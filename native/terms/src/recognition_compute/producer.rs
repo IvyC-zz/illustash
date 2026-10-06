@@ -216,6 +216,18 @@ impl Progress {
         }
     }
 }
+/// The batch's last file: the host may import a batch only once this exists, so it never reads
+/// a half-written package or sidecar. Digests pin both to exactly what the worker finished.
+pub fn write_complete(batch: &Path, task_id: &str, ids: &[String], sidecar: &[u8]) -> Result<()> {
+    let manifest = fs::read(batch.join("manifest.json"))?;
+    let value = json!({"format":"illustash-recognition-batch/1","task_id":task_id,"assets":ids,
+        "manifest_sha256":format!("{:x}", Sha256::digest(&manifest)),
+        "sidecar_sha256":format!("{:x}", Sha256::digest(sidecar))});
+    let temporary = batch.join("complete.tmp");
+    fs::write(&temporary, serde_json::to_vec(&value).map_err(|e| invalid(e.to_string()))?)?;
+    fs::rename(temporary, batch.join("complete.json"))?;
+    Ok(())
+}
 /// Produce WD v1 batches and independently bound character-claim sidecars.
 pub fn run(request: Request, resources: &Path, models: &Path, runtime: &Path, shared: &Path) -> Result<Value> {
     if request.format != "illustash-sync/1" {
@@ -266,9 +278,16 @@ pub fn run(request: Request, resources: &Path, models: &Path, runtime: &Path, sh
         let path = request.output.join(format!("batch-{}", batch * 25));
         write_batch(&path, &request.identity, &specs, &ids, &labels, &wd, &ccip)?;
         let sidecar = path.join("character-claims.json");
-        let claim =
-            super::claims::Claims::new(identity.clone(), ids, specs.clone(), snapshot.fingerprint.clone(), claims);
-        fs::write(&sidecar, serde_json::to_vec(&claim).map_err(|e| invalid(e.to_string()))?)?;
+        let claim = super::claims::Claims::new(
+            identity.clone(),
+            ids.clone(),
+            specs.clone(),
+            snapshot.fingerprint.clone(),
+            claims,
+        );
+        let sidecar_bytes = serde_json::to_vec(&claim).map_err(|e| invalid(e.to_string()))?;
+        fs::write(&sidecar, &sidecar_bytes)?;
+        write_complete(&path, &identity.task_id, &ids, &sidecar_bytes)?;
         sidecars.push(sidecar);
         packages.push(path);
     }

@@ -236,7 +236,7 @@ impl Application {
         let busy = session.syncer.running();
         session.index.recover(&library, busy);
         session.names.recover(&library);
-        if let Err(error) = session.research.recover(&library) {
+        if let Err(error) = session.research.recover(&library, busy) {
             eprintln!("研究事件恢复失败：{error}");
         }
         if let Err(error) = crate::app_effects::drain(&session.library.db()) {

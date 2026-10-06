@@ -2322,7 +2322,8 @@ function syncLine(s) {
     if (s.stage === 'preparing') return `正在加载识别模型（共 ${number(s.total || 0)} 张）…`;
     const failed = s.failed ? ` · ${number(s.failed)} 张无法识别` : '';
     const left = s.ms_per_image && s.total > s.done ? ` · 约 ${Math.max(1, Math.round((s.total - s.done) * s.ms_per_image / 60000))} 分钟` : '';
-    return `正在识别新图片 ${number(s.done || 0)}/${number(s.total || 0)}${failed}${left}`;
+    const imported = s.import_done ? ` · 已导入 ${number(s.import_done)}` : '';
+    return `正在识别新图片 ${number(s.done || 0)}/${number(s.total || 0)}${failed}${imported}${left}`;
   }
   if (s.status === 'done') return `上次同步：${stamp(s.finished_at)}`;
   if (s.status === 'needs_windows') return '新增图片较多，需使用 Windows 批量识别';

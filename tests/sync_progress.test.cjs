@@ -41,3 +41,8 @@ test('an interrupted run says why it stopped', () => {
     '同步已中断（任务超时：10 分钟没有进展），可重新扫描');
   assert.equal(context.syncLine({status: 'interrupted'}), '同步已中断，可重新扫描');
 });
+
+test('batches imported during recognition are counted while it runs', () => {
+  assert.equal(context.syncLine({status: 'recognising', stage: 'recognising', total: 60, done: 51, import_done: 50}),
+    '正在识别新图片 51/60 · 已导入 50');
+});

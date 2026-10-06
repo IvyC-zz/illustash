@@ -178,13 +178,30 @@ impl TaskContext {
         boundary.received = true;
         Ok(value)
     }
+    /// One part of a result that arrives in parts while the worker still runs (recognition
+    /// batches). The same envelope, cancellation, closure and deadline checks as `receive`, but
+    /// repeatable; each part's importer must itself be idempotent and atomic.
+    pub fn receive_part<T>(&self, identity: &TaskIdentity, apply: impl FnOnce() -> Result<T>) -> Result<T> {
+        self.check()?;
+        let boundary = self.boundary.lock().unwrap_or_else(|e| e.into_inner());
+        if boundary.closed
+            || boundary.received
+            || self.cancel.load(Ordering::SeqCst)
+            || self.clock.reason() != RUNNING
+            || identity != &self.identity
+        {
+            return Err(Error::Conflict("任务结果已过期或重复".into()));
+        }
+        apply()
+    }
     /// Run an optional worker without pipe deadlocks. The caller supplies files for large output;
     /// stdout/stderr are null by default. Always reap the leader and kill remaining descendants,
     /// including when the leader exits before its children. Workers must not detach their group.
     pub fn process(&self, command: &mut Command) -> Result<ExitStatus> {
-        self.process_observed(command, || {})
+        self.process_observed(command, || Ok(()))
     }
-    pub fn process_observed(&self, command: &mut Command, observe: impl FnMut()) -> Result<ExitStatus> {
+    /// `observe` runs while waiting; its error stops and reaps the worker.
+    pub fn process_observed(&self, command: &mut Command, observe: impl FnMut() -> Result<()>) -> Result<ExitStatus> {
         crate::platform_process::worker(command, || self.check(), observe)
     }
 }
