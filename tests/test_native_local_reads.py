@@ -53,6 +53,14 @@ class NativeLocalReadsTest(unittest.TestCase):
         for r in responses:self.assertEqual(r['status'],expected,(url,r['body']))
         self.assertEqual(responses[1]['route'],'core')
         if expected<400:
+            if url=='/api/names':
+                # #1 extends only GET /api/names. Keep the frozen reference bytes
+                # intact and append the exact unauthorized status for this fixture;
+                # compare the complete native response, including the new field.
+                self.assertTrue(responses[0]['body'].endswith(b'}'))
+                responses[0]['body']=(responses[0]['body'][:-1]
+                                      + b', "network": {"authorized": false, "granted_at": null, "this_run": false}}')
+                responses[0]['headers']['Content-Length']=str(len(responses[0]['body']))
             self.assertIsNone(difference(*responses),(url,difference(*responses)))
             for h in labels.HEADERS:self.assertEqual(responses[0]['headers'].get(h),responses[1]['headers'].get(h),h)
         self.assertEqual(before,[labels.states(lib) for lib in (self.left,self.right)])

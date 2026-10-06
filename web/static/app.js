@@ -52,6 +52,35 @@ async function post(path, body) {
   return result;
 }
 function error(message) { $('errorBanner').textContent = message; $('errorBanner').hidden = !message; }
+// Name text queries (tag and work names only) need this library's consent: the backend refuses with
+// this exact message until it is given. Any other failure is a real network or service error.
+const NAMES_UNAUTHORIZED = '显示名联网尚未授权';
+const NAMES_NOTE = '允许这个图库联网查询名称吗？\n\n会把你输入的角色名、作品名，以及图库里角色的 Danbooru tag 和作品名发给 Danbooru 和 Bangumi，用来搜索角色、作品和补全中文名。不会发送图片。\n\n允许后对这个图库一直有效，可以在「设置 › 网络与隐私」里随时撤销。';
+// A Danbooru name lookup: its results, or why it failed.
+const remoteNames = path => api(path).then(found => ({found}), e => ({found: null, unauthorized: e.message === NAMES_UNAUTHORIZED, reason: e.message}));
+const remoteNote = r => r.unauthorized ? '查 Danbooru 需要先允许这个图库联网查询名称（只发送文字）' : `Danbooru 暂时连不上：${r.reason}`;
+const namesAllowButton = '<button type="button" class="link-button" data-names-allow>允许查询…</button>';
+async function setNamesNetwork(allow) {
+  if (allow && !await confirmAction(NAMES_NOTE, '允许联网查询名称')) return false;
+  try {
+    state.names = {...state.names, ...await api('/api/names', {method: 'POST', body: JSON.stringify({action: 'network', allow})})};
+  } catch (err) { toast(err.message); return false; }
+  toast(allow ? '已允许这个图库联网查询名称' : '已撤销名称联网查询');
+  return true;
+}
+// 设置 › 网络与隐私: grant or revoke, then redraw the card.
+document.addEventListener('click', async e => {
+  const b = e.target.closest('[data-names-network]');
+  if (b && await setNamesNetwork(b.dataset.namesNetwork === '1')) renderSettings(false);
+});
+// The 允许查询… button under a search: once allowed, search again for what was typed.
+document.addEventListener('click', async e => {
+  const b = e.target.closest('[data-names-allow]');
+  if (!b) return;
+  e.preventDefault();
+  const input = b.closest('dialog, .combo, .watch-add, #picker')?.querySelector('input');
+  if (await setNamesNetwork(true)) { input?.focus(); input?.dispatchEvent(new Event('input', {bubbles: true})); }
+});
 
 // ---------- toast with undo ----------
 function toast(message, withUndo = false) {
@@ -967,10 +996,11 @@ async function paletteSearch() {
       sections.push(remote, {label: '', items: create});
       clearTimeout(p.remoteTimer);
       p.remoteTimer = setTimeout(async () => {
-        const found = await api('/api/entities?' + new URLSearchParams({q, remote: 1})).catch(() => null);
+        const result = await remoteNames('/api/entities?' + new URLSearchParams({q, remote: 1}));
         if (gen !== p.generation || palette !== p) return;
-        remote.items = (found || []).map(r => ({...r, remote: true, typed: q, hint: [r.work_name, `D 站 ${number(r.posts)} 张`].filter(Boolean).join(' · ')}));
-        remote.note = found === null ? 'Danbooru 暂时连不上，可以稍后再试，或先只在本地新建' : '';
+        remote.items = (result.found || []).map(r => ({...r, remote: true, typed: q, hint: [r.work_name, `D 站 ${number(r.posts)} 张`].filter(Boolean).join(' · ')}));
+        remote.note = result.found ? '' : result.unauthorized ? remoteNote(result) + '，也可以先只在本地新建' : remoteNote(result) + '，可以稍后再试，或先只在本地新建';
+        remote.allow = result.unauthorized;
         // Untouched: the best match wins the highlight (the first local hit, else the first Danbooru result).
         renderPalette(sections, q, p.touched && p.index > 0);
       }, 380);
@@ -996,7 +1026,7 @@ function renderPalette(sections, q, keep = false) {
   // Local-only creation is a fallback: never the default when anything else matched.
   if (!current && p.list[p.index]?.create) p.index = Math.max(0, p.list.findIndex(e => !e.create));
   let n = 0;
-  $('pickerResults').innerHTML = sections.filter(s => s.items.length || s.note).map(s => (s.label ? `<div class="palette-label">${s.label}</div>` : '') + (s.note && !s.items.length ? `<p class="palette-note">${esc(s.note)}</p>` : '') + s.items.map(e => {
+  $('pickerResults').innerHTML = sections.filter(s => s.items.length || s.note).map(s => (s.label ? `<div class="palette-label">${s.label}</div>` : '') + (s.note && !s.items.length ? `<p class="palette-note">${esc(s.note)}${s.allow ? ' ' + namesAllowButton : ''}</p>` : '') + s.items.map(e => {
     const i = n++, char = e.id && state.charMap.get(e.id), cover = char?.cover;
     const staged = p.multi && p.staged.some(x => stageKey(x) === stageKey(e));
     const add = p.multi ? `<span class="palette-add${staged ? ' on' : ''}" data-add="${i}" title="${staged ? '已加入，再点一次取消' : '再加一个角色（⇧+点击）'}">${staged ? '✓' : '＋'}</span>` : '';
@@ -1108,7 +1138,7 @@ function combo(input, menu, search, pick) {
   const render = sections => {
     list = sections.flatMap(x => x.items); index = Math.min(index, Math.max(0, list.length - 1));
     let i = 0;
-    menu.innerHTML = sections.filter(x => x.items.length || x.note).map(x => (x.label ? `<div class="palette-label">${esc(x.label)}</div>` : '') + (x.note ? `<p class="palette-note">${esc(x.note)}</p>` : '') +
+    menu.innerHTML = sections.filter(x => x.items.length || x.note).map(x => (x.label ? `<div class="palette-label">${esc(x.label)}</div>` : '') + (x.note ? `<p class="palette-note">${esc(x.note)}${x.allow ? ' ' + namesAllowButton : ''}</p>` : '') +
       x.items.map(r => `<button type="button" class="picker-item watch-option${i === index ? ' on' : ''}" data-i="${i++}"><span class="watch-name">${esc(r.label)}</span><small>${esc(r.detail || '')}</small><em>${esc(r.extra || '')}</em></button>`).join('')).join('');
     menu.hidden = !menu.innerHTML;
   };
@@ -1131,10 +1161,11 @@ function twoStage(local, remote, extra = () => []) {
     local(q).then(mine => {
       if (!q) { show([{label: '', items: mine}, ...extra(q)]); return; }
       show([{label: '', items: mine}, {label: 'Danbooru', items: [], note: '正在查 Danbooru…（只发送你输入的文字）'}, ...extra(q)]);
-      remote(q).then(found => {
+      remote(q).then(result => {
         // A Danbooru entry the library already has shows once, as the local one.
-        const fresh = found && found.filter(r => !mine.some(m => m.detail && m.detail === r.detail));
-        show([{label: '', items: mine}, {label: 'Danbooru', items: fresh || [], note: found === null ? 'Danbooru 暂时连不上' : fresh.length ? '' : found.length ? '' : '没有找到，可以换英文或日文写法'}, ...extra(q)]);
+        const found = result.found, fresh = found && found.filter(r => !mine.some(m => m.detail && m.detail === r.detail));
+        show([{label: '', items: mine}, {label: 'Danbooru', items: fresh || [], allow: result.unauthorized,
+          note: found === null ? remoteNote(result) : fresh.length ? '' : found.length ? '' : '没有找到，可以换英文或日文写法'}, ...extra(q)]);
       });
     });
   };
@@ -1169,12 +1200,13 @@ async function editProfile(c) {
   if (q('#pfTag')) combo(q('#pfTag'), q('#pfTagMenu'), (text, show) => {
     if (!text) { show([]); return; }
     show([{label: 'Danbooru', items: [], note: '正在查 Danbooru…（只发送你输入的文字）'}]);
-    api('/api/entities?' + new URLSearchParams({q: text, remote: 1})).then(found => show([{label: 'Danbooru', items: found.map(r => ({...r, label: r.name, detail: r.tag, extra: [r.work_name, `D 站 ${number(r.posts)}`].filter(Boolean).join(' · ')})), note: found.length ? '' : '没有找到，或已经在图库里（那就用「合并到另一个角色」）'}]))
-      .catch(() => show([{label: 'Danbooru', items: [], note: 'Danbooru 暂时连不上'}]));
+    remoteNames('/api/entities?' + new URLSearchParams({q: text, remote: 1})).then(({found, ...result}) => show([found
+      ? {label: 'Danbooru', items: found.map(r => ({...r, label: r.name, detail: r.tag, extra: [r.work_name, `D 站 ${number(r.posts)}`].filter(Boolean).join(' · ')})), note: found.length ? '' : '没有找到，或已经在图库里（那就用「合并到另一个角色」）'}
+      : {label: 'Danbooru', items: [], note: remoteNote(result), allow: result.unauthorized}]));
   }, r => { draft.tag = r.tag; draft.tagWork = r.work_name; tagNote(); workNote(); });
   if (q('#pfWork')) combo(q('#pfWork'), q('#pfWorkMenu'), twoStage(
     text => api('/api/works?' + new URLSearchParams({q: text})).then(ws => ws.slice(0, 8).map(w => ({id: w.id, label: w.name, detail: w.tag || '', extra: w.count ? `你有 ${number(w.count)} 张` : ''}))).catch(() => []),
-    text => api('/api/works?' + new URLSearchParams({q: text, remote: 1})).then(rs => rs.map(r => ({tag: r.tag, label: workName(r.tag) || r.tag, detail: r.tag, extra: `D 站 ${number(r.posts)}`}))).catch(() => null),
+    text => remoteNames('/api/works?' + new URLSearchParams({q: text, remote: 1})).then(r => r.found ? {found: r.found.map(w => ({tag: w.tag, label: workName(w.tag) || w.tag, detail: w.tag, extra: `D 站 ${number(w.posts)}`}))} : r),
     text => text ? [{label: '', items: [{create: text, label: `新建作品「${text}」`, detail: '只在本地'}]}] : []),
     r => { draft.work = r; workNote(); });
   q('form').onsubmit = async e => {
@@ -2407,14 +2439,14 @@ function wireWatchAdd(x, add) {
     render([{label: '你的图库里有', items: mine}], '正在查 Danbooru…（只发送你输入的文字）');
     clearTimeout(remoteTimer);
     remoteTimer = setTimeout(async () => {
-      const remote = await api('/api/works?' + new URLSearchParams({q, remote: 1})).catch(() => null);
+      const result = await remoteNames('/api/works?' + new URLSearchParams({q, remote: 1})), remote = result.found;
       if (g !== gen) return;
       const posts = new Map((remote || []).map(r => [r.tag, r.posts]));
       for (const r of mine) if (posts.has(r.tag)) r.posts = posts.get(r.tag);
       const known = new Set(mine.map(r => r.tag));
       const others = (remote || []).filter(r => !known.has(r.tag));
       render([{label: '你的图库里有', items: mine}, {label: 'Danbooru', items: others}],
-        remote === null ? 'Danbooru 暂时连不上，可以稍后再试' : !mine.length && !others.length ? '没有找到这个作品。可以换个写法，比如英文或日文名' : '');
+        remote === null ? esc(remoteNote(result)) + (result.unauthorized ? ' ' + namesAllowButton : '，可以稍后再试') : !mine.length && !others.length ? '没有找到这个作品。可以换个写法，比如英文或日文名' : '');
     }, 450);
   };
   const pick = i => { const r = list[i]; if (!r || watched.has(r.id) || (r.id && !r.watchable)) return; menu.hidden = true; add(r); };
@@ -2490,7 +2522,7 @@ function renderModelCard() {
     </div>
     <div class="sync-now form-actions"><span class="muted-note">${m.configured ? '已配置' : '未配置，不会使用'}</span><div class="spacer"></div>
       ${m.configured ? '<button class="quiet" id="modelClear">清除 key</button><button class="quiet" id="modelTest">测试连接</button>' : ''}<button class="primary" id="modelSave">保存</button></div>`)) return;
-  const save = async (body, done) => { try { state.names = await post('/api/names', {action: 'model_api', ...body}); toast(done); renderSettings(); } catch (e) { toast(e.message); } };
+  const save = async (body, done) => { try { state.names = {...state.names, ...await post('/api/names', {action: 'model_api', ...body})}; toast(done); renderSettings(); } catch (e) { toast(e.message); } };
   $('modelSave').onclick = () => {
     const body = {base: $('modelBase').value.trim() || 'https://api.deepseek.com', model: $('modelName').value.trim() || 'deepseek-chat'};
     if ($('modelKey').value.trim()) body.key = $('modelKey').value.trim();
@@ -2626,18 +2658,21 @@ async function renderAbout() {
 // Every feature that talks to the network, what it sends, and whether it is on: the one place to check (#200).
 function networkCard() {
   const up = state.settings?.startup || {}, p = state.provenance, acct = state.accounts, model = state.names?.model_api;
+  const net = state.names?.network, names = !net ? '' : net.granted_at ? `已允许（${esc(net.granted_at)} 起）` : net.this_run ? '本次启动已允许（命令行）' : '未允许，不联网';
   const row = (section, name, to, what, now) => `<tr><td><a class="link-button strong" href="#/settings/${section}">${name}</a></td><td>${to}</td><td>${what}</td><td>${now}</td></tr>`;
   return cardHead('会访问网络的功能', '图片本身和由图片算出的特征，任何时候都不会发出去。下面是全部会联网的功能和它们发送的内容。') +
     `<table class="settings-table net-table"><tr><th>功能</th><th>服务</th><th>发送的内容</th><th>现在</th></tr>
       ${row('characters', '检查新角色', 'Danbooru', '关注作品的名称；添加角色时下载约 20 张公开参考图', up.index_check ? '启动时自动（每周最多一次）' : '手动')}
-      ${row('characters', '角色名称', 'Bangumi、Danbooru', 'tag、作品名、日文名', up.names ? '启动时自动（只查新角色）' : '手动')}
+      ${row('characters', '角色名称', 'Bangumi、Danbooru', 'tag、作品名、日文名', net && !net.authorized ? names : up.names ? '启动时自动（只查新角色）' : '手动')}
       ${row('characters', '名称翻译', model?.configured ? esc(modelHost(model)) : '你配置的模型接口', 'tag、日文名、作品名', model?.configured ? '已配置' : '未配置，不使用')}
       ${row('artists', '找回画师', 'Danbooru（含 IQDB）', '像素哈希和 IQDB 签名（一串文本，不是图片）、画师名和账号', p?.auto_network ? '同步后自动，每次有流量上限' : '每次手动授权')}
       ${row('artists', '读取 Pixiv 关注', 'Pixiv', '用你在 app 里登录的状态读取关注列表（只读）', acct?.pixiv?.bound ? '已登录' : '未登录，不使用')}
       ${row('artists', '查找画师、找 TA 的其他图', 'Danbooru、画师主页', '所选图片的哈希文本；下载画师公开作品的小图，只在本机比对', '只在你点按钮时')}
-      ${row('characters', '在 Danbooru 上搜角色和作品', 'Danbooru', '你输入的文字；自建角色的名字（核对能否对上 Danbooru）', '只在你搜索或打开资料库时')}
+      ${row('characters', '在 Danbooru 上搜角色和作品', 'Danbooru', '你输入的文字；自建角色的名字（核对能否对上 Danbooru）', net && !net.authorized ? names : '只在你搜索或打开资料库时')}
       ${row('artists', '以图搜图', 'SauceNAO', '—', acct?.saucenao?.bound ? '已保存 key，还没有功能使用它' : '未使用')}
     </table>
+    ${net ? `<div class="setting-line"><span><b>名称联网查询</b><small>角色名称和 Danbooru 搜索共用这一项授权，只发送文字 · ${names}</small></span>
+      ${net.granted_at ? '<button class="quiet" data-names-network="0">撤销</button>' : '<button class="quiet" data-names-network="1">允许…</button>'}</div>` : ''}
     <p class="settings-note net-foot">同步、图片识别、相似图片检测、学习与分组都只在本机进行。X 的关注通过导入官方数据归档获得，不联网。</p>`;
 }
 async function renderSettings(fetchMissing = true, refresh = false) {
@@ -3161,7 +3196,7 @@ $('taskPanel').addEventListener('click', async e => {
   try {
     if (act === 'sync') { await post('/api/sync', {}); state.sync = {status: 'scanning'}; }
     else if (act === 'index') state.index = await post('/api/index', {action: 'check'});
-    else if (act === 'names') { state.names = await post('/api/names', {action: 'refresh'}); toast('已开始重新获取角色名称'); }
+    else if (act === 'names') { state.names = {...state.names, ...await post('/api/names', {action: 'refresh'})}; toast('已开始重新获取角色名称'); }
     else if (act === 'similar') { await post('/api/similar', {}); state.settings = await api('/api/settings'); }
   } catch (err) { toast(err.message); }
   taskTick();

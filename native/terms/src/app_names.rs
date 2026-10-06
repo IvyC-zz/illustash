@@ -19,6 +19,41 @@ use std::{
 fn invalid<T>(s: &str) -> Result<T> {
     Err(Error::Invalid(s.into()))
 }
+/// `prefs` key of a library's lasting consent to name text queries. Kept apart from the startup
+/// preferences, which never authorize network use.
+const CONSENT: &str = "names_network";
+/// When the library's consent to name text queries was given, if it was.
+fn consent(library: &Library) -> Result<Option<String>> {
+    let c = crate::app_library::read_connection(&library.instance_path().join("library.sqlite"))?;
+    let prefs: bool =
+        c.query_row("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='prefs')", [], |r| {
+            r.get(0)
+        })?;
+    if !prefs {
+        return Ok(None);
+    }
+    let value: Option<String> =
+        c.query_row("SELECT value FROM prefs WHERE key=?", [CONSENT], |r| r.get(0)).optional()?;
+    Ok(value
+        .and_then(|v| serde_json::from_str::<Value>(&v).ok())
+        .and_then(|v| v["granted_at"].as_str().map(str::to_owned)))
+}
+fn set_consent(library: &Library, allow: bool) -> Result<()> {
+    if library.frozen() {
+        return Err(Error::Conflict("图库只读".into()));
+    }
+    let mut c = net::db(&library.instance_path().join("library.sqlite"))?;
+    let tx = c.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+    crate::schema::require_current(&tx)?;
+    if allow {
+        let granted = json!({"granted_at": chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string()});
+        tx.execute("INSERT OR REPLACE INTO prefs(key,value) VALUES (?,?)", [CONSENT, &dump(&granted)])?;
+    } else {
+        tx.execute("DELETE FROM prefs WHERE key=?", [CONSENT])?;
+    }
+    tx.commit()?;
+    Ok(())
+}
 fn dump(v: &Value) -> String {
     crate::character_json::dump(v, false)
 }
@@ -460,7 +495,10 @@ pub(crate) struct Updater {
     generation: u64,
     session: String,
     enabled: bool,
-    authorized: bool,
+    /// Authorized for this process only (`--names-network`).
+    cli: bool,
+    /// The library's lasting consent, shared with every Source so revoking takes effect at once.
+    grant: Arc<AtomicBool>,
     retry: Instant,
     last_seen: i64,
 }
@@ -468,6 +506,7 @@ impl Updater {
     pub fn new(library: &Library, enabled: bool, authorized: bool, generation: u64, session: &str) -> Result<Self> {
         let pref = crate::app_settings::startup(library)?;
         let enabled = enabled && pref.get("names").is_none_or(crate::app_service::truthy);
+        let granted = consent(library)?.is_some();
         Ok(Self {
             state: Arc::new(Mutex::new(json!({"status":if enabled{"idle"}else{"off"},"done":0,"total":0}))),
             cancel: Arc::new(AtomicBool::new(false)),
@@ -475,7 +514,8 @@ impl Updater {
             generation,
             session: session.into(),
             enabled,
-            authorized,
+            cli: authorized,
+            grant: Arc::new(AtomicBool::new(granted)),
             retry: Instant::now(),
             last_seen: 0,
         })
@@ -500,6 +540,20 @@ impl Updater {
         let mut v = crate::app_local::names(&c, false)?;
         v.set("state", self.state_json());
         Ok(v)
+    }
+    /// `info` plus whether name text queries may go out (GET /api/names). The other actions keep
+    /// answering with `info` alone, as before.
+    pub fn status(&self, library: &Library) -> Result<Json> {
+        let mut v = self.info(library)?;
+        v.set("network", self.network(library)?);
+        Ok(v)
+    }
+    /// Whether name text queries may go out, and on what grounds.
+    pub fn network(&self, library: &Library) -> Result<Json> {
+        let granted_at = consent(library)?;
+        Ok(json!({"authorized": self.cli || self.grant.load(Ordering::SeqCst), "this_run": self.cli,
+            "granted_at": granted_at})
+        .into())
     }
     pub fn start(&mut self, library: &Library, entity: Option<&str>, refresh: bool) -> Result<()> {
         if !self.enabled {
@@ -560,7 +614,7 @@ impl Updater {
         let cancel = self.cancel.clone();
         let state = self.state.clone();
         let path = library.instance_path().join("library.sqlite");
-        let authorized = self.authorized;
+        let (authorized, grant) = (self.cli, self.grant.clone());
         *state.lock().expect("app_names mutex poisoned") = json!({"status":"running","done":0,"total":0});
         let identity = match crate::app_tasks::TaskIdentity::new(library, self.generation, &self.session) {
             Ok(v) => v,
@@ -587,7 +641,8 @@ impl Updater {
                             args["refresh"].as_bool().ok_or_else(|| Error::Invalid("名称事件刷新参数不正确".into()))?;
                         let request_key = dump(&json!([entity, refresh]));
                         if !completed.contains(&request_key) {
-                            let mut source = Source::new(path.clone(), cancel.clone(), authorized, refresh)?;
+                            let mut source =
+                                Source::new(path.clone(), cancel.clone(), authorized, refresh)?.granted(grant.clone());
                             run(&mut source, entity, &state)?;
                             completed.insert(request_key);
                         }
@@ -642,11 +697,26 @@ impl Updater {
                 configure(&library.instance_path().join("library.sqlite"), body)?;
                 self.info(library)
             }
+            Some("network") => {
+                let allow = match body.get("allow") {
+                    Some(Json::Scalar(Value::Bool(allow))) => *allow,
+                    _ => return invalid("allow 取值不正确"),
+                };
+                set_consent(library, allow)?;
+                self.grant.store(allow, Ordering::SeqCst);
+                if allow {
+                    // Name syncs that failed for want of authorization retry now.
+                    self.retry = Instant::now();
+                    self.last_seen = 0;
+                }
+                self.status(library)
+            }
             _ => invalid("未知显示名操作"),
         }
     }
     pub fn source(&self, library: &Library) -> Result<Source> {
-        Source::new(library.instance_path().join("library.sqlite"), self.cancel.clone(), self.authorized, false)
+        Ok(Source::new(library.instance_path().join("library.sqlite"), self.cancel.clone(), self.cli, false)?
+            .granted(self.grant.clone()))
     }
 }
 impl Drop for Updater {
