@@ -63,7 +63,7 @@ class NativeHumanCharactersTest(unittest.TestCase):
                 c.executemany("INSERT INTO audit_sample(uuid,entity,stratum,solo) VALUES (?,?,'synthetic',1)", [('a', self.alice), ('c', self.bob)])
         self.seed_both(audit)
         self.pair('/api/audit/answer', {'yes': ['a'], 'no': ['c']})
-        self.pair('/api/correct', {'id': 'a', 'old': self.alice, 'new': self.bob})
+        self.pair('/api/reassign', {'ids': ['a'], 'old': self.alice, 'new': self.bob})
         self.pair('/api/reassign', {'filter': {'entity': self.bob}, 'exclude': ['c'], 'old': self.bob, 'new': [self.alice]})
         self.pair('/api/sweep', {'entity': self.alice})
         self.pair('/api/sweep', {'entity': self.alice})  # empty machine set still records one action
@@ -82,7 +82,7 @@ class NativeHumanCharactersTest(unittest.TestCase):
         self.seed_both(identities)
         self.pair('/api/change', {'ids': ['c'], 'action': 'confirmed', 'entity': self.merged})
         self.pair('/api/reassign', {'ids': ['c'], 'old': self.merged, 'new': [self.bob, self.third, self.bob]})
-        self.pair('/api/correct', {'id': 'c', 'old': self.bob, 'new': self.alice})
+        self.pair('/api/reassign', {'ids': ['c'], 'old': self.bob, 'new': self.alice})
         with self.store.connect() as c:
             self.assertIsNotNone(c.execute('SELECT 1 FROM memberships WHERE uuid=? AND entity=?', ('c', self.third)).fetchone())
         for _ in range(3): self.undo_latest()
@@ -111,10 +111,9 @@ class NativeHumanCharactersTest(unittest.TestCase):
         pair('/api/identity/decision', {'a': self.alice, 'b': self.third, 'kind': 'duplicate_of',
                                       'status': 'rejected', 'reason': 'Synthetic refusal'})
         pair('/api/ask/answer', {'entity': self.alice, 'no': ['c'], 'switch': self.bob})
-        pair('/api/identity/uncertain', {'ids': ['c'], 'options': [self.alice, self.third]})
         pair('/api/change', {'ids': ['c'], 'action': 'resume'})
         pair('/api/merge', {'source': self.third, 'target': self.bob})
-        for _ in range(6): self.undo_latest()
+        for _ in range(5): self.undo_latest()
 
     def test_unused_extended_json_and_truthy_non_string_numbers(self):
         self.pair('/api/change', {'ids': ['c'], 'action': 'confirmed', 'entity': self.alice,
@@ -144,7 +143,6 @@ class NativeHumanCharactersTest(unittest.TestCase):
             {'entity': self.alice, 'yes': ['missing']},
             {'entity': self.alice, 'no': ['a'], 'switch': self.alice})]
         cases += [('/api/audit/answer', {}), ('/api/audit/answer', {'yes': ['missing']}),
-                  ('/api/correct', {'id': 'c', 'old': self.alice, 'new': self.alice}),
                   ('/api/reassign', {'ids': ['a'], 'old': self.alice, 'new': []}),
                   ('/api/reassign', {'ids': ['a'], 'old': self.alice, 'new': ['missing']}),
                   ('/api/sweep', {'entity': 'missing'})]
@@ -159,7 +157,6 @@ class NativeHumanCharactersTest(unittest.TestCase):
         self.seed_both(audit)
         commands = [('/api/change', {'ids': ['a'], 'action': 'confirmed', 'entity': self.alice}),
                     ('/api/ask/answer', {'entity': self.alice, 'yes': ['a']}),
-                    ('/api/correct', {'id': 'a', 'old': self.alice, 'new': self.bob}),
                     ('/api/reassign', {'ids': ['a'], 'old': self.alice, 'new': self.bob}),
                     ('/api/sweep', {'entity': self.alice})]
         commands.append(('/api/audit/answer', {'yes': ['a']}))
@@ -200,7 +197,6 @@ class NativeHumanCharactersTest(unittest.TestCase):
         commands = [('/api/change', {'ids': ['a'], 'action': 'unknown'}),
                     ('/api/ask/answer', {'entity': self.alice, 'later': ['a']}),
                     ('/api/audit/answer', {'yes': ['a']}),
-                    ('/api/correct', {'id': 'a', 'old': self.alice, 'new': self.bob}),
                     ('/api/reassign', {'ids': ['a'], 'old': self.alice, 'new': self.bob}),
                     ('/api/sweep', {'entity': self.alice})]
         for url, body in commands:

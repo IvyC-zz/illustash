@@ -102,7 +102,22 @@ class NativeIndexTest(unittest.TestCase):
         self.fail('index did not finish')
 
     def check(self):
-        self.index({'action':'check'}); v=self.finish();self.assertEqual(v['state']['status'],'checked',v);return v
+        self.index({'action':'check','allow_network':True}); v=self.finish();self.assertEqual(v['state']['status'],'checked',v);return v
+
+    def test_check_requires_consent_on_every_run_without_persisting_it(self):
+        before=snapshot(self.lib.db)['prefs']
+        for value in (None, False, 'true', 1):
+            body={'action':'check'}
+            if value is not None: body['allow_network']=value
+            r=self.request('/api/index',body);self.assertEqual(r['status'],400,r['body'])
+        self.assertEqual(self.calls,[])
+        self.check();calls=len(self.calls);self.assertGreater(calls,0)
+        r=self.request('/api/index',{'action':'check'});self.assertEqual(r['status'],400,r['body'])
+        self.assertEqual(len(self.calls),calls)
+        self.assertEqual(snapshot(self.lib.db)['prefs'],before)
+        self.stop(self.process);self.restart()
+        self.assertEqual(self.request('/api/index',{'action':'check'})['status'],400)
+        self.assertEqual(len(self.calls),calls)
 
     def apply(self):
         self.check();self.index({'action':'apply','tags':['carol_example','dani_example','carol_example']});return self.finish()
@@ -175,11 +190,11 @@ class NativeIndexTest(unittest.TestCase):
 
     def test_network_failure_no_check_replacement(self):
         old=self.check()['check'];self.fail_network=True
-        self.index({'action':'check'});self.assertEqual(self.finish()['state']['status'],'error');self.assertEqual(self.index()['check'],old)
+        self.index({'action':'check','allow_network':True});self.assertEqual(self.finish()['state']['status'],'error');self.assertEqual(self.index()['check'],old)
 
     def test_repeat_busy_cancel_switch_same_id_and_shutdown(self):
         self.mode.write_text('sleep');self.check();self.index({'action':'apply','tags':['carol_example']})
-        self.assertEqual(self.request('/api/index',{'action':'check'})['status'],400)
+        self.assertEqual(self.request('/api/index',{'action':'check','allow_network':True})['status'],400)
         self.assertEqual(self.request('/api/sync',{})['status'],400)
         other,store=self.package('other');other.config['id']=self.lib.config['id'];(other.path/'library.json').write_text(json.dumps(other.config))
         before=snapshot(other.source)
@@ -195,7 +210,7 @@ class NativeIndexTest(unittest.TestCase):
         self.stop(self.process)
         (self.shared/'char-patch/check.json').unlink(missing_ok=True)
         (self.shared/'char-patch/watch.json').write_text(json.dumps({'works':['example','unresolved'],'min_posts':100}))
-        self.process,self.log=self.start(self.lib.path,extra=('--index-check',))
+        self.process,self.log=self.start(self.lib.path,extra=('--index-check','--index-network'))
         self.token=json.loads(self.request('/api/bootstrap')['body'])['token']
         v=self.finish();self.assertEqual(v['state']['status'],'checked',v)
         self.assertEqual(v['check']['missing'],[])
@@ -291,8 +306,8 @@ class NativeIndexTest(unittest.TestCase):
         self.assertEqual(self.request('/api/recognition/import',{'resume':True})['status'],200)
         # No external request is made: the network gate rejects before contacting a host.
         self.stop(self.process);self.env.pop('ILLUSTASH_COPYRIGHT_BASE');self.restart()
-        self.index({'action':'check'});v=self.finish();self.assertEqual(v['state']['status'],'error',v)
-        self.assertIn('尚未授权',v['state']['message'])
+        r=self.request('/api/index',{'action':'check'});self.assertEqual(r['status'],400,r['body'])
+        self.assertIn('确认本次检查',r['body'].decode())
 
     def test_changed_input_rejects_stale_patch_then_new_check_remains_available(self):
         self.check();self.mode.write_text('sleep')

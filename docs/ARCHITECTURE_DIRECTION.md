@@ -209,7 +209,7 @@ M3 完成才表示基础应用脱离 Python；M5 需在无 Python、无 .venv �
 
 - **R1–R2（7 个）**：`/api/user-tags`、`/api/general-tags`（本地 CSV）、`/api/artists`（OC 画师统计）、`/api/artist`、`/api/artist-audit`、`/api/entities`、`/api/works`。画师读取保留旧/核心来源、来源帖子、候选原因及固定 SHA1 抽样；本地搜索的 `remote` 缺失或空值分支直读。
 - **R3（7 个）**：`/api/assets`、`/api/assets/count`、`/api/ids`、`/api/detail`、`/api/home`、`/api/fold`、`/api/review-pools`。包括现有筛选、排序、分页、可见性、NSFW、作品树、画师和 `pool=cluster|similar` 的持久化分组查询；详情组装包括源库标签和来源库帖子。
-- **R4（13 个）**：`/api/characters`、`/api/tagged`、`/api/character/profile`、`/api/character/activity`、`/api/character/stats`、`/api/identity/status`、`/api/identity/relations`、`/api/identity/count`、`/api/identity/queue`、`/api/identity/pairs`、`/api/identity/assignments`、`/api/bootstrap`、`/api/prefs`。保留未设置/hybrid 策略、summary、封面分配、首次命中、去重、分页、历史重渲染和会话字段；其他读取见下节。
+- **R4（8 个）**：`/api/characters`、`/api/tagged`、`/api/character/profile`、`/api/character/activity`、`/api/character/stats`、`/api/identity/count`、`/api/identity/queue`、`/api/bootstrap`。保留未设置/hybrid 策略、summary、封面分配、首次命中、去重、分页、历史重渲染和会话字段；其他读取见下节。
 
 ### 本地、外部与任务读取
 
@@ -265,9 +265,9 @@ terms 5（`5e7e7f7`）/6（`d9c49b4`）的历史源库定义均含可为 NULL �
 
 人工命令按完整 HTTP 调用链迁移。首组原生入口为 `POST /api/tag` 的用户标签增删及 `POST /api/undo`；基于原生会话，不依赖 fresh 建库或已有库升级。Rust 在命令事务内完成参数校验、filter/ids/exclude 解析、重复资产扩展、作品计数、现有核心写入、历史及有序响应。沿用旧目标和标签规则，不改分类政策；请求在会话锁内重查 generation 和令牌，旧请求不能写入切换后的图库。
 
-原生会话另接管 `POST /api/artist/verdict`、`/api/curate`、`/api/fold` 与 `/api/prefs`，覆盖画师裁决、人工收录与排除、重复关系折叠及置顶偏好。画师裁决仅选择已有资产，不扩展重复组；人工整理沿用标签目标选择并在同一应用事务写历史、curation 与 excluded。折叠配置按既有稳定哈希和关系规则重建 duplicates，并沿用成员差异可见性规则；源库只读快照与应用库提交之间保留独立边界，不宣称跨库原子事务。置顶与折叠沿用现存无历史语义；人工标签、画师裁决和整理统一参与最近一步撤销。持久化 JSON 的 ASCII、空格与字段顺序保持原契约，和 HTTP 序列化分开。
+原生会话另接管 `POST /api/artist/verdict`、`/api/curate`、`/api/fold`，覆盖画师裁决、人工收录与排除、重复关系折叠。画师裁决仅选择已有资产，不扩展重复组；人工整理沿用标签目标选择并在同一应用事务写历史、curation 与 excluded。折叠配置按既有稳定哈希和关系规则重建 duplicates，并沿用成员差异可见性规则；源库只读快照与应用库提交之间保留独立边界，不宣称跨库原子事务。折叠沿用现存无历史语义；人工标签、画师裁决和整理统一参与最近一步撤销。持久化 JSON 的 ASCII、空格与字段顺序保持原契约，和 HTTP 序列化分开。
 
-原生会话接管 `POST /api/entities`、`/api/character/profile`、`/api/local-links`、`/api/works`、`/api/character-work`、`/api/character/mascot`、`/api/kind`、`/api/oc/shared`。实体创建先按现行名称、别名及 Danbooru/WD 链接复用已有身份；无名 OC 按未占用的「原创角色 N」命名。作品保留 create/edit/from_tag/move/link/rename 六类操作、父子环与链接冲突检查。资料和本地链接与其他人工命令共用最近一步撤销；创建、作品编辑、类型、mascot 和直接作品归属沿用无历史语义。参数解析、核心写入、历史、名称与身份投影及事件入队共用 Immediate 事务；响应读取发生在提交及投影更新之后，不把提交后的响应或事件失败解释成回滚。
+原生会话接管 `POST /api/entities`、`/api/character/profile`、`/api/local-links`、`/api/works`、`/api/character/mascot`、`/api/kind`、`/api/oc/shared`。实体创建先按现行名称、别名及 Danbooru/WD 链接复用已有身份；无名 OC 按未占用的「原创角色 N」命名。作品保留 create/edit/from_tag/move/link/rename 六类操作、父子环与链接冲突检查。资料和本地链接与其他人工命令共用最近一步撤销；创建、作品编辑、类型及 mascot 沿用无历史语义；作品归属统一经资料接口修改并参与撤销。参数解析、核心写入、历史、名称与身份投影及事件入队共用 Immediate 事务；响应读取发生在提交及投影更新之后，不把提交后的响应或事件失败解释成回滚。
 
 版权解析先查本地作品的 Danbooru/qualifier 链接；无匹配时按原 `related_tag.json` 查询及 `name_cache` 契约选择覆盖率至少 0.9 的最小作品，缺失则退至 0.5。Rust HTTPS 客户端保留 25 秒超时、2 MB 响应限制和 500 MB 流量预算，查询缓存与成功流量记账随命令提交；查询或后续写入失败回滚本次正式修改。`ILLUSTASH_COPYRIGHT_BASE` 仅允许本机带端口的 HTTP 合成查询替身。网络查询的全局节流、重试与任务运行由 M4 名称协调接续；当前请求失败返回错误，不启动 Python。
 
@@ -275,9 +275,9 @@ terms 5（`5e7e7f7`）/6（`d9c49b4`）的历史源库定义均含可为 NULL �
 
 2026-10-01 同一 release、3 资产纯合成库，五流程各 1 轮预热、3 轮各 7 对交错 HTTP 请求，取各轮中位数的中位数：资料修改→最近撤销为 83.503 / 30.644 ms，本地链接→最近撤销为 49.342 / 17.079 ms，作品重命名为 14.385 / 4.372 ms，两次 mascot 切换为 25.354 / 11.536 ms，已有实体复用为 6.817 / 3.284 ms（旧 / 原生）。成功响应字节与三库核对放在计时外；本地链接使用预先建立的合成版权缓存。空闲 200 ms 后，Python 对照及夹具根进程 RSS 为 53,888 KiB，核心子进程 8,272 KiB；原生根进程 9,664 KiB，无直接子进程。五流程均未出现延迟退化，原生内存低于该对照；RSS 含夹具开销，测量期间其他会话并行工作，不代表真实大库、峰值、完整生产进程树或 Windows。
 
-原生角色裁决入口为 `POST /api/change`、`/api/audit/answer`、`/api/ask/answer`、`/api/correct`、`/api/reassign` 与 `/api/sweep`。HTTP 参数、筛选/exclude/confirm 和未展开副本的选择集在同一 Rust 写事务解析，角色核心继续负责副本范围、父角色/子标签裁决、原归属核验、历史及投影。全部 change 动作、多角色确认、问答 yes/no/later 与 switch、随机审核、单图纠正、批量替换和扫除沿用现行语义；只解析接口消费的参数，未使用字段中的超大整数和非有限浮点不改变操作结果；写入仍要求当前 schema 和完整四项词条核心切换；later-only 返回 `undo:null`，不返回此前历史。裁决和 verdict 事件同事务提交，提交后无 learner 的事件处理及恢复由原生会话完成；角色与标签、画师、整理及身份命令共用最近一步撤销。历史接口只作为测试参考；生产回退使用相容产物及升级前备份。
+原生角色裁决入口为 `POST /api/change`、`/api/audit/answer`、`/api/ask/answer`、`/api/reassign` 与 `/api/sweep`。HTTP 参数、筛选/exclude/confirm 和未展开副本的选择集在同一 Rust 写事务解析，角色核心继续负责副本范围、父角色/子标签裁决、原归属核验、历史及投影。全部 change 动作、多角色确认、问答 yes/no/later 与 switch、随机审核、单图和批量替换及扫除沿用现行语义；只解析接口消费的参数，未使用字段中的超大整数和非有限浮点不改变操作结果；写入仍要求当前 schema 和完整四项词条核心切换；later-only 返回 `undo:null`，不返回此前历史。裁决和 verdict 事件同事务提交，提交后无 learner 的事件处理及恢复由原生会话完成；角色与标签、画师、整理及身份命令共用最近一步撤销。历史接口只作为测试参考；生产回退使用相容产物及升级前备份。
 
-原生会话同时接管 `POST /api/identity/decision`、`/api/identity/skip`、`/api/identity/uncertain` 和 `/api/merge`。关系裁决复用核心的提议、证据指纹、状态决议与身份图重建；hybrid 合并保存 `duplicate_of` 决议，保留原始认领、资料和作品记录，通过身份图改变正式投影。未设置策略时沿现有合并链解析当前角色，再执行破坏式合并，搬移人工认领、候选、子标签、名称别名、置顶和审核归属，撤销恢复对应状态。身份未定按图片选取、不扩展复制品；队列跳过仅保存排序后的身份键，不要求角色存在或 hybrid 策略。跳过本身不写事件，其最近一步撤销沿用既有 verdict 通知；重复跳过及撤销保留偏好 JSON 和 rowid 的现行写法。四个入口与既有人工命令共用会话切库隔离、统一历史与提交后事件恢复，不升级格式；可回退到现有兼容 HTTP 入口。
+原生会话同时接管 `POST /api/identity/decision`、`/api/identity/skip` 和 `/api/merge`。关系裁决复用核心的提议、证据指纹、状态决议与身份图重建；hybrid 合并保存 `duplicate_of` 决议，保留原始认领、资料和作品记录，通过身份图改变正式投影。未设置策略时沿现有合并链解析当前角色，再执行破坏式合并，搬移人工认领、候选、子标签、名称别名、置顶和审核归属，撤销恢复对应状态。已有身份未定记录继续参与投影和迁移；队列跳过仅保存排序后的身份键，不要求角色存在或 hybrid 策略。跳过本身不写事件，其最近一步撤销沿用既有 verdict 通知；重复跳过及撤销保留偏好 JSON 和 rowid 的现行写法。三个入口与既有人工命令共用会话切库隔离、统一历史与提交后事件恢复，不升级格式；可回退到现有兼容 HTTP 入口。
 
 2026-10-01 的同一 release、相同纯合成 3 图输入（含复制品、角色、作品和子标签）下，操作加撤销的 Python / native HTTP 延迟为：hybrid 合并 38.341 / 20.093 ms、关系裁决 47.776 / 18.559 ms、身份未定 42.151 / 18.728 ms、跳过 24.134 / 11.794 ms、未设置策略合并 54.749 / 24.274 ms。每流程排除一对预热，三轮各五对，取轮中位数的中位数；native 根进程 RSS 为 9,472–9,920 KiB，Python 参考服务与测试夹具共用根进程为 54,688–57,136 KiB，另有 Rust 核心 daemon 8,960–9,120 KiB。RSS 是操作后单次快照，参考根进程含测试开销；这些数字不代表真实大库、峰值、完整生产进程树或 Windows。
 
@@ -318,7 +318,6 @@ suggest 在只读事务内复用人工目标/filter/exclude 解析，明确不�
 
 similar/clusters 从持久化表读取，worker 缺席时 state/learner 为 off；sync 的来源盘点、识别编排和本地历史见「原生来源同步与应用刷新」。names 的原生后台与远程选择器见 [WEB_NAMES.md](WEB_NAMES.md)，读取提供进度、名称覆盖、旧配置兼容与 API key 后四位；覆盖统计复用名称读取的 Danbooru、WD、Photos、CCIP、CCIP-base 链接回退。账号 GET 只读取既有绑定元数据、钥匙串/文件是否非空、X 导入统计及本机桌面登录桥，不联网、不改变凭据；写分支见「原生账号与桌面登录桥」。index 的原生检查、补丁与恢复见「原生角色索引维护」，provenance 已有原生 Runner，任务/授权和 worker 缺失行为见 [PROVENANCE.md](PROVENANCE.md) 第 8 节，已有来源结果仍由作品详情与画师读取呈现。oc/groups 从未持久化，是实时按需特征计算；worker 缺席返回原 400，local-links 与 entities/works 的非空 remote 查询已接入原生名称文本来源，联网授权独立于凭据保存。
 
-identity/pairs 的已存锚点预览由 Rust 验证 bank 上下文、向量 SHA256、版本指纹、二维 768 列、数量、有限非零向量和存在的身份；支持现行 float32 及 float64、大小端与 Fortran 数组。陈旧、损坏或不可读的 bank 沿旧规则省略预览，数据库故障仍返回错误；不加载 NumPy、不重建 bank 或启动研究任务。锚点仍按 canonical 身份显示，已有关系和样本查询保持原始字节契约。
 
 about 的应用名、版本和频道来自编译时现行应用元数据，schema 是应用 schema 36；build 是编译所用 Git 短提交，存在已跟踪改动时带 dirty，非 checkout 构建可为空。runtime 为编译器版本；Unix platform 来自 uname，其他平台报 Rust 目标 OS/架构。python 和 Pillow/NumPy/ONNX Runtime 均为 null，仅表示原生 HTTP 宿主未加载这些库，不诊断可选 worker 的安装状态；页面使用 runtime 展示诊断。旧 route 参数已退役；可选研究状态由原生协调器处理。无 schema/兼容表删除。
 
@@ -377,9 +376,9 @@ Photos 适配只打开显式配置包内的 Photos.sqlite 只读连接，收录 
 
 ### 原生角色索引维护
 
-原生 GET/POST `/api/index` 提供 check/apply/drop/watch、进度、关注作品、候选与最近六次记录。watch 沿用 v2 作品 ID、pending_tags 与 20–5000 的 min_posts，按图库存在应用数据库 `prefs.index_watch`（#205）；没有记录时从共享 `char-patch/watch.json` 只读推出初值，旧 tag 配置用本库已确认的作品链接解析。检查保持共现 ≥0.5、最低帖子数、本体筛选、已有角色/元数据/拒绝记录排除，以及每作品候选数；空检查也记录 checked_at。启动及周期检查读取 startup.index_check，七天到期重查；`--no-index-check` 关闭自动触发，手动检查保留，`--index-check` 可显式恢复本次自动触发。冻结图库不执行检查或恢复。
+原生 GET/POST `/api/index` 提供 check/apply/drop/watch、进度、关注作品、候选与最近六次记录。watch 沿用 v2 作品 ID、pending_tags 与 20–5000 的 min_posts，按图库存在应用数据库 `prefs.index_watch`（#205）；没有记录时从共享 `char-patch/watch.json` 只读推出初值，旧 tag 配置用本库已确认的作品链接解析。检查保持共现 ≥0.5、最低帖子数、本体筛选、已有角色/元数据/拒绝记录排除，以及每作品候选数；空检查也记录 checked_at。桌面手动检查每次确认后以 `allow_network:true` 仅授权当前任务，不写入偏好或名称授权；后端拒绝缺少确认的手动 check。命令行进程明确传入 `--index-network` 时，启动及周期检查才读取 startup.index_check 并在七天到期重查；`--no-index-check` 关闭自动触发，手动检查保留，`--index-check` 可显式恢复本次自动触发。冻结图库不执行检查或恢复。
 
-文本查询复用名称 Source 的主机节流、重试、25 秒单次超时与流量预算。`--index-network` 只授予本次进程 Danbooru 索引查询和公开参考图下载，保存凭据不授予联网。替身地址沿用 `ILLUSTASH_COPYRIGHT_BASE` 的带端口 loopback 限制；参考图只接受 Danbooru HTTPS 或本机合成 HTTP，禁重定向/URL 凭据，单图最多 2 MB，下载也占用 500 MB 预算。失败的单张参考图可跳过，取消与来源校验失败终止；可用参考不足仍由计算结果标为 rejected。没有实际账号、图库、Photos 或真实网络验收。
+文本查询复用名称 Source 的主机节流、重试、25 秒单次超时与流量预算。`--index-network` 只授予本次进程 Danbooru 索引查询和公开参考图下载，保存凭据不授予联网。添加角色的下载量确认只授权该次 apply，进程重启不延续请求授权。替身地址沿用 `ILLUSTASH_COPYRIGHT_BASE` 的带端口 loopback 限制；参考图只接受 Danbooru HTTPS 或本机合成 HTTP，禁重定向/URL 凭据，单图最多 2 MB，下载也占用 500 MB 预算。失败的单张参考图可跳过，取消与来源校验失败终止；可用参考不足仍由计算结果标为 rejected。没有实际账号、图库、Photos 或真实网络验收。
 
 可选 executable 由 `ILLUSTASH_INDEX_WORKER` 显式配置，参数为 request.json、response.json；没有 worker 仍可检查、编辑关注列表和浏览，apply/drop 明确拒绝。请求 format=`illustash-index/1`，含完整 TaskIdentity、源输入摘要、action、rows、reason 和隔离 review。Rust 备份源库，准备角色参考、游戏名称、相册映射、图库特征和公开参考图；macOS 安装适配器 `illustash-index` 在隔离快照中调用 `index_compute`，Windows/Linux 沿用 `tools/index_worker.py`；计算均不联网、不打开正式两库。响应回传 identity/before、characters 对象、aliases 三元组和 labels `[uuid,char_id,conf]`；上限 64 MB。进度文件也须匹配当前身份，只接受 fetch/clean/build/scan 及有界计数。Rust 校验版本、完整身份、源输入、角色/资产范围、重复项和置信度；已有孤立源认领只允许原样保留，新越界结果拒绝。默认任务超时 600 秒，`ILLUSTASH_INDEX_TIMEOUT_MS` 可设毫秒值。
 

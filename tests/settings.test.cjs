@@ -5,11 +5,11 @@ const vm = require('node:vm');
 const source = readFileSync(require('node:path').join(__dirname, '../web/static/app.js'), 'utf8');
 const helpers = source.slice(source.indexOf('const settingsRequests ='), source.indexOf('// One page per question'));
 function harness(api, extra = {}) {
-  const renders = [];
+  const renders = [], errors = [];
   const c = {api, state: {route: {page: 'settings'}}, document: {activeElement: null},
-    renderSettings: fetch => renders.push(fetch), ...extra};
+    error: message => errors.push(message), readError: e => '读取失败：' + e.message, renderSettings: fetch => renders.push(fetch), ...extra};
   vm.createContext(c); vm.runInContext(helpers, c);
-  return {c, renders};
+  return {c, renders, errors};
 }
 const tick = () => new Promise(resolve => setImmediate(resolve));
 
@@ -32,12 +32,13 @@ test('cold load starts all four reads concurrently and shares in-flight requests
 
 test('a failed card does not block others and remains retryable', async () => {
   let failed = true;
-  const {c} = harness(async path => {
+  const {c, errors} = harness(async path => {
     if (failed && path === '/api/names') throw new Error('offline');
     return path === '/api/fold' ? {kinds: []} : {loaded: true};
   });
   await c.loadSettingsData();
   assert.equal(c.state.names, undefined);
+  assert.deepEqual(errors, ['读取失败：offline']);
   assert.equal(c.state.settings.loaded, true);
   failed = false; await c.loadSettingsData();
   assert.equal(c.state.names.loaded, true);
@@ -131,7 +132,7 @@ test('new work data invalidates a collapsed editor even when its summary is unch
 
 test('returning to settings refreshes cached data once without clearing it', async () => {
   const calls = [];
-  const {c} = harness(async path => {calls.push(path);return path === '/api/fold' ? {kinds: []} : {updated:true};});
+  const {c, errors} = harness(async path => {calls.push(path);return path === '/api/fold' ? {kinds: []} : {updated:true};});
   Object.assign(c.state,{settings:{old:true},fold:[],index:{old:true},names:{old:true}});
   const load = c.loadSettingsData(true);
   assert.equal(c.state.settings.old,true);

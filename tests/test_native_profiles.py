@@ -98,13 +98,13 @@ class NativeProfilesTest(unittest.TestCase):
         self.pair('/api/works',{'action':'move','id':parent,'parent':child},400)
         self.pair('/api/works',{'action':'link','id':parent,'tag':'new_work'},400)
         self.pair('/api/works',{'action':'bad','id':parent},400)
-        self.pair('/api/character-work',{'entity':self.alice,'work':child})
-        self.pair('/api/character-work',{'entity':self.alice,'work':None})
+        self.pair('/api/character/profile',{'entity':self.alice,'work':child})
+        self.pair('/api/character/profile',{'entity':self.alice,'work':None})
         self.pair('/api/character/mascot',{'entity':self.alice,'mascot':True})
         self.pair('/api/character/mascot',{'entity':self.alice,'mascot':False})
         self.pair('/api/character/mascot',{'entity':self.alice,'mascot':1},400)
         self.pair('/api/kind',{'entity':self.alice,'kind':'oc','artist':'作者'})
-        self.pair('/api/character-work',{'entity':self.alice,'work':child},400)
+        self.pair('/api/character/profile',{'entity':self.alice,'work':child},400)
         self.pair('/api/kind',{'entity':self.alice})
 
     def test_profile_aliases_tags_links_and_mixed_undo(self):

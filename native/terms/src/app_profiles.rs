@@ -12,7 +12,6 @@ pub(crate) const ROUTES: &[&str] = &[
     "/api/character/profile",
     "/api/local-links",
     "/api/works",
-    "/api/character-work",
     "/api/character/mascot",
     "/api/kind",
     "/api/oc/shared",
@@ -163,7 +162,6 @@ pub(crate) fn request(c: &mut Connection, body: &Json, path: &str, prepared: Opt
         "/api/character/profile" => &["entity", "name", "aliases", "work", "tag"],
         "/api/local-links" => &["items"],
         "/api/works" => &["action", "id", "name", "parent", "tag"],
-        "/api/character-work" => &["entity", "work"],
         "/api/character/mascot" => &["entity", "mascot"],
         "/api/kind" => &["entity", "kind", "artist"],
         "/api/oc/shared" => &[],
@@ -331,7 +329,6 @@ pub(crate) fn request(c: &mut Connection, body: &Json, path: &str, prepared: Opt
             v["op"] = json!(match path {
                 "/api/kind" => "set_kind",
                 "/api/character/mascot" => "set_mascot",
-                "/api/character-work" => "set_work",
                 _ => return invalid("接口不存在"),
             });
             if path == "/api/kind" {

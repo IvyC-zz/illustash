@@ -17,7 +17,7 @@ pub(crate) fn request(c: &mut Connection, context: &LibraryContext, path: &str, 
         "/api/change" => "change",
         "/api/audit/answer" => "answer_audit",
         "/api/ask/answer" => "answer",
-        "/api/correct" | "/api/reassign" => "reassign",
+        "/api/reassign" => "reassign",
         "/api/sweep" => "sweep",
         _ => return Err(Error::Invalid("接口不存在".into())),
     };
@@ -41,11 +41,7 @@ pub(crate) fn request(c: &mut Connection, context: &LibraryContext, path: &str, 
         crate::schema::begin_writing(&tx).map_err(app_commands::core_error)?;
     }
     if matches!(op, "change" | "reassign") {
-        let selection = if path == "/api/correct" {
-            Json::object([("ids", Json::from(json!([input["id"]])))])
-        } else {
-            body.clone()
-        };
+        let selection = body.clone();
         // Defer business selection refusals to the core so its entity/argument check order is preserved.
         match app_commands::selected_scope(&tx, context, &selection, false) {
             Ok(ids) => args["asked"] = json!(ids),

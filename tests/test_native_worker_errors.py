@@ -50,7 +50,7 @@ class NativeWorkerErrorsTest(unittest.TestCase):
             with self.subTest(wrong=wrong), self.fixture(index_fixture.NativeIndexTest) as case:
                 script = worker_source(case.env['ILLUSTASH_INDEX_WORKER'])
                 self.corrupt(script, 'Path(sys.argv[2]).write_text(json.dumps(v))', 'labels', wrong)
-                case.index({'action': 'check'}); case.finish()
+                case.check()
                 case.index({'action': 'apply', 'tags': ['carol_example']})
                 state = case.finish()['state']
                 self.assertEqual(state['status'], 'error', state)
@@ -97,7 +97,7 @@ class NativeWorkerErrorsTest(unittest.TestCase):
         for wrong in (False, True):
             with self.subTest(wrong=wrong), self.fixture(index_fixture.NativeIndexTest) as case:
                 case.mode.write_text('fail')
-                case.index({'action': 'check'}); case.finish()
+                case.check()
                 case.index({'action': 'apply', 'tags': ['carol_example']}); case.finish()
                 file = case.lib.path / 'index-job.json'
                 journal = json.loads(file.read_text())

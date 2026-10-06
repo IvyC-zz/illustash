@@ -62,7 +62,6 @@ pub(crate) use illustash_core::compat_unicode;
 pub mod desktop_shell;
 pub(crate) use illustash_core::error;
 pub mod http;
-mod http_anchors;
 mod http_app;
 mod http_artists;
 mod http_browse;

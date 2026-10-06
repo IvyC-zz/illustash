@@ -14,12 +14,8 @@ pub const ROUTES: &[&str] = &[
     "/api/character/profile",
     "/api/character/activity",
     "/api/character/stats",
-    "/api/identity/status",
-    "/api/identity/relations",
     "/api/identity/count",
     "/api/identity/queue",
-    "/api/identity/pairs",
-    "/api/identity/assignments",
 ];
 fn val<'a>(j: &'a Json, k: &str) -> &'a Json {
     j.get(k).expect("query field")
@@ -334,89 +330,14 @@ fn stats(c: &Connection, id: &str, nsfw: &str, exclude: &str) -> Result<Json> {
         ("recent", array(recent)),
     ]))
 }
-const PENDING:&str="SELECT DISTINCT n.character_id FROM identity_relations r JOIN identity_nodes n ON n.id=r.a JOIN identity_evidence e ON e.relation_id=r.id AND e.source='legacy-hierarchy' WHERE r.kind='form_of' AND r.status='accepted' AND NOT EXISTS(SELECT 1 FROM identity_decision_evidence x WHERE x.fingerprint=e.fingerprint AND x.decision_id=(SELECT max(d.id) FROM identity_decisions d WHERE d.relation_id=r.id))";
-fn status(c: &Connection) -> Result<Json> {
-    let active = hybrid(c)?;
-    let ambiguous: i64 = c.query_row("SELECT count(*) FROM ambiguous_claims", [], |r| r.get(0))?;
-    let suspended: i64 = c.query_row("SELECT count(*) FROM identity_suspended", [], |r| r.get(0))?;
-    Ok(Json::object([
-        ("enabled", active.into()),
-        ("policy", if active { "hybrid".into() } else { None::<String>.into() }),
-        ("graph_version", crate::character_graph::version(c)?.into()),
-        ("ambiguous", ambiguous.into()),
-        ("legacy_hierarchy_pending_people", (strings(c, PENDING, &[])?.len() as i64).into()),
-        (
-            "relations",
-            Json::Array(rows(
-                c,
-                "SELECT kind,status,count(*) AS count FROM identity_relations GROUP BY kind,status",
-                &[],
-            )?),
-        ),
-        ("suspended", suspended.into()),
-    ]))
-}
 fn people(c: &Connection) -> Result<HashMap<String, String>> {
     Ok(rows(c, "SELECT id,character_id FROM identity_nodes", &[])?
         .into_iter()
         .map(|r| (text(&r, "id"), text(&r, "character_id")))
         .collect())
 }
-fn affected(c: &Connection) -> Result<HashMap<String, BTreeSet<String>>> {
-    let mut out: HashMap<String, BTreeSet<String>> = HashMap::new();
-    for r in rows(c, "SELECT uuid,entity FROM memberships UNION SELECT uuid,entity FROM family_evidence", &[])? {
-        out.entry(text(&r, "entity")).or_default().insert(text(&r, "uuid"));
-    }
-    Ok(out)
-}
-fn images(m: &HashMap<String, BTreeSet<String>>, a: &str, b: &str) -> BTreeSet<String> {
-    m.get(a).into_iter().chain(m.get(b)).flat_map(|s| s.iter().cloned()).collect()
-}
 fn page<T>(v: Vec<T>, offset: i64, limit: i64) -> Vec<T> {
     v.into_iter().skip(usize::try_from(offset).unwrap_or(usize::MAX)).take(limit as usize).collect()
-}
-fn relations(c: &Connection, status: &str, limit: i64, offset: i64) -> Result<Json> {
-    if !["", "proposed", "accepted", "rejected"].contains(&status) || !(1..=200).contains(&limit) || offset < 0 {
-        return bad("关系筛选或分页不正确");
-    }
-    let members = affected(c)?;
-    let nodes = people(c)?;
-    let mut out = rows(c, "SELECT * FROM identity_relations WHERE ?='' OR status=?", &[status, status])?;
-    for r in &mut out {
-        let a = text(r, "a");
-        let b = text(r, "b");
-        let images = images(
-            &members,
-            nodes.get(&a).map(String::as_str).unwrap_or(""),
-            nodes.get(&b).map(String::as_str).unwrap_or(""),
-        );
-        r.set("affected_images", (images.len() as i64).into());
-        r.set("samples", array(images.into_iter().take(6).collect()));
-    }
-    out.sort_by(|a, b| {
-        number(b, "affected_images").cmp(&number(a, "affected_images")).then(number(a, "id").cmp(&number(b, "id")))
-    });
-    let total = out.len();
-    let mut result = page(out, offset, limit);
-    for r in &mut result {
-        let id = number(r, "id").to_string();
-        let mut evidence = rows(c, "SELECT * FROM identity_evidence WHERE relation_id=?", &[&id])?;
-        for e in &mut evidence {
-            e.set("payload", parse_python(val(e, "payload").text())?);
-        }
-        let decisions = rows(c, "SELECT * FROM identity_decisions WHERE relation_id=? ORDER BY id", &[&id])?;
-        let reviewed:HashSet<String>=strings(c,"SELECT fingerprint FROM identity_decision_evidence WHERE decision_id=(SELECT max(id) FROM identity_decisions WHERE relation_id=?)",&[&id])?.into_iter().collect();
-        let review =
-            text(r, "status") != "proposed" && evidence.iter().any(|e| !reviewed.contains(&text(e, "fingerprint")));
-        r.set("evidence", Json::Array(evidence));
-        r.set("decisions", Json::Array(decisions));
-        r.set("new_evidence_requires_review", review.into());
-        let a = text(r, "a");
-        let b = text(r, "b");
-        let kind = text(r, "kind");
-        r.set("conflicting_decisions",Json::Array(rows(c,"SELECT id,kind,status FROM identity_relations WHERE status='accepted' AND id<>? AND ((a=? AND b=?) OR (a=? AND b=?)) AND (kind='different_from' OR ?='different_from')",&[&id,&a,&b,&b,&a,&kind])?));
-    }
-    Ok(Json::object([("items", Json::Array(result)), ("total", (total as i64).into())]))
 }
 fn pair_key(a: &str, b: &str) -> (String, String) {
     if a <= b {
@@ -549,56 +470,6 @@ fn queue(c: &Connection, limit: i64, offset: i64, nsfw: &str, count_only: bool) 
     }
     Ok(Json::object([("items", Json::Array(items)), ("total", (total as i64).into())]))
 }
-fn pairs(c: &Connection, limit: i64, offset: i64, include_empty: bool) -> Result<Json> {
-    if !(1..=200).contains(&limit) || offset < 0 {
-        return bad("分页参数不正确");
-    }
-    let nodes = people(c)?;
-    let affected = affected(c)?;
-    let mut result = Vec::new();
-    for mut r in rows(c, "SELECT * FROM identity_pairs", &[])? {
-        let a = text(&r, "a");
-        let b = text(&r, "b");
-        let images = images(
-            &affected,
-            nodes.get(&a).map(String::as_str).unwrap_or(&a),
-            nodes.get(&b).map(String::as_str).unwrap_or(&b),
-        );
-        if images.is_empty() && !include_empty {
-            continue;
-        }
-        r.set("affected_images", (images.len() as i64).into());
-        r.set("samples", array(images.into_iter().take(6).collect()));
-        result.push(r);
-    }
-    result.sort_by(|a, b| {
-        number(b, "affected_images")
-            .cmp(&number(a, "affected_images"))
-            .then(text(a, "a").cmp(&text(b, "a")))
-            .then(text(a, "b").cmp(&text(b, "b")))
-    });
-    let total = result.len();
-    let mut page = page(result, offset, limit);
-    let anchors = crate::http_anchors::anchors(c)?;
-    let canonical: HashMap<String, String> = c
-        .prepare("SELECT id,canonical_id FROM identity_nodes")?
-        .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
-        .collect::<rusqlite::Result<_>>()?;
-    for r in &mut page {
-        let evidence = remove(r, "evidence_json");
-        r.set("evidence", parse_python(evidence.text())?);
-        for (side, key) in [("a", "anchors_a"), ("b", "anchors_b")] {
-            let id = text(r, side);
-            let owner = canonical.get(&id).unwrap_or(&id);
-            r.set(key, Json::Array(anchors.get(owner).cloned().unwrap_or_default()));
-        }
-    }
-    Ok(Json::object([
-        ("items", Json::Array(page)),
-        ("total", (total as i64).into()),
-        ("impact_policy", "current memberships or stored identity evidence; distinct UUID union".into()),
-    ]))
-}
 pub(crate) fn assignments(c: &Connection, id: &str) -> Result<Json> {
     let (a, mut p) = if hybrid(c)? {
         (rows(c,"SELECT m.uuid,m.entity AS character_id,v.entity AS variant_id,m.status,m.origin FROM memberships m LEFT JOIN (SELECT entity,parent_id FROM variant_memberships WHERE uuid=?) v ON v.parent_id=m.entity WHERE m.uuid=?",&[id,id])?,rows(c,"SELECT options_json,reason FROM identity_uncertain WHERE uuid=? UNION ALL SELECT options_json,reason FROM identity_suspended WHERE uuid=?",&[id,id])?)
@@ -621,12 +492,8 @@ pub fn read(c: &Connection, _context: &LibraryContext, path: &str, q: &HashMap<S
         "/api/character/profile"=>profile(c,get("entity"))?,
         "/api/character/activity"=>activity(c,get("nsfw"))?,
         "/api/character/stats"=>stats(c,get("id"),get("nsfw"),get("exclude"))?,
-        "/api/identity/status"=>status(c)?,
-        "/api/identity/relations"=>relations(c,get("status"),int("limit","100")?,int("offset","0")?)?,
         "/api/identity/count"=>queue(c,20,0,get("nsfw"),true)?,
         "/api/identity/queue"=>queue(c,int("limit","20")?,int("offset","0")?,get("nsfw"),false)?,
-        "/api/identity/pairs"=>pairs(c,int("limit","100")?,int("offset","0")?,get("include_empty")=="1")?,
-        "/api/identity/assignments"=>assignments(c,get("id"))?,
         _=>return bad("unknown character read"),
     };
     Ok((value, 200))
@@ -635,7 +502,6 @@ pub fn read(c: &Connection, _context: &LibraryContext, path: &str, q: &HashMap<S
 pub fn validate(path: &str, q: &HashMap<String, String>) -> Result<()> {
     let args: &[(&str, &str)] = match path {
         "/api/characters" => &[("min", "0")],
-        "/api/identity/relations" | "/api/identity/pairs" => &[("limit", "100"), ("offset", "0")],
         "/api/identity/queue" => &[("limit", "20"), ("offset", "0")],
         _ => &[],
     };
@@ -646,19 +512,6 @@ pub fn validate(path: &str, q: &HashMap<String, String>) -> Result<()> {
     let get = |key| q.get(key).map(String::as_str).unwrap_or("");
     match path {
         "/api/characters" if numbers[0] < 0 => return bad("最小成员数不正确"),
-        "/api/identity/relations" => {
-            if !["", "proposed", "accepted", "rejected"].contains(&get("status"))
-                || !(1..=200).contains(&numbers[0])
-                || numbers[1] < 0
-            {
-                return bad("关系筛选或分页不正确");
-            }
-        }
-        "/api/identity/pairs" => {
-            if !(1..=200).contains(&numbers[0]) || numbers[1] < 0 {
-                return bad("分页参数不正确");
-            }
-        }
         "/api/identity/queue" => {
             if !(1..=100).contains(&numbers[0]) || numbers[1] < 0 {
                 return bad("分页参数不正确");

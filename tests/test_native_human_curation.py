@@ -164,12 +164,8 @@ class NativeHumanCurationTest(unittest.TestCase):
         self.assertEqual({row[0] for row in rows if row[4]}, {representative})
         self.assertEqual({row[0] for row in rows if row[5]}, hidden)
 
-    def test_prefs_ordered_dedup_and_fold_have_no_action_or_event_history(self):
+    def test_fold_has_no_action_or_event_history(self):
         before = snapshot(self.left.db)
-        result = self.pair('/api/prefs', {'pins': [self.bob, self.alice, self.bob, self.alice]})
-        self.assertEqual(result, {'pins': [self.bob, self.alice]})
-        self.pair('/api/prefs', {'pins': [self.alice] * 50})
-        self.pair('/api/prefs', {'pins': []})
         self.pair('/api/fold', {'kinds': ['identical', 'duplicate', 'identical']})
         after = snapshot(self.left.db)
         for table in ('actions', 'backend_effects'):
@@ -179,7 +175,7 @@ class NativeHumanCurationTest(unittest.TestCase):
         first = self.pair('/api/tag', {'ids': ['c'], 'tag': '第二标签'})['undo']
         self.pair('/api/artist/verdict', {'ids': ['b'], 'artist': self.artist, 'verdict': 'yes'})
         self.pair('/api/curate', {'ids': ['c', '图甲'], 'action': 'exclude'})
-        self.pair('/api/prefs', {'pins': [self.bob]})
+        self.seed_both(lambda store: store.set_pins([self.bob]))
         self.pair('/api/fold', {'kinds': ['crop']})
         self.pair('/api/undo', {'id': first['id']}, expected=400)
         for _ in range(3):
@@ -194,9 +190,6 @@ class NativeHumanCurationTest(unittest.TestCase):
                      artist | {'ids': ['a'], 'artist': None}, artist | {'ids': ['a'], 'artist': 'missing'}):
             with self.subTest(artist=body):
                 self.pair('/api/artist/verdict', body, expected=400)
-        for pins in (None, {}, [1], [self.alice] * 51, [self.work], [self.merged], ['Alice'], ['missing']):
-            with self.subTest(pins=pins):
-                self.pair('/api/prefs', {'pins': pins}, expected=400)
         for kinds in (None, 'crop', [None], ['missing'], [[]]):
             with self.subTest(kinds=kinds):
                 self.pair('/api/fold', {'kinds': kinds}, expected=400)
@@ -217,7 +210,7 @@ class NativeHumanCurationTest(unittest.TestCase):
             ('term_verdicts', '/api/artist/verdict', {'ids': ['b'], 'artist': self.artist, 'verdict': 'yes'}),
             ('actions', '/api/curate', {'ids': ['b', 'a'], 'action': 'exclude'}),
             ('duplicates', '/api/fold', {'kinds': ['crop', 'edit']}),
-            ('prefs', '/api/prefs', {'pins': [self.bob]}),
+
         ):
             for lib in (self.left, self.right):
                 with closing(sqlite3.connect(lib.db)) as c:
@@ -231,7 +224,7 @@ class NativeHumanCurationTest(unittest.TestCase):
     def test_security_and_inflight_curation_cannot_write_into_new_session(self):
         commands = (('/api/artist/verdict', {'ids': ['b'], 'artist': self.artist, 'verdict': 'yes'}),
                     ('/api/curate', {'ids': ['a'], 'action': 'exclude'}),
-                    ('/api/fold', {'kinds': []}), ('/api/prefs', {'pins': []}))
+                    ('/api/fold', {'kinds': []}), )
         for url, body in commands:
             self.pair(url, body, expected=403, headers={'X-CSRF-Token': 'bad'})
         self.stop(self.process)

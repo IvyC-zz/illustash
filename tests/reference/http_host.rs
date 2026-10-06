@@ -22,7 +22,6 @@ pub enum Backend {
 // R1–R4 share these route keys with the HTTP comparison corpus.
 pub const READ_ROUTES: &[(&str, &str)] = &[
     ("R4", "/api/bootstrap"),
-    ("R4", "/api/prefs"),
     ("R1", "/api/user-tags"),
     ("R1", "/api/general-tags"),
     ("R1", "/api/artists"),
@@ -47,12 +46,8 @@ pub const READ_ROUTES: &[(&str, &str)] = &[
     ("R4", "/api/oc/groups"),
     ("R4", "/api/local-links"),
     ("R4", "/api/ask"),
-    ("R4", "/api/identity/status"),
-    ("R4", "/api/identity/relations"),
     ("R4", "/api/identity/count"),
     ("R4", "/api/identity/queue"),
-    ("R4", "/api/identity/pairs"),
-    ("R4", "/api/identity/assignments"),
 ];
 
 #[derive(Clone, Default)]

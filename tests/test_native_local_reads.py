@@ -1,7 +1,6 @@
 """#41 native local queries: only disposable synthetic packages and original byte contracts."""
 from contextlib import closing
 from concurrent.futures import ThreadPoolExecutor
-import hashlib
 import json
 import os
 from pathlib import Path
@@ -66,6 +65,17 @@ class NativeLocalReadsTest(unittest.TestCase):
         self.assertEqual(before,[labels.states(lib) for lib in (self.left,self.right)])
         self.assertFalse(self.sentinel.exists())
         return json.loads(responses[1]['body']) if expected<400 else None
+
+    def test_retired_routes_are_unavailable_without_mutating_library(self):
+        before=labels.states(self.right)
+        for route in ('prefs','identity/status','identity/relations','identity/pairs','identity/assignments'):
+            response=fetch(self.origin,{'url':'/api/'+route},self.origin)
+            self.assertEqual(response['status'],400,(route,response['body']))
+        for route in ('prefs','correct','character-work','identity/uncertain'):
+            response=fetch(self.origin,{'url':'/api/'+route,'method':'POST','body':'{}','headers':{'Content-Type':'application/json','X-CSRF-Token':self.token}},self.origin)
+            self.assertEqual(response['status'],502,(route,response['body']))
+        self.assertEqual(labels.states(self.right),before)
+        self.assertFalse(self.sentinel.exists())
 
     def ask(self,query='',kind=None,entity=None,allowed=None):
         before=labels.states(self.right)
@@ -221,43 +231,6 @@ class NativeLocalReadsTest(unittest.TestCase):
                    'headers':{'Content-Type':'application/json','X-CSRF-Token':self.token}},self.origin)
         self.assertEqual(old['status'],403)
 
-    def test_identity_anchor_bank_valid_stale_corrupt_and_fingerprints(self):
-        import numpy as np
-        from web import identity
-        bank=self.root/'synthetic-bank';bank.mkdir()
-        prototypes=[{'entity':self.alice,'k':0,'references':[{'id':1,'tag':'synthetic'}]},
-                    {'entity':self.bob,'k':0,'references':[{'id':2,'tag':'synthetic'}]}]
-        vectors=np.zeros((2,768),np.float32);vectors[:,0]=1
-        np.save(bank/'vectors.npy',vectors)
-        with self.store.connect() as c:context=identity.bank_context(c)
-        meta={'context':context,'prototypes':prototypes,'vectors_sha256':hashlib.sha256((bank/'vectors.npy').read_bytes()).hexdigest(),
-              'reference_vectors_sha256':'synthetic-reference-sha'}
-        def write():
-            meta['version']=hashlib.sha256((meta['vectors_sha256']+meta['reference_vectors_sha256']+meta['context']+json.dumps(meta['prototypes'],sort_keys=True)).encode()).hexdigest()
-            (bank/'bank.json').write_text(json.dumps(meta,ensure_ascii=False))
-        write()
-        def seed(store):
-            with store.connect() as c:
-                c.execute("INSERT OR REPLACE INTO meta VALUES ('identity_bank',?)",(str(bank),))
-                c.execute("INSERT INTO identity_pairs VALUES (?,?,.2,.1,'anchor_unverified','synthetic','{}')",(self.alice,self.bob))
-        self.seed_both(seed)
-        result=self.get_pair('/api/identity/pairs?include_empty=1')['items'][0]
-        self.assertEqual(result['anchors_a'],prototypes[:1]);self.assertEqual(result['anchors_b'],prototypes[1:])
-        # Fingerprint/context failures must omit previews exactly as the original Store does.
-        original=(bank/'vectors.npy').read_bytes()
-        (bank/'vectors.npy').write_bytes(original[:-4]+b'bad!')
-        self.assertEqual(self.get_pair('/api/identity/pairs?include_empty=1')['items'][0]['anchors_a'],[])
-        (bank/'vectors.npy').write_bytes(original)
-        meta['context']='stale';write()
-        self.assertEqual(self.get_pair('/api/identity/pairs?include_empty=1')['items'][0]['anchors_a'],[])
-        meta['context']=context;write()
-        meta['version']='invalid';(bank/'bank.json').write_text(json.dumps(meta))
-        self.assertEqual(self.get_pair('/api/identity/pairs?include_empty=1')['items'][0]['anchors_a'],[])
-        for value in (np.zeros((2,768),np.float32),np.full((2,768),np.nan,np.float32),np.ones((2,767),np.float32),np.asfortranarray(vectors.astype('>f8'))):
-            np.save(bank/'vectors.npy',value);meta['vectors_sha256']=hashlib.sha256((bank/'vectors.npy').read_bytes()).hexdigest();write()
-            response=self.get_pair('/api/identity/pairs?include_empty=1')['items'][0]
-            self.assertEqual(response['anchors_a'],prototypes[:1] if value.shape==(2,768) and np.isfinite(value).all() and value.any() else [])
-        self.get_pair('/api/identity/pairs?limit=wrong',400)
 
     def test_suggest_2000_cap_nine_limit_and_no_copy_expansion(self):
         # a/b are synthetic duplicates; selecting a alone must not include b's alternatives.

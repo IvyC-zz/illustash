@@ -22,12 +22,11 @@ pub(crate) fn request_prepared(
         "/api/tag" => tag(&mut c, context, body),
         "/api/undo" => undo(&mut c, body),
         "/api/artist/verdict" => artist(&mut c, body),
-        "/api/prefs" => pins(&mut c, body),
-        "/api/change" | "/api/audit/answer" | "/api/ask/answer" | "/api/correct" | "/api/reassign" | "/api/sweep" => {
+        "/api/change" | "/api/audit/answer" | "/api/ask/answer" | "/api/reassign" | "/api/sweep" => {
             initialized(&c)?;
             crate::app_characters::request(&mut c, context, path, body)
         }
-        "/api/identity/decision" | "/api/identity/skip" | "/api/identity/uncertain" | "/api/merge" => {
+        "/api/identity/decision" | "/api/identity/skip" | "/api/merge" => {
             initialized(&c)?;
             crate::app_identity::request(&mut c, path, body)
         }
@@ -46,12 +45,7 @@ pub(crate) fn request_prepared(
     }?;
     if matches!(
         path,
-        "/api/undo"
-            | "/api/identity/decision"
-            | "/api/identity/uncertain"
-            | "/api/merge"
-            | "/api/character/profile"
-            | "/api/local-links"
+        "/api/undo" | "/api/identity/decision" | "/api/merge" | "/api/character/profile" | "/api/local-links"
     ) {
         crate::app_effects::drain(&context.db).map_err(|error| {
             eprintln!("人工操作已提交，verdict事件处理失败：{error}");
@@ -262,26 +256,6 @@ fn artist(c: &mut Connection, body: &Json) -> Result<Json> {
     http_read::register_names(c)?;
     Ok(Json::object([("undo", last_action(c)?)]))
 }
-fn pins(c: &mut Connection, body: &Json) -> Result<Json> {
-    initialized(c)?;
-    let mut pins = strings(body.get("pins").unwrap_or(&Json::Scalar(Value::Null)), "置顶列表不正确")?;
-    if pins.len() > 50 {
-        return Err(Error::Invalid("置顶列表不正确".into()));
-    }
-    let mut seen = HashSet::new();
-    pins.retain(|id| seen.insert(id.clone()));
-    let tx = c.transaction_with_behavior(TransactionBehavior::Immediate)?;
-    for id in &pins {
-        let exists: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM entities WHERE id=? AND parent_id IS NULL AND kind<>'work' AND merged_into IS NULL)", [id], |r| r.get(0))?;
-        if !exists {
-            return Err(Error::Invalid("角色不存在".into()));
-        }
-    }
-    let value = Value::Array(pins.iter().cloned().map(Value::String).collect());
-    tx.execute("INSERT OR REPLACE INTO prefs VALUES ('pins',?)", [crate::character_json::dump(&value, true)])?;
-    tx.commit()?;
-    Ok(Json::object([("pins", Json::Array(pins.into_iter().map(Json::from).collect()))]))
-}
 fn sqlite_id(value: Option<&Json>) -> Result<SqlValue> {
     Ok(match value {
         None | Some(Json::Scalar(Value::Null)) => SqlValue::Null,
@@ -480,25 +454,6 @@ mod tests {
             assert!(matches!(f.call("/api/artist/verdict", body), Err(Error::Invalid(s)) if s == expected));
         }
         assert_eq!(f.count("SELECT count(*) FROM actions"), 0);
-    }
-    #[test]
-    fn pins_keep_input_order_and_validate_before_atomic_update_without_history() {
-        let f = Fixture::new();
-        let c = crate::sqlite::open(&f.context.db).unwrap();
-        c.execute_batch("ALTER TABLE entities ADD COLUMN parent_id TEXT; ALTER TABLE entities ADD COLUMN kind TEXT; ALTER TABLE entities ADD COLUMN merged_into TEXT; INSERT INTO entities(id,kind) VALUES ('角色',''),('b',''),('work','work'); INSERT INTO prefs VALUES ('pins','[]');").unwrap();
-        let out = f.call("/api/prefs", r#"{"pins":["角色","b","角色"]}"#).unwrap();
-        assert_eq!(out.dump(), r#"{"pins": ["角色", "b"]}"#);
-        let persisted: String = c.query_row("SELECT value FROM prefs WHERE key='pins'", [], |r| r.get(0)).unwrap();
-        assert_eq!(persisted, r#"["\u89d2\u8272", "b"]"#);
-        assert!(
-            matches!(f.call("/api/prefs", r#"{"pins":["b","work"]}"#), Err(Error::Invalid(s)) if s == "角色不存在")
-        );
-        assert_eq!(
-            c.query_row("SELECT value FROM prefs WHERE key='pins'", [], |r| r.get::<_, String>(0)).unwrap(),
-            persisted
-        );
-        assert_eq!(f.count("SELECT count(*) FROM actions"), 0);
-        assert_eq!(f.count("SELECT count(*) FROM backend_effects"), 0);
     }
     #[test]
     fn only_core_business_refusals_become_invalid() {

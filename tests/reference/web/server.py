@@ -165,18 +165,10 @@ class Handler(BaseHTTPRequestHandler):
             store = self.server.store
             if url.path == '/api/bootstrap':
                 self.respond({**store.overview(q.get('nsfw', '')), 'token': self.server.token, 'read_only': store.write_refusal()})
-            elif url.path == '/api/identity/status':
-                self.respond(store.identity_status())
-            elif url.path == '/api/identity/relations':
-                self.respond(store.identity_relations(q.get('status', ''), int(q.get('limit', 100)), int(q.get('offset', 0))))
             elif url.path == '/api/identity/count':
                 self.respond(store.identity_queue(nsfw=q.get('nsfw', ''), count_only=True))
             elif url.path == '/api/identity/queue':
                 self.respond(store.identity_queue(int(q.get('limit', 20)), int(q.get('offset', 0)), q.get('nsfw', '')))
-            elif url.path == '/api/identity/pairs':
-                self.respond(store.identity_pairs(int(q.get('limit', 100)), int(q.get('offset', 0)), q.get('include_empty')=='1'))
-            elif url.path == '/api/identity/assignments':
-                self.respond(store.identity_assignments(q.get('id', '')))
             elif url.path == '/api/entities':
                 # remote=1 asks Danbooru with the typed text only.
                 self.respond(store.character_hints(self.server.names.character_search(q.get('q', ''))) if q.get('remote') else store.entities(q.get('q', '')))
@@ -208,8 +200,6 @@ class Handler(BaseHTTPRequestHandler):
                 self.respond(store.ids(q, offset, limit))
             elif url.path == '/api/user-tags':
                 self.respond(store.user_tags(q.get('q', '')))
-            elif url.path == '/api/prefs':
-                self.respond(store.prefs())
             elif url.path == '/api/sync':
                 syncer = self.server.syncer
                 self.respond({'state': syncer.status() if syncer else {'status': 'off'}, 'history': store.sync_history()})
@@ -310,10 +300,6 @@ class Handler(BaseHTTPRequestHandler):
                 self.respond({'undo': self.server.store.decide_identity(a=body.get('a'), b=body.get('b'), kind=body.get('kind'), relation_id=body.get('relation_id'), status=body.get('status'), reason=body.get('reason'), evidence=body.get('evidence'))})
             elif self.path == '/api/identity/skip':
                 self.respond({'undo': self.server.store.skip_identity_pair(body.get('a'), body.get('b'))})
-            elif self.path == '/api/identity/uncertain':
-                self.respond({'undo': self.server.store.uncertain_identity(body.get('ids'), body.get('options'), body.get('reason', '人工暂不判断'))})
-            elif self.path == '/api/correct':
-                self.respond({'undo': self.server.store.correct(body.get('id'), body.get('old'), body.get('new'))})
             elif self.path == '/api/reassign':
                 self.respond({'undo': self.server.store.reassign(body.get('ids'), body.get('old'), body.get('new'), filters=body.get('filter'), exclude=body.get('exclude'), confirm=body.get('confirm'))})
             elif self.path == '/api/sweep':
@@ -361,8 +347,6 @@ class Handler(BaseHTTPRequestHandler):
                 self.respond(result)
             elif self.path == '/api/works':
                 self.respond(self.server.store.edit_work(body.get('action'), body.get('id'), body.get('name'), body.get('parent'), body.get('tag')))
-            elif self.path == '/api/character-work':
-                self.respond(self.server.store.set_work(body.get('entity'), body.get('work')))
             elif self.path == '/api/character/mascot':
                 self.respond(self.server.store.set_mascot(body.get('entity'), body.get('mascot')))
             elif self.path == '/api/kind':
@@ -434,8 +418,6 @@ class Handler(BaseHTTPRequestHandler):
                 self.respond({'undo': self.server.store.merge(body.get('source'), body.get('target'))})
             elif self.path == '/api/curate':
                 self.respond({'undo': self.server.store.curate(body.get('ids'), body.get('action'), filters=body.get('filter'), exclude=body.get('exclude'), confirm=body.get('confirm'))})
-            elif self.path == '/api/prefs':
-                self.respond(self.server.store.set_pins(body.get('pins')))
             elif self.path == '/api/suggest':
                 self.respond(self.server.store.suggest(body.get('ids'), body.get('filter'), body.get('exclude')))
             else:

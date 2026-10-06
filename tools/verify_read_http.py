@@ -25,8 +25,8 @@ STAGES = {
     'R2': ('entities', 'works'),
     'R3': ('assets', 'assets/count', 'ids', 'detail', 'home', 'fold', 'similar', 'clusters', 'review-pools'),
     'R4': ('characters', 'character/profile', 'character/activity', 'character/stats', 'tagged',
-           'oc/groups', 'local-links', 'identity/status', 'identity/relations', 'identity/count',
-           'identity/queue', 'identity/pairs', 'identity/assignments', 'bootstrap', 'prefs'),
+           'oc/groups', 'local-links', 'identity/count',
+           'identity/queue', 'bootstrap'),
 }
 
 
@@ -57,8 +57,6 @@ def corpus(db, sample=16, query_limit=80):
                      UNION SELECT value FROM name_aliases UNION SELECT key FROM links
                      UNION SELECT work FROM entities UNION SELECT variant FROM entities''') if r[0]})
         pages = {
-            'identity/relations': c.execute('SELECT count(*) FROM identity_relations').fetchone()[0],
-            'identity/pairs': c.execute('SELECT count(*) FROM identity_pairs').fetchone()[0],
             'identity/queue': len(assets),
         }
     pick = random.Random(20260929)
@@ -91,8 +89,7 @@ def corpus(db, sample=16, query_limit=80):
     for ident in ids[::sample]:
         add('R4', 'character/profile', entity=ident)
     for ident in people[::sample]:
-        for path in ('character/stats', 'identity/assignments'):
-            add('R4', path, id=ident)
+        add('R4', 'character/stats', id=ident)
         add('R3', 'assets', entity=ident, limit=60)
     for work in works[::max(1, sample // 4)]:
         add('R4', 'characters', work=work)
@@ -105,7 +102,7 @@ def corpus(db, sample=16, query_limit=80):
     for path, count in pages.items():
         # Read all pages including one final empty page; no speculative pair-count query dependency.
         for offset in range(0, count + 200, 200):
-            add('R4', path, offset=offset, limit=200, **({'include_empty': 1} if path.endswith('pairs') else {}))
+            add('R4', path, offset=offset, limit=200)
     for limit in (0, 201, 'bad'):
         add('R3', 'assets', limit=limit)
     return out

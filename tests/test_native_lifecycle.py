@@ -33,9 +33,9 @@ from web.store import Store
 CORE_READS = (
     '/api/assets', '/api/assets/count', '/api/ids', '/api/detail?id=a', '/api/home', '/api/fold',
     '/api/review-pools', '/api/characters', '/api/tagged', '/api/character/profile',
-    '/api/character/activity', '/api/character/stats', '/api/identity/status', '/api/identity/relations',
-    '/api/identity/count', '/api/identity/queue', '/api/identity/pairs', '/api/identity/assignments?id=a',
-    '/api/bootstrap', '/api/prefs', '/api/user-tags', '/api/general-tags', '/api/artists',
+    '/api/character/activity', '/api/character/stats',
+    '/api/identity/count', '/api/identity/queue',
+    '/api/bootstrap', '/api/user-tags', '/api/general-tags', '/api/artists',
     '/api/artist', '/api/artist-audit', '/api/entities', '/api/works',
 )
 # 参考实现在 Windows 上有句柄泄漏、非法文件名和提前断开连接，逐字节对照只在 POSIX 上验收；
@@ -199,8 +199,8 @@ class NativeLifecycleTest(unittest.TestCase):
             self.assertEqual(left['headers'].get(header), right['headers'].get(header), (url, header))
         return right
 
-    def test_27_core_reads_original_bytes_headers_and_errors(self):
-        self.assertEqual(len(CORE_READS), 27)
+    def test_22_core_reads_original_bytes_headers_and_errors(self):
+        self.assertEqual(len(CORE_READS), 22)
         for url in CORE_READS:
             with self.subTest(url=url):
                 self.assertEqual(self.pair(url)['route'], 'core')
