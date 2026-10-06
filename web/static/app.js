@@ -2522,7 +2522,7 @@ function renderModelCard() {
     </div>
     <div class="sync-now form-actions"><span class="muted-note">${m.configured ? '已配置' : '未配置，不会使用'}</span><div class="spacer"></div>
       ${m.configured ? '<button class="quiet" id="modelClear">清除 key</button><button class="quiet" id="modelTest">测试连接</button>' : ''}<button class="primary" id="modelSave">保存</button></div>`)) return;
-  const save = async (body, done) => { try { state.names = await post('/api/names', {action: 'model_api', ...body}); toast(done); renderSettings(); } catch (e) { toast(e.message); } };
+  const save = async (body, done) => { try { state.names = {...state.names, ...await post('/api/names', {action: 'model_api', ...body})}; toast(done); renderSettings(); } catch (e) { toast(e.message); } };
   $('modelSave').onclick = () => {
     const body = {base: $('modelBase').value.trim() || 'https://api.deepseek.com', model: $('modelName').value.trim() || 'deepseek-chat'};
     if ($('modelKey').value.trim()) body.key = $('modelKey').value.trim();
@@ -3196,7 +3196,7 @@ $('taskPanel').addEventListener('click', async e => {
   try {
     if (act === 'sync') { await post('/api/sync', {}); state.sync = {status: 'scanning'}; }
     else if (act === 'index') state.index = await post('/api/index', {action: 'check'});
-    else if (act === 'names') { state.names = await post('/api/names', {action: 'refresh'}); toast('已开始重新获取角色名称'); }
+    else if (act === 'names') { state.names = {...state.names, ...await post('/api/names', {action: 'refresh'})}; toast('已开始重新获取角色名称'); }
     else if (act === 'similar') { await post('/api/similar', {}); state.settings = await api('/api/settings'); }
   } catch (err) { toast(err.message); }
   taskTick();

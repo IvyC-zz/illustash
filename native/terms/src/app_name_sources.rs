@@ -26,13 +26,6 @@ pub(crate) fn check(cancel: &AtomicBool) -> Result<()> {
         Ok(())
     }
 }
-fn wait(cancel: &AtomicBool, until: Instant) -> Result<()> {
-    while Instant::now() < until {
-        check(cancel)?;
-        std::thread::sleep(Duration::from_millis(20).min(until.saturating_duration_since(Instant::now())));
-    }
-    check(cancel)
-}
 pub(crate) fn db(path: &std::path::Path) -> Result<Connection> {
     let c = crate::sqlite::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE)?;
     c.busy_timeout(Duration::from_secs(2))?;
@@ -131,15 +124,27 @@ impl Source {
     fn allowed(&self) -> bool {
         self.authorized || self.grant.as_ref().is_some_and(|g| g.load(std::sync::atomic::Ordering::SeqCst))
     }
+    fn check_request(&self, local: bool) -> Result<()> {
+        check(&self.cancel)?;
+        if !local && !self.allowed() {
+            return network(UNAUTHORIZED);
+        }
+        Ok(())
+    }
+    fn wait(&self, until: Instant, local: bool) -> Result<()> {
+        while Instant::now() < until {
+            self.check_request(local)?;
+            std::thread::sleep(Duration::from_millis(20).min(until.saturating_duration_since(Instant::now())));
+        }
+        self.check_request(local)
+    }
     pub fn fetch(&self, address: &str, body: Option<&Value>, key: Option<&str>) -> Result<Value> {
         self.fetch_serialized(address, body, key).map(|(value, _)| value)
     }
     fn fetch_serialized(&self, address: &str, body: Option<&Value>, key: Option<&str>) -> Result<(Value, String)> {
         let u = url::Url::parse(address).map_err(|_| Error::Invalid("名称接口地址不正确".into()))?;
         let local = matches!(u.host_str(), Some("localhost" | "127.0.0.1" | "[::1]"));
-        if !self.allowed() && !local {
-            return network(UNAUTHORIZED);
-        }
+        self.check_request(local)?;
         if u.scheme() != "https" && !(local && u.scheme() == "http") {
             return network("名称接口须使用 HTTPS");
         }
@@ -161,17 +166,18 @@ impl Source {
             }
         };
         for attempt in 0..3 {
-            check(&self.cancel)?;
+            self.check_request(local)?;
             // One in-flight request per host is within the two-request maximum.
             let mut h = loop {
                 if let Ok(h) = host.try_lock() {
                     break h;
                 }
-                wait(&self.cancel, Instant::now() + Duration::from_millis(20))?;
+                self.wait(Instant::now() + Duration::from_millis(20), local)?;
             };
             if let Some(next) = h.next {
-                wait(&self.cancel, next)?;
+                self.wait(next, local)?;
             }
+            self.check_request(local)?;
             h.next = Some(Instant::now() + Duration::from_secs_f64(interval));
             {
                 let mut c = db(&self.path)?;
@@ -204,6 +210,7 @@ impl Source {
             if let Some(key) = key {
                 req = req.set("Authorization", &format!("Bearer {key}"));
             }
+            self.check_request(local)?;
             let response = if let Some(body) = body { req.send_json(body) } else { req.call() };
             let mut retry = 0.0;
             let (value, transient, label) = match response {
@@ -618,6 +625,35 @@ mod tests {
         grant.store(false, std::sync::atomic::Ordering::SeqCst);
         assert!(refused(&source), "revoking stops the next request");
         assert!(Source::new(path, cancel, true, false).unwrap().allowed());
+    }
+    #[test]
+    fn revocation_stops_requests_waiting_for_a_host_or_retry_deadline() {
+        for queued in [true, false] {
+            let host_name = if queued { "consent-queue.invalid" } else { "consent-backoff.invalid" };
+            let host = Arc::new(Mutex::new(Host { next: Some(Instant::now() + Duration::from_secs(10)), failures: 0 }));
+            HOSTS.get_or_init(Default::default).lock().unwrap().insert(format!("{host_name}:443"), host.clone());
+            let held = queued.then(|| host.lock().unwrap());
+            let grant = Arc::new(AtomicBool::new(true));
+            // No database is needed: a revoked request must stop before reserving traffic or sending HTTP.
+            let source = Source::new(PathBuf::new(), Arc::new(AtomicBool::new(false)), false, false)
+                .unwrap()
+                .granted(grant.clone());
+            let worker =
+                std::thread::spawn(move || source.fetch(&format!("https://{host_name}/tags.json"), None, None));
+            let deadline = Instant::now() + Duration::from_secs(2);
+            while Arc::strong_count(&host) < 3 || (!queued && host.try_lock().is_ok()) {
+                assert!(Instant::now() < deadline, "request did not reach the host wait");
+                std::thread::sleep(Duration::from_millis(1));
+            }
+            grant.store(false, Ordering::SeqCst);
+            while !worker.is_finished() {
+                assert!(Instant::now() < deadline, "revocation did not interrupt the wait");
+                std::thread::sleep(Duration::from_millis(1));
+            }
+            assert!(matches!(worker.join().unwrap(), Err(Error::Network(m)) if m == UNAUTHORIZED));
+            drop(held);
+            HOSTS.get().unwrap().lock().unwrap().remove(&format!("{host_name}:443"));
+        }
     }
     #[test]
     fn wiki_chinese_uses_exact_codec_order_and_work_exclusions() {
