@@ -61,7 +61,7 @@
 
 ### 写入与撤销
 
-`POST /api/change` 接收 `action=confirmed|rejected|unknown|resume|add_variant|remove_variant`；后两者的 entity 必须是子标签 ID。`action=confirmed` 可改传 `entities`（1–20 个角色 ID，与 `entity` 二选一），一次设为多个角色，作为一条撤销记录。`POST /api/reassign` 接收不同的父角色 `old,new`；一次拒绝旧角色并确认新角色，不触碰其他身份。`POST /api/correct` 保留单图适配接口。
+`POST /api/change` 接收 `action=confirmed|rejected|unknown|resume|add_variant|remove_variant`；后两者的 entity 必须是子标签 ID。`action=confirmed` 可改传 `entities`（1–20 个角色 ID，与 `entity` 二选一），一次设为多个角色，作为一条撤销记录。`POST /api/reassign` 接收不同的父角色 `old,new`；一次拒绝旧角色并确认新角色，不触碰其他身份。单图和批量纠正统一使用 `/api/reassign`。
 
 change/reassign 的选择方式二选一：
 
@@ -113,7 +113,6 @@ change/reassign 的选择方式二选一：
 - 相簿原名不再覆盖显示名，只作别名；日/中/英名、相簿名都能搜到，`/api/entities` 返回 `matched` 说明命中的别名。
 
 ### 新增 API
-- `GET /api/prefs`、`POST /api/prefs {pins}`：置顶角色，存 `prefs` 表。
 - `POST /api/suggest {ids|filter,exclude}`：所选图片共有的「也可能是」，按出现次数排序，供选择器建议。
 - `GET /api/characters?id=`：按 ID 取单个角色；返回增加 `reviewed_at`。
 - `GET /api/assets` 增加 `utag`、每项 `user_tags`；`pool=skipped` 为已跳过；`/api/review-pools` 返回 `unmatched` 与 `skipped`。
@@ -326,10 +325,11 @@ change/reassign 的选择方式二选一：
 
 ## 定期检查新角色（2026-09-24）
 
-把上次手动补外部索引的流程（`tools/char_patch.py`）做成设置页里的「新角色」卡片，代码在 `tests/reference/web/index_update.py`。
+设置页的「检查新角色」由原生 `/api/index` 提供；计算子进程仍使用 `tools/char_patch.py`。
 
 - **检查**：
-  - 每次启动时，如果离上次检查满 7 天，就自动查一次；也可以点「立即检查」；
+  - 每次点「检查新角色」都会说明联网目的并确认，只授权当前运行；取消后不发起检查，不保存授权。命令行 `--index-network` 可明确授权当前进程的自动检查，默认桌面启动不自动联网；
+  - 本地读取失败显示「读取失败：具体原因」，不以空结果替代失败；可选的本地链接探测保持静默。
   - 只发文本查询：对每个关注的作品调用 Danbooru 的 `related_tag`；
   - 条件与上次一致：≥ 最少图数（默认 100）、与该作品重合度 ≥ 0.5、本地没有、是本体；
   - 以前放弃过的角色（`char-patch/rejected/`）不再列出。

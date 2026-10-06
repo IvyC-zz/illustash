@@ -150,7 +150,7 @@ class FrontDoorHTTPTest(existing.HTTPTest):
                 conn = http.client.HTTPConnection('127.0.0.1', int(base.rsplit(':', 1)[1]), timeout=3)
                 try:
                     try:
-                        conn.request('POST', '/api/prefs', body=iter([b'{"hidden":true}']), encode_chunked=True,
+                        conn.request('POST', '/api/fold', body=iter([b'{"hidden":true}']), encode_chunked=True,
                                      headers={'Host': self.server.host_header, 'Origin': self.url,
                                               'Content-Type': 'application/json', 'X-CSRF-Token': self.server.token})
                     except (BrokenPipeError, ConnectionResetError):
@@ -167,7 +167,7 @@ class FrontDoorHTTPTest(existing.HTTPTest):
             self.assertEqual(json.loads(body), {'error': '请求格式不正确'})
         for attempt in range(5):   # the same early rejection, on Content-Length: resend when the reset ate the answer
             try:
-                large = self.pair('/api/prefs', 'POST', {'large': 'x' * 100001})
+                large = self.pair('/api/fold', 'POST', {'large': 'x' * 100001})
                 break
             except (BrokenPipeError, ConnectionResetError, http.client.RemoteDisconnected):
                 if attempt == 4:

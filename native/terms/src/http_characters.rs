@@ -330,22 +330,11 @@ fn stats(c: &Connection, id: &str, nsfw: &str, exclude: &str) -> Result<Json> {
         ("recent", array(recent)),
     ]))
 }
-const PENDING:&str="SELECT DISTINCT n.character_id FROM identity_relations r JOIN identity_nodes n ON n.id=r.a JOIN identity_evidence e ON e.relation_id=r.id AND e.source='legacy-hierarchy' WHERE r.kind='form_of' AND r.status='accepted' AND NOT EXISTS(SELECT 1 FROM identity_decision_evidence x WHERE x.fingerprint=e.fingerprint AND x.decision_id=(SELECT max(d.id) FROM identity_decisions d WHERE d.relation_id=r.id))";
 fn people(c: &Connection) -> Result<HashMap<String, String>> {
     Ok(rows(c, "SELECT id,character_id FROM identity_nodes", &[])?
         .into_iter()
         .map(|r| (text(&r, "id"), text(&r, "character_id")))
         .collect())
-}
-fn affected(c: &Connection) -> Result<HashMap<String, BTreeSet<String>>> {
-    let mut out: HashMap<String, BTreeSet<String>> = HashMap::new();
-    for r in rows(c, "SELECT uuid,entity FROM memberships UNION SELECT uuid,entity FROM family_evidence", &[])? {
-        out.entry(text(&r, "entity")).or_default().insert(text(&r, "uuid"));
-    }
-    Ok(out)
-}
-fn images(m: &HashMap<String, BTreeSet<String>>, a: &str, b: &str) -> BTreeSet<String> {
-    m.get(a).into_iter().chain(m.get(b)).flat_map(|s| s.iter().cloned()).collect()
 }
 fn page<T>(v: Vec<T>, offset: i64, limit: i64) -> Vec<T> {
     v.into_iter().skip(usize::try_from(offset).unwrap_or(usize::MAX)).take(limit as usize).collect()

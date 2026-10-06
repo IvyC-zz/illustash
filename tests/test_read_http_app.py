@@ -5,14 +5,12 @@ from tests.test_read_http_core import HTTPHarness
 
 
 class AppReadHTTPTest(HTTPHarness):
-    def test_bootstrap_prefs_and_history_rendering(self):
+    def test_bootstrap_history_and_legacy_pins_retention(self):
         for nsfw in ('', 'hide', 'only', 'bad'):
             self.pair('/api/bootstrap?' + urlencode({'nsfw': nsfw}))
-        self.pair('/api/prefs')
         with self.store.connect() as c:
             ids = [r[0] for r in c.execute("SELECT id FROM entities WHERE parent_id IS NULL AND kind<>'work' AND merged_into IS NULL LIMIT 2")]
             c.execute("INSERT OR REPLACE INTO prefs VALUES ('pins',?)", (json.dumps(ids + ids + ['missing']),))
-        self.assertEqual(json.loads(self.pair('/api/prefs')['body'])['pins'], ids)
         samples = [
             ('literal-history', []),
             ('已将 2 张设为 stale', [{'entity': ids[0]}]),

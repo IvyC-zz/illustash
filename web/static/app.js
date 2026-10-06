@@ -52,6 +52,16 @@ async function post(path, body) {
   return result;
 }
 function error(message) { $('errorBanner').textContent = message; $('errorBanner').hidden = !message; }
+function readError(e) { return '读取失败：' + (e?.message || String(e)); }
+function readFailure(node, e) { if (node) { node.hidden = false; node.innerHTML = `<p class="empty" role="alert">${esc(readError(e))}</p>`; } }
+async function checkIndex() {
+  const token = state.token;
+  if (!await confirmAction('本次检查会联网查询 Danbooru，只发送关注作品的 tag，不发送图库图片。允许本次检查联网吗？', '检查新角色') || token !== state.token) return false;
+  const result = await post('/api/index', {action: 'check', allow_network: true});
+  if (token !== state.token) return false;
+  state.index = result; return true;
+}
+
 // Name text queries (tag and work names only) need this library's consent: the backend refuses with
 // this exact message until it is given. Any other failure is a real network or service error.
 const NAMES_UNAUTHORIZED = '显示名联网尚未授权';
@@ -147,11 +157,12 @@ async function applyRoute() {
   state.char = null;
   state.groupNear = null;
   if (route.page === 'group') {
-    const g = (await api('/api/clusters?nsfw=' + state.nsfw).catch(() => ({clusters: []}))).clusters.find(x => String(x.cid) === route.id);
+    let result; try { result = await api('/api/clusters?nsfw=' + state.nsfw); } catch (e) { error(readError(e)); return; }
+    const g = result.clusters.find(x => String(x.cid) === route.id);
     state.groupNear = g?.near ? nearText(g) : null; state.groupNearId = g?.near || null; state.groupTraits = g?.traits || [];
   }
   if (route.char) {
-    const character = await fetchChar(route.char);
+    let character; try { character = await fetchChar(route.char); } catch (e) { if (state.route === route) error(readError(e)); return; }
     if (state.route !== route) return;
     state.char = character || {id: route.char, name: '角色', work: '', count: 0, unchecked: 0, variants: []};
   }
@@ -162,7 +173,7 @@ async function applyRoute() {
 window.addEventListener('hashchange', applyRoute);
 
 // ---------- sidebar & counts ----------
-const fetchChar = async id => (await api('/api/characters?' + new URLSearchParams({id, nsfw: state.nsfw})).catch(() => []))[0];
+const fetchChar = async id => (await api('/api/characters?' + new URLSearchParams({id, nsfw: state.nsfw})))[0];
 const navCount = (id, n, title = '') => { $(id).textContent = n ? number(n) : ''; $(id).title = title; };
 let metaPending = null, metaRevision = 0, metaFull = false;
 // After an edit the sidebar counts and character list (~0.6 s of server work) can wait until the edits stop:
@@ -170,7 +181,7 @@ let metaPending = null, metaRevision = 0, metaFull = false;
 let metaTimer = null, metaTagsOnly = true;
 function metaSoon(tagsOnly) {
   metaTagsOnly &&= tagsOnly; clearTimeout(metaTimer);
-  metaTimer = setTimeout(() => { const t = metaTagsOnly; metaTagsOnly = true; refreshMeta({tagsOnly: t}).catch(() => {}); }, 700);
+  metaTimer = setTimeout(() => { const t = metaTagsOnly; metaTagsOnly = true; refreshMeta({tagsOnly: t}).catch(e => error(readError(e))); }, 700);
 }
 function refreshMeta({tagsOnly = false, boot = null} = {}) {
   metaRevision++; metaFull ||= !tagsOnly;
@@ -199,7 +210,7 @@ async function refreshMetaOnce(full, revision, bootSeed) {
   const nsfw = new URLSearchParams({nsfw: state.nsfw});
   const charId = state.char?.id;
   const directory = state.route.page === 'characters';
-  const [boot, pools, chars, tags, queue, detail] = await Promise.all([bootSeed || api('/api/bootstrap?' + nsfw), api('/api/review-pools?' + nsfw), api('/api/characters?min=1&' + nsfw + (directory ? '' : '&summary=1')), api('/api/user-tags'), api('/api/identity/count?' + nsfw).catch(() => null), charId && !directory ? fetchChar(charId) : null]);
+  const [boot, pools, chars, tags, queue, detail] = await Promise.all([bootSeed || api('/api/bootstrap?' + nsfw), api('/api/review-pools?' + nsfw), api('/api/characters?min=1&' + nsfw + (directory ? '' : '&summary=1')), api('/api/user-tags'), api('/api/identity/count?' + nsfw).catch(e => { error(readError(e)); return null; }), charId && !directory ? fetchChar(charId) : null]);
   const currentChar = charId && (detail || (directory && (chars.find(c => c.id === charId) || await fetchChar(charId))));
   if (revision !== metaRevision || nsfw.get('nsfw') !== state.nsfw) return;
   state.userTags = tags;
@@ -223,7 +234,7 @@ async function refreshMetaOnce(full, revision, bootSeed) {
   else if (state.route.page === 'settings') renderSettings();
   else if (!['characters', 'library'].includes(state.route.page)) renderChrome();
   if (state.route.page === 'characters') {
-    if (!directory) { refreshMeta().catch(() => {}); return; }
+    if (!directory) { refreshMeta().catch(e => error(readError(e))); return; }
     if (state.route.section || !$('charSearch')?.value) renderIndexBody(state.chars);
   }
 }
@@ -537,9 +548,9 @@ function indexAt(clientX, clientY, clamp = true) {
 const REASONS = {photo: '真人/照片', screenshot: '截图', text: '文字图', manual: '手动排除'};
 // How many images the machine thinks may also be this character (shown as a toggle on the character page).
 async function refreshMaybe(gen) {
-  const r = state.route, total = status => api('/api/assets/count?' + new URLSearchParams({entity: r.char, status, ...(state.nsfw ? {nsfw: state.nsfw} : {})})).then(x => x.total).catch(() => 0);
+  const r = state.route, total = status => api('/api/assets/count?' + new URLSearchParams({entity: r.char, status, ...(state.nsfw ? {nsfw: state.nsfw} : {})})).then(x => x.total).catch(e => { error(readError(e)); return null; });
   const [count, doubt] = await Promise.all([r.maybe ? state.total : total('maybe'), r.doubt ? state.total : total('ambiguous')]);
-  if (gen !== state.generation || (count === state.maybeCount && doubt === state.doubtCount)) return;
+  if (count === null || doubt === null || gen !== state.generation || (count === state.maybeCount && doubt === state.doubtCount)) return;
   state.maybeCount = count; state.doubtCount = doubt; renderChrome();
 }
 // Adjacent groups get different hues so the pairs read at a glance.
@@ -938,7 +949,7 @@ async function undo() {
   if (!state.undo || state.busy) return; state.busy = true;
   try {
     const label = state.undo.label, r = await post('/api/undo', {id: state.undo.id}); setUndo(r.undo);
-    toast('已撤销 · ' + label.replace(/^已/, '')); await reload(); refreshMeta().catch(() => {});
+    toast('已撤销 · ' + label.replace(/^已/, '')); await reload(); refreshMeta().catch(e => error(readError(e)));
     if (state.route.page === 'identity') renderIdentity();
     if (state.route.page === 'groups') renderGroups(true);
     if (state.route.page === 'artist-audit') renderArtistAudit();
@@ -977,7 +988,7 @@ async function paletteSearch() {
     const rest = mine.filter(t => !recent.includes(t.tag));
     if (rest.length) sections.push({label: '我的标签', items: rest.map(t => ({tag: t.tag, name: t.tag, hint: `${number(t.count)} 张`}))});
     if (q) {
-      const wd = await api('/api/general-tags?q=' + encodeURIComponent(q)).catch(() => []);
+      let wd; try { wd = await api('/api/general-tags?q=' + encodeURIComponent(q)); } catch (e) { if (gen === p.generation && palette === p) renderPalette([{label: '本地标签', items: [], note: readError(e)}], q); return; }
       if (gen !== p.generation) return;
       const known = new Set(state.userTags.map(t => t.tag));
       if (wd.length) sections.push({label: '采纳 WD 通用标签', items: wd.filter(t => !known.has(t)).slice(0, 8).map(t => ({tag: t, name: t, hint: '机器词表，采纳后成为你的标签'}))});
@@ -985,7 +996,7 @@ async function paletteSearch() {
     }
   } else if (p.items) sections = [{label: '', items: p.items.filter(e => !q || e.name.toLowerCase().includes(q.toLowerCase()))}];
   else if (q) {
-    const list = await api('/api/entities?q=' + encodeURIComponent(q)).catch(() => []);
+    let list; try { list = await api('/api/entities?q=' + encodeURIComponent(q)); } catch (e) { if (gen === p.generation && palette === p) renderPalette([{label: '本地角色', items: [], note: readError(e)}], q); return; }
     if (gen !== p.generation) return;
     const items = list.filter(e => !(p.exclude || []).includes(e.id)).map(e => ({...e, hint: e.matched ? '别名：' + e.matched : charHint(e), count: e.count}));
     sections = [{label: '', items}];
@@ -1007,7 +1018,7 @@ async function paletteSearch() {
     }
   } else {
     if (p.suggest) {
-      const sug = await post('/api/suggest', p.suggest).catch(() => []);
+      let sug; try { sug = await post('/api/suggest', p.suggest); } catch (e) { if (gen === p.generation && palette === p) renderPalette([{label: '本地候选', items: [], note: readError(e)}], q); return; }
       if (gen !== p.generation) return;
       if (sug.length) sections.push({label: '也可能是', items: sug.filter(e => !(p.exclude || []).includes(e.id)).map(e => ({...e, hint: e.count > 1 ? `${number(e.count)} 张的机器候选` : '机器候选'}))});
     }
@@ -1119,7 +1130,7 @@ async function splitOc(c) {
   $('ocSplitTitle').textContent = `按相似细分 · ${c.name}`;
   body.innerHTML = '<p class="muted-note">正在比较长相…只在本机计算</p>';
   d.showModal();
-  let r; try { r = await api('/api/oc/groups?' + new URLSearchParams({entity: c.id})); } catch (e) { body.innerHTML = `<p class="muted-note">${esc(e.message)}</p>`; return; }
+  let r; try { r = await api('/api/oc/groups?' + new URLSearchParams({entity: c.id})); } catch (e) { body.innerHTML = `<p class="muted-note">${esc(readError(e))}</p>`; return; }
   const grouped = r.groups.reduce((n, g) => n + g.length, 0);
   body.innerHTML = `<p class="muted-note">${number(r.total)} 张里有 ${number(r.groups.length)} 组长得像（共 ${number(grouped)} 张）；其余的不像任何一张，留在这里。</p>` +
     (r.groups.map((g, i) => `<section class="oc-split-group" data-g="${i}"><div class="oc-split-thumbs">${g.slice(0, 8).map(u => `<img src="/image?id=${encodeURIComponent(u)}" alt="" loading="lazy">`).join('')}${g.length > 8 ? `<span>+${number(g.length - 8)}</span>` : ''}</div><div class="oc-split-meta"><span>${number(g.length)} 张</span><button class="quiet" data-split="${i}">设为新的原创角色</button></div></section>`).join('') || '<p class="palette-empty">没有长得像、能成组的图。可以在图库里选中后用「换成…」新建原创角色。</p>');
@@ -1167,7 +1178,7 @@ function twoStage(local, remote, extra = () => []) {
         show([{label: '', items: mine}, {label: 'Danbooru', items: fresh || [], allow: result.unauthorized,
           note: found === null ? remoteNote(result) : fresh.length ? '' : found.length ? '' : '没有找到，可以换英文或日文写法'}, ...extra(q)]);
       });
-    });
+    }).catch(e => show([{label: '本地资料', items: [], note: readError(e)}]));
   };
 }
 async function editProfile(c) {
@@ -1205,7 +1216,7 @@ async function editProfile(c) {
       : {label: 'Danbooru', items: [], note: remoteNote(result), allow: result.unauthorized}]));
   }, r => { draft.tag = r.tag; draft.tagWork = r.work_name; tagNote(); workNote(); });
   if (q('#pfWork')) combo(q('#pfWork'), q('#pfWorkMenu'), twoStage(
-    text => api('/api/works?' + new URLSearchParams({q: text})).then(ws => ws.slice(0, 8).map(w => ({id: w.id, label: w.name, detail: w.tag || '', extra: w.count ? `你有 ${number(w.count)} 张` : ''}))).catch(() => []),
+    text => api('/api/works?' + new URLSearchParams({q: text})).then(ws => ws.slice(0, 8).map(w => ({id: w.id, label: w.name, detail: w.tag || '', extra: w.count ? `你有 ${number(w.count)} 张` : ''}))),
     text => remoteNames('/api/works?' + new URLSearchParams({q: text, remote: 1})).then(r => r.found ? {found: r.found.map(w => ({tag: w.tag, label: workName(w.tag) || w.tag, detail: w.tag, extra: `D 站 ${number(w.posts)}`}))} : r),
     text => text ? [{label: '', items: [{create: text, label: `新建作品「${text}」`, detail: '只在本地'}]}] : []),
     r => { draft.work = r; workNote(); });
@@ -1281,7 +1292,7 @@ async function openRelate(ids) {
   $('relateTitle').textContent = `${number(ids.length)} 张图的关系`;
   $('relateBody').innerHTML = '<p class="muted-note">正在逐对比较…只在本机计算</p>';
   d.showModal();
-  let r; try { r = await post('/api/relate', {ids}); } catch (e) { $('relateBody').innerHTML = `<p class="muted-note">${esc(e.message)}</p>`; return; }
+  let r; try { r = await post('/api/relate', {ids}); } catch (e) { $('relateBody').innerHTML = `<p class="muted-note">${esc(readError(e))}</p>`; return; }
   const no = u => ids.indexOf(u) + 1;
   const figure = (u, boxes) => `<figure class="rel-fig"><div class="rel-img"><img src="/image?id=${encodeURIComponent(u)}&size=medium" alt="">${boxes.map(b =>
     `<i class="${b.match ? 'match' : 'diff'}" style="left:${(b.x * 100).toFixed(2)}%;top:${(b.y * 100).toFixed(2)}%;width:${(b.w * 100).toFixed(2)}%;height:${(b.h * 100).toFixed(2)}%"></i>`).join('')}<span class="rel-no">${no(u)}</span></div>
@@ -1506,7 +1517,7 @@ async function showViewer(i, held = null) {
   return refreshViewerBar(item, i);
 }
 async function refreshViewerBar(item, i) {
-  const d = await api('/api/detail?id=' + encodeURIComponent(item.uuid)).catch(() => null);
+  let d; try { d = await api('/api/detail?id=' + encodeURIComponent(item.uuid)); } catch (e) { if (state.viewerItem?.uuid === item.uuid) readFailure($('viewerBar'), e); return; }
   if (!d || state.viewerItem?.uuid !== item.uuid) return;
   state.detail = d; $('viewerBar').innerHTML = (shouldAsk(d, item.uuid) ? askHTML(d.question, true) : '') + identityChips(d, true);
   bindIdentity($('viewerBar'), d, item.uuid); bindAsk($('viewerBar'), d, item.uuid);
@@ -1551,8 +1562,8 @@ async function renderIndex() {
     if (state.route.page !== 'characters') return;
   }
   drawCast();
-  api('/api/tagged?' + new URLSearchParams({nsfw: state.nsfw})).then(t => { state.tagged = t; drawCast(); }).catch(() => {});
-  state.workTree = await api('/api/works').catch(() => state.workTree || []);
+  api('/api/tagged?' + new URLSearchParams({nsfw: state.nsfw})).then(t => { state.tagged = t; drawCast(); }).catch(e => error(readError(e)));
+  state.workTree = await api('/api/works').catch(e => { error(readError(e)); return state.workTree || []; });
   loadActivity(); refreshLocalLinks();
 }
 // Own characters whose name is a Danbooru tag (asks Danbooru with those names only; none → no request).
@@ -1564,16 +1575,17 @@ async function refreshLocalLinks() {
 }
 async function loadActivity() {
   const key = state.nsfw + '|' + state.readEpoch; if (cast.activityKey === key) return;
-  const act = await api('/api/character/activity?nsfw=' + state.nsfw).catch(() => null);
+  let act; try { act = await api('/api/character/activity?nsfw=' + state.nsfw); } catch (e) { error(readError(e)); return; }
   if (!act) return;
   cast.activity = new Map(Object.entries(act)); cast.activityKey = key;
   if (state.route.page === 'characters') drawCast();
 }
 async function searchIndex() {
+  const route = state.route, token = state.token;
   const q = $('charSearch').value.trim();
   if (!q) { cast.list = null; drawCast(); return; }
-  const list = await api('/api/characters?min=1&q=' + encodeURIComponent(q) + '&nsfw=' + state.nsfw).catch(() => []);
-  if (q === $('charSearch').value.trim()) { cast.list = list; drawCast(); }
+  let list; try { list = await api('/api/characters?min=1&q=' + encodeURIComponent(q) + '&nsfw=' + state.nsfw); } catch (e) { if (route === state.route && token === state.token && q === $('charSearch').value.trim()) readFailure($('charIndex'), e); return; }
+  if (route === state.route && token === state.token && q === $('charSearch').value.trim()) { cast.list = list; drawCast(); }
 }
 // Replace only the sections whose HTML changed, so covers that did not change are not reloaded.
 function reconcileSections(container, sections, empty = '没有匹配的角色') {
@@ -1699,9 +1711,11 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape' && cast.pop &
 // Watching a work means the index check asks Danbooru (work name only) for characters the local index lacks.
 const shelf = {q: '', filter: 'all'};
 async function renderShelf() {
-  $('hint').textContent = '点作品名看它的角色 · 关注的作品会定期检查 Danbooru 上的新角色';
+  const route = state.route, token = state.token;
+  $('hint').textContent = '点作品名看它的角色 · 检查关注作品的新角色前会确认联网';
   drawShelf();
-  const x = await api('/api/index').catch(() => null);
+  let x; try { x = await api('/api/index'); } catch (e) { if (route === state.route && token === state.token) readFailure($('charIndex'), e); return; }
+  if (route !== state.route || token !== state.token) return;
   if (x) state.index = x;
   if (state.route.page === 'characters' && state.route.section === 'works') { renderHeading(); drawShelf(); }
 }
@@ -1815,8 +1829,8 @@ function workDialog(w) {
         let id = w?.id;
         if (!id) id = (await post('/api/works', tag ? {action: 'create', name, tag} : {action: 'create', name})).id;
         if (w || parent) await post('/api/works', {action: 'edit', id, name, parent, tag});
-        state.index = await api('/api/index'); state.workTree = await api('/api/works').catch(() => state.workTree);
-        await refreshMeta().catch(() => {});
+        state.index = await api('/api/index'); state.workTree = await api('/api/works').catch(e => { error(readError(e)); return state.workTree; });
+        await refreshMeta().catch(e => error(readError(e)));
         renderIndexBody(); renderHeading();
         resolve({id, name});
       } catch (err) { toast(err.message); resolve(null); }
@@ -1826,7 +1840,7 @@ function workDialog(w) {
 }
 // Characters the last index check found on Danbooru for watched works; adding one downloads ~20 public reference pictures.
 function openIndexAdd(tag = '') {
-  const x = state.index, list = (x?.check?.missing || []).filter(r => !tag || r.copyright === tag);
+  const token = state.token, x = state.index, list = (x?.check?.missing || []).filter(r => !tag || r.copyright === tag);
   if (!list.length) return;
   const d = document.createElement('dialog'); d.className = 'palette profile-dialog index-add';
   d.innerHTML = `<form method="dialog"><div class="dialog-top"><h2>添加新角色</h2><button type="button" class="icon" data-close aria-label="关闭">×</button></div>
@@ -1846,8 +1860,8 @@ function openIndexAdd(tag = '') {
   q('[data-close]').onclick = () => d.close();
   d.onclose = async () => {
     const tags = picks().filter(b => b.checked).map(b => b.dataset.pick), ok = d.returnValue === 'ok'; d.remove();
-    if (!ok || !tags.length) return;
-    try { state.index = await post('/api/index', {action: 'apply', tags}); toast(`开始添加 ${number(tags.length)} 个角色，进度在任务面板里`); pollIndex(); renderIndexBody(); }
+    if (!ok || !tags.length || token !== state.token) return;
+    try { state.index = await post('/api/index', {action: 'apply', tags, allow_network: true}); toast(`开始添加 ${number(tags.length)} 个角色，进度在任务面板里`); pollIndex(); renderIndexBody(); }
     catch (e) { toast(e.message); }
   };
   document.body.append(d); note(); d.showModal();
@@ -1970,7 +1984,7 @@ function setNsfw(mode) {
   else if (state.route.page === 'groups') renderGroups();
   else if (state.route.page === 'similar') renderSimilar();
   else if (state.route.page === 'characters') { cast.activityKey = ''; loadActivity(); }
-  refreshMeta().catch(() => {});
+  refreshMeta().catch(e => error(readError(e)));
 }
 $('nsfwButton').onclick = () => setNsfw({'': 'hide', hide: 'only', only: ''}[state.nsfw]);
 renderNsfw();
@@ -1996,7 +2010,7 @@ async function renderHome(keep = false) {
     if (!keep) { home.askSkip = []; home.askOff = new Set(); home.ask = await nextAsk(); if (gen !== home.gen || state.route.page !== 'home') return; }
     drawHome();
     if (keep) $('viewport').scrollTop = scroll;
-  } catch (e) { if (gen === home.gen && state.route.page === 'home') $('homePage').innerHTML = `<p class="empty">${esc(e.message)}</p>`; }
+  } catch (e) { if (gen === home.gen && state.route.page === 'home') $('homePage').innerHTML = `<p class="empty">${esc(readError(e))}</p>`; }
 }
 async function moreHome() {
   if (home.loading || !home.next || state.route.page !== 'home') return;
@@ -2174,7 +2188,8 @@ async function renderGroups(keep = false) {
   $('grid').hidden = true; $('empty').hidden = true; $('charIndex').hidden = true; $('settingsPage').hidden = true; $('groupsPage').hidden = false;
   closeInspector(); $('selectionBar').hidden = true; $('resultCount').textContent = ''; $('hint').textContent = '点一下图片：不算在这组里 · 组头的按钮对整组生效，都可以撤销';
   const scroll = $('viewport').scrollTop, revision = ++groups.revision, nsfw = state.nsfw;
-  const {clusters, learner} = await api('/api/clusters?nsfw=' + state.nsfw).catch(() => ({clusters: [], learner: {}}));
+  let result; try { result = await api('/api/clusters?nsfw=' + state.nsfw); } catch (e) { if (state.route.page === 'groups' && revision === groups.revision && nsfw === state.nsfw) readFailure($('groupsPage'), e); return; }
+  const {clusters, learner} = result;
   if (state.route.page !== 'groups' || revision !== groups.revision || nsfw !== state.nsfw) return;
   // Groups that can be confirmed in one click come first (biggest first), then the ones still to be named.
   groups.list = [...clusters].sort((a, b) => !!b.lead - !!a.lead || b.size - a.size || a.cid - b.cid); groups.learner = learner;
@@ -2244,7 +2259,8 @@ async function renderSimilar() {
   $('grid').hidden = true; $('empty').hidden = true; $('charIndex').hidden = true; $('settingsPage').hidden = true; $('groupsPage').hidden = false;
   closeInspector(); $('selectionBar').hidden = true; $('resultCount').textContent = ''; $('hint').textContent = '点一组进去看';
   const kind = state.route.kind || '';
-  const {groups, state: s} = await api('/api/similar?' + new URLSearchParams({kind, nsfw: state.nsfw})).catch(() => ({groups: [], state: {status: 'error', message: '读取失败'}}));
+  let result; try { result = await api('/api/similar?' + new URLSearchParams({kind, nsfw: state.nsfw})); } catch (e) { if (state.route.page === 'similar' && kind === (state.route.kind || '')) readFailure($('groupsPage'), e); return; }
+  const {groups, state: s} = result;
   if (state.route.page !== 'similar') return;
   const busy = SIMILAR_ACTIVE.includes(s.status);
   $('groupsPage').innerHTML = `<div class="similar-status"><span class="local-dot${busy ? ' busy' : ''}"></span><span class="muted-note">${number(groups.length)} 组 · 共 ${number(groups.reduce((n, g) => n + g.size, 0))} 张${similarLine(s) ? ' · ' + esc(similarLine(s)) : ''}</span></div>
@@ -2302,7 +2318,7 @@ async function renderIdentity(more = false) {
   if (!more) { identity.items = []; identity.offset = 0; }
   let page;
   try { page = await api('/api/identity/queue?' + new URLSearchParams({limit: IDENTITY_PAGE, offset: identity.items.length, nsfw: state.nsfw})); }
-  catch (e) { $('groupsPage').innerHTML = `<p class="empty">${esc(e.message)}</p>`; return; }
+  catch (e) { $('groupsPage').innerHTML = `<p class="empty">${esc(readError(e))}</p>`; return; }
   if (state.route.page !== 'identity') return;
   identity.items.push(...page.items); identity.total = page.total; state.identityCount = page.total; navCount('countIdentity', page.total);
   $('resultCount').textContent = `${number(page.total)} 对待判断`;
@@ -2328,7 +2344,7 @@ async function decideIdentity(i, act) {
     card?.classList.add('leaving');
     await new Promise(done => setTimeout(done, 170));
     await renderIdentity();
-    refreshMeta().catch(() => {});
+    refreshMeta().catch(e => error(readError(e)));
   } catch (e) { toast(e.message); card?.classList.remove('working'); }
   finally { identity.busy.delete(i); }
 }
@@ -2373,7 +2389,7 @@ async function pollSync() {
     state.sync = s; state.syncHistory = history;
     if ((s.imported || 0) > lastImported || (SYNC_ACTIVE.includes(was) && !SYNC_ACTIVE.includes(s.status))) {
       state.countDirty = true; state.readEpoch++;
-      lastImported = s.imported || 0; await refreshMeta().catch(() => {});
+      lastImported = s.imported || 0; await refreshMeta().catch(e => error(readError(e)));
       if (!panelPage(state.route.page) && !selCount()) reload();
     }
     if (SYNC_ACTIVE.includes(was) && s.status === 'done' && s.imported) toast(`同步完成：新加入 ${number(s.imported)} 张`);
@@ -2393,8 +2409,9 @@ function indexLine(s, check) {
     error: '检查失败：' + (s.message || '')}[s.status] || (check ? `上次检查：${stamp(check.checked_at)} · 待添加 ${number(check.missing.length)} 个角色` : '尚未检查');
 }
 async function renderIndexCard(fresh = true) {
+  const route = state.route, token = state.token;
   if (!$('indexCard') || state.route.page !== 'settings') return;
-  if (fresh || !state.index) state.index = await settingsRequest('/api/index').catch(() => null);
+  if (fresh || !state.index) { try { const value = await settingsRequest('/api/index'); if (route !== state.route || token !== state.token) return; state.index = value; } catch (e) { if (route === state.route && token === state.token) readFailure($('indexCard'), e); return; } }
   const card = $('indexCard'), x = state.index; if (!x || !card) return;
   const s = x.state, active = INDEX_ACTIVE.includes(s.status), watched = x.watch.works.length;
   // Which works are watched is decided on each work in 资料库 · 作品; here only how the check runs.
@@ -2402,7 +2419,7 @@ async function renderIndexCard(fresh = true) {
     ${taskLink(indexLine(s, x.check), active ? 'busy' : s.status === 'error' ? 'warn' : s.status === 'off' ? 'off' : '')}
     <a class="setting-line set-link" href="#/characters/works"><span>关注的作品<small class="line-hint">在资料库的「作品」里逐部开关</small></span><span>${watched ? `${number(watched)} 部` : '还没有'} ›</span></a>
     <div class="setting-line"><span>只提示图片较多的角色<small class="line-hint">Danbooru 上图片少于这个数的角色不提示</small></span><span class="num-field"><input id="watchMin" type="number" min="20" max="5000" step="10" value="${x.watch.min_posts}"> 张</span></div>
-    ${startupSwitch('index_check', '启动时检查', '每周最多一次')}
+    <p class="settings-note">每次检查前确认联网，只允许本次运行。</p>
     ${x.history.length ? fold('indexHistory', `最近添加的角色（${number(x.history.reduce((n, h) => n + h.characters.length, 0))} 个）`, `<table class="settings-table">${x.history.flatMap(h => h.characters.map(c => `<tr><td>${esc(stamp(h.at))}</td>
       <td>${c.entity && c.status === 'added' ? `<a class="link" href="${charHash(c.entity.id)}">${esc(c.entity.name)}</a>` : esc(c.tag || c.short_tag)}</td>
       <td>${c.status === 'added' ? `匹配 ${number(c.entity?.count ?? c.claims)} 张` : c.status === 'dropped' ? '已移除' : `未添加：${esc(c.reason || '')}`}</td>
@@ -2418,7 +2435,7 @@ async function renderIndexCard(fresh = true) {
 // Work picker: works your library already has (instant, local names and aliases), then Danbooru
 // copyright tags for the typed text (only the text goes out). Picking one yields an exact tag.
 function wireWatchAdd(x, add) {
-  const input = $('watchAdd'), menu = $('watchMenu'), watched = new Set(x.watch.works);
+  const token = state.token, input = $('watchAdd'), menu = $('watchMenu'), watched = new Set(x.watch.works);
   let list = [], index = 0, gen = 0, localTimer = 0, remoteTimer = 0;
   const row = (r, i) => `<button class="picker-item watch-option${i === index ? ' on' : ''}" data-i="${i}" role="option" ${watched.has(r.id) || (r.id && !r.watchable) ? 'disabled' : ''}>
     <span class="watch-name">${esc(r.name || workName(r.tag))}</span><small>${esc(r.tag || 'D 站上还没有这个作品')}</small>
@@ -2432,15 +2449,15 @@ function wireWatchAdd(x, add) {
   const highlight = () => { for (const b of menu.querySelectorAll('[data-i]')) b.classList.toggle('on', Number(b.dataset.i) === index); menu.querySelector('.on')?.scrollIntoView({block: 'nearest'}); };
   const search = async () => {
     const q = input.value.trim(), g = ++gen;
-    const local = await api('/api/works?' + new URLSearchParams({q})).catch(() => []);
-    if (g !== gen) return;
+    let local; try { local = await api('/api/works?' + new URLSearchParams({q})); } catch (e) { if (g === gen && token === state.token && input === $('watchAdd')) render([], esc(readError(e))); return; }
+    if (g !== gen || token !== state.token || input !== $('watchAdd')) return;
     if (!q) { render([{label: '你的图库里还没关注的作品', items: local.filter(r => !watched.has(r.id)).slice(0, 10)}]); return; }
     const mine = local.slice(0, 8);
     render([{label: '你的图库里有', items: mine}], '正在查 Danbooru…（只发送你输入的文字）');
     clearTimeout(remoteTimer);
     remoteTimer = setTimeout(async () => {
       const result = await remoteNames('/api/works?' + new URLSearchParams({q, remote: 1})), remote = result.found;
-      if (g !== gen) return;
+      if (g !== gen || token !== state.token || input !== $('watchAdd')) return;
       const posts = new Map((remote || []).map(r => [r.tag, r.posts]));
       for (const r of mine) if (posts.has(r.tag)) r.posts = posts.get(r.tag);
       const known = new Set(mine.map(r => r.tag));
@@ -2478,7 +2495,7 @@ async function pollIndex() {
   } catch (e) { indexTimer = setTimeout(pollIndex, 10000); return; }
   const s = state.index.state;
   if (INDEX_ACTIVE.includes(was) && !INDEX_ACTIVE.includes(s.status)) {
-    if (s.status === 'done') { state.countDirty = true; state.readEpoch++; toast(s.kind === 'drop' ? `已移除，${number(s.changed)} 张图片已重新识别` : `已添加 ${number(s.added)} 个角色，${number(s.changed)} 张图片的识别结果已更新`); await refreshMeta().catch(() => {}); }
+    if (s.status === 'done') { state.countDirty = true; state.readEpoch++; toast(s.kind === 'drop' ? `已移除，${number(s.changed)} 张图片已重新识别` : `已添加 ${number(s.added)} 个角色，${number(s.changed)} 张图片的识别结果已更新`); await refreshMeta().catch(e => error(readError(e))); }
     else if (s.status === 'checked') toast(s.found ? `发现 ${number(s.found)} 个可添加的角色，在任务面板里添加` : '未发现新角色');
     else if (s.status === 'error') toast('角色索引更新失败：' + (s.message || ''));
   }
@@ -2494,8 +2511,9 @@ let namesTimer = 0;
 const NAMES_ACTIVE = ['fetching', 'matching', 'translating', 'running'];
 const namesLine = s => s.status === 'off' ? '当前未启用' : NAMES_ACTIVE.includes(s.status) ? `正在获取 ${s.total ? `${number(s.done || 0)} / ${number(s.total)}` : '…'}` : s.status === 'error' ? '获取失败，将在下次启动时重试' : '已是最新';
 async function renderNamesCard(fresh = true) {
+  const route = state.route, token = state.token;
   if (!$('namesCard') || state.route.page !== 'settings') return;
-  if (fresh || !state.names) state.names = await settingsRequest('/api/names').catch(() => null);
+  if (fresh || !state.names) { try { const value = await settingsRequest('/api/names'); if (route !== state.route || token !== state.token) return; state.names = value; } catch (e) { if (route === state.route && token === state.token) readFailure($('namesCard'), e); return; } }
   // The page may have been re-rendered while waiting: always work on the card that is on screen now.
   const card = $('namesCard'), x = state.names; if (!card) return; if (!x) { card.hidden = true; return; }
   card.hidden = false;
@@ -2568,12 +2586,13 @@ function settingsRequest(path) {
 }
 function loadSettingsData(refresh = false) {
   if (settingsLoading) return settingsLoading;
+  const token = state.token;
   const missing = [['settings', '/api/settings'], ['fold', '/api/fold'], ['index', '/api/index'], ['names', '/api/names']]
     .filter(([key]) => refresh || !state[key]);
   if (!missing.length) return;
   settingsLoading = Promise.all(missing.map(async ([key, path]) => {
-    try { const value = await settingsRequest(path); state[key] = key === 'fold' ? value.kinds : value; }
-    catch { /* Keep the card retryable on the next visit. */ }
+    try { const value = await settingsRequest(path); if (token !== state.token) return; state[key] = key === 'fold' ? value.kinds : value; }
+    catch (e) { if (token !== state.token) return; error(readError(e)); }
     if (state.route.page === 'settings') renderSettings(false);
   })).finally(() => { settingsLoading = null; });
   return settingsLoading;
@@ -2639,7 +2658,8 @@ const CREDITS = [
   ['Bangumi 番组计划', '', '角色中文名称', 'https://bgm.tv'],
   ['Pillow · NumPy · ONNX Runtime', '', '图像处理与模型推理', 'https://onnxruntime.ai']];
 async function renderAbout() {
-  if (!state.about) state.about = await settingsRequest('/api/about').catch(() => null);
+  const route = state.route, token = state.token;
+  if (!state.about) { try { const value = await settingsRequest('/api/about'); if (route !== state.route || token !== state.token) return; state.about = value; } catch (e) { if (route === state.route && token === state.token) readFailure($('setAbout'), e); return; } }
   const card = $('setAbout'), a = state.about; if (!card || !a) return;
   const version = `${a.version}${a.channel ? ' ' + a.channel : ''}`;
   const diag = [['应用', a.name], ['版本', version], ['构建', a.build || '—'], ['数据库架构', a.schema], [a.runtime ? '运行时' : 'Python', a.runtime || a.python], ['系统', a.platform],
@@ -2662,7 +2682,7 @@ function networkCard() {
   const row = (section, name, to, what, now) => `<tr><td><a class="link-button strong" href="#/settings/${section}">${name}</a></td><td>${to}</td><td>${what}</td><td>${now}</td></tr>`;
   return cardHead('会访问网络的功能', '图片本身和由图片算出的特征，任何时候都不会发出去。下面是全部会联网的功能和它们发送的内容。') +
     `<table class="settings-table net-table"><tr><th>功能</th><th>服务</th><th>发送的内容</th><th>现在</th></tr>
-      ${row('characters', '检查新角色', 'Danbooru', '关注作品的名称；添加角色时下载约 20 张公开参考图', up.index_check ? '启动时自动（每周最多一次）' : '手动')}
+      ${row('characters', '检查新角色', 'Danbooru', '关注作品的名称；添加角色时下载约 20 张公开参考图', '每次运行前确认')}
       ${row('characters', '角色名称', 'Bangumi、Danbooru', 'tag、作品名、日文名', net && !net.authorized ? names : up.names ? '启动时自动（只查新角色）' : '手动')}
       ${row('characters', '名称翻译', model?.configured ? esc(modelHost(model)) : '你配置的模型接口', 'tag、日文名、作品名', model?.configured ? '已配置' : '未配置，不使用')}
       ${row('artists', '找回画师', 'Danbooru（含 IQDB）', '像素哈希和 IQDB 签名（一串文本，不是图片）、画师名和账号', p?.auto_network ? '同步后自动，每次有流量上限' : '每次手动授权')}
@@ -3173,7 +3193,7 @@ async function taskTick() {
   clearTimeout(taskPanel.timer);
   const jobs = [pollSync(), pollIndex(), pollNames(), loadProvenance()];
   // The similar job's state comes with /api/settings, which also measures the caches: read it only when looked at.
-  if (taskPanel.open && Date.now() - taskPanel.settingsAt > (SIMILAR_ACTIVE.includes(state.settings?.tasks?.similar?.status) ? 2500 : 15000)) { taskPanel.settingsAt = Date.now(); jobs.push(settingsRequest('/api/settings').then(s => { state.settings = s; }).catch(() => {})); }
+  if (taskPanel.open && Date.now() - taskPanel.settingsAt > (SIMILAR_ACTIVE.includes(state.settings?.tasks?.similar?.status) ? 2500 : 15000)) { taskPanel.settingsAt = Date.now(); jobs.push(settingsRequest('/api/settings').then(s => { state.settings = s; }).catch(e => error(readError(e)))); }
   if (taskPanel.open && !state.libraries) jobs.push(loadLibraries());
   await Promise.allSettled(jobs);
   renderTasks();
@@ -3195,10 +3215,10 @@ $('taskPanel').addEventListener('click', async e => {
   b.disabled = true;
   try {
     if (act === 'sync') { await post('/api/sync', {}); state.sync = {status: 'scanning'}; }
-    else if (act === 'index') state.index = await post('/api/index', {action: 'check'});
+    else if (act === 'index') { if (!await checkIndex()) return; }
     else if (act === 'names') { state.names = {...state.names, ...await post('/api/names', {action: 'refresh'})}; toast('已开始重新获取角色名称'); }
     else if (act === 'similar') { await post('/api/similar', {}); state.settings = await api('/api/settings'); }
-  } catch (err) { toast(err.message); }
+  } catch (err) { toast(err.message); } finally { b.disabled = false; }
   taskTick();
 });
 document.addEventListener('click', e => { if (taskPanel.open && !e.target.closest('#taskPanel, dialog')) toggleTasks(false); });
@@ -3217,7 +3237,7 @@ async function renderArtistAudit() {
   $('hint').textContent = '点原帖或画师主页对照 · 看不出来就先留着 · 都可以撤销';
   const n = Number(prefs.get('artistAuditN', 50)) || 50, scroll = $('viewport').scrollTop;
   let d;
-  try { d = await api('/api/artist-audit?n=' + n); } catch (e) { $('groupsPage').innerHTML = `<p class="muted-note">${esc(e.message)}</p>`; return; }
+  try { d = await api('/api/artist-audit?n=' + n); } catch (e) { $('groupsPage').innerHTML = `<p class="muted-note">${esc(readError(e))}</p>`; return; }
   if (state.route.page !== 'artist-audit') return;
   const pairs = d.items.flatMap(it => it.artists.map(a => ({...a, method: auditMethod(a)})));
   const tally = list => { const yes = list.filter(a => a.confirmed).length, no = list.filter(a => a.rejected).length; return {yes, no, done: yes + no, all: list.length}; };
@@ -3295,7 +3315,7 @@ const findArtistWorks = (artist, name, after) => artistLookup({action: 'artist',
 function artistName(id) {
   if (!(id in artistNames)) {
     artistNames[id] = '…';
-    api('/api/artist?' + new URLSearchParams({id})).then(r => { artistNames[id] = r.name || '未知画师'; if (state.route.artist === id) renderHeading(); }).catch(() => {});
+    api('/api/artist?' + new URLSearchParams({id})).then(r => { artistNames[id] = r.name || '未知画师'; if (state.route.artist === id) renderHeading(); }).catch(e => error(readError(e)));
   }
   return artistNames[id];
 }

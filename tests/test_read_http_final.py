@@ -15,8 +15,7 @@ CORE = {
     'user-tags', 'general-tags', 'artists', 'artist', 'artist-audit', 'entities', 'works',
     'assets', 'assets/count', 'ids', 'detail', 'home', 'fold', 'review-pools',
     'characters', 'tagged', 'character/profile', 'character/activity', 'character/stats',
-    'identity/status', 'identity/relations', 'identity/count', 'identity/queue',
-    'identity/pairs', 'identity/assignments', 'bootstrap', 'prefs',
+    'identity/count', 'identity/queue', 'bootstrap',
 }
 
 
@@ -29,7 +28,7 @@ class FinalReadHTTPTest(HTTPHarness):
             env={**os.environ, 'ILLUSTASH_HTTP_STATE': str(self.state)},
             stdout=self.log, stderr=self.log,
         )
-        wait_until(lambda: verify.fetch(self.origin, {'url': '/api/prefs'}, self.origin)['status'] == 200)
+        wait_until(lambda: verify.fetch(self.origin, {'url': '/api/bootstrap'}, self.origin)['status'] == 200)
 
     def test_all_routes_same_corpus_without_python_upstream(self):
         requests = [r for r in verify.corpus(self.store.path, sample=1, query_limit=220)

@@ -92,14 +92,6 @@ class NativeHumanIdentityTest(unittest.TestCase):
         for _ in range(3): self.undo_latest()
         self.assertNotEqual(labels.snapshot(self.left.db)['backend_effects'], events)
 
-    def test_uncertain_selection_no_copy_expansion_and_restore(self):
-        self.pair('/api/identity/uncertain', {'ids':['a','a','c'],'options':[self.bob,self.alice]})
-        with self.store.connect() as c:
-            self.assertEqual([r[0] for r in c.execute('SELECT uuid FROM identity_uncertain ORDER BY uuid')], ['a','c'])
-        self.pair('/api/identity/uncertain', {'ids':['a'],'options':[self.third,self.alice], 'reason':'  未定  '})
-        self.undo_latest(); self.undo_latest()
-        self.pair('/api/identity/uncertain', {'ids':['c']*501,'options':[self.bob,self.alice], 'confirm':True}, expected=400)
-
     def test_hybrid_merge_is_relation_preserves_profiles_and_split_restores(self):
         before = labels.snapshot(self.left.db)
         self.pair('/api/merge', {'source':self.bob,'target':self.alice})
@@ -135,7 +127,6 @@ class NativeHumanIdentityTest(unittest.TestCase):
         self.pair('/api/merge', {'source':self.bob,'target':self.bob}, expected=400)
         self.pair('/api/merge', {'source':self.variant,'target':self.alice}, expected=400)
         self.pair('/api/identity/decision', {'a':self.alice,'b':self.bob,'kind':'duplicate_of','status':'accepted','reason':'x'}, expected=400)
-        self.pair('/api/identity/uncertain', {'ids':['c'],'options':[self.alice,self.bob]}, expected=400)
         self.pair('/api/identity/skip', {'a':self.bob,'b':self.alice}); self.undo_latest()
 
     def test_cross_type_recent_undo_and_error_validation(self):
@@ -144,10 +135,9 @@ class NativeHumanIdentityTest(unittest.TestCase):
         self.pair('/api/artist/verdict', {'ids':['b'],'artist':self.artist,'verdict':'yes'})
         self.pair('/api/curate', {'ids':['c'],'action':'exclude'})
         self.pair('/api/identity/skip', {'a':self.alice,'b':self.bob})
-        self.pair('/api/identity/uncertain', {'ids':['c'],'options':[self.alice,self.third]})
         self.pair('/api/merge', {'source':self.third,'target':self.alice})
         self.pair('/api/undo', {'id':first['id']},expected=400)
-        for _ in range(7): self.undo_latest()
+        for _ in range(6): self.undo_latest()
         for url, bodies in (
             ('/api/identity/skip', ({},{'a':'x','b':'x'},{'a':1,'b':'x'},{'a':'','b':'x'})),
             ('/api/identity/decision', ({},{'relation_id':True},{'relation_id':1.0},{'relation_id':'1'},
@@ -156,10 +146,7 @@ class NativeHumanIdentityTest(unittest.TestCase):
               {'a':self.alice,'b':self.bob,'kind':'bad','status':'accepted','reason':'x'},
               {'a':self.alice,'b':self.bob,'kind':'duplicate_of','status':None,'reason':'x'},
               {'a':self.alice,'b':self.bob,'kind':'duplicate_of','status':'accepted','reason':' '})),
-            ('/api/identity/uncertain', ({},{'ids':['c'],'options':[self.alice,self.alice]},{'ids':['c'],'options':[self.alice]*21},
-              {'ids':['c'],'options':[self.alice,2]}, {'ids':['missing'],'options':[self.alice,self.bob]},
-              {'ids':[],'options':[self.alice,self.bob]}, {'ids':['c'],'options':[self.alice,self.work]},
-              {'ids':['c'],'options':[self.alice,self.bob],'reason':None})),
+
             ('/api/merge', ({},{'source':self.alice,'target':self.alice},{'source':'missing','target':self.alice},
               {'source':self.work,'target':self.alice},{'source':[],'target':self.alice})),
         ):
@@ -169,7 +156,7 @@ class NativeHumanIdentityTest(unittest.TestCase):
     def test_transaction_faults_rollback(self):
         for table,url,body in (
             ('term_verdicts','/api/identity/decision',{'a':self.alice,'b':self.third,'kind':'duplicate_of','status':'accepted','reason':'x'}),
-            ('identity_uncertain','/api/identity/uncertain',{'ids':['c'],'options':[self.alice,self.bob]}),
+
             ('actions','/api/identity/skip',{'a':self.alice,'b':self.bob}),
             ('backend_effects','/api/merge',{'source':self.bob,'target':self.alice}),
         ):
@@ -183,7 +170,7 @@ class NativeHumanIdentityTest(unittest.TestCase):
     def test_postcommit_ack_failure_recovers_without_http(self):
         for url,body in (
             ('/api/identity/decision',{'a':self.alice,'b':self.third,'kind':'different_from','status':'accepted','reason':'x'}),
-            ('/api/identity/uncertain',{'ids':['c'],'options':[self.alice,self.bob]}),
+
             ('/api/merge',{'source':self.bob,'target':self.alice}),
         ):
             for lib in (self.left,self.right):
@@ -214,7 +201,7 @@ class NativeHumanIdentityTest(unittest.TestCase):
     def test_security_and_inflight_switch_isolation(self):
         commands = [('/api/identity/decision', {'a':self.alice,'b':self.bob,'kind':'different_from','status':'accepted','reason':'x'}),
                     ('/api/identity/skip',{'a':self.alice,'b':self.bob}),
-                    ('/api/identity/uncertain',{'ids':['c'],'options':[self.alice,self.bob]}),
+
                     ('/api/merge',{'source':self.bob,'target':self.alice})]
         for url,body in commands:
             self.pair(url,body,expected=403,headers={'X-CSRF-Token':'bad'})

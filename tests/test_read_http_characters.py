@@ -7,8 +7,8 @@ from tests import terms_names_fixture, terms_seed
 from tools import verify_read_http as verify
 
 CORE = {'characters', 'tagged', 'character/profile', 'character/activity', 'character/stats',
-        'identity/status', 'identity/relations', 'identity/count', 'identity/queue',
-        'identity/pairs', 'identity/assignments'}
+        'identity/count', 'identity/queue',
+        }
 
 class CharacterReadHTTPTest(HTTPHarness):
     def test_directory_and_identity_corpus(self):
@@ -21,8 +21,8 @@ class CharacterReadHTTPTest(HTTPHarness):
         self.assertTrue(json.loads(self.pair('/api/characters')['body']))
 
     def test_error_and_query_parameters(self):
-        for path, key in [('characters', 'min'), ('identity/relations', 'limit'),
-                          ('identity/queue', 'offset'), ('identity/pairs', 'limit')]:
+        for path, key in [('characters', 'min'),
+                          ('identity/queue', 'offset')]:
             for n in ['bad', '1.2', '-1', '0', '201', ' １_０ ', '\x1c2\x1f', '9'*100]:
                 self.pair('/api/' + path + '?' + urlencode({key:n}))
         for path in ['characters', 'tagged', 'character/activity', 'character/stats', 'identity/count', 'identity/queue']:
@@ -31,13 +31,12 @@ class CharacterReadHTTPTest(HTTPHarness):
             self.pair('/api/characters?' + query)
         self.pair('/api/character/profile?entity=no-such')
         self.pair('/api/characters?work=no-such')
-        self.pair('/api/identity/relations?status=bad')
 
-    def test_eager_errors_do_not_read_db_or_numpy_bank(self):
-        cases = ['/api/characters?min=-1', '/api/identity/relations?status=bad',
-                 '/api/identity/relations?limit=0', '/api/identity/queue?limit=0',
+    def test_eager_errors_do_not_read_db(self):
+        cases = ['/api/characters?min=-1',
+                  '/api/identity/queue?limit=0',
                  '/api/identity/queue?nsfw=bad', '/api/identity/count?nsfw=bad',
-                 '/api/identity/pairs?limit=0', '/api/character/stats',
+                  '/api/character/stats',
                  '/api/character/stats?id=a&nsfw=bad']
         original = self.store.path
         missing = self.root/'never-created.sqlite'
@@ -50,14 +49,7 @@ class CharacterReadHTTPTest(HTTPHarness):
         finally:
             self.store.path = original
             self.publish()
-        with self.store.connect() as c:
-            c.execute("INSERT OR REPLACE INTO meta VALUES ('identity_bank',?)", (str(self.root/'no-bank'),))
-        try:
-            self.assertEqual(self.pair('/api/identity/pairs?limit=0')['status'], 400)
-        finally:
-            with self.store.connect() as c:c.execute("DELETE FROM meta WHERE key='identity_bank'")
-
-    def test_nonempty_identity_payloads_first_hit_paging_and_bank_fallback(self):
+    def test_nonempty_identity_queue_first_hit_paging_and_detail(self):
         root = self.root/'r4-hybrid'; root.mkdir()
         replacement = terms_seed.base(root)
         replacement.activate_identity('hybrid')
@@ -77,7 +69,7 @@ class CharacterReadHTTPTest(HTTPHarness):
             c.execute("INSERT OR REPLACE INTO identity_pairs VALUES (?,?,0.20,0.11,'anchor_unverified','synthetic',?)",(b,a,'{}'))
         # Use supported core relation write so projections remain authoritative.
         self.store._core({'op':'propose','a':a,'b':b,'kind':'form_of','evidence':{'z':1,'nested':{'b':2,'a':1}},'source':'manual'})
-        for path in ['identity/pairs', 'identity/queue', 'identity/count', 'identity/relations', 'identity/status']:
+        for path in ['identity/queue', 'identity/count', 'detail?id=a']:
             self.pair('/api/' + path)
             for query in ['limit=1&offset=0', 'limit=1&offset=1', 'limit=1&offset=1000']:
                 self.pair('/api/' + path + '?' + query)
@@ -108,36 +100,23 @@ class CharacterReadHTTPTest(HTTPHarness):
         self.assertEqual(profile['user_name'], '合成用户名字')
         self.assertEqual(profile['aliases'], ['后插入','先排序'])
         for uuid in ('a','b','c'):
-            self.pair('/api/identity/assignments?id='+uuid)
+            self.pair('/api/detail?id='+uuid)
         action = self.store.skip_identity_pair(a,b)
         self.assertEqual(json.loads(self.pair('/api/identity/count')['body'])['total'],0)
         self.store.undo(action['id'])
         self.store.decide_identity(a=a,b=b,kind='different_from',status='accepted',reason='synthetic distinct',evidence={'z':1})
         self.store._core({'op':'propose','a':a,'b':b,'kind':'different_from','evidence':{'new':1},'source':'manual'})
-        self.pair('/api/identity/relations')
-        self.pair('/api/identity/status')
         self.pair('/api/identity/count')
         self.store.uncertain_identity(['a'],[a,b],reason='synthetic uncertainty')
-        response = json.loads(self.pair('/api/identity/assignments?id=a')['body'])
+        response = json.loads(self.pair('/api/detail?id=a')['body'])['identity']
         self.assertTrue(response['undetermined'])
-        with self.store.connect() as c:
-            c.execute("INSERT OR REPLACE INTO meta VALUES ('identity_bank',?)",(str(self.root/'missing-numpy-bank'),))
-        try:
-            self.pair('/api/identity/pairs', route='core')
-            # Eager int parsing still produces the exact Python error before loading the bank.
-            self.pair('/api/identity/pairs?limit=bad', route='core')
-        finally:
-            with self.store.connect() as c:
-                c.execute("DELETE FROM meta WHERE key='identity_bank'")
-                c.execute('DELETE FROM identity_pairs')
-
     def test_unset_policy_legacy_names_stable_ties_and_cover_reuse(self):
         other = self.root/'r4-legacy'; other.mkdir()
         replacement,_ = terms_names_fixture.build(other, legacy=True)
         original = self.server.store
         try:
             self.server.store = replacement; self.publish()
-            for path in ['characters', 'characters?summary=1', 'tagged', 'identity/status', 'identity/queue', 'identity/count', 'identity/assignments?id=a']:
+            for path in ['characters', 'characters?summary=1', 'tagged', 'identity/queue', 'identity/count', 'detail?id=a']:
                 self.pair('/api/' + path)
             with replacement.connect() as c:
                 ids=[r[0] for r in c.execute("SELECT id FROM entities WHERE kind='character' AND parent_id IS NULL AND merged_into IS NULL LIMIT 3")]
@@ -145,7 +124,7 @@ class CharacterReadHTTPTest(HTTPHarness):
                     c.execute("DELETE FROM names WHERE entity_id=?",(e,))
                     c.execute("INSERT INTO names(entity_id,lang,value,source,role,preferred,position) VALUES (?,'zh','平局','user','display',1,0)",(e,))
                 c.execute("DELETE FROM meta WHERE key='identity_policy'")
-            for path in ['characters', 'characters?summary=1', 'identity/status', 'identity/assignments?id=a']:
+            for path in ['characters', 'characters?summary=1', 'detail?id=a']:
                 self.pair('/api/' + path)
             for e in ids:
                 self.pair('/api/characters?' + urlencode({'id':e}))

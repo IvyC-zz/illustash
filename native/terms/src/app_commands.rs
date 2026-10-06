@@ -45,11 +45,7 @@ pub(crate) fn request_prepared(
     }?;
     if matches!(
         path,
-        "/api/undo"
-            | "/api/identity/decision"
-            | "/api/merge"
-            | "/api/character/profile"
-            | "/api/local-links"
+        "/api/undo" | "/api/identity/decision" | "/api/merge" | "/api/character/profile" | "/api/local-links"
     ) {
         crate::app_effects::drain(&context.db).map_err(|error| {
             eprintln!("人工操作已提交，verdict事件处理失败：{error}");

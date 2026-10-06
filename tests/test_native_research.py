@@ -117,7 +117,7 @@ Path(sys.argv[2]).write_text(json.dumps(v,allow_nan=False))
         self.assertEqual(actual['body'],json.dumps(expected,ensure_ascii=False).encode())
         self.assertEqual(self.request('/api/regroup',{})['body'],b'{"started": true}')
         self.finished()
-        for url in ['/api/identity/pairs','/api/assets/count','/api/identity/status']:
+        for url in ['/api/identity/queue','/api/assets/count','/api/identity/count']:
             self.pair(url)
         self.assertFalse(self.sentinel.exists())
 

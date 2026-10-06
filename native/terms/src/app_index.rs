@@ -388,6 +388,12 @@ impl Updater {
         match b["action"].as_str() {
             Some("watch") => set_watch(lib, &self.dir, &b)?,
             Some("check" | "apply" | "drop") => {
+                if b.get("allow_network").is_some_and(|v| !v.is_boolean()) {
+                    return bad("联网确认必须是布尔值");
+                }
+                if b["action"] == "check" && !self.network && b["allow_network"] != true {
+                    return bad("请先确认本次检查允许联网查询 Danbooru");
+                }
                 if b["action"] != "check" && busy {
                     return bad("正在与 Photos 同步，完成后再更新角色索引");
                 };
@@ -411,7 +417,7 @@ impl Updater {
                         return bad("上次索引任务尚待恢复，请先重试原任务");
                     }
                     self.next_retry = Instant::now() + Duration::from_secs(60);
-                    self.start(lib, json!({"action":"resume"}))?;
+                    self.start(lib, json!({"action":"resume", "allow_network":b["allow_network"]}))?;
                 } else {
                     self.next_retry = Instant::now() + Duration::from_secs(60);
                     self.start(lib, b)?;
@@ -432,7 +438,7 @@ impl Updater {
             }
             return;
         }
-        if !self.automatic || lib.frozen() {
+        if !self.automatic || !self.network || lib.frozen() {
             return;
         }
         let prefs = crate::app_settings::startup(lib)
@@ -489,8 +495,13 @@ impl Updater {
         self.task.take();
         let identity = TaskIdentity::new(lib, self.generation, &self.session)?;
         let lib = lib.pinned();
-        let (shared, dir, journal, state, network) =
-            (self.shared.clone(), self.dir.clone(), self.journal.clone(), self.state.clone(), self.network);
+        let (shared, dir, journal, state, network) = (
+            self.shared.clone(),
+            self.dir.clone(),
+            self.journal.clone(),
+            self.state.clone(),
+            self.network || b["allow_network"] == true,
+        );
         *state.lock().expect("index state mutex poisoned") = json!({"status":if action=="check"{"checking"}else if action=="drop"{"building"}else{"fetching"},"started_at":now()}).into();
         self.task = Some(Task::start(
             identity,

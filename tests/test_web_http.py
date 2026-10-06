@@ -109,9 +109,7 @@ class HTTPTest(unittest.TestCase):
 
     def test_identity_backend_without_review_ui(self):
         chars=self.store.characters();a,b=[r['id'] for r in chars[:2]]
-        self.assertEqual(self.request('/api/identity/status')[0],200)
-        self.assertTrue(json.loads(self.request('/api/identity/status')[1])['enabled'])
-        for endpoint in ('/api/identity/relations','/api/identity/pairs','/api/identity/assignments?id=a'):
+        for endpoint in ('/api/identity/count','/api/identity/queue','/api/detail?id=a'):
             self.assertEqual(self.request(endpoint)[0],200)
         body={'a':a,'b':b,'kind':'duplicate_of','status':'accepted','reason':'人工确认'}
         self.assertEqual(self.request('/api/identity/decision',body,{'X-CSRF-Token':'bad'})[0],403)
@@ -119,11 +117,10 @@ class HTTPTest(unittest.TestCase):
         self.assertEqual(status,200)
         action=json.loads(data)['undo']
         self.assertEqual(self.request('/api/undo',{'id':action['id']})[0],200)
-        self.assertEqual(self.request('/api/identity/uncertain',{'ids':['a'],'options':[a,b]})[0],200)
-        pending=json.loads(self.request('/api/identity/assignments?id=a')[1])
+        self.store.uncertain_identity(['a'],[a,b])
+        pending=json.loads(self.request('/api/detail?id=a')[1])['identity']
         self.assertEqual(pending['assignments'],[])
         self.assertTrue(pending['undetermined'])
-        self.assertEqual(self.request('/api/identity/pairs?limit=0')[0],400)
 
     def test_host_origin_and_csrf(self):
         self.assertEqual(self.request('/api/bootstrap',headers={'Host':'evil.example'})[0],403)
@@ -148,7 +145,7 @@ class HTTPTest(unittest.TestCase):
         self.assertEqual(json.loads(self.request('/api/assets?tag=blue_hair')[1])['total'],1)
         self.assertEqual(self.request('/api/review-pools')[0],200)
         alice=self.store.entities('Alice')[0]['id'];bob=self.store.entities('Bob')[0]['id']
-        status,body,_=self.request('/api/correct',{'id':'a','old':alice,'new':bob})
+        status,body,_=self.request('/api/reassign',{'ids':['a'],'old':alice,'new':bob})
         self.assertEqual(status,200)
         action=json.loads(body)['undo']
         self.assertEqual(self.store.detail('a')['assertions'][0]['status'],'rejected')
@@ -180,12 +177,8 @@ class HTTPTest(unittest.TestCase):
         self.assertEqual(self.request('/api/tasks')[0], 404)
         self.assertEqual([p['kind'] for p in json.loads(self.request('/api/review-pools')[1])], ['unmatched', 'skipped', 'duplicates', 'excluded', 'pending', 'recent', 'audit'])
 
-    def test_prefs_suggest_tags_and_character_lookup(self):
+    def test_suggest_tags_and_character_lookup(self):
         alice=self.store.entities('Alice')[0]['id'];bob=self.store.entities('Bob')[0]['id']
-        self.assertEqual(json.loads(self.request('/api/prefs')[1]),{'pins':[]})
-        self.assertEqual(json.loads(self.request('/api/prefs',{'pins':[alice,alice]})[1]),{'pins':[alice]})
-        self.assertEqual(self.request('/api/prefs',{'pins':['nope']})[0],400)
-        self.assertEqual(json.loads(self.request('/api/prefs')[1])['pins'],[alice])
         rows=json.loads(self.request('/api/characters?id='+bob)[1])
         self.assertEqual([r['id'] for r in rows],[bob])
         status,body,_=self.request('/api/suggest',{'ids':['a','b']})
@@ -294,7 +287,7 @@ class HTTPTest(unittest.TestCase):
         self.assertEqual(status,200)
         child=json.loads(body)['id']
         alice=self.store.entities('Alice')[0]['id']
-        self.assertEqual(self.request('/api/character-work', {'entity':alice,'work':child})[0],200)
+        self.assertEqual(self.request('/api/character/profile', {'entity':alice,'work':child})[0],200)
         self.assertEqual(json.loads(self.request('/api/assets?work='+parent)[1])['total'],2)
         self.assertEqual(len(json.loads(self.request('/api/characters?work='+parent)[1])),1)
         self.assertEqual(self.request('/api/works', {'action':'move','id':parent,'parent':child})[0],400)
