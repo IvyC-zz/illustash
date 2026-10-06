@@ -45,10 +45,16 @@ struct Host {
 }
 // Shared across synchronous pickers and background workers, including session rotations.
 static HOSTS: OnceLock<Mutex<HashMap<String, Arc<Mutex<Host>>>>> = OnceLock::new();
+/// The error of a name text query made without authorization; the front end keys on it.
+pub(crate) const UNAUTHORIZED: &str = "显示名联网尚未授权";
 pub(crate) struct Source {
     pub path: PathBuf,
     pub cancel: Arc<AtomicBool>,
+    /// Authorized for this process (`--names-network`, or index network for the index task).
     pub authorized: bool,
+    /// The library's lasting consent to name text queries, read at every request so that
+    /// revoking it stops the next request of a running task.
+    grant: Option<Arc<AtomicBool>>,
     pub force: bool,
     seen: HashSet<String>,
     pub db_base: String,
@@ -94,6 +100,7 @@ impl Source {
             path,
             cancel,
             authorized,
+            grant: None,
             force,
             seen: HashSet::new(),
             db_base: base("ILLUSTASH_COPYRIGHT_BASE", "https://danbooru.donmai.us")?,
@@ -117,14 +124,21 @@ impl Source {
         self.seen.insert(key);
         Ok(value)
     }
+    pub fn granted(mut self, grant: Arc<AtomicBool>) -> Self {
+        self.grant = Some(grant);
+        self
+    }
+    fn allowed(&self) -> bool {
+        self.authorized || self.grant.as_ref().is_some_and(|g| g.load(std::sync::atomic::Ordering::SeqCst))
+    }
     pub fn fetch(&self, address: &str, body: Option<&Value>, key: Option<&str>) -> Result<Value> {
         self.fetch_serialized(address, body, key).map(|(value, _)| value)
     }
     fn fetch_serialized(&self, address: &str, body: Option<&Value>, key: Option<&str>) -> Result<(Value, String)> {
         let u = url::Url::parse(address).map_err(|_| Error::Invalid("名称接口地址不正确".into()))?;
         let local = matches!(u.host_str(), Some("localhost" | "127.0.0.1" | "[::1]"));
-        if !self.authorized && !local {
-            return network("显示名联网尚未授权");
+        if !self.allowed() && !local {
+            return network(UNAUTHORIZED);
         }
         if u.scheme() != "https" && !(local && u.scheme() == "http") {
             return network("名称接口须使用 HTTPS");
@@ -587,6 +601,24 @@ pub(crate) fn character_values(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn remote_queries_need_this_run_or_the_library_consent_read_at_each_request() {
+        let path = std::env::temp_dir().join("illustash-names-consent-unit.sqlite");
+        let cancel = Arc::new(AtomicBool::new(false));
+        let refused = |source: &Source| match source.fetch("https://danbooru.donmai.us/tags.json", None, None) {
+            Err(Error::Network(m)) => m == UNAUTHORIZED,
+            _ => false,
+        };
+        assert!(refused(&Source::new(path.clone(), cancel.clone(), false, false).unwrap()));
+        let grant = Arc::new(AtomicBool::new(false));
+        let source = Source::new(path.clone(), cancel.clone(), false, false).unwrap().granted(grant.clone());
+        assert!(refused(&source));
+        grant.store(true, std::sync::atomic::Ordering::SeqCst);
+        assert!(source.allowed());
+        grant.store(false, std::sync::atomic::Ordering::SeqCst);
+        assert!(refused(&source), "revoking stops the next request");
+        assert!(Source::new(path, cancel, true, false).unwrap().allowed());
+    }
     #[test]
     fn wiki_chinese_uses_exact_codec_order_and_work_exclusions() {
         for (input, works, expected) in [

@@ -17,7 +17,7 @@
 
 ## 原生运行与恢复
 
-原生宿主直接提供 GET/POST `/api/names`、entities/works 的远程查询和 local-links 建议。启动按当前包的 names 偏好补拉，`--no-names` 禁止后台与显式刷新，仍可读取已有显示名及模型设置。`--names-network` 仅为本次进程授予文本查询联网；保存 key 和修改启动偏好不授予网络。模型 HTTP 401/403 等以本地安全错误报告，不回显服务响应、凭据或请求头。模型设置继续兼容旧 `deepseek_key`/`deepseek_model`，清除仅影响当前包。
+原生宿主直接提供 GET/POST `/api/names`、entities/works 的远程查询和 local-links 建议。启动按当前包的 names 偏好补拉，`--no-names` 禁止后台与显式刷新，仍可读取已有显示名及模型设置。名称文本查询（角色/作品远程搜索、后台补拉中文名、作品版权解析）的授权有两种来源（2026-10-06，#1）：`--names-network` 仅为本次进程授予；图库的持久授权由用户在界面上同意（`POST /api/names {"action":"network","allow":true|false}`），存在 `library.sqlite` 的 `prefs` 表 `names_network` 行（`{"granted_at":…}`），与启动偏好分开，撤销即删除该行。授权在每次请求时实时读取，撤销后运行中的任务下一次请求即被拒绝。`GET /api/names` 返回 `network:{authorized,this_run,granted_at}`。未授权的非本机请求报「显示名联网尚未授权」（HTTP 502），前端据此显示授权入口，其他失败显示具体原因。保存 key 和修改启动偏好不授予网络。模型 HTTP 401/403 等以本地安全错误报告，不回显服务响应、凭据或请求头。模型设置继续兼容旧 `deepseek_key`/`deepseek_model`，清除仅影响当前包。
 
 `backend_effects.kind=names:{"entity":...,"refresh":...}` 持久绑定事件所在包，entity=null 为全范围；单实体包含父角色、同族皮肤和作品。公共 Task 身份包含 canonical 包路径、generation、会话摘要及 task_id；切库先验证替代包，再取消并等待旧任务，退出同样等待。任务与同步选择器捕获原包路径及取消标记，迟到响应不能写入新包或返回新会话。底层 HTTP 每次 25 秒超时，取消期间等待在途 I/O 超时后收尾；等待节流/退避时每 20 ms 检查取消。
 

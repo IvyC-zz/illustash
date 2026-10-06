@@ -94,7 +94,7 @@ pub(super) fn handle(request: Request, host: &Host, received: u64) {
             if crate::http_read::query(request.url()).get("progress").is_some_and(|s| s == "1") {
                 Ok(Some((session.names.progress(), 200)))
             } else {
-                session.names.info(&session.library).map(|v| Some((v, 200)))
+                session.names.status(&session.library).map(|v| Some((v, 200)))
             }
         }
         "/api/sync" => session.syncer.status(&session.library).map(|p| Some((p, 200))),
