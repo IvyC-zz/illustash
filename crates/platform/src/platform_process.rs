@@ -25,7 +25,7 @@ pub fn parent_pid() -> std::io::Result<u32> {
 pub fn worker(
     command: &mut Command,
     mut check: impl FnMut() -> Result<()>,
-    mut observe: impl FnMut(),
+    mut observe: impl FnMut() -> Result<()>,
 ) -> Result<ExitStatus> {
     #[cfg(any(unix, windows))]
     {
@@ -40,7 +40,8 @@ pub fn worker(
         let mut group = windows_worker::ProcessJob::spawn(command)?;
         loop {
             check()?;
-            observe();
+            // An observer error stops the worker like cancellation: dropping the group kills it.
+            observe()?;
             #[cfg(unix)]
             let status = group.0.try_wait()?;
             #[cfg(windows)]

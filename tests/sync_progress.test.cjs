@@ -35,3 +35,14 @@ test('import is counted apart from recognition', () => {
   assert.equal(context.syncLine({status: 'importing'}), '正在导入…');
   assert.equal(context.syncBar({status: 'importing'}, bar), '');
 });
+
+test('an interrupted run says why it stopped', () => {
+  assert.equal(context.syncLine({status: 'interrupted', message: '任务超时：10 分钟没有进展'}),
+    '同步已中断（任务超时：10 分钟没有进展），可重新扫描');
+  assert.equal(context.syncLine({status: 'interrupted'}), '同步已中断，可重新扫描');
+});
+
+test('batches imported during recognition are counted while it runs', () => {
+  assert.equal(context.syncLine({status: 'recognising', stage: 'recognising', total: 60, done: 51, import_done: 50}),
+    '正在识别新图片 51/60 · 已导入 50');
+});

@@ -134,48 +134,41 @@ impl Syncer {
         let (library, state) = (library.pinned(), self.state.clone());
         let root = self.resource_root.clone();
         let per_run = self.per_run;
-        self.task = Some(crate::app_tasks::Task::start(
-            identity,
-            Some(std::time::Duration::from_millis(
-                std::env::var("ILLUSTASH_RECOGNITION_TIMEOUT_MS")
-                    .ok()
-                    .and_then(|v| v.parse::<u64>().ok())
-                    .filter(|v| *v > 0)
-                    .unwrap_or(600_000),
-            )),
-            move |ctx| {
-                let cancel = ctx.cancellation();
-                let result = run_with(&library, cancel, Some(&ctx), &root, per_run, &|fields| {
-                    if ctx.check().is_err() {
-                        return;
-                    }
-                    let apply = || -> Result<()> {
-                        let mut s = state.lock().expect("sync state mutex poisoned");
-                        s.merge(fields);
-                        Ok(())
-                    };
-                    let _ = apply();
-                });
-                match result {
-                    Ok(_) => Ok(()),
-                    Err(e) => {
-                        let mut s = state.lock().expect("sync state mutex poisoned");
-                        s.set(
-                            "status",
-                            (if cancel.load(Ordering::SeqCst) || crate::platform_process::stopping() {
-                                "interrupted"
-                            } else {
-                                "error"
-                            })
-                            .into(),
-                        );
-                        s.set("message", e.to_string().chars().take(300).collect::<String>().into());
-                        s.set("finished_at", now().into());
-                        Err(e)
-                    }
+        self.task = Some(crate::app_tasks::Task::start_with(identity, deadline(), move |ctx| {
+            let cancel = ctx.cancellation();
+            let result = run_with(&library, cancel, Some(&ctx), &root, per_run, &|fields| {
+                if ctx.check().is_err() {
+                    return;
                 }
-            },
-        ));
+                // Every state change comes from finished work (files checked, images recognised,
+                // batches imported), so the task keeps running for as long as it moves.
+                ctx.progressed();
+                let apply = || -> Result<()> {
+                    let mut s = state.lock().expect("sync state mutex poisoned");
+                    s.merge(fields);
+                    Ok(())
+                };
+                let _ = apply();
+            });
+            match result {
+                Ok(_) => Ok(()),
+                Err(e) => {
+                    let mut s = state.lock().expect("sync state mutex poisoned");
+                    s.set(
+                        "status",
+                        (if cancel.load(Ordering::SeqCst) || crate::platform_process::stopping() {
+                            "interrupted"
+                        } else {
+                            "error"
+                        })
+                        .into(),
+                    );
+                    s.set("message", stop_message(cancel, Some(&ctx), &e).into());
+                    s.set("finished_at", now().into());
+                    Err(e)
+                }
+            }
+        }));
         Ok(true)
     }
     pub fn configure_startup(&mut self, library: &Library, allowed: bool) -> Result<()> {
@@ -207,6 +200,25 @@ impl Drop for Syncer {
     fn drop(&mut self) {
         self.stop();
     }
+}
+/// Sync runs until it stops making progress, not for a fixed time from its start.
+/// ILLUSTASH_RECOGNITION_TIMEOUT_MS (default 10 minutes) is the longest stretch without any
+/// progress; ILLUSTASH_RECOGNITION_MAX_MS (default 24 hours) bounds the whole run.
+fn deadline() -> crate::app_tasks::Deadline {
+    let ms = |name: &str, default: u64| {
+        std::time::Duration::from_millis(
+            std::env::var(name).ok().and_then(|v| v.parse::<u64>().ok()).filter(|v| *v > 0).unwrap_or(default),
+        )
+    };
+    crate::app_tasks::Deadline {
+        idle: Some(ms("ILLUSTASH_RECOGNITION_TIMEOUT_MS", 600_000)),
+        limit: Some(ms("ILLUSTASH_RECOGNITION_MAX_MS", 86_400_000)),
+    }
+}
+/// A cancelled or timed-out run reports why it stopped, not the step it happened to interrupt.
+fn stop_message(cancel: &AtomicBool, ctx: Option<&crate::app_tasks::TaskContext>, e: &Error) -> String {
+    let stopped = if cancel.load(Ordering::SeqCst) { ctx.and_then(|c| c.stop_reason()) } else { None };
+    stopped.unwrap_or_else(|| e.to_string()).chars().take(300).collect()
 }
 fn now() -> String {
     chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string()
@@ -376,13 +388,13 @@ fn run_with(
         Ok((s, m, _)) => (*s, m.clone()),
         Err(e) => (
             if cancel.load(Ordering::SeqCst) || crate::platform_process::stopping() { "interrupted" } else { "error" },
-            e.to_string().chars().take(300).collect(),
+            stop_message(cancel, context, e),
         ),
     };
     c.execute("UPDATE sync_runs SET status=?,message=?,found=?,removed=?,imported=?,failed=?,finished_at=datetime('now','localtime') WHERE id=?",params![status,message,counts["found"].as_u64(),counts["removed"].as_u64(),counts["imported"].as_u64(),counts["failed"].as_u64(),run_id])?;
     if let Err(e) = &result {
         update(
-            json!({"found":counts["found"],"removed":counts["removed"],"imported":counts["imported"],"failed":counts["failed"],"message":e.to_string().chars().take(300).collect::<String>()}),
+            json!({"found":counts["found"],"removed":counts["removed"],"imported":counts["imported"],"failed":counts["failed"],"message":stop_message(cancel, context, e)}),
         );
     }
     if let Some(fields) = terminal.into_inner() {
@@ -681,10 +693,33 @@ fn recognise(
     command.env("ILLUSTASH_RECOGNITION_PROGRESS", &progress);
     let mut watch = ProgressWatch::new(&ctx.identity().task_id, readable.len());
     let unreadable = failed.len();
+    // Only the platform-accepted shipped native route mandates sidecars. The
+    // installed Python transition keeps its existing response contract. Explicit
+    // sidecar declarations remain fully validated on every platform below.
+    let native_adapter = crate::recognition_compute::production_adapter_enabled()
+        && std::path::Path::new(worker).file_stem().is_some_and(|name| name == "illustash-recognition");
+    let mut batches = Batches {
+        library,
+        require_claims: native_adapter,
+        ctx,
+        root,
+        folder: crate::app_paths::canonical(&folder)?,
+        expected: readable.iter().map(|r| r.id.clone()).collect(),
+        seen: HashSet::new(),
+        streamed: HashSet::new(),
+        inputs: None,
+        already_counted,
+        run_id,
+        import_done: 0,
+        scanned_at: None,
+    };
+    // Import each finished batch while the worker computes the next, so an interruption keeps
+    // every batch already imported; the next sync then recognises only what is left.
     let status = ctx.process_observed(&mut command, || {
         if let Some(fields) = watch.poll(&progress, unreadable) {
             update(fields);
         }
+        batches.stream(counts, update)
     })?;
     if !status.success() {
         return Err(Error::Invalid(format!("识别进程异常退出：{status}")));
@@ -697,46 +732,31 @@ fn recognise(
     if &reply.identity != ctx.identity() {
         return Err(Error::Conflict("任务结果已过期或重复".into()));
     }
-    // Only the platform-accepted shipped native route mandates sidecars. The
-    // installed Python transition keeps its existing response contract. Explicit
-    // sidecar declarations remain fully validated on every platform below.
-    let native_adapter = crate::recognition_compute::production_adapter_enabled()
-        && std::path::Path::new(worker).file_stem().is_some_and(|name| name == "illustash-recognition");
     if native_adapter && reply.character_claims.is_none() {
         return Err(Error::Invalid("原生识别响应缺少角色 sidecar 声明".into()));
     }
-    let expected = readable.iter().map(|r| r.id.clone()).collect::<HashSet<_>>();
-    let mut seen = HashSet::new();
-    let mut packages = Vec::new();
     if reply.character_claims.as_ref().is_some_and(|v| v.len() != reply.packages.len()) {
         return Err(Error::Invalid("识别角色 sidecar 数量与批次不匹配".into()));
     }
+    let mut packages = Vec::new();
+    let mut listed = HashSet::new();
     for (index, row) in reply.packages.iter().enumerate() {
         let path = crate::app_paths::canonical(row)?;
-        if !path.starts_with(crate::app_paths::canonical(&folder)?) {
+        if !path.starts_with(&batches.folder) {
             return Err(Error::Invalid("结果包必须位于本任务输出目录".into()));
         }
-        let manifest = path.join("manifest.json");
-        if fs::metadata(&manifest)?.len() > 4 * 1024 * 1024 {
-            return Err(Error::Invalid("结果清单过大".into()));
+        let ids = manifest_assets(&path)?;
+        if !listed.insert(path.clone()) {
+            return Err(Error::Conflict("结果超出本次识别范围或重复".into()));
         }
-        let m = fs::read(&manifest)?;
-        if m.len() > 4 * 1024 * 1024 {
-            return Err(Error::Invalid("结果清单过大".into()));
+        if batches.streamed.contains(&path) {
+            // Imported while the worker ran; its assets are already counted as seen.
+            continue;
         }
-        let m: protocol::RecognitionManifest = protocol::parse(
-            serde_json::from_slice(&m).map_err(|e| Error::Invalid(format!("{}: {e}", manifest.display())))?,
-            &manifest,
-        )?;
-        for id in &m.assets {
-            if !expected.contains(id) || !seen.insert(id.to_owned()) {
-                return Err(Error::Conflict("结果超出本次识别范围或重复".into()));
-            }
-        }
-        let ids = m.assets;
+        batches.claim(&ids)?;
         let claims = if let Some(paths) = &reply.character_claims {
             let path = crate::app_paths::canonical(&paths[index])?;
-            if !path.starts_with(crate::app_paths::canonical(&folder)?) {
+            if !path.starts_with(&batches.folder) {
                 return Err(Error::Invalid("角色 sidecar 必须位于本任务输出目录".into()));
             }
             Some(path)
@@ -745,89 +765,196 @@ fn recognise(
         };
         packages.push((path, ids, claims));
     }
+    if !batches.streamed.is_subset(&listed) {
+        return Err(Error::Invalid("识别响应缺少已完成的批次".into()));
+    }
     for u in &reply.failed {
         let id = &u.uuid;
-        if !expected.contains(id) || !seen.insert(id.to_owned()) {
+        if !batches.expected.contains(id) || !batches.seen.insert(id.to_owned()) {
             return Err(Error::Conflict("失败结果超出本次范围或重复".into()));
         }
         failed.insert(id.to_owned());
     }
-    if seen != expected {
+    if batches.seen != batches.expected {
         return Err(Error::Invalid("识别结果不完整".into()));
     }
     counts["failed"] = json!(failed.len());
     // Recognition is over: the reply's counts are final. Import has its own count, so the bar never
     // moves back from recognised to imported, and nothing recognised is shown as imported.
-    let import_total = packages.iter().map(|(_, ids, _)| ids.len()).sum::<usize>();
-    let mut import_done = 0;
+    let import_total = batches.import_done + packages.iter().map(|(_, ids, _)| ids.len()).sum::<usize>();
     update(json!({"status":"importing","stage":"verifying","done":total,"total":total,"failed":failed.len(),
-        "import_done":0,"import_total":import_total}));
-    // Full all-package computation preflight is cancellable and happens before
-    // acquiring the receipt lock. One task snapshot/index is reused by every batch.
-    let inputs = if packages.iter().any(|(_, _, c)| c.is_some()) {
-        Some(crate::app_recognition::WorkerInputs::load(library, ctx.identity(), root, ctx.cancellation())?)
-    } else {
-        None
-    };
-    let mut prepared = Vec::new();
+        "import_done":batches.import_done,"import_total":import_total}));
+    // The batches not yet imported: each is checked and imported on its own, as a streamed one.
     for (package, ids, claims) in packages {
-        ctx.check()?;
-        let proof = if let Some(claims) = claims {
-            Some(crate::app_recognition::prepare_worker_package(
-                library,
-                &package,
-                &claims,
-                inputs.as_ref().expect("claims task snapshot"),
-                ctx.cancellation(),
-            )?)
-        } else {
-            None
-        };
-        prepared.push((package, ids, proof));
+        batches.import(&package, &ids, claims.as_deref(), counts, update)?;
     }
-    ctx.receive(&reply.identity, || {
-        for (package, ids, claims) in prepared {
-            ctx.check()?;
-            update(json!({"status":"importing","stage":"importing"}));
-            let imported = if let Some(claims) = claims {
-                crate::app_recognition::import_worker_package(
-                    library,
-                    &claims,
-                    inputs.as_ref().expect("claims task snapshot"),
-                    ctx.cancellation(),
-                    &crate::app_research::dispatch,
-                )?
-            } else {
-                crate::app_recognition::import_package(
-                    library,
-                    &package,
-                    root,
-                    ctx.cancellation(),
-                    &crate::app_research::dispatch,
-                )?
-            };
-            if imported["status"] != "done" {
-                return Err(Error::Invalid("识别导入待恢复".into()));
-            }
-            counts["imported"] = json!(
-                counts["imported"].as_u64().expect("internal sync counter must be unsigned")
-                    + ids.iter().filter(|u| !already_counted.contains(*u)).count() as u64
-            );
-            remember_labels(library, &ids, ctx.cancellation())?;
-            import_done += ids.len();
-            writer(&library.db())?.execute(
-                "UPDATE sync_runs SET imported=?,failed=? WHERE id=?",
-                params![counts["imported"].as_u64(), counts["failed"].as_u64(), run_id],
-            )?;
-            update(json!({"import_done":import_done,"imported":counts["imported"],"failed":counts["failed"]}));
-        }
-        Ok(())
-    })?;
-
     update(
         json!({"status":"recognising","done":total,"total":total,"imported":counts["imported"],"failed":counts["failed"]}),
     );
     Ok(())
+}
+
+/// The recognition batches of one task: which assets they cover and which are already imported.
+struct Batches<'a> {
+    library: &'a Library,
+    /// The native route must deliver character claims with every batch.
+    require_claims: bool,
+    ctx: &'a crate::app_tasks::TaskContext,
+    root: &'a std::path::Path,
+    folder: std::path::PathBuf,
+    expected: HashSet<String>,
+    seen: HashSet<String>,
+    /// Batches imported while the worker still ran.
+    streamed: HashSet<std::path::PathBuf>,
+    /// Models and anchor snapshot, loaded once, at the first batch that has character claims.
+    inputs: Option<crate::app_recognition::WorkerInputs>,
+    already_counted: &'a HashSet<String>,
+    run_id: i64,
+    import_done: usize,
+    scanned_at: Option<std::time::Instant>,
+}
+impl Batches<'_> {
+    /// Each asset belongs to this run and to exactly one batch.
+    fn claim(&mut self, ids: &[String]) -> Result<()> {
+        for id in ids {
+            if !self.expected.contains(id) || !self.seen.insert(id.to_owned()) {
+                return Err(Error::Conflict("结果超出本次识别范围或重复".into()));
+            }
+        }
+        Ok(())
+    }
+    /// Import the batches the worker has marked complete since the last look, at most every 500 ms.
+    fn stream(&mut self, counts: &mut Value, update: &dyn Fn(Value)) -> Result<()> {
+        let now = std::time::Instant::now();
+        if self.scanned_at.is_some_and(|t| now.duration_since(t) < std::time::Duration::from_millis(500)) {
+            return Ok(());
+        }
+        self.scanned_at = Some(now);
+        let mut ready = Vec::new();
+        for entry in std::fs::read_dir(&self.folder)? {
+            let path = entry?.path();
+            let dir = std::fs::symlink_metadata(&path).is_ok_and(|m| m.is_dir());
+            if dir && !self.streamed.contains(&path) && path.join("complete.json").is_file() {
+                ready.push(path);
+            }
+        }
+        ready.sort();
+        for batch in ready {
+            let (ids, claims) = self.complete(&batch)?;
+            self.claim(&ids)?;
+            self.streamed.insert(batch.clone());
+            self.import(&batch, &ids, claims.as_deref(), counts, update)?;
+        }
+        Ok(())
+    }
+    /// The assets and claims sidecar of a batch the worker has finished, checked against its
+    /// completion marker.
+    fn complete(&self, batch: &std::path::Path) -> Result<(Vec<String>, Option<std::path::PathBuf>)> {
+        let bad = || Error::Invalid("识别批次的完成标记不合法".into());
+        let marker = batch.join("complete.json");
+        if !std::fs::symlink_metadata(&marker)?.is_file() || std::fs::metadata(&marker)?.len() > 1024 * 1024 {
+            return Err(bad());
+        }
+        let v: Value = serde_json::from_slice(&std::fs::read(&marker)?).map_err(|_| bad())?;
+        let digest =
+            |path: std::path::PathBuf| -> Result<String> { Ok(crate::strict_json::sha256_hex(&std::fs::read(path)?)) };
+        let ids: Vec<String> = serde_json::from_value(v["assets"].clone()).map_err(|_| bad())?;
+        let sidecar = batch.join("character-claims.json");
+        let claims = match v["sidecar_sha256"].as_str() {
+            Some(expected) if digest(sidecar.clone())? == expected => Some(sidecar),
+            None if v["sidecar_sha256"].is_null() && !self.require_claims => None,
+            _ => return Err(bad()),
+        };
+        if v["format"] != "illustash-recognition-batch/1"
+            || v["task_id"].as_str() != Some(self.ctx.identity().task_id.as_str())
+            || v["manifest_sha256"].as_str() != Some(digest(batch.join("manifest.json"))?.as_str())
+            || ids.is_empty()
+            || manifest_assets(batch)? != ids
+        {
+            return Err(bad());
+        }
+        Ok((ids, claims))
+    }
+    /// Check and import one batch, in its own source transaction, under this task's receipt.
+    fn import(
+        &mut self,
+        package: &std::path::Path,
+        ids: &[String],
+        claims: Option<&std::path::Path>,
+        counts: &mut Value,
+        update: &dyn Fn(Value),
+    ) -> Result<()> {
+        let (library, ctx) = (self.library, self.ctx);
+        ctx.check()?;
+        let prepared = match claims {
+            Some(claims) => {
+                if self.inputs.is_none() {
+                    self.inputs = Some(crate::app_recognition::WorkerInputs::load(
+                        library,
+                        ctx.identity(),
+                        self.root,
+                        ctx.cancellation(),
+                    )?);
+                }
+                let inputs = self.inputs.as_ref().expect("claims task snapshot");
+                Some(crate::app_recognition::prepare_worker_package(
+                    library,
+                    package,
+                    claims,
+                    inputs,
+                    ctx.cancellation(),
+                )?)
+            }
+            None => None,
+        };
+        let imported = ctx.receive_part(ctx.identity(), || match &prepared {
+            Some(prepared) => crate::app_recognition::import_worker_package(
+                library,
+                prepared,
+                self.inputs.as_ref().expect("claims task snapshot"),
+                ctx.cancellation(),
+                &crate::app_research::dispatch,
+            ),
+            None => crate::app_recognition::import_package(
+                library,
+                package,
+                self.root,
+                ctx.cancellation(),
+                &crate::app_research::dispatch,
+            ),
+        })?;
+        if imported["status"] != "done" {
+            return Err(Error::Invalid("识别导入待恢复".into()));
+        }
+        counts["imported"] = json!(
+            counts["imported"].as_u64().expect("internal sync counter must be unsigned")
+                + ids.iter().filter(|u| !self.already_counted.contains(*u)).count() as u64
+        );
+        remember_labels(library, ids, ctx.cancellation())?;
+        self.import_done += ids.len();
+        writer(&library.db())?.execute(
+            "UPDATE sync_runs SET imported=?,failed=? WHERE id=?",
+            params![counts["imported"].as_u64(), counts["failed"].as_u64(), self.run_id],
+        )?;
+        update(json!({"import_done":self.import_done,"imported":counts["imported"],"failed":counts["failed"]}));
+        Ok(())
+    }
+}
+/// The asset list of a result package's manifest.
+fn manifest_assets(path: &std::path::Path) -> Result<Vec<String>> {
+    let manifest = path.join("manifest.json");
+    if std::fs::metadata(&manifest)?.len() > 4 * 1024 * 1024 {
+        return Err(Error::Invalid("结果清单过大".into()));
+    }
+    let m = std::fs::read(&manifest)?;
+    if m.len() > 4 * 1024 * 1024 {
+        return Err(Error::Invalid("结果清单过大".into()));
+    }
+    let m: protocol::RecognitionManifest = protocol::parse(
+        serde_json::from_slice(&m).map_err(|e| Error::Invalid(format!("{}: {e}", manifest.display())))?,
+        &manifest,
+    )?;
+    Ok(m.assets)
 }
 
 fn remember_labels(library: &Library, ids: &[String], cancel: &AtomicBool) -> Result<()> {

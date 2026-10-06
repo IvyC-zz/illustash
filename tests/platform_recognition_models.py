@@ -203,6 +203,12 @@ class RecognitionModelTest(unittest.TestCase):
             path = Path(batch); manifest = json.loads((path / 'manifest.json').read_text(encoding='utf-8'))
             self.assertEqual(manifest['assets'], [f'asset-{i}' for i in (range(24) if size == 24 else (25,))])
             claim = json.loads(Path(sidecar).read_text(encoding='utf-8'))
+            # The completion marker, written last, pins exactly the finished manifest and sidecar.
+            complete = json.loads((path / 'complete.json').read_text(encoding='utf-8'))
+            self.assertEqual(complete, dict(format='illustash-recognition-batch/1', task_id='synthetic',
+                                            assets=manifest['assets'],
+                                            manifest_sha256=hashlib.sha256((path / 'manifest.json').read_bytes()).hexdigest(),
+                                            sidecar_sha256=hashlib.sha256(Path(sidecar).read_bytes()).hexdigest()))
             self.assertEqual(claim['identity'], identity)
             self.assertEqual(claim['assets'], manifest['assets'])
             self.assertEqual(claim['models'], manifest['models'])

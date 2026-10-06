@@ -2322,12 +2322,13 @@ function syncLine(s) {
     if (s.stage === 'preparing') return `正在加载识别模型（共 ${number(s.total || 0)} 张）…`;
     const failed = s.failed ? ` · ${number(s.failed)} 张无法识别` : '';
     const left = s.ms_per_image && s.total > s.done ? ` · 约 ${Math.max(1, Math.round((s.total - s.done) * s.ms_per_image / 60000))} 分钟` : '';
-    return `正在识别新图片 ${number(s.done || 0)}/${number(s.total || 0)}${failed}${left}`;
+    const imported = s.import_done ? ` · 已导入 ${number(s.import_done)}` : '';
+    return `正在识别新图片 ${number(s.done || 0)}/${number(s.total || 0)}${failed}${imported}${left}`;
   }
   if (s.status === 'done') return `上次同步：${stamp(s.finished_at)}`;
   if (s.status === 'needs_windows') return '新增图片较多，需使用 Windows 批量识别';
   if (s.status === 'needs_recognition') return `有 ${number(s.total || 0)} 张图等待识别（识别服务未启动）`;
-  if (s.status === 'interrupted') return '同步已中断，可重新扫描';
+  if (s.status === 'interrupted') return s.message ? `同步已中断（${s.message}），可重新扫描` : '同步已中断，可重新扫描';
   if (s.status === 'error') return '同步失败';
   return '本地图库';
 }

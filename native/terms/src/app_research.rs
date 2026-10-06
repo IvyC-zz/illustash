@@ -389,9 +389,13 @@ impl Research {
         }
         Ok(rx)
     }
-    pub fn recover(&mut self, library: &Library) -> Result<()> {
+    /// Start pending learning/similarity work. Not while a sync runs: its batch imports leave
+    /// `imported` events that one run after the sync coalesces, instead of learning competing
+    /// with recognition for the CPU between batches.
+    pub fn recover(&mut self, library: &Library, sync_busy: bool) -> Result<()> {
         if !configured()
             || library.frozen()
+            || sync_busy
             || self.paused
             || self.task.as_ref().is_some_and(Task::running)
             || self.retry_at.is_some_and(|t| std::time::Instant::now() < t)
@@ -494,7 +498,7 @@ fn run(
     let mut last = std::time::Instant::now();
     let status = ctx.process_observed(&mut cmd, || {
         if last.elapsed() < Duration::from_millis(100) {
-            return;
+            return Ok(());
         }
         last = std::time::Instant::now();
         if fs::metadata(&progress).is_ok_and(|m| m.len() < 16384) {
@@ -511,6 +515,7 @@ fn run(
                 }
             }
         }
+        Ok(())
     })?;
     ctx.check()?;
     if !status.success() {

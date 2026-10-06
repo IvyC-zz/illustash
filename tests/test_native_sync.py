@@ -139,6 +139,29 @@ if mode=='progress':
     for _ in range(1000):
         if release.exists(): break
         time.sleep(.01)
+(Path(sys.argv[0]).parent/'last-request').write_text(json.dumps([a['id'] for a in r['assets']]))
+if mode in ('stream','stream-hang'):
+    # One complete batch per asset, each marked complete only after its files exist.
+    specs=SPECS
+    for i,a in enumerate(r['assets']):
+        if mode=='stream-hang' and i==2:
+            time.sleep(60)
+        dest=Path(r['output'])/f'batch-{i}';dest.mkdir()
+        (dest/'labels.jsonl').write_text(json.dumps(dict(asset=a['id'],dim='rating',value='general',confidence=.9)))
+        for model in ('wd','ccip'): np.save(dest/(model+'.npy'),np.ones((1,specs[model]['dimension']),dtype='<f4'))
+        m=dict(format='illustash-recognition/1',library_id=r['identity']['library_id'],assets=[a['id']],models=specs,files={f:dict(bytes=(dest/f).stat().st_size,sha256=hashlib.sha256((dest/f).read_bytes()).hexdigest()) for f in ('labels.jsonl','wd.npy','ccip.npy')})
+        (dest/'manifest.json').write_text(json.dumps(m))
+        (dest/'complete.json').write_text(json.dumps(dict(format='illustash-recognition-batch/1',task_id=r['identity']['task_id'],assets=[a['id']],manifest_sha256=hashlib.sha256((dest/'manifest.json').read_bytes()).hexdigest(),sidecar_sha256=None)))
+        time.sleep(.6)
+    Path(sys.argv[2]).write_text(json.dumps(dict(identity=r['identity'],packages=[str(Path(r['output'])/f'batch-{i}') for i in range(len(r['assets']))],failed=[])))
+    sys.exit(0)
+if mode=='slow':
+    # Steady progress, each step well inside the idle window, the whole run longer than it.
+    prog=Path(os.environ['ILLUSTASH_RECOGNITION_PROGRESS'])
+    for stage,processed in [('preparing',0)]+[('recognising',i) for i in range(len(r['assets'])+1)]:
+        tmp=prog.with_suffix('.tmp')
+        tmp.write_text(json.dumps(dict(format='illustash-recognition-progress/1',task_id=r['identity']['task_id'],stage=stage,total=len(r['assets']),processed=processed,failed=0)))
+        tmp.replace(prog);time.sleep(.4)
 p=Path(r['output'])/'result';p.mkdir()
 ids=[a['id'] for a in r['assets']]
 (p/'labels.jsonl').write_text('\n'.join(json.dumps(dict(asset=u,dim='rating',value='general',confidence=.9)) for u in ids))
@@ -230,10 +253,58 @@ Path(sys.argv[2]).write_text(json.dumps(dict(identity=r['identity'],packages=pac
         self.assertEqual((value['done'],value['total'],value['imported'],value['import_done'],value['import_total']),
                          (total,total,total,total,total))
 
+    def test_native_library_new_worker_deadline_follows_progress_and_reports_why(self):
+        for uuid in ('E','F'):
+            self.photo(uuid,'com.atebits.Tweetie2')
+            original=self.library/f'originals/{uuid}/{uuid}.png';original.parent.mkdir(parents=True);original.write_bytes(b'synthetic')
+        # The worker runs about 2 s, longer than the 0.8 s idle window, but never 0.8 s without progress.
+        self.env['ILLUSTASH_RECOGNITION_TIMEOUT_MS']='800'
+        self.worker('slow')
+        value=self.sync()
+        self.assertEqual(value['state']['status'],'done',value)
+        self.assertEqual(value['state']['done'],value['state']['total'])
+        # The same steady worker is stopped by the total limit, with that reason kept.
+        with sqlite3.connect(self.lib.source) as c: c.execute("DELETE FROM labels WHERE uuid IN ('E','F')")
+        self.env.update(ILLUSTASH_RECOGNITION_TIMEOUT_MS='60000',ILLUSTASH_RECOGNITION_MAX_MS='1000')
+        self.worker('slow')
+        value=self.sync()
+        self.assertEqual(value['state']['status'],'interrupted',value)
+        self.assertEqual(value['state']['message'],'任务超时：超过 1 秒上限')
+        self.assertEqual((value['history'][0]['status'],value['history'][0]['message']),('interrupted','任务超时：超过 1 秒上限'))
+        self.env.pop('ILLUSTASH_RECOGNITION_MAX_MS')
+
+    def test_native_library_new_finished_batches_survive_interruption(self):
+        for uuid in ('E','F'):
+            self.photo(uuid,'com.atebits.Tweetie2')
+            original=self.library/f'originals/{uuid}/{uuid}.png';original.parent.mkdir(parents=True);original.write_bytes(b'synthetic')
+        # Two batches finish, then the worker stalls past the idle window.
+        self.env['ILLUSTASH_RECOGNITION_TIMEOUT_MS']='2000'
+        self.worker('stream-hang')
+        value=self.sync()
+        self.assertEqual(value['state']['status'],'interrupted',value)
+        self.assertEqual(value['state']['message'],'任务超时：2 秒没有进展')
+        first=json.loads((self.root/'last-request').read_text())
+        self.assertEqual(len(first),3)
+        self.assertEqual((value['history'][0]['status'],value['history'][0]['imported']),('interrupted',2))
+        with sqlite3.connect(self.lib.source) as c:
+            self.assertEqual(sorted(u for u, in c.execute('SELECT asset FROM recognition_assets')),sorted(first[:2]))
+            self.assertEqual(c.execute("SELECT count(*) FROM recognition_imports WHERE status='done'").fetchone()[0],2)
+        # The next sync recognises only the asset left, and the run completes.
+        self.env.pop('ILLUSTASH_RECOGNITION_TIMEOUT_MS')
+        self.worker('stream')
+        value=self.sync()
+        self.assertEqual(value['state']['status'],'done',value)
+        self.assertEqual(json.loads((self.root/'last-request').read_text()),first[2:])
+        self.assertEqual((value['state']['imported'],value['state']['import_done'],value['state']['import_total']),(1,1,1))
+        with sqlite3.connect(self.lib.source) as c:
+            self.assertEqual(c.execute('SELECT count(*) FROM recognition_assets').fetchone()[0],3)
+
     def test_native_library_new_worker_timeout_and_switch_cancel(self):
         self.env['ILLUSTASH_RECOGNITION_TIMEOUT_MS']='200'
         self.worker('hang')
-        self.assertEqual(self.sync()['state']['status'],'interrupted')
+        value=self.sync()
+        self.assertEqual(value['state']['status'],'interrupted')
+        self.assertEqual(value['state']['message'],'任务超时：200 毫秒没有进展')
         self.env.pop('ILLUSTASH_RECOGNITION_TIMEOUT_MS')
         self.stop(self.process)
         self.process,self.log=self.start(self.lib.path)
