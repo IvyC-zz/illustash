@@ -23,21 +23,6 @@ pub(crate) fn request(c: &mut Connection, path: &str, body: &Json) -> Result<Jso
                 "status":argument(body,"status")?, "reason":argument(body,"reason")?,
                 "evidence":argument(body,"evidence")?})
         }
-        "/api/identity/uncertain" => {
-            let options = argument(body, "options")?;
-            let reason =
-                if body.get("reason").is_none() { json!("人工暂不判断") } else { argument(body, "reason")? };
-            // The old wrapper validates these before passing selection to the core.
-            let items = options.as_array().ok_or_else(|| Error::Invalid("未定状态需要 2–20 个不同身份候选".into()))?;
-            let unique: std::collections::HashSet<_> = items.iter().filter_map(Value::as_str).collect();
-            if !(2..=20).contains(&items.len()) || unique.len() != items.len() {
-                return Err(Error::Invalid("未定状态需要 2–20 个不同身份候选".into()));
-            }
-            if reason.as_str().is_none_or(|s| http_read::trim(s).is_empty()) {
-                return Err(Error::Invalid("请保存未定理由".into()));
-            }
-            json!({"op":"uncertain", "asked":argument(body,"ids")?, "options":options, "reason":reason})
-        }
         "/api/merge" => json!({"op":"merge", "source":argument(body,"source")?, "target":argument(body,"target")?}),
         _ => return Err(Error::Invalid("接口不存在".into())),
     };

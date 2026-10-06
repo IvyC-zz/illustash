@@ -5,7 +5,7 @@ use crate::{
     http_read::{display, rows, strings, VISIBLE},
     Error, Result,
 };
-use rusqlite::{Connection, OptionalExtension};
+use rusqlite::Connection;
 use std::collections::{HashMap, HashSet};
 
 pub(crate) fn rating(alias: &str, nsfw: &str) -> Result<String> {
@@ -123,20 +123,7 @@ pub(crate) fn action_label(c: &Connection, r: &Json) -> Result<String> {
     }
     Ok(label.into())
 }
-pub fn read(c: &Connection, context: &LibraryContext, path: &str, q: &HashMap<String, String>) -> Result<(Json, u16)> {
-    if path == "/api/prefs" {
-        let saved: Option<String> =
-            c.query_row("SELECT value FROM prefs WHERE key='pins'", [], |r| r.get(0)).optional()?;
-        let pins = saved.map(|v| parse_python(&v)).transpose()?.unwrap_or(Json::Array(Vec::new()));
-        let Json::Array(pins) = pins else { return Err(Error::Invalid("置顶列表应为列表".into())) };
-        let mut out = Vec::new();
-        let mut seen = HashSet::new();
-        for p in pins {
-            let id = crate::character_commands::resolve(c, p.text())?;
-            if seen.insert(id.clone())&&c.query_row("SELECT EXISTS(SELECT 1 FROM entities WHERE parent_id IS NULL AND kind<>'work' AND merged_into IS NULL AND id=?)",[&id],|r|r.get::<_,bool>(0))?{out.push(id.into());}
-        }
-        return Ok((Json::object([("pins", Json::Array(out))]), 200));
-    }
+pub fn read(c: &Connection, context: &LibraryContext, q: &HashMap<String, String>) -> Result<(Json, u16)> {
     let nsfw = q.get("nsfw").map(String::as_str).unwrap_or("");
     let rated = rating("a", nsfw)?;
     let visible = VISIBLE.replace("m.uuid", "a.uuid");

@@ -23,14 +23,9 @@ pub const CORE_ROUTES: &[&str] = &[
     "/api/character/profile",
     "/api/character/activity",
     "/api/character/stats",
-    "/api/identity/status",
-    "/api/identity/relations",
     "/api/identity/count",
     "/api/identity/queue",
-    "/api/identity/pairs",
-    "/api/identity/assignments",
     "/api/bootstrap",
-    "/api/prefs",
     "/api/user-tags",
     "/api/general-tags",
     "/api/artists",
@@ -481,7 +476,7 @@ pub fn read(context: &LibraryContext, url: &str) -> Result<Option<(Json, u16)>> 
             tx.execute("ATTACH DATABASE ? AS prov", [sqlite_uri(&prov)])?;
         }
     }
-    if characters || browse || local || matches!(path, "/api/bootstrap" | "/api/prefs") {
+    if characters || browse || local || path == "/api/bootstrap" {
         // Store.connect probes the names switch before yielding, even without a name renderer.
         flag(&tx, "terms_names")?;
         // Counts, IDs and raw identity/prefs reads do not render names. Keep their query path local.
@@ -507,7 +502,7 @@ pub fn read(context: &LibraryContext, url: &str) -> Result<Option<(Json, u16)>> 
         } else if browse {
             crate::http_browse::read(&tx, context, path, &q)
         } else {
-            crate::http_app::read(&tx, context, path, &q)
+            crate::http_app::read(&tx, context, &q)
         };
         return match result {
             Ok(v) => {
