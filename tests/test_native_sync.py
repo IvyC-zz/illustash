@@ -139,6 +139,13 @@ if mode=='progress':
     for _ in range(1000):
         if release.exists(): break
         time.sleep(.01)
+if mode=='slow':
+    # Steady progress, each step well inside the idle window, the whole run longer than it.
+    prog=Path(os.environ['ILLUSTASH_RECOGNITION_PROGRESS'])
+    for stage,processed in [('preparing',0)]+[('recognising',i) for i in range(len(r['assets'])+1)]:
+        tmp=prog.with_suffix('.tmp')
+        tmp.write_text(json.dumps(dict(format='illustash-recognition-progress/1',task_id=r['identity']['task_id'],stage=stage,total=len(r['assets']),processed=processed,failed=0)))
+        tmp.replace(prog);time.sleep(.4)
 p=Path(r['output'])/'result';p.mkdir()
 ids=[a['id'] for a in r['assets']]
 (p/'labels.jsonl').write_text('\n'.join(json.dumps(dict(asset=u,dim='rating',value='general',confidence=.9)) for u in ids))
@@ -230,10 +237,32 @@ Path(sys.argv[2]).write_text(json.dumps(dict(identity=r['identity'],packages=pac
         self.assertEqual((value['done'],value['total'],value['imported'],value['import_done'],value['import_total']),
                          (total,total,total,total,total))
 
+    def test_native_library_new_worker_deadline_follows_progress_and_reports_why(self):
+        for uuid in ('E','F'):
+            self.photo(uuid,'com.atebits.Tweetie2')
+            original=self.library/f'originals/{uuid}/{uuid}.png';original.parent.mkdir(parents=True);original.write_bytes(b'synthetic')
+        # The worker runs about 2 s, longer than the 0.8 s idle window, but never 0.8 s without progress.
+        self.env['ILLUSTASH_RECOGNITION_TIMEOUT_MS']='800'
+        self.worker('slow')
+        value=self.sync()
+        self.assertEqual(value['state']['status'],'done',value)
+        self.assertEqual(value['state']['done'],value['state']['total'])
+        # The same steady worker is stopped by the total limit, with that reason kept.
+        with sqlite3.connect(self.lib.source) as c: c.execute("DELETE FROM labels WHERE uuid IN ('E','F')")
+        self.env.update(ILLUSTASH_RECOGNITION_TIMEOUT_MS='60000',ILLUSTASH_RECOGNITION_MAX_MS='1000')
+        self.worker('slow')
+        value=self.sync()
+        self.assertEqual(value['state']['status'],'interrupted',value)
+        self.assertEqual(value['state']['message'],'任务超时：超过 1 秒上限')
+        self.assertEqual((value['history'][0]['status'],value['history'][0]['message']),('interrupted','任务超时：超过 1 秒上限'))
+        self.env.pop('ILLUSTASH_RECOGNITION_MAX_MS')
+
     def test_native_library_new_worker_timeout_and_switch_cancel(self):
         self.env['ILLUSTASH_RECOGNITION_TIMEOUT_MS']='200'
         self.worker('hang')
-        self.assertEqual(self.sync()['state']['status'],'interrupted')
+        value=self.sync()
+        self.assertEqual(value['state']['status'],'interrupted')
+        self.assertEqual(value['state']['message'],'任务超时：200 毫秒没有进展')
         self.env.pop('ILLUSTASH_RECOGNITION_TIMEOUT_MS')
         self.stop(self.process)
         self.process,self.log=self.start(self.lib.path)

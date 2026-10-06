@@ -4,7 +4,7 @@ use std::{
     path::{Path, PathBuf},
     process::{Command, ExitStatus},
     sync::{
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicU8, Ordering},
         Arc, Mutex,
     },
     thread::{self, JoinHandle},
@@ -46,11 +46,66 @@ struct Boundary {
     received: bool,
     closed: bool,
 }
+/// When a task runs out of time. `limit` is a fixed total from the start; `idle` is a window
+/// that restarts whenever the task reports progress, so steady work is never cut off.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Deadline {
+    pub idle: Option<Duration>,
+    pub limit: Option<Duration>,
+}
+impl Deadline {
+    pub fn fixed(limit: Option<Duration>) -> Self {
+        Self { idle: None, limit }
+    }
+}
+const RUNNING: u8 = 0;
+const IDLE: u8 = 1;
+const LIMIT: u8 = 2;
+struct Clock {
+    deadline: Deadline,
+    started: Instant,
+    progressed: Mutex<Instant>,
+    /// Why the task stopped by itself (IDLE/LIMIT), kept so cancellation and timeout stay apart.
+    expired: AtomicU8,
+}
+impl Clock {
+    fn reason(&self) -> u8 {
+        let now = Instant::now();
+        let reason = if self.deadline.limit.is_some_and(|d| now >= self.started + d) {
+            LIMIT
+        } else if self
+            .deadline
+            .idle
+            .is_some_and(|d| now >= *self.progressed.lock().unwrap_or_else(|e| e.into_inner()) + d)
+        {
+            IDLE
+        } else {
+            RUNNING
+        };
+        // The first expiry wins; later checks keep reporting it.
+        match self.expired.compare_exchange(RUNNING, reason, Ordering::SeqCst, Ordering::SeqCst) {
+            Ok(_) => reason,
+            Err(earlier) => earlier,
+        }
+    }
+}
+fn human(d: Duration) -> String {
+    let ms = d.as_millis();
+    if ms < 1000 {
+        format!("{ms} 毫秒")
+    } else if ms < 120_000 {
+        format!("{} 秒", ms / 1000)
+    } else if ms < 7_200_000 {
+        format!("{} 分钟", ms / 60_000)
+    } else {
+        format!("{} 小时", ms / 3_600_000)
+    }
+}
 #[derive(Clone)]
 pub struct TaskContext {
     identity: TaskIdentity,
     cancel: Arc<AtomicBool>,
-    deadline: Option<Instant>,
+    clock: Arc<Clock>,
     boundary: Arc<Mutex<Boundary>>,
 }
 impl TaskContext {
@@ -63,15 +118,43 @@ impl TaskContext {
     pub fn cancellation(&self) -> &AtomicBool {
         &self.cancel
     }
+    /// Why the task stopped by itself; a cancellation that came first is never relabelled a timeout.
+    fn expiry(&self) -> u8 {
+        if self.cancel.load(Ordering::SeqCst) {
+            self.clock.expired.load(Ordering::SeqCst)
+        } else {
+            self.clock.reason()
+        }
+    }
     pub fn check(&self) -> Result<()> {
-        if self.deadline.is_some_and(|d| Instant::now() >= d) {
+        match self.stop_reason() {
+            Some(reason) => Err(Error::Invalid(reason)),
+            None => Ok(()),
+        }
+    }
+    /// Why the task stopped, in words for the user: cancelled, or which deadline ran out.
+    pub fn stop_reason(&self) -> Option<String> {
+        let reason = self.expiry();
+        if reason != RUNNING {
             self.cancel.store(true, Ordering::SeqCst);
         }
-        if self.cancel.load(Ordering::SeqCst) {
-            Err(Error::Invalid("任务已取消或超时".into()))
-        } else {
-            Ok(())
+        if !self.cancel.load(Ordering::SeqCst) {
+            return None;
         }
+        let deadline = self.clock.deadline;
+        Some(match (reason, deadline.idle, deadline.limit) {
+            (IDLE, Some(idle), _) => format!("任务超时：{}没有进展", human(idle)),
+            (LIMIT, _, Some(limit)) => format!("任务超时：超过 {}上限", human(limit)),
+            _ => "任务已取消".into(),
+        })
+    }
+    /// The task stopped because its time ran out, not because it was cancelled.
+    pub fn timed_out(&self) -> bool {
+        self.expiry() != RUNNING
+    }
+    /// Real work happened: restart the idle window. No effect on the total limit.
+    pub fn progressed(&self) {
+        *self.clock.progressed.lock().unwrap_or_else(|e| e.into_inner()) = Instant::now();
     }
     pub fn cancel(&self) {
         self.cancel.store(true, Ordering::SeqCst);
@@ -86,7 +169,7 @@ impl TaskContext {
         if boundary.closed
             || boundary.received
             || self.cancel.load(Ordering::SeqCst)
-            || self.deadline.is_some_and(|d| Instant::now() >= d)
+            || self.clock.reason() != RUNNING
             || identity != &self.identity
         {
             return Err(Error::Conflict("任务结果已过期或重复".into()));
@@ -116,10 +199,23 @@ impl Task {
         timeout: Option<Duration>,
         work: impl FnOnce(TaskContext) -> Result<()> + Send + 'static,
     ) -> Self {
+        Self::start_with(identity, Deadline::fixed(timeout), work)
+    }
+    pub fn start_with(
+        identity: TaskIdentity,
+        deadline: Deadline,
+        work: impl FnOnce(TaskContext) -> Result<()> + Send + 'static,
+    ) -> Self {
+        let now = Instant::now();
         let context = TaskContext {
             identity,
             cancel: Arc::new(AtomicBool::new(false)),
-            deadline: timeout.map(|d| Instant::now() + d),
+            clock: Arc::new(Clock {
+                deadline,
+                started: now,
+                progressed: Mutex::new(now),
+                expired: AtomicU8::new(RUNNING),
+            }),
             boundary: Arc::new(Mutex::new(Boundary { received: false, closed: false })),
         };
         let outcome = Arc::new(Mutex::new(TaskOutcome::Running));
@@ -181,6 +277,61 @@ mod tests {
     use super::*;
     fn identity() -> TaskIdentity {
         TaskIdentity::at(&std::env::temp_dir(), "synthetic", 1, "session").unwrap()
+    }
+    /// Run `work` under `deadline` and return its error message and whether it timed out.
+    fn stopped(deadline: Deadline, work: impl FnOnce(&TaskContext) + Send + 'static) -> (String, bool) {
+        let result = Arc::new(Mutex::new(None));
+        let out = result.clone();
+        let mut task = Task::start_with(identity(), deadline, move |ctx| {
+            work(&ctx);
+            let error = loop {
+                if let Err(e) = ctx.check() {
+                    break e;
+                }
+                thread::sleep(Duration::from_millis(1));
+            };
+            *out.lock().unwrap() = Some((error.to_string(), ctx.timed_out()));
+            Err(error)
+        });
+        assert!(task.wait(Duration::from_secs(5)));
+        assert_eq!(task.outcome(), TaskOutcome::Cancelled);
+        let value = result.lock().unwrap().take().unwrap();
+        value
+    }
+    #[test]
+    fn idle_deadline_follows_progress_and_limit_bounds_the_whole_task() {
+        let idle = Deadline { idle: Some(Duration::from_millis(80)), limit: None };
+        // Steady progress keeps the task alive well past one idle window.
+        let started = Instant::now();
+        let (message, timed_out) = stopped(idle, move |ctx| {
+            while started.elapsed() < Duration::from_millis(400) {
+                ctx.progressed();
+                assert!(ctx.check().is_ok(), "progressing task stopped");
+                thread::sleep(Duration::from_millis(20));
+            }
+        });
+        // The last progress came at most one 20 ms step before 400 ms, so expiry is no earlier than 460 ms.
+        assert!(started.elapsed() >= Duration::from_millis(400 - 20 + 80));
+        assert_eq!((message.as_str(), timed_out), ("不合法：任务超时：80 毫秒没有进展", true));
+        let limit = Deadline { idle: Some(Duration::from_secs(60)), limit: Some(Duration::from_millis(150)) };
+        let (message, timed_out) = stopped(limit, |ctx| ctx.progressed());
+        assert_eq!((message.as_str(), timed_out), ("不合法：任务超时：超过 150 毫秒上限", true));
+        assert_eq!(super::human(Duration::from_secs(600)), "10 分钟");
+        assert_eq!(super::human(Duration::from_secs(86_400)), "24 小时");
+    }
+    #[test]
+    fn cancellation_is_never_reported_as_timeout() {
+        let mut task =
+            Task::start_with(identity(), Deadline { idle: Some(Duration::from_millis(30)), limit: None }, |ctx| loop {
+                ctx.check()?;
+                thread::sleep(Duration::from_millis(1));
+            });
+        let ctx = task.context();
+        task.stop();
+        thread::sleep(Duration::from_millis(60));
+        assert!(!ctx.timed_out());
+        assert_eq!(ctx.check().unwrap_err().to_string(), "不合法：任务已取消");
+        assert_eq!(task.outcome(), TaskOutcome::Cancelled);
     }
     #[test]
     fn exact_envelope_retry_duplicate_and_closed_receipts() {

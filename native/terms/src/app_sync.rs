@@ -134,48 +134,41 @@ impl Syncer {
         let (library, state) = (library.pinned(), self.state.clone());
         let root = self.resource_root.clone();
         let per_run = self.per_run;
-        self.task = Some(crate::app_tasks::Task::start(
-            identity,
-            Some(std::time::Duration::from_millis(
-                std::env::var("ILLUSTASH_RECOGNITION_TIMEOUT_MS")
-                    .ok()
-                    .and_then(|v| v.parse::<u64>().ok())
-                    .filter(|v| *v > 0)
-                    .unwrap_or(600_000),
-            )),
-            move |ctx| {
-                let cancel = ctx.cancellation();
-                let result = run_with(&library, cancel, Some(&ctx), &root, per_run, &|fields| {
-                    if ctx.check().is_err() {
-                        return;
-                    }
-                    let apply = || -> Result<()> {
-                        let mut s = state.lock().expect("sync state mutex poisoned");
-                        s.merge(fields);
-                        Ok(())
-                    };
-                    let _ = apply();
-                });
-                match result {
-                    Ok(_) => Ok(()),
-                    Err(e) => {
-                        let mut s = state.lock().expect("sync state mutex poisoned");
-                        s.set(
-                            "status",
-                            (if cancel.load(Ordering::SeqCst) || crate::platform_process::stopping() {
-                                "interrupted"
-                            } else {
-                                "error"
-                            })
-                            .into(),
-                        );
-                        s.set("message", e.to_string().chars().take(300).collect::<String>().into());
-                        s.set("finished_at", now().into());
-                        Err(e)
-                    }
+        self.task = Some(crate::app_tasks::Task::start_with(identity, deadline(), move |ctx| {
+            let cancel = ctx.cancellation();
+            let result = run_with(&library, cancel, Some(&ctx), &root, per_run, &|fields| {
+                if ctx.check().is_err() {
+                    return;
                 }
-            },
-        ));
+                // Every state change comes from finished work (files checked, images recognised,
+                // batches imported), so the task keeps running for as long as it moves.
+                ctx.progressed();
+                let apply = || -> Result<()> {
+                    let mut s = state.lock().expect("sync state mutex poisoned");
+                    s.merge(fields);
+                    Ok(())
+                };
+                let _ = apply();
+            });
+            match result {
+                Ok(_) => Ok(()),
+                Err(e) => {
+                    let mut s = state.lock().expect("sync state mutex poisoned");
+                    s.set(
+                        "status",
+                        (if cancel.load(Ordering::SeqCst) || crate::platform_process::stopping() {
+                            "interrupted"
+                        } else {
+                            "error"
+                        })
+                        .into(),
+                    );
+                    s.set("message", stop_message(cancel, Some(&ctx), &e).into());
+                    s.set("finished_at", now().into());
+                    Err(e)
+                }
+            }
+        }));
         Ok(true)
     }
     pub fn configure_startup(&mut self, library: &Library, allowed: bool) -> Result<()> {
@@ -207,6 +200,25 @@ impl Drop for Syncer {
     fn drop(&mut self) {
         self.stop();
     }
+}
+/// Sync runs until it stops making progress, not for a fixed time from its start.
+/// ILLUSTASH_RECOGNITION_TIMEOUT_MS (default 10 minutes) is the longest stretch without any
+/// progress; ILLUSTASH_RECOGNITION_MAX_MS (default 24 hours) bounds the whole run.
+fn deadline() -> crate::app_tasks::Deadline {
+    let ms = |name: &str, default: u64| {
+        std::time::Duration::from_millis(
+            std::env::var(name).ok().and_then(|v| v.parse::<u64>().ok()).filter(|v| *v > 0).unwrap_or(default),
+        )
+    };
+    crate::app_tasks::Deadline {
+        idle: Some(ms("ILLUSTASH_RECOGNITION_TIMEOUT_MS", 600_000)),
+        limit: Some(ms("ILLUSTASH_RECOGNITION_MAX_MS", 86_400_000)),
+    }
+}
+/// A cancelled or timed-out run reports why it stopped, not the step it happened to interrupt.
+fn stop_message(cancel: &AtomicBool, ctx: Option<&crate::app_tasks::TaskContext>, e: &Error) -> String {
+    let stopped = if cancel.load(Ordering::SeqCst) { ctx.and_then(|c| c.stop_reason()) } else { None };
+    stopped.unwrap_or_else(|| e.to_string()).chars().take(300).collect()
 }
 fn now() -> String {
     chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string()
@@ -376,13 +388,13 @@ fn run_with(
         Ok((s, m, _)) => (*s, m.clone()),
         Err(e) => (
             if cancel.load(Ordering::SeqCst) || crate::platform_process::stopping() { "interrupted" } else { "error" },
-            e.to_string().chars().take(300).collect(),
+            stop_message(cancel, context, e),
         ),
     };
     c.execute("UPDATE sync_runs SET status=?,message=?,found=?,removed=?,imported=?,failed=?,finished_at=datetime('now','localtime') WHERE id=?",params![status,message,counts["found"].as_u64(),counts["removed"].as_u64(),counts["imported"].as_u64(),counts["failed"].as_u64(),run_id])?;
     if let Err(e) = &result {
         update(
-            json!({"found":counts["found"],"removed":counts["removed"],"imported":counts["imported"],"failed":counts["failed"],"message":e.to_string().chars().take(300).collect::<String>()}),
+            json!({"found":counts["found"],"removed":counts["removed"],"imported":counts["imported"],"failed":counts["failed"],"message":stop_message(cancel, context, e)}),
         );
     }
     if let Some(fields) = terminal.into_inner() {
@@ -784,6 +796,8 @@ fn recognise(
             None
         };
         prepared.push((package, ids, proof));
+        // Each checked package is progress for the idle deadline.
+        update(json!({"status":"importing","stage":"verifying"}));
     }
     ctx.receive(&reply.identity, || {
         for (package, ids, claims) in prepared {
