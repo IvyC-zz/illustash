@@ -2307,12 +2307,22 @@ const bytes = n => n >= 1e9 ? (n / 1e9).toFixed(1) + ' GB' : n >= 1e6 ? (n / 1e6
 const stamp = t => (t || '').replace('T', ' ').slice(5, 16);
 // Unix seconds → local "MM-DD hh:mm".
 const localStamp = sec => { const d = new Date(sec * 1000), p = n => String(n).padStart(2, '0'); return `${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`; };
+const syncBar = (s, bar) => s.status === 'recognising' && s.stage !== 'preparing' ? bar(s.done, s.total)
+  : s.status === 'importing' && s.import_total ? bar(s.import_done, s.import_total) : '';
+// Recognition and import are counted apart: done/total are images recognised or given up on,
+// import_done/import_total the recognised ones written into the library.
 function syncLine(s) {
   if (s.status === 'scanning') return s.scan_total == null ? '正在检查来源…' : `正在检查文件 ${number(s.scanned || 0)}/${number(s.scan_total)}`;
-  if (s.status === 'importing') return '正在导入…';
+  if (s.status === 'importing') {
+    if (!s.import_total) return '正在导入…';
+    return s.stage === 'verifying' ? `正在校验识别结果（${number(s.import_total)} 张）…`
+      : `正在导入识别结果 ${number(s.import_done || 0)}/${number(s.import_total)}`;
+  }
   if (s.status === 'recognising') {
+    if (s.stage === 'preparing') return `正在加载识别模型（共 ${number(s.total || 0)} 张）…`;
+    const failed = s.failed ? ` · ${number(s.failed)} 张无法识别` : '';
     const left = s.ms_per_image && s.total > s.done ? ` · 约 ${Math.max(1, Math.round((s.total - s.done) * s.ms_per_image / 60000))} 分钟` : '';
-    return `正在识别新图片 ${number(s.done || 0)}/${number(s.total || 0)}${left}`;
+    return `正在识别新图片 ${number(s.done || 0)}/${number(s.total || 0)}${failed}${left}`;
   }
   if (s.status === 'done') return `上次同步：${stamp(s.finished_at)}`;
   if (s.status === 'needs_windows') return '新增图片较多，需使用 Windows 批量识别';
@@ -3069,7 +3079,7 @@ function taskList() {
   const bar = (done, total) => total ? `<div class="progress"><span style="width:${Math.min(100, Math.round((done || 0) / total * 100))}%"></span></div>` : '';
   const list = [
     {key: 'sync', name: folder ? '文件夹同步' : '照片同步', active: SYNC_ACTIVE.includes(s.status), line: s.status === 'off' ? '这次启动没有开同步' : syncLine(s),
-      warn: ['error', 'needs_windows', 'needs_recognition', 'interrupted'].includes(s.status), body: s.status === 'recognising' ? bar(s.done, s.total) : '',
+      warn: ['error', 'needs_windows', 'needs_recognition', 'interrupted'].includes(s.status), body: syncBar(s, bar),
       action: `<button class="quiet small" data-task="sync" ${SYNC_ACTIVE.includes(s.status) || s.status === 'off' ? 'disabled' : ''}>立即同步</button>`,
       log: state.syncHistory?.length ? ['同步记录', `<table class="settings-table"><tr><th>时间</th><th>新增</th><th>移除</th><th>导入</th><th>失败</th></tr>${state.syncHistory.slice(0, 8).map(r => `<tr><td>${esc(stamp(r.started_at))}</td><td>${number(r.found)}</td><td>${number(r.removed)}</td><td>${number(r.imported)}</td><td>${number(r.failed)}</td></tr>`).join('')}</table>`] : null},
     {key: 'index', name: '检查新角色', active: INDEX_ACTIVE.includes(ix.status), line: state.index ? indexLine(ix, state.index.check) : '…', warn: ix.status === 'error',

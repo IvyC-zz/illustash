@@ -184,6 +184,38 @@ pub fn write_batch(
     fs::write(path.join("manifest.json"),serde_json::to_vec(&json!({"format":"illustash-recognition/1","library_id":library,"assets":ids,"models":models,"files":files})).map_err(|e|invalid(e.to_string()))?)?;
     Ok(())
 }
+/// Progress for the waiting host, at the path the host passes in ILLUSTASH_RECOGNITION_PROGRESS.
+/// Counts are finished attempts of this task only (`failed` included in `processed`); nothing here
+/// means imported. Advisory: a write failure never fails recognition, and the host validates every
+/// value. Replaced by rename, so the host never reads a partial file.
+pub struct Progress {
+    path: Option<PathBuf>,
+    task_id: String,
+    total: usize,
+    processed: usize,
+    failed: usize,
+}
+impl Progress {
+    pub fn new(path: Option<PathBuf>, task_id: &str, total: usize) -> Self {
+        Self { path, task_id: task_id.to_owned(), total, processed: 0, failed: 0 }
+    }
+    fn from_env(task_id: &str, total: usize) -> Self {
+        Self::new(std::env::var_os("ILLUSTASH_RECOGNITION_PROGRESS").map(PathBuf::from), task_id, total)
+    }
+    pub fn finished(&mut self, ok: bool) {
+        self.processed += 1;
+        self.failed += usize::from(!ok);
+    }
+    pub fn write(&self, stage: &str) {
+        let Some(path) = &self.path else { return };
+        let value = json!({"format":"illustash-recognition-progress/1","task_id":self.task_id,"stage":stage,
+            "total":self.total,"processed":self.processed,"failed":self.failed});
+        let temporary = path.with_extension("tmp");
+        if fs::write(&temporary, value.to_string()).is_ok() {
+            let _ = fs::rename(&temporary, path);
+        }
+    }
+}
 /// Produce WD v1 batches and independently bound character-claim sidecars.
 pub fn run(request: Request, resources: &Path, models: &Path, runtime: &Path, shared: &Path) -> Result<Value> {
     if request.format != "illustash-sync/1" {
@@ -191,12 +223,15 @@ pub fn run(request: Request, resources: &Path, models: &Path, runtime: &Path, sh
     }
     let identity: crate::app_tasks::TaskIdentity =
         serde_json::from_value(request.identity.clone()).map_err(|e| invalid(format!("识别 identity: {e}")))?;
+    let mut progress = Progress::from_env(&identity.task_id, request.assets.len());
+    progress.write("preparing");
     #[cfg(target_os = "windows")]
     illustash_platform::platform_research_math::windows_backend_identity().map_err(invalid)?;
     let snapshot = super::anchor_snapshot::Snapshot::load(shared, &identity.package.join("source.sqlite"))?;
     let specs = model_specs(resources, models)?;
     let tags = Tags::load(&resources.join("tags/tags_v3.csv"))?;
     let mut sessions = ModelSessions::load(models, runtime)?;
+    progress.write("recognising");
     let mut packages = Vec::new();
     let mut sidecars = Vec::new();
     let mut failed = Vec::new();
@@ -211,6 +246,8 @@ pub fn run(request: Request, resources: &Path, models: &Path, runtime: &Path, sh
                 Ok(image) => image,
                 Err(_) => {
                     failed.push(json!({"uuid":asset.id}));
+                    progress.finished(false);
+                    progress.write("recognising");
                     continue;
                 }
             };
@@ -220,6 +257,8 @@ pub fn run(request: Request, resources: &Path, models: &Path, runtime: &Path, sh
             ids.push(asset.id.clone());
             wd.push(wd_row);
             ccip.push(ccip_row);
+            progress.finished(true);
+            progress.write("recognising");
         }
         if ids.is_empty() {
             continue;
@@ -307,6 +346,29 @@ mod tests {
         assert!(npy(&[vec![0.; 3]], 3).is_err());
         assert!(npy(&[vec![f32::INFINITY; 3]], 3).is_err());
         assert!(npy(&values, 2).is_err());
+    }
+    #[test]
+    fn progress_counts_attempts_and_replaces_the_whole_file() {
+        let root = std::env::temp_dir().join(format!("illustash-recognition-progress-{}", std::process::id()));
+        fs::create_dir_all(&root).unwrap();
+        let path = root.join("progress.json");
+        let mut progress = Progress::new(Some(path.clone()), "task", 3);
+        progress.write("preparing");
+        let read = || serde_json::from_slice::<Value>(&fs::read(&path).unwrap()).unwrap();
+        assert_eq!(read()["stage"], "preparing");
+        progress.finished(true);
+        progress.finished(false);
+        progress.write("recognising");
+        let value = read();
+        assert_eq!(
+            (value["task_id"].as_str(), value["total"].as_u64(), value["processed"].as_u64(), value["failed"].as_u64()),
+            (Some("task"), Some(3), Some(2), Some(1))
+        );
+        assert!(!root.join("progress.tmp").exists());
+        // Without a host path, and with an unwritable one, progress is silently skipped.
+        Progress::new(None, "task", 1).write("preparing");
+        Progress::new(Some(root.join("missing/progress.json")), "task", 1).write("preparing");
+        fs::remove_dir_all(root).unwrap();
     }
     #[test]
     fn unsupported_format_fails_before_model_or_output_access() {
