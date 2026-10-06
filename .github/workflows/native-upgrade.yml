@@ -1,0 +1,58 @@
+name: Historical library upgrade
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: native-upgrade-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  TERMS_V5_COMMIT: 5e7e7f7e585f1cf8a17a8703e900a0f8fe99edef
+  TERMS_V6_COMMIT: d9c49b42eed12c5cc810215be4acf70688617679
+
+jobs:
+  upgrade:
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    name: Historical library upgrade (macOS)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: native/terms
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install 'numpy>=1.26,<3' 'Pillow>=10,<13'
+      - run: cargo build --release --locked --manifest-path native/terms/Cargo.toml
+      - name: Historical producers
+        run: |
+          mkdir -p "$RUNNER_TEMP/history-bin"
+          for commit in "$TERMS_V5_COMMIT" "$TERMS_V6_COMMIT"; do
+            src="$RUNNER_TEMP/history-src/$commit"
+            mkdir -p "$src"
+            git archive "$commit" native/terms | tar -x -C "$src"
+            cargo build --release --locked --manifest-path "$src/native/terms/Cargo.toml"
+            cp "$src/native/terms/target/release/illustash-terms" "$RUNNER_TEMP/history-bin/terms-$commit"
+          done
+      - name: Entire upgrade class, no skipped acceptance
+        env:
+          ILLUSTASH_TERMS_BIN: ${{ github.workspace }}/native/terms/target/release/illustash-terms
+          ILLUSTASH_NATIVE_ROOT: ${{ github.workspace }}
+          ILLUSTASH_TERMS_V5_BIN: ${{ runner.temp }}/history-bin/terms-${{ env.TERMS_V5_COMMIT }}
+          ILLUSTASH_TERMS_V6_BIN: ${{ runner.temp }}/history-bin/terms-${{ env.TERMS_V6_COMMIT }}
+        run: |
+          python - <<'PY'
+          import unittest
+          suite = unittest.defaultTestLoader.loadTestsFromName('tests.test_native_library_upgrade')
+          result = unittest.TextTestRunner(verbosity=2).run(suite)
+          if not result.wasSuccessful() or result.skipped or result.testsRun == 0:
+              raise SystemExit(1)
+          PY

@@ -1,0 +1,10 @@
+{
+  "ed4f167a5330424524f45258e7ca2c8d7f03c0cba1f30ee4985553ac1f88ecf8": {
+    "version": "0.3.34.106.0",
+    "numpy": "2.5.3"
+  },
+  "860d95b1c38e637ce4509f5fa24fbf2a98ba8696f9f3d28bf184bee74ad9a325": {
+    "version": "0.3.30",
+    "numpy": "2.3.3"
+  }
+}

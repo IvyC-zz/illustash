@@ -1,0 +1,10 @@
+{
+  "bundle": {
+    "resources": {
+      "../packaging/desktop-resources/": "resources/",
+      "../packaging/desktop-compute/": "compute/"
+    },
+    "targets": ["app"],
+    "macOS": { "minimumSystemVersion": "14.0" }
+  }
+}

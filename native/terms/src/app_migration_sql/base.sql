@@ -1,0 +1,40 @@
+-- Existing Python migration SQL; keep rules unchanged.
+
+CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY,value TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS entities(id TEXT PRIMARY KEY,name TEXT NOT NULL,work TEXT NOT NULL DEFAULT '',external_key TEXT UNIQUE);
+CREATE TABLE IF NOT EXISTS assets(uuid TEXT PRIMARY KEY,filename TEXT,src_path TEXT,width INTEGER,height INTEGER,added_at TEXT,src_kind TEXT);
+CREATE INDEX IF NOT EXISTS assets_date ON assets(added_at DESC,uuid);
+CREATE TABLE IF NOT EXISTS candidates(uuid TEXT NOT NULL,entity TEXT NOT NULL,source TEXT NOT NULL,score REAL NOT NULL,PRIMARY KEY(uuid,entity,source));
+CREATE INDEX IF NOT EXISTS candidates_entity ON candidates(entity,uuid);
+CREATE TABLE IF NOT EXISTS general_hits(uuid TEXT NOT NULL,value TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS assertions(uuid TEXT NOT NULL,entity TEXT NOT NULL,status TEXT NOT NULL CHECK(status IN ('confirmed','rejected')),origin TEXT NOT NULL,PRIMARY KEY(uuid,entity));
+CREATE INDEX IF NOT EXISTS assertions_entity ON assertions(entity,status,uuid);
+CREATE TABLE IF NOT EXISTS deferred(uuid TEXT PRIMARY KEY);
+CREATE TABLE IF NOT EXISTS imported(uuid TEXT NOT NULL,value TEXT NOT NULL,PRIMARY KEY(uuid,value));
+CREATE TABLE IF NOT EXISTS asset_tags(uuid TEXT NOT NULL,tag TEXT NOT NULL,origin TEXT NOT NULL,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,PRIMARY KEY(uuid,tag));
+CREATE INDEX IF NOT EXISTS asset_tags_tag ON asset_tags(tag,uuid);
+CREATE TABLE IF NOT EXISTS asset_rating(uuid TEXT PRIMARY KEY,rating TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS actions(id INTEGER PRIMARY KEY AUTOINCREMENT,label TEXT NOT NULL,before_json TEXT NOT NULL,ts TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,undone INTEGER NOT NULL DEFAULT 0);
+CREATE TABLE IF NOT EXISTS image_sigs(uuid TEXT PRIMARY KEY,ratio REAL,grid BLOB,ok INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS relations(a TEXT NOT NULL,b TEXT NOT NULL,kind TEXT NOT NULL,changed REAL,note TEXT NOT NULL DEFAULT '',
+ checked_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,PRIMARY KEY(a,b));
+CREATE TABLE IF NOT EXISTS links(system TEXT NOT NULL,key TEXT NOT NULL,entity_id TEXT NOT NULL REFERENCES entities(id),
+ current INTEGER NOT NULL DEFAULT 1,source TEXT NOT NULL,added_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,PRIMARY KEY(system,key));
+CREATE INDEX IF NOT EXISTS links_entity ON links(entity_id,system);
+CREATE TABLE IF NOT EXISTS names(entity_id TEXT NOT NULL REFERENCES entities(id),lang TEXT NOT NULL DEFAULT '' CHECK(lang IN ('','zh','ja','en')),
+ value TEXT NOT NULL,source TEXT NOT NULL,role TEXT NOT NULL CHECK(role IN ('display','alias')),preferred INTEGER NOT NULL DEFAULT 0,
+ position INTEGER NOT NULL DEFAULT 0,PRIMARY KEY(entity_id,role,lang,source,value));
+CREATE INDEX IF NOT EXISTS names_value ON names(value COLLATE NOCASE);
+CREATE TABLE IF NOT EXISTS asked(uuid TEXT NOT NULL,entity TEXT NOT NULL,kind TEXT NOT NULL,
+ answer TEXT NOT NULL CHECK(answer IN ('yes','no','later')),action_id INTEGER,asked_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+ PRIMARY KEY(uuid,entity));
+CREATE INDEX IF NOT EXISTS asked_entity ON asked(entity,answer,asked_at);
+CREATE TABLE IF NOT EXISTS audit_sample(uuid TEXT PRIMARY KEY,entity TEXT NOT NULL,stratum TEXT NOT NULL,
+ solo INTEGER NOT NULL,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE IF NOT EXISTS display_names(
+ kind TEXT NOT NULL, key TEXT NOT NULL, lang TEXT NOT NULL, source TEXT NOT NULL, value TEXT NOT NULL,
+ PRIMARY KEY(kind,key,lang,source,value));
+CREATE TABLE IF NOT EXISTS name_aliases(kind TEXT NOT NULL,key TEXT NOT NULL,value TEXT NOT NULL,position INTEGER NOT NULL,PRIMARY KEY(kind,key,value));
+CREATE TABLE IF NOT EXISTS name_cache(key TEXT PRIMARY KEY,value TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS name_settings(key TEXT PRIMARY KEY,value TEXT NOT NULL);
+;

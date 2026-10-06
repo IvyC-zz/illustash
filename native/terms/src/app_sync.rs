@@ -1,0 +1,1006 @@
+//! 原生来源同步与可选识别 worker 编排。任务固定包实例，切库/退出取消并等待。
+#![cfg_attr(not(test), deny(clippy::unwrap_used))]
+use crate::{app_library::Library, Error, Result};
+use crate::{
+    task_state::{State, Status},
+    worker_protocol as protocol,
+};
+use rusqlite::{params, Connection, OpenFlags};
+use serde_json::{json, Value};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Mutex,
+    },
+};
+
+pub(crate) struct Syncer {
+    state: Arc<Mutex<State>>,
+    task: Option<crate::app_tasks::Task>,
+    pub resource_root: std::path::PathBuf,
+    pub per_run: usize,
+    pub enabled: bool,
+}
+impl Default for Syncer {
+    fn default() -> Self {
+        Self {
+            state: Arc::new(Mutex::new(State::from(json!({"status":"idle"})))),
+            task: None,
+            resource_root: std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../.."),
+            per_run: 0,
+            enabled: true,
+        }
+    }
+}
+impl Syncer {
+    pub fn running(&self) -> bool {
+        self.task.as_ref().is_some_and(crate::app_tasks::Task::running)
+    }
+    pub fn available(library: &Library) -> bool {
+        !library.frozen()
+            && library.config()["sources"].as_array().is_some_and(|s| {
+                !s.is_empty() && s.iter().all(|s| matches!(s["kind"].as_str(), Some("folder" | "photos")))
+            })
+    }
+    pub fn status(&self, library: &Library) -> Result<crate::http_json::Json> {
+        use crate::http_json::Json;
+        let c = crate::app_library::read_connection(&library.db())?;
+        let mut q = c.prepare("SELECT * FROM sync_runs ORDER BY id DESC LIMIT 8")?;
+        let names = q.column_names().iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        let history = q
+            .query_map([], |r| {
+                let mut row = Vec::new();
+                for (i, name) in names.iter().enumerate() {
+                    let v = match r.get_ref(i)? {
+                        rusqlite::types::ValueRef::Null => Value::Null,
+                        rusqlite::types::ValueRef::Integer(v) => v.into(),
+                        rusqlite::types::ValueRef::Real(v) => v.into(),
+                        rusqlite::types::ValueRef::Text(v) => String::from_utf8_lossy(v).into_owned().into(),
+                        _ => Value::Null,
+                    };
+                    let v: Json = if name == "sources" {
+                        match v {
+                            Value::String(s) if !s.is_empty() => {
+                                serde_json::from_str(&s).unwrap_or_else(|_| Json::from(Value::Null))
+                            }
+                            _ => Json::from(Value::Null),
+                        }
+                    } else {
+                        v.into()
+                    };
+                    row.push((name.clone(), v));
+                }
+                Ok(Json::Object(row))
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        let state = if self.enabled && Self::available(library) {
+            let mut state = self.state.lock().expect("sync state mutex poisoned").snapshot();
+            if let Some(task) = &self.task {
+                if let crate::app_tasks::TaskOutcome::Failed(message) = task.outcome() {
+                    state.set("status", "error".into());
+                    state.set("message", message.chars().take(300).collect::<String>().into());
+                }
+            }
+            Json::Object(
+                [
+                    "status",
+                    "started_at",
+                    "scanned",
+                    "scan_total",
+                    "found",
+                    "removed",
+                    "imported",
+                    "failed",
+                    "total",
+                    "done",
+                    "message",
+                    "finished_at",
+                    "last_error",
+                    "ms_per_image",
+                ]
+                .iter()
+                .filter_map(|k| state.get(k).map(|v| ((*k).to_string(), v.clone())))
+                .collect(),
+            )
+        } else {
+            Json::object([("status", "off".into())])
+        };
+        Ok(Json::object([("state", state), ("history", Json::Array(history))]))
+    }
+    pub fn start(&mut self, library: &Library, generation: u64, session: &str) -> Result<bool> {
+        if !self.enabled || !Self::available(library) {
+            return Err(Error::Invalid("本次启动关闭了同步（--no-sync）".into()));
+        }
+        if let Some(task) = self.task.as_mut() {
+            if task.running() {
+                if matches!(
+                    self.state.lock().expect("sync state mutex poisoned").status(),
+                    Status::Scanning | Status::Recognising | Status::Importing
+                ) {
+                    return Ok(false);
+                }
+                if !task.wait(std::time::Duration::from_secs(1)) {
+                    return Ok(false);
+                }
+            }
+        }
+        self.task.take();
+        let identity = crate::app_tasks::TaskIdentity::new(library, generation, session)?;
+        self.state = Arc::new(Mutex::new(State::from(json!({"status":"scanning","started_at":now()}))));
+        let (library, state) = (library.pinned(), self.state.clone());
+        let root = self.resource_root.clone();
+        let per_run = self.per_run;
+        self.task = Some(crate::app_tasks::Task::start(
+            identity,
+            Some(std::time::Duration::from_millis(
+                std::env::var("ILLUSTASH_RECOGNITION_TIMEOUT_MS")
+                    .ok()
+                    .and_then(|v| v.parse::<u64>().ok())
+                    .filter(|v| *v > 0)
+                    .unwrap_or(600_000),
+            )),
+            move |ctx| {
+                let cancel = ctx.cancellation();
+                let result = run_with(&library, cancel, Some(&ctx), &root, per_run, &|fields| {
+                    if ctx.check().is_err() {
+                        return;
+                    }
+                    let apply = || -> Result<()> {
+                        let mut s = state.lock().expect("sync state mutex poisoned");
+                        s.merge(fields);
+                        Ok(())
+                    };
+                    let _ = apply();
+                });
+                match result {
+                    Ok(_) => Ok(()),
+                    Err(e) => {
+                        let mut s = state.lock().expect("sync state mutex poisoned");
+                        s.set(
+                            "status",
+                            (if cancel.load(Ordering::SeqCst) || crate::platform_process::stopping() {
+                                "interrupted"
+                            } else {
+                                "error"
+                            })
+                            .into(),
+                        );
+                        s.set("message", e.to_string().chars().take(300).collect::<String>().into());
+                        s.set("finished_at", now().into());
+                        Err(e)
+                    }
+                }
+            },
+        ));
+        Ok(true)
+    }
+    pub fn configure_startup(&mut self, library: &Library, allowed: bool) -> Result<()> {
+        let prefs: Value = serde_json::from_str(&crate::app_settings::startup(library)?.dump())
+            .map_err(|e| Error::Invalid(e.to_string()))?;
+        self.enabled = allowed && prefs["sync"] != false;
+        Ok(())
+    }
+    pub fn automatic(&mut self, library: &Library, generation: u64, session: &str) -> Result<()> {
+        let prefs: Value = serde_json::from_str(&crate::app_settings::startup(library)?.dump())
+            .map_err(|e| Error::Invalid(e.to_string()))?;
+        if self.enabled && Self::available(library) && prefs["sync"] == true {
+            self.start(library, generation, session)?;
+        }
+        Ok(())
+    }
+    #[cfg(test)]
+    pub(crate) fn install_fixture_task(&mut self, task: crate::app_tasks::Task) {
+        assert!(self.task.is_none());
+        self.task = Some(task);
+    }
+    pub fn stop(&mut self) {
+        if let Some(mut task) = self.task.take() {
+            task.stop();
+        }
+    }
+}
+impl Drop for Syncer {
+    fn drop(&mut self) {
+        self.stop();
+    }
+}
+fn now() -> String {
+    chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string()
+}
+fn writer(path: &std::path::Path) -> Result<Connection> {
+    let c = crate::sqlite::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_WRITE)?;
+    crate::configure(&c)?;
+    c.busy_timeout(std::time::Duration::from_millis(250))?;
+    Ok(c)
+}
+/// 可供 M4 复用：文件盘点后本地刷新；imported 事件与应用变更同事务提交，保留 pending 给 M4 消费。
+pub(crate) fn run(library: &Library, cancel: &AtomicBool, update: &dyn Fn(Value)) -> Result<Value> {
+    run_with(library, cancel, None, &std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../.."), 0, update)
+}
+fn run_with(
+    library: &Library,
+    cancel: &AtomicBool,
+    context: Option<&crate::app_tasks::TaskContext>,
+    root: &std::path::Path,
+    per_run: usize,
+    update: &dyn Fn(Value),
+) -> Result<Value> {
+    if !Syncer::available(library) {
+        return Err(Error::Invalid("原生同步没有支持的来源".into()));
+    }
+    let terminal = std::cell::RefCell::new(None);
+    let publish = update;
+    let update = |fields: Value| {
+        if fields.get("finished_at").is_some() {
+            terminal.replace(Some(fields));
+        } else {
+            publish(fields);
+        }
+    };
+    let c = writer(&library.db())?;
+    c.execute(
+        "UPDATE sync_runs SET status='interrupted',finished_at=datetime('now','localtime') WHERE status='running'",
+        [],
+    )?;
+    c.execute("INSERT INTO sync_runs(status,started_at) VALUES ('running',datetime('now','localtime'))", [])?;
+    let run_id = c.last_insert_rowid();
+    drop(c);
+    let mut counts = json!({"found":0,"removed":0,"imported":0,"failed":0});
+    let result: Result<(&str, String, Value)> = (|| {
+        let recovery = crate::app_recognition::resume(library, cancel, &crate::app_research::dispatch)?;
+        if recovery["status"] != "done" {
+            return Err(Error::Invalid("识别导入恢复未完成".into()));
+        }
+        let mut sources: Vec<(String, Value)> = Vec::new();
+        let mut scanned = 0;
+        for source in library.config()["sources"].as_array().into_iter().flatten() {
+            let done_in_source = std::cell::Cell::new(0);
+            let progress = |done, total| {
+                done_in_source.set(done);
+                update(json!({"scanned":scanned+done,"scan_total":scanned+total}))
+            };
+            let (scan, order) = if source["kind"] == "folder" {
+                let scan = crate::app_folder::scan(source, &library.source(), &|| check(cancel), &progress)?;
+                let _ = scan.changed;
+                let order = scan.counts["sources"]
+                    .as_object()
+                    .expect("folder scan source counts must be an object")
+                    .keys()
+                    .cloned()
+                    .collect::<Vec<_>>();
+                (scan.counts, order)
+            } else {
+                crate::app_photos::scan_ordered(source, &library.source(), &|| check(cancel), &progress)?
+            };
+            scanned += done_in_source.get();
+            counts["found"] = json!(
+                counts["found"].as_u64().expect("internal sync counter must be unsigned")
+                    + scan["new"].as_u64().expect("internal sync counter must be unsigned")
+                    + scan["returned"].as_u64().expect("internal sync counter must be unsigned")
+            );
+            for sid in &order {
+                let entry = &scan["sources"][sid];
+                if let Some((_, old)) = sources.iter_mut().find(|(id, _)| id == sid) {
+                    for key in ["photos", "collected"] {
+                        old[key] = json!(
+                            old[key].as_u64().expect("internal sync counter must be unsigned")
+                                + entry[key].as_u64().expect("internal sync counter must be unsigned")
+                        );
+                    }
+                } else {
+                    sources.push((sid.clone(), entry.clone()));
+                }
+            }
+            // The persisted source hash, rather than this in-memory list, drives retry after app failure.
+        }
+        let c = writer(&library.db())?;
+        c.execute(
+            "UPDATE sync_runs SET found=?,sources=? WHERE id=?",
+            params![
+                counts["found"].as_u64(),
+                crate::http_json::Json::Object(
+                    sources
+                        .iter()
+                        .map(|(sid, v)| (
+                            sid.clone(),
+                            crate::http_json::Json::object([
+                                ("name", v["name"].clone().into()),
+                                ("photos", v["photos"].clone().into()),
+                                ("collected", v["collected"].clone().into())
+                            ])
+                        ))
+                        .collect()
+                )
+                .dump(),
+                run_id
+            ],
+        )?;
+        drop(c);
+        check(cancel)?;
+        update(json!({"status":"importing"}));
+        let (out, refreshed) = refresh(library, run_id, cancel)?;
+        counts["imported"] = out["added"].clone();
+        counts["removed"] = out["removed"].clone();
+        let pending = out["pending"].as_u64().expect("internal sync counter must be unsigned");
+        let prefs: Value = serde_json::from_str(&crate::app_settings::startup(library)?.dump())
+            .map_err(|e| Error::Invalid(e.to_string()))?;
+        let limit = prefs["local_limit"].as_u64().unwrap_or(3000);
+        if pending > 0 && pending <= limit {
+            if let Some(ctx) = context {
+                if let Some(worker) = std::env::var_os("ILLUSTASH_RECOGNITION_WORKER") {
+                    recognise(
+                        library,
+                        ctx,
+                        &worker,
+                        RecognitionRun { root, per_run, already_counted: &refreshed, run_id },
+                        &mut counts,
+                        &update,
+                    )?;
+                    let message = if counts["failed"].as_u64().unwrap_or(0) > 0 {
+                        format!("{} 张暂时读不到（可能还在 iCloud），下次同步重试", counts["failed"])
+                    } else {
+                        String::new()
+                    };
+                    update(
+                        json!({"status":"done","message":message,"finished_at":now(),"found":counts["found"],"removed":counts["removed"],"imported":counts["imported"],"failed":counts["failed"]}),
+                    );
+                    return Ok(("done", message, out));
+                }
+            }
+        }
+        let status = if pending > limit {
+            "needs_windows"
+        } else if pending > 0 {
+            "needs_recognition"
+        } else {
+            "done"
+        };
+        let message = if pending > limit {
+            format!("有 {pending} 张新图，超过本机处理上限 {limit}，请交给 Windows 识别后再同步")
+        } else if pending > 0 {
+            format!("有 {pending} 张图等待识别；本次启动没有识别 worker")
+        } else {
+            String::new()
+        };
+        update(
+            json!({"status":status,"total":pending,"done":0,"message":message,"finished_at":now(),"found":counts["found"],"removed":counts["removed"],"imported":counts["imported"],"failed":0}),
+        );
+        Ok((status, message, out))
+    })();
+    let c = writer(&library.db())?;
+    let (status, message) = match &result {
+        Ok((s, m, _)) => (*s, m.clone()),
+        Err(e) => (
+            if cancel.load(Ordering::SeqCst) || crate::platform_process::stopping() { "interrupted" } else { "error" },
+            e.to_string().chars().take(300).collect(),
+        ),
+    };
+    c.execute("UPDATE sync_runs SET status=?,message=?,found=?,removed=?,imported=?,failed=?,finished_at=datetime('now','localtime') WHERE id=?",params![status,message,counts["found"].as_u64(),counts["removed"].as_u64(),counts["imported"].as_u64(),counts["failed"].as_u64(),run_id])?;
+    if let Err(e) = &result {
+        update(
+            json!({"found":counts["found"],"removed":counts["removed"],"imported":counts["imported"],"failed":counts["failed"],"message":e.to_string().chars().take(300).collect::<String>()}),
+        );
+    }
+    if let Some(fields) = terminal.into_inner() {
+        publish(fields);
+    }
+    result.map(|(_, _, out)| out)
+}
+fn refresh(library: &Library, run_id: i64, cancel: &AtomicBool) -> Result<(Value, HashSet<String>)> {
+    let mut c = writer(&library.db())?;
+    let mut src = crate::app_library::read_connection(&library.source())?;
+    let src = src.transaction()?;
+    let live=crate::app_migrate_data::rows(&src,"SELECT uuid,filename,src_path,width,height,added_at,src_kind FROM assets WHERE in_scope=1 AND coalesce(trashed,0)=0")?;
+    let known =
+        crate::app_migrate_data::rows(&c, "SELECT uuid,filename,src_path,width,height,added_at,src_kind FROM assets")?;
+    let have = known
+        .iter()
+        .map(|r| r[0].as_str().expect("SQLite uuid column must be text").to_owned())
+        .collect::<HashSet<_>>();
+    let present =
+        live.iter().map(|r| r[0].as_str().expect("SQLite uuid column must be text").to_owned()).collect::<HashSet<_>>();
+    let removed = known
+        .iter()
+        .filter(|r| !present.contains(r[0].as_str().expect("SQLite uuid column must be text")))
+        .map(|r| r[0].clone())
+        .collect::<Vec<_>>();
+    // Source labels are authoritative for machine freshness. Existing content metadata is persisted in meta
+    // so an application failure after source commit is retried even when the next scan sees unchanged files.
+    let journal_path = library.source().with_extension("scan-pending.json");
+    let journal: serde_json::Map<String, Value> = if journal_path.exists() {
+        serde_json::from_str(&std::fs::read_to_string(&journal_path)?).map_err(|e| Error::Invalid(e.to_string()))?
+    } else {
+        serde_json::Map::new()
+    };
+    let mut changed = Vec::new();
+    let mut hashes = Vec::new();
+    let mut labels_changed = HashSet::new();
+    let metadata = c
+        .prepare("SELECT key,value FROM meta WHERE key LIKE 'folder_hash:%' OR key LIKE 'folder_labels:%'")?
+        .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?
+        .collect::<rusqlite::Result<HashMap<_, _>>>()?;
+    let source_hashes = src
+        .prepare("SELECT uuid,stable_hash FROM assets")?
+        .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, Option<String>>(1)?)))?
+        .collect::<rusqlite::Result<HashMap<_, _>>>()?;
+
+    for row in &live {
+        let u = row[0].as_str().expect("SQLite uuid column must be text");
+        let hash = source_hashes.get(u).cloned().unwrap_or(None);
+        let label_rows =
+            crate::app_migrate_data::rows_with(&src, "SELECT * FROM labels WHERE uuid=? ORDER BY dim,value,conf", [u])?;
+        let label_hash = crate::strict_json::sha256_hex(
+            serde_json::to_string(&label_rows).expect("SQLite rows contain serializable JSON").as_bytes(),
+        );
+        let label_key = format!("folder_labels:{u}");
+        let old_labels = metadata.get(&label_key);
+        if have.contains(u) && old_labels.map(String::as_str) != Some(label_hash.as_str()) && !label_rows.is_empty() {
+            labels_changed.insert(u.to_string());
+        }
+        hashes.push((label_key, label_hash));
+        let key = format!("folder_hash:{u}");
+        let old = metadata.get(&key);
+        if have.contains(u)
+            && ((old.is_some() && old.map(String::as_str) != hash.as_deref())
+                || (old.is_none() && journal.get(u).and_then(Value::as_str) == hash.as_deref()))
+        {
+            changed.push(u.to_owned());
+        }
+        if let Some(hash) = hash {
+            hashes.push((key, hash));
+        }
+    }
+    let pending:i64=src.query_row("SELECT count(*) FROM assets a WHERE in_scope=1 AND coalesce(trashed,0)=0 AND NOT EXISTS(SELECT 1 FROM labels l WHERE l.uuid=a.uuid AND l.dim='rating')",[],|r|r.get(0))?;
+    // Photos keeps the established ready-only application import. Folder inventory remains
+    // browsable before recognition, as delivered by M3; both sources share the same backlog.
+    let photos_pending=src.prepare("SELECT a.uuid FROM assets a WHERE EXISTS(SELECT 1 FROM asset_links l WHERE l.asset=a.uuid AND l.system='photos' AND l.source_id=a.source_id) AND NOT EXISTS(SELECT 1 FROM labels l WHERE l.uuid=a.uuid AND l.dim='rating')")?.query_map([],|r|r.get::<_,String>(0))?.collect::<rusqlite::Result<HashSet<_>>>()?;
+    let added = live
+        .iter()
+        .filter(|r| !photos_pending.contains(r[0].as_str().expect("SQLite uuid column must be text")))
+        .filter(|r| {
+            !have.contains(r[0].as_str().expect("SQLite uuid column must be text"))
+                || labels_changed.contains(r[0].as_str().expect("SQLite uuid column must be text"))
+                || changed.iter().any(|u| Some(u.as_str()) == r[0].as_str())
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    let uuids =
+        added.iter().map(|r| r[0].as_str().expect("SQLite uuid column must be text").to_owned()).collect::<Vec<_>>();
+    check(cancel)?;
+    // WD delivery uses the established native evidence-package path; source snapshot remains read-only.
+    crate::app_migrate::deliver_wd(&mut c, &library.source(), library.id(), Some(&uuids), true)?;
+    let list = serde_json::to_string(&uuids).expect("UUID strings are serializable");
+    let labels=crate::app_migrate_data::rows(&src,&format!("SELECT uuid,value,conf,dim FROM labels WHERE ((dim='character' AND conf>=0.35) OR dim='char_ext') AND uuid IN (SELECT value FROM json_each('{}'))",list.replace('\'',"''")))?;
+    let decisions = crate::app_migrate_data::rows(
+        &src,
+        &format!(
+            "SELECT uuid,value FROM decisions WHERE dim='character' AND uuid IN (SELECT value FROM json_each('{}'))",
+            list.replace('\'', "''")
+        ),
+    )?;
+    let realistic = crate::app_migrate_data::rows(
+        &src,
+        "SELECT uuid FROM labels WHERE dim='general' AND value='realistic' AND conf>=0.15",
+    )?
+    .iter()
+    .map(|r| r[0].clone())
+    .collect::<Vec<_>>();
+    let album = library.source().parent().expect("source database path must have a parent").join("album-char-map.json");
+    let album = if album.is_file() {
+        serde_json::from_str::<Value>(&std::fs::read_to_string(album)?).map_err(|e| Error::Invalid(e.to_string()))?
+            ["map"]
+            .clone()
+    } else {
+        json!({})
+    };
+    let tx = c.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+    crate::schema::begin_writing(&tx)?;
+    let mut stale_ids = Vec::new();
+    for u in &changed {
+        let ids=tx.prepare("SELECT e.id,e.asset_id FROM term_evidence e JOIN term_assets a ON a.id=e.asset_id JOIN terms t ON t.id=e.term_id WHERE a.namespace='library' AND a.key=? AND e.source='wd' AND t.kind IN ('topic','rating')")?.query_map([u],|r|Ok((r.get::<_,i64>(0)?,r.get::<_,i64>(1)?)))?.collect::<rusqlite::Result<Vec<_>>>()?;
+        for (id, asset) in ids {
+            tx.execute(
+                "INSERT OR REPLACE INTO meta VALUES (?,?)",
+                params![format!("folder_stale_wd:{id}"), asset.to_string()],
+            )?;
+            stale_ids.push(asset);
+        }
+    }
+    stale_ids.sort_unstable();
+    stale_ids.dedup();
+    crate::store::project(&tx, &stale_ids)?;
+    for r in &live {
+        tx.execute(
+            "UPDATE assets SET filename=?,src_path=? WHERE uuid=?",
+            params![r[1].as_str(), r[2].as_str(), r[0].as_str()],
+        )?;
+    }
+    let shape = known
+        .iter()
+        .filter(|r| !removed.contains(&r[0]) && !uuids.iter().any(|u| Some(u.as_str()) == r[0].as_str()))
+        .cloned()
+        .chain(added.iter().cloned())
+        .collect::<Vec<_>>();
+    let stamp = now();
+    let args = json!({"op":"import","rows":added,"removed":removed,"run_id":run_id,"new_ids":{},"wd_tags":crate::app_migrate_data::rows(&src,"SELECT char_id,wd_tag FROM characters")?,"labels":labels,"decisions":decisions,"album_map":album,"duplicates":crate::app_migrate_data::duplicates(&tx,&src,&shape)?,"realistic":realistic,"indexed":stamp});
+    let out = if !uuids.is_empty() || !removed.is_empty() {
+        let out = crate::character_commands::command(&tx, &args)?;
+        tx.execute("INSERT INTO backend_effects(kind) VALUES ('imported')", [])?;
+        out
+    } else {
+        json!({"added":0,"removed":0})
+    };
+    for (key, hash) in hashes {
+        tx.execute("INSERT INTO meta(key,value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value WHERE value<>excluded.value", params![key, hash])?;
+    }
+    check(cancel)?;
+    crate::schema::commit_writing(tx)?;
+    // App hash markers make retry idempotent even if removing the committed journal fails.
+    if journal_path.exists() {
+        std::fs::remove_file(&journal_path)?;
+    }
+    Ok((json!({"added":out["added"],"removed":out["removed"],"pending":pending}), uuids.into_iter().collect()))
+}
+struct RecognitionRun<'a> {
+    root: &'a std::path::Path,
+    per_run: usize,
+    already_counted: &'a HashSet<String>,
+    run_id: i64,
+}
+fn recognise(
+    library: &Library,
+    ctx: &crate::app_tasks::TaskContext,
+    worker: &std::ffi::OsStr,
+    options: RecognitionRun<'_>,
+    counts: &mut Value,
+    update: &dyn Fn(Value),
+) -> Result<()> {
+    use std::{fs, process::Command};
+    let RecognitionRun { root, per_run, already_counted, run_id } = options;
+    let c = crate::app_library::read_connection(&library.source())?;
+    let mut assets=crate::app_migrate_data::rows(&c,"SELECT uuid,src_path FROM assets a WHERE in_scope=1 AND coalesce(trashed,0)=0 AND NOT EXISTS(SELECT 1 FROM labels l WHERE l.uuid=a.uuid AND l.dim='rating') ORDER BY uuid")?;
+    if per_run > 0 {
+        assets.truncate(per_run);
+    }
+    let total = assets.len();
+    let mut readable = Vec::new();
+    let mut failed = HashSet::new();
+    for row in assets {
+        ctx.check()?;
+        let id = row[0].as_str().expect("SQLite uuid column must be text").to_owned();
+        if std::fs::File::open(row[1].as_str().unwrap_or("")).is_err() {
+            failed.insert(id);
+        } else {
+            readable.push(protocol::SyncAsset {
+                id,
+                path: row[1]
+                    .as_str()
+                    .ok_or_else(|| Error::Invalid("source.sqlite: assets.src_path 必须为字符串".into()))?
+                    .to_owned(),
+            });
+        }
+    }
+    update(json!({"status":"recognising","total":total,"done":failed.len(),"failed":failed.len()}));
+    counts["failed"] = json!(failed.len());
+    if readable.is_empty() {
+        return Ok(());
+    }
+    let folder = std::env::temp_dir().join(format!("illustash-sync-{}", ctx.identity().task_id));
+    crate::platform_filesystem::create_private_dir(&folder)?;
+    struct Cleanup(std::path::PathBuf);
+    impl Drop for Cleanup {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+    let _cleanup = Cleanup(folder.clone());
+    let request = folder.join("request.json");
+    let response = folder.join("response.json");
+    fs::write(
+        &request,
+        serde_json::to_vec(&protocol::value(&protocol::SyncRequest {
+            format: protocol::Format::Sync,
+            identity: ctx.identity(),
+            assets: &readable,
+            output: &folder,
+        })?)
+        .map_err(|e| Error::Invalid(e.to_string()))?,
+    )?;
+    let mut command = Command::new(worker);
+    command.arg(&request).arg(&response);
+    command.env("ILLUSTASH_ROOT", crate::app_paths::resolve(root)?);
+    command.env("ILLUSTASH_SHARED", crate::app_resources::shared_path(root)?);
+    let status = ctx.process(&mut command)?;
+    if !status.success() {
+        return Err(Error::Invalid(format!("识别进程异常退出：{status}")));
+    }
+    let metadata = fs::symlink_metadata(&response)?;
+    if !metadata.is_file() || metadata.len() > 4 * 1024 * 1024 {
+        return Err(Error::Invalid("识别响应不合法".into()));
+    }
+    let reply: protocol::SyncResponse = protocol::read(&response)?;
+    if &reply.identity != ctx.identity() {
+        return Err(Error::Conflict("任务结果已过期或重复".into()));
+    }
+    // Only the platform-accepted shipped native route mandates sidecars. The
+    // installed Python transition keeps its existing response contract. Explicit
+    // sidecar declarations remain fully validated on every platform below.
+    let native_adapter = crate::recognition_compute::production_adapter_enabled()
+        && std::path::Path::new(worker).file_stem().is_some_and(|name| name == "illustash-recognition");
+    if native_adapter && reply.character_claims.is_none() {
+        return Err(Error::Invalid("原生识别响应缺少角色 sidecar 声明".into()));
+    }
+    let expected = readable.iter().map(|r| r.id.clone()).collect::<HashSet<_>>();
+    let mut seen = HashSet::new();
+    let mut packages = Vec::new();
+    if reply.character_claims.as_ref().is_some_and(|v| v.len() != reply.packages.len()) {
+        return Err(Error::Invalid("识别角色 sidecar 数量与批次不匹配".into()));
+    }
+    for (index, row) in reply.packages.iter().enumerate() {
+        let path = crate::app_paths::canonical(row)?;
+        if !path.starts_with(crate::app_paths::canonical(&folder)?) {
+            return Err(Error::Invalid("结果包必须位于本任务输出目录".into()));
+        }
+        let manifest = path.join("manifest.json");
+        if fs::metadata(&manifest)?.len() > 4 * 1024 * 1024 {
+            return Err(Error::Invalid("结果清单过大".into()));
+        }
+        let m = fs::read(&manifest)?;
+        if m.len() > 4 * 1024 * 1024 {
+            return Err(Error::Invalid("结果清单过大".into()));
+        }
+        let m: protocol::RecognitionManifest = protocol::parse(
+            serde_json::from_slice(&m).map_err(|e| Error::Invalid(format!("{}: {e}", manifest.display())))?,
+            &manifest,
+        )?;
+        for id in &m.assets {
+            if !expected.contains(id) || !seen.insert(id.to_owned()) {
+                return Err(Error::Conflict("结果超出本次识别范围或重复".into()));
+            }
+        }
+        let ids = m.assets;
+        let claims = if let Some(paths) = &reply.character_claims {
+            let path = crate::app_paths::canonical(&paths[index])?;
+            if !path.starts_with(crate::app_paths::canonical(&folder)?) {
+                return Err(Error::Invalid("角色 sidecar 必须位于本任务输出目录".into()));
+            }
+            Some(path)
+        } else {
+            None
+        };
+        packages.push((path, ids, claims));
+    }
+    for u in &reply.failed {
+        let id = &u.uuid;
+        if !expected.contains(id) || !seen.insert(id.to_owned()) {
+            return Err(Error::Conflict("失败结果超出本次范围或重复".into()));
+        }
+        failed.insert(id.to_owned());
+    }
+    if seen != expected {
+        return Err(Error::Invalid("识别结果不完整".into()));
+    }
+    counts["failed"] = json!(failed.len());
+    let mut done = failed.len();
+    // Full all-package computation preflight is cancellable and happens before
+    // acquiring the receipt lock. One task snapshot/index is reused by every batch.
+    let inputs = if packages.iter().any(|(_, _, c)| c.is_some()) {
+        Some(crate::app_recognition::WorkerInputs::load(library, ctx.identity(), root, ctx.cancellation())?)
+    } else {
+        None
+    };
+    let mut prepared = Vec::new();
+    for (package, ids, claims) in packages {
+        ctx.check()?;
+        let proof = if let Some(claims) = claims {
+            Some(crate::app_recognition::prepare_worker_package(
+                library,
+                &package,
+                &claims,
+                inputs.as_ref().expect("claims task snapshot"),
+                ctx.cancellation(),
+            )?)
+        } else {
+            None
+        };
+        prepared.push((package, ids, proof));
+    }
+    ctx.receive(&reply.identity, || {
+        for (package, ids, claims) in prepared {
+            ctx.check()?;
+            update(json!({"status":"importing"}));
+            let imported = if let Some(claims) = claims {
+                crate::app_recognition::import_worker_package(
+                    library,
+                    &claims,
+                    inputs.as_ref().expect("claims task snapshot"),
+                    ctx.cancellation(),
+                    &crate::app_research::dispatch,
+                )?
+            } else {
+                crate::app_recognition::import_package(
+                    library,
+                    &package,
+                    root,
+                    ctx.cancellation(),
+                    &crate::app_research::dispatch,
+                )?
+            };
+            if imported["status"] != "done" {
+                return Err(Error::Invalid("识别导入待恢复".into()));
+            }
+            counts["imported"] = json!(
+                counts["imported"].as_u64().expect("internal sync counter must be unsigned")
+                    + ids.iter().filter(|u| !already_counted.contains(*u)).count() as u64
+            );
+            remember_labels(library, &ids, ctx.cancellation())?;
+            done += ids.len();
+            writer(&library.db())?.execute(
+                "UPDATE sync_runs SET imported=?,failed=? WHERE id=?",
+                params![counts["imported"].as_u64(), counts["failed"].as_u64(), run_id],
+            )?;
+            update(json!({"done":done,"total":total,"imported":counts["imported"],"failed":counts["failed"]}));
+        }
+        Ok(())
+    })?;
+
+    update(
+        json!({"status":"recognising","done":total,"total":total,"imported":counts["imported"],"failed":counts["failed"]}),
+    );
+    Ok(())
+}
+
+fn remember_labels(library: &Library, ids: &[String], cancel: &AtomicBool) -> Result<()> {
+    let mut app = writer(&library.db())?;
+    let src = crate::app_library::read_connection(&library.source())?;
+    let tx = app.transaction()?;
+    for id in ids {
+        let labels = crate::app_migrate_data::rows_with(
+            &src,
+            "SELECT * FROM labels WHERE uuid=? ORDER BY dim,value,conf",
+            [id],
+        )?;
+        let hash = crate::strict_json::sha256_hex(
+            serde_json::to_string(&labels).expect("label values are serializable JSON").as_bytes(),
+        );
+        tx.execute("INSERT OR REPLACE INTO meta VALUES (?,?)", params![format!("folder_labels:{id}"), hash])?;
+    }
+    check(cancel)?;
+    tx.commit()?;
+    Ok(())
+}
+
+/// Existing host cancellation predicate; read adapters receive it at their original checkpoints.
+pub(crate) fn check(cancel: &AtomicBool) -> Result<()> {
+    if cancel.load(Ordering::SeqCst) || crate::platform_process::stopping() {
+        Err(Error::Conflict("扫描已中断".into()))
+    } else {
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::app_service::{Application, Options};
+    use std::{collections::BTreeMap, path::Path, sync::mpsc, time::Duration};
+
+    type Snapshot = BTreeMap<String, (Vec<String>, Vec<Vec<rusqlite::types::Value>>)>;
+    fn snapshot(path: &Path) -> Snapshot {
+        let c = crate::app_library::read_connection(path).unwrap();
+        if c.prepare("SELECT * FROM meta LIMIT 0").is_ok() {
+            crate::http_read::register_names(&c).unwrap();
+        }
+        c.execute_batch("BEGIN").unwrap();
+        let schema: Vec<(String, String, Option<String>)> = c
+            .prepare("SELECT type,name,sql FROM sqlite_schema ORDER BY type,name")
+            .unwrap()
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        let mut queries = vec![
+            ("schema".into(), "SELECT type,name,tbl_name,sql FROM sqlite_schema ORDER BY type,name".into()),
+            ("user_version".into(), "PRAGMA user_version".into()),
+        ];
+        for (kind, name, sql) in schema {
+            if matches!(kind.as_str(), "table" | "view") {
+                let columns = if kind == "view" || sql.unwrap_or_default().to_uppercase().contains("WITHOUT ROWID") {
+                    "*"
+                } else {
+                    "rowid,*"
+                };
+                queries.push((name.clone(), format!("SELECT {columns} FROM \"{}\"", name.replace('"', "\"\""))));
+            }
+        }
+        queries
+            .into_iter()
+            .map(|(name, sql)| {
+                let mut q = c.prepare(&sql).unwrap();
+                let columns = q.column_names().into_iter().map(str::to_owned).collect();
+                let count = q.column_count();
+                let mut rows = q
+                    .query_map([], |r| (0..count).map(|i| r.get(i)).collect::<rusqlite::Result<Vec<_>>>())
+                    .unwrap()
+                    .collect::<rusqlite::Result<Vec<_>>>()
+                    .unwrap();
+                rows.sort_by_cached_key(|r| format!("{r:?}"));
+                (name, (columns, rows))
+            })
+            .collect()
+    }
+
+    #[test]
+    fn scan_cancellation_and_completed_lifecycle_have_explicit_boundaries() {
+        let root = std::env::temp_dir().join(format!("illustash-sync-boundary-{}", crate::store::new_key().unwrap()));
+        std::fs::create_dir(&root).unwrap();
+        let status = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--ignored", "--exact", "app_sync::tests::scan_boundary_fixture", "--nocapture"])
+            .env("ILLUSTASH_SYNC_BOUNDARY_FIXTURE", &root)
+            .env("ILLUSTASH_APP_SUPPORT", root.join("support"))
+            .env("ILLUSTASH_SHARED", root.join("absent-reference"))
+            .env("ILLUSTASH_NO_KEYCHAIN", "1")
+            .status()
+            .unwrap();
+        std::fs::remove_dir_all(root).unwrap();
+        assert!(status.success());
+    }
+
+    #[test]
+    #[ignore = "isolated synthetic sync fixture, invoked by parent test"]
+    fn scan_boundary_fixture() {
+        let root = std::path::PathBuf::from(std::env::var_os("ILLUSTASH_SYNC_BOUNDARY_FIXTURE").unwrap());
+        let folder = root.join("images");
+        std::fs::create_dir(&folder).unwrap();
+        image::RgbImage::new(4, 3).save(folder.join("a.png")).unwrap();
+        let second = root.join("replacement.pilib");
+        crate::app_create::create_folder(&second, &folder, None, None, None).unwrap();
+        let replacement = Library::open(&second).unwrap();
+        let replacement_source = snapshot(&replacement.source());
+        let replacement_app = snapshot(&replacement.db());
+        let mut options = Options::new(root.clone());
+        options.names_enabled = false;
+        options.provenance_enabled = false;
+        options.index_automatic = false;
+        options.auto_sync = false;
+        // Every task below executes the actual sync pipeline, in the actual session-owned slot.
+        for finish in ["switch", "shutdown", "drop"] {
+            for stage in ["before_source_commit", "before_application_commit", "completed"] {
+                let cancelled = stage != "completed";
+                println!("SYNC_BOUNDARY {finish} stage={stage}");
+                let first = root.join(format!("{finish}-{stage}.pilib"));
+                crate::app_create::create_folder(&first, &folder, None, None, None).unwrap();
+                // Same logical ID cannot let an old task write a different physical package.
+                let config_path = first.join("library.json");
+                let mut config: Value = serde_json::from_slice(&std::fs::read(&config_path).unwrap()).unwrap();
+                config["id"] = replacement.id().into();
+                std::fs::write(config_path, serde_json::to_vec(&config).unwrap()).unwrap();
+                let lib = Library::open(&first).unwrap().pinned();
+                assert_eq!(lib.id(), replacement.id());
+                assert_ne!(lib.instance_path(), replacement.instance_path());
+                let mut c = crate::open(&lib.db()).unwrap();
+                let asset = crate::store::register_asset(&c, "synthetic", "manual", None).unwrap();
+                let term = crate::store::create_term(&c, crate::Kind::Label, Some("manual-label"), "user").unwrap();
+                crate::store::judge(
+                    &mut c,
+                    &[crate::store::VerdictTarget::Image { asset, term }],
+                    crate::store::Verdict::Yes,
+                    "user",
+                    "",
+                    "test",
+                )
+                .unwrap();
+                c.execute("INSERT INTO backend_effects(kind) VALUES ('synthetic-pending')", []).unwrap();
+                drop(c);
+                let source_before = snapshot(&lib.source());
+                let service = Arc::new(Application::open(&first, options.clone()).unwrap());
+                let generation = service.generation();
+                let (ready_tx, ready_rx) = mpsc::channel();
+                let (cancel_tx, cancel_rx) = mpsc::channel();
+                let (release_tx, release_rx) = mpsc::channel();
+                let context;
+                {
+                    let mut session = service.session.write().unwrap();
+                    let identity =
+                        crate::app_tasks::TaskIdentity::new(&session.library, generation, &session.token).unwrap();
+                    let task_lib = session.library.pinned();
+                    let task_root = root.clone();
+                    let task = crate::app_tasks::Task::start(identity, None, move |ctx| {
+                        let gated = AtomicBool::new(false);
+                        run_with(&task_lib, ctx.cancellation(), Some(&ctx), &task_root, 0, &|fields| {
+                            if ((stage == "before_source_commit" && fields.get("scanned").is_some())
+                                || (stage == "before_application_commit" && fields["status"] == "importing"))
+                                && !gated.swap(true, Ordering::SeqCst)
+                            {
+                                // Existing callbacks bracket source commit and application refresh.
+                                // Hold precisely this boundary until cancellation has been observed.
+                                ready_tx.send(()).unwrap();
+                                let deadline = std::time::Instant::now() + Duration::from_secs(5);
+                                while ctx.check().is_ok() {
+                                    assert!(std::time::Instant::now() < deadline, "lifecycle did not cancel scan");
+                                    std::thread::yield_now();
+                                }
+                                cancel_tx.send(()).unwrap();
+                                release_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+                            }
+                        })
+                        .map(|_| ())
+                    });
+                    context = task.context();
+                    session.syncer.state = Arc::new(Mutex::new(State::from(json!({"status":"scanning"}))));
+                    session.syncer.install_fixture_task(task);
+                    if !cancelled {
+                        assert!(session.syncer.task.as_mut().unwrap().wait(Duration::from_secs(5)));
+                        assert_eq!(
+                            session.syncer.task.as_ref().unwrap().outcome(),
+                            crate::app_tasks::TaskOutcome::Done
+                        );
+                    }
+                }
+                if cancelled {
+                    ready_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+                    let mut session = service.session.write().unwrap();
+                    let library = session.library.clone();
+                    let token = session.token.clone();
+                    assert!(!session.syncer.start(&library, generation, &token).unwrap());
+                    if stage == "before_source_commit" {
+                        assert_eq!(snapshot(&lib.source()), source_before);
+                    }
+                }
+                let source_at_finish = snapshot(&lib.source());
+                let src = crate::app_library::read_connection(&lib.source()).unwrap();
+                let files: i64 = src.query_row("SELECT count(*) FROM files", [], |r| r.get(0)).unwrap();
+                assert_eq!(files, if stage == "before_source_commit" { 0 } else { 1 });
+                drop(src);
+                let run = crate::app_library::read_connection(&lib.db()).unwrap();
+                let status: String = run.query_row("SELECT status FROM sync_runs", [], |r| r.get(0)).unwrap();
+                assert_eq!(status, if cancelled { "running" } else { "needs_recognition" });
+                drop(run);
+                let mut app_at_finish = snapshot(&lib.db());
+                app_at_finish.remove("sync_runs");
+                let completed_run = (!cancelled).then(|| snapshot(&lib.db())["sync_runs"].clone());
+                let observer = (finish != "drop").then(|| service.clone());
+                let target = second.clone();
+                let (done_tx, done_rx) = mpsc::channel();
+                let thread = std::thread::spawn(move || {
+                    match finish {
+                        "switch" => {
+                            service.switch(generation, &target).unwrap();
+                        }
+                        "shutdown" => service.shutdown(),
+                        "drop" => drop(service),
+                        _ => unreachable!(),
+                    }
+                    done_tx.send(()).unwrap();
+                });
+                if cancelled {
+                    cancel_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+                    assert!(matches!(done_rx.try_recv(), Err(mpsc::TryRecvError::Empty)));
+                    if finish == "switch" {
+                        assert_eq!(observer.as_ref().unwrap().generation(), generation);
+                    }
+                    release_tx.send(()).unwrap();
+                }
+                done_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+                thread.join().unwrap();
+                if let Some(observer) = observer {
+                    assert!(observer.with_library::<()>(generation, |_| panic!("old generation published")).is_err());
+                }
+                assert!(context.receive::<()>(context.identity(), || panic!("old result published")).is_err());
+                assert_eq!(snapshot(&lib.source()), source_at_finish);
+                let mut app_after = snapshot(&lib.db());
+                let runs = app_after.remove("sync_runs").unwrap();
+                assert_eq!(app_after, app_at_finish);
+                let c = crate::app_library::read_connection(&lib.db()).unwrap();
+                let status: String = c.query_row("SELECT status FROM sync_runs", [], |r| r.get(0)).unwrap();
+                assert_eq!(status, if cancelled { "interrupted" } else { "needs_recognition" });
+                if let Some(completed_run) = completed_run {
+                    assert_eq!(runs, completed_run);
+                }
+                assert_eq!(snapshot(&replacement.source()), replacement_source);
+                assert_eq!(snapshot(&replacement.db()), replacement_app);
+            }
+        }
+    }
+}

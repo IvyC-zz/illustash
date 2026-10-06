@@ -1,0 +1,225 @@
+# 手动检查入口；合并门槛为 PR 最终 head 上 tools/check_all.sh 全通过（#110）。
+# 只用仓库内合成数据；不接触真实图库、账号、Photos 或网络凭据。
+name: CI
+
+on:
+  workflow_dispatch:
+    inputs:
+      macos:
+        description: 桌面壳检查同时在 macOS 上运行
+        type: boolean
+        default: false
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  PYTHON_VERSION: '3.12'
+  # 历史版本产出的合成旧包，供 tests/test_native_library_upgrade.py 做升级验收。
+  TERMS_V5_COMMIT: 5e7e7f7
+  TERMS_V6_COMMIT: d9c49b4
+
+jobs:
+  core:
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    name: Rust 核心
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            native/terms
+            crates/iqdb
+            crates/core
+            crates/platform
+      # http_browse 的对照测试调用 python3 运行参考实现。
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: tests/requirements.txt
+      - run: pip install -r tests/requirements.txt
+      - name: Dependency boundary
+        run: python tools/check_architecture.py
+      - name: Core fmt/clippy/test/build
+        run: |
+          cargo fmt --manifest-path crates/core/Cargo.toml --check
+          cargo clippy --locked --manifest-path crates/core/Cargo.toml --all-targets -- -D warnings
+          cargo test --locked --manifest-path crates/core/Cargo.toml
+          cargo build --locked --manifest-path crates/core/Cargo.toml
+      - name: Platform fmt/clippy/test/build
+        run: |
+          cargo fmt --manifest-path crates/platform/Cargo.toml --check
+          cargo clippy --locked --manifest-path crates/platform/Cargo.toml --all-targets -- -D warnings
+          cargo test --locked --manifest-path crates/platform/Cargo.toml
+          cargo build --locked --manifest-path crates/platform/Cargo.toml
+      - name: fmt
+        run: cargo fmt --manifest-path native/terms/Cargo.toml --check
+      - name: clippy
+        run: cargo clippy --locked --manifest-path native/terms/Cargo.toml --all-targets --all-features -- -D warnings
+      - name: test
+        run: cargo test --locked --manifest-path native/terms/Cargo.toml
+      # iqdb 只跑测试：其中 0.7071 常数须与 haar.cpp 逐位一致，不按 clippy 改；格式未统一，留待单独整理。
+      - name: iqdb test
+        run: cargo test --locked --manifest-path crates/iqdb/Cargo.toml
+
+  # 跑在 macOS arm64：固定快照（tests/golden/terms_c3_*）在 Apple Silicon 上录制，
+  # float32 结果在 x86 上差 1 ulp；另有错误文案、zsh 启动脚本等平台差异。Linux/Windows 另行处理。
+  python:
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    name: Python 全量 (macOS)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            native/terms
+            crates/iqdb
+            crates/core
+            crates/platform
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: tests/requirements.txt
+      - run: pip install -r tests/requirements.txt
+      - name: 构建被测核心与 IQDB
+        run: |
+          cargo build --release --locked --manifest-path native/terms/Cargo.toml
+          # 历史 Python/HTTP 对照用的测试参考宿主（tests/reference/host.py 按 release/examples 定位）。
+          cargo build --release --locked --manifest-path native/terms/Cargo.toml --features test-reference-host --example reference-http --example recognition-compute --example index-compute --example research-compute --example relation-probe --example provenance-compute
+          cargo build --release --locked --manifest-path crates/iqdb/Cargo.toml
+      - name: 历史版本二进制缓存
+        id: history
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/history-bin
+          key: terms-history-${{ runner.os }}-${{ env.TERMS_V5_COMMIT }}-${{ env.TERMS_V6_COMMIT }}
+      - name: 构建历史版本（v5 / v6 旧包产出者）
+        if: steps.history.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p "$RUNNER_TEMP/history-bin"
+          for commit in "$TERMS_V5_COMMIT" "$TERMS_V6_COMMIT"; do
+            src="$RUNNER_TEMP/history-src/$commit"
+            mkdir -p "$src"
+            git archive "$commit" native/terms | tar -x -C "$src"
+            cargo build --release --locked --manifest-path "$src/native/terms/Cargo.toml"
+            cp "$src/native/terms/target/release/illustash-terms" "$RUNNER_TEMP/history-bin/terms-$commit"
+          done
+      - name: unittest
+        env:
+          ILLUSTASH_TERMS_BIN: ${{ github.workspace }}/native/terms/target/release/illustash-terms
+          ILLUSTASH_NATIVE_ROOT: ${{ github.workspace }}
+          ILLUSTASH_IQDB_BINARY: ${{ github.workspace }}/crates/iqdb/target/release/illustash-iqdb
+          ILLUSTASH_REFERENCE_HTTP_BIN: ${{ github.workspace }}/native/terms/target/release/examples/reference-http
+          ILLUSTASH_RECOGNITION_COMPUTE_BIN: ${{ github.workspace }}/native/terms/target/release/examples/recognition-compute
+          ILLUSTASH_INDEX_COMPUTE_BIN: ${{ github.workspace }}/native/terms/target/release/examples/index-compute
+          ILLUSTASH_RELATION_PROBE_BIN: ${{ github.workspace }}/native/terms/target/release/examples/relation-probe
+          ILLUSTASH_PROVENANCE_COMPUTE_BIN: ${{ github.workspace }}/native/terms/target/release/examples/provenance-compute
+          ILLUSTASH_RESEARCH_COMPUTE_BIN: ${{ github.workspace }}/native/terms/target/release/examples/research-compute
+          ILLUSTASH_RESEARCH_ADAPTER_BIN: ${{ github.workspace }}/native/terms/target/release/illustash-worker
+          ILLUSTASH_INDEX_ADAPTER_BIN: ${{ github.workspace }}/native/terms/target/release/illustash-worker
+          ILLUSTASH_TERMS_V5_BIN: ${{ runner.temp }}/history-bin/terms-${{ env.TERMS_V5_COMMIT }}
+          ILLUSTASH_TERMS_V6_BIN: ${{ runner.temp }}/history-bin/terms-${{ env.TERMS_V6_COMMIT }}
+        run: |
+          set -o pipefail
+          # -b：失败测试的输出（如被测服务日志）附在末尾失败报告里，不散落在日志中段。
+          python -m unittest discover -s tests -v -b 2>&1 | tee "$RUNNER_TEMP/unittest.log"
+      - name: 上传测试日志
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unittest-log
+          path: ${{ runner.temp }}/unittest.log
+          retention-days: 7
+      # 跳过必须可见：列出全部跳过及原因。只允许平台限制和依赖真实图库的数据缺失；
+      # 其余跳过（缺被测二进制、缺历史产出者等）在 CI 中视为未验收，判失败。
+      - name: 跳过清单
+        if: always()
+        run: |
+          log="$RUNNER_TEMP/unittest.log"
+          [ -f "$log" ] || exit 0
+          grep -E " \.\.\. skipped " "$log" > "$RUNNER_TEMP/skips.txt" || true
+          {
+            echo "### Python 跳过：$(wc -l < "$RUNNER_TEMP/skips.txt") 项"
+            echo '```'
+            cat "$RUNNER_TEMP/skips.txt"
+            echo '```'
+            tail -n 3 "$log"
+          } >> "$GITHUB_STEP_SUMMARY"
+          allowed="full-features\.npy not present|POSIX|posix|Unix|macOS/Linux only|Windows pinned OpenBLAS backend only|explicit Windows native development calculator only|explicit Windows development App publication only|macOS/Windows use the native production dispatcher|Linux retains the legacy production dispatcher"
+          if grep -Ev "$allowed" "$RUNNER_TEMP/skips.txt"; then
+            echo "::error::以上跳过不属于平台限制或真实图库数据缺失，CI 中视为未验收"
+            exit 1
+          fi
+
+  js:
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    name: 前端 JS
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: node --test tests/*.test.cjs tests/test_pixiv_poll.js
+
+  desktop:
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    name: 桌面壳 (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: ${{ fromJSON(inputs.macos && '["ubuntu-latest","macos-latest"]' || '["ubuntu-latest"]') }}
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: desktop
+      - name: Tauri 系统依赖
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev
+      # 桌面壳格式尚未统一（无 rustfmt.toml，存量代码按 120 列手写），暂不检查 fmt。
+      - name: clippy
+        run: cargo clippy --locked --manifest-path desktop/Cargo.toml --all-targets -- -D warnings
+      - name: test
+        run: cargo test --locked --manifest-path desktop/Cargo.toml
+
+  # #78: 仅 main 手动验收入口；不恢复任何自动触发。
+  contracts:
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    name: 原生固定契约（无 Python）
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: native/terms
+      - name: 构建独立重放可执行文件
+        run: |
+          cargo test --release --locked --manifest-path native/terms/Cargo.toml --test contracts --no-run --message-format=json > "$RUNNER_TEMP/contracts-artifacts.jsonl"
+      - name: 空 PATH / 独立 HOME 重放
+        run: |
+          binary=$(jq -r 'select(.reason == "compiler-artifact" and .target.name == "contracts" and .executable != null) | .executable' "$RUNNER_TEMP/contracts-artifacts.jsonl")
+          [ -n "$binary" ] && [ -x "$binary" ]
+          tools/test_native_contracts.sh "$binary"

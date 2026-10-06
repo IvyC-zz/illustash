@@ -1,0 +1,176 @@
+//! Illustash 应用宿主：进程内应用服务、CLI/HTTP 适配、任务编排与平台装配。
+//!
+//! 连接内业务规则、证据、人工裁决、关系、历史和投影由 `illustash-core` 单一实现。
+//! 本宿主保留旧 Rust 模块路径的转导出与必需备份/SQLite 路径适配；见 docs/ARCHITECTURE_DIRECTION.md。
+
+#![cfg_attr(not(test), warn(clippy::unwrap_used))]
+
+pub mod app_accounts;
+mod app_archives;
+mod app_characters;
+mod app_commands;
+pub mod app_create;
+mod app_curation;
+mod app_desktop;
+mod app_effects;
+mod app_files;
+mod app_folder;
+mod app_http;
+mod app_identity;
+mod app_legacy_upgrade;
+mod app_libraries;
+pub mod app_library;
+mod app_local;
+mod app_migrate;
+mod app_migrate_data;
+pub mod app_service;
+use illustash_platform::app_paths;
+mod app_photos;
+mod app_platform;
+mod app_profiles;
+pub mod app_recognition;
+pub mod app_research;
+pub mod app_resources;
+mod app_settings;
+mod app_sources;
+mod app_sync;
+pub mod app_tasks;
+mod app_upgrade;
+mod image_samples;
+pub mod index_compute;
+pub mod provenance_compute;
+pub mod recognition_compute;
+pub mod research_compute;
+pub use illustash_core::casefold;
+pub use illustash_core::character_commands;
+pub use illustash_core::character_evidence;
+pub use illustash_core::character_graph;
+pub use illustash_core::character_identity;
+pub use illustash_core::character_import;
+pub use illustash_core::character_json;
+pub use illustash_core::character_labels;
+pub use illustash_core::character_learning;
+pub use illustash_core::character_merge;
+pub use illustash_core::character_names;
+pub use illustash_core::character_profile;
+pub use illustash_core::character_projection;
+pub use illustash_core::character_structure;
+pub mod cli;
+pub(crate) use illustash_core::compat_text;
+
+pub(crate) use illustash_core::compat_unicode;
+pub mod desktop_shell;
+pub(crate) use illustash_core::error;
+pub mod http;
+mod http_anchors;
+mod http_app;
+mod http_artists;
+mod http_browse;
+mod http_characters;
+mod http_json;
+mod http_local;
+mod http_read;
+#[cfg(feature = "test-reference-host")]
+// Explicit historical test host is excluded from the production unwrap migration.
+#[allow(clippy::unwrap_used)]
+#[path = "../../../tests/reference/http_host.rs"]
+pub mod http_reference;
+use illustash_core::legacy_artists as legacy_artists_rules;
+/// Compatibility API; the application supplies the mandatory backup to the core rule.
+pub mod legacy_artists {
+    pub use crate::legacy_artists_rules::*;
+    pub fn sync(conn: &mut rusqlite::Connection, provenance: &std::path::Path) -> crate::Result<Report> {
+        crate::legacy_artists_rules::sync_with_attachment(conn, provenance, &crate::sqlite::path(provenance))
+    }
+    pub fn cutover(
+        conn: &mut rusqlite::Connection,
+        provenance: Option<&std::path::Path>,
+    ) -> crate::Result<Option<Report>> {
+        crate::legacy_artists_rules::cutover_with_backup(
+            conn,
+            provenance.map(crate::sqlite::path).as_deref(),
+            &crate::platform_backup::capability(),
+        )
+    }
+}
+use illustash_core::legacy_characters as legacy_characters_rules;
+/// Compatibility API; the application supplies the mandatory backup to the core rule.
+pub mod legacy_characters {
+    pub use crate::legacy_characters_rules::*;
+    pub fn cutover(conn: &mut rusqlite::Connection) -> crate::Result<Option<Report>> {
+        crate::legacy_characters_rules::cutover_with_backup(conn, &crate::platform_backup::capability())
+    }
+}
+use illustash_core::legacy_labels as legacy_labels_rules;
+/// Compatibility API; the application supplies the mandatory backup to the core rule.
+pub mod legacy_labels {
+    pub use crate::legacy_labels_rules::*;
+    pub fn cutover(conn: &mut rusqlite::Connection) -> crate::Result<Option<Report>> {
+        crate::legacy_labels_rules::cutover_with_backup(conn, &crate::platform_backup::capability())
+    }
+}
+use illustash_core::legacy_names as legacy_names_rules;
+/// Compatibility API; the application supplies the mandatory backup to the core rule.
+pub mod legacy_names {
+    pub use crate::legacy_names_rules::*;
+    pub fn cutover(conn: &mut rusqlite::Connection) -> crate::Result<Option<Report>> {
+        crate::legacy_names_rules::cutover_with_backup(conn, &crate::platform_backup::capability())
+    }
+}
+pub use illustash_core::names_commands;
+pub use illustash_core::names_search;
+pub use illustash_core::names_view;
+pub use illustash_core::origin;
+pub use illustash_core::package;
+use illustash_core::schema as schema_rules;
+use illustash_platform::platform_backup;
+use illustash_platform::platform_credentials;
+use illustash_platform::platform_filesystem;
+use illustash_platform::platform_folder;
+use illustash_platform::platform_photos;
+use illustash_platform::platform_system;
+use illustash_platform::platform_time;
+/// Existing API facade: every direct file-backed call receives the mandatory platform backup.
+pub mod schema {
+    pub use crate::schema_rules::*;
+    pub fn migrate(conn: &mut rusqlite::Connection) -> crate::Result<i64> {
+        crate::schema_rules::migrate_with_backup(conn, &crate::platform_backup::capability())
+    }
+    #[cfg(test)]
+    pub(crate) fn migrate_to(conn: &mut rusqlite::Connection, target: i64) -> crate::Result<i64> {
+        crate::schema_rules::migrate_to_with_backup(conn, target, &crate::platform_backup::capability())
+    }
+}
+mod service;
+use illustash_platform::source_rows;
+pub mod sqlite;
+pub use illustash_core::store;
+pub use illustash_core::strict_json;
+mod task_state;
+mod wd_pending;
+mod worker_protocol;
+
+pub use error::{Error, Result};
+pub use schema::{migrate, Kind, SCHEMA_VERSION};
+
+use rusqlite::Connection;
+use std::path::Path;
+
+/// 打开一个库并设置本连接的约定（外键、忙等待）。不迁移，也不改日志模式：日志模式归宿主决定。
+pub fn open(path: &Path) -> Result<Connection> {
+    let conn = crate::sqlite::open(path)?;
+    configure(&conn)?;
+    Ok(conn)
+}
+
+pub use illustash_core::configure;
+
+mod app_name_sources;
+mod app_names;
+pub(crate) use illustash_core::name_codecs;
+
+mod app_index;
+pub(crate) mod app_provenance;
+
+use illustash_platform::app_file_lock;
+pub mod platform_process;

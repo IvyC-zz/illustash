@@ -1,0 +1,57 @@
+{
+  "format": "illustash-evidence/1",
+  "library_id": "synthetic-library",
+  "producer": {
+    "name": "provenance",
+    "version": "fixture-v1"
+  },
+  "created_at": "2026-09-28T00:00:00Z",
+  "models": {
+    "wd": {
+      "version": "swinv2_448",
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+    }
+  },
+  "assets": [
+    {
+      "asset": {
+        "namespace": "photos",
+        "id": "synthetic-asset-1"
+      },
+      "task_id": "synthetic-task-1",
+      "status": "completed",
+      "error": null
+    },
+    {
+      "asset": {
+        "namespace": "photos",
+        "id": "synthetic-asset-2"
+      },
+      "task_id": "synthetic-task-2",
+      "status": "completed",
+      "error": null
+    },
+    {
+      "asset": {
+        "namespace": "photos",
+        "id": "synthetic-asset-3"
+      },
+      "task_id": "synthetic-task-3",
+      "status": "failed",
+      "error": {
+        "code": "network_refused",
+        "message": "HTTP 403, stopped without retrying"
+      }
+    }
+  ],
+  "files": {
+    "evidence.jsonl": {
+      "bytes": 1410,
+      "sha256": "2b7767fb933e321bbcded63a3b8bcd91c85c1fad30a5ce7377aaf04b3b42921f"
+    },
+    "notes.txt": {
+      "bytes": 80,
+      "sha256": "cc0435239b1f3b60e696c9f89cd3cef92e1a0443d2e7a42e9eb8bef9c273c2a2"
+    }
+  }
+}

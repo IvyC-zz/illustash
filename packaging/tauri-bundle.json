@@ -1,0 +1,13 @@
+{
+  "bundle": {
+    "resources": {
+      "../packaging/desktop-resources/": "resources/"
+    },
+    "targets": "all",
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser"
+      }
+    }
+  }
+}

@@ -1,0 +1,3940 @@
+{
+ "policy": "hybrid",
+ "initial": {
+  "entities": [
+   [
+    "artist",
+    "external_key",
+    "id",
+    "kind",
+    "label_only",
+    "mascot",
+    "mascot_origin",
+    "merged_into",
+    "name",
+    "original",
+    "parent_id",
+    "tag",
+    "variant",
+    "work",
+    "work_id"
+   ],
+   [
+    "",
+    null,
+    "00000000-0000-0000-0000-000000001001",
+    "character",
+    0,
+    0,
+    null,
+    null,
+    "",
+    0,
+    null,
+    null,
+    "",
+    "Example",
+    null
+   ],
+   [
+    "",
+    null,
+    "00000000-0000-0000-0000-000000001002",
+    "character",
+    0,
+    0,
+    null,
+    null,
+    "",
+    0,
+    null,
+    null,
+    "",
+    "Example",
+    null
+   ],
+   [
+    "",
+    null,
+    "00000000-0000-0000-0000-000000001003",
+    "work",
+    0,
+    0,
+    null,
+    null,
+    "",
+    0,
+    null,
+    null,
+    "",
+    "",
+    null
+   ],
+   [
+    "",
+    null,
+    "00000000-0000-0000-0000-000000001004",
+    "character",
+    0,
+    0,
+    null,
+    null,
+    "",
+    0,
+    null,
+    null,
+    "",
+    "",
+    null
+   ],
+   [
+    "",
+    null,
+    "00000000-0000-0000-0000-000000001005",
+    "character",
+    0,
+    0,
+    null,
+    null,
+    "",
+    0,
+    null,
+    null,
+    "",
+    "",
+    null
+   ],
+   [
+    "",
+    null,
+    "skin-x",
+    "skin",
+    0,
+    0,
+    null,
+    null,
+    "",
+    0,
+    "00000000-0000-0000-0000-000000001001",
+    null,
+    "swimsuit",
+    "",
+    null
+   ]
+  ],
+  "links": [
+   [
+    "current",
+    "entity_id",
+    "key",
+    "source",
+    "system"
+   ],
+   [
+    1,
+    "00000000-0000-0000-0000-000000001001",
+    "alice",
+    "import",
+    "ccip"
+   ],
+   [
+    1,
+    "00000000-0000-0000-0000-000000001001",
+    "alice",
+    "import",
+    "danbooru"
+   ],
+   [
+    1,
+    "00000000-0000-0000-0000-000000001002",
+    "bob",
+    "import",
+    "ccip"
+   ],
+   [
+    1,
+    "00000000-0000-0000-0000-000000001002",
+    "bob",
+    "import",
+    "danbooru"
+   ]
+  ],
+  "names": [
+   [
+    "entity_id",
+    "lang",
+    "position",
+    "preferred",
+    "role",
+    "source",
+    "value"
+   ],
+   [
+    "00000000-0000-0000-0000-000000001001",
+    "",
+    0,
+    0,
+    "alias",
+    "album",
+    "Alice album"
+   ],
+   [
+    "00000000-0000-0000-0000-000000001001",
+    "",
+    0,
+    0,
+    "alias",
+    "album",
+    "alice_album"
+   ],
+   [
+    "00000000-0000-0000-0000-000000001001",
+    "",
+    0,
+    0,
+    "alias",
+    "index",
+    "Alice"
+   ],
+   [
+    "00000000-0000-0000-0000-000000001001",
+    "",
+    0,
+    0,
+    "alias",
+    "index",
+    "a_li_ce"
+   ],
+   [
+    "00000000-0000-0000-0000-000000001001",
+    "",
+    0,
+    0,
+    "alias",
+    "index",
+    "alice"
+   ],
+   [
+    "00000000-0000-0000-0000-000000001001",
+    "",
+    0,
+    0,
+    "alias",
+    "index",
+    "alice_tag"
+   ],
+   [
+    "00000000-0000-0000-0000-000000001001",
+    "",
+    0,
+    0,
+    "alias",
+    "index",
+    "爱丽丝"
+   ],
+   [
+    "00000000-0000-0000-0000-000000001002",
+    "",
+    0,
+    0,
+    "alias",
+    "index",
+    "Bob"
+   ],
+   [
+    "00000000-0000-0000-0000-000000001002",
+    "",
+    0,
+    0,
+    "alias",
+    "index",
+    "bob"
+   ],
+   [
+    "00000000-0000-0000-0000-000000001002",
+    "",
+    0,
+    0,
+    "alias",
+    "index",
+    "bob_tag"
+   ],
+   [
+    "00000000-0000-0000-0000-000000001003",
+    "zh",
+    0,
+    1,
+    "display",
+    "user",
+    "作品甲"
+   ],
+   [
+    "00000000-0000-0000-0000-000000001004",
+    "zh",
+    0,
+    1,
+    "display",
+    "user",
+    "本地甲"
+   ],
+   [
+    "00000000-0000-0000-0000-000000001005",
+    "ja",
+    0,
+    1,
+    "display",
+    "user",
+    "ローカル"
+   ]
+  ],
+  "display_names": [
+   [
+    "key",
+    "kind",
+    "lang",
+    "source",
+    "value"
+   ],
+   [
+    "arknights",
+    "work",
+    "zh",
+    "builtin",
+    "明日方舟"
+   ],
+   [
+    "azur_lane",
+    "work",
+    "zh",
+    "builtin",
+    "碧蓝航线"
+   ],
+   [
+    "bang_dream!",
+    "work",
+    "zh",
+    "builtin",
+    "BanG Dream!"
+   ],
+   [
+    "blue_archive",
+    "work",
+    "zh",
+    "builtin",
+    "蔚蓝档案"
+   ],
+   [
+    "fate",
+    "work",
+    "zh",
+    "builtin",
+    "Fate"
+   ],
+   [
+    "genshin_impact",
+    "work",
+    "zh",
+    "builtin",
+    "原神"
+   ],
+   [
+    "girls'_frontline",
+    "work",
+    "zh",
+    "builtin",
+    "少女前线"
+   ],
+   [
+    "hololive",
+    "work",
+    "zh",
+    "builtin",
+    "hololive"
+   ],
+   [
+    "honkai:_star_rail",
+    "work",
+    "zh",
+    "builtin",
+    "崩坏：星穹铁道"
+   ],
+   [
+    "honkai_impact_3rd",
+    "work",
+    "zh",
+    "builtin",
+    "崩坏3"
+   ],
+   [
+    "idolmaster",
+    "work",
+    "zh",
+    "builtin",
+    "偶像大师"
+   ],
+   [
+    "kancolle",
+    "work",
+    "zh",
+    "builtin",
+    "舰队Collection"
+   ],
+   [
+    "love_live!",
+    "work",
+    "zh",
+    "builtin",
+    "LoveLive!"
+   ],
+   [
+    "nijisanji",
+    "work",
+    "zh",
+    "builtin",
+    "彩虹社"
+   ],
+   [
+    "pokemon",
+    "work",
+    "zh",
+    "builtin",
+    "宝可梦"
+   ],
+   [
+    "princess_connect!",
+    "work",
+    "zh",
+    "builtin",
+    "公主连结"
+   ],
+   [
+    "project_sekai",
+    "work",
+    "zh",
+    "builtin",
+    "世界计划"
+   ],
+   [
+    "touhou",
+    "work",
+    "zh",
+    "builtin",
+    "东方Project"
+   ],
+   [
+    "umamusume",
+    "work",
+    "zh",
+    "builtin",
+    "赛马娘"
+   ],
+   [
+    "vocaloid",
+    "work",
+    "zh",
+    "builtin",
+    "VOCALOID"
+   ],
+   [
+    "wuthering_waves",
+    "work",
+    "zh",
+    "builtin",
+    "鸣潮"
+   ],
+   [
+    "zenless_zone_zero",
+    "work",
+    "zh",
+    "builtin",
+    "绝区零"
+   ]
+  ],
+  "name_aliases": [
+   [
+    "key",
+    "kind",
+    "position",
+    "value"
+   ]
+  ],
+  "work_review": [
+   [
+    "entity_id",
+    "note",
+    "parent_locked",
+    "status"
+   ],
+   [
+    "00000000-0000-0000-0000-000000001003",
+    "",
+    1,
+    "pending"
+   ]
+  ],
+  "assertions": [
+   [
+    "entity",
+    "origin",
+    "status",
+    "uuid"
+   ],
+   [
+    "00000000-0000-0000-0000-000000001001",
+    "album",
+    "confirmed",
+    "a"
+   ]
+  ],
+  "deferred": [
+   [
+    "uuid"
+   ]
+  ],
+  "asked": [
+   [
+    "action_id",
+    "answer",
+    "entity",
+    "kind",
+    "uuid"
+   ]
+  ],
+  "reviews": [
+   [
+    "action_id",
+    "entity"
+   ]
+  ],
+  "identity_relations": [
+   [
+    "a",
+    "b",
+    "id",
+    "kind",
+    "status"
+   ],
+   [
+    "skin-x",
+    "00000000-0000-0000-0000-000000001001",
+    1,
+    "form_of",
+    "accepted"
+   ]
+  ],
+  "identity_decisions": [
+   [
+    "id",
+    "previous_status",
+    "reason",
+    "relation_id",
+    "status"
+   ],
+   [
+    1,
+    "proposed",
+    "保留既有层级并使其可撤销；不代表新增人工确认",
+    1,
+    "accepted"
+   ]
+  ],
+  "identity_uncertain": [
+   [
+    "options_json",
+    "reason",
+    "uuid"
+   ]
+  ],
+  "identity_anchor_decisions": [
+   [
+    "decision",
+    "entity",
+    "reason",
+    "reference"
+   ]
+  ],
+  "memberships": [
+   [
+    "ccip_only",
+    "entity",
+    "origin",
+    "score",
+    "skey",
+    "source_count",
+    "sources",
+    "status",
+    "uuid"
+   ],
+   [
+    0,
+    "00000000-0000-0000-0000-000000001001",
+    "album",
+    0.9,
+    "1010000000.9000000000001",
+    1,
+    "WD",
+    "confirmed",
+    "a"
+   ],
+   [
+    0,
+    "00000000-0000-0000-0000-000000001001",
+    "machine",
+    0.95,
+    "0110000000.9500000000001",
+    2,
+    "CCIP,WD",
+    "machine",
+    "b"
+   ],
+   [
+    0,
+    "00000000-0000-0000-0000-000000001002",
+    "machine",
+    0.7,
+    "0010000000.7000000000001",
+    1,
+    "WD",
+    "machine",
+    "b"
+   ]
+  ],
+  "tag_memberships": [
+   [
+    "ccip_only",
+    "entity",
+    "origin",
+    "score",
+    "skey",
+    "source_count",
+    "sources",
+    "status",
+    "uuid"
+   ]
+  ],
+  "asset_tags": [
+   [
+    "origin",
+    "tag",
+    "uuid"
+   ]
+  ],
+  "prefs": [
+   [
+    "key",
+    "value"
+   ]
+  ],
+  "actions": [
+   [
+    "id",
+    "label",
+    "undone"
+   ]
+  ],
+  "artist_verdicts": [
+   [
+    "artist",
+    "uuid",
+    "verdict"
+   ]
+  ]
+ },
+ "steps": [
+  {
+   "call": [
+    "create_linked",
+    {
+     "tag": "",
+     "typed": "",
+     "copyright_of": "<copyright_of>"
+    }
+   ],
+   "outcome": [
+    "ValueError",
+    "请选择 Danbooru 角色 tag"
+   ],
+   "diff": {}
+  },
+  {
+   "call": [
+    "create_linked",
+    {
+     "tag": "",
+     "typed": "Kaito",
+     "copyright_of": "<copyright_of>"
+    }
+   ],
+   "outcome": [
+    "ValueError",
+    "请选择 Danbooru 角色 tag"
+   ],
+   "diff": {}
+  },
+  {
+   "call": [
+    "create_linked",
+    {
+     "tag": "",
+     "typed": null,
+     "copyright_of": "<copyright_of>"
+    }
+   ],
+   "outcome": [
+    "ValueError",
+    "请选择 Danbooru 角色 tag"
+   ],
+   "diff": {}
+  },
+  {
+   "call": [
+    "create_linked",
+    {
+     "tag": "a b",
+     "typed": "",
+     "copyright_of": "<copyright_of>"
+    }
+   ],
+   "outcome": [
+    "ok",
+    "{\"canonical_id\": \"00000000-0000-0000-0000-000000000001\", \"character_id\": \"00000000-0000-0000-0000-000000000001\", \"id\": \"00000000-0000-0000-0000-000000000001\", \"name\": \"A B\", \"name_source\": \"readable\", \"names\": {\"en\": null, \"ja\": null, \"zh\": null}, \"node_type\": \"character\", \"tag\": \"a_b\", \"variant_id\": null, \"work_id\": null}"
+   ],
+   "diff": {
+    "entities": {
+     "-": [],
+     "+": [
+      [
+       "",
+       null,
+       "00000000-0000-0000-0000-000000000001",
+       "character",
+       0,
+       0,
+       null,
+       null,
+       "",
+       0,
+       null,
+       null,
+       "",
+       "",
+       null
+      ]
+     ]
+    },
+    "links": {
+     "-": [],
+     "+": [
+      [
+       1,
+       "00000000-0000-0000-0000-000000000001",
+       "a_b",
+       "user",
+       "danbooru"
+      ]
+     ]
+    }
+   }
+  },
+  {
+   "call": [
+    "create_linked",
+    {
+     "tag": "a b",
+     "typed": "Kaito",
+     "copyright_of": "<copyright_of>"
+    }
+   ],
+   "outcome": [
+    "ok",
+    "{\"canonical_id\": \"00000000-0000-0000-0000-000000000001\", \"character_id\": \"00000000-0000-0000-0000-000000000001\", \"id\": \"00000000-0000-0000-0000-000000000001\", \"name\": \"A B\", \"name_source\": \"readable\", \"names\": {\"en\": null, \"ja\": null, \"zh\": null}, \"node_type\": \"character\", \"tag\": \"a_b\", \"variant_id\": null, \"work_id\": null}"
+   ],
+   "diff": {}
+  },
+  {
+   "call": [
+    "create_linked",
+    {
+     "tag": "a b",
+     "typed": null,
+     "copyright_of": "<copyright_of>"
+    }
+   ],
+   "outcome": [
+    "ok",
+    "{\"canonical_id\": \"00000000-0000-0000-0000-000000000001\", \"character_id\": \"00000000-0000-0000-0000-000000000001\", \"id\": \"00000000-0000-0000-0000-000000000001\", \"name\": \"A B\", \"name_source\": \"readable\", \"names\": {\"en\": null, \"ja\": null, \"zh\": null}, \"node_type\": \"character\", \"tag\": \"a_b\", \"variant_id\": null, \"work_id\": null}"
+   ],
+   "diff": {}
+  },
+  {
+   "call": [
+    "create_linked",
+    {
+     "tag": null,
+     "typed": "",
+     "copyright_of": "<copyright_of>"
+    }
+   ],
+   "outcome": [
+    "ValueError",
+    "请选择 Danbooru 角色 tag"
+   ],
+   "diff": {}
+  },
+  {
+   "call": [
+    "create_linked",
+    {
+     "tag": null,
+     "typed": "Kaito",
+     "copyright_of": "<copyright_of>"
+    }
+   ],
+   "outcome": [
+    "ValueError",
+    "请选择 Danbooru 角色 tag"
+   ],
+   "diff": {}
+  },
+  {
+   "call": [
+    "create_linked",
+    {
+     "tag": null,
+     "typed": null,
+     "copyright_of": "<copyright_of>"
+    }
+   ],
+   "outcome": [
+    "ValueError",
+    "请选择 Danbooru 角色 tag"
+   ],
+   "diff": {}
+  },
+  {
+   "call": [
+    "create_linked",
+    {
+     "tag": 7,
+     "typed": "",
+     "copyright_of": "<copyright_of>"
+    }
+   ],
+   "outcome": [
+    "ValueError",
+    "请选择 Danbooru 角色 tag"
+   ],
+   "diff": {}
+  },
+  {
+   "call": [
+    "create_linked",
+    {
+     "tag": 7,
+     "typed": "Kaito",
+     "copyright_of": "<copyright_of>"
+    }
+   ],
+   "outcome": [
+    "ValueError",
+    "请选择 Danbooru 角色 tag"
+   ],
+   "diff": {}
+  },
+  {
+   "call": [
+    "create_linked",
+    {
+     "tag": 7,
+     "typed": null,
+     "copyright_of": "<copyright_of>"
+    }
+   ],
+   "outcome": [
+    "ValueError",
+    "请选择 Danbooru 角色 tag"
+   ],
+   "diff": {}
+  },
+  {
+   "call": [
+    "create_linked",
+    {
+     "tag": "alice_tag",
+     "typed": "",
+     "copyright_of": "<copyright_of>"
+    }
+   ],
+   "outcome": [
+    "ok",
+    "{\"canonical_id\": \"00000000-0000-0000-0000-000000000002\", \"character_id\": \"00000000-0000-0000-0000-000000000002\", \"id\": \"00000000-0000-0000-0000-000000000002\", \"name\": \"Alice Tag\", \"name_source\": \"readable\", \"names\": {\"en\": null, \"ja\": null, \"zh\": null}, \"node_type\": \"character\", \"tag\": \"alice_tag\", \"variant_id\": null, \"work_id\": null}"
+   ],
+   "diff": {
+    "entities": {
+     "-": [],
+     "+": [
+      [
+       "",
+       null,
+       "00000000-0000-0000-0000-000000000002",
+       "character",
+       0,
+       0,
+       null,
+       null,
+       "",
+       0,
+       null,
+       null,
+       "",
+       "",
+       null
+      ]
+     ]
+    },
+    "links": {
+     "-": [],
+     "+": [
+      [
+       1,
+       "00000000-0000-0000-0000-000000000002",
+       "alice_tag",
+       "user",
+       "danbooru"
+      ]
+     ]
+    }
+   }
+  },
+  {
+   "call": [
+    "create_linked",
+    {
+     "tag": "alice_tag",
+     "typed": "Kaito",
+     "copyright_of": "<copyright_of>"
+    }
+   ],
+   "outcome": [
+    "ok",
+    "{\"canonical_id\": \"00000000-0000-0000-0000-000000000002\", \"character_id\": \"00000000-0000-0000-0000-000000000002\", \"id\": \"00000000-0000-0000-0000-000000000002\", \"name\": \"Alice Tag\", \"name_source\": \"readable\", \"names\": {\"en\": null, \"ja\": null, \"zh\": null}, \"node_type\": \"character\", \"tag\": \"alice_tag\", \"variant_id\": null, \"work_id\": null}"
+   ],
+   "diff": {}
+  },
+  {
+   "call": [
+    "create_linked",
+    {
+     "tag": "alice_tag",
+     "typed": null,
+     "copyright_of": "<copyright_of>"
+    }
+   ],
+   "outcome": [
+    "ok",
+    "{\"canonical_id\": \"00000000-0000-0000-0000-000000000002\", \"character_id\": \"00000000-0000-0000-0000-000000000002\", \"id\": \"00000000-0000-0000-0000-000000000002\", \"name\": \"Alice Tag\", \"name_source\": \"readable\", \"names\": {\"en\": null, \"ja\": null, \"zh\": null}, \"node_type\": \"character\", \"tag\": \"alice_tag\", \"variant_id\": null, \"work_id\": null}"
+   ],
+   "diff": {}
+  },
+  {
+   "call": [
+    "create_linked",
+    {
+     "tag": "Alice_Tag",
+     "typed": "",
+     "copyright_of": "<copyright_of>"
+    }
+   ],
+   "outcome": [
+    "ok",
+    "{\"canonical_id\": \"00000000-0000-0000-0000-000000000002\", \"character_id\": \"00000000-0000-0000-0000-000000000002\", \"id\": \"00000000-0000-0000-0000-000000000002\", \"name\": \"Alice Tag\", \"name_source\": \"readable\", \"names\": {\"en\": null, \"ja\": null, \"zh\": null}, \"node_type\": \"character\", \"tag\": \"alice_tag\", \"variant_id\": null, \"work_id\": null}"
+   ],
+   "diff": {}
+  },
+  {
+   "call": [
+    "create_linked",
+    {
+     "tag": "Alice_Tag",
+     "typed": "Kaito",
+     "copyright_of": "<copyright_of>"
+    }
+   ],
+   "outcome": [
+    "ok",
+    "{\"canonical_id\": \"00000000-0000-0000-0000-000000000002\", \"character_id\": \"00000000-0000-0000-0000-000000000002\", \"id\": \"00000000-0000-0000-0000-000000000002\", \"name\": \"Alice Tag\", \"name_source\": \"readable\", \"names\": {\"en\": null, \"ja\": null, \"zh\": null}, \"node_type\": \"character\", \"tag\": \"alice_tag\", \"variant_id\": null, \"work_id\": null}"
+   ],
+   "diff": {}
+  },
+  {
+   "call": [
+    "create_linked",
+    {
+     "tag": "Alice_Tag",
+     "typed": null,
+     "copyright_of": "<copyright_of>"
+    }
+   ],
+   "outcome": [
+    "ok",
+    "{\"canonical_id\": \"00000000-0000-0000-0000-000000000002\", \"character_id\": \"00000000-0000-0000-0000-000000000002\", \"id\": \"00000000-0000-0000-0000-000000000002\", \"name\": \"Alice Tag\", \"name_source\": \"readable\", \"names\": {\"en\": null, \"ja\": null, \"zh\": null}, \"node_type\": \"character\", \"tag\": \"alice_tag\", \"variant_id\": null, \"work_id\": null}"
+   ],
+   "diff": {}
+  },
+  {
+   "call": [
+    "create_linked",
+    {
+     "tag": "kaito0_(vocaloid)",
+     "typed": "",
+     "copyright_of": "<copyright_of>"
+    }
+   ],
+   "outcome": [
+    "ok",
+    "{\"canonical_id\": \"00000000-0000-0000-0000-000000000003\", \"character_id\": \"00000000-0000-0000-0000-000000000003\", \"id\": \"00000000-0000-0000-0000-000000000003\", \"name\": \"Kaito0\", \"name_source\": \"readable\", \"names\": {\"en\": null, \"ja\": null, \"zh\": null}, \"node_type\": \"character\", \"tag\": \"kaito0_(vocaloid)\", \"variant_id\": null, \"work_id\": \"00000000-0000-0000-0000-000000000004\"}"
+   ],
+   "diff": {
+    "entities": {
+     "-": [],
+     "+": [
+      [
+       "",
+       null,
+       "00000000-0000-0000-0000-000000000003",
+       "character",
+       0,
+       0,
+       null,
+       null,
+       "",
+       0,
+       null,
+       null,
+       "",
+       "vocaloid",
+       "00000000-0000-0000-0000-000000000004"
+      ],
+      [
+       "",
+       null,
+       "00000000-0000-0000-0000-000000000004",
+       "work",
+       0,
+       0,
+       null,
+       null,
+       "",
+       0,
+       null,
+       null,
+       "",
+       "",
+       null
+      ]
+     ]
+    },
+    "links": {
+     "-": [],
+     "+": [
+      [
+       1,
+       "00000000-0000-0000-0000-000000000003",
+       "kaito0_(vocaloid)",
+       "user",
+       "danbooru"
+      ],
+      [
+       1,
+       "00000000-0000-0000-0000-000000000004",
+       "vocaloid",
+       "user",
+       "danbooru"
+      ],
+      [
+       1,
+       "00000000-0000-0000-0000-000000000004",
+       "vocaloid",
+       "user",
+       "qualifier"
+      ]
+     ]
+    },
+    "names": {
+     "-": [],
+     "+": [
+      [
+       "00000000-0000-0000-0000-000000000004",
+       "en",
+       0,
+       0,
+       "display",
+       "index",
+       "Vocaloid"
+      ]
+     ]
+    },
+    "work_review": {
+     "-": [],
+     "+": [
+      [
+       "00000000-0000-0000-0000-000000000004",
+       "从 Danbooru 角色的作品自动建立",
+       0,
+       "confirmed"
+      ]
+     ]
+    }
+   }
+  },
+  {
+   "call": [
+    "create_linked",
+    {
+     "tag": "zed0_(series_x)",
+     "typed": "",
+     "copyright_of": "<copyright_of>"
+    }
+   ],
+   "outcome": [
+    "ok",
+    "{\"canonical_id\": \"00000000-0000-0000-0000-000000000005\", \"character_id\": \"00000000-0000-0000-0000-000000000005\", \"id\": \"00000000-0000-0000-0000-000000000005\", \"name\": \"Zed0\", \"name_source\": \"readable\", \"names\": {\"en\": null, \"ja\": null, \"zh\": null}, \"node_type\": \"character\", \"tag\": \"zed0_(series_x)\", \"variant_id\": null, \"work_id\": \"00000000-0000-0000-0000-000000000006\"}"
+   ],
+   "diff": {
+    "entities": {
+     "-": [],
+     "+": [
+      [
+       "",
+       null,
+       "00000000-0000-0000-0000-000000000005",
+       "character",
+       0,
+       0,
+       null,
+       null,
+       "",
+       0,
+       null,
+       null,
+       "",
+       "series_x",
+       "00000000-0000-0000-0000-000000000006"
+      ],
+      [
+       "",
+       null,
+       "00000000-0000-0000-0000-000000000006",
+       "work",
+       0,
+       0,
+       null,
+       null,
+       "",
+       0,
+       null,
+       null,
+       "",
+       "",
+       null
+      ]
+     ]
+    },
+    "links": {
+     "-": [],
+     "+": [
+      [
+       1,
+       "00000000-0000-0000-0000-000000000005",
+       "zed0_(series_x)",
+       "user",
+       "danbooru"
+      ],
+      [
+       1,
+       "00000000-0000-0000-0000-000000000006",
+       "series_x",
+       "user",
+       "danbooru"
+      ],
+      [
+       1,
+       "00000000-0000-0000-0000-000000000006",
+       "series_x",
+       "user",
+       "qualifier"
+      ]
+     ]
+    },
+    "names": {
+     "-": [],
+     "+": [
+      [
+       "00000000-0000-0000-0000-000000000006",
+       "en",
+       0,
+       0,
+       "display",
+       "index",
+       "Series X"
+      ]
+     ]
+    },
+    "work_review": {
+     "-": [],
+     "+": [
+      [
+       "00000000-0000-0000-0000-000000000006",
+       "从 Danbooru 角色的作品自动建立",
+       0,
+       "confirmed"
+      ]
+     ]
+    }
+   }
+  },
+  {
+   "call": [
+    "create_linked",
+    {
+     "tag": "lone0",
+     "typed": "",
+     "copyright_of": "<copyright_of>"
+    }
+   ],
+   "outcome": [
+    "ok",
+    "{\"canonical_id\": \"00000000-0000-0000-0000-000000000007\", \"character_id\": \"00000000-0000-0000-0000-000000000007\", \"id\": \"00000000-0000-0000-0000-000000000007\", \"name\": \"Lone0\", \"name_source\": \"readable\", \"names\": {\"en\": null, \"ja\": null, \"zh\": null}, \"node_type\": \"character\", \"tag\": \"lone0\", \"variant_id\": null, \"work_id\": null}"
+   ],
+   "diff": {
+    "entities": {
+     "-": [],
+     "+": [
+      [
+       "",
+       null,
+       "00000000-0000-0000-0000-000000000007",
+       "character",
+       0,
+       0,
+       null,
+       null,
+       "",
+       0,
+       null,
+       null,
+       "",
+       "",
+       null
+      ]
+     ]
+    },
+    "links": {
+     "-": [],
+     "+": [
+      [
+       1,
+       "00000000-0000-0000-0000-000000000007",
+       "lone0",
+       "user",
+       "danbooru"
+      ]
+     ]
+    }
+   }
+  },
+  {
+   "call": [
+    "create_linked",
+    {
+     "tag": "kaito0_(vocaloid)",
+     "typed": "",
+     "copyright_of": "<copyright_of>"
+    }
+   ],
+   "outcome": [
+    "ok",
+    "{\"canonical_id\": \"00000000-0000-0000-0000-000000000003\", \"character_id\": \"00000000-0000-0000-0000-000000000003\", \"id\": \"00000000-0000-0000-0000-000000000003\", \"name\": \"Kaito0\", \"name_source\": \"readable\", \"names\": {\"en\": null, \"ja\": null, \"zh\": null}, \"node_type\": \"character\", \"tag\": \"kaito0_(vocaloid)\", \"variant_id\": null, \"work_id\": \"00000000-0000-0000-0000-000000000004\"}"
+   ],
+   "diff": {}
+  },
+  {
+   "call": [
+    "create_linked",
+    {
+     "tag": "hero0_(series_x)",
+     "typed": "Hero0 (series x)",
+     "copyright_of": "<copyright_of>"
+    }
+   ],
+   "outcome": [
+    "ok",
+    "{\"canonical_id\": \"00000000-0000-0000-0000-000000000008\", \"character_id\": \"00000000-0000-0000-0000-000000000008\", \"id\": \"00000000-0000-0000-0000-000000000008\", \"name\": \"Hero0\", \"name_source\": \"readable\", \"names\": {\"en\": null, \"ja\": null, \"zh\": null}, \"node_type\": \"character\", \"tag\": \"hero0_(series_x)\", \"variant_id\": null, \"work_id\": \"00000000-0000-0000-0000-000000000006\"}"
+   ],
+   "diff": {
+    "entities": {
+     "-": [],
+     "+": [
+      [
+       "",
+       null,
+       "00000000-0000-0000-0000-000000000008",
+       "character",
+       0,
+       0,
+       null,
+       null,
+       "",
+       0,
+       null,
+       null,
+       "",
+       "series_x",
+       "00000000-0000-0000-0000-000000000006"
+      ]
+     ]
+    },
+    "links": {
+     "-": [],
+     "+": [
+      [
+       1,
+       "00000000-0000-0000-0000-000000000008",
+       "hero0_(series_x)",
+       "user",
+       "danbooru"
+      ]
+     ]
+    }
+   }
+  },
+  {
+   "call": [
+    "create_linked",
+    {
+     "tag": "hero0b",
+     "typed": "hero0b",
+     "copyright_of": "<copyright_of>"
+    }
+   ],
+   "outcome": [
+    "ok",
+    "{\"canonical_id\": \"00000000-0000-0000-0000-000000000009\", \"character_id\": \"00000000-0000-0000-0000-000000000009\", \"id\": \"00000000-0000-0000-0000-000000000009\", \"name\": \"Hero0B\", \"name_source\": \"readable\", \"names\": {\"en\": null, \"ja\": null, \"zh\": null}, \"node_type\": \"character\", \"tag\": \"hero0b\", \"variant_id\": null, \"work_id\": null}"
+   ],
+   "diff": {
+    "entities": {
+     "-": [],
+     "+": [
+      [
+       "",
+       null,
+       "00000000-0000-0000-0000-000000000009",
+       "character",
+       0,
+       0,
+       null,
+       null,
+       "",
+       0,
+       null,
+       null,
+       "",
+       "",
+       null
+      ]
+     ]
+    },
+    "links": {
+     "-": [],
+     "+": [
+      [
+       1,
+       "00000000-0000-0000-0000-000000000009",
+       "hero0b",
+       "user",
+       "danbooru"
+      ]
+     ]
+    }
+   }
+  },
+  {
+   "call": [
+    "create_linked",
+    {
+     "tag": "kaito1_(vocaloid)",
+     "typed": "Kaito",
+     "copyright_of": "<copyright_of>"
+    }
+   ],
+   "outcome": [
+    "ok",
+    "{\"canonical_id\": \"00000000-0000-0000-0000-00000000000a\", \"character_id\": \"00000000-0000-0000-0000-00000000000a\", \"id\": \"00000000-0000-0000-0000-00000000000a\", \"name\": \"Kaito1\", \"name_source\": \"readable\", \"names\": {\"en\": null, \"ja\": null, \"zh\": null}, \"node_type\": \"character\", \"tag\": \"kaito1_(vocaloid)\", \"variant_id\": null, \"work_id\": \"00000000-0000-0000-0000-000000000004\"}"
+   ],
+   "diff": {
+    "entities": {
+     "-": [],
+     "+": [
+      [
+       "",
+       null,
+       "00000000-0000-0000-0000-00000000000a",
+       "character",
+       0,
+       0,
+       null,
+       null,
+       "",
+       0,
+       null,
+       null,
+       "",
+       "vocaloid",
+       "00000000-0000-0000-0000-000000000004"
+      ]
+     ]
+    },
+    "links": {
+     "-": [],
+     "+": [
+      [
+       1,
+       "00000000-0000-0000-0000-00000000000a",
+       "kaito1_(vocaloid)",
+       "user",
+       "danbooru"
+      ]
+     ]
+    },
+    "names": {
+     "-": [],
+     "+": [
+      [
+       "00000000-0000-0000-0000-00000000000a",
+       "",
+       0,
+       0,
+       "alias",
+       "user",
+       "Kaito"
+      ]
+     ]
+    }
+   }
+  },
+  {
+   "call": [
+    "create_linked",
+    {
+     "tag": "zed1_(series_x)",
+     "typed": "Kaito",
+     "copyright_of": "<copyright_of>"
+    }
+   ],
+   "outcome": [
+    "ok",
+    "{\"canonical_id\": \"00000000-0000-0000-0000-00000000000b\", \"character_id\": \"00000000-0000-0000-0000-00000000000b\", \"id\": \"00000000-0000-0000-0000-00000000000b\", \"name\": \"Zed1\", \"name_source\": \"readable\", \"names\": {\"en\": null, \"ja\": null, \"zh\": null}, \"node_type\": \"character\", \"tag\": \"zed1_(series_x)\", \"variant_id\": null, \"work_id\": \"00000000-0000-0000-0000-000000000006\"}"
+   ],
+   "diff": {
+    "entities": {
+     "-": [],
+     "+": [
+      [
+       "",
+       null,
+       "00000000-0000-0000-0000-00000000000b",
+       "character",
+       0,
+       0,
+       null,
+       null,
+       "",
+       0,
+       null,
+       null,
+       "",
+       "series_x",
+       "00000000-0000-0000-0000-000000000006"
+      ]
+     ]
+    },
+    "links": {
+     "-": [],
+     "+": [
+      [
+       1,
+       "00000000-0000-0000-0000-00000000000b",
+       "zed1_(series_x)",
+       "user",
+       "danbooru"
+      ]
+     ]
+    },
+    "names": {
+     "-": [],
+     "+": [
+      [
+       "00000000-0000-0000-0000-00000000000b",
+       "",
+       0,
+       0,
+       "alias",
+       "user",
+       "Kaito"
+      ]
+     ]
+    }
+   }
+  },
+  {
+   "call": [
+    "create_linked",
+    {
+     "tag": "lone1",
+     "typed": "Kaito",
+     "copyright_of": "<copyright_of>"
+    }
+   ],
+   "outcome": [
+    "ok",
+    "{\"canonical_id\": \"00000000-0000-0000-0000-00000000000c\", \"character_id\": \"00000000-0000-0000-0000-00000000000c\", \"id\": \"00000000-0000-0000-0000-00000000000c\", \"name\": \"Lone1\", \"name_source\": \"readable\", \"names\": {\"en\": null, \"ja\": null, \"zh\": null}, \"node_type\": \"character\", \"tag\": \"lone1\", \"variant_id\": null, \"work_id\": null}"
+   ],
+   "diff": {
+    "entities": {
+     "-": [],
+     "+": [
+      [
+       "",
+       null,
+       "00000000-0000-0000-0000-00000000000c",
+       "character",
+       0,
+       0,
+       null,
+       null,
+       "",
+       0,
+       null,
+       null,
+       "",
+       "",
+       null
+      ]
+     ]
+    },
+    "links": {
+     "-": [],
+     "+": [
+      [
+       1,
+       "00000000-0000-0000-0000-00000000000c",
+       "lone1",
+       "user",
+       "danbooru"
+      ]
+     ]
+    },
+    "names": {
+     "-": [],
+     "+": [
+      [
+       "00000000-0000-0000-0000-00000000000c",
+       "",
+       0,
+       0,
+       "alias",
+       "user",
+       "Kaito"
+      ]
+     ]
+    }
+   }
+  },
+  {
+   "call": [
+    "create_linked",
+    {
+     "tag": "kaito1_(vocaloid)",
+     "typed": "Kaito",
+     "copyright_of": "<copyright_of>"
+    }
+   ],
+   "outcome": [
+    "ok",
+    "{\"canonical_id\": \"00000000-0000-0000-0000-00000000000a\", \"character_id\": \"00000000-0000-0000-0000-00000000000a\", \"id\": \"00000000-0000-0000-0000-00000000000a\", \"name\": \"Kaito1\", \"name_source\": \"readable\", \"names\": {\"en\": null, \"ja\": null, \"zh\": null}, \"node_type\": \"character\", \"tag\": \"kaito1_(vocaloid)\", \"variant_id\": null, \"work_id\": \"00000000-0000-0000-0000-000000000004\"}"
+   ],
+   "diff": {}
+  },
+  {
+   "call": [
+    "create_linked",
+    {
+     "tag": "hero1_(series_x)",
+     "typed": "Hero1 (series x)",
+     "copyright_of": "<copyright_of>"
+    }
+   ],
+   "outcome": [
+    "ok",
+    "{\"canonical_id\": \"00000000-0000-0000-0000-00000000000d\", \"character_id\": \"00000000-0000-0000-0000-00000000000d\", \"id\": \"00000000-0000-0000-0000-00000000000d\", \"name\": \"Hero1\", \"name_source\": \"readable\", \"names\": {\"en\": null, \"ja\": null, \"zh\": null}, \"node_type\": \"character\", \"tag\": \"hero1_(series_x)\", \"variant_id\": null, \"work_id\": \"00000000-0000-0000-0000-000000000006\"}"
+   ],
+   "diff": {
+    "entities": {
+     "-": [],
+     "+": [
+      [
+       "",
+       null,
+       "00000000-0000-0000-0000-00000000000d",
+       "character",
+       0,
+       0,
+       null,
+       null,
+       "",
+       0,
+       null,
+       null,
+       "",
+       "series_x",
+       "00000000-0000-0000-0000-000000000006"
+      ]
+     ]
+    },
+    "links": {
+     "-": [],
+     "+": [
+      [
+       1,
+       "00000000-0000-0000-0000-00000000000d",
+       "hero1_(series_x)",
+       "user",
+       "danbooru"
+      ]
+     ]
+    }
+   }
+  },
+  {
+   "call": [
+    "create_linked",
+    {
+     "tag": "hero1b",
+     "typed": "hero1b",
+     "copyright_of": "<copyright_of>"
+    }
+   ],
+   "outcome": [
+    "ok",
+    "{\"canonical_id\": \"00000000-0000-0000-0000-00000000000e\", \"character_id\": \"00000000-0000-0000-0000-00000000000e\", \"id\": \"00000000-0000-0000-0000-00000000000e\", \"name\": \"Hero1B\", \"name_source\": \"readable\", \"names\": {\"en\": null, \"ja\": null, \"zh\": null}, \"node_type\": \"character\", \"tag\": \"hero1b\", \"variant_id\": null, \"work_id\": null}"
+   ],
+   "diff": {
+    "entities": {
+     "-": [],
+     "+": [
+      [
+       "",
+       null,
+       "00000000-0000-0000-0000-00000000000e",
+       "character",
+       0,
+       0,
+       null,
+       null,
+       "",
+       0,
+       null,
+       null,
+       "",
+       "",
+       null
+      ]
+     ]
+    },
+    "links": {
+     "-": [],
+     "+": [
+      [
+       1,
+       "00000000-0000-0000-0000-00000000000e",
+       "hero1b",
+       "user",
+       "danbooru"
+      ]
+     ]
+    }
+   }
+  },
+  {
+   "call": [
+    "create_linked",
+    {
+     "tag": "kaito2_(vocaloid)",
+     "typed": null,
+     "copyright_of": "<copyright_of>"
+    }
+   ],
+   "outcome": [
+    "ok",
+    "{\"canonical_id\": \"00000000-0000-0000-0000-00000000000f\", \"character_id\": \"00000000-0000-0000-0000-00000000000f\", \"id\": \"00000000-0000-0000-0000-00000000000f\", \"name\": \"Kaito2\", \"name_source\": \"readable\", \"names\": {\"en\": null, \"ja\": null, \"zh\": null}, \"node_type\": \"character\", \"tag\": \"kaito2_(vocaloid)\", \"variant_id\": null, \"work_id\": \"00000000-0000-0000-0000-000000000004\"}"
+   ],
+   "diff": {
+    "entities": {
+     "-": [],
+     "+": [
+      [
+       "",
+       null,
+       "00000000-0000-0000-0000-00000000000f",
+       "character",
+       0,
+       0,
+       null,
+       null,
+       "",
+       0,
+       null,
+       null,
+       "",
+       "vocaloid",
+       "00000000-0000-0000-0000-000000000004"
+      ]
+     ]
+    },
+    "links": {
+     "-": [],
+     "+": [
+      [
+       1,
+       "00000000-0000-0000-0000-00000000000f",
+       "kaito2_(vocaloid)",
+       "user",
+       "danbooru"
+      ]
+     ]
+    }
+   }
+  },
+  {
+   "call": [
+    "create_linked",
+    {
+     "tag": "zed2_(series_x)",
+     "typed": null,
+     "copyright_of": "<copyright_of>"
+    }
+   ],
+   "outcome": [
+    "ok",
+    "{\"canonical_id\": \"00000000-0000-0000-0000-000000000010\", \"character_id\": \"00000000-0000-0000-0000-000000000010\", \"id\": \"00000000-0000-0000-0000-000000000010\", \"name\": \"Zed2\", \"name_source\": \"readable\", \"names\": {\"en\": null, \"ja\": null, \"zh\": null}, \"node_type\": \"character\", \"tag\": \"zed2_(series_x)\", \"variant_id\": null, \"work_id\": \"00000000-0000-0000-0000-000000000006\"}"
+   ],
+   "diff": {
+    "entities": {
+     "-": [],
+     "+": [
+      [
+       "",
+       null,
+       "00000000-0000-0000-0000-000000000010",
+       "character",
+       0,
+       0,
+       null,
+       null,
+       "",
+       0,
+       null,
+       null,
+       "",
+       "series_x",
+       "00000000-0000-0000-0000-000000000006"
+      ]
+     ]
+    },
+    "links": {
+     "-": [],
+     "+": [
+      [
+       1,
+       "00000000-0000-0000-0000-000000000010",
+       "zed2_(series_x)",
+       "user",
+       "danbooru"
+      ]
+     ]
+    }
+   }
+  },
+  {
+   "call": [
+    "create_linked",
+    {
+     "tag": "lone2",
+     "typed": null,
+     "copyright_of": "<copyright_of>"
+    }
+   ],
+   "outcome": [
+    "ok",
+    "{\"canonical_id\": \"00000000-0000-0000-0000-000000000011\", \"character_id\": \"00000000-0000-0000-0000-000000000011\", \"id\": \"00000000-0000-0000-0000-000000000011\", \"name\": \"Lone2\", \"name_source\": \"readable\", \"names\": {\"en\": null, \"ja\": null, \"zh\": null}, \"node_type\": \"character\", \"tag\": \"lone2\", \"variant_id\": null, \"work_id\": null}"
+   ],
+   "diff": {
+    "entities": {
+     "-": [],
+     "+": [
+      [
+       "",
+       null,
+       "00000000-0000-0000-0000-000000000011",
+       "character",
+       0,
+       0,
+       null,
+       null,
+       "",
+       0,
+       null,
+       null,
+       "",
+       "",
+       null
+      ]
+     ]
+    },
+    "links": {
+     "-": [],
+     "+": [
+      [
+       1,
+       "00000000-0000-0000-0000-000000000011",
+       "lone2",
+       "user",
+       "danbooru"
+      ]
+     ]
+    }
+   }
+  },
+  {
+   "call": [
+    "create_linked",
+    {
+     "tag": "kaito2_(vocaloid)",
+     "typed": null,
+     "copyright_of": "<copyright_of>"
+    }
+   ],
+   "outcome": [
+    "ok",
+    "{\"canonical_id\": \"00000000-0000-0000-0000-00000000000f\", \"character_id\": \"00000000-0000-0000-0000-00000000000f\", \"id\": \"00000000-0000-0000-0000-00000000000f\", \"name\": \"Kaito2\", \"name_source\": \"readable\", \"names\": {\"en\": null, \"ja\": null, \"zh\": null}, \"node_type\": \"character\", \"tag\": \"kaito2_(vocaloid)\", \"variant_id\": null, \"work_id\": \"00000000-0000-0000-0000-000000000004\"}"
+   ],
+   "diff": {}
+  },
+  {
+   "call": [
+    "create_linked",
+    {
+     "tag": "hero2_(series_x)",
+     "typed": "Hero2 (series x)",
+     "copyright_of": "<copyright_of>"
+    }
+   ],
+   "outcome": [
+    "ok",
+    "{\"canonical_id\": \"00000000-0000-0000-0000-000000000012\", \"character_id\": \"00000000-0000-0000-0000-000000000012\", \"id\": \"00000000-0000-0000-0000-000000000012\", \"name\": \"Hero2\", \"name_source\": \"readable\", \"names\": {\"en\": null, \"ja\": null, \"zh\": null}, \"node_type\": \"character\", \"tag\": \"hero2_(series_x)\", \"variant_id\": null, \"work_id\": \"00000000-0000-0000-0000-000000000006\"}"
+   ],
+   "diff": {
+    "entities": {
+     "-": [],
+     "+": [
+      [
+       "",
+       null,
+       "00000000-0000-0000-0000-000000000012",
+       "character",
+       0,
+       0,
+       null,
+       null,
+       "",
+       0,
+       null,
+       null,
+       "",
+       "series_x",
+       "00000000-0000-0000-0000-000000000006"
+      ]
+     ]
+    },
+    "links": {
+     "-": [],
+     "+": [
+      [
+       1,
+       "00000000-0000-0000-0000-000000000012",
+       "hero2_(series_x)",
+       "user",
+       "danbooru"
+      ]
+     ]
+    }
+   }
+  },
+  {
+   "call": [
+    "create_linked",
+    {
+     "tag": "hero2b",
+     "typed": "hero2b",
+     "copyright_of": "<copyright_of>"
+    }
+   ],
+   "outcome": [
+    "ok",
+    "{\"canonical_id\": \"00000000-0000-0000-0000-000000000013\", \"character_id\": \"00000000-0000-0000-0000-000000000013\", \"id\": \"00000000-0000-0000-0000-000000000013\", \"name\": \"Hero2B\", \"name_source\": \"readable\", \"names\": {\"en\": null, \"ja\": null, \"zh\": null}, \"node_type\": \"character\", \"tag\": \"hero2b\", \"variant_id\": null, \"work_id\": null}"
+   ],
+   "diff": {
+    "entities": {
+     "-": [],
+     "+": [
+      [
+       "",
+       null,
+       "00000000-0000-0000-0000-000000000013",
+       "character",
+       0,
+       0,
+       null,
+       null,
+       "",
+       0,
+       null,
+       null,
+       "",
+       "",
+       null
+      ]
+     ]
+    },
+    "links": {
+     "-": [],
+     "+": [
+      [
+       1,
+       "00000000-0000-0000-0000-000000000013",
+       "hero2b",
+       "user",
+       "danbooru"
+      ]
+     ]
+    }
+   }
+  },
+  {
+   "call": [
+    "create_linked",
+    {
+     "tag": "kaito3_(vocaloid)",
+     "typed": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz",
+     "copyright_of": "<copyright_of>"
+    }
+   ],
+   "outcome": [
+    "ok",
+    "{\"canonical_id\": \"00000000-0000-0000-0000-000000000014\", \"character_id\": \"00000000-0000-0000-0000-000000000014\", \"id\": \"00000000-0000-0000-0000-000000000014\", \"name\": \"Kaito3\", \"name_source\": \"readable\", \"names\": {\"en\": null, \"ja\": null, \"zh\": null}, \"node_type\": \"character\", \"tag\": \"kaito3_(vocaloid)\", \"variant_id\": null, \"work_id\": \"00000000-0000-0000-0000-000000000004\"}"
+   ],
+   "diff": {
+    "entities": {
+     "-": [],
+     "+": [
+      [
+       "",
+       null,
+       "00000000-0000-0000-0000-000000000014",
+       "character",
+       0,
+       0,
+       null,
+       null,
+       "",
+       0,
+       null,
+       null,
+       "",
+       "vocaloid",
+       "00000000-0000-0000-0000-000000000004"
+      ]
+     ]
+    },
+    "links": {
+     "-": [],
+     "+": [
+      [
+       1,
+       "00000000-0000-0000-0000-000000000014",
+       "kaito3_(vocaloid)",
+       "user",
+       "danbooru"
+      ]
+     ]
+    },
+    "names": {
+     "-": [],
+     "+": [
+      [
+       "00000000-0000-0000-0000-000000000014",
+       "",
+       0,
+       0,
+       "alias",
+       "user",
+       "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+      ]
+     ]
+    }
+   }
+  },
+  {
+   "call": [
+    "create_linked",
+    {
+     "tag": "zed3_(series_x)",
+     "typed": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz",
+     "copyright_of": "<copyright_of>"
+    }
+   ],
+   "outcome": [
+    "ok",
+    "{\"canonical_id\": \"00000000-0000-0000-0000-000000000015\", \"character_id\": \"00000000-0000-0000-0000-000000000015\", \"id\": \"00000000-0000-0000-0000-000000000015\", \"name\": \"Zed3\", \"name_source\": \"readable\", \"names\": {\"en\": null, \"ja\": null, \"zh\": null}, \"node_type\": \"character\", \"tag\": \"zed3_(series_x)\", \"variant_id\": null, \"work_id\": \"00000000-0000-0000-0000-000000000006\"}"
+   ],
+   "diff": {
+    "entities": {
+     "-": [],
+     "+": [
+      [
+       "",
+       null,
+       "00000000-0000-0000-0000-000000000015",
+       "character",
+       0,
+       0,
+       null,
+       null,
+       "",
+       0,
+       null,
+       null,
+       "",
+       "series_x",
+       "00000000-0000-0000-0000-000000000006"
+      ]
+     ]
+    },
+    "links": {
+     "-": [],
+     "+": [
+      [
+       1,
+       "00000000-0000-0000-0000-000000000015",
+       "zed3_(series_x)",
+       "user",
+       "danbooru"
+      ]
+     ]
+    },
+    "names": {
+     "-": [],
+     "+": [
+      [
+       "00000000-0000-0000-0000-000000000015",
+       "",
+       0,
+       0,
+       "alias",
+       "user",
+       "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+      ]
+     ]
+    }
+   }
+  },
+  {
+   "call": [
+    "create_linked",
+    {
+     "tag": "lone3",
+     "typed": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz",
+     "copyright_of": "<copyright_of>"
+    }
+   ],
+   "outcome": [
+    "ok",
+    "{\"canonical_id\": \"00000000-0000-0000-0000-000000000016\", \"character_id\": \"00000000-0000-0000-0000-000000000016\", \"id\": \"00000000-0000-0000-0000-000000000016\", \"name\": \"Lone3\", \"name_source\": \"readable\", \"names\": {\"en\": null, \"ja\": null, \"zh\": null}, \"node_type\": \"character\", \"tag\": \"lone3\", \"variant_id\": null, \"work_id\": null}"
+   ],
+   "diff": {
+    "entities": {
+     "-": [],
+     "+": [
+      [
+       "",
+       null,
+       "00000000-0000-0000-0000-000000000016",
+       "character",
+       0,
+       0,
+       null,
+       null,
+       "",
+       0,
+       null,
+       null,
+       "",
+       "",
+       null
+      ]
+     ]
+    },
+    "links": {
+     "-": [],
+     "+": [
+      [
+       1,
+       "00000000-0000-0000-0000-000000000016",
+       "lone3",
+       "user",
+       "danbooru"
+      ]
+     ]
+    },
+    "names": {
+     "-": [],
+     "+": [
+      [
+       "00000000-0000-0000-0000-000000000016",
+       "",
+       0,
+       0,
+       "alias",
+       "user",
+       "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+      ]
+     ]
+    }
+   }
+  },
+  {
+   "call": [
+    "create_linked",
+    {
+     "tag": "kaito3_(vocaloid)",
+     "typed": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz",
+     "copyright_of": "<copyright_of>"
+    }
+   ],
+   "outcome": [
+    "ok",
+    "{\"canonical_id\": \"00000000-0000-0000-0000-000000000014\", \"character_id\": \"00000000-0000-0000-0000-000000000014\", \"id\": \"00000000-0000-0000-0000-000000000014\", \"name\": \"Kaito3\", \"name_source\": \"readable\", \"names\": {\"en\": null, \"ja\": null, \"zh\": null}, \"node_type\": \"character\", \"tag\": \"kaito3_(vocaloid)\", \"variant_id\": null, \"work_id\": \"00000000-0000-0000-0000-000000000004\"}"
+   ],
+   "diff": {}
+  },
+  {
+   "call": [
+    "create_linked",
+    {
+     "tag": "hero3_(series_x)",
+     "typed": "Hero3 (series x)",
+     "copyright_of": "<copyright_of>"
+    }
+   ],
+   "outcome": [
+    "ok",
+    "{\"canonical_id\": \"00000000-0000-0000-0000-000000000017\", \"character_id\": \"00000000-0000-0000-0000-000000000017\", \"id\": \"00000000-0000-0000-0000-000000000017\", \"name\": \"Hero3\", \"name_source\": \"readable\", \"names\": {\"en\": null, \"ja\": null, \"zh\": null}, \"node_type\": \"character\", \"tag\": \"hero3_(series_x)\", \"variant_id\": null, \"work_id\": \"00000000-0000-0000-0000-000000000006\"}"
+   ],
+   "diff": {
+    "entities": {
+     "-": [],
+     "+": [
+      [
+       "",
+       null,
+       "00000000-0000-0000-0000-000000000017",
+       "character",
+       0,
+       0,
+       null,
+       null,
+       "",
+       0,
+       null,
+       null,
+       "",
+       "series_x",
+       "00000000-0000-0000-0000-000000000006"
+      ]
+     ]
+    },
+    "links": {
+     "-": [],
+     "+": [
+      [
+       1,
+       "00000000-0000-0000-0000-000000000017",
+       "hero3_(series_x)",
+       "user",
+       "danbooru"
+      ]
+     ]
+    }
+   }
+  },
+  {
+   "call": [
+    "create_linked",
+    {
+     "tag": "hero3b",
+     "typed": "hero3b",
+     "copyright_of": "<copyright_of>"
+    }
+   ],
+   "outcome": [
+    "ok",
+    "{\"canonical_id\": \"00000000-0000-0000-0000-000000000018\", \"character_id\": \"00000000-0000-0000-0000-000000000018\", \"id\": \"00000000-0000-0000-0000-000000000018\", \"name\": \"Hero3B\", \"name_source\": \"readable\", \"names\": {\"en\": null, \"ja\": null, \"zh\": null}, \"node_type\": \"character\", \"tag\": \"hero3b\", \"variant_id\": null, \"work_id\": null}"
+   ],
+   "diff": {
+    "entities": {
+     "-": [],
+     "+": [
+      [
+       "",
+       null,
+       "00000000-0000-0000-0000-000000000018",
+       "character",
+       0,
+       0,
+       null,
+       null,
+       "",
+       0,
+       null,
+       null,
+       "",
+       "",
+       null
+      ]
+     ]
+    },
+    "links": {
+     "-": [],
+     "+": [
+      [
+       1,
+       "00000000-0000-0000-0000-000000000018",
+       "hero3b",
+       "user",
+       "danbooru"
+      ]
+     ]
+    }
+   }
+  },
+  {
+   "call": [
+    "create_linked",
+    {
+     "tag": "kaito4_(vocaloid)",
+     "typed": 7,
+     "copyright_of": "<copyright_of>"
+    }
+   ],
+   "outcome": [
+    "ok",
+    "{\"canonical_id\": \"00000000-0000-0000-0000-000000000019\", \"character_id\": \"00000000-0000-0000-0000-000000000019\", \"id\": \"00000000-0000-0000-0000-000000000019\", \"name\": \"Kaito4\", \"name_source\": \"readable\", \"names\": {\"en\": null, \"ja\": null, \"zh\": null}, \"node_type\": \"character\", \"tag\": \"kaito4_(vocaloid)\", \"variant_id\": null, \"work_id\": \"00000000-0000-0000-0000-000000000004\"}"
+   ],
+   "diff": {
+    "entities": {
+     "-": [],
+     "+": [
+      [
+       "",
+       null,
+       "00000000-0000-0000-0000-000000000019",
+       "character",
+       0,
+       0,
+       null,
+       null,
+       "",
+       0,
+       null,
+       null,
+       "",
+       "vocaloid",
+       "00000000-0000-0000-0000-000000000004"
+      ]
+     ]
+    },
+    "links": {
+     "-": [],
+     "+": [
+      [
+       1,
+       "00000000-0000-0000-0000-000000000019",
+       "kaito4_(vocaloid)",
+       "user",
+       "danbooru"
+      ]
+     ]
+    }
+   }
+  },
+  {
+   "call": [
+    "create_linked",
+    {
+     "tag": "zed4_(series_x)",
+     "typed": 7,
+     "copyright_of": "<copyright_of>"
+    }
+   ],
+   "outcome": [
+    "ok",
+    "{\"canonical_id\": \"00000000-0000-0000-0000-00000000001a\", \"character_id\": \"00000000-0000-0000-0000-00000000001a\", \"id\": \"00000000-0000-0000-0000-00000000001a\", \"name\": \"Zed4\", \"name_source\": \"readable\", \"names\": {\"en\": null, \"ja\": null, \"zh\": null}, \"node_type\": \"character\", \"tag\": \"zed4_(series_x)\", \"variant_id\": null, \"work_id\": \"00000000-0000-0000-0000-000000000006\"}"
+   ],
+   "diff": {
+    "entities": {
+     "-": [],
+     "+": [
+      [
+       "",
+       null,
+       "00000000-0000-0000-0000-00000000001a",
+       "character",
+       0,
+       0,
+       null,
+       null,
+       "",
+       0,
+       null,
+       null,
+       "",
+       "series_x",
+       "00000000-0000-0000-0000-000000000006"
+      ]
+     ]
+    },
+    "links": {
+     "-": [],
+     "+": [
+      [
+       1,
+       "00000000-0000-0000-0000-00000000001a",
+       "zed4_(series_x)",
+       "user",
+       "danbooru"
+      ]
+     ]
+    }
+   }
+  },
+  {
+   "call": [
+    "create_linked",
+    {
+     "tag": "lone4",
+     "typed": 7,
+     "copyright_of": "<copyright_of>"
+    }
+   ],
+   "outcome": [
+    "ok",
+    "{\"canonical_id\": \"00000000-0000-0000-0000-00000000001b\", \"character_id\": \"00000000-0000-0000-0000-00000000001b\", \"id\": \"00000000-0000-0000-0000-00000000001b\", \"name\": \"Lone4\", \"name_source\": \"readable\", \"names\": {\"en\": null, \"ja\": null, \"zh\": null}, \"node_type\": \"character\", \"tag\": \"lone4\", \"variant_id\": null, \"work_id\": null}"
+   ],
+   "diff": {
+    "entities": {
+     "-": [],
+     "+": [
+      [
+       "",
+       null,
+       "00000000-0000-0000-0000-00000000001b",
+       "character",
+       0,
+       0,
+       null,
+       null,
+       "",
+       0,
+       null,
+       null,
+       "",
+       "",
+       null
+      ]
+     ]
+    },
+    "links": {
+     "-": [],
+     "+": [
+      [
+       1,
+       "00000000-0000-0000-0000-00000000001b",
+       "lone4",
+       "user",
+       "danbooru"
+      ]
+     ]
+    }
+   }
+  },
+  {
+   "call": [
+    "create_linked",
+    {
+     "tag": "kaito4_(vocaloid)",
+     "typed": 7,
+     "copyright_of": "<copyright_of>"
+    }
+   ],
+   "outcome": [
+    "ok",
+    "{\"canonical_id\": \"00000000-0000-0000-0000-000000000019\", \"character_id\": \"00000000-0000-0000-0000-000000000019\", \"id\": \"00000000-0000-0000-0000-000000000019\", \"name\": \"Kaito4\", \"name_source\": \"readable\", \"names\": {\"en\": null, \"ja\": null, \"zh\": null}, \"node_type\": \"character\", \"tag\": \"kaito4_(vocaloid)\", \"variant_id\": null, \"work_id\": \"00000000-0000-0000-0000-000000000004\"}"
+   ],
+   "diff": {}
+  },
+  {
+   "call": [
+    "create_linked",
+    {
+     "tag": "hero4_(series_x)",
+     "typed": "Hero4 (series x)",
+     "copyright_of": "<copyright_of>"
+    }
+   ],
+   "outcome": [
+    "ok",
+    "{\"canonical_id\": \"00000000-0000-0000-0000-00000000001c\", \"character_id\": \"00000000-0000-0000-0000-00000000001c\", \"id\": \"00000000-0000-0000-0000-00000000001c\", \"name\": \"Hero4\", \"name_source\": \"readable\", \"names\": {\"en\": null, \"ja\": null, \"zh\": null}, \"node_type\": \"character\", \"tag\": \"hero4_(series_x)\", \"variant_id\": null, \"work_id\": \"00000000-0000-0000-0000-000000000006\"}"
+   ],
+   "diff": {
+    "entities": {
+     "-": [],
+     "+": [
+      [
+       "",
+       null,
+       "00000000-0000-0000-0000-00000000001c",
+       "character",
+       0,
+       0,
+       null,
+       null,
+       "",
+       0,
+       null,
+       null,
+       "",
+       "series_x",
+       "00000000-0000-0000-0000-000000000006"
+      ]
+     ]
+    },
+    "links": {
+     "-": [],
+     "+": [
+      [
+       1,
+       "00000000-0000-0000-0000-00000000001c",
+       "hero4_(series_x)",
+       "user",
+       "danbooru"
+      ]
+     ]
+    }
+   }
+  },
+  {
+   "call": [
+    "create_linked",
+    {
+     "tag": "hero4b",
+     "typed": "hero4b",
+     "copyright_of": "<copyright_of>"
+    }
+   ],
+   "outcome": [
+    "ok",
+    "{\"canonical_id\": \"00000000-0000-0000-0000-00000000001d\", \"character_id\": \"00000000-0000-0000-0000-00000000001d\", \"id\": \"00000000-0000-0000-0000-00000000001d\", \"name\": \"Hero4B\", \"name_source\": \"readable\", \"names\": {\"en\": null, \"ja\": null, \"zh\": null}, \"node_type\": \"character\", \"tag\": \"hero4b\", \"variant_id\": null, \"work_id\": null}"
+   ],
+   "diff": {
+    "entities": {
+     "-": [],
+     "+": [
+      [
+       "",
+       null,
+       "00000000-0000-0000-0000-00000000001d",
+       "character",
+       0,
+       0,
+       null,
+       null,
+       "",
+       0,
+       null,
+       null,
+       "",
+       "",
+       null
+      ]
+     ]
+    },
+    "links": {
+     "-": [],
+     "+": [
+      [
+       1,
+       "00000000-0000-0000-0000-00000000001d",
+       "hero4b",
+       "user",
+       "danbooru"
+      ]
+     ]
+    }
+   }
+  }
+ ],
+ "final": {
+  "entities": [
+   [
+    "artist",
+    "external_key",
+    "id",
+    "kind",
+    "label_only",
+    "mascot",
+    "mascot_origin",
+    "merged_into",
+    "name",
+    "original",
+    "parent_id",
+    "tag",
+    "variant",
+    "work",
+    "work_id"
+   ],
+   [
+    "",
+    null,
+    "00000000-0000-0000-0000-000000000001",
+    "character",
+    0,
+    0,
+    null,
+    null,
+    "",
+    0,
+    null,
+    null,
+    "",
+    "",
+    null
+   ],
+   [
+    "",
+    null,
+    "00000000-0000-0000-0000-000000000002",
+    "character",
+    0,
+    0,
+    null,
+    null,
+    "",
+    0,
+    null,
+    null,
+    "",
+    "",
+    null
+   ],
+   [
+    "",
+    null,
+    "00000000-0000-0000-0000-000000000003",
+    "character",
+    0,
+    0,
+    null,
+    null,
+    "",
+    0,
+    null,
+    null,
+    "",
+    "vocaloid",
+    "00000000-0000-0000-0000-000000000004"
+   ],
+   [
+    "",
+    null,
+    "00000000-0000-0000-0000-000000000004",
+    "work",
+    0,
+    0,
+    null,
+    null,
+    "",
+    0,
+    null,
+    null,
+    "",
+    "",
+    null
+   ],
+   [
+    "",
+    null,
+    "00000000-0000-0000-0000-000000000005",
+    "character",
+    0,
+    0,
+    null,
+    null,
+    "",
+    0,
+    null,
+    null,
+    "",
+    "series_x",
+    "00000000-0000-0000-0000-000000000006"
+   ],
+   [
+    "",
+    null,
+    "00000000-0000-0000-0000-000000000006",
+    "work",
+    0,
+    0,
+    null,
+    null,
+    "",
+    0,
+    null,
+    null,
+    "",
+    "",
+    null
+   ],
+   [
+    "",
+    null,
+    "00000000-0000-0000-0000-000000000007",
+    "character",
+    0,
+    0,
+    null,
+    null,
+    "",
+    0,
+    null,
+    null,
+    "",
+    "",
+    null
+   ],
+   [
+    "",
+    null,
+    "00000000-0000-0000-0000-000000000008",
+    "character",
+    0,
+    0,
+    null,
+    null,
+    "",
+    0,
+    null,
+    null,
+    "",
+    "series_x",
+    "00000000-0000-0000-0000-000000000006"
+   ],
+   [
+    "",
+    null,
+    "00000000-0000-0000-0000-000000000009",
+    "character",
+    0,
+    0,
+    null,
+    null,
+    "",
+    0,
+    null,
+    null,
+    "",
+    "",
+    null
+   ],
+   [
+    "",
+    null,
+    "00000000-0000-0000-0000-00000000000a",
+    "character",
+    0,
+    0,
+    null,
+    null,
+    "",
+    0,
+    null,
+    null,
+    "",
+    "vocaloid",
+    "00000000-0000-0000-0000-000000000004"
+   ],
+   [
+    "",
+    null,
+    "00000000-0000-0000-0000-00000000000b",
+    "character",
+    0,
+    0,
+    null,
+    null,
+    "",
+    0,
+    null,
+    null,
+    "",
+    "series_x",
+    "00000000-0000-0000-0000-000000000006"
+   ],
+   [
+    "",
+    null,
+    "00000000-0000-0000-0000-00000000000c",
+    "character",
+    0,
+    0,
+    null,
+    null,
+    "",
+    0,
+    null,
+    null,
+    "",
+    "",
+    null
+   ],
+   [
+    "",
+    null,
+    "00000000-0000-0000-0000-00000000000d",
+    "character",
+    0,
+    0,
+    null,
+    null,
+    "",
+    0,
+    null,
+    null,
+    "",
+    "series_x",
+    "00000000-0000-0000-0000-000000000006"
+   ],
+   [
+    "",
+    null,
+    "00000000-0000-0000-0000-00000000000e",
+    "character",
+    0,
+    0,
+    null,
+    null,
+    "",
+    0,
+    null,
+    null,
+    "",
+    "",
+    null
+   ],
+   [
+    "",
+    null,
+    "00000000-0000-0000-0000-00000000000f",
+    "character",
+    0,
+    0,
+    null,
+    null,
+    "",
+    0,
+    null,
+    null,
+    "",
+    "vocaloid",
+    "00000000-0000-0000-0000-000000000004"
+   ],
+   [
+    "",
+    null,
+    "00000000-0000-0000-0000-000000000010",
+    "character",
+    0,
+    0,
+    null,
+    null,
+    "",
+    0,
+    null,
+    null,
+    "",
+    "series_x",
+    "00000000-0000-0000-0000-000000000006"
+   ],
+   [
+    "",
+    null,
+    "00000000-0000-0000-0000-000000000011",
+    "character",
+    0,
+    0,
+    null,
+    null,
+    "",
+    0,
+    null,
+    null,
+    "",
+    "",
+    null
+   ],
+   [
+    "",
+    null,
+    "00000000-0000-0000-0000-000000000012",
+    "character",
+    0,
+    0,
+    null,
+    null,
+    "",
+    0,
+    null,
+    null,
+    "",
+    "series_x",
+    "00000000-0000-0000-0000-000000000006"
+   ],
+   [
+    "",
+    null,
+    "00000000-0000-0000-0000-000000000013",
+    "character",
+    0,
+    0,
+    null,
+    null,
+    "",
+    0,
+    null,
+    null,
+    "",
+    "",
+    null
+   ],
+   [
+    "",
+    null,
+    "00000000-0000-0000-0000-000000000014",
+    "character",
+    0,
+    0,
+    null,
+    null,
+    "",
+    0,
+    null,
+    null,
+    "",
+    "vocaloid",
+    "00000000-0000-0000-0000-000000000004"
+   ],
+   [
+    "",
+    null,
+    "00000000-0000-0000-0000-000000000015",
+    "character",
+    0,
+    0,
+    null,
+    null,
+    "",
+    0,
+    null,
+    null,
+    "",
+    "series_x",
+    "00000000-0000-0000-0000-000000000006"
+   ],
+   [
+    "",
+    null,
+    "00000000-0000-0000-0000-000000000016",
+    "character",
+    0,
+    0,
+    null,
+    null,
+    "",
+    0,
+    null,
+    null,
+    "",
+    "",
+    null
+   ],
+   [
+    "",
+    null,
+    "00000000-0000-0000-0000-000000000017",
+    "character",
+    0,
+    0,
+    null,
+    null,
+    "",
+    0,
+    null,
+    null,
+    "",
+    "series_x",
+    "00000000-0000-0000-0000-000000000006"
+   ],
+   [
+    "",
+    null,
+    "00000000-0000-0000-0000-000000000018",
+    "character",
+    0,
+    0,
+    null,
+    null,
+    "",
+    0,
+    null,
+    null,
+    "",
+    "",
+    null
+   ],
+   [
+    "",
+    null,
+    "00000000-0000-0000-0000-000000000019",
+    "character",
+    0,
+    0,
+    null,
+    null,
+    "",
+    0,
+    null,
+    null,
+    "",
+    "vocaloid",
+    "00000000-0000-0000-0000-000000000004"
+   ],
+   [
+    "",
+    null,
+    "00000000-0000-0000-0000-00000000001a",
+    "character",
+    0,
+    0,
+    null,
+    null,
+    "",
+    0,
+    null,
+    null,
+    "",
+    "series_x",
+    "00000000-0000-0000-0000-000000000006"
+   ],
+   [
+    "",
+    null,
+    "00000000-0000-0000-0000-00000000001b",
+    "character",
+    0,
+    0,
+    null,
+    null,
+    "",
+    0,
+    null,
+    null,
+    "",
+    "",
+    null
+   ],
+   [
+    "",
+    null,
+    "00000000-0000-0000-0000-00000000001c",
+    "character",
+    0,
+    0,
+    null,
+    null,
+    "",
+    0,
+    null,
+    null,
+    "",
+    "series_x",
+    "00000000-0000-0000-0000-000000000006"
+   ],
+   [
+    "",
+    null,
+    "00000000-0000-0000-0000-00000000001d",
+    "character",
+    0,
+    0,
+    null,
+    null,
+    "",
+    0,
+    null,
+    null,
+    "",
+    "",
+    null
+   ],
+   [
+    "",
+    null,
+    "00000000-0000-0000-0000-000000001001",
+    "character",
+    0,
+    0,
+    null,
+    null,
+    "",
+    0,
+    null,
+    null,
+    "",
+    "Example",
+    null
+   ],
+   [
+    "",
+    null,
+    "00000000-0000-0000-0000-000000001002",
+    "character",
+    0,
+    0,
+    null,
+    null,
+    "",
+    0,
+    null,
+    null,
+    "",
+    "Example",
+    null
+   ],
+   [
+    "",
+    null,
+    "00000000-0000-0000-0000-000000001003",
+    "work",
+    0,
+    0,
+    null,
+    null,
+    "",
+    0,
+    null,
+    null,
+    "",
+    "",
+    null
+   ],
+   [
+    "",
+    null,
+    "00000000-0000-0000-0000-000000001004",
+    "character",
+    0,
+    0,
+    null,
+    null,
+    "",
+    0,
+    null,
+    null,
+    "",
+    "",
+    null
+   ],
+   [
+    "",
+    null,
+    "00000000-0000-0000-0000-000000001005",
+    "character",
+    0,
+    0,
+    null,
+    null,
+    "",
+    0,
+    null,
+    null,
+    "",
+    "",
+    null
+   ],
+   [
+    "",
+    null,
+    "skin-x",
+    "skin",
+    0,
+    0,
+    null,
+    null,
+    "",
+    0,
+    "00000000-0000-0000-0000-000000001001",
+    null,
+    "swimsuit",
+    "",
+    null
+   ]
+  ],
+  "links": [
+   [
+    "current",
+    "entity_id",
+    "key",
+    "source",
+    "system"
+   ],
+   [
+    1,
+    "00000000-0000-0000-0000-000000000001",
+    "a_b",
+    "user",
+    "danbooru"
+   ],
+   [
+    1,
+    "00000000-0000-0000-0000-000000000002",
+    "alice_tag",
+    "user",
+    "danbooru"
+   ],
+   [
+    1,
+    "00000000-0000-0000-0000-000000000003",
+    "kaito0_(vocaloid)",
+    "user",
+    "danbooru"
+   ],
+   [
+    1,
+    "00000000-0000-0000-0000-000000000004",
+    "vocaloid",
+    "user",
+    "danbooru"
+   ],
+   [
+    1,
+    "00000000-0000-0000-0000-000000000004",
+    "vocaloid",
+    "user",
+    "qualifier"
+   ],
+   [
+    1,
+    "00000000-0000-0000-0000-000000000005",
+    "zed0_(series_x)",
+    "user",
+    "danbooru"
+   ],
+   [
+    1,
+    "00000000-0000-0000-0000-000000000006",
+    "series_x",
+    "user",
+    "danbooru"
+   ],
+   [
+    1,
+    "00000000-0000-0000-0000-000000000006",
+    "series_x",
+    "user",
+    "qualifier"
+   ],
+   [
+    1,
+    "00000000-0000-0000-0000-000000000007",
+    "lone0",
+    "user",
+    "danbooru"
+   ],
+   [
+    1,
+    "00000000-0000-0000-0000-000000000008",
+    "hero0_(series_x)",
+    "user",
+    "danbooru"
+   ],
+   [
+    1,
+    "00000000-0000-0000-0000-000000000009",
+    "hero0b",
+    "user",
+    "danbooru"
+   ],
+   [
+    1,
+    "00000000-0000-0000-0000-00000000000a",
+    "kaito1_(vocaloid)",
+    "user",
+    "danbooru"
+   ],
+   [
+    1,
+    "00000000-0000-0000-0000-00000000000b",
+    "zed1_(series_x)",
+    "user",
+    "danbooru"
+   ],
+   [
+    1,
+    "00000000-0000-0000-0000-00000000000c",
+    "lone1",
+    "user",
+    "danbooru"
+   ],
+   [
+    1,
+    "00000000-0000-0000-0000-00000000000d",
+    "hero1_(series_x)",
+    "user",
+    "danbooru"
+   ],
+   [
+    1,
+    "00000000-0000-0000-0000-00000000000e",
+    "hero1b",
+    "user",
+    "danbooru"
+   ],
+   [
+    1,
+    "00000000-0000-0000-0000-00000000000f",
+    "kaito2_(vocaloid)",
+    "user",
+    "danbooru"
+   ],
+   [
+    1,
+    "00000000-0000-0000-0000-000000000010",
+    "zed2_(series_x)",
+    "user",
+    "danbooru"
+   ],
+   [
+    1,
+    "00000000-0000-0000-0000-000000000011",
+    "lone2",
+    "user",
+    "danbooru"
+   ],
+   [
+    1,
+    "00000000-0000-0000-0000-000000000012",
+    "hero2_(series_x)",
+    "user",
+    "danbooru"
+   ],
+   [
+    1,
+    "00000000-0000-0000-0000-000000000013",
+    "hero2b",
+    "user",
+    "danbooru"
+   ],
+   [
+    1,
+    "00000000-0000-0000-0000-000000000014",
+    "kaito3_(vocaloid)",
+    "user",
+    "danbooru"
+   ],
+   [
+    1,
+    "00000000-0000-0000-0000-000000000015",
+    "zed3_(series_x)",
+    "user",
+    "danbooru"
+   ],
+   [
+    1,
+    "00000000-0000-0000-0000-000000000016",
+    "lone3",
+    "user",
+    "danbooru"
+   ],
+   [
+    1,
+    "00000000-0000-0000-0000-000000000017",
+    "hero3_(series_x)",
+    "user",
+    "danbooru"
+   ],
+   [
+    1,
+    "00000000-0000-0000-0000-000000000018",
+    "hero3b",
+    "user",
+    "danbooru"
+   ],
+   [
+    1,
+    "00000000-0000-0000-0000-000000000019",
+    "kaito4_(vocaloid)",
+    "user",
+    "danbooru"
+   ],
+   [
+    1,
+    "00000000-0000-0000-0000-00000000001a",
+    "zed4_(series_x)",
+    "user",
+    "danbooru"
+   ],
+   [
+    1,
+    "00000000-0000-0000-0000-00000000001b",
+    "lone4",
+    "user",
+    "danbooru"
+   ],
+   [
+    1,
+    "00000000-0000-0000-0000-00000000001c",
+    "hero4_(series_x)",
+    "user",
+    "danbooru"
+   ],
+   [
+    1,
+    "00000000-0000-0000-0000-00000000001d",
+    "hero4b",
+    "user",
+    "danbooru"
+   ],
+   [
+    1,
+    "00000000-0000-0000-0000-000000001001",
+    "alice",
+    "import",
+    "ccip"
+   ],
+   [
+    1,
+    "00000000-0000-0000-0000-000000001001",
+    "alice",
+    "import",
+    "danbooru"
+   ],
+   [
+    1,
+    "00000000-0000-0000-0000-000000001002",
+    "bob",
+    "import",
+    "ccip"
+   ],
+   [
+    1,
+    "00000000-0000-0000-0000-000000001002",
+    "bob",
+    "import",
+    "danbooru"
+   ]
+  ],
+  "names": [
+   [
+    "entity_id",
+    "lang",
+    "position",
+    "preferred",
+    "role",
+    "source",
+    "value"
+   ],
+   [
+    "00000000-0000-0000-0000-000000000004",
+    "en",
+    0,
+    0,
+    "display",
+    "index",
+    "Vocaloid"
+   ],
+   [
+    "00000000-0000-0000-0000-000000000006",
+    "en",
+    0,
+    0,
+    "display",
+    "index",
+    "Series X"
+   ],
+   [
+    "00000000-0000-0000-0000-00000000000a",
+    "",
+    0,
+    0,
+    "alias",
+    "user",
+    "Kaito"
+   ],
+   [
+    "00000000-0000-0000-0000-00000000000b",
+    "",
+    0,
+    0,
+    "alias",
+    "user",
+    "Kaito"
+   ],
+   [
+    "00000000-0000-0000-0000-00000000000c",
+    "",
+    0,
+    0,
+    "alias",
+    "user",
+    "Kaito"
+   ],
+   [
+    "00000000-0000-0000-0000-000000000014",
+    "",
+    0,
+    0,
+    "alias",
+    "user",
+    "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+   ],
+   [
+    "00000000-0000-0000-0000-000000000015",
+    "",
+    0,
+    0,
+    "alias",
+    "user",
+    "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+   ],
+   [
+    "00000000-0000-0000-0000-000000000016",
+    "",
+    0,
+    0,
+    "alias",
+    "user",
+    "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+   ],
+   [
+    "00000000-0000-0000-0000-000000001001",
+    "",
+    0,
+    0,
+    "alias",
+    "album",
+    "Alice album"
+   ],
+   [
+    "00000000-0000-0000-0000-000000001001",
+    "",
+    0,
+    0,
+    "alias",
+    "album",
+    "alice_album"
+   ],
+   [
+    "00000000-0000-0000-0000-000000001001",
+    "",
+    0,
+    0,
+    "alias",
+    "index",
+    "Alice"
+   ],
+   [
+    "00000000-0000-0000-0000-000000001001",
+    "",
+    0,
+    0,
+    "alias",
+    "index",
+    "a_li_ce"
+   ],
+   [
+    "00000000-0000-0000-0000-000000001001",
+    "",
+    0,
+    0,
+    "alias",
+    "index",
+    "alice"
+   ],
+   [
+    "00000000-0000-0000-0000-000000001001",
+    "",
+    0,
+    0,
+    "alias",
+    "index",
+    "alice_tag"
+   ],
+   [
+    "00000000-0000-0000-0000-000000001001",
+    "",
+    0,
+    0,
+    "alias",
+    "index",
+    "爱丽丝"
+   ],
+   [
+    "00000000-0000-0000-0000-000000001002",
+    "",
+    0,
+    0,
+    "alias",
+    "index",
+    "Bob"
+   ],
+   [
+    "00000000-0000-0000-0000-000000001002",
+    "",
+    0,
+    0,
+    "alias",
+    "index",
+    "bob"
+   ],
+   [
+    "00000000-0000-0000-0000-000000001002",
+    "",
+    0,
+    0,
+    "alias",
+    "index",
+    "bob_tag"
+   ],
+   [
+    "00000000-0000-0000-0000-000000001003",
+    "zh",
+    0,
+    1,
+    "display",
+    "user",
+    "作品甲"
+   ],
+   [
+    "00000000-0000-0000-0000-000000001004",
+    "zh",
+    0,
+    1,
+    "display",
+    "user",
+    "本地甲"
+   ],
+   [
+    "00000000-0000-0000-0000-000000001005",
+    "ja",
+    0,
+    1,
+    "display",
+    "user",
+    "ローカル"
+   ]
+  ],
+  "display_names": [
+   [
+    "key",
+    "kind",
+    "lang",
+    "source",
+    "value"
+   ],
+   [
+    "arknights",
+    "work",
+    "zh",
+    "builtin",
+    "明日方舟"
+   ],
+   [
+    "azur_lane",
+    "work",
+    "zh",
+    "builtin",
+    "碧蓝航线"
+   ],
+   [
+    "bang_dream!",
+    "work",
+    "zh",
+    "builtin",
+    "BanG Dream!"
+   ],
+   [
+    "blue_archive",
+    "work",
+    "zh",
+    "builtin",
+    "蔚蓝档案"
+   ],
+   [
+    "fate",
+    "work",
+    "zh",
+    "builtin",
+    "Fate"
+   ],
+   [
+    "genshin_impact",
+    "work",
+    "zh",
+    "builtin",
+    "原神"
+   ],
+   [
+    "girls'_frontline",
+    "work",
+    "zh",
+    "builtin",
+    "少女前线"
+   ],
+   [
+    "hololive",
+    "work",
+    "zh",
+    "builtin",
+    "hololive"
+   ],
+   [
+    "honkai:_star_rail",
+    "work",
+    "zh",
+    "builtin",
+    "崩坏：星穹铁道"
+   ],
+   [
+    "honkai_impact_3rd",
+    "work",
+    "zh",
+    "builtin",
+    "崩坏3"
+   ],
+   [
+    "idolmaster",
+    "work",
+    "zh",
+    "builtin",
+    "偶像大师"
+   ],
+   [
+    "kancolle",
+    "work",
+    "zh",
+    "builtin",
+    "舰队Collection"
+   ],
+   [
+    "love_live!",
+    "work",
+    "zh",
+    "builtin",
+    "LoveLive!"
+   ],
+   [
+    "nijisanji",
+    "work",
+    "zh",
+    "builtin",
+    "彩虹社"
+   ],
+   [
+    "pokemon",
+    "work",
+    "zh",
+    "builtin",
+    "宝可梦"
+   ],
+   [
+    "princess_connect!",
+    "work",
+    "zh",
+    "builtin",
+    "公主连结"
+   ],
+   [
+    "project_sekai",
+    "work",
+    "zh",
+    "builtin",
+    "世界计划"
+   ],
+   [
+    "touhou",
+    "work",
+    "zh",
+    "builtin",
+    "东方Project"
+   ],
+   [
+    "umamusume",
+    "work",
+    "zh",
+    "builtin",
+    "赛马娘"
+   ],
+   [
+    "vocaloid",
+    "work",
+    "zh",
+    "builtin",
+    "VOCALOID"
+   ],
+   [
+    "wuthering_waves",
+    "work",
+    "zh",
+    "builtin",
+    "鸣潮"
+   ],
+   [
+    "zenless_zone_zero",
+    "work",
+    "zh",
+    "builtin",
+    "绝区零"
+   ]
+  ],
+  "name_aliases": [
+   [
+    "key",
+    "kind",
+    "position",
+    "value"
+   ]
+  ],
+  "work_review": [
+   [
+    "entity_id",
+    "note",
+    "parent_locked",
+    "status"
+   ],
+   [
+    "00000000-0000-0000-0000-000000000004",
+    "从 Danbooru 角色的作品自动建立",
+    0,
+    "confirmed"
+   ],
+   [
+    "00000000-0000-0000-0000-000000000006",
+    "从 Danbooru 角色的作品自动建立",
+    0,
+    "confirmed"
+   ],
+   [
+    "00000000-0000-0000-0000-000000001003",
+    "",
+    1,
+    "pending"
+   ]
+  ],
+  "assertions": [
+   [
+    "entity",
+    "origin",
+    "status",
+    "uuid"
+   ],
+   [
+    "00000000-0000-0000-0000-000000001001",
+    "album",
+    "confirmed",
+    "a"
+   ]
+  ],
+  "deferred": [
+   [
+    "uuid"
+   ]
+  ],
+  "asked": [
+   [
+    "action_id",
+    "answer",
+    "entity",
+    "kind",
+    "uuid"
+   ]
+  ],
+  "reviews": [
+   [
+    "action_id",
+    "entity"
+   ]
+  ],
+  "identity_relations": [
+   [
+    "a",
+    "b",
+    "id",
+    "kind",
+    "status"
+   ],
+   [
+    "skin-x",
+    "00000000-0000-0000-0000-000000001001",
+    1,
+    "form_of",
+    "accepted"
+   ]
+  ],
+  "identity_decisions": [
+   [
+    "id",
+    "previous_status",
+    "reason",
+    "relation_id",
+    "status"
+   ],
+   [
+    1,
+    "proposed",
+    "保留既有层级并使其可撤销；不代表新增人工确认",
+    1,
+    "accepted"
+   ]
+  ],
+  "identity_uncertain": [
+   [
+    "options_json",
+    "reason",
+    "uuid"
+   ]
+  ],
+  "identity_anchor_decisions": [
+   [
+    "decision",
+    "entity",
+    "reason",
+    "reference"
+   ]
+  ],
+  "memberships": [
+   [
+    "ccip_only",
+    "entity",
+    "origin",
+    "score",
+    "skey",
+    "source_count",
+    "sources",
+    "status",
+    "uuid"
+   ],
+   [
+    0,
+    "00000000-0000-0000-0000-000000001001",
+    "album",
+    0.9,
+    "1010000000.9000000000001",
+    1,
+    "WD",
+    "confirmed",
+    "a"
+   ],
+   [
+    0,
+    "00000000-0000-0000-0000-000000001001",
+    "machine",
+    0.95,
+    "0110000000.9500000000001",
+    2,
+    "CCIP,WD",
+    "machine",
+    "b"
+   ],
+   [
+    0,
+    "00000000-0000-0000-0000-000000001002",
+    "machine",
+    0.7,
+    "0010000000.7000000000001",
+    1,
+    "WD",
+    "machine",
+    "b"
+   ]
+  ],
+  "tag_memberships": [
+   [
+    "ccip_only",
+    "entity",
+    "origin",
+    "score",
+    "skey",
+    "source_count",
+    "sources",
+    "status",
+    "uuid"
+   ]
+  ],
+  "asset_tags": [
+   [
+    "origin",
+    "tag",
+    "uuid"
+   ]
+  ],
+  "prefs": [
+   [
+    "key",
+    "value"
+   ]
+  ],
+  "actions": [
+   [
+    "id",
+    "label",
+    "undone"
+   ]
+  ],
+  "artist_verdicts": [
+   [
+    "artist",
+    "uuid",
+    "verdict"
+   ]
+  ]
+ }
+}

@@ -1,0 +1,2546 @@
+[
+ {
+  "entities": {
+   "replaced": [
+    [
+     "id",
+     "name",
+     "work",
+     "external_key",
+     "variant",
+     "parent_id",
+     "tag",
+     "merged_into",
+     "kind",
+     "artist",
+     "label_only",
+     "mascot",
+     "mascot_origin",
+     "work_id",
+     "original"
+    ],
+    [
+     "00000000-0000-0000-0000-000000001001",
+     "",
+     "Example",
+     null,
+     "",
+     null,
+     null,
+     null,
+     "character",
+     "",
+     0,
+     0,
+     null,
+     null,
+     0
+    ],
+    [
+     "00000000-0000-0000-0000-000000001002",
+     "",
+     "Example",
+     null,
+     "",
+     null,
+     null,
+     "00000000-0000-0000-0000-000000001001",
+     "character",
+     "",
+     0,
+     0,
+     null,
+     null,
+     0
+    ],
+    [
+     "skin-夏服",
+     "",
+     "",
+     null,
+     "",
+     null,
+     null,
+     null,
+     "character",
+     "",
+     0,
+     0,
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "links": {
+   "replaced": [
+    [
+     "system",
+     "key",
+     "entity_id",
+     "current",
+     "source"
+    ],
+    [
+     "ccip",
+     "alice",
+     "00000000-0000-0000-0000-000000001001",
+     1,
+     "import"
+    ],
+    [
+     "ccip",
+     "bob",
+     "00000000-0000-0000-0000-000000001002",
+     1,
+     "import"
+    ],
+    [
+     "danbooru",
+     "alice",
+     "00000000-0000-0000-0000-000000001001",
+     1,
+     "import"
+    ],
+    [
+     "danbooru",
+     "bob",
+     "00000000-0000-0000-0000-000000001002",
+     1,
+     "import"
+    ]
+   ]
+  },
+  "work_review": {
+   "replaced": [
+    [
+     "entity_id",
+     "status",
+     "note",
+     "parent_locked"
+    ]
+   ]
+  },
+  "assertions": {
+   "replaced": [
+    [
+     "uuid",
+     "entity",
+     "status",
+     "origin"
+    ],
+    [
+     "a",
+     "00000000-0000-0000-0000-000000001001",
+     "confirmed",
+     "review"
+    ],
+    [
+     "b",
+     "00000000-0000-0000-0000-000000001001",
+     "confirmed",
+     "album"
+    ],
+    [
+     "c",
+     "00000000-0000-0000-0000-000000001001",
+     "rejected",
+     "review"
+    ]
+   ]
+  },
+  "candidates": {
+   "replaced": [
+    [
+     "uuid",
+     "entity",
+     "source",
+     "score"
+    ],
+    [
+     "a",
+     "00000000-0000-0000-0000-000000001001",
+     "WD",
+     0.9
+    ],
+    [
+     "b",
+     "00000000-0000-0000-0000-000000001001",
+     "CCIP",
+     0.95
+    ],
+    [
+     "b",
+     "00000000-0000-0000-0000-000000001001",
+     "WD",
+     0.8
+    ]
+   ]
+  },
+  "identity_relations": {
+   "replaced": [
+    [
+     "id",
+     "a",
+     "b",
+     "kind",
+     "status"
+    ],
+    [
+     1,
+     "skin-夏服",
+     "00000000-0000-0000-0000-000000001001",
+     "form_of",
+     "proposed"
+    ],
+    [
+     2,
+     "00000000-0000-0000-0000-000000001002",
+     "00000000-0000-0000-0000-000000001001",
+     "duplicate_of",
+     "accepted"
+    ]
+   ]
+  },
+  "identity_evidence": {
+   "replaced": [
+    [
+     "relation_id",
+     "fingerprint",
+     "source",
+     "payload"
+    ],
+    [
+     1,
+     "9a1b0f7de91860ce3b59873a1940c62fe4d6d66b7c4a72928e499f0f8a2c6ad3",
+     "legacy-hierarchy",
+     "{\"inherited_parent_id\": \"00000000-0000-0000-0000-000000001001\", \"previous_kind\": \"skin\", \"review_status\": \"inherited_not_newly_verified\", \"variant_label\": \"alice_(summer)\"}"
+    ],
+    [
+     2,
+     "4a8758d4afb1b86a4bef118d42e0dd6e7e72f5d652ce00fb9eb12d66aca87bf5",
+     "migration",
+     "{\"legacy_destructive_merge\": true, \"raw_provenance\": \"not_recoverable_without_review\"}"
+    ]
+   ]
+  },
+  "identity_decisions": {
+   "replaced": [
+    [
+     "id",
+     "relation_id",
+     "previous_status",
+     "status",
+     "reason"
+    ],
+    [
+     1,
+     1,
+     "proposed",
+     "accepted",
+     "保留既有层级并使其可撤销；不代表新增人工确认"
+    ],
+    [
+     2,
+     2,
+     "proposed",
+     "accepted",
+     "保留迁移前已存在的人工合并；没有新增自动确认"
+    ],
+    [
+     3,
+     1,
+     "accepted",
+     "proposed",
+     "再看看"
+    ]
+   ]
+  },
+  "identity_decision_evidence": {
+   "replaced": [
+    [
+     "decision_id",
+     "fingerprint"
+    ],
+    [
+     3,
+     "9a1b0f7de91860ce3b59873a1940c62fe4d6d66b7c4a72928e499f0f8a2c6ad3"
+    ]
+   ]
+  },
+  "family_evidence": {
+   "replaced": [
+    [
+     "uuid",
+     "entity",
+     "sources",
+     "score",
+     "source_count",
+     "ccip_only",
+     "wd",
+     "ccip",
+     "rank"
+    ],
+    [
+     "a",
+     "00000000-0000-0000-0000-000000001001",
+     "WD",
+     0.9,
+     1,
+     0,
+     0.9,
+     null,
+     1
+    ],
+    [
+     "b",
+     "00000000-0000-0000-0000-000000001001",
+     "CCIP,WD",
+     0.95,
+     2,
+     0,
+     0.8,
+     0.95,
+     1
+    ]
+   ]
+  },
+  "single_assets": {
+   "replaced": [
+    [
+     "uuid"
+    ]
+   ]
+  },
+  "lead_assets": {
+   "replaced": [
+    [
+     "uuid"
+    ]
+   ]
+  },
+  "memberships": {
+   "replaced": [
+    [
+     "uuid",
+     "entity",
+     "status",
+     "origin",
+     "sources",
+     "score",
+     "source_count",
+     "ccip_only",
+     "skey"
+    ],
+    [
+     "a",
+     "00000000-0000-0000-0000-000000001001",
+     "confirmed",
+     "review",
+     "WD",
+     0.9,
+     1,
+     0,
+     "1010000000.9000000000001"
+    ],
+    [
+     "b",
+     "00000000-0000-0000-0000-000000001001",
+     "confirmed",
+     "album",
+     "CCIP,WD",
+     0.95,
+     2,
+     0,
+     "1110000000.9500000000001"
+    ]
+   ]
+  },
+  "tag_memberships": {
+   "replaced": [
+    [
+     "uuid",
+     "entity",
+     "status",
+     "origin",
+     "sources",
+     "score",
+     "source_count",
+     "ccip_only",
+     "skey"
+    ]
+   ]
+  },
+  "duplicates": {
+   "replaced": [
+    [
+     "uuid",
+     "grp",
+     "size",
+     "pos",
+     "grp_added",
+     "rep",
+     "hidden"
+    ]
+   ]
+  },
+  "identity_canonical": {
+   "replaced": [
+    [
+     "entity",
+     "canonical"
+    ],
+    [
+     "00000000-0000-0000-0000-000000001001",
+     "00000000-0000-0000-0000-000000001001"
+    ],
+    [
+     "00000000-0000-0000-0000-000000001002",
+     "00000000-0000-0000-0000-000000001001"
+    ],
+    [
+     "skin-夏服",
+     "skin-夏服"
+    ]
+   ]
+  },
+  "identity_scopes": {
+   "replaced": [
+    [
+     "uuid",
+     "entity",
+     "members_json"
+    ],
+    [
+     "a",
+     "00000000-0000-0000-0000-000000001001",
+     "[\"00000000-0000-0000-0000-000000001001\",\"00000000-0000-0000-0000-000000001002\"]"
+    ],
+    [
+     "b",
+     "00000000-0000-0000-0000-000000001001",
+     "[\"00000000-0000-0000-0000-000000001001\", \"00000000-0000-0000-0000-000000001002\"]"
+    ],
+    [
+     "c",
+     "00000000-0000-0000-0000-000000001001",
+     "[\"00000000-0000-0000-0000-000000001001\",\"00000000-0000-0000-0000-000000001002\"]"
+    ]
+   ]
+  },
+  "identity_suspended": {
+   "replaced": [
+    [
+     "uuid",
+     "entity",
+     "reason",
+     "options_json"
+    ]
+   ]
+  },
+  "identity_uncertain": {
+   "replaced": [
+    [
+     "uuid",
+     "options_json",
+     "reason"
+    ]
+   ]
+  },
+  "identity_anchor_decisions": {
+   "replaced": [
+    [
+     "entity",
+     "reference",
+     "decision",
+     "reason"
+    ],
+    [
+     "00000000-0000-0000-0000-000000001001",
+     "7",
+     "exclude",
+     "参考图错了"
+    ]
+   ]
+  },
+  "identity_anchor_history": {
+   "replaced": [
+    [
+     "id",
+     "entity",
+     "reference",
+     "decision",
+     "reason"
+    ],
+    [
+     1,
+     "00000000-0000-0000-0000-000000001001",
+     "7",
+     "exclude",
+     "参考图错了"
+    ]
+   ]
+  },
+  "learn_state": {
+   "replaced": [
+    [
+     "entity",
+     "signature"
+    ]
+   ]
+  },
+  "asked": {
+   "replaced": [
+    [
+     "uuid",
+     "entity",
+     "kind",
+     "answer",
+     "action_id"
+    ]
+   ]
+  },
+  "reviews": {
+   "replaced": [
+    [
+     "entity",
+     "action_id"
+    ],
+    [
+     "00000000-0000-0000-0000-000000001001",
+     4
+    ],
+    [
+     "00000000-0000-0000-0000-000000001001",
+     5
+    ]
+   ]
+  },
+  "deferred": {
+   "replaced": [
+    [
+     "uuid"
+    ],
+    [
+     "b"
+    ]
+   ]
+  },
+  "backend_effects": {
+   "replaced": [
+    [
+     "id",
+     "kind",
+     "status",
+     "error"
+    ],
+    [
+     1,
+     "verdict",
+     "pending",
+     ""
+    ],
+    [
+     10,
+     "verdict",
+     "pending",
+     ""
+    ],
+    [
+     11,
+     "verdict",
+     "pending",
+     ""
+    ],
+    [
+     12,
+     "verdict",
+     "pending",
+     ""
+    ],
+    [
+     13,
+     "verdict",
+     "pending",
+     ""
+    ],
+    [
+     2,
+     "verdict",
+     "pending",
+     ""
+    ],
+    [
+     3,
+     "verdict",
+     "pending",
+     ""
+    ],
+    [
+     4,
+     "verdict",
+     "pending",
+     ""
+    ],
+    [
+     5,
+     "verdict",
+     "pending",
+     ""
+    ],
+    [
+     6,
+     "verdict",
+     "pending",
+     ""
+    ],
+    [
+     7,
+     "verdict",
+     "pending",
+     ""
+    ],
+    [
+     8,
+     "verdict",
+     "pending",
+     ""
+    ],
+    [
+     9,
+     "verdict",
+     "pending",
+     ""
+    ]
+   ]
+  },
+  "names": {
+   "replaced": [
+    [
+     "entity_id",
+     "lang",
+     "value",
+     "source",
+     "role",
+     "preferred",
+     "position"
+    ],
+    [
+     "00000000-0000-0000-0000-000000001001",
+     "",
+     "Alice album",
+     "album",
+     "alias",
+     0,
+     0
+    ],
+    [
+     "00000000-0000-0000-0000-000000001001",
+     "",
+     "Alice",
+     "index",
+     "alias",
+     0,
+     0
+    ],
+    [
+     "00000000-0000-0000-0000-000000001001",
+     "",
+     "Bob",
+     "index",
+     "alias",
+     0,
+     0
+    ],
+    [
+     "00000000-0000-0000-0000-000000001001",
+     "",
+     "Bobby",
+     "user",
+     "alias",
+     0,
+     0
+    ],
+    [
+     "00000000-0000-0000-0000-000000001001",
+     "",
+     "a_li_ce",
+     "index",
+     "alias",
+     0,
+     0
+    ],
+    [
+     "00000000-0000-0000-0000-000000001001",
+     "",
+     "alice",
+     "index",
+     "alias",
+     0,
+     0
+    ],
+    [
+     "00000000-0000-0000-0000-000000001001",
+     "",
+     "alice_album",
+     "album",
+     "alias",
+     0,
+     0
+    ],
+    [
+     "00000000-0000-0000-0000-000000001001",
+     "",
+     "alice_tag",
+     "index",
+     "alias",
+     0,
+     0
+    ],
+    [
+     "00000000-0000-0000-0000-000000001001",
+     "",
+     "bob",
+     "index",
+     "alias",
+     0,
+     0
+    ],
+    [
+     "00000000-0000-0000-0000-000000001001",
+     "",
+     "bob_tag",
+     "index",
+     "alias",
+     0,
+     0
+    ],
+    [
+     "00000000-0000-0000-0000-000000001001",
+     "",
+     "爱丽丝",
+     "index",
+     "alias",
+     0,
+     0
+    ],
+    [
+     "00000000-0000-0000-0000-000000001001",
+     "zh",
+     "鲍勃",
+     "user",
+     "alias",
+     0,
+     0
+    ],
+    [
+     "00000000-0000-0000-0000-000000001002",
+     "",
+     "Bob",
+     "index",
+     "alias",
+     0,
+     0
+    ],
+    [
+     "00000000-0000-0000-0000-000000001002",
+     "",
+     "Bobby",
+     "user",
+     "alias",
+     0,
+     0
+    ],
+    [
+     "00000000-0000-0000-0000-000000001002",
+     "",
+     "bob",
+     "index",
+     "alias",
+     0,
+     0
+    ],
+    [
+     "00000000-0000-0000-0000-000000001002",
+     "",
+     "bob_tag",
+     "index",
+     "alias",
+     0,
+     0
+    ],
+    [
+     "00000000-0000-0000-0000-000000001002",
+     "zh",
+     "鲍勃",
+     "user",
+     "display",
+     1,
+     0
+    ]
+   ]
+  },
+  "prefs": {
+   "replaced": [
+    [
+     "key",
+     "value"
+    ]
+   ]
+  },
+  "audit_sample": {
+   "replaced": [
+    [
+     "uuid",
+     "entity",
+     "stratum",
+     "solo"
+    ],
+    [
+     "b",
+     "00000000-0000-0000-0000-000000001001",
+     "uniform",
+     0
+    ],
+    [
+     "c",
+     "00000000-0000-0000-0000-000000001002",
+     "uniform",
+     0
+    ]
+   ]
+  },
+  "assets": {
+   "replaced": [
+    [
+     "uuid",
+     "filename",
+     "src_path",
+     "width",
+     "height",
+     "src_kind"
+    ],
+    [
+     "a",
+     "a.png",
+     "<临时目录>/a.png",
+     120,
+     150,
+     "orig"
+    ],
+    [
+     "b",
+     "b.png",
+     "<临时目录>/b.png",
+     120,
+     150,
+     "orig"
+    ],
+    [
+     "c",
+     "c.png",
+     "<临时目录>/c.png",
+     120,
+     150,
+     "orig"
+    ]
+   ]
+  },
+  "auto_rules": {
+   "replaced": [
+    [
+     "uuid",
+     "kind",
+     "reason"
+    ]
+   ]
+  },
+  "excluded": {
+   "replaced": [
+    [
+     "uuid",
+     "reason",
+     "origin"
+    ],
+    [
+     "a",
+     "manual",
+     "review"
+    ]
+   ]
+  },
+  "imported": {
+   "replaced": [
+    [
+     "uuid",
+     "value"
+    ],
+    [
+     "a",
+     "alice_album"
+    ],
+    [
+     "b",
+     "alice_album"
+    ]
+   ]
+  },
+  "sync_added": {
+   "replaced": [
+    [
+     "uuid",
+     "run_id"
+    ]
+   ]
+  },
+  "curation": {
+   "replaced": [
+    [
+     "uuid",
+     "status",
+     "origin"
+    ],
+    [
+     "a",
+     "excluded",
+     "review"
+    ]
+   ]
+  },
+  "actions": {
+   "replaced": [
+    [
+     "id",
+     "label",
+     "before_json",
+     "undone"
+    ],
+    [
+     1,
+     "已将 1 张设为 Bob",
+     [
+      {
+       "assertion": null,
+       "deferred": false,
+       "entity": "00000000-0000-0000-0000-000000001002",
+       "uuid": "c"
+      },
+      {
+       "assertion": null,
+       "deferred": false,
+       "entity": "00000000-0000-0000-0000-000000001002",
+       "uuid": "b"
+      }
+     ],
+     0
+    ],
+    [
+     10,
+     "已保存身份关系决议",
+     [
+      {
+       "identity_relation": {
+        "decision_id": 3,
+        "previous_status": "accepted",
+        "relation_id": 1,
+        "status": "proposed"
+       }
+      }
+     ],
+     0
+    ],
+    [
+     11,
+     "已保留身份未定",
+     [
+      {
+       "assertion": null,
+       "deferred": false,
+       "entity": null,
+       "identity": {
+        "identity_scopes": null,
+        "identity_suspended": null,
+        "identity_uncertain": null
+       },
+       "uuid": "a"
+      }
+     ],
+     0
+    ],
+    [
+     12,
+     "已修正锚点参考图",
+     [
+      {
+       "identity_anchor": {
+        "entity": "00000000-0000-0000-0000-000000001001",
+        "previous": null,
+        "reference": "7"
+       }
+      }
+     ],
+     0
+    ],
+    [
+     13,
+     "已将 1 张设为 鲍勃",
+     [
+      {
+       "assertion": {
+        "origin": "review",
+        "status": "rejected"
+       },
+       "deferred": false,
+       "entity": "00000000-0000-0000-0000-000000001001",
+       "identity": {
+        "identity_scopes": [
+         "[\"00000000-0000-0000-0000-000000001001\", \"00000000-0000-0000-0000-000000001002\"]"
+        ],
+        "identity_suspended": null,
+        "identity_uncertain": [
+         "[\"00000000-0000-0000-0000-000000001001\", \"00000000-0000-0000-0000-000000001002\"]",
+         "人工暂不判断",
+         "<created_at>"
+        ]
+       },
+       "uuid": "a"
+      }
+     ],
+     0
+    ],
+    [
+     14,
+     "已将 1 张移出 鲍勃",
+     [
+      {
+       "assertion": {
+        "origin": "review",
+        "status": "confirmed"
+       },
+       "deferred": true,
+       "entity": "00000000-0000-0000-0000-000000001001",
+       "identity": {
+        "identity_scopes": [
+         "[\"00000000-0000-0000-0000-000000001001\", \"00000000-0000-0000-0000-000000001002\"]"
+        ],
+        "identity_suspended": null,
+        "identity_uncertain": null
+       },
+       "uuid": "c"
+      }
+     ],
+     0
+    ],
+    [
+     2,
+     "已将 1 张移出 Alice",
+     [
+      {
+       "assertion": {
+        "origin": "album",
+        "status": "confirmed"
+       },
+       "deferred": false,
+       "entity": "00000000-0000-0000-0000-000000001001",
+       "uuid": "a"
+      }
+     ],
+     0
+    ],
+    [
+     3,
+     "已将 1 张设为 Alice",
+     [
+      {
+       "assertion": null,
+       "deferred": false,
+       "entity": "00000000-0000-0000-0000-000000001001",
+       "uuid": "b"
+      },
+      {
+       "assertion": null,
+       "deferred": false,
+       "entity": "00000000-0000-0000-0000-000000001001",
+       "uuid": "c"
+      }
+     ],
+     1
+    ],
+    [
+     4,
+     "已将 Alice 标为已检查（0 张）",
+     [],
+     0
+    ],
+    [
+     5,
+     "已将 Alice 标为已检查（0 张）",
+     [],
+     0
+    ],
+    [
+     6,
+     "已更新 鲍勃 的资料",
+     [
+      {
+       "profile": {
+        "entity": "00000000-0000-0000-0000-000000001002",
+        "links": [
+         [
+          "danbooru",
+          "bob",
+          1,
+          "import",
+          "<added_at>"
+         ]
+        ],
+        "names": [],
+        "work": "Example",
+        "work_id": null
+       }
+      }
+     ],
+     0
+    ],
+    [
+     7,
+     "已跳过 2 张",
+     [
+      {
+       "assertion": null,
+       "deferred": false,
+       "entity": null,
+       "uuid": "b"
+      },
+      {
+       "assertion": null,
+       "deferred": false,
+       "entity": null,
+       "uuid": "c"
+      }
+     ],
+     0
+    ],
+    [
+     8,
+     "已排除 1 张",
+     [
+      {
+       "curation": null,
+       "uuid": "a"
+      }
+     ],
+     0
+    ],
+    [
+     9,
+     "已将 鲍勃 合并到 鲍勃（1 条人工结论）",
+     [
+      {
+       "merge": {
+        "aliases": [
+         [
+          "",
+          "Bob",
+          "index"
+         ],
+         [
+          "",
+          "bob",
+          "index"
+         ],
+         [
+          "",
+          "bob_tag",
+          "index"
+         ],
+         [
+          "",
+          "Bobby",
+          "user"
+         ],
+         [
+          "zh",
+          "鲍勃",
+          "user"
+         ]
+        ],
+        "candidates": [
+         [
+          "b",
+          "WD",
+          0.7
+         ]
+        ],
+        "kept": [
+         [
+          "b",
+          "confirmed",
+          "review"
+         ]
+        ],
+        "moved": [
+         [
+          "c",
+          "confirmed",
+          "review"
+         ]
+        ],
+        "pins": null,
+        "reviews": [],
+        "source": "00000000-0000-0000-0000-000000001002",
+        "target": "00000000-0000-0000-0000-000000001001",
+        "target_prev": [
+         [
+          "b",
+          "WD",
+          0.8
+         ]
+        ],
+        "uuids": [
+         "b",
+         "c"
+        ],
+        "variants": []
+       }
+      }
+     ],
+     0
+    ]
+   ]
+  },
+  "身份元数据": {
+   "replaced": [
+    [
+     "identity_graph_version",
+     "09d264385b4c4ca879ccdc5a7eba6b1f1d80b6b5b1b118c493cd25b41b7bdfab"
+    ],
+    [
+     "identity_policy",
+     "hybrid"
+    ]
+   ]
+  }
+ },
+ {
+  "assertions": {
+   "-": [
+    [
+     "c",
+     "00000000-0000-0000-0000-000000001001",
+     "rejected",
+     "review"
+    ]
+   ],
+   "+": [
+    [
+     "c",
+     "00000000-0000-0000-0000-000000001001",
+     "confirmed",
+     "review"
+    ]
+   ]
+  },
+  "memberships": {
+   "-": [],
+   "+": [
+    [
+     "c",
+     "00000000-0000-0000-0000-000000001001",
+     "confirmed",
+     "review",
+     "",
+     null,
+     0,
+     0,
+     "1110000001.0000000000001"
+    ]
+   ]
+  },
+  "identity_scopes": {
+   "-": [
+    [
+     "c",
+     "00000000-0000-0000-0000-000000001001",
+     "[\"00000000-0000-0000-0000-000000001001\",\"00000000-0000-0000-0000-000000001002\"]"
+    ]
+   ],
+   "+": [
+    [
+     "c",
+     "00000000-0000-0000-0000-000000001001",
+     "[\"00000000-0000-0000-0000-000000001001\", \"00000000-0000-0000-0000-000000001002\"]"
+    ]
+   ]
+  },
+  "deferred": {
+   "-": [],
+   "+": [
+    [
+     "c"
+    ]
+   ]
+  },
+  "backend_effects": {
+   "-": [],
+   "+": [
+    [
+     14,
+     "verdict",
+     "pending",
+     ""
+    ]
+   ]
+  },
+  "actions": {
+   "-": [
+    [
+     14,
+     "已将 1 张移出 鲍勃",
+     [
+      {
+       "assertion": {
+        "origin": "review",
+        "status": "confirmed"
+       },
+       "deferred": true,
+       "entity": "00000000-0000-0000-0000-000000001001",
+       "identity": {
+        "identity_scopes": [
+         "[\"00000000-0000-0000-0000-000000001001\", \"00000000-0000-0000-0000-000000001002\"]"
+        ],
+        "identity_suspended": null,
+        "identity_uncertain": null
+       },
+       "uuid": "c"
+      }
+     ],
+     0
+    ]
+   ],
+   "+": [
+    [
+     14,
+     "已将 1 张移出 鲍勃",
+     [
+      {
+       "assertion": {
+        "origin": "review",
+        "status": "confirmed"
+       },
+       "deferred": true,
+       "entity": "00000000-0000-0000-0000-000000001001",
+       "identity": {
+        "identity_scopes": [
+         "[\"00000000-0000-0000-0000-000000001001\", \"00000000-0000-0000-0000-000000001002\"]"
+        ],
+        "identity_suspended": null,
+        "identity_uncertain": null
+       },
+       "uuid": "c"
+      }
+     ],
+     1
+    ]
+   ]
+  }
+ },
+ {
+  "assertions": {
+   "-": [
+    [
+     "a",
+     "00000000-0000-0000-0000-000000001001",
+     "confirmed",
+     "review"
+    ]
+   ],
+   "+": [
+    [
+     "a",
+     "00000000-0000-0000-0000-000000001001",
+     "rejected",
+     "review"
+    ]
+   ]
+  },
+  "memberships": {
+   "-": [
+    [
+     "a",
+     "00000000-0000-0000-0000-000000001001",
+     "confirmed",
+     "review",
+     "WD",
+     0.9,
+     1,
+     0,
+     "1010000000.9000000000001"
+    ]
+   ],
+   "+": []
+  },
+  "identity_scopes": {
+   "-": [
+    [
+     "a",
+     "00000000-0000-0000-0000-000000001001",
+     "[\"00000000-0000-0000-0000-000000001001\",\"00000000-0000-0000-0000-000000001002\"]"
+    ]
+   ],
+   "+": [
+    [
+     "a",
+     "00000000-0000-0000-0000-000000001001",
+     "[\"00000000-0000-0000-0000-000000001001\", \"00000000-0000-0000-0000-000000001002\"]"
+    ]
+   ]
+  },
+  "identity_uncertain": {
+   "-": [],
+   "+": [
+    [
+     "a",
+     "[\"00000000-0000-0000-0000-000000001001\", \"00000000-0000-0000-0000-000000001002\"]",
+     "人工暂不判断"
+    ]
+   ]
+  },
+  "backend_effects": {
+   "-": [],
+   "+": [
+    [
+     15,
+     "verdict",
+     "pending",
+     ""
+    ]
+   ]
+  },
+  "actions": {
+   "-": [
+    [
+     13,
+     "已将 1 张设为 鲍勃",
+     [
+      {
+       "assertion": {
+        "origin": "review",
+        "status": "rejected"
+       },
+       "deferred": false,
+       "entity": "00000000-0000-0000-0000-000000001001",
+       "identity": {
+        "identity_scopes": [
+         "[\"00000000-0000-0000-0000-000000001001\", \"00000000-0000-0000-0000-000000001002\"]"
+        ],
+        "identity_suspended": null,
+        "identity_uncertain": [
+         "[\"00000000-0000-0000-0000-000000001001\", \"00000000-0000-0000-0000-000000001002\"]",
+         "人工暂不判断",
+         "<created_at>"
+        ]
+       },
+       "uuid": "a"
+      }
+     ],
+     0
+    ]
+   ],
+   "+": [
+    [
+     13,
+     "已将 1 张设为 鲍勃",
+     [
+      {
+       "assertion": {
+        "origin": "review",
+        "status": "rejected"
+       },
+       "deferred": false,
+       "entity": "00000000-0000-0000-0000-000000001001",
+       "identity": {
+        "identity_scopes": [
+         "[\"00000000-0000-0000-0000-000000001001\", \"00000000-0000-0000-0000-000000001002\"]"
+        ],
+        "identity_suspended": null,
+        "identity_uncertain": [
+         "[\"00000000-0000-0000-0000-000000001001\", \"00000000-0000-0000-0000-000000001002\"]",
+         "人工暂不判断",
+         "<created_at>"
+        ]
+       },
+       "uuid": "a"
+      }
+     ],
+     1
+    ]
+   ]
+  }
+ },
+ {
+  "identity_anchor_decisions": {
+   "-": [
+    [
+     "00000000-0000-0000-0000-000000001001",
+     "7",
+     "exclude",
+     "参考图错了"
+    ]
+   ],
+   "+": []
+  },
+  "identity_anchor_history": {
+   "-": [],
+   "+": [
+    [
+     2,
+     "00000000-0000-0000-0000-000000001001",
+     "7",
+     "undo",
+     "撤销锚点修正；需要重建和校准"
+    ]
+   ]
+  },
+  "backend_effects": {
+   "-": [],
+   "+": [
+    [
+     16,
+     "verdict",
+     "pending",
+     ""
+    ]
+   ]
+  },
+  "actions": {
+   "-": [
+    [
+     12,
+     "已修正锚点参考图",
+     [
+      {
+       "identity_anchor": {
+        "entity": "00000000-0000-0000-0000-000000001001",
+        "previous": null,
+        "reference": "7"
+       }
+      }
+     ],
+     0
+    ]
+   ],
+   "+": [
+    [
+     12,
+     "已修正锚点参考图",
+     [
+      {
+       "identity_anchor": {
+        "entity": "00000000-0000-0000-0000-000000001001",
+        "previous": null,
+        "reference": "7"
+       }
+      }
+     ],
+     1
+    ]
+   ]
+  }
+ },
+ {
+  "identity_uncertain": {
+   "-": [
+    [
+     "a",
+     "[\"00000000-0000-0000-0000-000000001001\", \"00000000-0000-0000-0000-000000001002\"]",
+     "人工暂不判断"
+    ]
+   ],
+   "+": []
+  },
+  "backend_effects": {
+   "-": [],
+   "+": [
+    [
+     17,
+     "verdict",
+     "pending",
+     ""
+    ]
+   ]
+  },
+  "actions": {
+   "-": [
+    [
+     11,
+     "已保留身份未定",
+     [
+      {
+       "assertion": null,
+       "deferred": false,
+       "entity": null,
+       "identity": {
+        "identity_scopes": null,
+        "identity_suspended": null,
+        "identity_uncertain": null
+       },
+       "uuid": "a"
+      }
+     ],
+     0
+    ]
+   ],
+   "+": [
+    [
+     11,
+     "已保留身份未定",
+     [
+      {
+       "assertion": null,
+       "deferred": false,
+       "entity": null,
+       "identity": {
+        "identity_scopes": null,
+        "identity_suspended": null,
+        "identity_uncertain": null
+       },
+       "uuid": "a"
+      }
+     ],
+     1
+    ]
+   ]
+  }
+ },
+ {
+  "entities": {
+   "-": [
+    [
+     "skin-夏服",
+     "",
+     "",
+     null,
+     "",
+     null,
+     null,
+     null,
+     "character",
+     "",
+     0,
+     0,
+     null,
+     null,
+     0
+    ]
+   ],
+   "+": [
+    [
+     "skin-夏服",
+     "",
+     "",
+     null,
+     "alice_(summer)",
+     "00000000-0000-0000-0000-000000001001",
+     null,
+     null,
+     "skin",
+     "",
+     0,
+     0,
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "identity_relations": {
+   "-": [
+    [
+     1,
+     "skin-夏服",
+     "00000000-0000-0000-0000-000000001001",
+     "form_of",
+     "proposed"
+    ]
+   ],
+   "+": [
+    [
+     1,
+     "skin-夏服",
+     "00000000-0000-0000-0000-000000001001",
+     "form_of",
+     "accepted"
+    ]
+   ]
+  },
+  "identity_decisions": {
+   "-": [],
+   "+": [
+    [
+     4,
+     1,
+     "proposed",
+     "accepted",
+     "撤销人工关系决议"
+    ]
+   ]
+  },
+  "identity_decision_evidence": {
+   "-": [],
+   "+": [
+    [
+     4,
+     "9a1b0f7de91860ce3b59873a1940c62fe4d6d66b7c4a72928e499f0f8a2c6ad3"
+    ]
+   ]
+  },
+  "backend_effects": {
+   "-": [],
+   "+": [
+    [
+     18,
+     "verdict",
+     "pending",
+     ""
+    ]
+   ]
+  },
+  "actions": {
+   "-": [
+    [
+     10,
+     "已保存身份关系决议",
+     [
+      {
+       "identity_relation": {
+        "decision_id": 3,
+        "previous_status": "accepted",
+        "relation_id": 1,
+        "status": "proposed"
+       }
+      }
+     ],
+     0
+    ]
+   ],
+   "+": [
+    [
+     10,
+     "已保存身份关系决议",
+     [
+      {
+       "identity_relation": {
+        "decision_id": 3,
+        "previous_status": "accepted",
+        "relation_id": 1,
+        "status": "proposed"
+       }
+      }
+     ],
+     1
+    ]
+   ]
+  },
+  "身份元数据": {
+   "replaced": [
+    [
+     "identity_graph_version",
+     "90637c2bddedfc4de9b1efe8572fe4a46ad6cd6e387578b41244e1378f4d6bf7"
+    ],
+    [
+     "identity_policy",
+     "hybrid"
+    ]
+   ]
+  }
+ },
+ {
+  "entities": {
+   "-": [
+    [
+     "00000000-0000-0000-0000-000000001002",
+     "",
+     "Example",
+     null,
+     "",
+     null,
+     null,
+     "00000000-0000-0000-0000-000000001001",
+     "character",
+     "",
+     0,
+     0,
+     null,
+     null,
+     0
+    ]
+   ],
+   "+": [
+    [
+     "00000000-0000-0000-0000-000000001002",
+     "",
+     "Example",
+     null,
+     "",
+     null,
+     null,
+     null,
+     "character",
+     "",
+     0,
+     0,
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "identity_relations": {
+   "-": [
+    [
+     2,
+     "00000000-0000-0000-0000-000000001002",
+     "00000000-0000-0000-0000-000000001001",
+     "duplicate_of",
+     "accepted"
+    ]
+   ],
+   "+": [
+    [
+     2,
+     "00000000-0000-0000-0000-000000001002",
+     "00000000-0000-0000-0000-000000001001",
+     "duplicate_of",
+     "proposed"
+    ]
+   ]
+  },
+  "identity_decisions": {
+   "-": [],
+   "+": [
+    [
+     5,
+     2,
+     "accepted",
+     "proposed",
+     "撤销历史合并；原归属无法区分的认领待确认"
+    ]
+   ]
+  },
+  "identity_decision_evidence": {
+   "-": [],
+   "+": [
+    [
+     5,
+     "4a8758d4afb1b86a4bef118d42e0dd6e7e72f5d652ce00fb9eb12d66aca87bf5"
+    ]
+   ]
+  },
+  "memberships": {
+   "-": [
+    [
+     "b",
+     "00000000-0000-0000-0000-000000001001",
+     "confirmed",
+     "album",
+     "CCIP,WD",
+     0.95,
+     2,
+     0,
+     "1110000000.9500000000001"
+    ],
+    [
+     "c",
+     "00000000-0000-0000-0000-000000001001",
+     "confirmed",
+     "review",
+     "",
+     null,
+     0,
+     0,
+     "1110000001.0000000000001"
+    ]
+   ],
+   "+": []
+  },
+  "identity_canonical": {
+   "-": [
+    [
+     "00000000-0000-0000-0000-000000001002",
+     "00000000-0000-0000-0000-000000001001"
+    ]
+   ],
+   "+": [
+    [
+     "00000000-0000-0000-0000-000000001002",
+     "00000000-0000-0000-0000-000000001002"
+    ]
+   ]
+  },
+  "identity_suspended": {
+   "-": [],
+   "+": [
+    [
+     "a",
+     "00000000-0000-0000-0000-000000001001",
+     "equivalence_split",
+     "[\"00000000-0000-0000-0000-000000001001\", \"00000000-0000-0000-0000-000000001002\"]"
+    ],
+    [
+     "b",
+     "00000000-0000-0000-0000-000000001001",
+     "equivalence_split",
+     "[\"00000000-0000-0000-0000-000000001001\", \"00000000-0000-0000-0000-000000001002\"]"
+    ],
+    [
+     "c",
+     "00000000-0000-0000-0000-000000001001",
+     "equivalence_split",
+     "[\"00000000-0000-0000-0000-000000001001\", \"00000000-0000-0000-0000-000000001002\"]"
+    ]
+   ]
+  },
+  "backend_effects": {
+   "-": [],
+   "+": [
+    [
+     19,
+     "verdict",
+     "pending",
+     ""
+    ]
+   ]
+  },
+  "actions": {
+   "-": [
+    [
+     9,
+     "已将 鲍勃 合并到 鲍勃（1 条人工结论）",
+     [
+      {
+       "merge": {
+        "aliases": [
+         [
+          "",
+          "Bob",
+          "index"
+         ],
+         [
+          "",
+          "bob",
+          "index"
+         ],
+         [
+          "",
+          "bob_tag",
+          "index"
+         ],
+         [
+          "",
+          "Bobby",
+          "user"
+         ],
+         [
+          "zh",
+          "鲍勃",
+          "user"
+         ]
+        ],
+        "candidates": [
+         [
+          "b",
+          "WD",
+          0.7
+         ]
+        ],
+        "kept": [
+         [
+          "b",
+          "confirmed",
+          "review"
+         ]
+        ],
+        "moved": [
+         [
+          "c",
+          "confirmed",
+          "review"
+         ]
+        ],
+        "pins": null,
+        "reviews": [],
+        "source": "00000000-0000-0000-0000-000000001002",
+        "target": "00000000-0000-0000-0000-000000001001",
+        "target_prev": [
+         [
+          "b",
+          "WD",
+          0.8
+         ]
+        ],
+        "uuids": [
+         "b",
+         "c"
+        ],
+        "variants": []
+       }
+      }
+     ],
+     0
+    ]
+   ],
+   "+": [
+    [
+     9,
+     "已将 鲍勃 合并到 鲍勃（1 条人工结论）",
+     [
+      {
+       "merge": {
+        "aliases": [
+         [
+          "",
+          "Bob",
+          "index"
+         ],
+         [
+          "",
+          "bob",
+          "index"
+         ],
+         [
+          "",
+          "bob_tag",
+          "index"
+         ],
+         [
+          "",
+          "Bobby",
+          "user"
+         ],
+         [
+          "zh",
+          "鲍勃",
+          "user"
+         ]
+        ],
+        "candidates": [
+         [
+          "b",
+          "WD",
+          0.7
+         ]
+        ],
+        "kept": [
+         [
+          "b",
+          "confirmed",
+          "review"
+         ]
+        ],
+        "moved": [
+         [
+          "c",
+          "confirmed",
+          "review"
+         ]
+        ],
+        "pins": null,
+        "reviews": [],
+        "source": "00000000-0000-0000-0000-000000001002",
+        "target": "00000000-0000-0000-0000-000000001001",
+        "target_prev": [
+         [
+          "b",
+          "WD",
+          0.8
+         ]
+        ],
+        "uuids": [
+         "b",
+         "c"
+        ],
+        "variants": []
+       }
+      }
+     ],
+     1
+    ]
+   ]
+  },
+  "身份元数据": {
+   "replaced": [
+    [
+     "identity_graph_version",
+     "c8d9059484c66453b8f207a2552ec5cc3917a1923cf35412ff659551cc715c7b"
+    ],
+    [
+     "identity_policy",
+     "hybrid"
+    ]
+   ]
+  }
+ },
+ {
+  "backend_effects": {
+   "-": [],
+   "+": [
+    [
+     20,
+     "verdict",
+     "pending",
+     ""
+    ]
+   ]
+  },
+  "excluded": {
+   "-": [
+    [
+     "a",
+     "manual",
+     "review"
+    ]
+   ],
+   "+": []
+  },
+  "curation": {
+   "-": [
+    [
+     "a",
+     "excluded",
+     "review"
+    ]
+   ],
+   "+": []
+  },
+  "actions": {
+   "-": [
+    [
+     8,
+     "已排除 1 张",
+     [
+      {
+       "curation": null,
+       "uuid": "a"
+      }
+     ],
+     0
+    ]
+   ],
+   "+": [
+    [
+     8,
+     "已排除 1 张",
+     [
+      {
+       "curation": null,
+       "uuid": "a"
+      }
+     ],
+     1
+    ]
+   ]
+  }
+ },
+ {
+  "deferred": {
+   "-": [
+    [
+     "b"
+    ],
+    [
+     "c"
+    ]
+   ],
+   "+": []
+  },
+  "backend_effects": {
+   "-": [],
+   "+": [
+    [
+     21,
+     "verdict",
+     "pending",
+     ""
+    ]
+   ]
+  },
+  "actions": {
+   "-": [
+    [
+     7,
+     "已跳过 2 张",
+     [
+      {
+       "assertion": null,
+       "deferred": false,
+       "entity": null,
+       "uuid": "b"
+      },
+      {
+       "assertion": null,
+       "deferred": false,
+       "entity": null,
+       "uuid": "c"
+      }
+     ],
+     0
+    ]
+   ],
+   "+": [
+    [
+     7,
+     "已跳过 2 张",
+     [
+      {
+       "assertion": null,
+       "deferred": false,
+       "entity": null,
+       "uuid": "b"
+      },
+      {
+       "assertion": null,
+       "deferred": false,
+       "entity": null,
+       "uuid": "c"
+      }
+     ],
+     1
+    ]
+   ]
+  }
+ },
+ {
+  "backend_effects": {
+   "-": [],
+   "+": [
+    [
+     22,
+     "verdict",
+     "pending",
+     ""
+    ]
+   ]
+  },
+  "names": {
+   "-": [
+    [
+     "00000000-0000-0000-0000-000000001002",
+     "",
+     "Bobby",
+     "user",
+     "alias",
+     0,
+     0
+    ],
+    [
+     "00000000-0000-0000-0000-000000001002",
+     "zh",
+     "鲍勃",
+     "user",
+     "display",
+     1,
+     0
+    ]
+   ],
+   "+": []
+  },
+  "actions": {
+   "-": [
+    [
+     6,
+     "已更新 鲍勃 的资料",
+     [
+      {
+       "profile": {
+        "entity": "00000000-0000-0000-0000-000000001002",
+        "links": [
+         [
+          "danbooru",
+          "bob",
+          1,
+          "import",
+          "<added_at>"
+         ]
+        ],
+        "names": [],
+        "work": "Example",
+        "work_id": null
+       }
+      }
+     ],
+     0
+    ]
+   ],
+   "+": [
+    [
+     6,
+     "已更新 鲍勃 的资料",
+     [
+      {
+       "profile": {
+        "entity": "00000000-0000-0000-0000-000000001002",
+        "links": [
+         [
+          "danbooru",
+          "bob",
+          1,
+          "import",
+          "<added_at>"
+         ]
+        ],
+        "names": [],
+        "work": "Example",
+        "work_id": null
+       }
+      }
+     ],
+     1
+    ]
+   ]
+  }
+ },
+ {
+  "reviews": {
+   "-": [
+    [
+     "00000000-0000-0000-0000-000000001001",
+     5
+    ]
+   ],
+   "+": []
+  },
+  "backend_effects": {
+   "-": [],
+   "+": [
+    [
+     23,
+     "verdict",
+     "pending",
+     ""
+    ]
+   ]
+  },
+  "actions": {
+   "-": [
+    [
+     5,
+     "已将 Alice 标为已检查（0 张）",
+     [],
+     0
+    ]
+   ],
+   "+": [
+    [
+     5,
+     "已将 Alice 标为已检查（0 张）",
+     [],
+     1
+    ]
+   ]
+  }
+ },
+ {
+  "reviews": {
+   "-": [
+    [
+     "00000000-0000-0000-0000-000000001001",
+     4
+    ]
+   ],
+   "+": []
+  },
+  "backend_effects": {
+   "-": [],
+   "+": [
+    [
+     24,
+     "verdict",
+     "pending",
+     ""
+    ]
+   ]
+  },
+  "actions": {
+   "-": [
+    [
+     4,
+     "已将 Alice 标为已检查（0 张）",
+     [],
+     0
+    ]
+   ],
+   "+": [
+    [
+     4,
+     "已将 Alice 标为已检查（0 张）",
+     [],
+     1
+    ]
+   ]
+  }
+ },
+ {
+  "assertions": {
+   "-": [
+    [
+     "a",
+     "00000000-0000-0000-0000-000000001001",
+     "rejected",
+     "review"
+    ]
+   ],
+   "+": [
+    [
+     "a",
+     "00000000-0000-0000-0000-000000001001",
+     "confirmed",
+     "album"
+    ]
+   ]
+  },
+  "memberships": {
+   "-": [],
+   "+": [
+    [
+     "a",
+     "00000000-0000-0000-0000-000000001001",
+     "confirmed",
+     "album",
+     "WD",
+     0.9,
+     1,
+     0,
+     "1010000000.9000000000001"
+    ]
+   ]
+  },
+  "identity_scopes": {
+   "-": [
+    [
+     "a",
+     "00000000-0000-0000-0000-000000001001",
+     "[\"00000000-0000-0000-0000-000000001001\", \"00000000-0000-0000-0000-000000001002\"]"
+    ]
+   ],
+   "+": []
+  },
+  "identity_suspended": {
+   "-": [
+    [
+     "a",
+     "00000000-0000-0000-0000-000000001001",
+     "equivalence_split",
+     "[\"00000000-0000-0000-0000-000000001001\", \"00000000-0000-0000-0000-000000001002\"]"
+    ]
+   ],
+   "+": []
+  },
+  "backend_effects": {
+   "-": [],
+   "+": [
+    [
+     25,
+     "verdict",
+     "pending",
+     ""
+    ]
+   ]
+  },
+  "actions": {
+   "-": [
+    [
+     2,
+     "已将 1 张移出 Alice",
+     [
+      {
+       "assertion": {
+        "origin": "album",
+        "status": "confirmed"
+       },
+       "deferred": false,
+       "entity": "00000000-0000-0000-0000-000000001001",
+       "uuid": "a"
+      }
+     ],
+     0
+    ]
+   ],
+   "+": [
+    [
+     2,
+     "已将 1 张移出 Alice",
+     [
+      {
+       "assertion": {
+        "origin": "album",
+        "status": "confirmed"
+       },
+       "deferred": false,
+       "entity": "00000000-0000-0000-0000-000000001001",
+       "uuid": "a"
+      }
+     ],
+     1
+    ]
+   ]
+  }
+ },
+ {
+  "backend_effects": {
+   "-": [],
+   "+": [
+    [
+     26,
+     "verdict",
+     "pending",
+     ""
+    ]
+   ]
+  },
+  "actions": {
+   "-": [
+    [
+     1,
+     "已将 1 张设为 Bob",
+     [
+      {
+       "assertion": null,
+       "deferred": false,
+       "entity": "00000000-0000-0000-0000-000000001002",
+       "uuid": "c"
+      },
+      {
+       "assertion": null,
+       "deferred": false,
+       "entity": "00000000-0000-0000-0000-000000001002",
+       "uuid": "b"
+      }
+     ],
+     0
+    ]
+   ],
+   "+": [
+    [
+     1,
+     "已将 1 张设为 Bob",
+     [
+      {
+       "assertion": null,
+       "deferred": false,
+       "entity": "00000000-0000-0000-0000-000000001002",
+       "uuid": "c"
+      },
+      {
+       "assertion": null,
+       "deferred": false,
+       "entity": "00000000-0000-0000-0000-000000001002",
+       "uuid": "b"
+      }
+     ],
+     1
+    ]
+   ]
+  }
+ }
+]

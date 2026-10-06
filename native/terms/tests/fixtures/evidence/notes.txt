@@ -1,0 +1,1 @@
+synthetic attachment: the core checks its size and hash but never interprets it

@@ -1,0 +1,25 @@
+[package]
+name = "illustash-desktop"
+version = "0.1.0"
+edition = "2021"
+description = "Illustash 桌面外壳：启动原生 HTTP 服务、承载 Pixiv 登录窗口；不承载业务逻辑"
+license = "GPL-3.0-or-later"
+publish = false
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+illustash-platform = { path = "../crates/platform" }
+tauri = { version = "2.12", features = [] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tiny_http = "0.12"
+tauri-plugin-dialog = "2"
+getrandom = "0.3"
+libc = "0.2"
+# 词条核心链进外壳：外壳兼当 illustash-terms 命令行（main.rs），版本与外壳一致，不另带边车程序。
+illustash-terms = { path = "../native/terms" }
+
+[profile.release]
+strip = true

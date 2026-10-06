@@ -1,0 +1,701 @@
+[
+ {
+  "entities": {
+   "replaced": [
+    [
+     "id",
+     "name",
+     "work",
+     "external_key",
+     "variant",
+     "parent_id",
+     "tag",
+     "merged_into",
+     "kind",
+     "artist",
+     "label_only",
+     "mascot",
+     "mascot_origin",
+     "work_id",
+     "original"
+    ],
+    [
+     "00000000-0000-0000-0000-000000001001",
+     "",
+     "Example",
+     null,
+     "",
+     null,
+     null,
+     null,
+     "character",
+     "",
+     0,
+     0,
+     null,
+     null,
+     0
+    ],
+    [
+     "00000000-0000-0000-0000-000000001002",
+     "",
+     "Example",
+     null,
+     "",
+     null,
+     null,
+     null,
+     "character",
+     "",
+     0,
+     0,
+     null,
+     null,
+     0
+    ],
+    [
+     "skin-夏服",
+     "",
+     "",
+     null,
+     "alice_(summer)",
+     "00000000-0000-0000-0000-000000001001",
+     null,
+     null,
+     "skin",
+     "",
+     0,
+     0,
+     null,
+     null,
+     0
+    ]
+   ]
+  },
+  "links": {
+   "replaced": [
+    [
+     "system",
+     "key",
+     "entity_id",
+     "current",
+     "source"
+    ],
+    [
+     "ccip",
+     "alice",
+     "00000000-0000-0000-0000-000000001001",
+     1,
+     "import"
+    ],
+    [
+     "ccip",
+     "bob",
+     "00000000-0000-0000-0000-000000001002",
+     1,
+     "import"
+    ],
+    [
+     "danbooru",
+     "alice",
+     "00000000-0000-0000-0000-000000001001",
+     1,
+     "import"
+    ],
+    [
+     "danbooru",
+     "bob",
+     "00000000-0000-0000-0000-000000001002",
+     1,
+     "import"
+    ]
+   ]
+  },
+  "work_review": {
+   "replaced": [
+    [
+     "entity_id",
+     "status",
+     "note",
+     "parent_locked"
+    ]
+   ]
+  },
+  "assertions": {
+   "replaced": [
+    [
+     "uuid",
+     "entity",
+     "status",
+     "origin"
+    ],
+    [
+     "a",
+     "00000000-0000-0000-0000-000000001001",
+     "confirmed",
+     "album"
+    ]
+   ]
+  },
+  "candidates": {
+   "replaced": [
+    [
+     "uuid",
+     "entity",
+     "source",
+     "score"
+    ],
+    [
+     "a",
+     "00000000-0000-0000-0000-000000001001",
+     "WD",
+     0.9
+    ],
+    [
+     "b",
+     "00000000-0000-0000-0000-000000001001",
+     "CCIP",
+     0.95
+    ],
+    [
+     "b",
+     "00000000-0000-0000-0000-000000001001",
+     "WD",
+     0.8
+    ],
+    [
+     "b",
+     "00000000-0000-0000-0000-000000001002",
+     "WD",
+     0.7
+    ]
+   ]
+  },
+  "identity_relations": {
+   "replaced": [
+    [
+     "id",
+     "a",
+     "b",
+     "kind",
+     "status"
+    ]
+   ]
+  },
+  "identity_evidence": {
+   "replaced": [
+    [
+     "relation_id",
+     "fingerprint",
+     "source",
+     "payload"
+    ]
+   ]
+  },
+  "identity_decisions": {
+   "replaced": [
+    [
+     "id",
+     "relation_id",
+     "previous_status",
+     "status",
+     "reason"
+    ]
+   ]
+  },
+  "identity_decision_evidence": {
+   "replaced": [
+    [
+     "decision_id",
+     "fingerprint"
+    ]
+   ]
+  },
+  "family_evidence": {
+   "replaced": [
+    [
+     "uuid",
+     "entity",
+     "sources",
+     "score",
+     "source_count",
+     "ccip_only",
+     "wd",
+     "ccip",
+     "rank"
+    ],
+    [
+     "a",
+     "00000000-0000-0000-0000-000000001001",
+     "WD",
+     0.9,
+     1,
+     0,
+     0.9,
+     null,
+     1
+    ],
+    [
+     "b",
+     "00000000-0000-0000-0000-000000001001",
+     "CCIP,WD",
+     0.95,
+     2,
+     0,
+     0.8,
+     0.95,
+     1
+    ],
+    [
+     "b",
+     "00000000-0000-0000-0000-000000001002",
+     "WD",
+     0.7,
+     1,
+     0,
+     0.7,
+     null,
+     2
+    ]
+   ]
+  },
+  "single_assets": {
+   "replaced": [
+    [
+     "uuid"
+    ]
+   ]
+  },
+  "lead_assets": {
+   "replaced": [
+    [
+     "uuid"
+    ]
+   ]
+  },
+  "memberships": {
+   "replaced": [
+    [
+     "uuid",
+     "entity",
+     "status",
+     "origin",
+     "sources",
+     "score",
+     "source_count",
+     "ccip_only",
+     "skey"
+    ],
+    [
+     "a",
+     "00000000-0000-0000-0000-000000001001",
+     "confirmed",
+     "album",
+     "WD",
+     0.9,
+     1,
+     0,
+     "1010000000.9000000000001"
+    ],
+    [
+     "b",
+     "00000000-0000-0000-0000-000000001001",
+     "machine",
+     "machine",
+     "CCIP,WD",
+     0.95,
+     2,
+     0,
+     "0110000000.9500000000001"
+    ],
+    [
+     "b",
+     "00000000-0000-0000-0000-000000001002",
+     "machine",
+     "machine",
+     "WD",
+     0.7,
+     1,
+     0,
+     "0010000000.7000000000001"
+    ]
+   ]
+  },
+  "tag_memberships": {
+   "replaced": [
+    [
+     "uuid",
+     "entity",
+     "status",
+     "origin",
+     "sources",
+     "score",
+     "source_count",
+     "ccip_only",
+     "skey"
+    ]
+   ]
+  },
+  "duplicates": {
+   "replaced": [
+    [
+     "uuid",
+     "grp",
+     "size",
+     "pos",
+     "grp_added",
+     "rep",
+     "hidden"
+    ],
+    [
+     "b",
+     "same-art",
+     2,
+     1,
+     "",
+     1,
+     0
+    ],
+    [
+     "c",
+     "same-art",
+     2,
+     2,
+     "",
+     0,
+     0
+    ]
+   ]
+  },
+  "identity_canonical": {
+   "replaced": [
+    [
+     "entity",
+     "canonical"
+    ]
+   ]
+  },
+  "identity_scopes": {
+   "replaced": [
+    [
+     "uuid",
+     "entity",
+     "members_json"
+    ]
+   ]
+  },
+  "identity_suspended": {
+   "replaced": [
+    [
+     "uuid",
+     "entity",
+     "reason",
+     "options_json"
+    ]
+   ]
+  },
+  "identity_uncertain": {
+   "replaced": [
+    [
+     "uuid",
+     "options_json",
+     "reason"
+    ]
+   ]
+  },
+  "identity_anchor_decisions": {
+   "replaced": [
+    [
+     "entity",
+     "reference",
+     "decision",
+     "reason"
+    ]
+   ]
+  },
+  "identity_anchor_history": {
+   "replaced": [
+    [
+     "id",
+     "entity",
+     "reference",
+     "decision",
+     "reason"
+    ]
+   ]
+  },
+  "learn_state": {
+   "replaced": [
+    [
+     "entity",
+     "signature"
+    ]
+   ]
+  },
+  "asked": {
+   "replaced": [
+    [
+     "uuid",
+     "entity",
+     "kind",
+     "answer",
+     "action_id"
+    ]
+   ]
+  },
+  "reviews": {
+   "replaced": [
+    [
+     "entity",
+     "action_id"
+    ]
+   ]
+  },
+  "deferred": {
+   "replaced": [
+    [
+     "uuid"
+    ]
+   ]
+  },
+  "backend_effects": {
+   "replaced": [
+    [
+     "id",
+     "kind",
+     "status",
+     "error"
+    ]
+   ]
+  },
+  "names": {
+   "replaced": [
+    [
+     "entity_id",
+     "lang",
+     "value",
+     "source",
+     "role",
+     "preferred",
+     "position"
+    ],
+    [
+     "00000000-0000-0000-0000-000000001001",
+     "",
+     "Alice album",
+     "album",
+     "alias",
+     0,
+     0
+    ],
+    [
+     "00000000-0000-0000-0000-000000001001",
+     "",
+     "Alice",
+     "index",
+     "alias",
+     0,
+     0
+    ],
+    [
+     "00000000-0000-0000-0000-000000001001",
+     "",
+     "a_li_ce",
+     "index",
+     "alias",
+     0,
+     0
+    ],
+    [
+     "00000000-0000-0000-0000-000000001001",
+     "",
+     "alice",
+     "index",
+     "alias",
+     0,
+     0
+    ],
+    [
+     "00000000-0000-0000-0000-000000001001",
+     "",
+     "alice_album",
+     "album",
+     "alias",
+     0,
+     0
+    ],
+    [
+     "00000000-0000-0000-0000-000000001001",
+     "",
+     "alice_tag",
+     "index",
+     "alias",
+     0,
+     0
+    ],
+    [
+     "00000000-0000-0000-0000-000000001001",
+     "",
+     "爱丽丝",
+     "index",
+     "alias",
+     0,
+     0
+    ],
+    [
+     "00000000-0000-0000-0000-000000001002",
+     "",
+     "Bob",
+     "index",
+     "alias",
+     0,
+     0
+    ],
+    [
+     "00000000-0000-0000-0000-000000001002",
+     "",
+     "bob",
+     "index",
+     "alias",
+     0,
+     0
+    ],
+    [
+     "00000000-0000-0000-0000-000000001002",
+     "",
+     "bob_tag",
+     "index",
+     "alias",
+     0,
+     0
+    ]
+   ]
+  },
+  "prefs": {
+   "replaced": [
+    [
+     "key",
+     "value"
+    ]
+   ]
+  },
+  "audit_sample": {
+   "replaced": [
+    [
+     "uuid",
+     "entity",
+     "stratum",
+     "solo"
+    ],
+    [
+     "b",
+     "00000000-0000-0000-0000-000000001001",
+     "uniform",
+     0
+    ],
+    [
+     "c",
+     "00000000-0000-0000-0000-000000001002",
+     "uniform",
+     0
+    ]
+   ]
+  },
+  "assets": {
+   "replaced": [
+    [
+     "uuid",
+     "filename",
+     "src_path",
+     "width",
+     "height",
+     "src_kind"
+    ],
+    [
+     "a",
+     "a.png",
+     "<临时目录>/a.png",
+     120,
+     150,
+     "orig"
+    ],
+    [
+     "b",
+     "b.png",
+     "<临时目录>/b.png",
+     120,
+     150,
+     "orig"
+    ],
+    [
+     "c",
+     "c.png",
+     "<临时目录>/c.png",
+     120,
+     150,
+     "orig"
+    ]
+   ]
+  },
+  "auto_rules": {
+   "replaced": [
+    [
+     "uuid",
+     "kind",
+     "reason"
+    ]
+   ]
+  },
+  "excluded": {
+   "replaced": [
+    [
+     "uuid",
+     "reason",
+     "origin"
+    ]
+   ]
+  },
+  "imported": {
+   "replaced": [
+    [
+     "uuid",
+     "value"
+    ],
+    [
+     "a",
+     "alice_album"
+    ]
+   ]
+  },
+  "sync_added": {
+   "replaced": [
+    [
+     "uuid",
+     "run_id"
+    ]
+   ]
+  },
+  "curation": {
+   "replaced": [
+    [
+     "uuid",
+     "status",
+     "origin"
+    ]
+   ]
+  },
+  "actions": {
+   "replaced": [
+    [
+     "id",
+     "label",
+     "before_json",
+     "undone"
+    ]
+   ]
+  },
+  "身份元数据": {
+   "replaced": []
+  }
+ }
+]

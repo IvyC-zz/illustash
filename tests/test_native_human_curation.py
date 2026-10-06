@@ -1,0 +1,259 @@
+"""M2 artist/curation/fold/preferences acceptance on independent synthetic packages.
+
+Python 3.12 constructs the shared seed and runs the real Server(None) reference consumer.
+An explicit new release is mandatory; missing binary skips do not count as acceptance.
+Success responses compare original status/bytes/headers; errors compare status only.
+The harness also compares raw DDL, all typed cells
+and physical rowids in app/source/provenance after every step. No old tests are inherited,
+no output is normalized, and no real library or library copy is opened.
+"""
+from contextlib import closing
+import http.client
+import json
+import sqlite3
+import unittest
+
+from tests import test_native_human_labels as labels
+from tests.test_native_human_labels import snapshot, states
+from tools.verify_read_http import fetch
+from web.store import Store
+
+
+class NativeHumanCurationTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        labels.NativeHumanLabelsTest.setUpClass()
+        cls.binary, cls.resources = labels.NativeHumanLabelsTest.binary, labels.NativeHumanLabelsTest.resources
+
+    # Composition, rather than subclassing Harness, avoids recounting its ten old tests.
+    clone = labels.NativeHumanLabelsTest.clone
+    start = labels.NativeHumanLabelsTest.start
+    stop = labels.NativeHumanLabelsTest.stop
+    seed_both = labels.NativeHumanLabelsTest.seed_both
+    undo_latest = labels.NativeHumanLabelsTest.undo_latest
+
+    def pair(self, url, body, *, expected=200, headers=None):
+        before = [states(lib) for lib in (self.left, self.right)]
+        responses = [fetch(base, {'url': url, 'method': 'POST',
+                                'body': json.dumps(body, ensure_ascii=False).encode('utf-8'),
+                                'headers': {'Content-Type': 'application/json', 'X-CSRF-Token': self.token,
+                                            **(headers or {})}}, self.origin)
+                     for base in (self.direct, self.origin)]
+        after = [states(lib) for lib in (self.left, self.right)]
+        for old, new, response in zip(before, after, responses):
+            self.assertEqual(response['status'], expected, (url, body, response['body']))
+            if response['status'] >= 400:
+                self.assertEqual(old, new, ('failed POST partially committed', url, body))
+        self.assertEqual(responses[1]['route'], 'core')
+        if expected < 400:
+            self.assertIsNone(labels.difference(*responses), (url, body, labels.difference(*responses)))
+            for header in labels.HEADERS:
+                self.assertEqual(responses[0]['headers'].get(header), responses[1]['headers'].get(header), header)
+        self.assertEqual(after[0], after[1], (url, body))
+        self.latency.append((url, responses[0]['ms'], responses[1]['ms']))
+        self.assertFalse(self.sentinel.exists())
+        return json.loads(responses[1]['body']) if expected < 400 else None
+
+    def setUp(self):
+        labels.NativeHumanLabelsTest.setUp(self)
+        self.relations = [('e', 'f', 'crop'), ('f', 'g', 'edit'), ('c', 'd', 'variant'),
+                          ('h', 'a', 'subtle'), ('b', 'd', 'similar')]
+        def augment(store):
+            with closing(sqlite3.connect(self.left.source)) as c:
+                c.executemany('INSERT INTO assets(uuid,filename,src_path,width,height,added_at,src_kind,in_scope,trashed,stable_hash) VALUES (?,?,?,?,?,?,?,?,?,NULL)',
+                              [(u, u + '.png', str(self.root / (u + '.png')), w, h, day, 'orig', 1, 0)
+                               for u, w, h, day in [('d', 400, 300, '2026-09-20'), ('e', 400, 300, '2026-09-20'),
+                                                    ('f', 100, 100, '2026-09-21'), ('g', 400, 300, '2026-09-19'),
+                                                    ('h', 400, 300, '2026-09-19'), ('图甲', 80, 100, '2026-09-22')]])
+                c.commit()
+            store.refresh()
+            # Establish different membership before the new hash groups exist; no copy inherits it.
+            store.change(['e'], 'confirmed', self.alice)
+            with closing(sqlite3.connect(self.left.source)) as c:
+                c.execute("UPDATE assets SET stable_hash='hash-two' WHERE uuid IN ('d','e')")
+                c.execute("UPDATE assets SET stable_hash='hash-three' WHERE uuid IN ('g','h')")
+                c.commit()
+            with store.connect() as c:
+                c.executemany('INSERT INTO relations(a,b,kind) VALUES (?,?,?)', self.relations)
+            store.refresh_similar()
+            self.work = store.edit_work('create', name='Synthetic Work')['id']
+            self.merged = store.create_entity('Synthetic merged')['id']
+            store.merge(self.merged, self.alice)
+        self.seed_both(augment)
+        self.assertEqual(states(self.left), states(self.right))
+        with closing(sqlite3.connect(self.left.db)) as c:
+            self.assertEqual(c.execute('SELECT count(*) FROM assets').fetchone()[0], 9)
+            self.assertEqual(c.execute('PRAGMA foreign_key_check').fetchall(), [])
+
+    def test_artist_filters_existing_ids_without_expanding_copies(self):
+        answer = self.pair('/api/artist/verdict', {'ids': ['missing', 'b', 'b'], 'artist': self.artist,
+                                                 'verdict': 'yes', 'name': ' 合成画师\n'})
+        self.assertEqual(answer['undo']['label'], '已确认 1 张是  合成画师\n 画的')
+        with self.store.connect() as c:
+            verdicts = c.execute("SELECT a.key,v.verdict FROM term_effective_verdicts v JOIN term_assets a ON a.id=v.asset_id JOIN terms t ON t.id=v.term_id WHERE t.key=?", (self.artist,)).fetchall()
+            self.assertEqual([tuple(row) for row in verdicts], [('b', 'yes')])
+        self.pair('/api/artist/verdict', {'ids': ['a'], 'artist': self.artist, 'verdict': 'no', 'name': 3})
+        self.pair('/api/artist/verdict', {'ids': ['b'], 'artist': self.artist, 'verdict': None})
+        for _ in range(3):
+            self.undo_latest()
+
+    def test_curate_ascii_history_order_and_bulk_excluded_rowids_on_undo(self):
+        def rules(store):
+            with store.connect() as c:
+                c.executemany("INSERT INTO auto_rules(uuid,kind,reason) VALUES (?,'exclude','synthetic')", [('a',), ('b',)])
+                Store._refresh_excluded(c)
+        self.seed_both(rules)
+        before_rows = self.excluded()
+        self.assertEqual(before_rows, [(1, 'a'), (2, 'b')])
+        action = self.pair('/api/curate', {'ids': ['b', 'a'], 'action': 'include'})['undo']
+        self.assertEqual(self.excluded(), [])
+        self.undo_latest()
+        self.assertEqual(self.excluded(), before_rows)
+        ids = ['图甲', 'b', 'a', 'c', 'b']
+        ordered = ['图甲', 'b', 'a', 'c']
+        action = self.pair('/api/curate', {'ids': ids, 'action': 'exclude'})['undo']
+        with closing(sqlite3.connect(self.right.db)) as c:
+            encoded = c.execute('SELECT before_json FROM actions WHERE id=?', (action['id'],)).fetchone()[0]
+        self.assertEqual(encoded, json.dumps([{'uuid': u, 'curation': None} for u in ordered]))
+        self.assertIn('\\u56fe\\u7532', encoded)
+        self.assertEqual(self.excluded(), [(1, 'a'), (2, 'b'), (3, 'c'), (4, '图甲')])
+        self.pair('/api/curate', {'ids': ids, 'action': 'reset'})
+        self.assertEqual(self.excluded(), before_rows)
+        self.undo_latest()
+        self.assertEqual(self.excluded(), [(1, 'a'), (2, 'b'), (3, 'c'), (4, '图甲')])
+        self.undo_latest()
+        self.assertEqual(self.excluded(), before_rows)
+
+    def excluded(self):
+        with closing(sqlite3.connect(self.right.db)) as c:
+            return c.execute('SELECT rowid,uuid FROM excluded ORDER BY rowid').fetchall()
+
+    def test_fold_hash_union_relationship_order_rep_ties_and_mixed_memberships(self):
+        history = snapshot(self.left.db)['actions']
+        self.pair('/api/fold', {'kinds': []})
+        self.assert_duplicates(['d', 'e'], 'hash-two', 'd', hidden=set())
+        self.assert_duplicates(['g', 'h'], 'hash-three', 'g', hidden={'h'})
+        response = self.pair('/api/fold', {'kinds': ['edit', 'crop', 'edit']})
+        self.assertEqual(response, {'kinds': ['crop', 'edit']})
+        self.assert_duplicates(['d', 'e', 'f', 'g', 'h'], 'hash-three', 'g', hidden=set())
+        def reverse_relations(store):
+            with store.connect() as c:
+                c.execute('DELETE FROM relations')
+                c.executemany('INSERT INTO relations(a,b,kind) VALUES (?,?,?)', reversed(self.relations))
+            store.set_fold_kinds([])
+        self.seed_both(reverse_relations)
+        self.pair('/api/fold', {'kinds': ['edit', 'crop']})
+        self.assert_duplicates(['d', 'e', 'f', 'g', 'h'], 'hash-three', 'g', hidden=set())
+        self.assertEqual(snapshot(self.left.db)['actions'], history)
+        # A valid older source without stable_hash follows relations only, without source writes.
+        def no_hash(store):
+            with closing(sqlite3.connect(self.left.source)) as c:
+                c.execute('ALTER TABLE assets DROP COLUMN stable_hash'); c.commit()
+            store.set_fold_kinds([])
+        self.seed_both(no_hash)
+        self.pair('/api/fold', {'kinds': ['crop', 'edit']})
+        self.assert_duplicates(['e', 'f', 'g'], 'sim:e', 'g', hidden=set())
+        self.assertEqual(snapshot(self.left.db)['actions'], history)
+
+    def assert_duplicates(self, ids, group, representative, hidden):
+        with closing(sqlite3.connect(self.right.db)) as c:
+            rows = c.execute('SELECT uuid,grp,size,pos,rep,hidden FROM duplicates WHERE grp=? ORDER BY pos', (group,)).fetchall()
+        self.assertEqual({row[0] for row in rows}, set(ids))
+        self.assertEqual({row[2] for row in rows}, {len(ids)})
+        self.assertEqual([row[3] for row in rows], list(range(1, len(ids) + 1)))
+        self.assertEqual({row[0] for row in rows if row[4]}, {representative})
+        self.assertEqual({row[0] for row in rows if row[5]}, hidden)
+
+    def test_prefs_ordered_dedup_and_fold_have_no_action_or_event_history(self):
+        before = snapshot(self.left.db)
+        result = self.pair('/api/prefs', {'pins': [self.bob, self.alice, self.bob, self.alice]})
+        self.assertEqual(result, {'pins': [self.bob, self.alice]})
+        self.pair('/api/prefs', {'pins': [self.alice] * 50})
+        self.pair('/api/prefs', {'pins': []})
+        self.pair('/api/fold', {'kinds': ['identical', 'duplicate', 'identical']})
+        after = snapshot(self.left.db)
+        for table in ('actions', 'backend_effects'):
+            self.assertEqual(before[table], after[table])
+
+    def test_cross_label_artist_curate_latest_undo_stack(self):
+        first = self.pair('/api/tag', {'ids': ['c'], 'tag': '第二标签'})['undo']
+        self.pair('/api/artist/verdict', {'ids': ['b'], 'artist': self.artist, 'verdict': 'yes'})
+        self.pair('/api/curate', {'ids': ['c', '图甲'], 'action': 'exclude'})
+        self.pair('/api/prefs', {'pins': [self.bob]})
+        self.pair('/api/fold', {'kinds': ['crop']})
+        self.pair('/api/undo', {'id': first['id']}, expected=400)
+        for _ in range(3):
+            self.undo_latest()
+        self.assertEqual(self.store.prefs(), {'pins': [self.bob]})
+        self.assertEqual(self.store.fold_kinds(), ['crop'])
+
+    def test_parameter_validation_selection_confirmation_and_error_order(self):
+        artist = {'artist': self.artist, 'verdict': 'yes'}
+        for body in ({}, artist | {'ids': []}, artist | {'ids': ['missing']}, artist | {'ids': [3]},
+                     artist | {'ids': ['b'] * 5001}, artist | {'ids': ['a'], 'verdict': True},
+                     artist | {'ids': ['a'], 'artist': None}, artist | {'ids': ['a'], 'artist': 'missing'}):
+            with self.subTest(artist=body):
+                self.pair('/api/artist/verdict', body, expected=400)
+        for pins in (None, {}, [1], [self.alice] * 51, [self.work], [self.merged], ['Alice'], ['missing']):
+            with self.subTest(pins=pins):
+                self.pair('/api/prefs', {'pins': pins}, expected=400)
+        for kinds in (None, 'crop', [None], ['missing'], [[]]):
+            with self.subTest(kinds=kinds):
+                self.pair('/api/fold', {'kinds': kinds}, expected=400)
+        base = {'action': 'exclude'}
+        for body in ({'action': 'bad', 'ids': []}, base | {'ids': []}, base | {'ids': ['missing']},
+                     base | {'ids': ['a'], 'exclude': [1]}, base | {'ids': ['a'], 'filter': {}},
+                     base | {'filter': {'q': 'missing'}}, base | {'filter': {'bad': ''}},
+                     base | {'ids': ['c'] * 501}, base | {'ids': ['c'] * 501, 'confirm': 1}):
+            with self.subTest(curate=body):
+                self.pair('/api/curate', body, expected=400)
+        self.pair('/api/curate', base | {'ids': ['c'] * 501, 'confirm': True})
+        self.undo_latest()
+        self.pair('/api/curate', {'filter': {}, 'exclude': ['b'], 'action': 'include'})
+        self.undo_latest()
+
+    def test_injected_writes_roll_back_every_declared_database(self):
+        for table, url, body in (
+            ('term_verdicts', '/api/artist/verdict', {'ids': ['b'], 'artist': self.artist, 'verdict': 'yes'}),
+            ('actions', '/api/curate', {'ids': ['b', 'a'], 'action': 'exclude'}),
+            ('duplicates', '/api/fold', {'kinds': ['crop', 'edit']}),
+            ('prefs', '/api/prefs', {'pins': [self.bob]}),
+        ):
+            for lib in (self.left, self.right):
+                with closing(sqlite3.connect(lib.db)) as c:
+                    c.execute(f"CREATE TRIGGER fail_curation BEFORE INSERT ON {table} BEGIN SELECT RAISE(ABORT,'synthetic write failure'); END")
+                    c.commit()
+            self.pair(url, body, expected=500)
+            for lib in (self.left, self.right):
+                with closing(sqlite3.connect(lib.db)) as c:
+                    c.execute('DROP TRIGGER fail_curation'); c.commit()
+
+    def test_security_and_inflight_curation_cannot_write_into_new_session(self):
+        commands = (('/api/artist/verdict', {'ids': ['b'], 'artist': self.artist, 'verdict': 'yes'}),
+                    ('/api/curate', {'ids': ['a'], 'action': 'exclude'}),
+                    ('/api/fold', {'kinds': []}), ('/api/prefs', {'pins': []}))
+        for url, body in commands:
+            self.pair(url, body, expected=403, headers={'X-CSRF-Token': 'bad'})
+        self.stop(self.process)
+        newer = self.clone(self.right, 'switched')
+        self.process = self.start(self.right)
+        token = json.loads(fetch(self.origin, {'url': '/api/bootstrap'}, self.origin)['body'])['token']
+        before_old, before_new = states(self.right), states(newer)
+        body = json.dumps({'ids': ['a'], 'action': 'exclude'}).encode()
+        conn = http.client.HTTPConnection('127.0.0.1', self.port, timeout=5)
+        self.addCleanup(conn.close)
+        conn.putrequest('POST', '/api/curate', skip_host=True)
+        for name, value in {'Host': self.origin.split('://')[1], 'Origin': self.origin,
+                            'Content-Type': 'application/json', 'X-CSRF-Token': token,
+                            'Content-Length': str(len(body))}.items():
+            conn.putheader(name, value)
+        conn.endheaders(); conn.send(body[:1])
+        switched = fetch(self.origin, {'method': 'POST', 'url': '/api/libraries/open',
+                                      'body': json.dumps({'path': str(newer.path)}).encode(),
+                                      'headers': {'Content-Type': 'application/json', 'X-CSRF-Token': token}}, self.origin)
+        self.assertEqual(switched['status'], 200, switched['body'])
+        conn.send(body[1:]); stale = conn.getresponse()
+        self.assertEqual(stale.status, 403, stale.read())
+        self.assertEqual(states(self.right), before_old)
+        self.assertEqual(states(newer), before_new)
+        self.assertFalse(self.sentinel.exists())

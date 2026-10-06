@@ -1,0 +1,80 @@
+[
+ {
+  "step": 0,
+  "queries": []
+ },
+ {
+  "step": 1,
+  "queries": []
+ },
+ {
+  "step": 2,
+  "queries": []
+ },
+ {
+  "step": 3,
+  "queries": [
+   [
+    "a_b",
+    ""
+   ]
+  ]
+ },
+ {
+  "step": 4,
+  "queries": []
+ },
+ {
+  "step": 5,
+  "queries": [
+   [
+    "nope_tag",
+    ""
+   ]
+  ]
+ },
+ {
+  "step": 6,
+  "queries": [
+   [
+    "bob_tag",
+    ""
+   ]
+  ]
+ },
+ {
+  "step": 7,
+  "queries": []
+ },
+ {
+  "step": 8,
+  "queries": [
+   [
+    "sk_tag",
+    ""
+   ]
+  ]
+ },
+ {
+  "step": 9,
+  "queries": [
+   [
+    "hero_(series_x)",
+    "series_x"
+   ],
+   [
+    "heroine_(series_x)",
+    "series_x"
+   ]
+  ]
+ },
+ {
+  "step": 10,
+  "queries": [
+   [
+    "solo_(series_y)",
+    "series_y"
+   ]
+  ]
+ }
+]

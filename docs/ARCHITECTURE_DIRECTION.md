@@ -1,0 +1,443 @@
+# 架构演进与 Rust 改写方向
+
+状态：现行参考与已批准方向，2026-10-03。词条抽象见 [TERMS.md](TERMS.md)；稳定应用整体迁移已批准，阶段任务见 总 Issue #8；生产兼容宿主已退役，干净平台交付门槛仍由 M5 分平台验收。
+
+## 目标与边界
+
+采用 **Rust 模块化单体 + Python 研究 worker + 现有前端**。目标是稳定应用核心能够独立运行，不以整个仓库的 Rust 代码占比作为验收指标。
+
+完成标准是卸掉 Python 后仍能启动、浏览、管理图库、执行全部人工整理和撤销；仓库里的 Python 测试、对照实现和研究工具不列入清零范围。依赖 Python 的新溯源、OCR、模型推理任务可以不可用，但不能阻断这些基础功能。平台专属能力和 Python 依赖仍需分别适配，Rust 不自动解决跨平台问题。
+
+保留 SQLite、本地 HTTP 与现有前端。暂不引入微服务、消息中间件、全面 ORM 化或通用插件框架。迁移可以同时改善职责边界，但每批尽量保持 API、数据语义和用户行为稳定；数据模型调整单独设计迁移及验收。
+
+## Core / Platform Service / App 边界
+
+Core 持有连接内规则、资产、证据、人工结论、历史/撤销和投影；平台差异不进入这些业务规则。Platform Service 提供原生文件选择、存储位置读取等平台能力，并明确 Supported / Unsupported。应用宿主管理图库实例、generation、任务取消/授权、持久事件恢复和正式发布；App（网页或桌面 UI）负责展示、用户选择及能力不足时的手填路径，不自行推断出处。服务返回选择结果不等于允许写库，宿主仍负责输入校验、会话隔离与提交。
+
+来源的「存储位置」属于平台能力，分**本地文件夹**与**云相册**。本地文件夹使用路径；云相册通过统一的枚举资产、读取原图/元数据、报告变更与不可用状态的接口接入，iCloud 照片（经 macOS Apple Photos）是第一个适配器。存储位置与 Pixiv / X / 其他「出处类型」分离：文件夹出处由用户指定；云相册按每张图片元数据确定，无法确定时为其他。现有只读适配器为 `platform_folder` / `platform_photos`；`app_folder` / `app_photos` 掌管来源归属、资产身份和差异提交。出处类型由 `origin` 统一提供（#111），没有新增云厂商或改变来源数据库结构。
+
+原生选择服务：`app_platform::choose(kind,multiple,stopping)` 接受 `folder`、`library`、`zip`、`archive`。桌面通过 `app_desktop` 共用 Pixiv 的 loopback 通道，请求 `POST /platform/choose?kind=folder&multiple=1`；启动时随机口令只给外壳和宿主，网页不接触口令。外壳在 bridge 工作线程调用 Tauri dialog 插件，文件夹支持多选；文件和图库保持单选。桥返回 `paths` 列表，不读选定目录、猜出处或记录私人路径。没有桌面通道时，CLI 网页的 macOS 使用 `osascript`，其他平台明确 Unsupported、由用户手填，不悄悄回退到另一条通道。
+
+`POST /api/libraries/choose` 默认沿用单选响应：`path`（取消为 null），文件夹成功时还有 `name` 和固定为 `other` 的中性 `preset`，保持既有表单字段兼容，绝不按目录名猜值。显式 `multiple:true` 仅适用于 `folder`，响应增加完整 `paths`（取消为空列表）；`path` 保留首项兼容，新增消费者应使用 `paths`。多来源界面由 #107 实施，本项不改 `web/static/`。CLI 建库的历史默认推断不由选择接口调用，其改动也由 #107 承接。
+
+弹窗等待期间不持图库会话锁；请求仍绑定接收时的 generation，并在返回后再验证，旧会话结果返回 403，不交给替换图库；归档导入另在取得写锁后复验 token/generation。停止宿主不会等待选择窗口满 600 秒；桌面按现有 stdin/子进程生命周期收尾。macOS、Windows、Linux 已验证取消与正常关窗/退出后的端口释放；Linux 正常关窗退出码为 0。macOS 模态选择窗口期间的退出快捷键未计为通过。回退需同时恢复外壳和核心的选择接口；数据库无需迁移，旧版本非 macOS 桌面会恢复手填限制。
+
+能力矩阵记录已收拢的平台能力，选择窗口证据见 PR #120，凭据存储证据与未覆盖平台见 PR #132，文件系统、时间与系统信息的合成验收见 PR #133（Linux 未实测）。编译通过不代替原生窗口实测。
+
+| 能力 | macOS | Windows | Linux |
+|---|---|---|---|
+| 桌面文件/文件夹原生选择 | Tauri；合成图库、文件夹与 ZIP 路径返回已实测 | Tauri；合成文件夹与 ZIP 路径返回已实测 | Tauri / GTK；合成文件夹与 ZIP 路径返回已实测 |
+| 桌面文件夹多选 | 已实测两个合成目录返回列表 | 已实测两个合成目录返回列表；取消、切库旧结果拒收及关窗退出通过 | 已实测两个合成目录返回列表；取消、切库旧结果拒收及正常关窗退出通过 |
+| CLI 网页原生选择 | 保留 osascript；显式多选解析已测试，CLI 窗口未验 | Unsupported，手填路径 | Unsupported，手填路径 |
+| iCloud 照片 | 既有 Apple Photos 适配器；本次不验真实相册权限 | 待 #112 查证 | 无现行适配器 |
+| 私有文件/目录 | 文件创建 0600；临时目录创建后设 0700 | 保留系统默认权限，不新增 ACL | 同 macOS 的 Unix 权限规则 |
+| worker 响应读取 | O_NOFOLLOW 拒绝最终路径符号链接 | 保留普通只读打开；识别输入另有既有 metadata 检查 | 同 macOS |
+| JPEG 缓存扩展名 | 大小写敏感 | ASCII 大小写不敏感 | 大小写敏感 |
+| 本地日期转换/系统描述 | libc mktime/localtime_r；uname | UCRT _mktime64/localtime_s；OS/架构 | 同 macOS 的 Unix API |
+| 账号凭据 | Illustash 钥匙串；`ILLUSTASH_NO_KEYCHAIN=1` 使用原 0600 文件 | 当前用户 DPAPI，按账号类型绑定用途，独立 `.dpapi` 密文 | 原 accounts 文件，Unix 权限 0600 |
+
+2026-10-02，macOS arm64 同机 release，以 main `a91dcb21` 为对照，独立合成 3 资产包每轮预热 30 次、`GET /api/assets` 100 次，三轮交错顺序取轮中位数的中位数：延迟 1.993 / 2.089 ms（+4.81%），宿主根进程采样 RSS 12.969 / 13.016 MiB（+0.047 MiB）。按用户 <20% / <10 MiB 规则接受；该口径不包含外壳插件内存、选择窗口停留、峰值或真实图库。
+
+## 共享 Core 与宿主的中性能力边界
+
+兼容文本位于 `compat_text`：共用 Python 引号、转义、Unicode 可打印规则及扩展空白裁剪；错误和桌面建库不依赖 HTTP 工具。Unicode 15 表保留历史文件名 `http_unicode.rs`，以中性 `compat_unicode` 模块加载。HTTP 与欢迎页共用 `app_create::creation_error`，保留创建成功后登记、登记失败保留包和原错误转换。
+
+扫描取消由宿主 `app_sync::check` 提供，保留 atomic cancel 或宿主进程停止状态的原谓词；文件夹、Photos 及只读函数仅调用传入的检查。文件夹仍先开启源库即时事务再盘点/哈希、发布 pending journal 后提交；Photos 仍先只读枚举显式来源再开启源库事务，并在原逐行位置探测路径。原检查点、频率、来源碰撞拒绝和应用库后续刷新边界不变。原生选择由宿主传停止谓词，保留 100ms 轮询、600s 超时及 kill/wait 收尾。
+
+`crates/core` 的 `illustash-core` 通过 path dependency 被 `native/terms` 的 `illustash-terms` 使用。Core 承载连接内的词条 schema/迁移、证据包解析与验证、人工裁决、角色/身份关系、历史/统一撤销、名字搜索与投影，以及 Error、Origin、严格 JSON、Unicode 与生成字符表。SQL 资源跟随规则归 Core；宿主以窄转导出保持旧 Rust 模块路径，折叠 SQL 通过连接内函数共用，不复制算法或 SQL。Core 可独立 fmt/clippy/test/locked build，进程内客户端不需要 HTTP/CLI/Tauri、平台 crate 或参考宿主；应用协调与 HTTP/CLI 留宿主；已有来源读取、路径/VFS、文件权限、进程/凭据/系统集成由 `crates/platform` / `illustash-platform` 提供。包名、bin 名、构建入口和 JSON/SQLite 格式不变，无根 workspace。
+
+`backup::RequiredBackup` 是 Core 的具体必需能力，字段私有：Platform 提供私有文件预留、VFS 打开和自身失败文件清理，Core 执行既有 SQLite Backup step100、DELETE journal 与 quick_check，保留已提交 WAL 和隐式 rowid。文件库不能以空适配或内存连接确认备份成功；只有 SQLite main filename 为空的内存库保留免备份语义。现有宿主公共 migrate/cutover 固定调用 `platform_backup::capability()`；Core 独立 API 必须显式提供该能力。宿主已持有 writer transaction 的升级以独立 reader 完成备份并获得字段私有的 `PreparedUpgrade`，规则核对原路径/版本后在原事务迁移；目标版本在任何写入前校验，无公开的不带备份的 migrate_in 或裸 v7 步骤。历史 v2 迁移的私有 stage 在其 writer 之前取得同样的备份凭证，再在原事务内执行原清理 SQL；stage 内额外备份随 stage 清理，正式两库备份及发布事务保留。ATTACH URI 原编码规则仍在 Core，宿主给 ATTACH 提供 Windows 规范化操作路径，同时保留原请求路径作校验与错误文本；只读和事务顺序不变。测试生成旧版本也走带能力入口，合成夹具只清其自身 setup 备份后测实际升级。回退需同时恢复 Core path dependency、宿主薄适配和规则目录；本次不迁移数据，格式回退仍用既有升级前备份。
+
+2026-10-03，MacBook Air M2 arm64，PR #142 同机 release 对照已合入前基线与其候选：100 张合成 PNG 每次全部变更 mtime 后重扫，预热一轮后交错三轮各 15 次，轮中位数的中位数延迟增加 1.76%，根进程峰值 RSS 增加 0.203125 MiB，在用户阈值内。仅包含 CLI 启动与源库扫描/提交，不代表真实图库、Photos、桌面窗口或 Windows 性能。
+
+2026-10-03，Core 抽库的同机 release 对照采用 4096 个合成 SQL 资产，经 loopback 查询及人工标签/撤销；一对预热后交错三轮，各查询先预热 5 次再计 50 次、人工操作计 20 对，取三轮平均延迟的中位数。初次对照查询变化为 −2.26% 至 −0.28%，标签 +3.56%、撤销 −1.51%，wait4 根宿主峰值 RSS 中位增加 0.328125 MiB，均在 <20% / <10 MiB 阈值内；不外推真实图库、Photos、GUI 或 Windows。最终验收及后续增量对照口径见 PR #144。
+
+`illustash-platform` 独立提供实际被宿主调用的进程/Windows Job、文件锁、目录与路径、SQLite 长路径/VFS、凭据/DPAPI、私有权限与不跟随链接、时间与系统信息，以及文件夹和 Photos 只读适配。Platform 仅引用 Core 的 Error/Result 与 RequiredBackup（测试复用合成标识生成），不依赖宿主、HTTP、CLI 或 Tauri；Core 不依赖 Platform。宿主保留原模块路径的窄别名，desktop 直接调用 Platform 进程能力；Windows Job 与宿主任务组合回归仍在宿主，原身份句柄/一次内核等待及结果断言保留。新库独立 fmt/clippy/unit/locked build 已接完整入口及手动 workflow，固定验收仅新增其 target 为可再生输出目录。
+
+Platform picker 以 Selected/Cancelled/Unsupported 表达原生回退结果，宿主保留 600 秒政策、JSON、loopback、token/generation 和旧结果拒收；Tauri dialog 与窗口仍在 desktop。`capabilities::photos()` 统一 desktop_shell 和 HTTP 的既有 macOS 可用性判断，Windows/Linux 仍保留原 Unsupported 文案，iOS/Android 未支持。普通文件夹读取可用于三种桌面平台；Photos 仅 macOS 具有现行产品入口，跨平台合成 SQLite 读取不代表其他系统具有 Photos 权限或集成。读取未改为全量缓存后提交；来源事务、差异/删除恢复、冲突/身份与正式发布仍由宿主业务层掌管。平台矩阵上列证据属于原实测；本次不重新操作 GUI/真实相册/真实凭据，也不把 Linux 或移动端编译推断为实测。
+
+回退应同时恢复 Platform 源文件位置、宿主/desktop path dependency、检查入口和锁文件；凭据服务/账号、CFData、DPAPI 用途与文件格式、覆盖优先和 0600 均未迁移或降级，数据库/worker/HTTP 数据无需迁移。RequiredBackup 的 copy/quick_check 与 PreparedUpgrade 校验仍在 Core；用户显示/校验路径与 SQLite 内部操作路径仍分离。
+
+2026-10-03，Platform 抽库的同机 release 合成对照以已验收 Core 版本为基线：100 张 80×60 PNG 每次全部变更 mtime 后重扫，一轮预热后交错三轮、每轮各 15 次，轮中位数的中位数 19.166083→19.392875ms（+1.1833%），根进程峰值 RSS 10,665,984→10,584,064 bytes（−0.078125MiB），在 <20% / <10MiB 阈值内。只覆盖 CLI 启动、文件夹读取和源库提交，不外推真实图库、Photos、GUI 或 Windows；最终 head 实测及完整验收口径见 PR #145。
+
+## 应用服务与客户端入口
+
+实际依赖为 `desktop → illustash-terms / illustash-platform`，`illustash-terms → illustash-core / illustash-platform`，`illustash-platform → illustash-core`；Core 不引用 Platform、宿主、HTTP/CLI 或 Tauri。`tools/check_architecture.py` 检查四份显式 manifest 的普通、build、dev、target 条件依赖和重命名包，禁止反向依赖及 Core/Platform 传输或 UI 依赖；合成负例和当前 manifest 检查纳入本地完整入口。保留独立 manifest/path dependency，未新增根 workspace 或架构框架。
+
+`native/terms` 继续是第三个后端 crate（应用宿主）。`app_service::Application` 私有持有 Session、实例、generation、任务和导出：显式 `open(path, Options)` 只校验/登记，`start` 初始化既有任务和恢复，`recover` 在该实例锁内恢复持久事件，`switch(received_generation, path)` 在写锁内复验后按原顺序打开、登记、停止旧任务、替换并发布新 generation，`shutdown` 停止并回收任务/导出；Drop 复用同一收尾。关闭后新的服务调用拒绝，重复关闭可安全调用。Options 保留本次网络与自动任务标志，偏好不会自行授予网络权限。进程内客户端须在接受工作时取 generation，再通过 `with_library` 的锁内复验执行 Core 操作，回调只取得已捕获物理实例的 pinned 路径，显示别名重指不能改写另一包；任务结果还须沿用完整 TaskIdentity、持久幂等与原所有者的正式提交校验。库 ID 相同不能代替实例路径、generation 或会话身份。
+
+HTTP 前门仅装配服务与 socket，保留 Host/Origin/token 检查、请求体解析、路由、状态码、响应序列化及等待后安全复验，原 403 和成功 JSON 字节契约不变。会话转 HTTP LibraryContext 留在传输适配；慢 body 不持图库锁，释放锁执行的旧库快照不能重新绑定替换实例。CLI 保留原命令/bin，连接内命令调用 Core；原角色命令事务 helper 移到应用服务，CLI、工厂、迁移与常驻 JSON 通道消费同一函数。`app_service::create` 与欢迎页、HTTP 多来源建库共用唯一 `app_create` 工厂及 optional reference 规则；登记使用工厂返回的实际绝对路径，相对目标不受之后 cwd 变化影响；发布后登记失败仍保留完整包，建库不自动打开、扫描或授权。来源库、应用库、事件与文件发布各自的提交边界不合并。
+
+未来进程内客户端可直接链接 Core 的连接内 API，或使用宿主服务复用现有图库/任务生命周期；不要求启动 HTTP、Tauri 或 Python。desktop 继续只消费 cli/desktop_shell 与 Platform 进程接口，Tauri dialog、窗口和 bridge 留在外壳；不增加 UI。现行能力矩阵只表示已实现及各次实际验收范围，iOS/Android、分享、通知和移动后台没有适配或目标构建证据；抽库及 Unix cfg 不表示移动支持。
+
+三级验证：开发提交做受影响 Core/Platform/宿主单元、进程内客户端、依赖方向和快速集成检查；合并前冻结已提交干净 head，以正规固定区完整 check_all（含两新 crate、宿主/desktop、历史 v5/v6、参考 example 与空 PATH 契约）及必要平台/同机合成端到端性能验收；发版前另做 macOS/Windows/Linux 干净安装、升级与平台能力真机 smoke。手动 workflow 保留 main ref 限制，未启用自动 CI 或必需分支保护。合成客户端、构建和历史平台证据不能替代本次未执行的平台/GUI/真实图库验收，限定例外须逐项由用户决定。
+
+回退应用服务提取应同时恢复 app_http 的生命周期装配、CLI/desktop_shell 接线、迁移清单和检查入口；包名/bin、锁文件、打包路径、HTTP/worker 协议及数据库版本均未改变，不需要数据格式迁移。Core 的具体 RequiredBackup、私有 PreparedUpgrade/target 校验、私有 v7 及用户显示路径/SQLite 操作数边界继续有效。未完成的 Windows 状态差异见 #146，平台交付与 #128 等门槛保持各自状态；第二阶段总验收与关闭由 #105 决定。
+
+2026-10-03，应用服务提取的同机 release 合成端到端对照覆盖 4096 个 SQL 资产、两个同 ID 的不同包实例，经实际宿主开库→bootstrap、常用读取、人工标签/undo、切库→bootstrap；一对预热后三轮交错，开库每轮七次取中位、切库一轮预热后二十次取中位，读取先五次预热再五十次计时、人工操作二十对取平均，再取三轮中位。延迟变化 −1.55% 至 +0.76%，wait4 根宿主峰值 RSS 中位增加 0.09375 MiB，符合 <20% / <10MiB 阈值；最终 head、环境、完整验收及后续同口径样本见 PR #147。只用合成数据与 loopback，不代表真实图库、Photos、Tauri 窗口、Windows 性能或移动支持。
+
+## 文件系统、时间与系统信息边界
+
+`crates/platform/src/platform_filesystem.rs` 提供私有文件创建选项、既有文件权限恢复、私有临时目录创建、只读不跟随符号链接选项和扩展名比较。业务模块保留文件路径、独占创建/覆盖/截断、大小限制、清理及错误处理。Unix 文件创建模式为 0600，凭据写入对已存在文件也恢复 0600；同步临时目录仍先 create_dir，再设置 0700。Windows 不新增 ACL 或符号链接拒绝能力；O_NOFOLLOW 只影响 Unix 最终路径组件，不保证父目录无符号链接。JPEG 缓存清理仍比较最后四个编码字节，Windows 忽略 ASCII 大小写。
+
+`platform_time.rs` 统一宿主本地时间转换：浏览日期下一日按中午 12 点和 tm_isdst=-1 交给 libc 规范化，Windows 使用 _mktime64，返回 -1 仍由业务转为原来的 mktime 错误；角色统计仍使用当前时间减固定秒数后调用 localtime_r/localtime_s，保留失败时零初始化结果。`platform_system.rs` 提供 about 的 Unix uname 描述及其他平台 OS/架构回退。不新增日期库、改变时区或扩大平台支持范围；回退可恢复原模块位置，无需数据迁移。
+
+2026-10-03，MacBook Air M2 arm64，原函数与搬迁后的 local_date 以相同 rustc -O/libc 做纯合成局部对照：每轮 100000 次，一对预热后三轮交错，进程总延迟中位增加 0.74%，根进程峰值 RSS 中位减少 0.015625 MiB，在用户阈值内；不代表应用端到端、Windows 或真实图库性能。
+
+## 应用生命周期首批边界
+
+2026-10-01 用户批准稳定应用整体迁移到 Rust，并允许生命周期首批与 M0 并行。首批以显式打开已初始化的 `.pilib` 包为入口：Rust 持有图库实例、会话和切库状态，直接复用现有 27 个 GET，提供备份、设置和退出。包格式、应用 schema、词条 schema 与四个 core 切换标记分别验证；需要建库、升级或 cutover 时拒绝启动，不通过读取入口隐式修改数据库。
+
+入口为 `./start-web.command --library /绝对路径/已有图库.pilib` 或 `illustash-terms http --library ...`，无需 `--native`。省略 `--library` 时重新打开最近登记的有效包；无记录则明确提示指定包，普通启动不创建图库或隐式升级。`--native` 保留为兼容别名。启动参数见 `http --help`；任务和网络授权参数沿用既有协议，`--no-open` 继续可用。旧宿主的 `--python`、`--upstream`、`--route`、`--refresh`、`--source`、`--db`、`--cache`、`--identity`、`--no-similar` 与参数分隔透传 `--` 明确报退役错误，不打开图库、不连接上游、不启动 Python。图库读、写、设置、备份和管理都在原生宿主中完成。
+
+当前请求在应用接收时绑定 generation；旧 token 的 POST、读取 body 期间切库的写请求及等待锁后已失效的请求不能写入替换图库。读取从请求选定的旧库完成后释放会话锁，网络慢读不阻断切库；旧只读快照可以完成送达，不重新绑定新库。每次切换分别验证目标包、生成新令牌、成功更新注册表后才激活；正式写连接为请求局部；溯源状态轮询保留只读连接，以 SQLite data_version 感知外部提交。同 ID 的不同包实例使用独立会话。原生入口已有名称、识别、同步和溯源协调；溯源任务/授权见 [PROVENANCE.md](PROVENANCE.md) 第 8 节。持久 startup 偏好与本次 `forced_off` 分离，保存偏好不启动任务、不授权联网。原生 POST 当前接收 UTF-8 常规 JSON，复用有序大整数/非有限数字解析；孤立 surrogate 明确拒绝，未将这些样例等同于 Python 所接受全部 JSON 字节编码的兼容性。
+
+普通校验、设置与图库列表不创建应用 schema 或缓存目录。SQLite 的正常只读 WAL 连接可能创建空 `-wal` 和 `-shm` 协调文件；这些文件由 SQLite 管理，不用 immutable 绕过并发锁，也不在失败时擅自删除其他连接可能使用的文件。正式数据库、非空 WAL、schema 和人工记录的失败不变性分别验收，SQLite 锁区字节不作为正式数据。[SQLite WAL 文档](https://sqlite.org/wal.html)
+
+备份是显式操作，只备份应用库 `library.sqlite`，使用 SQLite backup API 保留已提交 WAL 与隐式 rowid；随机文件名以独占创建避免覆盖，校验失败仅删除本次文件。不宣称源库和应用库跨库原子性。设置写入在一个即时事务内合并和提交；提交成功后 HTTP 统计或网络传输失败不能证明写入未发生，不能通过补偿写覆盖其他进程的后续改动。
+
+已有库升级/cutover 使用显式 `--upgrade`，fresh 创建见下节。基础入口不启动 Python；可选 worker 的取消、恢复和进程树清理由原生协调器负责。干净安装及 Windows 平台门槛仍见 M5 Issue #14。
+
+## 进程平台边界
+
+进程生命周期由 `crates/platform/src/platform_process.rs` 及其 Windows 子模块提供，业务任务负责取消、超时和结果状态，平台模块负责启动、观察和收尾。Unix worker 使用独立进程组并在所有退出路径杀掉剩余后代；Windows worker 先以挂起状态启动，分配私有 kill-on-close Job 后恢复线程，收尾等待 Job 活跃进程归零并回收领头进程。领头先退出不免除后代清理；其他平台保留拒绝启动 worker 的错误。
+
+Windows Job 的终止请求与后代进程对象信号完成有异步间隔，不能把零超时等待未信号直接等同于后代仍执行。用户 2026-10-03 决定保持生产收尾及超时语义；生命周期验收夹具在领头退出前，把原后代进程句柄复制到观察进程，保留 PID 和创建时间身份，并在现有 5 秒观察界限内作一次内核等待，再断言原身份、退出信号、Job 终止退出码及任务结果。此观察不依赖按 PID 重开，不用增加 sleep 或重试次数。回退测试观察会恢复立即信号的时序误判，产品行为和数据无需回退或迁移。
+
+桌面外壳复用该模块，保留既有管道和 10 秒停止宽限。Unix 强制收尾按 PID/PPID 枚举所属后代再终止进程组；Windows 保留启动后分配私有 Job 的方式，外壳异常退出时由内核关闭 Job。停止信号保持 Unix SIGINT/SIGTERM 与 Windows 控制台处理器；父进程变化检测仅用于 Unix，Windows 仍依靠桌面 Job 和 stdin EOF。可执行文件的 Windows `.exe` 后缀和 Unix worker `exec` 也在此边界提供。没有新增移动端能力；回退本次搬迁需同时恢复 Platform path dependency、宿主接线及原模块布局，数据和任务协议无需迁移。
+
+## 生产入口与测试参考
+
+读取对照的合成夹具遵守宿主文件名规则：POSIX 保留含 `?` 的包名，Windows 使用 `%` 并继续覆盖空格、Unicode 和 `#`。Windows 账号读取样本通过本机原生保存接口预种 DPAPI，旧 Python 参考保留独立明文种子及相同元数据；成功响应字节与业务断言不归一化。旧参考 HTTP 代理没有原生退出入口或 Windows 进程组，仅其测试收尾在 Windows terminate 后等待；原生正常退出和进程树清理的断言不改变。
+
+CLI 备份拒绝的跨平台合成夹具在回收临时目录前显式提交并关闭各 SQLite 连接，保留 schema、typed rows、rowid 和阻塞文件断言；Windows 句柄释放与迁移/切换拒绝分别核验。
+
+Python 合成测试在导入 `tests` 时为 `urllib.request.OpenerDirector.open` 安装守卫，只允许 HTTP/HTTPS 的 `localhost` 和数值 loopback 地址；外部服务必须 mock，跳转到外网也会被拦截。`python -m tests.run_offline -v -b` 跑完整发现套件并汇总外网尝试，测试代码即使捕获了拦截异常也不能使验收通过。名字写入夹具 mock `NameUpdater.wiki` 的空结果，保留别名解析器的合成答案和现有 golden。守卫只覆盖 Python urllib；原生进程与其他网络库仍由各自合成服务夹具约束。回退可撤销测试守卫及入口改动，不影响生产行为。
+
+`native/terms/src/http.rs` 只保留原生入口、请求上下文、JSON/安全响应；停止信号委托进程平台模块，`app_http` 持有应用会话；不再有 Python state/readiness、旧路由转发或 Python 宿主启动。资源沿用 `--root` / `ILLUSTASH_ROOT` 下 `web/static` 和 `tags/tags_v3.csv`，参考库来自 `ILLUSTASH_SHARED/reference.sqlite`。stdout 的 `图库已启动：http://127.0.0.1:PORT` 与 `/api/bootstrap` 是桌面复用的启动信号；账号桌面登录桥与显式配置的可选研究 worker 保留。
+
+历史 Python HTTP、Store 编排、识别导入和 Rust 命令桥位于 `tests/reference/web/`；2026-10-05 起（#186），只被它们使用的旧 Python 应用模块（names、effects、terms_characters、terms_route、wd_export、works、sync、artists、folder、index_update、provenance_job）和溯源 Runner、账号、导出及联网来源也移入 `tests/reference/web/`、`tests/reference/provenance/`，`web/`、`provenance/` 只保留 Linux 研究、识别、索引、溯源 worker 及其依赖。`tests` 包显式启用历史 `web.*` 导入名，生产 `web` 包没有自动回退；使用 Store 的对照工具也显式导入测试参考。旧转发宿主仅用于历史合成语料的 Rust test example：`cargo build --manifest-path native/terms/Cargo.toml --features test-reference-host --example reference-http`，不属于交付 CLI。普通构建不启用该 feature，基础包不包含测试参考；Python 研究只读常量与算法继续独立存在；研究 worker 使用 `research_snapshot` 的受限适配器，只写隔离副本中的研究表，不导入 Store/HTTP/旧命令桥。安装研究包按同一边界交付 `research_snapshot`、`research_constants` 与计算依赖，不从测试参考复制运行模块；资源和外部 Python 3.12+ 配置见 [安装交付](BACKEND_TASKS.md#独立安装与可选计算包)。
+
+#78 的固定契约位于 `native/terms/tests/fixtures/contracts/`，由 `tools/record_native_contracts.py`（2026-10-05 随参考实现删除，#186）在临时合成包上录制，参考生产者为 `fc49031`；v6 输入由历史核心 `d9c49b4` 经 Python 建库参考真正产出。现存 Python Store 的词条写入/迁移已委托显式 Rust CLI，所以这是现存参考宿主契约，不代表独立的纯 Python 词条算法。Rust 集成测试 `native/terms/tests/contracts.rs` 只恢复输入、启动原生宿主、重放 HTTP，并核对两库全部表的列名、typed cells、rowid（包括历史、撤销载荷、事件与任务行）；不会录制期望值。输入 SQL 显式保留 rowid 间隙。四个有限样本共 26 个 HTTP 步骤：基础 API 读取与拒绝、v6→v7 升级/备份/旧历史撤销、标签写入和撤销、已有 running 同步记录转为 interrupted 后完成新运行并再次运行。成功 JSON 的全部键和值按列出的归一化规则比较，检查四个响应头；错误正文只比较状态码，同时检查数据库不变量。同步 GET 只比较共享的 `history` 契约；原生新增扫描进度字段不在该样本的响应比对范围。
+
+时间仅按夹具列出的表/列及 JSON 时钟键解析后映射，资产日期、输入源运行日期和其余字符串不泛化；新用户概念 UUID 按固定名称、kind、origin、source 绑定，检查唯一性与 UUID 格式；session token 检查格式并映射，包内路径映射至 `@ROOT@`。输入中的既有 UUID 保持原值，整数 ID、NULL、历史顺序、载荷与引用不放宽。`tools/test_native_contracts.sh /absolute/contracts-executable` 运行已编译测试：runner 空 PATH/独立 HOME，原生子进程清空继承环境，仅配置临时 HOME、support、shared 和失败的 Python 名称哨兵。该隔离运行不调用 Python/Cargo，不等于在本机卸载所有解释器；录制阶段需要 Python。`.github/workflows/ci.yml` 的 contracts job 仅限手动触发，并从本次 Cargo compiler-artifact 提取可执行文件而非猜测缓存路径；Actions 触发与本地合并门槛统一见 [AGENTS.md](../AGENTS.md#约定)。既有 Python 对照与 golden 保留；四类样本不替代整个行为网，历史 Python 参考的退役不再逐项建固定契约；生产路径不再使用的旧实现按实际调用在 #186 中删除（2026-10-05 用户决定，替代已关闭的 #104、#154–#157）；完整包装和日常闭环的剩余门槛见 #158，各独立平台任务不因此自动完成。固定性能口径与阈值统一见 [TERMS_PERFORMANCE.md 第 5 节](TERMS_PERFORMANCE.md#5-固定原生宿主基准)。回退可撤销本测试/脚本/手动 job，不改变生产 schema；契约输入与期望不得用被测原生输出刷新。
+
+测试参考 Python HTTP 服务器绑定回环地址时直接记录数值地址与实际端口，不做主机名反向解析。标准库 `HTTPServer.server_bind()` 的同步 `getfqdn()` 曾在 macOS CI 阻塞初始化，使 Rust 前门在上游进入请求循环前连接超时；回归同时验证禁止 DNS 查询、原有 15 秒就绪门槛、切库后的令牌失效与退出释放端口。`.github/workflows/reference-http.yml` 仅验收合成参考 HTTP 语料，不代替生产与 Python 全量门槛。
+
+回退不再是删除 `--native` 或切换 `--route`。需停止新程序、保留当前包与已提交数据，再使用升级前备份恢复对应版本；有不兼容格式时禁止旧程序直接打开升级后的包。无格式变化的程序回退仍需使用与该包版本相容的旧安装产物。兼容表不在宿主退役提交中删除。角色、名称、身份和研究结构仍服务原生读写、历史及撤销；逐项职责和已有 v4/v6/v7 清理边界统一见 [TERMS_SCHEMA.md](TERMS_SCHEMA.md) 第 13 节。保留 terms 7 / 应用 36 / 包格式 1，不为宿主退役新增空迁移。
+
+2026-10-01 在 macOS 开发环境用合成 3 图包，对同 debug 构建进行 3 轮交错先后顺序采样（每轮预热 100 次、`GET /api/assets` 1000 次，取中位数的中位数）：默认入口切换前后延迟 5.918 / 5.187 ms，RSS 19.156 / 18.719 MiB，低于用户规定的退化阈值。该口径不代表真实图库或干净安装平台；干净 macOS/Windows 分别由 M5 平台门槛验证。
+
+## 目标职责
+
+**Rust 应用核心**负责启动、HTTP、静态文件、资产定位与缩略图；图库创建、打开、切换、导入导出、备份和升级；全部人工操作、历史、统一撤销、正式数据与投影；设置、账号状态、任务调度、进度、取消和恢复；稳定外部查询、名称与索引更新、结果验证导入。一次命令统一负责校验、目标解析、事务、历史和必要投影，不把一项逻辑写入拆到两个连接分别提交。保存凭据不能自动授权联网。
+
+**Rust／原生平台适配**负责文件夹扫描、Photos 接入和同步流程、文件可用性与权限。核心使用明确的资产引用，不依赖某个平台的内部路径布局；文件改名、移动和重新扫描必须保留资产身份与人工判断。
+
+**可选 worker（允许 Python／Swift）**负责模型推理、OCR、学习、聚类和实验性溯源算法，可维护研究缓存、特征和机器证据；优先复用现有证据包与结果包契约，交回证据和候选。worker 不得直接修改人工裁决和核心投影，正式结果由 Rust 校验、去重、导入并安排可恢复后处理；重复、迟到或旧图库结果必须拒绝或幂等处理。worker 缺失或崩溃不得阻断已有缓存浏览和人工操作。源库与应用库保留各自提交和恢复边界，不宣称跨库原子事务。
+
+溯源研究与画师归属管理需要分开。2026-09-28 实现已经分开（早期 `PROVENANCE.md` 草案把人工操作和 `prov_actions` 放在溯源进程，没有实现）：人工的「是 TA / 不是」存在核心 `library.sqlite` 的 `artist_verdicts`，由 `Store.judge_artist` 写入、进统一的 `actions` 历史、可以撤销，没有 Python worker 也能操作；溯源 worker 只写 `provenance.sqlite` 里的机器结果（`image_artists` 只有 `auto`、`candidate`），不读也不写人工表。所有权按 [TERMS.md](TERMS.md) 第 4 节第 2 步继续收进 Rust 词条核心，届时 worker 只交证据包。无需现在冻结研究内部表结构。机器候选和人工确认必须保留不同来源。
+
+## 推进顺序
+
+用户于 2026-10-01 批准 M0–M5，覆盖此前限制为新增模块或 R0–R4 的迁移范围与冻结条件。现有词条核心和 27 个 GET 完整接口继续使用；冻结分支只作规格与对照，不整支合入。每批按完整调用链独立验收，阶段可拆多个 PR，逐批合并由用户决定。
+
+| 阶段 | 设计边界 | 阶段门槛 |
+|---|---|---|
+| M0（#9） | 从 main 固定全部 HTTP 分支、CLI、启动/切库、数据库写入和后台副作用的最终所有者、旧实现、验收及删除条件；扩展现有对照工具。 | 全部运行入口和写入明确归属。读取严格比较状态码和原始响应字节，随机选择验候选范围和约束；M0 只保留写入 HTTP 骨架和一个合成用例，完整数据、历史、撤销和事件对照随 M2 第一批命令补齐。 |
+| M1（#10） | Rust 接管图库包、初始化、升级、备份、设置及当前图库/会话/切库状态；普通查询与建库升级严格分离。脚本直接定位 Rust，兼容服务或 worker 按需启动。 | 无 Python 可启动、打开已有库、调用已迁移读取；失败启动不留半升级。切库停止旧任务、释放连接，旧请求/结果不能写新库。未迁移接口允许转发。 |
+| M2（#11） | 全部人工 POST 的目标选择、校验、名称解析、响应与后处理归 Rust，直接复用既有规则；持久化事件提交后可恢复，脱离 HTTP URL 触发。 | 无 Python 完成全部人工整理；跨类型连续操作的最近一步撤销正确；注入失败无部分提交。 |
+| M3（#12） | 剩余本地查询、宿主/设置/图库读取、原图/缩略图/缓存、静态资源/错误响应、导入导出/目录扫描；Photos 保留原生边界。 | 浏览器与桌面基础操作完全不启动 web.server；worker 缺席时已有特征/缓存可浏览。缩略图独验方向、透明度、色彩、尺寸和缓存。 |
+| M4（#13） | Rust 接管同步、名称/索引更新、账号、任务与结果导入；协议补任务标识、目标图库、版本与重复处理。管理启停、进程树、取消、超时、进度、重试和崩溃恢复。 | 重复、延迟、错误与旧图库结果不污染数据；worker 崩溃不影响基础操作；关闭/切库无残留任务；网络授权与凭据保存分离。 |
+| M5（#14） | 全入口验收后删除 Python HTTP、Store 应用编排、桥接和旧转发；对照实现退出生产包，按实际测试用途决定是否保留。兼容表在消费者全部迁移后另批清理。 | 无 Python、无 .venv 的干净 macOS 和 Windows 完成基础功能验收；平台失败不能算全部完成。 |
+
+**M3 完成只表示基础应用脱离 Python，M5 完成才表示彻底迁移完成。** 不按源码比例验收，Python 仍处理的接口不能算已迁移。基础版交付 Rust 核心与桌面资源；研究版另加可选 worker，依赖缺失明确显示不可用。
+
+共享撤销历史必须有统一入口：标签、角色和作品操作共同影响最近一步，不能由各模块独立判断。统一入口在同一事务内检查最近动作并按类型分派。现有单连接撤销验收不能直接替代未来双连接验收；WAL 也不能替代事务归属、锁等待和快照一致性设计。
+
+## 已有试点证据与限度
+
+独立连接试点基于冻结提交 `5515f6e`，完整报告及可复现脚本位于 `codex/rust-core-pilot` 的 `docs/RUST_CORE_PILOT.md`，未合入 main。
+
+- macOS 同一 3000 实体夹具：角色列表 Python 约 69.2 ms、桥接 Rust 106.6 ms；结果一致。分段计时发现 Rust 内部计算、顶层结果序列化、宿主回调与既有 SQL 均有成本，不能把退化全部归因于 ctypes。
+- 100 个所选资产的标签命令中位耗时：Python 2.78 ms、桥接 Rust 5.03 ms、独立连接 Rust 1.38 ms；读取分别为 1.19、1.23、0.16 ms。原生路径包含 IPC，但复用连接；不能解释为纯语言加速或整应用收益。撤销返回契约不同，不比较其耗时作为加速证据。
+- 约 4.8 万张资产、59 张表的真实副本对照通过，覆盖标签添加、重复添加、删除、撤销、过期撤销拒绝和故障回滚。双后端各运行 394 项测试，均通过、各跳过 6 项；Rust 7 项测试及严格 clippy 通过。Windows 未验收。
+
+上述试点只证明独立连接的受限标签闭环。2026-10-01 批准的全域迁移以稳定应用独立运行作为目标，不能由低毫秒级标签收益推断全应用性能。原角色列表仍有数千次 SQL 调用，后续应按真实用户可感知延迟选择优化对象，不用 Rust 覆盖率代替性能指标。
+
+## 2026-09-28 补充：增量功能模块用 Rust
+
+2026-09-28 用户决定之后**新增功能模块**用 Rust；2026-10-01 的 M0–M5 批准范围进一步覆盖已有稳定应用模块。研究 worker 的语言边界保持可选。
+Tauri 桌面外壳（`desktop/`）是第一个 Rust 部分，只负责启动核心 HTTP 命令、管理窗口和 Pixiv 请求通道，不承载业务逻辑。
+桌面直接调用自身链接的 `http --native --no-open` 命令，透传图库、端口及网络授权参数，保留原生账号模块实际使用的 `ILLUSTASH_DESKTOP_BRIDGE/TOKEN` 登录桥，不启动 Python 宿主。资源优先使用显式 `--root` / `ILLUSTASH_ROOT`，安装包使用 Tauri `resource_dir()/resources`，仅 debug 构建允许源码根回退；启动前检查 `web/static/index.html` 和 `tags/tags_v3.csv`。核心链接进外壳，无额外核心边车；资源或执行文件缺失、启动失败、端口冲突与服务异常退出显示本地错误页及重装、检查参数后重启的操作提示。
+
+原生宿主完成启动恢复和自动任务初始化后输出并 flush `图库已启动：http://127.0.0.1:PORT`；外壳只接受当前端口的精确本机 ready URL。打开已有图库时对 `library.sqlite`、`source.sqlite` 各跑一次 `PRAGMA quick_check(1)`，需读完全部页面；数 GiB 的图库要几十秒。桌面宿主（设置 `ILLUSTASH_DESKTOP_STDIN`）在 ready 之前输出 `启动进度：<千分比> <阶段>`：检查进度按两库文件大小加权；库内进度取连接的页缓存未命中数除以 `page_count × 1.5`，由 SQLite 在完整性检查中调用的 progress handler 上报。quick_check 先逐页检查 b-tree，再逐行扫描各表检查约束，所以读取量超过页数：2026-10-02 在真实图库副本上实测，未命中数是页数的 1.43 倍（source）和 1.63 倍（library）。同一千分比和阶段只输出一行；CLI 不输出。真实图库副本（library 0.82 GiB、source 5.83 GiB，APFS 新克隆，单次）从启动到就绪 58.4 秒，进度行最大间隔 0.34 秒，检查结束时从 90.8% 跳到 95%。外壳启动页播放与图库页相同的 logo 折叠动画（`web/static/splash.js`，由 `desktop/build.rs` 复制进 `desktop/dist/`，两边只有一份），进度条按启动进度走到 90%，进度行不进入错误日志尾部。收到 ready 后，启动页等折叠播完，再以带 `launched=1` 的地址打开图库页；图库页看到这个参数就从成形的图标开始，进度条从 90% 接着走，不再重播折叠。启动页脚本 8 秒内没有跳走（例如窗口隐藏时动画暂停），由外壳直接导航。外壳页拿不到图库页保存的主题设置，跟随系统深浅色。外壳启动时：命令行给了 `--library` 就打开它；否则打开最近图库里第一个还能打开的（`desktop_shell::startup_library`）；一个都没有时显示欢迎页（#107）。欢迎页列出最近图库，可以打开已有图库或新建图库（按出处分栏添加文件夹，macOS 可加 iCloud 照片），建库与设置页共用 `app_create::create_sources` 和同一参考库规则（`desktop_shell::create`）。加载中可以「选择其他图库」；启动失败时显示原因、日志尾部和「重试 / 选择其他图库 / 新建图库」。每次启动本地服务取一个新的代号，取消、重试或换库后，旧服务的进度、ready 和退出一律忽略；换库前先按正常收尾停止旧服务（`Child::stop`）。这些命令（`welcome_*`、`startup_*`）只开放给主窗口的本地启动页（`desktop/capabilities/main.json`），127.0.0.1 上的图库页调用不了。启动超时按「30 秒内没有任何输出行」判定，不再限制总时长。登录桥与业务页保持原契约；只读请求的节流与网络授权由原生调用方负责。桌面设置内部 `ILLUSTASH_DESKTOP_STDIN=1`：宿主先等一字节启动闸门，再监听管道 EOF；外壳完成进程归属后释放闸门，关闭及异常父进程退出使管道关闭，宿主复用已有任务 stop/join。CLI 未设置该变量时不读 stdin。正常桌面退出等待宿主，10 秒超时才终止自身子进程；Unix 使用独立宿主进程组，超时先按 PID/PPID 枚举仍归属该宿主的后代并终止（覆盖独立 worker 组），再终止宿主组；枚举失败会输出诊断并退回宿主组终止。Windows 使用私有 kill-on-close Job 并在初始化任务前完成归属；归属失败会终止并 wait 新宿主，再显示重启提示。研究 worker 保留现有独立进程组与平台限制，不因桌面 Job 推断 Windows worker 已受验。
+
+2026-10-01 的桌面专项仅在 macOS 合成环境核验导航、角色浏览、正常窗口关闭、资源缺失、端口冲突、服务强制退出错误页，以及桌面父进程强制退出后的宿主和端口回收；合成研究 worker 的运行中 EOF 与父异常退出验证复用原生收尾。Windows 上的桌面启动、关窗收尾、stdin EOF、端口冲突和父进程异常退出已于 2026-10-01 在 x64 实机上验收（#72），结果和已知限制见 [BACKEND_TASKS.md](BACKEND_TASKS.md)「Windows」；干净 macOS 由 #71、干净 Windows 由 #90 验收，专项通过不代表双平台交付完成。直接 SIGKILL 原生宿主时仍不能保证执行 Unix worker 析构收尾（见原生任务协调），桌面父进程异常退出由存活宿主处理 EOF。回退时使用此前发布的应用与既有备份恢复规则，不重启旧 Python 宿主。
+
+2026-10-01 在同一 debug 二进制、两个独立 3 资产合成包、关闭自动任务的条件下比较 CLI 与桌面 stdin 监测：bootstrap 预热 5 次后，3 轮各 21 次交错请求，取轮中位数的中位数为 7.054 / 7.091 ms（+0.53%）；空闲 200 ms 后单次宿主根进程 RSS 为 17,984 / 18,208 KiB（+0.219 MiB）。按用户的延迟 <20%、内存增加 <10 MiB 阈值接受。这只计生命周期管道/监测开销，不含 Tauri 窗口、峰值、进程树或 Windows，不与旧 Python 宿主比较。
+
+第二个是 `crates/iqdb`（2026-09-29）：IQDB 签名计算与查询的命令行模块，由 Python 溯源 worker 调用，逐行交回结果，入库仍走 worker 现有的证据写入。
+
+## 2026-09-28 补充：以词条为核心收敛
+
+核心数据抽象和迁移顺序见 [TERMS.md](TERMS.md)：角色、画师、作品、标签等统一为「词条」，证据、裁决、投影分层；冻结的 `codex/rust-migration` 不恢复，只作规格和对照；新的 Rust 词条核心自持连接，以溯源的画师归属为第一个闭环。
+
+## 恢复条件与验收标准
+
+每批保留现有测试与 golden，不降低判等标准；验证读、写、数据库变化、历史、统一撤销和待处理事件。随机选择比较候选范围与业务约束，不要求独立随机调用抽到同一资产。真实图库和副本验收须另行授权，默认仅用隔离合成夹具，禁止默认启动真实库。
+
+故障与并发覆盖写入失败、锁竞争、请求中切库、进程中断、重复结果、备份与恢复；性能在相同数据、构建和负载下记录延迟及内存。显著退化必须解决或由用户明确接受，语言迁移不能代替性能证据。未执行、数据口径与平台限制须在对应 PR 明确列出。
+
+过渡期保留已验证的单接口回退。涉及不兼容升级时，从升级前备份恢复，禁止直接用旧程序打开新格式。生产包退出 Python 与数据库兼容表删除分别验收，不能混在一个提交。任务清单、交接和验收数字只写 GitHub，本文仅维护仍有效的设计和决定。
+
+### 迁移覆盖与对照工具
+
+`tests/migration_inventory.json` 记录生产入口与写入的最终归属、当前运行时、存储域、验收及删除条件；研究、测试和生成代码按目录或类别保留，生产可达工具另列例外。`python -m tools.migration_inventory check` 只在新增 HTTP 路由/分支、数据库写入点、启动/CLI 入口或归属缺失时失败，普通实现变化只报告。`expand` 按当前源码位置展开归属，`report` 输出覆盖摘要；静态候选含动态 SQL/包装调用，数量不代表正式写入数量或迁移完成率。工具要求 Python 3.12，不属于基础版运行依赖。
+
+`tools/verify_read_http.py` 对确定性读取严格比较状态码与原始响应字节，拒绝将随机 `/api/ask` 加入字节等同语料。M0 的写 HTTP 对照骨架 `tools/verify_write_http.py` 已于 2026-10-05 随参考实现删除（#186）。
+
+随机读取分别按调用者提供的独立候选契约检查状态、范围、数量、唯一性、元数据、尺寸及固定 hint 顺序，独立抽样不要求资产相同。单一标签夹具在克隆前预置随机 ID，并以合成触发器固定动作时间，不对响应归一化；不代表正式数据库时间行为。逐步 HTTP 延迟与运行内存可作为工具基线记录，单次用例不能证明迁移性能收益。
+
+M3 完成才表示基础应用脱离 Python；M5 需在无 Python、无 .venv 的干净 macOS（#71）和 Windows（#90）环境分别通过基础验收，平台失败不能计为全部完成。研究 worker 缺席必须明确显示不可用，不能阻断浏览和人工整理；其研究代码和测试不列入 Python 清零范围。
+
+## HTTP 读路径（2026-09-30）
+
+原生前门位于 `native/terms/src/app_http.rs`，CLI、启动脚本与桌面共享。原 27 个确定性 GET 的响应由核心独立组装；下列分组用于测试语料，不能按数量代替完整调用链验收。
+
+### 默认核心读取
+
+- **R1–R2（7 个）**：`/api/user-tags`、`/api/general-tags`（本地 CSV）、`/api/artists`（OC 画师统计）、`/api/artist`、`/api/artist-audit`、`/api/entities`、`/api/works`。画师读取保留旧/核心来源、来源帖子、候选原因及固定 SHA1 抽样；本地搜索的 `remote` 缺失或空值分支直读。
+- **R3（7 个）**：`/api/assets`、`/api/assets/count`、`/api/ids`、`/api/detail`、`/api/home`、`/api/fold`、`/api/review-pools`。包括现有筛选、排序、分页、可见性、NSFW、作品树、画师和 `pool=cluster|similar` 的持久化分组查询；详情组装包括源库标签和来源库帖子。
+- **R4（13 个）**：`/api/characters`、`/api/tagged`、`/api/character/profile`、`/api/character/activity`、`/api/character/stats`、`/api/identity/status`、`/api/identity/relations`、`/api/identity/count`、`/api/identity/queue`、`/api/identity/pairs`、`/api/identity/assignments`、`/api/bootstrap`、`/api/prefs`。保留未设置/hybrid 策略、summary、封面分配、首次命中、去重、分页、历史重渲染和会话字段；其他读取见下节。
+
+### 本地、外部与任务读取
+
+`/api/ask`、静态/图片、设置、图库、宿主信息、同步、名称、索引、账号和溯源状态均由原生实现处理。本地分组和已有特征/缓存可以在 worker 缺席时读取；按需研究计算走显式可选 worker，不启动旧 HTTP 宿主。未知接口或缺失研究能力明确返回 unavailable；Host/Origin/会话校验失败直接拒绝。远程名字/作品查询、网络授权及各任务具体协议见本篇对应章节。全部人工 POST、统一历史与撤销由原生业务模块提交。
+
+`tools/verify_read_http.py` 只接受系统临时目录内的合成夹具。成功响应严格比较状态码与原始响应字节，不归一化；错误按用户 2026-10-01 决定只比较状态码。golden 不重录，随机 `/api/ask` 沿用候选范围与选择约束。默认宿主专项另用仅包含失败 Python 哨兵的 PATH 验证不启动 Python；历史 R0–R4 转发语料只运行上述测试 example，不再表示生产路径。
+
+核心名字投影按请求实际使用的键查询，并只在本次读事务内记忆结果；未投影的作品文字仍按旧规则选名，旧名字后端保持原样。资产分页批量读取本页身份、作品显示名和 hybrid 节点，保留字段覆盖顺序；HTTP JSON 使用单一输出缓冲区，浮点规则和持久化 JSON 均未改。没有跨请求名字缓存，人工改名和切库后的请求重新读取当前快照。回退按上节的相容产物与备份恢复方式执行。
+
+2026-10-01 复用原合成库（8,000 图、1,200 身份、40,000 源标签）复测，同库同请求、release 核心与 Python HTTP 端到端、完整请求集预热后每轮再预热 1 次，3 轮各 7 次交错采样，取各轮中位数的中位数。60 张资产列表从原版 `4f5497c` 的 Rust 13.064 ms 降到 5.163 ms，同轮 Python 5.689 ms；NSFW 隐藏列表为 8.921 / 9.425 ms，200 张分页为 9.622 / 9.592 ms（Rust / Python，基本持平）。合成结果不外推到真实图库。检查结果当时汇总为一份验收文件（开源前已移出仓库）；验收过程写入 PR，原始计时样本仅留在临时目录，不提交。用户于 2026-10-01 接受已有桌面窗口证据及意外打开默认图库的已知风险，不再追加这两项核查；用户于同日明确批准提交推送并合并本批；真实副本响应对照和 Windows 验收分别转入 issue #6 和 issue #7，不将它们计作本批已完成验收。
+
+## 显式 fresh 建库边界（2026-10-01）
+
+建库与普通读取分离。Rust 提供 `illustash-terms library-create --dest <新包.pilib> --folder <来源目录> --reference <参考.sqlite> [--name <名称>] [--preset x|pixiv|other]`；目标包、来源文件夹与只读 reference 路径必须由调用方提供，不能隐式打开默认图库。新包须构造完整应用 schema、名称默认值和源库，再复用词条迁移、四类切换及核心刷新，完成后才发布 `library.json`。来源 reference 的表定义与索引保留，只复制 characters、character_aliases、runs 的数据；不扫描来源目录、不启动推理或联网。普通新库保留未设置的身份策略；名称缺省沿用原规则，不给 `--preset` 时出处为「其他」（不按文件夹名猜，见 [LIBRARIES.md](LIBRARIES.md)「来源管理」）。核心切换备份在包内 `library-backups/`，与设置页的 `backups/` 分开。
+
+创建独占取得新目录；失败只清理本次创建的目录，已有目标、来源文件夹、reference 与当前会话均不改。各核心初始化仍有自己的事务，不宣称源库与应用库跨库原子提交。中断留下的不完整新目录不能作为可打开图库呈现。已有库升级和恢复沿用独立设计，不能套用新目录删除策略。显式原生服务的 `POST /api/libraries/new` 已接同一 fresh 构造函数，支持 `kind=folder` 与 `kind=photos`，不扫描或启动 worker。新包按既有规则选唯一名称、创建并登记到 recent 末尾，不改变当前库或令牌；只有后续 `/api/libraries/open` 才切换会话。创建失败只清理本次目录；发布完成后若注册表失败，返回既有 400 并保留完整新包，当前会话不变。普通 JSON 参数、名称/路径、错误和注册顺序复用旧契约；显式创建与切库由会话锁串行协调。创建本身不启动同步；打开后的来源同步见「原生来源同步与应用刷新」，Windows 验收仍未完成。
+
+Photos 新库沿用既有来源契约：`s1`、`kind=photos`、宿主主目录下的 `Pictures/Photos Library.photoslibrary`，App 映射为 `com.atebits.Tweetie2 → x`、`net.pxv.iphone → pixiv`。创建仅登记来源路径，不解析链接、不检查存在性、不读取 Photos 数据，HTTP 请求中的 `folder`、`photos`、`preset` 字段沿用旧接口的忽略行为，来源保持默认值；Photos 读取继续由原生平台适配负责。两种来源共享完整 fresh 初始化、发布和失败清理边界；包格式、应用 schema、兼容表和已有 golden 均不变。过渡期可切回既有 Python 图库管理入口，新包无需格式回滚。
+
+2026-10-01 纯合成 Photos 来源空图库（0 图、2 个参考角色、2 个别名、1 条参考运行记录），相同 release 下测量 HTTP 创建→完整初始化→打开→bootstrap 就绪；预热 1 对，3 轮各 3 对交错采样，取轮中位数的中位数。旧 Python 为 238.601 ms，Rust 为 90.660 ms；空闲 200 ms 后根进程 RSS 为 51,104 / 10,128 KiB（旧 / Rust）。Python 对照走真实 HTTP 创建、初始化、刷新和登记，打开环节排除 exec/重启、worker 与联网；RSS 包含 Python 对照夹具解释器，不含子进程或峰值。数据不外推真实 Photos 图库、大索引或 Windows；按用户同日决定，内存增加小于 10 MiB、延迟退化小于 20% 可直接接受。
+
+回归结束、无并行测试进程时，纯合成空图库（2 个参考角色、2 个别名、1 条参考运行记录）完整建包端到端测量：预热 1 对，3 轮各 3 对交错创建，取各轮中位数的中位数，旧 Python 建包/初始化/刷新为 132.631 ms，Rust CLI 启动/建包为 67.221 ms。包含核心切换与刷新，不能解释为纯语言性能，也不外推大索引、HTTP、内存或 Windows。
+
+同一合成规模的 HTTP 创建→显式打开→settings/bootstrap 就绪流程，在回归结束后预热 1 对、3 轮各 3 对交错测量，取各轮中位数的中位数：Rust 原生为 89.276 ms，旧 Python 有界 HTTP 对照为 163.956 ms；就绪后空闲 200 ms 的单服务进程 RSS 分别为 10,032 KiB 与 49,296 KiB。旧对照使用真实建库/开库/刷新，排除旧 exec、重启延时、worker 和网络。单独 new 响应分别为 83.404 ms 与 9.981 ms，Rust 将完整应用初始化前移到发布前，两段不能单独作为等工作量优化结论；RSS 不含峰值、进程树或桌面资源。数据只代表合成空库，不外推大参考索引、真实图库或 Windows。
+
+## 原生图库管理与归档
+
+显式原生服务直接处理 `POST /api/libraries/choose`、`preset`、`sources/add`、`sources/remove`（见 [LIBRARIES.md](LIBRARIES.md)「来源管理」）、`forget`、`import`、`export` 和 `GET /api/libraries`；桌面外壳链接相同核心，显式原生模式复用这一调用链。macOS 选择窗口由 `osascript` 原生调用，取消返回空路径；选择期间不占用会话锁，返回结果仍须属于原会话，退出时终止选择进程。其他平台继续支持手填路径。来源预设沿用 x/pixiv/other，仅修改指定文件夹来源及其资产；配置先原子保存，再提交源库更新，保留既有可重试边界，不宣称配置文件与 SQLite 跨介质原子提交。最近图库移出只修改注册表，拒绝当前显示路径，不删除包。
+
+归档仅允许 `library.json`、`source.sqlite`、`library.sqlite`、`features/full-features.npy`、`features/full-manifest.csv` 和 `album-char-map.json`，不包含图片、缩略图、备份或 provenance。导入支持旧归档的 stored、deflate、bzip2 和 ZIP-LZMA，拒绝绝对路径、上级路径和未知内容，流式解包并校验 CRC；保留 library_id、来源和配置顺序，增加 imported_from，沿用唯一目录命名，完整发布后登记到 recent 末尾，不切当前库。失败只清理本次独占创建的目标目录；登记失败保留完整已发布包。导入不隐式初始化或升级已有数据库，旧归档后续打开仍须走现有显式升级入口。
+
+导出捕获包实例路径和会话 generation；配置 ID 相同的不同包不共用任务状态。SQLite 使用备份 API 包含已提交 WAL，各数据库分别取一致快照，不宣称两库与配置的跨库原子快照。数据库与特征流式写入同目录独占暂存归档，完整关闭后原子替换最终产物；错误或发布前取消保留原有产物，并清理本次暂存目录。启动响应为既有 running，重复请求在任务运行期间返回 400，列表发布 running/done/error；切库先验证并登记替代包，再取消并等待旧导出，新的会话显示 idle。退出拒绝新导出、取消并等待当前任务，备份分批检查取消并限制锁等待；普通网络慢响应不拥有导出任务。该接口可供 M4 复用，不能以本组完成宣称通用 worker 调度已交付。
+
+归档验收比较解包后文件内容及数据库 DDL、typed cells、rowid 和正式投影，不比较 ZIP 时间戳或压缩容器字节。确定性 HTTP 成功响应保持原始字节；错误只比较状态码。未知内容、路径和格式校验沿用 400，损坏 ZIP、CRC 与非对象配置沿用旧宿主的 500。包格式、兼容表和 golden 不变；回退需停止原生服务后使用既有兼容图库管理入口，无需格式回滚。Windows 与真实图库验收不属于本批合成验证；M3 其他子项与阶段闭环仍由阶段 Issue 跟踪。
+
+2026-10-01 合成 3 资产包及 8 MiB 固定伪随机特征文件，整合 main `2223e57` 后的同一 release、两个独立服务进程，预热 1 对后 3 轮各 5 对交错导出与导入，取轮中位数的中位数：旧 / 原生导出为 173.843 / 153.429 ms，导入为 8.626 / 8.558 ms。导出包含异步启动到 done 的 HTTP 轮询，导入包含流式解包与登记；内容核对和本次合成导入目录清理放在计时外。空闲 200 ms 的单服务根进程 RSS 为 67,184 / 11,664 KiB，不含峰值、子进程或桌面。无延迟或内存退化，按用户阈值直接接受；结果不外推冷盘、大图库、真实图库或 Windows。
+
+## 已有核心库的显式升级边界
+
+原生升级与普通打开分离；使用 `http --upgrade --library <包>` 显式请求。format 1 支持应用 schema 1–35（缺少版本按 Python 的早期分支处理）、schema 36 的旧 source、身份 v2 转 hybrid、缺失索引和名称初始化，以及已有 terms 5/6 核心库升到当前 terms 7。应用迁移保留 Python 的三个历史分支、名称来源、作品关系、默认标签与派生规则；四个核心切换复用现行 Rust 命令。无需升级的当前包沿用普通打开；未知未来版本、未完成的核心标记或损坏的既有写保护在写入前拒绝。普通打开不补跑这些迁移。
+
+旧 source/应用升级先在原应用库与 source 的 attached Immediate 事务中锁住两库，分别备份已提交 WAL、所有单元格和隐式 rowid，并保存原 `library.json` 到 `library-backups/application-before-<唯一标识>/`。升级及初始化在该目录中的临时包完成；核验后在原事务里保留原 DDL 和 rowid 发布两个数据库，使用 DELETE journal 的 SQLite super-journal 保证本流程的成对提交与中断回滚。配置、相册映射、图片和特征文件不改；相册标题继续按旧规则加入名称别名。不把该原子性推广到其他跨库流程。失败保留备份并区分提交前与提交后；恢复须先停止所有连接，再从同一备份目录恢复两个数据库，配置需要恢复时一并恢复，不能混用不同轮次。进程中断留下的 hot journal 需先执行 SQLite 可写恢复或显式恢复备份；普通只读打开不会替用户执行恢复。初始化完整的 terms 5/6 包保留既有单应用库迁移与提交后空间维护路径，维护失败仍使用待重试标记，source 和配置不写。
+
+terms 5（`5e7e7f7`）/6（`d9c49b4`）的历史源库定义均含可为 NULL 的 `assets.stable_hash`；文件夹建库从该完整参考 schema 克隆，词条升级无需补该列。精简读取夹具缺列时，升级仍可成功，默认同步会在应用刷新阶段记录 `error` 与缺列原因；这类夹具不代表历史完整扫描输入。迁移、历史、撤销及备份恢复的精确对照使用 `--no-sync` 隔离独立后台任务；默认自动同步另以完整历史 schema 和合成图片验证，每次启动均新增 `sync_runs`，不能把该任务记录算作迁移差异。当前 schema 上重复 `--upgrade` 只表示迁移无操作，仍遵循启动同步偏好。`--upgrade` 与 `--backup` 冲突在预检阶段拒绝，提示为 `--upgrade 不可与 --backup 同用`，不写库或备份。
+
+2026-10-01 验收覆盖合成应用 schema 1–35、无版本与空应用库、v2、旧 source、Photos 来源的可选只读查询、缺失全量及 WD 索引、作品/皮肤与多来源名称、相册映射；对照现行 Python 初始化/升级路径的 DDL、typed cells 与 rowid。独立运行只对新生成的服务器时钟做限定检查；新建 `term_assets` 行的非 NULL `removed_at` 与 `added_at` 一样按 UTC 解析，要求距当前时间严格小于 60 秒后对齐占位符，NULL 状态及既有行的时间保持精确对照。初始化参考输入明确绑定同一次刷新时钟和新角色 UUID；既有历史值、证据指纹与 golden 不改。发布后注入失败验证两库写锁和完整回滚；隔离子进程强制退出验证 hot-journal 恢复，备份成对恢复后核对旧内容。所有数据为合成夹具，不代表真实历史包、真实图库或 Windows。
+
+纯合成旧核心库（0 图、2 个参考角色、1 次人工资料操作）按真实 terms 5/6 producer 建库，再克隆同一输入；同一 release 下比较原生显式升级→bootstrap 就绪与旧可用的 Rust migrate→另起原生服务，每版本排除 1 对预热、3 轮各 3 对交错采样，取轮中位数的中位数。terms 5 为 51.758 / 58.385 ms、terms 6 为 33.951 / 37.179 ms；空闲 200 ms 的服务根进程 RSS 分别为 9,440 / 6,512 KiB、9,248 / 6,496 KiB（新 / 旧）。同进程升级的常驻内存增加约 2.86 / 2.69 MiB，不能宣称全面性能优化；旧基线迁移进程退出后才另起服务。数据不代表大库、真实图库、峰值、进程树、Python 或 Windows。用户于 2026-10-01 接受该约 2.7–2.9 MiB 的常驻内存增加。
+
+2026-10-01 纯合成 app 35 旧 source 包（应用 2,001 资产、101 角色、51 条人工断言），同一 release 比较原生升级→bootstrap 与 Python 旧升级→exec 同一原生服务。排除 1 对预热，3 对交错运行取中位数：原生 227.954 ms、旧路径 399.587 ms，延迟下降 42.95%；空闲 200 ms 的服务根进程 RSS 为 16,320 / 8,928 KiB，增加 7.22 MiB，按用户小于 10 MiB 的阈值直接接受。数据核对在计时外；Python 升级解释器已被 exec 替换，RSS 不含迁移峰值或完整进程树，不外推大库与真实图库。
+
+## 人工标签与统一撤销的原生入口边界
+
+人工命令按完整 HTTP 调用链迁移。首组原生入口为 `POST /api/tag` 的用户标签增删及 `POST /api/undo`；基于原生会话，不依赖 fresh 建库或已有库升级。Rust 在命令事务内完成参数校验、filter/ids/exclude 解析、重复资产扩展、作品计数、现有核心写入、历史及有序响应。沿用旧目标和标签规则，不改分类政策；请求在会话锁内重查 generation 和令牌，旧请求不能写入切换后的图库。
+
+原生会话另接管 `POST /api/artist/verdict`、`/api/curate`、`/api/fold` 与 `/api/prefs`，覆盖画师裁决、人工收录与排除、重复关系折叠及置顶偏好。画师裁决仅选择已有资产，不扩展重复组；人工整理沿用标签目标选择并在同一应用事务写历史、curation 与 excluded。折叠配置按既有稳定哈希和关系规则重建 duplicates，并沿用成员差异可见性规则；源库只读快照与应用库提交之间保留独立边界，不宣称跨库原子事务。置顶与折叠沿用现存无历史语义；人工标签、画师裁决和整理统一参与最近一步撤销。持久化 JSON 的 ASCII、空格与字段顺序保持原契约，和 HTTP 序列化分开。
+
+原生会话接管 `POST /api/entities`、`/api/character/profile`、`/api/local-links`、`/api/works`、`/api/character-work`、`/api/character/mascot`、`/api/kind`、`/api/oc/shared`。实体创建先按现行名称、别名及 Danbooru/WD 链接复用已有身份；无名 OC 按未占用的「原创角色 N」命名。作品保留 create/edit/from_tag/move/link/rename 六类操作、父子环与链接冲突检查。资料和本地链接与其他人工命令共用最近一步撤销；创建、作品编辑、类型、mascot 和直接作品归属沿用无历史语义。参数解析、核心写入、历史、名称与身份投影及事件入队共用 Immediate 事务；响应读取发生在提交及投影更新之后，不把提交后的响应或事件失败解释成回滚。
+
+版权解析先查本地作品的 Danbooru/qualifier 链接；无匹配时按原 `related_tag.json` 查询及 `name_cache` 契约选择覆盖率至少 0.9 的最小作品，缺失则退至 0.5。Rust HTTPS 客户端保留 25 秒超时、2 MB 响应限制和 500 MB 流量预算，查询缓存与成功流量记账随命令提交；查询或后续写入失败回滚本次正式修改。`ILLUSTASH_COPYRIGHT_BASE` 仅允许本机带端口的 HTTP 合成查询替身。网络查询的全局节流、重试与任务运行由 M4 名称协调接续；当前请求失败返回错误，不启动 Python。
+
+关联创建（含复用）、资料编辑成功后同事务写入 `backend_effects.kind = names:{"entity":角色ID,"refresh":false}`；本地链接写入相同结构而 entity 为 null，表示全范围。这是可恢复的名称更新请求，绑定事件所在包实例，不是完成通知。原生名称消费者按范围执行、重查来源指纹并更新正式名称/投影，成功后确认；失败、确认故障或中断保留 pending，重启幂等补跑。名称运行、网络授权与回退的现行边界统一见 [WEB_NAMES.md](WEB_NAMES.md)「原生运行与恢复」。兼容消费者仍跳过 names 前缀。
+
+2026-10-01 同一 release、3 资产纯合成库，五流程各 1 轮预热、3 轮各 7 对交错 HTTP 请求，取各轮中位数的中位数：资料修改→最近撤销为 83.503 / 30.644 ms，本地链接→最近撤销为 49.342 / 17.079 ms，作品重命名为 14.385 / 4.372 ms，两次 mascot 切换为 25.354 / 11.536 ms，已有实体复用为 6.817 / 3.284 ms（旧 / 原生）。成功响应字节与三库核对放在计时外；本地链接使用预先建立的合成版权缓存。空闲 200 ms 后，Python 对照及夹具根进程 RSS 为 53,888 KiB，核心子进程 8,272 KiB；原生根进程 9,664 KiB，无直接子进程。五流程均未出现延迟退化，原生内存低于该对照；RSS 含夹具开销，测量期间其他会话并行工作，不代表真实大库、峰值、完整生产进程树或 Windows。
+
+原生角色裁决入口为 `POST /api/change`、`/api/audit/answer`、`/api/ask/answer`、`/api/correct`、`/api/reassign` 与 `/api/sweep`。HTTP 参数、筛选/exclude/confirm 和未展开副本的选择集在同一 Rust 写事务解析，角色核心继续负责副本范围、父角色/子标签裁决、原归属核验、历史及投影。全部 change 动作、多角色确认、问答 yes/no/later 与 switch、随机审核、单图纠正、批量替换和扫除沿用现行语义；只解析接口消费的参数，未使用字段中的超大整数和非有限浮点不改变操作结果；写入仍要求当前 schema 和完整四项词条核心切换；later-only 返回 `undo:null`，不返回此前历史。裁决和 verdict 事件同事务提交，提交后无 learner 的事件处理及恢复由原生会话完成；角色与标签、画师、整理及身份命令共用最近一步撤销。历史接口只作为测试参考；生产回退使用相容产物及升级前备份。
+
+原生会话同时接管 `POST /api/identity/decision`、`/api/identity/skip`、`/api/identity/uncertain` 和 `/api/merge`。关系裁决复用核心的提议、证据指纹、状态决议与身份图重建；hybrid 合并保存 `duplicate_of` 决议，保留原始认领、资料和作品记录，通过身份图改变正式投影。未设置策略时沿现有合并链解析当前角色，再执行破坏式合并，搬移人工认领、候选、子标签、名称别名、置顶和审核归属，撤销恢复对应状态。身份未定按图片选取、不扩展复制品；队列跳过仅保存排序后的身份键，不要求角色存在或 hybrid 策略。跳过本身不写事件，其最近一步撤销沿用既有 verdict 通知；重复跳过及撤销保留偏好 JSON 和 rowid 的现行写法。四个入口与既有人工命令共用会话切库隔离、统一历史与提交后事件恢复，不升级格式；可回退到现有兼容 HTTP 入口。
+
+2026-10-01 的同一 release、相同纯合成 3 图输入（含复制品、角色、作品和子标签）下，操作加撤销的 Python / native HTTP 延迟为：hybrid 合并 38.341 / 20.093 ms、关系裁决 47.776 / 18.559 ms、身份未定 42.151 / 18.728 ms、跳过 24.134 / 11.794 ms、未设置策略合并 54.749 / 24.274 ms。每流程排除一对预热，三轮各五对，取轮中位数的中位数；native 根进程 RSS 为 9,472–9,920 KiB，Python 参考服务与测试夹具共用根进程为 54,688–57,136 KiB，另有 Rust 核心 daemon 8,960–9,120 KiB。RSS 是操作后单次快照，参考根进程含测试开销；这些数字不代表真实大库、峰值、完整生产进程树或 Windows。
+
+撤销沿用全库最近未撤销历史及明确 action id，不能只查本组标签历史。各现有历史类型的可逆操作、投影和持久化事件须按真实原路径验证，不能以 HTTP 返回成功替代正式恢复。全部人工接口由原生模块处理；未知接口保持不可用响应。异步副作用通过持久化事件恢复，worker 不得直接写人工裁决和核心投影。
+
+验收在相同合成初始库的独立克隆上比较 HTTP 成功状态与原始响应、正式数据库全表 typed cells/rowid 和 DDL、历史、连续跨类型撤销及待处理事件。角色、画师、整理、折叠、置顶及身份关系、未定、跳过与合并的错误响应只比较状态码，失败仍须验证三库无部分提交。只为独立运行提供相同已批准输入，不放宽 golden 或归一化正式输出；注入失败须无部分提交。第一组不代表全部人工整理完成。
+
+未配置研究 worker 的原生基础模式中，`verdict` 仍沿用旧 `Server(learner=None)` 的成功通知空操作；`done` 不表示学习完成，imported 和未知事件保留原状态。配置研究 worker 后，verdict/imported 由下文的原生研究协调器恢复和消费；正式投影始终通过核心发布。旧服务基础模式对照须执行同一无 learner 的通知路径；裸 migrate CLI 的 pending 状态不能充当 HTTP 启动后的基线。
+
+标签目标解析、概念创建、裁决、历史和投影共用一个应用库 Immediate 事务。原兼容 CLI 在创建新概念后遇到历史写入失败会留下未使用概念；原生 HTTP 按无部分提交约束回滚完整命令，故障数据差异单列，不能计为新旧严格等价。命令提交后的事件确认失败仍可能返回既有 500，此时人工操作完整提交、事件 pending，可恢复；该阶段与事务内失败回滚分别验证。标签与撤销不升级数据库格式，过渡期可切回既有兼容服务及原 POST 转发。
+
+2026-10-01 合成 3 资产库，使用同一 release 与相同初始库，比较真实 Python HTTP handler（无 learner，核心驻留子进程）与原生入口的已有标签添加→最近一步撤销。排除 1 对预热，3 轮各 7 对交错请求，各轮中位数的中位数为 28.156 / 5.983 ms（旧 / 原生）；三库数据核对放在计时外。空闲 200 ms 后 Python 对照及夹具解释器根进程 RSS 为 69,408 KiB，其核心子进程 6,768 KiB；原生根进程 7,824 KiB，无直接子进程。内存口径包含夹具解释器，不表示整应用或完整进程树；时间仅代表该合成操作，不外推真实图库或 Windows。
+
+2026-10-01 同一 release 的 3 资产合成库，四流程各 1 对预热、3 轮各 7 对交错 HTTP 请求，取各轮中位数的中位数：画师确认→最近撤销为 27.041 / 5.705 ms，排除→最近撤销为 15.093 / 6.571 ms，两种折叠配置为 13.233 / 4.323 ms，两种置顶顺序为 10.177 / 3.981 ms（旧 / 原生；三库核对放在计时外）。空闲 200 ms 后 Python 对照及夹具根进程 RSS 为 53,632 KiB，核心子进程 6,912 KiB；原生根进程 8,128 KiB，无直接子进程。仅代表该小库四条调用链，未测大库、Windows 或完整应用进程树。整理及其撤销共用旧 bulk excluded 重建规则，保留乱序目标下的物理 rowid 顺序；不新增历史格式或数据库升级。
+
+
+## 原生静态资源与图片服务
+
+显式原生模式直接提供 `/`、`/app.js`、`/app.css`、`/theme.js`、`/favicon.svg`、`/splash.js` 的既有资源字节、Content-Type 和安全响应头，以及 `/image?id=&size=`。资产路径只从本次会话的应用库读取，不扫描来源，不启动 Python。尺寸上限沿用 thumb 400、medium 800、preview 1600、full 3000，不放大；原图定位失败和不可读返回 404，非法尺寸返回 400。full 同样输出有界 JPEG，并非原文件下载。
+
+缓存键沿用 `sha256(ident:mtime_ns:size_bytes:size).jpg`；命中直接返回旧文件字节，绕过解码槽。未命中先遵循 EXIF 方向（缺失或非法值不旋转），再等比缩小、将透明区域压平到 `#f4f4f2`，输出质量 84 的 JPEG。JPEG 使用 vendored mozjpeg 的 libjpeg 快速配置和分数解码；其他格式使用 image 解码，SIMD 缩放保留 alpha 预乘与调色板及一位 PNG/BMP 的 nearest 规则。锁绑定包内缓存路径，同键在一个服务进程内只生成一次，最多四个解码任务并行；先独占创建随机临时文件，再原子替换，只清理本次临时文件。不宣称跨服务进程只生成一次或缓存写入的断电持久性。图片请求捕获旧会话的源路径与缓存目录后释放会话锁；解码、缓存和慢客户端不阻塞切库，也不会改用新包路径。
+
+新 JPEG 与 PIL 不要求字节一致；合成图验收要求尺寸与方向一致、透明底色各通道误差不超过 2/255，新旧 JPEG 各通道平均绝对误差不超过 4/255，至少 99% 像素的单通道误差不超过 24/255。旧缓存和静态资源保持原始字节、响应头严格相同；错误响应按用户 2026-10-01 决定只比较状态码，既有 golden 不改。只在合成临时图库验收，不外推真实图库或 Windows。生产兼容模式已退役；回退使用相容旧产物或升级前备份恢复。本地查询、扫描和归档已由原生模块接管；归档见「原生图库管理与归档」，M3 阶段结果见 Issue #12。
+
+
+原生 `POST /api/cache` 的 `action=clear`（2026-10-01）复用包内缩略图路径与 settings 统计；只删除直接子项中的 `*.jpg`（POSIX 区分大小写，Windows 沿用 glob 的不区分大小写；包含隐藏名称及符号链接本身），不递归，不删除临时文件、其他后缀或原图。缺失缓存目录返回 removed=0，不创建目录；成功返回先 removed 再原 settings 字段。文件已消失仍计入 removed，文件删除失败返回 500，保留旧入口的部分删除行为，不承诺回滚缓存。失败会释放协调锁与解码槽，修复缓存目录异常后可重试。
+
+清理与图片缓存操作按包路径协调：图片持共享锁完成缓存字节读取或同键生成、临时文件原子发布；清理持独占锁，复用一个解码槽，删除后在锁内读取 settings。锁按规范化路径共享并随在途请求释放，包路径别名不会绕开协调；不同包不共用独占锁，配置 ID 相同的包也按各自路径区分。清理在请求格式及会话校验后捕获所属包并释放会话锁，等待图片、删除与 socket 交付不会阻塞切库，旧请求的清理与响应不会转向新包；过期或切库前未读完请求体的会话返回 403。清理成功后新图片请求可以重新生成缓存，不保证清理响应交付时目录永久为空。协调限于同一服务进程；生产 HTTP 不再提供旧 Python 回退。
+
+2026-10-01 macOS 热文件缓存、同一新建合成包的清理对照中，1,000 个各 120 bytes 的缓存文件 HTTP 延迟为旧 Python 155.788 ms / 原生 141.954 ms（3 轮各 5 对交错采样中位数的中位数）；同负载结束空闲 200 ms 的单服务根进程 RSS 为 43,712 / 8,352 KiB。空缓存清理及缓存命中也未退化；不外推真实图库、冷盘、内存峰值或 Windows。
+
+
+## 原生本地查询与宿主信息
+
+原生模式接管 `GET /api/ask`、`/api/similar`、`/api/clusters`、`/api/sync`、`/api/names`（含 progress）、`/api/index`（含 progress）、`/api/about`、`/api/accounts`、`/api/provenance` 与 `POST /api/suggest`。ask 按 hint 优先、种子不足优先、否则 sample 的现行规则随机选择；保留按数量排序后的前 12 个候选、skip 最多 50 项、later 一周休息期、可见性/NSFW、单人约束、6 张上限与图片尺寸。候选随机抽取使用无模偏差的整数取样。随机输出只校验候选范围和规则；hint 图片按分数降序，seed/sample 图片沿 SQLite random 排序。回答由原生人工命令处理，已回答图片离开候选。
+
+suggest 在只读事务内复用人工目标/filter/exclude 解析，明确不扩展复制品；按去重后的输入顺序截取前 2,000 图，保留机器归属及人工拒绝排除、频次/强弱/分数/名称排序与 9 个候选上限。名称显示、作品覆盖与筛选规则复用现有读取模块。只创建请求局部 TEMP 表，不写正式数据库、历史或事件。
+
+similar/clusters 从持久化表读取，worker 缺席时 state/learner 为 off；sync 的来源盘点、识别编排和本地历史见「原生来源同步与应用刷新」。names 的原生后台与远程选择器见 [WEB_NAMES.md](WEB_NAMES.md)，读取提供进度、名称覆盖、旧配置兼容与 API key 后四位；覆盖统计复用名称读取的 Danbooru、WD、Photos、CCIP、CCIP-base 链接回退。账号 GET 只读取既有绑定元数据、钥匙串/文件是否非空、X 导入统计及本机桌面登录桥，不联网、不改变凭据；写分支见「原生账号与桌面登录桥」。index 的原生检查、补丁与恢复见「原生角色索引维护」，provenance 已有原生 Runner，任务/授权和 worker 缺失行为见 [PROVENANCE.md](PROVENANCE.md) 第 8 节，已有来源结果仍由作品详情与画师读取呈现。oc/groups 从未持久化，是实时按需特征计算；worker 缺席返回原 400，local-links 与 entities/works 的非空 remote 查询已接入原生名称文本来源，联网授权独立于凭据保存。
+
+identity/pairs 的已存锚点预览由 Rust 验证 bank 上下文、向量 SHA256、版本指纹、二维 768 列、数量、有限非零向量和存在的身份；支持现行 float32 及 float64、大小端与 Fortran 数组。陈旧、损坏或不可读的 bank 沿旧规则省略预览，数据库故障仍返回错误；不加载 NumPy、不重建 bank 或启动研究任务。锚点仍按 canonical 身份显示，已有关系和样本查询保持原始字节契约。
+
+about 的应用名、版本和频道来自编译时现行应用元数据，schema 是应用 schema 36；build 是编译所用 Git 短提交，存在已跟踪改动时带 dirty，非 checkout 构建可为空。runtime 为编译器版本；Unix platform 来自 uname，其他平台报 Rust 目标 OS/架构。python 和 Pillow/NumPy/ONNX Runtime 均为 null，仅表示原生 HTTP 宿主未加载这些库，不诊断可选 worker 的安装状态；页面使用 runtime 展示诊断。旧 route 参数已退役；可选研究状态由原生协调器处理。无 schema/兼容表删除。
+
+2026-10-01 单次合成 23 图负载，3 轮各 7 对交错 HTTP 请求、每轮排除一对预热、取轮中位数的中位数：ask 旧/原生为 2.307/1.862 ms，suggest 为 3.474/1.687 ms；accounts 0.491/0.527 ms，延迟增加 7.3%，按用户小于 20% 的规则接受。原生根进程 RSS 8,432 KiB，参考 Python 服务与夹具共用根进程 74,208 KiB；不代表整应用、峰值、真实大库或 Windows。完整口径与其他查询测量保留在对应 PR。
+
+## 原生账号与桌面登录桥
+
+2026-10-03，凭据平台边界为 `platform_credentials::{read,write,remove}`，按账号类型存取；共享 `support` 解析保留 `ILLUSTASH_APP_SUPPORT` 覆盖优先，账号存储接口不要求主目录存在；这不豁免整个宿主其他配置的主目录要求。`app_accounts` 保留类型校验（SauceNAO key 为 40 位十六进制）、账号锁、元数据及过期/网络授权业务；钥匙串 API、DPAPI 与私有文件权限只在平台模块内实现。钥匙串路径不求值文件目录，禁用开关仅在 macOS 切换到原文件存储。原读取空白裁剪、文件读取错误回退为空、解绑缺失忽略及错误文案保持不变；macOS 私有实现位于 `platform_credentials_macos`，与公共凭据模块使用同一 accounts 归属，通过 Security framework 的 `SecItemCopyMatching/Update/Add/Delete` 直接存取文件式 generic-password，服务名 `Illustash`、账号名及标签 `Illustash · <kind>` 不变；密钥只经进程内 CFData 传入，不启动 `security` 子进程。写入与删除先解析首个匹配项的 persistent reference，仅操作该项，避免对搜索列表内全部同名项批量修改；更新已有项保留原 ACL，旧 CLI 创建的条目可继续读取，不迁移到 Data Protection 钥匙串、不要求重新绑定。已有访问控制仍由系统执行；本次未验证真实账号授权或解锁。Rust 测试构建拒绝无显式句柄/搜索列表的钥匙串查询，搜索列表夹具也不能向默认钥匙串新增条目；该限制不改变发行构建。隔离合成钥匙串覆盖旧 API 建项、新 API 读写、旧 API 读回及删除，不能替代真实用户授权验收。本次不改变磁盘格式，程序回退仍使用原凭据存储方式与下述 Windows 重绑定规则。 2026-10-03，M2/macOS arm64 未优化原生模块、专用合成钥匙串缺失项读取，预热后 3 轮各 21 次取轮中位数的中位数：旧 CLI/原生 API 为 9.439/0.035 ms；测试进程 RSS 9,024→9,200 KiB（+0.17 MiB）。 另以相同未优化空载 harness 做三轮交错启动对照（不调用凭据 API），仅保留原生导入的进程 RSS 中位数为 1,504→5,776 KiB（+4.17 MiB），包含 framework 链接启动占用。该口径仅覆盖隔离缺失项与稳态进程，不代表首次加载、真实钥匙串授权或账号 HTTP 端到端性能。
+
+原生宿主的 `GET /api/accounts` 与 `POST /api/accounts/*` 由 `app_accounts` 完成：Pixiv 粘贴绑定、登录窗口、连接、检查、解绑；SauceNAO 保存和解绑；X 归档导入。账号元数据与凭据仍属于整个应用，macOS 使用原 Illustash 钥匙串服务；Windows 使用当前用户的 DPAPI（非机器级、禁止交互提示），凭据密文放在应用数据目录 `accounts/<kind>.dpapi`，按账号类型绑定用途；macOS 禁用钥匙串或其他 Unix 平台使用权限 0600 的原 accounts 文件；响应只含绑定、身份、检查时间和失效事实。Windows 不自动读取或迁移旧明文凭据，需在设置页重新绑定；旧文件保持原样，新凭据加密成功后原子替换密文，解密失败明确报错且不回退。解绑删除密文；回退旧版本不会读取密文，应重新绑定，不能把密文改名为旧明文文件。窗口登录只记录 `via: app`，替换粘贴凭据，解绑清窗口数据；首次失效隔 5 秒复查，网络失败不记为登录过期。
+
+`app_accounts::pixiv_binding()` 只读 Pixiv 元数据，不读钥匙串、SauceNAO 或桌面；`mark_pixiv(who,problem,detail)` 保留原身份/via，更新检查时间及失效事实，HTTP check 与溯源消费者复用同一合并逻辑。账号凭据及元数据操作共用进程内互斥和原子发布，避免并发覆盖其他账号；X 的包级 SQLite 导入不持账号锁。`app_accounts::secret` 供内部消费者读取凭据；`network_state(authorized)` 返回非敏感的授权/窗口/身份/失效事实，授权由调用方明确传入。`pixiv_get(path,authorized,session,in_app)` 未授权先拒绝；app 登录只走原桌面 token 与 127.0.0.1 桥，不回退到 cookie 或匿名登录。账号页面的显式校验只授权该次只读请求，保存 key 不授权名称、索引或溯源后台联网。名称模块与其他消费者通过 `model_credentials(&Connection)` 读取既有模型配置及 legacy 字段回退，敏感结构不实现 Debug/Serialize。每个直连请求上限 25 秒，桌面会话/登录 30 秒、窗口 fetch 120 秒；不跟随重定向。账号身份校验沿旧 Net 规则保持请求起点间隔至少 2 秒，短暂网络失败最多三次，拒绝登录及错误 JSON 不重试；后台消费者自行协调单次 pixiv_get 的节流、预算与任务取消。`ILLUSTASH_PIXIV_BASE` 仅接受带端口的 127.0.0.1 HTTP 合成替身。
+
+X 只读取 ZIP 或解压目录的 `data/following.js`，限制列表为 64 MiB，校验数字账号 ID，按原 source/system/key 唯一键写 leads。复用 provenance v5 schema，版本比程序新则拒绝，旧 ref_sigs 补 colour；schema 与 leads 在同一事务提交，不写人工历史、核心投影或后处理事件。HTTP 请求固定 canonical 包路径与会话 generation，导入/账号校验为有界同步请求，切库和正常退出等待在途请求；旧 CSRF 请求不进入替代包，即使两包配置 ID 相同。归档选择复用原生窗口且释放会话锁，选择后重新验证 generation；取消不写库。无需启动研究 worker 或新增后台任务。兼容 HTTP 宿主已退役；未更改 schema 版本或删除兼容表。
+
+2026-10-01 同 debug 构建、合成图库与本机服务，3 轮各 21 次请求（先预热）取轮中位数的中位数：账号 GET 相对 main（1fe7eb2）为 0.717→0.710 ms（−0.95%），SauceNAO 写入 Python/Rust 为 2.347/0.577 ms，1000 关注 ID 重复导入为 5.131/4.581 ms。负载后单次根进程 RSS main/新原生为 21,168/20,368 KiB（−0.78 MiB）；按用户阈值接受，不代表峰值、真实大库或 Windows。真实钥匙串与真实第三方登录未重新验收，合成验收使用本地模拟钥匙串和桌面服务。
+
+## 公共后台任务与会话结果边界
+
+`app_tasks::TaskIdentity::new(&Library, generation, session_token)` 捕获打开时的 canonical 包路径、library_id、generation、会话令牌摘要及随机 task_id，可作为 serde 结果信封；相同 library_id 的包副本和重新打开的会话分别识别。后台消费者通过 `Library::pinned()` 固定实际读写路径，不跟随显示路径的符号链接重新定位。文件夹 Syncer 使用这一身份和公共 Task，保留既有 GET/POST sync 契约；导出继续复用已经交付的取消/等待边界。
+
+`Task::start(identity, timeout, work)` 启动合作式任务，提供 running/outcome、有限时长 wait 和 stop；wait 超时保留任务所有权，stop/Drop 取消并 join。任务持有 Library 快照，不持有 Host Arc；切库先验证并登记替代包，再停止旧任务，退出停止并等待消费者。`TaskContext::identity()` 返回只读身份；check 检查取消与截止时刻，cancellation 提供已有业务循环需要的取消标记。内存计算不能强制中断，业务循环须及时检查取消/超时，I/O 须设置自身超时。
+
+`TaskContext::receive(identity, apply)` 在同一锁内比较完整信封并接收一次结果，取消或任务结束后拒绝迟到结果；apply 失败不占用接收名额。取消与已进入的结果提交串行，取消返回时没有在途 apply；apply 不可在自身接收锁内调用 cancel/stop。公共接收只负责会话与单次任务边界，持久幂等键必须由业务消费者与正式结果在同一事务保存。扫描继续用 sync_runs 将崩溃遗留 running 标记为 interrupted，源 journal 与应用摘要恢复两库提交边界；pending 后处理事件不被公共模块提前确认，各业务负责重试和恢复。
+
+文件夹同步取消的持久状态取决于取消点（2026-10-03）：哈希/源事务提交前观察到取消时回滚 source；源事务已提交而应用刷新尚未提交时，保留源结果供后续刷新重试，不能承诺 source 不变。实际 run_with 失败且取消已置位才记录 interrupted；已成功结束的 done/needs_recognition/needs_windows 不因后续切库或正常退出改成中断。同步任务固定旧包实例，切库先取消并 join，再替换会话并发布新 generation；两库及最终 sync_runs 状态记录仍是各自的原提交边界。
+
+取消回归用实际 run_with 的进度回调，在哈希完成且源事务提交前、源已提交且应用刷新前分别设置 ready/cancel/release/completion 闸门，验证应用服务切库、shutdown 和 Drop 的取消、等待、源提交前全表回滚及源提交后保留、人工历史及待处理事件保持、同 ID 的新物理包不变与旧 generation 结果拒收；完成路径先等待真实任务结束，再逐表核对正常收尾保留终态。HTTP 回归先观察持久终态，再核对切库/退出后的完整 typed cells、rowid 和重启重扫。不再用合成文件大小推断取消阶段；测试闸门仅在 cfg(test) 内，生产行为及 golden 不变。
+
+
+Unix `TaskContext::process(&mut Command)` 将可选 worker 放入独立进程组，轮询取消/超时，正常或异常退出、父进程先退出、任务取消及栈退出均杀死剩余进程组并 wait 直属子进程。stdin/stdout/stderr 默认关闭，结果通过调用方指定的文件交付，再经 receive 验证；worker 不得脱离进程组。Windows 使用私有 kill-on-close Job，挂起创建后归属并恢复，见 [独立计算包](BACKEND_TASKS.md#独立安装与可选计算包)。Unix 进程组收尾不宣称 SIGKILL 宿主时能执行析构；Windows Job 在宿主退出时由 OS 关闭持有句柄并清理后代。
+
+不新增应用数据库格式或删除兼容表；回退可退出原生模式并使用既有兼容宿主。公共机制已有实际来源同步消费者；名称、索引和研究算法按各业务继续交付，其他业务范围见 M4 Issue #13。
+
+2026-10-01 的 main `1815e79` 与公共 Task release 使用相同构建模式、101 个临时合成文件和已建立的应用索引，各一对预热，三轮各七对交错扫描，取轮中位数的中位数。POST 到任务完成的延迟为 41.552 / 42.002 ms（+1.08%）；处理后单次服务根进程 RSS 为 15,856 / 15,648 KiB（差 -0.203 MiB），不含夹具进程、峰值或整个子树。测量期间同机合成回归仍在运行，两个服务承受同一共享负载；按用户延迟 <20%、内存增加 <10 MiB 的门槛接受，不外推冷导入、真实图库或 Windows。
+
+## 原生来源同步与应用刷新
+
+原生 `POST /api/sync` 对配置中的 Photos/文件夹混合来源按配置顺序启动后台盘点，重复启动返回 `started:false`；`GET /api/sync` 提供进度、错误与最近八次记录。扫描跳过隐藏路径、`.pilib` 子目录和非图片文件，未变化文件不重新哈希；MD5 相同的移动/改名按原顺序保留资产身份，删除保留源记录并标记 trashed，恢复复用身份。同路径换图保留资产身份和人工裁决，清除源标签及 embeddings；损坏图片作为零尺寸资产盘点。无识别 worker 时仍导入文件夹基础信息，Photos 保持已有 rating 结果才进入应用库；已有结果正常浏览，待办明确显示 `needs_recognition`，不将未识别图片计作识别成功。
+
+盘点 CLI 是 `folder-scan` / `photos-scan --db <source.sqlite>`（标准输入为单来源 JSON）和 `library-scan --library <显式.pilib>`（盘点全部来源并刷新应用）；HTTP 使用同一模块。新资产/移除与内容变化复用角色 import 核心，路径更新、正式投影、内容及标签摘要和 `imported` 事件在应用事务中提交。扫描的 imported 事件持久化保留供研究消费者调度；正式识别导入的通知由结果包导入器确认，不代表研究算法完成。建库不扫描；服务启动和切库后按 startup.sync 自动启动。打开时 startup.sync=false 则本次会话关闭同步，重新启用偏好后须重新打开图库。`--no-sync` 关闭本会话同步，`--no-auto-sync` 仅关闭自动触发、保留手动同步；冻结/测试图库始终拒绝同步。待识别数超过 startup.local_limit 显示 needs_windows；缺席 worker 显示 needs_recognition，`--sync-limit N` 只限制每次识别数（0 为全部），不限制扫描。
+
+Photos 适配只打开显式配置包内的 Photos.sqlite 只读连接，收录 App 与 preset 来自来源 apps。盘点包含来源统计、Photos UUID/链接、范围、删除/恢复及导入路径；优先本地 derivative，其次 original，均不存在时保留可重试路径。删除检查按 source_id 隔离，Photos 扫描不删除文件夹资产；不同来源碰撞同一资产标识时拒绝替换。Photos 不写应用库，正式刷新复用同一原生调用链；没有真实图库或平台权限验收。
+
+可选识别 executable 由 `ILLUSTASH_RECOGNITION_WORKER` 显式配置，调用参数为 request.json 与 response.json 路径；请求 format 为 illustash-sync/1，包含完整 TaskIdentity、assets[{id,path}] 和独占 output 目录。worker 只读请求资产并在 output 下生成 [v1 结果包](RESULT_PACKAGES.md)，响应为 identity、packages[目录路径]、failed[{uuid,error}]，必须完整覆盖本次可读待办且无重复或越界资产；不可读原图由 Rust 记失败，后续同步补跑。响应上限 4 MiB，结果包由现行导入器验证；worker 不直接写两库。Unix 子进程复用公共进程组收尾，默认任务超时 600 秒（ILLUSTASH_RECOGNITION_TIMEOUT_MS 可配置正毫秒值）。取消、超时或切库后旧信封拒收，同 library_id 的包副本仍分别固定实际包路径；成功结果调用 app_recognition::import_package，补跑先调用 resume。多结果包各自保留源/应用提交边界，中途失败不撤销已提交包，下次恢复/去重。done 表示本次受 per_run 限制的待办已处理，剩余待办留到下次；失败与 iCloud 提示不冒充成功识别。运行最终记录提交后才发布完成状态。Windows 进程树及包内识别生产者见 [独立计算包](BACKEND_TASKS.md#独立安装与可选计算包)。
+
+源库提交与应用刷新是两个恢复边界。源库提交前原子发布包内 `source.scan-pending.json`，记录同路径换图的资产和内容摘要；应用提交后删除。应用 `meta` 中的 `folder_hash:`、`folder_labels:` 摘要使提交后重试幂等；源已提交而应用未提交时，下次扫描仍能恢复内容变化。旧 WD 分级/题材证据用 `folder_stale_wd:<证据id>` 标记失效，正式投影与 WD pending 预检过滤该标记；证据行及人工历史保留。同结果的成功识别重交会重新激活对应旧证据。角色机器证据仍通过现有空覆盖批次失效。切库与退出设置取消标记并等待旧任务结束；哈希分块与两库提交前检查取消，任务始终持有原包路径，未提交的扫描回滚。
+
+2026-10-01，201 个临时合成文件、同一 release、已有应用索引：真实旧 HTTP Syncer（识别器为空，不启动推理）与原生 HTTP 完整盘点/本地刷新各一对预热，三轮各七对交错，取轮中位数的中位数，旧/原生为 22.507 / 17.317 ms。处理后根进程 RSS 为 Python 对照及夹具 49,088 KiB、原生宿主 16,416 KiB；未计峰值、完整进程树、大库或 Windows。结果不外推真实图库；按本次用户的 <10 MiB/<20% 阈值接受。回退可使用同一当前 Rust 核心的兼容宿主；退回更旧二进制须先恢复对应备份，不能忽略机器失效元数据后重投。
+
+2026-10-01，main `1815e79` 与原生同步编排的同 debug 构建，各用独立合成图库、1,000 张 48×48 PNG 测量 CLI 完整首次盘点和应用刷新（无研究 worker）。排除一对预热后，三对交错采样的中位数为 443.060 / 503.123 ms（+13.56%），`time -l` 根进程峰值 RSS 为 26.609 / 27.094 MiB（+0.484 MiB）；含命令启动，不含夹具父进程与可选 worker。按用户 <20% / <10 MiB 规则接受，不外推 release、真实图库、Photos 权限、研究推理或 Windows。
+
+### 原生角色索引维护
+
+原生 GET/POST `/api/index` 提供 check/apply/drop/watch、进度、关注作品、候选与最近六次记录。watch 沿用 v2 作品 ID、pending_tags 与 20–5000 的 min_posts，按图库存在应用数据库 `prefs.index_watch`（#205）；没有记录时从共享 `char-patch/watch.json` 只读推出初值，旧 tag 配置用本库已确认的作品链接解析。检查保持共现 ≥0.5、最低帖子数、本体筛选、已有角色/元数据/拒绝记录排除，以及每作品候选数；空检查也记录 checked_at。启动及周期检查读取 startup.index_check，七天到期重查；`--no-index-check` 关闭自动触发，手动检查保留，`--index-check` 可显式恢复本次自动触发。冻结图库不执行检查或恢复。
+
+文本查询复用名称 Source 的主机节流、重试、25 秒单次超时与流量预算。`--index-network` 只授予本次进程 Danbooru 索引查询和公开参考图下载，保存凭据不授予联网。替身地址沿用 `ILLUSTASH_COPYRIGHT_BASE` 的带端口 loopback 限制；参考图只接受 Danbooru HTTPS 或本机合成 HTTP，禁重定向/URL 凭据，单图最多 2 MB，下载也占用 500 MB 预算。失败的单张参考图可跳过，取消与来源校验失败终止；可用参考不足仍由计算结果标为 rejected。没有实际账号、图库、Photos 或真实网络验收。
+
+可选 executable 由 `ILLUSTASH_INDEX_WORKER` 显式配置，参数为 request.json、response.json；没有 worker 仍可检查、编辑关注列表和浏览，apply/drop 明确拒绝。请求 format=`illustash-index/1`，含完整 TaskIdentity、源输入摘要、action、rows、reason 和隔离 review。Rust 备份源库，准备角色参考、游戏名称、相册映射、图库特征和公开参考图；macOS 安装适配器 `illustash-index` 在隔离快照中调用 `index_compute`，Windows/Linux 沿用 `tools/index_worker.py`；计算均不联网、不打开正式两库。响应回传 identity/before、characters 对象、aliases 三元组和 labels `[uuid,char_id,conf]`；上限 64 MB。进度文件也须匹配当前身份，只接受 fetch/clean/build/scan 及有界计数。Rust 校验版本、完整身份、源输入、角色/资产范围、重复项和置信度；已有孤立源认领只允许原样保留，新越界结果拒绝。默认任务超时 600 秒，`ILLUSTASH_INDEX_TIMEOUT_MS` 可设毫秒值。
+
+正式写入由 Rust 完成：源角色、别名、char_ext 与 native_index_runs 收据同事务；char_ext 保留 char_index 来源和本次模型/运行标识。源提交后安装所选参考、原始特征、拒绝记录与重建锚点，再以现有 reindex 命令更新变化资产的角色证据/名称/投影。应用完成键、全范围 names 请求和 index_changed 事件同事务，名称由现行消费者接续；index_changed 交给现行研究消费者重载锚点并再聚类；未配置研究 worker 时保留 pending，基础宿主不将算法未运行写成完成；人工历史不改。最后更新候选、历史与完成状态。源提交与应用提交不宣称跨库原子；包内 index-job.json 记录可重放任务，源收据及应用 meta 完成键避免重复正式导入，独立历史收据避免完成记录重复。失败留待恢复，重启或 60 秒周期补跑；源输入已改变且尚未提交的结果作废，重新检查/申请。未完成任务只能重试同一选择，不能悄悄改做另一动作。
+
+索引写任务与同步、显式识别导入互斥；检查只读源数据，可与同步并行。共享索引使用 OS 文件锁，崩溃释放锁；备份分批检查取消，网络等待有单次超时。切库和退出取消并等待 Task 及进程树，固定 canonical 包实例；重新打开原包的恢复使用新身份，不接受旧会话结果。只保留最近五份原生源库/锚点备份，完成后清理隔离计算目录；原始参考特征与拒绝记录保留用于后续计算。Unix 进程树沿用公共 Task，Windows 使用私有 Job 与文件锁，见 [独立计算包](BACKEND_TASKS.md#独立安装与可选计算包)。兼容宿主可读取沿用格式的 watch/check/history 与已提交源数据；未完成的原生任务先由原生宿主恢复，不能用旧工具绕过恢复边界直接写正式源库。
+
+索引计算模块 `index_compute` 在准备好的隔离 review 中执行 CCIP 参考特征、clean、角色/别名构建和 scan，不联网、不写正式数据库；使用既有 `CcipSession`，只加载 `model_feat.onnx` 和显式 CPU runtime，不加载 WD 或维护学习 Features 缓存。App Index 继续持有授权、任务身份/指纹、共享租约、校验、两库分阶段提交与恢复。原始补丁特征保留在 raw，拒收记录和人工 drop 理由保持；空角色集合重建有效 `(0,768)` 锚点并清除旧认领。
+
+2026-10-04，索引分位数保留现行 macOS NumPy 2.5.3 标量 `np.percentile(dd,q)` 口径：f32 输入按 f32 插值、f64 输入按 f64 插值；与学习单独批准的 float64 p90 不混用。NPY 原始大小端、C/F 布局及 f32/f64 归约先保留，输出锚点/清洗特征才转 f32；矩阵运算复用 Platform 的系统 Accelerate。索引与识别别名矩阵均保留旧算法 1024 行分块，64 行会使尾部单行 GEMV 翻转 `.01` 边界判断；取消仍在归一化、逐别名行和 BLAS 前后检查，单次不可中断 BLAS 最多 1024 行乘全体锚点。scan 保留最近 9 项 argpartition 后排序、先去实体重再判断阈值、补丁 p75/上游 p90 和 4000 列分块；正式标签置信度仍取四位小数 CSV 距离，scan CSV 保留旧 `csv.writer` 的 CRLF 行结束字节。等频 core tags 的旧哈希集合没有跨进程固定顺序，现行计算以标签字典序打破同计数平局。其他平台 portable 数值尚未取得此项实际验收，安装入口应保留既有路径，不能据 macOS 证据宣布跨平台原生替代完成。macOS 安装 dispatcher 的 index 入口直接进入原生计算，无需 `ILLUSTASH_WORKER_PYTHON` 或可发现的 Python；模型目录与 tags 沿用统一资源解析，CPU runtime 使用 `ILLUSTASH_ORT_DYLIB` 或资源根下 `onnxruntime/libonnxruntime.dylib`，`--check` 实际加载 CCIP 会话。2026-10-05 起 Windows 安装 dispatcher 的 index 入口同样走原生计算（CPU runtime 默认资源根下 `onnxruntime/onnxruntime.dll`），Linux 继续既有 Python 路径。Python 算法/联网 CLI 的测试与研究消费者仍保留；完整安装包的资源装配与平台验收范围以 [安装参考](BACKEND_TASKS.md#独立安装与可选计算包) 为准。
+
+Windows 开发计算候选复用 #151 的固定 ILP64 OpenBLAS 加载器：显式绝对 `ILLUSTASH_RESEARCH_OPENBLAS_DLL`、登记分发指纹和模块文件身份检查保持；索引 f32/f64 的 DOT 与 C/F 原始布局 GEMV 均走该后端，不用顺序累加替代，不将 F 布局转成另一种矩阵形状。缺配置明确失败，不静默使用 portable。安装后的 worker 在启动器未提供 `ILLUSTASH_RESEARCH_OPENBLAS_DLL` 与 `ILLUSTASH_ROOT` 时，按安装位置解析 `resources/openblas/openblas.dll`，学习、索引、识别三类入口一致；`--check` 也会验证该后端身份。Linux 的生产 gate 保持；其他平台算法未改。2026-10-04 用户批准最近 9 项的并列距离统一使用既有 NumPy 1.26.4 标量 argintroselect/aquicksort 顺序；Windows NumPy 2.5.3 的 SIMD 并列项选择及顺序会改变，可能改变 scan 去实体重后的候选与声明。距离数值、阈值与非并列项顺序保持原合同。回退既有 Python 路径会恢复该平台 NumPy 顺序。
+
+显式模型验收入口为 `python -m unittest tests.platform_index_models -v -b`，不进入普通 discover。开发计算候选的 `tests.test_native_index_compute.NativeIndexActualCcipTest` 与安装适配器的 `tests.test_native_index_production.InstalledIndexAppTest.test_actual_ccip_download_to_installed_adapter_without_python` 同样只按名字显式运行，普通 discover 不收集；显式运行时缺模型、runtime 或独立旧 raw 直接失败。必须提供当轮 `ILLUSTASH_TERMS_BIN`、`ILLUSTASH_INDEX_ADAPTER_BIN`、`ILLUSTASH_RECOGNITION_COMPUTE_BIN`、`ILLUSTASH_NATIVE_ROOT`，以及授权的 `ILLUSTASH_INDEX_INSTALLED_MODEL`、`ILLUSTASH_INDEX_INSTALLED_RUNTIME`、独立旧算法的 `ILLUSTASH_INDEX_REFERENCE_RAW`；缺输入直接失败。该入口只安装索引所需 CCIP 资源，用八张坐标生成 RGB 图片检查原生参考推理、正式发布、后续识别认领、缓存重算与 drop；子进程空 PATH，无 Python workers、WD 或外部模型/runtime 路径覆盖。补丁识别阈值按旧 `claim_thresholds` 取 p75。缓存重算保留角色元数据和 raw，仅删除派生的清洗矩阵；公共 apply 仍只接受最近检查里的缺失角色，不新增强制重算接口。该窄安装布局不代表签名 App 或全功能安装包，其他平台继续按各自门槛验收。
+
+2026-10-01，同一合成包（3 资产、2 既有角色、1 关注作品）和 loopback 服务返回 1,000 候选，原生 release 与旧 Python HTTP 检查各预热一次后取三次中位数：18.07 / 25.87 ms（原生 -30.15%）。处理后单次空闲 RSS 为 20,640 / 56,448 KiB；Python 含对照服务与夹具，不含独立核心 daemon，不是峰值或生产大库。debug 构建同负载为 66.30 / 25.81 ms，超过延迟接受阈值；交付性能结论限定为 release，不将 debug、真实网络、推理 worker 或 Windows 计为性能通过。
+
+### 离线识别结果导入
+
+原生 `POST /api/recognition/import` 与 `recognition-import` CLI 共用 `app_recognition`：校验 v1 manifest、目标图库、模型/标签指纹、资产范围、摘要、NPY float32 维度与有限非零向量、合法标签后，单源事务写机器标签/特征和去重账本。源提交、WD 核心证据提交、应用正式导入、后处理通知各保留实际边界。应用恢复标记和 imported 事件同事务提交，resume 不重复正式投影或人工历史。基础宿主无研究 worker 时通知成功 no-op；研究 dispatcher 失败留 pending 和错误，不将算法未运行写成已完成。契约、原生接口和回退细节统一见 [RESULT_PACKAGES.md](RESULT_PACKAGES.md)。显式 HTTP 导入受会话锁、generation 与 CSRF 保护；导入接口复用 canonical 包固定路径，异步研究接收者仍须先验证捕获的包实例和会话身份。
+
+2026-10-01，小型合成包（两个资产、合成模型/标签文件）的首次完整 HTTP 导入，独立种子克隆，切库准备排除计时；两对预热、三轮各七对交错，取轮中位数的中位数，Python / Rust 为 48.020 / 9.016 ms，21 对响应字节一致。重复导入五对预热、同样三轮各七对为 2.967 / 0.878 ms。处理后原生进程 RSS 14,000–14,384 KiB，Python 参考与夹具同进程 51,568–53,392 KiB；不含瞬时峰值、完整进程树或大库，不能外推真实模型及真实图库。本口径无延迟退化或正向内存增加，按用户 <20% / <10 MiB 阈值接受。
+
+## 内部 worker 协议与任务状态
+
+`native/terms/src/worker_protocol.rs` 定义索引、同步识别、溯源、研究的 request/response，以及索引 `index-job.json`、识别 manifest、签名文件和溯源网络请求的 serde 类型；外部文件在入口解析，结构错误带实际文件和嵌套字段路径。索引恢复不再把无效 journal 当成新任务。协议版本、request 字节、HTTP 字段顺序与数据库内容保持现行契约；身份、版本、资产范围及提交前指纹的语义校验仍由原协调模块执行。索引结果直接按类型校验，避免再建立整份动态 JSON 副本。索引 journal 与 `native_index_runs.result` 回执通过有序 JSON 值保存原键序；源库回执沿用不包含计算结果正文的格式。
+
+`native/terms/src/task_state.rs` 持有状态枚举和有序展示快照，包含现行 `needs_recognition`、`needs_windows` 等状态；外来研究 progress 和已存溯源状态先解析，坏溯源状态以含文件/字段的失败信息呈现，基础浏览与人工操作继续可用。crate 根对非测试 `unwrap` 启用 Clippy warn，`app_index`、`app_sync`、`app_provenance`、`app_research` 使用模块 deny；锁中毒用带说明的 expect，worker/job 外部字段使用可返回错误的解析。其余存量内部 unwrap 已改为有说明的 expect，保留既有不变量失败行为，不把它们宣称为可恢复错误。显式 `test-reference-host` feature 的历史参考宿主不属于生产清理范围，局部保留测试 unwrap 的允许级别，生产模块 deny 不受影响。
+
+`app_http::handle` 保留本机/跨站、generation、CSRF、body 格式检查与分派；`http_host_get.rs` 和 `http_host_post.rs` 承接会话业务路由，沿用旧快照、锁释放和切库后拒收边界。无数据库迁移；回退按独立模块提交恢复代码，先停止程序，不修改当前包或用旧工具接管未完成任务。
+
+2026-10-01 的 macOS arm64 release 合成验收以三次独立临时包中位数比较开工 main：3 资产、1 个索引补丁，宿主空闲与任务后 RSS 分别增加 0.16、0.19 MiB，浏览、索引轮询与完整索引任务延迟均无退化。RSS 为进程采样，不含计算 worker，不代表大图库峰值或 Windows；具体验收范围与结果见 PR #82。
+
+## 原生学习、聚类与相似研究协调
+
+显式设置 `ILLUSTASH_RESEARCH_WORKER` 为可执行文件后，Rust 宿主通过 `app_research::Research` 管理学习、聚类、相似扫描和按需 relate/OC 分组。可执行文件接收 `request.json response.json` 两个参数；仓库的 `web/research_worker.py` 是可选 Python 实现，需要 NumPy/Pillow 和可发现的 Python。基础版不设置该变量，研究状态为 off，缺失依赖/崩溃显示 error，已有特征、缓存、身份 pairs、浏览和人工操作仍走 Rust。启动和切库均调度当前包；相似自动扫描服从包的 startup.similar，学习与人工通知独立。
+
+请求协议为 `illustash-research/1`，携带 #45 的完整 TaskIdentity、版本、只供计算的 SQLite 快照、特征/补充锚点目录和输入参数。worker 复用 `learn.learn`、`learn.cluster`、`SimilarScanner.scan`、`relate.relate_all` 和 `learn.oc_groups`；只能修改临时快照。快照去掉名称模型密钥；补充锚点使用显式共享资源目录，不隐式读取另一个图库。Rust 校验回传身份、输入指纹、类型、范围和引用后，通过现有学习核心发布原型/弱证据/正式投影，原生重建相似组、重复与折叠投影。学习、研究缓存和本批事件确认在同一应用库事务；不修改人工裁决或历史。输入指纹包含两库的有序 typed rows、特征/锚点文件和原图文件的大小/修改时间；人工操作、输入更新和旧会话结果导致拒收。
+
+verdict/imported/index_changed 的 pending 事件按实际包实例恢复，完成本批结果发布后才确认；途中新增事件留给下一批。识别导入的 `dispatch` 先持久写入 `research_runs` 调度意图，再允许 #46 确认通知，算法完成由研究状态与意图的 done 表示；通知以事件 ID 保存稳定调度键，确认失败后的重放不会新增意图；重复导入不重复通知。手动 similar/regroup 也保存可重放意图。失败保留 pending/error，60 秒退避或手动/重启重试；发布前输入指纹不符（「研究输入已改变」）或学习批次过期（「学习输入已改变」）不按失败处理（2026-10-05，#194）：同一任务内状态显示 `waiting`「输入有变化，稍后自动重试（n/5）」，按 2、4、8、16、32 秒退避后用新快照重算，最多重试 5 次，过期结果始终不发布、一致性检查不放宽；用完仍冲突才以 error 报告并暂停本会话自动恢复，待手动「重新检查」/「重新分组」或重开。基准间隔可用 `ILLUSTASH_RESEARCH_RETRY_MS` 调整，重试计入任务总时限；OC 分组与 relate 查询不重试。`POST /api/similar` 或 `/api/regroup` 的 `action:cancel` 暂停本会话恢复，待下一次显式启动或重开。GET similar/clusters 显示实际状态/进度；OC 分组和 relate 在释放会话锁后等待受管理任务，切库后拒绝旧响应。默认总时限 30 分钟，可用 `ILLUSTASH_RESEARCH_TIMEOUT_MS` 显式调整。
+
+切库与退出同步 stop/join，使用 #45 的进程组收尾，正常父 worker 先退出也清理子进程；同 library_id 的不同包分别识别。Windows worker 使用受验的 kill-on-close Job，生命周期见 [独立计算包](BACKEND_TASKS.md#独立安装与可选计算包)；Unix SIGKILL 宿主不承诺析构清理。关闭变量可回到已验证的基础模式，缓存继续可读；未删除兼容宿主或兼容表。仅合成数据和本机计算验收，未接触真实图库、凭据或第三方服务；详细验收/性能口径见对应 PR。
+
+合成 18 图（12 个学习/分组输入、6 个局部差分图）在相同 debug 核心及 NumPy/Pillow 算法下，三次完整计算与正式发布中位数为 Python 28.005 秒、Rust 协调加 worker 29.377 秒（+4.90%）。空闲测试宿主根进程 RSS 三次中位数为 137.14/21.78 MiB（Python/Rust），不含可选 worker/核心 helper 峰值，也不代表生产大库或 Windows；上述已测口径在用户接受阈值内；可选 worker 峰值尚未测量。
+
+macOS/Windows 图像关系复用 `research_compute` 的 Features、只读快照和结果发布协议；安装 dispatcher 接管 similar、relate 及含 similar 的 mixed events，不分拆学习批次。Linux 保留原 Python 路由。App 继续拥有取消/进程树、输入指纹、人工历史与原子发布。`relation_image` 的 `signature` / `signature_bytes` 返回原 Pillow 解码入口对应方向的 16×16 灰度字节与宽高比，原 bands 含 A 或 mode P 时以 `#f4f4f2` 压平；RGB/L 的 PNG tRNS 保留原有不铺底条件；`reference_colour` / `reference_colour_bytes` 保留溯源 `_colour` 的 draft96、丢弃 alpha、24×24 RGB BOX 语义，不额外应用 EXIF（TIFF 解码器本身依旧按 Pillow 转置）。文件名和 bytes 入口分别保留 TIFF raw 单 strip、mmap 安全模式下的旧方向/尺寸合同，不假定两者相等。8-bit CMYK TIFF 通过既有锁定 tiff 解码器保留四通道，与 CMYK JPEG 共用先 thumbnail/reduce 后整数 RGB 转换的路径；不使用 image 适配器提前转 RGB 的 float 截断。GIF 局部首帧的画布使用透明索引（无透明时索引 0）的调色板颜色（含本帧局部调色板），不把解码器空白 RGBA 的透明黑当作旧背景。错误使用应用已有 Result，relate 仅将原解码/IO 失败归入 missing；I;16 reducing_gap 和 raw planar associated-alpha 的旧 ValueError 传播为任务失败，调用方按原业务处理，接口不创建缓存或访问资产库。
+
+图像解码/缩放合同按原输入模式区分；独立参考和失败边界见 `tests/test_native_relations_compute.py`，实际安装路由、非 no-op 新缓存的取消/旧快照拒绝、切库/退出/超时/重放及 mixed events ack 回滚见 `tests/test_native_research_production.py`。Pillow 12.3 对当前 height > width×100 且高度缩小的图像先纵向再横向缩放，判断在 reducing_gap 之后；modeF、byte 和整数路径均保留该严格条件及逐轴存储舍入。byte reducing_gap 保留原 float32 倒数乘子、UINT32 乘积右移24及末行/末列的实际样本数；不能替换为精确整数除法（3×3 总和5时原结果是0）。下表描述当前代码合同，不代替 PR 中指定提交的实际验收。
+
+| 输入域 | 解码后及缩放前的规则 | 缩放后转换及现有限制 |
+|---|---|---|
+| JPEG RGB/L、CMYK/YCCK | 按原 draft bound 解码、EXIF；CMYK 保留四通道 | 原 byte thumbnail/reduce 后 CMYK 整数转 RGB；alpha 不适用 |
+| PNG 灰度 1/2/4/8、RGB8、P、LA8/RGBA8 | 原 bands 的 A/P 条件；RGB/L tRNS 不增加 A；1/P 用 nearest | RGBA 在 byte thumbnail 前 premultiply、后还原并铺底；signature/colour 不先做 thumbnail |
+| PNG RGB16/LA16/RGBA16；TIFF RGB16/RGBA16 | 原 Pillow 在解码时取高字节，先于 thumbnail/alpha；不使用除 257 的四舍五入 | 与原 8-bit 模式共用后续路径；PNM maxval 缩放是另一合同 |
+| PNG I;16；TIFF unsigned I;16/I;16B | 16-bit 值保留至 thumbnail，filename TIFF mmap 和 bytes 原有方向分别处理 | 逐 axis 16-bit resample 后 RGB clamp255；I;16B 保留旧 native-storage 字节顺序；reducing_gap 对此模式的原错误保留 |
+| TIFF BlackIsZero I32/F32 | 复用共享 `image_samples::tiff_scalar` 的 typed scalar_samples，保留原 I/F 值、方向和布局；display 不应用 ICC。little-endian 主机上的 MM Deflate8 普通 strips 在消费前交换 32-bit word，保留旧 Pillow libtiff rawmode 行为，pure samples 不改 | 已验证交换域要求 planar1、predictor1、rows>0 和正确 strip 数；其它旧可读 MM32 编码/布局由 display typed 路径保持相同 word 交换，LZW/PackBits 不借用未经验证的 owner 缩放。交换先于 thumbnail/reduce；I/F full reduce 保留原同型 2×2 加法（I32 wrap、F32 每步舍入）后进 double，末行/列是逐项 double；逐 axis I32/F32 存储后才 RGB clamp；I32 cubic 正溢出保留平台原 C 转换：Mac arm64 饱和，Windows x64 存 INT_MIN |
+| TIFF L8/RGB8/RGBA8/RGBX、CMYK8 | 先 TIFF 自身转置；RGBX padding 不算 A；CMYK 保留 raw 四通道 | raw 单 strip mmap 安全模式下，原 filename reshape/transpose 与 bytes 普通 decode 不合并；tiled/raw 与压缩 FillOrder2 由 display typed 路径处理 |
+| GIF 首帧 P | 首帧局部/global palette，画布用 transparent 索引（无透明时 0）；nearest | 保留透明像素 RGB 给丢弃 alpha 的 colour；signature/load 按原 matte 条件 |
+| PNM P1/P4、P2/P3/P5/P6 | 使用共享 `image_samples::pnm` 的原样本读取（#153 像素哈希合入后共用）；P1/P4 保留 mode1 nearest；其余按原 value/maxval*out_max 的 ties-even，RGB/L8 输出 byte，gray>8 保留 modeI | modeI 先有符号逐 axis resample/reduce 再 RGB clamp，不能提前夹255，也不使用 PNG 高字节规则；P7 原拒绝边界保留 |
+| BMP L/1/P/RGB、WEBP RGB/RGBA、ICO/TGA | BMP identity 灰调色板是 L，其余 P/1 用 nearest；ICO 保留原最大面积、最低深度、稳定并列的选帧顺序，PNG payload 保留原 bands；32-bit BMP 保留 alpha、不用 AND mask | TGA 原 P/1 nearest、文件/bytes 检测、水平/垂直方向；16-bit RGB/palette、LA descriptor 与 raw1 适配已有 decoder，不建设新图像平台。ICO/TGA 手写头与 Pillow 导出样本独立对照 |
+| TIFF P/1/LA、8/16-bit planar/associated alpha | display 另用锁定 tiff 0.10.3（MSRV 1.74）读取 packed/LA 和各 plane；0.9.1 typed scalar 所有者与现有 RGB/CMYK 路径不变。palette 只在内存将第一 IFD 的 photometric 改为 BlackIsZero 解压索引，保留 offsets、compression 和原 palette；P/1 thumbnail 用 NEAREST | 原始方向/路径 mmap 与 bytes 分开对照；零 alpha 解预乘清零 RGB。planar tile 以本 plane 局部坐标裁剪 decoder 的底/右 padding。raw planar associated-alpha 保留旧 Pillow ValueError；raw16 planar 保留原 byte-band stride。FillOrder2 压缩在解码前对编码区间 union 翻转一次，允许共享 strip offsets |
+
+TIFF 额外 I/F 模式保留 signed16、unsigned32、WhiteIsZero 的原样本和先 thumbnail 后 RGB clamp；packed12 按 tile 局部 bit 边界及原右缘 floor stride 解包，不全图拼接半字节。TIFF JPEG 的 abbreviated strip/tile 复用现有 mozjpeg 后端与 JPEG tables，保持原 IDCT 和 CMYK 原通道至缩放后的整数转换；不使用另一 decoder 的近似 IDCT。未知/损坏编码沿原错误处理，不声明泛用 Pillow 格式全覆盖。
+
+关系 NCC 的第三方 FFT header 原样保存在 `native/terms/vendor/pocketfft/`，完整 BSD 许可证见同目录 `LICENSE.md`。正式来源为 NumPy `v2.5.3` 的 `numpy/fft/pocketfft` 子模块，固定指向官方 `mreineck/pocketfft` 提交 `33ae5dc94c9cdc7f1c78346504a85de87cadaa12`；header SHA-256 为 `50f4ddbe60432325f560c706b6f1c49f9e0949fc7f20ae6499f2299e37d9790c`，许可证 SHA-256 为 `a85ca13fdf90160b64a0698215868c13b74d835ad0a4e2ba44713b8c5058a056`。窄 C++ wrapper 对照该版本 `_pocketfft_umath.cpp`，保留补零时的 scalar plan、axis 顺序和逐 axis normalization。NumPy 2.5.3 前向默认整数因子 `1` 使 gufunc 选择 double 内核，每个 axis 后转回 complex64；乘积为 complex64，逆向因子与内核为 float32；Mac ARM 乘积按 NumPy NEON 的顺序，先舍入虚部乘积，再对实部乘积与该值执行 FMA。Windows x64 在 CPU 同时支持 AVX2/FMA 时沿用同样的 NumPy 复数乘积舍入；基础 x86 路径保留分离乘加。Windows FFT 的逐阶段与六组 valid correlation 固定参考独立于 Mac golden，不能跨平台复用逆向位级结果。Windows 灰度 RGB[h,w,3] @ weights[3] 通过 #151 的固定 ILP64 OpenBLAS 后端逐图像行调用 (w,3) GEMV，w=1 保留 DOT；不扁平化图像高度，不手写另一套 BLAS 尾块舍入。后端缺失、指纹或加载身份错误沿现有 Result 返回，不回退为另一套数学。候选保留这个实际类型解析及中间舍入，不能把整链改为一种精度。Clang 浮点参数遵循该版本根 `meson.build` 的 `-ftrapping-math`。不新增计划缓存或调度器。

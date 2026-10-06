@@ -1,0 +1,324 @@
+"""#48 actual native name event consumption. Only freshly generated synthetic packages/services.
+
+Deterministic success bytes, formal name/projection/history rows and event acknowledgements;
+errors compare status codes. No account store, real Photos package or library copy is read.
+"""
+from contextlib import closing
+from concurrent.futures import ThreadPoolExecutor
+import http.server
+import json
+import os
+from pathlib import Path
+import signal
+import sqlite3
+import subprocess
+import tempfile
+import threading
+import time
+import unittest
+import urllib.parse
+from unittest.mock import patch
+
+from tests import test_native_lifecycle as lifecycle
+from tests.test_read_http import INTERRUPT, SPAWN, free_port, wait_until
+from tests.test_names import Providers
+from tools.verify_read_http import fetch
+from web import names, library
+from web.store import Store
+
+
+class TextService:
+    def __init__(self):
+        self.provider = Providers()
+        self.calls = []
+        self.entered, self.release = threading.Event(), threading.Event()
+        self.block = False
+        self.hold_deadline = 5
+        self.failure = None
+        self.failures_left = 0
+        self.bad_json = False
+        outer = self
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def log_message(self, *args): pass
+            def do_GET(self): self.reply()
+            def do_POST(self): self.reply()
+            def reply(self):
+                body = json.loads(self.rfile.read(int(self.headers['Content-Length']))) if 'Content-Length' in self.headers else None
+                outer.calls.append((self.path, body))
+                if outer.block:
+                    outer.entered.set()
+                    if not outer.release.wait(outer.hold_deadline): raise AssertionError('synthetic hold deadline')
+                if outer.failure or outer.failures_left:
+                    code = outer.failure or 503
+                    outer.failures_left = max(0, outer.failures_left - 1)
+                    data = b'private provider response must never appear'
+                else:
+                    code = 200
+                    q = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
+                    if 'wiki_pages.json' in self.path:
+                        tag = q.get('search[title]', [''])[0]
+                        if 'search[title]' in q:
+                            values = ['アリス', '爱丽丝'] if 'alice' in tag else ['ボブ', '鲍勃'] if 'bob' in tag else ['エグザンプル']
+                            value = [{'title': tag, 'other_names': values}]
+                        else: value = [{'title': 'new_character_(Example)', 'tag': {'post_count': 9}}]
+                    elif '/tags.json' in self.path:
+                        if 'search[name]' in q:
+                            value = [{'name': q['search[name]'][0], 'post_count': 12}]
+                        else: value = [{'name': 'new_character_(Example)', 'post_count': 9}, {'name':'alice_tag','post_count':2}]
+                    elif '/related_tag.json' in self.path:
+                        value = {'related_tags': [{'tag': {'name': 'Example', 'post_count': 12}, 'frequency': .95}]}
+                    elif '/search/subjects' in self.path:
+                        value = {'data': [{'id': 1, 'name':'エグザンプル','name_cn':'示例作品'}]}
+                    elif '/search/characters' in self.path:
+                        value = {'data': [{'id': 10, 'name': body['keyword'], 'infobox': [{'key':'简体中文名','value':'爱丽丝' if 'リス' in body['keyword'] else '鲍勃'}]}]}
+                    elif '/characters/' in self.path:
+                        value = [{'name':'エグザンプル','name_cn':'示例作品'}]
+                    elif '/chat/completions' in self.path:
+                        value = {'choices':[{'message':{'content':'{"zh":"合成译名"}'}}]}
+                    else: raise AssertionError(self.path)
+                    data = b'{' if outer.bad_json else json.dumps(value, ensure_ascii=False).encode()
+                self.send_response(code); self.send_header('Content-Type', 'application/json')
+                self.send_header('Content-Length', str(len(data))); self.end_headers()
+                try: self.wfile.write(data)
+                except BrokenPipeError: pass
+        self.server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), Handler)
+        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+        self.thread.start()
+        self.base = f'http://127.0.0.1:{self.server.server_port}'
+    def close(self):
+        self.release.set(); self.server.shutdown(); self.server.server_close(); self.thread.join()
+    def transport(self, url, body=None, key=None):
+        import urllib.request
+        parsed = urllib.parse.urlsplit(url)
+        path = parsed.path + ('?' + parsed.query if parsed.query else '')
+        data = json.dumps(body).encode() if body is not None else None
+        with urllib.request.urlopen(urllib.request.Request(self.base + path, data=data), timeout=5) as response:
+            return json.load(response)
+
+
+class NativeNamesTest(unittest.TestCase):
+    setUpClass = classmethod(lifecycle.NativeLifecycleTest.setUpClass.__func__)
+    package = lifecycle.NativeLifecycleTest.package
+    stop = lifecycle.NativeLifecycleTest.stop
+    request = lifecycle.NativeLifecycleTest.request
+    def start(self, path, extra=(), command=None):
+        log = tempfile.TemporaryFile(); self.addCleanup(log.close)
+        args = [str(self.binary), 'http', '--no-auto-sync', '--library', str(path), '--port', str(self.port), '--root', str(self.resources), *extra]
+        if not getattr(self, 'enabled', False): args += ['--no-names']
+        process = subprocess.Popen(args, env=self.env, stdout=log, stderr=log, **SPAWN)
+        self.addCleanup(self.stop, process)
+        wait_until(lambda: fetch(self.origin, {'url':'/api/bootstrap'}, self.origin)['status']==200, timeout=5)
+        return process, log
+    def setUp(self):
+        self.enabled = False
+        lifecycle.NativeLifecycleTest.setUp(self)
+        self.service = TextService(); self.addCleanup(self.service.close)
+        self.env.update(ILLUSTASH_COPYRIGHT_BASE=self.service.base, ILLUSTASH_BANGUMI_BASE=self.service.base)
+        self.reference.names = names.NameUpdater(self.store, self.service.transport, interval=0, enabled=False)
+    def enable(self):
+        self.stop(self.process); self.enabled=True
+        self.process, self.log = self.start(self.lib.path)
+        self.token=json.loads(self.request('/api/bootstrap')['body'])['token']
+        self.reference.token=self.token
+        self.finish()
+    def finish(self, status='done'):
+        def complete():
+            value = json.loads(self.request('/api/names?progress=1')['body'])['state']
+            return value if value['status']==status else False
+        wait_until(complete, timeout=8)
+        return json.loads(self.request('/api/names?progress=1')['body'])['state']
+    def events(self):
+        with closing(sqlite3.connect(self.lib.db)) as c:
+            return c.execute("SELECT id,status,error FROM backend_effects WHERE kind LIKE 'names:%' ORDER BY id").fetchall()
+    def clone_reference(self):
+        folder=self.root/'comparison';folder.mkdir()
+        path=folder/'app.sqlite'
+        with closing(sqlite3.connect(self.lib.db)) as src, closing(sqlite3.connect(path)) as dst: src.backup(dst)
+        return Store.open(self.lib.source,path)
+    def test_complete_refresh_matches_reference_formal_names_and_history(self):
+        expected=self.clone_reference(); updater=names.NameUpdater(expected,self.service.transport,interval=0)
+        updater.run(refresh=True)
+        self.enable()
+        self.assertEqual(self.request('/api/names',{'action':'refresh'})['status'],200)
+        self.finish()
+        # All formal/core name tables and unchanged history; exclude nondeterministic timing/budget/cache bookkeeping.
+        with closing(sqlite3.connect(expected.path)) as old, closing(sqlite3.connect(self.lib.db)) as new:
+            tables=[r[0] for r in new.execute("SELECT name FROM sqlite_master WHERE type='table' AND (name IN ('names','display_names','name_aliases','actions') OR name LIKE 'term_name%' OR name IN ('term_key_names','term_key_aliases'))")]
+            for table in tables:
+                self.assertEqual(sorted(old.execute(f'SELECT * FROM "{table}"').fetchall(),key=repr),sorted(new.execute(f'SELECT * FROM "{table}"').fetchall(),key=repr),table)
+            self.assertEqual(new.execute("SELECT value FROM meta WHERE key='names_projected'").fetchone(),new.execute("SELECT value FROM meta WHERE key='names_version'").fetchone())
+        self.assertTrue(all(status=='done' and not error for _,status,error in self.events()))
+        self.assertFalse(self.sentinel.exists())
+    def test_single_entity_duplicate_events_and_warm_restart(self):
+        self.enable()
+        ident=self.store.entities('Alice')[0]['id']
+        self.assertEqual(self.request('/api/names',{'action':'refresh','entity':ident})['status'],200)
+        self.finish()
+        with sqlite3.connect(self.lib.db) as c:
+            event='names:'+json.dumps({'entity':ident,'refresh':False})
+            c.executemany('INSERT INTO backend_effects(kind) VALUES (?)',[(event,),(event,)])
+        self.stop(self.process); self.process,self.log=self.start(self.lib.path); self.finish()
+        wait_until(lambda:all(s=='done' for _,s,_ in self.events()),timeout=8)
+        count=len(self.service.calls)
+        self.stop(self.process);self.process,self.log=self.start(self.lib.path);self.finish()
+        self.assertEqual(len(self.service.calls),count)
+    def test_configuration_success_bytes_clear_legacy_and_secret_redaction(self):
+        for body in ({'action':'model_api','key':'synthetic-secret-key','model':'synthetic-model','base':self.service.base}, {'action':'model_api','key':None}, {'action':'model_api','model':None}):
+            left=self.request('/api/names',body,base=self.direct);right=self.request('/api/names',body)
+            self.assertEqual(left['status'],200);self.assertEqual(right['status'],200)
+            self.assertEqual(left['body'],right['body'])
+            self.assertNotIn(b'synthetic-secret-key',right['body'])
+        self.assertEqual(json.loads(self.request('/api/names',{'action':'model_api_test'})['body']),{'ok':False,'error':'尚未设置 API key'})
+        self.request('/api/names',{'action':'model_api','key':'synthetic-secret-key','base':self.service.base})
+        self.assertEqual(self.request('/api/names',{'action':'model_api_test'})['body'],b'{"ok": true}')
+        self.service.failure=401
+        response=self.request('/api/names',{'action':'model_api_test'})
+        self.assertEqual(response['status'],200)
+        self.assertNotIn(b'private provider',response['body']);self.assertNotIn(b'synthetic-secret',response['body'])
+    def test_validation_and_disabled_refresh_error_status(self):
+        for body in ({'action':'refresh'},{'action':'refresh','entity':3},{'action':'model_api','key':'bad'}, {'action':'model_api','model':'bad space'},{'action':'model_api','base':'http://example.invalid'},{'action':'model_api','base':self.service.base+'?x=1'},{'action':'unknown'}):
+            self.assertEqual(self.request('/api/names',body)['status'],400)
+        self.assertEqual(len(self.service.calls),0)
+    def test_remote_picker_success_bytes_and_persistent_query_cache(self):
+        self.stop(self.process);self.process,self.log=self.start(self.lib.path)
+        for url in ('/api/entities?remote=1&q=new','/api/entities?remote=1&q=%E5%90%88%E6%88%90','/api/works?remote=1&q=new','/api/works?remote=1&q=%E5%90%88%E6%88%90','/api/local-links'):
+            old=self.request(url,base=self.direct);new=self.request(url)
+            self.assertEqual(new['status'],200,new['body']);self.assertEqual(old['body'],new['body'],url)
+        count=len(self.service.calls)
+        self.request('/api/entities?remote=1&q=new')
+        self.assertEqual(len(self.service.calls),count)
+    def test_failure_no_negative_cache_then_restart_consumes_pending(self):
+        self.service.failure=503
+        self.enable_error()
+        self.assertTrue(any(s=='pending' and e for _,s,e in self.events()))
+        with closing(sqlite3.connect(self.lib.db)) as c:
+            self.assertEqual(c.execute("SELECT count(*) FROM name_cache WHERE key LIKE '%wiki_pages%' OR key LIKE '[\"done\", 1, \"character\",%'").fetchone()[0],0)
+        self.service.failure=None
+        self.stop(self.process);self.process,self.log=self.start(self.lib.path);self.finish()
+        wait_until(lambda:all(s=='done' for _,s,_ in self.events()),timeout=8)
+    def enable_error(self):
+        self.stop(self.process);self.enabled=True;self.process,self.log=self.start(self.lib.path);self.finish('error')
+    def test_busy_refresh_cancel_switch_same_id_and_late_result(self):
+        self.enable(); second,_=self.package('second')
+        second.config['id']=self.lib.config['id'];second.save()
+        self.service.block=True
+        self.assertEqual(self.request('/api/names',{'action':'refresh'})['status'],200)
+        self.assertTrue(self.service.entered.wait(3))
+        self.assertEqual(self.request('/api/names',{'action':'refresh'})['status'],400)
+        with closing(sqlite3.connect(self.lib.db)) as c: before=c.execute('SELECT * FROM names ORDER BY entity_id,value').fetchall()
+        with ThreadPoolExecutor() as pool:
+            switched=pool.submit(self.request,'/api/libraries/open',{'path':str(second.path)})
+            time.sleep(.1);self.service.release.set()
+            self.assertEqual(switched.result(timeout=5)['status'],200)
+        with closing(sqlite3.connect(self.lib.db)) as c: self.assertEqual(before,c.execute('SELECT * FROM names ORDER BY entity_id,value').fetchall())
+        self.assertTrue(any(s=='pending' for _,s,_ in self.events()))
+        self.assertFalse(self.sentinel.exists())
+    def test_exit_waits_cancellation_and_keeps_pending_for_recovery(self):
+        self.enable();self.service.block=True
+        self.request('/api/names',{'action':'refresh'});self.assertTrue(self.service.entered.wait(3))
+        self.process.send_signal(INTERRUPT);time.sleep(.1);self.service.release.set();self.process.wait(5)
+        self.assertEqual(self.process.returncode,0)
+        self.assertTrue(any(s=='pending' for _,s,_ in self.events()))
+    def test_transient_retry_and_traffic_budget(self):
+        self.service.failures_left=2;self.enable()
+        self.assertGreaterEqual(len(self.service.calls),3)
+        self.request('/api/names',{'action':'model_api','key':'synthetic-secret','base':self.service.base})
+        with sqlite3.connect(self.lib.db) as c:c.execute("INSERT OR REPLACE INTO name_settings VALUES ('traffic_reserved','499000000')")
+        count=len(self.service.calls);response=self.request('/api/names',{'action':'model_api_test'})
+        self.assertEqual(response['status'],200);self.assertFalse(json.loads(response['body'])['ok'])
+        self.assertEqual(len(self.service.calls),count)
+    def test_profile_lookup_and_durable_event_actual_consumption(self):
+        self.enable();ident=self.store.entities('Alice')[0]['id']
+        response=self.request('/api/character/profile',{'entity':ident,'tag':'synthetic_(Example)'})
+        self.assertEqual(response['status'],200,response['body'])
+        wait_until(lambda:all(s=='done' for _,s,_ in self.events()),timeout=8)
+        self.assertTrue(any('/related_tag.json' in path for path,_ in self.service.calls))
+        self.assertTrue(any('synthetic_' in path for path,_ in self.service.calls))
+
+    def test_error_statuses_and_no_negative_remote_cache(self):
+        self.stop(self.process);self.process,self.log=self.start(self.lib.path)
+        self.service.failure=401
+        old=self.request('/api/works?remote=1&q=uncached',base=self.direct)
+        new=self.request('/api/works?remote=1&q=uncached')
+        self.assertEqual(old['status'],502);self.assertEqual(new['status'],old['status'])
+        self.assertNotIn(b'private provider',new['body'])
+        self.service.failure=None
+        self.assertEqual(self.request('/api/works?remote=1&q=uncached')['status'],200)
+
+    def test_ack_failure_replays_without_false_completion(self):
+        with sqlite3.connect(self.lib.db) as c:
+            c.execute("CREATE TRIGGER synthetic_ack_failure BEFORE UPDATE OF status ON backend_effects WHEN NEW.kind LIKE 'names:%' BEGIN SELECT RAISE(ABORT,'synthetic ack failure'); END")
+        self.enable_error()
+        self.assertTrue(any(s=='pending' for _,s,_ in self.events()))
+        with closing(sqlite3.connect(self.lib.db)) as c:
+            formal=c.execute('SELECT * FROM names ORDER BY entity_id,role,source,value').fetchall()
+        self.stop(self.process)
+        with sqlite3.connect(self.lib.db) as c:c.execute('DROP TRIGGER synthetic_ack_failure')
+        self.process,self.log=self.start(self.lib.path);self.finish()
+        wait_until(lambda:all(s=='done' for _,s,_ in self.events()),timeout=8)
+        with closing(sqlite3.connect(self.lib.db)) as c:self.assertEqual(formal,c.execute('SELECT * FROM names ORDER BY entity_id,role,source,value').fetchall())
+
+    def test_query_source_changed_while_pending_rejects_old_name(self):
+        self.enable();ident=self.store.entities('Alice')[0]['id']
+        self.service.block=True
+        self.request('/api/names',{'action':'refresh','entity':ident});self.assertTrue(self.service.entered.wait(3))
+        self.store.set_profile(ident,name='人工保留名')
+        self.service.release.set();state=self.finish('error')
+        self.assertIn('名称来源已改变',state['error'])
+        self.assertEqual(self.store.profile(ident)['name'],'人工保留名')
+        self.assertTrue(any(s=='pending' for _,s,_ in self.events()))
+
+    def test_malformed_event_does_not_block_new_valid_request(self):
+        self.enable()
+        with sqlite3.connect(self.lib.db) as c:
+            c.execute("INSERT INTO backend_effects(kind) VALUES ('names:malformed')")
+        self.finish('error')
+        ident=self.store.entities('Alice')[0]['id']
+        self.assertEqual(self.request('/api/names',{'action':'refresh','entity':ident})['status'],200)
+        wait_until(lambda:self.events()[-1][1]=='done',timeout=8)
+        self.assertTrue(any(s=='pending' and e for _,s,e in self.events()))
+
+    def test_explicit_no_network_and_key_save_cannot_authorize(self):
+        self.request('/api/names',{'action':'model_api','key':'synthetic-secret'})
+        self.assertEqual(self.request('/api/names',{'action':'model_api_test'})['status'],200)
+        self.assertIn('尚未授权',json.loads(self.request('/api/names',{'action':'model_api_test'})['body'])['error'])
+        self.assertEqual(len(self.service.calls),0)
+
+    def test_model_request_switch_rejects_late_response(self):
+        self.stop(self.process);self.process,self.log=self.start(self.lib.path)
+        self.token=json.loads(self.request('/api/bootstrap')['body'])['token']
+        self.request('/api/names',{'action':'model_api','key':'synthetic-secret','base':self.service.base})
+        second,_=self.package('model-second')
+        self.service.block=True
+        with ThreadPoolExecutor() as pool:
+            pending=pool.submit(self.request,'/api/names',{'action':'model_api_test'})
+            self.assertTrue(self.service.entered.wait(3))
+            self.assertEqual(self.request('/api/libraries/open',{'path':str(second.path)})['status'],200)
+            self.service.release.set()
+            self.assertEqual(pending.result(timeout=5)['status'],403)
+        self.assertFalse(self.sentinel.exists())
+
+
+    def test_process_killed_while_query_pending_restarts_actual_consumer(self):
+        self.enable();self.service.block=True
+        self.assertEqual(self.request('/api/names',{'action':'refresh'})['status'],200)
+        self.assertTrue(self.service.entered.wait(3))
+        self.process.kill();self.process.wait(5)
+        self.assertTrue(any(s=='pending' for _,s,_ in self.events()))
+        self.service.release.set();self.service.block=False
+        self.process,self.log=self.start(self.lib.path);self.finish()
+        wait_until(lambda:all(s=='done' for _,s,_ in self.events()),timeout=8)
+        self.assertFalse(self.sentinel.exists())
+
+    def test_inflight_transport_timeout_retries_and_commits_after_recovery(self):
+        self.enable();self.service.block=True;self.service.hold_deadline=32
+        before=len(self.service.calls)
+        self.assertEqual(self.request('/api/names',{'action':'refresh'})['status'],200)
+        self.assertTrue(self.service.entered.wait(3))
+        timer=threading.Timer(26,self.service.release.set);timer.start();self.addCleanup(timer.cancel)
+        wait_until(lambda:json.loads(self.request('/api/names?progress=1')['body'])['state']['status']=='done',timeout=35)
+        wait_until(lambda:all(s=='done' for _,s,_ in self.events()),timeout=8)
+        attempted=[path for path,_ in self.service.calls[before:]]
+        self.assertGreaterEqual(attempted.count(attempted[0]),2)
+
+if __name__=='__main__':unittest.main()

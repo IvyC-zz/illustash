@@ -1,0 +1,2 @@
+# 所有平台签出都保持 LF，打包资源、夹具和 golden 的字节不随 Windows 的 core.autocrlf 变化。
+* text=auto eol=lf

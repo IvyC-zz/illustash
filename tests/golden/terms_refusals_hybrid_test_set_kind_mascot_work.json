@@ -1,0 +1,3878 @@
+{
+ "policy": "hybrid",
+ "initial": {
+  "entities": [
+   [
+    "artist",
+    "external_key",
+    "id",
+    "kind",
+    "label_only",
+    "mascot",
+    "mascot_origin",
+    "merged_into",
+    "name",
+    "original",
+    "parent_id",
+    "tag",
+    "variant",
+    "work",
+    "work_id"
+   ],
+   [
+    "",
+    null,
+    "00000000-0000-0000-0000-000000001001",
+    "character",
+    0,
+    0,
+    null,
+    null,
+    "",
+    0,
+    null,
+    null,
+    "",
+    "Example",
+    null
+   ],
+   [
+    "",
+    null,
+    "00000000-0000-0000-0000-000000001002",
+    "character",
+    0,
+    0,
+    null,
+    null,
+    "",
+    0,
+    null,
+    null,
+    "",
+    "Example",
+    null
+   ],
+   [
+    "",
+    null,
+    "00000000-0000-0000-0000-000000001003",
+    "work",
+    0,
+    0,
+    null,
+    null,
+    "",
+    0,
+    null,
+    null,
+    "",
+    "",
+    null
+   ],
+   [
+    "",
+    null,
+    "00000000-0000-0000-0000-000000001004",
+    "character",
+    0,
+    0,
+    null,
+    null,
+    "",
+    0,
+    null,
+    null,
+    "",
+    "",
+    null
+   ],
+   [
+    "",
+    null,
+    "00000000-0000-0000-0000-000000001005",
+    "character",
+    0,
+    0,
+    null,
+    null,
+    "",
+    0,
+    null,
+    null,
+    "",
+    "",
+    null
+   ],
+   [
+    "",
+    null,
+    "skin-x",
+    "skin",
+    0,
+    0,
+    null,
+    null,
+    "",
+    0,
+    "00000000-0000-0000-0000-000000001001",
+    null,
+    "swimsuit",
+    "",
+    null
+   ]
+  ],
+  "links": [
+   [
+    "current",
+    "entity_id",
+    "key",
+    "source",
+    "system"
+   ],
+   [
+    1,
+    "00000000-0000-0000-0000-000000001001",
+    "alice",
+    "import",
+    "ccip"
+   ],
+   [
+    1,
+    "00000000-0000-0000-0000-000000001001",
+    "alice",
+    "import",
+    "danbooru"
+   ],
+   [
+    1,
+    "00000000-0000-0000-0000-000000001002",
+    "bob",
+    "import",
+    "ccip"
+   ],
+   [
+    1,
+    "00000000-0000-0000-0000-000000001002",
+    "bob",
+    "import",
+    "danbooru"
+   ]
+  ],
+  "names": [
+   [
+    "entity_id",
+    "lang",
+    "position",
+    "preferred",
+    "role",
+    "source",
+    "value"
+   ],
+   [
+    "00000000-0000-0000-0000-000000001001",
+    "",
+    0,
+    0,
+    "alias",
+    "album",
+    "Alice album"
+   ],
+   [
+    "00000000-0000-0000-0000-000000001001",
+    "",
+    0,
+    0,
+    "alias",
+    "album",
+    "alice_album"
+   ],
+   [
+    "00000000-0000-0000-0000-000000001001",
+    "",
+    0,
+    0,
+    "alias",
+    "index",
+    "Alice"
+   ],
+   [
+    "00000000-0000-0000-0000-000000001001",
+    "",
+    0,
+    0,
+    "alias",
+    "index",
+    "a_li_ce"
+   ],
+   [
+    "00000000-0000-0000-0000-000000001001",
+    "",
+    0,
+    0,
+    "alias",
+    "index",
+    "alice"
+   ],
+   [
+    "00000000-0000-0000-0000-000000001001",
+    "",
+    0,
+    0,
+    "alias",
+    "index",
+    "alice_tag"
+   ],
+   [
+    "00000000-0000-0000-0000-000000001001",
+    "",
+    0,
+    0,
+    "alias",
+    "index",
+    "爱丽丝"
+   ],
+   [
+    "00000000-0000-0000-0000-000000001002",
+    "",
+    0,
+    0,
+    "alias",
+    "index",
+    "Bob"
+   ],
+   [
+    "00000000-0000-0000-0000-000000001002",
+    "",
+    0,
+    0,
+    "alias",
+    "index",
+    "bob"
+   ],
+   [
+    "00000000-0000-0000-0000-000000001002",
+    "",
+    0,
+    0,
+    "alias",
+    "index",
+    "bob_tag"
+   ],
+   [
+    "00000000-0000-0000-0000-000000001003",
+    "zh",
+    0,
+    1,
+    "display",
+    "user",
+    "作品甲"
+   ],
+   [
+    "00000000-0000-0000-0000-000000001004",
+    "zh",
+    0,
+    1,
+    "display",
+    "user",
+    "本地甲"
+   ],
+   [
+    "00000000-0000-0000-0000-000000001005",
+    "ja",
+    0,
+    1,
+    "display",
+    "user",
+    "ローカル"
+   ]
+  ],
+  "display_names": [
+   [
+    "key",
+    "kind",
+    "lang",
+    "source",
+    "value"
+   ],
+   [
+    "arknights",
+    "work",
+    "zh",
+    "builtin",
+    "明日方舟"
+   ],
+   [
+    "azur_lane",
+    "work",
+    "zh",
+    "builtin",
+    "碧蓝航线"
+   ],
+   [
+    "bang_dream!",
+    "work",
+    "zh",
+    "builtin",
+    "BanG Dream!"
+   ],
+   [
+    "blue_archive",
+    "work",
+    "zh",
+    "builtin",
+    "蔚蓝档案"
+   ],
+   [
+    "fate",
+    "work",
+    "zh",
+    "builtin",
+    "Fate"
+   ],
+   [
+    "genshin_impact",
+    "work",
+    "zh",
+    "builtin",
+    "原神"
+   ],
+   [
+    "girls'_frontline",
+    "work",
+    "zh",
+    "builtin",
+    "少女前线"
+   ],
+   [
+    "hololive",
+    "work",
+    "zh",
+    "builtin",
+    "hololive"
+   ],
+   [
+    "honkai:_star_rail",
+    "work",
+    "zh",
+    "builtin",
+    "崩坏：星穹铁道"
+   ],
+   [
+    "honkai_impact_3rd",
+    "work",
+    "zh",
+    "builtin",
+    "崩坏3"
+   ],
+   [
+    "idolmaster",
+    "work",
+    "zh",
+    "builtin",
+    "偶像大师"
+   ],
+   [
+    "kancolle",
+    "work",
+    "zh",
+    "builtin",
+    "舰队Collection"
+   ],
+   [
+    "love_live!",
+    "work",
+    "zh",
+    "builtin",
+    "LoveLive!"
+   ],
+   [
+    "nijisanji",
+    "work",
+    "zh",
+    "builtin",
+    "彩虹社"
+   ],
+   [
+    "pokemon",
+    "work",
+    "zh",
+    "builtin",
+    "宝可梦"
+   ],
+   [
+    "princess_connect!",
+    "work",
+    "zh",
+    "builtin",
+    "公主连结"
+   ],
+   [
+    "project_sekai",
+    "work",
+    "zh",
+    "builtin",
+    "世界计划"
+   ],
+   [
+    "touhou",
+    "work",
+    "zh",
+    "builtin",
+    "东方Project"
+   ],
+   [
+    "umamusume",
+    "work",
+    "zh",
+    "builtin",
+    "赛马娘"
+   ],
+   [
+    "vocaloid",
+    "work",
+    "zh",
+    "builtin",
+    "VOCALOID"
+   ],
+   [
+    "wuthering_waves",
+    "work",
+    "zh",
+    "builtin",
+    "鸣潮"
+   ],
+   [
+    "zenless_zone_zero",
+    "work",
+    "zh",
+    "builtin",
+    "绝区零"
+   ]
+  ],
+  "name_aliases": [
+   [
+    "key",
+    "kind",
+    "position",
+    "value"
+   ]
+  ],
+  "work_review": [
+   [
+    "entity_id",
+    "note",
+    "parent_locked",
+    "status"
+   ],
+   [
+    "00000000-0000-0000-0000-000000001003",
+    "",
+    1,
+    "pending"
+   ]
+  ],
+  "assertions": [
+   [
+    "entity",
+    "origin",
+    "status",
+    "uuid"
+   ],
+   [
+    "00000000-0000-0000-0000-000000001001",
+    "album",
+    "confirmed",
+    "a"
+   ]
+  ],
+  "deferred": [
+   [
+    "uuid"
+   ]
+  ],
+  "asked": [
+   [
+    "action_id",
+    "answer",
+    "entity",
+    "kind",
+    "uuid"
+   ]
+  ],
+  "reviews": [
+   [
+    "action_id",
+    "entity"
+   ]
+  ],
+  "identity_relations": [
+   [
+    "a",
+    "b",
+    "id",
+    "kind",
+    "status"
+   ],
+   [
+    "skin-x",
+    "00000000-0000-0000-0000-000000001001",
+    1,
+    "form_of",
+    "accepted"
+   ]
+  ],
+  "identity_decisions": [
+   [
+    "id",
+    "previous_status",
+    "reason",
+    "relation_id",
+    "status"
+   ],
+   [
+    1,
+    "proposed",
+    "保留既有层级并使其可撤销；不代表新增人工确认",
+    1,
+    "accepted"
+   ]
+  ],
+  "identity_uncertain": [
+   [
+    "options_json",
+    "reason",
+    "uuid"
+   ]
+  ],
+  "identity_anchor_decisions": [
+   [
+    "decision",
+    "entity",
+    "reason",
+    "reference"
+   ]
+  ],
+  "memberships": [
+   [
+    "ccip_only",
+    "entity",
+    "origin",
+    "score",
+    "skey",
+    "source_count",
+    "sources",
+    "status",
+    "uuid"
+   ],
+   [
+    0,
+    "00000000-0000-0000-0000-000000001001",
+    "album",
+    0.9,
+    "1010000000.9000000000001",
+    1,
+    "WD",
+    "confirmed",
+    "a"
+   ],
+   [
+    0,
+    "00000000-0000-0000-0000-000000001001",
+    "machine",
+    0.95,
+    "0110000000.9500000000001",
+    2,
+    "CCIP,WD",
+    "machine",
+    "b"
+   ],
+   [
+    0,
+    "00000000-0000-0000-0000-000000001002",
+    "machine",
+    0.7,
+    "0010000000.7000000000001",
+    1,
+    "WD",
+    "machine",
+    "b"
+   ]
+  ],
+  "tag_memberships": [
+   [
+    "ccip_only",
+    "entity",
+    "origin",
+    "score",
+    "skey",
+    "source_count",
+    "sources",
+    "status",
+    "uuid"
+   ]
+  ],
+  "asset_tags": [
+   [
+    "origin",
+    "tag",
+    "uuid"
+   ]
+  ],
+  "prefs": [
+   [
+    "key",
+    "value"
+   ]
+  ],
+  "actions": [
+   [
+    "id",
+    "label",
+    "undone"
+   ]
+  ],
+  "artist_verdicts": [
+   [
+    "artist",
+    "uuid",
+    "verdict"
+   ]
+  ]
+ },
+ "steps": [
+  {
+   "call": [
+    "set_kind",
+    {
+     "entity": "00000000-0000-0000-0000-000000001001",
+     "kind": "",
+     "artist": ""
+    }
+   ],
+   "outcome": [
+    "ok",
+    "{\"artist\": \"\", \"id\": \"00000000-0000-0000-0000-000000001001\", \"kind\": \"\"}"
+   ],
+   "diff": {}
+  },
+  {
+   "call": [
+    "set_kind",
+    {
+     "entity": "00000000-0000-0000-0000-000000001001",
+     "kind": "",
+     "artist": "someone"
+    }
+   ],
+   "outcome": [
+    "ValueError",
+    "画师名称不正确"
+   ],
+   "diff": {}
+  },
+  {
+   "call": [
+    "set_kind",
+    {
+     "entity": "00000000-0000-0000-0000-000000001001",
+     "kind": "",
+     "artist": null
+    }
+   ],
+   "outcome": [
+    "ValueError",
+    "画师名称不正确"
+   ],
+   "diff": {}
+  },
+  {
+   "call": [
+    "set_kind",
+    {
+     "entity": "00000000-0000-0000-0000-000000001001",
+     "kind": "",
+     "artist": "yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy"
+    }
+   ],
+   "outcome": [
+    "ValueError",
+    "画师名称不正确"
+   ],
+   "diff": {}
+  },
+  {
+   "call": [
+    "set_kind",
+    {
+     "entity": "00000000-0000-0000-0000-000000001001",
+     "kind": "oc",
+     "artist": ""
+    }
+   ],
+   "outcome": [
+    "ok",
+    "{\"artist\": \"\", \"id\": \"00000000-0000-0000-0000-000000001001\", \"kind\": \"oc\"}"
+   ],
+   "diff": {
+    "entities": {
+     "-": [
+      [
+       "",
+       null,
+       "00000000-0000-0000-0000-000000001001",
+       "character",
+       0,
+       0,
+       null,
+       null,
+       "",
+       0,
+       null,
+       null,
+       "",
+       "Example",
+       null
+      ]
+     ],
+     "+": [
+      [
+       "",
+       null,
+       "00000000-0000-0000-0000-000000001001",
+       "character",
+       0,
+       0,
+       null,
+       null,
+       "",
+       1,
+       null,
+       null,
+       "",
+       "",
+       null
+      ]
+     ]
+    },
+    "names": {
+     "-": [],
+     "+": [
+      [
+       "00000000-0000-0000-0000-000000001001",
+       "en",
+       0,
+       1,
+       "display",
+       "user",
+       "Alice"
+      ]
+     ]
+    }
+   }
+  },
+  {
+   "call": [
+    "set_kind",
+    {
+     "entity": "00000000-0000-0000-0000-000000001001",
+     "kind": "oc",
+     "artist": "someone"
+    }
+   ],
+   "outcome": [
+    "ok",
+    "{\"artist\": \"someone\", \"id\": \"00000000-0000-0000-0000-000000001001\", \"kind\": \"oc\"}"
+   ],
+   "diff": {
+    "entities": {
+     "-": [
+      [
+       "",
+       null,
+       "00000000-0000-0000-0000-000000001001",
+       "character",
+       0,
+       0,
+       null,
+       null,
+       "",
+       1,
+       null,
+       null,
+       "",
+       "",
+       null
+      ]
+     ],
+     "+": [
+      [
+       "someone",
+       null,
+       "00000000-0000-0000-0000-000000001001",
+       "character",
+       0,
+       0,
+       null,
+       null,
+       "",
+       1,
+       null,
+       null,
+       "",
+       "",
+       null
+      ]
+     ]
+    }
+   }
+  },
+  {
+   "call": [
+    "set_kind",
+    {
+     "entity": "00000000-0000-0000-0000-000000001001",
+     "kind": "oc",
+     "artist": null
+    }
+   ],
+   "outcome": [
+    "ValueError",
+    "画师名称不正确"
+   ],
+   "diff": {}
+  },
+  {
+   "call": [
+    "set_kind",
+    {
+     "entity": "00000000-0000-0000-0000-000000001001",
+     "kind": "oc",
+     "artist": "yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy"
+    }
+   ],
+   "outcome": [
+    "ValueError",
+    "画师名称不正确"
+   ],
+   "diff": {}
+  },
+  {
+   "call": [
+    "set_kind",
+    {
+     "entity": "00000000-0000-0000-0000-000000001001",
+     "kind": "bad",
+     "artist": ""
+    }
+   ],
+   "outcome": [
+    "ValueError",
+    "未知角色类型"
+   ],
+   "diff": {}
+  },
+  {
+   "call": [
+    "set_kind",
+    {
+     "entity": "00000000-0000-0000-0000-000000001001",
+     "kind": "bad",
+     "artist": "someone"
+    }
+   ],
+   "outcome": [
+    "ValueError",
+    "未知角色类型"
+   ],
+   "diff": {}
+  },
+  {
+   "call": [
+    "set_kind",
+    {
+     "entity": "00000000-0000-0000-0000-000000001001",
+     "kind": "bad",
+     "artist": null
+    }
+   ],
+   "outcome": [
+    "ValueError",
+    "未知角色类型"
+   ],
+   "diff": {}
+  },
+  {
+   "call": [
+    "set_kind",
+    {
+     "entity": "00000000-0000-0000-0000-000000001001",
+     "kind": "bad",
+     "artist": "yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy"
+    }
+   ],
+   "outcome": [
+    "ValueError",
+    "未知角色类型"
+   ],
+   "diff": {}
+  },
+  {
+   "call": [
+    "set_kind",
+    {
+     "entity": "00000000-0000-0000-0000-000000001001",
+     "kind": null,
+     "artist": ""
+    }
+   ],
+   "outcome": [
+    "ValueError",
+    "未知角色类型"
+   ],
+   "diff": {}
+  },
+  {
+   "call": [
+    "set_kind",
+    {
+     "entity": "00000000-0000-0000-0000-000000001001",
+     "kind": null,
+     "artist": "someone"
+    }
+   ],
+   "outcome": [
+    "ValueError",
+    "未知角色类型"
+   ],
+   "diff": {}
+  },
+  {
+   "call": [
+    "set_kind",
+    {
+     "entity": "00000000-0000-0000-0000-000000001001",
+     "kind": null,
+     "artist": null
+    }
+   ],
+   "outcome": [
+    "ValueError",
+    "未知角色类型"
+   ],
+   "diff": {}
+  },
+  {
+   "call": [
+    "set_kind",
+    {
+     "entity": "00000000-0000-0000-0000-000000001001",
+     "kind": null,
+     "artist": "yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy"
+    }
+   ],
+   "outcome": [
+    "ValueError",
+    "未知角色类型"
+   ],
+   "diff": {}
+  },
+  {
+   "call": [
+    "set_kind",
+    {
+     "entity": "skin-x",
+     "kind": "",
+     "artist": ""
+    }
+   ],
+   "outcome": [
+    "ValueError",
+    "只能标记角色本身，不能标记子标签"
+   ],
+   "diff": {}
+  },
+  {
+   "call": [
+    "set_kind",
+    {
+     "entity": "skin-x",
+     "kind": "",
+     "artist": "someone"
+    }
+   ],
+   "outcome": [
+    "ValueError",
+    "画师名称不正确"
+   ],
+   "diff": {}
+  },
+  {
+   "call": [
+    "set_kind",
+    {
+     "entity": "skin-x",
+     "kind": "",
+     "artist": null
+    }
+   ],
+   "outcome": [
+    "ValueError",
+    "画师名称不正确"
+   ],
+   "diff": {}
+  },
+  {
+   "call": [
+    "set_kind",
+    {
+     "entity": "skin-x",
+     "kind": "",
+     "artist": "yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy"
+    }
+   ],
+   "outcome": [
+    "ValueError",
+    "画师名称不正确"
+   ],
+   "diff": {}
+  },
+  {
+   "call": [
+    "set_kind",
+    {
+     "entity": "skin-x",
+     "kind": "oc",
+     "artist": ""
+    }
+   ],
+   "outcome": [
+    "ValueError",
+    "只能标记角色本身，不能标记子标签"
+   ],
+   "diff": {}
+  },
+  {
+   "call": [
+    "set_kind",
+    {
+     "entity": "skin-x",
+     "kind": "oc",
+     "artist": "someone"
+    }
+   ],
+   "outcome": [
+    "ValueError",
+    "只能标记角色本身，不能标记子标签"
+   ],
+   "diff": {}
+  },
+  {
+   "call": [
+    "set_kind",
+    {
+     "entity": "skin-x",
+     "kind": "oc",
+     "artist": null
+    }
+   ],
+   "outcome": [
+    "ValueError",
+    "画师名称不正确"
+   ],
+   "diff": {}
+  },
+  {
+   "call": [
+    "set_kind",
+    {
+     "entity": "skin-x",
+     "kind": "oc",
+     "artist": "yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy"
+    }
+   ],
+   "outcome": [
+    "ValueError",
+    "画师名称不正确"
+   ],
+   "diff": {}
+  },
+  {
+   "call": [
+    "set_kind",
+    {
+     "entity": "skin-x",
+     "kind": "bad",
+     "artist": ""
+    }
+   ],
+   "outcome": [
+    "ValueError",
+    "未知角色类型"
+   ],
+   "diff": {}
+  },
+  {
+   "call": [
+    "set_kind",
+    {
+     "entity": "skin-x",
+     "kind": "bad",
+     "artist": "someone"
+    }
+   ],
+   "outcome": [
+    "ValueError",
+    "未知角色类型"
+   ],
+   "diff": {}
+  },
+  {
+   "call": [
+    "set_kind",
+    {
+     "entity": "skin-x",
+     "kind": "bad",
+     "artist": null
+    }
+   ],
+   "outcome": [
+    "ValueError",
+    "未知角色类型"
+   ],
+   "diff": {}
+  },
+  {
+   "call": [
+    "set_kind",
+    {
+     "entity": "skin-x",
+     "kind": "bad",
+     "artist": "yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy"
+    }
+   ],
+   "outcome": [
+    "ValueError",
+    "未知角色类型"
+   ],
+   "diff": {}
+  },
+  {
+   "call": [
+    "set_kind",
+    {
+     "entity": "skin-x",
+     "kind": null,
+     "artist": ""
+    }
+   ],
+   "outcome": [
+    "ValueError",
+    "未知角色类型"
+   ],
+   "diff": {}
+  },
+  {
+   "call": [
+    "set_kind",
+    {
+     "entity": "skin-x",
+     "kind": null,
+     "artist": "someone"
+    }
+   ],
+   "outcome": [
+    "ValueError",
+    "未知角色类型"
+   ],
+   "diff": {}
+  },
+  {
+   "call": [
+    "set_kind",
+    {
+     "entity": "skin-x",
+     "kind": null,
+     "artist": null
+    }
+   ],
+   "outcome": [
+    "ValueError",
+    "未知角色类型"
+   ],
+   "diff": {}
+  },
+  {
+   "call": [
+    "set_kind",
+    {
+     "entity": "skin-x",
+     "kind": null,
+     "artist": "yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy"
+    }
+   ],
+   "outcome": [
+    "ValueError",
+    "未知角色类型"
+   ],
+   "diff": {}
+  },
+  {
+   "call": [
+    "set_kind",
+    {
+     "entity": "nope",
+     "kind": "",
+     "artist": ""
+    }
+   ],
+   "outcome": [
+    "ValueError",
+    "角色不存在"
+   ],
+   "diff": {}
+  },
+  {
+   "call": [
+    "set_kind",
+    {
+     "entity": "nope",
+     "kind": "",
+     "artist": "someone"
+    }
+   ],
+   "outcome": [
+    "ValueError",
+    "画师名称不正确"
+   ],
+   "diff": {}
+  },
+  {
+   "call": [
+    "set_kind",
+    {
+     "entity": "nope",
+     "kind": "",
+     "artist": null
+    }
+   ],
+   "outcome": [
+    "ValueError",
+    "画师名称不正确"
+   ],
+   "diff": {}
+  },
+  {
+   "call": [
+    "set_kind",
+    {
+     "entity": "nope",
+     "kind": "",
+     "artist": "yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy"
+    }
+   ],
+   "outcome": [
+    "ValueError",
+    "画师名称不正确"
+   ],
+   "diff": {}
+  },
+  {
+   "call": [
+    "set_kind",
+    {
+     "entity": "nope",
+     "kind": "oc",
+     "artist": ""
+    }
+   ],
+   "outcome": [
+    "ValueError",
+    "角色不存在"
+   ],
+   "diff": {}
+  },
+  {
+   "call": [
+    "set_kind",
+    {
+     "entity": "nope",
+     "kind": "oc",
+     "artist": "someone"
+    }
+   ],
+   "outcome": [
+    "ValueError",
+    "角色不存在"
+   ],
+   "diff": {}
+  },
+  {
+   "call": [
+    "set_kind",
+    {
+     "entity": "nope",
+     "kind": "oc",
+     "artist": null
+    }
+   ],
+   "outcome": [
+    "ValueError",
+    "画师名称不正确"
+   ],
+   "diff": {}
+  },
+  {
+   "call": [
+    "set_kind",
+    {
+     "entity": "nope",
+     "kind": "oc",
+     "artist": "yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy"
+    }
+   ],
+   "outcome": [
+    "ValueError",
+    "画师名称不正确"
+   ],
+   "diff": {}
+  },
+  {
+   "call": [
+    "set_kind",
+    {
+     "entity": "nope",
+     "kind": "bad",
+     "artist": ""
+    }
+   ],
+   "outcome": [
+    "ValueError",
+    "未知角色类型"
+   ],
+   "diff": {}
+  },
+  {
+   "call": [
+    "set_kind",
+    {
+     "entity": "nope",
+     "kind": "bad",
+     "artist": "someone"
+    }
+   ],
+   "outcome": [
+    "ValueError",
+    "未知角色类型"
+   ],
+   "diff": {}
+  },
+  {
+   "call": [
+    "set_kind",
+    {
+     "entity": "nope",
+     "kind": "bad",
+     "artist": null
+    }
+   ],
+   "outcome": [
+    "ValueError",
+    "未知角色类型"
+   ],
+   "diff": {}
+  },
+  {
+   "call": [
+    "set_kind",
+    {
+     "entity": "nope",
+     "kind": "bad",
+     "artist": "yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy"
+    }
+   ],
+   "outcome": [
+    "ValueError",
+    "未知角色类型"
+   ],
+   "diff": {}
+  },
+  {
+   "call": [
+    "set_kind",
+    {
+     "entity": "nope",
+     "kind": null,
+     "artist": ""
+    }
+   ],
+   "outcome": [
+    "ValueError",
+    "未知角色类型"
+   ],
+   "diff": {}
+  },
+  {
+   "call": [
+    "set_kind",
+    {
+     "entity": "nope",
+     "kind": null,
+     "artist": "someone"
+    }
+   ],
+   "outcome": [
+    "ValueError",
+    "未知角色类型"
+   ],
+   "diff": {}
+  },
+  {
+   "call": [
+    "set_kind",
+    {
+     "entity": "nope",
+     "kind": null,
+     "artist": null
+    }
+   ],
+   "outcome": [
+    "ValueError",
+    "未知角色类型"
+   ],
+   "diff": {}
+  },
+  {
+   "call": [
+    "set_kind",
+    {
+     "entity": "nope",
+     "kind": null,
+     "artist": "yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy"
+    }
+   ],
+   "outcome": [
+    "ValueError",
+    "未知角色类型"
+   ],
+   "diff": {}
+  },
+  {
+   "call": [
+    "set_kind",
+    {
+     "entity": null,
+     "kind": "",
+     "artist": ""
+    }
+   ],
+   "outcome": [
+    "ValueError",
+    "请选择角色"
+   ],
+   "diff": {}
+  },
+  {
+   "call": [
+    "set_kind",
+    {
+     "entity": null,
+     "kind": "",
+     "artist": "someone"
+    }
+   ],
+   "outcome": [
+    "ValueError",
+    "画师名称不正确"
+   ],
+   "diff": {}
+  },
+  {
+   "call": [
+    "set_kind",
+    {
+     "entity": null,
+     "kind": "",
+     "artist": null
+    }
+   ],
+   "outcome": [
+    "ValueError",
+    "画师名称不正确"
+   ],
+   "diff": {}
+  },
+  {
+   "call": [
+    "set_kind",
+    {
+     "entity": null,
+     "kind": "",
+     "artist": "yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy"
+    }
+   ],
+   "outcome": [
+    "ValueError",
+    "画师名称不正确"
+   ],
+   "diff": {}
+  },
+  {
+   "call": [
+    "set_kind",
+    {
+     "entity": null,
+     "kind": "oc",
+     "artist": ""
+    }
+   ],
+   "outcome": [
+    "ValueError",
+    "请选择角色"
+   ],
+   "diff": {}
+  },
+  {
+   "call": [
+    "set_kind",
+    {
+     "entity": null,
+     "kind": "oc",
+     "artist": "someone"
+    }
+   ],
+   "outcome": [
+    "ValueError",
+    "请选择角色"
+   ],
+   "diff": {}
+  },
+  {
+   "call": [
+    "set_kind",
+    {
+     "entity": null,
+     "kind": "oc",
+     "artist": null
+    }
+   ],
+   "outcome": [
+    "ValueError",
+    "画师名称不正确"
+   ],
+   "diff": {}
+  },
+  {
+   "call": [
+    "set_kind",
+    {
+     "entity": null,
+     "kind": "oc",
+     "artist": "yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy"
+    }
+   ],
+   "outcome": [
+    "ValueError",
+    "画师名称不正确"
+   ],
+   "diff": {}
+  },
+  {
+   "call": [
+    "set_kind",
+    {
+     "entity": null,
+     "kind": "bad",
+     "artist": ""
+    }
+   ],
+   "outcome": [
+    "ValueError",
+    "未知角色类型"
+   ],
+   "diff": {}
+  },
+  {
+   "call": [
+    "set_kind",
+    {
+     "entity": null,
+     "kind": "bad",
+     "artist": "someone"
+    }
+   ],
+   "outcome": [
+    "ValueError",
+    "未知角色类型"
+   ],
+   "diff": {}
+  },
+  {
+   "call": [
+    "set_kind",
+    {
+     "entity": null,
+     "kind": "bad",
+     "artist": null
+    }
+   ],
+   "outcome": [
+    "ValueError",
+    "未知角色类型"
+   ],
+   "diff": {}
+  },
+  {
+   "call": [
+    "set_kind",
+    {
+     "entity": null,
+     "kind": "bad",
+     "artist": "yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy"
+    }
+   ],
+   "outcome": [
+    "ValueError",
+    "未知角色类型"
+   ],
+   "diff": {}
+  },
+  {
+   "call": [
+    "set_kind",
+    {
+     "entity": null,
+     "kind": null,
+     "artist": ""
+    }
+   ],
+   "outcome": [
+    "ValueError",
+    "未知角色类型"
+   ],
+   "diff": {}
+  },
+  {
+   "call": [
+    "set_kind",
+    {
+     "entity": null,
+     "kind": null,
+     "artist": "someone"
+    }
+   ],
+   "outcome": [
+    "ValueError",
+    "未知角色类型"
+   ],
+   "diff": {}
+  },
+  {
+   "call": [
+    "set_kind",
+    {
+     "entity": null,
+     "kind": null,
+     "artist": null
+    }
+   ],
+   "outcome": [
+    "ValueError",
+    "未知角色类型"
+   ],
+   "diff": {}
+  },
+  {
+   "call": [
+    "set_kind",
+    {
+     "entity": null,
+     "kind": null,
+     "artist": "yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy"
+    }
+   ],
+   "outcome": [
+    "ValueError",
+    "未知角色类型"
+   ],
+   "diff": {}
+  },
+  {
+   "call": [
+    "set_kind",
+    {
+     "entity": "00000000-0000-0000-0000-000000001004",
+     "kind": "",
+     "artist": ""
+    }
+   ],
+   "outcome": [
+    "ok",
+    "{\"artist\": \"\", \"id\": \"00000000-0000-0000-0000-000000001004\", \"kind\": \"\"}"
+   ],
+   "diff": {}
+  },
+  {
+   "call": [
+    "set_kind",
+    {
+     "entity": "00000000-0000-0000-0000-000000001004",
+     "kind": "",
+     "artist": "someone"
+    }
+   ],
+   "outcome": [
+    "ValueError",
+    "画师名称不正确"
+   ],
+   "diff": {}
+  },
+  {
+   "call": [
+    "set_kind",
+    {
+     "entity": "00000000-0000-0000-0000-000000001004",
+     "kind": "",
+     "artist": null
+    }
+   ],
+   "outcome": [
+    "ValueError",
+    "画师名称不正确"
+   ],
+   "diff": {}
+  },
+  {
+   "call": [
+    "set_kind",
+    {
+     "entity": "00000000-0000-0000-0000-000000001004",
+     "kind": "",
+     "artist": "yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy"
+    }
+   ],
+   "outcome": [
+    "ValueError",
+    "画师名称不正确"
+   ],
+   "diff": {}
+  },
+  {
+   "call": [
+    "set_kind",
+    {
+     "entity": "00000000-0000-0000-0000-000000001004",
+     "kind": "oc",
+     "artist": ""
+    }
+   ],
+   "outcome": [
+    "ok",
+    "{\"artist\": \"\", \"id\": \"00000000-0000-0000-0000-000000001004\", \"kind\": \"oc\"}"
+   ],
+   "diff": {
+    "entities": {
+     "-": [
+      [
+       "",
+       null,
+       "00000000-0000-0000-0000-000000001004",
+       "character",
+       0,
+       0,
+       null,
+       null,
+       "",
+       0,
+       null,
+       null,
+       "",
+       "",
+       null
+      ]
+     ],
+     "+": [
+      [
+       "",
+       null,
+       "00000000-0000-0000-0000-000000001004",
+       "character",
+       0,
+       0,
+       null,
+       null,
+       "",
+       1,
+       null,
+       null,
+       "",
+       "",
+       null
+      ]
+     ]
+    }
+   }
+  },
+  {
+   "call": [
+    "set_kind",
+    {
+     "entity": "00000000-0000-0000-0000-000000001004",
+     "kind": "oc",
+     "artist": "someone"
+    }
+   ],
+   "outcome": [
+    "ok",
+    "{\"artist\": \"someone\", \"id\": \"00000000-0000-0000-0000-000000001004\", \"kind\": \"oc\"}"
+   ],
+   "diff": {
+    "entities": {
+     "-": [
+      [
+       "",
+       null,
+       "00000000-0000-0000-0000-000000001004",
+       "character",
+       0,
+       0,
+       null,
+       null,
+       "",
+       1,
+       null,
+       null,
+       "",
+       "",
+       null
+      ]
+     ],
+     "+": [
+      [
+       "someone",
+       null,
+       "00000000-0000-0000-0000-000000001004",
+       "character",
+       0,
+       0,
+       null,
+       null,
+       "",
+       1,
+       null,
+       null,
+       "",
+       "",
+       null
+      ]
+     ]
+    }
+   }
+  },
+  {
+   "call": [
+    "set_kind",
+    {
+     "entity": "00000000-0000-0000-0000-000000001004",
+     "kind": "oc",
+     "artist": null
+    }
+   ],
+   "outcome": [
+    "ValueError",
+    "画师名称不正确"
+   ],
+   "diff": {}
+  },
+  {
+   "call": [
+    "set_kind",
+    {
+     "entity": "00000000-0000-0000-0000-000000001004",
+     "kind": "oc",
+     "artist": "yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy"
+    }
+   ],
+   "outcome": [
+    "ValueError",
+    "画师名称不正确"
+   ],
+   "diff": {}
+  },
+  {
+   "call": [
+    "set_kind",
+    {
+     "entity": "00000000-0000-0000-0000-000000001004",
+     "kind": "bad",
+     "artist": ""
+    }
+   ],
+   "outcome": [
+    "ValueError",
+    "未知角色类型"
+   ],
+   "diff": {}
+  },
+  {
+   "call": [
+    "set_kind",
+    {
+     "entity": "00000000-0000-0000-0000-000000001004",
+     "kind": "bad",
+     "artist": "someone"
+    }
+   ],
+   "outcome": [
+    "ValueError",
+    "未知角色类型"
+   ],
+   "diff": {}
+  },
+  {
+   "call": [
+    "set_kind",
+    {
+     "entity": "00000000-0000-0000-0000-000000001004",
+     "kind": "bad",
+     "artist": null
+    }
+   ],
+   "outcome": [
+    "ValueError",
+    "未知角色类型"
+   ],
+   "diff": {}
+  },
+  {
+   "call": [
+    "set_kind",
+    {
+     "entity": "00000000-0000-0000-0000-000000001004",
+     "kind": "bad",
+     "artist": "yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy"
+    }
+   ],
+   "outcome": [
+    "ValueError",
+    "未知角色类型"
+   ],
+   "diff": {}
+  },
+  {
+   "call": [
+    "set_kind",
+    {
+     "entity": "00000000-0000-0000-0000-000000001004",
+     "kind": null,
+     "artist": ""
+    }
+   ],
+   "outcome": [
+    "ValueError",
+    "未知角色类型"
+   ],
+   "diff": {}
+  },
+  {
+   "call": [
+    "set_kind",
+    {
+     "entity": "00000000-0000-0000-0000-000000001004",
+     "kind": null,
+     "artist": "someone"
+    }
+   ],
+   "outcome": [
+    "ValueError",
+    "未知角色类型"
+   ],
+   "diff": {}
+  },
+  {
+   "call": [
+    "set_kind",
+    {
+     "entity": "00000000-0000-0000-0000-000000001004",
+     "kind": null,
+     "artist": null
+    }
+   ],
+   "outcome": [
+    "ValueError",
+    "未知角色类型"
+   ],
+   "diff": {}
+  },
+  {
+   "call": [
+    "set_kind",
+    {
+     "entity": "00000000-0000-0000-0000-000000001004",
+     "kind": null,
+     "artist": "yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy"
+    }
+   ],
+   "outcome": [
+    "ValueError",
+    "未知角色类型"
+   ],
+   "diff": {}
+  },
+  {
+   "call": [
+    "set_mascot",
+    {
+     "entity": "00000000-0000-0000-0000-000000001002",
+     "mascot": true
+    }
+   ],
+   "outcome": [
+    "ok",
+    "{\"id\": \"00000000-0000-0000-0000-000000001002\", \"mascot\": true}"
+   ],
+   "diff": {
+    "entities": {
+     "-": [
+      [
+       "",
+       null,
+       "00000000-0000-0000-0000-000000001002",
+       "character",
+       0,
+       0,
+       null,
+       null,
+       "",
+       0,
+       null,
+       null,
+       "",
+       "Example",
+       null
+      ]
+     ],
+     "+": [
+      [
+       "",
+       null,
+       "00000000-0000-0000-0000-000000001002",
+       "character",
+       0,
+       1,
+       "user",
+       null,
+       "",
+       0,
+       null,
+       null,
+       "",
+       "Example",
+       null
+      ]
+     ]
+    },
+    "memberships": {
+     "-": [
+      [
+       0,
+       "00000000-0000-0000-0000-000000001002",
+       "machine",
+       0.7,
+       "0010000000.7000000000001",
+       1,
+       "WD",
+       "machine",
+       "b"
+      ]
+     ],
+     "+": []
+    },
+    "tag_memberships": {
+     "-": [],
+     "+": [
+      [
+       0,
+       "00000000-0000-0000-0000-000000001002",
+       "machine",
+       0.7,
+       "0010000000.7000000000001",
+       1,
+       "WD",
+       "machine",
+       "b"
+      ]
+     ]
+    }
+   }
+  },
+  {
+   "call": [
+    "set_mascot",
+    {
+     "entity": "00000000-0000-0000-0000-000000001002",
+     "mascot": false
+    }
+   ],
+   "outcome": [
+    "ok",
+    "{\"id\": \"00000000-0000-0000-0000-000000001002\", \"mascot\": false}"
+   ],
+   "diff": {
+    "entities": {
+     "-": [
+      [
+       "",
+       null,
+       "00000000-0000-0000-0000-000000001002",
+       "character",
+       0,
+       1,
+       "user",
+       null,
+       "",
+       0,
+       null,
+       null,
+       "",
+       "Example",
+       null
+      ]
+     ],
+     "+": [
+      [
+       "",
+       null,
+       "00000000-0000-0000-0000-000000001002",
+       "character",
+       0,
+       0,
+       "user",
+       null,
+       "",
+       0,
+       null,
+       null,
+       "",
+       "Example",
+       null
+      ]
+     ]
+    },
+    "memberships": {
+     "-": [],
+     "+": [
+      [
+       0,
+       "00000000-0000-0000-0000-000000001002",
+       "machine",
+       0.7,
+       "0010000000.7000000000001",
+       1,
+       "WD",
+       "machine",
+       "b"
+      ]
+     ]
+    },
+    "tag_memberships": {
+     "-": [
+      [
+       0,
+       "00000000-0000-0000-0000-000000001002",
+       "machine",
+       0.7,
+       "0010000000.7000000000001",
+       1,
+       "WD",
+       "machine",
+       "b"
+      ]
+     ],
+     "+": []
+    }
+   }
+  },
+  {
+   "call": [
+    "set_mascot",
+    {
+     "entity": "00000000-0000-0000-0000-000000001002",
+     "mascot": 1
+    }
+   ],
+   "outcome": [
+    "ValueError",
+    "参数不正确"
+   ],
+   "diff": {}
+  },
+  {
+   "call": [
+    "set_mascot",
+    {
+     "entity": "00000000-0000-0000-0000-000000001002",
+     "mascot": null
+    }
+   ],
+   "outcome": [
+    "ValueError",
+    "参数不正确"
+   ],
+   "diff": {}
+  },
+  {
+   "call": [
+    "set_mascot",
+    {
+     "entity": "skin-x",
+     "mascot": true
+    }
+   ],
+   "outcome": [
+    "ValueError",
+    "只能标记角色本身，不能标记子标签"
+   ],
+   "diff": {}
+  },
+  {
+   "call": [
+    "set_mascot",
+    {
+     "entity": "skin-x",
+     "mascot": false
+    }
+   ],
+   "outcome": [
+    "ValueError",
+    "只能标记角色本身，不能标记子标签"
+   ],
+   "diff": {}
+  },
+  {
+   "call": [
+    "set_mascot",
+    {
+     "entity": "skin-x",
+     "mascot": 1
+    }
+   ],
+   "outcome": [
+    "ValueError",
+    "参数不正确"
+   ],
+   "diff": {}
+  },
+  {
+   "call": [
+    "set_mascot",
+    {
+     "entity": "skin-x",
+     "mascot": null
+    }
+   ],
+   "outcome": [
+    "ValueError",
+    "参数不正确"
+   ],
+   "diff": {}
+  },
+  {
+   "call": [
+    "set_mascot",
+    {
+     "entity": "nope",
+     "mascot": true
+    }
+   ],
+   "outcome": [
+    "ValueError",
+    "角色不存在"
+   ],
+   "diff": {}
+  },
+  {
+   "call": [
+    "set_mascot",
+    {
+     "entity": "nope",
+     "mascot": false
+    }
+   ],
+   "outcome": [
+    "ValueError",
+    "角色不存在"
+   ],
+   "diff": {}
+  },
+  {
+   "call": [
+    "set_mascot",
+    {
+     "entity": "nope",
+     "mascot": 1
+    }
+   ],
+   "outcome": [
+    "ValueError",
+    "参数不正确"
+   ],
+   "diff": {}
+  },
+  {
+   "call": [
+    "set_mascot",
+    {
+     "entity": "nope",
+     "mascot": null
+    }
+   ],
+   "outcome": [
+    "ValueError",
+    "参数不正确"
+   ],
+   "diff": {}
+  },
+  {
+   "call": [
+    "set_mascot",
+    {
+     "entity": null,
+     "mascot": true
+    }
+   ],
+   "outcome": [
+    "ValueError",
+    "请选择角色"
+   ],
+   "diff": {}
+  },
+  {
+   "call": [
+    "set_mascot",
+    {
+     "entity": null,
+     "mascot": false
+    }
+   ],
+   "outcome": [
+    "ValueError",
+    "请选择角色"
+   ],
+   "diff": {}
+  },
+  {
+   "call": [
+    "set_mascot",
+    {
+     "entity": null,
+     "mascot": 1
+    }
+   ],
+   "outcome": [
+    "ValueError",
+    "参数不正确"
+   ],
+   "diff": {}
+  },
+  {
+   "call": [
+    "set_mascot",
+    {
+     "entity": null,
+     "mascot": null
+    }
+   ],
+   "outcome": [
+    "ValueError",
+    "参数不正确"
+   ],
+   "diff": {}
+  },
+  {
+   "call": [
+    "set_work",
+    {
+     "entity": "00000000-0000-0000-0000-000000001002",
+     "work": "00000000-0000-0000-0000-000000001003"
+    }
+   ],
+   "outcome": [
+    "ok",
+    "{\"id\": \"00000000-0000-0000-0000-000000001002\", \"work_id\": \"00000000-0000-0000-0000-000000001003\"}"
+   ],
+   "diff": {
+    "entities": {
+     "-": [
+      [
+       "",
+       null,
+       "00000000-0000-0000-0000-000000001002",
+       "character",
+       0,
+       0,
+       "user",
+       null,
+       "",
+       0,
+       null,
+       null,
+       "",
+       "Example",
+       null
+      ]
+     ],
+     "+": [
+      [
+       "",
+       null,
+       "00000000-0000-0000-0000-000000001002",
+       "character",
+       0,
+       0,
+       "user",
+       null,
+       "",
+       0,
+       null,
+       null,
+       "",
+       "",
+       "00000000-0000-0000-0000-000000001003"
+      ]
+     ]
+    }
+   }
+  },
+  {
+   "call": [
+    "set_work",
+    {
+     "entity": "00000000-0000-0000-0000-000000001002",
+     "work": ""
+    }
+   ],
+   "outcome": [
+    "ok",
+    "{\"id\": \"00000000-0000-0000-0000-000000001002\", \"work_id\": null}"
+   ],
+   "diff": {
+    "entities": {
+     "-": [
+      [
+       "",
+       null,
+       "00000000-0000-0000-0000-000000001002",
+       "character",
+       0,
+       0,
+       "user",
+       null,
+       "",
+       0,
+       null,
+       null,
+       "",
+       "",
+       "00000000-0000-0000-0000-000000001003"
+      ]
+     ],
+     "+": [
+      [
+       "",
+       null,
+       "00000000-0000-0000-0000-000000001002",
+       "character",
+       0,
+       0,
+       "user",
+       null,
+       "",
+       0,
+       null,
+       null,
+       "",
+       "",
+       null
+      ]
+     ]
+    }
+   }
+  },
+  {
+   "call": [
+    "set_work",
+    {
+     "entity": "00000000-0000-0000-0000-000000001002",
+     "work": null
+    }
+   ],
+   "outcome": [
+    "ok",
+    "{\"id\": \"00000000-0000-0000-0000-000000001002\", \"work_id\": null}"
+   ],
+   "diff": {}
+  },
+  {
+   "call": [
+    "set_work",
+    {
+     "entity": "00000000-0000-0000-0000-000000001002",
+     "work": "nope"
+    }
+   ],
+   "outcome": [
+    "ValueError",
+    "作品不存在"
+   ],
+   "diff": {}
+  },
+  {
+   "call": [
+    "set_work",
+    {
+     "entity": "00000000-0000-0000-0000-000000001002",
+     "work": 5
+    }
+   ],
+   "outcome": [
+    "ValueError",
+    "作品不存在"
+   ],
+   "diff": {}
+  },
+  {
+   "call": [
+    "set_work",
+    {
+     "entity": "00000000-0000-0000-0000-000000001002",
+     "work": true
+    }
+   ],
+   "outcome": [
+    "ValueError",
+    "作品不存在"
+   ],
+   "diff": {}
+  },
+  {
+   "call": [
+    "set_work",
+    {
+     "entity": "00000000-0000-0000-0000-000000001002",
+     "work": 0
+    }
+   ],
+   "outcome": [
+    "ok",
+    "{\"id\": \"00000000-0000-0000-0000-000000001002\", \"work_id\": null}"
+   ],
+   "diff": {}
+  },
+  {
+   "call": [
+    "set_work",
+    {
+     "entity": "00000000-0000-0000-0000-000000001002",
+     "work": "00000000-0000-0000-0000-000000001002"
+    }
+   ],
+   "outcome": [
+    "ValueError",
+    "作品不存在"
+   ],
+   "diff": {}
+  },
+  {
+   "call": [
+    "set_work",
+    {
+     "entity": "skin-x",
+     "work": "00000000-0000-0000-0000-000000001003"
+    }
+   ],
+   "outcome": [
+    "ValueError",
+    "皮肤跟随角色的作品"
+   ],
+   "diff": {}
+  },
+  {
+   "call": [
+    "set_work",
+    {
+     "entity": "skin-x",
+     "work": ""
+    }
+   ],
+   "outcome": [
+    "ValueError",
+    "皮肤跟随角色的作品"
+   ],
+   "diff": {}
+  },
+  {
+   "call": [
+    "set_work",
+    {
+     "entity": "skin-x",
+     "work": null
+    }
+   ],
+   "outcome": [
+    "ValueError",
+    "皮肤跟随角色的作品"
+   ],
+   "diff": {}
+  },
+  {
+   "call": [
+    "set_work",
+    {
+     "entity": "skin-x",
+     "work": "nope"
+    }
+   ],
+   "outcome": [
+    "ValueError",
+    "皮肤跟随角色的作品"
+   ],
+   "diff": {}
+  },
+  {
+   "call": [
+    "set_work",
+    {
+     "entity": "skin-x",
+     "work": 5
+    }
+   ],
+   "outcome": [
+    "ValueError",
+    "皮肤跟随角色的作品"
+   ],
+   "diff": {}
+  },
+  {
+   "call": [
+    "set_work",
+    {
+     "entity": "skin-x",
+     "work": true
+    }
+   ],
+   "outcome": [
+    "ValueError",
+    "皮肤跟随角色的作品"
+   ],
+   "diff": {}
+  },
+  {
+   "call": [
+    "set_work",
+    {
+     "entity": "skin-x",
+     "work": 0
+    }
+   ],
+   "outcome": [
+    "ValueError",
+    "皮肤跟随角色的作品"
+   ],
+   "diff": {}
+  },
+  {
+   "call": [
+    "set_work",
+    {
+     "entity": "skin-x",
+     "work": "00000000-0000-0000-0000-000000001002"
+    }
+   ],
+   "outcome": [
+    "ValueError",
+    "皮肤跟随角色的作品"
+   ],
+   "diff": {}
+  },
+  {
+   "call": [
+    "set_work",
+    {
+     "entity": "nope",
+     "work": "00000000-0000-0000-0000-000000001003"
+    }
+   ],
+   "outcome": [
+    "ValueError",
+    "角色不存在"
+   ],
+   "diff": {}
+  },
+  {
+   "call": [
+    "set_work",
+    {
+     "entity": "nope",
+     "work": ""
+    }
+   ],
+   "outcome": [
+    "ValueError",
+    "角色不存在"
+   ],
+   "diff": {}
+  },
+  {
+   "call": [
+    "set_work",
+    {
+     "entity": "nope",
+     "work": null
+    }
+   ],
+   "outcome": [
+    "ValueError",
+    "角色不存在"
+   ],
+   "diff": {}
+  },
+  {
+   "call": [
+    "set_work",
+    {
+     "entity": "nope",
+     "work": "nope"
+    }
+   ],
+   "outcome": [
+    "ValueError",
+    "角色不存在"
+   ],
+   "diff": {}
+  },
+  {
+   "call": [
+    "set_work",
+    {
+     "entity": "nope",
+     "work": 5
+    }
+   ],
+   "outcome": [
+    "ValueError",
+    "角色不存在"
+   ],
+   "diff": {}
+  },
+  {
+   "call": [
+    "set_work",
+    {
+     "entity": "nope",
+     "work": true
+    }
+   ],
+   "outcome": [
+    "ValueError",
+    "角色不存在"
+   ],
+   "diff": {}
+  },
+  {
+   "call": [
+    "set_work",
+    {
+     "entity": "nope",
+     "work": 0
+    }
+   ],
+   "outcome": [
+    "ValueError",
+    "角色不存在"
+   ],
+   "diff": {}
+  },
+  {
+   "call": [
+    "set_work",
+    {
+     "entity": "nope",
+     "work": "00000000-0000-0000-0000-000000001002"
+    }
+   ],
+   "outcome": [
+    "ValueError",
+    "角色不存在"
+   ],
+   "diff": {}
+  },
+  {
+   "call": [
+    "set_work",
+    {
+     "entity": null,
+     "work": "00000000-0000-0000-0000-000000001003"
+    }
+   ],
+   "outcome": [
+    "ValueError",
+    "请选择角色"
+   ],
+   "diff": {}
+  },
+  {
+   "call": [
+    "set_work",
+    {
+     "entity": null,
+     "work": ""
+    }
+   ],
+   "outcome": [
+    "ValueError",
+    "请选择角色"
+   ],
+   "diff": {}
+  },
+  {
+   "call": [
+    "set_work",
+    {
+     "entity": null,
+     "work": null
+    }
+   ],
+   "outcome": [
+    "ValueError",
+    "请选择角色"
+   ],
+   "diff": {}
+  },
+  {
+   "call": [
+    "set_work",
+    {
+     "entity": null,
+     "work": "nope"
+    }
+   ],
+   "outcome": [
+    "ValueError",
+    "请选择角色"
+   ],
+   "diff": {}
+  },
+  {
+   "call": [
+    "set_work",
+    {
+     "entity": null,
+     "work": 5
+    }
+   ],
+   "outcome": [
+    "ValueError",
+    "请选择角色"
+   ],
+   "diff": {}
+  },
+  {
+   "call": [
+    "set_work",
+    {
+     "entity": null,
+     "work": true
+    }
+   ],
+   "outcome": [
+    "ValueError",
+    "请选择角色"
+   ],
+   "diff": {}
+  },
+  {
+   "call": [
+    "set_work",
+    {
+     "entity": null,
+     "work": 0
+    }
+   ],
+   "outcome": [
+    "ValueError",
+    "请选择角色"
+   ],
+   "diff": {}
+  },
+  {
+   "call": [
+    "set_work",
+    {
+     "entity": null,
+     "work": "00000000-0000-0000-0000-000000001002"
+    }
+   ],
+   "outcome": [
+    "ValueError",
+    "请选择角色"
+   ],
+   "diff": {}
+  },
+  {
+   "call": [
+    "set_work",
+    {
+     "entity": "00000000-0000-0000-0000-000000001005",
+     "work": "00000000-0000-0000-0000-000000001003"
+    }
+   ],
+   "outcome": [
+    "ok",
+    "{\"id\": \"00000000-0000-0000-0000-000000001005\", \"work_id\": \"00000000-0000-0000-0000-000000001003\"}"
+   ],
+   "diff": {
+    "entities": {
+     "-": [
+      [
+       "",
+       null,
+       "00000000-0000-0000-0000-000000001005",
+       "character",
+       0,
+       0,
+       null,
+       null,
+       "",
+       0,
+       null,
+       null,
+       "",
+       "",
+       null
+      ]
+     ],
+     "+": [
+      [
+       "",
+       null,
+       "00000000-0000-0000-0000-000000001005",
+       "character",
+       0,
+       0,
+       null,
+       null,
+       "",
+       0,
+       null,
+       null,
+       "",
+       "",
+       "00000000-0000-0000-0000-000000001003"
+      ]
+     ]
+    }
+   }
+  },
+  {
+   "call": [
+    "set_work",
+    {
+     "entity": "00000000-0000-0000-0000-000000001005",
+     "work": ""
+    }
+   ],
+   "outcome": [
+    "ok",
+    "{\"id\": \"00000000-0000-0000-0000-000000001005\", \"work_id\": null}"
+   ],
+   "diff": {
+    "entities": {
+     "-": [
+      [
+       "",
+       null,
+       "00000000-0000-0000-0000-000000001005",
+       "character",
+       0,
+       0,
+       null,
+       null,
+       "",
+       0,
+       null,
+       null,
+       "",
+       "",
+       "00000000-0000-0000-0000-000000001003"
+      ]
+     ],
+     "+": [
+      [
+       "",
+       null,
+       "00000000-0000-0000-0000-000000001005",
+       "character",
+       0,
+       0,
+       null,
+       null,
+       "",
+       0,
+       null,
+       null,
+       "",
+       "",
+       null
+      ]
+     ]
+    }
+   }
+  },
+  {
+   "call": [
+    "set_work",
+    {
+     "entity": "00000000-0000-0000-0000-000000001005",
+     "work": null
+    }
+   ],
+   "outcome": [
+    "ok",
+    "{\"id\": \"00000000-0000-0000-0000-000000001005\", \"work_id\": null}"
+   ],
+   "diff": {}
+  },
+  {
+   "call": [
+    "set_work",
+    {
+     "entity": "00000000-0000-0000-0000-000000001005",
+     "work": "nope"
+    }
+   ],
+   "outcome": [
+    "ValueError",
+    "作品不存在"
+   ],
+   "diff": {}
+  },
+  {
+   "call": [
+    "set_work",
+    {
+     "entity": "00000000-0000-0000-0000-000000001005",
+     "work": 5
+    }
+   ],
+   "outcome": [
+    "ValueError",
+    "作品不存在"
+   ],
+   "diff": {}
+  },
+  {
+   "call": [
+    "set_work",
+    {
+     "entity": "00000000-0000-0000-0000-000000001005",
+     "work": true
+    }
+   ],
+   "outcome": [
+    "ValueError",
+    "作品不存在"
+   ],
+   "diff": {}
+  },
+  {
+   "call": [
+    "set_work",
+    {
+     "entity": "00000000-0000-0000-0000-000000001005",
+     "work": 0
+    }
+   ],
+   "outcome": [
+    "ok",
+    "{\"id\": \"00000000-0000-0000-0000-000000001005\", \"work_id\": null}"
+   ],
+   "diff": {}
+  },
+  {
+   "call": [
+    "set_work",
+    {
+     "entity": "00000000-0000-0000-0000-000000001005",
+     "work": "00000000-0000-0000-0000-000000001002"
+    }
+   ],
+   "outcome": [
+    "ValueError",
+    "作品不存在"
+   ],
+   "diff": {}
+  },
+  {
+   "call": [
+    "set_work",
+    {
+     "entity": "00000000-0000-0000-0000-000000001001",
+     "work": "00000000-0000-0000-0000-000000001003"
+    }
+   ],
+   "outcome": [
+    "ValueError",
+    "原创角色不能归属作品"
+   ],
+   "diff": {}
+  },
+  {
+   "call": [
+    "set_work",
+    {
+     "entity": "00000000-0000-0000-0000-000000001001",
+     "work": ""
+    }
+   ],
+   "outcome": [
+    "ok",
+    "{\"id\": \"00000000-0000-0000-0000-000000001001\", \"work_id\": null}"
+   ],
+   "diff": {}
+  },
+  {
+   "call": [
+    "set_work",
+    {
+     "entity": "00000000-0000-0000-0000-000000001001",
+     "work": null
+    }
+   ],
+   "outcome": [
+    "ok",
+    "{\"id\": \"00000000-0000-0000-0000-000000001001\", \"work_id\": null}"
+   ],
+   "diff": {}
+  },
+  {
+   "call": [
+    "set_work",
+    {
+     "entity": "00000000-0000-0000-0000-000000001001",
+     "work": "nope"
+    }
+   ],
+   "outcome": [
+    "ValueError",
+    "作品不存在"
+   ],
+   "diff": {}
+  },
+  {
+   "call": [
+    "set_work",
+    {
+     "entity": "00000000-0000-0000-0000-000000001001",
+     "work": 5
+    }
+   ],
+   "outcome": [
+    "ValueError",
+    "作品不存在"
+   ],
+   "diff": {}
+  },
+  {
+   "call": [
+    "set_work",
+    {
+     "entity": "00000000-0000-0000-0000-000000001001",
+     "work": true
+    }
+   ],
+   "outcome": [
+    "ValueError",
+    "作品不存在"
+   ],
+   "diff": {}
+  },
+  {
+   "call": [
+    "set_work",
+    {
+     "entity": "00000000-0000-0000-0000-000000001001",
+     "work": 0
+    }
+   ],
+   "outcome": [
+    "ok",
+    "{\"id\": \"00000000-0000-0000-0000-000000001001\", \"work_id\": null}"
+   ],
+   "diff": {}
+  },
+  {
+   "call": [
+    "set_work",
+    {
+     "entity": "00000000-0000-0000-0000-000000001001",
+     "work": "00000000-0000-0000-0000-000000001002"
+    }
+   ],
+   "outcome": [
+    "ValueError",
+    "作品不存在"
+   ],
+   "diff": {}
+  }
+ ],
+ "final": {
+  "entities": [
+   [
+    "artist",
+    "external_key",
+    "id",
+    "kind",
+    "label_only",
+    "mascot",
+    "mascot_origin",
+    "merged_into",
+    "name",
+    "original",
+    "parent_id",
+    "tag",
+    "variant",
+    "work",
+    "work_id"
+   ],
+   [
+    "",
+    null,
+    "00000000-0000-0000-0000-000000001002",
+    "character",
+    0,
+    0,
+    "user",
+    null,
+    "",
+    0,
+    null,
+    null,
+    "",
+    "",
+    null
+   ],
+   [
+    "",
+    null,
+    "00000000-0000-0000-0000-000000001003",
+    "work",
+    0,
+    0,
+    null,
+    null,
+    "",
+    0,
+    null,
+    null,
+    "",
+    "",
+    null
+   ],
+   [
+    "",
+    null,
+    "00000000-0000-0000-0000-000000001005",
+    "character",
+    0,
+    0,
+    null,
+    null,
+    "",
+    0,
+    null,
+    null,
+    "",
+    "",
+    null
+   ],
+   [
+    "",
+    null,
+    "skin-x",
+    "skin",
+    0,
+    0,
+    null,
+    null,
+    "",
+    0,
+    "00000000-0000-0000-0000-000000001001",
+    null,
+    "swimsuit",
+    "",
+    null
+   ],
+   [
+    "someone",
+    null,
+    "00000000-0000-0000-0000-000000001001",
+    "character",
+    0,
+    0,
+    null,
+    null,
+    "",
+    1,
+    null,
+    null,
+    "",
+    "",
+    null
+   ],
+   [
+    "someone",
+    null,
+    "00000000-0000-0000-0000-000000001004",
+    "character",
+    0,
+    0,
+    null,
+    null,
+    "",
+    1,
+    null,
+    null,
+    "",
+    "",
+    null
+   ]
+  ],
+  "links": [
+   [
+    "current",
+    "entity_id",
+    "key",
+    "source",
+    "system"
+   ],
+   [
+    1,
+    "00000000-0000-0000-0000-000000001001",
+    "alice",
+    "import",
+    "ccip"
+   ],
+   [
+    1,
+    "00000000-0000-0000-0000-000000001001",
+    "alice",
+    "import",
+    "danbooru"
+   ],
+   [
+    1,
+    "00000000-0000-0000-0000-000000001002",
+    "bob",
+    "import",
+    "ccip"
+   ],
+   [
+    1,
+    "00000000-0000-0000-0000-000000001002",
+    "bob",
+    "import",
+    "danbooru"
+   ]
+  ],
+  "names": [
+   [
+    "entity_id",
+    "lang",
+    "position",
+    "preferred",
+    "role",
+    "source",
+    "value"
+   ],
+   [
+    "00000000-0000-0000-0000-000000001001",
+    "",
+    0,
+    0,
+    "alias",
+    "album",
+    "Alice album"
+   ],
+   [
+    "00000000-0000-0000-0000-000000001001",
+    "",
+    0,
+    0,
+    "alias",
+    "album",
+    "alice_album"
+   ],
+   [
+    "00000000-0000-0000-0000-000000001001",
+    "",
+    0,
+    0,
+    "alias",
+    "index",
+    "Alice"
+   ],
+   [
+    "00000000-0000-0000-0000-000000001001",
+    "",
+    0,
+    0,
+    "alias",
+    "index",
+    "a_li_ce"
+   ],
+   [
+    "00000000-0000-0000-0000-000000001001",
+    "",
+    0,
+    0,
+    "alias",
+    "index",
+    "alice"
+   ],
+   [
+    "00000000-0000-0000-0000-000000001001",
+    "",
+    0,
+    0,
+    "alias",
+    "index",
+    "alice_tag"
+   ],
+   [
+    "00000000-0000-0000-0000-000000001001",
+    "",
+    0,
+    0,
+    "alias",
+    "index",
+    "爱丽丝"
+   ],
+   [
+    "00000000-0000-0000-0000-000000001001",
+    "en",
+    0,
+    1,
+    "display",
+    "user",
+    "Alice"
+   ],
+   [
+    "00000000-0000-0000-0000-000000001002",
+    "",
+    0,
+    0,
+    "alias",
+    "index",
+    "Bob"
+   ],
+   [
+    "00000000-0000-0000-0000-000000001002",
+    "",
+    0,
+    0,
+    "alias",
+    "index",
+    "bob"
+   ],
+   [
+    "00000000-0000-0000-0000-000000001002",
+    "",
+    0,
+    0,
+    "alias",
+    "index",
+    "bob_tag"
+   ],
+   [
+    "00000000-0000-0000-0000-000000001003",
+    "zh",
+    0,
+    1,
+    "display",
+    "user",
+    "作品甲"
+   ],
+   [
+    "00000000-0000-0000-0000-000000001004",
+    "zh",
+    0,
+    1,
+    "display",
+    "user",
+    "本地甲"
+   ],
+   [
+    "00000000-0000-0000-0000-000000001005",
+    "ja",
+    0,
+    1,
+    "display",
+    "user",
+    "ローカル"
+   ]
+  ],
+  "display_names": [
+   [
+    "key",
+    "kind",
+    "lang",
+    "source",
+    "value"
+   ],
+   [
+    "arknights",
+    "work",
+    "zh",
+    "builtin",
+    "明日方舟"
+   ],
+   [
+    "azur_lane",
+    "work",
+    "zh",
+    "builtin",
+    "碧蓝航线"
+   ],
+   [
+    "bang_dream!",
+    "work",
+    "zh",
+    "builtin",
+    "BanG Dream!"
+   ],
+   [
+    "blue_archive",
+    "work",
+    "zh",
+    "builtin",
+    "蔚蓝档案"
+   ],
+   [
+    "fate",
+    "work",
+    "zh",
+    "builtin",
+    "Fate"
+   ],
+   [
+    "genshin_impact",
+    "work",
+    "zh",
+    "builtin",
+    "原神"
+   ],
+   [
+    "girls'_frontline",
+    "work",
+    "zh",
+    "builtin",
+    "少女前线"
+   ],
+   [
+    "hololive",
+    "work",
+    "zh",
+    "builtin",
+    "hololive"
+   ],
+   [
+    "honkai:_star_rail",
+    "work",
+    "zh",
+    "builtin",
+    "崩坏：星穹铁道"
+   ],
+   [
+    "honkai_impact_3rd",
+    "work",
+    "zh",
+    "builtin",
+    "崩坏3"
+   ],
+   [
+    "idolmaster",
+    "work",
+    "zh",
+    "builtin",
+    "偶像大师"
+   ],
+   [
+    "kancolle",
+    "work",
+    "zh",
+    "builtin",
+    "舰队Collection"
+   ],
+   [
+    "love_live!",
+    "work",
+    "zh",
+    "builtin",
+    "LoveLive!"
+   ],
+   [
+    "nijisanji",
+    "work",
+    "zh",
+    "builtin",
+    "彩虹社"
+   ],
+   [
+    "pokemon",
+    "work",
+    "zh",
+    "builtin",
+    "宝可梦"
+   ],
+   [
+    "princess_connect!",
+    "work",
+    "zh",
+    "builtin",
+    "公主连结"
+   ],
+   [
+    "project_sekai",
+    "work",
+    "zh",
+    "builtin",
+    "世界计划"
+   ],
+   [
+    "touhou",
+    "work",
+    "zh",
+    "builtin",
+    "东方Project"
+   ],
+   [
+    "umamusume",
+    "work",
+    "zh",
+    "builtin",
+    "赛马娘"
+   ],
+   [
+    "vocaloid",
+    "work",
+    "zh",
+    "builtin",
+    "VOCALOID"
+   ],
+   [
+    "wuthering_waves",
+    "work",
+    "zh",
+    "builtin",
+    "鸣潮"
+   ],
+   [
+    "zenless_zone_zero",
+    "work",
+    "zh",
+    "builtin",
+    "绝区零"
+   ]
+  ],
+  "name_aliases": [
+   [
+    "key",
+    "kind",
+    "position",
+    "value"
+   ]
+  ],
+  "work_review": [
+   [
+    "entity_id",
+    "note",
+    "parent_locked",
+    "status"
+   ],
+   [
+    "00000000-0000-0000-0000-000000001003",
+    "",
+    1,
+    "pending"
+   ]
+  ],
+  "assertions": [
+   [
+    "entity",
+    "origin",
+    "status",
+    "uuid"
+   ],
+   [
+    "00000000-0000-0000-0000-000000001001",
+    "album",
+    "confirmed",
+    "a"
+   ]
+  ],
+  "deferred": [
+   [
+    "uuid"
+   ]
+  ],
+  "asked": [
+   [
+    "action_id",
+    "answer",
+    "entity",
+    "kind",
+    "uuid"
+   ]
+  ],
+  "reviews": [
+   [
+    "action_id",
+    "entity"
+   ]
+  ],
+  "identity_relations": [
+   [
+    "a",
+    "b",
+    "id",
+    "kind",
+    "status"
+   ],
+   [
+    "skin-x",
+    "00000000-0000-0000-0000-000000001001",
+    1,
+    "form_of",
+    "accepted"
+   ]
+  ],
+  "identity_decisions": [
+   [
+    "id",
+    "previous_status",
+    "reason",
+    "relation_id",
+    "status"
+   ],
+   [
+    1,
+    "proposed",
+    "保留既有层级并使其可撤销；不代表新增人工确认",
+    1,
+    "accepted"
+   ]
+  ],
+  "identity_uncertain": [
+   [
+    "options_json",
+    "reason",
+    "uuid"
+   ]
+  ],
+  "identity_anchor_decisions": [
+   [
+    "decision",
+    "entity",
+    "reason",
+    "reference"
+   ]
+  ],
+  "memberships": [
+   [
+    "ccip_only",
+    "entity",
+    "origin",
+    "score",
+    "skey",
+    "source_count",
+    "sources",
+    "status",
+    "uuid"
+   ],
+   [
+    0,
+    "00000000-0000-0000-0000-000000001001",
+    "album",
+    0.9,
+    "1010000000.9000000000001",
+    1,
+    "WD",
+    "confirmed",
+    "a"
+   ],
+   [
+    0,
+    "00000000-0000-0000-0000-000000001001",
+    "machine",
+    0.95,
+    "0110000000.9500000000001",
+    2,
+    "CCIP,WD",
+    "machine",
+    "b"
+   ],
+   [
+    0,
+    "00000000-0000-0000-0000-000000001002",
+    "machine",
+    0.7,
+    "0010000000.7000000000001",
+    1,
+    "WD",
+    "machine",
+    "b"
+   ]
+  ],
+  "tag_memberships": [
+   [
+    "ccip_only",
+    "entity",
+    "origin",
+    "score",
+    "skey",
+    "source_count",
+    "sources",
+    "status",
+    "uuid"
+   ]
+  ],
+  "asset_tags": [
+   [
+    "origin",
+    "tag",
+    "uuid"
+   ]
+  ],
+  "prefs": [
+   [
+    "key",
+    "value"
+   ]
+  ],
+  "actions": [
+   [
+    "id",
+    "label",
+    "undone"
+   ]
+  ],
+  "artist_verdicts": [
+   [
+    "artist",
+    "uuid",
+    "verdict"
+   ]
+  ]
+ }
+}

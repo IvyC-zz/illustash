@@ -1,0 +1,58 @@
+//! A direct platform consumer; synthetic sources only, no application/HTTP dependency.
+use illustash_platform::{platform_folder as folder, platform_photos as photos, sqlite, Error};
+use std::{fs, path::PathBuf};
+struct Fixture(PathBuf);
+impl Fixture {
+    fn new() -> Self {
+        let root = std::env::temp_dir().join(format!(
+            "illustash-platform-read-{}-{}",
+            std::process::id(),
+            illustash_core::store::new_key().unwrap()
+        ));
+        fs::create_dir(&root).unwrap();
+        Self(root)
+    }
+}
+impl Drop for Fixture {
+    fn drop(&mut self) {
+        fs::remove_dir_all(&self.0).unwrap();
+    }
+}
+#[test]
+fn folder_reads_keep_source_bytes_and_supplied_cancel() {
+    let f = Fixture::new();
+    let file = f.0.join("synthetic.png");
+    image::RgbImage::new(3, 2).save(&file).unwrap();
+    let before = fs::read(&file).unwrap();
+    let mut files = Vec::new();
+    folder::walk(&f.0, &f.0, &mut files, &|| Ok(())).unwrap();
+    assert_eq!(files.len(), 1);
+    assert_eq!(files[0].rel, "synthetic.png");
+    assert_eq!(&folder::describe(&files[0]).0, &3);
+    assert_eq!(&folder::describe(&files[0]).1, &2);
+    assert_eq!(folder::hash(&file, &|| Ok(())).unwrap().len(), 32);
+    let cancel = || Err(Error::Invalid("synthetic cancellation".into()));
+    assert!(matches!(folder::hash(&file, &cancel), Err(Error::Invalid(s)) if s=="synthetic cancellation"));
+    let mut rejected = Vec::new();
+    assert!(folder::walk(&f.0, &f.0, &mut rejected, &cancel).is_err());
+    assert!(rejected.is_empty());
+    assert_eq!(fs::read(file).unwrap(), before);
+}
+#[test]
+fn photos_reads_only_explicit_fixture_and_preserves_database() {
+    let f = Fixture::new();
+    fs::create_dir(f.0.join("database")).unwrap();
+    let db = f.0.join("database/Photos.sqlite");
+    let c = sqlite::open(&db).unwrap();
+    c.execute_batch("CREATE TABLE ZASSET(ZUUID,Z_PK,ZWIDTH,ZHEIGHT,ZADDEDDATE,ZHIDDEN,ZDIRECTORY,ZFILENAME,ZADDITIONALATTRIBUTES,ZKIND,ZTRASHEDSTATE); CREATE TABLE ZADDITIONALASSETATTRIBUTES(Z_PK,ZIMPORTEDBYBUNDLEIDENTIFIER,ZORIGINALSTABLEHASH,ZORIGINALFILESIZE); INSERT INTO ZASSET VALUES ('SYNTHETIC',1,3,2,0,0,'a','b.png',1,0,0); INSERT INTO ZADDITIONALASSETATTRIBUTES VALUES(1,'synthetic-app','hash',10);").unwrap();
+    drop(c);
+    let before = fs::read(&db).unwrap();
+    let (root, rows) = photos::read(f.0.to_str().unwrap()).unwrap();
+    assert_eq!(root, f.0);
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0][0], "SYNTHETIC");
+    assert_eq!(rows[0][8], "synthetic-app");
+    assert_eq!(photos::path(&root, "SYNTHETIC", "a", "b.png").unwrap().0, "deriv");
+    assert!(photos::path(&root, "SYNTHETIC", "..", "b.png").is_err());
+    assert_eq!(fs::read(db).unwrap(), before);
+}

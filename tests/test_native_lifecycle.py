@@ -1,0 +1,776 @@
+"""M1 native lifecycle acceptance on explicit temporary packages only.
+
+Requires ILLUSTASH_TERMS_BIN pointing to the M1 release under test; never builds or discovers
+an older binary. Python is used only to construct fixtures and run the isolated reference HTTP
+server. The launched native process receives a PATH containing only failing Python sentinels.
+Folder and Photos package creation are covered; existing-library upgrades, worker task shutdown and Windows
+process-tree acceptance remain out of scope.
+"""
+from contextlib import chdir, closing
+import gc
+import hashlib
+import http.client
+import json
+import os
+from pathlib import Path
+import signal
+import socket
+import sqlite3
+import subprocess
+import tempfile
+import threading
+import time
+import unittest
+from unittest.mock import patch
+
+from tests.synthetic_source import source_fixture as fixture, synthetic_reference
+from tests.test_read_http import INTERRUPT, SPAWN, free_port, wait_until
+from tools.verify_read_http import difference, fetch
+from web import library, terms_characters
+from web.server import Server, open_store
+from web.store import Store
+
+CORE_READS = (
+    '/api/assets', '/api/assets/count', '/api/ids', '/api/detail?id=a', '/api/home', '/api/fold',
+    '/api/review-pools', '/api/characters', '/api/tagged', '/api/character/profile',
+    '/api/character/activity', '/api/character/stats', '/api/identity/status', '/api/identity/relations',
+    '/api/identity/count', '/api/identity/queue', '/api/identity/pairs', '/api/identity/assignments?id=a',
+    '/api/bootstrap', '/api/prefs', '/api/user-tags', '/api/general-tags', '/api/artists',
+    '/api/artist', '/api/artist-audit', '/api/entities', '/api/works',
+)
+# 参考实现在 Windows 上有句柄泄漏、非法文件名和提前断开连接，逐字节对照只在 POSIX 上验收；
+# Windows 上同一批原生行为由 tools/windows_acceptance.py 直接验证。
+REFERENCE_PARITY_ONLY = unittest.skipIf(os.name == 'nt', 'Python 参考实现不支持 Windows；原生行为见 tools/windows_acceptance.py')
+HEADERS = ('Content-Type', 'Content-Length', 'Content-Encoding', 'Cache-Control', 'Vary',
+           'X-Content-Type-Options', 'Referrer-Policy', 'Content-Security-Policy')
+
+
+def dump(db):
+    with closing(sqlite3.connect(db)) as c:
+        return list(c.iterdump())
+
+
+def files(root):
+    return {p.relative_to(root).as_posix(): hashlib.sha256(p.read_bytes()).hexdigest()
+            for p in root.rglob('*') if p.is_file()}
+
+
+class NativeLifecycleTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        configured = os.environ.get('ILLUSTASH_TERMS_BIN')
+        if not configured:
+            raise unittest.SkipTest('set ILLUSTASH_TERMS_BIN explicitly to the M1 release')
+        cls.binary = Path(configured).resolve()
+        if not cls.binary.is_file():
+            raise unittest.SkipTest('configured M1 release does not exist')
+        cls.resources = Path(os.environ.get('ILLUSTASH_NATIVE_ROOT') or cls.binary.parents[4]).resolve()
+
+    def setUp(self):
+        # #111 explicitly adds this field to library info. Extend only the reference
+        # producer; keep the existing whole-body byte/header comparison unchanged.
+        original_info = library.Library.info
+        def info_with_origins(lib):
+            result = original_info(lib)
+            self.assertNotIn('origins', result)
+            result['origins'] = [{'id': 'pixiv', 'label': 'Pixiv'},
+                                 {'id': 'x', 'label': 'X'}, {'id': 'other', 'label': '其他'}]
+            return result
+        origin_info = patch.object(library.Library, 'info', info_with_origins)
+        origin_info.start(); self.addCleanup(origin_info.stop)
+        # #107: the native factory never guesses an origin from the folder name; without one it is 「其他」.
+        no_guess = patch.object(library, 'guess_preset', lambda path: 'other')
+        no_guess.start(); self.addCleanup(no_guess.stop)
+        self.temp = tempfile.TemporaryDirectory(prefix='illustash-native-lifecycle-')
+        self.addCleanup(self.temp.cleanup)
+        # 参考实现的 Store.refresh 在引用环里留着连接；Windows 删不掉仍打开的文件，先释放再清目录。
+        self.addCleanup(NativeLifecycleTest.release_python_handles, self)
+        self.root = Path(self.temp.name).resolve()
+        self.support, self.shared = self.root / 'support', self.root / 'shared'
+        self.shared.mkdir()
+        for name, value in (('APP_SUPPORT', self.support), ('SHARED', self.shared),
+                            ('HOME', self.root / 'home' / 'Pictures' / 'Illustash'), ('REFERENCE', self.shared / 'reference.sqlite')):
+            scoped = patch.object(library, name, value)
+            scoped.start(); self.addCleanup(scoped.stop)
+        # No subprocess may silently run Python or use the caller's real app support directory.
+        self.sentinel = self.root / 'python-was-launched'
+        self.bin = self.root / 'bin'; self.bin.mkdir()
+        for name in ('python', 'python3', 'python3.12'):
+            executable = self.bin / name
+            executable.write_text('#!/bin/sh\n/bin/echo forbidden > "$ILLUSTASH_PYTHON_SENTINEL"\nexit 97\n')
+            executable.chmod(0o755)
+        # Match the native HOME-derived Photos path, entirely inside the synthetic root.
+        photos = patch('web.sync.PHOTOS', self.root / 'home' / 'Pictures' / 'Photos Library.photoslibrary')
+        photos.start(); self.addCleanup(photos.stop)
+        # Windows 上原生核心按 USERPROFILE 定位主目录，两个都指向合成根目录。
+        self.env = {**os.environ, 'PATH': str(self.bin), 'HOME': str(self.root / 'home'), 'USERPROFILE': str(self.root / 'home'),
+                    'ILLUSTASH_APP_SUPPORT': str(self.support),
+                    'ILLUSTASH_SHARED': str(self.shared), 'ILLUSTASH_PYTHON_SENTINEL': str(self.sentinel),
+                    'ILLUSTASH_TERMS_BIN': str(self.binary)}
+        if self._testMethodName.startswith('test_native_library_new'):
+            self.new_reference = synthetic_reference(self.shared)
+            self.new_folder = self.root / 'downloads-Pixiv'; self.new_folder.mkdir()
+            (self.new_folder / 'not-scanned.png').write_bytes(b'not an image')
+            # Relative/empty folder input resolves against the same isolated application root.
+            (self.root / 'tags').mkdir()
+            (self.root / 'tags' / 'tags_v3.csv').write_bytes((self.resources / 'tags' / 'tags_v3.csv').read_bytes())
+            self.resources = self.root
+            working_directory = chdir(self.root)
+            working_directory.__enter__()
+            self.addCleanup(working_directory.__exit__, None, None, None)
+            first = self.root / 'first.pilib'
+            result = subprocess.run([str(self.binary), 'library-create', '--dest', str(first),
+                                     '--folder', str(self.new_folder), '--reference', str(self.new_reference),
+                                     '--name', 'first'], env=self.env, capture_output=True, timeout=20)
+            self.assertEqual(result.returncode, 0, result.stderr.decode(errors='replace'))
+            self.assertEqual(json.loads(result.stdout), {'path': str(first), 'name': 'first'})
+            self.lib = library.Library(first, json.loads((first / 'library.json').read_text()))
+            self.store = Store.open(self.lib.source, self.lib.db)
+            self.assertFalse(self.sentinel.exists())
+        else:
+            self.lib, self.store = self.package('first')
+        self.port = free_port(); self.origin = f'http://127.0.0.1:{self.port}'
+        self.process, self.log = self.start(self.lib.path)
+        self.reference = Server(('127.0.0.1', 0), self.store, self.lib.thumbnails, public_origin=self.origin)
+        self.reference.library = self.lib
+        self.reference.forced_off = {'index_check', 'names', 'provenance', 'similar', 'sync'}
+        self.thread = threading.Thread(target=self.reference.serve_forever, daemon=True)
+        self.thread.start()
+        self.addCleanup(self.reference.server_close)
+        self.addCleanup(self.thread.join)
+        self.addCleanup(self.reference.shutdown)
+        self.direct = f'http://127.0.0.1:{self.reference.server_port}'
+        self.token = json.loads(self.request('/api/bootstrap')['body'])['token']
+        self.reference.token = self.token
+
+    def release_python_handles(self):
+        self.store = self.reference = None
+        gc.collect()
+        if os.name == 'nt':
+            # 参考实现的常驻核心子进程继承了启动时的工作目录（可能就是本测试的临时目录）。
+            from web import terms_core
+            terms_core.close_service()
+
+    def package(self, name):
+        lib = library.create(self.root / (name + '.pilib'), name)
+        fixture(lib.path).rename(lib.source)
+        store = Store(lib.source, lib.db)
+        store.refresh()
+        gc.collect()  # refresh 的引用环里留着连接；Windows 上之后删改这个包会被占用
+        return lib, store
+
+    def stop(self, process):
+        if process.poll() is None:
+            process.send_signal(INTERRUPT)
+            try:
+                process.wait(5)
+            except subprocess.TimeoutExpired:
+                process.kill(); process.wait(3)
+
+    def start(self, path, extra=(), command=None):
+        port = self.port if not command else free_port()
+        log = tempfile.TemporaryFile()
+        args = list(command or [str(self.binary), 'http']) + ['--no-auto-sync', '--library', str(path),
+                '--port', str(port), '--root', str(self.resources), '--no-names', '--no-index-check', *extra]
+        process = subprocess.Popen(args, env=self.env, stdout=log, stderr=log, **SPAWN)
+        self.addCleanup(log.close)
+        self.addCleanup(self.stop, process)
+        origin = f'http://127.0.0.1:{port}'
+        try:
+            wait_until(lambda: fetch(origin, {'url': '/api/bootstrap'}, origin)['status'] == 200, timeout=5)
+        except AssertionError:
+            log.seek(0)
+            self.fail(f'native startup failed ({process.poll()}): {log.read().decode(errors="replace")}')
+        return process, log
+
+    def request(self, url, body=None, *, base=None, token=None, headers=None):
+        item = {'url': url, 'headers': headers or {}}
+        if body is not None:
+            item.update(method='POST', body=json.dumps(body, ensure_ascii=False).encode('utf-8'))
+            item['headers'] = {'Content-Type': 'application/json', 'X-CSRF-Token': token or self.token,
+                               **item['headers']}
+        return fetch(base or self.origin, item, self.origin)
+
+    def pair(self, url, body=None, **kwargs):
+        left = self.request(url, body, base=self.direct, **kwargs)
+        right = self.request(url, body, **kwargs)
+        self.assertIsNone(difference(left, right), (url, difference(left, right)))
+        for header in HEADERS if right['status'] < 400 else ():
+            self.assertEqual(left['headers'].get(header), right['headers'].get(header), (url, header))
+        return right
+
+    def test_27_core_reads_original_bytes_headers_and_errors(self):
+        self.assertEqual(len(CORE_READS), 27)
+        for url in CORE_READS:
+            with self.subTest(url=url):
+                self.assertEqual(self.pair(url)['route'], 'core')
+        for url in ('/api/assets?limit=bad', '/api/assets?nsfw=hide', '/api/characters?q=Alice',
+                    '/api/identity/queue?limit=0', '/api/artist-audit?n=bad'):
+            self.pair(url)
+        self.assertFalse(self.sentinel.exists())
+
+    def test_host_origin_csrf_security_and_unavailable_forward(self):
+        for headers in ({'Host': 'evil.example'}, {'Origin': 'https://evil.example'}):
+            self.assertEqual(self.pair('/api/bootstrap', headers=headers)['status'], 403)
+        before = dump(self.lib.db)
+        self.assertEqual(self.pair('/api/startup', {'sync': False}, token='bad')['status'], 403)
+        self.assertEqual(self.pair('/api/startup', {'sync': False},
+                                   headers={'Origin': 'https://evil.example'})['status'], 403)
+        self.assertEqual(before, dump(self.lib.db))
+        response = self.request('/api/local-links')
+        self.assertEqual(response['status'], 200)
+        self.assertEqual(response['route'], 'core')
+        self.assertEqual(json.loads(response['body']), [])
+
+    def test_settings_startup_values_errors_and_database_state(self):
+        self.assertEqual(self.pair('/api/settings')['status'], 200)
+        self.assertEqual(self.pair('/api/libraries')['status'], 200)
+        changes = {'sync': False, 'similar': False, 'local_limit': 1234}
+        # Compute expected DB changes on an independent clone before either HTTP write.
+        expected_db = self.root / 'expected-startup.sqlite'
+        with closing(sqlite3.connect(self.lib.db)) as source, closing(sqlite3.connect(expected_db)) as clone:
+            source.backup(clone)
+        expected_store = Store(self.lib.source, expected_db)
+        expected_store.set_startup(changes)
+        response = self.request('/api/startup', changes)
+        self.assertEqual(response['status'], 200)
+        self.assertEqual(self.store.startup(), {**Store.STARTUP_DEFAULT, **changes})
+        self.assertEqual(dump(self.lib.db), dump(expected_db))
+        left = self.request('/api/startup', changes, base=self.direct)
+        self.assertIsNone(difference(left, response), difference(left, response))
+        for header in HEADERS if response['status'] < 400 else ():
+            self.assertEqual(left['headers'].get(header), response['headers'].get(header), header)
+        self.assertEqual(dump(self.lib.db), dump(expected_db))
+        for invalid in ({}, {'new': True}, {'sync': 1}, {'local_limit': True},
+                        {'local_limit': 99}, {'local_limit': 100001}):
+            before = dump(self.lib.db)
+            self.assertEqual(self.pair('/api/startup', invalid)['status'], 400)
+            self.assertEqual(before, dump(self.lib.db))
+
+    def test_raw_post_framing_and_multi_key_error_order(self):
+        raw_cases = [(b'{}', 'text/plain'), (b'', 'application/json')]
+        raw_cases += [(body, 'application/json') for body in (
+            b'[]', b'{', b'{"sync": false', b'{"sync":"\\x"}', b'{"sync":"a\x01"}',
+            b'{"sync":"unfinished}', b'{"sync":"\\uXYZA"}', b'{"sync": tru}',
+            b'{"sync":}', b'{"sync":true}garbage', b'{"local_limit":NaN}',
+            b'{"local_limit":Infinity}', b'{"local_limit":-Infinity}',
+            b'{"local_limit":100.0}', b'{"local_limit":1e400}',
+            b'{"local_limit":' + b'9' * 100 + b'}')]
+        for body, content_type in raw_cases:
+            with self.subTest(body=body, content_type=content_type):
+                before = dump(self.lib.db)
+                item = {'url': '/api/startup', 'method': 'POST', 'body': body,
+                        'headers': {'Content-Type': content_type, 'X-CSRF-Token': self.token}}
+                left = fetch(self.direct, item, self.origin)
+                right = fetch(self.origin, item, self.origin)
+                self.assertEqual(left['status'], 400)
+                self.assertIsNone(difference(left, right), difference(left, right))
+                self.assertEqual(before, dump(self.lib.db))
+        for invalid in ({'sync': 1, 'local_limit': 99}, {'local_limit': 99, 'sync': 1}):
+            with self.subTest(invalid=invalid):
+                before = dump(self.lib.db)
+                self.assertEqual(self.pair('/api/startup', invalid)['status'], 400)
+                self.assertEqual(before, dump(self.lib.db))
+
+    @REFERENCE_PARITY_ONLY
+    def test_native_library_new_raw_http_data_then_open_rotates_session(self):
+        self.check_library_new_data_then_open('folder')
+
+    @REFERENCE_PARITY_ONLY
+    def test_native_library_new_photos_raw_http_data_then_open_rotates_session(self):
+        self.check_library_new_data_then_open('photos')
+
+    def check_library_new_data_then_open(self, kind):
+        started = time.time() - 2
+        registry = self.support / 'libraries.json'
+        token, current = self.token, (dump(self.lib.source), dump(self.lib.db))
+        folder_before = files(self.new_folder)
+        names = ('合成 ✨', 'a/b:c', '   ', 123, True, None, '\x1c控制\x1f',
+                 {'称呼': ['x', None, True], 'quote': "it's"}, ['x', {'nested': False}])
+        bodies = [{'kind': 'folder', 'folder': str(self.new_folder), 'preset': 'other', 'name': name}
+                  for name in names]
+        bodies += [{'kind': 'folder', 'folder': 'downloads-Pixiv', 'preset': '', 'name': 'relative-folder'},
+                   {'kind': 'folder', 'folder': '', 'name': 'empty-folder'},
+                   {'kind': 'folder', 'folder': 'downloads-Pixiv/missing/..', 'name': 'nonstrict-resolution'},
+                   {'kind': 'folder', 'folder': 'downloads-Pixiv/..', 'name': 'parent-folder'}]
+        if kind == 'photos':
+            # Old HTTP ignores folder/preset/photos fields for this kind; preserve that contract.
+            bodies = [{**body, 'kind': kind, 'folder': ['ignored'], 'preset': 'ignored',
+                       'photos': '/ignored-override'} for body in bodies[:len(names)]]
+            bodies.append({'kind': kind, 'name': names[0]})  # unique-path suffix on repeated name
+        for index, body in enumerate(bodies):
+            name = body['name']
+            with self.subTest(body=body):
+                registry_before = registry.read_bytes()
+                left = self.request('/api/libraries/new', body, base=self.direct)
+                self.assertEqual(left['status'], 200, left['body'])
+                dest = Path(json.loads(left['body'])['path'])
+                self.assertTrue(dest.is_relative_to(self.root))
+                self.assertNotEqual(dest, self.lib.path)
+                # Preserve only this test-owned old result, then restore registry input so both
+                # actual HTTP calls choose the exact same path/name. Response bytes stay untouched.
+                baseline = self.root / f'baseline-{index}.pilib'
+                dest.rename(baseline)
+                registry.write_bytes(registry_before)
+                right = self.request('/api/libraries/new', body)
+                self.assertIsNone(difference(left, right),
+                                  (name, left['status'], right['status'], left['body'], right['body']))
+                for header in HEADERS:
+                    self.assertEqual(left['headers'].get(header), right['headers'].get(header), (name, header))
+                with closing(sqlite3.connect(dest / 'library.sqlite')) as c:
+                    ids = dict(c.execute("SELECT l.key,t.key FROM term_links l JOIN terms t ON t.id=l.term_id "
+                                         "WHERE l.system='ccip' AND l.current=1 AND t.kind='character'"))
+                self.assertEqual(set(ids), {'alice', 'bob'})
+                old = library.Library(baseline, json.loads((baseline / 'library.json').read_text()))
+                expected = open_store(old.source, old.db)
+                refresh = terms_characters.refresh
+                def aligned(store, src, c):
+                    return refresh(store, src, c, new_ids={'ccip': ids})
+                with patch.object(terms_characters, 'refresh', side_effect=aligned) as called:
+                    expected.refresh()
+                self.assertEqual(called.call_count, 1)
+                from tests.test_native_library_create import NativeLibraryCreateTest
+                comparator = NativeLibraryCreateTest()
+                comparator.started = started
+                self.assertEqual(comparator.state(old.source), comparator.state(dest / 'source.sqlite'))
+                self.assertEqual(comparator.state(old.db, application=True),
+                                 comparator.state(dest / 'library.sqlite', application=True))
+                config = json.loads((dest / 'library.json').read_text())
+                self.assertEqual({k: v for k, v in old.config.items() if k not in {'id', 'created_at'}},
+                                 {k: v for k, v in config.items() if k not in {'id', 'created_at'}})
+                comparator.timestamp(config['created_at'], iso=True)
+                self.assertEqual(current, (dump(self.lib.source), dump(self.lib.db)))
+                self.assertEqual(json.loads(self.request('/api/bootstrap')['body'])['token'], token)
+                recent = json.loads(registry.read_bytes())['recent']
+                self.assertEqual(recent[0]['path'], str(self.lib.path))
+                self.assertEqual(recent[-1]['path'], str(dest))
+                self.assertEqual(files(self.new_folder), folder_before)
+        for url in CORE_READS:
+            self.assertEqual(self.pair(url)['route'], 'core')
+        self.assertEqual(current, (dump(self.lib.source), dump(self.lib.db)))
+        self.assertEqual(json.loads(self.request('/api/settings')['body'])['package']['path'], str(self.lib.path))
+        self.assertEqual(self.request('/api/startup', {'sync': True}, token=token)['status'], 200)
+        self.assertEqual(self.request('/api/libraries/open', {'path': str(dest)}, token=token)['status'], 200)
+        new_token = json.loads(self.request('/api/bootstrap')['body'])['token']
+        self.assertNotEqual(new_token, token)
+        before = dump(dest / 'library.sqlite')
+        self.assertEqual(self.request('/api/startup', {'sync': False}, token=token)['status'], 403)
+        self.assertEqual(before, dump(dest / 'library.sqlite'))
+        self.assertEqual(json.loads(self.request('/api/settings')['body'])['package']['path'], str(dest))
+        self.reference.library = library.Library(dest, config)
+        self.reference.store = Store.open(dest / 'source.sqlite', dest / 'library.sqlite')
+        self.reference.cache = dest / 'thumbnails'
+        self.reference.token = self.token = new_token
+        for url in CORE_READS:
+            self.assertEqual(self.pair(url)['route'], 'core')
+        self.assertFalse(self.sentinel.exists())
+
+    @REFERENCE_PARITY_ONLY
+    def test_native_library_new_invalid_inputs_and_reference_errors_are_byte_exact(self):
+        base = {'kind': 'folder', 'folder': str(self.new_folder), 'preset': 'other', 'name': 'bad-input'}
+        for change in ({'kind': 'invalid'}, {'kind': None}, {'folder': str(self.root / 'missing-folder')},
+                       {'folder': 123}, {'folder': True}, {'folder': 1.5}, {'folder': ['x']}, {'folder': {'x': 1}},
+                       {'folder': 'bad\0folder'}, {'preset': 'invalid'}, {'preset': 123}, {'name': 'bad\0name'},
+                       {'folder': str(self.root / 'missing-folder'), 'preset': 'invalid'},
+                       {'folder': 'missing/deeper/..'}, {'folder': 'downloads-Pixiv/not-scanned.png'},
+                       {'name': 'x' * 256, 'folder': str(self.root / 'missing-folder'), 'preset': 'invalid'}):
+            with self.subTest(change=change):
+                before, registry = (dump(self.lib.source), dump(self.lib.db)), (self.support / 'libraries.json').read_bytes()
+                response = self.pair('/api/libraries/new', {**base, **change})
+                self.assertEqual(response['status'], 400)
+                self.assertEqual(before, (dump(self.lib.source), dump(self.lib.db)))
+                self.assertEqual(registry, (self.support / 'libraries.json').read_bytes())
+                self.assertEqual(json.loads(self.request('/api/bootstrap')['body'])['token'], self.token)
+        reference_bytes = self.new_reference.read_bytes()
+        for kind, status in (('corrupt', 500),):
+            with self.subTest(reference=kind):
+                if kind == 'missing':
+                    self.new_reference.unlink()
+                else:
+                    self.new_reference.write_bytes(b'not a sqlite database')
+                before = (dump(self.lib.source), dump(self.lib.db))
+                try:
+                    response = self.pair('/api/libraries/new', base)
+                    self.assertEqual(response['status'], status)
+                    self.assertEqual(before, (dump(self.lib.source), dump(self.lib.db)))
+                    self.assertFalse((library.HOME / 'bad-input.pilib').exists())
+                finally:
+                    self.new_reference.write_bytes(reference_bytes)
+        for kind in ('pictures-file', 'dangling-dest', 'long-name'):
+            with self.subTest(filesystem=kind):
+                body = {**base, 'name': kind}
+                if kind == 'pictures-file':
+                    pictures = self.root / 'home' / 'Pictures'
+                    # Earlier failed creates may leave empty parents; remove only empty test-owned
+                    # directories to inject a regular file, never recursively erase caller contents.
+                    if library.HOME.exists():
+                        library.HOME.rmdir()
+                    if pictures.exists():
+                        pictures.rmdir()
+                    pictures.parent.mkdir(parents=True, exist_ok=True)
+                    pictures.write_bytes(b'not a directory')
+                elif kind == 'dangling-dest':
+                    dest = library.HOME / 'dangling-dest.pilib'
+                    dest.parent.mkdir(parents=True, exist_ok=True)
+                    missing = self.root / 'missing-link-target.pilib'
+                    dest.symlink_to(missing)
+                else:
+                    body['name'] = 'x' * 256  # ASCII bytes exceed the 255-byte component limit.
+                before = (dump(self.lib.source), dump(self.lib.db))
+                registry = (self.support / 'libraries.json').read_bytes()
+                try:
+                    self.assertEqual(self.pair('/api/libraries/new', body)['status'], 400)
+                    self.assertEqual(before, (dump(self.lib.source), dump(self.lib.db)))
+                    self.assertEqual(registry, (self.support / 'libraries.json').read_bytes())
+                    self.assertEqual(json.loads(self.request('/api/bootstrap')['body'])['token'], self.token)
+                    if kind == 'pictures-file':
+                        self.assertEqual(pictures.read_bytes(), b'not a directory')
+                    elif kind == 'dangling-dest':
+                        self.assertTrue(dest.is_symlink())
+                        self.assertEqual(dest.readlink(), missing)
+                        self.assertFalse(missing.exists())
+                finally:
+                    if kind == 'pictures-file':
+                        pictures.unlink()
+                    elif kind == 'dangling-dest':
+                        dest.unlink()
+        self.assertFalse(self.sentinel.exists())
+
+    @REFERENCE_PARITY_ONLY
+    def test_native_library_new_photos_failure_cleanup_and_security(self):
+        body = {'kind': 'photos', 'name': 'photos-failure'}
+        photos = self.root / 'home' / 'Pictures' / 'Photos Library.photoslibrary'
+        photos.mkdir(parents=True)
+        (photos / 'untouched').write_bytes(b'synthetic Photos sentinel')
+        photos_before = files(photos)
+        current = (dump(self.lib.source), dump(self.lib.db))
+        registry = self.support / 'libraries.json'
+        registry_before = registry.read_bytes()
+        reference_before = self.new_reference.read_bytes()
+        for kind, status in (('csrf', 403), ('name', 400), ('corrupt', 500),
+                             ('dangling', 400)):
+            with self.subTest(kind=kind):
+                kwargs = {}
+                request = body
+                if kind == 'csrf':
+                    kwargs['token'] = 'invalid'
+                elif kind == 'name':
+                    request = {**body, 'name': 'bad\0name'}
+                elif kind == 'missing':
+                    self.new_reference.unlink()
+                elif kind == 'corrupt':
+                    self.new_reference.write_bytes(b'not sqlite')
+                elif kind == 'dangling':
+                    dest = library.HOME / 'photos-failure.pilib'
+                    dest.parent.mkdir(parents=True, exist_ok=True)
+                    dest.symlink_to(self.root / 'missing-package')
+                try:
+                    left = self.request('/api/libraries/new', request, base=self.direct, **kwargs)
+                    right = self.request('/api/libraries/new', request, **kwargs)
+                    self.assertEqual(left['status'], status)
+                    self.assertEqual(right['status'], status)
+                    self.assertEqual(current, (dump(self.lib.source), dump(self.lib.db)))
+                    self.assertEqual(registry_before, registry.read_bytes())
+                    self.assertEqual(photos_before, files(photos))
+                    self.assertEqual(json.loads(self.request('/api/bootstrap')['body'])['token'], self.token)
+                    self.assertFalse((library.HOME / 'photos-failure.pilib').exists())
+                    if kind == 'dangling':
+                        self.assertTrue(dest.is_symlink())
+                finally:
+                    self.new_reference.write_bytes(reference_before)
+                    if kind == 'dangling':
+                        dest.unlink()
+        self.assertFalse(self.sentinel.exists())
+
+    @REFERENCE_PARITY_ONLY
+    def test_native_library_new_photos_registry_failure_preserves_published_package_and_current(self):
+        self.check_library_new_registry_failure('photos')
+
+    @REFERENCE_PARITY_ONLY
+    def test_native_library_new_registry_failure_preserves_published_package_and_current(self):
+        self.check_library_new_registry_failure('folder')
+
+    def check_library_new_registry_failure(self, kind):
+        body = {'kind': kind, 'folder': str(self.new_folder), 'preset': 'other', 'name': 'registry-failure'}
+        registry = self.support / 'libraries.json'
+        registry_before, current = registry.read_bytes(), (dump(self.lib.source), dump(self.lib.db))
+        blocked = registry.with_suffix('.tmp'); blocked.mkdir()
+        left = self.request('/api/libraries/new', body, base=self.direct)
+        self.assertEqual(left['status'], 400)
+        dest = library.HOME / 'registry-failure.pilib'
+        self.assertTrue(dest.is_relative_to(self.root))
+        self.assertTrue((dest / 'library.json').is_file())
+        self.assertTrue((dest / 'source.sqlite').is_file())
+        # Legacy publishes before remember; preserve that test-owned result and reproduce the
+        # exact failed registry path. Native retains its already complete published package.
+        dest.rename(self.root / 'old-registry-failure.pilib')
+        right = self.request('/api/libraries/new', body)
+        self.assertEqual(left['status'], right['status'])
+        self.assertEqual(right['status'], 400)
+        self.assertEqual(current, (dump(self.lib.source), dump(self.lib.db)))
+        self.assertEqual(registry_before, registry.read_bytes())
+        self.assertEqual(json.loads(self.request('/api/bootstrap')['body'])['token'], self.token)
+        self.assertEqual(json.loads(self.request('/api/settings')['body'])['package']['path'], str(self.lib.path))
+        with closing(sqlite3.connect(dest / 'library.sqlite')) as c:
+            self.assertEqual(c.execute('PRAGMA quick_check').fetchone()[0], 'ok')
+            self.assertEqual(c.execute("SELECT value FROM meta WHERE key='schema_version'").fetchone()[0], '36')
+            self.assertEqual(c.execute("SELECT value FROM meta WHERE key='terms_schema'").fetchone()[0], '7')
+            self.assertEqual(c.execute("SELECT count(*) FROM term_links WHERE system='ccip' AND current=1").fetchone()[0], 2)
+        for url in CORE_READS:
+            self.assertEqual(self.pair(url)['route'], 'core')
+        blocked.rmdir()
+        self.assertEqual(self.request('/api/libraries/open', {'path': str(dest)})['status'], 200)
+        new_token = json.loads(self.request('/api/bootstrap')['body'])['token']
+        self.assertNotEqual(new_token, self.token)
+        before = dump(dest / 'library.sqlite')
+        self.assertEqual(self.request('/api/startup', {'sync': True})['status'], 403)
+        self.assertEqual(before, dump(dest / 'library.sqlite'))
+        self.assertFalse(self.sentinel.exists())
+
+    def test_backup_includes_current_committed_wal_human_data(self):
+        with sqlite3.connect(self.lib.db) as keeper:
+            keeper.execute('PRAGMA journal_mode=WAL')
+            keeper.execute('PRAGMA wal_autocheckpoint=0')
+            self.store.tag(['b'], 'committed-wal-tag')
+            self.assertTrue(Path(str(self.lib.db) + '-wal').stat().st_size > 0)
+            response = self.request('/api/backup', {})
+            self.assertEqual(response['status'], 200)
+            path = Path(json.loads(response['body'])['path'])
+            self.assertEqual(path.parent, self.lib.backups)
+            with sqlite3.connect(path) as backup:
+                self.assertEqual(backup.execute('PRAGMA quick_check').fetchone()[0], 'ok')
+                self.assertEqual(backup.execute("SELECT tag FROM asset_tags WHERE uuid='b'").fetchall(),
+                                 [('committed-wal-tag',)])
+                self.assertGreater(backup.execute('SELECT count(*) FROM actions WHERE undone=0').fetchone()[0], 0)
+
+    def test_switch_same_id_different_instance_rotates_token_and_failed_switch_preserves_state(self):
+        target, target_store = self.package('second')
+        target.config['id'] = self.lib.config['id']; target.save()
+        old_token = self.token
+        response = self.request('/api/libraries/open', {'path': str(target.path)})
+        self.assertEqual(response['status'], 200)
+        value = json.loads(response['body'])
+        self.assertEqual((value['path'], value['name']), (str(target.path), 'second'))
+        new_token = json.loads(self.request('/api/bootstrap')['body'])['token']
+        self.assertNotEqual(new_token, old_token)
+        before = dump(target.db)
+        self.assertEqual(self.request('/api/startup', {'sync': False}, token=old_token)['status'], 403)
+        self.assertEqual(before, dump(target.db))
+        self.token = new_token
+        self.assertEqual(self.request('/api/startup', {'local_limit': 4321})['status'], 200)
+        self.assertEqual(target_store.startup()['local_limit'], 4321)
+        self.assertEqual(self.store.startup()['local_limit'], 3000)
+        before = dump(target.db)
+        self.assertEqual(self.request('/api/libraries/open', {'path': str(self.root / 'missing.pilib')})['status'], 400)
+        self.assertEqual(before, dump(target.db))
+        self.assertEqual(json.loads(self.request('/api/bootstrap')['body'])['token'], new_token)
+        self.assertEqual(json.loads(self.request('/api/settings')['body'])['package']['path'], str(target.path))
+        upgrade, _ = self.package('needs-upgrade')
+        for key, value in (('terms_names', 'pending'), ('schema_version', '35')):
+            with self.subTest(rejected_open=key):
+                with closing(sqlite3.connect(upgrade.db)) as c:
+                    old = c.execute('SELECT value FROM meta WHERE key=?', (key,)).fetchone()[0]
+                    c.execute('UPDATE meta SET value=? WHERE key=?', (value, key))
+                    c.commit()
+                    c.execute('PRAGMA journal_mode=DELETE')
+                unchanged = files(upgrade.path)
+                response = self.request('/api/libraries/open', {'path': str(upgrade.path)})
+                # Legacy LibraryError reaches the generic write failure boundary (500).
+                # Do not invoke the Python open path: it would schedule a restart/upgrade.
+                self.assertEqual(response['status'], 500)
+                self.assertEqual(response['body'], json.dumps({
+                    'error': '保存失败，未提交的操作已回滚；请查看启动终端'}, ensure_ascii=False).encode())
+                self.assertEqual(unchanged, files(upgrade.path))
+                self.assertEqual(before, dump(target.db))
+                self.assertEqual(json.loads(self.request('/api/bootstrap')['body'])['token'], new_token)
+                self.assertEqual(json.loads(self.request('/api/settings')['body'])['package']['path'], str(target.path))
+                with closing(sqlite3.connect(upgrade.db)) as c:
+                    c.execute('UPDATE meta SET value=? WHERE key=?', (old, key))
+                    c.commit()
+        self.assertFalse(self.sentinel.exists())
+
+    def test_request_started_before_switch_cannot_write_new_library(self):
+        target, _ = self.package('second')
+        body = b'{"local_limit": 1234}'
+        conn = http.client.HTTPConnection('127.0.0.1', self.port, timeout=5)
+        self.addCleanup(conn.close)
+        conn.putrequest('POST', '/api/startup', skip_host=True)
+        for key, value in {'Host': self.origin.split('://')[1], 'Origin': self.origin,
+                           'Content-Type': 'application/json', 'Content-Length': str(len(body)),
+                           'X-CSRF-Token': self.token}.items():
+            conn.putheader(key, value)
+        conn.endheaders(); conn.send(body[:8])
+        # The old request is in flight with an incomplete body; the second connection can switch.
+        self.assertEqual(self.request('/api/libraries/open', {'path': str(target.path)})['status'], 200)
+        before = dump(target.db)
+        conn.send(body[8:]); response = conn.getresponse(); response.read()
+        self.assertEqual(response.status, 403)
+        self.assertEqual(before, dump(target.db))
+
+    def test_slow_reader_old_snapshot_does_not_block_library_switch(self):
+        target, _ = self.package('second')
+        ids = [f'old-{i:04}-' + 'x' * 24576 for i in range(200)]
+        with closing(sqlite3.connect(self.lib.db)) as c:
+            c.executemany('INSERT INTO assets VALUES (?,?,?,?,?,?,?)',
+                          [(ident, 'synthetic.png', '', 120, 150, '2026-10-01', 'orig') for ident in ids])
+            c.commit()
+        # A small receive window and ~5 MiB JSON keep the first socket under backpressure.
+        sock = socket.socket()
+        self.addCleanup(sock.close)
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 4096)
+        sock.settimeout(15)
+        sock.connect(('127.0.0.1', self.port))
+        sock.sendall((f'GET /api/assets?limit=200 HTTP/1.1\r\nHost: 127.0.0.1:{self.port}\r\n'
+                      f'Origin: {self.origin}\r\nAccept-Encoding: identity\r\nConnection: close\r\n\r\n').encode())
+        response = http.client.HTTPResponse(sock)
+        self.addCleanup(response.close)
+        response.begin()
+        self.assertEqual(response.status, 200)
+        self.assertGreater(int(response.getheader('Content-Length')), 4 * 1024 * 1024)
+        before = dump(target.db)
+        started = time.monotonic()
+        switched = fetch(self.origin, {
+            'method': 'POST', 'url': '/api/libraries/open',
+            'body': json.dumps({'path': str(target.path)}).encode(),
+            'headers': {'Content-Type': 'application/json', 'X-CSRF-Token': self.token}},
+            self.origin, timeout=3)
+        self.assertEqual(switched['status'], 200)
+        self.assertLess(time.monotonic() - started, 3)
+        self.assertEqual(before, dump(target.db))
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 1024 * 1024)
+        value = json.loads(response.read())
+        self.assertEqual({item['uuid'] for item in value['items']}, set(ids))
+        current = json.loads(self.request('/api/assets')['body'])
+        self.assertEqual({item['uuid'] for item in current['items']}, set('abc'))
+
+    def test_upgrade_rejection_with_cold_wal_only_creates_sqlite_coordination_files(self):
+        broken, store = self.package('cold-wal')
+        store.tag(['b'], 'cold-failure-history')
+        with closing(sqlite3.connect(broken.db)) as c:
+            c.execute("UPDATE meta SET value='35' WHERE key='schema_version'")
+            c.commit()
+        before_sql = dump(broken.db)
+        before = files(broken.path)
+        self.assertNotIn('library.sqlite-wal', before)
+        self.assertNotIn('library.sqlite-shm', before)
+        result = subprocess.run([str(self.binary), 'http', '--no-auto-sync', '--library', str(broken.path),
+                                 '--port', str(free_port())], env=self.env, capture_output=True, timeout=5)
+        self.assertNotEqual(result.returncode, 0)
+        after = files(broken.path)
+        added = set(after) - set(before)
+        self.assertLessEqual(added, {'library.sqlite-wal', 'library.sqlite-shm'})
+        self.assertEqual(before, {k: v for k, v in after.items() if k not in added})
+        if 'library.sqlite-wal' in added:
+            self.assertEqual((broken.path / 'library.sqlite-wal').stat().st_size, 0)
+        if 'library.sqlite-shm' in added:
+            self.assertEqual((broken.path / 'library.sqlite-shm').stat().st_size, 32768)
+        self.assertEqual(before_sql, dump(broken.db))
+        self.assertTrue(any('cold-failure-history' in line for line in before_sql))
+
+    def test_upgrade_rejection_with_active_wal_preserves_database_wal_history(self):
+        broken, store = self.package('active-wal')
+        with closing(sqlite3.connect(broken.db)) as keeper:
+            keeper.execute('PRAGMA journal_mode=WAL')
+            keeper.execute('PRAGMA wal_autocheckpoint=0')
+            store.tag(['b'], 'failure-wal-history')
+            keeper.execute("UPDATE meta SET value='35' WHERE key='schema_version'")
+            keeper.commit()
+            before_sql = dump(broken.db)
+            before = files(broken.path)
+            self.assertGreater(Path(str(broken.db) + '-wal').stat().st_size, 0)
+            result = subprocess.run([str(self.binary), 'http', '--no-auto-sync', '--library', str(broken.path),
+                                     '--port', str(free_port())], env=self.env, capture_output=True, timeout=5)
+            self.assertNotEqual(result.returncode, 0)
+            after = files(broken.path)
+            # Active SQLite readers may update SHM lock/read marks. The application DB, WAL,
+            # source and all other package files remain byte-exact; full SQL includes undo history.
+            self.assertEqual({k: v for k, v in before.items() if not k.endswith('-shm')},
+                             {k: v for k, v in after.items() if not k.endswith('-shm')})
+            self.assertEqual(before_sql, dump(broken.db))
+            self.assertTrue(any('failure-wal-history' in line for line in before_sql))
+
+    def test_upgrade_missing_database_and_native_python_flags_reject_without_side_effects(self):
+        broken, _ = self.package('broken')
+        for key, value in (('schema_version', '35'), ('terms_schema', '6'), ('terms_names', 'pending')):
+            with self.subTest(key=key):
+                with sqlite3.connect(broken.db) as c:
+                    old = c.execute('SELECT value FROM meta WHERE key=?', (key,)).fetchone()[0]
+                    c.execute('UPDATE meta SET value=? WHERE key=?', (value, key))
+                    c.commit()
+                    c.execute('PRAGMA journal_mode=DELETE')
+                c.close()  # Quiescent DELETE fixture: every package file is byte-exact.
+                before = files(broken.path)
+                result = subprocess.run([str(self.binary), 'http', '--no-auto-sync', '--library', str(broken.path),
+                                         '--port', str(free_port())], env=self.env, capture_output=True, timeout=5)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(before, files(broken.path))
+                with sqlite3.connect(broken.db) as c:
+                    c.execute('UPDATE meta SET value=? WHERE key=?', (old, key))
+                c.close()
+        broken.source.unlink()
+        before = files(broken.path)
+        result = subprocess.run([str(self.binary), 'http', '--no-auto-sync', '--library', str(broken.path),
+                                 '--port', str(free_port())], env=self.env, capture_output=True, timeout=5)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(before, files(broken.path))
+        for args in (['--python', str(self.bin / 'python')], ['--upstream', '41002']):
+            before = files(self.lib.path)
+            result = subprocess.run([str(self.binary), 'http', '--no-auto-sync', '--library', str(self.lib.path),
+                                     '--port', str(free_port()), *args], env=self.env, capture_output=True, timeout=5)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertEqual(before, files(self.lib.path))
+        self.assertFalse(self.sentinel.exists())
+
+    def test_retired_forward_route_is_rejected_and_exit_releases_port(self):
+        self.stop(self.process)
+        result = subprocess.run([str(self.binary), 'http', '--library', str(self.lib.path),
+                                 '--port', str(self.port), '--route', 'GET:/api/fold=forward'],
+                                env=self.env, capture_output=True, timeout=5)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('已退役', result.stderr.decode())
+        with socket.socket() as probe:
+            probe.bind(('127.0.0.1', self.port))
+        self.assertFalse(self.sentinel.exists())
+
+    def test_default_recent_library_and_native_alias(self):
+        self.stop(self.process)
+        log = tempfile.TemporaryFile(); self.addCleanup(log.close)
+        self.process = subprocess.Popen([str(self.binary), 'http', '--root', str(self.resources),
+            '--port', str(self.port), '--no-sync', '--no-names', '--no-index-check'],
+            env=self.env, stdout=log, stderr=log, **SPAWN)
+        self.addCleanup(self.stop, self.process)
+        wait_until(lambda: self.request('/api/bootstrap')['status'] == 200, timeout=5)
+        self.assertEqual(json.loads(self.request('/api/libraries')['body'])['current'], str(self.lib.path))
+        self.assertFalse(self.sentinel.exists())
+        self.stop(self.process)
+        self.process, _ = self.start(self.lib.path, ('--native',))
+        self.assertEqual(self.request('/api/bootstrap')['status'], 200)
+
+    def test_all_retired_parameters_reject_before_side_effects(self):
+        before = files(self.lib.path)
+        for arg in ('--python=unused', '--upstream=12345', '--route=GET:/api/assets=core',
+                    '--refresh', '--source=unused', '--db=unused', '--cache=unused',
+                    '--identity=hybrid', '--no-similar', '--'):
+            result = subprocess.run([str(self.binary), 'http', arg], env=self.env,
+                                    capture_output=True, timeout=5)
+            self.assertNotEqual(result.returncode, 0, arg)
+            self.assertIn('已退役', result.stderr.decode(), arg)
+        self.assertEqual(before, files(self.lib.path))
+        help_result = subprocess.run([str(self.binary), 'http', '--help'], env=self.env,
+                                     capture_output=True, timeout=5)
+        self.assertEqual(help_result.returncode, 0)
+        self.assertNotIn('--upstream', help_result.stdout.decode())
+        self.assertFalse(self.sentinel.exists())
+
+    def test_production_python_has_no_compatibility_host(self):
+        result = subprocess.run([__import__('sys').executable, '-c',
+            "import importlib.util; assert all(importlib.util.find_spec('web.' + m) is None for m in ('server','store','terms_core','results')); import web.learn"],
+            cwd=self.resources, env=self.env, capture_output=True, timeout=10)
+        self.assertEqual(result.returncode, 0, result.stderr.decode())
+
+    @unittest.skipUnless(os.name == 'posix', 'macOS shell launcher acceptance')
+    def test_launcher_directly_finds_rust_without_python(self):
+        script = self.resources / 'start-web.command'
+        process, _ = self.start(self.lib.path, command=[str(script)])
+        self.assertIsNone(process.poll())
+        self.assertFalse(self.sentinel.exists())

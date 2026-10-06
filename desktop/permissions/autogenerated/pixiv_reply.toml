@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-pixiv-reply"
+description = "Enables the pixiv_reply command without any pre-configured scope."
+commands.allow = ["pixiv_reply"]
+
+[[permission]]
+identifier = "deny-pixiv-reply"
+description = "Denies the pixiv_reply command without any pre-configured scope."
+commands.deny = ["pixiv_reply"]

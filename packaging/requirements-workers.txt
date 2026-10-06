@@ -1,0 +1,5 @@
+# Python 3.12+ is required by the calculation modules.
+# Optional computation only; never installed by the base application.
+numpy>=1.26,<3
+Pillow>=10,<13
+onnxruntime>=1.18,<2

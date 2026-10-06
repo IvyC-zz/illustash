@@ -1,0 +1,8 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "pixiv-bridge",
+  "description": "Pixiv 登录窗口里的页面只能把请求结果交回外壳（pixiv_reply），别的都不能调用。主窗口没有任何权限。",
+  "windows": ["pixiv"],
+  "remote": { "urls": ["https://www.pixiv.net/*"] },
+  "permissions": ["allow-pixiv-reply"]
+}

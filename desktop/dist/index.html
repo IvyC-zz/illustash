@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><title>Illustash</title>
+<style>
+/* 与图库页的启动画面（web/static/app.css 的 #splash）保持同一尺寸和配色，跳转时画面才接得上。外壳页拿不到图库页的主题设置，跟随系统。 */
+:root{color-scheme:light dark;--ink:#1b1b1f;--muted:#8b8b94;--line:#e8e8ec;--accent:#7c80d8;--warn:#e08a2c;
+  font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI","PingFang SC",sans-serif;font-size:13px;font-synthesis:none}
+@media (prefers-color-scheme:dark){:root{--ink:#eeeef2;--muted:#9a9aa3;--line:#3a3a41;--accent:#a1a4f3;--warn:#f0a04b}}
+body{margin:0;height:100vh;overflow:hidden;background:#f6f5fd}
+@media (prefers-color-scheme:dark){body{background:#222227}}
+#splash{position:fixed;inset:0;display:grid;place-items:center;cursor:default}
+#splash .sp-bg{position:absolute;inset:0;background:radial-gradient(120% 90% at 50% 42%,#fff 0%,#f6f5fd 55%,#ecebf9 100%)}
+@media (prefers-color-scheme:dark){#splash .sp-bg{background:radial-gradient(120% 90% at 50% 42%,#2b2b33 0%,#222227 55%,#1b1b1f 100%)}}
+#splash .sp-col{position:relative;display:grid;justify-items:center}
+#splash .sp-icon{width:128px;height:128px;position:relative;transform-origin:0 0}
+#splash .sp-icon svg{position:absolute;inset:0;width:100%;height:100%;overflow:visible;transform-origin:50% 95%}
+#splash .sp-name{margin-top:18px;font-weight:650;font-size:32px;letter-spacing:.12em;color:var(--ink);display:flex;white-space:nowrap;transform-origin:0 0}
+#splash .sp-name span{display:inline-block;opacity:0}
+#splash .sp-status{margin-top:18px;display:grid;justify-items:center;gap:8px;width:240px;opacity:0}
+#splash .sp-text{font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums;white-space:nowrap}
+#splash .sp-track{width:100%;height:3px;border-radius:2px;background:var(--line);overflow:hidden}
+#splash .sp-fill{display:block;height:100%;width:0;border-radius:2px;background:var(--accent)}
+/* 启动失败：卡片停下，进度条换成原因和最后几行输出 */
+.sp-error{display:none;margin-top:18px;max-width:560px;padding:0 24px;text-align:center}
+.sp-error p{margin:0;color:var(--ink);font-size:13px}
+.sp-error pre{text-align:left;white-space:pre-wrap;font-size:12px;color:var(--muted);max-height:40vh;overflow:auto;margin:12px 0 0}
+.failed #splash .sp-status{display:none}
+.failed .sp-error{display:block}
+/* 加载中可以改选别的图库；失败后可以重试、改选或新建 */
+button{font:inherit;color:inherit;cursor:pointer}
+.sp-switch{border:0;background:none;color:var(--muted);font-size:12px;padding:2px 6px;border-radius:6px}
+.sp-switch:hover{color:var(--ink);background:var(--line)}
+.sp-actions{display:flex;gap:8px;justify-content:center;margin-top:14px;flex-wrap:wrap}
+.btn{border:1px solid var(--line);background:var(--sheet);border-radius:999px;padding:6px 14px;font-size:12.5px}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+.btn:disabled{opacity:.5;cursor:default}
+/* 欢迎页：没有能打开的图库时 */
+:root{--sheet:#fff;--soft:#f2f2f5}
+@media (prefers-color-scheme:dark){:root{--sheet:#28282d;--soft:#323238}}
+#welcome{display:none;position:fixed;inset:0;overflow:auto;background:radial-gradient(120% 90% at 50% 42%,#fff 0%,#f6f5fd 55%,#ecebf9 100%)}
+@media (prefers-color-scheme:dark){#welcome{background:radial-gradient(120% 90% at 50% 42%,#2b2b33 0%,#222227 55%,#1b1b1f 100%)}}
+.welcoming #splash{display:none}
+.welcoming #welcome{display:block}
+.w-col{max-width:680px;margin:0 auto;padding:56px 24px 40px;color:var(--ink)}
+.w-head{display:flex;align-items:center;gap:14px;margin-bottom:22px}
+.w-head img{width:56px;height:56px}
+.w-head h1{margin:0;font-size:26px;font-weight:650}
+.w-note{color:var(--muted);font-size:12.5px;line-height:1.6;margin:0 0 14px}
+.w-recent{display:grid;gap:6px;margin:0 0 18px}
+.w-recent button{display:block;width:100%;text-align:left;border:0;background:var(--sheet);border-radius:12px;padding:10px 14px;box-shadow:0 0 0 1px var(--line)}
+.w-recent button:hover{box-shadow:0 0 0 1px var(--accent)}
+.w-recent small{display:block;color:var(--muted);font-size:11px;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;direction:rtl;text-align:left}
+.w-recent b{font-weight:600;font-size:13.5px}
+.w-form{margin-top:18px;padding:14px;border-radius:14px;background:var(--soft)}
+.w-cols{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px;margin:10px 0}
+.w-col-box{background:var(--sheet);border-radius:10px;padding:8px 10px;box-shadow:0 0 0 1px var(--line);min-width:0}
+.w-col-box h3{margin:0 0 6px;font-size:12px;font-weight:600}
+.w-picked{display:flex;align-items:center;gap:4px;font-size:12px;color:var(--muted)}
+.w-picked span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;direction:rtl;text-align:left}
+.w-picked button{border:0;background:none;color:var(--muted);padding:0 4px}
+.w-col-box .btn{margin-top:6px;padding:3px 10px;font-size:12px}
+.w-line{display:flex;align-items:center;gap:10px;margin:10px 0;font-size:12.5px}
+.w-line input[type=text]{flex:1;height:30px;border:0;border-radius:999px;background:var(--sheet);padding:0 12px;color:var(--ink);box-shadow:0 0 0 1px var(--line);font:inherit}
+.w-error{color:var(--warn);font-size:12.5px;margin:10px 0 0;min-height:1em}
+</style></head>
+<body>
+<div id="splash" data-shell><div class="sp-bg"></div><div class="sp-col"><div class="sp-icon"><svg viewBox="302 291 650 650" fill="none"></svg></div><div class="sp-name">Illustash</div><div class="sp-status"><span class="sp-text">正在启动本地服务…</span><span class="sp-track"><span class="sp-fill"></span></span><button class="sp-switch" id="switch">选择其他图库</button></div><div class="sp-error"><p id="msg"></p><pre id="log" hidden></pre>
+<div class="sp-actions"><button class="btn primary" data-act="retry">重试</button><button class="btn" data-act="choose">选择其他图库</button><button class="btn" data-act="create">新建图库</button></div></div></div></div>
+<div id="welcome"><div class="w-col" id="wcol"></div></div>
+<!-- splash.js 由 desktop/build.rs 从 web/static/ 复制过来，两边用同一份 -->
+<script src="splash.js"></script>
+<script>
+// 外壳转发本地服务的启动进度：done 为 0–1 的整体比例。进度条只走到 90%，剩下的留给图库页自己的加载。
+window.showProgress = (done, stage) => {
+  if (document.body.classList.contains('failed') || !window.splash) return;
+  splash.status(`${stage} ${Math.floor(done * 100)}%`);
+  splash.progress(done * .9);
+};
+// 本地服务就绪：等折叠动画播完再打开图库页（地址里带 launched，图库页从成形的图标接着走）。
+window.launch = async url => {
+  if (document.body.classList.contains('failed')) return;
+  if (window.splash) { splash.progress(.9); await splash.settled(); }
+  location.replace(url);
+};
+// 只有本地启动页能调用这些命令（capabilities/main.json）。
+const invoke = (cmd, args) => window.__TAURI_INTERNALS__.invoke(cmd, args);
+const busy = on => document.querySelectorAll('button').forEach(b => { b.disabled = on; });
+document.getElementById('switch').onclick = () => { busy(true); invoke('startup_choose', {create: false}); };
+document.querySelector('.sp-actions').onclick = e => {
+  const act = e.target.closest('[data-act]')?.dataset.act; if (!act) return;
+  busy(true);
+  invoke(act === 'retry' ? 'startup_retry' : 'startup_choose', act === 'retry' ? {} : {create: act === 'create'});
+};
+// 欢迎页：没有能打开的图库、用户改选或启动失败后改选时显示。按出处分栏添加文件夹，出处由用户指定。
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
+const home = p => String(p || '').replace(/^\/Users\/[^/]+/, '~').replace(/^C:\\Users\\[^\\]+/i, '~');
+let W = null;
+window.showWelcome = state => {
+  // state.photos: whether this platform can read the Photos library (macOS); W.photos: whether it is ticked.
+  W = {...state, photosOk: !!state.photos, photos: false, form: !!state.create || !(state.recent || []).length, folders: {}, name: '', error: ''};
+  document.body.classList.remove('failed');
+  document.body.classList.add('welcoming');
+  busy(false);
+  window.splash?.halt();
+  renderWelcome();
+};
+function renderWelcome() {
+  const origins = (W.origins || []).map(o => [o.id, o.label]);
+  const recent = W.recent || [];
+  const form = !W.form ? '' : `<div class="w-form">
+    <p class="w-note">图片保留在原位置，不复制。按图片来自哪里分别添加文件夹，每类可以有多个，子文件夹会一起读取。选 X 或 Pixiv 的文件夹才能用以图搜图、画师回查。</p>
+    <div class="w-cols">${origins.map(([id, label]) => `<div class="w-col-box"><h3>${esc(label)}</h3>
+      ${(W.folders[id] || []).map((p, i) => `<div class="w-picked"><span title="${esc(p)}"><bdi>${esc(home(p))}</bdi></span><button data-drop="${id}" data-index="${i}" title="不添加这个文件夹">×</button></div>`).join('')}
+      <button class="btn" data-pick="${id}">添加文件夹…</button></div>`).join('')}</div>
+    ${W.photosOk ? `<label class="w-line"><input type="checkbox" id="wphotos" ${W.photos ? 'checked' : ''}> 同时读取 iCloud 照片（本机「照片」图库，按存图的 App 区分 X 和 Pixiv）</label>` : ''}
+    <div class="w-line"><span>名字</span><input type="text" id="wname" placeholder="新图库" value="${esc(W.name)}"></div>
+    <p class="w-note">保存在 ${esc(home(W.home))}</p>
+    <div class="sp-actions" style="justify-content:flex-start"><button class="btn primary" data-act-w="create">创建并打开</button>${recent.length ? '<button class="btn" data-act-w="back">返回</button>' : ''}</div></div>`;
+  document.getElementById('wcol').innerHTML = `<div class="w-head"><img src="icon.png" alt=""><h1>Illustash</h1></div>
+    ${recent.length ? `<p class="w-note">最近的图库</p><div class="w-recent">${recent.map(l => `<button data-open="${esc(l.path)}"><b>${esc(l.name)}</b><small><bdi>${esc(home(l.path))}</bdi></small></button>`).join('')}</div>`
+      : '<p class="w-note">还没有图库。新建一个图库，选好图片所在的文件夹；或者打开已有的图库。</p>'}
+    <div class="sp-actions" style="justify-content:flex-start">${W.form ? '' : '<button class="btn primary" data-act-w="new">新建图库</button>'}<button class="btn" data-act-w="pick-library">打开已有图库…</button></div>
+    ${form}<p class="w-error" id="werr">${esc(W.error)}</p>`;
+}
+const keepName = () => { W.name = document.getElementById('wname')?.value ?? W.name; W.photos = document.getElementById('wphotos')?.checked ?? W.photos; };
+document.getElementById('welcome').onclick = async e => {
+  const b = e.target.closest('button'); if (!b) return;
+  const d = b.dataset; keepName(); W.error = '';
+  const fail = err => { W.error = String(err); busy(false); renderWelcome(); };
+  try {
+    if (d.open) { busy(true); await invoke('welcome_open', {path: d.open}); }
+    else if (d.actW === 'new') { W.form = true; renderWelcome(); }
+    else if (d.actW === 'back') { W.form = false; renderWelcome(); }
+    else if (d.actW === 'pick-library') {
+      const r = await invoke('welcome_pick', {kind: 'library', multiple: false});
+      if (r.paths?.[0]) { busy(true); await invoke('welcome_open', {path: r.paths[0]}); }
+    }
+    else if (d.pick) {
+      const r = await invoke('welcome_pick', {kind: 'folder', multiple: true}), column = W.folders[d.pick] ||= [];
+      for (const p of r.paths || []) if (!Object.values(W.folders).some(c => c.includes(p))) column.push(p);
+      renderWelcome();
+    }
+    else if (d.drop) { W.folders[d.drop]?.splice(+d.index, 1); renderWelcome(); }
+    else if (d.actW === 'create') {
+      const sources = Object.entries(W.folders).flatMap(([preset, paths]) => paths.map(path => ({kind: 'folder', path, preset})));
+      if (W.photos) sources.push({kind: 'photos'});
+      if (!sources.length) { fail('请至少添加一个文件夹'); return; }
+      busy(true); await invoke('welcome_create', {name: W.name, sources});
+    }
+  } catch (err) { fail(err); }
+};
+// 外壳在服务启动失败时调用，显示原因和最后几行输出。
+window.showError = (msg, log) => {
+  document.body.classList.add('failed');
+  window.splash?.halt();
+  busy(false);
+  document.getElementById('msg').textContent = msg;
+  const pre = document.getElementById('log');
+  pre.textContent = log || ''; pre.hidden = !log;
+};
+</script></body></html>

@@ -1,0 +1,209 @@
+# 数据模型：作品、角色、名字与外部 tag
+
+定稿于 2026-09-24。分三步迁移（第 7 节）：**链接、名字、作品三步代码已实现**（schema 23 → 24 → 25）；外部作品对应关系与多上级歧义保留人工确认。验收记录已删除，见开源前私有历史中的 `docs/DATA_MODEL_ACCEPTANCE.md`。
+
+## 1. 为什么要改
+
+现在一个角色有好几种写法，每一种都有地方拿它当 key：
+
+- D 站 tag：`airi_(band)_(blue_archive)`；
+- CCIP 短名：`airi_band_blue_archive`；
+- `entities.name`：大多是短名，有 201 个是中文名，手建的角色则是随手打的文字；
+- 作品：`nikke`、`kancolle`，是从角色 tag 括号里抠出来的后缀，不是 D 站作品 tag。
+
+名字又分散在四处：`name`、`aliases`、`display_names`、`name_aliases`。
+
+结果就是：
+- 手建的角色对不上任何外部数据；
+- 作品会出现 D 站上不存在的 tag；
+- 以后每加一个数据源，都要再多一种写法。
+
+## 2. 原则
+
+1. **身份只认内部 ID。** 作品、角色、皮肤一经创建，ID 永远不变，不从任何字符串推导。改名、D 站改 tag、合并，都不会改变它。
+2. **外部 tag 全部是「链接」。** D 站 tag、CCIP 索引名、WD tag、Bangumi ID、Photos 相簿名，都只是挂在身份上的链接。
+   - 链接可以没有，可以之后再补，一个身份也可以挂多个。
+   - **新角色在 D 站还没收录时，照样是完整的角色。**
+3. **名字是单独的一层。** 多语言、多来源，分成显示名和只供搜索的别名。你起的名字永远优先，自动拉取不会覆盖它。
+4. **导入时只按链接认人，不按名字认人。** 名字相似只能用来提出「是不是同一个？」让你确认，绝不自动合并。
+5. **一键原则不变。** 新建角色时，作品、外部 tag 都不是必填项。
+
+## 3. 概念
+
+| 身份类型 | 说明 | 上级（`parent_id`） | 所属作品（`work_id`） |
+|---|---|---|---|
+| 作品 `work` | 游戏、动画、企划，也可以是系列 | 上级作品（可空）；可以任意层级嵌套，不能成环 | — |
+| 角色 `character` | 一个人物 | 空 | 可空（还没归类，或者是原创角色） |
+| 皮肤 `skin` | 角色的某套服装或形态 | 所属角色（必填） | 跟随角色 |
+
+- **原创角色**是 `character` 加上标记 `original=1`，不属于任何作品。
+- **作品是一棵树**，用来解决 fate、崩坏这类歧义。例如「Fate 系列」下面有 Fate/stay night、Fate/Grand Order；「崩坏系列」下面有崩坏3、星穹铁道。
+  - 角色只知道后缀是 `fate` 时，先挂在「Fate 系列」上，以后可以改到具体作品。
+  - 按某个作品筛选时，包含它整棵子树里所有作品的角色。
+  - 唯一的约束：不能成环（一个作品不能挂到自己的子作品下面）。
+  - 树的初始结构用 D 站作品 tag 之间的蕴含关系自动搭建（例如 `fate/grand_order` 蕴含 `fate_(series)`，只发送 tag 文字），你再修正个别地方。
+
+## 4. 表结构（草案）
+
+```sql
+-- 身份
+CREATE TABLE entities(
+  id TEXT PRIMARY KEY,                       -- UUID，永不改变
+  kind TEXT NOT NULL CHECK(kind IN ('work','character','skin')),
+  parent_id TEXT REFERENCES entities(id),    -- work → 上级作品（任意层级，不成环）；skin → 角色；character 为空
+  work_id TEXT REFERENCES entities(id),      -- 只用于 character
+  original INTEGER NOT NULL DEFAULT 0,       -- 原创角色
+  merged_into TEXT REFERENCES entities(id),  -- 合并后指向保留的那个
+  origin TEXT NOT NULL,                      -- 最初从哪来：index / wd / user / album / check
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+
+-- 外部链接：同一个 (system, key) 只能属于一个身份
+CREATE TABLE links(
+  system TEXT NOT NULL,        -- danbooru / ccip / wd / bangumi / photos_album / qualifier
+  key TEXT NOT NULL,           -- 按各系统的规范写法，见下表
+  entity_id TEXT NOT NULL REFERENCES entities(id),
+  current INTEGER NOT NULL DEFAULT 1,        -- 0 = 旧写法（D 站改名前的 tag 等）
+  source TEXT NOT NULL,        -- import / user / check（定期检查时确认的）
+  added_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY(system, key));
+CREATE INDEX links_entity ON links(entity_id);
+
+-- 名字
+CREATE TABLE names(
+  entity_id TEXT NOT NULL REFERENCES entities(id),
+  lang TEXT NOT NULL CHECK(lang IN ('zh','ja','en')),
+  value TEXT NOT NULL,
+  source TEXT NOT NULL,        -- user / bangumi / index / builtin / danbooru / model
+  role TEXT NOT NULL CHECK(role IN ('display','alias')),
+  preferred INTEGER NOT NULL DEFAULT 0,      -- 每个身份、每种语言最多一个首选
+  PRIMARY KEY(entity_id, lang, value, source));
+```
+
+### 链接系统
+
+| system | 挂在 | key 的写法 | 例子 |
+|---|---|---|---|
+| `danbooru` | 作品 / 角色 / 皮肤 | D 站 tag 原文，小写 | `goddess_of_victory:_nikke`、`airi_(band)_(blue_archive)` |
+| `ccip` | 角色 / 皮肤 | 角色索引文件名（短名） | `airi_band_blue_archive` |
+| `wd` | 角色 | WD 模型词表里的 tag | `male_doctor_(arknights)` |
+| `bangumi` | 作品 / 角色 | 条目或角色的数字 ID | `12345` |
+| `photos_album` | 角色 | 相簿名原文 | `miyo` |
+| `ccip_base` | 角色 | 索引里「基础角色 tag + 作品」这一对（JSON），用于索引缺少基础角色、只有皮肤时补建的父角色 | `["james_moriarty", "fate"]` |
+| `qualifier` | 作品 | D 站角色 tag 括号里的作品后缀 | `nikke`、`kancolle`、`fate` |
+
+- WD 词表是 D 站 tag 在某个时间点的快照，可能已经过时，所以单独作为一个系统。导入 WD 结果时，先按 `wd` 链接找；找不到再按同名的 `danbooru` 链接找。
+- `qualifier` 用来解析 D 站角色 tag。导入 `rapi_(nikke)` 时，靠后缀 `nikke` 找到「胜利女神：妮姬」。它不是可以对外查询的 tag，**不能**当作 D 站作品 tag 去关注。
+
+### 名字
+
+- **来源优先级**：`user` > `bangumi` > `index` > `builtin` > `model`（机器翻译），数字越靠前越优先。
+- `danbooru`（wiki 里的其他名称）只作 `alias`，不进入显示。这和现在「wiki aliases must never enter the display layer」的规则一致。
+- 从 tag 推出来的可读英文名（`airi_(band)_(blue_archive)` → Airi）**不存储**，显示时现算。
+- 你手动改名，就是写一条 `source='user'`、`preferred=1` 的名字。自动拉取只增加其他来源的名字，不改这一条。
+
+## 5. 规则
+
+### 显示
+
+1. 显示语言顺序是一个设置项，默认 中 → 日 → 英。
+2. 对每种语言，依次尝试：首选名 → 该语言里来源优先级最高的显示名。
+3. 所有语言都没有名字时：用 `danbooru` 链接推出可读英文名；没有就用 `ccip` 链接推；再没有就显示「未命名角色」或「未命名作品」。
+4. 机器翻译的名字，在悬停提示里标出「机器翻译」。
+5. 悬停提示里显示链接的原文（D 站 tag），和现在一样。
+6. 名字不要求唯一。同名时，显示上用作品来区分，比如「明里 · 蔚蓝档案」。
+
+### 搜索
+
+以下任何一项匹配都算命中：
+- 所有名字，包括别名；
+- 所有链接的 key，下划线当作空格；
+- 搜作品名时，能搜出这个作品和它下面所有作品的角色。
+
+### 创建
+
+- **你新建角色**：只需要一个名字。作品可选，不选就是「未归类」；链接可以以后补。
+- **原创角色**：`original=1`，自动命名为「原创角色 N」（写成 `source='user'` 的名字）。
+- **新建作品**：只需要一个名字。有 D 站作品 tag 的话，挂一条 `danbooru` 链接，这个作品才能被「关注」。
+
+### 导入（CCIP 索引、WD 结果、定期检查补进来的角色）
+
+1. 先按链接找：`ccip` → `danbooru` → `wd`。找到了，就把新链接补挂到这个身份上。
+2. 按链接都找不到，就新建身份。作品按后缀，通过 `qualifier` 链接找；找不到就不填作品，不凭空造一个作品。
+3. 新身份和已有身份的名字相似（含你手建的角色）时，只生成一条「可能是同一个」的提示，由你确认后合并。
+
+### 合并
+
+- 保留一个身份，另一个的 `merged_into` 指向它。
+- 名字、人工结论并过去。**链接留在被合并的身份上**：按链接找到它之后，沿 `merged_into` 走到保留的身份（`Store._resolve`）。这样撤销合并时不用搬动链接，以后的导入也照样落到保留的身份上。
+- 两边的首选名冲突时，保留目标身份的，另一个降为别名。
+- 可撤销（沿用现有的撤销机制）。
+
+### 关注作品（资料库 › 作品）
+
+- 关注列表存的是**作品 ID**。检查时用这个作品当前的 `danbooru` 链接去查。
+- 作品 ID 只在自己的图库里有效，所以关注列表和「最少张数」**按图库存**，在应用数据库 `prefs` 表的 `index_watch` 键（2026-10-05 用户定，#205）。
+- 没有 `danbooru` 链接的作品，在列表里显示为不可选，并注明「D 站上还没有这个作品」。
+- 联想搜索到 D 站作品 tag 后：如果这个 tag 已经挂在某个作品上，就关注那个作品；没有的话，先找后缀或名字对得上的本地作品，让你确认后挂上链接，再不行就新建作品。
+
+## 6. 场景推演
+
+1. **新角色，D 站还没有。**
+   - 你标图时新建「X」，没有任何链接。
+   - 标了几张以后，学习线程（`web/learn.py`）从你的标注里学会认 X。
+2. **几个月后 D 站收录了 `x_(game)`。**
+   - 定期检查发现它，按规则提示「D 站新角色 `x_(game)`，名字和你建的『X』很像，是同一个吗？」。
+   - 你点「是」：`danbooru` 链接挂到 X 上，参考图也补给 X。身份不变，你之前的标注都在。
+3. **系统已经先导入成了另一个身份。** 用「合并」把两个并成一个：名字、标注并过去，链接留在原处，沿 `merged_into` 指向保留的身份。
+4. **D 站把 tag 改了名。** 新 tag 挂成 `current=1`，旧 tag 改成 `current=0`。用旧 tag 查过来的数据也能对上。
+5. **同名角色**（好几个作品都有 Akane）。身份靠 ID 区分，显示时带上作品。
+6. **后缀有歧义**（fate）。`qualifier:fate` 挂在「Fate 系列」上。角色先归到系列，以后可以改到具体作品。
+7. **不是作品的后缀**（`vtuber`、`1st_costume`）。不建 `qualifier` 链接，带这类后缀的角色就「未归类」，等你来归。
+
+## 7. 迁移对照（✅ 表示已完成）
+
+| 现在 | 迁移后 |
+|---|---|
+| `entities.id` | `entities.id`，原样保留，所有引用都不用改 |
+| `entities.kind='oc'` | `kind='character'`、`original=1` |
+| `parent_id` 不为空（皮肤） | `kind='skin'`，`parent_id` 不变 |
+| `entities.tag` | `links(danbooru, tag)` ✅ |
+| `external_key` 为 `index:…` | `links(ccip, …)` ✅ |
+| `external_key` 为 `wd:…` | `links(wd, …)` ✅ |
+| `external_key` 为 `album:…` | `links(photos_album, …)` ✅ |
+| `external_key` 为 `parent:[…]` | `links(ccip_base, …)` ✅（重新导入时要靠它找回补建的父角色） |
+| `entities.work`（字符串） | 同一个字符串归到同一个作品身份，字符串本身存为 `links(qualifier, …)`；D 站作品 tag 另外核对 |
+| `entities.name`，没有链接的身份（你手建的角色、原创角色） | `names`，`source='user'`，`preferred=1` |
+| `entities.name`，有链接的身份（索引的中文、日文、英文名或短名） | 显示时本来就不读它；索引名已在 `display_names`（`source='index'`），迁移时丢弃 |
+| `entities.variant` | 皮肤的可读名，由 `danbooru` 链接现算，或者迁成名字 |
+| `aliases` 表 | `names`，`role='alias'` |
+| `display_names` 表 | `names`，`role='display'`，来源照旧 |
+| `name_aliases` 表 | `names`，`role='alias'`，`source='danbooru'` |
+| 关注列表 `watch.json`（作品 tag） | 作品 ID 列表 |
+| `entities.artist` | 保留原样，留给溯源模块（BACKLOG 第 5 项），不在本模型范围内 |
+
+### 需要人来决定的
+
+- **作品的 D 站链接**：批量核对一次，只发 tag 文字。能直接对上的，自动挂链接；对不上的列成清单让你选，包括有歧义的、不是作品的。按 2026-09-24 对图片最多的 60 个作品的抽查，对不上的约 11 个：`fate`、`nikke`、`kancolle`、`honkai_impact`、`pgr`、`re:zero`、`marionette's_id`、`vtuber`、`oshiro_project`、`xenoblade`、`1st_costume`。
+- **你手建的 11 个角色**：可能和已有角色是同一个的，比如 `Janus_(azur_lane)`、`karen_(blue_archive)`，只提示，由你决定是否合并。其余的保留为只有名字、没有链接的角色。
+
+### 迁移方式
+
+- 迁移前先做一致性备份（`--backup`）。
+- 用 schema 版本号驱动迁移，和现在的 `SCHEMA_VERSION` 一样。
+- 迁移完核对计数：身份数、成员关系数、人工结论数，都必须和迁移前完全一致。
+
+## 8. 不在本模型范围内
+
+- **WD 画面标签**（white_hair 等）和**我的标签**：它们描述的是图片，不是身份，维持现状。
+- **组合、团体**（乐队、hololive 的某一期）：以后需要时，可以作为一种新的 `kind` 加进来，不影响现在的结构。
+- **画师**：溯源模块另行设计。
+
+
+## 9. schema 25 的兼容边界与操作入口
+
+- 库内 `kind` 使用 `work / character / skin`，原创由 `original=1` 表达。现有前端角色 API 暂保留 `kind='oc' / ''` 的兼容输出，并提供 `work_id`。
+- `work_id` 是所属作品的唯一依据；`entities.work` 暂保留为旧版名称更新器的文字上下文。旧 `display_names / name_aliases` 中的作品、服装词汇保留为缓存，作品身份自己的名称同时存入 `names`。不再用文字决定作品身份。
+- 历史作品字符串逐个保留为待核对作品及 `qualifier` 链接。只对远端确认的同名、非废弃、类别为作品的 tag 自动建立 Danbooru 链接。无匹配、非作品 tag、链接冲突与多上级全部保留待确认，不能把未核验后缀当作远端作品查询。
+- 设置 → 角色索引 → 作品管理支持新建、改名、修改上级及确认外部链接；角色的更多菜单可调整所属作品。角色页的作品分组可直接查看整棵子树的图片。所有树调整事务内防环。
+- 关注列表的 version 2 格式存作品 ID，未解析的旧 tag 保存在 `pending_tags`，检查时重新读取当前 Danbooru 链接。2026-10-05 起存在各图库的 `prefs.index_watch`；图库还没有这条记录时，从早期版本共享目录里的 `char-patch/watch.json` 推出初值（v2 文件只认领本库存在的作品 ID 并带上 `pending_tags`，v1 tag 列表用本库链接解析，没有文件时用原来的 8 个默认作品 tag），第一次保存时写入本库。共享文件只读、不再改写。
+- 自动树初始化不会覆盖用户调整过的上级。一次性作品协调与迁移核验工具已于 2026-10-05 删除（#186），当前作品管理通过上述原生入口完成。

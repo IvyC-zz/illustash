@@ -1,0 +1,17 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Illustash",
+  "version": "0.1.0",
+  "identifier": "app.illustash.desktop",
+  "build": { "frontendDist": "dist" },
+  "app": {
+    "windows": [],
+    "security": { "csp": null }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["app"],
+    "icon": ["icons/icon.png", "icons/icon.ico"],
+    "macOS": { "minimumSystemVersion": "14.0" }
+  }
+}

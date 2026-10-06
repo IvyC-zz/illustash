@@ -1,0 +1,5 @@
+# Third-party packages the test suite and the Rust↔Python comparison tests import.
+# Same ranges as the optional research worker; CI installs exactly this file.
+numpy>=1.26,<3
+Pillow>=10,<13
+onnxruntime>=1.18,<2

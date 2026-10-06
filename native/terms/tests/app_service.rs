@@ -1,0 +1,190 @@
+//! Synthetic client: no HTTP server, Tauri runtime, Python or research process.
+use illustash_terms::{
+    app_create::NewSource,
+    app_service::{self, Application, Options},
+    app_tasks::{Task, TaskIdentity},
+    store, Error, Kind,
+};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+    sync::{mpsc, Arc},
+    time::Duration,
+};
+
+struct Fixture {
+    root: PathBuf,
+}
+impl Fixture {
+    fn new() -> Self {
+        let root = std::env::temp_dir().join(format!(
+            "illustash-service-{}-{}",
+            std::process::id(),
+            store::new_key().unwrap()
+        ));
+        fs::create_dir_all(root.join("source")).unwrap();
+        // This test binary has one test; no environment mutation races with other tests.
+        std::env::set_var("ILLUSTASH_APP_SUPPORT", root.join("support"));
+        std::env::set_var("ILLUSTASH_SHARED", root.join("absent-reference"));
+        std::env::set_var("ILLUSTASH_NO_KEYCHAIN", "1");
+        Self { root: illustash_platform::app_paths::canonical(&root).unwrap() }
+    }
+    fn create(&self, name: &str) -> PathBuf {
+        app_service::create(
+            &self.root,
+            &self.root.join(format!("{name}.pilib")),
+            name,
+            vec![NewSource::Folder { path: self.root.join("source"), preset: "other".into() }],
+        )
+        .unwrap()
+    }
+}
+impl Drop for Fixture {
+    fn drop(&mut self) {
+        fs::remove_dir_all(&self.root).unwrap();
+    }
+}
+fn options(root: &Path) -> Options {
+    let mut options = Options::new(root.to_owned());
+    options.names_enabled = false;
+    options.provenance_enabled = false;
+    options.index_automatic = false;
+    options.auto_sync = false;
+    options.sync_disabled = true;
+    options
+}
+
+#[test]
+fn creation_open_same_id_switch_late_work_and_exit_without_transport() {
+    let f = Fixture::new();
+    let a = f.create("first");
+    let b = f.create("second");
+    let config = fs::read(a.join("library.json")).unwrap();
+    // Distinct packages deliberately share the same user-visible ID.
+    let original: serde_json::Value = serde_json::from_slice(&config).unwrap();
+    let mut second: serde_json::Value = serde_json::from_slice(&fs::read(b.join("library.json")).unwrap()).unwrap();
+    second["id"] = original["id"].clone();
+    fs::write(b.join("library.json"), serde_json::to_vec(&second).unwrap()).unwrap();
+    #[cfg(unix)]
+    let active = {
+        let alias = f.root.join("active.pilib");
+        std::os::unix::fs::symlink(&a, &alias).unwrap();
+        alias
+    };
+    #[cfg(not(unix))]
+    let active = a.clone();
+    let service = Arc::new(Application::open(&active, options(&f.root)).unwrap());
+    #[cfg(unix)]
+    {
+        // Rebind the display alias after acceptance to the distinct package with the same ID.
+        fs::remove_file(&active).unwrap();
+        std::os::unix::fs::symlink(&b, &active).unwrap();
+    }
+    service.start().unwrap();
+    let generation = service.generation();
+    let identity =
+        service.with_library(generation, |lib| TaskIdentity::new(lib, generation, "synthetic-session")).unwrap();
+    let (go_tx, go_rx) = mpsc::channel();
+    let task_service = service.clone();
+    let (done_tx, done_rx) = mpsc::channel();
+    let mut worker = Task::start(identity.clone(), None, move |context| {
+        loop {
+            context.check()?;
+            match go_rx.recv_timeout(Duration::from_millis(10)) {
+                Ok(()) => break,
+                Err(mpsc::RecvTimeoutError::Timeout) => {}
+                Err(_) => return Ok(()),
+            }
+        }
+        let result = context
+            .receive(&identity, || task_service.with_library::<()>(generation, |_| panic!("stale worker applied")));
+        done_tx.send(result.is_err()).unwrap();
+        Ok(())
+    });
+    // Existing Core writes and undo execute under the accepted instance's service guard.
+    service
+        .with_library(generation, |lib| {
+            assert_eq!(lib.path(), lib.instance_path());
+            assert_eq!(lib.path(), a);
+            let mut c = illustash_terms::open(&lib.db())?;
+            let asset = store::register_asset(&c, "synthetic", "service-image", None)?;
+            let term = store::create_term(&c, Kind::Label, Some("service-label"), "user")?;
+            let action = store::judge(
+                &mut c,
+                &[store::VerdictTarget::Image { asset, term }],
+                store::Verdict::Yes,
+                "user",
+                "",
+                "test",
+            )?;
+            assert_eq!(store::state(&c, asset, term)?.as_deref(), Some("confirmed"));
+            store::undo(&mut c, Some(action))?;
+            assert_eq!(store::state(&c, asset, term)?, None);
+            Ok(())
+        })
+        .unwrap();
+    assert!(service.switch(generation, &f.root.join("missing.pilib")).is_err());
+    assert_eq!(service.generation(), generation);
+    service.switch(generation, &b).unwrap();
+    assert_eq!(service.generation(), generation + 1);
+    assert!(matches!(
+        service.with_library::<()>(generation, |_| panic!("stale request applied")),
+        Err(Error::Conflict(_))
+    ));
+    assert!(service.switch(generation, &a).is_err());
+    service
+        .with_library(service.generation(), |lib| {
+            assert_eq!(lib.id(), original["id"].as_str().unwrap());
+            assert_ne!(lib.instance_path(), a);
+            assert_eq!(lib.path(), b);
+            let c = illustash_terms::open(&lib.db())?;
+            assert_eq!(
+                c.query_row("SELECT COUNT(*) FROM terms WHERE key=?", ["service-label"], |row| row.get::<_, i64>(0))?,
+                0
+            );
+            Ok(())
+        })
+        .unwrap();
+    go_tx.send(()).unwrap();
+    assert!(done_rx.recv_timeout(Duration::from_secs(2)).unwrap());
+    assert!(worker.wait(Duration::from_secs(2)));
+    service.recover();
+    service.shutdown();
+    service.shutdown();
+    assert!(service.start().is_err());
+    assert!(service.with_library(service.generation(), |_| Ok(())).is_err());
+    assert!(service.switch(service.generation(), &a).is_err());
+    drop(worker);
+    drop(service);
+    // Failed creation cannot remove a pre-existing published package or its metadata.
+    assert!(app_service::create(
+        &f.root,
+        &a,
+        "first",
+        vec![NewSource::Folder { path: f.root.join("source"), preset: "other".into() }]
+    )
+    .is_err());
+    assert_eq!(config, fs::read(a.join("library.json")).unwrap());
+    // Relative destinations register the factory's actual absolute path and survive a cwd change.
+    struct Cwd(std::path::PathBuf);
+    impl Drop for Cwd {
+        fn drop(&mut self) {
+            std::env::set_current_dir(&self.0).unwrap();
+        }
+    }
+    let _cwd = Cwd(std::env::current_dir().unwrap());
+    std::env::set_current_dir(&f.root).unwrap();
+    let actual = app_service::create(
+        &f.root,
+        Path::new("relative.pilib"),
+        "relative",
+        vec![NewSource::Folder { path: f.root.join("source"), preset: "other".into() }],
+    )
+    .unwrap();
+    assert_eq!(actual, f.root.join("relative.pilib"));
+    fs::create_dir(f.root.join("different-cwd")).unwrap();
+    std::env::set_current_dir(f.root.join("different-cwd")).unwrap();
+    let entries = illustash_terms::desktop_shell::recent();
+    assert!(entries.iter().any(|entry| entry["path"].as_str() == actual.to_str()));
+    Application::open(&actual, options(&f.root)).unwrap().shutdown();
+}

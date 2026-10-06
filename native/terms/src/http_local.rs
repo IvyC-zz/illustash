@@ -1,0 +1,119 @@
+//! Local candidate selection and cached research results; no worker or network calls.
+use crate::{
+    http::LibraryContext,
+    http_json::Json,
+    http_read::{display, rows, VISIBLE},
+    Error, Result,
+};
+use rusqlite::{Connection, OpenFlags};
+use std::collections::HashMap;
+pub(crate) const ROUTES: &[&str] = &["/api/ask", "/api/similar", "/api/clusters"];
+const UNASKED: &str = "NOT EXISTS(SELECT 1 FROM asked k WHERE k.uuid=m.uuid AND k.entity=m.entity)";
+const LEARNABLE: &str = "NOT EXISTS(SELECT 1 FROM entities l WHERE l.id=m.entity AND l.label_only=1)";
+const REST: &str = "SELECT DISTINCT entity FROM asked WHERE answer='later' AND asked_at>=datetime('now','-7 days')";
+const HINTS: &str = "SELECT w.uuid,w.entity,w.score FROM weak_claims w JOIN single_assets o ON o.uuid=w.uuid WHERE w.source='PROTO' AND NOT EXISTS(SELECT 1 FROM asked k WHERE k.uuid=w.uuid AND k.entity=w.entity) AND NOT EXISTS(SELECT 1 FROM entities l WHERE l.id=w.entity AND l.label_only=1) AND NOT EXISTS(SELECT 1 FROM memberships m WHERE m.uuid=w.uuid AND m.entity=w.entity) AND NOT EXISTS(SELECT 1 FROM assertions s WHERE s.uuid=w.uuid AND (s.status='confirmed' OR s.entity=w.entity)) AND NOT EXISTS(SELECT 1 FROM excluded x WHERE x.uuid=w.uuid)";
+fn get<'a>(q: &'a HashMap<String, String>, k: &str) -> &'a str {
+    q.get(k).map(String::as_str).unwrap_or("")
+}
+fn off() -> Json {
+    Json::object([("status", "off".into())])
+}
+pub(crate) fn read(c: &Connection, path: &str, q: &HashMap<String, String>) -> Result<(Json, u16)> {
+    let payload = match path {
+        "/api/ask" => Json::object([(
+            "batch",
+            ask(c, get(q, "nsfw"), &get(q, "skip").split(',').filter(|s| !s.is_empty()).collect::<Vec<_>>())?,
+        )]),
+        "/api/similar" => Json::object([
+            ("groups", crate::http_browse::similar_groups(c, get(q, "kind"), get(q, "nsfw"))?),
+            ("state", off()),
+        ]),
+        "/api/clusters" => {
+            Json::object([("clusters", crate::http_browse::clusters(c, get(q, "nsfw"))?), ("learner", off())])
+        }
+        _ => return Err(Error::Invalid("未迁移本地接口".into())),
+    };
+    Ok((payload, 200))
+}
+fn choose(pool: &[Json]) -> Result<Option<&Json>> {
+    if pool.is_empty() {
+        return Ok(None);
+    }
+    let n = pool.len() as u64;
+    let limit = u64::MAX - u64::MAX % n;
+    loop {
+        let mut bytes = [0; 8];
+        getrandom::fill(&mut bytes).map_err(|e| Error::Invalid(e.to_string()))?;
+        let draw = u64::from_ne_bytes(bytes);
+        if draw < limit {
+            return Ok(Some(&pool[(draw % n) as usize]));
+        }
+    }
+}
+fn ask(c: &Connection, nsfw: &str, skip: &[&str]) -> Result<Json> {
+    if skip.len() > 50 {
+        return Err(Error::Invalid("参数不正确".into()));
+    }
+    let seen = format!("{VISIBLE}{}", crate::http_browse::rating("m", nsfw)?);
+    let hints=rows(c,&format!("SELECT h.entity,count(*) AS n FROM ({HINTS}) h JOIN assets m ON m.uuid=h.uuid WHERE {seen} AND h.entity NOT IN ({REST}) GROUP BY h.entity HAVING n>=2 ORDER BY n DESC"),&[])?;
+    let hints: Vec<_> = hints
+        .into_iter()
+        .filter(|r| !skip.contains(&r.get("entity").expect("http_local internal invariant").text()))
+        .take(12)
+        .collect();
+    let (kind, pick) = if let Some(r) = choose(&hints)? {
+        ("hint", r.get("entity").expect("http_local internal invariant").text().to_owned())
+    } else {
+        let pool=rows(c,&format!("SELECT m.entity,count(*) AS n,(SELECT count(*) FROM memberships x WHERE x.entity=m.entity AND x.status='confirmed') AS conf FROM memberships m JOIN single_assets o ON o.uuid=m.uuid WHERE m.status='machine' AND {seen} AND {UNASKED} AND {LEARNABLE} AND m.entity NOT IN ({REST}) GROUP BY m.entity HAVING n>=2"),&[])?;
+        let pool: Vec<_> = pool
+            .into_iter()
+            .filter(|r| !skip.contains(&r.get("entity").expect("http_local internal invariant").text()))
+            .collect();
+        let mut short: Vec<_> = pool
+            .iter()
+            .filter(|r| r.get("conf").expect("http_local internal invariant").integer() < 5)
+            .cloned()
+            .collect();
+        short.sort_by_key(|r| -r.get("n").expect("http_local internal invariant").integer());
+        short.truncate(12);
+        let kind = if short.is_empty() { "sample" } else { "seed" };
+        let Some(r) = choose(if short.is_empty() { &pool } else { &short })? else {
+            return Ok(None::<String>.into());
+        };
+        (kind, r.get("entity").expect("http_local internal invariant").text().to_owned())
+    };
+    let items = if kind == "hint" {
+        rows(c,&format!("SELECT h.uuid,m.width,m.height FROM ({HINTS}) h JOIN assets m ON m.uuid=h.uuid WHERE h.entity=? AND {seen} ORDER BY h.score DESC LIMIT 6"),&[&pick])?
+    } else {
+        rows(c,&format!("SELECT m.uuid,a.width,a.height FROM memberships m JOIN single_assets o ON o.uuid=m.uuid JOIN assets a ON a.uuid=m.uuid WHERE m.entity=? AND m.status='machine' AND {seen} AND {UNASKED} ORDER BY random() LIMIT 6"),&[&pick])?
+    };
+    let name = c.query_row("SELECT entity_name(id) FROM entities WHERE id=?", [&pick], |r| r.get::<_, String>(0))?;
+    let confirmed =
+        c.query_row("SELECT count(*) FROM memberships WHERE entity=? AND status='confirmed'", [&pick], |r| {
+            r.get::<_, i64>(0)
+        })?;
+    Ok(Json::object([
+        ("kind", kind.into()),
+        ("entity", pick.into()),
+        ("name", name.into()),
+        ("confirmed", confirmed.into()),
+        ("items", Json::Array(items)),
+    ]))
+}
+pub(crate) fn suggest(context: &LibraryContext, body: &Json) -> Result<Json> {
+    let mut c = crate::sqlite::open_with_flags(&context.db, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+    c.busy_timeout(std::time::Duration::from_secs(10))?;
+    let tx = c.transaction()?;
+    crate::http_read::register_names(&tx)?;
+    let mut body = body.clone();
+    body.set("confirm", true.into());
+    let ids = crate::app_commands::selected_scope(&tx, context, &body, false)?;
+    tx.execute_batch("CREATE TEMP TABLE picked(uuid TEXT PRIMARY KEY)")?;
+    for id in ids.iter().take(2000) {
+        tx.execute("INSERT INTO picked VALUES (?)", [id])?;
+    }
+    let selected=rows(&tx,"SELECT e.id,entity_name(e.id) AS name,e.work,count(DISTINCT v.uuid) AS count FROM (SELECT uuid,entity,score,0 AS weak FROM family_evidence UNION ALL SELECT uuid,entity,score,1 FROM weak_claims) v JOIN picked p ON p.uuid=v.uuid JOIN entities e ON e.id=v.entity WHERE NOT EXISTS(SELECT 1 FROM memberships m WHERE m.uuid=v.uuid AND m.entity=v.entity) AND NOT EXISTS(SELECT 1 FROM assertions s WHERE s.uuid=v.uuid AND s.entity=v.entity AND s.status='rejected') GROUP BY e.id ORDER BY count DESC,min(v.weak),max(v.score) DESC,name LIMIT 9",&[])?;
+    let result = Json::Array(selected.into_iter().map(|r| display(&tx, r)).collect::<Result<_>>()?);
+    tx.commit()?;
+    Ok(result)
+}

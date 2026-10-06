@@ -1,0 +1,109 @@
+# 后端任务交付边界
+
+状态：现行参考，2026-10-06；任务职责与 [架构方向](ARCHITECTURE_DIRECTION.md) 配套，安装交付以本篇为准。用户已授权提交并推送本轮变更；提交发布不代表部署，不重启生产服务。外部来源未做联网验证，所有测试使用假网络；本地 OCR 不上传图片或文字给模型服务。
+
+## 当前交付状态（2026-09-28）
+
+已实现：溯源任务互斥、取消、超时、异常恢复与增量补跑；Windows 识别结果包的事务导入、去重与恢复；显式初始化/查询入口及事务后业务事件；Pixiv 关注和昵称 worker。本地 OCR 计算已于 2026-10-05 按用户决定删除（#177），已有 OCR 结果与人工判断保留。结果包命令、HTTP 接口及事务边界见 [RESULT_PACKAGES.md](RESULT_PACKAGES.md)。
+
+2026-09-28 的验收覆盖 macOS 离线测试与真实图库副本；2026-10-01 的原生默认入口和安装包集成验收仅使用合成数据。Windows x64 的基础功能已在 2026-10-01 实机验收（见下文「Windows」），Windows 识别生产端、Pixiv 真实账号响应以及画师归属的人工准确率验收仍未完成，不标记整个阶段完成。旧 `Store(...)` 初始化行为只留在 `tests/reference`，不随基础包或可选研究包交付。
+
+## 溯源生命周期
+
+原生溯源的现行任务/授权与恢复见 [PROVENANCE.md](PROVENANCE.md) 第 8 节；下述 Python 生命周期只存在于测试参考（`tests/reference/`，#186），生产不使用。`tests/reference/provenance/lifecycle.py` 为一个图库提供跨进程租约。App 和 CLI 共享租约；取得独占权后才将遗留 running 记录恢复为 failed。App 先记录 run，再启动子进程；启动失败、非零退出、停止和超时均写回该 run。子进程使用独立进程组；切图库 close 等待清理，超时强杀；正常退出后仍清理持有管道的孙进程。macOS 上父进程异常消失时，worker 看门狗终止整个进程组，下一次打开恢复中断记录。Windows 分支采用 taskkill /T /F，尚未做 Windows 实机生命周期验收。
+
+Runner 不设总时长上限：worker 连续 600 秒没有任何输出才判为「运行超时（10 分钟没有进展）」，可通过构造参数调整；停止宽限 10 秒。（2026-09-28 改：原来的 3600 秒总超时让第一次整库 OCR（约 4.8 万张、每秒约 5 张）在 OCR 步骤就被截断，后面的步骤永远轮不到。）进度除文字外还有结构化数字（`{"progress": {label, done, total, found, mb}}`，Runner 存进状态的 `progress`，设置页画成进度条和「流量 / 上限」条）。OCR 每 200 张、像素哈希每 1000 张、本地比对每 100 张小图（一位画师常有上千张）、X 关注每 100 个、Pixiv 相关画师和昵称每 20 位报一次进度。忙碌时收到 new 请求会持久化并合并为一次补跑，切库时不启动补跑，回到该库后可恢复。
+
+增量范围：pixel_hash 对有效 x/pixiv 资产中尚无 hit/miss 的项执行。因此涵盖以往失败或遗漏的积压，不限于本次同步的新 ID。verify 的缓存带当前应用资产集合指纹；新增/移除资产后重新比对已有候选画师，逐图匹配，不把一个图的判断传播给其他图。
+
+外部请求默认不授权。CLI 明确增加 `--allow-network`；HTTP 启动单次任务增加 `allow_network:true`；自动任务需要启动服务时显式 `--allow-provenance-network`。授权参数不写入默认设置，不因保存账号凭据而自动授权。未授权步骤记录 stopped。设置页「找回画师」的「开始…」先展开本次会发出什么（发给谁、下载什么、流量上限），用户点「授权并开始」才附带 `allow_network:true`，也可以选「只跑本地」；授权只对这一次有效，不保存。
+
+## 初始化与业务后处理
+
+本节描述显式启用的历史测试参考；现行生产初始化与后处理见 [架构方向](ARCHITECTURE_DIRECTION.md#生产入口与测试参考)。参考中的 `Store.open(source,db)` 是查询/操作入口，不建目录、不迁移、不备份、不读取 Photos 或相册映射。`Store(...,initialize=False).initialize(...)` 是显式启动入口；backup 路径使用 open，避免备份之前隐式迁移。参考中的旧 `Store(...)` 构造方式仍转调 initialize。
+
+业务操作通过 `effects.operation` 在写事务中追加 backend_effects；学习规则不再依据 HTTP 路径判断。命令行、同步和 HTTP 调用同一 Store 操作都留下相同事件。失败分发保留 pending 和错误。HTTP 交付既有后台调度，CLI 可调用 `effects.drain(store,effects.local_handler(store))` 同步完成本地后处理。启动恢复 pending 事件。Photos 扫描仍由 Syncer 独立发起。
+
+## 来源
+
+- `pixiv_following`：分页、可续跑的公开关注列表，只产生 seed；跟随关系不能证明画师归属。
+- `nicknames`：按稳定 Pixiv 用户 ID 更新独立 artist_names，重名不会合并画师。
+
+新增来源共用 evidence 的候选格式、响应缓存与重试元数据。缓存有效期 7 天；错误 1 小时后可重试，miss 1 天、hit 7 天。403/429 等拒绝仍由 Net 停止该主机，不绕过风控。已有 pixel_hash / verify 的专用缓存保留原语义。
+
+## 验收
+
+离线单元/HTTP 测试覆盖互斥、强停、超时、孙进程清理、恢复、增量触发、去重、回滚、人工判断保护、来源候选与授权边界。真实图库数据库使用 SQLite backup 副本对照旧/新初始化，60 张既有表逐表一致，仅新增空的 backend_effects。源库副本 SHA256 不变，普通查询前后逐表不变，quick_check 通过。对照工具 `tools/verify_backend_refactor.py` 已于 2026-10-05 删除（#186）。真实 OCR 单图可运行性通过，但该样本识别文本为 0，不作为准确率证据；另用本机生成的 @TestArtist 图片通过实际 Vision 识别。最终完整离线回归 367 项通过。
+
+Pixiv 登录过期：运行前检查绑定的登录，带登录收到 401 也按过期处理，本次停掉 Pixiv 而不退回未登录查询，设置页提示重新绑定（见 PROVENANCE.md 第 8 节）。2026-09-28 真实账号联测被 Cloudflare 人机验证（403）拦下，未绕过。后续改由 app 内嵌 Pixiv 登录窗口发请求（PROVENANCE.md 第 9 节）。
+
+尚未验证：Pixiv 实际账号响应、真实图片识别质量及大图库。Windows 研究 worker 与真实模型的合成验收见下文，不计为真实账号/图片验收。
+
+## 独立安装与可选计算包
+
+共享资源、图库和研究输出的职责及相对路径兼容规则以 [图库参考](LIBRARIES.md#2-包外的共享资源) 为准。物理整理不改变本节的安装白名单；共享数据由 `ILLUSTASH_SHARED` 一处配置，安装计算进程沿用解析后的绝对路径。
+
+基础版生产资源包含 `bin/illustash-terms`（Windows 为 `.exe`）、`resources/web/static/`、`resources/tags/tags_v3.csv` 及编入程序的第三方许可。图片来自显式打开的图库，图库、账号、缓存、模型、`.venv`、Python HTTP 宿主、开发 `target/` 均不打进包。SQLite 随 Rust 构建；完整 Rust 依赖及版本分别由 `native/terms/Cargo.lock`、`desktop/Cargo.lock` 固定。桌面另需系统 WebView（macOS WKWebView；Windows WebView2）及操作系统图像适配组件。Python 是打包脚本的构建工具，不是基础程序运行依赖。首次建库使用程序内置的空 source schema，不需要 `review/` 或 `ILLUSTASH_SHARED`；命令、参考库校验和「待识别」状态见 [LIBRARIES.md](LIBRARIES.md#首次建库与参考库)。
+
+在仓库根目录运行 `python3 packaging/build.py --output /tmp/illustash-base`，脚本执行 `cargo build --locked --release --manifest-path native/terms/Cargo.toml --bins`，按白名单复制资源，并产生逐文件 SHA-256 的 `manifest.json` 和 `dependencies/core-Cargo.lock` 生产依赖清单。加 `--archive /tmp/illustash-base.zip` 可生成按路径排序、固定 ZIP 时间戳并保留 Unix 权限的发布归档；已有对应平台构建可用 `--binaries PATH`，调试构建可用 `--profile dev`；产物、归档和桌面暂存目录必须不存在，避免把旧文件带入新安装包。将输出整体复制到安装位置后，运行 `./start.sh --library /absolute/synthetic.pilib --no-sync --no-open`（Windows：`start.cmd ...`）。也可直接运行 `bin/illustash-terms http --native --library ...`，原生入口从可执行文件相邻的 `resources/` 定位资源；显式 `--root` 和 `ILLUSTASH_ROOT` 可覆盖。数据目录与只读安装资源分开，目录移动不迁移图库所有权。
+
+桌面便携目录可用 `--desktop /path/to/illustash-desktop` 加入本平台桌面程序及 `dependencies/desktop-Cargo.lock` 依赖清单，运行 `./desktop.sh --library ...` 或 `desktop.cmd ...` 时显式传入便携资源根；应用安装包用 `python3 packaging/build.py --output /tmp/illustash-base --desktop-resources packaging/desktop-resources` 暂存同一资源，再在 `desktop/` 执行 `cargo tauri build --config ../packaging/tauri-bundle.json`。macOS 安装资源为 `Illustash.app/Contents/Resources/resources/`；Windows 为 Tauri `resource_dir()/resources/`。桌面启动参数与 ready/退出由桌面生命周期实现负责，不用另一个 Python 服务。构建需要本平台 Rust/C 工具链和 Tauri CLI；macOS 打包需 Xcode 工具链，Windows 需 MSVC 和 WebView2。跨平台编译不等于对应平台运行验收。
+
+研究形态运行 `python3 packaging/build.py --research --output /tmp/illustash-research`，在基础包之外加入预构建 `bin/illustash-iqdb`（不在安装后调用 Cargo）及 `bin/illustash-research`、`illustash-index`、`illustash-provenance`、`illustash-recognition` 原生适配器。2026-10-05 起 macOS/Windows 的四类适配器全部原生执行（含 `--check`），包内不带 Python 源码或解释器；识别与索引需要资源根下的 CPU ONNX Runtime，Windows 另需固定 OpenBLAS。仅 Linux 包加入 `workers/` 计算源码，并需显式设置 `ILLUSTASH_WORKER_PYTHON` 为外部 Python 3.12+ 解释器的绝对路径，按 `workers/requirements.txt` 安装 NumPy、Pillow 与 ONNX Runtime。便携计算包的 `start.sh` / `desktop.sh` 及对应 `.cmd` 为当前进程配置这四个标准适配器和安装模型根，显式环境配置优先。launcher 本身不执行 `--check` 或计算；依赖诊断须显式调用适配器或 `research.cmd --check`，打开图库后的任务与恢复沿用现有 App 编排。共享可写默认位置为 macOS 的 `~/Library/Application Support/Illustash/Shared`、Linux 的 `${XDG_DATA_HOME:-~/.local/share}/Illustash/Shared` 或 Windows 的 `%LOCALAPPDATA%\Illustash\Shared`；不写系统环境。研究包仅交付快照适配器和计算依赖，不包含历史 Store、HTTP 宿主或 Python 核心桥接；正式结果仍由 Rust 验证导入。适配器按已验收的平台和任务路由到原生计算或既有解释器，不持有正式数据库写入边界。macOS/Windows 的 `illustash-index` 直接执行原生参考特征、clean/build/scan，无需 Python 配置；需要统一模型/标签资源与 CPU ORT，`--check` 加载实际 CCIP 会话。Linux 的 index 继续既有 Python 路径；算法与恢复边界见 [角色索引](ARCHITECTURE_DIRECTION.md#原生角色索引维护)。直接启动裸核心时仍只按显式环境启用计算；基础包的 launcher 不配置这些适配器。包内 `illustash-recognition` 沿用既有 `ILLUSTASH_RECOGNITION_WORKER` 协议生成 WD/CCIP 结果包，复用既有预处理/阈值；Rust 验证、导入和发布。无私人锚点仍生成 WD 标签与两类向量；扩展角色声明需要显式部署锚点。请求/快照的 UTF-8 由适配器 `-X utf8` 固定。
+
+默认不带模型；`--research --models PATH` 可按白名单加入 WD、CCIP 两个 ONNX 特征模型、CCIP metrics 模型及参数到 `resources/models/`，计算与核心指纹共用这一份资源。原生识别/索引默认模型根为资源根的 `models/`；`ILLUSTASH_MODELS` 可绝对指定，原生相对覆盖以资源根解析。Linux 的 Python 路径使用适配器传入的同一安装模型根；直接使用旧 Python 工具的默认位置仍由其自身配置。Windows 用 `--openblas-site DIR` 指向装有固定 NumPy wheel 的 site-packages，只从中提取登记的 OpenBLAS DLL 和 wheel 许可，不携带 Python；`--ort-dylib FILE --ort-licenses DIR` 加入 CPU ONNX Runtime。构建脚本不自动下载或安装系统软件。运行 `research.cmd --check` 检查四类适配器，`first-start.cmd` 用显式图片文件夹和全新的 `.pilib` 路径建库并启动；已有库用 `research.cmd --library PATH`。Windows 便携包路径含空格可重定位，不需要系统 Python/Cargo。WebView2 与 VC++ 运行库仍是系统前提。默认共享索引放 `%LOCALAPPDATA%\Illustash\Shared`，显式 `ILLUSTASH_SHARED` 可覆盖。图库、私人锚点、图片、账号和缓存不随包发布。附模型需遵守上游使用限制（WD Apache-2.0；CCIP OpenRAIL），测试包不等同公开发布许可审查。
+
+原生 CPU ORT 可显式通过 `--ort-dylib FILE --ort-licenses DIR` 交付。动态库重命名为 `resources/onnxruntime/libonnxruntime.dylib`（Windows 为 `onnxruntime.dll`，Linux 为 `libonnxruntime.so`），沿用原生消费者的默认路径；`ILLUSTASH_ORT_DYLIB` 仍可覆盖。许可目录必须同时提供该分发的 `LICENSE` 和 `ThirdPartyNotices.txt`，按原字节放入 `resources/licenses/onnxruntime/` 并登记 SHA-256。脚本不下载库或模型；文件已复制不等于其平台、ABI 或推理通过验收。PocketFFT BSD 许可原文为 `native/terms/vendor/pocketfft/LICENSE.md`，随基础与计算资源安装到 `resources/licenses/pocketfft/LICENSE.md`。LittleCMS 2.19 与 lcms2 封装层的 MIT 许可 `native/terms/licenses/LCMS.txt` 随基础与计算资源安装到 `resources/licenses/`。全部第三方组件与许可汇总见 [第三方组件与许可](THIRD_PARTY.md)。
+
+完整 macOS App 安装与各平台闭环以 #158 的实际门槛为准，不能用便携资源合成检查替代。
+
+
+Windows MSVC 构建由仓库 `.cargo/config.toml` 统一启用 `+crt-static`；打包脚本的 Cargo 调用固定从仓库根执行，以读取该配置。完整安装包暂存前必须在 MSVC 开发者命令行中提供 `dumpbin`，脚本逐一检查计算目录的 exe 与 DLL（含延迟导入）；依赖 VCRUNTIME、MSVCP、CONCRT、VCOMP 或 MSVCR 的组件会拒绝打包。系统自带的 UCRT/API-set 依赖允许保留。Rust 的静态 CRT 配置不改变外部 ONNX Runtime DLL；从 Python wheel 提取的动态 CRT DLL 不能直接用于完整安装包。
+
+CPU ONNX Runtime 1.30.0 使用官方标签 `v1.30.0`（`f2c39fe2`），在对应源码根的 x64 MSVC 开发者命令行运行以下命令；需要 Python、CMake 3.28+、Ninja 和上游构建依赖。保留完整 CPU 算子，使用静态 CRT，不构建 Python 绑定。把产出的 `ORT_BUILD/Release/onnxruntime.dll` 传给 `--ort-dylib`，该源码根的 `LICENSE` 与 `ThirdPartyNotices.txt` 传给 `--ort-licenses`。构建后仍需核对全部 DLL 依赖及真实模型推理，`--check` 通过不能代替推理验收。
+
+```bat
+python tools/ci_build/build.py --config Release --build_dir ORT_BUILD --build_shared_lib --parallel 4 --skip_tests --skip_submodule_sync --compile_no_warning_as_error --cmake_generator Ninja --cmake_extra_defines CMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded ONNX_USE_MSVC_STATIC_RUNTIME=ON protobuf_MSVC_STATIC_RUNTIME=ON ABSL_MSVC_STATIC_RUNTIME=ON gtest_force_shared_crt=OFF
+```
+
+**Windows 完整安装包（2026-10-03）**：在 Windows 用 `packaging/build.py --research --models PATH --openblas-site DIR --ort-dylib FILE --ort-licenses DIR --output NEW_PATH --desktop-resources packaging/desktop-resources --desktop-compute packaging/desktop-compute` 暂存，再在 `desktop/` 运行 `tauri build --bundles nsis --config ../packaging/tauri-full.json`。完整 NSIS 包除基础资源外包含安装目录下的 `compute/`（四类适配器、核心工具、模型、CPU ONNX Runtime 与固定 OpenBLAS；2026-10-05 起不含 Python 运行时与计算源码）；普通快捷方式在创建线程前为当前进程配置这些组件，核心与计算使用同一模型/标签资源根，共享可写数据默认在 `%LOCALAPPDATA%\Illustash\Shared`。显式环境配置优先，不修改系统环境；缺组件显示重装提示，不静默退回“未启用”。基础安装配置不携带 `compute/`，仍不启用计算。联网溯源、参考数据下载与账号授权保持独立；CPU 推理，不包含个人图库、锚点或凭据。回退时先卸载完整版再装基础版，避免残留完整包标记触发计算；图库与共享数据不作为安装资源卸载。
+
+**macOS 完整应用资源布局（2026-10-04）**：在 macOS 将显式模型、ORT 动态库及许可一并传给 `packaging/build.py --research --models PATH --ort-dylib FILE --ort-licenses DIR --output NEW_PATH --desktop-resources packaging/desktop-resources --macos-desktop-compute packaging/desktop-compute`，再在 `desktop/` 用 `tauri build --bundles app --config ../packaging/tauri-full-macos.json`。计算资源位于 `Illustash.app/Contents/Resources/compute/`，只复制便携包已有 manifest 登记且哈希一致的 bin/resources/dependencies，排除桌面主程序、快捷脚本和私人目录；缺资源或复制期间变化不发布新 manifest。普通应用进程在 Tauri/worker 线程启动前设置自身默认 ROOT/MODELS/四 adapter，SHARED 默认 `~/Library/Application Support/Illustash/Shared`；显式环境覆盖优先，只有基础包没有 compute 目录时保持基础能力，有 compute 而缺/坏 manifest、组件或执行权限会明确报错。2026-10-05 起计算资源不含 Python workers，四类适配器全部原生；签名 App、Finder/GUI 与干净环境的日常闭环仍按 #158 单独验收。
+
+显式 `tests.platform_packaging_mac` 使用当轮 `ILLUSTASH_DESKTOP_BIN`、`ILLUSTASH_TERMS_BIN`、`ILLUSTASH_RESEARCH_ADAPTER_BIN`、`ILLUSTASH_IQDB_BINARY`，缺产物失败，不自动构建。它在隔离合成 `.app` 布局中执行桌面二进制的原生 CLI 分支，验证不传 `--root` 的计算资源启动、学习/恢复/人工保留和组件错误；模型/ORT 输入为 marker，不运行 Tauri GUI 或模型。签名、实际 `.app` 安装、Finder/GUI 和完整计算闭环仍按 #158 单独验收，保持现行签名与平台门槛。
+
+原生研究计算候选 `native/terms/src/research_compute` 使用同一 `illustash-research/1` 快照协议，提供独立的特征归一化/版本缓存、原型与弱线索计算、未识别池和共享 OC 分组；它不持有正式图库、历史或人工写入接口。`research-compute` 是显式构建的测试 example；安装适配器在 macOS/Windows 上将受支持的学习、regroup 和 OC 请求交给同一原生 dispatcher，在 Python 解释器与脚本设置前返回。Windows 每进程先验证固定 ILP64 OpenBLAS 资源，缺失或身份不符会报错，不能回退到 portable 产物。Linux 的 portable 数值后端未接受，继续使用既有 Python 研究 dispatcher；原生 CPU 识别生产入口覆盖 macOS 与 Windows（2026-10-05），Linux 沿用既有 Python 识别入口。宿主与识别 worker 共用这一平台 gate：仅原生安装入口强制新角色 sidecar，旧 Python 的无 sidecar 响应沿用公开 v1 接收；任何平台显式声明的 sidecar 仍须全量预验，不能静默退回仅发布 WD。显式测试 example 仍可独立验证原生候选，不意味着生产启用。相似/关系计算及含相似计算的混合 events 由同一 dispatcher 原生执行，规则见 [架构方向](ARCHITECTURE_DIRECTION.md)；`--check` 仍检查 Python 回退路径的依赖，不代表原生计算或模型验收，既有 Python 包依赖因此仍保留。macOS 的窄 float32 乘积由 Platform 调用系统 Accelerate，其他平台的数值保真需分别验收。用户于 2026-10-04 批准沿用当前 NumPy 1.26 标量 introsort 的并列排序合同，覆盖密度优先、距离与 trait 描述排序，不采用 NumPy 2.x 的 SIMD 并列顺序。用户于 2026-10-04 批准原型 p90 固定为 NumPy 1.26 的 float64 线性插值口径：float32 spread 排序，索引 `(n-1)*0.9` 和插值比例为 float64，端点差先按 float32 相减，再转 float64；比例 ≥0.5 时从上端点反向插值，随后按原 floor/cap、负例边距和 hint 规则计算，不增加容差。旧 NumPy 2.x 的标量提升会在少数弱候选临界输入给出不同值，这一版本差异保留为对照证据，不修改人工结论或旧 golden。不同 BLAS 后端的乘积位差也会在相同原型和阈值下改变临界强认领/弱线索，float64 插值的批准不能代替各平台数值后端契约的确定和验收。基础 NPY 保留 C/F 布局及 float32/float64（含大小端）的归一化精度，再转为 float32 并哈希；其他 dtype 当前显式拒绝，未取得完整 `np.load` 输入域兼容验收。不能把 floor/cap 限定的合成通过当作整个学习迁移完成；正式任务验证/发布、人工覆盖与撤销继续由现有 App/Core 持有。
+
+Windows 原生研究的资源身份只在 `crates/platform/src/research_openblas.json` 登记，版本与对应 NumPy 参考不可互换。`--openblas-site` 只从显式 site-packages 的 `numpy.libs` 提取唯一登记 DLL，并复制同版本 wheel 的完整 `dist-info/licenses` 原字节树到 `resources/licenses/openblas`；缺少许可、身份不符、多个登记 DLL 或复制变化均拒绝发布包 manifest。安装资源固定为 `resources/openblas/openblas.dll`，普通 cmd launcher 和桌面 bootstrap 为当前进程设置 `ILLUSTASH_RESEARCH_OPENBLAS_DLL` 默认值，保留显式覆盖；平台加载器也可从绝对 `ILLUSTASH_ROOT` 解析同一路径，两者都未设置时 worker 按自身安装位置解析。运行时不搜索 Python 目录或 PATH。加载器在调用导出前用规范模块路径、卷序列号和 128 位文件 ID 复核实际 HMODULE 与已哈希锁定文件的身份，固定 C 枚举 i32、尺寸/步长 signed i64，完整解析 f32/f64 DOT/GEMV/GEMM/SYRK 及配置后持有模块和禁止写入/替换的文件句柄；加载后检查不能撤销已运行的 DllMain。Windows trait profile 保留 f64 权重和除法，norm 复用连续 pairwise 归约，alike 按同缓冲整矩阵乘积选择 DSYRK；精度和最终分类独立验证，不能以 f32 通过代替。各自对应 NumPy/DLL 的乘积逐位参考须同时记录 CPU 内核和实际线程数；scalar 排序与 percentile 使用上述已批准的独立合同。固定资源错误沿既有任务状态报告，正式发布仍由 App/Core 持有；原生学习/分组路径不代表识别、真实模型或 GUI 安装闭环已验收。
+
+Windows 计算任务使用挂起创建 → 私有 kill-on-close Job → 恢复主线程，父 worker 先退出也终止并等待后代，宿主异常退出由 OS 关闭 Job 清理。共享索引与溯源租约使用可自动释放的文件锁。全新参考索引没有已有锚点时按空集比较；坏图可跳过，模型/运行时错误直接失败，不伪装成参考图不一致。`--check` 只验证依赖导入，不证明推理或真实图片准确率。
+
+独立产物的专项验证与完整平台门槛分开：干净 macOS 由 #71 承接；Windows 的构建、安装和基础功能已由 #72 在开发机上实测，用户 2026-10-02 取消了 #90 的无 Python 干净 Windows 专项复验；取消关闭不计为该环境验收通过。打包脚本成功不代表这些门槛已通过。
+
+## Windows
+
+2026-10-01 在 x64 Windows 11 家庭版开发机上实测（#72）。这台机器装有系统级 Python 3.12，所以只证明产品进程树不调用 Python，不等于干净环境；干净环境复验见 #90。
+
+**构建**：需要 MSVC 生成工具（VC 工具集和 Windows SDK）、Rust stable（`x86_64-pc-windows-msvc`）、Tauri CLI 2 和 WebView2；`packaging/build.py` 遵守 `CARGO_TARGET_DIR`。`tauri build --bundles nsis,msi --config ../packaging/tauri-bundle.json` 产出 NSIS 和 MSI，安装到 `C:\Program Files\Illustash\`，资源在其下的 `resources\`。NSIS 需要 Tauri 官方发布的 NSIS 工具及 `nsis_tauri_utils.dll`；直连下载超时可在构建机下载并按 bundler 固定校验值核对，放入工具缓存，不关闭校验或修改系统安全策略。仓库用 `.gitattributes` 固定 LF：Git for Windows 默认 `core.autocrlf=true`，否则签出后静态资源、标签表和测试夹具的字节都会变。
+
+**运行时行为**：
+- Windows 不创建原生顶部菜单，应用内侧栏和导航保留；macOS 保留原有原生菜单。帮助、按钮提示及动态撤销等按平台显示 `Ctrl` 或 `⌘`。
+- 应用数据目录：未设置 `ILLUSTASH_APP_SUPPORT` 时为 `%APPDATA%\Illustash\`（macOS 为 `~/Library/Application Support/Illustash/`），保存最近图库记录和账号数据。账号凭据使用当前用户 DPAPI；存储及旧文件处理见 [架构参考](ARCHITECTURE_DIRECTION.md#原生账号与桌面登录桥)。
+- 用户主目录取 `USERPROFILE`；默认图库位置和导出目录与 macOS 相同，即 `图片\Illustash`、`下载`。
+- 写入配置和最近图库记录的路径经 `app_paths::canonical` 去掉 `\\?\` 前缀；超长或包含 Win32 不接受的组件时保留扩展形式。
+- 退出：CLI 宿主响应 Ctrl+C、Ctrl+Break 和关闭控制台（`SetConsoleCtrlHandler`）；桌面通过 stdin EOF 通知宿主收尾，宿主同时挂在桌面的 Job Object 下，桌面异常退出时由系统回收。
+- 归档导入按原始字节拒绝条目名里的反斜杠，与平台无关。
+- 可选研究/索引/识别/溯源 worker 在 Windows 上可显式启用，依赖、模型和生命周期见「独立安装与可选计算包」。Apple 照片来源仍仅限 macOS。
+- **SQLite 路径**：Windows 的文件连接统一使用内置 `win32-longpath` VFS，数据库与 `ATTACH` 文件名在 SQLite 边界转为扩展绝对路径；配置与展示路径的规则不变。不依赖缩短 `TEMP` 或启用系统长路径策略。升级暂存仍在包内，升级前备份与双库原子恢复约定不变。
+
+**验收**：`python tools/windows_acceptance.py --bin <基础版 bin\illustash-terms.exe> --desktop "C:\Program Files\Illustash\illustash-desktop.exe" --work <空目录>`，需要管理员权限，桌面一项还需要管理员已登录本机控制台。脚本只用合成数据：被测进程的 PATH 里没有 Python，用户目录和应用数据目录都指向合成目录，用 WMI 进程启动事件记录整个产品进程树。覆盖 CLI 建库、文件夹同步、缩略图（EXIF 方向、透明、大图、中文路径）、详情、连续撤销、Host/CSRF 拒绝、备份、运行中切库与令牌轮换、导出导入、CTRL_BREAK 与 stdin 退出、端口冲突、强杀后重新打开、worker 缺席，以及已安装桌面的启动、截图、关窗退出和无残留进程。2026-10-01 的结果为 51/51 通过，产品进程树里只出现 `illustash-desktop.exe` 和 `msedgewebview2.exe`。同一台机器上，合成 11 图、release 构建的 `GET /api/assets` 三轮各 100 次，轮中位数的中位数为 15.4 ms，宿主峰值工作集约 10 MiB。只作记录，不与 macOS 比较。
+
+**2026-10-02 长路径验收（#91）**：Windows 11 x64，通过 SSH 在用户默认 `TEMP` 下运行合成后端测试；224–225 字符图库路径的建库、旧库升级、WAL 手动备份（文件路径 270 字符）与恢复通过，升级前应用/source 双库恢复保持完整 schema（表、索引、视图、触发器）、类型化数据和 rowid；中文路径超过默认 VFS 的 1,040 字节缓冲也通过。旧库升级含提交失败回滚与进程强退恢复共 5 项，SQLite 定向测试 2 项。未验证 Windows 界面操作、UNC 网络共享或干净系统。Windows release 合成空库建库三轮各七对有效样本、每轮排除一对预热：延迟中位数的中位数变化 -0.43%，1 ms 采样的根进程峰值工作集变化 -0.047 MiB，按用户阈值直接接受；不代表真实大库或整个桌面进程树。另以同一对 release 的合成空库，三轮各 31 对有效交错 HTTP 请求、每轮每种查询排除五对预热：浏览/计数/设置最大延迟增加 1.69%，根进程峰值工作集减少 0.012 MiB，也按用户阈值接受。回退到旧程序时长路径限制会恢复，应先把包复制到较短路径，并按数据库格式使用升级前备份。
+
+2026-10-02 Windows 11 x64 合成验收确认无原生菜单、保留导航，Ctrl+K 打开角色跳转，帮助显示 Ctrl 提示。DPAPI 的用途隔离、密文持久化、重启、替换、损坏拒绝与解绑通过；旧明文不读取、不迁移。NSIS 与 MSI 均能构建；NSIS 默认固定为当前用户安装。为避免正式 NSIS 自动迁移卸载已有 MSI，安装、资源读取、窗口及卸载用相同代码资源的独立合成产品标识验证，已有 MSI 字节与注册保留。正式 MSI → NSIS 迁移、跨 Windows 用户解密与真实凭据未验证；详细结果及首轮失败见 PR #103。回退安装程序与资源须成套替换；Windows 凭据回退规则见架构参考。
+
+同机 `5d55cc6a` 基线与 `aad3554` 集成版本、11 个合成文件（含一张故意损坏图片）、3 轮每轮每端点每版本 100 次交错请求（另去掉各轮一次预热）：accounts 中位数 3.541 → 4.053 ms（+14.45%），assets 15.834 → 15.862 ms（+0.18%）；原生宿主工作集增加 1.96 MiB、峰值工作集增加 1.94 MiB，按用户小于 20% / 10 MiB 的规则接受。不代表真实大库、跨机器或整个桌面进程树。
+
+**2026-10-01 基础版测试口径**：Rust 核心 188/191，未通过的 3 项是 `app_legacy_upgrade` 的 MAX_PATH 限制（#91），把 `TEMP` 设成短路径后 4/4 通过。原生 Python 集成测试 25 个模块 255 项：192 项通过，63 项按平台跳过（原生 worker、Apple 照片、macOS 钥匙串，以及 Python 参考实现在 Windows 上做不了的逐字节对照）。被跳过的原生行为由上面的验收脚本直接验证。回退时替换程序与资源为同一版本；数据库不兼容时按升级前备份恢复，不能直接用旧程序打开新格式。
+
+2026-10-02 的 Windows 11 x64 研究产物使用嵌入式 Python 3.13.16、NumPy 2.5.3、Pillow 12.3.0、ONNX Runtime 1.30.0（CPU）。3 张生成签名 PNG（中文文件名）的单次完整识别/正式导入得到 795 条 labels 和 WD/CCIP 各 3 个向量，本地 OCR 3 行；学习/相似计算完成。6 张合成参考图经 loopback 服务、真实 CCIP 完成索引建立/原生导入，无私人预置锚点。取消、超时、切库、正常退出、宿主强杀和后代清理通过定向验收。详细测试口径与初次失败见 PR #98。未做真实图库/账号、GPU、研究桌面 GUI 人工操作、缺语言组件及干净系统运行库验收；网络未授权时溯源本地步骤后停止不算联网成功。Windows SQLite 长路径行为见上面的运行时说明。取消四类 worker 配置可退回基础形态，人工/正式数据库协议未变。

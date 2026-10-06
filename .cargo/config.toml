@@ -1,0 +1,3 @@
+# Windows releases must run without a preinstalled Visual C++ Redistributable.
+[target.'cfg(all(target_os = "windows", target_env = "msvc"))']
+rustflags = ["-C", "target-feature=+crt-static"]
