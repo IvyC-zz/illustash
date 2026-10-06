@@ -70,7 +70,7 @@ HTTP 前门仅装配服务与 socket，保留 Host/Origin/token 检查、请求�
 
 未来进程内客户端可直接链接 Core 的连接内 API，或使用宿主服务复用现有图库/任务生命周期；不要求启动 HTTP、Tauri 或 Python。desktop 继续只消费 cli/desktop_shell 与 Platform 进程接口，Tauri dialog、窗口和 bridge 留在外壳；不增加 UI。现行能力矩阵只表示已实现及各次实际验收范围，iOS/Android、分享、通知和移动后台没有适配或目标构建证据；抽库及 Unix cfg 不表示移动支持。
 
-三级验证：开发提交做受影响 Core/Platform/宿主单元、进程内客户端、依赖方向和快速集成检查；合并前冻结已提交干净 head，以正规固定区完整 check_all（含两新 crate、宿主/desktop、历史 v5/v6、参考 example 与空 PATH 契约）及必要平台/同机合成端到端性能验收；发版前另做 macOS/Windows/Linux 干净安装、升级与平台能力真机 smoke。手动 workflow 保留 main ref 限制，未启用自动 CI 或必需分支保护。合成客户端、构建和历史平台证据不能替代本次未执行的平台/GUI/真实图库验收，限定例外须逐项由用户决定。
+三级验证：开发提交做受影响 Core/Platform/宿主单元、进程内客户端、依赖方向和快速集成检查；合并前冻结已提交干净 head，以正规固定区完整 check_all（含两新 crate、宿主/desktop、v5/v6 旧图库升级夹具、参考 example 与空 PATH 契约）及必要平台/同机合成端到端性能验收；发版前另做 macOS/Windows/Linux 干净安装、升级与平台能力真机 smoke。手动 workflow 保留 main ref 限制，未启用自动 CI 或必需分支保护。合成客户端、构建和历史平台证据不能替代本次未执行的平台/GUI/真实图库验收，限定例外须逐项由用户决定。
 
 回退应用服务提取应同时恢复 app_http 的生命周期装配、CLI/desktop_shell 接线、迁移清单和检查入口；包名/bin、锁文件、打包路径、HTTP/worker 协议及数据库版本均未改变，不需要数据格式迁移。Core 的具体 RequiredBackup、私有 PreparedUpgrade/target 校验、私有 v7 及用户显示路径/SQLite 操作数边界继续有效。未完成的 Windows 状态差异见 #146，平台交付与 #128 等门槛保持各自状态；第二阶段总验收与关闭由 #105 决定。
 
