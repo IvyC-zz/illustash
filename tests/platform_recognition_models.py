@@ -164,9 +164,34 @@ class RecognitionModelTest(unittest.TestCase):
         bad = self.root / 'bad.png'; bad.write_bytes(b'not an image')
         assets = [dict(id=f'asset-{i}', path=str(bad if i == 24 else self.images[i % 8])) for i in range(26)]
         output = self.root / 'output'; output.mkdir()
-        response = self.invoke(self.compute, dict(mode='produce', resources=str(self.resources),
-                               models=str(self.resources / 'models'), runtime=str(self.runtime), shared=str(self.shared),
-                               request=dict(format='illustash-sync/1', identity=identity, assets=assets, output=str(output))))
+        # Progress is visible while the producer still runs: sample it until the process exits.
+        progress = self.root / 'progress.json'
+        request = dict(mode='produce', resources=str(self.resources), models=str(self.resources / 'models'),
+                       runtime=str(self.runtime), shared=str(self.shared),
+                       request=dict(format='illustash-sync/1', identity=identity, assets=assets, output=str(output)))
+        (self.root / 'request.json').write_text(json.dumps(request), encoding='utf-8')
+        (self.root / 'response.json').unlink(missing_ok=True)
+        process = subprocess.Popen([str(self.compute), str(self.root / 'request.json'), str(self.root / 'response.json')],
+                                   env=dict(self.env, ILLUSTASH_RECOGNITION_PROGRESS=str(progress)), cwd=self.root,
+                                   stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+        seen, deadline = [], time.monotonic() + 120
+        while process.poll() is None and time.monotonic() < deadline:
+            try:
+                value = json.loads(progress.read_text(encoding='utf-8'))
+            except (OSError, ValueError):
+                value = None
+            if value and (not seen or seen[-1] != value):
+                seen.append(value)
+            time.sleep(.01)
+        with process:
+            self.assertEqual(process.wait(timeout=5), 0, process.stderr.read().decode(errors='replace'))
+        response = json.loads((self.root / 'response.json').read_text(encoding='utf-8'))
+        self.assertEqual({v['stage'] for v in seen} & {'preparing', 'recognising'}, {'preparing', 'recognising'})
+        self.assertTrue(any(0 < v['processed'] < 26 for v in seen), seen)
+        self.assertTrue(all(v['task_id'] == 'synthetic' and v['total'] == 26 for v in seen))
+        self.assertEqual([v['processed'] for v in seen], sorted(v['processed'] for v in seen))
+        final = json.loads(progress.read_text(encoding='utf-8'))
+        self.assertEqual((final['stage'], final['processed'], final['failed']), ('recognising', 26, 1))
         self.assertEqual(response['identity'], identity)
         self.assertEqual(response['failed'], [{'uuid': 'asset-24'}])
         self.assertEqual(len(response['packages']), 2)

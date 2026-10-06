@@ -98,6 +98,9 @@ impl Syncer {
                     "finished_at",
                     "last_error",
                     "ms_per_image",
+                    "stage",
+                    "import_done",
+                    "import_total",
                 ]
                 .iter()
                 .filter_map(|k| state.get(k).map(|v| ((*k).to_string(), v.clone())))
@@ -542,6 +545,67 @@ fn refresh(library: &Library, run_id: i64, cancel: &AtomicBool) -> Result<(Value
     }
     Ok((json!({"added":out["added"],"removed":out["removed"],"pending":pending}), uuids.into_iter().collect()))
 }
+/// Reads the recognition worker's progress file while the host waits for it. Only a value for
+/// this task, within this request's size and moving forward is accepted; anything else is ignored,
+/// so a stale or malformed file can neither fake progress nor fail the task.
+struct ProgressWatch {
+    task_id: String,
+    total: usize,
+    read_at: Option<std::time::Instant>,
+    processed: Option<usize>,
+    stage: String,
+    /// When the worker reported its first recognised image, for the time estimate.
+    started: Option<(std::time::Instant, usize)>,
+}
+impl ProgressWatch {
+    fn new(task_id: &str, total: usize) -> Self {
+        Self { task_id: task_id.to_owned(), total, read_at: None, processed: None, stage: String::new(), started: None }
+    }
+    /// The validated (stage, processed, failed) in `bytes`, if it is newer than what was shown.
+    fn accept(&mut self, bytes: &[u8]) -> Option<(String, usize, usize)> {
+        let v: Value = serde_json::from_slice(bytes).ok()?;
+        let count = |k: &str| v[k].as_u64().and_then(|n| usize::try_from(n).ok());
+        let (stage, processed, failed) = (v["stage"].as_str()?, count("processed")?, count("failed")?);
+        let valid = v["format"] == "illustash-recognition-progress/1"
+            && v["task_id"].as_str() == Some(self.task_id.as_str())
+            && matches!(stage, "preparing" | "recognising")
+            && count("total") == Some(self.total)
+            && processed <= self.total
+            && failed <= processed;
+        let backwards = self.processed.is_some_and(|p| processed < p)
+            || (stage == "preparing" && (processed > 0 || self.stage == "recognising"));
+        if !valid || backwards {
+            return None;
+        }
+        if self.processed == Some(processed) && self.stage == stage {
+            return None;
+        }
+        (self.processed, self.stage) = (Some(processed), stage.to_owned());
+        Some((stage.to_owned(), processed, failed))
+    }
+    /// State fields for the sync task, at most every 200 ms.
+    fn poll(&mut self, path: &std::path::Path, unreadable: usize) -> Option<Value> {
+        let now = std::time::Instant::now();
+        if self.read_at.is_some_and(|t| now.duration_since(t) < std::time::Duration::from_millis(200)) {
+            return None;
+        }
+        self.read_at = Some(now);
+        if !std::fs::metadata(path).is_ok_and(|m| m.is_file() && m.len() <= 4096) {
+            return None;
+        }
+        let (stage, processed, failed) = self.accept(&std::fs::read(path).ok()?)?;
+        let mut fields = json!({"status":"recognising","stage":stage,"done":unreadable + processed,
+            "failed":unreadable + failed});
+        if stage == "recognising" {
+            let (since, from) = *self.started.get_or_insert((now, processed));
+            if processed > from {
+                fields["ms_per_image"] =
+                    json!(now.duration_since(since).as_millis() as u64 / (processed - from) as u64);
+            }
+        }
+        Some(fields)
+    }
+}
 struct RecognitionRun<'a> {
     root: &'a std::path::Path,
     per_run: usize,
@@ -581,7 +645,7 @@ fn recognise(
             });
         }
     }
-    update(json!({"status":"recognising","total":total,"done":failed.len(),"failed":failed.len()}));
+    update(json!({"status":"recognising","stage":"preparing","total":total,"done":failed.len(),"failed":failed.len()}));
     counts["failed"] = json!(failed.len());
     if readable.is_empty() {
         return Ok(());
@@ -611,7 +675,17 @@ fn recognise(
     command.arg(&request).arg(&response);
     command.env("ILLUSTASH_ROOT", crate::app_paths::resolve(root)?);
     command.env("ILLUSTASH_SHARED", crate::app_resources::shared_path(root)?);
-    let status = ctx.process(&mut command)?;
+    // Inside the task folder, so it is cleaned up with the batches. Workers that do not write it
+    // (the Linux Python route) leave the count where it is until import, as before.
+    let progress = folder.join("progress.json");
+    command.env("ILLUSTASH_RECOGNITION_PROGRESS", &progress);
+    let mut watch = ProgressWatch::new(&ctx.identity().task_id, readable.len());
+    let unreadable = failed.len();
+    let status = ctx.process_observed(&mut command, || {
+        if let Some(fields) = watch.poll(&progress, unreadable) {
+            update(fields);
+        }
+    })?;
     if !status.success() {
         return Err(Error::Invalid(format!("识别进程异常退出：{status}")));
     }
@@ -682,7 +756,12 @@ fn recognise(
         return Err(Error::Invalid("识别结果不完整".into()));
     }
     counts["failed"] = json!(failed.len());
-    let mut done = failed.len();
+    // Recognition is over: the reply's counts are final. Import has its own count, so the bar never
+    // moves back from recognised to imported, and nothing recognised is shown as imported.
+    let import_total = packages.iter().map(|(_, ids, _)| ids.len()).sum::<usize>();
+    let mut import_done = 0;
+    update(json!({"status":"importing","stage":"verifying","done":total,"total":total,"failed":failed.len(),
+        "import_done":0,"import_total":import_total}));
     // Full all-package computation preflight is cancellable and happens before
     // acquiring the receipt lock. One task snapshot/index is reused by every batch.
     let inputs = if packages.iter().any(|(_, _, c)| c.is_some()) {
@@ -709,7 +788,7 @@ fn recognise(
     ctx.receive(&reply.identity, || {
         for (package, ids, claims) in prepared {
             ctx.check()?;
-            update(json!({"status":"importing"}));
+            update(json!({"status":"importing","stage":"importing"}));
             let imported = if let Some(claims) = claims {
                 crate::app_recognition::import_worker_package(
                     library,
@@ -735,12 +814,12 @@ fn recognise(
                     + ids.iter().filter(|u| !already_counted.contains(*u)).count() as u64
             );
             remember_labels(library, &ids, ctx.cancellation())?;
-            done += ids.len();
+            import_done += ids.len();
             writer(&library.db())?.execute(
                 "UPDATE sync_runs SET imported=?,failed=? WHERE id=?",
                 params![counts["imported"].as_u64(), counts["failed"].as_u64(), run_id],
             )?;
-            update(json!({"done":done,"total":total,"imported":counts["imported"],"failed":counts["failed"]}));
+            update(json!({"import_done":import_done,"imported":counts["imported"],"failed":counts["failed"]}));
         }
         Ok(())
     })?;
@@ -785,6 +864,58 @@ mod tests {
     use super::*;
     use crate::app_service::{Application, Options};
     use std::{collections::BTreeMap, path::Path, sync::mpsc, time::Duration};
+
+    fn progress(task: &str, stage: &str, total: usize, processed: usize, failed: usize) -> Vec<u8> {
+        json!({"format":"illustash-recognition-progress/1","task_id":task,"stage":stage,"total":total,
+            "processed":processed,"failed":failed})
+        .to_string()
+        .into_bytes()
+    }
+    #[test]
+    fn recognition_progress_accepts_only_this_task_moving_forward() {
+        let mut watch = ProgressWatch::new("task", 30);
+        assert_eq!(watch.accept(&progress("task", "preparing", 30, 0, 0)), Some(("preparing".into(), 0, 0)));
+        assert_eq!(watch.accept(&progress("task", "preparing", 30, 0, 0)), None, "unchanged");
+        assert_eq!(watch.accept(&progress("task", "recognising", 30, 0, 0)), Some(("recognising".into(), 0, 0)));
+        assert_eq!(watch.accept(&progress("task", "recognising", 30, 26, 1)), Some(("recognising".into(), 26, 1)));
+        for refused in [
+            progress("other", "recognising", 30, 28, 1), // a different (stale) task
+            progress("task", "recognising", 31, 28, 1),  // a different request size
+            progress("task", "recognising", 30, 31, 1),  // more than requested
+            progress("task", "recognising", 30, 28, 29), // more failures than attempts
+            progress("task", "recognising", 30, 25, 1),  // backwards
+            progress("task", "preparing", 30, 26, 1),    // back to model loading
+            progress("task", "importing", 30, 28, 1),    // not a worker stage
+            br#"{"task_id":"task","stage":"recognising","total":30,"processed":28,"failed":1}"#.to_vec(),
+            b"{\"format\":".to_vec(),
+        ] {
+            assert_eq!(watch.accept(&refused), None, "{}", String::from_utf8_lossy(&refused));
+        }
+        assert_eq!(watch.accept(&progress("task", "recognising", 30, 30, 2)), Some(("recognising".into(), 30, 2)));
+    }
+    #[test]
+    fn recognition_progress_poll_reports_counts_with_unreadable_files() {
+        let root = std::env::temp_dir().join(format!("illustash-sync-progress-unit-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        let path = root.join("progress.json");
+        let mut watch = ProgressWatch::new("task", 4);
+        assert_eq!(watch.poll(&path, 2), None, "no file yet");
+        std::fs::write(&path, progress("task", "recognising", 4, 3, 1)).unwrap();
+        watch.read_at = None;
+        let fields = watch.poll(&path, 2).unwrap();
+        assert_eq!(
+            (fields["status"].as_str(), fields["stage"].as_str(), fields["done"].as_u64(), fields["failed"].as_u64()),
+            (Some("recognising"), Some("recognising"), Some(5), Some(3))
+        );
+        std::fs::write(&path, progress("task", "recognising", 4, 4, 1)).unwrap();
+        assert_eq!(watch.poll(&path, 2), None, "read at most every 200 ms");
+        watch.read_at = None;
+        assert!(watch.poll(&path, 2).unwrap()["ms_per_image"].is_u64());
+        std::fs::write(&path, vec![b' '; 4097]).unwrap();
+        watch.read_at = None;
+        assert_eq!(watch.poll(&path, 2), None, "oversized file is ignored");
+        std::fs::remove_dir_all(root).unwrap();
+    }
 
     type Snapshot = BTreeMap<String, (Vec<String>, Vec<Vec<rusqlite::types::Value>>)>;
     fn snapshot(path: &Path) -> Snapshot {
