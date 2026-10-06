@@ -124,6 +124,21 @@ if mode=='hang':
     (Path(r['output'])/'pid').write_text(str(os.getpid()))
     time.sleep(60)
 if mode=='fail': sys.exit(7)
+if mode=='progress':
+    # A stale task's value first (ignored), then this task's; hold until the test releases it.
+    prog=Path(os.environ['ILLUSTASH_RECOGNITION_PROGRESS'])
+    def report(stage,processed,failed=0,task=r['identity']['task_id']):
+        tmp=prog.with_suffix('.tmp')
+        tmp.write_text(json.dumps(dict(format='illustash-recognition-progress/1',task_id=task,stage=stage,total=len(r['assets']),processed=processed,failed=failed)))
+        tmp.replace(prog)
+    report('recognising',len(r['assets']),task='stale-task');time.sleep(.5)
+    report('preparing',0);time.sleep(.5)
+    report('recognising',1);time.sleep(.5)
+    report('recognising',2)
+    release=Path(sys.argv[0]).parent/'release'
+    for _ in range(1000):
+        if release.exists(): break
+        time.sleep(.01)
 p=Path(r['output'])/'result';p.mkdir()
 ids=[a['id'] for a in r['assets']]
 (p/'labels.jsonl').write_text('\n'.join(json.dumps(dict(asset=u,dim='rating',value='general',confidence=.9)) for u in ids))
@@ -185,6 +200,35 @@ Path(sys.argv[2]).write_text(json.dumps(dict(identity=r['identity'],packages=pac
         with sqlite3.connect(self.lib.db) as c:
             self.assertEqual(c.execute("SELECT rating FROM asset_rating WHERE uuid='D'").fetchall(),[('general',)])
         self.assertFalse(self.sentinel.exists())
+
+    def test_native_library_new_worker_progress_before_exit(self):
+        import time
+        for uuid in ('E','F'):
+            self.photo(uuid,'com.atebits.Tweetie2')
+            original=self.library/f'originals/{uuid}/{uuid}.png';original.parent.mkdir(parents=True);original.write_bytes(b'synthetic')
+        self.worker('progress')
+        self.assertEqual(self.request('/api/sync',{})['body'],b'{"started": true}')
+        seen=[]
+        for _ in range(1000):
+            s=json.loads(self.request('/api/sync')['body'])['state']
+            seen.append({k:s.get(k) for k in ('status','stage','done','total','failed')})
+            if s['status']=='recognising' and s.get('stage')=='recognising' and s.get('done')==2: break
+            time.sleep(.01)
+        else:
+            self.fail(seen[-5:])
+        total=seen[-1]['total']
+        self.assertGreaterEqual(total,3)
+        self.assertEqual(seen[-1]['failed'],0)
+        recognising=[v for v in seen if v['status']=='recognising']
+        # Only this task's moving count reaches the panel; the stale full count never does.
+        self.assertIn('preparing',[v['stage'] for v in recognising])
+        self.assertTrue(all(v['done'] in (0,1,2) for v in recognising),recognising)
+        self.assertFalse((self.root/'release').exists())
+        (self.root/'release').touch()
+        value=self.finish()['state']
+        self.assertEqual(value['status'],'done',value)
+        self.assertEqual((value['done'],value['total'],value['imported'],value['import_done'],value['import_total']),
+                         (total,total,total,total,total))
 
     def test_native_library_new_worker_timeout_and_switch_cancel(self):
         self.env['ILLUSTASH_RECOGNITION_TIMEOUT_MS']='200'
