@@ -20,9 +20,6 @@ permissions:
 env:
   CARGO_TERM_COLOR: always
   PYTHON_VERSION: '3.12'
-  # 历史版本产出的合成旧包，供 tests/test_native_library_upgrade.py 做升级验收。
-  TERMS_V5_COMMIT: 5e7e7f7
-  TERMS_V6_COMMIT: d9c49b4
 
 jobs:
   core:
@@ -102,23 +99,6 @@ jobs:
           # 历史 Python/HTTP 对照用的测试参考宿主（tests/reference/host.py 按 release/examples 定位）。
           cargo build --release --locked --manifest-path native/terms/Cargo.toml --features test-reference-host --example reference-http --example recognition-compute --example index-compute --example research-compute --example relation-probe --example provenance-compute
           cargo build --release --locked --manifest-path crates/iqdb/Cargo.toml
-      - name: 历史版本二进制缓存
-        id: history
-        uses: actions/cache@v4
-        with:
-          path: ${{ runner.temp }}/history-bin
-          key: terms-history-${{ runner.os }}-${{ env.TERMS_V5_COMMIT }}-${{ env.TERMS_V6_COMMIT }}
-      - name: 构建历史版本（v5 / v6 旧包产出者）
-        if: steps.history.outputs.cache-hit != 'true'
-        run: |
-          mkdir -p "$RUNNER_TEMP/history-bin"
-          for commit in "$TERMS_V5_COMMIT" "$TERMS_V6_COMMIT"; do
-            src="$RUNNER_TEMP/history-src/$commit"
-            mkdir -p "$src"
-            git archive "$commit" native/terms | tar -x -C "$src"
-            cargo build --release --locked --manifest-path "$src/native/terms/Cargo.toml"
-            cp "$src/native/terms/target/release/illustash-terms" "$RUNNER_TEMP/history-bin/terms-$commit"
-          done
       - name: unittest
         env:
           ILLUSTASH_TERMS_BIN: ${{ github.workspace }}/native/terms/target/release/illustash-terms
@@ -132,8 +112,6 @@ jobs:
           ILLUSTASH_RESEARCH_COMPUTE_BIN: ${{ github.workspace }}/native/terms/target/release/examples/research-compute
           ILLUSTASH_RESEARCH_ADAPTER_BIN: ${{ github.workspace }}/native/terms/target/release/illustash-worker
           ILLUSTASH_INDEX_ADAPTER_BIN: ${{ github.workspace }}/native/terms/target/release/illustash-worker
-          ILLUSTASH_TERMS_V5_BIN: ${{ runner.temp }}/history-bin/terms-${{ env.TERMS_V5_COMMIT }}
-          ILLUSTASH_TERMS_V6_BIN: ${{ runner.temp }}/history-bin/terms-${{ env.TERMS_V6_COMMIT }}
         run: |
           set -o pipefail
           # -b：失败测试的输出（如被测服务日志）附在末尾失败报告里，不散落在日志中段。
@@ -146,7 +124,7 @@ jobs:
           path: ${{ runner.temp }}/unittest.log
           retention-days: 7
       # 跳过必须可见：列出全部跳过及原因。只允许平台限制和依赖真实图库的数据缺失；
-      # 其余跳过（缺被测二进制、缺历史产出者等）在 CI 中视为未验收，判失败。
+      # 其余跳过（缺被测二进制等）在 CI 中视为未验收，判失败。
       - name: 跳过清单
         if: always()
         run: |

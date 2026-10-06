@@ -1,0 +1,5 @@
+{
+  "producer": "d9c49b42eed12c5cc810215be4acf70688617679",
+  "action": 1,
+  "generator": "python -m tests.test_native_library_upgrade --write-fixtures"
+}

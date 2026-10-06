@@ -252,12 +252,7 @@ class LocalAcceptanceTests(unittest.TestCase):
             self.write(name, 'old target')
         self.write('tests/__init__.py', '')
         self.write('tests/candidate_helper.py', 'EXPECTED=\"candidate\"')
-        self.write('tests/test_candidate.py', "from tests.candidate_helper import EXPECTED\nimport os, pathlib, unittest\nclass Candidate(unittest.TestCase):\n def test_candidate(self):\n  root=pathlib.Path(os.environ['ILLUSTASH_NATIVE_ROOT'])\n  self.assertEqual(pathlib.Path(os.environ['ILLUSTASH_TERMS_BIN']).read_text(),'candidate')\n  self.assertEqual(pathlib.Path(os.environ['ILLUSTASH_IQDB_BINARY']).read_text(),'candidate')\n  self.assertEqual((root/'native/terms/target/release/examples/reference-http').read_text(),'candidate')\n  for key in ('ILLUSTASH_TERMS_V5_BIN','ILLUSTASH_TERMS_V6_BIN'):\n   self.assertEqual(pathlib.Path(os.environ[key]).read_text(),'synthetic historical')\n")
-        history = self.root / '.venv/check-all/history' / (acceptance.platform.system() + '-' + acceptance.platform.machine()) / 'synthetic-rust'
-        history.mkdir(parents=True)
-        cached = history / ('terms-' + self.head())
-        cached.write_text('synthetic historical')
-        cached.chmod(0o700)
+        self.write('tests/test_candidate.py', "from tests.candidate_helper import EXPECTED\nimport os, pathlib, unittest\nclass Candidate(unittest.TestCase):\n def test_candidate(self):\n  root=pathlib.Path(os.environ['ILLUSTASH_NATIVE_ROOT'])\n  self.assertEqual(pathlib.Path(os.environ['ILLUSTASH_TERMS_BIN']).read_text(),'candidate')\n  self.assertEqual(pathlib.Path(os.environ['ILLUSTASH_IQDB_BINARY']).read_text(),'candidate')\n  self.assertEqual((root/'native/terms/target/release/examples/reference-http').read_text(),'candidate')\n")
         prefix = """set -eu
 root=$PWD
 cache=$root/.venv/check-all
