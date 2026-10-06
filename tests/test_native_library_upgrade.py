@@ -1,11 +1,16 @@
 """Explicit terms-only startup upgrade on genuinely produced historical synthetic libraries.
 
-Set ILLUSTASH_TERMS_BIN to the release under test and ILLUSTASH_TERMS_V5_BIN /
-ILLUSTASH_TERMS_V6_BIN to historical producers 5e7e7f7 / d9c49b4. Tests never build,
-find a default library, or change an existing golden. Historical binaries and Python
-construct fixtures only; the native host has a Python-sentinel-only PATH.
+Set ILLUSTASH_TERMS_BIN to the release under test. The v5/v6 libraries in
+tests/fixtures/library_upgrade were produced once by the historical producers
+5e7e7f7 / d9c49b4, whose commits predate the public repository; each test starts
+from a byte-identical copy. To regenerate them, set ILLUSTASH_TERMS_V5_BIN /
+ILLUSTASH_TERMS_V6_BIN to those producers and run
+`python -m tests.test_native_library_upgrade --write-fixtures`. Tests never build,
+find a default library, or change an existing golden; the native host has a
+Python-sentinel-only PATH.
 """
 from contextlib import closing
+import gzip
 import hashlib
 import json
 import os
@@ -46,6 +51,10 @@ INSERT INTO meta VALUES ('identity_calibration_active','synthetic-old'),('identi
 # it so a future source-schema change cannot silently rewrite the old input.
 HISTORICAL_SOURCE_SHA256 = '8b2c4aae7adb8e413bbe4ec309cfd523e8ae3f9bcacc6c4c6e91269aaee36c05'
 
+FIXTURES = Path(__file__).resolve().parent / 'fixtures' / 'library_upgrade'
+PRODUCERS = {5: '5e7e7f7e585f1cf8a17a8703e900a0f8fe99edef', 6: 'd9c49b42eed12c5cc810215be4acf70688617679'}
+FOLDER = '<test folder>'
+
 
 def tree(root):
     state = {}
@@ -77,10 +86,10 @@ def database(path):
 
 class NativeLibraryUpgradeTest(unittest.TestCase):
     @classmethod
-    def setUpClass(cls):
+    def setUpClass(cls, producers=False):
         cls.binaries = {}
         for version, variable in ((7, 'ILLUSTASH_TERMS_BIN'), (5, 'ILLUSTASH_TERMS_V5_BIN'),
-                                  (6, 'ILLUSTASH_TERMS_V6_BIN')):
+                                  (6, 'ILLUSTASH_TERMS_V6_BIN'))[:3 if producers else 1]:
             configured = os.environ.get(variable)
             if not configured or not Path(configured).is_file():
                 raise unittest.SkipTest(f'set {variable} explicitly; absence is not upgrade acceptance')
@@ -118,6 +127,23 @@ class NativeLibraryUpgradeTest(unittest.TestCase):
                     'ILLUSTASH_PYTHON_SENTINEL': str(self.sentinel)}
 
     def package(self, version, name):
+        """A fresh copy of the historical v5/v6 library, its source pointed at this test's folder."""
+        fixture = FIXTURES / f'v{version}'
+        produced = json.loads((fixture / 'fixture.json').read_text(encoding='utf-8'))
+        self.assertEqual(produced['producer'], PRODUCERS[version])
+        path = self.root / (name + '.pilib')
+        for sub in ('', 'features', 'thumbnails', 'backups'):
+            (path / sub).mkdir()
+        for database_name in ('library.sqlite', 'source.sqlite'):
+            (path / database_name).write_bytes(gzip.decompress((fixture / (database_name + '.gz')).read_bytes()))
+        config = json.loads((fixture / 'library.json').read_text(encoding='utf-8'))
+        self.assertEqual(config['sources'][0]['path'], FOLDER)
+        config['name'], config['sources'][0]['path'] = name, str(self.folder)
+        library.write_config(path, config)
+        return library.Library(path, config), produced['action']
+
+    def produce(self, version, name):
+        """Run the historical producer; only --write-fixtures calls this."""
         producer = self.binaries[version]
         # Old producers predate resident serve/wd-pending; the unchanged one-shot protocol
         # and asset-free reference perform a complete successful initial refresh.
@@ -461,3 +487,39 @@ class NativeLibraryUpgradeTest(unittest.TestCase):
         self.assertEqual({p.relative_to(lib.path).as_posix(): p.read_bytes() for p in lib.path.rglob('*.sqlite')
                           if p not in (lib.source, lib.db)}, backup_state)
         self.assertFalse(self.sentinel.exists())
+
+
+def write_fixtures():
+    """Produce tests/fixtures/library_upgrade with the historical producers (see module docstring)."""
+    NativeLibraryUpgradeTest.setUpClass(producers=True)
+    case = NativeLibraryUpgradeTest('test_plain_startup_rejects_true_old_schemas_without_changes')
+    case.setUp()
+    try:
+        for version in (5, 6):
+            lib, action = case.produce(version, f'v{version}')
+            leftovers = [p.name for p in lib.path.iterdir() if p.name.endswith(('-wal', '-shm', '-journal'))]
+            assert not leftovers, leftovers
+            fixture = FIXTURES / f'v{version}'
+            fixture.mkdir(parents=True, exist_ok=True)
+            for name in ('library.sqlite', 'source.sqlite'):
+                (fixture / (name + '.gz')).write_bytes(gzip.compress((lib.path / name).read_bytes(), mtime=0))
+            config = json.loads((lib.path / 'library.json').read_text(encoding='utf-8'))
+            assert config['sources'][0]['path'] == str(case.folder)
+            config['sources'][0]['path'] = FOLDER
+            (fixture / 'library.json').write_text(json.dumps(config, ensure_ascii=False, indent=2) + '\n',
+                                                  encoding='utf-8', newline='\n')
+            (fixture / 'fixture.json').write_text(json.dumps(
+                {'producer': PRODUCERS[version], 'action': action,
+                 'generator': 'python -m tests.test_native_library_upgrade --write-fixtures'}, indent=2) + '\n',
+                encoding='utf-8', newline='\n')
+            print(f'v{version}: action {action} -> {fixture}')
+    finally:
+        case.doCleanups()
+
+
+if __name__ == '__main__':
+    import sys
+    if sys.argv[1:] == ['--write-fixtures']:
+        write_fixtures()
+    else:
+        unittest.main()

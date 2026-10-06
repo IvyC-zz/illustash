@@ -1,0 +1,15 @@
+{
+  "format": 1,
+  "id": "C44B3D15-2D54-4F6B-82A2-F2F2A1F4F894",
+  "name": "v5",
+  "created_at": "2026-10-06T21:37:31+08:00",
+  "sources": [
+    {
+      "id": "s1",
+      "kind": "folder",
+      "path": "<test folder>",
+      "preset": "other",
+      "preset_origin": "user"
+    }
+  ]
+}

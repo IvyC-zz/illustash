@@ -62,26 +62,6 @@ run cargo test --locked --manifest-path crates/iqdb/Cargo.toml
 run cargo build --release --locked --manifest-path native/terms/Cargo.toml
 run cargo build --release --locked --manifest-path native/terms/Cargo.toml --features test-reference-host --example reference-http --example recognition-compute --example index-compute --example research-compute --example relation-probe --example provenance-compute
 run cargo build --release --locked --manifest-path crates/iqdb/Cargo.toml
-# 和 CI 一样从历史源码构建；缓存按完整提交、平台及工具链隔离。
-history="$cache/history/$(uname -s)-$(uname -m)/$(rustc --version | tr ' /' '__')"
-mkdir -p "$history"
-for version in V5 V6; do
-  commit=$(config "TERMS_${version}_COMMIT")
-  [ -n "$commit" ] || { echo "缺少 TERMS_${version}_COMMIT" >&2; exit 1; }
-  commit=$(git rev-parse "$commit^{commit}")
-  binary="$history/terms-$commit"
-  if [ ! -x "$binary" ]; then
-    src=$(mktemp -d "${TMPDIR:-/tmp}/illustash-history.XXXXXX")
-    trap 'rm -rf "$src"' EXIT
-    git archive "$commit" native/terms | tar -x -C "$src"
-    run cargo build --release --locked --manifest-path "$src/native/terms/Cargo.toml"
-    cp "$src/native/terms/target/release/illustash-terms" "$binary.tmp"
-    mv "$binary.tmp" "$binary"
-    rm -rf "$src"
-    trap - EXIT
-  fi
-  export "ILLUSTASH_TERMS_${version}_BIN=$binary"
-done
 export ILLUSTASH_TERMS_BIN="$root/native/terms/target/release/illustash-terms"
 export ILLUSTASH_NATIVE_ROOT="$root"
 export ILLUSTASH_IQDB_BINARY="$root/crates/iqdb/target/release/illustash-iqdb"
