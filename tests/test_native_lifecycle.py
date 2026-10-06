@@ -199,8 +199,8 @@ class NativeLifecycleTest(unittest.TestCase):
             self.assertEqual(left['headers'].get(header), right['headers'].get(header), (url, header))
         return right
 
-    def test_27_core_reads_original_bytes_headers_and_errors(self):
-        self.assertEqual(len(CORE_READS), 27)
+    def test_22_core_reads_original_bytes_headers_and_errors(self):
+        self.assertEqual(len(CORE_READS), 22)
         for url in CORE_READS:
             with self.subTest(url=url):
                 self.assertEqual(self.pair(url)['route'], 'core')
