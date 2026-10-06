@@ -179,6 +179,34 @@ class NativeNamesTest(unittest.TestCase):
         for body in ({'action':'refresh'},{'action':'refresh','entity':3},{'action':'model_api','key':'bad'}, {'action':'model_api','model':'bad space'},{'action':'model_api','base':'http://example.invalid'},{'action':'model_api','base':self.service.base+'?x=1'},{'action':'unknown'}):
             self.assertEqual(self.request('/api/names',body)['status'],400)
         self.assertEqual(len(self.service.calls),0)
+    def test_library_consent_to_name_queries_persists_and_revokes(self):
+        network=lambda:json.loads(self.request('/api/names')['body'])['network']
+        prefs=lambda:sqlite3.connect(self.lib.db).execute("SELECT count(*) FROM prefs WHERE key='names_network'").fetchone()[0]
+        self.assertEqual(network(),{'authorized':False,'this_run':False,'granted_at':None})
+        for body in ({'action':'network'},{'action':'network','allow':'yes'},{'action':'network','allow':1}):
+            self.assertEqual(self.request('/api/names',body)['status'],400)
+        self.assertEqual(prefs(),0)
+        response=self.request('/api/names',{'action':'network','allow':True})
+        self.assertEqual(response['status'],200,response['body'])
+        granted=json.loads(response['body'])['network']
+        self.assertTrue(granted['authorized']);self.assertFalse(granted['this_run']);self.assertRegex(granted['granted_at'],r'^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d$')
+        self.assertEqual(prefs(),1)
+        # The consent belongs to the library: it survives a restart and is not a startup preference.
+        self.stop(self.process);self.process,self.log=self.start(self.lib.path)
+        self.token=json.loads(self.request('/api/bootstrap')['body'])['token']
+        self.assertEqual(network(),granted)
+        self.assertNotIn('names_network',json.loads(self.request('/api/settings')['body'])['startup'])
+        revoked=self.request('/api/names',{'action':'network','allow':False})
+        self.assertEqual(revoked['status'],200,revoked['body'])
+        self.assertEqual(json.loads(revoked['body'])['network'],
+                         {'authorized':False,'this_run':False,'granted_at':None})
+        self.assertEqual(prefs(),0)
+        # --names-network authorizes this run only and records nothing.
+        self.stop(self.process);self.process,self.log=self.start(self.lib.path,extra=('--names-network',))
+        self.token=json.loads(self.request('/api/bootstrap')['body'])['token']
+        self.assertEqual(network(),{'authorized':True,'this_run':True,'granted_at':None})
+        self.assertEqual(prefs(),0)
+        self.assertEqual(len(self.service.calls),0)
     def test_remote_picker_success_bytes_and_persistent_query_cache(self):
         self.stop(self.process);self.process,self.log=self.start(self.lib.path)
         for url in ('/api/entities?remote=1&q=new','/api/entities?remote=1&q=%E5%90%88%E6%88%90','/api/works?remote=1&q=new','/api/works?remote=1&q=%E5%90%88%E6%88%90','/api/local-links'):
