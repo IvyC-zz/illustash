@@ -38,6 +38,8 @@ static VOLATILE: LazyLock<Regex> = LazyLock::new(|| {
 static STAMP: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^learning-v1:[0-9a-f]{64}$").unwrap());
 static STAMPS: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"learning-v1:[0-9a-f]{64}").unwrap());
 static DERIVED: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"migration[/:][0-9a-f]{16}").unwrap());
+/// The operating system's own error text and number (recorded on macOS; Windows words and numbers it differently).
+static OS_ERROR: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"[^：:\n]*\(os error \d+\)").unwrap());
 const SKIP_COLUMNS: [(&str, &str); 2] = [("term_packages", "manifest"), ("term_evidence", "fingerprint")];
 const DERIVED_META: [&str; 1] = ["identity_graph_version"];
 const COMPANIONS: [&str; 4] = ["", "-wal", "-shm", "-journal"];
@@ -235,9 +237,10 @@ fn inverse(mapping: &HashMap<String, String>) -> HashMap<String, String> {
     mapping.iter().filter(|(k, _)| !STAMP.is_match(k)).map(|(k, v)| (v.clone(), k.clone())).collect()
 }
 
-/// Output text as compared: stamps and derived versions masked.
+/// Output text as compared: stamps, derived versions and operating-system error text masked.
 fn masked(text: &str) -> String {
-    DERIVED.replace_all(&STAMPS.replace_all(text, "<stamp>"), "<derived>").into_owned()
+    let text = DERIVED.replace_all(&STAMPS.replace_all(text, "<stamp>"), "<derived>").into_owned();
+    OS_ERROR.replace_all(&text, "<os error>").into_owned()
 }
 
 struct Serve {
