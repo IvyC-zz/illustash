@@ -34,7 +34,7 @@ illustash-terms reproject --db <library.sqlite>     # 需要时整表重建投�
 
 ## 2. 逐表对照
 
-`tools/verify_terms_artists.py --library <副本>`（2026-10-05 随参考实现删除，#186；见 git 历史）：调用 `tests/reference/web/artists.py` 的原函数（不另写一份旧逻辑）与核心投影比较；拒绝在 `~/Pictures/Illustash` 下运行。
+`tools/verify_terms_artists.py --library <副本>`（2026-10-05 随参考实现删除，#186；见 git 历史）：调用 `tests/reference/web/artists.py（#9 已删除）` 的原函数（不另写一份旧逻辑）与核心投影比较；拒绝在 `~/Pictures/Illustash` 下运行。
 
 **2026-09-28，「我的图库」一致性副本**（SQLite 备份接口只读拷贝 library.sqlite 与 provenance.sqlite；拷贝前后核对原库未被写）：
 
@@ -54,13 +54,13 @@ illustash-terms reproject --db <library.sqlite>     # 需要时整表重建投�
 - 用 Python `Store.undo` 撤销那步收回，同步后一致；
 - 故意删掉一条投影，脚本在显示、筛选、计数三项报出差异；`reproject` 后恢复一致。
 
-没有对照的：原帖（`image_sources`）仍只在溯源库，核心不收；显示名的选择顺序（昵称 → X 账号 → Danbooru tag）仍在 `tests/reference/web/artists.py`，这里只比原料。Windows 未验收。
+没有对照的：原帖（`image_sources`）仍只在溯源库，核心不收；显示名的选择顺序（昵称 → X 账号 → Danbooru tag）仍在 `tests/reference/web/artists.py（#9 已删除）`，这里只比原料。Windows 未验收。
 
 ## 3. 收编写路径
 
 **切换**（`legacy_artists::cutover`，命令行 `cutover-artists`）：建表或升级、最后一次收编同步，并在**同一个事务**里写下 library.sqlite 的 `meta` `terms_artists=core`。已经切过就什么都不做；切过之后 `sync-artists` 拒绝运行（核心新写的裁决不在冻结的旧表里）。没有 provenance.sqlite 的图库也能切（按空的溯源库处理，只收人工判断）。
 
-历史 Python 测试参考的服务启动时（`tests/reference/web/server.py` `adopt_artists`）：图库还没切、且找得到核心程序，就先 `Store.backup()` 备份人工知识，再切换，打印收了多少画师、证据和判断；找不到程序或切换失败，照旧用旧表并打印原因。桌面 App 里核心程序就是外壳本身（`ILLUSTASH_TERMS_BIN`）。
+历史 Python 测试参考的服务启动时（`tests/reference/web/server.py（#9 已删除）` `adopt_artists`）：图库还没切、且找得到核心程序，就先 `Store.backup()` 备份人工知识，再切换，打印收了多少画师、证据和判断；找不到程序或切换失败，照旧用旧表并打印原因。桌面 App 里核心程序就是外壳本身（`ILLUSTASH_TERMS_BIN`）。
 
 **切换之后：**
 
@@ -69,8 +69,8 @@ illustash-terms reproject --db <library.sqlite>     # 需要时整表重建投�
 | 「是 TA / 不是 / 清除」 | Python 写 `artist_verdicts` | `Store.judge_artist` 校验后调用核心 `judge`，写 `term_verdicts` 和一步 `actions`；历史文案不变 |
 | 撤销 | Python 按 `before_json` 改回 `artist_verdicts` | 核心写的步骤、以及旧的 `artist_verdict` 步骤（收编时已挂在同一个 action 上）都交给核心撤；其他步骤仍归 Python |
 | `Store.artist_verdicts()` | 读 `artist_verdicts` | 读核心的有效裁决，形状不变 |
-| 溯源结果 | 核心直接读 `image_artists` | 每次运行结束（含停止、失败），以及服务启动时，Runner 调 `tests/reference/provenance/export.py` 写一个完整快照证据包，交核心 `import`；核心按指纹去重。失败只记录（`/api/provenance` 的 `delivery`）不抛出，下次再交 |
-| 详情里的画师、库里 N 张、按画师筛选、抽查池 | `tests/reference/web/artists.py` 读 `image_artists` + 判断 | 读核心投影（机器认定、人工确认可见；抽查池是有强证据的图） |
+| 溯源结果 | 核心直接读 `image_artists` | 每次运行结束（含停止、失败），以及服务启动时，Runner 调 `tests/reference/provenance/export.py（#9 已删除）` 写一个完整快照证据包，交核心 `import`；核心按指纹去重。失败只记录（`/api/provenance` 的 `delivery`）不抛出，下次再交 |
+| 详情里的画师、库里 N 张、按画师筛选、抽查池 | `tests/reference/web/artists.py（#9 已删除）` 读 `image_artists` + 判断 | 读核心投影（机器认定、人工确认可见；抽查池是有强证据的图） |
 | 画师名字与主页 | 读 `artist_links`、`artist_names` | 读 `term_links`、`term_names`，选名规则不变（`_card` 两边共用） |
 | 原帖 | `image_sources` | 不变，仍读溯源库；「不是」的判断改用核心投影 |
 
@@ -86,7 +86,7 @@ illustash-terms reproject --db <library.sqlite>     # 需要时整表重建投�
 
 - 切换：0.7 秒，4,011 位画师、9,420 条证据、51 条裁决（50 对历史），全体核对通过。
 - 切换后第一个证据包：9,420 条全部识别为已有（`added 0, duplicate 9420`），约 2.3 秒；同一快照再交一次直接判为已导入。
-- 三方对照（`verify_terms_artists.py --baseline` 未切换的副本）：旧读路径 vs 核心表 vs App 实际读路径（切换后的 `tests/reference/web/artists.py`），显示与确认 8,316 张、库里 N 张 3,269 位、筛选 4,011 位、抽查池 8,316 张、链接昵称与显示名 4,011 位，**全部 0 差异**。旧读路径全量 24.2 秒，切换后的 App 读路径 18.2 秒。
+- 三方对照（`verify_terms_artists.py --baseline` 未切换的副本）：旧读路径 vs 核心表 vs App 实际读路径（切换后的 `tests/reference/web/artists.py（#9 已删除）`），显示与确认 8,316 张、库里 N 张 3,269 位、筛选 4,011 位、抽查池 8,316 张、链接昵称与显示名 4,011 位，**全部 0 差异**。旧读路径全量 24.2 秒，切换后的 App 读路径 18.2 秒。
 - 测试：Rust 48 项；Python 全量 401 项（新增 `tests/test_terms_artists.py`：切换、核心读写、撤销新旧步骤、交包、没有核心、交包失败、核心拒绝的提示）。
 
 没有做的：没在真实图库上切换（它会在你下次用这个分支启动 App 时自动进行，先备份）；没启动完整桌面 App；Windows 未验收；同一位画师的合并（`same_as`）还不会在投影里归并，当前真实数据里没有合并过的画师。

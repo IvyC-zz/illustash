@@ -17,10 +17,10 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 SPEC = ROOT / 'tests/migration_inventory.json'
-ROOTS = ('web', 'provenance', 'tools', 'desktop', 'native', 'crates')
+ROOTS = ('web', 'tools', 'desktop', 'native', 'crates')
 EXTENSIONS = {'.py', '.rs', '.sql', '.swift', '.sh', '.command', '.ps1', '.bat'}
 EXCLUDE_DIRS = {'target', '__pycache__', '.venv', 'node_modules', '.git', 'tests'}
-PRODUCTION_TOOLS = {'char_patch.py', 'build_characters.py', 'char_scan.py', 'ccip.py', 'calibrate_classification.py', 'index_worker.py'}
+PRODUCTION_TOOLS = {'char_patch.py', 'build_characters.py', 'char_scan.py', 'ccip.py', 'index_worker.py'}
 GENERATED = {'casefold.rs', 'http_unicode.rs', 'name_codecs.rs'}
 WRITE_SQL = re.compile(r'\b(INSERT(?:\s+OR\s+\w+)?\s+INTO|REPLACE\s+INTO|UPDATE|DELETE\s+FROM|CREATE\s+(?:TABLE|INDEX|TRIGGER|VIEW)(?:\s+IF\s+NOT\s+EXISTS)?|ALTER\s+TABLE|DROP\s+(?:TABLE|INDEX|TRIGGER|VIEW)(?:\s+IF\s+EXISTS)?)\s+([\w.]+)', re.I)
 TRANSACTIONS = re.compile(r'\b(BEGIN|COMMIT|ROLLBACK|VACUUM|ATTACH|DETACH|REINDEX)\b', re.I)
@@ -40,9 +40,6 @@ def source_files(root):
             if rel.as_posix() == 'native/terms/examples/read-http.rs':
                 continue  # Explicit test-read-host feature only; never a shipped entry.
             if path.parent.name == 'tools' and path.name not in PRODUCTION_TOOLS:
-                continue
-            # Research evidence/cache implementations remain optional; their coordination exceptions are reviewed.
-            if rel.parts[0] == 'provenance' and path.name not in {'assets.py', 'db.py', 'net.py'}:
                 continue
             if path.suffix in EXTENSIONS:
                 paths.append(path)
@@ -157,18 +154,14 @@ def scan(root):
         rel = path.relative_to(root).as_posix()
         text = path.read_text(encoding='utf-8')
         candidates = python_sites(text) if path.suffix == '.py' else text_sites(text, path.suffix)
-        # db.connect upgrades research storage; the remaining provenance DB writers are optional machine evidence.
+        # ccip.py: only its function-level database writes are production boundaries.
         if rel == 'tools/ccip.py':
             candidates = [s for s in candidates if s['kind'] == 'database-write' and s['scope'] != '<module>']
-        if rel == 'tools/calibrate_classification.py':
-            candidates = [s for s in candidates if s['scope'].startswith('image_groups')]
-        if rel == 'provenance/db.py':
-            candidates = [s for s in candidates if s['scope'] == 'connect']
         if path.suffix == '.json':
             config = json.loads(text)
             commands = [c.get('runtimeExecutable', '<dynamic>') for c in config.get('configurations', [])] if rel.startswith('.claude/') else ['desktop-app']
             candidates = [{'line': 1, 'scope': '<config>', 'kind': 'entrypoint', 'key': command, 'detail': command} for command in commands]
-        if rel not in {'tools/ccip.py', 'tools/calibrate_classification.py'}:
+        if rel != 'tools/ccip.py':
             sources[rel] = hashlib.sha256(text.encode()).hexdigest()  # reporting only, never a gate
         for site in sorted(candidates, key=lambda s: (s['line'], s['kind'])):
             sites.append({'path': rel, **site})

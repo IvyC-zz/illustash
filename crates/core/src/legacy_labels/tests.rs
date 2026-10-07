@@ -3,7 +3,7 @@ use crate::package::tests::build;
 use crate::package::{Package, FORMAT};
 use crate::store::{import_package_with, state, undo, Undo};
 
-/// tests/reference/web/store.py 里本模块读的表（原样，含索引），以及一段用户标签历史：
+/// tests/reference/web/store.py（#9 已删除） 里本模块读的表（原样，含索引），以及一段用户标签历史：
 /// 1 给 a、b 贴上 summer；2 从 b 去掉 summer；3 给 c 贴 x 后撤销。
 const LIBRARY_SQL: &str = r#"
 CREATE TABLE meta(key TEXT PRIMARY KEY,value TEXT NOT NULL);
@@ -104,7 +104,7 @@ fn cutover_swaps_the_tables_for_views_that_read_the_same() {
     assert!(crate::store::labels_in_core(&c).unwrap());
     assert_eq!(cutover(&mut c).unwrap(), None, "切过就不再切");
     // Python 升级 schema 时会重跑建表语句：CREATE TABLE IF NOT EXISTS 碰到同名视图不报错；给视图建索引则报错，
-    // 即使索引名还挂在冻结的旧表上。所以 tests/reference/web/store.py 升级时要跳过这三个名字上的建索引语句。
+    // 即使索引名还挂在冻结的旧表上。所以 tests/reference/web/store.py（#9 已删除） 升级时要跳过这三个名字上的建索引语句。
     c.execute_batch(
         "CREATE TABLE IF NOT EXISTS asset_tags(uuid TEXT,tag TEXT);
          CREATE TABLE IF NOT EXISTS general_hits(uuid TEXT,value TEXT); CREATE TABLE IF NOT EXISTS asset_rating(uuid TEXT,rating TEXT);",

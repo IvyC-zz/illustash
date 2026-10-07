@@ -32,7 +32,7 @@
      - 搜索能匹配中、日、英名、原 tag 和作品名。
    - 数据源：Bangumi + Danbooru wiki（萌娘百科不做）。DeepSeek 只作最后兜底，设置页已留 key 输入框，等用户单独测试。
    - **已完成**（已合并到 main）：
-     - 后端 `tests/reference/web/names.py`，由 Codex 完成，分支 `codex/display-names`；
+     - 后端 `tests/reference/web/names.py（#9 已删除）`，由 Codex 完成，分支 `codex/display-names`；
      - 前端显示、角色页折叠、设置页「角色名」一栏；
      - 在库的副本上实测过：Bangumi 角色搜索加精确匹配，大部分角色能拿到正确的中文名。
    - 2026-09-24 第二、三轮已合并：
@@ -136,7 +136,7 @@
 - **iOS（开了 iCloud 照片）**：桌面端直接读 Mac 上本机的 Photos，两端之间只同步识别结果和人工结论（走用户自己的 iCloud 私有数据库），不传图片。
 - **分工**：首次全量和大规模重算交给桌面端；日常增量尽量在手机本机跑，桌面端是加速器，不是必需品。
   低端安卓机跑不动时，增量也交给桌面端。
-- **资产 ID 链接化（做移动端之前必须完成）**：现在人工结论按 Mac Photos 的 UUID 存（`tests/reference/web/store.py` 的 `assets.uuid`），
+- **资产 ID 链接化（做移动端之前必须完成）**：现在人工结论按 Mac Photos 的 UUID 存（`tests/reference/web/store.py（#9 已删除）` 的 `assets.uuid`），
   跨设备对不上；安卓 MediaStore ID 在重新扫描后也可能变。改成**内部资产 ID + 设备链接**
   （iOS `PHCloudIdentifier`、Mac Photos UUID、安卓路径加内容哈希），和身份模型「内部 ID + 外部 tag 链接」同一个思路。
 - **待验证**：
@@ -163,7 +163,7 @@
 - **以后恢复时走方案 A**：让 Rust 自己持有 SQLite 连接（例如 rusqlite），事务也由 Rust 管理，Python 只作为研究/推理 worker。
   这是 Rust 独立运行、做 Windows 桌面端和「安卓借桌面算力」节点的前提，也是唯一可能带来性能收益的路。改动大，先出方案再动手。
   - **有利条件**：已迁移的 Rust 业务代码都通过 `dyn Database` 接口访问数据库，换成 rusqlite 实现后业务逻辑基本不用改。
-  - **瓶颈在哪**：`web/native_core.py` 用 ctypes 回调，每条 SQL 都要走一轮「Rust 编码 JSON → Python 解码 → sqlite3 执行 → 编码结果行 → Rust 解析」。
+  - **瓶颈在哪**：`web/native_core.py（#9 已删除）` 用 ctypes 回调，每条 SQL 都要走一轮「Rust 编码 JSON → Python 解码 → sqlite3 执行 → 编码结果行 → Rust 解析」。
     Windows CI 上同一个 3000 实体测试，默认 Python 模式通过、Rust 模式超时，说明代价就在这座桥上。
   - **三档方案**：
     - **方案 0，只修桥**：ctypes 换成 PyO3，JSON 换成二进制，多条 SQL 合并成一次回调。能让 Windows 门禁变绿，但仍离不开 Python，不作为方向。
@@ -185,7 +185,7 @@
 
 ## 已知的局限与可以改进的地方
 
-- **相似检测**（`web/relate.py`、`web/similar.py`）：
+- **相似检测**（`web/relate.py（#9 已删除）`、`web/similar.py（#9 已删除）`）：
   - 一张图多了个小插图、另一张那里是空白，会被判成「色块遮住」，归类不准，但分组是对的；
   - 布局相同的两张聊天截图会被判成差分；这类图大多已经被排除规则排除了；
   - 还不支持部分重叠，比如一张长图被拆成两张、两张之间有重叠的情况；

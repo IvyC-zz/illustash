@@ -1,6 +1,6 @@
 //! 用户标签、分级、WD 题材切到词条核心（docs/TERMS.md 第 4 节第 3 步，docs/TERMS_LABELS.md）。
 //!
-//! - 分级、WD 题材：机器证据由 tests/reference/web/wd_export.py 按证据包交来（链接 `wd_rating:<值>`、`wd:<标签>`），判定器见 schema.rs。
+//! - 分级、WD 题材：机器证据由 tests/reference/web/wd_export.py（#9 已删除） 按证据包交来（链接 `wd_rating:<值>`、`wd:<标签>`），判定器见 schema.rs。
 //! - 用户标签：用户自建的概念（kind=concept，显示名来源 `user`）；「加上」是裁决 yes，「去掉」是 clear（人收回，不是否定）。
 //!   旧的 `asset_tags` 按 `actions` 历史重建成裁决，每条挂在原来那一步上，与画师收编同一个办法。
 //!
@@ -81,7 +81,7 @@ pub fn concept_by_name(conn: &Connection, name: &str, create: Option<&str>) -> R
     }
 }
 
-/// 切换。已经切过返回 None。之前必须已把 WD 证据交齐（tests/reference/web/wd_export.py），否则拒绝并说还差几张。
+/// 切换。已经切过返回 None。之前必须已把 WD 证据交齐（tests/reference/web/wd_export.py（#9 已删除）），否则拒绝并说还差几张。
 pub fn cutover_with_backup(conn: &mut Connection, backup: &crate::backup::RequiredBackup) -> Result<Option<Report>> {
     crate::schema_rules::migrate_with_backup(conn, backup)?;
     if crate::store::labels_in_core(conn)? {

@@ -10,7 +10,7 @@
 
 ## 溯源生命周期
 
-原生溯源的现行任务/授权与恢复见 [PROVENANCE.md](PROVENANCE.md) 第 8 节；下述 Python 生命周期只存在于测试参考（`tests/reference/`，#186），生产不使用。`tests/reference/provenance/lifecycle.py` 为一个图库提供跨进程租约。App 和 CLI 共享租约；取得独占权后才将遗留 running 记录恢复为 failed。App 先记录 run，再启动子进程；启动失败、非零退出、停止和超时均写回该 run。子进程使用独立进程组；切图库 close 等待清理，超时强杀；正常退出后仍清理持有管道的孙进程。macOS 上父进程异常消失时，worker 看门狗终止整个进程组，下一次打开恢复中断记录。Windows 分支采用 taskkill /T /F，尚未做 Windows 实机生命周期验收。
+原生溯源的现行任务/授权与恢复见 [PROVENANCE.md](PROVENANCE.md) 第 8 节；下述 Python 生命周期是已删除的旧实现（原在 `tests/reference/`，#9 删除，副本在私有库归档），只作历史说明，生产从未使用。`tests/reference/provenance/lifecycle.py（#9 已删除）` 为一个图库提供跨进程租约。App 和 CLI 共享租约；取得独占权后才将遗留 running 记录恢复为 failed。App 先记录 run，再启动子进程；启动失败、非零退出、停止和超时均写回该 run。子进程使用独立进程组；切图库 close 等待清理，超时强杀；正常退出后仍清理持有管道的孙进程。macOS 上父进程异常消失时，worker 看门狗终止整个进程组，下一次打开恢复中断记录。Windows 分支采用 taskkill /T /F，尚未做 Windows 实机生命周期验收。
 
 Runner 不设总时长上限：worker 连续 600 秒没有任何输出才判为「运行超时（10 分钟没有进展）」，可通过构造参数调整；停止宽限 10 秒。（2026-09-28 改：原来的 3600 秒总超时让第一次整库 OCR（约 4.8 万张、每秒约 5 张）在 OCR 步骤就被截断，后面的步骤永远轮不到。）进度除文字外还有结构化数字（`{"progress": {label, done, total, found, mb}}`，Runner 存进状态的 `progress`，设置页画成进度条和「流量 / 上限」条）。OCR 每 200 张、像素哈希每 1000 张、本地比对每 100 张小图（一位画师常有上千张）、X 关注每 100 个、Pixiv 相关画师和昵称每 20 位报一次进度。忙碌时收到 new 请求会持久化并合并为一次补跑，切库时不启动补跑，回到该库后可恢复。
 

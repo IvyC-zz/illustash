@@ -76,7 +76,7 @@ illustash-terms recognition-import --library /path/to/library.pilib --root /path
 illustash-terms recognition-import --library /path/to/library.pilib --root /path/to/resources --resume
 ```
 
-旧 `python -m web.results` CLI 已退出生产；Python 导入函数和历史 CLI 对照保留在 `tests/reference/web/results.py`，仅供测试参考。`--root` 是模型与标签资源目录，不是图库路径。
+旧 `python -m web.results` CLI 已退出生产；Python 导入函数和历史 CLI 对照保留在 `tests/reference/web/results.py（#9 已删除）`，仅供测试参考。`--root` 是模型与标签资源目录，不是图库路径。
 
 模型规格命令只计算本地模型及 tag 文件的指纹，不联网。生产者必须使用同一套模型、tag 顺序和预处理。模型名称字符串相同而文件不同也会被拒绝。
 

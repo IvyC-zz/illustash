@@ -115,7 +115,7 @@ mod tests {
 
 #[cfg(test)]
 mod float_layout {
-    /// tests/reference/provenance/export.py 的 canonical 要逐字符复现这套排版（tests/test_terms_artists.py 用同一组字面值）。
+    /// tests/reference/provenance/export.py（#9 已删除） 的 canonical 要逐字符复现这套排版（tests/test_terms_artists.py 用同一组字面值）。
     #[test]
     fn serde_json_lays_out_floats_like_this() {
         let values =

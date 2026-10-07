@@ -14,7 +14,7 @@
 //! - `reproject-characters --db <library.sqlite>`：S3 从兼容表重算角色派生表（尚非完整 term_* 重建）。
 //! - `reproject --db <library.sqlite>`：由证据和裁决整表重建投影（投影随时可以算回来）。
 //! - `undo --db <library.sqlite> --action <id>`：撤销最近一步，且它必须正是 `<id>`、由词条核心写入。
-//!   由 tests/reference/web/terms_core.py 调用。
+//!   由 tests/reference/web/terms_core.py（#9 已删除） 调用。
 //!
 //! - `library-create --dest <新包.pilib> --folder <来源目录> [--reference <参考.sqlite>] [--name <名称>] [--preset pixiv|x|other]`：显式创建新库，不扫描、升级或启动 worker。
 //!

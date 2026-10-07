@@ -2,7 +2,7 @@ use super::*;
 use crate::store::{state, undo, Undo};
 use std::path::PathBuf;
 
-/// provenance/db.py v4 里本模块读的几张表（原样）。
+/// provenance/db.py（#9 已删除） v4 里本模块读的几张表（原样）。
 const PROVENANCE: &str = "
 CREATE TABLE artist_names(artist_id TEXT NOT NULL REFERENCES artists(id), source TEXT NOT NULL, name TEXT NOT NULL,
  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY(artist_id,source));
@@ -25,7 +25,7 @@ INSERT INTO image_artists(asset,artist_id,method,score,evidence,status,updated_a
  ('gone','ART-B','pixel_hash',1,'{}','auto','2026-09-28 01:00:00');
 ";
 
-/// tests/reference/web/store.py 里本模块读的几张表，以及一段画师判断历史：
+/// tests/reference/web/store.py（#9 已删除） 里本模块读的几张表，以及一段画师判断历史：
 /// 1 判 a 是 ART-A；2 判 b 是 ART-A；3 改判 a 不是 ART-A；4 判 c 是 ART-B 后又撤销；5 别的操作（标签）。
 const LIBRARY_SQL: &str = r#"
 CREATE TABLE meta(key TEXT PRIMARY KEY,value TEXT NOT NULL);

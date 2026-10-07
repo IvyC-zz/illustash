@@ -1,4 +1,4 @@
-//! tests/reference/web/artists.py read contract. Auxiliary provenance stays read-only and shares the request transaction.
+//! tests/reference/web/artists.py（#9 已删除） read contract. Auxiliary provenance stays read-only and shares the request transaction.
 use crate::{
     http_json::Json,
     http_read::{flag, rows, strings},

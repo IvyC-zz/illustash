@@ -1,4 +1,4 @@
-//! S3 角色业务命令（docs/TERMS_CHARACTERS_PLAN.md 第 8 节）：一个命令一个核心事务，逐行照 tests/reference/web/store.py 的旧写法。
+//! S3 角色业务命令（docs/TERMS_CHARACTERS_PLAN.md 第 8 节）：一个命令一个核心事务，逐行照 tests/reference/web/store.py（#9 已删除） 的旧写法。
 //!
 //! 写法：兼容表（`assertions`、`entities`、`links`、`work_review`……）照旧 SQL 写；人工结论同时追加成
 //! `term_verdicts`（挂在这一步上），结构状态按受影响的身份镜像进 `terms` / `term_tree` / `term_links`。
@@ -741,7 +741,7 @@ pub fn command(c: &Connection, args: &Value) -> Result<Value> {
 /// - 旧步骤：非空，每项都是角色的旧形状（快照、合并、身份关系、锚点、资料）。
 ///
 /// `[]`、`curation`、`identity_skip`、标签、画师仍归各自的主人；角色形状与别的形状混在一步里、或形状不认识，拒绝。
-/// tests/reference/web/terms_core.py 的 `character_owns` 用同一条规则。
+/// tests/reference/web/terms_core.py（#9 已删除） 的 `character_owns` 用同一条规则。
 pub fn owns(before: &Value) -> Result<Option<Vec<Value>>> {
     let Some(items) = before.as_array() else { return Ok(None) };
     if items.len() == 1 {

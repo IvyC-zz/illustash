@@ -6,7 +6,7 @@
 
 **范围**：
 - 角色、皮肤、作品的名字（`names`）、按文字键的名字与别名（`display_names`、`name_aliases`）；
-- 选名规则（`tests/reference/web/names.py` 的 `View` 与词表）、名字搜索；
+- 选名规则（`tests/reference/web/names.py（#9 已删除）` 的 `View` 与词表）、名字搜索；
 - 历史文案的生成，以及剩下写入口的预演（拆脚手架阶段 C 里依赖名字的部分）。
 
 **不在范围**：
@@ -31,7 +31,7 @@ Python 里的词表副本仍给 NameUpdater 用，两边由测试钉住相同。
 ## 2. 切换
 
 - 命令 `cutover-names`，前提是角色已在核心。一个事务里完成：最后一次收编（必须零差异）、三张名字表加写保护、写 `meta.terms_names=core`、整表建显示投影。
-- 服务启动时 `adopt_terms` 按「标签 → 角色 → 名字」顺序切换（`tests/reference/web/server.py` `adopt_names`）。切换前先备份；失败就留在旧表，下次启动再试。
+- 服务启动时 `adopt_terms` 按「标签 → 角色 → 名字」顺序切换（`tests/reference/web/server.py（#9 已删除）` `adopt_names`）。切换前先备份；失败就留在旧表，下次启动再试。
 - 已切换的库每次启动先跑一次核心 `migrate`（拆脚手架阶段 A 的 `upgrade_terms`）。真实图库现在是第 3 版，第一次用这个分支启动时会升到第 5 版，同时删掉冻结的旧表。
 
 ## 3. 切换之后
