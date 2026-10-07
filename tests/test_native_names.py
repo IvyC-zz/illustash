@@ -114,14 +114,12 @@ class NativeNamesTest(unittest.TestCase):
         self.service = TextService(); self.addCleanup(self.service.close)
         self.rec.alias(self.service.base, '@SERVICE@')
         self.env.update(ILLUSTASH_COPYRIGHT_BASE=self.service.base, ILLUSTASH_BANGUMI_BASE=self.service.base)
-        pass
         self.alice = self.rec.value('alice')
     def enable(self):
         self.stop(self.process); self.enabled=True
         self.process, self.log = self.start(self.lib.path)
         self.token=json.loads(self.request('/api/bootstrap')['body'])['token']
         self.rec.alias(self.token,'@TOKEN@')
-        pass
         self.finish()
     def finish(self, status='done'):
         def complete():
@@ -221,7 +219,7 @@ class NativeNamesTest(unittest.TestCase):
     def enable_error(self):
         self.stop(self.process);self.enabled=True;self.process,self.log=self.start(self.lib.path);self.finish('error')
     def test_busy_refresh_cancel_switch_same_id_and_late_result(self):
-        self.enable(); second,_=self.package('second')
+        self.enable(); second = self.package('second')
         second.config['id']=self.lib.config['id'];second.save()
         self.service.block=True
         self.assertEqual(self.request('/api/names',{'action':'refresh'})['status'],200)
@@ -313,7 +311,7 @@ class NativeNamesTest(unittest.TestCase):
         self.stop(self.process);self.process,self.log=self.start(self.lib.path)
         self.token=json.loads(self.request('/api/bootstrap')['body'])['token']
         self.request('/api/names',{'action':'model_api','key':'synthetic-secret','base':self.service.base})
-        second,_=self.package('model-second')
+        second = self.package('model-second')
         self.service.block=True
         with ThreadPoolExecutor() as pool:
             pending=pool.submit(self.request,'/api/names',{'action':'model_api_test'})

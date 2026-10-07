@@ -102,7 +102,7 @@ class NativeIndexComputeTest(unittest.TestCase):
 
     def legacy(self, root, tags, request):
         # Fixed algorithm reference: no model_metrics check/model loading; no numeric substitute.
-        return index_expectations.legacy(self,old)
+        return index_expectations.legacy(self, root)
 
     def test_cached_apply_clean_build_scan_matches_algorithm_reference(self):
         with tempfile.TemporaryDirectory() as tmp:

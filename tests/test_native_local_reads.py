@@ -1,7 +1,7 @@
 """#41 native local queries: only disposable synthetic packages and original byte contracts.
 
 The former Python reference's responses and the library states it built are recorded through
-tests/reference_replay.py (#9; ``ILLUSTASH_REFERENCE=record`` re-runs it).
+tests/fixed_expectations.py (#9).
 """
 from contextlib import closing
 from concurrent.futures import ThreadPoolExecutor
@@ -28,14 +28,12 @@ class NativeLocalReadsTest(unittest.TestCase):
     pair = curation.NativeHumanCurationTest.pair
     latest_action = labels.NativeHumanLabelsTest.latest_action
     reference_response = labels.NativeHumanLabelsTest.reference_response
-    start_reference = labels.NativeHumanLabelsTest.start_reference
 
     def setUp(self):
         labels.NativeHumanLabelsTest.setUp(self)
         self.env['ILLUSTASH_NO_KEYCHAIN'] = '1'
         self.env.pop('ILLUSTASH_DESKTOP_BRIDGE', None)
         self.env.pop('ILLUSTASH_DESKTOP_TOKEN', None)
-        pass
         self.seed_both()
 
     def get_pair(self,url,expected=200):
@@ -68,13 +66,6 @@ class NativeLocalReadsTest(unittest.TestCase):
             self.assertEqual(response['status'],502,(route,response['body']))
         self.assertEqual(labels.states(self.right),before)
         self.assertFalse(self.sentinel.exists())
-
-    def entity_facts(self,entity):
-        """Recording only: the old Store's display name, confirmed count and image sizes."""
-        with self.store.connect() as c:
-            return {'name':c.execute('SELECT entity_name(?)',(entity,)).fetchone()[0],
-                    'confirmed':c.execute("SELECT count(*) FROM memberships WHERE entity=? AND status='confirmed'",(entity,)).fetchone()[0],
-                    'valid':{u:[w,h] for u,w,h in c.execute('SELECT uuid,width,height FROM assets')}}
 
     def ask(self,query='',kind=None,entity=None,allowed=None):
         before=labels.states(self.right)

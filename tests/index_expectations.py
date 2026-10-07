@@ -15,7 +15,10 @@ def records():
         return json.load(f)
 
 def encode(v):
-    if isinstance(v,np.ndarray):return {'array_key':[v.dtype.str,list(v.shape),hashlib.sha256(v.tobytes()).hexdigest()]}
+    if isinstance(v,np.ndarray):
+        # Memory order is part of the input: the old merge accumulated in it.
+        order=['F'] if v.flags.f_contiguous and not v.flags.c_contiguous else []
+        return {'array_key':[v.dtype.str,list(v.shape),hashlib.sha256(v.tobytes()).hexdigest()]+order}
     if isinstance(v,np.generic):return v.item()
     if isinstance(v,tuple):return {'tuple':[encode(x) for x in v]}
     if isinstance(v,list):return [encode(x) for x in v]
@@ -51,9 +54,36 @@ def restore(files,root):
         elif 'text' in data:p.write_text(data['text'].replace('@FOLDER@',str(root)),encoding='utf-8')
         else:p.write_bytes(base64.b64decode(data['bytes']))
 
+def current_files(root):
+    """The input folder as recorded entries spell it (root as @FOLDER@)."""
+    result={}
+    for p in root.rglob('*'):
+        if not p.is_file() or p.name.endswith(('-wal','-shm','-journal')):continue
+        data=p.read_bytes();name=str(p.relative_to(root))
+        if data.startswith(b'SQLite format'):
+            with sqlite3.connect(p) as c:result[name]={'sql':'\n'.join(c.iterdump()).replace(str(root),'@FOLDER@')}
+        else:
+            try:result[name]={'text':data.decode().replace(str(root),'@FOLDER@')}
+            except UnicodeDecodeError:result[name]={'bytes':base64.b64encode(data).decode()}
+    return result
+
 def legacy(test,root):
-    i=getattr(test,'_fixed_index_cursor',0);test._fixed_index_cursor=i+1
-    entry=records()['legacy'][test._testMethodName][i]
+    """The old index run's result on this input folder; its output files are restored into it.
+    Entries of one test are taken in call order; calls recorded under a throwaway test instance
+    (``runTest``) are told apart by their input files."""
+    entries=records()['legacy'][test._testMethodName]
+    if test._testMethodName=='runTest':
+        now=current_files(root)
+        # Entries hold the folder after the run, which rewrites the character index and adds outputs;
+        # the plan, album map and features it only reads tell the inputs apart.
+        decisive=lambda name:name in ('char-patch/plan.json','album-char-map.json','full-features.npy','full-manifest.csv')
+        matches=[e for e in entries if all(e['files'].get(name)==data for name,data in now.items() if decisive(name))]
+        if not matches:
+            raise AssertionError('no recorded old index run for this input folder')
+        entry=matches[0]
+    else:
+        i=getattr(test,'_fixed_index_cursor',0);test._fixed_index_cursor=i+1
+        entry=entries[i]
     restore(entry['files'],root)
     return entry['value']
 

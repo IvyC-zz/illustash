@@ -44,13 +44,11 @@ class CoreReadHTTPTest(HTTPHarness):
             writer=csv_module.writer(f); writer.writerow(['name', 'category']);
             for tag in tags: writer.writerow([tag, '0'])
             writer.writerow(['not_general', '1'])
-        pass
         state = json.loads(self.state.read_text()); state['tags'] = str(csv)
         self.state.write_text(json.dumps(state))
         self.assertEqual(json.loads(self.pair('/api/general-tags')['body']), tags[:30])
         for q in ('STRASSE', 'i\u0307', 'σασ', '雪🙂', 'comma,', 'line', 'ＡＢ', 'not_general'):
             self.pair('/api/general-tags?'+urlencode({'q': q}))
-        pass
         self.sync('tagged')
         self.assertTrue(json.loads(self.pair('/api/user-tags')['body']))
         for q in ('雪', 'tie_', ' ', '%', '标签', '\x1c雪\x1f'):
@@ -61,18 +59,15 @@ class CoreReadHTTPTest(HTTPHarness):
             self.pair('/api/entities?'+urlencode({'q':q}))
         before = self.pair('/api/entities')['body']
         other = self.root/'other'; other.mkdir(exist_ok=True)
-        pass
         self.sync('other'); self.publish()
         response = self.pair('/api/entities')
         self.assertNotEqual(response['body'], before)
 
     def test_equal_sort_keys_and_legacy_name_fallback(self):
         ties=self.root/'ties'; ties.mkdir(exist_ok=True)
-        pass
         self.sync('ties'); self.publish()
         for core in (False,True):
             if core:
-                pass
                 self.sync('switched'); self.publish()
             for path in ('/api/entities', '/api/entities?q='+urlencode({'q':'排序平局'}).split('=',1)[1], '/api/works', '/api/works?'+urlencode({'q':'作品平局'})):
                 self.pair(path)
@@ -104,12 +99,10 @@ class ArtistReadHTTPTest(HTTPHarness):
     @unittest.skipIf(os.name == 'nt', '固定期望录自 POSIX，包名含 Windows 不允许的 ?')
     def test_auxiliary_artist_reads_legacy_then_core_with_fixed_hash_order(self):
         package = self.root/'Artists #雪?.pilib'
-        pass
         ids = self.rec.value('ids')
         self.sync('artists'); self.publish()
         for core in (False,True):
             if core:
-                pass
                 self.sync('switched'); self.publish()
             if not core:
                 # json.loads accepts nonfinite values and integers beyond f64 precision.

@@ -3,7 +3,7 @@
 Python constructs inputs only. The explicit native process has no Python PATH, never scans the
 folder, and must not update the recent-library registry. Schema and all typed table rows including
 rowids are compared with the former Python factory's fresh store, recorded through
-tests/reference_replay.py (#9; ``ILLUSTASH_REFERENCE=record`` re-runs it). That baseline received
+tests/fixed_expectations.py (#9). That baseline received
 the same two CCIP birth UUIDs through the existing new_ids protocol; the native keys are
 reproducible (store::new_key test counter). Only the named runtime timestamp fields below are
 mapped. Requires an explicitly configured factory release.
@@ -58,7 +58,6 @@ class NativeLibraryCreateTest(unittest.TestCase):
         self.rec = Expectations(self)
         self.addCleanup(self.rec.finish, self)
         self.rec.alias(self.root, '@ROOT@')
-        pass
         bin_dir = self.root / 'bin'; bin_dir.mkdir()
         self.sentinel = self.root / 'python-was-launched'
         for name in ('python', 'python3', 'python3.12'):
@@ -173,7 +172,6 @@ class NativeLibraryCreateTest(unittest.TestCase):
 
 
     def test_default_name_auto_preset_and_three_explicit_presets(self):
-        pass
         for index, preset in enumerate((None, 'x', 'pixiv', 'other')):
             with self.subTest(preset=preset):
                 dest = self.root / f'different-dest-{index}.pilib'

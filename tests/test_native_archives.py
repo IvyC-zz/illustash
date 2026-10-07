@@ -116,7 +116,7 @@ class NativeArchivesTest(unittest.TestCase):
         self.assertEqual(json.loads(self.request('/api/libraries')['body'])['info']['sources'][0], result)
         for body in ({'source':'absent','preset':'x'}, {'source':'s1','preset':'bad'}, {'source':None, 'preset':[]}):
             self.assertEqual(self.request('/api/libraries/preset', body)['status'], self.reference_status('/api/libraries/preset', body))
-        other, _ = self.package('other'); library.remember(other, front=False)
+        other = self.package('other'); library.remember(other, front=False)
         before = snapshot(other.db)
         response = self.pair('/api/libraries/forget', {'path':str(other.path)})
         self.assertEqual(response['body'], b'{"ok": true}')
@@ -164,7 +164,7 @@ class NativeArchivesTest(unittest.TestCase):
 
     def test_repeated_export_busy_switch_cancel_same_id_and_exit_cleanup(self):
         # A held rollback-journal write lock deterministically keeps backup active without huge data.
-        other, _ = self.package('other')
+        other = self.package('other')
         other.config['id'] = self.lib.config['id']; other.save()
         lock = sqlite3.connect(self.lib.source); self.addCleanup(lock.close)
         lock.execute('BEGIN EXCLUSIVE')
@@ -236,7 +236,7 @@ class NativeArchivesTest(unittest.TestCase):
         self.assertEqual(json.loads(self.request('/api/libraries')['body'])['current'], str(self.lib.path))
 
     def test_management_filesystem_failures_status_and_source_database_boundary(self):
-        other, _ = self.package('other'); library.remember(other, front=False)
+        other = self.package('other'); library.remember(other, front=False)
         tmp = self.support / 'libraries.tmp'; tmp.mkdir()
         body = {'path':str(other.path)}
         self.assertEqual(self.request('/api/libraries/forget',body)['status'], self.reference_status('/api/libraries/forget',body))

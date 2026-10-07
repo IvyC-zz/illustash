@@ -28,11 +28,9 @@ class FinalReadHTTPTest(HTTPHarness):
         self.pair('/api/bootstrap?nsfw=hide')
 
     def test_written_tag_and_readonly_context_are_read(self):
-        pass
         self.sync('tagged')
         tags = json.loads(self.pair('/api/user-tags?q=final-')['body'])
         self.assertEqual(tags, [{'tag': 'final-合成标签', 'count': 1}])
-        pass
         self.publish()
         self.assertEqual(json.loads(self.pair('/api/bootstrap')['body'])['read_only'], 'temporary synthetic readonly')
         self.assertEqual(json.loads(self.pair('/api/user-tags?q=rejected')['body']), [])

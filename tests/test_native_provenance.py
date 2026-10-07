@@ -118,7 +118,7 @@ class NativeProvenanceTest(unittest.TestCase):
         self.post({'action':'stop'})
     def test_optional_coordinator_keeps_ordinary_cache_schema_and_minimal_packages(self):
         self.env.pop('ILLUSTASH_PROVENANCE_WORKER');self.restart()
-        other,_=self.package('minimal-without-sync')
+        other = self.package('minimal-without-sync')
         with sqlite3.connect(other.db) as c:c.execute('DROP TABLE sync_runs')
         self.assertEqual(self.request('/api/libraries/open',{'path':str(other.path)})['status'],200)
         self.lib=other;self.token=json.loads(self.request('/api/bootstrap')['body'])['token']
@@ -191,7 +191,7 @@ class NativeProvenanceTest(unittest.TestCase):
         self.assertEqual(self.sql('SELECT status FROM native_delivery',cache=True),[('pending',)])
 
     def test_same_id_other_package_switch_rejects_late_results(self):
-        other,_=self.package('other');config=other.config.copy();config['id']=self.lib.config['id'];(other.path/'library.json').write_text(json.dumps(config))
+        other = self.package('other');config=other.config.copy();config['id']=self.lib.config['id'];(other.path/'library.json').write_text(json.dumps(config))
         self.env['SYNTHETIC_MODE']='hang';self.restart();self.post({'action':'artist','artist':'synthetic'})
         response=self.request('/api/libraries/open',{'path':str(other.path)});self.assertEqual(response['status'],200,response)
         self.token=json.loads(self.request('/api/bootstrap')['body'])['token']
@@ -214,7 +214,7 @@ class NativeProvenanceTest(unittest.TestCase):
 
     def test_export_contract_native_matches_python(self):
         # The former Python exporter, importer and run report on the same lookup are recorded
-        # (tests/reference_replay.py); clock-like text compares as <clock>.
+        # (tests/fixed_expectations.py); clock-like text compares as <clock>.
         before=self.root/'reference-application.sqlite'
         with sqlite3.connect(self.lib.db) as source,sqlite3.connect(before) as target:source.backup(target)
         self.post({'action':'lookup','ids':['a']});self.finish('done')

@@ -1,9 +1,9 @@
 """M2 user-label/undo acceptance, on independent disposable package clones only.
 
 Explicit ILLUSTASH_TERMS_BIN is required; missing release is not acceptance. The native host is
-compared with the former Python reference handler through fixed recordings (tests/reference_replay.py,
+compared with the former Python reference handler through fixed recordings (tests/fixed_expectations.py,
 #9): the seed packages, every reference response and the reference library state after each step
-were recorded while the reference existed; ``ILLUSTASH_REFERENCE=record`` re-runs it. Neither side
+were recorded while the reference existed). Neither side
 starts research workers. All app/source/provenance tables, raw DDL, typed cells and rowids are
 compared after each HTTP step (as digests), including history, undo and durable events. Responses
 are compared byte for byte; only session tokens, loopback origins and temporary roots are
@@ -168,7 +168,6 @@ class NativeHumanLabelsTest(unittest.TestCase):
         self.rec.alias(self.root, '@ROOT@')
         support, shared = self.root / 'support', self.root / 'shared'
         shared.mkdir()
-        pass
         sentinel_bin = self.root / 'bin'; sentinel_bin.mkdir()
         self.sentinel = self.root / 'python-was-launched'
         for command in ('python', 'python3', 'python3.12'):
@@ -180,18 +179,15 @@ class NativeHumanLabelsTest(unittest.TestCase):
                     'ILLUSTASH_PYTHON_SENTINEL': str(self.sentinel),
                     # Reproducible native keys, so recorded expectations hold (store::new_key test hook).
                     'ILLUSTASH_TEST_KEY_COUNTER': str(self.root / 'key-counter')}
-        pass
         for name in ('pristine', 'left', 'right'):
             lib = self.rec.package(name, self.root / f'{name}.pilib')
             setattr(self, name, lib)
         self.alice, self.bob, self.artist = self.rec.value('ids')
         self.port = free_port(); self.origin = f'http://127.0.0.1:{self.port}'
         self.rec.alias(self.origin, '@ORIGIN@')
-        pass
         self.process = self.start(self.right)
         self.token = json.loads(fetch(self.origin, {'url': '/api/bootstrap'}, self.origin)['body'])['token']
         self.rec.alias(self.token, '@TOKEN@')
-        pass
         self.assertEqual(self.rec.state('start'), states(self.right))
         self.latency = []
 
@@ -266,7 +262,6 @@ class NativeHumanLabelsTest(unittest.TestCase):
     def seed_both(self):
         # Seed history through actual old commands once (recorded), then clone the complete committed input.
         self.stop(self.process)
-        pass
         self.rec.package('seeded', self.left.path)
         for filename in ('library.sqlite', 'source.sqlite', 'provenance.sqlite'):
             with closing(sqlite3.connect(self.left.path / filename)) as src, closing(sqlite3.connect(self.right.path / filename)) as dst:
@@ -274,7 +269,6 @@ class NativeHumanLabelsTest(unittest.TestCase):
         self.process = self.start(self.right)
         self.token = json.loads(fetch(self.origin, {'url': '/api/bootstrap'}, self.origin)['body'])['token']
         self.rec.alias(self.token, '@TOKEN@')
-        pass
         self.assertEqual(self.rec.state('seeded'), states(self.right))
 
     def test_tag_add_remove_filter_duplicates_and_literal_false(self):
@@ -506,7 +500,6 @@ class NativeHumanLabelsTest(unittest.TestCase):
             for lib in (self.left, self.right):
                 with closing(sqlite3.connect(lib.db)) as c:
                     c.execute('DROP TRIGGER fail_ack'); c.commit()
-            pass
             drained = self.rec.state('drained')
             # No HTTP request: the native loop must recover its committed pending event.
             wait_until(lambda: states(self.right) == drained, timeout=5)

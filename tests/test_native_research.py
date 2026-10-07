@@ -1,8 +1,7 @@
 """#52: optional real calculator and controlled failures on generated packages only.
 
 The existing Python calculators' results on the same inputs (similar scan, clustering, relations,
-OC groups) and the prepared package were recorded through tests/reference_replay.py (#9;
-``ILLUSTASH_REFERENCE=record`` re-runs them).
+OC groups) and the prepared package were recorded through tests/fixed_expectations.py (#9).
 """
 from tests.native_worker_fixture import command as worker_command, source as worker_source, exists as worker_exists
 
@@ -69,7 +68,6 @@ Path(sys.argv[2]).write_text(json.dumps(v,allow_nan=False))
                 v=np.zeros(768,np.float32);v[0 if i<6 else 1]=1
                 c.execute('INSERT INTO assets VALUES (?,?,?,?,?,?,?,?,?)',(u,u+'.png',str(self.lib.path/(u+'.png')),120,150,'2026-10-01','orig',1,0))
                 c.execute('INSERT OR REPLACE INTO embeddings VALUES (?,?,?)',(u,'ccip',v.tobytes()))
-        pass
         self.lib=self.rec.package('prepared',self.lib.path)
         self.alice=self.rec.value('alice')
         pixels=np.random.default_rng(1).integers(0,255,(150,120,3),dtype=np.uint8)
@@ -159,7 +157,7 @@ Path(sys.argv[2]).write_text(json.dumps(v,allow_nan=False))
         self.request('/api/similar',{})
         wait_until(lambda:self.pid.exists() and int(self.pid.read_text())!=pid,timeout=5)
         pid=int(self.pid.read_text())
-        replacement,_=self.package('same-id')
+        replacement = self.package('same-id')
         config=replacement.config;config['id']=self.lib.config['id'];(replacement.path/'library.json').write_text(json.dumps(config))
         self.assertEqual(self.request('/api/libraries/open',{'path':str(replacement.path)})['status'],200)
         wait_until(lambda:not group_exists(pid),timeout=5)

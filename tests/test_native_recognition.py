@@ -1,7 +1,7 @@
 """Rust recognition imports: owned synthetic resources/packages, no models or accounts.
 
 The former Python importer's result on the same package was recorded through
-tests/reference_replay.py (#9; ``ILLUSTASH_REFERENCE=record`` re-runs it).
+tests/fixed_expectations.py (#9).
 """
 import concurrent.futures
 import hashlib

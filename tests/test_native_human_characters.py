@@ -23,7 +23,6 @@ class NativeHumanCharactersTest(unittest.TestCase):
     undo_latest = labels.NativeHumanLabelsTest.undo_latest
     latest_action = labels.NativeHumanLabelsTest.latest_action
     reference_response = labels.NativeHumanLabelsTest.reference_response
-    start_reference = labels.NativeHumanLabelsTest.start_reference
     pair = curation.NativeHumanCurationTest.pair
 
     def test_change_all_actions_multi_copy_filter_and_variants(self):
@@ -165,11 +164,9 @@ class NativeHumanCharactersTest(unittest.TestCase):
             with closing(sqlite3.connect(lib.db)) as c:
                 c.execute('DROP TRIGGER fail_ack'); c.commit()
         self.stop(self.process)
-        pass
         self.process = self.start(self.right)
         self.token = json.loads(fetch(self.origin, {'url': '/api/bootstrap'}, self.origin)['body'])['token']
         self.rec.alias(self.token, '@TOKEN@')
-        pass
         self.assertEqual(self.rec.state('drained'), states(self.right))
         self.undo_latest()
 
@@ -206,4 +203,3 @@ class NativeHumanCharactersTest(unittest.TestCase):
             self.assertEqual(restored['status'], 200)
             self.token = json.loads(fetch(self.origin, {'url': '/api/bootstrap'}, self.origin)['body'])['token']
             self.rec.alias(self.token, '@TOKEN@')
-            pass

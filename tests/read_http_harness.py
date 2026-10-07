@@ -3,8 +3,8 @@
 The core read routes (`http_read::read` with the application's response encoding) are served by
 the test-only `read-http` example for whatever library context the test publishes to a state
 file. Their bytes are compared with the former Python reference server's responses to the same
-requests on the same databases, recorded once through ``tests/reference_replay.py``
-(``ILLUSTASH_REFERENCE=record`` re-runs the reference). The databases themselves are recorded as
+requests on the same databases, recorded once through ``tests/fixed_expectations.py``
+(#9; the reference is gone, so they cannot be recorded again). The databases themselves are recorded as
 packages of the temporary root after every reference-side change and restored before the next
 request, so no Python reference code runs in the default mode.
 """
@@ -69,7 +69,6 @@ class HTTPHarness(unittest.TestCase):
         rec.alias(cls.root, '@ROOT@')
         rec.alias(cls.origin, '@ORIGIN@')
         cls.server = cls.store = None
-        pass
         rec.package('root', cls.root, library=False)
         cls.context = publish(rec, cls.server, cls.state)
         cls.log = tempfile.TemporaryFile()
@@ -84,7 +83,6 @@ class HTTPHarness(unittest.TestCase):
             cls.host.wait(12)
         stop_process(cls.host)
         cls.log.close()
-        pass
         cls.temp.cleanup()
         cls.state_dir.cleanup()
         if not False and cls.rec.position != len(cls.rec.entries):
@@ -95,7 +93,6 @@ class HTTPHarness(unittest.TestCase):
         self.addCleanup(self.rec.finish, self)
         for actual, placeholder in type(self).rec.aliases:
             self.rec.alias(actual, placeholder)
-        pass
         # Each test starts from the recorded root and context, independent of earlier tests.
         self.sync('start')
         self.publish()

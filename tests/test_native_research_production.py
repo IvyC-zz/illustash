@@ -194,7 +194,6 @@ class NativeResearchPublicationTest(unittest.TestCase):
         self.env.update(ILLUSTASH_RESEARCH_WORKER=str(self.worker), ILLUSTASH_RESEARCH_TIMEOUT_MS='5000')
         self.env.pop('ILLUSTASH_WORKER_PYTHON', None)
         # Keep the #151 base fixture learning-only; #152 extends it below.
-        pass
         with sqlite3.connect(self.lib.source) as c:
             c.execute('CREATE TABLE IF NOT EXISTS embeddings(uuid TEXT,model TEXT,vec BLOB,PRIMARY KEY(uuid,model))')
             for i in range(9):
@@ -204,8 +203,7 @@ class NativeResearchPublicationTest(unittest.TestCase):
                 c.execute('INSERT INTO assets VALUES (?,?,?,?,?,?,?,?,?)',
                           (ident, ident + '.png', str(self.lib.path / (ident + '.png')), 120, 150, '2026-10-04', 'orig', 1, 0))
                 c.execute("INSERT INTO embeddings VALUES (?,'ccip',?)", (ident, vector.tobytes()))
-        pass
-        # The package as the former Python Store refreshed and confirmed it (recorded, tests/reference_replay.py).
+        # The package as the former Python Store refreshed and confirmed it (recorded, tests/fixed_expectations.py).
         self.lib = self.rec.package('prepared', self.lib.path)
         self.entity = self.rec.value('entity')
         self.restart()
@@ -348,7 +346,7 @@ child.terminate();child.wait()
         self.timing_fixture()
         before = self.rows(['prototypes', 'proto_claims', 'clusters', 'actions', 'assertions'])
         pids = self.held()
-        replacement, _ = self.package('same-id')
+        replacement = self.package('same-id')
         replacement.config['id'] = self.lib.config['id']
         (replacement.path / 'library.json').write_text(json.dumps(replacement.config), encoding='utf-8')
         self.assertEqual(self.request('/api/libraries/open', {'path': str(replacement.path)})['status'], 200)
@@ -459,7 +457,6 @@ class NativeRelationPublicationTest(NativeResearchPublicationTest):
                 pixels=np.stack(((x*7+y*3)%256,(x*11+y*17)%256,(x*23+y*13)%256),axis=2).astype(np.uint8)
                 Image.fromarray(pixels).save(path)
                 c.execute('UPDATE assets SET src_path=? WHERE uuid=?',(str(path),ident))
-        pass
         self.lib = self.rec.package('relations', self.lib.path)
         self.restart()
         self.finished()

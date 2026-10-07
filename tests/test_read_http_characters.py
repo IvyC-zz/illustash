@@ -37,20 +37,17 @@ class CharacterReadHTTPTest(HTTPHarness):
                   '/api/character/stats',
                  '/api/character/stats?id=a&nsfw=bad']
         missing = self.root/'never-created.sqlite'
-        pass
         self.publish()
         for path in cases:
             self.assertEqual(self.pair(path)['status'], 400)
         self.assertFalse(missing.exists())
     def test_nonempty_identity_queue_first_hit_paging_and_detail(self):
         root = self.root/'r4-hybrid'; root.mkdir(exist_ok=True)
-        pass
         self.sync('hybrid'); self.publish()
         with self.connect() as c:
             ids = [r[0] for r in c.execute("SELECT entity,count(*) FROM memberships GROUP BY entity ORDER BY count(*) DESC")]
         self.assertGreaterEqual(len(ids), 2)
         a, b = ids[:2]
-        pass
         self.sync('proposed')
         for path in ['identity/queue', 'identity/count', 'detail?id=a']:
             self.pair('/api/' + path)
@@ -73,32 +70,26 @@ class CharacterReadHTTPTest(HTTPHarness):
         self.assertEqual(covers[a], 'a')  # Solo, confirmed image wins over the shared machine image.
         self.assertEqual(covers[b], 'b')
         self.assertNotEqual(covers[a], covers[b])
-        pass
         self.sync('mascot')
         tagged=json.loads(self.pair('/api/tagged')['body'])
         self.assertTrue(any(r['id']==b and r['count'] for r in tagged))
         self.pair('/api/characters?'+urlencode({'id':b}))
-        pass
         self.sync('profile')
         profile=json.loads(self.pair('/api/character/profile?'+urlencode({'entity':a}))['body'])
         self.assertEqual(profile['user_name'], '合成用户名字')
         self.assertEqual(profile['aliases'], ['后插入','先排序'])
         for uuid in ('a','b','c'):
             self.pair('/api/detail?id='+uuid)
-        pass
         self.sync('skipped')
         self.assertEqual(json.loads(self.pair('/api/identity/count')['body'])['total'],0)
-        pass
         self.sync('decided')
         self.pair('/api/identity/count')
-        pass
         self.sync('uncertain')
         response = json.loads(self.pair('/api/detail?id=a')['body'])['identity']
         self.assertTrue(response['undetermined'])
 
     def test_unset_policy_legacy_names_stable_ties_and_cover_reuse(self):
         other = self.root/'r4-legacy'; other.mkdir(exist_ok=True)
-        pass
         self.sync('legacy'); self.publish()
         for path in ['characters', 'characters?summary=1', 'tagged', 'identity/queue', 'identity/count', 'detail?id=a']:
             self.pair('/api/' + path)

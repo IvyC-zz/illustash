@@ -7,8 +7,8 @@ from a byte-identical copy. To regenerate them, set ILLUSTASH_TERMS_V5_BIN /
 ILLUSTASH_TERMS_V6_BIN to those producers and run
 `python -m tests.test_native_library_upgrade --write-fixtures` (this needs the former Python
 application, so it only works on a checkout from before #9 removed it). The former Python
-reference's reads and startup event consumer were recorded through tests/reference_replay.py
-(#9; ``ILLUSTASH_REFERENCE=record`` re-runs them). Tests never build, find a default library, or
+reference's reads and startup event consumer were recorded through tests/fixed_expectations.py
+(#9). Tests never build, find a default library, or
 change an existing golden; the native host has a Python-sentinel-only PATH.
 """
 from contextlib import closing
@@ -207,7 +207,6 @@ class NativeLibraryUpgradeTest(unittest.TestCase):
         self.rec.alias(origin, '@ORIGIN@')
         self.rec.alias(token, '@TOKEN@')
         server = thread = None
-        pass
         try:
             reference = f'http://127.0.0.1:{server.server_port}' if server else None
             for url in lifecycle.CORE_READS:
@@ -240,7 +239,7 @@ class NativeLibraryUpgradeTest(unittest.TestCase):
                 self.assertEqual(expected.returncode, 0, expected.stderr)
                 # Compare equivalent startup consumers: the bare migrate CLI leaves verdict
                 # events pending, while the native HTTP host performs no-learner dispatch.
-                # The former Python consumer's result is recorded (tests/reference_replay.py).
+                # The former Python consumer's result is recorded (tests/fixed_expectations.py).
                 self.rec.package(f'drained-v{version}', baseline)
                 process, origin = self.start(lib)
                 self.assertEqual(database(lib.db), database(baseline / 'library.sqlite'))

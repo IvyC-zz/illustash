@@ -2,8 +2,7 @@
 
 Requires ILLUSTASH_TERMS_BIN pointing to the M1 release under test; never builds or discovers
 an older binary. Python constructs fixtures only. The former Python reference server's responses,
-packages and expected states were recorded through tests/reference_replay.py (#9;
-``ILLUSTASH_REFERENCE=record`` re-runs it); native keys are reproducible (store::new_key test
+packages and expected states were recorded through tests/fixed_expectations.py (#9); native keys are reproducible (store::new_key test
 counter). The launched native process receives a PATH containing only failing Python sentinels.
 Folder and Photos package creation are covered; existing-library upgrades, worker task shutdown and Windows
 process-tree acceptance remain out of scope.
@@ -98,9 +97,7 @@ class NativeLifecycleTest(unittest.TestCase):
         self.support, self.shared = self.root / 'support', self.root / 'shared'
         self.home = self.root / 'home' / 'Pictures' / 'Illustash'
         self.shared.mkdir()
-        self.store = self.reference = None
         NativeLifecycleTest.confine_library_helpers(self)
-        pass
         # No subprocess may silently run Python or use the caller's real app support directory.
         self.sentinel = self.root / 'python-was-launched'
         self.bin = self.root / 'bin'; self.bin.mkdir()
@@ -132,18 +129,16 @@ class NativeLifecycleTest(unittest.TestCase):
                                      '--name', 'first'], env=self.env, capture_output=True, timeout=20)
             self.assertEqual(result.returncode, 0, result.stderr.decode(errors='replace'))
             self.assertEqual(json.loads(result.stdout), {'path': str(first), 'name': 'first'})
-            pass
             # The package as the reference opened it (recorded; the native factory output is reproducible).
             self.lib = self.rec.package('first', first)
             self.assertFalse(self.sentinel.exists())
         else:
-            self.lib, self.store = self.package('first')
+            self.lib = self.package('first')
         self.port = free_port(); self.origin = f'http://127.0.0.1:{self.port}'
         self.rec.alias(self.origin, '@ORIGIN@')
         self.process, self.log = self.start(self.lib.path)
         self.token = json.loads(self.request('/api/bootstrap')['body'])['token']
         self.rec.alias(self.token, '@TOKEN@')
-        pass
 
     def confine_library_helpers(self):
         """The Python library helpers some tests build inputs with never see the real user folders."""
@@ -153,12 +148,9 @@ class NativeLifecycleTest(unittest.TestCase):
             scoped = patch.object(library, name, value)
             scoped.start(); self.addCleanup(scoped.stop)
 
-    def package(self, name, build=None):
-        """A synthetic package as the former Python application created and refreshed it (recorded),
-        after ``build(store)`` when given. Returns the package and, when recording, its old Store."""
-        path, store = self.root / (name + '.pilib'), None
-        pass
-        return self.rec.package(name, path), store
+    def package(self, name):
+        """A synthetic package as the former Python application created and refreshed it (fixed recording)."""
+        return self.rec.package(name, self.root / (name + '.pilib'))
 
     def stop(self, process):
         if process.poll() is None:
@@ -308,7 +300,6 @@ class NativeLifecycleTest(unittest.TestCase):
                 dest = Path(json.loads(left['body'])['path'])
                 self.assertTrue(dest.is_relative_to(self.root))
                 self.assertNotEqual(dest, self.lib.path)
-                pass
                 right = self.request('/api/libraries/new', body)
                 self.assertIsNone(difference(left, right),
                                   (name, left['status'], right['status'], left['body'], right['body']))
@@ -348,7 +339,6 @@ class NativeLifecycleTest(unittest.TestCase):
         self.assertEqual(json.loads(self.request('/api/settings')['body'])['package']['path'], str(dest))
         self.token = new_token
         self.rec.alias(self.token, '@TOKEN@')
-        pass
         for url in CORE_READS:
             self.assertEqual(self.pair(url)['route'], 'core')
         self.assertFalse(self.sentinel.exists())
@@ -488,7 +478,6 @@ class NativeLifecycleTest(unittest.TestCase):
         self.assertEqual(left['status'], 400)
         dest = self.home / 'registry-failure.pilib'
         self.assertTrue(dest.is_relative_to(self.root))
-        pass
         right = self.request('/api/libraries/new', body)
         self.assertEqual(left['status'], right['status'])
         self.assertEqual(right['status'], 400)
@@ -529,7 +518,7 @@ class NativeLifecycleTest(unittest.TestCase):
                 self.assertGreater(backup.execute('SELECT count(*) FROM actions WHERE undone=0').fetchone()[0], 0)
 
     def test_switch_same_id_different_instance_rotates_token_and_failed_switch_preserves_state(self):
-        target, _ = self.package('second')
+        target = self.package('second')
         target.save({**target.config, 'id': self.lib.config['id']})
         old_token = self.token
         response = self.request('/api/libraries/open', {'path': str(target.path)})
@@ -550,7 +539,7 @@ class NativeLifecycleTest(unittest.TestCase):
         self.assertEqual(before, dump(target.db))
         self.assertEqual(json.loads(self.request('/api/bootstrap')['body'])['token'], new_token)
         self.assertEqual(json.loads(self.request('/api/settings')['body'])['package']['path'], str(target.path))
-        upgrade, _ = self.package('needs-upgrade')
+        upgrade = self.package('needs-upgrade')
         for key, value in (('terms_names', 'pending'), ('schema_version', '35')):
             with self.subTest(rejected_open=key):
                 with closing(sqlite3.connect(upgrade.db)) as c:
@@ -575,7 +564,7 @@ class NativeLifecycleTest(unittest.TestCase):
         self.assertFalse(self.sentinel.exists())
 
     def test_request_started_before_switch_cannot_write_new_library(self):
-        target, _ = self.package('second')
+        target = self.package('second')
         body = b'{"local_limit": 1234}'
         conn = http.client.HTTPConnection('127.0.0.1', self.port, timeout=5)
         self.addCleanup(conn.close)
@@ -593,7 +582,7 @@ class NativeLifecycleTest(unittest.TestCase):
         self.assertEqual(before, dump(target.db))
 
     def test_slow_reader_old_snapshot_does_not_block_library_switch(self):
-        target, _ = self.package('second')
+        target = self.package('second')
         ids = [f'old-{i:04}-' + 'x' * 24576 for i in range(200)]
         with closing(sqlite3.connect(self.lib.db)) as c:
             c.executemany('INSERT INTO assets VALUES (?,?,?,?,?,?,?)',
@@ -629,7 +618,7 @@ class NativeLifecycleTest(unittest.TestCase):
         self.assertEqual({item['uuid'] for item in current['items']}, set('abc'))
 
     def test_upgrade_rejection_with_cold_wal_only_creates_sqlite_coordination_files(self):
-        broken, _ = self.package('cold-wal', lambda store: store.tag(['b'], 'cold-failure-history'))
+        broken = self.package('cold-wal')  # its recorded history holds 'cold-failure-history'
         with closing(sqlite3.connect(broken.db)) as c:
             c.execute("UPDATE meta SET value='35' WHERE key='schema_version'")
             c.commit()
@@ -653,7 +642,7 @@ class NativeLifecycleTest(unittest.TestCase):
 
     def test_upgrade_rejection_with_active_wal_preserves_database_wal_history(self):
         # The recorded package holds the old command's history; the meta change below stays in the WAL.
-        broken, _ = self.package('active-wal', lambda store: store.tag(['b'], 'failure-wal-history'))
+        broken = self.package('active-wal')  # its recorded history holds 'failure-wal-history'
         with closing(sqlite3.connect(broken.db)) as keeper:
             keeper.execute('PRAGMA journal_mode=WAL')
             keeper.execute('PRAGMA wal_autocheckpoint=0')
@@ -674,7 +663,7 @@ class NativeLifecycleTest(unittest.TestCase):
             self.assertTrue(any('failure-wal-history' in line for line in before_sql))
 
     def test_upgrade_missing_database_and_native_python_flags_reject_without_side_effects(self):
-        broken, _ = self.package('broken')
+        broken = self.package('broken')
         for key, value in (('schema_version', '35'), ('terms_schema', '6'), ('terms_names', 'pending')):
             with self.subTest(key=key):
                 with sqlite3.connect(broken.db) as c:

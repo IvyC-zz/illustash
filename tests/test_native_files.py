@@ -1,4 +1,4 @@
-"""M3 files: old handler (recorded, tests/reference_replay.py) vs native host, generated temporary assets only.
+"""M3 files: old handler (recorded, tests/fixed_expectations.py) vs native host, generated temporary assets only.
 
 Cache hits and static bodies/headers are exact; errors compare status only. New JPEGs
 use explicit pixel bounds, independent caches, no snapshot re-recording. No workers
@@ -195,7 +195,7 @@ class NativeFilesTest(unittest.TestCase):
         self.assertFalse(self.sentinel.exists())
 
     def test_image_backpressure_does_not_block_switch_and_new_session_uses_new_path(self):
-        second, _ = self.package('second')
+        second = self.package('second')
         source = asset(self, 'switch', Image.new('RGB', (12,8), 'red'))
         target = self.lib.thumbnails / key(source, 'switch', 'thumb')
         payload = b'old-session-cache' * 300_000

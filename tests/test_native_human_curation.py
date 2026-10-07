@@ -1,7 +1,7 @@
 """M2 artist/curation/fold/preferences acceptance on independent synthetic packages.
 
 The former Python reference (seed and Server) is replayed from fixed recordings
-(tests/reference_replay.py, #9).
+(tests/fixed_expectations.py, #9).
 An explicit new release is mandatory; missing binary skips do not count as acceptance.
 Success responses compare original status/bytes/headers; errors compare status only.
 The harness also compares raw DDL, all typed cells
@@ -34,7 +34,6 @@ class NativeHumanCurationTest(unittest.TestCase):
     undo_latest = labels.NativeHumanLabelsTest.undo_latest
     latest_action = labels.NativeHumanLabelsTest.latest_action
     reference_response = labels.NativeHumanLabelsTest.reference_response
-    start_reference = labels.NativeHumanLabelsTest.start_reference
 
     def pair(self, url, body, *, expected=200, headers=None):
         item = {'url': url, 'method': 'POST', 'body': json.dumps(body, ensure_ascii=False).encode('utf-8'),

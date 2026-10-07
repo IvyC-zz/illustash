@@ -10,13 +10,11 @@ from tests.read_http_harness import HTTPHarness
 class BrowseReadHTTPTest(HTTPHarness):
     def test_page_names_refresh_after_write_and_library_switch_in_hybrid(self):
         root = self.root/'page-name-refresh'; root.mkdir(exist_ok=True)
-        pass
         self.sync('replacement'); self.publish()
         first = self.pair('/api/assets?limit=200')['body']
         items = json.loads(first)['items']
         member = next(m for row in items for m in row['memberships'])
         self.assertIn('node_type', member)
-        pass
         self.sync('renamed')
         updated = self.pair('/api/assets?limit=200')['body']
         self.assertNotEqual(first, updated)
@@ -25,7 +23,6 @@ class BrowseReadHTTPTest(HTTPHarness):
                       'pool=unmatched', 'order=hinted', 'order=suspicious',
                       'nsfw=hide', 'nsfw=only'):
             self.pair('/api/assets?'+query)
-        pass
         self.publish()
         self.pair('/api/assets?limit=200')
 
@@ -68,7 +65,6 @@ class BrowseReadHTTPTest(HTTPHarness):
     def test_database_error_precedes_review_pool_rating_validation(self):
         corrupt = self.root/'corrupt-temporary.sqlite'
         corrupt.write_bytes(b'not a SQLite database')
-        pass
         self.publish()
         self.assertEqual(self.pair('/api/review-pools?nsfw=invalid')['status'],500)
 
@@ -102,12 +98,10 @@ class BrowseReadHTTPTest(HTTPHarness):
     def test_expanded_legacy_core_visibility_evidence_and_auxiliary_reads(self):
         name = 'Browse #雪%.pilib' if os.name == 'nt' else 'Browse #雪?.pilib'
         package = self.root/name
-        pass
         self.sync('expanded'); self.publish()
         source = Path(self.rec.value('source'))
         for core in (False,True):
             if core:
-                pass
                 self.sync('switched'); self.publish()
             for nsfw in ('','hide','only'):
                 for pool in ('','duplicates','excluded','unmatched','pending','recent','audit'):

@@ -22,7 +22,6 @@ class NativeHumanIdentityTest(unittest.TestCase):
     undo_latest = labels.NativeHumanLabelsTest.undo_latest
     latest_action = labels.NativeHumanLabelsTest.latest_action
     reference_response = labels.NativeHumanLabelsTest.reference_response
-    start_reference = labels.NativeHumanLabelsTest.start_reference
     def wait_timestamp_pair(self, url):
         # The existing core stamps newly proposed evidence with SELECT CURRENT_TIMESTAMP.
         # Start both real calls early in the same second, without changing stored/output timestamps.
@@ -36,7 +35,6 @@ class NativeHumanIdentityTest(unittest.TestCase):
 
     def setUp(self):
         self.hybrid = 'no_policy' not in self._testMethodName
-        pass
         labels.NativeHumanLabelsTest.setUp(self)
         self.seed_both()
         self.third, self.work, self.variant = self.rec.value('augmented ids')
@@ -168,7 +166,6 @@ class NativeHumanIdentityTest(unittest.TestCase):
                     if lib is self.right:
                         self.assertEqual(c.execute('SELECT status FROM backend_effects ORDER BY id DESC LIMIT 1').fetchone()[0],'pending')
                     c.execute('DROP TRIGGER fail_ack'); c.commit()
-            pass
             drained = self.rec.state('drained')
             wait_until(lambda:drained==labels.states(self.right),timeout=5)
             self.undo_latest()

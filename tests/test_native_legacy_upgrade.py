@@ -1,8 +1,7 @@
 """#29 synthetic historical source/app migrations; no real library or copied real data.
 
 The historical packages were built, and their expected upgrades computed, by the former Python
-application; both are recorded through tests/reference_replay.py (#9; ``ILLUSTASH_REFERENCE=record``
-re-runs it). Native keys are reproducible (store::new_key test counter).
+application; both are recorded through tests/fixed_expectations.py (#9). Native keys are reproducible (store::new_key test counter).
 """
 from contextlib import closing
 import json
@@ -37,12 +36,10 @@ class LegacyUpgradeTest(unittest.TestCase):
                   'ILLUSTASH_TEST_KEY_COUNTER':str(self.root/'key-counter')}
         self.rec=Expectations(self);self.addCleanup(self.rec.finish,self)
         self.rec.alias(self.root,'@ROOT@')
-        pass
 
     def package(self,version):
         """A historical application of this version, as the former Python Store wrote it (recorded)."""
         path=self.root/f'v{version}.pilib'
-        pass
         return self.rec.package(f'v{version}',path)
 
 

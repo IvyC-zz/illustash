@@ -1,7 +1,7 @@
 """M3 folder scans: only owned temporary synthetic folders and packages.
 
 The former Python scanner's and importer's results on the same inputs were recorded through
-tests/reference_replay.py (#9; ``ILLUSTASH_REFERENCE=record`` re-runs them). Generated files get
+tests/fixed_expectations.py (#9). Generated files get
 content-derived modification times and native keys are reproducible, so the recorded states hold.
 """
 from tests.native_worker_fixture import command as worker_command, source as worker_source, exists as worker_exists
@@ -286,7 +286,7 @@ class NativeFolderHTTPTest(unittest.TestCase):
         self.assertEqual(self.finish()['state']['status'], 'needs_recognition')
         source, app = snapshot(self.lib.source), snapshot(self.lib.db)
         old = self.lib
-        other, _ = self.package('replacement')
+        other = self.package('replacement')
         response = self.request('/api/libraries/open', {'path': str(other.path)})
         self.assertEqual(response['status'], 200, response['body'])
         self.token = json.loads(self.request('/api/bootstrap')['body'])['token']

@@ -3,7 +3,7 @@
 Native births supply UUID inputs through the reference's existing UUID/NeedId protocol.
 The reference fetch_names callback records the observed invocation as the durable M4
 handoff used by native. The reference's responses and states are recorded through
-tests/reference_replay.py (#9; ``ILLUSTASH_REFERENCE=record`` re-runs it); only clock-like text
+tests/fixed_expectations.py (#9); only clock-like text
 compares as ``<clock>``.
 """
 from contextlib import closing
@@ -26,24 +26,10 @@ class NativeProfilesTest(unittest.TestCase):
     undo_latest = labels.NativeHumanLabelsTest.undo_latest
     latest_action = labels.NativeHumanLabelsTest.latest_action
     reference_response = labels.NativeHumanLabelsTest.reference_response
-    start_reference = labels.NativeHumanLabelsTest.start_reference
 
     def setUp(self):
         labels.NativeHumanLabelsTest.setUp(self)
-        pass
         self.seed_both()
-
-    def seed_name_cache(self):
-        """Recording only: reproducible cached remote responses exercise the real copyright selector;
-        separate live synthetic HTTP tests cover cache misses and transport."""
-        from urllib.parse import urlencode
-        with self.store.connect() as c:
-            for t, rows in [('remote_person', [('series',1000,1),('specific',10,.95)]),
-                             ('fallback_person',[('fallback',4,.6),('weak',1,.2)]),
-                             ('unknown_person', [])]:
-                url='https://danbooru.donmai.us/related_tag.json?'+urlencode({'search[query]':t,'search[category]':'copyright','limit':10})
-                c.execute('INSERT OR REPLACE INTO name_cache VALUES (?,?)',
-                          (json.dumps([url,None],ensure_ascii=False),json.dumps({'related_tags':[{'tag':{'name':n,'post_count':p},'frequency':f} for n,p,f in rows]},ensure_ascii=False)))
 
     def name_request(self, entity=None, refresh=False):
         with self.store.connect() as c:
@@ -158,7 +144,6 @@ class NativeProfilesTest(unittest.TestCase):
         self.stop(self.process);self.env['ILLUSTASH_COPYRIGHT_BASE']=base;self.process=self.start(self.right)
         self.token=json.loads(fetch(self.origin,{'url':'/api/bootstrap'},self.origin)['body'])['token']
         self.rec.alias(self.token,'@TOKEN@')
-        pass
         self.pair('/api/entities',{'tag':'live_person','typed':'实体'})
         self.pair('/api/entities',{'tag':'live_person'})
         self.pair('/api/entities',{'tag':'second_person_(specific)'})
@@ -208,7 +193,6 @@ class NativeProfilesTest(unittest.TestCase):
             c.execute('DROP TRIGGER fail_names');c.commit()
         self.assertEqual(labels.states(self.right),before)
         self.pair('/api/character/profile',{'entity':self.alice,'name':'保留交接'})
-        pass
 
     def test_profile_identity_artist_and_tag_continuous_undo(self):
         import time

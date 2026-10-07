@@ -73,7 +73,7 @@ class NativePlatformPickerTest(unittest.TestCase):
             self.assertEqual(self.request('/api/libraries/choose', {'kind': 'folder'})['status'], 400)
 
     def test_picker_old_result_cannot_enter_replacement_library(self):
-        other, _ = self.package('replacement')
+        other = self.package('replacement')
         self.shell.reply = {'paths': [str(self.root / 'old-selected')]}
         self.shell.release.clear()
         with ThreadPoolExecutor() as pool:

@@ -3,14 +3,19 @@ from pathlib import Path
 import sqlite3
 
 SCHEMA = (Path(__file__).parent / 'fixtures/provenance_schema.sql').read_text()
+VERSION = 5   # the provenance cache schema version (former provenance.db.VERSION)
 
 
 def connect(library):
+    """The provenance cache as the former Python connection opened it: WAL, foreign keys,
+    the current schema and its user_version."""
     c = sqlite3.connect(Path(library.path) / 'provenance.sqlite', timeout=30)
     c.row_factory = sqlite3.Row
-    if not c.execute("SELECT 1 FROM sqlite_schema WHERE name='artists'").fetchone():
-        c.executescript(SCHEMA)
     c.execute('PRAGMA journal_mode=WAL')
+    c.execute('PRAGMA foreign_keys=ON')
+    if c.execute('PRAGMA user_version').fetchone()[0] < VERSION:
+        c.executescript(SCHEMA)
+        c.execute(f'PRAGMA user_version={VERSION}')
     return c
 
 

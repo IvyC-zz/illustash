@@ -81,7 +81,6 @@ class NativeIndexTest(unittest.TestCase):
         self.remote=ThreadingHTTPServer(('127.0.0.1',0),Handler);t=threading.Thread(target=self.remote.serve_forever,daemon=True);t.start()
         self.addCleanup(t.join);self.addCleanup(self.remote.server_close);self.addCleanup(self.remote.shutdown)
         self.env.update(ILLUSTASH_COPYRIGHT_BASE=f'http://127.0.0.1:{self.remote.server_port}',ILLUSTASH_INDEX_WORKER=worker_command(worker))
-        pass
         self.lib=self.rec.package('work',self.lib.path)
         self.work=self.rec.value('work')
         (self.shared/'char-index').mkdir()
@@ -149,7 +148,7 @@ class NativeIndexTest(unittest.TestCase):
         self.assertEqual(self.index({'action':'watch','works':[self.work],'min_posts':150})['watch']['min_posts'],150)
         self.assertEqual(shared_file.read_bytes(),legacy)
         with sqlite3.connect(self.lib.db) as c:self.assertEqual(json.loads(c.execute("SELECT value FROM prefs WHERE key='index_watch'").fetchone()[0])['works'],[self.work])
-        other,store=self.package('other',lambda store:setattr(self,'other_work',store.edit_work('create',name='另一部合成作品',tag='other_example')['id']))
+        other = self.package('other')
         other_work=self.rec.value('other work')
         self.stop(self.process);self.process,self.log=self.start(other.path,extra=('--no-index-check',))
         self.token=json.loads(self.request('/api/bootstrap')['body'])['token']
@@ -199,7 +198,7 @@ class NativeIndexTest(unittest.TestCase):
         self.mode.write_text('sleep');self.check();self.index({'action':'apply','tags':['carol_example']})
         self.assertEqual(self.request('/api/index',{'action':'check','allow_network':True})['status'],400)
         self.assertEqual(self.request('/api/sync',{})['status'],400)
-        other,store=self.package('other');other.config['id']=self.lib.config['id'];(other.path/'library.json').write_text(json.dumps(other.config))
+        other = self.package('other');other.config['id']=self.lib.config['id'];(other.path/'library.json').write_text(json.dumps(other.config))
         before=snapshot(other.source)
         start=time.monotonic();r=self.request('/api/libraries/open',{'path':str(other.path)});self.assertEqual(r['status'],200,r['body']);self.assertLess(time.monotonic()-start,3)
         self.token=json.loads(self.request('/api/bootstrap')['body'])['token']
@@ -224,16 +223,13 @@ class NativeIndexTest(unittest.TestCase):
         count=len(self.calls);time.sleep(1.2);self.assertEqual(len(self.calls),count)
 
     def test_deterministic_get_and_progress_bytes_match_reference(self):
-        # The former Python updater's bytes are recorded (tests/reference_replay.py); it had its own
+        # The former Python updater's bytes are recorded (tests/fixed_expectations.py); it had its own
         # shared state and the native timings were copied into it, so times compare as <clock>.
         reference=None
-        pass
         watch=self.index()['watch']
-        pass
         info=lambda:json.dumps(reference.info(),ensure_ascii=False)
         self.assertEqual(self.request('/api/index')['body'].decode(),self.rec.value('info'))
         self.check();v=self.index()
-        pass
         self.assertEqual(unclocked(self.request('/api/index')['body'].decode()),unclocked(self.rec.value('checked info')))
         self.assertEqual(unclocked(self.request('/api/index?progress=1')['body'].decode()),
                          unclocked(self.rec.value('progress')))

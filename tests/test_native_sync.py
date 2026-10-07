@@ -318,7 +318,7 @@ Path(sys.argv[2]).write_text(json.dumps(dict(identity=r['identity'],packages=pac
             if json.loads(self.request('/api/sync')['body'])['state']['status']=='recognising':break
             time.sleep(.01)
         self.assertEqual(self.request('/api/sync',{})['body'],b'{"started": false}')
-        other,_=self.package('other')
+        other = self.package('other')
         other.config['id']=self.lib.config['id']
         (other.path/'library.json').write_text(json.dumps(other.config))
         self.assertEqual(self.request('/api/libraries/open',{'path':str(other.path)})['status'],200)
@@ -368,7 +368,7 @@ Path(sys.argv[2]).write_text(json.dumps(dict(identity=r['identity'],packages=pac
 
     @unittest.skipIf(os.name == 'nt', 'Apple 照片图库只在 macOS 上提供')
     def test_native_library_new_photos_exact_source_reference(self):
-        # The former Python Photos scanner's results on the same inputs are recorded (tests/reference_replay.py).
+        # The former Python Photos scanner's results on the same inputs are recorded (tests/fixed_expectations.py).
         for u,app in (('D','com.atebits.Tweetie2'),('E','net.pxv.iphone'),('F','com.apple.springboard')): self.photo(u,app)
         for i,app in enumerate(('com.apple.camera','com.apple.mobileslideshow','com.apple.mobilesafari','tv.danmaku.bilianime','ai.x.GrokApp','com.tencent.xin','com.baidu.netdisk','app.nicegram','')):self.photo('N'+str(i),app)
         def pair():
