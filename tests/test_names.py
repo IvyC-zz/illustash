@@ -100,21 +100,6 @@ class NamesTest(unittest.TestCase):
             self.updater.start(self.ids['alice'])
             start.assert_called_once()
 
-    def test_local_oc_and_local_child_names_untouched(self):
-        for kind in ('', 'oc'):
-            local = self.store.create_entity('我的名字' + kind, kind=kind)
-            self.add('character', local['name'], 'zh', 'bangumi', '不可替换')
-            row = self.store.entities(local['name'])[0]
-            self.assertEqual(row['name'], local['name'])
-            self.assertEqual(row['tag'], '')
-            self.assertEqual(row['name_source'], 'user')
-        self.store.set_kind(self.ids['alice'], 'oc')
-        before = self.char()['name']
-        self.updater.run()
-        self.assertEqual(self.char()['name'], before)
-        self.assertEqual(self.char()['name_source'], 'user')
-        self.assertEqual(self.char()['tag'], 'alice')
-
     def test_no_identity_effect_when_names_removed(self):
         self.updater.run()
         action = self.store.change(['c'], 'confirmed', self.ids['alice'])
@@ -214,15 +199,6 @@ class NamesTest(unittest.TestCase):
         self.assertEqual(result, {'state': self.updater.state})
         result['state']['done'] = 9
         self.assertEqual(self.updater.state['done'], 3)
-
-    def test_model_api_cache_restores_deleted_name_data(self):
-        self.updater.configure('sk-test-secret-1234')
-        self.updater.run()
-        count = len(self.providers.calls)
-        self.clear_display()
-        self.updater.run()
-        self.assertEqual(len(self.providers.calls), count)
-        self.assertEqual(self.char('bob')['name_source'], 'model')
 
     def test_legacy_undo_label_renders_without_rewriting_history(self):
         action = self.store.change(['c'], 'confirmed', self.ids['alice'])

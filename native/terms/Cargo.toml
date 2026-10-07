@@ -55,3 +55,8 @@ cc = "=1.5.1"
 [[example]]
 name = "reference-http"
 required-features = ["test-reference-host"]
+
+# The replay tests (tests/replay.rs) hash every table after each recorded call; an unoptimised
+# bundled SQLite makes that the slowest part of `cargo test`.
+[profile.dev.package.libsqlite3-sys]
+opt-level = 3

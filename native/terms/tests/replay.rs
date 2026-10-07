@@ -468,10 +468,25 @@ fn replay(module: &str) {
     let bin = Path::new(env!("CARGO_BIN_EXE_illustash-terms"));
     let cases = data["cases"].as_object().unwrap();
     assert!(!cases.is_empty(), "{module}: empty recording");
-    let mut problems = Vec::new();
-    for (name, case_data) in cases {
-        problems.extend(case(name, case_data["calls"].as_array().unwrap(), &data["blobs"], bin));
-    }
+    // Cases are independent (own directory, key counter and serve process): run them on a few threads.
+    let work: Vec<(&String, &Value)> = cases.iter().collect();
+    let threads = std::thread::available_parallelism().map_or(2, |n| n.get().min(4));
+    let next = std::sync::atomic::AtomicUsize::new(0);
+    let problems: Vec<String> = std::thread::scope(|s| {
+        let workers: Vec<_> = (0..threads)
+            .map(|_| {
+                s.spawn(|| {
+                    let mut found = Vec::new();
+                    loop {
+                        let i = next.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                        let Some((name, case_data)) = work.get(i) else { break found };
+                        found.extend(case(name, case_data["calls"].as_array().unwrap(), &data["blobs"], bin));
+                    }
+                })
+            })
+            .collect();
+        workers.into_iter().flat_map(|w| w.join().unwrap()).collect()
+    });
     assert!(
         problems.is_empty(),
         "{module}: {} of {} cases differ:\n{}",

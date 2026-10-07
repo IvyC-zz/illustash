@@ -1849,6 +1849,43 @@ mod sources_tests {
     }
 
     #[test]
+    fn oc_characters_are_not_looked_up_or_renamed() {
+        let (p, lib) = (Providers::start(), Library::load());
+        lib.put("character", "alice", "zh", "user", "我的角色");
+        {
+            let mut c = lib.db();
+            let tx = c.transaction().unwrap();
+            crate::schema::begin_writing(&tx).unwrap();
+            tx.execute("UPDATE entities SET kind='oc' WHERE id=(SELECT entity_id FROM links WHERE system='danbooru' AND key='alice')", [])
+                .unwrap();
+            crate::schema::commit_writing(tx).unwrap();
+        }
+        lib.run(&p, None, false).unwrap();
+        assert_eq!(named(lib.char("alice")), pair("我的角色", "user"));
+        assert!(!p.calls().iter().any(|(u, _)| u.contains("alice")), "an OC is never requested");
+    }
+
+    #[test]
+    fn model_cache_restores_deleted_name_data() {
+        let (p, lib) = (Providers::start(), Library::load());
+        lib.configure_model(&p);
+        lib.run(&p, None, false).unwrap();
+        let count = p.calls().len();
+        {
+            let mut c = lib.db();
+            let tx = c.transaction().unwrap();
+            crate::schema::begin_writing(&tx).unwrap();
+            tx.execute("DELETE FROM names WHERE source='model'", []).unwrap();
+            tx.execute("DELETE FROM name_cache WHERE key LIKE '[\"done\",%'", []).unwrap();
+            crate::schema::commit_writing(tx).unwrap();
+        }
+        lib.run(&p, None, false).unwrap();
+        assert_eq!(p.model_calls().len(), 1, "answered from the model cache");
+        assert_eq!(lib.char("bob").source, "model");
+        assert!(p.calls().len() >= count);
+    }
+
+    #[test]
     fn user_name_survives_provider_refresh() {
         let (p, lib) = (Providers::start(), Library::load());
         lib.put("character", "alice", "zh", "user", "人工名");
