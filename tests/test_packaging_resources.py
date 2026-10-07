@@ -213,7 +213,7 @@ class CandidateExampleWiringTest(unittest.TestCase):
     def test_full_runners_build_and_export_each_current_candidate_before_discovery(self):
         shell = (ROOT / 'tools/check_all.sh').read_text()
         ci = (ROOT / '.github/workflows/ci.yml').read_text()
-        probes = {'REFERENCE_HTTP': 'reference-http', 'RECOGNITION_COMPUTE': 'recognition-compute',
+        probes = {'READ_HTTP': 'read-http', 'RECOGNITION_COMPUTE': 'recognition-compute',
                   'INDEX_COMPUTE': 'index-compute', 'RESEARCH_COMPUTE': 'research-compute',
                   'RELATION_PROBE': 'relation-probe', 'PROVENANCE_COMPUTE': 'provenance-compute'}
         for key, example in probes.items():

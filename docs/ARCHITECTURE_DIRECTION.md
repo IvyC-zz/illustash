@@ -108,7 +108,7 @@ Windows Job 的终止请求与后代进程对象信号完成有异步间隔，�
 
 ## 生产入口与测试参考
 
-读取对照的合成夹具遵守宿主文件名规则：POSIX 保留含 `?` 的包名，Windows 使用 `%` 并继续覆盖空格、Unicode 和 `#`。Windows 账号读取样本通过本机原生保存接口预种 DPAPI，旧 Python 参考保留独立明文种子及相同元数据；成功响应字节与业务断言不归一化。旧参考 HTTP 代理没有原生退出入口或 Windows 进程组，仅其测试收尾在 Windows terminate 后等待；原生正常退出和进程树清理的断言不改变。
+读取对照的合成夹具遵守宿主文件名规则：POSIX 保留含 `?` 的包名，Windows 使用 `%` 并继续覆盖空格、Unicode 和 `#`。Windows 账号读取样本通过本机原生保存接口预种 DPAPI，旧 Python 参考录制时使用独立明文种子及相同元数据。测试读宿主没有原生退出入口或 Windows 进程组，仅其测试收尾在 Windows terminate 后等待；原生正常退出和进程树清理的断言不改变。
 
 CLI 备份拒绝的跨平台合成夹具在回收临时目录前显式提交并关闭各 SQLite 连接，保留 schema、typed rows、rowid 和阻塞文件断言；Windows 句柄释放与迁移/切换拒绝分别核验。
 
@@ -116,13 +116,13 @@ Python 合成测试在导入 `tests` 时为 `urllib.request.OpenerDirector.open`
 
 `native/terms/src/http.rs` 只保留原生入口、请求上下文、JSON/安全响应；停止信号委托进程平台模块，`app_http` 持有应用会话；不再有 Python state/readiness、旧路由转发或 Python 宿主启动。资源沿用 `--root` / `ILLUSTASH_ROOT` 下 `web/static` 和 `tags/tags_v3.csv`，参考库来自 `ILLUSTASH_SHARED/reference.sqlite`。stdout 的 `图库已启动：http://127.0.0.1:PORT` 与 `/api/bootstrap` 是桌面复用的启动信号；账号桌面登录桥与显式配置的可选研究 worker 保留。
 
-历史 Python HTTP、Store 编排、识别导入和 Rust 命令桥位于 `tests/reference/web/`；2026-10-05 起（#186），只被它们使用的旧 Python 应用模块（names、effects、terms_characters、terms_route、wd_export、works、sync、artists、folder、index_update、provenance_job）和溯源 Runner、账号、导出及联网来源也移入 `tests/reference/web/`、`tests/reference/provenance/`，`web/`、`provenance/` 只保留旧 Python 研究、索引、溯源计算脚本及其依赖；2026-10-07 起它们不随任何安装包交付（Linux 已冻结，见 [README](../README.md)），只作原生计算对照测试的参考，按 #9 删除。`tests` 包显式启用历史 `web.*` 导入名，生产 `web` 包没有自动回退；使用 Store 的对照工具也显式导入测试参考。旧转发宿主仅用于历史合成语料的 Rust test example：`cargo build --manifest-path native/terms/Cargo.toml --features test-reference-host --example reference-http`，不属于交付 CLI。普通构建不启用该 feature，基础包不包含测试参考；Python 研究只读常量与算法继续独立存在；研究 worker 使用 `research_snapshot` 的受限适配器，只写隔离副本中的研究表，不导入 Store/HTTP/旧命令桥。安装研究包的资源见 [安装交付](BACKEND_TASKS.md#独立安装与可选计算包)。
+历史 Python HTTP、Store 编排、识别导入和 Rust 命令桥位于 `tests/reference/web/`；2026-10-05 起（#186），只被它们使用的旧 Python 应用模块（names、effects、terms_characters、terms_route、wd_export、works、sync、artists、folder、index_update、provenance_job）和溯源 Runner、账号、导出及联网来源也移入 `tests/reference/web/`、`tests/reference/provenance/`，`web/`、`provenance/` 只保留旧 Python 研究、索引、溯源计算脚本及其依赖；2026-10-07 起它们不随任何安装包交付（Linux 已冻结，见 [README](../README.md)），只作原生计算对照测试的参考，按 #9 删除。`tests` 包显式启用历史 `web.*` 导入名，生产 `web` 包没有自动回退；使用 Store 的对照工具也显式导入测试参考。读路由语料测试使用只服务核心读路由的测试读宿主（`native/terms/src/read_harness.rs`，`cargo build --manifest-path native/terms/Cargo.toml --features test-read-host --example read-http`），不转发、不启动 Python，不属于交付 CLI。普通构建不启用该 feature，基础包不包含测试参考；Python 研究只读常量与算法继续独立存在；研究 worker 使用 `research_snapshot` 的受限适配器，只写隔离副本中的研究表，不导入 Store/HTTP/旧命令桥。安装研究包的资源见 [安装交付](BACKEND_TASKS.md#独立安装与可选计算包)。
 
 #78 的固定契约位于 `native/terms/tests/fixtures/contracts/`，由 `tools/record_native_contracts.py`（2026-10-05 随参考实现删除，#186）在临时合成包上录制，参考生产者为 `fc49031`；v6 输入由历史核心 `d9c49b4` 经 Python 建库参考真正产出。现存 Python Store 的词条写入/迁移已委托显式 Rust CLI，所以这是现存参考宿主契约，不代表独立的纯 Python 词条算法。Rust 集成测试 `native/terms/tests/contracts.rs` 只恢复输入、启动原生宿主、重放 HTTP，并核对两库全部表的列名、typed cells、rowid（包括历史、撤销载荷、事件与任务行）；不会录制期望值。输入 SQL 显式保留 rowid 间隙。四个有限样本共 26 个 HTTP 步骤：基础 API 读取与拒绝、v6→v7 升级/备份/旧历史撤销、标签写入和撤销、已有 running 同步记录转为 interrupted 后完成新运行并再次运行。成功 JSON 的全部键和值按列出的归一化规则比较，检查四个响应头；错误正文只比较状态码，同时检查数据库不变量。同步 GET 只比较共享的 `history` 契约；原生新增扫描进度字段不在该样本的响应比对范围。
 
 时间仅按夹具列出的表/列及 JSON 时钟键解析后映射，资产日期、输入源运行日期和其余字符串不泛化；新用户概念 UUID 按固定名称、kind、origin、source 绑定，检查唯一性与 UUID 格式；session token 检查格式并映射，包内路径映射至 `@ROOT@`。输入中的既有 UUID 保持原值，整数 ID、NULL、历史顺序、载荷与引用不放宽。`tools/test_native_contracts.sh /absolute/contracts-executable` 运行已编译测试：runner 空 PATH/独立 HOME，原生子进程清空继承环境，仅配置临时 HOME、support、shared 和失败的 Python 名称哨兵。该隔离运行不调用 Python/Cargo，不等于在本机卸载所有解释器；录制阶段需要 Python。`.github/workflows/ci.yml` 的 contracts job 仅限手动触发，并从本次 Cargo compiler-artifact 提取可执行文件而非猜测缓存路径；Actions 触发与本地合并门槛统一见 [AGENTS.md](../AGENTS.md#约定)。既有 Python 对照与 golden 保留；四类样本不替代整个行为网，历史 Python 参考的退役不再逐项建固定契约；生产路径不再使用的旧实现按实际调用在 #186 中删除（2026-10-05 用户决定，替代已关闭的 #104、#154–#157）；完整包装和日常闭环的剩余门槛见 #158，各独立平台任务不因此自动完成。固定性能口径与阈值统一见 [TERMS_PERFORMANCE.md 第 5 节](TERMS_PERFORMANCE.md#5-固定原生宿主基准)。回退可撤销本测试/脚本/手动 job，不改变生产 schema；契约输入与期望不得用被测原生输出刷新。
 
-测试参考 Python HTTP 服务器绑定回环地址时直接记录数值地址与实际端口，不做主机名反向解析。标准库 `HTTPServer.server_bind()` 的同步 `getfqdn()` 曾在 macOS CI 阻塞初始化，使 Rust 前门在上游进入请求循环前连接超时；回归同时验证禁止 DNS 查询、原有 15 秒就绪门槛、切库后的令牌失效与退出释放端口。`.github/workflows/reference-http.yml` 仅验收合成参考 HTTP 语料，不代替生产与 Python 全量门槛。
+#9 第 3 阶段起，原生黑盒测试不再并跑旧 Python 参考，而是与录下的参考结果比较：`tests/reference_replay.py` 在参考实现仍存在时以 `ILLUSTASH_REFERENCE=record` 运行原测试，按调用顺序保存参考响应、参考库状态（每表一个摘要，含 schema、存储类型、值、rowid 和视图行）、参考建出的包（数据库按一致性字节，文本按占位符）和其余参考计算值，写入 `tests/fixtures/reference/<模块>.tar.xz`；默认模式只读这些期望，不导入任何参考代码。临时根、回环 origin、会话令牌等一次性字符串以占位符保存，恢复包时把数据库文本里的旧根路径换成本次的。参考与原生在不同时间运行，凡形如日期时间（到分或秒）的文本按 `<clock>` 比较；没有日期时间的字段、计数、rowid、键和字节仍逐一比较。原生侧需要可复现的键时设置仅测试用的 `ILLUSTASH_TEST_KEY_COUNTER`（计数在锁文件下递增），测试生成的图片按内容设定修改时间。参考删除后这些期望不能重录，被测原生输出也不得用来刷新它们；某项期望若需改变，只能按产品决定单独修改并在 PR 说明。录下的期望来自 macOS，路径写法不同的 Windows 不运行逐字节对照用例。
 
 回退不再是删除 `--native` 或切换 `--route`。需停止新程序、保留当前包与已提交数据，再使用升级前备份恢复对应版本；有不兼容格式时禁止旧程序直接打开升级后的包。无格式变化的程序回退仍需使用与该包版本相容的旧安装产物。兼容表不在宿主退役提交中删除。角色、名称、身份和研究结构仍服务原生读写、历史及撤销；逐项职责和已有 v4/v6/v7 清理边界统一见 [TERMS_SCHEMA.md](TERMS_SCHEMA.md) 第 13 节。保留 terms 7 / 应用 36 / 包格式 1，不为宿主退役新增空迁移。
 
@@ -215,7 +215,7 @@ M3 完成才表示基础应用脱离 Python；M5 需在无 Python、无 .venv �
 
 `/api/ask`、静态/图片、设置、图库、宿主信息、同步、名称、索引、账号和溯源状态均由原生实现处理。本地分组和已有特征/缓存可以在 worker 缺席时读取；按需研究计算走显式可选 worker，不启动旧 HTTP 宿主。未知接口或缺失研究能力明确返回 unavailable；Host/Origin/会话校验失败直接拒绝。远程名字/作品查询、网络授权及各任务具体协议见本篇对应章节。全部人工 POST、统一历史与撤销由原生业务模块提交。
 
-`tools/verify_read_http.py` 只接受系统临时目录内的合成夹具。成功响应严格比较状态码与原始响应字节，不归一化；错误按用户 2026-10-01 决定只比较状态码。golden 不重录，随机 `/api/ask` 沿用候选范围与选择约束。默认宿主专项另用仅包含失败 Python 哨兵的 PATH 验证不启动 Python；历史 R0–R4 转发语料只运行上述测试 example，不再表示生产路径。
+`tools/verify_read_http.py` 只接受系统临时目录内的合成夹具。成功响应严格比较状态码与原始响应字节，不归一化；错误按用户 2026-10-01 决定只比较状态码。golden 不重录，随机 `/api/ask` 沿用候选范围与选择约束。默认宿主专项另用仅包含失败 Python 哨兵的 PATH 验证不启动 Python；R1–R4 读路由语料由上述测试读宿主按录下的旧 Python 响应逐字节核对（#9），不表示生产路径。
 
 核心名字投影按请求实际使用的键查询，并只在本次读事务内记忆结果；未投影的作品文字仍按旧规则选名，旧名字后端保持原样。资产分页批量读取本页身份、作品显示名和 hybrid 节点，保留字段覆盖顺序；HTTP JSON 使用单一输出缓冲区，浮点规则和持久化 JSON 均未改。没有跨请求名字缓存，人工改名和切库后的请求重新读取当前快照。回退按上节的相容产物与备份恢复方式执行。
 
@@ -406,7 +406,7 @@ Windows 开发计算候选复用 #151 的固定 ILP64 OpenBLAS 加载器：显�
 
 `native/terms/src/worker_protocol.rs` 定义索引、同步识别、溯源、研究的 request/response，以及索引 `index-job.json`、识别 manifest、签名文件和溯源网络请求的 serde 类型；外部文件在入口解析，结构错误带实际文件和嵌套字段路径。索引恢复不再把无效 journal 当成新任务。协议版本、request 字节、HTTP 字段顺序与数据库内容保持现行契约；身份、版本、资产范围及提交前指纹的语义校验仍由原协调模块执行。索引结果直接按类型校验，避免再建立整份动态 JSON 副本。索引 journal 与 `native_index_runs.result` 回执通过有序 JSON 值保存原键序；源库回执沿用不包含计算结果正文的格式。
 
-`native/terms/src/task_state.rs` 持有状态枚举和有序展示快照，包含现行 `needs_recognition`、`needs_windows` 等状态；外来研究 progress 和已存溯源状态先解析，坏溯源状态以含文件/字段的失败信息呈现，基础浏览与人工操作继续可用。crate 根对非测试 `unwrap` 启用 Clippy warn，`app_index`、`app_sync`、`app_provenance`、`app_research` 使用模块 deny；锁中毒用带说明的 expect，worker/job 外部字段使用可返回错误的解析。其余存量内部 unwrap 已改为有说明的 expect，保留既有不变量失败行为，不把它们宣称为可恢复错误。显式 `test-reference-host` feature 的历史参考宿主不属于生产清理范围，局部保留测试 unwrap 的允许级别，生产模块 deny 不受影响。
+`native/terms/src/task_state.rs` 持有状态枚举和有序展示快照，包含现行 `needs_recognition`、`needs_windows` 等状态；外来研究 progress 和已存溯源状态先解析，坏溯源状态以含文件/字段的失败信息呈现，基础浏览与人工操作继续可用。crate 根对非测试 `unwrap` 启用 Clippy warn，`app_index`、`app_sync`、`app_provenance`、`app_research` 使用模块 deny；锁中毒用带说明的 expect，worker/job 外部字段使用可返回错误的解析。其余存量内部 unwrap 已改为有说明的 expect，保留既有不变量失败行为，不把它们宣称为可恢复错误。显式 `test-read-host` feature 的测试读宿主不属于生产代码，生产模块 deny 不受影响。
 
 `app_http::handle` 保留本机/跨站、generation、CSRF、body 格式检查与分派；`http_host_get.rs` 和 `http_host_post.rs` 承接会话业务路由，沿用旧快照、锁释放和切库后拒收边界。无数据库迁移；回退按独立模块提交恢复代码，先停止程序，不修改当前包或用旧工具接管未完成任务。
 
