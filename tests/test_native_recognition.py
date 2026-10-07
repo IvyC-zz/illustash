@@ -15,7 +15,7 @@ from pathlib import Path
 from unittest.mock import patch
 import numpy as np
 from tests import test_native_lifecycle as lifecycle
-from tests.reference_replay import RECORD
+from tests.fixed_expectations import unclocked
 from tests.test_native_human_labels import snapshot, freeze_seed_defaults
 
 # The recognition package files and the source tables they land in (input contract of the former importer).
@@ -88,16 +88,7 @@ class NativeRecognitionTest(unittest.TestCase):
         with sqlite3.connect(self.lib.source) as c: c.executescript(SCHEMA)
         freeze_seed_defaults(self.lib.source)
         freeze_seed_defaults(self.lib.db)
-        def old_import():
-            from web import library, results
-            from web.store import Store
-            old=self.root/'old.pilib'; shutil.copytree(self.lib.path,old)
-            reference=library.Library(old,self.lib.config)
-            store=Store.open(reference.source,reference.db); store.on_effect=lambda _:None
-            with patch.object(results,'ROOT',self.resources):
-                result=results.import_package(reference,p,store,self.specs)
-            return {'result':result,'source':snapshot(reference.source),'db':snapshot(reference.db)}
-        expected=self.rec.value('old import',old_import)
+        expected=self.rec.value('old import')
         actual=self.import_result(p)
         source_now=dict(snapshot(self.lib.source))
         if os.name == 'nt':

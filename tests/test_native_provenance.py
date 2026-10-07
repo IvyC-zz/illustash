@@ -17,10 +17,10 @@ import unittest
 from unittest.mock import patch
 
 from tests import test_native_lifecycle as lifecycle
-from tests.reference_replay import RECORD, unclocked
+from tests.fixed_expectations import unclocked
 from tests.test_read_http import SPAWN, wait_until
 from tools.verify_read_http import fetch
-from provenance import db
+from tests import provenance_fixture as db
 
 
 WORKER = r'''
@@ -219,7 +219,7 @@ class NativeProvenanceTest(unittest.TestCase):
         with sqlite3.connect(self.lib.db) as source,sqlite3.connect(before) as target:source.backup(target)
         self.post({'action':'lookup','ids':['a']});self.finish('done')
         package=self.lib.path/self.sql('SELECT package FROM native_delivery',cache=True)[0][0]
-        expected=self.rec.value('python export',lambda:self.python_export(before))
+        expected=self.rec.value('python export')
         for name in ('evidence.jsonl','terms.jsonl'):
             self.assertEqual(unclocked((Path(package)/name).read_text(encoding='utf-8')),unclocked(expected['files'][name]))
         # Creation clock is transport metadata; file digests cover the (clock-bearing) bytes compared above.
@@ -235,20 +235,6 @@ class NativeProvenanceTest(unittest.TestCase):
         self.assertEqual(native['runs'],expected['runs']);self.assertEqual(native['coverage'],expected['coverage'])
         self.assertEqual(native['runs'][0]['report'],expected['report'])
 
-    def python_export(self,before):
-        """Recording only: the former Python exporter's package, its import into the pre-lookup
-        application copy, and the former run summary and report."""
-        from provenance import export, report
-        from web import artists, terms_core
-        out=self.root/'reference-evidence';export.write(self.lib,out)
-        manifest=manifest_shape(json.loads((out/'manifest.json').read_text()))
-        reference_import=terms_core.import_package(before,self.lib.config['id'],out)
-        with sqlite3.connect(before) as expected:
-            rows=[json.loads(unclocked(json.dumps(expected.execute(q).fetchall(),ensure_ascii=False))) for q in EXPORT_QUERIES]
-        runs=json.loads(unclocked(json.dumps(artists.runs(self.lib),ensure_ascii=False)))
-        return {'files':{name:(out/name).read_text(encoding='utf-8') for name in ('evidence.jsonl','terms.jsonl')},
-                'manifest':manifest,'import':reference_import,'rows':rows,'runs':runs['runs'],'coverage':runs['coverage'],
-                'report':json.loads(unclocked(json.dumps(report.run(self.lib),ensure_ascii=False)))}
 
     def test_pixiv_pages_cache_and_expiry_never_grants_background_consent(self):
         account=self.support/'accounts';account.mkdir(parents=True,exist_ok=True)
@@ -327,7 +313,7 @@ class NativeProvenanceTest(unittest.TestCase):
 
     def test_real_adapter_hash_and_owner_crash_recovery(self):
         from PIL import Image
-        from provenance.sources.pixel_hash import pixel_hash
+        import hashlib
         image=self.root/'synthetic.png';Image.new('RGBA',(2,3),(9,17,21,255)).save(image)
         with sqlite3.connect(self.lib.source) as c:c.execute("UPDATE assets SET src_path=? WHERE uuid='a'",(str(image),))
         cache=self.root/'adapter-cache';cache.mkdir()
@@ -335,15 +321,21 @@ class NativeProvenanceTest(unittest.TestCase):
             with sqlite3.connect(cache/'provenance.sqlite') as out:c.backup(out)
         request={'format':'illustash-provenance/1','identity':{'task_id':'synthetic'},'owner_pid':os.getpid(),'library':str(self.lib.path),'cache':str(cache),'mailbox':str(cache),'step':'pixel_hash','only':['a'],'artists':[],'network':False}
         req=cache/'request.json';req.write_text(json.dumps(request));reply=cache/'response.json'
-        adapter=Path(__file__).resolve().parents[1]/'provenance/native_worker.py'
-        subprocess.run([sys.executable,str(adapter),str(req),str(reply)],check=True,start_new_session=True,env={**self.env,'PATH':os.environ['PATH']})
-        self.assertEqual(json.loads((cache/'hashes.json').read_text()),[{'asset':'a','hash':pixel_hash(image)}])
+        from tests.test_native_provenance_production import candidate_worker
+        import shutil
+        adapter=cache / ('illustash-provenance.exe' if os.name=='nt' else 'illustash-provenance')
+        shutil.copy2(candidate_worker(),adapter)
+        subprocess.run([str(adapter),str(req),str(reply)],check=True,start_new_session=True,env={**self.env,'PATH':os.environ['PATH']})
+        self.assertEqual(json.loads((cache/'hashes.json').read_text()),[{'asset':'a','hash':hashlib.md5(b'P7\nWIDTH 2\nHEIGHT 3\nDEPTH 4\nMAXVAL 255\nTUPLTYPE RGB_ALPHA\nENDHDR\n'+bytes([9,17,21,255])*6).hexdigest()}])
         if os.environ.get('ILLUSTASH_IQDB_BINARY'):
             request['step']='iqdb';req.write_text(json.dumps(request))
-            subprocess.run([sys.executable,str(adapter),str(req),str(reply)],check=True,start_new_session=True,env={**self.env,'PATH':os.environ['PATH']})
+            subprocess.run([str(adapter),str(req),str(reply)],check=True,start_new_session=True,env={**self.env,'PATH':os.environ['PATH']})
             rows=json.loads((cache/'hashes.json').read_text());self.assertEqual([r['asset'] for r in rows],['a']);self.assertTrue(rows[0]['hash'].startswith('iqdb_'))
         wrapper=self.root/'owner-worker'
-        wrapper.write_text('#!'+sys.executable+'\n'+"import importlib.util,os,subprocess,time\n"+f"spec=importlib.util.spec_from_file_location('adapter',{str(adapter)!r});m=importlib.util.module_from_spec(spec);spec.loader.exec_module(m)\n"+"def compute(r):\n p=subprocess.Popen([os.environ['SYNTHETIC_PYTHON'],'-c','import time;time.sleep(300)']);open(os.environ['SYNTHETIC_PID'],'w').write(str(p.pid))\n while True:time.sleep(.1)\nm.execute=compute;m.main()\n")
+        wrapper.write_text('#!'+sys.executable+'\n'+"import os,subprocess,time\n"+
+                           "p=subprocess.Popen([os.environ['SYNTHETIC_PYTHON'],'-c','import time;time.sleep(300)'])\n"+
+                           "open(os.environ['SYNTHETIC_PID'],'w').write(str(p.pid))\n"+
+                           "while True:time.sleep(.1)\n")
         wrapper.chmod(0o755);pidfile=self.root/'owner-child'
         self.env.update(ILLUSTASH_PROVENANCE_WORKER=worker_command(wrapper),SYNTHETIC_PYTHON=sys.executable,SYNTHETIC_PID=str(pidfile));self.restart()
         self.post({'action':'artist','artist':'synthetic'});wait_until(pidfile.exists,timeout=5)

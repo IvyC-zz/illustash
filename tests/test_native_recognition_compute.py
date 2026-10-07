@@ -9,9 +9,9 @@ import unittest
 
 import numpy as np
 from PIL import Image
-from web.infer import wd_input
-from tools.ccip import preprocess
-from tools.ccip import cross
+from tests.image_expectations import wd_input
+from tests.image_expectations import preprocess
+from tests.vector_math import cross
 
 FIXED_ORDER=json.loads((Path(__file__).resolve().parent/'fixtures/recognition_anchor_order.json').read_text())
 

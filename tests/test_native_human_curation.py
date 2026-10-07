@@ -17,7 +17,7 @@ import unittest
 from tests import test_native_human_labels as labels
 from tests.test_native_human_labels import snapshot, states
 from tools.verify_read_http import fetch
-from tests.reference_replay import RECORD
+from tests.fixed_expectations import unclocked
 
 
 class NativeHumanCurationTest(unittest.TestCase):
@@ -34,15 +34,14 @@ class NativeHumanCurationTest(unittest.TestCase):
     undo_latest = labels.NativeHumanLabelsTest.undo_latest
     latest_action = labels.NativeHumanLabelsTest.latest_action
     reference_response = labels.NativeHumanLabelsTest.reference_response
-    build_reference_seed = labels.NativeHumanLabelsTest.build_reference_seed
     start_reference = labels.NativeHumanLabelsTest.start_reference
 
     def pair(self, url, body, *, expected=200, headers=None):
         item = {'url': url, 'method': 'POST', 'body': json.dumps(body, ensure_ascii=False).encode('utf-8'),
                 'headers': {'Content-Type': 'application/json', 'X-CSRF-Token': self.token, **(headers or {})}}
-        before = [self.rec.state('before', self.left), states(self.right)]
+        before = [self.rec.state('before'), states(self.right)]
         responses = [self.reference_response('response', item), fetch(self.origin, item, self.origin)]
-        after = [self.rec.state('after', self.left), states(self.right)]
+        after = [self.rec.state('after'), states(self.right)]
         for old, new, response in zip(before, after, responses):
             self.assertEqual(response['status'], expected, (url, body, response['body']))
             if response['status'] >= 400:
@@ -61,29 +60,8 @@ class NativeHumanCurationTest(unittest.TestCase):
         labels.NativeHumanLabelsTest.setUp(self)
         self.relations = [('e', 'f', 'crop'), ('f', 'g', 'edit'), ('c', 'd', 'variant'),
                           ('h', 'a', 'subtle'), ('b', 'd', 'similar')]
-        def augment(store):
-            with closing(sqlite3.connect(self.left.source)) as c:
-                c.executemany('INSERT INTO assets(uuid,filename,src_path,width,height,added_at,src_kind,in_scope,trashed,stable_hash) VALUES (?,?,?,?,?,?,?,?,?,NULL)',
-                              [(u, u + '.png', str(self.root / (u + '.png')), w, h, day, 'orig', 1, 0)
-                               for u, w, h, day in [('d', 400, 300, '2026-09-20'), ('e', 400, 300, '2026-09-20'),
-                                                    ('f', 100, 100, '2026-09-21'), ('g', 400, 300, '2026-09-19'),
-                                                    ('h', 400, 300, '2026-09-19'), ('图甲', 80, 100, '2026-09-22')]])
-                c.commit()
-            store.refresh()
-            # Establish different membership before the new hash groups exist; no copy inherits it.
-            store.change(['e'], 'confirmed', self.alice)
-            with closing(sqlite3.connect(self.left.source)) as c:
-                c.execute("UPDATE assets SET stable_hash='hash-two' WHERE uuid IN ('d','e')")
-                c.execute("UPDATE assets SET stable_hash='hash-three' WHERE uuid IN ('g','h')")
-                c.commit()
-            with store.connect() as c:
-                c.executemany('INSERT INTO relations(a,b,kind) VALUES (?,?,?)', self.relations)
-            store.refresh_similar()
-            self.work = store.edit_work('create', name='Synthetic Work')['id']
-            self.merged = store.create_entity('Synthetic merged')['id']
-            store.merge(self.merged, self.alice)
-        self.seed_both(augment)
-        self.work, self.merged = self.rec.value('augmented ids', lambda: (self.work, self.merged))
+        self.seed_both()
+        self.work, self.merged = self.rec.value('augmented ids')
         with closing(sqlite3.connect(self.right.db)) as c:
             self.assertEqual(c.execute('SELECT count(*) FROM assets').fetchone()[0], 9)
             self.assertEqual(c.execute('PRAGMA foreign_key_check').fetchall(), [])
@@ -101,12 +79,7 @@ class NativeHumanCurationTest(unittest.TestCase):
             self.undo_latest()
 
     def test_curate_ascii_history_order_and_bulk_excluded_rowids_on_undo(self):
-        def rules(store):
-            from web.store import Store
-            with store.connect() as c:
-                c.executemany("INSERT INTO auto_rules(uuid,kind,reason) VALUES (?,'exclude','synthetic')", [('a',), ('b',)])
-                Store._refresh_excluded(c)
-        self.seed_both(rules)
+        self.seed_both()
         before_rows = self.excluded()
         self.assertEqual(before_rows, [(1, 'a'), (2, 'b')])
         action = self.pair('/api/curate', {'ids': ['b', 'a'], 'action': 'include'})['undo']
@@ -140,21 +113,12 @@ class NativeHumanCurationTest(unittest.TestCase):
         response = self.pair('/api/fold', {'kinds': ['edit', 'crop', 'edit']})
         self.assertEqual(response, {'kinds': ['crop', 'edit']})
         self.assert_duplicates(['d', 'e', 'f', 'g', 'h'], 'hash-three', 'g', hidden=set())
-        def reverse_relations(store):
-            with store.connect() as c:
-                c.execute('DELETE FROM relations')
-                c.executemany('INSERT INTO relations(a,b,kind) VALUES (?,?,?)', reversed(self.relations))
-            store.set_fold_kinds([])
-        self.seed_both(reverse_relations)
+        self.seed_both()
         self.pair('/api/fold', {'kinds': ['edit', 'crop']})
         self.assert_duplicates(['d', 'e', 'f', 'g', 'h'], 'hash-three', 'g', hidden=set())
         self.assertEqual(snapshot(self.right.db)['actions'], history)
         # A valid older source without stable_hash follows relations only, without source writes.
-        def no_hash(store):
-            with closing(sqlite3.connect(self.left.source)) as c:
-                c.execute('ALTER TABLE assets DROP COLUMN stable_hash'); c.commit()
-            store.set_fold_kinds([])
-        self.seed_both(no_hash)
+        self.seed_both()
         self.pair('/api/fold', {'kinds': ['crop', 'edit']})
         self.assert_duplicates(['e', 'f', 'g'], 'sim:e', 'g', hidden=set())
         self.assertEqual(snapshot(self.right.db)['actions'], history)
@@ -179,12 +143,12 @@ class NativeHumanCurationTest(unittest.TestCase):
         first = self.pair('/api/tag', {'ids': ['c'], 'tag': '第二标签'})['undo']
         self.pair('/api/artist/verdict', {'ids': ['b'], 'artist': self.artist, 'verdict': 'yes'})
         self.pair('/api/curate', {'ids': ['c', '图甲'], 'action': 'exclude'})
-        self.seed_both(lambda store: store.set_pins([self.bob]))
+        self.seed_both()
         self.pair('/api/fold', {'kinds': ['crop']})
         self.pair('/api/undo', {'id': first['id']}, expected=400)
         for _ in range(3):
             self.undo_latest()
-        prefs, kinds = self.rec.value('reference preferences', lambda: (self.store.prefs(), self.store.fold_kinds()))
+        prefs, kinds = self.rec.value('reference preferences')
         self.assertEqual(prefs, {'pins': [self.bob]})
         self.assertEqual(kinds, ['crop'])
 

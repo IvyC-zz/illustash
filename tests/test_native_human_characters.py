@@ -10,7 +10,7 @@ from tests import test_native_human_curation as curation
 from tests import test_native_human_identity as identity
 from tests.test_native_human_labels import states
 from tools.verify_read_http import fetch
-from tests.reference_replay import RECORD
+from tests.fixed_expectations import unclocked
 
 
 class NativeHumanCharactersTest(unittest.TestCase):
@@ -23,19 +23,12 @@ class NativeHumanCharactersTest(unittest.TestCase):
     undo_latest = labels.NativeHumanLabelsTest.undo_latest
     latest_action = labels.NativeHumanLabelsTest.latest_action
     reference_response = labels.NativeHumanLabelsTest.reference_response
-    build_reference_seed = labels.NativeHumanLabelsTest.build_reference_seed
     start_reference = labels.NativeHumanLabelsTest.start_reference
     pair = curation.NativeHumanCurationTest.pair
 
     def test_change_all_actions_multi_copy_filter_and_variants(self):
         skin = 'synthetic-skin'
-        def variant(store):
-            with store.connect() as c:
-                c.execute("INSERT OR REPLACE INTO meta VALUES ('terms_writer','1')")
-                c.execute("INSERT INTO entities(id,name,kind,parent_id,variant) VALUES (?,'Synthetic summer','skin',?,'summer')", (skin, self.alice))
-                c.execute("DELETE FROM meta WHERE key='terms_writer'")
-            store.set_profile(self.alice, name='Alice')
-        self.seed_both(variant)
+        self.seed_both()
         calls = [({'ids': ['a', 'a'], 'action': 'confirmed', 'entity': self.alice}),
                  ({'ids': ['c'], 'action': 'confirmed', 'entities': [self.alice, self.bob, self.alice]}),
                  ({'ids': ['c'], 'action': 'add_variant', 'entity': skin}),
@@ -61,11 +54,7 @@ class NativeHumanCharactersTest(unittest.TestCase):
         self.assertEqual(self.latest_action(), prior)
 
     def test_audit_correct_reassign_sweep_and_mixed_latest_undo(self):
-        def audit(store):
-            with store.connect() as c:
-                c.execute('DELETE FROM audit_sample')
-                c.executemany("INSERT INTO audit_sample(uuid,entity,stratum,solo) VALUES (?,?,'synthetic',1)", [('a', self.alice), ('c', self.bob)])
-        self.seed_both(audit)
+        self.seed_both()
         self.pair('/api/audit/answer', {'yes': ['a'], 'no': ['c']})
         self.pair('/api/reassign', {'ids': ['a'], 'old': self.alice, 'new': self.bob})
         self.pair('/api/reassign', {'filter': {'entity': self.bob}, 'exclude': ['c'], 'old': self.bob, 'new': [self.alice]})
@@ -79,12 +68,8 @@ class NativeHumanCharactersTest(unittest.TestCase):
             self.undo_latest()
 
     def test_merged_entity_and_multi_replacement_preserve_other_memberships(self):
-        def identities(store):
-            self.third = store.create_entity('Synthetic third')['id']
-            self.merged = store.create_entity('Synthetic merged')['id']
-            store.merge(self.merged, self.alice)
-        self.seed_both(identities)
-        self.third, self.merged = self.rec.value('created ids', lambda: (self.third, self.merged))
+        self.seed_both()
+        self.third, self.merged = self.rec.value('created ids')
         self.pair('/api/change', {'ids': ['c'], 'action': 'confirmed', 'entity': self.merged})
         self.pair('/api/reassign', {'ids': ['c'], 'old': self.merged, 'new': [self.bob, self.third, self.bob]})
         self.pair('/api/reassign', {'ids': ['c'], 'old': self.bob, 'new': self.alice})
@@ -93,12 +78,7 @@ class NativeHumanCharactersTest(unittest.TestCase):
         for _ in range(3): self.undo_latest()
 
     def test_hybrid_verdict_scope_and_undo(self):
-        def hybrid(store):
-            with store.connect() as c:
-                c.execute("INSERT OR REPLACE INTO meta VALUES ('identity_policy','hybrid')")
-            from web import terms_core
-            terms_core.character_command(store.path, {'op': 'rebuild'})
-        self.seed_both(hybrid)
+        self.seed_both()
         self.pair('/api/change', {'ids': ['a'], 'action': 'confirmed', 'entity': self.alice})
         self.pair('/api/ask/answer', {'entity': self.alice, 'no': ['a'], 'switch': self.bob})
         self.pair('/api/reassign', {'ids': ['a'], 'old': self.bob, 'new': self.alice})
@@ -106,14 +86,8 @@ class NativeHumanCharactersTest(unittest.TestCase):
         for _ in range(4): self.undo_latest()
 
     def test_role_and_identity_commands_share_recent_undo(self):
-        def hybrid(store):
-            self.third = store.create_entity('Synthetic third')['id']
-            with store.connect() as c:
-                c.execute("INSERT OR REPLACE INTO meta VALUES ('identity_policy','hybrid')")
-            from web import terms_core
-            terms_core.character_command(store.path, {'op': 'rebuild'})
-        self.seed_both(hybrid)
-        self.third = self.rec.value('created id', lambda: self.third)
+        self.seed_both()
+        self.third = self.rec.value('created id')
         pair = lambda url, body: identity.NativeHumanIdentityTest.pair(self, url, body)
         pair('/api/change', {'ids': ['c'], 'action': 'confirmed', 'entity': self.alice})
         pair('/api/identity/decision', {'a': self.alice, 'b': self.third, 'kind': 'duplicate_of',
@@ -159,10 +133,7 @@ class NativeHumanCharactersTest(unittest.TestCase):
                 self.pair(url, body, expected=400)
 
     def test_transaction_faults_rollback(self):
-        def audit(store):
-            with store.connect() as c:
-                c.execute("INSERT OR REPLACE INTO audit_sample(uuid,entity,stratum,solo) VALUES (?,?,'synthetic',1)", ('a', self.alice))
-        self.seed_both(audit)
+        self.seed_both()
         commands = [('/api/change', {'ids': ['a'], 'action': 'confirmed', 'entity': self.alice}),
                     ('/api/ask/answer', {'entity': self.alice, 'yes': ['a']}),
                     ('/api/reassign', {'ids': ['a'], 'old': self.alice, 'new': self.bob}),
@@ -187,22 +158,19 @@ class NativeHumanCharactersTest(unittest.TestCase):
                 'headers': {'Content-Type': 'application/json', 'X-CSRF-Token': self.token}}
         responses = [self.reference_response('response', item), fetch(self.origin, item, self.origin)]
         self.assertEqual([r['status'] for r in responses], [500, 500])
-        self.assertEqual(self.rec.state('after', self.left), states(self.right))
+        self.assertEqual(self.rec.state('after'), states(self.right))
         with closing(sqlite3.connect(self.right.db)) as c:
             self.assertEqual(c.execute("SELECT status FROM backend_effects ORDER BY id DESC LIMIT 1").fetchone()[0], 'pending')
         for lib in (self.left, self.right):
             with closing(sqlite3.connect(lib.db)) as c:
                 c.execute('DROP TRIGGER fail_ack'); c.commit()
         self.stop(self.process)
-        if RECORD:
-            from web import effects
-            effects.drain(self.store, self.reference._after_operation)
+        pass
         self.process = self.start(self.right)
         self.token = json.loads(fetch(self.origin, {'url': '/api/bootstrap'}, self.origin)['body'])['token']
         self.rec.alias(self.token, '@TOKEN@')
-        if RECORD:
-            self.reference.token = self.token
-        self.assertEqual(self.rec.state('drained', self.left), states(self.right))
+        pass
+        self.assertEqual(self.rec.state('drained'), states(self.right))
         self.undo_latest()
 
     def test_security_and_inflight_request_switch_isolation(self):
@@ -238,5 +206,4 @@ class NativeHumanCharactersTest(unittest.TestCase):
             self.assertEqual(restored['status'], 200)
             self.token = json.loads(fetch(self.origin, {'url': '/api/bootstrap'}, self.origin)['body'])['token']
             self.rec.alias(self.token, '@TOKEN@')
-            if RECORD:
-                self.reference.token = self.token
+            pass

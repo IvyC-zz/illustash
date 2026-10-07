@@ -6,22 +6,25 @@ import sqlite3
 from types import SimpleNamespace
 import unittest
 from PIL import Image
-from provenance import db, native_worker
-from provenance.sources import groups
+from tests import provenance_fixture as db
+from tests.provenance_expectations import native_worker
+from tests.provenance_expectations import groups
 from tests import test_native_provenance_compute as driver
 
 
 class IndependentLocalProvenanceInputs(unittest.TestCase):
+    setUpClass = classmethod(driver.NativeProvenanceComputeTest.setUpClass.__func__)
     def test_handwritten_group_counts_conflict_and_300_second_boundary(self):
         for partial, expected in ((False, dict(auto=1, candidates=3, stopped='')),
                                   (True, dict(auto=1, candidates=1, stopped=''))):
             with self.subTest(partial=partial):
                 fixture = NativeLocalProvenanceTest()
+                fixture.binary = self.binary
                 fixture.setUp()
                 try:
-                    _, reference = fixture.group_fixture(partial)
-                    self.assertEqual(groups.run(reference, log=lambda _: None), expected)
-                    with sqlite3.connect(reference.path / 'provenance.sqlite') as c:
+                    request, reference = fixture.group_fixture(partial)
+                    self.assertEqual(fixture.probe(request)['result'], expected)
+                    with sqlite3.connect(Path(request['cache']) / 'provenance.sqlite') as c:
                         self.assertEqual(c.execute("SELECT evidence FROM image_artists WHERE asset='dup'").fetchone()[0],
                                          '{"group": "duplicate", "count": 1, "from": ["known"]}')
                         self.assertEqual(c.execute("SELECT count(*) FROM image_artists WHERE asset IN ('untouched','weak','after','old')").fetchone()[0], 0)
@@ -30,13 +33,13 @@ class IndependentLocalProvenanceInputs(unittest.TestCase):
 
     def test_fixed_old_worker_missing_path_is_fatal(self):
         fixture = NativeLocalProvenanceTest()
+        fixture.binary = self.binary
         fixture.setUp()
         try:
             request, reference = fixture.fixture_local('pixel_hash')
             with sqlite3.connect(reference.source) as c:
                 c.execute('INSERT INTO assets VALUES (?, ?, NULL, ?, 1, 0, NULL)', ('absent', 'files', 'x'))
-            with self.assertRaises(AttributeError):
-                native_worker.execute(request)
+            fixture.probe(request, success=False)
         finally:
             fixture.doCleanups()
 

@@ -17,7 +17,7 @@ import zlib
 import numpy as np
 from PIL import Image, ImageDraw
 
-from web import relate, similar
+from tests.image_expectations import relate, similar, assert_bits
 from tests.relate_images import picture, jpeg
 
 
@@ -219,14 +219,15 @@ class NativeRelationImagesTest(unittest.TestCase):
         self.assertEqual(actual['size'], list(size))
         self.assertEqual((actual['height'], actual['width']), expected.shape[:2])
         actual_bits = np.asarray(actual['bits'], np.uint32)
-        np.testing.assert_array_equal(actual_bits, expected.view(np.uint32).ravel())
+        assert_bits(self, actual_bits, expected)
         ratio, grid = similar.signature(path)
         actual = self.probe('signature', path=path)
         self.assertEqual(actual['ratio'], ratio)
         self.assertEqual(bytes(actual['grid']), grid)
         ratio_bytes,grid_bytes=similar.signature(io.BytesIO(Path(path).read_bytes()))
         self.assertEqual(self.probe('signature_bytes', path=path),dict(ratio=ratio_bytes,grid=list(grid_bytes)))
-        from provenance.verify import _colour
+        from tests.image_expectations import verify
+        _colour = verify._colour
         expected_colour = _colour(path).astype(np.uint8).ravel().tolist()
         self.assertEqual(self.probe('colour', path=path), expected_colour)
         expected_bytes=_colour(io.BytesIO(Path(path).read_bytes())).astype(np.uint8).ravel().tolist()
@@ -512,7 +513,7 @@ class NativeRelationImagesTest(unittest.TestCase):
                              pixels=x.ravel().tolist())
                 got = self.probe('resize', image=image, width=size[0], height=size[1])
                 expected = relate._resize(x, size)
-                np.testing.assert_array_equal(np.asarray(got['bits'], np.uint32), expected.view(np.uint32).ravel())
+                assert_bits(self, got['bits'], expected)
 
     def test_thin_portrait_original_axis_order_byte_alpha_and_integer_modes(self):
         rng=np.random.default_rng(15219)
@@ -597,7 +598,8 @@ class NativeRelationImagesTest(unittest.TestCase):
                         raw[pos+10:pos+10]=bytes([0,0,255,0,255,0]+[0]*762)
                     path=self.root/f'partial-{transparent}-{local}.gif';path.write_bytes(raw)
                     self.assert_image(str(path))
-                    from provenance.verify import _colour
+                    from tests.image_expectations import verify
+                    _colour = verify._colour
                     corner = [0,255,0] if transparent == 1 else ([0,0,255] if local else [255,0,0])
                     self.assertEqual(_colour(path)[0,0].tolist(),corner)
 
@@ -613,7 +615,8 @@ class NativeRelationImagesTest(unittest.TestCase):
                     self.assert_image(path)
         # Integer Pillow conversion, independently handwritten counterexample
         # to image's float truncation. It must survive the TIFF decoding path.
-        from provenance.verify import _colour
+        from tests.image_expectations import verify
+        _colour = verify._colour
         im=Image.new('CMYK',(24,24),(31,127,210,90))
         path=self.save(im,'cmyk-rounding.tiff')
         self.assertEqual(_colour(path)[0,0].tolist(),[145,83,29])
@@ -635,7 +638,8 @@ class NativeRelationImagesTest(unittest.TestCase):
             self.assert_image(self.raw_png(pixels,colour,16,f'wide16-{colour}.png'))
         pixels=np.array([[[510,128,65279]]],np.uint16)
         path=self.raw_png(pixels,2,16,'high-byte.png')
-        from provenance.verify import _colour
+        from tests.image_expectations import verify
+        _colour = verify._colour
         self.assertEqual(_colour(path)[0,0].tolist(),[1,0,254])
         self.assert_image(path)
 
@@ -775,7 +779,8 @@ class NativeRelationImagesTest(unittest.TestCase):
         for magic in [b'P3',b'P6']:
             values=np.ones((1,1,3),np.uint16)
             path=write(magic,6,values,f'ties-{magic.decode()}.pnm')
-            from provenance.verify import _colour
+            from tests.image_expectations import verify
+            _colour = verify._colour
             self.assertEqual(_colour(path)[0,0].tolist(),[42,42,42])
             self.assert_image(path)
         values=rng.integers(0,2,(3,2048),np.uint8)
@@ -872,7 +877,9 @@ class NativeSimilarSnapshotTest(unittest.TestCase):
         return run, output
 
     def test_exact_cache_rows_incremental_skip_retry_and_unchanged_snapshot(self):
-        from web.research_snapshot import Snapshot
+        import gzip
+        with gzip.open(Path(__file__).parent/'fixtures/similar_values.json.gz','rt',encoding='utf-8') as f:
+            fixed = iter(json.load(f))
         reference = self.root/'reference'
         reference.mkdir()
         for name in ['source.sqlite', 'library.sqlite']:
@@ -884,10 +891,17 @@ class NativeSimilarSnapshotTest(unittest.TestCase):
             self.assertEqual(run.returncode, 0, run.stderr.decode())
             self.assertEqual((self.root/'library.sqlite').read_bytes(), before)
             out = json.loads(output.read_text())
-            scanner = similar.SimilarScanner(Snapshot(reference))
-            scanner.scan()
+            expected_state = next(fixed)
+            with sqlite3.connect(reference/'library.sqlite') as c:
+                for table, rows in expected_state['tables'].items():
+                    c.execute('CREATE TABLE IF NOT EXISTS '+table+' ('+ {'similar_paired':'uuid TEXT PRIMARY KEY','similar_retry':'a TEXT,b TEXT,PRIMARY KEY(a,b)'}.get(table,'unused')+')')
+                    c.execute('DELETE FROM '+table)
+                    if table=='image_sigs':
+                        rows = [[r[0],r[1],bytes.fromhex(r[2]) if r[2] is not None else None,r[3]] for r in rows]
+                    if rows:
+                        c.executemany('INSERT INTO '+table+' VALUES ('+','.join('?' for _ in rows[0])+')',rows)
             self.assertEqual({k:out['result'][k] for k in ('status','compared','found')},
-                             {k:scanner.state[k] for k in ('status','compared','found')})
+                             {k:expected_state['state'][k] for k in ('status','compared','found')})
             with sqlite3.connect(reference/'library.sqlite') as c:
                 for table, rows in out['tables'].items():
                     expected = [list(r) for r in c.execute('SELECT * FROM '+table)]
@@ -962,7 +976,7 @@ class NativeSimilarSnapshotTest(unittest.TestCase):
         self.assertEqual(out['tables']['similar_paired'], [['a'],['b']])
 
     def test_candidate_blocks_precise_ccip_threshold_and_uuid_ranking_reference(self):
-        from web.features import Features
+        from tests.research_fixture import Features
         rng = np.random.default_rng(51)
         ids = [f'{i:04}' for i in range(520)][::-1]
         raw = np.zeros((520,768), np.float32)
@@ -983,7 +997,7 @@ class NativeSimilarSnapshotTest(unittest.TestCase):
             c.executemany('INSERT INTO image_sigs VALUES (?,?,?,1)', zip(ids,ratios,grids))
         with sqlite3.connect(self.root/'source.sqlite') as c:
             c.executemany("INSERT INTO embeddings VALUES (?,'ccip',?)", [(u,v.astype('<f4').tobytes()) for u,v in zip(ids,raw)])
-        features = Features(self.root/'source.sqlite', base_dir=self.root/'features').load()
+        features = Features(self.root/'source.sqlite', raw, ids)
         for query in [None, {ids[0],ids[15],ids[16],ids[17]}]:
             if query is not None:
                 with sqlite3.connect(self.root/'library.sqlite') as c:

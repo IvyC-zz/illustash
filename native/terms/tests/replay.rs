@@ -512,6 +512,9 @@ macro_rules! modules {
 }
 
 modules!(
+    test_terms_core,
+    test_terms_labels,
+    test_terms_artists,
     test_terms_character_commands,
     test_terms_character_history,
     test_terms_character_identity,

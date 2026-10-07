@@ -13,7 +13,7 @@ import tempfile
 import unittest
 
 from PIL import Image
-from provenance.sources import pixel_hash
+from tests.image_expectations import pixel_hash
 
 
 class IndependentProvenanceInputs(unittest.TestCase):
@@ -48,6 +48,8 @@ class NativeProvenanceComputeTest(unittest.TestCase):
         temp = tempfile.TemporaryDirectory()
         self.addCleanup(temp.cleanup)
         self.root = Path(temp.name)
+        from tests.provenance_expectations import begin
+        begin(self)
 
     def probe(self, request, success=True):
         incoming, output = self.root / 'request.json', self.root / 'output.json'

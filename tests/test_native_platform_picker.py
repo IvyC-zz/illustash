@@ -31,7 +31,6 @@ class NativePlatformPickerTest(unittest.TestCase):
     stop = lifecycle.NativeLifecycleTest.stop
     start = lifecycle.NativeLifecycleTest.start
     request = lifecycle.NativeLifecycleTest.request
-    release_python_handles = lifecycle.NativeLifecycleTest.release_python_handles
     def setUp(self):
         lifecycle.NativeLifecycleTest.setUp(self)
         self.stop(self.process)

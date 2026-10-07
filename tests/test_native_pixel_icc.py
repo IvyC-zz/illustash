@@ -10,9 +10,10 @@ from pathlib import Path
 import tempfile
 import unittest
 from PIL import Image, ImageCms, features
-from provenance.sources.pixel_hash import pixel_hash
+from tests.image_expectations import pixel_hash as pixel_module
+pixel_hash = pixel_module.pixel_hash
 from tests import test_native_provenance_compute as driver
-from tests.provenance_image_fixtures import gamma_profile, jpeg_icc_variant, raw_u16_tiff, rgb_image, scalar_image, scalar_tiff, scalar_tiffs, srgb_profile
+from tests.provenance_image_fixtures import lab_profile, gamma_profile, jpeg_icc_variant, raw_u16_tiff, rgb_image, scalar_image, scalar_tiff, scalar_tiffs, srgb_profile
 
 
 class IndependentICCAndScalarInputs(unittest.TestCase):
@@ -233,7 +234,7 @@ class NativeICCAndScalarTest(unittest.TestCase):
     def test_icc_profile_gamma_alpha_invalid_and_incompatible(self):
         profiles = [('sRGB', srgb_profile()), ('gamma', gamma_profile()),
                     ('bad', b'invalid synthetic ICC'),
-                    ('LAB', ImageCms.ImageCmsProfile(ImageCms.createProfile('LAB')).tobytes())]
+                    ('LAB', lab_profile())]
         for mode in ('RGB', 'RGBA', 'L', 'LA', 'P'):
             for label, profile in profiles:
                 path = self.root / f'{mode}-{label}.png'

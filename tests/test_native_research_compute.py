@@ -1,6 +1,6 @@
 """#151 calculator parity on explicit fixed/synthetic features, never a real model/library.
 
-The algorithm reference is Python/NumPy; both publishers intentionally use the same Core.
+旧 Python/NumPy 结果已冻结；测试通过当前原生命令准备合成状态。
 This suite never builds/discovers a binary. Set ILLUSTASH_RESEARCH_COMPUTE_BIN and
 ILLUSTASH_TERMS_BIN to the candidate example/host for a development window.
 """
@@ -14,8 +14,8 @@ import unittest
 
 import numpy as np
 
-from web import learn, terms_core
-from web.features import Features
+from tests import native_commands as terms_core
+from tests.research_fixture import Features, decode
 from tests import learn_fixture as reference_learning
 
 
@@ -33,7 +33,6 @@ class NativeResearchComputeTest(unittest.TestCase):
     def setUp(self):
         reference_learning.Learning.setUp(self)
         self.addCleanup(self.temp.cleanup)
-        self.addCleanup(terms_core.close_service)
         # Pad the existing fixed eight-dimensional input to the production CCIP width.
         self.raw = np.pad(self.features.X, ((0, 0), (0, 760)))
         self.features = Features(self.store.source, self.raw, self.features.uuids)
@@ -52,7 +51,7 @@ class NativeResearchComputeTest(unittest.TestCase):
         anchors.mkdir()
         features = snapshot / 'features'
         features.mkdir()
-        token = terms_core.LearningPublisher(self.store.path).snapshot()
+        token = terms_core.run('learning-snapshot', '--db', self.store.path)['token']
         request = dict(format='illustash-research/1', identity=dict(synthetic=True), version='fixed-input-v1',
                        kind=kind, args=args or {}, regroup=regroup, snapshot=str(snapshot),
                        features=str(features), anchors=str(anchors), core=str(self.core), learning_token=token)
@@ -77,34 +76,45 @@ class NativeResearchComputeTest(unittest.TestCase):
         result, output, snapshot = self.request(mutate=mutate)
         self.assertEqual(result.returncode, 0, result.stderr.decode())
         response = json.loads(output.read_text())
-        anchors = None
-        if patched_anchors:
-            anchors = learn.patch_anchors(self.store)
-            self.assertIsNotNone(anchors)
-            self.assertEqual(anchors['entities'], [self.alice])
-        expected = learn.learn(self.store, self.features, reclaim=True, anchors=anchors)
-        self.assertEqual(response['result'] | {'clusters': None}, expected | {'clusters': None})
-        actual_rows, expected_rows = self.rows(snapshot / 'library.sqlite'), self.rows(self.store.path)
-        for table in actual_rows:
-            if table == 'learn_state':
-                actual_rows[table] = [r[:2] for r in actual_rows[table]]
-                expected_rows[table] = [r[:2] for r in expected_rows[table]]
-            self.assertEqual(actual_rows[table], expected_rows[table], table)
-        clusters = learn.cluster(self.store, self.features)
-        self.assertEqual(response['result']['clusters'], clusters)
-        with self.store.connect() as c:
-            expected_clusters = [list(r) for r in c.execute('SELECT * FROM clusters')]
-            expected_info = [list(r) for r in c.execute('SELECT * FROM cluster_info')]
-        self.assertEqual(response['tables']['clusters'], expected_clusters)
+        fixed = self.fixed['steps'][self.fixed_position]
+        self.fixed_position += 1
+        expected = fixed['response']
+        self.assertEqual(response['result'], expected['result'])
+        actual_rows = self.rows(snapshot / 'library.sqlite')
+        actual_rows['learn_state'] = [r[:2] for r in actual_rows['learn_state']]
+        from tests.fixed_expectations import unclocked
+        def normalized(value):
+            if isinstance(value, (tuple, list)):
+                return [normalized(v) for v in value]
+            if isinstance(value, dict):
+                return {k:normalized(v) for k,v in value.items()}
+            return unclocked(value)
+        self.assertEqual(normalized(actual_rows), normalized(fixed['rows']))
+        self.assertEqual(response['tables']['clusters'], expected['tables']['clusters'])
         self.assertEqual([r[:4] + r[5:] for r in response['tables']['cluster_info']],
-                         [r[:4] + r[5:] for r in expected_info])
+                         [r[:4] + r[5:] for r in expected['tables']['cluster_info']])
+        # Accept the checked native snapshot as the next command's input; fixed answers stay read-only.
+        with sqlite3.connect(snapshot / 'library.sqlite') as source, sqlite3.connect(self.store.path) as dest:
+            source.backup(dest)
+        with self.store.connect() as c:
+            for table in ('clusters','cluster_info'):
+                c.execute('DELETE FROM '+table)
+                rows = response['tables'][table]
+                if rows:
+                    c.executemany('INSERT INTO '+table+' VALUES ('+','.join('?' for _ in rows[0])+')', rows)
         return response
+
+    def fixed_oc(self):
+        value = self.fixed['oc'][self.oc_position]
+        self.oc_position += 1
+        return value
 
     def test_prototypes_claims_weak_and_unmatched_cache_exact(self):
         self.compare_learning()
 
     def test_valid_anchors_skip_bad_encoding_and_json_but_preserve_io_errors(self):
-        reference_root = learn.shared_dir(self.store.source)
+        reference_root = Path(self.temp.name).resolve() / 'shared'
+        reference_root.mkdir()
         self.assertTrue(reference_root.is_relative_to(Path(self.temp.name).resolve()))
         with sqlite3.connect(self.store.source) as c:
             for column, kind in [('anchor_p90', 'REAL'), ('anchor_p75', 'REAL'), ('anchor_p50', 'REAL'),
@@ -138,8 +148,6 @@ class NativeResearchComputeTest(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertFalse(output.exists())
         self.assertEqual(self.rows(snapshot / 'library.sqlite'), before)
-        with self.assertRaises(OSError):
-            learn.patch_anchors(self.store)
 
     def test_negative_seed_and_undo_preserve_human_history(self):
         action = self.store.change(['s0'], 'rejected', self.alice)
@@ -166,7 +174,7 @@ class NativeResearchComputeTest(unittest.TestCase):
         self.store.change([f'u{i}' for i in range(4)] + ['far'], 'confirmed', oc['id'])
         result, output, _ = self.request('oc', regroup=False, args=dict(entity=oc['id']))
         self.assertEqual(result.returncode, 0, result.stderr.decode())
-        self.assertEqual(json.loads(output.read_text())['result'], learn.oc_groups(self.store, self.features, oc['id']))
+        self.assertEqual(json.loads(output.read_text())['result'], self.fixed_oc())
         self.compare_learning()
 
     def test_invalid_vector_and_stale_token_leave_snapshot_untouched(self):
@@ -274,7 +282,7 @@ class NativeResearchComputeTest(unittest.TestCase):
         result, output, _ = self.request('oc', regroup=False, args=dict(entity=oc))
         self.assertEqual(result.returncode, 0, result.stderr.decode())
         actual = json.loads(output.read_text())['result']
-        self.assertEqual(actual, learn.oc_groups(self.store, self.features, oc))
+        self.assertEqual(actual, self.fixed_oc())
         self.assertEqual(actual['total'], 4)
         self.assertEqual([sorted(g) for g in actual['groups']], [['u0', 'u1', 'u2']])
         self.compare_learning()

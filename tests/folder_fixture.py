@@ -8,7 +8,7 @@ from unittest import mock
 
 from PIL import Image
 
-from web import library
+from tests import library_fixture as library
 from tests.synthetic_source import source_fixture as fixture
 
 
@@ -45,23 +45,15 @@ class FolderSource:
         patcher = mock.patch.object(library, 'APP_SUPPORT', self.root / 'support')
         patcher.start()
         self.addCleanup(patcher.stop)
-        ref_dir = self.root / 'ref'
-        ref_dir.mkdir()
-        source = fixture(ref_dir)
-        with sqlite3.connect(source) as c:                              # the real source schema's asset columns
-            for col in ('z_pk INTEGER', 'hidden INTEGER', 'stable_hash TEXT', 'orig_size INTEGER'):
-                c.execute(f'ALTER TABLE assets ADD COLUMN {col}')
-            c.execute('CREATE TABLE embeddings(uuid TEXT NOT NULL,model TEXT NOT NULL,vec BLOB NOT NULL,PRIMARY KEY(uuid,model))')
-        self.reference = library.export_reference(source, self.root / 'reference.sqlite')
         self.pics = self.root / 'Pictures' / 'pixiv'
         image(self.pics / 'a.png', 'red')
         image(self.pics / 'sub' / 'b.jpg', 'green')
         image(self.pics / '.hidden.png', 'blue')
         (self.pics / 'notes.txt').write_text('not an image')
         settle(self.pics)
-        with mock.patch.object(library, 'REFERENCE', self.reference):
-            self.lib = library.new_folder_library(self.pics, self.root / 'P.pilib')
-        self.source = self.lib.config['sources'][0]
+        (self.root / 'P.pilib').mkdir()
+        self.lib = library.Library(self.root / 'P.pilib')
+        self.source = library.folder_source(self.pics, 'pixiv')
 
     def tearDown(self):
         self.temp.cleanup()

@@ -8,7 +8,7 @@ import unittest
 
 from tests import test_native_human_labels as labels
 from tests import test_native_human_curation as curation
-from tests.reference_replay import RECORD
+from tests.fixed_expectations import unclocked
 from tools.verify_read_http import fetch
 from tests.test_read_http import wait_until
 
@@ -22,7 +22,6 @@ class NativeHumanIdentityTest(unittest.TestCase):
     undo_latest = labels.NativeHumanLabelsTest.undo_latest
     latest_action = labels.NativeHumanLabelsTest.latest_action
     reference_response = labels.NativeHumanLabelsTest.reference_response
-    build_reference_seed = labels.NativeHumanLabelsTest.build_reference_seed
     start_reference = labels.NativeHumanLabelsTest.start_reference
     def wait_timestamp_pair(self, url):
         # The existing core stamps newly proposed evidence with SELECT CURRENT_TIMESTAMP.
@@ -37,34 +36,11 @@ class NativeHumanIdentityTest(unittest.TestCase):
 
     def setUp(self):
         self.hybrid = 'no_policy' not in self._testMethodName
-        if RECORD:
-            from web.store import Store
-            def factory(*args, **kwargs):
-                return Store(*args, **kwargs, identity='hybrid' if self.hybrid else None)
-            self.store_factory = factory
+        pass
         labels.NativeHumanLabelsTest.setUp(self)
-        def augment(store):
-            self.third = store.create_entity('Synthetic third')['id']
-            self.work = store.edit_work('create', name='Synthetic Work')['id']
-            store.set_work(self.alice, self.work)
-            self.variant = store.create_entity('Synthetic variant')['id']
-            if self.hybrid:
-                store.decide_identity(a=self.variant, b=self.bob, kind='form_of', status='accepted', reason='seed form')
-            else:
-                # Common synthetic input only: seed a legacy child in compatibility state;
-                # the public Rust work command mirrors it into core state before cloning.
-                with store.connect() as c:
-                    c.execute("INSERT INTO meta VALUES ('terms_writer','1')")
-                    c.execute("UPDATE entities SET parent_id=?,kind='skin',variant='form' WHERE id=?", (self.bob,self.variant))
-                    c.execute("DELETE FROM meta WHERE key='terms_writer'")
-                store.set_work(self.bob,self.work)
-            store.change(['c'], 'confirmed', self.bob)
-            store.change(['a'], 'rejected', self.bob)
-            store.change(['a'], 'confirmed', self.alice)
-            store.set_pins([self.bob,self.alice])
-        self.seed_both(augment)
-        self.third, self.work, self.variant = self.rec.value('augmented ids', lambda: (self.third, self.work, self.variant))
-        self.assertEqual(self.rec.state('seeded', self.left), labels.states(self.right))
+        self.seed_both()
+        self.third, self.work, self.variant = self.rec.value('augmented ids')
+        self.assertEqual(self.rec.state('seeded'), labels.states(self.right))
 
     def decide(self, **kwargs):
         return self.pair('/api/identity/decision', {'a':self.alice,'b':self.bob,'kind':'duplicate_of',
@@ -180,22 +156,20 @@ class NativeHumanIdentityTest(unittest.TestCase):
             for lib in (self.left,self.right):
                 with closing(sqlite3.connect(lib.db)) as c:
                     c.execute("CREATE TRIGGER fail_ack BEFORE UPDATE ON backend_effects BEGIN SELECT RAISE(ABORT,'synthetic ack failure'); END"); c.commit()
-            before = [self.rec.state('before', self.left), labels.states(self.right)]
+            before = [self.rec.state('before'), labels.states(self.right)]
             item={'url':url,'method':'POST','body':json.dumps(body).encode(),'headers':{'Content-Type':'application/json','X-CSRF-Token':self.token}}
             self.wait_timestamp_pair(url)
             responses=[self.reference_response('response', item), fetch(self.origin,item,self.origin)]
             self.assertEqual([r['status'] for r in responses],[500,500])
-            after=[self.rec.state('after', self.left), labels.states(self.right)]
+            after=[self.rec.state('after'), labels.states(self.right)]
             self.assertEqual(after[0],after[1]); self.assertNotEqual(before[1],after[1])
             for lib in (self.left,self.right):
                 with closing(sqlite3.connect(lib.db)) as c:
                     if lib is self.right:
                         self.assertEqual(c.execute('SELECT status FROM backend_effects ORDER BY id DESC LIMIT 1').fetchone()[0],'pending')
                     c.execute('DROP TRIGGER fail_ack'); c.commit()
-            if RECORD:
-                from web import effects
-                effects.drain(self.store,self.reference._after_operation)
-            drained = self.rec.state('drained', self.left)
+            pass
+            drained = self.rec.state('drained')
             wait_until(lambda:drained==labels.states(self.right),timeout=5)
             self.undo_latest()
 

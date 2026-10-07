@@ -19,7 +19,7 @@ from concurrent.futures import ThreadPoolExecutor
 import numpy as np
 from PIL import Image
 from tests import test_native_lifecycle as lifecycle
-from tests.reference_replay import RECORD, unclocked
+from tests.fixed_expectations import unclocked
 from tests.test_read_http import wait_until
 
 
@@ -51,8 +51,8 @@ if mode=='hang':
     time.sleep(60)
 if mode=='crash': sys.exit(7)
 if mode=='slow': time.sleep(1)
-from web.research_worker import run
-v=run(r)
+subprocess.run([os.environ['ILLUSTASH_RESEARCH_COMPUTE_BIN'],sys.argv[1],sys.argv[2]],check=True)
+v=json.loads(Path(sys.argv[2]).read_text())
 if mode=='wrong': v['identity']['generation']+=1
 if mode=='bad': v['tables']['relations']=[['a','foreign','identical',0,'','2026-10-01']]
 if mode=='invalid': v['tables']['cluster_info']=[['invalid']]
@@ -69,12 +69,9 @@ Path(sys.argv[2]).write_text(json.dumps(v,allow_nan=False))
                 v=np.zeros(768,np.float32);v[0 if i<6 else 1]=1
                 c.execute('INSERT INTO assets VALUES (?,?,?,?,?,?,?,?,?)',(u,u+'.png',str(self.lib.path/(u+'.png')),120,150,'2026-10-01','orig',1,0))
                 c.execute('INSERT OR REPLACE INTO embeddings VALUES (?,?,?)',(u,'ccip',v.tobytes()))
-        if RECORD:
-            self.store.refresh()
-            entity=self.store.entities('Alice')[0]['id']
-            self.store.change(['seed'+str(i) for i in range(6)],'confirmed',entity)
+        pass
         self.lib=self.rec.package('prepared',self.lib.path)
-        self.alice=self.rec.value('alice',lambda:self.store.entities('Alice')[0]['id'])
+        self.alice=self.rec.value('alice')
         pixels=np.random.default_rng(1).integers(0,255,(150,120,3),dtype=np.uint8)
         for u in list('abc')+[('seed'+str(i)) if i<6 else 'unmatched'+str(i) for i in range(9)]: Image.fromarray(pixels).save(self.lib.path/(u+'.png'))
         self.restart()
@@ -103,38 +100,21 @@ Path(sys.argv[2]).write_text(json.dumps(v,allow_nan=False))
         tables=['relations','image_sigs','similar_paired','similar_retry','similar_groups','duplicates']
         native=self.rows(tables)
         self.assertGreater(len(self.rows(['prototypes'])['prototypes']),0)
-        def scanned():
-            from web.features import Features
-            from web.similar import SimilarScanner
-            SimilarScanner(self.store,Features(self.lib.source).load()).scan()
-            return self.rows(tables)
         # Wall-clock columns (when a relation was computed) are compared as <clock>.
         masked=lambda rows:{t:[tuple(unclocked(v) for v in r) for r in rs] for t,rs in rows.items()}
-        self.assertEqual(masked(native),masked(self.rec.value('scanned',scanned)))
+        self.assertEqual(masked(native),masked(self.rec.value('scanned')))
         clusters=self.rows(['clusters','cluster_info'])
         self.assertGreater(len(clusters['clusters']),0)
-        def clustered():
-            from web import learn
-            from web.features import Features
-            learn.cluster(self.store,Features(self.lib.source).load())
-            return self.rows(['clusters','cluster_info'])
-        expected=self.rec.value('clustered',clustered)
+        expected=self.rec.value('clustered')
         self.assertEqual(clusters['clusters'],expected['clusters'])
         self.assertEqual([r[:4]+r[5:] for r in clusters['cluster_info']], [r[:4]+r[5:] for r in expected['cluster_info']])
-        def related():
-            from web import relate
-            return relate.relate_all({u:relate.load(self.lib.path/(u+'.png')) for u in 'ab'})|{'missing':[]}
-        expected=self.rec.value('related',lambda:json.dumps(related(),ensure_ascii=False))
+        expected=self.rec.value('related')
         actual=self.request('/api/relate',{'ids':['a','b','a']})
         self.assertEqual(actual['status'],200,actual)
         self.assertEqual(actual['body'],expected.encode())
         self.assertEqual(self.request('/api/relate',{'ids':['a']})['status'],400)
         entity=self.alice
-        def groups():
-            from web import learn
-            from web.features import Features
-            return json.dumps(learn.oc_groups(self.store,Features(self.lib.source).load(),entity),ensure_ascii=False)
-        expected=self.rec.value('oc groups',groups)
+        expected=self.rec.value('oc groups')
         actual=self.request('/api/oc/groups?entity='+entity)
         self.assertEqual(actual['status'],200,actual)
         self.assertEqual(actual['body'],expected.encode())
@@ -219,12 +199,7 @@ Path(sys.argv[2]).write_text(json.dumps(v,allow_nan=False))
         # Published groups are the existing calculator's result on the post-verdict library.
         native=self.rows(['clusters'])
         self.assertNotIn('unmatched6',self.clustered())
-        def clustered():
-            from web import learn
-            from web.features import Features
-            learn.cluster(self.store,Features(self.lib.source).load())
-            return self.rows(['clusters'])
-        self.assertEqual(native,self.rec.value('clustered',clustered))
+        self.assertEqual(native,self.rec.value('clustered'))
         with sqlite3.connect(self.lib.db) as c:
             self.assertEqual(c.execute("SELECT count(*) FROM research_runs WHERE status='pending'").fetchone()[0],0)
 

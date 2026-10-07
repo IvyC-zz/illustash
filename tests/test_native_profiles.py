@@ -13,7 +13,7 @@ import unittest
 from unittest.mock import patch
 
 from tests import test_native_human_labels as labels
-from tests.reference_replay import RECORD
+from tests.fixed_expectations import unclocked
 from tools.verify_read_http import fetch
 
 
@@ -26,15 +26,12 @@ class NativeProfilesTest(unittest.TestCase):
     undo_latest = labels.NativeHumanLabelsTest.undo_latest
     latest_action = labels.NativeHumanLabelsTest.latest_action
     reference_response = labels.NativeHumanLabelsTest.reference_response
-    build_reference_seed = labels.NativeHumanLabelsTest.build_reference_seed
     start_reference = labels.NativeHumanLabelsTest.start_reference
 
     def setUp(self):
         labels.NativeHumanLabelsTest.setUp(self)
-        if RECORD:
-            self.reference.names.start = self.name_request
-            self.seed_name_cache()
-        self.seed_both(lambda store: None)
+        pass
+        self.seed_both()
 
     def seed_name_cache(self):
         """Recording only: reproducible cached remote responses exercise the real copyright selector;
@@ -58,7 +55,7 @@ class NativeProfilesTest(unittest.TestCase):
                            'headers':{'Content-Type':'application/json','X-CSRF-Token':self.token}},self.origin)
 
     def pair(self,url,body,expected=200):
-        before=[self.rec.state('before',self.left),labels.states(self.right)]
+        before=[self.rec.state('before'),labels.states(self.right)]
         with closing(sqlite3.connect(self.right.db)) as c:
             ids={r[0] for r in c.execute('SELECT id FROM entities')}
         native=self.post(self.origin,url,body)
@@ -67,15 +64,12 @@ class NativeProfilesTest(unittest.TestCase):
         import uuid
         actual_uuid=uuid.uuid4
         pending=iter(births)
-        def reference():
-            with patch('uuid.uuid4',side_effect=lambda: next(pending,None) or actual_uuid()):
-                return self.post(self.direct,url,body)
-        old=self.rec.value('response',reference)
+        old=self.rec.value('response')
         for r in (old,native):self.assertEqual(r['status'],expected,(url,body,r['body']))
         self.assertEqual(native['route'],'core')
         if expected<400:
             self.assertIsNone(labels.difference(old,native),(url,body,old['body'],native['body']))
-        after=[self.rec.state('after',self.left),labels.states(self.right)]
+        after=[self.rec.state('after'),labels.states(self.right)]
         if expected>=400:
             self.assertEqual(before,after,'failed transaction committed')
         self.assertEqual(after[0],after[1],(url,body))
@@ -164,16 +158,12 @@ class NativeProfilesTest(unittest.TestCase):
         self.stop(self.process);self.env['ILLUSTASH_COPYRIGHT_BASE']=base;self.process=self.start(self.right)
         self.token=json.loads(fetch(self.origin,{'url':'/api/bootstrap'},self.origin)['body'])['token']
         self.rec.alias(self.token,'@TOKEN@')
-        if RECORD:
-            from web import names
-            self.reference.token=self.token
-            self.reference.names.interval=0
-            scoped=patch.object(names,'DB',base);scoped.start();self.addCleanup(scoped.stop)
+        pass
         self.pair('/api/entities',{'tag':'live_person','typed':'实体'})
         self.pair('/api/entities',{'tag':'live_person'})
         self.pair('/api/entities',{'tag':'second_person_(specific)'})
         # Each side queries once, then reuses its cache; the recorded reference makes no request now.
-        self.assertEqual(requests,['live_person']*(2 if RECORD else 1))
+        self.assertEqual(requests,['live_person']*(2 if False else 1))
 
     def test_pending_ack_failure_committed_profile_recovers_on_restart(self):
         with closing(sqlite3.connect(self.right.db)) as c:
@@ -218,13 +208,7 @@ class NativeProfilesTest(unittest.TestCase):
             c.execute('DROP TRIGGER fail_names');c.commit()
         self.assertEqual(labels.states(self.right),before)
         self.pair('/api/character/profile',{'entity':self.alice,'name':'保留交接'})
-        if RECORD:
-            # The former compatibility drain leaves the native handoff alone.
-            from web import effects
-            pending=labels.states(self.left)
-            calls=[];effects.drain(self.store,calls.append)
-            self.assertEqual(calls,[])
-            self.assertEqual(labels.states(self.left),pending)
+        pass
 
     def test_profile_identity_artist_and_tag_continuous_undo(self):
         import time

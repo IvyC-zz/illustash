@@ -7,7 +7,7 @@ import os
 import unittest
 from urllib.parse import urlencode
 
-from tests.read_http_harness import RECORD, HTTPHarness
+from tests.read_http_harness import HTTPHarness
 from tools import verify_read_http as verify
 
 
@@ -44,18 +44,13 @@ class CoreReadHTTPTest(HTTPHarness):
             writer=csv_module.writer(f); writer.writerow(['name', 'category']);
             for tag in tags: writer.writerow([tag, '0'])
             writer.writerow(['not_general', '1'])
-        if RECORD:
-            self.store.tag_names = tags
+        pass
         state = json.loads(self.state.read_text()); state['tags'] = str(csv)
         self.state.write_text(json.dumps(state))
         self.assertEqual(json.loads(self.pair('/api/general-tags')['body']), tags[:30])
         for q in ('STRASSE', 'i\u0307', 'σασ', '雪🙂', 'comma,', 'line', 'ＡＢ', 'not_general'):
             self.pair('/api/general-tags?'+urlencode({'q': q}))
-        if RECORD:
-            ids = list(self.store.uuids())[:2]
-            self.store.tag(ids, '雪\t标签')
-            self.store.tag(ids[:1], 'tie_a')
-            self.store.tag(ids[1:], 'tie_z')
+        pass
         self.sync('tagged')
         self.assertTrue(json.loads(self.pair('/api/user-tags')['body']))
         for q in ('雪', 'tie_', ' ', '%', '标签', '\x1c雪\x1f'):
@@ -66,33 +61,18 @@ class CoreReadHTTPTest(HTTPHarness):
             self.pair('/api/entities?'+urlencode({'q':q}))
         before = self.pair('/api/entities')['body']
         other = self.root/'other'; other.mkdir(exist_ok=True)
-        if RECORD:
-            from tests import terms_seed
-            # Reuse the existing fixture definition rather than any real library.
-            self.server.store = terms_seed.switch(terms_seed.base(other))
+        pass
         self.sync('other'); self.publish()
         response = self.pair('/api/entities')
         self.assertNotEqual(response['body'], before)
 
     def test_equal_sort_keys_and_legacy_name_fallback(self):
         ties=self.root/'ties'; ties.mkdir(exist_ok=True)
-        if RECORD:
-            from tests import terms_names_fixture, terms_seed
-            replacement,_=terms_names_fixture.build(ties,legacy=True)
-            with replacement.connect() as c:
-                ids=[r[0] for r in c.execute("SELECT id FROM entities WHERE parent_id IS NULL AND kind<>'work' AND merged_into IS NULL LIMIT 3")]
-                for id in ids:
-                    c.execute("UPDATE entities SET original=1 WHERE id=?",(id,))
-                    c.execute("DELETE FROM names WHERE entity_id=?",(id,))
-                    c.execute("INSERT INTO names(entity_id,lang,value,source,role,preferred,position) VALUES (?,'zh','排序平局','user','display',1,0)",(id,))
-                for (id,) in c.execute("SELECT id FROM entities WHERE kind='work' AND merged_into IS NULL").fetchall():
-                    c.execute("DELETE FROM names WHERE entity_id=? AND source='user'",(id,))
-                    c.execute("INSERT INTO names(entity_id,lang,value,source,role,preferred,position) VALUES (?,'zh','作品平局','user','display',1,0)",(id,))
-            self.server.store=replacement
+        pass
         self.sync('ties'); self.publish()
         for core in (False,True):
             if core:
-                if RECORD: terms_seed.switch(replacement)
+                pass
                 self.sync('switched'); self.publish()
             for path in ('/api/entities', '/api/entities?q='+urlencode({'q':'排序平局'}).split('=',1)[1], '/api/works', '/api/works?'+urlencode({'q':'作品平局'})):
                 self.pair(path)
@@ -113,7 +93,7 @@ class CoreReadHTTPTest(HTTPHarness):
                     response=conn.getresponse()
                     return {'status':response.status,'body':response.read(),'headers':dict(response.getheaders()),'route':response.getheader('X-Illustash-Route')}
                 finally:conn.close()
-            a,b=self.rec.value('response', lambda: fetch(self.direct)),fetch(self.origin)
+            a,b=self.rec.value('response'),fetch(self.origin)
             self.assertEqual(b['route'], 'core')
             self.assertEqual(a['headers'].get('Content-Encoding'), b['headers'].get('Content-Encoding'))
             if compressed: self.assertEqual(gzip.decompress(b['body']), baseline)
@@ -124,17 +104,12 @@ class ArtistReadHTTPTest(HTTPHarness):
     @unittest.skipIf(os.name == 'nt', '固定期望录自 POSIX，包名含 Windows 不允许的 ?')
     def test_auxiliary_artist_reads_legacy_then_core_with_fixed_hash_order(self):
         package = self.root/'Artists #雪?.pilib'
-        if RECORD:
-            self.build_artists(package)
-        ids = self.rec.value('ids', lambda: self.ids)
+        pass
+        ids = self.rec.value('ids')
         self.sync('artists'); self.publish()
         for core in (False,True):
             if core:
-                if RECORD:
-                    from tests import terms_seed
-                    from web.server import adopt_artists
-                    self.assertTrue(adopt_artists(self.server.store,self.server.library))
-                    terms_seed.switch(self.server.store,artists=False)
+                pass
                 self.sync('switched'); self.publish()
             if not core:
                 # json.loads accepts nonfinite values and integers beyond f64 precision.
@@ -172,41 +147,3 @@ class ArtistReadHTTPTest(HTTPHarness):
                 if prov.is_dir(): prov.rmdir()
                 parked.rename(prov)
 
-    def build_artists(self, package):
-        """Recording only: the synthetic artist inputs, written through the former Python application."""
-        from provenance import db
-        from tests import terms_seed
-        from web import library
-        lib = library.create(package)
-        store = terms_seed.startup_input(self.store, db=lib.db)
-        with store.connect() as c:
-            # OC statistics and stable tied ordering, irrespective of provenance artists.
-            ids_stats=[r[0] for r in c.execute("SELECT id FROM entities WHERE parent_id IS NULL AND kind<>'work' AND merged_into IS NULL LIMIT 4")]
-            for id,artist in zip(ids_stats,('雪画师','A画师','雪画师','Z画师')):
-                c.execute("UPDATE entities SET original=1,artist=? WHERE id=?",(artist,id))
-        with db.connect(lib) as c:
-            for id in ('A','B','C','M','D','N'):
-                c.execute('INSERT INTO artists(id) VALUES (?)', (id,))
-            c.execute("UPDATE artists SET merged_into='A' WHERE id='M'")
-            for system, key, id in [('x','雪_account','A'),('x_id','123','A'),('pixiv','42','A'),('danbooru','snow_artist','A'),
-                                    ('x_id','99','B'),('danbooru','fallback_name','B'),('name','Name key','C'),('pixiv','77','D')]:
-                c.execute('INSERT INTO artist_links(system,key,artist_id,url,source) VALUES (?,?,?,\'unused\',\'test\')',(system,key,id))
-            c.execute("INSERT INTO artist_names(artist_id,source,name,updated_at) VALUES ('A','pixiv','雪🙂\"\\名','2026-09-30 00:00:00')")
-            ids=list(store.uuids())[:3]
-            self.assertGreaterEqual(len(ids),3)
-            c.executemany('INSERT INTO image_artists(asset,artist_id,method,score,evidence,status) VALUES (?,?,?,?,?,?)',[
-                (ids[0],'A','pixel_hash',1.0,'{}','auto'),(ids[0],'B','iqdb',0.99,'{}','auto'),
-                (ids[0],'C','group_oc',0.5,'{"z":0,"count":1.0,"a":{"z":2,"a":3}}','candidate'),
-                (ids[0],'D','group_run',0.5,'{"count":5.72e-5}','candidate'),
-                (ids[1],'M','gallery_match',0.99,'{}','auto'),(ids[1],'B','ocr',0.8,'broken-json','candidate'),
-                (ids[2],'B','ocr',0.1,'{}','candidate'),('removed-asset','A','pixel_hash',1.0,'{}','auto')])
-            for asset,site,post,id,method in [(ids[0],'danbooru','01','A','pixel_hash'),(ids[0],'pixiv','2','B','gallery_match'),
-                (ids[0],'pixiv','1','A','pixel_hash'),(ids[0],'x','3','B','gallery_match'),(ids[1],'unknown','1','M','gallery_match')]:
-                c.execute('INSERT INTO image_sources(asset,site,post_id,url,artist_id,method) VALUES (?,?,?,?,?,?)',(asset,site,post,f'https://example.test/{site}/{post}',id,method))
-        with store.connect() as c:
-            c.execute('INSERT INTO artist_verdicts(uuid,artist,verdict) VALUES (?,\'B\',\'no\')',(ids[0],))
-            c.execute('INSERT INTO artist_verdicts(uuid,artist,verdict) VALUES (?,\'B\',\'yes\')',(ids[2],))
-            c.execute('INSERT INTO actions(label,before_json) VALUES (\'synthetic artist verdicts\',?)',
-                      (json.dumps([{'artist_verdict':{'uuid':ids[0],'artist':'B','had':None}}, {'artist_verdict':{'uuid':ids[2],'artist':'B','had':None}}]),))
-        self.ids = ids
-        self.server.store=store; self.server.library=lib

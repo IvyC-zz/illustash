@@ -14,7 +14,7 @@ import zipfile
 from tests import test_native_lifecycle as lifecycle
 from tests.test_native_human_labels import snapshot
 from tests.test_read_http import wait_until
-from web import library
+from tests import library_fixture as library
 
 
 class NativeArchivesTest(unittest.TestCase):

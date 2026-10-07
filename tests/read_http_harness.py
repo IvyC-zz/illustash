@@ -21,7 +21,7 @@ import unittest
 from contextlib import closing
 from urllib.parse import quote
 
-from tests.reference_replay import RECORD, Recorder
+from tests.fixed_expectations import Expectations
 from tests.test_read_http import free_port, stop_process, wait_until
 from tools import verify_read_http as verify
 
@@ -48,10 +48,7 @@ def binary():
 def publish(rec, server, state):
     """Atomically publish the request context (formerly the reference server's readiness file)."""
     # The session token is recorded as is: response lengths depend on it.
-    context = rec.value('context', lambda: {
-        'db': str(server.store.path.resolve()), 'source': str(server.store.source.resolve()),
-        'library': str(server.library.path) if server.library else None,
-        'token': server.token, 'read_only': server.store.read_only})
+    context = rec.value('context')
     temp = state.with_suffix('.new')
     temp.write_text(json.dumps({**context, 'generation': secrets.token_hex(16),
                                 'tags': str(ROOT / 'tags' / 'tags_v3.csv')}), encoding='utf-8')
@@ -68,20 +65,11 @@ class HTTPHarness(unittest.TestCase):
         cls.state_dir = tempfile.TemporaryDirectory(prefix='illustash-r12-state-')
         cls.state = Path(cls.state_dir.name) / 'state.json'
         cls.origin = f'http://127.0.0.1:{free_port()}'
-        cls.rec = rec = Recorder(cls)
+        cls.rec = rec = Expectations(cls)
         rec.alias(cls.root, '@ROOT@')
         rec.alias(cls.origin, '@ORIGIN@')
         cls.server = cls.store = None
-        if RECORD:
-            from tests import terms_names_fixture
-            from web.server import Server
-            cls.store, _ = terms_names_fixture.build(cls.root)
-            cls.server = Server(('127.0.0.1', 0), cls.store, cls.root / 'cache', public_origin=cls.origin)
-            cls.server.names.character_search = lambda _: []
-            cls.server.names.work_search = lambda _: []
-            cls.thread = threading.Thread(target=cls.server.serve_forever, daemon=True)
-            cls.thread.start()
-            cls.direct = f'http://127.0.0.1:{cls.server.server_port}'
+        pass
         rec.package('root', cls.root, library=False)
         cls.context = publish(rec, cls.server, cls.state)
         cls.log = tempfile.TemporaryFile()
@@ -96,26 +84,18 @@ class HTTPHarness(unittest.TestCase):
             cls.host.wait(12)
         stop_process(cls.host)
         cls.log.close()
-        if RECORD:
-            cls.server.shutdown(); cls.thread.join(); cls.server.server_close()
+        pass
         cls.temp.cleanup()
         cls.state_dir.cleanup()
-        if not RECORD and cls.rec.position != len(cls.rec.entries):
+        if not False and cls.rec.position != len(cls.rec.entries):
             raise AssertionError(f'{cls.rec.test}: recorded reference values not reached')
 
     def setUp(self):
-        self.rec = Recorder(self)
+        self.rec = Expectations(self)
         self.addCleanup(self.rec.finish, self)
         for actual, placeholder in type(self).rec.aliases:
             self.rec.alias(actual, placeholder)
-        if RECORD:
-            # Tests point the reference server at other stores; the next test starts from the first.
-            server, store = self.server, self.server.store
-            saved = (store, server.library, server.token, store.path, store.read_only, store.tag_names)
-            def restore():
-                server.store, server.library, server.token = saved[:3]
-                store.path, store.read_only, store.tag_names = saved[3:]
-            self.addCleanup(restore)
+        pass
         # Each test starts from the recorded root and context, independent of earlier tests.
         self.sync('start')
         self.publish()
@@ -135,7 +115,7 @@ class HTTPHarness(unittest.TestCase):
         self.rec.package(label, self.root, library=False)
 
     def reference(self, item):
-        return self.rec.value('response', lambda: verify.fetch(self.direct, item, self.origin))
+        return self.rec.value('response')
 
     def pair(self, path, route='core', headers=None):
         item = {'url': quote(path, safe='/?&=;%+#'), 'headers': headers or {}}
@@ -147,12 +127,11 @@ class HTTPHarness(unittest.TestCase):
         return a
 
     def corpus(self, *, sample, query_limit, keep=lambda item: True):
-        return self.rec.value('corpus', lambda: [r for r in verify.corpus(self.store.path, sample=sample,
-                                                                           query_limit=query_limit) if keep(r)])
+        return self.rec.value('corpus')
 
     def compare(self, requests, require_core=()):
         """The verify_read_http report shape, with the reference side recorded."""
-        expected = self.rec.value('responses', lambda: [verify.fetch(self.direct, item, self.origin) for item in requests])
+        expected = self.rec.value('responses')
         report = {'compared': 0, 'differ': 0, 'core_equal': 0, 'stages': set(), 'differences': []}
         for item, left in zip(requests, expected, strict=True):
             report['compared'] += 1

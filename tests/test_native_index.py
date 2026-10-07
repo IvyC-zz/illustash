@@ -12,7 +12,7 @@ import time
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from tests import test_native_lifecycle as lifecycle
-from tests.reference_replay import RECORD, unclocked
+from tests.fixed_expectations import unclocked
 from tests.test_native_human_labels import snapshot
 
 WORKER = r'''#!/usr/bin/env PYTHON
@@ -81,10 +81,9 @@ class NativeIndexTest(unittest.TestCase):
         self.remote=ThreadingHTTPServer(('127.0.0.1',0),Handler);t=threading.Thread(target=self.remote.serve_forever,daemon=True);t.start()
         self.addCleanup(t.join);self.addCleanup(self.remote.server_close);self.addCleanup(self.remote.shutdown)
         self.env.update(ILLUSTASH_COPYRIGHT_BASE=f'http://127.0.0.1:{self.remote.server_port}',ILLUSTASH_INDEX_WORKER=worker_command(worker))
-        if RECORD:
-            self.work=self.store.edit_work('create',name='合成作品',tag='example')['id']
+        pass
         self.lib=self.rec.package('work',self.lib.path)
-        self.work=self.rec.value('work',lambda:self.work)
+        self.work=self.rec.value('work')
         (self.shared/'char-index').mkdir()
         (self.shared/'char-patch').mkdir(exist_ok=True)
         (self.shared/'char-patch/watch.json').write_text(json.dumps({'version':2,'works':[self.work],'pending_tags':[],'min_posts':100}))
@@ -151,7 +150,7 @@ class NativeIndexTest(unittest.TestCase):
         self.assertEqual(shared_file.read_bytes(),legacy)
         with sqlite3.connect(self.lib.db) as c:self.assertEqual(json.loads(c.execute("SELECT value FROM prefs WHERE key='index_watch'").fetchone()[0])['works'],[self.work])
         other,store=self.package('other',lambda store:setattr(self,'other_work',store.edit_work('create',name='另一部合成作品',tag='other_example')['id']))
-        other_work=self.rec.value('other work',lambda:self.other_work)
+        other_work=self.rec.value('other work')
         self.stop(self.process);self.process,self.log=self.start(other.path,extra=('--no-index-check',))
         self.token=json.loads(self.request('/api/bootstrap')['body'])['token']
         self.assertEqual(self.index()['watch'],{'version':2,'works':[],'pending_tags':[],'min_posts':100})
@@ -228,24 +227,16 @@ class NativeIndexTest(unittest.TestCase):
         # The former Python updater's bytes are recorded (tests/reference_replay.py); it had its own
         # shared state and the native timings were copied into it, so times compare as <clock>.
         reference=None
-        if RECORD:
-            from web import index_update
-            from unittest.mock import patch
-            old=self.root/'reference-index';old.mkdir()
-            with patch.object(index_update,'shared_dir',return_value=old): reference=index_update.IndexUpdater(self.store)
-            (old/'char-patch').mkdir()
+        pass
         watch=self.index()['watch']
-        if RECORD:
-            (old/'char-patch/watch.json').write_text(json.dumps(watch))
+        pass
         info=lambda:json.dumps(reference.info(),ensure_ascii=False)
-        self.assertEqual(self.request('/api/index')['body'].decode(),self.rec.value('info',info))
+        self.assertEqual(self.request('/api/index')['body'].decode(),self.rec.value('info'))
         self.check();v=self.index()
-        if RECORD:
-            reference.state={'status':'checked','started_at':v['state']['started_at'],'found':v['state']['found'],'finished_at':v['state']['finished_at']}
-            reference._write('check.json',v['check'])
-        self.assertEqual(unclocked(self.request('/api/index')['body'].decode()),unclocked(self.rec.value('checked info',info)))
+        pass
+        self.assertEqual(unclocked(self.request('/api/index')['body'].decode()),unclocked(self.rec.value('checked info')))
         self.assertEqual(unclocked(self.request('/api/index?progress=1')['body'].decode()),
-                         unclocked(self.rec.value('progress',lambda:json.dumps(reference.progress(),ensure_ascii=False))))
+                         unclocked(self.rec.value('progress')))
 
     def test_real_bundled_calculation_worker_native_download_and_import(self):
         import numpy as np
@@ -293,9 +284,9 @@ class NativeIndexTest(unittest.TestCase):
         worker.write_text('#!'+os.sys.executable+'\n'+
             'import sys,json\nfrom pathlib import Path\n'+
             'sys.path.insert(0,'+repr(str(repo))+')\n'+
-            'from web.research_worker import run\n'+
+            'import subprocess,os\n'+
             'r=json.loads(Path(sys.argv[1]).read_text());Path('+repr(str(receipt))+').write_text(json.dumps(r))\n'+
-            'import traceback\ntry: v=run(r);Path(sys.argv[2]).write_text(json.dumps(v,allow_nan=False))\nexcept Exception: Path('+repr(str(self.root/'research-error'))+').write_text(traceback.format_exc());raise\n')
+            'import traceback\ntry: subprocess.run([os.environ["ILLUSTASH_RESEARCH_COMPUTE_BIN"],sys.argv[1],sys.argv[2]],check=True)\nexcept Exception: Path('+repr(str(self.root/'research-error'))+').write_text(traceback.format_exc());raise\n')
         worker.chmod(0o755);self.env['ILLUSTASH_RESEARCH_WORKER']=worker_command(worker);self.restart()
         def complete():
             with sqlite3.connect(self.lib.db) as c:
@@ -335,7 +326,7 @@ class NativeIndexTest(unittest.TestCase):
         self.check();self.index({'action':'apply','tags':['carol_example']});self.assertEqual(self.finish()['state']['status'],'done')
 
     def test_apply_source_projection_names_and_history_match_python_chain(self):
-        expected=self.rec.value('python chain',self.python_chain)
+        expected=self.rec.value('python chain')
         actual=self.apply();self.assertEqual(actual['state']['status'],'done',actual)
         for table in ('characters','character_aliases','labels'):
             with sqlite3.connect(self.lib.source) as b:
@@ -346,34 +337,6 @@ class NativeIndexTest(unittest.TestCase):
         canonical(a,self.lib.db)
         self.assertEqual(a,b)
 
-    def python_chain(self):
-        """Recording only: the former Python index updater applying the same patch on a clone."""
-        from unittest.mock import patch
-        from web import index_update
-        from web.store import Store
-        root=self.root/'old-chain';root.mkdir()
-        source=root/'source.sqlite';app=root/'library.sqlite'
-        for old,new in ((self.lib.source,source),(self.lib.db,app)):
-            with sqlite3.connect(old) as src,sqlite3.connect(new) as dst:src.backup(dst)
-        store=Store.open(source,app)
-        def finder(works,minimum,per):per('example',2);return self.remote_rows
-        def runner(args):
-            yield {'step':'fetch','done':0,'total':2}
-            with sqlite3.connect(source) as c:
-                c.execute("INSERT INTO characters VALUES ('carol_example','Carol',NULL,NULL,'example',NULL)")
-                c.execute("DELETE FROM labels WHERE dim='char_ext' AND uuid='b'")
-                c.executemany("INSERT INTO labels VALUES (?,'char_ext','carol_example',?)",[('b',.97),('c',.96)])
-            (root/'char-index').mkdir()
-            (root/'char-index/carol_example.json').write_text(json.dumps({'source':'danbooru-patch'}))
-            (root/'char-patch/rejected').mkdir()
-            (root/'char-patch/rejected/dani_example.json').write_text(json.dumps({'rejected':'参考图没有一致的主体'}))
-            yield {'step':'scan'}
-        with patch.object(index_update,'shared_dir',return_value=root):old=index_update.IndexUpdater(store,runner=runner,finder=finder)
-        old._write('watch.json',self.index()['watch']);old.start_check();old.thread.join(5);old.start_apply(['carol_example','dani_example']);old.thread.join(5)
-        info=old.info();canonical(info['history'][0],app)
-        with sqlite3.connect(source) as a:
-            tables={table:sorted(a.execute('SELECT * FROM '+table),key=repr) for table in ('characters','character_aliases','labels')}
-        return {'source':tables,'projection':projection(app),'info':info}
 
 
 def projection(path):

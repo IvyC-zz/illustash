@@ -11,7 +11,11 @@ from PIL import Image, ImageCms
 
 
 def srgb_profile():
-    return ImageCms.ImageCmsProfile(ImageCms.createProfile('sRGB')).tobytes()
+    return (Path(__file__).parent/'fixtures/icc/sRGB.icc').read_bytes()
+
+
+def lab_profile():
+    return (Path(__file__).parent/'fixtures/icc/LAB.icc').read_bytes()
 
 
 def gamma_profile(padded=False):

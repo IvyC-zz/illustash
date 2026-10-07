@@ -30,7 +30,7 @@ class NativeSyncTest(unittest.TestCase):
         with sqlite3.connect(self.library / 'database/Photos.sqlite') as c:
             c.execute('CREATE TABLE ZASSET(Z_PK INTEGER PRIMARY KEY,ZUUID TEXT,ZKIND INTEGER,ZTRASHEDSTATE INTEGER,ZWIDTH INTEGER,ZHEIGHT INTEGER,ZADDEDDATE REAL,ZHIDDEN INTEGER,ZDIRECTORY TEXT,ZFILENAME TEXT,ZADDITIONALATTRIBUTES INTEGER)')
             c.execute('CREATE TABLE ZADDITIONALASSETATTRIBUTES(Z_PK INTEGER PRIMARY KEY,ZIMPORTEDBYBUNDLEIDENTIFIER TEXT,ZORIGINALSTABLEHASH TEXT,ZORIGINALFILESIZE INTEGER)')
-        from web.library import ensure_source_schema
+        from tests.library_fixture import ensure_source_schema
         with sqlite3.connect(self.lib.source) as c:
             ensure_source_schema(c)
             if 'z_pk' not in {row[1] for row in c.execute('PRAGMA table_info(assets)')}:
@@ -376,10 +376,7 @@ Path(sys.argv[2]).write_text(json.dumps(dict(identity=r['identity'],packages=pac
             with sqlite3.connect(self.lib.source) as src,sqlite3.connect(old) as dest:src.backup(dest)
             result=subprocess.run([str(self.binary),'photos-scan','--db',str(self.lib.source)],input=json.dumps(self.source).encode(),capture_output=True,env=self.env)
             self.assertEqual(result.returncode,0,result.stderr)
-            def old_scan():
-                from web.sync import scan
-                return {'result':scan(self.library,old,self.source),'source':snapshot(old)}
-            expected=self.rec.value('old scan',old_scan)
+            expected=self.rec.value('old scan')
             self.assertEqual(json.loads(result.stdout),expected['result'])
             self.assertEqual(snapshot(self.lib.source),expected['source'])
         pair()

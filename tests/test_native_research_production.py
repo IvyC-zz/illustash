@@ -24,7 +24,7 @@ from tests import test_native_relations_compute as relations
 from tests import test_native_folder as folder_fixture
 from tests import test_native_sync as sync_fixture
 from tests.native_worker_fixture import command as fixture_command, exists as process_exists
-from tests.reference_replay import RECORD
+from tests.fixed_expectations import unclocked
 from tests.test_read_http import wait_until
 
 
@@ -194,8 +194,7 @@ class NativeResearchPublicationTest(unittest.TestCase):
         self.env.update(ILLUSTASH_RESEARCH_WORKER=str(self.worker), ILLUSTASH_RESEARCH_TIMEOUT_MS='5000')
         self.env.pop('ILLUSTASH_WORKER_PYTHON', None)
         # Keep the #151 base fixture learning-only; #152 extends it below.
-        if RECORD:
-            self.store.set_startup({'similar': False})
+        pass
         with sqlite3.connect(self.lib.source) as c:
             c.execute('CREATE TABLE IF NOT EXISTS embeddings(uuid TEXT,model TEXT,vec BLOB,PRIMARY KEY(uuid,model))')
             for i in range(9):
@@ -205,13 +204,10 @@ class NativeResearchPublicationTest(unittest.TestCase):
                 c.execute('INSERT INTO assets VALUES (?,?,?,?,?,?,?,?,?)',
                           (ident, ident + '.png', str(self.lib.path / (ident + '.png')), 120, 150, '2026-10-04', 'orig', 1, 0))
                 c.execute("INSERT INTO embeddings VALUES (?,'ccip',?)", (ident, vector.tobytes()))
-        if RECORD:
-            self.store.refresh()
-            self.entity = self.store.entities('Alice')[0]['id']
-            self.store.change(['seed' + str(i) for i in range(6)], 'confirmed', self.entity)
+        pass
         # The package as the former Python Store refreshed and confirmed it (recorded, tests/reference_replay.py).
         self.lib = self.rec.package('prepared', self.lib.path)
-        self.entity = self.rec.value('entity', lambda: self.entity)
+        self.entity = self.rec.value('entity')
         self.restart()
         self.finished()
 
@@ -295,11 +291,7 @@ child.terminate();child.wait()
             self.assertEqual(self.request('/api/regroup', {})['body'], b'{"started": true}')
             self.finished()
         self.assertEqual(self.rows(['actions', 'assertions']), before)
-        def groups():
-            from web import learn
-            from web.features import Features
-            return json.dumps(learn.oc_groups(self.store, Features(self.lib.source).load(), self.entity), ensure_ascii=False)
-        expected = self.rec.value('oc groups', groups)
+        expected = self.rec.value('oc groups')
         response = self.request('/api/oc/groups?entity=' + self.entity)
         self.assertEqual(response['status'], 200, response)
         self.assertEqual(response['body'], expected.encode())
@@ -467,10 +459,7 @@ class NativeRelationPublicationTest(NativeResearchPublicationTest):
                 pixels=np.stack(((x*7+y*3)%256,(x*11+y*17)%256,(x*23+y*13)%256),axis=2).astype(np.uint8)
                 Image.fromarray(pixels).save(path)
                 c.execute('UPDATE assets SET src_path=? WHERE uuid=?',(str(path),ident))
-        if RECORD:
-            self.store.refresh()
-            self.store.set_startup({'similar': True})
-            self.store.set_fold_kinds([])
+        pass
         self.lib = self.rec.package('relations', self.lib.path)
         self.restart()
         self.finished()

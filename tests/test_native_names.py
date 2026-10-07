@@ -20,7 +20,7 @@ import urllib.parse
 from unittest.mock import patch
 
 from tests import test_native_lifecycle as lifecycle
-from tests.reference_replay import RECORD, unclocked
+from tests.fixed_expectations import unclocked
 from tests.test_read_http import INTERRUPT, SPAWN, free_port, wait_until
 from tests.name_providers import Providers
 from tools.verify_read_http import fetch
@@ -114,17 +114,14 @@ class NativeNamesTest(unittest.TestCase):
         self.service = TextService(); self.addCleanup(self.service.close)
         self.rec.alias(self.service.base, '@SERVICE@')
         self.env.update(ILLUSTASH_COPYRIGHT_BASE=self.service.base, ILLUSTASH_BANGUMI_BASE=self.service.base)
-        if RECORD:
-            from web import names
-            self.reference.names = names.NameUpdater(self.store, self.service.transport, interval=0, enabled=False)
-        self.alice = self.rec.value('alice', lambda: self.store.entities('Alice')[0]['id'])
+        pass
+        self.alice = self.rec.value('alice')
     def enable(self):
         self.stop(self.process); self.enabled=True
         self.process, self.log = self.start(self.lib.path)
         self.token=json.loads(self.request('/api/bootstrap')['body'])['token']
         self.rec.alias(self.token,'@TOKEN@')
-        if RECORD:
-            self.reference.token=self.token
+        pass
         self.finish()
     def finish(self, status='done'):
         def complete():
@@ -135,19 +132,8 @@ class NativeNamesTest(unittest.TestCase):
     def events(self):
         with closing(sqlite3.connect(self.lib.db)) as c:
             return c.execute("SELECT id,status,error FROM backend_effects WHERE kind LIKE 'names:%' ORDER BY id").fetchall()
-    def reference_refresh(self):
-        """Recording only: the former Python name updater's complete refresh on a clone, as name tables."""
-        from web import names
-        from web.store import Store
-        folder=self.root/'comparison';folder.mkdir()
-        path=folder/'app.sqlite'
-        with closing(sqlite3.connect(self.lib.db)) as src, closing(sqlite3.connect(path)) as dst: src.backup(dst)
-        expected=Store.open(self.lib.source,path)
-        names.NameUpdater(expected,self.service.transport,interval=0).run(refresh=True)
-        with closing(sqlite3.connect(path)) as old:
-            return name_tables(old)
     def test_complete_refresh_matches_reference_formal_names_and_history(self):
-        expected=self.rec.value('reference refresh',self.reference_refresh)
+        expected=self.rec.value('reference refresh')
         self.enable()
         self.assertEqual(self.request('/api/names',{'action':'refresh'})['status'],200)
         self.finish()

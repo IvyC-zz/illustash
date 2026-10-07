@@ -19,7 +19,7 @@ from unittest.mock import patch
 
 from PIL import Image
 from tests.folder_fixture import FolderSource, image, settle
-from tests.reference_replay import RECORD, Recorder, unclocked
+from tests.fixed_expectations import Expectations, unclocked
 from tests.test_native_human_labels import snapshot
 from tests import test_native_lifecycle as lifecycle
 from tests.test_native_lifecycle import NativeLifecycleTest
@@ -31,7 +31,7 @@ class NativeFolderScanTest(unittest.TestCase):
 
     def setUp(self):
         FolderSource.setUp(self)
-        self.rec = Recorder(self)
+        self.rec = Expectations(self)
         self.addCleanup(self.rec.finish, self)
         self.rec.alias(self.root, '@ROOT@')
         # The package as first built (its asset keys are random): recorded, restored when replaying.
@@ -56,11 +56,7 @@ class NativeFolderScanTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr.decode())
         new = json.loads(result.stdout)
         ids = [u for u, in self.rows('SELECT uuid FROM assets ORDER BY rowid') if u not in before]
-        def old_scan():
-            from web import folder
-            with patch.object(folder.uuid, 'uuid4', side_effect=ids):
-                return {'result': folder.scan(self.source, old), 'source': snapshot(old)}
-        expected = self.rec.value('old scan', old_scan)
+        expected = self.rec.value('old scan')
         self.assertEqual(new, expected['result'])
         self.assertEqual(snapshot(self.lib.source), expected['source'])
         return new
@@ -233,13 +229,13 @@ class NativeFolderHTTPTest(unittest.TestCase):
         image(self.new_folder / 'a.png', 'red')
         image(self.new_folder / 'b.webp', 'blue')
         # Run both independently writing consumers within one real clock second (when recording).
-        while RECORD and time.time() % 1 > .1:
+        while False and time.time() % 1 > .1:
             time.sleep(.005)
         state=self.sync()
         self.assertEqual(state['state']['status'],'needs_recognition',state)
         with sqlite3.connect(self.lib.source) as c:
             ids = [u for u, in c.execute('SELECT uuid FROM assets ORDER BY rowid')]
-        expected = self.rec.value('old import', lambda: self.old_import(clone, ids, state['history'][0]))
+        expected = self.rec.value('old import')
         self.assertEqual(snapshot(self.lib.source),expected['source'])
         # Exact DDL, storage types, physical rowids and every view, including formal projections.
         left,right=snapshot(self.lib.db),expected['db']
@@ -250,29 +246,6 @@ class NativeFolderHTTPTest(unittest.TestCase):
             self.assertEqual(self.request(url)['body'],lifecycle.NativeLifecycleTest.reference_response(self, url)['body'])
         self.assertFalse(self.sentinel.exists())
 
-    def old_import(self, clone, ids, run):
-        """Recording only: the former Python scanner and importer on a clone of the same input."""
-        from web.store import Store
-        from web import folder, library, terms_characters
-        import hashlib
-        old_lib = library.Library(clone, self.lib.config)
-        old_store = Store(old_lib.source, old_lib.db)
-        with patch.object(folder.uuid,'uuid4',side_effect=ids):
-            for source in self.lib.config['sources']:
-                folder.scan(source,old_lib.source)
-        source = snapshot(old_lib.source)
-        with sqlite3.connect(old_lib.db) as c:
-            c.execute("INSERT INTO sync_runs(id,status,started_at) VALUES (?,'running',?)",(run['id'],run['started_at']))
-        with patch.object(terms_characters,'_now',return_value=run['finished_at']):
-            old_store.import_changes(ids,run_id=run['id'])
-        with sqlite3.connect(old_lib.source) as src, sqlite3.connect(old_lib.db) as c:
-            for u,h in src.execute('SELECT uuid,stable_hash FROM assets'):
-                c.execute('INSERT OR REPLACE INTO meta VALUES (?,?)',('folder_labels:'+u,hashlib.sha256(b'[]').hexdigest()))
-                c.execute('INSERT OR REPLACE INTO meta VALUES (?,?)',('folder_hash:'+u,h))
-            c.execute("UPDATE sync_runs SET status=?,finished_at=?,found=?,removed=?,imported=?,failed=?,sources=?,message=? WHERE id=?",
-                      (run['status'],run['finished_at'],run['found'],run['removed'],run['imported'],run['failed'],
-                       json.dumps(run['sources'],ensure_ascii=False),run['message'],run['id']))
-        return {'source': source, 'db': snapshot(old_lib.db)}
 
     @unittest.skipIf(os.name == 'nt', '固定期望录自 macOS：资产键序与文件元数据随平台不同')
     def test_native_library_new_folder_multiple_sources_keep_configuration_order(self):

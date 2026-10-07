@@ -12,7 +12,7 @@ fn main() {
         .file("src/research_compute/relation_fft.cpp")
         .include("vendor/pocketfft")
         .compile("illustash_relation_fft");
-    println!("cargo:rerun-if-changed=../../web/__init__.py");
+    println!("cargo:rerun-if-changed=application.json");
     println!("cargo:rerun-if-changed=Cargo.lock");
     println!("cargo:rerun-if-changed=src");
     let root = Path::new("../..");
@@ -36,14 +36,10 @@ fn main() {
     let dirty = !run("git", &["status", "--porcelain", "--untracked-files=no"]).is_empty();
     println!("cargo:rustc-env=ILLUSTASH_BUILD={build}{}", if dirty { "-dirty" } else { "" });
     println!("cargo:rustc-env=ILLUSTASH_RUSTC={}", run("rustc", &["--version"]));
-    let source = std::fs::read_to_string(root.join("web/__init__.py")).expect("application metadata");
-    for (key, env) in
-        [("NAME", "ILLUSTASH_NAME"), ("__version__", "ILLUSTASH_VERSION"), ("CHANNEL", "ILLUSTASH_CHANNEL")]
-    {
-        let value = source
-            .lines()
-            .find_map(|line| line.strip_prefix(&format!("{key} = '")).and_then(|s| s.strip_suffix('\'')))
-            .expect("metadata string");
+    let source = std::fs::read_to_string("application.json").expect("application metadata");
+    let metadata: serde_json::Value = serde_json::from_str(&source).expect("application metadata JSON");
+    for (key, env) in [("name", "ILLUSTASH_NAME"), ("version", "ILLUSTASH_VERSION"), ("channel", "ILLUSTASH_CHANNEL")] {
+        let value = metadata[key].as_str().expect("metadata string");
         println!("cargo:rustc-env={env}={value}");
     }
 }
