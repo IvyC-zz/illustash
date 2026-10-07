@@ -6,10 +6,20 @@ SCHEMA = (Path(__file__).parent / 'fixtures/provenance_schema.sql').read_text()
 VERSION = 5   # the provenance cache schema version (former provenance.db.VERSION)
 
 
+class Connection(sqlite3.Connection):
+    """Leaving ``with`` commits (or rolls back) and closes, so the WAL is checkpointed into the
+    file before a test reads its bytes."""
+    def __exit__(self, *exc):
+        try:
+            return super().__exit__(*exc)
+        finally:
+            self.close()
+
+
 def connect(library):
     """The provenance cache as the former Python connection opened it: WAL, foreign keys,
     the current schema and its user_version."""
-    c = sqlite3.connect(Path(library.path) / 'provenance.sqlite', timeout=30)
+    c = sqlite3.connect(Path(library.path) / 'provenance.sqlite', timeout=30, factory=Connection)
     c.row_factory = sqlite3.Row
     c.execute('PRAGMA journal_mode=WAL')
     c.execute('PRAGMA foreign_keys=ON')

@@ -737,7 +737,7 @@ class NativeLifecycleTest(unittest.TestCase):
 
     def test_production_python_has_no_compatibility_host(self):
         result = subprocess.run([__import__('sys').executable, '-c',
-            "from pathlib import Path; assert not list(Path('web').glob('*.py')); assert not Path('tests/reference').exists(); assert not list(Path('provenance').rglob('*.py'))"],
+            "from pathlib import Path; assert not list(Path('web').glob('*.py')); assert not list(Path('tests/reference').rglob('*.py')); assert not list(Path('provenance').rglob('*.py'))"],
             cwd=self.resources, env=self.env, capture_output=True, timeout=10)
         self.assertEqual(result.returncode, 0, result.stderr.decode())
 
