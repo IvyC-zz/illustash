@@ -3,7 +3,7 @@ import copy
 import json
 import urllib.parse
 
-from web.names import MODEL_BASE
+MODEL_BASE = 'https://api.deepseek.com'   # the model API's default base (former web.names.MODEL_BASE)
 
 DS = MODEL_BASE + '/chat/completions'
 
