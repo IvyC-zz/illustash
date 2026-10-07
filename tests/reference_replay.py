@@ -11,7 +11,7 @@ produced, recorded once while the reference still existed:
 Values are recorded in call order and must be requested in the same order with the same label.
 Run-specific strings (session tokens, loopback origins, temporary roots) are registered with
 ``alias`` and stored as placeholders, so a replay substitutes its own. Library states are kept
-as per-table digests of schema, storage types, values and physical rowids (views by their rows). Recordings live in ``tests/fixtures/reference/<module>.tar.xz`` and
+as per-table digests of schema, storage types, values and physical rowids (views by their rows). Recordings live in ``tests/fixtures/reference_recordings/<module>.tar.xz`` and
 cannot be re-recorded once the reference is gone. Clock-like text (the core stamps some rows and
 responses with the current time) is compared as ``<clock>``.
 """
@@ -29,7 +29,7 @@ from functools import lru_cache
 from pathlib import Path
 
 RECORD = os.environ.get('ILLUSTASH_REFERENCE') == 'record'
-FIXTURES = Path(__file__).resolve().parent / 'fixtures' / 'reference'
+FIXTURES = Path(__file__).resolve().parent / 'fixtures' / 'reference_recordings'
 _recorded = {}   # module -> {'tests': {test id: [entry]}, 'blobs': {sha: bytes}}
 _current = None  # the running test's recorder: its run-specific strings are placeholders in digests
 CLOCK = re.compile(r'\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:\d{2})?')
@@ -123,11 +123,20 @@ class Recorder:
             self.blobs = data['blobs']
 
     def alias(self, actual, placeholder):
-        """Register a run-specific string; the latest registration of a placeholder wins."""
-        self.aliases = [(a, p) for a, p in self.aliases if p != placeholder] + [(str(actual), placeholder)]
+        """Register a run-specific string; the latest registration of a placeholder wins. A macOS
+        temporary path is also known by its unresolved /var spelling."""
+        actual = str(actual)
+        pairs = [(actual, placeholder)]
+        if actual.startswith('/private/'):
+            pairs.append((actual[len('/private'):], placeholder[:-1] + '_SHORT@'))
+        names = {p for _, p in pairs}
+        self.aliases = [(a, p) for a, p in self.aliases if p not in names] + pairs
+
+    def _ordered(self):
+        return sorted(self.aliases, key=lambda x: -len(x[0]))
 
     def _to_placeholders(self, text):
-        for actual, placeholder in sorted(self.aliases, key=lambda x: -len(x[0])):
+        for actual, placeholder in self._ordered():
             text = text.replace(actual, placeholder)
         return text
 
@@ -207,7 +216,7 @@ class Recorder:
                     data, kind = _file_bytes(f), 'raw'
                     if f.suffix in ('.sqlite', '.db'):
                         try:
-                            data, kind = _sqlite_bytes(f), 'sqlite'
+                            data, kind = _sqlite_bytes(f, [(a, p) for a, p in self._ordered()]), 'sqlite'
                         except sqlite3.DatabaseError:
                             pass
                     else:
@@ -218,15 +227,11 @@ class Recorder:
                     key = hashlib.sha256(data).hexdigest()
                     self.blobs[key] = data
                     files[f.relative_to(path).as_posix()] = key if kind != 'raw' else ['raw', key]
-            # Databases keep the recording's run-specific strings (temporary roots in stored paths);
-            # a replay rebases them on its own.
-            self.entries.append({'label': label, 'value': files, 'package': True,
-                                 'aliases': {placeholder: actual for actual, placeholder in self.aliases}})
+            self.entries.append({'label': label, 'value': files, 'package': True})
             return Library(path) if library else path
-        entry = self._next(label)
-        files = entry['value']
-        current = {placeholder: actual for actual, placeholder in self.aliases}
-        rebase = [(old, current[p]) for p, old in entry.get('aliases', {}).items() if p in current and current[p] != old]
+        files = self._next(label)['value']
+        # Run-specific strings stored in database text (temporary roots in paths) come back as this run's.
+        rebase = [(p, a) for a, p in sorted(self.aliases, key=lambda x: -len(x[1]))]
         path.mkdir(parents=True, exist_ok=True)
         for name, key in files.items():
             target = path / name
@@ -302,11 +307,34 @@ def _file_bytes(path):
     return Path(path).read_bytes()
 
 
-def _sqlite_bytes(path):
-    """A consistent single-file copy (WAL folded in), byte for byte including rowids."""
-    with closing(sqlite3.connect(path)) as src, closing(sqlite3.connect(':memory:')) as mem:
-        src.backup(mem)
-        return mem.serialize()
+def _sqlite_bytes(path, placeholders=()):
+    """A consistent single-file copy (WAL folded in) including rowids, run-specific strings in
+    its text cells replaced by placeholders."""
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmp:
+        copy = Path(tmp) / 'copy.sqlite'
+        with closing(sqlite3.connect(path)) as src, closing(sqlite3.connect(copy)) as dst:
+            mode = src.execute('PRAGMA journal_mode').fetchone()[0]
+            src.backup(dst)
+        if placeholders:
+            _rebase(copy, list(placeholders))
+        # Rebuilt without free pages or unused cell space: no residue of replaced text is kept.
+        clean = Path(tmp) / 'clean.sqlite'
+        with closing(sqlite3.connect(copy)) as c:
+            c.execute('VACUUM INTO ?', (str(clean),))
+        global _current
+        saved, _current = _current, None
+        try:
+            if table_digests(copy) != table_digests(clean):
+                raise AssertionError(f'{path}: rebuilding the recorded copy changed its rows or rowids')
+        finally:
+            _current = saved
+        with closing(sqlite3.connect(clean)) as c:
+            # Keep the original journal mode (WAL is recorded in the header); fold any WAL back in.
+            c.execute('PRAGMA journal_mode=DELETE')
+            if mode == 'wal':
+                c.execute('PRAGMA journal_mode=WAL')
+        return clean.read_bytes()
 
 
 @lru_cache(maxsize=None)
