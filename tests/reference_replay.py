@@ -113,7 +113,9 @@ class Recorder:
         _current = self
         kind = test if isinstance(test, type) else type(test)
         self.module = kind.__module__.split('.')[-1]
-        self.test = f'{kind.__module__}.{kind.__qualname__}.setUpClass' if isinstance(test, type) else test.id()
+        # Keyed by the id under the tests package, however the tests were discovered.
+        test_id = f'{kind.__module__}.{kind.__qualname__}.setUpClass' if isinstance(test, type) else test.id()
+        self.test = 'tests.' + test_id.removeprefix('tests.')
         self.aliases = []      # (actual, placeholder)
         self.position = 0
         if RECORD:

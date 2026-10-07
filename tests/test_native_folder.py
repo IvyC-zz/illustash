@@ -137,7 +137,7 @@ class NativeFolderHTTPTest(unittest.TestCase):
         self.fail('sync did not finish')
 
     def sync(self):
-        settle(self.new_folder, self.root / 'second-source')
+        settle(*[f for f in (getattr(self, 'new_folder', None), self.root / 'second-source') if f])
         response = self.request('/api/sync', {})
         self.assertEqual(response['status'], 200, response['body'])
         self.assertEqual(response['body'], b'{"started": true}')
