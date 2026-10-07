@@ -12,9 +12,18 @@ from web import library
 from tests.synthetic_source import source_fixture as fixture
 
 
+IMAGES = Path(__file__).resolve().parent / 'fixtures' / 'folder_images'
+
+
 def image(path, colour, size=(40, 30)):
+    """A solid-colour image. The committed copies keep the bytes independent of the local
+    encoder, so scans match recorded expectations on every platform."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    Image.new('RGB', size, colour).save(path)
+    fixed = IMAGES / f'{colour}-{size[0]}x{size[1]}{path.suffix.lower()}'
+    if fixed.is_file():
+        path.write_bytes(fixed.read_bytes())
+    else:
+        Image.new('RGB', size, colour).save(path)
 
 
 def settle(*folders):

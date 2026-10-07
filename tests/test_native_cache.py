@@ -41,9 +41,14 @@ class NativeCacheTest(unittest.TestCase):
         new = self.request('/api/cache', {'action': 'clear'})
         self.assertEqual(old['status'], 200)
         self.assertEqual(new['status'], 200)
-        self.assertEqual(new['body'], old['body'])
+        # The reference was recorded on POSIX; Windows file names ignore case, so it also removes keep.JPG.
+        recorded, payload = json.loads(old['body']), json.loads(new['body'])
+        if os.name == 'nt':
+            recorded['removed'] = payload['removed']
+            self.assertEqual(payload, recorded)
+        else:
+            self.assertEqual(new['body'], old['body'])
         self.assertEqual(new['route'], 'core')
-        payload = json.loads(new['body'])
         self.assertEqual(payload['removed'], 4 if os.name == 'nt' else 3)
         self.assertEqual(payload['thumbnails']['files'], 0)
         self.assertEqual(payload['thumbnails']['bytes'], 0)

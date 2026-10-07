@@ -121,6 +121,7 @@ class CoreReadHTTPTest(HTTPHarness):
 
 
 class ArtistReadHTTPTest(HTTPHarness):
+    @unittest.skipIf(os.name == 'nt', '固定期望录自 POSIX，包名含 Windows 不允许的 ?')
     def test_auxiliary_artist_reads_legacy_then_core_with_fixed_hash_order(self):
         package = self.root/'Artists #雪?.pilib'
         if RECORD:

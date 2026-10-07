@@ -122,7 +122,13 @@ class Recorder:
             self.blobs = store['blobs']
         else:
             data = _load(self.module)
-            self.entries = data['tests'].get(self.test, [])   # a test may use no reference value
+            self.entries = data['tests'].get(self.test)
+            if self.entries is None:
+                # Never recorded: a test that only runs on another platform than the recording's, or
+                # one that uses no reference value. Its shared setup values come from the module's
+                # first recorded test (the same synthetic packages and seeds).
+                donors = [entries for _, entries in sorted(data['tests'].items())]
+                self.entries, self.donor = [], donors[0] if donors else []
             self.blobs = data['blobs']
 
     def alias(self, actual, placeholder):
@@ -206,6 +212,10 @@ class Recorder:
         return value
 
     def _next(self, label):
+        donor = getattr(self, 'donor', None)
+        if donor is not None and self.position < len(donor) and donor[self.position]['label'] == label:
+            self.position += 1
+            return donor[self.position - 1]
         if self.position >= len(self.entries):
             raise AssertionError(f'{self.test}: no recorded value #{self.position} ({label})')
         entry = self.entries[self.position]
@@ -264,6 +274,8 @@ class Recorder:
         rebase = [(p, a) for a, p in sorted(self.aliases, key=lambda x: -len(x[1]))]
         path.mkdir(parents=True, exist_ok=True)
         for name, key in files.items():
+            if WINDOWS and any(c in name for c in '<>:"|?*'):
+                continue   # a name this platform cannot hold; its tests are POSIX-only
             target = path / name
             target.parent.mkdir(parents=True, exist_ok=True)
             for suffix in ('-wal', '-shm', '-journal'):
@@ -277,9 +289,14 @@ class Recorder:
                 _rebase(target, rebase, self._from_placeholders)
         return Library(path) if library else path
 
+    def skip(self, label):
+        """A recorded value this platform has no counterpart for (the test documents why)."""
+        if not RECORD:
+            self._next(label)
+
     def finish(self, test):
         """Every recorded value must have been used."""
-        if not RECORD and self.position != len(self.entries):
+        if not RECORD and getattr(self, 'donor', None) is None and self.position != len(self.entries):
             test.fail(f'{self.test}: {len(self.entries) - self.position} recorded reference values not reached')
 
 

@@ -19,7 +19,7 @@ from unittest.mock import patch
 
 from PIL import Image
 from tests.folder_fixture import FolderSource, image, settle
-from tests.reference_replay import RECORD, Recorder
+from tests.reference_replay import RECORD, Recorder, unclocked
 from tests.test_native_human_labels import snapshot
 from tests import test_native_lifecycle as lifecycle
 from tests.test_native_lifecycle import NativeLifecycleTest
@@ -171,7 +171,8 @@ class NativeFolderHTTPTest(unittest.TestCase):
         self.assertEqual(snapshot(self.lib.db)['actions'], before)
         detail = self.request('/api/detail?id=' + asset)
         self.assertEqual(detail['status'], 200)
-        self.assertEqual(detail['body'], lifecycle.NativeLifecycleTest.reference_response(self, '/api/detail?id=' + asset)['body'])
+        # The asset's added time comes from the file's birth time, which only macOS lets settle() fix.
+        self.assertEqual(unclocked(detail['body']), unclocked(lifecycle.NativeLifecycleTest.reference_response(self, '/api/detail?id=' + asset)['body']))
         self.assertEqual(self.request('/api/undo', {'id': undo['id']})['status'], 200)
         (folder_path / 'moved.png').rename(self.root / 'saved.png')
         state = self.sync()

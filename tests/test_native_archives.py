@@ -131,7 +131,10 @@ class NativeArchivesTest(unittest.TestCase):
         variants = [b'not zip', good.read_bytes()[:100]]
         # Windows 上 zipfile 写入时会把反斜杠换成 `/`，构造不出反斜杠条目；该情形由 app_archives 的单元测试覆盖。
         names = ('../escape', '/absolute', 'features/../library.json', 'features\\full-features.npy', 'unexpected', 'features/')
-        for name in (n for n in names if os.name != 'nt' or '\\' not in n):
+        for name in names:
+            if os.name == 'nt' and '\\' in name:
+                variants.append(None)   # recorded on POSIX; skipped here (see above)
+                continue
             out = self.root / f'bad-{len(variants)}.zip'
             with zipfile.ZipFile(out, 'w') as z:
                 for n,b in files.items(): z.writestr(n,b)
@@ -148,6 +151,9 @@ class NativeArchivesTest(unittest.TestCase):
             z.writestr('features/full-features.npy', b'synthetic-crc-needle')
         data = bytearray(out.read_bytes()); data[data.index(b'synthetic-crc-needle')] ^= 1; variants.append(data)
         for i,data in enumerate(variants):
+            if data is None:
+                self.rec.skip('response')
+                continue
             archive = self.root / f'case-{i}.zip'; archive.write_bytes(data)
             before = set(library.HOME.glob('*')) if library.HOME.exists() else set()
             with self.subTest(i=i):

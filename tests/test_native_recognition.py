@@ -59,7 +59,7 @@ class NativeRecognitionTest(unittest.TestCase):
         p.mkdir(exist_ok=True)
         labels = [dict(asset=u, dim='rating', value='general', confidence=.9) for u in ids]
         labels += [dict(asset=u, dim='general', value='blue_hair', confidence=.7) for u in ids]
-        (p / 'labels.jsonl').write_text('\n'.join(json.dumps(x) for x in labels))
+        (p / 'labels.jsonl').write_text('\n'.join(json.dumps(x) for x in labels), newline='\n')
         for model in ('wd', 'ccip'):
             np.save(p / (model + '.npy'), np.ones((len(ids), self.specs[model]['dimension']), dtype='<f4'))
         self.manifest(p, ids)
@@ -68,7 +68,7 @@ class NativeRecognitionTest(unittest.TestCase):
     def manifest(self, p, ids=('a', 'b')):
         m = dict(format='illustash-recognition/1', library_id=self.lib.config['id'], assets=list(ids), models=self.specs,
                  files={f:dict(bytes=(p/f).stat().st_size,sha256=hashlib.sha256((p/f).read_bytes()).hexdigest()) for f in FILES})
-        (p / 'manifest.json').write_text(json.dumps(m))
+        (p / 'manifest.json').write_text(json.dumps(m), newline='\n')
         return m
 
     def cli(self, *args):
@@ -109,7 +109,7 @@ class NativeRecognitionTest(unittest.TestCase):
         self.assertEqual(snapshot(self.lib.source),source)
         self.assertEqual(snapshot(self.lib.db),app)
         # Different manifest with exactly the same asset results also deduplicates.
-        m=json.loads((p/'manifest.json').read_text());m['producer_note']='合成';(p/'manifest.json').write_text(json.dumps(m))
+        m=json.loads((p/'manifest.json').read_text());m['producer_note']='合成';(p/'manifest.json').write_text(json.dumps(m),newline='\n')
         self.assertFalse(self.import_result(p)['duplicate'])
         with sqlite3.connect(self.lib.source) as c:
             self.assertEqual(c.execute('SELECT count(*) FROM recognition_assets').fetchone()[0],2)
