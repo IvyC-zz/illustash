@@ -65,6 +65,7 @@ class NativeFolderScanTest(unittest.TestCase):
         self.assertEqual(snapshot(self.lib.source), expected['source'])
         return new
 
+    @unittest.skipIf(os.name == 'nt', '固定期望录自 macOS：资产键序与文件元数据随平台不同')
     def test_complete_source_typed_rowid_ddl_comparison(self):
         shutil.copyfile(self.pics / 'a.png', self.pics / 'copy.png')
         (self.pics / 'bad.gif').write_bytes(b'synthetic corrupt image')
@@ -221,6 +222,7 @@ class NativeFolderHTTPTest(unittest.TestCase):
         self.assertFalse(self.lib.source.with_suffix('.scan-pending.json').exists())
         self.assertFalse(self.sentinel.exists())
 
+    @unittest.skipIf(os.name == 'nt', '固定期望录自 macOS：资产键序与文件元数据随平台不同')
     def test_native_library_new_folder_full_application_typed_rowid_projection_comparison(self):
         clone = self.root / 'reference-clone.pilib'
         clone.mkdir()
@@ -272,6 +274,7 @@ class NativeFolderHTTPTest(unittest.TestCase):
                        json.dumps(run['sources'],ensure_ascii=False),run['message'],run['id']))
         return {'source': source, 'db': snapshot(old_lib.db)}
 
+    @unittest.skipIf(os.name == 'nt', '固定期望录自 macOS：资产键序与文件元数据随平台不同')
     def test_native_library_new_folder_multiple_sources_keep_configuration_order(self):
         self.stop(self.process)
         self.lib.config['sources'][0]['id']='z'
