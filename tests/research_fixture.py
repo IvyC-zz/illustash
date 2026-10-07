@@ -64,7 +64,7 @@ class Store:
     def curate(self, ids, action):
         import os, subprocess
         from tools.verify_read_http import fetch
-        from tests.test_read_http import free_port, wait_until, stop_process
+        from tests.test_read_http import SPAWN, free_port, wait_until, stop_process
         package = Path(tempfile.mkdtemp(prefix='curation-input-', dir=self.root)).with_suffix('.pilib')
         package.mkdir()
         for source,name in ((self.path,'library.sqlite'),(self.source,'source.sqlite')):
@@ -80,7 +80,7 @@ class Store:
         process = subprocess.Popen([str(core.binary()),'http','--library',str(package),'--root',
                                     str(Path(__file__).resolve().parents[1]),'--port',str(port),
                                     '--no-open','--no-auto-sync','--no-names','--no-provenance','--no-index-check'],
-                                   env=env,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+                                   env=env,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,**SPAWN)
         try:
             wait_until(lambda:fetch(origin,{'url':'/api/bootstrap'},origin)['status']==200,timeout=10)
             token = json.loads(fetch(origin,{'url':'/api/bootstrap'},origin)['body'])['token']
@@ -111,7 +111,7 @@ class Store:
         for index, files in enumerate(self.record['packages']):
             package = Path(tempfile.mkdtemp(prefix='wd-input-', dir=self.root))
             for name, text in files.items():
-                (package / name).write_text(text, encoding='utf-8')
+                (package / name).write_text(text, encoding='utf-8', newline='')
             core.run('import', '--db', self.path, '--library-id', 'local', '--package', package)
         self.command('rederive', realistic=[], rating_indexed='2026-10-01 00:00:00',
                      general_indexed='2026-10-01 00:00:00')

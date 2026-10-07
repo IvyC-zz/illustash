@@ -51,7 +51,7 @@ def restore(files,root):
         if 'sql' in data:
             for suffix in ('','-wal','-shm','-journal'):Path(str(p)+suffix).unlink(missing_ok=True)
             with sqlite3.connect(p) as c:c.executescript(data['sql'].replace('@FOLDER@',str(root)))
-        elif 'text' in data:p.write_text(data['text'].replace('@FOLDER@',str(root)),encoding='utf-8')
+        elif 'text' in data:p.write_text(data['text'].replace('@FOLDER@',str(root)),encoding='utf-8',newline='')
         else:p.write_bytes(base64.b64decode(data['bytes']))
 
 def current_files(root):
@@ -59,11 +59,12 @@ def current_files(root):
     result={}
     for p in root.rglob('*'):
         if not p.is_file() or p.name.endswith(('-wal','-shm','-journal')):continue
-        data=p.read_bytes();name=str(p.relative_to(root))
+        data=p.read_bytes();name=p.relative_to(root).as_posix()
         if data.startswith(b'SQLite format'):
             with sqlite3.connect(p) as c:result[name]={'sql':'\n'.join(c.iterdump()).replace(str(root),'@FOLDER@')}
         else:
-            try:result[name]={'text':data.decode().replace(str(root),'@FOLDER@')}
+            # Inputs written in text mode carry CRLF on Windows; the recording was made with LF.
+            try:result[name]={'text':data.decode().replace('\r\n','\n').replace(str(root),'@FOLDER@')}
             except UnicodeDecodeError:result[name]={'bytes':base64.b64encode(data).decode()}
     return result
 

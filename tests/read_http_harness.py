@@ -22,7 +22,7 @@ from contextlib import closing
 from urllib.parse import quote
 
 from tests.fixed_expectations import Expectations
-from tests.test_read_http import free_port, stop_process, wait_until
+from tests.test_read_http import SPAWN, free_port, stop_process, wait_until
 from tools import verify_read_http as verify
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -73,7 +73,7 @@ class HTTPHarness(unittest.TestCase):
         cls.context = publish(rec, cls.server, cls.state)
         cls.log = tempfile.TemporaryFile()
         cls.host = subprocess.Popen([str(cls.binary), '--port', cls.origin.rsplit(':', 1)[1], '--state', str(cls.state)],
-                                    stdout=cls.log, stderr=cls.log)
+                                    stdout=cls.log, stderr=cls.log, **SPAWN)
         wait_until(lambda: verify.fetch(cls.origin, {'url': '/api/fold'}, cls.origin)['status'] == 200)
 
     @classmethod

@@ -10,6 +10,7 @@ import os
 import re
 import sqlite3
 import tarfile
+import unittest
 from contextlib import closing
 from functools import lru_cache
 from pathlib import Path
@@ -102,8 +103,29 @@ class Expectations:
         self.test = 'tests.' + test_id.removeprefix('tests.')
         self.aliases = []      # (actual, placeholder)
         self.position = 0
-        data = _load(self.module)
+        try:
+            data = _load(self.module)
+        except AssertionError:
+            if isinstance(test, type):
+                raise
+            data = {'tests': {}, 'blobs': {}}   # a module of platform-only subclasses only
         self.entries = data['tests'].get(self.test)
+        if self.entries is None and not isinstance(test, type):
+            # A platform-only subclass (e.g. the Windows OpenBLAS runs) replays its parent's recording.
+            for parent in kind.__mro__[1:]:
+                if not (isinstance(parent, type) and issubclass(parent, unittest.TestCase)) \
+                        or parent is unittest.TestCase:
+                    continue
+                name = parent.__module__.split('.')[-1]
+                key = f"tests.{parent.__module__.removeprefix('tests.')}.{parent.__qualname__}.{test._testMethodName}"
+                try:
+                    found = _load(name)
+                except AssertionError:
+                    continue
+                if key in found['tests']:
+                    self.module, self.test, data = name, key, found
+                    self.entries = found['tests'][key]
+                    break
         if self.entries is None:
             # Never recorded: a test that only runs on another platform than the recording's, or
             # one that uses no reference value. Its shared setup values come from the module's

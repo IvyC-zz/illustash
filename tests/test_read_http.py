@@ -39,8 +39,9 @@ def wait_until(predicate, timeout=15):
 
 
 def stop_process(process):
+    """Stop a host started with ``SPAWN`` (on Windows the interrupt goes to its process group)."""
     if process.poll() is None:
-        process.send_signal(signal.SIGINT)
+        process.send_signal(INTERRUPT)
         try:
             process.wait(12)
         except subprocess.TimeoutExpired:
