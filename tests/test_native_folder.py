@@ -13,16 +13,16 @@ from pathlib import Path
 from unittest.mock import patch
 
 from PIL import Image
-from tests.test_folder import FolderSourceTest, image
+from tests.folder_fixture import FolderSource, image
 from tests.test_native_human_labels import snapshot
 from tests.test_native_lifecycle import NativeLifecycleTest
 from web import folder
 
 
 class NativeFolderScanTest(unittest.TestCase):
-    setUp = FolderSourceTest.setUp
-    tearDown = FolderSourceTest.tearDown
-    rows = FolderSourceTest.rows
+    setUp = FolderSource.setUp
+    tearDown = FolderSource.tearDown
+    rows = FolderSource.rows
 
     @classmethod
     def setUpClass(cls):
@@ -302,4 +302,4 @@ class NativeFolderHTTPTest(unittest.TestCase):
         self.assertFalse(self.sentinel.exists())
 
 # Reuse fixtures without rediscovering their unrelated tests.
-del NativeLifecycleTest, FolderSourceTest
+del NativeLifecycleTest

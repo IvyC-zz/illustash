@@ -21,7 +21,7 @@ from unittest.mock import patch
 
 from tests import test_native_lifecycle as lifecycle
 from tests.test_read_http import INTERRUPT, SPAWN, free_port, wait_until
-from tests.test_names import Providers
+from tests.name_providers import Providers
 from tools.verify_read_http import fetch
 from web import names, library
 from web.store import Store

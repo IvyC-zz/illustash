@@ -1,6 +1,6 @@
 # 词条第 4、5 步修订方案：角色、皮肤 / 变体、作品、名字
 
-2026-09-28，已确认（第 14 节）。回应方案审核 `TERMS_CHARACTERS_REVIEW.md`（审核基线 `fbee1f0`，审核提交 `aeb42c0`；审核稿与交接文档已删除，见开源前私有历史）。开篇方案记录于 2026-09-28；后续实现进度见文末，当前恢复入口见下节。原审核行号指 `aeb42c0`（业务代码与 `fbee1f0` 相同）。
+2026-09-28，已确认（第 14 节）。回应方案审核 `TERMS_CHARACTERS_REVIEW.md`（审核基线 `fbee1f0`，审核提交 `aeb42c0`；审核稿与交接文档已删除，见开源前私有历史）。开篇方案记录于 2026-09-28；后续实现进度见文末，当前恢复入口见下节。原审核行号指 `aeb42c0`（业务代码与 `fbee1f0` 相同）。Python 测试 2026-10-07 起已删除（#9）：文中提到的 `tests/test_*.py` 改由 `native/terms/tests/replay.rs` 中同名模块的录制重放及 Rust 单元测试覆盖，现状见 [TERMS_CHARACTERS.md](TERMS_CHARACTERS.md) 第 6 节与 [TERMS_NAMES.md](TERMS_NAMES.md) 第 6 节。
 
 ## 现状（2026-09-29）：S0–S6 全部完成
 

@@ -143,7 +143,8 @@ pub(crate) fn mirror_state(c: &Connection, ids: &[String], origin: &str) -> Resu
     c.execute(
         &format!(
             "INSERT INTO terms(key,kind,origin,attrs) SELECT e.id,e.kind,?1,{ATTRS} FROM entities e
-             WHERE e.id IN (SELECT id FROM state_scope) AND NOT EXISTS(SELECT 1 FROM terms t WHERE t.key=e.id)"
+             WHERE e.id IN (SELECT id FROM state_scope) AND NOT EXISTS(SELECT 1 FROM terms t WHERE t.key=e.id)
+             ORDER BY e.rowid"
         ),
         [origin],
     )?;

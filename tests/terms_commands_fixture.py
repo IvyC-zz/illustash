@@ -14,10 +14,66 @@ from pathlib import Path
 from tests import terms_seed
 from tests.terms_c3_snapshots import Checkpoints
 from tests.test_terms_core import core
-from tests.test_terms_character_learning import rebuilt_snapshot, snapshot
-from tests.test_terms_characters_contract import COMPAT, PROJECTIONS, refreshed_projections
 from web import names, terms_core
 from web.store import Store
+
+# 兼容表：影子收编（S2）生成 shadow_<名字>，与旧表逐行逐列比对。
+COMPAT = ('entities', 'links', 'work_review', 'assertions', 'candidates',
+          'identity_relations', 'identity_evidence', 'identity_decisions', 'identity_decision_evidence')
+PROJECTIONS = ('family_evidence', 'single_assets', 'lead_assets', 'memberships', 'tag_memberships', 'duplicates')
+
+
+def snapshot(store, tables):
+    with store.connect() as c:
+        return {t: sorted((tuple(r) for r in c.execute(f'SELECT * FROM {t}')), key=repr) for t in tables
+                if c.execute('SELECT 1 FROM sqlite_master WHERE name=?', (t,)).fetchone()}
+
+
+def rebuilt_snapshot(store, tables):
+    cloned = copy.copy(store)
+    cloned.path = Path(str(store.path) + '.rebuild')
+    with sqlite3.connect(store.path) as source, sqlite3.connect(cloned.path) as target:
+        source.backup(target)
+    try:
+        terms_core.run('reproject-characters', '--db', cloned.path)
+        return snapshot(cloned, tables)
+    finally:
+        cloned.path.unlink()
+
+
+def refreshed_projections(path, swap):
+    """库的一份拷贝：swap 时先把影子兼容表换上真名（旧表丢掉），再用 Python 原来的 SQL 全量重算投影。"""
+    from web import effects  # noqa: F401  (Store 的静态方法只用连接)
+    copy = Path(str(path) + ('.swap' if swap else '.plain'))
+    with sqlite3.connect(path) as src, sqlite3.connect(copy) as dst:
+        src.backup(dst)
+    c = sqlite3.connect(copy)
+    c.row_factory = sqlite3.Row
+    names.register(c)
+    if swap:
+        c.execute('PRAGMA legacy_alter_table=ON')
+        shadows = {r[0] for r in c.execute("SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'shadow_%'")}
+        for t in COMPAT:
+            if 'shadow_' + t in shadows:
+                for (trigger,) in c.execute("SELECT name FROM sqlite_master WHERE type='trigger' AND tbl_name=?", ('shadow_' + t,)).fetchall():
+                    c.execute(f'DROP TRIGGER {trigger}')
+                c.execute(f'DROP TABLE {t}')
+                c.execute(f'ALTER TABLE shadow_{t} RENAME TO {t}')
+        c.execute('PRAGMA legacy_alter_table=OFF')
+    # 只在抛弃式副本中授权原 SQL 参考重算；被比较的核心库绝不修复或解除写保护。
+    c.execute("INSERT OR REPLACE INTO meta VALUES ('terms_writer','1')")
+    Store._refresh_evidence(c)
+    Store._refresh_single(c)
+    Store._refresh_memberships(c)
+    c.execute("DELETE FROM meta WHERE key='terms_writer'")
+    out = {t: sorted(map(tuple, c.execute(f'SELECT * FROM {t}'))) for t in PROJECTIONS}
+    for view in ('family_confirmed', 'effective_assertions', 'identity_nodes', 'identity_assignments', 'ambiguous_claims'):
+        if c.execute("SELECT 1 FROM sqlite_master WHERE type='view' AND name=?", (view,)).fetchone():
+            out[view] = sorted(map(tuple, c.execute(f'SELECT * FROM {view}')))
+    c.close()
+    copy.unlink()
+    return out
+
 
 PRIVATE = ('identity_canonical', 'identity_scopes', 'identity_suspended', 'identity_uncertain',
            'identity_anchor_decisions', 'identity_anchor_history', 'learn_state', 'asked', 'reviews', 'deferred',

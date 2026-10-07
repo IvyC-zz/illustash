@@ -16,7 +16,7 @@ import unittest
 from unittest.mock import patch
 
 from PIL import Image
-from tests import test_web_http as existing
+from tests import web_http_fixture as existing
 from tools import verify_read_http as verify
 from web import library, terms_core
 from tests.reference import host
@@ -294,7 +294,7 @@ class LifecycleTest(unittest.TestCase):
 
     def test_cli_launch_library_switch_token_restart_and_clean_exit(self):
         from web.store import Store
-        from tests.test_web import fixture
+        from tests.synthetic_source import source_fixture as fixture
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             packages = []

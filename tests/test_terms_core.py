@@ -10,7 +10,7 @@ from unittest import mock
 
 from web import terms_core
 from web.store import Invalid, Store
-from tests.test_web import fixture
+from tests.synthetic_source import source_fixture as fixture
 
 
 def core():

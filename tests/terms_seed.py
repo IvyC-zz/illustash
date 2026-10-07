@@ -33,7 +33,7 @@ def load(name, root, *, db=None, source=None, provenance=None):
         raise ValueError('固定输入夹具仅允许恢复到临时目录')
     record = json.loads((ROOT / f'{name}.json').read_text(encoding='utf-8'))
     # 源夹具的相册映射是源数据库之外的输入；恢复固定 SQL 之前先重建同一个公共源夹具侧文件。
-    from tests.test_web import fixture
+    from tests.synthetic_source import source_fixture as fixture
     original_source = root / 'source.db'
     if original_source.exists():
         original_source.unlink()

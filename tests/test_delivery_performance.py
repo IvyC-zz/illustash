@@ -8,13 +8,13 @@ import time
 import unittest
 from unittest.mock import patch
 from PIL import Image
-from tests import test_web_http
+from tests import web_http_fixture
 
 
 class DeliveryPerformanceTest(unittest.TestCase):
-    setUp = test_web_http.HTTPTest.setUp
-    tearDown = test_web_http.HTTPTest.tearDown
-    request = test_web_http.HTTPTest.request
+    setUp = web_http_fixture.HTTPTest.setUp
+    tearDown = web_http_fixture.HTTPTest.tearDown
+    request = web_http_fixture.HTTPTest.request
 
     def test_character_summary_http_contract(self):
         status, body, _ = self.request('/api/characters?min=1&summary=1')

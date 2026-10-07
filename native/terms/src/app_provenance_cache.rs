@@ -217,3 +217,36 @@ pub(super) fn latest(cache: &Path) -> Result<Json> {
         })
         .unwrap_or_else(|| Json::object([("status", "idle".into())])))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn version_4_cache_keeps_its_signatures_and_gains_the_colour_column() {
+        let root = std::env::temp_dir().join(format!(
+            "illustash-provenance-v4-{}-{}",
+            std::process::id(),
+            crate::store::new_key().unwrap()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let path = root.join("provenance.sqlite");
+        Connection::open(&path)
+            .unwrap()
+            .execute_batch(
+                "CREATE TABLE ref_sigs(site TEXT NOT NULL, post_id TEXT NOT NULL, page INTEGER NOT NULL DEFAULT 0,
+                 artist_id TEXT, ratio REAL NOT NULL, grid BLOB NOT NULL, url TEXT, PRIMARY KEY(site, post_id, page));
+                 INSERT INTO ref_sigs(site,post_id,ratio,grid) VALUES ('danbooru','1',1.0,x'00'); PRAGMA user_version=4;",
+            )
+            .unwrap();
+        let c = connect(&path).unwrap();
+        let version: u32 = c.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
+        assert_eq!(version, 5);
+        // Kept, and re-signed only when a comparison needs the colour check.
+        let row: (String, Option<Vec<u8>>) =
+            c.query_row("SELECT post_id, colour FROM ref_sigs", [], |r| Ok((r.get(0)?, r.get(1)?))).unwrap();
+        assert_eq!(row, ("1".into(), None));
+        drop(c);
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+}
