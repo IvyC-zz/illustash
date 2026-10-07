@@ -69,11 +69,8 @@ mod http_characters;
 mod http_json;
 mod http_local;
 mod http_read;
-#[cfg(feature = "test-reference-host")]
-// Explicit historical test host is excluded from the production unwrap migration.
-#[allow(clippy::unwrap_used)]
-#[path = "../../../tests/reference/http_host.rs"]
-pub mod http_reference;
+#[cfg(feature = "test-read-host")]
+pub mod read_harness;
 use illustash_core::legacy_artists as legacy_artists_rules;
 /// Compatibility API; the application supplies the mandatory backup to the core rule.
 pub mod legacy_artists {

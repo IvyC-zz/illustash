@@ -37,8 +37,8 @@ def source_files(root):
             rel = path.relative_to(root)
             if not path.is_file() or set(rel.parts) & EXCLUDE_DIRS or path.name in GENERATED or path.name in {'tests.rs', 'old_schema.sql'}:
                 continue
-            if rel.as_posix() == 'native/terms/examples/reference-http.rs':
-                continue  # Explicit test-reference-host feature only; never a shipped entry.
+            if rel.as_posix() == 'native/terms/examples/read-http.rs':
+                continue  # Explicit test-read-host feature only; never a shipped entry.
             if path.parent.name == 'tools' and path.name not in PRODUCTION_TOOLS:
                 continue
             # Research evidence/cache implementations remain optional; their coordination exceptions are reviewed.

@@ -26,6 +26,10 @@ class NativeArchivesTest(unittest.TestCase):
     request = lifecycle.NativeLifecycleTest.request
     pair = lifecycle.NativeLifecycleTest.pair
 
+    def reference_status(self, url, body=None, **kwargs):
+        """The former reference server's status for the same request (recorded)."""
+        return lifecycle.NativeLifecycleTest.reference_response(self, url, body, **kwargs)['status']
+
     def state(self):
         return json.loads(self.request('/api/libraries')['body'])['export']
 
@@ -111,7 +115,7 @@ class NativeArchivesTest(unittest.TestCase):
         self.assertEqual(snapshot(self.lib.source), snapshot(expected.source))
         self.assertEqual(json.loads(self.request('/api/libraries')['body'])['info']['sources'][0], result)
         for body in ({'source':'absent','preset':'x'}, {'source':'s1','preset':'bad'}, {'source':None, 'preset':[]}):
-            self.assertEqual(self.request('/api/libraries/preset', body)['status'], self.request('/api/libraries/preset', body, base=self.direct)['status'])
+            self.assertEqual(self.request('/api/libraries/preset', body)['status'], self.reference_status('/api/libraries/preset', body))
         other, _ = self.package('other'); library.remember(other, front=False)
         before = snapshot(other.db)
         response = self.pair('/api/libraries/forget', {'path':str(other.path)})
@@ -147,7 +151,7 @@ class NativeArchivesTest(unittest.TestCase):
             archive = self.root / f'case-{i}.zip'; archive.write_bytes(data)
             before = set(library.HOME.glob('*')) if library.HOME.exists() else set()
             with self.subTest(i=i):
-                self.assertEqual(self.request('/api/libraries/import', {'path':str(archive)})['status'], self.request('/api/libraries/import', {'path':str(archive)}, base=self.direct)['status'])
+                self.assertEqual(self.request('/api/libraries/import', {'path':str(archive)})['status'], self.reference_status('/api/libraries/import', {'path':str(archive)}))
                 self.assertEqual(set(library.HOME.glob('*')) if library.HOME.exists() else set(), before)
         self.assertFalse((self.root / 'escape').exists())
         self.assertFalse(self.sentinel.exists())
@@ -188,7 +192,7 @@ class NativeArchivesTest(unittest.TestCase):
 
     def test_choose_invalid_kind_status_and_security(self):
         for body in ({}, {'kind':'bad'}, {'kind':[]}, {'kind':None}):
-            self.assertEqual(self.request('/api/libraries/choose', body)['status'], self.request('/api/libraries/choose', body, base=self.direct)['status'])
+            self.assertEqual(self.request('/api/libraries/choose', body)['status'], self.reference_status('/api/libraries/choose', body))
         self.assertEqual(self.request('/api/libraries/choose', {'kind':'bad'}, token='bad')['status'],403)
 
     def test_parallel_export_one_start_and_failed_switch_keeps_job(self):
@@ -229,13 +233,13 @@ class NativeArchivesTest(unittest.TestCase):
         other, _ = self.package('other'); library.remember(other, front=False)
         tmp = self.support / 'libraries.tmp'; tmp.mkdir()
         body = {'path':str(other.path)}
-        self.assertEqual(self.request('/api/libraries/forget',body)['status'], self.request('/api/libraries/forget',body,base=self.direct)['status'])
+        self.assertEqual(self.request('/api/libraries/forget',body)['status'], self.reference_status('/api/libraries/forget',body))
         source = library.folder_source(self.root / 'folder')
         self.lib.config['sources']=[source];self.lib.save()
         config_tmp = self.lib.path / 'library.json.tmp';config_tmp.mkdir()
         before = snapshot(self.lib.source)
         body={'source':'s1','preset':'x'}
-        self.assertEqual(self.request('/api/libraries/preset',body)['status'], self.request('/api/libraries/preset',body,base=self.direct)['status'])
+        self.assertEqual(self.request('/api/libraries/preset',body)['status'], self.reference_status('/api/libraries/preset',body))
         self.assertEqual(snapshot(self.lib.source),before)
 
     def test_import_legacy_zip_compressions(self):
@@ -261,5 +265,5 @@ class NativeArchivesTest(unittest.TestCase):
                     bad = self.root / 'lzma-crc.zip'; bad.write_bytes(corrupted)
                     before = set(library.HOME.iterdir())
                     body = {'path':str(bad)}
-                    self.assertEqual(self.request('/api/libraries/import',body)['status'],self.request('/api/libraries/import',body,base=self.direct)['status'])
+                    self.assertEqual(self.request('/api/libraries/import',body)['status'],self.reference_status('/api/libraries/import',body))
                     self.assertEqual(set(library.HOME.iterdir()),before)

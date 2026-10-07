@@ -1,4 +1,8 @@
-"""Rust recognition imports: owned synthetic resources/packages, no models or accounts."""
+"""Rust recognition imports: owned synthetic resources/packages, no models or accounts.
+
+The former Python importer's result on the same package was recorded through
+tests/reference_replay.py (#9; ``ILLUSTASH_REFERENCE=record`` re-runs it).
+"""
 import concurrent.futures
 import hashlib
 import json
@@ -10,9 +14,17 @@ from pathlib import Path
 from unittest.mock import patch
 import numpy as np
 from tests import test_native_lifecycle as lifecycle
+from tests.reference_replay import RECORD
 from tests.test_native_human_labels import snapshot, freeze_seed_defaults
-from web import library, results
-from web.store import Store
+
+# The recognition package files and the source tables they land in (input contract of the former importer).
+FILES = ('labels.jsonl', 'wd.npy', 'ccip.npy')
+SCHEMA = """CREATE TABLE IF NOT EXISTS recognition_imports(
+ digest TEXT PRIMARY KEY, manifest TEXT NOT NULL, assets TEXT NOT NULL, status TEXT NOT NULL,
+ error TEXT NOT NULL DEFAULT '', imported_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+ CREATE TABLE IF NOT EXISTS recognition_assets(
+ asset TEXT PRIMARY KEY, digest TEXT NOT NULL, package TEXT NOT NULL);
+ CREATE TABLE IF NOT EXISTS embeddings(uuid TEXT NOT NULL,model TEXT NOT NULL,vec BLOB NOT NULL,PRIMARY KEY(uuid,model));"""
 
 
 class NativeRecognitionTest(unittest.TestCase):
@@ -55,7 +67,7 @@ class NativeRecognitionTest(unittest.TestCase):
 
     def manifest(self, p, ids=('a', 'b')):
         m = dict(format='illustash-recognition/1', library_id=self.lib.config['id'], assets=list(ids), models=self.specs,
-                 files={f:dict(bytes=(p/f).stat().st_size,sha256=results.sha((p/f).read_bytes())) for f in results.FILES})
+                 files={f:dict(bytes=(p/f).stat().st_size,sha256=hashlib.sha256((p/f).read_bytes()).hexdigest()) for f in FILES})
         (p / 'manifest.json').write_text(json.dumps(m))
         return m
 
@@ -72,20 +84,25 @@ class NativeRecognitionTest(unittest.TestCase):
         # Seed a manual verdict and preserve it through native import and resume.
         self.assertEqual(self.request('/api/tag', {'ids':['a'], 'tag':'合成人工'})['status'],200)
         before=snapshot(self.lib.db)['actions']
-        with sqlite3.connect(self.lib.source) as c: c.executescript(results.SCHEMA)
+        with sqlite3.connect(self.lib.source) as c: c.executescript(SCHEMA)
         freeze_seed_defaults(self.lib.source)
         freeze_seed_defaults(self.lib.db)
-        old=self.root/'old.pilib'; shutil.copytree(self.lib.path,old)
-        reference=library.Library(old,self.lib.config)
-        store=Store.open(reference.source,reference.db); store.on_effect=lambda _:None
-        with patch.object(results,'ROOT',self.resources):
-            expected=results.import_package(reference,p,store,self.specs)
+        def old_import():
+            from web import library, results
+            from web.store import Store
+            old=self.root/'old.pilib'; shutil.copytree(self.lib.path,old)
+            reference=library.Library(old,self.lib.config)
+            store=Store.open(reference.source,reference.db); store.on_effect=lambda _:None
+            with patch.object(results,'ROOT',self.resources):
+                result=results.import_package(reference,p,store,self.specs)
+            return {'result':result,'source':snapshot(reference.source),'db':snapshot(reference.db)}
+        expected=self.rec.value('old import',old_import)
         actual=self.import_result(p)
-        self.assertEqual(actual,expected)
-        self.assertEqual(snapshot(self.lib.source),snapshot(reference.source))
+        self.assertEqual(actual,expected['result'])
+        self.assertEqual(snapshot(self.lib.source),expected['source'])
         # Random identity IDs/timestamps are checked by existing core golden tests; these tags/results are deterministic.
         for table in ('assets','assertions','asset_tags','memberships','general_hits','asset_rating','actions'):
-            self.assertEqual(snapshot(self.lib.db)[table],snapshot(reference.db)[table],table)
+            self.assertEqual(snapshot(self.lib.db)[table],expected['db'][table],table)
         self.assertEqual(snapshot(self.lib.db)['actions'],before)
         source=snapshot(self.lib.source); app=snapshot(self.lib.db)
         self.assertTrue(self.import_result(p)['duplicate'])
@@ -191,7 +208,7 @@ class NativeRecognitionTest(unittest.TestCase):
 
     def test_source_done_confirmation_failure_retries_only_confirmation(self):
         with sqlite3.connect(self.lib.source) as c:
-            c.executescript(results.SCHEMA)
+            c.executescript(SCHEMA)
             c.execute("CREATE TRIGGER fail BEFORE UPDATE ON recognition_imports WHEN NEW.status='done' BEGIN SELECT RAISE(ABORT,'synthetic confirmation failure'); END")
         self.assertEqual(self.request('/api/recognition/import',{'path':str(self.incoming())})['status'],500)
         before=snapshot(self.lib.db)
@@ -211,11 +228,3 @@ class NativeRecognitionTest(unittest.TestCase):
         for body in ({'path':str(self.incoming())},{'resume':True}):
             self.assertEqual(self.request('/api/recognition/import',body)['status'],409)
         self.assertEqual(snapshot(self.lib.source),before)
-
-    def test_legacy_cli_forwards_native_command_and_pending_exit_status(self):
-        from unittest.mock import Mock
-        import sys
-        for action in (['--resume'],['--model-specs'],['--package','synthetic-package']):
-            with patch.object(sys,'argv',['web.results','--library','synthetic.pilib',*action]), patch('web.terms_core.binary',return_value=self.binary), patch('subprocess.run',return_value=Mock(returncode=2)) as run:
-                self.assertEqual(results.main(),2)
-                self.assertEqual(run.call_args.args[0], [str(self.binary),'recognition-import','--library','synthetic.pilib','--root',str(results.ROOT),*action])

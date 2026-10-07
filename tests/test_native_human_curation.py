@@ -1,6 +1,7 @@
 """M2 artist/curation/fold/preferences acceptance on independent synthetic packages.
 
-Python 3.12 constructs the shared seed and runs the real Server(None) reference consumer.
+The former Python reference (seed and Server) is replayed from fixed recordings
+(tests/reference_replay.py, #9).
 An explicit new release is mandatory; missing binary skips do not count as acceptance.
 Success responses compare original status/bytes/headers; errors compare status only.
 The harness also compares raw DDL, all typed cells
@@ -16,7 +17,7 @@ import unittest
 from tests import test_native_human_labels as labels
 from tests.test_native_human_labels import snapshot, states
 from tools.verify_read_http import fetch
-from web.store import Store
+from tests.reference_replay import RECORD
 
 
 class NativeHumanCurationTest(unittest.TestCase):
@@ -31,15 +32,17 @@ class NativeHumanCurationTest(unittest.TestCase):
     stop = labels.NativeHumanLabelsTest.stop
     seed_both = labels.NativeHumanLabelsTest.seed_both
     undo_latest = labels.NativeHumanLabelsTest.undo_latest
+    latest_action = labels.NativeHumanLabelsTest.latest_action
+    reference_response = labels.NativeHumanLabelsTest.reference_response
+    build_reference_seed = labels.NativeHumanLabelsTest.build_reference_seed
+    start_reference = labels.NativeHumanLabelsTest.start_reference
 
     def pair(self, url, body, *, expected=200, headers=None):
-        before = [states(lib) for lib in (self.left, self.right)]
-        responses = [fetch(base, {'url': url, 'method': 'POST',
-                                'body': json.dumps(body, ensure_ascii=False).encode('utf-8'),
-                                'headers': {'Content-Type': 'application/json', 'X-CSRF-Token': self.token,
-                                            **(headers or {})}}, self.origin)
-                     for base in (self.direct, self.origin)]
-        after = [states(lib) for lib in (self.left, self.right)]
+        item = {'url': url, 'method': 'POST', 'body': json.dumps(body, ensure_ascii=False).encode('utf-8'),
+                'headers': {'Content-Type': 'application/json', 'X-CSRF-Token': self.token, **(headers or {})}}
+        before = [self.rec.state('before', self.left), states(self.right)]
+        responses = [self.reference_response('response', item), fetch(self.origin, item, self.origin)]
+        after = [self.rec.state('after', self.left), states(self.right)]
         for old, new, response in zip(before, after, responses):
             self.assertEqual(response['status'], expected, (url, body, response['body']))
             if response['status'] >= 400:
@@ -80,8 +83,8 @@ class NativeHumanCurationTest(unittest.TestCase):
             self.merged = store.create_entity('Synthetic merged')['id']
             store.merge(self.merged, self.alice)
         self.seed_both(augment)
-        self.assertEqual(states(self.left), states(self.right))
-        with closing(sqlite3.connect(self.left.db)) as c:
+        self.work, self.merged = self.rec.value('augmented ids', lambda: (self.work, self.merged))
+        with closing(sqlite3.connect(self.right.db)) as c:
             self.assertEqual(c.execute('SELECT count(*) FROM assets').fetchone()[0], 9)
             self.assertEqual(c.execute('PRAGMA foreign_key_check').fetchall(), [])
 
@@ -89,7 +92,7 @@ class NativeHumanCurationTest(unittest.TestCase):
         answer = self.pair('/api/artist/verdict', {'ids': ['missing', 'b', 'b'], 'artist': self.artist,
                                                  'verdict': 'yes', 'name': ' 合成画师\n'})
         self.assertEqual(answer['undo']['label'], '已确认 1 张是  合成画师\n 画的')
-        with self.store.connect() as c:
+        with closing(sqlite3.connect(self.right.db)) as c:
             verdicts = c.execute("SELECT a.key,v.verdict FROM term_effective_verdicts v JOIN term_assets a ON a.id=v.asset_id JOIN terms t ON t.id=v.term_id WHERE t.key=?", (self.artist,)).fetchall()
             self.assertEqual([tuple(row) for row in verdicts], [('b', 'yes')])
         self.pair('/api/artist/verdict', {'ids': ['a'], 'artist': self.artist, 'verdict': 'no', 'name': 3})
@@ -99,6 +102,7 @@ class NativeHumanCurationTest(unittest.TestCase):
 
     def test_curate_ascii_history_order_and_bulk_excluded_rowids_on_undo(self):
         def rules(store):
+            from web.store import Store
             with store.connect() as c:
                 c.executemany("INSERT INTO auto_rules(uuid,kind,reason) VALUES (?,'exclude','synthetic')", [('a',), ('b',)])
                 Store._refresh_excluded(c)
@@ -129,7 +133,7 @@ class NativeHumanCurationTest(unittest.TestCase):
             return c.execute('SELECT rowid,uuid FROM excluded ORDER BY rowid').fetchall()
 
     def test_fold_hash_union_relationship_order_rep_ties_and_mixed_memberships(self):
-        history = snapshot(self.left.db)['actions']
+        history = snapshot(self.right.db)['actions']
         self.pair('/api/fold', {'kinds': []})
         self.assert_duplicates(['d', 'e'], 'hash-two', 'd', hidden=set())
         self.assert_duplicates(['g', 'h'], 'hash-three', 'g', hidden={'h'})
@@ -144,7 +148,7 @@ class NativeHumanCurationTest(unittest.TestCase):
         self.seed_both(reverse_relations)
         self.pair('/api/fold', {'kinds': ['edit', 'crop']})
         self.assert_duplicates(['d', 'e', 'f', 'g', 'h'], 'hash-three', 'g', hidden=set())
-        self.assertEqual(snapshot(self.left.db)['actions'], history)
+        self.assertEqual(snapshot(self.right.db)['actions'], history)
         # A valid older source without stable_hash follows relations only, without source writes.
         def no_hash(store):
             with closing(sqlite3.connect(self.left.source)) as c:
@@ -153,7 +157,7 @@ class NativeHumanCurationTest(unittest.TestCase):
         self.seed_both(no_hash)
         self.pair('/api/fold', {'kinds': ['crop', 'edit']})
         self.assert_duplicates(['e', 'f', 'g'], 'sim:e', 'g', hidden=set())
-        self.assertEqual(snapshot(self.left.db)['actions'], history)
+        self.assertEqual(snapshot(self.right.db)['actions'], history)
 
     def assert_duplicates(self, ids, group, representative, hidden):
         with closing(sqlite3.connect(self.right.db)) as c:
@@ -165,9 +169,9 @@ class NativeHumanCurationTest(unittest.TestCase):
         self.assertEqual({row[0] for row in rows if row[5]}, hidden)
 
     def test_fold_has_no_action_or_event_history(self):
-        before = snapshot(self.left.db)
+        before = snapshot(self.right.db)
         self.pair('/api/fold', {'kinds': ['identical', 'duplicate', 'identical']})
-        after = snapshot(self.left.db)
+        after = snapshot(self.right.db)
         for table in ('actions', 'backend_effects'):
             self.assertEqual(before[table], after[table])
 
@@ -180,8 +184,9 @@ class NativeHumanCurationTest(unittest.TestCase):
         self.pair('/api/undo', {'id': first['id']}, expected=400)
         for _ in range(3):
             self.undo_latest()
-        self.assertEqual(self.store.prefs(), {'pins': [self.bob]})
-        self.assertEqual(self.store.fold_kinds(), ['crop'])
+        prefs, kinds = self.rec.value('reference preferences', lambda: (self.store.prefs(), self.store.fold_kinds()))
+        self.assertEqual(prefs, {'pins': [self.bob]})
+        self.assertEqual(kinds, ['crop'])
 
     def test_parameter_validation_selection_confirmation_and_error_order(self):
         artist = {'artist': self.artist, 'verdict': 'yes'}

@@ -45,16 +45,16 @@ regex = "=1.13.1"
 httpdate = "=1.0.3"
 serde_path_to_error = "0.1"
 
-# Legacy transport exists only in an explicitly built test example, never the shipped CLI.
+# The core read host for read-route tests exists only in an explicitly built example, never the shipped CLI.
 [features]
-test-reference-host = []
+test-read-host = []
 
 [build-dependencies]
 cc = "=1.5.1"
 
 [[example]]
-name = "reference-http"
-required-features = ["test-reference-host"]
+name = "read-http"
+required-features = ["test-read-host"]
 
 # The replay tests (tests/replay.rs) hash every table after each recorded call; an unoptimised
 # bundled SQLite makes that the slowest part of `cargo test`.
