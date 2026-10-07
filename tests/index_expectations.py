@@ -78,7 +78,10 @@ def legacy(test,root):
         # Entries hold the folder after the run, which rewrites the character index and adds outputs;
         # the plan, album map and features it only reads tell the inputs apart.
         decisive=lambda name:name in ('char-patch/plan.json','album-char-map.json','full-features.npy','full-manifest.csv')
-        matches=[e for e in entries if all(e['files'].get(name)==data for name,data in now.items() if decisive(name))]
+        # The Windows recording spells names with \\ and text inputs with CRLF.
+        same=lambda files:{name.replace('\\','/'):({'text':data['text'].replace('\r\n','\n')} if 'text' in data else data)
+                           for name,data in files.items()}
+        matches=[e for e in entries if all(same(e['files']).get(name)==data for name,data in now.items() if decisive(name))]
         if not matches:
             raise AssertionError('no recorded old index run for this input folder')
         entry=matches[0]
