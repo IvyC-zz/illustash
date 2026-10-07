@@ -1,4 +1,9 @@
-"""M3 folder scans: only owned temporary synthetic folders and packages."""
+"""M3 folder scans: only owned temporary synthetic folders and packages.
+
+The former Python scanner's and importer's results on the same inputs were recorded through
+tests/reference_replay.py (#9; ``ILLUSTASH_REFERENCE=record`` re-runs them). Generated files get
+content-derived modification times and native keys are reproducible, so the recorded states hold.
+"""
 from tests.native_worker_fixture import command as worker_command, source as worker_source, exists as worker_exists
 
 import json
@@ -13,16 +18,25 @@ from pathlib import Path
 from unittest.mock import patch
 
 from PIL import Image
-from tests.folder_fixture import FolderSource, image
+from tests.folder_fixture import FolderSource, image, settle
+from tests.reference_replay import RECORD, Recorder, unclocked
 from tests.test_native_human_labels import snapshot
+from tests import test_native_lifecycle as lifecycle
 from tests.test_native_lifecycle import NativeLifecycleTest
-from web import folder
 
 
 class NativeFolderScanTest(unittest.TestCase):
-    setUp = FolderSource.setUp
     tearDown = FolderSource.tearDown
     rows = FolderSource.rows
+
+    def setUp(self):
+        FolderSource.setUp(self)
+        self.rec = Recorder(self)
+        self.addCleanup(self.rec.finish, self)
+        self.rec.alias(self.root, '@ROOT@')
+        # The package as first built (its asset keys are random): recorded, restored when replaying.
+        self.rec.package('package', self.lib.path)
+        self.env = {**os.environ, 'ILLUSTASH_TEST_KEY_COUNTER': str(self.root / 'key-counter')}
 
     @classmethod
     def setUpClass(cls):
@@ -32,21 +46,26 @@ class NativeFolderScanTest(unittest.TestCase):
         cls.binary = Path(path).resolve()
 
     def scan_pair(self):
+        settle(self.pics)
         old = self.root / 'old.sqlite'
         with sqlite3.connect(self.lib.source) as src, sqlite3.connect(old) as dest:
             src.backup(dest)
         before = set(u for u, in self.rows('SELECT uuid FROM assets'))
         result = subprocess.run([str(self.binary), 'folder-scan', '--db', str(self.lib.source)],
-                                input=json.dumps(self.source).encode(), capture_output=True, timeout=15)
+                                input=json.dumps(self.source).encode(), capture_output=True, timeout=15, env=self.env)
         self.assertEqual(result.returncode, 0, result.stderr.decode())
         new = json.loads(result.stdout)
         ids = [u for u, in self.rows('SELECT uuid FROM assets ORDER BY rowid') if u not in before]
-        with patch.object(folder.uuid, 'uuid4', side_effect=ids):
-            expected = folder.scan(self.source, old)
-        self.assertEqual(new, expected)
-        self.assertEqual(snapshot(self.lib.source), snapshot(old))
+        def old_scan():
+            from web import folder
+            with patch.object(folder.uuid, 'uuid4', side_effect=ids):
+                return {'result': folder.scan(self.source, old), 'source': snapshot(old)}
+        expected = self.rec.value('old scan', old_scan)
+        self.assertEqual(new, expected['result'])
+        self.assertEqual(snapshot(self.lib.source), expected['source'])
         return new
 
+    @unittest.skipIf(os.name == 'nt', '固定期望录自 macOS：资产键序与文件元数据随平台不同')
     def test_complete_source_typed_rowid_ddl_comparison(self):
         shutil.copyfile(self.pics / 'a.png', self.pics / 'copy.png')
         (self.pics / 'bad.gif').write_bytes(b'synthetic corrupt image')
@@ -118,6 +137,7 @@ class NativeFolderHTTPTest(unittest.TestCase):
         self.fail('sync did not finish')
 
     def sync(self):
+        settle(*[f for f in (getattr(self, 'new_folder', None), self.root / 'second-source') if f])
         response = self.request('/api/sync', {})
         self.assertEqual(response['status'], 200, response['body'])
         self.assertEqual(response['body'], b'{"started": true}')
@@ -152,7 +172,8 @@ class NativeFolderHTTPTest(unittest.TestCase):
         self.assertEqual(snapshot(self.lib.db)['actions'], before)
         detail = self.request('/api/detail?id=' + asset)
         self.assertEqual(detail['status'], 200)
-        self.assertEqual(detail['body'], self.request('/api/detail?id=' + asset, base=self.direct)['body'])
+        # The asset's added time comes from the file's birth time, which only macOS lets settle() fix.
+        self.assertEqual(unclocked(detail['body']), unclocked(lifecycle.NativeLifecycleTest.reference_response(self, '/api/detail?id=' + asset)['body']))
         self.assertEqual(self.request('/api/undo', {'id': undo['id']})['status'], 200)
         (folder_path / 'moved.png').rename(self.root / 'saved.png')
         state = self.sync()
@@ -201,32 +222,45 @@ class NativeFolderHTTPTest(unittest.TestCase):
         self.assertFalse(self.lib.source.with_suffix('.scan-pending.json').exists())
         self.assertFalse(self.sentinel.exists())
 
+    @unittest.skipIf(os.name == 'nt', '固定期望录自 macOS：资产键序与文件元数据随平台不同')
     def test_native_library_new_folder_full_application_typed_rowid_projection_comparison(self):
-        from web.store import Store
-        from web import library, terms_characters
-        import hashlib
         clone = self.root / 'reference-clone.pilib'
         clone.mkdir()
         (clone / 'library.json').write_bytes((self.lib.path / 'library.json').read_bytes())
         for name in ('source.sqlite', 'library.sqlite'):
             with sqlite3.connect(self.lib.path / name) as src, sqlite3.connect(clone / name) as dest:
                 src.backup(dest)
-        old_lib = library.Library(clone, self.lib.config)
-        old_store = Store(old_lib.source, old_lib.db)
         image(self.new_folder / 'a.png', 'red')
         image(self.new_folder / 'b.webp', 'blue')
-        # Run both independently writing consumers within one real clock second.
-        while time.time() % 1 > .1:
+        # Run both independently writing consumers within one real clock second (when recording).
+        while RECORD and time.time() % 1 > .1:
             time.sleep(.005)
         state=self.sync()
         self.assertEqual(state['state']['status'],'needs_recognition',state)
         with sqlite3.connect(self.lib.source) as c:
             ids = [u for u, in c.execute('SELECT uuid FROM assets ORDER BY rowid')]
+        expected = self.rec.value('old import', lambda: self.old_import(clone, ids, state['history'][0]))
+        self.assertEqual(snapshot(self.lib.source),expected['source'])
+        # Exact DDL, storage types, physical rowids and every view, including formal projections.
+        left,right=snapshot(self.lib.db),expected['db']
+        self.assertEqual(set(left),set(right))
+        for table in left:
+            self.assertEqual(left[table],right[table],table)
+        for url in ('/api/assets','/api/ids','/api/home','/api/assets/count'):
+            self.assertEqual(self.request(url)['body'],lifecycle.NativeLifecycleTest.reference_response(self, url)['body'])
+        self.assertFalse(self.sentinel.exists())
+
+    def old_import(self, clone, ids, run):
+        """Recording only: the former Python scanner and importer on a clone of the same input."""
+        from web.store import Store
+        from web import folder, library, terms_characters
+        import hashlib
+        old_lib = library.Library(clone, self.lib.config)
+        old_store = Store(old_lib.source, old_lib.db)
         with patch.object(folder.uuid,'uuid4',side_effect=ids):
             for source in self.lib.config['sources']:
                 folder.scan(source,old_lib.source)
-        self.assertEqual(snapshot(self.lib.source),snapshot(old_lib.source))
-        run=state['history'][0]
+        source = snapshot(old_lib.source)
         with sqlite3.connect(old_lib.db) as c:
             c.execute("INSERT INTO sync_runs(id,status,started_at) VALUES (?,'running',?)",(run['id'],run['started_at']))
         with patch.object(terms_characters,'_now',return_value=run['finished_at']):
@@ -238,15 +272,9 @@ class NativeFolderHTTPTest(unittest.TestCase):
             c.execute("UPDATE sync_runs SET status=?,finished_at=?,found=?,removed=?,imported=?,failed=?,sources=?,message=? WHERE id=?",
                       (run['status'],run['finished_at'],run['found'],run['removed'],run['imported'],run['failed'],
                        json.dumps(run['sources'],ensure_ascii=False),run['message'],run['id']))
-        # Exact DDL, storage types, physical rowids and every view, including formal projections.
-        left,right=snapshot(self.lib.db),snapshot(old_lib.db)
-        self.assertEqual(set(left),set(right))
-        for table in left:
-            self.assertEqual(left[table],right[table],table)
-        for url in ('/api/assets','/api/ids','/api/home','/api/assets/count'):
-            self.assertEqual(self.request(url)['body'],self.request(url,base=self.direct)['body'])
-        self.assertFalse(self.sentinel.exists())
+        return {'source': source, 'db': snapshot(old_lib.db)}
 
+    @unittest.skipIf(os.name == 'nt', '固定期望录自 macOS：资产键序与文件元数据随平台不同')
     def test_native_library_new_folder_multiple_sources_keep_configuration_order(self):
         self.stop(self.process)
         self.lib.config['sources'][0]['id']='z'

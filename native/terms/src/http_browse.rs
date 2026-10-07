@@ -1033,7 +1033,7 @@ mod tests {
         }
     }
     #[test]
-    fn query_only_groups_match_python_store_raw_json() {
+    fn query_only_groups_match_recorded_python_store_raw_json() {
         let path = std::env::temp_dir().join(format!(
             "illustash-browse-groups-{}-{}.sqlite",
             std::process::id(),
@@ -1055,44 +1055,8 @@ mod tests {
             Ok(Json::object([("name", id.into())]).dump())
         })
         .unwrap();
-        let repo = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-        let local = repo.join(".venv/bin/python");
-        let python = std::env::var("ILLUSTASH_TEST_PYTHON").unwrap_or_else(|_| {
-            if local.exists() {
-                local.to_string_lossy().into_owned()
-            } else {
-                "python3".into()
-            }
-        });
-        let result = std::process::Command::new(python)
-            .current_dir(repo)
-            .env("PYTHONUTF8", "1")
-            .args([
-                "-c",
-                r#"
-import sys,sqlite3,json
-from contextlib import contextmanager
-from tests import reference
-from web.store import Store
-store=Store.__new__(Store)
-@contextmanager
-def connect():
- c=sqlite3.connect(sys.argv[1]);c.row_factory=sqlite3.Row
- try:yield c
- finally:c.close()
-store.connect=connect
-store._display_reader=lambda c,ids:lambda row,skin=False:{**dict(row),'name':row['id']}
-out=[]
-for nsfw in ('','hide','only'):
- out.append(store.clusters(nsfw))
- for kind in ('','identical','subtle','edit'):out.append(store.similar_groups(kind,nsfw))
-sys.stdout.buffer.write(json.dumps(out,ensure_ascii=False).encode('utf-8'))
-"#,
-            ])
-            .arg(&path)
-            .output()
-            .unwrap();
-        assert!(result.status.success(), "{}", String::from_utf8_lossy(&result.stderr));
+        // The former Python Store's clusters()/similar_groups() bytes on this database, recorded once (#9).
+        let expected = include_bytes!("../tests/fixtures/json/browse_groups.json");
         let tx = c.transaction().unwrap();
         let mut actual = Vec::new();
         for nsfw in ["", "hide", "only"] {
@@ -1101,7 +1065,7 @@ sys.stdout.buffer.write(json.dumps(out,ensure_ascii=False).encode('utf-8'))
                 actual.push(similar_groups(&tx, kind, nsfw).unwrap());
             }
         }
-        assert_eq!(Json::Array(actual).dump().as_bytes(), result.stdout.as_slice());
+        assert_eq!(Json::Array(actual).dump().as_bytes(), expected.as_slice());
         tx.commit().unwrap();
         drop(c);
         std::fs::remove_file(path).unwrap();

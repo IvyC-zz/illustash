@@ -4,9 +4,9 @@
 
 ## 开发检查与完整入口
 
-开发 worktree 先跑新改测试和相关定向检查。`tools/check_all.sh` 先验证测试文件语法及验收工具合成测试，再执行 crates/core 与 crates/platform 独立 fmt/clippy/test/locked build、宿主 fmt/clippy、JS、桌面 clippy/test，随后执行原有 Rust、release 构建、Python discover 和空 PATH 契约重放。覆盖、失败即退出、跳过白名单不变。构建前只运行固定的测试语法、验收工具合成测试等纯轻量项。任意指定的定向测试使用 `CHECK_ALL_TARGETED_TESTS='tests.test_native_http.TestCase'`（使用完整模块路径，在仓库根执行，以实际类名为准），在本轮候选 release 核心、参考宿主及 IQDB 准备完成并设置二进制路径之后、Python discover 之前运行；输出候选 head，不提前读取旧 target。旧变量 `CHECK_ALL_PREFLIGHT_TESTS` 非空时明确退出 2，不静默改变其含义。额外定向结果不能代替全量，也不缩小 discover 的覆盖。
+开发 worktree 先跑新改测试和相关定向检查。`tools/check_all.sh` 先验证测试文件语法及验收工具合成测试，再执行 crates/core 与 crates/platform 独立 fmt/clippy/test/locked build、宿主 fmt/clippy、JS、桌面 clippy/test，随后执行原有 Rust、release 构建、Python discover 和空 PATH 契约重放。覆盖、失败即退出、跳过白名单不变。构建前只运行固定的测试语法、验收工具合成测试等纯轻量项。任意指定的定向测试使用 `CHECK_ALL_TARGETED_TESTS='tests.test_native_http.TestCase'`（使用完整模块路径，在仓库根执行，以实际类名为准），在本轮候选 release 核心、测试读宿主及 IQDB 准备完成并设置二进制路径之后、Python discover 之前运行；输出候选 head，不提前读取旧 target。旧变量 `CHECK_ALL_PREFLIGHT_TESTS` 非空时明确退出 2，不静默改变其含义。额外定向结果不能代替全量，也不缩小 discover 的覆盖。
 
-当前候选的 `reference-http`、`recognition-compute`、`index-compute`、`research-compute`、`relation-probe`、`provenance-compute` examples 在本轮 release 构建中显式准备，再导出各自 `ILLUSTASH_*_BIN`；研究/索引安装适配器同样显式指向本轮 `illustash-worker`。本地与 CI 使用相同接线，缺产物不能靠测试默认跳过形成通过。模型的专项授权及平台证据仍单列。
+当前候选的 `read-http`、`recognition-compute`、`index-compute`、`research-compute`、`relation-probe`、`provenance-compute` examples 在本轮 release 构建中显式准备，再导出各自 `ILLUSTASH_*_BIN`；研究/索引安装适配器同样显式指向本轮 `illustash-worker`。本地与 CI 使用相同接线，缺产物不能靠测试默认跳过形成通过。模型的专项授权及平台证据仍单列。
 
 直接执行 `tools/check_all.sh` 仍要求已提交的干净候选，运行期间 head/已跟踪文件保持不变。验收工具合成测试的前置与全量都使用 `unittest -b` 捕获模式，文本捕获器不提供二进制输出流时仍保留原始完整日志及其摘要。脚本独立执行不会生成可复用签名记录。缓存速度没有固定承诺。
 

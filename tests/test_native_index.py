@@ -12,8 +12,8 @@ import time
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from tests import test_native_lifecycle as lifecycle
+from tests.reference_replay import RECORD, unclocked
 from tests.test_native_human_labels import snapshot
-from web.index_update import IndexUpdater
 
 WORKER = r'''#!/usr/bin/env PYTHON
 import json, sqlite3, sys, time
@@ -81,7 +81,10 @@ class NativeIndexTest(unittest.TestCase):
         self.remote=ThreadingHTTPServer(('127.0.0.1',0),Handler);t=threading.Thread(target=self.remote.serve_forever,daemon=True);t.start()
         self.addCleanup(t.join);self.addCleanup(self.remote.server_close);self.addCleanup(self.remote.shutdown)
         self.env.update(ILLUSTASH_COPYRIGHT_BASE=f'http://127.0.0.1:{self.remote.server_port}',ILLUSTASH_INDEX_WORKER=worker_command(worker))
-        self.work=self.store.edit_work('create',name='合成作品',tag='example')['id']
+        if RECORD:
+            self.work=self.store.edit_work('create',name='合成作品',tag='example')['id']
+        self.lib=self.rec.package('work',self.lib.path)
+        self.work=self.rec.value('work',lambda:self.work)
         (self.shared/'char-index').mkdir()
         (self.shared/'char-patch').mkdir(exist_ok=True)
         (self.shared/'char-patch/watch.json').write_text(json.dumps({'version':2,'works':[self.work],'pending_tags':[],'min_posts':100}))
@@ -147,7 +150,8 @@ class NativeIndexTest(unittest.TestCase):
         self.assertEqual(self.index({'action':'watch','works':[self.work],'min_posts':150})['watch']['min_posts'],150)
         self.assertEqual(shared_file.read_bytes(),legacy)
         with sqlite3.connect(self.lib.db) as c:self.assertEqual(json.loads(c.execute("SELECT value FROM prefs WHERE key='index_watch'").fetchone()[0])['works'],[self.work])
-        other,store=self.package('other');other_work=store.edit_work('create',name='另一部合成作品',tag='other_example')['id']
+        other,store=self.package('other',lambda store:setattr(self,'other_work',store.edit_work('create',name='另一部合成作品',tag='other_example')['id']))
+        other_work=self.rec.value('other work',lambda:self.other_work)
         self.stop(self.process);self.process,self.log=self.start(other.path,extra=('--no-index-check',))
         self.token=json.loads(self.request('/api/bootstrap')['body'])['token']
         self.assertEqual(self.index()['watch'],{'version':2,'works':[],'pending_tags':[],'min_posts':100})
@@ -221,19 +225,27 @@ class NativeIndexTest(unittest.TestCase):
         count=len(self.calls);time.sleep(1.2);self.assertEqual(len(self.calls),count)
 
     def test_deterministic_get_and_progress_bytes_match_reference(self):
-        from web import index_update
-        from unittest.mock import patch
-        # Reference has its own shared state; timings are copied only to compare wire shape.
-        old=self.root/'reference-index';old.mkdir()
-        with patch.object(index_update,'shared_dir',return_value=old): reference=IndexUpdater(self.store)
-        (old/'char-patch').mkdir()
-        watch=self.index()['watch'];(old/'char-patch/watch.json').write_text(json.dumps(watch))
-        self.assertEqual(self.request('/api/index')['body'],json.dumps(reference.info(),ensure_ascii=False).encode())
+        # The former Python updater's bytes are recorded (tests/reference_replay.py); it had its own
+        # shared state and the native timings were copied into it, so times compare as <clock>.
+        reference=None
+        if RECORD:
+            from web import index_update
+            from unittest.mock import patch
+            old=self.root/'reference-index';old.mkdir()
+            with patch.object(index_update,'shared_dir',return_value=old): reference=index_update.IndexUpdater(self.store)
+            (old/'char-patch').mkdir()
+        watch=self.index()['watch']
+        if RECORD:
+            (old/'char-patch/watch.json').write_text(json.dumps(watch))
+        info=lambda:json.dumps(reference.info(),ensure_ascii=False)
+        self.assertEqual(self.request('/api/index')['body'].decode(),self.rec.value('info',info))
         self.check();v=self.index()
-        reference.state={'status':'checked','started_at':v['state']['started_at'],'found':v['state']['found'],'finished_at':v['state']['finished_at']}
-        reference._write('check.json',v['check'])
-        self.assertEqual(self.request('/api/index')['body'],json.dumps(reference.info(),ensure_ascii=False).encode())
-        self.assertEqual(self.request('/api/index?progress=1')['body'],json.dumps(reference.progress(),ensure_ascii=False).encode())
+        if RECORD:
+            reference.state={'status':'checked','started_at':v['state']['started_at'],'found':v['state']['found'],'finished_at':v['state']['finished_at']}
+            reference._write('check.json',v['check'])
+        self.assertEqual(unclocked(self.request('/api/index')['body'].decode()),unclocked(self.rec.value('checked info',info)))
+        self.assertEqual(unclocked(self.request('/api/index?progress=1')['body'].decode()),
+                         unclocked(self.rec.value('progress',lambda:json.dumps(reference.progress(),ensure_ascii=False))))
 
     def test_real_bundled_calculation_worker_native_download_and_import(self):
         import numpy as np
@@ -323,6 +335,19 @@ class NativeIndexTest(unittest.TestCase):
         self.check();self.index({'action':'apply','tags':['carol_example']});self.assertEqual(self.finish()['state']['status'],'done')
 
     def test_apply_source_projection_names_and_history_match_python_chain(self):
+        expected=self.rec.value('python chain',self.python_chain)
+        actual=self.apply();self.assertEqual(actual['state']['status'],'done',actual)
+        for table in ('characters','character_aliases','labels'):
+            with sqlite3.connect(self.lib.source) as b:
+                self.assertEqual(expected['source'][table],sorted(b.execute('SELECT * FROM '+table),key=repr),table)
+        self.assertEqual(expected['projection'],projection(self.lib.db))
+        self.assertEqual(actual['state']['changed'],expected['info']['state']['changed'])
+        a,b=actual['history'][0],expected['info']['history'][0];a.pop('at');b.pop('at')
+        canonical(a,self.lib.db)
+        self.assertEqual(a,b)
+
+    def python_chain(self):
+        """Recording only: the former Python index updater applying the same patch on a clone."""
         from unittest.mock import patch
         from web import index_update
         from web.store import Store
@@ -343,29 +368,32 @@ class NativeIndexTest(unittest.TestCase):
             (root/'char-patch/rejected').mkdir()
             (root/'char-patch/rejected/dani_example.json').write_text(json.dumps({'rejected':'参考图没有一致的主体'}))
             yield {'step':'scan'}
-        with patch.object(index_update,'shared_dir',return_value=root):old=IndexUpdater(store,runner=runner,finder=finder)
+        with patch.object(index_update,'shared_dir',return_value=root):old=index_update.IndexUpdater(store,runner=runner,finder=finder)
         old._write('watch.json',self.index()['watch']);old.start_check();old.thread.join(5);old.start_apply(['carol_example','dani_example']);old.thread.join(5)
-        expected=old.info();actual=self.apply();self.assertEqual(actual['state']['status'],'done',actual)
-        for table in ('characters','character_aliases','labels'):
-            with sqlite3.connect(source) as a,sqlite3.connect(self.lib.source) as b:self.assertEqual(sorted(a.execute('SELECT * FROM '+table),key=repr),sorted(b.execute('SELECT * FROM '+table),key=repr),table)
-        def projection(path):
-            with sqlite3.connect(path) as c:
-                ids=dict(c.execute("SELECT entity_id,system||':'||key FROM links WHERE system IN ('ccip','qualifier')"))
-                def canon(rows):return sorted([tuple(ids.get(v,v) for v in r) for r in rows],key=repr)
-                return {table:canon(c.execute(sql)) for table,sql in {
-                  'names':'SELECT entity_id,lang,value,source,role,preferred,position FROM names',
-                  'links':'SELECT system,key,entity_id,current FROM links',
-                  'memberships':'SELECT uuid,entity,status FROM memberships',
-                  'candidates':'SELECT uuid,entity,score,source FROM candidates',
-                  'assertions':'SELECT uuid,entity,status,origin FROM assertions',
-                  'actions':'SELECT * FROM actions'}.items()}
-        self.assertEqual(projection(app),projection(self.lib.db))
-        self.assertEqual(actual['state']['changed'],expected['state']['changed'])
-        a,b=actual['history'][0],expected['history'][0];a.pop('at');b.pop('at')
-        for h,path in ((a,self.lib.db),(b,app)):
-            with sqlite3.connect(path) as c: ids=dict(c.execute("SELECT entity_id,system||':'||key FROM links WHERE system IN ('ccip','qualifier')"))
-            for r in h['characters']:
-                if r['entity']:
-                    for key in ('id','work_id','character_id','variant_id','canonical_id'):
-                        if key in r['entity']:r['entity'][key]=ids.get(r['entity'][key],r['entity'][key])
-        self.assertEqual(a,b)
+        info=old.info();canonical(info['history'][0],app)
+        with sqlite3.connect(source) as a:
+            tables={table:sorted(a.execute('SELECT * FROM '+table),key=repr) for table in ('characters','character_aliases','labels')}
+        return {'source':tables,'projection':projection(app),'info':info}
+
+
+def projection(path):
+    """Application rows the patch touches, entity ids replaced by their stable links; times as <clock>."""
+    with sqlite3.connect(path) as c:
+        ids=dict(c.execute("SELECT entity_id,system||':'||key FROM links WHERE system IN ('ccip','qualifier')"))
+        def canon(rows):return sorted([tuple(unclocked(ids.get(v,v)) for v in r) for r in rows],key=repr)
+        return {table:canon(c.execute(sql)) for table,sql in {
+          'names':'SELECT entity_id,lang,value,source,role,preferred,position FROM names',
+          'links':'SELECT system,key,entity_id,current FROM links',
+          'memberships':'SELECT uuid,entity,status FROM memberships',
+          'candidates':'SELECT uuid,entity,score,source FROM candidates',
+          'assertions':'SELECT uuid,entity,status,origin FROM assertions',
+          'actions':'SELECT * FROM actions'}.items()}
+
+
+def canonical(history,path):
+    """A history entry's entity ids replaced by their stable links in that library."""
+    with sqlite3.connect(path) as c: ids=dict(c.execute("SELECT entity_id,system||':'||key FROM links WHERE system IN ('ccip','qualifier')"))
+    for r in history['characters']:
+        if r['entity']:
+            for key in ('id','work_id','character_id','variant_id','canonical_id'):
+                if key in r['entity']:r['entity'][key]=ids.get(r['entity'][key],r['entity'][key])

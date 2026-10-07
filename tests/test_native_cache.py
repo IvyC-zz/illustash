@@ -9,6 +9,7 @@ import time
 import unittest
 
 from PIL import Image
+from tests import test_native_lifecycle as lifecycle
 from tests.test_native_lifecycle import NativeLifecycleTest, dump
 from tests.test_native_files import asset, key
 
@@ -35,14 +36,19 @@ class NativeCacheTest(unittest.TestCase):
         before = dump(self.lib.db)
         database_bytes = self.lib.db.read_bytes()
         self.seed()
-        old = self.request('/api/cache', {'action': 'clear'}, base=self.direct)
+        old = lifecycle.NativeLifecycleTest.reference_response(self, '/api/cache', {'action': 'clear'})
         self.seed()
         new = self.request('/api/cache', {'action': 'clear'})
         self.assertEqual(old['status'], 200)
         self.assertEqual(new['status'], 200)
-        self.assertEqual(new['body'], old['body'])
+        # The reference was recorded on POSIX; Windows file names ignore case, so it also removes keep.JPG.
+        recorded, payload = json.loads(old['body']), json.loads(new['body'])
+        if os.name == 'nt':
+            recorded['removed'] = payload['removed']
+            self.assertEqual(payload, recorded)
+        else:
+            self.assertEqual(new['body'], old['body'])
         self.assertEqual(new['route'], 'core')
-        payload = json.loads(new['body'])
         self.assertEqual(payload['removed'], 4 if os.name == 'nt' else 3)
         self.assertEqual(payload['thumbnails']['files'], 0)
         self.assertEqual(payload['thumbnails']['bytes'], 0)
@@ -59,15 +65,15 @@ class NativeCacheTest(unittest.TestCase):
         self.assertFalse(self.lib.thumbnails.exists())
         for body in ({}, {'action': 'bad'}, {'action': None}, {'action': ['clear']}, {'action': 1}):
             self.assertEqual(self.request('/api/cache', body)['status'],
-                             self.request('/api/cache', body, base=self.direct)['status'])
+                             lifecycle.NativeLifecycleTest.reference_response(self, '/api/cache', body)['status'])
         for headers in ({'Host': 'evil.example'}, {'Origin': 'https://evil.example'}):
             self.assertEqual(self.request('/api/cache', {'action': 'clear'}, headers=headers)['status'],
-                             self.request('/api/cache', {'action': 'clear'}, headers=headers, base=self.direct)['status'])
+                             lifecycle.NativeLifecycleTest.reference_response(self, '/api/cache', {'action': 'clear'}, headers=headers)['status'])
         self.assertEqual(self.request('/api/cache', {'action': 'clear'}, token='bad')['status'], 403)
         self.lib.thumbnails.mkdir()
         (self.lib.thumbnails / 'cannot-unlink.jpg').mkdir()
         self.assertEqual(self.request('/api/cache', {'action': 'clear'})['status'],
-                         self.request('/api/cache', {'action': 'clear'}, base=self.direct)['status'])
+                         lifecycle.NativeLifecycleTest.reference_response(self, '/api/cache', {'action': 'clear'})['status'])
         self.assertEqual(self.request('/api/cache', {'action': 'clear'})['status'], 500)
         self.assertTrue((self.lib.thumbnails / 'cannot-unlink.jpg').is_dir())
         self.assertFalse(self.sentinel.exists())

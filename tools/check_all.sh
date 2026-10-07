@@ -57,12 +57,12 @@ run cargo test --locked --manifest-path desktop/Cargo.toml
 run cargo test --locked --manifest-path native/terms/Cargo.toml
 run cargo test --locked --manifest-path crates/iqdb/Cargo.toml
 run cargo build --release --locked --manifest-path native/terms/Cargo.toml
-run cargo build --release --locked --manifest-path native/terms/Cargo.toml --features test-reference-host --example reference-http --example recognition-compute --example index-compute --example research-compute --example relation-probe --example provenance-compute
+run cargo build --release --locked --manifest-path native/terms/Cargo.toml --features test-read-host --example read-http --example recognition-compute --example index-compute --example research-compute --example relation-probe --example provenance-compute
 run cargo build --release --locked --manifest-path crates/iqdb/Cargo.toml
 export ILLUSTASH_TERMS_BIN="$root/native/terms/target/release/illustash-terms"
 export ILLUSTASH_NATIVE_ROOT="$root"
 export ILLUSTASH_IQDB_BINARY="$root/crates/iqdb/target/release/illustash-iqdb"
-export ILLUSTASH_REFERENCE_HTTP_BIN="$root/native/terms/target/release/examples/reference-http"
+export ILLUSTASH_READ_HTTP_BIN="$root/native/terms/target/release/examples/read-http"
 export ILLUSTASH_RECOGNITION_COMPUTE_BIN="$root/native/terms/target/release/examples/recognition-compute"
 export ILLUSTASH_INDEX_COMPUTE_BIN="$root/native/terms/target/release/examples/index-compute"
 export ILLUSTASH_RELATION_PROBE_BIN="$root/native/terms/target/release/examples/relation-probe"
@@ -70,7 +70,7 @@ export ILLUSTASH_PROVENANCE_COMPUTE_BIN="$root/native/terms/target/release/examp
 export ILLUSTASH_RESEARCH_COMPUTE_BIN="$root/native/terms/target/release/examples/research-compute"
 export ILLUSTASH_RESEARCH_ADAPTER_BIN="$root/native/terms/target/release/illustash-worker"
 export ILLUSTASH_INDEX_ADAPTER_BIN="$root/native/terms/target/release/illustash-worker"
-# 依赖核心/参考宿主/IQDB/旧包的定向测试只在本次候选构建后运行。
+# 依赖核心/测试读宿主/IQDB/旧包的定向测试只在本次候选构建后运行。
 if [ -n "${CHECK_ALL_TARGETED_TESTS:-}" ]; then
   printf '构建后定向测试：候选 head=%s；二进制来自本轮固定路径构建。\n' "$head"
   read -r -a targeted_tests <<< "$CHECK_ALL_TARGETED_TESTS"
