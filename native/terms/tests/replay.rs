@@ -307,7 +307,9 @@ fn case(name: &str, calls: &[Value], blobs: &Value, bin: &Path) -> Vec<String> {
     fs::create_dir_all(temp.join("root")).unwrap();
     let counter = temp.join("key-counter");
     fs::write(&counter, "0").unwrap();
-    let base = fs::canonicalize(temp.join("root")).unwrap().to_string_lossy().into_owned();
+    // Windows canonical paths carry a verbatim `\\?\` prefix, which rejects the recorded `/` separators.
+    let base = if cfg!(windows) { temp.join("root") } else { fs::canonicalize(temp.join("root")).unwrap() };
+    let base = base.to_string_lossy().into_owned();
     let text = serde_json::to_string(calls).unwrap();
     let mut tokens: Vec<String> =
         Regex::new(r"@ROOT(?:_\d+)?@").unwrap().find_iter(&text).map(|m| m.as_str().to_owned()).collect();
