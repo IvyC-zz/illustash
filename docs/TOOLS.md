@@ -1,10 +1,10 @@
 # tools/ 目录用途
 
-状态：现行参考，2026-10-05。本文列出 `tools/` 下保留的脚本及用途；保留与删除的依据见 #186，安装包里实际带哪些脚本以 `packaging/build.py` 的白名单为准（见 [后端与安装说明](BACKEND_TASKS.md#独立安装与可选计算包)）。
+状态：现行参考，2026-10-07。本文列出 `tools/` 下保留的脚本及用途；保留与删除的依据见 #186，安装包里实际带哪些脚本以 `packaging/build.py` 的白名单为准（见 [后端与安装说明](BACKEND_TASKS.md#独立安装与可选计算包)）。
 
-## Linux 计算 worker 及其依赖
+## 旧 Python 计算脚本（只作测试参考）
 
-只有 Linux 安装包仍由 `illustash-worker` 调 Python 执行；macOS/Windows 全部原生。
+2026-10-07 起不进任何安装包（Linux 已冻结，见 [README](../README.md)），只被原生计算的对照测试引用；改为固定期望后随 `tests/reference/` 一起删除（#9）。
 
 | 脚本 | 用途 |
 |---|---|
@@ -26,12 +26,4 @@
 | `build_provenance_probe.py`、`windows_acceptance.py`、`windows_research_acceptance.py` | 溯源候选构建、Windows 基础版与研究包验收 |
 | `build_db.py` | 重建旧格式分析源库；`test_native_library_upgrade` 用它造旧库 |
 
-## 研究工具
-
-只在本机研究时手动运行，不进安装包，也不属于任何生产路径。其余研究脚本已于 2026-10-06 移出本仓库。
-
-| 脚本 | 用途 |
-|---|---|
-| `wd_extract.py`、`wd_shard.py` | WD v3 推理与分片；Linux 计算路径仍引用 |
-| `new_character.py`、`strata_report.py` | 补 WD 认不出的角色与分层抽检；测试仍引用 |
-| `fetch_char_index.sh`、`fetch_imgs.sh` | 下载 deepghs/character_index；拉取参考图到本地缓存 |
+研究脚本已全部移出本仓库（2026-10-06、2026-10-07）。

@@ -12,13 +12,14 @@ import sys
 import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
-WEB = 'recognition_worker research_worker research_snapshot research_constants learn relate features similar library infer identity'.split()
-TOOLS = 'index_worker ccip char_patch build_characters char_scan calibrate_classification validation_worksheet'.split()
 RESEARCH_OPENBLAS_IDENTITIES = json.loads((ROOT / 'crates/platform/src/research_openblas.json').read_text())
 
 def copy(source, destination):
     if source.is_symlink():
         raise ValueError(f'symlink resource rejected: {source}')
+    if not source.is_file():
+        # Name the file; Windows CopyFile2 errors do not carry the path.
+        raise FileNotFoundError(f'resource missing: {source}')
     destination.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(source, destination)
 
@@ -41,11 +42,9 @@ def launcher_environment(windows=False):
         for kind in ('research', 'index', 'provenance', 'recognition'):
             lines.append(f'if not defined ILLUSTASH_{kind.upper()}_WORKER set "ILLUSTASH_{kind.upper()}_WORKER=%~dp0bin\\illustash-{kind}.exe"')
         return '\r\n'.join(lines) + '\r\n'
-    shared = ('${HOME:?HOME required}/Library/Application Support/Illustash/Shared' if sys.platform == 'darwin'
-              else '${XDG_DATA_HOME:-${HOME:?HOME required}/.local/share}/Illustash/Shared')
     lines = [': "${ILLUSTASH_ROOT:=$ROOT/resources}"',
              ': "${ILLUSTASH_MODELS:=$ILLUSTASH_ROOT/models}"',
-             f': "${{ILLUSTASH_SHARED:={shared}}}"',
+             ': "${ILLUSTASH_SHARED:=${HOME:?HOME required}/Library/Application Support/Illustash/Shared}"',
              'export ILLUSTASH_ROOT ILLUSTASH_MODELS ILLUSTASH_SHARED']
     for kind in ('research', 'index', 'provenance', 'recognition'):
         key = f'ILLUSTASH_{kind.upper()}_WORKER'
@@ -79,6 +78,9 @@ def stage(destination, binaries, research=False, desktop=None, iqdb=None, models
         raise ValueError('output already exists; choose a new directory')
     if (models or openblas_site or ort_dylib or ort_licenses) and not research:
         raise ValueError('models/runtime require --research')
+    if research and sys.platform not in ('darwin', 'win32'):
+        # Linux is frozen: no computation package ships there (README).
+        raise ValueError('computation packages require macOS or Windows')
     if bool(ort_dylib) != bool(ort_licenses):
         raise ValueError('ORT runtime requires its LICENSE and ThirdPartyNotices.txt directory')
     openblas = None
@@ -108,23 +110,11 @@ def stage(destination, binaries, research=False, desktop=None, iqdb=None, models
         copy(ROOT / 'crates/iqdb/Cargo.lock', destination / 'dependencies/iqdb-Cargo.lock')
         for kind in ('research', 'index', 'provenance', 'recognition'):
             copy(binaries / ('illustash-worker' + suffix), destination / 'bin' / ('illustash-' + kind + suffix))
-        if sys.platform not in ('darwin', 'win32'):
-            # Only Linux adapters still run the Python calculators; macOS/Windows are native.
-            copy(ROOT / 'tags/tags_v3.csv', destination / 'workers/tags/tags_v3.csv')
-            for package, names in (('web', WEB), ('tools', TOOLS)):
-                copy(ROOT / package / '__init__.py', destination / 'workers' / package / '__init__.py')
-                for name in names:
-                    source = ROOT / package / (name + '.py')
-                    copy(source, destination / 'workers' / package / (name + '.py'))
-            for path in sorted((ROOT / 'provenance').rglob('*')):
-                if path.is_file() and path.suffix == '.py':
-                    copy(path, destination / 'workers' / path.relative_to(ROOT))
-            copy(ROOT / 'packaging/requirements-workers.txt', destination / 'workers/requirements.txt')
         if models:
             for name in ('wd_swinv2_v3_emb.onnx', 'ccip/model_feat.onnx', 'ccip/model_metrics.onnx', 'ccip/metrics.json'):
                 copy(models / name, destination / 'resources/models' / name)
         if ort_dylib:
-            library = 'onnxruntime.dll' if sys.platform == 'win32' else ('libonnxruntime.dylib' if sys.platform == 'darwin' else 'libonnxruntime.so')
+            library = 'onnxruntime.dll' if sys.platform == 'win32' else 'libonnxruntime.dylib'
             copy(ort_dylib, destination / 'resources/onnxruntime' / library)
             for name in ('LICENSE', 'ThirdPartyNotices.txt'):
                 copy(ort_licenses / name, destination / 'resources/licenses/onnxruntime' / name)

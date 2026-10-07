@@ -39,7 +39,7 @@ Claude Code 通过 `CLAUDE.md` 引入本文件，Codex 等直接读本文件。�
   4. 只改文档（Markdown，不含脚本、配置和代码注释）的 PR 不跑全量，只检查相对链接。
 - 2026-10-03 用户批准：验收叙述收尾可按有效输入复用完整全量事实，仅限 `docs/acceptance/local-summary.md`；默认其他所有文档均影响指纹。由 `tools/local_acceptance.py` 在固定 detached worktree 串行执行并签名记录，保留原已测 commit/tree 和环境，不冒称新候选已重建。机制合并验证前其他会话不得采用；固定验收区缓存不随开发任务清理。失效规则、候选提交、取结果和释放窗口见 [本地验收](docs/LOCAL_CHECKS.md)。
 - 2026-10-02 用户定：GitHub Actions 仅保留 `workflow_dispatch`，所有实际 job 同时要求运行 ref 为 `refs/heads/main`；推送、开 PR、合并均不自动运行。其他分支在 UI 仍可能被选择并留下跳过的 run 记录，但不执行任务。新分支从最新 main 创建；旧分支合入前必须保留这套事件及 job 限制，不能重新引入自动触发。
-- 本地全量对齐 `.github/workflows/ci.yml`，默认包含原生固定契约空 PATH 重放。升级验收使用 `tests/fixtures/library_upgrade` 中由历史 v5/v6 产出者一次性生成的合成旧图库，不在检查时构建历史版本；升级测试不能跳过。脚本依赖 Python 3.12（`CHECK_ALL_PYTHON` 可指定解释器）、Node 22、Rust stable（含 rustfmt/clippy），Python 依赖与历史构建缓存放在被忽略的 `.venv/check-all/`；Linux 需另装 CI 所列 Tauri 系统依赖，Windows 单列验收。只允许 CI 同样允许的平台限制和真实图库数据缺失跳过，不访问真实图库补齐数据。
+- 本地全量对齐 `.github/workflows/ci.yml`，默认包含原生固定契约空 PATH 重放。升级验收使用 `tests/fixtures/library_upgrade` 中由历史 v5/v6 产出者一次性生成的合成旧图库，不在检查时构建历史版本；升级测试不能跳过。脚本依赖 Python 3.12（`CHECK_ALL_PYTHON` 可指定解释器）、Node 22、Rust stable（含 rustfmt/clippy），Python 依赖与历史构建缓存放在被忽略的 `.venv/check-all/`；只支持 macOS（Linux 已冻结，见 README），Windows 单列验收。只允许 CI 同样允许的平台限制和真实图库数据缺失跳过，不访问真实图库补齐数据。
 - 读不到 GitHub 的代理（禁网沙箱）：由 Lead 把 Issue 正文贴给它，它的进度和结果由 Lead 代写进 PR。
 - 合并到 main、推送标签、关闭别人开的 Issue 由用户决定或明确授权。
 - 每个会话都必须知道的约束写在本文件，不写在 Issue 里：Issue 不会自动进上下文。

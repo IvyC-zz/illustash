@@ -76,91 +76,19 @@ class PackagingTest(unittest.TestCase):
                 self.stop(process)
             self.assertEqual(process.returncode, 0)
 
-    @unittest.skipIf(sys.platform in ('darwin', 'win32'), 'macOS/Windows use the native production dispatcher')
-    def test_relocated_worker_shared_paths_and_legacy_refusal(self):
-        install = self.root / 'relocated worker artifact'
-        build.stage(install, self.binary.parent, research=True,
-                    iqdb=Path(os.environ['ILLUSTASH_IQDB_BINARY']) if os.environ.get('ILLUSTASH_IQDB_BINARY') else None)
-        adapter = install / 'bin' / ('illustash-provenance.exe' if os.name == 'nt' else 'illustash-provenance')
-        # Replace only this test's staged script with an environment probe; no model or real image is read.
-        # Steps the native adapter does not handle still reach the staged Python script
-        # (local provenance steps and recognition's accepted macOS route never read it).
-        (install / 'workers/provenance/native_worker.py').write_text(
-            'import json, os, sys\nfrom pathlib import Path\n'
-            'sys.path.insert(0, str(Path(__file__).resolve().parents[1]))\n'
-            'from web.library import SHARED\n'
-            'Path(sys.argv[2]).write_text(json.dumps({"shared": str(SHARED), "env": os.environ["ILLUSTASH_SHARED"]}))\n')
-        cwd = self.root / 'different cwd'
-        cwd.mkdir()
-        env = {k: v for k, v in self.env.items() if k not in ('ILLUSTASH_ROOT', 'ILLUSTASH_SHARED')}
-        env['ILLUSTASH_WORKER_PYTHON'] = sys.executable
-        response = self.root / 'probe.json'
-        request = self.root / 'fallback-request.json'
-        request.write_text(json.dumps({'step': 'not-a-local-step'}))
-        def probe():
-            return subprocess.run([str(adapter), str(request), str(response)],
-                                  cwd=cwd, env=env, capture_output=True)
-        result = probe()
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(json.loads(response.read_text())['shared'], str((install / 'resources/review').resolve()))
-        env['ILLUSTASH_SHARED'] = 'shared'
-        result = probe()
-        self.assertEqual(result.returncode, 0, result.stderr)
-        expected = str((install / 'resources/shared').resolve())
-        self.assertEqual(json.loads(response.read_text()), {'shared': expected, 'env': expected})
-        old = cwd / 'shared'
-        (old / 'char-index').mkdir(parents=True)
-        response.unlink()
-        result = probe()
-        self.assertEqual(result.returncode, 1)
-        self.assertIn('绝对路径', result.stderr.decode())
-        self.assertFalse(response.exists())
-        self.assertFalse((install / 'resources/shared').exists())
-        env['ILLUSTASH_SHARED'] = str(old)
-        result = probe()
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(json.loads(response.read_text())['shared'], str(old.resolve()))
-
     def test_research_adapter_diagnostics_and_failure(self):
         install = self.root / 'installed research'
         build.stage(install, self.binary.parent, research=True, iqdb=Path(os.environ['ILLUSTASH_IQDB_BINARY']) if os.environ.get('ILLUSTASH_IQDB_BINARY') else None)
-        if sys.platform not in ('darwin', 'win32'):
-            for name in ('store', 'terms_core', 'server', 'results'):
-                self.assertFalse((install / 'workers/web' / (name + '.py')).exists())
-            for name in ('research_snapshot', 'research_constants'):
-                self.assertTrue((install / 'workers/web' / (name + '.py')).is_file())
         adapter = install / 'bin' / ('illustash-research.exe' if os.name == 'nt' else 'illustash-research')
-        env = {k: v for k, v in self.env.items() if k != 'ILLUSTASH_WORKER_PYTHON'}
-        if sys.platform in ('darwin', 'win32'):
-            # No interpreter ships or is configured: readiness and requests stay native.
-            self.assertFalse((install / 'workers').exists())
-            self.assertFalse((install / 'runtime').exists())
-            for kind in ('research', 'provenance'):
-                checked = install / 'bin' / (f'illustash-{kind}.exe' if os.name == 'nt' else f'illustash-{kind}')
-                result = subprocess.run([str(checked), '--check'], env=env, capture_output=True)
-                self.assertEqual(result.returncode, 0, result.stderr)
-            invalid = self.root / 'invalid.json'; invalid.write_text('{}')
-            result = subprocess.run([str(adapter), str(invalid), str(self.root / 'response.json')], env=env, capture_output=True)
-            self.assertNotEqual(result.returncode, 0)
-            self.assertFalse((self.root / 'response.json').exists())
-            self.assertEqual(self.request('/api/assets')['status'], 200)
-            return
-        result = subprocess.run([str(adapter), '--check'], env=env, capture_output=True)
-        self.assertEqual(result.returncode, 1)
-        self.assertIn('ILLUSTASH_WORKER_PYTHON', result.stderr.decode())
-        if os.name != 'nt':
-            env['ILLUSTASH_WORKER_PYTHON'] = str(self.bin / 'python')
-            result = subprocess.run([str(adapter), '--check'], env=env, capture_output=True)
-            self.assertEqual(result.returncode, 97)
-        else:
-            env['ILLUSTASH_WORKER_PYTHON'] = str(self.root / 'missing.exe')
-            result = subprocess.run([str(adapter), '--check'], env=env, capture_output=True)
-            self.assertEqual(result.returncode, 1)
-        env['ILLUSTASH_WORKER_PYTHON'] = sys.executable
-        result = subprocess.run([str(adapter), '--check'], env=env, capture_output=True)
-        self.assertEqual(result.returncode, 0, result.stderr)
+        # No interpreter ships: readiness and requests stay native.
+        self.assertFalse((install / 'workers').exists())
+        self.assertFalse((install / 'runtime').exists())
+        for kind in ('research', 'provenance'):
+            checked = install / 'bin' / (f'illustash-{kind}.exe' if os.name == 'nt' else f'illustash-{kind}')
+            result = subprocess.run([str(checked), '--check'], env=self.env, capture_output=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
         invalid = self.root / 'invalid.json'; invalid.write_text('{}')
-        result = subprocess.run([str(adapter), str(invalid), str(self.root / 'response.json')], env=env, capture_output=True)
+        result = subprocess.run([str(adapter), str(invalid), str(self.root / 'response.json')], env=self.env, capture_output=True)
         self.assertNotEqual(result.returncode, 0)
         self.assertFalse((self.root / 'response.json').exists())
         self.assertEqual(self.request('/api/assets')['status'], 200)
@@ -174,7 +102,6 @@ class InstalledResearchTest(unittest.TestCase):
         install = self.root / 'research artifact'
         build.stage(install, self.binary.parent, research=True, iqdb=Path(os.environ['ILLUSTASH_IQDB_BINARY']) if os.environ.get('ILLUSTASH_IQDB_BINARY') else None)
         self.env['ILLUSTASH_RESEARCH_WORKER'] = str(install / 'bin' / ('illustash-research.exe' if os.name == 'nt' else 'illustash-research'))
-        self.env['ILLUSTASH_WORKER_PYTHON'] = sys.executable
         self.restart()
         self.finished()
     test_real_similar_relate_cluster_and_oc_routes = research.NativeResearchTest.test_real_similar_relate_cluster_and_oc_routes

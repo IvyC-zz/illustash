@@ -77,14 +77,8 @@ class PackagingResourcesTest(unittest.TestCase):
         worker = hashlib.sha256((self.binaries / ('illustash-worker' + suffix)).read_bytes()).hexdigest()
         for kind in ('recognition', 'index', 'research', 'provenance'):
             self.assertEqual(complete['files'][f'bin/illustash-{kind}{suffix}'], worker)
-        if sys.platform in ('darwin', 'win32'):
-            # Every installed macOS/Windows request is native: no Python calculators ship.
-            self.assertFalse(any(name.startswith(('workers/', 'runtime/')) for name in delta))
-        else:
-            # Linux adapters keep the Python calculators.
-            for name in ('web/research_worker.py', 'web/recognition_worker.py',
-                         'tools/index_worker.py', 'provenance/native_worker.py', 'requirements.txt'):
-                self.assertIn('workers/' + name, delta)
+        # Every installed request is native: no Python calculators ship.
+        self.assertFalse(any(name.startswith(('workers/', 'runtime/')) for name in delta))
         self.assertFalse((base / 'workers').exists())
         self.assertFalse((base / 'runtime').exists())
         self.assertFalse((base / 'resources/models').exists())
@@ -245,8 +239,7 @@ class CandidateExampleWiringTest(unittest.TestCase):
             for reason in ('Windows pinned OpenBLAS backend only',
                            'explicit Windows native development calculator only',
                            'explicit Windows development App publication only',
-                           'macOS/Windows use the native production dispatcher',
-                           'Linux retains the legacy production dispatcher'):
+                           'Linux is frozen: no local computation'):
                 self.assertRegex(reason, pattern)
             for reason in ('explicit candidate research calculator/core required',
                            'explicit candidate host and its built worker required',

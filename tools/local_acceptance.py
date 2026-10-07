@@ -32,7 +32,7 @@ TAURI_METADATA = frozenset({
     'desktop/gen/schemas/acl-manifests.json',
     'desktop/gen/schemas/capabilities.json',
     'desktop/gen/schemas/desktop-schema.json',
-    'desktop/gen/schemas/' + ('macOS' if sys.platform == 'darwin' else 'linux') + '-schema.json',
+    'desktop/gen/schemas/macOS-schema.json',
 })
 OUTPUTS = ('.venv/', 'native/terms/target/', 'crates/iqdb/target/', 'crates/core/target/', 'crates/platform/target/', 'desktop/target/')
 
@@ -174,12 +174,9 @@ def environment(root, env):
     for tool in ('rustc', 'cargo', 'rustfmt', 'clippy-driver'):
         path = subprocess.check_output(['rustup', 'which', tool], env=env, cwd=root).decode().strip()
         versions[tool + '-resolved'] = [path, digest(Path(path).read_bytes())]
-    if sys.platform == 'darwin':
-        versions.update(mac_developer_environment(root, env))
-    elif sys.platform.startswith('linux'):
-        versions['tauri-libs'] = probe(['pkg-config', '--modversion', 'webkit2gtk-4.1', 'ayatana-appindicator3-0.1', 'librsvg-2.0', 'xdo'], env, root)
-    else:
-        raise ValueError('仅 macOS/Linux；其他平台不复用。')
+    if sys.platform != 'darwin':
+        raise ValueError('仅 macOS；Linux 已冻结，其他平台不复用。')
+    versions.update(mac_developer_environment(root, env))
     cargo_home = Path(env.get('CARGO_HOME', str(Path.home() / '.cargo')))
     configs = {'git-config': digest(git(root, 'config', '--list', '--show-origin'))}
     for path in (cargo_home / 'config', cargo_home / 'config.toml', Path.home() / '.rustup/settings.toml'):

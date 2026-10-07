@@ -1,6 +1,6 @@
 //! CPU float32 products needed by the existing research matrix calculator.
 //! macOS uses system BLAS; Windows native research requires a fixed
-//! ILP64 OpenBLAS DLL. Linux retains its portable backend and production Python gate.
+//! ILP64 OpenBLAS DLL. Other platforms keep an unaccepted portable loop (Linux is frozen).
 #[cfg(target_os = "windows")]
 mod windows_openblas;
 

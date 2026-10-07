@@ -62,12 +62,7 @@ class NativeResearchComputeTest(unittest.TestCase):
         input_path.write_text(json.dumps(request), encoding='utf-8')
         # Empty PATH proves this calculator itself never delegates learning to Python/a subprocess.
         env = os.environ | dict(PATH='', ILLUSTASH_SHARED=str(anchors), ILLUSTASH_RESEARCH_PROGRESS=str(snapshot / 'progress.json'))
-        # Native calculators never configure Python. The production transition-gate
-        # suite explicitly supplies the legacy interpreter to exercise that path.
-        if getattr(self, 'fallback_python', None):
-            env['ILLUSTASH_WORKER_PYTHON'] = self.fallback_python
-        else:
-            env.pop('ILLUSTASH_WORKER_PYTHON', None)
+        env.pop('ILLUSTASH_WORKER_PYTHON', None)
         result = subprocess.run([str(self.binary), str(input_path), str(output)], env=env,
                                 capture_output=True, timeout=30)
         return result, output, snapshot

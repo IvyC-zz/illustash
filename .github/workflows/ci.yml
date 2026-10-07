@@ -2,13 +2,9 @@
 # 只用仓库内合成数据；不接触真实图库、账号、Photos 或网络凭据。
 name: CI
 
+# Linux 已冻结（README）：除不涉平台的前端 JS 外，全部在 macOS 上运行。
 on:
   workflow_dispatch:
-    inputs:
-      macos:
-        description: 桌面壳检查同时在 macOS 上运行
-        type: boolean
-        default: false
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -25,7 +21,7 @@ jobs:
   core:
     if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
     name: Rust 核心
-    runs-on: ubuntu-latest
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -70,7 +66,7 @@ jobs:
         run: cargo test --locked --manifest-path crates/iqdb/Cargo.toml
 
   # 跑在 macOS arm64：固定快照（tests/golden/terms_c3_*）在 Apple Silicon 上录制，
-  # float32 结果在 x86 上差 1 ulp；另有错误文案、zsh 启动脚本等平台差异。Linux/Windows 另行处理。
+  # float32 结果在 x86 上差 1 ulp；另有错误文案、zsh 启动脚本等平台差异。Windows 另行处理。
   python:
     if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
     name: Python 全量 (macOS)
@@ -138,7 +134,7 @@ jobs:
             echo '```'
             tail -n 3 "$log"
           } >> "$GITHUB_STEP_SUMMARY"
-          allowed="full-features\.npy not present|POSIX|posix|Unix|macOS/Linux only|Windows pinned OpenBLAS backend only|explicit Windows native development calculator only|explicit Windows development App publication only|macOS/Windows use the native production dispatcher|Linux retains the legacy production dispatcher"
+          allowed="full-features\.npy not present|POSIX|posix|Unix|macOS/Linux only|Windows pinned OpenBLAS backend only|explicit Windows native development calculator only|explicit Windows development App publication only|Linux is frozen: no local computation"
           if grep -Ev "$allowed" "$RUNNER_TEMP/skips.txt"; then
             echo "::error::以上跳过不属于平台限制或真实图库数据缺失，CI 中视为未验收"
             exit 1
@@ -157,12 +153,8 @@ jobs:
 
   desktop:
     if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
-    name: 桌面壳 (${{ matrix.os }})
-    strategy:
-      fail-fast: false
-      matrix:
-        os: ${{ fromJSON(inputs.macos && '["ubuntu-latest","macos-latest"]' || '["ubuntu-latest"]') }}
-    runs-on: ${{ matrix.os }}
+    name: 桌面壳 (macOS)
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -171,11 +163,6 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: desktop
-      - name: Tauri 系统依赖
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev
       # 桌面壳格式尚未统一（无 rustfmt.toml，存量代码按 120 列手写），暂不检查 fmt。
       - name: clippy
         run: cargo clippy --locked --manifest-path desktop/Cargo.toml --all-targets -- -D warnings
@@ -186,7 +173,7 @@ jobs:
   contracts:
     if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
     name: 原生固定契约（无 Python）
-    runs-on: ubuntu-latest
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
