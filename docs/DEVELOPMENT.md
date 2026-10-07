@@ -55,7 +55,7 @@ cargo build --release --manifest-path native/terms/Cargo.toml
 
 `packaging/build.py` 按白名单复制资源，生成逐文件 SHA-256 的 `manifest.json` 与依赖清单；`--archive` 出 ZIP，`--binaries` 复用已构建的二进制，`--profile dev` 用调试构建。研究便携形态加 `--research --models PATH`；macOS 与 Windows 另需 `--ort-dylib FILE --ort-licenses DIR`，Windows 还需 `--openblas-site DIR`；桌面形态加 `--desktop PATH`，或加 `--desktop-resources` 后再在 `desktop/` 执行 `cargo tauri build --config ../packaging/tauri-bundle.json`。
 
-2026-10-05 起 macOS 与 Windows 的四类计算适配器（识别、索引、学习/相似、溯源）全部原生执行，包内不带 Python 与计算源码；Linux 包交付计算源码，需显式配置外部 Python 3.12+。完整安装包、平台门槛与依赖边界见 [安装与平台](BACKEND_TASKS.md#独立安装与可选计算包)。
+2026-10-05 起 macOS 与 Windows 的四类计算适配器（识别、索引、学习/相似、溯源）全部原生执行，包内不带 Python 与计算源码；Linux 不提供计算包（已冻结，见 [README](../README.md)）。完整安装包、平台门槛与依赖边界见 [安装与平台](BACKEND_TASKS.md#独立安装与可选计算包)。
 
 ## 图库包
 

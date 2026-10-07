@@ -1,9 +1,5 @@
 //! Installed optional worker adapter. Never enabled by the base application.
-use std::{
-    env,
-    path::PathBuf,
-    process::{Command, ExitCode},
-};
+use std::{env, path::PathBuf, process::ExitCode};
 fn main() -> ExitCode {
     match run() {
         Ok(code) => ExitCode::from(code),
@@ -26,7 +22,6 @@ fn run() -> Result<u8, Box<dyn std::error::Error>> {
         env::set_var("ILLUSTASH_RESEARCH_OPENBLAS_DLL", root.join("openblas/openblas.dll"));
     }
     // The validated macOS/Windows recognition producer owns CPU model execution.
-    // Linux keeps its interpreter until model/math acceptance completes.
     if illustash_terms::recognition_compute::production_adapter_enabled() && kind == "recognition" {
         illustash_terms::recognition_compute::producer::worker(&native_args)?;
         return Ok(0);
@@ -36,9 +31,7 @@ fn run() -> Result<u8, Box<dyn std::error::Error>> {
         return Ok(0);
     }
     // Learning, grouping, similarity/relations and mixed events share one research
-    // dispatcher. Return before Python or installed script/resource setup for a
-    // native request. Windows uses the fixed ILP64 resource; Linux keeps the
-    // legacy calculator.
+    // dispatcher. Windows uses the fixed ILP64 resource.
     if cfg!(any(target_os = "macos", target_os = "windows"))
         && kind == "research"
         && native_args.len() == 2
@@ -51,7 +44,7 @@ fn run() -> Result<u8, Box<dyn std::error::Error>> {
             return Ok(0);
         }
     }
-    // Diagnostics need no interpreter where every request is native.
+    // Diagnostics of the native calculators.
     if cfg!(any(target_os = "macos", target_os = "windows"))
         && native_args == ["--check"]
         && matches!(kind, "research" | "provenance")
@@ -76,61 +69,14 @@ fn run() -> Result<u8, Box<dyn std::error::Error>> {
             return Ok(0);
         }
     }
-    let root = exe.parent().ok_or("无法定位 worker 安装目录")?.join("../workers");
-    let mut args = native_args.into_iter();
-    let script = match kind {
-        "recognition" => "web/recognition_worker.py",
-        "research" => "web/research_worker.py",
-        "index" => "tools/index_worker.py",
-        "provenance" => "provenance/native_worker.py",
-        _ => {
-            return Err(
-                "请使用 illustash-research / illustash-index / illustash-provenance / illustash-recognition".into()
-            )
-        }
-    };
-    let python = PathBuf::from(
-        env::var_os("ILLUSTASH_WORKER_PYTHON").ok_or("请设置 ILLUSTASH_WORKER_PYTHON 为 Python 解释器绝对路径")?,
-    );
-    if !python.is_absolute() || !python.is_file() {
-        return Err("Python 解释器路径无效".into());
+    // Everything else is refused: no interpreter fallback remains, and Linux is frozen (README).
+    if !matches!(kind, "recognition" | "research" | "index" | "provenance") {
+        return Err("请使用 illustash-research / illustash-index / illustash-provenance / illustash-recognition".into());
     }
-    let script = root.join(script);
-    if !script.is_file() {
-        return Err("缺少研究包资源，请安装可选 workers 包".into());
-    }
-    let first = args.next().ok_or("需要 request.json response.json 或 --check")?;
-    let mut command = Command::new(python);
-    // Request/snapshot files are UTF-8, including on non-English Windows installations.
-    command.args(["-X", "utf8"]);
-    command.env("PYTHONDONTWRITEBYTECODE", "1");
-    let resources = illustash_terms::app_resources::default_root();
-    command.env("ILLUSTASH_SHARED", illustash_terms::app_resources::shared_path(&resources)?);
-    let models = exe.parent().unwrap().join("../resources/models");
-    if models.is_dir() {
-        command.env("ILLUSTASH_MODELS", models);
-    }
-    command.env(
-        "ILLUSTASH_IQDB_BIN",
-        exe.parent().unwrap().join(illustash_terms::platform_process::executable_name("illustash-iqdb")),
-    );
-    command.env(
-        "ILLUSTASH_TERMS_BIN",
-        exe.parent().unwrap().join(illustash_terms::platform_process::executable_name("illustash-terms")),
-    );
-    if first == "--check" {
-        let imports = if matches!(kind, "index" | "research" | "recognition") {
-            "import numpy, PIL, onnxruntime"
-        } else {
-            "import numpy, PIL"
-        };
-        command.args(["-c", imports]);
+    Err(if cfg!(any(target_os = "macos", target_os = "windows")) {
+        "不支持的计算请求"
     } else {
-        let response = args.next().ok_or("缺少 response.json")?;
-        if args.next().is_some() {
-            return Err("多余 worker 参数".into());
-        }
-        command.arg(script).args([first, response]);
+        "本平台不提供本地计算"
     }
-    Ok(illustash_terms::platform_process::run_worker_adapter(&mut command)?)
+    .into())
 }

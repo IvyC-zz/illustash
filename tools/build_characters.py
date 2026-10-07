@@ -167,7 +167,7 @@ def main():
     meta = load_index_meta()
     log("  %d 个角色" % len(meta))
     if not meta:
-        print("review/char-index/ 是空的 —— 先跑 tools/fetch_char_index.sh", file=sys.stderr)
+        print("review/char-index/ 是空的 —— 先下载 deepghs/character_index", file=sys.stderr)
         return 1
 
     log("读 WD 标签表 ...")

@@ -159,7 +159,7 @@ class NativeIqdbQueueTest(unittest.TestCase):
         self.assertEqual(self.native(self.binary, iqdb=False), expected)
 
 
-@unittest.skipUnless(sys.platform in ('darwin', 'win32'), 'Linux retains the legacy production dispatcher')
+@unittest.skipUnless(sys.platform in ('darwin', 'win32'), 'Linux is frozen: no local computation')
 class InstalledIqdbQueueTest(NativeIqdbQueueTest):
     @classmethod
     def setUpClass(cls):

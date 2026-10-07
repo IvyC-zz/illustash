@@ -51,7 +51,7 @@ labels.jsonl 每行：
 
 2026-10-04 macOS arm64、CPU ONNX Runtime 1.30.0 合成对照：8 张生成图片的 10,861 维 WD 概率、1024 / 768 维原始向量与现行 Python 路径逐位一致，保留阈值与四位舍入一致；同一组生成图的模型输出构造 8 条合成锚点后，真实生产得到的 14 条认领与 Python 按声明类型解码逐位一致。稠密向量及相邻 float32 阈值对照确认没有用容差掩盖归约差异。首版 `fdb8e3e` 的另一次 26 项真实模型请求（25 项复用生成图片、1 项损坏输入）验证两批 24 / 1、文件指纹、原始向量、标签及无锚点 sidecar，源 sentinel 未改变。正式认领替换、空结果、人工裁决保护、预验后篡改/过期拒绝、外部合成模型根及源提交后恢复由合成数据库回归覆盖；这些结果不代表真实图片准确率、私人锚点质量、Windows、GPU 或整批全量验收。
 
-macOS / Windows 安装 adapter 的识别请求走原生 CPU producer，宿主对该入口要求角色 sidecar；Linux 继续沿用 Python producer。Windows 复用固定 ILP64 OpenBLAS 资源及已登记 DLL 身份，默认仅解析 ROOT/openblas/openblas.dll，显式 ILLUSTASH_RESEARCH_OPENBLAS_DLL 优先；缺失或未知身份直接失败，无 portable/Python 回退。显式声明的 sidecar 在各平台仍严格校验。共享 CCIP 推理接口由索引计算直接复用，不需要加载 WD。
+macOS / Windows 安装 adapter 的识别请求走原生 CPU producer，宿主对该入口要求角色 sidecar；Linux 已冻结，不提供识别。Windows 复用固定 ILP64 OpenBLAS 资源及已登记 DLL 身份，默认仅解析 ROOT/openblas/openblas.dll，显式 ILLUSTASH_RESEARCH_OPENBLAS_DLL 优先；缺失或未知身份直接失败，无 portable/Python 回退。显式声明的 sidecar 在各平台仍严格校验。共享 CCIP 推理接口由索引计算直接复用，不需要加载 WD。
 
 真实模型的可重复合成验收入口为 `tests.platform_recognition_models`，与普通 discover 分离，缺少显式输入直接失败：
 

@@ -202,19 +202,6 @@ pub fn executable_name(stem: &str) -> String {
     }
 }
 
-/// Unix exec preserves the core's worker process group; other platforms wait.
-pub fn run_worker_adapter(command: &mut Command) -> std::io::Result<u8> {
-    #[cfg(unix)]
-    {
-        use std::os::unix::process::CommandExt;
-        Err(command.exec())
-    }
-    #[cfg(not(unix))]
-    {
-        Ok(command.status()?.code().unwrap_or(1).clamp(0, 255) as u8)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

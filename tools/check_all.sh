@@ -24,11 +24,8 @@ mkdir -p "$cache"
 python="$cache/python/bin/python"
 "$python" -m pip install -r tests/requirements.txt
 export PATH="$cache/python/bin:$PATH"
-case "$(uname -s)" in
-  Darwin) ;;
-  Linux) echo '平台说明：Linux 需预装 CI desktop job 的 Tauri 系统依赖；macOS 固定快照未覆盖。' ;;
-  *) echo '当前脚本仅支持 macOS/Linux；Windows 需另行验收。' >&2; exit 2 ;;
-esac
+# Linux 已冻结（README）；Windows 单列验收。
+[ "$(uname -s)" = Darwin ] || { echo '当前脚本仅支持 macOS；Linux 已冻结，Windows 需另行验收。' >&2; exit 2; }
 printf '本地全量开始：head=%s，平台=%s %s\n' "$head" "$(uname -s)" "$(uname -m)"
 "$python" --version
 node --version
@@ -87,7 +84,7 @@ grep -E ' \.\.\. skipped ' "$log" > "$cache/skips.txt" || true
 printf '\nPython 跳过：%s 项\n' "$(wc -l < "$cache/skips.txt" | tr -d ' ')"
 cat "$cache/skips.txt"
 tail -n 3 "$log"
-allowed='full-features\.npy not present|POSIX|posix|Unix|macOS/Linux only|Windows pinned OpenBLAS backend only|explicit Windows native development calculator only|explicit Windows development App publication only|macOS/Windows use the native production dispatcher|Linux retains the legacy production dispatcher'
+allowed='full-features\.npy not present|POSIX|posix|Unix|macOS/Linux only|Windows pinned OpenBLAS backend only|explicit Windows native development calculator only|explicit Windows development App publication only|Linux is frozen: no local computation'
 if grep -Ev "$allowed" "$cache/skips.txt"; then
   echo '以上跳过不属于平台限制或真实图库数据缺失，视为未验收。' >&2
   status=1

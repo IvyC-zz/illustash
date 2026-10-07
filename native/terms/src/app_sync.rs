@@ -688,7 +688,7 @@ fn recognise(
     command.env("ILLUSTASH_ROOT", crate::app_paths::resolve(root)?);
     command.env("ILLUSTASH_SHARED", crate::app_resources::shared_path(root)?);
     // Inside the task folder, so it is cleaned up with the batches. Workers that do not write it
-    // (the Linux Python route) leave the count where it is until import, as before.
+    // leave the count where it is until import, as before.
     let progress = folder.join("progress.json");
     command.env("ILLUSTASH_RECOGNITION_PROGRESS", &progress);
     let mut watch = ProgressWatch::new(&ctx.identity().task_id, readable.len());

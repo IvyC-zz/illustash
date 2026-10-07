@@ -47,7 +47,7 @@ class Installed:
         shutil.copy2(self.candidate_worker, self.binary)
 
 
-skip_linux = unittest.skipUnless(sys.platform in ('darwin', 'win32'), 'Linux retains the legacy production dispatcher')
+skip_linux = unittest.skipUnless(sys.platform in ('darwin', 'win32'), 'Linux is frozen: no local computation')
 
 
 @skip_linux
@@ -74,7 +74,7 @@ class _FixtureOnly(unittest.TestCase):
 class InstalledProvenanceRoutingTest(Installed, _FixtureOnly):
     setUpClass = classmethod(Installed.setUpClass.__func__)
 
-    def test_unknown_step_falls_back_to_the_python_worker(self):
+    def test_unknown_step_is_refused(self):
         request, _ = self.fixture_local('groups')
         for step in ('not-a-local-step',):
             with self.subTest(step=step):
@@ -83,7 +83,7 @@ class InstalledProvenanceRoutingTest(Installed, _FixtureOnly):
                 run = subprocess.run([str(self.binary), str(incoming), str(output)], env=os.environ | {'PATH': ''},
                                      capture_output=True, timeout=30, start_new_session=os.name != 'nt')
                 self.assertNotEqual(run.returncode, 0)
-                self.assertIn('ILLUSTASH_WORKER_PYTHON', run.stderr.decode(errors='replace'))
+                self.assertIn('不支持的计算请求', run.stderr.decode(errors='replace'))
                 self.assertFalse(output.exists())
 
 

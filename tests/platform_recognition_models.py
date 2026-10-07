@@ -5,7 +5,7 @@ ILLUSTASH_RECOGNITION_ADAPTER_BIN, ILLUSTASH_RECOGNITION_COMPUTE_BIN,
 ILLUSTASH_RECOGNITION_MODELS and ILLUSTASH_ORT_DYLIB. Missing inputs fail.
 The relocated resources below are a narrow recognition layout fixture, not a
 signed/full installer. Windows also requires explicit ILLUSTASH_RESEARCH_OPENBLAS_DLL matching the
-reference NumPy wheel; Linux production remains gated pending acceptance.
+reference NumPy wheel; Linux is frozen.
 """
 from contextlib import closing
 import csv

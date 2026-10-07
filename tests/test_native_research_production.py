@@ -2,8 +2,7 @@
 
 No binary builds/discovery: an explicit candidate host supplies its sibling worker (or
 ILLUSTASH_RESEARCH_ADAPTER_BIN). macOS direct tests run the installed native adapter with
-no Python configuration; the transition suite separately supplies the actual legacy
-interpreter on Linux. Timing tests use the existing #146 fixture launcher/process-tree
+no Python configuration. Timing tests use the existing #146 fixture launcher/process-tree
 checks around responses produced by that actual adapter, never a mocked calculator.
 """
 import json
@@ -30,7 +29,7 @@ from web import learn
 from web.features import Features
 
 
-@unittest.skipUnless(sys.platform in ('darwin', 'win32'), 'Linux retains the legacy production dispatcher')
+@unittest.skipUnless(sys.platform in ('darwin', 'win32'), 'Linux is frozen: no local computation')
 class InstalledResearchComputeTest(compute.NativeResearchComputeTest):
     @classmethod
     def setUpClass(cls):
@@ -51,11 +50,11 @@ class InstalledResearchComputeTest(compute.NativeResearchComputeTest):
         self.binary = folder / ('illustash-research.exe' if os.name == 'nt' else 'illustash-research')
         shutil.copy2(self.candidate_worker, self.binary)
 
-    def test_unknown_kind_retains_existing_fallback_without_partial_native_learning(self):
+    def test_unknown_kind_is_refused_without_partial_native_learning(self):
         before = self.rows(self.store.path)
         result, output, snapshot = self.request('unknown-research-kind', regroup=False)
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn('ILLUSTASH_WORKER_PYTHON', result.stderr.decode(errors='replace'))
+        self.assertIn('不支持的计算请求', result.stderr.decode(errors='replace'))
         self.assertFalse(output.exists())
         self.assertEqual(self.rows(snapshot / 'library.sqlite'), before)
 
@@ -70,58 +69,6 @@ class InstalledResearchComputeTest(compute.NativeResearchComputeTest):
         self.assertNotEqual(result.returncode, 0)
         self.assertNotIn('ILLUSTASH_WORKER_PYTHON', result.stderr.decode(errors='replace'))
         self.assertFalse(response.exists())
-
-
-@unittest.skipUnless(sys.platform not in ('darwin', 'win32'), 'macOS/Windows use the native production dispatcher')
-class ResearchTransitionGateTest(compute.NativeResearchComputeTest):
-    """The installed Linux adapter retains the actual existing Python calculator."""
-    setUpClass = InstalledResearchComputeTest.__dict__['setUpClass']
-
-    def setUp(self):
-        compute.NativeResearchComputeTest.setUp(self)
-        root = Path(self.temp.name)
-        folder = root / 'installed-bin'
-        folder.mkdir()
-        self.binary = folder / ('illustash-research.exe' if os.name == 'nt' else 'illustash-research')
-        shutil.copy2(self.candidate_worker, self.binary)
-        # Supply only this checkout's calculator source and the explicitly running
-        # test interpreter. No installed user application, model or library is read.
-        workers = root / 'workers'
-        for name in ('web', 'tools'):
-            shutil.copytree(self.resources / name, workers / name,
-                            ignore=shutil.ignore_patterns('__pycache__'))
-        self.fallback_python = sys.executable
-
-    def test_invalid_vector_and_stale_token_leave_snapshot_untouched(self):
-        # Preserve the original Python transport contract, which reports a stale
-        # learning batch in a successful response rather than failing the process.
-        # Core rejects that batch and App still owns formal response validation.
-        before = self.rows(self.store.path)
-        original = self.raw.copy()
-        self.raw[0, 0] = np.nan
-        result, output, snapshot = self.request()
-        self.assertNotEqual(result.returncode, 0)
-        self.assertFalse(output.exists())
-        self.assertEqual(self.rows(snapshot / 'library.sqlite'), before)
-        self.raw = original
-        result, output, snapshot = self.request(mutate=lambda r: r.update(learning_token='obsolete'))
-        self.assertEqual(result.returncode, 0, result.stderr.decode(errors='replace'))
-        response = json.loads(output.read_text(encoding='utf-8'))
-        self.assertEqual(response['result']['status'], 'stale')
-        self.assertEqual(response['learning']['token'], 'obsolete')
-        # Isolated grouping tables may be computed, but neither protected learning
-        # data nor the original formal library may acquire the stale publication.
-        self.assertEqual(self.rows(snapshot / 'library.sqlite'), before)
-        self.assertEqual(self.rows(self.store.path), before)
-
-    def test_supported_learning_still_requires_legacy_python_without_native_publication(self):
-        del self.fallback_python
-        before = self.rows(self.store.path)
-        result, output, snapshot = self.request()
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn('ILLUSTASH_WORKER_PYTHON', result.stderr.decode(errors='replace'))
-        self.assertFalse(output.exists())
-        self.assertEqual(self.rows(snapshot / 'library.sqlite'), before)
 
 
 class RecognitionTransitionRoutingTest(unittest.TestCase):
@@ -142,10 +89,7 @@ class RecognitionTransitionRoutingTest(unittest.TestCase):
             result = subprocess.run([str(worker), str(request), str(output)], env=env,
                                     capture_output=True, timeout=10)
             self.assertNotEqual(result.returncode, 0)
-            if sys.platform in ('darwin', 'win32'):
-                self.assertNotIn('ILLUSTASH_WORKER_PYTHON', result.stderr.decode(errors='replace'))
-            else:
-                self.assertIn('ILLUSTASH_WORKER_PYTHON', result.stderr.decode(errors='replace'))
+            self.assertNotIn('ILLUSTASH_WORKER_PYTHON', result.stderr.decode(errors='replace'))
             self.assertFalse(output.exists())
             self.assertFalse((root / 'result').exists())
 
@@ -235,7 +179,7 @@ class RecognitionTransitionReceiptTest(unittest.TestCase):
         self.assertFalse(self.sentinel.exists())
 
 
-@unittest.skipUnless(sys.platform in ('darwin', 'win32'), 'Linux retains the legacy production dispatcher')
+@unittest.skipUnless(sys.platform in ('darwin', 'win32'), 'Linux is frozen: no local computation')
 class NativeResearchPublicationTest(unittest.TestCase):
     setUpClass = InstalledResearchComputeTest.__dict__['setUpClass']
     package = lifecycle.NativeLifecycleTest.package
@@ -485,7 +429,7 @@ child.terminate();child.wait()
             self.assertEqual(c.execute("SELECT count(*) FROM backend_effects WHERE status='pending' AND kind='index_changed'").fetchone()[0], 0)
 
 
-@unittest.skipUnless(sys.platform in ('darwin', 'win32'), 'Linux retains the legacy production dispatcher')
+@unittest.skipUnless(sys.platform in ('darwin', 'win32'), 'Linux is frozen: no local computation')
 class InstalledRelationSnapshotTest(relations.NativeSimilarSnapshotTest):
     """Same independent cache/precision reference through the actual installed adapter."""
     setUpClass = InstalledResearchComputeTest.__dict__['setUpClass']
@@ -501,7 +445,7 @@ class InstalledRelationSnapshotTest(relations.NativeSimilarSnapshotTest):
         os.environ.pop('ILLUSTASH_WORKER_PYTHON', None)
 
 
-@unittest.skipUnless(sys.platform in ('darwin', 'win32'), 'Linux retains the legacy production dispatcher')
+@unittest.skipUnless(sys.platform in ('darwin', 'win32'), 'Linux is frozen: no local computation')
 class NativeRelationPublicationTest(NativeResearchPublicationTest):
     """Mixed startup plus direct similar uses existing App atomic/lifecycle tests."""
     def setUp(self):

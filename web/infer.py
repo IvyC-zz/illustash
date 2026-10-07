@@ -2,7 +2,7 @@
 
 Runs as a child of the web server, which holds the Photos access permission. Same models,
 preprocessing and storage as the full runs, so new rows are indistinguishable from old ones:
-    WD v3 (wd_swinv2_v3_emb)   general / character / rating, every tag >= 0.001   (tools/wd_shard.py)
+    WD v3 (wd_swinv2_v3_emb)   general / character / rating, every tag >= 0.001
     CCIP + character_index      claims within each anchor's adaptive threshold    (tools/char_scan.py)
 Embeddings (WD 1024-d, CCIP 768-d) are kept for later clustering of unknown characters.
 
@@ -42,7 +42,7 @@ DIMS = {0: 'general', 4: 'character', 9: 'rating'}
 
 
 def wd_input(image, size=448):
-    """White-pad to square, bicubic 448, float32 0-255, BGR, NHWC (imgutils wd14; tools/wd_extract.py)."""
+    """White-pad to square, bicubic 448, float32 0-255, BGR, NHWC (imgutils wd14)."""
     im = image.convert('RGB')
     w, h = im.size
     m = max(w, h)

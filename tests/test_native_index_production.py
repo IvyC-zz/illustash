@@ -79,14 +79,11 @@ class IndexTransitionRoutingTest(CandidateIndexAdapter, unittest.TestCase):
             result = subprocess.run([str(adapter), str(request), str(response)],
                                     env=self.isolated_env(resources), capture_output=True, timeout=10)
             self.assertNotEqual(result.returncode, 0)
-            if sys.platform in ('darwin', 'win32'):
-                self.assertNotIn('ILLUSTASH_WORKER_PYTHON', result.stderr.decode(errors='replace'))
-            else:
-                self.assertIn('ILLUSTASH_WORKER_PYTHON', result.stderr.decode(errors='replace'))
+            self.assertNotIn('ILLUSTASH_WORKER_PYTHON', result.stderr.decode(errors='replace'))
             self.assertFalse(response.exists())
 
 
-@unittest.skipUnless(sys.platform in ('darwin', 'win32'), 'Linux retains the legacy production dispatcher')
+@unittest.skipUnless(sys.platform in ('darwin', 'win32'), 'Linux is frozen: no local computation')
 class InstalledIndexComputeTest(CandidateIndexAdapter, unittest.TestCase):
     def test_fresh_empty_and_last_drop_clear_anchors_without_model_or_python(self):
         with tempfile.TemporaryDirectory(prefix='illustash-index-empty-') as tmp:
@@ -161,7 +158,7 @@ class InstalledIndexComputeTest(CandidateIndexAdapter, unittest.TestCase):
                 self.assertFalse(output.exists())
 
 
-@unittest.skipUnless(sys.platform in ('darwin', 'win32'), 'Linux retains the legacy production dispatcher')
+@unittest.skipUnless(sys.platform in ('darwin', 'win32'), 'Linux is frozen: no local computation')
 class InstalledIndexAppTest(CandidateIndexAdapter, unittest.TestCase):
     package = index_fixture.NativeIndexTest.package
     start = index_fixture.NativeIndexTest.start
