@@ -32,7 +32,7 @@ RECORD = os.environ.get('ILLUSTASH_REFERENCE') == 'record'
 FIXTURES = Path(__file__).resolve().parent / 'fixtures' / 'reference'
 _recorded = {}   # module -> {'tests': {test id: [entry]}, 'blobs': {sha: bytes}}
 _current = None  # the running test's recorder: its run-specific strings are placeholders in digests
-CLOCK = re.compile(r'\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})?')
+CLOCK = re.compile(r'\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:\d{2})?')
 CLOCK_BYTES = re.compile(CLOCK.pattern.encode())
 
 
@@ -191,16 +191,18 @@ class Recorder:
             return Digests(digests)
         return Digests(self._next(label)['value'])
 
-    def package(self, label, path, build=None, library=True):
+    def package(self, label, path, build=None, library=True, only=None):
         """Files under ``path`` (databases as consistent bytes, text with placeholders, anything
         else raw): saved after ``build`` when recording, restored into ``path`` otherwise. Returns a
-        ``Library`` unless ``library`` is false."""
+        ``Library`` unless ``library`` is false. ``only`` limits it to the named relative paths."""
         path = Path(path)
         if RECORD:
             if build is not None:
                 build()
             files = {}
             for f in sorted(path.rglob('*')):
+                if only is not None and f.relative_to(path).as_posix() not in only:
+                    continue
                 if f.is_file() and not f.name.endswith(('-wal', '-shm', '-journal')) and 'thumbnails' not in f.parts:
                     data, kind = _file_bytes(f), 'raw'
                     if f.suffix in ('.sqlite', '.db'):

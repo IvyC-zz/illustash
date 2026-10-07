@@ -285,7 +285,10 @@ Path(sys.argv[2]).write_text(json.dumps(dict(identity=r['identity'],packages=pac
         self.assertEqual(value['state']['message'],'任务超时：2 秒没有进展')
         first=json.loads((self.root/'last-request').read_text())
         self.assertEqual(len(first),3)
-        self.assertEqual((value['history'][0]['status'],value['history'][0]['imported']),('interrupted',2))
+        # The folder asset is counted when the scan imports it; a streamed batch counts only the
+        # Photos assets it brings. Which assets the first two batches hold follows key order.
+        self.assertEqual((value['history'][0]['status'],value['history'][0]['imported']),
+                         ('interrupted',1+sum(u in ('E','F') for u in first[:2])))
         with sqlite3.connect(self.lib.source) as c:
             self.assertEqual(sorted(u for u, in c.execute('SELECT asset FROM recognition_assets')),sorted(first[:2]))
             self.assertEqual(c.execute("SELECT count(*) FROM recognition_imports WHERE status='done'").fetchone()[0],2)
@@ -365,7 +368,7 @@ Path(sys.argv[2]).write_text(json.dumps(dict(identity=r['identity'],packages=pac
 
     @unittest.skipIf(os.name == 'nt', 'Apple 照片图库只在 macOS 上提供')
     def test_native_library_new_photos_exact_source_reference(self):
-        from web.sync import scan
+        # The former Python Photos scanner's results on the same inputs are recorded (tests/reference_replay.py).
         for u,app in (('D','com.atebits.Tweetie2'),('E','net.pxv.iphone'),('F','com.apple.springboard')): self.photo(u,app)
         for i,app in enumerate(('com.apple.camera','com.apple.mobileslideshow','com.apple.mobilesafari','tv.danmaku.bilianime','ai.x.GrokApp','com.tencent.xin','com.baidu.netdisk','app.nicegram','')):self.photo('N'+str(i),app)
         def pair():
@@ -373,9 +376,12 @@ Path(sys.argv[2]).write_text(json.dumps(dict(identity=r['identity'],packages=pac
             with sqlite3.connect(self.lib.source) as src,sqlite3.connect(old) as dest:src.backup(dest)
             result=subprocess.run([str(self.binary),'photos-scan','--db',str(self.lib.source)],input=json.dumps(self.source).encode(),capture_output=True,env=self.env)
             self.assertEqual(result.returncode,0,result.stderr)
-            expected=scan(self.library,old,self.source)
-            self.assertEqual(json.loads(result.stdout),expected)
-            self.assertEqual(snapshot(self.lib.source),snapshot(old))
+            def old_scan():
+                from web.sync import scan
+                return {'result':scan(self.library,old,self.source),'source':snapshot(old)}
+            expected=self.rec.value('old scan',old_scan)
+            self.assertEqual(json.loads(result.stdout),expected['result'])
+            self.assertEqual(snapshot(self.lib.source),expected['source'])
         pair()
         with sqlite3.connect(self.library/'database/Photos.sqlite') as c:c.execute("UPDATE ZASSET SET ZTRASHEDSTATE=1 WHERE ZUUID='D'")
         pair()

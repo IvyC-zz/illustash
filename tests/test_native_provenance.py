@@ -17,10 +17,10 @@ import unittest
 from unittest.mock import patch
 
 from tests import test_native_lifecycle as lifecycle
+from tests.reference_replay import RECORD, unclocked
 from tests.test_read_http import SPAWN, wait_until
 from tools.verify_read_http import fetch
-from provenance import db, export
-from web import artists
+from provenance import db
 
 
 WORKER = r'''
@@ -213,34 +213,42 @@ class NativeProvenanceTest(unittest.TestCase):
         self.assertEqual(self.info()['state']['kind'],'new');self.post({'action':'stop'});self.finish('stopped')
 
     def test_export_contract_native_matches_python(self):
-        from web import terms_core
+        # The former Python exporter, importer and run report on the same lookup are recorded
+        # (tests/reference_replay.py); clock-like text compares as <clock>.
         before=self.root/'reference-application.sqlite'
         with sqlite3.connect(self.lib.db) as source,sqlite3.connect(before) as target:source.backup(target)
         self.post({'action':'lookup','ids':['a']});self.finish('done')
         package=self.lib.path/self.sql('SELECT package FROM native_delivery',cache=True)[0][0]
-        out=self.root/'reference-evidence';export.write(self.lib,out)
-        for name in ('evidence.jsonl','terms.jsonl'):self.assertEqual((Path(package)/name).read_bytes(),(out/name).read_bytes())
-        native_manifest=json.loads((Path(package)/'manifest.json').read_text());reference_manifest=json.loads((out/'manifest.json').read_text())
-        native_manifest.pop('created_at');reference_manifest.pop('created_at')
-        self.assertEqual(native_manifest,reference_manifest) # creation clock is transport metadata
-        reference_import=terms_core.import_package(before,self.lib.config['id'],out)
+        expected=self.rec.value('python export',lambda:self.python_export(before))
+        for name in ('evidence.jsonl','terms.jsonl'):
+            self.assertEqual(unclocked((Path(package)/name).read_text(encoding='utf-8')),unclocked(expected['files'][name]))
+        # Creation clock is transport metadata; file digests cover the (clock-bearing) bytes compared above.
+        self.assertEqual(manifest_shape(json.loads((Path(package)/'manifest.json').read_text())),expected['manifest'])
         native_import=self.info()['delivery']
-        self.assertEqual({k:v for k,v in native_import.items() if k!='status'},reference_import)
+        self.assertEqual({k:v for k,v in native_import.items() if k!='status'},expected['import'])
         # Resolve random term IDs through stable links; compare formal evidence, projections,
         # history and durable events against the reference import of identical bytes.
-        queries=(
-            'SELECT source,method,score,metric,data,asset_id FROM term_evidence ORDER BY source,method,data,asset_id',
-            'SELECT system,key FROM term_links ORDER BY system,key',
-            'SELECT p.asset_id,t.kind,p.state,p.score FROM term_projection p JOIN terms t ON t.id=p.term_id ORDER BY p.asset_id,t.kind,p.state,p.score',
-            'SELECT label,before_json FROM actions ORDER BY id',
-            'SELECT kind,status,error FROM backend_effects ORDER BY id',
-        )
-        with sqlite3.connect(before) as expected,sqlite3.connect(self.lib.db) as actual:
-            for query in queries:self.assertEqual(actual.execute(query).fetchall(),expected.execute(query).fetchall(),query)
-        native=self.info();reference=artists.runs(self.lib)
-        self.assertEqual(native['runs'],reference['runs']);self.assertEqual(native['coverage'],reference['coverage'])
-        from provenance import report
-        self.assertEqual(native['runs'][0]['report'],report.run(self.lib))
+        with sqlite3.connect(self.lib.db) as actual:
+            for query,rows in zip(EXPORT_QUERIES,expected['rows']):
+                self.assertEqual(json.loads(unclocked(json.dumps(actual.execute(query).fetchall(),ensure_ascii=False))),rows,query)
+        native=json.loads(unclocked(json.dumps(self.info(),ensure_ascii=False)))
+        self.assertEqual(native['runs'],expected['runs']);self.assertEqual(native['coverage'],expected['coverage'])
+        self.assertEqual(native['runs'][0]['report'],expected['report'])
+
+    def python_export(self,before):
+        """Recording only: the former Python exporter's package, its import into the pre-lookup
+        application copy, and the former run summary and report."""
+        from provenance import export, report
+        from web import artists, terms_core
+        out=self.root/'reference-evidence';export.write(self.lib,out)
+        manifest=manifest_shape(json.loads((out/'manifest.json').read_text()))
+        reference_import=terms_core.import_package(before,self.lib.config['id'],out)
+        with sqlite3.connect(before) as expected:
+            rows=[json.loads(unclocked(json.dumps(expected.execute(q).fetchall(),ensure_ascii=False))) for q in EXPORT_QUERIES]
+        runs=json.loads(unclocked(json.dumps(artists.runs(self.lib),ensure_ascii=False)))
+        return {'files':{name:(out/name).read_text(encoding='utf-8') for name in ('evidence.jsonl','terms.jsonl')},
+                'manifest':manifest,'import':reference_import,'rows':rows,'runs':runs['runs'],'coverage':runs['coverage'],
+                'report':json.loads(unclocked(json.dumps(report.run(self.lib),ensure_ascii=False)))}
 
     def test_pixiv_pages_cache_and_expiry_never_grants_background_consent(self):
         account=self.support/'accounts';account.mkdir(parents=True,exist_ok=True)
@@ -344,3 +352,20 @@ class NativeProvenanceTest(unittest.TestCase):
         self.process,self.log=self.start(self.lib.path);self.token=json.loads(self.request('/api/bootstrap')['body'])['token']
         self.assertEqual(self.info()['state']['status'],'stopped')
         self.assertEqual(self.sql("SELECT count(*) FROM term_evidence WHERE source='provenance'"),[(0,)])
+
+
+def manifest_shape(manifest):
+    manifest.pop('created_at')
+    for entry in (manifest.get('files') or {}).values():
+        if isinstance(entry, dict):
+            entry.pop('sha256', None)
+    return manifest
+
+
+EXPORT_QUERIES=(
+    'SELECT source,method,score,metric,data,asset_id FROM term_evidence ORDER BY source,method,data,asset_id',
+    'SELECT system,key FROM term_links ORDER BY system,key',
+    'SELECT p.asset_id,t.kind,p.state,p.score FROM term_projection p JOIN terms t ON t.id=p.term_id ORDER BY p.asset_id,t.kind,p.state,p.score',
+    'SELECT label,before_json FROM actions ORDER BY id',
+    'SELECT kind,status,error FROM backend_effects ORDER BY id',
+)
