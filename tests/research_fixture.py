@@ -1,5 +1,5 @@
 """旧参考冻结的研究输入和期望，合成状态只通过原生命令继续演化。"""
-import gzip
+from contextlib import closing
 import json
 from functools import lru_cache
 from pathlib import Path
@@ -8,12 +8,12 @@ import tempfile
 
 import numpy as np
 from tests import native_commands as core
+from tests.fixed_expectations import fixed_values
 
 
 @lru_cache(None)
 def records():
-    with gzip.open(Path(__file__).parent / 'fixtures/research_values.json.gz', 'rt', encoding='utf-8') as f:
-        return json.load(f)
+    return fixed_values('research_values.json.gz')
 
 
 def decode(value, root):
@@ -68,10 +68,10 @@ class Store:
         package = Path(tempfile.mkdtemp(prefix='curation-input-', dir=self.root)).with_suffix('.pilib')
         package.mkdir()
         for source,name in ((self.path,'library.sqlite'),(self.source,'source.sqlite')):
-            with sqlite3.connect(source) as src, sqlite3.connect(package/name) as dst:
+            with closing(sqlite3.connect(source)) as src, closing(sqlite3.connect(package/name)) as dst:
                 src.backup(dst)
         (package/'library.json').write_text(json.dumps({'format':1,'id':'local','name':'Synthetic','sources':[]}))
-        with sqlite3.connect(package/'library.sqlite') as c:
+        with closing(sqlite3.connect(package/'library.sqlite')) as c, c:
             c.execute("INSERT OR REPLACE INTO prefs VALUES ('startup',?)", (json.dumps({'similar':False}),))
         port = free_port()
         origin = f'http://127.0.0.1:{port}'
@@ -91,7 +91,7 @@ class Store:
                 raise AssertionError(result)
         finally:
             stop_process(process)
-        with sqlite3.connect(package/'library.sqlite') as src, sqlite3.connect(self.path) as dst:
+        with closing(sqlite3.connect(package/'library.sqlite')) as src, closing(sqlite3.connect(self.path)) as dst:
             src.backup(dst)
         return json.loads(result['body'])
 
@@ -122,7 +122,7 @@ def seed(test, root):
     # Installed worker subclasses add protocol refusal cases with the shared base input.
     record = records().get(name) or records()['test_prototypes_claims_weak_and_unmatched_cache_exact']
     for kind, filename in [('library','app.sqlite'), ('source','source.db')]:
-        with sqlite3.connect(root / filename) as c:
+        with closing(sqlite3.connect(root / filename)) as c, c:
             c.executescript(decode(record['seed'][kind], root))
     test.fixed = decode(record, root)
     test.fixed_position = test.oc_position = 0

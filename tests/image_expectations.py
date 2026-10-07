@@ -1,6 +1,5 @@
 """旧图像参考的只读答案；完整像素位用 SHA-256 校验，无法生成或刷新夹具。"""
 import base64
-import gzip
 import hashlib
 import io
 import json
@@ -10,12 +9,12 @@ from types import SimpleNamespace
 
 import numpy as np
 from PIL import Image, UnidentifiedImageError
+from tests.fixed_expectations import fixed_values
 
 
 @lru_cache(None)
 def records():
-    with gzip.open(Path(__file__).parent/'fixtures/image_values.json.gz','rt',encoding='utf-8') as f:
-        return json.load(f)
+    return fixed_values('image_values.json.gz')
 
 
 class Pixels:

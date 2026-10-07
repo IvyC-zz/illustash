@@ -41,7 +41,7 @@ class NativeResearchTest(unittest.TestCase):
         self.worker.write_text('#!'+sys.executable+'\n'+f'''import sys,os,json,time,subprocess
 from pathlib import Path
 sys.path.insert(0,{str(self.repo)!r})
-r=json.loads(Path(sys.argv[1]).read_text())
+r=json.loads(Path(sys.argv[1]).read_text(encoding='utf-8'))
 Path({str(self.pid)!r}).write_text(str(os.getpid()))
 with open({str(self.runs)!r},'a') as f: f.write(r['version']+'\\n')
 mode=Path({str(self.mode)!r}).read_text()
@@ -51,7 +51,7 @@ if mode=='hang':
 if mode=='crash': sys.exit(7)
 if mode=='slow': time.sleep(1)
 subprocess.run([os.environ['ILLUSTASH_RESEARCH_COMPUTE_BIN'],sys.argv[1],sys.argv[2]],check=True)
-v=json.loads(Path(sys.argv[2]).read_text())
+v=json.loads(Path(sys.argv[2]).read_text(encoding='utf-8'))
 if mode=='wrong': v['identity']['generation']+=1
 if mode=='bad': v['tables']['relations']=[['a','foreign','identical',0,'','2026-10-01']]
 if mode=='invalid': v['tables']['cluster_info']=[['invalid']]

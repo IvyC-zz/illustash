@@ -4,8 +4,10 @@
 其他类型、列、rowid、响应字节与固定录制保持精确一致。
 """
 import base64
+import gzip
 import hashlib
 import json
+import lzma
 import os
 import re
 import sqlite3
@@ -22,6 +24,24 @@ FIXTURES = Path(__file__).resolve().parent / 'fixtures' / 'reference_recordings'
 _current = None  # the running test's recorder: its run-specific strings are placeholders in digests
 CLOCK = re.compile(r'\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:\d{2})?')
 CLOCK_BYTES = re.compile(CLOCK.pattern.encode())
+
+
+def fixed_values(name):
+    """A frozen value file under tests/fixtures. Values the old reference computed differently on
+    Windows (float summation order, image codecs) were recorded there too and are kept in
+    tests/fixtures/windows/ as replacements at the listed paths; they apply on Windows only."""
+    opener = lzma.open if name.endswith('.xz') else gzip.open
+    with opener(FIXTURES.parent / name, 'rt', encoding='utf-8') as f:
+        values = json.load(f)
+    overlay = FIXTURES.parent / 'windows' / name
+    if WINDOWS and overlay.exists():
+        with opener(overlay, 'rt', encoding='utf-8') as f:
+            for path, value in json.load(f)['replace']:
+                node = values
+                for key in path[:-1]:
+                    node = node.setdefault(key, {})
+                node[path[-1]] = value
+    return values
 
 
 def unclocked(value):

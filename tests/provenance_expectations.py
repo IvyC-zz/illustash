@@ -1,5 +1,5 @@
 """旧溯源参考的固定结果与合成状态，只读恢复；不执行计算或网络。"""
-import gzip
+from contextlib import closing
 import json
 from pathlib import Path
 from functools import lru_cache
@@ -7,6 +7,7 @@ import sqlite3
 from types import SimpleNamespace
 
 from tests.image_expectations import verify as image_verify
+from tests.fixed_expectations import fixed_values
 
 _active = None
 
@@ -17,8 +18,7 @@ class Stopped(RuntimeError):
 
 @lru_cache(None)
 def records():
-    with gzip.open(Path(__file__).parent/'fixtures/provenance_values.json.gz','rt',encoding='utf-8') as f:
-        return json.load(f)
+    return fixed_values('provenance_values.json.gz')
 
 
 def begin(test):
@@ -50,7 +50,7 @@ def call(label,lib,*args,**kwargs):
         raise {'AttributeError':AttributeError,'ValueError':ValueError,'IntegrityError':sqlite3.IntegrityError}[kind](message)
     path = Path(lib['cache']) if isinstance(lib,dict) else lib.path
     # Restore only the historical machine cache. The core/source databases remain untouched.
-    with sqlite3.connect(path/'provenance.sqlite') as c:
+    with closing(sqlite3.connect(path/'provenance.sqlite')) as c, c:
         for name,table in entry.get('tables',{}).items():
             c.execute('DELETE FROM "'+name+'"')
             rows = decode(table['rows'])
