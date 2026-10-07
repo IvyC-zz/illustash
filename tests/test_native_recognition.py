@@ -99,11 +99,15 @@ class NativeRecognitionTest(unittest.TestCase):
             return {'result':result,'source':snapshot(reference.source),'db':snapshot(reference.db)}
         expected=self.rec.value('old import',old_import)
         actual=self.import_result(p)
+        source_now=dict(snapshot(self.lib.source))
         if os.name == 'nt':
-            # The package digest differs on Windows from the macOS recording; the rest must match.
+            # The package digest differs on Windows from the macOS recording, and with it the rows
+            # keyed by it (run ids, import records); everything else must match.
             actual,expected['result']=dict(actual,digest=None),dict(expected['result'],digest=None)
+            for table in ('labels','recognition_assets','recognition_imports'):
+                source_now.pop(table,None);expected['source'].pop(table,None)
         self.assertEqual(actual,expected['result'])
-        self.assertEqual(snapshot(self.lib.source),expected['source'])
+        self.assertEqual(source_now,expected['source'])
         # Random identity IDs/timestamps are checked by existing core golden tests; these tags/results are deterministic.
         for table in ('assets','assertions','asset_tags','memberships','general_hits','asset_rating','actions'):
             self.assertEqual(snapshot(self.lib.db)[table],expected['db'][table],table)
