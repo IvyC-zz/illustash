@@ -16,7 +16,7 @@ import numpy as np
 
 from web import learn, terms_core
 from web.features import Features
-from tests import test_learn as reference_learning
+from tests import learn_fixture as reference_learning
 
 
 class NativeResearchComputeTest(unittest.TestCase):
@@ -31,7 +31,7 @@ class NativeResearchComputeTest(unittest.TestCase):
             raise AssertionError('configured candidate calculator/core missing')
 
     def setUp(self):
-        reference_learning.LearnTest.setUp(self)
+        reference_learning.Learning.setUp(self)
         self.addCleanup(self.temp.cleanup)
         self.addCleanup(terms_core.close_service)
         # Pad the existing fixed eight-dimensional input to the production CCIP width.
@@ -232,14 +232,14 @@ class NativeResearchComputeTest(unittest.TestCase):
 
     def test_rejected_machine_claim_and_named_unmatched_members_leave_no_stale_group(self):
         self.compare_learning()
-        self.assertEqual(reference_learning.LearnTest.owners(self, 'close'), [self.alice])
+        self.assertEqual(reference_learning.Learning.owners(self, 'close'), [self.alice])
         action = self.store.change(['close'], 'rejected', self.alice)
         self.compare_learning()
-        self.assertEqual(reference_learning.LearnTest.owners(self, 'close'), [])
-        self.assertEqual(reference_learning.LearnTest.owners(self, 'edge'), [])
+        self.assertEqual(reference_learning.Learning.owners(self, 'close'), [])
+        self.assertEqual(reference_learning.Learning.owners(self, 'edge'), [])
         self.store.undo(action['id'])
         self.compare_learning()
-        self.assertEqual(reference_learning.LearnTest.owners(self, 'close'), [self.alice])
+        self.assertEqual(reference_learning.Learning.owners(self, 'close'), [self.alice])
         self.store.change(['u0', 'u1', 'u2'], 'confirmed', self.bob)
         result = self.compare_learning()
         self.assertEqual(result['result']['clusters'], 0)
@@ -256,7 +256,7 @@ class NativeResearchComputeTest(unittest.TestCase):
             centre * (1 - 2 * distance) + side * np.sqrt(1 - (1 - 2 * distance) ** 2))
         self.features = Features(self.store.source, self.raw, self.features.uuids)
         self.compare_learning()
-        self.assertNotIn(self.alice, reference_learning.LearnTest.owners(self, 'ring'))
+        self.assertNotIn(self.alice, reference_learning.Learning.owners(self, 'ring'))
         with self.store.connect() as c:
             self.assertEqual([r[0] for r in c.execute("SELECT entity FROM weak_claims WHERE uuid='ring' AND source='PROTO'")], [self.alice])
         self.store.change(['ring'], 'rejected', self.alice)
@@ -281,11 +281,11 @@ class NativeResearchComputeTest(unittest.TestCase):
 
     def test_rejected_skin_is_not_a_parent_negative(self):
         self.compare_learning()
-        expected = reference_learning.LearnTest.learned_snapshot(self)
+        expected = reference_learning.Learning.learned_snapshot(self)
         self.store.change(['s0'], 'remove_variant', 'summer')
         self.compare_learning()
-        self.assertEqual(reference_learning.LearnTest.learned_snapshot(self), expected)
-        self.assertEqual(reference_learning.LearnTest.owners(self, 'close'), [self.alice])
+        self.assertEqual(reference_learning.Learning.learned_snapshot(self), expected)
+        self.assertEqual(reference_learning.Learning.owners(self, 'close'), [self.alice])
 
     def test_hair_colour_splits_a_group_and_traits_describe_it(self):
         ids = self.features.uuids

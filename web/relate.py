@@ -9,7 +9,7 @@
     · 大面积都不同 → 构图相似的不同图。
 - 比例不同（或同比例但对不上）：在多个缩放比例下，用 FFT 归一化互相关在大图里找小图，
   找到了就是局部重复（裁剪），再对重叠部分做同样的逐像素比较，看裁剪后有没有改动。
-阈值用 tests/test_relate.py 的人造图和真实库里的副本、差分校准过（见 docs/WEB_V2.md）。
+阈值用 tests/relate_images.py 的人造图和真实库里的副本、差分校准过（见 docs/WEB_V2.md）。
 """
 from itertools import combinations
 

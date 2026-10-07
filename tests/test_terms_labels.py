@@ -12,7 +12,7 @@ from unittest import mock
 from web import terms_core
 from web.server import adopt_labels
 from web.store import Invalid, Store, _indexes_a_view
-from tests.test_web import fixture
+from tests.synthetic_source import source_fixture as fixture
 from tests import terms_seed
 from tests.test_terms_core import core
 

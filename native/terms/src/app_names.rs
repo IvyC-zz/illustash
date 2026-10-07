@@ -928,3 +928,931 @@ fn local_links(source: &mut Source) -> Result<Json> {
     }
     Ok(Json::Array(out))
 }
+
+/// Loopback provider for name tests: a handler answers each request; `None` is a 503.
+#[cfg(test)]
+mod test_provider {
+    use serde_json::Value;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    pub(super) struct Server {
+        pub base: String,
+        stop: Arc<AtomicBool>,
+        thread: Option<std::thread::JoinHandle<()>>,
+    }
+
+    pub(super) fn param(query: &str, name: &str) -> String {
+        url::form_urlencoded::parse(query.as_bytes()).find(|(k, _)| k == name).map(|(_, v)| v.into_owned()).unwrap()
+    }
+
+    impl Server {
+        pub fn start(mut answer: impl FnMut(&str, &str, Option<&Value>) -> Option<Value> + Send + 'static) -> Self {
+            let server = tiny_http::Server::http("127.0.0.1:0").unwrap();
+            let base = format!("http://127.0.0.1:{}", server.server_addr().to_ip().unwrap().port());
+            let stop = Arc::new(AtomicBool::new(false));
+            let s = stop.clone();
+            let thread = std::thread::spawn(move || {
+                while !s.load(Ordering::SeqCst) {
+                    let Ok(Some(mut request)) = server.recv_timeout(Duration::from_millis(20)) else { continue };
+                    let mut text = String::new();
+                    request.as_reader().read_to_string(&mut text).unwrap();
+                    let body: Option<Value> = (!text.is_empty()).then(|| serde_json::from_str(&text).unwrap());
+                    let url = request.url().to_owned();
+                    let (path, query) = url.split_once('?').unwrap_or((&url, ""));
+                    let response = match answer(path, query, body.as_ref()) {
+                        Some(value) => tiny_http::Response::from_string(value.to_string()),
+                        None => tiny_http::Response::from_string("").with_status_code(503),
+                    };
+                    let _ = request.respond(response);
+                }
+            });
+            Self { base, stop, thread: Some(thread) }
+        }
+    }
+
+    impl Drop for Server {
+        fn drop(&mut self) {
+            self.stop.store(true, Ordering::SeqCst);
+            self.thread.take().unwrap().join().unwrap();
+        }
+    }
+}
+
+/// Name choice on libraries switched from the old form (#9: formerly tests/test_name_matching.py).
+/// Each library state was saved from the old test's own arrangement (old-form rows, then the real
+/// start-up switch); the provider answers and expected names are the old test's, unchanged.
+#[cfg(test)]
+mod matching_tests {
+    use super::*;
+    use std::io::Read;
+    use std::path::{Path, PathBuf};
+
+    pub(super) fn result(id: i64, name: &str, zh: Option<&str>) -> Value {
+        let infobox: Vec<Value> = zh.into_iter().map(|v| json!({"key":"简体中文名","value":v})).collect();
+        json!({"id": id, "name": name, "infobox": infobox})
+    }
+
+    /// The old test's WIKIS table: Danbooru wiki other names per tag.
+    fn wikis() -> HashMap<String, Vec<String>> {
+        let rows: [(&str, &[&str]); 7] = [
+            (
+                "mika_(blue_archive)",
+                &[
+                    "聖園ミカ",
+                    "Misono_Mika",
+                    "圣园未花",
+                    "未花",
+                    "ミカ",
+                    "미소노미카",
+                    "mika",
+                    "聖園彌香",
+                    "圣园弥香",
+                    "MisonoMika",
+                    "美園ミカ",
+                ],
+            ),
+            ("hakurei_reimu", &["博丽灵梦", "博麗霊夢", "霊夢", "青霊夢", "博麗靈夢", "靈夢", "レイマリ"]),
+            ("amiya_(arknights)", &["阿米娅", "アーミヤ", "アーミヤ(アークナイツ)", "Amiya"]),
+            (
+                "raiden_shogun",
+                &[
+                    "雷电将军",
+                    "RaidenShogun",
+                    "雷电影",
+                    "Raiden_Ei",
+                    "巴尔泽布",
+                    "Beelzebul",
+                    "一心净土",
+                    "雷電将軍",
+                    "雷電將軍",
+                    "雷電将軍(原神)",
+                    "雷電影",
+                    "雷神バアル",
+                    "EiMiko",
+                    "影ちゃん",
+                ],
+            ),
+            (
+                "blue_archive",
+                &[
+                    "ブルアカ",
+                    "ブルーアーカイブ",
+                    "ブルアカイラスト部",
+                    "蔚藍檔案",
+                    "碧蓝档案",
+                    "碧藍檔案",
+                    "BA",
+                    "蔚蓝档案",
+                    "ぶるあか",
+                ],
+            ),
+            ("genshin_impact", &["原神", "原神project", "원신", "gnsnプラス", "Genshin"]),
+            ("touhou", &["東方Project", "おは東方"]),
+        ];
+        rows.iter().map(|(k, v)| (k.to_string(), v.iter().map(|s| s.to_string()).collect())).collect()
+    }
+
+    #[derive(Default)]
+    struct Answers {
+        wikis: HashMap<String, Vec<String>>,
+        results: HashMap<String, Vec<Value>>,
+        subjects: Vec<Value>,
+        related: HashMap<i64, Vec<Value>>,
+        offline_subjects: bool,
+        calls: Vec<(String, Option<Value>)>,
+    }
+
+    /// Loopback Danbooru/Bangumi stand-in answering from `Answers`.
+    struct Provider {
+        base: String,
+        answers: Arc<Mutex<Answers>>,
+        _server: test_provider::Server,
+    }
+
+    impl Provider {
+        fn start() -> Self {
+            let answers = Arc::new(Mutex::new(Answers { wikis: wikis(), ..Default::default() }));
+            let a = answers.clone();
+            let server = test_provider::Server::start(move |path, query, body| {
+                let mut answers = a.lock().unwrap();
+                answers.calls.push((format!("{path}?{query}"), body.cloned()));
+                Some(if path == "/wiki_pages.json" {
+                    let tag = test_provider::param(query, "search[title]");
+                    json!([{"title": tag, "other_names": answers.wikis.get(&tag).cloned().unwrap_or_default()}])
+                } else if path == "/search/characters" {
+                    let keyword = body.unwrap()["keyword"].as_str().unwrap();
+                    json!({"data": answers.results.get(keyword).cloned().unwrap_or_default()})
+                } else if path == "/search/subjects" {
+                    if answers.offline_subjects {
+                        return None;
+                    }
+                    json!({"data": answers.subjects})
+                } else if let Some(id) = path.strip_prefix("/characters/").and_then(|p| p.strip_suffix("/subjects")) {
+                    json!(answers.related.get(&id.parse::<i64>().unwrap()).cloned().unwrap_or_default())
+                } else {
+                    panic!("unexpected provider path {path}");
+                })
+            });
+            Self { base: server.base.clone(), answers, _server: server }
+        }
+        fn set(&self, f: impl FnOnce(&mut Answers)) {
+            f(&mut self.answers.lock().unwrap());
+        }
+        fn calls(&self) -> Vec<(String, Option<Value>)> {
+            self.answers.lock().unwrap().calls.clone()
+        }
+        fn keywords(&self) -> Vec<String> {
+            self.calls()
+                .into_iter()
+                .filter(|(url, _)| url.starts_with("/search/characters"))
+                .map(|(_, body)| body.unwrap()["keyword"].as_str().unwrap().to_owned())
+                .collect()
+        }
+    }
+
+    /// One saved scenario restored into a fresh package directory.
+    struct Library {
+        root: PathBuf,
+        tag: String,
+    }
+
+    impl Library {
+        fn load(key: &str) -> Self {
+            let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/names/matching.json.gz");
+            let mut text = String::new();
+            flate2::read::GzDecoder::new(std::fs::File::open(path).unwrap()).read_to_string(&mut text).unwrap();
+            let data: Value = serde_json::from_str(&text).unwrap();
+            let scenario = &data[key];
+            assert!(scenario.is_object(), "no saved scenario {key}");
+            let root = std::env::temp_dir().join(format!(
+                "illustash-names-matching-{}-{}",
+                std::process::id(),
+                crate::store::new_key().unwrap()
+            ));
+            std::fs::create_dir_all(&root).unwrap();
+            let root_text = root.to_string_lossy().into_owned();
+            for (file, field) in [("library.sqlite", "library"), ("source.sqlite", "source")] {
+                let c = Connection::open(root.join(file)).unwrap();
+                c.execute_batch("PRAGMA foreign_keys=OFF").unwrap();
+                c.execute_batch(&scenario[field].as_str().unwrap().replace("@ROOT@", &root_text)).unwrap();
+            }
+            Self { root, tag: scenario["entity"].as_str().unwrap().to_owned() }
+        }
+        fn db(&self) -> Connection {
+            Connection::open(self.root.join("library.sqlite")).unwrap()
+        }
+        fn refresh(&self, provider: &Provider, force: bool) -> Result<()> {
+            let mut source =
+                Source::new(self.root.join("library.sqlite"), Arc::new(AtomicBool::new(false)), true, force)?
+                    .with_bases(&provider.base, &provider.base);
+            run(&mut source, Some(&self.tag), &Mutex::new(json!({})))
+        }
+        fn choice(&self, kind: &str, key: &str) -> crate::names_view::Choice {
+            crate::names_view::View::load(&self.db()).unwrap().choose(kind, key).unwrap()
+        }
+        /// (display name, its source)
+        fn name(&self) -> (String, String) {
+            let c = self.choice("character", &self.tag);
+            (c.name, c.source)
+        }
+        /// (zh, ja)
+        fn languages(&self) -> (Option<String>, Option<String>) {
+            let c = self.choice("character", &self.tag);
+            (c.names[0].clone(), c.names[1].clone())
+        }
+        fn work_name(&self, work: &str) -> String {
+            self.choice("work", work).name
+        }
+        fn found_by(&self, query: &str) -> bool {
+            crate::names_search::hits(&self.db(), query).unwrap().contains_key(&self.tag)
+        }
+        fn write(&self, ops: Vec<Value>) {
+            let mut c = self.db();
+            command(&mut c, ops).unwrap();
+        }
+    }
+
+    impl Drop for Library {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.root);
+        }
+    }
+
+    fn s(v: &str) -> Option<String> {
+        Some(v.to_owned())
+    }
+    fn pair(a: &str, b: &str) -> (String, String) {
+        (a.to_owned(), b.to_owned())
+    }
+
+    #[test]
+    fn mika_chinese_subject_subtitle_and_cache() {
+        let (p, lib) = (Provider::start(), Library::load("mika_(blue_archive)|blue_archive|聖園ミカ|未花"));
+        p.set(|a| {
+            a.results.insert("聖園ミカ".into(), vec![result(114601, "聖園ミカ", Some("圣园未花"))]);
+            a.subjects = vec![
+                json!({"id":1,"name":"ブルーアーカイブ -Blue Archive-","name_cn":"蔚蓝档案"}),
+                json!({"id":2,"name":"ブルーアーカイブ The Animation","name_cn":"蔚蓝档案"}),
+            ];
+        });
+        lib.refresh(&p, false).unwrap();
+        assert_eq!(lib.name(), pair("圣园未花", "bangumi"));
+        assert_eq!(lib.work_name("blue_archive"), "蔚蓝档案");
+        assert_eq!(p.keywords(), ["聖園ミカ"]);
+        assert!(!p.calls().iter().any(|(url, _)| url.ends_with("/114601")));
+        let count = p.calls().len();
+        lib.refresh(&p, false).unwrap();
+        assert_eq!(p.calls().len(), count, "answered from the cache");
+        let danbooru: i64 =
+            lib.db().query_row("SELECT count(*) FROM display_names WHERE source='danbooru'", [], |r| r.get(0)).unwrap();
+        assert_eq!(danbooru, 0);
+    }
+
+    #[test]
+    fn reimu_never_displays_pairing_alias_and_alias_remains_searchable() {
+        let (p, lib) = (Provider::start(), Library::load("hakurei_reimu|touhou||"));
+        lib.refresh(&p, false).unwrap();
+        // Bangumi misses: the first Chinese wiki alias is shown, never the pairing alias.
+        assert_eq!(lib.name(), pair("博丽灵梦", "wiki"));
+        assert!(lib.found_by("レイマリ"));
+        p.set(|a| {
+            a.results.insert("博丽灵梦".into(), vec![result(12, "博麗霊夢", Some("博丽灵梦"))]);
+        });
+        lib.refresh(&p, true).unwrap();
+        assert_eq!(lib.name().0, "博丽灵梦");
+        assert_eq!(lib.work_name("touhou"), "东方Project"); // a failed work does not gate the character
+    }
+
+    #[test]
+    fn character_ambiguity_uses_related_work_or_abstains() {
+        let (p, lib) = (Provider::start(), Library::load("mika_(blue_archive)|blue_archive|聖園ミカ|"));
+        p.set(|a| {
+            a.results.insert(
+                "聖園ミカ".into(),
+                vec![result(1, "聖園ミカ", Some("正确名")), result(2, "聖園ミカ", Some("错误名"))],
+            );
+            a.related.insert(1, vec![json!({"name":"带副标题的原名","name_cn":"蔚蓝档案"})]);
+            a.related.insert(2, vec![json!({"name":"其他作品"})]);
+        });
+        lib.refresh(&p, false).unwrap();
+        assert_eq!(lib.name().0, "正确名");
+        p.set(|a| {
+            let same = a.related[&1].clone();
+            a.related.insert(2, same);
+        });
+        lib.refresh(&p, true).unwrap();
+        // Bangumi abstains; the wiki's Chinese name comes before the index Japanese.
+        assert_eq!(lib.name(), pair("圣园未花", "wiki"));
+        p.set(|a| a.related.clear());
+        lib.refresh(&p, true).unwrap();
+        assert_eq!(lib.name().1, "wiki");
+    }
+
+    #[test]
+    fn work_ambiguity_chinese_candidate_tiebreak() {
+        let (p, lib) = (Provider::start(), Library::load("raiden_shogun|genshin_impact||"));
+        p.set(|a| {
+            a.subjects = vec![
+                json!({"id":1,"name":"原神","name_cn":"无关中文名"}),
+                json!({"id":2,"name":"原神 -Genshin Impact-","name_cn":"原神"}),
+            ]
+        });
+        lib.refresh(&p, false).unwrap();
+        assert_eq!(lib.work_name("genshin_impact"), "原神");
+        assert_eq!(lib.name(), pair("雷电将军", "wiki"));
+        p.set(|a| a.subjects[1] = json!({"id":2,"name":"原神","name_cn":"另一中文名"}));
+        lib.refresh(&p, true).unwrap();
+        assert_eq!(lib.work_name("genshin_impact"), "原神");
+    }
+
+    #[test]
+    fn candidates_bounded_and_parentheses_filtered() {
+        let (p, lib) = (Provider::start(), Library::load("amiya_(arknights)|arknights||"));
+        lib.refresh(&p, false).unwrap();
+        assert_eq!(p.keywords(), ["阿米娅", "アーミヤ"]);
+        let names: Vec<String> = ["名（作品）", "名(作品)", &"名".repeat(41), "一", "二", "三", "四"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        assert_eq!(net::keywords(&names, false), ["一", "二", "三"]);
+    }
+
+    #[test]
+    fn work_network_failure_does_not_block_character() {
+        let (p, lib) = (Provider::start(), Library::load("mika_(blue_archive)|example_work|聖園ミカ|"));
+        p.set(|a| {
+            a.results.insert("聖園ミカ".into(), vec![result(114601, "聖園ミカ", Some("圣园未花"))]);
+            a.offline_subjects = true;
+            a.wikis.insert("example_work".into(), vec!["作品甲".into()]);
+        });
+        assert!(lib.refresh(&p, false).is_err(), "the failed work is reported");
+        assert_eq!(lib.name().0, "圣园未花");
+    }
+
+    #[test]
+    fn index_japanese_precedes_model() {
+        let (p, lib) = (Provider::start(), Library::load("hakurei_reimu|touhou|博麗霊夢|"));
+        p.set(|a| {
+            a.wikis.insert("hakurei_reimu".into(), vec!["博麗霊夢".into(), "霊夢".into()]);
+            // no Chinese wiki alias
+        });
+        lib.refresh(&p, false).unwrap();
+        lib.write(vec![replace("character", &lib.tag, "model", vec![json!(["zh", "机翻名"])])]);
+        assert_eq!(lib.name(), pair("博麗霊夢", "index"));
+    }
+
+    #[test]
+    fn chinese_original_name_beats_secret_name_in_infobox() {
+        let (p, lib) = (Provider::start(), Library::load("raiden_shogun|genshin_impact||"));
+        p.set(|a| {
+            a.results.insert("雷电将军".into(), vec![result(98862, "雷电将军", Some("巴尔泽布"))]);
+            a.subjects = vec![json!({"id":1,"name":"原神","name_cn":"原神"})];
+        });
+        lib.refresh(&p, false).unwrap();
+        assert_eq!(lib.name(), pair("雷电将军", "bangumi"));
+        assert_eq!(lib.languages(), (s("雷电将军"), None));
+        assert!(lib.found_by("巴尔泽布"));
+        let shown: i64 = lib
+            .db()
+            .query_row(
+                "SELECT count(*) FROM display_names WHERE kind='character' AND key=? AND value='巴尔泽布'",
+                [&lib.tag],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(shown, 0);
+    }
+
+    #[test]
+    fn japanese_han_name_is_not_chinese() {
+        let (p, lib) = (Provider::start(), Library::load("hakurei_reimu|touhou||"));
+        p.set(|a| {
+            a.results.insert("博丽灵梦".into(), vec![result(12, "博麗霊夢", Some("博丽灵梦"))]);
+        });
+        lib.refresh(&p, false).unwrap();
+        assert_eq!(lib.languages(), (s("博丽灵梦"), s("博麗霊夢")));
+        assert_eq!(lib.name().0, "博丽灵梦");
+    }
+
+    #[test]
+    fn japanese_han_name_without_matched_work_is_not_chinese() {
+        let (p, lib) = (Provider::start(), Library::load("yuuki_makoto_(persona_3)|persona_3||"));
+        p.set(|a| {
+            a.wikis.insert(lib.tag.clone(), vec!["結城理".into()]);
+            a.results.insert("結城理".into(), vec![result(546, "結城理", Some("结城理"))]);
+        });
+        lib.refresh(&p, false).unwrap();
+        assert_eq!(lib.languages(), (s("结城理"), s("結城理")));
+    }
+
+    #[test]
+    fn chinese_name_without_unique_work_subject_uses_wiki_exact() {
+        let (p, lib) = (Provider::start(), Library::load("nahida_(genshin_impact)|genshin_impact|纳西妲|"));
+        p.set(|a| {
+            a.results.insert("纳西妲".into(), vec![result(112644, "纳西妲", Some("布耶尔"))]);
+        });
+        lib.refresh(&p, false).unwrap();
+        assert_eq!(lib.name().0, "纳西妲");
+    }
+
+    #[test]
+    fn unknown_chinese_work_uses_exact_wiki_name_without_subject() {
+        let (p, lib) = (Provider::start(), Library::load("角色甲_(unknown)|unknown||"));
+        p.set(|a| {
+            a.wikis.insert(lib.tag.clone(), vec!["角色甲".into()]);
+            a.results.insert("角色甲".into(), vec![result(101, "角色甲", Some("人物别名"))]);
+        });
+        lib.refresh(&p, false).unwrap();
+        assert_eq!(lib.name().0, "角色甲");
+        assert_eq!(lib.languages().1, None);
+    }
+
+    #[test]
+    fn hangul_wiki_alias_never_becomes_chinese_or_japanese() {
+        let (p, lib) = (Provider::start(), Library::load("modernia_(nikke)|nikke||"));
+        p.set(|a| {
+            a.wikis.insert(lib.tag.clone(), vec!["모더니아".into()]);
+            a.results.insert("모더니아".into(), vec![result(102, "모더니아", None)]);
+        });
+        lib.refresh(&p, false).unwrap();
+        assert_eq!(lib.name().1, "readable");
+        assert_eq!(lib.languages(), (None, None));
+    }
+
+    #[test]
+    fn individual_does_not_adopt_team_wiki_alias() {
+        assert!(!net::group("Steam"));
+        assert!(net::group("カバさんチーム"));
+        let (p, lib) = (Provider::start(), Library::load("saemonza_(girls_und_panzer)|girls_und_panzer||"));
+        p.set(|a| {
+            a.wikis.insert(lib.tag.clone(), vec!["左衛門佐".into(), "杉山清美".into(), "カバさんチーム".into()]);
+            a.results.insert("左衛門佐".into(), vec![result(17426, "左衛門佐 / 杉山清美", Some("左卫门佐"))]);
+            a.results.insert("カバさんチーム".into(), vec![result(166515, "カバさんチーム", Some("河马队"))]);
+        });
+        lib.refresh(&p, false).unwrap();
+        assert_eq!(lib.name().1, "readable");
+        assert!(!p.keywords().iter().any(|k| k == "カバさんチーム"));
+    }
+
+    #[test]
+    fn japanese_han_name_with_unmatched_work_stays_japanese() {
+        let key = "shiina_mahiru_(otonari_no_tenshi-sama)|otonari_no_tenshi-sama||";
+        let (p, lib) = (Provider::start(), Library::load(key));
+        p.set(|a| {
+            a.wikis.insert(lib.tag.clone(), vec!["椎名真昼".into()]);
+            a.results.insert("椎名真昼".into(), vec![result(76270, "椎名真昼", Some("椎名真昼"))]);
+        });
+        lib.refresh(&p, false).unwrap();
+        assert_eq!(lib.languages(), (s("椎名真昼"), s("椎名真昼")));
+    }
+
+    #[test]
+    fn ambiguous_entries_agree_or_abstain_on_chinese_name() {
+        let (p, lib) = (Provider::start(), Library::load("hatsune_miku|vocaloid|初音ミク|"));
+        p.set(|a| {
+            a.results.insert(
+                "初音ミク".into(),
+                vec![result(10452, "初音ミク", Some("初音未来")), result(184752, "初音ミク", Some("初音未来"))],
+            );
+        });
+        lib.refresh(&p, false).unwrap();
+        assert_eq!(lib.name(), pair("初音未来", "bangumi"));
+        p.set(|a| a.results.get_mut("初音ミク").unwrap()[1]["infobox"][0]["value"] = json!("另一名字"));
+        lib.refresh(&p, true).unwrap();
+        assert_eq!(lib.name(), pair("初音ミク", "index"));
+    }
+
+    #[test]
+    fn exact_query_result_beats_broad_wiki_aliases_in_same_page() {
+        let (p, lib) = (Provider::start(), Library::load("hatsune_miku|vocaloid|初音ミク|"));
+        p.set(|a| {
+            a.wikis.insert(lib.tag.clone(), vec!["初音ミク".into(), "初音".into(), "初音未來".into()]);
+            a.results.insert(
+                "初音ミク".into(),
+                vec![
+                    result(10452, "初音ミク", Some("初音未来")),
+                    result(184752, "初音未來", Some("初音未来")),
+                    result(1501, "初音", None),
+                ],
+            );
+        });
+        lib.refresh(&p, false).unwrap();
+        assert_eq!(lib.name(), pair("初音未来", "bangumi"));
+    }
+
+    #[test]
+    fn series_builtin_overrides_specific_subject_but_not_user() {
+        let lib = Library::load("hakurei_reimu|touhou||");
+        for key in ["touhou", "vocaloid", "fate", "genshin_impact", "blue_archive", "arknights"] {
+            lib.write(vec![replace("work", key, "bangumi", vec![json!(["zh", "某个具体作品"])])]);
+            let chosen = lib.choice("work", key);
+            assert_eq!(
+                (chosen.name.as_str(), chosen.source.as_str()),
+                (crate::names_view::work_name(key).unwrap(), "builtin")
+            );
+        }
+        lib.write(vec![replace("work", "fate", "user", vec![json!(["zh", "用户命名"])])]);
+        assert_eq!(lib.choice("work", "fate").name, "用户命名");
+        assert_eq!(lib.choice("work", "touhou_koumakyou").source, "readable");
+    }
+}
+
+/// Name sources and their priority on the old test's base library (#9: formerly tests/test_names.py).
+/// The library state was saved from that test's own arrangement after the real start-up switch;
+/// provider answers (tests/name_providers.py) and expectations are unchanged.
+#[cfg(test)]
+mod sources_tests {
+    use super::matching_tests::result;
+    use super::*;
+    use std::io::Read;
+    use std::path::PathBuf;
+
+    struct Answers {
+        wikis: HashMap<String, Vec<String>>,
+        subjects: Vec<Value>,
+        characters: Vec<Value>,
+        fields: HashMap<i64, Value>,
+        translation: Value,
+        down: bool,
+        calls: Vec<(String, Option<Value>)>,
+    }
+
+    impl Default for Answers {
+        fn default() -> Self {
+            Self {
+                wikis: [("Example", vec!["エグザンプル"]), ("alice", vec!["ア_リス", "愛麗絲"]), ("bob", vec!["ボブ"])]
+                    .into_iter()
+                    .map(|(k, v)| (k.to_owned(), v.into_iter().map(str::to_owned).collect()))
+                    .collect(),
+                subjects: vec![
+                    json!({"id":99,"name":"エグザンプル外伝","name_cn":"错误作品"}),
+                    json!({"id":1,"name":"エグザンプル","name_cn":"示例作品"}),
+                ],
+                characters: vec![json!({"id":10,"name":"アリス"}), json!({"id":11,"name":"別人"})],
+                fields: HashMap::from([(10, result(10, "アリス", Some("爱丽丝")))]),
+                translation: json!({"zh":"译名"}),
+                down: false,
+                calls: vec![],
+            }
+        }
+    }
+
+    struct Providers {
+        base: String,
+        answers: Arc<Mutex<Answers>>,
+        _server: test_provider::Server,
+    }
+
+    impl Providers {
+        fn start() -> Self {
+            let answers = Arc::new(Mutex::new(Answers::default()));
+            let a = answers.clone();
+            let server = test_provider::Server::start(move |path, query, body| {
+                let mut a = a.lock().unwrap();
+                a.calls.push((format!("{path}?{query}"), body.cloned()));
+                if a.down {
+                    return None;
+                }
+                Some(if path == "/wiki_pages.json" {
+                    let tag = test_provider::param(query, "search[title]");
+                    match a.wikis.get(&tag) {
+                        Some(names) => json!([{"title": tag, "other_names": names}]),
+                        None => json!([]),
+                    }
+                } else if path == "/search/subjects" {
+                    json!({"data": a.subjects, "total": a.subjects.len()})
+                } else if path == "/search/characters" {
+                    let rows: Vec<Value> = a
+                        .characters
+                        .iter()
+                        .map(|r| {
+                            let mut r = r.clone();
+                            if let Some(extra) = a.fields.get(&r["id"].as_i64().unwrap()) {
+                                for (k, v) in extra.as_object().unwrap() {
+                                    if k != "id" {
+                                        r[k] = v.clone();
+                                    }
+                                }
+                            }
+                            r
+                        })
+                        .collect();
+                    json!({"data": rows})
+                } else if path.starts_with("/characters/") && path.ends_with("/subjects") {
+                    json!([{"name":"エグザンプル","name_cn":"示例作品"}])
+                } else if path == "/chat/completions" {
+                    json!({"choices":[{"message":{"content": a.translation.to_string()}}]})
+                } else {
+                    panic!("unexpected provider path {path}");
+                })
+            });
+            Self { base: server.base.clone(), answers, _server: server }
+        }
+        fn set(&self, f: impl FnOnce(&mut Answers)) {
+            f(&mut self.answers.lock().unwrap());
+        }
+        fn calls(&self) -> Vec<(String, Option<Value>)> {
+            self.answers.lock().unwrap().calls.clone()
+        }
+        fn model_calls(&self) -> Vec<Value> {
+            self.calls()
+                .into_iter()
+                .filter(|(u, _)| u.starts_with("/chat/completions"))
+                .map(|(_, b)| b.unwrap())
+                .collect()
+        }
+    }
+
+    struct Library {
+        root: PathBuf,
+    }
+
+    impl Library {
+        fn load() -> Self {
+            let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/names/base.json.gz");
+            let mut text = String::new();
+            flate2::read::GzDecoder::new(std::fs::File::open(path).unwrap()).read_to_string(&mut text).unwrap();
+            let data: Value = serde_json::from_str(&text).unwrap();
+            let root = std::env::temp_dir().join(format!(
+                "illustash-names-sources-{}-{}",
+                std::process::id(),
+                crate::store::new_key().unwrap()
+            ));
+            std::fs::create_dir_all(&root).unwrap();
+            let root_text = root.to_string_lossy().into_owned();
+            for (file, field) in [("library.sqlite", "library"), ("source.sqlite", "source")] {
+                let c = Connection::open(root.join(file)).unwrap();
+                c.execute_batch("PRAGMA foreign_keys=OFF").unwrap();
+                c.execute_batch(&data["base"][field].as_str().unwrap().replace("@ROOT@", &root_text)).unwrap();
+            }
+            Self { root }
+        }
+        fn db(&self) -> Connection {
+            Connection::open(self.root.join("library.sqlite")).unwrap()
+        }
+        fn run(&self, p: &Providers, entity: Option<&str>, force: bool) -> Result<()> {
+            let mut source =
+                Source::new(self.root.join("library.sqlite"), Arc::new(AtomicBool::new(false)), true, force)?
+                    .with_bases(&p.base, &p.base);
+            run(&mut source, entity, &Mutex::new(json!({})))
+        }
+        fn configure_model(&self, p: &Providers) {
+            self.db()
+                .execute_batch(&format!(
+                    "INSERT OR REPLACE INTO name_settings VALUES ('model_key','sk-test-secret-1234'),('model_base','{}')",
+                    p.base
+                ))
+                .unwrap();
+        }
+        fn put(&self, kind: &str, key: &str, lang: &str, source: &str, value: &str) {
+            let mut c = self.db();
+            command(&mut c, vec![json!({"op":"put","kind":kind,"key":key,"lang":lang,"source":source,"value":value})])
+                .unwrap();
+        }
+        fn char(&self, tag: &str) -> crate::names_view::Choice {
+            crate::names_view::View::load(&self.db()).unwrap().choose("character", tag).unwrap()
+        }
+        fn work_name(&self) -> String {
+            crate::names_view::View::load(&self.db()).unwrap().choose("work", "Example").unwrap().name
+        }
+        fn hits(&self, query: &str) -> BTreeSet<String> {
+            let c = self.db();
+            let tags: HashMap<String, String> = c
+                .prepare(
+                    "SELECT l.entity_id,l.key FROM links l JOIN entities e ON e.id=l.entity_id
+                     WHERE l.system='danbooru' AND l.current=1 AND e.kind<>'work'",
+                )
+                .unwrap()
+                .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+                .unwrap()
+                .collect::<rusqlite::Result<_>>()
+                .unwrap();
+            crate::names_search::hits(&c, query).unwrap().keys().filter_map(|id| tags.get(id).cloned()).collect()
+        }
+    }
+
+    impl Drop for Library {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.root);
+        }
+    }
+
+    fn named(c: crate::names_view::Choice) -> (String, String) {
+        (c.name, c.source)
+    }
+    fn pair(a: &str, b: &str) -> (String, String) {
+        (a.to_owned(), b.to_owned())
+    }
+
+    #[test]
+    fn fallback_and_source_priority() {
+        let lib = Library::load();
+        assert_eq!(named(lib.char("alice")), pair("Alice", "readable"));
+        lib.put("character", "alice", "ja", "index", "アリス");
+        assert_eq!(lib.char("alice").name, "アリス");
+        for (source, name) in [("model", "机翻"), ("danbooru", "站点中文"), ("index", "索引中文"), ("bangumi", "中文")]
+        {
+            lib.put("character", "alice", "zh", source, name);
+        }
+        assert_eq!(named(lib.char("alice")), pair("中文", "bangumi"));
+        lib.put("character", "alice", "zh", "user", "用户中文");
+        assert_eq!(lib.char("alice").name, "用户中文");
+        assert_eq!(crate::names_view::readable("mika_(blue_archive)", true), "Mika");
+        assert_eq!(crate::names_view::readable("hatsune_miku", true), "Hatsune Miku");
+    }
+
+    #[test]
+    fn han_only_danbooru_names_are_kept_as_given() {
+        let (p, lib) = (Providers::start(), Library::load());
+        let names = ["博麗霊夢", "聖園ミカ", "Mika", "미카"];
+        p.set(|a| {
+            a.wikis.insert("alice".into(), names.iter().map(|s| s.to_string()).collect());
+        });
+        let mut source = Source::new(lib.root.join("library.sqlite"), Arc::new(AtomicBool::new(false)), true, false)
+            .unwrap()
+            .with_bases(&p.base, &p.base);
+        assert_eq!(source.wiki("alice").unwrap(), names);
+    }
+
+    #[test]
+    fn wiki_chinese_alias_selection() {
+        let zh = |names: &[&str], works: &[&str]| {
+            net::wiki_zh(
+                &names.iter().map(|s| s.to_string()).collect::<Vec<_>>(),
+                &works.iter().map(|s| s.to_string()).collect::<Vec<_>>(),
+            )
+        };
+        assert_eq!(zh(&["ホタル", "流螢", "流萤(崩坏:星穹铁道)", "流萤"], &[]).as_deref(), Some("流萤"));
+        assert_eq!(
+            zh(&["モルガン(Fate)", "モルガン・ル・フェ", "摩根·勒·菲", "摩根(fate)"], &[]).as_deref(),
+            Some("摩根·勒·菲")
+        );
+        assert_eq!(zh(&["露娜", "银冕"], &[]).as_deref(), Some("露娜")); // wiki order, not the most "Chinese-looking"
+        assert_eq!(zh(&["阿尔托莉雅·潘德拉贡〔Alter〕"], &[]).as_deref(), Some("阿尔托莉雅·潘德拉贡〔Alter〕"));
+        for names in [
+            &["博麗霊夢"][..],
+            &["神里綾華"],
+            &["Ado誕生日"],
+            &["AK-12(少女前線)"],
+            &["寒色兄妹"],
+            &["カイト", "Kaito"],
+            &["미카"],
+        ] {
+            assert_eq!(zh(names, &[]), None, "{names:?}");
+        }
+        assert_eq!(zh(&["重返未来6"], &["重返未来：1999", "重返未来"]), None);
+    }
+
+    #[test]
+    fn wiki_chinese_alias_is_below_bangumi_and_skips_model() {
+        let (p, lib) = (Providers::start(), Library::load());
+        p.set(|a| {
+            a.wikis.insert("bob".into(), vec!["ボブ".into(), "鲍勃".into()]);
+        });
+        lib.configure_model(&p);
+        lib.run(&p, None, false).unwrap();
+        assert_eq!(named(lib.char("bob")), pair("鲍勃", "wiki"));
+        assert!(p.model_calls().is_empty());
+        lib.put("character", "bob", "ja", "index", "ボブ");
+        assert_eq!(lib.char("bob").name, "鲍勃"); // Chinese first, even over a sourced Japanese name
+        p.set(|a| {
+            a.wikis.insert("alice".into(), vec!["ア_リス".into(), "爱丽丝酱".into()]);
+        });
+        lib.run(&p, None, true).unwrap();
+        assert_eq!(named(lib.char("alice")), pair("爱丽丝", "bangumi"));
+    }
+
+    #[test]
+    fn bangumi_search_names() {
+        let (p, lib) = (Providers::start(), Library::load());
+        lib.run(&p, None, false).unwrap();
+        assert_eq!(lib.char("alice").name, "爱丽丝");
+        assert_eq!(lib.char("alice").names[1].as_deref(), Some("アリス"));
+        assert_eq!(lib.work_name(), "示例作品");
+        assert_eq!(named(lib.char("bob")), pair("Bob", "readable"));
+        assert!(!p.calls().iter().any(|(u, _)| u.contains("/characters/11")));
+        assert_eq!(net::normalize("Ａ ・ リ ス"), net::normalize("A･リス"));
+    }
+
+    #[test]
+    fn nonexact_character_search_result_is_not_adopted() {
+        let (p, lib) = (Providers::start(), Library::load());
+        p.set(|a| {
+            a.fields.insert(10, json!({"name":"違う人","name_cn":"不可采用"}));
+        });
+        lib.run(&p, None, false).unwrap();
+        assert_ne!(lib.char("alice").source, "bangumi");
+        assert_eq!(lib.char("alice").names[0], None);
+    }
+
+    #[test]
+    fn ambiguous_or_nonexact_subject_not_adopted() {
+        let (p, lib) = (Providers::start(), Library::load());
+        p.set(|a| a.subjects.truncate(1));
+        lib.run(&p, None, false).unwrap();
+        assert_eq!(lib.work_name(), "Example");
+        assert_eq!(lib.char("alice").source, "bangumi");
+        p.set(|a| {
+            a.subjects.extend([json!({"id":1,"name":"エグザンプル"}), json!({"id":2,"name":"エグザンプル"})]);
+        });
+        lib.run(&p, None, true).unwrap();
+        assert_eq!(lib.char("alice").source, "bangumi");
+    }
+
+    #[test]
+    fn skin_compound_fallback() {
+        assert_eq!(crate::names_view::skin_zh("swimsuit_maid").as_deref(), Some("泳装 · 女仆"));
+        assert_eq!(crate::names_view::skin_zh("first_ascension").as_deref(), Some("第一再临"));
+        assert_eq!(crate::names_view::skin_zh("swimsuit_foreigner"), None);
+        let lib = Library::load();
+        let view = crate::names_view::View::load(&lib.db()).unwrap();
+        assert_eq!(view.choose("skin", "swimsuit_foreigner").unwrap().name, "Swimsuit Foreigner");
+    }
+
+    #[test]
+    fn all_search_surfaces_and_all_name_sources() {
+        let (p, lib) = (Providers::start(), Library::load());
+        lib.run(&p, None, false).unwrap();
+        lib.put("character", "bob", "en", "index", "English Alias");
+        let both: BTreeSet<String> = ["alice".to_owned(), "bob".to_owned()].into();
+        for query in ["示例作品", "エグザンプル", "Example"] {
+            assert_eq!(lib.hits(query), both, "{query}");
+        }
+        for query in ["爱丽丝", "アリス", "Alice", "alice", "a_li_ce"] {
+            assert!(lib.hits(query).contains("alice"), "{query}");
+        }
+        assert!(lib.hits("English Alias").contains("bob"));
+    }
+
+    #[test]
+    fn negative_cache_survives_restart_and_refresh_bypasses() {
+        let (p, lib) = (Providers::start(), Library::load());
+        p.set(|a| a.wikis.clear());
+        lib.run(&p, None, false).unwrap();
+        let count = p.calls().len();
+        lib.run(&p, None, false).unwrap(); // a new updater: finished names are not looked up again
+        assert_eq!(p.calls().len(), count);
+        let alice: String = lib
+            .db()
+            .query_row("SELECT entity_id FROM links WHERE system='danbooru' AND key='alice'", [], |r| r.get(0))
+            .unwrap();
+        lib.run(&p, Some(&alice), true).unwrap();
+        assert_eq!(p.calls().len(), count + 3); // two wikis and the indexed Japanese character search
+    }
+
+    #[test]
+    fn failed_lookup_is_retried_next_launch() {
+        let (p, lib) = (Providers::start(), Library::load());
+        p.set(|a| a.down = true);
+        assert!(lib.run(&p, None, false).is_err());
+        p.set(|a| a.down = false);
+        lib.run(&p, None, false).unwrap();
+        assert_eq!(lib.char("alice").name, "爱丽丝");
+    }
+
+    #[test]
+    fn model_api_last_resort_and_negative_cache() {
+        let (p, lib) = (Providers::start(), Library::load());
+        lib.configure_model(&p);
+        lib.run(&p, None, false).unwrap();
+        assert_eq!(lib.char("alice").source, "bangumi");
+        assert_eq!(lib.char("bob").source, "model");
+        let asked = p.model_calls();
+        assert_eq!(asked.len(), 1);
+        let content: Value = serde_json::from_str(asked[0]["messages"][1]["content"].as_str().unwrap()).unwrap();
+        assert_eq!(
+            content.as_object().unwrap().keys().cloned().collect::<BTreeSet<_>>(),
+            ["japanese_name", "tag", "work"].map(String::from).into()
+        );
+        lib.run(&p, None, false).unwrap();
+        assert_eq!(p.model_calls().len(), 1);
+        p.set(|a| a.translation = json!({"zh": null}));
+        lib.run(&p, None, true).unwrap();
+        let count = p.calls().len();
+        lib.run(&p, None, false).unwrap();
+        assert_eq!(p.calls().len(), count);
+    }
+
+    #[test]
+    fn unusable_model_answer_is_asked_once() {
+        let (p, lib) = (Providers::start(), Library::load());
+        lib.configure_model(&p);
+        p.set(|a| a.translation = json!({"zh":"ボブ"})); // kana: not a Chinese name
+        lib.run(&p, None, false).unwrap();
+        assert_ne!(lib.char("bob").source, "model");
+        let asked = p.model_calls().len();
+        assert_eq!(asked, 1);
+        lib.run(&p, None, false).unwrap();
+        assert_eq!(p.model_calls().len(), asked);
+    }
+
+    #[test]
+    fn user_name_survives_provider_refresh() {
+        let (p, lib) = (Providers::start(), Library::load());
+        lib.put("character", "alice", "zh", "user", "人工名");
+        lib.run(&p, None, true).unwrap();
+        assert_eq!(named(lib.char("alice")), pair("人工名", "user"));
+    }
+}

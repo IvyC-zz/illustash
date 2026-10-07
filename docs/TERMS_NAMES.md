@@ -65,12 +65,8 @@ Python 里的词表副本仍给 NameUpdater 用，两边由测试钉住相同。
 ## 6. 验收
 
 **测试**（全量：cargo 77 + 3、clippy 零警告、JS 40、Python 816 项，跳过 11）：
-- 契约（`tests/test_terms_names_contract.py`）：N0 在旧代码上钉住的选名、搜索、历史文案，切换后原样通过。切换后的全量快照与切换前逐字相等；搜索与旧实现全量对照，包括两种边角数据形状。
-- 投影（`test_terms_names_projection.py`）：每个身份、每个文字键与旧 `View` 相等，9 种改动后逐一重建再对照。
-- 收编（`test_terms_names_sync.py`）：零差异、再跑不改、改坏能报出、预检失败整次回滚。
-- 写入双跑（`test_terms_names_writes.py`）：NameUpdater 与角色命令。
-- 拒绝对照（`test_terms_character_refusals.py`）：14 个写入口 × 有 / 无身份策略 × 名字在 / 不在核心。
-- 切换后再跑已有测试（`test_terms_switched_suites.py`）。
+- 契约、投影、收编、写入双跑、拒绝对照（原 `test_terms_names_contract`、`test_terms_names_projection`、`test_terms_names_sync`、`test_terms_names_writes`、`test_terms_character_refusals`）：2026-10-07 起改为 `native/terms/tests/replay.rs` 中同名模块的核心调用重放（#9），比较口径见该文件开头。
+- 选名规则：`native/terms/src/app_names.rs` 的 `matching_tests`、`sources_tests` 在原测试保存的图库状态上用同样的提供方回答驱动原生名字任务，核对原期望；传输层的重试与节奏见 `app_name_sources.rs` 的 `network_tests`。
 - 每一段都做了变异检查，见方案第 6 节。
 
 **真实副本**（N6，详见方案第 6 节）：

@@ -18,7 +18,7 @@ import numpy as np
 from PIL import Image, ImageDraw
 
 from web import relate, similar
-from tests.test_relate import picture, jpeg
+from tests.relate_images import picture, jpeg
 
 
 class NativeRelationImagesTest(unittest.TestCase):

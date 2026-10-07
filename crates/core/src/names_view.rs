@@ -5,7 +5,7 @@
 //! - `term_name_choice(kind, key, …)`：`View.choose(kind, key)`，键的范围是人物的 tag、作品文字（`entities.work` 与
 //!   qualifier 链接）、皮肤 variant。
 //!
-//! 结果与旧代码全量逐字对照（tests/test_terms_names_projection.py）。
+//! 结果曾与旧代码全量逐字对照；现由 native/terms/tests/replay.rs 的 test_terms_names_projection 重放钉住（#9）。
 use crate::{Error, Result};
 use rusqlite::{params, Connection};
 use std::collections::{BTreeMap, BTreeSet, HashMap};

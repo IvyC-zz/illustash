@@ -14,7 +14,7 @@ from web.provenance_job import Runner
 from web.server import adopt_artists
 from web.store import Invalid, Store
 from provenance import db, export
-from tests.test_web import fixture
+from tests.synthetic_source import source_fixture as fixture
 from tests import terms_seed
 from tests.test_terms_core import core
 

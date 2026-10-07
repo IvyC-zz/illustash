@@ -7,7 +7,7 @@ import subprocess
 import os
 import unittest
 from tests.test_native_folder import NativeFolderHTTPTest
-from tests.test_sync import SyncTest
+from tests import photos_fixture
 from tests.test_native_human_labels import snapshot
 
 class NativeSyncTest(unittest.TestCase):
@@ -20,7 +20,7 @@ class NativeSyncTest(unittest.TestCase):
     finish = NativeFolderHTTPTest.finish
     _folder_setup = NativeFolderHTTPTest.setUp
     _fixture_setup = NativeFolderHTTPTest._fixture_setup
-    photo = SyncTest.photo
+    photo = photos_fixture.photo
 
     def setUp(self):
         self._folder_setup()
@@ -429,4 +429,4 @@ Path(sys.argv[2]).write_text(json.dumps(dict(identity=r['identity'],packages=pac
         self.assertEqual(state['history'][0]['sources']['com.atebits.Tweetie2'],{'name':'X','photos':2,'collected':2})
         with sqlite3.connect(self.lib.source) as c:self.assertEqual(c.execute("SELECT uuid,source_id FROM assets WHERE source_id LIKE '%photos' ORDER BY uuid").fetchall(),[('D','photos'),('G','second-photos')])
 
-del NativeFolderHTTPTest, SyncTest
+del NativeFolderHTTPTest

@@ -14,7 +14,7 @@
 
 基础版首次文件夹同步完成盘点和应用导入后可浏览、人工整理；没有可选识别 worker 时状态为「待识别」，不表示盘点失败。回退时使用同版本程序和资源，旧版仍可能要求外部参考库；不要为回退把个人数据放进安装资源。
 
-合成测试输入由 `tests/synthetic_source.py` 的 `source_fixture(root)` 与 `synthetic_reference(root)` 构造，只使用显式临时目录和 SQLite/JSON，不导入 Store/Server 或调用原生候选建库。前者保留固定小源库及相册映射，后者保留完整参考 schema 与 `characters`、`character_aliases`、`runs` 行；历史升级 schema/producer 和业务期望仍由各自既有测试持有。`tests.test_web.fixture` 与 native create 模块的同名 reference 导入保持兼容，现有动态 Store/Server 对照尚未退役。
+合成测试输入由 `tests/synthetic_source.py` 的 `source_fixture(root)` 与 `synthetic_reference(root)` 构造，只使用显式临时目录和 SQLite/JSON，不导入 Store/Server 或调用原生候选建库。前者保留固定小源库及相册映射，后者保留完整参考 schema 与 `characters`、`character_aliases`、`runs` 行；历史升级 schema/producer 和业务期望仍由各自既有测试持有。旧的 `tests.test_web.fixture` 已随第 1 类测试删除（#9），各测试直接导入 `source_fixture`；仍依赖动态 Store/Server 的对照按 #9 后续阶段退役。
 
 ## 出处类型接口
 

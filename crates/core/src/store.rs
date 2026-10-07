@@ -19,9 +19,18 @@ pub type RelationId = i64;
 pub type ActionId = i64;
 
 /// 新词条的 key：随机 UUID v4，永不改变。
+///
+/// 只供测试：设置 `ILLUSTASH_TEST_KEY_COUNTER` 为一个计数文件时，按文件里的计数依次生成可复现的键，
+/// 录制与重放（native/terms/tests/replay.rs）因此得到同样的键和同样的排序。产品从不设置它。
 pub fn new_key() -> Result<String> {
     let mut b = [0u8; 16];
-    getrandom::fill(&mut b).map_err(|e| Error::Invalid(format!("无法生成随机 ID：{e}")))?;
+    if let Some(counter) = std::env::var_os("ILLUSTASH_TEST_KEY_COUNTER") {
+        let n = std::fs::read_to_string(&counter).ok().and_then(|s| s.trim().parse::<u64>().ok()).unwrap_or(0) + 1;
+        std::fs::write(&counter, n.to_string())?;
+        b.copy_from_slice(&sha2::Sha256::digest(n.to_le_bytes())[..16]);
+    } else {
+        getrandom::fill(&mut b).map_err(|e| Error::Invalid(format!("无法生成随机 ID：{e}")))?;
+    }
     b[6] = (b[6] & 0x0f) | 0x40;
     b[8] = (b[8] & 0x3f) | 0x80;
     let h = hex(&b);

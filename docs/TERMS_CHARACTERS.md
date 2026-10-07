@@ -126,12 +126,9 @@ S5 在真实数据里修掉两个实现 bug：
 - `tools/verify_terms_characters.py`：切换后三方对照；
 - `tools/bench_terms_characters.py`：合成副本基准。
 
-测试：
-- `tests/test_terms_characters_contract.py`（S0）；
-- `tests/test_terms_character_*.py`（学习、身份、命令、结构、导入、历史、性能）；
-- `tests/test_terms_characters_cutover.py`、`tests/test_terms_switched_suites.py`；
-- 双跑框架 `tests/terms_dual.py`；
-- Rust `native/terms/src/legacy_characters/tests.rs` 等。
+测试（2026-10-07 起，#9）：
+- `native/terms/tests/replay.rs`：原 Python 契约与双跑测试（`test_terms_characters_contract`、`test_terms_character_*`、`test_terms_characters_cutover`、`test_identity*`、`test_lead`、`test_web_v2`、`test_works` 等，按原模块名各一项）在仍通过固定快照时录下的全部核心调用，用当前 `illustash-terms` 重放，逐步对照输出和各表状态摘要。录制无法重做：参考实现已删除。夹具在 `native/terms/tests/fixtures/replay/`，比较口径写在 `replay.rs` 开头；
+- Rust `crates/core/src/legacy_characters/tests.rs` 等。
 
 ## 7. 体积与性能
 

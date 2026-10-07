@@ -1,6 +1,6 @@
 # 名字投影与收编方案（词条第 4 步的名字这一半）
 
-2026-09-29 起草；**2026-09-29 用户确认第 5 节**（N1 改为「这一步就搬进核心」，N2–N4 按建议）。前置契约见 [TERMS_CHARACTERS_PLAN.md](TERMS_CHARACTERS_PLAN.md) 第 10 节和审核意见 B5（`TERMS_CHARACTERS_REVIEW.md`，已删除，见开源前私有历史）。分支 `terms-scaffold`，做完验收后合回 main。
+2026-09-29 起草；**2026-09-29 用户确认第 5 节**（N1 改为「这一步就搬进核心」，N2–N4 按建议）。前置契约见 [TERMS_CHARACTERS_PLAN.md](TERMS_CHARACTERS_PLAN.md) 第 10 节和审核意见 B5（`TERMS_CHARACTERS_REVIEW.md`，已删除，见开源前私有历史）。分支 `terms-scaffold`，做完验收后合回 main。Python 测试 2026-10-07 起已删除（#9）：文中提到的 `tests/test_*.py` 改由 `native/terms/tests/replay.rs` 中同名模块的录制重放及 Rust 单元测试覆盖，现状见 [TERMS_CHARACTERS.md](TERMS_CHARACTERS.md) 第 6 节与 [TERMS_NAMES.md](TERMS_NAMES.md) 第 6 节。
 
 ## 1. 现状
 
