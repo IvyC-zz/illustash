@@ -17,6 +17,9 @@ RESEARCH_OPENBLAS_IDENTITIES = json.loads((ROOT / 'crates/platform/src/research_
 def copy(source, destination):
     if source.is_symlink():
         raise ValueError(f'symlink resource rejected: {source}')
+    if not source.is_file():
+        # Name the file; Windows CopyFile2 errors do not carry the path.
+        raise FileNotFoundError(f'resource missing: {source}')
     destination.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(source, destination)
 
