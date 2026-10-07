@@ -174,13 +174,11 @@ class MigrationInventoryTest(unittest.TestCase):
         (self.root / 'tools').mkdir()
         (self.root / 'tools/char_scan.py').write_text('def load(c, sql):\n    c.execute(sql)\n')
         (self.root / 'tools/ccip.py').write_text('def compute(c):\n    c.execute("DELETE FROM clusters")\n')
-        (self.root / 'tools/calibrate_classification.py').write_text('def image_groups(c):\n    c.execute("DELETE FROM clusters")\n')
         (self.root / 'native').mkdir()
         (self.root / 'native/commands.sql').write_text('INSERT INTO facts VALUES (1);')
         current = inventory.scan(self.root)
         self.assertTrue(any(s['path'] == 'tools/char_scan.py' and s['kind'] == 'database-write' for s in current['sites']))
         self.assertTrue(any(s['path'] == 'tools/ccip.py' and s['kind'] == 'database-write' for s in current['sites']))
-        self.assertTrue(any(s['path'] == 'tools/calibrate_classification.py' and s['kind'] == 'database-write' for s in current['sites']))
         self.assertTrue(any(s['path'].endswith('.sql') and s['kind'] == 'database-write' for s in current['sites']))
         self.assertTrue(any('tools/char_scan.py' in e and 'database-write' in e for e in self.errors()))
 

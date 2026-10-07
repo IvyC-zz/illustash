@@ -73,11 +73,10 @@ illustash/
 ├── crates/               词条核心、平台能力、IQDB 签名
 ├── native/terms/         应用宿主：Core 适配、CLI、HTTP、任务编排
 ├── desktop/              Tauri 桌面外壳：启动服务与 Pixiv 登录窗口
-├── web/                  静态界面（web/static）与可选计算代码
-├── provenance/           溯源计算与来源适配
+├── web/static/           静态界面
 ├── packaging/            安装包与便携产物构建、资源白名单
 ├── tools/                构建、验收与研究入口（用途见 docs/TOOLS.md）
-├── tests/                合成测试、契约夹具与历史参考实现
+├── tests/                合成测试、契约夹具与录下的旧参考固定期望
 ├── docs/                 现行参考、进行中的方案与待办
 ├── tags/                 标签表（tags_v3.csv）
 ├── start-web.command     本地 Web 入口（macOS）

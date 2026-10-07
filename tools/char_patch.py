@@ -14,7 +14,7 @@ review/char-index/ 相同的 <short_tag>.npy + .json，然后照常跑 tools/bui
     .venv/bin/python -u tools/char_patch.py apply --only a_tag,b_tag   # 设置页用：只补这几个，然后重建锚点、重扫
     .venv/bin/python -u tools/char_patch.py drop x --reason "..." --rebuild
 
-设置页（tests/reference/web/index_update.py）的「检查新角色」只发文本查询（related_tag），结果给用户挑；
+设置页（tests/reference/web/index_update.py（#9 已删除））的「检查新角色」只发文本查询（related_tag），结果给用户挑；
 选中后调用 apply：备份 → fetch → clean → build_characters.py → char_scan.py --load，都只处理选中的角色。
 以 @ 开头的输出行是给设置页看的进度（JSON）。
 

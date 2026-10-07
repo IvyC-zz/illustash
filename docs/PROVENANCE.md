@@ -402,9 +402,9 @@ CREATE TABLE image_artists(
 -- auto：展示为画师（像素哈希、本地比对）；candidate：只是线索（OCR）
 ```
 
-其余是研究缓存和运行记录，字段见 `provenance/db.py`：`seeds`（种子来源给出的候选画师）、`leads`（绑定账号读到、还没对上画师的原始 ID）、`lookups`（外部查询记录和重试阶梯）、`marks`（本地 OCR 结果，不外发）、`ref_sigs`（公开作品的 16×16 签名，不留预览图）、`runs`（每次运行一行）、`pending_runs`（忙碌时合并的补跑）、`ext_cache`（外部响应的永久缓存）。
+其余是研究缓存和运行记录，字段见 `provenance/db.py（#9 已删除）`：`seeds`（种子来源给出的候选画师）、`leads`（绑定账号读到、还没对上画师的原始 ID）、`lookups`（外部查询记录和重试阶梯）、`marks`（本地 OCR 结果，不外发）、`ref_sigs`（公开作品的 16×16 签名，不留预览图）、`runs`（每次运行一行）、`pending_runs`（忙碌时合并的补跑）、`ext_cache`（外部响应的永久缓存）。
 
-**人工结论**在核心的 `library.sqlite`（`tests/reference/web/store.py`）：
+**人工结论**在核心的 `library.sqlite`（`tests/reference/web/store.py（#9 已删除）`）：
 
 ```sql
 CREATE TABLE artist_verdicts(uuid TEXT NOT NULL, artist TEXT NOT NULL,
@@ -436,8 +436,8 @@ photo-intelligence/
 ```
 
 - **溯源读核心（只读）**：`assets`（uuid、原图路径、`added_at`）、`image_sigs`、`duplicates`、`similar_groups`。
-  来源 App 暂时像 `tests/reference/web/sync.py` 一样自己从 Photos.sqlite 读；资产 ID 链接化以后，改成由核心提供。
-- **核心读溯源（只读）**：`image_sources`（原帖）。画师归属、链接、昵称在图库切到词条核心之后（[TERMS_ARTISTS.md](TERMS_ARTISTS.md)）改由每次运行结束后的证据包交给核心（`tests/reference/provenance/export.py`），核心不再读 `image_artists`、`artist_links`、`artist_names`；还没切换的图库照旧直接读。
+  来源 App 暂时像 `tests/reference/web/sync.py（#9 已删除）` 一样自己从 Photos.sqlite 读；资产 ID 链接化以后，改成由核心提供。
+- **核心读溯源（只读）**：`image_sources`（原帖）。画师归属、链接、昵称在图库切到词条核心之后（[TERMS_ARTISTS.md](TERMS_ARTISTS.md)）改由每次运行结束后的证据包交给核心（`tests/reference/provenance/export.py（#9 已删除）`），核心不再读 `image_artists`、`artist_links`、`artist_names`；还没切换的图库照旧直接读。
 - **人工操作怎么走**（2026-09-28 按实现改）：界面上点「是 / 不是 TA」时，核心写自己的表并进操作历史，不经过溯源模块，也不写溯源的表：
   切到词条核心之前写 `library.sqlite.artist_verdicts`，之后写 Rust 词条核心的 `term_verdicts`（`artist_verdicts` 冻结）。
 - **触发时机**：每次同步完成后，核心通知溯源模块处理新图；溯源在后台跑，不影响浏览。
@@ -449,8 +449,8 @@ photo-intelligence/
 
 | 种子来源 | 需要什么 | 状态 |
 |---|---|---|
-| Danbooru 像素哈希 | 无（只发哈希文本） | **已实现**（`provenance/sources/pixel_hash.py`） |
-| Danbooru IQDB 感知哈希 | 无（只发 `iqdb_…` 签名文本） | **已实现**（2026-09-29，`crates/iqdb` Rust 模块算签名和查询，`provenance/sources/iqdb.py` 挑图和入库）：只查还没有画师的图，后台每 5 张中 4 张按来源与评级的历史命中率排序、1 张保留原种子/保存段队列顺序，手动选图顺序不变；每次运行最多 10,000 张，≥ 80 分算命中，未命中 90 天后重查。2026-09-29 提速：请求开始时刻至少相隔 0.5 秒、两个在途（每秒最多 2 次）；IQDB 与后续步骤同时进行（不同站点，各自限速），设置页显示「同时进行」 |
+| Danbooru 像素哈希 | 无（只发哈希文本） | **已实现**（`provenance/sources/pixel_hash.py（#9 已删除）`） |
+| Danbooru IQDB 感知哈希 | 无（只发 `iqdb_…` 签名文本） | **已实现**（2026-09-29，`crates/iqdb` Rust 模块算签名和查询，`provenance/sources/iqdb.py（#9 已删除）` 挑图和入库）：只查还没有画师的图，后台每 5 张中 4 张按来源与评级的历史命中率排序、1 张保留原种子/保存段队列顺序，手动选图顺序不变；每次运行最多 10,000 张，≥ 80 分算命中，未命中 90 天后重查。2026-09-29 提速：请求开始时刻至少相隔 0.5 秒、两个在途（每秒最多 2 次）；IQDB 与后续步骤同时进行（不同站点，各自限速），设置页显示「同时进行」 |
 | OCR 读账号 | 无（macOS Vision，本地） | **2026-10-05 删除**（#177）；已有结果保留 |
 | Pixiv 公开关注列表 | 绑定 Pixiv + 单独授权外部请求 | **worker 已实现**（`sources/pixiv_following.py`）；候选入库与缓存通过假网络测试，分页续跑和真实账号响应待联测 |
 | Pixiv 昵称 | 单独授权外部请求 | **已实现**（`sources/nicknames.py`）；按稳定用户 ID 更新独立名字表，不按同名合并画师；真实响应待验收 |
@@ -460,8 +460,8 @@ photo-intelligence/
 | X 点赞 | 同上（`like.js`，只有推文 ID，没有作者） | 暂缓：要逐条查推文作者，且用户很少点赞 |
 | SauceNAO | 用户自己的 key，默认关闭 | 第二阶段 |
 
-**本地验证**（**已实现**，`provenance/verify.py`）：已知画师 → Danbooru 最新 200 条 + Pixiv 最新 300 件（150 px 小图，R18 需要 Pixiv 登录；不登录时画师作品列表里没有 R18）→ 和图库的 16×16 签名比对，再用 24×24 彩色小图复核 → `image_artists`。
-2026-09-28：候选画师按证据强弱比对（像素哈希 → OCR → X 关注 → Pixiv 关注 → 相关画师，同类里库中已关联图多的先比），因为每位约 5 MB、一次 300 MB 只够约 60 位；请求复用连接（`provenance/net.py` `KeepAlive`，照常走系统代理），经本机代理每张小图 0.64 s → 0.17 s；小图站点的间隔随之调到 0.25 s，实际频率与原来相当（约 3 张/秒），不借复用连接加快请求。
+**本地验证**（**已实现**，`provenance/verify.py（#9 已删除）`）：已知画师 → Danbooru 最新 200 条 + Pixiv 最新 300 件（150 px 小图，R18 需要 Pixiv 登录；不登录时画师作品列表里没有 R18）→ 和图库的 16×16 签名比对，再用 24×24 彩色小图复核 → `image_artists`。
+2026-09-28：候选画师按证据强弱比对（像素哈希 → OCR → X 关注 → Pixiv 关注 → 相关画师，同类里库中已关联图多的先比），因为每位约 5 MB、一次 300 MB 只够约 60 位；请求复用连接（`provenance/net.py（#9 已删除）` `KeepAlive`，照常走系统代理），经本机代理每张小图 0.64 s → 0.17 s；小图站点的间隔随之调到 0.25 s，实际频率与原来相当（约 3 张/秒），不借复用连接加快请求。
 同日：下载过的参考小图只存签名（`ref_sigs`，v5 起加 24×24 彩色签名），此前文档写了但代码从未写入，图库每次同步进新图都会把所有画师的小图重下一遍；现在重比对不再下载。像素哈希已对上的 Danbooru 帖子和 Pixiv 作品不再下载；先查 Pixiv，Danbooru 帖子的来源若是本次查过的 Pixiv 作品（前 3 页）就跳过。签名和比对结果逐条提交，流量用完停在画师中途也不丢。新图不再让所有画师作废重查：新步骤「本地重比新图」（`local_match`，纯本地、无需授权，同步后的自动运行也执行）把新图和已存签名逐一比对，每张图只比一次（`lookups` 的 `ref_compare`）；已比对的画师 30 天后才重新拉作品列表（补画师的新作品）。1.36 万个签名对全库约 1 秒。
 **2026-09-29 查询排序优化及线上小样本验证**：后台采用 80% 来源/评级收益优先 + 20% 原队列保底，完整队列不删图；手动选图、命中阈值、请求速率与并发不变。冻结排序用此前 3,879 条结果制定，在独立的 1,861 张后续图片回放上核对；随后暂停第 29 次任务，对同一待查快照的旧/新队列分别取前 120 张，线上交错测试（每块 10 张，块顺序交替）。为控制实验流量，两组均使用 1 秒间隔、单并发，生产仍为 0.5 秒间隔、双并发。
 
@@ -480,12 +480,12 @@ photo-intelligence/
 
 同日提速（第 17 次运行实测 IQDB 3,000 张约 1.6 小时、本地比对每位画师约 80 秒）：Pixiv 作品列表（www.pixiv.net，2 秒一次）提前一批去取，与小图下载（i.pximg.net）重叠；只有 OCR 或相关画师线索、库里又没有已知作品的弱线索画师，每站先看最新 30 件，没对上就停（`lookups.cursor = probe`，以后可补查全部）；各站点间隔不变。
 同日用户定：**本地比对只自动处理值得的画师**——库里已有 3 张以上、或其 Pixiv 保存段里还有 2 张以上没画师的图、或 Danbooru 帖子 ≥ 1,000（`tags.json` 批量查，缓存 30 天）；其余不自动查，等图变多后再符合。本库四千多位候选里前两条符合约千位。IQDB 每次运行上限 3,000 → 10,000 张。估算 3,000 张图的普通用户：逐张的像素哈希 + IQDB 约 1 小时、几十 MB 拿到大部分结果，本地比对占九成以上时间而收益有限。
-同日用户定：**后台只做便宜的逐张部分，按需查找画师**。后台（任务面板「开始…」和同步后）只跑 OCR、本地重比、像素哈希、IQDB、关注列表；图库里选中图片（可批量，一次最多 500 张）点「查找画师」→ 只对这些图跑像素哈希 + IQDB（几秒，点击即授权本次）；详情面板画师下的「找 TA 的其他图」→ 只对这位画师做本地比对。按需查找会先让后台运行停下，同步后的运行挂起到查找结束再继续。首次使用弹一次说明发出的内容。**分组推荐（已实现，2026-09-29，`provenance/sources/groups.py`，本地步骤 `groups`）**：组内已有画师的图全部一致时，推荐给同组其余图。按本库实测的组内画师一致率定强度：重复组、相似组 100%（同一张图）→ 直接认定（`same_picture`）；已细分的原创角色 100%（8 组）→ 强候选，1 张即可；未识别聚类 41%、保存段约 30% → 弱候选，需 2 张一致；普通角色 8% → 不用。候选在详情面板显示为「也许是 TA」及理由，「是 TA / 不是」走核心的画师判断，确认后计入画师的图；「找 TA 的其他图」用本地比对核实。IQDB 优先查还没有画师的原创角色（每组 3 张）。每次运行末尾重算，按需查找后也立即重算。本库副本试跑：直接认定 656 张，候选 1,267 张（保存段 1,176、聚类 64、原创角色 27），0.5 秒。第 12 次运行实测：前 6 位多产画师每位约 500 张小图、3.3 MB；全部 4,043 位估计 6～13 GB（去重前）。
+同日用户定：**后台只做便宜的逐张部分，按需查找画师**。后台（任务面板「开始…」和同步后）只跑 OCR、本地重比、像素哈希、IQDB、关注列表；图库里选中图片（可批量，一次最多 500 张）点「查找画师」→ 只对这些图跑像素哈希 + IQDB（几秒，点击即授权本次）；详情面板画师下的「找 TA 的其他图」→ 只对这位画师做本地比对。按需查找会先让后台运行停下，同步后的运行挂起到查找结束再继续。首次使用弹一次说明发出的内容。**分组推荐（已实现，2026-09-29，`provenance/sources/groups.py（#9 已删除）`，本地步骤 `groups`）**：组内已有画师的图全部一致时，推荐给同组其余图。按本库实测的组内画师一致率定强度：重复组、相似组 100%（同一张图）→ 直接认定（`same_picture`）；已细分的原创角色 100%（8 组）→ 强候选，1 张即可；未识别聚类 41%、保存段约 30% → 弱候选，需 2 张一致；普通角色 8% → 不用。候选在详情面板显示为「也许是 TA」及理由，「是 TA / 不是」走核心的画师判断，确认后计入画师的图；「找 TA 的其他图」用本地比对核实。IQDB 优先查还没有画师的原创角色（每组 3 张）。每次运行末尾重算，按需查找后也立即重算。本库副本试跑：直接认定 656 张，候选 1,267 张（保存段 1,176、聚类 64、原创角色 27），0.5 秒。第 12 次运行实测：前 6 位多产画师每位约 500 张小图、3.3 MB；全部 4,043 位估计 6～13 GB（去重前）。
 
 **账号**：
 - 凭证属于整个 App（所有图库共用），存 macOS 钥匙串，不存明文；找到的种子和结果属于各自的图库。
 - 设置页加「账号」区块：绑定、解绑、状态、上次读取时间。X 用「导入数据归档」而不是登录（官方 API 太贵）。
-- 只读、低频；遇到 403、429、验证码或维护页就停，不绕过（`provenance/net.py`）。
+- 只读、低频；遇到 403、429、验证码或维护页就停，不绕过（`provenance/net.py（#9 已删除）`）。
 - Pixiv 用的是网页和 App 自己的非官方接口，做进产品时在绑定页写明。
 
 **模块**（`provenance/`，已有骨架）：`db.py`（图库包里的 `provenance.sqlite`，含 `seeds` 表）、`net.py`（按站点限速、整次运行的流量上限、遇拒绝即停）、
@@ -496,14 +496,14 @@ photo-intelligence/
 
 **命令**（历史，现只在测试参考中运行）：纯本地运行 `python -m provenance.run --library <图库包> --steps ocr,report`。明确授权本次外部请求时使用 `python -m provenance.run --library <图库包> --allow-network [--x-archive <归档>] --steps ocr,pixel_hash,x_following,pixiv_following,verify,pixiv_related,verify,nicknames,report`（步骤可以重复：相关用户找到的新画师要再验证一次）。
 
-**账号绑定**（**已实现**，2026-09-28）：`tests/reference/provenance/accounts.py`，原生凭证存 macOS 钥匙串（服务名 Illustash），Windows 使用当前用户 DPAPI；存储、旧文件与回退规则见 [架构参考](ARCHITECTURE_DIRECTION.md#原生账号与桌面登录桥)；
+**账号绑定**（**已实现**，2026-09-28）：`tests/reference/provenance/accounts.py（#9 已删除）`，原生凭证存 macOS 钥匙串（服务名 Illustash），Windows 使用当前用户 DPAPI；存储、旧文件与回退规则见 [架构参考](ARCHITECTURE_DIRECTION.md#原生账号与桌面登录桥)；
 设置「画师」页的「账号」区块：Pixiv 粘贴 `PHPSESSID` 绑定（绑定时校验登录并显示昵称、关注数；2026-10-05 起只在网页版用 `?dev` 打开后显示，桌面 app 用下文的登录窗口），X 导入数据归档（到当前图库），SauceNAO 保存 key。
 **登录过期**（2026-09-28）：授权外部请求、且步骤里有要访问 Pixiv 的（关注、昵称、本地比对、相关画师）时，运行前先用绑定的登录检查一次；
 Pixiv 不接受就记为「登录已过期」，本次运行停掉 Pixiv（其余步骤照跑，Danbooru 照常比对），不退回未登录状态（那样查不到 R18，还会被缓存成「没找到」）。
 运行中带着登录收到 401 也按过期处理。设置页显示「登录已过期」和重新绑定的输入框，另有「重新检查」按钮。检查时遇到 403 或断网只记日志，不判为过期。
 2026-09-28 用真实账号联测：第一个请求就被 Cloudflare 人机验证页（HTTP 403「Just a moment...」）拦下，按设计停止、不绕过；Pixiv 关注分页与昵称的真实响应仍未验证。
 
-**详情面板显示画师**（**已实现**，2026-09-28）：核心新增只读的 `tests/reference/web/artists.py`，读图库包里的 `provenance.sqlite`；
+**详情面板显示画师**（**已实现**，2026-09-28）：核心新增只读的 `tests/reference/web/artists.py（#9 已删除）`，读图库包里的 `provenance.sqlite`；
 详情里「角色」下面多一个「画师」区块（名字、库里还有 N 张、X · Pixiv · Danbooru 主页、原帖每个站点一条），没有画师就不显示；
 图库新增按画师筛选（`#/?artist=<id>`，标题「画师 · 名字」）。筛选只把画师的图片列表交给核心，核心的归属逻辑不动。
 
@@ -511,12 +511,12 @@ Pixiv 不接受就记为「登录已过期」，本次运行停掉 Pixiv（其�
 - 原生 GET/POST `/api/provenance` 由 Rust Runner 管理租约和任务；Python Runner 只保留在测试参考（`tests/reference/`，#186），生产不使用。任务固定包路径、generation、session、task_id；切库/退出先取消并收尾进程组。连续 600 秒无进展判超时；崩溃后中断记录恢复为 stopped，new 保留补跑。
 - 动作是 start、stop、lookup（1–500 张）、artist（1 位）；状态包含步骤/进度、最近 5 次记录和交付状态。任务/流量上限为 full=1024 MiB（local_match → pixel_hash → iqdb → x_following → pixiv_following → groups），new=50 MiB（local_match → pixel_hash → iqdb → groups），pick=20 MiB（pixel_hash → iqdb → groups），artist=200 MiB（verify → groups）。pick/artist 仅授权本次；full 仅明确 `allow_network:true` 时联网。
 - Rust 执行像素/IQDB 哈希文本查询、X ID 解析、Pixiv 关注分页及覆盖统计，不上传图片。研究 worker 执行哈希、本地/作品签名比对和分组推断；其只读 GET 经 Rust 邮箱完成白名单、授权、限速及流量控制。403/429/挑战/维护停止站点，暂时错误留待重试，不记为未命中。Pixiv 检查/过期复用账号接口；App 内绑定只走桌面窗口，无窗口不回退 cookie。
-- 显式配置 `ILLUSTASH_PROVENANCE_WORKER` 为受信任可执行适配器；`provenance/native_worker.py` 使用 shebang 指定的 Python 环境及已有研究依赖，外置 IQDB 签名可用 `ILLUSTASH_IQDB_BINARY`；安装适配器自动提供 `ILLUSTASH_IQDB_BIN`。Windows 任务收尾与本地 OCR 的无置信度边界见 [独立计算包](BACKEND_TASKS.md#独立安装与可选计算包)。Rust 不自动启动整套 Python App；未配置 worker 且没有既有原生交付账本时，普通开库/状态读取不新建缓存或扩展原缓存 schema。显式配置适配器、任务或新同步补跑初始化账本；没有同步记录表的有效包仍可浏览。worker 缺失/失败仍可读状态/缓存并操作人工判断。`--no-provenance` 关闭本次任务；启动偏好不授权联网，自动查询另需 `--allow-provenance-network`。
+- 显式配置 `ILLUSTASH_PROVENANCE_WORKER` 为受信任可执行适配器；`provenance/native_worker.py（#9 已删除）` 使用 shebang 指定的 Python 环境及已有研究依赖，外置 IQDB 签名可用 `ILLUSTASH_IQDB_BINARY`；安装适配器自动提供 `ILLUSTASH_IQDB_BIN`。Windows 任务收尾与本地 OCR 的无置信度边界见 [独立计算包](BACKEND_TASKS.md#独立安装与可选计算包)。Rust 不自动启动整套 Python App；未配置 worker 且没有既有原生交付账本时，普通开库/状态读取不新建缓存或扩展原缓存 schema。显式配置适配器、任务或新同步补跑初始化账本；没有同步记录表的有效包仍可浏览。worker 缺失/失败仍可读状态/缓存并操作人工判断。`--no-provenance` 关闭本次任务；启动偏好不授权联网，自动查询另需 `--allow-provenance-network`。
 - `native/terms/src/provenance_compute` 提供原生本地计算：像素哈希、IQDB 签名队列、分组推荐、本地重比与公开作品验证。2026-10-05 起，macOS/Windows 的安装适配器 `illustash-provenance` 对 pixel_hash、iqdb、local_match、verify、groups 全部本地步骤直接走原生，不经过 Python；iqdb 的选图与排序（评级优先、每 5 位保留 1 位原始顺序、未解决原创角色优先、Pixiv 每段保存最多 3 张）与原 Python 一致，签名仍由 `illustash-iqdb --hash-only` 计算，环境变量 `ILLUSTASH_IQDB_BINARY` 优先，否则用适配器同目录的 `illustash-iqdb`。其余步骤直接报错，没有 Python 回退。OCR 计算已于 2026-10-05 删除（#177），`marks` 表、已有 OCR 候选和人工判断保留，种子来源 `ocr` 仍按弱线索参与核验。原生像素哈希对拒收的图像域返回空哈希、不回退 Python，行为与旧 worker 计算出哈希不同；X/Pixiv 来源的 JPEG/PNG/GIF/WebP 不受影响。公开缩略图只经 App 的授权 mailbox 进入，候选无网络客户端；正式导入和人工判断继续由 App/Core 持有。签名与颜色缩略图复用 `research_compute::relation_image` 的 path/bytes 接口。像素身份候选接受普通 strips、planar1、FillOrder1 的 RGB8 TIFF，并在 ICC 前按旧解码语义应用 orientation；scalar TIFF 保留独立的 path/bytes、数值 clamp 与 mmap 重排规则，alpha、palette、planar/tiled 彩色 TIFF 继续拒收。候选保留旧作品分页、弱线索探测、保存段扩展、缓存重用及拒绝后的停止/保留规则；安装入口测试见 `tests/test_native_provenance_production.py`。
 
 - 同步提交后以缓存内持久游标合并 new 补跑；pick/artist 取消后台 full/new，new 保留补跑。仅显式配置计算 worker、偏好开启且未禁用时自动执行。原生模式在 v5 缓存增加交付账本和游标，源库、缓存、正式库分别提交；恢复见 [EVIDENCE_PACKAGES.md](EVIDENCE_PACKAGES.md)。
 - **人工的「是 TA / 不是」**：存在核心的 `library.sqlite` 新表 `artist_verdicts`，和其他人工操作一样进操作历史、可以撤销；
-  机器结果留在 `provenance.sqlite` 不动，核心读的时候套用（`tests/reference/web/artists.py`）。「不是」只对这一张图：这张不再显示这位画师，
+  机器结果留在 `provenance.sqlite` 不动，核心读的时候套用（`tests/reference/web/artists.py（#9 已删除）`）。「不是」只对这一张图：这张不再显示这位画师，
   TA 的「库里还有 N 张」和按画师筛选也不再算它；由本地比对得来、挂在这位画师名下的原帖一起隐藏，像素哈希查到的原帖是同一个文件，照样显示。
   「是 TA」显示「✓ 已确认」，可以撤回。worker 不读这张表，也就不可能覆盖人工结论。
 - 覆盖率是机器结果的统计，不扣除人工的「不是」。
@@ -552,9 +552,9 @@ Pixiv 不接受就记为「登录已过期」，本次运行停掉 Pixiv（其�
 - **验证结果（2026-09-28，一个最小的 Swift WKWebView 探测程序）**：用户在 WKWebView 里亲手登录后，页面内 `fetch('/ajax/user/extra')` 与 `/ajax/user/{id}/following` 都是 200 JSON，无 `cf-mitigated`。
   Python 只带 `Referer: https://www.pixiv.net/` 拉 `i.pximg.net` 的 250 与 150 小图都通过，不带 Referer 为 403；所以小图照旧由 Python 拉，只有 `www.pixiv.net` 的接口走窗口。
 - **桌面实现（2026-10-01）**：`desktop/`（Tauri 2）启动 `start-web.command --no-open`，等「图库已启动」再让主窗口加载本地页面，站外链接交给默认浏览器；
-  关闭主窗口即退出整个 app（隐藏的 Pixiv 窗口不会阻止退出）；退出时向服务发 SIGINT，10 秒不退就结束进程组；外壳被强制退出时，服务发现父进程不在了也会自己收尾（`tests/reference/web/server.py` `follow_desktop_app`）。
-  Pixiv 窗口使用独立的网站数据存储（macOS 14+），解绑时只清它。本机通道（`desktop/src/bridge.rs`，只听 127.0.0.1，每次启动随机口令）只接受 `www.pixiv.net/ajax/` 下的 GET，每次一个，间隔仍由 `provenance/net.py` 控制；
-  页面里只有 `pixiv_reply` 一个命令可调，主窗口没有任何外壳权限。原生账号与稳定查询客户端为 `native/terms/src/app_accounts.rs`，沿用同一桥与登录窗口；授权和同步请求边界见 [架构参考](ARCHITECTURE_DIRECTION.md#原生账号与桌面登录桥)。兼容端 `tests/reference/provenance/desktop.py` 和 `Net(via=…)` 保留原协议。
+  关闭主窗口即退出整个 app（隐藏的 Pixiv 窗口不会阻止退出）；退出时向服务发 SIGINT，10 秒不退就结束进程组；外壳被强制退出时，服务发现父进程不在了也会自己收尾（`tests/reference/web/server.py（#9 已删除）` `follow_desktop_app`）。
+  Pixiv 窗口使用独立的网站数据存储（macOS 14+），解绑时只清它。本机通道（`desktop/src/bridge.rs`，只听 127.0.0.1，每次启动随机口令）只接受 `www.pixiv.net/ajax/` 下的 GET，每次一个，间隔仍由 `provenance/net.py（#9 已删除）` 控制；
+  页面里只有 `pixiv_reply` 一个命令可调，主窗口没有任何外壳权限。原生账号与稳定查询客户端为 `native/terms/src/app_accounts.rs`，沿用同一桥与登录窗口；授权和同步请求边界见 [架构参考](ARCHITECTURE_DIRECTION.md#原生账号与桌面登录桥)。兼容端 `tests/reference/provenance/desktop.py（#9 已删除）` 和 `Net(via=…)` 保留原协议。
   设置页：从桌面 app 打开时「登录 Pixiv…」「重新登录 Pixiv…」「改用窗口登录…」打开窗口并轮询 `pixiv/connect`，只记录是谁（`accounts.json` 里 `via: app`），不存 cookie；
   过期重登会先清除 Pixiv 窗口的网站数据再打开登录页；cookie 存在不再触发自动隐藏，完成后由用户关闭 Pixiv 窗口。绑定轮询串行执行，停止或替换轮询后忽略旧响应。
   网页版保留粘贴 `PHPSESSID` 的开发入口。登录在窗口里但不是从桌面 app 启动时，Pixiv 步骤直接停掉，不退回未登录。手动运行发现登录过期时弹出登录窗口，同步后的自动运行不弹窗。

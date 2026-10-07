@@ -110,12 +110,15 @@ mod tests {
         let b = parse(r#"{ "a": {"c":"x","d":0.5}, "b": 1 }"#).unwrap();
         assert_eq!(canonical(&a), r#"{"a":{"c":"x","d":0.5},"b":1}"#);
         assert_eq!(canonical(&a), canonical(&b));
+        // The former Python canonical() gave these exact bytes (#9).
+        let c = parse("{\"b\":[1,true,null,\"é\\n\"],\"a\":{\"y\":2.5e-05}}").unwrap();
+        assert_eq!(canonical(&c), "{\"a\":{\"y\":0.000025},\"b\":[1,true,null,\"é\\n\"]}");
     }
 }
 
 #[cfg(test)]
 mod float_layout {
-    /// tests/reference/provenance/export.py 的 canonical 要逐字符复现这套排版（tests/test_terms_artists.py 用同一组字面值）。
+    /// tests/reference/provenance/export.py（#9 已删除） 的 canonical 要逐字符复现这套排版（原 tests/test_terms_artists.py 的 CanonicalTest 用同一组字面值，#9 已删除）。
     #[test]
     fn serde_json_lays_out_floats_like_this() {
         let values =

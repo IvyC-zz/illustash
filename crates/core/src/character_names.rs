@@ -1,9 +1,9 @@
 //! 名字这一步不收编（方案第 10 节）：`names` 仍是 Python 的表。核心命令需要写用户名字和别名时，逐行照
-//! tests/reference/web/names.py `put_name` 与 tests/reference/web/store.py `Store.alias` 的语义写。
+//! tests/reference/web/names.py（#9 已删除） `put_name` 与 tests/reference/web/store.py（#9 已删除） `Store.alias` 的语义写。
 use crate::{Error, Result};
 use rusqlite::{params, Connection, OptionalExtension};
 
-/// tests/reference/web/names.py PRIORITY 的来源。
+/// tests/reference/web/names.py（#9 已删除） PRIORITY 的来源。
 const SOURCES: [&str; 7] = ["user", "bangumi", "index", "danbooru", "wiki", "builtin", "model"];
 
 /// Python `str.strip()` 去掉的空白（比 Rust 的 White_Space 多 \x1c–\x1f）。

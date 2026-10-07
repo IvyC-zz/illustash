@@ -1,5 +1,5 @@
 //! 同步、刷新、重扫（方案第 7、9 节）：`refresh`、`reindex_characters`、`import_changes`、`_refresh_general_hits`
-//! 各是一个核心事务，逐行照 tests/reference/web/store.py 的旧顺序。Python 在锁内只读 source.sqlite，把要用的行交进来：
+//! 各是一个核心事务，逐行照 tests/reference/web/store.py（#9 已删除） 的旧顺序。Python 在锁内只读 source.sqlite，把要用的行交进来：
 //! 新图行、候选标签行、相册决定与映射、索引的角色 / 别名 / tag、重复组的全量分组、realistic 列表、时间戳文字。
 //! 候选写成证据批次（覆盖范围：refresh 全库、reindex 改动的图、import 新图与移除的图），兼容 `candidates`
 //! 由有效证据算出；相册结论是 album 批次上的裁决，照旧只在没有结论时写。

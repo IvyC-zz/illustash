@@ -2,7 +2,7 @@
 
 状态：现行参考，2026-10-06。名称来源与选择规则见本篇，核心数据与投影见 [TERMS_NAMES.md](TERMS_NAMES.md)，应用生命周期见 [ARCHITECTURE_DIRECTION.md](ARCHITECTURE_DIRECTION.md)。
 
-显示名由 Rust 名称命令更新正式名称及其投影，不改变实体身份、memberships 或 assertions；名称请求和配置保留在 `name_cache`、`name_settings`。`tests/reference/web/names.py` 是兼容宿主及测试对照实现。18/19/20 → 21 迁移先备份，添加别名表、删除全部 source=danbooru 的显示名、写入确定的系列作品内置名，不重建归属，保留已有请求缓存。`Store.connect()` 注册的 SQL 显示函数使用每连接快照；创建实体的去重谓词继续使用原始 tag / 既有 aliases。
+显示名由 Rust 名称命令更新正式名称及其投影，不改变实体身份、memberships 或 assertions；名称请求和配置保留在 `name_cache`、`name_settings`。`tests/reference/web/names.py（#9 已删除）` 是兼容宿主及测试对照实现。18/19/20 → 21 迁移先备份，添加别名表、删除全部 source=danbooru 的显示名、写入确定的系列作品内置名，不重建归属，保留已有请求缓存。`Store.connect()` 注册的 SQL 显示函数使用每连接快照；创建实体的去重谓词继续使用原始 tag / 既有 aliases。
 
 ## API 与运行
 

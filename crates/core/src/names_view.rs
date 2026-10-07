@@ -1,4 +1,4 @@
-//! 名字的显示投影（docs/TERMS_NAMES_PLAN.md N1）：逐条移植 tests/reference/web/names.py 的 `View`（`entity_rows`、`load`、`choose`、
+//! 名字的显示投影（docs/TERMS_NAMES_PLAN.md N1）：逐条移植 tests/reference/web/names.py（#9 已删除） 的 `View`（`entity_rows`、`load`、`choose`、
 //! `entity`、`base`、`own_name`）和词表（`PRIORITY`、`SKINS`、`WORK_NAMES`、`readable`、`skin_zh`）。
 //! 输入是名字的兼容表（`entities`、当前 `links`、`names`、`display_names`），输出两张投影表：
 //! - `term_name_display(entity, skin_only, …)`：`View.entity(id, skin_only)`；

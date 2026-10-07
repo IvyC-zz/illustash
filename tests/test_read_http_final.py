@@ -1,7 +1,7 @@
 """Final read-route contract: every core read route on the same synthetic DB, byte for byte."""
 import json
 
-from tests.read_http_harness import RECORD, HTTPHarness
+from tests.read_http_harness import HTTPHarness
 
 
 CORE = {
@@ -28,13 +28,9 @@ class FinalReadHTTPTest(HTTPHarness):
         self.pair('/api/bootstrap?nsfw=hide')
 
     def test_written_tag_and_readonly_context_are_read(self):
-        if RECORD:
-            self.store.tag(['a'], 'final-合成标签')
         self.sync('tagged')
         tags = json.loads(self.pair('/api/user-tags?q=final-')['body'])
         self.assertEqual(tags, [{'tag': 'final-合成标签', 'count': 1}])
-        if RECORD:
-            self.store.read_only = 'temporary synthetic readonly'
         self.publish()
         self.assertEqual(json.loads(self.pair('/api/bootstrap')['body'])['read_only'], 'temporary synthetic readonly')
         self.assertEqual(json.loads(self.pair('/api/user-tags?q=rejected')['body']), [])

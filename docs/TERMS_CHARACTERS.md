@@ -50,14 +50,14 @@
 6. 按当前兼容表整片建人物 / 皮肤的 `term_projection` 镜像（S5 发现并补上，见第 6 节）。
 7. 写 `meta` 的 `terms_characters=core`。
 
-**历史 Python 测试参考的服务启动时**（`tests/reference/web/server.py`）：`initialize` → 画师切换（`adopt_artists`）→ 补交溯源证据包 → 页面可用 → 后台 `adopt_terms`：先标签、再角色。
+**历史 Python 测试参考的服务启动时**（`tests/reference/web/server.py（#9 已删除）`）：`initialize` → 画师切换（`adopt_artists`）→ 补交溯源证据包 → 页面可用 → 后台 `adopt_terms`：先标签、再角色。
 - 每次切换前先备份；
 - 角色切换全程持有进程写锁（`Store._labels_lock`），期间写操作等待，读照常；
 - 失败或中途退出都留在旧表，下次启动再试。在真实副本上用桌面 App 验证过：标签交 WD 证据中途 App 被关掉，库完好、仍是旧表，重开后接着交完并切换。
 
 ## 3. 切换之后
 
-**写入口**：`tests/reference/web/terms_route.py` 的 `via_core` 包住 Store 的写方法：`change`、`answer`、`answer_audit`、`reassign`、`sweep`、`correct_identity_anchor`、`decide_identity`、`uncertain_identity`、`merge`、`create_entity`、`create_linked`、`set_profile`、`link_local`、`shared_oc`、`set_kind`、`set_mascot`、`set_work`，另外 `edit_work` 在方法内分支。
+**写入口**：`tests/reference/web/terms_route.py（#9 已删除）` 的 `via_core` 包住 Store 的写方法：`change`、`answer`、`answer_audit`、`reassign`、`sweep`、`correct_identity_anchor`、`decide_identity`、`uncertain_identity`、`merge`、`create_entity`、`create_linked`、`set_profile`、`link_local`、`shared_oc`、`set_kind`、`set_mascot`、`set_work`，另外 `edit_work` 在方法内分支。
 
 做法是先在一个「只演不写」的连接上跑一遍旧代码（总是回滚）。拿到的东西有：
 - 旧的校验和拒绝文案；
@@ -94,7 +94,7 @@
 
 - 切换前的自动备份（`library-backups/`）可以整库恢复。**切换之后做的操作会丢失**（D3）。
 - 冻结的旧表不再保留（词条 schema 第 4 版，用户 2026-09-29 决定）：画师的 `artist_verdicts`、标签的 `legacy_asset_tags`、角色的 `legacy_*` 在切换时直接删掉；第 4 版之前切换的库，在下次启动升级词条表时删掉。切换前的数据只在自动备份里。
-- 服务每次启动都先升级词条表（`tests/reference/web/server.py` `upgrade_terms`）：已切换的库不会再经过 `adopt_*` 的迁移，而核心命令拒绝旧版本的库。
+- 服务每次启动都先升级词条表（`tests/reference/web/server.py（#9 已删除）` `upgrade_terms`）：已切换的库不会再经过 `adopt_*` 的迁移，而核心命令拒绝旧版本的库。
 - 切换是单向的：用这个分支打开过的图库，main 的旧代码读不到切换后的数据。
 
 ## 5. 与旧行为的差别

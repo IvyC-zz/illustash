@@ -26,8 +26,8 @@ import numpy as np
 import onnxruntime as ort
 from PIL import Image
 from tools import char_scan
-from tools.ccip import cross, preprocess
-from web.infer import wd_input
+from tools.ccip import cross
+
 from tests import test_native_lifecycle as lifecycle
 from tests.test_native_human_labels import snapshot
 from tests.test_read_http import free_port
@@ -103,10 +103,13 @@ class RecognitionModelTest(unittest.TestCase):
         wd = ort.InferenceSession(str(models / 'wd_swinv2_v3_emb.onnx'), options, providers=['CPUExecutionProvider'])
         options = ort.SessionOptions(); options.log_severity_level = 3
         ccip = ort.InferenceSession(str(models / 'ccip/model_feat.onnx'), options, providers=['CPUExecutionProvider'])
-        for path in cls.images:
-            with Image.open(path) as image:
-                probabilities, embedding = wd.run(None, {wd.get_inputs()[0].name: wd_input(image)})
-                feature = ccip.run(None, {ccip.get_inputs()[0].name: preprocess(image)})[0]
+        import gzip, io
+        frozen = ROOT / 'tests/fixtures/model_inputs'
+        for i, path in enumerate(cls.images):
+            wd_input = np.load(io.BytesIO(gzip.decompress((frozen/f'wd-{i}.npy.gz').read_bytes())),allow_pickle=False)
+            ccip_input = np.load(io.BytesIO(gzip.decompress((frozen/f'ccip-{i}.npy.gz').read_bytes())),allow_pickle=False)
+            probabilities, embedding = wd.run(None, {wd.get_inputs()[0].name: wd_input})
+            feature = ccip.run(None, {ccip.get_inputs()[0].name: ccip_input})[0]
             cls.reference.append(dict(probs=probabilities.reshape(-1), wd=embedding.reshape(-1), ccip=feature.reshape(-1)))
         # No simultaneous Python/native model sessions during the acceptance run.
         del wd, ccip

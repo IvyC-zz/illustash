@@ -11,7 +11,7 @@ import time
 import unittest
 from unittest.mock import patch
 
-from tests.reference_replay import RECORD, Recorder
+from tests.fixed_expectations import Expectations
 from tools import verify_read_http as verify
 
 # Windows 没有 SIGINT：宿主放在独立进程组里启动，用 CTRL_BREAK 走它的控制台退出处理。
@@ -39,8 +39,9 @@ def wait_until(predicate, timeout=15):
 
 
 def stop_process(process):
+    """Stop a host started with ``SPAWN`` (on Windows the interrupt goes to its process group)."""
     if process.poll() is None:
-        process.send_signal(signal.SIGINT)
+        process.send_signal(INTERRUPT)
         try:
             process.wait(12)
         except subprocess.TimeoutExpired:
@@ -55,13 +56,9 @@ class ComparatorTest(unittest.TestCase):
     def test_deterministic_corpus_excludes_random_ask(self):
         with tempfile.TemporaryDirectory() as tmp:
             # The synthetic application database as the former Python Store built it (recorded).
-            root, rec = Path(tmp).resolve(), Recorder(self)
+            root, rec = Path(tmp).resolve(), Expectations(self)
             rec.alias(root, '@ROOT@')
-            def build():
-                from web.store import Store
-                from tests.synthetic_source import source_fixture as fixture
-                Store(fixture(root), root / 'app.sqlite').refresh()
-            rec.package('store', root, build if RECORD else None, library=False)
+            rec.package('store', root, library=False)
             requests = verify.corpus(root / 'app.sqlite', sample=1, query_limit=0)
             rec.finish(self)
             self.assertTrue(requests)

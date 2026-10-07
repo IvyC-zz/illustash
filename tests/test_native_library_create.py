@@ -3,7 +3,7 @@
 Python constructs inputs only. The explicit native process has no Python PATH, never scans the
 folder, and must not update the recent-library registry. Schema and all typed table rows including
 rowids are compared with the former Python factory's fresh store, recorded through
-tests/reference_replay.py (#9; ``ILLUSTASH_REFERENCE=record`` re-runs it). That baseline received
+tests/fixed_expectations.py (#9). That baseline received
 the same two CCIP birth UUIDs through the existing new_ids protocol; the native keys are
 reproducible (store::new_key test counter). Only the named runtime timestamp fields below are
 mapped. Requires an explicitly configured factory release.
@@ -22,7 +22,7 @@ import unittest
 import uuid
 from unittest.mock import patch
 
-from tests.reference_replay import RECORD, Recorder
+from tests.fixed_expectations import Expectations
 from tests.synthetic_source import synthetic_reference
 
 # The former factory's origins, the shipped preset choices.
@@ -55,15 +55,9 @@ class NativeLibraryCreateTest(unittest.TestCase):
         self.folder = self.root / 'downloads-Pixiv'; self.folder.mkdir()
         # A source file must not be scanned, decoded, indexed or uploaded by the factory.
         (self.folder / 'not-scanned.png').write_bytes(b'not-a-real-image')
-        self.rec = Recorder(self)
+        self.rec = Expectations(self)
         self.addCleanup(self.rec.finish, self)
         self.rec.alias(self.root, '@ROOT@')
-        if RECORD:
-            from web import library
-            for name, value in (('APP_SUPPORT', self.support), ('SHARED', self.shared),
-                                ('HOME', self.home / 'Pictures' / 'Illustash'), ('REFERENCE', self.reference)):
-                scoped = patch.object(library, name, value)
-                scoped.start(); self.addCleanup(scoped.stop)
         bin_dir = self.root / 'bin'; bin_dir.mkdir()
         self.sentinel = self.root / 'python-was-launched'
         for name in ('python', 'python3', 'python3.12'):
@@ -158,7 +152,7 @@ class NativeLibraryCreateTest(unittest.TestCase):
                                  "WHERE l.system='ccip' AND l.current=1 AND t.kind='character'"))
         self.assertEqual(set(ids), {'alice', 'bob'})
         self.assertEqual(len(set(ids.values())), 2)
-        expected = self.rec.value('old factory', lambda: self.old_factory(name, ids))
+        expected = self.rec.value('old factory')
         config = json.loads((dest / 'library.json').read_text())
         self.assertEqual(str(uuid.UUID(config['id'])).upper(), config['id'])
         self.timestamp(config['created_at'], iso=True)
@@ -176,31 +170,8 @@ class NativeLibraryCreateTest(unittest.TestCase):
             self.assertTrue((dest / sub).is_dir())
             self.assertEqual(list((dest / sub).iterdir()), [])
 
-    def old_factory(self, name, ids):
-        """Recording only: the former Python factory's fresh library, aligned on the native CCIP ids."""
-        from web import library, terms_characters
-        from web.server import open_store
-        expected = library.new_folder_library(self.folder, self.root / 'old.pilib', name, 'other')
-        old_store = open_store(expected.source, expected.db)
-        refresh = terms_characters.refresh
-        # Align only the pre-existing new_ids input. Random UUID ordering otherwise changes even
-        # old/old terms.id and its references; no output rows, rowids or other payload are normalized.
-        def same_ids(store, src, c):
-            return refresh(store, src, c, new_ids={'ccip': ids})
-        with patch.object(terms_characters, 'refresh', side_effect=same_ids) as aligned:
-            old_store.refresh()
-        self.assertEqual(aligned.call_count, 1)
-        self.assertTrue(old_store.ready())
-        self.assertEqual(old_store.assets()['total'], 0)
-        self.assertEqual([(v['name'], v['count'], v['unchecked']) for v in old_store.characters()],
-                         [('Alice', 0, 0), ('Bob', 0, 0)])
-        return {'config': expected.config, 'source': self.state(expected.source),
-                'application': self.state(expected.db, application=True)}
 
     def test_default_name_auto_preset_and_three_explicit_presets(self):
-        if RECORD:
-            from web import library
-            self.assertEqual(library.PRESETS, PRESETS)
         for index, preset in enumerate((None, 'x', 'pixiv', 'other')):
             with self.subTest(preset=preset):
                 dest = self.root / f'different-dest-{index}.pilib'
@@ -209,9 +180,7 @@ class NativeLibraryCreateTest(unittest.TestCase):
                 config = json.loads((dest / 'library.json').read_text())
                 self.assertEqual(config['name'], self.folder.name)
                 # The native factory never guesses the origin from the folder name (#107): no preset is 「其他」.
-                expected = self.rec.value('source', lambda: {
-                    **__import__('web.library').library.folder_source(self.folder, preset or 'other'),
-                    'preset_origin': 'user' if preset else 'auto'})
+                expected = self.rec.value('source')
                 self.assertEqual(config['sources'], [expected])
         self.assertFalse(self.sentinel.exists())
 

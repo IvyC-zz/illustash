@@ -31,7 +31,6 @@ class NativePlatformPickerTest(unittest.TestCase):
     stop = lifecycle.NativeLifecycleTest.stop
     start = lifecycle.NativeLifecycleTest.start
     request = lifecycle.NativeLifecycleTest.request
-    release_python_handles = lifecycle.NativeLifecycleTest.release_python_handles
     def setUp(self):
         lifecycle.NativeLifecycleTest.setUp(self)
         self.stop(self.process)
@@ -74,7 +73,7 @@ class NativePlatformPickerTest(unittest.TestCase):
             self.assertEqual(self.request('/api/libraries/choose', {'kind': 'folder'})['status'], 400)
 
     def test_picker_old_result_cannot_enter_replacement_library(self):
-        other, _ = self.package('replacement')
+        other = self.package('replacement')
         self.shell.reply = {'paths': [str(self.root / 'old-selected')]}
         self.shell.release.clear()
         with ThreadPoolExecutor() as pool:

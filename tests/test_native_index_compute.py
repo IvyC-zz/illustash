@@ -14,12 +14,10 @@ import unittest
 from unittest.mock import patch
 
 import numpy as np
-from tools import index_worker
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'tools'))
-import build_characters as build
-import char_patch
-import char_scan
-import ccip
+from tests.index_expectations import build, char_patch, char_scan
+from tests import index_expectations, vector_math as ccip
+char_scan.cross = ccip.cross
+
 
 
 class NativeIndexComputeTest(unittest.TestCase):
@@ -104,9 +102,7 @@ class NativeIndexComputeTest(unittest.TestCase):
 
     def legacy(self, root, tags, request):
         # Fixed algorithm reference: no model_metrics check/model loading; no numeric substitute.
-        with patch.dict(char_patch.__dict__),patch.dict(build.__dict__),patch.dict(char_scan.__dict__),patch.object(build,'TAGS',str(tags)),patch.object(char_scan,'cross',side_effect=lambda a,b,check=True:ccip.cross(a,b,check=False)),patch.object(ccip,'features',side_effect=AssertionError('cached refs must not infer')),patch.object(sys,'argv',sys.argv[:]),contextlib.redirect_stdout(io.StringIO()):
-            index_worker.main(str(request),str(root/'response.json'))
-        return json.loads((root/'response.json').read_text())
+        return index_expectations.legacy(self, root)
 
     def test_cached_apply_clean_build_scan_matches_algorithm_reference(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -135,44 +131,7 @@ class NativeIndexComputeTest(unittest.TestCase):
                 self.assertEqual(db.execute("SELECT value,source FROM labels WHERE dim='general'").fetchall(),[('solo','human')])
 
     def prepare_large(self, old):
-        old.mkdir()
-        tags,_=self.prepare(old)
-        for path in (old/'char-index').glob('*'):path.unlink()
-        rng=np.random.default_rng(150)
-        parents=[]
-        for _ in range(4):
-            base=rng.normal(size=768).astype('f4');base/=np.linalg.norm(base)
-            side=rng.normal(size=768).astype('f4');side-=np.dot(base,side)*base;side/=np.linalg.norm(side)
-            parents.append((base,side))
-        centres=[];sides=[]
-        for i in range(129):
-            anchor=rng.normal(size=768).astype('f4');anchor/=np.linalg.norm(anchor)
-            centres.append(anchor);sides.append(parents[0][1])
-        for i,(base,side) in enumerate(parents):centres[i]=base;sides[i]=side
-        def refs(i):
-            return np.stack([centres[i]+np.float32(x)*sides[i] for x in (-.002,-.001,0,0,.001,.002)]).astype('f4')
-        anchors=np.stack([build.merge(refs(i))for i in range(129)])
-        # Tune the final merged anchors in the actual old 129x129 alias matrix,
-        # across native 64-row boundaries, with four separate high-score parents.
-        edges=[(63,0,True),(64,1,False),(127,2,True),(128,3,False)]
-        for i,parent,within in edges:
-            base,side=parents[parent];sides[i]=side;factor=np.float32(.20305866)
-            direction=np.float32(-np.inf if within else np.inf)
-            for _ in range(2048):
-                centres[i]=base+factor*side;anchors[i]=build.merge(refs(i))
-                distance=ccip.cross(anchors,anchors,check=False)[i,parent]
-                if (distance<=np.float32(.01))==within:break
-                factor=np.nextafter(factor,direction)
-            else:self.fail('independent final alias matrix did not bracket threshold')
-        actual_distances=ccip.cross(anchors,anchors,check=False)
-        for i,parent,within in edges:self.assertEqual(actual_distances[i,parent]<=np.float32(.01),within)
-        for i in range(129):
-            cid=f'large{i:03}'
-            np.save(old/'char-index'/f'{cid}.npy',refs(i))
-            (old/'char-index'/f'{cid}.json').write_text(json.dumps(dict(short_tag=cid,tag=cid,gender={'girl':1},post_count=129-i)))
-        np.save(old/'full-features.npy',np.stack(centres));(old/'full-manifest.csv').write_text('uuid\n'+''.join(f'asset{i}\n'for i in range(129)))
-        with contextlib.closing(sqlite3.connect(old/'pi.db')) as c, c:c.execute('DELETE FROM embeddings')
-        return tags,centres,edges
+        return index_expectations.large(self,old)
 
     def test_large_alias_matrix_at_boundary_matches_old_scan(self):
         with tempfile.TemporaryDirectory() as tmp:

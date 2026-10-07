@@ -1,4 +1,4 @@
-//! 历史文案由核心生成（docs/TERMS_NAMES_PLAN.md N5）：角色命令的文案逐字照 tests/reference/web/store.py，用到的三样东西在这里。
+//! 历史文案由核心生成（docs/TERMS_NAMES_PLAN.md N5）：角色命令的文案逐字照 tests/reference/web/store.py（#9 已删除），用到的三样东西在这里。
 //! - `Shown::name`：SQL 函数 `entity_name(id)`，即 `View.entity(id)['name']`，身份不存在时空串。名字已在核心时读显示
 //!   投影（这个事务改过名字就先在事务里重建投影，`legacy_names::refresh_projection`）；名字还没切过来时用移植的 `View`
 //!   （names_view，与旧代码全量逐字相等）在同一事务的数据上现算。

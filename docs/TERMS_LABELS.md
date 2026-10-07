@@ -12,7 +12,7 @@
 | `labels`（dim=general，WD ≥ 0.2） | 题材证据：kind=topic，链接 `wd:<标签>`；≥ 0.35 机器认定（= 旧 `general_hits`），0.2–0.35 也可能是 |
 | `asset_tags`（人贴的标签） | 用户概念：kind=concept，显示名来源 `user`；「加上」= 裁决 yes，「去掉」= clear（人收回，不是否定）；按 `actions` 历史重建，每条挂在原来那一步上 |
 
-WD 证据由 `tests/reference/web/wd_export.py` 从 source.sqlite 导出成证据包（每 1,000 张一包，控制两边内存），来源 `wd`、方法 = labels.source（`wd_v3`）、版本 = 模型版本（`swinv2_448`）。链接不用 `danbooru`：Danbooru 画师链接和 WD 通用标签绝不能解析到同一个词条。原始的 2,000 万条 WD 分数仍只在 source.sqlite。
+WD 证据由 `tests/reference/web/wd_export.py（#9 已删除）` 从 source.sqlite 导出成证据包（每 1,000 张一包，控制两边内存），来源 `wd`、方法 = labels.source（`wd_v3`）、版本 = 模型版本（`swinv2_448`）。链接不用 `danbooru`：Danbooru 画师链接和 WD 通用标签绝不能解析到同一个词条。原始的 2,000 万条 WD 分数仍只在 source.sqlite。
 
 ## 2. 切换
 
@@ -24,7 +24,7 @@ WD 证据由 `tests/reference/web/wd_export.py` 从 source.sqlite 导出成证�
 4. 建三个**同名同形的视图**（`VIEWS`），Python 现有读查询一行不改；视图 join `assets`，图移除后自动消失；
 5. 写 `meta` `terms_labels=core`。
 
-历史 Python 测试参考的服务启动时 `tests/reference/web/server.py` 的 `adopt_labels` 在**后台**做：建表 → 全量交 WD 证据（期间 App 照常用旧表）→ 拿 `Store._labels_lock` 补交期间同步进来的图 → 备份 → 切换。失败或找不到核心程序则留在旧表，下次启动再试。
+历史 Python 测试参考的服务启动时 `tests/reference/web/server.py（#9 已删除）` 的 `adopt_labels` 在**后台**做：建表 → 全量交 WD 证据（期间 App 照常用旧表）→ 拿 `Store._labels_lock` 补交期间同步进来的图 → 备份 → 切换。失败或找不到核心程序则留在旧表，下次启动再试。
 
 **切换之后的写路径：**
 

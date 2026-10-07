@@ -1,5 +1,5 @@
 //! 身份与作品的结构命令（方案第 8 节「不进历史」的那些）：建身份、改类型、当作标签、归作品、作品编辑、
-//! 作品证据（`works.apply_evidence`）。逐行照 tests/reference/web/store.py、tests/reference/web/works.py；作品的可读名由调用方给，
+//! 作品证据（`works.apply_evidence`）。逐行照 tests/reference/web/store.py（#9 已删除）、tests/reference/web/works.py（#9 已删除）；作品的可读名由调用方给，
 //! 当前显示名由核心读（character_labels）。
 use crate::character_commands::{hybrid, invalid, require_entity, text};
 use crate::character_profile::{new_id, require_work, set_work, tag_owner, work_for};
@@ -179,7 +179,7 @@ fn children(c: &Connection, entity: &str) -> Result<Vec<String>> {
         .collect::<rusqlite::Result<_>>()?)
 }
 
-// ---- 作品（tests/reference/web/works.py） ----
+// ---- 作品（tests/reference/web/works.py（#9 已删除）） ----
 
 /// works.TREE：作品和它的全部子作品（UNION 防旧数据成环）。
 fn descendants(c: &Connection, ident: &str) -> Result<Vec<String>> {

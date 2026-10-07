@@ -4,26 +4,17 @@ import os
 import unittest
 from pathlib import Path
 from urllib.parse import urlencode
-from tests.read_http_harness import RECORD, HTTPHarness
+from tests.read_http_harness import HTTPHarness
 
 
 class BrowseReadHTTPTest(HTTPHarness):
     def test_page_names_refresh_after_write_and_library_switch_in_hybrid(self):
         root = self.root/'page-name-refresh'; root.mkdir(exist_ok=True)
-        if RECORD:
-            from tests import terms_seed
-            replacement = terms_seed.base(root)
-            replacement.activate_identity('hybrid')
-            terms_seed.switch(replacement)
-            original = self.server.store
-            self.server.store = replacement
         self.sync('replacement'); self.publish()
         first = self.pair('/api/assets?limit=200')['body']
         items = json.loads(first)['items']
         member = next(m for row in items for m in row['memberships'])
         self.assertIn('node_type', member)
-        if RECORD:
-            replacement.set_profile(member['id'], name='分页更新🙂')
         self.sync('renamed')
         updated = self.pair('/api/assets?limit=200')['body']
         self.assertNotEqual(first, updated)
@@ -32,8 +23,6 @@ class BrowseReadHTTPTest(HTTPHarness):
                       'pool=unmatched', 'order=hinted', 'order=suspicious',
                       'nsfw=hide', 'nsfw=only'):
             self.pair('/api/assets?'+query)
-        if RECORD:
-            self.server.store = original
         self.publish()
         self.pair('/api/assets?limit=200')
 
@@ -76,8 +65,6 @@ class BrowseReadHTTPTest(HTTPHarness):
     def test_database_error_precedes_review_pool_rating_validation(self):
         corrupt = self.root/'corrupt-temporary.sqlite'
         corrupt.write_bytes(b'not a SQLite database')
-        if RECORD:
-            self.store.path = corrupt
         self.publish()
         self.assertEqual(self.pair('/api/review-pools?nsfw=invalid')['status'],500)
 
@@ -111,17 +98,10 @@ class BrowseReadHTTPTest(HTTPHarness):
     def test_expanded_legacy_core_visibility_evidence_and_auxiliary_reads(self):
         name = 'Browse #雪%.pilib' if os.name == 'nt' else 'Browse #雪?.pilib'
         package = self.root/name
-        if RECORD:
-            self.build_expanded(package)
         self.sync('expanded'); self.publish()
-        source = Path(self.rec.value('source', lambda: str(self.server.store.source)))
+        source = Path(self.rec.value('source'))
         for core in (False,True):
             if core:
-                if RECORD:
-                    from tests import terms_seed
-                    from web.server import adopt_artists
-                    self.assertTrue(adopt_artists(self.server.store,self.server.library))
-                    terms_seed.switch(self.server.store,artists=False)
                 self.sync('switched'); self.publish()
             for nsfw in ('','hide','only'):
                 for pool in ('','duplicates','excluded','unmatched','pending','recent','audit'):
@@ -159,64 +139,4 @@ class BrowseReadHTTPTest(HTTPHarness):
                 self.assertEqual(self.pair('/api/detail?id=a')['status'],500)
             finally:prov.rmdir();parked.rename(prov)
 
-    def build_expanded(self, package):
-        """Recording only: the expanded legacy inputs, written through the former Python application."""
-        import sqlite3
-        from web import artists, library
-        from provenance import db
-        from tests import terms_names_fixture
-        lib=library.create(package)
-        seed=self.root/'browse-expanded'; seed.mkdir(exist_ok=True)
-        store,attrs=terms_names_fixture.build(seed,legacy=True)
-        alice,bob=attrs['alice'],attrs['bob']
-        with sqlite3.connect(store.source) as c:
-            for i,date in enumerate(('2026-09-23 01:00:00','2026-09-23 01:00:00','2026-09-24',
-                                     '2026-09-24','2026-09-25','2026-09-25','2026-09-25','2026-09-25')):
-                id=f'extra-{i}'
-                c.execute('INSERT INTO assets VALUES (?,?,?,?,?,?,?,?,?)',(id,id+'.png','',80+i,90+i,date,'orig',1,0))
-                c.execute("INSERT INTO labels VALUES (?,'general','blue_hair',?)",(id,.9))
-                c.execute("INSERT INTO labels VALUES (?,'rating',?,.99)",(id,'explicit' if i%2 else 'general'))
-            c.executemany("INSERT INTO labels VALUES ('a','general',?,.8)",[(f'float-tie-{i}',) for i in range(28)])
-        with store.connect() as c:
-            with sqlite3.connect(store.source) as src:
-                extra=src.execute("SELECT uuid,filename,src_path,width,height,added_at,src_kind FROM assets WHERE uuid LIKE 'extra-%'").fetchall()
-            c.executemany('INSERT INTO assets VALUES (?,?,?,?,?,?,?)',extra)
-            for id,entity in [('extra-0',alice),('extra-1',alice),('extra-2',alice),('extra-3',bob)]:
-                c.execute("INSERT INTO assertions VALUES (?,?,'confirmed','review')",(id,entity))
-            c.execute("INSERT INTO candidates VALUES ('extra-4',?,'WD',.91)",(alice,))
-            c.execute("INSERT INTO candidates VALUES ('extra-4',?,'CCIP',.92)",(alice,))
-            c.execute("INSERT INTO weak_claims VALUES ('extra-6',?,'PROTO',.6)",(alice,))
-            c.execute("INSERT INTO weak_claims VALUES ('extra-7',?,'PROTO',.6)",(bob,))
-            c.execute("INSERT INTO deferred VALUES ('extra-5')")
-            c.execute("INSERT INTO curation(uuid,status,origin) VALUES ('extra-3','excluded','review')")
-            c.execute("INSERT INTO excluded VALUES ('extra-3','manual','review')")
-            c.execute("INSERT INTO auto_rules VALUES ('extra-4','pending','text')")
-            c.execute("INSERT INTO sync_added VALUES ('extra-6',1)")
-            c.execute("INSERT INTO audit_sample(uuid,entity,stratum,solo) VALUES ('extra-0',?,'uniform',1)",(alice,))
-            for id,grp,pos,rep in [('extra-0','same',0,1),('extra-1','same',1,0),('extra-2','mixed',0,1),('extra-3','mixed',1,0)]:
-                c.execute('INSERT INTO duplicates VALUES (?,?,2,?,?,?,0)',(id,grp,pos,'2026-09-24',rep))
-            c.execute('INSERT INTO clusters VALUES (\'extra-6\',7),(\'extra-7\',7)')
-            c.execute('INSERT INTO similar_groups VALUES (\'extra-0\',9),(\'extra-1\',9),(\'extra-2\',9)')
-            store._refresh_memberships(c)
-            c.execute("INSERT INTO general_hits SELECT uuid,'blue_hair' FROM assets WHERE uuid LIKE 'extra-%'")
-            c.execute("INSERT INTO asset_rating SELECT uuid,CASE WHEN CAST(substr(uuid,-1) AS INTEGER)%2 THEN 'explicit' ELSE 'general' END FROM assets WHERE uuid LIKE 'extra-%'")
-        # Library sqlite used by artists._core is this very same application database.
-        with store.connect() as src,sqlite3.connect(lib.db) as dst:src.backup(dst)
-        store.path=lib.db
-        with db.connect(lib) as c:
-            c.execute("INSERT INTO artists(id) VALUES ('A'),('B'),('M')")
-            c.execute("UPDATE artists SET merged_into='A' WHERE id='M'")
-            c.execute("INSERT INTO artist_links(system,key,artist_id,url,source) VALUES ('pixiv','42','A','unused','test')")
-            c.executemany('INSERT INTO image_artists(asset,artist_id,method,score,evidence,status) VALUES (?,?,?,?,?,?)',[
-                ('a','A','pixel_hash',1,'{}','auto'),('a','B','group_oc',.5,'{"count":2}','candidate'),
-                ('extra-0','M','gallery_match',.95,'{}','auto'),('extra-1','B','ocr',.6,'{}','candidate')])
-            c.executemany('INSERT INTO image_sources(asset,site,post_id,url,artist_id,method) VALUES (?,?,?,?,?,?)',[
-                ('a','pixiv','2','https://example.test/2','B','gallery_match'),
-                ('a','pixiv','1','https://example.test/1','A','pixel_hash'),
-                ('a','x','3','https://example.test/x','A','gallery_match')])
-        with store.connect() as c:
-            c.execute("INSERT INTO artist_verdicts(uuid,artist,verdict) VALUES ('a','B','no'),('extra-1','B','yes')")
-            c.execute("INSERT INTO actions(label,before_json) VALUES ('synthetic artist verdicts',?)",(json.dumps([{'artist_verdict':{'uuid':'a','artist':'B','had':None}},{'artist_verdict':{'uuid':'extra-1','artist':'B','had':None}}]),))
-        store.artist_assets=lambda artist:artists.assets_of(lib,artist,rejected=store.artist_verdicts())
-        self.server.store=store;self.server.library=lib
 

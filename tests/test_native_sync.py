@@ -30,7 +30,7 @@ class NativeSyncTest(unittest.TestCase):
         with sqlite3.connect(self.library / 'database/Photos.sqlite') as c:
             c.execute('CREATE TABLE ZASSET(Z_PK INTEGER PRIMARY KEY,ZUUID TEXT,ZKIND INTEGER,ZTRASHEDSTATE INTEGER,ZWIDTH INTEGER,ZHEIGHT INTEGER,ZADDEDDATE REAL,ZHIDDEN INTEGER,ZDIRECTORY TEXT,ZFILENAME TEXT,ZADDITIONALATTRIBUTES INTEGER)')
             c.execute('CREATE TABLE ZADDITIONALASSETATTRIBUTES(Z_PK INTEGER PRIMARY KEY,ZIMPORTEDBYBUNDLEIDENTIFIER TEXT,ZORIGINALSTABLEHASH TEXT,ZORIGINALFILESIZE INTEGER)')
-        from web.library import ensure_source_schema
+        from tests.library_fixture import ensure_source_schema
         with sqlite3.connect(self.lib.source) as c:
             ensure_source_schema(c)
             if 'z_pk' not in {row[1] for row in c.execute('PRAGMA table_info(assets)')}:
@@ -318,7 +318,7 @@ Path(sys.argv[2]).write_text(json.dumps(dict(identity=r['identity'],packages=pac
             if json.loads(self.request('/api/sync')['body'])['state']['status']=='recognising':break
             time.sleep(.01)
         self.assertEqual(self.request('/api/sync',{})['body'],b'{"started": false}')
-        other,_=self.package('other')
+        other = self.package('other')
         other.config['id']=self.lib.config['id']
         (other.path/'library.json').write_text(json.dumps(other.config))
         self.assertEqual(self.request('/api/libraries/open',{'path':str(other.path)})['status'],200)
@@ -368,7 +368,7 @@ Path(sys.argv[2]).write_text(json.dumps(dict(identity=r['identity'],packages=pac
 
     @unittest.skipIf(os.name == 'nt', 'Apple 照片图库只在 macOS 上提供')
     def test_native_library_new_photos_exact_source_reference(self):
-        # The former Python Photos scanner's results on the same inputs are recorded (tests/reference_replay.py).
+        # The former Python Photos scanner's results on the same inputs are recorded (tests/fixed_expectations.py).
         for u,app in (('D','com.atebits.Tweetie2'),('E','net.pxv.iphone'),('F','com.apple.springboard')): self.photo(u,app)
         for i,app in enumerate(('com.apple.camera','com.apple.mobileslideshow','com.apple.mobilesafari','tv.danmaku.bilianime','ai.x.GrokApp','com.tencent.xin','com.baidu.netdisk','app.nicegram','')):self.photo('N'+str(i),app)
         def pair():
@@ -376,10 +376,7 @@ Path(sys.argv[2]).write_text(json.dumps(dict(identity=r['identity'],packages=pac
             with sqlite3.connect(self.lib.source) as src,sqlite3.connect(old) as dest:src.backup(dest)
             result=subprocess.run([str(self.binary),'photos-scan','--db',str(self.lib.source)],input=json.dumps(self.source).encode(),capture_output=True,env=self.env)
             self.assertEqual(result.returncode,0,result.stderr)
-            def old_scan():
-                from web.sync import scan
-                return {'result':scan(self.library,old,self.source),'source':snapshot(old)}
-            expected=self.rec.value('old scan',old_scan)
+            expected=self.rec.value('old scan')
             self.assertEqual(json.loads(result.stdout),expected['result'])
             self.assertEqual(snapshot(self.lib.source),expected['source'])
         pair()

@@ -4,9 +4,11 @@ from pathlib import Path
 
 import numpy as np
 
-from web.features import Features
-from tests import terms_seed
-from web.store import MIXED
+from tests.research_fixture import Features
+from tests.research_fixture import seed
+MIXED = """EXISTS(SELECT 1 FROM duplicates y WHERE y.grp=d.grp AND y.uuid<>d.uuid AND (
+ EXISTS(SELECT entity FROM memberships WHERE uuid=d.uuid EXCEPT SELECT entity FROM memberships WHERE uuid=y.uuid) OR
+ EXISTS(SELECT entity FROM memberships WHERE uuid=y.uuid EXCEPT SELECT entity FROM memberships WHERE uuid=d.uuid)))"""
 
 
 def assert_memberships_current(test, store):
@@ -34,18 +36,11 @@ def unit(v):
 
 class Learning:
     """setUp/tearDown/owners/learned_snapshot for learning fixtures (former tests/test_learn.py)."""
-    def setUp(self, *, seed=None):
+    def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         root = Path(self.temp.name)
-        default_seed = seed is None
-        seed = seed or 'test_terms_character_learning_LearningContract_test_learning_changes_and_continuous_old_undo_double_run'
-        self.store, attrs = terms_seed.load(seed, root)
+        self.store, attrs = seed(self, root)
         self.alice, self.bob = attrs['alice'], attrs['bob']
-        if default_seed:
-            if self._testMethodName == 'test_rejected_skin_is_not_a_parent_negative':
-                with self.store.connect() as c:
-                    c.execute("INSERT INTO entities(id,name,kind,parent_id,variant) VALUES ('summer','','skin',?,'summer')", (self.alice,))
-            terms_seed.switch(self.store)
         rng = np.random.default_rng(0)
         A, B = unit([1, 0, 0, 0, 0, 0, 0, 0]), unit([0, 0, 0, 0, 1, 0, 0, 0])
         near = lambda centre, spread: unit(centre + rng.normal(0, spread, 8))
@@ -62,7 +57,8 @@ class Learning:
         self.temp.cleanup()
 
     def owners(self, uuid):
-        return [m['id'] for m in self.store.detail(uuid)['memberships']]
+        with self.store.connect() as c:
+            return [r[0] for r in c.execute('SELECT entity FROM memberships WHERE uuid=? ORDER BY entity', (uuid,))]
 
     def learned_snapshot(self):
         with self.store.connect() as c:

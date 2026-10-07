@@ -2,7 +2,7 @@
 import json
 import unittest
 from urllib.parse import urlencode
-from tests.read_http_harness import RECORD, HTTPHarness
+from tests.read_http_harness import HTTPHarness
 
 CORE = {'characters', 'tagged', 'character/profile', 'character/activity', 'character/stats',
         'identity/count', 'identity/queue',
@@ -37,32 +37,17 @@ class CharacterReadHTTPTest(HTTPHarness):
                   '/api/character/stats',
                  '/api/character/stats?id=a&nsfw=bad']
         missing = self.root/'never-created.sqlite'
-        if RECORD:
-            self.store.path = missing
         self.publish()
         for path in cases:
             self.assertEqual(self.pair(path)['status'], 400)
         self.assertFalse(missing.exists())
     def test_nonempty_identity_queue_first_hit_paging_and_detail(self):
         root = self.root/'r4-hybrid'; root.mkdir(exist_ok=True)
-        if RECORD:
-            from tests import terms_seed
-            replacement = terms_seed.base(root)
-            replacement.activate_identity('hybrid')
-            terms_seed.switch(replacement)
-            self.server.store = store = replacement
         self.sync('hybrid'); self.publish()
         with self.connect() as c:
             ids = [r[0] for r in c.execute("SELECT entity,count(*) FROM memberships GROUP BY entity ORDER BY count(*) DESC")]
         self.assertGreaterEqual(len(ids), 2)
         a, b = ids[:2]
-        if RECORD:
-            with store.connect() as c:
-                c.execute("INSERT OR REPLACE INTO identity_pairs VALUES (?,?,0.21,0.12,'anchor_unverified','synthetic',?)",
-                          (a,b,json.dumps({'relation':'form_of','subject':'first_tag','object':'second_tag','nested':{'z':1,'a':2}})))
-                c.execute("INSERT OR REPLACE INTO identity_pairs VALUES (?,?,0.20,0.11,'anchor_unverified','synthetic',?)",(b,a,'{}'))
-            # Use supported core relation write so projections remain authoritative.
-            store._core({'op':'propose','a':a,'b':b,'kind':'form_of','evidence':{'z':1,'nested':{'b':2,'a':1}},'source':'manual'})
         self.sync('proposed')
         for path in ['identity/queue', 'identity/count', 'detail?id=a']:
             self.pair('/api/' + path)
@@ -85,42 +70,26 @@ class CharacterReadHTTPTest(HTTPHarness):
         self.assertEqual(covers[a], 'a')  # Solo, confirmed image wins over the shared machine image.
         self.assertEqual(covers[b], 'b')
         self.assertNotEqual(covers[a], covers[b])
-        if RECORD:
-            store.set_mascot(b, True)
         self.sync('mascot')
         tagged=json.loads(self.pair('/api/tagged')['body'])
         self.assertTrue(any(r['id']==b and r['count'] for r in tagged))
         self.pair('/api/characters?'+urlencode({'id':b}))
-        if RECORD:
-            store.set_mascot(b, False)
-            store.set_profile(a, name='合成用户名字', aliases=['后插入','先排序'])
         self.sync('profile')
         profile=json.loads(self.pair('/api/character/profile?'+urlencode({'entity':a}))['body'])
         self.assertEqual(profile['user_name'], '合成用户名字')
         self.assertEqual(profile['aliases'], ['后插入','先排序'])
         for uuid in ('a','b','c'):
             self.pair('/api/detail?id='+uuid)
-        if RECORD:
-            action = store.skip_identity_pair(a,b)
         self.sync('skipped')
         self.assertEqual(json.loads(self.pair('/api/identity/count')['body'])['total'],0)
-        if RECORD:
-            store.undo(action['id'])
-            store.decide_identity(a=a,b=b,kind='different_from',status='accepted',reason='synthetic distinct',evidence={'z':1})
-            store._core({'op':'propose','a':a,'b':b,'kind':'different_from','evidence':{'new':1},'source':'manual'})
         self.sync('decided')
         self.pair('/api/identity/count')
-        if RECORD:
-            store.uncertain_identity(['a'],[a,b],reason='synthetic uncertainty')
         self.sync('uncertain')
         response = json.loads(self.pair('/api/detail?id=a')['body'])['identity']
         self.assertTrue(response['undetermined'])
 
     def test_unset_policy_legacy_names_stable_ties_and_cover_reuse(self):
         other = self.root/'r4-legacy'; other.mkdir(exist_ok=True)
-        if RECORD:
-            from tests import terms_names_fixture
-            self.server.store, _ = terms_names_fixture.build(other, legacy=True)
         self.sync('legacy'); self.publish()
         for path in ['characters', 'characters?summary=1', 'tagged', 'identity/queue', 'identity/count', 'detail?id=a']:
             self.pair('/api/' + path)

@@ -1,17 +1,17 @@
 # tools/ 目录用途
 
-状态：现行参考，2026-10-07。本文列出 `tools/` 下保留的脚本及用途；保留与删除的依据见 #186，安装包里实际带哪些脚本以 `packaging/build.py` 的白名单为准（见 [后端与安装说明](BACKEND_TASKS.md#独立安装与可选计算包)）。
+状态：现行参考，2026-10-08。本文列出 `tools/` 下保留的脚本及用途；保留与删除的依据见 #186，安装包里实际带哪些脚本以 `packaging/build.py` 的白名单为准（见 [后端与安装说明](BACKEND_TASKS.md#独立安装与可选计算包)）。
 
-## 旧 Python 计算脚本（只作测试参考）
+## 旧 Python 索引脚本
 
-2026-10-07 起不进任何安装包（Linux 已冻结，见 [README](../README.md)），只被原生计算的对照测试引用；改为固定期望后随 `tests/reference/` 一起删除（#9）。
+不进任何安装包（Linux 已冻结，见 [README](../README.md)），原生索引计算已替代它们；现在只被自身单测（`test_index_worker`、`test_char_tools`）和个别平台专项引用。去留另行决定，见 #9 的遗留项。旧 Python 应用与计算代码（`tests/reference/`、`web/*.py`、`provenance/`、`calibrate_classification.py`）已在 #9 删除，副本在私有库归档。
 
 | 脚本 | 用途 |
 |---|---|
 | `index_worker.py` | 角色索引更新 worker，只写 Rust 准备的隔离目录 |
 | `ccip.py` | CCIP 角色相似度（两阶段实现，见 [ERRATA.md](../ERRATA.md) 第 1、7 条） |
 | `char_patch.py`、`build_characters.py`、`char_scan.py` | 补外部角色索引、角色实体表、锚点全库扫描；`index_worker` 调用 |
-| `calibrate_classification.py`、`validation_worksheet.py` | `web/learn.py` 引用的阈值校准与盲审工作表 |
+| `validation_worksheet.py` | 盲审工作表 |
 
 ## 构建、检查与验收
 

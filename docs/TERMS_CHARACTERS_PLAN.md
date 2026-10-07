@@ -14,11 +14,11 @@
 
 ### 整合范围与验收门槛（待执行）
 
-只读三方合并预览在 `tests/reference/web/artists.py` 出现文本冲突；自动合并成功也不能代替业务验收。以 main 的最新溯源产品行为和 terms-core 的核心写入、裁决及撤销边界共同作为目标，不能整文件选一侧覆盖另一侧。
+只读三方合并预览在 `tests/reference/web/artists.py（#9 已删除）` 出现文本冲突；自动合并成功也不能代替业务验收。以 main 的最新溯源产品行为和 terms-core 的核心写入、裁决及撤销边界共同作为目标，不能整文件选一侧覆盖另一侧。
 
-1. **新证据与候选读路径。** 保留 IQDB、`same_picture` 自动归属，`group_oc` / `group_cluster` / `group_run` 候选及原因；核对核心判定器、证据方法映射、`term_projection` 和 `tests/reference/web/artists.py`。当前核心读路径 `_core_for_asset()` 未返回 `maybe`，`STRONG` 仍仅列 `pixel_hash`、`gallery_match`。验收旧路径与切换后路径的归属、候选原因、数量、人工确认 / 否定 / 撤销一致；候选确认前不能计为正式归属。新方法的强弱遵循 main 已定行为，不顺带重设计规则。
-2. **候选失效与重复交付。** main 的 groups 步骤每次删除旧分组候选再重算；`tests/reference/provenance/export.py` 交全量快照、核心保留历史证据。核实并补齐有效范围 / 失效机制，不能假定快照中缺失的候选自动失效。测试候选消失、成功空结果、重复交付、失败 / 取消后的部分交付，区分成功撤回与未完成计算；机器证据更新不得抹掉人工裁决。
-3. **运行生命周期和权限。** 保留 main 的便宜后台步骤、选图查找、指定画师查找、后台暂停恢复，以及未授权只跳过联网步骤、本地步骤继续执行。核对 `tests/reference/web/provenance_job.py` 的交包与 `tests/reference/web/server.py` 的接线：正常结束、取消、失败、重启补交后核心结果和页面刷新一致，按需运行结束后后台正确恢复；离线回归使用假网络，不以本次文档授权开展外部请求。
+1. **新证据与候选读路径。** 保留 IQDB、`same_picture` 自动归属，`group_oc` / `group_cluster` / `group_run` 候选及原因；核对核心判定器、证据方法映射、`term_projection` 和 `tests/reference/web/artists.py（#9 已删除）`。当前核心读路径 `_core_for_asset()` 未返回 `maybe`，`STRONG` 仍仅列 `pixel_hash`、`gallery_match`。验收旧路径与切换后路径的归属、候选原因、数量、人工确认 / 否定 / 撤销一致；候选确认前不能计为正式归属。新方法的强弱遵循 main 已定行为，不顺带重设计规则。
+2. **候选失效与重复交付。** main 的 groups 步骤每次删除旧分组候选再重算；`tests/reference/provenance/export.py（#9 已删除）` 交全量快照、核心保留历史证据。核实并补齐有效范围 / 失效机制，不能假定快照中缺失的候选自动失效。测试候选消失、成功空结果、重复交付、失败 / 取消后的部分交付，区分成功撤回与未完成计算；机器证据更新不得抹掉人工裁决。
+3. **运行生命周期和权限。** 保留 main 的便宜后台步骤、选图查找、指定画师查找、后台暂停恢复，以及未授权只跳过联网步骤、本地步骤继续执行。核对 `tests/reference/web/provenance_job.py（#9 已删除）` 的交包与 `tests/reference/web/server.py（#9 已删除）` 的接线：正常结束、取消、失败、重启补交后核心结果和页面刷新一致，按需运行结束后后台正确恢复；离线回归使用假网络，不以本次文档授权开展外部请求。
 4. **角色兼容与完整回归。** 分组推荐读取 `duplicates`、`similar_groups`、`memberships`、`entities`、`clusters`，核对切换后的兼容读路径。先补溯源整合测试并跑两边相关回归，再完成文末 S4 未做项和完整 Rust / Python 回归。S5 仍需逐次授权，仅在副本上做当前状态、连续撤销、增量 / 全量重建和 App 读路径对照；历史测试数字不代表合并后通过。
 
 本节是恢复后的优先执行顺序；下文 S0–S4 记录保留为历史证据，历史记录中的“未完成”“不进行下一阶段”按对应时间理解。S4 原剩余项目仍全部有效，溯源整合通过不能代替 S4 完成。
@@ -36,10 +36,10 @@
 
 | 项 | 结论 | 回应 / 修订位置 |
 |---|---|---|
-| 事实 3 | 接受更正 | `change`、`reassign` 不写 `asked`；`answer`、`answer_audit` 写；`sweep` 写 `reviews`（`tests/reference/web/store.py:1877–1936,2015–2150`）。矩阵按此写（第 8 节）。 |
-| 事实 8 | 接受更正 | `learn` 没有 dirty 且不 `reclaim` 时提前返回（`web/learn.py:156–157`）；只有进入 `_claim` 才整表替换。 |
+| 事实 3 | 接受更正 | `change`、`reassign` 不写 `asked`；`answer`、`answer_audit` 写；`sweep` 写 `reviews`（`tests/reference/web/store.py（#9 已删除）:1877–1936,2015–2150`）。矩阵按此写（第 8 节）。 |
+| 事实 8 | 接受更正 | `learn` 没有 dirty 且不 `reclaim` 时提前返回（`web/learn.py（#9 已删除）:156–157`）；只有进入 `_claim` 才整表替换。 |
 | B1 历史重建 | 接受 | 按事件类型分别重建，基线用非用户批次定位；区分当前状态等价与连续撤销等价；不能解释的出处计数并阻止切换（第 6 节）。album 批次保持「没有结论才写」，不改成覆盖。 |
-| B2 proposed 与回落 | 接受（机制不同于「hold」） | 身份关系**没有机器回落**：图只采用「人工 yes 或非用户批次 yes」的关系，以及 `identity_baseline` 里的基线边（与 `_graph` 相同，`web/identity.py:298–333`）。人工退回 proposed = 追加一条 `clear`，它是最新的一条，所以不会回落。`reviewed` 按每条裁决保存，包括 `clear`，「未复核继承层级」按最近一条裁决计算（第 5.1 节）。`identity_baseline` 作为活的私有表保留，新身份照旧追加。迁移证据用 `migration-hierarchy` 等来源，不用被禁止的 `legacy`（`crates/core/src/schema.rs:188`）。 |
+| B2 proposed 与回落 | 接受（机制不同于「hold」） | 身份关系**没有机器回落**：图只采用「人工 yes 或非用户批次 yes」的关系，以及 `identity_baseline` 里的基线边（与 `_graph` 相同，`web/identity.py（#9 已删除）:298–333`）。人工退回 proposed = 追加一条 `clear`，它是最新的一条，所以不会回落。`reviewed` 按每条裁决保存，包括 `clear`，「未复核继承层级」按最近一条裁决计算（第 5.1 节）。`identity_baseline` 作为活的私有表保留，新身份照旧追加。迁移证据用 `migration-hierarchy` 等来源，不用被禁止的 `legacy`（`crates/core/src/schema.rs:188`）。 |
 | B3 有效批次 | 接受 | 新增证据批次与有效证据集，定义覆盖范围、成功空结果、失败（第 7 节）。初次收编以现有 `candidates` 整表作为迁移批次。「角色证据交包可以先做」撤回：交包只在切换后、由核心在同一事务里解析并建词条。 |
 | B4 作品树与身份图语义 | 接受 | 作品上级是**状态**，由移植后的 `apply_evidence`、`move`、`create` 按原顺序更新，不是从证据重算；身份图逐行移植 `_graph`/`_project`，保留 b 为代表、处理顺序、先等价后层级、不限制同层（第 5 节）。四个反例进夹具。改语义的列进第 11 节，不混入。 |
 | B5 名字 | 接受；改为这一步不收编 | 名字表与规则留 Python，核心只按 `put_name` 的原语义写入（第 10 节）。名字包、词表、`View` 直读路径、投影失效依赖作为下一步的前置契约列出。 |
@@ -68,7 +68,7 @@ schema v1 已随第 2、3 步用于切换，不能改；新增一次迁移 v2，
 
 ## 3. 身份策略的支持范围
 
-- 支持 `identity_policy` 未设置（新图库的默认，只有 `tools/identity_rollout.py`、`tools/eval_bench.py`（两者 2026-10-05 删除，#186）会激活，`tests/reference/web/store.py:2153`）和 `hybrid`。两者的规则 SQL 不同（`V2_SCHEMA` 与 `identity.VIEWS`+`HYBRID_*`），都原样执行；图的算法只在 hybrid 下运行，未设置时 `parent_id`、`merged_into` 是直接状态。
+- 支持 `identity_policy` 未设置（新图库的默认，只有 `tools/identity_rollout.py`、`tools/eval_bench.py`（两者 2026-10-05 删除，#186）会激活，`tests/reference/web/store.py（#9 已删除）:2153`）和 `hybrid`。两者的规则 SQL 不同（`V2_SCHEMA` 与 `identity.VIEWS`+`HYBRID_*`），都原样执行；图的算法只在 hybrid 下运行，未设置时 `parent_id`、`merged_into` 是直接状态。
 - `v2` 的库拒绝切换，留在旧表并提示原因（待确认，见 D1）。
 - 切换后拒绝 `activate_identity`：改策略是迁移，不是日常写。
 
@@ -91,7 +91,7 @@ schema v1 已随第 2、3 步用于切换，不能改；新增一次迁移 v2，
 | 旧表 | 主数据 | 切换后 | 写入方 |
 |---|---|---|---|
 | `assertions` | 对 (图, 原始词条) 的 `term_verdicts`：confirmed→yes，rejected→no；`via` 保存原 origin | 旧表冻结为 `legacy_assertions`；兼容表 `assertions` = 每个目标的有效裁决，origin = `via` | 核心 |
-| `identity_relations` | `term_relations`：`duplicate_of(a,b)` → `same_as(a,b)`（b 是代表）；`form_of(a=皮肤,b=人物)` → `contains(b→a)`，**端点反转**；`different_from` → `different_from` | 冻结；兼容表保留原 id（新关系 id 大于旧的最大值），`different_from` 按原来的**文字**顺序输出 a < b（`web/identity.py:244`），status 由最新裁决算出（yes = accepted，no = rejected，clear 或没有 = proposed） | 核心 |
+| `identity_relations` | `term_relations`：`duplicate_of(a,b)` → `same_as(a,b)`（b 是代表）；`form_of(a=皮肤,b=人物)` → `contains(b→a)`，**端点反转**；`different_from` → `different_from` | 冻结；兼容表保留原 id（新关系 id 大于旧的最大值），`different_from` 按原来的**文字**顺序输出 a < b（`web/identity.py（#9 已删除）:244`），status 由最新裁决算出（yes = accepted，no = rejected，clear 或没有 = proposed） | 核心 |
 | `identity_evidence` | 关系证据：source 原样（`migration`、`legacy-hierarchy`、`manual`……，都不在保留字里），payload 进 data，原 sha256 指纹进 `data.legacy_fingerprint`；核心指纹取它的前 16 字节 | 冻结；兼容表 | 核心 |
 | `identity_decisions` | 关系裁决：有 action 的挂 action（经 `before_json` 里的 `decision_id`）；`activate` 写的挂 `migration` 批次；reason 原样；previous_status 由序列算出，并存进裁决 data 以便核对 | 冻结；兼容表保留原 id | 核心 |
 | `identity_decision_evidence` | 裁决的 `reviewed`（证据 id） | 冻结；兼容表 | 核心 |
@@ -122,10 +122,10 @@ schema v1 已随第 2、3 步用于切换，不能改；新增一次迁移 v2，
 | 列 | 兼容表的值 | 说明 |
 |---|---|---|
 | `id` | `terms.key` | 界面链接不变 |
-| `name` | `''` | 切换前预检全部为 `''`，否则拒绝（`tests/reference/web/store.py:491` 已清空） |
-| `work` | `term_tree.work_text` 原样 | 不由 qualifier 重算：未知版权后缀的角色可能有字符串而 `work_id` 为空（`tests/reference/web/store.py:1070–1079`，`tests/test_works.py:44–51`）。写入规则照 `_entity`、`_set_work`、`set_work`、`set_kind`（原创时清空）、`_undo_profile` |
-| `external_key`、`tag` | `NULL` | 预检全部为空（`tests/reference/web/store.py:452–460`） |
-| `variant` | hybrid：图投影（有父人物时取基线 variant，没有就取 Danbooru 链接，再没有就取 id；否则 `''`，`web/identity.py:372–377`）；未设置策略：attrs 原样 | |
+| `name` | `''` | 切换前预检全部为 `''`，否则拒绝（`tests/reference/web/store.py（#9 已删除）:491` 已清空） |
+| `work` | `term_tree.work_text` 原样 | 不由 qualifier 重算：未知版权后缀的角色可能有字符串而 `work_id` 为空（`tests/reference/web/store.py（#9 已删除）:1070–1079`，`tests/test_works.py:44–51`）。写入规则照 `_entity`、`_set_work`、`set_work`、`set_kind`（原创时清空）、`_undo_profile` |
+| `external_key`、`tag` | `NULL` | 预检全部为空（`tests/reference/web/store.py（#9 已删除）:452–460`） |
+| `variant` | hybrid：图投影（有父人物时取基线 variant，没有就取 Danbooru 链接，再没有就取 id；否则 `''`，`web/identity.py（#9 已删除）:372–377`）；未设置策略：attrs 原样 | |
 | `parent_id` | 作品：`term_tree`；人物、皮肤：hybrid 用图投影，未设置策略用直接状态 | |
 | `merged_into` | hybrid：图投影（代表不是自己时）；未设置策略：直接状态（破坏式合并） | |
 | `kind` | 作品：`work`；hybrid 下有父为 `skin`，否则取基线 kind；未设置策略下原样 | |
@@ -133,16 +133,16 @@ schema v1 已随第 2、3 步用于切换，不能改；新增一次迁移 v2，
 | `work_id` | `term_tree`（角色）；皮肤为 `NULL` | |
 
 - **assertions**（uuid, entity, status, origin）：有效裁决；origin 取 `via`（review / sweep / album，基线行保存原值）。
-- **candidates**（uuid, entity, source, score）：见 4.3；entity 是 `_candidate` 解析出的**原始**词条（hybrid 不走合并，未设置策略时走 `_resolve`，`tests/reference/web/store.py:1100–1102`）。
+- **candidates**（uuid, entity, source, score）：见 4.3；entity 是 `_candidate` 解析出的**原始**词条（hybrid 不走合并，未设置策略时走 `_resolve`，`tests/reference/web/store.py（#9 已删除）:1100–1102`）。
 - **identity_relations**（id, a, b, kind, status）、**identity_decisions**（id, relation_id, previous_status, status, reason, created_at）、**identity_decision_evidence**（decision_id, fingerprint）、**identity_evidence**（relation_id, fingerprint, source, payload, created_at）：id、指纹、时间都取原值。
-- **memberships / tag_memberships**：9 列由原 SQL 产生，包括 skey 的 `printf`（`tests/reference/web/store.py:672–675`）。
+- **memberships / tag_memberships**：9 列由原 SQL 产生，包括 skey 的 `printf`（`tests/reference/web/store.py（#9 已删除）:672–675`）。
 - **links**（system, key, entity_id, current, source, added_at）：`wd_character` 映射回 `wd`；entity_id = 词条 key。
 
 ## 5. 既有语义（逐行移植，写进测试）
 
 ### 5.1 身份图（hybrid）
 
-1. 每次重建前先追加基线：`entities` 里还不在 `term_identity_baseline` 的身份，按当时的 parent_id / variant / kind / merged_into 追加（= `baseline()`，`web/identity.py:233–235`）。新身份的层级（`_hierarchy` 的名字规则）只在这里，不是关系，人工不能覆盖（原行为）。
+1. 每次重建前先追加基线：`entities` 里还不在 `term_identity_baseline` 的身份，按当时的 parent_id / variant / kind / merged_into 追加（= `baseline()`，`web/identity.py（#9 已删除）:233–235`）。新身份的层级（`_hierarchy` 的名字规则）只在这里，不是关系，人工不能覆盖（原行为）。
 2. `_graph`：
    - 基线行按原 rowid 顺序；先按基线 `merged_into` 合并，再按 accepted 的 `duplicate_of`（**按关系 id 顺序**）合并，`join(a,b)` 的根取 b 那一侧；
    - 再在等价组上挂层级：先挂基线父，后挂 accepted 的 `form_of`（按 id）；
@@ -153,13 +153,13 @@ schema v1 已随第 2、3 步用于切换，不能改；新增一次迁移 v2，
    - 重写 canonical，逐行写回 entities；
    - `graph_version` = `json.dumps([rows, sorted(pending)])` 的 sha256，按 Python 默认（`ensure_ascii`、`', '` 分隔）逐字节复刻（冻结分支 `identity_graph.rs::legacy_json` 与其测试可作对照）；
    - 版本变了：失效校准、清认领；hybrid 下对受影响的图（`affected_images` 加挂起的图）重算证据与归属。
-4. `accept_many` 逐条接受、逐条校验，最后重建一次。`decide` 每次都追加一条决议，并记下当时关系上全部证据的指纹，包括退回 proposed（`web/identity.py:412–424`）。
+4. `accept_many` 逐条接受、逐条校验，最后重建一次。`decide` 每次都追加一条决议，并记下当时关系上全部证据的指纹，包括退回 proposed（`web/identity.py（#9 已删除）:412–424`）。
 5. 「未复核继承层级」（`pending_hierarchy_people`）：关系上有 `legacy-hierarchy` 证据，且**最近一条裁决（含 clear）**的 reviewed 没有包含它。
-6. `assertions` 的触发器语义（`web/identity.py:206–218`）：写一条结论时，删掉该 (图, 身份) 的 scope / suspended；所在等价组多于一个成员时，按组成员重写 scope。移进核心写裁决的同一段代码，别处不再触发。
+6. `assertions` 的触发器语义（`web/identity.py（#9 已删除）:206–218`）：写一条结论时，删掉该 (图, 身份) 的 scope / suspended；所在等价组多于一个成员时，按组成员重写 scope。移进核心写裁决的同一段代码，别处不再触发。
 
 ### 5.2 作品树（状态，不是重算）
 
-- `create`：新作品一律上锁（有无上级都锁，`tests/reference/web/works.py:22–30`）。`move`：先查不成环（子树包含目标就拒绝），然后上锁。`link`：旧的 Danbooru 链接改为非当前、新链接为当前，status 改 confirmed、note 清空。清空链接：status = confirmed，note = 「外部链接已由用户清空」。
+- `create`：新作品一律上锁（有无上级都锁，`tests/reference/web/works.py（#9 已删除）:22–30`）。`move`：先查不成环（子树包含目标就拒绝），然后上锁。`link`：旧的 Danbooru 链接改为非当前、新链接为当前，status 改 confirmed、note 清空。清空链接：status = confirmed，note = 「外部链接已由用户清空」。
 - `apply_evidence` 逐行移植（冻结分支 `works.rs:157–337` 对照）：
   - 遍历 qualifier 的顺序 = 原查询的行序；
   - 按 tag 排序处理上级候选；
@@ -170,7 +170,7 @@ schema v1 已随第 2、3 步用于切换，不能改；新增一次迁移 v2，
 
 ### 5.3 归属规则
 
-`family_evidence` 的插入语句、`membership_rules`、`variant_memberships`、`ambiguous_claims` 按当前策略的**原 SQL** 执行（`tests/reference/web/store.py:581–604`，`web/identity.py:82–155`，`tests/reference/web/store.py:195–251`）。由此自动保持审核 I3 列出的每一项：先排名后筛否定、各项条件、hybrid 皮肤视图读代表的原始结论、相册确认不能单独确认皮肤、skey 格式。
+`family_evidence` 的插入语句、`membership_rules`、`variant_memberships`、`ambiguous_claims` 按当前策略的**原 SQL** 执行（`tests/reference/web/store.py（#9 已删除）:581–604`，`web/identity.py（#9 已删除）:82–155`，`tests/reference/web/store.py（#9 已删除）:195–251`）。由此自动保持审核 I3 列出的每一项：先排名后筛否定、各项条件、hybrid 皮肤视图读代表的原始结论、相册确认不能单独确认皮肤、skey 格式。
 
 ## 6. 历史重建与撤销
 
@@ -209,7 +209,7 @@ schema v1 已随第 2、3 步用于切换，不能改；新增一次迁移 v2，
 | 形状 | 核心的撤销 |
 |---|---|
 | 快照 `{uuid, entity, assertion, deferred[, identity]}`（entity 可空） | 标记撤销，有效裁决随之回退；`deferred` 按原值恢复；有 `identity` 就恢复 scope / suspended / uncertain（`restore_scope`）；重算这些图的归属与折叠；删 `asked` 中该 action 的记录 |
-| `merge`，策略未设置 | 标记撤销：M 上的 clear / yes / no 失效，`merged_into`、候选、皮肤父、别名、pins、reviews 按快照恢复（= `_undo_merge`，`tests/reference/web/store.py:2453–2471`） |
+| `merge`，策略未设置 | 标记撤销：M 上的 clear / yes / no 失效，`merged_into`、候选、皮肤父、别名、pins、reviews 按快照恢复（= `_undo_merge`，`tests/reference/web/store.py（#9 已删除）:2453–2471`） |
 | `merge`，hybrid（激活前留下的旧合并） | 在 `undo_audit` 批次追加对应 `duplicate_of` 的 clear（reason「撤销历史合并；原归属无法区分的认领待确认」，reviewed = 当时的全部证据），再重建图；找不到迁移记录时照原样拒绝 |
 | `identity_relation` | 标记撤销，并在 `undo_audit` 批次追加 previous_status 对应的裁决（reason「撤销人工关系决议」，reviewed = 当时的全部证据），与旧版的 `decide(previous)` 等价，因此「未复核」的判定一致；再重建图 |
 | `identity_anchor` | 恢复原锚点结论、追加历史 `undo`、失效校准、清认领、重算归属；不恢复旧的机器认领 |
@@ -219,13 +219,13 @@ schema v1 已随第 2、3 步用于切换，不能改；新增一次迁移 v2，
 - 两边都要保留的：删掉该 action 的 `reviews`；最近一步核验（核心在自己的事务里再核对一次）。
 - 挂起只在等价组**真的拆开**时触发（`tests/test_identity.py:51–87`）。
 - **新步骤**写成 `[{"terms": {"v": 2, "type": …, …}}]`；零成员的 `sweep` 也是非空数组，仍写 `reviews`。
-- `names.action_label` 按快照里的 entity id 重新渲染历史文案（`tests/reference/web/names.py:487–514`），核心步骤里要保留同样的 entity id 字段，并改 `action_label` 读取它，否则改名后历史文案会与旧版不同。这一项计入等价验收。
+- `names.action_label` 按快照里的 entity id 重新渲染历史文案（`tests/reference/web/names.py（#9 已删除）:487–514`），核心步骤里要保留同样的 entity id 字段，并改 `action_label` 读取它，否则改名后历史文案会与旧版不同。这一项计入等价验收。
 
 ## 7. 证据批次
 
 - **可替换来源**：`wd.wd_character`（source.sqlite `labels` dim=character、conf ≥ 0.35）和 `ccip_index.char_ext`（dim=char_ext）。每个批次写明覆盖范围：
   - `refresh` 覆盖全库；
-  - `reindex_characters` 覆盖被改动的图（含索引 drop，`tests/reference/web/index_update.py:219–254`）；
+  - `reindex_characters` 覆盖被改动的图（含索引 drop，`tests/reference/web/index_update.py（#9 已删除）:219–254`）；
   - `import_changes` 覆盖新图。
 - **生效规则**：覆盖范围内每张图的当前有效证据 = 本批次的行；覆盖到但没有行（成功的空结果）= 该图这个来源的证据清空。失败的批次整事务回滚，旧的有效集不动。
 - **版本与冲突**：版本 = `labels.model_ver` 加内容摘要（沿用画师的做法 `v4/<摘要>`）。参考索引换了而模型版本没变时，内容不同就另起一行，不再冲突。
@@ -267,10 +267,10 @@ schema v1 已随第 2、3 步用于切换，不能改；新增一次迁移 v2，
 ## 9. 跨连接协议
 
 1. **进程级写锁**：把 `Store._labels_lock` 扩成一把 `_terms_lock`（可重入）。每个会让核心写的 Store 方法，从解析选择集到核心返回全程持有；Syncer、IndexUpdater、Learner 的发布、撤销、切换同样持有。NameUpdater 只写 Python 自己的名字表，不需要。
-2. **一个业务命令 = 一个核心事务**：Python 在持锁状态下用只读事务解析 id 和文案，关掉连接后调用核心（沿用 `tests/reference/web/terms_core.py` 的约定）。核心在自己的 `BEGIN IMMEDIATE` 里重新核验：图存在、重复组展开（在核心内按 `duplicates` 重算，不信任调用方）、目标身份解析（`_resolve` / `_require_entity`）、原归属、父角色是否被移出、最近一步。
+2. **一个业务命令 = 一个核心事务**：Python 在持锁状态下用只读事务解析 id 和文案，关掉连接后调用核心（沿用 `tests/reference/web/terms_core.py（#9 已删除）` 的约定）。核心在自己的 `BEGIN IMMEDIATE` 里重新核验：图存在、重复组展开（在核心内按 `duplicates` 重算，不信任调用方）、目标身份解析（`_resolve` / `_require_entity`）、原归属、父角色是否被移出、最近一步。
 3. **选择集**：写锁保证解析和写入之间没有进程内的其他写入，结果与旧版「同一事务里解析」一致。其他进程写入由第 8 节的工具检查挡住，桌面 App 只有一个实例。
-4. **后处理**：核心同事务写 `backend_effects(kind)`；Python 的 `effects.operation` 回来后照旧 `drain`（`tests/reference/web/effects.py`），学习与相似扫描照常被唤醒。
-5. **折叠**：成员有变化的同一事务里，核心对受影响的组执行 `_refresh_fold` 的原 SQL（`tests/reference/web/store.py:692–695`）。
+4. **后处理**：核心同事务写 `backend_effects(kind)`；Python 的 `effects.operation` 回来后照旧 `drain`（`tests/reference/web/effects.py（#9 已删除）`），学习与相似扫描照常被唤醒。
+5. **折叠**：成员有变化的同一事务里，核心对受影响的组执行 `_refresh_fold` 的原 SQL（`tests/reference/web/store.py（#9 已删除）:692–695`）。
 6. **导入**（B6 的主要场景）：
    - Python 在锁内只读 source.sqlite，准备好：新图行、删除列表、角色标签行、相册决定与映射、`duplicates` 全量分组（它不依赖成员）、`realistic` 列表。
    - 然后调用一次核心 `import-changes`，一个事务按旧顺序提交：assets → 候选批次 → 相册批次 + imported + 别名 → 证据与单人、线索 → 归属 → duplicates 替换 → 折叠 → auto_rules → excluded → sync_added → meta.indexed → effects。
@@ -435,7 +435,7 @@ Rust 新增 3 项（批次形状/BLOB/重复目标、类型敏感且稳定的指
 | `character_evidence.rs` | 候选写成证据批次：每个可替换来源一个批次，覆盖范围 refresh 全库、reindex 改动的图、import 新图与移除的图；版本按行取内容摘要 `c1/<摘要>`，同样的结果复用原证据行 |
 | `character_names.rs` | 逐行照 `put_name`、`Store.alias` 写 `names`（名字这一步不收编，方案第 10 节） |
 
-Python 侧：`tests/reference/web/terms_characters.py` 在写锁内用只读连接准备同步、刷新、重扫的输入，查询与顺序照旧；`tests/reference/web/terms_core.py` 加了 `character_owns`（与 Rust `owns` 同一规则）、`legacy_before`（拆开核心步骤的信封）、`character_command`；`names.action_label` 从信封里读快照，改名后历史文案与旧版相同（计入等价验收，见下）。`Store._refresh_duplicates` 的计算抽成 `_duplicate_rows`（算法不变），供 Python 先算好重复组交给核心。
+Python 侧：`tests/reference/web/terms_characters.py（#9 已删除）` 在写锁内用只读连接准备同步、刷新、重扫的输入，查询与顺序照旧；`tests/reference/web/terms_core.py（#9 已删除）` 加了 `character_owns`（与 Rust `owns` 同一规则）、`legacy_before`（拆开核心步骤的信封）、`character_command`；`names.action_label` 从信封里读快照，改名后历史文案与旧版相同（计入等价验收，见下）。`Store._refresh_duplicates` 的计算抽成 `_duplicate_rows`（算法不变），供 Python 先算好重复组交给核心。
 
 **实现里定下来的做法**（方案范围内，没有改规则）：
 
@@ -510,12 +510,12 @@ Python 侧：`tests/reference/web/terms_characters.py` 在写锁内用只读连�
 
 ### main 整合（2026-09-29，完成）
 
-合入 `main@7332d2f`（合并提交 `4e608ea`）。只有 `tests/reference/web/artists.py` 一处文本冲突：两边都保留，terms-core 的 `_posts()` 与核心读路径，加上 main 的「也许是 TA」。main 结尾那行 `maybe` 过滤用的 `seen` 已被帖子的站点集合重新赋值，实际上不过滤；候选在前面已按画师去重，所以照实际效果返回。之后按「当前恢复入口」的四项门槛补兼容：
+合入 `main@7332d2f`（合并提交 `4e608ea`）。只有 `tests/reference/web/artists.py（#9 已删除）` 一处文本冲突：两边都保留，terms-core 的 `_posts()` 与核心读路径，加上 main 的「也许是 TA」。main 结尾那行 `maybe` 过滤用的 `seen` 已被帖子的站点集合重新赋值，实际上不过滤；候选在前面已按画师去重，所以照实际效果返回。之后按「当前恢复入口」的四项门槛补兼容：
 
-1. **新方法的强弱**：溯源写 `image_artists.status` 的规则由方法决定。`auto` 是 pixel_hash、gallery_match、iqdb、same_picture；`candidate` 是 ocr 和 group_*。核心画师判定器的强证据加上 `iqdb`、`same_picture`（`schema.rs` Kind::Artist，`tests/reference/web/artists.py` STRONG 同步），其余方法照旧只到「也许是 TA」。
+1. **新方法的强弱**：溯源写 `image_artists.status` 的规则由方法决定。`auto` 是 pixel_hash、gallery_match、iqdb、same_picture；`candidate` 是 ocr 和 group_*。核心画师判定器的强证据加上 `iqdb`、`same_picture`（`schema.rs` Kind::Artist，`tests/reference/web/artists.py（#9 已删除）` STRONG 同步），其余方法照旧只到「也许是 TA」。
 2. **候选失效**：schema 第 3 版，溯源证据整个来源按批次生效（`REPLACEABLE_SOURCES`，批次方法记为 `*`）。
    - 证据包按快照替换：包里标为「已完成」的图是覆盖范围，覆盖到而没有行就是查无结果（与包格式原有的约定一致）；失败、取消的图不覆盖。
-   - `tests/reference/provenance/export.py` 把图库里每张图都列为「已完成」，每个包是真正的全量；内容相同的快照照旧去重，不另起批次。
+   - `tests/reference/provenance/export.py（#9 已删除）` 把图库里每张图都列为「已完成」，每个包是真正的全量；内容相同的快照照旧去重，不另起批次。
    - 画师收编（切换前的同步、切换）每次也写一个全库覆盖的批次，内容不变不新建。
    - 迁移时已有的溯源证据全部收进一个初始批次，迁移前后有效的证据不变。
    - v3 要放宽 `term_evidence_sets` 的 CHECK，父表和三张子表一起重建（新子表的外键指向新父表，再用新式 ALTER 改名），失败时回到 v2 原样。

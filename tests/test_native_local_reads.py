@@ -1,7 +1,7 @@
 """#41 native local queries: only disposable synthetic packages and original byte contracts.
 
 The former Python reference's responses and the library states it built are recorded through
-tests/reference_replay.py (#9; ``ILLUSTASH_REFERENCE=record`` re-runs it).
+tests/fixed_expectations.py (#9).
 """
 from contextlib import closing
 from concurrent.futures import ThreadPoolExecutor
@@ -14,7 +14,7 @@ from unittest.mock import patch
 from urllib.parse import urlencode
 
 from tests import test_native_human_labels as labels, test_native_human_curation as curation
-from tests.reference_replay import RECORD
+from tests.fixed_expectations import unclocked
 from tests.test_native_human_labels import difference
 from tools.verify_read_http import fetch
 
@@ -28,36 +28,16 @@ class NativeLocalReadsTest(unittest.TestCase):
     pair = curation.NativeHumanCurationTest.pair
     latest_action = labels.NativeHumanLabelsTest.latest_action
     reference_response = labels.NativeHumanLabelsTest.reference_response
-    build_reference_seed = labels.NativeHumanLabelsTest.build_reference_seed
-    start_reference = labels.NativeHumanLabelsTest.start_reference
 
     def setUp(self):
         labels.NativeHumanLabelsTest.setUp(self)
         self.env['ILLUSTASH_NO_KEYCHAIN'] = '1'
         self.env.pop('ILLUSTASH_DESKTOP_BRIDGE', None)
         self.env.pop('ILLUSTASH_DESKTOP_TOKEN', None)
-        if RECORD:
-            # Both sides have no research workers; mirror native's explicit forced-off names.
-            from web import names
-            from web.index_update import IndexUpdater
-            from provenance import accounts
-            self.reference.names = names.NameUpdater(self.store, enabled=False)
-            self.reference.indexer=IndexUpdater(self.store)
-            for key, value in [('APP_SUPPORT', self.root/'support')]:
-                scoped=patch.object(accounts,key,value);scoped.start();self.addCleanup(scoped.stop)
-            scoped=patch.dict(os.environ, {'ILLUSTASH_NO_KEYCHAIN':'1'});scoped.start();self.addCleanup(scoped.stop)
-        def seed(store):
-            with closing(sqlite3.connect(self.left.source)) as c:
-                c.executemany('INSERT INTO assets(uuid,filename,src_path,width,height,added_at,src_kind,in_scope,trashed) VALUES (?,?,?,?,?,?,?,?,?)',
-                              [(f'SYN{i:02}',f'synthetic-{i}.png',str(self.root/f'synthetic-{i}.png'),120+i,150+i,'2026-09-22','orig',1,0) for i in range(20)])
-                c.executemany('INSERT INTO labels VALUES (?,?,?,?)',[(f'SYN{i:02}',dim,tag,score) for i in range(20)
-                              for dim,tag,score in [('character','alice_tag',.95),('general','solo',1.)]])
-                c.commit()
-            store.refresh()
-        self.seed_both(seed)
+        self.seed_both()
 
     def get_pair(self,url,expected=200):
-        before=[self.rec.state('before',self.left),labels.states(self.right)]
+        before=[self.rec.state('before'),labels.states(self.right)]
         responses=[self.reference_response('response',{'url':url}),fetch(self.origin,{'url':url},self.origin)]
         for r in responses:self.assertEqual(r['status'],expected,(url,r['body']))
         self.assertEqual(responses[1]['route'],'core')
@@ -72,7 +52,7 @@ class NativeLocalReadsTest(unittest.TestCase):
                 responses[0]['headers']['Content-Length']=str(len(responses[0]['body']))
             self.assertIsNone(difference(*responses),(url,difference(*responses)))
             for h in labels.HEADERS:self.assertEqual(responses[0]['headers'].get(h),responses[1]['headers'].get(h),h)
-        self.assertEqual(before,[self.rec.state('after',self.left),labels.states(self.right)])
+        self.assertEqual(before,[self.rec.state('after'),labels.states(self.right)])
         self.assertFalse(self.sentinel.exists())
         return json.loads(responses[1]['body']) if expected<400 else None
 
@@ -87,16 +67,9 @@ class NativeLocalReadsTest(unittest.TestCase):
         self.assertEqual(labels.states(self.right),before)
         self.assertFalse(self.sentinel.exists())
 
-    def entity_facts(self,entity):
-        """Recording only: the old Store's display name, confirmed count and image sizes."""
-        with self.store.connect() as c:
-            return {'name':c.execute('SELECT entity_name(?)',(entity,)).fetchone()[0],
-                    'confirmed':c.execute("SELECT count(*) FROM memberships WHERE entity=? AND status='confirmed'",(entity,)).fetchone()[0],
-                    'valid':{u:[w,h] for u,w,h in c.execute('SELECT uuid,width,height FROM assets')}}
-
     def ask(self,query='',kind=None,entity=None,allowed=None):
         before=labels.states(self.right)
-        facts=self.rec.value('entity facts',lambda:self.entity_facts(entity)) if kind is not None else None
+        facts=self.rec.value('entity facts') if kind is not None else None
         item={'url':'/api/ask'+('?' + query if query else '')}
         for side in ('reference','native'):
             r=self.reference_response('ask',item) if side=='reference' else fetch(self.origin,item,self.origin)
@@ -128,26 +101,16 @@ class NativeLocalReadsTest(unittest.TestCase):
         self.pair('/api/ask/answer',{'entity':self.alice,'yes':[chosen]})
         self.ask(kind='seed',entity=self.alice,allowed=eligible-{chosen})
         seeds={chosen,*sorted(eligible-{chosen})[:4]}
-        def confirmed(store):store.answer(self.alice,yes=sorted(seeds-{chosen}),kind='seed')
-        self.seed_both(confirmed)
+        self.seed_both()
         self.ask(kind='sample',entity=self.alice,allowed=eligible-seeds)
         later=sorted(eligible-seeds)[0];excluded=sorted(eligible-seeds)[1]
-        self.seed_both(lambda store:store.answer(self.alice,later=[later]))
+        self.seed_both()
         self.ask()
-        def expired(store):
-            with store.connect() as c:c.execute("UPDATE asked SET asked_at=datetime('now','-8 days') WHERE answer='later'")
-            store.curate([excluded],'exclude')
-        self.seed_both(expired)
+        self.seed_both()
         self.ask(kind='sample',entity=self.alice,allowed=eligible-seeds-{later,excluded})
 
     def test_hints_first_score_order_skip_and_nsfw(self):
-        def hints(store):
-            from tests import terms_seed
-            with terms_seed.staged(store) as old:
-                with old.connect() as c:
-                    c.executemany("INSERT INTO weak_claims VALUES (?,?,'PROTO',?)",[('SYN00',self.bob,.9),('SYN01',self.bob,.8),('SYN02',self.bob,.7)])
-            with closing(sqlite3.connect(old.path)) as src, closing(sqlite3.connect(store.path)) as dst:src.backup(dst)
-        self.seed_both(hints)
+        self.seed_both()
         batch=self.ask(kind='hint',entity=self.bob,allowed={'SYN00','SYN01','SYN02'})
         self.assertEqual([x['uuid'] for x in batch['items']],['SYN00','SYN01','SYN02'])
         self.ask(urlencode({'skip':self.bob}),kind='seed',entity=self.alice,allowed={f'SYN{i:02}' for i in range(20)})
@@ -161,39 +124,24 @@ class NativeLocalReadsTest(unittest.TestCase):
         for body in ({},{'ids':[]},{'ids':['missing']},{'ids':[1]},{'ids':'b'},{'filter':[]},
                      {'filter':{'unknown':'x'}},{'ids':['b'],'filter':{}},{'ids':['b'],'exclude':['a']},{'ids':['b'],'exclude':[1]}):
             self.pair('/api/suggest',body,expected=400)
-        self.seed_both(lambda store:store.change(['b'],'rejected',self.bob))
+        self.seed_both()
         self.assertNotIn(self.bob,[r['id'] for r in self.pair('/api/suggest',{'ids':['b']})])
 
     def test_cached_groups_clusters_sync_and_worker_off(self):
-        def cached(store):
-            with store.connect() as c:
-                c.execute("INSERT INTO relations(a,b,kind,changed,note) VALUES ('SYN00','SYN01','duplicate',0.9,'fixture')")
-                c.executemany('INSERT INTO similar_groups VALUES (?,17)',[('SYN00',),('SYN01',)])
-                c.execute("INSERT INTO cluster_info VALUES (9,2,NULL,NULL,'2026-10-01',NULL,'[\"合成\"]')")
-                c.executemany('INSERT INTO clusters VALUES (?,9)',[('SYN18',),('SYN19',)])
-                c.execute("INSERT INTO sync_runs(status,sources) VALUES ('done','[\"s1\"]')")
-                c.execute("INSERT INTO sync_runs(status,sources) VALUES ('interrupted','')")
-            store.change(['SYN18','SYN19'],'rejected',self.alice)
-        self.seed_both(cached)
+        self.seed_both()
         for url in ['/api/similar','/api/similar?kind=duplicate','/api/clusters','/api/sync','/api/index',
                     '/api/index?progress=1','/api/provenance','/api/names','/api/names?progress=1']:
             if url=='/api/provenance':
                 # #51 now supplies a coordinator even without computation workers.
                 # Use the real idle Python coordinator for the original byte contract.
-                if RECORD:
-                    from web.provenance_job import Runner
-                    self.reference.provenance=Runner(self.left)
-                    self.addCleanup(self.reference.provenance.close)
+                pass
             result=self.get_pair(url)
             if url=='/api/similar':self.assertTrue(result['groups'])
             if url=='/api/clusters':self.assertTrue(result['clusters'])
         for url in ['/api/similar?kind=wrong','/api/similar?nsfw=wrong','/api/clusters?nsfw=wrong','/api/oc/groups?entity='+self.alice]:self.get_pair(url,400)
 
     def test_names_configuration_coverage_and_accounts(self):
-        def config(store):
-            with store.connect() as c:
-                c.executemany('INSERT INTO name_settings VALUES (?,?)',[('deepseek_key','synthetic-key-1234'),('deepseek_model','synthetic:model')])
-        self.seed_both(config)
+        self.seed_both()
         result=self.get_pair('/api/names');self.assertEqual(result['model_api']['hint'],'1234')
         support=self.root/'support';(support/'accounts').mkdir(exist_ok=True)
         (support/'accounts'/'saucenao').write_text('synthetic-placeholder')
@@ -214,17 +162,7 @@ class NativeLocalReadsTest(unittest.TestCase):
     def test_names_coverage_link_fallbacks(self):
         for system in ('photos_album', 'ccip', 'ccip_base'):
             with self.subTest(system=system):
-                def links(store):
-                    from tests import terms_seed
-                    with terms_seed.staged(store) as old:
-                        with old.connect() as c:
-                            c.execute('DELETE FROM links WHERE entity_id IN (?,?)', (self.alice, self.bob))
-                            for entity, key in ((self.alice, 'synthetic_alice'), (self.bob, 'synthetic_bob')):
-                                value = json.dumps([key, 'synthetic_work']) if system == 'ccip_base' else key
-                                c.execute("INSERT INTO links(system,key,entity_id,current,source) VALUES (?,?,?,1,'synthetic')", (system, value, entity))
-                    with closing(sqlite3.connect(old.path)) as src, closing(sqlite3.connect(store.path)) as dst:
-                        src.backup(dst)
-                self.seed_both(links)
+                self.seed_both()
                 self.get_pair('/api/names')
 
     def test_about_reports_compiled_host_without_python(self):
@@ -244,11 +182,7 @@ class NativeLocalReadsTest(unittest.TestCase):
             result=list(pool.map(lambda u:fetch(self.origin,{'url':u},self.origin),urls))
         self.assertTrue(all((r['status'],r['route'])==(200,'core') for r in result))
         self.assertEqual(before,labels.states(self.right))
-        def excluded():
-            from web.store import Store
-            self.clone(self.left,'replacement')
-            Store.open(self.root/'replacement.pilib'/'source.sqlite',self.root/'replacement.pilib'/'library.sqlite').curate([f'SYN{i:02}' for i in range(20)],'exclude')
-        replacement=self.rec.package('replacement',self.root/'replacement.pilib',excluded if RECORD else None)
+        replacement=self.rec.package('replacement',self.root/'replacement.pilib')
         response=fetch(self.origin,{'url':'/api/libraries/open','method':'POST','body':json.dumps({'path':str(replacement.path)}),
                         'headers':{'Content-Type':'application/json','X-CSRF-Token':self.token}},self.origin)
         self.assertEqual(response['status'],200,response['body'])
@@ -262,20 +196,8 @@ class NativeLocalReadsTest(unittest.TestCase):
         # a/b are synthetic duplicates; selecting a alone must not include b's alternatives.
         self.assertEqual(self.pair('/api/suggest',{'ids':['a']}),[])
         targets=[]
-        def seed(store):
-            targets.extend(store.create_entity('Synthetic alternative '+str(i))['id'] for i in range(11))
-            with closing(sqlite3.connect(self.left.source)) as c:
-                c.executemany('INSERT INTO assets(uuid,filename,src_path,width,height,added_at,src_kind,in_scope,trashed) VALUES (?,?,?,?,?,?,?,?,?)',
-                              [(f'SUG{i:04}',f'synthetic-suggest-{i}.png',str(self.root/f'synthetic-suggest-{i}.png'),10,20,'2026-10-01','orig',1,0) for i in range(2001)])
-                c.commit()
-            store.refresh()
-            from tests import terms_seed
-            with terms_seed.staged(store) as old:
-                with old.connect() as c:
-                    c.executemany("INSERT INTO weak_claims VALUES (?,?,'PROTO',?)",[(f'SUG{i:04}',targets[0],.8) for i in range(2000)]+[('SUG2000',targets[1],.99)]+[('SUG0000',t,.5) for t in targets[2:]])
-            with closing(sqlite3.connect(old.path)) as src,closing(sqlite3.connect(store.path)) as dst:src.backup(dst)
-        self.seed_both(seed)
-        targets=self.rec.value('targets',lambda:targets)
+        self.seed_both()
+        targets=self.rec.value('targets')
         ids=[f'SUG{i:04}' for i in range(2001)]
         result=self.pair('/api/suggest',{'ids':ids})
         self.assertEqual(len(result),9);self.assertEqual(result[0]['count'],2000)
@@ -302,15 +224,8 @@ class NativeLocalReadsTest(unittest.TestCase):
 
     def test_hint_top_twelve_pool_after_skip(self):
         ids=[]
-        def seed(store):
-            ids.extend(store.create_entity('Synthetic hint '+str(i))['id'] for i in range(13))
-            from tests import terms_seed
-            with terms_seed.staged(store) as old:
-                with old.connect() as c:
-                    c.executemany("INSERT INTO weak_claims VALUES (?,?,'PROTO',?)",[(f'SYN{j:02}',entity,.9-j*.01) for i,entity in enumerate(ids) for j in range(i+2)])
-            with closing(sqlite3.connect(old.path)) as src,closing(sqlite3.connect(store.path)) as dst:src.backup(dst)
-        self.seed_both(seed)
-        ids=self.rec.value('ids',lambda:ids)
+        self.seed_both()
+        ids=self.rec.value('ids')
         for side in ('reference','native'):
             for _ in range(24):
                 r=self.reference_response('ask',{'url':'/api/ask'}) if side=='reference' else fetch(self.origin,{'url':'/api/ask'},self.origin)

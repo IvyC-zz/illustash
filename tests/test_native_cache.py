@@ -101,7 +101,7 @@ class NativeCacheTest(unittest.TestCase):
         self.assertFalse(self.sentinel.exists())
 
     def test_slow_image_clear_and_switch_keep_old_bytes_and_new_cache(self):
-        second, store = self.package('second')
+        second = self.package('second')
         source = asset(self, 'slow', Image.new('RGB', (12, 8), 'red'))
         target = self.lib.thumbnails / key(source, 'slow', 'thumb')
         payload = b'synthetic old cache' * 300_000
@@ -129,7 +129,7 @@ class NativeCacheTest(unittest.TestCase):
         self.assertFalse(self.sentinel.exists())
 
     def test_inflight_clear_switch_returns_old_package_settings(self):
-        second, _ = self.package('second')
+        second = self.package('second')
         # Package copies may have the same ID; storage ownership follows the path/session.
         config = json.loads((second.path / 'library.json').read_text())
         config['id'] = json.loads((self.lib.path / 'library.json').read_text())['id']
@@ -154,7 +154,7 @@ class NativeCacheTest(unittest.TestCase):
         self.assertFalse(self.sentinel.exists())
 
     def test_partial_body_from_old_session_cannot_clear_new_package(self):
-        second, _ = self.package('second')
+        second = self.package('second')
         (second.thumbnails / 'keep.jpg').write_bytes(b'new cache')
         sock = socket.socket(); self.addCleanup(sock.close); sock.settimeout(5)
         sock.connect(('127.0.0.1', self.port))

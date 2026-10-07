@@ -1,7 +1,7 @@
 """App reads through the same HTTP byte contract and synthetic request context."""
 import json
 from urllib.parse import urlencode
-from tests.read_http_harness import RECORD, HTTPHarness
+from tests.read_http_harness import HTTPHarness
 
 
 class AppReadHTTPTest(HTTPHarness):
@@ -35,13 +35,9 @@ class AppReadHTTPTest(HTTPHarness):
                     c.execute('INSERT OR REPLACE INTO reviews(entity,action_id) VALUES (?,?)', (ids[0], ident))
                 c.commit()
             self.pair('/api/bootstrap')
-        if RECORD:
-            self.store.read_only = 'synthetic refusal 雪'
         self.publish()
         self.assertEqual(json.loads(self.pair('/api/bootstrap')['body'])['read_only'], 'synthetic refusal 雪')
 
     def test_private_session_refresh(self):
-        if RECORD:
-            self.server.token = 'replacement-synthetic-token'
         self.publish()
         self.assertEqual(json.loads(self.pair('/api/bootstrap')['body'])['token'], 'replacement-synthetic-token')
