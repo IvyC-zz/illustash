@@ -29,6 +29,9 @@ from functools import lru_cache
 from pathlib import Path
 
 RECORD = os.environ.get('ILLUSTASH_REFERENCE') == 'record'
+WINDOWS = os.name == 'nt'
+# A recorded path continues after its placeholder with /-separated segments.
+_TAIL = r'((?:/[^/"\'\s,;:}\]\)\\]+)*)'
 FIXTURES = Path(__file__).resolve().parent / 'fixtures' / 'reference_recordings'
 _recorded = {}   # module -> {'tests': {test id: [entry]}, 'blobs': {sha: bytes}}
 _current = None  # the running test's recorder: its run-specific strings are placeholders in digests
@@ -137,17 +140,40 @@ class Recorder:
 
     def _to_placeholders(self, text):
         for actual, placeholder in self._ordered():
+            if WINDOWS and _is_path(actual):
+                # Recordings spell paths with /: a Windows path (also JSON-escaped) is normalized.
+                escaped = json.dumps(actual, ensure_ascii=False)[1:-1]
+                text = re.sub(re.escape(escaped) + r'((?:\\\\[^\\"]+)*)',
+                              lambda m: placeholder + m.group(1).replace('\\\\', '/'), text)
+                text = re.sub(re.escape(actual) + r'((?:\\[^\\"\s,;:}\]\)]+)*)',
+                              lambda m: placeholder + m.group(1).replace('\\', '/'), text)
             text = text.replace(actual, placeholder)
         return text
 
     def _from_placeholders(self, text):
-        for actual, placeholder in self.aliases:
-            text = text.replace(placeholder, actual)
+        """This run's strings back in place; on Windows a path takes this platform's separators,
+        JSON-escaped when the text is a JSON document."""
+        if not WINDOWS:
+            for actual, placeholder in self.aliases:
+                text = text.replace(placeholder, actual)
+            return text
+        as_json = _is_json(text)
+        for actual, placeholder in sorted(self.aliases, key=lambda x: -len(x[1])):
+            if placeholder not in text:
+                continue
+            if not _is_path(actual):
+                text = text.replace(placeholder, actual)
+                continue
+            def path(m, actual=actual):
+                value = actual + m.group(1).replace('/', '\\')
+                return json.dumps(value, ensure_ascii=False)[1:-1] if as_json else value
+            text = re.sub(re.escape(placeholder) + _TAIL, path, text)
         return text
 
     def _encode(self, value):
         if isinstance(value, bytes):
-            return {'$bytes': base64.b64encode(self._to_placeholders(value.decode('latin-1')).encode('latin-1')).decode()}
+            return {'$bytes': base64.b64encode(self._to_placeholders(value.decode('utf-8', 'surrogateescape'))
+                                               .encode('utf-8', 'surrogateescape')).decode()}
         if isinstance(value, str):
             return self._to_placeholders(value)
         if isinstance(value, tuple):
@@ -167,12 +193,16 @@ class Recorder:
             return [self._decode(v) for v in value]
         if isinstance(value, dict):
             if set(value) == {'$bytes'}:
-                return self._from_placeholders(base64.b64decode(value['$bytes']).decode('latin-1')).encode('latin-1')
+                return self._from_placeholders(base64.b64decode(value['$bytes']).decode('utf-8', 'surrogateescape')).encode('utf-8', 'surrogateescape')
             if set(value) == {'$tuple'}:
                 return tuple(self._decode(v) for v in value['$tuple'])
             if set(value) == {'$items'}:
                 return {self._decode(k): self._decode(v) for k, v in value['$items']}
-            return {k: self._decode(v) for k, v in value.items()}
+            out = {k: self._decode(v) for k, v in value.items()}
+            # A response whose body took this run's strings keeps a consistent length header.
+            if isinstance(out.get('body'), bytes) and isinstance(out.get('headers'), dict) and 'Content-Length' in out['headers']:
+                out['headers']['Content-Length'] = str(len(out['body']))
+            return out
         return value
 
     def _next(self, label):
@@ -216,7 +246,7 @@ class Recorder:
                     data, kind = _file_bytes(f), 'raw'
                     if f.suffix in ('.sqlite', '.db'):
                         try:
-                            data, kind = _sqlite_bytes(f, [(a, p) for a, p in self._ordered()]), 'sqlite'
+                            data, kind = _sqlite_bytes(f, [(a, p) for a, p in self._ordered()], self._to_placeholders), 'sqlite'
                         except sqlite3.DatabaseError:
                             pass
                     else:
@@ -244,7 +274,7 @@ class Recorder:
                 data = self._from_placeholders(data.decode('utf-8')).encode()
             target.write_bytes(data)
             if not raw and name.endswith(('.sqlite', '.db')) and rebase:
-                _rebase(target, rebase)
+                _rebase(target, rebase, self._from_placeholders)
         return Library(path) if library else path
 
     def finish(self, test):
@@ -273,10 +303,17 @@ class Digests:
         return f'Digests({self.tree!r})'
 
 
-def _rebase(path, pairs):
-    """Replace recorded run-specific strings in every text cell of the ordinary tables, rowids kept.
-    Triggers are set aside meanwhile (they guard writes, they are not data)."""
+def _rebase(path, pairs, convert=None):
+    """Replace recorded run-specific strings (``pairs`` of old, new) in every text cell of the
+    ordinary tables with ``convert`` (plain replacement by default), rowids kept. Triggers are set
+    aside meanwhile (they guard writes, they are not data)."""
+    if convert is None:
+        def convert(text):
+            for old, new in pairs:
+                text = text.replace(old, new)
+            return text
     with closing(sqlite3.connect(path)) as c:
+        c.create_function('convert_text', 1, lambda v: convert(v) if isinstance(v, str) else v, deterministic=True)
         tables = [(name, sql) for name, sql in c.execute("SELECT name,sql FROM sqlite_schema WHERE type='table'")
                   if sql and not name.startswith('sqlite_') and not sql.upper().startswith('CREATE VIRTUAL')]
         virtual = [name for (name,) in c.execute("SELECT name FROM sqlite_schema WHERE type='table' AND upper(sql) LIKE 'CREATE VIRTUAL%'")]
@@ -295,19 +332,34 @@ def _rebase(path, pairs):
         c.execute('BEGIN')
         for name, _ in triggers:
             c.execute(f'DROP TRIGGER {quote(name)}')
-        for name, column, old, new in updates:
-            c.execute(f'UPDATE {quote(name)} SET {quote(column)}=replace({quote(column)},?,?) '
-                      f'WHERE typeof({quote(column)})=\'text\' AND instr({quote(column)},?)', (old, new, old))
+        for name, column, old in dict.fromkeys((n, col, o) for n, col, o, _ in updates):
+            c.execute(f'UPDATE {quote(name)} SET {quote(column)}=convert_text({quote(column)}) '
+                      f'WHERE typeof({quote(column)})=\'text\' AND instr({quote(column)},?)', (old,))
         for _, sql in triggers:
             c.execute(sql)
         c.commit()
+
+
+def _is_path(text):
+    return '\\' in text or text.startswith('/')
+
+
+def _is_json(text):
+    stripped = text.strip()
+    if not stripped[:1] in ('{', '['):
+        return False
+    try:
+        json.loads(stripped)
+        return True
+    except ValueError:
+        return False
 
 
 def _file_bytes(path):
     return Path(path).read_bytes()
 
 
-def _sqlite_bytes(path, placeholders=()):
+def _sqlite_bytes(path, placeholders=(), convert=None):
     """A consistent single-file copy (WAL folded in) including rowids, run-specific strings in
     its text cells replaced by placeholders."""
     import tempfile
@@ -317,7 +369,7 @@ def _sqlite_bytes(path, placeholders=()):
             mode = src.execute('PRAGMA journal_mode').fetchone()[0]
             src.backup(dst)
         if placeholders:
-            _rebase(copy, list(placeholders))
+            _rebase(copy, list(placeholders), convert)
         # Rebuilt without free pages or unused cell space: no residue of replaced text is kept.
         clean = Path(tmp) / 'clean.sqlite'
         with closing(sqlite3.connect(copy)) as c:
