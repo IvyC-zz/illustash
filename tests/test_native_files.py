@@ -75,8 +75,20 @@ class NativeFilesTest(unittest.TestCase):
 
 
     def test_static_bytes_headers_and_security(self):
-        for url in ('/', '/app.js', '/app.css', '/theme.js', '/favicon.svg', '/splash.js'):
-            response = self.pair(url + '?cache=1')
+        # The former reference served these files verbatim: bodies are compared with the checked-in
+        # source (so interface edits need no re-recording); status and other headers stay recorded.
+        static = Path(__file__).resolve().parents[1] / 'web' / 'static'
+        for url, name in (('/', 'index.html'), ('/app.js', 'app.js'), ('/app.css', 'app.css'),
+                          ('/theme.js', 'theme.js'), ('/favicon.svg', 'favicon.svg'), ('/splash.js', 'splash.js')):
+            recorded = lifecycle.NativeLifecycleTest.reference_response(self, url + '?cache=1')
+            response = self.request(url + '?cache=1')
+            body = (static / name).read_bytes()
+            self.assertEqual(response['status'], recorded['status'])
+            self.assertEqual(response['body'], body, url)
+            self.assertEqual(response['headers'].get('Content-Length'), str(len(body)), url)
+            for header in HEADERS:
+                if header != 'Content-Length':
+                    self.assertEqual(recorded['headers'].get(header), response['headers'].get(header), (url, header))
             self.assertEqual(response['status'], 200)
             self.assertEqual(response['route'], 'core')
             for headers in ({'Host': 'evil.example'}, {'Origin': 'https://evil.example'}):

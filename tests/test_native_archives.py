@@ -68,10 +68,15 @@ class NativeArchivesTest(unittest.TestCase):
         self.assertIn(markers[3].encode(), self.lib.db.read_bytes(), 'fixture must contain deleted secret bytes')
         before = snapshot(self.lib.db)
         source_before = snapshot(self.lib.source)
-        expected = dict(before)
-        expected['name_settings'] = (before['name_settings'][0], [])
-        expected['prefs'] = (before['prefs'][0], [row for row in before['prefs'][1]
-                                               if row[1] != ('str', 'names_network')])
+        # snapshot() is per-table digests: build the expected state on a plain copy, rowids untouched.
+        expected_db = self.root / 'expected-sanitized.sqlite'
+        with closing(sqlite3.connect(self.lib.db)) as c, closing(sqlite3.connect(expected_db)) as e:
+            c.backup(e)
+            e.execute('DELETE FROM name_settings')
+            e.execute("DELETE FROM prefs WHERE key='names_network'")
+            e.commit()
+        expected = snapshot(expected_db)
+        self.assertNotEqual(expected['prefs'], before['prefs'], 'fixture must grant names_network')
         legacy = library.export_library(self.lib, self.root / 'unsafe-legacy.zip')
         legacy_bytes = legacy.read_bytes()
         self.begin()
