@@ -237,7 +237,7 @@ class NativeIndexTest(unittest.TestCase):
     def test_real_bundled_calculation_worker_native_download_and_import(self):
         import numpy as np
         from PIL import Image
-        # Numerical/model substitute only: actual clean/build/scan and native downloads/import run.
+        # 合成模型特征输入；真实原生 clean/build/scan、下载与导入仍运行。
         with sqlite3.connect(self.lib.source) as c:
             for column in ('anchor_p90 REAL','base_tag TEXT','skin TEXT','post_count INTEGER','gender_conf REAL','anchor_p50 REAL','anchor_p75 REAL'):
                 c.execute('ALTER TABLE characters ADD COLUMN '+column)
@@ -251,16 +251,23 @@ class NativeIndexTest(unittest.TestCase):
         with sqlite3.connect(self.lib.source) as c:
             c.execute('CREATE TABLE embeddings(uuid TEXT,model TEXT,vec BLOB)')
             for col in ('source','model_ver','run_id'):c.execute('ALTER TABLE labels ADD COLUMN '+col+' TEXT')
-        wrapper=self.root/'numerical-worker';wrapper.write_text('#!'+os.sys.executable+'\n'+
-            'import sys,types,numpy as np\n'+
-            'sys.path.insert(0,'+repr(str(self.resources/'tools'))+')\n'+
-            'm=types.ModuleType("ccip")\n'+
-            'def cross(a,b,check=True):\n a=np.asarray(a);b=np.asarray(b);return (1-a@b.T/np.linalg.norm(a,axis=1)[:,None]/np.linalg.norm(b,axis=1)[None,:])/2\n'+
-            'def features(images):\n a=np.zeros((len(images),768),np.float32);a[:,1]=1;a[:,3]=[im.getpixel((0,0))[0]*.002 for im in images];return a\n'+
-            'm.cross=cross;m.features=features;sys.modules["ccip"]=m\n'+
-            'import index_worker,traceback\ntry: index_worker.main(*sys.argv[1:])\nexcept Exception:\n open('+repr(str(self.root/'worker-error'))+',"w").write(traceback.format_exc());raise\n')
-        wrapper.chmod(0o755)
-        self.stop(self.process);self.env['ILLUSTASH_INDEX_WORKER']=worker_command(wrapper);self.restart()
+        # 原生计算读取合成的缓存特征；模型输入准备与索引计算分开验收。
+        raw=self.shared/'char-patch/raw';raw.mkdir(parents=True,exist_ok=True)
+        rows=np.zeros((6,768),np.float32);rows[:,1]=1;rows[:,3]=np.arange(6)*.002
+        np.save(raw/'carol_example.npy',rows)
+        # 宿主照常下载；启动计算前只补合成缓存的来源元数据，随后运行原生程序。
+        wrapper=self.root/'cached-index-worker'
+        wrapper.write_text('#!'+os.sys.executable+'\n'+
+            'import json,os,subprocess,sys\nfrom pathlib import Path\n'+
+            'request=json.loads(Path(sys.argv[1]).read_text());review=Path(request["review"])\n'+
+            'for row in request["rows"]:\n'+
+            ' meta=dict(row,source="danbooru-patch",posts=list(range(6)),gender={"girl":1})\n'+
+            ' (review/"char-index"/(row["short_tag"]+".json")).write_text(json.dumps(meta))\n'+
+            'sys.exit(subprocess.run([os.environ["ILLUSTASH_INDEX_COMPUTE_BIN"],*sys.argv[1:]]).returncode)\n')
+        self.stop(self.process)
+        self.env.update(ILLUSTASH_INDEX_WORKER=worker_command(wrapper),
+                        ILLUSTASH_INDEX_TAGS=str(self.resources/'tags/tags_v3.csv'))
+        self.restart()
         self.remote_rows=self.remote_rows[:1]
         self.posts=[{'id':i,'tag_string_general':'solo 1girl blue_hair','media_asset':{'variants':[{'type':'720x720','url':f'http://127.0.0.1:{self.remote.server_port}/image/{i}'}]}} for i in range(6)]
         self.check();self.index({'action':'apply','tags':['carol_example']});v=self.finish();self.assertEqual(v['state']['status'],'done',(v,(self.root/'worker-error').read_text() if (self.root/'worker-error').exists() else ''))

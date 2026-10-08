@@ -86,7 +86,7 @@
 
 **拒绝的操作**：
 - 切换后拒绝激活或改身份策略、拒绝旧的 schema 升级（`_migrate`）；
-- `char_patch`（不写图库）照常。当时在副作用之前拒绝的离线工具（`apply_classification_repair`、`preview_classification_repair`、`identity_rollout`、`identity_bank`、`identity_metadata`、`eval_bench`）已于 2026-10-05 删除（#186）。
+- 旧 Python 索引工具已在 #53 删除。当时在副作用之前拒绝的离线工具（`apply_classification_repair`、`preview_classification_repair`、`identity_rollout`、`identity_bank`、`identity_metadata`、`eval_bench`）已于 2026-10-05 删除（#186）。
 
 **切换之后仍由 Python 负责的**：`curate`（收藏排除）、跳过配对、名字的联网补全（NameUpdater）、复制品组和相似组的计算（核心只接收结果）。
 

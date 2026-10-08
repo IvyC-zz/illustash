@@ -1,7 +1,7 @@
-"""Native iqdb signature step against the unchanged Python worker on the same request.
+"""Native iqdb signature step against fixed historical worker values.
 
-Both sides run the same explicitly built illustash-iqdb (ILLUSTASH_IQDB_BINARY) on
-generated images; the queue order, paths and emitted signatures must match exactly.
+The candidate runs explicitly built illustash-iqdb (ILLUSTASH_IQDB_BINARY) on
+generated images; queue order, local paths and signatures match fixed recordings.
 """
 import json
 import os
@@ -22,6 +22,14 @@ from tests import test_native_provenance_compute as driver
 from tests.test_native_provenance_production import candidate_worker
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def local_errors(hashes):
+    # Rust 的系统错误文字由操作系统本地化；只统一缺文件文案，保留错误码与状态。
+    for row in hashes or ():
+        if row.get('error', '').endswith(' (os error 2)'):
+            row['error'] = 'file not found (os error 2)'
+    return hashes
 
 
 class NativeIqdbQueueTest(unittest.TestCase):
@@ -114,13 +122,19 @@ class NativeIqdbQueueTest(unittest.TestCase):
         queue = [json.loads(line) for line in (mailbox / 'hash-input.jsonl').read_text().splitlines()] \
             if (mailbox / 'hash-input.jsonl').exists() else None
         hashes = json.loads((mailbox / 'hashes.json').read_text()) if (mailbox / 'hashes.json').exists() else None
-        return result, queue, hashes
+        return result, queue, local_errors(hashes)
 
     def expected(self):
         import gzip
         with gzip.open(Path(__file__).parent/'fixtures/iqdb_values.json.gz','rt',encoding='utf-8') as f:
             text = f.read().replace('@ROOT@',str(self.root).replace('\\','\\\\'))
             record = json.loads(text)[self._testMethodName][0]
+        # 录制值里的路径段按本机分隔符还原，签名与队列顺序保持固定。
+        if record[1] is not None:
+            for row in record[1]:
+                if row['path'] != 'None':
+                    row['path'] = str(Path(row['path']))
+        record[2] = local_errors(record[2])
         return tuple(record)
 
     def native(self, binary, only=(), iqdb=True, side='native'):

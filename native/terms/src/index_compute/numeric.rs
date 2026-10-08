@@ -186,7 +186,7 @@ macro_rules! reference_math {
                 let lo = at.floor() as usize;
                 let hi = at.ceil() as usize;
                 let t = at - lo as f64;
-                // build_characters uses scalar q: NumPy weak promotion retains input dtype.
+                // The recorded index algorithm uses scalar q: NumPy weak promotion retains input dtype.
                 // Learning owns its independently approved float64 percentile contract.
                 let diff = d[hi] - d[lo];
                 if t >= 0.5 {

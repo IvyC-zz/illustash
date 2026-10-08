@@ -148,7 +148,7 @@ L0 实际做法和设计稿的差别：
 | `APP_SUPPORT/libraries.json`、设置与账号 | `app_libraries`、设置与原生账号入口 | 用户应用数据，和 SHARED 分开 | 不随包；凭据不参与研究整理 |
 | `review/identity-metadata-*`、`identity-bank-*`、评测与测试图库输出 | 已删除的身份研究工具、`eval_bench.py`、`test_libraries.py`（#186） | 研究输入或输出，可能含私有 UUID / 文件引用；已有数据保留 | 不随包；新输出显式指定 `_scratch/research/` |
 | `review/pi.db`、`library.sqlite`、`full-features.npy`、`full-manifest.csv` 的旧布局入口 | 研究工具与裸库兼容入口 | 可能是指向个人图库的链接；只看链接类别不能推定可删除 | 不随包；不跟随链接做清理 |
-| `tools/` | 构建、验收与几份旧 Python 索引脚本 | 按入口和实际调用判断职责；保留现行消费者 | Python 源码不进任何安装包；旧 Python 计算代码（原 `web/*.py`、`provenance/`）已在 #9 删除 |
+| `tools/` | 构建、检查与验收脚本 | 按入口和实际调用判断职责；保留现行消费者 | Python 源码不进任何安装包；旧 Python 计算代码（原 `web/*.py`、`provenance/`）已在 #9 删除 |
 | `tests/fixtures/`（含 `reference_recordings/`）、契约夹具 | 录下的旧参考固定期望与合成验收 | 已跟踪安全测试输入；不同于本机 `reference/` | 不随生产包，保留回归用途；参考已删除，不能重录 |
 | `.venv/`、`target/`、`packaging/desktop-*` | 依赖、构建与固定路径验收 | 本机生成物；正式验收有独立租约与结果签名 | 忽略，不随源码提交；在持有者释放前不整理 |
 | `.claude/worktrees/`、`.worktrees/` | 任务代理 checkout | Git 管理的任务生命周期；不能按名称或大小删除 | 忽略，由任务持有者收尾 |
