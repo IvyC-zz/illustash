@@ -260,7 +260,7 @@ schema v1 已随第 2、3 步用于切换，不能改；新增一次迁移 v2，
 | NameUpdater（`replace`、`aliases`、`seed`、`put`） | 否 | 不变：只写非用户来源的名字 | — | — |
 | `undo` | — | 按第 6.3 节分派 | — | verdict |
 | 工具：`reconcile_works --apply`（2026-10-05 删除，#186） | 否 | 调用核心的作品证据命令 | — | — |
-| 工具：`apply_classification_repair`、`preview_classification_repair`、`identity_rollout`、`identity_bank`、`identity_metadata`、`eval_bench`（这六个已于 2026-10-05 删除，#186）、`char_patch` | 否 | 在**任何**副作用（初始化、备份、写 source）之前检查切换标记，已切换就拒绝；纯读取的工具照常 | — | — |
+| 工具：`apply_classification_repair`、`preview_classification_repair`、`identity_rollout`、`identity_bank`、`identity_metadata`、`eval_bench`（这六个已于 2026-10-05 删除，#186）；旧 Python 索引工具已在 #53 删除 | 否 | 在**任何**副作用（初始化、备份、写 source）之前检查切换标记，已切换就拒绝；纯读取的工具照常 | — | — |
 
 新增行为「作品和类型编辑可撤销」不在本步（见第 11 节），所以这些接口的 HTTP 响应形状不变。
 

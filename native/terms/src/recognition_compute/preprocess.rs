@@ -96,7 +96,7 @@ pub fn wd_input(image: &RgbImage, size: u32) -> Vec<f32> {
         .collect()
 }
 /// Squash BILINEAR, then CLIP normalisation in f32 with NCHW planes.
-#[allow(clippy::excessive_precision)] // Keep the published CLIP constants visibly identical to tools/ccip.py.
+#[allow(clippy::excessive_precision)] // Keep the published CLIP constants visibly identical to the recorded CCIP preprocessing fixture.
 pub fn ccip_input(image: &RgbImage, size: u32) -> Vec<f32> {
     assert!(size > 0 && image.width() > 0 && image.height() > 0);
     let image = resize(image, size, size, Filter::Linear);
