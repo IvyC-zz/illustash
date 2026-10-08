@@ -79,7 +79,7 @@ fi
 log="$cache/unittest.log"
 # 失败时仍输出完整跳过清单，随后保留 unittest 的失败状态。
 status=0
-run "$python" -m unittest discover -s tests -v -b 2>&1 | tee "$log" || status=$?
+run "$python" -m tests.run_fixed_suite -v -b 2>&1 | tee "$log" || status=$?
 grep -E ' \.\.\. skipped ' "$log" > "$cache/skips.txt" || true
 printf '\nPython 跳过：%s 项\n' "$(wc -l < "$cache/skips.txt" | tr -d ' ')"
 cat "$cache/skips.txt"

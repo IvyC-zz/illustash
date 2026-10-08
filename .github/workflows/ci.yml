@@ -111,7 +111,7 @@ jobs:
         run: |
           set -o pipefail
           # -b：失败测试的输出（如被测服务日志）附在末尾失败报告里，不散落在日志中段。
-          python -m unittest discover -s tests -v -b 2>&1 | tee "$RUNNER_TEMP/unittest.log"
+          python -m tests.run_fixed_suite -v -b 2>&1 | tee "$RUNNER_TEMP/unittest.log"
       - name: 上传测试日志
         if: failure()
         uses: actions/upload-artifact@v4

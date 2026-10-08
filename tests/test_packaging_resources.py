@@ -220,7 +220,7 @@ class CandidateExampleWiringTest(unittest.TestCase):
             for source in (shell, ci):
                 build_at = source.index('--example ' + example)
                 export_at = source.index('ILLUSTASH_' + key + '_BIN')
-                discover_at = source.index('-m unittest discover -s tests -v -b')
+                discover_at = source.index('-m tests.run_fixed_suite -v -b')
                 self.assertLess(build_at, export_at)
                 self.assertLess(export_at, discover_at)
                 self.assertIn('native/terms/target/release/examples/' + example, source)
