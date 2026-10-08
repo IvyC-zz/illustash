@@ -41,6 +41,23 @@ class IndexModelAcceptance(installed.InstalledIndexAppTest):
         super().setUpClass()
         cls.recognition = Path(os.environ['ILLUSTASH_RECOGNITION_COMPUTE_BIN']).resolve(strict=True)
 
+    def setUp(self):
+        # 平台专项复用安装版用例的合成包；本模块从未单独录制 setup。
+        method = self._testMethodName
+        self._testMethodName = 'test_cached_installed_compute_publish_drop_preserves_history'
+        try:
+            super().setUp()
+        finally:
+            self._testMethodName = method
+
+    def expected(self):
+        # 仅此生成图专项的原算法期望；不复算、不刷新通用固定录制。
+        from tests.fixed_expectations import fixed_values
+        values = fixed_values('platform_index_values.json.xz')['index']
+        cursor = getattr(self, '_platform_expected_cursor', 0)
+        self._platform_expected_cursor = cursor + 1
+        return values[cursor]
+
     def install(self, root):
         adapter, resources = super().install(root)
         model = Path(os.environ['ILLUSTASH_INDEX_INSTALLED_MODEL'])
