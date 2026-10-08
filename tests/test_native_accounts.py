@@ -1,7 +1,8 @@
 """#50 account actions using synthetic secrets, packages and loopback services only.
 
-Success bytes/metadata/DB rows compared with the reference; errors compare status.
-The native process cannot discover Python and cannot read the user's credential store.
+Success bytes/metadata/DB rows compared with the reference (recorded through
+tests/fixed_expectations.py, #9; minute-precision check times compared as ``<clock>``); errors
+compare status. The native process cannot discover Python and cannot read the user's credential store.
 """
 from contextlib import closing
 from concurrent.futures import ThreadPoolExecutor
@@ -9,7 +10,6 @@ import http.server
 import json
 import os
 from pathlib import Path
-import shutil
 import sqlite3
 import stat
 import threading
@@ -17,14 +17,18 @@ import time
 import unittest
 from tests.test_read_http import INTERRUPT
 import urllib.parse
-import urllib.request
 import zipfile
-from unittest.mock import patch
 
 from tests import test_native_lifecycle as life, test_native_human_labels as labels
-from tools.verify_read_http import difference
-from provenance import accounts, desktop, db
-from provenance.net import Net, LoginRejected
+from tests.fixed_expectations import unclocked
+
+
+def difference(left, right):
+    return life.difference(left, right)
+
+
+def provenance_db(lib):
+    return Path(lib.path) / 'provenance.sqlite'
 
 class AccountService:
     def __init__(self):
@@ -78,51 +82,28 @@ class NativeAccountsTest(unittest.TestCase):
     def setUp(self):
         self.service=AccountService();self.addCleanup(self.service.close)
         life.NativeLifecycleTest.setUp(self)
-        self.ref_support=self.root/'reference-support'
-        scoped=patch.object(accounts,'APP_SUPPORT',self.ref_support);scoped.start();self.addCleanup(scoped.stop)
-        env={'ILLUSTASH_NO_KEYCHAIN':'1','ILLUSTASH_DESKTOP_BRIDGE':self.service.base if getattr(self,'with_bridge',False) else '',
-             'ILLUSTASH_DESKTOP_TOKEN':'synthetic-bridge-token' if getattr(self,'with_bridge',False) else ''}
-        scoped=patch.dict(os.environ,env);scoped.start();self.addCleanup(scoped.stop)
-        # Reference network traffic is redirected to the same local service. Never use real Pixiv.
-        service=self.service
-        def get(net,url,params=None,extra=None):
-            path=urllib.parse.urlsplit(url).path
-            if params:path+='?'+urllib.parse.urlencode(params)
-            if getattr(net,'via',None):
-                code,data=desktop.fetch('https://www.pixiv.net'+path)
-                if code==401:raise LoginRejected('HTTP 401')
-                if code==404:return None
-                return json.loads(data)
-            headers=extra or net.headers.get('www.pixiv.net',{})
-            req=urllib.request.Request(service.base+path,headers=headers)
-            with urllib.request.urlopen(req,timeout=5) as response:return json.load(response)
-        scoped=patch.object(Net,'get',get);scoped.start();self.addCleanup(scoped.stop)
-        # Prepare one synthetic schema, freeze only fixture defaults, then clone it.
-        with closing(db.connect(self.lib)):pass
-        labels.freeze_seed_defaults(db.path_of(self.lib))
-        self.ref_path=self.root/'reference.pilib';shutil.copytree(self.lib.path,self.ref_path)
-        self.ref_lib=type(self.lib)(self.ref_path,self.lib.config)
-        self.reference.library=self.ref_lib
+        # One synthetic provenance schema with frozen fixture defaults (recorded).
+        self.rec.package('provenance', self.lib.path)
     def pair(self,action,body=None,expected=200):
         route='/api/accounts/'+action
         # Preserve raw timestamps without output normalization across a minute boundary.
-        if action in ('pixiv','pixiv/check','pixiv/connect'):
-            second=time.localtime().tm_sec
-            if second >= 49:time.sleep(61-second)
-        left=self.request(route,body or {},base=self.direct)
+        left=life.NativeLifecycleTest.reference_response(self,route,body or {})
         right=self.request(route,body or {})
         self.assertEqual(left['status'],expected,left['body']);self.assertEqual(right['status'],expected,right['body'])
         self.assertEqual(right['route'],'core')
         if expected<400:
             self.assertIsNone(difference(left,right),(left['body'],right['body']))
-            self.assertEqual(self.metadata(self.ref_support),self.metadata(self.support))
-            if action == 'x/import':self.assertEqual(labels.states(self.lib),labels.states(self.ref_lib))
+            masked=lambda m:json.loads(unclocked(json.dumps(m,ensure_ascii=False)))
+            self.assertEqual(masked(self.rec.value('reference metadata')),
+                             masked(self.metadata(self.support)))
+            if action == 'x/import':
+                self.assertEqual(labels.states(self.lib),self.rec.state('reference state'))
         self.assertFalse(self.sentinel.exists())
         return json.loads(right['body']) if expected<400 else None
     def metadata(self,path):
         f=path/'accounts.json';return json.loads(f.read_text(encoding='utf-8')) if f.exists() else {}
     def status_pair(self):
-        left=self.request('/api/accounts',base=self.direct);right=self.request('/api/accounts')
+        left=life.NativeLifecycleTest.reference_response(self,'/api/accounts');right=self.request('/api/accounts')
         self.assertIsNone(difference(left,right),(left['body'],right['body']));return json.loads(right['body'])
     def archive(self,items,name='synthetic.zip',broken=False):
         f=self.root/name
@@ -141,7 +122,7 @@ class NativeAccountsTest(unittest.TestCase):
         self.log.seek(0);self.assertNotIn(b'123_AbC',self.log.read())
     def test_saucenao_global_secret_and_unbind(self):
         self.pair('saucenao',{'value':' A'+'b'*39+' '});self.status_pair()
-        other,_=self.package('second');self.request('/api/libraries/open',{'path':str(other.path)})
+        other=self.package('second');self.request('/api/libraries/open',{'path':str(other.path)})
         self.token=json.loads(self.request('/api/bootstrap')['body'])['token']
         self.assertTrue(json.loads(self.request('/api/accounts')['body'])['saucenao']['bound'])
         self.assertNotIn(('A'+'b'*39).encode(),self.request('/api/accounts')['body'])
@@ -173,35 +154,33 @@ class NativeAccountsTest(unittest.TestCase):
         self.assertFalse((self.support/'accounts.json').exists())
     def test_archive_duplicates_and_typed_database(self):
         f=self.archive(['2','1','2','3']);self.assertEqual(self.pair('x/import',{'path':str(f)})['new'],3)
-        self.assertEqual(labels.snapshot(db.path_of(self.lib)),labels.snapshot(db.path_of(self.ref_lib)))
+        self.assertEqual(labels.snapshot(provenance_db(self.lib)),self.rec.value('reference provenance'))
         self.assertEqual(self.pair('x/import',{'path':str(f)})['new'],0);self.status_pair()
         directory=self.root/'unzipped';(directory/'data').mkdir(parents=True)
         (directory/'data/following.js').write_text('window.YTD.following.part0 = [{"following":{"accountId":"4"}}]')
         self.assertEqual(self.pair('x/import',{'path':str(directory)})['new'],1)
-        self.assertEqual(labels.snapshot(db.path_of(self.lib)),labels.snapshot(db.path_of(self.ref_lib)))
+        self.assertEqual(labels.snapshot(provenance_db(self.lib)),self.rec.value('reference provenance'))
     def test_archive_corruption_and_rollback(self):
-        before=labels.snapshot(db.path_of(self.lib))
+        before=labels.snapshot(provenance_db(self.lib))
         self.pair('x/import',{'path':str(self.archive([],broken=True))},400)
         self.pair('x/import',{'path':str(self.root/'missing.zip')},400)
         f=self.root/'missing-following.zip'
         with zipfile.ZipFile(f,'w') as z:z.writestr('data/tweets.js','unused')
         self.pair('x/import',{'path':str(f)},400)
-        with closing(sqlite3.connect(db.path_of(self.lib))) as c:c.execute("CREATE TRIGGER fail_lead BEFORE INSERT ON leads WHEN NEW.key='2' BEGIN SELECT RAISE(ABORT,'synthetic'); END")
+        with closing(sqlite3.connect(provenance_db(self.lib))) as c:c.execute("CREATE TRIGGER fail_lead BEFORE INSERT ON leads WHEN NEW.key='2' BEGIN SELECT RAISE(ABORT,'synthetic'); END")
         result=self.request('/api/accounts/x/import',{'path':str(self.archive(['1','2']))});self.assertEqual(result['status'],400)
-        with closing(sqlite3.connect(db.path_of(self.lib))) as c:
+        with closing(sqlite3.connect(provenance_db(self.lib))) as c:
             self.assertEqual(c.execute('SELECT count(*) FROM leads').fetchone()[0],0);c.execute('DROP TRIGGER fail_lead')
-        self.assertEqual(before,labels.snapshot(db.path_of(self.lib)))
+        self.assertEqual(before,labels.snapshot(provenance_db(self.lib)))
     def test_archive_switch_package_isolation(self):
         f=self.archive(['1','2']);self.request('/api/accounts/x/import',{'path':str(f)})
-        other,_=self.package('second')
+        other=self.package('second')
         other.config['id']=self.lib.config['id'];(other.path/'library.json').write_text(json.dumps(other.config))
         self.request('/api/libraries/open',{'path':str(other.path)})
         self.token=json.loads(self.request('/api/bootstrap')['body'])['token'];self.assertEqual(json.loads(self.request('/api/accounts')['body'])['x'],{'imported':0})
         self.assertEqual(json.loads(self.request('/api/accounts/x/import',{'path':str(f)})['body'])['new'],2)
         with closing(sqlite3.connect(other.path/'provenance.sqlite')) as c:self.assertEqual(c.execute('PRAGMA user_version').fetchone()[0],5)
-        fresh,_=self.package('schema-reference')
-        with closing(db.connect(fresh)):pass
-        self.assertEqual(labels.snapshot(other.path/'provenance.sqlite')['schema'],labels.snapshot(db.path_of(fresh))['schema'])
+        self.assertEqual(labels.snapshot(other.path/'provenance.sqlite')['schema'],self.rec.value('fresh schema'))
     def test_network_failure_does_not_mark_expired(self):
         self.pair('pixiv',{'value':'123_AbC'});before=self.metadata(self.support)
         self.service.code=503;self.pair('pixiv/check',expected=400)
@@ -250,7 +229,6 @@ class NativeDesktopAccountsTest(NativeAccountsTest):
             if path.startswith('/pixiv/'):self.assertEqual(token,'synthetic-bridge-token')
     def test_window_expired_and_force_relogin(self):
         self.pair('pixiv/connect');self.service.logged=False
-        scoped=patch.object(accounts,'RECHECK_AFTER',0);scoped.start();self.addCleanup(scoped.stop)
         self.pair('pixiv/check');self.status_pair();self.pair('pixiv/login')
         self.assertTrue(any('/pixiv/login?force=1' in c[1] for c in self.service.calls))
         self.service.logged=True;self.pair('pixiv/connect');self.assertNotIn('expired',self.status_pair()['pixiv'])
@@ -260,13 +238,12 @@ class NativeDesktopAccountsTest(NativeAccountsTest):
 
     def test_window_expired_rejection_detail(self):
         self.pair('pixiv/connect');self.service.rejected=True
-        scoped=patch.object(accounts,'RECHECK_AFTER',0);scoped.start();self.addCleanup(scoped.stop)
         self.pair('pixiv/check');self.status_pair()
     def test_window_open_fetch_failure_is_pending(self):
         self.service.login_open=True;self.service.fetch_status=0
         self.pair('pixiv/connect');self.assertFalse(self.status_pair()['pixiv']['bound'])
     def test_inflight_account_switch_waits_for_original_request(self):
-        self.service.block=True;other,_=self.package('second')
+        self.service.block=True;other=self.package('second')
         with ThreadPoolExecutor(2) as pool:
             action=pool.submit(self.request,'/api/accounts/pixiv',{'value':'123_AbC'})
             self.assertTrue(self.service.entered.wait(3))
@@ -288,5 +265,4 @@ class NativeDesktopAccountsTest(NativeAccountsTest):
 
     def test_window_404_marks_expired_with_original_detail(self):
         self.pair('pixiv/connect');self.service.fetch_status=404
-        scoped=patch.object(accounts,'RECHECK_AFTER',0);scoped.start();self.addCleanup(scoped.stop)
         self.pair('pixiv/check');self.status_pair()

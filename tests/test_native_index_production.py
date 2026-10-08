@@ -333,7 +333,7 @@ class InstalledIndexAppTest(CandidateIndexAdapter, unittest.TestCase):
     def test_switch_cancels_actual_computed_late_result_and_keeps_same_id_other_package(self):
         self.hold_after_actual_compute(); before = snapshot(self.lib.source); self.start_held()
         worker_pid = int(self.ready.read_text())
-        other, store = self.package('other'); other.config['id'] = self.lib.config['id']
+        other = self.package('other'); other.config['id'] = self.lib.config['id']
         (other.path/'library.json').write_text(json.dumps(other.config)); other_before = snapshot(other.source)
         result = self.request('/api/libraries/open', {'path':str(other.path)})
         self.assertEqual(result['status'], 200, result['body'])
@@ -360,7 +360,8 @@ class InstalledIndexAppTest(CandidateIndexAdapter, unittest.TestCase):
         self.assertFalse(self.sentinel.exists())
 
     def test_timeout_cancels_after_actual_compute_without_formal_writes(self):
-        self.env['ILLUSTASH_INDEX_TIMEOUT_MS'] = '1000'
+        # Allow the actual calculator to start before the deliberately held result times out.
+        self.env['ILLUSTASH_INDEX_TIMEOUT_MS'] = '5000'
         self.hold_after_actual_compute(); before = snapshot(self.lib.source); self.start_held()
         worker_pid = int(self.ready.read_text()); result = self.finish()
         self.assertEqual(result['state']['status'], 'error', result)

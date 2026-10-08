@@ -17,10 +17,10 @@ import unittest
 from unittest.mock import patch
 
 from tests import test_native_lifecycle as lifecycle
+from tests.fixed_expectations import unclocked
 from tests.test_read_http import SPAWN, wait_until
 from tools.verify_read_http import fetch
-from provenance import db, export
-from web import artists
+from tests import provenance_fixture as db
 
 
 WORKER = r'''
@@ -118,7 +118,7 @@ class NativeProvenanceTest(unittest.TestCase):
         self.post({'action':'stop'})
     def test_optional_coordinator_keeps_ordinary_cache_schema_and_minimal_packages(self):
         self.env.pop('ILLUSTASH_PROVENANCE_WORKER');self.restart()
-        other,_=self.package('minimal-without-sync')
+        other = self.package('minimal-without-sync')
         with sqlite3.connect(other.db) as c:c.execute('DROP TABLE sync_runs')
         self.assertEqual(self.request('/api/libraries/open',{'path':str(other.path)})['status'],200)
         self.lib=other;self.token=json.loads(self.request('/api/bootstrap')['body'])['token']
@@ -191,7 +191,7 @@ class NativeProvenanceTest(unittest.TestCase):
         self.assertEqual(self.sql('SELECT status FROM native_delivery',cache=True),[('pending',)])
 
     def test_same_id_other_package_switch_rejects_late_results(self):
-        other,_=self.package('other');config=other.config.copy();config['id']=self.lib.config['id'];(other.path/'library.json').write_text(json.dumps(config))
+        other = self.package('other');config=other.config.copy();config['id']=self.lib.config['id'];(other.path/'library.json').write_text(json.dumps(config))
         self.env['SYNTHETIC_MODE']='hang';self.restart();self.post({'action':'artist','artist':'synthetic'})
         response=self.request('/api/libraries/open',{'path':str(other.path)});self.assertEqual(response['status'],200,response)
         self.token=json.loads(self.request('/api/bootstrap')['body'])['token']
@@ -213,34 +213,28 @@ class NativeProvenanceTest(unittest.TestCase):
         self.assertEqual(self.info()['state']['kind'],'new');self.post({'action':'stop'});self.finish('stopped')
 
     def test_export_contract_native_matches_python(self):
-        from web import terms_core
+        # The former Python exporter, importer and run report on the same lookup are recorded
+        # (tests/fixed_expectations.py); clock-like text compares as <clock>.
         before=self.root/'reference-application.sqlite'
         with sqlite3.connect(self.lib.db) as source,sqlite3.connect(before) as target:source.backup(target)
         self.post({'action':'lookup','ids':['a']});self.finish('done')
         package=self.lib.path/self.sql('SELECT package FROM native_delivery',cache=True)[0][0]
-        out=self.root/'reference-evidence';export.write(self.lib,out)
-        for name in ('evidence.jsonl','terms.jsonl'):self.assertEqual((Path(package)/name).read_bytes(),(out/name).read_bytes())
-        native_manifest=json.loads((Path(package)/'manifest.json').read_text());reference_manifest=json.loads((out/'manifest.json').read_text())
-        native_manifest.pop('created_at');reference_manifest.pop('created_at')
-        self.assertEqual(native_manifest,reference_manifest) # creation clock is transport metadata
-        reference_import=terms_core.import_package(before,self.lib.config['id'],out)
+        expected=self.rec.value('python export')
+        for name in ('evidence.jsonl','terms.jsonl'):
+            self.assertEqual(unclocked((Path(package)/name).read_text(encoding='utf-8')),unclocked(expected['files'][name]))
+        # Creation clock is transport metadata; file digests cover the (clock-bearing) bytes compared above.
+        self.assertEqual(manifest_shape(json.loads((Path(package)/'manifest.json').read_text())),expected['manifest'])
         native_import=self.info()['delivery']
-        self.assertEqual({k:v for k,v in native_import.items() if k!='status'},reference_import)
+        self.assertEqual({k:v for k,v in native_import.items() if k!='status'},expected['import'])
         # Resolve random term IDs through stable links; compare formal evidence, projections,
         # history and durable events against the reference import of identical bytes.
-        queries=(
-            'SELECT source,method,score,metric,data,asset_id FROM term_evidence ORDER BY source,method,data,asset_id',
-            'SELECT system,key FROM term_links ORDER BY system,key',
-            'SELECT p.asset_id,t.kind,p.state,p.score FROM term_projection p JOIN terms t ON t.id=p.term_id ORDER BY p.asset_id,t.kind,p.state,p.score',
-            'SELECT label,before_json FROM actions ORDER BY id',
-            'SELECT kind,status,error FROM backend_effects ORDER BY id',
-        )
-        with sqlite3.connect(before) as expected,sqlite3.connect(self.lib.db) as actual:
-            for query in queries:self.assertEqual(actual.execute(query).fetchall(),expected.execute(query).fetchall(),query)
-        native=self.info();reference=artists.runs(self.lib)
-        self.assertEqual(native['runs'],reference['runs']);self.assertEqual(native['coverage'],reference['coverage'])
-        from provenance import report
-        self.assertEqual(native['runs'][0]['report'],report.run(self.lib))
+        with sqlite3.connect(self.lib.db) as actual:
+            for query,rows in zip(EXPORT_QUERIES,expected['rows']):
+                self.assertEqual(json.loads(unclocked(json.dumps(actual.execute(query).fetchall(),ensure_ascii=False))),rows,query)
+        native=json.loads(unclocked(json.dumps(self.info(),ensure_ascii=False)))
+        self.assertEqual(native['runs'],expected['runs']);self.assertEqual(native['coverage'],expected['coverage'])
+        self.assertEqual(native['runs'][0]['report'],expected['report'])
+
 
     def test_pixiv_pages_cache_and_expiry_never_grants_background_consent(self):
         account=self.support/'accounts';account.mkdir(parents=True,exist_ok=True)
@@ -319,7 +313,7 @@ class NativeProvenanceTest(unittest.TestCase):
 
     def test_real_adapter_hash_and_owner_crash_recovery(self):
         from PIL import Image
-        from provenance.sources.pixel_hash import pixel_hash
+        import hashlib
         image=self.root/'synthetic.png';Image.new('RGBA',(2,3),(9,17,21,255)).save(image)
         with sqlite3.connect(self.lib.source) as c:c.execute("UPDATE assets SET src_path=? WHERE uuid='a'",(str(image),))
         cache=self.root/'adapter-cache';cache.mkdir()
@@ -327,15 +321,21 @@ class NativeProvenanceTest(unittest.TestCase):
             with sqlite3.connect(cache/'provenance.sqlite') as out:c.backup(out)
         request={'format':'illustash-provenance/1','identity':{'task_id':'synthetic'},'owner_pid':os.getpid(),'library':str(self.lib.path),'cache':str(cache),'mailbox':str(cache),'step':'pixel_hash','only':['a'],'artists':[],'network':False}
         req=cache/'request.json';req.write_text(json.dumps(request));reply=cache/'response.json'
-        adapter=Path(__file__).resolve().parents[1]/'provenance/native_worker.py'
-        subprocess.run([sys.executable,str(adapter),str(req),str(reply)],check=True,start_new_session=True,env={**self.env,'PATH':os.environ['PATH']})
-        self.assertEqual(json.loads((cache/'hashes.json').read_text()),[{'asset':'a','hash':pixel_hash(image)}])
+        from tests.test_native_provenance_production import candidate_worker
+        import shutil
+        adapter=cache / ('illustash-provenance.exe' if os.name=='nt' else 'illustash-provenance')
+        shutil.copy2(candidate_worker(),adapter)
+        subprocess.run([str(adapter),str(req),str(reply)],check=True,start_new_session=True,env={**self.env,'PATH':os.environ['PATH']})
+        self.assertEqual(json.loads((cache/'hashes.json').read_text()),[{'asset':'a','hash':hashlib.md5(b'P7\nWIDTH 2\nHEIGHT 3\nDEPTH 4\nMAXVAL 255\nTUPLTYPE RGB_ALPHA\nENDHDR\n'+bytes([9,17,21,255])*6).hexdigest()}])
         if os.environ.get('ILLUSTASH_IQDB_BINARY'):
             request['step']='iqdb';req.write_text(json.dumps(request))
-            subprocess.run([sys.executable,str(adapter),str(req),str(reply)],check=True,start_new_session=True,env={**self.env,'PATH':os.environ['PATH']})
+            subprocess.run([str(adapter),str(req),str(reply)],check=True,start_new_session=True,env={**self.env,'PATH':os.environ['PATH']})
             rows=json.loads((cache/'hashes.json').read_text());self.assertEqual([r['asset'] for r in rows],['a']);self.assertTrue(rows[0]['hash'].startswith('iqdb_'))
         wrapper=self.root/'owner-worker'
-        wrapper.write_text('#!'+sys.executable+'\n'+"import importlib.util,os,subprocess,time\n"+f"spec=importlib.util.spec_from_file_location('adapter',{str(adapter)!r});m=importlib.util.module_from_spec(spec);spec.loader.exec_module(m)\n"+"def compute(r):\n p=subprocess.Popen([os.environ['SYNTHETIC_PYTHON'],'-c','import time;time.sleep(300)']);open(os.environ['SYNTHETIC_PID'],'w').write(str(p.pid))\n while True:time.sleep(.1)\nm.execute=compute;m.main()\n")
+        wrapper.write_text('#!'+sys.executable+'\n'+"import os,subprocess,time\n"+
+                           "p=subprocess.Popen([os.environ['SYNTHETIC_PYTHON'],'-c','import time;time.sleep(300)'])\n"+
+                           "open(os.environ['SYNTHETIC_PID'],'w').write(str(p.pid))\n"+
+                           "while True:time.sleep(.1)\n")
         wrapper.chmod(0o755);pidfile=self.root/'owner-child'
         self.env.update(ILLUSTASH_PROVENANCE_WORKER=worker_command(wrapper),SYNTHETIC_PYTHON=sys.executable,SYNTHETIC_PID=str(pidfile));self.restart()
         self.post({'action':'artist','artist':'synthetic'});wait_until(pidfile.exists,timeout=5)
@@ -344,3 +344,20 @@ class NativeProvenanceTest(unittest.TestCase):
         self.process,self.log=self.start(self.lib.path);self.token=json.loads(self.request('/api/bootstrap')['body'])['token']
         self.assertEqual(self.info()['state']['status'],'stopped')
         self.assertEqual(self.sql("SELECT count(*) FROM term_evidence WHERE source='provenance'"),[(0,)])
+
+
+def manifest_shape(manifest):
+    manifest.pop('created_at')
+    for entry in (manifest.get('files') or {}).values():
+        if isinstance(entry, dict):
+            entry.pop('sha256', None)
+    return manifest
+
+
+EXPORT_QUERIES=(
+    'SELECT source,method,score,metric,data,asset_id FROM term_evidence ORDER BY source,method,data,asset_id',
+    'SELECT system,key FROM term_links ORDER BY system,key',
+    'SELECT p.asset_id,t.kind,p.state,p.score FROM term_projection p JOIN terms t ON t.id=p.term_id ORDER BY p.asset_id,t.kind,p.state,p.score',
+    'SELECT label,before_json FROM actions ORDER BY id',
+    'SELECT kind,status,error FROM backend_effects ORDER BY id',
+)

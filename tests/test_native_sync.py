@@ -7,7 +7,7 @@ import subprocess
 import os
 import unittest
 from tests.test_native_folder import NativeFolderHTTPTest
-from tests.test_sync import SyncTest
+from tests import photos_fixture
 from tests.test_native_human_labels import snapshot
 
 class NativeSyncTest(unittest.TestCase):
@@ -20,7 +20,7 @@ class NativeSyncTest(unittest.TestCase):
     finish = NativeFolderHTTPTest.finish
     _folder_setup = NativeFolderHTTPTest.setUp
     _fixture_setup = NativeFolderHTTPTest._fixture_setup
-    photo = SyncTest.photo
+    photo = photos_fixture.photo
 
     def setUp(self):
         self._folder_setup()
@@ -30,7 +30,7 @@ class NativeSyncTest(unittest.TestCase):
         with sqlite3.connect(self.library / 'database/Photos.sqlite') as c:
             c.execute('CREATE TABLE ZASSET(Z_PK INTEGER PRIMARY KEY,ZUUID TEXT,ZKIND INTEGER,ZTRASHEDSTATE INTEGER,ZWIDTH INTEGER,ZHEIGHT INTEGER,ZADDEDDATE REAL,ZHIDDEN INTEGER,ZDIRECTORY TEXT,ZFILENAME TEXT,ZADDITIONALATTRIBUTES INTEGER)')
             c.execute('CREATE TABLE ZADDITIONALASSETATTRIBUTES(Z_PK INTEGER PRIMARY KEY,ZIMPORTEDBYBUNDLEIDENTIFIER TEXT,ZORIGINALSTABLEHASH TEXT,ZORIGINALFILESIZE INTEGER)')
-        from web.library import ensure_source_schema
+        from tests.library_fixture import ensure_source_schema
         with sqlite3.connect(self.lib.source) as c:
             ensure_source_schema(c)
             if 'z_pk' not in {row[1] for row in c.execute('PRAGMA table_info(assets)')}:
@@ -257,8 +257,9 @@ Path(sys.argv[2]).write_text(json.dumps(dict(identity=r['identity'],packages=pac
         for uuid in ('E','F'):
             self.photo(uuid,'com.atebits.Tweetie2')
             original=self.library/f'originals/{uuid}/{uuid}.png';original.parent.mkdir(parents=True);original.write_bytes(b'synthetic')
-        # The worker runs about 2 s, longer than the 0.8 s idle window, but never 0.8 s without progress.
-        self.env['ILLUSTASH_RECOGNITION_TIMEOUT_MS']='800'
+        # The worker runs about 2 s, longer than the 1.5 s idle window; progress arrives every 0.4 s.
+        # The first report includes interpreter/NumPy startup, so allow room for a loaded machine.
+        self.env['ILLUSTASH_RECOGNITION_TIMEOUT_MS']='1500'
         self.worker('slow')
         value=self.sync()
         self.assertEqual(value['state']['status'],'done',value)
@@ -285,7 +286,10 @@ Path(sys.argv[2]).write_text(json.dumps(dict(identity=r['identity'],packages=pac
         self.assertEqual(value['state']['message'],'任务超时：2 秒没有进展')
         first=json.loads((self.root/'last-request').read_text())
         self.assertEqual(len(first),3)
-        self.assertEqual((value['history'][0]['status'],value['history'][0]['imported']),('interrupted',2))
+        # The folder asset is counted when the scan imports it; a streamed batch counts only the
+        # Photos assets it brings. Which assets the first two batches hold follows key order.
+        self.assertEqual((value['history'][0]['status'],value['history'][0]['imported']),
+                         ('interrupted',1+sum(u in ('E','F') for u in first[:2])))
         with sqlite3.connect(self.lib.source) as c:
             self.assertEqual(sorted(u for u, in c.execute('SELECT asset FROM recognition_assets')),sorted(first[:2]))
             self.assertEqual(c.execute("SELECT count(*) FROM recognition_imports WHERE status='done'").fetchone()[0],2)
@@ -315,7 +319,7 @@ Path(sys.argv[2]).write_text(json.dumps(dict(identity=r['identity'],packages=pac
             if json.loads(self.request('/api/sync')['body'])['state']['status']=='recognising':break
             time.sleep(.01)
         self.assertEqual(self.request('/api/sync',{})['body'],b'{"started": false}')
-        other,_=self.package('other')
+        other = self.package('other')
         other.config['id']=self.lib.config['id']
         (other.path/'library.json').write_text(json.dumps(other.config))
         self.assertEqual(self.request('/api/libraries/open',{'path':str(other.path)})['status'],200)
@@ -365,7 +369,7 @@ Path(sys.argv[2]).write_text(json.dumps(dict(identity=r['identity'],packages=pac
 
     @unittest.skipIf(os.name == 'nt', 'Apple 照片图库只在 macOS 上提供')
     def test_native_library_new_photos_exact_source_reference(self):
-        from web.sync import scan
+        # The former Python Photos scanner's results on the same inputs are recorded (tests/fixed_expectations.py).
         for u,app in (('D','com.atebits.Tweetie2'),('E','net.pxv.iphone'),('F','com.apple.springboard')): self.photo(u,app)
         for i,app in enumerate(('com.apple.camera','com.apple.mobileslideshow','com.apple.mobilesafari','tv.danmaku.bilianime','ai.x.GrokApp','com.tencent.xin','com.baidu.netdisk','app.nicegram','')):self.photo('N'+str(i),app)
         def pair():
@@ -373,9 +377,9 @@ Path(sys.argv[2]).write_text(json.dumps(dict(identity=r['identity'],packages=pac
             with sqlite3.connect(self.lib.source) as src,sqlite3.connect(old) as dest:src.backup(dest)
             result=subprocess.run([str(self.binary),'photos-scan','--db',str(self.lib.source)],input=json.dumps(self.source).encode(),capture_output=True,env=self.env)
             self.assertEqual(result.returncode,0,result.stderr)
-            expected=scan(self.library,old,self.source)
-            self.assertEqual(json.loads(result.stdout),expected)
-            self.assertEqual(snapshot(self.lib.source),snapshot(old))
+            expected=self.rec.value('old scan')
+            self.assertEqual(json.loads(result.stdout),expected['result'])
+            self.assertEqual(snapshot(self.lib.source),expected['source'])
         pair()
         with sqlite3.connect(self.library/'database/Photos.sqlite') as c:c.execute("UPDATE ZASSET SET ZTRASHEDSTATE=1 WHERE ZUUID='D'")
         pair()
@@ -429,4 +433,4 @@ Path(sys.argv[2]).write_text(json.dumps(dict(identity=r['identity'],packages=pac
         self.assertEqual(state['history'][0]['sources']['com.atebits.Tweetie2'],{'name':'X','photos':2,'collected':2})
         with sqlite3.connect(self.lib.source) as c:self.assertEqual(c.execute("SELECT uuid,source_id FROM assets WHERE source_id LIKE '%photos' ORDER BY uuid").fetchall(),[('D','photos'),('G','second-photos')])
 
-del NativeFolderHTTPTest, SyncTest
+del NativeFolderHTTPTest

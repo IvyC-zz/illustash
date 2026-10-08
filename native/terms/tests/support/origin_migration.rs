@@ -30,28 +30,6 @@ fn legacy_photos_upgrade_preserves_missing_apps_fallback_and_explicit_mapping() 
             config["sources"][0]["apps"] = mapping;
         }
         let before_config = config.clone();
-        let reference = root.join(format!("{name}-reference.sqlite"));
-        std::fs::copy(&db, &reference).unwrap();
-        let python = std::env::var("ILLUSTASH_TEST_PYTHON").unwrap_or_else(|_| "python3".into());
-        let legacy = std::process::Command::new(python)
-            .current_dir(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../.."))
-            .env("PYTHONUTF8", "1")
-            .args(["-c", r#"
-import json, sqlite3, sys
-from pathlib import Path
-from web.library import ensure_source_schema, link_photos
-source = json.loads(sys.argv[2])['sources'][0]
-with sqlite3.connect((Path(source['path']) / 'database/Photos.sqlite').as_uri() + '?mode=ro', uri=True) as photos:
-    app = {u.upper(): a for u, a in photos.execute('SELECT a.ZUUID,coalesce(d.ZIMPORTEDBYBUNDLEIDENTIFIER,\'\') FROM ZASSET a LEFT JOIN ZADDITIONALASSETATTRIBUTES d ON a.ZADDITIONALATTRIBUTES=d.Z_PK WHERE a.ZKIND=0 AND a.ZTRASHEDSTATE=0')}
-with sqlite3.connect(sys.argv[1]) as c:
-    ensure_source_schema(c)
-    missing = [u for (u,) in c.execute('SELECT uuid FROM assets WHERE source_id IS NULL OR preset IS NULL')]
-    link_photos(c, source, [(u, app.get(u)) for u in missing])
-    print(json.dumps(c.execute('SELECT source_id,preset FROM assets ORDER BY uuid').fetchall()))
-"#])
-            .arg(&reference).arg(config.to_string()).output().unwrap();
-        assert!(legacy.status.success(), "{}", String::from_utf8_lossy(&legacy.stderr));
-        let legacy_rows: Value = serde_json::from_slice(&legacy.stdout).unwrap();
         source(&db, &config).unwrap();
         let c = crate::app_library::read_connection(&db).unwrap();
         let rows = c
@@ -61,8 +39,8 @@ with sqlite3.connect(sys.argv[1]) as c:
             .unwrap()
             .collect::<rusqlite::Result<Vec<_>>>()
             .unwrap();
-        assert_eq!(serde_json::to_value(&rows).unwrap(), legacy_rows);
-        // 原迁移的完整输出：仅缺少来源/预设的行回填，完整行保持不变；无元数据保留已有值。
+        // 原迁移（旧 Python ensure_source_schema/link_photos，#9 起不再并跑）的完整输出：
+        // 仅缺少来源/预设的行回填，完整行保持不变；无元数据保留已有值。
         assert_eq!(
             rows,
             vec![

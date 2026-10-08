@@ -190,7 +190,7 @@ impl NpyMatrix {
         self.len() == 0
     }
     pub(super) fn into_anchor_matrices(mut self, ids: Vec<String>) -> Result<(Matrix, Matrix)> {
-        // char_scan.cross converts the raw alias input to contiguous f32 first;
+        // The recorded alias-distance algorithm converts the raw alias input to contiguous f32 first;
         // patch_anchors instead selects rows, normalizes in the original dtype, then casts.
         let alias_rows = match &self.values {
             NpyValues::Float32(rows) => rows.clone(),

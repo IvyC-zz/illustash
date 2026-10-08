@@ -10,10 +10,6 @@ __pycache__/
 .DS_Store
 :memory:*
 
-!tests/reference/
-!tests/reference/**
-tests/reference/**/__pycache__/
-tests/reference/**/*.pyc
 /packaging/desktop-resources/
 
 packaging/desktop-compute/

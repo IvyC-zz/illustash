@@ -36,7 +36,7 @@
 
 ## 2. 常驻核心进程
 
-角色命令默认走一个常驻的 Rust 子进程，省掉每次命令的进程启动（`tests/reference/web/terms_core.py` 的 `character_command`）。
+角色命令默认走一个常驻的 Rust 子进程，省掉每次命令的进程启动（`tests/reference/web/terms_core.py（#9 已删除）` 的 `character_command`）。
 
 - Python 进程通过私有 stdin / stdout 管道持有子进程，不开端口。
 - 宿主锁把请求串行化，Store 原来的写锁仍然有效；跨 Python 进程由 SQLite `BEGIN IMMEDIATE` 仲裁。

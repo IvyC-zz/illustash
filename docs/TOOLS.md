@@ -1,17 +1,8 @@
 # tools/ 目录用途
 
-状态：现行参考，2026-10-07。本文列出 `tools/` 下保留的脚本及用途；保留与删除的依据见 #186，安装包里实际带哪些脚本以 `packaging/build.py` 的白名单为准（见 [后端与安装说明](BACKEND_TASKS.md#独立安装与可选计算包)）。
+状态：现行参考，2026-10-08。本文列出 `tools/` 下保留的脚本及用途；保留与删除的依据见 #186，安装包里实际带哪些脚本以 `packaging/build.py` 的白名单为准（见 [后端与安装说明](BACKEND_TASKS.md#独立安装与可选计算包)）。
 
-## 旧 Python 计算脚本（只作测试参考）
-
-2026-10-07 起不进任何安装包（Linux 已冻结，见 [README](../README.md)），只被原生计算的对照测试引用；改为固定期望后随 `tests/reference/` 一起删除（#9）。
-
-| 脚本 | 用途 |
-|---|---|
-| `index_worker.py` | 角色索引更新 worker，只写 Rust 准备的隔离目录 |
-| `ccip.py` | CCIP 角色相似度（两阶段实现，见 [ERRATA.md](../ERRATA.md) 第 1、7 条） |
-| `char_patch.py`、`build_characters.py`、`char_scan.py` | 补外部角色索引、角色实体表、锚点全库扫描；`index_worker` 调用 |
-| `calibrate_classification.py`、`validation_worksheet.py` | `web/learn.py` 引用的阈值校准与盲审工作表 |
+旧 Python 索引工具及其自测已于 2026-10-08 按用户决定删除（#53）。正式索引计算由原生 `illustash-worker` 完成；平台模型专项用原生 CLI 准备合成认领输入，算法比较沿用提交的固定期望。`tools/` 只保留构建、检查与验收脚本，Python 源码不进安装包。
 
 ## 构建、检查与验收
 

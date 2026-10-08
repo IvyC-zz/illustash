@@ -468,27 +468,20 @@ mod tests {
             assert!(parse_python(invalid).is_err(), "{invalid}");
         }
     }
+    /// Python `json` outputs recorded once (#9) by the scripts that used to run here each time
+    /// (fixed seeds; CPython 3.12): `tests/fixtures/json/`.
+    fn recorded(name: &str) -> Vec<u8> {
+        use std::io::Read;
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/json").join(name);
+        let mut out = Vec::new();
+        flate2::read::GzDecoder::new(std::fs::File::open(&path).unwrap()).read_to_end(&mut out).unwrap();
+        out
+    }
     #[test]
     fn request_errors_and_valid_values_match_python_reference() {
-        let python = std::env::var("ILLUSTASH_TEST_PYTHON").unwrap_or_else(|_| "python3".into());
-        // 中文 Windows 上 Python 标准输出默认是 GBK；对照输出统一用 UTF-8。
-        let output = std::process::Command::new(python).env("PYTHONUTF8", "1").args(["-c", r#"
-import json, random
-cases = ['', ' ', '{', '[', '{"x":}', '{"x":01}', '{"x":1.}', '{"x":1e+}', '{"x":tru}', '[1,]', '{"a":1,}', '{"a" 1}', '{"a":1 "b":2}', '{} xx', '{"x":"\\q"}', '{"x":"abc}', '{"x":"a\nb"}', '{"x":"\\u123"}', '{"x":"\\u12xx"}', '{"猫":"\\q"}', '{\n"猫":"\\q"}', '{"x":"\\ud800\\uxxxx"}', 'NaNx', 'truefalse', '-InfinityX', '-.2', '+1', '-']
-cases += [json.dumps({'猫': '角色🙂', 'array': [False, None, 0.0, -0.0, 1e-7]}), '{"z":NaN,"i":Infinity,"m":-Infinity,"big":123456789012345678901234567890}', '9' * 4301]
-r = random.Random(20261001)
-for original in ['{"x":"角色\\n🙂","y":[1,2,true,null]}', '{"x":-12.34e-5}', '["a\\\\b",{},[]]']:
- for i in range(150):
-  pos=r.randrange(len(original)); ch=r.choice('xyz012 ,:{}[]"\\\n猫')
-  cases.append(original[:pos]+ch+original[pos+1:])
-result=[]
-for text in cases:
- try: result.append([text, True, json.dumps(json.loads(text),ensure_ascii=False)])
- except (ValueError, RecursionError) as e: result.append([text, False, str(e)])
-print(json.dumps(result,ensure_ascii=False))
-"#]).output().expect("Python JSON request reference");
-        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
-        let cases: Value = serde_json::from_slice(&output.stdout).unwrap();
+        // Python's json.loads/json.dumps(ensure_ascii=False) on malformed, edge and randomly mutated
+        // texts: [text, parsed, re-dumped text or error message].
+        let cases: Value = serde_json::from_slice(&recorded("request_cases.json.gz")).unwrap();
         for case in cases.as_array().unwrap() {
             let text = case[0].as_str().unwrap();
             let expected = case[2].as_str().unwrap();
@@ -515,28 +508,11 @@ print(json.dumps(result,ensure_ascii=False))
     }
     #[test]
     fn float_and_string_bytes_match_python_not_just_semantic_json() {
-        let python = std::env::var("ILLUSTASH_TEST_PYTHON").unwrap_or_else(|_| "python3".into());
-        let result = std::process::Command::new(python)
-            .env("PYTHONUTF8", "1")
-            .args([
-                "-c",
-                r#"
-import random,struct,json,math
-r=random.Random(20260930)
-v=[0.0,-0.0,1e-4,1e-5,1e15,1e16,1e20,1e21,1.2345678901234567,5e-324,1.7976931348623157e308]
-for i in range(20000):
- f=struct.unpack('d',r.randbytes(8))[0]
- if math.isfinite(f):v.append(f)
-v += [chr(i) for i in range(128)] + ['雪🙂', '\u2028\u2029', '\\"/']
-print(json.dumps({'input':v,'expected':json.dumps(v,ensure_ascii=False)},ensure_ascii=False))
-"#,
-            ])
-            .output()
-            .expect("Python JSON reference");
-        assert!(result.status.success());
-        let reference: Json = serde_json::from_slice(&result.stdout).unwrap();
-        assert_eq!(reference.get("input").unwrap().dump(), reference.get("expected").unwrap().text());
-        let parsed = parse_python(std::str::from_utf8(&result.stdout).unwrap()).unwrap();
-        assert_eq!(parsed.get("input").unwrap().dump(), reference.get("expected").unwrap().text());
+        // json.dumps(ensure_ascii=False) of 20,000 random finite doubles, float boundaries, ASCII and
+        // separators: both parsers must reproduce Python's bytes.
+        let expected = String::from_utf8(recorded("float_bytes.json.gz")).unwrap();
+        let reference: Json = serde_json::from_str(&expected).unwrap();
+        assert_eq!(reference.dump(), expected);
+        assert_eq!(parse_python(&expected).unwrap().dump(), expected);
     }
 }

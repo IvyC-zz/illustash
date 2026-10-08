@@ -1,4 +1,8 @@
-"""#29 synthetic historical source/app migrations; no real library or copied real data."""
+"""#29 synthetic historical source/app migrations; no real library or copied real data.
+
+The historical packages were built, and their expected upgrades computed, by the former Python
+application; both are recorded through tests/fixed_expectations.py (#9). Native keys are reproducible (store::new_key test counter).
+"""
 from contextlib import closing
 import json
 import datetime
@@ -12,13 +16,11 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
+from tests.fixed_expectations import Library, Expectations, unclocked
 from tests.test_native_library_upgrade import database
 from tests.test_read_http import SPAWN, free_port, wait_until
 from tools.verify_read_http import fetch
 from tests.synthetic_source import source_fixture as fixture
-from web import library, terms_core
-from web.store import Store
-from web.server import open_store, adopt_artists, adopt_terms
 
 
 class LegacyUpgradeTest(unittest.TestCase):
@@ -30,77 +32,21 @@ class LegacyUpgradeTest(unittest.TestCase):
     def setUp(self):
         self.tmp=tempfile.TemporaryDirectory(prefix='illustash-issue29-'); self.addCleanup(self.tmp.cleanup)
         self.root=Path(self.tmp.name).resolve()
-        self.env={**os.environ,'HOME':str(self.root/'home'),'USERPROFILE':str(self.root/'home'),'ILLUSTASH_APP_SUPPORT':str(self.root/'support'),'ILLUSTASH_SHARED':str(self.root/'shared')}
-        self.patch=patch.object(terms_core,'binary',return_value=self.binary);self.patch.start();self.addCleanup(self.patch.stop)
-        self.daemon=patch.dict(os.environ,{'ILLUSTASH_TERMS_DAEMON':'0'});self.daemon.start();self.addCleanup(self.daemon.stop)
+        self.env={**os.environ,'HOME':str(self.root/'home'),'USERPROFILE':str(self.root/'home'),'ILLUSTASH_APP_SUPPORT':str(self.root/'support'),'ILLUSTASH_SHARED':str(self.root/'shared'),
+                  'ILLUSTASH_TEST_KEY_COUNTER':str(self.root/'key-counter')}
+        self.rec=Expectations(self);self.addCleanup(self.rec.finish,self)
+        self.rec.alias(self.root,'@ROOT@')
 
     def package(self,version):
-        path=self.root/f'v{version}.pilib';path.mkdir()
-        source=fixture(path);source.rename(path/'source.sqlite')
-        # Old source has the established base layout but no source-id/preset/link/file additions.
-        with closing(sqlite3.connect(path/'source.sqlite')) as c:
-            c.execute('CREATE TABLE runs(id INTEGER PRIMARY KEY,kind TEXT)')
-            c.execute('DELETE FROM labels');c.execute('DELETE FROM decisions')
-            c.executescript("CREATE TABLE retained_source_rows(value BLOB); INSERT INTO retained_source_rows(rowid,value) VALUES (83,x'0001ff');")
-            c.commit()
-        config={'format':1,'id':'synthetic-old','name':'合成旧包','sources':[]}
-        (path/'library.json').write_text(json.dumps(config))
-        store=Store(path/'source.sqlite',path/'library.sqlite',legacy=True)
-        with store.connect() as c:
-            c.executescript("""
-            INSERT INTO entities(id,name,kind) VALUES ('user-character','人工名称','character');
-            INSERT INTO assets VALUES ('a','synthetic.png','synthetic',10,20,'2026-01-01','folder');
-            INSERT INTO assertions VALUES ('a','user-character','confirmed','user');
-            INSERT INTO meta VALUES ('indexed','synthetic-index'),('general_indexed','synthetic-general'),('rating_indexed','synthetic-rating');
-            CREATE TABLE retained_rows(value TEXT); INSERT INTO retained_rows(rowid,value) VALUES (27,'preserve');
-            INSERT INTO actions(id,label,before_json,ts,undone) VALUES
-                (41,'合成已撤销历史','[{"identity_skip":null}]','2026-01-01 00:00:00',1),
-                (57,'合成旧宿主步骤','[{"identity_skip":null}]','2026-01-02 00:00:00',0);
-            INSERT INTO prefs VALUES ('identity_skipped','["synthetic-old"]');
-            """)
-            if version>=25:
-                c.execute("UPDATE entities SET name=''")
-                c.execute("INSERT INTO names(entity_id,lang,value,source,role,preferred) VALUES ('user-character','zh','人工名称','user','display',1)")
-            # Old ownership definitions did not reference later mascot columns.
-            if version<36:
-                for view in ('membership_rules','ambiguous_claims','identity_nodes'):
-                    c.execute('DROP VIEW IF EXISTS '+view)
-            # Exercise every Python branch with its older columns and name storage.
-            if version<25:
-                c.execute("UPDATE entities SET name='人工名称',kind='oc'")
-                c.execute('CREATE TABLE aliases(entity TEXT,alias TEXT)');c.execute("INSERT INTO aliases VALUES ('user-character','旧别名')")
-                for view in ('identity_nodes',):c.execute('DROP VIEW IF EXISTS '+view)
-                for col in ('original','work_id','mascot_origin','mascot','label_only'):
-                    if col in {r[1] for r in c.execute('PRAGMA table_info(entities)')}:
-                        if col=='work_id':c.execute('DROP INDEX IF EXISTS entities_work_id')
-                        c.execute('ALTER TABLE entities DROP COLUMN '+col)
-                if version<18:
-                    # Dependent views are the old derived objects, replaced by this branch.
-                    for (name,) in c.execute("SELECT name FROM sqlite_master WHERE type='view'").fetchall():c.execute('DROP VIEW '+name)
-                    c.execute('DROP INDEX IF EXISTS entities_parent')
-                    for col in ('artist','kind','merged_into','tag','parent_id','variant'):c.execute('ALTER TABLE entities DROP COLUMN '+col)
-                c.execute('DROP TABLE names');c.execute('DROP TABLE links')
-                if version>=18:
-                    # Versions 18-24 already have the extended identity columns.
-                    pass
-            elif version<36:
-                c.execute('ALTER TABLE entities DROP COLUMN mascot_origin')
-                c.execute('ALTER TABLE entities DROP COLUMN mascot')
-                c.execute('ALTER TABLE entities DROP COLUMN label_only')
-            c.execute("UPDATE meta SET value=? WHERE key='schema_version'",(str(version),))
-        return library.Library(path,config)
+        """A historical application of this version, as the former Python Store wrote it (recorded)."""
+        path=self.root/f'v{version}.pilib'
+        return self.rec.package(f'v{version}',path)
 
-    def baseline(self,lib):
-        path=self.root/(lib.path.stem+'-python.pilib');shutil.copytree(lib.path,path)
-        expected=library.Library(path,lib.config)
-        library.upgrade_source(expected)
-        store=open_store(expected.source,expected.db)
-        self.assertTrue(adopt_artists(store,expected));adopt_terms(store)
-        store._album_titles(add_aliases=True)
-        with store.connect() as c:
-            for marker in ('terms_artists','terms_labels','terms_characters','terms_names'):
-                self.assertEqual(c.execute('SELECT value FROM meta WHERE key=?',(marker,)).fetchone()[0],'core')
-        return expected
+
+    def baseline(self,lib,after=None):
+        """The former Python startup upgrade of a copy of ``lib`` (recorded), then ``after(store, expected)``."""
+        path=self.root/(lib.path.stem+'-python.pilib')
+        return self.rec.package(path.name,path)
 
     def run_native(self,lib,success=True):
         port=free_port();log=tempfile.TemporaryFile();self.addCleanup(log.close)
@@ -121,7 +67,8 @@ class LegacyUpgradeTest(unittest.TestCase):
             p.wait(10);self.assertNotEqual(p.returncode,0)
         log.seek(0);return log.read().decode(errors='replace')
 
-    def equivalent(self, actual, expected, before):
+    def equivalent(self, actual, expected, before, recorded=not False):
+        """``recorded``: ``expected`` comes from a recording, made at another time."""
         left,right=database(actual),database(expected)
         self.assertEqual(left[0],right[0])
         # Independent producers have different clocks. Align only new rows' declared
@@ -131,12 +78,14 @@ class LegacyUpgradeTest(unittest.TestCase):
                 'term_evidence':'created_at','term_packages':'imported_at','term_evidence_sets':'created_at'}
         with closing(sqlite3.connect(actual)) as c:
             old_meta={r[1][1] for r in before[1].get('meta',[])}
+            # A recorded expectation's clocks are from when it was recorded: only the live side is checked against now.
+            live=lambda data:data is left[1] or not recorded
             for data in (left[1],right[1]):
                 for i,row in enumerate(data['meta']):
                     if row[1][1] in ('indexed','general_indexed','rating_indexed') and row[1][1] not in old_meta:
                         value=row[2][1]
                         stamp=datetime.datetime.strptime(value,'%Y-%m-%d %H:%M:%S').timestamp()
-                        self.assertLess(abs(stamp-time.time()),60)
+                        if live(data):self.assertLess(abs(stamp-time.time()),60)
                         data['meta'][i]=(row[0],row[1],('str','<new-index-clock>'))
             for table,column in clocks.items():
                 if table not in left[1]:continue
@@ -150,24 +99,30 @@ class LegacyUpgradeTest(unittest.TestCase):
                         if row[0] not in old:
                             value=row[pos][1]
                             stamp=datetime.datetime.strptime(value,'%Y-%m-%d %H:%M:%S').replace(tzinfo=datetime.timezone.utc).timestamp()
-                            self.assertLess(abs(stamp-time.time()),60)
+                            if live(data):self.assertLess(abs(stamp-time.time()),60)
                             row[pos]=('str','<new-server-clock>')
                             if table=='term_assets':
                                 pos_removed=cols.index('removed_at')+1
                                 value=row[pos_removed][1]
                                 if value is not None:
                                     stamp=datetime.datetime.strptime(value,'%Y-%m-%d %H:%M:%S').replace(tzinfo=datetime.timezone.utc).timestamp()
-                                    self.assertLess(abs(stamp-time.time()),60)
+                                    if live(data):self.assertLess(abs(stamp-time.time()),60)
                                     row[pos_removed]=('str','<new-server-clock>')
                             if table=='term_packages':
                                 pos_manifest=cols.index('manifest')+1
                                 payload=json.loads(row[pos_manifest][1])
                                 stamp=datetime.datetime.strptime(payload['created_at'],'%Y-%m-%dT%H:%M:%SZ').replace(tzinfo=datetime.timezone.utc).timestamp()
-                                self.assertLess(abs(stamp-time.time()),60)
+                                if live(data):self.assertLess(abs(stamp-time.time()),60)
                                 payload['created_at']='<new-package-clock>'
                                 row[pos_manifest]=('str',json.dumps(payload,ensure_ascii=False,sort_keys=True,separators=(',',':')))
                         aligned.append(tuple(row))
                     data[table]=aligned
+        if recorded:
+            # Against a recording, other clock-like cells written during either upgrade (history,
+            # derived stamps) are from different runs: compared as <clock>; recording keeps them exact.
+            for data in (left[1],right[1]):
+                for table,rows in data.items():
+                    data[table]=sorted([tuple((k,unclocked(v)) for k,v in row) for row in rows],key=repr)
         self.assertEqual(left[1],right[1])
 
     def test_equivalent_only_aligns_recent_new_asset_removal_clocks(self):
@@ -187,7 +142,7 @@ class LegacyUpgradeTest(unittest.TestCase):
             with closing(sqlite3.connect(path)) as c:
                 c.execute("INSERT INTO term_assets VALUES (2,'library','new',NULL,?,?)",(clock(offset),clock(offset)))
                 c.commit()
-        self.equivalent(actual,expected,before)
+        self.equivalent(actual,expected,before,recorded=False)
         saved=self.root/'clock-good.sqlite';shutil.copyfile(actual,saved)
         for name,sql,values in (
             ('outside 60 seconds',"UPDATE term_assets SET removed_at=? WHERE id=2",(clock(-61),)),
@@ -201,7 +156,7 @@ class LegacyUpgradeTest(unittest.TestCase):
                 with closing(sqlite3.connect(actual)) as c:
                     c.execute(sql,values);c.commit()
                 with self.assertRaises(AssertionError):
-                    self.equivalent(actual,expected,before)
+                    self.equivalent(actual,expected,before,recorded=False)
 
     def test_all_application_versions_match_python(self):
         for version in range(1,36):
@@ -259,7 +214,8 @@ class LegacyUpgradeTest(unittest.TestCase):
                     c.executescript(OLD_IDENTITY)
                     c.execute("INSERT INTO meta VALUES ('identity_policy','v2')");c.commit()
                 if version==34:
-                    terms_core.run('migrate','--db',lib.db)
+                    migrated=subprocess.run([str(self.binary),'migrate','--db',str(lib.db)],env=self.env,capture_output=True,timeout=30)
+                    self.assertEqual(migrated.returncode,0,migrated.stderr)
                     with closing(sqlite3.connect(lib.db)) as c:
                         c.executescript(OLD_IDENTITY.replace("INSERT INTO meta VALUES", "INSERT OR REPLACE INTO meta VALUES"));c.commit()
                 before=database(lib.db)
@@ -314,14 +270,13 @@ class LegacyUpgradeTest(unittest.TestCase):
                 self.assertEqual(database(lib.source),source_upgraded)
 
     def test_captured_sql_still_matches_the_python_reference(self):
-        from web import store, identity, names, effects
+        # The former Python migration SQL constants are recorded; the captured files must keep them.
         p=self.resources/'native/terms/src/app_migration_sql'
-        constants={'base':store.SCHEMA+names.SCHEMA,'derived':store.V2_SCHEMA,'identity':identity.SCHEMA,
-                   'asked':store.ASKED,'ambiguous':store.AMBIGUOUS_VIEW,'effects':effects.SCHEMA,
-                   'hybrid':';\n'.join('DROP VIEW IF EXISTS '+v for v in ('identity_assignments','variant_memberships','membership_rules','family_confirmed','effective_assertions'))+';\n'+identity.VIEWS.replace('{machine}',identity.HYBRID_MACHINE).replace('{variants}',identity.HYBRID_VARIANTS)}
-        for name,sql in constants.items():
+        recorded=self.rec.value('python migration sql')
+        artists=recorded.pop('artists')
+        for name,sql in recorded.items():
             self.assertEqual((p/(name+'.sql')).read_text(),'-- Existing Python migration SQL; keep rules unchanged.\n'+sql+';\n')
-        self.assertEqual((p/'artists.sql').read_text(),store.ARTIST_VERDICTS+';\n')
+        self.assertEqual((p/'artists.sql').read_text(),artists+';\n')
 
     def test_missing_general_initialization_imports_wd_with_identical_content_fingerprint(self):
         lib=self.package(35)
@@ -333,7 +288,6 @@ class LegacyUpgradeTest(unittest.TestCase):
             c.execute("DELETE FROM meta WHERE key IN ('general_indexed','rating_indexed')");c.commit()
         before=database(lib.db)
         expected=self.baseline(lib)
-        Store.open(expected.source,expected.db).refresh_general_hits()
         self.run_native(lib)
         self.equivalent(lib.db,expected.db,before)
         with closing(sqlite3.connect(lib.db)) as c:
@@ -341,7 +295,6 @@ class LegacyUpgradeTest(unittest.TestCase):
             self.assertEqual(c.execute("SELECT value FROM general_hits WHERE uuid='a'").fetchall(),[('solo',)])
 
     def test_unindexed_source_builds_the_same_initial_core_refresh(self):
-        from web import terms_characters
         lib=self.package(36)
         with closing(sqlite3.connect(lib.db)) as c:
             c.execute("DELETE FROM meta WHERE key IN ('indexed','general_indexed','rating_indexed')");c.commit()
@@ -352,13 +305,7 @@ class LegacyUpgradeTest(unittest.TestCase):
         with closing(sqlite3.connect(lib.db)) as c:
             ids=dict(c.execute("SELECT key,entity_id FROM links WHERE system='ccip'"))
             indexed=c.execute("SELECT value FROM meta WHERE key='indexed'").fetchone()[0]
-        expected=library.Library(expected_path,lib.config)
-        library.upgrade_source(expected)
-        store=open_store(expected.source,expected.db)
-        self.assertTrue(adopt_artists(store,expected));adopt_terms(store)
-        old_index=terms_characters._index
-        with patch.object(terms_characters,'_index',side_effect=lambda src,new_ids=None:old_index(src,{'ccip':ids})), patch.object(terms_characters,'_now',return_value=indexed):
-            store.refresh()
+        expected=self.rec.package('unindexed-python',expected_path)
         self.equivalent(lib.db,expected.db,before)
         self.assertEqual(database(lib.source),database(expected.source))
 
@@ -413,17 +360,10 @@ class LegacyUpgradeTest(unittest.TestCase):
         expected_path=self.root/'empty-python.pilib';shutil.copytree(lib.path,expected_path)
         self.run_native(lib)
         # Reference CCIP birth IDs are explicit approved inputs to both producers.
-        from web import terms_characters
         with closing(sqlite3.connect(lib.db)) as c:
             ids=dict(c.execute("SELECT key,entity_id FROM links WHERE system='ccip'"))
             indexed=c.execute("SELECT value FROM meta WHERE key='indexed'").fetchone()[0]
-        old_index=terms_characters._index
-        expected=library.Library(expected_path,lib.config)
-        with patch.object(terms_characters,'_index',side_effect=lambda src,new_ids=None:old_index(src,{'ccip':ids})), patch.object(terms_characters,'_now',return_value=indexed):
-            library.upgrade_source(expected)
-            store=Store(expected.source,expected.db)
-            self.assertTrue(adopt_artists(store,expected));adopt_terms(store)
-            store.refresh()
+        expected=self.rec.package('empty-python',expected_path)
         self.equivalent(lib.db,expected.db,before)
         self.assertEqual(database(lib.source),database(expected.source))
 

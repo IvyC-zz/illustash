@@ -19,13 +19,38 @@ pub type RelationId = i64;
 pub type ActionId = i64;
 
 /// 新词条的 key：随机 UUID v4，永不改变。
+///
+/// 只供测试：设置 `ILLUSTASH_TEST_KEY_COUNTER` 为一个计数文件时，按文件里的计数依次生成可复现的键，
+/// 测试与固定期望（native/terms/tests/replay.rs 与 tests/fixed_expectations.py，#9 时录下）因此得到同样的键和同样的排序。
+/// 计数在旁边的锁文件下递增，同一宿主的多个线程和并行的命令行进程也不会取到同一个数。产品从不设置它。
 pub fn new_key() -> Result<String> {
     let mut b = [0u8; 16];
-    getrandom::fill(&mut b).map_err(|e| Error::Invalid(format!("无法生成随机 ID：{e}")))?;
+    if let Some(counter) = std::env::var_os("ILLUSTASH_TEST_KEY_COUNTER") {
+        let n = next_test_key(std::path::Path::new(&counter))?;
+        b.copy_from_slice(&sha2::Sha256::digest(n.to_le_bytes())[..16]);
+    } else {
+        getrandom::fill(&mut b).map_err(|e| Error::Invalid(format!("无法生成随机 ID：{e}")))?;
+    }
     b[6] = (b[6] & 0x0f) | 0x40;
     b[8] = (b[8] & 0x3f) | 0x80;
     let h = hex(&b);
     Ok(format!("{}-{}-{}-{}-{}", &h[0..8], &h[8..12], &h[12..16], &h[16..20], &h[20..32]))
+}
+
+fn next_test_key(counter: &std::path::Path) -> Result<u64> {
+    let lock = counter.with_extension("lock");
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while std::fs::OpenOptions::new().write(true).create_new(true).open(&lock).is_err() {
+        if std::time::Instant::now() > deadline {
+            return Err(Error::Invalid(format!("测试键计数器被占用：{}", lock.display())));
+        }
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+    let n = std::fs::read_to_string(counter).ok().and_then(|s| s.trim().parse::<u64>().ok()).unwrap_or(0) + 1;
+    let written = std::fs::write(counter, n.to_string());
+    let _ = std::fs::remove_file(&lock);
+    written?;
+    Ok(n)
 }
 
 // ---- 资产 ----
@@ -319,7 +344,7 @@ pub enum Undo {
     Nothing,
 }
 
-/// 历史已变化（最近一步不是调用方看到的那一步）时的提示，与 tests/reference/web/store.py 的 undo 一致。
+/// 历史已变化（最近一步不是调用方看到的那一步）时的提示，与 tests/reference/web/store.py（#9 已删除） 的 undo 一致。
 pub const HISTORY_CHANGED: &str = "操作历史已变化，请刷新后撤销最近一步";
 
 /// 统一撤销入口的词条这一半：同一事务里取最近一步，是自己的就撤，不是就原样交回，不跳过它去撤更早的。
@@ -433,7 +458,7 @@ pub fn labels_in_core(conn: &Connection) -> Result<bool> {
 /// - 画师已切到核心时，只有一个键 `artist_verdict` 的旧画师判断；
 /// - 标签已切到核心时，恰好是 `uuid`、`tag`、`had` 三个键的旧用户标签步骤。
 ///
-/// tests/reference/web/terms_core.py 的 `owns` 用同一条规则，两边改一处就要改另一处。
+/// tests/reference/web/terms_core.py（#9 已删除） 的 `owns` 用同一条规则，两边改一处就要改另一处。
 pub fn owns(steps: &[Value], handed: Handover) -> bool {
     !steps.is_empty()
         && steps.iter().all(|s| {

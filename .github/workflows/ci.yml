@@ -92,15 +92,15 @@ jobs:
       - name: 构建被测核心与 IQDB
         run: |
           cargo build --release --locked --manifest-path native/terms/Cargo.toml
-          # 历史 Python/HTTP 对照用的测试参考宿主（tests/reference/host.py 按 release/examples 定位）。
-          cargo build --release --locked --manifest-path native/terms/Cargo.toml --features test-reference-host --example reference-http --example recognition-compute --example index-compute --example research-compute --example relation-probe --example provenance-compute
+          # 读路由固定期望用的测试读宿主（tests/read_http_harness.py 按 release/examples 定位）。
+          cargo build --release --locked --manifest-path native/terms/Cargo.toml --features test-read-host --example read-http --example recognition-compute --example index-compute --example research-compute --example relation-probe --example provenance-compute
           cargo build --release --locked --manifest-path crates/iqdb/Cargo.toml
       - name: unittest
         env:
           ILLUSTASH_TERMS_BIN: ${{ github.workspace }}/native/terms/target/release/illustash-terms
           ILLUSTASH_NATIVE_ROOT: ${{ github.workspace }}
           ILLUSTASH_IQDB_BINARY: ${{ github.workspace }}/crates/iqdb/target/release/illustash-iqdb
-          ILLUSTASH_REFERENCE_HTTP_BIN: ${{ github.workspace }}/native/terms/target/release/examples/reference-http
+          ILLUSTASH_READ_HTTP_BIN: ${{ github.workspace }}/native/terms/target/release/examples/read-http
           ILLUSTASH_RECOGNITION_COMPUTE_BIN: ${{ github.workspace }}/native/terms/target/release/examples/recognition-compute
           ILLUSTASH_INDEX_COMPUTE_BIN: ${{ github.workspace }}/native/terms/target/release/examples/index-compute
           ILLUSTASH_RELATION_PROBE_BIN: ${{ github.workspace }}/native/terms/target/release/examples/relation-probe
@@ -111,7 +111,7 @@ jobs:
         run: |
           set -o pipefail
           # -b：失败测试的输出（如被测服务日志）附在末尾失败报告里，不散落在日志中段。
-          python -m unittest discover -s tests -v -b 2>&1 | tee "$RUNNER_TEMP/unittest.log"
+          python -m tests.run_fixed_suite -v -b 2>&1 | tee "$RUNNER_TEMP/unittest.log"
       - name: 上传测试日志
         if: failure()
         uses: actions/upload-artifact@v4

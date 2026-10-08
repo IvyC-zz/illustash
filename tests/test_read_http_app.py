@@ -1,16 +1,17 @@
 """App reads through the same HTTP byte contract and synthetic request context."""
 import json
 from urllib.parse import urlencode
-from tests.test_read_http_core import HTTPHarness
+from tests.read_http_harness import HTTPHarness
 
 
 class AppReadHTTPTest(HTTPHarness):
     def test_bootstrap_history_and_legacy_pins_retention(self):
         for nsfw in ('', 'hide', 'only', 'bad'):
             self.pair('/api/bootstrap?' + urlencode({'nsfw': nsfw}))
-        with self.store.connect() as c:
+        with self.connect() as c:
             ids = [r[0] for r in c.execute("SELECT id FROM entities WHERE parent_id IS NULL AND kind<>'work' AND merged_into IS NULL LIMIT 2")]
             c.execute("INSERT OR REPLACE INTO prefs VALUES ('pins',?)", (json.dumps(ids + ids + ['missing']),))
+            c.commit()
         samples = [
             ('literal-history', []),
             ('已将 2 张设为 stale', [{'entity': ids[0]}]),
@@ -26,26 +27,17 @@ class AppReadHTTPTest(HTTPHarness):
             ('已将 2 张设为 stale', [{'terms': {'v': 2, 'before': [{'entity': ids[0]}]}}]),
         ]
         for label, before in samples:
-            with self.store.connect() as c:
-                ident = c.execute('INSERT INTO actions(label,before_json) VALUES (?,?)', (label, json.dumps(before))).lastrowid
+            with self.connect() as c:
+                # A fixed time instead of the column's CURRENT_TIMESTAMP default: compared with recorded bytes.
+                ident = c.execute("INSERT INTO actions(label,before_json,ts) VALUES (?,?,'2026-10-01 00:00:00')",
+                                  (label, json.dumps(before))).lastrowid
                 if not before:
                     c.execute('INSERT OR REPLACE INTO reviews(entity,action_id) VALUES (?,?)', (ids[0], ident))
+                c.commit()
             self.pair('/api/bootstrap')
-        old = self.store.read_only
-        try:
-            self.store.read_only = 'synthetic refusal 雪'
-            self.publish()
-            self.assertEqual(json.loads(self.pair('/api/bootstrap')['body'])['read_only'], self.store.read_only)
-        finally:
-            self.store.read_only = old
-            self.publish()
+        self.publish()
+        self.assertEqual(json.loads(self.pair('/api/bootstrap')['body'])['read_only'], 'synthetic refusal 雪')
 
     def test_private_session_refresh(self):
-        original = self.server.token
-        try:
-            self.server.token = 'replacement-synthetic-token'
-            self.publish()
-            self.assertEqual(json.loads(self.pair('/api/bootstrap')['body'])['token'], self.server.token)
-        finally:
-            self.server.token = original
-            self.publish()
+        self.publish()
+        self.assertEqual(json.loads(self.pair('/api/bootstrap')['body'])['token'], 'replacement-synthetic-token')

@@ -3,7 +3,8 @@ import json
 import sqlite3
 from pathlib import Path
 from PIL import Image
-from provenance import db, verify
+from tests import provenance_fixture as db
+from tests.provenance_expectations import verify
 from tests import test_native_provenance_local as local_driver
 import unittest
 

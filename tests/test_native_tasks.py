@@ -3,7 +3,7 @@ import json
 import sqlite3
 import time
 import unittest
-from web import library
+from tests import library_fixture as library
 from tests.test_native_folder import NativeFolderHTTPTest
 
 

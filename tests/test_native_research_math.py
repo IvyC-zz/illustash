@@ -133,7 +133,6 @@ from tests import test_native_research_production as production
 class WindowsNativeResearchComputeTest(compute.NativeResearchComputeTest):
     """Algorithm-only comparison through the example; installed routing is tested separately."""
 
-    pass
 
 
 @unittest.skipUnless(sys.platform == 'win32', 'explicit Windows development App publication only')

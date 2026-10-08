@@ -1,14 +1,13 @@
-"""Synthetic regression fixtures and opt-in historical reference implementations."""
+"""合成回归夹具，所有历史参考期望只读。"""
 import gc
 import os
 import tempfile
 import time
 
-from tests import reference
 from tests import network_guard
 
 if os.name == 'nt':
-    # 参考实现会在引用环里留着 SQLite 连接；Windows 删不掉仍打开的文件。
+    # 测试的临时 SQLite 连接可能留在引用环里；Windows 删不掉仍打开的文件。
     # 清理临时目录前先回收这些连接，不放宽清理失败本身。
     _cleanup = tempfile.TemporaryDirectory.cleanup
 

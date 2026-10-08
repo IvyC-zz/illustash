@@ -9,7 +9,7 @@ use rusqlite::{params, params_from_iter, types::ValueRef, Connection, OpenFlags,
 use std::{collections::HashMap, sync::Arc};
 use unicode_normalization::UnicodeNormalization;
 
-#[cfg(any(test, feature = "test-reference-host"))]
+#[cfg(test)]
 pub const CORE_ROUTES: &[&str] = &[
     "/api/assets",
     "/api/assets/count",

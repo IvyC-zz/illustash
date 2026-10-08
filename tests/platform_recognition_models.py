@@ -20,14 +20,12 @@ import sys
 import tempfile
 import time
 import unittest
-from unittest.mock import patch
 
 import numpy as np
 import onnxruntime as ort
 from PIL import Image
-from tools import char_scan
-from tools.ccip import cross, preprocess
-from web.infer import wd_input
+from tests.native_claims_fixture import claims as native_claims
+
 from tests import test_native_lifecycle as lifecycle
 from tests.test_native_human_labels import snapshot
 from tests.test_read_http import free_port
@@ -103,10 +101,13 @@ class RecognitionModelTest(unittest.TestCase):
         wd = ort.InferenceSession(str(models / 'wd_swinv2_v3_emb.onnx'), options, providers=['CPUExecutionProvider'])
         options = ort.SessionOptions(); options.log_severity_level = 3
         ccip = ort.InferenceSession(str(models / 'ccip/model_feat.onnx'), options, providers=['CPUExecutionProvider'])
-        for path in cls.images:
-            with Image.open(path) as image:
-                probabilities, embedding = wd.run(None, {wd.get_inputs()[0].name: wd_input(image)})
-                feature = ccip.run(None, {ccip.get_inputs()[0].name: preprocess(image)})[0]
+        import gzip, io
+        frozen = ROOT / 'tests/fixtures/model_inputs'
+        for i, path in enumerate(cls.images):
+            wd_input = np.load(io.BytesIO(gzip.decompress((frozen/f'wd-{i}.npy.gz').read_bytes())),allow_pickle=False)
+            ccip_input = np.load(io.BytesIO(gzip.decompress((frozen/f'ccip-{i}.npy.gz').read_bytes())),allow_pickle=False)
+            probabilities, embedding = wd.run(None, {wd.get_inputs()[0].name: wd_input})
+            feature = ccip.run(None, {ccip.get_inputs()[0].name: ccip_input})[0]
             cls.reference.append(dict(probs=probabilities.reshape(-1), wd=embedding.reshape(-1), ccip=feature.reshape(-1)))
         # No simultaneous Python/native model sessions during the acceptance run.
         del wd, ccip
@@ -196,9 +197,6 @@ class RecognitionModelTest(unittest.TestCase):
         self.assertEqual(response['failed'], [{'uuid': 'asset-24'}])
         self.assertEqual(len(response['packages']), 2)
         self.assertEqual(len(response['character_claims']), 2)
-        _, p90, _, p75, aliases = char_scan.anchor_index(vectors, ids, str(source))
-        with patch.object(char_scan, 'REVIEW', str(self.shared)):
-            limits = char_scan.claim_thresholds(ids, p90, p75)
         for batch, sidecar, size in zip(response['packages'], response['character_claims'], (24, 1)):
             path = Path(batch); manifest = json.loads((path / 'manifest.json').read_text(encoding='utf-8'))
             self.assertEqual(manifest['assets'], [f'asset-{i}' for i in (range(24) if size == 24 else (25,))])
@@ -212,20 +210,15 @@ class RecognitionModelTest(unittest.TestCase):
             self.assertEqual(claim['identity'], identity)
             self.assertEqual(claim['assets'], manifest['assets'])
             self.assertEqual(claim['models'], manifest['models'])
-            expected_labels, expected_claims = [], []
+            expected_labels = []
+            reference_features = np.asarray([self.reference[int(asset.split('-')[1]) % 8]['ccip']
+                                             for asset in manifest['assets']], np.float32)
+            fixture = native_claims(self.compute, self.root, self.shared, source, identity,
+                                    manifest['assets'], reference_features, self.env)
+            expected_claims = fixture['claims']
             for asset in manifest['assets']:
                 row = self.reference[int(asset.split('-')[1]) % 8]
                 expected_labels.extend(labels(asset, row['probs'], self.tags))
-                distances = cross(vectors, np.asarray([row['ccip']], np.float32), check=False)[:, 0]
-                seen = set()
-                for j in np.argsort(distances)[:9]:
-                    char = aliases[j]
-                    if char in seen:
-                        continue
-                    seen.add(char)
-                    if limits[j] > 0 and distances[j] <= limits[j]:
-                        expected_claims.append(dict(asset=asset, character=char, distance=float(distances[j]),
-                                                    threshold=float(limits[j]), confidence=1-float(distances[j])))
             self.assertEqual([json.loads(line) for line in (path / 'labels.jsonl').read_text(encoding='utf-8').splitlines()], expected_labels)
             for field in ('distance', 'threshold'):
                 np.testing.assert_array_equal(np.asarray([r[field] for r in claim['claims']], np.float32),
@@ -359,17 +352,11 @@ class RecognitionModelTest(unittest.TestCase):
         (self.shared / 'char-anchors.txt').write_text('\n'.join(ids)+'\n', encoding='utf-8')
         (self.shared / 'char-index').mkdir()
         (self.shared / 'char-index' / (ids[0]+'.json')).write_text('{"source":"danbooru-patch"}', encoding='utf-8')
-        _, p90, _, p75, aliases = char_scan.anchor_index(vectors, ids, str(source))
-        with patch.object(char_scan, 'REVIEW', str(self.shared)):
-            limits = char_scan.claim_thresholds(ids, p90, p75)
-        distances = cross(vectors, np.asarray([self.reference[2]['ccip']], np.float32), check=False)[:, 0]
-        expected_claims, seen = [], set()
-        for j in np.argsort(distances)[:9]:
-            if aliases[j] in seen:
-                continue
-            seen.add(aliases[j])
-            if limits[j] > 0 and distances[j] <= limits[j]:
-                expected_claims.append((aliases[j], 1-float(distances[j])))
+        fixture_identity = dict(package=str(source.parent), library_id='synthetic',
+                                generation=1, session='0'*64, task_id='synthetic-claims')
+        fixture = native_claims(self.compute, self.root, self.shared, source, fixture_identity,
+                                ['synthetic-asset'], np.asarray([self.reference[2]['ccip']], np.float32), self.env)
+        expected_claims = [(row['character'], row['confidence']) for row in fixture['claims']]
         self.assertTrue(expected_claims, 'generated anchors must exercise formal character publication')
         shutil.copy2(self.images[2], folder / 'generated-2.png')
         (folder / 'bad.png').write_bytes(b'not an image')

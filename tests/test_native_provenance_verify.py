@@ -8,8 +8,8 @@ import subprocess
 import time
 import urllib.parse
 import unittest
-from provenance import verify
-from provenance.net import Stopped
+from tests.provenance_expectations import verify
+from tests.provenance_expectations import Stopped
 from tests import test_native_provenance_match as match_driver
 
 

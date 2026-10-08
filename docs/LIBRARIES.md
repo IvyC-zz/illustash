@@ -14,7 +14,7 @@
 
 基础版首次文件夹同步完成盘点和应用导入后可浏览、人工整理；没有可选识别 worker 时状态为「待识别」，不表示盘点失败。回退时使用同版本程序和资源，旧版仍可能要求外部参考库；不要为回退把个人数据放进安装资源。
 
-合成测试输入由 `tests/synthetic_source.py` 的 `source_fixture(root)` 与 `synthetic_reference(root)` 构造，只使用显式临时目录和 SQLite/JSON，不导入 Store/Server 或调用原生候选建库。前者保留固定小源库及相册映射，后者保留完整参考 schema 与 `characters`、`character_aliases`、`runs` 行；历史升级 schema/producer 和业务期望仍由各自既有测试持有。`tests.test_web.fixture` 与 native create 模块的同名 reference 导入保持兼容，现有动态 Store/Server 对照尚未退役。
+合成测试输入由 `tests/synthetic_source.py` 的 `source_fixture(root)` 与 `synthetic_reference(root)` 构造，只使用显式临时目录和 SQLite/JSON，不导入 Store/Server 或调用原生候选建库。前者保留固定小源库及相册映射，后者保留完整参考 schema 与 `characters`、`character_aliases`、`runs` 行；历史升级 schema/producer 和业务期望仍由各自既有测试持有。旧的 `tests.test_web.fixture` 已随第 1 类测试删除（#9），各测试直接导入 `source_fixture`；仍依赖动态 Store/Server 的对照按 #9 后续阶段退役。
 
 ## 出处类型接口
 
@@ -45,12 +45,12 @@
 ## 多图库与来源约定
 
 L0–L3 的现行约定（2026-09-28）：
-- L0：`web/library.py`、server 的 `--library`、现有数据迁成 `~/Pictures/Illustash/我的图库.pilib`。
+- L0：`web/library.py（#9 已删除）`、server 的 `--library`、现有数据迁成 `~/Pictures/Illustash/我的图库.pilib`。
 - L1：源库加了 `asset_links`、`assets.source_id`、`assets.preset`（打开图库时自动升级，Photos 可读时按 App 回填预设；同步新图时一并登记）；
   `tools/test_libraries.py --materialize <名字>`（2026-10-05 删除，#186；见 git 历史）把测试清单生成成图库包（3,000 张约 11 秒、390 MB）；
   **图库切换放在设置的「图库」页**（用户 2026-09-27 定：切换不频繁，不放侧栏），切换 = 后台用同一端口重启到另一个图库；
   侧栏只在当前是测试图库时在 Logo 下显示一行小字。
-- L2：`tests/reference/web/folder.py` 文件夹扫描（只对大小或修改时间变了的文件算 MD5；按 MD5 跟上移动和改名，资产 ID 和人工结论不变；
+- L2：`tests/reference/web/folder.py（#9 已删除）` 文件夹扫描（只对大小或修改时间变了的文件算 MD5；按 MD5 跟上移动和改名，资产 ID 和人工结论不变；
   消失的文件标记已删除，同一路径内容变了就重新识别）；`files` 表记录每个文件上次读到的样子；`Store.refresh_paths()` 在每次同步后把新路径同步进应用库。
   新建命令和参考库行为见上文「首次建库与参考库」；出处不再按文件夹名猜（见上文「来源管理」）。
   实测：30 张图的文件夹建库、识别（每张约 0.8 秒），人工「移出角色」后把文件改名移到子文件夹，重新同步后资产 ID、人工结论、图片显示都正常。
@@ -148,8 +148,8 @@ L0 实际做法和设计稿的差别：
 | `APP_SUPPORT/libraries.json`、设置与账号 | `app_libraries`、设置与原生账号入口 | 用户应用数据，和 SHARED 分开 | 不随包；凭据不参与研究整理 |
 | `review/identity-metadata-*`、`identity-bank-*`、评测与测试图库输出 | 已删除的身份研究工具、`eval_bench.py`、`test_libraries.py`（#186） | 研究输入或输出，可能含私有 UUID / 文件引用；已有数据保留 | 不随包；新输出显式指定 `_scratch/research/` |
 | `review/pi.db`、`library.sqlite`、`full-features.npy`、`full-manifest.csv` 的旧布局入口 | 研究工具与裸库兼容入口 | 可能是指向个人图库的链接；只看链接类别不能推定可删除 | 不随包；不跟随链接做清理 |
-| `tools/`、`provenance/`、`web/*worker.py` | 构建、验收、研究或打包白名单中的计算源码 | 按入口和实际调用判断职责；保留现行消费者 | 部分源码进可选 workers 包；算法迁移另行处理 |
-| `tests/reference/`、契约夹具 | 历史逐字节对照与合成验收 | 已跟踪安全测试输入；不同于本机 `reference/` | 不随生产包，保留回归用途 |
+| `tools/` | 构建、检查与验收脚本 | 按入口和实际调用判断职责；保留现行消费者 | Python 源码不进任何安装包；旧 Python 计算代码（原 `web/*.py`、`provenance/`）已在 #9 删除 |
+| `tests/fixtures/`（含 `reference_recordings/`）、契约夹具 | 录下的旧参考固定期望与合成验收 | 已跟踪安全测试输入；不同于本机 `reference/` | 不随生产包，保留回归用途；参考已删除，不能重录 |
 | `.venv/`、`target/`、`packaging/desktop-*` | 依赖、构建与固定路径验收 | 本机生成物；正式验收有独立租约与结果签名 | 忽略，不随源码提交；在持有者释放前不整理 |
 | `.claude/worktrees/`、`.worktrees/` | 任务代理 checkout | Git 管理的任务生命周期；不能按名称或大小删除 | 忽略，由任务持有者收尾 |
 
@@ -191,14 +191,14 @@ CREATE INDEX asset_links_asset ON asset_links(asset);
 
 ## 4. 来源
 
-**Photos 来源**：由 `native/terms/src/app_sync.rs` 协调原生盘点、识别与导入，Photos 读取在 `crates/platform/src/platform_photos.rs`；图库路径和 App 映射从 `library.json` 读取。`tests/reference/web/sync.py` 只用于历史参考对照。
+**Photos 来源**：由 `native/terms/src/app_sync.rs` 协调原生盘点、识别与导入，Photos 读取在 `crates/platform/src/platform_photos.rs`；图库路径和 App 映射从 `library.json` 读取。`tests/reference/web/sync.py（#9 已删除）` 只用于历史参考对照。
 
 **文件夹来源**（新）：
 
 1. 用户选一个文件夹并指定出处（X / Pixiv / 其他），不按文件夹名猜。
 2. 递归扫描图片文件（jpg、jpeg、png、webp、静态 gif），跳过隐藏文件和系统文件。
 3. 每张算 `md5`，写进 `assets` 和 `asset_links`，`src_path` 就是文件本身。
-4. 识别沿用 `web/infer.py`（它本来就只认路径），超过 `LOCAL_LIMIT` 的首次全量照旧提示交给 Windows。
+4. 识别沿用 `web/infer.py（#9 已删除）`（它本来就只认路径），超过 `LOCAL_LIMIT` 的首次全量照旧提示交给 Windows。
 5. 之后每次打开图库做一次增量重扫：新文件入库，消失的文件标记为已删除（和 Photos 里删图一样处理）。第一版不做实时监听。
 
 一个图库可以有多个来源，规则见上文「来源管理」。
@@ -211,7 +211,7 @@ CREATE INDEX asset_links_asset ON asset_links(asset);
 
 **生命周期先拆开**（对应 [ARCHITECTURE_DIRECTION.md](ARCHITECTURE_DIRECTION.md)「推进顺序」M1）：
 
-- 新增 `web/library.py`：负责图库包的**建立、打开、升级迁移、备份**，以及读写 `library.json`；
+- 新增 `web/library.py（#9 已删除）`：负责图库包的**建立、打开、升级迁移、备份**，以及读写 `library.json`；
 - `Store` 只接收一个已经打开的图库，不再在构造函数里顺带做迁移、读相册标题、补索引这些副作用；
 - 平台来源（Photos、文件夹）拆成独立的扫描器，只负责「列出资产、给出路径和链接」，不直接写应用库。
 
@@ -242,7 +242,7 @@ CREATE INDEX asset_links_asset ON asset_links(asset);
 
 ## 8. 和 Rust 的关系
 
-用户于 2026-10-01 批准稳定应用完全由 Rust 运行，Python 只保留可选研究 worker；统一设计与阶段门槛见 [ARCHITECTURE_DIRECTION.md](ARCHITECTURE_DIRECTION.md)「推进顺序」。图库生命周期在 M1 接管，导入导出与文件服务在 M3 接管；显式原生服务已支持完整 fresh 文件夹/Photos 包创建、登记和打开，Photos 创建不读取来源或启动同步。图库选择、来源预设、最近列表与归档进出也已由原生服务处理；完整行为、任务收尾和回退统一见 [ARCHITECTURE_DIRECTION.md](ARCHITECTURE_DIRECTION.md)「原生图库管理与归档」。Photos 只读盘点、混合来源同步及可选识别结果编排见 [ARCHITECTURE_DIRECTION.md](ARCHITECTURE_DIRECTION.md)「原生来源同步与应用刷新」；Windows 选择窗口与 worker 进程树保持独立平台边界。
+用户于 2026-10-01 批准稳定应用完全由 Rust 运行，Python 只保留可选研究 worker（此后研究 worker 也已原生化，Python 实现于 #9 删除）；统一设计与阶段门槛见 [ARCHITECTURE_DIRECTION.md](ARCHITECTURE_DIRECTION.md)「推进顺序」。图库生命周期在 M1 接管，导入导出与文件服务在 M3 接管；显式原生服务已支持完整 fresh 文件夹/Photos 包创建、登记和打开，Photos 创建不读取来源或启动同步。图库选择、来源预设、最近列表与归档进出也已由原生服务处理；完整行为、任务收尾和回退统一见 [ARCHITECTURE_DIRECTION.md](ARCHITECTURE_DIRECTION.md)「原生图库管理与归档」。Photos 只读盘点、混合来源同步及可选识别结果编排见 [ARCHITECTURE_DIRECTION.md](ARCHITECTURE_DIRECTION.md)「原生来源同步与应用刷新」；Windows 选择窗口与 worker 进程树保持独立平台边界。
 
 图库包目录、版本化 `library.json`、SQLite 和 `.npy` 是跨语言契约。Rust 应直接打开同一包，自持连接；普通查询与建库、升级、备份和扫描严格分离，不依赖 Store 构造副作用。切库必须停止旧任务、释放连接，并通过图库身份/会话 generation 阻断旧请求和 worker 结果。格式或 schema 需要不兼容变更时，先备份、独立迁移验收，并从备份回退，不能承诺无需数据转换。
 
@@ -250,7 +250,7 @@ CREATE INDEX asset_links_asset ON asset_links(asset);
 
 | 步 | 内容 | 验收 |
 |---|---|---|
-| L0 | `web/library.py`：图库包的建立、打开、迁移、备份；server 改为 `--library`；把现有数据迁成「我的图库」；共享资源的路径集中配置 | 行为不变；正式库副本迁移前后逐表一致 |
+| L0 | `web/library.py（#9 已删除）`：图库包的建立、打开、迁移、备份；server 改为 `--library`；把现有数据迁成「我的图库」；共享资源的路径集中配置 | 行为不变；正式库副本迁移前后逐表一致 |
 | L1 | `asset_links`、`source_id`、`preset`；`test_libraries.py --materialize`；侧栏切换图库 | 能在界面里切到测试图库，看到新用户状态 |
 | L2 | 文件夹来源：扫描、`md5`、识别、增量重扫、来源预设 | 选一个文件夹能建成图库；移动或改名文件后重扫不丢人工结论 |
 | L3 | 新建图库向导、设置页的来源管理、导出/导入（zip，不含图片） | 已打开图库后可在界面建库和切换；首库命令见上文 |

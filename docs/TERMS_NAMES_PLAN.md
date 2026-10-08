@@ -1,6 +1,6 @@
 # 名字投影与收编方案（词条第 4 步的名字这一半）
 
-2026-09-29 起草；**2026-09-29 用户确认第 5 节**（N1 改为「这一步就搬进核心」，N2–N4 按建议）。前置契约见 [TERMS_CHARACTERS_PLAN.md](TERMS_CHARACTERS_PLAN.md) 第 10 节和审核意见 B5（`TERMS_CHARACTERS_REVIEW.md`，已删除，见开源前私有历史）。分支 `terms-scaffold`，做完验收后合回 main。
+2026-09-29 起草；**2026-09-29 用户确认第 5 节**（N1 改为「这一步就搬进核心」，N2–N4 按建议）。前置契约见 [TERMS_CHARACTERS_PLAN.md](TERMS_CHARACTERS_PLAN.md) 第 10 节和审核意见 B5（`TERMS_CHARACTERS_REVIEW.md`，已删除，见开源前私有历史）。分支 `terms-scaffold`，做完验收后合回 main。Python 测试 2026-10-07 起已删除（#9）：文中提到的 `tests/test_*.py` 改由 `native/terms/tests/replay.rs` 中同名模块的录制重放及 Rust 单元测试覆盖，现状见 [TERMS_CHARACTERS.md](TERMS_CHARACTERS.md) 第 6 节与 [TERMS_NAMES.md](TERMS_NAMES.md) 第 6 节。
 
 ## 1. 现状
 
@@ -13,7 +13,7 @@
 | `name_aliases` | 按文字键的别名（搜索用） | NameUpdater |
 | `name_cache`、`name_settings` | 联网结果缓存、模型设置 | NameUpdater（外围，不算名字数据） |
 
-**选名规则**全在 `tests/reference/web/names.py` 的 `View`：
+**选名规则**全在 `tests/reference/web/names.py（#9 已删除）` 的 `View`：
 - `choose(kind, key)`：按首选、来源优先级 `user > bangumi > index > danbooru > wiki > builtin > model` 选每种语言的名字，再在语言之间选；皮肤词表 `SKINS`、作品词表 `WORK_NAMES` 的例外；英文回退到可读的 tag。
 - `entity(ident, skin_only)`：作品（用户名字 → qualifier 的词表名 → 自己的名字）、本地 / 原创角色只用自己起的名字、皮肤（皮肤名，或「以前的人物变成的皮肤」保留自己的名字；完整名是「父 · 皮肤」）、人物（`base`：合并的代表借用成员的名字）。
 - 产出：显示名、名字来源、zh / ja / en 三种语言、tag。
@@ -134,7 +134,7 @@
 ### N4 读路径与搜索进核心（2026-09-29，完成）
 
 - **开工先合入 main@202dbd5**（`test_net_keepalive` 偶发失败的修复），全量回归通过后再继续。
-- **读路径**（`tests/reference/web/names.py`）：
+- **读路径**（`tests/reference/web/names.py（#9 已删除）`）：
   - `ProjectedView`：接口与 `View` 相同（`entity(ident, skin_only)`、`choose(kind, key)`、`load()`、`entities`），读核心的 `term_name_display`、`term_name_choice`；`entities` 仍是 `entity_rows` 的原始身份行（`_display` 要用）。按 `meta.names_version` 在连接之间共享快照，只共享已提交的状态（与 `View._SHARED` 同一做法）。
   - `choose` 遇到投影里没有的键（任意 tag 的 `work_name`、词表里有但库里没有的作品），退回 `View(c).choose`。投影只收库里出现过的键。
   - 与 `View` 一样，还没装载快照时的单次 `choose`（NameUpdater 的后台检查）只按主键读投影的一行，不装载整个图库（`test_translate_with_cached_names_never_loads_full_library` 切换后第一次跑时抓到）。

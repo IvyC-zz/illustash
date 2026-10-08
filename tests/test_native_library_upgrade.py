@@ -5,9 +5,11 @@ tests/fixtures/library_upgrade were produced once by the historical producers
 5e7e7f7 / d9c49b4, whose commits predate the public repository; each test starts
 from a byte-identical copy. To regenerate them, set ILLUSTASH_TERMS_V5_BIN /
 ILLUSTASH_TERMS_V6_BIN to those producers and run
-`python -m tests.test_native_library_upgrade --write-fixtures`. Tests never build,
-find a default library, or change an existing golden; the native host has a
-Python-sentinel-only PATH.
+`python -m tests.test_native_library_upgrade --write-fixtures` (this needs the former Python
+application, so it only works on a checkout from before #9 removed it). The former Python
+reference's reads and startup event consumer were recorded through tests/fixed_expectations.py
+(#9). Tests never build, find a default library, or
+change an existing golden; the native host has a Python-sentinel-only PATH.
 """
 from contextlib import closing
 import gzip
@@ -28,13 +30,13 @@ from unittest.mock import patch
 from PIL import Image
 
 from tests import test_native_lifecycle as lifecycle
+from tests.fixed_expectations import Library, Expectations
 from tests.synthetic_source import synthetic_reference
 from tests.test_read_http import INTERRUPT, SPAWN, free_port, wait_until
 from tools.build_db import SCHEMA as SOURCE_SCHEMA
-from tools.verify_read_http import difference, fetch
-from web import effects, library, terms_core, terms_route
-from web.server import Server
-from web.store import Store
+from tools.verify_read_http import fetch
+
+difference = lifecycle.difference
 
 # Actual unused hybrid tables from d9c49b4:web/identity.py:45-49. The current Python
 # constructor no longer installs them; preserve their historical definitions as v7 input.
@@ -112,10 +114,15 @@ class NativeLibraryUpgradeTest(unittest.TestCase):
             c.executescript(SOURCE_SCHEMA)
             c.commit()
         self.folder = self.root / 'folder'; self.folder.mkdir()
-        for name, value in (('HOME', self.home / 'Pictures' / 'Illustash'), ('APP_SUPPORT', self.support),
-                            ('SHARED', self.shared), ('REFERENCE', self.reference)):
-            scoped = patch.object(library, name, value)
-            scoped.start(); self.addCleanup(scoped.stop)
+        self.rec = Expectations(self)
+        self.addCleanup(self.rec.finish, self)
+        self.rec.alias(self.root, '@ROOT@')
+        if False:
+            from tests import library_fixture as library
+            for name, value in (('HOME', self.home / 'Pictures' / 'Illustash'), ('APP_SUPPORT', self.support),
+                                ('SHARED', self.shared), ('REFERENCE', self.reference)):
+                scoped = patch.object(library, name, value)
+                scoped.start(); self.addCleanup(scoped.stop)
         self.sentinel = self.root / 'python-was-launched'
         bin_dir = self.root / 'bin'; bin_dir.mkdir()
         for name in ('python', 'python3', 'python3.12'):
@@ -139,42 +146,10 @@ class NativeLibraryUpgradeTest(unittest.TestCase):
         config = json.loads((fixture / 'library.json').read_text(encoding='utf-8'))
         self.assertEqual(config['sources'][0]['path'], FOLDER)
         config['name'], config['sources'][0]['path'] = name, str(self.folder)
-        library.write_config(path, config)
-        return library.Library(path, config), produced['action']
+        lib = Library(path)
+        lib.save(config)
+        return lib, produced['action']
 
-    def produce(self, version, name):
-        """Run the historical producer; only --write-fixtures calls this."""
-        producer = self.binaries[version]
-        # Old producers predate resident serve/wd-pending; the unchanged one-shot protocol
-        # and asset-free reference perform a complete successful initial refresh.
-        with patch.object(terms_core, 'binary', return_value=producer), \
-                patch.dict(os.environ, {'ILLUSTASH_TERMS_DAEMON': '0'}):
-            lib = library.new_folder_library(self.folder, self.root / (name + '.pilib'), name, 'other')
-            store = Store(lib.source, lib.db)
-            store.refresh()
-            # v5 refresh predates merged finalize_labels; its historical Python startup
-            # finishes with the independent rederive command, not manually patched meta.
-            store.refresh_general_hits()
-            self.assertTrue(store.ready() and store.general_ready() and store.ratings_ready())
-            with closing(sqlite3.connect(lib.db)) as c:
-                alice = c.execute("SELECT entity_id FROM links WHERE system='ccip' AND key='alice'").fetchone()[0]
-            command = terms_route.set_profile(store, alice, name='升级前人工名称', aliases=['人工别名'])
-            command.update(label='升级前人工资料', name_lang='zh')  # Required old v5 request fields.
-            action = store._core(command)['action']
-        with closing(sqlite3.connect(lib.db)) as c:
-            self.assertEqual(c.execute("SELECT value FROM meta WHERE key='terms_schema'").fetchone()[0], str(version))
-            for marker in ('terms_artists', 'terms_labels', 'terms_characters', 'terms_names'):
-                self.assertEqual(c.execute('SELECT value FROM meta WHERE key=?', (marker,)).fetchone()[0], 'core')
-            ddl = c.execute("SELECT sql FROM sqlite_schema WHERE name='candidates'").fetchone()[0]
-            self.assertEqual('WITHOUT ROWID' in ddl.upper(), version == 6)
-            c.executescript(OLD_IDENTITY)
-            c.commit()
-            c.execute('PRAGMA journal_mode=DELETE')
-        with closing(sqlite3.connect(lib.source)) as c:
-            self.assertIn('stable_hash', {r[1] for r in c.execute('PRAGMA table_info(assets)')})
-            c.execute('PRAGMA journal_mode=DELETE')
-        self.assertFalse(self.sentinel.exists())
-        return lib, action
 
     def args(self, lib, *, upgrade=True, port=None, sync=False):
         # Migration/history/undo comparisons exclude independent startup tasks.
@@ -228,29 +203,29 @@ class NativeLibraryUpgradeTest(unittest.TestCase):
         return [p for p in lib.path.rglob('*.sqlite') if p.relative_to(lib.path).as_posix() not in before]
 
     def reads(self, lib, origin):
-        store = Store.open(lib.source, lib.db)
-        server = Server(('127.0.0.1', 0), store, lib.thumbnails, public_origin=origin)
-        server.library = lib
-        server.forced_off = {'index_check', 'names', 'provenance', 'similar', 'sync'}
-        server.token = json.loads(fetch(origin, {'url': '/api/bootstrap'}, origin)['body'])['token']
-        thread = threading.Thread(target=server.serve_forever, daemon=True); thread.start()
+        token = json.loads(fetch(origin, {'url': '/api/bootstrap'}, origin)['body'])['token']
+        self.rec.alias(origin, '@ORIGIN@')
+        self.rec.alias(token, '@TOKEN@')
+        server = thread = None
         try:
-            reference = f'http://127.0.0.1:{server.server_port}'
+            reference = f'http://127.0.0.1:{server.server_port}' if server else None
             for url in lifecycle.CORE_READS:
                 with self.subTest(url=url):
-                    left, right = fetch(reference, {'url': url}, origin), fetch(origin, {'url': url}, origin)
+                    left = self.rec.value('response')
+                    right = fetch(origin, {'url': url}, origin)
                     self.assertIsNone(difference(left, right), (url, difference(left, right)))
                     self.assertEqual(right['route'], 'core')
                     for header in lifecycle.HEADERS:
                         self.assertEqual(left['headers'].get(header), right['headers'].get(header), (url, header))
             before = database(lib.db)
-            for token, status in ((server.token, 400), ('not-current', 403)):
+            for token, status in ((token, 400), ('not-current', 403)):
                 out = fetch(origin, {'url': '/api/startup', 'method': 'POST', 'body': b'{}',
                                      'headers': {'Content-Type': 'application/json', 'X-CSRF-Token': token}}, origin)
                 self.assertEqual(out['status'], status)
             self.assertEqual(database(lib.db), before)
         finally:
-            server.shutdown(); thread.join(); server.server_close()
+            if server:
+                server.shutdown(); thread.join(); server.server_close()
 
     def test_true_v5_v6_upgrade_matches_existing_migrate_history_undo_and_27_reads(self):
         for version in (5, 6):
@@ -264,12 +239,8 @@ class NativeLibraryUpgradeTest(unittest.TestCase):
                 self.assertEqual(expected.returncode, 0, expected.stderr)
                 # Compare equivalent startup consumers: the bare migrate CLI leaves verdict
                 # events pending, while the native HTTP host performs no-learner dispatch.
-                baseline_store = Store.open(baseline / 'source.sqlite', baseline / 'library.sqlite')
-                server = Server(('127.0.0.1', 0), baseline_store, baseline / 'thumbnails')
-                try:
-                    effects.drain(baseline_store, server._after_operation)
-                finally:
-                    server.server_close()
+                # The former Python consumer's result is recorded (tests/fixed_expectations.py).
+                self.rec.package(f'drained-v{version}', baseline)
                 process, origin = self.start(lib)
                 self.assertEqual(database(lib.db), database(baseline / 'library.sqlite'))
                 upgraded = database(lib.db)
@@ -306,12 +277,13 @@ class NativeLibraryUpgradeTest(unittest.TestCase):
                 with closing(sqlite3.connect(restored_db)) as c:
                     self.assertEqual(c.execute("SELECT value FROM meta WHERE key='terms_schema'").fetchone()[0], str(version))
                     self.assertEqual(c.execute('SELECT undone FROM actions WHERE id=?', (action,)).fetchone()[0], 0)
-                recovered = library.Library(restored, json.loads((restored / 'library.json').read_text()))
+                recovered = Library(restored)
                 process, origin = self.start(recovered)
                 self.assertEqual(database(recovered.db), upgraded)
                 self.assertEqual(recovered.source.read_bytes(), source)
                 self.reads(recovered, origin)
                 self.stop(process)
+
 
     def test_plain_startup_rejects_true_old_schemas_without_changes(self):
         for version in (5, 6):
@@ -489,37 +461,7 @@ class NativeLibraryUpgradeTest(unittest.TestCase):
         self.assertFalse(self.sentinel.exists())
 
 
-def write_fixtures():
-    """Produce tests/fixtures/library_upgrade with the historical producers (see module docstring)."""
-    NativeLibraryUpgradeTest.setUpClass(producers=True)
-    case = NativeLibraryUpgradeTest('test_plain_startup_rejects_true_old_schemas_without_changes')
-    case.setUp()
-    try:
-        for version in (5, 6):
-            lib, action = case.produce(version, f'v{version}')
-            leftovers = [p.name for p in lib.path.iterdir() if p.name.endswith(('-wal', '-shm', '-journal'))]
-            assert not leftovers, leftovers
-            fixture = FIXTURES / f'v{version}'
-            fixture.mkdir(parents=True, exist_ok=True)
-            for name in ('library.sqlite', 'source.sqlite'):
-                (fixture / (name + '.gz')).write_bytes(gzip.compress((lib.path / name).read_bytes(), mtime=0))
-            config = json.loads((lib.path / 'library.json').read_text(encoding='utf-8'))
-            assert config['sources'][0]['path'] == str(case.folder)
-            config['sources'][0]['path'] = FOLDER
-            (fixture / 'library.json').write_text(json.dumps(config, ensure_ascii=False, indent=2) + '\n',
-                                                  encoding='utf-8', newline='\n')
-            (fixture / 'fixture.json').write_text(json.dumps(
-                {'producer': PRODUCERS[version], 'action': action,
-                 'generator': 'python -m tests.test_native_library_upgrade --write-fixtures'}, indent=2) + '\n',
-                encoding='utf-8', newline='\n')
-            print(f'v{version}: action {action} -> {fixture}')
-    finally:
-        case.doCleanups()
 
 
 if __name__ == '__main__':
-    import sys
-    if sys.argv[1:] == ['--write-fixtures']:
-        write_fixtures()
-    else:
-        unittest.main()
+    unittest.main()

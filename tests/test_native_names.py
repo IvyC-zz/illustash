@@ -20,11 +20,10 @@ import urllib.parse
 from unittest.mock import patch
 
 from tests import test_native_lifecycle as lifecycle
+from tests.fixed_expectations import unclocked
 from tests.test_read_http import INTERRUPT, SPAWN, free_port, wait_until
-from tests.test_names import Providers
+from tests.name_providers import Providers
 from tools.verify_read_http import fetch
-from web import names, library
-from web.store import Store
 
 
 class TextService:
@@ -113,13 +112,14 @@ class NativeNamesTest(unittest.TestCase):
         self.enabled = False
         lifecycle.NativeLifecycleTest.setUp(self)
         self.service = TextService(); self.addCleanup(self.service.close)
+        self.rec.alias(self.service.base, '@SERVICE@')
         self.env.update(ILLUSTASH_COPYRIGHT_BASE=self.service.base, ILLUSTASH_BANGUMI_BASE=self.service.base)
-        self.reference.names = names.NameUpdater(self.store, self.service.transport, interval=0, enabled=False)
+        self.alice = self.rec.value('alice')
     def enable(self):
         self.stop(self.process); self.enabled=True
         self.process, self.log = self.start(self.lib.path)
         self.token=json.loads(self.request('/api/bootstrap')['body'])['token']
-        self.reference.token=self.token
+        self.rec.alias(self.token,'@TOKEN@')
         self.finish()
     def finish(self, status='done'):
         def complete():
@@ -130,28 +130,20 @@ class NativeNamesTest(unittest.TestCase):
     def events(self):
         with closing(sqlite3.connect(self.lib.db)) as c:
             return c.execute("SELECT id,status,error FROM backend_effects WHERE kind LIKE 'names:%' ORDER BY id").fetchall()
-    def clone_reference(self):
-        folder=self.root/'comparison';folder.mkdir()
-        path=folder/'app.sqlite'
-        with closing(sqlite3.connect(self.lib.db)) as src, closing(sqlite3.connect(path)) as dst: src.backup(dst)
-        return Store.open(self.lib.source,path)
     def test_complete_refresh_matches_reference_formal_names_and_history(self):
-        expected=self.clone_reference(); updater=names.NameUpdater(expected,self.service.transport,interval=0)
-        updater.run(refresh=True)
+        expected=self.rec.value('reference refresh')
         self.enable()
         self.assertEqual(self.request('/api/names',{'action':'refresh'})['status'],200)
         self.finish()
         # All formal/core name tables and unchanged history; exclude nondeterministic timing/budget/cache bookkeeping.
-        with closing(sqlite3.connect(expected.path)) as old, closing(sqlite3.connect(self.lib.db)) as new:
-            tables=[r[0] for r in new.execute("SELECT name FROM sqlite_master WHERE type='table' AND (name IN ('names','display_names','name_aliases','actions') OR name LIKE 'term_name%' OR name IN ('term_key_names','term_key_aliases'))")]
-            for table in tables:
-                self.assertEqual(sorted(old.execute(f'SELECT * FROM "{table}"').fetchall(),key=repr),sorted(new.execute(f'SELECT * FROM "{table}"').fetchall(),key=repr),table)
+        with closing(sqlite3.connect(self.lib.db)) as new:
+            self.assertEqual(expected,name_tables(new))
             self.assertEqual(new.execute("SELECT value FROM meta WHERE key='names_projected'").fetchone(),new.execute("SELECT value FROM meta WHERE key='names_version'").fetchone())
         self.assertTrue(all(status=='done' and not error for _,status,error in self.events()))
         self.assertFalse(self.sentinel.exists())
     def test_single_entity_duplicate_events_and_warm_restart(self):
         self.enable()
-        ident=self.store.entities('Alice')[0]['id']
+        ident=self.alice
         self.assertEqual(self.request('/api/names',{'action':'refresh','entity':ident})['status'],200)
         self.finish()
         with sqlite3.connect(self.lib.db) as c:
@@ -164,7 +156,7 @@ class NativeNamesTest(unittest.TestCase):
         self.assertEqual(len(self.service.calls),count)
     def test_configuration_success_bytes_clear_legacy_and_secret_redaction(self):
         for body in ({'action':'model_api','key':'synthetic-secret-key','model':'synthetic-model','base':self.service.base}, {'action':'model_api','key':None}, {'action':'model_api','model':None}):
-            left=self.request('/api/names',body,base=self.direct);right=self.request('/api/names',body)
+            left=lifecycle.NativeLifecycleTest.reference_response(self, '/api/names',body);right=self.request('/api/names',body)
             self.assertEqual(left['status'],200);self.assertEqual(right['status'],200)
             self.assertEqual(left['body'],right['body'])
             self.assertNotIn(b'synthetic-secret-key',right['body'])
@@ -210,7 +202,7 @@ class NativeNamesTest(unittest.TestCase):
     def test_remote_picker_success_bytes_and_persistent_query_cache(self):
         self.stop(self.process);self.process,self.log=self.start(self.lib.path)
         for url in ('/api/entities?remote=1&q=new','/api/entities?remote=1&q=%E5%90%88%E6%88%90','/api/works?remote=1&q=new','/api/works?remote=1&q=%E5%90%88%E6%88%90','/api/local-links'):
-            old=self.request(url,base=self.direct);new=self.request(url)
+            old=lifecycle.NativeLifecycleTest.reference_response(self, url);new=self.request(url)
             self.assertEqual(new['status'],200,new['body']);self.assertEqual(old['body'],new['body'],url)
         count=len(self.service.calls)
         self.request('/api/entities?remote=1&q=new')
@@ -227,7 +219,7 @@ class NativeNamesTest(unittest.TestCase):
     def enable_error(self):
         self.stop(self.process);self.enabled=True;self.process,self.log=self.start(self.lib.path);self.finish('error')
     def test_busy_refresh_cancel_switch_same_id_and_late_result(self):
-        self.enable(); second,_=self.package('second')
+        self.enable(); second = self.package('second')
         second.config['id']=self.lib.config['id'];second.save()
         self.service.block=True
         self.assertEqual(self.request('/api/names',{'action':'refresh'})['status'],200)
@@ -256,7 +248,7 @@ class NativeNamesTest(unittest.TestCase):
         self.assertEqual(response['status'],200);self.assertFalse(json.loads(response['body'])['ok'])
         self.assertEqual(len(self.service.calls),count)
     def test_profile_lookup_and_durable_event_actual_consumption(self):
-        self.enable();ident=self.store.entities('Alice')[0]['id']
+        self.enable();ident=self.alice
         response=self.request('/api/character/profile',{'entity':ident,'tag':'synthetic_(Example)'})
         self.assertEqual(response['status'],200,response['body'])
         wait_until(lambda:all(s=='done' for _,s,_ in self.events()),timeout=8)
@@ -266,7 +258,7 @@ class NativeNamesTest(unittest.TestCase):
     def test_error_statuses_and_no_negative_remote_cache(self):
         self.stop(self.process);self.process,self.log=self.start(self.lib.path)
         self.service.failure=401
-        old=self.request('/api/works?remote=1&q=uncached',base=self.direct)
+        old=lifecycle.NativeLifecycleTest.reference_response(self, '/api/works?remote=1&q=uncached')
         new=self.request('/api/works?remote=1&q=uncached')
         self.assertEqual(old['status'],502);self.assertEqual(new['status'],old['status'])
         self.assertNotIn(b'private provider',new['body'])
@@ -287,13 +279,16 @@ class NativeNamesTest(unittest.TestCase):
         with closing(sqlite3.connect(self.lib.db)) as c:self.assertEqual(formal,c.execute('SELECT * FROM names ORDER BY entity_id,role,source,value').fetchall())
 
     def test_query_source_changed_while_pending_rejects_old_name(self):
-        self.enable();ident=self.store.entities('Alice')[0]['id']
+        self.enable();ident=self.alice
         self.service.block=True
         self.request('/api/names',{'action':'refresh','entity':ident});self.assertTrue(self.service.entered.wait(3))
-        self.store.set_profile(ident,name='人工保留名')
+        # A user name saved meanwhile (formerly through the old Store, now the application's own route).
+        edited=self.request('/api/character/profile',{'entity':ident,'name':'人工保留名'})
+        self.assertEqual(edited['status'],200,edited['body'])
         self.service.release.set();state=self.finish('error')
         self.assertIn('名称来源已改变',state['error'])
-        self.assertEqual(self.store.profile(ident)['name'],'人工保留名')
+        profile=json.loads(self.request('/api/character/profile?entity='+urllib.parse.quote(ident))['body'])
+        self.assertEqual(profile['user_name'],'人工保留名')
         self.assertTrue(any(s=='pending' for _,s,_ in self.events()))
 
     def test_malformed_event_does_not_block_new_valid_request(self):
@@ -301,7 +296,7 @@ class NativeNamesTest(unittest.TestCase):
         with sqlite3.connect(self.lib.db) as c:
             c.execute("INSERT INTO backend_effects(kind) VALUES ('names:malformed')")
         self.finish('error')
-        ident=self.store.entities('Alice')[0]['id']
+        ident=self.alice
         self.assertEqual(self.request('/api/names',{'action':'refresh','entity':ident})['status'],200)
         wait_until(lambda:self.events()[-1][1]=='done',timeout=8)
         self.assertTrue(any(s=='pending' and e for _,s,e in self.events()))
@@ -316,7 +311,7 @@ class NativeNamesTest(unittest.TestCase):
         self.stop(self.process);self.process,self.log=self.start(self.lib.path)
         self.token=json.loads(self.request('/api/bootstrap')['body'])['token']
         self.request('/api/names',{'action':'model_api','key':'synthetic-secret','base':self.service.base})
-        second,_=self.package('model-second')
+        second = self.package('model-second')
         self.service.block=True
         with ThreadPoolExecutor() as pool:
             pending=pool.submit(self.request,'/api/names',{'action':'model_api_test'})
@@ -348,5 +343,13 @@ class NativeNamesTest(unittest.TestCase):
         wait_until(lambda:all(s=='done' for _,s,_ in self.events()),timeout=8)
         attempted=[path for path,_ in self.service.calls[before:]]
         self.assertGreaterEqual(attempted.count(attempted[0]),2)
+
+
+
+def name_tables(c):
+    """Formal/core name tables and history, rows sorted; clock-like text as <clock>."""
+    tables=[r[0] for r in c.execute("SELECT name FROM sqlite_master WHERE type='table' AND (name IN ('names','display_names','name_aliases','actions') OR name LIKE 'term_name%' OR name IN ('term_key_names','term_key_aliases'))")]
+    return {table:sorted([[unclocked(v) for v in row] for row in c.execute(f'SELECT * FROM "{table}"')],key=repr) for table in tables}
+
 
 if __name__=='__main__':unittest.main()

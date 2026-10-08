@@ -1,19 +1,22 @@
-"""M3 files: real old handler vs native host, generated temporary assets only.
+"""M3 files: old handler (recorded, tests/fixed_expectations.py) vs native host, generated temporary assets only.
 
 Cache hits and static bodies/headers are exact; errors compare status only. New JPEGs
 use explicit pixel bounds, independent caches, no snapshot re-recording. No workers
 or Python are permitted in the native process (the lifecycle harness installs sentinels).
 """
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import closing
 import hashlib
 import io
 import http.client
 import socket
 import os
 from pathlib import Path
+import sqlite3
 import unittest
 
 from PIL import Image, ImageChops, ImageStat, ImageDraw
+from tests import test_native_lifecycle as lifecycle
 from tests.test_native_lifecycle import NativeLifecycleTest, HEADERS
 
 
@@ -26,9 +29,10 @@ def asset(self, ident, im=None, *, format='PNG', exif=None):
     path = self.root / (ident + '.data')  # Decode by signature, not extension.
     if im is not None:
         im.save(path, format=format, **({'exif': exif} if exif is not None else {}))
-    with self.store.connect() as c:
+    with closing(sqlite3.connect(self.lib.db)) as c:
         c.execute("INSERT OR REPLACE INTO assets(uuid,src_path,width,height) VALUES (?,?,?,?)",
                   (ident, str(path), im.width if im else 1, im.height if im else 1))
+        c.commit()
     return path
 
 
@@ -36,9 +40,9 @@ def compare_generated(self, ident, path, size='thumb'):
     url = f'/image?id={ident}&size={size}'
     target = self.lib.thumbnails / key(path, ident, size)
     target.unlink(missing_ok=True)
-    old = self.request(url, base=self.direct)
+    old = lifecycle.NativeLifecycleTest.reference_response(self, url)
     self.assertEqual(old['status'], 200)
-    target.unlink()
+    target.unlink(missing_ok=True)   # written by the reference when recording
     new = self.request(url)
     self.assertEqual(new['status'], 200)
     self.assertEqual(new['route'], 'core')
@@ -77,7 +81,7 @@ class NativeFilesTest(unittest.TestCase):
             self.assertEqual(response['route'], 'core')
             for headers in ({'Host': 'evil.example'}, {'Origin': 'https://evil.example'}):
                 self.assertEqual(self.request(url, headers=headers)['status'],
-                                 self.request(url, base=self.direct, headers=headers)['status'])
+                                 lifecycle.NativeLifecycleTest.reference_response(self, url, headers=headers)['status'])
         self.assertFalse(self.sentinel.exists())
 
 
@@ -155,12 +159,13 @@ class NativeFilesTest(unittest.TestCase):
         truncated.write_bytes(truncated.read_bytes()[:80])
         folder = asset(self, 'folder'); folder.mkdir()
         good = asset(self, 'good', Image.new('RGB', (12,8), 'red'))
-        with self.store.connect() as c:
+        with closing(sqlite3.connect(self.lib.db)) as c:
             c.execute("INSERT INTO assets(uuid,src_path) VALUES ('null',NULL),('empty','')")
+            c.commit()
         for url in ('/image', '/image?id=', '/image?id=not-present', '/image?id=missing',
                     '/image?id=broken', '/image?id=truncated', '/image?id=folder', '/image?id=null', '/image?id=empty',
                     '/image?id=good&size=raw', '/image?id=good&size=FULL'):
-            self.assertEqual(self.request(url)['status'], self.request(url, base=self.direct)['status'], url)
+            self.assertEqual(self.request(url)['status'], lifecycle.NativeLifecycleTest.reference_response(self, url)['status'], url)
         for url in ('/image?id=bad&id=good', '/image?id=good&id=', '/image?id=good&size=',
                     '/image?id=good&size=bad&size=thumb', '/image?id=good&size=medium&size='):
             self.assertEqual(self.pair(url)['status'], 200)
@@ -190,15 +195,16 @@ class NativeFilesTest(unittest.TestCase):
         self.assertFalse(self.sentinel.exists())
 
     def test_image_backpressure_does_not_block_switch_and_new_session_uses_new_path(self):
-        second, store = self.package('second')
+        second = self.package('second')
         source = asset(self, 'switch', Image.new('RGB', (12,8), 'red'))
         target = self.lib.thumbnails / key(source, 'switch', 'thumb')
         payload = b'old-session-cache' * 300_000
         target.write_bytes(payload)
         new_source = self.root / 'new-switch.png'
         Image.new('RGB', (12,8), '#40a060').save(new_source)
-        with store.connect() as c:
+        with closing(sqlite3.connect(second.db)) as c:
             c.execute("INSERT INTO assets(uuid,src_path,width,height) VALUES ('switch',?,12,8)", (str(new_source),))
+            c.commit()
         sock = socket.socket(); self.addCleanup(sock.close)
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 4096); sock.settimeout(10)
         sock.connect(('127.0.0.1', self.port))

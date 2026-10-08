@@ -213,14 +213,14 @@ class CandidateExampleWiringTest(unittest.TestCase):
     def test_full_runners_build_and_export_each_current_candidate_before_discovery(self):
         shell = (ROOT / 'tools/check_all.sh').read_text()
         ci = (ROOT / '.github/workflows/ci.yml').read_text()
-        probes = {'REFERENCE_HTTP': 'reference-http', 'RECOGNITION_COMPUTE': 'recognition-compute',
+        probes = {'READ_HTTP': 'read-http', 'RECOGNITION_COMPUTE': 'recognition-compute',
                   'INDEX_COMPUTE': 'index-compute', 'RESEARCH_COMPUTE': 'research-compute',
                   'RELATION_PROBE': 'relation-probe', 'PROVENANCE_COMPUTE': 'provenance-compute'}
         for key, example in probes.items():
             for source in (shell, ci):
                 build_at = source.index('--example ' + example)
                 export_at = source.index('ILLUSTASH_' + key + '_BIN')
-                discover_at = source.index('-m unittest discover -s tests -v -b')
+                discover_at = source.index('-m tests.run_fixed_suite -v -b')
                 self.assertLess(build_at, export_at)
                 self.assertLess(export_at, discover_at)
                 self.assertIn('native/terms/target/release/examples/' + example, source)

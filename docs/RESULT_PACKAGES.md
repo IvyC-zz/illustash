@@ -43,7 +43,7 @@ labels.jsonl 每行：
 
 公开 v1 不接收 `char_ext`。原生识别任务另生成 `character-claims.json`，格式为 `illustash-recognition-claims/1`，绑定完整任务身份、资产顺序、模型规格，以及共享锚点向量、ID、源角色元数据和补丁来源指纹。它只供同步任务在 `TaskContext::receive` 内部接收；公开 CLI/HTTP 结果导入没有这个入口。一个任务只构建一份锚点关系快照；全部声明的 sidecar 计算预验在接收锁外完成，并检查取消。准备证明仅保存路径与摘要，不累计保存全部批次载荷。源写事务内重新校验权威模型、锚点文件、角色元数据和 sidecar 指纹，严格复读 v1 载荷，不重建锚点关系或计算认领；声明的 sidecar 缺失、损坏、迟到或版本不匹配时拒绝写入该批 WD 结果。同步先预验全部声明的 sidecar，再开始逐包导入；逐包源事务不代表整个多包任务跨库原子提交。
 
-认领复用 `char_scan.anchor_index` 的直接邻居打分与严格向上别名跳转、curated p90 / `danbooru-patch` p75 阈值，检查最近 9 个锚点；同一别名先登记已见再判断阈值。距离是 float32 `(1-cos)/2`，得分为 `1-distance`，不当作 WD 概率四舍五入或裁剪。已有锚点但本次认领为空时，清除本批资产旧 `char_index/char_ext` 机器候选；没有锚点时保留旧角色候选，仍生成 WD 与原始向量。
+原生认领保留固定契约中的直接邻居打分与严格向上别名跳转、curated p90 / `danbooru-patch` p75 阈值，检查最近 9 个锚点；同一别名先登记已见再判断阈值。距离是 float32 `(1-cos)/2`，得分为 `1-distance`，不当作 WD 概率四舍五入或裁剪。已有锚点但本次认领为空时，清除本批资产旧 `char_index/char_ext` 机器候选；没有锚点时保留旧角色候选，仍生成 WD 与原始向量。
 
 锚点单位化复用研究计算中 NumPy float32 连续归约（8 lane、128 元素 cutoff），保留 `ccip.cross` 的零向量分母下限；矩阵乘法复用 Platform 的窄 CPU 数值接口。macOS 使用系统 BLAS，其他平台数值验收单列。锚点关系构建保留旧算法最多 1024 行的矩阵块；64 行分块会令末尾单行 GEMV 翻转 `.01` 别名边界。取消仍在归一化、逐别名行与 BLAS 前后检查；一次不可中断 BLAS 最多 1024 行乘全体锚点，相较 64 行上限增加 16 倍，取消等待受实际矩阵规模与平台影响，不承诺固定时长。不增加阈值 epsilon。sidecar 的 distance/threshold 按 float32 解码，confidence 为 float64，JSON 最短小数表示不改变该类型契约。
 
@@ -76,7 +76,7 @@ illustash-terms recognition-import --library /path/to/library.pilib --root /path
 illustash-terms recognition-import --library /path/to/library.pilib --root /path/to/resources --resume
 ```
 
-旧 `python -m web.results` CLI 已退出生产；Python 导入函数和历史 CLI 对照保留在 `tests/reference/web/results.py`，仅供测试参考。`--root` 是模型与标签资源目录，不是图库路径。
+旧 `python -m web.results` CLI 已退出生产；Python 导入函数和历史 CLI 对照保留在 `tests/reference/web/results.py（#9 已删除）`，仅供测试参考。`--root` 是模型与标签资源目录，不是图库路径。
 
 模型规格命令只计算本地模型及 tag 文件的指纹，不联网。生产者必须使用同一套模型、tag 顺序和预处理。模型名称字符串相同而文件不同也会被拒绝。
 

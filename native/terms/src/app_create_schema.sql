@@ -1,6 +1,6 @@
--- Fresh application schema 36, from web/store.py SCHEMA/V2_SCHEMA/ASKED,
--- tests/reference/web/names.py SCHEMA/WORK_NAMES, tests/reference/web/works.py migrate, web/identity.py SCHEMA,
--- and tests/reference/web/effects.py SCHEMA. No existing-library migrations or identity activation.
+-- Fresh application schema 36, from web/store.py（#9 已删除） SCHEMA/V2_SCHEMA/ASKED,
+-- tests/reference/web/names.py（#9 已删除） SCHEMA/WORK_NAMES, tests/reference/web/works.py（#9 已删除） migrate, web/identity.py（#9 已删除） SCHEMA,
+-- and tests/reference/web/effects.py（#9 已删除） SCHEMA. No existing-library migrations or identity activation.
 
 CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY,value TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS entities(id TEXT PRIMARY KEY,name TEXT NOT NULL,work TEXT NOT NULL DEFAULT '',external_key TEXT UNIQUE);

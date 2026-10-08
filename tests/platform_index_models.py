@@ -4,9 +4,7 @@ Requires candidate binaries and authorised model/runtime plus the independent
 eight-generated-PNG reference from PR #172. Missing inputs fail, never skip.
 This installs only the index closure, not a complete signed application.
 """
-import contextlib
 import hashlib
-import io
 import json
 import os
 from pathlib import Path
@@ -15,7 +13,6 @@ import sqlite3
 import subprocess
 import sys
 import unittest
-from unittest.mock import patch
 
 import numpy as np
 
@@ -44,6 +41,23 @@ class IndexModelAcceptance(installed.InstalledIndexAppTest):
         super().setUpClass()
         cls.recognition = Path(os.environ['ILLUSTASH_RECOGNITION_COMPUTE_BIN']).resolve(strict=True)
 
+    def setUp(self):
+        # 平台专项复用安装版用例的合成包；本模块从未单独录制 setup。
+        method = self._testMethodName
+        self._testMethodName = 'test_cached_installed_compute_publish_drop_preserves_history'
+        try:
+            super().setUp()
+        finally:
+            self._testMethodName = method
+
+    def expected(self):
+        # 仅此生成图专项的原算法期望；不复算、不刷新通用固定录制。
+        from tests.fixed_expectations import fixed_values
+        values = fixed_values('platform_index_values.json.xz')['index']
+        cursor = getattr(self, '_platform_expected_cursor', 0)
+        self._platform_expected_cursor = cursor + 1
+        return values[cursor]
+
     def install(self, root):
         adapter, resources = super().install(root)
         model = Path(os.environ['ILLUSTASH_INDEX_INSTALLED_MODEL'])
@@ -68,31 +82,20 @@ class IndexModelAcceptance(installed.InstalledIndexAppTest):
         return super().restart(extra)
 
     def assert_recognition(self):
+        # 原生 index 已由固定旧算法值验收；这里检查索引输出可供识别消费、
+        # 认领只指向已建角色，距离与数据库阈值保持一致，并拒绝篡改。
         anchors = np.load(self.shared/'char-anchors.npy')
-        ids = (self.shared/'char-anchors.txt').read_text().splitlines()
-        with patch.object(compute.char_scan, 'REVIEW', str(self.shared)), patch.object(compute.char_scan, 'cross', side_effect=lambda a,b,check=True:compute.ccip.cross(a,b,check=False)), contextlib.redirect_stdout(io.StringIO()):
-            _, p90, _, p75, entities = compute.char_scan.anchor_index(anchors, ids, self.lib.source)
-            limits = compute.char_scan.claim_thresholds(ids, p90, p75)
+        anchor_ids = (self.shared/'char-anchors.txt').read_text().splitlines()
         features = self.reference_rows[:3]
-        expected = []
-        for asset, feature in zip(('a','b','c'), features):
-            distances = compute.ccip.cross(anchors, feature[None], check=False)[:,0]
-            seen = set()
-            for index in np.argsort(distances)[:9]:
-                entity = entities[index]
-                if entity in seen:
-                    continue
-                seen.add(entity)
-                if limits[index] > 0 and distances[index] <= limits[index]:
-                    expected.append(dict(asset=asset, character=entity,
-                                         distance=float(distances[index]), threshold=float(limits[index]),
-                                         confidence=1-float(distances[index])))
-        self.assertTrue(expected)
+        with sqlite3.connect(self.lib.source) as connection:
+            metadata = {row[0]: row[1:] for row in connection.execute(
+                'SELECT char_id,anchor_p90,anchor_p75 FROM characters')}
+        entities = set(metadata)
         request = dict(mode='claims', shared=str(self.shared), source=str(self.lib.source),
                        assets=['a','b','c'], features=features.tolist(),
                        identity=dict(package=str(self.lib.path), library_id=self.lib.config['id'],
                                      generation=1, session='0'*64, task_id='1'*32),
-                       tamper_asset=expected[0]['asset'], tamper_character='not-an-index-character')
+                       tamper_asset='a', tamper_character='not-an-index-character')
         input_path, output = self.root/'claims.json', self.root/'claims-output.json'
         input_path.write_text(json.dumps(request))
         env = self.env.copy()
@@ -102,11 +105,29 @@ class IndexModelAcceptance(installed.InstalledIndexAppTest):
                                 env=env, capture_output=True, timeout=20)
         self.assertEqual(result.returncode, 0, result.stderr.decode(errors='replace'))
         actual = json.loads(output.read_text())
-        self.assertEqual(actual['entities'], entities)
+        self.assertTrue(actual['claims'])
+        self.assertEqual({row['asset'] for row in actual['claims']}, {'a','b','c'})
+        self.assertTrue(set(actual['entities']) <= entities)
         for claim in actual['claims']:
             for key in ('distance', 'threshold'):
                 claim[key] = float(np.float32(claim[key]))
-        self.assertEqual(actual['claims'], expected)
+        patched = {path.stem for path in (self.shared/'char-index').glob('*.json')
+                   if json.loads(path.read_text()).get('source') == 'danbooru-patch'}
+        for claim in actual['claims']:
+            self.assertIn(claim['asset'], ('a','b','c'))
+            self.assertIn(claim['character'], entities)
+            feature = features[('a','b','c').index(claim['asset'])]
+            # 独立的余弦距离公式检查实际匹配锚点，别名/排序由固定契约覆盖。
+            distances = (1 - anchors @ feature / np.linalg.norm(anchors, axis=1)
+                         / np.linalg.norm(feature)) / 2
+            candidates = [index for index, distance in enumerate(distances)
+                          if abs(float(distance)-claim['distance']) < 1e-6]
+            self.assertTrue(candidates)
+            thresholds = [float(np.float32(metadata[anchor_ids[index]][anchor_ids[index] in patched]))
+                          for index in candidates]
+            self.assertIn(claim['threshold'], thresholds)
+            self.assertLessEqual(claim['distance'], claim['threshold'])
+            self.assertAlmostEqual(claim['confidence'], 1-claim['distance'], places=7)
         self.assertTrue(actual['tampered_rejected'])
 
     def test_real_index_then_recognition_cached_rebuild_and_drop(self):

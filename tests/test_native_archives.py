@@ -14,7 +14,7 @@ import zipfile
 from tests import test_native_lifecycle as lifecycle
 from tests.test_native_human_labels import snapshot
 from tests.test_read_http import wait_until
-from web import library
+from tests import library_fixture as library
 
 
 class NativeArchivesTest(unittest.TestCase):
@@ -25,6 +25,10 @@ class NativeArchivesTest(unittest.TestCase):
     start = lifecycle.NativeLifecycleTest.start
     request = lifecycle.NativeLifecycleTest.request
     pair = lifecycle.NativeLifecycleTest.pair
+
+    def reference_status(self, url, body=None, **kwargs):
+        """The former reference server's status for the same request (recorded)."""
+        return lifecycle.NativeLifecycleTest.reference_response(self, url, body, **kwargs)['status']
 
     def state(self):
         return json.loads(self.request('/api/libraries')['body'])['export']
@@ -207,8 +211,8 @@ class NativeArchivesTest(unittest.TestCase):
         self.assertEqual(snapshot(self.lib.source), snapshot(expected.source))
         self.assertEqual(json.loads(self.request('/api/libraries')['body'])['info']['sources'][0], result)
         for body in ({'source':'absent','preset':'x'}, {'source':'s1','preset':'bad'}, {'source':None, 'preset':[]}):
-            self.assertEqual(self.request('/api/libraries/preset', body)['status'], self.request('/api/libraries/preset', body, base=self.direct)['status'])
-        other, _ = self.package('other'); library.remember(other, front=False)
+            self.assertEqual(self.request('/api/libraries/preset', body)['status'], self.reference_status('/api/libraries/preset', body))
+        other = self.package('other'); library.remember(other, front=False)
         before = snapshot(other.db)
         response = self.pair('/api/libraries/forget', {'path':str(other.path)})
         self.assertEqual(response['body'], b'{"ok": true}')
@@ -223,7 +227,10 @@ class NativeArchivesTest(unittest.TestCase):
         variants = [b'not zip', good.read_bytes()[:100]]
         # Windows 上 zipfile 写入时会把反斜杠换成 `/`，构造不出反斜杠条目；该情形由 app_archives 的单元测试覆盖。
         names = ('../escape', '/absolute', 'features/../library.json', 'features\\full-features.npy', 'unexpected', 'features/')
-        for name in (n for n in names if os.name != 'nt' or '\\' not in n):
+        for name in names:
+            if os.name == 'nt' and '\\' in name:
+                variants.append(None)   # recorded on POSIX; skipped here (see above)
+                continue
             out = self.root / f'bad-{len(variants)}.zip'
             with zipfile.ZipFile(out, 'w') as z:
                 for n,b in files.items(): z.writestr(n,b)
@@ -240,17 +247,20 @@ class NativeArchivesTest(unittest.TestCase):
             z.writestr('features/full-features.npy', b'synthetic-crc-needle')
         data = bytearray(out.read_bytes()); data[data.index(b'synthetic-crc-needle')] ^= 1; variants.append(data)
         for i,data in enumerate(variants):
+            if data is None:
+                self.rec.skip('response')
+                continue
             archive = self.root / f'case-{i}.zip'; archive.write_bytes(data)
             before = set(library.HOME.glob('*')) if library.HOME.exists() else set()
             with self.subTest(i=i):
-                self.assertEqual(self.request('/api/libraries/import', {'path':str(archive)})['status'], self.request('/api/libraries/import', {'path':str(archive)}, base=self.direct)['status'])
+                self.assertEqual(self.request('/api/libraries/import', {'path':str(archive)})['status'], self.reference_status('/api/libraries/import', {'path':str(archive)}))
                 self.assertEqual(set(library.HOME.glob('*')) if library.HOME.exists() else set(), before)
         self.assertFalse((self.root / 'escape').exists())
         self.assertFalse(self.sentinel.exists())
 
     def test_repeated_export_busy_switch_cancel_same_id_and_exit_cleanup(self):
         # A held rollback-journal write lock deterministically keeps backup active without huge data.
-        other, _ = self.package('other')
+        other = self.package('other')
         other.config['id'] = self.lib.config['id']; other.save()
         lock = sqlite3.connect(self.lib.source); self.addCleanup(lock.close)
         lock.execute('BEGIN EXCLUSIVE')
@@ -284,7 +294,7 @@ class NativeArchivesTest(unittest.TestCase):
 
     def test_choose_invalid_kind_status_and_security(self):
         for body in ({}, {'kind':'bad'}, {'kind':[]}, {'kind':None}):
-            self.assertEqual(self.request('/api/libraries/choose', body)['status'], self.request('/api/libraries/choose', body, base=self.direct)['status'])
+            self.assertEqual(self.request('/api/libraries/choose', body)['status'], self.reference_status('/api/libraries/choose', body))
         self.assertEqual(self.request('/api/libraries/choose', {'kind':'bad'}, token='bad')['status'],403)
 
     def test_parallel_export_one_start_and_failed_switch_keeps_job(self):
@@ -322,16 +332,16 @@ class NativeArchivesTest(unittest.TestCase):
         self.assertEqual(json.loads(self.request('/api/libraries')['body'])['current'], str(self.lib.path))
 
     def test_management_filesystem_failures_status_and_source_database_boundary(self):
-        other, _ = self.package('other'); library.remember(other, front=False)
+        other = self.package('other'); library.remember(other, front=False)
         tmp = self.support / 'libraries.tmp'; tmp.mkdir()
         body = {'path':str(other.path)}
-        self.assertEqual(self.request('/api/libraries/forget',body)['status'], self.request('/api/libraries/forget',body,base=self.direct)['status'])
+        self.assertEqual(self.request('/api/libraries/forget',body)['status'], self.reference_status('/api/libraries/forget',body))
         source = library.folder_source(self.root / 'folder')
         self.lib.config['sources']=[source];self.lib.save()
         config_tmp = self.lib.path / 'library.json.tmp';config_tmp.mkdir()
         before = snapshot(self.lib.source)
         body={'source':'s1','preset':'x'}
-        self.assertEqual(self.request('/api/libraries/preset',body)['status'], self.request('/api/libraries/preset',body,base=self.direct)['status'])
+        self.assertEqual(self.request('/api/libraries/preset',body)['status'], self.reference_status('/api/libraries/preset',body))
         self.assertEqual(snapshot(self.lib.source),before)
 
     def test_import_legacy_zip_compressions(self):
@@ -357,5 +367,5 @@ class NativeArchivesTest(unittest.TestCase):
                     bad = self.root / 'lzma-crc.zip'; bad.write_bytes(corrupted)
                     before = set(library.HOME.iterdir())
                     body = {'path':str(bad)}
-                    self.assertEqual(self.request('/api/libraries/import',body)['status'],self.request('/api/libraries/import',body,base=self.direct)['status'])
+                    self.assertEqual(self.request('/api/libraries/import',body)['status'],self.reference_status('/api/libraries/import',body))
                     self.assertEqual(set(library.HOME.iterdir()),before)

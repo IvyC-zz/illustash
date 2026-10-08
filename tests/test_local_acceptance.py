@@ -245,14 +245,14 @@ class LocalAcceptanceTests(unittest.TestCase):
         targeted = script.index('if [ -n "${CHECK_ALL_TARGETED_TESTS:-}" ]')
         end = script.index('log="$cache/unittest.log"')
         self.assertLess(start, targeted)
-        self.assertLess(targeted, script.index('run "$python" -m unittest discover -s tests -v -b'))
+        self.assertLess(targeted, script.index('run "$python" -m tests.run_fixed_suite -v -b'))
         # 执行真实脚本的构建至定向片段；只将 cargo 变成合成写入。
         for name in ('native/terms/target/release/illustash-terms', 'crates/iqdb/target/release/illustash-iqdb',
-                     'native/terms/target/release/examples/reference-http'):
+                     'native/terms/target/release/examples/read-http'):
             self.write(name, 'old target')
         self.write('tests/__init__.py', '')
         self.write('tests/candidate_helper.py', 'EXPECTED=\"candidate\"')
-        self.write('tests/test_candidate.py', "from tests.candidate_helper import EXPECTED\nimport os, pathlib, unittest\nclass Candidate(unittest.TestCase):\n def test_candidate(self):\n  root=pathlib.Path(os.environ['ILLUSTASH_NATIVE_ROOT'])\n  self.assertEqual(pathlib.Path(os.environ['ILLUSTASH_TERMS_BIN']).read_text(),'candidate')\n  self.assertEqual(pathlib.Path(os.environ['ILLUSTASH_IQDB_BINARY']).read_text(),'candidate')\n  self.assertEqual((root/'native/terms/target/release/examples/reference-http').read_text(),'candidate')\n")
+        self.write('tests/test_candidate.py', "from tests.candidate_helper import EXPECTED\nimport os, pathlib, unittest\nclass Candidate(unittest.TestCase):\n def test_candidate(self):\n  root=pathlib.Path(os.environ['ILLUSTASH_NATIVE_ROOT'])\n  self.assertEqual(pathlib.Path(os.environ['ILLUSTASH_TERMS_BIN']).read_text(),'candidate')\n  self.assertEqual(pathlib.Path(os.environ['ILLUSTASH_IQDB_BINARY']).read_text(),'candidate')\n  self.assertEqual((root/'native/terms/target/release/examples/read-http').read_text(),'candidate')\n")
         prefix = """set -eu
 root=$PWD
 cache=$root/.venv/check-all
@@ -264,7 +264,7 @@ run() {
   if [ "$1" = cargo ]; then
     printf candidate > native/terms/target/release/illustash-terms
     printf candidate > crates/iqdb/target/release/illustash-iqdb
-    printf candidate > native/terms/target/release/examples/reference-http
+    printf candidate > native/terms/target/release/examples/read-http
   else
     "$@"
   fi

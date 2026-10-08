@@ -117,6 +117,13 @@ impl Source {
         self.seen.insert(key);
         Ok(value)
     }
+    /// Tests point both providers at one loopback service without touching the process environment.
+    #[cfg(test)]
+    pub(crate) fn with_bases(mut self, db: &str, bg: &str) -> Self {
+        self.db_base = db.trim_end_matches('/').into();
+        self.bg_base = bg.trim_end_matches('/').into();
+        self
+    }
     pub fn granted(mut self, grant: Arc<AtomicBool>) -> Self {
         self.grant = Some(grant);
         self
@@ -700,5 +707,227 @@ mod tests {
             (vec![json!(["zh", "合成角色"])], Some("另一个名字".into()))
         );
         assert_eq!(normalize("Ａ_・ リス"), "a_リス");
+    }
+}
+
+/// Retry, pacing and cache rules of the native transport (#9: formerly tests/test_name_network.py,
+/// which exercised the old Python updater; native limits differ and are tested as they are).
+#[cfg(test)]
+mod network_tests {
+    use super::*;
+    use std::collections::VecDeque;
+    use std::sync::atomic::AtomicUsize;
+
+    struct Reply {
+        status: u16,
+        retry_after: Option<String>,
+        body: &'static str,
+        delay: Duration,
+    }
+
+    fn reply(status: u16, body: &'static str) -> Reply {
+        Reply { status, retry_after: None, body, delay: Duration::ZERO }
+    }
+
+    /// Loopback server answering from a script (then 200 `[]`), one thread per request.
+    struct Scripted {
+        base: String,
+        host: String,
+        calls: Arc<AtomicUsize>,
+        peak: Arc<AtomicUsize>,
+        stop: Arc<AtomicBool>,
+        thread: Option<std::thread::JoinHandle<()>>,
+    }
+
+    impl Scripted {
+        fn start(script: Vec<Reply>) -> Self {
+            let server = tiny_http::Server::http("127.0.0.1:0").unwrap();
+            let port = server.server_addr().to_ip().unwrap().port();
+            let script = Arc::new(Mutex::new(VecDeque::from(script)));
+            let (calls, peak, active) =
+                (Arc::new(AtomicUsize::new(0)), Arc::new(AtomicUsize::new(0)), Arc::new(AtomicUsize::new(0)));
+            let stop = Arc::new(AtomicBool::new(false));
+            let (sc, c, p, s) = (script.clone(), calls.clone(), peak.clone(), stop.clone());
+            let thread = std::thread::spawn(move || {
+                while !s.load(Ordering::SeqCst) {
+                    let Ok(Some(request)) = server.recv_timeout(Duration::from_millis(10)) else { continue };
+                    c.fetch_add(1, Ordering::SeqCst);
+                    let next = sc.lock().unwrap().pop_front().unwrap_or_else(|| reply(200, "[]"));
+                    let (p, active) = (p.clone(), active.clone());
+                    std::thread::spawn(move || {
+                        let now = active.fetch_add(1, Ordering::SeqCst) + 1;
+                        p.fetch_max(now, Ordering::SeqCst);
+                        std::thread::sleep(next.delay);
+                        active.fetch_sub(1, Ordering::SeqCst);
+                        let mut response = tiny_http::Response::from_string(next.body).with_status_code(next.status);
+                        if let Some(value) = next.retry_after {
+                            response = response.with_header(
+                                tiny_http::Header::from_bytes(&b"Retry-After"[..], value.as_bytes()).unwrap(),
+                            );
+                        }
+                        let _ = request.respond(response);
+                    });
+                }
+            });
+            Self {
+                base: format!("http://127.0.0.1:{port}"),
+                host: format!("127.0.0.1:{port}"),
+                calls,
+                peak,
+                stop,
+                thread: Some(thread),
+            }
+        }
+        fn calls(&self) -> usize {
+            self.calls.load(Ordering::SeqCst)
+        }
+        fn host(&self) -> Arc<Mutex<Host>> {
+            HOSTS.get_or_init(Default::default).lock().unwrap().entry(self.host.clone()).or_default().clone()
+        }
+    }
+
+    impl Drop for Scripted {
+        fn drop(&mut self) {
+            self.stop.store(true, Ordering::SeqCst);
+            self.thread.take().unwrap().join().unwrap();
+        }
+    }
+
+    struct Library(PathBuf);
+
+    impl Library {
+        fn new() -> Self {
+            let root = std::env::temp_dir().join(format!(
+                "illustash-name-net-{}-{}",
+                std::process::id(),
+                crate::store::new_key().unwrap()
+            ));
+            std::fs::create_dir_all(&root).unwrap();
+            Connection::open(root.join("library.sqlite"))
+                .unwrap()
+                .execute_batch(
+                    "CREATE TABLE name_settings(key TEXT PRIMARY KEY,value TEXT NOT NULL);
+                     CREATE TABLE name_cache(key TEXT PRIMARY KEY,value TEXT NOT NULL);",
+                )
+                .unwrap();
+            Self(root)
+        }
+        fn source(&self, server: &Scripted, cancel: Arc<AtomicBool>) -> Source {
+            Source::new(self.0.join("library.sqlite"), cancel, true, false)
+                .unwrap()
+                .with_bases(&server.base, &server.base)
+        }
+        fn cached_rows(&self) -> i64 {
+            db(&self.0.join("library.sqlite"))
+                .unwrap()
+                .query_row("SELECT count(*) FROM name_cache", [], |r| r.get(0))
+                .unwrap()
+        }
+    }
+
+    impl Drop for Library {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn quiet() -> Arc<AtomicBool> {
+        Arc::new(AtomicBool::new(false))
+    }
+
+    #[test]
+    fn retry_after_then_5xx_exponential_backoff() {
+        let server = Scripted::start(vec![
+            Reply { retry_after: Some("1".into()), ..reply(429, "limit") },
+            reply(503, "unavailable"),
+            reply(200, r#"{"data":[]}"#),
+        ]);
+        let lib = Library::new();
+        let started = Instant::now();
+        let value =
+            lib.source(&server, quiet()).fetch(&format!("{}/search/characters", server.base), None, None).unwrap();
+        assert_eq!(value, json!({"data":[]}));
+        assert_eq!(server.calls(), 3);
+        // Retry-After 1 s, then the second exponential step (at least 1 s).
+        assert!(started.elapsed() >= Duration::from_millis(1950), "{:?}", started.elapsed());
+        assert_eq!(server.host().lock().unwrap().failures, 0);
+    }
+
+    #[test]
+    fn retry_after_http_date() {
+        let date = httpdate::fmt_http_date(std::time::SystemTime::now() + Duration::from_secs(3));
+        let server = Scripted::start(vec![Reply { retry_after: Some(date), ..reply(503, "busy") }]);
+        let lib = Library::new();
+        let started = Instant::now();
+        lib.source(&server, quiet()).fetch(&format!("{}/subjects/1", server.base), None, None).unwrap();
+        assert!(started.elapsed() >= Duration::from_millis(1950), "{:?}", started.elapsed());
+        assert_eq!(server.calls(), 2);
+    }
+
+    #[test]
+    fn not_found_is_empty_and_other_4xx_do_not_retry() {
+        for code in [400, 401, 403] {
+            let server = Scripted::start(vec![reply(code, "private body")]);
+            let lib = Library::new();
+            let error = lib.source(&server, quiet()).fetch(&format!("{}/search/characters", server.base), None, None);
+            assert!(matches!(&error, Err(Error::Network(m)) if !m.contains("private")), "{code}: {error:?}");
+            assert_eq!(server.calls(), 1, "{code}");
+        }
+        let server = Scripted::start(vec![reply(404, "")]);
+        let lib = Library::new();
+        let value = lib.source(&server, quiet()).fetch(&format!("{}/characters/0", server.base), None, None).unwrap();
+        assert_eq!((value, server.calls()), (Value::Null, 1));
+    }
+
+    #[test]
+    fn exhausted_network_error_has_no_negative_cache() {
+        let server = Scripted::start(vec![reply(503, ""), reply(503, ""), reply(503, "")]);
+        let lib = Library::new();
+        let address = format!("{}/wiki_pages.json?search%5Btitle%5D=test", server.base);
+        assert!(lib.source(&server, quiet()).cached(&address, None).is_err());
+        assert_eq!((server.calls(), lib.cached_rows()), (3, 0));
+        assert_eq!(lib.source(&server, quiet()).cached(&address, None).unwrap(), json!([]));
+        assert_eq!(lib.cached_rows(), 1);
+    }
+
+    #[test]
+    fn twenty_consecutive_host_failures_pause_the_host() {
+        let server = Scripted::start(vec![reply(503, "")]);
+        server.host().lock().unwrap().failures = 19;
+        let lib = Library::new();
+        let cancel = quiet();
+        let source = lib.source(&server, cancel.clone());
+        let address = format!("{}/search/subjects", server.base);
+        let started = Instant::now();
+        let worker = std::thread::spawn(move || source.fetch(&address, None, None));
+        while server.calls() < 1 {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        std::thread::sleep(Duration::from_millis(100));
+        cancel.store(true, Ordering::SeqCst); // the pause is long; stop the waiting request
+        assert!(worker.join().unwrap().is_err());
+        let host = server.host();
+        let host = host.lock().unwrap();
+        assert_eq!(host.failures, 0);
+        assert!(host.next.unwrap() >= started + Duration::from_secs(179), "paused for 180 s");
+        assert_eq!(server.calls(), 1);
+    }
+
+    #[test]
+    fn one_request_in_flight_per_host() {
+        let server =
+            Scripted::start((0..4).map(|_| Reply { delay: Duration::from_millis(50), ..reply(200, "[]") }).collect());
+        let lib = Library::new();
+        let workers: Vec<_> = (0..4)
+            .map(|i| {
+                let source = lib.source(&server, quiet());
+                let address = format!("{}/subjects/{i}", server.base);
+                std::thread::spawn(move || source.fetch(&address, None, None).unwrap())
+            })
+            .collect();
+        for w in workers {
+            assert_eq!(w.join().unwrap(), json!([]));
+        }
+        assert_eq!((server.calls(), server.peak.load(Ordering::SeqCst)), (4, 1));
     }
 }

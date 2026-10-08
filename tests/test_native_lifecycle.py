@@ -1,8 +1,9 @@
 """M1 native lifecycle acceptance on explicit temporary packages only.
 
 Requires ILLUSTASH_TERMS_BIN pointing to the M1 release under test; never builds or discovers
-an older binary. Python is used only to construct fixtures and run the isolated reference HTTP
-server. The launched native process receives a PATH containing only failing Python sentinels.
+an older binary. Python constructs fixtures only. The former Python reference server's responses,
+packages and expected states were recorded through tests/fixed_expectations.py (#9); native keys are reproducible (store::new_key test
+counter). The launched native process receives a PATH containing only failing Python sentinels.
 Folder and Photos package creation are covered; existing-library upgrades, worker task shutdown and Windows
 process-tree acceptance remain out of scope.
 """
@@ -23,12 +24,11 @@ import time
 import unittest
 from unittest.mock import patch
 
+from tests.fixed_expectations import Library, Expectations, unclocked
 from tests.synthetic_source import source_fixture as fixture, synthetic_reference
 from tests.test_read_http import INTERRUPT, SPAWN, free_port, wait_until
-from tools.verify_read_http import difference, fetch
-from web import library, terms_characters
-from web.server import Server, open_store
-from web.store import Store
+from tools import verify_read_http
+from tools.verify_read_http import fetch
 
 CORE_READS = (
     '/api/assets', '/api/assets/count', '/api/ids', '/api/detail?id=a', '/api/home', '/api/fold',
@@ -38,16 +38,36 @@ CORE_READS = (
     '/api/bootstrap', '/api/user-tags', '/api/general-tags', '/api/artists',
     '/api/artist', '/api/artist-audit', '/api/entities', '/api/works',
 )
-# 参考实现在 Windows 上有句柄泄漏、非法文件名和提前断开连接，逐字节对照只在 POSIX 上验收；
+# 参考实现在 Windows 上有句柄泄漏、非法文件名和提前断开连接，逐字节对照的期望录自 POSIX，只在 POSIX 上验收；
 # Windows 上同一批原生行为由 tools/windows_acceptance.py 直接验证。
-REFERENCE_PARITY_ONLY = unittest.skipIf(os.name == 'nt', 'Python 参考实现不支持 Windows；原生行为见 tools/windows_acceptance.py')
+REFERENCE_PARITY_ONLY = unittest.skipIf(os.name == 'nt', '固定期望录自 POSIX 上的 Python 参考实现；Windows 原生行为见 tools/windows_acceptance.py')
 HEADERS = ('Content-Type', 'Content-Length', 'Content-Encoding', 'Cache-Control', 'Vary',
            'X-Content-Type-Options', 'Referrer-Policy', 'Content-Security-Policy')
 
 
+def difference(left, right):
+    """Byte difference of two responses; clock-like text (the native host stamps the current time,
+    e.g. a new library's index time) is compared as `<clock>`."""
+    masked = [dict(r, body=unclocked(r['body'])) if 'body' in r else r for r in (left, right)]
+    return verify_read_http.difference(*masked)
+
+
 def dump(db):
+    """Every schema and row statement, as a sorted list: equal for equal contents, whatever the
+    order of the schema rows (a restored recording may recreate triggers)."""
     with closing(sqlite3.connect(db)) as c:
-        return list(c.iterdump())
+        return sorted(c.iterdump())
+
+
+STARTUP_DEFAULT = {'sync': True, 'similar': True, 'index_check': True, 'names': True, 'provenance': True,
+                   'local_limit': 3000}
+
+
+def startup(db):
+    """The startup preferences as the application reads them (defaults plus stored changes)."""
+    with closing(sqlite3.connect(db)) as c:
+        row = c.execute("SELECT value FROM prefs WHERE key='startup'").fetchone()
+    return {**STARTUP_DEFAULT, **(json.loads(row[0]) if row else {})}
 
 
 def files(root):
@@ -67,31 +87,17 @@ class NativeLifecycleTest(unittest.TestCase):
         cls.resources = Path(os.environ.get('ILLUSTASH_NATIVE_ROOT') or cls.binary.parents[4]).resolve()
 
     def setUp(self):
-        # #111 explicitly adds this field to library info. Extend only the reference
-        # producer; keep the existing whole-body byte/header comparison unchanged.
-        original_info = library.Library.info
-        def info_with_origins(lib):
-            result = original_info(lib)
-            self.assertNotIn('origins', result)
-            result['origins'] = [{'id': 'pixiv', 'label': 'Pixiv'},
-                                 {'id': 'x', 'label': 'X'}, {'id': 'other', 'label': '其他'}]
-            return result
-        origin_info = patch.object(library.Library, 'info', info_with_origins)
-        origin_info.start(); self.addCleanup(origin_info.stop)
-        # #107: the native factory never guesses an origin from the folder name; without one it is 「其他」.
-        no_guess = patch.object(library, 'guess_preset', lambda path: 'other')
-        no_guess.start(); self.addCleanup(no_guess.stop)
         self.temp = tempfile.TemporaryDirectory(prefix='illustash-native-lifecycle-')
         self.addCleanup(self.temp.cleanup)
         # 参考实现的 Store.refresh 在引用环里留着连接；Windows 删不掉仍打开的文件，先释放再清目录。
-        self.addCleanup(NativeLifecycleTest.release_python_handles, self)
         self.root = Path(self.temp.name).resolve()
+        self.rec = Expectations(self)
+        self.addCleanup(self.rec.finish, self)
+        self.rec.alias(self.root, '@ROOT@')
         self.support, self.shared = self.root / 'support', self.root / 'shared'
+        self.home = self.root / 'home' / 'Pictures' / 'Illustash'
         self.shared.mkdir()
-        for name, value in (('APP_SUPPORT', self.support), ('SHARED', self.shared),
-                            ('HOME', self.root / 'home' / 'Pictures' / 'Illustash'), ('REFERENCE', self.shared / 'reference.sqlite')):
-            scoped = patch.object(library, name, value)
-            scoped.start(); self.addCleanup(scoped.stop)
+        NativeLifecycleTest.confine_library_helpers(self)
         # No subprocess may silently run Python or use the caller's real app support directory.
         self.sentinel = self.root / 'python-was-launched'
         self.bin = self.root / 'bin'; self.bin.mkdir()
@@ -99,14 +105,13 @@ class NativeLifecycleTest(unittest.TestCase):
             executable = self.bin / name
             executable.write_text('#!/bin/sh\n/bin/echo forbidden > "$ILLUSTASH_PYTHON_SENTINEL"\nexit 97\n')
             executable.chmod(0o755)
-        # Match the native HOME-derived Photos path, entirely inside the synthetic root.
-        photos = patch('web.sync.PHOTOS', self.root / 'home' / 'Pictures' / 'Photos Library.photoslibrary')
-        photos.start(); self.addCleanup(photos.stop)
         # Windows 上原生核心按 USERPROFILE 定位主目录，两个都指向合成根目录。
         self.env = {**os.environ, 'PATH': str(self.bin), 'HOME': str(self.root / 'home'), 'USERPROFILE': str(self.root / 'home'),
                     'ILLUSTASH_APP_SUPPORT': str(self.support),
                     'ILLUSTASH_SHARED': str(self.shared), 'ILLUSTASH_PYTHON_SENTINEL': str(self.sentinel),
-                    'ILLUSTASH_TERMS_BIN': str(self.binary)}
+                    'ILLUSTASH_TERMS_BIN': str(self.binary),
+                    # Reproducible native keys, so recorded expectations hold (store::new_key test hook).
+                    'ILLUSTASH_TEST_KEY_COUNTER': str(self.root / 'key-counter')}
         if self._testMethodName.startswith('test_native_library_new'):
             self.new_reference = synthetic_reference(self.shared)
             self.new_folder = self.root / 'downloads-Pixiv'; self.new_folder.mkdir()
@@ -124,40 +129,28 @@ class NativeLifecycleTest(unittest.TestCase):
                                      '--name', 'first'], env=self.env, capture_output=True, timeout=20)
             self.assertEqual(result.returncode, 0, result.stderr.decode(errors='replace'))
             self.assertEqual(json.loads(result.stdout), {'path': str(first), 'name': 'first'})
-            self.lib = library.Library(first, json.loads((first / 'library.json').read_text()))
-            self.store = Store.open(self.lib.source, self.lib.db)
+            # The package as the reference opened it (recorded; the native factory output is reproducible).
+            self.lib = self.rec.package('first', first)
             self.assertFalse(self.sentinel.exists())
         else:
-            self.lib, self.store = self.package('first')
+            self.lib = self.package('first')
         self.port = free_port(); self.origin = f'http://127.0.0.1:{self.port}'
+        self.rec.alias(self.origin, '@ORIGIN@')
         self.process, self.log = self.start(self.lib.path)
-        self.reference = Server(('127.0.0.1', 0), self.store, self.lib.thumbnails, public_origin=self.origin)
-        self.reference.library = self.lib
-        self.reference.forced_off = {'index_check', 'names', 'provenance', 'similar', 'sync'}
-        self.thread = threading.Thread(target=self.reference.serve_forever, daemon=True)
-        self.thread.start()
-        self.addCleanup(self.reference.server_close)
-        self.addCleanup(self.thread.join)
-        self.addCleanup(self.reference.shutdown)
-        self.direct = f'http://127.0.0.1:{self.reference.server_port}'
         self.token = json.loads(self.request('/api/bootstrap')['body'])['token']
-        self.reference.token = self.token
+        self.rec.alias(self.token, '@TOKEN@')
 
-    def release_python_handles(self):
-        self.store = self.reference = None
-        gc.collect()
-        if os.name == 'nt':
-            # 参考实现的常驻核心子进程继承了启动时的工作目录（可能就是本测试的临时目录）。
-            from web import terms_core
-            terms_core.close_service()
+    def confine_library_helpers(self):
+        """The Python library helpers some tests build inputs with never see the real user folders."""
+        from tests import library_fixture as library
+        for name, value in (('APP_SUPPORT', self.support), ('SHARED', self.shared),
+                            ('HOME', self.home), ('REFERENCE', self.shared / 'reference.sqlite')):
+            scoped = patch.object(library, name, value)
+            scoped.start(); self.addCleanup(scoped.stop)
 
     def package(self, name):
-        lib = library.create(self.root / (name + '.pilib'), name)
-        fixture(lib.path).rename(lib.source)
-        store = Store(lib.source, lib.db)
-        store.refresh()
-        gc.collect()  # refresh 的引用环里留着连接；Windows 上之后删改这个包会被占用
-        return lib, store
+        """A synthetic package as the former Python application created and refreshed it (fixed recording)."""
+        return self.rec.package(name, self.root / (name + '.pilib'))
 
     def stop(self, process):
         if process.poll() is None:
@@ -191,8 +184,12 @@ class NativeLifecycleTest(unittest.TestCase):
                                **item['headers']}
         return fetch(base or self.origin, item, self.origin)
 
+    def reference_response(self, url, body=None, **kwargs):
+        """The former reference server's response to the same request (recorded)."""
+        return self.rec.value('response')
+
     def pair(self, url, body=None, **kwargs):
-        left = self.request(url, body, base=self.direct, **kwargs)
+        left = NativeLifecycleTest.reference_response(self, url, body, **kwargs)
         right = self.request(url, body, **kwargs)
         self.assertIsNone(difference(left, right), (url, difference(left, right)))
         for header in HEADERS if right['status'] < 400 else ():
@@ -227,20 +224,16 @@ class NativeLifecycleTest(unittest.TestCase):
         self.assertEqual(self.pair('/api/libraries')['status'], 200)
         changes = {'sync': False, 'similar': False, 'local_limit': 1234}
         # Compute expected DB changes on an independent clone before either HTTP write.
-        expected_db = self.root / 'expected-startup.sqlite'
-        with closing(sqlite3.connect(self.lib.db)) as source, closing(sqlite3.connect(expected_db)) as clone:
-            source.backup(clone)
-        expected_store = Store(self.lib.source, expected_db)
-        expected_store.set_startup(changes)
+        expected = self.rec.value('expected dump')
         response = self.request('/api/startup', changes)
         self.assertEqual(response['status'], 200)
-        self.assertEqual(self.store.startup(), {**Store.STARTUP_DEFAULT, **changes})
-        self.assertEqual(dump(self.lib.db), dump(expected_db))
-        left = self.request('/api/startup', changes, base=self.direct)
+        self.assertEqual(startup(self.lib.db), {**STARTUP_DEFAULT, **changes})
+        self.assertEqual(dump(self.lib.db), expected)
+        left = self.reference_response('/api/startup', changes)
         self.assertIsNone(difference(left, response), difference(left, response))
         for header in HEADERS if response['status'] < 400 else ():
             self.assertEqual(left['headers'].get(header), response['headers'].get(header), header)
-        self.assertEqual(dump(self.lib.db), dump(expected_db))
+        self.assertEqual(dump(self.lib.db), expected)
         for invalid in ({}, {'new': True}, {'sync': 1}, {'local_limit': True},
                         {'local_limit': 99}, {'local_limit': 100001}):
             before = dump(self.lib.db)
@@ -261,7 +254,7 @@ class NativeLifecycleTest(unittest.TestCase):
                 before = dump(self.lib.db)
                 item = {'url': '/api/startup', 'method': 'POST', 'body': body,
                         'headers': {'Content-Type': content_type, 'X-CSRF-Token': self.token}}
-                left = fetch(self.direct, item, self.origin)
+                left = self.rec.value('response')
                 right = fetch(self.origin, item, self.origin)
                 self.assertEqual(left['status'], 400)
                 self.assertIsNone(difference(left, right), difference(left, right))
@@ -302,16 +295,11 @@ class NativeLifecycleTest(unittest.TestCase):
             name = body['name']
             with self.subTest(body=body):
                 registry_before = registry.read_bytes()
-                left = self.request('/api/libraries/new', body, base=self.direct)
+                left = self.reference_response('/api/libraries/new', body)
                 self.assertEqual(left['status'], 200, left['body'])
                 dest = Path(json.loads(left['body'])['path'])
                 self.assertTrue(dest.is_relative_to(self.root))
                 self.assertNotEqual(dest, self.lib.path)
-                # Preserve only this test-owned old result, then restore registry input so both
-                # actual HTTP calls choose the exact same path/name. Response bytes stay untouched.
-                baseline = self.root / f'baseline-{index}.pilib'
-                dest.rename(baseline)
-                registry.write_bytes(registry_before)
                 right = self.request('/api/libraries/new', body)
                 self.assertIsNone(difference(left, right),
                                   (name, left['status'], right['status'], left['body'], right['body']))
@@ -321,22 +309,14 @@ class NativeLifecycleTest(unittest.TestCase):
                     ids = dict(c.execute("SELECT l.key,t.key FROM term_links l JOIN terms t ON t.id=l.term_id "
                                          "WHERE l.system='ccip' AND l.current=1 AND t.kind='character'"))
                 self.assertEqual(set(ids), {'alice', 'bob'})
-                old = library.Library(baseline, json.loads((baseline / 'library.json').read_text()))
-                expected = open_store(old.source, old.db)
-                refresh = terms_characters.refresh
-                def aligned(store, src, c):
-                    return refresh(store, src, c, new_ids={'ccip': ids})
-                with patch.object(terms_characters, 'refresh', side_effect=aligned) as called:
-                    expected.refresh()
-                self.assertEqual(called.call_count, 1)
                 from tests.test_native_library_create import NativeLibraryCreateTest
                 comparator = NativeLibraryCreateTest()
                 comparator.started = started
-                self.assertEqual(comparator.state(old.source), comparator.state(dest / 'source.sqlite'))
-                self.assertEqual(comparator.state(old.db, application=True),
-                                 comparator.state(dest / 'library.sqlite', application=True))
+                old = self.rec.value('old library')
+                self.assertEqual(old['source'], comparator.state(dest / 'source.sqlite'))
+                self.assertEqual(old['application'], comparator.state(dest / 'library.sqlite', application=True))
                 config = json.loads((dest / 'library.json').read_text())
-                self.assertEqual({k: v for k, v in old.config.items() if k not in {'id', 'created_at'}},
+                self.assertEqual({k: v for k, v in old['config'].items() if k not in {'id', 'created_at'}},
                                  {k: v for k, v in config.items() if k not in {'id', 'created_at'}})
                 comparator.timestamp(config['created_at'], iso=True)
                 self.assertEqual(current, (dump(self.lib.source), dump(self.lib.db)))
@@ -357,13 +337,12 @@ class NativeLifecycleTest(unittest.TestCase):
         self.assertEqual(self.request('/api/startup', {'sync': False}, token=token)['status'], 403)
         self.assertEqual(before, dump(dest / 'library.sqlite'))
         self.assertEqual(json.loads(self.request('/api/settings')['body'])['package']['path'], str(dest))
-        self.reference.library = library.Library(dest, config)
-        self.reference.store = Store.open(dest / 'source.sqlite', dest / 'library.sqlite')
-        self.reference.cache = dest / 'thumbnails'
-        self.reference.token = self.token = new_token
+        self.token = new_token
+        self.rec.alias(self.token, '@TOKEN@')
         for url in CORE_READS:
             self.assertEqual(self.pair(url)['route'], 'core')
         self.assertFalse(self.sentinel.exists())
+
 
     @REFERENCE_PARITY_ONLY
     def test_native_library_new_invalid_inputs_and_reference_errors_are_byte_exact(self):
@@ -393,7 +372,7 @@ class NativeLifecycleTest(unittest.TestCase):
                     response = self.pair('/api/libraries/new', base)
                     self.assertEqual(response['status'], status)
                     self.assertEqual(before, (dump(self.lib.source), dump(self.lib.db)))
-                    self.assertFalse((library.HOME / 'bad-input.pilib').exists())
+                    self.assertFalse((self.home / 'bad-input.pilib').exists())
                 finally:
                     self.new_reference.write_bytes(reference_bytes)
         for kind in ('pictures-file', 'dangling-dest', 'long-name'):
@@ -403,14 +382,14 @@ class NativeLifecycleTest(unittest.TestCase):
                     pictures = self.root / 'home' / 'Pictures'
                     # Earlier failed creates may leave empty parents; remove only empty test-owned
                     # directories to inject a regular file, never recursively erase caller contents.
-                    if library.HOME.exists():
-                        library.HOME.rmdir()
+                    if self.home.exists():
+                        self.home.rmdir()
                     if pictures.exists():
                         pictures.rmdir()
                     pictures.parent.mkdir(parents=True, exist_ok=True)
                     pictures.write_bytes(b'not a directory')
                 elif kind == 'dangling-dest':
-                    dest = library.HOME / 'dangling-dest.pilib'
+                    dest = self.home / 'dangling-dest.pilib'
                     dest.parent.mkdir(parents=True, exist_ok=True)
                     missing = self.root / 'missing-link-target.pilib'
                     dest.symlink_to(missing)
@@ -461,11 +440,11 @@ class NativeLifecycleTest(unittest.TestCase):
                 elif kind == 'corrupt':
                     self.new_reference.write_bytes(b'not sqlite')
                 elif kind == 'dangling':
-                    dest = library.HOME / 'photos-failure.pilib'
+                    dest = self.home / 'photos-failure.pilib'
                     dest.parent.mkdir(parents=True, exist_ok=True)
                     dest.symlink_to(self.root / 'missing-package')
                 try:
-                    left = self.request('/api/libraries/new', request, base=self.direct, **kwargs)
+                    left = self.reference_response('/api/libraries/new', request, **kwargs)
                     right = self.request('/api/libraries/new', request, **kwargs)
                     self.assertEqual(left['status'], status)
                     self.assertEqual(right['status'], status)
@@ -473,7 +452,7 @@ class NativeLifecycleTest(unittest.TestCase):
                     self.assertEqual(registry_before, registry.read_bytes())
                     self.assertEqual(photos_before, files(photos))
                     self.assertEqual(json.loads(self.request('/api/bootstrap')['body'])['token'], self.token)
-                    self.assertFalse((library.HOME / 'photos-failure.pilib').exists())
+                    self.assertFalse((self.home / 'photos-failure.pilib').exists())
                     if kind == 'dangling':
                         self.assertTrue(dest.is_symlink())
                 finally:
@@ -495,15 +474,10 @@ class NativeLifecycleTest(unittest.TestCase):
         registry = self.support / 'libraries.json'
         registry_before, current = registry.read_bytes(), (dump(self.lib.source), dump(self.lib.db))
         blocked = registry.with_suffix('.tmp'); blocked.mkdir()
-        left = self.request('/api/libraries/new', body, base=self.direct)
+        left = self.reference_response('/api/libraries/new', body)
         self.assertEqual(left['status'], 400)
-        dest = library.HOME / 'registry-failure.pilib'
+        dest = self.home / 'registry-failure.pilib'
         self.assertTrue(dest.is_relative_to(self.root))
-        self.assertTrue((dest / 'library.json').is_file())
-        self.assertTrue((dest / 'source.sqlite').is_file())
-        # Legacy publishes before remember; preserve that test-owned result and reproduce the
-        # exact failed registry path. Native retains its already complete published package.
-        dest.rename(self.root / 'old-registry-failure.pilib')
         right = self.request('/api/libraries/new', body)
         self.assertEqual(left['status'], right['status'])
         self.assertEqual(right['status'], 400)
@@ -531,7 +505,7 @@ class NativeLifecycleTest(unittest.TestCase):
         with sqlite3.connect(self.lib.db) as keeper:
             keeper.execute('PRAGMA journal_mode=WAL')
             keeper.execute('PRAGMA wal_autocheckpoint=0')
-            self.store.tag(['b'], 'committed-wal-tag')
+            self.assertEqual(self.request('/api/tag', {'ids': ['b'], 'tag': 'committed-wal-tag'})['status'], 200)
             self.assertTrue(Path(str(self.lib.db) + '-wal').stat().st_size > 0)
             response = self.request('/api/backup', {})
             self.assertEqual(response['status'], 200)
@@ -544,8 +518,8 @@ class NativeLifecycleTest(unittest.TestCase):
                 self.assertGreater(backup.execute('SELECT count(*) FROM actions WHERE undone=0').fetchone()[0], 0)
 
     def test_switch_same_id_different_instance_rotates_token_and_failed_switch_preserves_state(self):
-        target, target_store = self.package('second')
-        target.config['id'] = self.lib.config['id']; target.save()
+        target = self.package('second')
+        target.save({**target.config, 'id': self.lib.config['id']})
         old_token = self.token
         response = self.request('/api/libraries/open', {'path': str(target.path)})
         self.assertEqual(response['status'], 200)
@@ -558,14 +532,14 @@ class NativeLifecycleTest(unittest.TestCase):
         self.assertEqual(before, dump(target.db))
         self.token = new_token
         self.assertEqual(self.request('/api/startup', {'local_limit': 4321})['status'], 200)
-        self.assertEqual(target_store.startup()['local_limit'], 4321)
-        self.assertEqual(self.store.startup()['local_limit'], 3000)
+        self.assertEqual(startup(target.db)['local_limit'], 4321)
+        self.assertEqual(startup(self.lib.db)['local_limit'], 3000)
         before = dump(target.db)
         self.assertEqual(self.request('/api/libraries/open', {'path': str(self.root / 'missing.pilib')})['status'], 400)
         self.assertEqual(before, dump(target.db))
         self.assertEqual(json.loads(self.request('/api/bootstrap')['body'])['token'], new_token)
         self.assertEqual(json.loads(self.request('/api/settings')['body'])['package']['path'], str(target.path))
-        upgrade, _ = self.package('needs-upgrade')
+        upgrade = self.package('needs-upgrade')
         for key, value in (('terms_names', 'pending'), ('schema_version', '35')):
             with self.subTest(rejected_open=key):
                 with closing(sqlite3.connect(upgrade.db)) as c:
@@ -590,7 +564,7 @@ class NativeLifecycleTest(unittest.TestCase):
         self.assertFalse(self.sentinel.exists())
 
     def test_request_started_before_switch_cannot_write_new_library(self):
-        target, _ = self.package('second')
+        target = self.package('second')
         body = b'{"local_limit": 1234}'
         conn = http.client.HTTPConnection('127.0.0.1', self.port, timeout=5)
         self.addCleanup(conn.close)
@@ -608,7 +582,7 @@ class NativeLifecycleTest(unittest.TestCase):
         self.assertEqual(before, dump(target.db))
 
     def test_slow_reader_old_snapshot_does_not_block_library_switch(self):
-        target, _ = self.package('second')
+        target = self.package('second')
         ids = [f'old-{i:04}-' + 'x' * 24576 for i in range(200)]
         with closing(sqlite3.connect(self.lib.db)) as c:
             c.executemany('INSERT INTO assets VALUES (?,?,?,?,?,?,?)',
@@ -644,8 +618,7 @@ class NativeLifecycleTest(unittest.TestCase):
         self.assertEqual({item['uuid'] for item in current['items']}, set('abc'))
 
     def test_upgrade_rejection_with_cold_wal_only_creates_sqlite_coordination_files(self):
-        broken, store = self.package('cold-wal')
-        store.tag(['b'], 'cold-failure-history')
+        broken = self.package('cold-wal')  # its recorded history holds 'cold-failure-history'
         with closing(sqlite3.connect(broken.db)) as c:
             c.execute("UPDATE meta SET value='35' WHERE key='schema_version'")
             c.commit()
@@ -668,11 +641,11 @@ class NativeLifecycleTest(unittest.TestCase):
         self.assertTrue(any('cold-failure-history' in line for line in before_sql))
 
     def test_upgrade_rejection_with_active_wal_preserves_database_wal_history(self):
-        broken, store = self.package('active-wal')
+        # The recorded package holds the old command's history; the meta change below stays in the WAL.
+        broken = self.package('active-wal')  # its recorded history holds 'failure-wal-history'
         with closing(sqlite3.connect(broken.db)) as keeper:
             keeper.execute('PRAGMA journal_mode=WAL')
             keeper.execute('PRAGMA wal_autocheckpoint=0')
-            store.tag(['b'], 'failure-wal-history')
             keeper.execute("UPDATE meta SET value='35' WHERE key='schema_version'")
             keeper.commit()
             before_sql = dump(broken.db)
@@ -690,7 +663,7 @@ class NativeLifecycleTest(unittest.TestCase):
             self.assertTrue(any('failure-wal-history' in line for line in before_sql))
 
     def test_upgrade_missing_database_and_native_python_flags_reject_without_side_effects(self):
-        broken, _ = self.package('broken')
+        broken = self.package('broken')
         for key, value in (('schema_version', '35'), ('terms_schema', '6'), ('terms_names', 'pending')):
             with self.subTest(key=key):
                 with sqlite3.connect(broken.db) as c:
@@ -764,7 +737,7 @@ class NativeLifecycleTest(unittest.TestCase):
 
     def test_production_python_has_no_compatibility_host(self):
         result = subprocess.run([__import__('sys').executable, '-c',
-            "import importlib.util; assert all(importlib.util.find_spec('web.' + m) is None for m in ('server','store','terms_core','results')); import web.learn"],
+            "from pathlib import Path; assert not list(Path('web').glob('*.py')); assert not list(Path('tests/reference').rglob('*.py')); assert not list(Path('provenance').rglob('*.py'))"],
             cwd=self.resources, env=self.env, capture_output=True, timeout=10)
         self.assertEqual(result.returncode, 0, result.stderr.decode())
 

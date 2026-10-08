@@ -1,7 +1,7 @@
 //! 词条核心的表、类型策略和迁移。
 //!
 //! 表放在 library.sqlite 里，全部以 `term_` 开头，和 Python 现有的 `entities`、`names`、`links`、`assets`
-//! 等并存；只有撤销历史 `actions` 和版本表 `meta` 是共用的，定义与 tests/reference/web/store.py 逐字一致。
+//! 等并存；只有撤销历史 `actions` 和版本表 `meta` 是共用的，定义与 tests/reference/web/store.py（#9 已删除） 逐字一致。
 //! 版本号记在 `meta` 的 `terms_schema`，与 Python 的 schema 版本各自独立。
 
 #[cfg(test)]
@@ -134,7 +134,7 @@ impl Kind {
                 None,
                 true,
             ),
-            // 与 tests/reference/web/store.py refresh_ratings 一致：每张图取 WD 最高的一个分级。
+            // 与 tests/reference/web/store.py（#9 已删除） refresh_ratings 一致：每张图取 WD 最高的一个分级。
             Kind::Rating => p("分级", Judge::Top { metric: WD }, Exclusive::ExactlyOne, true, None, false),
             // 与 general_hits 一致：WD ≥ 0.35 算命中；0.2–0.35 只给搜索放宽用。
             Kind::Topic => p(
@@ -202,7 +202,7 @@ pub const SCHEMA_VERSION: i64 = 7;
 pub const REPLACEABLE: [(&str, &str); 2] = [("wd", "wd_character"), ("ccip_index", "char_ext")];
 
 /// 整个来源一起替换的机器证据（第 3 版）：一次交付是这个来源的全量快照，覆盖到的图上它所有方法的证据都按批次生效，
-/// 批次的方法记为 `*`。溯源每次交的包就是 provenance.sqlite 的全量快照（tests/reference/provenance/export.py）：快照里没有了的
+/// 批次的方法记为 `*`。溯源每次交的包就是 provenance.sqlite 的全量快照（tests/reference/provenance/export.py（#9 已删除））：快照里没有了的
 /// 候选（分组推荐每次重算）随之失效。与 V3 的 CHECK 和 term_current_evidence 一致。
 pub const REPLACEABLE_SOURCES: [&str; 1] = ["provenance"];
 
@@ -338,7 +338,7 @@ pub(crate) fn backup_before_cutover(
 /// 别的连接看不到未提交的行，所以 Python 在核心事务之外写这些表都会被拒绝。
 pub const WRITER_KEY: &str = "terms_writer";
 
-/// 与 tests/reference/web/store.py 的定义逐字一致；已存在时是空操作。
+/// 与 tests/reference/web/store.py（#9 已删除） 的定义逐字一致；已存在时是空操作。
 const SHARED: &str = "
 CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY,value TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS actions(id INTEGER PRIMARY KEY AUTOINCREMENT,label TEXT NOT NULL,before_json TEXT NOT NULL,ts TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,undone INTEGER NOT NULL DEFAULT 0);
@@ -1223,7 +1223,7 @@ mod tests {
 
     #[test]
     fn coexists_with_the_python_library_tables() {
-        // 与 tests/reference/web/store.py 相同的 meta/actions 定义，以及一段已有历史。
+        // 与 tests/reference/web/store.py（#9 已删除） 相同的 meta/actions 定义，以及一段已有历史。
         let mut c = Connection::open_in_memory().unwrap();
         c.execute_batch(
             "CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY,value TEXT NOT NULL);

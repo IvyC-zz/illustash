@@ -1,5 +1,6 @@
--- 旧库（web/store.py、web/identity.py、tests/reference/web/works.py 建的）里 legacy_characters 读的表，从 Python 建的库原样导出。
--- 只给测试用：用 tests.test_web.fixture 建库、activate_identity(hybrid) 之后从 sqlite_master 导出。旧 schema 变了要重新导出，不手改。
+-- 旧库（web/store.py（#9 已删除）、web/identity.py（#9 已删除）、tests/reference/web/works.py（#9 已删除） 建的）里 legacy_characters 读的表，从 Python 建的库原样导出。
+-- 只给测试用：当初用 tests.test_web.fixture 建库、activate_identity(hybrid) 之后从 sqlite_master 导出，不手改。
+-- 旧 Python 实现已删除（#9），旧 schema 不再变化，也不再重新导出。
 CREATE TABLE meta(key TEXT PRIMARY KEY,value TEXT NOT NULL);
 CREATE TABLE actions(id INTEGER PRIMARY KEY AUTOINCREMENT,label TEXT NOT NULL,before_json TEXT NOT NULL,ts TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,undone INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE assets(uuid TEXT PRIMARY KEY,filename TEXT,src_path TEXT,width INTEGER,height INTEGER,added_at TEXT,src_kind TEXT);

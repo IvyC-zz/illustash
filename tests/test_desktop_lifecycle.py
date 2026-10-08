@@ -53,7 +53,7 @@ class DesktopLifecycleTest(unittest.TestCase):
         self.assertIn('正在检查图库数据（source.sqlite）', {stage for _, _, stage in progress})
 
     def test_eof_waits_and_releases_port_after_library_switch(self):
-        second, store = self.package('second')
+        second = self.package('second')
         response = self.request('/api/libraries/open', {'path': str(second.path)})
         self.assertEqual(response['status'], 200)
         self.process.stdin.close()

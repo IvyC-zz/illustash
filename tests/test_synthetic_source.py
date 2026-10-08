@@ -17,6 +17,8 @@ class SyntheticSourceTest(unittest.TestCase):
         code = '''
 import importlib.abc
 import sys
+from pathlib import Path
+sys.path.insert(0, str(Path.cwd()))
 blocked = {'web.store', 'web.server', 'web.library', 'tests.test_web',
            'tests.test_native_library_create'}
 class Refuse(importlib.abc.MetaPathFinder):

@@ -1,12 +1,14 @@
 """M2 user-label/undo acceptance, on independent disposable package clones only.
 
-Explicit ILLUSTASH_TERMS_BIN is required; missing release is not acceptance. Python 3.12
-constructs the original fixture and serves the real reference handler. Neither server starts
-research workers. All declared app/source/provenance tables, views, raw DDL, typed cells and
-rowids are compared after each HTTP step, including history, undo and durable events. No
-response/DB normalization is performed. Only this newly generated seed's timestamp DEFAULTs
-are fixed before cloning; preseeded user terms avoid independent random identity creation.
-Snapshots are individually transactional, not an assertion of cross-database atomicity.
+Explicit ILLUSTASH_TERMS_BIN is required; missing release is not acceptance. The native host is
+compared with the former Python reference handler through fixed recordings (tests/fixed_expectations.py,
+#9): the seed packages, every reference response and the reference library state after each step
+were recorded while the reference existed). Neither side
+starts research workers. All app/source/provenance tables, raw DDL, typed cells and rowids are
+compared after each HTTP step (as digests), including history, undo and durable events. Responses
+are compared byte for byte; only session tokens, loopback origins and temporary roots are
+placeholders. The recorded seed fixed its timestamp DEFAULTs and preseeded user terms, so native
+results are deterministic. Snapshots are individually transactional, not cross-database atomic.
 """
 from contextlib import closing
 import datetime
@@ -25,13 +27,11 @@ import time
 import unittest
 from unittest.mock import patch
 
-from provenance import db as provenance_db, export
+from tests.fixed_expectations import Library, Expectations, library_digests, unclocked
 from tests.test_read_http import INTERRUPT, SPAWN, free_port, wait_until
 from tests.synthetic_source import source_fixture as fixture
-from tools.verify_read_http import difference, fetch, temporary_path
-from web import artists, effects, library, names, terms_core
-from web.server import Server
-from web.store import Store
+from tools import verify_read_http
+from tools.verify_read_http import fetch, temporary_path
 
 HEADERS = ('Content-Type', 'Content-Length', 'Content-Encoding', 'Cache-Control', 'Vary',
            'X-Content-Type-Options', 'Referrer-Policy', 'Content-Security-Policy')
@@ -41,29 +41,20 @@ def quote(name):
     return '"' + name.replace('"', '""') + '"'
 
 
+def difference(left, right):
+    """Byte difference of two responses; clock-like text is compared as `<clock>`."""
+    masked = [dict(r, body=unclocked(r['body'])) if 'body' in r else r for r in (left, right)]
+    return verify_read_http.difference(*masked)
+
+
 def snapshot(path):
-    """All persisted objects and values, with storage types and physical table rowids."""
-    path = temporary_path(path)
-    with closing(sqlite3.connect(path.as_uri() + '?mode=ro', uri=True)) as c:
-        c.row_factory = sqlite3.Row
-        c.execute('BEGIN')
-        if c.execute("SELECT 1 FROM sqlite_schema WHERE name='meta'").fetchone():
-            names.register(c)
-        schema = [tuple(r) for r in c.execute('SELECT type,name,tbl_name,sql FROM sqlite_schema ORDER BY type,name')]
-        result = {'schema': schema, 'user_version': c.execute('PRAGMA user_version').fetchone()[0]}
-        for kind, name, _, sql in schema:
-            if kind not in ('table', 'view'):
-                continue
-            columns = '*' if kind == 'view' or 'WITHOUT ROWID' in (sql or '').upper() else 'rowid,*'
-            cursor = c.execute('SELECT ' + columns + ' FROM ' + quote(name))
-            result[name] = ([col[0] for col in cursor.description],
-                            sorted((tuple((type(v).__name__, v) for v in row) for row in cursor), key=repr))
-        return result
+    """Schema and every table (typed cells and physical rowids), as per-table digests."""
+    from tests.fixed_expectations import table_digests
+    return table_digests(temporary_path(path))
 
 
 def states(lib):
-    return {name: snapshot(lib.path / filename) for name, filename in
-            (('app', 'library.sqlite'), ('source', 'source.sqlite'), ('provenance', 'provenance.sqlite'))}
+    return library_digests(lib)
 
 
 def freeze_seed_defaults(path):
@@ -128,6 +119,7 @@ class SnapshotTest(unittest.TestCase):
             harness.left, harness.right = left, right
             harness.direct, harness.origin = 'left', 'right'
             harness.token, harness.latency, harness.sentinel = 'token', [], root / 'sentinel'
+            harness.rec = Live(harness)
             def partial(base, item, origin):
                 lib = left if base == 'left' else right
                 with closing(sqlite3.connect(lib.path / 'library.sqlite')) as c:
@@ -148,6 +140,16 @@ class SnapshotTest(unittest.TestCase):
                     harness.pair('/api/tag', {'ids': ['a'], 'tag': 'synthetic'})
 
 
+class Live:
+    """比较器自测的假响应与状态输入，独立于产品实现。"""
+    def __init__(self, harness):
+        self.harness = harness
+    def state(self, label):
+        return states(self.harness.left)
+    def response(self, item):
+        return fetch(self.harness.direct,item,self.harness.direct)
+
+
 class NativeHumanLabelsTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -161,12 +163,11 @@ class NativeHumanLabelsTest(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory(prefix='illustash-m2-human-')
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name).resolve()
+        self.rec = Expectations(self)
+        self.addCleanup(self.rec.finish, self)
+        self.rec.alias(self.root, '@ROOT@')
         support, shared = self.root / 'support', self.root / 'shared'
         shared.mkdir()
-        for name, value in (('APP_SUPPORT', support), ('SHARED', shared),
-                            ('HOME', self.root / 'home' / 'Pictures' / 'Illustash')):
-            scoped = patch.object(library, name, value)
-            scoped.start(); self.addCleanup(scoped.stop)
         sentinel_bin = self.root / 'bin'; sentinel_bin.mkdir()
         self.sentinel = self.root / 'python-was-launched'
         for command in ('python', 'python3', 'python3.12'):
@@ -175,44 +176,22 @@ class NativeHumanLabelsTest(unittest.TestCase):
             executable.chmod(0o755)
         self.env = {**os.environ, 'PATH': str(sentinel_bin), 'HOME': str(self.root / 'home'), 'USERPROFILE': str(self.root / 'home'),
                     'ILLUSTASH_APP_SUPPORT': str(support), 'ILLUSTASH_SHARED': str(shared),
-                    'ILLUSTASH_PYTHON_SENTINEL': str(self.sentinel)}
-        seed = library.create(self.root / 'original.pilib', 'Synthetic')
-        fixture(seed.path).rename(seed.source)
-        with closing(sqlite3.connect(seed.source)) as c:
-            c.execute('ALTER TABLE assets ADD COLUMN stable_hash TEXT')
-            c.execute("UPDATE assets SET stable_hash='same' WHERE uuid IN ('a','b')")
-            c.commit()
-        with closing(provenance_db.connect(seed)) as c:
-            self.artist = provenance_db.artist_for(c, [('x', 'synthetic_artist', '')], 'test')
-            c.executemany("INSERT INTO image_artists(asset,artist_id,method,status) VALUES (?,?,'pixel_hash','auto')",
-                          [('a', self.artist), ('b', self.artist)])
-            c.commit()
-        store = Store(seed.source, seed.db); store.refresh()
-        seed.config['id'] = store.library_id(); seed.save()
-        terms_core.import_package(seed.db, store.library_id(), export.write(seed, self.root / 'artist-evidence'))
-        freeze_seed_defaults(seed.db)
-        self.pristine = self.clone(seed, 'pristine-no-history')
-        # Each identity is born once before cloning. The tested calls use real tag/undo commands.
-        for tag in ('合成 标签', '第二标签'):
-            store.undo(store.tag(['c'], tag)['id'])
-        self.alice, self.bob = store.entities('Alice')[0]['id'], store.entities('Bob')[0]['id']
-        self.left, self.right = self.clone(seed, 'left'), self.clone(seed, 'right')
-        self.store = Store.open(self.left.source, self.left.db)
-        self.store.artist_assets = lambda artist: artists.assets_of(self.left, artist, rejected=self.store.artist_verdicts())
+                    'ILLUSTASH_PYTHON_SENTINEL': str(self.sentinel),
+                    # Reproducible native keys, so recorded expectations hold (store::new_key test hook).
+                    'ILLUSTASH_TEST_KEY_COUNTER': str(self.root / 'key-counter')}
+        for name in ('pristine', 'left', 'right'):
+            lib = self.rec.package(name, self.root / f'{name}.pilib')
+            setattr(self, name, lib)
+        self.alice, self.bob, self.artist = self.rec.value('ids')
         self.port = free_port(); self.origin = f'http://127.0.0.1:{self.port}'
-        self.reference = Server(('127.0.0.1', 0), self.store, self.left.thumbnails, public_origin=self.origin)
-        self.reference.library = self.left
-        self.reference.forced_off = {'index_check', 'names', 'provenance', 'similar', 'sync'}
-        self.direct = f'http://127.0.0.1:{self.reference.server_port}'
-        self.thread = threading.Thread(target=self.reference.serve_forever, daemon=True); self.thread.start()
-        self.addCleanup(self.reference.server_close)
-        self.addCleanup(self.thread.join)
-        self.addCleanup(self.reference.shutdown)
+        self.rec.alias(self.origin, '@ORIGIN@')
         self.process = self.start(self.right)
         self.token = json.loads(fetch(self.origin, {'url': '/api/bootstrap'}, self.origin)['body'])['token']
-        self.reference.token = self.token
-        self.assertEqual(states(self.left), states(self.right))
+        self.rec.alias(self.token, '@TOKEN@')
+        self.assertEqual(self.rec.state('start'), states(self.right))
         self.latency = []
+
+
 
     def clone(self, source, name):
         path = self.root / (name + '.pilib'); path.mkdir()
@@ -223,7 +202,7 @@ class NativeHumanLabelsTest(unittest.TestCase):
                 src.backup(dst)
         for directory in ('thumbnails', 'features', 'backups'):
             (path / directory).mkdir()
-        return library.open_library(path)
+        return Library(path)
 
     def stop(self, process):
         if process.poll() is None:
@@ -245,13 +224,16 @@ class NativeHumanLabelsTest(unittest.TestCase):
             log.seek(0); self.fail(f'native startup failed: {log.read().decode(errors="replace")}')
         return process
 
+    def reference_response(self, label, item):
+        """The former reference's response to the same request (recorded)."""
+        return self.rec.response(item) if isinstance(self.rec, Live) else self.rec.value(label)
+
     def pair(self, url, body, *, expected=200, headers=None):
-        before = [states(lib) for lib in (self.left, self.right)]
-        responses = [fetch(base, {'url': url, 'method': 'POST', 'body': json.dumps(body, ensure_ascii=False).encode('utf-8'),
-                                'headers': {'Content-Type': 'application/json', 'X-CSRF-Token': self.token,
-                                            **(headers or {})}}, self.origin)
-                     for base in (self.direct, self.origin)]
-        after = [states(lib) for lib in (self.left, self.right)]
+        item = {'url': url, 'method': 'POST', 'body': json.dumps(body, ensure_ascii=False).encode('utf-8'),
+                'headers': {'Content-Type': 'application/json', 'X-CSRF-Token': self.token, **(headers or {})}}
+        before = [self.rec.state('before'), states(self.right)]
+        responses = [self.reference_response('response', item), fetch(self.origin, item, self.origin)]
+        after = [self.rec.state('after'), states(self.right)]
         # Even two identically failed/partially committed commands must fail acceptance.
         for old, new, response in zip(before, after, responses):
             if response['status'] >= 400:
@@ -266,23 +248,28 @@ class NativeHumanLabelsTest(unittest.TestCase):
         self.assertFalse(self.sentinel.exists())
         return json.loads(responses[1]['body'])
 
-    def undo_latest(self):
-        with closing(sqlite3.connect(self.left.db)) as c:
+    def latest_action(self):
+        """Latest live action; both sides hold the same history (checked after every step)."""
+        with closing(sqlite3.connect(self.right.db)) as c:
             action = c.execute('SELECT id FROM actions WHERE undone=0 ORDER BY id DESC LIMIT 1').fetchone()
-        self.assertIsNotNone(action)
-        return self.pair('/api/undo', {'id': action[0]})
+        return action[0] if action else None
 
-    def seed_both(self, operation):
-        # Seed history through actual old commands once, then clone the complete committed input.
+    def undo_latest(self):
+        action = self.latest_action()
+        self.assertIsNotNone(action)
+        return self.pair('/api/undo', {'id': action})
+
+    def seed_both(self):
+        # Seed history through actual old commands once (recorded), then clone the complete committed input.
         self.stop(self.process)
-        operation(self.store)
+        self.rec.package('seeded', self.left.path)
         for filename in ('library.sqlite', 'source.sqlite', 'provenance.sqlite'):
             with closing(sqlite3.connect(self.left.path / filename)) as src, closing(sqlite3.connect(self.right.path / filename)) as dst:
                 src.backup(dst)
         self.process = self.start(self.right)
         self.token = json.loads(fetch(self.origin, {'url': '/api/bootstrap'}, self.origin)['body'])['token']
-        self.reference.token = self.token
-        self.assertEqual(states(self.left), states(self.right))
+        self.rec.alias(self.token, '@TOKEN@')
+        self.assertEqual(self.rec.state('seeded'), states(self.right))
 
     def test_tag_add_remove_filter_duplicates_and_literal_false(self):
         first = self.pair('/api/tag', {'ids': ['a', 'a'], 'tag': ' 合成\t标签\n'})['undo']
@@ -314,14 +301,9 @@ class NativeHumanLabelsTest(unittest.TestCase):
                 self.pair('/api/undo', {'id': value}, expected=400 if value not in ([], {}) else 500)
 
     def test_cross_type_latest_undo_and_committed_effects(self):
-        def stack(store):
-            store.skip_identity_pair(self.alice, self.bob)
-            store.curate(['c'], 'exclude')
-            store.judge_artist(['b'], self.artist, 'no', '@synthetic_artist')
-            store.change(['b'], 'confirmed', self.bob)
-        self.seed_both(stack)
+        self.seed_both()
         self.pair('/api/tag', {'ids': ['c'], 'tag': '第二标签'})
-        with closing(sqlite3.connect(self.left.db)) as c:
+        with closing(sqlite3.connect(self.right.db)) as c:
             oldest = c.execute('SELECT min(id) FROM actions WHERE undone=0').fetchone()[0]
         self.pair('/api/undo', {'id': oldest}, expected=400)
         for _ in range(5):
@@ -342,17 +324,12 @@ class NativeHumanLabelsTest(unittest.TestCase):
                 with closing(sqlite3.connect(lib.db)) as c:
                     c.execute('DROP TRIGGER fail_write'); c.commit()
         for owner in ('character', 'curation'):
-            def seed(store):
-                if owner == 'character':
-                    store.change(['c'], 'confirmed', self.alice)
-                else:
-                    store.curate(['c'], 'exclude')
-            self.seed_both(seed)
+            self.seed_both()
             for lib in (self.left, self.right):
                 with closing(sqlite3.connect(lib.db)) as c:
                     c.execute("CREATE TRIGGER fail_event BEFORE INSERT ON backend_effects BEGIN SELECT RAISE(ABORT,'synthetic event failure'); END")
                     c.commit()
-            with closing(sqlite3.connect(self.left.db)) as c:
+            with closing(sqlite3.connect(self.right.db)) as c:
                 action = c.execute('SELECT max(id) FROM actions WHERE undone=0').fetchone()[0]
             self.pair('/api/undo', {'id': action}, expected=500)
             for lib in (self.left, self.right):
@@ -363,7 +340,7 @@ class NativeHumanLabelsTest(unittest.TestCase):
             with closing(sqlite3.connect(lib.db)) as c:
                 c.execute("INSERT INTO actions(label,before_json) VALUES ('unknown synthetic','[{\"unknown\":true}]')")
                 c.commit()
-        self.pair('/api/undo', {'id': self.store.overview()['undo']['id']}, expected=500)
+        self.pair('/api/undo', {'id': self.rec.value('reference undo id')}, expected=500)
 
     def test_csrf_host_and_origin_refuse_without_database_writes(self):
         for headers in ({'X-CSRF-Token': 'bad'}, {'Host': 'evil.example'}, {'Origin': 'https://evil.example'}):
@@ -376,24 +353,23 @@ class NativeHumanLabelsTest(unittest.TestCase):
                 c.execute("CREATE TRIGGER fail_action BEFORE INSERT ON actions BEGIN SELECT RAISE(ABORT,'synthetic action failure'); END")
                 c.commit()
         # The injected schema itself is part of the common input, not an output exception.
-        before = [states(lib) for lib in (self.left, self.right)]
+        before = [self.rec.state('before'), states(self.right)]
         item = {'method': 'POST', 'url': '/api/tag', 'body': json.dumps({'ids': ['a'], 'tag': '全新故障标签'}),
                 'headers': {'Content-Type': 'application/json', 'X-CSRF-Token': self.token}}
-        old = fetch(self.direct, item, self.origin)
+        old = self.reference_response('response', item)
         native = fetch(self.origin, item, self.origin)
         self.assertIsNone(difference(old, native), difference(old, native))
         self.assertEqual(native['status'], 500)
         self.assertEqual(states(self.right), before[1])
         # The old CLI creates the concept outside its verdict transaction. Record the real
         # legacy partial commit separately; this exception never weakens normal pair().
-        after_old = states(self.left)
+        after_old = self.rec.state('after old')
         self.assertNotEqual(after_old, before[0], 'the legacy partial-create bug must be evidenced')
         self.assertEqual(after_old['source'], before[0]['source'])
         self.assertEqual(after_old['provenance'], before[0]['provenance'])
         self.assertEqual(after_old['app']['actions'], before[0]['app']['actions'])
         self.assertEqual(after_old['app']['backend_effects'], before[0]['app']['backend_effects'])
-        with closing(sqlite3.connect(self.left.db)) as c:
-            self.assertEqual(c.execute("SELECT count(*) FROM terms t JOIN term_names n ON n.term_id=t.id WHERE t.kind='concept' AND n.value='全新故障标签'").fetchone()[0], 1)
+        self.assertEqual(self.rec.value('old concepts'), 1)
         with closing(sqlite3.connect(self.right.db)) as c:
             self.assertEqual(c.execute("SELECT count(*) FROM terms t JOIN term_names n ON n.term_id=t.id WHERE t.kind='concept' AND n.value='全新故障标签'").fetchone()[0], 0)
         # Successful birth is native-only: the two engines generate independent UUIDs.
@@ -406,8 +382,7 @@ class NativeHumanLabelsTest(unittest.TestCase):
         self.assertEqual(created['route'], 'core')
         action = json.loads(created['body'])['undo']
         self.assertEqual(action['label'], '已给 1 张加上标签 全新故障标签')
-        native_store = Store.open(self.right.source, self.right.db)
-        expected_tags = native_store.user_tags()
+        expected_tags = self.rec.value('reference reading of the native tags')
         tags = fetch(self.origin, {'url': '/api/user-tags'}, self.origin)
         self.assertEqual(tags['status'], 200)
         self.assertEqual(tags['body'], json.dumps(expected_tags, ensure_ascii=False).encode())
@@ -447,26 +422,7 @@ class NativeHumanLabelsTest(unittest.TestCase):
         for owner in ('tag', 'artist', 'character', 'curation', 'identity_skip'):
             for value in (True, 1.0, '1'):
                 with self.subTest(owner=owner, id=value):
-                    def seed(store):
-                        # Each owner's actual first action is produced from the untouched,
-                        # complete no-history seed. No dangling/rebound action foreign keys.
-                        for filename in ('library.sqlite', 'source.sqlite', 'provenance.sqlite'):
-                            with closing(sqlite3.connect(self.pristine.path / filename)) as src, closing(sqlite3.connect(self.left.path / filename)) as dst:
-                                src.backup(dst)
-                        if owner == 'tag':
-                            action = store.tag(['c'], '第二标签')
-                        elif owner == 'artist':
-                            action = store.judge_artist(['c'], self.artist, 'no', '合成画师')
-                        elif owner == 'character':
-                            action = store.change(['c'], 'confirmed', self.alice)
-                        elif owner == 'curation':
-                            action = store.curate(['c'], 'exclude')
-                        else:
-                            action = store.skip_identity_pair(self.alice, self.bob)
-                        self.assertEqual(action['id'], 1)
-                        with store.connect() as c:
-                            self.assertEqual(c.execute('PRAGMA foreign_key_check').fetchall(), [])
-                    self.seed_both(seed)
+                    self.seed_both()
                     rejected = owner == 'character' or owner in ('curation', 'identity_skip') and isinstance(value, str)
                     self.pair('/api/undo', {'id': value}, expected=400 if rejected else 200)
 
@@ -515,39 +471,38 @@ class NativeHumanLabelsTest(unittest.TestCase):
         # committed. Its exact old HTTP500 does not mean the undo itself was rolled back.
         # Keep this explicit committed phase separate from pair()'s precommit fault gate.
         for owner in ('character', 'curation'):
-            def seed(store):
-                if owner == 'character':
-                    store.change(['c'], 'confirmed', self.alice)
-                else:
-                    store.curate(['c'], 'exclude')
-            self.seed_both(seed)
+            self.seed_both()
             for lib in (self.left, self.right):
                 with closing(sqlite3.connect(lib.db)) as c:
                     c.execute("CREATE TRIGGER fail_ack BEFORE UPDATE ON backend_effects WHEN OLD.kind='verdict' "
                               "BEGIN SELECT RAISE(ABORT,'synthetic acknowledgement failure'); END")
                     c.commit()
-            with closing(sqlite3.connect(self.left.db)) as c:
+            with closing(sqlite3.connect(self.right.db)) as c:
                 action = c.execute('SELECT max(id) FROM actions WHERE undone=0').fetchone()[0]
-            before = [states(lib) for lib in (self.left, self.right)]
+            before = [self.rec.state('before'), states(self.right)]
             item = {'method': 'POST', 'url': '/api/undo', 'body': json.dumps({'id': action}).encode(),
                     'headers': {'Content-Type': 'application/json', 'X-CSRF-Token': self.token}}
-            old, native = [fetch(base, item, self.origin) for base in (self.direct, self.origin)]
+            old, native = self.reference_response('response', item), fetch(self.origin, item, self.origin)
             self.assertIsNone(difference(old, native), difference(old, native))
             self.assertEqual(native['status'], 500)
             self.assertEqual(native['body'], json.dumps({'error': '保存失败，未提交的操作已回滚；请查看启动终端'}, ensure_ascii=False).encode())
-            after = [states(lib) for lib in (self.left, self.right)]
+            after = [self.rec.state('after'), states(self.right)]
             self.assertEqual(after[0], after[1])
+            def committed(lib):
+                with closing(sqlite3.connect(lib.db)) as c:
+                    return (c.execute('SELECT undone FROM actions WHERE id=?', (action,)).fetchone()[0],
+                            c.execute("SELECT kind,status,error FROM backend_effects ORDER BY id DESC LIMIT 1").fetchone())
             for lib, previous, current in zip((self.left, self.right), before, after):
                 self.assertEqual(previous['source'], current['source'])
                 self.assertEqual(previous['provenance'], current['provenance'])
+            for seen in (self.rec.value('old side committed'), committed(self.right)):
+                self.assertEqual(tuple(seen[0:1]) + (tuple(seen[1]),), (1, ('verdict', 'pending', '')))
+            for lib in (self.left, self.right):
                 with closing(sqlite3.connect(lib.db)) as c:
-                    self.assertEqual(c.execute('SELECT undone FROM actions WHERE id=?', (action,)).fetchone()[0], 1)
-                    self.assertEqual(c.execute("SELECT kind,status,error FROM backend_effects ORDER BY id DESC LIMIT 1").fetchone(),
-                                     ('verdict', 'pending', ''))
                     c.execute('DROP TRIGGER fail_ack'); c.commit()
-            effects.drain(self.store, self.reference._after_operation)
+            drained = self.rec.state('drained')
             # No HTTP request: the native loop must recover its committed pending event.
-            wait_until(lambda: states(self.right) == states(self.left), timeout=5)
+            wait_until(lambda: states(self.right) == drained, timeout=5)
             self.assertFalse(self.sentinel.exists())
         self.stop(self.process)
         with closing(sqlite3.connect(self.right.db)) as c:
