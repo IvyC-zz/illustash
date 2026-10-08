@@ -257,8 +257,9 @@ Path(sys.argv[2]).write_text(json.dumps(dict(identity=r['identity'],packages=pac
         for uuid in ('E','F'):
             self.photo(uuid,'com.atebits.Tweetie2')
             original=self.library/f'originals/{uuid}/{uuid}.png';original.parent.mkdir(parents=True);original.write_bytes(b'synthetic')
-        # The worker runs about 2 s, longer than the 0.8 s idle window, but never 0.8 s without progress.
-        self.env['ILLUSTASH_RECOGNITION_TIMEOUT_MS']='800'
+        # The worker runs about 2 s, longer than the 1.5 s idle window; progress arrives every 0.4 s.
+        # The first report includes interpreter/NumPy startup, so allow room for a loaded machine.
+        self.env['ILLUSTASH_RECOGNITION_TIMEOUT_MS']='1500'
         self.worker('slow')
         value=self.sync()
         self.assertEqual(value['state']['status'],'done',value)

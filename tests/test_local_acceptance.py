@@ -245,7 +245,7 @@ class LocalAcceptanceTests(unittest.TestCase):
         targeted = script.index('if [ -n "${CHECK_ALL_TARGETED_TESTS:-}" ]')
         end = script.index('log="$cache/unittest.log"')
         self.assertLess(start, targeted)
-        self.assertLess(targeted, script.index('run "$python" -m unittest discover -s tests -v -b'))
+        self.assertLess(targeted, script.index('run "$python" -m tests.run_fixed_suite -v -b'))
         # 执行真实脚本的构建至定向片段；只将 cargo 变成合成写入。
         for name in ('native/terms/target/release/illustash-terms', 'crates/iqdb/target/release/illustash-iqdb',
                      'native/terms/target/release/examples/read-http'):

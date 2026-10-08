@@ -105,8 +105,14 @@ class NativeLocalReadsTest(unittest.TestCase):
         self.ask(kind='sample',entity=self.alice,allowed=eligible-seeds)
         later=sorted(eligible-seeds)[0];excluded=sorted(eligible-seeds)[1]
         self.seed_both()
+        # The recorded later answer is a relative-time input, not a permanent date.
+        # Preserve the frozen outputs while exercising an unexpired seven-day rest.
+        with closing(sqlite3.connect(self.right.db)) as c, c:
+            c.execute("UPDATE asked SET asked_at=datetime('now') WHERE answer='later'")
         self.ask()
         self.seed_both()
+        with closing(sqlite3.connect(self.right.db)) as c, c:
+            c.execute("UPDATE asked SET asked_at=datetime('now','-8 days') WHERE answer='later'")
         self.ask(kind='sample',entity=self.alice,allowed=eligible-seeds-{later,excluded})
 
     def test_hints_first_score_order_skip_and_nsfw(self):

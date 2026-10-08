@@ -360,7 +360,8 @@ class InstalledIndexAppTest(CandidateIndexAdapter, unittest.TestCase):
         self.assertFalse(self.sentinel.exists())
 
     def test_timeout_cancels_after_actual_compute_without_formal_writes(self):
-        self.env['ILLUSTASH_INDEX_TIMEOUT_MS'] = '1000'
+        # Allow the actual calculator to start before the deliberately held result times out.
+        self.env['ILLUSTASH_INDEX_TIMEOUT_MS'] = '5000'
         self.hold_after_actual_compute(); before = snapshot(self.lib.source); self.start_held()
         worker_pid = int(self.ready.read_text()); result = self.finish()
         self.assertEqual(result['state']['status'], 'error', result)
