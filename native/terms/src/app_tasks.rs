@@ -320,15 +320,19 @@ mod tests {
         let idle = Deadline { idle: Some(Duration::from_millis(80)), limit: None };
         // Steady progress keeps the task alive well past one idle window.
         let started = Instant::now();
+        let last = Arc::new(Mutex::new(started));
+        let seen = last.clone();
         let (message, timed_out) = stopped(idle, move |ctx| {
             while started.elapsed() < Duration::from_millis(400) {
+                *seen.lock().unwrap() = Instant::now();
                 ctx.progressed();
                 assert!(ctx.check().is_ok(), "progressing task stopped");
                 thread::sleep(Duration::from_millis(20));
             }
         });
-        // The last progress came at most one 20 ms step before 400 ms, so expiry is no earlier than 460 ms.
-        assert!(started.elapsed() >= Duration::from_millis(400 - 20 + 80));
+        // Expiry is no earlier than one idle window after the last progress, however late a sleep ran.
+        assert!(started.elapsed() >= Duration::from_millis(400));
+        assert!(last.lock().unwrap().elapsed() >= Duration::from_millis(80));
         assert_eq!((message.as_str(), timed_out), ("不合法：任务超时：80 毫秒没有进展", true));
         let limit = Deadline { idle: Some(Duration::from_secs(60)), limit: Some(Duration::from_millis(150)) };
         let (message, timed_out) = stopped(limit, |ctx| ctx.progressed());
