@@ -546,6 +546,8 @@ fn refresh(library: &Library, run_id: i64, cancel: &AtomicBool) -> Result<(Value
     } else {
         json!({"added":0,"removed":0})
     };
+    // Changed pictures were imported above (an 'imported' event follows), so similar recomputes them.
+    crate::app_research::forget_content(&tx, &src, &changed)?;
     for (key, hash) in hashes {
         tx.execute("INSERT INTO meta(key,value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value WHERE value<>excluded.value", params![key, hash])?;
     }

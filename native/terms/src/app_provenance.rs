@@ -405,6 +405,7 @@ impl Runner {
             self.initialize()?;
             let identity = TaskIdentity::new(&self.library, self.generation, &self.session)?;
             let c = cache::connect(&self.path())?;
+            cache::forget_changed_content(&c, &self.library)?;
             c.execute("INSERT INTO runs(kind,steps) VALUES (?,?)", [kind, *steps])?;
             let id = c.last_insert_rowid();
             if kind == "new" {

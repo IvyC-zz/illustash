@@ -52,6 +52,31 @@ const CACHES: &[(&str, usize)] = &[
     ("similar_paired", 1),
     ("similar_retry", 2),
 ];
+/// A picture whose bytes changed under the same UUID is no longer described by the similar results computed
+/// from its pixels: drop its signature, every relation it is part of and its pairing marks, so the next
+/// similar run computes them again, and rebuild the groups from what remains. Unchanged pictures keep their
+/// results. All of these are machine caches; human decisions are stored elsewhere and stay.
+pub(crate) fn forget_content(tx: &Connection, src: &Connection, changed: &[String]) -> Result<()> {
+    if changed.is_empty() {
+        return Ok(());
+    }
+    let list = serde_json::to_string(changed).expect("UUID strings are serializable");
+    tx.execute("DELETE FROM image_sigs WHERE uuid IN (SELECT value FROM json_each(?1))", [&list])?;
+    tx.execute(
+        "DELETE FROM relations WHERE a IN (SELECT value FROM json_each(?1)) OR b IN (SELECT value FROM json_each(?1))",
+        [&list],
+    )?;
+    // Created by the first similar run that publishes them.
+    if tx.query_row("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name='similar_paired')", [], |r| r.get(0))? {
+        tx.execute("DELETE FROM similar_paired WHERE uuid IN (SELECT value FROM json_each(?1))", [&list])?;
+        tx.execute(
+            "DELETE FROM similar_retry WHERE a IN (SELECT value FROM json_each(?1)) OR b IN (SELECT value FROM json_each(?1))",
+            [&list],
+        )?;
+    }
+    crate::app_migrate_data::early_groups(tx, src)?;
+    crate::character_projection::fold(tx)
+}
 fn hash_db(c: &Connection, h: &mut Sha256, ctx: &TaskContext) -> Result<()> {
     fn feed(h: &mut Sha256, b: &[u8]) {
         h.update((b.len() as u64).to_le_bytes());

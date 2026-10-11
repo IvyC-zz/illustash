@@ -32,6 +32,46 @@ fn has_column(c: &Connection, table: &str, column: &str) -> Result<bool> {
         .iter()
         .any(|s| s == column))
 }
+/// Pixel results describe the bytes they were computed from. Each picture's content hash is remembered, and
+/// when its bytes change under the same UUID its lookups, matched posts, attributions and OCR marks are
+/// dropped so the next run computes them again; the snapshot delivered after that run replaces the evidence
+/// computed from the old bytes. A picture seen for the first time is only remembered. All of these are
+/// machine results; verdicts live in the core.
+pub(super) fn forget_changed_content(c: &Connection, library: &Library) -> Result<()> {
+    let src = crate::app_library::read_connection(&library.source())?;
+    // Opening does not require the column; such a source has no content version to compare.
+    if src.prepare("SELECT stable_hash FROM assets LIMIT 0").is_err() {
+        return Ok(());
+    }
+    c.execute_batch("CREATE TABLE IF NOT EXISTS content_versions(asset TEXT PRIMARY KEY, hash TEXT NOT NULL)")?;
+    let current = src
+        .prepare("SELECT uuid,stable_hash FROM assets WHERE coalesce(stable_hash,'')<>''")?
+        .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    let seen = c
+        .prepare("SELECT asset,hash FROM content_versions")?
+        .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?
+        .collect::<rusqlite::Result<std::collections::HashMap<_, _>>>()?;
+    let tx = c.unchecked_transaction()?;
+    for (asset, hash) in current {
+        match seen.get(&asset) {
+            Some(old) if *old == hash => continue,
+            Some(_) => {
+                tx.execute("DELETE FROM lookups WHERE target=?", [&asset])?;
+                tx.execute("DELETE FROM image_sources WHERE asset=?", [&asset])?;
+                tx.execute("DELETE FROM image_artists WHERE asset=?", [&asset])?;
+                tx.execute("DELETE FROM marks WHERE asset=?", [&asset])?;
+            }
+            None => {}
+        }
+        tx.execute(
+            "INSERT INTO content_versions(asset,hash) VALUES (?1,?2) ON CONFLICT(asset) DO UPDATE SET hash=excluded.hash",
+            [&asset, &hash],
+        )?;
+    }
+    tx.commit()?;
+    Ok(())
+}
 pub(super) fn backup(from: &Path, to: &Path) -> Result<()> {
     let c = crate::app_library::read_connection(from)?;
     c.backup(rusqlite::DatabaseName::Main, to, None)?;
