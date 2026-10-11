@@ -18,7 +18,7 @@ pub(crate) fn info(library: &Library) -> Result<Json> {
 
 pub(crate) fn remember(library: &Library) -> Result<()> {
     let home = user_home()?;
-    remember_at(library.path(), library.name(), &registry(&home), &now()?, true)
+    remember_at(library.display_path(), library.name(), &registry(&home), &now()?, true)
 }
 
 /// List a completed creation without making it the next startup/current library.
@@ -147,7 +147,7 @@ fn info_at(library: &Library, file: &Path, home: &Path) -> Result<Json> {
         })
         .collect();
     Ok(Json::object([
-        ("current", display(library.path())?.into()),
+        ("current", display(library.display_path())?.into()),
         ("info", current),
         ("libraries", Json::Array(items)),
         ("export", Json::object([("status", "idle".into())])),
@@ -264,7 +264,7 @@ mod tests {
         f.write(json!({"recent":[{"path":other,"name":"stale"}]}));
         let before = fs::read(&missing).unwrap();
         let out = value(info_at(&lib, &missing, &home).unwrap());
-        assert_eq!(out["current"], json!(lib.path()));
+        assert_eq!(out["current"], json!(lib.display_path()));
         assert_eq!(out["home"], json!(home));
         assert_eq!(out["export"], json!({"status":"idle"}));
         assert_eq!(out["info"]["test"], "合成人设");
@@ -291,27 +291,30 @@ mod tests {
             json!({"recent":[{"path":valid},{"path":broken},{"path":newer},{"path":f.0.join("missing.pilib")},{}]}),
         );
         assert_eq!(recent(&file).len(), 1);
-        remember_at(lib.path(), lib.name(), &file, "2026-10-01T12:00:00+08:00", true).unwrap();
+        remember_at(lib.display_path(), lib.name(), &file, "2026-10-01T12:00:00+08:00", true).unwrap();
         assert_eq!(recent(&file).len(), 2);
     }
     #[test]
     fn remember_front_dedupes_caps_and_atomically_replaces_legacy_registry() {
         let f = Fixture::new();
         let lib = f.library();
-        let mut entries = vec![json!({"path":lib.path(),"name":"stale","opened_at":"old"})];
+        let mut entries = vec![json!({"path":lib.display_path(),"name":"stale","opened_at":"old"})];
         entries.extend((0..24).map(|n| json!({"path":f.package(&format!("recent-{n}")),"extra":true})));
         f.write(json!({"recent":entries}));
         let file = f.registry();
-        remember_at(lib.path(), lib.name(), &file, "2026-10-01T12:00:00+08:00", true).unwrap();
+        remember_at(lib.display_path(), lib.name(), &file, "2026-10-01T12:00:00+08:00", true).unwrap();
         let text = fs::read_to_string(&file).unwrap();
         assert!(text.ends_with('\n'));
         assert!(text.contains("  \"recent\""));
         let entries = recent(&file);
         assert_eq!(entries.len(), 20);
-        assert_eq!(entries[0], json!({"path":lib.path(),"name":"current","opened_at":"2026-10-01T12:00:00+08:00"}));
+        assert_eq!(
+            entries[0],
+            json!({"path":lib.display_path(),"name":"current","opened_at":"2026-10-01T12:00:00+08:00"})
+        );
         assert_eq!(entries[1]["extra"], true);
         assert!(!file.with_extension("tmp").exists());
-        remember_at(lib.path(), lib.name(), &file, "second", true).unwrap();
+        remember_at(lib.display_path(), lib.name(), &file, "second", true).unwrap();
         assert_eq!(recent(&file).len(), 20);
         assert_eq!(recent(&file)[0]["opened_at"], "second");
     }
@@ -322,20 +325,20 @@ mod tests {
         let first = f.package("front");
         let second = f.package("second");
         f.write(json!({"recent":[{"path":first,"opened_at":"front"},
-            {"path":lib.path(),"name":"stale","opened_at":"old"},{"path":second}]}));
+            {"path":lib.display_path(),"name":"stale","opened_at":"old"},{"path":second}]}));
         let before_info = value(info_at(&lib, &f.registry(), &f.0).unwrap());
-        remember_at(lib.path(), lib.name(), &f.registry(), "created", false).unwrap();
+        remember_at(lib.display_path(), lib.name(), &f.registry(), "created", false).unwrap();
         let entries = recent(&f.registry());
         assert_eq!(entries.len(), 3);
         assert_eq!(entries[0]["path"], json!(first));
         assert_eq!(entries[0]["opened_at"], "front");
         assert_eq!(entries[1]["path"], json!(second));
-        assert_eq!(entries[2], json!({"path":lib.path(),"name":"current","opened_at":"created"}));
+        assert_eq!(entries[2], json!({"path":lib.display_path(),"name":"current","opened_at":"created"}));
         let after_info = value(info_at(&lib, &f.registry(), &f.0).unwrap());
         assert_eq!(after_info["current"], before_info["current"]);
         assert_eq!(after_info["info"], before_info["info"]);
-        remember_at(lib.path(), lib.name(), &f.registry(), "opened", true).unwrap();
-        assert_eq!(recent(&f.registry())[0]["path"], json!(lib.path()));
+        remember_at(lib.display_path(), lib.name(), &f.registry(), "opened", true).unwrap();
+        assert_eq!(recent(&f.registry())[0]["path"], json!(lib.display_path()));
     }
     #[test]
     fn append_at_twenty_preserves_legacy_truncation_including_lost_new_card() {
@@ -343,13 +346,13 @@ mod tests {
         let lib = f.library();
         let entries: Vec<Value> = (0..20).map(|n| json!({"path":f.package(&format!("recent-{n}"))})).collect();
         f.write(json!({"recent":entries}));
-        remember_at(lib.path(), lib.name(), &f.registry(), "created", false).unwrap();
+        remember_at(lib.display_path(), lib.name(), &f.registry(), "created", false).unwrap();
         assert_eq!(recent(&f.registry()), entries);
         let file = f.registry();
         assert!(!file.with_extension("tmp").exists());
         fs::create_dir(file.with_extension("tmp")).unwrap();
         let before = fs::read(&file).unwrap();
-        assert!(remember_at(lib.path(), lib.name(), &file, "created", false).is_err());
+        assert!(remember_at(lib.display_path(), lib.name(), &file, "created", false).is_err());
         assert_eq!(fs::read(file).unwrap(), before);
     }
     #[cfg(target_os = "macos")]
@@ -362,18 +365,18 @@ mod tests {
         let tmp = file.with_extension("tmp");
         fs::create_dir(&tmp).unwrap();
         let before = fs::read(&file).unwrap();
-        let failure = remember_at(lib.path(), lib.name(), &file, "created", false).unwrap_err();
+        let failure = remember_at(lib.display_path(), lib.name(), &file, "created", false).unwrap_err();
         assert!(
             matches!(failure, Error::Invalid(message) if message == format!("[Errno 21] Is a directory: {}", crate::http_read::python_repr(&tmp.to_string_lossy())))
         );
-        assert!(matches!(remember_at(lib.path(), lib.name(), &file, "opened", true), Err(Error::Io(_))));
+        assert!(matches!(remember_at(lib.display_path(), lib.name(), &file, "opened", true), Err(Error::Io(_))));
         assert_eq!(fs::read(&file).unwrap(), before);
         fs::remove_dir(&tmp).unwrap();
         fs::remove_file(&file).unwrap();
         fs::create_dir(&file).unwrap();
         let keep = file.join("keep");
         fs::write(&keep, b"existing").unwrap();
-        let failure = remember_at(lib.path(), lib.name(), &file, "created", false).unwrap_err();
+        let failure = remember_at(lib.display_path(), lib.name(), &file, "created", false).unwrap_err();
         assert!(
             matches!(failure, Error::Invalid(message) if message == format!("[Errno 21] Is a directory: {} -> {}", crate::http_read::python_repr(&tmp.to_string_lossy()), crate::http_read::python_repr(&file.to_string_lossy())))
         );
@@ -414,10 +417,10 @@ mod tests {
         let f = Fixture::new();
         let lib = f.library();
         let alias = f.0.join("alias.pilib");
-        std::os::unix::fs::symlink(lib.path(), &alias).unwrap();
+        std::os::unix::fs::symlink(lib.display_path(), &alias).unwrap();
         let aliased = Library::open(&alias).unwrap();
-        remember_at(lib.path(), lib.name(), &f.registry(), "original", true).unwrap();
-        remember_at(aliased.path(), aliased.name(), &f.registry(), "alias", true).unwrap();
+        remember_at(lib.display_path(), lib.name(), &f.registry(), "original", true).unwrap();
+        remember_at(aliased.display_path(), aliased.name(), &f.registry(), "alias", true).unwrap();
         let entries = recent(&f.registry());
         assert_eq!(entries.len(), 2);
         assert_eq!(entries[0]["path"], json!(alias));
@@ -433,11 +436,11 @@ mod tests {
         let file = f.registry();
         let before = fs::read(&file).unwrap();
         fs::create_dir(file.with_extension("tmp")).unwrap();
-        assert!(remember_at(lib.path(), lib.name(), &file, "now", true).is_err());
+        assert!(remember_at(lib.display_path(), lib.name(), &file, "now", true).is_err());
         assert_eq!(fs::read(file).unwrap(), before);
         let blocker = f.0.join("not-a-directory");
         fs::write(&blocker, "x").unwrap();
-        assert!(remember_at(lib.path(), lib.name(), &blocker.join("libraries.json"), "now", true).is_err());
+        assert!(remember_at(lib.display_path(), lib.name(), &blocker.join("libraries.json"), "now", true).is_err());
     }
     #[test]
     fn timestamp_has_legacy_local_iso_seconds_shape() {

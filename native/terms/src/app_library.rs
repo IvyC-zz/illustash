@@ -19,9 +19,13 @@ pub type Progress = Arc<dyn Fn(&str, f64) + Send + Sync + std::panic::RefUnwindS
 
 /// Paths are immutable after validation. Session identity must additionally include a fresh session generation,
 /// since copies of a package may share its config ID. No default package or Python runtime is consulted.
+///
+/// Every file the package owns is reached through the canonical path fixed at opening: retargeting the alias
+/// the user opened afterwards must not redirect reads or writes to another package. The alias is kept only to
+/// show and remember what the user chose.
 #[derive(Clone, Debug)]
 pub struct Library {
-    path: PathBuf,
+    display_path: PathBuf,
     instance_path: PathBuf,
     config: Value,
     ordered_config: Json,
@@ -70,7 +74,7 @@ impl Library {
         }
         let ordered_config =
             serde_json::from_str(&text).map_err(|e| Error::Invalid(format!("无效 library.json：{e}")))?;
-        let library = Self { path, instance_path, config, ordered_config };
+        let library = Self { display_path: path, instance_path, config, ordered_config };
         // Weight each check by its file size, so the overall fraction tracks the bytes actually read.
         let weights = match &progress {
             Some(_) => {
@@ -105,26 +109,37 @@ impl Library {
         Ok(library)
     }
 
+    /// Validate the same package again through its canonical path, keeping the alias the user opened for display.
+    pub(crate) fn reopen(&self) -> Result<Self> {
+        self.keep_display(Self::open_validated(&self.instance_path, false, None)?)
+    }
+
+    /// `reopen` for the explicit upgrade workflow, which accepts an old core.
+    pub(crate) fn reopen_for_upgrade(&self) -> Result<Self> {
+        self.keep_display(Self::open_validated(&self.instance_path, true, None)?)
+    }
+
+    fn keep_display(&self, mut library: Self) -> Result<Self> {
+        library.display_path = self.display_path.clone();
+        Ok(library)
+    }
+
     /// A settings write updates the captured session's config without reopening or upgrading databases.
     pub(crate) fn reload_config(&mut self) -> Result<()> {
-        let text = fs::read_to_string(self.path.join("library.json"))?;
+        let text = fs::read_to_string(self.instance_path.join("library.json"))?;
         self.config = serde_json::from_str(&text).map_err(|e| Error::Invalid(e.to_string()))?;
         self.ordered_config = serde_json::from_str(&text).map_err(|e| Error::Invalid(e.to_string()))?;
         Ok(())
     }
 
-    pub fn path(&self) -> &Path {
-        &self.path
+    /// The path as the user opened it, alias included: for display and the recent-libraries registry only.
+    pub fn display_path(&self) -> &Path {
+        &self.display_path
     }
-    /// Canonical package identity; combine this with a fresh session generation, never just config.id.
+    /// Canonical package identity and the root of every package file; combine it with a fresh session
+    /// generation for identity, never just config.id.
     pub fn instance_path(&self) -> &Path {
         &self.instance_path
-    }
-    /// A background consumer must keep using the captured package, even if its display alias changes.
-    pub fn pinned(&self) -> Self {
-        let mut library = self.clone();
-        library.path = self.instance_path.clone();
-        library
     }
     pub fn config(&self) -> &Value {
         &self.config
@@ -136,19 +151,19 @@ impl Library {
         self.config["id"].as_str().expect("validated id")
     }
     pub fn source(&self) -> PathBuf {
-        self.path.join("source.sqlite")
+        self.instance_path.join("source.sqlite")
     }
     pub fn db(&self) -> PathBuf {
-        self.path.join("library.sqlite")
+        self.instance_path.join("library.sqlite")
     }
     pub fn features(&self) -> PathBuf {
-        self.path.join("features")
+        self.instance_path.join("features")
     }
     pub fn thumbnails(&self) -> PathBuf {
-        self.path.join("thumbnails")
+        self.instance_path.join("thumbnails")
     }
     pub fn backups(&self) -> PathBuf {
-        self.path.join("backups")
+        self.instance_path.join("backups")
     }
     pub fn frozen(&self) -> bool {
         self.config.get("test").is_some_and(truthy) || self.config.get("frozen").is_some_and(truthy)
@@ -157,7 +172,7 @@ impl Library {
     /// Same field order and nested config order as web.library.Library.info; sizes include live WAL bytes.
     pub(crate) fn info(&self) -> Result<Json> {
         Ok(Json::object([
-            ("path", self.path.to_str().ok_or_else(|| Error::Invalid("图库路径不是 UTF-8".into()))?.into()),
+            ("path", self.display_path.to_str().ok_or_else(|| Error::Invalid("图库路径不是 UTF-8".into()))?.into()),
             ("name", self.ordered_config.get("name").expect("app_library internal invariant").clone()),
             ("id", self.ordered_config.get("id").expect("app_library internal invariant").clone()),
             ("format", self.ordered_config.get("format").expect("app_library internal invariant").clone()),
@@ -351,7 +366,7 @@ mod tests {
         let f = Fixture::new();
         let before = f.bytes();
         let lib = Library::open(&f.package).unwrap();
-        assert_eq!(lib.path(), f.package);
+        assert_eq!(lib.display_path(), f.package);
         assert_eq!(lib.instance_path(), crate::app_paths::canonical(&f.package).unwrap());
         assert_eq!(lib.id(), "synthetic");
         assert_eq!(lib.name(), "合成图库");
@@ -367,7 +382,7 @@ mod tests {
             info,
             format!(
                 r#"{{"path": {}, "name": "合成图库", "id": "synthetic", "format": 1, "sources": [{{"kind": "folder", "id": "s1", "path": "/synthetic-only"}}], "test": {{"name": "合成", "id": "persona"}}, "source_bytes": {source_bytes}, "library_bytes": {library_bytes}, "origins": [{{"id": "pixiv", "label": "Pixiv"}}, {{"id": "x", "label": "X"}}, {{"id": "other", "label": "其他"}}]}}"#,
-                serde_json::to_string(lib.path().to_str().unwrap()).unwrap()
+                serde_json::to_string(lib.display_path().to_str().unwrap()).unwrap()
             )
         );
         assert_eq!(before, f.bytes());
@@ -453,7 +468,7 @@ mod tests {
         fs::write(f.package.join("library.json"), r#"{"name":"x","id":"x","format":1}"#).unwrap();
         let lib = Library::open(&f.package).unwrap();
         assert!(!lib.frozen());
-        assert!(!lib.path().join("provenance.sqlite").exists());
+        assert!(!lib.instance_path().join("provenance.sqlite").exists());
         let info = lib.info_json().unwrap();
         assert!(info.contains("\"sources\": [], \"test\": null"));
     }
@@ -503,19 +518,42 @@ mod tests {
         let a = Library::open(&f.package).unwrap();
         let b = Library::open(&alias).unwrap();
         assert_eq!(a.instance_path(), b.instance_path());
-        assert_ne!(a.path(), b.path());
-        assert_eq!(b.path(), alias);
+        assert_ne!(a.display_path(), b.display_path());
+        assert_eq!(b.display_path(), alias);
         let alias_text = serde_json::to_string(alias.to_str().unwrap()).unwrap();
         assert!(b.info_json().unwrap().starts_with(&format!("{{\"path\": {alias_text},")));
-        assert_eq!(b.source(), alias.join("source.sqlite"));
-        assert_eq!(b.db(), alias.join("library.sqlite"));
-        let pinned = b.pinned();
+        assert_eq!(b.source(), a.instance_path().join("source.sqlite"));
+        assert_eq!(b.db(), a.instance_path().join("library.sqlite"));
         fs::remove_file(&alias).unwrap();
-        assert_eq!(pinned.path(), a.instance_path());
-        assert!(pinned.db().is_file());
+        assert!(b.db().is_file());
         let other = Fixture::new();
         let c = Library::open(&other.package).unwrap();
         assert_eq!(a.id(), c.id());
         assert_ne!(a.instance_path(), c.instance_path());
+    }
+    #[cfg(unix)]
+    #[test]
+    fn retargeted_alias_keeps_every_package_file_on_the_opened_package() {
+        use std::os::unix::fs::symlink;
+        // Two packages with the same config ID; the alias first names A, then B.
+        let (a, b) = (Fixture::new(), Fixture::new());
+        fs::write(b.package.join("library.json"), r#"{"format":1,"id":"synthetic","name":"另一个合成图库"}"#).unwrap();
+        let alias = a.root.join("alias.pilib");
+        symlink(&a.package, &alias).unwrap();
+        let mut opened = Library::open(&alias).unwrap();
+        fs::remove_file(&alias).unwrap();
+        symlink(&b.package, &alias).unwrap();
+        let home = crate::app_paths::canonical(&a.package).unwrap();
+        let files = [opened.db(), opened.source(), opened.features(), opened.thumbnails(), opened.backups()];
+        assert_eq!(files.map(|p| p.parent().unwrap().to_owned()), [(); 5].map(|_| home.clone()));
+        opened.reload_config().unwrap();
+        assert_eq!(opened.name(), "合成图库");
+        let again = opened.reopen().unwrap();
+        assert_eq!(
+            (again.instance_path(), again.display_path(), again.name()),
+            (home.as_path(), alias.as_path(), "合成图库")
+        );
+        // Opening the alias afresh is a deliberate choice of B.
+        assert_eq!(Library::open(&alias).unwrap().name(), "另一个合成图库");
     }
 }

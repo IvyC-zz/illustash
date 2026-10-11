@@ -75,8 +75,18 @@ class NativeFilesTest(unittest.TestCase):
 
 
     def test_static_bytes_headers_and_security(self):
+        # User decision 2026-10-11 (#33): the recording froze the front end as it was then, so bodies are
+        # compared with the files being served; status and headers still match the recorded reference.
+        static = self.resources / 'web' / 'static'
         for url in ('/', '/app.js', '/app.css', '/theme.js', '/favicon.svg', '/splash.js'):
-            response = self.pair(url + '?cache=1')
+            reference = lifecycle.NativeLifecycleTest.reference_response(self, url + '?cache=1')
+            response = self.request(url + '?cache=1')
+            current = (static / ('index.html' if url == '/' else url[1:])).read_bytes()
+            self.assertEqual(response['body'], current, url)
+            self.assertEqual(response['status'], reference['status'])
+            for header in HEADERS:
+                expected = str(len(current)) if header == 'Content-Length' else reference['headers'].get(header)
+                self.assertEqual(response['headers'].get(header), expected, (url, header))
             self.assertEqual(response['status'], 200)
             self.assertEqual(response['route'], 'core')
             for headers in ({'Host': 'evil.example'}, {'Origin': 'https://evil.example'}):

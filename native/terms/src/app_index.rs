@@ -494,7 +494,7 @@ impl Updater {
         };
         self.task.take();
         let identity = TaskIdentity::new(lib, self.generation, &self.session)?;
-        let lib = lib.pinned();
+        let lib = lib.clone();
         let (shared, dir, journal, state, network) = (
             self.shared.clone(),
             self.dir.clone(),

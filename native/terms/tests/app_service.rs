@@ -104,8 +104,8 @@ fn creation_open_same_id_switch_late_work_and_exit_without_transport() {
     // Existing Core writes and undo execute under the accepted instance's service guard.
     service
         .with_library(generation, |lib| {
-            assert_eq!(lib.path(), lib.instance_path());
-            assert_eq!(lib.path(), a);
+            assert_eq!(lib.db(), lib.instance_path().join("library.sqlite"));
+            assert_eq!(lib.instance_path(), a);
             let mut c = illustash_terms::open(&lib.db())?;
             let asset = store::register_asset(&c, "synthetic", "service-image", None)?;
             let term = store::create_term(&c, Kind::Label, Some("service-label"), "user")?;
@@ -136,7 +136,7 @@ fn creation_open_same_id_switch_late_work_and_exit_without_transport() {
         .with_library(service.generation(), |lib| {
             assert_eq!(lib.id(), original["id"].as_str().unwrap());
             assert_ne!(lib.instance_path(), a);
-            assert_eq!(lib.path(), b);
+            assert_eq!(lib.instance_path(), b);
             let c = illustash_terms::open(&lib.db())?;
             assert_eq!(
                 c.query_row("SELECT COUNT(*) FROM terms WHERE key=?", ["service-label"], |row| row.get::<_, i64>(0))?,

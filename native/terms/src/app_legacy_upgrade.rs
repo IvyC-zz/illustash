@@ -156,7 +156,7 @@ fn upgrade_with<F: FnOnce(&Connection) -> Result<()>>(
     let mut backup = None;
     let mut committed = false;
     let result = (|| -> Result<crate::app_upgrade::UpgradeReport> {
-        let current = Library::open_for_upgrade(lib.path())?;
+        let current = lib.reopen_for_upgrade()?;
         if current.config() != lib.config() || current.instance_path() != lib.instance_path() {
             return Err(Error::Conflict("升级预检后图库包已改变".into()));
         }
@@ -175,12 +175,15 @@ fn upgrade_with<F: FnOnce(&Connection) -> Result<()>>(
         let tx = c.transaction_with_behavior(TransactionBehavior::Immediate)?;
         validate(&tx)?;
         let before = crate::schema::version(&tx)?;
-        let root = lib.path().join("library-backups").join(format!("application-before-{}", crate::store::new_key()?));
-        fs::create_dir_all(lib.path().join("library-backups"))?;
+        let root = lib
+            .instance_path()
+            .join("library-backups")
+            .join(format!("application-before-{}", crate::store::new_key()?));
+        fs::create_dir_all(lib.instance_path().join("library-backups"))?;
         fs::create_dir(&root)?;
         copy_db(&lib.db(), &root.join("library.sqlite"))?;
         copy_db(&lib.source(), &root.join("source.sqlite"))?;
-        fs::copy(lib.path().join("library.json"), root.join("library.json"))?;
+        fs::copy(lib.instance_path().join("library.json"), root.join("library.json"))?;
         backup = Some(root.join("library.sqlite"));
         let stage = root.join("upgrade.pilib");
         fs::create_dir(&stage)?;
@@ -188,7 +191,7 @@ fn upgrade_with<F: FnOnce(&Connection) -> Result<()>>(
             copy_db(&root.join("library.sqlite"), &stage.join("library.sqlite"))?;
             copy_db(&root.join("source.sqlite"), &stage.join("source.sqlite"))?;
             fs::copy(root.join("library.json"), stage.join("library.json"))?;
-            let mapping = lib.path().join("album-char-map.json");
+            let mapping = lib.instance_path().join("album-char-map.json");
             if mapping.is_file() {
                 fs::copy(mapping, stage.join("album-char-map.json"))?;
             }
@@ -227,7 +230,7 @@ fn upgrade_with<F: FnOnce(&Connection) -> Result<()>>(
         drop(c);
         fs::remove_dir_all(stage)?;
         Ok(crate::app_upgrade::UpgradeReport {
-            library: Library::open(lib.path())?,
+            library: lib.reopen()?,
             before,
             after: crate::SCHEMA_VERSION,
             backup: backup.clone().expect("app_legacy_upgrade internal invariant"),

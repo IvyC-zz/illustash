@@ -258,14 +258,14 @@ impl Application {
         self.generation.load(Ordering::SeqCst)
     }
     /// Execute against the accepted physical instance, rechecking after the lock wait.
-    /// The callback receives pinned paths; display aliases cannot retarget its database.
+    /// Package files resolve through the canonical path fixed at opening, so display aliases cannot retarget them.
     pub fn with_library<T>(&self, received: u64, operation: impl FnOnce(&Library) -> Result<T>) -> Result<T> {
         let session = self.session.read().expect("application session lock poisoned");
         self.check_open()?;
         if !self.accepts(&session, received) {
             return Err(Error::Conflict("会话已过期，请刷新页面".into()));
         }
-        operation(&session.library.pinned())
+        operation(&session.library)
     }
 }
 impl Session {
@@ -283,7 +283,7 @@ impl Application {
     pub fn switch(&self, received: u64, path: &Path) -> Result<PathBuf> {
         let mut session = self.session.write().expect("application session lock poisoned");
         self.switch_locked(&mut session, received, path)?;
-        Ok(session.library.path().to_owned())
+        Ok(session.library.display_path().to_owned())
     }
     pub(crate) fn switch_locked(&self, session: &mut Session, received: u64, path: &Path) -> Result<Json> {
         self.check_open()?;
@@ -308,7 +308,7 @@ impl Application {
         replacement.syncer.configure_startup(&replacement.library, !self.sync_disabled)?;
         crate::app_libraries::remember(&replacement.library)?;
         let result = Json::object([
-            ("path", replacement.library.path().to_string_lossy().as_ref().into()),
+            ("path", replacement.library.display_path().to_string_lossy().as_ref().into()),
             ("name", replacement.library.name().into()),
         ]);
         replacement.auto_sync = session.auto_sync;

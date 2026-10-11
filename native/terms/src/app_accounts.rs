@@ -566,7 +566,6 @@ pub fn import_archive(library: &Library, path: &Path) -> Result<i64> {
             ids.push(s);
         }
     }
-    let library = library.pinned();
     let mut c = crate::sqlite::open(library.instance_path().join("provenance.sqlite"))?;
     c.busy_timeout(Duration::from_secs(30))?;
     c.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;")?;
