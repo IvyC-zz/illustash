@@ -319,7 +319,7 @@ suggest 在只读事务内复用人工目标/filter/exclude 解析，明确不�
 similar/clusters 从持久化表读取，worker 缺席时 state/learner 为 off；sync 的来源盘点、识别编排和本地历史见「原生来源同步与应用刷新」。names 的原生后台与远程选择器见 [WEB_NAMES.md](WEB_NAMES.md)，读取提供进度、名称覆盖、旧配置兼容与 API key 后四位；覆盖统计复用名称读取的 Danbooru、WD、Photos、CCIP、CCIP-base 链接回退。账号 GET 只读取既有绑定元数据、钥匙串/文件是否非空、X 导入统计及本机桌面登录桥，不联网、不改变凭据；写分支见「原生账号与桌面登录桥」。index 的原生检查、补丁与恢复见「原生角色索引维护」，provenance 已有原生 Runner，任务/授权和 worker 缺失行为见 [PROVENANCE.md](PROVENANCE.md) 第 8 节，已有来源结果仍由作品详情与画师读取呈现。oc/groups 从未持久化，是实时按需特征计算；worker 缺席返回原 400，local-links 与 entities/works 的非空 remote 查询已接入原生名称文本来源，联网授权独立于凭据保存。
 
 
-about 的应用名、版本和频道来自编译时现行应用元数据，schema 是应用 schema 36；build 是编译所用 Git 短提交，存在已跟踪改动时带 dirty，非 checkout 构建可为空。runtime 为编译器版本；Unix platform 来自 uname，其他平台报 Rust 目标 OS/架构。python 和 Pillow/NumPy/ONNX Runtime 均为 null，仅表示原生 HTTP 宿主未加载这些库，不诊断可选 worker 的安装状态；页面使用 runtime 展示诊断。旧 route 参数已退役；可选研究状态由原生协调器处理。无 schema/兼容表删除。
+about 的应用名、版本和频道来自编译时现行应用元数据，schema 是应用 schema 36；build 是编译所用 Git 短提交，存在已跟踪改动时带 dirty；`git archive` 导出的源码没有 `.git`，改从 `native/terms/source-revision.txt`（export-subst 写入的导出提交）读取，不带 dirty（2026-10-12，#56）；其他非 checkout 构建可为空。runtime 为编译器版本；Unix platform 来自 uname，其他平台报 Rust 目标 OS/架构。python 和 Pillow/NumPy/ONNX Runtime 均为 null，仅表示原生 HTTP 宿主未加载这些库，不诊断可选 worker 的安装状态；页面使用 runtime 展示诊断。旧 route 参数已退役；可选研究状态由原生协调器处理。无 schema/兼容表删除。
 
 2026-10-01 单次合成 23 图负载，3 轮各 7 对交错 HTTP 请求、每轮排除一对预热、取轮中位数的中位数：ask 旧/原生为 2.307/1.862 ms，suggest 为 3.474/1.687 ms；accounts 0.491/0.527 ms，延迟增加 7.3%，按用户小于 20% 的规则接受。原生根进程 RSS 8,432 KiB，参考 Python 服务与夹具共用根进程 74,208 KiB；不代表整应用、峰值、真实大库或 Windows。完整口径与其他查询测量保留在对应 PR。
 

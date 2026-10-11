@@ -32,8 +32,18 @@ fn main() {
             println!("cargo:rerun-if-changed={path}");
         }
     }
-    let build = run("git", &["rev-parse", "--short", "HEAD"]);
+    println!("cargo:rerun-if-changed=source-revision.txt");
+    let mut build = run("git", &["rev-parse", "--short", "HEAD"]);
     let dirty = !run("git", &["status", "--porcelain", "--untracked-files=no"]).is_empty();
+    if build.is_empty() {
+        // Sources exported by `git archive` have no .git; export-subst wrote the exported revision into this file.
+        // In a checkout it still reads `$Format:%h$`, which is not a hash and is ignored.
+        let exported = std::fs::read_to_string("source-revision.txt").unwrap_or_default();
+        let exported = exported.trim();
+        if (7..=40).contains(&exported.len()) && exported.bytes().all(|b| b.is_ascii_hexdigit()) {
+            build = exported.to_owned();
+        }
+    }
     println!("cargo:rustc-env=ILLUSTASH_BUILD={build}{}", if dirty { "-dirty" } else { "" });
     println!("cargo:rustc-env=ILLUSTASH_RUSTC={}", run("rustc", &["--version"]));
     let source = std::fs::read_to_string("application.json").expect("application metadata");
