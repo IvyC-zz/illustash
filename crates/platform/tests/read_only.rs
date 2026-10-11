@@ -24,9 +24,10 @@ fn folder_reads_keep_source_bytes_and_supplied_cancel() {
     let file = f.0.join("synthetic.png");
     image::RgbImage::new(3, 2).save(&file).unwrap();
     let before = fs::read(&file).unwrap();
-    let mut files = Vec::new();
-    folder::walk(&f.0, &f.0, &mut files, &|| Ok(())).unwrap();
+    let (mut files, mut unreadable) = (Vec::new(), Vec::new());
+    folder::walk(&f.0, &f.0, &mut files, &mut unreadable, &|| Ok(())).unwrap();
     assert_eq!(files.len(), 1);
+    assert!(unreadable.is_empty());
     assert_eq!(files[0].rel, "synthetic.png");
     assert_eq!(&folder::describe(&files[0]).0, &3);
     assert_eq!(&folder::describe(&files[0]).1, &2);
@@ -34,9 +35,26 @@ fn folder_reads_keep_source_bytes_and_supplied_cancel() {
     let cancel = || Err(Error::Invalid("synthetic cancellation".into()));
     assert!(matches!(folder::hash(&file, &cancel), Err(Error::Invalid(s)) if s=="synthetic cancellation"));
     let mut rejected = Vec::new();
-    assert!(folder::walk(&f.0, &f.0, &mut rejected, &cancel).is_err());
+    assert!(folder::walk(&f.0, &f.0, &mut rejected, &mut unreadable, &cancel).is_err());
     assert!(rejected.is_empty());
     assert_eq!(fs::read(file).unwrap(), before);
+}
+#[cfg(unix)]
+#[test]
+fn folder_that_cannot_be_listed_is_reported_not_skipped() {
+    use std::os::unix::fs::PermissionsExt;
+    let f = Fixture::new();
+    image::RgbImage::new(1, 1).save(f.0.join("kept.png")).unwrap();
+    let locked = f.0.join("sub").join("locked");
+    fs::create_dir_all(&locked).unwrap();
+    image::RgbImage::new(1, 1).save(locked.join("hidden.png")).unwrap();
+    fs::set_permissions(&locked, fs::Permissions::from_mode(0o000)).unwrap();
+    let (mut files, mut unreadable) = (Vec::new(), Vec::new());
+    let result = folder::walk(&f.0, &f.0, &mut files, &mut unreadable, &|| Ok(()));
+    fs::set_permissions(&locked, fs::Permissions::from_mode(0o755)).unwrap();
+    result.unwrap();
+    assert_eq!(files.iter().map(|f| f.rel.as_str()).collect::<Vec<_>>(), ["kept.png"]);
+    assert_eq!(unreadable, ["sub/locked"]);
 }
 #[test]
 fn photos_reads_only_explicit_fixture_and_preserves_database() {

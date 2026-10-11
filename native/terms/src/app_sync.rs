@@ -101,6 +101,7 @@ impl Syncer {
                     "stage",
                     "import_done",
                     "import_total",
+                    "unreadable",
                 ]
                 .iter()
                 .filter_map(|k| state.get(k).map(|v| ((*k).to_string(), v.clone())))
@@ -269,6 +270,7 @@ fn run_with(
         }
         let mut sources: Vec<(String, Value)> = Vec::new();
         let mut scanned = 0;
+        let mut unreadable = 0;
         for source in library.config()["sources"].as_array().into_iter().flatten() {
             let done_in_source = std::cell::Cell::new(0);
             let progress = |done, total| {
@@ -289,6 +291,7 @@ fn run_with(
                 crate::app_photos::scan_ordered(source, &library.source(), &|| check(cancel), &progress)?
             };
             scanned += done_in_source.get();
+            unreadable += scan["unreadable"].as_u64().unwrap_or(0);
             counts["found"] = json!(
                 counts["found"].as_u64().expect("internal sync counter must be unsigned")
                     + scan["new"].as_u64().expect("internal sync counter must be unsigned")
@@ -352,14 +355,19 @@ fn run_with(
                         &mut counts,
                         &update,
                     )?;
-                    let message = if counts["failed"].as_u64().unwrap_or(0) > 0 {
-                        format!("{} 张暂时读不到（可能还在 iCloud），下次同步重试", counts["failed"])
-                    } else {
-                        String::new()
-                    };
-                    update(
-                        json!({"status":"done","message":message,"finished_at":now(),"found":counts["found"],"removed":counts["removed"],"imported":counts["imported"],"failed":counts["failed"]}),
+                    let message = with_unreadable(
+                        unreadable,
+                        if counts["failed"].as_u64().unwrap_or(0) > 0 {
+                            format!("{} 张暂时读不到（可能还在 iCloud），下次同步重试", counts["failed"])
+                        } else {
+                            String::new()
+                        },
                     );
+                    let mut fields = json!({"status":"done","message":message,"finished_at":now(),"found":counts["found"],"removed":counts["removed"],"imported":counts["imported"],"failed":counts["failed"]});
+                    if unreadable > 0 {
+                        fields["unreadable"] = json!(unreadable);
+                    }
+                    update(fields);
                     return Ok(("done", message, out));
                 }
             }
@@ -371,16 +379,21 @@ fn run_with(
         } else {
             "done"
         };
-        let message = if pending > limit {
-            format!("有 {pending} 张新图，超过本机处理上限 {limit}，请交给 Windows 识别后再同步")
-        } else if pending > 0 {
-            format!("有 {pending} 张图等待识别；本次启动没有识别 worker")
-        } else {
-            String::new()
-        };
-        update(
-            json!({"status":status,"total":pending,"done":0,"message":message,"finished_at":now(),"found":counts["found"],"removed":counts["removed"],"imported":counts["imported"],"failed":0}),
+        let message = with_unreadable(
+            unreadable,
+            if pending > limit {
+                format!("有 {pending} 张新图，超过本机处理上限 {limit}，请交给 Windows 识别后再同步")
+            } else if pending > 0 {
+                format!("有 {pending} 张图等待识别；本次启动没有识别 worker")
+            } else {
+                String::new()
+            },
         );
+        let mut fields = json!({"status":status,"total":pending,"done":0,"message":message,"finished_at":now(),"found":counts["found"],"removed":counts["removed"],"imported":counts["imported"],"failed":0});
+        if unreadable > 0 {
+            fields["unreadable"] = json!(unreadable);
+        }
+        update(fields);
         Ok((status, message, out))
     })();
     let c = writer(&library.db())?;
@@ -558,6 +571,18 @@ fn refresh(library: &Library, run_id: i64, cancel: &AtomicBool) -> Result<(Value
         std::fs::remove_file(&journal_path)?;
     }
     Ok((json!({"added":out["added"],"removed":out["removed"],"pending":pending}), uuids.into_iter().collect()))
+}
+/// Folder paths the scan could not read keep their pictures as they were; say so, so the user can retry.
+fn with_unreadable(unreadable: u64, message: String) -> String {
+    if unreadable == 0 {
+        return message;
+    }
+    let note = format!("{unreadable} 处文件或文件夹暂时读不到，其中已有的图片保留不动；恢复访问后再同步");
+    if message.is_empty() {
+        note
+    } else {
+        format!("{note}；{message}")
+    }
 }
 /// Reads the recognition worker's progress file while the host waits for it. Only a value for
 /// this task, within this request's size and moving forward is accepted; anything else is ignored,

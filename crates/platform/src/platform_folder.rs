@@ -16,10 +16,40 @@ pub struct File {
     pub born: SystemTime,
     pub hash: String,
 }
-pub fn walk(root: &Path, folder: &Path, out: &mut Vec<File>, check: &dyn Fn() -> Result<()>) -> Result<()> {
+/// Paths relative to the root with `/` separators; the root itself is the empty string.
+fn relative(root: &Path, path: &Path) -> String {
+    path.strip_prefix(root)
+        .expect("app_folder internal invariant")
+        .to_string_lossy()
+        .replace(std::path::MAIN_SEPARATOR, "/")
+}
+
+/// Every image file under `folder`. What could not be read — a folder that cannot be listed or that had an
+/// unreadable entry, an entry whose metadata failed — goes to `unreadable` as a relative path, so a caller
+/// never takes "not read" for "gone".
+pub fn walk(
+    root: &Path,
+    folder: &Path,
+    out: &mut Vec<File>,
+    unreadable: &mut Vec<String>,
+    check: &dyn Fn() -> Result<()>,
+) -> Result<()> {
     check()?;
-    let Ok(entries) = fs::read_dir(folder) else { return Ok(()) };
-    let mut entries = entries.filter_map(|e| e.ok()).collect::<Vec<_>>();
+    let Ok(entries) = fs::read_dir(folder) else {
+        unreadable.push(relative(root, folder));
+        return Ok(());
+    };
+    let mut listed = Vec::new();
+    for entry in entries {
+        match entry {
+            Ok(entry) => listed.push(entry),
+            Err(_) => {
+                unreadable.push(relative(root, folder));
+                break;
+            }
+        }
+    }
+    let mut entries = listed;
     entries.sort_by_key(|e| e.file_name());
     let mut dirs = Vec::new();
     for entry in entries {
@@ -30,7 +60,10 @@ pub fn walk(root: &Path, folder: &Path, out: &mut Vec<File>, check: &dyn Fn() ->
             continue;
         }
         let path = entry.path();
-        let Ok(st) = path.metadata() else { continue };
+        let Ok(st) = path.metadata() else {
+            unreadable.push(relative(root, &path));
+            continue;
+        };
         if st.is_dir() {
             if !name.ends_with(".pilib") && !entry.file_type().is_ok_and(|t| t.is_symlink()) {
                 dirs.push(path);
@@ -51,11 +84,7 @@ pub fn walk(root: &Path, folder: &Path, out: &mut Vec<File>, check: &dyn Fn() ->
             Err(e) => -i64::try_from(e.duration().as_nanos()).map_err(|_| Error::Invalid("文件时间超出范围".into()))?,
         };
         out.push(File {
-            rel: path
-                .strip_prefix(root)
-                .expect("app_folder internal invariant")
-                .to_string_lossy()
-                .replace(std::path::MAIN_SEPARATOR, "/"),
+            rel: relative(root, &path),
             path,
             size: st.len() as i64,
             mtime,
@@ -64,7 +93,7 @@ pub fn walk(root: &Path, folder: &Path, out: &mut Vec<File>, check: &dyn Fn() ->
         });
     }
     for dir in dirs {
-        walk(root, &dir, out, check)?;
+        walk(root, &dir, out, unreadable, check)?;
     }
     Ok(())
 }

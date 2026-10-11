@@ -45,8 +45,8 @@ pub(crate) fn scan(
         .prepare("SELECT uuid FROM assets WHERE source_id=? AND coalesce(trashed,0)=1")?
         .query_map([sid], |r| r.get::<_, String>(0))?
         .collect::<rusqlite::Result<HashSet<_>>>()?;
-    let mut files = Vec::new();
-    walk(root, root, &mut files, check)?;
+    let (mut files, mut unreadable) = (Vec::new(), Vec::new());
+    walk(root, root, &mut files, &mut unreadable, check)?;
     let mut seen = Vec::new();
     let mut hashed = Vec::new();
     let total = files.len();
@@ -60,15 +60,20 @@ pub(crate) fn scan(
                     f.hash = h;
                     hashed.push(f);
                 }
-                Err(Error::Io(_)) => {}
+                Err(Error::Io(_)) => unreadable.push(f.rel.clone()),
                 Err(e) => return Err(e),
             }
         }
         progress(i + 1, total);
     }
     let present = seen.iter().map(|r| r.0.clone()).chain(hashed.iter().map(|f| f.rel.clone())).collect::<HashSet<_>>();
-    let mut vanished =
-        known_order.iter().filter(|(p, _)| !present.contains(p)).map(|(p, _)| p.clone()).collect::<HashSet<_>>();
+    // A path that could not be read is not known to be gone: its asset stays as it is until a scan reads it.
+    let unknown = |p: &str| unreadable.iter().any(|u| u.is_empty() || p == u || p.starts_with(&format!("{u}/")));
+    let mut vanished = known_order
+        .iter()
+        .filter(|(p, _)| !present.contains(p) && !unknown(p))
+        .map(|(p, _)| p.clone())
+        .collect::<HashSet<_>>();
     let mut movable: HashMap<String, std::collections::VecDeque<(String, String)>> = HashMap::new();
     for (p, old) in &known_order {
         if vanished.contains(p) {
@@ -177,10 +182,11 @@ pub(crate) fn scan(
     check()?;
     tx.commit()?;
     let name = crate::origin::get(preset).label();
-    Ok(Scan {
-        counts: json!({"new":new,"returned":back.len(),"gone":vanished.len(),"moved":moved,"changed":changed.len(),"sources":{sid:{"name":format!("{}（{}）",name,root.file_name().unwrap_or_default().to_string_lossy()),"photos":total-vanished.len() as i64,"collected":total-vanished.len() as i64}}}),
-        changed,
-    })
+    let mut counts = json!({"new":new,"returned":back.len(),"gone":vanished.len(),"moved":moved,"changed":changed.len(),"sources":{sid:{"name":format!("{}（{}）",name,root.file_name().unwrap_or_default().to_string_lossy()),"photos":total-vanished.len() as i64,"collected":total-vanished.len() as i64}}});
+    if !unreadable.is_empty() {
+        counts["unreadable"] = json!(unreadable.len());
+    }
+    Ok(Scan { counts, changed })
 }
 
 #[cfg(test)]
