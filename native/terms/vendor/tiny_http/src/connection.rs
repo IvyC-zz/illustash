@@ -95,6 +95,21 @@ impl Connection {
         }
     }
 
+    /// Illustash (#25): bound how long one read or write may wait.
+    pub(crate) fn set_timeouts(&self, read: Option<std::time::Duration>, write: Option<std::time::Duration>) -> std::io::Result<()> {
+        match self {
+            Self::Tcp(s) => {
+                s.set_read_timeout(read)?;
+                s.set_write_timeout(write)
+            }
+            #[cfg(unix)]
+            Self::Unix(s) => {
+                s.set_read_timeout(read)?;
+                s.set_write_timeout(write)
+            }
+        }
+    }
+
     pub(crate) fn try_clone(&self) -> std::io::Result<Self> {
         match self {
             Self::Tcp(s) => s.try_clone().map(Self::from),

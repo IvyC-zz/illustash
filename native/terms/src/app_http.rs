@@ -16,6 +16,27 @@ mod http_host_get;
 mod http_host_post;
 
 const FORCED_OFF: [&str; 2] = ["similar", "sync"];
+/// Connections served at once (#25). A browser keeps about six per origin, so several windows stay far below it.
+const MAX_CONNECTIONS: usize = 64;
+/// Request handlers running at once; pipelined requests on one connection each take one.
+const MAX_HANDLERS: usize = 128;
+
+/// The local HTTP server with per-connection bounds (#25): a client that stops sending (or reading) loses its
+/// connection after the timeout, and connections beyond the limit are refused with 503, so a slow or stalled
+/// client cannot hold threads without bound. `ILLUSTASH_HTTP_TIMEOUT_MS` shortens the timeout for tests.
+fn serve(listener: TcpListener) -> Result<Server> {
+    let timeout = std::env::var("ILLUSTASH_HTTP_TIMEOUT_MS")
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .filter(|ms| *ms > 0)
+        .map_or(Duration::from_secs(30), Duration::from_millis);
+    let limits = tiny_http::Limits {
+        read_timeout: Some(timeout),
+        write_timeout: Some(timeout),
+        max_connections: Some(MAX_CONNECTIONS),
+    };
+    Server::from_listener_with_limits(listener, None, limits).map_err(|e| Error::Invalid(e.to_string()))
+}
 
 use crate::app_service::{truthy, Application, Options, Session};
 struct Host {
@@ -493,7 +514,7 @@ pub(crate) fn run(args: &[String]) -> Result<u8> {
     // Reserve the port and session entropy before any explicit upgrade commit.
     let server = if upgrade {
         let listener = TcpListener::bind(("127.0.0.1", port))?;
-        Some(Server::from_listener(listener, None).map_err(|e| Error::Invalid(e.to_string()))?)
+        Some(serve(listener)?)
     } else {
         None
     };
@@ -522,7 +543,7 @@ pub(crate) fn run(args: &[String]) -> Result<u8> {
         Some(server) => server,
         None => {
             let listener = TcpListener::bind(("127.0.0.1", port))?;
-            Server::from_listener(listener, None).map_err(|e| Error::Invalid(e.to_string()))?
+            serve(listener)?
         }
     };
     let application = Application::from_library(
@@ -565,8 +586,13 @@ pub(crate) fn run(args: &[String]) -> Result<u8> {
         if let Some(request) = server.recv_timeout(Duration::from_millis(100))? {
             // Capture before spawning/locking/body IO: queued requests belong to the receiving session.
             let received = host.generation.load(Ordering::SeqCst);
-            let host = host.clone();
-            handlers.push(thread::spawn(move || handle(request, &host, received)));
+            if handlers.iter().filter(|h| !h.is_finished()).count() >= MAX_HANDLERS {
+                // Bounded threads: further requests are refused at once instead of piling up.
+                respond(request, error("服务繁忙，请稍后重试"), 503, "core");
+            } else {
+                let host = host.clone();
+                handlers.push(thread::spawn(move || handle(request, &host, received)));
+            }
         }
         if Instant::now() >= next_recovery {
             host.recover();

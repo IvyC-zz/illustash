@@ -617,6 +617,53 @@ class NativeLifecycleTest(unittest.TestCase):
         self.assertEqual(untouched, {name: dump(other / name) for name in untouched})
         self.assertFalse(self.sentinel.exists())
 
+    def test_stalled_connections_are_closed_and_their_number_is_bounded(self):
+        # #25: a client that stops sending loses its connection after the read timeout (shortened here),
+        # and connections beyond the limit are refused at once, so stalled clients cannot hold threads without bound.
+        self.stop(self.process)
+        self.env['ILLUSTASH_HTTP_TIMEOUT_MS'] = '500'
+        self.process, self.log = self.start(self.lib.path)
+        self.token = json.loads(self.request('/api/bootstrap')['body'])['token']
+        body = json.dumps({'local_limit': 1234}).encode()
+
+        def stalled(length):
+            head = (f'POST /api/startup HTTP/1.1\r\nHost: 127.0.0.1:{self.port}\r\nOrigin: {self.origin}\r\n'
+                    f'Content-Type: application/json\r\nContent-Length: {length}\r\nX-CSRF-Token: {self.token}\r\n\r\n')
+            conn = socket.create_connection(('127.0.0.1', self.port), timeout=10)
+            self.addCleanup(conn.close)
+            conn.sendall(head.encode() + body[:5])
+            return conn
+
+        def closed_within(conn, seconds):
+            conn.settimeout(seconds)
+            started = time.monotonic()
+            try:
+                while conn.recv(4096):
+                    pass
+            except ConnectionResetError:
+                pass
+            return time.monotonic() - started < seconds
+
+        # A small body is read by the HTTP library itself, a larger one by the request handler: both time out.
+        for length in (len(body), 4096):
+            with self.subTest(length=length):
+                self.assertTrue(closed_within(stalled(length), 5))
+        # Holding every connection slot: a further connection is refused straight away.
+        held = [stalled(len(body)) for _ in range(64)]
+        refused = socket.create_connection(('127.0.0.1', self.port), timeout=5)
+        self.addCleanup(refused.close)
+        refused.sendall(f'GET /api/bootstrap HTTP/1.1\r\nHost: 127.0.0.1:{self.port}\r\n\r\n'.encode())
+        try:
+            reply = refused.recv(4096)
+        except ConnectionResetError:
+            reply = b'reset'
+        self.assertTrue(reply.startswith(b'HTTP/1.1 503') or reply in (b'', b'reset'), reply)
+        # The held connections time out; the host then serves normally and nothing was written.
+        self.assertTrue(all(closed_within(conn, 5) for conn in held))
+        wait_until(lambda: self.request('/api/bootstrap')['status'] == 200, timeout=10)
+        self.assertEqual(startup(self.lib.db)['local_limit'], 3000)
+        self.assertFalse(self.sentinel.exists())
+
     def test_slow_reader_old_snapshot_does_not_block_library_switch(self):
         target = self.package('second')
         ids = [f'old-{i:04}-' + 'x' * 24576 for i in range(200)]

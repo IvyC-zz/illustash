@@ -90,6 +90,9 @@
 #![forbid(unsafe_code)]
 #![deny(rust_2018_idioms)]
 #![allow(clippy::match_like_matches_macro)]
+// Illustash: as a path dependency this copy is not lint-capped like the crates.io one; silence the two
+// warnings newer compilers raise on unchanged upstream code.
+#![allow(unused_imports, dead_code)]
 
 #[cfg(any(feature = "ssl-openssl", feature = "ssl-rustls"))]
 use zeroize::Zeroizing;
@@ -170,6 +173,18 @@ pub struct IncomingRequests<'a> {
 }
 
 /// Represents the parameters required to create a server.
+/// Illustash (#25): bounds on connections. The default sets none, which is upstream behaviour.
+#[derive(Debug, Clone, Default)]
+pub struct Limits {
+    /// Longest wait for one read from a connection (headers, body, or the next request). A timed-out
+    /// connection gets 408 if no request has started and is then closed.
+    pub read_timeout: Option<Duration>,
+    /// Longest wait for one write to a connection.
+    pub write_timeout: Option<Duration>,
+    /// Connections served at once; further ones get 503 and are closed right away.
+    pub max_connections: Option<usize>,
+}
+
 #[derive(Debug, Clone)]
 pub struct ServerConfig {
     /// The addresses to try to listen to.
@@ -243,6 +258,15 @@ impl Server {
         listener: L,
         ssl_config: Option<SslConfig>,
     ) -> Result<Server, Box<dyn Error + Send + Sync + 'static>> {
+        Self::from_listener_with_limits(listener, ssl_config, Limits::default())
+    }
+
+    /// Illustash (#25): `from_listener` with per-connection timeouts and a connection limit.
+    pub fn from_listener_with_limits<L: Into<Listener>>(
+        listener: L,
+        ssl_config: Option<SslConfig>,
+        limits: Limits,
+    ) -> Result<Server, Box<dyn Error + Send + Sync + 'static>> {
         let listener = listener.into();
         // building the "close" variable
         let close_trigger = Arc::new(AtomicBool::new(false));
@@ -288,12 +312,28 @@ impl Server {
         thread::spawn(move || {
             // a tasks pool is used to dispatch the connections into threads
             let tasks_pool = util::TaskPool::new();
+            let open = Arc::new(std::sync::atomic::AtomicUsize::new(0));
 
             log::debug!("Running accept thread");
             while !inside_close_trigger.load(Relaxed) {
                 let new_client = match server.accept() {
-                    Ok((sock, _)) => {
+                    Ok((mut sock, _)) => {
+                        use std::io::Write;
                         use util::RefinedTcpStream;
+                        if limits
+                            .max_connections
+                            .is_some_and(|max| open.load(std::sync::atomic::Ordering::SeqCst) >= max)
+                        {
+                            // The reply fits in the socket buffer; the timeout only guards a full one.
+                            let _ = sock.set_timeouts(None, Some(Duration::from_secs(1)));
+                            let _ = sock.write_all(
+                                b"HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                            );
+                            continue;
+                        }
+                        if sock.set_timeouts(limits.read_timeout, limits.write_timeout).is_err() {
+                            continue;
+                        }
                         let (read_closable, write_closable) = match ssl {
                             None => RefinedTcpStream::new(sock),
                             #[cfg(any(feature = "ssl-openssl", feature = "ssl-rustls"))]
@@ -320,7 +360,16 @@ impl Server {
                     Ok(client) => {
                         let messages = inside_messages.clone();
                         let mut client = Some(client);
+                        struct Open(Arc<std::sync::atomic::AtomicUsize>);
+                        impl Drop for Open {
+                            fn drop(&mut self) {
+                                self.0.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+                            }
+                        }
+                        open.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                        let mut open = Some(Open(open.clone()));
                         tasks_pool.spawn(Box::new(move || {
+                            let _open = open.take();
                             if let Some(client) = client.take() {
                                 // Synchronization is needed for HTTPS requests to avoid a deadlock
                                 if client.secure() {

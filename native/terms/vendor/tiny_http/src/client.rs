@@ -203,7 +203,9 @@ impl Iterator for ClientConnection {
                                  // se we have to close
                 }
 
-                Err(ReadError::ReadIoError(ref err)) if err.kind() == ErrorKind::TimedOut => {
+                Err(ReadError::ReadIoError(ref err))
+                    if matches!(err.kind(), ErrorKind::TimedOut | ErrorKind::WouldBlock) =>
+                {
                     // request timeout
                     let writer = self.sink.next().unwrap();
                     let response = Response::new_empty(StatusCode(408));
