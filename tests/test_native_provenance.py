@@ -146,6 +146,24 @@ class NativeProvenanceTest(unittest.TestCase):
         self.assertEqual(count,self.sql("SELECT count(*) FROM term_evidence WHERE source='provenance'"))
         self.assertEqual(history,self.sql('SELECT count(*) FROM actions'))
         self.assertTrue(self.sql("SELECT verdict FROM term_effective_verdicts WHERE verdict='no'"))
+    def test_changed_picture_bytes_are_looked_up_again(self):
+        # #27: pixel results from a picture's old bytes go when its bytes change under the same UUID.
+        with closing(sqlite3.connect(self.lib.source)) as c:
+            c.execute('ALTER TABLE assets ADD COLUMN stable_hash TEXT')
+            c.execute("UPDATE assets SET stable_hash='first-'||uuid");c.commit()
+        self.post({'action':'lookup','ids':['a']});self.finish('done')
+        self.assertEqual(len(self.calls),1)
+        artist=self.sql("SELECT artist_id FROM image_artists WHERE asset='a'",cache=True)[0][0]
+        r=self.request('/api/artist/verdict',{'ids':['a'],'artist':artist,'verdict':'no'});self.assertEqual(r['status'],200,r)
+        self.post({'action':'lookup','ids':['a']});self.finish('done')
+        self.assertEqual(len(self.calls),1)  # unchanged bytes reuse the earlier result
+        with closing(sqlite3.connect(self.lib.source)) as c:
+            c.execute("UPDATE assets SET stable_hash='second' WHERE uuid='a'");c.commit()
+        self.post({'action':'lookup','ids':['a']});v=self.finish('done')
+        self.assertEqual(len(self.calls),2)
+        self.assertEqual(v['delivery']['status'],'done')
+        self.assertEqual(self.sql("SELECT hash FROM content_versions WHERE asset='a'",cache=True),[('second',)])
+        self.assertTrue(self.sql("SELECT verdict FROM term_effective_verdicts WHERE verdict='no'"))
     def test_full_local_consent_and_x_leads(self):
         with db.connect(self.lib) as c:c.execute("INSERT INTO leads(source,system,key) VALUES ('x_following','x_id','123')")
         self.post({'action':'start'});v=self.finish('stopped');self.assertFalse(self.calls)
