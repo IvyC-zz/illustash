@@ -92,7 +92,7 @@ where
     A: FnOnce(&Library) -> Result<()>,
 {
     // Repeat package validation: a prepared handle is not permission to upgrade a changed package.
-    let current = Library::open_for_upgrade(prepared.library.path())?;
+    let current = prepared.library.reopen_for_upgrade()?;
     if current.instance_path() != prepared.library.instance_path() || current.config() != prepared.library.config() {
         return Err(Error::Conflict("升级预检后图库包已改变，请重新预检".into()).into());
     }
@@ -124,7 +124,7 @@ where
         let maintenance_pending = meta(&c, "terms_compact_pending")?.is_some();
         drop(c);
         after_commit(&current)?;
-        let library = Library::open(current.path())?;
+        let library = current.reopen()?;
         Ok(UpgradeReport { library, before, after: crate::SCHEMA_VERSION, backup: backup_path, maintenance_pending })
     })();
     result.map_err(|error| UpgradeFailure { error, backup, committed })
@@ -278,7 +278,7 @@ mod tests {
             assert_eq!(f.backups(), 0);
             let report = upgrade(&prepared).unwrap();
             assert_eq!((report.before, report.after, report.maintenance_pending), (version, 7, false));
-            assert_eq!(report.library.path(), f.0);
+            assert_eq!(report.library.display_path(), f.0);
             assert_eq!(f.backups(), 1);
             let backup = app_library::read_connection(&report.backup).unwrap();
             assert_eq!(crate::schema::version(&backup).unwrap(), version);

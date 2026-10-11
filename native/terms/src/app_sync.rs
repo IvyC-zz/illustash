@@ -131,7 +131,7 @@ impl Syncer {
         self.task.take();
         let identity = crate::app_tasks::TaskIdentity::new(library, generation, session)?;
         self.state = Arc::new(Mutex::new(State::from(json!({"status":"scanning","started_at":now()}))));
-        let (library, state) = (library.pinned(), self.state.clone());
+        let (library, state) = (library.clone(), self.state.clone());
         let root = self.resource_root.clone();
         let per_run = self.per_run;
         self.task = Some(crate::app_tasks::Task::start_with(identity, deadline(), move |ctx| {
@@ -546,6 +546,8 @@ fn refresh(library: &Library, run_id: i64, cancel: &AtomicBool) -> Result<(Value
     } else {
         json!({"added":0,"removed":0})
     };
+    // Changed pictures were imported above (an 'imported' event follows), so similar recomputes them.
+    crate::app_research::forget_content(&tx, &src, &changed)?;
     for (key, hash) in hashes {
         tx.execute("INSERT INTO meta(key,value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value WHERE value<>excluded.value", params![key, hash])?;
     }
@@ -1134,7 +1136,7 @@ mod tests {
                 let mut config: Value = serde_json::from_slice(&std::fs::read(&config_path).unwrap()).unwrap();
                 config["id"] = replacement.id().into();
                 std::fs::write(config_path, serde_json::to_vec(&config).unwrap()).unwrap();
-                let lib = Library::open(&first).unwrap().pinned();
+                let lib = Library::open(&first).unwrap();
                 assert_eq!(lib.id(), replacement.id());
                 assert_ne!(lib.instance_path(), replacement.instance_path());
                 let mut c = crate::open(&lib.db()).unwrap();
@@ -1162,7 +1164,7 @@ mod tests {
                     let mut session = service.session.write().unwrap();
                     let identity =
                         crate::app_tasks::TaskIdentity::new(&session.library, generation, &session.token).unwrap();
-                    let task_lib = session.library.pinned();
+                    let task_lib = session.library.clone();
                     let task_root = root.clone();
                     let task = crate::app_tasks::Task::start(identity, None, move |ctx| {
                         let gated = AtomicBool::new(false);

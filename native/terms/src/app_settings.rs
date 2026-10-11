@@ -148,7 +148,7 @@ pub(crate) fn preset(library: &mut Library, source_id: &str, preset: &str) -> Re
     if crate::origin::find(preset).is_none() {
         return Err(Error::Invalid("来源预设只能是 x、pixiv、other".into()));
     }
-    let mut config = config_from_text(&fs::read_to_string(library.path().join("library.json"))?)?;
+    let mut config = config_from_text(&fs::read_to_string(library.instance_path().join("library.json"))?)?;
     let SettingValue::Object(fields) = &mut config else { unreachable!() };
     let source = fields
         .iter_mut()
@@ -166,7 +166,7 @@ pub(crate) fn preset(library: &mut Library, source_id: &str, preset: &str) -> Re
     source.set("preset_origin".into(), SettingValue::Scalar("user".into()));
     let response = source.clone().response();
     // Match the existing configuration-first boundary. SQLite failure leaves an explicit retryable preset.
-    write_config(library.path(), &config)?;
+    write_config(library.instance_path(), &config)?;
     library.reload_config()?;
     set_asset_preset(library, source_id, preset)?;
     Ok(response)

@@ -111,7 +111,13 @@ mod tests {
         #[cfg(windows)]
         assert_eq!(error.raw_os_error(), Some(33));
         drop(a);
-        acquire(&b).unwrap();
+        // A child spawned concurrently by another test can inherit `a` until its exec closes it,
+        // holding the lease a moment longer; callers retry, so the test does too.
+        let until = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while let Err(error) = acquire(&b) {
+            assert!(should_retry(&error) && std::time::Instant::now() < until, "lease not released: {error}");
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
         release(&b).unwrap();
         acquire(&b).unwrap();
         drop(b);

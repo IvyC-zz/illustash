@@ -402,7 +402,7 @@ CREATE TABLE image_artists(
 -- auto：展示为画师（像素哈希、本地比对）；candidate：只是线索（OCR）
 ```
 
-其余是研究缓存和运行记录，字段见 `provenance/db.py（#9 已删除）`：`seeds`（种子来源给出的候选画师）、`leads`（绑定账号读到、还没对上画师的原始 ID）、`lookups`（外部查询记录和重试阶梯）、`marks`（本地 OCR 结果，不外发）、`ref_sigs`（公开作品的 16×16 签名，不留预览图）、`runs`（每次运行一行）、`pending_runs`（忙碌时合并的补跑）、`ext_cache`（外部响应的永久缓存）。
+其余是研究缓存和运行记录，字段见 `provenance/db.py（#9 已删除）`：`seeds`（种子来源给出的候选画师）、`leads`（绑定账号读到、还没对上画师的原始 ID）、`lookups`（外部查询记录和重试阶梯）、`marks`（本地 OCR 结果，不外发）、`ref_sigs`（公开作品的 16×16 签名，不留预览图）、`runs`（每次运行一行）、`pending_runs`（忙碌时合并的补跑）、`ext_cache`（外部响应的永久缓存）。原生模式另有 `content_versions`（每张图上次见到的内容摘要，内容变化时清掉该图的机器结果，见 [ARCHITECTURE_DIRECTION.md](ARCHITECTURE_DIRECTION.md) 文件夹来源一节）。
 
 **人工结论**在核心的 `library.sqlite`（`tests/reference/web/store.py（#9 已删除）`）：
 

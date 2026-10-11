@@ -315,7 +315,7 @@ pub(super) fn handle(request: Request, host: &Host, received: u64, text: &str, b
                 .map(Json::text)
                 .filter(|s| !s.is_empty())
                 .ok_or_else(|| Error::Invalid("无效路径".into()))?;
-            if Path::new(raw) == session.library.path() {
+            if Path::new(raw) == session.library.display_path() {
                 return Err(Error::Invalid("不能移出当前打开的图库".into()));
             }
             crate::app_libraries::forget(&expand_path(raw)?).map_err(management_error)?;
