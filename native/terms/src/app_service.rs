@@ -24,7 +24,7 @@ impl Owner {
             .read(true)
             .write(true)
             .open(library.instance_path().join(".illustash-owner.lock"))?;
-        match crate::app_file_lock::acquire(&file) {
+        match crate::app_file_lock::acquire_unobstructed(&file) {
             Ok(()) => Ok(Arc::new(Self { _lock: file })),
             Err(e) if e.kind() == std::io::ErrorKind::WouldBlock || e.raw_os_error() == Some(33) => {
                 Err(Error::Conflict("这个图库已在另一个 Illustash 中打开；请先关闭那边，或回到那边继续使用".into()))
