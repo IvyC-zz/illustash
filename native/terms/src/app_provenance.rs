@@ -87,7 +87,7 @@ pub(crate) struct Runner {
 }
 impl Runner {
     pub fn new(library: &Library, generation: u64, session: &str, enabled: bool, authorized: bool) -> Result<Self> {
-        let library = library.pinned();
+        let library = library.clone();
         let path = library.instance_path().join("provenance.sqlite");
         let worker = std::env::var_os("ILLUSTASH_PROVENANCE_WORKER").map(PathBuf::from);
         let native = path.is_file()
@@ -405,6 +405,7 @@ impl Runner {
             self.initialize()?;
             let identity = TaskIdentity::new(&self.library, self.generation, &self.session)?;
             let c = cache::connect(&self.path())?;
+            cache::forget_changed_content(&c, &self.library)?;
             c.execute("INSERT INTO runs(kind,steps) VALUES (?,?)", [kind, *steps])?;
             let id = c.last_insert_rowid();
             if kind == "new" {

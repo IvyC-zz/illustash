@@ -75,20 +75,18 @@ class NativeFilesTest(unittest.TestCase):
 
 
     def test_static_bytes_headers_and_security(self):
-        # The former reference served these files verbatim: bodies are compared with the checked-in
-        # source (so interface edits need no re-recording); status and other headers stay recorded.
-        static = Path(__file__).resolve().parents[1] / 'web' / 'static'
-        for url, name in (('/', 'index.html'), ('/app.js', 'app.js'), ('/app.css', 'app.css'),
-                          ('/theme.js', 'theme.js'), ('/favicon.svg', 'favicon.svg'), ('/splash.js', 'splash.js')):
-            recorded = lifecycle.NativeLifecycleTest.reference_response(self, url + '?cache=1')
+        # User decision 2026-10-11 (#33): the recording froze the front end as it was then, so bodies are
+        # compared with the files being served; status and headers still match the recorded reference.
+        static = self.resources / 'web' / 'static'
+        for url in ('/', '/app.js', '/app.css', '/theme.js', '/favicon.svg', '/splash.js'):
+            reference = lifecycle.NativeLifecycleTest.reference_response(self, url + '?cache=1')
             response = self.request(url + '?cache=1')
-            body = (static / name).read_bytes()
-            self.assertEqual(response['status'], recorded['status'])
-            self.assertEqual(response['body'], body, url)
-            self.assertEqual(response['headers'].get('Content-Length'), str(len(body)), url)
+            current = (static / ('index.html' if url == '/' else url[1:])).read_bytes()
+            self.assertEqual(response['body'], current, url)
+            self.assertEqual(response['status'], reference['status'])
             for header in HEADERS:
-                if header != 'Content-Length':
-                    self.assertEqual(recorded['headers'].get(header), response['headers'].get(header), (url, header))
+                expected = str(len(current)) if header == 'Content-Length' else reference['headers'].get(header)
+                self.assertEqual(response['headers'].get(header), expected, (url, header))
             self.assertEqual(response['status'], 200)
             self.assertEqual(response['route'], 'core')
             for headers in ({'Host': 'evil.example'}, {'Origin': 'https://evil.example'}):

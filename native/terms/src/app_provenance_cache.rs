@@ -15,18 +15,62 @@ pub(crate) fn connect(path: &Path) -> Result<Connection> {
     if version < 5 {
         c.execute_batch(include_str!("app_migration_sql/provenance.sql"))?;
     }
-    let colour: bool = c
-        .prepare("PRAGMA table_info(ref_sigs)")?
+    if !has_column(&c, "ref_sigs", "colour")? {
+        c.execute_batch("ALTER TABLE ref_sigs ADD COLUMN colour BLOB")?;
+    }
+    c.execute_batch("PRAGMA user_version=5; CREATE TABLE IF NOT EXISTS native_delivery(task_id TEXT PRIMARY KEY, package TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending', error TEXT NOT NULL DEFAULT '');")?;
+    if !has_column(&c, "native_delivery", "error")? {
+        c.execute_batch("ALTER TABLE native_delivery ADD COLUMN error TEXT NOT NULL DEFAULT ''")?;
+    }
+    c.execute_batch("CREATE TABLE IF NOT EXISTS native_meta(key TEXT PRIMARY KEY,value TEXT NOT NULL)")?;
+    Ok(c)
+}
+fn has_column(c: &Connection, table: &str, column: &str) -> Result<bool> {
+    Ok(c.prepare(&format!("PRAGMA table_info({table})"))?
         .query_map([], |r| r.get::<_, String>(1))?
         .collect::<rusqlite::Result<Vec<_>>>()?
         .iter()
-        .any(|s| s == "colour");
-    if !colour {
-        c.execute_batch("ALTER TABLE ref_sigs ADD COLUMN colour BLOB")?;
+        .any(|s| s == column))
+}
+/// Pixel results describe the bytes they were computed from. Each picture's content hash is remembered, and
+/// when its bytes change under the same UUID its lookups, matched posts, attributions and OCR marks are
+/// dropped so the next run computes them again; the snapshot delivered after that run replaces the evidence
+/// computed from the old bytes. A picture seen for the first time is only remembered. All of these are
+/// machine results; verdicts live in the core.
+pub(super) fn forget_changed_content(c: &Connection, library: &Library) -> Result<()> {
+    let src = crate::app_library::read_connection(&library.source())?;
+    // Opening does not require the column; such a source has no content version to compare.
+    if src.prepare("SELECT stable_hash FROM assets LIMIT 0").is_err() {
+        return Ok(());
     }
-    c.execute_batch("PRAGMA user_version=5; CREATE TABLE IF NOT EXISTS native_delivery(task_id TEXT PRIMARY KEY, package TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending');")?;
-    c.execute_batch("CREATE TABLE IF NOT EXISTS native_meta(key TEXT PRIMARY KEY,value TEXT NOT NULL)")?;
-    Ok(c)
+    c.execute_batch("CREATE TABLE IF NOT EXISTS content_versions(asset TEXT PRIMARY KEY, hash TEXT NOT NULL)")?;
+    let current = src
+        .prepare("SELECT uuid,stable_hash FROM assets WHERE coalesce(stable_hash,'')<>''")?
+        .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    let seen = c
+        .prepare("SELECT asset,hash FROM content_versions")?
+        .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?
+        .collect::<rusqlite::Result<std::collections::HashMap<_, _>>>()?;
+    let tx = c.unchecked_transaction()?;
+    for (asset, hash) in current {
+        match seen.get(&asset) {
+            Some(old) if *old == hash => continue,
+            Some(_) => {
+                tx.execute("DELETE FROM lookups WHERE target=?", [&asset])?;
+                tx.execute("DELETE FROM image_sources WHERE asset=?", [&asset])?;
+                tx.execute("DELETE FROM image_artists WHERE asset=?", [&asset])?;
+                tx.execute("DELETE FROM marks WHERE asset=?", [&asset])?;
+            }
+            None => {}
+        }
+        tx.execute(
+            "INSERT INTO content_versions(asset,hash) VALUES (?1,?2) ON CONFLICT(asset) DO UPDATE SET hash=excluded.hash",
+            [&asset, &hash],
+        )?;
+    }
+    tx.commit()?;
+    Ok(())
 }
 pub(super) fn backup(from: &Path, to: &Path) -> Result<()> {
     let c = crate::app_library::read_connection(from)?;
@@ -121,6 +165,11 @@ pub(super) fn package(library: &Library, cache: &Path, output: &Path) -> Result<
     std::fs::write(output.join("manifest.json"), format!("{text}\n"))?;
     Ok(pkg)
 }
+/// Import pending packages in order. A package the core refuses for its content, or one that is gone,
+/// will never import: it is marked stale with the reason instead of blocking every later delivery. Each
+/// package is a snapshot of the whole cache and importing one replaces the previous snapshot, so when the
+/// newest outcome is stale the cache as it stands now is sealed again; it names only assets still in the
+/// library. Other failures (a busy or unreadable database) leave the queue as it is for the next retry.
 pub(super) fn deliver(library: &Library, cache: &Path) -> Result<Json> {
     if library.frozen() {
         return Ok(Json::Scalar(Value::Null));
@@ -131,28 +180,63 @@ pub(super) fn deliver(library: &Library, cache: &Path) -> Result<Json> {
         .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     let mut last = Json::Scalar(Value::Null);
+    let mut stale = false;
     for (task, path) in rows {
-        let saved = Path::new(&path);
-        let path = if saved.is_absolute() { saved.to_owned() } else { library.instance_path().join(saved) };
-        let pkg = crate::package::Package::open(&path)?;
-        if pkg.manifest.producer != "provenance" {
-            return Err(Error::Invalid("不是溯源证据包".into()));
-        }
-        let mut app = crate::sqlite::open_with_flags(library.db(), rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE)?;
-        app.busy_timeout(Duration::from_secs(2))?;
-        let report = crate::store::import_package(&mut app, &pkg, library.id())?;
-        c.execute("UPDATE native_delivery SET status='done' WHERE task_id=?", [task])?;
-        last = Json::object([
-            ("status", "done".into()),
-            ("package", report.package.into()),
-            ("added", (report.added as i64).into()),
-            ("duplicate", (report.duplicate as i64).into()),
-            ("skipped", (report.skipped as i64).into()),
-            ("created_terms", (report.created_terms as i64).into()),
-            ("already", report.already.into()),
-        ]);
+        (last, stale) = settle(library, &c, &task, &path)?;
+    }
+    if stale {
+        let task = format!("resealed-{}", crate::store::new_key()?);
+        let path = format!(".provenance/{task}/evidence");
+        package(library, cache, &library.instance_path().join(&path))?;
+        c.execute("INSERT INTO native_delivery(task_id,package) VALUES (?,?)", [&task, &path])?;
+        // A resealed package that is refused again stays stale; the next research run seals a new one.
+        (last, _) = settle(library, &c, &task, &path)?;
     }
     Ok(last)
+}
+/// Deliver one pending package: done, stale with its reason, or an error that leaves it pending.
+fn settle(library: &Library, c: &Connection, task: &str, path: &str) -> Result<(Json, bool)> {
+    match import(library, path) {
+        Ok(report) => {
+            c.execute("UPDATE native_delivery SET status='done',error='' WHERE task_id=?", [task])?;
+            Ok((report, false))
+        }
+        Err(e) if refused(&e) => {
+            let reason = e.to_string();
+            c.execute("UPDATE native_delivery SET status='stale',error=? WHERE task_id=?", [&reason, task])?;
+            Ok((Json::object([("status", "stale".into()), ("error", reason.into())]), true))
+        }
+        Err(e) => Err(e),
+    }
+}
+fn import(library: &Library, path: &str) -> Result<Json> {
+    let saved = Path::new(path);
+    let path = if saved.is_absolute() { saved.to_owned() } else { library.instance_path().join(saved) };
+    let pkg = crate::package::Package::open(&path)?;
+    if pkg.manifest.producer != "provenance" {
+        return Err(Error::Invalid("不是溯源证据包".into()));
+    }
+    let mut app = crate::sqlite::open_with_flags(library.db(), rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE)?;
+    app.busy_timeout(Duration::from_secs(2))?;
+    let report = crate::store::import_package(&mut app, &pkg, library.id())?;
+    Ok(Json::object([
+        ("status", "done".into()),
+        ("package", report.package.into()),
+        ("added", (report.added as i64).into()),
+        ("duplicate", (report.duplicate as i64).into()),
+        ("skipped", (report.skipped as i64).into()),
+        ("created_terms", (report.created_terms as i64).into()),
+        ("already", report.already.into()),
+    ]))
+}
+/// The package itself can never import: its content is refused (an asset since removed, another library,
+/// a damaged file) or it no longer exists. Retrying the same bytes would fail the same way.
+fn refused(e: &Error) -> bool {
+    match e {
+        Error::Invalid(_) | Error::Conflict(_) => true,
+        Error::Io(e) | Error::IoAt { source: e, .. } => e.kind() == std::io::ErrorKind::NotFound,
+        _ => false,
+    }
 }
 /// Keep a read-only connection so SQLite data_version invalidates cached history after
 /// any native or external writer commits; polling does not reopen/parse unchanged rows.
@@ -248,5 +332,42 @@ mod tests {
         assert_eq!(row, ("1".into(), None));
         drop(c);
         std::fs::remove_dir_all(&root).unwrap();
+    }
+    #[test]
+    fn earlier_delivery_queue_gains_the_error_column_and_keeps_its_rows() {
+        let root = std::env::temp_dir().join(format!(
+            "illustash-provenance-delivery-{}-{}",
+            std::process::id(),
+            crate::store::new_key().unwrap()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let path = root.join("provenance.sqlite");
+        drop(connect(&path).unwrap());
+        Connection::open(&path)
+            .unwrap()
+            .execute_batch(
+                "DROP TABLE native_delivery; CREATE TABLE native_delivery(task_id TEXT PRIMARY KEY, package TEXT NOT NULL,
+                 status TEXT NOT NULL DEFAULT 'pending'); INSERT INTO native_delivery(task_id,package) VALUES ('t','p');",
+            )
+            .unwrap();
+        let c = connect(&path).unwrap();
+        let row: (String, String, String) = c
+            .query_row("SELECT package,status,error FROM native_delivery", [], |r| {
+                Ok((r.get(0)?, r.get(1)?, r.get(2)?))
+            })
+            .unwrap();
+        assert_eq!(row, ("p".into(), "pending".into(), String::new()));
+        drop(c);
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+    #[test]
+    fn only_packages_that_can_never_import_are_settled_as_stale() {
+        assert!(refused(&Error::Invalid("图已移除".into())));
+        assert!(refused(&Error::Conflict("链接冲突".into())));
+        assert!(refused(&Error::Io(std::io::ErrorKind::NotFound.into())));
+        let busy = rusqlite::Error::SqliteFailure(rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_BUSY), None);
+        assert!(!refused(&Error::Sql(busy)));
+        assert!(!refused(&Error::Io(std::io::ErrorKind::PermissionDenied.into())));
+        assert!(!refused(&Error::Schema("图库需要升级".into())));
     }
 }

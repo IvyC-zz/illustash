@@ -28,7 +28,7 @@ const prefs = {
 };
 
 const state = {
-  route: {page: 'library'}, token: '', undo: null, busy: false,
+  route: {page: 'library'}, token: '', stale: false, undo: null, busy: false,
   chars: [], charMap: new Map(), pins: [], char: null, pools: {unmatched: 0, skipped: 0}, dupInfo: {groups: 0, mixed: 0}, exclInfo: {count: 0, reasons: {}}, pendingCount: 0, sync: {status: 'off'}, syncHistory: [], settings: null, recentCount: 0, maybeCount: 0, userTags: [],
   items: [], total: 0, readEpoch: 0, pages: new Set(), pending: new Set(), generation: 0, dataVersion: 0, gridKey: '',
   cols: 1, cellW: 180, rowH: 250, gap: 12, size: Math.min(SIZE_MAX, Math.max(SIZE_MIN, prefs.get('size', 185))), fit: prefs.get('fit', false),
@@ -37,9 +37,30 @@ const state = {
 };
 let abortList, toastTimer, searchTimer, pageTimer, pickerTimer, detailGen = 0;
 
+// The page belongs to the session it booted with. Another window or caller that switches (or reopens)
+// the library starts a new session; adopting its token would send this page's selection, dialogs and
+// queued work to that library. The page stops instead, and drops responses that arrive afterwards.
+const SESSION_EXPIRED = '会话已过期，请刷新页面';
+const STALE = '图库已在其他窗口切换或重新打开，请重新载入页面';
+function adoptToken(token) {
+  if (!state.token) state.token = token;
+  else if (token !== state.token) staleSession();
+  return !state.stale;
+}
+function staleSession() {
+  if (state.stale) return;
+  state.stale = true;
+  const banner = $('errorBanner'), reload = document.createElement('button');
+  banner.textContent = STALE + '。这个页面已停止读写，未保存的输入不会提交。';
+  reload.type = 'button'; reload.textContent = '重新载入'; reload.onclick = () => location.reload();
+  banner.append(reload); banner.hidden = false;
+}
 async function api(path, options = {}) {
+  if (state.stale) throw new Error(STALE);
   const response = await fetch(path, {...options, headers: {'Content-Type': 'application/json', 'X-CSRF-Token': state.token, ...options.headers}});
   const result = await response.json();
+  if (response.status === 403 && result.error === SESSION_EXPIRED) staleSession();
+  if (state.stale) throw new Error(STALE);
   if (!response.ok) throw new Error(result.error || '请求失败');
   return result;
 }
@@ -51,7 +72,7 @@ async function post(path, body) {
   if (metaPending) { metaRevision++; metaFull ||= path !== '/api/tag'; }
   return result;
 }
-function error(message) { $('errorBanner').textContent = message; $('errorBanner').hidden = !message; }
+function error(message) { if (state.stale) return; $('errorBanner').textContent = message; $('errorBanner').hidden = !message; }
 function readError(e) { return '读取失败：' + (e?.message || String(e)); }
 function readFailure(node, e) { if (node) { node.hidden = false; node.innerHTML = `<p class="empty" role="alert">${esc(readError(e))}</p>`; } }
 async function checkIndex() {
@@ -212,9 +233,9 @@ async function refreshMetaOnce(full, revision, bootSeed) {
   const directory = state.route.page === 'characters';
   const [boot, pools, chars, tags, queue, detail] = await Promise.all([bootSeed || api('/api/bootstrap?' + nsfw), api('/api/review-pools?' + nsfw), api('/api/characters?min=1&' + nsfw + (directory ? '' : '&summary=1')), api('/api/user-tags'), api('/api/identity/count?' + nsfw).catch(e => { error(readError(e)); return null; }), charId && !directory ? fetchChar(charId) : null]);
   const currentChar = charId && (detail || (directory && (chars.find(c => c.id === charId) || await fetchChar(charId))));
-  if (revision !== metaRevision || nsfw.get('nsfw') !== state.nsfw) return;
+  if (revision !== metaRevision || nsfw.get('nsfw') !== state.nsfw || !adoptToken(boot.token)) return;
   state.userTags = tags;
-  state.token = boot.token; setUndo(boot.undo);
+  setUndo(boot.undo);
   state.pools = Object.fromEntries(pools.map(p => [p.kind, p.count]));
   state.chars = chars; state.charMap = new Map(chars.map(c => [c.id, c]));
   state.workNames = new Map(chars.filter(c => c.work && c.work_name).map(c => [c.work, c.work_name]));
@@ -2942,6 +2963,8 @@ $('settingsPage').addEventListener('click', async e => {
 });
 async function openLibrary(path, name) {
   try { await api('/api/libraries/open', {method: 'POST', body: JSON.stringify({path})}); } catch (err) { toast(err.message); return; }
+  // This page's state belongs to the library it left: no reads or writes until the reload below.
+  state.stale = true;
   toast(`正在打开「${name}」…`);
   for (let i = 0; i < 120; i++) {
     await new Promise(r => setTimeout(r, 700));
@@ -2950,7 +2973,7 @@ async function openLibrary(path, name) {
       if (s.package?.path === path) { location.hash = '#/home'; location.reload(); return; }
     } catch { /* the server is restarting */ }
   }
-  error('切换图库超时：请检查启动终端。');
+  $('errorBanner').textContent = '切换图库超时：请检查启动终端，然后刷新页面。'; $('errorBanner').hidden = false;
 }
 $('settingsPage').addEventListener('click', e => {
   const b = e.target.closest('[data-open-library]');
@@ -3341,7 +3364,7 @@ function artistSection(d, ident) {
 (async () => {
   try {
     const bootNsfw = state.nsfw;
-    const boot = await api('/api/bootstrap?' + new URLSearchParams({nsfw: bootNsfw})); state.token = boot.token; setUndo(boot.undo);
+    const boot = await api('/api/bootstrap?' + new URLSearchParams({nsfw: bootNsfw})); adoptToken(boot.token); setUndo(boot.undo);
     if (boot.read_only) toast(boot.read_only);   // the library could not be switched to the terms core: read-only
     navCount('countLibrary', boot.total);
     window.splash?.status(`正在整理 ${number(boot.total)} 张图…`);

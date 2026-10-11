@@ -16,7 +16,7 @@ use std::{
 };
 
 fn read(library: &Library) -> Result<SettingValue> {
-    config_from_text(&fs::read_to_string(library.path().join("library.json"))?)
+    config_from_text(&fs::read_to_string(library.instance_path().join("library.json"))?)
 }
 fn plain(value: &SettingValue) -> Value {
     serde_json::to_value(value).expect("settings serialize to JSON")
@@ -103,7 +103,7 @@ pub(crate) fn add(library: &mut Library, kind: &str, path: &str, preset: &str) -
     }
     let setting: SettingValue = serde_json::from_value(entry).map_err(|e| Error::Invalid(e.to_string()))?;
     list(&mut config, "sources").push(setting);
-    write_config(library.path(), &config)?;
+    write_config(library.instance_path(), &config)?;
     library.reload_config()?;
     if kind == "folder" {
         // A folder that comes back may come back with another origin.
@@ -143,7 +143,7 @@ pub(crate) fn remove(library: &mut Library, source_id: &str, confirm: bool) -> R
     let stamp = chrono::Local::now().format("%Y-%m-%dT%H:%M:%S%:z").to_string();
     retired.set("removed_at".into(), SettingValue::Scalar(stamp.into()));
     list(&mut config, "removed_sources").push(retired);
-    write_config(library.path(), &config)?;
+    write_config(library.instance_path(), &config)?;
     library.reload_config()?;
     Ok(Json::object([("removed", count.into())]))
 }
@@ -266,7 +266,7 @@ mod tests {
         );
         assert!(add(&mut library, "folder", f.0.join("missing").to_str().unwrap(), "x").is_err());
         assert!(add(&mut library, "folder", f.0.join("c").to_str().unwrap(), "guess").is_err());
-        let path = library.path().join("library.json");
+        let path = library.instance_path().join("library.json");
         let mut config: Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
         config["test"] = json!({"persona":"合成"});
         fs::write(&path, config.to_string()).unwrap();

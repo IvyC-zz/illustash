@@ -14,6 +14,7 @@ import http.client
 import json
 import os
 from pathlib import Path
+import shutil
 import signal
 import socket
 import sqlite3
@@ -580,6 +581,41 @@ class NativeLifecycleTest(unittest.TestCase):
         conn.send(body[8:]); response = conn.getresponse(); response.read()
         self.assertEqual(response.status, 403)
         self.assertEqual(before, dump(target.db))
+
+    @unittest.skipIf(os.name == 'nt', '目录符号链接在 Windows 上需要额外权限')
+    def test_retargeted_alias_keeps_the_session_on_the_opened_library(self):
+        # A copy shares the config ID and every image UUID; only its name tells the two apart.
+        self.stop(self.process)
+        other = self.root / 'other.pilib'
+        shutil.copytree(self.lib.path, other)
+        config = json.loads((other / 'library.json').read_text(encoding='utf-8'))
+        (other / 'library.json').write_text(json.dumps({**config, 'name': 'other'}, ensure_ascii=False),
+                                            encoding='utf-8')
+        alias = self.root / 'alias.pilib'
+        alias.symlink_to(self.lib.path, target_is_directory=True)
+        self.process, self.log = self.start(alias)
+        self.token = json.loads(self.request('/api/bootstrap')['body'])['token']
+        alias.unlink(); alias.symlink_to(other, target_is_directory=True)
+        untouched = {name: dump(other / name) for name in ('library.sqlite', 'source.sqlite')}
+        self.assertEqual(self.request('/api/tag', {'ids': ['b'], 'tag': 'opened-library-tag'})['status'], 200)
+        self.assertEqual(self.request('/api/startup', {'local_limit': 4321})['status'], 200)
+        with closing(sqlite3.connect(self.lib.db)) as c:
+            self.assertEqual(c.execute("SELECT tag FROM asset_tags WHERE uuid='b' AND tag='opened-library-tag'")
+                             .fetchall(), [('opened-library-tag',)])
+        self.assertEqual(startup(self.lib.db)['local_limit'], 4321)
+        self.assertEqual(untouched, {name: dump(other / name) for name in untouched})
+        self.assertIn('opened-library-tag', self.request('/api/user-tags')['body'].decode())
+        package = json.loads(self.request('/api/settings')['body'])['package']
+        self.assertEqual((package['path'], package['name']), (str(alias), self.lib.name))
+        # Opening the alias again is a deliberate switch: a new session on the other package.
+        old_token = self.token
+        self.assertEqual(self.request('/api/libraries/open', {'path': str(alias)})['status'], 200)
+        self.token = json.loads(self.request('/api/bootstrap')['body'])['token']
+        self.assertNotEqual(self.token, old_token)
+        self.assertEqual(self.request('/api/startup', {'local_limit': 1234}, token=old_token)['status'], 403)
+        self.assertEqual(json.loads(self.request('/api/settings')['body'])['package']['name'], 'other')
+        self.assertEqual(untouched, {name: dump(other / name) for name in untouched})
+        self.assertFalse(self.sentinel.exists())
 
     def test_slow_reader_old_snapshot_does_not_block_library_switch(self):
         target = self.package('second')

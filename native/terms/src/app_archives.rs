@@ -136,7 +136,7 @@ pub(crate) fn export(library: &Library, dest: &Path, cancel: &Arc<AtomicBool>) -
     ));
     for rel in EXPORTED {
         cancelled(cancel)?;
-        let src = library.path().join(rel);
+        let src = library.instance_path().join(rel);
         if !src.try_exists()? {
             continue;
         }

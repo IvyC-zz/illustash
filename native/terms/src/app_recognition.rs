@@ -324,7 +324,6 @@ pub(crate) fn prepare_worker_package(
     inputs: &WorkerInputs,
     cancel: &AtomicBool,
 ) -> Result<PreparedWorkerPackage> {
-    let library = &library.pinned();
     if inputs.identity.library_id != library.id() || inputs.identity.package != library.instance_path() {
         return Err(invalid());
     }
@@ -364,7 +363,6 @@ fn import_internal(
     dispatch: &dyn Fn(&Library, &str) -> Result<()>,
     claims: Option<(&PreparedWorkerPackage, &WorkerInputs)>,
 ) -> Result<Value> {
-    let library = &library.pinned();
     if library.frozen() {
         return Err(Error::Conflict("图库只读".into()));
     }
@@ -512,7 +510,6 @@ pub fn resume(
     cancel: &AtomicBool,
     dispatch: &dyn Fn(&Library, &str) -> Result<()>,
 ) -> Result<Value> {
-    let library = &library.pinned();
     if library.frozen() {
         return Err(Error::Conflict("图库只读".into()));
     }

@@ -11,18 +11,21 @@ import os
 import shutil
 import sqlite3
 import subprocess
+import sys
 import threading
 import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from PIL import Image
+from PIL import Image, ImageDraw
+from PIL.PngImagePlugin import PngInfo
 from tests.folder_fixture import FolderSource, image, settle
 from tests.fixed_expectations import Expectations, unclocked
 from tests.test_native_human_labels import snapshot
 from tests import test_native_lifecycle as lifecycle
 from tests.test_native_lifecycle import NativeLifecycleTest
+from tests.test_read_http import wait_until
 
 
 class NativeFolderScanTest(unittest.TestCase):
@@ -179,6 +182,55 @@ class NativeFolderHTTPTest(unittest.TestCase):
         with sqlite3.connect(self.lib.db) as c:
             self.assertEqual(c.execute("SELECT uuid FROM assets WHERE filename='back.png'").fetchone()[0], asset)
         self.assertFalse(self.sentinel.exists())
+
+    def test_native_library_new_folder_changed_content_is_compared_again(self):
+        # #27: once a picture's bytes change under the same UUID, similar results from the old bytes go.
+        worker = self.root / 'research-worker'
+        worker.write_text('#!' + sys.executable + '\nimport os,subprocess,sys\n'
+                          "subprocess.run([os.environ['ILLUSTASH_RESEARCH_COMPUTE_BIN'],sys.argv[1],sys.argv[2]],check=True)\n")
+        worker.chmod(0o755)
+        self.env.update(ILLUSTASH_RESEARCH_WORKER=worker_command(worker), ILLUSTASH_RESEARCH_TIMEOUT_MS='20000',
+                        ILLUSTASH_RESEARCH_RETRY_MS='300')
+        self.stop(self.process)
+        self.process, self.log = self.start(self.lib.path)
+        self.token = json.loads(self.request('/api/bootstrap')['body'])['token']
+        # The same pixels in different bytes are compared; byte-identical copies are grouped and skipped.
+        first = Image.linear_gradient('L').resize((64, 48)).convert('RGB')
+        first.save(self.new_folder / 'a.png')
+        note = PngInfo(); note.add_text('synthetic', 'second copy')
+        first.save(self.new_folder / 'b.png', pnginfo=note)
+
+        def compared():
+            self.assertNotEqual(self.sync()['state']['status'], 'error')
+            wait_until(lambda: json.loads(self.request('/api/similar')['body'])['state']['status'] == 'idle'
+                       and not self.pending(), timeout=30)
+            with sqlite3.connect(self.lib.db) as c:
+                a, b = (c.execute('SELECT uuid FROM assets WHERE filename=?', (n,)).fetchone()[0] for n in ('a.png', 'b.png'))
+                pair = tuple(sorted((a, b)))
+                kinds = c.execute('SELECT kind FROM relations WHERE a=? AND b=?', pair).fetchall()
+                grid = c.execute('SELECT grid FROM image_sigs WHERE uuid=?', (b,)).fetchone()
+                tags = c.execute('SELECT tag FROM asset_tags WHERE uuid=?', (b,)).fetchall()
+            return b, kinds, grid, tags
+
+        b, kinds, grid, _ = compared()
+        self.assertEqual(kinds, [('identical',)])
+        tag = self.request('/api/tag', {'ids': [b], 'tag': '人工标签'})
+        self.assertEqual(tag['status'], 200, tag)
+        edited = first.copy(); ImageDraw.Draw(edited).rectangle((28, 20, 35, 25), fill='black')
+        edited.save(self.new_folder / 'b.png')
+        again, kinds, changed_grid, tags = compared()
+        self.assertEqual(again, b)
+        self.assertEqual(len(kinds), 1)
+        self.assertNotEqual(kinds, [('identical',)])
+        self.assertNotEqual(changed_grid, grid)
+        groups = json.loads(self.request('/api/similar')['body'])['groups']
+        self.assertEqual([list(g['kinds']) for g in groups], [[kinds[0][0]]])  # the groups follow the new result
+        self.assertEqual(tags, [('人工标签',)])
+        self.assertFalse(self.sentinel.exists())
+
+    def pending(self):
+        with sqlite3.connect(self.lib.db) as c:
+            return c.execute("SELECT count(*) FROM backend_effects WHERE status='pending' AND kind IN ('verdict','imported','index_changed')").fetchone()[0]
 
     def test_native_library_new_folder_application_failure_retry_and_changed_evidence(self):
         image(self.new_folder / 'a.png', 'red')
