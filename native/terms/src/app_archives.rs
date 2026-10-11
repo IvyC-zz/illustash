@@ -50,6 +50,17 @@ fn cancelled(cancel: &AtomicBool) -> Result<()> {
         Ok(())
     }
 }
+fn import_cancelled(cancel: &AtomicBool) -> Result<()> {
+    if cancel.load(Ordering::SeqCst) || crate::platform_process::stopping() {
+        Err(Error::Conflict("程序正在退出，导入已取消".into()))
+    } else {
+        Ok(())
+    }
+}
+/// The configuration is buffered and parsed in memory; real ones are a few kilobytes.
+const CONFIG_LIMIT: u64 = 1 << 20;
+/// Kept free after unpacking, so an import never fills the disk the library lives on.
+const SPACE_MARGIN: u64 = 256 << 20;
 fn random() -> Result<String> {
     let mut bytes = [0; 16];
     getrandom::fill(&mut bytes).map_err(invalid)?;
@@ -214,13 +225,17 @@ fn backup_into(source: &rusqlite::Connection, copy: &Path, cancel: &AtomicBool) 
         }
     }
 }
-struct CheckedWriter<W> {
+struct CheckedWriter<'a, W> {
     output: W,
     crc: crc32fast::Hasher,
     bytes: u64,
+    cancel: &'a AtomicBool,
 }
-impl<W: Write> Write for CheckedWriter<W> {
+impl<W: Write> Write for CheckedWriter<'_, W> {
     fn write(&mut self, data: &[u8]) -> std::io::Result<usize> {
+        if self.cancel.load(Ordering::SeqCst) || crate::platform_process::stopping() {
+            return Err(std::io::Error::other("cancelled"));
+        }
         let n = self.output.write(data)?;
         self.crc.update(&data[..n]);
         self.bytes += n as u64;
@@ -230,7 +245,14 @@ impl<W: Write> Write for CheckedWriter<W> {
         self.output.flush()
     }
 }
-fn unpack<W: Write>(zip: &mut ZipArchive<BufReader<File>>, name: &str, mut output: W, buffer: &mut [u8]) -> Result<()> {
+/// Streams one entry, writing no more than the size it declares (the import's space check counts on that).
+fn unpack<W: Write>(
+    zip: &mut ZipArchive<BufReader<File>>,
+    name: &str,
+    mut output: W,
+    buffer: &mut [u8],
+    cancel: &AtomicBool,
+) -> Result<()> {
     let index = zip.index_for_name(name).ok_or_else(|| invalid("缺少归档内容"))?;
     let mut raw = zip.by_index_raw(index).map_err(zip_failure)?;
     if raw.compression() == zip::CompressionMethod::LZMA {
@@ -246,28 +268,39 @@ fn unpack<W: Write>(zip: &mut ZipArchive<BufReader<File>>, name: &str, mut outpu
         raw.read_exact(&mut header[..5]).map_err(zip_read_failure)?;
         header[5..].copy_from_slice(&size.to_le_bytes());
         let mut input = BufReader::with_capacity(65536, std::io::Cursor::new(header).chain(raw));
-        let mut checked = CheckedWriter { output, crc: crc32fast::Hasher::new(), bytes: 0 };
-        lzma_rs::lzma_decompress(&mut input, &mut checked).map_err(|error| Error::Io(std::io::Error::other(error)))?;
+        let mut checked = CheckedWriter { output, crc: crc32fast::Hasher::new(), bytes: 0, cancel };
+        let decoded = lzma_rs::lzma_decompress(&mut input, &mut checked);
+        import_cancelled(cancel)?;
+        decoded.map_err(|error| Error::Io(std::io::Error::other(error)))?;
         if checked.bytes != size || checked.crc.finalize() != crc {
             return Err(Error::Io(std::io::Error::other("Invalid checksum")));
         }
     } else {
+        let size = raw.size();
         drop(raw);
         let mut source = zip.by_name(name).map_err(zip_failure)?;
+        let mut written = 0u64;
         loop {
+            import_cancelled(cancel)?;
             let n = source.read(buffer).map_err(zip_read_failure)?;
             if n == 0 {
                 break;
+            }
+            written += n as u64;
+            if written > size {
+                return Err(Error::Io(std::io::Error::other("归档内容比声明的大小更大")));
             }
             output.write_all(&buffer[..n]).map_err(invalid)?;
         }
     }
     Ok(())
 }
-pub(crate) fn import(archive: &Path) -> Result<(PathBuf, String)> {
+/// `cancel` is the application's closing flag: an import interrupted by quitting removes what it unpacked.
+pub(crate) fn import(archive: &Path, cancel: &Arc<AtomicBool>) -> Result<(PathBuf, String)> {
     let mut zip = ZipArchive::new(BufReader::with_capacity(1 << 20, File::open(archive).map_err(invalid)?))
         .map_err(zip_failure)?;
     let mut names = std::collections::BTreeSet::new();
+    let mut declared = 0u64;
     for i in 0..zip.len() {
         let file = zip.by_index_raw(i).map_err(zip_failure)?;
         let name = file.name();
@@ -279,7 +312,12 @@ pub(crate) fn import(archive: &Path) -> Result<(PathBuf, String)> {
         {
             return Err(invalid("导出文件里有不认识的内容，已拒绝导入"));
         }
+        // The archive index is keyed by name, so the entries are at most the exported set.
         names.insert(name.to_owned());
+        if name == "library.json" && file.size() > CONFIG_LIMIT {
+            return Err(invalid("导出文件里的图库配置过大，已拒绝导入"));
+        }
+        declared = declared.saturating_add(file.size());
     }
     if !names.contains("library.json") || !names.contains("source.sqlite") {
         return Err(invalid("不是导出的图库（缺少 library.json 或 source.sqlite）"));
@@ -288,7 +326,7 @@ pub(crate) fn import(archive: &Path) -> Result<(PathBuf, String)> {
     let mut buffer = vec![0u8; 1 << 20];
     let config_text = {
         let mut bytes = Vec::new();
-        unpack(&mut zip, "library.json", &mut bytes, &mut buffer)?;
+        unpack(&mut zip, "library.json", &mut bytes, &mut buffer, cancel)?;
         String::from_utf8(bytes).map_err(invalid)?
     };
     let value: serde_json::Value = serde_json::from_str(&config_text).map_err(invalid)?;
@@ -315,6 +353,20 @@ pub(crate) fn import(archive: &Path) -> Result<(PathBuf, String)> {
         .unwrap_or_else(|| archive.file_stem().unwrap_or_default().to_string_lossy().into_owned());
     let path = crate::app_libraries::unique_path(&name)?;
     fs::create_dir_all(path.parent().expect("internal file path must have a parent")).map_err(invalid)?;
+    // Unpacking writes at most the declared sizes; compaction of library.sqlite may need as much again.
+    let library_size = zip.index_for_name("library.sqlite").map_or(Ok(0), |i| zip.by_index_raw(i).map(|f| f.size()));
+    let needed = declared.saturating_add(library_size.map_err(zip_failure)?).saturating_add(SPACE_MARGIN);
+    let available =
+        crate::platform_filesystem::available_space(path.parent().expect("internal file path must have a parent"))
+            .map_err(invalid)?;
+    if needed > available {
+        return Err(invalid(format!(
+            "磁盘空间不足：导入需要约 {} MiB，可用 {} MiB",
+            needed.div_ceil(1 << 20),
+            available >> 20
+        )));
+    }
+    import_cancelled(cancel)?;
     fs::create_dir(&path).map_err(invalid)?;
     let mut cleanup = Stage(path.clone(), false);
     for name in names {
@@ -324,14 +376,17 @@ pub(crate) fn import(archive: &Path) -> Result<(PathBuf, String)> {
             1 << 20,
             OpenOptions::new().write(true).create_new(true).open(out).map_err(invalid)?,
         );
-        unpack(&mut zip, &name, &mut file, &mut buffer)?;
+        unpack(&mut zip, &name, &mut file, &mut buffer, cancel)?;
         file.flush().map_err(invalid)?;
     }
     // Old exports can still contain credentials and the sender's lasting consent.
     // Strip them before publishing or registering this newly created package.
     let database = path.join("library.sqlite");
     if database.try_exists()? {
-        sanitize_database(&database, None)?;
+        sanitize_database(&database, Some(cancel.clone())).map_err(|e| match import_cancelled(cancel) {
+            Err(stop) => stop,
+            Ok(()) => e,
+        })?;
     }
     for sub in ["features", "thumbnails", "backups"] {
         fs::create_dir_all(path.join(sub)).map_err(invalid)?;
@@ -348,6 +403,7 @@ pub(crate) fn import(archive: &Path) -> Result<(PathBuf, String)> {
     if fmt_is_current(&fmt) {
         opens(&path).map_err(|e| invalid(format!("导入的图库无法打开，已取消导入：{e}")))?;
     }
+    import_cancelled(cancel)?;
     cleanup.1 = true;
     Ok((path, name))
 }
@@ -576,7 +632,7 @@ mod tests {
         let raw = fs::read(&path).unwrap();
         let needle: &[u8] = b"features\\full-features.npy";
         assert!(raw.windows(needle.len()).any(|w| w == needle), "fixture must keep the backslash");
-        let error = import(&path).unwrap_err().to_string();
+        let error = import(&path, &Arc::default()).unwrap_err().to_string();
         fs::remove_file(&path).unwrap();
         assert!(error.contains("不认识的内容"), "{error}");
     }

@@ -142,6 +142,75 @@ pub(super) fn handle(request: Request, host: &Host, received: u64, text: &str, b
         }
         return;
     }
+    // Long imports run without the session lock (#26), so switching libraries, other requests and quitting
+    // are not held up. A recognition import stays bound to the library it started on; closing that session
+    // (switch or quit) cancels it before it commits. An archive import creates a new package and stops when the
+    // application closes, removing what it unpacked.
+    if request.url() == "/api/recognition/import" {
+        let started = if session.index.writing() {
+            Err(Error::Invalid("角色索引正在更新，请稍后".into()))
+        } else {
+            Ok(session.imports.admit())
+        };
+        let library = session.library.clone();
+        drop(session);
+        let result = started.and_then(|ticket| {
+            ticket.run(|cancel| {
+                let imported = (|| {
+                    let out = if matches!(body.get("resume"), Some(Json::Scalar(serde_json::Value::Bool(true)))) {
+                        crate::app_recognition::resume(&library, cancel, &crate::app_research::dispatch)?
+                    } else {
+                        let path = match body.get("path") {
+                            Some(Json::Scalar(serde_json::Value::String(path))) => path,
+                            _ => return Err(Error::Invalid("需要结果包目录 path".into())),
+                        };
+                        crate::app_recognition::import_package(
+                            &library,
+                            Path::new(path),
+                            &host.root,
+                            cancel,
+                            &crate::app_research::dispatch,
+                        )?
+                    };
+                    // Keep legacy response insertion order (digest, duplicate, status, error).
+                    Ok(Json::Object(
+                        ["digest", "duplicate", "status", "error"]
+                            .iter()
+                            .filter_map(|k| out.get(*k).map(|v| ((*k).to_string(), v.clone().into())))
+                            .collect(),
+                    ))
+                })();
+                // Nothing past the last checkpoint was committed; pending projections resume with that library.
+                imported.map_err(|e| {
+                    if cancel.load(std::sync::atomic::Ordering::SeqCst) {
+                        Error::Conflict("图库已切换或程序正在退出，导入已取消".into())
+                    } else {
+                        e
+                    }
+                })
+            })
+        });
+        match result {
+            Ok(payload) => respond(request, payload, 200, "core"),
+            Err(e) => failure(request, e, true),
+        }
+        return;
+    }
+    if request.url() == "/api/libraries/import" {
+        drop(session);
+        let closing = host.closing();
+        let result = (|| {
+            let path = body.get("path").map(Json::text).unwrap_or("");
+            let (path, name) = crate::app_archives::import(&expand_path(path)?, &closing)?;
+            crate::app_libraries::remember_created(&path, &name)?;
+            Ok(Json::object([("path", path.to_string_lossy().as_ref().into()), ("name", name.into())]))
+        })();
+        match result {
+            Ok(payload) => respond(request, payload, 200, "core"),
+            Err(e) => failure(request, e, true),
+        }
+        return;
+    }
     let result = match request.url() {
         "/api/tag"
         | "/api/undo"
@@ -170,45 +239,25 @@ pub(super) fn handle(request: Request, host: &Host, received: u64, text: &str, b
         "/api/index" => {
             let library = session.library.clone();
             let busy = session.syncer.running();
-            session.index.post(&library, &body, busy)
+            if session.imports.running() && matches!(body.get("action").map(Json::text), Some("apply" | "drop")) {
+                Err(Error::Invalid("识别结果正在导入，完成后再更新角色索引".into()))
+            } else {
+                session.index.post(&library, &body, busy)
+            }
         }
         "/api/names" => {
             let library = session.library.clone();
             session.names.post(&library, &body)
         }
-        "/api/recognition/import" => (|| {
-            if session.index.writing() {
-                return Err(Error::Invalid("角色索引正在更新，请稍后".into()));
-            }
-
-            let cancel = std::sync::atomic::AtomicBool::new(false);
-            let out = if matches!(body.get("resume"), Some(Json::Scalar(serde_json::Value::Bool(true)))) {
-                crate::app_recognition::resume(&session.library, &cancel, &crate::app_research::dispatch)?
-            } else {
-                let path = match body.get("path") {
-                    Some(Json::Scalar(serde_json::Value::String(path))) => path,
-                    _ => return Err(Error::Invalid("需要结果包目录 path".into())),
-                };
-                crate::app_recognition::import_package(
-                    &session.library,
-                    Path::new(path),
-                    &host.root,
-                    &cancel,
-                    &crate::app_research::dispatch,
-                )?
-            };
-            // Keep legacy response insertion order (digest, duplicate, status, error).
-            Ok(Json::Object(
-                ["digest", "duplicate", "status", "error"]
-                    .iter()
-                    .filter_map(|k| out.get(*k).map(|v| ((*k).to_string(), v.clone().into())))
-                    .collect(),
-            ))
-        })(),
         "/api/sync" => {
             if session.index.writing() {
                 drop(session);
                 failure(request, Error::Invalid("角色索引正在更新，请稍后".into()), true);
+                return;
+            }
+            if session.imports.running() {
+                drop(session);
+                failure(request, Error::Invalid("识别结果正在导入，请稍后".into()), true);
                 return;
             }
             let library = session.library.clone();
@@ -320,12 +369,6 @@ pub(super) fn handle(request: Request, host: &Host, received: u64, text: &str, b
             }
             crate::app_libraries::forget(&expand_path(raw)?).map_err(management_error)?;
             Ok(Json::object([("ok", true.into())]))
-        })(),
-        "/api/libraries/import" => (|| {
-            let path = body.get("path").map(Json::text).unwrap_or("");
-            let (path, name) = crate::app_archives::import(&expand_path(path)?)?;
-            crate::app_libraries::remember_created(&path, &name)?;
-            Ok(Json::object([("path", path.to_string_lossy().as_ref().into()), ("name", name.into())]))
         })(),
         "/api/libraries/export" => host.exports.start(&session.library, session.generation),
         "/api/libraries/open" => (|| {
