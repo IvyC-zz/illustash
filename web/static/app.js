@@ -976,7 +976,10 @@ async function undo() {
     if (state.route.page === 'artist-audit') renderArtistAudit();
     if (state.focused) inspect(state.focused, true);
     if (state.viewer >= 0) { const i = indexOf(state.viewerItem?.uuid); showViewer(i >= 0 ? i : state.viewer, i >= 0 ? state.items[i] : state.viewerItem); }
-  } catch (e) { toast(e.message); } finally { state.busy = false; setUndo(state.undo); }
+  } catch (e) {
+    // The history may have moved on (another window, or a failure after the server committed): show its latest step.
+    toast(e.message); refreshMeta().catch(err => error(readError(err)));
+  } finally { state.busy = false; setUndo(state.undo); }
 }
 async function sweep() {
   const c = state.char; if (!c?.unchecked) return;

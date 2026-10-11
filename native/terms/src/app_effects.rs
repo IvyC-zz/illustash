@@ -4,6 +4,15 @@ use crate::Result;
 use rusqlite::{OpenFlags, OptionalExtension, TransactionBehavior};
 use std::path::Path;
 
+/// After a human operation has committed: its result stands whatever happens here. A failure leaves the
+/// events pending for the next drain (another operation, startup or periodic recovery) and is only logged,
+/// so the response never reports a committed operation as rolled back.
+pub(crate) fn drain_after_commit(db: &Path) {
+    if let Err(error) = drain(db) {
+        eprintln!("人工操作已提交，verdict事件处理失败，稍后重试：{error}");
+    }
+}
+
 pub(crate) fn drain(db: &Path) -> Result<()> {
     if crate::app_research::configured() {
         return Ok(());
