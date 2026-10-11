@@ -74,9 +74,38 @@ fn path_exists(path: &Path) -> Result<bool> {
     }
 }
 
+/// Hosts of different libraries share the registry: each read-modify-write holds its lock, so one host's
+/// update is never lost to another's or written through the same temporary file at once. When the lock
+/// file itself cannot be opened the update goes ahead as before and reports its own failure.
+fn registry_locked<T>(file: &Path, update: impl FnOnce() -> Result<T>) -> Result<T> {
+    let lock = file.parent().and_then(|parent| {
+        fs::create_dir_all(parent).ok()?;
+        fs::OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .read(true)
+            .write(true)
+            .open(file.with_extension("lock"))
+            .ok()
+    });
+    if let Some(lock) = &lock {
+        // Another host holds it only for one small write; wait for it rather than overwrite its result.
+        for _ in 0..500 {
+            if crate::app_file_lock::acquire(lock).is_ok() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+    }
+    update()
+}
+
 pub(crate) fn forget(path: &Path) -> Result<()> {
     let file = registry(&user_home()?);
-    let mut entries = recent(&file);
+    registry_locked(&file, || forget_at(path, &file))
+}
+fn forget_at(path: &Path, file: &Path) -> Result<()> {
+    let mut entries = recent(file);
     entries.retain(|entry| Path::new(entry["path"].as_str().expect("validated internal text field")) != path);
     let text =
         serde_json::to_string_pretty(&json!({"recent":entries})).map_err(|e| Error::Invalid(e.to_string()))? + "\n";
@@ -155,6 +184,9 @@ fn info_at(library: &Library, file: &Path, home: &Path) -> Result<Json> {
     ]))
 }
 fn remember_at(path: &Path, name: &str, file: &Path, opened_at: &str, front: bool) -> Result<()> {
+    registry_locked(file, || remember_unlocked(path, name, file, opened_at, front))
+}
+fn remember_unlocked(path: &Path, name: &str, file: &Path, opened_at: &str, front: bool) -> Result<()> {
     let mut entries = recent(file);
     entries.retain(|entry| Path::new(entry["path"].as_str().expect("validated internal text field")) != path);
     let entry = json!({"path": display(path)?, "name": name, "opened_at": opened_at});
@@ -441,6 +473,34 @@ mod tests {
         let blocker = f.0.join("not-a-directory");
         fs::write(&blocker, "x").unwrap();
         assert!(remember_at(lib.display_path(), lib.name(), &blocker.join("libraries.json"), "now", true).is_err());
+    }
+    #[test]
+    fn concurrent_hosts_never_lose_each_others_registry_updates() {
+        // Each thread stands for a host of a different library, writing the shared registry at once.
+        let f = Fixture::new();
+        let file = f.registry();
+        let names: Vec<String> = (0..8).map(|i| format!("library-{i}")).collect();
+        let paths: Vec<PathBuf> = names.iter().map(|name| f.package(name)).collect();
+        std::thread::scope(|scope| {
+            for (name, path) in names.iter().zip(&paths) {
+                let file = &file;
+                scope.spawn(move || {
+                    for round in 0..10 {
+                        remember_at(path, name, file, &format!("round-{round}"), true).unwrap();
+                    }
+                });
+            }
+        });
+        let written: Value = serde_json::from_slice(&fs::read(&file).unwrap()).unwrap();
+        let mut seen = written["recent"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|e| e["name"].as_str().unwrap().to_owned())
+            .collect::<Vec<_>>();
+        seen.sort();
+        assert_eq!(seen, names);
+        assert!(!file.with_extension("tmp").exists());
     }
     #[test]
     fn timestamp_has_legacy_local_iso_seconds_shape() {
