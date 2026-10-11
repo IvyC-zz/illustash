@@ -6,6 +6,7 @@ import http.server
 import json
 import os
 from pathlib import Path
+import shutil
 import signal
 import sqlite3
 import subprocess
@@ -176,6 +177,45 @@ class NativeProvenanceTest(unittest.TestCase):
         with db.connect(self.lib) as c:c.execute("UPDATE native_delivery SET status='pending'")
         count=self.sql('SELECT count(*) FROM term_evidence');self.restart()
         self.assertEqual(count,self.sql('SELECT count(*) FROM term_evidence'))
+        self.assertFalse(self.sql("SELECT task_id FROM native_delivery WHERE status='pending'",cache=True))
+    def test_refused_pending_package_is_resealed_and_later_deliveries_proceed(self):
+        # #28: a package left pending by a transient failure names an asset removed before the retry.
+        with closing(sqlite3.connect(self.lib.db)) as hold:
+            hold.execute('BEGIN IMMEDIATE')  # the library is busy when the run delivers its package
+            self.post({'action':'lookup','ids':['a']});v=self.finish('done')
+            hold.rollback()
+        self.assertEqual(v['delivery']['status'],'failed')
+        [(old,status)]=self.sql('SELECT task_id,status FROM native_delivery',cache=True)
+        self.assertEqual(status,'pending')
+        kept="SELECT count(*) FROM term_evidence e JOIN term_assets t ON t.id=e.asset_id WHERE t.key='b'"
+        evidence_b=self.sql(kept)
+        self.stop(self.process)
+        # Removed the way a sync removes a picture: its row goes and the core marks it removed.
+        with closing(sqlite3.connect(self.lib.db)) as c:
+            c.execute("DELETE FROM assets WHERE uuid='b'")
+            c.execute("UPDATE term_assets SET removed_at=CURRENT_TIMESTAMP WHERE namespace='library' AND key='b'")
+            c.commit()
+        self.restart()
+        rows=dict(self.sql('SELECT task_id,status FROM native_delivery',cache=True))
+        self.assertEqual(rows[old],'stale')
+        self.assertIn('已移除',self.sql('SELECT error FROM native_delivery WHERE task_id=?',(old,),cache=True)[0][0])
+        resealed=[task for task in rows if task.startswith('resealed-')]
+        self.assertEqual([rows[task] for task in resealed],['done'])
+        self.assertEqual(self.info()['delivery']['status'],'done')
+        # Later research delivers; nothing is left pending and the removed picture keeps its evidence.
+        self.post({'action':'lookup','ids':['a']});v=self.finish('done')
+        self.assertEqual(v['delivery']['status'],'done')
+        self.assertFalse(self.sql("SELECT task_id FROM native_delivery WHERE status='pending'",cache=True))
+        self.assertEqual(self.sql(kept),evidence_b)
+        # A stale package is not retried, and a later restart seals nothing new.
+        count=self.sql('SELECT count(*) FROM native_delivery',cache=True);self.restart()
+        self.assertEqual(self.sql('SELECT count(*) FROM native_delivery',cache=True),count)
+        # A pending package whose directory is gone is settled the same way.
+        latest=self.sql('SELECT task_id,package FROM native_delivery ORDER BY rowid DESC LIMIT 1',cache=True)[0]
+        with db.connect(self.lib) as c:c.execute("UPDATE native_delivery SET status='pending' WHERE task_id=?",(latest[0],))
+        self.stop(self.process);shutil.rmtree(self.lib.path/latest[1]);self.restart()
+        self.assertEqual(self.sql('SELECT status FROM native_delivery WHERE task_id=?',(latest[0],),cache=True),[('stale',)])
+        self.assertEqual(self.info()['delivery']['status'],'done')
         self.assertFalse(self.sql("SELECT task_id FROM native_delivery WHERE status='pending'",cache=True))
     def test_frozen_package_does_not_replay_pending_delivery(self):
         self.post({'action':'lookup','ids':['a']});self.finish('done')
