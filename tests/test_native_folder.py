@@ -183,6 +183,41 @@ class NativeFolderHTTPTest(unittest.TestCase):
             self.assertEqual(c.execute("SELECT uuid FROM assets WHERE filename='back.png'").fetchone()[0], asset)
         self.assertFalse(self.sentinel.exists())
 
+    def test_native_library_new_folder_written_back_file_returns_in_one_sync(self):
+        # #44: a file written back to the path it was removed from shows again after the first sync.
+        path = self.new_folder / 'a.png'
+        image(path, 'red')
+        self.sync()
+        with sqlite3.connect(self.lib.db) as c:
+            asset = c.execute("SELECT uuid FROM assets WHERE filename='a.png'").fetchone()[0]
+        self.assertEqual(self.request('/api/tag', {'ids': [asset], 'tag': '人工标签'})['status'], 200)
+
+        def shown():
+            with sqlite3.connect(self.lib.db) as c:
+                return (c.execute('SELECT uuid,width FROM assets WHERE uuid=?', (asset,)).fetchone(),
+                        c.execute('SELECT tag FROM asset_tags WHERE uuid=?', (asset,)).fetchall())
+
+        for case, write in (('same bytes, new time', lambda saved: path.write_bytes(saved)),
+                            ('other bytes', lambda saved: image(path, 'yellow', (51, 31)))):
+            with self.subTest(case):
+                saved = path.read_bytes()
+                path.unlink()
+                self.sync()
+                self.assertIsNone(shown()[0])
+                write(saved)
+                settle(self.new_folder)
+                stat = path.stat()
+                os.utime(path, ns=(stat.st_atime_ns, stat.st_mtime_ns + 7_000_000_000))
+                self.assertEqual(self.request('/api/sync', {})['status'], 200)
+                state = self.finish()['state']
+                self.assertNotEqual(state['status'], 'error', state)
+                row, tags = shown()
+                self.assertEqual(row, (asset, 51 if case == 'other bytes' else 40))
+                self.assertEqual(tags, [('人工标签',)])
+                with sqlite3.connect(self.lib.source) as c:
+                    self.assertEqual(c.execute('SELECT trashed FROM assets WHERE uuid=?', (asset,)).fetchone(), (0,))
+        self.assertFalse(self.sentinel.exists())
+
     @unittest.skipIf(os.name == 'nt', 'POSIX 权限位制造读取失败；Windows ACL 另行验证')
     def test_native_library_new_folder_unreadable_paths_keep_their_pictures(self):
         # #43: a folder or file the scan cannot read is not gone; a real deletion still is.

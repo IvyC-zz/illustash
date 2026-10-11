@@ -120,6 +120,10 @@ pub(crate) fn scan(
                 "UPDATE files SET size=?,mtime_ns=?,md5=? WHERE source_id=? AND path=?",
                 params![f.size, f.mtime, f.hash, sid, f.rel],
             )?;
+            // A file written back to the path it was removed from returns in this scan, not the next one.
+            if trashed.contains(&asset) {
+                back.push(asset.clone());
+            }
             continue;
         } else if let Some((old_path, u)) = movement {
             asset = u;
