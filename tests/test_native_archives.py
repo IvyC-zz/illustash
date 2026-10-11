@@ -263,6 +263,36 @@ class NativeArchivesTest(unittest.TestCase):
         self.assertFalse((self.root / 'escape').exists())
         self.assertFalse(self.sentinel.exists())
 
+    def test_import_refuses_a_package_that_cannot_be_opened(self):
+        # #42: the archive is structurally valid, but the package it holds would not open.
+        good = library.export_library(self.lib, self.root / 'good.zip')
+        with zipfile.ZipFile(good) as z:
+            files = {name: z.read(name) for name in z.namelist()}
+        config = json.loads(files['library.json'])
+        cases = {
+            'damaged-source': {**files, 'source.sqlite': b'not a database ' * 512},
+            'config-without-id': {**files, 'library.json': json.dumps({k: v for k, v in config.items() if k != 'id'}).encode()},
+            'config-without-name': {**files, 'library.json': json.dumps({k: v for k, v in config.items() if k != 'name'}).encode()},
+        }
+        registry = self.support / 'libraries.json'
+        listing = lambda: set(library.HOME.glob('*')) if library.HOME.exists() else set()
+        for case, content in cases.items():
+            with self.subTest(case):
+                archive = self.root / f'{case}.zip'
+                with zipfile.ZipFile(archive, 'w') as z:
+                    for name, data in content.items():
+                        z.writestr(name, data)
+                before, recent = listing(), registry.read_bytes() if registry.exists() else None
+                response = self.request('/api/libraries/import', {'path': str(archive)})
+                self.assertEqual(response['status'], 400, response)
+                self.assertIn('导入的图库无法打开', json.loads(response['body'])['error'])
+                self.assertEqual(listing(), before)
+                self.assertEqual(registry.read_bytes() if registry.exists() else None, recent)
+        imported = self.request('/api/libraries/import', {'path': str(good)})
+        self.assertEqual(imported['status'], 200, imported)
+        self.assertTrue(Path(json.loads(imported['body'])['path']).is_dir())
+        self.assertFalse(self.sentinel.exists())
+
     def test_repeated_export_busy_switch_cancel_same_id_and_exit_cleanup(self):
         # A held rollback-journal write lock deterministically keeps backup active without huge data.
         other = self.package('other')

@@ -4,6 +4,7 @@ use rusqlite::{
     backup::{Backup, StepResult},
     Connection,
 };
+use std::collections::HashMap;
 use std::{
     fs::{self, File, OpenOptions},
     io::{BufReader, BufWriter, Read, Write},
@@ -130,42 +131,27 @@ fn sanitize_database(path: &Path, cancel: Option<Arc<AtomicBool>>) -> Result<()>
 pub(crate) fn export(library: &Library, dest: &Path, cancel: &Arc<AtomicBool>) -> Result<PathBuf> {
     let work = stage(dest.parent().ok_or_else(|| invalid("无效导出路径"))?)?;
     let archive = work.0.join("archive.zip");
+    // The databases first, as one consistent set; compression afterwards holds no database.
+    let copies = snapshot(library, &work.0, cancel)?;
+    if let Some(copy) = copies.get("library.sqlite") {
+        sanitize_database(copy, Some(cancel.clone()))?;
+        cancelled(cancel)?;
+    }
     let mut zip = ZipWriter::new(BufWriter::with_capacity(
         1 << 20,
         OpenOptions::new().write(true).create_new(true).open(&archive)?,
     ));
     for rel in EXPORTED {
         cancelled(cancel)?;
-        let src = library.instance_path().join(rel);
-        if !src.try_exists()? {
-            continue;
-        }
-        let source = if src.extension().and_then(|s| s.to_str()) == Some("sqlite") {
-            let copy = work.0.join(src.file_name().expect("app_archives internal invariant"));
-            let a = crate::app_library::read_connection(&src)?;
-            a.busy_timeout(Duration::from_millis(50))?;
-            let mut b = crate::sqlite::open(&copy)?;
-            let backup = Backup::new(&a, &mut b)?;
-            let deadline = std::time::Instant::now() + Duration::from_secs(30);
-            loop {
-                cancelled(cancel)?;
-                match backup.step(256)? {
-                    StepResult::Done => break,
-                    StepResult::More => {}
-                    _ if std::time::Instant::now() >= deadline => return Err(invalid("数据库备份超时")),
-                    _ => thread::sleep(Duration::from_millis(10)),
+        let source = match copies.get(rel) {
+            Some(copy) => copy.clone(),
+            None => {
+                let src = library.instance_path().join(rel);
+                if rel.ends_with(".sqlite") || !src.try_exists()? {
+                    continue;
                 }
+                src
             }
-            drop(backup);
-            drop(b);
-            if *rel == "library.sqlite" {
-                cancelled(cancel)?;
-                sanitize_database(&copy, Some(cancel.clone()))?;
-                cancelled(cancel)?;
-            }
-            copy
-        } else {
-            src
         };
         zip.start_file(
             *rel,
@@ -180,6 +166,53 @@ pub(crate) fn export(library: &Library, dest: &Path, cancel: &Arc<AtomicBool>) -
     cancelled(cancel)?;
     fs::rename(&archive, dest)?;
     Ok(dest.to_owned())
+}
+/// Copies of the package databases that belong together: every copy is retaken until no database has committed
+/// anything between the first and the last copy (SQLite data_version), so the archive never pairs a source
+/// from before a cross-database update with an application database from after it.
+fn snapshot(library: &Library, work: &Path, cancel: &AtomicBool) -> Result<HashMap<&'static str, PathBuf>> {
+    let mut readers = Vec::new();
+    for rel in EXPORTED.iter().filter(|rel| rel.ends_with(".sqlite")) {
+        let src = library.instance_path().join(rel);
+        if src.try_exists()? {
+            let c = crate::app_library::read_connection(&src)?;
+            c.busy_timeout(Duration::from_millis(50))?;
+            readers.push((*rel, c, work.join(rel)));
+        }
+    }
+    let versions = |readers: &[(&str, rusqlite::Connection, PathBuf)]| -> Result<Vec<i64>> {
+        readers.iter().map(|(_, c, _)| Ok(c.query_row("PRAGMA data_version", [], |r| r.get(0))?)).collect()
+    };
+    for _ in 0..SNAPSHOT_ATTEMPTS {
+        cancelled(cancel)?;
+        let before = versions(&readers)?;
+        for (_, c, copy) in &readers {
+            if copy.try_exists()? {
+                fs::remove_file(copy)?;
+            }
+            backup_into(c, copy, cancel)?;
+        }
+        if versions(&readers)? == before {
+            return Ok(readers.into_iter().map(|(rel, _, copy)| (rel, copy)).collect());
+        }
+    }
+    Err(invalid("导出期间图库一直在写入，请稍后再导出"))
+}
+/// Retaking a snapshot is cheap next to compressing it; a library that keeps changing is reported instead.
+const SNAPSHOT_ATTEMPTS: usize = 5;
+fn backup_into(source: &rusqlite::Connection, copy: &Path, cancel: &AtomicBool) -> Result<()> {
+    let mut b = crate::sqlite::open(copy)?;
+    let backup = Backup::new(source, &mut b)?;
+    let deadline = std::time::Instant::now() + Duration::from_secs(30);
+    loop {
+        cancelled(cancel)?;
+        match backup.step(256)? {
+            StepResult::Done => return Ok(()),
+            StepResult::More => {}
+            _ if std::time::Instant::now() >= deadline => return Err(invalid("数据库备份超时")),
+            _ => thread::sleep(Duration::from_millis(10)),
+        }
+    }
 }
 struct CheckedWriter<W> {
     output: W,
@@ -310,8 +343,30 @@ pub(crate) fn import(archive: &Path) -> Result<(PathBuf, String)> {
         ),
     );
     crate::app_settings::write_config(&path, &config).map_err(invalid)?;
+    // Publish only a package that opens: a damaged database or an incomplete configuration is refused here and
+    // the new directory removed, instead of registering a library that then fails to open.
+    if fmt_is_current(&fmt) {
+        opens(&path).map_err(|e| invalid(format!("导入的图库无法打开，已取消导入：{e}")))?;
+    }
     cleanup.1 = true;
     Ok((path, name))
+}
+/// The archive declares the current package format (older ones keep their explicit upgrade path).
+fn fmt_is_current(fmt: &Json) -> bool {
+    match fmt {
+        Json::Integer(v) => v.parse::<i64>().is_ok_and(|v| v == crate::app_library::FORMAT),
+        Json::Scalar(serde_json::Value::Number(v)) => v.as_i64() == Some(crate::app_library::FORMAT),
+        _ => false,
+    }
+}
+/// The same validation as opening, including both integrity checks. A package whose core still needs the
+/// explicit upgrade is valid input: it is checked the way that upgrade will check it.
+fn opens(path: &Path) -> Result<()> {
+    match Library::open(path) {
+        Ok(_) => Ok(()),
+        Err(Error::Schema(_)) => Library::open_for_upgrade(path).map(|_| ()),
+        Err(e) => Err(e),
+    }
 }
 struct Task {
     state: Arc<Mutex<Json>>,
@@ -400,6 +455,83 @@ impl Drop for Exports {
 mod tests {
     use super::*;
     use std::io::Write;
+
+    #[test]
+    fn exported_databases_are_one_snapshot_while_both_keep_changing() {
+        let root =
+            std::env::temp_dir().join(format!("illustash-archive-snapshot-{}", crate::store::new_key().unwrap()));
+        fs::create_dir_all(root.join("folder")).unwrap();
+        let status = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--ignored", "--exact", "app_archives::tests::snapshot_fixture"])
+            .env("ILLUSTASH_ARCHIVE_FIXTURE", &root)
+            .env("ILLUSTASH_APP_SUPPORT", root.join("support"))
+            .env("ILLUSTASH_SHARED", root.join("absent-reference"))
+            .env("ILLUSTASH_NO_KEYCHAIN", "1")
+            .status()
+            .unwrap();
+        fs::remove_dir_all(&root).unwrap();
+        assert!(status.success());
+    }
+    #[test]
+    #[ignore = "isolated fixture, run with synthetic support by the parent test"]
+    fn snapshot_fixture() {
+        // #23: a writer commits each update to the source and then the application database, as sync does.
+        let root = PathBuf::from(std::env::var_os("ILLUSTASH_ARCHIVE_FIXTURE").expect("isolated fixture only"));
+        let package = root.join("synthetic.pilib");
+        crate::app_create::create_folder(&package, &root.join("folder"), None, None, None).unwrap();
+        let library = Library::open(&package).unwrap();
+        for db in [library.source(), library.db()] {
+            crate::sqlite::open(&db)
+                .unwrap()
+                .execute_batch(
+                    "CREATE TABLE epoch(n INTEGER); INSERT INTO epoch VALUES (0); CREATE TABLE bulk(x BLOB);
+                     WITH RECURSIVE n(i) AS (VALUES(1) UNION ALL SELECT i+1 FROM n WHERE i<1500) INSERT INTO bulk SELECT randomblob(4096) FROM n;",
+                )
+                .unwrap();
+        }
+        let stop = Arc::new(AtomicBool::new(false));
+        let writer = {
+            let (source, app, stop) = (library.source(), library.db(), stop.clone());
+            thread::spawn(move || {
+                let (s, a) = (crate::sqlite::open(&source).unwrap(), crate::sqlite::open(&app).unwrap());
+                let mut n = 0;
+                while !stop.load(Ordering::SeqCst) {
+                    n += 1;
+                    s.execute("UPDATE epoch SET n=?", [n]).unwrap();
+                    a.execute("UPDATE epoch SET n=?", [n]).unwrap();
+                    thread::sleep(Duration::from_millis(40));
+                }
+                n
+            })
+        };
+        let dest = root.join("export.zip");
+        let mut outcomes = Vec::new();
+        for _ in 0..3 {
+            let _ = fs::remove_file(&dest);
+            outcomes.push(export(&library, &dest, &Arc::new(AtomicBool::new(false))).map(|_| {
+                let mut zip = ZipArchive::new(File::open(&dest).unwrap()).unwrap();
+                let mut epoch = |name: &str| {
+                    let copy = root.join(format!("check-{name}"));
+                    std::io::copy(&mut zip.by_name(name).unwrap(), &mut File::create(&copy).unwrap()).unwrap();
+                    let n: i64 =
+                        crate::sqlite::open(&copy).unwrap().query_row("SELECT n FROM epoch", [], |r| r.get(0)).unwrap();
+                    fs::remove_file(copy).unwrap();
+                    n
+                };
+                (epoch("source.sqlite"), epoch("library.sqlite"))
+            }));
+        }
+        stop.store(true, Ordering::SeqCst);
+        assert!(writer.join().unwrap() > 0);
+        // One instant of the pair: never the application ahead of the source, nor the source a whole update ahead.
+        for outcome in outcomes {
+            match outcome {
+                Ok((source, app)) => assert!(app <= source && source <= app + 1, "source {source}, app {app}"),
+                Err(Error::Invalid(m)) => assert!(m.contains("一直在写入"), "{m}"),
+                Err(e) => panic!("{e}"),
+            }
+        }
+    }
 
     #[test]
     fn legacy_database_without_settings_preserves_sparse_rowids() {
