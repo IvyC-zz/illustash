@@ -1040,21 +1040,57 @@ fn commit(
         tx.commit()?;
     }
     // Files are copied from an immutable validated job. Repeating this boundary is safe after a crash.
+    // Shared files are staged beside their targets first: a failed copy or a full disk leaves the
+    // published set untouched. Only then are they renamed into place inside one publication
+    // generation, so readers never take a mix of old and new files (index_generation).
     let allowed = job.rows.iter().map(|r| r.short_tag.as_str()).collect::<BTreeSet<_>>();
-    for cid in allowed {
-        if !safe(cid) {
-            return bad("索引文件 ID 不正确");
-        };
-        for ext in ["json", "npy"] {
-            let from = folder.join("char-index").join(format!("{cid}.{ext}"));
-            let to = shared.join("char-index").join(format!("{cid}.{ext}"));
-            std::fs::create_dir_all(to.parent().expect("index file path must have a parent"))?;
-            if from.exists() {
-                std::fs::copy(from, to)?;
-            } else if to.exists() {
-                std::fs::remove_file(to)?;
+    let mut staged: Vec<(PathBuf, PathBuf)> = Vec::new();
+    let mut retired: Vec<PathBuf> = Vec::new();
+    let stage = |from: &Path, to: PathBuf, staged: &mut Vec<(PathBuf, PathBuf)>| -> Result<()> {
+        std::fs::create_dir_all(to.parent().expect("index file path must have a parent"))?;
+        let name = to.file_name().expect("index file path must have a name").to_string_lossy().into_owned();
+        let tmp = to.with_file_name(format!(".{name}.{}.tmp", crate::store::new_key()?));
+        staged.push((tmp.clone(), to));
+        std::fs::copy(from, tmp)?;
+        Ok(())
+    };
+    let staging = (|| -> Result<()> {
+        for cid in &allowed {
+            if !safe(cid) {
+                return bad("索引文件 ID 不正确");
+            };
+            for ext in ["json", "npy"] {
+                let from = folder.join("char-index").join(format!("{cid}.{ext}"));
+                let to = shared.join("char-index").join(format!("{cid}.{ext}"));
+                if from.exists() {
+                    stage(&from, to, &mut staged)?;
+                } else if to.exists() {
+                    retired.push(to);
+                }
             }
         }
+        for name in ["char-anchors.npy", "char-anchors.txt"] {
+            if folder.join(name).exists() {
+                stage(&folder.join(name), shared.join(name), &mut staged)?;
+            }
+        }
+        Ok(())
+    })();
+    if let Err(e) = staging {
+        for (tmp, _) in &staged {
+            let _ = std::fs::remove_file(tmp);
+        }
+        return Err(e);
+    }
+    let generation = crate::index_generation::start(shared)?;
+    for (tmp, to) in &staged {
+        std::fs::rename(tmp, to)?;
+    }
+    for to in &retired {
+        std::fs::remove_file(to)?;
+    }
+    crate::index_generation::finish(shared, generation)?;
+    for cid in allowed {
         let raw = folder.join("char-patch/raw").join(format!("{cid}.npy"));
         if raw.exists() {
             std::fs::create_dir_all(dir.join("raw"))?;
@@ -1063,11 +1099,6 @@ fn commit(
         let rejected = folder.join("char-patch/rejected").join(format!("{cid}.json"));
         if rejected.exists() {
             write(&dir.join("rejected").join(format!("{cid}.json")), &read(&rejected, Value::Null))?;
-        }
-    }
-    for name in ["char-anchors.npy", "char-anchors.txt"] {
-        if folder.join(name).exists() {
-            std::fs::copy(folder.join(name), shared.join(name))?;
         }
     }
     write(&dir.join("plan.json"), &read(&folder.join("char-patch/plan.json"), json!([])))?;

@@ -119,7 +119,17 @@ fn hash_db(c: &Connection, h: &mut Sha256, ctx: &TaskContext) -> Result<()> {
     }
     Ok(())
 }
+/// Shared anchor files are read within one complete index publication (index_generation).
 fn fingerprint(
+    app: &Connection,
+    src: &Connection,
+    library: &Library,
+    anchors: &Path,
+    ctx: &TaskContext,
+) -> Result<String> {
+    crate::index_generation::stable(anchors, || fingerprint_once(app, src, library, anchors, ctx))
+}
+fn fingerprint_once(
     app: &Connection,
     src: &Connection,
     library: &Library,
