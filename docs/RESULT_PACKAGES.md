@@ -37,7 +37,7 @@ labels.jsonl 每行：
 
 ## 原生计算与内部角色认领
 
-`recognition_compute` 使用显式路径加载 ONNX Runtime 动态库，固定 CPU provider；WD 使用 4 个 intra-op 线程，CCIP 保留 runtime 默认线程数。WD 先丢弃 alpha、白底补成正方形（奇数差向下取整居中），按 Pillow BICUBIC 语义缩到 448，输入为未除以 255 的 BGR NHWC float32；CCIP 按 Pillow BILINEAR 语义直接缩到 384，RGB/CLIP 归一化后输入 NCHW float32。不应用 EXIF 旋转或 ICC 转换。保存模型的原始 WD 1024 / CCIP 768 向量；Features 缓存的单位化属于研究计算消费者。
+`recognition_compute` 使用显式路径加载 ONNX Runtime 动态库，固定 CPU provider；WD 使用 4 个 intra-op 线程，CCIP 保留 runtime 默认线程数。WD 先丢弃 alpha、白底补成正方形（奇数差向下取整居中），按 Pillow BICUBIC 语义缩到 448；白边是虚拟采样，不物化 max(宽,高)² 的正方形，输出与物化实现逐位一致（#46），输入为未除以 255 的 BGR NHWC float32；CCIP 按 Pillow BILINEAR 语义直接缩到 384，RGB/CLIP 归一化后输入 NCHW float32。不应用 EXIF 旋转或 ICC 转换。保存模型的原始 WD 1024 / CCIP 768 向量；Features 缓存的单位化属于研究计算消费者。
 
 生产者与导入器共用 `ModelFiles` 路径及 SHA-256 规格：默认为资源 root 的 `models/`，`ILLUSTASH_MODELS` 的绝对路径直接使用，相对路径锚定资源 root。同步把自己的资源 root 传给计算进程，标签仍由同一资源 root 的 `tags/tags_v3.csv` 提供；自定义模型根不绕过字节指纹，模型或标签变化拒绝旧结果。流式指纹读取保留合作取消检查。
 
