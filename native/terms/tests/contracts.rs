@@ -194,6 +194,9 @@ fn prepare(category: &str) -> (Value, Sandbox, PathBuf, PathBuf) {
         fs::create_dir_all(&scratch.0).unwrap();
         scratch.0.canonicalize().unwrap()
     });
+    // Windows canonical paths carry a verbatim `\\?\` prefix the host never produces.
+    #[cfg(windows)]
+    let root = PathBuf::from(root.to_str().unwrap().strip_prefix(r"\\?\").unwrap());
     let package = root.join("fixture.pilib");
     for dir in ["fixture.pilib", "fixture.pilib/thumbnails", "folder", "bin", "home", "support", "shared"] {
         fs::create_dir_all(root.join(dir)).unwrap();
@@ -205,11 +208,15 @@ fn prepare(category: &str) -> (Value, Sandbox, PathBuf, PathBuf) {
             c.pragma_update(None, "foreign_keys", false).unwrap();
             c.execute_batch(&sql.replace("@ROOT@", root.to_str().unwrap())).unwrap();
         } else {
-            fs::write(path, input["text"].as_str().unwrap().replace("@ROOT@", root.to_str().unwrap())).unwrap();
+            // Text inputs are JSON documents: the root goes in as a JSON string body.
+            let encoded = json!(root.to_str().unwrap()).to_string();
+            fs::write(path, input["text"].as_str().unwrap().replace("@ROOT@", &encoded[1..encoded.len() - 1])).unwrap();
         }
     }
     // No inherited PATH, user HOME, credentials or application support. Unix sentinels
     // additionally prove common Python names were not invoked. Absolute host path only.
+    // Windows has no sentinel: std resolves bare names to `.exe` only, then also searches
+    // the system directories, so a script in `bin` could not intercept a launch there.
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -236,7 +243,11 @@ fn launch(root: &Path, package: &Path, category: &str, binary: &Path) -> (Host, 
         .env("ILLUSTASH_APP_SUPPORT", root.join("support"))
         .env("ILLUSTASH_NO_KEYCHAIN", "1")
         .env("ILLUSTASH_SHARED", root.join("shared"))
-        .env("ILLUSTASH_PYTHON_SENTINEL", root.join("python-launched"))
+        .env("ILLUSTASH_PYTHON_SENTINEL", root.join("python-launched"));
+    // Winsock loads its providers through %SystemRoot%; nothing else is passed through.
+    #[cfg(windows)]
+    command.env("SystemRoot", std::env::var_os("SystemRoot").expect("SystemRoot"));
+    command
         .args(["http", "--no-auto-sync", "--no-names", "--no-index-check", "--no-provenance", "--library"])
         .arg(package)
         .arg("--root")
