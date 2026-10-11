@@ -100,20 +100,39 @@ pub fn wd_input(image: &RgbImage, size: u32) -> Vec<f32> {
     } else {
         // Both passes map side -> size, so `resize` derives the same coefficients twice.
         let coeffs = coefficients(side, size, Filter::Cubic);
+        // The horizontal sums are i64 integer sums, which are exact and independent of order: per
+        // output column, |k| sums to about 1.1 * 2^22 plus half a unit of rounding per tap, so even
+        // with 4 * u32::MAX taps times 255 every partial sum stays below 2^42. A column's padding
+        // taps therefore contribute 255 * (total weight - weight over image columns), and an image
+        // row only visits the taps that land on the image: the result equals the sequential fold
+        // over the materialised square, in time linear in the image instead of in side^2 (#74).
+        let columns: Vec<(i64, std::ops::Range<usize>)> = coeffs
+            .iter()
+            .map(|(start, weights)| {
+                let total: i64 = weights.iter().map(|k| i64::from(*k)).sum();
+                let first = (*start).max(left as usize);
+                let end = (start + weights.len()).min((left + width) as usize);
+                let inside = if first < end { first - start..end - start } else { 0..0 };
+                let inside_total: i64 = weights[inside.clone()].iter().map(|k| i64::from(*k)).sum();
+                (255 * (total - inside_total), inside)
+            })
+            .collect();
         // A padding row is white across the whole square; its horizontal result depends only on x.
         let white: Vec<u8> = coeffs
             .iter()
             .map(|(_, weights)| {
-                let sum = weights.iter().fold(1i64 << 21, |sum, k| sum + 255 * i64::from(*k));
+                let sum = (1i64 << 21) + 255 * weights.iter().map(|k| i64::from(*k)).sum::<i64>();
                 (sum >> 22).clamp(0, 255) as u8
             })
             .collect();
         // Horizontal pass for image rows only (size x height); padding rows come from `white`.
         let rows = RgbImage::from_fn(size, height, |x, y| {
             let (start, weights) = &coeffs[x as usize];
+            let (padding, inside) = &columns[x as usize];
             image::Rgb(std::array::from_fn(|c| {
-                let sum = weights.iter().enumerate().fold(1i64 << 21, |sum, (j, k)| {
-                    sum + i64::from(padded((start + j) as u32, y + top)[c]) * i64::from(*k)
+                let sum = weights[inside.clone()].iter().enumerate().fold((1i64 << 21) + padding, |sum, (j, k)| {
+                    let column = (start + inside.start + j) as u32 - left;
+                    sum + i64::from(image.get_pixel(column, y)[c]) * i64::from(*k)
                 });
                 (sum >> 22).clamp(0, 255) as u8
             }))
@@ -210,6 +229,8 @@ mod tests {
             (1, 449),
             (512, 1),
             (1, 512),
+            (2, 1000),
+            (1000, 2),
             (448, 448),
         ];
         let mut cases = 0;
@@ -218,11 +239,17 @@ mod tests {
             let image = noise(width, height, 0x4632_91ab ^ index as u32);
             // Down/up-sampling around side; the production size 448 on a representative subset
             // keeps the debug test fast (each 448 case costs a full 448 x 448 resize twice).
-            let mut sizes = vec![1, 2, 16, side, side - 1];
+            let mut sizes = vec![1, 2, 16, side];
+            // side - 1 costs a near-full-size resize of the materialised square; large sides use 448 below.
+            if side <= 512 {
+                sizes.push(side - 1);
+            }
             if side <= 64 {
                 sizes.push(side + 1);
             }
-            if [(1, 1), (2, 3), (4, 7), (37, 1), (5, 64), (449, 1), (1, 449), (448, 448)].contains(&(width, height)) {
+            if [(1, 1), (2, 3), (4, 7), (37, 1), (5, 64), (449, 1), (1, 449), (2, 1000), (1000, 2), (448, 448)]
+                .contains(&(width, height))
+            {
                 sizes.push(448);
             }
             sizes.retain(|&size| size > 0);
@@ -236,7 +263,7 @@ mod tests {
                 cases += 1;
             }
         }
-        assert_eq!(cases, 114);
+        assert_eq!(cases, 124);
         // Uniform and border-heavy images: odd margins and image edges meet the padding exactly.
         for (width, height) in [(1, 6), (6, 1), (3, 10), (10, 3)] {
             for colour in [[0; 3], [255; 3], [254, 0, 255]] {
