@@ -1243,17 +1243,18 @@ async function editProfile(c) {
     r => { draft.work = r; workNote(); });
   q('form').onsubmit = async e => {
     e.preventDefault();
+    if (q('#pfSave').disabled) return;  // one save at a time: no second work or profile from a double click
     const body = {entity: p.id};
     const name = q('#pfName').value.trim(); if (name !== p.user_name) body.name = name;
     if (JSON.stringify(draft.aliases) !== JSON.stringify(p.aliases)) body.aliases = draft.aliases;
     if (q('#pfTag') && draft.tag !== p.tag) body.tag = draft.tag;
+    // A new work is made in the same request (and transaction) as the profile it belongs to.
+    if (q('#pfWork') && (draft.work?.id || null) !== (p.work_id || null)) {
+      body.work = !draft.work ? '' : draft.work.create ? {create: draft.work.create} : draft.work.tag ? {tag: draft.work.tag} : draft.work.id;
+    }
+    if (Object.keys(body).length === 1) { close(); return; }
+    q('#pfSave').disabled = true;
     try {
-      if (q('#pfWork') && (draft.work?.id || null) !== (p.work_id || null)) {
-        body.work = !draft.work ? '' : draft.work.create ? (await post('/api/works', {action: 'create', name: draft.work.create})).id
-          : draft.work.tag ? (await post('/api/works', {action: 'from_tag', tag: draft.work.tag})).id : draft.work.id;
-      }
-      if (Object.keys(body).length === 1) { close(); return; }
-      q('#pfSave').disabled = true;
       const r = await post('/api/character/profile', body);
       close(); setUndo(r.undo); toast(r.undo.label, true);
       state.localLinks = null; await refreshMeta(); renderHeading();
@@ -1848,8 +1849,9 @@ function workDialog(w) {
       const name = String(data.get('title')).trim(), parent = data.get('parent'), tag = String(data.get('tag')).trim();
       try {
         let id = w?.id;
-        if (!id) id = (await post('/api/works', tag ? {action: 'create', name, tag} : {action: 'create', name})).id;
-        if (w || parent) await post('/api/works', {action: 'edit', id, name, parent, tag});
+        // A new work is created with its parent in one request; only an existing one is edited.
+        if (!id) id = (await post('/api/works', {action: 'create', name, ...(tag ? {tag} : {}), ...(parent ? {parent} : {})})).id;
+        else await post('/api/works', {action: 'edit', id, name, parent, tag});
         state.index = await api('/api/index'); state.workTree = await api('/api/works').catch(e => { error(readError(e)); return state.workTree; });
         await refreshMeta().catch(e => error(readError(e)));
         renderIndexBody(); renderHeading();
