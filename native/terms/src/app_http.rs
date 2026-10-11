@@ -33,7 +33,7 @@ impl Session {
         http::LibraryContext {
             db: self.library.db(),
             generation: self.token.clone(),
-            library: Some(self.library.path().to_owned()),
+            library: Some(self.library.instance_path().to_owned()),
             tags: tags.to_owned(),
             source: Some(self.library.source()),
             token: Some(self.token.clone()),

@@ -424,7 +424,7 @@ pub(crate) fn application(stage: &Path, original: &Library) -> Result<()> {
     }
     tx.commit()?;
     crate::migrate(&mut c)?;
-    let provenance = original.path().join("provenance.sqlite");
+    let provenance = original.instance_path().join("provenance.sqlite");
     crate::legacy_artists::cutover(&mut c, provenance.is_file().then_some(provenance.as_path()))
         .map_err(|e| Error::Schema(format!("画师切换失败：{e}")))?;
     deliver_wd(&mut c, &source, original.id(), None, false)?;

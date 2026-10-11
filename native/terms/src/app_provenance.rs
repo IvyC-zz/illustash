@@ -87,7 +87,7 @@ pub(crate) struct Runner {
 }
 impl Runner {
     pub fn new(library: &Library, generation: u64, session: &str, enabled: bool, authorized: bool) -> Result<Self> {
-        let library = library.pinned();
+        let library = library.clone();
         let path = library.instance_path().join("provenance.sqlite");
         let worker = std::env::var_os("ILLUSTASH_PROVENANCE_WORKER").map(PathBuf::from);
         let native = path.is_file()

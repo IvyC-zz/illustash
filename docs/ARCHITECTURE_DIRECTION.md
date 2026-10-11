@@ -64,7 +64,7 @@ Platform picker 以 Selected/Cancelled/Unsupported 表达原生回退结果，�
 
 实际依赖为 `desktop → illustash-terms / illustash-platform`，`illustash-terms → illustash-core / illustash-platform`，`illustash-platform → illustash-core`；Core 不引用 Platform、宿主、HTTP/CLI 或 Tauri。`tools/check_architecture.py` 检查四份显式 manifest 的普通、build、dev、target 条件依赖和重命名包，禁止反向依赖及 Core/Platform 传输或 UI 依赖；合成负例和当前 manifest 检查纳入本地完整入口。保留独立 manifest/path dependency，未新增根 workspace 或架构框架。
 
-`native/terms` 继续是第三个后端 crate（应用宿主）。`app_service::Application` 私有持有 Session、实例、generation、任务和导出：显式 `open(path, Options)` 只校验/登记，`start` 初始化既有任务和恢复，`recover` 在该实例锁内恢复持久事件，`switch(received_generation, path)` 在写锁内复验后按原顺序打开、登记、停止旧任务、替换并发布新 generation，`shutdown` 停止并回收任务/导出；Drop 复用同一收尾。关闭后新的服务调用拒绝，重复关闭可安全调用。Options 保留本次网络与自动任务标志，偏好不会自行授予网络权限。进程内客户端须在接受工作时取 generation，再通过 `with_library` 的锁内复验执行 Core 操作，回调只取得已捕获物理实例的 pinned 路径，显示别名重指不能改写另一包；任务结果还须沿用完整 TaskIdentity、持久幂等与原所有者的正式提交校验。库 ID 相同不能代替实例路径、generation 或会话身份。
+`native/terms` 继续是第三个后端 crate（应用宿主）。`app_service::Application` 私有持有 Session、实例、generation、任务和导出：显式 `open(path, Options)` 只校验/登记，`start` 初始化既有任务和恢复，`recover` 在该实例锁内恢复持久事件，`switch(received_generation, path)` 在写锁内复验后按原顺序打开、登记、停止旧任务、替换并发布新 generation，`shutdown` 停止并回收任务/导出；Drop 复用同一收尾。关闭后新的服务调用拒绝，重复关闭可安全调用。Options 保留本次网络与自动任务标志，偏好不会自行授予网络权限。进程内客户端须在接受工作时取 generation，再通过 `with_library` 的锁内复验执行 Core 操作，回调取得的 Library 经打开时固定的物理实例访问包内文件，显示别名重指不能改写另一包；任务结果还须沿用完整 TaskIdentity、持久幂等与原所有者的正式提交校验。库 ID 相同不能代替实例路径、generation 或会话身份。
 
 HTTP 前门仅装配服务与 socket，保留 Host/Origin/token 检查、请求体解析、路由、状态码、响应序列化及等待后安全复验，原 403 和成功 JSON 字节契约不变。会话转 HTTP LibraryContext 留在传输适配；慢 body 不持图库锁，释放锁执行的旧库快照不能重新绑定替换实例。CLI 保留原命令/bin，连接内命令调用 Core；原角色命令事务 helper 移到应用服务，CLI、工厂、迁移与常驻 JSON 通道消费同一函数。`app_service::create` 与欢迎页、HTTP 多来源建库共用唯一 `app_create` 工厂及 optional reference 规则；登记使用工厂返回的实际绝对路径，相对目标不受之后 cwd 变化影响；发布后登记失败仍保留完整包，建库不自动打开、扫描或授权。来源库、应用库、事件与文件发布各自的提交边界不合并。
 
@@ -337,7 +337,7 @@ X 只读取 ZIP 或解压目录的 `data/following.js`，限制列表为 64 MiB�
 
 ## 公共后台任务与会话结果边界
 
-`app_tasks::TaskIdentity::new(&Library, generation, session_token)` 捕获打开时的 canonical 包路径、library_id、generation、会话令牌摘要及随机 task_id，可作为 serde 结果信封；相同 library_id 的包副本和重新打开的会话分别识别。后台消费者通过 `Library::pinned()` 固定实际读写路径，不跟随显示路径的符号链接重新定位。文件夹 Syncer 使用这一身份和公共 Task，保留既有 GET/POST sync 契约；导出继续复用已经交付的取消/等待边界。
+`app_tasks::TaskIdentity::new(&Library, generation, session_token)` 捕获打开时的 canonical 包路径、library_id、generation、会话令牌摘要及随机 task_id，可作为 serde 结果信封；相同 library_id 的包副本和重新打开的会话分别识别。`Library` 只把用户打开时的路径（含别名）用于显示和最近图库登记（`display_path()`）；数据库、源库、配置、特征、缩略图、备份与出处等包内文件一律经打开时固定的 canonical 路径（`instance_path()`）访问，HTTP 会话、设置、来源、导出、升级与后台任务都不跟随显示路径的符号链接重新定位。重新以该别名打开属于明确切库，换新 generation 与令牌（2026-10-11，#22）。文件夹 Syncer 使用这一身份和公共 Task，保留既有 GET/POST sync 契约；导出继续复用已经交付的取消/等待边界。
 
 `Task::start(identity, timeout, work)` 启动合作式任务，提供 running/outcome、有限时长 wait 和 stop；wait 超时保留任务所有权，stop/Drop 取消并 join。任务持有 Library 快照，不持有 Host Arc；切库先验证并登记替代包，再停止旧任务，退出停止并等待消费者。`TaskContext::identity()` 返回只读身份；check 检查取消与截止时刻，cancellation 提供已有业务循环需要的取消标记。内存计算不能强制中断，业务循环须及时检查取消/超时，I/O 须设置自身超时。
 

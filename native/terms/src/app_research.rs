@@ -301,7 +301,7 @@ impl Research {
                 [kind],
             )?;
         }
-        let library = library.pinned();
+        let library = library.clone();
         let identity = TaskIdentity::new(&library, self.generation, &self.session)?;
         let kind = kind.to_string();
         let state = self.state.clone();
