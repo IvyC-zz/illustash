@@ -53,8 +53,7 @@ pub fn run(request: &Value) -> Result<Value> {
     #[cfg(target_os = "windows")]
     illustash_platform::platform_research_math::windows_backend_identity().map_err(Error::Invalid)?;
     let snapshot = snapshot::Snapshot::open(Path::new(field(request, "snapshot")?))?;
-    let mut features = features::Features::default();
-    let features = features.load(&snapshot.source, Path::new(field(request, "features")?))?;
+    // Pixel comparison never reads CCIP features; an unrelated bad vector must not block it (#30).
     if request["kind"] == "relate" {
         let c = snapshot.read()?;
         let ids = request["args"]["ids"].as_array().ok_or_else(|| Error::Invalid("missing relation ids".into()))?;
@@ -94,6 +93,8 @@ pub fn run(request: &Value) -> Result<Value> {
             json!({"format":"illustash-research/1","identity":request["identity"],"version":request["version"],"result":result}),
         );
     }
+    // Every remaining kind consumes CCIP features and still rejects any invalid vector.
+    let features = &features::load(&snapshot.source, Path::new(field(request, "features")?))?;
     let mut out = json!({"format":"illustash-research/1","identity":request["identity"],"version":request["version"]});
     if request["kind"] == "oc" {
         out["result"] = groups::oc(&snapshot, features, field(&request["args"], "entity")?)?;
@@ -176,6 +177,47 @@ mod tests {
         let bytes = response_bytes(Some("oc"), json!({"result":{"total":3,"groups":[["a","b"]]}})).unwrap();
         let ordered = crate::http_json::parse_python(std::str::from_utf8(&bytes).unwrap()).unwrap();
         assert_eq!(ordered.get("result").unwrap().dump(), r#"{"total": 3, "groups": [["a", "b"]]}"#);
+    }
+    #[test]
+    fn relate_ignores_unrelated_bad_ccip_vector_but_feature_kinds_reject_it() {
+        // #30: synthetic images and features only; relate is a pixel comparison.
+        let root = std::env::temp_dir().join(format!("illustash-relate-test-{}", crate::store::new_key().unwrap()));
+        let features = root.join("features");
+        fs::create_dir_all(&features).unwrap();
+        let library = crate::sqlite::open(root.join("library.sqlite")).unwrap();
+        library.execute_batch("CREATE TABLE assets(uuid TEXT PRIMARY KEY, src_path TEXT);").unwrap();
+        for (id, edited) in [("A", false), ("B", true)] {
+            let path = root.join(format!("{id}.png"));
+            image::RgbImage::from_fn(96, 64, |x, y| {
+                let mark = edited && (30..50).contains(&x) && (20..40).contains(&y);
+                image::Rgb(if mark { [250, 20, 20] } else { [(x * 2) as u8, (y * 3) as u8, ((x + y) % 256) as u8] })
+            })
+            .save(&path)
+            .unwrap();
+            library.execute("INSERT INTO assets VALUES (?,?)", [id, path.to_str().unwrap()]).unwrap();
+        }
+        let source = crate::sqlite::open(root.join("source.sqlite")).unwrap();
+        source.execute_batch("CREATE TABLE embeddings(uuid,model,vec,PRIMARY KEY(uuid,model));").unwrap();
+        let request = |kind: &str| {
+            json!({"format":"illustash-research/1","identity":{"synthetic":true},"version":"v","kind":kind,
+                "args":{"ids":["A","B","C"]},"snapshot":root.to_str().unwrap(),"features":features.to_str().unwrap()})
+        };
+        let before = run(&request("relate")).unwrap();
+        assert_eq!(before["result"]["missing"], json!(["C"]));
+        assert_eq!(before["result"]["sizes"]["A"], json!({"width":96,"height":64}));
+        // Feature kinds load CCIP first; this minimal snapshot has no full library schema.
+        assert!(!run(&request("similar")).unwrap_err().to_string().contains("CCIP"));
+        // An unrelated stored CCIP vector is invalid (NaN), as is a finite one whose norm overflows.
+        for bad in [features::bytes(&[f32::NAN; 768]), features::bytes(&[1e30; 768])] {
+            source.execute("INSERT OR REPLACE INTO embeddings VALUES ('UNRELATED','ccip',?)", [bad]).unwrap();
+            assert_eq!(run(&request("relate")).unwrap(), before);
+            for kind in ["similar", "oc"] {
+                let error = run(&request(kind)).unwrap_err().to_string();
+                assert!(error.contains("Invalid CCIP feature vector"), "{kind}: {error}");
+            }
+        }
+        drop((library, source));
+        fs::remove_dir_all(root).unwrap();
     }
     #[test]
     fn routing_never_runs_both_calculators_for_an_events_task() {
