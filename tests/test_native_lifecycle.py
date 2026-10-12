@@ -617,6 +617,29 @@ class NativeLifecycleTest(unittest.TestCase):
         self.assertEqual(untouched, {name: dump(other / name) for name in untouched})
         self.assertFalse(self.sentinel.exists())
 
+    def test_second_host_is_refused_while_the_first_owns_the_library(self):
+        # #24: one physical library has one owning host; a crash releases it.
+        before = dump(self.lib.db)
+        paths = [self.lib.path]
+        if os.name != 'nt':
+            alias = self.root / 'alias.pilib'; alias.symlink_to(self.lib.path, target_is_directory=True)
+            paths.append(alias)
+        for path in paths:
+            with self.subTest(path=path.name):
+                result = subprocess.run([str(self.binary), 'http', '--no-auto-sync', '--library', str(path),
+                                         '--port', str(free_port()), '--root', str(self.resources), '--no-names',
+                                         '--no-index-check'], env=self.env, capture_output=True, timeout=10)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn('另一个 Illustash', result.stderr.decode(errors='replace'))
+        self.assertEqual(before, dump(self.lib.db))
+        self.assertEqual(self.request('/api/startup', {'local_limit': 4321})['status'], 200)
+        # The owner crashes: the system drops its lock and the next host opens the library.
+        self.process.kill(); self.process.wait()
+        self.process, self.log = self.start(self.lib.path)
+        self.token = json.loads(self.request('/api/bootstrap')['body'])['token']
+        self.assertEqual(startup(self.lib.db)['local_limit'], 4321)
+        self.assertFalse(self.sentinel.exists())
+
     def test_slow_reader_old_snapshot_does_not_block_library_switch(self):
         target = self.package('second')
         ids = [f'old-{i:04}-' + 'x' * 24576 for i in range(200)]
@@ -780,6 +803,7 @@ class NativeLifecycleTest(unittest.TestCase):
     @unittest.skipUnless(os.name == 'posix', 'macOS shell launcher acceptance')
     def test_launcher_directly_finds_rust_without_python(self):
         script = self.resources / 'start-web.command'
+        self.stop(self.process)  # one host owns a library at a time (#24)
         process, _ = self.start(self.lib.path, command=[str(script)])
         self.assertIsNone(process.poll())
         self.assertFalse(self.sentinel.exists())

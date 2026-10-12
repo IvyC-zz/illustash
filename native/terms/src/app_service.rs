@@ -8,8 +8,35 @@ use std::{
         Arc, Mutex, RwLock,
     },
 };
+/// The host that opened a physical package owns it until it switches away, shuts down or exits: an OS
+/// file lock, which the system drops with the process, so a crash never leaves the package locked. A
+/// second host (or the same package through another alias) is refused instead of treating the active
+/// owner's running work as left over from a crash.
+pub(crate) struct Owner {
+    _lock: std::fs::File,
+}
+impl Owner {
+    pub(crate) fn claim(library: &Library) -> Result<Arc<Self>> {
+        crate::app_file_lock::ensure_supported()?;
+        let file = std::fs::OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .read(true)
+            .write(true)
+            .open(library.instance_path().join(".illustash-owner.lock"))?;
+        match crate::app_file_lock::acquire_unobstructed(&file) {
+            Ok(()) => Ok(Arc::new(Self { _lock: file })),
+            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock || e.raw_os_error() == Some(33) => {
+                Err(Error::Conflict("这个图库已在另一个 Illustash 中打开；请先关闭那边，或回到那边继续使用".into()))
+            }
+            Err(e) => Err(e.into()),
+        }
+    }
+}
 pub(crate) struct Session {
     pub(crate) library: Library,
+    /// Released when the session closes (switch or shutdown), not only when the service is dropped.
+    pub(crate) owner: Option<Arc<Owner>>,
     pub(crate) token: String,
     pub(crate) generation: u64,
     pub(crate) syncer: crate::app_sync::Syncer,
@@ -64,6 +91,7 @@ impl Session {
     #[allow(clippy::too_many_arguments)] // Session options mirror independent startup task flags.
     fn new(
         library: Library,
+        owner: Arc<Owner>,
         generation: u64,
         names_enabled: bool,
         names_network: bool,
@@ -82,6 +110,7 @@ impl Session {
         let research = crate::app_research::Research::new(generation, &token, similar);
         Ok(Self {
             library,
+            owner: Some(owner),
             generation,
             token,
             syncer: crate::app_sync::Syncer::default(),
@@ -165,6 +194,8 @@ impl Application {
         options: Options,
         registration_error: impl FnOnce(Error) -> Error,
     ) -> Result<Self> {
+        // Owned before any recovery below reads or rewrites the package's task state.
+        let owner = Owner::claim(&library)?;
         let Options {
             root,
             names_enabled,
@@ -187,6 +218,7 @@ impl Application {
         research.anchors = reference.parent().expect("internal file path must have a parent").to_owned();
         let mut session = Session {
             library,
+            owner: Some(owner),
             generation: 1,
             token,
             syncer: crate::app_sync::Syncer::default(),
@@ -314,6 +346,7 @@ impl Session {
         self.research.stop();
         self.names.stop();
         self.syncer.stop();
+        self.owner = None;
     }
 }
 
@@ -333,8 +366,14 @@ impl Application {
             return Err(Error::Invalid("不是图库包".into()));
         }
         let library = Library::open(path)?;
+        // Reopening the same physical package keeps its ownership; another one is claimed first.
+        let owner = match &session.owner {
+            Some(owner) if library.instance_path() == session.library.instance_path() => owner.clone(),
+            _ => Owner::claim(&library)?,
+        };
         let mut replacement = Session::new(
             library,
+            owner,
             session.generation + 1,
             self.names_enabled,
             self.names_network,
