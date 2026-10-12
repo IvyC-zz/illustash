@@ -4,12 +4,39 @@ use crate::{app_library::Library, Error, Result};
 use std::{
     path::{Path, PathBuf},
     sync::{
-        atomic::{AtomicBool, AtomicU64, Ordering},
-        RwLock,
+        atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
+        Arc, Mutex, RwLock,
     },
 };
+/// The host that opened a physical package owns it until it switches away, shuts down or exits: an OS
+/// file lock, which the system drops with the process, so a crash never leaves the package locked. A
+/// second host (or the same package through another alias) is refused instead of treating the active
+/// owner's running work as left over from a crash.
+pub(crate) struct Owner {
+    _lock: std::fs::File,
+}
+impl Owner {
+    pub(crate) fn claim(library: &Library) -> Result<Arc<Self>> {
+        crate::app_file_lock::ensure_supported()?;
+        let file = std::fs::OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .read(true)
+            .write(true)
+            .open(library.instance_path().join(".illustash-owner.lock"))?;
+        match crate::app_file_lock::acquire_unobstructed(&file) {
+            Ok(()) => Ok(Arc::new(Self { _lock: file })),
+            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock || e.raw_os_error() == Some(33) => {
+                Err(Error::Conflict("这个图库已在另一个 Illustash 中打开；请先关闭那边，或回到那边继续使用".into()))
+            }
+            Err(e) => Err(e.into()),
+        }
+    }
+}
 pub(crate) struct Session {
     pub(crate) library: Library,
+    /// Released when the session closes (switch or shutdown), not only when the service is dropped.
+    pub(crate) owner: Option<Arc<Owner>>,
     pub(crate) token: String,
     pub(crate) generation: u64,
     pub(crate) syncer: crate::app_sync::Syncer,
@@ -18,6 +45,42 @@ pub(crate) struct Session {
     pub(crate) index: crate::app_index::Updater,
     pub(crate) auto_sync: bool,
     pub(crate) research: crate::app_research::Research,
+    pub(crate) imports: Imports,
+}
+/// Recognition-result imports run outside the session lock (#26). They still take turns, as they did under the
+/// lock, and closing the session (switching libraries or quitting) cancels the running and the waiting ones.
+#[derive(Default)]
+pub(crate) struct Imports {
+    active: Arc<AtomicUsize>,
+    turn: Arc<Mutex<()>>,
+    cancel: Arc<AtomicBool>,
+}
+impl Imports {
+    /// Counted as active from here, so index and sync starts are refused while it waits or runs.
+    pub(crate) fn admit(&self) -> ImportTicket {
+        self.active.fetch_add(1, Ordering::SeqCst);
+        ImportTicket { active: self.active.clone(), turn: self.turn.clone(), cancel: self.cancel.clone() }
+    }
+    pub(crate) fn running(&self) -> bool {
+        self.active.load(Ordering::SeqCst) > 0
+    }
+}
+pub(crate) struct ImportTicket {
+    active: Arc<AtomicUsize>,
+    turn: Arc<Mutex<()>>,
+    pub(crate) cancel: Arc<AtomicBool>,
+}
+impl ImportTicket {
+    /// Waits for the previous import of this session, then runs with the session's cancel flag.
+    pub(crate) fn run<T>(&self, import: impl FnOnce(&AtomicBool) -> T) -> T {
+        let _turn = self.turn.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        import(&self.cancel)
+    }
+}
+impl Drop for ImportTicket {
+    fn drop(&mut self) {
+        self.active.fetch_sub(1, Ordering::SeqCst);
+    }
 }
 impl Session {
     pub(crate) fn token() -> Result<String> {
@@ -28,6 +91,7 @@ impl Session {
     #[allow(clippy::too_many_arguments)] // Session options mirror independent startup task flags.
     fn new(
         library: Library,
+        owner: Arc<Owner>,
         generation: u64,
         names_enabled: bool,
         names_network: bool,
@@ -46,6 +110,7 @@ impl Session {
         let research = crate::app_research::Research::new(generation, &token, similar);
         Ok(Self {
             library,
+            owner: Some(owner),
             generation,
             token,
             syncer: crate::app_sync::Syncer::default(),
@@ -54,13 +119,14 @@ impl Session {
             index,
             auto_sync: true,
             research,
+            imports: Imports::default(),
         })
     }
 }
 pub struct Application {
     pub(crate) session: RwLock<Session>,
     pub(crate) generation: AtomicU64,
-    closed: AtomicBool,
+    closed: Arc<AtomicBool>,
     pub(crate) tags: PathBuf,
     pub(crate) root: PathBuf,
     pub(crate) reference: PathBuf,
@@ -128,6 +194,8 @@ impl Application {
         options: Options,
         registration_error: impl FnOnce(Error) -> Error,
     ) -> Result<Self> {
+        // Owned before any recovery below reads or rewrites the package's task state.
+        let owner = Owner::claim(&library)?;
         let Options {
             root,
             names_enabled,
@@ -150,6 +218,7 @@ impl Application {
         research.anchors = reference.parent().expect("internal file path must have a parent").to_owned();
         let mut session = Session {
             library,
+            owner: Some(owner),
             generation: 1,
             token,
             syncer: crate::app_sync::Syncer::default(),
@@ -158,6 +227,7 @@ impl Application {
             index,
             auto_sync,
             research,
+            imports: Imports::default(),
         };
         session.syncer.resource_root = root.clone();
         session.syncer.per_run = per_run;
@@ -166,7 +236,7 @@ impl Application {
         Ok(Self {
             session: RwLock::new(session),
             generation: AtomicU64::new(1),
-            closed: AtomicBool::new(false),
+            closed: Arc::default(),
             tags: root.join("tags/tags_v3.csv"),
             root,
             reference,
@@ -270,11 +340,13 @@ impl Application {
 }
 impl Session {
     fn close(&mut self) {
+        self.imports.cancel.store(true, Ordering::SeqCst);
         self.provenance.close();
         self.index.stop();
         self.research.stop();
         self.names.stop();
         self.syncer.stop();
+        self.owner = None;
     }
 }
 
@@ -294,8 +366,14 @@ impl Application {
             return Err(Error::Invalid("不是图库包".into()));
         }
         let library = Library::open(path)?;
+        // Reopening the same physical package keeps its ownership; another one is claimed first.
+        let owner = match &session.owner {
+            Some(owner) if library.instance_path() == session.library.instance_path() => owner.clone(),
+            _ => Owner::claim(&library)?,
+        };
         let mut replacement = Session::new(
             library,
+            owner,
             session.generation + 1,
             self.names_enabled,
             self.names_network,
@@ -351,6 +429,10 @@ impl Application {
     }
     pub(crate) fn current(&self, received: u64) -> bool {
         !self.closed.load(Ordering::SeqCst) && self.generation() == received
+    }
+    /// Set once the application shuts down; long work outside the session lock polls it.
+    pub(crate) fn closing(&self) -> Arc<AtomicBool> {
+        self.closed.clone()
     }
     fn check_open(&self) -> Result<()> {
         if self.closed.load(Ordering::SeqCst) {

@@ -58,7 +58,11 @@ impl Snapshot {
     pub fn load(shared: &Path, source: &Path) -> Result<Self> {
         Self::load_checked(shared, source, &|| Ok(()))
     }
+    /// Anchors, ids and per-character files from one complete index publication (index_generation).
     pub(crate) fn load_checked(shared: &Path, source: &Path, check: &dyn Fn() -> Result<()>) -> Result<Self> {
+        crate::index_generation::stable(shared, || Self::load_once(shared, source, check))
+    }
+    fn load_once(shared: &Path, source: &Path, check: &dyn Fn() -> Result<()>) -> Result<Self> {
         check()?;
         if !anchored(shared)? {
             return Ok(Self {
@@ -105,6 +109,9 @@ impl Snapshot {
         source: &Connection,
         check: &dyn Fn() -> Result<()>,
     ) -> Result<Fingerprint> {
+        crate::index_generation::stable(shared, || Self::fingerprint_once(shared, source, check))
+    }
+    fn fingerprint_once(shared: &Path, source: &Connection, check: &dyn Fn() -> Result<()>) -> Result<Fingerprint> {
         check()?;
         if !anchored(shared)? {
             return Ok(absent());

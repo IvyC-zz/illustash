@@ -123,6 +123,37 @@ class NativeProfilesTest(unittest.TestCase):
         self.pair('/api/entities',{'name':'故障'},500)
         self.pair('/api/character/profile',{'entity':self.alice,'name':'故障'},500)
 
+    def test_profile_with_a_new_work_is_one_transaction(self):
+        # #35: a work chosen as new is made together with the profile, or not at all.
+        def works():
+            with closing(sqlite3.connect(self.right.db)) as c:
+                return {name: ident for ident, name in c.execute(
+                    "SELECT e.id,n.value FROM entities e JOIN names n ON n.entity_id=e.id AND n.role='display' WHERE e.kind='work'")}
+        def work_of(entity):
+            with closing(sqlite3.connect(self.right.db)) as c:
+                return c.execute('SELECT work_id FROM entities WHERE id=?', (entity,)).fetchone()[0]
+        before = works()
+        with closing(sqlite3.connect(self.right.db)) as c:
+            c.execute("CREATE TRIGGER fail_profile BEFORE INSERT ON names WHEN NEW.value='故障' BEGIN SELECT RAISE(ABORT,'synthetic failure'); END"); c.commit()
+        failed = self.post(self.origin, '/api/character/profile', {'entity': self.alice, 'name': '故障', 'work': {'create': '合成新作品'}})
+        self.assertEqual(failed['status'], 500, failed['body'])
+        self.assertEqual(works(), before)
+        with closing(sqlite3.connect(self.right.db)) as c:
+            c.execute('DROP TRIGGER fail_profile'); c.commit()
+        saved = self.post(self.origin, '/api/character/profile', {'entity': self.alice, 'work': {'create': '合成新作品'}})
+        self.assertEqual(saved['status'], 200, saved['body'])
+        self.assertIn('undo', json.loads(saved['body']))
+        created = works()
+        self.assertEqual(set(created) - set(before), {'合成新作品'})
+        self.assertEqual(work_of(self.alice), created['合成新作品'])
+        tagged = self.post(self.origin, '/api/character/profile', {'entity': self.alice, 'work': {'tag': 'synthetic_series'}})
+        self.assertEqual(tagged['status'], 200, tagged['body'])
+        self.assertNotEqual(work_of(self.alice), created['合成新作品'])
+        self.assertIn(work_of(self.alice), works().values())
+        refused = self.post(self.origin, '/api/character/profile', {'entity': self.alice, 'work': {'bogus': 1}})
+        self.assertEqual(refused['status'], 400, refused['body'])
+        self.assertFalse(self.sentinel.exists())
+
     def test_live_synthetic_copyright_cache_and_local_shortcut(self):
         import http.server
         import threading
@@ -154,7 +185,9 @@ class NativeProfilesTest(unittest.TestCase):
         with closing(sqlite3.connect(self.right.db)) as c:
             c.execute("CREATE TRIGGER fail_ack BEFORE UPDATE ON backend_effects WHEN OLD.kind='verdict' BEGIN SELECT RAISE(ABORT,'ack failure'); END");c.commit()
         response=self.post(self.origin,'/api/character/profile',{'entity':self.alice,'name':'已提交'})
-        self.assertEqual(response['status'],500)
+        # The profile save commits before its event acknowledgement fails; by user decision on 2026-10-11 (#40)
+        # a committed operation answers 200 and the event stays pending for recovery.
+        self.assertEqual(response['status'],200,response['body'])
         with closing(sqlite3.connect(self.right.db)) as c:
             self.assertEqual(c.execute("SELECT value FROM names WHERE entity_id=? AND source='user' AND role='display'",(self.alice,)).fetchone()[0],'已提交')
             self.assertEqual(c.execute("SELECT status FROM backend_effects WHERE kind='verdict' ORDER BY id DESC LIMIT 1").fetchone()[0],'pending')

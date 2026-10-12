@@ -332,7 +332,7 @@ impl Updater {
     pub fn info(&self, lib: &Library) -> Result<Json> {
         let c = crate::app_library::read_connection(&lib.db())?;
         crate::http_read::register_names(&c)?;
-        let mut history = read(&self.dir.join("history.json"), json!([])).as_array().cloned().unwrap_or_default();
+        let (state, mut history) = state_and_history(&self.state, &self.dir);
         history.truncate(6);
         for h in &mut history {
             if let Some(h) = h.as_object_mut() {
@@ -358,7 +358,7 @@ impl Updater {
             (
                 "state",
                 ordered(
-                    &self.state.lock().expect("index state mutex poisoned").value(),
+                    &state,
                     &[
                         "status",
                         "started_at",
@@ -1040,21 +1040,57 @@ fn commit(
         tx.commit()?;
     }
     // Files are copied from an immutable validated job. Repeating this boundary is safe after a crash.
+    // Shared files are staged beside their targets first: a failed copy or a full disk leaves the
+    // published set untouched. Only then are they renamed into place inside one publication
+    // generation, so readers never take a mix of old and new files (index_generation).
     let allowed = job.rows.iter().map(|r| r.short_tag.as_str()).collect::<BTreeSet<_>>();
-    for cid in allowed {
-        if !safe(cid) {
-            return bad("索引文件 ID 不正确");
-        };
-        for ext in ["json", "npy"] {
-            let from = folder.join("char-index").join(format!("{cid}.{ext}"));
-            let to = shared.join("char-index").join(format!("{cid}.{ext}"));
-            std::fs::create_dir_all(to.parent().expect("index file path must have a parent"))?;
-            if from.exists() {
-                std::fs::copy(from, to)?;
-            } else if to.exists() {
-                std::fs::remove_file(to)?;
+    let mut staged: Vec<(PathBuf, PathBuf)> = Vec::new();
+    let mut retired: Vec<PathBuf> = Vec::new();
+    let stage = |from: &Path, to: PathBuf, staged: &mut Vec<(PathBuf, PathBuf)>| -> Result<()> {
+        std::fs::create_dir_all(to.parent().expect("index file path must have a parent"))?;
+        let name = to.file_name().expect("index file path must have a name").to_string_lossy().into_owned();
+        let tmp = to.with_file_name(format!(".{name}.{}.tmp", crate::store::new_key()?));
+        staged.push((tmp.clone(), to));
+        std::fs::copy(from, tmp)?;
+        Ok(())
+    };
+    let staging = (|| -> Result<()> {
+        for cid in &allowed {
+            if !safe(cid) {
+                return bad("索引文件 ID 不正确");
+            };
+            for ext in ["json", "npy"] {
+                let from = folder.join("char-index").join(format!("{cid}.{ext}"));
+                let to = shared.join("char-index").join(format!("{cid}.{ext}"));
+                if from.exists() {
+                    stage(&from, to, &mut staged)?;
+                } else if to.exists() {
+                    retired.push(to);
+                }
             }
         }
+        for name in ["char-anchors.npy", "char-anchors.txt"] {
+            if folder.join(name).exists() {
+                stage(&folder.join(name), shared.join(name), &mut staged)?;
+            }
+        }
+        Ok(())
+    })();
+    if let Err(e) = staging {
+        for (tmp, _) in &staged {
+            let _ = std::fs::remove_file(tmp);
+        }
+        return Err(e);
+    }
+    let generation = crate::index_generation::start(shared)?;
+    for (tmp, to) in &staged {
+        std::fs::rename(tmp, to)?;
+    }
+    for to in &retired {
+        std::fs::remove_file(to)?;
+    }
+    crate::index_generation::finish(shared, generation)?;
+    for cid in allowed {
         let raw = folder.join("char-patch/raw").join(format!("{cid}.npy"));
         if raw.exists() {
             std::fs::create_dir_all(dir.join("raw"))?;
@@ -1063,11 +1099,6 @@ fn commit(
         let rejected = folder.join("char-patch/rejected").join(format!("{cid}.json"));
         if rejected.exists() {
             write(&dir.join("rejected").join(format!("{cid}.json")), &read(&rejected, Value::Null))?;
-        }
-    }
-    for name in ["char-anchors.npy", "char-anchors.txt"] {
-        if folder.join(name).exists() {
-            std::fs::copy(folder.join(name), shared.join(name))?;
         }
     }
     write(&dir.join("plan.json"), &read(&folder.join("char-patch/plan.json"), json!([])))?;
@@ -1295,4 +1326,43 @@ impl Drop for PreparedStage {
 fn update(state: &Mutex<State>, fields: Value) {
     let mut s = state.lock().expect("index state mutex poisoned");
     s.merge(fields);
+}
+
+/// The job state and its history for `info`, state first. A job writes its history entry before it reports
+/// done, so a done state read first always comes with a history that contains it; reading the history first
+/// could pair the previous history with the new done (#85).
+fn state_and_history(state: &Mutex<State>, dir: &Path) -> (Value, Vec<Value>) {
+    let state = state.lock().expect("index state mutex poisoned").value();
+    let history = read(&dir.join("history.json"), json!([])).as_array().cloned().unwrap_or_default();
+    (state, history)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn info_never_pairs_a_done_state_with_the_previous_history() {
+        // #85: a finished job writes its history entry and then reports done. Hold the state lock while
+        // the reader starts, finish the job that way, and only then let the reader take the state.
+        let dir = std::env::temp_dir().join(format!("illustash-index-info-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        write(&dir.join("history.json"), &json!([{"kind":"add"}])).unwrap();
+        let state = Arc::new(Mutex::new(State::from(json!({"status":"building"}))));
+        let mut held = state.lock().unwrap();
+        let reader = {
+            let (state, dir) = (state.clone(), dir.clone());
+            std::thread::spawn(move || state_and_history(&state, &dir))
+        };
+        // Let the reader get as far as it can before the job finishes. Whatever it reached, a done state
+        // must come with the new history; the wait only decides whether a wrong order gets caught.
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        write(&dir.join("history.json"), &json!([{"kind":"drop"},{"kind":"add"}])).unwrap();
+        *held = State::from(json!({"status":"done"}));
+        drop(held);
+        let (seen, history) = reader.join().unwrap();
+        std::fs::remove_dir_all(&dir).unwrap();
+        assert_eq!(seen["status"], "done");
+        assert_eq!(history[0]["kind"], "drop", "{history:?}");
+    }
 }

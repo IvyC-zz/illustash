@@ -278,6 +278,26 @@ pub(crate) fn request(c: &mut Connection, body: &Json, path: &str, prepared: Opt
             )
         }
         "/api/character/profile" => {
+            // A work chosen as new ({"create": name}) or from a Danbooru tag ({"tag": tag}) is made in this
+            // same transaction: a failed profile write leaves no orphan work, and one save is one request.
+            if v["work"].is_object() {
+                let work = v["work"].take();
+                let mut w = json!({"op":"edit_work","ident":null,"id":null});
+                if let Some(name) = work.get("create").and_then(Value::as_str) {
+                    w["action"] = json!("create");
+                    w["name"] = json!(name);
+                    w["lang"] = json!(crate::character_labels::lang_of(name));
+                } else if let Some(t) = work.get("tag") {
+                    let t = tag(t)?;
+                    w["action"] = json!("from_tag");
+                    w["lang"] = json!(crate::character_labels::lang_of(""));
+                    w["readable"] = json!(crate::names_view::readable(&t, false));
+                    w["tag"] = json!(t);
+                } else {
+                    return invalid("作品应为已有作品、新建名称或 Danbooru tag");
+                }
+                v["work"] = run(&tx, &w)?["id"].clone();
+            }
             v["op"] = json!("set_profile");
             if truthy(&v["tag"]) {
                 let t = tag(&v["tag"])?;

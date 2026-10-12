@@ -155,8 +155,11 @@ class NativeHumanCharactersTest(unittest.TestCase):
         item = {'method': 'POST', 'url': '/api/change',
                 'body': json.dumps({'ids': ['c'], 'action': 'confirmed', 'entity': self.alice}),
                 'headers': {'Content-Type': 'application/json', 'X-CSRF-Token': self.token}}
+        # The old reference answered 500 although the change had committed; by user decision on
+        # 2026-10-11 (#40) the committed change answers 200 and its event stays pending for recovery.
         responses = [self.reference_response('response', item), fetch(self.origin, item, self.origin)]
-        self.assertEqual([r['status'] for r in responses], [500, 500])
+        self.assertEqual([r['status'] for r in responses], [500, 200])
+        self.assertIn('undo', json.loads(responses[1]['body']))
         self.assertEqual(self.rec.state('after'), states(self.right))
         with closing(sqlite3.connect(self.right.db)) as c:
             self.assertEqual(c.execute("SELECT status FROM backend_effects ORDER BY id DESC LIMIT 1").fetchone()[0], 'pending')

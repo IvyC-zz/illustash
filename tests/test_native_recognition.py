@@ -9,6 +9,7 @@ import json
 import shutil
 import sqlite3
 import subprocess
+import time
 import os
 import unittest
 from pathlib import Path
@@ -227,3 +228,42 @@ class NativeRecognitionTest(unittest.TestCase):
         for body in ({'path':str(self.incoming())},{'resume':True}):
             self.assertEqual(self.request('/api/recognition/import',body)['status'],409)
         self.assertEqual(snapshot(self.lib.source),before)
+
+    @unittest.skipUnless(hasattr(os, 'mkfifo'), 'a FIFO holds the import open; POSIX only')
+    def test_import_runs_outside_the_session_lock_and_a_switch_cancels_it(self):
+        # #26: the WD model file is a FIFO, so the import stays in its model fingerprint step until it is fed.
+        p = self.incoming()
+        model = self.resources / 'models' / 'wd_swinv2_v3_emb.onnx'
+        model.unlink()
+        os.mkfifo(model)
+        before = snapshot(self.lib.source)
+        other = self.root / 'other.pilib'
+        shutil.copytree(self.lib.path, other)
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            pending = pool.submit(self.request, '/api/recognition/import', {'path': str(p)})
+            deadline = time.monotonic() + 10
+            while True:  # opening the write end succeeds once the import has the FIFO open for reading
+                try:
+                    writer = os.open(model, os.O_WRONLY | os.O_NONBLOCK)
+                    break
+                except OSError:
+                    self.assertLess(time.monotonic(), deadline, 'import never reached the model files')
+                    time.sleep(0.01)
+            self.addCleanup(lambda: os.close(writer) if writer is not None else None)
+            started = time.monotonic()
+            self.assertEqual(self.request('/api/bootstrap')['status'], 200)
+            refused = self.request('/api/sync', {})
+            self.assertEqual(refused['status'], 400, refused)
+            self.assertIn('识别结果正在导入', json.loads(refused['body'])['error'])
+            opened = self.request('/api/libraries/open', {'path': str(other)})
+            self.assertEqual(opened['status'], 200, opened)
+            self.assertLess(time.monotonic() - started, 5)
+            self.assertFalse(pending.done())
+            os.set_blocking(writer, True)
+            os.write(writer, b'synthetic WD')
+            os.close(writer)
+            writer = None
+            response = pending.result(timeout=20)
+        self.assertEqual(response['status'], 409, response)
+        self.assertIn('导入已取消', json.loads(response['body'])['error'])
+        self.assertEqual(snapshot(self.lib.source), before)

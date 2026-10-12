@@ -35,7 +35,9 @@ pub fn normalise_layout(v: &mut [f32], contiguous: bool) -> Result<(), String> {
     }
     let squares: Vec<_> = v.iter().map(|x| x * x).collect();
     let norm = if contiguous { sum32(&squares) } else { squares.iter().fold(-0.0, |s, x| s + x) }.sqrt();
-    if norm <= 1e-12 {
+    // Finite inputs can still overflow the squared sum to Inf; dividing by it would
+    // silently yield a zero vector, so reject it like a zero norm (#45).
+    if norm <= 1e-12 || !norm.is_finite() {
         return Err("Invalid CCIP feature vector".into());
     }
     for x in v {
@@ -68,7 +70,7 @@ pub fn normalise64(v: &[f64], contiguous: bool) -> Result<Vec<f32>, String> {
     }
     let squares: Vec<_> = v.iter().map(|x| x * x).collect();
     let norm = if contiguous { sum64(&squares) } else { squares.iter().fold(-0.0, |s, x| s + x) }.sqrt();
-    if norm <= 1e-12 {
+    if norm <= 1e-12 || !norm.is_finite() {
         return Err("Invalid CCIP feature vector".into());
     }
     Ok(v.iter().map(|x| (x / norm) as f32).collect())
@@ -442,6 +444,47 @@ mod tests {
                 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 38, 39
             ]
         );
+    }
+    #[test]
+    fn finite_norm_overflow_is_rejected_and_largest_finite_square_passes() {
+        // #45: finite elements whose squared sum overflows used to divide by Inf into zeros.
+        for contiguous in [true, false] {
+            for row in [vec![1e30f32; 768], vec![2e19, 0.0], vec![f32::MAX, 1.0]] {
+                let mut v = row.clone();
+                assert_eq!(normalise_layout(&mut v, contiguous), Err("Invalid CCIP feature vector".into()));
+                assert_eq!(v, row, "rejected rows stay untouched");
+            }
+            for row in [vec![1e200f64; 768], vec![f64::MAX, 1.0]] {
+                assert_eq!(normalise64(&row, contiguous), Err("Invalid CCIP feature vector".into()));
+            }
+            // The largest finite squares still normalise; [3, 4] keeps exact bits.
+            let mut v = vec![1e19f32, 0.0];
+            normalise_layout(&mut v, contiguous).unwrap();
+            assert_eq!(v, vec![1.0, 0.0]);
+            let mut v = vec![3.0f32, 4.0];
+            normalise_layout(&mut v, contiguous).unwrap();
+            assert_eq!(v.iter().map(|x| x.to_bits()).collect::<Vec<_>>(), [0.6f32.to_bits(), 0.8f32.to_bits()]);
+            assert_eq!(normalise64(&[1e40, 0.0], contiguous).unwrap(), vec![1.0, 0.0]);
+        }
+    }
+    #[test]
+    fn ordinary_rows_keep_reference_normalisation_bits() {
+        use sha2::Digest;
+        let row: Vec<f32> = (0..768).map(|i| ((i * 37 % 101) as f32 - 50.0) * 0.013).collect();
+        for (contiguous, expected) in [
+            (true, "ad69f5ac1e9afa20bbccd5e6bb244177cfe88545a404ffe18d561d419c4873b3"),
+            (false, "09f5d705ec2682886574112e61648c7e4d26c527f8093b056d5bf0d43f87807f"),
+        ] {
+            let mut v = row.clone();
+            normalise_layout(&mut v, contiguous).unwrap();
+            let digest = sha2::Sha256::digest(v.iter().flat_map(|x| x.to_le_bytes()).collect::<Vec<_>>());
+            assert_eq!(format!("{digest:x}"), expected, "contiguous={contiguous}");
+        }
+        let row64: Vec<f64> = row.iter().map(|&x| x as f64 * 1e3).collect();
+        let digest = sha2::Sha256::digest(
+            normalise64(&row64, true).unwrap().iter().flat_map(|x| x.to_le_bytes()).collect::<Vec<_>>(),
+        );
+        assert_eq!(format!("{digest:x}"), "5b69579d79e7a40bc40f5aa0ad79eb09b652dcd6e5f344af18a8731453a488dd");
     }
     #[test]
     fn floor_and_linear_percentile() {

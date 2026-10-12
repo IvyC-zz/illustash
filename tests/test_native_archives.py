@@ -1,4 +1,5 @@
 """#42 acceptance. All paths and packages are temporary synthetic fixtures; no real library input."""
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import closing
 import json
 import os
@@ -44,6 +45,80 @@ class NativeArchivesTest(unittest.TestCase):
         result = self.state()
         self.assertEqual(result['status'], 'done', result)
         return Path(result['path'])
+
+    def test_share_export_and_legacy_import_remove_secrets_and_require_new_consent(self):
+        markers = [f'archive-synthetic-secret-{kind}' for kind in ('current', 'legacy', 'future', 'retired')]
+        response = self.request('/api/names', {'action': 'model_api', 'key': markers[0],
+                                             'model': 'synthetic-model', 'base': 'https://example.invalid'})
+        self.assertEqual(response['status'], 200, response)
+        response = self.request('/api/names', {'action': 'network', 'allow': True})
+        self.assertEqual(response['status'], 200, response)
+        with closing(sqlite3.connect(self.lib.db)) as c:
+            c.execute('PRAGMA secure_delete=OFF')
+            c.executemany('INSERT OR REPLACE INTO name_settings VALUES (?,?)',
+                          [('deepseek_key', markers[1]), ('future_credential', markers[2]),
+                           ('traffic_reserved', '2000000'), ('retired_key', markers[3] + 'x' * 16000)])
+            c.commit()
+            c.execute("DELETE FROM name_settings WHERE key='retired_key'")
+            c.execute("INSERT OR REPLACE INTO prefs VALUES ('startup',?)", ('{"names":true,"sync":false}',))
+            # Unindexed historical tables must retain sparse physical rowids through compaction.
+            c.execute('CREATE TABLE archive_sparse(value TEXT)')
+            c.execute("INSERT INTO archive_sparse(rowid,value) VALUES (37,'synthetic human record')")
+            c.commit()
+            c.execute('PRAGMA wal_checkpoint(TRUNCATE)')
+        self.assertIn(markers[3].encode(), self.lib.db.read_bytes(), 'fixture must contain deleted secret bytes')
+        before = snapshot(self.lib.db)
+        source_before = snapshot(self.lib.source)
+        # snapshot() is per-table digests: build the expected state on a plain copy, rowids untouched.
+        expected_db = self.root / 'expected-sanitized.sqlite'
+        with closing(sqlite3.connect(self.lib.db)) as c, closing(sqlite3.connect(expected_db)) as e:
+            c.backup(e)
+            e.execute('DELETE FROM name_settings')
+            e.execute("DELETE FROM prefs WHERE key='names_network'")
+            e.commit()
+        expected = snapshot(expected_db)
+        self.assertNotEqual(expected['prefs'], before['prefs'], 'fixture must grant names_network')
+        legacy = library.export_library(self.lib, self.root / 'unsafe-legacy.zip')
+        legacy_bytes = legacy.read_bytes()
+        self.begin()
+        exported = self.done()
+        unpacked = self.root / 'sanitized'
+        with zipfile.ZipFile(exported) as z:
+            self.assertEqual(set(z.namelist()), set(library.EXPORTED) &
+                             {p.relative_to(self.lib.path).as_posix() for p in self.lib.path.rglob('*') if p.is_file()})
+            z.extractall(unpacked)
+            for name in z.namelist():
+                data = z.read(name)
+                for marker in markers:
+                    self.assertNotIn(marker.encode(), data, name)
+                if name.endswith('.sqlite'):
+                    # snapshot traverses every table/view, typed cell, rowid and DDL.
+                    state = snapshot(unpacked / name)
+                    for marker in markers:
+                        self.assertNotIn(marker, repr(state), name)
+        self.assertEqual(snapshot(unpacked / 'library.sqlite'), expected)
+        self.assertEqual(snapshot(unpacked / 'source.sqlite'), source_before)
+        self.assertEqual(snapshot(self.lib.db), before)
+        self.assertEqual(snapshot(self.lib.source), source_before)
+        for archive in (exported, legacy):
+            response = self.request('/api/libraries/import', {'path': str(archive)})
+            self.assertEqual(response['status'], 200, response)
+            path = Path(json.loads(response['body'])['path'])
+            self.assertEqual(snapshot(path / 'library.sqlite'), expected)
+            self.assertEqual(snapshot(path / 'source.sqlite'), source_before)
+            for file in path.rglob('*'):
+                if file.is_file():
+                    for marker in markers:
+                        self.assertNotIn(marker.encode(), file.read_bytes(), file.name)
+            response = self.request('/api/libraries/open', {'path': str(path)})
+            self.assertEqual(response['status'], 200, response)
+            self.token = json.loads(self.request('/api/bootstrap')['body'])['token']
+            names = json.loads(self.request('/api/names')['body'])
+            self.assertFalse(names['model_api']['configured'])
+            self.assertEqual(names['network'], {'authorized': False, 'this_run': False, 'granted_at': None})
+        self.assertEqual(legacy.read_bytes(), legacy_bytes)
+        self.assertEqual(snapshot(self.lib.db), before)
+        self.assertFalse(self.sentinel.exists())
 
     def test_roundtrip_wal_archive_contents_database_projection_and_same_id(self):
         self.lib.config['sources'] = [library.folder_source(self.root / 'Pixiv')]
@@ -98,6 +173,33 @@ class NativeArchivesTest(unittest.TestCase):
         self.assertEqual(json.loads(self.request('/api/libraries')['body'])['current'], str(imported.path))
         self.assertTrue(second.exists())
         self.assertFalse(self.sentinel.exists())
+
+    def test_sanitization_failure_does_not_publish_export_or_import(self):
+        self.begin()
+        dest = self.done()
+        published = dest.read_bytes()
+        with closing(sqlite3.connect(self.lib.db)) as c:
+            c.execute("INSERT INTO name_settings VALUES ('model_key','archive-synthetic-failure-secret')")
+            c.execute("CREATE TRIGGER archive_fail BEFORE DELETE ON name_settings BEGIN SELECT RAISE(ABORT,'synthetic failure'); END")
+            c.commit()
+        before = snapshot(self.lib.db)
+        legacy = library.export_library(self.lib, self.root / 'failure-legacy.zip')
+        self.begin()
+        wait_until(lambda: self.state()['status'] == 'error', timeout=10)
+        self.assertEqual(dest.read_bytes(), published)
+        self.assertEqual(list(dest.parent.glob('.illustash-export-*')), [])
+        imports = set(library.HOME.glob('*')) if library.HOME.exists() else set()
+        response = self.request('/api/libraries/import', {'path': str(legacy)})
+        self.assertNotEqual(response['status'], 200, response)
+        self.assertEqual(set(library.HOME.glob('*')) if library.HOME.exists() else set(), imports)
+        self.assertEqual(snapshot(self.lib.db), before)
+        with closing(sqlite3.connect(self.lib.db)) as c:
+            c.execute('DROP TRIGGER archive_fail')
+            c.commit()
+        self.begin()
+        self.done()
+        with zipfile.ZipFile(dest) as z:
+            self.assertNotIn(b'archive-synthetic-failure-secret', z.read('library.sqlite'))
 
     def test_preset_success_bytes_database_and_forget_preserves_package(self):
         source = library.folder_source(self.root / 'folder')
@@ -161,6 +263,108 @@ class NativeArchivesTest(unittest.TestCase):
                 self.assertEqual(set(library.HOME.glob('*')) if library.HOME.exists() else set(), before)
         self.assertFalse((self.root / 'escape').exists())
         self.assertFalse(self.sentinel.exists())
+
+    def test_import_refuses_a_package_that_cannot_be_opened(self):
+        # #42: the archive is structurally valid, but the package it holds would not open.
+        good = library.export_library(self.lib, self.root / 'good.zip')
+        with zipfile.ZipFile(good) as z:
+            files = {name: z.read(name) for name in z.namelist()}
+        config = json.loads(files['library.json'])
+        cases = {
+            'damaged-source': {**files, 'source.sqlite': b'not a database ' * 512},
+            'config-without-id': {**files, 'library.json': json.dumps({k: v for k, v in config.items() if k != 'id'}).encode()},
+            'config-without-name': {**files, 'library.json': json.dumps({k: v for k, v in config.items() if k != 'name'}).encode()},
+        }
+        registry = self.support / 'libraries.json'
+        listing = lambda: set(library.HOME.glob('*')) if library.HOME.exists() else set()
+        for case, content in cases.items():
+            with self.subTest(case):
+                archive = self.root / f'{case}.zip'
+                with zipfile.ZipFile(archive, 'w') as z:
+                    for name, data in content.items():
+                        z.writestr(name, data)
+                before, recent = listing(), registry.read_bytes() if registry.exists() else None
+                response = self.request('/api/libraries/import', {'path': str(archive)})
+                self.assertEqual(response['status'], 400, response)
+                self.assertIn('导入的图库无法打开', json.loads(response['body'])['error'])
+                self.assertEqual(listing(), before)
+                self.assertEqual(registry.read_bytes() if registry.exists() else None, recent)
+        imported = self.request('/api/libraries/import', {'path': str(good)})
+        self.assertEqual(imported['status'], 200, imported)
+        self.assertTrue(Path(json.loads(imported['body'])['path']).is_dir())
+        self.assertFalse(self.sentinel.exists())
+
+    def test_import_limits_refuse_before_anything_is_created(self):
+        # #26: the configuration is capped and the declared sizes must fit on disk (entries are limited to the exported set).
+        good = library.export_library(self.lib, self.root / 'good.zip')
+        with zipfile.ZipFile(good) as z:
+            files = {name: z.read(name) for name in z.namelist()}
+        registry = self.support / 'libraries.json'
+        listing = lambda: set(library.HOME.glob('*')) if library.HOME.exists() else set()
+
+        def archive(case, content=files, declare=None, compression=zipfile.ZIP_STORED):
+            out = self.root / f'{case}.zip'
+            with zipfile.ZipFile(out, 'w', compression=compression) as z:
+                for name, data in content:
+                    z.writestr(name, data)
+                for info in z.filelist:  # the central directory is written on close, with these sizes
+                    if declare and info.filename == declare[0]:
+                        info.file_size = declare[1]
+            return out
+
+        oversized = json.dumps({**json.loads(files['library.json']), 'padding': ' ' * (1 << 20)}).encode()
+        npy = 'features/full-features.npy'
+        cases = {
+            'config-over-limit': (archive('config-over-limit', [(n, oversized if n == 'library.json' else b) for n, b in files.items()]), 400, '图库配置过大'),
+            'beyond-free-space': (archive('beyond-free-space', [*files.items(), (npy, b'small')], declare=(npy, 1 << 50)), 400, '磁盘空间不足'),
+            'more-than-declared': (archive('more-than-declared', [*files.items(), (npy, b'x' * 4096)], declare=(npy, 16)), None, None),
+        }
+        for case, (path, status, message) in cases.items():
+            with self.subTest(case):
+                before, recent = listing(), registry.read_bytes() if registry.exists() else None
+                response = self.request('/api/libraries/import', {'path': str(path)})
+                if status:
+                    self.assertEqual(response['status'], status, response)
+                    self.assertIn(message, json.loads(response['body'])['error'])
+                else:
+                    self.assertGreaterEqual(response['status'], 400, response)
+                self.assertEqual(listing(), before)
+                self.assertEqual(registry.read_bytes() if registry.exists() else None, recent)
+        self.assertEqual(self.request('/api/libraries/import', {'path': str(good)})['status'], 200)
+
+    def test_archive_import_runs_outside_the_session_lock_and_quitting_removes_it(self):
+        # #26: a large, highly compressed features file keeps the import unpacking for a while.
+        size = 256 << 20
+        if shutil.disk_usage(self.root).free < 2 * size + (512 << 20):
+            self.skipTest('not enough free space for the synthetic archive')
+        good = library.export_library(self.lib, self.root / 'good.zip')
+        archive = self.root / 'large.zip'
+        with zipfile.ZipFile(good) as source, zipfile.ZipFile(archive, 'w', compression=zipfile.ZIP_LZMA) as z:
+            for name in source.namelist():
+                if name != 'features/full-features.npy':
+                    z.writestr(name, source.read(name))
+            with z.open('features/full-features.npy', 'w', force_zip64=True) as out:
+                for _ in range(size >> 20):
+                    out.write(bytes(1 << 20))
+        registry = self.support / 'libraries.json'
+        listing = lambda: set(library.HOME.glob('*')) if library.HOME.exists() else set()
+        before, recent = listing(), registry.read_bytes() if registry.exists() else None
+        unpacking = lambda: [p / 'features' / 'full-features.npy' for p in listing() - before
+                             if (p / 'features' / 'full-features.npy').exists()]
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            pending = pool.submit(self.request, '/api/libraries/import', {'path': str(archive)})
+            wait_until(lambda: any(f.stat().st_size for f in unpacking()), timeout=20)
+            started = time.monotonic()
+            self.assertEqual(self.request('/api/bootstrap')['status'], 200)
+            self.assertLess(time.monotonic() - started, 2)
+            # Answered while the features file is still being written.
+            self.assertLess(max(f.stat().st_size for f in unpacking()), size)
+            stopped = time.monotonic()
+            self.stop(self.process)
+            self.assertLess(time.monotonic() - stopped, 8)
+            pending.result(timeout=20)
+        self.assertEqual(listing(), before)
+        self.assertEqual(registry.read_bytes() if registry.exists() else None, recent)
 
     def test_repeated_export_busy_switch_cancel_same_id_and_exit_cleanup(self):
         # A held rollback-journal write lock deterministically keeps backup active without huge data.

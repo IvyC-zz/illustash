@@ -24,9 +24,13 @@ fn unit(row: &[f32]) -> Result<Vec<f32>> {
     if row.is_empty() || row.iter().any(|v| !v.is_finite()) {
         return Err(invalid());
     }
+    let squares = crate::research_compute::contiguous_sum32(&row.iter().map(|v| v * v).collect::<Vec<_>>());
+    // Finite but huge elements overflow the sum; dividing by an infinite norm would silently give an all-zero row.
+    if !squares.is_finite() {
+        return Err(Error::Invalid("特征向量数值过大，无法归一化".into()));
+    }
     // ccip.cross has a 1e-12 denominator floor, including all-zero rows.
-    let norm =
-        crate::research_compute::contiguous_sum32(&row.iter().map(|v| v * v).collect::<Vec<_>>()).sqrt().max(1e-12);
+    let norm = squares.sqrt().max(1e-12);
     Ok(row.iter().map(|v| v / norm).collect())
 }
 /// Rectangular (1-cos)/2 in f32, including the Python zero-vector floor.
@@ -336,6 +340,28 @@ mod tests {
         );
         assert!(cross(&[vec![f32::NAN]], &[vec![1.]]).is_err());
         assert!(cross(&[vec![1.]], &[vec![1., 2.]]).is_err());
+    }
+    #[test]
+    fn overflowing_norm_is_refused_while_zero_rows_keep_the_floor() {
+        // #75: 2e19² overflows f32, so the old code divided by an infinite norm and returned zeros.
+        let huge: Vec<f32> = vec![2e19, 0.];
+        fn refused<T>(result: Result<T>) -> bool {
+            matches!(result, Err(Error::Invalid(m)) if m.contains("数值过大"))
+        }
+        assert!(refused(unit(&huge)));
+        assert!(refused(cross(std::slice::from_ref(&huge), &[vec![1., 0.]])));
+        assert!(refused(cross(&[vec![1., 0.]], std::slice::from_ref(&huge))));
+        // Building the anchor index and matching an image feature both fail instead of scoring 0.5 everywhere.
+        let ids = vec!["a".to_string(), "b".to_string()];
+        assert!(refused(anchor_index_for_scan(&[vec![1., 0.], huge.clone()], &ids, &HashMap::new())));
+        let index = AnchorIndex { entities: vec!["c".into()], p90: vec![], p50: vec![], p75: vec![] };
+        assert!(refused(claims("a", &[vec![1., 0.]], &huge, &index, &[1.])));
+        // Largest values whose squares still sum to a finite number are normalized as before.
+        let edge: Vec<f32> = vec![1.3e19, 1.3e19];
+        let norm = (edge[0] * edge[0] + edge[1] * edge[1]).sqrt();
+        assert_eq!(unit(&edge).unwrap(), vec![edge[0] / norm, edge[1] / norm]);
+        assert_eq!(unit(&[0., 0.]).unwrap(), vec![0., 0.]);
+        assert_eq!(cross(&[vec![0., 0.]], &[vec![1., 0.]]).unwrap(), vec![vec![0.5]]);
     }
     #[test]
     fn closest_alias_is_seen_before_threshold_and_only_nine_are_considered() {

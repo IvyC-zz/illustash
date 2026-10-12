@@ -56,7 +56,7 @@ pub(crate) fn request(c: &mut Connection, context: &LibraryContext, path: &str, 
     // A later-only answer has no action, even if an earlier undoable action exists.
     let undo =
         if op == "answer" && out["action"].is_null() { Json::from(Value::Null) } else { app_commands::last_action(c)? };
-    crate::app_effects::drain(&context.db)?;
+    crate::app_effects::drain_after_commit(&context.db);
     Ok(Json::object([("undo", undo)]))
 }
 

@@ -1,4 +1,4 @@
-//! Feature cache owned by research. Recognition supplies raw little-endian float32 vectors.
+//! Feature loading owned by research. Recognition supplies raw little-endian float32 vectors.
 use super::numeric;
 use crate::{Error, Result};
 use rusqlite::OpenFlags;
@@ -7,8 +7,6 @@ use std::{
     collections::{HashMap, HashSet},
     fs,
     path::Path,
-    sync::Arc,
-    time::SystemTime,
 };
 
 fn invalid(message: &str) -> Error {
@@ -24,7 +22,7 @@ pub fn decode(blob: &[u8]) -> Result<Vec<f32>> {
     Ok(blob.chunks_exact(4).map(|b| f32::from_le_bytes(b.try_into().expect("four bytes"))).collect())
 }
 
-#[derive(Default, Clone)]
+#[derive(Default)]
 pub struct Matrix {
     pub uuids: Vec<String>,
     pub rows: Vec<Vec<f32>>,
@@ -64,108 +62,69 @@ impl Matrix {
     }
 }
 
-type Stamp = Option<(SystemTime, u64)>;
-pub struct Features {
-    pub data: Arc<Matrix>,
-    stamp: Option<[Stamp; 2]>,
-    overlay: HashMap<String, Vec<u8>>,
-    injected: Option<Matrix>,
-}
-impl Default for Features {
-    fn default() -> Self {
-        Self {
-            data: Arc::new(Matrix { dimension: 768, ..Matrix::default() }),
-            stamp: None,
-            overlay: HashMap::new(),
-            injected: None,
+/// Load the on-disk base matrix plus the SQLite CCIP overlay once for this one-shot worker.
+/// Each research process loads at most once, so there is no cross-call cache (#32).
+/// Every read and validation finishes before a matrix is returned; any invalid row fails the load.
+pub fn load(source: &Path, base: &Path) -> Result<Matrix> {
+    let paths = [base.join("full-manifest.csv"), base.join("full-features.npy")];
+    let present = paths
+        .iter()
+        .map(|p| match fs::metadata(p) {
+            Ok(_) => Ok(true),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(false),
+            Err(e) => Err(e),
+        })
+        .collect::<std::io::Result<Vec<_>>>()?;
+    let c = crate::sqlite::open_with_flags(source, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+    let exists: bool =
+        c.query_row("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name='embeddings' AND type='table')", [], |r| {
+            r.get(0)
+        })?;
+    let overlay: Vec<(String, Vec<u8>)> = if exists {
+        c.prepare("SELECT uuid,vec FROM embeddings WHERE model='ccip'")?
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
+            .collect::<rusqlite::Result<_>>()?
+    } else {
+        vec![]
+    };
+    let mut matrix = match present[..] {
+        [true, true] => {
+            let mut csv = csv::Reader::from_path(&paths[0]).map_err(|e| invalid(&e.to_string()))?;
+            let col = csv
+                .headers()
+                .map_err(|e| invalid(&e.to_string()))?
+                .iter()
+                .position(|h| h == "uuid")
+                .ok_or_else(|| invalid("Feature manifest missing uuid"))?;
+            let uuids = csv
+                .records()
+                .map(|r| r.map(|r| r.get(col).unwrap_or("").trim().to_uppercase()))
+                .collect::<std::result::Result<Vec<_>, _>>()
+                .map_err(|e| invalid(&e.to_string()))?;
+            read_npy(&paths[1])?.into_matrix(uuids)?
         }
-    }
-}
-impl Features {
-    pub fn injected(uuids: Vec<String>, rows: Vec<Vec<f32>>, dimension: usize) -> Result<Self> {
-        let matrix = Matrix::new(uuids, rows, dimension)?;
-        Ok(Self { data: Arc::new(matrix.clone()), injected: Some(matrix), ..Self::default() })
-    }
-    /// All reads and validations finish before replacing the cache. An invalid update keeps the same Arc.
-    pub fn load(&mut self, source: &Path, base: &Path) -> Result<&Matrix> {
-        let paths = [base.join("full-manifest.csv"), base.join("full-features.npy")];
-        let stamp = paths
-            .iter()
-            .map(|p| match fs::metadata(p) {
-                Ok(m) => Ok(Some((m.modified()?, m.len()))),
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
-                Err(e) => Err(e),
-            })
-            .collect::<std::io::Result<Vec<_>>>()?;
-        let stamp: [Stamp; 2] = stamp.try_into().expect("two files");
-        let c = crate::sqlite::open_with_flags(source, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
-        let exists: bool = c.query_row(
-            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name='embeddings' AND type='table')",
-            [],
-            |r| r.get(0),
-        )?;
-        let extra: Vec<(String, Vec<u8>)> = if exists {
-            c.prepare("SELECT uuid,vec FROM embeddings WHERE model='ccip'")?
-                .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
-                .collect::<rusqlite::Result<_>>()?
+        [false, false] => Matrix { dimension: 768, ..Matrix::default() },
+        _ => return Err(invalid("Both feature matrix and manifest are required")),
+    };
+    for (u, raw) in overlay {
+        let mut v = decode(&raw)?;
+        numeric::normalise(&mut v).map_err(|m| invalid(&m))?;
+        if v.len() != matrix.dimension {
+            return Err(invalid("CCIP feature dimension mismatch"));
+        }
+        let index = if let Some(&i) = matrix.row.get(&u) {
+            i
         } else {
-            vec![]
+            let i = matrix.rows.len();
+            matrix.uuids.push(u.clone());
+            matrix.rows.push(vec![]);
+            matrix.row.insert(u.clone(), i);
+            i
         };
-        let raw: HashMap<_, _> = extra.iter().cloned().collect();
-        let rebuild = self.stamp.as_ref() != Some(&stamp) || self.overlay.keys().any(|u| !raw.contains_key(u));
-        let changed: Vec<_> = extra.into_iter().filter(|(u, v)| rebuild || self.overlay.get(u) != Some(v)).collect();
-        if !rebuild && changed.is_empty() {
-            return Ok(&self.data);
-        }
-        let mut candidate = if rebuild {
-            match (&stamp[0], &stamp[1]) {
-                (Some(_), Some(_)) => {
-                    let mut csv = csv::Reader::from_path(&paths[0]).map_err(|e| invalid(&e.to_string()))?;
-                    let col = csv
-                        .headers()
-                        .map_err(|e| invalid(&e.to_string()))?
-                        .iter()
-                        .position(|h| h == "uuid")
-                        .ok_or_else(|| invalid("Feature manifest missing uuid"))?;
-                    let uuids = csv
-                        .records()
-                        .map(|r| r.map(|r| r.get(col).unwrap_or("").trim().to_uppercase()))
-                        .collect::<std::result::Result<Vec<_>, _>>()
-                        .map_err(|e| invalid(&e.to_string()))?;
-                    read_npy(&paths[1])?.into_matrix(uuids)?
-                }
-                (None, None) => self
-                    .injected
-                    .clone()
-                    .unwrap_or_else(|| Matrix { dimension: self.data.dimension, ..Matrix::default() }),
-                _ => return Err(invalid("Both feature matrix and manifest are required")),
-            }
-        } else {
-            (*self.data).clone()
-        };
-        for (u, raw) in changed {
-            let mut v = decode(&raw)?;
-            numeric::normalise(&mut v).map_err(|m| invalid(&m))?;
-            if v.len() != candidate.dimension {
-                return Err(invalid("CCIP feature dimension mismatch"));
-            }
-            let index = if let Some(&i) = candidate.row.get(&u) {
-                i
-            } else {
-                let i = candidate.rows.len();
-                candidate.uuids.push(u.clone());
-                candidate.rows.push(vec![]);
-                candidate.row.insert(u.clone(), i);
-                i
-            };
-            candidate.versions.insert(u, Sha256::digest(bytes(&v)).to_vec());
-            candidate.rows[index] = v;
-        }
-        self.data = Arc::new(candidate);
-        self.stamp = Some(stamp);
-        self.overlay = raw;
-        Ok(&self.data)
+        matrix.versions.insert(u, Sha256::digest(bytes(&v)).to_vec());
+        matrix.rows[index] = v;
     }
+    Ok(matrix)
 }
 
 // Preserve dtype and layout until after the reference rowwise norm/division.
@@ -451,32 +410,17 @@ mod tests {
         assert_eq!(a.matrix(&["missing".into(), "A".into()]).0, vec!["A"]);
     }
     #[test]
-    fn cache_change_failure_and_overlay_deletion() {
+    fn base_overlay_failure_and_deletion() {
         let root = std::env::temp_dir().join(format!("illustash-feature-test-{}", crate::store::new_key().unwrap()));
         fs::create_dir(&root).unwrap();
         let source = root.join("source.sqlite");
         let c = crate::sqlite::open(&source).unwrap();
+        // No base files and no overlay: an empty production-width matrix.
+        let empty = load(&source, &root).unwrap();
+        assert_eq!((empty.dimension, empty.rows.len()), (768, 0));
         c.execute_batch("CREATE TABLE embeddings(uuid,model,vec,PRIMARY KEY(uuid,model));").unwrap();
-        let mut cache = Features::injected(vec!["A".into()], vec![vec![1.0, 0.0]], 2).unwrap();
-        cache.load(&source, &root).unwrap();
-        let before = cache.data.clone();
-        cache.load(&source, &root).unwrap();
-        assert!(Arc::ptr_eq(&before, &cache.data));
-        c.execute("INSERT INTO embeddings VALUES (?,'ccip',?)", rusqlite::params!["A", bytes(&[f32::NAN, 1.0])])
-            .unwrap();
-        assert!(cache.load(&source, &root).is_err());
-        assert!(Arc::ptr_eq(&before, &cache.data));
-        c.execute("UPDATE embeddings SET vec=?", [bytes(&[0.0, 1.0])]).unwrap();
-        cache.load(&source, &root).unwrap();
-        assert_eq!(cache.data.rows, vec![vec![0.0, 1.0]]);
-        c.execute("DELETE FROM embeddings", []).unwrap();
-        cache.load(&source, &root).unwrap();
-        assert_eq!(cache.data.rows, vec![vec![1.0, 0.0]]);
         fs::write(root.join("full-manifest.csv"), "uuid\nA\n").unwrap();
-        assert!(cache.load(&source, &root).is_err());
-        assert_eq!(cache.data.rows, vec![vec![1.0, 0.0]]);
-        // The old cache test also replaces an on-disk base; injected overlays alone
-        // cannot prove stamp invalidation or the normalized version fingerprint.
+        assert!(load(&source, &root).is_err(), "manifest without matrix");
         let path = root.join("full-features.npy");
         let write_base = |row: &[f32]| {
             let header = "{'descr': '<f4', 'fortran_order': False, 'shape': (1, 2), }\n";
@@ -487,16 +431,28 @@ mod tests {
             fs::write(&path, file).unwrap();
         };
         write_base(&[0.0, -1.0]);
-        cache.load(&source, &root).unwrap();
-        assert_eq!(cache.data.rows, vec![vec![0.0, -1.0]]);
-        let before = cache.data.clone();
-        let version = before.versions["A"].clone();
-        cache.load(&source, &root).unwrap();
-        assert!(Arc::ptr_eq(&before, &cache.data));
+        let base = load(&source, &root).unwrap();
+        assert_eq!(base.rows, vec![vec![0.0, -1.0]]);
+        let version = base.versions["A"].clone();
         write_base(&[1.0, 0.0]);
-        cache.load(&source, &root).unwrap();
-        assert_eq!(cache.data.rows, vec![vec![1.0, 0.0]]);
-        assert_ne!(version, cache.data.versions["A"]);
+        let replaced = load(&source, &root).unwrap();
+        assert_eq!(replaced.rows, vec![vec![1.0, 0.0]]);
+        assert_ne!(version, replaced.versions["A"]);
+        // Invalid overlays fail the whole load, including finite rows whose norm overflows (#45).
+        for bad in [bytes(&[f32::NAN, 1.0]), bytes(&[1e30, 1e30]), vec![0, 0, 0], bytes(&[1.0, 0.0, 0.0])] {
+            c.execute("INSERT OR REPLACE INTO embeddings VALUES ('B','ccip',?)", [bad]).unwrap();
+            assert!(load(&source, &root).is_err());
+        }
+        // Overlays replace base rows by UUID, append new UUIDs, and disappear when deleted.
+        c.execute("UPDATE embeddings SET uuid='A', vec=?", [bytes(&[0.0, 3.0])]).unwrap();
+        c.execute("INSERT INTO embeddings VALUES ('B','ccip',?)", [bytes(&[4.0, 0.0])]).unwrap();
+        c.execute("INSERT INTO embeddings VALUES ('C','other',?)", [bytes(&[f32::NAN])]).unwrap();
+        let merged = load(&source, &root).unwrap();
+        assert_eq!(merged.uuids, vec!["A", "B"]);
+        assert_eq!(merged.rows, vec![vec![0.0, 1.0], vec![1.0, 0.0]]);
+        assert_eq!(merged.versions["B"], Sha256::digest(bytes(&[1.0, 0.0])).to_vec());
+        c.execute("DELETE FROM embeddings WHERE model='ccip'", []).unwrap();
+        assert_eq!(load(&source, &root).unwrap().rows, vec![vec![1.0, 0.0]]);
         drop(c);
         fs::remove_dir_all(root).unwrap();
     }

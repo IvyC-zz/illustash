@@ -37,7 +37,7 @@ labels.jsonl 每行：
 
 ## 原生计算与内部角色认领
 
-`recognition_compute` 使用显式路径加载 ONNX Runtime 动态库，固定 CPU provider；WD 使用 4 个 intra-op 线程，CCIP 保留 runtime 默认线程数。WD 先丢弃 alpha、白底补成正方形（奇数差向下取整居中），按 Pillow BICUBIC 语义缩到 448，输入为未除以 255 的 BGR NHWC float32；CCIP 按 Pillow BILINEAR 语义直接缩到 384，RGB/CLIP 归一化后输入 NCHW float32。不应用 EXIF 旋转或 ICC 转换。保存模型的原始 WD 1024 / CCIP 768 向量；Features 缓存的单位化属于研究计算消费者。
+`recognition_compute` 使用显式路径加载 ONNX Runtime 动态库，固定 CPU provider；WD 使用 4 个 intra-op 线程，CCIP 保留 runtime 默认线程数。WD 先丢弃 alpha、白底补成正方形（奇数差向下取整居中），按 Pillow BICUBIC 语义缩到 448；白边是虚拟采样，不物化 max(宽,高)² 的正方形，横向一轮只遍历落在图像列上的系数，白边部分按整数权重和一次计入，耗时随输入像素线性增长（#74），输出与物化实现逐位一致（#46），输入为未除以 255 的 BGR NHWC float32；CCIP 按 Pillow BILINEAR 语义直接缩到 384，RGB/CLIP 归一化后输入 NCHW float32。不应用 EXIF 旋转或 ICC 转换。保存模型的原始 WD 1024 / CCIP 768 向量；特征的单位化属于研究计算消费者。
 
 生产者与导入器共用 `ModelFiles` 路径及 SHA-256 规格：默认为资源 root 的 `models/`，`ILLUSTASH_MODELS` 的绝对路径直接使用，相对路径锚定资源 root。同步把自己的资源 root 传给计算进程，标签仍由同一资源 root 的 `tags/tags_v3.csv` 提供；自定义模型根不绕过字节指纹，模型或标签变化拒绝旧结果。流式指纹读取保留合作取消检查。
 
@@ -45,7 +45,7 @@ labels.jsonl 每行：
 
 原生认领保留固定契约中的直接邻居打分与严格向上别名跳转、curated p90 / `danbooru-patch` p75 阈值，检查最近 9 个锚点；同一别名先登记已见再判断阈值。距离是 float32 `(1-cos)/2`，得分为 `1-distance`，不当作 WD 概率四舍五入或裁剪。已有锚点但本次认领为空时，清除本批资产旧 `char_index/char_ext` 机器候选；没有锚点时保留旧角色候选，仍生成 WD 与原始向量。
 
-锚点单位化复用研究计算中 NumPy float32 连续归约（8 lane、128 元素 cutoff），保留 `ccip.cross` 的零向量分母下限；矩阵乘法复用 Platform 的窄 CPU 数值接口。macOS 使用系统 BLAS，其他平台数值验收单列。锚点关系构建保留旧算法最多 1024 行的矩阵块；64 行分块会令末尾单行 GEMV 翻转 `.01` 别名边界。取消仍在归一化、逐别名行与 BLAS 前后检查；一次不可中断 BLAS 最多 1024 行乘全体锚点，相较 64 行上限增加 16 倍，取消等待受实际矩阵规模与平台影响，不承诺固定时长。不增加阈值 epsilon。sidecar 的 distance/threshold 按 float32 解码，confidence 为 float64，JSON 最短小数表示不改变该类型契约。
+锚点单位化复用研究计算中 NumPy float32 连续归约（8 lane、128 元素 cutoff），保留 `ccip.cross` 的零向量分母下限；元素都有限但平方和溢出的向量（锚点或待匹配特征）报「特征向量数值过大」并让任务失败，不再按全零向量计距（2026-10-12，#75）；矩阵乘法复用 Platform 的窄 CPU 数值接口。macOS 使用系统 BLAS，其他平台数值验收单列。锚点关系构建保留旧算法最多 1024 行的矩阵块；64 行分块会令末尾单行 GEMV 翻转 `.01` 别名边界。取消仍在归一化、逐别名行与 BLAS 前后检查；一次不可中断 BLAS 最多 1024 行乘全体锚点，相较 64 行上限增加 16 倍，取消等待受实际矩阵规模与平台影响，不承诺固定时长。不增加阈值 epsilon。sidecar 的 distance/threshold 按 float32 解码，confidence 为 float64，JSON 最短小数表示不改变该类型契约。
 
 角色源标签、WD、向量和组合指纹共用已有源事务与 pending 账本。应用恢复经既有 `import_changes` 发布 `ccip_index / char_ext / ccip_score` 有效证据集，替换相同范围旧机器候选并保留人工裁决；不另建恢复调度器。组合指纹包含锚点快照与该资产认领，其他来源标签和人工记录保持现行规则。撤回 sidecar 生产路径后仍可用原生 `resume` 完成已提交 pending 记录；公开 v1 协议及原有无锚点去重指纹不变。
 
@@ -92,6 +92,6 @@ HTTP：`POST /api/recognition/import`，JSON `{"path":"本机结果包目录"}`�
 
 Windows 包内 `illustash-recognition` 生产者只写隔离结果目录，复用既有 WD/CCIP 预处理和阈值，沿用本协议交给 Rust 导入。2026-10-02 已用真实模型和 3 张生成图片验收识别、两类向量及正式标签导入；未验收真实图片准确率、大图库或 GPU，也未据此作跨平台性能比较。安装与依赖边界见 [独立计算包](BACKEND_TASKS.md#独立安装与可选计算包)。
 
-公开 Rust 接口 `import_package(&Library,&Path /*结果目录*/,&Path /*资源root*/,&AtomicBool,dispatch)` 与 `resume(&Library,&AtomicBool,dispatch)` 返回原状态对象；接口内部固定 canonical 包路径（`Library::pinned`），显示别名移除或改指向不会重定位结果；调用方仍须捕获会话身份并验证迟到结果，不能仅用 library_id 定位。取消在验证、源写入和各应用提交前检查；已提交的阶段留待恢复。HTTP 显式离线导入在会话锁内串行执行，旧令牌/请求不能写入新会话。只读图库拒绝导入；研究计算不得修改人工裁决。
+公开 Rust 接口 `import_package(&Library,&Path /*结果目录*/,&Path /*资源root*/,&AtomicBool,dispatch)` 与 `resume(&Library,&AtomicBool,dispatch)` 返回原状态对象；接口内部固定 canonical 包路径（`Library::pinned`），显示别名移除或改指向不会重定位结果；调用方仍须捕获会话身份并验证迟到结果，不能仅用 library_id 定位。取消在验证、源写入和各应用提交前检查；已提交的阶段留待恢复。HTTP 显式离线导入在会话锁内验证令牌后释放锁执行，同一会话的导入排队串行；切库或退出取消运行和排队中的导入，旧令牌/请求不能写入新会话（#26）。只读图库拒绝导入；研究计算不得修改人工裁决。
 
 回退到当前版本的兼容宿主可读取相同 v1 源账本；原生恢复标记和事件记录保留，避免把已提交但未确认的结果当作未导入。旧 Python 恢复不识别原生投影标记，pending 包应先用原生 resume 完成确认后再切换兼容宿主。更旧核心版本须恢复升级前备份。

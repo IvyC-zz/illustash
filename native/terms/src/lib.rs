@@ -167,6 +167,7 @@ pub(crate) use illustash_core::name_codecs;
 
 mod app_index;
 pub(crate) mod app_provenance;
+mod index_generation;
 
 use illustash_platform::app_file_lock;
 pub mod platform_process;

@@ -46,3 +46,13 @@ test('batches imported during recognition are counted while it runs', () => {
   assert.equal(context.syncLine({status: 'recognising', stage: 'recognising', total: 60, done: 51, import_done: 50}),
     '正在识别新图片 51/60 · 已导入 50');
 });
+
+test('a finished run says which pictures it kept because their paths could not be read', () => {
+  assert.equal(context.syncLine({status: 'done', finished_at: '10-11 21:00'}), '上次同步：10-11 21:00');
+  assert.equal(context.syncLine({status: 'done', finished_at: '10-11 21:00', unreadable: 2}),
+    '上次同步：10-11 21:00 · 2 处暂时读不到，已有图片保留不动');
+  assert.equal(context.syncLine({status: 'needs_recognition', total: 3, unreadable: 1}),
+    '有 3 张图等待识别（识别服务未启动） · 1 处暂时读不到，已有图片保留不动');
+  assert.equal(context.syncLine({status: 'needs_windows', unreadable: 1}),
+    '新增图片较多，需使用 Windows 批量识别 · 1 处暂时读不到，已有图片保留不动');
+});

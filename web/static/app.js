@@ -178,7 +178,8 @@ async function applyRoute() {
   state.char = null;
   state.groupNear = null;
   if (route.page === 'group') {
-    let result; try { result = await api('/api/clusters?nsfw=' + state.nsfw); } catch (e) { error(readError(e)); return; }
+    let result; try { result = await api('/api/clusters?nsfw=' + state.nsfw); } catch (e) { if (state.route === route) error(readError(e)); return; }
+    if (state.route !== route) return;  // navigated on while the groups loaded: this answer belongs to no page
     const g = result.clusters.find(x => String(x.cid) === route.id);
     state.groupNear = g?.near ? nearText(g) : null; state.groupNearId = g?.near || null; state.groupTraits = g?.traits || [];
   }
@@ -976,7 +977,10 @@ async function undo() {
     if (state.route.page === 'artist-audit') renderArtistAudit();
     if (state.focused) inspect(state.focused, true);
     if (state.viewer >= 0) { const i = indexOf(state.viewerItem?.uuid); showViewer(i >= 0 ? i : state.viewer, i >= 0 ? state.items[i] : state.viewerItem); }
-  } catch (e) { toast(e.message); } finally { state.busy = false; setUndo(state.undo); }
+  } catch (e) {
+    // The history may have moved on (another window, or a failure after the server committed): show its latest step.
+    toast(e.message); refreshMeta().catch(err => error(readError(err)));
+  } finally { state.busy = false; setUndo(state.undo); }
 }
 async function sweep() {
   const c = state.char; if (!c?.unchecked) return;
@@ -1243,17 +1247,18 @@ async function editProfile(c) {
     r => { draft.work = r; workNote(); });
   q('form').onsubmit = async e => {
     e.preventDefault();
+    if (q('#pfSave').disabled) return;  // one save at a time: no second work or profile from a double click
     const body = {entity: p.id};
     const name = q('#pfName').value.trim(); if (name !== p.user_name) body.name = name;
     if (JSON.stringify(draft.aliases) !== JSON.stringify(p.aliases)) body.aliases = draft.aliases;
     if (q('#pfTag') && draft.tag !== p.tag) body.tag = draft.tag;
+    // A new work is made in the same request (and transaction) as the profile it belongs to.
+    if (q('#pfWork') && (draft.work?.id || null) !== (p.work_id || null)) {
+      body.work = !draft.work ? '' : draft.work.create ? {create: draft.work.create} : draft.work.tag ? {tag: draft.work.tag} : draft.work.id;
+    }
+    if (Object.keys(body).length === 1) { close(); return; }
+    q('#pfSave').disabled = true;
     try {
-      if (q('#pfWork') && (draft.work?.id || null) !== (p.work_id || null)) {
-        body.work = !draft.work ? '' : draft.work.create ? (await post('/api/works', {action: 'create', name: draft.work.create})).id
-          : draft.work.tag ? (await post('/api/works', {action: 'from_tag', tag: draft.work.tag})).id : draft.work.id;
-      }
-      if (Object.keys(body).length === 1) { close(); return; }
-      q('#pfSave').disabled = true;
       const r = await post('/api/character/profile', body);
       close(); setUndo(r.undo); toast(r.undo.label, true);
       state.localLinks = null; await refreshMeta(); renderHeading();
@@ -1848,8 +1853,9 @@ function workDialog(w) {
       const name = String(data.get('title')).trim(), parent = data.get('parent'), tag = String(data.get('tag')).trim();
       try {
         let id = w?.id;
-        if (!id) id = (await post('/api/works', tag ? {action: 'create', name, tag} : {action: 'create', name})).id;
-        if (w || parent) await post('/api/works', {action: 'edit', id, name, parent, tag});
+        // A new work is created with its parent in one request; only an existing one is edited.
+        if (!id) id = (await post('/api/works', {action: 'create', name, ...(tag ? {tag} : {}), ...(parent ? {parent} : {})})).id;
+        else await post('/api/works', {action: 'edit', id, name, parent, tag});
         state.index = await api('/api/index'); state.workTree = await api('/api/works').catch(e => { error(readError(e)); return state.workTree; });
         await refreshMeta().catch(e => error(readError(e)));
         renderIndexBody(); renderHeading();
@@ -2394,18 +2400,23 @@ function syncLine(s) {
     const imported = s.import_done ? ` · 已导入 ${number(s.import_done)}` : '';
     return `正在识别新图片 ${number(s.done || 0)}/${number(s.total || 0)}${failed}${imported}${left}`;
   }
-  if (s.status === 'done') return `上次同步：${stamp(s.finished_at)}`;
-  if (s.status === 'needs_windows') return '新增图片较多，需使用 Windows 批量识别';
-  if (s.status === 'needs_recognition') return `有 ${number(s.total || 0)} 张图等待识别（识别服务未启动）`;
+  // Paths the scan could not read keep their pictures; the next sync reads them again.
+  const kept = s.unreadable ? ` · ${number(s.unreadable)} 处暂时读不到，已有图片保留不动` : '';
+  if (s.status === 'done') return `上次同步：${stamp(s.finished_at)}${kept}`;
+  if (s.status === 'needs_windows') return '新增图片较多，需使用 Windows 批量识别' + kept;
+  if (s.status === 'needs_recognition') return `有 ${number(s.total || 0)} 张图等待识别（识别服务未启动）${kept}`;
   if (s.status === 'interrupted') return s.message ? `同步已中断（${s.message}），可重新扫描` : '同步已中断，可重新扫描';
   if (s.status === 'error') return '同步失败';
   return '本地图库';
 }
-let syncTimer = null, lastImported = 0;
+let syncTimer = null, lastImported = 0, syncPoll = 0;
 async function pollSync() {
   clearTimeout(syncTimer);
+  // Polls overlap (task panel, timer, after a start): an older answer arriving last must not wind the state back.
+  const poll = ++syncPoll;
   try {
     const {state: s, history} = await api('/api/sync');
+    if (poll !== syncPoll) return;
     const was = state.sync.status;
     state.sync = s; state.syncHistory = history;
     if ((s.imported || 0) > lastImported || (SYNC_ACTIVE.includes(was) && !SYNC_ACTIVE.includes(s.status))) {
@@ -2416,7 +2427,7 @@ async function pollSync() {
     if (SYNC_ACTIVE.includes(was) && s.status === 'done' && s.imported) toast(`同步完成：新加入 ${number(s.imported)} 张`);
     renderTasks();
     if (SYNC_ACTIVE.includes(s.status)) syncTimer = setTimeout(pollSync, 2000);
-  } catch (e) { syncTimer = setTimeout(pollSync, 10000); }
+  } catch (e) { if (poll === syncPoll) syncTimer = setTimeout(pollSync, 10000); }
 }
 // ---------- new characters for the external index (native/terms/src/app_index.rs) ----------
 const WORK_NAMES = {blue_archive: '蔚蓝档案', 'arknights:_endfield': '明日方舟：终末地', wuthering_waves: '鸣潮', 'meitantei_precure!': '名侦探光之美少女',
@@ -2812,6 +2823,11 @@ async function loadLibraries() {
 const ORIGINS = [['pixiv', 'Pixiv'], ['x', 'X'], ['other', '其他']];
 const IS_MAC = /Mac/.test(navigator.platform);
 const libForm = {open: false, name: '', folders: {}, photos: false};
+// What is typed into the new-library form is kept as it is typed, so a background refresh of the card loses nothing.
+$('settingsPage').addEventListener('input', e => {
+  if (e.target.id === 'libName') libForm.name = e.target.value;
+  else if (e.target.id === 'libPhotos') libForm.photos = e.target.checked;
+});
 // The backend lists the origins it knows (#111); the fallback covers the legacy layout without library info.
 const origins = () => { const list = state.libraries?.info?.origins; return list?.length ? list.map(o => [o.id, o.label]) : ORIGINS; };
 function renderLibrariesCard() {
@@ -2840,7 +2856,7 @@ function renderLibrariesCard() {
     : `<button class="quiet" data-open-library="${esc(l.path)}" data-name="${esc(l.name)}">打开</button><button class="quiet" data-forget-library="${esc(l.path)}" title="只从列表里移除，不删除图库">移出列表</button>`}</td></tr>`;
   const ex = data.export || {};
   const exportLine = ex.status === 'running' ? `<p class="muted-note">正在导出到 ${esc(home(ex.path))}…</p>`
-    : ex.status === 'done' ? `<p class="muted-note">已导出：${esc(home(ex.path))}（${(ex.bytes / 1048576).toFixed(0)} MB）</p>`
+    : ex.status === 'done' ? `<p class="muted-note">已导出：${esc(home(ex.path))}（${(ex.bytes / 1048576).toFixed(0)} MB）。${EXPORT_LEAVES_OUT}</p>`
     : ex.status === 'error' ? `<p class="muted-note">导出失败：${esc(ex.error)}</p>` : '';
   const f = libForm;
   const form = !f.open ? '' : `<div class="lib-form">
@@ -2851,14 +2867,16 @@ function renderLibrariesCard() {
       ${IS_MAC ? `<label class="lib-photos"><input type="checkbox" id="libPhotos" ${f.photos ? 'checked' : ''}> 同时读取 iCloud 照片（本机「照片」图库，按存图的 App 区分 X 和 Pixiv）</label>` : ''}
       <div class="setting-line"><span>名字<small class="line-hint">保存在 ${esc(home(data.home))}</small></span><input class="lib-input" id="libName" placeholder="新图库" value="${esc(f.name)}"></div>
       <p><button class="primary" data-lib-create>创建并打开</button> <button class="quiet" data-lib-cancel>取消</button></p></div>`;
-  card.innerHTML = `${cardHead('图库', '每个图库各自保存识别结果和人工整理记录，图片本身留在原处、不复制。切换图库时后台会重启，几秒后自动刷新。')}
+  setSettingsHTML(card, `${cardHead('图库', '每个图库各自保存识别结果和人工整理记录，图片本身留在原处、不复制。切换图库时后台会重启，几秒后自动刷新。')}
     ${cur ? `<div class="setting-line"><span><b>${esc(cur.name)}</b><small class="line-hint lib-path-hint">${esc(home(cur.path))}</small></span><span class="tag-on">当前图库</span></div>
     <div class="lib-groups">${groups}</div>` : '<p class="muted-note">当前是旧的数据布局（不是图库包）。</p>'}
     <p class="lib-actions"><button class="quiet" data-lib-new>新建图库</button><button class="quiet" data-lib-choose="library">打开其他图库…</button><button class="quiet" data-lib-choose="zip">导入…</button>${cur ? `<button class="quiet" data-lib-export ${ex.status === 'running' ? 'disabled' : ''}>导出当前图库</button>` : ''}</p>
     ${form}${exportLine}
     ${data.libraries.length > 1 || dev ? `<table class="settings-table lib-table"><tr><th>这台电脑上的图库</th>${dev ? '<th>测试画像</th>' : ''}<th></th></tr>${data.libraries.map(row).join('')}</table>` : ''}
-    <p class="muted-note">导出的 zip 只有识别结果和人工整理记录，不含图片，可以换电脑或发给别人。</p>`;
+    <p class="muted-note">导出的 zip 包含识别结果、人工整理记录和来源配置，不含模型连接设置或联网授权，可以换电脑或发给别人。导入后需重新设置模型接口，并自行确认名称查询的联网授权；旧版导出包也会清除这些设置。个人备份请保留完整图库目录。${ex.status === 'done' ? '' : EXPORT_LEAVES_OUT}</p>`);
 }
+// #41: the shareable export leaves out personal inputs; say so instead of implying a complete move.
+const EXPORT_LEAVES_OUT = '不含图片、画师出处缓存和导入过的 X 关注列表；在新电脑上要回查画师，需要重新导入 X 归档。';
 // Gallery pages have no Tauri dialog permission. Keep confirmation inside the page;
 // window.confirm may be replaced with an async plugin function by the desktop shell.
 let confirmationOpen = false;
@@ -2921,7 +2939,7 @@ $('settingsPage').addEventListener('click', async e => {
   else if (d.libChoose) {
     const r = await libraryAction('choose', {kind: d.libChoose}); if (!r?.path) return;
     if (d.libChoose === 'library') openLibrary(r.path, r.path.split('/').pop().replace(/\.pilib$/, ''));
-    else { toast('正在导入…'); const lib = await libraryAction('import', {path: r.path}); if (lib) { toast(`已导入「${lib.name}」`); loadLibraries(); } }
+    else { toast('正在导入…'); const lib = await libraryAction('import', {path: r.path}); if (lib) { toast(`已导入「${lib.name}」，模型接口与名称联网授权需重新设置`); loadLibraries(); } }
   }
   else if ('libCreate' in d) {
     keep();

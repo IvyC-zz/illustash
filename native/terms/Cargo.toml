@@ -61,3 +61,8 @@ required-features = ["test-read-host"]
 # bundled SQLite makes that the slowest part of `cargo test`.
 [profile.dev.package.libsqlite3-sys]
 opt-level = 3
+
+# tiny_http 0.12 has no per-connection timeout or connection limit (#25); the vendored copy adds
+# `Server::from_listener_with_limits`. Every build root linking this crate repeats this patch.
+[patch.crates-io]
+tiny_http = { path = "vendor/tiny_http" }
