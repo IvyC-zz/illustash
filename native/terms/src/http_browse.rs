@@ -805,6 +805,26 @@ fn home(c: &Connection, q: &HashMap<String, String>) -> Result<Json> {
     };
     Ok(Json::object([("days", Json::Array(result)), ("next", next)]))
 }
+/// Smallest share of the library, in permille, left after hiding NSFW for the date-index page (#48).
+/// Measured on synthetic libraries (debug host, 10k and 50k assets): counting twice rebuilds the NSFW
+/// list from the term projection twice, so the date-index page only beats the filtered copy while
+/// NSFW stays a minority; see docs/TERMS_PERFORMANCE.md section 3.
+const DATE_PAGE_MIN_KEPT_PERMILLE: i64 = 700;
+/// Whether the plain hide-NSFW date page should skip the filtered copy. Decided before the real count
+/// from two cheap reads in the same snapshot: all assets, and the NSFW rows of the rating projection
+/// (an index range without the joins of asset_rating, stopping once the threshold is exceeded). The
+/// estimate ignores folded and excluded rows; it only chooses the path, never the result. Libraries
+/// whose labels are not core keep the copy. Deep pages keep it too, since walking the index past half
+/// the kept rows costs about another count.
+fn date_page_pays(c: &Connection, offset: i64, limit: i64) -> Result<bool> {
+    if !flag(c, "terms_labels")? {
+        return Ok(false);
+    }
+    let all = count(c, "SELECT count(*) FROM assets", &[])?;
+    let most_nsfw = all - (all * DATE_PAGE_MIN_KEPT_PERMILLE + 999) / 1000;
+    let nsfw = count(c, &format!("SELECT count(*) FROM (SELECT 1 FROM term_projection WHERE state IN ('machine','confirmed') AND term_id IN (SELECT l.term_id FROM term_links l JOIN terms t ON t.id=l.term_id AND t.kind='rating' WHERE l.system='wd_rating' AND l.key IN ('questionable','explicit')) LIMIT {})", most_nsfw + 1), &[])?;
+    Ok(nsfw <= most_nsfw && (offset + limit) * 2 <= all - nsfw)
+}
 pub fn read(c: &Connection, context: &LibraryContext, path: &str, q: &HashMap<String, String>) -> Result<(Json, u16)> {
     validate(path, q)?;
     let result = match path {
@@ -863,7 +883,18 @@ pub fn read(c: &Connection, context: &LibraryContext, path: &str, q: &HashMap<St
             } else {
                 let total_needed = value(q, "count") != "0";
                 let nsfw = value(q, "nsfw");
-                let (total, sql) = if total_needed && !nsfw.is_empty() {
+                // A rating-filtered total copies the matches once, then counts and sorts the copy, so the
+                // rating subquery and other filters run once. Only the plain library view hiding NSFW in date
+                // order (#48) may page assets through assets_date instead, when date_page_pays() estimates
+                // the copy and its sort cost more than counting twice. Both read one transaction snapshot
+                // and every ordering ends in the primary key, so either path returns the same rows in the
+                // same order.
+                let date_page = total_needed
+                    && nsfw == "hide"
+                    && order.starts_with("a.added_at ")
+                    && f.iter().all(|(k, v)| k == "nsfw" || k == "order" || v.is_empty())
+                    && date_page_pays(c, offset, limit)?;
+                let (total, sql) = if total_needed && !nsfw.is_empty() && !date_page {
                     c.execute(&format!("CREATE TEMP TABLE selected_assets AS SELECT a.uuid,a.width,a.height,a.added_at FROM assets a WHERE {where_}"),rusqlite::params_from_iter(&args))?;
                     let n = count(c, "SELECT count(*) FROM selected_assets", &[])?;
                     args.clear();
@@ -1069,5 +1100,122 @@ mod tests {
         tx.commit().unwrap();
         drop(c);
         std::fs::remove_file(path).unwrap();
+    }
+    #[test]
+    fn rating_filtered_pages_keep_order_total_and_bounds() {
+        // #48: rating-filtered pages keep fixed expectations for ties, NULL dates, folded/excluded rows,
+        // the last partial page, past-the-end offsets and empty results on both paths. Without extra
+        // rows half the library is NSFW, so every page falls back to the filtered copy; twelve excluded
+        // general rows raise the kept share above the threshold, so shallow plain hide pages use
+        // assets_date while deep ones still fall back.
+        for extra in [0usize, 12] {
+            rating_filtered_pages(extra);
+        }
+    }
+    fn rating_filtered_pages(extra: usize) {
+        let root = std::env::temp_dir().join(format!(
+            "illustash-browse-rating-pages-{}-{extra}-{}",
+            std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+        ));
+        std::fs::create_dir_all(root.join("input")).unwrap();
+        let dest = root.join("synthetic.pilib");
+        crate::app_create::create_folder(&dest, &root.join("input"), None, None, None).unwrap();
+        let c = crate::sqlite::open(dest.join("library.sqlite")).unwrap();
+        let extras = (0..extra).map(|i| format!("z{i:02}")).collect::<Vec<_>>();
+        for z in &extras {
+            c.execute("INSERT INTO assets(uuid,filename,width,height,added_at) VALUES (?1,?1||'.png',1,1,'2026-09-01 10:00:00')", [z])
+                .unwrap();
+            c.execute("INSERT INTO excluded VALUES (?,'photo','manual')", [z]).unwrap();
+        }
+        // Insertion order differs from every expected order, so rowid order cannot pass by accident.
+        c.execute_batch("INSERT INTO assets(uuid,filename,width,height,added_at) VALUES
+            ('e1','e1.png',1,1,'2026-09-28 10:00:00'),('a3','a3.png',1,1,'2026-09-30 10:00:00'),
+            ('c1','c1.png',1,1,NULL),('b2','b2.png',1,1,'2026-09-29 10:00:00'),
+            ('a2','a2.png',1,1,'2026-09-30 10:00:00'),('d1','d1.png',1,1,'2026-09-28 10:00:00'),
+            ('b1','b1.png',1,1,'2026-09-29 10:00:00'),('a1','a1.png',1,1,'2026-09-30 10:00:00');
+            INSERT INTO duplicates VALUES ('d1','g','2',1,'2026-09-28 10:00:00',0,1),('b2','g','2',0,'2026-09-28 10:00:00',1,0);
+            INSERT INTO excluded VALUES ('e1','photo','manual');
+            INSERT INTO terms(key,kind,origin) VALUES ('synthetic-general','rating','synthetic'),('synthetic-sensitive','rating','synthetic'),
+             ('synthetic-questionable','rating','synthetic'),('synthetic-explicit','rating','synthetic');
+            INSERT INTO term_links(system,key,term_id,source) SELECT 'wd_rating',substr(key,11),id,'synthetic' FROM terms WHERE key LIKE 'synthetic-%';
+            INSERT INTO term_assets(namespace,key) SELECT 'library',uuid FROM assets;
+            INSERT INTO term_projection(asset_id,term_id,state) SELECT ta.id,t.id,'machine' FROM (VALUES
+             ('a1','general'),('a2','explicit'),('b1','questionable'),('b2','sensitive'),('c1','general'),('d1','explicit'),('e1','explicit')) r
+             JOIN term_assets ta ON ta.namespace='library' AND ta.key=r.column1 JOIN terms t ON t.key='synthetic-'||r.column2;
+            INSERT INTO term_projection(asset_id,term_id,state) SELECT ta.id,t.id,'machine' FROM term_assets ta
+             JOIN terms t ON t.key='synthetic-general' WHERE ta.key LIKE 'z%';").unwrap();
+        // Both libraries hold four NSFW assets: 4/8 kept is below the threshold, 16/20 above it.
+        let pays = |offset, limit| date_page_pays(&c, offset, limit).unwrap();
+        if extra == 0 {
+            assert!(!pays(0, 1));
+        } else {
+            assert!(pays(0, 2) && pays(3, 2) && pays(0, 8));
+            assert!(!pays(7, 2) && !pays(0, 100));
+        }
+        drop(c);
+        let context = crate::http::LibraryContext {
+            db: dest.join("library.sqlite"),
+            generation: "synthetic".into(),
+            library: Some(dest.clone()),
+            source: Some(dest.join("source.sqlite")),
+            tags: std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tags/tags_v3.csv"),
+            token: Some("synthetic-token".into()),
+            read_only: None,
+        };
+        let page = |query: &str| {
+            let (body, status) = crate::http_read::read(&context, &format!("/api/assets?{query}")).unwrap().unwrap();
+            assert_eq!(status, 200, "{query}");
+            let ids = match body.get("items") {
+                Some(Json::Array(items)) => items.iter().map(|v| get(v, "uuid").text().to_owned()).collect::<Vec<_>>(),
+                _ => panic!("{query}"),
+            };
+            (ids, get(&body, "total").dump(), body)
+        };
+        let excluded = extras.iter().map(String::as_str).collect::<Vec<_>>();
+        let excluded_total = extra.to_string();
+        let cases: &[(&str, &[&str], &str)] = &[
+            ("nsfw=hide", &["a1", "a3", "b2", "c1"], "4"),
+            ("nsfw=hide&limit=2", &["a1", "a3"], "4"),
+            ("nsfw=hide&limit=1&offset=1", &["a3"], "4"),
+            ("nsfw=hide&limit=2&offset=2", &["b2", "c1"], "4"),
+            ("nsfw=hide&limit=2&offset=3", &["c1"], "4"),
+            ("nsfw=hide&limit=2&offset=4", &[], "4"),
+            ("nsfw=hide&limit=2&offset=7", &[], "4"),
+            ("nsfw=hide&offset=99", &[], "4"),
+            ("nsfw=hide&order=oldest", &["c1", "b2", "a1", "a3"], "4"),
+            ("nsfw=hide&order=oldest&limit=2", &["c1", "b2"], "4"),
+            ("nsfw=hide&order=oldest&limit=1&offset=3", &["a3"], "4"),
+            ("nsfw=hide&q=", &["a1", "a3", "b2", "c1"], "4"),
+            ("nsfw=hide&q=&limit=2", &["a1", "a3"], "4"),
+            ("nsfw=hide&order=hinted", &["a1", "a3", "b2", "c1"], "4"),
+            ("nsfw=hide&order=suspicious&limit=3&offset=1", &["a3", "b2", "c1"], "4"),
+            ("nsfw=hide&q=a", &["a1", "a3"], "2"),
+            ("nsfw=hide&pool=duplicates", &["b2"], "1"),
+            ("nsfw=hide&pool=excluded", &excluded, &excluded_total),
+            ("nsfw=only", &["a2", "b1"], "2"),
+            ("nsfw=only&order=oldest", &["b1", "a2"], "2"),
+            ("nsfw=only&pool=duplicates", &["d1"], "1"),
+            ("nsfw=only&q=nomatch", &[], "0"),
+            ("nsfw=only&pool=excluded", &["e1"], "1"),
+            ("nsfw=", &["a1", "a2", "a3", "b1", "b2", "c1"], "6"),
+        ];
+        for (query, expected, total) in cases {
+            let (ids, shown_total, body) = page(query);
+            assert_eq!(
+                (ids.iter().map(String::as_str).collect::<Vec<_>>(), shown_total.as_str()),
+                (expected.to_vec(), *total),
+                "{query} extra={extra}"
+            );
+            // The page without a total is the same rows, byte for byte.
+            let (_, untotaled, unpaged) = page(&format!("{query}&count=0"));
+            assert_eq!(untotaled, "null", "{query}");
+            assert_eq!(get(&body, "items").dump(), get(&unpaged, "items").dump(), "{query}");
+            let filters = query.split('&').filter(|p| !p.starts_with("limit=") && !p.starts_with("offset="));
+            let url = format!("/api/assets/count?{}", filters.collect::<Vec<_>>().join("&"));
+            let counted = crate::http_read::read(&context, &url).unwrap().unwrap();
+            assert_eq!(get(&counted.0, "total").dump(), *total, "{query}");
+        }
+        std::fs::remove_dir_all(root).unwrap();
     }
 }
