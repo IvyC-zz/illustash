@@ -4,6 +4,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 import sys
 import tempfile
@@ -22,6 +23,21 @@ def module(name):
 
 
 pack = module('build')
+
+
+def desktop_required(name):
+    """The desktop host's required-component list (desktop/src/bundled_workers.rs)."""
+    source = (ROOT / 'desktop/src/bundled_workers.rs').read_text(encoding='utf-8')
+    body = re.search(rf'const {name}: \[&str; \d+\] = \[(.*?)\];', source, re.S).group(1)
+    return re.findall(r'"([^"]+)"', body)
+
+
+def assert_desktop_contract(test, manifest, platform, name):
+    """The host accepts only format 1 / research / its platform and manifested components."""
+    test.assertEqual((manifest['format'], manifest['variant'], manifest['platform']), (1, 'research', platform))
+    required = desktop_required(name)
+    test.assertTrue(required)
+    test.assertEqual([path for path in required if path not in manifest['files']], [])
 
 
 class PackagingResourcesTest(unittest.TestCase):
@@ -275,6 +291,7 @@ class MacDesktopResourcesTest(unittest.TestCase):
             installed = self.manifest(output)
             original = json.loads((source / 'manifest.json').read_text())
             self.assertEqual((installed['variant'], installed['platform']), ('research', 'darwin'))
+            assert_desktop_contract(self, installed, 'darwin', 'MACOS_FILES')
             self.assertEqual(installed['files'], {name: digest for name, digest in original['files'].items()
                              if name.startswith(('bin/', 'resources/', 'dependencies/'))
                              and Path(name).name != 'illustash-desktop'})
@@ -358,7 +375,7 @@ class WindowsOpenBLASResourcesTest(unittest.TestCase):
                     self.assertEqual(target.read_bytes(), source.read_bytes())
             compute = self.root / 'relocated with spaces/compute'
             pack.desktop_compute(output, compute)
-            self.manifest(compute)
+            assert_desktop_contract(self, self.manifest(compute), 'win32', 'WINDOWS_FILES')
             self.assertEqual((compute / 'resources/openblas/openblas.dll').read_bytes(), self.dll.read_bytes())
             self.assertIn('ILLUSTASH_RESEARCH_OPENBLAS_DLL=%ILLUSTASH_ROOT%\\openblas\\openblas.dll', (output / 'start.cmd').read_text())
             self.assertIn('if not defined ILLUSTASH_RESEARCH_OPENBLAS_DLL', (output / 'research.cmd').read_text())
