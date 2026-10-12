@@ -2870,10 +2870,44 @@ function renderLibrariesCard() {
   setSettingsHTML(card, `${cardHead('图库', '每个图库各自保存识别结果和人工整理记录，图片本身留在原处、不复制。切换图库时后台会重启，几秒后自动刷新。')}
     ${cur ? `<div class="setting-line"><span><b>${esc(cur.name)}</b><small class="line-hint lib-path-hint">${esc(home(cur.path))}</small></span><span class="tag-on">当前图库</span></div>
     <div class="lib-groups">${groups}</div>` : '<p class="muted-note">当前是旧的数据布局（不是图库包）。</p>'}
-    <p class="lib-actions"><button class="quiet" data-lib-new>新建图库</button><button class="quiet" data-lib-choose="library">打开其他图库…</button><button class="quiet" data-lib-choose="zip">导入…</button>${cur ? `<button class="quiet" data-lib-export ${ex.status === 'running' ? 'disabled' : ''}>导出当前图库</button>` : ''}</p>
-    ${form}${exportLine}
+    <p class="lib-actions"><button class="quiet" data-lib-new>新建图库</button><button class="quiet" data-lib-choose="library">打开其他图库…</button><button class="quiet" data-lib-choose="zip" ${importActive() ? 'disabled' : ''}>导入…</button>${cur ? `<button class="quiet" data-lib-export ${ex.status === 'running' ? 'disabled' : ''}>导出当前图库</button>` : ''}</p>
+    ${form}${exportLine}${importBlock(state.importTask)}
     ${data.libraries.length > 1 || dev ? `<table class="settings-table lib-table"><tr><th>这台电脑上的图库</th>${dev ? '<th>测试画像</th>' : ''}<th></th></tr>${data.libraries.map(row).join('')}</table>` : ''}
     <p class="muted-note">导出的 zip 包含识别结果、人工整理记录和来源配置，不含模型连接设置或联网授权，可以换电脑或发给别人。导入后需重新设置模型接口，并自行确认名称查询的联网授权；旧版导出包也会清除这些设置。个人备份请保留完整图库目录。${ex.status === 'done' ? '' : EXPORT_LEAVES_OUT}</p>`);
+}
+// #88: an archive or recognition-result import runs as a background task. The card shows the step it is on, with real
+// counts only (bytes unpacked, files read, pictures written), a cancel button while it runs, and how it ended.
+const IMPORT_ACTIVE = ['running', 'stopping'];
+const importActive = () => IMPORT_ACTIVE.includes(state.importTask?.status);
+const IMPORT_STAGES = {
+  archive: {reading: '正在读取归档', unpacking: '正在解压', cleaning: '正在清除模型连接设置和联网授权', checking: '正在检查新图库能否打开', publishing: '正在登记新图库'},
+  recognition: {models: '正在核对模型指纹', reading: '正在读取结果包', verifying: '正在校验识别结果', writing: '正在写入识别结果', committing: '正在提交', projecting: '正在更新图库索引'},
+};
+const mib = n => (n / 1048576).toFixed(n < 10485760 ? 1 : 0);
+function importCount(t) {
+  if (t.done == null || !t.total) return '';
+  if (t.stage === 'unpacking') return ` ${mib(t.done)}/${mib(t.total)} MB`;
+  if (t.stage === 'reading') return `（第 ${Math.min(t.done + 1, t.total)}/${t.total} 个文件）`;
+  return ` ${number(t.done)}/${number(t.total)} 张`;
+}
+function importLine(t) {
+  if (!t || t.status === 'idle') return '';
+  const what = t.kind === 'recognition' ? '识别结果' : '归档';
+  const name = t.file ? `「${t.file}」` : '';
+  if (t.status === 'running') return `导入${what}${name}：${(IMPORT_STAGES[t.kind] || {})[t.stage] || '正在准备'}${importCount(t)}…`;
+  if (t.status === 'stopping') return `正在取消导入${what}${name}…`;
+  if (t.status === 'cancelled') return `${t.reason || '导入已取消'}；图库没有改动。`;
+  if (t.status === 'error') return `导入${what}${name}失败：${t.error}`;
+  if (t.status !== 'done') return '';
+  const r = t.result || {};
+  if (t.kind === 'archive') return `已导入「${r.name}」，模型接口与名称联网授权需重新设置。`;
+  if (r.status === 'pending') return `识别结果已导入，后续处理尚未完成（${r.error || '可稍后恢复'}）。`;
+  return r.duplicate ? '这份识别结果之前已经导入过。' : '识别结果已导入。';
+}
+function importBlock(t) {
+  const line = importLine(t); if (!line) return '';
+  const button = t.status === 'running' ? ' <button class="quiet" data-import-cancel>取消导入</button>' : '';
+  return `<p class="muted-note import-line">${esc(line)}${button}</p>`;
 }
 // #41: the shareable export leaves out personal inputs; say so instead of implying a complete move.
 const EXPORT_LEAVES_OUT = '不含图片、画师出处缓存和导入过的 X 关注列表；在新电脑上要回查画师，需要重新导入 X 归档。';
@@ -2920,6 +2954,35 @@ const removingSources = new Set();
 async function libraryAction(action, body = {}, token = state.token) {
   try { return await api('/api/libraries/' + action, {method: 'POST', body: JSON.stringify(body), headers: {'X-CSRF-Token': token}}); } catch (err) { toast(err.message); return null; }
 }
+// Polls overlap (the start answer, the timer, a cancel): an older answer arriving last must not wind the state back,
+// and an answer for a page that has since changed session is dropped (#34).
+let importTimer = null, importPoll = 0;
+async function pollImports() {
+  clearTimeout(importTimer);
+  const poll = ++importPoll, token = state.token;
+  try {
+    const t = await api('/api/imports');
+    if (poll !== importPoll || token !== state.token) return;
+    const was = state.importTask;
+    state.importTask = t;
+    if (IMPORT_ACTIVE.includes(was?.status) && was.id === t.id && !IMPORT_ACTIVE.includes(t.status)) importEnded(t);
+    renderLibrariesCard();
+    if (IMPORT_ACTIVE.includes(t.status)) importTimer = setTimeout(pollImports, 700);
+  } catch { if (poll === importPoll && token === state.token) importTimer = setTimeout(pollImports, 5000); }
+}
+function importEnded(t) {
+  toast(importLine(t));
+  if (t.status === 'done' && t.kind === 'archive') loadLibraries();
+}
+async function startImport(path) {
+  const r = await libraryAction('import', {path});
+  if (!r?.task) return;
+  state.importTask = r.task; renderLibrariesCard(); pollImports();
+}
+async function cancelImport() {
+  try { await api('/api/imports/cancel', {method: 'POST', body: '{}'}); } catch (err) { toast(err.message); }
+  pollImports();
+}
 async function pollExport() {
   for (let i = 0; i < 2400 && state.libraries?.export?.status === 'running'; i++) { await new Promise(r => setTimeout(r, 1500)); await loadLibraries(); }
 }
@@ -2939,7 +3002,7 @@ $('settingsPage').addEventListener('click', async e => {
   else if (d.libChoose) {
     const r = await libraryAction('choose', {kind: d.libChoose}); if (!r?.path) return;
     if (d.libChoose === 'library') openLibrary(r.path, r.path.split('/').pop().replace(/\.pilib$/, ''));
-    else { toast('正在导入…'); const lib = await libraryAction('import', {path: r.path}); if (lib) { toast(`已导入「${lib.name}」，模型接口与名称联网授权需重新设置`); loadLibraries(); } }
+    else await startImport(r.path);
   }
   else if ('libCreate' in d) {
     keep();
@@ -2978,6 +3041,7 @@ $('settingsPage').addEventListener('click', async e => {
   }
   else if (d.forgetLibrary) { if (await libraryAction('forget', {path: d.forgetLibrary})) loadLibraries(); }
   else if ('libExport' in d) { if (await libraryAction('export')) { await loadLibraries(); pollExport(); } }
+  else if ('importCancel' in d) { t.disabled = true; await cancelImport(); }
 });
 async function openLibrary(path, name) {
   try { await api('/api/libraries/open', {method: 'POST', body: JSON.stringify({path})}); } catch (err) { toast(err.message); return; }
@@ -2998,6 +3062,7 @@ $('settingsPage').addEventListener('click', e => {
   if (b) openLibrary(b.dataset.openLibrary, b.dataset.name);
 });
 loadLibraries();
+pollImports();
 
 // ---------- bound accounts (docs/PROVENANCE.md section 8): shared by every library; secrets live in the Keychain ----------
 async function loadAccounts() {

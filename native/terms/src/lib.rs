@@ -17,6 +17,7 @@ mod app_files;
 mod app_folder;
 mod app_http;
 mod app_identity;
+mod app_imports;
 mod app_legacy_upgrade;
 mod app_libraries;
 pub mod app_library;

@@ -339,3 +339,65 @@ fn dense_anchor_boundary_refuses_old_scalar_claim_and_imports_empty_result() {
     assert_eq!(count(&f.app(), "SELECT count(*) FROM candidates WHERE source='CCIP'"), 0);
     assert_eq!(human(&f.app()), before);
 }
+/// Records what an import reports (#88) and cancels when it reaches `cancel_at`, as the cancel button would.
+struct Recorder {
+    log: std::sync::Mutex<Vec<String>>,
+    cancel_at: Option<&'static str>,
+    cancel: AtomicBool,
+}
+impl crate::app_imports::Observer for Recorder {
+    fn stage(&self, stage: &'static str) {
+        self.log.lock().unwrap().push(stage.into());
+        if self.cancel_at == Some(stage) {
+            self.cancel.store(true, Ordering::SeqCst);
+        }
+    }
+    fn count(&self, done: u64, total: u64) {
+        self.log.lock().unwrap().push(format!("{done}/{total}"));
+    }
+    fn publish(&self, apply: &mut dyn FnMut() -> Result<()>) -> Result<()> {
+        self.log.lock().unwrap().push("publish".into());
+        if self.cancel.load(Ordering::SeqCst) {
+            return Err(Error::Conflict("任务结果已过期或重复".into()));
+        }
+        apply()
+    }
+}
+fn recorded(f: &Fixture, path: &Path, cancel_at: Option<&'static str>) -> (Result<Value>, Vec<String>) {
+    let recorder = Recorder { log: Default::default(), cancel_at, cancel: AtomicBool::new(false) };
+    let result = import_package_observed(&f.library, path, &f.resources, &recorder.cancel, &|_, _| Ok(()), &recorder);
+    (result, recorder.log.into_inner().unwrap())
+}
+#[test]
+fn an_import_reports_its_real_stages_and_a_cancel_at_any_stage_before_commit_writes_nothing() {
+    let f = Fixture::new(false);
+    let (path, _) = f.batch("plain", feature(1));
+    let (result, log) = recorded(&f, &path, None);
+    assert_eq!(result.unwrap()["status"], "done");
+    assert_eq!(
+        log,
+        [
+            "models",
+            "reading",
+            "0/3",
+            "1/3",
+            "2/3",
+            "verifying",
+            "writing",
+            "0/1",
+            "committing",
+            "publish",
+            "projecting"
+        ]
+    );
+    for stage in ["models", "reading", "verifying", "writing", "committing"] {
+        let f = Fixture::new(false);
+        let (path, _) = f.batch("plain", feature(1));
+        let app = human(&f.app());
+        let (result, log) = recorded(&f, &path, Some(stage));
+        assert!(result.is_err(), "{stage}");
+        assert!(!log.contains(&"projecting".to_string()), "{stage}: {log:?}");
+        assert_no_wd(&f);
+        assert_eq!(human(&f.app()), app);
+    }
+}

@@ -80,7 +80,7 @@ illustash-terms recognition-import --library /path/to/library.pilib --root /path
 
 模型规格命令只计算本地模型及 tag 文件的指纹，不联网。生产者必须使用同一套模型、tag 顺序和预处理。模型名称字符串相同而文件不同也会被拒绝。
 
-HTTP：`POST /api/recognition/import`，JSON `{"path":"本机结果包目录"}`；恢复用 `{"resume":true}`。沿用已有 loopback、Origin 和 CSRF 校验，不提供远程文件下载。
+HTTP：`POST /api/recognition/import`，JSON `{"path":"本机结果包目录"}`；恢复用 `{"resume":true}`。沿用已有 loopback、Origin 和 CSRF 校验，不提供远程文件下载。请求启动后台任务后立即返回，阶段、结果和取消经 `GET /api/imports`、`POST /api/imports/cancel`，见[导入任务](ARCHITECTURE_DIRECTION.md#导入任务)（#88）；CLI 仍为同步执行。
 
 ## 事务、去重与后处理
 
@@ -92,6 +92,6 @@ HTTP：`POST /api/recognition/import`，JSON `{"path":"本机结果包目录"}`�
 
 Windows 包内 `illustash-recognition` 生产者只写隔离结果目录，复用既有 WD/CCIP 预处理和阈值，沿用本协议交给 Rust 导入。2026-10-02 已用真实模型和 3 张生成图片验收识别、两类向量及正式标签导入；未验收真实图片准确率、大图库或 GPU，也未据此作跨平台性能比较。安装与依赖边界见 [独立计算包](BACKEND_TASKS.md#独立安装与可选计算包)。
 
-公开 Rust 接口 `import_package(&Library,&Path /*结果目录*/,&Path /*资源root*/,&AtomicBool,dispatch)` 与 `resume(&Library,&AtomicBool,dispatch)` 返回原状态对象；接口内部固定 canonical 包路径（`Library::pinned`），显示别名移除或改指向不会重定位结果；调用方仍须捕获会话身份并验证迟到结果，不能仅用 library_id 定位。取消在验证、源写入和各应用提交前检查；已提交的阶段留待恢复。HTTP 显式离线导入在会话锁内验证令牌后释放锁执行，同一会话的导入排队串行；切库或退出取消运行和排队中的导入，旧令牌/请求不能写入新会话（#26）。只读图库拒绝导入；研究计算不得修改人工裁决。
+公开 Rust 接口 `import_package(&Library,&Path /*结果目录*/,&Path /*资源root*/,&AtomicBool,dispatch)` 与 `resume(&Library,&AtomicBool,dispatch)` 返回原状态对象；接口内部固定 canonical 包路径（`Library::pinned`），显示别名移除或改指向不会重定位结果；调用方仍须捕获会话身份并验证迟到结果，不能仅用 library_id 定位。取消在验证、源写入和各应用提交前检查；已提交的阶段留待恢复。HTTP 显式离线导入在会话锁内验证令牌后作为后台任务执行，应用同一时间只运行一个导入；取消、切库或退出在源事务提交前停止导入，旧令牌/请求不能写入新会话（#26、#88）。只读图库拒绝导入；研究计算不得修改人工裁决。
 
 回退到当前版本的兼容宿主可读取相同 v1 源账本；原生恢复标记和事件记录保留，避免把已提交但未确认的结果当作未导入。旧 Python 恢复不识别原生投影标记，pending 包应先用原生 resume 完成确认后再切换兼容宿主。更旧核心版本须恢复升级前备份。

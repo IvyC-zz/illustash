@@ -4,8 +4,8 @@ use crate::{app_library::Library, Error, Result};
 use std::{
     path::{Path, PathBuf},
     sync::{
-        atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
-        Arc, Mutex, RwLock,
+        atomic::{AtomicBool, AtomicU64, Ordering},
+        Arc, RwLock,
     },
 };
 /// The host that opened a physical package owns it until it switches away, shuts down or exits: an OS
@@ -45,42 +45,6 @@ pub(crate) struct Session {
     pub(crate) index: crate::app_index::Updater,
     pub(crate) auto_sync: bool,
     pub(crate) research: crate::app_research::Research,
-    pub(crate) imports: Imports,
-}
-/// Recognition-result imports run outside the session lock (#26). They still take turns, as they did under the
-/// lock, and closing the session (switching libraries or quitting) cancels the running and the waiting ones.
-#[derive(Default)]
-pub(crate) struct Imports {
-    active: Arc<AtomicUsize>,
-    turn: Arc<Mutex<()>>,
-    cancel: Arc<AtomicBool>,
-}
-impl Imports {
-    /// Counted as active from here, so index and sync starts are refused while it waits or runs.
-    pub(crate) fn admit(&self) -> ImportTicket {
-        self.active.fetch_add(1, Ordering::SeqCst);
-        ImportTicket { active: self.active.clone(), turn: self.turn.clone(), cancel: self.cancel.clone() }
-    }
-    pub(crate) fn running(&self) -> bool {
-        self.active.load(Ordering::SeqCst) > 0
-    }
-}
-pub(crate) struct ImportTicket {
-    active: Arc<AtomicUsize>,
-    turn: Arc<Mutex<()>>,
-    pub(crate) cancel: Arc<AtomicBool>,
-}
-impl ImportTicket {
-    /// Waits for the previous import of this session, then runs with the session's cancel flag.
-    pub(crate) fn run<T>(&self, import: impl FnOnce(&AtomicBool) -> T) -> T {
-        let _turn = self.turn.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-        import(&self.cancel)
-    }
-}
-impl Drop for ImportTicket {
-    fn drop(&mut self) {
-        self.active.fetch_sub(1, Ordering::SeqCst);
-    }
 }
 impl Session {
     pub(crate) fn token() -> Result<String> {
@@ -119,7 +83,6 @@ impl Session {
             index,
             auto_sync: true,
             research,
-            imports: Imports::default(),
         })
     }
 }
@@ -133,6 +96,8 @@ pub struct Application {
     pub(crate) sync_disabled: bool,
     pub(crate) images: crate::app_files::Images,
     pub(crate) exports: crate::app_archives::Exports,
+    /// Recognition-result and archive imports, one at a time, outside the session lock (#26, #88).
+    pub(crate) imports: crate::app_imports::Imports,
     pub(crate) names_enabled: bool,
     pub(crate) names_network: bool,
     pub(crate) provenance_enabled: bool,
@@ -227,7 +192,6 @@ impl Application {
             index,
             auto_sync,
             research,
-            imports: Imports::default(),
         };
         session.syncer.resource_root = root.clone();
         session.syncer.per_run = per_run;
@@ -243,6 +207,7 @@ impl Application {
             sync_disabled,
             images: crate::app_files::Images::default(),
             exports: crate::app_archives::Exports::default(),
+            imports: crate::app_imports::Imports::default(),
             names_enabled,
             names_network,
             provenance_enabled,
@@ -313,15 +278,18 @@ impl Application {
             eprintln!("native verdict事件恢复失败：{error}");
         }
     }
-    /// Stops and joins the current session's tasks and exports.
+    /// Stops and joins the current session's tasks and exports; a running import gets a bounded wait to remove
+    /// what it unpacked.
     pub fn shutdown(&self) {
         let mut session = self.session.write().expect("application session lock poisoned");
         if self.closed.swap(true, Ordering::SeqCst) {
             return;
         }
+        self.imports.cancel(crate::app_imports::QUITTING);
         session.close();
         drop(session);
         self.exports.shutdown();
+        self.imports.shutdown(crate::app_imports::QUIT_WAIT);
     }
     /// Capture when accepting work, before body IO, scheduling or lock waits.
     pub fn generation(&self) -> u64 {
@@ -340,7 +308,6 @@ impl Application {
 }
 impl Session {
     fn close(&mut self) {
-        self.imports.cancel.store(true, Ordering::SeqCst);
         self.provenance.close();
         self.index.stop();
         self.research.stop();
@@ -396,6 +363,8 @@ impl Application {
 
         session.close();
         self.exports.stop();
+        // An import does not follow a switch: it stops before publishing and the replacement session starts clean.
+        self.imports.cancel(crate::app_imports::SWITCHED);
         *session = replacement;
         let library = session.library.clone();
         if let Err(e) = crate::app_research::dispatch(&library, "imported") {
@@ -429,10 +398,6 @@ impl Application {
     }
     pub(crate) fn current(&self, received: u64) -> bool {
         !self.closed.load(Ordering::SeqCst) && self.generation() == received
-    }
-    /// Set once the application shuts down; long work outside the session lock polls it.
-    pub(crate) fn closing(&self) -> Arc<AtomicBool> {
-        self.closed.clone()
     }
     fn check_open(&self) -> Result<()> {
         if self.closed.load(Ordering::SeqCst) {

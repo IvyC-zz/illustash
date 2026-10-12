@@ -215,10 +215,14 @@ pub(crate) fn check_database(conn: &Connection) -> Result<()> {
 }
 
 /// quick_check reads every page, then (for tables) every row again to check constraints; SQLite 3.43+ calls
-/// the progress handler during both passes. The pager's cache-miss count tracks the pages read so far. With
-/// the default 2 MiB page cache nearly every read misses; on real libraries the total came to 1.4–1.6× the
-/// page count (2026-10-02), so `READS` is the expected ratio. A low estimate stalls the bar near its end,
-/// a high one ends in a short jump, which is the lesser problem.
+/// the progress handler during both passes. The pager's page requests (cache hits plus misses) track the pages
+/// visited so far; on real libraries, where the 2 MiB default cache makes nearly every request a miss, the
+/// total came to 1.4–1.6× the page count (2026-10-02), so `READS` is the expected ratio. A low estimate stalls
+/// the bar near its end, a high one ends in a short jump, which is the lesser problem.
+///
+/// Misses alone are not enough: the bundled SQLite (SQLITE_ENABLE_MEMORY_MANAGEMENT) puts every connection in
+/// the process into one page-cache group, so this connection may keep a whole small file cached by recycling
+/// other connections' idle pages, and the second pass then misses nothing (#84).
 fn check_database_reporting(
     conn: &Connection,
     progress: Option<Arc<dyn Fn(f64) + Send + Sync + std::panic::RefUnwindSafe>>,
@@ -228,13 +232,13 @@ fn check_database_reporting(
         let pages: i64 = conn.query_row("PRAGMA page_count", [], |row| row.get(0))?;
         let expected = pages.max(1) as f64 * READS;
         let handle = Handle(unsafe { conn.handle() });
-        let start = cache_misses(handle);
+        let start = page_requests(handle);
         let report = progress.clone();
         progress(0.0);
         conn.progress_handler(
             100,
             Some(move || {
-                report(((cache_misses(handle) - start).max(0) as f64 / expected).min(0.99));
+                report(((page_requests(handle) - start).max(0) as f64 / expected).min(0.99));
                 false
             }),
         );
@@ -259,18 +263,17 @@ struct Handle(*mut rusqlite::ffi::sqlite3);
 unsafe impl Send for Handle {}
 impl std::panic::RefUnwindSafe for Handle {}
 
-fn cache_misses(handle: Handle) -> i64 {
-    let (mut current, mut high) = (0, 0);
-    unsafe {
-        rusqlite::ffi::sqlite3_db_status(
-            handle.0,
-            rusqlite::ffi::SQLITE_DBSTATUS_CACHE_MISS,
-            &mut current,
-            &mut high,
-            0,
-        );
-    }
-    current as i64
+fn page_requests(handle: Handle) -> i64 {
+    [rusqlite::ffi::SQLITE_DBSTATUS_CACHE_HIT, rusqlite::ffi::SQLITE_DBSTATUS_CACHE_MISS]
+        .into_iter()
+        .map(|op| {
+            let (mut current, mut high) = (0, 0);
+            unsafe {
+                rusqlite::ffi::sqlite3_db_status(handle.0, op, &mut current, &mut high, 0);
+            }
+            current as i64
+        })
+        .sum()
 }
 pub(crate) fn require_meta(conn: &Connection, key: &str, expected: &str) -> Result<()> {
     let mut query = conn.prepare("SELECT value FROM meta WHERE key=?1")?;
@@ -484,20 +487,35 @@ mod tests {
         )
         .unwrap();
         drop(src);
-        let seen = Arc::new(std::sync::Mutex::new(Vec::<(String, f64)>::new()));
-        let sink = seen.clone();
-        let progress: Progress = Arc::new(move |label, done| sink.lock().unwrap().push((label.into(), done)));
-        let before = f.bytes();
-        Library::open_reporting(&f.package, progress).unwrap();
-        assert_eq!(f.bytes(), before);
-        let seen = seen.lock().unwrap();
-        assert!(seen.windows(2).all(|w| w[0].1 <= w[1].1), "{seen:?}");
-        assert_eq!(seen.first().unwrap(), &("library.sqlite".to_string(), 0.0));
-        assert_eq!(seen.last().unwrap(), &("source.sqlite".to_string(), 1.0));
-        let source: Vec<f64> = seen.iter().filter(|(l, _)| l == "source.sqlite").map(|(_, d)| *d).collect();
-        // Intermediate reports during the scan itself, reaching most of the way before it completes.
-        assert!(source.len() > 10, "{seen:?}");
-        assert!(source[source.len() - 2] > 0.8, "{source:?}");
+        // Idle connections elsewhere in the process, each holding a full default cache of another copy. The
+        // bundled SQLite shares one page-cache group between connections, so the check may keep the whole
+        // file cached by recycling their pages, and its second pass then misses nothing (#84).
+        let other = f.root.join("other.sqlite");
+        fs::copy(f.package.join("source.sqlite"), &other).unwrap();
+        for idle in [0, 8] {
+            let held: Vec<Connection> = (0..idle)
+                .map(|_| {
+                    let c = read_connection(&other).unwrap();
+                    c.query_row("SELECT sum(length(body)) FROM bulk", [], |row| row.get::<_, i64>(0)).unwrap();
+                    c
+                })
+                .collect();
+            let seen = Arc::new(std::sync::Mutex::new(Vec::<(String, f64)>::new()));
+            let sink = seen.clone();
+            let progress: Progress = Arc::new(move |label, done| sink.lock().unwrap().push((label.into(), done)));
+            let before = f.bytes();
+            Library::open_reporting(&f.package, progress).unwrap();
+            drop(held);
+            assert_eq!(f.bytes(), before);
+            let seen = seen.lock().unwrap();
+            assert!(seen.windows(2).all(|w| w[0].1 <= w[1].1), "{seen:?}");
+            assert_eq!(seen.first().unwrap(), &("library.sqlite".to_string(), 0.0));
+            assert_eq!(seen.last().unwrap(), &("source.sqlite".to_string(), 1.0));
+            let source: Vec<f64> = seen.iter().filter(|(l, _)| l == "source.sqlite").map(|(_, d)| *d).collect();
+            // Intermediate reports during the scan itself, reaching most of the way before it completes.
+            assert!(source.len() > 10, "{seen:?}");
+            assert!(source[source.len() - 2] > 0.8, "idle connections {idle}: {:?}", &source[source.len() - 3..]);
+        }
     }
     #[test]
     fn wal_size_is_counted_without_opening_or_changing_it() {
