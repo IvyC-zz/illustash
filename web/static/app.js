@@ -2856,7 +2856,7 @@ function renderLibrariesCard() {
     : `<button class="quiet" data-open-library="${esc(l.path)}" data-name="${esc(l.name)}">打开</button><button class="quiet" data-forget-library="${esc(l.path)}" title="只从列表里移除，不删除图库">移出列表</button>`}</td></tr>`;
   const ex = data.export || {};
   const exportLine = ex.status === 'running' ? `<p class="muted-note">正在导出到 ${esc(home(ex.path))}…</p>`
-    : ex.status === 'done' ? `<p class="muted-note">已导出：${esc(home(ex.path))}（${(ex.bytes / 1048576).toFixed(0)} MB）</p>`
+    : ex.status === 'done' ? `<p class="muted-note">已导出：${esc(home(ex.path))}（${(ex.bytes / 1048576).toFixed(0)} MB）。${EXPORT_LEAVES_OUT}</p>`
     : ex.status === 'error' ? `<p class="muted-note">导出失败：${esc(ex.error)}</p>` : '';
   const f = libForm;
   const form = !f.open ? '' : `<div class="lib-form">
@@ -2873,8 +2873,10 @@ function renderLibrariesCard() {
     <p class="lib-actions"><button class="quiet" data-lib-new>新建图库</button><button class="quiet" data-lib-choose="library">打开其他图库…</button><button class="quiet" data-lib-choose="zip">导入…</button>${cur ? `<button class="quiet" data-lib-export ${ex.status === 'running' ? 'disabled' : ''}>导出当前图库</button>` : ''}</p>
     ${form}${exportLine}
     ${data.libraries.length > 1 || dev ? `<table class="settings-table lib-table"><tr><th>这台电脑上的图库</th>${dev ? '<th>测试画像</th>' : ''}<th></th></tr>${data.libraries.map(row).join('')}</table>` : ''}
-    <p class="muted-note">导出的 zip 包含识别结果、人工整理记录和来源配置，不含图片、模型连接设置或联网授权，可以换电脑或发给别人。导入后需重新设置模型接口，并自行确认名称查询的联网授权；旧版导出包也会清除这些设置。个人备份请保留完整图库目录。</p>`);
+    <p class="muted-note">导出的 zip 包含识别结果、人工整理记录和来源配置，不含模型连接设置或联网授权，可以换电脑或发给别人。导入后需重新设置模型接口，并自行确认名称查询的联网授权；旧版导出包也会清除这些设置。个人备份请保留完整图库目录。${ex.status === 'done' ? '' : EXPORT_LEAVES_OUT}</p>`);
 }
+// #41: the shareable export leaves out personal inputs; say so instead of implying a complete move.
+const EXPORT_LEAVES_OUT = '不含图片、画师出处缓存和导入过的 X 关注列表；在新电脑上要回查画师，需要重新导入 X 归档。';
 // Gallery pages have no Tauri dialog permission. Keep confirmation inside the page;
 // window.confirm may be replaced with an async plugin function by the desktop shell.
 let confirmationOpen = false;
