@@ -94,7 +94,8 @@ fn copy_cancelled(mut from: impl Read, mut to: impl Write, cancel: &AtomicBool) 
     }
 }
 /// Only call on an export snapshot or a newly unpacked package, never the sender's database.
-/// Model connection settings (including future keys) and lasting network consent are personal.
+/// Model connection settings (including future keys), lasting network consent and the first-run guide record
+/// (which questions were answered, what was ticked: #116) are personal.
 fn sanitize_database(path: &Path, cancel: Option<Arc<AtomicBool>>) -> Result<()> {
     let mut c = crate::sqlite::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE)?;
     // Compaction may dominate large exports. Switching libraries/closing the app must
@@ -102,9 +103,10 @@ fn sanitize_database(path: &Path, cancel: Option<Arc<AtomicBool>>) -> Result<()>
     c.progress_handler(1000, cancel.map(|cancel| move || cancel.load(Ordering::SeqCst)));
     c.execute_batch("PRAGMA journal_mode=DELETE; PRAGMA secure_delete=ON;")?;
     let tx = c.transaction()?;
-    for (table, sql) in
-        [("name_settings", "DELETE FROM name_settings"), ("prefs", "DELETE FROM prefs WHERE key='names_network'")]
-    {
+    for (table, sql) in [
+        ("name_settings", "DELETE FROM name_settings"),
+        ("prefs", "DELETE FROM prefs WHERE key IN ('names_network','onboarding')"),
+    ] {
         if tx.query_row("SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE type='table' AND name=?)", [table], |r| {
             r.get::<_, bool>(0)
         })? {
