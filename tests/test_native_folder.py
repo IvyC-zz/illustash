@@ -183,6 +183,51 @@ class NativeFolderHTTPTest(unittest.TestCase):
             self.assertEqual(c.execute("SELECT uuid FROM assets WHERE filename='back.png'").fetchone()[0], asset)
         self.assertFalse(self.sentinel.exists())
 
+    @unittest.skipIf(os.name == 'nt', 'POSIX 权限位制造读取失败；Windows ACL 另行验证')
+    def test_native_library_new_folder_unreadable_paths_keep_their_pictures(self):
+        # #43: a folder or file the scan cannot read is not gone; a real deletion still is.
+        sub = self.new_folder / 'sub'; sub.mkdir()
+        image(sub / 'a.png', 'red')
+        image(self.new_folder / 'b.png', 'blue')
+        image(self.new_folder / 'c.png', 'green')
+        self.sync()
+        with sqlite3.connect(self.lib.db) as c:
+            ids = dict(c.execute('SELECT filename,uuid FROM assets').fetchall())
+        tagged = self.request('/api/tag', {'ids': [ids['a.png']], 'tag': '人工标签'})
+        self.assertEqual(tagged['status'], 200, tagged)
+
+        def visible():
+            with sqlite3.connect(self.lib.db) as c:
+                return {f for f, in c.execute('SELECT filename FROM assets')} & {'a.png', 'b.png', 'c.png'}
+
+        (self.new_folder / 'b.png').unlink()
+        sub.chmod(0)
+        self.addCleanup(sub.chmod, 0o755)
+        state = self.sync()['state']
+        sub.chmod(0o755)
+        self.assertEqual(visible(), {'a.png', 'c.png'})
+        self.assertEqual((state['removed'], state.get('unreadable')), (1, 1), state)
+        with sqlite3.connect(self.lib.db) as c:
+            self.assertEqual(c.execute('SELECT tag FROM asset_tags WHERE uuid=?', (ids['a.png'],)).fetchall(), [('人工标签',)])
+        # A known file that changed but cannot be hashed keeps its picture too.
+        image(self.new_folder / 'c.png', 'yellow', (51, 31))
+        settle(self.new_folder)
+        (self.new_folder / 'c.png').chmod(0)
+        self.addCleanup((self.new_folder / 'c.png').chmod, 0o644)
+        self.assertEqual(self.request('/api/sync', {})['status'], 200)
+        state = self.finish()['state']
+        (self.new_folder / 'c.png').chmod(0o644)
+        self.assertEqual(visible(), {'a.png', 'c.png'})
+        self.assertEqual((state['removed'], state.get('unreadable')), (0, 1), state)
+        # Readable again: an ordinary sync with nothing kept back, the same picture and its label.
+        state = self.sync()['state']
+        self.assertNotIn('unreadable', state)
+        with sqlite3.connect(self.lib.db) as c:
+            self.assertEqual(c.execute("SELECT uuid FROM assets WHERE filename='a.png'").fetchone()[0], ids['a.png'])
+            self.assertEqual(c.execute("SELECT width FROM assets WHERE filename='c.png'").fetchone()[0], 51)
+            self.assertEqual(c.execute('SELECT tag FROM asset_tags WHERE uuid=?', (ids['a.png'],)).fetchall(), [('人工标签',)])
+        self.assertFalse(self.sentinel.exists())
+
     def test_native_library_new_folder_changed_content_is_compared_again(self):
         # #27: once a picture's bytes change under the same UUID, similar results from the old bytes go.
         worker = self.root / 'research-worker'

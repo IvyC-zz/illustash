@@ -2394,9 +2394,11 @@ function syncLine(s) {
     const imported = s.import_done ? ` · 已导入 ${number(s.import_done)}` : '';
     return `正在识别新图片 ${number(s.done || 0)}/${number(s.total || 0)}${failed}${imported}${left}`;
   }
-  if (s.status === 'done') return `上次同步：${stamp(s.finished_at)}`;
-  if (s.status === 'needs_windows') return '新增图片较多，需使用 Windows 批量识别';
-  if (s.status === 'needs_recognition') return `有 ${number(s.total || 0)} 张图等待识别（识别服务未启动）`;
+  // Paths the scan could not read keep their pictures; the next sync reads them again.
+  const kept = s.unreadable ? ` · ${number(s.unreadable)} 处暂时读不到，已有图片保留不动` : '';
+  if (s.status === 'done') return `上次同步：${stamp(s.finished_at)}${kept}`;
+  if (s.status === 'needs_windows') return '新增图片较多，需使用 Windows 批量识别' + kept;
+  if (s.status === 'needs_recognition') return `有 ${number(s.total || 0)} 张图等待识别（识别服务未启动）${kept}`;
   if (s.status === 'interrupted') return s.message ? `同步已中断（${s.message}），可重新扫描` : '同步已中断，可重新扫描';
   if (s.status === 'error') return '同步失败';
   return '本地图库';
