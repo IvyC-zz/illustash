@@ -1626,6 +1626,121 @@ mod tests {
         fs::remove_dir_all(root).unwrap();
     }
 
+    /// Synthetic library of the #31 measurements: n pictures with signatures and pairing marks, a chain of
+    /// n-1 relations, no retries.
+    fn bench_library(base: &Path, n: usize) {
+        let c = crate::sqlite::open(base).unwrap();
+        c.execute_batch(include_str!("app_create_schema.sql")).unwrap();
+        c.execute_batch("CREATE TABLE IF NOT EXISTS similar_paired(uuid TEXT PRIMARY KEY);CREATE TABLE IF NOT EXISTS similar_retry(a TEXT NOT NULL,b TEXT NOT NULL,PRIMARY KEY(a,b));BEGIN;").unwrap();
+        for i in 0..n {
+            let id = format!("{i:08x}-synthetic");
+            c.execute("INSERT INTO assets(uuid,src_path) VALUES (?,'')", [&id]).unwrap();
+            let grid: Vec<u8> = (0..256).map(|j| ((i * 31 + j * 7) % 256) as u8).collect();
+            c.execute("INSERT INTO image_sigs VALUES (?,?,?,1)", rusqlite::params![id, 1.25, grid]).unwrap();
+            c.execute("INSERT INTO similar_paired VALUES (?)", [&id]).unwrap();
+            if i > 0 {
+                c.execute(
+                    "INSERT INTO relations VALUES (?,?,'similar',0,'','2026-10-12 00:00:00')",
+                    [format!("{:08x}-synthetic", i - 1), id],
+                )
+                .unwrap();
+            }
+        }
+        c.execute_batch("COMMIT;VACUUM;").unwrap();
+    }
+    type BenchMode = fn(&mut [Vec<Value>; 4], &dyn Fn(usize) -> Value);
+    /// No change; one signature replaced (moved to the end, as the calculator does); every signature replaced.
+    fn bench_modes() -> [(&'static str, BenchMode); 3] {
+        [
+            ("nochange", |_, _| {}),
+            ("single", |t, grid| {
+                let row = t[0].remove(t[0].len() / 2);
+                t[0].push(json!([row[0], 1.5, grid(7), 1]));
+            }),
+            ("full", |t, grid| {
+                let rows = std::mem::take(&mut t[0]);
+                t[0] = rows.into_iter().enumerate().map(|(i, r)| json!([r[0], 1.5, grid(i), 1])).collect();
+            }),
+        ]
+    }
+    /// Peak resident memory of this process so far, in bytes (macOS reports bytes, Linux KiB).
+    fn peak_rss() -> u64 {
+        let mut usage: libc::rusage = unsafe { std::mem::zeroed() };
+        unsafe { libc::getrusage(libc::RUSAGE_SELF, &mut usage) };
+        let peak = usage.ru_maxrss as u64;
+        if cfg!(target_os = "macos") {
+            peak
+        } else {
+            peak * 1024
+        }
+    }
+    /// #31 owner memory (synthetic, release), one result per process: first
+    /// `ILLUSTASH_RESEARCH_RSS_DIR=<dir> cargo test --release research_publish_rss -- --ignored --nocapture` writes
+    /// the libraries and responses, then each run with `ILLUSTASH_RESEARCH_RSS_RUN=<n>-<mode>-<main|delta>` parses
+    /// one response as App does and publishes it, reporting the process peak before and after.
+    #[test]
+    #[ignore]
+    fn research_publish_rss() {
+        let Some(dir) = std::env::var_os("ILLUSTASH_RESEARCH_RSS_DIR").map(PathBuf::from) else {
+            return;
+        };
+        let f = Fixture::new();
+        let Ok(run) = std::env::var("ILLUSTASH_RESEARCH_RSS_RUN") else {
+            let sizes = std::env::var("ILLUSTASH_RESEARCH_BENCH_SIZES").unwrap_or_else(|_| "1000,10000,50000".into());
+            for n in sizes.split(',').map(|s| s.trim().parse::<usize>().unwrap()) {
+                let base = dir.join(format!("{n}.sqlite"));
+                bench_library(&base, n);
+                let snapshot = crate::sqlite::open(&base).unwrap();
+                let old: [Vec<Value>; 4] =
+                    SIMILAR.map(|t| crate::research_compute::similar::table(&snapshot, t).unwrap());
+                let grid = |i: usize| Value::String(format!("{:02x}", i % 256).repeat(256));
+                for (mode, change) in bench_modes() {
+                    let mut new = old.clone();
+                    change(&mut new, &grid);
+                    let full: serde_json::Map<_, _> =
+                        SIMILAR.iter().zip(&new).map(|(t, rows)| (t.to_string(), Value::Array(rows.clone()))).collect();
+                    let delta: serde_json::Map<_, _> = SIMILAR
+                        .iter()
+                        .zip(new.iter().zip(&old))
+                        .map(|(t, (rows, before))| {
+                            let change = crate::research_compute::similar::changes(&snapshot, t, before, rows.clone());
+                            (t.to_string(), change.unwrap())
+                        })
+                        .collect();
+                    for (code, tables) in [("main", full), ("delta", delta)] {
+                        let bytes =
+                            serde_json::to_vec(&json!({"format":"illustash-research/1","tables":tables})).unwrap();
+                        fs::write(dir.join(format!("{n}-{mode}-{code}.json")), bytes).unwrap();
+                    }
+                }
+            }
+            return;
+        };
+        let n = run.split('-').next().unwrap();
+        let before = peak_rss();
+        let bytes = fs::read(dir.join(format!("{run}.json"))).unwrap();
+        let text = std::str::from_utf8(&bytes).unwrap();
+        let ordered = crate::http_json::parse_python(text).unwrap();
+        let parsed = crate::strict_json::parse(text).unwrap();
+        let path = dir.join(format!("{run}.sqlite"));
+        fs::copy(dir.join(format!("{n}.sqlite")), &path).unwrap();
+        let mut c = crate::sqlite::open(&path).unwrap();
+        let tx = c.transaction_with_behavior(TransactionBehavior::Immediate).unwrap();
+        let tables = parsed["tables"].as_object().unwrap();
+        if run.ends_with("-main") {
+            legacy_publish(&tx, tables, &f.ctx).unwrap();
+        } else {
+            publish(&tx, tables, &f.ctx).unwrap();
+        }
+        tx.commit().unwrap();
+        drop((ordered, parsed, bytes));
+        println!("{}", json!({"run": run, "peak_before": before, "peak_after": peak_rss()}));
+        drop(c);
+        for suffix in ["", "-wal", "-shm"] {
+            let _ = fs::remove_file(dir.join(format!("{run}.sqlite{suffix}")));
+        }
+    }
+
     /// #31 measurement (synthetic, release): `cargo test --release research_delta_bench -- --ignored --nocapture`.
     /// Publication of the four similar tables only (early_groups/fold and the fingerprint are the same in both and
     /// left out). ILLUSTASH_RESEARCH_BENCH_SIZES overrides the default 1000,10000,50000; three runs, median.
@@ -1644,42 +1759,11 @@ mod tests {
             let dir = f.root.join(format!("delta-{n}"));
             fs::create_dir_all(&dir).unwrap();
             let base = dir.join("base.sqlite");
-            {
-                let c = crate::sqlite::open(&base).unwrap();
-                c.execute_batch(include_str!("app_create_schema.sql")).unwrap();
-                c.execute_batch("CREATE TABLE IF NOT EXISTS similar_paired(uuid TEXT PRIMARY KEY);CREATE TABLE IF NOT EXISTS similar_retry(a TEXT NOT NULL,b TEXT NOT NULL,PRIMARY KEY(a,b));BEGIN;").unwrap();
-                for i in 0..n {
-                    let id = format!("{i:08x}-synthetic");
-                    c.execute("INSERT INTO assets(uuid,src_path) VALUES (?,'')", [&id]).unwrap();
-                    let grid: Vec<u8> = (0..256).map(|j| ((i * 31 + j * 7) % 256) as u8).collect();
-                    c.execute("INSERT INTO image_sigs VALUES (?,?,?,1)", rusqlite::params![id, 1.25, grid]).unwrap();
-                    c.execute("INSERT INTO similar_paired VALUES (?)", [&id]).unwrap();
-                    if i > 0 {
-                        c.execute(
-                            "INSERT INTO relations VALUES (?,?,'similar',0,'','2026-10-12 00:00:00')",
-                            [format!("{:08x}-synthetic", i - 1), id],
-                        )
-                        .unwrap();
-                    }
-                }
-                c.execute_batch("COMMIT;VACUUM;").unwrap();
-            }
+            bench_library(&base, n);
             let snapshot = crate::sqlite::open(&base).unwrap();
             let old: [Vec<Value>; 4] = SIMILAR.map(|t| crate::research_compute::similar::table(&snapshot, t).unwrap());
             let grid = |i: usize| Value::String(format!("{:02x}", i % 256).repeat(256));
-            type Mode = fn(&mut [Vec<Value>; 4], &dyn Fn(usize) -> Value);
-            let modes: [(&str, Mode); 3] = [
-                ("nochange", |_, _| {}),
-                ("single", |t, grid| {
-                    let row = t[0].remove(t[0].len() / 2);
-                    t[0].push(json!([row[0], 1.5, grid(7), 1]));
-                }),
-                ("full", |t, grid| {
-                    let rows = std::mem::take(&mut t[0]);
-                    t[0] = rows.into_iter().enumerate().map(|(i, r)| json!([r[0], 1.5, grid(i), 1])).collect();
-                }),
-            ];
-            for (mode, change) in modes {
+            for (mode, change) in bench_modes() {
                 let mut new = old.clone();
                 change(&mut new, &grid);
                 let full = Value::Object(
