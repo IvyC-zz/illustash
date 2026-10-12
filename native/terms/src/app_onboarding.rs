@@ -1,5 +1,6 @@
-//! 新图库的首次引导（#96）：引导走到哪一步、这台电脑能识别什么、首次同步得到了什么，以及按已认出的角色推荐
-//! 可能想关注的作品。进度按图库存在 prefs（键 `onboarding`）；记录进度不授权联网、不启动同步或索引任务。
+//! 新图库的首次引导（#96）：在真实界面上逐步提示的进度、上手清单、只问一次的联网与关注提示，这台电脑能识别什么、
+//! 首次同步得到了什么，以及按已认出的角色推荐可能想关注的作品。进度按图库存在 prefs（键 `onboarding`）；
+//! 记录进度不授权联网、不启动同步或索引任务。
 //! 唯一的计算是用户打开引导时一次识别组件自检（`--check`，实际加载模型），结果只留在本次会话。
 #![cfg_attr(not(test), deny(clippy::unwrap_used))]
 use crate::{
@@ -18,8 +19,12 @@ use std::{
 };
 
 const PREF: &str = "onboarding";
-/// 引导的步骤，按顺序：识别能力、联网选择、首次同步与结果、认出更多角色、开始整理。
-pub(crate) const STEPS: [&str; 5] = ["ability", "network", "sync", "more", "start"];
+/// 逐步提示的各站，按顺序：欢迎、任务（识别进度）、首页、资料库、未识别、结束。
+pub(crate) const STEPS: [&str; 6] = ["welcome", "tasks", "home", "characters", "unmatched", "end"];
+/// 上手清单的各项，做过就勾上：看看认出的角色、纠正一张、撤销一次、确认一组未识别、关注一部作品。
+const ITEMS: [&str; 5] = ["look", "correct", "undo", "group", "follow"];
+/// 需要时才出现、回答过就不再出现的提示：名称联网、关注推荐的作品。
+const PROMPTS: [&str; 2] = ["names", "works"];
 /// 推荐作品最多几部。
 const SUGGESTED: usize = 5;
 
@@ -29,24 +34,46 @@ fn bad<T>(message: &str) -> Result<T> {
 
 /// 引导状态。存过的按存的来；没存过的：还没有一次同步走完的图库是新图库（`new`，界面打开时写入），
 /// 其余（升级上来的旧图库、导入的归档）不弹引导（`off`），可以从设置里重新打开。
+/// `ticked`、`seen` 只留认得的项，按固定顺序；`hidden`：上手清单已收起不再显示。
 fn guide(c: &Connection) -> Result<Value> {
     let stored: Option<String> = c.query_row("SELECT value FROM prefs WHERE key=?", [PREF], |r| r.get(0)).optional()?;
     if let Some(text) = stored {
         let v: Value = serde_json::from_str(&text).map_err(|e| Error::Invalid(format!("无效的引导记录：{e}")))?;
         let status = v["status"].as_str().filter(|s| ["active", "skipped", "done"].contains(s)).unwrap_or("off");
         let step = v["step"].as_str().filter(|s| STEPS.contains(s)).unwrap_or(STEPS[0]);
-        return Ok(json!({"status": status, "step": step}));
+        let listed = |key: &str, known: &[&str]| -> Vec<Value> {
+            let have = v[key].as_array();
+            known.iter().filter(|k| have.is_some_and(|a| a.iter().any(|x| x == **k))).map(|k| Value::from(*k)).collect()
+        };
+        return Ok(json!({"status": status, "step": step, "ticked": listed("ticked", &ITEMS),
+            "seen": listed("seen", &PROMPTS), "hidden": v["hidden"] == true}));
     }
     let synced: bool = c.query_row(
         "SELECT EXISTS(SELECT 1 FROM sync_runs WHERE status IN ('done','needs_recognition','needs_windows'))",
         [],
         |r| r.get(0),
     )?;
-    Ok(json!({"status": if synced { "off" } else { "new" }, "step": STEPS[0]}))
+    Ok(
+        json!({"status": if synced { "off" } else { "new" }, "step": STEPS[0], "ticked": [], "seen": [], "hidden": false}),
+    )
 }
-
-fn save(lib: &Library, status: &str, step: &str) -> Result<()> {
-    crate::app_settings::update_pref(lib, PREF, |_| Ok(json!({"status": status, "step": step}).to_string()))
+/// Change the stored guide under the writer lock, so a tick and a step taken together cannot lose one another.
+fn save(lib: &Library, change: impl FnOnce(&mut Value)) -> Result<()> {
+    crate::app_settings::update_pref(lib, PREF, |c| {
+        let mut v = guide(c)?;
+        if v["status"] == "new" {
+            v["status"] = "active".into();
+        }
+        change(&mut v);
+        Ok(v.to_string())
+    })
+}
+fn add(list: &mut Value, key: &str) {
+    if let Some(items) = list.as_array_mut() {
+        if !items.iter().any(|v| v == key) {
+            items.push(key.into());
+        }
+    }
 }
 
 /// 首次同步的结果分开算：在图库里（可见）、识别过（有 WD 分级，即识别结果已导入）、认出了角色、仍未识别。
@@ -257,24 +284,43 @@ impl Onboarding {
         let watched = if works { session.index.watched(&session.library)? } else { Vec::new() };
         session.onboarding.info(&session.library, shared.as_deref(), general.as_deref().map(Vec::as_slice), &watched)
     }
-    /// `{action: step|skip|done|reopen|check, step?}`。
+    /// `{action: step|skip|done|reopen|check|tick|seen|hide, step?, item?, key?, hidden?}`。
     pub fn post(&mut self, lib: &Library, body: &Json) -> Result<()> {
         let body: Value = serde_json::from_str(&body.dump()).map_err(|e| Error::Invalid(e.to_string()))?;
         if lib.frozen() {
             return bad("测试图库没有引导");
         }
-        let current = guide(&crate::app_library::read_connection(&lib.db())?)?;
-        let step = current["step"].as_str().unwrap_or(STEPS[0]).to_owned();
+        let named = |field: &str, known: &[&str], message: &str| -> Result<String> {
+            body[field]
+                .as_str()
+                .filter(|s| known.contains(s))
+                .map(str::to_owned)
+                .ok_or_else(|| Error::Invalid(message.into()))
+        };
         match body["action"].as_str() {
             Some("step") => {
-                let Some(next) = body["step"].as_str().filter(|s| STEPS.contains(s)) else {
-                    return bad("未知的引导步骤");
-                };
-                save(lib, "active", next)
+                let next = named("step", &STEPS, "未知的引导步骤")?;
+                save(lib, |v| {
+                    v["status"] = "active".into();
+                    v["step"] = next.into();
+                })
             }
-            Some("skip") => save(lib, "skipped", &step),
-            Some("done") => save(lib, "done", &step),
-            Some("reopen") => save(lib, "active", STEPS[0]),
+            Some("skip") => save(lib, |v| v["status"] = "skipped".into()),
+            Some("done") => save(lib, |v| v["status"] = "done".into()),
+            Some("reopen") => save(lib, |v| {
+                v["status"] = "active".into();
+                v["step"] = STEPS[0].into();
+                v["hidden"] = false.into();
+            }),
+            Some("tick") => {
+                let item = named("item", &ITEMS, "未知的清单项")?;
+                save(lib, |v| add(&mut v["ticked"], &item))
+            }
+            Some("seen") => {
+                let key = named("key", &PROMPTS, "未知的提示")?;
+                save(lib, |v| add(&mut v["seen"], &key))
+            }
+            Some("hide") => save(lib, |v| v["hidden"] = (body["hidden"] != false).into()),
             Some("check") => self.start_check(lib),
             _ => bad("未知操作"),
         }
@@ -315,16 +361,53 @@ mod tests {
     fn a_new_library_starts_the_guide_and_its_choices_are_kept() {
         let (_root, lib) = fixture();
         let mut o = Onboarding::new(1, "token");
-        assert_eq!(read(&o, &lib, None)["guide"], json!({"status": "new", "step": "ability"}));
-        o.post(&lib, &Json::from(json!({"action": "step", "step": "sync"}))).unwrap();
-        assert_eq!(read(&o, &lib, None)["guide"], json!({"status": "active", "step": "sync"}));
+        let guide = |o: &Onboarding| {
+            let g = read(o, &lib, None)["guide"].clone();
+            (g["status"].as_str().unwrap().to_owned(), g["step"].as_str().unwrap().to_owned())
+        };
+        assert_eq!(
+            read(&o, &lib, None)["guide"],
+            json!({"status": "new", "step": "welcome", "ticked": [], "seen": [], "hidden": false})
+        );
+        o.post(&lib, &Json::from(json!({"action": "step", "step": "home"}))).unwrap();
+        assert_eq!(guide(&o), ("active".into(), "home".into()));
         assert!(o.post(&lib, &Json::from(json!({"action": "step", "step": "elsewhere"}))).is_err());
         o.post(&lib, &Json::from(json!({"action": "skip"}))).unwrap();
-        assert_eq!(read(&o, &lib, None)["guide"], json!({"status": "skipped", "step": "sync"}));
+        assert_eq!(guide(&o), ("skipped".into(), "home".into()));
         o.post(&lib, &Json::from(json!({"action": "reopen"}))).unwrap();
-        assert_eq!(read(&o, &lib, None)["guide"], json!({"status": "active", "step": "ability"}));
+        assert_eq!(guide(&o), ("active".into(), "welcome".into()));
         o.post(&lib, &Json::from(json!({"action": "done"}))).unwrap();
         assert_eq!(read(&o, &lib, None)["guide"]["status"], "done");
+    }
+
+    #[test]
+    fn checklist_ticks_and_answered_prompts_are_kept_in_order_and_survive_steps() {
+        let (_root, lib) = fixture();
+        let mut o = Onboarding::new(1, "token");
+        for body in [
+            json!({"action": "tick", "item": "undo"}),
+            json!({"action": "tick", "item": "look"}),
+            json!({"action": "tick", "item": "undo"}),
+            json!({"action": "seen", "key": "names"}),
+            json!({"action": "step", "step": "end"}),
+            json!({"action": "hide"}),
+        ] {
+            o.post(&lib, &Json::from(body)).unwrap();
+        }
+        assert_eq!(
+            read(&o, &lib, None)["guide"],
+            json!({"status": "active", "step": "end", "ticked": ["look", "undo"],
+            "seen": ["names"], "hidden": true})
+        );
+        for bad in [json!({"action": "tick", "item": "elsewhere"}), json!({"action": "seen", "key": "x"})] {
+            assert!(o.post(&lib, &Json::from(bad)).is_err());
+        }
+        o.post(&lib, &Json::from(json!({"action": "reopen"}))).unwrap();
+        let g = read(&o, &lib, None)["guide"].clone();
+        assert_eq!(
+            (g["step"].clone(), g["hidden"].clone(), g["ticked"].clone()),
+            (json!("welcome"), json!(false), json!(["look", "undo"]))
+        );
     }
 
     #[test]
@@ -335,7 +418,7 @@ mod tests {
         let o = Onboarding::new(1, "token");
         assert_eq!(read(&o, &lib, None)["guide"]["status"], "new", "an unfinished first sync is still new");
         c.execute("INSERT INTO sync_runs(status,started_at) VALUES ('done','2026-10-01 11:00:00')", []).unwrap();
-        assert_eq!(read(&o, &lib, None)["guide"], json!({"status": "off", "step": "ability"}));
+        assert_eq!(read(&o, &lib, None)["guide"]["status"], "off");
     }
 
     #[test]
