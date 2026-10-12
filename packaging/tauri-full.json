@@ -1,7 +1,6 @@
 {
   "bundle": {
     "resources": {
-      "../packaging/desktop-resources/": "resources/",
       "../packaging/desktop-compute/": "compute/"
     },
     "targets": ["nsis"],

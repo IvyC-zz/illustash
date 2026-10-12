@@ -23,13 +23,21 @@ def copy(source, destination):
     destination.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(source, destination)
 
+# Every artifact (portable ZIP, base and full installers) carries these notices under
+# resources/licenses/; the full installers' compute/ copies them with the rest of resources/.
+NOTICES = {'licenses/LICENSE': 'LICENSE', 'licenses/THIRD_PARTY.md': 'docs/THIRD_PARTY.md',
+           'licenses/pocketfft/LICENSE.md': 'native/terms/vendor/pocketfft/LICENSE.md',
+           'licenses/LCMS.txt': 'native/terms/licenses/LCMS.txt'}
+# One worker binary serves all four kinds; the host passes the kind per launch (#37).
+WORKER_KINDS = ('research', 'index', 'provenance', 'recognition')
+
 def resources(destination):
     for path in sorted((ROOT / 'web/static').rglob('*')):
         if path.is_file():
             copy(path, destination / path.relative_to(ROOT))
     copy(ROOT / 'tags/tags_v3.csv', destination / 'tags/tags_v3.csv')
-    copy(ROOT / 'native/terms/vendor/pocketfft/LICENSE.md', destination / 'licenses/pocketfft/LICENSE.md')
-    copy(ROOT / 'native/terms/licenses/LCMS.txt', destination / 'licenses/LCMS.txt')
+    for installed, source in NOTICES.items():
+        copy(ROOT / source, destination / installed)
 
 def launcher_environment(windows=False):
     """Opt in to installed adapters without running diagnostics or a task at startup."""
@@ -39,16 +47,16 @@ def launcher_environment(windows=False):
                  'if not defined ILLUSTASH_MODELS set "ILLUSTASH_MODELS=%ILLUSTASH_ROOT%\\models"',
                  'if not defined ILLUSTASH_SHARED if defined LOCALAPPDATA set "ILLUSTASH_SHARED=%LOCALAPPDATA%\\Illustash\\Shared"',
                  'if not defined ILLUSTASH_SHARED (echo Cannot locate writable shared resources; configure ILLUSTASH_SHARED. & exit /b 1)']
-        for kind in ('research', 'index', 'provenance', 'recognition'):
-            lines.append(f'if not defined ILLUSTASH_{kind.upper()}_WORKER set "ILLUSTASH_{kind.upper()}_WORKER=%~dp0bin\\illustash-{kind}.exe"')
+        for kind in WORKER_KINDS:
+            lines.append(f'if not defined ILLUSTASH_{kind.upper()}_WORKER set "ILLUSTASH_{kind.upper()}_WORKER=%~dp0bin\\illustash-worker.exe"')
         return '\r\n'.join(lines) + '\r\n'
     lines = [': "${ILLUSTASH_ROOT:=$ROOT/resources}"',
              ': "${ILLUSTASH_MODELS:=$ILLUSTASH_ROOT/models}"',
              ': "${ILLUSTASH_SHARED:=${HOME:?HOME required}/Library/Application Support/Illustash/Shared}"',
              'export ILLUSTASH_ROOT ILLUSTASH_MODELS ILLUSTASH_SHARED']
-    for kind in ('research', 'index', 'provenance', 'recognition'):
+    for kind in WORKER_KINDS:
         key = f'ILLUSTASH_{kind.upper()}_WORKER'
-        lines.extend([f': "${{{key}:=$ROOT/bin/illustash-{kind}}}"', f'export {key}'])
+        lines.extend([f': "${{{key}:=$ROOT/bin/illustash-worker}}"', f'export {key}'])
     return '\n'.join(lines) + '\n'
 
 def research_openblas(site):
@@ -72,12 +80,19 @@ def research_openblas(site):
     return candidates[0]
 
 def stage(destination, binaries, research=False, desktop=None, iqdb=None, models=None, openblas_site=None,
-          ort_dylib=None, ort_licenses=None):
+          ort_dylib=None, ort_licenses=None, model_licenses=None):
     destination = destination.resolve()
     if destination.exists():
         raise ValueError('output already exists; choose a new directory')
     if (models or openblas_site or ort_dylib or ort_licenses) and not research:
         raise ValueError('models/runtime require --research')
+    if model_licenses and not models:
+        raise ValueError('model licenses require --models')
+    model_notices = []
+    if model_licenses:
+        model_notices = [path for path in sorted(model_licenses.rglob('*')) if path.is_file() or path.is_symlink()]
+        if not model_notices:
+            raise ValueError('model license directory is empty')
     if research and sys.platform not in ('darwin', 'win32'):
         # Linux is frozen: no computation package ships there (README).
         raise ValueError('computation packages require macOS or Windows')
@@ -108,11 +123,13 @@ def stage(destination, binaries, research=False, desktop=None, iqdb=None, models
         iqdb = iqdb or target(ROOT / 'crates/iqdb') / 'release' / ('illustash-iqdb' + suffix)
         copy(iqdb, destination / 'bin' / ('illustash-iqdb' + suffix))
         copy(ROOT / 'crates/iqdb/Cargo.lock', destination / 'dependencies/iqdb-Cargo.lock')
-        for kind in ('research', 'index', 'provenance', 'recognition'):
-            copy(binaries / ('illustash-worker' + suffix), destination / 'bin' / ('illustash-' + kind + suffix))
+        copy(binaries / ('illustash-worker' + suffix), destination / 'bin' / ('illustash-worker' + suffix))
         if models:
             for name in ('wd_swinv2_v3_emb.onnx', 'ccip/model_feat.onnx', 'ccip/model_metrics.onnx', 'ccip/metrics.json'):
                 copy(models / name, destination / 'resources/models' / name)
+            # Original model license texts are supplied by the packager, never written here.
+            for path in model_notices:
+                copy(path, destination / 'resources/licenses/models' / path.relative_to(model_licenses))
         if ort_dylib:
             library = 'onnxruntime.dll' if sys.platform == 'win32' else 'libonnxruntime.dylib'
             copy(ort_dylib, destination / 'resources/onnxruntime' / library)
@@ -159,7 +176,8 @@ def desktop_compute(source, destination):
     """Installer-only layout, reused by the existing worker adapters unchanged."""
     if sys.platform != 'win32':
         raise ValueError('full desktop installers require Windows')
-    for required in ('resources/models/wd_swinv2_v3_emb.onnx',
+    for required in ('bin/illustash-worker.exe', 'resources/licenses/LICENSE', 'resources/licenses/THIRD_PARTY.md',
+                     'resources/models/wd_swinv2_v3_emb.onnx',
                      'resources/models/ccip/model_feat.onnx', 'resources/models/ccip/model_metrics.onnx',
                      'resources/models/ccip/metrics.json', 'resources/openblas/openblas.dll',
                      'resources/licenses/openblas/LICENSE.txt', 'resources/onnxruntime/onnxruntime.dll',
@@ -196,9 +214,8 @@ def macos_desktop_compute(source, destination):
         'resources/onnxruntime/libonnxruntime.dylib',
         'resources/licenses/onnxruntime/LICENSE',
         'resources/licenses/onnxruntime/ThirdPartyNotices.txt',
-        'resources/licenses/pocketfft/LICENSE.md',
-        'resources/licenses/LCMS.txt', 'bin/illustash-terms', 'bin/illustash-iqdb',
-        *(f'bin/illustash-{kind}' for kind in ('recognition', 'index', 'research', 'provenance')),
+        *(f'resources/{name}' for name in NOTICES),
+        'bin/illustash-terms', 'bin/illustash-iqdb', 'bin/illustash-worker',
         'dependencies/core-Cargo.lock', 'dependencies/iqdb-Cargo.lock',
     )
     manifest = json.loads((source / 'manifest.json').read_text())
@@ -259,6 +276,7 @@ def main():
     parser.add_argument('--openblas-site', type=Path, help='Windows: site-packages holding the fixed NumPy wheel (numpy.libs OpenBLAS DLL and its licenses)')
     parser.add_argument('--ort-dylib', type=Path, help='explicit existing CPU ORT dynamic library; installed under resources/onnxruntime')
     parser.add_argument('--ort-licenses', type=Path, help='directory containing this ORT distribution LICENSE and ThirdPartyNotices.txt')
+    parser.add_argument('--model-licenses', type=Path, help='with --models: directory of the models\' original license texts, copied to resources/licenses/models/')
     parser.add_argument('--profile', choices=('release', 'dev'), default='release')
     parser.add_argument('--binaries', type=Path, help='use already built release binaries')
     parser.add_argument('--iqdb', type=Path, help='built optional IQDB executable')
@@ -269,6 +287,8 @@ def main():
     args = parser.parse_args()
     if (args.models or args.openblas_site or args.ort_dylib or args.ort_licenses) and not args.research:
         parser.error('models/runtime require --research')
+    if args.model_licenses and not args.models:
+        parser.error('--model-licenses requires --models')
     if bool(args.ort_dylib) != bool(args.ort_licenses):
         parser.error('--ort-dylib and --ort-licenses must be supplied together')
     if args.desktop_compute and not (args.research and args.models and args.openblas_site
@@ -287,7 +307,7 @@ def main():
     if args.research and args.iqdb is None:
         subprocess.run(['cargo', 'build', '--locked', '--release', '--manifest-path', str(ROOT / 'crates/iqdb/Cargo.toml')], check=True, cwd=ROOT)
     stage(args.output, binaries, args.research, args.desktop, args.iqdb, args.models, args.openblas_site,
-          args.ort_dylib, args.ort_licenses)
+          args.ort_dylib, args.ort_licenses, args.model_licenses)
     if args.desktop_compute:
         desktop_compute(args.output, args.desktop_compute)
     if args.macos_desktop_compute:

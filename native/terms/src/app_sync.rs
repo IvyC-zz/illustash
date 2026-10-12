@@ -700,7 +700,7 @@ fn recognise(
         .map_err(|e| Error::Invalid(e.to_string()))?,
     )?;
     let mut command = Command::new(worker);
-    command.arg(&request).arg(&response);
+    command.env(crate::app_tasks::WORKER_KIND_ENV, "recognition").arg(&request).arg(&response);
     command.env("ILLUSTASH_ROOT", crate::app_paths::resolve(root)?);
     command.env("ILLUSTASH_SHARED", crate::app_resources::shared_path(root)?);
     // Inside the task folder, so it is cleaned up with the batches. Workers that do not write it

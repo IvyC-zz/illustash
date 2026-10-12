@@ -11,6 +11,31 @@ use std::{
     time::{Duration, Instant},
 };
 
+/// 计算 worker 的四个种类。安装包只带一个 `illustash-worker`，四个
+/// `ILLUSTASH_<KIND>_WORKER` 都指向它（#37）。
+pub const WORKER_KINDS: [&str; 4] = ["research", "index", "provenance", "recognition"];
+/// 宿主每次启动 worker 都用这个环境变量显式告诉它本次的种类；请求/响应两参数协议不变，
+/// 旧布局里按文件名分派的适配器和测试替身 worker 不读这个变量。
+pub const WORKER_KIND_ENV: &str = "ILLUSTASH_WORKER_KIND";
+
+/// worker 本次的种类。旧安装布局的 `illustash-<kind>` 文件名仍按文件名分派（兼容旧安装和
+/// 显式覆盖）；其他文件名（安装包里的 `illustash-worker`）必须由 [`WORKER_KIND_ENV`] 给出。
+/// 两者都给出而不一致时拒绝，不猜。
+pub fn worker_kind<'a>(stem: &'a str, requested: Option<&'a str>) -> std::result::Result<&'a str, String> {
+    let named = stem.strip_prefix("illustash-").filter(|kind| WORKER_KINDS.contains(kind));
+    match (named, requested.filter(|kind| !kind.is_empty())) {
+        (Some(named), Some(requested)) if named != requested => {
+            Err(format!("worker 文件名对应 {named}，但 {WORKER_KIND_ENV}={requested}"))
+        }
+        (Some(named), _) => Ok(named),
+        (None, Some(requested)) if WORKER_KINDS.contains(&requested) => Ok(requested),
+        (None, Some(requested)) => Err(format!("未知的计算种类 {WORKER_KIND_ENV}={requested}")),
+        (None, None) => {
+            Err(format!("请由 Illustash 启动，或设置 {WORKER_KIND_ENV}=research / index / provenance / recognition"))
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct TaskIdentity {
     pub package: PathBuf,
@@ -300,6 +325,22 @@ mod tests {
     use super::*;
     fn identity() -> TaskIdentity {
         TaskIdentity::at(&std::env::temp_dir(), "synthetic", 1, "session").unwrap()
+    }
+    #[test]
+    fn single_worker_kind_is_explicit_and_legacy_names_still_dispatch() {
+        for kind in WORKER_KINDS {
+            assert_eq!(worker_kind("illustash-worker", Some(kind)), Ok(kind));
+            let legacy = format!("illustash-{kind}");
+            assert_eq!(worker_kind(&legacy, None), Ok(kind));
+            assert_eq!(worker_kind(&legacy, Some("")), Ok(kind));
+            assert_eq!(worker_kind(&legacy, Some(kind)), Ok(kind));
+            assert_eq!(worker_kind("renamed copy", Some(kind)), Ok(kind));
+        }
+        assert!(worker_kind("illustash-worker", None).unwrap_err().contains(WORKER_KIND_ENV));
+        assert!(worker_kind("illustash-worker", Some("")).unwrap_err().contains(WORKER_KIND_ENV));
+        assert!(worker_kind("illustash-worker", Some("ocr")).unwrap_err().contains("未知"));
+        assert!(worker_kind("illustash-index", Some("research")).unwrap_err().contains("index，但"));
+        assert!(worker_kind("illustash-terms", None).is_err());
     }
     /// Run `work` under `deadline` and return its error message and whether it timed out.
     fn stopped(deadline: Deadline, work: impl FnOnce(&TaskContext) + Send + 'static) -> (String, bool) {

@@ -31,12 +31,13 @@ def run(artifact, work):
          'USERPROFILE':str(work/'home'), 'APPDATA':str(work/'support'), 'LOCALAPPDATA':str(work/'local'),
          'ILLUSTASH_APP_SUPPORT':str(work/'support'), 'ILLUSTASH_SHARED':str(work/'shared'),
          'ILLUSTASH_WORKER_PYTHON':str(artifact/'runtime/python.exe')}
+    # One installed worker serves all four kinds; the host (and --check here) names the kind.
     for kind in ('research','index','provenance','recognition'):
-        env['ILLUSTASH_'+kind.upper()+'_WORKER']=str(artifact/'bin'/('illustash-'+kind+'.exe'))
-    env.pop('ILLUSTASH_IQDB_BINARY',None);env.pop('ILLUSTASH_IQDB_BIN',None)
+        env['ILLUSTASH_'+kind.upper()+'_WORKER']=str(artifact/'bin/illustash-worker.exe')
+    env.pop('ILLUSTASH_IQDB_BINARY',None);env.pop('ILLUSTASH_IQDB_BIN',None);env.pop('ILLUSTASH_WORKER_KIND',None)
     core=artifact/'bin/illustash-terms.exe'
     for kind in ('research','index','provenance','recognition'):
-        subprocess.run([env['ILLUSTASH_'+kind.upper()+'_WORKER'],'--check'],env=env,check=True)
+        subprocess.run([env['ILLUSTASH_'+kind.upper()+'_WORKER'],'--check'],env={**env,'ILLUSTASH_WORKER_KIND':kind},check=True)
     subprocess.run([str(core),'library-create','--folder',str(folder),'--dest',str(library),'--name','Synthetic'],env=env,check=True)
     with socket.socket() as sock:
         sock.bind(('127.0.0.1',0));port=sock.getsockname()[1]
