@@ -376,7 +376,7 @@ class NativeArchivesTest(unittest.TestCase):
         self.assertEqual((end['status'], end['kind'], end['file']), ('done', 'archive', archive.name))
         path = Path(end['result']['path'])
         self.assertEqual((path / 'features' / 'full-features.npy').stat().st_size, self.LARGE)
-        self.assertIn(str(path), registry.read_text())
+        self.assertIn(str(path), [r['path'] for r in json.loads(registry.read_text())['recent']])
 
     def test_archive_import_cancel_switch_and_quit_remove_what_it_unpacked(self):
         # #88 (#26): the cancel button, a switch and quitting each stop the unpacking within 5 s (quitting: the
@@ -422,7 +422,7 @@ class NativeArchivesTest(unittest.TestCase):
                         self.token = json.loads(self.request('/api/bootstrap')['body'])['token']
                 self.assertEqual(listing(), before)
                 if how != 'cancel':  # opening a library (switching, restarting) updates the registry; the import adds nothing
-                    self.assertNotIn(str(library.HOME), registry.read_text())
+                    self.assertFalse([r for r in json.loads(registry.read_text())['recent'] if Path(r['path']).resolve().parent == library.HOME.resolve()])
                 else:
                     self.assertEqual(registry.read_bytes() if registry.exists() else None, recent)
 
