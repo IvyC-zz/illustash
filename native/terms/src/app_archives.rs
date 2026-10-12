@@ -81,7 +81,53 @@ fn copy_cancelled(mut from: impl Read, mut to: impl Write, cancel: &AtomicBool) 
         to.write_all(&bytes[..n])?;
     }
 }
-pub(crate) fn export(library: &Library, dest: &Path, cancel: &AtomicBool) -> Result<PathBuf> {
+/// Only call on an export snapshot or a newly unpacked package, never the sender's database.
+/// Model connection settings (including future keys) and lasting network consent are personal.
+fn sanitize_database(path: &Path, cancel: Option<Arc<AtomicBool>>) -> Result<()> {
+    let mut c = crate::sqlite::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE)?;
+    // Compaction may dominate large exports. Switching libraries/closing the app must
+    // interrupt these SQLite operations as well as the streaming copy and backup.
+    c.progress_handler(1000, cancel.map(|cancel| move || cancel.load(Ordering::SeqCst)));
+    c.execute_batch("PRAGMA journal_mode=DELETE; PRAGMA secure_delete=ON;")?;
+    let tx = c.transaction()?;
+    for (table, sql) in
+        [("name_settings", "DELETE FROM name_settings"), ("prefs", "DELETE FROM prefs WHERE key='names_network'")]
+    {
+        if tx.query_row("SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE type='table' AND name=?)", [table], |r| {
+            r.get::<_, bool>(0)
+        })? {
+            tx.execute(sql, [])?;
+        }
+    }
+    // VACUUM removes secrets left in free pages by older writes with secure_delete disabled.
+    // SQLite rewrites implicit rowids only in unindexed tables. Temporary indexes preserve
+    // those identities, including historical/user tables, without changing the final schema.
+    let tables = tx
+        .prepare("SELECT name FROM sqlite_schema WHERE type='table' AND name NOT LIKE 'sqlite_%'")?
+        .query_map([], |r| r.get::<_, String>(0))?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    let quote = |s: &str| format!("\"{}\"", s.replace('"', "\"\""));
+    let mut indexes = Vec::new();
+    for table in tables {
+        let table = quote(&table);
+        if tx.prepare(&format!("PRAGMA index_list({table})"))?.exists([])? {
+            continue;
+        }
+        let column: String = tx.query_row(&format!("PRAGMA table_info({table})"), [], |r| r.get(1))?;
+        let index = quote(&format!("archive_rowid_{}", random()?));
+        tx.execute_batch(&format!("CREATE INDEX {index} ON {table}({})", quote(&column)))?;
+        indexes.push(index);
+    }
+    tx.commit()?;
+    c.execute_batch("VACUUM")?;
+    let tx = c.transaction()?;
+    for index in indexes {
+        tx.execute_batch(&format!("DROP INDEX {index}"))?;
+    }
+    tx.commit()?;
+    Ok(())
+}
+pub(crate) fn export(library: &Library, dest: &Path, cancel: &Arc<AtomicBool>) -> Result<PathBuf> {
     let work = stage(dest.parent().ok_or_else(|| invalid("无效导出路径"))?)?;
     let archive = work.0.join("archive.zip");
     let mut zip = ZipWriter::new(BufWriter::with_capacity(
@@ -112,6 +158,11 @@ pub(crate) fn export(library: &Library, dest: &Path, cancel: &AtomicBool) -> Res
             }
             drop(backup);
             drop(b);
+            if *rel == "library.sqlite" {
+                cancelled(cancel)?;
+                sanitize_database(&copy, Some(cancel.clone()))?;
+                cancelled(cancel)?;
+            }
             copy
         } else {
             src
@@ -243,6 +294,12 @@ pub(crate) fn import(archive: &Path) -> Result<(PathBuf, String)> {
         unpack(&mut zip, &name, &mut file, &mut buffer)?;
         file.flush().map_err(invalid)?;
     }
+    // Old exports can still contain credentials and the sender's lasting consent.
+    // Strip them before publishing or registering this newly created package.
+    let database = path.join("library.sqlite");
+    if database.try_exists()? {
+        sanitize_database(&database, None)?;
+    }
     for sub in ["features", "thumbnails", "backups"] {
         fs::create_dir_all(path.join(sub)).map_err(invalid)?;
     }
@@ -343,6 +400,35 @@ impl Drop for Exports {
 mod tests {
     use super::*;
     use std::io::Write;
+
+    #[test]
+    fn legacy_database_without_settings_preserves_sparse_rowids() {
+        let work = stage(&std::env::temp_dir()).unwrap();
+        let path = work.0.join("library.sqlite");
+        let c = crate::sqlite::open(&path).unwrap();
+        c.execute_batch("CREATE TABLE human(value BLOB); INSERT INTO human(rowid,value) VALUES (37,x'00ff');").unwrap();
+        drop(c);
+        sanitize_database(&path, None).unwrap();
+        let c = crate::sqlite::open(&path).unwrap();
+        let row: (i64, Vec<u8>) =
+            c.query_row("SELECT rowid,value FROM human", [], |r| Ok((r.get(0)?, r.get(1)?))).unwrap();
+        assert_eq!(row, (37, vec![0, 255]));
+        assert_eq!(
+            c.query_row("SELECT count(*) FROM sqlite_schema WHERE type='index'", [], |r| r.get::<_, i64>(0)).unwrap(),
+            0
+        );
+    }
+
+    #[test]
+    fn sanitization_honors_export_cancellation_inside_sqlite() {
+        let work = stage(&std::env::temp_dir()).unwrap();
+        let path = work.0.join("library.sqlite");
+        let c = crate::sqlite::open(&path).unwrap();
+        c.execute_batch("CREATE TABLE human(value); WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<20000) INSERT INTO human SELECT x FROM n;").unwrap();
+        drop(c);
+        let error = sanitize_database(&path, Some(Arc::new(AtomicBool::new(true)))).unwrap_err();
+        assert!(matches!(error, Error::Sql(_)), "{error}");
+    }
 
     #[test]
     fn backslash_entry_names_are_rejected_on_every_platform() {

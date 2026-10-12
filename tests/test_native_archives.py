@@ -45,6 +45,80 @@ class NativeArchivesTest(unittest.TestCase):
         self.assertEqual(result['status'], 'done', result)
         return Path(result['path'])
 
+    def test_share_export_and_legacy_import_remove_secrets_and_require_new_consent(self):
+        markers = [f'archive-synthetic-secret-{kind}' for kind in ('current', 'legacy', 'future', 'retired')]
+        response = self.request('/api/names', {'action': 'model_api', 'key': markers[0],
+                                             'model': 'synthetic-model', 'base': 'https://example.invalid'})
+        self.assertEqual(response['status'], 200, response)
+        response = self.request('/api/names', {'action': 'network', 'allow': True})
+        self.assertEqual(response['status'], 200, response)
+        with closing(sqlite3.connect(self.lib.db)) as c:
+            c.execute('PRAGMA secure_delete=OFF')
+            c.executemany('INSERT OR REPLACE INTO name_settings VALUES (?,?)',
+                          [('deepseek_key', markers[1]), ('future_credential', markers[2]),
+                           ('traffic_reserved', '2000000'), ('retired_key', markers[3] + 'x' * 16000)])
+            c.commit()
+            c.execute("DELETE FROM name_settings WHERE key='retired_key'")
+            c.execute("INSERT OR REPLACE INTO prefs VALUES ('startup',?)", ('{"names":true,"sync":false}',))
+            # Unindexed historical tables must retain sparse physical rowids through compaction.
+            c.execute('CREATE TABLE archive_sparse(value TEXT)')
+            c.execute("INSERT INTO archive_sparse(rowid,value) VALUES (37,'synthetic human record')")
+            c.commit()
+            c.execute('PRAGMA wal_checkpoint(TRUNCATE)')
+        self.assertIn(markers[3].encode(), self.lib.db.read_bytes(), 'fixture must contain deleted secret bytes')
+        before = snapshot(self.lib.db)
+        source_before = snapshot(self.lib.source)
+        # snapshot() is per-table digests: build the expected state on a plain copy, rowids untouched.
+        expected_db = self.root / 'expected-sanitized.sqlite'
+        with closing(sqlite3.connect(self.lib.db)) as c, closing(sqlite3.connect(expected_db)) as e:
+            c.backup(e)
+            e.execute('DELETE FROM name_settings')
+            e.execute("DELETE FROM prefs WHERE key='names_network'")
+            e.commit()
+        expected = snapshot(expected_db)
+        self.assertNotEqual(expected['prefs'], before['prefs'], 'fixture must grant names_network')
+        legacy = library.export_library(self.lib, self.root / 'unsafe-legacy.zip')
+        legacy_bytes = legacy.read_bytes()
+        self.begin()
+        exported = self.done()
+        unpacked = self.root / 'sanitized'
+        with zipfile.ZipFile(exported) as z:
+            self.assertEqual(set(z.namelist()), set(library.EXPORTED) &
+                             {p.relative_to(self.lib.path).as_posix() for p in self.lib.path.rglob('*') if p.is_file()})
+            z.extractall(unpacked)
+            for name in z.namelist():
+                data = z.read(name)
+                for marker in markers:
+                    self.assertNotIn(marker.encode(), data, name)
+                if name.endswith('.sqlite'):
+                    # snapshot traverses every table/view, typed cell, rowid and DDL.
+                    state = snapshot(unpacked / name)
+                    for marker in markers:
+                        self.assertNotIn(marker, repr(state), name)
+        self.assertEqual(snapshot(unpacked / 'library.sqlite'), expected)
+        self.assertEqual(snapshot(unpacked / 'source.sqlite'), source_before)
+        self.assertEqual(snapshot(self.lib.db), before)
+        self.assertEqual(snapshot(self.lib.source), source_before)
+        for archive in (exported, legacy):
+            response = self.request('/api/libraries/import', {'path': str(archive)})
+            self.assertEqual(response['status'], 200, response)
+            path = Path(json.loads(response['body'])['path'])
+            self.assertEqual(snapshot(path / 'library.sqlite'), expected)
+            self.assertEqual(snapshot(path / 'source.sqlite'), source_before)
+            for file in path.rglob('*'):
+                if file.is_file():
+                    for marker in markers:
+                        self.assertNotIn(marker.encode(), file.read_bytes(), file.name)
+            response = self.request('/api/libraries/open', {'path': str(path)})
+            self.assertEqual(response['status'], 200, response)
+            self.token = json.loads(self.request('/api/bootstrap')['body'])['token']
+            names = json.loads(self.request('/api/names')['body'])
+            self.assertFalse(names['model_api']['configured'])
+            self.assertEqual(names['network'], {'authorized': False, 'this_run': False, 'granted_at': None})
+        self.assertEqual(legacy.read_bytes(), legacy_bytes)
+        self.assertEqual(snapshot(self.lib.db), before)
+        self.assertFalse(self.sentinel.exists())
+
     def test_roundtrip_wal_archive_contents_database_projection_and_same_id(self):
         self.lib.config['sources'] = [library.folder_source(self.root / 'Pixiv')]
         self.lib.save()
@@ -98,6 +172,33 @@ class NativeArchivesTest(unittest.TestCase):
         self.assertEqual(json.loads(self.request('/api/libraries')['body'])['current'], str(imported.path))
         self.assertTrue(second.exists())
         self.assertFalse(self.sentinel.exists())
+
+    def test_sanitization_failure_does_not_publish_export_or_import(self):
+        self.begin()
+        dest = self.done()
+        published = dest.read_bytes()
+        with closing(sqlite3.connect(self.lib.db)) as c:
+            c.execute("INSERT INTO name_settings VALUES ('model_key','archive-synthetic-failure-secret')")
+            c.execute("CREATE TRIGGER archive_fail BEFORE DELETE ON name_settings BEGIN SELECT RAISE(ABORT,'synthetic failure'); END")
+            c.commit()
+        before = snapshot(self.lib.db)
+        legacy = library.export_library(self.lib, self.root / 'failure-legacy.zip')
+        self.begin()
+        wait_until(lambda: self.state()['status'] == 'error', timeout=10)
+        self.assertEqual(dest.read_bytes(), published)
+        self.assertEqual(list(dest.parent.glob('.illustash-export-*')), [])
+        imports = set(library.HOME.glob('*')) if library.HOME.exists() else set()
+        response = self.request('/api/libraries/import', {'path': str(legacy)})
+        self.assertNotEqual(response['status'], 200, response)
+        self.assertEqual(set(library.HOME.glob('*')) if library.HOME.exists() else set(), imports)
+        self.assertEqual(snapshot(self.lib.db), before)
+        with closing(sqlite3.connect(self.lib.db)) as c:
+            c.execute('DROP TRIGGER archive_fail')
+            c.commit()
+        self.begin()
+        self.done()
+        with zipfile.ZipFile(dest) as z:
+            self.assertNotIn(b'archive-synthetic-failure-secret', z.read('library.sqlite'))
 
     def test_preset_success_bytes_database_and_forget_preserves_package(self):
         source = library.folder_source(self.root / 'folder')

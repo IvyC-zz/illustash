@@ -2857,7 +2857,7 @@ function renderLibrariesCard() {
     <p class="lib-actions"><button class="quiet" data-lib-new>新建图库</button><button class="quiet" data-lib-choose="library">打开其他图库…</button><button class="quiet" data-lib-choose="zip">导入…</button>${cur ? `<button class="quiet" data-lib-export ${ex.status === 'running' ? 'disabled' : ''}>导出当前图库</button>` : ''}</p>
     ${form}${exportLine}
     ${data.libraries.length > 1 || dev ? `<table class="settings-table lib-table"><tr><th>这台电脑上的图库</th>${dev ? '<th>测试画像</th>' : ''}<th></th></tr>${data.libraries.map(row).join('')}</table>` : ''}
-    <p class="muted-note">导出的 zip 只有识别结果和人工整理记录，不含图片，可以换电脑或发给别人。</p>`;
+    <p class="muted-note">导出的 zip 包含识别结果、人工整理记录和来源配置，不含图片、模型连接设置或联网授权，可以换电脑或发给别人。导入后需重新设置模型接口，并自行确认名称查询的联网授权；旧版导出包也会清除这些设置。个人备份请保留完整图库目录。</p>`;
 }
 // Gallery pages have no Tauri dialog permission. Keep confirmation inside the page;
 // window.confirm may be replaced with an async plugin function by the desktop shell.
@@ -2921,7 +2921,7 @@ $('settingsPage').addEventListener('click', async e => {
   else if (d.libChoose) {
     const r = await libraryAction('choose', {kind: d.libChoose}); if (!r?.path) return;
     if (d.libChoose === 'library') openLibrary(r.path, r.path.split('/').pop().replace(/\.pilib$/, ''));
-    else { toast('正在导入…'); const lib = await libraryAction('import', {path: r.path}); if (lib) { toast(`已导入「${lib.name}」`); loadLibraries(); } }
+    else { toast('正在导入…'); const lib = await libraryAction('import', {path: r.path}); if (lib) { toast(`已导入「${lib.name}」，模型接口与名称联网授权需重新设置`); loadLibraries(); } }
   }
   else if ('libCreate' in d) {
     keep();
