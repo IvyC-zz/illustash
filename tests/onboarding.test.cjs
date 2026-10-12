@@ -78,3 +78,17 @@ test('suggested works show who is followed, who needs checking first, and who ca
   assert.match(html, /原神.*data-guide-watch="2">关注/s, 'a suggested tag shows its built-in Chinese name');
   assert.doesNotMatch(html, /data-guide="index-check" disabled/, 'a followed work enables the check');
 });
+
+test('after a stopped or failed sync the guide says nothing is lost and what to do next (#97)', async () => {
+  for (const [sync, expected] of [
+    [{status: 'interrupted', message: '任务已取消'}, /同步没有做完.*再同步一次会接着处理剩下的/s],
+    [{status: 'error', message: '文件夹不存在或无法访问：/gone'}, /同步出错了.*\/gone.*外接硬盘/s],
+    [{status: 'error', message: 'disk I/O error'}, /诊断信息/],
+    [{status: 'done', finished_at: '10-12 10:00', message: '2 张暂时读不到（可能还在 iCloud），下次同步重试', unreadable: 3}, /2 张暂时读不到.*有 3 处读不到/s],
+  ]) {
+    const c = guide({step: 'sync', sync, results: {total: 5, recognized: 5}});
+    await c.renderStart();
+    assert.match(c.nodes.startPage.innerHTML, expected, sync.status);
+    assert.match(c.nodes.startPage.innerHTML, /再同步一次/, sync.status);
+  }
+});

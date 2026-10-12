@@ -2824,7 +2824,8 @@ async function loadLibraries() {
 // pictures came from; nothing is guessed from folder names. Folders include their subfolders and may not nest.
 const ORIGINS = [['pixiv', 'Pixiv'], ['x', 'X'], ['other', '其他']];
 const IS_MAC = /Mac/.test(navigator.platform);
-const libForm = {open: false, name: '', folders: {}, photos: false};
+// created: a library published but not listed among the recent ones (#97), offered instead of creating again.
+const libForm = {open: false, name: '', folders: {}, photos: false, created: null};
 // What is typed into the new-library form is kept as it is typed, so a background refresh of the card loses nothing.
 $('settingsPage').addEventListener('input', e => {
   if (e.target.id === 'libName') libForm.name = e.target.value;
@@ -2868,7 +2869,10 @@ function renderLibrariesCard() {
         <button class="quiet" data-lib-pick="${id}">添加文件夹…</button></div>`).join('')}</div>
       ${IS_MAC ? `<label class="lib-photos"><input type="checkbox" id="libPhotos" ${f.photos ? 'checked' : ''}> 同时读取 iCloud 照片（本机「照片」图库，按存图的 App 区分 X 和 Pixiv）</label>` : ''}
       <div class="setting-line"><span>名字<small class="line-hint">保存在 ${esc(home(data.home))}</small></span><input class="lib-input" id="libName" placeholder="新图库" value="${esc(f.name)}"></div>
-      <p><button class="primary" data-lib-create>创建并打开</button> <button class="quiet" data-lib-cancel>取消</button></p></div>`;
+      ${f.created ? `<div class="lib-created"><p><b>图库已经建好</b>，保存在 <bdi>${esc(home(f.created.path))}</bdi>，但没能加入最近图库列表：${esc(f.created.error)}</p>
+        <p class="muted-note">打开它会再试一次加入列表；再点创建会另建一个带编号的图库。</p>
+        <p><button class="primary" data-open-library="${esc(f.created.path)}" data-name="${esc(f.created.name)}">打开这个图库</button> <button class="quiet" data-lib-again>仍然新建一个</button></p></div>`
+        : '<p><button class="primary" data-lib-create>创建并打开</button> <button class="quiet" data-lib-cancel>取消</button></p>'}</div>`;
   setSettingsHTML(card, `${cardHead('图库', '每个图库各自保存识别结果和人工整理记录，图片本身留在原处、不复制。切换图库时后台会重启，几秒后自动刷新。')}
     ${cur ? `<div class="setting-line"><span><b>${esc(cur.name)}</b><small class="line-hint lib-path-hint">${esc(home(cur.path))}</small></span><span class="tag-on">当前图库</span></div>
     <div class="lib-groups">${groups}</div>` : '<p class="muted-note">当前是旧的数据布局（不是图库包）。</p>'}
@@ -2992,7 +2996,8 @@ $('settingsPage').addEventListener('click', async e => {
   const t = e.target.closest('button'); if (!t || !$('setLibraries')?.contains(t)) return;
   const d = t.dataset;
   const keep = () => { libForm.name = $('libName')?.value ?? libForm.name; libForm.photos = $('libPhotos')?.checked ?? libForm.photos; };
-  if ('libNew' in d) { Object.assign(libForm, {open: true, name: '', folders: {}, photos: false}); renderLibrariesCard(); }
+  if ('libNew' in d) { Object.assign(libForm, {open: true, name: '', folders: {}, photos: false, created: null}); renderLibrariesCard(); }
+  else if ('libAgain' in d) { libForm.created = null; renderLibrariesCard(); }
   else if ('libCancel' in d) { libForm.open = false; renderLibrariesCard(); }
   else if (d.libPick) {
     keep();
@@ -3012,7 +3017,8 @@ $('settingsPage').addEventListener('click', async e => {
     if (libForm.photos) sources.push({kind: 'photos'});
     if (!sources.length) { toast('请至少添加一个文件夹'); return; }
     const lib = await libraryAction('new', {name: libForm.name, sources});
-    if (lib) { libForm.open = false; openLibrary(lib.path, lib.name); }
+    if (lib?.listed === false) { libForm.created = lib; renderLibrariesCard(); }
+    else if (lib) { libForm.open = false; openLibrary(lib.path, lib.name); }
   }
   else if (d.libAddSource) {
     const paths = await pickFolders(); if (!paths.length) return;
@@ -3511,11 +3517,17 @@ function guideSync(g) {
   const why = [];
   if (waiting) why.push(!c.recognition ? `${number(waiting)} 张没有识别：这个安装没有识别组件。` : running ? `${number(waiting)} 张还在排队识别。` : `${number(waiting)} 张还没识别，下次同步会继续。`);
   if (unseen) why.push(`识别过但没认出角色的 ${number(unseen)} 张：可能是原创角色、冷门角色，或者不是插画。可以在下一步为常见作品补充参考特征，也可以在「未识别」里手动设为角色。`);
+  // After a stop or failure nothing already added or recognised is lost; say what to do next (#97).
+  const missing = /不存在或无法访问/.test(s.message || '');
+  const next = s.status === 'interrupted' ? guideNote('warn', '同步没有做完', '已经加入和识别的图都保留了。再同步一次会接着处理剩下的。')
+    : s.status === 'error' ? guideNote('warn', '同步出错了', `${esc(s.message || '')}${s.message ? '。' : ''}已经加入和识别的图都保留了。${missing ? '检查来源文件夹是否还在、外接硬盘是否接上，或者在 <a class="link" href="#/settings/library">设置 › 图库</a> 里换一个文件夹，然后再同步一次。' : '可以再同步一次；还不行的话，反馈时附上「设置 › 关于」里的诊断信息。'}`)
+    : s.status === 'done' && s.message ? `<p class="settings-note">${esc(s.message)}</p>` : '';
+  const unreadable = s.unreadable && !running ? `<p class="settings-note">有 ${number(s.unreadable)} 处读不到（比如还没下载到本机的 iCloud 文件、没接上的硬盘、没有权限的子文件夹）：那里原有的图都保留着，恢复访问后再同步就会读进来。</p>` : '';
   const cell = (n, label, hint = '') => `<div class="start-count"><b>${number(n)}</b><span>${label}</span>${hint ? `<small>${hint}</small>` : ''}</div>`;
   const empty = !running && s.status !== 'off' && !r.total && s.finished_at;
   return cardHead('首次同步', '打开图库时会自动读取来源里的图片，并在本机识别。图片留在原来的位置，不复制、不修改。') +
     `<p class="start-status">${running ? '<span class="local-dot busy"></span>' : ''}${esc(s.status === 'off' ? '这次启动没有开同步' : syncLine(s))}</p>${syncBar(s, (done, total) => total ? `<div class="progress"><span style="width:${Math.min(100, Math.round((done || 0) / total * 100))}%"></span></div>` : '')}
-    ${stage ? `<p class="settings-note">${stage}</p>` : ''}
+    ${stage ? `<p class="settings-note">${stage}</p>` : ''}${next}${unreadable}
     <div class="start-counts">${cell(r.total, '张在图库里')}${cell(r.recognized, '张已识别', '算过画面标签和角色特征')}${cell(r.with_character, '张认出了角色', `共 ${number(r.characters)} 个角色`)}${cell(r.unmatched, '张还没认出角色')}</div>
     ${why.map(t => `<p class="settings-note">${t}</p>`).join('')}
     ${empty ? guideNote('warn', '来源里没有找到图片', '检查选的文件夹里有没有图片，或者在 <a class="link" href="#/settings/library">设置 › 图库</a> 里添加来源。') : ''}

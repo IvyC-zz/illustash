@@ -526,8 +526,12 @@ class NativeLifecycleTest(unittest.TestCase):
         dest = self.home / 'registry-failure.pilib'
         self.assertTrue(dest.is_relative_to(self.root))
         right = self.request('/api/libraries/new', body)
-        self.assertEqual(left['status'], right['status'])
-        self.assertEqual(right['status'], 400)
+        # #97 (2026-10-12, user decision): the published package is reported with why it is not listed, instead of
+        # the recorded 400; creating again would only make a second, numbered package.
+        self.assertEqual(right['status'], 200, right['body'])
+        made = json.loads(right['body'])
+        self.assertEqual((Path(made['path']).resolve(), made['name'], made['listed']), (dest.resolve(), 'registry-failure', False))
+        self.assertTrue(made['error'])
         self.assertEqual(current, (dump(self.lib.source), dump(self.lib.db)))
         self.assertEqual(registry_before, registry.read_bytes())
         self.assertEqual(json.loads(self.request('/api/bootstrap')['body'])['token'], self.token)

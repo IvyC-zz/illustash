@@ -37,9 +37,17 @@ pub enum Pick {
     Photos,
 }
 
-/// Create a library under the libraries home (a numbered name when taken), list it among the recent ones and
-/// return its path. `root` is the resource root, for the reference library.
-pub fn create(root: &Path, name: &str, picks: Vec<Pick>) -> Result<PathBuf> {
+/// A library made on the welcome page. `unlisted` says why it is not among the recent libraries: the package was
+/// published, only the registry could not be written (#97). Creating again would make a second, numbered package;
+/// opening this one lists it.
+pub struct Created {
+    pub path: PathBuf,
+    pub unlisted: Option<String>,
+}
+
+/// Create a library under the libraries home (a numbered name when taken) and list it among the recent ones.
+/// `root` is the resource root, for the reference library. An error means nothing was published.
+pub fn create(root: &Path, name: &str, picks: Vec<Pick>) -> Result<Created> {
     let name = crate::compat_text::trim(name);
     let name = if name.is_empty() { "新图库" } else { name };
     let mut sources = Vec::new();
@@ -55,7 +63,10 @@ pub fn create(root: &Path, name: &str, picks: Vec<Pick>) -> Result<PathBuf> {
         });
     }
     let dest = crate::app_libraries::unique_path(name)?;
-    crate::app_service::create(root, &dest, name, sources)
+    let built = crate::app_service::build_sources(root, &dest, name, sources)?;
+    let path = PathBuf::from(built["path"].as_str().ok_or_else(|| Error::Schema("建库结果缺少路径".into()))?);
+    let unlisted = crate::app_libraries::remember_created(&path, name).err().map(|e| e.to_string());
+    Ok(Created { path, unlisted })
 }
 
 /// How long the welcome page waits for one folder to be counted; past it the count is a lower bound.

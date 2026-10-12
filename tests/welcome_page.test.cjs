@@ -73,3 +73,22 @@ test('a failed import and a failed creation keep the form as it was filled in', 
   assert.match(c.nodes.wcol.innerHTML, /data-drop="\/a"/);
   assert.deepEqual(JSON.parse(JSON.stringify(c.calls.find(([cmd]) => cmd === 'welcome_create')[1].sources)), [{kind: 'folder', path: '/a', preset: 'x'}]);
 });
+
+test('a library made but not listed is offered instead of making a second one (#97)', async () => {
+  const c = page({
+    welcome_pick: () => ({paths: ['/a']}),
+    welcome_inspect: ({paths}) => paths.map(p => ok(p, 2)),
+    welcome_create: () => ({created: '/Users/me/Pictures/Illustash/新图库.pilib', error: '写入失败（合成）'}),
+    welcome_open: () => null,
+  });
+  await click(c, {pick: 'x'});
+  await click(c, {actW: 'create'});
+  const shown = c.nodes.wcol.innerHTML;
+  assert.match(shown, /图库已经建好/);
+  assert.match(shown, /写入失败（合成）/);
+  assert.doesNotMatch(shown, /data-act-w="create"/, 'creating again is not the first offer');
+  await click(c, {actW: 'open-created'});
+  assert.deepEqual(JSON.parse(JSON.stringify(c.calls.at(-1))), ['welcome_open', {path: '/Users/me/Pictures/Illustash/新图库.pilib'}]);
+  await click(c, {actW: 'create-again'});
+  assert.match(c.nodes.wcol.innerHTML, /data-act-w="create"/);
+});
