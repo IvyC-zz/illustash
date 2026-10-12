@@ -1,6 +1,7 @@
 """#51 acceptance: fresh synthetic packages, computation substitutes and loopback queries only."""
 from tests.native_worker_fixture import command as worker_command, source as worker_source, exists as worker_exists
 
+import contextlib
 from contextlib import closing
 import http.server
 import json
@@ -431,16 +432,31 @@ class NativeProvenanceTest(unittest.TestCase):
             request['step']='iqdb';req.write_text(json.dumps(request))
             subprocess.run([str(adapter),str(req),str(reply)],check=True,start_new_session=True,env={**self.env,'PATH':os.environ['PATH']})
             rows=json.loads((cache/'hashes.json').read_text());self.assertEqual([r['asset'] for r in rows],['a']);self.assertTrue(rows[0]['hash'].startswith('iqdb_'))
+        # 和真实 worker 的 check_owner 一样：宿主不再是父进程就收掉自己的子进程并退出。
+        # Windows 上 worker 经 .cmd 启动、父进程不是宿主，宿主退出时由 Job 收掉整棵树。
         wrapper=self.root/'owner-worker'
-        wrapper.write_text('#!'+sys.executable+'\n'+"import os,subprocess,time\n"+
+        wrapper.write_text('#!'+sys.executable+'\n'+"import json,os,subprocess,sys,time\n"+
+                           "owner=json.loads(open(sys.argv[1]).read())['owner_pid']\n"+
                            "p=subprocess.Popen([os.environ['SYNTHETIC_PYTHON'],'-c','import time;time.sleep(300)'])\n"+
-                           "open(os.environ['SYNTHETIC_PID'],'w').write(str(p.pid))\n"+
-                           "while True:time.sleep(.1)\n")
+                           "out=os.environ['SYNTHETIC_PID'];open(out+'.tmp','w').write(f'{os.getpid()} {p.pid}');os.replace(out+'.tmp',out)\n"+
+                           "while os.name=='nt' or os.getppid()==owner:time.sleep(.1)\n"+
+                           "p.kill();p.wait()\n")
         wrapper.chmod(0o755);pidfile=self.root/'owner-child'
         self.env.update(ILLUSTASH_PROVENANCE_WORKER=worker_command(wrapper),SYNTHETIC_PYTHON=sys.executable,SYNTHETIC_PID=str(pidfile));self.restart()
         self.post({'action':'artist','artist':'synthetic'});wait_until(pidfile.exists,timeout=5)
-        child=int(pidfile.read_text());self.process.kill();self.process.wait(timeout=5)
-        wait_until(lambda:not worker_exists(child),timeout=5)
+        worker,child=map(int,pidfile.read_text().split())
+        gone=[]
+        def reap():
+            # 断言没走到时兜底，不把 worker 留成孤儿；已确认退出的不再按 pid 发信号。
+            if gone:return
+            for pid,group in ((worker,True),(child,False)):
+                with contextlib.suppress(OSError):
+                    if os.name=='nt':os.kill(pid,signal.SIGTERM)
+                    else:(os.killpg if group else os.kill)(pid,signal.SIGKILL)
+        self.addCleanup(reap)
+        self.process.kill();self.process.wait(timeout=5)
+        # POSIX 上 worker_exists 按进程组查，worker 是组长，孙进程同组，一并覆盖。
+        wait_until(lambda:not worker_exists(worker) and not worker_exists(child),timeout=5);gone.append(True)
         self.process,self.log=self.start(self.lib.path);self.token=json.loads(self.request('/api/bootstrap')['body'])['token']
         self.assertEqual(self.info()['state']['status'],'stopped')
         self.assertEqual(self.sql("SELECT count(*) FROM term_evidence WHERE source='provenance'"),[(0,)])
