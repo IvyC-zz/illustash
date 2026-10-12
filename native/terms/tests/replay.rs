@@ -18,6 +18,10 @@
 //!   column; then output order) as a safeguard;
 //! - learning stamps hash timestamps: they are substituted into later inputs (two recorded stamps
 //!   may be one replayed stamp) and masked as `<stamp>` in output comparisons.
+//!
+//! Replay side only (#101): a case's temporary directory is masked, in every spelling, before keys
+//! are looked for, so UUID-like segments of its path (an agent session's temp directory, say) are
+//! not taken for keys the core made. The case directory carries such a segment on purpose.
 use flate2::read::GzDecoder;
 use regex::Regex;
 use rusqlite::{types::ValueRef, Connection};
@@ -43,6 +47,69 @@ static OS_ERROR: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"[^：:\n]*\(os 
 const SKIP_COLUMNS: [(&str, &str); 2] = [("term_packages", "manifest"), ("term_evidence", "fingerprint")];
 const DERIVED_META: [&str; 1] = ["identity_graph_version"];
 const COMPANIONS: [&str; 4] = ["", "-wal", "-shm", "-journal"];
+/// A v4-shaped segment in every case directory's path, so that each run exercises [`Temp`] (#101).
+const UUID_SEGMENT: &str = "3f2b8c1e-9a4d-4e7b-8c21-5d6e7f809a1b";
+
+/// A case's temporary directory as text may spell it (#101).
+struct Temp {
+    /// Longest first.
+    spellings: Vec<String>,
+    /// Key-like values inside the directory's path.
+    segments: Vec<String>,
+}
+
+impl Temp {
+    fn new(dir: &Path) -> Self {
+        let mut bases = vec![dir.to_string_lossy().into_owned()];
+        if let Ok(canonical) = fs::canonicalize(dir) {
+            bases.push(canonical.to_string_lossy().into_owned());
+        }
+        for base in bases.clone() {
+            for prefix in [r"\\?\", "/private"] {
+                if let Some(short) = base.strip_prefix(prefix) {
+                    bases.push(short.to_owned());
+                }
+            }
+        }
+        let mut spellings = Vec::new();
+        for base in &bases {
+            let forward = base.replace('\\', "/");
+            let backward = forward.replace('/', "\\");
+            // As written, with `/`, with `\`, and with `\` escaped as in JSON text.
+            spellings.extend([base.clone(), forward, backward.replace('\\', "\\\\"), backward]);
+        }
+        spellings.sort_by(|a, b| b.len().cmp(&a.len()).then_with(|| a.cmp(b)));
+        spellings.dedup();
+        let segments = bases
+            .iter()
+            .flat_map(|b| VOLATILE.find_iter(b).map(|m| m.as_str().to_owned()).collect::<Vec<_>>())
+            .collect::<HashSet<_>>()
+            .into_iter()
+            .collect();
+        Temp { spellings, segments }
+    }
+
+    /// Text to look for keys in: the directory masked. A key-like segment of its path still left
+    /// over means a spelling not handled here; fail plainly rather than count it as a key.
+    fn mask(&self, text: &str) -> String {
+        let mut text = text.to_owned();
+        for spelling in &self.spellings {
+            text = text.replace(spelling.as_str(), "@TEMP@");
+        }
+        for segment in &self.segments {
+            if let Some(at) = text.find(segment.as_str()) {
+                let from = text.floor_char_boundary(at.saturating_sub(200));
+                let to = text.ceil_char_boundary(at + segment.len() + 40);
+                panic!(
+                    "{segment} is part of the replay's temporary directory, spelled here in a way \
+                     `Temp::new` does not mask (#101): {:?}",
+                    &text[from..to]
+                );
+            }
+        }
+        text
+    }
+}
 
 /// Temporary roots of one case: (real path, token), longest real path first when substituting.
 struct Roots(Vec<(String, String)>);
@@ -162,7 +229,7 @@ fn digests(db: &Path, roots: &Roots, back: &HashMap<String, String>) -> BTreeMap
 }
 
 /// Volatile values in the database, in recording order.
-fn volatile(db: &Path) -> Vec<String> {
+fn volatile(db: &Path, temp: &Temp) -> Vec<String> {
     if !db.exists() {
         return Vec::new();
     }
@@ -179,7 +246,7 @@ fn volatile(db: &Path) -> Vec<String> {
         while let Some(row) = q.next().unwrap() {
             for i in 0..n {
                 if let ValueRef::Text(v) = row.get_ref(i).unwrap() {
-                    for m in VOLATILE.find_iter(&String::from_utf8_lossy(v)) {
+                    for m in VOLATILE.find_iter(&temp.mask(&String::from_utf8_lossy(v))) {
                         if seen.insert(m.as_str().to_owned()) {
                             order.push(m.as_str().to_owned());
                         }
@@ -305,9 +372,11 @@ fn op(call: &Value) -> String {
 
 /// Replay one case; returns the first few differences.
 fn case(name: &str, calls: &[Value], blobs: &Value, bin: &Path) -> Vec<String> {
-    let temp = std::env::temp_dir().join(format!("illustash-replay-{}-{}", std::process::id(), short(name)));
-    let _ = fs::remove_dir_all(&temp);
+    let outer = std::env::temp_dir().join(format!("illustash-replay-{}-{}", std::process::id(), short(name)));
+    let _ = fs::remove_dir_all(&outer);
+    let temp = outer.join(UUID_SEGMENT);
     fs::create_dir_all(temp.join("root")).unwrap();
+    let masks = Temp::new(&temp);
     let counter = temp.join("key-counter");
     fs::write(&counter, "0").unwrap();
     // Recorded paths use `/`, often inside JSON text. On Windows the root is written with `/` too (a
@@ -341,7 +410,8 @@ fn case(name: &str, calls: &[Value], blobs: &Value, bin: &Path) -> Vec<String> {
         environment(call, blobs, &roots, &mapping);
         let sub = |text: &str, mapping: &HashMap<String, String>| roots.sub(&remap(text, mapping));
         let db = call.get("db").and_then(Value::as_str).map(|d| PathBuf::from(sub(d, &mapping)));
-        let before: HashSet<String> = db.as_deref().map(volatile).unwrap_or_default().into_iter().collect();
+        let before: HashSet<String> =
+            db.as_deref().map(|d| volatile(d, &masks)).unwrap_or_default().into_iter().collect();
         let outputs = if call["mode"] == "cli" {
             let args: Vec<String> =
                 call["args"].as_array().unwrap().iter().map(|a| sub(a.as_str().unwrap(), &mapping)).collect();
@@ -386,7 +456,7 @@ fn case(name: &str, calls: &[Value], blobs: &Value, bin: &Path) -> Vec<String> {
         };
         let mut check = || -> Result<(), String> {
             if let Some(db) = &db {
-                let new: Vec<String> = volatile(db).into_iter().filter(|v| !before.contains(v)).collect();
+                let new: Vec<String> = volatile(db, &masks).into_iter().filter(|v| !before.contains(v)).collect();
                 let keys: Vec<String> = call
                     .get("keys")
                     .and_then(Value::as_array)
@@ -407,7 +477,7 @@ fn case(name: &str, calls: &[Value], blobs: &Value, bin: &Path) -> Vec<String> {
                 };
                 let act = {
                     let known: HashSet<&String> = mapping.values().collect();
-                    fresh(got, &known)
+                    fresh(&masks.mask(got), &known)
                 };
                 extend(&mut mapping, &rec, &act, &format!("{at} {key}"))?;
             }
@@ -465,7 +535,7 @@ fn case(name: &str, calls: &[Value], blobs: &Value, bin: &Path) -> Vec<String> {
         }
     }
     drop(serve);
-    let _ = fs::remove_dir_all(&temp);
+    let _ = fs::remove_dir_all(&outer);
     problems
 }
 
