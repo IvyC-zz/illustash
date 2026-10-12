@@ -468,7 +468,9 @@ class NativeHumanLabelsTest(unittest.TestCase):
 
     def test_pending_verdict_startup_and_failed_ack_resume_without_http_trigger(self):
         # A dispatcher acknowledgement failure happens AFTER the human transaction has
-        # committed. Its exact old HTTP500 does not mean the undo itself was rolled back.
+        # committed. The old reference answered HTTP 500 "rolled back"; by user decision on
+        # 2026-10-11 (#40) the committed undo now answers 200 with the latest step to undo,
+        # and the event stays pending for recovery. Database states still match the recording.
         # Keep this explicit committed phase separate from pair()'s precommit fault gate.
         for owner in ('character', 'curation'):
             self.seed_both()
@@ -483,9 +485,9 @@ class NativeHumanLabelsTest(unittest.TestCase):
             item = {'method': 'POST', 'url': '/api/undo', 'body': json.dumps({'id': action}).encode(),
                     'headers': {'Content-Type': 'application/json', 'X-CSRF-Token': self.token}}
             old, native = self.reference_response('response', item), fetch(self.origin, item, self.origin)
-            self.assertIsNone(difference(old, native), difference(old, native))
-            self.assertEqual(native['status'], 500)
-            self.assertEqual(native['body'], json.dumps({'error': '保存失败，未提交的操作已回滚；请查看启动终端'}, ensure_ascii=False).encode())
+            self.assertEqual(old['status'], 500)  # the recorded former answer, no longer the contract
+            self.assertEqual(native['status'], 200, native['body'])
+            self.assertIn('undo', json.loads(native['body']))
             after = [self.rec.state('after'), states(self.right)]
             self.assertEqual(after[0], after[1])
             def committed(lib):

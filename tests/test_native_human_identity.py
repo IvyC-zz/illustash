@@ -157,8 +157,10 @@ class NativeHumanIdentityTest(unittest.TestCase):
             before = [self.rec.state('before'), labels.states(self.right)]
             item={'url':url,'method':'POST','body':json.dumps(body).encode(),'headers':{'Content-Type':'application/json','X-CSRF-Token':self.token}}
             self.wait_timestamp_pair(url)
+            # The old reference answered 500 although the operation had committed; by user decision on
+            # 2026-10-11 (#40) it answers 200 and the event stays pending for recovery.
             responses=[self.reference_response('response', item), fetch(self.origin,item,self.origin)]
-            self.assertEqual([r['status'] for r in responses],[500,500])
+            self.assertEqual([r['status'] for r in responses],[500,200])
             after=[self.rec.state('after'), labels.states(self.right)]
             self.assertEqual(after[0],after[1]); self.assertNotEqual(before[1],after[1])
             for lib in (self.left,self.right):

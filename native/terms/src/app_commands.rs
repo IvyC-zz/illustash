@@ -47,10 +47,7 @@ pub(crate) fn request_prepared(
         path,
         "/api/undo" | "/api/identity/decision" | "/api/merge" | "/api/character/profile" | "/api/local-links"
     ) {
-        crate::app_effects::drain(&context.db).map_err(|error| {
-            eprintln!("人工操作已提交，verdict事件处理失败：{error}");
-            error
-        })?;
+        crate::app_effects::drain_after_commit(&context.db);
     }
     Ok(result)
 }

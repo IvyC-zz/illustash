@@ -173,6 +173,34 @@ class NativeHumanCurationTest(unittest.TestCase):
         self.pair('/api/curate', {'filter': {}, 'exclude': ['b'], 'action': 'include'})
         self.undo_latest()
 
+    def test_committed_undo_is_reported_even_when_event_acknowledgement_fails(self):
+        # #40: a failure after the commit (acknowledging the verdict event) does not report a rollback.
+        def post(url, body):
+            item = {'url': url, 'method': 'POST', 'body': json.dumps(body).encode(),
+                    'headers': {'Content-Type': 'application/json', 'X-CSRF-Token': self.token}}
+            response = fetch(self.origin, item, self.origin)
+            return response['status'], json.loads(response['body'])
+        def sql(query):
+            with closing(sqlite3.connect(self.right.db)) as c:
+                return c.execute(query).fetchall()
+        status, first = post('/api/curate', {'ids': ['a'], 'action': 'exclude'}); self.assertEqual(status, 200, first)
+        status, second = post('/api/curate', {'ids': ['a'], 'action': 'include'}); self.assertEqual(status, 200, second)
+        with closing(sqlite3.connect(self.right.db)) as c:
+            c.execute("CREATE TRIGGER fail_ack BEFORE UPDATE ON backend_effects BEGIN SELECT RAISE(ABORT,'synthetic ack failure'); END")
+            c.commit()
+        status, undone = post('/api/undo', {'id': second['undo']['id']})
+        self.assertEqual(status, 200, undone)
+        self.assertEqual(undone['undo']['id'], first['undo']['id'])
+        self.assertEqual(sql(f"SELECT undone FROM actions WHERE id={second['undo']['id']}"), [(1,)])
+        self.assertGreater(sql("SELECT count(*) FROM backend_effects WHERE kind='verdict' AND status='pending'")[0][0], 0)
+        # The committed step is not undone twice, and the earlier one is still there to undo.
+        status, refused = post('/api/undo', {'id': second['undo']['id']}); self.assertEqual(status, 400, refused)
+        with closing(sqlite3.connect(self.right.db)) as c:
+            c.execute('DROP TRIGGER fail_ack'); c.commit()
+        status, last = post('/api/undo', {'id': first['undo']['id']}); self.assertEqual(status, 200, last)
+        self.assertEqual(sql("SELECT count(*) FROM backend_effects WHERE kind='verdict' AND status='pending'"), [(0,)])
+        self.assertFalse(self.sentinel.exists())
+
     def test_injected_writes_roll_back_every_declared_database(self):
         for table, url, body in (
             ('term_verdicts', '/api/artist/verdict', {'ids': ['b'], 'artist': self.artist, 'verdict': 'yes'}),
