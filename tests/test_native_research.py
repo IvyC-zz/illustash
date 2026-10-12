@@ -201,6 +201,61 @@ Path(sys.argv[2]).write_text(json.dumps(v,allow_nan=False))
         with sqlite3.connect(self.lib.db) as c:
             self.assertEqual(c.execute("SELECT count(*) FROM research_runs WHERE status='pending'").fetchone()[0],0)
 
+    def inflight(self, start, write):
+        """Start a run with the slow worker, commit `write` while it computes; return what was seen."""
+        runs=len(self.versions())
+        self.mode.write_text('slow')
+        result=start()
+        wait_until(lambda:len(self.versions())>runs,timeout=5)
+        with sqlite3.connect(self.lib.db) as c: write(c)
+        seen=[]
+        def settled():
+            seen.append(self.state()['status'])
+            return seen[-1] in ('idle','error')
+        wait_until(settled,timeout=20)
+        return result,seen,len(self.versions())-runs
+
+    def test_unread_tables_written_inflight_do_not_invalidate_learning(self):
+        # #29: preferences, name caches/settings and sync history are no research input.
+        before=self.rows(['clusters'])
+        self.assertTrue(before['clusters'])
+        def write(c):
+            c.execute("INSERT OR REPLACE INTO prefs VALUES ('synthetic_view','grid')")
+            c.execute("INSERT OR REPLACE INTO name_cache VALUES ('synthetic','{}')")
+            c.execute("INSERT OR REPLACE INTO name_settings VALUES ('traffic_reserved','42')")
+            c.execute("INSERT INTO sync_runs(status) VALUES ('done')")
+        _,seen,runs=self.inflight(lambda:self.request('/api/regroup',{}),write)
+        self.assertEqual(self.state()['status'],'idle',self.state())
+        self.assertNotIn('waiting',seen)
+        self.assertEqual(runs,1)
+        self.assertEqual(self.rows(['clusters']),before)
+
+    def test_similar_ignores_human_verdict_and_retries_on_its_own_inputs(self):
+        # #29: a verdict changes learning inputs only; an exclusion changes what similar scans.
+        def verdict(c):
+            response=self.request('/api/change',{'ids':['unmatched6'],'action':'confirmed','entity':self.alice})
+            self.assertEqual(response['status'],200,response)
+        _,seen,runs=self.inflight(lambda:self.request('/api/similar',{}),verdict)
+        self.assertEqual(self.state()['status'],'idle',self.state())
+        self.assertNotIn('waiting',seen)
+        self.assertEqual(runs,1)
+        _,seen,runs=self.inflight(lambda:self.request('/api/similar',{}),lambda c:c.execute("INSERT INTO excluded VALUES ('b','synthetic','test')"))
+        self.assertEqual(self.state()['status'],'idle',self.state())
+        self.assertIn('waiting',seen)
+        self.assertGreaterEqual(runs,2)
+
+    def test_oc_query_answers_despite_unread_write(self):
+        # #29: OC reads memberships, tags, exclusions and vectors only; it never retries.
+        expected=self.request('/api/oc/groups?entity='+self.alice)
+        self.assertEqual(expected['status'],200,expected)
+        with ThreadPoolExecutor(1) as pool:
+            answer,_,runs=self.inflight(lambda:pool.submit(self.request,'/api/oc/groups?entity='+self.alice),
+                lambda c:c.execute("INSERT OR REPLACE INTO prefs VALUES ('synthetic_view','list')"))
+            actual=answer.result(timeout=20)
+        self.assertEqual(actual['status'],200,actual)
+        self.assertEqual(actual['body'],expected['body'])
+        self.assertEqual(runs,1)
+
     def test_continuous_input_change_retries_are_bounded_then_manual_retry(self):
         # Six slow runs plus backoff outlast the default fixture task limit.
         self.stop(self.process);self.env['ILLUSTASH_RESEARCH_TIMEOUT_MS']='60000';self.restart();self.finished()

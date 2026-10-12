@@ -77,85 +77,219 @@ pub(crate) fn forget_content(tx: &Connection, src: &Connection, changed: &[Strin
     crate::app_migrate_data::early_groups(tx, src)?;
     crate::character_projection::fold(tx)
 }
-fn hash_db(c: &Connection, h: &mut Sha256, ctx: &TaskContext) -> Result<()> {
-    fn feed(h: &mut Sha256, b: &[u8]) {
-        h.update((b.len() as u64).to_le_bytes());
-        h.update(b);
+/// Application tables that no research calculator, learning stamp or result check reads (#29):
+/// preferences, name-source settings (model keys, traffic counters), name caches and display names,
+/// sync history and the research queues themselves. Writing them never invalidates a result. Every
+/// other table, including one added later, stays an input of learning.
+const UNREAD: &[&str] = &[
+    "backend_effects",
+    "display_names",
+    "name_aliases",
+    "name_cache",
+    "name_settings",
+    "names",
+    "prefs",
+    "research_runs",
+    "sync_added",
+    "sync_runs",
+];
+/// `meta` rows that are not inputs: the names version counts writes to name tables (triggers).
+const UNREAD_META: &str = "'names_version'";
+/// What one research kind's result is computed from (#29, docs/ARCHITECTURE_DIRECTION.md).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Scope {
+    /// events/regroup: learning, clustering and (events with similar) the similar scan.
+    Learning,
+    Similar,
+    Oc,
+    Relate,
+}
+impl Scope {
+    fn of(kind: &str) -> Self {
+        match kind {
+            "similar" => Self::Similar,
+            "oc" => Self::Oc,
+            "relate" => Self::Relate,
+            _ => Self::Learning,
+        }
     }
-    let tables = c.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT IN ('backend_effects','research_runs') ORDER BY name")?.query_map([],|r|r.get::<_,String>(0))?.collect::<rusqlite::Result<Vec<_>>>()?;
-    for table in tables {
+    /// Application tables the calculator reads; `None` means every table except `UNREAD`.
+    fn app(self) -> Option<&'static [&'static str]> {
+        match self {
+            Self::Learning => None,
+            // research_compute::similar::scan.
+            Self::Similar => Some(&[
+                "assets",
+                "duplicates",
+                "excluded",
+                "image_sigs",
+                "relations",
+                "similar_paired",
+                "similar_retry",
+            ]),
+            // research_compute::groups::oc.
+            Self::Oc => Some(&["duplicates", "excluded", "general_hits", "memberships"]),
+            // Only the requested assets' paths, hashed by `fingerprint_once`.
+            Self::Relate => Some(&[]),
+        }
+    }
+    /// Source tables the calculator reads; `None` means every table. CCIP vectors are the `embeddings` overlay.
+    fn source(self) -> Option<&'static [&'static str]> {
+        match self {
+            Self::Learning => None,
+            Self::Similar | Self::Oc => Some(&["embeddings"]),
+            Self::Relate => Some(&[]),
+        }
+    }
+    /// Kinds that publish caches or learning; the others only answer a query.
+    fn publishes(self) -> bool {
+        matches!(self, Self::Learning | Self::Similar)
+    }
+}
+/// The fingerprinted inputs of one run: the kind's scope plus the paths it reads outside the databases.
+struct Inputs<'a> {
+    scope: Scope,
+    /// relate: the requested assets, sorted and unique.
+    ids: Vec<String>,
+    features: PathBuf,
+    anchors: &'a Path,
+}
+impl<'a> Inputs<'a> {
+    fn new(library: &Library, anchors: &'a Path, kind: &str, args: &Value) -> Self {
+        let scope = Scope::of(kind);
+        let mut ids: Vec<String> = if scope == Scope::Relate {
+            args["ids"].as_array().into_iter().flatten().filter_map(|v| v.as_str().map(str::to_owned)).collect()
+        } else {
+            vec![]
+        };
+        ids.sort();
+        ids.dedup();
+        Self { scope, ids, features: library.instance_path().join("features"), anchors }
+    }
+    /// Shared files hashed by content: base features (all but relate) and anchors (learning only).
+    fn files(&self) -> Result<Vec<PathBuf>> {
+        let mut files = vec![];
+        if self.scope != Scope::Relate {
+            files.extend([self.features.join("full-manifest.csv"), self.features.join("full-features.npy")]);
+        }
+        if self.scope == Scope::Learning {
+            files.extend([self.anchors.join("char-anchors.npy"), self.anchors.join("char-anchors.txt")]);
+            if let Ok(entries) = fs::read_dir(self.anchors.join("char-index")) {
+                for entry in entries {
+                    let p = entry?.path();
+                    if p.extension().is_some_and(|s| s == "json") {
+                        files.push(p);
+                    }
+                }
+            }
+        }
+        files.sort();
+        Ok(files)
+    }
+    /// Cheap evidence that the shared files are unchanged: index generation plus each file's size and
+    /// modification time. Compared under the write lock instead of reading the files again.
+    fn stamp(&self) -> Result<Vec<u8>> {
+        let mut h = Sha256::new();
+        if self.scope == Scope::Learning && !self.anchors.as_os_str().is_empty() {
+            h.update(crate::index_generation::current(self.anchors)?.to_le_bytes());
+        }
+        for p in self.files()? {
+            feed(&mut h, p.to_string_lossy().as_bytes());
+            file_metadata(&mut h, &p);
+        }
+        Ok(h.finalize().to_vec())
+    }
+}
+fn feed(h: &mut Sha256, b: &[u8]) {
+    h.update((b.len() as u64).to_le_bytes());
+    h.update(b);
+}
+fn file_metadata(h: &mut Sha256, path: &Path) {
+    if let Ok(m) = fs::metadata(path) {
+        h.update(m.len().to_le_bytes());
+        if let Ok(t) = m.modified().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).map_err(std::io::Error::other))
+        {
+            h.update(t.as_nanos().to_le_bytes());
+        }
+    } else {
+        h.update(b"missing");
+    }
+}
+/// Ordered typed rows of one table (or a missing-table marker).
+fn hash_table(c: &Connection, h: &mut Sha256, table: &str, ctx: &TaskContext) -> Result<()> {
+    feed(h, table.as_bytes());
+    let exists: bool =
+        c.query_row("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name=?)", [table], |r| r.get(0))?;
+    if !exists {
+        feed(h, b"absent");
+        return Ok(());
+    }
+    let quoted = table.replace('"', "\"\"");
+    let n = c.prepare(&format!("SELECT * FROM \"{quoted}\""))?.column_count();
+    let order = (1..=n).map(|i| i.to_string()).collect::<Vec<_>>().join(",");
+    let filter = if table == "meta" { format!(" WHERE key NOT IN ({UNREAD_META})") } else { String::new() };
+    let mut q = c.prepare(&format!("SELECT * FROM \"{quoted}\"{filter} ORDER BY {order}"))?;
+    let mut rows = q.query([])?;
+    while let Some(r) = rows.next()? {
         ctx.check()?;
-        feed(h, table.as_bytes());
-        let quoted = table.replace('"', "\"\"");
-        let n = c.prepare(&format!("SELECT * FROM \"{quoted}\""))?.column_count();
-        let order = (1..=n).map(|i| i.to_string()).collect::<Vec<_>>().join(",");
-        let mut q = c.prepare(&format!("SELECT * FROM \"{quoted}\" ORDER BY {order}"))?;
-        let mut rows = q.query([])?;
-        while let Some(r) = rows.next()? {
-            ctx.check()?;
-            feed(h, b"row");
-            for i in 0..n {
-                match r.get_ref(i)? {
-                    ValueRef::Null => feed(h, b"null"),
-                    ValueRef::Integer(v) => {
-                        feed(h, b"int");
-                        feed(h, &v.to_le_bytes());
-                    }
-                    ValueRef::Real(v) => {
-                        feed(h, b"real");
-                        feed(h, &v.to_bits().to_le_bytes());
-                    }
-                    ValueRef::Text(v) => {
-                        feed(h, b"text");
-                        feed(h, v);
-                    }
-                    ValueRef::Blob(v) => {
-                        feed(h, b"blob");
-                        feed(h, v);
-                    }
+        feed(h, b"row");
+        for i in 0..n {
+            match r.get_ref(i)? {
+                ValueRef::Null => feed(h, b"null"),
+                ValueRef::Integer(v) => {
+                    feed(h, b"int");
+                    feed(h, &v.to_le_bytes());
+                }
+                ValueRef::Real(v) => {
+                    feed(h, b"real");
+                    feed(h, &v.to_bits().to_le_bytes());
+                }
+                ValueRef::Text(v) => {
+                    feed(h, b"text");
+                    feed(h, v);
+                }
+                ValueRef::Blob(v) => {
+                    feed(h, b"blob");
+                    feed(h, v);
                 }
             }
         }
     }
     Ok(())
 }
-/// Shared anchor files are read within one complete index publication (index_generation).
-fn fingerprint(
-    app: &Connection,
-    src: &Connection,
-    library: &Library,
-    anchors: &Path,
-    ctx: &TaskContext,
-) -> Result<String> {
-    crate::index_generation::stable(anchors, || fingerprint_once(app, src, library, anchors, ctx))
-}
-fn fingerprint_once(
-    app: &Connection,
-    src: &Connection,
-    library: &Library,
-    anchors: &Path,
-    ctx: &TaskContext,
-) -> Result<String> {
-    let mut h = Sha256::new();
-    hash_db(app, &mut h, ctx)?;
-    hash_db(src, &mut h, ctx)?;
-    // Base feature/anchor files are inputs too. Changed vectors invalidate an in-flight result.
-    let mut files = vec![
-        library.instance_path().join("features/full-manifest.csv"),
-        library.instance_path().join("features/full-features.npy"),
-        anchors.join("char-anchors.npy"),
-        anchors.join("char-anchors.txt"),
-    ];
-    if let Ok(entries) = fs::read_dir(anchors.join("char-index")) {
-        for entry in entries {
-            let p = entry?.path();
-            if p.extension().is_some_and(|s| s == "json") {
-                files.push(p);
-            }
-        }
+/// `only`: the tables to hash; `None` hashes every table except `skip`.
+fn hash_db(c: &Connection, h: &mut Sha256, only: Option<&[&str]>, skip: &[&str], ctx: &TaskContext) -> Result<()> {
+    let tables = match only {
+        Some(tables) => tables.iter().map(|t| t.to_string()).collect(),
+        None => c
+            .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name")?
+            .query_map([], |r| r.get::<_, String>(0))?
+            .collect::<rusqlite::Result<Vec<_>>>()?
+            .into_iter()
+            .filter(|t| !skip.contains(&t.as_str()))
+            .collect::<Vec<_>>(),
+    };
+    for table in tables {
+        ctx.check()?;
+        hash_table(c, h, &table, ctx)?;
     }
-    files.sort();
-    for p in files {
+    Ok(())
+}
+/// Shared anchor files are read within one complete index publication (index_generation).
+fn fingerprint(app: &Connection, src: &Connection, inputs: &Inputs<'_>, ctx: &TaskContext) -> Result<String> {
+    if inputs.scope == Scope::Learning {
+        crate::index_generation::stable(inputs.anchors, || fingerprint_once(app, src, inputs, ctx))
+    } else {
+        fingerprint_once(app, src, inputs, ctx)
+    }
+}
+fn fingerprint_once(app: &Connection, src: &Connection, inputs: &Inputs<'_>, ctx: &TaskContext) -> Result<String> {
+    let mut h = Sha256::new();
+    feed(&mut h, format!("{:?}", inputs.scope).as_bytes());
+    hash_db(app, &mut h, inputs.scope.app(), UNREAD, ctx)?;
+    hash_db(src, &mut h, inputs.scope.source(), &["backend_effects", "research_runs"], ctx)?;
+    // Base feature/anchor files are inputs too. Changed vectors invalidate an in-flight result.
+    for p in inputs.files()? {
         ctx.check()?;
         let name = p.to_string_lossy();
         h.update(name.as_bytes());
@@ -171,22 +305,91 @@ fn fingerprint_once(
             }
         }
     }
-    let mut q = app.prepare("SELECT src_path FROM assets ORDER BY uuid")?;
-    for path in q.query_map([], |r| r.get::<_, Option<String>>(0))? {
-        ctx.check()?;
-        let path = path?.unwrap_or_default();
-        if let Ok(m) = fs::metadata(&path) {
-            h.update(m.len().to_le_bytes());
-            if let Ok(t) =
-                m.modified().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).map_err(std::io::Error::other))
-            {
-                h.update(t.as_nanos().to_le_bytes());
+    // Original images: every asset for learning/similar, the requested ones for relate; OC reads none.
+    match inputs.scope {
+        Scope::Learning | Scope::Similar => {
+            let mut q = app.prepare("SELECT src_path FROM assets ORDER BY uuid")?;
+            for path in q.query_map([], |r| r.get::<_, Option<String>>(0))? {
+                ctx.check()?;
+                file_metadata(&mut h, Path::new(&path?.unwrap_or_default()));
             }
-        } else {
-            h.update(b"missing");
         }
+        Scope::Relate => {
+            let ids = serde_json::to_string(&inputs.ids).map_err(|_| bad())?;
+            let mut q = app.prepare(
+                "SELECT uuid,src_path FROM assets WHERE uuid IN (SELECT value FROM json_each(?)) ORDER BY uuid",
+            )?;
+            for row in q.query_map([ids], |r| Ok((r.get::<_, String>(0)?, r.get::<_, Option<String>>(1)?)))? {
+                ctx.check()?;
+                let (uuid, path) = row?;
+                let path = path.unwrap_or_default();
+                feed(&mut h, uuid.as_bytes());
+                feed(&mut h, path.as_bytes());
+                file_metadata(&mut h, Path::new(&path));
+            }
+        }
+        Scope::Oc => {}
     }
     Ok(format!("{:x}", h.finalize()))
+}
+/// Rounds of the accept check that recompute the fingerprint outside the write lock.
+const OUTSIDE_ROUNDS: u32 = 3;
+/// One consistent read of each connection: everything `read` does sees the state committed when it
+/// first reads. Nothing is written, so each transaction ends with ROLLBACK.
+fn read_snapshot<T>(dbs: &[&Connection], read: impl FnOnce() -> Result<T>) -> Result<T> {
+    let mut open = vec![];
+    let value = (|| {
+        for c in dbs {
+            c.execute_batch("BEGIN")?;
+            open.push(*c);
+        }
+        read()
+    })();
+    for c in open {
+        let end = c.execute_batch("ROLLBACK");
+        if value.is_ok() {
+            end?;
+        }
+    }
+    value
+}
+fn data_version(c: &Connection) -> Result<i64> {
+    Ok(c.query_row("PRAGMA data_version", [], |r| r.get(0))?)
+}
+/// Accept-time input check for publishing kinds (#29). The fingerprint is recomputed in a read
+/// transaction, without the write lock. Under BEGIN IMMEDIATE only this connection's
+/// `PRAGMA data_version` (changed by any commit from another connection) and the shared files' stamp
+/// are compared; if either moved, the round is repeated, and the last round recomputes the fingerprint
+/// under the lock. A mismatch is always `INPUT_CHANGED`. `between` runs before each lock (test hook).
+fn confirm<T>(
+    app: &mut Connection,
+    src: &Connection,
+    inputs: &Inputs<'_>,
+    version: &str,
+    ctx: &TaskContext,
+    mut between: impl FnMut(),
+    publish: impl FnOnce(rusqlite::Transaction<'_>) -> Result<T>,
+) -> Result<T> {
+    let mut round = 1;
+    loop {
+        let files = inputs.stamp()?;
+        let reader: &Connection = app;
+        let (fresh, seen) =
+            read_snapshot(&[reader], || Ok((fingerprint(reader, src, inputs, ctx)?, data_version(reader)?)))?;
+        if fresh != version {
+            return Err(Error::Conflict(INPUT_CHANGED.into()));
+        }
+        between();
+        let tx = app.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let unchanged = data_version(&tx)? == seen && inputs.stamp()? == files;
+        if unchanged || round == OUTSIDE_ROUNDS {
+            if !unchanged && fingerprint(&tx, src, inputs, ctx)? != version {
+                return Err(Error::Conflict(INPUT_CHANGED.into()));
+            }
+            return publish(tx);
+        }
+        round += 1;
+    }
 }
 struct Scratch(PathBuf);
 impl Drop for Scratch {
@@ -474,42 +677,46 @@ fn run(
     fs::create_dir(&scratch.0)?;
     let c = crate::app_library::read_connection(&library.db())?;
     let src = crate::app_library::read_connection(&library.source())?;
+    let inputs = Inputs::new(library, anchors, kind, &args);
     // Snapshot/version from the same read transactions.
-    c.execute_batch("BEGIN")?;
-    src.execute_batch("BEGIN")?;
-    let version = fingerprint(&c, &src, library, anchors, ctx)?;
-    backup(&c, &scratch.0.join("library.sqlite"), ctx)?;
-    backup(&src, &scratch.0.join("source.sqlite"), ctx)?;
-    let events: Vec<i64> = c
-        .prepare(
-            "SELECT id FROM backend_effects WHERE status='pending' AND kind IN ('verdict','imported','index_changed') ORDER BY id",
-        )?
-        .query_map([], |r| r.get(0))?
-        .collect::<rusqlite::Result<_>>()?;
-    let intents: Vec<String> =
-        if c.query_row("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name='research_runs')", [], |r| {
-            r.get::<_, bool>(0)
-        })? {
-            c.prepare("SELECT id FROM research_runs WHERE status='pending' AND (?='events' OR kind=?)")?
-                .query_map(rusqlite::params![kind, kind], |r| r.get(0))?
-                .collect::<rusqlite::Result<_>>()?
+    let (version, events, intents, regroup, learning) = read_snapshot(&[&c, &src], || {
+        let version = fingerprint(&c, &src, &inputs, ctx)?;
+        backup(&c, &scratch.0.join("library.sqlite"), ctx)?;
+        backup(&src, &scratch.0.join("source.sqlite"), ctx)?;
+        let events: Vec<i64> = c
+            .prepare(
+                "SELECT id FROM backend_effects WHERE status='pending' AND kind IN ('verdict','imported','index_changed') ORDER BY id",
+            )?
+            .query_map([], |r| r.get(0))?
+            .collect::<rusqlite::Result<_>>()?;
+        let intents: Vec<String> =
+            if c.query_row("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name='research_runs')", [], |r| {
+                r.get::<_, bool>(0)
+            })? {
+                c.prepare("SELECT id FROM research_runs WHERE status='pending' AND (?='events' OR kind=?)")?
+                    .query_map(rusqlite::params![kind, kind], |r| r.get(0))?
+                    .collect::<rusqlite::Result<_>>()?
+            } else {
+                vec![]
+            };
+        let regroup = kind == "regroup"
+            || kind == "events"
+                && (c.query_row(
+                    "SELECT EXISTS(SELECT 1 FROM backend_effects WHERE status='pending' AND kind IN ('imported','index_changed'))",
+                    [],
+                    |r| r.get::<_, bool>(0),
+                )? || !intents.is_empty());
+        crate::sqlite::open(scratch.0.join("library.sqlite"))?
+            .execute("DELETE FROM name_settings WHERE key IN ('model_key','deepseek_key')", [])?;
+        // Only learning kinds publish a learning batch; the others skip its full input stamp.
+        let learning = if inputs.scope == Scope::Learning {
+            crate::character_learning::snapshot(&mut crate::sqlite::open(scratch.0.join("library.sqlite"))?)?["token"]
+                .clone()
         } else {
-            vec![]
+            Value::Null
         };
-    let regroup = kind == "regroup"
-        || kind == "events"
-            && (c.query_row(
-                "SELECT EXISTS(SELECT 1 FROM backend_effects WHERE status='pending' AND kind IN ('imported','index_changed'))",
-                [],
-                |r| r.get::<_, bool>(0),
-            )? || !intents.is_empty());
-    crate::sqlite::open(scratch.0.join("library.sqlite"))?
-        .execute("DELETE FROM name_settings WHERE key IN ('model_key','deepseek_key')", [])?;
-    let learning = crate::character_learning::snapshot(&mut crate::sqlite::open(scratch.0.join("library.sqlite"))?)?
-        ["token"]
-        .clone();
-    c.execute_batch("ROLLBACK")?;
-    src.execute_batch("ROLLBACK")?;
+        Ok((version, events, intents, regroup, learning))
+    })?;
     let request = protocol::value(&protocol::ResearchRequest {
         format: protocol::Format::Research,
         identity: ctx.identity(),
@@ -573,19 +780,22 @@ fn run(
     }
     *state.lock().expect("research state mutex poisoned") = json!({"status":"importing"}).into();
     ctx.receive(&response.identity, || {
-        let mut c = crate::sqlite::open(library.db())?;
-        crate::configure(&c)?;
         let mut src = crate::app_library::read_connection(&library.source())?;
         let src = src.transaction()?;
-        let tx = c.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        if fingerprint(&tx, &src, library, anchors,ctx)? != version {
-            return Err(Error::Conflict(INPUT_CHANGED.into()));
+        if !inputs.scope.publishes() {
+            // A query publishes nothing: one read transaction checks its inputs and its answer.
+            let c = crate::app_library::read_connection(&library.db())?;
+            return read_snapshot(&[&c], || {
+                if fingerprint(&c, &src, &inputs, ctx)? != version {
+                    return Err(Error::Conflict(INPUT_CHANGED.into()));
+                }
+                validate_query(&c, kind, &Value::Object(response.result.clone()), &args)?;
+                ordered.get("result").cloned().ok_or_else(bad)
+            });
         }
-        let result = Value::Object(response.result.clone());
-        if kind == "oc" || kind == "relate" {
-            validate_query(&tx, kind, &result, &args)?;
-            return ordered.get("result").cloned().ok_or_else(bad);
-        }
+        let mut c = crate::sqlite::open(library.db())?;
+        crate::configure(&c)?;
+        confirm(&mut c, &src, &inputs, &version, ctx, || {}, |tx| {
         crate::schema::begin_writing(&tx)?;
         if kind != "similar" {
             if let Some(batch) = response.learning.as_ref().filter(|v| !v.is_null()) {
@@ -634,6 +844,7 @@ fn run(
         ctx.check()?;
         crate::schema::commit_writing(tx)?;
         ordered.get("result").cloned().ok_or_else(bad)
+        })
     })
 }
 fn replace(c: &Connection, table: &str, value: &Value, ctx: &TaskContext) -> Result<()> {
@@ -750,4 +961,433 @@ fn validate_query(c: &Connection, kind: &str, v: &Value, args: &Value) -> Result
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    //! #29: synthetic databases and files only.
+    use super::*;
+    use crate::app_tasks::{Task, TaskIdentity};
+    use std::collections::BTreeSet;
+
+    const ALL: [Scope; 4] = [Scope::Learning, Scope::Similar, Scope::Oc, Scope::Relate];
+    struct Fixture {
+        root: PathBuf,
+        anchors: PathBuf,
+        _task: Task,
+        ctx: TaskContext,
+    }
+    impl Drop for Fixture {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.root);
+        }
+    }
+    impl Fixture {
+        fn new() -> Self {
+            let root =
+                std::env::temp_dir().join(format!("illustash-research-scope-{}", crate::store::new_key().unwrap()));
+            let anchors = root.join("shared");
+            fs::create_dir_all(root.join("features")).unwrap();
+            fs::create_dir_all(anchors.join("char-index")).unwrap();
+            let app = crate::sqlite::open(root.join("library.sqlite")).unwrap();
+            app.execute_batch(
+                "PRAGMA journal_mode=WAL;
+                 CREATE TABLE meta(key TEXT PRIMARY KEY,value TEXT);
+                 INSERT INTO meta VALUES ('names_version','0'),('identity_policy','hybrid');
+                 CREATE TABLE assets(uuid TEXT PRIMARY KEY,src_path TEXT);
+                 CREATE TABLE prefs(key TEXT PRIMARY KEY,value TEXT NOT NULL);
+                 CREATE TABLE name_cache(key TEXT PRIMARY KEY,value TEXT NOT NULL);
+                 CREATE TABLE name_settings(key TEXT PRIMARY KEY,value TEXT NOT NULL);
+                 CREATE TABLE names(entity_id TEXT,value TEXT);
+                 CREATE TABLE display_names(kind TEXT,key TEXT,value TEXT);
+                 CREATE TABLE sync_runs(id INTEGER PRIMARY KEY,status TEXT);
+                 CREATE TABLE backend_effects(id INTEGER PRIMARY KEY,kind TEXT,status TEXT DEFAULT 'pending');
+                 CREATE TABLE entities(id TEXT PRIMARY KEY);
+                 CREATE TRIGGER names_version_names AFTER INSERT ON names
+                   BEGIN UPDATE meta SET value=CAST(value AS INTEGER)+1 WHERE key='names_version'; END;
+                 CREATE TABLE assertions(uuid TEXT,entity TEXT,status TEXT);
+                 CREATE TABLE memberships(uuid TEXT,entity TEXT);
+                 CREATE TABLE duplicates(uuid TEXT,grp TEXT,hidden INTEGER);
+                 CREATE TABLE excluded(uuid TEXT);
+                 CREATE TABLE general_hits(uuid TEXT,value TEXT);
+                 CREATE TABLE image_sigs(uuid TEXT PRIMARY KEY,ratio REAL,grid BLOB,ok INTEGER);
+                 CREATE TABLE relations(a TEXT,b TEXT,kind TEXT,changed INTEGER,note TEXT,checked_at TEXT);",
+            )
+            .unwrap();
+            for id in ["a", "b", "c"] {
+                let path = root.join(format!("{id}.png"));
+                fs::write(&path, id).unwrap();
+                app.execute("INSERT INTO assets VALUES (?,?)", [id, path.to_str().unwrap()]).unwrap();
+            }
+            let src = crate::sqlite::open(root.join("source.sqlite")).unwrap();
+            src.execute_batch(
+                "CREATE TABLE embeddings(uuid TEXT,model TEXT,vec BLOB,PRIMARY KEY(uuid,model));
+                 CREATE TABLE characters(char_id TEXT PRIMARY KEY,post_count INTEGER);",
+            )
+            .unwrap();
+            let task =
+                Task::start(TaskIdentity::at(&root, "synthetic", 1, "research-scope").unwrap(), None, |_| Ok(()));
+            let ctx = task.context();
+            Self { root, anchors, _task: task, ctx }
+        }
+        fn inputs(&self, scope: Scope) -> Inputs<'_> {
+            Inputs {
+                scope,
+                ids: vec!["a".into(), "b".into()],
+                features: self.root.join("features"),
+                anchors: &self.anchors,
+            }
+        }
+        fn app(&self) -> Connection {
+            crate::sqlite::open(self.root.join("library.sqlite")).unwrap()
+        }
+        fn source(&self) -> Connection {
+            crate::sqlite::open(self.root.join("source.sqlite")).unwrap()
+        }
+        fn version(&self, scope: Scope) -> String {
+            fingerprint(&self.app(), &self.source(), &self.inputs(scope), &self.ctx).unwrap()
+        }
+        fn versions(&self) -> Vec<String> {
+            ALL.iter().map(|s| self.version(*s)).collect()
+        }
+        /// Run the accept check for `scope`; returns whether it published and how many rounds ran.
+        fn confirm(&self, scope: Scope, version: &str, mut between: impl FnMut(u32)) -> (Result<()>, u32) {
+            let mut app = self.app();
+            let mut src = self.source();
+            let src = src.transaction().unwrap();
+            let mut rounds = 0;
+            let result = confirm(
+                &mut app,
+                &src,
+                &self.inputs(scope),
+                version,
+                &self.ctx,
+                || {
+                    rounds += 1;
+                    between(rounds)
+                },
+                |tx| {
+                    tx.execute("INSERT INTO image_sigs VALUES ('published',1.0,NULL,0)", [])?;
+                    tx.commit()?;
+                    Ok(())
+                },
+            );
+            (result, rounds)
+        }
+        fn published(&self) -> bool {
+            self.app()
+                .query_row("SELECT EXISTS(SELECT 1 FROM image_sigs WHERE uuid='published')", [], |r| r.get(0))
+                .unwrap()
+        }
+    }
+    fn conflict(r: &Result<()>) -> bool {
+        matches!(r, Err(Error::Conflict(m)) if m == INPUT_CHANGED)
+    }
+
+    #[test]
+    fn each_kind_fingerprints_only_its_inputs() {
+        let f = Fixture::new();
+        let app = |sql: &str| f.app().execute_batch(sql).unwrap();
+        let src = |sql: &str| f.source().execute_batch(sql).unwrap();
+        type Change<'a> = Box<dyn Fn() + 'a>;
+        use Scope::*;
+        let changes: Vec<(&str, Change, &[Scope])> = vec![
+            ("prefs", Box::new(|| app("INSERT INTO prefs VALUES ('synthetic_view','grid')")), &[]),
+            ("name cache", Box::new(|| app("INSERT INTO name_cache VALUES ('synthetic','{}')")), &[]),
+            ("name traffic", Box::new(|| app("INSERT INTO name_settings VALUES ('traffic_reserved','42')")), &[]),
+            ("model key", Box::new(|| app("INSERT INTO name_settings VALUES ('model_key','synthetic')")), &[]),
+            ("names + names_version", Box::new(|| app("INSERT INTO names VALUES ('e1','合成')")), &[]),
+            ("display names", Box::new(|| app("INSERT INTO display_names VALUES ('character','e1','合成')")), &[]),
+            ("sync history", Box::new(|| app("INSERT INTO sync_runs(status) VALUES ('done')")), &[]),
+            ("pending event", Box::new(|| app("INSERT INTO backend_effects(kind) VALUES ('verdict')")), &[]),
+            ("human verdict", Box::new(|| app("INSERT INTO assertions VALUES ('a','e1','confirmed')")), &[Learning]),
+            (
+                "identity policy",
+                Box::new(|| app("UPDATE meta SET value='default' WHERE key='identity_policy'")),
+                &[Learning],
+            ),
+            ("entity", Box::new(|| app("INSERT INTO entities VALUES ('e2')")), &[Learning]),
+            ("membership", Box::new(|| app("INSERT INTO memberships VALUES ('a','e1')")), &[Learning, Oc]),
+            ("general tag", Box::new(|| app("INSERT INTO general_hits VALUES ('a','blue_hair')")), &[Learning, Oc]),
+            ("excluded", Box::new(|| app("INSERT INTO excluded VALUES ('c')")), &[Learning, Similar, Oc]),
+            ("duplicate", Box::new(|| app("INSERT INTO duplicates VALUES ('a','g',0)")), &[Learning, Similar, Oc]),
+            ("signature", Box::new(|| app("INSERT INTO image_sigs VALUES ('c',1.0,NULL,0)")), &[Learning, Similar]),
+            (
+                "relation",
+                Box::new(|| app("INSERT INTO relations VALUES ('a','b','similar',0,'','t')")),
+                &[Learning, Similar],
+            ),
+            ("other asset", Box::new(|| app("INSERT INTO assets VALUES ('z','')")), &[Learning, Similar]),
+            (
+                "requested path",
+                Box::new(|| app("UPDATE assets SET src_path=src_path||'.moved' WHERE uuid='a'")),
+                &[Learning, Similar, Relate],
+            ),
+            (
+                "ccip vector",
+                Box::new(|| src("INSERT INTO embeddings VALUES ('a','ccip',x'00')")),
+                &[Learning, Similar, Oc],
+            ),
+            ("character metadata", Box::new(|| src("INSERT INTO characters VALUES ('c1',3)")), &[Learning]),
+            (
+                "feature file",
+                Box::new(|| fs::write(f.root.join("features/full-manifest.csv"), "uuid\na\n").unwrap()),
+                &[Learning, Similar, Oc],
+            ),
+            ("anchor file", Box::new(|| fs::write(f.anchors.join("char-index/c1.json"), "{}").unwrap()), &[Learning]),
+            (
+                "requested image",
+                Box::new(|| fs::write(f.root.join("b.png"), "changed bytes").unwrap()),
+                &[Learning, Similar, Relate],
+            ),
+        ];
+        for (name, change, expected) in changes {
+            let before = f.versions();
+            change();
+            let after = f.versions();
+            let changed: BTreeSet<_> = ALL
+                .iter()
+                .zip(before.iter().zip(&after))
+                .filter(|(_, (b, a))| b != a)
+                .map(|(s, _)| format!("{s:?}"))
+                .collect();
+            let expected: BTreeSet<_> = expected.iter().map(|s| format!("{s:?}")).collect();
+            assert_eq!(changed, expected, "{name}");
+        }
+    }
+
+    #[test]
+    fn unread_commit_between_check_and_lock_is_accepted() {
+        let f = Fixture::new();
+        for scope in [Scope::Learning, Scope::Similar] {
+            let version = f.version(scope);
+            let (result, rounds) = f.confirm(scope, &version, |round| {
+                if round == 1 {
+                    f.app()
+                        .execute("INSERT OR REPLACE INTO prefs VALUES ('synthetic',?)", [format!("{scope:?}")])
+                        .unwrap();
+                }
+            });
+            // The commit moved data_version, so a second round confirmed the unchanged inputs.
+            assert!(result.is_ok(), "{scope:?}: {result:?}");
+            assert_eq!(rounds, 2, "{scope:?}");
+            assert!(f.published());
+            f.app().execute("DELETE FROM image_sigs WHERE uuid='published'", []).unwrap();
+        }
+        // Nothing in between: one round, and the lock only compares data_version and file stamps.
+        let version = f.version(Scope::Learning);
+        assert_eq!(f.confirm(Scope::Learning, &version, |_| {}).1, 1);
+    }
+
+    #[test]
+    fn relevant_commit_between_check_and_lock_is_rejected() {
+        let f = Fixture::new();
+        // Committed after the outside check, before BEGIN IMMEDIATE: caught by data_version.
+        let version = f.version(Scope::Learning);
+        let (result, rounds) = f.confirm(Scope::Learning, &version, |round| {
+            if round == 1 {
+                f.app().execute("INSERT INTO assertions VALUES ('b','e1','rejected')", []).unwrap();
+            }
+        });
+        assert!(conflict(&result), "{result:?}");
+        assert_eq!(rounds, 1);
+        assert!(!f.published());
+        let version = f.version(Scope::Similar);
+        let (result, _) = f.confirm(Scope::Similar, &version, |round| {
+            if round == 1 {
+                f.app().execute("INSERT INTO excluded VALUES ('a')", []).unwrap();
+            }
+        });
+        assert!(conflict(&result), "{result:?}");
+        assert!(!f.published());
+        // A shared file replaced in the same window: caught by the file stamp.
+        let version = f.version(Scope::Learning);
+        let (result, _) = f.confirm(Scope::Learning, &version, |round| {
+            if round == 1 {
+                fs::write(f.anchors.join("char-anchors.txt"), "c1\n").unwrap();
+            }
+        });
+        assert!(conflict(&result), "{result:?}");
+        assert!(!f.published());
+    }
+
+    #[test]
+    fn last_round_checks_the_full_fingerprint_under_the_lock() {
+        let f = Fixture::new();
+        // Unread commits before every lock: the last round recomputes under the lock and accepts.
+        let version = f.version(Scope::Learning);
+        let (result, rounds) = f.confirm(Scope::Learning, &version, |round| {
+            f.app().execute("INSERT OR REPLACE INTO prefs VALUES ('synthetic',?)", [round]).unwrap();
+        });
+        assert!(result.is_ok(), "{result:?}");
+        assert_eq!(rounds, OUTSIDE_ROUNDS);
+        assert!(f.published());
+        f.app().execute("DELETE FROM image_sigs WHERE uuid='published'", []).unwrap();
+        // A real input committed just before the last lock is found by that recomputation.
+        let version = f.version(Scope::Learning);
+        let (result, rounds) = f.confirm(Scope::Learning, &version, |round| {
+            let sql = if round == OUTSIDE_ROUNDS {
+                "INSERT INTO memberships VALUES ('c','e1')"
+            } else {
+                "INSERT OR REPLACE INTO prefs VALUES ('synthetic','x')"
+            };
+            f.app().execute(sql, []).unwrap();
+        });
+        assert!(conflict(&result), "{result:?}");
+        assert_eq!(rounds, OUTSIDE_ROUNDS);
+        assert!(!f.published());
+    }
+
+    /// main's fingerprint before #29, copied unchanged except that the features directory replaces
+    /// `Library`: every table of both databases except the research queues, inside the caller's lock.
+    fn main_fingerprint(
+        app: &Connection,
+        src: &Connection,
+        features: &Path,
+        anchors: &Path,
+        ctx: &TaskContext,
+    ) -> (String, [f64; 3]) {
+        let started = std::time::Instant::now();
+        let mut parts = [0.0; 3];
+        let mut h = Sha256::new();
+        hash_db(app, &mut h, None, &["backend_effects", "research_runs"], ctx).unwrap();
+        hash_db(src, &mut h, None, &["backend_effects", "research_runs"], ctx).unwrap();
+        parts[0] = started.elapsed().as_secs_f64() * 1000.0;
+        let mut files = vec![
+            features.join("full-manifest.csv"),
+            features.join("full-features.npy"),
+            anchors.join("char-anchors.npy"),
+            anchors.join("char-anchors.txt"),
+        ];
+        files.sort();
+        for p in files {
+            h.update(p.to_string_lossy().as_bytes());
+            if let Ok(bytes) = fs::read(&p) {
+                h.update(&bytes);
+            }
+        }
+        parts[1] = started.elapsed().as_secs_f64() * 1000.0 - parts[0];
+        let mut q = app.prepare("SELECT src_path FROM assets ORDER BY uuid").unwrap();
+        for path in q.query_map([], |r| r.get::<_, Option<String>>(0)).unwrap() {
+            file_metadata(&mut h, Path::new(&path.unwrap().unwrap_or_default()));
+        }
+        parts[2] = started.elapsed().as_secs_f64() * 1000.0 - parts[0] - parts[1];
+        (format!("{:x}", h.finalize()), parts)
+    }
+
+    /// #29 measurement (synthetic, release): `cargo test --release research_fingerprint_bench -- --ignored --nocapture`.
+    /// ILLUSTASH_RESEARCH_BENCH_SIZES overrides the default 1000,10000,50000.
+    #[test]
+    #[ignore]
+    fn research_fingerprint_bench() {
+        use std::time::Instant;
+        let sizes = std::env::var("ILLUSTASH_RESEARCH_BENCH_SIZES").unwrap_or_else(|_| "1000,10000,50000".into());
+        let ms = |d: std::time::Duration| d.as_secs_f64() * 1000.0;
+        let median = |mut v: Vec<f64>| {
+            v.sort_by(f64::total_cmp);
+            v[v.len() / 2]
+        };
+        for n in sizes.split(',').map(|s| s.trim().parse::<usize>().unwrap()) {
+            let f = Fixture::new();
+            let app = f.app();
+            app.execute_batch("DELETE FROM assets; BEGIN;").unwrap();
+            fs::create_dir_all(f.root.join("images")).unwrap();
+            let grid = vec![7u8; 256];
+            for i in 0..n {
+                let id = format!("{i:08x}-synthetic");
+                let path = f.root.join("images").join(format!("{i}.png"));
+                fs::write(&path, [i as u8]).unwrap();
+                app.execute("INSERT INTO assets VALUES (?,?)", [&id, path.to_str().unwrap()]).unwrap();
+                app.execute("INSERT INTO image_sigs VALUES (?,?,?,1)", rusqlite::params![id, 1.25, grid]).unwrap();
+                app.execute("INSERT INTO assertions VALUES (?,'e1','confirmed')", [&id]).unwrap();
+                app.execute("INSERT INTO memberships VALUES (?,'e1')", [&id]).unwrap();
+                app.execute("INSERT INTO general_hits VALUES (?,'blue_hair')", [&id]).unwrap();
+                app.execute("INSERT INTO name_cache VALUES (?,'{}')", [&id]).unwrap();
+                if i > 0 {
+                    app.execute(
+                        "INSERT INTO relations VALUES (?,?,'similar',0,'','2026-10-12')",
+                        [format!("{:08x}-synthetic", i - 1), id.clone()],
+                    )
+                    .unwrap();
+                }
+            }
+            app.execute_batch("COMMIT;").unwrap();
+            let src = f.source();
+            src.execute_batch("BEGIN").unwrap();
+            for i in 0..n / 100 {
+                src.execute(
+                    "INSERT INTO embeddings VALUES (?,'ccip',?)",
+                    rusqlite::params![format!("{i:08x}-synthetic"), vec![1u8; 3072]],
+                )
+                .unwrap();
+            }
+            src.execute_batch("COMMIT").unwrap();
+            let manifest: String =
+                std::iter::once("uuid\n".to_string()).chain((0..n).map(|i| format!("{i:08x}-synthetic\n"))).collect();
+            fs::write(f.root.join("features/full-manifest.csv"), manifest).unwrap();
+            fs::write(f.root.join("features/full-features.npy"), vec![3u8; n * 768 * 4]).unwrap();
+            let features = f.root.join("features");
+            let (mut before_prepare, mut before_lock, mut before_parts) = (vec![], vec![], vec![]);
+            for _ in 0..3 {
+                let started = Instant::now();
+                let src = f.source();
+                let mut c = f.app();
+                let read = c.transaction().unwrap();
+                before_parts.push(main_fingerprint(&read, &src, &features, &f.anchors, &f.ctx).1);
+                read.finish().unwrap();
+                before_prepare.push(ms(started.elapsed()));
+                let started = Instant::now();
+                let tx = c.transaction_with_behavior(TransactionBehavior::Immediate).unwrap();
+                main_fingerprint(&tx, &src, &features, &f.anchors, &f.ctx);
+                tx.commit().unwrap();
+                before_lock.push(ms(started.elapsed()));
+            }
+            println!(
+                "{}",
+                json!({"n": n, "code": "main", "kind": "all", "prepare_ms": median(before_prepare), "accept_outside_ms": 0.0, "accept_lock_ms": median(before_lock),
+                    "prepare_parts_ms": {"tables": median(before_parts.iter().map(|p| p[0]).collect()), "shared_files": median(before_parts.iter().map(|p| p[1]).collect()), "images": median(before_parts.iter().map(|p| p[2]).collect())}})
+            );
+            for scope in ALL {
+                let (mut prepare, mut outside, mut lock) = (vec![], vec![], vec![]);
+                for _ in 0..3 {
+                    let started = Instant::now();
+                    let version = f.version(scope);
+                    prepare.push(ms(started.elapsed()));
+                    let mut app = f.app();
+                    let mut src = f.source();
+                    let src = src.transaction().unwrap();
+                    let started = Instant::now();
+                    if !scope.publishes() {
+                        // Queries check in one read transaction and take no write lock.
+                        let read = app.transaction().unwrap();
+                        assert_eq!(fingerprint(&read, &src, &f.inputs(scope), &f.ctx).unwrap(), version);
+                        outside.push(ms(started.elapsed()));
+                        lock.push(0.0);
+                        continue;
+                    }
+                    let locked = std::cell::Cell::new(started);
+                    confirm(
+                        &mut app,
+                        &src,
+                        &f.inputs(scope),
+                        &version,
+                        &f.ctx,
+                        || locked.set(Instant::now()),
+                        |tx| {
+                            tx.commit()?;
+                            Ok(())
+                        },
+                    )
+                    .unwrap();
+                    let done = Instant::now();
+                    outside.push(ms(locked.get() - started));
+                    lock.push(ms(done - locked.get()));
+                }
+                println!(
+                    "{}",
+                    json!({"n": n, "code": "#29", "kind": format!("{scope:?}"), "prepare_ms": median(prepare), "accept_outside_ms": median(outside), "accept_lock_ms": median(lock)})
+                );
+            }
+        }
+    }
 }
