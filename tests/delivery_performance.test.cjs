@@ -9,7 +9,7 @@ function metaHarness(api) {
   const nodes = {}, paints = [];
   const c = {URLSearchParams, api, state: {nsfw: '', chars: [], dupInfo: {}, exclInfo: {}, route: {page: 'library'}},
     $: id => nodes[id] ||= {}, setUndo() {}, navCount() {}, fetchChar: async () => null,
-    renderChrome: () => paints.push('chrome'), renderSettings() {}, renderIndexBody() {},
+    renderChrome: () => paints.push('chrome'), renderSettings() {}, renderIndexBody() {}, guideAfterPost() {},
     document: {createElement: () => ({})}};
   vm.createContext(c);
   vm.runInContext(section('const SESSION_EXPIRED', 'async function api('), c);

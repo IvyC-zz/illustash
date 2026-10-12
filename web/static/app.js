@@ -67,6 +67,7 @@ async function api(path, options = {}) {
 async function post(path, body) {
   const result = await api(path, {method: 'POST', body: JSON.stringify(body)});
   if (path === '/api/suggest') return result;  // read-only; POST only carries the selection
+  guideAfterPost(path, body);
   state.countDirty = true; state.readEpoch++;
   // Prevent an older metadata read from overwriting the just-completed mutation.
   if (metaPending) { metaRevision++; metaFull ||= path !== '/api/tag'; }
@@ -102,7 +103,7 @@ async function setNamesNetwork(allow) {
 // 设置 › 网络与隐私: grant or revoke, then redraw the card.
 document.addEventListener('click', async e => {
   const b = e.target.closest('[data-names-network]');
-  if (b && await setNamesNetwork(b.dataset.namesNetwork === '1')) { renderSettings(false); if (state.route.page === 'start') drawStart(); }
+  if (b && await setNamesNetwork(b.dataset.namesNetwork === '1')) { renderSettings(false); drawGuide(); }
 });
 // The 允许查询… button under a search: once allowed, search again for what was typed.
 document.addEventListener('click', async e => {
@@ -136,7 +137,7 @@ function parseHash() {
   if (!parts.length && !query) route.page = 'home';
   // 资料库 (#/characters) and 设置 have sub-views of their own address: #/characters/works, #/settings/library.
   else if (parts[0] === 'characters' || parts[0] === 'settings') Object.assign(route, {page: parts[0], section: parts[1] || ''});
-  else if (['home', 'start', 'unmatched', 'skipped', 'duplicates', 'excluded', 'pending', 'recent', 'audit', 'groups', 'similar', 'identity', 'artist-audit'].includes(parts[0])) route.page = parts[0];
+  else if (['home', 'unmatched', 'skipped', 'duplicates', 'excluded', 'pending', 'recent', 'audit', 'groups', 'similar', 'identity', 'artist-audit'].includes(parts[0])) route.page = parts[0];
   else if (parts[0] === 's' && parts[1]) Object.assign(route, {page: 'sgroup', id: decodeURIComponent(parts[1])});
   else if (parts[0] === 'g' && parts[1]) Object.assign(route, {page: 'group', id: decodeURIComponent(parts[1])});
   // Old character pages (#/c/id/skin) are now the library filtered to that character.
@@ -164,7 +165,7 @@ const cleanup = () => !!state.route.char || ['unmatched', 'skipped', 'excluded',
 // Browsing pages: click opens details, selection is opt-in.
 const browsing = () => !state.route.char && ['library', 'duplicates', 'recent'].includes(state.route.page);
 // Pages that replace the image grid with their own panel.
-const panelPage = page => page === 'home' || page === 'start' || page === 'characters' || page === 'settings' || page === 'groups' || page === 'similar' || page === 'identity';
+const panelPage = page => page === 'home' || page === 'characters' || page === 'settings' || page === 'groups' || page === 'similar' || page === 'identity';
 
 async function applyRoute() {
   const route = parseHash(); route.sort = route.sort || defaultSort(route);
@@ -189,10 +190,9 @@ async function applyRoute() {
     state.char = character || {id: route.char, name: '角色', work: '', count: 0, unchecked: 0, variants: []};
   }
   $('homePage').hidden = route.page !== 'home';
-  $('startPage').hidden = route.page !== 'start';
-  showGuideNav();
+  if (route.page === 'characters') guideTick('look');
   renderChrome();
-  if (route.page === 'home') renderHome(); else if (route.page === 'start') renderStart(); else if (route.page === 'characters') renderIndex(); else if (route.page === 'settings') renderSettings(true, !samePage); else if (route.page === 'groups') renderGroups(); else if (route.page === 'similar') renderSimilar(); else if (route.page === 'identity') renderIdentity(); else if (route.page === 'artist-audit') renderArtistAudit(); else await reload(true);
+  if (route.page === 'home') renderHome(); else if (route.page === 'characters') renderIndex(); else if (route.page === 'settings') renderSettings(true, !samePage); else if (route.page === 'groups') renderGroups(); else if (route.page === 'similar') renderSimilar(); else if (route.page === 'identity') renderIdentity(); else if (route.page === 'artist-audit') renderArtistAudit(); else await reload(true);
 }
 window.addEventListener('hashchange', applyRoute);
 
@@ -287,7 +287,7 @@ function renderChrome() {
   const r = state.route, bar = $('toolbar'), tabs = subTabs(r);
   if (r.page === 'settings') { bar.innerHTML = ''; return; }
   if (r.page === 'groups' || r.page === 'similar') { bar.innerHTML = tabs; return; }
-  if (r.page === 'identity' || r.page === 'home' || r.page === 'start') { bar.innerHTML = ''; return; }
+  if (r.page === 'identity' || r.page === 'home') { bar.innerHTML = ''; return; }
   if (r.page === 'characters') {
     // 资料库: 角色 browses, 作品 manages; both search their own list.
     const works = r.section === 'works';
@@ -376,7 +376,7 @@ function renderHeading() {
     return;
   }
   const n = state.totalReady ? number(state.total) : '…';
-  const meta = {start: ['开始使用', '新图库的几步准备 · 每一步都可以跳过，以后在「设置 › 关于」里能重新打开'], home: ['首页', `按加入日期分组${state.recentCount ? ` · 最近一次同步新加入 ${number(state.recentCount)} 张` : ''}`], library: [r.artist ? '画师 · ' + esc(artistName(r.artist)) : r.day ? esc(dayLabel(r.day)) + ' 加入' : r.work ? esc((state.workTree || []).find(w => w.id === r.work)?.name || '作品筛选') : r.utag ? '# ' + esc(r.utag) : '图库', `${n} 张${r.work ? ' · 包含所有子作品 <a class="link" href="#/library">清除筛选</a>' : r.artist ? ' · 按画作比对找到 <a class="link" href="#/library">清除筛选</a>' : ''}`], characters: ['资料库', r.section === 'works' ? `${number(state.index?.works?.length || 0)} 部作品${state.index?.watch?.works.length ? ` · 关注 ${number(state.index.watch.works.length)} 部` : ''}` : `${number(state.chars.length)} 位角色 · ${number(new Set(state.chars.map(workKey)).size)} 部作品`],
+  const meta = {home: ['首页', `按加入日期分组${state.recentCount ? ` · 最近一次同步新加入 ${number(state.recentCount)} 张` : ''}`], library: [r.artist ? '画师 · ' + esc(artistName(r.artist)) : r.day ? esc(dayLabel(r.day)) + ' 加入' : r.work ? esc((state.workTree || []).find(w => w.id === r.work)?.name || '作品筛选') : r.utag ? '# ' + esc(r.utag) : '图库', `${n} 张${r.work ? ' · 包含所有子作品 <a class="link" href="#/library">清除筛选</a>' : r.artist ? ' · 按画作比对找到 <a class="link" href="#/library">清除筛选</a>' : ''}`], characters: ['资料库', r.section === 'works' ? `${number(state.index?.works?.length || 0)} 部作品${state.index?.watch?.works.length ? ` · 关注 ${number(state.index.watch.works.length)} 部` : ''}` : `${number(state.chars.length)} 位角色 · ${number(new Set(state.chars.map(workKey)).size)} 部作品`],
     recent: ['新加入', `最近一次同步加入的 ${number(state.recentCount)} 张，已自动识别`],
     audit: ['随机抽查', `还剩 ${number(state.pools.audit || 0)} / ${n} 张 · 鼠标移到角色 tag 上点 ✓ / ✗，或选中多张按 Y / N；打开大图也会问「是 TA 吗？」${state.nsfw ? ' · <b>R18 筛选开着：抽查要看全部才准，按 H 切换</b>' : ''}`],
     unmatched: ['未识别', `${n} 张 · 选中后设为角色，或跳过`], skipped: ['未识别', `已跳过 ${n} 张 · 可以恢复到未识别`],
@@ -2427,7 +2427,7 @@ async function pollSync() {
     }
     if (SYNC_ACTIVE.includes(was) && s.status === 'done' && s.imported) toast(`同步完成：新加入 ${number(s.imported)} 张`);
     renderTasks();
-    if (state.route.page === 'start' && guideStep() === 'sync') renderStart();
+    guideRefresh(SYNC_ACTIVE.includes(was) && !SYNC_ACTIVE.includes(s.status));
     if (SYNC_ACTIVE.includes(s.status)) syncTimer = setTimeout(pollSync, 2000);
   } catch (e) { if (poll === syncPoll) syncTimer = setTimeout(pollSync, 10000); }
 }
@@ -2535,7 +2535,6 @@ async function pollIndex() {
   }
   if (state.route.page === 'settings' && s.status !== was) renderIndexCard(false);
   if (state.route.section === 'works' && s.status !== was) drawShelf();
-  if (state.route.page === 'start' && guideStep() === 'more' && s.status !== was) drawStart();
   renderTasks();
   if (INDEX_ACTIVE.includes(s.status)) indexTimer = setTimeout(pollIndex, 2000);
 }
@@ -2706,7 +2705,7 @@ async function renderAbout() {
     ${fold('diagnostics', '诊断信息', `<table class="settings-table">${diag.map(([k, v]) => `<tr><td>${esc(k)}</td><td class="mono">${esc(v)}</td></tr>`).join('')}</table>`)}`;
   wireFolds(card);
   $('aboutKeys').onclick = () => $('help').showModal();
-  $('aboutGuide').onclick = async () => { if (await guideAction({action: 'reopen'})) go({page: 'start'}); };
+  $('aboutGuide').onclick = replayGuide;
   $('aboutCopy').onclick = async () => {
     try { await navigator.clipboard.writeText(diag.map(([k, v]) => `${k}: ${v}`).join('\n')); toast('诊断信息已复制'); } catch (e) { toast('无法访问剪贴板'); }
   };
@@ -3451,137 +3450,219 @@ function artistSection(d, ident) {
   return `<section class="inspector-section"><h3 class="section-title">画师</h3>${(d.artists || []).map(artist).join('')}${(d.maybe || []).map(maybe).join('')}${!d.artists?.length ? find : ''}
     ${d.posts?.length ? `<div class="artist-posts"><span>原帖</span>${d.posts.map(p => link(p.url, p.site)).join(' · ')}</div>` : ''}</section>`;
 }
-// ---------- 开始使用：新图库的首次引导 (#96, native/terms/src/app_onboarding.rs) ----------
-// The guide's place is kept per library; it never grants network access or starts a task by itself. Every step can
-// be passed over, the whole guide skipped, and it reopens from 设置 › 关于.
-const GUIDE_STEPS = [['ability', '识别能力'], ['network', '联网选择'], ['sync', '首次同步'], ['more', '认出更多角色'], ['start', '开始整理']];
-let guideTimer = 0, guideChecked = false;
+// ---------- 新图库的首次引导 (#96, native/terms/src/app_onboarding.rs) ----------
+// Taught on the real interface: a few stops lit up one at a time, a checklist that ticks itself as things get done,
+// and questions asked when they matter (names once characters show, a work once the first sync is through). The
+// guide's place is kept per library; nothing here grants network access or starts a task without the person's click.
+const TOUR = ['welcome', 'tasks', 'home', 'characters', 'unmatched', 'end'];
+const CHECKLIST = [['look', '看看认出的角色', '#/characters'], ['correct', '纠正一张认错的图', '', '选中后按 C'], ['undo', '撤销一次操作', '', shortcut('Z')],
+  ['group', '确认一组没认出的图', '#/groups'], ['follow', '关注一部作品', '#/characters/works']];
+let guideChecked = false, guideLoadedAt = 0, guideWorksAt = 0, tourAt = -1, checklistOpen = false;
+const guideOn = () => !!state.guide && state.guide.guide.status !== 'off';
 const guideActive = () => ['new', 'active'].includes(state.guide?.guide?.status);
-const guideStep = () => state.guide?.guide?.step || 'ability';
-function showGuideNav() { $('navStart').hidden = !guideActive() && state.route.page !== 'start'; }
 async function loadGuide(works = false) {
   const token = state.token, value = await api('/api/onboarding' + (works ? '?works=1' : ''));
   if (token !== state.token) return null;
   state.guide = {...value, works: value.works || state.guide?.works};
-  showGuideNav();
+  guideLoadedAt = Date.now();
   return value;
 }
 async function guideAction(body) {
   const token = state.token;
   try {
     const value = await api('/api/onboarding', {method: 'POST', body: JSON.stringify(body)});
-    if (token === state.token) { state.guide = {...value, works: value.works || state.guide?.works}; showGuideNav(); }
+    if (token === state.token) state.guide = {...value, works: value.works || state.guide?.works};
     return true;
   } catch (e) { toast(e.message); return false; }
 }
-// A new library, or one whose guide was left half way, opens on the guide instead of 首页.
+// On opening: a new library records that its guide started; the tour itself waits for the splash to finish.
 async function guideOnOpen() {
   try { await loadGuide(); } catch (e) { return; }
-  if (state.guide?.guide.status === 'new') await guideAction({action: 'step', step: 'ability'});
-  if (guideActive() && !location.hash.replace(/^#\/?/, '')) history.replaceState(null, '', '#/start');
+  if (state.guide?.guide.status === 'new') await guideAction({action: 'step', step: 'welcome'});
 }
-async function renderStart(fetch = true) {
-  $('grid').hidden = true; $('empty').hidden = true; $('charIndex').hidden = true; $('settingsPage').hidden = true; $('groupsPage').hidden = true; $('homePage').hidden = true; $('startPage').hidden = false;
-  closeInspector(); $('selectionBar').hidden = true; $('resultCount').textContent = ''; $('hint').textContent = '';
-  if (fetch || !state.guide) {
-    try { await loadGuide(guideStep() === 'more'); } catch (e) { if (state.route.page === 'start') readFailure($('startPage'), e); return; }
-    if (state.route.page !== 'start') return;
+const splashGone = () => new Promise(done => {
+  const started = Date.now(), wait = () => (!document.getElementById('splash') || Date.now() - started > 8000) ? done() : setTimeout(wait, 150);
+  wait();
+});
+async function guideAfterBoot() {
+  if (!guideOn()) return;
+  await splashGone();
+  if (guideActive()) showTour(Math.max(0, TOUR.indexOf(state.guide.guide.step)));
+  drawGuide();
+}
+// Something about the library changed (a sync step, a mutation): read the guide again, at most every few seconds.
+async function guideRefresh(force = false) {
+  if (!guideOn() || (!force && Date.now() - guideLoadedAt < 4000)) return;
+  try { await loadGuide(); } catch (e) { return; }
+  drawGuide();
+}
+function drawGuide() {
+  drawGuideNotice(); drawNudge(); drawChecklist();
+  if (tourAt >= 0) placeTour(false);
+}
+
+// ----- the problem bar: recognition missing or its self-check failed, or a sync that stopped (while it lasts, #97) -----
+function syncTrouble() {
+  const s = state.sync, said = s.message ? `（${esc(s.message)}）` : '', missing = /不存在或无法访问/.test(s.message || '');
+  if (s.status === 'interrupted') return `同步没有做完${said}：已经加入和识别的图都保留了，再同步一次会接着处理剩下的。`;
+  if (s.status !== 'error') return '';
+  return `同步出错了${said}：已经加入和识别的图都保留了。` + (missing
+    ? '检查来源文件夹是否还在、外接硬盘是否接上，或者在 <a class="link" href="#/settings/library">设置 › 图库</a> 里换一个文件夹，然后再同步一次。'
+    : '可以再同步一次；还不行的话，反馈时附上「设置 › 关于」里的诊断信息。');
+}
+function drawGuideNotice() {
+  const el = $('guideNotice'), g = state.guide; if (!el) return;
+  const c = g?.capability, check = c?.check || {};
+  if (guideOn() && c?.recognition && check.status === 'idle' && !guideChecked) { guideChecked = true; guideAction({action: 'check'}).then(() => setTimeout(() => guideRefresh(true), 1500)); }
+  if (guideOn() && check.status === 'checking') setTimeout(() => guideRefresh(true), 1500);
+  const problem = !guideOn() ? '' : !c.recognition ? '这个安装没有识别组件：图片会加入图库、可以手动整理，但不会自动认出角色。安装 Illustash 完整版后就能自动识别。'
+    : check.status === 'failed' ? `识别组件没能启动（${esc(check.message || '')}）。图片仍会加入图库；可以重新检查，或重新安装完整版。` : '';
+  const trouble = guideOn() && !problem ? syncTrouble() : '';
+  el.hidden = !problem && !trouble;
+  el.innerHTML = problem ? `<span>${problem}</span>${c.recognition ? '<button class="quiet small" data-guide-check>重新检查</button>' : ''}`
+    : trouble ? `<span>${trouble}</span><button class="quiet small" data-guide-sync>再同步一次</button>` : '';
+}
+$('guideNotice').addEventListener('click', async e => {
+  if (e.target.closest('[data-guide-check]')) { await guideAction({action: 'check'}); drawGuide(); setTimeout(() => guideRefresh(true), 1500); }
+  if (e.target.closest('[data-guide-sync]')) { try { await post('/api/sync', {}); state.sync = {status: 'scanning'}; pollSync(); } catch (err) { toast(err.message); } drawGuide(); }
+});
+
+// ----- the tour: one real element lit up at a time -----
+function tourStop(id) {
+  const g = state.guide, s = state.sync, r = g.results;
+  const counting = SYNC_ACTIVE.includes(s.status) ? syncLine(s) : r.total ? `已经有 ${number(r.total)} 张图，认出了 ${number(r.characters)} 个角色。` : '';
+  return {
+    welcome: SYNC_ACTIVE.includes(s.status) || !r.total
+      ? {title: '图库建好了', text: '正在读取并识别你的图片，全部在这台电脑上完成，图片不会发出去。花一分钟认识一下界面？', next: '带我看看', skip: '自己逛逛'}
+      : {title: '认识一下界面', text: '花一分钟看看几个常用的地方？', next: '带我看看', skip: '不用了'},
+    tasks: {target: () => $('taskButton'), title: '进度在这里', text: `${counting ? esc(counting) + '<br>' : ''}同步和识别在后台进行，识别好的图会陆续出现在首页，不用等全部完成。`},
+    home: {route: 'home', target: () => document.querySelector('#homePage .home-j') || $('homePage'), title: '首页',
+      text: document.querySelector('#homePage .home-j') ? `新加入的图按日期排在这里，图上写着认出的角色。认错了就选中它按 C 换成正确的角色，${shortcut('Z')} 随时撤销。` : '图片导入后会按日期排在这里，图上写着认出的角色。'},
+    characters: {target: () => document.querySelector('.nav[data-page="characters"]'), title: '资料库', text: '认出的角色按作品放在这里，点进去只看 TA 的图。'},
+    unmatched: {target: () => document.querySelector('.nav[data-page="unmatched"]'), title: '还没认出的图', text: '长得像的会分成一组，一次确认一整组。确认得越多，认得越准。'},
+    end: {title: '就这些', text: '右下角的「上手」清单会跟着你做过的事打勾，全做完就自己消失。以后想再看一遍，在「设置 › 关于」里。', next: '开始用吧'},
+  }[id];
+}
+function showTour(at) {
+  tourAt = at; drawNudge(); drawChecklist();
+  const root = $('tour'); root.hidden = false; requestAnimationFrame(() => root.classList.add('on'));
+  placeTour(true);
+}
+function closeTour() {
+  tourAt = -1; const root = $('tour'); root.classList.remove('on');
+  setTimeout(() => { if (tourAt < 0) root.hidden = true; }, 260);
+  drawGuide();
+}
+async function placeTour(moved) {
+  if (tourAt < 0 || !state.guide) return;
+  const id = TOUR[tourAt], stop = tourStop(id), root = $('tour'), hole = root.querySelector('.tour-hole'), bubble = root.querySelector('.tour-bubble');
+  if (moved && stop.route && state.route.page !== stop.route) { go({page: stop.route}); await new Promise(done => setTimeout(done, 450)); if (TOUR[tourAt] !== id) return; }
+  // While a stop stays, only its text follows the live counts; its buttons are never rebuilt under a press.
+  if (!moved && bubble.dataset.stop === id) {
+    const text = bubble.querySelector('.tour-text'); if (text && text.innerHTML !== stop.text) text.innerHTML = stop.text;
   }
-  drawStart();
-}
-const guideNote = (kind, title, text) => `<div class="start-note ${kind}"><b>${title}</b><span>${text}</span></div>`;
-function guideAbility(g) {
-  const c = g.capability, check = c.check || {};
-  const line = !c.recognition ? guideNote('warn', '这个安装没有识别组件', '图片仍会加入图库，可以浏览和手动整理，但不会自动识别画面和角色。要自动识别，请安装 Illustash 完整版（安装包里带识别模型）。')
-    : check.status === 'ok' ? guideNote('ok', '本机可以识别', 'WD Tagger 识别画面标签和常见角色，CCIP 比较角色长相。都在这台电脑上计算，图片和由图片算出的特征都不会发出去。')
-    : check.status === 'failed' ? guideNote('warn', '识别组件没能启动', `${esc(check.message || '')}。图片仍会加入图库；可以重新检查，或重新安装完整版。`) + '<button class="quiet small" data-guide="check">重新检查</button>'
-    : '<p class="start-status"><span class="local-dot busy"></span>正在检查识别组件（会加载一次模型，几秒钟）…</p>';
-  const anchors = c.anchors ? `已经有 ${number(c.anchors)} 个角色的参考特征，这些角色可以按长相认出来。`
-    : '还没有角色参考特征：现在能认出 WD Tagger 自带的约 2,700 个常见角色。新游戏和冷门角色可以在「认出更多角色」一步补充。';
-  return cardHead('识别能力', 'Illustash 在这台电脑上识别每张图里的角色。先看看现在能做什么。') + line + `<p class="settings-note start-gap">${anchors}</p>`;
-}
-function guideNetwork() {
-  const n = state.names, net = n?.network;
-  const names = !n ? '<span class="muted-note">…</span>' : !net ? '<span class="muted-note">这次启动关闭了名称查询</span>'
-    : net.granted_at ? '<span class="start-ok">已允许</span><button class="quiet small" data-names-network="0">撤销</button>' : '<button class="primary small" data-names-network="1">允许…</button>';
-  const row = (title, text, action = '') => `<div class="start-choice"><div><b>${title}</b><small>${text}</small></div><div class="start-choice-act">${action}</div></div>`;
-  return cardHead('联网选择', '识别和整理都在本机完成。下面这些功能会访问网络，都只发送文字，不发送图片。默认都不开；现在决定，或以后在「设置 › 网络与隐私」里改都可以。') +
-    row('角色中文名', '向 Bangumi、Danbooru 查角色和作品的中文名、别名。发送角色的 tag、作品名和日文名。允许后对这个图库一直有效，可以随时撤销。', names) +
-    row('检查新角色', '为你关注的作品从 Danbooru 下载公开参考图，让更多角色能按长相认出来。在「认出更多角色」一步再决定，每次运行前单独确认。') +
-    row('找回画师', '用图片的哈希文本在 Danbooru 查原帖和画师。在 <a class="link" href="#/settings/artists">设置 › 画师</a> 里使用，每次运行前单独确认。');
-}
-function guideSync(g) {
-  const s = state.sync, r = g.results, c = g.capability, running = SYNC_ACTIVE.includes(s.status);
-  const stage = {scanning: '正在读取来源里的文件，找出新加入的图片。', recognising: s.stage === 'preparing' ? '' : '正在识别新图片：每张图算出画面标签和角色特征，识别好的分批加入图库，不用等全部完成。', importing: '正在把识别结果写进图库。'}[s.status] || '';
-  const waiting = Math.max(0, r.total - r.recognized), unseen = Math.max(0, r.unmatched - waiting);
-  const why = [];
-  if (waiting) why.push(!c.recognition ? `${number(waiting)} 张没有识别：这个安装没有识别组件。` : running ? `${number(waiting)} 张还在排队识别。` : `${number(waiting)} 张还没识别，下次同步会继续。`);
-  if (unseen) why.push(`识别过但没认出角色的 ${number(unseen)} 张：可能是原创角色、冷门角色，或者不是插画。可以在下一步为常见作品补充参考特征，也可以在「未识别」里手动设为角色。`);
-  // After a stop or failure nothing already added or recognised is lost; say what to do next (#97).
-  const missing = /不存在或无法访问/.test(s.message || '');
-  const next = s.status === 'interrupted' ? guideNote('warn', '同步没有做完', '已经加入和识别的图都保留了。再同步一次会接着处理剩下的。')
-    : s.status === 'error' ? guideNote('warn', '同步出错了', `${esc(s.message || '')}${s.message ? '。' : ''}已经加入和识别的图都保留了。${missing ? '检查来源文件夹是否还在、外接硬盘是否接上，或者在 <a class="link" href="#/settings/library">设置 › 图库</a> 里换一个文件夹，然后再同步一次。' : '可以再同步一次；还不行的话，反馈时附上「设置 › 关于」里的诊断信息。'}`)
-    : s.status === 'done' && s.message ? `<p class="settings-note">${esc(s.message)}</p>` : '';
-  const unreadable = s.unreadable && !running ? `<p class="settings-note">有 ${number(s.unreadable)} 处读不到（比如还没下载到本机的 iCloud 文件、没接上的硬盘、没有权限的子文件夹）：那里原有的图都保留着，恢复访问后再同步就会读进来。</p>` : '';
-  const cell = (n, label, hint = '') => `<div class="start-count"><b>${number(n)}</b><span>${label}</span>${hint ? `<small>${hint}</small>` : ''}</div>`;
-  const empty = !running && s.status !== 'off' && !r.total && s.finished_at;
-  return cardHead('首次同步', '打开图库时会自动读取来源里的图片，并在本机识别。图片留在原来的位置，不复制、不修改。') +
-    `<p class="start-status">${running ? '<span class="local-dot busy"></span>' : ''}${esc(s.status === 'off' ? '这次启动没有开同步' : syncLine(s))}</p>${syncBar(s, (done, total) => total ? `<div class="progress"><span style="width:${Math.min(100, Math.round((done || 0) / total * 100))}%"></span></div>` : '')}
-    ${stage ? `<p class="settings-note">${stage}</p>` : ''}${next}${unreadable}
-    <div class="start-counts">${cell(r.total, '张在图库里')}${cell(r.recognized, '张已识别', '算过画面标签和角色特征')}${cell(r.with_character, '张认出了角色', `共 ${number(r.characters)} 个角色`)}${cell(r.unmatched, '张还没认出角色')}</div>
-    ${why.map(t => `<p class="settings-note">${t}</p>`).join('')}
-    ${empty ? guideNote('warn', '来源里没有找到图片', '检查选的文件夹里有没有图片，或者在 <a class="link" href="#/settings/library">设置 › 图库</a> 里添加来源。') : ''}
-    <div class="start-inline">${running && r.total ? '<a class="quiet" href="#/library">先去看已经加入的图</a>' : ''}${!running && s.status !== 'off' ? '<button class="quiet small" data-guide="sync">再同步一次</button>' : ''}</div>`;
-}
-function guideMore(g) {
-  const x = state.index, watched = new Set(x?.watch?.works || []), works = g.works;
-  const list = !works ? '<p class="muted-note">正在统计…</p>' : !works.length ? '<p class="settings-note">暂时没有可以推荐的作品：还没认出角色，或者角色名里没有作品信息。可以在 <a class="link" href="#/characters/works">资料库 › 作品</a> 里搜索并关注。</p>'
-    : `<div class="start-works">${works.map((w, i) => `<div class="start-work"><div><b>${esc(guideWorkName(w))}</b><small>${esc(w.tag)}</small></div><span class="muted-note">你有 ${number(w.count)} 张</span>
-      ${w.watched || (w.id && watched.has(w.id)) ? '<span class="start-ok">已关注</span>' : !w.watchable ? '<span class="muted-note" title="先在资料库的「作品」里核对这部作品的 Danbooru tag">需要先核对作品</span>' : `<button class="quiet small" data-guide-watch="${i}">关注</button>`}</div>`).join('')}</div>`;
-  const s = x?.state || {}, missing = x?.check?.missing || [];
-  const check = !g.capability.index ? '<p class="settings-note">这个安装没有角色索引组件，不能补充参考特征。</p>'
-    : INDEX_ACTIVE.includes(s.status) ? `<p class="start-status"><span class="local-dot busy"></span>${esc(indexLine(s, x.check))}</p>`
-    : missing.length ? `<p class="settings-note">发现 <b>${number(missing.length)}</b> 个本地还不认识的角色。添加时每个角色下载约 20 张公开参考图（约 ${x.mb_per_character} MB），在本机算好特征后重新扫描图库。</p><button class="primary small" data-guide="index-add">查看并添加…</button>`
-    : `${s.status === 'checked' ? '<p class="settings-note">关注的作品里没有发现新角色。</p>' : ''}<button class="quiet small" data-guide="index-check" ${watched.size ? '' : 'disabled title="先关注至少一部作品"'}>检查新角色…</button>`;
-  return cardHead('认出更多角色', '下面是你的图库里已认出角色最多的几部作品。关注之后，可以从 Danbooru 下载这些作品里本地还不认识的角色的公开参考图，让它们也能按长相认出来。不做这一步也没关系，常见角色已经能认出来。') +
-    list + `<div class="start-gap">${check}</div>`;
-}
-function guideStart() {
-  const items = [['看看认出的角色', '资料库按作品列出全部角色，点进去只看 TA 的图。', '#/characters', '打开资料库'],
-    ['纠正认错的', '在图库里选中图片，按 C 换成正确的角色，按 ⌫ 从当前角色里移出。你的判断优先，之后的识别不会覆盖它。', '#/library', '打开图库'],
-    ['随时撤销', `任何整理操作都能撤销：按 ${shortcut('Z')}，或点顶栏的撤销按钮。`, '', ''],
-    ['整理还没认出的', '长得像的未识别图分成一组，一组一组设为角色；确认得越多，认得越准。', '#/groups', '打开未识别'],
-    ['添加更多来源', '在「设置 › 图库」里添加文件夹，或者换一个图库。', '#/settings/library', '打开设置']];
-  return cardHead('开始整理', '机器的识别结果默认算数，看到错的再动手。几个常用的入口：') +
-    `<div class="start-tips">${items.map(([t, text, href, label]) => `<div class="start-tip"><b>${t}</b><span>${text}</span>${href ? `<a class="link" href="${href}">${label} ›</a>` : ''}</div>`).join('')}</div>`;
-}
-function drawStart() {
-  const g = state.guide, page = $('startPage'); if (!g || !page || state.route.page !== 'start') return;
-  let html;
-  if (!guideActive()) html = `<div class="settings-card start-card start-closed"><p>${g.guide.status === 'done' ? '新手引导已经完成。' : g.guide.status === 'skipped' ? '新手引导已跳过。' : '这个图库没有打开新手引导。'}可以随时重新打开，之前的选择都会保留。</p><button class="primary" data-guide="reopen">重新打开引导</button></div>`;
-  else {
-    const step = guideStep(), i = Math.max(0, GUIDE_STEPS.findIndex(([k]) => k === step));
-    const body = {ability: guideAbility, network: guideNetwork, sync: guideSync, more: guideMore, start: guideStart}[step](g);
-    html = `<nav class="start-steps" aria-label="引导步骤">${GUIDE_STEPS.map(([k, t], n) => `<button class="${n === i ? 'on' : n < i ? 'past' : ''}" data-guide-step="${k}"${n === i ? ' aria-current="step"' : ''}><span class="start-num">${n < i ? '✓' : n + 1}</span>${t}</button>`).join('')}
-        <button class="link-button start-skip" data-guide="skip">跳过引导</button></nav>
-      <section class="settings-card start-card">${body}
-        <div class="start-actions">${i ? `<button class="quiet" data-guide-step="${GUIDE_STEPS[i - 1][0]}">上一步</button>` : ''}<div class="spacer"></div>
-          ${i < GUIDE_STEPS.length - 1 ? `<button class="primary" data-guide-step="${GUIDE_STEPS[i + 1][0]}">下一步</button>` : '<button class="primary" data-guide="done">完成</button>'}</div></section>`;
+  const html = `<b class="tour-title">${stop.title}</b><p class="tour-text">${stop.text}</p>
+    <div class="tour-foot"><span class="tour-dots">${TOUR.map((_, i) => `<i class="${i === tourAt ? 'on' : ''}"></i>`).join('')}</span><div class="spacer"></div>
+      ${stop.skip || tourAt === TOUR.length - 1 ? '' : '<button class="quiet small" data-tour="skip">跳过</button>'}${stop.skip ? `<button class="quiet small" data-tour="skip">${stop.skip}</button>` : ''}
+      ${tourAt && tourAt < TOUR.length - 1 ? '<button class="quiet small" data-tour="back">上一步</button>' : ''}
+      <button class="primary small" data-tour="${tourAt === TOUR.length - 1 ? 'done' : 'next'}">${stop.next || '下一步'}</button></div>`;
+  if (bubble.dataset.stop !== id || moved && bubble.dataset.html !== html) {
+    if (moved && bubble.dataset.html) { bubble.classList.add('swap'); await new Promise(done => setTimeout(done, 120)); }
+    bubble.innerHTML = html; bubble.dataset.html = html; bubble.dataset.stop = id; bubble.classList.remove('swap');
   }
-  if (page.dataset.html !== html) { page.innerHTML = html; page.dataset.html = html; }
-  guideFollowUp(g);
+  const target = stop.target?.(), r = target?.getBoundingClientRect(), pad = 6, W = innerWidth, H = innerHeight, bw = bubble.offsetWidth, bh = bubble.offsetHeight;
+  if (!r || !r.width) {
+    Object.assign(hole.style, {left: W / 2 + 'px', top: H / 2 + 'px', width: '0px', height: '0px'}); hole.classList.add('none');
+    Object.assign(bubble.style, {left: (W - bw) / 2 + 'px', top: (H - bh) / 2 + 'px'});
+    return;
+  }
+  // A large area (the home page) is lit only at its top, where the first pictures are.
+  const box = {left: r.left - pad, top: r.top - pad, width: r.width + pad * 2, height: Math.min(r.height, H * .45) + pad * 2};
+  Object.assign(hole.style, {left: box.left + 'px', top: box.top + 'px', width: box.width + 'px', height: box.height + 'px'}); hole.classList.remove('none');
+  const right = box.left + box.width + 14, below = box.top + box.height + 14;
+  const [x, y] = right + bw < W - 12 ? [right, box.top] : below + bh < H - 12 ? [box.left, below] : [box.left, box.top - bh - 14];
+  Object.assign(bubble.style, {left: Math.max(12, Math.min(x, W - bw - 12)) + 'px', top: Math.max(12, Math.min(y, H - bh - 12)) + 'px'});
 }
-// What a step still needs: the recognition self-check once, the name consent state, the suggested works.
-function guideFollowUp(g) {
-  clearTimeout(guideTimer);
-  if (!guideActive()) return;
-  const step = guideStep(), redraw = () => { if (state.route.page === 'start') drawStart(); };
-  if (step === 'ability' && g.capability.recognition && g.capability.check.status === 'idle' && !guideChecked) { guideChecked = true; guideAction({action: 'check'}).then(redraw); }
-  if (step === 'ability' && g.capability.check.status === 'checking') guideTimer = setTimeout(() => { if (state.route.page === 'start') renderStart(); }, 1500);
-  if (step === 'network' && !state.names) api('/api/names').then(v => { state.names = v; redraw(); }).catch(e => toast(e.message));
-  if (step === 'more' && !g.works) loadGuide(true).then(redraw).catch(e => toast(e.message));
-  if (step === 'more' && !state.index) api('/api/index').then(v => { state.index = v; redraw(); }).catch(e => toast(e.message));
+$('tour').addEventListener('click', async e => {
+  const act = e.target.closest('[data-tour]')?.dataset.tour; if (!act) return;
+  if (act === 'skip' || act === 'done') { closeTour(); await guideAction({action: act === 'done' ? 'done' : 'skip'}); drawGuide(); return; }
+  tourAt = Math.max(0, Math.min(TOUR.length - 1, tourAt + (act === 'next' ? 1 : -1)));
+  placeTour(true); guideAction({action: 'step', step: TOUR[tourAt]});
+});
+addEventListener('resize', () => { if (tourAt >= 0) requestAnimationFrame(() => placeTour(false)); });
+document.addEventListener('keydown', e => { if (tourAt >= 0 && e.key === 'Escape') { e.stopImmediatePropagation(); closeTour(); guideAction({action: 'skip'}); } }, true);
+
+// ----- questions asked when they matter, once each -----
+function nextNudge() {
+  const g = state.guide; if (!guideOn() || tourAt >= 0) return null;
+  const seen = g.guide.seen || [], net = state.names?.network, idle = !SYNC_ACTIVE.includes(state.sync.status);
+  if (!seen.includes('names') && net && !net.granted_at && !net.this_run && g.results.characters > 0) return {key: 'names'};
+  if (!seen.includes('works') && idle && g.results.with_character > 0) {
+    if (!g.works && Date.now() - guideWorksAt > 30000) { guideWorksAt = Date.now(); loadGuide(true).then(drawNudge).catch(() => {}); }
+    const w = (g.works || []).find(x => x.watchable && !x.watched);
+    if (w && !(state.index?.watch?.works || []).length) return {key: 'works', w};
+  }
+  return null;
 }
+function drawNudge() {
+  const el = $('nudge'), n = nextNudge();
+  if (guideOn() && !state.names && !el.dataset.names) { el.dataset.names = '1'; api('/api/names').then(v => { state.names = v; drawNudge(); }).catch(() => {}); }
+  const html = !n ? '' : n.key === 'names'
+    ? `<div><b>认出了 ${number(state.guide.results.characters)} 个角色。要联网查它们的中文名吗？</b><small>只发送角色的 tag 和作品名，不发送图片。允许后对这个图库一直有效，可以在「设置 › 网络与隐私」里撤销。</small></div>
+      <div class="nudge-acts"><button class="quiet small" data-nudge="later">暂不</button><button class="primary small" data-nudge="allow">允许</button></div>`
+    : `<div><b>你的图里《${esc(guideWorkName(n.w))}》最多（${number(n.w.count)} 张）</b><small>关注它，就能从 Danbooru 补充这部作品里本地还不认识的角色，让它们也能按长相认出来。检查时会再问一次联网。</small></div>
+      <div class="nudge-acts"><button class="quiet small" data-nudge="later">暂不</button><button class="primary small" data-nudge="follow">关注</button></div>`;
+  if (el.dataset.html === html) return;
+  el.dataset.html = html; el.dataset.key = n?.key || '';
+  if (!html) { el.classList.remove('on'); setTimeout(() => { if (!el.dataset.html) el.hidden = true; }, 260); return; }
+  el.innerHTML = html; el.hidden = false; requestAnimationFrame(() => el.classList.add('on'));
+}
+$('nudge').addEventListener('click', async e => {
+  const act = e.target.closest('[data-nudge]')?.dataset.nudge, key = $('nudge').dataset.key; if (!act || !key) return;
+  for (const b of $('nudge').querySelectorAll('button')) b.disabled = true;
+  if (act === 'allow') {
+    try { state.names = {...state.names, ...await api('/api/names', {method: 'POST', body: JSON.stringify({action: 'network', allow: true})})}; toast('已允许这个图库联网查询名称'); }
+    catch (err) { toast(err.message); }
+  }
+  if (act === 'follow') { const w = nextNudge()?.w; if (w) await guideWatch(w); }
+  await guideAction({action: 'seen', key});
+  drawGuide();
+});
+
+// ----- the checklist: ticks itself as things get done -----
+function guideTick(item) {
+  const g = state.guide; if (!guideOn() || g.guide.ticked.includes(item)) return;
+  g.guide.ticked = [...g.guide.ticked, item]; drawChecklist(item);
+  guideAction({action: 'tick', item}).then(() => drawChecklist());
+}
+// Called after every successful change: which checklist item it shows was learned.
+function guideAfterPost(path, body) {
+  if (!guideOn()) return;
+  if (path === '/api/undo') guideTick('undo');
+  else if (path === '/api/change' && body?.action === 'confirmed' && ['groups', 'group'].includes(state.route.page)) guideTick('group');
+  else if (path === '/api/change' || path === '/api/reassign') guideTick('correct');
+  else if (path === '/api/index' && body?.action === 'watch' && body.works?.length) guideTick('follow');
+  if (Date.now() - guideLoadedAt > 4000) guideRefresh();
+}
+function drawChecklist(just = '') {
+  const el = $('checklist'), g = state.guide;
+  const ticked = g?.guide.ticked || [], all = ticked.length === CHECKLIST.length;
+  const show = guideOn() && !g.guide.hidden && tourAt < 0 && (!all || just);
+  el.hidden = !show; if (!show) return;
+  const ring = `<svg class="cl-ring" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="8"/><circle cx="10" cy="10" r="8" class="cl-done" style="stroke-dasharray:${(ticked.length / CHECKLIST.length * 50.3).toFixed(1)} 50.3"/></svg>`;
+  el.classList.toggle('open', checklistOpen);
+  el.innerHTML = `<button class="cl-pill" data-cl="toggle" aria-expanded="${checklistOpen}">${ring}<span>${all ? '都会了' : '上手'}</span><b>${ticked.length}/${CHECKLIST.length}</b></button>
+    ${checklistOpen ? `<div class="cl-panel"><p class="cl-head">边用边学：做过的会自动打勾</p>${CHECKLIST.map(([k, t, href, hint]) => `<div class="cl-item${ticked.includes(k) ? ' done' : ''}${k === just ? ' just' : ''}"><span class="cl-check" aria-hidden="true">${ticked.includes(k) ? '✓' : ''}</span>${href && !ticked.includes(k) ? `<a class="link" href="${href}">${t}</a>` : `<span>${t}</span>`}${hint ? `<kbd>${esc(hint)}</kbd>` : ''}</div>`).join('')}
+      <button class="link-button" data-cl="hide">不再显示</button></div>` : ''}`;
+  if (just) { el.classList.add('pulse'); setTimeout(() => el.classList.remove('pulse'), 900); }
+  if (all && just) setTimeout(() => guideAction({action: 'hide'}).then(() => drawChecklist()), 2500);
+}
+$('checklist').addEventListener('click', async e => {
+  const act = e.target.closest('[data-cl]')?.dataset.cl;
+  if (act === 'toggle') { checklistOpen = !checklistOpen; drawChecklist(); }
+  else if (act === 'hide') { await guideAction({action: 'hide'}); drawChecklist(); }
+  else if (e.target.closest('a[href]')) { checklistOpen = false; drawChecklist(); }
+});
 // A work the library has keeps its own name; a suggested Danbooru tag shows the built-in Chinese name when there is one.
 const guideWorkName = w => (!w.id && WORK_NAMES[w.tag]) || w.name;
 // Following a suggested work: the local work for its Danbooru tag (made when missing), added to the watch list.
@@ -3590,26 +3671,16 @@ async function guideWatch(w) {
     const id = w.id || (await post('/api/works', {action: 'from_tag', tag: w.tag})).id;
     const x = await api('/api/index');
     state.index = x.watch.works.includes(id) ? x : await post('/api/index', {action: 'watch', works: [...x.watch.works, id], min_posts: x.watch.min_posts});
-    toast(`已关注「${guideWorkName(w)}」`);
+    toast(`已关注「${guideWorkName(w)}」，可以在任务面板里检查它的新角色`);
   } catch (e) { toast(e.message); }
   await loadGuide(true).catch(e => toast(e.message));
-  drawStart();
 }
-$('startPage').addEventListener('click', async e => {
-  const step = e.target.closest('[data-guide-step]');
-  if (step) { if (await guideAction({action: 'step', step: step.dataset.guideStep, works: step.dataset.guideStep === 'more'})) { $('viewport').scrollTop = 0; drawStart(); } return; }
-  const watch = e.target.closest('[data-guide-watch]');
-  if (watch) { watch.disabled = true; guideWatch(state.guide.works[Number(watch.dataset.guideWatch)]); return; }
-  const b = e.target.closest('[data-guide]'); if (!b) return;
-  const act = b.dataset.guide;
-  if (act === 'skip') { if (await confirmAction('跳过新手引导吗？已经做的选择都会保留，以后可以在「设置 › 关于」里重新打开。', '跳过引导') && await guideAction({action: 'skip'})) go({page: 'home'}); }
-  else if (act === 'done') { if (await guideAction({action: 'done'})) go({page: 'home'}); }
-  else if (act === 'reopen') { guideChecked = false; if (await guideAction({action: 'reopen'})) drawStart(); }
-  else if (act === 'check') { guideChecked = true; await guideAction({action: 'check'}); drawStart(); }
-  else if (act === 'sync') { b.disabled = true; try { await post('/api/sync', {}); state.sync = {status: 'scanning'}; pollSync(); } catch (err) { toast(err.message); } drawStart(); }
-  else if (act === 'index-check') { if (await checkIndex()) { pollIndex(); drawStart(); } }
-  else if (act === 'index-add') openIndexAdd();
-});
+async function replayGuide() {
+  if (!await guideAction({action: 'reopen'})) return;
+  if (state.route.page === 'settings') go({page: 'home'});
+  await new Promise(done => setTimeout(done, 300));
+  showTour(0);
+}
 
 (async () => {
   try {
@@ -3625,6 +3696,7 @@ $('startPage').addEventListener('click', async e => {
     await meta;
     window.splash?.ready();
     taskTick();
+    guideAfterBoot();
   } catch (e) { window.splash?.ready(); error('启动失败：' + e.message + '。请检查启动终端，然后刷新页面。'); }
 })();
 
