@@ -301,7 +301,7 @@ child.terminate();child.wait()
         before = self.rows(['prototypes', 'proto_claims', 'clusters', 'cluster_info'])
         pids = self.held()
         stale = json.loads(self.saved.read_text(encoding='utf-8'))['version']
-        self.assertEqual(self.request('/api/tag', {'ids': ['a'], 'tag': '合成旧快照'})['status'], 200)
+        self.human_input_change()
         human = self.rows(['actions', 'assertions'])
         self.release.write_text('release')
         wait_until(lambda: self.state()['status'] == 'waiting', timeout=10)
@@ -312,6 +312,10 @@ child.terminate();child.wait()
         self.assertNotEqual(int(self.pid.read_text()), pids[0])
         self.assertNotEqual(json.loads(self.saved.read_text(encoding='utf-8'))['version'], stale)
         self.assertEqual(self.rows(['actions', 'assertions']), human)
+
+    def human_input_change(self):
+        # A tag also writes history (actions), which learning reads; #29 limits each kind to what it reads.
+        self.assertEqual(self.request('/api/tag', {'ids': ['a'], 'tag': '合成旧快照'})['status'], 200)
 
     def test_cancel_timeout_and_retry_use_existing_process_tree_contract(self):
         self.timing_fixture()
@@ -490,6 +494,11 @@ class NativeRelationPublicationTest(NativeResearchPublicationTest):
         self.assertGreater(len(response['tables']['image_sigs']),len(before['image_sigs']))
         self.assertGreater(len(response['tables']['relations']),len(before['relations']))
         return pids
+
+    def human_input_change(self):
+        # Similar reads exclusions, not tags (#29): a human exclusion is the in-flight input change.
+        response=self.request('/api/curate',{'ids':['a'],'action':'exclude'})
+        self.assertEqual(response['status'],200,response)
 
     def test_old_real_response_replay_is_rejected_without_republishing(self):
         self.timing_fixture()
