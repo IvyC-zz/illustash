@@ -178,7 +178,8 @@ async function applyRoute() {
   state.char = null;
   state.groupNear = null;
   if (route.page === 'group') {
-    let result; try { result = await api('/api/clusters?nsfw=' + state.nsfw); } catch (e) { error(readError(e)); return; }
+    let result; try { result = await api('/api/clusters?nsfw=' + state.nsfw); } catch (e) { if (state.route === route) error(readError(e)); return; }
+    if (state.route !== route) return;  // navigated on while the groups loaded: this answer belongs to no page
     const g = result.clusters.find(x => String(x.cid) === route.id);
     state.groupNear = g?.near ? nearText(g) : null; state.groupNearId = g?.near || null; state.groupTraits = g?.traits || [];
   }
@@ -2408,11 +2409,14 @@ function syncLine(s) {
   if (s.status === 'error') return '同步失败';
   return '本地图库';
 }
-let syncTimer = null, lastImported = 0;
+let syncTimer = null, lastImported = 0, syncPoll = 0;
 async function pollSync() {
   clearTimeout(syncTimer);
+  // Polls overlap (task panel, timer, after a start): an older answer arriving last must not wind the state back.
+  const poll = ++syncPoll;
   try {
     const {state: s, history} = await api('/api/sync');
+    if (poll !== syncPoll) return;
     const was = state.sync.status;
     state.sync = s; state.syncHistory = history;
     if ((s.imported || 0) > lastImported || (SYNC_ACTIVE.includes(was) && !SYNC_ACTIVE.includes(s.status))) {
@@ -2423,7 +2427,7 @@ async function pollSync() {
     if (SYNC_ACTIVE.includes(was) && s.status === 'done' && s.imported) toast(`同步完成：新加入 ${number(s.imported)} 张`);
     renderTasks();
     if (SYNC_ACTIVE.includes(s.status)) syncTimer = setTimeout(pollSync, 2000);
-  } catch (e) { syncTimer = setTimeout(pollSync, 10000); }
+  } catch (e) { if (poll === syncPoll) syncTimer = setTimeout(pollSync, 10000); }
 }
 // ---------- new characters for the external index (native/terms/src/app_index.rs) ----------
 const WORK_NAMES = {blue_archive: '蔚蓝档案', 'arknights:_endfield': '明日方舟：终末地', wuthering_waves: '鸣潮', 'meitantei_precure!': '名侦探光之美少女',
@@ -2819,6 +2823,11 @@ async function loadLibraries() {
 const ORIGINS = [['pixiv', 'Pixiv'], ['x', 'X'], ['other', '其他']];
 const IS_MAC = /Mac/.test(navigator.platform);
 const libForm = {open: false, name: '', folders: {}, photos: false};
+// What is typed into the new-library form is kept as it is typed, so a background refresh of the card loses nothing.
+$('settingsPage').addEventListener('input', e => {
+  if (e.target.id === 'libName') libForm.name = e.target.value;
+  else if (e.target.id === 'libPhotos') libForm.photos = e.target.checked;
+});
 // The backend lists the origins it knows (#111); the fallback covers the legacy layout without library info.
 const origins = () => { const list = state.libraries?.info?.origins; return list?.length ? list.map(o => [o.id, o.label]) : ORIGINS; };
 function renderLibrariesCard() {
@@ -2858,13 +2867,13 @@ function renderLibrariesCard() {
       ${IS_MAC ? `<label class="lib-photos"><input type="checkbox" id="libPhotos" ${f.photos ? 'checked' : ''}> 同时读取 iCloud 照片（本机「照片」图库，按存图的 App 区分 X 和 Pixiv）</label>` : ''}
       <div class="setting-line"><span>名字<small class="line-hint">保存在 ${esc(home(data.home))}</small></span><input class="lib-input" id="libName" placeholder="新图库" value="${esc(f.name)}"></div>
       <p><button class="primary" data-lib-create>创建并打开</button> <button class="quiet" data-lib-cancel>取消</button></p></div>`;
-  card.innerHTML = `${cardHead('图库', '每个图库各自保存识别结果和人工整理记录，图片本身留在原处、不复制。切换图库时后台会重启，几秒后自动刷新。')}
+  setSettingsHTML(card, `${cardHead('图库', '每个图库各自保存识别结果和人工整理记录，图片本身留在原处、不复制。切换图库时后台会重启，几秒后自动刷新。')}
     ${cur ? `<div class="setting-line"><span><b>${esc(cur.name)}</b><small class="line-hint lib-path-hint">${esc(home(cur.path))}</small></span><span class="tag-on">当前图库</span></div>
     <div class="lib-groups">${groups}</div>` : '<p class="muted-note">当前是旧的数据布局（不是图库包）。</p>'}
     <p class="lib-actions"><button class="quiet" data-lib-new>新建图库</button><button class="quiet" data-lib-choose="library">打开其他图库…</button><button class="quiet" data-lib-choose="zip">导入…</button>${cur ? `<button class="quiet" data-lib-export ${ex.status === 'running' ? 'disabled' : ''}>导出当前图库</button>` : ''}</p>
     ${form}${exportLine}
     ${data.libraries.length > 1 || dev ? `<table class="settings-table lib-table"><tr><th>这台电脑上的图库</th>${dev ? '<th>测试画像</th>' : ''}<th></th></tr>${data.libraries.map(row).join('')}</table>` : ''}
-    <p class="muted-note">导出的 zip 包含识别结果、人工整理记录和来源配置，不含图片、模型连接设置或联网授权，可以换电脑或发给别人。导入后需重新设置模型接口，并自行确认名称查询的联网授权；旧版导出包也会清除这些设置。个人备份请保留完整图库目录。</p>`;
+    <p class="muted-note">导出的 zip 包含识别结果、人工整理记录和来源配置，不含图片、模型连接设置或联网授权，可以换电脑或发给别人。导入后需重新设置模型接口，并自行确认名称查询的联网授权；旧版导出包也会清除这些设置。个人备份请保留完整图库目录。</p>`);
 }
 // Gallery pages have no Tauri dialog permission. Keep confirmation inside the page;
 // window.confirm may be replaced with an async plugin function by the desktop shell.
