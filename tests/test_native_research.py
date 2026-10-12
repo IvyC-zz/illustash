@@ -189,7 +189,9 @@ Path(sys.argv[2]).write_text(json.dumps(v,allow_nan=False))
             seen.append(s['status'])
             return s['status'] in ('idle','error')
         wait_until(settled,timeout=20)
-        self.assertEqual(self.state()['status'],'idle',self.state())
+        # Judge the state that ended the wait: the next recovery tick (every second) may already start the
+        # queued events run for the verdict, which regroup does not acknowledge.
+        self.assertEqual(seen[-1],'idle',seen)
         self.assertIn('waiting',seen)
         versions=self.versions()[runs:]
         self.assertGreaterEqual(len(versions),2)
