@@ -147,7 +147,8 @@ class NativeFirstInstallTest(unittest.TestCase):
         (self.root / 'support/libraries.tmp').rmdir()
         response = self.request('/api/libraries/open', {'path': made['path']})
         self.assertEqual(response['status'], 200, response['body'])
-        self.assertIn(made['path'], registry.read_text(encoding='utf-8'))
+        # Compare parsed paths: on Windows the registry's JSON escapes every backslash.
+        self.assertIn(made['path'], [entry['path'] for entry in json.loads(registry.read_text(encoding='utf-8'))['recent']])
 
     def test_existing_user_creating_another_library_keeps_the_first_and_its_guide(self):
         # #97: a second library starts its own guide; the first library, its sources and its guide stay as they were.
