@@ -24,6 +24,37 @@ from tools.verify_read_http import fetch
 from tests import provenance_fixture as db
 
 
+def store_credential(support, kind, value):
+    """A synthetic account credential in the form the host reads on this platform.
+
+    Windows never reads the plaintext file: the credential is a DPAPI blob bound to the
+    account kind (crates/platform/src/app_dpapi.rs), written here the same way.
+    """
+    directory = support / 'accounts'
+    directory.mkdir(parents=True, exist_ok=True)
+    if os.name != 'nt':
+        (directory / kind).write_text(value)
+        return
+    import ctypes
+    from ctypes import wintypes
+
+    class Blob(ctypes.Structure):
+        _fields_ = [('len', wintypes.DWORD), ('data', ctypes.POINTER(ctypes.c_char))]
+
+    def blob(data):
+        buffer = ctypes.create_string_buffer(data, len(data))
+        return Blob(len(data), ctypes.cast(buffer, ctypes.POINTER(ctypes.c_char))), buffer
+
+    (plain, plain_buffer), (purpose, purpose_buffer) = blob(value.encode()), blob(f'Illustash/accounts/v1/{kind}'.encode())
+    out = Blob()
+    if not ctypes.windll.crypt32.CryptProtectData(ctypes.byref(plain), None, ctypes.byref(purpose), None, None, 1, ctypes.byref(out)):
+        raise ctypes.WinError()
+    try:
+        (directory / f'{kind}.dpapi').write_bytes(ctypes.string_at(out.data, out.len))
+    finally:
+        ctypes.windll.kernel32.LocalFree(out.data)
+
+
 WORKER = r'''
 import json,os,sqlite3,sys,time
 from pathlib import Path
@@ -105,8 +136,12 @@ class NativeProvenanceTest(unittest.TestCase):
     def info(self):
         value=self.request('/api/provenance');self.assertEqual(value['status'],200,value);return json.loads(value['body'])
     def finish(self,status=None):
-        wait_until(lambda:self.info()['state']['status'] not in ('running','stopping'),timeout=10)
-        value=self.info()
+        # Judge the state that ended the wait: a queued run may start before a second read (#56).
+        seen=[]
+        def settled():
+            seen[:]=[self.info()];return seen[0]['state']['status'] not in ('running','stopping')
+        wait_until(settled,timeout=10)
+        value=seen[0]
         if status:self.assertEqual(value['state']['status'],status,value)
         return value
     def post(self,body,code=200):
@@ -237,8 +272,11 @@ class NativeProvenanceTest(unittest.TestCase):
         self.assertFalse(self.sql("SELECT task_id FROM native_delivery WHERE status='pending'",cache=True))
     def test_frozen_package_does_not_replay_pending_delivery(self):
         self.post({'action':'lookup','ids':['a']});self.finish('done')
-        with db.connect(self.lib) as c:c.execute("UPDATE native_delivery SET status='pending'")
+        wait_until(lambda:self.sql('SELECT status FROM native_delivery',cache=True)==[('done',)],timeout=10)
+        # A running, unfrozen host replays pending deliveries on its next idle tick (#56), so the
+        # pending state is set only once that host has stopped.
         self.stop(self.process)
+        with db.connect(self.lib) as c:c.execute("UPDATE native_delivery SET status='pending'")
         config=dict(self.lib.config);config['frozen']=True
         (self.lib.path/'library.json').write_text(json.dumps(config))
         with sqlite3.connect(self.lib.db) as c:before=list(c.iterdump())
@@ -295,8 +333,7 @@ class NativeProvenanceTest(unittest.TestCase):
 
 
     def test_pixiv_pages_cache_and_expiry_never_grants_background_consent(self):
-        account=self.support/'accounts';account.mkdir(parents=True,exist_ok=True)
-        (account/'pixiv').write_text('9_synthetic')
+        store_credential(self.support,'pixiv','9_synthetic')
         self.pixiv_users=True
         self.post({'action':'start'});self.finish('stopped');self.assertFalse(self.calls)
         self.post({'action':'start','allow_network':True});self.finish('done')
@@ -311,13 +348,18 @@ class NativeProvenanceTest(unittest.TestCase):
         metadata=json.loads((self.support/'accounts.json').read_text());self.assertIn('expired',metadata['pixiv'])
         self.assertFalse(self.info()['auto_network'])
     def test_new_queue_preemption_resume_and_startup_disable(self):
+        # Runs here end by preemption or an explicit stop, never by the idle timeout. Each step starts a new worker
+        # process, and on Windows that start alone can exceed the suite's 2-second idle limit (#56).
+        self.env['ILLUSTASH_PROVENANCE_IDLE_SECONDS']='30'
         self.env['SYNTHETIC_MODE']='hang-first';self.restart()
         with db.connect(self.lib) as c:c.execute("INSERT INTO pending_runs(kind) VALUES ('new')")
         self.restart()
         wait_until(lambda:self.info()['state'].get('kind')=='new',timeout=5)
         self.post({'action':'start'},400)
         self.post({'action':'lookup','ids':['a']})
-        self.finish('done')
+        # The preempted run resumes as soon as the lookup ends, so the lookup's outcome is read from its run.
+        wait_until(lambda:any(r['kind']=='pick' and r['status'] not in ('running','stopping') for r in self.info()['runs']),timeout=10)
+        self.assertEqual([r['status'] for r in self.info()['runs'] if r['kind']=='pick'],['done'])
         wait_until(lambda:self.info()['state'].get('kind')=='new' and self.info()['state']['status']=='running',timeout=5)
         self.post({'action':'stop'});self.finish('stopped')
         with db.connect(self.lib) as c:c.execute("INSERT OR IGNORE INTO pending_runs(kind) VALUES ('new')")

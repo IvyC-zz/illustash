@@ -1,2 +1,4 @@
 # 所有平台签出都保持 LF，打包资源、夹具和 golden 的字节不随 Windows 的 core.autocrlf 变化。
 * text=auto eol=lf
+# git archive 把这个文件替换成导出的提交短哈希；没有 .git 的源码构建据此在 about 里报告 build。
+native/terms/source-revision.txt export-subst
