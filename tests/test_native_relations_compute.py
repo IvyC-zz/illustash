@@ -834,6 +834,25 @@ class NativeRelationImagesTest(unittest.TestCase):
         self.assertIsNone(self.probe('locate', a=a, b=flat))
 
 
+# Primary-key width of each similarity cache: rows a change list deletes are named by these columns.
+KEYS = {'image_sigs':1, 'relations':2, 'similar_paired':1, 'similar_retry':2}
+
+
+def applied(path, table, change):
+    """A change list `{delete, append}` applied to the snapshot table the way App publishes it."""
+    with sqlite3.connect(path) as c:
+        exists = c.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table,)).fetchone()
+        stored = [list(r) for r in c.execute('SELECT * FROM '+table+' ORDER BY rowid')] if exists else []
+    if table=='image_sigs':
+        stored = [[r[0],r[1],r[2].hex() if r[2] is not None else None,r[3]] for r in stored]
+    assert isinstance(change, dict) and set(change)=={'delete','append'}, change
+    width = KEYS[table]
+    keys = [tuple(r[:width]) for r in stored]
+    gone = [tuple(k) for k in change['delete']]
+    assert len(set(gone))==len(gone) and set(gone)<=set(keys), (table, gone)
+    return [r for r in stored if tuple(r[:width]) not in set(gone)] + change['append']
+
+
 class NativeSimilarSnapshotTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -865,10 +884,12 @@ class NativeSimilarSnapshotTest(unittest.TestCase):
             with sqlite3.connect(self.root/'library.sqlite') as c:
                 c.execute('INSERT INTO assets VALUES (?,?)', (ident, str(path)))
 
-    def request(self, kind='similar', ids=None):
+    def request(self, kind='similar', ids=None, delta=False):
         request = dict(format='illustash-research/1', identity=dict(synthetic=True), version='fixed-v1',
                        kind=kind, args=dict(ids=ids or []), regroup=False, snapshot=str(self.root),
                        features=str(self.root/'features'), anchors=str(self.root/'anchors'))
+        if delta:
+            request['delta_tables'] = True
         input_path, output = self.root/'request.json', self.root/'response.json'
         input_path.write_text(json.dumps(request), encoding='utf-8')
         run = subprocess.run([str(self.binary), str(input_path), str(output)],
@@ -891,6 +912,19 @@ class NativeSimilarSnapshotTest(unittest.TestCase):
             self.assertEqual(run.returncode, 0, run.stderr.decode())
             self.assertEqual((self.root/'library.sqlite').read_bytes(), before)
             out = json.loads(output.read_text())
+            # #31: the owner that asks for change lists gets the same tables as edits of its snapshot.
+            run, output = self.request(delta=True)
+            self.assertEqual(run.returncode, 0, run.stderr.decode())
+            self.assertEqual((self.root/'library.sqlite').read_bytes(), before)
+            changes = json.loads(output.read_text())
+            self.assertEqual({k:changes['result'][k] for k in ('status','compared','found')},
+                             {k:out['result'][k] for k in ('status','compared','found')})
+            self.assertEqual(set(changes['tables']), set(out['tables']))
+            for table, rows in out['tables'].items():
+                edited = applied(self.root/'library.sqlite', table, changes['tables'][table])
+                if table=='relations':
+                    edited, rows = [r[:-1] for r in edited], [r[:-1] for r in rows]
+                self.assertEqual(edited, rows, table)
             expected_state = next(fixed)
             with sqlite3.connect(reference/'library.sqlite') as c:
                 for table, rows in expected_state['tables'].items():

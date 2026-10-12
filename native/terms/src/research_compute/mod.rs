@@ -8,7 +8,7 @@ mod numeric;
 mod relation_fft;
 pub mod relation_image;
 pub mod relations;
-mod similar;
+pub(crate) mod similar;
 // Existing NumPy f32 contiguous reduction shared with native anchor inference.
 pub(crate) use numeric::{sum32 as contiguous_sum32, sum64 as contiguous_sum64};
 pub mod snapshot;
@@ -43,6 +43,10 @@ fn progress_value(value: Value) -> Result<()> {
         fs::rename(temporary, path)?;
     }
     Ok(())
+}
+/// The owner accepts similarity caches as change lists (#31); an owner that does not say so gets full tables.
+fn delta_tables(request: &Value) -> bool {
+    request["delta_tables"] == true
 }
 pub fn run(request: &Value) -> Result<Value> {
     if request["format"] != "illustash-research/1" || !handles(request) {
@@ -101,7 +105,7 @@ pub fn run(request: &Value) -> Result<Value> {
         return Ok(out);
     }
     if request["kind"] == "similar" {
-        let (result, tables) = similar::scan(&snapshot, features)?;
+        let (result, tables) = similar::scan(&snapshot, features, delta_tables(request))?;
         out["result"] = result;
         out["tables"] = tables;
         return Ok(out);
@@ -124,7 +128,7 @@ pub fn run(request: &Value) -> Result<Value> {
         tables = cache;
     }
     if request["kind"] == "events" && request["regroup"] == true && request["args"]["similar"] == true {
-        let (state, cache) = similar::scan(&snapshot, features)?;
+        let (state, cache) = similar::scan(&snapshot, features, delta_tables(request))?;
         result
             .as_object_mut()
             .expect("learning result object")
