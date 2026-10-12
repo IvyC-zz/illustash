@@ -35,9 +35,10 @@ pub fn welcome_open(app: AppHandle, path: String) -> Result<(), String> {
     Ok(())
 }
 
-/// Create a library from the folders picked per origin (and Photos on macOS), then open it.
+/// Create a library from the folders picked per origin (and Photos on macOS), then open it. When only listing it
+/// among the recent libraries failed, answer `{created, error}` instead: the page offers to open what was made.
 #[tauri::command(async)]
-pub fn welcome_create(app: AppHandle, name: String, sources: Vec<Source>) -> Result<(), String> {
+pub fn welcome_create(app: AppHandle, name: String, sources: Vec<Source>) -> Result<Value, String> {
     use illustash_terms::desktop_shell::Pick;
     let picks = sources
         .into_iter()
@@ -51,9 +52,12 @@ pub fn welcome_create(app: AppHandle, name: String, sources: Vec<Source>) -> Res
         })
         .collect::<Result<Vec<_>, _>>()?;
     let root = server::resource_root(&app).ok_or("应用资源不可用；请重新启动应用")?;
-    let library = illustash_terms::desktop_shell::create(&root, &name, picks).map_err(|e| e.to_string())?;
-    server::restart(&app, Some(library));
-    Ok(())
+    let created = illustash_terms::desktop_shell::create(&root, &name, picks).map_err(|e| e.to_string())?;
+    if let Some(error) = created.unlisted {
+        return Ok(json!({"created": created.path, "error": error}));
+    }
+    server::restart(&app, Some(created.path));
+    Ok(json!({}))
 }
 
 /// What each picked folder holds (readable, how many pictures, already covered by another), read-only; only the

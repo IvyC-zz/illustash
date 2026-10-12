@@ -835,6 +835,8 @@ a.cc-name:hover{color:var(--accent-ink)}
 .start-tip a{margin-top:auto;font-size:12px}
 .start-closed{align-items:flex-start}
 .start-closed p{margin:0}
+.lib-created{margin-top:8px;padding:10px 12px;border-radius:10px;box-shadow:0 0 0 1px var(--warn);font-size:12.5px;line-height:1.55}
+.lib-created p{margin:0 0 6px}
 @media (max-width:760px){.start-page{grid-template-columns:minmax(0,1fr);gap:10px}.start-steps{position:static;flex-direction:row;flex-wrap:wrap}}
 .home-day{padding:0 0 22px}
 .home-dh{position:sticky;top:0;z-index:3;display:flex;align-items:baseline;gap:8px;margin:0 -26px;padding:10px 26px 8px;background:color-mix(in srgb,var(--sheet) 82%,transparent);-webkit-backdrop-filter:blur(18px) saturate(1.5);backdrop-filter:blur(18px) saturate(1.5)}

@@ -73,6 +73,8 @@ button{font:inherit;color:inherit;cursor:pointer}
 .w-check.warn{color:var(--warn)}
 .w-track{height:3px;border-radius:2px;background:var(--line);overflow:hidden;margin:4px 0 2px}
 .w-track span{display:block;height:100%;background:var(--accent);transition:width .3s}
+.w-created{margin-top:10px;padding:10px 12px;border-radius:10px;background:var(--sheet);box-shadow:0 0 0 1px var(--warn)}
+.w-created p{margin:0 0 6px;font-size:12.5px;line-height:1.55}
 </style></head>
 <body>
 <div id="splash" data-shell><div class="sp-bg"></div><div class="sp-col"><div class="sp-icon"><svg viewBox="302 291 650 650" fill="none"></svg></div><div class="sp-name">Illustash</div><div class="sp-status"><span class="sp-text">正在启动本地服务…</span><span class="sp-track"><span class="sp-fill"></span></span><button class="sp-switch" id="switch">选择其他图库</button></div><div class="sp-error"><p id="msg"></p><pre id="log" hidden></pre>
@@ -112,7 +114,7 @@ let W = null;
 window.showWelcome = state => {
   // state.photos: whether this platform can read the Photos library (macOS); W.photos: whether it is ticked.
   // W.seq: the picked folders in the order they were added, [origin, path]; W.info: what the check found for each path.
-  W = {...state, photosOk: !!state.photos, photos: false, form: !!state.create || !(state.recent || []).length, seq: [], info: {}, notes: [], name: '', error: '', importing: null};
+  W = {...state, photosOk: !!state.photos, photos: false, form: !!state.create || !(state.recent || []).length, seq: [], info: {}, notes: [], name: '', error: '', importing: null, created: null};
   document.body.classList.remove('failed');
   document.body.classList.add('welcoming');
   busy(false);
@@ -148,7 +150,10 @@ function renderWelcome() {
     ${W.photosOk ? `<label class="w-line"><input type="checkbox" id="wphotos" ${W.photos ? 'checked' : ''}> 同时读取 iCloud 照片（本机「照片」图库，按存图的 App 区分 X 和 Pixiv）</label>` : ''}
     <div class="w-line"><span>名字</span><input type="text" id="wname" placeholder="新图库" value="${esc(W.name)}"></div>
     <p class="w-note">保存在 ${esc(home(W.home))}</p>
-    <div class="sp-actions" style="justify-content:flex-start"><button class="btn primary" data-act-w="create">创建并打开</button></div></div>`;
+    ${W.created ? `<div class="w-created"><p><b>图库已经建好</b>，保存在 <bdi>${esc(home(W.created.created))}</bdi>，但没能加入最近图库列表：${esc(W.created.error)}</p>
+      <p class="w-note">打开它会再试一次加入列表；再点创建会另建一个带编号的图库。</p>
+      <div class="sp-actions" style="justify-content:flex-start"><button class="btn primary" data-act-w="open-created">打开这个图库</button><button class="btn" data-act-w="create-again">仍然新建一个</button></div></div>`
+      : '<div class="sp-actions" style="justify-content:flex-start"><button class="btn primary" data-act-w="create">创建并打开</button></div>'}</div>`;
   document.getElementById('wcol').innerHTML = `<div class="w-head"><img src="icon.png" alt=""><h1>Illustash</h1></div>
     ${recent.length ? `<p class="w-note">最近的图库</p><div class="w-recent">${recent.map(l => `<button data-open="${esc(l.path)}" ${im ? 'disabled' : ''}><b>${esc(l.name)}</b><small><bdi>${esc(home(l.path))}</bdi></small></button>`).join('')}</div>`
       : '<p class="w-note">还没有图库。图库记下图片在哪里、识别结果和你的整理，图片本身留在原来的文件夹里。</p>'}
@@ -219,8 +224,13 @@ document.getElementById('welcome').onclick = async e => {
       const sources = W.seq.map(([preset, path]) => ({kind: 'folder', path, preset}));
       if (W.photos) sources.push({kind: 'photos'});
       if (!sources.length) { fail('请至少添加一个文件夹'); return; }
-      busy(true); await invoke('welcome_create', {name: W.name, sources});
+      busy(true);
+      const r = await invoke('welcome_create', {name: W.name, sources});
+      // Published but not listed (#97): offer the package instead of making a second, numbered one.
+      if (r?.created) { W.created = r; busy(false); renderWelcome(); }
     }
+    else if (d.actW === 'open-created') { busy(true); await invoke('welcome_open', {path: W.created.created}); }
+    else if (d.actW === 'create-again') { W.created = null; renderWelcome(); }
   } catch (err) { fail(err); }
 };
 // 外壳在服务启动失败时调用，显示原因和最后几行输出。
