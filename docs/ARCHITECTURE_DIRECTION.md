@@ -269,7 +269,7 @@ terms 5（`5e7e7f7`）/6（`d9c49b4`）的历史源库定义均含可为 NULL �
 
 原生会话另接管 `POST /api/artist/verdict`、`/api/curate`、`/api/fold`，覆盖画师裁决、人工收录与排除、重复关系折叠。画师裁决仅选择已有资产，不扩展重复组；人工整理沿用标签目标选择并在同一应用事务写历史、curation 与 excluded。折叠配置按既有稳定哈希和关系规则重建 duplicates，并沿用成员差异可见性规则；源库只读快照与应用库提交之间保留独立边界，不宣称跨库原子事务。折叠沿用现存无历史语义；人工标签、画师裁决和整理统一参与最近一步撤销。持久化 JSON 的 ASCII、空格与字段顺序保持原契约，和 HTTP 序列化分开。
 
-原生会话接管 `POST /api/entities`、`/api/character/profile`、`/api/local-links`、`/api/works`、`/api/character/mascot`、`/api/kind`、`/api/oc/shared`。实体创建先按现行名称、别名及 Danbooru/WD 链接复用已有身份；无名 OC 按未占用的「原创角色 N」命名。作品保留 create/edit/from_tag/move/link/rename 六类操作、父子环与链接冲突检查。资料和本地链接与其他人工命令共用最近一步撤销；创建、作品编辑、类型及 mascot 沿用无历史语义；作品归属统一经资料接口修改并参与撤销。参数解析、核心写入、历史、名称与身份投影及事件入队共用 Immediate 事务；响应读取发生在提交及投影更新之后，不把提交后的响应或事件失败解释成回滚。
+原生会话接管 `POST /api/entities`、`/api/character/profile`、`/api/local-links`、`/api/works`、`/api/character/mascot`、`/api/kind`、`/api/oc/shared`。实体创建先按现行名称、别名及 Danbooru/WD 链接复用已有身份；无名 OC 按未占用的「原创角色 N」命名。作品保留 create/edit/from_tag/move/link/rename 六类操作、父子环与链接冲突检查。资料和本地链接与其他人工命令共用最近一步撤销；创建、作品编辑、类型及 mascot 沿用无历史语义；作品归属统一经资料接口修改并参与撤销。资料请求的 `work` 也可写成 `{"create": 名称}` 或 `{"tag": tag}`：新建或按 tag 取得作品与资料写入在同一事务，资料失败不留孤立作品；网页保存在第一次请求前即禁用按钮，新建作品时上级作品随 `create` 一并提交（2026-10-11，#35）。参数解析、核心写入、历史、名称与身份投影及事件入队共用 Immediate 事务；响应读取发生在提交及投影更新之后，不把提交后的响应或事件失败解释成回滚。
 
 版权解析先查本地作品的 Danbooru/qualifier 链接；无匹配时按原 `related_tag.json` 查询及 `name_cache` 契约选择覆盖率至少 0.9 的最小作品，缺失则退至 0.5。Rust HTTPS 客户端保留 25 秒超时、2 MB 响应限制和 500 MB 流量预算，查询缓存与成功流量记账随命令提交；查询或后续写入失败回滚本次正式修改。`ILLUSTASH_COPYRIGHT_BASE` 仅允许本机带端口的 HTTP 合成查询替身。网络查询的全局节流、重试与任务运行由 M4 名称协调接续；当前请求失败返回错误，不启动 Python。
 
