@@ -1,5 +1,6 @@
 //! Similarity calculator over an explicit isolated snapshot. Caches are returned
 //! to App Research for the existing validation/publication; this owns no scheduler.
+//! When the request allows it (#31), each cache is returned as the change list against the snapshot.
 use super::{
     features::Matrix,
     numeric::{pair_block_rows, sum32},
@@ -101,7 +102,7 @@ pub fn ccip_pairs(features: &Matrix, ids: &[String], query: Option<&HashSet<Stri
     }
     Ok(pairs)
 }
-fn table(c: &rusqlite::Connection, name: &str) -> Result<Vec<Value>> {
+pub(crate) fn table(c: &rusqlite::Connection, name: &str) -> Result<Vec<Value>> {
     // Exact existing table shapes, including historical rows not in active assets.
     if !["image_sigs", "relations", "similar_paired", "similar_retry"].contains(&name) {
         return Err(Error::Invalid("unknown similarity table".into()));
@@ -167,7 +168,34 @@ fn load_cached(
     }
     Ok(image)
 }
-pub fn scan(snapshot: &Snapshot, features: &Matrix) -> Result<(Value, Value)> {
+/// #31: `delete` (primary keys of snapshot rows that go) and `append` (rows added after the rows that
+/// stay, in order) turn the snapshot table into `new` with the rowid order a full rewrite gives. A table
+/// without a primary key is returned whole.
+pub(crate) fn changes(c: &rusqlite::Connection, name: &str, old: &[Value], new: Vec<Value>) -> Result<Value> {
+    let mut columns: Vec<(i64, usize)> = c
+        .prepare("SELECT pk,cid FROM pragma_table_info(?)")?
+        .query_map([name], |r| Ok((r.get(0)?, r.get(1)?)))?
+        .collect::<rusqlite::Result<_>>()?;
+    // A table the snapshot does not have yet has no rows to delete; App creates it with its key.
+    let present = !columns.is_empty();
+    columns.retain(|(pk, _)| *pk > 0);
+    columns.sort();
+    let key: Vec<usize> = columns.into_iter().map(|(_, i)| i).collect();
+    if present && key.is_empty() {
+        return Ok(Value::Array(new));
+    }
+    let plan = crate::table_delta::plan(
+        old,
+        &new,
+        |r| key.iter().map(|&i| r[i].to_string()).collect::<Vec<_>>(),
+        |a, b| a == b,
+    );
+    let delete: Vec<Value> =
+        plan.delete.iter().map(|&i| Value::Array(key.iter().map(|&k| old[i][k].clone()).collect())).collect();
+    let append: Vec<Value> = new.into_iter().skip(plan.kept.len()).collect();
+    Ok(json!({"delete":delete,"append":append}))
+}
+pub fn scan(snapshot: &Snapshot, features: &Matrix, delta: bool) -> Result<(Value, Value)> {
     let started = Instant::now();
     let c = snapshot.read()?;
     let paths: Vec<(String, String)> = c
@@ -181,6 +209,7 @@ pub fn scan(snapshot: &Snapshot, features: &Matrix) -> Result<(Value, Value)> {
     let mut relations = table(&c, "relations")?;
     let mut paired = table(&c, "similar_paired")?;
     let mut retry = table(&c, "similar_retry")?;
+    let before = delta.then(|| [sigs.clone(), relations.clone(), paired.clone(), retry.clone()]);
     let done: HashSet<_> =
         sigs.iter().filter(|r| r[3] == 1).map(|r| as_str(r, 0).map(str::to_owned)).collect::<Result<_>>()?;
     let todo: Vec<_> = paths.iter().filter(|(u, _)| !done.contains(u)).collect();
@@ -270,9 +299,18 @@ pub fn scan(snapshot: &Snapshot, features: &Matrix) -> Result<(Value, Value)> {
             paired.push(json!([u]));
         }
     }
+    let tables = match before {
+        Some([s, r, p, q]) => json!({
+            "image_sigs": changes(&c, "image_sigs", &s, sigs)?,
+            "relations": changes(&c, "relations", &r, relations)?,
+            "similar_paired": changes(&c, "similar_paired", &p, paired)?,
+            "similar_retry": changes(&c, "similar_retry", &q, retry)?,
+        }),
+        None => json!({"image_sigs":sigs,"relations":relations,"similar_paired":paired,"similar_retry":retry}),
+    };
     Ok((
         json!({"status":"idle","compared":todo.len(),"found":found,"seconds":started.elapsed().as_secs_f64().round_ties_even() as u64,"at":chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string()}),
-        json!({"image_sigs":sigs,"relations":relations,"similar_paired":paired,"similar_retry":retry}),
+        tables,
     ))
 }
 use relations::GROUPING;

@@ -491,8 +491,10 @@ class NativeRelationPublicationTest(NativeResearchPublicationTest):
         before=self.rows(['image_sigs','relations'])
         pids=super().held()
         response=json.loads(self.saved.read_text(encoding='utf-8'))
-        self.assertGreater(len(response['tables']['image_sigs']),len(before['image_sigs']))
-        self.assertGreater(len(response['tables']['relations']),len(before['relations']))
+        # #31: App asks for change lists; the removed signature and its relations come back as appended rows.
+        self.assertIn('seed0',[r[0] for r in response['tables']['image_sigs']['append']])
+        self.assertTrue(any('seed0' in r[:2] for r in response['tables']['relations']['append']))
+        self.assertEqual(response['tables']['image_sigs']['delete'],[])
         return pids
 
     def human_input_change(self):
@@ -525,6 +527,47 @@ class NativeRelationPublicationTest(NativeResearchPublicationTest):
             with sqlite3.connect(self.lib.db) as c:
                 self.assertEqual(c.execute('SELECT count(*) FROM duplicates').fetchone()[0]>0,bool(kinds))
         self.assertFalse(self.sentinel.exists())
+
+    def test_unchanged_and_small_results_write_only_changed_cache_rows(self):
+        # #31: an unchanged result writes no similarity cache row; a picture computed again writes only its rows.
+        tables=('image_sigs','relations','similar_paired','similar_retry')
+        self.stop(self.process)
+        with sqlite3.connect(self.lib.db) as c:
+            c.execute('CREATE TABLE synthetic_writes(tbl TEXT,op TEXT)')
+            for table in tables:
+                for op in ('INSERT','UPDATE','DELETE'):
+                    c.execute(f"CREATE TRIGGER synthetic_{table}_{op} AFTER {op} ON {table} BEGIN INSERT INTO synthetic_writes VALUES ('{table}','{op}'); END")
+        self.restart()
+        self.finished()
+        def ordered():
+            with sqlite3.connect(self.lib.db) as c:
+                return {t:c.execute('SELECT * FROM '+t+' ORDER BY rowid').fetchall() for t in tables}
+        def writes():
+            with sqlite3.connect(self.lib.db) as c:
+                return c.execute('SELECT tbl,op,count(*) FROM synthetic_writes GROUP BY 1,2 ORDER BY 1,2').fetchall()
+        def similar():
+            with sqlite3.connect(self.lib.db) as c:c.execute('DELETE FROM synthetic_writes')
+            self.assertEqual(self.request('/api/similar',{})['body'],b'{"started": true}')
+            self.finished()
+        before=ordered()
+        similar()
+        self.assertEqual(writes(),[])
+        self.assertEqual(ordered(),before)
+        with sqlite3.connect(self.lib.db) as c:
+            c.execute("DELETE FROM image_sigs WHERE uuid='seed0'")
+            c.execute("DELETE FROM relations WHERE a='seed0' OR b='seed0'")
+            c.execute("DELETE FROM similar_paired WHERE uuid='seed0'")
+        kept=ordered()
+        similar()
+        after=ordered()
+        mine=lambda t,row:'seed0' in (row[:2] if t in ('relations','similar_retry') else row[:1])
+        for table in tables:
+            # Other rows stay in place; the picture's rows are appended as the full replacement ordered them.
+            self.assertEqual([r for r in after[table] if not mine(table,r)],kept[table],table)
+            self.assertEqual(after[table][len(kept[table]):],[r for r in after[table] if mine(table,r)],table)
+        self.assertEqual(after['image_sigs'],kept['image_sigs']+[r for r in before['image_sigs'] if r[0]=='seed0'])
+        expected=[(t,'INSERT',n) for t in tables if (n:=sum(mine(t,r) for r in after[t]))]
+        self.assertEqual(writes(),expected)
 
     def test_mixed_event_ack_failure_rolls_back_new_image_cache_then_retry_publishes(self):
         self.stop(self.process)

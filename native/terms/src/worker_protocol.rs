@@ -155,6 +155,8 @@ pub(crate) struct ResearchRequest<'a> {
     pub learning_token: &'a Value,
     pub anchors: &'a Path,
     pub core: PathBuf,
+    /// The owner accepts similarity caches as change lists against the snapshot (#31).
+    pub delta_tables: bool,
 }
 #[derive(Deserialize)]
 pub(crate) struct ResearchResponse {
@@ -366,8 +368,9 @@ mod tests {
             learning_token: &learning,
             anchors: path,
             core: path.into(),
+            delta_tables: true,
         };
-        assert_eq!(value(&request).unwrap().to_string(), json!({"format":"illustash-research/1","identity":identity,"kind":"similar","args":args,"regroup":false,"snapshot":path,"features":path,"version":"synthetic","learning_token":learning,"anchors":path,"core":path}).to_string());
+        assert_eq!(value(&request).unwrap().to_string(), json!({"format":"illustash-research/1","identity":identity,"kind":"similar","args":args,"regroup":false,"snapshot":path,"features":path,"version":"synthetic","learning_token":learning,"anchors":path,"core":path,"delta_tables":true}).to_string());
     }
     #[test]
     fn provenance_hash_response_retains_nested_error_field() {

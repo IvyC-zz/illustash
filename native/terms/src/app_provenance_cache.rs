@@ -192,7 +192,68 @@ pub(super) fn deliver(library: &Library, cache: &Path) -> Result<Json> {
         // A resealed package that is refused again stays stale; the next research run seals a new one.
         (last, _) = settle(library, &c, &task, &path)?;
     }
+    // Directories are only reclaimed; a failure to remove one never changes the delivery outcome.
+    let _ = collect(library.instance_path(), &c, false);
     Ok(last)
+}
+/// Retention of the run directories `.provenance/<task>` (#31). A pending package is kept: delivery and
+/// recovery import it. Of the delivered packages only the newest is kept, the snapshot the core now holds
+/// (every package replaces the previous one), for inspection. Stale packages never import and their reason
+/// stays in `native_delivery.error`, so they go. With `orphans`, directories without a delivery row go too:
+/// runs that failed, were stopped or died before the receive gate, which recovery never imports. Callers hold
+/// the provenance lease, so no run of this package is writing a directory meanwhile. Returns how many went.
+pub(super) fn collect(instance: &Path, c: &Connection, orphans: bool) -> Result<usize> {
+    let rows = c
+        .prepare("SELECT package,status FROM native_delivery ORDER BY rowid")?
+        .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    let (mut keep, mut known, mut delivered) = (BTreeSet::new(), BTreeSet::new(), None);
+    for (package, status) in rows {
+        let Some(name) = run_directory(instance, &package) else {
+            continue;
+        };
+        known.insert(name.clone());
+        match status.as_str() {
+            "pending" => {
+                keep.insert(name);
+            }
+            "done" => delivered = Some(name),
+            _ => {}
+        }
+    }
+    keep.extend(delivered);
+    let Ok(entries) = std::fs::read_dir(instance.join(".provenance")) else {
+        return Ok(0);
+    };
+    let mut removed = 0;
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if keep.contains(&name) || !orphans && !known.contains(&name) {
+            continue;
+        }
+        let path = entry.path();
+        let gone = match std::fs::symlink_metadata(&path) {
+            Ok(m) if m.is_dir() => std::fs::remove_dir_all(&path),
+            Ok(_) => std::fs::remove_file(&path),
+            Err(e) => Err(e),
+        };
+        removed += usize::from(gone.is_ok());
+    }
+    Ok(removed)
+}
+/// `<task>` of a package saved as `.provenance/<task>/evidence` (relative, or absolute inside the package).
+fn run_directory(instance: &Path, package: &str) -> Option<String> {
+    use std::path::Component;
+    let path = Path::new(package);
+    let path = if path.is_absolute() { path.strip_prefix(instance).ok()? } else { path };
+    match path.components().collect::<Vec<_>>().as_slice() {
+        [Component::Normal(root), Component::Normal(task), Component::Normal(evidence)]
+            if *root == ".provenance" && *evidence == "evidence" =>
+        {
+            task.to_str().map(str::to_owned)
+        }
+        _ => None,
+    }
 }
 /// Deliver one pending package: done, stale with its reason, or an error that leaves it pending.
 fn settle(library: &Library, c: &Connection, task: &str, path: &str) -> Result<(Json, bool)> {
@@ -358,6 +419,213 @@ mod tests {
             .unwrap();
         assert_eq!(row, ("p".into(), "pending".into(), String::new()));
         drop(c);
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+    #[test]
+    fn run_directories_keep_pending_and_the_newest_delivered_package() {
+        // #31: synthetic run directories and delivery rows only.
+        let root =
+            std::env::temp_dir().join(format!("illustash-provenance-retention-{}", crate::store::new_key().unwrap()));
+        let runs = root.join(".provenance");
+        std::fs::create_dir_all(&runs).unwrap();
+        let c = connect(&root.join("provenance.sqlite")).unwrap();
+        let rows = [
+            ("old-done", "done"),
+            ("stale", "stale"),
+            ("pending", "pending"),
+            ("newest-done", "done"),
+            ("later-pending", "pending"),
+        ];
+        for (task, status) in rows {
+            std::fs::create_dir_all(runs.join(task).join("evidence")).unwrap();
+            std::fs::write(runs.join(task).join("evidence/manifest.json"), "{}").unwrap();
+            c.execute(
+                "INSERT INTO native_delivery(task_id,package,status) VALUES (?,?,?)",
+                [task, &format!(".provenance/{task}/evidence"), status],
+            )
+            .unwrap();
+        }
+        // A run that failed before its receive gate, and a package saved with an absolute path.
+        std::fs::create_dir_all(runs.join("failed-run/groups")).unwrap();
+        std::fs::write(runs.join("failed-run/provenance.sqlite"), "staged").unwrap();
+        let absolute = root.join(".provenance/absolute/evidence");
+        std::fs::create_dir_all(&absolute).unwrap();
+        c.execute(
+            "INSERT INTO native_delivery(task_id,package,status) VALUES ('absolute',?,'pending')",
+            [absolute.to_str().unwrap()],
+        )
+        .unwrap();
+        let names = || {
+            let mut v: Vec<String> =
+                std::fs::read_dir(&runs).unwrap().map(|e| e.unwrap().file_name().into_string().unwrap()).collect();
+            v.sort();
+            v
+        };
+        // Delivery reclaims settled packages only.
+        assert_eq!(collect(&root, &c, false).unwrap(), 2);
+        assert_eq!(names(), ["absolute", "failed-run", "later-pending", "newest-done", "pending"]);
+        // Opening or starting a run also reclaims directories no delivery row names.
+        assert_eq!(collect(&root, &c, true).unwrap(), 1);
+        assert_eq!(names(), ["absolute", "later-pending", "newest-done", "pending"]);
+        // Once delivered, a pending package becomes the newest delivered one and the previous goes.
+        c.execute(
+            "UPDATE native_delivery SET status='done' WHERE task_id IN ('pending','later-pending','absolute')",
+            [],
+        )
+        .unwrap();
+        assert_eq!(collect(&root, &c, false).unwrap(), 3);
+        assert_eq!(names(), ["absolute"]);
+        assert_eq!(collect(&root, &c, true).unwrap(), 0);
+        drop(c);
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+    /// #31 measurement (synthetic, release): `cargo test --release provenance_delta_bench -- --ignored --nocapture`.
+    /// Accepting a staged machine cache (ten tables) and the size of one sealed package. Three runs, median.
+    /// ILLUSTASH_RESEARCH_BENCH_SIZES overrides the default 1000,10000,50000.
+    #[test]
+    #[ignore]
+    fn provenance_delta_bench() {
+        use std::time::Instant;
+        const TABLES: [&str; 10] = [
+            "artists",
+            "artist_links",
+            "artist_names",
+            "image_sources",
+            "image_artists",
+            "seeds",
+            "lookups",
+            "marks",
+            "ref_sigs",
+            "ext_cache",
+        ];
+        let sizes = std::env::var("ILLUSTASH_RESEARCH_BENCH_SIZES").unwrap_or_else(|_| "1000,10000,50000".into());
+        let median = |mut v: Vec<f64>| {
+            v.sort_by(f64::total_cmp);
+            v[v.len() / 2]
+        };
+        let root =
+            std::env::temp_dir().join(format!("illustash-provenance-bench-{}", crate::store::new_key().unwrap()));
+        for n in sizes.split(',').map(|s| s.trim().parse::<usize>().unwrap()) {
+            let dir = root.join(n.to_string());
+            std::fs::create_dir_all(&dir).unwrap();
+            // A synthetic library with n pictures and a cache attributing each of them.
+            let reference = dir.join("reference.sqlite");
+            crate::open(&reference).unwrap().execute_batch(include_str!("app_source_empty.sql")).unwrap();
+            let dest = dir.join("synthetic.pilib");
+            crate::app_create::create_folder(&dest, &dir, Some("synthetic"), Some("other"), Some(&reference)).unwrap();
+            let library = Library::open(&dest).unwrap();
+            let base = dir.join("provenance.sqlite");
+            {
+                let app = crate::open(&library.db()).unwrap();
+                app.execute_batch("BEGIN").unwrap();
+                for i in 0..n {
+                    app.execute("INSERT INTO assets(uuid,src_path) VALUES (?,'')", [format!("asset-{i:06}")]).unwrap();
+                }
+                app.execute_batch("COMMIT").unwrap();
+                let c = connect(&base).unwrap();
+                c.execute_batch("BEGIN").unwrap();
+                let artists = (n / 10).max(1);
+                for k in 0..artists {
+                    let id = format!("artist-{k:05}");
+                    c.execute("INSERT INTO artists(id) VALUES (?)", [&id]).unwrap();
+                    c.execute(
+                        "INSERT INTO artist_links(system,key,artist_id,source) VALUES ('danbooru',?,?,'danbooru_post')",
+                        [format!("tag_{k}"), id.clone()],
+                    )
+                    .unwrap();
+                    c.execute(
+                        "INSERT INTO artist_names(artist_id,source,name) VALUES (?,'danbooru',?)",
+                        [id.clone(), format!("name {k}")],
+                    )
+                    .unwrap();
+                    c.execute("INSERT INTO seeds(artist_id,source) VALUES (?,'pixel_hash')", [&id]).unwrap();
+                }
+                for i in 0..n {
+                    let asset = format!("asset-{i:06}");
+                    let artist = format!("artist-{:05}", i % artists);
+                    c.execute("INSERT INTO image_sources(asset,site,post_id,url,artist_id,method) VALUES (?,'danbooru',?,?,?,'pixel_hash')", [asset.clone(), i.to_string(), format!("https://example.invalid/posts/{i}"), artist.clone()]).unwrap();
+                    c.execute("INSERT INTO image_artists(asset,artist_id,method,score,evidence,status,updated_at) VALUES (?,?,'pixel_hash',1.0,?,'auto','2026-10-12 00:00:00')", [asset.clone(), artist.clone(), format!("{{\"post\":{i}}}")]).unwrap();
+                    c.execute("INSERT INTO lookups(target,backend,attempts,last_at,last_result) VALUES (?,'pixel_hash',1,'2026-10-12 00:00:00','hit')", [&asset]).unwrap();
+                    c.execute(
+                        "INSERT INTO ref_sigs(site,post_id,page,artist_id,ratio,grid) VALUES ('danbooru',?,0,?,1.25,?)",
+                        rusqlite::params![i.to_string(), artist, vec![(i % 256) as u8; 256]],
+                    )
+                    .unwrap();
+                }
+                for i in 0..n / 100 {
+                    c.execute(
+                        "INSERT INTO ext_cache(key,body,fetched_at) VALUES (?,?,'2026-10-12 00:00:00')",
+                        rusqlite::params![format!("synthetic-{i}"), vec![b'x'; 4096]],
+                    )
+                    .unwrap();
+                }
+                c.execute_batch("COMMIT; PRAGMA wal_checkpoint(TRUNCATE);").unwrap();
+            }
+            let cache_bytes = std::fs::metadata(&base).unwrap().len();
+            let started = Instant::now();
+            let sealed = dir.join("evidence");
+            package(&library, &base, &sealed).unwrap();
+            let seal_ms = started.elapsed().as_secs_f64() * 1000.0;
+            let package_bytes: u64 =
+                std::fs::read_dir(&sealed).unwrap().map(|e| e.unwrap().metadata().unwrap().len()).sum();
+            println!(
+                "{}",
+                json!({"n": n, "cache_bytes": cache_bytes, "package_bytes": package_bytes, "seal_ms": seal_ms})
+            );
+            let mid = format!("asset-{:06}", n / 2);
+            let modes: [(&str, String); 3] = [
+                ("nochange", String::new()),
+                ("single", format!("UPDATE lookups SET attempts=attempts+1 WHERE target='{mid}'; INSERT OR REPLACE INTO image_artists(asset,artist_id,method,score,evidence,status,updated_at) SELECT asset,artist_id,method,0.9,evidence,status,'2026-10-13 00:00:00' FROM image_artists WHERE asset='{mid}';")),
+                ("full", "UPDATE lookups SET attempts=attempts+1,last_at='2026-10-13 00:00:00';".into()),
+            ];
+            for (mode, sql) in modes {
+                let stage = dir.join(format!("stage-{mode}.sqlite"));
+                std::fs::copy(&base, &stage).unwrap();
+                connect(&stage).unwrap().execute_batch(&sql).unwrap();
+                crate::app_library::read_connection(&stage)
+                    .unwrap()
+                    .execute_batch("PRAGMA wal_checkpoint(TRUNCATE)")
+                    .ok();
+                for code in ["main", "#31"] {
+                    let (mut publish, mut wal, mut written) = (vec![], vec![], 0usize);
+                    for run in 0..3 {
+                        let path = dir.join(format!("run-{run}.sqlite"));
+                        std::fs::copy(&base, &path).unwrap();
+                        let mut c = connect(&path).unwrap();
+                        c.execute_batch("PRAGMA wal_autocheckpoint=0").unwrap();
+                        c.execute("ATTACH DATABASE ? AS stage", [stage.to_str().unwrap()]).unwrap();
+                        c.execute_batch("PRAGMA defer_foreign_keys=ON").unwrap();
+                        let started = Instant::now();
+                        let tx = c.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate).unwrap();
+                        written = 0;
+                        for table in TABLES {
+                            if code == "main" {
+                                written += tx.execute(&format!("DELETE FROM {table}"), []).unwrap();
+                                written += tx
+                                    .execute(&format!("INSERT INTO {table} SELECT * FROM stage.{table}"), [])
+                                    .unwrap();
+                            } else {
+                                written += crate::table_delta::mirror(&tx, table, "stage").unwrap().rows();
+                            }
+                        }
+                        tx.commit().unwrap();
+                        publish.push(started.elapsed().as_secs_f64() * 1000.0);
+                        wal.push(
+                            std::fs::metadata(dir.join(format!("run-{run}.sqlite-wal"))).map(|m| m.len()).unwrap_or(0)
+                                as f64,
+                        );
+                        drop(c);
+                        for suffix in ["", "-wal", "-shm"] {
+                            let _ = std::fs::remove_file(dir.join(format!("run-{run}.sqlite{suffix}")));
+                        }
+                    }
+                    println!(
+                        "{}",
+                        json!({"n": n, "mode": mode, "code": code, "publish_ms": median(publish), "rows_written": written, "wal_bytes": median(wal)})
+                    );
+                }
+            }
+        }
         std::fs::remove_dir_all(&root).unwrap();
     }
     #[test]

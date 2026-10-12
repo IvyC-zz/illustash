@@ -477,3 +477,94 @@ EXPORT_QUERIES=(
     'SELECT label,before_json FROM actions ORDER BY id',
     'SELECT kind,status,error FROM backend_effects ORDER BY id',
 )
+
+
+MACHINE = ('artists', 'artist_links', 'artist_names', 'image_sources', 'image_artists', 'seeds', 'lookups', 'marks',
+           'ref_sigs', 'ext_cache')
+
+
+class ProvenanceRetentionTest(unittest.TestCase):
+    """#31: run directories and machine cache writes. Reuses the harness above without running its tests twice;
+    unrecorded, so its setup values come from this module's first recorded test."""
+    setUpClass = NativeProvenanceTest.__dict__['setUpClass']
+    package = NativeProvenanceTest.package
+    stop = NativeProvenanceTest.stop
+    request = NativeProvenanceTest.request
+    start = NativeProvenanceTest.start
+    setUp = NativeProvenanceTest.setUp
+    restart = NativeProvenanceTest.restart
+    info = NativeProvenanceTest.info
+    finish = NativeProvenanceTest.finish
+    post = NativeProvenanceTest.post
+    sql = NativeProvenanceTest.sql
+
+    def runs(self):
+        root = self.lib.path / '.provenance'
+        return sorted(p.name for p in root.iterdir()) if root.exists() else []
+
+    def newest_delivered(self):
+        return self.sql("SELECT task_id FROM native_delivery WHERE status='done' ORDER BY rowid DESC LIMIT 1",
+                        cache=True)[0][0]
+
+    def test_only_pending_and_newest_delivered_packages_stay(self):
+        self.post({'action': 'lookup', 'ids': ['a']}); self.finish('done')
+        first = self.newest_delivered()
+        self.assertEqual(self.runs(), [first])
+        self.assertEqual([p.name for p in (self.lib.path / '.provenance' / first).iterdir()], ['evidence'])
+        # Each package replaces the previous snapshot in the core: only the newest delivered one stays.
+        self.post({'action': 'lookup', 'ids': ['a']}); self.finish('done')
+        second = self.newest_delivered()
+        self.assertNotEqual(first, second)
+        self.assertEqual(self.runs(), [second])
+        # A run that fails before its receive gate is never imported; it stays for inspection until the next
+        # opening or run.
+        self.env['SYNTHETIC_MODE'] = 'crash'; self.restart()
+        self.post({'action': 'lookup', 'ids': ['a']}); v = self.finish()
+        self.assertIn(v['state']['status'], ('failed', 'stopped'))
+        failed = [name for name in self.runs() if name != second]
+        self.assertEqual(len(failed), 1)
+        self.assertTrue((self.lib.path / '.provenance' / failed[0] / 'provenance.sqlite').exists())
+        self.env['SYNTHETIC_MODE'] = 'ok'; self.restart()
+        self.assertEqual(self.runs(), [second])
+        # A package whose delivery failed is pending: it stays across a restart until it is delivered.
+        with closing(sqlite3.connect(self.lib.db)) as hold:
+            hold.execute('BEGIN IMMEDIATE')
+            self.post({'action': 'lookup', 'ids': ['a']}); v = self.finish('done')
+            hold.rollback()
+        self.assertEqual(v['delivery']['status'], 'failed')
+        [(pending,)] = self.sql("SELECT task_id FROM native_delivery WHERE status='pending'", cache=True)
+        self.assertEqual(self.runs(), sorted([second, pending]))
+        self.restart()
+        self.assertEqual(self.sql('SELECT status FROM native_delivery WHERE task_id=?', (pending,), cache=True),
+                         [('done',)])
+        self.assertEqual(self.runs(), [pending])
+
+    def test_publication_writes_only_rows_the_run_changed(self):
+        from collections import Counter
+        self.post({'action': 'lookup', 'ids': ['a']}); self.finish('done')
+        cache = self.lib.path / 'provenance.sqlite'
+        with closing(sqlite3.connect(cache)) as c:
+            c.executemany("INSERT INTO ref_sigs(site,post_id,page,ratio,grid) VALUES ('synthetic',?,0,1.0,?)",
+                          [(str(i), bytes([i % 256]) * 256) for i in range(2000)])
+            c.executemany("INSERT INTO lookups(target,backend,attempts,last_result) VALUES (?,'synthetic',1,'miss')",
+                          [('synthetic-' + str(i),) for i in range(2000)])
+            c.execute('CREATE TABLE synthetic_writes(tbl TEXT,op TEXT)')
+            for table in MACHINE:
+                for op in ('INSERT', 'UPDATE', 'DELETE'):
+                    c.execute(f"CREATE TRIGGER synthetic_{table}_{op} AFTER {op} ON {table} "
+                              f"BEGIN INSERT INTO synthetic_writes VALUES ('{table}','{op}'); END")
+            c.commit()
+
+        def rows():
+            with closing(sqlite3.connect(cache)) as c:
+                return {t: c.execute('SELECT * FROM ' + t + ' ORDER BY rowid').fetchall() for t in MACHINE}
+        before = rows()
+        self.post({'action': 'lookup', 'ids': ['a']}); self.finish('done')
+        after = rows()
+        written = self.sql('SELECT tbl,op FROM synthetic_writes', cache=True)
+        # The 4,000 synthetic rows were neither rewritten nor moved; the full rewrite wrote every row again.
+        self.assertLess(len(written), 20, Counter(written))
+        self.assertFalse([w for w in written if w[0] in ('ref_sigs',)], written)
+        self.assertEqual(after['ref_sigs'], before['ref_sigs'])
+        synthetic = lambda rows: [r for r in rows if r[1] == 'synthetic']
+        self.assertEqual(synthetic(after['lookups']), synthetic(before['lookups']))

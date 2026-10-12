@@ -143,6 +143,7 @@ use illustash_platform::source_rows;
 pub mod sqlite;
 pub use illustash_core::store;
 pub use illustash_core::strict_json;
+pub(crate) mod table_delta;
 mod task_state;
 mod wd_pending;
 mod worker_protocol;

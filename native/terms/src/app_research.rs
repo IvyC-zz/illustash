@@ -391,6 +391,35 @@ fn confirm<T>(
         round += 1;
     }
 }
+/// Snapshot directories `illustash-research-<task>` are removed when their run ends, whatever the outcome
+/// (`Scratch`). Only a killed process leaves one; such a directory is removed once it is older than a day and
+/// than twice the task deadline, so a running task never loses its own (#31).
+const SCRATCH_AGE: Duration = Duration::from_secs(24 * 3600);
+fn sweep_scratch(root: &Path, age: Duration) -> usize {
+    let Ok(entries) = fs::read_dir(root) else {
+        return 0;
+    };
+    let mut removed = 0;
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let Some(task) = name.to_str().and_then(|n| n.strip_prefix("illustash-research-")) else {
+            continue;
+        };
+        if task.len() != 32 || !task.bytes().all(|b| b.is_ascii_hexdigit()) {
+            continue;
+        }
+        let expired = fs::symlink_metadata(entry.path())
+            .ok()
+            .filter(|m| m.is_dir())
+            .and_then(|m| m.modified().ok())
+            .and_then(|t| t.elapsed().ok())
+            .is_some_and(|elapsed| elapsed > age);
+        if expired && fs::remove_dir_all(entry.path()).is_ok() {
+            removed += 1;
+        }
+    }
+    removed
+}
 struct Scratch(PathBuf);
 impl Drop for Scratch {
     fn drop(&mut self) {
@@ -545,8 +574,9 @@ impl Research {
         let state = self.state.clone();
         let anchors = self.anchors.clone();
         let exhausted = self.exhausted.clone();
-        let timeout =
+        let timeout: u64 =
             std::env::var("ILLUSTASH_RESEARCH_TIMEOUT_MS").ok().and_then(|s| s.parse().ok()).unwrap_or(1800000);
+        sweep_scratch(&std::env::temp_dir(), Duration::from_millis(timeout.saturating_mul(2)).max(SCRATCH_AGE));
         let running = json!({"status": match kind.as_str(){"similar"=>"pairing","relate"=>"comparing","oc"=>"grouping",_=>"learning"}});
         *state.lock().expect("research state mutex poisoned") = running.clone().into();
         self.task = Some(Task::start(identity, Some(Duration::from_millis(timeout)), move |ctx| {
@@ -729,6 +759,7 @@ fn run(
         learning_token: &learning,
         anchors,
         core: std::env::current_exe()?,
+        delta_tables: true,
     })?;
     let input = scratch.0.join("request.json");
     let output = scratch.0.join("response.json");
@@ -795,101 +826,161 @@ fn run(
         }
         let mut c = crate::sqlite::open(library.db())?;
         crate::configure(&c)?;
-        confirm(&mut c, &src, &inputs, &version, ctx, || {}, |tx| {
-        crate::schema::begin_writing(&tx)?;
-        if kind != "similar" {
-            if let Some(batch) = response.learning.as_ref().filter(|v| !v.is_null()) {
-                if batch["token"] != learning {
+        confirm(
+            &mut c,
+            &src,
+            &inputs,
+            &version,
+            ctx,
+            || {},
+            |tx| {
+                crate::schema::begin_writing(&tx)?;
+                if kind != "similar" {
+                    if let Some(batch) = response.learning.as_ref().filter(|v| !v.is_null()) {
+                        if batch["token"] != learning {
+                            return Err(bad());
+                        }
+                        if crate::character_learning::publish_tx(&tx, batch)?["status"] == "stale" {
+                            return Err(Error::Conflict(LEARNING_CHANGED.into()));
+                        }
+                    }
+                }
+                let caches = response
+                    .tables
+                    .as_ref()
+                    .ok_or_else(|| Error::Invalid(format!("{}: 字段 tables: 缺少结果表", output.display())))?;
+                let expected: Vec<&str> = if kind == "similar" {
+                    vec!["image_sigs", "relations", "similar_paired", "similar_retry"]
+                } else if regroup {
+                    let mut v = vec!["clusters", "cluster_info"];
+                    if kind == "events" && args["similar"] == true {
+                        v.extend(["image_sigs", "relations", "similar_paired", "similar_retry"]);
+                    }
+                    v
+                } else {
+                    vec![]
+                };
+                if caches.keys().map(String::as_str).collect::<std::collections::BTreeSet<_>>()
+                    != expected.iter().copied().collect()
+                {
                     return Err(bad());
                 }
-                if crate::character_learning::publish_tx(&tx, batch)?["status"] == "stale" {
-                    return Err(Error::Conflict(LEARNING_CHANGED.into()));
+                let mut published = Published::default();
+                for table in expected.iter() {
+                    publish_table(&tx, table, &caches[*table], ctx, &mut published)?;
                 }
-            }
-        }
-        let caches = response.tables.as_ref().ok_or_else(|| Error::Invalid(format!("{}: 字段 tables: 缺少结果表", output.display())))?;
-        let expected: Vec<&str> = if kind == "similar" {
-            vec!["image_sigs", "relations", "similar_paired", "similar_retry"]
-        } else if regroup {
-            let mut v = vec!["clusters", "cluster_info"];
-            if kind == "events" && args["similar"] == true {
-                v.extend(["image_sigs", "relations", "similar_paired", "similar_retry"]);
-            }
-            v
-        } else {
-            vec![]
-        };
-        if caches.keys().map(String::as_str).collect::<std::collections::BTreeSet<_>>()
-            != expected.iter().copied().collect()
-        {
-            return Err(bad());
-        }
-        tx.execute_batch("CREATE TEMP TABLE research_old_relations AS SELECT * FROM relations;CREATE TEMP TABLE research_old_sigs AS SELECT * FROM image_sigs;")?;
-        for table in expected.iter() {
-            replace(&tx, table, &caches[*table],ctx)?;
-        }
-        if expected.contains(&"relations") {
-            crate::app_migrate_data::early_groups(&tx, &src)?;
-            crate::character_projection::fold(&tx)?;
-        }
-        validate_references(&tx,&expected)?;
-        if kind == "events" {
-            for id in events {
-                tx.execute("UPDATE backend_effects SET status='done',error='' WHERE id=?", [id])?;
-            }
-        }
-        for id in intents {
-            tx.execute("UPDATE research_runs SET status='done',error='' WHERE id=?", [id])?;
-        }
-        ctx.check()?;
-        crate::schema::commit_writing(tx)?;
-        ordered.get("result").cloned().ok_or_else(bad)
-        })
+                if expected.contains(&"relations") {
+                    crate::app_migrate_data::early_groups(&tx, &src)?;
+                    crate::character_projection::fold(&tx)?;
+                }
+                validate_references(&tx, &expected, &published)?;
+                if kind == "events" {
+                    for id in events {
+                        tx.execute("UPDATE backend_effects SET status='done',error='' WHERE id=?", [id])?;
+                    }
+                }
+                for id in intents {
+                    tx.execute("UPDATE research_runs SET status='done',error='' WHERE id=?", [id])?;
+                }
+                ctx.check()?;
+                crate::schema::commit_writing(tx)?;
+                ordered.get("result").cloned().ok_or_else(bad)
+            },
+        )
     })
 }
-fn replace(c: &Connection, table: &str, value: &Value, ctx: &TaskContext) -> Result<()> {
+/// What a publication wrote to relations and signatures (#31): rowids of the rows inserted or rewritten, and
+/// the previous version of each row deleted or rewritten, for `validate_references`.
+#[derive(Default)]
+struct Published {
+    touched: std::collections::HashMap<&'static str, Vec<i64>>,
+    old: std::collections::HashMap<&'static str, std::collections::HashSet<Vec<crate::table_delta::Cell>>>,
+}
+/// One cache table of a result (#31). A full array (an older worker, clusters) is compared with the stored
+/// rows; a change list `{delete, append}` from the worker is applied to the rows the snapshot held, which the
+/// accepted fingerprint guarantees are still stored. Either way only differing rows are written, and the table
+/// ends as the full replacement left it: the same rows in the same rowid order.
+fn publish_table(
+    c: &Connection,
+    table: &str,
+    value: &Value,
+    ctx: &TaskContext,
+    published: &mut Published,
+) -> Result<usize> {
     let n = CACHES.iter().find(|(t, _)| *t == table).ok_or_else(bad)?.1;
-    let rows = value.as_array().ok_or_else(bad)?;
-    if rows.len() > 1000000 {
-        return Err(bad());
-    }
     if ["similar_retry", "similar_paired"].contains(&table) {
         c.execute_batch("CREATE TABLE IF NOT EXISTS similar_paired(uuid TEXT PRIMARY KEY);CREATE TABLE IF NOT EXISTS similar_retry(a TEXT NOT NULL,b TEXT NOT NULL,PRIMARY KEY(a,b));")?;
     }
-    c.execute(&format!("DELETE FROM {table}"), [])?;
-    let mut q = c.prepare(&format!("INSERT INTO {table} VALUES ({})", vec!["?"; n].join(",")))?;
-    for row in rows {
-        ctx.check()?;
-        let r = row.as_array().filter(|r| r.len() == n).ok_or_else(bad)?;
-        validate_row(table, r)?;
-        let mut values = vec![];
-        for (i, v) in r.iter().enumerate() {
-            values.push(if table == "image_sigs" && i == 2 && !v.is_null() {
-                let hex = v.as_str().filter(|s| s.len() == 512 && s.is_ascii()).ok_or_else(bad)?;
-                Sql::Blob(
-                    (0..hex.len())
-                        .step_by(2)
-                        .map(|j| u8::from_str_radix(&hex[j..j + 2], 16).map_err(|_| bad()))
-                        .collect::<Result<Vec<_>>>()?,
-                )
-            } else {
-                match v {
-                    Value::Null => Sql::Null,
-                    Value::String(s) => Sql::Text(s.clone()),
-                    Value::Number(v) => {
-                        if let Some(i) = v.as_i64() {
-                            Sql::Integer(i)
-                        } else {
-                            Sql::Real(v.as_f64().filter(|f| f.is_finite()).ok_or_else(bad)?)
-                        }
-                    }
-                    _ => return Err(bad()),
-                }
-            });
+    let checked = match table {
+        "relations" => Some("relations"),
+        "image_sigs" => Some("image_sigs"),
+        _ => None,
+    };
+    let check = || ctx.check();
+    let rows = |rows: &[Value]| rows.iter().map(|r| cache_row(table, n, r)).collect::<Result<Vec<_>>>();
+    let written = match value {
+        Value::Array(full) if full.len() <= 1000000 => {
+            crate::table_delta::sync(c, table, rows(full)?, checked.is_some(), &check)?
         }
-        q.execute(rusqlite::params_from_iter(values))?;
+        Value::Object(change) if change.len() == 2 => {
+            let delete = change.get("delete").and_then(Value::as_array).ok_or_else(bad)?;
+            let append = change.get("append").and_then(Value::as_array).ok_or_else(bad)?;
+            if delete.len() + append.len() > 1000000 {
+                return Err(bad());
+            }
+            let keys = delete
+                .iter()
+                .map(|k| {
+                    let k = k.as_array().ok_or_else(bad)?;
+                    k.iter()
+                        .map(|v| {
+                            v.as_str().map(|s| crate::table_delta::Cell::Text(s.as_bytes().to_vec())).ok_or_else(bad)
+                        })
+                        .collect::<Result<Vec<_>>>()
+                })
+                .collect::<Result<Vec<_>>>()?;
+            crate::table_delta::apply(c, table, &keys, rows(append)?, checked.is_some(), &check)?
+        }
+        _ => return Err(bad()),
+    };
+    if let Some(table) = checked {
+        let rows = written.rows();
+        published.touched.entry(table).or_default().extend(written.touched);
+        published.old.entry(table).or_default().extend(written.old);
+        return Ok(rows);
     }
-    Ok(())
+    Ok(written.rows())
+}
+/// One validated result row as the values the full replacement inserted.
+fn cache_row(table: &str, n: usize, row: &Value) -> Result<Vec<crate::table_delta::Cell>> {
+    let r = row.as_array().filter(|r| r.len() == n).ok_or_else(bad)?;
+    validate_row(table, r)?;
+    let mut values = vec![];
+    for (i, v) in r.iter().enumerate() {
+        values.push(if table == "image_sigs" && i == 2 && !v.is_null() {
+            let hex = v.as_str().filter(|s| s.len() == 512 && s.is_ascii()).ok_or_else(bad)?;
+            Sql::Blob(
+                (0..hex.len())
+                    .step_by(2)
+                    .map(|j| u8::from_str_radix(&hex[j..j + 2], 16).map_err(|_| bad()))
+                    .collect::<Result<Vec<_>>>()?,
+            )
+        } else {
+            match v {
+                Value::Null => Sql::Null,
+                Value::String(s) => Sql::Text(s.clone()),
+                Value::Number(v) => {
+                    if let Some(i) = v.as_i64() {
+                        Sql::Integer(i)
+                    } else {
+                        Sql::Real(v.as_f64().filter(|f| f.is_finite()).ok_or_else(bad)?)
+                    }
+                }
+                _ => return Err(bad()),
+            }
+        });
+    }
+    Ok(values.into_iter().map(crate::table_delta::Cell::from).collect())
 }
 fn validate_row(table: &str, r: &[Value]) -> Result<()> {
     let text = |i: usize| r[i].is_string();
@@ -920,18 +1011,46 @@ fn validate_row(table: &str, r: &[Value]) -> Result<()> {
         Err(bad())
     }
 }
-fn validate_references(c: &Connection, expected: &[&str]) -> Result<()> {
+fn validate_references(c: &Connection, expected: &[&str], published: &Published) -> Result<()> {
     for (index,sql) in [
         "SELECT EXISTS(SELECT 1 FROM clusters WHERE uuid NOT IN (SELECT uuid FROM assets) OR cid NOT IN (SELECT cid FROM cluster_info))",
         "SELECT EXISTS(SELECT 1 FROM cluster_info WHERE size<2 OR (near IS NOT NULL AND near NOT IN (SELECT cid FROM cluster_info)) OR (near_kind IS NOT NULL AND near_kind NOT IN ('look','trait')) OR NOT json_valid(traits))",
-        "SELECT EXISTS(SELECT 1 FROM relations r WHERE a>=b OR ((a NOT IN (SELECT uuid FROM assets) OR b NOT IN (SELECT uuid FROM assets)) AND NOT EXISTS(SELECT 1 FROM research_old_relations o WHERE o.a=r.a AND o.b=r.b AND o.kind=r.kind AND o.changed IS r.changed AND o.note=r.note AND o.checked_at=r.checked_at)) OR kind NOT IN ('identical','duplicate','subtle','crop','variant','edit','similar','unrelated') OR changed<0 OR changed>1)",
-        "SELECT EXISTS(SELECT 1 FROM image_sigs r WHERE (uuid NOT IN (SELECT uuid FROM assets) AND NOT EXISTS(SELECT 1 FROM research_old_sigs o WHERE o.uuid=r.uuid AND o.ratio IS r.ratio AND o.grid IS r.grid AND o.ok=r.ok)) OR ok NOT IN (0,1) OR (ok=1 AND (length(grid)!=256 OR ratio<=0)))",
         "SELECT EXISTS(SELECT 1 FROM proto_claims WHERE uuid NOT IN (SELECT uuid FROM assets) OR entity NOT IN (SELECT id FROM entities) OR score<0 OR score>1)",
         "SELECT EXISTS(SELECT 1 FROM weak_claims WHERE uuid NOT IN (SELECT uuid FROM assets) OR entity NOT IN (SELECT id FROM entities) OR source NOT IN ('PROTO','CCIP') OR score<0 OR score>1)",
         "SELECT EXISTS(SELECT 1 FROM prototypes WHERE entity NOT IN (SELECT id FROM entities) OR threshold<0 OR threshold>1 OR hint<threshold OR hint>1)",
     ].into_iter().enumerate() {
-        if index<2 && !expected.contains(&"clusters") || index==2 && !expected.contains(&"relations") || index==3 && !expected.contains(&"image_sigs") {continue;}
+        if index<2 && !expected.contains(&"clusters") {continue;}
         if c.query_row(sql,[],|r|r.get::<_,bool>(0))? {return Err(bad());}
+    }
+    // Relations and signatures (#31): only the rows this publication wrote are checked; every other row is the
+    // stored one. A written row naming a picture no longer in the library is allowed only as the identical
+    // previous row (history the calculator kept).
+    for (table, shape, missing) in [
+        (
+            "relations",
+            "a>=b OR kind NOT IN ('identical','duplicate','subtle','crop','variant','edit','similar','unrelated') OR changed<0 OR changed>1",
+            "a NOT IN (SELECT uuid FROM assets) OR b NOT IN (SELECT uuid FROM assets)",
+        ),
+        ("image_sigs", "ok NOT IN (0,1) OR (ok=1 AND (length(grid)!=256 OR ratio<=0))", "uuid NOT IN (SELECT uuid FROM assets)"),
+    ] {
+        if !expected.contains(&table) {
+            continue;
+        }
+        let touched = serde_json::to_string(published.touched.get(table).map(Vec::as_slice).unwrap_or_default())
+            .map_err(|_| bad())?;
+        let written = format!("FROM {table} WHERE rowid IN (SELECT value FROM json_each(?1))");
+        if c.query_row(&format!("SELECT EXISTS(SELECT 1 {written} AND ({shape}))"), [&touched], |r| r.get::<_, bool>(0))? {
+            return Err(bad());
+        }
+        let mut q = c.prepare(&format!("SELECT * {written} AND ({missing})"))?;
+        let width = q.column_count();
+        let mut rows = q.query([&touched])?;
+        while let Some(r) = rows.next()? {
+            let row = (0..width).map(|i| r.get_ref(i).map(crate::table_delta::Cell::from)).collect::<rusqlite::Result<Vec<_>>>()?;
+            if !published.old.get(table).is_some_and(|old| old.contains(&row)) {
+                return Err(bad());
+            }
+        }
     }
     Ok(())
 }
@@ -1236,6 +1355,482 @@ mod tests {
         assert!(conflict(&result), "{result:?}");
         assert_eq!(rounds, OUTSIDE_ROUNDS);
         assert!(!f.published());
+    }
+
+    /// The publication before #31: full temporary copies of relations and signatures, then every result table
+    /// deleted and inserted again in result order, then the whole-table checks. The row conversion it used is
+    /// `cache_row` (moved there unchanged).
+    fn legacy_publish(tx: &Connection, tables: &serde_json::Map<String, Value>, ctx: &TaskContext) -> Result<()> {
+        tx.execute_batch("CREATE TEMP TABLE research_old_relations AS SELECT * FROM relations;CREATE TEMP TABLE research_old_sigs AS SELECT * FROM image_sigs;")?;
+        for (table, value) in tables {
+            legacy_replace(tx, table, value, ctx)?;
+        }
+        for sql in [
+            "SELECT EXISTS(SELECT 1 FROM relations r WHERE a>=b OR ((a NOT IN (SELECT uuid FROM assets) OR b NOT IN (SELECT uuid FROM assets)) AND NOT EXISTS(SELECT 1 FROM research_old_relations o WHERE o.a=r.a AND o.b=r.b AND o.kind=r.kind AND o.changed IS r.changed AND o.note=r.note AND o.checked_at=r.checked_at)) OR kind NOT IN ('identical','duplicate','subtle','crop','variant','edit','similar','unrelated') OR changed<0 OR changed>1)",
+            "SELECT EXISTS(SELECT 1 FROM image_sigs r WHERE (uuid NOT IN (SELECT uuid FROM assets) AND NOT EXISTS(SELECT 1 FROM research_old_sigs o WHERE o.uuid=r.uuid AND o.ratio IS r.ratio AND o.grid IS r.grid AND o.ok=r.ok)) OR ok NOT IN (0,1) OR (ok=1 AND (length(grid)!=256 OR ratio<=0)))",
+        ] {
+            if tx.query_row(sql, [], |r| r.get::<_, bool>(0))? {
+                return Err(bad());
+            }
+        }
+        Ok(())
+    }
+    fn legacy_replace(c: &Connection, table: &str, value: &Value, ctx: &TaskContext) -> Result<()> {
+        let n = CACHES.iter().find(|(t, _)| *t == table).ok_or_else(bad)?.1;
+        let rows = value.as_array().ok_or_else(bad)?;
+        if rows.len() > 1000000 {
+            return Err(bad());
+        }
+        if ["similar_retry", "similar_paired"].contains(&table) {
+            c.execute_batch("CREATE TABLE IF NOT EXISTS similar_paired(uuid TEXT PRIMARY KEY);CREATE TABLE IF NOT EXISTS similar_retry(a TEXT NOT NULL,b TEXT NOT NULL,PRIMARY KEY(a,b));")?;
+        }
+        c.execute(&format!("DELETE FROM {table}"), [])?;
+        let mut q = c.prepare(&format!("INSERT INTO {table} VALUES ({})", vec!["?"; n].join(",")))?;
+        for row in rows {
+            ctx.check()?;
+            let values = cache_row(table, n, row)?;
+            q.execute(rusqlite::params_from_iter(values.iter()))?;
+        }
+        Ok(())
+    }
+    /// The current publication of the similar tables, as `run` does it.
+    fn publish(tx: &Connection, tables: &serde_json::Map<String, Value>, ctx: &TaskContext) -> Result<usize> {
+        let mut published = Published::default();
+        let mut written = 0;
+        for (table, value) in tables {
+            written += publish_table(tx, table, value, ctx, &mut published)?;
+        }
+        validate_references(tx, &tables.keys().map(String::as_str).collect::<Vec<_>>(), &published)?;
+        Ok(written)
+    }
+    const SIMILAR: [&str; 4] = ["image_sigs", "relations", "similar_paired", "similar_retry"];
+    fn similar_library() -> Connection {
+        let c = Connection::open_in_memory().unwrap();
+        c.execute_batch(include_str!("app_create_schema.sql")).unwrap();
+        c.execute_batch("CREATE TABLE IF NOT EXISTS similar_paired(uuid TEXT PRIMARY KEY);CREATE TABLE IF NOT EXISTS similar_retry(a TEXT NOT NULL,b TEXT NOT NULL,PRIMARY KEY(a,b));").unwrap();
+        for i in 0..20 {
+            c.execute("INSERT INTO assets(uuid,src_path) VALUES (?,'')", [format!("a{i:02}")]).unwrap();
+        }
+        for i in 0..18 {
+            c.execute(
+                "INSERT INTO image_sigs VALUES (?,?,?,1)",
+                rusqlite::params![format!("a{i:02}"), 1.0 + f64::from(i) / 8.0, vec![i as u8; 256]],
+            )
+            .unwrap();
+            c.execute("INSERT INTO similar_paired VALUES (?)", [format!("a{i:02}")]).unwrap();
+        }
+        c.execute_batch(
+            "INSERT INTO image_sigs VALUES ('a18',NULL,NULL,0);
+             INSERT INTO relations VALUES ('a00','a01','duplicate',0,'','2026-10-01 00:00:00'),('a02','a03','similar',NULL,'','2026-10-01 00:00:00'),
+               ('gone-a','gone-b','duplicate',0,'historic','2000-01-01 00:00:00');
+             INSERT INTO similar_retry VALUES ('a04','a05');",
+        )
+        .unwrap();
+        c
+    }
+    fn copy(c: &Connection) -> Connection {
+        let mut out = Connection::open_in_memory().unwrap();
+        rusqlite::backup::Backup::new(c, &mut out).unwrap().run_to_completion(256, Duration::ZERO, None).unwrap();
+        out
+    }
+    fn cache_rows(c: &Connection, table: &str, order: &str) -> Vec<Vec<crate::table_delta::Cell>> {
+        let mut q = c.prepare(&format!("SELECT * FROM {table}{order}")).unwrap();
+        let n = q.column_count();
+        q.query_map([], |r| {
+            (0..n).map(|i| r.get_ref(i).map(crate::table_delta::Cell::from)).collect::<rusqlite::Result<Vec<_>>>()
+        })
+        .unwrap()
+        .map(|r| r.unwrap())
+        .collect()
+    }
+    fn count_writes(c: &Connection) {
+        c.execute_batch("CREATE TEMP TABLE writes(tbl TEXT,op TEXT);").unwrap();
+        for table in SIMILAR {
+            for op in ["INSERT", "UPDATE", "DELETE"] {
+                c.execute_batch(&format!("CREATE TEMP TRIGGER w_{table}_{op} AFTER {op} ON main.{table} BEGIN INSERT INTO writes VALUES ('{table}','{op}'); END;")).unwrap();
+            }
+        }
+    }
+    fn writes(c: &Connection) -> i64 {
+        c.query_row("SELECT count(*) FROM temp.writes", [], |r| r.get(0)).unwrap()
+    }
+    type Change = fn(&mut [Vec<Value>; 4]);
+    /// Rows written (full result, change list).
+    /// What a similar run does to the arrays it read (`similar::scan`): replaced rows move to the end.
+    fn worker_changes() -> Vec<(&'static str, Change, [i64; 2])> {
+        fn replace(rows: &mut Vec<Value>, row: Value) {
+            rows.retain(|r| r[0] != row[0] || (r.as_array().unwrap().len() == 2 && r[1] != row[1]));
+            rows.push(row);
+        }
+        fn grid(n: u8) -> Value {
+            Value::String(format!("{n:02x}").repeat(256))
+        }
+        vec![
+            ("unchanged", |_| {}, [0, 0]),
+            ("one signature", |t| replace(&mut t[0], json!(["a05", 3.5, grid(5), 1])), [2, 2]),
+            // An unreadable picture tried again; the last stored row stays where it is.
+            ("failed again, last row", |t| replace(&mut t[0], json!(["a18", null, null, 0])), [0, 0]),
+            (
+                "failed again, earlier row",
+                |t| {
+                    replace(&mut t[0], json!(["a18", null, null, 0]));
+                    replace(&mut t[0], json!(["a17", 3.0, grid(17), 1]));
+                    replace(&mut t[0], json!(["a18", null, null, 0]));
+                },
+                // A full result rewrites a17 in place; a change list moves it and a18 again.
+                [1, 4],
+            ),
+            (
+                "new picture",
+                |t| {
+                    t[0].push(json!(["a19", 1.5, grid(19), 1]));
+                    replace(&mut t[0], json!(["a18", null, null, 0]));
+                    t[1].retain(|r| !(r[0] == "a00" && r[1] == "a01"));
+                    t[1].push(json!(["a00", "a01", "identical", 0.0, "", "2026-10-12 00:00:00"]));
+                    t[1].push(json!(["a00", "a19", "crop", 1.0, "", "2026-10-12 00:00:00"]));
+                    t[2].push(json!(["a19"]));
+                    t[3].retain(|r| r[0] != "a04");
+                    t[3].push(json!(["a06", "a07"]));
+                },
+                [9, 9],
+            ),
+            (
+                "every signature",
+                |t| {
+                    for i in 0..18u8 {
+                        replace(&mut t[0], json!([format!("a{i:02}"), 2.0 + f64::from(i), grid(i), 1]));
+                    }
+                },
+                [36, 36],
+            ),
+        ]
+    }
+
+    #[test]
+    fn change_lists_and_full_results_publish_the_full_replacement_rows_writing_only_changes() {
+        let f = Fixture::new();
+        let base = similar_library();
+        for (name, change, expected) in worker_changes() {
+            let mut read: [Vec<Value>; 4] = SIMILAR.map(|t| crate::research_compute::similar::table(&base, t).unwrap());
+            let before = read.clone();
+            change(&mut read);
+            let full: serde_json::Map<_, _> =
+                SIMILAR.iter().zip(read.iter()).map(|(t, rows)| (t.to_string(), Value::Array(rows.clone()))).collect();
+            let delta: serde_json::Map<_, _> = SIMILAR
+                .iter()
+                .zip(read.iter().zip(&before))
+                .map(|(t, (rows, old))| {
+                    (t.to_string(), crate::research_compute::similar::changes(&base, t, old, rows.clone()).unwrap())
+                })
+                .collect();
+            let mut legacy = copy(&base);
+            let tx = legacy.transaction().unwrap();
+            legacy_publish(&tx, &full, &f.ctx).unwrap();
+            tx.commit().unwrap();
+            for (mode, tables, expected) in [("full", &full, expected[0]), ("delta", &delta, expected[1])] {
+                let mut c = copy(&base);
+                count_writes(&c);
+                let tx = c.transaction().unwrap();
+                let written = publish(&tx, tables, &f.ctx).unwrap();
+                tx.commit().unwrap();
+                for table in SIMILAR {
+                    for order in ["", " ORDER BY rowid"] {
+                        assert_eq!(
+                            cache_rows(&c, table, order),
+                            cache_rows(&legacy, table, order),
+                            "{name} {mode} {table}"
+                        );
+                    }
+                }
+                assert_eq!(writes(&c), written as i64, "{name} {mode}");
+                assert_eq!(written as i64, expected, "{name} {mode}");
+            }
+            if name == "unchanged" {
+                assert!(delta.values().all(|v| v["delete"] == json!([]) && v["append"] == json!([])));
+            }
+        }
+    }
+
+    #[test]
+    fn written_rows_are_checked_like_the_full_replacement() {
+        let f = Fixture::new();
+        let base = similar_library();
+        let historic = json!(["gone-a", "gone-b", "duplicate", 0.0, "historic", "2000-01-01 00:00:00"]);
+        type Rows = fn(&mut Vec<Value>);
+        let cases: [(&str, Rows, bool); 4] = [
+            ("reversed pair", |r| r.push(json!(["a09", "a08", "similar", 0.0, "", "t"])), false),
+            ("unknown picture", |r| r.push(json!(["a00", "zz", "similar", 0.0, "", "t"])), false),
+            (
+                "historic row rewritten",
+                |r| {
+                    r.iter_mut().for_each(|x| {
+                        if x[0] == "gone-a" {
+                            x[4] = json!("changed")
+                        }
+                    })
+                },
+                false,
+            ),
+            ("historic row kept", |_| {}, true),
+        ];
+        for (name, change, ok) in cases {
+            let old = crate::research_compute::similar::table(&base, "relations").unwrap();
+            assert!(old.contains(&historic));
+            let mut rows = old.clone();
+            change(&mut rows);
+            let full = serde_json::Map::from_iter([("relations".to_string(), Value::Array(rows.clone()))]);
+            let delta = serde_json::Map::from_iter([(
+                "relations".to_string(),
+                crate::research_compute::similar::changes(&base, "relations", &old, rows).unwrap(),
+            )]);
+            let mut legacy = copy(&base);
+            let tx = legacy.transaction().unwrap();
+            assert_eq!(legacy_publish(&tx, &full, &f.ctx).is_ok(), ok, "{name} legacy");
+            for tables in [&full, &delta] {
+                let mut c = copy(&base);
+                let tx = c.transaction().unwrap();
+                assert_eq!(publish(&tx, tables, &f.ctx).is_ok(), ok, "{name}");
+            }
+        }
+        // A change list against rows that are not stored, or of another shape, is refused.
+        for bad in [
+            json!({"delete":[["a98","a99"]],"append":[]}),
+            json!({"delete":[["a00"]],"append":[]}),
+            json!({"delete":[],"append":[["a00","a01","duplicate",0,"","t"]]}),
+            json!({"delete":[],"append":[],"extra":[]}),
+            json!({"append":[]}),
+        ] {
+            let mut c = copy(&base);
+            let tx = c.transaction().unwrap();
+            let tables = serde_json::Map::from_iter([("relations".to_string(), bad.clone())]);
+            assert!(publish(&tx, &tables, &f.ctx).is_err(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn only_old_task_snapshots_are_swept() {
+        let root = std::env::temp_dir().join(format!("illustash-sweep-{}", crate::store::new_key().unwrap()));
+        let task = |n: u8| root.join(format!("illustash-research-{}", format!("{n:02x}").repeat(16)));
+        for n in 0..2 {
+            fs::create_dir_all(task(n)).unwrap();
+            fs::write(task(n).join("library.sqlite"), "synthetic").unwrap();
+        }
+        fs::create_dir_all(root.join("illustash-research-scope-other")).unwrap();
+        fs::create_dir_all(root.join("unrelated")).unwrap();
+        // Nothing is older than an hour.
+        assert_eq!(sweep_scratch(&root, Duration::from_secs(3600)), 0);
+        std::thread::sleep(Duration::from_millis(20));
+        assert_eq!(sweep_scratch(&root, Duration::from_millis(10)), 2);
+        assert!(!task(0).exists() && !task(1).exists());
+        assert!(root.join("illustash-research-scope-other").exists() && root.join("unrelated").exists());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    /// Synthetic library of the #31 measurements: n pictures with signatures and pairing marks, a chain of
+    /// n-1 relations, no retries.
+    fn bench_library(base: &Path, n: usize) {
+        let c = crate::sqlite::open(base).unwrap();
+        c.execute_batch(include_str!("app_create_schema.sql")).unwrap();
+        c.execute_batch("CREATE TABLE IF NOT EXISTS similar_paired(uuid TEXT PRIMARY KEY);CREATE TABLE IF NOT EXISTS similar_retry(a TEXT NOT NULL,b TEXT NOT NULL,PRIMARY KEY(a,b));BEGIN;").unwrap();
+        for i in 0..n {
+            let id = format!("{i:08x}-synthetic");
+            c.execute("INSERT INTO assets(uuid,src_path) VALUES (?,'')", [&id]).unwrap();
+            let grid: Vec<u8> = (0..256).map(|j| ((i * 31 + j * 7) % 256) as u8).collect();
+            c.execute("INSERT INTO image_sigs VALUES (?,?,?,1)", rusqlite::params![id, 1.25, grid]).unwrap();
+            c.execute("INSERT INTO similar_paired VALUES (?)", [&id]).unwrap();
+            if i > 0 {
+                c.execute(
+                    "INSERT INTO relations VALUES (?,?,'similar',0,'','2026-10-12 00:00:00')",
+                    [format!("{:08x}-synthetic", i - 1), id],
+                )
+                .unwrap();
+            }
+        }
+        c.execute_batch("COMMIT;VACUUM;").unwrap();
+    }
+    type BenchMode = fn(&mut [Vec<Value>; 4], &dyn Fn(usize) -> Value);
+    /// No change; one signature replaced (moved to the end, as the calculator does); every signature replaced.
+    fn bench_modes() -> [(&'static str, BenchMode); 3] {
+        [
+            ("nochange", |_, _| {}),
+            ("single", |t, grid| {
+                let row = t[0].remove(t[0].len() / 2);
+                t[0].push(json!([row[0], 1.5, grid(7), 1]));
+            }),
+            ("full", |t, grid| {
+                let rows = std::mem::take(&mut t[0]);
+                t[0] = rows.into_iter().enumerate().map(|(i, r)| json!([r[0], 1.5, grid(i), 1])).collect();
+            }),
+        ]
+    }
+    /// Peak resident memory of this process so far, in bytes (macOS reports bytes, Linux KiB).
+    fn peak_rss() -> u64 {
+        let mut usage: libc::rusage = unsafe { std::mem::zeroed() };
+        unsafe { libc::getrusage(libc::RUSAGE_SELF, &mut usage) };
+        let peak = usage.ru_maxrss as u64;
+        if cfg!(target_os = "macos") {
+            peak
+        } else {
+            peak * 1024
+        }
+    }
+    /// #31 owner memory (synthetic, release), one result per process: first
+    /// `ILLUSTASH_RESEARCH_RSS_DIR=<dir> cargo test --release research_publish_rss -- --ignored --nocapture` writes
+    /// the libraries and responses, then each run with `ILLUSTASH_RESEARCH_RSS_RUN=<n>-<mode>-<main|delta>` parses
+    /// one response as App does and publishes it, reporting the process peak before and after.
+    #[test]
+    #[ignore]
+    fn research_publish_rss() {
+        let Some(dir) = std::env::var_os("ILLUSTASH_RESEARCH_RSS_DIR").map(PathBuf::from) else {
+            return;
+        };
+        let f = Fixture::new();
+        let Ok(run) = std::env::var("ILLUSTASH_RESEARCH_RSS_RUN") else {
+            let sizes = std::env::var("ILLUSTASH_RESEARCH_BENCH_SIZES").unwrap_or_else(|_| "1000,10000,50000".into());
+            for n in sizes.split(',').map(|s| s.trim().parse::<usize>().unwrap()) {
+                let base = dir.join(format!("{n}.sqlite"));
+                bench_library(&base, n);
+                let snapshot = crate::sqlite::open(&base).unwrap();
+                let old: [Vec<Value>; 4] =
+                    SIMILAR.map(|t| crate::research_compute::similar::table(&snapshot, t).unwrap());
+                let grid = |i: usize| Value::String(format!("{:02x}", i % 256).repeat(256));
+                for (mode, change) in bench_modes() {
+                    let mut new = old.clone();
+                    change(&mut new, &grid);
+                    let full: serde_json::Map<_, _> =
+                        SIMILAR.iter().zip(&new).map(|(t, rows)| (t.to_string(), Value::Array(rows.clone()))).collect();
+                    let delta: serde_json::Map<_, _> = SIMILAR
+                        .iter()
+                        .zip(new.iter().zip(&old))
+                        .map(|(t, (rows, before))| {
+                            let change = crate::research_compute::similar::changes(&snapshot, t, before, rows.clone());
+                            (t.to_string(), change.unwrap())
+                        })
+                        .collect();
+                    for (code, tables) in [("main", full), ("delta", delta)] {
+                        let bytes =
+                            serde_json::to_vec(&json!({"format":"illustash-research/1","tables":tables})).unwrap();
+                        fs::write(dir.join(format!("{n}-{mode}-{code}.json")), bytes).unwrap();
+                    }
+                }
+            }
+            return;
+        };
+        let n = run.split('-').next().unwrap();
+        let before = peak_rss();
+        let bytes = fs::read(dir.join(format!("{run}.json"))).unwrap();
+        let text = std::str::from_utf8(&bytes).unwrap();
+        let ordered = crate::http_json::parse_python(text).unwrap();
+        let parsed = crate::strict_json::parse(text).unwrap();
+        let path = dir.join(format!("{run}.sqlite"));
+        fs::copy(dir.join(format!("{n}.sqlite")), &path).unwrap();
+        let mut c = crate::sqlite::open(&path).unwrap();
+        let tx = c.transaction_with_behavior(TransactionBehavior::Immediate).unwrap();
+        let tables = parsed["tables"].as_object().unwrap();
+        if run.ends_with("-main") {
+            legacy_publish(&tx, tables, &f.ctx).unwrap();
+        } else {
+            publish(&tx, tables, &f.ctx).unwrap();
+        }
+        tx.commit().unwrap();
+        drop((ordered, parsed, bytes));
+        println!("{}", json!({"run": run, "peak_before": before, "peak_after": peak_rss()}));
+        drop(c);
+        for suffix in ["", "-wal", "-shm"] {
+            let _ = fs::remove_file(dir.join(format!("{run}.sqlite{suffix}")));
+        }
+    }
+
+    /// #31 measurement (synthetic, release): `cargo test --release research_delta_bench -- --ignored --nocapture`.
+    /// Publication of the four similar tables only (early_groups/fold and the fingerprint are the same in both and
+    /// left out). ILLUSTASH_RESEARCH_BENCH_SIZES overrides the default 1000,10000,50000; three runs, median.
+    #[test]
+    #[ignore]
+    fn research_delta_bench() {
+        use std::time::Instant;
+        let sizes = std::env::var("ILLUSTASH_RESEARCH_BENCH_SIZES").unwrap_or_else(|_| "1000,10000,50000".into());
+        let f = Fixture::new();
+        let ms = |d: std::time::Duration| d.as_secs_f64() * 1000.0;
+        let median = |mut v: Vec<f64>| {
+            v.sort_by(f64::total_cmp);
+            v[v.len() / 2]
+        };
+        for n in sizes.split(',').map(|s| s.trim().parse::<usize>().unwrap()) {
+            let dir = f.root.join(format!("delta-{n}"));
+            fs::create_dir_all(&dir).unwrap();
+            let base = dir.join("base.sqlite");
+            bench_library(&base, n);
+            let snapshot = crate::sqlite::open(&base).unwrap();
+            let old: [Vec<Value>; 4] = SIMILAR.map(|t| crate::research_compute::similar::table(&snapshot, t).unwrap());
+            let grid = |i: usize| Value::String(format!("{:02x}", i % 256).repeat(256));
+            for (mode, change) in bench_modes() {
+                let mut new = old.clone();
+                change(&mut new, &grid);
+                let full = Value::Object(
+                    SIMILAR.iter().zip(&new).map(|(t, rows)| (t.to_string(), Value::Array(rows.clone()))).collect(),
+                );
+                let mut delta_ms = vec![];
+                let mut delta = Value::Null;
+                for _ in 0..3 {
+                    let started = Instant::now();
+                    delta = Value::Object(
+                        SIMILAR
+                            .iter()
+                            .zip(new.iter().zip(&old))
+                            .map(|(t, (rows, before))| {
+                                let change =
+                                    crate::research_compute::similar::changes(&snapshot, t, before, rows.clone());
+                                (t.to_string(), change.unwrap())
+                            })
+                            .collect(),
+                    );
+                    delta_ms.push(ms(started.elapsed()));
+                }
+                for (code, tables) in [("main", &full), ("#31", &delta)] {
+                    let bytes = serde_json::to_vec(&json!({"format":"illustash-research/1","tables":tables})).unwrap();
+                    let (mut parse, mut apply, mut wal, mut written, mut scratch) = (vec![], vec![], vec![], 0, 0);
+                    for run in 0..3 {
+                        let started = Instant::now();
+                        let text = std::str::from_utf8(&bytes).unwrap();
+                        crate::http_json::parse_python(text).unwrap();
+                        let parsed = crate::strict_json::parse(text).unwrap();
+                        parse.push(ms(started.elapsed()));
+                        let path = dir.join(format!("{mode}-{run}.sqlite"));
+                        fs::copy(&base, &path).unwrap();
+                        let mut c = crate::sqlite::open(&path).unwrap();
+                        c.execute_batch("PRAGMA journal_mode=WAL; PRAGMA wal_autocheckpoint=0;").unwrap();
+                        let tables = parsed["tables"].as_object().unwrap();
+                        let started = Instant::now();
+                        let tx = c.transaction_with_behavior(TransactionBehavior::Immediate).unwrap();
+                        if code == "main" {
+                            legacy_publish(&tx, tables, &f.ctx).unwrap();
+                            written = old.iter().chain(&new).map(Vec::len).sum::<usize>();
+                            scratch = old[0].len() + old[1].len();
+                        } else {
+                            written = publish(&tx, tables, &f.ctx).unwrap();
+                            scratch = 0;
+                        }
+                        tx.commit().unwrap();
+                        apply.push(ms(started.elapsed()));
+                        wal.push(
+                            fs::metadata(dir.join(format!("{mode}-{run}.sqlite-wal"))).map(|m| m.len()).unwrap_or(0)
+                                as f64,
+                        );
+                        drop(c);
+                        for suffix in ["", "-wal", "-shm"] {
+                            let _ = fs::remove_file(dir.join(format!("{mode}-{run}.sqlite{suffix}")));
+                        }
+                    }
+                    println!(
+                        "{}",
+                        json!({"n": n, "mode": mode, "code": code, "response_bytes": bytes.len(),
+                            "worker_delta_ms": if code == "#31" { median(delta_ms.clone()) } else { 0.0 },
+                            "parse_ms": median(parse), "publish_ms": median(apply), "rows_written": written,
+                            "temp_rows": scratch, "wal_bytes": median(wal)})
+                    );
+                }
+            }
+        }
     }
 
     /// main's fingerprint before #29, copied unchanged except that the features directory replaces
