@@ -1663,7 +1663,9 @@ mod tests {
             }),
         ]
     }
-    /// Peak resident memory of this process so far, in bytes (macOS reports bytes, Linux KiB).
+    /// Peak resident memory of this process so far, in bytes (macOS reports bytes, Linux KiB). `getrusage` is
+    /// POSIX only, so this measurement and the test using it are not built on Windows.
+    #[cfg(unix)]
     fn peak_rss() -> u64 {
         let mut usage: libc::rusage = unsafe { std::mem::zeroed() };
         unsafe { libc::getrusage(libc::RUSAGE_SELF, &mut usage) };
@@ -1674,10 +1676,11 @@ mod tests {
             peak * 1024
         }
     }
-    /// #31 owner memory (synthetic, release), one result per process: first
+    /// #31 owner memory (synthetic, release; POSIX only), one result per process: first
     /// `ILLUSTASH_RESEARCH_RSS_DIR=<dir> cargo test --release research_publish_rss -- --ignored --nocapture` writes
     /// the libraries and responses, then each run with `ILLUSTASH_RESEARCH_RSS_RUN=<n>-<mode>-<main|delta>` parses
     /// one response as App does and publishes it, reporting the process peak before and after.
+    #[cfg(unix)]
     #[test]
     #[ignore]
     fn research_publish_rss() {
