@@ -34,11 +34,16 @@ fn main() {
         .manage(server::ErrorPage::default())
         .manage(server::StartupPage::default())
         .manage(server::Launch::default())
+        .manage(welcome::Import::default())
         .invoke_handler(tauri::generate_handler![
             pixiv::pixiv_reply,
             welcome::welcome_pick,
             welcome::welcome_open,
             welcome::welcome_create,
+            welcome::welcome_inspect,
+            welcome::welcome_import,
+            welcome::welcome_import_status,
+            welcome::welcome_import_cancel,
             welcome::startup_choose,
             welcome::startup_retry
         ])

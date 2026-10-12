@@ -17,7 +17,7 @@ function harness() {
   const c = {
     URLSearchParams, state: {nsfw: '', token: '', stale: false, route: {page: 'library'}, chars: [], dupInfo: {}, exclInfo: {},
       readEpoch: 0, sel: {all: false, ids: new Set(['same-uuid']), exclude: new Set()}},
-    $: id => nodes[id] ||= element(), document: {createElement: element}, location: {reload() { c.reloaded = true; }},
+    $: id => nodes[id] ||= element(), document: {createElement: element}, location: {reload() { c.reloaded = true; }}, guideAfterPost() {},
     setUndo() {}, navCount() {}, fetchChar: async () => null, renderChrome() {}, renderSettings() {}, renderIndexBody() {},
     async fetch(path, options = {}) {
       server.requests.push({path, method: options.method || 'GET', token: options.headers['X-CSRF-Token']});

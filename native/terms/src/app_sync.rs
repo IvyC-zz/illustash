@@ -341,10 +341,7 @@ fn run_with(
         counts["imported"] = out["added"].clone();
         counts["removed"] = out["removed"].clone();
         let pending = out["pending"].as_u64().expect("internal sync counter must be unsigned");
-        let prefs: Value = serde_json::from_str(&crate::app_settings::startup(library)?.dump())
-            .map_err(|e| Error::Invalid(e.to_string()))?;
-        let limit = prefs["local_limit"].as_u64().unwrap_or(3000);
-        if pending > 0 && pending <= limit {
+        if pending > 0 {
             if let Some(ctx) = context {
                 if let Some(worker) = std::env::var_os("ILLUSTASH_RECOGNITION_WORKER") {
                     recognise(
@@ -372,18 +369,10 @@ fn run_with(
                 }
             }
         }
-        let status = if pending > limit {
-            "needs_windows"
-        } else if pending > 0 {
-            "needs_recognition"
-        } else {
-            "done"
-        };
+        let status = if pending > 0 { "needs_recognition" } else { "done" };
         let message = with_unreadable(
             unreadable,
-            if pending > limit {
-                format!("有 {pending} 张新图，超过本机处理上限 {limit}，请交给 Windows 识别后再同步")
-            } else if pending > 0 {
+            if pending > 0 {
                 format!("有 {pending} 张图等待识别；本次启动没有识别 worker")
             } else {
                 String::new()

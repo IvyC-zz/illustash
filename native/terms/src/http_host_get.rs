@@ -98,6 +98,11 @@ pub(super) fn handle(request: Request, host: &Host, received: u64) {
             }
         }
         "/api/sync" => session.syncer.status(&session.library).map(|p| Some((p, 200))),
+        "/api/onboarding" => {
+            let works = crate::http_read::query(request.url()).get("works").is_some_and(|v| v == "1");
+            crate::app_onboarding::Onboarding::read(&session, &host.root, &session.context(&host.tags), works)
+                .map(|p| Some((p, 200)))
+        }
         // The import slot belongs to the application: after a switch the page still reads why the last one stopped.
         "/api/imports" => Ok(Some((host.imports.state(), 200))),
         path if crate::app_local::ROUTES.contains(&path) => {

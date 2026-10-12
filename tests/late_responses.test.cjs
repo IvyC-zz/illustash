@@ -19,6 +19,7 @@ test('a group page answer that arrives after navigating home does not take over 
     clearSelection() {}, closeInspector() {}, error: m => painted.push('error ' + m), readError: e => e.message,
     api: () => new Promise(resolve => { answer = resolve; }), nearText: () => 'near', fetchChar: async () => null,
     renderChrome: () => painted.push('chrome'), renderHome: () => painted.push('home'), reload: async () => painted.push('grid'),
+    showGuideNav() {}, renderStart: () => painted.push('start'),
   };
   vm.createContext(c);
   vm.runInContext(section('async function applyRoute()', "window.addEventListener('hashchange'"), c);
@@ -39,7 +40,7 @@ test('an older sync answer that arrives last does not move the state back', asyn
   const c = {
     state: {sync: {status: 'scanning'}, route: {page: 'library'}}, SYNC_ACTIVE: ['scanning', 'recognising', 'importing'],
     api: () => new Promise(resolve => answers.push(resolve)), refreshMeta: async () => {}, panelPage: () => true,
-    selCount: () => 0, reload() {}, toast() {}, renderTasks() {}, number: String, error() {}, readError: e => e.message,
+    selCount: () => 0, reload() {}, toast() {}, renderTasks() {}, number: String, error() {}, readError: e => e.message, guideRefresh() {},
     timers: [], setTimeout(fn, ms) { this.timers.push(ms); return this.timers.length; }, clearTimeout() {},
   };
   vm.createContext(c);

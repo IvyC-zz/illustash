@@ -267,10 +267,15 @@ fn create_library(host: &Host, body: &Json) -> Result<Json> {
         _ => return Err(Error::Invalid("请选择来源".into())),
     }
     .map_err(|error| creation_error(error, &host.reference))?;
-    // Published packages survive registry failure. Creation never rotates the active session.
+    // Published packages survive registry failure. Creation never rotates the active session. A registry failure is
+    // reported with the published path (#97): creating again would only make a second, numbered package.
     let path = result["path"].as_str().ok_or_else(|| Error::Schema("建库结果缺少路径".into()))?;
-    crate::app_libraries::remember_created(std::path::Path::new(path), name)?;
-    Ok(Json::object([("path", path.into()), ("name", name.into())]))
+    let mut out = Json::object([("path", path.into()), ("name", name.into())]);
+    if let Err(error) = crate::app_libraries::remember_created(std::path::Path::new(path), name) {
+        out.set("listed", false.into());
+        out.set("error", error.to_string().into());
+    }
+    Ok(out)
 }
 /// `sources: [{kind: "folder", path, preset} | {kind: "photos"}]`: every folder names its origin; none is guessed.
 fn create_sources_library(host: &Host, body: &Json, dest: &Path, name: &str) -> Result<serde_json::Value> {

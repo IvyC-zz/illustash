@@ -29,6 +29,7 @@
         <header class="topbar"><button class="icon" id="sidebarToggle" title="切换侧栏" aria-label="切换侧栏"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3.5 6h13M3.5 10h13M3.5 14h13"/></svg></button><div class="page-heading" id="heading"></div><div class="top-actions"><button class="jump" id="jumpButton" title="跳到角色（⌘K）"><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="9" cy="9" r="5.5"/><path d="m13.2 13.2 3.8 3.8"/></svg><span>跳到角色</span><kbd>⌘K</kbd></button><button class="nsfw-toggle" id="nsfwButton"></button><span class="view-anchor"><button class="icon" id="viewButton" title="视图选项" aria-label="视图选项" aria-haspopup="true" aria-expanded="false"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 6h7M15 6h1M4 14h1M9 14h7"/><circle cx="13" cy="6" r="2"/><circle cx="7" cy="14" r="2"/></svg></button><div class="view-pop" id="viewPopover" role="dialog" aria-label="视图选项" hidden></div></span><button class="icon" id="undoButton" disabled aria-label="撤销"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M7.5 5 4 8.5 7.5 12"/><path d="M4.5 8.5H12a4 4 0 0 1 0 8H9"/></svg></button><button class="icon" id="helpButton" title="快捷键" aria-label="快捷键"><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="7.2"/><path d="M8 7.8a2.2 2.2 0 1 1 3 2c-.6.3-1 .8-1 1.4v.4M10 14.2v.1"/></svg></button></div></header>
         <div class="toolbar" id="toolbar"></div>
         <div id="errorBanner" role="alert" hidden></div>
+        <div id="guideNotice" class="guide-notice" role="status" hidden></div>
         <div class="viewport" id="viewport" tabindex="0" aria-label="图片浏览区域">
           <div id="grid" class="grid" role="group" aria-label="图片"></div>
           <div id="marquee" class="marquee" hidden></div>
@@ -45,6 +46,9 @@
   </main>
 </div>
 <div class="task-pop" id="taskPanel" role="dialog" aria-label="任务" hidden></div>
+<div id="tour" class="tour" hidden><div class="tour-hole"></div><div class="tour-bubble" role="dialog" aria-live="polite" aria-label="使用引导"></div></div>
+<div id="nudge" class="nudge" role="status" hidden></div>
+<div id="checklist" class="checklist" hidden></div>
 <div id="selectionBar" class="selection-bar" hidden></div>
 <div id="toast" class="toast" role="status" hidden><span id="toastText"></span><button id="toastUndo" class="toast-undo" hidden>撤销</button></div>
 <div id="viewer" class="viewer" hidden>

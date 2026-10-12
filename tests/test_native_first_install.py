@@ -130,3 +130,47 @@ class NativeFirstInstallTest(unittest.TestCase):
         self.assertEqual(before, reference.read_bytes())
         self.assertEqual(registry_before, registry.read_bytes())
         self.assertFalse((self.home / 'Pictures/Illustash/rejected.pilib').exists())
+
+    def test_http_create_with_blocked_registry_reports_the_published_package(self):
+        # #97: only listing it failed. The answer names the package so the page offers it instead of a second one.
+        self.start(self.create())
+        registry = self.root / 'support/libraries.json'
+        before = registry.read_bytes()
+        (self.root / 'support/libraries.tmp').mkdir()
+        response = self.request('/api/libraries/new', {'kind': 'folder', 'folder': str(self.folder), 'name': '未登记'})
+        self.assertEqual(response['status'], 200, response['body'])
+        made = json.loads(response['body'])
+        self.assertIs(made['listed'], False)
+        self.assertTrue(made['error'])
+        self.assertTrue((Path(made['path']) / 'library.json').is_file())
+        self.assertEqual(registry.read_bytes(), before)
+        (self.root / 'support/libraries.tmp').rmdir()
+        response = self.request('/api/libraries/open', {'path': made['path']})
+        self.assertEqual(response['status'], 200, response['body'])
+        # Compare parsed paths: on Windows the registry's JSON escapes every backslash.
+        self.assertIn(made['path'], [entry['path'] for entry in json.loads(registry.read_text(encoding='utf-8'))['recent']])
+
+    def test_existing_user_creating_another_library_keeps_the_first_and_its_guide(self):
+        # #97: a second library starts its own guide; the first library, its sources and its guide stay as they were.
+        first = self.create()
+        self.start(first)
+        self.token = json.loads(self.request('/api/bootstrap')['body'])['token']
+        self.assertEqual(self.request('/api/onboarding', {'action': 'done'})['status'], 200)
+        guide = json.loads(self.request('/api/onboarding')['body'])['guide']
+        state = lambda: ((first / 'library.json').read_bytes(), lifecycle.dump(first / 'library.sqlite'),
+                         lifecycle.dump(first / 'source.sqlite'))
+        kept = state()
+        pictures = self.root / '第二批'; pictures.mkdir()
+        Image.new('RGB', (13, 11), 'green').save(pictures / 'green.png')
+        response = self.request('/api/libraries/new', {'kind': 'folder', 'folder': str(pictures), 'name': '第二个'})
+        self.assertEqual(response['status'], 200, response['body'])
+        second = json.loads(response['body'])['path']
+        self.assertNotIn('listed', json.loads(response['body']))
+        self.assertEqual(state(), kept)
+        self.assertEqual(json.loads(self.request('/api/onboarding')['body'])['guide'], guide)
+        self.assertEqual(self.request('/api/libraries/open', {'path': second})['status'], 200)
+        self.token = json.loads(self.request('/api/bootstrap')['body'])['token']
+        self.assertEqual(json.loads(self.request('/api/onboarding')['body'])['guide']['status'], 'new')
+        self.assertEqual(self.request('/api/libraries/open', {'path': str(first)})['status'], 200)
+        self.token = json.loads(self.request('/api/bootstrap')['body'])['token']
+        self.assertEqual(json.loads(self.request('/api/onboarding')['body'])['guide'], guide)

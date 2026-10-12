@@ -361,11 +361,12 @@ Path(sys.argv[2]).write_text(json.dumps(dict(identity=r['identity'],packages=pac
         for i in range(101):self.photo('S'+str(i),'com.atebits.Tweetie2')
         self.process,self.log=self.start(self.lib.path)
         self.token=json.loads(self.request('/api/bootstrap')['body'])['token']
-        self.assertEqual(self.request('/api/startup',{'local_limit':100})['status'],200)
+        # The local recognition limit is gone (#100): any number of new pictures waits for this machine's worker.
+        self.assertEqual(self.request('/api/startup',{'local_limit':100})['status'],400)
         state=self.sync()
-        self.assertEqual(state['state']['status'],'needs_windows')
+        self.assertEqual(state['state']['status'],'needs_recognition')
         self.assertEqual(state['state']['total'],102)
-        self.assertEqual(state['history'][0]['status'],'needs_windows')
+        self.assertEqual(state['history'][0]['status'],'needs_recognition')
 
     @unittest.skipIf(os.name == 'nt', 'Apple 照片图库只在 macOS 上提供')
     def test_native_library_new_photos_exact_source_reference(self):
