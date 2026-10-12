@@ -10,10 +10,24 @@ fn fixture() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/evidence")
 }
 
-fn scratch(name: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("illustash-terms-{}-{name}", std::process::id()));
-    let _ = fs::remove_dir_all(&dir);
-    fs::create_dir_all(&dir).unwrap();
+/// 夹具副本目录；和其他测试的临时目录一样，离开作用域（含断言失败）即删除。
+struct Scratch(PathBuf);
+impl Drop for Scratch {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.0);
+    }
+}
+impl std::ops::Deref for Scratch {
+    type Target = Path;
+    fn deref(&self) -> &Path {
+        &self.0
+    }
+}
+
+fn scratch(name: &str) -> Scratch {
+    let dir = Scratch(std::env::temp_dir().join(format!("illustash-terms-{}-{name}", std::process::id())));
+    let _ = fs::remove_dir_all(&dir.0);
+    fs::create_dir_all(&dir.0).unwrap();
     for f in ["manifest.json", "evidence.jsonl", "notes.txt"] {
         fs::copy(fixture().join(f), dir.join(f)).unwrap();
     }
