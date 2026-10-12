@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-welcome-inspect"
+description = "Enables the welcome_inspect command without any pre-configured scope."
+commands.allow = ["welcome_inspect"]
+
+[[permission]]
+identifier = "deny-welcome-inspect"
+description = "Denies the welcome_inspect command without any pre-configured scope."
+commands.deny = ["welcome_inspect"]

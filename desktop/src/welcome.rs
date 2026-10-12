@@ -2,10 +2,12 @@
 //! while one is loading, and retry / choose / create after a failure. Only the main window's local start page
 //! may call them (capabilities/main.json); the library page on 127.0.0.1 cannot.
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 
 use serde::Deserialize;
-use serde_json::Value;
-use tauri::{AppHandle, Manager};
+use serde_json::{json, Value};
+use tauri::{AppHandle, Manager, State};
 
 use crate::{picker, server};
 
@@ -52,6 +54,70 @@ pub fn welcome_create(app: AppHandle, name: String, sources: Vec<Source>) -> Res
     let library = illustash_terms::desktop_shell::create(&root, &name, picks).map_err(|e| e.to_string())?;
     server::restart(&app, Some(library));
     Ok(())
+}
+
+/// What each picked folder holds (readable, how many pictures, already covered by another), read-only; only the
+/// folders in `count` are counted again.
+#[tauri::command(async)]
+pub fn welcome_inspect(paths: Vec<String>, count: Vec<String>) -> Vec<Value> {
+    let paths: Vec<PathBuf> = paths.into_iter().map(PathBuf::from).collect();
+    let count: Vec<PathBuf> = count.into_iter().map(PathBuf::from).collect();
+    illustash_terms::desktop_shell::inspect(&paths, &count)
+}
+
+/// The welcome page's archive import: one at a time, cancellable until the new library is published.
+#[derive(Default)]
+pub struct Import {
+    cancel: Mutex<Option<Arc<AtomicBool>>>,
+    state: Arc<Mutex<Value>>,
+}
+
+/// Import an exported library (.zip) into the libraries home, then open it. The page polls `welcome_import_status`.
+#[tauri::command(async)]
+pub fn welcome_import(app: AppHandle, import: State<'_, Import>, path: String) -> Result<(), String> {
+    let cancel = {
+        let mut slot = import.cancel.lock().unwrap();
+        if slot.is_some() {
+            return Err("已经在导入另一个图库".into());
+        }
+        slot.insert(Arc::new(AtomicBool::new(false))).clone()
+    };
+    *import.state.lock().unwrap() = json!({"stage": "reading"});
+    let state = import.state.clone();
+    let report = move |stage: &'static str, count: Option<(u64, u64)>| {
+        let mut state = state.lock().unwrap();
+        match count {
+            Some((done, total)) => {
+                state["done"] = done.into();
+                state["total"] = total.into();
+            }
+            None => *state = json!({"stage": stage}),
+        }
+    };
+    let result = illustash_terms::desktop_shell::import(&PathBuf::from(path), &cancel, &report);
+    import.cancel.lock().unwrap().take();
+    match result {
+        Ok(library) => {
+            server::restart(&app, Some(library));
+            Ok(())
+        }
+        Err(_) if cancel.load(Ordering::SeqCst) => Err("已取消导入".into()),
+        Err(error) => Err(error.to_string()),
+    }
+}
+
+/// The running import's stage and byte counts (`{}` when none runs).
+#[tauri::command]
+pub fn welcome_import_status(import: State<'_, Import>) -> Value {
+    if import.cancel.lock().unwrap().is_some() { import.state.lock().unwrap().clone() } else { json!({}) }
+}
+
+/// Stop the running import before its library is published; what it unpacked is removed.
+#[tauri::command]
+pub fn welcome_import_cancel(import: State<'_, Import>) {
+    if let Some(cancel) = import.cancel.lock().unwrap().as_ref() {
+        cancel.store(true, Ordering::SeqCst);
+    }
 }
 
 /// Stop the library being opened (or the one that failed) and show the welcome page.
