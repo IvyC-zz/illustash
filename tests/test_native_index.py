@@ -40,6 +40,9 @@ else:
  for ext in ('.json','.npy'):
   (p/'char-index'/f'{cid}{ext}').unlink(missing_ok=True)
  (p/'char-patch/rejected'/f'{cid}.json').write_text(json.dumps({'rejected':'人工看图后放弃：'+req['reason']}))
+if mode=='anchors':
+ ids=sorted(x.stem for x in (p/'char-index').glob('*.json'))
+ (p/'char-anchors.txt').write_text('\n'.join(ids)); (p/'char-anchors.npy').write_bytes(('rows:'+','.join(ids)).encode())
 v=dict(format=req['format'],identity=req['identity'],before=req['before'],characters=chars,aliases=aliases,labels=labels)
 if mode=='identity': v['identity']['generation']+=1
 if mode=='invalid': v['labels'].append(['not-an-asset','alice',1])
@@ -158,6 +161,34 @@ class NativeIndexTest(unittest.TestCase):
         self.stop(self.process);self.restart()
         v=self.index()['watch'];self.assertEqual((v['works'],v['min_posts']),([self.work],150))
         self.assertEqual(shared_file.read_bytes(),legacy)
+
+    @unittest.skipIf(os.name == 'nt', 'POSIX 权限位制造复制失败')
+    def test_index_files_are_published_as_one_generation(self):
+        # #47: readers never see a mix of old and new shared index files.
+        self.mode.write_text('anchors')
+        names = ('char-anchors.npy', 'char-anchors.txt', 'char-index/carol_example.json')
+        published = lambda: {n: (self.shared/n).read_bytes() if (self.shared/n).exists() else None for n in names}
+        generation = lambda: (self.shared/'index-generation').read_text() if (self.shared/'index-generation').exists() else None
+        # A copy that fails while staging changes no published file and leaves no staged copy behind.
+        self.check()
+        self.shared.chmod(0o555); self.addCleanup(self.shared.chmod, 0o755)
+        self.index({'action':'apply','tags':['carol_example']}); v = self.finish()
+        self.shared.chmod(0o755)
+        self.assertEqual(v['state']['status'], 'error', v)
+        self.assertEqual((published(), generation()), (dict.fromkeys(names), None))
+        self.assertEqual(list(self.shared.rglob('*.tmp')), [])
+        self.stop(self.process); self.restart(); v = self.finish(); self.assertEqual(v['state']['status'], 'done', v)
+        first = published()
+        self.assertEqual((first['char-anchors.txt'], generation()), (b'carol_example', '2'))
+        # A failure after files were replaced leaves the generation odd until the resume completes the set.
+        index = self.shared/'char-index'
+        index.chmod(0o555); self.addCleanup(index.chmod, 0o755)
+        self.index({'action':'drop','char':'carol_example','reason':'合成放弃'}); v = self.finish()
+        index.chmod(0o755)
+        self.assertEqual((v['state']['status'], generation()), ('error', '3'), v)
+        self.stop(self.process); self.restart(); v = self.finish(); self.assertEqual(v['state']['status'], 'done', v)
+        self.assertEqual((published(), generation()), ({'char-anchors.npy': b'rows:', 'char-anchors.txt': b'', 'char-index/carol_example.json': None}, '4'))
+        self.assertEqual(list(self.shared.rglob('*.tmp')), [])
 
     def test_source_failure_rollback_then_retry(self):
         self.check()
