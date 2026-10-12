@@ -185,7 +185,9 @@ class NativeProfilesTest(unittest.TestCase):
         with closing(sqlite3.connect(self.right.db)) as c:
             c.execute("CREATE TRIGGER fail_ack BEFORE UPDATE ON backend_effects WHEN OLD.kind='verdict' BEGIN SELECT RAISE(ABORT,'ack failure'); END");c.commit()
         response=self.post(self.origin,'/api/character/profile',{'entity':self.alice,'name':'已提交'})
-        self.assertEqual(response['status'],500)
+        # The profile save commits before its event acknowledgement fails; by user decision on 2026-10-11 (#40)
+        # a committed operation answers 200 and the event stays pending for recovery.
+        self.assertEqual(response['status'],200,response['body'])
         with closing(sqlite3.connect(self.right.db)) as c:
             self.assertEqual(c.execute("SELECT value FROM names WHERE entity_id=? AND source='user' AND role='display'",(self.alice,)).fetchone()[0],'已提交')
             self.assertEqual(c.execute("SELECT status FROM backend_effects WHERE kind='verdict' ORDER BY id DESC LIMIT 1").fetchone()[0],'pending')
