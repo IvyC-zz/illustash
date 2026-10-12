@@ -53,6 +53,4 @@ test('a finished run says which pictures it kept because their paths could not b
     '上次同步：10-11 21:00 · 2 处暂时读不到，已有图片保留不动');
   assert.equal(context.syncLine({status: 'needs_recognition', total: 3, unreadable: 1}),
     '有 3 张图等待识别（识别服务未启动） · 1 处暂时读不到，已有图片保留不动');
-  assert.equal(context.syncLine({status: 'needs_windows', unreadable: 1}),
-    '新增图片较多，需使用 Windows 批量识别 · 1 处暂时读不到，已有图片保留不动');
 });

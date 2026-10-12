@@ -13,6 +13,7 @@ import hashlib
 import http.client
 import json
 import os
+import re
 from pathlib import Path
 import shutil
 import signal
@@ -92,8 +93,21 @@ def import_task(test, url, body, *, token=None, timeout=60, seen=None):
     return {**started, 'status': status, 'body': json.dumps(payload, ensure_ascii=False).encode()}
 
 
-STARTUP_DEFAULT = {'sync': True, 'similar': True, 'index_check': True, 'names': True, 'provenance': True,
-                   'local_limit': 3000}
+STARTUP_DEFAULT = {'sync': True, 'similar': True, 'index_check': True, 'names': True, 'provenance': True}
+LOCAL_LIMIT = re.compile(r', "local_limit": \d+')
+
+
+def without_local_limit(value):
+    """#100 removed the local recognition limit preference. The recordings stored and answered it after every
+    other preference; this is the same recording without it (the request no longer sends it)."""
+    if isinstance(value, list):
+        return [without_local_limit(v) for v in value]
+    if isinstance(value, str):
+        return LOCAL_LIMIT.sub('', value)
+    if b'"local_limit"' not in value.get('body', b''):
+        return value
+    body = LOCAL_LIMIT.sub('', value['body'].decode()).encode()
+    return {**value, 'body': body, 'headers': {**value['headers'], 'Content-Length': str(len(body))}}
 
 
 def startup(db):
@@ -219,7 +233,7 @@ class NativeLifecycleTest(unittest.TestCase):
 
     def reference_response(self, url, body=None, **kwargs):
         """The former reference server's response to the same request (recorded)."""
-        return self.rec.value('response')
+        return without_local_limit(self.rec.value('response'))
 
     def pair(self, url, body=None, **kwargs):
         left = NativeLifecycleTest.reference_response(self, url, body, **kwargs)
@@ -255,9 +269,9 @@ class NativeLifecycleTest(unittest.TestCase):
     def test_settings_startup_values_errors_and_database_state(self):
         self.assertEqual(self.pair('/api/settings')['status'], 200)
         self.assertEqual(self.pair('/api/libraries')['status'], 200)
-        changes = {'sync': False, 'similar': False, 'local_limit': 1234}
+        changes = {'sync': False, 'similar': False}
         # Compute expected DB changes on an independent clone before either HTTP write.
-        expected = self.rec.value('expected dump')
+        expected = without_local_limit(self.rec.value('expected dump'))
         response = self.request('/api/startup', changes)
         self.assertEqual(response['status'], 200)
         self.assertEqual(startup(self.lib.db), {**STARTUP_DEFAULT, **changes})
@@ -564,9 +578,9 @@ class NativeLifecycleTest(unittest.TestCase):
         self.assertEqual(self.request('/api/startup', {'sync': False}, token=old_token)['status'], 403)
         self.assertEqual(before, dump(target.db))
         self.token = new_token
-        self.assertEqual(self.request('/api/startup', {'local_limit': 4321})['status'], 200)
-        self.assertEqual(startup(target.db)['local_limit'], 4321)
-        self.assertEqual(startup(self.lib.db)['local_limit'], 3000)
+        self.assertEqual(self.request('/api/startup', {'similar': False})['status'], 200)
+        self.assertEqual(startup(target.db)['similar'], False)
+        self.assertEqual(startup(self.lib.db)['similar'], True)
         before = dump(target.db)
         self.assertEqual(self.request('/api/libraries/open', {'path': str(self.root / 'missing.pilib')})['status'], 400)
         self.assertEqual(before, dump(target.db))
@@ -598,7 +612,7 @@ class NativeLifecycleTest(unittest.TestCase):
 
     def test_request_started_before_switch_cannot_write_new_library(self):
         target = self.package('second')
-        body = b'{"local_limit": 1234}'
+        body = b'{"similar": false}'
         conn = http.client.HTTPConnection('127.0.0.1', self.port, timeout=5)
         self.addCleanup(conn.close)
         conn.putrequest('POST', '/api/startup', skip_host=True)
@@ -630,11 +644,11 @@ class NativeLifecycleTest(unittest.TestCase):
         alias.unlink(); alias.symlink_to(other, target_is_directory=True)
         untouched = {name: dump(other / name) for name in ('library.sqlite', 'source.sqlite')}
         self.assertEqual(self.request('/api/tag', {'ids': ['b'], 'tag': 'opened-library-tag'})['status'], 200)
-        self.assertEqual(self.request('/api/startup', {'local_limit': 4321})['status'], 200)
+        self.assertEqual(self.request('/api/startup', {'similar': False})['status'], 200)
         with closing(sqlite3.connect(self.lib.db)) as c:
             self.assertEqual(c.execute("SELECT tag FROM asset_tags WHERE uuid='b' AND tag='opened-library-tag'")
                              .fetchall(), [('opened-library-tag',)])
-        self.assertEqual(startup(self.lib.db)['local_limit'], 4321)
+        self.assertEqual(startup(self.lib.db)['similar'], False)
         self.assertEqual(untouched, {name: dump(other / name) for name in untouched})
         self.assertIn('opened-library-tag', self.request('/api/user-tags')['body'].decode())
         package = json.loads(self.request('/api/settings')['body'])['package']
@@ -644,7 +658,7 @@ class NativeLifecycleTest(unittest.TestCase):
         self.assertEqual(self.request('/api/libraries/open', {'path': str(alias)})['status'], 200)
         self.token = json.loads(self.request('/api/bootstrap')['body'])['token']
         self.assertNotEqual(self.token, old_token)
-        self.assertEqual(self.request('/api/startup', {'local_limit': 1234}, token=old_token)['status'], 403)
+        self.assertEqual(self.request('/api/startup', {'similar': True}, token=old_token)['status'], 403)
         self.assertEqual(json.loads(self.request('/api/settings')['body'])['package']['name'], 'other')
         self.assertEqual(untouched, {name: dump(other / name) for name in untouched})
         self.assertFalse(self.sentinel.exists())
@@ -664,12 +678,12 @@ class NativeLifecycleTest(unittest.TestCase):
                 self.assertNotEqual(result.returncode, 0)
                 self.assertIn('另一个 Illustash', result.stderr.decode(errors='replace'))
         self.assertEqual(before, dump(self.lib.db))
-        self.assertEqual(self.request('/api/startup', {'local_limit': 4321})['status'], 200)
+        self.assertEqual(self.request('/api/startup', {'similar': False})['status'], 200)
         # The owner crashes: the system drops its lock and the next host opens the library.
         self.process.kill(); self.process.wait()
         self.process, self.log = self.start(self.lib.path)
         self.token = json.loads(self.request('/api/bootstrap')['body'])['token']
-        self.assertEqual(startup(self.lib.db)['local_limit'], 4321)
+        self.assertEqual(startup(self.lib.db)['similar'], False)
         self.assertFalse(self.sentinel.exists())
 
     def test_stalled_connections_are_closed_and_their_number_is_bounded(self):
@@ -680,7 +694,7 @@ class NativeLifecycleTest(unittest.TestCase):
         self.env['ILLUSTASH_HTTP_TIMEOUT_MS'] = '3000'
         self.process, self.log = self.start(self.lib.path)
         self.token = json.loads(self.request('/api/bootstrap')['body'])['token']
-        body = json.dumps({'local_limit': 1234}).encode()
+        body = json.dumps({'similar': False}).encode()
 
         def stalled(length):
             head = (f'POST /api/startup HTTP/1.1\r\nHost: 127.0.0.1:{self.port}\r\nOrigin: {self.origin}\r\n'
@@ -717,7 +731,7 @@ class NativeLifecycleTest(unittest.TestCase):
         # The held connections time out; the host then serves normally and nothing was written.
         self.assertTrue(all(closed_within(conn, 10) for conn in held))
         wait_until(lambda: self.request('/api/bootstrap')['status'] == 200, timeout=10)
-        self.assertEqual(startup(self.lib.db)['local_limit'], 3000)
+        self.assertEqual(startup(self.lib.db)['similar'], True)
         self.assertFalse(self.sentinel.exists())
 
     def test_slow_reader_old_snapshot_does_not_block_library_switch(self):

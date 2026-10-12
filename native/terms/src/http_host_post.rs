@@ -245,6 +245,13 @@ pub(super) fn handle(request: Request, host: &Host, received: u64, text: &str, b
         | "/api/identity/skip"
         | "/api/merge" => crate::app_commands::request(&session.context(&host.tags), request.url(), &body),
         "/api/provenance" => session.provenance.post(&body),
+        "/api/onboarding" => {
+            let library = session.library.clone();
+            let works = body.get("works").is_some_and(truthy);
+            session.onboarding.post(&library, &body).and_then(|()| {
+                crate::app_onboarding::Onboarding::read(&session, &host.root, &session.context(&host.tags), works)
+            })
+        }
         route if route.starts_with("/api/accounts/") => {
             crate::app_accounts::action(&session.library, &route["/api/accounts/".len()..], &body)
         }

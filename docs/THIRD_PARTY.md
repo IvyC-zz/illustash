@@ -34,6 +34,6 @@ PocketFFT 与 LittleCMS 的许可原文随基础与计算资源安装到 `resour
 |---|---|---|---|
 | WD SwinV2 Tagger v3 | [SmilingWolf/wd-swinv2-tagger-v3](https://huggingface.co/SmilingWolf/wd-swinv2-tagger-v3) | 图片标签与角色识别 | Apache-2.0 |
 | CCIP | [deepghs/ccip](https://huggingface.co/deepghs/ccip)、[deepghs/ccip_onnx](https://huggingface.co/deepghs/ccip_onnx) | 角色特征比对 | OpenRAIL |
-| Character Index | [deepghs/character_index](https://huggingface.co/datasets/deepghs/character_index) | 角色索引数据（运行时按需下载） | MIT |
+| Character Index | [deepghs/character_index](https://huggingface.co/datasets/deepghs/character_index) | 已有共享角色索引的来源数据；不随安装包分发，应用也不下载。新用户补充角色参考特征走「检查新角色」（Danbooru 公开图片，每次运行前确认） | MIT |
 
 应用「关于」页另列出致谢的上游项目与数据源（Danbooru、Bangumi 等）；联网获取的数据按各站点条款使用，见 [找回画师](PROVENANCE.md) 与 [界面名称](WEB_NAMES.md)。
