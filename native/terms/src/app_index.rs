@@ -300,6 +300,15 @@ impl Updater {
             next_retry: Instant::now(),
         })
     }
+    /// The works this library watches for new characters (#96 marks them among the suggested works).
+    pub fn watched(&self, lib: &Library) -> Result<Vec<String>> {
+        Ok(watch(lib, &self.dir)?["works"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|w| w.as_str().map(str::to_owned))
+            .collect())
+    }
     pub fn writing(&self) -> bool {
         self.task.as_ref().is_some_and(Task::running)
             && self.state.lock().expect("index state mutex poisoned").status() != Status::Checking

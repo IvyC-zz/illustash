@@ -242,15 +242,22 @@ pub(crate) fn set_startup_json(lib: &Library, body: &str) -> Result<()> {
         };
         validated.push((key, SettingValue::Scalar(value)));
     }
+    update_pref(lib, "startup", |c| {
+        let mut merged = load_startup(c)?;
+        for (key, value) in validated {
+            merged.set(key, value);
+        }
+        Ok(merged.persisted())
+    })
+}
+/// Replace one preference with the text `change` builds from the current state. The writer lock is taken before
+/// reading, so concurrent partial updates cannot lose one another. Preferences never grant network or start tasks.
+pub(crate) fn update_pref(lib: &Library, key: &str, change: impl FnOnce(&Connection) -> Result<String>) -> Result<()> {
     let mut conn = connection(lib, true)?;
-    // Acquire the writer lock before reading preferences: concurrent partial updates cannot lose one another.
     let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
     crate::schema::require_current(&tx)?;
-    let mut merged = load_startup(&tx)?;
-    for (key, value) in validated {
-        merged.set(key, value);
-    }
-    tx.execute("INSERT OR REPLACE INTO prefs(key,value) VALUES ('startup',?1)", [merged.persisted()])?;
+    let value = change(&tx)?;
+    tx.execute("INSERT OR REPLACE INTO prefs(key,value) VALUES (?1,?2)", [key, &value])?;
     tx.commit()?;
     Ok(())
 }

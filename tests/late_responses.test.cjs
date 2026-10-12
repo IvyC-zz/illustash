@@ -19,6 +19,7 @@ test('a group page answer that arrives after navigating home does not take over 
     clearSelection() {}, closeInspector() {}, error: m => painted.push('error ' + m), readError: e => e.message,
     api: () => new Promise(resolve => { answer = resolve; }), nearText: () => 'near', fetchChar: async () => null,
     renderChrome: () => painted.push('chrome'), renderHome: () => painted.push('home'), reload: async () => painted.push('grid'),
+    showGuideNav() {}, renderStart: () => painted.push('start'),
   };
   vm.createContext(c);
   vm.runInContext(section('async function applyRoute()', "window.addEventListener('hashchange'"), c);

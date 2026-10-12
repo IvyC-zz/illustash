@@ -24,6 +24,7 @@ pub mod app_library;
 mod app_local;
 mod app_migrate;
 mod app_migrate_data;
+mod app_onboarding;
 pub mod app_service;
 use illustash_platform::app_paths;
 mod app_photos;

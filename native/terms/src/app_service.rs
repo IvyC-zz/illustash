@@ -45,6 +45,7 @@ pub(crate) struct Session {
     pub(crate) index: crate::app_index::Updater,
     pub(crate) auto_sync: bool,
     pub(crate) research: crate::app_research::Research,
+    pub(crate) onboarding: crate::app_onboarding::Onboarding,
 }
 impl Session {
     pub(crate) fn token() -> Result<String> {
@@ -72,6 +73,7 @@ impl Session {
         let index = crate::app_index::Updater::new(&library, root, generation, &token, index_network, index_automatic)?;
         let similar = crate::app_settings::startup(&library)?.get("similar").is_some_and(truthy);
         let research = crate::app_research::Research::new(generation, &token, similar);
+        let onboarding = crate::app_onboarding::Onboarding::new(generation, &token);
         Ok(Self {
             library,
             owner: Some(owner),
@@ -83,6 +85,7 @@ impl Session {
             index,
             auto_sync: true,
             research,
+            onboarding,
         })
     }
 }
@@ -181,6 +184,7 @@ impl Application {
         let similar_enabled = crate::app_settings::startup(&library)?.get("similar").is_some_and(truthy);
         let mut research = crate::app_research::Research::new(1, &token, similar_enabled);
         research.anchors = reference.parent().expect("internal file path must have a parent").to_owned();
+        let onboarding = crate::app_onboarding::Onboarding::new(1, &token);
         let mut session = Session {
             library,
             owner: Some(owner),
@@ -192,6 +196,7 @@ impl Application {
             index,
             auto_sync,
             research,
+            onboarding,
         };
         session.syncer.resource_root = root.clone();
         session.syncer.per_run = per_run;
@@ -310,6 +315,7 @@ impl Session {
     fn close(&mut self) {
         self.provenance.close();
         self.index.stop();
+        self.onboarding.stop();
         self.research.stop();
         self.names.stop();
         self.syncer.stop();
