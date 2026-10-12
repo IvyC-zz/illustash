@@ -127,6 +127,12 @@ impl Runner {
         } else {
             Json::Scalar(Value::Null)
         };
+        if owned && initialized && !library.frozen() {
+            // Directories of runs that ended before their receive gate (#31).
+            if let Ok(c) = cache::connect(&path) {
+                let _ = cache::collect(library.instance_path(), &c, true);
+            }
+        }
         let pending = if path.is_file() {
             crate::app_library::read_connection(&path)?.query_row(
                 "SELECT EXISTS(SELECT 1 FROM pending_runs WHERE kind='new')",
@@ -405,6 +411,8 @@ impl Runner {
             self.initialize()?;
             let identity = TaskIdentity::new(&self.library, self.generation, &self.session)?;
             let c = cache::connect(&self.path())?;
+            // Runs that ended before their receive gate are kept for inspection until the next run (#31).
+            let _ = cache::collect(self.library.instance_path(), &c, true);
             cache::forget_changed_content(&c, &self.library)?;
             c.execute("INSERT INTO runs(kind,steps) VALUES (?,?)", [kind, *steps])?;
             let id = c.last_insert_rowid();
@@ -599,9 +607,9 @@ fn run(
         c.execute("ATTACH DATABASE ? AS stage",[crate::sqlite::path(&staged).to_string_lossy().as_ref()])?;
         c.execute_batch("PRAGMA defer_foreign_keys=ON")?;
         let tx=c.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        // The machine tables become the staged ones, rowids included; only differing rows are written (#31).
         for table in ["artists","artist_links","artist_names","image_sources","image_artists","seeds","lookups","marks","ref_sigs","ext_cache"] {
-            tx.execute(&format!("DELETE FROM {table}"),[])?;
-            tx.execute(&format!("INSERT INTO {table} SELECT * FROM stage.{table}"),[])?;
+            crate::table_delta::mirror(&tx,table,"stage")?;
         }
         // Account archive imports may add leads during a research run: preserve new leads.
         tx.execute("INSERT INTO leads SELECT * FROM stage.leads WHERE 1 ON CONFLICT(source,system,key) DO UPDATE SET status=excluded.status,artist_id=excluded.artist_id,next_due_at=excluded.next_due_at",[])?;
