@@ -269,7 +269,7 @@ Path(sys.argv[2]).write_text(json.dumps(v,allow_nan=False))
         self.restart();self.finished()
         history=self.rows(['assertions','actions'])
         with sqlite3.connect(self.lib.db) as c:before=c.execute('SELECT count(*) FROM research_runs').fetchone()[0]
-        self.assertEqual(self.request('/api/recognition/import',{'path':str(package)})['status'],200)
+        self.assertEqual(lifecycle.import_task(self,'/api/recognition/import',{'path':str(package)})['status'],200)
         def completed():
             with sqlite3.connect(self.lib.db) as c:return c.execute("SELECT count(*) FROM research_runs WHERE status='done'").fetchone()[0]>before
         wait_until(completed,timeout=20)
@@ -288,7 +288,7 @@ Path(sys.argv[2]).write_text(json.dumps(v,allow_nan=False))
             c.execute('DROP TRIGGER fail_dispatch_ack')
         self.mode.write_text('ok');self.stop(self.process);self.restart();self.finished()
         with sqlite3.connect(self.lib.db) as c:count=c.execute('SELECT count(*) FROM research_runs').fetchone()[0]
-        self.assertEqual(self.request('/api/recognition/import',{'path':str(package)})['status'],200)
+        self.assertEqual(lifecycle.import_task(self,'/api/recognition/import',{'path':str(package)})['status'],200)
         with sqlite3.connect(self.lib.db) as c:self.assertEqual(c.execute('SELECT count(*) FROM research_runs').fetchone()[0],count)
 
     def test_worker_missing_dependency_and_frozen_package_preserve_basics(self):

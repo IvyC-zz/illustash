@@ -32,6 +32,8 @@ pub(crate) enum Status {
     Reading,
     /// Research input changed before publication; a fresh snapshot is retried after a delay.
     Waiting,
+    /// Stopped on request (or by a switch or quit) before publishing anything (#88 imports).
+    Cancelled,
 }
 #[derive(Deserialize)]
 struct Header {

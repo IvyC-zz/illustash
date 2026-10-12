@@ -49,7 +49,7 @@
 
 3. **导入 Windows 跑完的大批识别结果**（2026-09-28 **后端已实现，实机链路待验收**）
    - `native/terms/src/app_recognition.rs` 实现 labels / embeddings 结果包，校验图库与资产 ID、模型及 tag 文件指纹、版本、向量维度和文件完整性；事务导入、重复去重、冲突拒绝，输入或写入失败整包回滚。
-   - CLI `illustash-terms recognition-import --library <图库包> --package <结果目录>`，HTTP `POST /api/recognition/import`；没有新增界面。后处理失败记 pending，可用 `--resume` 恢复。
+   - CLI `illustash-terms recognition-import --library <图库包> --package <结果目录>`，HTTP `POST /api/recognition/import`（后台任务，设置页「图库」卡片显示阶段并可取消，#88）；没有新增入口。后处理失败记 pending，可用 `--resume` 恢复。
    - 导入后更新应用索引，通过共享业务事件触发学习与相似检测；不覆盖人工判断。HTTP 的 done 表示已交付后台调度，算法完成状态仍由现有后台任务报告。
    - 协议及事务边界见 [RESULT_PACKAGES.md](RESULT_PACKAGES.md)。目前未交付通用远程算力调度，也未验证 Windows 实机识别/导出链路；跨设备算力节点协议继续保留为后续方向。
 

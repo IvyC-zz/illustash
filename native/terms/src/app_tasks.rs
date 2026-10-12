@@ -276,6 +276,12 @@ impl Task {
         }
         true
     }
+    /// Cancel without waiting any longer: the thread ends by itself at its next checkpoint, which may never come
+    /// for work blocked on input (a pipe nobody writes). Only for quitting, after a bounded `wait`.
+    pub fn abandon(mut self) {
+        self.context.cancel();
+        drop(self.thread.take());
+    }
     pub fn stop(&mut self) {
         self.context.cancel();
         if let Some(t) = self.thread.take() {

@@ -34,6 +34,9 @@ class NativeArchivesTest(unittest.TestCase):
     def state(self):
         return json.loads(self.request('/api/libraries')['body'])['export']
 
+    def archive_import(self, body, **kwargs):
+        return lifecycle.import_task(self, '/api/libraries/import', body, **kwargs)
+
     def begin(self):
         response = self.request('/api/libraries/export', {})
         self.assertEqual(response['status'], 200, response)
@@ -101,7 +104,7 @@ class NativeArchivesTest(unittest.TestCase):
         self.assertEqual(snapshot(self.lib.db), before)
         self.assertEqual(snapshot(self.lib.source), source_before)
         for archive in (exported, legacy):
-            response = self.request('/api/libraries/import', {'path': str(archive)})
+            response = self.archive_import({'path': str(archive)})
             self.assertEqual(response['status'], 200, response)
             path = Path(json.loads(response['body'])['path'])
             self.assertEqual(snapshot(path / 'library.sqlite'), expected)
@@ -154,7 +157,7 @@ class NativeArchivesTest(unittest.TestCase):
                 self.assertEqual((left / rel).read_bytes(), (right / rel).read_bytes(), rel)
         expected_path = library.unique_path(library.HOME, self.lib.name)
         expected_bytes = json.dumps({'path':str(expected_path), 'name':self.lib.name}, ensure_ascii=False).encode()
-        response = self.request('/api/libraries/import', {'path':str(native)})
+        response = self.archive_import({'path':str(native)})
         self.assertEqual(response['status'], 200, response)
         self.assertEqual(response['body'], expected_bytes)
         imported = library.open_library(expected_path)
@@ -189,7 +192,7 @@ class NativeArchivesTest(unittest.TestCase):
         self.assertEqual(dest.read_bytes(), published)
         self.assertEqual(list(dest.parent.glob('.illustash-export-*')), [])
         imports = set(library.HOME.glob('*')) if library.HOME.exists() else set()
-        response = self.request('/api/libraries/import', {'path': str(legacy)})
+        response = self.archive_import({'path': str(legacy)})
         self.assertNotEqual(response['status'], 200, response)
         self.assertEqual(set(library.HOME.glob('*')) if library.HOME.exists() else set(), imports)
         self.assertEqual(snapshot(self.lib.db), before)
@@ -259,7 +262,7 @@ class NativeArchivesTest(unittest.TestCase):
             archive = self.root / f'case-{i}.zip'; archive.write_bytes(data)
             before = set(library.HOME.glob('*')) if library.HOME.exists() else set()
             with self.subTest(i=i):
-                self.assertEqual(self.request('/api/libraries/import', {'path':str(archive)})['status'], self.reference_status('/api/libraries/import', {'path':str(archive)}))
+                self.assertEqual(self.archive_import({'path':str(archive)})['status'], self.reference_status('/api/libraries/import', {'path':str(archive)}))
                 self.assertEqual(set(library.HOME.glob('*')) if library.HOME.exists() else set(), before)
         self.assertFalse((self.root / 'escape').exists())
         self.assertFalse(self.sentinel.exists())
@@ -284,12 +287,12 @@ class NativeArchivesTest(unittest.TestCase):
                     for name, data in content.items():
                         z.writestr(name, data)
                 before, recent = listing(), registry.read_bytes() if registry.exists() else None
-                response = self.request('/api/libraries/import', {'path': str(archive)})
+                response = self.archive_import({'path': str(archive)})
                 self.assertEqual(response['status'], 400, response)
                 self.assertIn('导入的图库无法打开', json.loads(response['body'])['error'])
                 self.assertEqual(listing(), before)
                 self.assertEqual(registry.read_bytes() if registry.exists() else None, recent)
-        imported = self.request('/api/libraries/import', {'path': str(good)})
+        imported = self.archive_import({'path': str(good)})
         self.assertEqual(imported['status'], 200, imported)
         self.assertTrue(Path(json.loads(imported['body'])['path']).is_dir())
         self.assertFalse(self.sentinel.exists())
@@ -322,7 +325,7 @@ class NativeArchivesTest(unittest.TestCase):
         for case, (path, status, message) in cases.items():
             with self.subTest(case):
                 before, recent = listing(), registry.read_bytes() if registry.exists() else None
-                response = self.request('/api/libraries/import', {'path': str(path)})
+                response = self.archive_import({'path': str(path)})
                 if status:
                     self.assertEqual(response['status'], status, response)
                     self.assertIn(message, json.loads(response['body'])['error'])
@@ -330,12 +333,13 @@ class NativeArchivesTest(unittest.TestCase):
                     self.assertGreaterEqual(response['status'], 400, response)
                 self.assertEqual(listing(), before)
                 self.assertEqual(registry.read_bytes() if registry.exists() else None, recent)
-        self.assertEqual(self.request('/api/libraries/import', {'path': str(good)})['status'], 200)
+        self.assertEqual(self.archive_import({'path': str(good)})['status'], 200)
 
-    def test_archive_import_runs_outside_the_session_lock_and_quitting_removes_it(self):
-        # #26: a large, highly compressed features file keeps the import unpacking for a while.
-        size = 256 << 20
-        if shutil.disk_usage(self.root).free < 2 * size + (512 << 20):
+    LARGE = 256 << 20
+
+    def large_archive(self):
+        """A valid export whose features file is LARGE zero bytes, LZMA-compressed: unpacking it takes seconds."""
+        if shutil.disk_usage(self.root).free < 2 * self.LARGE + (512 << 20):
             self.skipTest('not enough free space for the synthetic archive')
         good = library.export_library(self.lib, self.root / 'good.zip')
         archive = self.root / 'large.zip'
@@ -344,25 +348,101 @@ class NativeArchivesTest(unittest.TestCase):
                 if name != 'features/full-features.npy':
                     z.writestr(name, source.read(name))
             with z.open('features/full-features.npy', 'w', force_zip64=True) as out:
-                for _ in range(size >> 20):
+                for _ in range(self.LARGE >> 20):
                     out.write(bytes(1 << 20))
+        with zipfile.ZipFile(archive) as z:
+            declared = sum(info.file_size for info in z.infolist())
+        return archive, declared
+
+    def imports(self):
+        return json.loads(self.request('/api/imports')['body'])
+
+    def test_archive_import_polls_its_real_stages_and_unpacked_bytes(self):
+        # #88: the request answers at once; polling follows the stages in order with the real bytes unpacked.
+        archive, declared = self.large_archive()
+        registry = self.support / 'libraries.json'
+        seen = []
+        response = self.archive_import({'path': str(archive)}, seen=seen, timeout=600)
+        self.assertEqual(response['status'], 200, response)
+        order = ['reading', 'unpacking', 'cleaning', 'checking', 'publishing']
+        stages = [s['stage'] for s in seen if s['status'] == 'running' and 'stage' in s]
+        self.assertEqual(stages, sorted(stages, key=order.index), 'stages only move forward')
+        unpacked = [(s['done'], s['total']) for s in seen if s.get('stage') == 'unpacking' and 'done' in s]
+        self.assertGreaterEqual(len({done for done, _ in unpacked}), 2, 'the unpacked bytes are seen growing')
+        self.assertEqual({total for _, total in unpacked}, {declared})
+        self.assertEqual([done for done, _ in unpacked], sorted(done for done, _ in unpacked))
+        self.assertTrue(all(done <= declared for done, _ in unpacked))
+        end = seen[-1]
+        self.assertEqual((end['status'], end['kind'], end['file']), ('done', 'archive', archive.name))
+        path = Path(end['result']['path'])
+        self.assertEqual((path / 'features' / 'full-features.npy').stat().st_size, self.LARGE)
+        self.assertIn(str(path), registry.read_text())
+
+    def test_archive_import_cancel_switch_and_quit_remove_what_it_unpacked(self):
+        # #88 (#26): the cancel button, a switch and quitting each stop the unpacking within 5 s (quitting: the
+        # process ends within 8 s), remove the new directory and leave the registry alone.
+        archive, _ = self.large_archive()
+        other = self.root / 'other.pilib'
+        shutil.copytree(self.lib.path, other)
+        registry = self.support / 'libraries.json'
+        listing = lambda: set(library.HOME.glob('*')) if library.HOME.exists() else set()
+        for how in ('cancel', 'switch', 'quit'):
+            with self.subTest(how):
+                before, recent = listing(), registry.read_bytes() if registry.exists() else None
+                r = self.request('/api/libraries/import', {'path': str(archive)})
+                self.assertEqual(r['status'], 200, r)
+                task = json.loads(r['body'])['task']
+                wait_until(lambda: self.imports().get('done', 0) > 0, timeout=20)
+                # Reads are answered while it unpacks.
+                started = time.monotonic()
+                self.assertEqual(self.request('/api/bootstrap')['status'], 200)
+                self.assertLess(time.monotonic() - started, 2)
+                started = time.monotonic()
+                if how == 'quit':
+                    self.stop(self.process)
+                    self.assertLess(time.monotonic() - started, 8)
+                    self.process, self.log = self.start(self.lib.path)
+                    self.token = json.loads(self.request('/api/bootstrap')['body'])['token']
+                else:
+                    if how == 'cancel':
+                        self.assertEqual(self.request('/api/imports/cancel', {})['status'], 200)
+                        reason = '导入已取消'
+                    else:
+                        self.assertEqual(self.request('/api/libraries/open', {'path': str(other)})['status'], 200)
+                        reason = '图库已切换，导入已取消'
+                    wait_until(lambda: self.imports()['status'] in lifecycle.IMPORT_ENDED, timeout=10)
+                    self.assertLess(time.monotonic() - started, 5)
+                    end = self.imports()
+                    self.assertEqual((end['id'], end['status'], end['reason'], end['stage']),
+                                     (task['id'], 'cancelled', reason, 'unpacking'), end)
+                    self.assertLess(end['done'], end['total'])
+                    if how == 'switch':
+                        self.token = json.loads(self.request('/api/bootstrap')['body'])['token']
+                        self.assertEqual(self.request('/api/libraries/open', {'path': str(self.lib.path)})['status'], 200)
+                        self.token = json.loads(self.request('/api/bootstrap')['body'])['token']
+                self.assertEqual(listing(), before)
+                if how != 'cancel':  # opening a library (switching, restarting) updates the registry; the import adds nothing
+                    self.assertNotIn(str(library.HOME), registry.read_text())
+                else:
+                    self.assertEqual(registry.read_bytes() if registry.exists() else None, recent)
+
+    def test_damaged_archive_reports_why_and_publishes_nothing(self):
+        good = library.export_library(self.lib, self.root / 'good.zip')
+        with zipfile.ZipFile(good) as z:
+            files = {name: z.read(name) for name in z.namelist()}
+        damaged = self.root / 'damaged.zip'
+        with zipfile.ZipFile(damaged, 'w') as z:
+            for name, data in files.items():
+                z.writestr(name, b'not a database ' * 512 if name == 'source.sqlite' else data)
         registry = self.support / 'libraries.json'
         listing = lambda: set(library.HOME.glob('*')) if library.HOME.exists() else set()
         before, recent = listing(), registry.read_bytes() if registry.exists() else None
-        unpacking = lambda: [p / 'features' / 'full-features.npy' for p in listing() - before
-                             if (p / 'features' / 'full-features.npy').exists()]
-        with ThreadPoolExecutor(max_workers=1) as pool:
-            pending = pool.submit(self.request, '/api/libraries/import', {'path': str(archive)})
-            wait_until(lambda: any(f.stat().st_size for f in unpacking()), timeout=20)
-            started = time.monotonic()
-            self.assertEqual(self.request('/api/bootstrap')['status'], 200)
-            self.assertLess(time.monotonic() - started, 2)
-            # Answered while the features file is still being written.
-            self.assertLess(max(f.stat().st_size for f in unpacking()), size)
-            stopped = time.monotonic()
-            self.stop(self.process)
-            self.assertLess(time.monotonic() - stopped, 8)
-            pending.result(timeout=20)
+        seen = []
+        response = self.archive_import({'path': str(damaged)}, seen=seen)
+        self.assertEqual(response['status'], 400, response)
+        end = seen[-1]
+        self.assertEqual((end['status'], end['code'], end['stage']), ('error', 400, 'checking'), end)
+        self.assertIn('导入的图库无法打开', end['error'])
         self.assertEqual(listing(), before)
         self.assertEqual(registry.read_bytes() if registry.exists() else None, recent)
 
@@ -425,14 +505,14 @@ class NativeArchivesTest(unittest.TestCase):
         legacy = library.import_library(archive, self.root / 'legacy-imports')
         library.HOME.mkdir(parents=True, exist_ok=True)
         taken = library.HOME / (self.lib.name + '.pilib'); taken.write_bytes(b'keep-existing')
-        response = self.request('/api/libraries/import', {'path':str(archive)})
+        response = self.archive_import({'path':str(archive)})
         self.assertEqual(response['status'], 200, response)
         path = Path(json.loads(response['body'])['path'])
         self.assertEqual(path.name, self.lib.name + ' 2.pilib')
         self.assertEqual((path / 'library.json').read_bytes(), (legacy.path / 'library.json').read_bytes())
         self.assertEqual(taken.read_bytes(), b'keep-existing')
         tmp = self.support / 'libraries.tmp'; tmp.mkdir()
-        response = self.request('/api/libraries/import', {'path':str(archive)})
+        response = self.archive_import({'path':str(archive)})
         self.assertEqual(response['status'], 400)
         published = library.HOME / (self.lib.name + ' 3.pilib')
         self.assertEqual((published / 'library.json').read_bytes(), (legacy.path / 'library.json').read_bytes())
@@ -462,7 +542,7 @@ class NativeArchivesTest(unittest.TestCase):
                     for name,data in files.items(): z.writestr(name,data)
                 expected=library.import_library(archive,self.root / 'legacy-compression')
                 path=library.unique_path(library.HOME,self.lib.name)
-                result=self.request('/api/libraries/import',{'path':str(archive)})
+                result=self.archive_import({'path':str(archive)})
                 self.assertEqual(result['status'],200,result)
                 self.assertEqual(result['body'],json.dumps({'path':str(path),'name':self.lib.name},ensure_ascii=False).encode())
                 self.assertEqual((path / 'library.json').read_bytes(),(expected.path / 'library.json').read_bytes())
@@ -475,5 +555,5 @@ class NativeArchivesTest(unittest.TestCase):
                     bad = self.root / 'lzma-crc.zip'; bad.write_bytes(corrupted)
                     before = set(library.HOME.iterdir())
                     body = {'path':str(bad)}
-                    self.assertEqual(self.request('/api/libraries/import',body)['status'],self.reference_status('/api/libraries/import',body))
+                    self.assertEqual(self.archive_import(body)['status'],self.reference_status('/api/libraries/import',body))
                     self.assertEqual(set(library.HOME.iterdir()),before)
