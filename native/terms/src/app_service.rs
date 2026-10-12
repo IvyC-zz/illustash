@@ -4,8 +4,8 @@ use crate::{app_library::Library, Error, Result};
 use std::{
     path::{Path, PathBuf},
     sync::{
-        atomic::{AtomicBool, AtomicU64, Ordering},
-        RwLock,
+        atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
+        Arc, Mutex, RwLock,
     },
 };
 pub(crate) struct Session {
@@ -18,6 +18,42 @@ pub(crate) struct Session {
     pub(crate) index: crate::app_index::Updater,
     pub(crate) auto_sync: bool,
     pub(crate) research: crate::app_research::Research,
+    pub(crate) imports: Imports,
+}
+/// Recognition-result imports run outside the session lock (#26). They still take turns, as they did under the
+/// lock, and closing the session (switching libraries or quitting) cancels the running and the waiting ones.
+#[derive(Default)]
+pub(crate) struct Imports {
+    active: Arc<AtomicUsize>,
+    turn: Arc<Mutex<()>>,
+    cancel: Arc<AtomicBool>,
+}
+impl Imports {
+    /// Counted as active from here, so index and sync starts are refused while it waits or runs.
+    pub(crate) fn admit(&self) -> ImportTicket {
+        self.active.fetch_add(1, Ordering::SeqCst);
+        ImportTicket { active: self.active.clone(), turn: self.turn.clone(), cancel: self.cancel.clone() }
+    }
+    pub(crate) fn running(&self) -> bool {
+        self.active.load(Ordering::SeqCst) > 0
+    }
+}
+pub(crate) struct ImportTicket {
+    active: Arc<AtomicUsize>,
+    turn: Arc<Mutex<()>>,
+    pub(crate) cancel: Arc<AtomicBool>,
+}
+impl ImportTicket {
+    /// Waits for the previous import of this session, then runs with the session's cancel flag.
+    pub(crate) fn run<T>(&self, import: impl FnOnce(&AtomicBool) -> T) -> T {
+        let _turn = self.turn.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        import(&self.cancel)
+    }
+}
+impl Drop for ImportTicket {
+    fn drop(&mut self) {
+        self.active.fetch_sub(1, Ordering::SeqCst);
+    }
 }
 impl Session {
     pub(crate) fn token() -> Result<String> {
@@ -54,13 +90,14 @@ impl Session {
             index,
             auto_sync: true,
             research,
+            imports: Imports::default(),
         })
     }
 }
 pub struct Application {
     pub(crate) session: RwLock<Session>,
     pub(crate) generation: AtomicU64,
-    closed: AtomicBool,
+    closed: Arc<AtomicBool>,
     pub(crate) tags: PathBuf,
     pub(crate) root: PathBuf,
     pub(crate) reference: PathBuf,
@@ -158,6 +195,7 @@ impl Application {
             index,
             auto_sync,
             research,
+            imports: Imports::default(),
         };
         session.syncer.resource_root = root.clone();
         session.syncer.per_run = per_run;
@@ -166,7 +204,7 @@ impl Application {
         Ok(Self {
             session: RwLock::new(session),
             generation: AtomicU64::new(1),
-            closed: AtomicBool::new(false),
+            closed: Arc::default(),
             tags: root.join("tags/tags_v3.csv"),
             root,
             reference,
@@ -270,6 +308,7 @@ impl Application {
 }
 impl Session {
     fn close(&mut self) {
+        self.imports.cancel.store(true, Ordering::SeqCst);
         self.provenance.close();
         self.index.stop();
         self.research.stop();
@@ -351,6 +390,10 @@ impl Application {
     }
     pub(crate) fn current(&self, received: u64) -> bool {
         !self.closed.load(Ordering::SeqCst) && self.generation() == received
+    }
+    /// Set once the application shuts down; long work outside the session lock polls it.
+    pub(crate) fn closing(&self) -> Arc<AtomicBool> {
+        self.closed.clone()
     }
     fn check_open(&self) -> Result<()> {
         if self.closed.load(Ordering::SeqCst) {

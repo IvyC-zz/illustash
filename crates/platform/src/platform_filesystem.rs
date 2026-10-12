@@ -51,9 +51,53 @@ pub fn extension_matches(actual: &[u8], expected: &[u8]) -> bool {
     }
 }
 
+/// Bytes the current user can still write on the volume holding `path` (an existing directory).
+pub fn available_space(path: &Path) -> io::Result<u64> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::ffi::OsStrExt;
+        let path = std::ffi::CString::new(path.as_os_str().as_bytes()).map_err(io::Error::other)?;
+        let mut stat = std::mem::MaybeUninit::<libc::statvfs>::uninit();
+        if unsafe { libc::statvfs(path.as_ptr(), stat.as_mut_ptr()) } != 0 {
+            return Err(io::Error::last_os_error());
+        }
+        let stat = unsafe { stat.assume_init() };
+        #[allow(clippy::unnecessary_cast)] // Field widths differ between Unix platforms.
+        Ok((stat.f_bavail as u64).saturating_mul(stat.f_frsize as u64))
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::ffi::OsStrExt;
+        #[link(name = "kernel32")]
+        extern "system" {
+            fn GetDiskFreeSpaceExW(path: *const u16, available: *mut u64, total: *mut u64, free: *mut u64) -> i32;
+        }
+        let wide: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
+        let mut available = 0u64;
+        if unsafe { GetDiskFreeSpaceExW(wide.as_ptr(), &mut available, std::ptr::null_mut(), std::ptr::null_mut()) }
+            == 0
+        {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(available)
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        let _ = path;
+        Err(io::Error::new(io::ErrorKind::Unsupported, "free space is unknown on this platform"))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn available_space_reports_the_volume_and_rejects_missing_paths() {
+        let here = std::env::temp_dir();
+        assert!(available_space(&here).unwrap() > 0);
+        assert!(available_space(&here.join("illustash-no-such-directory-for-space")).is_err());
+    }
     #[test]
     fn private_permissions_nofollow_and_extension_contract() {
         let root = std::env::temp_dir().join(format!("illustash-platform-fs-{}", crate::store::new_key().unwrap()));
