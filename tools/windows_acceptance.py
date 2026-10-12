@@ -308,8 +308,11 @@ class Acceptance:
             exported = state.get('path') if state.get('status') == 'done' else None
         self.check('导出图库归档', exported and Path(exported).is_file(), r['body'][:200])
         if exported:
+            # #88: the import is a background task; its end is read from GET /api/imports.
             r = self.post(origin, '/api/libraries/import', {'path': exported}, token)
-            self.check('导入图库归档', r['status'] == 200, r['body'][:200])
+            task = lambda: json.loads(self.get(origin, '/api/imports')['body'])
+            ended = r['status'] == 200 and self.wait(lambda: task().get('status') in ('done', 'error', 'cancelled'), 60)
+            self.check('导入图库归档', ended and task().get('status') == 'done', (r['body'] if not ended else json.dumps(task(), ensure_ascii=False).encode())[:200])
         code = self.stop(p)
         self.check('CTRL_BREAK 正常退出', code == 0, str(code))
         self.check('退出后端口释放', self.released(port))

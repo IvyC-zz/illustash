@@ -76,8 +76,11 @@ class NativeRecognitionTest(unittest.TestCase):
     def cli(self, *args):
         return subprocess.run([str(self.binary), 'recognition-import', '--library', str(self.lib.path), '--root', str(self.resources), *args], env=self.env, capture_output=True, timeout=20)
 
+    def recognition_import(self, body, **kwargs):
+        return lifecycle.import_task(self, '/api/recognition/import', body, **kwargs)
+
     def import_result(self, p):
-        r = self.request('/api/recognition/import', {'path': str(p)})
+        r = self.recognition_import({'path': str(p)})
         self.assertEqual(r['status'], 200, r['body'])
         return json.loads(r['body'])
 
@@ -144,7 +147,7 @@ class NativeRecognitionTest(unittest.TestCase):
                     raw=(p/'wd.npy').read_bytes(); raw=raw.replace(b"'fortran_order': False",b"'fortran_order': True ");(p/'wd.npy').write_bytes(raw);m=self.manifest(p)
                 (p/'manifest.json').write_text(json.dumps(m))
                 source=snapshot(self.lib.source); app=snapshot(self.lib.db)
-                r=self.request('/api/recognition/import',{'path':str(p)})
+                r=self.recognition_import({'path':str(p)})
                 self.assertEqual(r['status'],400)
                 self.assertEqual(snapshot(self.lib.source),source)
                 self.assertEqual(snapshot(self.lib.db),app)
@@ -155,13 +158,13 @@ class NativeRecognitionTest(unittest.TestCase):
         with sqlite3.connect(self.lib.source) as c:
             c.execute("CREATE TRIGGER fail BEFORE INSERT ON labels WHEN NEW.uuid='b' AND NEW.source='wd_v3' BEGIN SELECT RAISE(ABORT,'synthetic source failure'); END")
         before=snapshot(self.lib.source)
-        self.assertEqual(self.request('/api/recognition/import',{'path':str(p)})['status'],500)
+        self.assertEqual(self.recognition_import({'path':str(p)})['status'],500)
         self.assertEqual(snapshot(self.lib.source),before)
         with sqlite3.connect(self.lib.source) as c:c.execute('DROP TRIGGER fail')
         result=self.cli('--package',str(p));self.assertEqual(result.returncode,0,result.stderr)
         np.save(p/'wd.npy',np.full((2,1024),2,dtype='<f4'));self.manifest(p)
         before=snapshot(self.lib.source)
-        self.assertEqual(self.request('/api/recognition/import',{'path':str(p)})['status'],400)
+        self.assertEqual(self.recognition_import({'path':str(p)})['status'],400)
         self.assertEqual(snapshot(self.lib.source),before)
         self.assertEqual(json.loads(self.cli('--model-specs').stdout),self.specs)
 
@@ -177,7 +180,7 @@ class NativeRecognitionTest(unittest.TestCase):
         with sqlite3.connect(self.lib.db) as c:c.execute('DROP TRIGGER fail')
         self.stop(self.process);self.process,self.log=self.start(self.lib.path)
         self.token=json.loads(self.request('/api/bootstrap')['body'])['token']
-        self.assertEqual(self.request('/api/recognition/import',{'resume':True})['body'],b'{"status": "done"}')
+        self.assertEqual(self.recognition_import({'resume':True})['body'],b'{"status": "done"}')
         before=snapshot(self.lib.db)
         self.assertEqual(self.cli('--resume').returncode,0)
         self.assertEqual(snapshot(self.lib.db),before)
@@ -187,30 +190,40 @@ class NativeRecognitionTest(unittest.TestCase):
         self.assertEqual(self.import_result(self.incoming())['status'],'pending')
         before=snapshot(self.lib.db)
         with sqlite3.connect(self.lib.db) as c:c.execute('DROP TRIGGER fail')
-        self.assertEqual(json.loads(self.request('/api/recognition/import',{'resume':True})['body']),{'status':'done'})
+        self.assertEqual(json.loads(self.recognition_import({'resume':True})['body']),{'status':'done'})
         after=snapshot(self.lib.db)
         for table in ('term_evidence','term_evidence_sets','term_batches','term_projection','term_verdicts','actions','memberships'):
             self.assertEqual(before[table],after[table],table)
         with sqlite3.connect(self.lib.db) as c:
             self.assertEqual(c.execute("SELECT count(*) FROM backend_effects WHERE kind='imported'").fetchone()[0],1)
 
-    def test_concurrent_duplicate_and_old_session_same_id_package(self):
+    def test_one_import_at_a_time_duplicate_and_old_session_same_id_package(self):
+        # #88: while an import runs (held in its first stage), every other start is refused, whatever its kind.
         p=self.incoming()
+        self.hold_models()
+        task=self.start_held({'path':str(p)})
         with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
-            out=list(pool.map(lambda _:self.import_result(p),range(4)))
-        self.assertEqual(sum(not r['duplicate'] for r in out),1)
+            refused=list(pool.map(lambda body:self.request(*body),[('/api/recognition/import',{'path':str(p)})]*3+[('/api/libraries/import',{'path':str(self.root/'synthetic.zip')})]))
+        for r in refused:
+            self.assertEqual(r['status'],400,r)
+            self.assertIn('已有导入正在进行',json.loads(r['body'])['error'])
+        self.assertEqual(self.request('/api/imports/cancel',{})['status'],200)
+        self.assertEqual(self.ended(task)['status'],'cancelled')
+        self.release_models()
+        out=[self.import_result(p) for _ in range(2)]
+        self.assertEqual([r['duplicate'] for r in out],[False,True])
         old_token=self.token
         other=self.root/'other.pilib';shutil.copytree(self.lib.path,other)
         self.assertEqual(self.request('/api/libraries/open',{'path':str(other)})['status'],200)
         before=snapshot(other/'source.sqlite')
-        self.assertEqual(self.request('/api/recognition/import',{'path':str(p)},token=old_token)['status'],403)
+        self.assertEqual(self.recognition_import({'path':str(p)},token=old_token)['status'],403)
         self.assertEqual(snapshot(other/'source.sqlite'),before)
 
     def test_source_done_confirmation_failure_retries_only_confirmation(self):
         with sqlite3.connect(self.lib.source) as c:
             c.executescript(SCHEMA)
             c.execute("CREATE TRIGGER fail BEFORE UPDATE ON recognition_imports WHEN NEW.status='done' BEGIN SELECT RAISE(ABORT,'synthetic confirmation failure'); END")
-        self.assertEqual(self.request('/api/recognition/import',{'path':str(self.incoming())})['status'],500)
+        self.assertEqual(self.recognition_import({'path':str(self.incoming())})['status'],500)
         before=snapshot(self.lib.db)
         with sqlite3.connect(self.lib.source) as c:
             self.assertEqual(c.execute('SELECT status FROM recognition_imports').fetchone()[0],'pending')
@@ -226,8 +239,105 @@ class NativeRecognitionTest(unittest.TestCase):
         self.token=json.loads(self.request('/api/bootstrap')['body'])['token']
         before=snapshot(self.lib.source)
         for body in ({'path':str(self.incoming())},{'resume':True}):
-            self.assertEqual(self.request('/api/recognition/import',body)['status'],409)
+            self.assertEqual(self.recognition_import(body)['status'],409)
         self.assertEqual(snapshot(self.lib.source),before)
+
+    # #88: a 64 GiB sparse WD model keeps an import fingerprinting it (SHA-256 of zeros) far longer than any step
+    # below, on every platform, without a pipe or a test hook; nothing on disk is allocated for it.
+    HELD = 64 << 30
+
+    def hold_models(self):
+        sparse(self.resources / 'models' / 'wd_swinv2_v3_emb.onnx', self.HELD)
+
+    def release_models(self):
+        (self.resources / 'models' / 'wd_swinv2_v3_emb.onnx').write_bytes(b'synthetic WD')
+
+    def start_held(self, body):
+        r = self.request('/api/recognition/import', body)
+        self.assertEqual(r['status'], 200, r)
+        task = json.loads(r['body'])['task']
+        self.assertEqual((task['status'], task['kind']), ('running', 'recognition'), task)
+        lifecycle.wait_until(lambda: self.imports().get('stage') == 'models', timeout=10)
+        return task
+
+    def imports(self):
+        return json.loads(self.request('/api/imports')['body'])
+
+    def ended(self, task, within=5):
+        """The task's final state, which must arrive within `within` seconds."""
+        started = time.monotonic()
+        lifecycle.wait_until(lambda: self.imports()['status'] in lifecycle.IMPORT_ENDED, timeout=within + 5)
+        self.assertLess(time.monotonic() - started, within)
+        state = self.imports()
+        self.assertEqual(state['id'], task['id'])
+        return state
+
+    def test_cancel_switch_and_quit_stop_an_import_before_it_commits(self):
+        # #88 (and the #26 Windows gap): the cancel button, a switch and quitting each stop a running recognition
+        # import within 5 s, before its source transaction; the library is byte-for-byte as before.
+        p = self.incoming()
+        other = self.root / 'other.pilib'
+        shutil.copytree(self.lib.path, other)
+        for how in ('cancel', 'switch', 'quit'):
+            with self.subTest(how):
+                self.hold_models()
+                source, app = snapshot(self.lib.source), snapshot(self.lib.db)
+                task = self.start_held({'path': str(p)})
+                running = self.imports()
+                self.assertEqual((running['status'], running['file']), ('running', p.name))
+                self.assertNotIn('done', running)
+                if how == 'cancel':
+                    # While it runs: reads answer, sync and index writes wait for it.
+                    refused = self.request('/api/sync', {})
+                    self.assertEqual(refused['status'], 400, refused)
+                    self.assertIn('识别结果正在导入', json.loads(refused['body'])['error'])
+                    r = self.request('/api/imports/cancel', {})
+                    self.assertEqual(r['status'], 200, r)
+                    self.assertIn(json.loads(r['body'])['status'], ('stopping', 'cancelled'))
+                    end = self.ended(task)
+                    self.assertEqual((end['status'], end['reason'], end['stage']), ('cancelled', '导入已取消', 'models'))
+                elif how == 'switch':
+                    started = time.monotonic()
+                    opened = self.request('/api/libraries/open', {'path': str(other)})
+                    self.assertEqual(opened['status'], 200, opened)
+                    self.assertLess(time.monotonic() - started, 5)
+                    end = self.ended(task)
+                    self.assertEqual((end['status'], end['reason']), ('cancelled', '图库已切换，导入已取消'))
+                    self.token = json.loads(self.request('/api/bootstrap')['body'])['token']
+                    self.assertEqual(self.request('/api/libraries/open', {'path': str(self.lib.path)})['status'], 200)
+                    self.token = json.loads(self.request('/api/bootstrap')['body'])['token']
+                else:
+                    started = time.monotonic()
+                    self.stop(self.process)
+                    self.assertLess(time.monotonic() - started, 8)
+                    self.assertEqual(self.process.returncode, 0)
+                    self.process, self.log = self.start(self.lib.path)
+                    self.token = json.loads(self.request('/api/bootstrap')['body'])['token']
+                    self.assertEqual(self.imports(), {'status': 'idle'})
+                self.assertEqual(snapshot(self.lib.source), source)
+                self.assertEqual(snapshot(self.lib.db), app)
+        # Nothing was committed by the stopped imports: the first complete one is not a duplicate.
+        self.release_models()
+        self.assertFalse(self.import_result(p)['duplicate'])
+
+    def test_polling_shows_the_running_stage_and_a_failure_names_its_cause(self):
+        p = self.incoming()
+        self.hold_models()
+        task = self.start_held({'path': str(p)})
+        seen = self.imports()
+        self.assertEqual({k: seen[k] for k in ('status', 'kind', 'id', 'file', 'stage')},
+                         {'status': 'running', 'kind': 'recognition', 'id': task['id'], 'file': p.name, 'stage': 'models'})
+        self.request('/api/imports/cancel', {})
+        self.ended(task)
+        self.release_models()
+        # A package whose checksum does not match fails in its reading stage, says why, and writes nothing.
+        (p / 'wd.npy').write_bytes(b'damaged')
+        source = snapshot(self.lib.source)
+        r = self.request('/api/recognition/import', {'path': str(p)})
+        end = self.ended(json.loads(r['body'])['task'])
+        self.assertEqual((end['status'], end['code'], end['stage']), ('error', 400, 'reading'), end)
+        self.assertIn('识别结果包不合法', end['error'])
+        self.assertEqual(snapshot(self.lib.source), source)
 
     @unittest.skipUnless(hasattr(os, 'mkfifo'), 'a FIFO holds the import open; POSIX only')
     def test_import_runs_outside_the_session_lock_and_a_switch_cancels_it(self):
@@ -239,31 +349,67 @@ class NativeRecognitionTest(unittest.TestCase):
         before = snapshot(self.lib.source)
         other = self.root / 'other.pilib'
         shutil.copytree(self.lib.path, other)
-        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-            pending = pool.submit(self.request, '/api/recognition/import', {'path': str(p)})
-            deadline = time.monotonic() + 10
-            while True:  # opening the write end succeeds once the import has the FIFO open for reading
-                try:
-                    writer = os.open(model, os.O_WRONLY | os.O_NONBLOCK)
-                    break
-                except OSError:
-                    self.assertLess(time.monotonic(), deadline, 'import never reached the model files')
-                    time.sleep(0.01)
-            self.addCleanup(lambda: os.close(writer) if writer is not None else None)
-            started = time.monotonic()
-            self.assertEqual(self.request('/api/bootstrap')['status'], 200)
-            refused = self.request('/api/sync', {})
-            self.assertEqual(refused['status'], 400, refused)
-            self.assertIn('识别结果正在导入', json.loads(refused['body'])['error'])
-            opened = self.request('/api/libraries/open', {'path': str(other)})
-            self.assertEqual(opened['status'], 200, opened)
-            self.assertLess(time.monotonic() - started, 5)
-            self.assertFalse(pending.done())
-            os.set_blocking(writer, True)
-            os.write(writer, b'synthetic WD')
-            os.close(writer)
-            writer = None
-            response = pending.result(timeout=20)
-        self.assertEqual(response['status'], 409, response)
-        self.assertIn('导入已取消', json.loads(response['body'])['error'])
+        started = self.request('/api/recognition/import', {'path': str(p)})
+        self.assertEqual(started['status'], 200, started)
+        task = json.loads(started['body'])['task']
+        deadline = time.monotonic() + 10
+        while True:  # opening the write end succeeds once the import has the FIFO open for reading
+            try:
+                writer = os.open(model, os.O_WRONLY | os.O_NONBLOCK)
+                break
+            except OSError:
+                self.assertLess(time.monotonic() - deadline, 0, 'import never reached the model files')
+                time.sleep(0.01)
+        self.addCleanup(lambda: os.close(writer) if writer is not None else None)
+        started = time.monotonic()
+        self.assertEqual(self.request('/api/bootstrap')['status'], 200)
+        refused = self.request('/api/sync', {})
+        self.assertEqual(refused['status'], 400, refused)
+        self.assertIn('识别结果正在导入', json.loads(refused['body'])['error'])
+        opened = self.request('/api/libraries/open', {'path': str(other)})
+        self.assertEqual(opened['status'], 200, opened)
+        self.assertLess(time.monotonic() - started, 5)
+        # Blocked in a read, the import cannot have stopped yet: it is reported as stopping, not as running.
+        self.assertEqual(self.imports()['status'], 'stopping')
+        os.set_blocking(writer, True)
+        os.write(writer, b'synthetic WD')
+        os.close(writer)
+        writer = None
+        end = self.ended(task, within=20)
+        self.assertEqual((end['status'], end['reason']), ('cancelled', '图库已切换，导入已取消'))
         self.assertEqual(snapshot(self.lib.source), before)
+
+
+def sparse(path, size):
+    """A file of `size` zero bytes with nothing allocated (NTFS needs the sparse flag first; SetEndOfFile, unlike
+    the C runtime's resize, does not write the zeros)."""
+    path.unlink(missing_ok=True)
+    with open(path, 'wb') as f:
+        if os.name != 'nt':
+            f.truncate(size)
+            return
+        import ctypes
+        import msvcrt
+        from ctypes import wintypes
+        kernel32 = ctypes.WinDLL('kernel32', use_last_error=True)
+        kernel32.DeviceIoControl.argtypes = [wintypes.HANDLE, wintypes.DWORD, wintypes.LPVOID, wintypes.DWORD,
+                                             wintypes.LPVOID, wintypes.DWORD, ctypes.POINTER(wintypes.DWORD), wintypes.LPVOID]
+        kernel32.SetFilePointerEx.argtypes = [wintypes.HANDLE, ctypes.c_longlong, ctypes.POINTER(ctypes.c_longlong), wintypes.DWORD]
+        kernel32.SetEndOfFile.argtypes = [wintypes.HANDLE]
+        handle = wintypes.HANDLE(msvcrt.get_osfhandle(f.fileno()))
+        returned = wintypes.DWORD()
+        if not kernel32.DeviceIoControl(handle, 0x900C4, None, 0, None, 0, ctypes.byref(returned), None):  # FSCTL_SET_SPARSE
+            raise ctypes.WinError(ctypes.get_last_error())
+        if not kernel32.SetFilePointerEx(handle, size, None, 0) or not kernel32.SetEndOfFile(handle):
+            raise ctypes.WinError(ctypes.get_last_error())
+    if os.name == 'nt':  # never fill the disk: the file must really be sparse
+        kernel32.GetCompressedFileSizeW.argtypes = [wintypes.LPCWSTR, ctypes.POINTER(wintypes.DWORD)]
+        kernel32.GetCompressedFileSizeW.restype = wintypes.DWORD
+        high = wintypes.DWORD()
+        low = kernel32.GetCompressedFileSizeW(str(path), ctypes.byref(high))
+        allocated = (high.value << 32) | low
+    else:
+        allocated = os.stat(path).st_blocks * 512
+    if allocated > 1 << 20:
+        path.unlink()
+        raise unittest.SkipTest(f'this file system allocated {allocated} bytes for a sparse file')

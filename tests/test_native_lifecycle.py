@@ -60,6 +60,38 @@ def dump(db):
         return sorted(c.iterdump())
 
 
+IMPORT_ENDED = ('done', 'error', 'cancelled')
+
+
+def import_task(test, url, body, *, token=None, timeout=60, seen=None):
+    """#88: archive and recognition imports are background tasks. Start one, poll GET /api/imports until it
+    ends, and answer as the former synchronous request did: the start's own refusal, 200 and the result, the
+    error status and message, or 409 when it was cancelled. `seen` collects every state polled."""
+    started = test.request(url, body, token=token)
+    if started['status'] != 200:
+        return started
+    task = json.loads(started['body'])['task']
+    test.assertEqual(task['status'], 'running', task)
+    state = task
+
+    def ended():
+        nonlocal state
+        state = json.loads(test.request('/api/imports')['body'])
+        test.assertEqual(state.get('id'), task['id'], state)
+        if seen is not None:
+            seen.append(state)
+        return state['status'] in IMPORT_ENDED
+
+    wait_until(ended, timeout=timeout)
+    if state['status'] == 'done':
+        payload, status = state['result'], 200
+    elif state['status'] == 'cancelled':
+        payload, status = {'error': state['reason']}, 409
+    else:
+        payload, status = {'error': state['error']}, state['code']
+    return {**started, 'status': status, 'body': json.dumps(payload, ensure_ascii=False).encode()}
+
+
 STARTUP_DEFAULT = {'sync': True, 'similar': True, 'index_check': True, 'names': True, 'provenance': True,
                    'local_limit': 3000}
 

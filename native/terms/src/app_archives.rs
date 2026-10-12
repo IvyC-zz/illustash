@@ -230,6 +230,7 @@ struct CheckedWriter<'a, W> {
     crc: crc32fast::Hasher,
     bytes: u64,
     cancel: &'a AtomicBool,
+    written: &'a dyn Fn(u64),
 }
 impl<W: Write> Write for CheckedWriter<'_, W> {
     fn write(&mut self, data: &[u8]) -> std::io::Result<usize> {
@@ -239,6 +240,7 @@ impl<W: Write> Write for CheckedWriter<'_, W> {
         let n = self.output.write(data)?;
         self.crc.update(&data[..n]);
         self.bytes += n as u64;
+        (self.written)(n as u64);
         Ok(n)
     }
     fn flush(&mut self) -> std::io::Result<()> {
@@ -246,12 +248,14 @@ impl<W: Write> Write for CheckedWriter<'_, W> {
     }
 }
 /// Streams one entry, writing no more than the size it declares (the import's space check counts on that).
+/// `written` hears every block written, for the progress the page polls.
 fn unpack<W: Write>(
     zip: &mut ZipArchive<BufReader<File>>,
     name: &str,
     mut output: W,
     buffer: &mut [u8],
     cancel: &AtomicBool,
+    written: &dyn Fn(u64),
 ) -> Result<()> {
     let index = zip.index_for_name(name).ok_or_else(|| invalid("缺少归档内容"))?;
     let mut raw = zip.by_index_raw(index).map_err(zip_failure)?;
@@ -268,7 +272,7 @@ fn unpack<W: Write>(
         raw.read_exact(&mut header[..5]).map_err(zip_read_failure)?;
         header[5..].copy_from_slice(&size.to_le_bytes());
         let mut input = BufReader::with_capacity(65536, std::io::Cursor::new(header).chain(raw));
-        let mut checked = CheckedWriter { output, crc: crc32fast::Hasher::new(), bytes: 0, cancel };
+        let mut checked = CheckedWriter { output, crc: crc32fast::Hasher::new(), bytes: 0, cancel, written };
         let decoded = lzma_rs::lzma_decompress(&mut input, &mut checked);
         import_cancelled(cancel)?;
         decoded.map_err(|error| Error::Io(std::io::Error::other(error)))?;
@@ -279,24 +283,32 @@ fn unpack<W: Write>(
         let size = raw.size();
         drop(raw);
         let mut source = zip.by_name(name).map_err(zip_failure)?;
-        let mut written = 0u64;
+        let mut emitted = 0u64;
         loop {
             import_cancelled(cancel)?;
             let n = source.read(buffer).map_err(zip_read_failure)?;
             if n == 0 {
                 break;
             }
-            written += n as u64;
-            if written > size {
+            emitted += n as u64;
+            if emitted > size {
                 return Err(Error::Io(std::io::Error::other("归档内容比声明的大小更大")));
             }
             output.write_all(&buffer[..n]).map_err(invalid)?;
+            written(n as u64);
         }
     }
     Ok(())
 }
-/// `cancel` is the application's closing flag: an import interrupted by quitting removes what it unpacked.
-pub(crate) fn import(archive: &Path, cancel: &Arc<AtomicBool>) -> Result<(PathBuf, String)> {
+/// Runs as a background task (#88): `cancel` is set by the cancel button, a switch or quitting, and an import
+/// stopped before publication removes what it unpacked. `observer` hears the stages and the bytes unpacked; the
+/// new directory is kept only through its publication point.
+pub(crate) fn import(
+    archive: &Path,
+    cancel: &Arc<AtomicBool>,
+    observer: &dyn crate::app_imports::Observer,
+) -> Result<(PathBuf, String)> {
+    observer.stage("reading");
     let mut zip = ZipArchive::new(BufReader::with_capacity(1 << 20, File::open(archive).map_err(invalid)?))
         .map_err(zip_failure)?;
     let mut names = std::collections::BTreeSet::new();
@@ -326,7 +338,7 @@ pub(crate) fn import(archive: &Path, cancel: &Arc<AtomicBool>) -> Result<(PathBu
     let mut buffer = vec![0u8; 1 << 20];
     let config_text = {
         let mut bytes = Vec::new();
-        unpack(&mut zip, "library.json", &mut bytes, &mut buffer, cancel)?;
+        unpack(&mut zip, "library.json", &mut bytes, &mut buffer, cancel, &|_| ())?;
         String::from_utf8(bytes).map_err(invalid)?
     };
     let value: serde_json::Value = serde_json::from_str(&config_text).map_err(invalid)?;
@@ -369,6 +381,13 @@ pub(crate) fn import(archive: &Path, cancel: &Arc<AtomicBool>) -> Result<(PathBu
     import_cancelled(cancel)?;
     fs::create_dir(&path).map_err(invalid)?;
     let mut cleanup = Stage(path.clone(), false);
+    observer.stage("unpacking");
+    observer.count(0, declared);
+    let unpacked = std::cell::Cell::new(0u64);
+    let written = |n: u64| {
+        unpacked.set(unpacked.get() + n);
+        observer.count(unpacked.get(), declared);
+    };
     for name in names {
         let out = path.join(&name);
         fs::create_dir_all(out.parent().expect("internal file path must have a parent")).map_err(invalid)?;
@@ -376,12 +395,13 @@ pub(crate) fn import(archive: &Path, cancel: &Arc<AtomicBool>) -> Result<(PathBu
             1 << 20,
             OpenOptions::new().write(true).create_new(true).open(out).map_err(invalid)?,
         );
-        unpack(&mut zip, &name, &mut file, &mut buffer, cancel)?;
+        unpack(&mut zip, &name, &mut file, &mut buffer, cancel, &written)?;
         file.flush().map_err(invalid)?;
     }
     // Old exports can still contain credentials and the sender's lasting consent.
     // Strip them before publishing or registering this newly created package.
     let database = path.join("library.sqlite");
+    observer.stage("cleaning");
     if database.try_exists()? {
         sanitize_database(&database, Some(cancel.clone())).map_err(|e| match import_cancelled(cancel) {
             Err(stop) => stop,
@@ -398,13 +418,21 @@ pub(crate) fn import(archive: &Path, cancel: &Arc<AtomicBool>) -> Result<(PathBu
         ),
     );
     crate::app_settings::write_config(&path, &config).map_err(invalid)?;
+    observer.stage("checking");
     // Publish only a package that opens: a damaged database or an incomplete configuration is refused here and
     // the new directory removed, instead of registering a library that then fails to open.
     if fmt_is_current(&fmt) {
         opens(&path).map_err(|e| invalid(format!("导入的图库无法打开，已取消导入：{e}")))?;
     }
     import_cancelled(cancel)?;
-    cleanup.1 = true;
+    observer.stage("publishing");
+    // The publication point: a cancellation that came first keeps the new directory out; one that comes during
+    // it waits, and the import then counts as done.
+    observer.publish(&mut || {
+        import_cancelled(cancel)?;
+        cleanup.1 = true;
+        Ok(())
+    })?;
     Ok((path, name))
 }
 /// The archive declares the current package format (older ones keep their explicit upgrade path).
@@ -632,7 +660,7 @@ mod tests {
         let raw = fs::read(&path).unwrap();
         let needle: &[u8] = b"features\\full-features.npy";
         assert!(raw.windows(needle.len()).any(|w| w == needle), "fixture must keep the backslash");
-        let error = import(&path, &Arc::default()).unwrap_err().to_string();
+        let error = import(&path, &Arc::default(), &crate::app_imports::Silent).unwrap_err().to_string();
         fs::remove_file(&path).unwrap();
         assert!(error.contains("不认识的内容"), "{error}");
     }

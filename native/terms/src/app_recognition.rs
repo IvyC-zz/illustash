@@ -1,4 +1,5 @@
 //! 离线识别 v1：验证后源事务提交；应用投影与 imported 事件可独立重试。
+use crate::app_imports::{Observer, Silent};
 use crate::{app_library::Library, Error, Result};
 use rusqlite::{params, Connection, OpenFlags, OptionalExtension, TransactionBehavior};
 use serde_json::{json, Value};
@@ -171,10 +172,17 @@ struct Package {
     wd: Vec<u8>,
     ccip: Vec<u8>,
 }
-fn validate(path: &Path, library: &Library, root: &Path, cancel: &AtomicBool) -> Result<Package> {
+fn validate(
+    path: &Path,
+    library: &Library,
+    root: &Path,
+    cancel: &AtomicBool,
+    observer: &dyn Observer,
+) -> Result<Package> {
+    observer.stage("models");
     let specs =
         crate::recognition_compute::models::ModelFiles::resolve(root)?.specs(&|| crate::app_sync::check(cancel))?;
-    validate_against(path, library, root, &specs, cancel)
+    validate_against(path, library, root, &specs, cancel, observer)
 }
 fn validate_against(
     path: &Path,
@@ -182,7 +190,9 @@ fn validate_against(
     root: &Path,
     specs: &Value,
     cancel: &AtomicBool,
+    observer: &dyn Observer,
 ) -> Result<Package> {
+    observer.stage("reading");
     crate::app_sync::check(cancel)?;
     let m = crate::strict_json::parse(
         std::str::from_utf8(&file(&path.join("manifest.json"), 4 * 1024 * 1024)?).map_err(|_| invalid())?,
@@ -203,7 +213,8 @@ fn validate_against(
         return Err(invalid());
     }
     let mut payload = HashMap::new();
-    for name in ["labels.jsonl", "wd.npy", "ccip.npy"] {
+    for (read, name) in ["labels.jsonl", "wd.npy", "ccip.npy"].into_iter().enumerate() {
+        observer.count(read as u64, 3);
         crate::app_sync::check(cancel)?;
         let raw = file(&path.join(name), 1024 * 1024 * 1024)?;
         if m["files"][name] != json!({"bytes":raw.len(),"sha256":sha(&raw)}) {
@@ -211,6 +222,7 @@ fn validate_against(
         }
         payload.insert(name, raw);
     }
+    observer.stage("verifying");
     let wd = vectors_checked(
         payload.remove("wd.npy").expect("app_recognition internal invariant"),
         ids.len(),
@@ -281,7 +293,18 @@ pub fn import_package(
     cancel: &AtomicBool,
     dispatch: &dyn Fn(&Library, &str) -> Result<()>,
 ) -> Result<Value> {
-    import_internal(library, path, root, cancel, dispatch, None)
+    import_internal(library, path, root, cancel, dispatch, None, &Silent)
+}
+/// `import_package` that reports its stages and publishes its source transaction through `observer` (#88).
+pub(crate) fn import_package_observed(
+    library: &Library,
+    path: &Path,
+    root: &Path,
+    cancel: &AtomicBool,
+    dispatch: &dyn Fn(&Library, &str) -> Result<()>,
+    observer: &dyn Observer,
+) -> Result<Value> {
+    import_internal(library, path, root, cancel, dispatch, None, observer)
 }
 /// Owned only by one recognition task; build before taking TaskContext::receive.
 pub(crate) struct WorkerInputs {
@@ -327,7 +350,7 @@ pub(crate) fn prepare_worker_package(
     if inputs.identity.library_id != library.id() || inputs.identity.package != library.instance_path() {
         return Err(invalid());
     }
-    let pkg = validate_against(path, library, &inputs.root, &inputs.models, cancel)?;
+    let pkg = validate_against(path, library, &inputs.root, &inputs.models, cancel, &Silent)?;
     let bytes = file(sidecar, 4 * 1024 * 1024)?;
     let value =
         crate::strict_json::parse(std::str::from_utf8(&bytes).map_err(|_| invalid())?).map_err(Error::Invalid)?;
@@ -353,7 +376,7 @@ pub(crate) fn import_worker_package(
     if inputs.identity.library_id != library.id() || inputs.identity.package != library.instance_path() {
         return Err(invalid());
     }
-    import_internal(library, &prepared.package, &inputs.root, cancel, dispatch, Some((prepared, inputs)))
+    import_internal(library, &prepared.package, &inputs.root, cancel, dispatch, Some((prepared, inputs)), &Silent)
 }
 fn import_internal(
     library: &Library,
@@ -362,19 +385,21 @@ fn import_internal(
     cancel: &AtomicBool,
     dispatch: &dyn Fn(&Library, &str) -> Result<()>,
     claims: Option<(&PreparedWorkerPackage, &WorkerInputs)>,
+    observer: &dyn Observer,
 ) -> Result<Value> {
     if library.frozen() {
         return Err(Error::Conflict("图库只读".into()));
     }
     let mut pkg = if let Some((prepared, inputs)) = claims {
-        let pkg = validate_against(path, library, root, &inputs.models, cancel)?;
+        let pkg = validate_against(path, library, root, &inputs.models, cancel, observer)?;
         if pkg.digest != prepared.digest {
             return Err(invalid());
         }
         pkg
     } else {
-        validate(path, library, root, cancel)?
+        validate(path, library, root, cancel, observer)?
     };
+    observer.stage("writing");
     let mut c = writer(&library.source())?;
     let tx = c.transaction_with_behavior(TransactionBehavior::Immediate)?;
     // Source lease freezes authoritative role metadata. Recheck bytes/identity/version,
@@ -436,6 +461,7 @@ fn import_internal(
     if !duplicate {
         let mut added = Vec::new();
         for (i, u) in pkg.ids.iter().enumerate() {
+            observer.count(i as u64, pkg.ids.len() as u64);
             crate::app_sync::check(cancel)?;
             let wd = &pkg.wd[i * 1024 * 4..(i + 1) * 1024 * 4];
             let ccip = &pkg.ccip[i * 768 * 4..(i + 1) * 768 * 4];
@@ -496,9 +522,15 @@ fn import_internal(
             ],
         )?;
     }
+    observer.stage("committing");
     crate::app_sync::check(cancel)?;
-    tx.commit()?;
+    // The publication point: nothing reaches the library unless this commit runs, and it runs only if no
+    // cancellation came first. A cancellation arriving during it waits; the projection below then pauses as pending.
+    let mut tx = Some(tx);
+    observer.publish(&mut || Ok(tx.take().expect("the source transaction is published once").commit()?))?;
+    drop(tx);
     drop(c);
+    observer.stage("projecting");
     let mut result = resume(library, cancel, dispatch)?;
     result["digest"] = json!(pkg.digest);
     result["duplicate"] = json!(duplicate);

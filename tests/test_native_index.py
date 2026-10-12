@@ -340,7 +340,7 @@ class NativeIndexTest(unittest.TestCase):
         for k in ('characters','character_aliases','labels'):self.assertEqual(snapshot(self.lib.source)[k],before[k])
         self.stop(self.process);(self.lib.path/'index-job.json').unlink();self.env.pop('ILLUSTASH_INDEX_WORKER');self.env.pop('ILLUSTASH_INDEX_TIMEOUT_MS');self.restart()
         self.assertEqual(self.request('/api/index',{'action':'apply','tags':['carol_example']})['status'],400)
-        self.assertEqual(self.request('/api/recognition/import',{'resume':True})['status'],200)
+        self.assertEqual(lifecycle.import_task(self,'/api/recognition/import',{'resume':True})['status'],200)
         # No external request is made: the network gate rejects before contacting a host.
         self.stop(self.process);self.env.pop('ILLUSTASH_COPYRIGHT_BASE');self.restart()
         r=self.request('/api/index',{'action':'check'});self.assertEqual(r['status'],400,r['body'])
