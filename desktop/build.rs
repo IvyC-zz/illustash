@@ -5,7 +5,8 @@ fn main() {
     // Only the Pixiv window (www.pixiv.net) may call pixiv_reply (capabilities/pixiv.json); only the main window's
     // local start page may call the start page commands (capabilities/main.json).
     const COMMANDS: &[&str] =
-        &["pixiv_reply", "welcome_pick", "welcome_open", "welcome_create", "startup_choose", "startup_retry"];
+        &["pixiv_reply", "welcome_pick", "welcome_open", "welcome_create", "welcome_inspect", "welcome_import",
+          "welcome_import_status", "welcome_import_cancel", "startup_choose", "startup_retry"];
     tauri_build::try_build(tauri_build::Attributes::new().app_manifest(tauri_build::AppManifest::new().commands(COMMANDS)))
         .expect("tauri build");
 }

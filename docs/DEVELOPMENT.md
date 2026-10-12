@@ -11,7 +11,7 @@
 | 形态 | 入口 | 要点 |
 |---|---|---|
 | 本地 Web | `./start-web.command --library /路径/图库.pilib` | macOS 可双击；省略 `--library` 打开最近登记的图库；默认 `http://127.0.0.1:8765`，终端 Ctrl+C 停止 |
-| 桌面 App | `desktop/`（Tauri 外壳） | 没有能打开的图库时显示欢迎页，可在界面里新建；承载 Pixiv 登录窗口 |
+| 桌面 App | `desktop/`（Tauri 外壳） | 没有能打开的图库时显示欢迎页，可在界面里新建、打开或从导出包导入；承载 Pixiv 登录窗口 |
 | 安装包 | `python3 packaging/build.py --output OUT` | 基础版只含核心、静态界面与标签表；`--research` 追加四类原生计算适配器 |
 
 ### 快速开始

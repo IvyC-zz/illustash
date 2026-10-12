@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-welcome-import-status"
+description = "Enables the welcome_import_status command without any pre-configured scope."
+commands.allow = ["welcome_import_status"]
+
+[[permission]]
+identifier = "deny-welcome-import-status"
+description = "Denies the welcome_import_status command without any pre-configured scope."
+commands.deny = ["welcome_import_status"]

@@ -8,6 +8,10 @@
     "allow-welcome-pick",
     "allow-welcome-open",
     "allow-welcome-create",
+    "allow-welcome-inspect",
+    "allow-welcome-import",
+    "allow-welcome-import-status",
+    "allow-welcome-import-cancel",
     "allow-startup-choose",
     "allow-startup-retry"
   ]
