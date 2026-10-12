@@ -12,7 +12,9 @@ use std::{
     time::{Duration, UNIX_EPOCH},
 };
 
-const KEYS: [&str; 6] = ["sync", "similar", "index_check", "names", "provenance", "local_limit"];
+const KEYS: [&str; 5] = ["sync", "similar", "index_check", "names", "provenance"];
+/// Removed preferences (#100: the local recognition limit). A stored value is ignored and dropped on the next save.
+const REMOVED: [&str; 1] = ["local_limit"];
 
 // Persisted settings retain Python dict insertion order. Scalar encoding reuses the persistence serializer;
 // HTTP's ordered representation is only constructed for responses, never used to serialize stored preferences.
@@ -200,7 +202,7 @@ fn connection(lib: &Library, write: bool) -> Result<Connection> {
 fn load_startup(conn: &Connection) -> Result<SettingValue> {
     let mut result = SettingValue::object();
     for key in KEYS {
-        result.set(key.into(), SettingValue::Scalar(if key == "local_limit" { 3000.into() } else { true.into() }));
+        result.set(key.into(), SettingValue::Scalar(true.into()));
     }
     let stored: Option<String> =
         conn.query_row("SELECT value FROM prefs WHERE key='startup'", [], |r| r.get(0)).optional()?;
@@ -211,7 +213,9 @@ fn load_startup(conn: &Connection) -> Result<SettingValue> {
             return Err(Error::Invalid("无效 startup 设置".into()));
         };
         for (key, value) in fields {
-            result.set(key, value);
+            if !REMOVED.contains(&key.as_str()) {
+                result.set(key, value);
+            }
         }
     }
     Ok(result)
@@ -231,15 +235,7 @@ pub(crate) fn set_startup_json(lib: &Library, body: &str) -> Result<()> {
     }
     let mut validated = Vec::new();
     for (key, value) in changes {
-        let value = if key == "local_limit" {
-            let number = match value {
-                Json::Integer(v) => v.parse::<i64>().ok(),
-                Json::Scalar(v) => v.as_i64(),
-                _ => None,
-            }
-            .filter(|v| (100..=100000).contains(v));
-            number.ok_or_else(|| Error::Invalid("本机识别上限要在 100–100,000 张之间".into()))?.into()
-        } else if let Json::Scalar(value @ Value::Bool(_)) = value {
+        let value = if let Json::Scalar(value @ Value::Bool(_)) = value {
             value
         } else {
             return Err(Error::Invalid("开关取值不正确".into()));
@@ -476,7 +472,7 @@ mod tests {
         assert_eq!(parsed["tasks"], json!({"similar":{"status":"off"}}));
         assert_eq!(
             startup(&f.lib).unwrap().dump(),
-            r#"{"sync": true, "similar": true, "index_check": true, "names": true, "provenance": true, "local_limit": 3000}"#
+            r#"{"sync": true, "similar": true, "index_check": true, "names": true, "provenance": true}"#
         );
         let mut last = 0;
         for key in
@@ -501,10 +497,7 @@ mod tests {
             (json!({"other":true}), "未知设置"),
             (json!({"sync":1}), "开关取值不正确"),
             (json!({"provenance":null}), "开关取值不正确"),
-            (json!({"local_limit":true}), "本机识别上限要在 100–100,000 张之间"),
-            (json!({"local_limit":100.0}), "本机识别上限要在 100–100,000 张之间"),
-            (json!({"local_limit":99}), "本机识别上限要在 100–100,000 张之间"),
-            (json!({"local_limit":100001}), "本机识别上限要在 100–100,000 张之间"),
+            (json!({"local_limit":3000}), "未知设置"),
         ] {
             assert!(matches!(set_startup(&f.lib,&input),Err(Error::Invalid(s)) if s==message));
             assert_eq!(f.stored(), None);
@@ -514,20 +507,20 @@ mod tests {
     fn raw_body_preserves_first_invalid_key_error_precedence() {
         let f = Fixture::new();
         assert!(
-            matches!(set_startup_json(&f.lib, r#"{"sync":1,"local_limit":null}"#), Err(Error::Invalid(v)) if v == "开关取值不正确")
+            matches!(set_startup_json(&f.lib, r#"{"sync":1,"names":null}"#), Err(Error::Invalid(v)) if v == "开关取值不正确")
         );
         assert!(
-            matches!(set_startup_json(&f.lib, r#"{"local_limit":null,"sync":1}"#), Err(Error::Invalid(v)) if v == "本机识别上限要在 100–100,000 张之间")
+            matches!(set_startup_json(&f.lib, r#"{"sync":1,"other":true}"#), Err(Error::Invalid(v)) if v == "未知设置")
         );
         assert_eq!(f.stored(), None);
     }
     #[test]
     fn startup_updates_are_ordered_atomic_and_do_not_authorize_network() {
         let f = Fixture::new();
-        set_startup(&f.lib, &json!({"sync":false,"local_limit":100})).unwrap();
+        set_startup(&f.lib, &json!({"sync":false,"similar":false})).unwrap();
         assert_eq!(
             f.stored().unwrap(),
-            r#"{"sync": false, "similar": true, "index_check": true, "names": true, "provenance": true, "local_limit": 100}"#
+            r#"{"sync": false, "similar": false, "index_check": true, "names": true, "provenance": true}"#
         );
         let db = connection(&f.lib, true).unwrap();
         db.execute_batch(
@@ -553,9 +546,22 @@ mod tests {
         db.execute("INSERT INTO prefs VALUES ('startup',?)", [r#"{"names":false,"legacy":{"z":"角色🙂","a":1e-7}}"#])
             .unwrap();
         drop(db);
-        set_startup(&f.lib, &json!({"local_limit":100000})).unwrap();
+        set_startup(&f.lib, &json!({"similar":false})).unwrap();
         assert!(f.stored().unwrap().ends_with(r#", "legacy": {"z": "\u89d2\u8272\ud83d\ude42", "a": 1e-07}}"#));
         assert!(startup(&f.lib).unwrap().dump().contains(r#""legacy": {"z": "角色🙂", "a": 1e-07}"#));
+    }
+    #[test]
+    fn removed_local_limit_is_ignored_and_dropped_on_save() {
+        let f = Fixture::new();
+        let db = connection(&f.lib, true).unwrap();
+        db.execute("INSERT INTO prefs VALUES ('startup',?)", [r#"{"sync":false,"local_limit":100}"#]).unwrap();
+        drop(db);
+        assert_eq!(
+            startup(&f.lib).unwrap().dump(),
+            r#"{"sync": false, "similar": true, "index_check": true, "names": true, "provenance": true}"#
+        );
+        set_startup(&f.lib, &json!({"names":false})).unwrap();
+        assert!(!f.stored().unwrap().contains("local_limit"));
     }
     #[test]
     fn thumbnail_and_backup_listing_matches_sizes_filter_order_and_limit() {

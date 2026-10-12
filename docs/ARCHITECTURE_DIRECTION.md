@@ -345,7 +345,7 @@ X 只读取 ZIP 或解压目录的 `data/following.js`，限制列表为 64 MiB�
 
 `TaskContext::receive(identity, apply)` 在同一锁内比较完整信封并接收一次结果，取消或任务结束后拒绝迟到结果；apply 失败不占用接收名额。取消与已进入的结果提交串行，取消返回时没有在途 apply；apply 不可在自身接收锁内调用 cancel/stop。公共接收只负责会话与单次任务边界，持久幂等键必须由业务消费者与正式结果在同一事务保存。扫描继续用 sync_runs 将崩溃遗留 running 标记为 interrupted，源 journal 与应用摘要恢复两库提交边界；pending 后处理事件不被公共模块提前确认，各业务负责重试和恢复。
 
-文件夹同步取消的持久状态取决于取消点（2026-10-03）：哈希/源事务提交前观察到取消时回滚 source；源事务已提交而应用刷新尚未提交时，保留源结果供后续刷新重试，不能承诺 source 不变。实际 run_with 失败且取消已置位才记录 interrupted；已成功结束的 done/needs_recognition/needs_windows 不因后续切库或正常退出改成中断。同步任务固定旧包实例，切库先取消并 join，再替换会话并发布新 generation；两库及最终 sync_runs 状态记录仍是各自的原提交边界。
+文件夹同步取消的持久状态取决于取消点（2026-10-03）：哈希/源事务提交前观察到取消时回滚 source；源事务已提交而应用刷新尚未提交时，保留源结果供后续刷新重试，不能承诺 source 不变。实际 run_with 失败且取消已置位才记录 interrupted；已成功结束的 done/needs_recognition 不因后续切库或正常退出改成中断。同步任务固定旧包实例，切库先取消并 join，再替换会话并发布新 generation；两库及最终 sync_runs 状态记录仍是各自的原提交边界。
 
 取消回归用实际 run_with 的进度回调，在哈希完成且源事务提交前、源已提交且应用刷新前分别设置 ready/cancel/release/completion 闸门，验证应用服务切库、shutdown 和 Drop 的取消、等待、源提交前全表回滚及源提交后保留、人工历史及待处理事件保持、同 ID 的新物理包不变与旧 generation 结果拒收；完成路径先等待真实任务结束，再逐表核对正常收尾保留终态。HTTP 回归先观察持久终态，再核对切库/退出后的完整 typed cells、rowid 和重启重扫。不再用合成文件大小推断取消阶段；测试闸门仅在 cfg(test) 内，生产行为及 golden 不变。
 
@@ -370,7 +370,7 @@ Unix `TaskContext::process(&mut Command)` 将可选 worker 放入独立进程组
 
 原生 `POST /api/sync` 对配置中的 Photos/文件夹混合来源按配置顺序启动后台盘点，重复启动返回 `started:false`；`GET /api/sync` 提供进度、错误与最近八次记录。扫描跳过隐藏路径、`.pilib` 子目录和非图片文件，未变化文件不重新哈希；MD5 相同的移动/改名按原顺序保留资产身份，删除保留源记录并标记 trashed，恢复复用身份。同路径换图保留资产身份和人工裁决，清除源标签及 embeddings；损坏图片作为零尺寸资产盘点。无识别 worker 时仍导入文件夹基础信息，Photos 保持已有 rating 结果才进入应用库；已有结果正常浏览，待办明确显示 `needs_recognition`，不将未识别图片计作识别成功。
 
-盘点 CLI 是 `folder-scan` / `photos-scan --db <source.sqlite>`（标准输入为单来源 JSON）和 `library-scan --library <显式.pilib>`（盘点全部来源并刷新应用）；HTTP 使用同一模块。只有确认已不存在的文件才算移除：列不出的文件夹、读不到的目录项或元数据、算哈希时读取失败的文件记为暂时读不到，其中已有的资产原样保留，不标 trashed，其余区域的新增、移动与移除照常提交；扫描结果与同步终态带 `unreadable` 计数，界面提示已保留、恢复访问后再同步（2026-10-11，#43）。已移除的文件写回原路径时（内容相同或不同、大小或时间改变），本次扫描即恢复为存活，不需再同步一次（#44）。新资产/移除与内容变化复用角色 import 核心，路径更新、正式投影、内容及标签摘要和 `imported` 事件在应用事务中提交。扫描的 imported 事件持久化保留供研究消费者调度；正式识别导入的通知由结果包导入器确认，不代表研究算法完成。建库不扫描；服务启动和切库后按 startup.sync 自动启动。打开时 startup.sync=false 则本次会话关闭同步，重新启用偏好后须重新打开图库。`--no-sync` 关闭本会话同步，`--no-auto-sync` 仅关闭自动触发、保留手动同步；冻结/测试图库始终拒绝同步。待识别数超过 startup.local_limit 显示 needs_windows；缺席 worker 显示 needs_recognition，`--sync-limit N` 只限制每次识别数（0 为全部），不限制扫描。
+盘点 CLI 是 `folder-scan` / `photos-scan --db <source.sqlite>`（标准输入为单来源 JSON）和 `library-scan --library <显式.pilib>`（盘点全部来源并刷新应用）；HTTP 使用同一模块。只有确认已不存在的文件才算移除：列不出的文件夹、读不到的目录项或元数据、算哈希时读取失败的文件记为暂时读不到，其中已有的资产原样保留，不标 trashed，其余区域的新增、移动与移除照常提交；扫描结果与同步终态带 `unreadable` 计数，界面提示已保留、恢复访问后再同步（2026-10-11，#43）。已移除的文件写回原路径时（内容相同或不同、大小或时间改变），本次扫描即恢复为存活，不需再同步一次（#44）。新资产/移除与内容变化复用角色 import 核心，路径更新、正式投影、内容及标签摘要和 `imported` 事件在应用事务中提交。扫描的 imported 事件持久化保留供研究消费者调度；正式识别导入的通知由结果包导入器确认，不代表研究算法完成。建库不扫描；服务启动和切库后按 startup.sync 自动启动。打开时 startup.sync=false 则本次会话关闭同步，重新启用偏好后须重新打开图库。`--no-sync` 关闭本会话同步，`--no-auto-sync` 仅关闭自动触发、保留手动同步；冻结/测试图库始终拒绝同步。有识别 worker 时总是在本机识别全部待识别图片；缺席 worker 显示 needs_recognition。原本机识别上限 `startup.local_limit`（超过即 needs_windows）已按用户决定删除（2026-10-12，#100）：已存的旧值读取时忽略，下次保存设置时去掉，请求再带它按未知设置拒绝；历史同步记录里的 needs_windows 原样保留。`--sync-limit N` 只限制每次识别数（0 为全部），不限制扫描。
 
 Photos 适配只打开显式配置包内的 Photos.sqlite 只读连接，收录 App 与 preset 来自来源 apps。盘点包含来源统计、Photos UUID/链接、范围、删除/恢复及导入路径；优先本地 derivative，其次 original，均不存在时保留可重试路径。删除检查按 source_id 隔离，Photos 扫描不删除文件夹资产；不同来源碰撞同一资产标识时拒绝替换。Photos 不写应用库，正式刷新复用同一原生调用链；没有真实图库或平台权限验收。
 
@@ -418,7 +418,7 @@ Windows 开发计算候选复用 #151 的固定 ILP64 OpenBLAS 加载器：显�
 
 `native/terms/src/worker_protocol.rs` 定义索引、同步识别、溯源、研究的 request/response，以及索引 `index-job.json`、识别 manifest、签名文件和溯源网络请求的 serde 类型；外部文件在入口解析，结构错误带实际文件和嵌套字段路径。索引恢复不再把无效 journal 当成新任务。协议版本、request 字节、HTTP 字段顺序与数据库内容保持现行契约；身份、版本、资产范围及提交前指纹的语义校验仍由原协调模块执行。索引结果直接按类型校验，避免再建立整份动态 JSON 副本。索引 journal 与 `native_index_runs.result` 回执通过有序 JSON 值保存原键序；源库回执沿用不包含计算结果正文的格式。
 
-`native/terms/src/task_state.rs` 持有状态枚举和有序展示快照，包含现行 `needs_recognition`、`needs_windows` 等状态；外来研究 progress 和已存溯源状态先解析，坏溯源状态以含文件/字段的失败信息呈现，基础浏览与人工操作继续可用。crate 根对非测试 `unwrap` 启用 Clippy warn，`app_index`、`app_sync`、`app_provenance`、`app_research` 使用模块 deny；锁中毒用带说明的 expect，worker/job 外部字段使用可返回错误的解析。其余存量内部 unwrap 已改为有说明的 expect，保留既有不变量失败行为，不把它们宣称为可恢复错误。显式 `test-read-host` feature 的测试读宿主不属于生产代码，生产模块 deny 不受影响。
+`native/terms/src/task_state.rs` 持有状态枚举和有序展示快照，包含现行 `needs_recognition` 等状态（`needs_windows` 只为解析旧记录保留）；外来研究 progress 和已存溯源状态先解析，坏溯源状态以含文件/字段的失败信息呈现，基础浏览与人工操作继续可用。crate 根对非测试 `unwrap` 启用 Clippy warn，`app_index`、`app_sync`、`app_provenance`、`app_research` 使用模块 deny；锁中毒用带说明的 expect，worker/job 外部字段使用可返回错误的解析。其余存量内部 unwrap 已改为有说明的 expect，保留既有不变量失败行为，不把它们宣称为可恢复错误。显式 `test-read-host` feature 的测试读宿主不属于生产代码，生产模块 deny 不受影响。
 
 `app_http::handle` 保留本机/跨站、generation、CSRF、body 格式检查与分派；`http_host_get.rs` 和 `http_host_post.rs` 承接会话业务路由，沿用旧快照、锁释放和切库后拒收边界。无数据库迁移；回退按独立模块提交恢复代码，先停止程序，不修改当前包或用旧工具接管未完成任务。
 

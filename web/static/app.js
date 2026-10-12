@@ -2403,7 +2403,6 @@ function syncLine(s) {
   // Paths the scan could not read keep their pictures; the next sync reads them again.
   const kept = s.unreadable ? ` · ${number(s.unreadable)} 处暂时读不到，已有图片保留不动` : '';
   if (s.status === 'done') return `上次同步：${stamp(s.finished_at)}${kept}`;
-  if (s.status === 'needs_windows') return '新增图片较多，需使用 Windows 批量识别' + kept;
   if (s.status === 'needs_recognition') return `有 ${number(s.total || 0)} 张图等待识别（识别服务未启动）${kept}`;
   if (s.status === 'interrupted') return s.message ? `同步已中断（${s.message}），可重新扫描` : '同步已中断，可重新扫描';
   if (s.status === 'error') return '同步失败';
@@ -2733,7 +2732,7 @@ async function renderSettings(fetchMissing = true, refresh = false) {
   closeInspector(); $('selectionBar').hidden = true; $('resultCount').textContent = ''; $('hint').textContent = '';
   if (fetchMissing) loadSettingsData(refresh);
   const [section, , , cards] = settingsSection();
-  const runs = state.syncHistory, info = state.settings, up = info?.startup || {};
+  const runs = state.syncHistory, info = state.settings;
   const reasons = state.exclInfo.reasons || {};
   const sourcesOf = info?.package?.sources || state.libraries?.info?.sources || [];
   const photos = sourcesOf.some(x => x.kind === 'photos');
@@ -2752,9 +2751,8 @@ async function renderSettings(fetchMissing = true, refresh = false) {
       <div class="setting-line"><span>按角色筛选时的默认排序</span>${segment('sortCharacter', [['suspicious', '可疑优先'], ['newest', '最新加入'], ['oldest', '最早加入']], csort)}</div>
       <p class="settings-note net-foot">缩略图大小、图上显示什么、详情面板的内容，在顶栏的「视图选项」里调。</p>`,
     setSync: () => cardHead('同步', '只读读取来源里的图片，新增的导入并在本机识别；来源里删掉的图会从图库移除，人工整理记录保留。同步不联网。', 'library') + `
-      ${taskLink(s.status === 'off' ? '这次启动没有开同步' : syncLine(s), SYNC_ACTIVE.includes(s.status) ? 'busy' : ['error', 'needs_windows', 'needs_recognition'].includes(s.status) ? 'warn' : s.status === 'off' ? 'off' : '')}
+      ${taskLink(s.status === 'off' ? '这次启动没有开同步' : syncLine(s), SYNC_ACTIVE.includes(s.status) ? 'busy' : ['error', 'needs_recognition'].includes(s.status) ? 'warn' : s.status === 'off' ? 'off' : '')}
       ${startupSwitch('sync', '启动时同步', '检查来源里新增和删除的图')}
-      <div class="setting-line"><span>本机识别上限<small class="line-hint">一次新增超过这么多张时，改为提示用 Windows 批量识别</small></span><span class="num-field"><input type="number" id="localLimit" ${!info ? 'disabled' : ''} min="100" max="100000" step="100" value="${up.local_limit || 3000}"> 张</span></div>
       ${photos && apps.length ? fold('sourcesApps', `iCloud 照片按存图的 App 统计（${number(apps.length)} 个 App）`, `<p class="muted-note">iCloud 照片里只导入 X 和 Pixiv 存下的图。</p><table class="settings-table"><tr><th>App</th><th>照片里</th><th>已导入</th></tr>${apps.map(appRow).join('')}</table>`) : ''}`,
     setExclude: () => cardHead('排除规则', `照片、截图、文字图这类不是插画的图不算进图库。只是做标记，不改动${photos ? '照片图库' : '来源文件'}；你的判断优先于自动规则。`, 'library') + `
       <div class="rule-row">${Object.entries(REASONS).map(([k, t]) => `<a class="rule" href="#/excluded?reason=${k}"><b>${number(reasons[k] || 0)}</b><span>${t}</span></a>`).join('')}<a class="rule" href="#/pending"><b>${number(state.pendingCount)}</b><span>待确认</span></a></div>`,
@@ -2785,7 +2783,6 @@ async function renderSettings(fetchMissing = true, refresh = false) {
   };
   const startup = async (body, done) => { try { state.settings = await post('/api/startup', body); toast(done); } catch (e) { toast(e.message); } renderSettings(); };
   page.onchange = e => { const box = e.target.closest('[data-startup]'); if (box) startup({[box.dataset.startup]: box.checked}, '已保存，下次启动时生效'); };
-  if ($('localLimit')) $('localLimit').onchange = e => startup({local_limit: Math.round(Number(e.target.value))}, '已更新本机识别上限');
   if ($('backupNow')) $('backupNow').onclick = async () => { try { const r = await post('/api/backup', {}); toast('备份完成：' + r.path.split('/').pop()); state.settings = null; renderSettings(); } catch (e) { toast(e.message); } };
   if ($('clearCache')) $('clearCache').onclick = async () => { try { const r = await post('/api/cache', {action: 'clear'}); state.settings = r; toast(`已清除 ${number(r.removed)} 个缩略图`); renderSettings(); } catch (e) { toast(e.message); } };
   for (const g of page.querySelectorAll('[data-setting]')) for (const b of g.querySelectorAll('button')) b.onclick = () => {
@@ -3241,7 +3238,7 @@ function taskList() {
   const bar = (done, total) => total ? `<div class="progress"><span style="width:${Math.min(100, Math.round((done || 0) / total * 100))}%"></span></div>` : '';
   const list = [
     {key: 'sync', name: folder ? '文件夹同步' : '照片同步', active: SYNC_ACTIVE.includes(s.status), line: s.status === 'off' ? '这次启动没有开同步' : syncLine(s),
-      warn: ['error', 'needs_windows', 'needs_recognition', 'interrupted'].includes(s.status), body: syncBar(s, bar),
+      warn: ['error', 'needs_recognition', 'interrupted'].includes(s.status), body: syncBar(s, bar),
       action: `<button class="quiet small" data-task="sync" ${SYNC_ACTIVE.includes(s.status) || s.status === 'off' ? 'disabled' : ''}>立即同步</button>`,
       log: state.syncHistory?.length ? ['同步记录', `<table class="settings-table"><tr><th>时间</th><th>新增</th><th>移除</th><th>导入</th><th>失败</th></tr>${state.syncHistory.slice(0, 8).map(r => `<tr><td>${esc(stamp(r.started_at))}</td><td>${number(r.found)}</td><td>${number(r.removed)}</td><td>${number(r.imported)}</td><td>${number(r.failed)}</td></tr>`).join('')}</table>`] : null},
     {key: 'index', name: '检查新角色', active: INDEX_ACTIVE.includes(ix.status), line: state.index ? indexLine(ix, state.index.check) : '…', warn: ix.status === 'error',
@@ -3272,7 +3269,6 @@ function taskAsks() {
     <p class="muted-note">授权只对这一次有效，下次开始会再问。图片本身不会上传。查过的图和画师不会重查，可以随时停止。</p>
     <div class="prov-confirm-btns"><button class="primary" data-prov="start" data-network="1">授权并开始</button><button class="quiet" data-prov="start">只跑本地（签名识别）</button><button class="quiet" data-prov="cancel">取消</button></div></div>`);
   if (missing.length && !INDEX_ACTIVE.includes(state.index.state.status)) asks.push(`<div class="task-ask"><span>上次检查发现 <b>${number(missing.length)}</b> 个还没收录的角色</span><button class="primary small" data-task="index-add">查看并添加…</button></div>`);
-  if (s.status === 'needs_windows') asks.push('<div class="task-ask"><span>这次新加的图超过本机识别上限：可以用 Windows 批量识别，或在设置的「图库」里调高上限后重新同步。</span></div>');
   return asks;
 }
 function renderTasks() {
