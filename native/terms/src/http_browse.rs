@@ -863,7 +863,15 @@ pub fn read(c: &Connection, context: &LibraryContext, path: &str, q: &HashMap<St
             } else {
                 let total_needed = value(q, "count") != "0";
                 let nsfw = value(q, "nsfw");
-                let (total, sql) = if total_needed && !nsfw.is_empty() {
+                // A rating-filtered total copies the matches once, then counts and sorts the copy, so the
+                // rating subquery and other filters run once. Only the plain library view hiding NSFW in date
+                // order (#48) pages assets through assets_date instead: there the copy and its sort cost more
+                // than counting twice. Both read one transaction snapshot and every ordering ends in the
+                // primary key, so either path returns the same rows in the same order.
+                let date_page = nsfw == "hide"
+                    && order.starts_with("a.added_at ")
+                    && f.iter().all(|(k, v)| k == "nsfw" || k == "order" || v.is_empty());
+                let (total, sql) = if total_needed && !nsfw.is_empty() && !date_page {
                     c.execute(&format!("CREATE TEMP TABLE selected_assets AS SELECT a.uuid,a.width,a.height,a.added_at FROM assets a WHERE {where_}"),rusqlite::params_from_iter(&args))?;
                     let n = count(c, "SELECT count(*) FROM selected_assets", &[])?;
                     args.clear();
@@ -1069,5 +1077,94 @@ mod tests {
         tx.commit().unwrap();
         drop(c);
         std::fs::remove_file(path).unwrap();
+    }
+    #[test]
+    fn rating_filtered_pages_keep_order_total_and_bounds() {
+        // #48: rating-filtered pages, whether paged through assets_date or through the filtered copy, keep
+        // fixed expectations for ties, NULL dates, folded/excluded rows, the last partial page,
+        // past-the-end offsets and empty results.
+        let root = std::env::temp_dir().join(format!(
+            "illustash-browse-rating-pages-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+        ));
+        std::fs::create_dir_all(root.join("input")).unwrap();
+        let dest = root.join("synthetic.pilib");
+        crate::app_create::create_folder(&dest, &root.join("input"), None, None, None).unwrap();
+        let c = crate::sqlite::open(dest.join("library.sqlite")).unwrap();
+        // Insertion order differs from every expected order, so rowid order cannot pass by accident.
+        c.execute_batch("INSERT INTO assets(uuid,filename,width,height,added_at) VALUES
+            ('e1','e1.png',1,1,'2026-09-28 10:00:00'),('a3','a3.png',1,1,'2026-09-30 10:00:00'),
+            ('c1','c1.png',1,1,NULL),('b2','b2.png',1,1,'2026-09-29 10:00:00'),
+            ('a2','a2.png',1,1,'2026-09-30 10:00:00'),('d1','d1.png',1,1,'2026-09-28 10:00:00'),
+            ('b1','b1.png',1,1,'2026-09-29 10:00:00'),('a1','a1.png',1,1,'2026-09-30 10:00:00');
+            INSERT INTO duplicates VALUES ('d1','g','2',1,'2026-09-28 10:00:00',0,1),('b2','g','2',0,'2026-09-28 10:00:00',1,0);
+            INSERT INTO excluded VALUES ('e1','photo','manual');
+            INSERT INTO terms(key,kind,origin) VALUES ('synthetic-general','rating','synthetic'),('synthetic-sensitive','rating','synthetic'),
+             ('synthetic-questionable','rating','synthetic'),('synthetic-explicit','rating','synthetic');
+            INSERT INTO term_links(system,key,term_id,source) SELECT 'wd_rating',substr(key,11),id,'synthetic' FROM terms WHERE key LIKE 'synthetic-%';
+            INSERT INTO term_assets(namespace,key) SELECT 'library',uuid FROM assets;
+            INSERT INTO term_projection(asset_id,term_id,state) SELECT ta.id,t.id,'machine' FROM (VALUES
+             ('a1','general'),('a2','explicit'),('b1','questionable'),('b2','sensitive'),('c1','general'),('d1','explicit'),('e1','explicit')) r
+             JOIN term_assets ta ON ta.namespace='library' AND ta.key=r.column1 JOIN terms t ON t.key='synthetic-'||r.column2;").unwrap();
+        drop(c);
+        let context = crate::http::LibraryContext {
+            db: dest.join("library.sqlite"),
+            generation: "synthetic".into(),
+            library: Some(dest.clone()),
+            source: Some(dest.join("source.sqlite")),
+            tags: std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tags/tags_v3.csv"),
+            token: Some("synthetic-token".into()),
+            read_only: None,
+        };
+        let page = |query: &str| {
+            let (body, status) = crate::http_read::read(&context, &format!("/api/assets?{query}")).unwrap().unwrap();
+            assert_eq!(status, 200, "{query}");
+            let ids = match body.get("items") {
+                Some(Json::Array(items)) => items.iter().map(|v| get(v, "uuid").text().to_owned()).collect::<Vec<_>>(),
+                _ => panic!("{query}"),
+            };
+            (ids, get(&body, "total").dump(), body)
+        };
+        let cases: &[(&str, &[&str], &str)] = &[
+            ("nsfw=hide", &["a1", "a3", "b2", "c1"], "4"),
+            ("nsfw=hide&limit=2", &["a1", "a3"], "4"),
+            ("nsfw=hide&limit=1&offset=1", &["a3"], "4"),
+            ("nsfw=hide&limit=2&offset=2", &["b2", "c1"], "4"),
+            ("nsfw=hide&limit=2&offset=3", &["c1"], "4"),
+            ("nsfw=hide&limit=2&offset=4", &[], "4"),
+            ("nsfw=hide&offset=99", &[], "4"),
+            ("nsfw=hide&order=oldest", &["c1", "b2", "a1", "a3"], "4"),
+            ("nsfw=hide&order=oldest&limit=1&offset=3", &["a3"], "4"),
+            ("nsfw=hide&q=", &["a1", "a3", "b2", "c1"], "4"),
+            ("nsfw=hide&order=hinted", &["a1", "a3", "b2", "c1"], "4"),
+            ("nsfw=hide&order=suspicious&limit=3&offset=1", &["a3", "b2", "c1"], "4"),
+            ("nsfw=hide&q=a", &["a1", "a3"], "2"),
+            ("nsfw=hide&pool=duplicates", &["b2"], "1"),
+            ("nsfw=only", &["a2", "b1"], "2"),
+            ("nsfw=only&order=oldest", &["b1", "a2"], "2"),
+            ("nsfw=only&pool=duplicates", &["d1"], "1"),
+            ("nsfw=only&q=nomatch", &[], "0"),
+            ("nsfw=hide&pool=excluded", &[], "0"),
+            ("nsfw=only&pool=excluded", &["e1"], "1"),
+            ("nsfw=", &["a1", "a2", "a3", "b1", "b2", "c1"], "6"),
+        ];
+        for (query, expected, total) in cases {
+            let (ids, shown_total, body) = page(query);
+            assert_eq!(
+                (ids.iter().map(String::as_str).collect::<Vec<_>>(), shown_total.as_str()),
+                (expected.to_vec(), *total),
+                "{query}"
+            );
+            // The page without a total is the same rows, byte for byte.
+            let (_, untotaled, unpaged) = page(&format!("{query}&count=0"));
+            assert_eq!(untotaled, "null", "{query}");
+            assert_eq!(get(&body, "items").dump(), get(&unpaged, "items").dump(), "{query}");
+            let filters = query.split('&').filter(|p| !p.starts_with("limit=") && !p.starts_with("offset="));
+            let url = format!("/api/assets/count?{}", filters.collect::<Vec<_>>().join("&"));
+            let counted = crate::http_read::read(&context, &url).unwrap().unwrap();
+            assert_eq!(get(&counted.0, "total").dump(), *total, "{query}");
+        }
+        std::fs::remove_dir_all(root).unwrap();
     }
 }
