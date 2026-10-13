@@ -4,6 +4,6 @@
       "../packaging/desktop-compute/": "compute/"
     },
     "targets": ["nsis"],
-    "windows": { "nsis": { "installMode": "currentUser" } }
+    "windows": { "nsis": { "installMode": "currentUser", "installerHooks": "../packaging/nsis-full-hooks.nsh" } }
   }
 }

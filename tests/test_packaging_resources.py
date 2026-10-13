@@ -228,6 +228,15 @@ class PackagingResourcesTest(unittest.TestCase):
             # The host roots full installs at compute/resources (bundled_workers tests), so a
             # second top-level resources/ copy would have no consumer.
             self.assertEqual(mapping(name), {'../packaging/desktop-compute/': 'compute/'}, name)
+        # Upgrading an older full install must not leave the per-kind copies or resources/ behind.
+        config = json.loads((ROOT / 'packaging/tauri-full.json').read_text())
+        hooks = (ROOT / 'desktop' / config['bundle']['windows']['nsis']['installerHooks']).resolve()
+        text = hooks.read_text()
+        self.assertIn('!macro NSIS_HOOK_PREINSTALL', text)
+        for kind in pack.WORKER_KINDS:
+            self.assertIn(f'Delete "$INSTDIR\\compute\\bin\\illustash-{kind}.exe"', text)
+        self.assertIn('RMDir /r "$INSTDIR\\resources"', text)
+        self.assertNotIn('worker', ''.join(line for line in text.splitlines() if line.lstrip().startswith(('Delete', 'RMDir'))))
 
     @unittest.skipIf(os.name == 'nt', 'POSIX shell launcher execution only')
     def test_relocated_ordinary_launch_preserves_overrides_and_remains_lazy(self):
