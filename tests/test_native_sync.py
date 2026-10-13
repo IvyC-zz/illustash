@@ -122,7 +122,8 @@ import numpy as np
 r=json.loads(Path(sys.argv[1]).read_text())
 mode=MODE
 if mode=='hang':
-    (Path(r['output'])/'pid').write_text(str(os.getpid()))
+    # Written whole, then renamed: a test that sees the file reads the full pid (#132).
+    (Path(r['output'])/'pid.tmp').write_text(str(os.getpid()));os.replace(Path(r['output'])/'pid.tmp',Path(r['output'])/'pid')
     time.sleep(60)
 if mode=='fail': sys.exit(7)
 if mode=='progress':

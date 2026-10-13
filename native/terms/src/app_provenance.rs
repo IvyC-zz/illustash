@@ -187,7 +187,7 @@ impl Runner {
         self.library.instance_path().join("provenance.sqlite")
     }
     fn busy(&self) -> bool {
-        self.task.as_ref().is_some_and(Task::running)
+        active(self.task.as_ref(), self.state.lock().expect("provenance state mutex poisoned").status())
     }
     pub fn info(&self) -> Result<Json> {
         let mut history = self.history.lock().expect("provenance state mutex poisoned");
@@ -513,6 +513,12 @@ fn lock(file: &std::fs::File) -> bool {
 }
 fn unlock(file: &std::fs::File) {
     let _ = crate::app_file_lock::release(file);
+}
+
+/// A run is in progress until its state ends. It reports that end before it removes its scratch files, and the
+/// page may ask for the next run at once (#132); starting one joins the finishing thread first.
+fn active(task: Option<&Task>, status: Status) -> bool {
+    task.is_some_and(Task::running) && !matches!(status, Status::Done | Status::Failed | Status::Stopped)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -842,4 +848,29 @@ fn result_json(step: &str, value: &Value) -> Json {
         }
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::mpsc;
+
+    #[test]
+    fn a_finishing_run_is_not_busy_once_its_state_has_ended() {
+        let identity = TaskIdentity::at(&std::env::temp_dir(), "synthetic", 1, "session").unwrap();
+        let (release, wait) = mpsc::channel::<()>();
+        let mut task = Task::start(identity, None, move |_| {
+            wait.recv().unwrap();
+            Ok(())
+        });
+        assert!(active(Some(&task), Status::Running));
+        assert!(active(Some(&task), Status::Stopping));
+        for ended in [Status::Done, Status::Failed, Status::Stopped] {
+            assert!(!active(Some(&task), ended), "{ended:?}");
+        }
+        release.send(()).unwrap();
+        task.stop();
+        assert!(!active(Some(&task), Status::Running));
+        assert!(!active(None, Status::Running));
+    }
 }

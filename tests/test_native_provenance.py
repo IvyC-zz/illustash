@@ -67,7 +67,8 @@ if mode in ('hang','tree'):
  if mode=='tree':
   import subprocess
   p=subprocess.Popen([sys.executable,'-c','import time; time.sleep(300)'])
-  Path(os.environ['SYNTHETIC_PID']).write_text(str(p.pid))
+  # Written whole, then renamed: a test that sees the file reads the full pid (#132).
+  Path(os.environ['SYNTHETIC_PID']+'.tmp').write_text(str(p.pid));os.replace(os.environ['SYNTHETIC_PID']+'.tmp',os.environ['SYNTHETIC_PID'])
  while True: time.sleep(.1)
 if mode=='crash': sys.exit(9)
 step=r['step']; result={'stopped':''}
