@@ -243,7 +243,9 @@ fn launch(root: &Path, package: &Path, category: &str, binary: &Path) -> (Host, 
         .env("ILLUSTASH_APP_SUPPORT", root.join("support"))
         .env("ILLUSTASH_NO_KEYCHAIN", "1")
         .env("ILLUSTASH_SHARED", root.join("shared"))
-        .env("ILLUSTASH_PYTHON_SENTINEL", root.join("python-launched"));
+        .env("ILLUSTASH_PYTHON_SENTINEL", root.join("python-launched"))
+        // The core's incremental-vs-full check (#102; test builds only).
+        .env("ILLUSTASH_TEST_VERIFY_INCREMENTAL", root.join("verified"));
     // Winsock loads its providers through %SystemRoot%; nothing else is passed through.
     #[cfg(windows)]
     command.env("SystemRoot", std::env::var_os("SystemRoot").expect("SystemRoot"));
@@ -332,6 +334,13 @@ fn replay(category: &str) {
         equal(&state(&package, &root, &fixture), &step["state"], &format!("{category}/{i}/database"));
     }
     assert!(!root.join("python-launched").exists());
+    let checks = fs::read_to_string(root.join("verified")).unwrap_or_default();
+    eprintln!("{category}: incremental names checks {}", checks.lines().count());
+    // These recordings commit name changes on the incremental path; the check must have run.
+    assert!(
+        !matches!(category, "task_recovery" | "upgrade_v6") || checks.lines().count() > 0,
+        "{category}: the incremental names check never ran"
+    );
 }
 #[test]
 fn http_api_contract() {

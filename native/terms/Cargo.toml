@@ -47,7 +47,11 @@ serde_path_to_error = "0.1"
 
 # The core read host for read-route tests exists only in an explicitly built example, never the shipped CLI.
 [features]
-test-read-host = []
+test-read-host = ["illustash-core/verify-incremental"]
+
+# 测试构建（cargo test，含录制重放与固定契约启动的二进制）编进核心的对照核对；普通 cargo build 不编进去（#102）。
+[dev-dependencies]
+illustash-core = { path = "../../crates/core", features = ["verify-incremental"] }
 
 [build-dependencies]
 cc = "=1.5.1"

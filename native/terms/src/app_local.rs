@@ -6,7 +6,7 @@ use crate::{
     Error, Result,
 };
 use rusqlite::{Connection, OpenFlags};
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{HashMap, HashSet};
 pub(crate) const ROUTES: &[&str] =
     &["/api/about", "/api/sync", "/api/names", "/api/index", "/api/provenance", "/api/accounts", "/api/oc/groups"];
 fn off() -> Json {
@@ -72,23 +72,27 @@ pub(crate) fn names(c: &Connection, progress: bool) -> Result<Json> {
         return Ok(out);
     }
     let active:HashSet<_>=strings(c,"SELECT entity FROM memberships UNION SELECT entity FROM candidates UNION SELECT parent_id FROM entities WHERE id IN (SELECT entity FROM memberships UNION SELECT entity FROM candidates) AND parent_id IS NOT NULL",&[])?.into_iter().collect();
-    let mut links: HashMap<String, BTreeMap<String, String>> = HashMap::new();
-    for r in rows(c, "SELECT system,key,entity_id FROM links WHERE current=1 ORDER BY added_at,key", &[])? {
-        links
-            .entry(r.get("entity_id").expect("app_local internal invariant").text().into())
-            .or_default()
-            .entry(r.get("system").expect("app_local internal invariant").text().into())
-            .or_insert_with(|| r.get("key").expect("app_local internal invariant").text().into());
-    }
+    // One library-wide load serves both the scope (formerly a second read of entities and links) and the choices (#102).
+    let view = crate::names_view::View::load_with_work(c)?;
     let mut keys: [HashSet<String>; 3] = Default::default();
-    for r in rows(c,"SELECT id,parent_id,work,variant FROM entities WHERE merged_into IS NULL AND kind NOT IN ('oc','work') AND coalesce(original,0)=0",&[])? {
-        let id=r.get("id").expect("app_local internal invariant").text();
-        if !active.contains(id) {continue;}
-        let Some(l)=links.get(id).filter(|l|!l.is_empty()) else {continue;};
-        if matches!(r.get("parent_id"),Some(Json::Scalar(serde_json::Value::Null))) {keys[0].insert(crate::names_view::linked_tag(l)?);}
-        for (i,k) in [(1,"work"),(2,"variant")] {let s=r.get(k).expect("app_local internal invariant").text();if !s.is_empty(){keys[i].insert(s.into());}}
+    for e in view.identities() {
+        if e.merged_into.is_some()
+            || matches!(e.kind, "oc" | "work")
+            || e.original
+            || !e.linked
+            || !active.contains(e.id)
+        {
+            continue;
+        }
+        if e.parent.is_none() {
+            keys[0].insert(e.tag.into());
+        }
+        for (i, s) in [(1, e.work), (2, e.variant)] {
+            if !s.is_empty() {
+                keys[i].insert(s.into());
+            }
+        }
     }
-    let view = crate::names_view::View::load(c)?;
     let mut counts = Json::Object(Vec::new());
     for (i, (plural, kind)) in
         [("characters", "character"), ("works", "work"), ("skins", "skin")].into_iter().enumerate()
