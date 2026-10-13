@@ -40,3 +40,5 @@ for base in reversed(fixture.NativeProvenanceTest.__mro__):
     for name,value in vars(base).items():
         if not name.startswith('test_') and not name.startswith('__') and name not in vars(IqdbTest):
             setattr(IqdbTest,name,value)
+# 循环变量留在模块里会被 discover 当成本模块的测试类，把原类的测试再跑一遍。
+del base
