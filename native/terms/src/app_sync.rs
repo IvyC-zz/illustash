@@ -102,6 +102,7 @@ impl Syncer {
                     "import_done",
                     "import_total",
                     "unreadable",
+                    "damaged",
                 ]
                 .iter()
                 .filter_map(|k| state.get(k).map(|v| ((*k).to_string(), v.clone())))
@@ -110,7 +111,11 @@ impl Syncer {
         } else {
             Json::object([("status", "off".into())])
         };
-        Ok(Json::object([("state", state), ("history", Json::Array(history))]))
+        let mut fields = vec![("state", state), ("history", Json::Array(history))];
+        if let Some(listing) = damaged::listing(&c)? {
+            fields.push(("damaged", listing));
+        }
+        Ok(Json::object(fields))
     }
     pub fn start(&mut self, library: &Library, generation: u64, session: &str) -> Result<bool> {
         if !self.enabled || !Self::available(library) {
@@ -341,6 +346,10 @@ fn run_with(
         counts["imported"] = out["added"].clone();
         counts["removed"] = out["removed"].clone();
         let pending = out["pending"].as_u64().expect("internal sync counter must be unsigned");
+        if pending == 0 {
+            // Every picture is recognised or gone: nothing is known damaged any more.
+            damaged::save(library, &damaged::load(library)?, &serde_json::Map::new())?;
+        }
         if pending > 0 {
             if let Some(ctx) = context {
                 if let Some(worker) = std::env::var_os("ILLUSTASH_RECOGNITION_WORKER") {
@@ -352,17 +361,15 @@ fn run_with(
                         &mut counts,
                         &update,
                     )?;
-                    let message = with_unreadable(
-                        unreadable,
-                        if counts["failed"].as_u64().unwrap_or(0) > 0 {
-                            format!("{} 张暂时读不到（可能还在 iCloud），下次同步重试", counts["failed"])
-                        } else {
-                            String::new()
-                        },
-                    );
+                    let damaged = counts["damaged"].as_u64().unwrap_or(0);
+                    let message =
+                        with_unreadable(unreadable, failure_message(counts["failed"].as_u64().unwrap_or(0), damaged));
                     let mut fields = json!({"status":"done","message":message,"finished_at":now(),"found":counts["found"],"removed":counts["removed"],"imported":counts["imported"],"failed":counts["failed"]});
                     if unreadable > 0 {
                         fields["unreadable"] = json!(unreadable);
+                    }
+                    if damaged > 0 {
+                        fields["damaged"] = json!(damaged);
                     }
                     update(fields);
                     return Ok(("done", message, out));
@@ -561,6 +568,17 @@ fn refresh(library: &Library, run_id: i64, cancel: &AtomicBool) -> Result<(Value
     }
     Ok((json!({"added":out["added"],"removed":out["removed"],"pending":pending}), uuids.into_iter().collect()))
 }
+/// Pictures given up on in this run, by what helps: wait and sync again, or fix or replace the file.
+fn failure_message(failed: u64, damaged: u64) -> String {
+    let mut parts = Vec::new();
+    if failed > 0 {
+        parts.push(format!("{failed} 张暂时读不到（可能还在 iCloud），下次同步重试"));
+    }
+    if damaged > 0 {
+        parts.push(format!("{damaged} 张图片已损坏或格式不支持，已跳过；文件改动后会重新识别"));
+    }
+    parts.join("；")
+}
 /// Folder paths the scan could not read keep their pictures as they were; say so, so the user can retry.
 fn with_unreadable(unreadable: u64, message: String) -> String {
     if unreadable == 0 {
@@ -651,7 +669,36 @@ fn recognise(
     use std::{fs, process::Command};
     let RecognitionRun { root, per_run, already_counted, run_id } = options;
     let c = crate::app_library::read_connection(&library.source())?;
-    let mut assets=crate::app_migrate_data::rows(&c,"SELECT uuid,src_path FROM assets a WHERE in_scope=1 AND coalesce(trashed,0)=0 AND NOT EXISTS(SELECT 1 FROM labels l WHERE l.uuid=a.uuid AND l.dim='rating') ORDER BY uuid")?;
+    let mut assets=crate::app_migrate_data::rows(&c,"SELECT uuid,src_path,stable_hash FROM assets a WHERE in_scope=1 AND coalesce(trashed,0)=0 AND NOT EXISTS(SELECT 1 FROM labels l WHERE l.uuid=a.uuid AND l.dim='rating') ORDER BY uuid")?;
+    drop(c);
+    // Pictures that could be read but not decoded wait, unchanged, until their file changes (#112);
+    // they never take a place within per_run.
+    let marks = damaged::load(library)?;
+    let (mut kept, mut held) = (serde_json::Map::new(), serde_json::Map::new());
+    let mut located = HashMap::new();
+    assets.retain(|row| {
+        let id = row[0].as_str().expect("SQLite uuid column must be text");
+        let path = row[1].as_str().unwrap_or("");
+        let hash = row[2].as_str();
+        located.insert(id.to_owned(), (path.to_owned(), hash.map(str::to_owned)));
+        let Some(mark) = marks.get(id) else { return true };
+        match damaged::fingerprint(path, hash) {
+            Some(now) if &now == mark => {
+                kept.insert(id.to_owned(), now);
+                false
+            }
+            Some(_) => true,
+            // Not readable right now: it is retried as such, and still known damaged if it comes back unchanged.
+            None => {
+                held.insert(id.to_owned(), mark.clone());
+                true
+            }
+        }
+    });
+    let skipped = kept.len();
+    kept.extend(held);
+    damaged::save(library, &marks, &kept)?;
+    counts["damaged"] = json!(skipped);
     if per_run > 0 {
         assets.truncate(per_run);
     }
@@ -784,16 +831,29 @@ fn recognise(
     if !batches.streamed.is_subset(&listed) {
         return Err(Error::Invalid("识别响应缺少已完成的批次".into()));
     }
+    let (mut marked, mut found) = (kept.clone(), 0);
     for u in &reply.failed {
         let id = &u.uuid;
         if !batches.expected.contains(id) || !batches.seen.insert(id.to_owned()) {
             return Err(Error::Conflict("失败结果超出本次范围或重复".into()));
         }
-        failed.insert(id.to_owned());
+        let (path, hash) = &located[id];
+        // A file that cannot even be looked at now is counted as unreadable and retried.
+        match (u.reason, damaged::fingerprint(path, hash.as_deref())) {
+            (protocol::FailureReason::Undecodable, Some(now)) => {
+                marked.insert(id.to_owned(), now);
+                found += 1;
+            }
+            _ => {
+                failed.insert(id.to_owned());
+            }
+        }
     }
     if batches.seen != batches.expected {
         return Err(Error::Invalid("识别结果不完整".into()));
     }
+    damaged::save(library, &kept, &marked)?;
+    counts["damaged"] = json!(skipped + found);
     counts["failed"] = json!(failed.len());
     // Recognition is over: the reply's counts are final. Import has its own count, so the bar never
     // moves back from recognised to imported, and nothing recognised is shown as imported.
@@ -993,6 +1053,75 @@ fn remember_labels(library: &Library, ids: &[String], cancel: &AtomicBool) -> Re
     Ok(())
 }
 
+/// Pictures whose file could be read but not decoded (#112). Each is kept with what its file looked
+/// like then: size, modification time and the scan's content hash (#27). While all three stay the
+/// same the picture is skipped; any change, such as the file being replaced, makes the next sync
+/// try it again. Stored as one preference, which no research input reads, so no schema change.
+mod damaged {
+    use super::*;
+    const KEY: &str = "sync_damaged";
+    pub(super) type Marks = serde_json::Map<String, Value>;
+    pub(super) fn fingerprint(path: &str, hash: Option<&str>) -> Option<Value> {
+        let meta = std::fs::metadata(path).ok().filter(std::fs::Metadata::is_file)?;
+        let mtime = match meta.modified().ok()?.duration_since(std::time::UNIX_EPOCH) {
+            Ok(v) => i64::try_from(v.as_nanos()).ok()?,
+            Err(e) => -i64::try_from(e.duration().as_nanos()).ok()?,
+        };
+        Some(json!({"size":meta.len(),"mtime_ns":mtime,"hash":hash}))
+    }
+    fn read(c: &Connection) -> Result<Marks> {
+        let value: Option<String> =
+            c.query_row("SELECT value FROM prefs WHERE key=?", [KEY], |r| r.get(0)).optional()?;
+        // Unreadable marks only cost one more attempt at each picture.
+        Ok(value.and_then(|v| serde_json::from_str(&v).ok()).unwrap_or_default())
+    }
+    pub(super) fn load(library: &Library) -> Result<Marks> {
+        read(&crate::app_library::read_connection(&library.db())?)
+    }
+    pub(super) fn save(library: &Library, before: &Marks, after: &Marks) -> Result<()> {
+        if before == after {
+            return Ok(());
+        }
+        let c = writer(&library.db())?;
+        if after.is_empty() {
+            c.execute("DELETE FROM prefs WHERE key=?", [KEY])?;
+        } else {
+            let value = serde_json::to_string(after).expect("internal JSON value is serializable");
+            c.execute("INSERT OR REPLACE INTO prefs(key,value) VALUES (?,?)", params![KEY, value])?;
+        }
+        Ok(())
+    }
+    /// How many pictures are known damaged and where the first of them are, for the sync status.
+    pub(super) fn listing(c: &Connection) -> Result<Option<crate::http_json::Json>> {
+        use crate::http_json::Json;
+        let marks = read(c)?;
+        if marks.is_empty() {
+            return Ok(None);
+        }
+        let ids = serde_json::to_string(&marks.keys().collect::<Vec<_>>()).expect("UUID strings are serializable");
+        let count: i64 =
+            c.query_row("SELECT count(*) FROM assets WHERE uuid IN (SELECT value FROM json_each(?))", [&ids], |r| {
+                r.get(0)
+            })?;
+        if count == 0 {
+            return Ok(None);
+        }
+        let paths = c
+            .prepare(
+                "SELECT src_path FROM assets WHERE uuid IN (SELECT value FROM json_each(?)) ORDER BY src_path LIMIT ?",
+            )?
+            .query_map(params![ids, LISTED], |r| r.get::<_, Option<String>>(0))?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(Some(Json::object([
+            ("count", count.into()),
+            ("paths", Json::Array(paths.into_iter().map(|p| p.unwrap_or_default().into()).collect())),
+        ])))
+    }
+    /// The status shows this many locations; the rest are counted.
+    const LISTED: i64 = 50;
+    use rusqlite::OptionalExtension;
+}
+
 /// Existing host cancellation predicate; read adapters receive it at their original checkpoints.
 pub(crate) fn check(cancel: &AtomicBool) -> Result<()> {
     if cancel.load(Ordering::SeqCst) || crate::platform_process::stopping() {
@@ -1005,6 +1134,32 @@ pub(crate) fn check(cancel: &AtomicBool) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn unreadable_and_damaged_pictures_are_reported_apart() {
+        assert_eq!(failure_message(0, 0), "");
+        assert_eq!(failure_message(2, 0), "2 张暂时读不到（可能还在 iCloud），下次同步重试");
+        assert_eq!(failure_message(0, 1), "1 张图片已损坏或格式不支持，已跳过；文件改动后会重新识别");
+        assert_eq!(
+            failure_message(2, 1),
+            "2 张暂时读不到（可能还在 iCloud），下次同步重试；1 张图片已损坏或格式不支持，已跳过；文件改动后会重新识别"
+        );
+    }
+    #[test]
+    fn damaged_fingerprint_follows_size_time_and_content_hash() {
+        let root = std::env::temp_dir().join(format!("illustash-damaged-{}", crate::store::new_key().unwrap()));
+        std::fs::create_dir(&root).unwrap();
+        let file = root.join("bad.png");
+        std::fs::write(&file, b"\x89PNG truncated").unwrap();
+        let path = file.to_str().unwrap();
+        let first = damaged::fingerprint(path, Some("h1")).unwrap();
+        assert_eq!(damaged::fingerprint(path, Some("h1")), Some(first.clone()));
+        assert_ne!(damaged::fingerprint(path, Some("h2")), Some(first.clone()), "content hash");
+        std::fs::write(&file, b"\x89PNG truncated, longer").unwrap();
+        assert_ne!(damaged::fingerprint(path, Some("h1")), Some(first.clone()), "size");
+        assert_eq!(damaged::fingerprint(root.to_str().unwrap(), None), None, "not a file");
+        assert_eq!(damaged::fingerprint(root.join("missing").to_str().unwrap(), None), None);
+        std::fs::remove_dir_all(root).unwrap();
+    }
     use crate::app_service::{Application, Options};
     use std::{collections::BTreeMap, path::Path, sync::mpsc, time::Duration};
 
