@@ -441,7 +441,8 @@ fn run(source: &mut Source, entity: Option<&str>, state: &Mutex<Value>) -> Resul
             )?;
             net::check(&source.cancel)?;
             // Alias mirrors sync once at commit (legacy_names::after_write). The absorbed snapshot equals a fresh
-            // load of this transaction, so the commit's projection uses it instead of loading the library again.
+            // load of this transaction, so a commit whose projection falls back to a whole rebuild uses it instead
+            // of loading the library again (name rows alone are projected by their closure, #103).
             // It follows this commit only if the commit succeeds; on any failure it is gone and the next read
             // loads again.
             let next = names.absorb(&tx, base)?;

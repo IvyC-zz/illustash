@@ -684,46 +684,37 @@ pub fn rebuild_from(c: &Connection, view: &View) -> Result<(usize, usize)> {
     Ok((shown, keys.len()))
 }
 
-/// 名字行变化时只写依赖闭包；实体与链接结构变更由调用方回退整表。
+/// 名字行变化时只写依赖闭包；实体与链接结构变更由调用方回退整表。只载入闭包和选名要读的行（#103 A3，见
+/// `Scope`）；闭包碰到空 tag 或空 variant 的键时退回整表重建。
 pub fn rebuild_changed(c: &Connection) -> Result<(usize, usize)> {
-    rebuild_changed_from(c, &View::load(c)?)
+    rebuild_changed_with(c, None)
 }
 
-/// 同 `rebuild_changed`，用调用方给的快照（同 `rebuild_from`）。
-pub fn rebuild_changed_from(c: &Connection, view: &View) -> Result<(usize, usize)> {
-    let mut ids: BTreeSet<String> = c
-        .prepare("SELECT id FROM names_dirty_entities")?
-        .query_map([], |r| r.get(0))?
-        .collect::<rusqlite::Result<_>>()?;
-    let mut keys: BTreeSet<(String, String)> = c
-        .prepare("SELECT kind,key FROM names_dirty_keys")?
-        .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
-        .collect::<rusqlite::Result<_>>()?;
-    loop {
-        let before = (ids.len(), keys.len());
-        for e in view.entities.values() {
-            if ids.contains(&e.id) && e.kind != "work" && e.parent.is_none() && !e.tag.is_empty() {
-                keys.insert(("character".into(), e.tag.clone()));
-            }
-            if keys.contains(&("character".into(), e.tag.clone()))
-                || keys.contains(&("skin".into(), e.variant.clone()))
-                || e.keys.get("qualifier").is_some_and(|k| keys.contains(&("work".into(), k.clone())))
-                || e.parent.as_ref().is_some_and(|p| ids.contains(p))
-                || view.merged.get(&e.id).is_some_and(|members| members.iter().any(|m| ids.contains(m)))
-            {
-                ids.insert(e.id.clone());
-            }
+/// 同 `rebuild_changed`；退回整表重建时用调用方给的整库快照（同 `rebuild_from`），不再整库载入。
+pub fn rebuild_changed_with(c: &Connection, view: Option<&View>) -> Result<(usize, usize)> {
+    match (Scope::collect(c)?, view) {
+        (Some(scope), _) => {
+            let scoped = scope.load(c)?;
+            write_changed(c, &scoped, &scope.ids, scope.keys.intersection(&scope.existing))
         }
-        if before == (ids.len(), keys.len()) {
-            break;
-        }
+        (None, Some(view)) => rebuild_from(c, view),
+        (None, None) => rebuild(c),
     }
+}
+
+/// 把闭包里的身份和（库里出现过的）键按 `view` 重写进两张投影表。
+fn write_changed<'a>(
+    c: &Connection,
+    view: &View,
+    ids: &BTreeSet<String>,
+    keys: impl Iterator<Item = &'a (String, String)>,
+) -> Result<(usize, usize)> {
     let mut put = c.prepare(
         "INSERT OR REPLACE INTO term_name_display(entity,skin_only,name,name_source,zh,ja,en,tag)
         VALUES (?,?,?,?,?,?,?,?)",
     )?;
     let mut shown = 0;
-    for id in &ids {
+    for id in ids {
         for skin in [false, true] {
             if let Some((ch, tag)) = view.entity(id, skin)? {
                 let [zh, ja, en] = &ch.names;
@@ -732,18 +723,360 @@ pub fn rebuild_changed_from(c: &Connection, view: &View) -> Result<(usize, usize
             }
         }
     }
-    let existing = view.choice_keys(c)?;
     let mut put = c.prepare(
         "INSERT OR REPLACE INTO term_name_choice(kind,key,name,name_source,zh,ja,en) VALUES (?,?,?,?,?,?,?)",
     )?;
     let mut chosen = 0;
-    for (kind, key) in keys.intersection(&existing) {
+    for (kind, key) in keys {
         let ch = view.choose(kind, key)?;
         let [zh, ja, en] = &ch.names;
         put.execute(params![kind, key, ch.name, ch.source, zh, ja, en])?;
         chosen += 1;
     }
     Ok((shown, chosen))
+}
+
+/// 名字变化时局部维护投影要读的范围（#103 A3）。`collect` 从本事务记下的身份和键出发，用按索引的定向查询求依赖
+/// 闭包（身份 `ids`、文字键 `keys`），再补上选名要读的身份：父身份、并入者、与它们同 tag 的身份。`load` 只为这些
+/// 身份建快照，`entity` / `choose` 照旧。`entities` 上没有索引的三列（皮肤 `variant`、`merged_into`、作品文字
+/// `work`）各用一条扫描语句，只在闭包里有对应的键或身份时执行（#38 2026-10-12 用户决定第 2 条；variant 同样只
+/// 记录、不加索引，2026-10-13）。
+struct Scope {
+    ids: BTreeSet<String>,
+    keys: BTreeSet<(String, String)>,
+    /// `keys` 里库中出现过的（`choice_keys` 的范围）。
+    existing: BTreeSet<(String, String)>,
+    /// 要载入的身份与它们在 `entities` 里的 rowid。
+    read: BTreeMap<String, (i64, Entity)>,
+}
+
+/// 按 id 取过的身份（含当前链接）；None = 库里没有。
+#[derive(Default)]
+struct Fetched(HashMap<String, Option<(i64, Entity)>>);
+
+impl Fetched {
+    fn get(&mut self, c: &Connection, id: &str) -> Result<Option<&Entity>> {
+        if !self.0.contains_key(id) {
+            let found = fetch(c, id)?;
+            self.0.insert(id.to_owned(), found);
+        }
+        Ok(self.0[id].as_ref().map(|(_, e)| e))
+    }
+
+    /// 当前 tag 恰好是 `tag` 的身份。tag 只可能来自这几种链接（`linked_tag`），按 `links` 主键找候选，再按优先级复核。
+    fn tagged(&mut self, c: &Connection, tag: &str) -> Result<Vec<String>> {
+        let candidates: Vec<String> = c
+            .prepare_cached(
+                "SELECT entity_id FROM links WHERE system IN ('danbooru','wd','photos_album','ccip') AND key=?1 AND current=1
+                 UNION SELECT entity_id FROM links WHERE system='ccip_base' AND current=1
+                  AND CASE WHEN json_valid(key) THEN json_extract(key,'$[0]') END=?1",
+            )?
+            .query_map([tag], |r| r.get(0))?
+            .collect::<rusqlite::Result<_>>()?;
+        let mut found = Vec::new();
+        for id in candidates {
+            if self.get(c, &id)?.is_some_and(|e| e.tag == tag) {
+                found.push(id);
+            }
+        }
+        Ok(found)
+    }
+
+    /// 当前 qualifier 链接是 `key` 的身份。
+    fn qualified(&mut self, c: &Connection, key: &str) -> Result<Vec<String>> {
+        let candidates: Vec<String> = c
+            .prepare_cached("SELECT entity_id FROM links WHERE system='qualifier' AND key=? AND current=1")?
+            .query_map([key], |r| r.get(0))?
+            .collect::<rusqlite::Result<_>>()?;
+        let mut found = Vec::new();
+        for id in candidates {
+            if self.get(c, &id)?.is_some_and(|e| e.keys.get("qualifier").is_some_and(|k| k == key)) {
+                found.push(id);
+            }
+        }
+        Ok(found)
+    }
+}
+
+/// 一个身份和它的当前链接，与 `View::load` 里同一个身份逐项相同（`seq` 由 `Scope::load` 重新编）。
+fn fetch(c: &Connection, id: &str) -> Result<Option<(i64, Entity)>> {
+    use rusqlite::OptionalExtension;
+    let found = c
+        .prepare_cached(
+            "SELECT rowid,id,kind,parent_id,variant,merged_into,coalesce(original,0) FROM entities WHERE id=?",
+        )?
+        .query_row([id], |r| {
+            Ok((
+                r.get::<_, i64>(0)?,
+                Entity {
+                    id: r.get(1)?,
+                    kind: r.get(2)?,
+                    parent: r.get(3)?,
+                    variant: r.get::<_, Option<String>>(4)?.unwrap_or_default(),
+                    merged: r.get(5)?,
+                    original: r.get::<_, i64>(6)? != 0,
+                    keys: BTreeMap::new(),
+                    linked: false,
+                    tag: String::new(),
+                    seq: 0,
+                },
+            ))
+        })
+        .optional()?;
+    let Some((rowid, mut e)) = found else { return Ok(None) };
+    for row in c
+        .prepare_cached("SELECT system,key FROM links WHERE entity_id=? AND current=1 ORDER BY added_at,key")?
+        .query_map([id], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?
+    {
+        let (system, key) = row?;
+        e.keys.entry(system).or_insert(key);
+    }
+    e.linked = !e.keys.is_empty();
+    e.tag = linked_tag(&e.keys)?;
+    Ok(Some((rowid, e)))
+}
+
+fn json_list<'a>(items: impl IntoIterator<Item = &'a str>) -> Result<String> {
+    serde_json::to_string(&items.into_iter().collect::<Vec<_>>()).map_err(|e| Error::Invalid(e.to_string()))
+}
+
+impl Scope {
+    /// 本事务记下的身份和键的依赖闭包与读取范围。闭包碰到空 tag 的人物键或空 variant 的皮肤键时返回 None：库里
+    /// 所有没有 tag（没有 variant）的身份都依赖它们，调用方改为整表重建。
+    fn collect(c: &Connection) -> Result<Option<Scope>> {
+        let seed_ids: Vec<String> = c
+            .prepare("SELECT id FROM names_dirty_entities")?
+            .query_map([], |r| r.get(0))?
+            .collect::<rusqlite::Result<_>>()?;
+        let seed_keys: Vec<(String, String)> = c
+            .prepare("SELECT kind,key FROM names_dirty_keys")?
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
+            .collect::<rusqlite::Result<_>>()?;
+        let mut f = Fetched::default();
+        let mut ids: BTreeSet<String> = BTreeSet::new();
+        let mut keys: BTreeSet<(String, String)> = BTreeSet::new();
+        let mut existing: BTreeSet<(String, String)> = BTreeSet::new();
+        let mut new_ids = seed_ids;
+        let mut new_keys = seed_keys;
+        let mut children = c.prepare_cached("SELECT id FROM entities WHERE parent_id=?")?;
+        // 不动点：身份 → 它的人物键（会把显示名并进人物键的身份）、子身份、它并入的身份（有链接时）；键 → tag、
+        // variant、qualifier 是这个键的身份。
+        while !new_ids.is_empty() || !new_keys.is_empty() {
+            let mut next_ids = Vec::new();
+            for id in std::mem::take(&mut new_ids) {
+                if !ids.insert(id.clone()) {
+                    continue;
+                }
+                let Some(e) = f.get(c, &id)? else { continue };
+                if View::spoken(e) {
+                    if e.tag.is_empty() {
+                        return Ok(None);
+                    }
+                    new_keys.push(("character".into(), e.tag.clone()));
+                }
+                if let Some(m) = e.merged.as_ref().filter(|m| e.linked && !m.is_empty()) {
+                    next_ids.push(m.clone());
+                }
+                for child in children.query_map([&id], |r| r.get::<_, String>(0))? {
+                    next_ids.push(child?);
+                }
+            }
+            let mut skins: Vec<String> = Vec::new();
+            for key in std::mem::take(&mut new_keys) {
+                if keys.contains(&key) {
+                    continue;
+                }
+                match key.0.as_str() {
+                    "character" => {
+                        if key.1.is_empty() {
+                            return Ok(None);
+                        }
+                        let found = f.tagged(c, &key.1)?;
+                        if !found.is_empty() {
+                            existing.insert(key.clone());
+                        }
+                        next_ids.extend(found);
+                    }
+                    "skin" => {
+                        if key.1.is_empty() {
+                            return Ok(None);
+                        }
+                        skins.push(key.1.clone());
+                    }
+                    "work" => next_ids.extend(f.qualified(c, &key.1)?),
+                    _ => {}
+                }
+                keys.insert(key);
+            }
+            if !skins.is_empty() {
+                // 扫描 `entities`（variant 没有索引）。
+                let list = json_list(skins.iter().map(String::as_str))?;
+                for row in c
+                    .prepare_cached(
+                        "SELECT id,variant FROM entities WHERE variant IN (SELECT value FROM json_each(?1))",
+                    )?
+                    .query_map([&list], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?
+                {
+                    let (id, variant) = row?;
+                    existing.insert(("skin".into(), variant));
+                    next_ids.push(id);
+                }
+            }
+            new_ids = next_ids;
+        }
+        let works: Vec<&str> = keys.iter().filter(|(k, _)| k == "work").map(|(_, v)| v.as_str()).collect();
+        if !works.is_empty() {
+            // 作品文字的范围与 `choice_keys` 相同：`entities.work`（没有索引，扫描）与任意 qualifier 链接。
+            let list = json_list(works.iter().copied())?;
+            for row in c
+                .prepare_cached(
+                    "SELECT DISTINCT work FROM entities WHERE work<>'' AND work IN (SELECT value FROM json_each(?1))",
+                )?
+                .query_map([&list], |r| r.get::<_, String>(0))?
+            {
+                existing.insert(("work".into(), row?));
+            }
+            let mut linked =
+                c.prepare_cached("SELECT EXISTS(SELECT 1 FROM links WHERE system='qualifier' AND key=?)")?;
+            for key in works {
+                if linked.query_row([key], |r| r.get::<_, bool>(0))? {
+                    existing.insert(("work".into(), key.to_owned()));
+                }
+            }
+        }
+        // 选名还要读的身份：皮肤的父身份（`base`），以及这些身份的并入者（`base` 在没有名字时借并入者的人物键）。
+        let mut want: BTreeSet<String> = BTreeSet::new();
+        let mut bases: BTreeSet<String> = BTreeSet::new();
+        for id in &ids {
+            let Some(e) = f.get(c, id)? else { continue };
+            let parent = e.parent.clone();
+            want.insert(id.clone());
+            bases.insert(id.clone());
+            if let Some(p) = parent {
+                if let Some(pe) = f.get(c, &p)? {
+                    if pe.linked && pe.tag.is_empty() {
+                        return Ok(None);
+                    }
+                    want.insert(p.clone());
+                    bases.insert(p);
+                }
+            }
+        }
+        let mut tags: BTreeSet<String> = BTreeSet::new();
+        if !bases.is_empty() {
+            // 扫描 `entities`（merged_into 没有索引）。
+            let list = json_list(bases.iter().map(String::as_str))?;
+            let members: Vec<String> = c
+                .prepare_cached("SELECT id FROM entities WHERE merged_into IN (SELECT value FROM json_each(?1))")?
+                .query_map([&list], |r| r.get(0))?
+                .collect::<rusqlite::Result<_>>()?;
+            for m in members {
+                let Some(e) = f.get(c, &m)? else { continue };
+                if e.linked {
+                    if e.tag.is_empty() {
+                        return Ok(None);
+                    }
+                    tags.insert(e.tag.clone());
+                    want.insert(m);
+                }
+            }
+        }
+        for id in &bases {
+            if let Some(e) = f.get(c, id)?.filter(|e| !e.tag.is_empty()) {
+                tags.insert(e.tag.clone());
+            }
+        }
+        // 人物键下的名字由同 tag 的全部身份拼成；闭包里的人物键已经找过一遍。
+        for tag in tags {
+            if !keys.contains(&("character".to_owned(), tag.clone())) {
+                want.extend(f.tagged(c, &tag)?);
+            }
+        }
+        let mut read = BTreeMap::new();
+        for id in want {
+            if let Some(Some(x)) = f.0.remove(&id) {
+                read.insert(id, x);
+            }
+        }
+        Ok(Some(Scope { ids, keys, existing, read }))
+    }
+
+    /// 只含 `read` 的快照：每个身份、它的名字和链接与整库 `View::load` 里逐项相同；人物键、皮肤键、作品键下的名字
+    /// 只装这些身份用得到的键，每个键装全（同 tag 的身份都在 `read` 里）。
+    fn load(&self, c: &Connection) -> Result<View> {
+        let mut order: Vec<&(i64, Entity)> = self.read.values().collect();
+        order.sort_by_key(|(rowid, _)| *rowid);
+        let mut entities: BTreeMap<String, Entity> = BTreeMap::new();
+        for (seq, (_, e)) in order.iter().enumerate() {
+            let mut e = e.clone();
+            e.seq = u32::try_from(seq).map_err(|_| Error::Invalid("身份太多".into()))?;
+            entities.insert(e.id.clone(), e);
+        }
+        let mut merged: HashMap<String, Vec<String>> = HashMap::new();
+        for e in entities.values() {
+            if let Some(m) = e.merged.as_ref().filter(|m| e.linked && !m.is_empty()) {
+                merged.entry(m.clone()).or_default().push(e.id.clone());
+            }
+        }
+        let mut own: HashMap<String, Vec<NameRow>> = HashMap::new();
+        let mut rows = c.prepare_cached(
+            "SELECT lang,value,source,preferred FROM names WHERE entity_id=? AND role='display'
+             ORDER BY preferred DESC,value,rowid",
+        )?;
+        for id in entities.keys() {
+            let found: Vec<NameRow> = rows
+                .query_map([id], |r| {
+                    Ok(NameRow {
+                        lang: r.get(0)?,
+                        value: r.get(1)?,
+                        source: r.get(2)?,
+                        preferred: r.get::<_, i64>(3)? != 0,
+                    })
+                })?
+                .collect::<rusqlite::Result<_>>()?;
+            if !found.is_empty() {
+                own.insert(id.clone(), found);
+            }
+        }
+        let mut wanted: BTreeSet<(String, String)> = self.keys.clone();
+        for e in entities.values() {
+            if !e.tag.is_empty() {
+                wanted.insert(("character".into(), e.tag.clone()));
+            }
+            if !e.variant.is_empty() {
+                wanted.insert(("skin".into(), e.variant.clone()));
+            }
+            if let Some(q) = e.keys.get("qualifier") {
+                wanted.insert(("work".into(), q.clone()));
+            }
+        }
+        let mut names: HashMap<(String, String), Vec<NameRow>> = HashMap::new();
+        let has_display: bool =
+            c.query_row("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name='display_names')", [], |r| r.get(0))?;
+        if has_display {
+            let mut display = c.prepare_cached(
+                "SELECT lang,source,value FROM display_names WHERE kind=? AND key=? AND source<>'danbooru' ORDER BY rowid",
+            )?;
+            for (kind, key) in wanted {
+                let found: Vec<NameRow> = display
+                    .query_map([&kind, &key], |r| {
+                        Ok(NameRow { lang: r.get(0)?, source: r.get(1)?, value: r.get(2)?, preferred: false })
+                    })?
+                    .collect::<rusqlite::Result<_>>()?;
+                if !found.is_empty() {
+                    names.insert((kind, key), found);
+                }
+            }
+        }
+        for (_, e) in &order {
+            if View::spoken(e) {
+                if let Some(rows) = own.get(&e.id) {
+                    names.entry(("character".into(), e.tag.clone())).or_default().extend(rows.iter().cloned());
+                }
+            }
+        }
+        Ok(View { entities, merged, names, own, works: Vec::new(), with_work: false })
+    }
 }
 
 #[cfg(test)]
@@ -812,6 +1145,96 @@ mod tests {
         tx.execute("UPDATE entities SET variant='other' WHERE id='s1'", []).unwrap();
         assert!(view.absorb(&tx).unwrap().is_none());
         assert!(same(&view, &before));
+    }
+
+    fn projection(c: &Connection) -> Vec<Vec<rusqlite::types::Value>> {
+        let mut all = Vec::new();
+        for sql in [
+            "SELECT * FROM term_name_display ORDER BY entity,skin_only",
+            "SELECT * FROM term_name_choice ORDER BY kind,key",
+        ] {
+            let mut st = c.prepare(sql).unwrap();
+            let n = st.column_count();
+            all.extend(
+                st.query_map([], |r| (0..n).map(|i| r.get(i)).collect::<rusqlite::Result<Vec<_>>>())
+                    .unwrap()
+                    .map(|r| r.unwrap()),
+            );
+        }
+        all
+    }
+
+    /// `library` plus a skin sharing a variant, a nameless character borrowing its member's name, a ccip_base tag
+    /// and two characters linked without a tag; the projection is fully built.
+    fn projected() -> Connection {
+        let c = library();
+        c.execute_batch(TABLES).unwrap();
+        c.execute_batch(
+            "INSERT INTO entities VALUES ('s2','skin','e2','swimsuit_x',NULL,0,''),('e3','character',NULL,'',NULL,0,''),
+              ('m2','character',NULL,'','e3',0,''),('e4','character',NULL,'',NULL,0,''),
+              ('b1','character',NULL,'',NULL,0,''),('b2','character',NULL,'',NULL,0,''),('w2','work',NULL,'',NULL,0,'series_w'),
+              ('s3','skin','e3','',NULL,0,'');
+             INSERT INTO links VALUES ('danbooru','synth_swimsuit_2','s2',1,'2026-01-06'),('danbooru','lonely','e3',1,'2026-01-07'),
+              ('danbooru','member_tag','m2',1,'2026-01-08'),('ccip_base','[\"ccip_tag\",1]','e4',1,'2026-01-09'),
+              ('bangumi','b1','b1',1,'2026-01-10'),('danbooru','s3_tag','s3',1,'2026-01-13'),('bangumi','b2','b2',1,'2026-01-11'),
+              ('danbooru','old_tag','e4',0,'2026-01-12');
+             INSERT INTO names VALUES ('m2','zh','成员名','index','display',0,0),('e4','zh','卡','index','display',0,0),
+              ('b1','zh','无标签一','index','display',0,0),('b2','ja','無標籤二','index','display',0,0);
+             INSERT INTO display_names VALUES ('character','member_tag','ja','wiki','メンバー');",
+        )
+        .unwrap();
+        rebuild(&c).unwrap();
+        c
+    }
+
+    #[test]
+    fn scoped_projection_matches_a_whole_rebuild() {
+        let mut c = projected();
+        let before = projection(&c);
+        let cases: [(&str, Option<&[&str]>); 9] = [
+            // Own name of a character: its tag-mate (e2 via wd), its skin and the character key.
+            ("UPDATE names SET value='改名' WHERE entity_id='e1' AND lang='zh'", Some(&["e1", "e2", "m1", "s1", "s2"])),
+            // A member's name: the nameless character it was merged into borrows it.
+            ("UPDATE names SET value='成员改名' WHERE entity_id='m2'", Some(&["e3", "m2", "s3"])),
+            ("DELETE FROM names WHERE entity_id='m2'", Some(&["e3", "m2", "s3"])),
+            // Shared skin variant: both skins and their parents.
+            (
+                "INSERT INTO display_names VALUES ('skin','swimsuit_x','ja','wiki','ミズギ')",
+                Some(&["e1", "e2", "m1", "s1", "s2"]),
+            ),
+            // Work text: the work with that qualifier; `entities.work` keeps the key in range.
+            ("DELETE FROM display_names WHERE kind='work' AND key='series_w'", Some(&["w1"])),
+            ("INSERT INTO display_names VALUES ('character','ccip_tag','zh','bangumi','新卡')", Some(&["e4"])),
+            (
+                "INSERT INTO display_names VALUES ('character','member_tag','zh','bangumi','成员键')",
+                Some(&["e3", "m2", "s3"]),
+            ),
+            // Linked without a tag: every tagless identity shares the ("character","") key → whole rebuild.
+            ("UPDATE names SET value='无标签改' WHERE entity_id='b1'", None),
+            ("INSERT INTO display_names VALUES ('skin','','zh','index','空')", None),
+        ];
+        for (sql, read) in cases {
+            for from_view in [false, true] {
+                let tx = c.transaction().unwrap();
+                crate::legacy_names::track(&tx).unwrap();
+                tx.execute_batch(sql).unwrap();
+                let scope = Scope::collect(&tx).unwrap();
+                assert_eq!(
+                    scope.as_ref().map(|s| s.read.keys().map(String::as_str).collect::<Vec<_>>()),
+                    read.map(<[&str]>::to_vec),
+                    "{sql}"
+                );
+                if from_view {
+                    rebuild_changed_with(&tx, Some(&View::load(&tx).unwrap())).unwrap();
+                } else {
+                    rebuild_changed(&tx).unwrap();
+                }
+                let changed = projection(&tx);
+                rebuild(&tx).unwrap();
+                assert_eq!(changed, projection(&tx), "{sql} (from_view={from_view})");
+                assert_ne!(changed, before, "{sql}");
+            }
+        }
     }
 
     #[test]
