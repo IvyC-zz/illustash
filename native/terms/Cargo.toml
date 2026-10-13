@@ -66,6 +66,21 @@ required-features = ["test-read-host"]
 [profile.dev.package.libsqlite3-sys]
 opt-level = 3
 
+# tests/replay.rs digests every table after each of ~13,000 recorded calls; unoptimized dependencies (hashing,
+# regex masking, JSON, gzip, SQLite bindings) dominate its time (#130). Our own crates stay at the dev level, so
+# editing them rebuilds as fast as before.
+[profile.dev.package."*"]
+opt-level = 3
+
+[profile.dev.package.illustash-core]
+opt-level = 0
+
+[profile.dev.package.illustash-platform]
+opt-level = 0
+
+[profile.dev.package.tiny_http]
+opt-level = 0
+
 # tiny_http 0.12 has no per-connection timeout or connection limit (#25); the vendored copy adds
 # `Server::from_listener_with_limits`. Every build root linking this crate repeats this patch.
 [patch.crates-io]

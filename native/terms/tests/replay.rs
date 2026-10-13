@@ -56,6 +56,8 @@ struct Temp {
     spellings: Vec<String>,
     /// Key-like values inside the directory's path.
     segments: Vec<String>,
+    /// Matches any spelling or segment; text without one is left as it is (most database cells).
+    filter: Regex,
 }
 
 impl Temp {
@@ -86,12 +88,16 @@ impl Temp {
             .collect::<HashSet<_>>()
             .into_iter()
             .collect();
-        Temp { spellings, segments }
+        let filter = literals(spellings.iter().chain(&segments));
+        Temp { spellings, segments, filter }
     }
 
     /// Text to look for keys in: the directory masked. A key-like segment of its path still left
     /// over means a spelling not handled here; fail plainly rather than count it as a key.
     fn mask(&self, text: &str) -> String {
+        if !self.filter.is_match(text) {
+            return text.to_owned();
+        }
         let mut text = text.to_owned();
         for spelling in &self.spellings {
             text = text.replace(spelling.as_str(), "@TEMP@");
@@ -111,30 +117,43 @@ impl Temp {
 }
 
 /// Temporary roots of one case: (real path, token), longest real path first when substituting.
-struct Roots(Vec<(String, String)>);
+struct Roots {
+    roots: Vec<(String, String)>,
+    /// Real paths, with and without `/private`, longest first: what `norm` replaces, in order.
+    pairs: Vec<(String, String)>,
+    /// Matches any of `pairs`; text without one is left as it is (most database cells).
+    filter: Regex,
+}
 
 impl Roots {
-    /// Real paths -> tokens (recorded spelling).
-    fn norm(&self, text: &str) -> String {
-        let mut pairs: Vec<(String, &str)> = Vec::new();
-        for (real, token) in &self.0 {
-            pairs.push((real.clone(), token));
+    fn new(roots: Vec<(String, String)>) -> Self {
+        let mut pairs = Vec::new();
+        for (real, token) in &roots {
+            pairs.push((real.clone(), token.clone()));
             if let Some(short) = real.strip_prefix("/private") {
-                pairs.push((short.to_owned(), token));
+                pairs.push((short.to_owned(), token.clone()));
             }
         }
         pairs.sort_by(|a, b| b.0.len().cmp(&a.0.len()).then_with(|| a.0.cmp(&b.0)));
         pairs.dedup();
+        let filter = literals(pairs.iter().map(|(real, _)| real));
+        Roots { roots, pairs, filter }
+    }
+    /// Real paths -> tokens (recorded spelling).
+    fn norm(&self, text: &str) -> String {
+        if !self.filter.is_match(text) {
+            return text.to_owned();
+        }
         let mut text = text.to_owned();
-        for (real, token) in pairs {
-            text = text.replace(&real, token);
+        for (real, token) in &self.pairs {
+            text = text.replace(real.as_str(), token);
         }
         text
     }
     /// Tokens -> real paths.
     fn sub(&self, text: &str) -> String {
         let mut text = text.to_owned();
-        for (real, token) in &self.0 {
+        for (real, token) in &self.roots {
             text = text.replace(token.as_str(), real);
         }
         text
@@ -165,6 +184,12 @@ fn hex(bytes: &[u8]) -> String {
 
 fn short(text: &str) -> String {
     hex(&Sha256::digest(text.as_bytes()))[..16].to_owned()
+}
+
+/// Any of these strings, as one pattern: a quick test before replacing each in turn.
+fn literals<'a>(texts: impl IntoIterator<Item = &'a String>) -> Regex {
+    let alternatives: Vec<String> = texts.into_iter().map(|t| regex::escape(t)).collect();
+    Regex::new(&alternatives.join("|")).unwrap()
 }
 
 fn encode(value: ValueRef, roots: &Roots, back: &HashMap<String, String>) -> String {
@@ -400,7 +425,7 @@ fn case(name: &str, calls: &[Value], blobs: &Value, bin: &Path, under: &Path, ve
     tokens.push("@ROOT@".into());
     tokens.sort();
     tokens.dedup();
-    let roots = Roots(
+    let roots = Roots::new(
         tokens
             .into_iter()
             .map(|t| {
