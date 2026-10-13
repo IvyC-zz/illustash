@@ -125,7 +125,9 @@ class NativeProvenanceTest(unittest.TestCase):
         self.service=http.server.ThreadingHTTPServer(('127.0.0.1',0),Handler)
         t=threading.Thread(target=self.service.serve_forever,daemon=True);t.start()
         self.addCleanup(self.service.server_close);self.addCleanup(t.join);self.addCleanup(self.service.shutdown)
-        self.env.update(ILLUSTASH_PROVENANCE_WORKER=worker_command(self.worker),ILLUSTASH_PROVENANCE_BASE=f'http://127.0.0.1:{self.service.server_port}',ILLUSTASH_PROVENANCE_IDLE_SECONDS='2')
+        # Only the timeout case relies on the idle limit; under load (the parallel suite, Windows #56) a worker start
+        # alone can exceed 2 seconds, so the rest use a limit that never ends their runs.
+        self.env.update(ILLUSTASH_PROVENANCE_WORKER=worker_command(self.worker),ILLUSTASH_PROVENANCE_BASE=f'http://127.0.0.1:{self.service.server_port}',ILLUSTASH_PROVENANCE_IDLE_SECONDS='30')
         with sqlite3.connect(self.lib.source) as c:
             c.execute("ALTER TABLE assets ADD COLUMN preset TEXT DEFAULT 'x'")
             c.execute("ALTER TABLE assets ADD COLUMN source_id TEXT DEFAULT 'synthetic'")
@@ -209,6 +211,7 @@ class NativeProvenanceTest(unittest.TestCase):
         self.assertEqual(self.sql("SELECT status FROM leads WHERE key='123'",cache=True),[('resolved',)])
         self.assertTrue(any('artists.json' in s for s in self.calls))
     def test_worker_missing_wrong_identity_crash_and_timeout(self):
+        self.env['ILLUSTASH_PROVENANCE_IDLE_SECONDS']='2'
         for mode in ('wrong','crash','hang','outside'):
             self.env['SYNTHETIC_MODE']=mode;self.restart()
             self.post({'action':'lookup','ids':['a']});v=self.finish()
@@ -349,9 +352,6 @@ class NativeProvenanceTest(unittest.TestCase):
         metadata=json.loads((self.support/'accounts.json').read_text());self.assertIn('expired',metadata['pixiv'])
         self.assertFalse(self.info()['auto_network'])
     def test_new_queue_preemption_resume_and_startup_disable(self):
-        # Runs here end by preemption or an explicit stop, never by the idle timeout. Each step starts a new worker
-        # process, and on Windows that start alone can exceed the suite's 2-second idle limit (#56).
-        self.env['ILLUSTASH_PROVENANCE_IDLE_SECONDS']='30'
         self.env['SYNTHETIC_MODE']='hang-first';self.restart()
         with db.connect(self.lib) as c:c.execute("INSERT INTO pending_runs(kind) VALUES ('new')")
         self.restart()
