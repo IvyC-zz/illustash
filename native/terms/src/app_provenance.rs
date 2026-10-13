@@ -673,7 +673,7 @@ fn compute(
         })?,
     )?;
     let mut command = Command::new(worker);
-    command.args([&request, &response]);
+    command.env(crate::app_tasks::WORKER_KIND_ENV, "provenance").args([&request, &response]);
     // The network broker stays in Rust; computation has no credential or login interface.
     std::thread::scope(|scope| -> Result<()> {
         let child = scope.spawn(|| ctx.process(&mut command));

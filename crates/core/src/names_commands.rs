@@ -170,7 +170,7 @@ pub fn run(conn: &mut Connection, args: &Value) -> Result<Value> {
     for op in &ops {
         one(&tx, op)?;
     }
-    crate::legacy_names::mirror_aliases(&tx)?;
+    // 别名镜像由提交时的 `legacy_names::after_write` 按受影响的键同步，一个事务只同步一次。
     commit_writing(tx)?;
     Ok(json!({"done": ops.len()}))
 }

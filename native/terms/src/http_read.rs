@@ -147,7 +147,8 @@ pub(crate) fn register_names(c: &Connection) -> Result<()> {
     }
     let fallback = Arc::new(View::load(c)?);
     let mut shown = HashMap::new();
-    for id in strings(c, "SELECT id FROM entities", &[])? {
+    // The snapshot already holds every identity; no second read of entities (#102).
+    for id in fallback.ids().cloned().collect::<Vec<_>>() {
         for skin in [0, 1] {
             if let Some((v, tag)) = fallback.entity(&id, skin != 0)? {
                 let mut info = choice(v);

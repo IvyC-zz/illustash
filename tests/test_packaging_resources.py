@@ -38,6 +38,19 @@ def assert_desktop_contract(test, manifest, platform, name):
     required = desktop_required(name)
     test.assertTrue(required)
     test.assertEqual([path for path in required if path not in manifest['files']], [])
+    assert_single_worker_and_notices(test, manifest, '.exe' if platform == 'win32' else '')
+
+
+def assert_single_worker_and_notices(test, manifest, suffix, research=True):
+    """#37: one worker program, no duplicate executables; #8: project and third-party notices ship."""
+    files = manifest['files']
+    binaries = {name: digest for name, digest in files.items() if name.startswith('bin/')}
+    test.assertEqual(len(set(binaries.values())), len(binaries), binaries)
+    workers = [name for name in binaries if 'worker' in name or any(
+        name == f'bin/illustash-{kind}{suffix}' for kind in pack.WORKER_KINDS)]
+    test.assertEqual(workers, [f'bin/illustash-worker{suffix}'] if research else [])
+    for installed, source in pack.NOTICES.items():
+        test.assertEqual(files['resources/' + installed], hashlib.sha256((ROOT / source).read_bytes()).hexdigest())
 
 
 class PackagingResourcesTest(unittest.TestCase):
@@ -89,10 +102,12 @@ class PackagingResourcesTest(unittest.TestCase):
             'resources/models/ccip/model_metrics.onnx', 'resources/models/ccip/metrics.json'})
         suffix = '.exe' if os.name == 'nt' else ''
         self.assertEqual({name for name in delta if name.startswith('bin/')}, {
-            f'bin/illustash-{name}{suffix}' for name in ('recognition', 'index', 'research', 'provenance', 'iqdb')})
+            f'bin/illustash-{name}{suffix}' for name in ('worker', 'iqdb')})
         worker = hashlib.sha256((self.binaries / ('illustash-worker' + suffix)).read_bytes()).hexdigest()
-        for kind in ('recognition', 'index', 'research', 'provenance'):
-            self.assertEqual(complete['files'][f'bin/illustash-{kind}{suffix}'], worker)
+        self.assertEqual(complete['files'][f'bin/illustash-worker{suffix}'], worker)
+        assert_single_worker_and_notices(self, plain, suffix, research=False)
+        assert_single_worker_and_notices(self, complete, suffix)
+        self.assertFalse((base / 'resources/licenses/models').exists())
         # Every installed request is native: no Python calculators ship.
         self.assertFalse(any(name.startswith(('workers/', 'runtime/')) for name in delta))
         self.assertFalse((base / 'workers').exists())
@@ -154,7 +169,7 @@ class PackagingResourcesTest(unittest.TestCase):
         with patch.object(pack.sys, 'platform', 'darwin'):
             if os.name == 'nt':
                 for name in ('illustash-terms', 'illustash-worker'):
-                    (self.binaries / name).write_bytes(b'synthetic marker')
+                    (self.binaries / name).write_bytes(b'synthetic marker:' + name.encode())
             output = self.root / 'explicit-native-resources'
             with patch.object(pack.subprocess, 'run') as compiler:
                 pack.stage(output, self.binaries, research=True, iqdb=self.iqdb,
@@ -182,6 +197,47 @@ class PackagingResourcesTest(unittest.TestCase):
                        iqdb=self.iqdb, ort_dylib=runtime, ort_licenses=notices)
         self.assertFalse((self.root / 'incomplete-notices/manifest.json').exists())
 
+    def test_model_licenses_are_copied_verbatim_only_with_models(self):
+        notices = self.root / 'model notices'
+        (notices / 'ccip').mkdir(parents=True)
+        (notices / 'wd').mkdir()
+        (notices / 'ccip/LICENSE').write_bytes(b'synthetic CCIP license text')
+        (notices / 'wd/LICENSE').write_bytes(b'synthetic WD license text')
+        output = self.root / 'with model notices'
+        pack.stage(output, self.binaries, research=True, iqdb=self.iqdb, models=self.models, model_licenses=notices)
+        manifest = self.manifest(output)
+        for name in ('ccip/LICENSE', 'wd/LICENSE'):
+            self.assertEqual((output / 'resources/licenses/models' / name).read_bytes(), (notices / name).read_bytes())
+            self.assertIn('resources/licenses/models/' + name, manifest['files'])
+        with self.assertRaisesRegex(ValueError, 'require --models'):
+            pack.stage(self.root / 'no models', self.binaries, research=True, iqdb=self.iqdb, model_licenses=notices)
+        self.assertFalse((self.root / 'no models').exists())
+        empty = self.root / 'empty notices'
+        empty.mkdir()
+        with self.assertRaisesRegex(ValueError, 'empty'):
+            pack.stage(self.root / 'empty', self.binaries, research=True, iqdb=self.iqdb, models=self.models,
+                       model_licenses=empty)
+        self.assertFalse((self.root / 'empty').exists())
+
+    def test_full_installers_ship_resources_once(self):
+        """#37: full installers use compute/resources only; the base installer keeps resources/."""
+        def mapping(name):
+            return json.loads((ROOT / 'packaging' / name).read_text())['bundle']['resources']
+        self.assertEqual(mapping('tauri-bundle.json'), {'../packaging/desktop-resources/': 'resources/'})
+        for name in ('tauri-full.json', 'tauri-full-macos.json'):
+            # The host roots full installs at compute/resources (bundled_workers tests), so a
+            # second top-level resources/ copy would have no consumer.
+            self.assertEqual(mapping(name), {'../packaging/desktop-compute/': 'compute/'}, name)
+        # Upgrading an older full install must not leave the per-kind copies or resources/ behind.
+        config = json.loads((ROOT / 'packaging/tauri-full.json').read_text())
+        hooks = (ROOT / 'desktop' / config['bundle']['windows']['nsis']['installerHooks']).resolve()
+        text = hooks.read_text()
+        self.assertIn('!macro NSIS_HOOK_PREINSTALL', text)
+        for kind in pack.WORKER_KINDS:
+            self.assertIn(f'Delete "$INSTDIR\\compute\\bin\\illustash-{kind}.exe"', text)
+        self.assertIn('RMDir /r "$INSTDIR\\resources"', text)
+        self.assertNotIn('worker', ''.join(line for line in text.splitlines() if line.lstrip().startswith(('Delete', 'RMDir'))))
+
     @unittest.skipIf(os.name == 'nt', 'POSIX shell launcher execution only')
     def test_relocated_ordinary_launch_preserves_overrides_and_remains_lazy(self):
         keys = ('ILLUSTASH_ROOT', 'ILLUSTASH_MODELS', 'ILLUSTASH_SHARED',
@@ -206,7 +262,7 @@ class PackagingResourcesTest(unittest.TestCase):
         shared = (home / 'Library/Application Support/Illustash/Shared' if pack.sys.platform == 'darwin'
                   else home / '.local/share/Illustash/Shared')
         expected = [str(moved / 'resources'), str(moved / 'resources/models'), str(shared)] + [
-            str(moved / f'bin/illustash-{kind}') for kind in ('research', 'index', 'provenance', 'recognition')]
+            str(moved / 'bin/illustash-worker')] * 4
         for script, args in (('start.sh', ['http', '--native']), ('desktop.sh', [])):
             with self.subTest(script=script):
                 result = subprocess.run(['/bin/sh', str(moved / script), '--library', 'synthetic.pilib'],
@@ -279,7 +335,7 @@ class MacDesktopResourcesTest(unittest.TestCase):
         with patch.object(pack.sys, 'platform', 'darwin'):
             if os.name == 'nt':
                 for name in ('illustash-terms', 'illustash-worker'):
-                    (self.binaries / name).write_bytes(b'synthetic marker')
+                    (self.binaries / name).write_bytes(b'synthetic marker:' + name.encode())
             source = self.root / 'portable'
             pack.stage(source, self.binaries, research=True, iqdb=self.iqdb, models=self.models,
                        desktop=self.binaries / ('illustash-desktop.exe' if os.name == 'nt' else 'illustash-desktop'),
@@ -356,7 +412,7 @@ class WindowsOpenBLASResourcesTest(unittest.TestCase):
         self.addCleanup(crt.stop)
         # Only marker binaries get Windows names. This is cross-platform source testing.
         for name in ('illustash-terms', 'illustash-worker'):
-            (self.binaries / (name + '.exe')).write_bytes(b'synthetic marker')
+            (self.binaries / (name + '.exe')).write_bytes(b'synthetic marker:' + name.encode())
         return site
 
     def test_fixed_resource_and_complete_notices_manifest_relocation(self):

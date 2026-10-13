@@ -2404,11 +2404,23 @@ function syncLine(s) {
   }
   // Paths the scan could not read keep their pictures; the next sync reads them again.
   const kept = s.unreadable ? ` · ${number(s.unreadable)} 处暂时读不到，已有图片保留不动` : '';
-  if (s.status === 'done') return `上次同步：${stamp(s.finished_at)}${kept}`;
+  // Pictures given up on, apart (#112): unreadable ones are tried again, damaged ones wait for their file to change.
+  const gave = (s.failed ? ` · ${number(s.failed)} 张暂时读不到（可能还在 iCloud），下次同步重试` : '')
+    + (s.damaged ? ` · ${number(s.damaged)} 张已损坏或格式不支持，已跳过` : '');
+  if (s.status === 'done') return `上次同步：${stamp(s.finished_at)}${kept}${gave}`;
   if (s.status === 'needs_recognition') return `有 ${number(s.total || 0)} 张图等待识别（识别服务未启动）${kept}`;
   if (s.status === 'interrupted') return s.message ? `同步已中断（${s.message}），可重新扫描` : '同步已中断，可重新扫描';
   if (s.status === 'error') return '同步失败';
   return '本地图库';
+}
+// Pictures whose files open but are not images the app can read: where they are, as on the library page.
+function syncDamaged(d) {
+  if (!d?.count) return '';
+  const short = p => p.replace(/^\/Users\/[^/]+/, '~');
+  const rows = d.paths.map(p => `<div class="setting-line lib-folder"><span class="lib-path" title="${esc(p)}"><bdi>${esc(short(p))}</bdi></span></div>`).join('');
+  const more = d.count > d.paths.length ? `<p class="muted-note">另有 ${number(d.count - d.paths.length)} 张未列出。</p>` : '';
+  return fold('task-sync-damaged', `${number(d.count)} 张图片已损坏或格式不支持`,
+    `<p class="muted-note">这些文件读得到，但不是能打开的图片，同步时跳过。修好或换成正常的图片后，下次同步会重新识别。</p>${rows}${more}`);
 }
 let syncTimer = null, lastImported = 0, syncPoll = 0;
 async function pollSync() {
@@ -2416,10 +2428,10 @@ async function pollSync() {
   // Polls overlap (task panel, timer, after a start): an older answer arriving last must not wind the state back.
   const poll = ++syncPoll;
   try {
-    const {state: s, history} = await api('/api/sync');
+    const {state: s, history, damaged} = await api('/api/sync');
     if (poll !== syncPoll) return;
     const was = state.sync.status;
-    state.sync = s; state.syncHistory = history;
+    state.sync = s; state.syncHistory = history; state.syncDamaged = damaged;
     if ((s.imported || 0) > lastImported || (SYNC_ACTIVE.includes(was) && !SYNC_ACTIVE.includes(s.status))) {
       state.countDirty = true; state.readEpoch++;
       lastImported = s.imported || 0; await refreshMeta().catch(e => error(readError(e)));
@@ -3248,7 +3260,7 @@ function taskList() {
   const bar = (done, total) => total ? `<div class="progress"><span style="width:${Math.min(100, Math.round((done || 0) / total * 100))}%"></span></div>` : '';
   const list = [
     {key: 'sync', name: folder ? '文件夹同步' : '照片同步', active: SYNC_ACTIVE.includes(s.status), line: s.status === 'off' ? '这次启动没有开同步' : syncLine(s),
-      warn: ['error', 'needs_recognition', 'interrupted'].includes(s.status), body: syncBar(s, bar),
+      warn: ['error', 'needs_recognition', 'interrupted'].includes(s.status), body: syncBar(s, bar) + (SYNC_ACTIVE.includes(s.status) ? '' : syncDamaged(state.syncDamaged)),
       action: `<button class="quiet small" data-task="sync" ${SYNC_ACTIVE.includes(s.status) || s.status === 'off' ? 'disabled' : ''}>立即同步</button>`,
       log: state.syncHistory?.length ? ['同步记录', `<table class="settings-table"><tr><th>时间</th><th>新增</th><th>移除</th><th>导入</th><th>失败</th></tr>${state.syncHistory.slice(0, 8).map(r => `<tr><td>${esc(stamp(r.started_at))}</td><td>${number(r.found)}</td><td>${number(r.removed)}</td><td>${number(r.imported)}</td><td>${number(r.failed)}</td></tr>`).join('')}</table>`] : null},
     {key: 'index', name: '检查新角色', active: INDEX_ACTIVE.includes(ix.status), line: state.index ? indexLine(ix, state.index.check) : '…', warn: ix.status === 'error',

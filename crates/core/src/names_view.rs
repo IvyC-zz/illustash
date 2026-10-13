@@ -140,7 +140,7 @@ pub struct Choice {
 
 const LANGS: [&str; 3] = ["zh", "ja", "en"];
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 struct NameRow {
     lang: String,
     value: String,
@@ -148,7 +148,7 @@ struct NameRow {
     preferred: bool,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 struct Entity {
     id: String,
     kind: String,
@@ -159,6 +159,8 @@ struct Entity {
     keys: BTreeMap<String, String>,
     linked: bool,
     tag: String,
+    /// 在 `entities` 里的 rowid 顺序（人物键下的名字按这个顺序拼接）。u32 落在已有的对齐空隙里，不增大快照。
+    seq: u32,
 }
 
 /// `View` 的一个快照。
@@ -167,6 +169,32 @@ pub struct View {
     merged: HashMap<String, Vec<String>>,
     names: HashMap<(String, String), Vec<NameRow>>,
     own: HashMap<String, Vec<NameRow>>,
+    /// `entities.work`，按 `seq` 排；只有 `load_with_work` 载入，否则为空。
+    works: Vec<String>,
+    with_work: bool,
+}
+
+/// 一个身份在快照里的样子（`/api/names` 的统计用，免得再读一遍 `entities` 和 `links`）。
+pub struct Identity<'a> {
+    pub id: &'a str,
+    pub kind: &'a str,
+    pub parent: Option<&'a str>,
+    pub merged_into: Option<&'a str>,
+    pub original: bool,
+    /// 有当前链接。
+    pub linked: bool,
+    pub tag: &'a str,
+    pub work: &'a str,
+    pub variant: &'a str,
+}
+
+/// 快照里一个条目被替换之前的样子（None = 原来没有）。
+type Replaced<K> = Vec<(K, Option<Vec<NameRow>>)>;
+
+/// `View::absorb` 之前被替换掉的快照条目，`View::restore` 用它撤回。
+pub struct Absorbed {
+    own: Replaced<String>,
+    names: Replaced<(String, String)>,
 }
 
 pub fn linked_tag(keys: &BTreeMap<String, String>) -> Result<String> {
@@ -188,12 +216,26 @@ pub fn linked_tag(keys: &BTreeMap<String, String>) -> Result<String> {
 
 impl View {
     pub fn load(c: &Connection) -> Result<View> {
+        View::load_inner(c, false)
+    }
+
+    /// 同 `load`，另带上 `entities.work`（`identities` 里的 `work`）。
+    pub fn load_with_work(c: &Connection) -> Result<View> {
+        View::load_inner(c, true)
+    }
+
+    fn load_inner(c: &Connection, with_work: bool) -> Result<View> {
         let mut entities: BTreeMap<String, Entity> = BTreeMap::new();
         let mut order: Vec<String> = Vec::new();
-        for row in c
-            .prepare("SELECT id,kind,parent_id,variant,merged_into,coalesce(original,0) FROM entities ORDER BY rowid")?
-            .query_map([], |r| {
-                Ok(Entity {
+        let mut works: Vec<String> = Vec::new();
+        let sql = if with_work {
+            "SELECT id,kind,parent_id,variant,merged_into,coalesce(original,0),work FROM entities ORDER BY rowid"
+        } else {
+            "SELECT id,kind,parent_id,variant,merged_into,coalesce(original,0) FROM entities ORDER BY rowid"
+        };
+        for row in c.prepare(sql)?.query_map([], |r| {
+            Ok((
+                Entity {
                     id: r.get(0)?,
                     kind: r.get(1)?,
                     parent: r.get(2)?,
@@ -203,10 +245,16 @@ impl View {
                     keys: BTreeMap::new(),
                     linked: false,
                     tag: String::new(),
-                })
-            })?
-        {
-            let e = row?;
+                    seq: 0,
+                },
+                if with_work { r.get::<_, Option<String>>(6)?.unwrap_or_default() } else { String::new() },
+            ))
+        })? {
+            let (mut e, work) = row?;
+            e.seq = u32::try_from(order.len()).map_err(|_| Error::Invalid("身份太多".into()))?;
+            if with_work {
+                works.push(work);
+            }
             order.push(e.id.clone());
             entities.insert(e.id.clone(), e);
         }
@@ -273,11 +321,146 @@ impl View {
                 }
             }
         }
-        Ok(View { entities, merged, names, own })
+        Ok(View { entities, merged, names, own, works, with_work })
     }
 
     pub fn ids(&self) -> impl Iterator<Item = &String> {
         self.entities.keys()
+    }
+
+    /// 全部身份，按 id 排序。
+    pub fn identities(&self) -> impl Iterator<Item = Identity<'_>> {
+        self.entities.values().map(|e| Identity {
+            id: &e.id,
+            kind: &e.kind,
+            parent: e.parent.as_deref(),
+            merged_into: e.merged.as_deref(),
+            original: e.original,
+            linked: e.linked,
+            tag: &e.tag,
+            work: self.works.get(e.seq as usize).map(String::as_str).unwrap_or(""),
+            variant: &e.variant,
+        })
+    }
+
+    /// 名字更新器在一批任务里复用同一个整库快照（#102 A5a）：快照恰好对应本事务开始时的库（调用方用
+    /// `names_version` 保证）、本事务只改了名字行时，按 `legacy_names::track` 记下的身份和键把这些行重新读进快照，
+    /// 结果与整库重新载入逐项相同（行的先后也相同：`load` 的排序在 SQLite 里是稳定的，并列时按 rowid）。本事务改了
+    /// 身份或链接、或者没有追踪时返回 None，调用方应丢弃快照、改为整库载入。返回值交给 `restore` 可以撤回。
+    pub fn absorb(&mut self, c: &Connection) -> Result<Option<Absorbed>> {
+        let tracked: bool =
+            c.query_row("SELECT EXISTS(SELECT 1 FROM sqlite_temp_master WHERE name='names_dirty_full')", [], |r| {
+                r.get(0)
+            })?;
+        if !tracked
+            || c.query_row("SELECT EXISTS(SELECT 1 FROM names_dirty_full WHERE value=1)", [], |r| r.get::<_, bool>(0))?
+        {
+            return Ok(None);
+        }
+        // 先把要换的行全部读出来，读完再改快照：读的过程中出错时快照保持原样。
+        let ids: Vec<String> = c
+            .prepare("SELECT id FROM names_dirty_entities ORDER BY id")?
+            .query_map([], |r| r.get(0))?
+            .collect::<rusqlite::Result<_>>()?;
+        let mut keys: BTreeSet<(String, String)> = c
+            .prepare("SELECT kind,key FROM names_dirty_keys")?
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
+            .collect::<rusqlite::Result<_>>()?;
+        let mut own = c.prepare_cached(
+            "SELECT lang,value,source,preferred FROM names WHERE entity_id=? AND role='display'
+             ORDER BY preferred DESC,value,rowid",
+        )?;
+        let mut owned: HashMap<String, Vec<NameRow>> = HashMap::new();
+        for id in &ids {
+            let rows: Vec<NameRow> = own
+                .query_map([id], |r| {
+                    Ok(NameRow {
+                        lang: r.get(0)?,
+                        value: r.get(1)?,
+                        source: r.get(2)?,
+                        preferred: r.get::<_, i64>(3)? != 0,
+                    })
+                })?
+                .collect::<rusqlite::Result<_>>()?;
+            owned.insert(id.clone(), rows);
+            if let Some(e) = self.entities.get(id).filter(|e| Self::spoken(e)) {
+                keys.insert(("character".into(), e.tag.clone()));
+            }
+        }
+        let tags: BTreeSet<&str> = keys.iter().filter(|(k, _)| k == "character").map(|(_, t)| t.as_str()).collect();
+        let mut members: HashMap<&str, Vec<(u32, &str)>> = HashMap::new();
+        if !tags.is_empty() {
+            for e in self.entities.values().filter(|e| Self::spoken(e) && tags.contains(e.tag.as_str())) {
+                members.entry(e.tag.as_str()).or_default().push((e.seq, e.id.as_str()));
+            }
+        }
+        let mut display = c.prepare_cached(
+            "SELECT lang,source,value FROM display_names WHERE kind=? AND key=? AND source<>'danbooru' ORDER BY rowid",
+        )?;
+        let mut named: Vec<((String, String), Vec<NameRow>)> = Vec::with_capacity(keys.len());
+        for (kind, key) in keys {
+            let mut rows: Vec<NameRow> = display
+                .query_map([&kind, &key], |r| {
+                    Ok(NameRow { lang: r.get(0)?, source: r.get(1)?, value: r.get(2)?, preferred: false })
+                })?
+                .collect::<rusqlite::Result<_>>()?;
+            if kind == "character" {
+                if let Some(m) = members.get_mut(key.as_str()) {
+                    m.sort();
+                    for (_, id) in m.iter() {
+                        if let Some(r) = owned.get(*id).or_else(|| self.own.get(*id)) {
+                            rows.extend(r.iter().cloned());
+                        }
+                    }
+                }
+            }
+            named.push(((kind, key), rows));
+        }
+        let mut undo = Absorbed { own: Vec::with_capacity(owned.len()), names: Vec::with_capacity(named.len()) };
+        for (id, rows) in owned {
+            let old = if rows.is_empty() { self.own.remove(&id) } else { self.own.insert(id.clone(), rows) };
+            undo.own.push((id, old));
+        }
+        for (k, rows) in named {
+            let old = if rows.is_empty() { self.names.remove(&k) } else { self.names.insert(k.clone(), rows) };
+            undo.names.push((k, old));
+        }
+        Ok(Some(undo))
+    }
+
+    /// 撤回一次 `absorb`（模型预演在回滚的事务里读待提交的名字，读完把快照还原）。
+    pub fn restore(&mut self, undo: Absorbed) {
+        for (k, old) in undo.names.into_iter().rev() {
+            match old {
+                Some(v) => self.names.insert(k, v),
+                None => self.names.remove(&k),
+            };
+        }
+        for (id, old) in undo.own.into_iter().rev() {
+            match old {
+                Some(v) => self.own.insert(id, v),
+                None => self.own.remove(&id),
+            };
+        }
+    }
+
+    /// 对照核对（`legacy_names::verifying`）：吸收增量后的快照与同一事务里整库重新载入的结果逐项相同。
+    pub fn verify_absorbed(&self, c: &Connection) -> Result<()> {
+        let full = View::load_inner(c, self.with_work)?;
+        if self.entities != full.entities
+            || self.merged != full.merged
+            || self.names != full.names
+            || self.own != full.own
+            || self.works != full.works
+        {
+            return Err(Error::Conflict("增量名字快照与整库重新载入不一致".into()));
+        }
+        crate::legacy_names::record_verified("view")
+    }
+
+    /// 自己的显示名会并进人物键（`load` 里同样的条件）。
+    fn spoken(e: &Entity) -> bool {
+        e.kind != "work" && e.linked && e.parent.is_none()
     }
 
     /// `View.choose`（已装载快照的那条路径）。
@@ -470,7 +653,11 @@ CREATE TABLE IF NOT EXISTS term_name_choice(
 
 /// 整表重建两张投影表（影子阶段：只读名字的兼容表，写核心自己的两张表）。
 pub fn rebuild(c: &Connection) -> Result<(usize, usize)> {
-    let view = View::load(c)?;
+    rebuild_from(c, &View::load(c)?)
+}
+
+/// 同 `rebuild`，用调用方给的快照（必须与这个事务此刻的库逐项相同，见 `View::absorb`）。
+pub fn rebuild_from(c: &Connection, view: &View) -> Result<(usize, usize)> {
     c.execute_batch("DELETE FROM term_name_display; DELETE FROM term_name_choice;")?;
     let mut put = c.prepare(
         "INSERT INTO term_name_display(entity,skin_only,name,name_source,zh,ja,en,tag) VALUES (?,?,?,?,?,?,?,?)",
@@ -499,7 +686,11 @@ pub fn rebuild(c: &Connection) -> Result<(usize, usize)> {
 
 /// 名字行变化时只写依赖闭包；实体与链接结构变更由调用方回退整表。
 pub fn rebuild_changed(c: &Connection) -> Result<(usize, usize)> {
-    let view = View::load(c)?;
+    rebuild_changed_from(c, &View::load(c)?)
+}
+
+/// 同 `rebuild_changed`，用调用方给的快照（同 `rebuild_from`）。
+pub fn rebuild_changed_from(c: &Connection, view: &View) -> Result<(usize, usize)> {
     let mut ids: BTreeSet<String> = c
         .prepare("SELECT id FROM names_dirty_entities")?
         .query_map([], |r| r.get(0))?
@@ -558,6 +749,70 @@ pub fn rebuild_changed(c: &Connection) -> Result<(usize, usize)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Name inputs only, names already in the core so `legacy_names::track` records changes.
+    fn library() -> Connection {
+        let c = Connection::open_in_memory().unwrap();
+        c.execute_batch(
+            "CREATE TABLE meta(key TEXT PRIMARY KEY,value TEXT NOT NULL);
+             INSERT INTO meta VALUES ('terms_names','core'),('names_version','0'),('names_projected','0');
+             CREATE TABLE entities(id TEXT PRIMARY KEY,kind TEXT NOT NULL,parent_id TEXT,variant TEXT NOT NULL DEFAULT '',
+              merged_into TEXT,original INTEGER,work TEXT NOT NULL DEFAULT '');
+             CREATE TABLE links(system TEXT,key TEXT,entity_id TEXT,current INTEGER NOT NULL DEFAULT 1,added_at TEXT,
+              PRIMARY KEY(system,key));
+             CREATE TABLE names(entity_id TEXT,lang TEXT,value TEXT,source TEXT,role TEXT,preferred INTEGER NOT NULL DEFAULT 0,
+              position INTEGER NOT NULL DEFAULT 0,PRIMARY KEY(entity_id,role,lang,source,value));
+             CREATE TABLE display_names(kind TEXT,key TEXT,lang TEXT,source TEXT,value TEXT,PRIMARY KEY(kind,key,lang,source,value));
+             CREATE TABLE name_aliases(kind TEXT,key TEXT,value TEXT,position INTEGER,PRIMARY KEY(kind,key,value));
+             INSERT INTO entities VALUES ('e1','character',NULL,'',NULL,0,'series_w'),('e2','character',NULL,'',NULL,0,''),
+              ('s1','skin','e1','swimsuit_x',NULL,0,''),('w1','work',NULL,'',NULL,0,''),('m1','character',NULL,'','e1',0,'');
+             INSERT INTO links VALUES ('danbooru','synth_(series_w)','e1',1,'2026-01-01'),('wd','synth_(series_w)','e2',1,'2026-01-02'),
+              ('danbooru','synth_swimsuit','s1',1,'2026-01-03'),('qualifier','series_w','w1',1,'2026-01-04'),
+              ('danbooru','merged_tag','m1',1,'2026-01-05');
+             -- Rows tied on (preferred,value) whose rowid order differs from the primary key order.
+             INSERT INTO names VALUES ('e1','zh','同名','index','display',0,0),('e1','ja','同名','wiki','display',0,0),
+              ('e2','en','Other','wiki','display',0,0),('m1','zh','并入名','index','display',0,0);
+             INSERT INTO display_names VALUES ('skin','swimsuit_x','zh','index','皮肤名'),('work','series_w','zh','bangumi','作品名');",
+        )
+        .unwrap();
+        c
+    }
+
+    fn same(a: &View, b: &View) -> bool {
+        a.entities == b.entities && a.merged == b.merged && a.names == b.names && a.own == b.own && a.works == b.works
+    }
+
+    #[test]
+    fn absorbed_name_rows_read_as_a_fresh_load() {
+        let mut c = library();
+        let before = View::load(&c).unwrap();
+        let mut view = View::load(&c).unwrap();
+        let tx = c.transaction().unwrap();
+        crate::legacy_names::track(&tx).unwrap();
+        tx.execute_batch(
+            "INSERT INTO names VALUES ('e2','zh','同名','bangumi','display',0,0),('e1','en','同名','user','display',0,0);
+             UPDATE names SET preferred=1 WHERE entity_id='m1';
+             DELETE FROM names WHERE entity_id='e2' AND lang='en';
+             INSERT INTO display_names VALUES ('character','synth_(series_w)','ja','index','キャラ'),
+              ('work','series_w','ja','wiki','サクヒン'),('skin','swimsuit_x','en','wiki','Swim');
+             DELETE FROM display_names WHERE kind='skin' AND key='swimsuit_x' AND lang='zh';",
+        )
+        .unwrap();
+        let undo = view.absorb(&tx).unwrap().expect("name rows only");
+        view.verify_absorbed(&tx).unwrap();
+        for id in ["e1", "e2", "s1", "w1", "m1"] {
+            for skin in [false, true] {
+                let fresh = View::load(&tx).unwrap().entity(id, skin).unwrap();
+                assert_eq!(view.entity(id, skin).unwrap(), fresh);
+            }
+        }
+        // The pending view is undone exactly (model preview), and a structure change is never absorbed.
+        view.restore(undo);
+        assert!(same(&view, &before));
+        tx.execute("UPDATE entities SET variant='other' WHERE id='s1'", []).unwrap();
+        assert!(view.absorb(&tx).unwrap().is_none());
+        assert!(same(&view, &before));
+    }
 
     #[test]
     fn vocabulary_helpers_follow_python() {

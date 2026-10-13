@@ -25,7 +25,8 @@ are sent to recognition services or language models. No accounts/credentials are
 
 The program is unsigned: Windows may show SmartScreen. Do not disable antivirus
 or device security policies to run it. This package is for personal testing.
-Python/dependency licenses are included with their distributions. Model origins:
+resources/licenses/ holds the Illustash license (GPL-3.0-or-later), THIRD_PARTY.md
+and the original notices of bundled components. Model origins:
 WD embeddings: https://huggingface.co/deepghs/wd14_tagger_with_embeddings (Apache-2.0)
 CCIP: https://huggingface.co/deepghs/ccip (OpenRAIL), ONNX distribution:
 https://huggingface.co/deepghs/ccip_onnx

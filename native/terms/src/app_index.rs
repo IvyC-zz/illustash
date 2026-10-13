@@ -789,6 +789,7 @@ fn patch(
         let process = std::thread::spawn(move || {
             process_ctx.process(
                 std::process::Command::new(executable)
+                    .env(crate::app_tasks::WORKER_KIND_ENV, "index")
                     .arg(worker_folder.join("request.json"))
                     .arg(worker_folder.join("response.json")),
             )
@@ -1200,13 +1201,22 @@ fn commit(
         let _ = std::fs::remove_dir_all(e.path());
     }
     let added = chars.iter().filter(|r| r["status"] == "added").count();
+    // Clean up before reporting done: whoever sees done must find no journal or job folder left (#123).
+    std::fs::remove_file(journal)?;
+    let _ = std::fs::remove_dir_all(&folder);
     update(
         state,
         json!({"status":"done","kind":if drop{"drop"}else{"add"},"added":added,"changed":changed,"finished_at":now()}),
     );
-    std::fs::remove_file(journal)?;
-    let _ = std::fs::remove_dir_all(&folder);
+    pause_after_done();
     Ok(())
+}
+
+/// Test-only widening of the moment right after a job reports done (#123); unset in production.
+fn pause_after_done() {
+    if let Some(ms) = std::env::var("ILLUSTASH_TEST_INDEX_DONE_PAUSE_MS").ok().and_then(|v| v.parse().ok()) {
+        std::thread::sleep(Duration::from_millis(ms));
+    }
 }
 
 fn sql_value(v: &Value) -> rusqlite::types::Value {

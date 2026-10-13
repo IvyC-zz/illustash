@@ -194,7 +194,7 @@ class RecognitionModelTest(unittest.TestCase):
         final = json.loads(progress.read_text(encoding='utf-8'))
         self.assertEqual((final['stage'], final['processed'], final['failed']), ('recognising', 26, 1))
         self.assertEqual(response['identity'], identity)
-        self.assertEqual(response['failed'], [{'uuid': 'asset-24'}])
+        self.assertEqual(response['failed'], [{'uuid': 'asset-24', 'reason': 'undecodable'}])
         self.assertEqual(len(response['packages']), 2)
         self.assertEqual(len(response['character_claims']), 2)
         for batch, sidecar, size in zip(response['packages'], response['character_claims'], (24, 1)):
@@ -245,7 +245,7 @@ class RecognitionModelTest(unittest.TestCase):
         request = dict(format='illustash-sync/1', identity=identity, output=str(output),
                        assets=[dict(id='good', path=str(self.images[0])), dict(id='bad', path=str(bad))])
         response = self.invoke(self.adapter, request)
-        self.assertEqual(response['failed'], [{'uuid': 'bad'}])
+        self.assertEqual(response['failed'], [{'uuid': 'bad', 'reason': 'undecodable'}])
         self.assertEqual(len(response['packages']), 1)
         sidecar = json.loads(Path(response['character_claims'][0]).read_text(encoding='utf-8'))
         self.assertEqual(sidecar['claims'], [])
@@ -362,7 +362,9 @@ class RecognitionModelTest(unittest.TestCase):
         (folder / 'bad.png').write_bytes(b'not an image')
         incremental = sync()
         self.assertEqual(incremental['state']['status'], 'done', incremental)
-        self.assertEqual(incremental['state']['failed'], 1)
+        # #112: read in full but not an image, so damaged and skipped until it changes, not retried.
+        self.assertEqual((incremental['state']['failed'], incremental['state']['damaged']), (0, 1), incremental)
+        self.assertEqual([Path(p).name for p in incremental['damaged']['paths']], ['bad.png'])
         with closing(sqlite3.connect(source)) as c:
             self.assertEqual(c.execute('SELECT count(*) FROM recognition_assets').fetchone()[0], 3)
             self.assertEqual(c.execute('SELECT count(*) FROM recognition_imports').fetchone()[0], 2)
@@ -375,5 +377,20 @@ class RecognitionModelTest(unittest.TestCase):
         after = snapshot(app)
         for table, expected in human.items():
             self.assertEqual(after[table], expected, table)
+        again = sync()
+        self.assertEqual((again['state']['status'], again['state']['failed'], again['state']['damaged']), ('done', 0, 1), again)
+        # Replaced by a picture whose second half is missing: still damaged, under the same asset.
+        whole = self.images[3].read_bytes()
+        (folder / 'bad.png').write_bytes(whole[:len(whole) // 2])
+        truncated = sync()
+        self.assertEqual((truncated['state']['failed'], truncated['state']['damaged']), (0, 1), truncated)
+        # Fixed: recognised on the next sync, under the same asset.
+        shutil.copy2(self.images[3], folder / 'bad.png')
+        fixed = sync()
+        self.assertEqual((fixed['state']['failed'], fixed['state'].get('damaged')), (0, None), fixed)
+        self.assertNotIn('damaged', fixed)
+        with closing(sqlite3.connect(source)) as c:
+            self.assertEqual(c.execute("SELECT count(*) FROM recognition_assets r JOIN assets a ON a.uuid=r.asset WHERE a.filename='bad.png'").fetchone()[0], 1)
+            self.assertEqual(c.execute("SELECT count(*) FROM assets WHERE filename='bad.png'").fetchone()[0], 1)
         self.stop(process)
         self.assertEqual(process.returncode, 0)

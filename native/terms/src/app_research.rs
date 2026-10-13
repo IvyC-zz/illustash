@@ -767,7 +767,10 @@ fn run(
     fs::write(&input, serde_json::to_vec(&request).map_err(|_| bad())?)?;
     // A separate observer is unnecessary: progress is a bounded file polled by the process API callback.
     let mut cmd = Command::new(worker);
-    cmd.arg(&input).arg(&output).env("ILLUSTASH_RESEARCH_PROGRESS", &progress);
+    cmd.env(crate::app_tasks::WORKER_KIND_ENV, "research")
+        .arg(&input)
+        .arg(&output)
+        .env("ILLUSTASH_RESEARCH_PROGRESS", &progress);
     let mut last = std::time::Instant::now();
     let status = ctx.process_observed(&mut cmd, || {
         if last.elapsed() < Duration::from_millis(100) {
