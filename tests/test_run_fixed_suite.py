@@ -120,6 +120,24 @@ class FixedSuiteRunnerTest(unittest.TestCase):
         self.assertRegex(run.stderr, r'\[2/2\] test_alpha\.Beta（1 项，[0-9.]+s，单独运行）')
         self.assertIn('Ran 4 tests in ', run.stderr)
 
+    def test_parallel_workers_do_not_rely_on_cwd_in_sys_path(self):
+        # 模拟带 ._pth 的嵌入式 Python：-I 不把 cwd 或脚本目录放进 sys.path，也忽略 PYTHONPATH。
+        # 父进程按验收机的方式自行插入仓库根；子进程须沿用父进程的 -I/-X utf8，并在隔离下找到 tests 包。
+        self.write('test_isolated.py', 'import sys, unittest\nclass Isolated(unittest.TestCase):\n'
+                                       '    def test_flags(self):\n'
+                                       '        self.assertTrue(sys.flags.isolated)\n'
+                                       '        self.assertTrue(sys.flags.utf8_mode)\n'
+                                       "        self.assertNotIn('', sys.path)\n")
+        code = ("import runpy,sys;sys.path.insert(0,sys.argv.pop(1));"
+                "runpy.run_module('tests.run_fixed_suite',run_name='__main__',alter_sys=True)")
+        run = subprocess.run([sys.executable, '-I', '-X', 'utf8', '-c', code, str(self.root), '-v', '-b', '--jobs', '2'],
+                             cwd=self.root, capture_output=True, text=True, encoding='utf-8', timeout=120)
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertNotIn('ModuleNotFoundError', run.stderr)
+        self.assertIn('Ran 5 tests in ', run.stderr)
+        self.assertIn('test_flags (test_isolated.Isolated.test_flags) ... ok', run.stderr)
+        self.assertIn('退役参考导入尝试：0', run.stdout)
+
     def test_parallel_mode_rejects_unsupported_arguments(self):
         run = self.run_suite('--jobs', '2', '-k', 'one')
         self.assertNotEqual(run.returncode, 0)
