@@ -168,6 +168,9 @@ impl Imports {
             ("id", identity.task_id.as_str().into()),
             ("file", file.into()),
         ]))));
+        // The answer is the task as started: one that fails at once must still reach the page as running, or the
+        // page, which reports an import when a poll sees it end, never says why it failed.
+        let answer = lock(&state).snapshot();
         let reason: Arc<Mutex<Option<&'static str>>> = Arc::default();
         let (shared, why) = (state.clone(), reason.clone());
         let task = Task::start_with(identity, Deadline::default(), move |context| {
@@ -199,7 +202,7 @@ impl Imports {
             Ok(())
         });
         *current = Some(Current { task, state, reason, kind, generation });
-        Ok(current.as_ref().expect("import just started").snapshot())
+        Ok(answer)
     }
     /// A recognition import of this session is admitted or running: sync and index writes wait for it.
     pub(crate) fn recognition_running(&self, generation: u64) -> bool {
