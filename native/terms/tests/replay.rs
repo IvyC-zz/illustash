@@ -98,12 +98,11 @@ impl Temp {
         }
         for segment in &self.segments {
             if let Some(at) = text.find(segment.as_str()) {
-                let from = text.floor_char_boundary(at.saturating_sub(200));
-                let to = text.ceil_char_boundary(at + segment.len() + 40);
+                let from = text[..at].char_indices().rev().nth(199).map_or(0, |(i, _)| i);
+                let near: String = text[from..].chars().take(240 + segment.len()).collect();
                 panic!(
                     "{segment} is part of the replay's temporary directory, spelled here in a way \
-                     `Temp::new` does not mask (#101): {:?}",
-                    &text[from..to]
+                     `Temp::new` does not mask (#101): {near:?}"
                 );
             }
         }
