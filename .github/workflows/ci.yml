@@ -65,7 +65,7 @@ jobs:
       - name: iqdb test
         run: cargo test --locked --manifest-path crates/iqdb/Cargo.toml
 
-  # 跑在 macOS arm64：固定快照（tests/golden/terms_c3_*）在 Apple Silicon 上录制，
+  # 跑在 macOS arm64：固定期望（tests/fixtures/ 下的录制值）在 Apple Silicon 上录制，
   # float32 结果在 x86 上差 1 ulp；另有错误文案、zsh 启动脚本等平台差异。Windows 另行处理。
   python:
     if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
