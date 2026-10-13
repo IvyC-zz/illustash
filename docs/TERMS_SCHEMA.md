@@ -156,7 +156,7 @@ cargo clippy --manifest-path native/terms/Cargo.toml --all-targets -- -D warning
 |---|---|---|
 | `term_key_names(kind, key, lang, source, value)` | 按文字键的名字（作品的 qualifier、皮肤的 variant），= `display_names` | 名字收编（`sync-names` / `cutover-names`）；切换后由核心每个写事务从兼容表补齐 |
 | `term_key_aliases(kind, key, value, position)` | 按文字键的别名（搜索用），= `name_aliases` | 同上；别名表不在 `names_version` 的触发器里，核心写事务按本事务改到的键在提交前同步（每个事务一次） |
-| `term_name_display(entity, skin_only, name, name_source, zh, ja, en, tag)` | 显示投影：每个身份的 `View.entity(id)` 与 `View.entity(id, skin_only=True)`（`crates/core/src/names_view.rs`） | 核心整表重建：切换时一次；之后凡是改了 `names_version` 的核心写事务，提交前在同一事务里维护（`legacy_names::after_write`）：只改了名字行时按依赖闭包重写受影响的行，改了身份或链接时整表重建（[TERMS_NAMES.md](TERMS_NAMES.md) 第 3 节）；命令要在事务中途读名字时（历史文案）先重建投影 |
+| `term_name_display(entity, skin_only, name, name_source, zh, ja, en, tag)` | 显示投影：每个身份的 `View.entity(id)` 与 `View.entity(id, skin_only=True)`（`crates/core/src/names_view.rs`） | 核心整表重建：切换时一次；之后凡是改了 `names_version` 的核心写事务，提交前在同一事务里维护（`legacy_names::after_write`）：按依赖闭包重写受影响的行、删掉失效的行（名字行、身份和链接的变化都一样；闭包过大等少数情况整表重建，[TERMS_NAMES.md](TERMS_NAMES.md) 第 3 节）；命令要在事务中途读名字时（历史文案）先重建投影 |
 | `term_name_choice(kind, key, name, name_source, zh, ja, en)` | 按文字键的选名结果 `View.choose(kind, key)`，键的范围：人物的 tag、作品文字（`entities.work` 与 qualifier 链接）、皮肤 variant | 同上 |
 
 按身份的名字进 `term_names`（第 1 版就有的表，画师的名字已经在里面），只收角色、皮肤、作品（`term_tree` 里的词条）的行。`meta.names_projected` 记投影重建时的 `names_version`。
