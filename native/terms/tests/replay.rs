@@ -21,7 +21,7 @@
 //!
 //! Replay side only (#101): a case's temporary directory is masked, in every spelling, before keys
 //! are looked for, so UUID-like segments of its path (an agent session's temp directory, say) are
-//! not taken for keys the core made. The case directory carries such a segment on purpose.
+//! not taken for keys the core made; `uuid_segment_in_temp_path` replays one module under such a path.
 use flate2::read::GzDecoder;
 use regex::Regex;
 use rusqlite::{types::ValueRef, Connection};
@@ -47,7 +47,7 @@ static OS_ERROR: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"[^：:\n]*\(os 
 const SKIP_COLUMNS: [(&str, &str); 2] = [("term_packages", "manifest"), ("term_evidence", "fingerprint")];
 const DERIVED_META: [&str; 1] = ["identity_graph_version"];
 const COMPANIONS: [&str; 4] = ["", "-wal", "-shm", "-journal"];
-/// A v4-shaped segment in every case directory's path, so that each run exercises [`Temp`] (#101).
+/// A v4-shaped path segment for `uuid_segment_in_temp_path` (#101).
 const UUID_SEGMENT: &str = "3f2b8c1e-9a4d-4e7b-8c21-5d6e7f809a1b";
 
 /// A case's temporary directory as text may spell it (#101).
@@ -150,6 +150,15 @@ fn remap(text: &str, mapping: &HashMap<String, String>) -> String {
         .into_owned()
 }
 
+/// Opens a database, naming the path and its length when that fails: a long temporary directory
+/// can push recorded paths past what SQLite opens on Windows (MAX_PATH, 260 UTF-16 units).
+fn open(path: &Path) -> Connection {
+    Connection::open(path).unwrap_or_else(|e| {
+        let units = path.as_os_str().to_string_lossy().encode_utf16().count();
+        panic!("cannot open {} ({units} UTF-16 units; a shorter temporary directory may help): {e}", path.display())
+    })
+}
+
 fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
@@ -192,7 +201,7 @@ fn rows(c: &Connection, query: &str, keep: &[usize], roots: &Roots, back: &HashM
 
 /// Per-table digests; `back` turns this replay's random values into the recorded ones first.
 fn digests(db: &Path, roots: &Roots, back: &HashMap<String, String>) -> BTreeMap<String, String> {
-    let c = Connection::open(db).unwrap();
+    let c = open(db);
     let mut out = BTreeMap::new();
     let schema = rows(
         &c,
@@ -232,7 +241,7 @@ fn volatile(db: &Path, temp: &Temp) -> Vec<String> {
     if !db.exists() {
         return Vec::new();
     }
-    let c = Connection::open(db).unwrap();
+    let c = open(db);
     let (mut seen, mut order) = (HashSet::new(), Vec::new());
     for name in tables(&c) {
         let sql: Option<String> =
@@ -343,15 +352,15 @@ fn environment(call: &Value, blobs: &Value, roots: &Roots, mapping: &HashMap<Str
         }
         fs::create_dir_all(path.parent().unwrap()).unwrap();
         if let Some(from) = value.get("copy").and_then(Value::as_str) {
-            let source = Connection::open(sub(from)).unwrap();
-            let mut target = Connection::open(&path).unwrap();
+            let source = open(Path::new(&sub(from)));
+            let mut target = open(&path);
             rusqlite::backup::Backup::new(&source, &mut target)
                 .unwrap()
                 .run_to_completion(1024, Default::default(), None)
                 .unwrap();
         } else if let Some(sql) = value.get("sql").and_then(Value::as_str) {
             // As recorded (Python's sqlite3): foreign keys off while the dump is restored.
-            let c = Connection::open(&path).unwrap();
+            let c = open(&path);
             c.execute_batch("PRAGMA foreign_keys=OFF").unwrap();
             c.execute_batch(&sub(blobs[sql].as_str().unwrap())).unwrap();
         } else {
@@ -370,10 +379,9 @@ fn op(call: &Value) -> String {
 }
 
 /// Replay one case; returns the first few differences.
-fn case(name: &str, calls: &[Value], blobs: &Value, bin: &Path) -> Vec<String> {
-    let outer = std::env::temp_dir().join(format!("illustash-replay-{}-{}", std::process::id(), short(name)));
-    let _ = fs::remove_dir_all(&outer);
-    let temp = outer.join(UUID_SEGMENT);
+fn case(name: &str, calls: &[Value], blobs: &Value, bin: &Path, under: &Path) -> Vec<String> {
+    let temp = under.join(format!("illustash-replay-{}-{}", std::process::id(), short(name)));
+    let _ = fs::remove_dir_all(&temp);
     fs::create_dir_all(temp.join("root")).unwrap();
     let masks = Temp::new(&temp);
     let counter = temp.join("key-counter");
@@ -534,11 +542,16 @@ fn case(name: &str, calls: &[Value], blobs: &Value, bin: &Path) -> Vec<String> {
         }
     }
     drop(serve);
-    let _ = fs::remove_dir_all(&outer);
+    let _ = fs::remove_dir_all(&temp);
     problems
 }
 
+/// Replays a module with case directories under the system temporary directory.
 fn replay(module: &str) {
+    replay_in(module, &std::env::temp_dir());
+}
+
+fn replay_in(module: &str, under: &Path) {
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join(format!("tests/fixtures/replay/{module}.json.gz"));
     let mut text = String::new();
     GzDecoder::new(fs::File::open(&path).unwrap()).read_to_string(&mut text).unwrap();
@@ -558,7 +571,7 @@ fn replay(module: &str) {
                     loop {
                         let i = next.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                         let Some((name, case_data)) = work.get(i) else { break found };
-                        found.extend(case(name, case_data["calls"].as_array().unwrap(), &data["blobs"], bin));
+                        found.extend(case(name, case_data["calls"].as_array().unwrap(), &data["blobs"], bin, under));
                     }
                 })
             })
@@ -609,3 +622,17 @@ modules!(
     test_terms_artists_provenance,
     test_web,
 );
+
+/// #101: a v4-shaped segment in the temporary path (an agent session's directory, say) is not a key
+/// the core made.
+#[test]
+fn uuid_segment_in_temp_path() {
+    struct Cleanup(PathBuf);
+    impl Drop for Cleanup {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+    let outer = Cleanup(std::env::temp_dir().join(format!("illustash-replay-{}-uuid", std::process::id())));
+    replay_in("test_terms_core", &outer.0.join(UUID_SEGMENT));
+}
