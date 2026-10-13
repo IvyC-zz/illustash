@@ -57,6 +57,7 @@ test('a stopping or finished import has no cancel button and says how it ended',
     (task.status === 'stopping' ? assert.match : assert.doesNotMatch)(html, /data-lib-choose="zip" disabled/);
   }
   assert.doesNotMatch(card({status: 'idle'}).html, /import-line/);
+  assert.doesNotMatch(card({...running(), status: 'done', result: {name: '合成', path: '/tmp/合成.pilib'}}).html, /data-open-library/);
   assert.doesNotMatch(card(undefined).html, /import-line/);
 });
 
@@ -132,4 +133,12 @@ test('the cancel button asks the server and then polls for the end', async () =>
   await cancelling;
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(p.c.state.importTask.status, 'cancelled');
+});
+
+test('a published import that could not be listed is offered to open instead of importing again (#111)', () => {
+  const task = {...running(), status: 'done', result: {name: '合成', path: '/Users/me/Pictures/Illustash/合成 2.pilib', listed: false, error: '写入失败（合成）'}};
+  const {html, line} = card(task);
+  assert.equal(line(task), '已导入「合成」，保存在 ~/Pictures/Illustash/合成 2.pilib，但没能加入最近图库列表：写入失败（合成）。打开它会再试一次加入列表；再导入会另建一个带编号的图库。模型接口与名称联网授权需重新设置。');
+  assert.match(html, /data-open-library="\/Users\/me\/Pictures\/Illustash\/合成 2\.pilib" data-name="合成">打开这个图库/);
+  assert.doesNotMatch(html, /data-lib-choose="zip" disabled/);
 });

@@ -519,9 +519,17 @@ class NativeArchivesTest(unittest.TestCase):
         self.assertEqual((path / 'library.json').read_bytes(), (legacy.path / 'library.json').read_bytes())
         self.assertEqual(taken.read_bytes(), b'keep-existing')
         tmp = self.support / 'libraries.tmp'; tmp.mkdir()
+        registry = self.support / 'libraries.json'
+        recent = registry.read_bytes() if registry.exists() else None
         response = self.archive_import({'path':str(archive)})
-        self.assertEqual(response['status'], 400)
+        # #111 (like creation, #97): the published package is reported with why it is not listed, instead of the
+        # recorded 400; importing again would only make a second, numbered package.
+        self.assertEqual(response['status'], 200, response)
         published = library.HOME / (self.lib.name + ' 3.pilib')
+        made = json.loads(response['body'])
+        self.assertEqual((Path(made['path']), made['name'], made['listed']), (published, self.lib.name, False))
+        self.assertTrue(made['error'])
+        self.assertEqual(registry.read_bytes() if registry.exists() else None, recent)
         self.assertEqual((published / 'library.json').read_bytes(), (legacy.path / 'library.json').read_bytes())
         self.assertEqual(snapshot(published / 'library.sqlite'), snapshot(self.lib.db))
         self.assertEqual(json.loads(self.request('/api/libraries')['body'])['current'], str(self.lib.path))

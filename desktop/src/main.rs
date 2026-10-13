@@ -35,6 +35,7 @@ fn main() {
         .manage(server::StartupPage::default())
         .manage(server::Launch::default())
         .manage(welcome::Import::default())
+        .manage(welcome::Requests::default())
         .invoke_handler(tauri::generate_handler![
             pixiv::pixiv_reply,
             welcome::welcome_pick,

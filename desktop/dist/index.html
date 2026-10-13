@@ -185,13 +185,22 @@ async function inspectFolders(fresh) {
   }
   renderWelcome();
 }
+// #115: each create and import carries a request id; the shell runs a second delivery of the same id only once.
+const requestId = () => `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+// One picker at a time: a double click must not open a second picker (and import or add twice).
+let picking = false;
+async function pick(kind, multiple) {
+  if (picking) return {};
+  picking = true;
+  try { return await invoke('welcome_pick', {kind, multiple}); } finally { picking = false; }
+}
 async function importArchive(path) {
   W.importing = {file: path.split(/[\\/]/).pop(), stage: 'reading'}; W.error = ''; renderWelcome();
   const poll = setInterval(async () => {
     const s = await invoke('welcome_import_status').catch(() => ({}));
     if (W.importing && s.stage) { Object.assign(W.importing, s); if (!s.total) { delete W.importing.done; delete W.importing.total; } renderWelcome(); }
   }, 300);
-  try { await invoke('welcome_import', {path}); }   // success replaces this page with the new library
+  try { await invoke('welcome_import', {request: requestId(), path}); }   // success replaces this page with the new library
   catch (err) { W.importing = null; W.error = String(err); busy(false); renderWelcome(); }
   finally { clearInterval(poll); }
 }
@@ -203,16 +212,16 @@ document.getElementById('welcome').onclick = async e => {
     if (d.open) { busy(true); await invoke('welcome_open', {path: d.open}); }
     else if (d.actW === 'new') { W.form = !W.form || !!W.importing; renderWelcome(); }
     else if (d.actW === 'pick-library') {
-      const r = await invoke('welcome_pick', {kind: 'library', multiple: false});
+      const r = await pick('library', false);
       if (r.paths?.[0]) { busy(true); await invoke('welcome_open', {path: r.paths[0]}); }
     }
     else if (d.actW === 'import') {
-      const r = await invoke('welcome_pick', {kind: 'zip', multiple: false});
+      const r = await pick('zip', false);
       if (r.paths?.[0]) await importArchive(r.paths[0]);
     }
     else if (d.actW === 'import-cancel') { W.importing.cancelling = true; renderWelcome(); await invoke('welcome_import_cancel'); }
     else if (d.pick) {
-      const r = await invoke('welcome_pick', {kind: 'folder', multiple: true});
+      const r = await pick('folder', true);
       const fresh = (r.paths || []).filter(p => !W.seq.some(([, q]) => q === p));
       if (!fresh.length) return;
       W.seq = [...W.seq, ...fresh.map(p => [d.pick, p])]; W.notes = [];
@@ -225,7 +234,7 @@ document.getElementById('welcome').onclick = async e => {
       if (W.photos) sources.push({kind: 'photos'});
       if (!sources.length) { fail('请至少添加一个文件夹'); return; }
       busy(true);
-      const r = await invoke('welcome_create', {name: W.name, sources});
+      const r = await invoke('welcome_create', {request: requestId(), name: W.name, sources});
       // Published but not listed (#97): offer the package instead of making a second, numbered one.
       if (r?.created) { W.created = r; busy(false); renderWelcome(); }
     }
