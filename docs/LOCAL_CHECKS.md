@@ -1,16 +1,61 @@
 # 本地全量验收
 
-现行参考，2026-10-03。本文补充 [AGENTS.md](../AGENTS.md) 的本地验收约定；CI 覆盖及允许跳过仍以 `.github/workflows/ci.yml`、`tools/check_all.sh` 为准。
+现行参考，2026-10-13。本文补充 [AGENTS.md](../AGENTS.md) 的本地验收约定；CI 覆盖及允许跳过仍以 `.github/workflows/ci.yml`、`tools/check_all.sh` 为准。
 
 ## 开发检查与完整入口
 
-开发 worktree 先跑新改测试和相关定向检查。`tools/check_all.sh` 先验证测试文件语法及验收工具合成测试，再执行 crates/core 与 crates/platform 独立 fmt/clippy/test/locked build、宿主 fmt/clippy、JS、桌面 clippy/test，随后执行原有 Rust、release 构建、屏蔽退役参考目录导入的 Python discover 和空 PATH 契约重放。覆盖、失败即退出、跳过白名单不变。Python 全套由 `tests.run_fixed_suite` 执行，默认按测试类分给与 CPU 核数相同的子进程并行（`--jobs N` 可改，`--jobs 1` 为原串行 discover），对 CPU 负载敏感的少数测试类（`SERIAL` 名单）在并行池之后逐个单独运行、不重试，每组输出整段回放，父进程核对实际运行的测试与发现的完全一致，子进程崩溃或漏跑即失败；导入源位于 `tests/reference/`、`web/` 或 #53 已退役的旧索引工具文件时立即拒绝，任何被捕获的导入尝试也使检查失败。构建前只运行固定的测试语法、验收工具合成测试等纯轻量项。任意指定的定向测试使用 `CHECK_ALL_TARGETED_TESTS='tests.test_native_http.TestCase'`（使用完整模块路径，在仓库根执行，以实际类名为准），在本轮候选 release 核心、测试读宿主及 IQDB 准备完成并设置二进制路径之后、Python discover 之前运行；输出候选 head，不提前读取旧 target。旧变量 `CHECK_ALL_PREFLIGHT_TESTS` 非空时明确退出 2，不静默改变其含义。额外定向结果不能代替全量，也不缩小 discover 的覆盖。
+开发 worktree 先跑新改测试和相关定向检查。`tools/check_all.sh` 先验证测试文件语法及验收工具合成测试，再执行 crates/core 与 crates/platform 独立 fmt/clippy/test/locked build、宿主 fmt/clippy、JS、桌面 clippy/test，随后执行原有 Rust、release 构建、屏蔽退役参考目录导入的 Python discover 和空 PATH 契约重放。Python 全套由 `tests.run_fixed_suite` 执行，调度和参数见下文；覆盖、失败即退出、跳过白名单不变。导入源位于 `tests/reference/`、`web/` 或 #53 已退役的旧索引工具文件时立即拒绝，任何被捕获的导入尝试也使检查失败。构建前只运行固定的测试语法、验收工具合成测试等纯轻量项。任意指定的定向测试使用 `CHECK_ALL_TARGETED_TESTS='tests.test_native_http.TestCase'`（使用完整模块路径，在仓库根执行，以实际类名为准），在本轮候选 release 核心、测试读宿主及 IQDB 准备完成并设置二进制路径之后、Python discover 之前运行；输出候选 head，不提前读取旧 target。旧变量 `CHECK_ALL_PREFLIGHT_TESTS` 非空时明确退出 2，不静默改变其含义。额外定向结果不能代替全量，也不缩小 discover 的覆盖。
 
 当前候选的 `read-http`、`recognition-compute`、`index-compute`、`research-compute`、`relation-probe`、`provenance-compute` examples 在本轮 release 构建中显式准备，再导出各自 `ILLUSTASH_*_BIN`；研究/索引安装适配器同样显式指向本轮 `illustash-worker`。本地与 CI 使用相同接线，缺产物不能靠测试默认跳过形成通过。模型的专项授权及平台证据仍单列。
 
 直接执行 `tools/check_all.sh` 仍要求已提交的干净候选，运行期间 head/已跟踪文件保持不变。验收工具合成测试的前置与全量都使用 `unittest -b` 捕获模式，文本捕获器不提供二进制输出流时仍保留原始完整日志及其摘要。脚本独立执行不会生成可复用签名记录。缓存速度没有固定承诺。
 
 2026-10-03 用户批准的 PR #131 / #136 / #141 是限定合批例外：各项保留独立 review 和受影响平台专项，整合保留原提交，最终整合 head 一次完整入口通过后整批 merge；原 PR 的历史或定向证据单列，不冒称逐项新 head 全量。其余任务仍按 AGENTS.md 原合并门槛执行，不能因复用或合批省略实际 GUI / 安装验收。
+
+## 并行运行与耗时口径
+
+`tests/run_fixed_suite.py` 默认以 CPU 核数为进程上限，按测试类分组动态领取，同一类在一个子进程内运行；`--jobs N` 指定正整数上限，`--jobs 1` 使用原串行 discover。并行模式仅接受 `-v`、`-b`，筛选等其他 unittest 参数需配合 `--jobs 1`。每组输出整段回放，父进程检查发现的测试 ID 是否漏跑或出现额外项，子进程崩溃、测试失败及退役导入尝试均使入口失败。单独调用运行器前仍须准备对应候选二进制和环境；改变进程数不构成完整验收。
+
+`SERIAL` 是运行器内的测试类名单：并行池结束后，名单里的类逐个单独运行，每个用例仍只执行一次，不自动重试。2026-10-13，[PR #134](https://github.com/shio-vinyl/illustash/pull/134) 修复找回画师终态与忙状态不一致、PID 文件未写完整及研究调用计数混入其他任务的问题后，名单为空（`SERIAL=frozenset()`），全部正常发现的测试类进入并行池。临时加入名单时，在对应 Issue 记录失败现象和移除条件；修复后验证并行运行并移除，不把串行结果当作竞态已修复。
+
+2026-10-13 的合成数据实测：Apple M2 8 核、macOS 26.6.2 arm64，Python 3.12.12、Node 22.23.2、Rust/Cargo 1.94.1。最终已测 head `5ad38c9`（包含 #131 全部优化）单次完整检查为 **569 秒（9 分 29 秒）**，其中 Python 全套 8 进程为 122 秒（638 项、611 通过、27 白名单跳过），Rust 重放为 220 秒；依赖缓存已存在。此前 `0748ced` 单次完整检查为 903 秒，包含 dev 依赖优化级别变化后的约 190 秒一次性重编。验收详情分别见 [PR #134](https://github.com/shio-vinyl/illustash/pull/134) 和 [PR #131](https://github.com/shio-vinyl/illustash/pull/131)；这两轮未覆盖 Windows，不能把耗时外推到其他机器、平台或冷缓存，也不表示后续 main 已重新完整运行。
+
+全量耗时包含依赖准备、fmt/clippy、测试编译、Rust/JS/Python 执行、release 构建和空 PATH 重放；Python 汇总及 Rust 重放各只是其中一部分。比较时写明已测 head、平台、进程数、数据口径和缓存是否已存在，分别列出编译与执行时间。当前 Rust 重放缓存每个场景的路径替换规则并预筛无目标字符串的单元格；`native/terms/Cargo.toml` 的 dev profile 优化第三方依赖，自有 core/platform 和修改过的 tiny_http 保持未优化。依赖重编的单次总时长、测试执行时间与固定验收缓存复用是不同口径，不能合成一个提速数字。
+
+## 修改测试的导航
+
+业务契约和固定期望的比较规则见 [架构参考](ARCHITECTURE_DIRECTION.md)；本节说明测试分工、依赖和修改方法，测试入口与合并门槛仍按上文及 AGENTS.md。
+
+| 要验证的行为 | 优先阅读或修改的位置 | 依赖与范围 |
+|---|---|---|
+| 事务、证据、人工历史、投影和业务规则 | `crates/core/src/` 的测试模块、`crates/core/tests/` | 直接调用核心，多数用内存 SQLite；适合规则的边界组合 |
+| 文件、凭据、进程、系统数学库等平台能力 | `crates/platform/src/` 的测试模块、`crates/platform/tests/` | 以真实平台边界为准；其他平台的证据单列 |
+| 宿主任务状态、取消、切库与提交顺序 | `native/terms/src/` 的测试模块；`tests/test_native_lifecycle.py`、`test_native_sync.py`、`test_native_research.py`、`test_native_provenance.py` 等 | 模块内测试可控制实际任务阶段；HTTP 测试验证调用方看到的状态和结果 |
+| 旧行为与旧图库兼容 | `native/terms/tests/replay.rs`、`contracts.rs`；`tests/fixed_expectations.py`、`test_native_library_upgrade.py` | 使用提交的录制或历史合成包；期望独立于当前候选输出 |
+| 数值、图像及计算发布 | `tests/test_native_*_compute.py`、`test_native_*_production.py` | 显式指定候选 examples/worker；固定数值由 `*_expectations.py` 读取，Windows 差异另有覆盖文件 |
+| 界面、资源装配与检查工具 | `tests/*.test.cjs`、`test_pixiv_poll.js`、`test_packaging*.py`、`test_local_acceptance.py`、`test_architecture.py` | JS 与合成工具测试不等于 GUI 或完整安装验收 |
+
+真实模型专项为 `tests/platform_*_models.py`，独立于默认 `test_*.py` discover；模型、runtime 和候选必须显式提供。不能把合成计算或资源装配通过写成真实模型、桌面 GUI 或另一平台通过。
+
+### 新增与收拢覆盖
+
+新增用例先写清可触发的条件和可观察的错误结果，再选择能覆盖它的最低一层。规则的边界组合优先直接调用核心；HTTP、CLI 或 worker 层保留请求接线、授权、发布及生命周期的代表性场景。同一规则跨层出现时，应能说明各层独有的失败方式。收拢前对照输入、断言和状态边界；相似名称、相同路由或同样出现 SQLite 不足以证明重复。
+
+普通新用例优先检查受影响的返回值、行和业务不变量；拒绝写入、事务回滚、切库隔离等本身要求其他状态不变的场景，才做相应范围的完整状态比较。已有固定录制的比较范围按既定契约维护，不能借性能优化直接删减。
+
+### 固定期望与共享夹具
+
+`tests/fixtures/reference_recordings/` 按测试 ID 和调用顺序取值，`native/terms/tests/fixtures/replay/` 按模块重放核心调用；改测试模块、类名、方法名或取值顺序之前先查读取方。`tests/image_expectations.py`、`index_expectations.py` 等是冻结答案的读取器，旧模块名出现在这些文件里不表示旧业务实现仍在执行。比较失败先区分输入、路径/时钟归一化、平台差异和产品行为变化；原生输出不得刷新旧答案。产品决定确需改变期望时，按架构参考的规则在对应 PR 说明。
+
+HTTP 测试共用 `tests/test_read_http.py` 的端口、等待和进程清理工具；多种原生测试借用 `tests/test_native_lifecycle.py` 的建包与宿主方法，worker 启动与进程存在性工具在 `tests/native_worker_fixture.py`。修改这些共享方法须检查实际使用它们的测试类，别只看定义文件。提取 helper 时避免把带 `test_*` 方法的 `TestCase` 作为模块级别名留给 discover；`__module__` 还可能参与固定录制的定位，移动前须核对。
+
+### 慢测试与时序失败
+
+排查时分别计入构建、建库/复制、启动进程、执行被测操作、扫描与比较期望、等待/清理；同时记录调用次数、进程次数和参与比较的数据量。录制重放的一个 Rust 测试函数包含多次调用，每次还会扫描数据库；测试项数不能代表工作量。先消除重复执行和比较器内部的重复计算，再根据实测决定并行粒度。共享 Cargo 产物的任务可能争锁，录制模块内部也已有并行线程；增加外层并行前须核对这些依赖及机器负载。
+
+等待状态应以完整结果为条件：文件存在不保证 PID 已写完，终态可见也需符合下一次操作的接纳契约。超时用例单独设置短超时；其他用例的等待上限应容纳正常负载。取消或提交边界优先用已存在的阶段闸门、进度回调或显式握手定位；自动重试和一律加长 sleep 会掩盖竞态。失败信息应带最后状态、子进程日志或不一致的表/字段，避免只剩一个通用等待超时。
+
+调整 `tools/check_all.sh` 的结构时检查 `tests/test_local_acceptance.py` 与 `test_packaging_resources.py`：它们目前还按脚本文本定位构建、环境导出和 discover 顺序。维护时保留候选产物先准备再消费、漏跑失败及跳过白名单等行为；新增检查优先验证行为，避免继续绑定命令的排版与拼写。全量检查前置的 `test_local_acceptance.py` 也会被后续 discover 再执行；任何去重须同时保留快速失败入口及最终覆盖。
 
 ## 固定验收窗口
 
@@ -35,7 +80,7 @@ python3.12 tools/local_acceptance.py result <候选SHA>
 
 环境指纹包含同一固定路径、机器名、OS/架构、全部传入环境变量的摘要、Python/Node/Bash/Rust 工具链版本和文件摘要、实际 rustup 工具链、Cargo/Git 配置、macOS SDK/实际 clang 和明确区分的 Command Line Tools 安装身份或完整 Xcode 版本（探针失败不忽略），以及已安装 Python 依赖文件和模式。环境变量明文不会写入记录；`PWD` 固定化，`_`/`OLDPWD`/`SHLVL` 等壳层状态和被完整脚本明确 unset 的 `CARGO_TARGET_DIR` 移除后传给检查。首次安装 Python 依赖按完整脚本要求执行，记录安装后的实际依赖指纹；其余工具链/环境在运行前后必须一致。
 
-被忽略的 `packaging/desktop-resources` 内容纳入指纹。桌面构建输出仅窄识别 `desktop/dist/splash.js` 及 `desktop/gen/schemas` 下的 `acl-manifests.json`、`capabilities.json`、`desktop-schema.json` 和 `macOS-schema.json`。`splash.js` 必须与已跟踪的普通文件 `web/static/splash.js` 逐字节一致；Tauri 文件必须为普通 JSON object 文件，首次由完整检查生成后记录各自内容和模式，签名记录同时绑定已跟踪的 build.rs、capabilities/permissions、Cargo.lock 等源输入及工具链。复用时这些已测输出也须逐项匹配，删除/篡改使复用失效；完整命令之后缺少要求输出不得记录成功。输入指纹不因这些具体输出从无到有而变动，产物证据与输入分别校验。旧候选的 splash 不一致时拒绝复用，但可由新的完整检查重新复制源并校验后登记；不泛化豁免整个 dist 或 gen，未知文件/符号链接仍拒绝。ONNX Runtime 1.30 导入会生成根目录 `:memory:.ses`，只将这一普通文件的时间戳/UUID 固定格式纳入同样的签名生成输出证据，不豁免任意 `:memory:*`；未知名称或格式拒绝，文件变化使复用失效。记录格式为 v3，旧 v1/v2 记录失效并需完整执行。未知忽略输入（例如外部 models/reference）直接拒绝，不读取内容；各已登记 crate（包括 crates/platform）的 target、工具 `.venv` 缓存、Python 字节码和 `.DS_Store` 属于可再生输出。固定区不得额外放置外部输入；若引入新的被忽略构建输入，应先修改策略和合成测试。历史产出者仍由完整脚本按 CI 提交号构建。
+被忽略的 `packaging/desktop-resources` 内容纳入指纹。桌面构建输出仅窄识别 `desktop/dist/splash.js` 及 `desktop/gen/schemas` 下的 `acl-manifests.json`、`capabilities.json`、`desktop-schema.json` 和 `macOS-schema.json`。`splash.js` 必须与已跟踪的普通文件 `web/static/splash.js` 逐字节一致；Tauri 文件必须为普通 JSON object 文件，首次由完整检查生成后记录各自内容和模式，签名记录同时绑定已跟踪的 build.rs、capabilities/permissions、Cargo.lock 等源输入及工具链。复用时这些已测输出也须逐项匹配，删除/篡改使复用失效；完整命令之后缺少要求输出不得记录成功。输入指纹不因这些具体输出从无到有而变动，产物证据与输入分别校验。旧候选的 splash 不一致时拒绝复用，但可由新的完整检查重新复制源并校验后登记；不泛化豁免整个 dist 或 gen，未知文件/符号链接仍拒绝。ONNX Runtime 1.30 导入会生成根目录 `:memory:.ses`，只将这一普通文件的时间戳/UUID 固定格式纳入同样的签名生成输出证据，不豁免任意 `:memory:*`；未知名称或格式拒绝，文件变化使复用失效。记录格式为 v3，旧 v1/v2 记录失效并需完整执行。未知忽略输入（例如外部 models/reference）直接拒绝，不读取内容；各已登记 crate（包括 crates/platform）的 target、工具 `.venv` 缓存、Python 字节码和 `.DS_Store` 属于可再生输出。固定区不得额外放置外部输入；若引入新的被忽略构建输入，应先修改策略和合成测试。旧图库升级输入使用 `tests/fixtures/library_upgrade` 中提交的历史 v5/v6 合成包；每项测试复制后升级，不在全量检查期间构建历史版本。
 
 本机私有权限密钥对记录作 HMAC 校验，完整日志也校验摘要；缺字段、失败、定向命令、签名/日志篡改、输入或环境不匹配均拒绝。该记录用于防止误改/手工修改记录后的复用；拥有本机密钥和工具源码写权限的人不是安全隔离边界。不能把记录移到另一机器或平台冒称覆盖。密钥丢失则旧记录无效，从头完整运行。
 
