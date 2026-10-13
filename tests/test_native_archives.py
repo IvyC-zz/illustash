@@ -64,6 +64,10 @@ class NativeArchivesTest(unittest.TestCase):
             c.commit()
             c.execute("DELETE FROM name_settings WHERE key='retired_key'")
             c.execute("INSERT OR REPLACE INTO prefs VALUES ('startup',?)", ('{"names":true,"sync":false}',))
+            # #116: the sender's first-run guide (answered questions, ticks) is personal too.
+            c.execute("INSERT OR REPLACE INTO prefs VALUES ('onboarding',?)",
+                      ('{"status":"skipped","step":"home","ticked":["undo"],"seen":["names"],"hidden":false}',))
+            c.execute("INSERT INTO sync_runs(status) VALUES ('done')")
             # Unindexed historical tables must retain sparse physical rowids through compaction.
             c.execute('CREATE TABLE archive_sparse(value TEXT)')
             c.execute("INSERT INTO archive_sparse(rowid,value) VALUES (37,'synthetic human record')")
@@ -77,7 +81,7 @@ class NativeArchivesTest(unittest.TestCase):
         with closing(sqlite3.connect(self.lib.db)) as c, closing(sqlite3.connect(expected_db)) as e:
             c.backup(e)
             e.execute('DELETE FROM name_settings')
-            e.execute("DELETE FROM prefs WHERE key='names_network'")
+            e.execute("DELETE FROM prefs WHERE key IN ('names_network','onboarding')")
             e.commit()
         expected = snapshot(expected_db)
         self.assertNotEqual(expected['prefs'], before['prefs'], 'fixture must grant names_network')
@@ -119,6 +123,9 @@ class NativeArchivesTest(unittest.TestCase):
             names = json.loads(self.request('/api/names')['body'])
             self.assertFalse(names['model_api']['configured'])
             self.assertEqual(names['network'], {'authorized': False, 'this_run': False, 'granted_at': None})
+            guide = json.loads(self.request('/api/onboarding')['body'])['guide']
+            # Without the sender's record, a library that has finished a sync counts as off: no guide, no checklist.
+            self.assertEqual((guide['status'], guide['seen'], guide['ticked']), ('off', [], []))
         self.assertEqual(legacy.read_bytes(), legacy_bytes)
         self.assertEqual(snapshot(self.lib.db), before)
         self.assertFalse(self.sentinel.exists())
