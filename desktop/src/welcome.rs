@@ -1,9 +1,10 @@
 //! Commands of the start page (#107): the welcome page when no library can be opened, choosing another library
 //! while one is loading, and retry / choose / create after a failure. Only the main window's local start page
 //! may call them (capabilities/main.json); the library page on 127.0.0.1 cannot.
+use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Condvar, Mutex};
 
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -35,10 +36,65 @@ pub fn welcome_open(app: AppHandle, path: String) -> Result<(), String> {
     Ok(())
 }
 
+/// The page names each create and import with a request id. Tauri sends a call again over postMessage when its
+/// custom-protocol request fails, and both commands navigate the page before they answer, which can fail that
+/// request (#115): a second delivery of the same id does not run again, it waits for the first and gets its answer.
+type Answer = Result<Value, String>;
+
+#[derive(Default)]
+pub struct Requests {
+    seen: Mutex<VecDeque<(String, Option<Answer>)>>,
+    done: Condvar,
+}
+
+impl Requests {
+    fn once(&self, id: &str, work: impl FnOnce() -> Answer) -> Answer {
+        if id.is_empty() {
+            return Err("缺少请求编号；请重新启动应用".into());
+        }
+        {
+            let mut seen = self.seen.lock().unwrap();
+            if seen.iter().any(|(s, _)| s == id) {
+                eprintln!("[welcome] 同一请求再次送达，不重复执行");
+                loop {
+                    if let Some((_, Some(answer))) = seen.iter().find(|(s, _)| s == id) {
+                        return answer.clone();
+                    }
+                    seen = self.done.wait(seen).unwrap();
+                }
+            }
+            // Only one create or import runs at a time; keep the last few answered ones.
+            while seen.len() >= 8 {
+                let Some(i) = seen.iter().position(|(_, answer)| answer.is_some()) else {
+                    break;
+                };
+                seen.remove(i);
+            }
+            seen.push_back((id.to_owned(), None));
+        }
+        let answer = work();
+        if let Some(entry) = self.seen.lock().unwrap().iter_mut().find(|(s, _)| s == id) {
+            entry.1 = Some(answer.clone());
+        }
+        self.done.notify_all();
+        answer
+    }
+}
+
 /// Create a library from the folders picked per origin (and Photos on macOS), then open it. When only listing it
 /// among the recent libraries failed, answer `{created, error}` instead: the page offers to open what was made.
 #[tauri::command(async)]
-pub fn welcome_create(app: AppHandle, name: String, sources: Vec<Source>) -> Result<Value, String> {
+pub fn welcome_create(
+    app: AppHandle,
+    requests: State<'_, Requests>,
+    request: String,
+    name: String,
+    sources: Vec<Source>,
+) -> Result<Value, String> {
+    requests.once(&request, || create(&app, name, sources))
+}
+
+fn create(app: &AppHandle, name: String, sources: Vec<Source>) -> Result<Value, String> {
     use illustash_terms::desktop_shell::Pick;
     let picks = sources
         .into_iter()
@@ -51,12 +107,12 @@ pub fn welcome_create(app: AppHandle, name: String, sources: Vec<Source>) -> Res
             _ => Err("请选择来源".to_string()),
         })
         .collect::<Result<Vec<_>, _>>()?;
-    let root = server::resource_root(&app).ok_or("应用资源不可用；请重新启动应用")?;
+    let root = server::resource_root(app).ok_or("应用资源不可用；请重新启动应用")?;
     let created = illustash_terms::desktop_shell::create(&root, &name, picks).map_err(|e| e.to_string())?;
     if let Some(error) = created.unlisted {
         return Ok(json!({"created": created.path, "error": error}));
     }
-    server::restart(&app, Some(created.path));
+    server::restart(app, Some(created.path));
     Ok(json!({}))
 }
 
@@ -78,7 +134,17 @@ pub struct Import {
 
 /// Import an exported library (.zip) into the libraries home, then open it. The page polls `welcome_import_status`.
 #[tauri::command(async)]
-pub fn welcome_import(app: AppHandle, import: State<'_, Import>, path: String) -> Result<(), String> {
+pub fn welcome_import(
+    app: AppHandle,
+    import: State<'_, Import>,
+    requests: State<'_, Requests>,
+    request: String,
+    path: String,
+) -> Result<(), String> {
+    requests.once(&request, || import_archive(&app, &import, path).map(|()| Value::Null)).map(|_| ())
+}
+
+fn import_archive(app: &AppHandle, import: &Import, path: String) -> Result<(), String> {
     let cancel = {
         let mut slot = import.cancel.lock().unwrap();
         if slot.is_some() {
@@ -102,7 +168,7 @@ pub fn welcome_import(app: AppHandle, import: State<'_, Import>, path: String) -
     import.cancel.lock().unwrap().take();
     match result {
         Ok(library) => {
-            server::restart(&app, Some(library));
+            server::restart(app, Some(library));
             Ok(())
         }
         Err(_) if cancel.load(Ordering::SeqCst) => Err("已取消导入".into()),
@@ -136,4 +202,54 @@ pub fn startup_choose(app: AppHandle, create: bool) {
 #[tauri::command(async)]
 pub fn startup_retry(app: AppHandle) {
     server::restart(&app, None);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::AtomicUsize;
+
+    #[test]
+    fn a_request_delivered_twice_runs_once_and_both_get_its_answer() {
+        let requests = Arc::new(Requests::default());
+        let runs = Arc::new(AtomicUsize::new(0));
+        let (started, release) = (Arc::new(AtomicBool::new(false)), Arc::new(AtomicBool::new(false)));
+        let first = {
+            let (requests, runs, started, release) = (requests.clone(), runs.clone(), started.clone(), release.clone());
+            std::thread::spawn(move || {
+                requests.once("r1", || {
+                    runs.fetch_add(1, Ordering::SeqCst);
+                    started.store(true, Ordering::SeqCst);
+                    while !release.load(Ordering::SeqCst) {
+                        std::thread::yield_now();
+                    }
+                    Ok(json!({"made": 1}))
+                })
+            })
+        };
+        while !started.load(Ordering::SeqCst) {
+            std::thread::yield_now();
+        }
+        // The second delivery arrives while the first still runs: it waits instead of making a second library.
+        let second = {
+            let (requests, runs) = (requests.clone(), runs.clone());
+            std::thread::spawn(move || requests.once("r1", || Ok(json!({"made": runs.fetch_add(1, Ordering::SeqCst)}))))
+        };
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        release.store(true, Ordering::SeqCst);
+        assert_eq!(first.join().unwrap(), Ok(json!({"made": 1})));
+        assert_eq!(second.join().unwrap(), Ok(json!({"made": 1})));
+        // Arriving after the first answered, failures included, it is not run either.
+        assert_eq!(requests.once("r1", || unreachable!()), Ok(json!({"made": 1})));
+        assert_eq!(requests.once("r2", || Err("坏包".into())), Err("坏包".to_string()));
+        assert_eq!(requests.once("r2", || unreachable!()), Err("坏包".to_string()));
+        assert_eq!(runs.load(Ordering::SeqCst), 1);
+        assert!(requests.once("", || unreachable!()).is_err());
+        // A new click is a new request.
+        assert_eq!(requests.once("r3", || Ok(Value::Null)), Ok(Value::Null));
+        for i in 0..20 {
+            requests.once(&format!("x{i}"), || Ok(Value::Null)).unwrap();
+        }
+        assert!(requests.seen.lock().unwrap().len() <= 8);
+    }
 }
