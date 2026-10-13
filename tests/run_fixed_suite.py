@@ -20,8 +20,8 @@ BLOCKED=(ROOT/'tests/reference',ROOT/'web')
 RETIRED_TOOLS={ROOT/'tools'/name for name in ('index_worker.py','char_patch.py','build_characters.py','char_scan.py','ccip.py','validation_worksheet.py')}
 ATTEMPTS=[]
 RULE='-'*70
-# 对 CPU 负载敏感、并发下会偶发失败的测试类：并行池跑完后逐个单独运行（#130）。每项仍只运行一次，不重试；
-# 修好其中的时序问题后从这里移除。
+# 对 CPU 负载敏感、并发下会偶发失败的测试类：并行池跑完后逐个单独运行。每项仍只运行一次，不重试；
+# 修好其中的时序问题后从这里移除（#132）。
 SERIAL=frozenset({'test_native_research.NativeResearchTest','test_native_provenance.NativeProvenanceTest'})
 
 def retired(origin):
