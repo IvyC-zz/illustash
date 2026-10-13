@@ -363,7 +363,7 @@ pub fn after_write(c: &Connection) -> Result<()> {
 }
 
 /// 同 `after_write`；`view` 是调用方手里与这个事务此刻的库逐项相同的名字快照（名字更新器吸收了本事务写入的批快照，
-/// #102 A5a），重建投影时用它，不再整库载入。
+/// #102 A5a）；显示投影需要整表重建时用它，不再整库载入（只改了名字行时投影按闭包局部维护，不用快照，#103）。
 pub fn after_write_with(c: &Connection, view: Option<&crate::names_view::View>) -> Result<()> {
     if !names_in_core(c)? {
         return Ok(());
@@ -438,6 +438,41 @@ fn verify_incremental(c: &Connection, kind: &str) -> Result<()> {
     record_verified(&format!("mirror_{kind}"))
 }
 
+/// 局部维护显示投影之后、同一事务里（#103）：两张投影表与保存点里整表重建的结果逐行逐列相同；随后回滚保存点。
+fn verify_projection(c: &Connection) -> Result<()> {
+    if !verifying() {
+        return Ok(());
+    }
+    fn rows(c: &Connection) -> Result<Vec<Vec<rusqlite::types::Value>>> {
+        let mut all = Vec::new();
+        for sql in [
+            "SELECT 'display',* FROM term_name_display ORDER BY entity,skin_only",
+            "SELECT 'choice',* FROM term_name_choice ORDER BY kind,key",
+        ] {
+            let mut st = c.prepare(sql)?;
+            let n = st.column_count();
+            for row in st.query_map([], |r| (0..n).map(|i| r.get(i)).collect::<rusqlite::Result<Vec<_>>>())? {
+                all.push(row?);
+            }
+        }
+        Ok(all)
+    }
+    let scoped = rows(c)?;
+    c.execute_batch("SAVEPOINT verify_projection")?;
+    let full = crate::names_view::rebuild(c).and_then(|_| rows(c));
+    c.execute_batch("ROLLBACK TO verify_projection; RELEASE verify_projection")?;
+    let full = full?;
+    if scoped != full {
+        let differs = scoped.iter().zip(&full).find(|(a, b)| a != b);
+        return Err(Error::Conflict(format!(
+            "局部显示投影与整表重建不一致：局部 {} 行、整表 {} 行，第一处不同：{differs:?}",
+            scoped.len(),
+            full.len()
+        )));
+    }
+    record_verified("projection")
+}
+
 /// 事务中途要读显示名（核心生成历史文案，character_labels）：这个事务改过名字相关的数据就先重建显示投影。只重建投影
 /// （它只读兼容表），不补主数据、也不记 `names_projected`：主数据按 `term_tree` 挑身份，事务里后面的结构镜像可能还没
 /// 做；显示版本单独记录，提交时仍补主数据，但只在版本再次变化时重建投影。
@@ -458,11 +493,17 @@ fn refresh_projection_with(
         return Ok(());
     }
     match (tracked(c)?, view) {
-        (true, Some(view)) => crate::names_view::rebuild_changed_from(c, view)?,
-        (true, None) => crate::names_view::rebuild_changed(c)?,
-        (false, Some(view)) => crate::names_view::rebuild_from(c, view)?,
-        (false, None) => crate::names_view::rebuild(c)?,
-    };
+        (true, view) => {
+            crate::names_view::rebuild_changed_with(c, view)?;
+            verify_projection(c)?;
+        }
+        (false, Some(view)) => {
+            crate::names_view::rebuild_from(c, view)?;
+        }
+        (false, None) => {
+            crate::names_view::rebuild(c)?;
+        }
+    }
     c.execute(
         "INSERT OR REPLACE INTO meta(key,value) VALUES (?1,?2)",
         rusqlite::params![DISPLAY_PROJECTED, version.clone().unwrap_or_default()],
