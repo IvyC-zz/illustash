@@ -653,7 +653,11 @@ CREATE TABLE IF NOT EXISTS term_name_choice(
 
 /// 整表重建两张投影表（影子阶段：只读名字的兼容表，写核心自己的两张表）。
 pub fn rebuild(c: &Connection) -> Result<(usize, usize)> {
-    let view = View::load(c)?;
+    rebuild_from(c, &View::load(c)?)
+}
+
+/// 同 `rebuild`，用调用方给的快照（必须与这个事务此刻的库逐项相同，见 `View::absorb`）。
+pub fn rebuild_from(c: &Connection, view: &View) -> Result<(usize, usize)> {
     c.execute_batch("DELETE FROM term_name_display; DELETE FROM term_name_choice;")?;
     let mut put = c.prepare(
         "INSERT INTO term_name_display(entity,skin_only,name,name_source,zh,ja,en,tag) VALUES (?,?,?,?,?,?,?,?)",
@@ -682,7 +686,11 @@ pub fn rebuild(c: &Connection) -> Result<(usize, usize)> {
 
 /// 名字行变化时只写依赖闭包；实体与链接结构变更由调用方回退整表。
 pub fn rebuild_changed(c: &Connection) -> Result<(usize, usize)> {
-    let view = View::load(c)?;
+    rebuild_changed_from(c, &View::load(c)?)
+}
+
+/// 同 `rebuild_changed`，用调用方给的快照（同 `rebuild_from`）。
+pub fn rebuild_changed_from(c: &Connection, view: &View) -> Result<(usize, usize)> {
     let mut ids: BTreeSet<String> = c
         .prepare("SELECT id FROM names_dirty_entities")?
         .query_map([], |r| r.get(0))?

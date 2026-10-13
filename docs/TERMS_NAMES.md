@@ -45,7 +45,7 @@ Python 里的词表副本仍给 NameUpdater 用，两边由测试钉住相同。
 **读**：
 - `names.view(c)`：名字已在核心时给 `ProjectedView`，接口与 `View` 相同，按 `names_version` 在连接之间共享快照；否则给 `View`。三个 SQL 函数 `entity_name` / `entity_info` / `work_name` 经它注册，嵌着它们的 34 处查询一行没改。`Store._display_reader`、`names.action_label`、NameUpdater 的统计与翻译前检查也都用它。
 - 投影只收库里出现过的键。别的键（任意 tag 的 `work_name`、词表里有但库里没有的作品）由 `View` 选；未装载快照时的单次查询只读一行。
-- 名字更新器一批任务只整库载入一次 `View`（选作品名、模型预演、皮肤翻译前检查共用）：本批自己的提交按改动的名字行补进快照（`View::absorb`），别的写入方改动 `names_version` 后重新载入；模型预演仍在回滚的事务里写入待提交改动后读取。`/api/names` 的统计也只载入一次（2026-10-13，#102）。
+- 名字更新器一批任务只整库载入一次 `View`（选作品名、模型预演、皮肤翻译前检查、每个任务提交时重建显示投影共用）：本批自己的提交按改动的名字行补进快照（`View::absorb`），别的写入方改动 `names_version` 后重新载入；模型预演仍在回滚的事务里写入待提交改动后读取。`/api/names` 的统计也只载入一次（2026-10-13，#102）。
 - 搜索：`search_hits` 调 `names-search`，旧实现保留为 `search_hits_python`，没切换的库照用，也作对照的标准答案。
 
 **历史文案与预演**：

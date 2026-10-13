@@ -351,6 +351,12 @@ fn mirror_aliases(c: &Connection) -> Result<()> {
 /// 每个核心写事务提交前（schema::commit_writing）：名字已在核心、且这个事务改到了名字相关的数据，就在同一事务里
 /// 补齐主数据、维护显示投影。名字行使用依赖闭包，结构变更 / 过期状态回退整表。别名每个事务只同步一次（#102 A1）。
 pub fn after_write(c: &Connection) -> Result<()> {
+    after_write_with(c, None)
+}
+
+/// 同 `after_write`；`view` 是调用方手里与这个事务此刻的库逐项相同的名字快照（名字更新器吸收了本事务写入的批快照，
+/// #102 A5a），重建投影时用它，不再整库载入。
+pub fn after_write_with(c: &Connection, view: Option<&crate::names_view::View>) -> Result<()> {
     if !names_in_core(c)? {
         return Ok(());
     }
@@ -369,7 +375,7 @@ pub fn after_write(c: &Connection) -> Result<()> {
     } else {
         mirror(c, &mut Report::default())?;
     }
-    refresh_projection(c, &mut None)?;
+    refresh_projection_with(c, &mut None, view)?;
     c.execute(
         "INSERT OR REPLACE INTO meta(key,value) VALUES (?1,?2)",
         rusqlite::params![PROJECTED, version.unwrap_or_default()],
@@ -429,17 +435,26 @@ fn verify_incremental(c: &Connection, kind: &str) -> Result<()> {
 /// 做；显示版本单独记录，提交时仍补主数据，但只在版本再次变化时重建投影。
 /// `seen`：调用方上次重建时的版本，没变就不再重建。
 pub fn refresh_projection(c: &Connection, seen: &mut Option<String>) -> Result<()> {
+    refresh_projection_with(c, seen, None)
+}
+
+fn refresh_projection_with(
+    c: &Connection,
+    seen: &mut Option<String>,
+    view: Option<&crate::names_view::View>,
+) -> Result<()> {
     let version = meta(c, "names_version")?;
     if version.is_some()
         && (version == *seen || version == meta(c, PROJECTED)? || version == meta(c, DISPLAY_PROJECTED)?)
     {
         return Ok(());
     }
-    if tracked(c)? {
-        crate::names_view::rebuild_changed(c)?;
-    } else {
-        crate::names_view::rebuild(c)?;
-    }
+    match (tracked(c)?, view) {
+        (true, Some(view)) => crate::names_view::rebuild_changed_from(c, view)?,
+        (true, None) => crate::names_view::rebuild_changed(c)?,
+        (false, Some(view)) => crate::names_view::rebuild_from(c, view)?,
+        (false, None) => crate::names_view::rebuild(c)?,
+    };
     c.execute(
         "INSERT OR REPLACE INTO meta(key,value) VALUES (?1,?2)",
         rusqlite::params![DISPLAY_PROJECTED, version.clone().unwrap_or_default()],
