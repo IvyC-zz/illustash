@@ -7,7 +7,6 @@ use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::{
     fs,
-    io::BufReader,
     path::{Path, PathBuf},
 };
 
@@ -91,7 +90,19 @@ pub fn model_specs(resources: &Path, models: &Path) -> Result<Value> {
 }
 /// First frame, unrotated RGB; drop alpha before interpolation, as Pillow convert('RGB').
 pub fn decode(path: &Path) -> Result<RgbImage> {
-    let mut reader = ImageReader::new(BufReader::new(fs::File::open(path)?)).with_guessed_format()?;
+    decode_bytes(&fs::read(path)?, path)
+}
+/// One picture of a sync request: read in full first, so a failure is classified by where it
+/// happened. Reading can fail for a while (permissions, iCloud placeholder, unplugged disk); the
+/// decoder then only sees bytes in memory, so its every error is about the content itself.
+pub(crate) fn load(path: &Path) -> std::result::Result<RgbImage, crate::worker_protocol::FailureReason> {
+    use crate::worker_protocol::FailureReason;
+    let bytes = fs::read(path).map_err(|_| FailureReason::Unreadable)?;
+    decode_bytes(&bytes, path).map_err(|_| FailureReason::Undecodable)
+}
+/// `path` only names the format when the bytes do not; nothing is read from it.
+pub fn decode_bytes(bytes: &[u8], path: &Path) -> Result<RgbImage> {
+    let mut reader = ImageReader::new(std::io::Cursor::new(bytes)).with_guessed_format()?;
     // TGA has no dependable magic; retain the filename fallback after sniffing.
     if reader.format().is_none() {
         if let Ok(format) = image::ImageFormat::from_path(path) {
@@ -254,10 +265,10 @@ pub fn run(request: Request, resources: &Path, models: &Path, runtime: &Path, sh
         let mut ccip = Vec::new();
         let mut claims = Vec::new();
         for asset in assets {
-            let image = match decode(&asset.path) {
+            let image = match load(&asset.path) {
                 Ok(image) => image,
-                Err(_) => {
-                    failed.push(json!({"uuid":asset.id}));
+                Err(reason) => {
+                    failed.push(json!({"uuid":asset.id,"reason":reason}));
                     progress.finished(false);
                     progress.write("recognising");
                     continue;
@@ -336,6 +347,54 @@ pub fn worker(arguments: &[String]) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn sync_pictures_fail_as_unreadable_or_undecodable_by_where_the_error_happened() {
+        use crate::worker_protocol::FailureReason::{Undecodable, Unreadable};
+        let root = std::env::temp_dir().join(format!("illustash-load-{}", crate::store::new_key().unwrap()));
+        fs::create_dir(&root).unwrap();
+        let png = root.join("good.png");
+        image::RgbImage::from_fn(32, 24, |x, y| image::Rgb([x as u8 * 7, y as u8 * 9, 128])).save(&png).unwrap();
+        let jpeg = root.join("good.jpg");
+        let rgb = image::RgbImage::from_fn(32, 24, |x, y| image::Rgb([x as u8 * 7, y as u8 * 9, 128]));
+        let mut encoder = mozjpeg::Compress::new(mozjpeg::ColorSpace::JCS_RGB);
+        encoder.set_size(32, 24);
+        let mut encoder = encoder.start_compress(Vec::new()).unwrap();
+        encoder.write_scanlines(rgb.as_raw()).unwrap();
+        fs::write(&jpeg, encoder.finish().unwrap()).unwrap();
+        assert_eq!(load(&png).unwrap(), decode(&png).unwrap());
+        assert_eq!(load(&jpeg).unwrap(), decode(&jpeg).unwrap());
+        let bytes = fs::read(&png).unwrap();
+        let cases = [
+            ("truncated.png", bytes[..bytes.len() / 2].to_vec()),
+            ("header-only.jpg", fs::read(&jpeg).unwrap()[..20].to_vec()),
+            ("truncated.jpg", {
+                let b = fs::read(&jpeg).unwrap();
+                b[..b.len() / 2].to_vec()
+            }),
+            ("text.jpg", b"not an image".to_vec()),
+            ("empty.png", Vec::new()),
+            ("unknown.webp", b"RIFF\0\0\0\0WEBPVP8 ".to_vec()),
+        ];
+        for (name, content) in cases {
+            fs::write(root.join(name), content).unwrap();
+            assert_eq!(load(&root.join(name)).err(), Some(Undecodable), "{name}");
+        }
+        assert_eq!(load(&root.join("missing.png")).err(), Some(Unreadable));
+        assert_eq!(load(&root).err(), Some(Unreadable), "a directory cannot be read as a file");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let locked = root.join("locked.png");
+            fs::copy(&png, &locked).unwrap();
+            fs::set_permissions(&locked, fs::Permissions::from_mode(0o000)).unwrap();
+            // Root reads through permission bits; there the file is simply readable.
+            if fs::read(&locked).is_err() {
+                assert_eq!(load(&locked).err(), Some(Unreadable));
+            }
+            fs::set_permissions(&locked, fs::Permissions::from_mode(0o600)).unwrap();
+        }
+        fs::remove_dir_all(root).unwrap();
+    }
     #[test]
     fn wd_keep_cast_and_round_match_python_boundaries() {
         let tags = Tags {

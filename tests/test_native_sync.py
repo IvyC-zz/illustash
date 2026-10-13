@@ -6,6 +6,7 @@ import sqlite3
 import subprocess
 import os
 import unittest
+from pathlib import Path
 from tests.test_native_folder import NativeFolderHTTPTest
 from tests import photos_fixture
 from tests.test_native_human_labels import snapshot
@@ -140,6 +141,21 @@ if mode=='progress':
         if release.exists(): break
         time.sleep(.01)
 (Path(sys.argv[0]).parent/'last-request').write_text(json.dumps([a['id'] for a in r['assets']]))
+failures=[]
+if mode in ('classify','classify-legacy'):
+    # Stands in for the native producer (#112): a file it cannot read is unreadable; a PNG read in
+    # full without its end chunk, or anything else, is undecodable. Older workers give no reason.
+    kept=[]
+    for a in r['assets']:
+        try: b=Path(a['path']).read_bytes()
+        except OSError: failures.append(dict(uuid=a['id'],reason='unreadable')); continue
+        if b.startswith(b'\x89PNG') and b.endswith(b'IEND\xaeB`\x82'): kept.append(a)
+        else: failures.append(dict(uuid=a['id'],reason='undecodable'))
+    if mode=='classify-legacy': failures=[dict(uuid=f['uuid']) for f in failures]
+    r['assets']=kept
+    if not kept:
+        Path(sys.argv[2]).write_text(json.dumps(dict(identity=r['identity'],packages=[],failed=failures)))
+        sys.exit(0)
 if mode in ('stream','stream-hang'):
     # One complete batch per asset, each marked complete only after its files exist.
     specs=SPECS
@@ -180,6 +196,7 @@ if mode=='splitbad' and len(ids)>1:
         manifest=dict(m,assets=[u],files={f:dict(bytes=(dest/f).stat().st_size,sha256=hashlib.sha256((dest/f).read_bytes()).hexdigest()) for f in ('labels.jsonl','wd.npy','ccip.npy')})
         (dest/'manifest.json').write_text(json.dumps(manifest));packages.append(str(dest))
 Path(sys.argv[2]).write_text(json.dumps(dict(identity=r['identity'],packages=packages,failed=[])))
+if failures: Path(sys.argv[2]).write_text(json.dumps(dict(identity=r['identity'],packages=packages,failed=failures)))
 """.replace('MODE',repr(mode)).replace('SPECS',repr(specs)))
         script.chmod(0o700)
         self.env['ILLUSTASH_RECOGNITION_WORKER']=worker_command(script)
@@ -399,6 +416,118 @@ Path(sys.argv[2]).write_text(json.dumps(dict(identity=r['identity'],packages=pac
         state=self.sync()
         self.assertEqual((state['state']['status'],state['state']['failed'],state['state']['imported']),('done',0,1))
         with sqlite3.connect(self.lib.source) as c:self.assertEqual(c.execute("SELECT count(*) FROM recognition_assets WHERE asset='E'").fetchone()[0],1)
+
+    def hold_unreadable(self, path):
+        """Make an existing file unreadable while its metadata stays as it was: POSIX permission
+        bits, or on Windows an open handle that shares nothing. Returns the release function."""
+        if os.name != 'nt':
+            path.chmod(0)
+            release = lambda: path.chmod(0o644)
+        else:
+            import ctypes
+            from ctypes import wintypes
+            kernel = ctypes.WinDLL('kernel32', use_last_error=True)
+            kernel.CreateFileW.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD, wintypes.LPVOID,
+                                           wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE]
+            kernel.CreateFileW.restype = wintypes.HANDLE
+            kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+            handle = kernel.CreateFileW(str(path), 0x80000000, 0, None, 3, 0, None)  # GENERIC_READ, no sharing, OPEN_EXISTING
+            if handle in (None, wintypes.HANDLE(-1).value):
+                raise ctypes.WinError(ctypes.get_last_error())
+            release = lambda: kernel.CloseHandle(handle)
+        held = [True]
+        def done():
+            if held.pop() if held else False:
+                release()
+        self.addCleanup(done)
+        try:
+            path.read_bytes()
+            done()
+            self.skipTest('this account reads files whatever their permissions')
+        except OSError:
+            pass
+        return done
+
+    def test_native_library_new_damaged_pictures_wait_for_a_change_unreadable_ones_retry(self):
+        # #112: a picture that cannot be read is tried again on every sync; one read in full that
+        # is not a valid image is skipped until its file changes; both are counted apart.
+        from tests.folder_fixture import image, settle
+        folder = self.new_folder
+        image(folder / 'good.png', 'red'); image(folder / 'locked.png', 'blue'); image(folder / 'bad.png', 'green', (41, 30))
+        whole = (folder / 'bad.png').read_bytes(); (folder / 'bad.png').write_bytes(whole[:len(whole) // 2])
+        self.assertEqual(self.sync()['state']['status'], 'needs_recognition')
+        with sqlite3.connect(self.lib.db) as c:
+            ids = dict(c.execute("SELECT filename,uuid FROM assets WHERE filename LIKE '%.png'").fetchall())
+        self.assertEqual(set(ids), {'not-scanned.png', 'good.png', 'locked.png', 'bad.png'})
+        for name in ('good.png', 'bad.png'):
+            self.assertEqual(self.request('/api/tag', {'ids': [ids[name]], 'tag': '合成人工'})['status'], 200)
+        with sqlite3.connect(self.lib.db) as c:
+            tags = c.execute('SELECT uuid,tag FROM asset_tags ORDER BY uuid,tag').fetchall()
+        self.worker('classify')
+        request = self.root / 'last-request'
+        def run():
+            request.unlink(missing_ok=True)
+            response = self.request('/api/sync', {})
+            self.assertEqual(response['status'], 200, response['body'])
+            value = self.finish()
+            self.assertEqual(value['state']['status'], 'done', value)
+            sent = set(json.loads(request.read_text())) if request.exists() else set()
+            return value, {name for name, u in ids.items() if u in sent}
+        settle(folder)
+        release = self.hold_unreadable(folder / 'locked.png')
+        value, sent = run()
+        state = value['state']
+        self.assertEqual(sent, {'not-scanned.png', 'good.png', 'bad.png'})
+        self.assertEqual((state['failed'], state['damaged'], state['imported']), (1, 2, 1), state)
+        self.assertEqual(state['message'], '1 张暂时读不到（可能还在 iCloud），下次同步重试；'
+                                           '2 张图片已损坏或格式不支持，已跳过；文件改动后会重新识别')
+        self.assertEqual(value['damaged']['count'], 2)
+        self.assertEqual(sorted(Path(p).name for p in value['damaged']['paths']), ['bad.png', 'not-scanned.png'])
+        self.assertEqual(value['history'][0]['failed'], 1)
+        # Again: the damaged pictures are not sent, the unreadable one is tried again.
+        value, sent = run()
+        self.assertEqual(sent, set())
+        self.assertEqual((value['state']['failed'], value['state']['damaged']), (1, 2), value['state'])
+        release()
+        value, sent = run()
+        self.assertEqual(sent, {'locked.png'})
+        self.assertEqual((value['state']['failed'], value['state']['damaged'], value['state']['imported']), (0, 2, 1), value['state'])
+        self.assertEqual(value['state']['message'], '2 张图片已损坏或格式不支持，已跳过；文件改动后会重新识别')
+        # The damaged file is replaced by a valid picture: the next sync recognises it, under the same UUID.
+        image(folder / 'bad.png', 'yellow', (51, 31))
+        settle(folder)
+        value, sent = run()
+        self.assertEqual(sent, {'bad.png'})
+        self.assertEqual((value['state']['failed'], value['state']['damaged'], value['state']['imported']), (0, 1, 1), value['state'])
+        self.assertEqual([Path(p).name for p in value['damaged']['paths']], ['not-scanned.png'])
+        (folder / 'not-scanned.png').unlink()
+        value, sent = run()
+        self.assertEqual(sent, set())
+        self.assertNotIn('damaged', value['state']); self.assertNotIn('damaged', value)
+        with sqlite3.connect(self.lib.db) as c:
+            self.assertEqual(dict(c.execute("SELECT filename,uuid FROM assets WHERE filename LIKE '%.png'").fetchall()),
+                             {k: v for k, v in ids.items() if k != 'not-scanned.png'})
+            self.assertEqual(c.execute('SELECT uuid,tag FROM asset_tags ORDER BY uuid,tag').fetchall(), tags)
+            self.assertIsNone(c.execute("SELECT value FROM prefs WHERE key='sync_damaged'").fetchone())
+        with sqlite3.connect(self.lib.source) as c:
+            done = {u for u, in c.execute('SELECT asset FROM recognition_assets')}
+        self.assertEqual(done & set(ids.values()), {ids[n] for n in ('good.png', 'locked.png', 'bad.png')})
+        self.assertFalse(self.sentinel.exists())
+
+    def test_native_library_new_worker_without_failure_reasons_keeps_retrying(self):
+        # A worker from before #112 gives no reason: every failure stays retryable, as it was.
+        from tests.folder_fixture import image
+        image(self.new_folder / 'good.png', 'red')
+        self.worker('classify-legacy')
+        for _ in range(2):
+            (self.root / 'last-request').unlink(missing_ok=True)
+            value = self.sync()
+            self.assertEqual((value['state']['status'], value['state']['failed']), ('done', 1), value)
+            self.assertNotIn('damaged', value['state']); self.assertNotIn('damaged', value)
+            with sqlite3.connect(self.lib.db) as c:
+                text = c.execute("SELECT uuid FROM assets WHERE filename='not-scanned.png'").fetchone()[0]
+            self.assertIn(text, json.loads((self.root / 'last-request').read_text()))
+            self.assertEqual(value['state']['message'], '1 张暂时读不到（可能还在 iCloud），下次同步重试')
 
     def test_native_library_new_batch_commit_then_failure_recovers_once(self):
         self.photo('D','com.atebits.Tweetie2')

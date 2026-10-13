@@ -117,6 +117,18 @@ pub(crate) struct SyncResponse {
 #[derive(Deserialize)]
 pub(crate) struct SyncFailure {
     pub uuid: String,
+    /// Workers before #112 send no reason; their failures stay retryable, as before.
+    #[serde(default)]
+    pub reason: FailureReason,
+}
+/// Why the worker gave up on one picture. Decided by where the error came from, never by its text:
+/// reading the file (retry next sync) or decoding bytes that were read in full (retry once they change).
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum FailureReason {
+    #[default]
+    Unreadable,
+    Undecodable,
 }
 #[derive(Deserialize)]
 pub(crate) struct RecognitionManifest {
@@ -280,6 +292,22 @@ mod tests {
         let v = json!({"identity":identity(),"packages":[],"failed":[{"uuid":2}]});
         let error = parse::<SyncResponse>(v, Path::new("sync/response.json")).err().unwrap().to_string();
         assert!(error.contains("failed[0].uuid"), "{error}");
+    }
+    #[test]
+    fn sync_failure_reason_defaults_to_retry_and_rejects_unknown_values() {
+        let v = json!({"identity":identity(),"packages":[],"failed":[{"uuid":"old"},{"uuid":"read","reason":"unreadable"},{"uuid":"bad","reason":"undecodable"}]});
+        let reply = parse::<SyncResponse>(v, Path::new("sync/response.json")).unwrap();
+        assert_eq!(
+            reply.failed.iter().map(|f| (f.uuid.as_str(), f.reason)).collect::<Vec<_>>(),
+            [
+                ("old", FailureReason::Unreadable),
+                ("read", FailureReason::Unreadable),
+                ("bad", FailureReason::Undecodable)
+            ]
+        );
+        let v = json!({"identity":identity(),"packages":[],"failed":[{"uuid":"x","reason":"broken"}]});
+        let error = parse::<SyncResponse>(v, Path::new("sync/response.json")).err().unwrap().to_string();
+        assert!(error.contains("failed[0].reason"), "{error}");
     }
     #[test]
     fn recognition_manifest_missing_and_wrong_fields_have_file_and_field() {
