@@ -209,8 +209,10 @@ pub fn track(c: &Connection) -> Result<()> {
     c.execute_batch(
         "CREATE TEMP TABLE IF NOT EXISTS names_dirty_entities(id TEXT PRIMARY KEY);
         CREATE TEMP TABLE IF NOT EXISTS names_dirty_keys(kind TEXT,key TEXT,PRIMARY KEY(kind,key));
+        CREATE TEMP TABLE IF NOT EXISTS names_dirty_aliases(kind TEXT,key TEXT,PRIMARY KEY(kind,key));
         CREATE TEMP TABLE IF NOT EXISTS names_dirty_full(value INTEGER PRIMARY KEY);
-        DELETE FROM names_dirty_entities; DELETE FROM names_dirty_keys; DELETE FROM names_dirty_full;",
+        DELETE FROM names_dirty_entities; DELETE FROM names_dirty_keys; DELETE FROM names_dirty_aliases;
+        DELETE FROM names_dirty_full;",
     )?;
     if meta(c, "names_version")? != meta(c, PROJECTED)? {
         c.execute("INSERT INTO names_dirty_full VALUES (2)", [])?;
@@ -253,6 +255,22 @@ pub fn track(c: &Connection) -> Result<()> {
             ))?;
         }
     }
+    // 别名表不在 `names_version` 的触发器里，单独记下受影响的键，提交时只同步这些键（#102 A1）。
+    for event in ["INSERT", "UPDATE", "DELETE"] {
+        let mut body = String::new();
+        for side in ["old", "new"] {
+            if (event == "INSERT" && side == "old") || (event == "DELETE" && side == "new") {
+                continue;
+            }
+            body.push_str(&format!(
+                "INSERT INTO names_dirty_aliases SELECT {side}.kind,{side}.key WHERE NOT EXISTS(SELECT 1 FROM names_dirty_aliases WHERE kind={side}.kind AND key={side}.key);"
+            ));
+        }
+        c.execute_batch(&format!(
+            "CREATE TEMP TRIGGER IF NOT EXISTS track_names_name_aliases_{event}
+            AFTER {event} ON main.name_aliases BEGIN {body} END;"
+        ))?;
+    }
     Ok(())
 }
 
@@ -271,27 +289,53 @@ fn tracked_master(c: &Connection) -> Result<bool> {
         && !c.query_row("SELECT EXISTS(SELECT 1 FROM names_dirty_full WHERE value=2)", [], |r| r.get::<_, bool>(0))?)
 }
 
+/// 按本事务记下的身份和键补齐名字主数据。由 dirty 表驱动（`CROSS JOIN` 固定连接顺序），不扫整张 `names`、`terms`、
+/// `display_names`（#102 A2）。`term_names` 是普通表，固定契约连隐藏 rowid 一起比较，所以插入仍按 `names` 的 rowid
+/// 顺序（原计划整表扫描 `names` 的顺序），新行分到的 rowid 与原来相同。
 fn mirror_changed(c: &Connection) -> Result<()> {
-    c.execute_batch("DELETE FROM term_names WHERE term_id IN (
-            SELECT t.id FROM terms t JOIN term_tree r ON r.term_id=t.id JOIN names_dirty_entities d ON d.id=t.key)
+    c.execute_batch(
+        "DELETE FROM term_names WHERE term_id IN (
+            SELECT t.id FROM names_dirty_entities d CROSS JOIN terms t ON t.key=d.id CROSS JOIN term_tree r ON r.term_id=t.id)
         AND NOT EXISTS(SELECT 1 FROM names n JOIN terms t ON t.key=n.entity_id
             WHERE t.id=term_names.term_id AND n.lang=term_names.lang AND n.value=term_names.value
             AND n.source=term_names.source AND n.role=term_names.role
             AND n.preferred=term_names.preferred AND n.position=term_names.position);
         INSERT INTO term_names(term_id,lang,value,source,role,preferred,position)
-        SELECT t.id,n.lang,n.value,n.source,n.role,n.preferred,n.position FROM names n
-        JOIN names_dirty_entities d ON d.id=n.entity_id JOIN terms t ON t.key=n.entity_id
-        JOIN term_tree r ON r.term_id=t.id WHERE true
+        SELECT t.id,n.lang,n.value,n.source,n.role,n.preferred,n.position FROM names_dirty_entities d
+        CROSS JOIN names n ON n.entity_id=d.id CROSS JOIN terms t ON t.key=n.entity_id
+        CROSS JOIN term_tree r ON r.term_id=t.id WHERE true ORDER BY n.rowid
         ON CONFLICT(term_id,role,lang,source,value) DO UPDATE SET preferred=excluded.preferred,position=excluded.position;
         DELETE FROM term_key_names WHERE (kind,key) IN (SELECT kind,key FROM names_dirty_keys);
-        INSERT INTO term_key_names SELECT n.* FROM display_names n
-        JOIN names_dirty_keys d ON d.kind=n.kind AND d.key=n.key;")?;
-    mirror_aliases(c)?;
+        INSERT INTO term_key_names SELECT n.kind,n.key,n.lang,n.source,n.value FROM names_dirty_keys d
+        CROSS JOIN display_names n ON n.kind=d.kind AND n.key=d.key;",
+    )?;
     Ok(())
 }
 
-/// 别名表只影响搜索，不在 `names_version` 的触发器里：写它的名字命令提交前直接同步。
-pub fn mirror_aliases(c: &Connection) -> Result<()> {
+/// 别名表只影响搜索，不在 `names_version` 的触发器里：提交前按本事务记下的键同步（#102 A1）。没有追踪（这个连接
+/// 没开过核心写事务）时退回整表同步。`term_key_aliases` 是 WITHOUT ROWID 表，写入顺序不影响比较。
+fn mirror_aliases_changed(c: &Connection) -> Result<bool> {
+    let tracked: bool =
+        c.query_row("SELECT EXISTS(SELECT 1 FROM sqlite_temp_master WHERE name='names_dirty_aliases')", [], |r| {
+            r.get(0)
+        })?;
+    if !tracked {
+        mirror_aliases(c)?;
+        return Ok(false);
+    }
+    c.execute_batch(
+        "DELETE FROM term_key_aliases WHERE (kind,key) IN (SELECT kind,key FROM names_dirty_aliases)
+         AND NOT EXISTS(SELECT 1 FROM name_aliases a WHERE a.kind=term_key_aliases.kind AND a.key=term_key_aliases.key
+          AND a.value=term_key_aliases.value AND a.position=term_key_aliases.position);
+        INSERT INTO term_key_aliases SELECT a.kind,a.key,a.value,a.position FROM names_dirty_aliases d
+         CROSS JOIN name_aliases a ON a.kind=d.kind AND a.key=d.key WHERE true
+         ON CONFLICT(kind,key,value) DO UPDATE SET position=excluded.position WHERE position<>excluded.position;",
+    )?;
+    Ok(true)
+}
+
+/// 整表同步别名：多的删、少的加。只用于没有追踪的事务和对照核对。
+fn mirror_aliases(c: &Connection) -> Result<()> {
     c.execute(
         "DELETE FROM term_key_aliases WHERE (kind,key,value,position) NOT IN (SELECT kind,key,value,position FROM name_aliases)",
         [],
@@ -305,17 +349,23 @@ pub fn mirror_aliases(c: &Connection) -> Result<()> {
 }
 
 /// 每个核心写事务提交前（schema::commit_writing）：名字已在核心、且这个事务改到了名字相关的数据，就在同一事务里
-/// 补齐主数据、维护显示投影。名字行使用依赖闭包，结构变更 / 过期状态回退整表。
+/// 补齐主数据、维护显示投影。名字行使用依赖闭包，结构变更 / 过期状态回退整表。别名每个事务只同步一次（#102 A1）。
 pub fn after_write(c: &Connection) -> Result<()> {
     if !names_in_core(c)? {
         return Ok(());
     }
     let version = meta(c, "names_version")?;
     if version.is_some() && version == meta(c, PROJECTED)? {
+        // 名字版本没变：别名表不在版本触发器里，仍可能改过。
+        if mirror_aliases_changed(c)? {
+            verify_incremental(c, "aliases")?;
+        }
         return Ok(());
     }
     if tracked_master(c)? {
         mirror_changed(c)?;
+        mirror_aliases_changed(c)?;
+        verify_incremental(c, "names")?;
     } else {
         mirror(c, &mut Report::default())?;
     }
@@ -325,6 +375,53 @@ pub fn after_write(c: &Connection) -> Result<()> {
         rusqlite::params![PROJECTED, version.unwrap_or_default()],
     )?;
     Ok(())
+}
+
+/// 对照核对的开关（#102；#38 2026-10-12 用户决定）：只在测试特性 `verify-incremental` 下编译。设置了环境变量
+/// `ILLUSTASH_TEST_VERIFY_INCREMENTAL`（一个记录文件的路径）时，每次走增量路径都在同一事务里核对「增量结果 = 整表
+/// 重建」，并往记录文件追加一行核对的种类，测试据此证明核对确实执行过。产品构建里恒为关闭。
+#[cfg(feature = "verify-incremental")]
+pub fn verifying() -> bool {
+    std::env::var_os(VERIFY_ENV).is_some_and(|v| !v.is_empty())
+}
+#[cfg(not(feature = "verify-incremental"))]
+pub fn verifying() -> bool {
+    false
+}
+#[cfg(feature = "verify-incremental")]
+const VERIFY_ENV: &str = "ILLUSTASH_TEST_VERIFY_INCREMENTAL";
+
+/// 记下一次已通过的核对（见 `verifying`）。
+#[cfg(feature = "verify-incremental")]
+pub fn record_verified(kind: &str) -> Result<()> {
+    use std::io::Write;
+    let Some(path) = std::env::var_os(VERIFY_ENV).filter(|v| !v.is_empty()) else { return Ok(()) };
+    let mut f = std::fs::OpenOptions::new().create(true).append(true).open(&path)?;
+    f.write_all(format!("{kind}\n").as_bytes())?;
+    Ok(())
+}
+#[cfg(not(feature = "verify-incremental"))]
+pub fn record_verified(_kind: &str) -> Result<()> {
+    Ok(())
+}
+
+/// 增量镜像之后、同一事务里：在保存点里再跑一遍整表同步，它不应改动任何一行；随后回滚保存点。
+fn verify_incremental(c: &Connection, kind: &str) -> Result<()> {
+    if !verifying() {
+        return Ok(());
+    }
+    c.execute_batch("SAVEPOINT verify_incremental")?;
+    let mut r = Report::default();
+    let full = mirror(c, &mut r);
+    c.execute_batch("ROLLBACK TO verify_incremental; RELEASE verify_incremental")?;
+    full?;
+    if r.changed.values().any(|v| v.as_i64() != Some(0)) {
+        return Err(Error::Conflict(format!(
+            "增量名字镜像与整表重建不一致（{kind}）：整表重建还要改 {}",
+            Value::Object(r.changed)
+        )));
+    }
+    record_verified(&format!("mirror_{kind}"))
 }
 
 /// 事务中途要读显示名（核心生成历史文案，character_labels）：这个事务改过名字相关的数据就先重建显示投影。只重建投影

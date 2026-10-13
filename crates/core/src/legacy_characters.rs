@@ -180,13 +180,16 @@ pub(crate) fn mirror_state(c: &Connection, ids: &[String], origin: &str) -> Resu
     if let Some((system, key)) = foreign {
         return Err(Error::Conflict(format!("链接 {system}:{key} 已属于别的类型的词条")));
     }
-    // 链接从这些身份移到了别的身份：跟着旧表改归属（新主人不一定在范围里）。
+    // 链接从这些身份移到了别的身份：跟着旧表改归属（新主人不一定在范围里）。由范围驱动（`CROSS JOIN` 固定连接顺序），
+    // 不扫整张 `links`、`term_links`（#102 A2）；`term_links` 是普通表，插入仍按 `links` 的 rowid 顺序（原计划整表扫描
+    // `links` 的顺序）。每行旧链接只对应一个 (system,key)，连接不会产生重复行。
     c.execute(
         "INSERT INTO term_links(system,key,term_id,url,source,current,added_at)
          SELECT CASE l.system WHEN 'wd' THEN 'wd_character' ELSE l.system END,l.key,t.id,'',l.source,l.current,l.added_at
-         FROM links l JOIN terms t ON t.key=l.entity_id
-         WHERE (CASE l.system WHEN 'wd' THEN 'wd_character' ELSE l.system END,l.key) IN (
-          SELECT x.system,x.key FROM term_links x JOIN terms t ON t.id=x.term_id JOIN state_scope s ON s.id=t.key)
+         FROM state_scope s CROSS JOIN terms st ON st.key=s.id CROSS JOIN term_links x ON x.term_id=st.id
+         CROSS JOIN links l ON l.key=x.key AND l.system IN (x.system,CASE x.system WHEN 'wd_character' THEN 'wd' END)
+          AND CASE l.system WHEN 'wd' THEN 'wd_character' ELSE l.system END=x.system
+         CROSS JOIN terms t ON t.key=l.entity_id WHERE true ORDER BY l.rowid
          ON CONFLICT(system,key) DO UPDATE SET term_id=excluded.term_id,source=excluded.source,current=excluded.current,
           added_at=excluded.added_at
          WHERE term_links.term_id IS NOT excluded.term_id OR term_links.source IS NOT excluded.source
@@ -194,7 +197,7 @@ pub(crate) fn mirror_state(c: &Connection, ids: &[String], origin: &str) -> Resu
         [],
     )?;
     c.execute(
-        "DELETE FROM term_links WHERE term_id IN (SELECT t.id FROM terms t JOIN state_scope s ON s.id=t.key) AND NOT EXISTS(
+        "DELETE FROM term_links WHERE term_id IN (SELECT t.id FROM state_scope s CROSS JOIN terms t ON t.key=s.id) AND NOT EXISTS(
           SELECT 1 FROM links l WHERE l.system=CASE term_links.system WHEN 'wd_character' THEN 'wd' ELSE term_links.system END
           AND l.key=term_links.key)",
         [],

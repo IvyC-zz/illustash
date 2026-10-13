@@ -303,8 +303,9 @@ fn op(call: &Value) -> String {
     call.get("args").and_then(|a| a[0].as_str()).or_else(|| call["input"]["op"].as_str()).unwrap_or("").to_owned()
 }
 
-/// Replay one case; returns the first few differences.
-fn case(name: &str, calls: &[Value], blobs: &Value, bin: &Path) -> Vec<String> {
+/// Replay one case; returns the first few differences. Every incremental names check the build makes is
+/// appended to `verified` (#102).
+fn case(name: &str, calls: &[Value], blobs: &Value, bin: &Path, verified: &Path) -> Vec<String> {
     let temp = std::env::temp_dir().join(format!("illustash-replay-{}-{}", std::process::id(), short(name)));
     let _ = fs::remove_dir_all(&temp);
     fs::create_dir_all(temp.join("root")).unwrap();
@@ -348,6 +349,7 @@ fn case(name: &str, calls: &[Value], blobs: &Value, bin: &Path) -> Vec<String> {
             let mut child = Command::new(bin)
                 .args(&args)
                 .env("ILLUSTASH_TEST_KEY_COUNTER", &counter)
+                .env(VERIFY_INCREMENTAL, verified)
                 .stdin(Stdio::piped())
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped())
@@ -368,6 +370,7 @@ fn case(name: &str, calls: &[Value], blobs: &Value, bin: &Path) -> Vec<String> {
                 let mut child = Command::new(bin)
                     .arg("serve")
                     .env("ILLUSTASH_TEST_KEY_COUNTER", &counter)
+                    .env(VERIFY_INCREMENTAL, verified)
                     .stdin(Stdio::piped())
                     .stdout(Stdio::piped())
                     .spawn()
@@ -479,6 +482,8 @@ fn replay(module: &str) {
     assert!(!cases.is_empty(), "{module}: empty recording");
     // Cases are independent (own directory, key counter and serve process): run them on a few threads.
     let work: Vec<(&String, &Value)> = cases.iter().collect();
+    let verified = std::env::temp_dir().join(format!("illustash-replay-{}-{module}.verified", std::process::id()));
+    let _ = fs::remove_file(&verified);
     let threads = std::thread::available_parallelism().map_or(2, |n| n.get().min(4));
     let next = std::sync::atomic::AtomicUsize::new(0);
     let problems: Vec<String> = std::thread::scope(|s| {
@@ -489,13 +494,26 @@ fn replay(module: &str) {
                     loop {
                         let i = next.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                         let Some((name, case_data)) = work.get(i) else { break found };
-                        found.extend(case(name, case_data["calls"].as_array().unwrap(), &data["blobs"], bin));
+                        found.extend(case(
+                            name,
+                            case_data["calls"].as_array().unwrap(),
+                            &data["blobs"],
+                            bin,
+                            &verified,
+                        ));
                     }
                 })
             })
             .collect();
         workers.into_iter().flat_map(|w| w.join().unwrap()).collect()
     });
+    let checks = verified_checks(&verified);
+    let _ = fs::remove_file(&verified);
+    eprintln!("{module}: incremental names checks {checks:?}");
+    assert!(
+        !VERIFIED_MODULES.contains(&module) || !checks.is_empty(),
+        "{module}: the incremental names check never ran (built without illustash-core/verify-incremental?)"
+    );
     assert!(
         problems.is_empty(),
         "{module}: {} of {} cases differ:\n{}",
@@ -503,6 +521,42 @@ fn replay(module: &str) {
         cases.len(),
         problems.join("\n")
     );
+}
+
+/// The core's incremental-vs-full check (#102), compiled into test builds only and switched on per process.
+const VERIFY_INCREMENTAL: &str = "ILLUSTASH_TEST_VERIFY_INCREMENTAL";
+/// Recordings whose commits take the incremental names path: the check must have run in each of them.
+const VERIFIED_MODULES: [&str; 21] = [
+    "test_terms_core",
+    "test_terms_labels",
+    "test_terms_artists",
+    "test_terms_character_commands",
+    "test_terms_character_history",
+    "test_terms_character_identity",
+    "test_terms_character_import",
+    "test_terms_character_learning",
+    "test_terms_character_refusals",
+    "test_terms_character_structure",
+    "test_terms_characters_contract",
+    "test_terms_characters_cutover",
+    "test_terms_golden",
+    "test_terms_names_writes",
+    "test_identity",
+    "test_identity_hybrid",
+    "test_lead",
+    "test_web_v2",
+    "test_works",
+    "test_terms_artists_provenance",
+    "test_web",
+];
+
+/// Passed checks by kind.
+fn verified_checks(path: &Path) -> BTreeMap<String, usize> {
+    let mut checks = BTreeMap::new();
+    for line in fs::read_to_string(path).unwrap_or_default().lines() {
+        *checks.entry(line.to_owned()).or_default() += 1;
+    }
+    checks
 }
 
 macro_rules! modules {
