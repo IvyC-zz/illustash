@@ -1,4 +1,7 @@
 //! Installed optional worker adapter. Never enabled by the base application.
+//! One binary serves all four kinds: the host names the kind explicitly per launch
+//! (ILLUSTASH_WORKER_KIND); legacy `illustash-<kind>` copies still dispatch by name.
+use illustash_terms::app_tasks::{worker_kind, WORKER_KIND_ENV};
 use std::{env, path::PathBuf, process::ExitCode};
 fn main() -> ExitCode {
     match run() {
@@ -11,7 +14,9 @@ fn main() -> ExitCode {
 }
 fn run() -> Result<u8, Box<dyn std::error::Error>> {
     let exe = env::current_exe()?;
-    let kind = exe.file_stem().and_then(|s| s.to_str()).unwrap_or("").strip_prefix("illustash-").unwrap_or("");
+    let stem = exe.file_stem().and_then(|s| s.to_str()).unwrap_or("");
+    let requested = env::var(WORKER_KIND_ENV).ok();
+    let kind = worker_kind(stem, requested.as_deref())?;
     let native_args: Vec<String> = env::args().skip(1).collect();
     // Launchers set ROOT (or the DLL) for the fixed Windows OpenBLAS; an adapter run
     // directly resolves the same installed resource. Still single-threaded here.
@@ -70,9 +75,6 @@ fn run() -> Result<u8, Box<dyn std::error::Error>> {
         }
     }
     // Everything else is refused: no interpreter fallback remains, and Linux is frozen (README).
-    if !matches!(kind, "recognition" | "research" | "index" | "provenance") {
-        return Err("请使用 illustash-research / illustash-index / illustash-provenance / illustash-recognition".into());
-    }
     Err(if cfg!(any(target_os = "macos", target_os = "windows")) {
         "不支持的计算请求"
     } else {

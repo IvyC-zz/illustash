@@ -232,7 +232,10 @@ impl Onboarding {
         self.task = Some(Task::start(identity, Some(Duration::from_secs(180)), move |ctx| {
             let outcome = (|| -> Result<Value> {
                 let mut command = std::process::Command::new(&worker);
-                command.arg("--check").stderr(std::fs::File::create(&log)?);
+                command
+                    .env(crate::app_tasks::WORKER_KIND_ENV, "recognition")
+                    .arg("--check")
+                    .stderr(std::fs::File::create(&log)?);
                 let status = ctx.process(&mut command)?;
                 if status.success() {
                     return Ok(json!({"status": "ok"}));

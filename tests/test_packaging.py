@@ -4,6 +4,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import shutil
 import signal
 import subprocess
 import sys
@@ -79,16 +80,33 @@ class PackagingTest(unittest.TestCase):
     def test_research_adapter_diagnostics_and_failure(self):
         install = self.root / 'installed research'
         build.stage(install, self.binary.parent, research=True, iqdb=Path(os.environ['ILLUSTASH_IQDB_BINARY']) if os.environ.get('ILLUSTASH_IQDB_BINARY') else None)
-        adapter = install / 'bin' / ('illustash-research.exe' if os.name == 'nt' else 'illustash-research')
+        suffix = '.exe' if os.name == 'nt' else ''
+        adapter = install / 'bin' / ('illustash-worker' + suffix)
         # No interpreter ships: readiness and requests stay native.
         self.assertFalse((install / 'workers').exists())
         self.assertFalse((install / 'runtime').exists())
+        # #37: one worker program; the kind is explicit per launch.
+        self.assertEqual(sorted(p.name for p in (install / 'bin').iterdir()),
+                         sorted(f'illustash-{name}{suffix}' for name in ('terms', 'iqdb', 'worker')))
+        env = {k: v for k, v in self.env.items() if k != 'ILLUSTASH_WORKER_KIND'}
         for kind in ('research', 'provenance'):
-            checked = install / 'bin' / (f'illustash-{kind}.exe' if os.name == 'nt' else f'illustash-{kind}')
-            result = subprocess.run([str(checked), '--check'], env=self.env, capture_output=True)
+            result = subprocess.run([str(adapter), '--check'], env={**env, 'ILLUSTASH_WORKER_KIND': kind}, capture_output=True)
             self.assertEqual(result.returncode, 0, result.stderr)
+        for extra, message in (({}, 'ILLUSTASH_WORKER_KIND'), ({'ILLUSTASH_WORKER_KIND': 'ocr'}, '未知')):
+            result = subprocess.run([str(adapter), '--check'], env={**env, **extra}, capture_output=True)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(message, result.stderr.decode(errors='replace'))
+        # Older layouts and explicit overrides naming illustash-<kind> still dispatch by name.
+        legacy = self.root / 'legacy layout' / ('illustash-provenance' + suffix)
+        legacy.parent.mkdir()
+        shutil.copy2(adapter, legacy)
+        result = subprocess.run([str(legacy), '--check'], env=env, capture_output=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        result = subprocess.run([str(legacy), '--check'], env={**env, 'ILLUSTASH_WORKER_KIND': 'research'}, capture_output=True)
+        self.assertNotEqual(result.returncode, 0)
         invalid = self.root / 'invalid.json'; invalid.write_text('{}')
-        result = subprocess.run([str(adapter), str(invalid), str(self.root / 'response.json')], env=self.env, capture_output=True)
+        result = subprocess.run([str(adapter), str(invalid), str(self.root / 'response.json')],
+                                env={**env, 'ILLUSTASH_WORKER_KIND': 'research'}, capture_output=True)
         self.assertNotEqual(result.returncode, 0)
         self.assertFalse((self.root / 'response.json').exists())
         self.assertEqual(self.request('/api/assets')['status'], 200)
@@ -101,7 +119,9 @@ class InstalledResearchTest(unittest.TestCase):
         self.stop(self.process)
         install = self.root / 'research artifact'
         build.stage(install, self.binary.parent, research=True, iqdb=Path(os.environ['ILLUSTASH_IQDB_BINARY']) if os.environ.get('ILLUSTASH_IQDB_BINARY') else None)
-        self.env['ILLUSTASH_RESEARCH_WORKER'] = str(install / 'bin' / ('illustash-research.exe' if os.name == 'nt' else 'illustash-research'))
+        # The host names the kind; the installed worker carries no kind in its file name.
+        self.env['ILLUSTASH_RESEARCH_WORKER'] = str(install / 'bin' / ('illustash-worker.exe' if os.name == 'nt' else 'illustash-worker'))
+        self.env.pop('ILLUSTASH_WORKER_KIND', None)
         self.restart()
         self.finished()
     test_real_similar_relate_cluster_and_oc_routes = research.NativeResearchTest.test_real_similar_relate_cluster_and_oc_routes
@@ -183,7 +203,8 @@ class DesktopComputeStagingTest(unittest.TestCase):
                      'resources/models/ccip/model_feat.onnx', 'resources/models/ccip/model_metrics.onnx',
                      'resources/models/ccip/metrics.json', 'resources/openblas/openblas.dll',
                      'resources/licenses/openblas/LICENSE.txt', 'resources/web/static/index.html',
-                     'resources/tags/tags_v3.csv', 'bin/illustash-recognition.exe',
+                     'resources/tags/tags_v3.csv', 'bin/illustash-worker.exe',
+                     'resources/licenses/LICENSE', 'resources/licenses/THIRD_PARTY.md',
                      'dependencies/core-Cargo.lock',
                      'bin/illustash-desktop.exe', 'private/library.sqlite']
             for name in names:

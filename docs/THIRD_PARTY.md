@@ -15,7 +15,7 @@
 | Unicode 字符数据 | `crates/core` 的 casefold 与 HTTP 字符表，由 `tools/gen_casefold.py`、`tools/gen_http_unicode.py` 从 Python `unicodedata`（Unicode 15.0）生成 | [Unicode License v3](https://www.unicode.org/license.txt) |
 | 标签表 | `tags/tags_v3.csv`、`tags/tags_v14.csv` | 取自 WD tagger 模型仓库的 `selected_tags.csv`（Apache-2.0）；标签名与计数源自 [Danbooru](https://danbooru.donmai.us) |
 
-PocketFFT 与 LittleCMS 的许可原文随基础与计算资源安装到 `resources/licenses/`，见 [安装与平台](BACKEND_TASKS.md#独立安装与可选计算包)。
+每个分发产物（便携包、基础与完整安装包）的 `resources/licenses/` 里有本项目 `LICENSE`、本文（`THIRD_PARTY.md`）以及 PocketFFT、LittleCMS 的许可原文，见 [安装与平台](BACKEND_TASKS.md#独立安装与可选计算包)。Rust 依赖目前只随包附 `Cargo.lock` 版本清单，各 crate 的许可正文不随包附带（#8）。
 
 ## 打包时加入的运行库
 
@@ -28,7 +28,7 @@ PocketFFT 与 LittleCMS 的许可原文随基础与计算资源安装到 `resour
 
 ## 模型与数据
 
-仓库不含模型。完整安装包按白名单加入以下模型；分发带模型的安装包须同时遵守各自许可，CCIP 的 OpenRAIL 许可附带使用限制，发布前须随包附上原文。
+仓库不含模型。完整安装包按白名单加入以下模型；分发带模型的安装包须同时遵守各自许可，CCIP 的 OpenRAIL 许可附带使用限制，发布前须随包附上原文。打包脚本用 `--model-licenses DIR` 按原字节放进 `resources/licenses/models/`；仓库和模型目录里都没有这些原文，2026-10-13 的安装包尚未附带（#8）。
 
 | 名称 | 来源 | 用途 | 许可 |
 |---|---|---|---|

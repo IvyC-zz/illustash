@@ -3,11 +3,17 @@
 //! and a compute directory without a matching manifest is an error on every platform.
 use std::{ffi::OsString, path::Path};
 
-const KINDS: [&str; 4] = ["research", "index", "provenance", "recognition"];
+/// 四类计算共用一个 worker 程序，宿主启动时显式传入 kind（#37）。
+const WORKER_KEYS: [&str; 4] = [
+    "ILLUSTASH_RESEARCH_WORKER",
+    "ILLUSTASH_INDEX_WORKER",
+    "ILLUSTASH_PROVENANCE_WORKER",
+    "ILLUSTASH_RECOGNITION_WORKER",
+];
 
 /// Windows 完整包 compute/ 必需组件（与 packaging/build.py 的 desktop_compute 产物一致）。
 #[cfg(any(windows, test))]
-const WINDOWS_FILES: [&str; 17] = [
+const WINDOWS_FILES: [&str; 14] = [
     "resources/web/static/index.html",
     "resources/tags/tags_v3.csv",
     "resources/onnxruntime/onnxruntime.dll",
@@ -21,15 +27,12 @@ const WINDOWS_FILES: [&str; 17] = [
     "resources/models/ccip/model_feat.onnx",
     "resources/models/ccip/model_metrics.onnx",
     "resources/models/ccip/metrics.json",
-    "bin/illustash-research.exe",
-    "bin/illustash-index.exe",
-    "bin/illustash-provenance.exe",
-    "bin/illustash-recognition.exe",
+    "bin/illustash-worker.exe",
 ];
 
 /// macOS 完整包 compute/ 必需组件（与 packaging/build.py 的 macos_desktop_compute 产物一致）。
 #[cfg(any(target_os = "macos", test))]
-const MACOS_FILES: [&str; 17] = [
+const MACOS_FILES: [&str; 14] = [
     "resources/web/static/index.html",
     "resources/tags/tags_v3.csv",
     "resources/models/wd_swinv2_v3_emb.onnx",
@@ -43,10 +46,7 @@ const MACOS_FILES: [&str; 17] = [
     "resources/licenses/LCMS.txt",
     "bin/illustash-terms",
     "bin/illustash-iqdb",
-    "bin/illustash-research",
-    "bin/illustash-index",
-    "bin/illustash-provenance",
-    "bin/illustash-recognition",
+    "bin/illustash-worker",
 ];
 
 /// 平台无关的完整包契约：没有 compute 目录是基础安装（`Ok(false)`）；
@@ -109,18 +109,9 @@ fn defaults(
             .join("resources/openblas/openblas.dll")
             .into_os_string(),
     ));
-    for (kind, key) in KINDS.into_iter().zip([
-        "ILLUSTASH_RESEARCH_WORKER",
-        "ILLUSTASH_INDEX_WORKER",
-        "ILLUSTASH_PROVENANCE_WORKER",
-        "ILLUSTASH_RECOGNITION_WORKER",
-    ]) {
-        values.push((
-            key,
-            compute
-                .join(format!("bin/illustash-{kind}.exe"))
-                .into_os_string(),
-        ));
+    let worker = compute.join("bin/illustash-worker.exe").into_os_string();
+    for key in WORKER_KEYS {
+        values.push((key, worker.clone()));
     }
     if let Some(local) = local.filter(|v| !v.is_empty()) {
         values.push((
@@ -148,10 +139,7 @@ fn macos_defaults(
         for relative in [
             "bin/illustash-terms",
             "bin/illustash-iqdb",
-            "bin/illustash-research",
-            "bin/illustash-index",
-            "bin/illustash-provenance",
-            "bin/illustash-recognition",
+            "bin/illustash-worker",
         ] {
             let mode = std::fs::metadata(compute.join(relative))
                 .map_err(|e| e.to_string())?
@@ -184,18 +172,9 @@ fn macos_defaults(
         ),
         ("ILLUSTASH_SHARED", shared),
     ];
-    for (kind, key) in KINDS.into_iter().zip([
-        "ILLUSTASH_RESEARCH_WORKER",
-        "ILLUSTASH_INDEX_WORKER",
-        "ILLUSTASH_PROVENANCE_WORKER",
-        "ILLUSTASH_RECOGNITION_WORKER",
-    ]) {
-        values.push((
-            key,
-            compute
-                .join(format!("bin/illustash-{kind}"))
-                .into_os_string(),
-        ));
+    let worker = compute.join("bin/illustash-worker").into_os_string();
+    for key in WORKER_KEYS {
+        values.push((key, worker.clone()));
     }
     Ok(values)
 }
@@ -276,10 +255,7 @@ mod tests {
             "resources/licenses/LCMS.txt",
             "bin/illustash-terms",
             "bin/illustash-iqdb",
-            "bin/illustash-research",
-            "bin/illustash-index",
-            "bin/illustash-provenance",
-            "bin/illustash-recognition",
+            "bin/illustash-worker",
         ] {
             let path = root.join(name);
             fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -313,6 +289,16 @@ mod tests {
         assert!(settings
             .iter()
             .all(|(key, _)| !key.contains("NETWORK") && !key.contains("PYTHON")));
+        // 四个 worker 变量都指向同一个程序，kind 由宿主启动时传入。
+        assert_eq!(
+            settings[3..]
+                .iter()
+                .map(|(key, value)| (*key, value.clone()))
+                .collect::<Vec<_>>(),
+            WORKER_KEYS
+                .map(|key| (key, root.join("bin/illustash-worker").into_os_string()))
+                .to_vec()
+        );
         assert!(!home.exists());
         assert_eq!(
             macos_defaults(&root, None, Some("/explicit shared".into())).unwrap()[2].1,
@@ -327,7 +313,7 @@ mod tests {
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            let helper = root.join("bin/illustash-provenance");
+            let helper = root.join("bin/illustash-worker");
             fs::set_permissions(&helper, fs::Permissions::from_mode(0o644)).unwrap();
             assert!(
                 macos_defaults(&root, Some(home.clone().into_os_string()), None)
@@ -506,10 +492,12 @@ mod tests {
             root.join("resources/openblas/openblas.dll")
                 .into_os_string()
         );
-        assert_eq!(
-            settings[6].1,
-            root.join("bin/illustash-recognition.exe").into_os_string()
-        );
+        for (_, value) in &settings[3..7] {
+            assert_eq!(
+                *value,
+                root.join("bin/illustash-worker.exe").into_os_string()
+            );
+        }
         assert_eq!(
             settings[7].1,
             Path::new("user data")
@@ -520,10 +508,17 @@ mod tests {
             .iter()
             .all(|(key, _)| !key.contains("NETWORK") && !key.contains("PYTHON")));
         assert!(defaults(&root, None).unwrap_err().contains("LOCALAPPDATA"));
-        fs::remove_file(root.join("bin/illustash-recognition.exe")).unwrap();
+        fs::remove_file(root.join("bin/illustash-worker.exe")).unwrap();
         assert!(defaults(&root, Some("user data".into()))
             .unwrap_err()
-            .contains("illustash-recognition.exe"));
+            .contains("illustash-worker.exe"));
+        // #37 之前的布局（每类一份 illustash-<kind>.exe）不再满足契约：提示重装，不按旧文件名猜。
+        for kind in ["research", "index", "provenance", "recognition"] {
+            fs::write(root.join(format!("bin/illustash-{kind}.exe")), b"fixture").unwrap();
+        }
+        let error = defaults(&root, Some("user data".into())).unwrap_err();
+        assert!(error.contains("illustash-worker.exe"), "{error}");
+        assert!(error.contains("重新安装 Windows 完整版"), "{error}");
         fs::remove_dir_all(scratch).unwrap();
     }
 }

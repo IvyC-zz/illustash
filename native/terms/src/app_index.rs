@@ -789,6 +789,7 @@ fn patch(
         let process = std::thread::spawn(move || {
             process_ctx.process(
                 std::process::Command::new(executable)
+                    .env(crate::app_tasks::WORKER_KIND_ENV, "index")
                     .arg(worker_folder.join("request.json"))
                     .arg(worker_folder.join("response.json")),
             )
