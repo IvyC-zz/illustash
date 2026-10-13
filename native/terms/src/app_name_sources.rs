@@ -855,10 +855,13 @@ mod network_tests {
 
     #[test]
     fn retry_after_http_date() {
+        // HTTP-date has whole-second precision, so the client waits until floor(now + 3 s), at least 2 s
+        // after the date is taken. Measure from that moment: setup time must not count against the wait,
+        // while ignoring the header would leave only the first backoff step (at most 0.625 s).
+        let started = Instant::now();
         let date = httpdate::fmt_http_date(std::time::SystemTime::now() + Duration::from_secs(3));
         let server = Scripted::start(vec![Reply { retry_after: Some(date), ..reply(503, "busy") }]);
         let lib = Library::new();
-        let started = Instant::now();
         lib.source(&server, quiet()).fetch(&format!("{}/subjects/1", server.base), None, None).unwrap();
         assert!(started.elapsed() >= Duration::from_millis(1950), "{:?}", started.elapsed());
         assert_eq!(server.calls(), 2);
