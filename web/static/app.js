@@ -2917,13 +2917,17 @@ function importLine(t) {
   if (t.status === 'error') return `导入${what}${name}失败：${t.error}`;
   if (t.status !== 'done') return '';
   const r = t.result || {};
+  // Published but not listed (#111): opening it lists it; importing again would make a second, numbered library.
+  if (t.kind === 'archive' && r.listed === false) return `已导入「${r.name}」，保存在 ${String(r.path).replace(/^\/Users\/[^/]+/, '~')}，但没能加入最近图库列表：${r.error}。打开它会再试一次加入列表；再导入会另建一个带编号的图库。模型接口与名称联网授权需重新设置。`;
   if (t.kind === 'archive') return `已导入「${r.name}」，模型接口与名称联网授权需重新设置。`;
   if (r.status === 'pending') return `识别结果已导入，后续处理尚未完成（${r.error || '可稍后恢复'}）。`;
   return r.duplicate ? '这份识别结果之前已经导入过。' : '识别结果已导入。';
 }
 function importBlock(t) {
   const line = importLine(t); if (!line) return '';
-  const button = t.status === 'running' ? ' <button class="quiet" data-import-cancel>取消导入</button>' : '';
+  const r = t.result || {};
+  const button = t.status === 'running' ? ' <button class="quiet" data-import-cancel>取消导入</button>'
+    : t.status === 'done' && r.listed === false ? ` <button class="primary" data-open-library="${esc(r.path)}" data-name="${esc(r.name)}">打开这个图库</button>` : '';
   return `<p class="muted-note import-line">${esc(line)}${button}</p>`;
 }
 // #41: the shareable export leaves out personal inputs; say so instead of implying a complete move.

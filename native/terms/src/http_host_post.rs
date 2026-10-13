@@ -206,9 +206,15 @@ pub(super) fn handle(request: Request, host: &Host, received: u64, text: &str, b
             let file = archive.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default();
             host.imports.start(identity, crate::app_imports::Kind::Archive, &file, move |progress| {
                 let (path, name) = crate::app_archives::import(&archive, &progress.cancellation_arc(), progress)?;
-                // Published: registration failure keeps the complete package (it can be opened by path).
-                crate::app_libraries::remember_created(&path, &name)?;
-                Ok(Json::object([("path", path.to_string_lossy().as_ref().into()), ("name", name.into())]))
+                // Published: a registration failure keeps the complete package and is reported with it, like
+                // creation (#97, #111); importing again would only make a second, numbered package.
+                let listed = crate::app_libraries::remember_created(&path, &name);
+                let mut out = Json::object([("path", path.to_string_lossy().as_ref().into()), ("name", name.into())]);
+                if let Err(error) = listed {
+                    out.set("listed", false.into());
+                    out.set("error", error.to_string().into());
+                }
+                Ok(out)
             })
         })();
         drop(session);

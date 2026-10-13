@@ -239,7 +239,7 @@ Photos 新库沿用既有来源契约：`s1`、`kind=photos`、宿主主目录�
 
 显式原生服务直接处理 `POST /api/libraries/choose`、`preset`、`sources/add`、`sources/remove`（见 [LIBRARIES.md](LIBRARIES.md)「来源管理」）、`forget`、`import`、`export` 和 `GET /api/libraries`；桌面外壳链接相同核心，显式原生模式复用这一调用链。macOS 选择窗口由 `osascript` 原生调用，取消返回空路径；选择期间不占用会话锁，返回结果仍须属于原会话，退出时终止选择进程。其他平台继续支持手填路径。来源预设沿用 x/pixiv/other，仅修改指定文件夹来源及其资产；配置先原子保存，再提交源库更新，保留既有可重试边界，不宣称配置文件与 SQLite 跨介质原子提交。最近图库移出只修改注册表，拒绝当前显示路径，不删除包。
 
-归档仅允许 `library.json`、`source.sqlite`、`library.sqlite`、`features/full-features.npy`、`features/full-manifest.csv` 和 `album-char-map.json`，不包含图片、缩略图、备份或 provenance。导入支持旧归档的 stored、deflate、bzip2 和 ZIP-LZMA，拒绝绝对路径、上级路径和未知内容，流式解包并校验 CRC；保留 library_id、来源和配置顺序，增加 imported_from，沿用唯一目录命名，完整发布后登记到 recent 末尾，不切当前库。失败只清理本次独占创建的目标目录；登记失败保留完整已发布包。导入不隐式初始化或升级已有数据库，旧归档后续打开仍须走现有显式升级入口。
+归档仅允许 `library.json`、`source.sqlite`、`library.sqlite`、`features/full-features.npy`、`features/full-manifest.csv` 和 `album-char-map.json`，不包含图片、缩略图、备份或 provenance。导入支持旧归档的 stored、deflate、bzip2 和 ZIP-LZMA，拒绝绝对路径、上级路径和未知内容，流式解包并校验 CRC；保留 library_id、来源和配置顺序，增加 imported_from，沿用唯一目录命名，完整发布后登记到 recent 末尾，不切当前库。失败只清理本次独占创建的目标目录；登记失败保留完整已发布包，导入任务照常结束为 done，结果为 `{path, name, listed: false, error}`，设置页提供「打开这个图库」（打开时再登记一次），不再以错误结束让重试另导入一个带编号的包（2026-10-13，#111，与建库的 #97 相同）。导入不隐式初始化或升级已有数据库，旧归档后续打开仍须走现有显式升级入口。
 
 可分享归档与个人备份的边界：导出只清理 SQLite 副本，清空 `name_settings`（当前及旧模型密钥、接口地址、模型名、流量计数与将来的连接设置均不随包分享），删除 `prefs.names_network` 和 `prefs.onboarding`（首次引导记录：答过的提问、上手清单，2026-10-13，#116），保留其他偏好、人工记录和识别结果；原图库设置不变。清理启用 secure_delete，并压实副本以移除历史写入遗留的秘密字节；对无索引表临时建立索引，压实后删除，以保留隐式 rowid 与最终 schema。导入包括旧版 ZIP 在发布前执行同一清理，不继承发送者的名称联网授权，模型接口与授权由接收者重新设置。其他平台账号凭据位于归档范围外的应用凭据存储。需要完整保留个人设置时，停止程序后备份完整图库目录；分享应使用修复后的导出入口，回退旧版导出入口会恢复密钥随包泄漏的风险。
 
