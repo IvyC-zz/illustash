@@ -37,13 +37,16 @@ class NativeResearchTest(unittest.TestCase):
         self.mode = self.root/'mode'
         self.pid = self.root/'worker.pid'
         self.runs = self.root/'worker.runs'
+        self.kinds = self.root/'worker.kinds'
         self.mode.write_text('ok')
         self.worker.write_text('#!'+sys.executable+'\n'+f'''import sys,os,json,time,subprocess
 from pathlib import Path
 sys.path.insert(0,{str(self.repo)!r})
 r=json.loads(Path(sys.argv[1]).read_text(encoding='utf-8'))
-Path({str(self.pid)!r}).write_text(str(os.getpid()))
+# Written whole, then renamed: a test that sees the file reads the full pid (#132).
+Path({str(self.pid)!r}+'.tmp').write_text(str(os.getpid()));os.replace({str(self.pid)!r}+'.tmp',{str(self.pid)!r})
 with open({str(self.runs)!r},'a') as f: f.write(r['version']+'\\n')
+with open({str(self.kinds)!r},'a') as f: f.write(r['kind']+'\\n')
 mode=Path({str(self.mode)!r}).read_text()
 if mode=='hang':
     subprocess.Popen([sys.executable,'-c','import time;time.sleep(60)'])
@@ -89,6 +92,7 @@ Path(sys.argv[2]).write_text(json.dumps(v,allow_nan=False))
     def pending(self):
         with sqlite3.connect(self.lib.db) as c: return c.execute("SELECT count(*) FROM backend_effects WHERE kind IN ('verdict','imported','index_changed') AND status='pending'").fetchone()[0]
     def versions(self): return self.runs.read_text().split() if self.runs.exists() else []
+    def run_kinds(self): return self.kinds.read_text().split() if self.kinds.exists() else []
     def clustered(self):
         with sqlite3.connect(self.lib.db) as c: return {u for (u,) in c.execute('SELECT uuid FROM clusters')}
     def poke_event(self):
@@ -237,10 +241,13 @@ Path(sys.argv[2]).write_text(json.dumps(v,allow_nan=False))
         def verdict(c):
             response=self.request('/api/change',{'ids':['unmatched6'],'action':'confirmed','entity':self.alice})
             self.assertEqual(response['status'],200,response)
-        _,seen,runs=self.inflight(lambda:self.request('/api/similar',{}),verdict)
+        before=len(self.run_kinds())
+        _,seen,_=self.inflight(lambda:self.request('/api/similar',{}),verdict)
         self.assertEqual(self.state()['status'],'idle',self.state())
         self.assertNotIn('waiting',seen)
-        self.assertEqual(runs,1)
+        # The verdict queues learning (an `events` run) once similar ends; under load it can start before the
+        # count is read (#132). Only a second similar run would be a retry.
+        self.assertEqual(self.run_kinds()[before:].count('similar'),1,(seen,self.run_kinds()[before:]))
         _,seen,runs=self.inflight(lambda:self.request('/api/similar',{}),lambda c:c.execute("INSERT INTO excluded VALUES ('b','synthetic','test')"))
         self.assertEqual(self.state()['status'],'idle',self.state())
         self.assertIn('waiting',seen)

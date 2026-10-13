@@ -239,7 +239,8 @@ class NativeResearchPublicationTest(unittest.TestCase):
         bridge.write_text('#!' + sys.executable + '\n' + f'''import json,os,sys,subprocess,time
 from pathlib import Path
 mode=Path({str(self.mode)!r}).read_text()
-Path({str(self.pid)!r}).write_text(str(os.getpid()))
+# Written whole, then renamed: a test that sees the file reads the full pid (#132).
+Path({str(self.pid)!r}+'.tmp').write_text(str(os.getpid()));os.replace({str(self.pid)!r}+'.tmp',{str(self.pid)!r})
 if mode=='replay':
     Path(sys.argv[2]).write_bytes(Path({str(self.saved)!r}).read_bytes())
     sys.exit(0)
@@ -248,7 +249,7 @@ if code: sys.exit(code)
 if mode=='pass': sys.exit(0)
 Path({str(self.saved)!r}).write_bytes(Path(sys.argv[2]).read_bytes())
 child=subprocess.Popen([sys.executable,'-c','import time;time.sleep(30)'])
-Path({str(self.child)!r}).write_text(str(child.pid))
+Path({str(self.child)!r}+'.tmp').write_text(str(child.pid));os.replace({str(self.child)!r}+'.tmp',{str(self.child)!r})
 Path({str(self.ready)!r}).write_text('native calculated')
 deadline=time.monotonic()+25
 while not Path({str(self.release)!r}).exists() and time.monotonic()<deadline: time.sleep(.01)
