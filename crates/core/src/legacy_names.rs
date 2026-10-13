@@ -256,7 +256,12 @@ pub fn track(c: &Connection) -> Result<()> {
         }
     }
     // 别名表不在 `names_version` 的触发器里，单独记下受影响的键，提交时只同步这些键（#102 A1）。
-    for event in ["INSERT", "UPDATE", "DELETE"] {
+    let aliases: bool = c.query_row(
+        "SELECT EXISTS(SELECT 1 FROM main.sqlite_master WHERE type='table' AND name='name_aliases')",
+        [],
+        |r| r.get(0),
+    )?;
+    for event in ["INSERT", "UPDATE", "DELETE"].into_iter().filter(|_| aliases) {
         let mut body = String::new();
         for side in ["old", "new"] {
             if (event == "INSERT" && side == "old") || (event == "DELETE" && side == "new") {
@@ -322,6 +327,9 @@ fn mirror_aliases_changed(c: &Connection) -> Result<bool> {
     if !tracked {
         mirror_aliases(c)?;
         return Ok(false);
+    }
+    if !c.query_row("SELECT EXISTS(SELECT 1 FROM names_dirty_aliases)", [], |r| r.get::<_, bool>(0))? {
+        return Ok(true);
     }
     c.execute_batch(
         "DELETE FROM term_key_aliases WHERE (kind,key) IN (SELECT kind,key FROM names_dirty_aliases)
