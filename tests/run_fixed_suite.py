@@ -21,8 +21,8 @@ RETIRED_TOOLS={ROOT/'tools'/name for name in ('index_worker.py','char_patch.py',
 ATTEMPTS=[]
 RULE='-'*70
 # 对 CPU 负载敏感、并发下会偶发失败的测试类：并行池跑完后逐个单独运行。每项仍只运行一次，不重试；
-# 修好其中的时序问题后从这里移除（#132）。
-SERIAL=frozenset({'test_native_research.NativeResearchTest','test_native_provenance.NativeProvenanceTest'})
+# 修好其中的时序问题后从这里移除。#132 修完后为空。
+SERIAL=frozenset()
 
 def retired(origin):
     return origin in RETIRED_TOOLS or any(origin.is_relative_to(root) for root in BLOCKED)
