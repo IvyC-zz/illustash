@@ -106,6 +106,20 @@ class FixedSuiteRunnerTest(unittest.TestCase):
         self.assertIn('Ran 5 tests in ', run.stderr)
         self.assertIn('test_alias (test_alpha.Alias.test_alias) ... ok', run.stderr)
 
+    def test_serial_classes_run_alone_after_the_pool(self):
+        runner = self.root / 'tests/run_fixed_suite.py'
+        source = runner.read_text()
+        start = source.index('SERIAL=frozenset(')
+        runner.write_text(source[:start] + "SERIAL=frozenset({'test_alpha.Beta','test_missing.Gone'})" +
+                          source[source.index('\n', start):])
+        run = self.run_suite('--jobs', '3')
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertIn('串行名单中的测试类未被发现：test_missing.Gone', run.stderr)
+        headers = re.findall(r'(?m)^\[\d+/2\] (\S+)（', run.stderr)
+        self.assertEqual(headers, ['test_alpha.Alpha', 'test_alpha.Beta'])
+        self.assertRegex(run.stderr, r'\[2/2\] test_alpha\.Beta（1 项，[0-9.]+s，单独运行）')
+        self.assertIn('Ran 4 tests in ', run.stderr)
+
     def test_parallel_mode_rejects_unsupported_arguments(self):
         run = self.run_suite('--jobs', '2', '-k', 'one')
         self.assertNotEqual(run.returncode, 0)

@@ -20,6 +20,9 @@ BLOCKED=(ROOT/'tests/reference',ROOT/'web')
 RETIRED_TOOLS={ROOT/'tools'/name for name in ('index_worker.py','char_patch.py','build_characters.py','char_scan.py','ccip.py','validation_worksheet.py')}
 ATTEMPTS=[]
 RULE='-'*70
+# 对 CPU 负载敏感、并发下会偶发失败的测试类：并行池跑完后逐个单独运行（#130）。每项仍只运行一次，不重试；
+# 修好其中的时序问题后从这里移除。
+SERIAL=frozenset({'test_native_research.NativeResearchTest','test_native_provenance.NativeProvenanceTest'})
 
 def retired(origin):
     return origin in RETIRED_TOOLS or any(origin.is_relative_to(root) for root in BLOCKED)
@@ -122,35 +125,47 @@ def parallel(jobs,verbosity,buffer,passthrough):
         ran.extend(data['ran']);attempts.extend(data.get('attempts',()))
     if local:
         add(run_in_process(local,verbosity,buffer))
+    pool=[item for item in queue if item[0] not in SERIAL];serial=[item for item in queue if item[0] in SERIAL]
+    for name in sorted(SERIAL-{name for name,_ in queue}):
+        sys.stderr.write(f'串行名单中的测试类未被发现：{name}\n')
     workdir=tempfile.TemporaryDirectory(prefix='illustash-suite-')
-    running=[];index=0;done=0
+    count=len(queue);index=0;done=0
+
+    def run(queue,limit):
+        nonlocal index,done
+        running=[]
+        try:
+            while queue or running:
+                while queue and len(running)<limit:
+                    name,members=queue.pop(0);index+=1
+                    log=Path(workdir.name)/f'{index}.log';summary=Path(workdir.name)/f'{index}.json'
+                    handle=log.open('wb')
+                    process=subprocess.Popen([sys.executable,'-m','tests.run_fixed_suite','--worker',str(summary),*passthrough],
+                                             cwd=ROOT,stdin=subprocess.PIPE,stdout=handle,stderr=subprocess.STDOUT)
+                    process.stdin.write(json.dumps([f'{name}.{test._testMethodName}' for test in members]).encode());process.stdin.close()
+                    running.append((name,members,process,handle,log,summary,time.perf_counter()))
+                finished=[item for item in running if item[2].poll() is not None]
+                if not finished:
+                    time.sleep(.05); continue
+                for item in finished:
+                    running.remove(item)
+                    name,members,process,handle,log,summary,began=item
+                    handle.close();done+=1
+                    mode='，单独运行' if limit==1 and name in SERIAL else ''
+                    sys.stderr.write(f'[{done}/{count}] {name}（{len(members)} 项，{time.perf_counter()-began:.1f}s{mode}）\n')
+                    sys.stderr.write(log.read_text(errors='replace'))
+                    if process.returncode or not summary.exists():
+                        broken.append(f'{name}：子进程退出码 {process.returncode}')
+                    else:
+                        add(json.loads(summary.read_text()))
+                    sys.stderr.flush()
+        except BaseException:
+            for item in running: item[2].kill()
+            raise
+
     try:
-        while queue or running:
-            while queue and len(running)<jobs:
-                name,members=queue.pop(0);index+=1
-                log=Path(workdir.name)/f'{index}.log';summary=Path(workdir.name)/f'{index}.json'
-                handle=log.open('wb')
-                process=subprocess.Popen([sys.executable,'-m','tests.run_fixed_suite','--worker',str(summary),*passthrough],
-                                         cwd=ROOT,stdin=subprocess.PIPE,stdout=handle,stderr=subprocess.STDOUT)
-                process.stdin.write(json.dumps([f'{name}.{test._testMethodName}' for test in members]).encode());process.stdin.close()
-                running.append((name,members,process,handle,log,summary,time.perf_counter()))
-            finished=[item for item in running if item[2].poll() is not None]
-            if not finished:
-                time.sleep(.05); continue
-            for item in finished:
-                running.remove(item)
-                name,members,process,handle,log,summary,began=item
-                handle.close();done+=1
-                sys.stderr.write(f'[{done}/{index+len(queue)}] {name}（{len(members)} 项，{time.perf_counter()-began:.1f}s）\n')
-                sys.stderr.write(log.read_text(errors='replace'))
-                if process.returncode or not summary.exists():
-                    broken.append(f'{name}：子进程退出码 {process.returncode}')
-                else:
-                    add(json.loads(summary.read_text()))
-                sys.stderr.flush()
-    except BaseException:
-        for item in running: item[2].kill()
-        raise
+        run(pool,jobs)
+        run(serial,1)
     finally:
         workdir.cleanup()
     missing=expected-set(ran);extra=[test for test in ran if test not in expected]
