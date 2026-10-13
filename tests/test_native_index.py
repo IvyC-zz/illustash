@@ -190,6 +190,14 @@ class NativeIndexTest(unittest.TestCase):
         self.assertEqual((published(), generation()), ({'char-anchors.npy': b'rows:', 'char-anchors.txt': b'', 'char-index/carol_example.json': None}, '4'))
         self.assertEqual(list(self.shared.rglob('*.tmp')), [])
 
+    def test_done_is_reported_only_after_the_job_is_cleaned_up(self):
+        # #123: a finished job reported done before removing its journal and folder; a poll in between saw both.
+        # The test-only pause right after done makes that moment wide enough to observe every time.
+        self.env['ILLUSTASH_TEST_INDEX_DONE_PAUSE_MS']='1500';self.stop(self.process);self.restart()
+        self.check();v=self.apply();self.assertEqual(v['state']['status'],'done',v)
+        self.assertFalse((self.lib.path/'index-job.json').exists())
+        self.assertEqual(list((self.lib.path/'index-jobs').iterdir()),[])
+
     def test_source_failure_rollback_then_retry(self):
         self.check()
         with sqlite3.connect(self.lib.source) as c:c.execute("CREATE TRIGGER fail_index BEFORE DELETE ON characters BEGIN SELECT RAISE(ABORT,'synthetic'); END")
