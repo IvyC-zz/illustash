@@ -92,3 +92,28 @@ test('a library made but not listed is offered instead of making a second one (#
   await click(c, {actW: 'create-again'});
   assert.match(c.nodes.wcol.innerHTML, /data-act-w="create"/);
 });
+
+test('a double click opens one picker and each import or creation carries its own request id (#115)', async () => {
+  let choose;
+  const c = page({
+    welcome_pick: ({kind}) => kind === 'zip' ? new Promise(r => { choose = r; }) : {paths: ['/a']},
+    welcome_inspect: ({paths}) => paths.map(p => ok(p, 2)),
+    welcome_import: () => { throw '合成失败'; },
+    welcome_create: () => { throw '合成失败'; },
+  });
+  const first = click(c, {actW: 'import'}), second = click(c, {actW: 'import'});
+  await second;
+  choose({paths: ['/Downloads/a.pilib.zip']});
+  await first;
+  assert.equal(c.calls.filter(([cmd]) => cmd === 'welcome_pick').length, 1);
+  assert.equal(c.calls.filter(([cmd]) => cmd === 'welcome_import').length, 1);
+  const again = click(c, {actW: 'import'});
+  choose({paths: ['/Downloads/a.pilib.zip']});
+  await again;
+  await click(c, {pick: 'x'});
+  await click(c, {actW: 'create'});
+  const ids = c.calls.filter(([cmd]) => cmd === 'welcome_import' || cmd === 'welcome_create').map(([, a]) => a.request);
+  assert.equal(ids.length, 3);
+  assert.ok(ids.every(id => typeof id === 'string' && id.length > 4));
+  assert.equal(new Set(ids).size, 3, 'a new click is a new request');
+});
