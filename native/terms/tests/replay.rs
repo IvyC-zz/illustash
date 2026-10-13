@@ -623,6 +623,10 @@ fn replay_in(module: &str, under: &Path) {
         "{module}: the incremental names check never ran (built without illustash-core/verify-incremental?)"
     );
     assert!(
+        !PROJECTED_MODULES.contains(&module) || checks.get("projection").is_some_and(|n| *n > 0),
+        "{module}: the scoped display projection was never checked against a whole rebuild"
+    );
+    assert!(
         problems.is_empty(),
         "{module}: {} of {} cases differ:\n{}",
         problems.len(),
@@ -651,6 +655,28 @@ const VERIFIED_MODULES: [&str; 21] = [
     "test_terms_names_writes",
     "test_identity",
     "test_identity_hybrid",
+    "test_lead",
+    "test_web_v2",
+    "test_works",
+    "test_terms_artists_provenance",
+    "test_web",
+];
+/// Recordings that commit name changes without changing identities or links: the scoped display projection (#103)
+/// must have been checked against a whole rebuild in each of them.
+const PROJECTED_MODULES: [&str; 18] = [
+    "test_terms_labels",
+    "test_terms_artists",
+    "test_terms_character_commands",
+    "test_terms_character_history",
+    "test_terms_character_identity",
+    "test_terms_character_learning",
+    "test_terms_character_refusals",
+    "test_terms_character_structure",
+    "test_terms_characters_contract",
+    "test_terms_characters_cutover",
+    "test_terms_golden",
+    "test_terms_names_writes",
+    "test_identity",
     "test_lead",
     "test_web_v2",
     "test_works",

@@ -335,7 +335,11 @@ fn replay(category: &str) {
     }
     assert!(!root.join("python-launched").exists());
     let checks = fs::read_to_string(root.join("verified")).unwrap_or_default();
-    eprintln!("{category}: incremental names checks {}", checks.lines().count());
+    let mut kinds = std::collections::BTreeMap::<&str, usize>::new();
+    for kind in checks.lines() {
+        *kinds.entry(kind).or_default() += 1;
+    }
+    eprintln!("{category}: incremental names checks {kinds:?}");
     // These recordings commit name changes on the incremental path; the check must have run.
     assert!(
         !matches!(category, "task_recovery" | "upgrade_v6") || checks.lines().count() > 0,

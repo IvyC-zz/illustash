@@ -669,7 +669,7 @@ pub fn commit_writing(tx: rusqlite::Transaction<'_>) -> Result<()> {
     commit_writing_with(tx, None)
 }
 
-/// 同 `commit_writing`；`names` 是与这个事务此刻的库逐项相同的名字快照，重建显示投影时用它（#102 A5a）。
+/// 同 `commit_writing`；`names` 是与这个事务此刻的库逐项相同的名字快照，整表重建显示投影时用它（#102 A5a）。
 pub fn commit_writing_with(tx: rusqlite::Transaction<'_>, names: Option<&crate::names_view::View>) -> Result<()> {
     // 名字已在核心时，这个事务改到名字相关的数据就同事务补齐名字主数据、重建显示投影（docs/TERMS_NAMES_PLAN.md）。
     crate::legacy_names::after_write_with(&tx, names)?;
