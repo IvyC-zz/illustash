@@ -1,6 +1,6 @@
 //! Existing provenance.verify local drawing comparison. Only machine cache is writable.
 use super::{check_owner, write, Request};
-use crate::{app_provenance::cache, research_compute::relation_image, Error, Result};
+use crate::{research_compute::relation_image, Error, Result};
 use rusqlite::{params, Connection};
 use serde_json::{json, Value};
 use std::{
@@ -173,7 +173,7 @@ pub(super) fn progress(request: &Request, sequence: &mut u64, mut value: Value) 
 }
 pub(super) fn run(request: &Request, sequence: &mut u64) -> Result<Value> {
     let mut lib = Library::open(&request.library)?;
-    let mut c = cache::connect(&request.cache.join("provenance.sqlite"))?;
+    let mut c = super::staged_cache(&request.cache)?;
     let seen: HashSet<String> = c
         .prepare("SELECT target FROM lookups WHERE backend='ref_compare'")?
         .query_map([], |r| r.get(0))?
