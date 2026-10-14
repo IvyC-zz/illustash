@@ -7,6 +7,7 @@ import signal
 import socket
 import subprocess
 import tempfile
+import threading
 import time
 import unittest
 from unittest.mock import patch
@@ -81,6 +82,45 @@ class ComparatorTest(unittest.TestCase):
                      (b'{"x":1.0}', b'{"x":1}'), (b'[]', b'[]\n'), (b'[]', b'[')):
             self.assertIsNotNone(verify.difference({'status': 200, 'body': a}, {'status': 200, 'body': b}))
         self.assertIsNotNone(verify.difference({'status': 200, 'body': b'[]'}, {'status': 400, 'body': b'[]'}))
+
+    def test_fetch_closes_with_reset_after_reading_the_whole_response(self):
+        # #140：每个请求仍是一条新连接，读完响应后以 RST 关闭，本机不留 TIME_WAIT；服务端据此看到复位而非 EOF。
+        listener = socket.create_server(('127.0.0.1', 0))
+        self.addCleanup(listener.close)
+        listener.settimeout(10)
+        seen = []
+
+        def serve(count):
+            for index in range(count):
+                conn, (_, port) = listener.accept()
+                with conn:
+                    conn.settimeout(10)
+                    data = b''
+                    while b'\r\n\r\n' not in data:
+                        data += conn.recv(4096)
+                    head, body = data.split(b'\r\n\r\n', 1)
+                    length = next((int(line.split(b':')[1]) for line in head.split(b'\r\n')
+                                   if line.lower().startswith(b'content-length:')), 0)
+                    while len(body) < length:
+                        body += conn.recv(4096)
+                    reply = head.split(b' ', 1)[0] + b' ' + body
+                    close = b'Connection: close\r\n' if index == count - 1 else b''
+                    conn.sendall(b'HTTP/1.1 200 OK\r\nContent-Length: %d\r\n%s\r\n%s' % (len(reply), close, reply))
+                    try:
+                        ending = 'eof' if conn.recv(1) == b'' else 'data'
+                    except ConnectionResetError:
+                        ending = 'reset'
+                    seen.append((port, ending))
+
+        server = threading.Thread(target=serve, args=(3,), daemon=True)
+        server.start()
+        origin = f'http://127.0.0.1:{listener.getsockname()[1]}'
+        bodies = [verify.fetch(origin, item, origin)['body'] for item in (
+            {'url': '/'}, {'url': '/', 'method': 'POST', 'body': b'{"x":1}'}, {'url': '/last'})]
+        server.join(10)
+        self.assertEqual(bodies, [b'GET ', b'POST {"x":1}', b'GET '])
+        self.assertEqual([ending for _, ending in seen], ['reset'] * 3)
+        self.assertEqual(len({port for port, _ in seen}), 3)
 
     def test_non_temporary_database_refused_before_open(self):
         with patch.object(sqlite3, 'connect', side_effect=AssertionError('opened DB')):

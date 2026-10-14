@@ -8,6 +8,8 @@ import tempfile
 import unittest
 
 RUNNER = Path(__file__).with_name('run_fixed_suite.py')
+LAUNCH = ("import runpy,sys;sys.path.insert(0,sys.argv.pop(1));"
+          "runpy.run_module('tests.run_fixed_suite',run_name='__main__',alter_sys=True)")
 
 PASSING = '''import unittest
 class Alpha(unittest.TestCase):
@@ -41,9 +43,12 @@ class FixedSuiteRunnerTest(unittest.TestCase):
         (self.root / 'web').mkdir()
         (self.root / 'web/__init__.py').write_text('')
 
-    def run_suite(self, *args):
-        return subprocess.run([sys.executable, '-m', 'tests.run_fixed_suite', '-v', '-b', *args], cwd=self.root,
-                              capture_output=True, text=True, timeout=120)
+    def run_suite(self, *args, flags=()):
+        # 按 Windows 验收机的方式启动：自行插入仓库根后 runpy，不依赖 `-m` 把 cwd 放进 sys.path（嵌入式 Python 不放）。
+        # 沿用本进程的解释器选项并固定 -X utf8，输出按 UTF-8 解码，与本进程的编码设置无关。
+        command = [sys.executable, *subprocess._args_from_interpreter_flags(), '-X', 'utf8', *flags,
+                   '-c', LAUNCH, str(self.root), '-v', '-b', *args]
+        return subprocess.run(command, cwd=self.root, capture_output=True, text=True, encoding='utf-8', timeout=120)
 
     def test_parallel_summary_matches_serial_counts_and_keeps_skip_lines(self):
         for jobs in ('1', '3'):
@@ -119,6 +124,21 @@ class FixedSuiteRunnerTest(unittest.TestCase):
         self.assertEqual(headers, ['test_alpha.Alpha', 'test_alpha.Beta'])
         self.assertRegex(run.stderr, r'\[2/2\] test_alpha\.Beta（1 项，[0-9.]+s，单独运行）')
         self.assertIn('Ran 4 tests in ', run.stderr)
+
+    def test_parallel_workers_do_not_rely_on_cwd_in_sys_path(self):
+        # 模拟带 ._pth 的嵌入式 Python：-I 不把 cwd 或脚本目录放进 sys.path，也忽略 PYTHONPATH。
+        # 子进程须沿用父进程的 -I/-X utf8，并在隔离下自行找到 tests 包。
+        self.write('test_isolated.py', 'import sys, unittest\nclass Isolated(unittest.TestCase):\n'
+                                       '    def test_flags(self):\n'
+                                       '        self.assertTrue(sys.flags.isolated)\n'
+                                       '        self.assertTrue(sys.flags.utf8_mode)\n'
+                                       "        self.assertNotIn('', sys.path)\n")
+        run = self.run_suite('--jobs', '2', flags=('-I',))
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertNotIn('ModuleNotFoundError', run.stderr)
+        self.assertIn('Ran 5 tests in ', run.stderr)
+        self.assertIn('test_flags (test_isolated.Isolated.test_flags) ... ok', run.stderr)
+        self.assertIn('退役参考导入尝试：0', run.stdout)
 
     def test_parallel_mode_rejects_unsupported_arguments(self):
         run = self.run_suite('--jobs', '2', '-k', 'one')
