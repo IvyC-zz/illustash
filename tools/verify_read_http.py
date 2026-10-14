@@ -11,9 +11,12 @@ Random /api/ask is excluded; validate it by candidate range and constraints inst
 import argparse
 import http.client
 import json
+import os
 from pathlib import Path
 import random
+import socket
 import sqlite3
+import struct
 import sys
 import tempfile
 import time
@@ -108,6 +111,10 @@ def corpus(db, sample=16, query_limit=80):
     return out
 
 
+# struct linger：Windows 是两个 u_short，其他平台是两个 int。
+ABORTIVE_CLOSE = struct.pack('HH' if os.name == 'nt' else 'ii', 1, 0)
+
+
 def fetch(base, item, origin, timeout=30):
     url, public = urlsplit(base), urlsplit(origin)
     if url.scheme != 'http' or url.hostname != '127.0.0.1' or not url.port or url.path or url.query or url.fragment:
@@ -121,6 +128,10 @@ def fetch(base, item, origin, timeout=30):
     headers['Accept-Encoding'] = 'identity'
     started = time.perf_counter()
     try:
+        conn.connect()
+        # 关闭时直接复位（RST），不走四次挥手：每个请求一条短连接，客户端先关会在本机留下一个 TIME_WAIT，
+        # Windows 上并行跑全套时临时端口会耗尽（#140）。正常路径读完整个响应才关闭，请求与响应都不变。
+        conn.sock.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, ABORTIVE_CLOSE)
         conn.request(item.get('method', 'GET'), item['url'], body=item.get('body'), headers=headers)
         response = conn.getresponse()
         data = response.read()
