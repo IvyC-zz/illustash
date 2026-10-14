@@ -1,12 +1,12 @@
 //! Legacy pixel-hash worker queue. Only hashes leave this local candidate.
 use super::{check_owner, pixel_hash, write, Request};
-use crate::{app_provenance::cache, Error, Result};
+use crate::{Error, Result};
 use rusqlite::params;
 use serde_json::{json, Value};
 use std::{collections::BTreeSet, fs, path::PathBuf};
 
 pub(super) fn run(request: &Request, sequence: &mut u64) -> Result<Value> {
-    let c = cache::connect(&request.cache.join("provenance.sqlite"))?;
+    let c = super::staged_cache(&request.cache)?;
     let done = c
         .prepare("SELECT target FROM lookups WHERE backend='pixel_hash' AND last_result IN ('hit','miss')")?
         .query_map([], |r| r.get::<_, String>(0))?

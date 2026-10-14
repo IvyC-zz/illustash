@@ -622,14 +622,22 @@ fn run(
         tx.execute("INSERT INTO native_delivery(task_id,package) VALUES (?,?)",params![ctx.identity().task_id,format!(".provenance/{}/evidence",ctx.identity().task_id)])?;
         tx.execute("UPDATE runs SET status=?,reason=?,results=?,found=?,traffic_mb=?,report=?,finished_at=datetime('now') WHERE id=?",params![status,reasons.join("；"),Value::Object(results).to_string(),found,(net.used as f64/1048576.0*100.0).round()/100.0,crate::character_json::dump(&report,false),id])?;
         tx.commit()?;
+        // The receipt is committed: detach the staged copy and remove the run's working files before the
+        // terminal state is published, so a caller that sees the end state finds only the sealed evidence (#143).
+        // Cleanup failure must not relabel accepted evidence as a failed run; recovery uses only that package.
+        drop(c);
+        pause_before_cleanup();
+        remove_working_files(&dir);
         *delivery.lock().expect("provenance state mutex poisoned")=match cache::deliver(lib,&path){Ok(v)=>v,Err(e)=>Json::object([("status","failed".into()),("error",e.to_string().into())])};
         let mut s=state.lock().expect("provenance state mutex poisoned");s.remove("text");s.set("status",status.into());s.set("reason",reasons.join("；").into());s.set("found",found.into());s.set("traffic_mb",Json::Float((net.used as f64/1048576.0*100.0).round()/100.0));s.set("finished_at",now().into());
         Ok(())
     })?;
     let _ = pkg;
-    // The receipt and terminal state are committed. Cleanup failure must not relabel
-    // accepted evidence as a failed run; recovery uses only the sealed evidence package.
-    if let Ok(entries) = std::fs::read_dir(&dir) {
+    Ok(())
+}
+/// Everything in a delivered run directory except its sealed `evidence` package; failures are ignored.
+fn remove_working_files(dir: &Path) {
+    if let Ok(entries) = std::fs::read_dir(dir) {
         for entry in entries.flatten() {
             if entry.file_name() == "evidence" {
                 continue;
@@ -641,7 +649,12 @@ fn run(
             }
         }
     }
-    Ok(())
+}
+/// Test-only widening of the moment between the receipt commit and the working-file cleanup (#143); unset in production.
+fn pause_before_cleanup() {
+    if let Some(ms) = std::env::var("ILLUSTASH_TEST_PROVENANCE_CLEANUP_PAUSE_MS").ok().and_then(|v| v.parse().ok()) {
+        std::thread::sleep(Duration::from_millis(ms));
+    }
 }
 #[allow(clippy::too_many_arguments)]
 fn compute(

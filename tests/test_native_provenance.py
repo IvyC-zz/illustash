@@ -232,6 +232,8 @@ class NativeProvenanceTest(unittest.TestCase):
         self.assertEqual(len(self.calls),1)
         self.code=200;self.post({'action':'lookup','ids':['a']});self.finish('done')
         self.assertTrue(self.sql("SELECT last_result FROM lookups WHERE backend='pixel_hash'",cache=True))
+        # Pending is set only on a stopped host: a running one replays it on its next idle tick (#56, #143).
+        self.stop(self.process)
         with db.connect(self.lib) as c:c.execute("UPDATE native_delivery SET status='pending'")
         count=self.sql('SELECT count(*) FROM term_evidence');self.restart()
         self.assertEqual(count,self.sql('SELECT count(*) FROM term_evidence'))
@@ -241,13 +243,15 @@ class NativeProvenanceTest(unittest.TestCase):
         with closing(sqlite3.connect(self.lib.db)) as hold:
             hold.execute('BEGIN IMMEDIATE')  # the library is busy when the run delivers its package
             self.post({'action':'lookup','ids':['a']});v=self.finish('done')
+            # Stop before the library is free again: the host's periodic retry (every 60 s) must not deliver
+            # the pending package before the asset is removed (#143).
+            self.stop(self.process)
             hold.rollback()
         self.assertEqual(v['delivery']['status'],'failed')
         [(old,status)]=self.sql('SELECT task_id,status FROM native_delivery',cache=True)
         self.assertEqual(status,'pending')
         kept="SELECT count(*) FROM term_evidence e JOIN term_assets t ON t.id=e.asset_id WHERE t.key='b'"
         evidence_b=self.sql(kept)
-        self.stop(self.process)
         # Removed the way a sync removes a picture: its row goes and the core marks it removed.
         with closing(sqlite3.connect(self.lib.db)) as c:
             c.execute("DELETE FROM assets WHERE uuid='b'")
@@ -270,8 +274,9 @@ class NativeProvenanceTest(unittest.TestCase):
         self.assertEqual(self.sql('SELECT count(*) FROM native_delivery',cache=True),count)
         # A pending package whose directory is gone is settled the same way.
         latest=self.sql('SELECT task_id,package FROM native_delivery ORDER BY rowid DESC LIMIT 1',cache=True)[0]
+        self.stop(self.process)
         with db.connect(self.lib) as c:c.execute("UPDATE native_delivery SET status='pending' WHERE task_id=?",(latest[0],))
-        self.stop(self.process);shutil.rmtree(self.lib.path/latest[1]);self.restart()
+        shutil.rmtree(self.lib.path/latest[1]);self.restart()
         self.assertEqual(self.sql('SELECT status FROM native_delivery WHERE task_id=?',(latest[0],),cache=True),[('stale',)])
         self.assertEqual(self.info()['delivery']['status'],'done')
         self.assertFalse(self.sql("SELECT task_id FROM native_delivery WHERE status='pending'",cache=True))
@@ -531,6 +536,8 @@ class ProvenanceRetentionTest(unittest.TestCase):
         with closing(sqlite3.connect(self.lib.db)) as hold:
             hold.execute('BEGIN IMMEDIATE')
             self.post({'action': 'lookup', 'ids': ['a']}); v = self.finish('done')
+            # Stopped while the library is busy, so the periodic retry cannot deliver it before the restart (#143).
+            self.stop(self.process)
             hold.rollback()
         self.assertEqual(v['delivery']['status'], 'failed')
         [(pending,)] = self.sql("SELECT task_id FROM native_delivery WHERE status='pending'", cache=True)
@@ -539,6 +546,13 @@ class ProvenanceRetentionTest(unittest.TestCase):
         self.assertEqual(self.sql('SELECT status FROM native_delivery WHERE task_id=?', (pending,), cache=True),
                          [('done',)])
         self.assertEqual(self.runs(), [pending])
+
+    def test_done_is_reported_only_after_working_files_are_removed(self):
+        # #143: widen the moment before the cleanup; whoever reads the end state finds only the sealed package.
+        self.env['ILLUSTASH_TEST_PROVENANCE_CLEANUP_PAUSE_MS'] = '1500'; self.restart()
+        self.post({'action': 'lookup', 'ids': ['a']}); self.finish('done')
+        task = self.newest_delivered()
+        self.assertEqual([p.name for p in (self.lib.path / '.provenance' / task).iterdir()], ['evidence'])
 
     def test_publication_writes_only_rows_the_run_changed(self):
         from collections import Counter
