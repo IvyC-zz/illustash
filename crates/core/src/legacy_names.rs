@@ -195,6 +195,16 @@ pub fn names_in_core(c: &Connection) -> Result<bool> {
     Ok(c.query_row("SELECT EXISTS(SELECT 1 FROM meta WHERE key=?1 AND value='core')", [NAMES_IN_CORE], |r| r.get(0))?)
 }
 
+/// 显示投影与名字的兼容表一致：名字已在核心，最近一次改名字相关数据的是核心写事务，提交时维护过投影（#105）。读侧据此
+/// 直接读投影；不一致时（例如有写入绕过了 `schema::commit_writing`）调用方应改为现算。
+pub fn projection_current(c: &Connection) -> Result<bool> {
+    if !names_in_core(c)? {
+        return Ok(false);
+    }
+    let version = meta(c, "names_version")?;
+    Ok(version.is_some() && version == meta(c, PROJECTED)?)
+}
+
 fn meta(c: &Connection, key: &str) -> Result<Option<String>> {
     use rusqlite::OptionalExtension;
     Ok(c.query_row("SELECT value FROM meta WHERE key=?1", [key], |r| r.get(0)).optional()?)
@@ -359,12 +369,6 @@ fn mirror_aliases(c: &Connection) -> Result<()> {
 /// 每个核心写事务提交前（schema::commit_writing）：名字已在核心、且这个事务改到了名字相关的数据，就在同一事务里
 /// 补齐主数据、维护显示投影。名字行使用依赖闭包，结构变更 / 过期状态回退整表。别名每个事务只同步一次（#102 A1）。
 pub fn after_write(c: &Connection) -> Result<()> {
-    after_write_with(c, None)
-}
-
-/// 同 `after_write`；`view` 是调用方手里与这个事务此刻的库逐项相同的名字快照（名字更新器吸收了本事务写入的批快照，
-/// #102 A5a）；显示投影需要整表重建时用它，不再整库载入（只改了名字行时投影按闭包局部维护，不用快照，#103）。
-pub fn after_write_with(c: &Connection, view: Option<&crate::names_view::View>) -> Result<()> {
     if !names_in_core(c)? {
         return Ok(());
     }
@@ -383,7 +387,7 @@ pub fn after_write_with(c: &Connection, view: Option<&crate::names_view::View>) 
     } else {
         mirror(c, &mut Report::default())?;
     }
-    refresh_projection_with(c, &mut None, view)?;
+    refresh_projection(c, &mut None)?;
     c.execute(
         "INSERT OR REPLACE INTO meta(key,value) VALUES (?1,?2)",
         rusqlite::params![PROJECTED, version.unwrap_or_default()],
@@ -478,31 +482,17 @@ fn verify_projection(c: &Connection) -> Result<()> {
 /// 做；显示版本单独记录，提交时仍补主数据，但只在版本再次变化时重建投影。
 /// `seen`：调用方上次重建时的版本，没变就不再重建。
 pub fn refresh_projection(c: &Connection, seen: &mut Option<String>) -> Result<()> {
-    refresh_projection_with(c, seen, None)
-}
-
-fn refresh_projection_with(
-    c: &Connection,
-    seen: &mut Option<String>,
-    view: Option<&crate::names_view::View>,
-) -> Result<()> {
     let version = meta(c, "names_version")?;
     if version.is_some()
         && (version == *seen || version == meta(c, PROJECTED)? || version == meta(c, DISPLAY_PROJECTED)?)
     {
         return Ok(());
     }
-    match (tracked(c)?, view) {
-        (true, view) => {
-            crate::names_view::rebuild_changed_with(c, view)?;
-            verify_projection(c)?;
-        }
-        (false, Some(view)) => {
-            crate::names_view::rebuild_from(c, view)?;
-        }
-        (false, None) => {
-            crate::names_view::rebuild(c)?;
-        }
+    if tracked(c)? {
+        crate::names_view::rebuild_changed(c)?;
+        verify_projection(c)?;
+    } else {
+        crate::names_view::rebuild(c)?;
     }
     c.execute(
         "INSERT OR REPLACE INTO meta(key,value) VALUES (?1,?2)",

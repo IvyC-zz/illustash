@@ -140,7 +140,7 @@ fn matched(c: &Connection, work: &str) -> Result<Vec<Value>> {
         _ => vec![],
     })
 }
-fn enrich(source: &mut Source, names: &mut Names, kind: &str, key: &str, work: &str) -> Result<Vec<Value>> {
+fn enrich(source: &mut Source, kind: &str, key: &str, work: &str) -> Result<Vec<Value>> {
     let mut c = net::db(&source.path)?;
     let wiki_tag = if kind == "work" {
         c.query_row("SELECT d.key FROM links q JOIN links d ON d.entity_id=q.entity_id AND d.system='danbooru' AND d.current=1 WHERE q.system='qualifier' AND q.key=?",[key],|r|r.get::<_,String>(0)).optional()?
@@ -284,21 +284,20 @@ fn enrich(source: &mut Source, names: &mut Names, kind: &str, key: &str, work: &
             }
         }
         ops.push(replace(kind, key, "bangumi", values));
-        let zh = names.view(&c)?.choose("work", work)?.names[0].clone().unwrap_or_default();
+        let zh = choose(&c, "work", work)?.names[0].clone().unwrap_or_default();
         let found = net::wiki_zh(&wiki, &[zh, crate::names_view::work_name(work).unwrap_or("").into()]);
         ops.push(replace(kind, key, "wiki", found.map(|v| vec![json!(["zh", v])]).unwrap_or_default()));
     }
-    // Model reads the pending projection in a rolled-back transaction, then requests without DB locks.
+    // Model reads the pending choice in a rolled-back transaction, then requests without DB locks.
     let settings = settings(&c)?;
     if let Some(secret) = settings.key {
         let tx = c.transaction()?;
         crate::schema::begin_writing(&tx)?;
-        // The batch snapshot as of this transaction's start; the pending writes are absorbed and then undone.
-        let base = names.base(&tx)?;
         for op in &ops {
             crate::names_commands::one(&tx, op)?;
         }
-        let choice = names.preview(&tx, base, kind, key)?;
+        // The key's own rows as this transaction wrote them (#105): no projection refresh, no library-wide load.
+        let choice = choose(&tx, kind, key)?;
         tx.rollback()?;
         if matches!(choice.source.as_str(), "readable" | "model") {
             let cache_key = dump(&json!(["model", settings.base, settings.model, kind, key, choice.names[1], work]));
@@ -355,7 +354,6 @@ fn job_scope(rows: &[Entity], kind: &str, key: &str, work: &str) -> Vec<Entity> 
 }
 fn run(source: &mut Source, entity: Option<&str>, state: &Mutex<Value>) -> Result<()> {
     let mut c = net::db(&source.path)?;
-    let mut names = Names::default();
     let rows = scope(&c, entity)?;
     let fp = fingerprint(&c, &rows)?;
     let previous: Option<String> =
@@ -413,11 +411,7 @@ fn run(source: &mut Source, entity: Option<&str>, state: &Mutex<Value>) -> Resul
         let result = (|| {
             net::check(&source.cancel)?;
             let job_fp = fingerprint(&c, &job_scope(&rows, kind, key, work))?;
-            let ops = if *kind == "skin" {
-                translate_skin(source, &mut names, key)?
-            } else {
-                enrich(source, &mut names, kind, key, work)?
-            };
+            let ops = if *kind == "skin" { translate_skin(source, key)? } else { enrich(source, kind, key, work)? };
             net::check(&source.cancel)?;
             // Check sources under the same write transaction as names/projections/done marker.
             let tx = c.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
@@ -425,7 +419,6 @@ fn run(source: &mut Source, entity: Option<&str>, state: &Mutex<Value>) -> Resul
                 return invalid("名称来源已改变，请重试");
             }
             crate::schema::begin_writing(&tx)?;
-            let base = Names::version(&tx)?;
             for op in ops {
                 crate::names_commands::one(&tx, &op)?;
             }
@@ -440,14 +433,8 @@ fn run(source: &mut Source, entity: Option<&str>, state: &Mutex<Value>) -> Resul
                 ],
             )?;
             net::check(&source.cancel)?;
-            // Alias mirrors sync once at commit (legacy_names::after_write). The absorbed snapshot equals a fresh
-            // load of this transaction, so a commit whose projection falls back to a whole rebuild uses it instead
-            // of loading the library again (name rows alone are projected by their closure, #103).
-            // It follows this commit only if the commit succeeds; on any failure it is gone and the next read
-            // loads again.
-            let next = names.absorb(&tx, base)?;
-            crate::schema::commit_writing_with(tx, next.as_ref().map(|(_, view)| view))?;
-            names.snapshot = next;
+            // Alias mirrors and the display projection follow once at commit (legacy_names::after_write).
+            crate::schema::commit_writing(tx)?;
             Ok(())
         })();
         if let Err(e) = result {
@@ -467,11 +454,11 @@ fn run(source: &mut Source, entity: Option<&str>, state: &Mutex<Value>) -> Resul
         Ok(())
     }
 }
-fn translate_skin(source: &mut Source, names: &mut Names, key: &str) -> Result<Vec<Value>> {
+fn translate_skin(source: &mut Source, key: &str) -> Result<Vec<Value>> {
     // Reuse the same translation path with no wiki/Bangumi fetch.
     let c = net::db(&source.path)?;
     let settings = settings(&c)?;
-    let choice = names.view(&c)?.choose("skin", key)?;
+    let choice = choose(&c, "skin", key)?;
     if settings.key.is_none() || !matches!(choice.source.as_str(), "readable" | "model") {
         return Ok(vec![]);
     }
@@ -502,122 +489,15 @@ fn translate_skin(source: &mut Source, names: &mut Names, key: &str) -> Result<V
     Ok(vec![replace("skin", key, "model", vec![json!(["zh", value])])])
 }
 
-/// One library-wide name snapshot per refresh batch (#102 A5a). Choosing a work name, the model preview and the
-/// skin pre-check each loaded the whole library once per key; now a batch loads once, and each of the batch's own
-/// commits is folded into the snapshot from the name rows it changed (`View::absorb`), which reads the same as a
-/// fresh load. Any other change to names, identities or links moves `names_version` and forces a fresh load.
-#[derive(Default)]
-struct Names {
-    /// (`names_version` the snapshot was taken at, snapshot). A version of None never matches: load every time.
-    snapshot: Option<(Option<String>, crate::names_view::View)>,
-}
-/// `names_version` bumpers (app_create): all twelve must exist for the version to cover every input of the snapshot.
-const VERSION_TRIGGERS: [&str; 12] = [
-    "names_version_entities_insert",
-    "names_version_entities_update",
-    "names_version_entities_delete",
-    "names_version_links_insert",
-    "names_version_links_update",
-    "names_version_links_delete",
-    "names_version_names_insert",
-    "names_version_names_update",
-    "names_version_names_delete",
-    "names_version_display_names_insert",
-    "names_version_display_names_update",
-    "names_version_display_names_delete",
-];
-#[cfg(test)]
-thread_local! {
-    /// Whole-library loads made by the updater on this thread (tests only).
-    static FULL_LOADS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
-}
-impl Names {
-    /// The library's `names_version`, or None when it cannot tell whether the snapshot is stale.
-    fn version(c: &Connection) -> Result<Option<String>> {
-        let triggers = dump(&json!(VERSION_TRIGGERS));
-        let complete: bool = c.query_row(
-            "SELECT count(*)=? FROM sqlite_master WHERE type='trigger' AND name IN (SELECT value FROM json_each(?))",
-            rusqlite::params![VERSION_TRIGGERS.len() as i64, triggers],
-            |r| r.get(0),
-        )?;
-        if !complete {
-            return Ok(None);
-        }
-        Ok(c.query_row("SELECT value FROM meta WHERE key='names_version'", [], |r| r.get(0)).optional()?)
-    }
-    fn current(&self, version: &Option<String>) -> bool {
-        matches!(&self.snapshot, Some((Some(v), _)) if version.as_ref() == Some(v))
-    }
-    /// The snapshot of the library as `c` sees it now; loads the whole library only if it changed since.
-    fn view(&mut self, c: &Connection) -> Result<&crate::names_view::View> {
-        let version = Self::version(c)?;
-        if !self.current(&version) {
-            // Version and rows from one read transaction, so the snapshot matches the version it is filed under.
-            let tx = if c.is_autocommit() { Some(c.unchecked_transaction()?) } else { None };
-            let version = Self::version(c)?;
-            let view = crate::names_view::View::load(c)?;
-            #[cfg(test)]
-            FULL_LOADS.with(|n| n.set(n.get() + 1));
-            if let Some(tx) = tx {
-                tx.commit()?;
-            }
-            self.snapshot = Some((version, view));
-        }
-        Ok(&self.snapshot.as_ref().expect("snapshot loaded").1)
-    }
-    /// Inside a write transaction, before its writes: make the snapshot match this transaction's start.
-    fn base(&mut self, tx: &Connection) -> Result<Option<String>> {
-        let version = Self::version(tx)?;
-        if version.is_some() {
-            self.view(tx)?;
-        }
-        Ok(version)
-    }
-    /// The model preview: the choice after this rolled-back transaction's pending writes, as a fresh load would see
-    /// it. The snapshot is restored afterwards.
-    fn preview(
-        &mut self,
-        tx: &Connection,
-        base: Option<String>,
-        kind: &str,
-        key: &str,
-    ) -> Result<crate::names_view::Choice> {
-        if base.is_some() && self.current(&base) {
-            let view = &mut self.snapshot.as_mut().expect("current snapshot").1;
-            if let Some(undo) = view.absorb(tx)? {
-                let checked = if verifying() { view.verify_absorbed(tx) } else { Ok(()) };
-                let choice = checked.and_then(|_| view.choose(kind, key));
-                view.restore(undo);
-                return choice;
-            }
-        }
-        #[cfg(test)]
-        FULL_LOADS.with(|n| n.set(n.get() + 1));
-        crate::names_view::View::load(tx)?.choose(kind, key)
-    }
-    /// Before committing a job: the snapshot with this transaction's writes folded in, filed under the version it
-    /// commits, or None. The current snapshot is taken either way; the caller keeps the result only if the commit
-    /// succeeds.
-    fn absorb(
-        &mut self,
-        tx: &Connection,
-        base: Option<String>,
-    ) -> Result<Option<(Option<String>, crate::names_view::View)>> {
-        let current = base.is_some() && self.current(&base);
-        let Some((_, mut view)) = self.snapshot.take().filter(|_| current) else { return Ok(None) };
-        if view.absorb(tx)?.is_none() {
-            return Ok(None);
-        }
-        if verifying() {
-            view.verify_absorbed(tx)?;
-        }
-        Ok(Some((Self::version(tx)?, view)))
-    }
-}
-/// Compare every absorbed snapshot with a fresh load: always in this crate's tests, and in test builds when the
+/// One key's choice, read from that key's own rows (#105 A5b; `names_view::choose_key`) instead of a library-wide
+/// load. In this crate's tests every choice is also compared with a library-wide load; test builds do so when the
 /// core's check is switched on (`legacy_names::verifying`).
-fn verifying() -> bool {
-    cfg!(test) || crate::legacy_names::verifying()
+fn choose(c: &Connection, kind: &str, key: &str) -> Result<crate::names_view::Choice> {
+    let choice = crate::names_view::choose_key(c, kind, key)?;
+    if cfg!(test) && !crate::legacy_names::verifying() {
+        crate::names_view::verify_choice(c, kind, key, &choice)?;
+    }
+    Ok(choice)
 }
 
 pub(crate) struct Updater {
@@ -2025,56 +1905,19 @@ mod sources_tests {
         assert_eq!(named(lib.char("alice")), pair("人工名", "user"));
     }
 
-    fn full_loads() -> usize {
-        FULL_LOADS.with(|n| n.get())
-    }
-
     #[test]
-    fn one_whole_library_load_per_batch() {
-        // #102 A5a: work names, model previews and skin checks of one batch share one snapshot. Every absorbed
-        // commit and preview is compared with a fresh load (`verifying` is always on in these tests).
+    fn a_batch_never_loads_the_whole_library() {
+        // #105 A5b: work names, model previews and skin checks read each key's own rows, and commits project by
+        // closure. Every choice is still compared with a library-wide load here (`choose`; not counted). The preview
+        // reads the job's pending writes: alice's Bangumi name exists only in them, yet she is never sent to the model.
         let (p, lib) = (Providers::start(), Library::load());
         lib.configure_model(&p);
-        let start = full_loads();
+        let start = crate::names_view::whole_loads();
         lib.run(&p, None, true).unwrap();
-        assert_eq!(full_loads() - start, 1);
-        assert!(!p.model_calls().is_empty(), "the batch must reach the model preview");
+        assert_eq!(crate::names_view::whole_loads() - start, 0);
+        assert_eq!(p.model_calls().len(), 1, "only bob reaches the model");
         assert_eq!(lib.char("alice").source, "bangumi");
         assert_eq!(lib.char("bob").source, "model");
-    }
-
-    #[test]
-    fn batch_snapshot_follows_own_commits_and_reloads_after_other_writes() {
-        let lib = Library::load();
-        let mut names = Names::default();
-        let mut c = lib.db();
-        let start = full_loads();
-        names.view(&c).unwrap();
-        names.view(&c).unwrap();
-        assert_eq!(full_loads() - start, 1);
-        let fresh = |c: &Connection| crate::names_view::View::load(c).unwrap().choose("character", "alice").unwrap();
-        // The batch's own commit is folded in: no reload, same choice as a fresh load.
-        let tx = c.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate).unwrap();
-        crate::schema::begin_writing(&tx).unwrap();
-        let base = Names::version(&tx).unwrap();
-        assert!(base.is_some());
-        let op = json!({"op":"put","kind":"character","key":"alice","lang":"zh","source":"bangumi","value":"合成名"});
-        crate::names_commands::one(&tx, &op).unwrap();
-        let next = names.absorb(&tx, base).unwrap();
-        assert!(next.is_some());
-        crate::schema::commit_writing(tx).unwrap();
-        names.snapshot = next;
-        assert_eq!(names.view(&c).unwrap().choose("character", "alice").unwrap(), fresh(&c));
-        assert_eq!(names.view(&c).unwrap().choose("character", "alice").unwrap().name, "合成名");
-        assert_eq!(full_loads() - start, 1);
-        // Another writer moves names_version: the next read loads again.
-        lib.put("character", "alice", "zh", "user", "人工名");
-        assert_eq!(names.view(&c).unwrap().choose("character", "alice").unwrap().name, "人工名");
-        assert_eq!(full_loads() - start, 2);
-        // A transaction that starts from a version the snapshot does not hold is not folded in.
-        let tx = c.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate).unwrap();
-        crate::schema::begin_writing(&tx).unwrap();
-        assert!(names.absorb(&tx, Some("not-this-version".into())).unwrap().is_none());
-        assert!(names.snapshot.is_none());
+        assert_eq!(crate::names_view::whole_loads() - start, 2, "the counter sees the two reference loads above");
     }
 }
