@@ -121,14 +121,15 @@ fn count_json(total: i64, zh: i64, ja: i64, readable: i64) -> Json {
 }
 /// The counts from the display projection (#105): identities and keys in SQL, each key's choice read from
 /// `term_name_choice`; a key the projection does not hold (a character without a tag) is chosen from its own rows.
-/// Only the projection's per-kind sums and the unprojected keys reach Rust.
+/// Only the projection's per-kind sums and the unprojected keys reach Rust. `shown` is materialized once rather than
+/// inlined into each of the three key branches.
 fn projected_counts(c: &Connection) -> Result<Json> {
     let mut sums: HashMap<String, (i64, i64, i64, i64, String)> = c
         .prepare(
             "WITH active(id) AS (SELECT entity FROM memberships UNION SELECT entity FROM candidates
                UNION SELECT parent_id FROM entities WHERE id IN (SELECT entity FROM memberships UNION SELECT entity FROM candidates)
                 AND parent_id IS NOT NULL),
-             shown AS (SELECT e.id,e.parent_id,coalesce(e.work,'') AS work,coalesce(e.variant,'') AS variant FROM entities e
+             shown AS MATERIALIZED (SELECT e.id,e.parent_id,coalesce(e.work,'') AS work,coalesce(e.variant,'') AS variant FROM entities e
                WHERE e.id IN active AND e.merged_into IS NULL AND e.kind NOT IN ('oc','work') AND coalesce(e.original,0)=0
                 AND EXISTS(SELECT 1 FROM links l WHERE l.entity_id=e.id AND l.current=1)),
              keys(kind,key) AS (SELECT 'character',d.tag FROM shown s JOIN term_name_display d ON d.entity=s.id AND d.skin_only=0
