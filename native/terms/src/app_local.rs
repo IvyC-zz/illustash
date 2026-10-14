@@ -16,7 +16,7 @@ pub(crate) fn read(context: &LibraryContext, url: &str) -> Result<Json> {
     let q = crate::http_read::query(url);
     let path = url.split('?').next().unwrap_or(url);
     match path {
-        "/api/about" => return Ok(about()),
+        "/api/about" => return Ok(about(context)),
         "/api/index" => return Ok(Json::object([("state", off())])),
         "/api/provenance" => return Ok(Json::object([("available", false.into())])),
         // OC sub-grouping is an on-demand research computation, never a stored cache.
@@ -42,7 +42,7 @@ pub(crate) fn read(context: &LibraryContext, url: &str) -> Result<Json> {
     tx.commit()?;
     Ok(result)
 }
-fn about() -> Json {
+fn about(context: &LibraryContext) -> Json {
     let platform = crate::platform_system::platform();
     Json::object([
         ("name", env!("ILLUSTASH_NAME").into()),
@@ -52,16 +52,27 @@ fn about() -> Json {
         ("schema", 36i64.into()),
         ("python", None::<String>.into()),
         ("platform", platform.into()),
-        (
-            "libraries",
-            Json::object([
-                ("Pillow", None::<String>.into()),
-                ("NumPy", None::<String>.into()),
-                ("ONNX Runtime", None::<String>.into()),
-            ]),
-        ),
+        ("libraries", components(context)),
         ("runtime", env!("ILLUSTASH_RUSTC").into()),
     ])
+}
+/// The recognition components the workers would use (#148): the recognition worker and the ONNX Runtime it loads,
+/// found by the same paths the workers use (the session's resource root, which sync hands workers as
+/// `ILLUSTASH_ROOT`). A missing one is null (shown as 「未安装」). Presence only: the host never loads ONNX Runtime,
+/// and no path is reported.
+fn components(context: &LibraryContext) -> Json {
+    let worker = std::env::var_os("ILLUSTASH_RECOGNITION_WORKER")
+        .is_some_and(|p| !p.is_empty() && std::path::Path::new(&p).is_file());
+    // The session's tags file is `<root>/tags/tags_v3.csv`.
+    let root = context
+        .tags
+        .parent()
+        .and_then(std::path::Path::parent)
+        .map(std::path::Path::to_path_buf)
+        .unwrap_or_else(crate::app_resources::default_root);
+    let runtime = crate::app_resources::ort_runtime(&root).is_file();
+    let state = |present: bool, label: &str| if present { Json::from(label) } else { None::<String>.into() };
+    Json::object([("识别组件", state(worker, "可用")), ("ONNX Runtime", state(runtime, "已安装"))])
 }
 pub(crate) fn names(c: &Connection, progress: bool) -> Result<Json> {
     let mut out = Json::object([(
@@ -309,6 +320,41 @@ mod tests {
         assert_eq!(names(&c, false).unwrap().get("counts").unwrap().dump(), projected.dump());
         assert_eq!(crate::names_view::whole_loads() - start, 1);
         drop(c);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn about_reports_the_components_the_workers_would_use() {
+        let root = std::env::temp_dir().join(format!(
+            "illustash-about-{}-{}",
+            std::process::id(),
+            crate::store::new_key().unwrap()
+        ));
+        std::fs::create_dir_all(root.join("tags")).unwrap();
+        let context = LibraryContext {
+            db: root.join("library.sqlite"),
+            generation: String::new(),
+            library: None,
+            tags: root.join("tags/tags_v3.csv"),
+            source: None,
+            token: None,
+            read_only: None,
+        };
+        let libraries = |context: &LibraryContext| -> serde_json::Value {
+            serde_json::from_str(&about(context).get("libraries").unwrap().dump()).unwrap()
+        };
+        let keys: std::collections::BTreeSet<String> =
+            libraries(&context).as_object().unwrap().keys().cloned().collect();
+        assert_eq!(keys, ["ONNX Runtime", "识别组件"].map(String::from).into(), "no Python-era Pillow/NumPy entries");
+        // ONNX Runtime is found where the workers look for it: under the session's resource root unless
+        // ILLUSTASH_ORT_DYLIB names one (as the Windows acceptance run does; then only that file counts).
+        let runtime = crate::app_resources::ort_runtime(&root);
+        if std::env::var_os("ILLUSTASH_ORT_DYLIB").is_none() {
+            assert_eq!(libraries(&context)["ONNX Runtime"], serde_json::Value::Null);
+            std::fs::create_dir_all(runtime.parent().unwrap()).unwrap();
+            std::fs::write(&runtime, b"synthetic").unwrap();
+        }
+        assert_eq!(libraries(&context)["ONNX Runtime"] == "已安装", runtime.is_file());
         std::fs::remove_dir_all(root).unwrap();
     }
 }

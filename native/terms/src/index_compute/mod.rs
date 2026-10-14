@@ -262,10 +262,7 @@ pub fn worker(arguments: &[String]) -> Result<()> {
     let resources = crate::app_resources::default_root();
     let files = crate::recognition_compute::models::ModelFiles::resolve(&resources)?;
     let model = files.root.join("ccip/model_feat.onnx");
-    let library = if cfg!(target_os = "windows") { "onnxruntime.dll" } else { "libonnxruntime.dylib" };
-    let runtime = std::env::var_os("ILLUSTASH_ORT_DYLIB")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| resources.join("onnxruntime").join(library));
+    let runtime = crate::app_resources::ort_runtime(&resources);
     let tags = resources.join("tags/tags_v3.csv");
     // Windows scan/anchor products need the fixed OpenBLAS backend; fail before any work.
     #[cfg(target_os = "windows")]

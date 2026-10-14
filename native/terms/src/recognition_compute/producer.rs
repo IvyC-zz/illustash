@@ -311,16 +311,7 @@ pub fn worker(arguments: &[String]) -> Result<()> {
     let resources = crate::app_resources::default_root();
     let model_files = super::models::ModelFiles::resolve(&resources)?;
     let models = &model_files.root;
-    let library = if cfg!(windows) {
-        "onnxruntime.dll"
-    } else if cfg!(target_os = "macos") {
-        "libonnxruntime.dylib"
-    } else {
-        "libonnxruntime.so"
-    };
-    let runtime = std::env::var_os("ILLUSTASH_ORT_DYLIB")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| resources.join("onnxruntime").join(library));
+    let runtime = crate::app_resources::ort_runtime(&resources);
     if arguments == ["--check"] {
         #[cfg(target_os = "windows")]
         illustash_platform::platform_research_math::windows_backend_identity().map_err(invalid)?;
