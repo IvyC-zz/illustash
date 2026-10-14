@@ -627,6 +627,10 @@ fn replay_in(module: &str, under: &Path) {
         "{module}: the scoped display projection was never checked against a whole rebuild"
     );
     assert!(
+        !STRUCTURE_MODULES.contains(&module) || checks.get("projection_structure").is_some_and(|n| *n > 0),
+        "{module}: the scoped projection after identity or link changes was never checked against a whole rebuild"
+    );
+    assert!(
         problems.is_empty(),
         "{module}: {} of {} cases differ:\n{}",
         problems.len(),
@@ -677,6 +681,30 @@ const PROJECTED_MODULES: [&str; 18] = [
     "test_terms_golden",
     "test_terms_names_writes",
     "test_identity",
+    "test_lead",
+    "test_web_v2",
+    "test_works",
+    "test_terms_artists_provenance",
+    "test_web",
+];
+
+/// Recordings that commit identity or link changes: the scoped display projection on both sides of the change (#104)
+/// must have been checked against a whole rebuild in each of them.
+const STRUCTURE_MODULES: [&str; 19] = [
+    "test_terms_labels",
+    "test_terms_artists",
+    "test_terms_character_history",
+    "test_terms_character_identity",
+    "test_terms_character_import",
+    "test_terms_character_learning",
+    "test_terms_character_refusals",
+    "test_terms_character_structure",
+    "test_terms_characters_contract",
+    "test_terms_characters_cutover",
+    "test_terms_golden",
+    "test_terms_names_writes",
+    "test_identity",
+    "test_identity_hybrid",
     "test_lead",
     "test_web_v2",
     "test_works",

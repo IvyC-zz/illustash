@@ -210,8 +210,14 @@ fn meta(c: &Connection, key: &str) -> Result<Option<String>> {
     Ok(c.query_row("SELECT value FROM meta WHERE key=?1", [key], |r| r.get(0)).optional()?)
 }
 
-/// 只在当前连接的写事务内追踪名字变化；结构变更或旧投影过期时退回完整重建。
-/// TEMP 表与触发器不改变持久 schema，事务回滚会一并撤销追踪状态。
+/// 只在当前连接的写事务内追踪名字变化；旧投影过期（事务开始时 `names_version` 与 `names_projected` 不同）时退回完整
+/// 重建。TEMP 表与触发器不改变持久 schema，事务回滚会一并撤销追踪状态。
+///
+/// 身份或链接变化时（#104 A4），显示投影要同时按变化前、变化后两侧求依赖闭包：BEFORE 触发器在一个身份第一次被改动
+/// 时，把它在事务开始时的行（`names_old_entities`，`present=0` 表示原来没有）和当前链接（`names_old_links`，取过的身份
+/// 记在 `names_old_links_seen`）存下来。`INSERT OR REPLACE` 顶掉的行不会触发 DELETE 触发器，所以插入前也先存下会被
+/// 顶掉的行（按主键、`entities.external_key`、`links (system,key)`）。只改与名字无关的列（如 `entities.name`、
+/// `links.source`）不记。`names_dirty_full` 只剩值 2：事务开始时投影已过期，提交时整表重建。
 pub fn track(c: &Connection) -> Result<()> {
     if !names_in_core(c)? {
         return Ok(());
@@ -221,20 +227,26 @@ pub fn track(c: &Connection) -> Result<()> {
         CREATE TEMP TABLE IF NOT EXISTS names_dirty_keys(kind TEXT,key TEXT,PRIMARY KEY(kind,key));
         CREATE TEMP TABLE IF NOT EXISTS names_dirty_aliases(kind TEXT,key TEXT,PRIMARY KEY(kind,key));
         CREATE TEMP TABLE IF NOT EXISTS names_dirty_full(value INTEGER PRIMARY KEY);
+        CREATE TEMP TABLE IF NOT EXISTS names_old_entities(id TEXT PRIMARY KEY,present INTEGER NOT NULL,kind TEXT,
+         parent_id TEXT,variant TEXT,merged_into TEXT,original INTEGER,work TEXT);
+        CREATE TEMP TABLE IF NOT EXISTS names_old_links_seen(id TEXT PRIMARY KEY);
+        CREATE TEMP TABLE IF NOT EXISTS names_old_links(system TEXT,key TEXT,entity_id TEXT,current INTEGER,added_at TEXT);
+        CREATE TEMP TABLE IF NOT EXISTS names_scope_ids(id TEXT PRIMARY KEY);
+        CREATE TEMP TABLE IF NOT EXISTS names_scope_keys(kind TEXT,key TEXT,PRIMARY KEY(kind,key));
         DELETE FROM names_dirty_entities; DELETE FROM names_dirty_keys; DELETE FROM names_dirty_aliases;
-        DELETE FROM names_dirty_full;",
+        DELETE FROM names_dirty_full; DELETE FROM names_old_entities; DELETE FROM names_old_links_seen;
+        DELETE FROM names_old_links; DELETE FROM names_scope_ids; DELETE FROM names_scope_keys;",
     )?;
     if meta(c, "names_version")? != meta(c, PROJECTED)? {
         c.execute("INSERT INTO names_dirty_full VALUES (2)", [])?;
     }
+    let entity_columns = structure_triggers(c)?;
     // 外层 UPSERT 的冲突策略可能覆盖触发器的 OR IGNORE，用存在性条件避免重复插入。
     for table in ["entities", "links", "names", "display_names"] {
         for event in ["INSERT", "UPDATE", "DELETE"] {
             let mut body = String::new();
             if matches!(table, "entities" | "links") {
-                body.push_str(
-                    "INSERT INTO names_dirty_full SELECT 1 WHERE NOT EXISTS(SELECT 1 FROM names_dirty_full WHERE value=1);",
-                );
+                // 链接的变化由 BEFORE 触发器记下（`names_old_links_seen`），这里只记改过的身份。
                 if table == "entities" {
                     for side in ["old", "new"] {
                         if (event == "INSERT" && side == "old") || (event == "DELETE" && side == "new") {
@@ -259,9 +271,17 @@ pub fn track(c: &Connection) -> Result<()> {
                     }
                 }
             }
+            let when = match (table, event) {
+                ("entities", "UPDATE") => format!(" WHEN {}", changed(&entity_columns)),
+                ("links", "UPDATE") => format!(" WHEN {}", changed(&LINK_COLUMNS)),
+                _ => String::new(),
+            };
+            if body.is_empty() {
+                continue;
+            }
             c.execute_batch(&format!(
                 "CREATE TEMP TRIGGER IF NOT EXISTS track_names_{table}_{event}
-                AFTER {event} ON main.{table} BEGIN {body} END;"
+                AFTER {event} ON main.{table}{when} BEGIN {body} END;"
             ))?;
         }
     }
@@ -289,13 +309,84 @@ pub fn track(c: &Connection) -> Result<()> {
     Ok(())
 }
 
-pub fn tracked(c: &Connection) -> Result<bool> {
-    let exists: bool =
-        c.query_row("SELECT EXISTS(SELECT 1 FROM sqlite_temp_master WHERE name='names_dirty_full')", [], |r| r.get(0))?;
-    Ok(exists && !c.query_row("SELECT EXISTS(SELECT 1 FROM names_dirty_full)", [], |r| r.get::<_, bool>(0))?)
+/// 显示投影读到的 `entities` 列（`names_view::View`）；表里没有的列（只建了几张表的测试库）不算。
+const ENTITY_COLUMNS: [&str; 7] = ["id", "kind", "parent_id", "variant", "merged_into", "original", "work"];
+/// 显示投影读到的 `links` 列。
+const LINK_COLUMNS: [&str; 5] = ["system", "key", "entity_id", "current", "added_at"];
+
+fn changed(columns: &[&str]) -> String {
+    columns.iter().map(|col| format!("OLD.{col} IS NOT NEW.{col}")).collect::<Vec<_>>().join(" OR ")
 }
 
-/// 结构变更可能需要全量显示投影，但名字主数据仍只受变更身份影响。
+/// 变化前的身份和链接（见 `track`）。返回 `entities` 上实际存在的、投影读到的列。
+fn structure_triggers(c: &Connection) -> Result<Vec<&'static str>> {
+    let present: Vec<String> = c
+        .prepare("SELECT name FROM pragma_table_info('entities')")?
+        .query_map([], |r| r.get(0))?
+        .collect::<rusqlite::Result<_>>()?;
+    let has = |col: &str| present.iter().any(|p| p == col);
+    let columns: Vec<&'static str> = ENTITY_COLUMNS.into_iter().filter(|col| has(col)).collect();
+    let work = if has("work") { "work" } else { "''" };
+    // 一行身份第一次被改动时存下它原来的样子，后面的改动不覆盖；`present=0`：事务开始时没有这一行。
+    let keep = |rows: &str| {
+        format!(
+            "INSERT INTO names_old_entities SELECT id,1,kind,parent_id,variant,merged_into,original,{work}
+             FROM main.entities WHERE ({rows}) AND id NOT IN (SELECT id FROM names_old_entities);"
+        )
+    };
+    let replaced =
+        if has("external_key") { " OR (NEW.external_key IS NOT NULL AND external_key=NEW.external_key)" } else { "" };
+    let absent = "INSERT INTO names_old_entities(id,present) SELECT NEW.id,0
+        WHERE NOT EXISTS(SELECT 1 FROM names_old_entities WHERE id=NEW.id);";
+    let entity_bodies = [
+        ("INSERT", String::new(), format!("{}{absent}", keep(&format!("id=NEW.id{replaced}")))),
+        (
+            "UPDATE",
+            format!(
+                " WHEN {}{}",
+                changed(&columns),
+                if has("external_key") { " OR OLD.external_key IS NOT NEW.external_key" } else { "" }
+            ),
+            format!("{}{absent}", keep(&format!("id IN (OLD.id,NEW.id){replaced}"))),
+        ),
+        ("DELETE", String::new(), keep("id=OLD.id")),
+    ];
+    for (event, when, body) in entity_bodies {
+        c.execute_batch(&format!(
+            "CREATE TEMP TRIGGER IF NOT EXISTS track_names_old_entities_{event}
+            BEFORE {event} ON main.entities{when} BEGIN {body} END;"
+        ))?;
+    }
+    // 一个身份的链接第一次被改动时存下它当时全部的链接，包括会被 REPLACE 顶掉的那一行的主人。
+    let keep_links = |owner: &str| {
+        format!(
+            "INSERT INTO names_old_links SELECT l.system,l.key,l.entity_id,l.current,l.added_at
+             FROM ({owner}) o JOIN main.links l ON l.entity_id=o.id WHERE o.id NOT IN (SELECT id FROM names_old_links_seen);
+             INSERT INTO names_old_links_seen SELECT DISTINCT o.id FROM ({owner}) o
+             WHERE o.id IS NOT NULL AND o.id NOT IN (SELECT id FROM names_old_links_seen);"
+        )
+    };
+    let owner = |side: &str| format!("SELECT {side}.entity_id AS id");
+    let holder = "SELECT entity_id AS id FROM main.links WHERE system=NEW.system AND key=NEW.key";
+    let link_bodies = [
+        ("INSERT", String::new(), format!("{}{}", keep_links(&owner("NEW")), keep_links(holder))),
+        (
+            "UPDATE",
+            format!(" WHEN {}", changed(&LINK_COLUMNS)),
+            format!("{}{}{}", keep_links(&owner("OLD")), keep_links(&owner("NEW")), keep_links(holder)),
+        ),
+        ("DELETE", String::new(), keep_links(&owner("OLD"))),
+    ];
+    for (event, when, body) in link_bodies {
+        c.execute_batch(&format!(
+            "CREATE TEMP TRIGGER IF NOT EXISTS track_names_old_links_{event}
+            BEFORE {event} ON main.links{when} BEGIN {body} END;"
+        ))?;
+    }
+    Ok(columns)
+}
+
+/// 本事务的名字相关改动都被追踪到了：名字主数据与显示投影都按记下的身份和键增量维护（结构变化也一样，#104）。
 /// 若开始时投影已经过期（值 2），来源未被本事务完整追踪，保留全量同步。
 fn tracked_master(c: &Connection) -> Result<bool> {
     let exists: bool =
@@ -443,7 +534,9 @@ fn verify_incremental(c: &Connection, kind: &str) -> Result<()> {
 }
 
 /// 局部维护显示投影之后、同一事务里（#103）：两张投影表与保存点里整表重建的结果逐行逐列相同；随后回滚保存点。
-fn verify_projection(c: &Connection) -> Result<()> {
+/// 按 `names_view::Maintained` 分别记为 `projection`（只改名字行）、`projection_structure`（改过身份或链接，#104）、
+/// `projection_whole`（退回了整表重建，核对只证明整表重建可重复）。
+fn verify_projection(c: &Connection, kind: &str) -> Result<()> {
     if !verifying() {
         return Ok(());
     }
@@ -474,7 +567,7 @@ fn verify_projection(c: &Connection) -> Result<()> {
             full.len()
         )));
     }
-    record_verified("projection")
+    record_verified(kind)
 }
 
 /// 事务中途要读显示名（核心生成历史文案，character_labels）：这个事务改过名字相关的数据就先重建显示投影。只重建投影
@@ -488,9 +581,13 @@ pub fn refresh_projection(c: &Connection, seen: &mut Option<String>) -> Result<(
     {
         return Ok(());
     }
-    if tracked(c)? {
-        crate::names_view::rebuild_changed(c)?;
-        verify_projection(c)?;
+    if tracked_master(c)? {
+        let kind = match crate::names_view::rebuild_changed(c)? {
+            crate::names_view::Maintained::Names => "projection",
+            crate::names_view::Maintained::Structure => "projection_structure",
+            crate::names_view::Maintained::Whole => "projection_whole",
+        };
+        verify_projection(c, kind)?;
     } else {
         crate::names_view::rebuild(c)?;
     }

@@ -572,31 +572,58 @@ pub fn rebuild(c: &Connection) -> Result<(usize, usize)> {
     Ok((shown, keys.len()))
 }
 
-/// 名字行变化时只写依赖闭包；实体与链接结构变更由调用方回退整表。只载入闭包和选名要读的行（#103 A3，见
-/// `Scope`）；闭包碰到空 tag 或空 variant 的键时退回整表重建。
-pub fn rebuild_changed(c: &Connection) -> Result<(usize, usize)> {
+/// 名字、身份或链接变化时只写依赖闭包（#103 A3、#104 A4，见 `Scope`）：只载入闭包和选名要读的行，重写受影响的
+/// 投影行，删掉已经不存在的身份和库里不再出现的键。闭包碰到空 tag 或空 variant 的键、或者大到全库的八分之一以上时
+/// 退回整表重建。
+pub fn rebuild_changed(c: &Connection) -> Result<Maintained> {
     match Scope::collect(c)? {
         Some(scope) => {
             let scoped = scope.load(c)?;
-            write_changed(c, &scoped, &scope.ids, scope.keys.intersection(&scope.existing))
+            write_changed(c, &scoped, &scope)?;
+            // 事务后面若再刷新一次（中途的历史文案之后又有改动），这次写过的行也要按那时的状态重算。
+            let mut id = c.prepare_cached(
+                "INSERT INTO names_scope_ids SELECT ?1 WHERE NOT EXISTS(SELECT 1 FROM names_scope_ids WHERE id=?1)",
+            )?;
+            for i in &scope.ids {
+                id.execute([i])?;
+            }
+            let mut key = c.prepare_cached(
+                "INSERT INTO names_scope_keys SELECT ?1,?2
+                 WHERE NOT EXISTS(SELECT 1 FROM names_scope_keys WHERE kind=?1 AND key=?2)",
+            )?;
+            for (kind, k) in &scope.keys {
+                key.execute([kind, k])?;
+            }
+            Ok(if scope.structure { Maintained::Structure } else { Maintained::Names })
         }
-        None => rebuild(c),
+        None => rebuild(c).map(|_| Maintained::Whole),
     }
 }
 
-/// 把闭包里的身份和（库里出现过的）键按 `view` 重写进两张投影表。
-fn write_changed<'a>(
-    c: &Connection,
-    view: &View,
-    ids: &BTreeSet<String>,
-    keys: impl Iterator<Item = &'a (String, String)>,
-) -> Result<(usize, usize)> {
+/// `rebuild_changed` 走了哪条路（对照核对按它分别计数）。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Maintained {
+    /// 局部维护，本事务只改了名字行。
+    Names,
+    /// 局部维护，本事务改过身份或链接。
+    Structure,
+    /// 退回整表重建。
+    Whole,
+}
+
+/// 把闭包里的身份和键按 `view` 重写进两张投影表：身份不存在了就删掉它的两行，键在库里不再出现就删掉它的行。
+fn write_changed(c: &Connection, view: &View, scope: &Scope) -> Result<(usize, usize)> {
     let mut put = c.prepare(
         "INSERT OR REPLACE INTO term_name_display(entity,skin_only,name,name_source,zh,ja,en,tag)
         VALUES (?,?,?,?,?,?,?,?)",
     )?;
+    let mut gone = c.prepare("DELETE FROM term_name_display WHERE entity=?")?;
     let mut shown = 0;
-    for id in ids {
+    for id in &scope.ids {
+        if !view.entities.contains_key(id) {
+            gone.execute([id])?;
+            continue;
+        }
         for skin in [false, true] {
             if let Some((ch, tag)) = view.entity(id, skin)? {
                 let [zh, ja, en] = &ch.names;
@@ -608,8 +635,13 @@ fn write_changed<'a>(
     let mut put = c.prepare(
         "INSERT OR REPLACE INTO term_name_choice(kind,key,name,name_source,zh,ja,en) VALUES (?,?,?,?,?,?,?)",
     )?;
+    let mut gone = c.prepare("DELETE FROM term_name_choice WHERE kind=? AND key=?")?;
     let mut chosen = 0;
-    for (kind, key) in keys {
+    for (kind, key) in &scope.keys {
+        if !scope.existing.contains(&(kind.clone(), key.clone())) {
+            gone.execute([kind, key])?;
+            continue;
+        }
         let ch = view.choose(kind, key)?;
         let [zh, ja, en] = &ch.names;
         put.execute(params![kind, key, ch.name, ch.source, zh, ja, en])?;
@@ -630,6 +662,8 @@ struct Scope {
     existing: BTreeSet<(String, String)>,
     /// 要载入的身份与它们在 `entities` 里的 rowid。
     read: BTreeMap<String, (i64, Entity)>,
+    /// 本事务改过身份或链接。
+    structure: bool,
 }
 
 /// 按 id 取过的身份（含当前链接）；None = 库里没有。
@@ -680,6 +714,80 @@ impl Fetched {
     }
 }
 
+/// 按 `links_sql`（参数是身份 id，返回当前链接的 system,key，按 `added_at,key` 排）补上链接、tag。
+fn link_up(c: &Connection, e: &mut Entity, links_sql: &str) -> Result<()> {
+    for row in
+        c.prepare_cached(links_sql)?.query_map([&e.id], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?
+    {
+        let (system, key) = row?;
+        e.keys.entry(system).or_insert(key);
+    }
+    e.linked = !e.keys.is_empty();
+    e.tag = linked_tag(&e.keys)?;
+    Ok(())
+}
+
+const LINKS_SQL: &str = "SELECT system,key FROM links WHERE entity_id=? AND current=1 ORDER BY added_at,key";
+
+fn current_work(c: &Connection, id: &str, has_work: bool) -> Result<String> {
+    if !has_work {
+        return Ok(String::new());
+    }
+    Ok(c.prepare_cached("SELECT coalesce(work,'') FROM entities WHERE id=?")?.query_row([id], |r| r.get(0))?)
+}
+
+/// 事务开始时的身份与它的 `entities.work`（`legacy_names::track` 存下的；没存就是没改过，取现在的）；那时没有这个
+/// 身份时 None。
+fn old_state(c: &Connection, id: &str, has_work: bool) -> Result<Option<(String, Entity)>> {
+    use rusqlite::OptionalExtension;
+    let captured = c
+        .prepare_cached(
+            "SELECT present,kind,parent_id,variant,merged_into,coalesce(original,0),coalesce(work,'')
+             FROM names_old_entities WHERE id=?",
+        )?
+        .query_row([id], |r| {
+            Ok((
+                r.get::<_, i64>(0)? != 0,
+                Entity {
+                    id: id.to_owned(),
+                    kind: r.get::<_, Option<String>>(1)?.unwrap_or_default(),
+                    parent: r.get(2)?,
+                    variant: r.get::<_, Option<String>>(3)?.unwrap_or_default(),
+                    merged: r.get(4)?,
+                    original: r.get::<_, i64>(5)? != 0,
+                    keys: BTreeMap::new(),
+                    linked: false,
+                    tag: String::new(),
+                    seq: 0,
+                },
+                r.get::<_, String>(6)?,
+            ))
+        })
+        .optional()?;
+    let (mut e, work) = match captured {
+        Some((false, ..)) => return Ok(None),
+        Some((true, e, work)) => (e, work),
+        None => match fetch(c, id)? {
+            // 行没改过：只有链接改过时才会走到这里，链接下面按存下的重新补。
+            Some((_, mut e)) => {
+                e.keys.clear();
+                (e, current_work(c, id, has_work)?)
+            }
+            None => return Ok(None),
+        },
+    };
+    let seen: bool = c
+        .prepare_cached("SELECT EXISTS(SELECT 1 FROM names_old_links_seen WHERE id=?)")?
+        .query_row([id], |r| r.get(0))?;
+    let links = if seen {
+        "SELECT system,key FROM names_old_links WHERE entity_id=? AND current=1 ORDER BY added_at,key"
+    } else {
+        LINKS_SQL
+    };
+    link_up(c, &mut e, links)?;
+    Ok(Some((work, e)))
+}
+
 /// 一个身份和它的当前链接，与 `View::load` 里同一个身份逐项相同（`seq` 由 `Scope::load` 重新编）。
 fn fetch(c: &Connection, id: &str) -> Result<Option<(i64, Entity)>> {
     use rusqlite::OptionalExtension;
@@ -706,15 +814,7 @@ fn fetch(c: &Connection, id: &str) -> Result<Option<(i64, Entity)>> {
         })
         .optional()?;
     let Some((rowid, mut e)) = found else { return Ok(None) };
-    for row in c
-        .prepare_cached("SELECT system,key FROM links WHERE entity_id=? AND current=1 ORDER BY added_at,key")?
-        .query_map([id], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?
-    {
-        let (system, key) = row?;
-        e.keys.entry(system).or_insert(key);
-    }
-    e.linked = !e.keys.is_empty();
-    e.tag = linked_tag(&e.keys)?;
+    link_up(c, &mut e, LINKS_SQL)?;
     Ok(Some((rowid, e)))
 }
 
@@ -726,20 +826,59 @@ impl Scope {
     /// 本事务记下的身份和键的依赖闭包与读取范围。闭包碰到空 tag 的人物键或空 variant 的皮肤键时返回 None：库里
     /// 所有没有 tag（没有 variant）的身份都依赖它们，调用方改为整表重建。
     fn collect(c: &Connection) -> Result<Option<Scope>> {
-        let seed_ids: Vec<String> = c
-            .prepare("SELECT id FROM names_dirty_entities")?
+        // 种子：改过名字的身份和键、改过行或链接的身份（`legacy_names::track`），以及本事务里先前局部维护时写过的
+        // 身份和键（事务中途为历史文案刷新过投影，那时写下的行也要按最终状态重算或删除）。
+        let mut new_ids: Vec<String> = c
+            .prepare(
+                "SELECT id FROM names_dirty_entities UNION SELECT id FROM names_old_entities
+                 UNION SELECT id FROM names_old_links_seen UNION SELECT id FROM names_scope_ids",
+            )?
             .query_map([], |r| r.get(0))?
             .collect::<rusqlite::Result<_>>()?;
-        let seed_keys: Vec<(String, String)> = c
-            .prepare("SELECT kind,key FROM names_dirty_keys")?
+        let mut new_keys: Vec<(String, String)> = c
+            .prepare("SELECT kind,key FROM names_dirty_keys UNION SELECT kind,key FROM names_scope_keys")?
             .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
             .collect::<rusqlite::Result<_>>()?;
+        // 改过行或链接的身份（#104 A4）：变化前、变化后两侧用到的键都要重算（键可能新出现，也可能不再出现），变化前
+        // 它并入的身份也要重算（那个身份可能借过它的人物键）。
+        let moved: Vec<String> = c
+            .prepare("SELECT id FROM names_old_entities UNION SELECT id FROM names_old_links_seen")?
+            .query_map([], |r| r.get(0))?
+            .collect::<rusqlite::Result<_>>()?;
+        let has_work: bool =
+            c.query_row("SELECT EXISTS(SELECT 1 FROM pragma_table_info('entities') WHERE name='work')", [], |r| {
+                r.get(0)
+            })?;
+        for id in &moved {
+            let now = match fetch(c, id)? {
+                Some((_, e)) => Some((current_work(c, id, has_work)?, e)),
+                None => None,
+            };
+            for (work, e) in [old_state(c, id, has_work)?, now].into_iter().flatten() {
+                if View::spoken(&e) && e.tag.is_empty() {
+                    return Ok(None);
+                }
+                if !e.tag.is_empty() {
+                    new_keys.push(("character".into(), e.tag.clone()));
+                }
+                if !e.variant.is_empty() {
+                    new_keys.push(("skin".into(), e.variant.clone()));
+                }
+                if let Some(q) = e.keys.get("qualifier") {
+                    new_keys.push(("work".into(), q.clone()));
+                }
+                if !work.is_empty() {
+                    new_keys.push(("work".into(), work));
+                }
+                if let Some(m) = e.merged.as_ref().filter(|m| e.linked && !m.is_empty()) {
+                    new_ids.push(m.clone());
+                }
+            }
+        }
         let mut f = Fetched::default();
         let mut ids: BTreeSet<String> = BTreeSet::new();
         let mut keys: BTreeSet<(String, String)> = BTreeSet::new();
         let mut existing: BTreeSet<(String, String)> = BTreeSet::new();
-        let mut new_ids = seed_ids;
-        let mut new_keys = seed_keys;
         let mut children = c.prepare_cached("SELECT id FROM entities WHERE parent_id=?")?;
         // 不动点：身份 → 它的人物键（会把显示名并进人物键的身份）、子身份、它并入的身份（有链接时）；键 → tag、
         // variant、qualifier 是这个键的身份。
@@ -826,6 +965,13 @@ impl Scope {
                 }
             }
         }
+        // 闭包占到全库的八分之一以上（例如一次导入很多身份）时，逐个查询不如整表重建。
+        if ids.len() > 256 {
+            let total: i64 = c.query_row("SELECT count(*) FROM entities", [], |r| r.get(0))?;
+            if ids.len() as i64 * 8 > total {
+                return Ok(None);
+            }
+        }
         // 选名还要读的身份：皮肤的父身份（`base`），以及这些身份的并入者（`base` 在没有名字时借并入者的人物键）。
         let mut want: BTreeSet<String> = BTreeSet::new();
         let mut bases: BTreeSet<String> = BTreeSet::new();
@@ -880,7 +1026,7 @@ impl Scope {
                 read.insert(id, x);
             }
         }
-        Ok(Some(Scope { ids, keys, existing, read }))
+        Ok(Some(Scope { ids, keys, existing, read, structure: !moved.is_empty() }))
     }
 
     /// 只含 `read` 的快照：每个身份、它的名字和链接与整库 `View::load` 里逐项相同；人物键、皮肤键、作品键下的名字
@@ -1158,6 +1304,84 @@ mod tests {
             assert_eq!(changed, projection(&tx), "{sql}");
             assert_ne!(changed, before, "{sql}");
         }
+    }
+
+    #[test]
+    fn structure_changes_are_projected_on_both_sides() {
+        let mut c = projected();
+        let cases: [&str; 10] = [
+            // Old variant key stays (s2), a new one appears.
+            "UPDATE entities SET variant='other_v' WHERE id='s1'",
+            // A deleted identity loses its rows, and its tag key leaves the choices.
+            "DELETE FROM links WHERE entity_id='s2'; DELETE FROM entities WHERE id='s2'",
+            // A link changes hands: e1 becomes unlinked, e3 takes the older tag and 'lonely' leaves the choices.
+            "UPDATE links SET entity_id='e3' WHERE system='danbooru' AND key='synth_(series_w)'",
+            // Unmerged: the nameless e3 no longer borrows its member's name.
+            "UPDATE entities SET merged_into=NULL WHERE id='m2'",
+            // Merged into the nameless e3, which now borrows the first named member (e4 before m2).
+            "UPDATE entities SET merged_into='e3' WHERE id='e4'",
+            "INSERT INTO entities VALUES ('n1','character',NULL,'',NULL,0,'');
+             INSERT INTO links VALUES ('danbooru','new_tag','n1',1,'2026-01-20');
+             INSERT INTO names VALUES ('n1','zh','新人','index','display',0,0)",
+            // REPLACE takes m2's link without firing the DELETE trigger.
+            "INSERT OR REPLACE INTO links VALUES ('danbooru','member_tag','e4',1,'2026-01-14')",
+            "UPDATE entities SET work='series_new' WHERE id='e2'",
+            "UPDATE entities SET kind='work' WHERE id='e2'",
+            "UPDATE links SET current=0 WHERE entity_id='e4' AND system='ccip_base'",
+        ];
+        let before = projection(&c);
+        for sql in cases {
+            let tx = c.transaction().unwrap();
+            crate::legacy_names::track(&tx).unwrap();
+            tx.execute_batch(sql).unwrap();
+            assert_eq!(rebuild_changed(&tx).unwrap(), Maintained::Structure, "{sql}");
+            let changed = projection(&tx);
+            rebuild(&tx).unwrap();
+            assert_eq!(changed, projection(&tx), "{sql}");
+            assert_ne!(changed, before, "{sql}");
+        }
+        // Projected mid-transaction (history labels), then changed again: rows written for the middle state go too.
+        let tx = c.transaction().unwrap();
+        crate::legacy_names::track(&tx).unwrap();
+        tx.execute_batch(
+            "INSERT INTO entities VALUES ('n2','character',NULL,'',NULL,0,'');
+             INSERT INTO links VALUES ('danbooru','passing_tag','n2',1,'2026-01-21');",
+        )
+        .unwrap();
+        rebuild_changed(&tx).unwrap();
+        assert!(projection(&tx).iter().any(|r| r[0] == rusqlite::types::Value::Text("n2".into())));
+        tx.execute_batch("DELETE FROM links WHERE entity_id='n2'; DELETE FROM entities WHERE id='n2';").unwrap();
+        rebuild_changed(&tx).unwrap();
+        let changed = projection(&tx);
+        rebuild(&tx).unwrap();
+        assert_eq!(changed, projection(&tx));
+        assert_eq!(changed, before);
+        // A closure over an eighth of the library (a large import) falls back to the whole rebuild.
+        drop(tx);
+        let tx = c.transaction().unwrap();
+        crate::legacy_names::track(&tx).unwrap();
+        for i in 0..300 {
+            tx.execute(&format!("INSERT INTO entities VALUES ('bulk{i}','character',NULL,'',NULL,0,'')"), []).unwrap();
+            tx.execute(&format!("INSERT INTO links VALUES ('danbooru','bulk_{i}','bulk{i}',1,'2026-01-22')"), [])
+                .unwrap();
+        }
+        assert_eq!(rebuild_changed(&tx).unwrap(), Maintained::Whole);
+        let changed = projection(&tx);
+        rebuild(&tx).unwrap();
+        assert_eq!(changed, projection(&tx));
+        // Only columns the projection does not read: nothing is tracked as a structure change.
+        drop(tx);
+        let tx = c.transaction().unwrap();
+        crate::legacy_names::track(&tx).unwrap();
+        tx.execute_batch("UPDATE links SET added_at=added_at WHERE entity_id='e1'").unwrap();
+        let moved: i64 = tx
+            .query_row(
+                "SELECT (SELECT count(*) FROM names_old_links_seen)+(SELECT count(*) FROM names_old_entities)",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(moved, 0);
     }
 
     #[test]
