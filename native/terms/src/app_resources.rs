@@ -14,6 +14,20 @@ pub fn default_root() -> PathBuf {
         .or_else(|| std::env::current_exe().ok().and_then(|exe| installed_root(&exe)))
         .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../.."))
 }
+/// The ONNX Runtime the recognition and index workers load: `ILLUSTASH_ORT_DYLIB`, else the full installer's copy
+/// under the resource root.
+pub fn ort_runtime(resources: &Path) -> PathBuf {
+    let library = if cfg!(windows) {
+        "onnxruntime.dll"
+    } else if cfg!(target_os = "macos") {
+        "libonnxruntime.dylib"
+    } else {
+        "libonnxruntime.so"
+    };
+    std::env::var_os("ILLUSTASH_ORT_DYLIB")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| resources.join("onnxruntime").join(library))
+}
 /// Shared runtime resources. Relative overrides are anchored to the resource root, never the worker CWD.
 pub fn shared_path(root: &Path) -> Result<PathBuf> {
     shared_from(root, &std::env::current_dir()?, std::env::var_os("ILLUSTASH_SHARED").as_deref().map(Path::new))

@@ -178,7 +178,12 @@ class NativeLocalReadsTest(unittest.TestCase):
         self.assertEqual((info['name'],info['version'],info['channel'],info['schema']),('Illustash','0.1.0','预览版',36))
         self.assertIsNone(info['python']);self.assertTrue(info['runtime'].startswith('rustc '))
         self.assertRegex(info['build'],r'^[0-9a-f]{7,40}(?:-dirty)?$');self.assertIn('(',info['platform'])
-        self.assertTrue(all(v is None for v in info['libraries'].values()))
+        # #148: the recognition components the workers would use, found where the workers look; presence only.
+        library = 'onnxruntime.dll' if os.name == 'nt' else 'libonnxruntime.dylib'
+        runtime = Path(os.environ.get('ILLUSTASH_ORT_DYLIB') or self.resources / 'onnxruntime' / library)
+        worker = os.environ.get('ILLUSTASH_RECOGNITION_WORKER')
+        self.assertEqual(info['libraries'], {'识别组件': '可用' if worker and Path(worker).is_file() else None,
+                                             'ONNX Runtime': '已安装' if runtime.is_file() else None})
         self.assertFalse(self.sentinel.exists())
 
     def test_concurrent_cached_reads_and_suggest_then_switch(self):
