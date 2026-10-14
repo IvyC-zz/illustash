@@ -233,30 +233,22 @@ fn register_projected_names(c: &Connection) -> Result<()> {
         Ok(info)
     })?;
     let mut chosen: HashMap<String, String> = HashMap::new();
-    let mut fallback = None;
     c.create_scalar_function("work_name", 1, f, move |ctx| {
         let key = ctx.get::<String>(0)?;
         if let Some(name) = chosen.get(&key) {
             return Ok(name.clone());
         }
-        // SAFETY: as above; fallback also uses this transaction, never a new connection.
+        // SAFETY: as above; the fallback also reads this transaction, never a new connection.
         let c = unsafe { ctx.get_connection()? };
         let name: Option<String> = c
             .query_row("SELECT name FROM term_name_choice WHERE kind='work' AND key=?", [&key], |r| r.get(0))
             .optional()?;
         let name = match name {
             Some(name) => name,
-            None => {
-                if fallback.is_none() {
-                    fallback = Some(View::load(&c).map_err(|e| rusqlite::Error::UserFunctionError(Box::new(e)))?);
-                }
-                fallback
-                    .as_ref()
-                    .expect("http_read internal invariant")
-                    .choose("work", &key)
-                    .map(|v| v.name)
-                    .map_err(|e| rusqlite::Error::UserFunctionError(Box::new(e)))?
-            }
+            // A key the projection does not hold: chosen from that key's own rows (#105), no library-wide load.
+            None => crate::names_view::choose_key(&c, "work", &key)
+                .map(|v| v.name)
+                .map_err(|e| rusqlite::Error::UserFunctionError(Box::new(e)))?,
         };
         chosen.insert(key, name.clone());
         Ok(name)
@@ -600,6 +592,13 @@ mod tests {
         );
         assert_eq!(values.2, "{}");
         assert_eq!(values.3, "projected");
+        // A work key outside the projection reads only its own display names (#105).
+        let c = Connection::open_in_memory().unwrap();
+        fixture(&c);
+        c.execute_batch("DROP TABLE entities; DROP TABLE links; DROP TABLE names;").unwrap();
+        register_names(&c).unwrap();
+        let name: String = c.query_row("SELECT work_name('unprojected')", [], |r| r.get(0)).unwrap();
+        assert_eq!(name, "未投影🙂");
     }
     #[test]
     fn lazy_projected_names_keep_snapshot_and_refresh_on_next_request() {

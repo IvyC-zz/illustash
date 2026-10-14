@@ -23,6 +23,15 @@ RULE='-'*70
 # 对 CPU 负载敏感、并发下会偶发失败的测试类：并行池跑完后逐个单独运行。每项仍只运行一次，不重试；
 # 修好其中的时序问题后从这里移除。#132 修完后为空。
 SERIAL=frozenset()
+# 子进程自行把仓库根插到 sys.path 最前再按模块运行：带 ._pth 的嵌入式 Python 与 -I 一样不把 cwd 放进
+# sys.path，也忽略 PYTHONPATH，`-m tests.run_fixed_suite` 在那里找不到 tests 包。插入后与 `-m` 的 sys.path[0] 相同。
+WORKER=("import runpy,sys;sys.path.insert(0,sys.argv.pop(1));"
+        "runpy.run_module('tests.run_fixed_suite',run_name='__main__',alter_sys=True)")
+
+def worker_command(summary,passthrough):
+    # 沿用父进程的 -I、-X utf8、-W 等解释器选项（multiprocessing 的 spawn 也用这个函数），子进程日志与父进程同一编码。
+    return [sys.executable,*subprocess._args_from_interpreter_flags(),'-c',WORKER,str(ROOT),
+            '--worker',str(summary),*passthrough]
 
 def retired(origin):
     return origin in RETIRED_TOOLS or any(origin.is_relative_to(root) for root in BLOCKED)
@@ -140,8 +149,7 @@ def parallel(jobs,verbosity,buffer,passthrough):
                     name,members=queue.pop(0);index+=1
                     log=Path(workdir.name)/f'{index}.log';summary=Path(workdir.name)/f'{index}.json'
                     handle=log.open('wb')
-                    process=subprocess.Popen([sys.executable,'-m','tests.run_fixed_suite','--worker',str(summary),*passthrough],
-                                             cwd=ROOT,stdin=subprocess.PIPE,stdout=handle,stderr=subprocess.STDOUT)
+                    process=subprocess.Popen(worker_command(summary,passthrough),cwd=ROOT,stdin=subprocess.PIPE,stdout=handle,stderr=subprocess.STDOUT)
                     process.stdin.write(json.dumps([f'{name}.{test._testMethodName}' for test in members]).encode());process.stdin.close()
                     running.append((name,members,process,handle,log,summary,time.perf_counter()))
                 finished=[item for item in running if item[2].poll() is not None]

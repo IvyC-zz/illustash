@@ -71,51 +71,23 @@ pub(crate) fn names(c: &Connection, progress: bool) -> Result<Json> {
     if progress {
         return Ok(out);
     }
-    let active:HashSet<_>=strings(c,"SELECT entity FROM memberships UNION SELECT entity FROM candidates UNION SELECT parent_id FROM entities WHERE id IN (SELECT entity FROM memberships UNION SELECT entity FROM candidates) AND parent_id IS NOT NULL",&[])?.into_iter().collect();
-    // One library-wide load serves both the scope (formerly a second read of entities and links) and the choices (#102).
-    let view = crate::names_view::View::load_with_work(c)?;
-    let mut keys: [HashSet<String>; 3] = Default::default();
-    for e in view.identities() {
-        if e.merged_into.is_some()
-            || matches!(e.kind, "oc" | "work")
-            || e.original
-            || !e.linked
-            || !active.contains(e.id)
-        {
-            continue;
-        }
-        if e.parent.is_none() {
-            keys[0].insert(e.tag.into());
-        }
-        for (i, s) in [(1, e.work), (2, e.variant)] {
-            if !s.is_empty() {
-                keys[i].insert(s.into());
+    let counts = if crate::legacy_names::projection_current(c)? {
+        let counts = projected_counts(c)?;
+        if crate::legacy_names::verifying() {
+            let loaded = loaded_counts(c)?;
+            if counts.dump() != loaded.dump() {
+                return Err(Error::Conflict(format!(
+                    "按投影统计的名字覆盖与整库载入不一致：{} ≠ {}",
+                    counts.dump(),
+                    loaded.dump()
+                )));
             }
+            crate::legacy_names::record_verified("names_counts")?;
         }
-    }
-    let mut counts = Json::Object(Vec::new());
-    for (i, (plural, kind)) in
-        [("characters", "character"), ("works", "work"), ("skins", "skin")].into_iter().enumerate()
-    {
-        let mut zh = 0;
-        let mut ja = 0;
-        let mut readable = 0;
-        for key in &keys[i] {
-            let choice = view.choose(kind, key)?;
-            zh += i64::from(choice.names.first().and_then(|x| x.as_ref()).is_some_and(|s| !s.is_empty()));
-            ja += i64::from(choice.names.get(1).and_then(|x| x.as_ref()).is_some_and(|s| !s.is_empty()));
-            readable += i64::from(choice.source == "readable");
-        }
-        counts.set(
-            plural,
-            Json::object([
-                ("total", (keys[i].len() as i64).into()),
-                ("zh", zh.into()),
-                ("ja", ja.into()),
-                ("readable", readable.into()),
-            ]),
-        );
-    }
+        counts
+    } else {
+        loaded_counts(c)?
+    };
     out.set("counts", counts);
     let settings: HashMap<_, _> = c
         .prepare("SELECT key,value FROM name_settings")?
@@ -140,6 +112,88 @@ pub(crate) fn names(c: &Connection, progress: bool) -> Result<Json> {
         ]),
     );
     Ok(out)
+}
+/// Characters, works and skins `/api/names` counts: the active, linked, unmerged non-OC identities' character tags,
+/// work texts and skin variants.
+const KINDS: [(&str, &str); 3] = [("characters", "character"), ("works", "work"), ("skins", "skin")];
+fn count_json(total: i64, zh: i64, ja: i64, readable: i64) -> Json {
+    Json::object([("total", total.into()), ("zh", zh.into()), ("ja", ja.into()), ("readable", readable.into())])
+}
+/// The counts from the display projection (#105): identities and keys in SQL, each key's choice read from
+/// `term_name_choice`; a key the projection does not hold (a character without a tag) is chosen from its own rows.
+/// Only the projection's per-kind sums and the unprojected keys reach Rust. `shown` is materialized once rather than
+/// inlined into each of the three key branches.
+fn projected_counts(c: &Connection) -> Result<Json> {
+    let mut sums: HashMap<String, (i64, i64, i64, i64, String)> = c
+        .prepare(
+            "WITH active(id) AS (SELECT entity FROM memberships UNION SELECT entity FROM candidates
+               UNION SELECT parent_id FROM entities WHERE id IN (SELECT entity FROM memberships UNION SELECT entity FROM candidates)
+                AND parent_id IS NOT NULL),
+             shown AS MATERIALIZED (SELECT e.id,e.parent_id,coalesce(e.work,'') AS work,coalesce(e.variant,'') AS variant FROM entities e
+               WHERE e.id IN active AND e.merged_into IS NULL AND e.kind NOT IN ('oc','work') AND coalesce(e.original,0)=0
+                AND EXISTS(SELECT 1 FROM links l WHERE l.entity_id=e.id AND l.current=1)),
+             keys(kind,key) AS (SELECT 'character',d.tag FROM shown s JOIN term_name_display d ON d.entity=s.id AND d.skin_only=0
+                WHERE s.parent_id IS NULL
+               UNION SELECT 'work',work FROM shown WHERE work<>''
+               UNION SELECT 'skin',variant FROM shown WHERE variant<>'')
+             SELECT k.kind,count(*),coalesce(sum(coalesce(ch.zh,'')<>''),0),coalesce(sum(coalesce(ch.ja,'')<>''),0),
+              coalesce(sum(ch.name_source='readable'),0),json_group_array(k.key) FILTER (WHERE ch.kind IS NULL)
+             FROM keys k LEFT JOIN term_name_choice ch ON ch.kind=k.kind AND ch.key=k.key GROUP BY k.kind",
+        )?
+        .query_map([], |r| Ok((r.get(0)?, (r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?))))?
+        .collect::<rusqlite::Result<_>>()?;
+    let mut counts = Json::Object(Vec::new());
+    for (plural, kind) in KINDS {
+        let (total, mut zh, mut ja, mut readable, missing) = sums.remove(kind).unwrap_or((0, 0, 0, 0, "[]".into()));
+        let missing: Vec<String> = serde_json::from_str(&missing).map_err(|e| Error::Invalid(e.to_string()))?;
+        for key in missing {
+            let choice = crate::names_view::choose_key(c, kind, &key)?;
+            zh += i64::from(choice.names[0].as_ref().is_some_and(|s| !s.is_empty()));
+            ja += i64::from(choice.names[1].as_ref().is_some_and(|s| !s.is_empty()));
+            readable += i64::from(choice.source == "readable");
+        }
+        counts.set(plural, count_json(total, zh, ja, readable));
+    }
+    Ok(counts)
+}
+/// The counts from one library-wide load (#102): names not yet in the core, or a projection that is behind the name
+/// tables. Also the reference for the projected counts under the incremental check.
+fn loaded_counts(c: &Connection) -> Result<Json> {
+    let active:HashSet<_>=strings(c,"SELECT entity FROM memberships UNION SELECT entity FROM candidates UNION SELECT parent_id FROM entities WHERE id IN (SELECT entity FROM memberships UNION SELECT entity FROM candidates) AND parent_id IS NOT NULL",&[])?.into_iter().collect();
+    let view = crate::names_view::View::load_with_work(c)?;
+    let mut keys: [HashSet<String>; 3] = Default::default();
+    for e in view.identities() {
+        if e.merged_into.is_some()
+            || matches!(e.kind, "oc" | "work")
+            || e.original
+            || !e.linked
+            || !active.contains(e.id)
+        {
+            continue;
+        }
+        if e.parent.is_none() {
+            keys[0].insert(e.tag.into());
+        }
+        for (i, s) in [(1, e.work), (2, e.variant)] {
+            if !s.is_empty() {
+                keys[i].insert(s.into());
+            }
+        }
+    }
+    let mut counts = Json::Object(Vec::new());
+    for (i, (plural, kind)) in KINDS.into_iter().enumerate() {
+        let mut zh = 0;
+        let mut ja = 0;
+        let mut readable = 0;
+        for key in &keys[i] {
+            let choice = view.choose(kind, key)?;
+            zh += i64::from(choice.names.first().and_then(|x| x.as_ref()).is_some_and(|s| !s.is_empty()));
+            ja += i64::from(choice.names.get(1).and_then(|x| x.as_ref()).is_some_and(|s| !s.is_empty()));
+            readable += i64::from(choice.source == "readable");
+        }
+        counts.set(plural, count_json(keys[i].len() as i64, zh, ja, readable));
+    }
+    Ok(counts)
 }
 fn accounts(context: &LibraryContext) -> Result<Json> {
     let mut out = crate::app_accounts::status()?;
@@ -180,4 +234,81 @@ fn accounts(context: &LibraryContext) -> Result<Json> {
         .unwrap_or_else(|| None::<String>.into());
     out.set("library", name);
     Ok(out)
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Read;
+
+    /// The name updater's synthetic base library plus every identity shape the counts filter on.
+    fn library() -> (std::path::PathBuf, Connection) {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/names/base.json.gz");
+        let mut text = String::new();
+        flate2::read::GzDecoder::new(std::fs::File::open(path).unwrap()).read_to_string(&mut text).unwrap();
+        let data: serde_json::Value = serde_json::from_str(&text).unwrap();
+        let root = std::env::temp_dir().join(format!(
+            "illustash-local-names-{}-{}",
+            std::process::id(),
+            crate::store::new_key().unwrap()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let mut c = Connection::open(root.join("library.sqlite")).unwrap();
+        c.execute_batch("PRAGMA foreign_keys=OFF").unwrap();
+        c.execute_batch(&data["base"]["library"].as_str().unwrap().replace("@ROOT@", &root.to_string_lossy())).unwrap();
+        let tx = c.transaction().unwrap();
+        crate::schema::begin_writing(&tx).unwrap();
+        tx.execute_batch(
+            "INSERT INTO entities(id,name,work,variant,parent_id,merged_into,kind,original) VALUES
+              ('tagless','','Example','',NULL,NULL,'character',0),('hidden','','Other','',NULL,NULL,'character',0),
+              ('skin1','','Example','swimsuit','tagless',NULL,'skin',0),('skin2','','','outfit_x','tagless',NULL,'skin',0),
+              ('merged','','Example','',NULL,'tagless','character',0),('own','','Mine','',NULL,NULL,'character',1),
+              ('loose','','Loose','',NULL,NULL,'character',0),('idle','','Idle','',NULL,NULL,'character',0);
+             INSERT INTO links(system,key,entity_id,current,source,added_at) VALUES
+              ('bangumi','tagless','tagless',1,'import','2026-10-07 06:00:00'),
+              ('danbooru','','hidden',1,'import','2026-10-07 06:00:01'),('danbooru','hidden_tag','hidden',1,'import','2026-10-07 06:00:02'),
+              ('danbooru','swim_tag','skin1',1,'import','2026-10-07 06:00:03'),('danbooru','outfit_tag','skin2',1,'import','2026-10-07 06:00:08'),('danbooru','merged_tag','merged',1,'import','2026-10-07 06:00:04'),
+              ('danbooru','own_tag','own',1,'import','2026-10-07 06:00:05'),('danbooru','loose_tag','loose',0,'import','2026-10-07 06:00:06'),
+              ('danbooru','idle_tag','idle',1,'import','2026-10-07 06:00:07');
+             INSERT INTO names(entity_id,lang,value,source,role,preferred,position) VALUES
+              ('tagless','ja','タグナシ','index','display',0,0),('hidden','zh','隐','user','display',1,0);
+             INSERT INTO display_names VALUES ('character','','en','wiki','Empty key'),('skin','outfit_x','zh','index','外套');
+             INSERT INTO candidates VALUES ('a','tagless','WD',0.9),('a','hidden','WD',0.9),('a','skin1','WD',0.9),
+              ('a','skin2','WD',0.9),('a','merged','WD',0.9),('a','own','WD',0.9),('a','loose','WD',0.9);",
+        )
+        .unwrap();
+        crate::schema::commit_writing(tx).unwrap();
+        (root, c)
+    }
+
+    #[test]
+    fn projected_counts_match_a_whole_load() {
+        let (root, c) = library();
+        let tx = c.unchecked_transaction().unwrap();
+        assert!(crate::legacy_names::projection_current(&tx).unwrap());
+        let start = crate::names_view::whole_loads();
+        let projected = projected_counts(&tx).unwrap();
+        assert_eq!(crate::names_view::whole_loads(), start, "the projected counts load nothing library-wide");
+        assert_eq!(projected.dump(), loaded_counts(&tx).unwrap().dump());
+        // alice, bob and the unprojected ("character","") key the two tagless characters share; the OC, the merged,
+        // the unlinked and the inactive identities are left out.
+        let counts: serde_json::Value = serde_json::from_str(&projected.dump()).unwrap();
+        assert_eq!(counts["characters"]["total"], 3, "{counts}");
+        // The empty key's Chinese name comes from `hidden`, whose empty danbooru link hides its tag.
+        assert_eq!(
+            (&counts["characters"]["zh"], &counts["characters"]["readable"]),
+            (&1.into(), &2.into()),
+            "{counts}"
+        );
+        assert_eq!(counts["skins"]["total"], 2, "{counts}");
+        assert_eq!(names(&tx, false).unwrap().get("counts").unwrap().dump(), projected.dump());
+        tx.commit().unwrap();
+        // A write that bypassed the core's commit leaves the projection behind: the counts are computed afresh.
+        c.execute("UPDATE meta SET value=CAST(value AS INTEGER)+1 WHERE key='names_version'", []).unwrap();
+        assert!(!crate::legacy_names::projection_current(&c).unwrap());
+        let start = crate::names_view::whole_loads();
+        assert_eq!(names(&c, false).unwrap().get("counts").unwrap().dump(), projected.dump());
+        assert_eq!(crate::names_view::whole_loads() - start, 1);
+        drop(c);
+        std::fs::remove_dir_all(root).unwrap();
+    }
 }

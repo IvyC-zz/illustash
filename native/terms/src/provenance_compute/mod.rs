@@ -76,6 +76,16 @@ pub(crate) fn check_owner(owner_pid: u32) -> Result<()> {
     Ok(())
 }
 
+/// The run's staged copy of the machine cache (`request.cache`): a scratch directory the host imports only after the
+/// run succeeds. Transaction boundaries stay as they are; `synchronous=NORMAL` (WAL) only drops the flush on every
+/// commit, which a scratch copy lost to a crash never needed. Thousands of per-match commits otherwise each wait
+/// for a flush, past 30 s on a loaded Windows disk (#143).
+pub(crate) fn staged_cache(dir: &Path) -> Result<rusqlite::Connection> {
+    let c = crate::app_provenance::cache::connect(&dir.join("provenance.sqlite"))?;
+    c.execute_batch("PRAGMA synchronous=NORMAL")?;
+    Ok(c)
+}
+
 /// Request entry for the installed adapter and the explicit example.
 pub fn run_files(input: &Path, output: &Path) -> Result<()> {
     let request = Request::read(input)?;

@@ -14,7 +14,7 @@
 
 ## 并行运行与耗时口径
 
-`tests/run_fixed_suite.py` 默认以 CPU 核数为进程上限，按测试类分组动态领取，同一类在一个子进程内运行；`--jobs N` 指定正整数上限，`--jobs 1` 使用原串行 discover。并行模式仅接受 `-v`、`-b`，筛选等其他 unittest 参数需配合 `--jobs 1`。每组输出整段回放，父进程检查发现的测试 ID 是否漏跑或出现额外项，子进程崩溃、测试失败及退役导入尝试均使入口失败。单独调用运行器前仍须准备对应候选二进制和环境；改变进程数不构成完整验收。
+`tests/run_fixed_suite.py` 默认以 CPU 核数为进程上限，按测试类分组动态领取，同一类在一个子进程内运行；`--jobs N` 指定正整数上限，`--jobs 1` 使用原串行 discover。并行模式仅接受 `-v`、`-b`，筛选等其他 unittest 参数需配合 `--jobs 1`。每组输出整段回放，父进程检查发现的测试 ID 是否漏跑或出现额外项，子进程崩溃、测试失败及退役导入尝试均使入口失败。子进程以 `-c` 启动，先把仓库根插到 `sys.path` 最前再运行 `tests.run_fixed_suite`，并沿用父进程的 `-I`、`-X utf8`、`-W` 等解释器选项，因此不依赖解释器把 cwd 放进 `sys.path`；带 `._pth` 的嵌入式 Python（Windows 验收机）与 `-I` 一样不加 cwd、忽略 `PYTHONPATH`，父进程须同样自行插入仓库根后用 `runpy` 运行，`tests/test_run_fixed_suite.py` 以 `-I` 覆盖这一情形。单独调用运行器前仍须准备对应候选二进制和环境；改变进程数不构成完整验收。
 
 `SERIAL` 是运行器内的测试类名单：并行池结束后，名单里的类逐个单独运行，每个用例仍只执行一次，不自动重试。2026-10-13，[PR #134](https://github.com/shio-vinyl/illustash/pull/134) 修复找回画师终态与忙状态不一致、PID 文件未写完整及研究调用计数混入其他任务的问题后，名单为空（`SERIAL=frozenset()`），全部正常发现的测试类进入并行池。临时加入名单时，在对应 Issue 记录失败现象和移除条件；修复后验证并行运行并移除，不把串行结果当作竞态已修复。
 
@@ -47,7 +47,7 @@
 
 `tests/fixtures/reference_recordings/` 按测试 ID 和调用顺序取值，`native/terms/tests/fixtures/replay/` 按模块重放核心调用；改测试模块、类名、方法名或取值顺序之前先查读取方。`tests/image_expectations.py`、`index_expectations.py` 等是冻结答案的读取器，旧模块名出现在这些文件里不表示旧业务实现仍在执行。比较失败先区分输入、路径/时钟归一化、平台差异和产品行为变化；原生输出不得刷新旧答案。产品决定确需改变期望时，按架构参考的规则在对应 PR 说明。
 
-HTTP 测试共用 `tests/test_read_http.py` 的端口、等待和进程清理工具；多种原生测试借用 `tests/test_native_lifecycle.py` 的建包与宿主方法，worker 启动与进程存在性工具在 `tests/native_worker_fixture.py`。修改这些共享方法须检查实际使用它们的测试类，别只看定义文件。提取 helper 时避免把带 `test_*` 方法的 `TestCase` 作为模块级别名留给 discover；`__module__` 还可能参与固定录制的定位，移动前须核对。
+HTTP 测试共用 `tests/test_read_http.py` 的端口、等待和进程清理工具；多种原生测试借用 `tests/test_native_lifecycle.py` 的建包与宿主方法，worker 启动与进程存在性工具在 `tests/native_worker_fixture.py`。测试对宿主的 HTTP 请求统一经 `tools/verify_read_http.py` 的 `fetch`：每个请求一条短连接，读完响应后以 RST 关闭，本机不留 TIME_WAIT。逐个正常关闭时，并行全套约 1.5 万个连接会在 Windows 上耗尽默认的 16,384 个临时端口（#140）。新增大量请求或轮询时沿用 `fetch`，不要另起逐次关闭的客户端；只有验证连接本身行为（半包、卡住、慢读）的测试才自建 socket。修改这些共享方法须检查实际使用它们的测试类，别只看定义文件。提取 helper 时避免把带 `test_*` 方法的 `TestCase` 作为模块级别名留给 discover；`__module__` 还可能参与固定录制的定位，移动前须核对。
 
 ### 慢测试与时序失败
 

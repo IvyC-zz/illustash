@@ -195,6 +195,16 @@ pub fn names_in_core(c: &Connection) -> Result<bool> {
     Ok(c.query_row("SELECT EXISTS(SELECT 1 FROM meta WHERE key=?1 AND value='core')", [NAMES_IN_CORE], |r| r.get(0))?)
 }
 
+/// 显示投影与名字的兼容表一致：名字已在核心，最近一次改名字相关数据的是核心写事务，提交时维护过投影（#105）。读侧据此
+/// 直接读投影；不一致时（例如有写入绕过了 `schema::commit_writing`）调用方应改为现算。
+pub fn projection_current(c: &Connection) -> Result<bool> {
+    if !names_in_core(c)? {
+        return Ok(false);
+    }
+    let version = meta(c, "names_version")?;
+    Ok(version.is_some() && version == meta(c, PROJECTED)?)
+}
+
 fn meta(c: &Connection, key: &str) -> Result<Option<String>> {
     use rusqlite::OptionalExtension;
     Ok(c.query_row("SELECT value FROM meta WHERE key=?1", [key], |r| r.get(0)).optional()?)
@@ -207,7 +217,7 @@ fn meta(c: &Connection, key: &str) -> Result<Option<String>> {
 /// 时，把它在事务开始时的行（`names_old_entities`，`present=0` 表示原来没有）和当前链接（`names_old_links`，取过的身份
 /// 记在 `names_old_links_seen`）存下来。`INSERT OR REPLACE` 顶掉的行不会触发 DELETE 触发器，所以插入前也先存下会被
 /// 顶掉的行（按主键、`entities.external_key`、`links (system,key)`）。只改与名字无关的列（如 `entities.name`、
-/// `links.source`）不记。`names_dirty_full` 的值 1 仍表示本事务改过身份或链接（名字更新器的批快照据此丢弃快照）。
+/// `links.source`）不记。`names_dirty_full` 只剩值 2：事务开始时投影已过期，提交时整表重建。
 pub fn track(c: &Connection) -> Result<()> {
     if !names_in_core(c)? {
         return Ok(());
@@ -236,9 +246,7 @@ pub fn track(c: &Connection) -> Result<()> {
         for event in ["INSERT", "UPDATE", "DELETE"] {
             let mut body = String::new();
             if matches!(table, "entities" | "links") {
-                body.push_str(
-                    "INSERT INTO names_dirty_full SELECT 1 WHERE NOT EXISTS(SELECT 1 FROM names_dirty_full WHERE value=1);",
-                );
+                // 链接的变化由 BEFORE 触发器记下（`names_old_links_seen`），这里只记改过的身份。
                 if table == "entities" {
                     for side in ["old", "new"] {
                         if (event == "INSERT" && side == "old") || (event == "DELETE" && side == "new") {
@@ -268,6 +276,9 @@ pub fn track(c: &Connection) -> Result<()> {
                 ("links", "UPDATE") => format!(" WHEN {}", changed(&LINK_COLUMNS)),
                 _ => String::new(),
             };
+            if body.is_empty() {
+                continue;
+            }
             c.execute_batch(&format!(
                 "CREATE TEMP TRIGGER IF NOT EXISTS track_names_{table}_{event}
                 AFTER {event} ON main.{table}{when} BEGIN {body} END;"
@@ -449,12 +460,6 @@ fn mirror_aliases(c: &Connection) -> Result<()> {
 /// 每个核心写事务提交前（schema::commit_writing）：名字已在核心、且这个事务改到了名字相关的数据，就在同一事务里
 /// 补齐主数据、维护显示投影。名字行使用依赖闭包，结构变更 / 过期状态回退整表。别名每个事务只同步一次（#102 A1）。
 pub fn after_write(c: &Connection) -> Result<()> {
-    after_write_with(c, None)
-}
-
-/// 同 `after_write`；`view` 是调用方手里与这个事务此刻的库逐项相同的名字快照（名字更新器吸收了本事务写入的批快照，
-/// #102 A5a）；显示投影需要整表重建时用它，不再整库载入（只改了名字行时投影按闭包局部维护，不用快照，#103）。
-pub fn after_write_with(c: &Connection, view: Option<&crate::names_view::View>) -> Result<()> {
     if !names_in_core(c)? {
         return Ok(());
     }
@@ -473,7 +478,7 @@ pub fn after_write_with(c: &Connection, view: Option<&crate::names_view::View>) 
     } else {
         mirror(c, &mut Report::default())?;
     }
-    refresh_projection_with(c, &mut None, view)?;
+    refresh_projection(c, &mut None)?;
     c.execute(
         "INSERT OR REPLACE INTO meta(key,value) VALUES (?1,?2)",
         rusqlite::params![PROJECTED, version.unwrap_or_default()],
@@ -570,35 +575,21 @@ fn verify_projection(c: &Connection, kind: &str) -> Result<()> {
 /// 做；显示版本单独记录，提交时仍补主数据，但只在版本再次变化时重建投影。
 /// `seen`：调用方上次重建时的版本，没变就不再重建。
 pub fn refresh_projection(c: &Connection, seen: &mut Option<String>) -> Result<()> {
-    refresh_projection_with(c, seen, None)
-}
-
-fn refresh_projection_with(
-    c: &Connection,
-    seen: &mut Option<String>,
-    view: Option<&crate::names_view::View>,
-) -> Result<()> {
     let version = meta(c, "names_version")?;
     if version.is_some()
         && (version == *seen || version == meta(c, PROJECTED)? || version == meta(c, DISPLAY_PROJECTED)?)
     {
         return Ok(());
     }
-    match (tracked_master(c)?, view) {
-        (true, view) => {
-            let kind = match crate::names_view::rebuild_changed_with(c, view)? {
-                crate::names_view::Maintained::Names => "projection",
-                crate::names_view::Maintained::Structure => "projection_structure",
-                crate::names_view::Maintained::Whole => "projection_whole",
-            };
-            verify_projection(c, kind)?;
-        }
-        (false, Some(view)) => {
-            crate::names_view::rebuild_from(c, view)?;
-        }
-        (false, None) => {
-            crate::names_view::rebuild(c)?;
-        }
+    if tracked_master(c)? {
+        let kind = match crate::names_view::rebuild_changed(c)? {
+            crate::names_view::Maintained::Names => "projection",
+            crate::names_view::Maintained::Structure => "projection_structure",
+            crate::names_view::Maintained::Whole => "projection_whole",
+        };
+        verify_projection(c, kind)?;
+    } else {
+        crate::names_view::rebuild(c)?;
     }
     c.execute(
         "INSERT OR REPLACE INTO meta(key,value) VALUES (?1,?2)",
