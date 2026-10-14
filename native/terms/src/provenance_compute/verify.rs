@@ -5,7 +5,7 @@ use super::{
     local_match::{self, Library, Signature},
     write, Request,
 };
-use crate::{app_provenance::cache, research_compute::relation_image, Error};
+use crate::{research_compute::relation_image, Error};
 use rusqlite::{params, Connection, OptionalExtension};
 use serde_json::{json, Value};
 use std::{
@@ -635,7 +635,7 @@ fn popularity(
 }
 fn execute(request: &Request, seq: &mut u64) -> Result<Value> {
     let mut lib = Library::open(&request.library)?;
-    let mut c = cache::connect(&request.cache.join("provenance.sqlite"))?;
+    let mut c = super::staged_cache(&request.cache)?;
     let net = Network { request, used: std::sync::atomic::AtomicU64::new(0), gate: std::sync::Mutex::new(()) };
     let (mut processed, mut matched_artists, mut matches, mut cold) = (0usize, 0usize, 0usize, 0usize);
     let mut stopped = String::new();

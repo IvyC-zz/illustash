@@ -2,7 +2,7 @@
 //! local `illustash-iqdb --hash-only` signature program. Only signatures leave
 //! this worker; the App performs the authorized Danbooru IQDB queries.
 use super::{check_owner, groups, pixel_batch, write, Request};
-use crate::{app_provenance::cache, Error, Result};
+use crate::{Error, Result};
 use rusqlite::{params, Connection, OptionalExtension};
 use serde_json::{json, Value};
 use std::{
@@ -203,7 +203,7 @@ pub(super) fn signature_program() -> Option<PathBuf> {
 }
 
 pub(super) fn run(request: &Request, sequence: &mut u64) -> Result<Value> {
-    let c = cache::connect(&request.cache.join("provenance.sqlite"))?;
+    let c = super::staged_cache(&request.cache)?;
     let mut todo = order(request, &c)?;
     todo.truncate(PER_RUN);
     drop(c);
@@ -297,7 +297,7 @@ mod tests {
         source.execute_batch("CREATE TABLE assets(uuid,preset,source_id,src_path,in_scope,trashed,added_at);").unwrap();
         let core = Connection::open(request.library.join("library.sqlite")).unwrap();
         core.execute_batch("CREATE TABLE duplicates(grp,uuid); CREATE TABLE similar_groups(gid,uuid); CREATE TABLE entities(id,original,label_only); CREATE TABLE memberships(entity,uuid); CREATE TABLE clusters(cid,uuid);").unwrap();
-        let cache = cache::connect(&request.cache.join("provenance.sqlite")).unwrap();
+        let cache = crate::app_provenance::cache::connect(&request.cache.join("provenance.sqlite")).unwrap();
         (root, request, cache)
     }
     fn insert(request: &Request, asset: &str, preset: &str, added: &str) {

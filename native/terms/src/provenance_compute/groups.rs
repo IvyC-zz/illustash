@@ -1,6 +1,6 @@
 //! Local group recommendations. Core/source are read-only; receipt remains machine-only.
 use super::{check_owner, write, Request};
-use crate::{app_provenance::cache, Error, Result};
+use crate::{Error, Result};
 use chrono::{DateTime, Local, NaiveDateTime, TimeZone};
 use rusqlite::params;
 use serde_json::{json, Value};
@@ -92,7 +92,7 @@ pub(super) fn save_runs(request: &Request, presets: &[&str]) -> Result<Groups> {
 
 pub(super) fn run(request: &Request, sequence: &mut u64) -> Result<Value> {
     let groups = library_groups(request)?;
-    let mut c = cache::connect(&request.cache.join("provenance.sqlite"))?;
+    let mut c = super::staged_cache(&request.cache)?;
     let mut owners = BTreeMap::<String, BTreeSet<String>>::new();
     for row in c
         .prepare("SELECT asset,artist_id FROM image_artists WHERE status='auto'")?
