@@ -16,7 +16,7 @@ Core 持有连接内规则、资产、证据、人工结论、历史/撤销和�
 
 来源的「存储位置」属于平台能力，分**本地文件夹**与**云相册**。本地文件夹使用路径；云相册通过统一的枚举资产、读取原图/元数据、报告变更与不可用状态的接口接入，iCloud 照片（经 macOS Apple Photos）是第一个适配器。存储位置与 Pixiv / X / 其他「出处类型」分离：文件夹出处由用户指定；云相册按每张图片元数据确定，无法确定时为其他。现有只读适配器为 `platform_folder` / `platform_photos`；`app_folder` / `app_photos` 掌管来源归属、资产身份和差异提交。出处类型由 `origin` 统一提供（#111），没有新增云厂商或改变来源数据库结构。
 
-原生选择服务：`app_platform::choose(kind,multiple,stopping)` 接受 `folder`、`library`、`zip`、`archive`。桌面通过 `app_desktop` 共用 Pixiv 的 loopback 通道，请求 `POST /platform/choose?kind=folder&multiple=1`；启动时随机口令只给外壳和宿主，网页不接触口令。外壳在 bridge 工作线程调用 Tauri dialog 插件，文件夹支持多选；文件和图库保持单选。桥返回 `paths` 列表，不读选定目录、猜出处或记录私人路径。没有桌面通道时，CLI 网页的 macOS 使用 `osascript`，其他平台明确 Unsupported、由用户手填，不悄悄回退到另一条通道。
+原生选择服务：`app_platform::choose(kind,multiple,stopping)` 接受 `folder`、`library`、`zip`、`archive`。桌面通过 `app_desktop` 共用 Pixiv 的 loopback 通道，请求 `POST /platform/choose?kind=folder&multiple=1`；启动时随机口令只给外壳和宿主，网页不接触口令。外壳在 bridge 工作线程调用 Tauri dialog 插件，文件夹支持多选；文件和图库保持单选。桥返回 `paths` 列表，不读选定目录、猜出处或记录私人路径。桥调用失败时报「桌面 app 没有响应或拒绝请求：」加失败的那一步：桌面 app 回复的错误原文（如选择窗口的失败）、连不上本机通道、等待超时或连接中断（2026-10-15，#147）；Pixiv 账号逻辑按这个前缀识别桥失败。没有桌面通道时，CLI 网页的 macOS 使用 `osascript`，其他平台明确 Unsupported、由用户手填，不悄悄回退到另一条通道。
 
 `POST /api/libraries/choose` 默认沿用单选响应：`path`（取消为 null），文件夹成功时还有 `name` 和固定为 `other` 的中性 `preset`，保持既有表单字段兼容，绝不按目录名猜值。显式 `multiple:true` 仅适用于 `folder`，响应增加完整 `paths`（取消为空列表）；`path` 保留首项兼容，新增消费者应使用 `paths`。多来源界面由 #107 实施，本项不改 `web/static/`。CLI 建库的历史默认推断不由选择接口调用，其改动也由 #107 承接。
 

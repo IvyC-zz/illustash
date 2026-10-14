@@ -221,8 +221,8 @@ fn account_query(
         match pixiv_get(path, true, session, in_app) {
             Err(Error::Invalid(ref message))
                 if attempt < 2
-                    && ["Pixiv 请求失败", "Pixiv 窗口里的请求失败", "桌面 app 没有响应或拒绝请求"]
-                        .contains(&message.as_str()) =>
+                    && (["Pixiv 请求失败", "Pixiv 窗口里的请求失败"].contains(&message.as_str())
+                        || crate::app_desktop::unanswered(message)) =>
             {
                 std::thread::sleep(Duration::from_secs(2 * (attempt + 1)));
             }
@@ -397,7 +397,7 @@ fn action_inner(library: &Library, action: &str, body: &Json) -> Result<Json> {
                 let w = who(uid, None, true);
                 match w {
                     Err(Error::Invalid(ref msg))
-                        if (msg == "Pixiv 窗口里的请求失败" || msg == "桌面 app 没有响应或拒绝请求")
+                        if (msg == "Pixiv 窗口里的请求失败" || crate::app_desktop::unanswered(msg))
                             && s.get("loginOpen").is_some_and(crate::app_service::truthy) => {}
                     Err(e) => return Err(e),
                     Ok(mut w) => {
