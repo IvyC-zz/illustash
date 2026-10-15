@@ -28,6 +28,9 @@ def copy(source, destination):
 NOTICES = {'licenses/LICENSE': 'LICENSE', 'licenses/THIRD_PARTY.md': 'docs/THIRD_PARTY.md',
            'licenses/pocketfft/LICENSE.md': 'native/terms/vendor/pocketfft/LICENSE.md',
            'licenses/LCMS.txt': 'native/terms/licenses/LCMS.txt'}
+# Original texts of the bundled models' licenses, committed with their sources and SHA-256 (#8).
+# Every package that carries models carries them; there is no other source.
+MODEL_LICENSES = ROOT / 'packaging/model-licenses'
 # One worker binary serves all four kinds; the host passes the kind per launch (#37).
 WORKER_KINDS = ('research', 'index', 'provenance', 'recognition')
 
@@ -59,6 +62,27 @@ def launcher_environment(windows=False):
         lines.extend([f': "${{{key}:=$ROOT/bin/illustash-worker}}"', f'export {key}'])
     return '\n'.join(lines) + '\n'
 
+def model_licenses(source=None):
+    """[(installed path, file)] for the committed model notices, verified against sources.json."""
+    source = source or MODEL_LICENSES
+    registry = source / 'sources.json'
+    if not registry.is_file():
+        raise ValueError(f'model license registry missing: {registry}')
+    originals = json.loads(registry.read_text())['files']
+    for name, entry in originals.items():
+        path = source / name
+        if path.is_symlink() or not path.is_file():
+            raise ValueError(f'model license text missing: {name}')
+        if hashlib.sha256(path.read_bytes()).hexdigest() != entry['sha256']:
+            raise ValueError(f'model license text differs from its registered original: {name}')
+    expected = {'NOTICE.txt', 'sources.json', *originals}
+    present = {path.relative_to(source).as_posix() for path in source.rglob('*')
+               if not path.is_dir() and path.name != '.DS_Store'}
+    if present != expected:
+        raise ValueError(f'model license directory does not match sources.json: '
+                         f'missing {sorted(expected - present)}, unregistered {sorted(present - expected)}')
+    return [(f'resources/licenses/models/{name}', source / name) for name in sorted(expected)]
+
 def research_openblas(site):
     """Fixed DLL + complete bundled notices from an explicit site-packages holding the NumPy wheel."""
     registry = RESEARCH_OPENBLAS_IDENTITIES
@@ -80,19 +104,14 @@ def research_openblas(site):
     return candidates[0]
 
 def stage(destination, binaries, research=False, desktop=None, iqdb=None, models=None, openblas_site=None,
-          ort_dylib=None, ort_licenses=None, model_licenses=None):
+          ort_dylib=None, ort_licenses=None):
     destination = destination.resolve()
     if destination.exists():
         raise ValueError('output already exists; choose a new directory')
     if (models or openblas_site or ort_dylib or ort_licenses) and not research:
         raise ValueError('models/runtime require --research')
-    if model_licenses and not models:
-        raise ValueError('model licenses require --models')
-    model_notices = []
-    if model_licenses:
-        model_notices = [path for path in sorted(model_licenses.rglob('*')) if path.is_file() or path.is_symlink()]
-        if not model_notices:
-            raise ValueError('model license directory is empty')
+    # Checked before creating output: a package with models but without their licenses is never staged.
+    model_notices = model_licenses() if models else []
     if research and sys.platform not in ('darwin', 'win32'):
         # Linux is frozen: no computation package ships there (README).
         raise ValueError('computation packages require macOS or Windows')
@@ -127,9 +146,8 @@ def stage(destination, binaries, research=False, desktop=None, iqdb=None, models
         if models:
             for name in ('wd_swinv2_v3_emb.onnx', 'ccip/model_feat.onnx', 'ccip/model_metrics.onnx', 'ccip/metrics.json'):
                 copy(models / name, destination / 'resources/models' / name)
-            # Original model license texts are supplied by the packager, never written here.
-            for path in model_notices:
-                copy(path, destination / 'resources/licenses/models' / path.relative_to(model_licenses))
+            for installed, path in model_notices:
+                copy(path, destination / installed)
         if ort_dylib:
             library = 'onnxruntime.dll' if sys.platform == 'win32' else 'libonnxruntime.dylib'
             copy(ort_dylib, destination / 'resources/onnxruntime' / library)
@@ -181,7 +199,8 @@ def desktop_compute(source, destination):
                      'resources/models/ccip/model_feat.onnx', 'resources/models/ccip/model_metrics.onnx',
                      'resources/models/ccip/metrics.json', 'resources/openblas/openblas.dll',
                      'resources/licenses/openblas/LICENSE.txt', 'resources/onnxruntime/onnxruntime.dll',
-                     'resources/licenses/onnxruntime/LICENSE', 'resources/licenses/onnxruntime/ThirdPartyNotices.txt'):
+                     'resources/licenses/onnxruntime/LICENSE', 'resources/licenses/onnxruntime/ThirdPartyNotices.txt',
+                     *(installed for installed, _ in model_licenses())):
         if not (source / required).is_file():
             raise ValueError(f'full installer component missing: {required}')
     openblas_digest = hashlib.sha256((source / 'resources/openblas/openblas.dll').read_bytes()).hexdigest()
@@ -215,6 +234,7 @@ def macos_desktop_compute(source, destination):
         'resources/licenses/onnxruntime/LICENSE',
         'resources/licenses/onnxruntime/ThirdPartyNotices.txt',
         *(f'resources/{name}' for name in NOTICES),
+        *(installed for installed, _ in model_licenses()),
         'bin/illustash-terms', 'bin/illustash-iqdb', 'bin/illustash-worker',
         'dependencies/core-Cargo.lock', 'dependencies/iqdb-Cargo.lock',
     )
@@ -272,11 +292,10 @@ def main():
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--archive', type=Path, help='also write a sorted ZIP with fixed timestamps')
     parser.add_argument('--research', action='store_true')
-    parser.add_argument('--models', type=Path, help='explicit model directory (allowlisted WD/CCIP files only)')
+    parser.add_argument('--models', type=Path, help='explicit model directory (allowlisted WD/CCIP files only); their licenses come from packaging/model-licenses/')
     parser.add_argument('--openblas-site', type=Path, help='Windows: site-packages holding the fixed NumPy wheel (numpy.libs OpenBLAS DLL and its licenses)')
     parser.add_argument('--ort-dylib', type=Path, help='explicit existing CPU ORT dynamic library; installed under resources/onnxruntime')
     parser.add_argument('--ort-licenses', type=Path, help='directory containing this ORT distribution LICENSE and ThirdPartyNotices.txt')
-    parser.add_argument('--model-licenses', type=Path, help='with --models: directory of the models\' original license texts, copied to resources/licenses/models/')
     parser.add_argument('--profile', choices=('release', 'dev'), default='release')
     parser.add_argument('--binaries', type=Path, help='use already built release binaries')
     parser.add_argument('--iqdb', type=Path, help='built optional IQDB executable')
@@ -287,8 +306,6 @@ def main():
     args = parser.parse_args()
     if (args.models or args.openblas_site or args.ort_dylib or args.ort_licenses) and not args.research:
         parser.error('models/runtime require --research')
-    if args.model_licenses and not args.models:
-        parser.error('--model-licenses requires --models')
     if bool(args.ort_dylib) != bool(args.ort_licenses):
         parser.error('--ort-dylib and --ort-licenses must be supplied together')
     if args.desktop_compute and not (args.research and args.models and args.openblas_site
@@ -300,6 +317,11 @@ def main():
     for destination in (args.output, args.archive, args.desktop_resources, args.desktop_compute, args.macos_desktop_compute):
         if destination is not None and destination.exists():
             parser.error(f'output already exists: {destination}; choose a fresh path')
+    if args.models:
+        try:
+            model_licenses()
+        except ValueError as error:
+            parser.error(str(error))
     binaries = args.binaries
     if binaries is None:
         subprocess.run(['cargo', 'build', '--locked', '--profile', args.profile, '--manifest-path', str(ROOT / 'native/terms/Cargo.toml'), '--bins'], check=True, cwd=ROOT)
@@ -307,7 +329,7 @@ def main():
     if args.research and args.iqdb is None:
         subprocess.run(['cargo', 'build', '--locked', '--release', '--manifest-path', str(ROOT / 'crates/iqdb/Cargo.toml')], check=True, cwd=ROOT)
     stage(args.output, binaries, args.research, args.desktop, args.iqdb, args.models, args.openblas_site,
-          args.ort_dylib, args.ort_licenses, args.model_licenses)
+          args.ort_dylib, args.ort_licenses)
     if args.desktop_compute:
         desktop_compute(args.output, args.desktop_compute)
     if args.macos_desktop_compute:

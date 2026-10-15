@@ -206,7 +206,8 @@ class DesktopComputeStagingTest(unittest.TestCase):
                      'resources/tags/tags_v3.csv', 'bin/illustash-worker.exe',
                      'resources/licenses/LICENSE', 'resources/licenses/THIRD_PARTY.md',
                      'dependencies/core-Cargo.lock',
-                     'bin/illustash-desktop.exe', 'private/library.sqlite']
+                     'bin/illustash-desktop.exe', 'private/library.sqlite',
+                     *(installed for installed, _ in build.model_licenses())]
             for name in names:
                 path = source / name; path.parent.mkdir(parents=True, exist_ok=True); path.write_bytes(b'fixture')
             with patch.object(build.sys, 'platform', 'win32'), patch.object(build, 'check_windows_crt'), patch.dict(build.RESEARCH_OPENBLAS_IDENTITIES, {hashlib.sha256(b'fixture').hexdigest(): dict(version='synthetic', numpy='synthetic')}, clear=True):
@@ -224,6 +225,11 @@ class DesktopComputeStagingTest(unittest.TestCase):
             self.assertIn('resources/models/ccip/model_feat.onnx', manifest['files'])
             for name, digest in manifest['files'].items():
                 self.assertEqual(hashlib.sha256((dest / name).read_bytes()).hexdigest(), digest)
+            # #8: a full installer without the bundled models' license texts is never staged.
+            (source / 'resources/licenses/models/ccip/BigScience-OpenRAIL-M.pdf').unlink()
+            with patch.object(build.sys, 'platform', 'win32'), self.assertRaisesRegex(ValueError, 'OpenRAIL-M.pdf'):
+                build.desktop_compute(source, root / 'no model license')
+            self.assertFalse((root / 'no model license').exists())
             (source / 'resources/onnxruntime/onnxruntime.dll').unlink()
             with patch.object(build.sys, 'platform', 'win32'), self.assertRaisesRegex(ValueError, 'onnxruntime.dll'):
                 build.desktop_compute(source, root / 'incomplete')

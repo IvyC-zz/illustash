@@ -1,0 +1,45 @@
+Bundled model notices
+
+The Illustash code is licensed under GPL-3.0-or-later (resources/licenses/LICENSE). The
+machine-learning models under resources/models/ are not covered by that
+license. Each one is distributed under its own license, reproduced in this
+directory together with the upstream model cards. The model files are
+redistributed unmodified. sources.json records where each text came from and
+its SHA-256.
+
+wd_swinv2_v3_emb.onnx
+  Model:    WD SwinV2 Tagger v3 by SmilingWolf, re-exported to ONNX with an
+            embedding output by DeepGHS.
+  File:     https://huggingface.co/deepghs/wd14_tagger_with_embeddings
+            SmilingWolf/wd-swinv2-tagger-v3/model.onnx
+            revision 4ec31f2aeabf66353f3ee3ccd20d2f07e716851b
+            SHA-256 ae25f5f12b2d5891728fb7768fa63d65bf13a83d6d4823e3a1bf7b42875c74ff
+  Origin:   https://huggingface.co/SmilingWolf/wd-swinv2-tagger-v3
+            revision 627aef95638667ddcaa3ac8ae625e88ea5b02f51
+  License:  Apache License, Version 2.0 (wd-swinv2-tagger-v3/LICENSE-2.0.txt),
+            as declared on both model cards (wd-swinv2-tagger-v3/*-README.md).
+            Neither repository ships a NOTICE file.
+
+ccip/model_feat.onnx, ccip/model_metrics.onnx, ccip/metrics.json
+  Model:    CCIP (Contrastive Anime Character Image Pre-Training) by DeepGHS,
+            variant ccip-caformer-24-randaug-pruned.
+  Files:    https://huggingface.co/deepghs/ccip_onnx
+            ccip-caformer-24-randaug-pruned/
+            revision eb2acdd29af1703388d3d0c04221add322bc9110
+            model_feat.onnx    SHA-256 4ea118d16496274f4f6e08d3afc768cc592389e8f7f32f8732ce2215c228ac5f
+            model_metrics.onnx SHA-256 7e4646fdfbe369ad485b227ec47ac4092c98b8deef3af44e19fdbd8ba7bc25c1
+            metrics.json       Git blob e1b45822bd77816a8290ffc9c90170b1c9edc478
+  Origin:   https://huggingface.co/deepghs/ccip
+            revision 8f636fb81a9f4342dfe220a16144525c2bece2a1
+  License:  Both model cards (ccip/*-README.md) declare "openrail", the
+            OpenRAIL license family, without naming a specific license text.
+            Illustash redistributes CCIP under the BigScience Open RAIL-M
+            License dated August 18, 2022 (ccip/BigScience-OpenRAIL-M.pdf, as
+            published by BigScience at
+            https://bigscience.huggingface.co/blog/bigscience-openrail-m).
+
+  Use-based restrictions: the CCIP model and its derivatives are subject to
+  paragraph 5 of that license. You may not use them for any of the purposes
+  listed in its Attachment A ("Use Restrictions"). If you redistribute the
+  model, you must pass these restrictions on to your recipients and give them
+  a copy of the license.
