@@ -1,5 +1,6 @@
 //! Existing prototypes and weak rings. Human decisions and ownership are published by Core.
 use super::{
+    discriminate,
     features::{self, Matrix},
     numeric,
     snapshot::{self, Snapshot},
@@ -164,7 +165,7 @@ pub fn signatures(c: &Connection, f: &Matrix) -> Result<BTreeMap<String, String>
     }
     Ok(hashes
         .into_iter()
-        .map(|(e, h)| (e, format!("{}{:x}", if hybrid { "identity-v2:" } else { "v3:" }, h.finalize())))
+        .map(|(e, h)| (e, format!("{}{:x}", if hybrid { "identity-v3:" } else { "v4:" }, h.finalize())))
         .collect())
 }
 
@@ -184,7 +185,14 @@ fn hex_decode(s: &str) -> Result<Vec<u8>> {
         .map(|i| u8::from_str_radix(&s[i..i + 2], 16).map_err(|_| Error::Invalid("Invalid prototype bytes".into())))
         .collect()
 }
-fn claims(f: &Matrix, uuids: &[String], protos: &[Value], anchors: &Anchors) -> Result<(Vec<Value>, Vec<Value>)> {
+/// Prototype claims plus the discriminative `strong` ones (higher score wins), and weak rings.
+fn claims(
+    f: &Matrix,
+    uuids: &[String],
+    protos: &[Value],
+    anchors: &Anchors,
+    strong: &BTreeMap<(String, String), f64>,
+) -> Result<(Vec<Value>, Vec<Value>)> {
     let (ids, rows) = f.matrix(uuids);
     let mut claims = BTreeMap::<(String, String), f64>::new();
     let mut weak = BTreeMap::<(String, String, String), f64>::new();
@@ -229,6 +237,9 @@ fn claims(f: &Matrix, uuids: &[String], protos: &[Value], anchors: &Anchors) -> 
                 }
             }
         }
+    }
+    for (key, &score) in strong {
+        claims.entry(key.clone()).and_modify(|s| *s = s.max(score)).or_insert(score);
     }
     weak.retain(|(u, e, source), _| source != "PROTO" || !claims.contains_key(&(u.clone(), e.clone())));
     Ok((
@@ -295,7 +306,8 @@ pub fn learn(
         }
     }
     let uuids = snapshot::strings(&c, "SELECT uuid FROM assets", &[])?;
-    let (claims, weak) = claims(f, &uuids, &protos, anchors)?;
+    let strong = discriminate::claims(&c, f, &marks, &artwork_groups(&c)?, &uuids)?;
+    let (claims, weak) = claims(f, &uuids, &protos, anchors, &strong)?;
     let batch = json!({"v":1,"token":token,"relearned":dirty.len(),"prototypes":protos,"learn_state":states,"proto_claims":claims,"weak_claims":weak});
     drop(c);
     let result = snapshot.publish_learning(&batch)?;
@@ -423,11 +435,11 @@ mod tests {
         let f = Matrix::new(vec!["SYNTHETIC".into()], vec![vec![cosine, (1.0 - cosine * cosine).sqrt()]], 2).unwrap();
         let encoded: String = features::bytes(&[1.0, 0.0]).iter().map(|b| format!("{b:02x}")).collect();
         let old = json!(["E", 0, encoded, threshold, 5, hint]);
-        let (strong, weak) = claims(&f, &f.uuids, &[old], &Anchors::default()).unwrap();
+        let (strong, weak) = claims(&f, &f.uuids, &[old], &Anchors::default(), &BTreeMap::new()).unwrap();
         assert!(strong.is_empty() && weak.is_empty());
         // Evidence for the old version drift stays explicit; no tolerance or golden rewrite.
         let promoted = json!(["E", 0, encoded, threshold, 5, 0.08815577626228333]);
-        let (strong, weak) = claims(&f, &f.uuids, &[promoted], &Anchors::default()).unwrap();
+        let (strong, weak) = claims(&f, &f.uuids, &[promoted], &Anchors::default(), &BTreeMap::new()).unwrap();
         assert!(strong.is_empty());
         assert_eq!(weak, vec![json!(["SYNTHETIC", "E", "PROTO", 0.9118442237377167])]);
     }
