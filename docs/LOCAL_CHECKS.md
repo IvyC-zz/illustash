@@ -1,6 +1,6 @@
 # 本地全量验收
 
-现行参考，2026-10-13。本文补充 [AGENTS.md](../AGENTS.md) 的本地验收约定；CI 覆盖及允许跳过仍以 `.github/workflows/ci.yml`、`tools/check_all.sh` 为准。
+现行参考，2026-10-15。本文补充 [AGENTS.md](../AGENTS.md) 的本地验收约定；CI 覆盖及允许跳过仍以 `.github/workflows/ci.yml`、`tools/check_all.sh` 为准。
 
 ## 开发检查与完整入口
 
@@ -85,3 +85,22 @@ python3.12 tools/local_acceptance.py result <候选SHA>
 本机私有权限密钥对记录作 HMAC 校验，完整日志也校验摘要；缺字段、失败、定向命令、签名/日志篡改、输入或环境不匹配均拒绝。该记录用于防止误改/手工修改记录后的复用；拥有本机密钥和工具源码写权限的人不是安全隔离边界。不能把记录移到另一机器或平台冒称覆盖。密钥丢失则旧记录无效，从头完整运行。
 
 PR 应明确区分“当前 head 上完整执行退出 0”和“当前候选仅验收叙述变化，复用已测 commit 的全量事实”，列出双方 commit/tree、固定路径、机器/平台/工具链、结果和跳过理由；其他平台与尚未做的 UI 验收单列。缓存收益只引用同一口径的实测时间；没有实测就不写提速数字。
+
+## macOS 实机测试（虚拟机）
+
+2026-10-15 起，在 Mac 上启动 App 的实机测试都在 [Tart](https://tart.run) 虚拟机里做（用户决定见 [AGENTS.md](../AGENTS.md)）。虚拟机有自己的用户目录、应用数据和钥匙串，碰不到本机正式版的数据；本机只被占用磁盘，以及运行时的 CPU 和内存。
+
+**母版与副本**：本机保留一台母版 `illustash-master`，来自 `ghcr.io/cirruslabs/macos-tahoe-base`（macOS 26），约 30 GB。镜像默认关闭 SIP，母版已在恢复模式里用 `csrutil enable` 打开 SIP；Gatekeeper 保持开启，母版里从没装过 Illustash。每次测试用 `tart clone illustash-master <名字>` 复制一份（APFS 写时复制，几乎不占额外空间），测完 `tart stop` 后 `tart delete` 删掉副本。母版只在用户明确同意时才修改或删除。镜像下载约 27 GB，大文件不经本机代理下载。
+
+**启动与操作**：
+- 启动用 `tart run --no-graphics --vnc-experimental [--dir=名字:路径:ro] <副本>`。不加 `--no-graphics` 时，tart 会在本机打开「屏幕共享」并占住 VNC 连接。VNC 只在测试期间开着，监听所有网卡，用的是随机口令。
+- 截图、点击、输入走 VNC，不需要虚拟机里的系统授权。命令走 `tart exec`：它用的是虚拟化通道，不依赖网络，以当前登录的用户身份运行。`tart exec` 第一次访问「下载」或管理用户时，虚拟机里会弹出授权框，要用 VNC 点允许。
+- VNC 下滚轮和 Cmd 组合键不可靠：滚动靠拖滚动条，退出等操作走菜单栏；在原生文件选择器里直接输入 `/`，就能打开「前往文件夹」。
+
+**验收用法**：
+- 新用户首次安装：用 `sysadminctl -addUser` 建一个标准用户，再用 `sysadminctl -autologin set` 设为自动登录；重启后走完系统设置向导，之后的步骤都在这个账户里做。
+- Gatekeeper：要让 App 像从网上下载的一样，就在虚拟机里用 `python3 -m http.server --bind 127.0.0.1` 提供 zip，再用 Safari 下载。这样文件会带上 Safari 的隔离标记；直接拷进虚拟机的文件没有这个标记。
+- 断网：在虚拟机里用 `networksetup -setnetworkserviceenabled Ethernet off` 关掉唯一的网络服务（需要管理员权限）。这时 `scutil --nwi` 显示 Not Reachable，DNS 解析失败，等同拔掉网线；恢复时把 `off` 改成 `on`。
+- 验收结果按平台写在 Issue 或 PR 里，注明这是虚拟机，以及构建的提交和安装包的哈希。
+
+**做不了的**：iCloud 照片（虚拟机没登录 Apple 账户）；性能和识别速度（虚拟机里的数字没有参考价值）；Windows（Apple 芯片上只能跑 ARM 版 Windows，和用户的 x64 环境不同，Windows 仍在 x64 验收机上做）。
