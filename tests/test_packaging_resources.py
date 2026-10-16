@@ -244,6 +244,71 @@ class PackagingResourcesTest(unittest.TestCase):
                     pack.stage(output, self.binaries, research=True, iqdb=self.iqdb, models=self.models)
                 self.assertFalse(output.exists())
 
+    def test_rust_licenses_cover_every_locked_crate_and_ship(self):
+        """#161: fails whenever a Cargo.lock changes without rerunning tools/gen_rust_licenses.py."""
+        text = pack.rust_licenses()
+        self.assertEqual(pack.NOTICES['licenses/rust-dependencies.txt'], text.relative_to(ROOT).as_posix())
+        registry = json.loads((pack.RUST_LICENSES / 'crates.json').read_text())
+        self.assertEqual(registry['generator'], 'cargo-about 0.9.2')
+        # The shipped index lists exactly the crates with texts, each with at least one text number.
+        body = text.read_text(encoding='utf-8')
+        listed = re.findall(r'^(\S+ \S+) \(.+\): \[\d+\]', body.split('\nLicense texts\n')[0], re.M)
+        self.assertEqual(sorted(listed), sorted({name for entry in registry['workspaces'].values()
+                                                 for name in entry['crates']}))
+        self.assertIn('tiny_http 0.12.0', listed)  # vendored path dependency
+        self.assertFalse(any(name.startswith('illustash-') for name in listed))
+        for packaged in ('base', 'research'):
+            output = self.root / packaged
+            pack.stage(output, self.binaries, research=packaged == 'research', iqdb=self.iqdb)
+            self.assertEqual(self.manifest(output)['files']['resources/licenses/rust-dependencies.txt'],
+                             hashlib.sha256(text.read_bytes()).hexdigest())
+        pack.resources(self.root / 'desktop-resources')
+        self.assertEqual((self.root / 'desktop-resources/licenses/rust-dependencies.txt').read_bytes(), text.read_bytes())
+
+    def test_lock_file_parsing_keeps_vendored_and_drops_own_crates(self):
+        lock = self.root / 'Cargo.lock'
+        lock.write_text('# generated\nversion = 4\n\n[[package]]\nname = "illustash-core"\nversion = "0.1.0"\n'
+                        'dependencies = [\n "serde",\n]\n\n[[package]]\nname = "serde"\nversion = "1.0.1"\n'
+                        'source = "registry+https://github.com/rust-lang/crates.io-index"\nchecksum = "00"\n\n'
+                        '[[package]]\nname = "tiny_http"\nversion = "0.12.0"\n\n'
+                        '[[patch.unused]]\nname = "unused"\nversion = "9.9.9"\n'.replace('\n', '\r\n'))
+        self.assertEqual(pack.third_party_crates(lock), {'serde 1.0.1', 'tiny_http 0.12.0'})
+
+    def test_stale_rust_licenses_refuse_packaging(self):
+        def lock_root(name, workspace, change):
+            root = self.root / name
+            for each in pack.RUST_WORKSPACES:
+                (root / each).mkdir(parents=True)
+                shutil.copy2(ROOT / each / 'Cargo.lock', root / each / 'Cargo.lock')
+            lock = root / workspace / 'Cargo.lock'
+            lock.write_text(change(lock.read_text()))
+            return root
+        added = '\n[[package]]\nname = "zzz-new"\nversion = "1.0.0"\nsource = "registry+https://github.com/rust-lang/crates.io-index"\n'
+        cases = {
+            'added': ('desktop', lambda text: text + added, r"desktop/Cargo.lock: unlisted \['zzz-new 1.0.0'\]"),
+            'bumped': ('crates/iqdb', lambda text: text.replace('name = "ring"\nversion = "0.17.14"', 'name = "ring"\nversion = "0.17.15"'),
+                       r"unlisted \['ring 0.17.15'\], no longer locked \['ring 0.17.14'\]"),
+            'removed': ('native/terms', lambda text: text.replace('name = "zlib-rs"', 'name = "illustash-zlib-rs"'),
+                        r"no longer locked \['zlib-rs 0.6.8'\]"),
+        }
+        for name, (workspace, change, message) in cases.items():
+            with self.subTest(name), self.assertRaisesRegex(ValueError, message + '.*gen_rust_licenses'):
+                pack.rust_licenses(root=lock_root(name, workspace, change))
+        def broken(name, change):
+            source = self.root / name
+            shutil.copytree(pack.RUST_LICENSES, source)
+            change(source)
+            return source
+        for name, (change, message) in {
+            'edited text': (lambda s: (s / 'rust-dependencies.txt').write_bytes(b'edited'), 'differ from crates.json'),
+            'no text': (lambda s: (s / 'rust-dependencies.txt').unlink(), 'texts missing'),
+        }.items():
+            with self.subTest(name), patch.object(pack, 'RUST_LICENSES', broken(name, change)):
+                output = self.root / f'out {name}'
+                with self.assertRaisesRegex(ValueError, message):
+                    pack.stage(output, self.binaries)
+                self.assertFalse(output.exists())
+
     def test_full_installers_ship_resources_once(self):
         """#37: full installers use compute/resources only; the base installer keeps resources/."""
         def mapping(name):
@@ -391,6 +456,14 @@ class MacDesktopResourcesTest(unittest.TestCase):
                 pack.macos_desktop_compute(source, self.root / 'lost-resource')
             self.assertFalse((self.root / 'lost-resource').exists())
             lost.write_bytes(saved)
+            # #161: the Rust crates' license texts are a required component too.
+            rust = source / 'resources/licenses/rust-dependencies.txt'
+            saved = rust.read_bytes()
+            rust.unlink()
+            with self.assertRaisesRegex(ValueError, 'missing or unmanifested: resources/licenses/rust-dependencies.txt'):
+                pack.macos_desktop_compute(source, self.root / 'no rust licenses')
+            self.assertFalse((self.root / 'no rust licenses').exists())
+            rust.write_bytes(saved)
             runtime = source / 'resources/onnxruntime/libonnxruntime.dylib'
             runtime.write_bytes(b'changed after staging')
             with self.assertRaisesRegex(ValueError, 'does not match manifest'):
