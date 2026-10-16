@@ -38,8 +38,13 @@ ccip/model_feat.onnx, ccip/model_metrics.onnx, ccip/metrics.json
             published by BigScience at
             https://bigscience.huggingface.co/blog/bigscience-openrail-m).
 
-  Use-based restrictions: the CCIP model and its derivatives are subject to
-  paragraph 5 of that license. You may not use them for any of the purposes
-  listed in its Attachment A ("Use Restrictions"). If you redistribute the
-  model, you must pass these restrictions on to your recipients and give them
+  Terms for CCIP: the CCIP model files above are licensed to you under the
+  BigScience Open RAIL-M License, and these terms govern your use and
+  distribution of them. The model and its derivatives are subject to
+  paragraph 5 of that license: the use-based restrictions in its Attachment A
+  ("Use Restrictions") are an enforceable part of these terms, and you may not
+  use the model or its derivatives for any purpose listed there. If you
+  distribute the model or a derivative, you must include these restrictions as
+  an enforceable provision in the agreement under which you distribute it,
+  give your recipients notice that it is subject to paragraph 5, and give them
   a copy of the license.
