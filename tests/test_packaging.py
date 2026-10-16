@@ -204,7 +204,7 @@ class DesktopComputeStagingTest(unittest.TestCase):
                      'resources/models/ccip/metrics.json', 'resources/openblas/openblas.dll',
                      'resources/licenses/openblas/LICENSE.txt', 'resources/web/static/index.html',
                      'resources/tags/tags_v3.csv', 'bin/illustash-worker.exe',
-                     'resources/licenses/LICENSE', 'resources/licenses/THIRD_PARTY.md',
+                     *(f'resources/{name}' for name in build.NOTICES),
                      'dependencies/core-Cargo.lock',
                      'bin/illustash-desktop.exe', 'private/library.sqlite',
                      *(installed for installed, _ in build.model_licenses())]
@@ -230,6 +230,13 @@ class DesktopComputeStagingTest(unittest.TestCase):
             with patch.object(build.sys, 'platform', 'win32'), self.assertRaisesRegex(ValueError, 'OpenRAIL-M.pdf'):
                 build.desktop_compute(source, root / 'no model license')
             self.assertFalse((root / 'no model license').exists())
+            # #161: nor one without the Rust crates' license texts.
+            rust = source / 'resources/licenses/rust-dependencies.txt'
+            rust.rename(root / 'rust-dependencies.txt')
+            with patch.object(build.sys, 'platform', 'win32'), self.assertRaisesRegex(ValueError, 'rust-dependencies.txt'):
+                build.desktop_compute(source, root / 'no rust licenses')
+            self.assertFalse((root / 'no rust licenses').exists())
+            (root / 'rust-dependencies.txt').rename(rust)
             (source / 'resources/onnxruntime/onnxruntime.dll').unlink()
             with patch.object(build.sys, 'platform', 'win32'), self.assertRaisesRegex(ValueError, 'onnxruntime.dll'):
                 build.desktop_compute(source, root / 'incomplete')
