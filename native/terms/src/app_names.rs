@@ -352,6 +352,16 @@ fn job_scope(rows: &[Entity], kind: &str, key: &str, work: &str) -> Vec<Entity> 
         .cloned()
         .collect()
 }
+/// A name query held back for want of consent: the task waits for it rather than failing.
+fn unauthorized(e: &Error) -> bool {
+    matches!(e, Error::Network(m) if m == net::UNAUTHORIZED)
+}
+/// Keep the first real failure; a missing consent only stands when nothing else went wrong.
+fn keep(first: &mut Option<Error>, e: Error) {
+    if first.as_ref().is_none_or(|f| unauthorized(f) && !unauthorized(&e)) {
+        *first = Some(e);
+    }
+}
 fn run(source: &mut Source, entity: Option<&str>, state: &Mutex<Value>) -> Result<()> {
     let mut c = net::db(&source.path)?;
     let rows = scope(&c, entity)?;
@@ -441,7 +451,7 @@ fn run(source: &mut Source, entity: Option<&str>, state: &Mutex<Value>) -> Resul
             if source.cancel.load(Ordering::SeqCst) {
                 return Err(e);
             }
-            first_error.get_or_insert(e);
+            keep(&mut first_error, e);
         }
         state.lock().expect("app_names mutex poisoned")["done"] = json!(i + 1);
     }
@@ -615,7 +625,10 @@ impl Updater {
             Ok(p) if !p.is_empty() => p,
             _ => return,
         };
-        if Instant::now() < self.retry {
+        // Requests left waiting for consent run again once it is granted, not on every retry tick.
+        let waiting = self.state.lock().expect("app_names mutex poisoned")["status"] == "unauthorized"
+            && !(self.cli || self.grant.load(Ordering::SeqCst));
+        if waiting || Instant::now() < self.retry {
             pending.retain(|(id, _)| *id > self.last_seen);
         }
         if pending.is_empty() {
@@ -635,7 +648,7 @@ impl Updater {
         self.thread = Some(crate::app_tasks::Task::start(identity, None, move |ctx| {
             ctx.receive(ctx.identity(), || {
                 let mut completed = BTreeSet::new();
-                let mut final_error = None;
+                let (mut final_error, mut waiting) = (None, false);
                 for (id, kind) in pending {
                     if ctx.check().is_err() || net::check(&cancel).is_err() {
                         break;
@@ -668,6 +681,11 @@ impl Updater {
                     let mut s = state.lock().expect("app_names mutex poisoned");
                     match result {
                         Ok(()) => s["status"] = json!("done"),
+                        // Stays pending: granting consent retries it, and nothing went wrong meanwhile.
+                        Err(e) if unauthorized(&e) => {
+                            s["status"] = json!("unauthorized");
+                            waiting = true;
+                        }
                         Err(e) => {
                             s["status"] = json!("error");
                             let message = match e {
@@ -685,10 +703,12 @@ impl Updater {
                         }
                     }
                 }
+                let mut s = state.lock().expect("app_names mutex poisoned");
                 if let Some(error) = final_error {
-                    let mut s = state.lock().expect("app_names mutex poisoned");
                     s["status"] = json!("error");
                     s["error"] = json!(error);
+                } else if waiting {
+                    s["status"] = json!("unauthorized");
                 }
                 Ok(())
             })
@@ -1822,6 +1842,32 @@ mod sources_tests {
         p.set(|a| a.down = false);
         lib.run(&p, None, false).unwrap();
         assert_eq!(lib.char("alice").name, "爱丽丝");
+    }
+
+    #[test]
+    fn missing_consent_waits_without_requests_and_is_not_a_failure() {
+        let (p, lib) = (Providers::start(), Library::load());
+        let mut source = Source::new(lib.root.join("library.sqlite"), Arc::new(AtomicBool::new(false)), false, false)
+            .unwrap()
+            // Loopback providers count as local; a remote address is what consent guards.
+            .with_bases("https://names.invalid", "https://names.invalid")
+            .granted(Arc::new(AtomicBool::new(false)));
+        let e = run(&mut source, None, &Mutex::new(json!({}))).unwrap_err();
+        assert!(unauthorized(&e), "{e:?}");
+        assert!(p.calls().is_empty());
+        lib.run(&p, None, false).unwrap();
+        assert_eq!(lib.char("alice").name, "爱丽丝");
+    }
+
+    #[test]
+    fn a_real_failure_outranks_missing_consent() {
+        let waiting = || Error::Network(net::UNAUTHORIZED.into());
+        let mut first = None;
+        keep(&mut first, waiting());
+        assert!(first.as_ref().is_some_and(unauthorized));
+        keep(&mut first, Error::Network("请求超时".into()));
+        keep(&mut first, waiting());
+        assert!(matches!(&first, Some(Error::Network(m)) if m == "请求超时"));
     }
 
     #[test]

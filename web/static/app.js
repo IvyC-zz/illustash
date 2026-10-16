@@ -2555,7 +2555,7 @@ async function pollIndex() {
 // Chinese / Japanese names fetched from Bangumi (text queries only); a configured model API is an opt-in last resort.
 let namesTimer = 0;
 const NAMES_ACTIVE = ['fetching', 'matching', 'translating', 'running'];
-const namesLine = s => s.status === 'off' ? '当前未启用' : NAMES_ACTIVE.includes(s.status) ? `正在获取 ${s.total ? `${number(s.done || 0)} / ${number(s.total)}` : '…'}` : s.status === 'error' ? '获取失败，将在下次启动时重试' : '已是最新';
+const namesLine = s => s.status === 'off' ? '当前未启用' : NAMES_ACTIVE.includes(s.status) ? `正在获取 ${s.total ? `${number(s.done || 0)} / ${number(s.total)}` : '…'}` : s.status === 'error' ? '获取失败，将在下次启动时重试' : s.status === 'unauthorized' ? '未允许联网查询，先显示本机已有的名称；可在「设置 › 网络与隐私」里允许' : '已是最新';
 async function renderNamesCard(fresh = true) {
   const route = state.route, token = state.token;
   if (!$('namesCard') || state.route.page !== 'settings') return;
@@ -2567,7 +2567,7 @@ async function renderNamesCard(fresh = true) {
   const row = (t, c) => c ? `<tr><td>${t}</td><td>${number(c.total)}</td><td>${number(c.zh || 0)}</td><td>${number(c.ja || 0)}</td><td>${number(c.readable || 0)}</td></tr>` : '';
   const cc = x.counts?.characters;
   card.innerHTML = cardHead('角色名称', '从 Bangumi 取角色的中文名，只发送 tag 和作品名。没有中文名时显示日文名，再没有就显示英文名；原始 tag 在悬停提示里。', 'library') + `
-    ${taskLink(namesLine(s) + (s.error ? '：' + s.error : ''), active ? 'busy' : s.status === 'error' ? 'warn' : s.status === 'off' ? 'off' : '')}
+    ${taskLink(namesLine(s) + (s.error ? '：' + s.error : ''), active ? 'busy' : s.status === 'error' ? 'warn' : ['off', 'unauthorized'].includes(s.status) ? 'off' : '')}
     ${startupSwitch('names', '启动时获取', '只查新增的角色')}
     ${x.counts ? fold('namesStats', `覆盖率${active ? '（完成后更新）' : ''}${cc ? `：${Math.round(cc.zh / Math.max(1, cc.total) * 100)}% 的角色有中文名` : ''}`, `<table class="settings-table"><tr><th></th><th>共</th><th>中文名</th><th>日文名</th><th>英文名</th></tr>${row('角色', x.counts.characters)}${row('作品', x.counts.works)}${row('皮肤', x.counts.skins)}</table>`) : ''}`;
   wireFolds(card);
