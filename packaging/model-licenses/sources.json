@@ -1,0 +1,29 @@
+{
+  "format": 1,
+  "files": {
+    "ccip/BigScience-OpenRAIL-M.pdf": {
+      "sha256": "4db909595010d4812aa587b54e4242348801be4fe459d9d34fa3a3570d8b0969",
+      "source": "https://drive.google.com/file/d/16NqKiAkzyZ55NClubCIFup8pT2jnyVIo (linked from https://bigscience.huggingface.co/blog/bigscience-openrail-m)"
+    },
+    "ccip/deepghs-ccip-README.md": {
+      "sha256": "30662c6ce13039d7c55d484319ab48823adbc1eafbb9338d29cfe8f7f9ca34c3",
+      "source": "https://huggingface.co/deepghs/ccip/raw/8f636fb81a9f4342dfe220a16144525c2bece2a1/README.md"
+    },
+    "ccip/deepghs-ccip_onnx-README.md": {
+      "sha256": "0832843d0238f1a08f71f9bcffaa95c338cba33079fcc1d26f83d80f45e24e58",
+      "source": "https://huggingface.co/deepghs/ccip_onnx/raw/eb2acdd29af1703388d3d0c04221add322bc9110/README.md"
+    },
+    "wd-swinv2-tagger-v3/LICENSE-2.0.txt": {
+      "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+      "source": "https://www.apache.org/licenses/LICENSE-2.0.txt"
+    },
+    "wd-swinv2-tagger-v3/SmilingWolf-wd-swinv2-tagger-v3-README.md": {
+      "sha256": "6df0944e7c4794933e0a1a593bc392807ed9bf6c71be1408755ca7be588e9fb9",
+      "source": "https://huggingface.co/SmilingWolf/wd-swinv2-tagger-v3/raw/627aef95638667ddcaa3ac8ae625e88ea5b02f51/README.md"
+    },
+    "wd-swinv2-tagger-v3/deepghs-wd14_tagger_with_embeddings-README.md": {
+      "sha256": "2d3779a45ced25571d7d261010a1ba360beca596c95d2f3a4d59f1829cd8c92d",
+      "source": "https://huggingface.co/deepghs/wd14_tagger_with_embeddings/raw/4ec31f2aeabf66353f3ee3ccd20d2f07e716851b/README.md"
+    }
+  }
+}

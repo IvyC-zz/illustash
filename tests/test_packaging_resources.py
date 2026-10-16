@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -99,7 +100,8 @@ class PackagingResourcesTest(unittest.TestCase):
         delta = complete['files'].keys() - plain['files'].keys()
         self.assertEqual({name for name in delta if name.startswith('resources/')}, {
             'resources/models/wd_swinv2_v3_emb.onnx', 'resources/models/ccip/model_feat.onnx',
-            'resources/models/ccip/model_metrics.onnx', 'resources/models/ccip/metrics.json'})
+            'resources/models/ccip/model_metrics.onnx', 'resources/models/ccip/metrics.json',
+            *(installed for installed, _ in pack.model_licenses())})
         suffix = '.exe' if os.name == 'nt' else ''
         self.assertEqual({name for name in delta if name.startswith('bin/')}, {
             f'bin/illustash-{name}{suffix}' for name in ('worker', 'iqdb')})
@@ -197,27 +199,50 @@ class PackagingResourcesTest(unittest.TestCase):
                        iqdb=self.iqdb, ort_dylib=runtime, ort_licenses=notices)
         self.assertFalse((self.root / 'incomplete-notices/manifest.json').exists())
 
-    def test_model_licenses_are_copied_verbatim_only_with_models(self):
-        notices = self.root / 'model notices'
-        (notices / 'ccip').mkdir(parents=True)
-        (notices / 'wd').mkdir()
-        (notices / 'ccip/LICENSE').write_bytes(b'synthetic CCIP license text')
-        (notices / 'wd/LICENSE').write_bytes(b'synthetic WD license text')
-        output = self.root / 'with model notices'
-        pack.stage(output, self.binaries, research=True, iqdb=self.iqdb, models=self.models, model_licenses=notices)
+    def test_model_licenses_ship_verbatim_with_models(self):
+        """#8: packages with models carry the committed license originals; nothing else is a source."""
+        registry = json.loads((pack.MODEL_LICENSES / 'sources.json').read_text())['files']
+        self.assertEqual(sorted(registry), ['ccip/BigScience-OpenRAIL-M.pdf', 'ccip/deepghs-ccip-README.md',
+                                            'ccip/deepghs-ccip_onnx-README.md', 'wd-swinv2-tagger-v3/LICENSE-2.0.txt',
+                                            'wd-swinv2-tagger-v3/SmilingWolf-wd-swinv2-tagger-v3-README.md',
+                                            'wd-swinv2-tagger-v3/deepghs-wd14_tagger_with_embeddings-README.md'])
+        notice = (pack.MODEL_LICENSES / 'NOTICE.txt').read_text()
+        # The notice names every bundled model file and the license text that covers it.
+        for name in ('wd_swinv2_v3_emb.onnx', 'model_feat.onnx', 'model_metrics.onnx', 'metrics.json',
+                     'wd-swinv2-tagger-v3/LICENSE-2.0.txt', 'ccip/BigScience-OpenRAIL-M.pdf'):
+            self.assertIn(name, notice)
+        output = self.root / 'with models'
+        pack.stage(output, self.binaries, research=True, iqdb=self.iqdb, models=self.models)
         manifest = self.manifest(output)
-        for name in ('ccip/LICENSE', 'wd/LICENSE'):
-            self.assertEqual((output / 'resources/licenses/models' / name).read_bytes(), (notices / name).read_bytes())
-            self.assertIn('resources/licenses/models/' + name, manifest['files'])
-        with self.assertRaisesRegex(ValueError, 'require --models'):
-            pack.stage(self.root / 'no models', self.binaries, research=True, iqdb=self.iqdb, model_licenses=notices)
-        self.assertFalse((self.root / 'no models').exists())
-        empty = self.root / 'empty notices'
-        empty.mkdir()
-        with self.assertRaisesRegex(ValueError, 'empty'):
-            pack.stage(self.root / 'empty', self.binaries, research=True, iqdb=self.iqdb, models=self.models,
-                       model_licenses=empty)
-        self.assertFalse((self.root / 'empty').exists())
+        shipped = sorted(name for name in manifest['files'] if name.startswith('resources/licenses/models/'))
+        self.assertEqual(shipped, sorted(f'resources/licenses/models/{name}'
+                                         for name in ('NOTICE.txt', 'sources.json', *registry)))
+        for name in shipped:
+            source = pack.MODEL_LICENSES / name.removeprefix('resources/licenses/models/')
+            self.assertEqual((output / name).read_bytes(), source.read_bytes())
+        without = self.root / 'without models'
+        pack.stage(without, self.binaries, research=True, iqdb=self.iqdb)
+        self.assertFalse((without / 'resources/licenses/models').exists())
+
+    def test_packages_with_models_refuse_incomplete_model_licenses(self):
+        def broken(name, change):
+            source = self.root / name
+            shutil.copytree(pack.MODEL_LICENSES, source)
+            change(source)
+            return source
+        cases = {
+            'missing': (lambda s: (s / 'ccip/BigScience-OpenRAIL-M.pdf').unlink(), 'missing: ccip/BigScience'),
+            'altered': (lambda s: (s / 'wd-swinv2-tagger-v3/LICENSE-2.0.txt').write_bytes(b'edited'), 'differs'),
+            'no notice': (lambda s: (s / 'NOTICE.txt').unlink(), "missing \\['NOTICE.txt'\\]"),
+            'unregistered': (lambda s: (s / 'ccip/extra.txt').write_bytes(b'x'), 'unregistered'),
+            'no registry': (lambda s: (s / 'sources.json').unlink(), 'registry missing'),
+        }
+        for name, (change, message) in cases.items():
+            with self.subTest(name), patch.object(pack, 'MODEL_LICENSES', broken(name, change)):
+                output = self.root / f'out {name}'
+                with self.assertRaisesRegex(ValueError, message):
+                    pack.stage(output, self.binaries, research=True, iqdb=self.iqdb, models=self.models)
+                self.assertFalse(output.exists())
 
     def test_full_installers_ship_resources_once(self):
         """#37: full installers use compute/resources only; the base installer keeps resources/."""

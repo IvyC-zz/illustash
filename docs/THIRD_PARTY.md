@@ -1,6 +1,6 @@
 # 第三方组件与许可
 
-状态：现行参考，2026-10-06。本项目代码以 GPL-3.0-or-later 发布（见仓库根目录 `LICENSE`）；本文列出随代码或安装包分发的第三方组件及其许可。模型与数据不受本项目代码许可约束，按各自许可使用。Illustash 名称与图标不随代码授权。
+状态：现行参考，2026-10-16。本项目代码以 GPL-3.0-or-later 发布（见仓库根目录 `LICENSE`）；本文列出随代码或安装包分发的第三方组件及其许可。模型与数据不受本项目代码许可约束，按各自许可使用。Illustash 名称与图标不随代码授权。
 
 ## Rust 依赖
 
@@ -28,12 +28,19 @@
 
 ## 模型与数据
 
-仓库不含模型。完整安装包按白名单加入以下模型；分发带模型的安装包须同时遵守各自许可，CCIP 的 OpenRAIL 许可附带使用限制，发布前须随包附上原文。打包脚本用 `--model-licenses DIR` 按原字节放进 `resources/licenses/models/`；仓库和模型目录里都没有这些原文，2026-10-13 的安装包尚未附带（#8）。
+仓库不含模型。完整安装包按白名单加入以下模型，分发时须同时遵守各自的许可。
 
-| 名称 | 来源 | 用途 | 许可 |
+| 名称 | 随包文件的来源 | 用途 | 许可 |
 |---|---|---|---|
-| WD SwinV2 Tagger v3 | [SmilingWolf/wd-swinv2-tagger-v3](https://huggingface.co/SmilingWolf/wd-swinv2-tagger-v3) | 图片标签与角色识别 | Apache-2.0 |
-| CCIP | [deepghs/ccip](https://huggingface.co/deepghs/ccip)、[deepghs/ccip_onnx](https://huggingface.co/deepghs/ccip_onnx) | 角色特征比对 | OpenRAIL |
+| WD SwinV2 Tagger v3 | [deepghs/wd14_tagger_with_embeddings](https://huggingface.co/deepghs/wd14_tagger_with_embeddings) 的 `SmilingWolf/wd-swinv2-tagger-v3/model.onnx`（DeepGHS 加了向量输出的重导出），原模型 [SmilingWolf/wd-swinv2-tagger-v3](https://huggingface.co/SmilingWolf/wd-swinv2-tagger-v3) | 图片标签与角色识别 | Apache-2.0 |
+| CCIP | [deepghs/ccip_onnx](https://huggingface.co/deepghs/ccip_onnx) 的 `ccip-caformer-24-randaug-pruned/`，原模型 [deepghs/ccip](https://huggingface.co/deepghs/ccip) | 角色特征比对 | 上游声明 OpenRAIL；随包按 BigScience Open RAIL-M 分发 |
+
+**随包的许可原文**（2026-10-16，#8）：原文提交在 `packaging/model-licenses/`，是打包的唯一来源。`sources.json` 登记每个文件的上游地址和 SHA-256。只要打包时带了模型（`--models`），就把这个目录整份按原字节放进 `resources/licenses/models/`；文件缺失、多出、内容与登记不符，打包都会报错，不会产出半成品。Windows 和 macOS 完整安装包的暂存步骤也把这些文件列为必需组件。内部测试包只要带模型，也一样附上。
+
+- WD：Apache-2.0 原文（apache.org 的 `LICENSE-2.0.txt`），加上两个上游仓库在固定 revision 下的模型卡。两个仓库都没有 NOTICE 文件。
+- CCIP：两个上游模型卡只写了 `license: openrail`。Hugging Face 对这个标识的定义是「OpenRAIL 许可家族」，没有对应的条款文本。2026-10-16 用户决定：按最通用的 BigScience Open RAIL-M（2022-08-18 版，BigScience 发布页链接的 PDF 原件）随包，同时附两份模型卡。该许可第 5 条及附件 A 的使用限制对使用者生效，再分发时必须一并传递。同日查过几个使用 CCIP 的开源项目：多数写「OpenRAIL，以模型卡为准」，不附条款原文，且运行时才下载、不随包；没有一家附了确定的条款文本。
+- `NOTICE.txt`（英文）列出每个随包模型文件的上游仓库、revision、SHA-256 和对应的许可文件，并写明 CCIP 的使用限制。
+- 更新上游许可或模型时，替换原文、改 `sources.json` 的哈希，并同步 `NOTICE.txt`。
 | Character Index | [deepghs/character_index](https://huggingface.co/datasets/deepghs/character_index) | 已有共享角色索引的来源数据；不随安装包分发，应用也不下载。新用户补充角色参考特征走「检查新角色」（Danbooru 公开图片，每次运行前确认） | MIT |
 
 应用「关于」页另列出致谢的上游项目与数据源（Danbooru、Bangumi 等）；联网获取的数据按各站点条款使用，见 [找回画师](PROVENANCE.md) 与 [界面名称](WEB_NAMES.md)。
