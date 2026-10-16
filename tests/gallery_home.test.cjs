@@ -109,3 +109,22 @@ test('opening the app lands on 首页; the library has its own hash and old quer
   c.location.hash=c.hashFor({page:'library',day:'2026-10-02'}); assert.equal(c.location.hash,'#/library?day=2026-10-02');
   assert.deepEqual([c.parseHash().page,c.parseHash().day],['library','2026-10-02']);
 });
+test('undo and a finished sync redraw the home page, whose day groups come from their own read', async () => {
+  const calls = [];
+  const c = {
+    state: {undo: {id: 7, label: '已将 1 张移出 A'}, busy: false, route: {page: 'home'}, sync: {status: 'scanning'}, focused: null, viewer: -1},
+    async post() { return {undo: null}; }, setUndo(u) { c.state.undo = u; }, toast() {}, async reload() { calls.push('reload'); },
+    async refreshMeta() {}, error() {}, readError: e => e, renderHome(keep) { calls.push(['home', keep]); },
+    renderIdentity() {}, renderGroups() {}, renderArtistAudit() {}, inspect() {}, selCount: () => 0, renderTasks() {}, guideRefresh() {},
+    SYNC_ACTIVE: ['scanning'], number: String, clearTimeout() {}, setTimeout() {}, panelPage: p => p === 'home',
+    async api() { return {state: {status: 'done', imported: 1}, history: [], damaged: null}; },
+  };
+  vm.createContext(c);
+  vm.runInContext(source.slice(source.indexOf('async function undo()'), source.indexOf('async function sweep()')) + ';this.undo = undo;', c);
+  await c.undo();
+  assert.deepEqual(calls, ['reload', ['home', true]]);
+  calls.length = 0;
+  vm.runInContext('let syncTimer = 0, syncPoll = 0, lastImported = 0;' + source.slice(source.indexOf('async function pollSync()'), source.indexOf('// ---------- new characters')) + ';this.pollSync = pollSync;', c);
+  await c.pollSync();
+  assert.deepEqual(calls, [['home', true]]);
+});

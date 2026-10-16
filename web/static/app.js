@@ -974,6 +974,7 @@ async function undo() {
   try {
     const label = state.undo.label, r = await post('/api/undo', {id: state.undo.id}); setUndo(r.undo);
     toast('已撤销 · ' + label.replace(/^已/, '')); await reload(); refreshMeta().catch(e => error(readError(e)));
+    if (state.route.page === 'home') renderHome(true);
     if (state.route.page === 'identity') renderIdentity();
     if (state.route.page === 'groups') renderGroups(true);
     if (state.route.page === 'artist-audit') renderArtistAudit();
@@ -2436,6 +2437,8 @@ async function pollSync() {
       state.countDirty = true; state.readEpoch++;
       lastImported = s.imported || 0; await refreshMeta().catch(e => error(readError(e)));
       if (!panelPage(state.route.page) && !selCount()) reload();
+      // The home page's day groups and counts are drawn from their own read; redraw them once the sync settles.
+      else if (state.route.page === 'home' && !SYNC_ACTIVE.includes(s.status)) renderHome(true);
     }
     if (SYNC_ACTIVE.includes(was) && s.status === 'done' && s.imported) toast(`同步完成：新加入 ${number(s.imported)} 张`);
     renderTasks();
@@ -3270,7 +3273,7 @@ function taskList() {
     {key: 'index', name: '检查新角色', active: INDEX_ACTIVE.includes(ix.status), line: state.index ? indexLine(ix, state.index.check) : '…', warn: ix.status === 'error',
       body: INDEX_ACTIVE.includes(ix.status) ? bar(ix.done, ix.total) : '',
       action: `<button class="quiet small" data-task="index" ${INDEX_ACTIVE.includes(ix.status) || ix.status === 'off' || !state.index?.watch?.works.length ? 'disabled' : ''} title="${state.index?.watch?.works.length ? '查关注作品在 Danbooru 上有没有新角色（只发送作品名）' : '先在资料库里关注作品'}">立即检查</button>`},
-    {key: 'names', name: '角色名称', active: NAMES_ACTIVE.includes(nm.status), line: namesLine(nm), warn: nm.status === 'error', body: NAMES_ACTIVE.includes(nm.status) ? bar(nm.done, nm.total) : '',
+    {key: 'names', name: '角色名称', active: NAMES_ACTIVE.includes(nm.status), line: namesLine(nm) + (nm.error ? '：' + nm.error : ''), warn: nm.status === 'error', body: NAMES_ACTIVE.includes(nm.status) ? bar(nm.done, nm.total) : '',
       action: `<button class="quiet small" data-task="names" ${NAMES_ACTIVE.includes(nm.status) || nm.status === 'off' || !state.names ? 'disabled' : ''} title="从 Bangumi 重新获取全部角色的中文名（只发送 tag 与作品名）">重新获取</button>`},
     {key: 'similar', name: '相似图片', active: SIMILAR_ACTIVE.includes(sim.status), line: taskSimilar(sim), warn: sim.status === 'error', body: SIMILAR_ACTIVE.includes(sim.status) ? bar(sim.done, sim.total) : '',
       action: `<button class="quiet small" data-task="similar" ${SIMILAR_ACTIVE.includes(sim.status) || sim.status === 'off' ? 'disabled' : ''}>重新检查</button>`},
