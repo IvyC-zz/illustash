@@ -2558,7 +2558,7 @@ async function pollIndex() {
 // Chinese / Japanese names fetched from Bangumi (text queries only); a configured model API is an opt-in last resort.
 let namesTimer = 0;
 const NAMES_ACTIVE = ['fetching', 'matching', 'translating', 'running'];
-const namesLine = s => s.status === 'off' ? '当前未启用' : NAMES_ACTIVE.includes(s.status) ? `正在获取 ${s.total ? `${number(s.done || 0)} / ${number(s.total)}` : '…'}` : s.status === 'error' ? '获取失败，将在下次启动时重试' : s.status === 'unauthorized' ? '未允许联网查询，先显示本机已有的名称；可在「设置 › 网络与隐私」里允许' : '已是最新';
+const namesLine = s => s.status === 'off' ? '当前未启用' : NAMES_ACTIVE.includes(s.status) ? `正在获取 ${s.total ? `${number(s.done || 0)} / ${number(s.total)}` : '…'}` : s.status === 'error' ? '获取失败，将在下次启动时重试' : s.status === 'unauthorized' ? '未允许联网查询 · 可在设置 › 网络与隐私里允许' : '已是最新';
 async function renderNamesCard(fresh = true) {
   const route = state.route, token = state.token;
   if (!$('namesCard') || state.route.page !== 'settings') return;

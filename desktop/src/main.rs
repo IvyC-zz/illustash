@@ -80,14 +80,14 @@ fn main() {
                 })
                 .build()?;
             if let Err(error) = &computation {
-                server::show_error(&main, error, &std::collections::VecDeque::new());
+                server::blocked(&main, error);
                 return Ok(());
             }
             let token = bridge::token();
             let port = match bridge::start(handle.clone(), token.clone()) {
                 Ok(port) => port,
                 Err(error) => {
-                    server::show_error(&main, &format!("无法启动本机登录通道：{error}；请重新启动应用"), &std::collections::VecDeque::new());
+                    server::blocked(&main, &format!("无法启动本机登录通道：{error}；请重新启动应用"));
                     return Ok(());
                 }
             };
