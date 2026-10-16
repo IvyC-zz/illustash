@@ -575,7 +575,7 @@ fn failure_message(failed: u64, damaged: u64) -> String {
         parts.push(format!("{failed} 张暂时读不到（可能还在 iCloud），下次同步重试"));
     }
     if damaged > 0 {
-        parts.push(format!("{damaged} 张图片已损坏或格式不支持，已跳过；文件改动后会重新识别"));
+        parts.push(format!("{damaged} 张图片已损坏或格式不支持，留在图库里但不识别；文件改动后会重新识别"));
     }
     parts.join("；")
 }
@@ -1138,10 +1138,10 @@ mod tests {
     fn unreadable_and_damaged_pictures_are_reported_apart() {
         assert_eq!(failure_message(0, 0), "");
         assert_eq!(failure_message(2, 0), "2 张暂时读不到（可能还在 iCloud），下次同步重试");
-        assert_eq!(failure_message(0, 1), "1 张图片已损坏或格式不支持，已跳过；文件改动后会重新识别");
+        assert_eq!(failure_message(0, 1), "1 张图片已损坏或格式不支持，留在图库里但不识别；文件改动后会重新识别");
         assert_eq!(
             failure_message(2, 1),
-            "2 张暂时读不到（可能还在 iCloud），下次同步重试；1 张图片已损坏或格式不支持，已跳过；文件改动后会重新识别"
+            "2 张暂时读不到（可能还在 iCloud），下次同步重试；1 张图片已损坏或格式不支持，留在图库里但不识别；文件改动后会重新识别"
         );
     }
     #[test]

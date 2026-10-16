@@ -114,6 +114,14 @@ document.addEventListener('click', async e => {
   if (await setNamesNetwork(true)) { input?.focus(); input?.dispatchEvent(new Event('input', {bubbles: true})); }
 });
 
+// A picture the app cannot decode (a damaged file): a plain placeholder instead of the browser's broken-image glyph.
+// The viewer has its own message (#viewerMissing).
+document.addEventListener('error', e => {
+  const img = e.target;
+  if (!(img instanceof HTMLImageElement) || img.id || !img.getAttribute('src')?.startsWith('/image?')) return;
+  const ph = document.createElement('span'); ph.className = 'img-broken'; ph.textContent = '无法打开'; img.replaceWith(ph);
+}, true);
+
 // ---------- toast with undo ----------
 function toast(message, withUndo = false) {
   $('toastText').textContent = message; $('toastUndo').hidden = !withUndo; $('toast').hidden = false;
@@ -2407,7 +2415,7 @@ function syncLine(s) {
   const kept = s.unreadable ? ` · ${number(s.unreadable)} 处暂时读不到，已有图片保留不动` : '';
   // Pictures given up on, apart (#112): unreadable ones are tried again, damaged ones wait for their file to change.
   const gave = (s.failed ? ` · ${number(s.failed)} 张暂时读不到（可能还在 iCloud），下次同步重试` : '')
-    + (s.damaged ? ` · ${number(s.damaged)} 张已损坏或格式不支持，已跳过` : '');
+    + (s.damaged ? ` · ${number(s.damaged)} 张已损坏或格式不支持，未识别` : '');
   if (s.status === 'done') return `上次同步：${stamp(s.finished_at)}${kept}${gave}`;
   if (s.status === 'needs_recognition') return `有 ${number(s.total || 0)} 张图等待识别（识别服务未启动）${kept}`;
   if (s.status === 'interrupted') return s.message ? `同步已中断（${s.message}），可重新扫描` : '同步已中断，可重新扫描';
@@ -2421,7 +2429,7 @@ function syncDamaged(d) {
   const rows = d.paths.map(p => `<div class="setting-line lib-folder"><span class="lib-path" title="${esc(p)}"><bdi>${esc(short(p))}</bdi></span></div>`).join('');
   const more = d.count > d.paths.length ? `<p class="muted-note">另有 ${number(d.count - d.paths.length)} 张未列出。</p>` : '';
   return fold('task-sync-damaged', `${number(d.count)} 张图片已损坏或格式不支持`,
-    `<p class="muted-note">这些文件读得到，但不是能打开的图片，同步时跳过。修好或换成正常的图片后，下次同步会重新识别。</p>${rows}${more}`);
+    `<p class="muted-note">这些文件读得到，但不是能打开的图片：已经加入图库，图上显示「无法打开」，不参与识别。修好或换成正常的图片后，下次同步会重新识别。</p>${rows}${more}`);
 }
 let syncTimer = null, lastImported = 0, syncPoll = 0;
 async function pollSync() {
