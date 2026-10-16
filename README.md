@@ -49,7 +49,7 @@ cargo build --release --manifest-path native/terms/Cargo.toml
 
 ## 许可
 
-代码以 [GPL-3.0-or-later](LICENSE) 发布。第三方组件、模型与数据的许可见 [第三方组件与许可](docs/THIRD_PARTY.md)；模型不随代码许可，按各自许可使用。
+代码以 [GPL-3.0-or-later](LICENSE) 发布。第三方组件、模型与数据的许可见 [第三方组件与许可](docs/THIRD_PARTY.md)；模型不随代码许可，按各自许可使用。完整安装包附带的 CCIP 模型依据 BigScience Open RAIL-M 许可提供，使用和再分发受其第 5 条及附件 A 的使用限制约束。
 
 Illustash 的名称与图标不随代码授权：基于本项目的修改版本请使用其他名称和图标。
 

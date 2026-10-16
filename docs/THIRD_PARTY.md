@@ -55,7 +55,8 @@ python3 tools/gen_rust_licenses.py
 
 - WD：Apache-2.0 原文（apache.org 的 `LICENSE-2.0.txt`），加上两个上游仓库在固定 revision 下的模型卡。两个仓库都没有 NOTICE 文件。
 - CCIP：两个上游模型卡只写了 `license: openrail`。Hugging Face 对这个标识的定义是「OpenRAIL 许可家族」，没有对应的条款文本。2026-10-16 用户决定：按最通用的 BigScience Open RAIL-M（2022-08-18 版，BigScience 发布页链接的 PDF 原件）随包，同时附两份模型卡。该许可第 5 条及附件 A 的使用限制对使用者生效，再分发时必须一并传递。同日查过几个使用 CCIP 的开源项目：多数写「OpenRAIL，以模型卡为准」，不附条款原文，且运行时才下载、不随包；没有一家附了确定的条款文本。
-- `NOTICE.txt`（英文）列出每个随包模型文件的上游仓库、revision、SHA-256 和对应的许可文件，并写明 CCIP 的使用限制。
+- `NOTICE.txt`（英文）列出每个随包模型文件的上游仓库、revision、SHA-256 和对应的许可文件。CCIP 一节就是该模型的分发条款：写明随包的 CCIP 按 Open RAIL-M 许可给使用者，附件 A 的使用限制是条款中可执行的部分，再分发者须把限制写进自己的分发协议、告知接收者并附上许可。这满足该许可第 4(a)(b) 条。
+- 2026-10-16 用户决定（#163）：不另设需要点击接受的协议，安装向导和首次启动都不加确认；应用「关于」页的「致谢与第三方组件」和 README「许可」一节写明 CCIP 受 Open RAIL-M 第 5 条约束及原文位置。不向上游 DeepGHS 征询具体条款文本；上游日后指明别的版本时，替换原文并改 `NOTICE.txt` 的版本说明。
 - 更新上游许可或模型时，替换原文、改 `sources.json` 的哈希，并同步 `NOTICE.txt`。
 | Character Index | [deepghs/character_index](https://huggingface.co/datasets/deepghs/character_index) | 已有共享角色索引的来源数据；不随安装包分发，应用也不下载。新用户补充角色参考特征走「检查新角色」（Danbooru 公开图片，每次运行前确认） | MIT |
 
