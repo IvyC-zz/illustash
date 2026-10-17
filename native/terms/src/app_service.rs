@@ -46,6 +46,9 @@ pub(crate) struct Session {
     pub(crate) auto_sync: bool,
     pub(crate) research: crate::app_research::Research,
     pub(crate) onboarding: crate::app_onboarding::Onboarding,
+    /// Why this library could not be listed among the recent ones when it was opened (#176). Listing only spares
+    /// picking it again next time, so the library opens anyway and the page says so once.
+    pub(crate) unlisted: Option<String>,
 }
 impl Session {
     pub(crate) fn token() -> Result<String> {
@@ -86,6 +89,7 @@ impl Session {
             auto_sync: true,
             research,
             onboarding,
+            unlisted: None,
         })
     }
 }
@@ -154,13 +158,13 @@ impl Options {
 impl Application {
     /// Opens and registers an explicit package. Does not bind a port or start background work.
     pub fn open(path: &Path, options: Options) -> Result<Self> {
-        Self::from_library(Library::open(path)?, Session::token()?, options, |error| error)
+        Self::from_library(Library::open(path)?, Session::token()?, options, |error| error.to_string())
     }
     pub(crate) fn from_library(
         library: Library,
         token: String,
         options: Options,
-        registration_error: impl FnOnce(Error) -> Error,
+        unlisted_note: impl FnOnce(Error) -> String,
     ) -> Result<Self> {
         // Owned before any recovery below reads or rewrites the package's task state.
         let owner = Owner::claim(&library)?;
@@ -197,11 +201,16 @@ impl Application {
             auto_sync,
             research,
             onboarding,
+            unlisted: None,
         };
         session.syncer.resource_root = root.clone();
         session.syncer.per_run = per_run;
         session.syncer.configure_startup(&session.library, !sync_disabled)?;
-        crate::app_libraries::remember(&session.library).map_err(registration_error)?;
+        if let Err(error) = crate::app_libraries::remember(&session.library) {
+            let note = unlisted_note(error);
+            eprintln!("没能记进最近图库，图库照常打开：{note}");
+            session.unlisted = Some(note);
+        }
         Ok(Self {
             session: RwLock::new(session),
             generation: AtomicU64::new(1),
@@ -357,7 +366,10 @@ impl Application {
             self.index_automatic,
         )?;
         replacement.syncer.configure_startup(&replacement.library, !self.sync_disabled)?;
-        crate::app_libraries::remember(&replacement.library)?;
+        if let Err(error) = crate::app_libraries::remember(&replacement.library) {
+            eprintln!("没能记进最近图库，图库照常打开：{error}");
+            replacement.unlisted = Some(error.to_string());
+        }
         let result = Json::object([
             ("path", replacement.library.display_path().to_string_lossy().as_ref().into()),
             ("name", replacement.library.name().into()),

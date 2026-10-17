@@ -263,4 +263,4 @@ CREATE INDEX asset_links_asset ON asset_links(asset);
 2. 扩展名 `.pilib` 先这么叫，产品名定了再换。
 3. 名字缓存等外部查询缓存什么时候挪成所有图库共享。
 
-现行数据库兼容结构及消费者见 [TERMS_SCHEMA.md](TERMS_SCHEMA.md) 第 13 节；显式升级、成对发布与备份回退边界见 [ARCHITECTURE_DIRECTION.md](ARCHITECTURE_DIRECTION.md)「已有核心库的显式升级边界」。源库研究/历史附加表及隐式 rowid 保留，不因宿主退出删除；注册失败和提交后事件失败须按已提交状态恢复。
+现行数据库兼容结构及消费者见 [TERMS_SCHEMA.md](TERMS_SCHEMA.md) 第 13 节；显式升级、成对发布与备份回退边界见 [ARCHITECTURE_DIRECTION.md](ARCHITECTURE_DIRECTION.md)「已有核心库的显式升级边界」。源库研究/历史附加表及隐式 rowid 保留，不因宿主退出删除；注册失败和提交后事件失败须按已提交状态恢复；打开时登记最近图库失败不挡住打开（#176），原因见 `/api/libraries` 的 `unlisted`。

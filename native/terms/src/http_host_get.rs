@@ -121,6 +121,10 @@ pub(super) fn handle(request: Request, host: &Host, received: u64) {
         }),
         "/api/libraries" => crate::app_libraries::info(&session.library).map(|mut p| {
             p.set("export", host.exports.state(&session.library, session.generation));
+            // Only when listing it failed (#176): the page says so once; the usual answer is unchanged.
+            if let Some(why) = &session.unlisted {
+                p.set("unlisted", why.as_str().into());
+            }
             Some((p, 200))
         }),
         _ if !crate::http_read::remote(request.url()) => {
