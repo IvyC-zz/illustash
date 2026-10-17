@@ -77,7 +77,7 @@ fn path_exists(path: &Path) -> Result<bool> {
 /// Hosts of different libraries share the registry: each read-modify-write holds its lock, so one host's
 /// update is never lost to another's or written through the same temporary file at once. When the lock
 /// file itself cannot be opened the update goes ahead as before and reports its own failure.
-fn registry_locked<T>(file: &Path, update: impl FnOnce() -> Result<T>) -> Result<T> {
+pub(crate) fn registry_locked<T>(file: &Path, update: impl FnOnce() -> Result<T>) -> Result<T> {
     let lock = file.parent().and_then(|parent| {
         fs::create_dir_all(parent).ok()?;
         fs::OpenOptions::new()

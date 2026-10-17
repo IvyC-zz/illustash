@@ -137,7 +137,8 @@ def text_sites(source, suffix):
                 anchor = 'dynamic-or-wrapper'
         if anchor:
             sites.append({'line': number, 'scope': scope, 'kind': 'database-write', 'key': anchor, 'detail': text})
-        routes = re.findall(r'"(/(?:api/[^" ]+|image|app\.[^" ]+|favicon[^" ]*))"', text)
+        # Static page routes added after the baseline (/i18n.js, #173) are listed as boundaries too.
+        routes = re.findall(r'"(/(?:api/[^" ]+|image|app\.[^" ]+|i18n\.js|favicon[^" ]*))"', text)
         if routes or 'Backend::Forward' in text or re.search(r'\bforward\(', text):
             key = '|'.join(routes) if routes else '<forward>'
             sites.append({'line': number, 'scope': scope, 'kind': 'http-branch', 'key': key, 'detail': text})

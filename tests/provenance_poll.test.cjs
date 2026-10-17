@@ -8,7 +8,7 @@ const code = source.slice(source.indexOf('async function loadProvenance'), sourc
 function harness(answers) {
   const timers = [], renders = [];
   const ctx = {
-    state: {route: {page: 'settings'}, provenance: null}, provenanceTimer: 0,
+    state: {route: {page: 'settings'}, provenance: null}, provenanceTimer: 0, t: require('./i18n_zh.cjs'),
     setTimeout(fn, ms) { timers.push(ms); return timers.length; }, clearTimeout() {},
     renderProvenanceCard() { renders.push(ctx.state.provenance?.state?.status ?? null); }, renderTasks() {},
     api: async () => { const a = answers.shift(); if (a instanceof Error) throw a; return a; },
