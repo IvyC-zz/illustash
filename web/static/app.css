@@ -59,7 +59,7 @@ main{flex:1;display:flex;flex-direction:column;min-width:0}
 .primary kbd{color:#c3c3ce;border-color:#54545d;margin-left:6px}
 .primary.armed{background:#8a3b2c;border-color:#8a3b2c}
 .workspace{flex:1;display:flex;min-height:0;position:relative}
-.content{display:flex;flex-direction:column;flex:1;min-width:0;padding:0 26px}
+.content{display:flex;flex-direction:column;flex:1;min-width:0;--gutter:26px;padding:0 var(--gutter)}
 .page-heading{display:flex;align-items:flex-end;justify-content:space-between;padding:26px 0 16px;gap:16px}
 .heading-main{min-width:0}
 h1{font-size:22px;letter-spacing:-.6px;font-weight:600;margin:0 0 6px}
@@ -93,6 +93,10 @@ select{height:32px;border:1px solid var(--line);background:var(--sheet);color:va
 /* grid */
 .viewport{position:relative;overflow:auto;flex:1;min-height:0;overscroll-behavior:contain;scrollbar-width:thin;scrollbar-color:#d4d4db transparent}
 .viewport:focus-visible{outline:none}
+/* Home and the character pages bleed strips and sticky bars to the sheet edge and draw card shadows: the scroll area
+   spans the gutter there, so nothing overflows it (no stray horizontal scrollbar) or gets clipped. Their pages keep
+   their width; the image grid, which sizes itself from the viewport, is not affected. */
+.viewport:has(>.home-page:not([hidden])),.viewport:has(>.char-index:not([hidden])){margin:0 calc(-1 * var(--gutter));padding-left:var(--gutter);padding-right:var(--gutter)}
 .grid{position:relative;width:100%;min-height:1px;user-select:none;-webkit-user-select:none}
 .card{position:absolute;background:var(--soft);border-radius:8px;overflow:hidden;display:flex;flex-direction:column;cursor:default;contain:layout style;transition:opacity .18s var(--ease),transform .18s var(--ease),box-shadow .12s ease}
 .card.skeleton{background:linear-gradient(90deg,var(--soft),var(--soft),var(--soft));background-size:200% 100%;animation:shimmer 1.4s linear infinite}
@@ -556,7 +560,7 @@ a.sidebar-bottom.active{color:var(--accent-ink);font-weight:600}
 a.sidebar-bottom.active .nav-icon{background:var(--accent-soft);color:var(--accent)}
 /* sheets */
 .workspace{padding:10px 10px 10px 0;gap:10px}
-.content{background:var(--sheet);border-radius:18px;box-shadow:var(--sheet-shadow);padding:0 26px;overflow:hidden}
+.content{background:var(--sheet);border-radius:18px;box-shadow:var(--sheet-shadow);padding:0 var(--gutter);overflow:hidden}
 .inspector{width:320px;border-left:0;border-radius:18px;box-shadow:var(--sheet-shadow);background:var(--sheet);scrollbar-width:none}
 /* top bar */
 .topbar{height:auto;min-height:70px;border-bottom:0;padding:14px 0 10px;gap:14px;align-items:center}
@@ -706,7 +710,7 @@ dialog::backdrop{background:rgba(20,20,30,.22);backdrop-filter:blur(3px)}
   .sidebar{background:var(--canvas);box-shadow:10px 0 35px rgba(0,0,0,.1)}
   #sidebarToggle{display:inline-flex}
   .workspace{padding:6px}
-  .content{padding:0 12px}
+  .content{--gutter:12px;padding:0 var(--gutter)}
   .jump{min-width:0}.jump span,.jump kbd{display:none}
 }
 dialog{background:var(--sheet);color:var(--ink)}
@@ -824,6 +828,13 @@ a.cc-name:hover{color:var(--accent-ink)}
 .cl-ring circle{fill:none;stroke:var(--line);stroke-width:3}
 .cl-ring .cl-done{stroke:var(--accent);stroke-linecap:round;transition:stroke-dasharray .6s var(--ease)}
 .checklist.pulse .cl-pill{animation:cl-pulse .9s var(--ease)}
+/* The checklist pill and the nudge float over the page (#98 Windows check): leave room under the content so its last
+   rows scroll clear of them, keep the pill out of the image viewer and the task panel, and keep the home page's
+   nudges (follow a work, look names up online) off the settings forms they would cover. */
+body:has(#checklist:not([hidden])) .viewport{padding-bottom:64px}
+body:has(#nudge:not([hidden])) .viewport{padding-bottom:120px}
+body:has(#viewer:not([hidden])) .checklist,body:has(#taskPanel:not([hidden])) .checklist{display:none}
+body:has(#settingsPage:not([hidden])) .nudge{display:none}
 @keyframes cl-pulse{30%{transform:scale(1.08)}60%{transform:scale(.98)}}
 .cl-panel{order:1;width:260px;padding:12px 14px 8px;border-radius:14px;background:var(--sheet);box-shadow:0 10px 32px rgba(var(--sh),.22),0 0 0 1px var(--hair);animation:tour-in .25s var(--ease)}
 .cl-head{margin:0 0 8px;font-size:11.5px;color:var(--muted)}
@@ -842,7 +853,7 @@ a.cc-name:hover{color:var(--accent-ink)}
 .lib-created{margin-top:8px;padding:10px 12px;border-radius:10px;box-shadow:0 0 0 1px var(--warn);font-size:12.5px;line-height:1.55}
 .lib-created p{margin:0 0 6px}
 .home-day{padding:0 0 22px}
-.home-dh{position:sticky;top:0;z-index:3;display:flex;align-items:baseline;gap:8px;margin:0 -26px;padding:10px 26px 8px;background:color-mix(in srgb,var(--sheet) 82%,transparent);-webkit-backdrop-filter:blur(18px) saturate(1.5);backdrop-filter:blur(18px) saturate(1.5)}
+.home-dh{position:sticky;top:0;z-index:3;display:flex;align-items:baseline;gap:8px;margin:0 calc(-1 * var(--gutter));padding:10px var(--gutter) 8px;background:color-mix(in srgb,var(--sheet) 82%,transparent);-webkit-backdrop-filter:blur(18px) saturate(1.5);backdrop-filter:blur(18px) saturate(1.5)}
 .home-dh b{font-size:21px;font-weight:700;letter-spacing:-.5px}
 .home-dh span{font-size:13px;color:var(--muted)}
 .home-all{margin-left:auto;font-size:12px;color:var(--accent-ink);font-weight:600}
@@ -907,8 +918,8 @@ a.cc-name:hover{color:var(--accent-ink)}
 
 
 /* 首页：横向滑动的一天 */
-.home-strip-wrap{position:relative;margin:0 -26px}
-.home-strip{display:flex;gap:6px;overflow-x:auto;overflow-y:hidden;padding:4px 26px 12px;scroll-padding:0 26px;overscroll-behavior-x:contain;scrollbar-width:thin;scrollbar-color:var(--faint) transparent}
+.home-strip-wrap{position:relative;margin:0 calc(-1 * var(--gutter))}
+.home-strip{display:flex;gap:6px;overflow-x:auto;overflow-y:hidden;padding:4px var(--gutter) 12px;scroll-padding:0 var(--gutter);overscroll-behavior-x:contain;scrollbar-width:thin;scrollbar-color:var(--faint) transparent}
 .home-strip::-webkit-scrollbar{height:8px}
 .home-strip::-webkit-scrollbar-thumb{background:var(--line);border-radius:999px;border:2px solid var(--sheet)}
 .home-strip::-webkit-scrollbar-thumb:hover{background:var(--faint)}
@@ -931,7 +942,7 @@ a.cc-name:hover{color:var(--accent-ink)}
 .cast{padding-bottom:28px}
 .cast-av{display:block;border-radius:50%;overflow:hidden;background:var(--soft);box-shadow:inset 0 0 0 1px var(--hair);flex:none}
 .cast-av img{width:100%;height:100%;object-fit:cover;display:block}
-.cast-tabs{position:sticky;top:0;z-index:4;display:flex;align-items:center;gap:8px;margin:0 -26px;padding:4px 26px 12px;background:color-mix(in srgb,var(--sheet) 88%,transparent);-webkit-backdrop-filter:blur(18px) saturate(1.5);backdrop-filter:blur(18px) saturate(1.5)}
+.cast-tabs{position:sticky;top:0;z-index:4;display:flex;align-items:center;gap:8px;margin:0 calc(-1 * var(--gutter));padding:4px var(--gutter) 12px;background:color-mix(in srgb,var(--sheet) 88%,transparent);-webkit-backdrop-filter:blur(18px) saturate(1.5);backdrop-filter:blur(18px) saturate(1.5)}
 .cast-tabrow{display:flex;gap:6px;overflow-x:auto;scrollbar-width:none;flex:1;min-width:0;padding-right:40px;-webkit-mask-image:linear-gradient(90deg,#000 calc(100% - 48px),transparent);mask-image:linear-gradient(90deg,#000 calc(100% - 48px),transparent)}
 .cast-tabrow::-webkit-scrollbar{display:none}
 .cast-tab{flex:none;display:inline-flex;align-items:center;gap:7px;height:34px;padding:0 14px 0 5px;border:0;border-radius:999px;background:var(--soft);font-size:12.5px;color:var(--ink2);white-space:nowrap;transition:background .15s,color .15s}
@@ -1298,7 +1309,9 @@ button.sidebar-bottom:hover .nav-icon{background:rgba(var(--sh),.06)}
 .task-top{display:flex;align-items:center;justify-content:space-between;margin:0 4px 6px}
 .task-top h2{margin:0;font-size:15px;font-weight:650}
 .task-pop h6{margin:12px 6px 6px;font-size:11px;font-weight:600;color:var(--muted);letter-spacing:.2px}
-.task-item{padding:10px 12px;display:grid;gap:8px}
+/* One shrinkable column: a long unbroken line inside (a damaged picture's path) must ellipsize, not widen the row past
+   the panel and push its button out of view. */
+.task-item{padding:10px 12px;display:grid;grid-template-columns:minmax(0,1fr);gap:8px}
 .task-item.on{background:color-mix(in srgb,var(--accent-soft) 45%,transparent)}
 .task-main{display:flex;align-items:center;gap:10px;font-size:12.5px}
 .task-text{flex:1;min-width:0;display:grid;gap:1px}
