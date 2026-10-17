@@ -9,6 +9,7 @@ from contextlib import closing
 import hashlib
 import io
 import http.client
+import json
 import socket
 import os
 from pathlib import Path
@@ -92,6 +93,40 @@ class NativeFilesTest(unittest.TestCase):
             for headers in ({'Host': 'evil.example'}, {'Origin': 'https://evil.example'}):
                 self.assertEqual(self.request(url, headers=headers)['status'],
                                  lifecycle.NativeLifecycleTest.reference_response(self, url, headers=headers)['status'])
+        self.assertFalse(self.sentinel.exists())
+
+
+    def test_i18n_script_carries_the_app_wide_language(self):
+        # #173: the language lives in preferences.json beside libraries.json and is written ahead of i18n.js.
+        static = self.resources / 'web' / 'static'
+        script, table = (static / 'i18n.js').read_bytes(), json.loads((static / 'locales/en.json').read_text(encoding='utf-8'))
+
+        def served():
+            response = self.request('/i18n.js')
+            self.assertEqual((response['status'], response['route']), (200, 'core'))
+            self.assertEqual(response['headers'].get('Content-Type'), 'text/javascript')
+            self.assertEqual(response['headers'].get('Cache-Control'), 'no-store')
+            language, english, rest = response['body'].split(b'\n', 2)
+            self.assertEqual(rest, script)
+            self.assertEqual(json.loads(english.removeprefix(b'self.ILLUSTASH_EN = ').removesuffix(b';')), table)
+            return json.loads(language.removeprefix(b'self.ILLUSTASH_LANGUAGE = ').removesuffix(b';'))
+
+        preferences = self.support / 'preferences.json'
+        self.assertEqual(served(), 'system')
+        self.assertFalse(preferences.exists())
+        self.assertEqual(json.loads(self.request('/api/settings')['body'])['preferences'], {'language': 'system'})
+        changed = self.request('/api/preferences', {'language': 'en'})
+        self.assertEqual(changed['status'], 200)
+        self.assertEqual(json.loads(changed['body'])['preferences'], {'language': 'en'})
+        self.assertEqual(json.loads(preferences.read_text(encoding='utf-8')), {'language': 'en'})
+        self.assertEqual(served(), 'en')
+        for body in ({'language': 'fr'}, {'language': 'en', 'theme': 'dark'}, {}):
+            self.assertEqual(self.request('/api/preferences', body)['status'], 400, body)
+        self.assertEqual(self.request('/api/preferences', {'language': 'zh-CN'}, token='bad')['status'], 403)
+        self.assertEqual(served(), 'en')
+        # A hand-broken file falls back to following the system instead of failing the page.
+        preferences.write_text('{broken', encoding='utf-8')
+        self.assertEqual(served(), 'system')
         self.assertFalse(self.sentinel.exists())
 
 

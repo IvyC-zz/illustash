@@ -14,7 +14,7 @@ for (const platform of ['MacIntel', 'Win32', 'Linux x86_64']) {
     vm.createContext(context); vm.runInContext(hints, context);
     assert.equal(vm.runInContext("shortcut('Z')", context), platform === 'MacIntel' ? '⌘Z' : 'Ctrl+Z');
     const undoButton = {};
-    context.state = {}; context.$ = () => undoButton;
+    context.state = {}; context.$ = () => undoButton; context.t = require('./i18n_zh.cjs');
     vm.runInContext(source.slice(source.indexOf('function setUndo('), source.indexOf('// ---------- routing')), context);
     vm.runInContext("setUndo({label:'合成撤销'})", context);
     assert.equal(undoButton.title, platform === 'MacIntel' ? '撤销：合成撤销（⌘Z）' : '撤销：合成撤销（Ctrl+Z）');

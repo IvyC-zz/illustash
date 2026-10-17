@@ -132,7 +132,7 @@ $('toast').addEventListener('mouseleave', () => { toastTimer = setTimeout(() => 
 $('toastUndo').onclick = () => undo();
 function setUndo(value) {
   state.undo = value; $('undoButton').disabled = !value || state.busy;
-  $('undoButton').title = value ? `撤销：${value.label}（${shortcut("Z")}）` : '暂无可撤销操作';
+  $('undoButton').title = value ? t('撤销：{label}（{key}）', {label: value.label, key: shortcut('Z')}) : t('暂无可撤销操作');
 }
 
 // ---------- routing ----------
@@ -396,7 +396,7 @@ function renderHeading() {
     identity: ['身份整理', `${number(state.identityCount || 0)} 对长得像的角色 · 按涉及图片数排序 · 每一步都可撤销`],
     sgroup: [`相似组 ${esc(r.id)}`, `${n} 张 · 选中两张以上可以判断关系`],
     excluded: ['已排除', `${n} 张 · 只是标记，不动 Photos`], pending: ['已排除', `待确认 ${n} 张 · 像截图但有人物，排除或保留`],
-    settings: ['设置', r.page === 'settings' ? settingsSection()[2] : '']}[r.page];
+    settings: [t('设置'), r.page === 'settings' ? settingsSection()[2] : '']}[r.page];
   const localLinks = r.page === 'characters' && !r.section && state.localLinks?.length ? `<span class="heading-links"><button class="quiet" id="localLinksButton" title="关联后自动补中文名、别名和作品；和已有角色重复的可以合并">${number(state.localLinks.length)} 个自建角色能对上 Danbooru</button></span>` : '';
   const links = localLinks ? localLinks : r.page === 'group' ? `<span class="heading-links">${state.total ? '<button class="quiet" id="groupOc" title="整组都是同一个原创角色：新建一个原创角色，把这组图都设为它">整组标为原创角色</button>' : ''}${state.groupNear ? `<a class="quiet link" href="#/g/${state.groupNearId}">${esc(state.groupNear)} →</a>` : ''}</span>`
     : r.page === 'sgroup' && state.total >= 2 && state.total <= 12 ? '<span class="heading-links"><button class="quiet" id="sgroupRelate">判断关系</button></span>' : '';
@@ -1958,25 +1958,25 @@ function applyViewClasses() {
 const viewSwitch = (key, label, hint = '') => `<button class="view-opt" data-view="${key}" role="switch" aria-checked="${viewOpts[key]}"><span>${label}${hint ? `<small>${hint}</small>` : ''}</span><i class="view-sw${viewOpts[key] ? ' on' : ''}"></i></button>`;
 function renderViewPop() {
   const grid = !panelPage(state.route.page);
-  $('viewPopover').innerHTML = (state.route.page === 'home' ? `<h6>首页</h6><div class="view-group">
-      <div class="view-row"><span>缩略图</span><div class="segmented" id="homeSizeSeg">${[[0, '小'], [1, '中'], [2, '大']].map(([v, t]) => `<button data-hsize="${v}" class="${viewOpts.homeSize === v ? 'on' : ''}">${t}</button>`).join('')}</div></div>
-      ${viewSwitch('hero', '放大每组主图')}
-      ${viewSwitch('people', '分组显示角色数')}
-      ${viewSwitch('marks', '图上显示副本数')}
-    </div>` : '') + (grid ? `<h6>图片网格</h6><div class="view-group">
-      <label class="view-row"><span>缩略图大小</span><input type="range" id="zoom" min="0" max="100" step="1" value="${sizeToSlider(state.size)}" aria-label="缩略图大小"></label>
-      ${viewSwitch('captions', '图片下方显示角色名', '浏览页、格子够大时')}
-      ${viewSwitch('marks', '图上显示副本数与皮肤')}
-      ${viewSwitch('hints', '未识别的图上显示「可能是」', '点一下就设为该角色')}
-    </div>` : '') + `<h6>侧栏与提示</h6><div class="view-group">
-      ${viewSwitch('railCount', '侧栏显示数量')}
-      ${viewSwitch('footer', '底部状态栏', '已加载张数与操作提示')}
-    </div><h6>详情面板</h6><div class="view-group">
-      ${viewSwitch('chart', '收藏曲线', '这个角色每月收了多少张')}
-      ${viewSwitch('same', '同一角色的其它图')}
-      ${viewSwitch('meta', '文件信息与画面标签')}
-      ${viewSwitch('ask', '偶尔问一句「是 TA 吗？」', '详情和首页；回答会用来学习认人')}
-    </div><div class="view-foot"><span>设置会自动保存</span><button class="link-button strong" id="viewReset">恢复默认</button></div>`;
+  $('viewPopover').innerHTML = (state.route.page === 'home' ? `<h6>${t('首页')}</h6><div class="view-group">
+      <div class="view-row"><span>${t('缩略图')}</span><div class="segmented" id="homeSizeSeg">${[[0, t('小')], [1, t('中')], [2, t('大')]].map(([v, label]) => `<button data-hsize="${v}" class="${viewOpts.homeSize === v ? 'on' : ''}">${label}</button>`).join('')}</div></div>
+      ${viewSwitch('hero', t('放大每组主图'))}
+      ${viewSwitch('people', t('分组显示角色数'))}
+      ${viewSwitch('marks', t('图上显示副本数'))}
+    </div>` : '') + (grid ? `<h6>${t('图片网格')}</h6><div class="view-group">
+      <label class="view-row"><span>${t('缩略图大小')}</span><input type="range" id="zoom" min="0" max="100" step="1" value="${sizeToSlider(state.size)}" aria-label="${t('缩略图大小')}"></label>
+      ${viewSwitch('captions', t('图片下方显示角色名'), t('浏览页、格子够大时'))}
+      ${viewSwitch('marks', t('图上显示副本数与皮肤'))}
+      ${viewSwitch('hints', t('未识别的图上显示「可能是」'), t('点一下就设为该角色'))}
+    </div>` : '') + `<h6>${t('侧栏与提示')}</h6><div class="view-group">
+      ${viewSwitch('railCount', t('侧栏显示数量'))}
+      ${viewSwitch('footer', t('底部状态栏'), t('已加载张数与操作提示'))}
+    </div><h6>${t('详情面板')}</h6><div class="view-group">
+      ${viewSwitch('chart', t('收藏曲线'), t('这个角色每月收了多少张'))}
+      ${viewSwitch('same', t('同一角色的其它图'))}
+      ${viewSwitch('meta', t('文件信息与画面标签'))}
+      ${viewSwitch('ask', t('偶尔问一句「是 TA 吗？」'), t('详情和首页；回答会用来学习认人'))}
+    </div><div class="view-foot"><span>${t('设置会自动保存')}</span><button class="link-button strong" id="viewReset">${t('恢复默认')}</button></div>`;
   $('zoom')?.addEventListener('input', e => requestZoom(() => setSize(sliderToSize(Number(e.target.value)), undefined, undefined, true)));
   $('viewReset').onclick = () => { Object.assign(viewOpts, VIEW_DEFAULTS); prefs.set('view', viewOpts); afterViewChange(true); renderViewPop(); if (state.route.page === 'home') drawHome(); };
 }
@@ -2007,7 +2007,7 @@ applyViewClasses();
 // ---------- NSFW filter ----------
 // One click cycles 显示 → 隐藏 → 仅 NSFW; H toggles hiding. NSFW = WD rating questionable/explicit.
 // The R18 plate: hollow = everything shows, struck through = hidden, filled = R18 only.
-const NSFW_TIP = {'': 'R18：显示中 · 点击隐藏（H）', hide: 'R18：已隐藏 · 点击只看 R18', only: 'R18：只看 R18 · 点击恢复全部'};
+const NSFW_TIP = {'': t('R18：显示中 · 点击隐藏（H）'), hide: t('R18：已隐藏 · 点击只看 R18'), only: t('R18：只看 R18 · 点击恢复全部')};
 const R18_ICON = '<svg class="r18" viewBox="0 0 34 20" aria-hidden="true"><rect class="plate" x="1.2" y="1.2" width="31.6" height="17.6" rx="5.5"/><text x="17" y="14.1" text-anchor="middle">R18</text><path class="cut" d="M5 17.5 29 2.5"/><path class="slash" d="M5 17.5 29 2.5"/></svg>';
 function renderNsfw() {
   const b = $('nsfwButton'); if (!b.firstChild) b.innerHTML = R18_ICON;
@@ -2015,7 +2015,7 @@ function renderNsfw() {
 }
 function setNsfw(mode) {
   state.nsfw = mode; prefs.set('nsfw', mode); renderNsfw(); state.selecting = false; clearSelection();
-  toast({'': '已显示全部内容', hide: '已隐藏 R18', only: '只看 R18'}[mode]);
+  toast({'': t('已显示全部内容'), hide: t('已隐藏 R18'), only: t('只看 R18')}[mode]);
   if (!panelPage(state.route.page)) reload(true);
   else if (state.route.page === 'identity') renderIdentity();
   else if (state.route.page === 'home') renderHome();
@@ -2682,19 +2682,19 @@ function patchSettingsPage(html, section) {
 // One page per question the person brings: how it looks, where pictures come from, who is in them, who drew them,
 // what leaves the machine, where data lives. Each page lists the cards it shows (#/settings/<id>).
 const SETTINGS_SECTIONS = [
-  ['general', '通用', '外观、图片网格与默认排序', ['setDisplay']],
-  ['library', '图库', '当前图库、来源、同步与排除', ['setLibraries', 'setSync', 'setExclude', 'setFold']],
-  ['characters', '角色资料', '新角色检查、角色名称与翻译', ['indexCard', 'namesCard', 'modelCard']],
-  ['artists', '画师', '找回画师与绑定的账号', ['setProvenance', 'setAccounts']],
-  ['network', '网络与隐私', '所有会访问网络的功能，以及它们发送什么', ['setNetwork']],
-  ['data', '数据', '备份、缓存与存储位置', ['setData']],
-  ['about', '关于', '版本、致谢与诊断信息', ['setAbout']]];
+  ['general', t('通用'), t('语言、外观、图片网格与默认排序'), ['setDisplay', 'setLanguage']],
+  ['library', t('图库'), t('当前图库、来源、同步与排除'), ['setLibraries', 'setSync', 'setExclude', 'setFold']],
+  ['characters', t('角色资料'), t('新角色检查、角色名称与翻译'), ['indexCard', 'namesCard', 'modelCard']],
+  ['artists', t('画师'), t('找回画师与绑定的账号'), ['setProvenance', 'setAccounts']],
+  ['network', t('网络与隐私'), t('所有会访问网络的功能，以及它们发送什么'), ['setNetwork']],
+  ['data', t('数据'), t('备份、缓存与存储位置'), ['setData']],
+  ['about', t('关于'), t('版本、致谢与诊断信息'), ['setAbout']]];
 const OWN_CARDS = ['setLibraries', 'setProvenance', 'setAccounts', 'indexCard', 'namesCard', 'modelCard', 'setAbout'];
 const settingsSection = () => SETTINGS_SECTIONS.find(s => s[0] === state.route.section) || SETTINGS_SECTIONS[0];
 // Developer-only entries (test libraries, pasting a Pixiv cookie) show only after opening the page once with ?dev.
 const devMode = (() => { try { if (new URLSearchParams(location.search).has('dev')) prefs.set('dev', true); } catch {} return !!prefs.get('dev', false); })();
 // Where a setting is kept, so the person knows what follows them across libraries and browsers.
-const SCOPE = {browser: ['仅本浏览器', '保存在这个浏览器里，换浏览器或清除网站数据会恢复默认'], library: ['本图库', '每个图库各自保存'], shared: ['所有图库共用', '保存在这台电脑上，所有图库共用']};
+const SCOPE = {browser: [t('仅本浏览器'), t('保存在这个浏览器里，换浏览器或清除网站数据会恢复默认')], library: [t('本图库'), t('每个图库各自保存')], shared: [t('所有图库共用'), t('保存在这台电脑上，所有图库共用')]};
 const scope = key => `<span class="set-scope" title="${SCOPE[key][1]}">${SCOPE[key][0]}</span>`;
 const cardHead = (title, note = '', key = '') => `<h2>${title}${key ? scope(key) : ''}</h2>${note ? `<p class="settings-note">${note}</p>` : ''}`;
 // A launch-time switch; --no-* flags still win for the current launch.
@@ -2763,20 +2763,24 @@ async function renderSettings(fetchMissing = true, refresh = false) {
   const reasons = state.exclInfo.reasons || {};
   const sourcesOf = info?.package?.sources || state.libraries?.info?.sources || [];
   const photos = sourcesOf.some(x => x.kind === 'photos');
-  const segment = (name, options, current) => `<div class="segmented" data-setting="${name}">${options.map(([v, t]) => `<button class="${current === v ? 'on' : ''}" data-value="${v}">${t}</button>`).join('')}</div>`;
+  const segment = (name, options, current) => `<div class="segmented" data-setting="${name}">${options.map(([v, label]) => `<button class="${current === v ? 'on' : ''}" data-value="${v}">${label}</button>`).join('')}</div>`;
   // Per-app counts exist only for the Photos source (pictures saved by X or Pixiv); a folder library has none.
   const apps = Object.entries(runs.find(r => r.sources)?.sources || {}).sort((a, b) => b[1].photos - a[1].photos);
   const appRow = ([, v]) => `<tr><td title="${esc(v.name)}">${esc(v.name)}</td><td>${number(v.photos)}</td><td>${v.collected ? number(v.collected) : '—'}</td></tr>`;
   const sort = prefs.get('sortLibrary', 'newest'), csort = prefs.get('sortCharacter', 'suspicious');
   const s = state.sync;
   const body = {
-    setDisplay: () => cardHead('显示', '', 'browser') + `
-      <div class="setting-line"><span>外观</span>${segment('theme', [['', '跟随系统'], ['light', '浅色'], ['dark', '深色']], prefs.get('theme', ''))}</div>
-      <div class="setting-line"><span>图片网格</span>${segment('fit', [['0', '方形裁切'], ['1', '原比例']], state.fit ? '1' : '0')}</div>
-      <div class="setting-line"><span>R18 内容</span>${segment('nsfw', [['', '显示'], ['hide', '隐藏'], ['only', '只看 R18']], state.nsfw)}</div>
-      <div class="setting-line"><span>图库默认排序</span>${segment('sortLibrary', [['newest', '最新加入'], ['oldest', '最早加入']], sort)}</div>
-      <div class="setting-line"><span>按角色筛选时的默认排序</span>${segment('sortCharacter', [['suspicious', '可疑优先'], ['newest', '最新加入'], ['oldest', '最早加入']], csort)}</div>
-      <p class="settings-note net-foot">缩略图大小、图上显示什么、详情面板的内容，在顶栏的「视图选项」里调。</p>`,
+    setDisplay: () => cardHead(t('显示'), '', 'browser') + `
+      <div class="setting-line"><span>${t('外观')}</span>${segment('theme', [['', t('跟随系统')], ['light', t('浅色')], ['dark', t('深色')]], prefs.get('theme', ''))}</div>
+      <div class="setting-line"><span>${t('图片网格')}</span>${segment('fit', [['0', t('方形裁切')], ['1', t('原比例')]], state.fit ? '1' : '0')}</div>
+      <div class="setting-line"><span>${t('R18 内容')}</span>${segment('nsfw', [['', t('显示')], ['hide', t('隐藏')], ['only', t('只看 R18')]], state.nsfw)}</div>
+      <div class="setting-line"><span>${t('图库默认排序')}</span>${segment('sortLibrary', [['newest', t('最新加入')], ['oldest', t('最早加入')]], sort)}</div>
+      <div class="setting-line"><span>${t('按角色筛选时的默认排序')}</span>${segment('sortCharacter', [['suspicious', t('可疑优先')], ['newest', t('最新加入')], ['oldest', t('最早加入')]], csort)}</div>
+      <p class="settings-note net-foot">${t('缩略图大小、图上显示什么、详情面板的内容，在顶栏的「视图选项」里调。')}</p>`,
+    // App-wide (preferences.json), so the desktop shell and every library and browser share it (#173). Language
+    // names stay in their own language.
+    setLanguage: () => cardHead(t('语言'), '', 'shared') + `
+      <div class="setting-line"><span>${t('界面语言')}<small class="line-hint">${t('切换后页面会重新载入')}</small></span>${segment('language', [['system', t('跟随系统')], ['zh-CN', '简体中文'], ['en', 'English']], I18N.preference)}</div>`,
     setSync: () => cardHead('同步', '只读读取来源里的图片，新增的导入并在本机识别；来源里删掉的图会从图库移除，人工整理记录保留。同步不联网。', 'library') + `
       ${taskLink(s.status === 'off' ? '这次启动没有开同步' : syncLine(s), SYNC_ACTIVE.includes(s.status) ? 'busy' : ['error', 'needs_recognition'].includes(s.status) ? 'warn' : s.status === 'off' ? 'off' : '')}
       ${startupSwitch('sync', '启动时同步', '检查来源里新增和删除的图')}
@@ -2793,7 +2797,7 @@ async function renderSettings(fetchMissing = true, refresh = false) {
       ${info?.backups?.length ? fold('backupList', '最近的备份', `<table class="settings-table">${info.backups.slice(0, 5).map(b => `<tr><td class="mono">${esc(b.name)}</td><td>${bytes(b.bytes)}</td></tr>`).join('')}</table>`) : ''}
       ${info ? fold('dataPaths', '存储位置', `<table class="settings-table">${[['源数据库（识别结果，可以重建）', info.source], ['应用数据库（人工整理，不要删）', info.library], ['缩略图缓存（可以放心删）', info.thumbnails]].map(([t, d]) => `<tr><td>${t}</td><td class="mono">${esc(d.path)}</td><td>${bytes(d.bytes)}</td></tr>`).join('')}</table>`) : ''}`,
   };
-  patchSettingsPage(`<nav class="settings-nav" aria-label="设置">${SETTINGS_SECTIONS.map(([id, t]) => `<a href="#/settings/${id}" class="${id === section ? 'on' : ''}"${id === section ? ' aria-current="page"' : ''}>${t}</a>`).join('')}</nav>
+  patchSettingsPage(`<nav class="settings-nav" aria-label="${t('设置')}">${SETTINGS_SECTIONS.map(([id, title]) => `<a href="#/settings/${id}" class="${id === section ? 'on' : ''}"${id === section ? ' aria-current="page"' : ''}>${title}</a>`).join('')}</nav>
     <div class="settings-main" data-section="${section}">${cards.map(id => `<section class="settings-card" id="${id}">${body[id] ? body[id]() : ''}</section>`).join('')}</div>`, section);
   const page = $('settingsPage');
   renderAbout();
@@ -2814,12 +2818,18 @@ async function renderSettings(fetchMissing = true, refresh = false) {
   if ($('clearCache')) $('clearCache').onclick = async () => { try { const r = await post('/api/cache', {action: 'clear'}); state.settings = r; toast(`已清除 ${number(r.removed)} 个缩略图`); renderSettings(); } catch (e) { toast(e.message); } };
   for (const g of page.querySelectorAll('[data-setting]')) for (const b of g.querySelectorAll('button')) b.onclick = () => {
     const key = g.dataset.setting, v = b.dataset.value;
+    if (key === 'language') { setLanguage(v); return; }
     if (key === 'fit' && state.fit !== (v === '1')) { state.fit = !state.fit; prefs.set('fit', state.fit); }
     if (key === 'nsfw') setNsfw(v);
     if (key === 'theme') { prefs.set('theme', v); window.applyTheme?.(); }
     if (key === 'sortLibrary' || key === 'sortCharacter') prefs.set(key, v);
     renderSettings();
   };
+}
+// The whole page is redrawn in the new language; the setting is saved first so every window and library follows.
+async function setLanguage(language) {
+  if (language === I18N.preference) return;
+  try { await api('/api/preferences', {method: 'POST', body: JSON.stringify({language})}); location.reload(); } catch (e) { toast(e.message); }
 }
 // Status lines on the settings pages hand over to the task panel, where runs are started, stopped and confirmed.
 $('settingsPage').addEventListener('click', e => {
@@ -2838,7 +2848,7 @@ for (const dialog of document.querySelectorAll('dialog')) dialog.addEventListene
 async function loadLibraries() {
   try { state.libraries = await api('/api/libraries'); } catch { state.libraries = null; }
   const cur = state.libraries?.info;
-  $('brandLib').textContent = cur?.test ? '测试·' + (cur.name.split(' · ').pop()) : '';
+  $('brandLib').textContent = cur?.test ? t('测试·') + (cur.name.split(' · ').pop()) : '';
   $('brand').title = cur ? `Illustash · ${cur.name}` : 'Illustash';
   renderLibrariesCard();
 }
@@ -3215,7 +3225,7 @@ async function loadProvenance() {
   const s = state.provenance?.state?.status;
   if (['running', 'stopping'].includes(s)) provenanceTimer = setTimeout(loadProvenance, 1500);
 }
-const RUN_STATUS = {done: '完成', stopped: '已停止', failed: '出错', running: '进行中'};
+const RUN_STATUS = {done: t('完成'), stopped: t('已停止'), failed: t('出错'), running: t('进行中')};
 const pct = (n, total) => total ? `${(n / total * 100).toFixed(1)}%` : '—';
 // provenance.sqlite keeps SQLite's UTC timestamps.
 const localTime = utc => { const d = new Date(String(utc || '').replace(' ', 'T') + 'Z'); return isNaN(d) ? '' : `${d.getMonth() + 1}-${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; };
@@ -3274,55 +3284,55 @@ function taskList() {
   const folder = !(state.settings?.package?.sources || state.libraries?.info?.sources || []).some(x => x.kind === 'photos');
   const bar = (done, total) => total ? `<div class="progress"><span style="width:${Math.min(100, Math.round((done || 0) / total * 100))}%"></span></div>` : '';
   const list = [
-    {key: 'sync', name: folder ? '文件夹同步' : '照片同步', active: SYNC_ACTIVE.includes(s.status), line: s.status === 'off' ? '这次启动没有开同步' : syncLine(s),
+    {key: 'sync', name: folder ? t('文件夹同步') : t('照片同步'), busy: t('同步中'), active: SYNC_ACTIVE.includes(s.status), off: s.status === 'off', line: s.status === 'off' ? t('这次启动没有开同步') : syncLine(s),
       warn: ['error', 'needs_recognition', 'interrupted'].includes(s.status), body: syncBar(s, bar) + (SYNC_ACTIVE.includes(s.status) ? '' : syncDamaged(state.syncDamaged)),
-      action: `<button class="quiet small" data-task="sync" ${SYNC_ACTIVE.includes(s.status) || s.status === 'off' ? 'disabled' : ''}>立即同步</button>`,
-      log: state.syncHistory?.length ? ['同步记录', `<table class="settings-table"><tr><th>时间</th><th>新增</th><th>移除</th><th>导入</th><th>失败</th></tr>${state.syncHistory.slice(0, 8).map(r => `<tr><td>${esc(stamp(r.started_at))}</td><td>${number(r.found)}</td><td>${number(r.removed)}</td><td>${number(r.imported)}</td><td>${number(r.failed)}</td></tr>`).join('')}</table>`] : null},
-    {key: 'index', name: '检查新角色', active: INDEX_ACTIVE.includes(ix.status), line: state.index ? indexLine(ix, state.index.check) : '…', warn: ix.status === 'error',
+      action: `<button class="quiet small" data-task="sync" ${SYNC_ACTIVE.includes(s.status) || s.status === 'off' ? 'disabled' : ''}>${t('立即同步')}</button>`,
+      log: state.syncHistory?.length ? [t('同步记录'), `<table class="settings-table"><tr><th>${t('时间')}</th><th>${t('新增')}</th><th>${t('移除')}</th><th>${t('导入')}</th><th>${t('失败')}</th></tr>${state.syncHistory.slice(0, 8).map(r => `<tr><td>${esc(stamp(r.started_at))}</td><td>${number(r.found)}</td><td>${number(r.removed)}</td><td>${number(r.imported)}</td><td>${number(r.failed)}</td></tr>`).join('')}</table>`] : null},
+    {key: 'index', name: t('检查新角色'), busy: t('检查新角色中'), active: INDEX_ACTIVE.includes(ix.status), line: state.index ? indexLine(ix, state.index.check) : '…', warn: ix.status === 'error',
       body: INDEX_ACTIVE.includes(ix.status) ? bar(ix.done, ix.total) : '',
-      action: `<button class="quiet small" data-task="index" ${INDEX_ACTIVE.includes(ix.status) || ix.status === 'off' || !state.index?.watch?.works.length ? 'disabled' : ''} title="${state.index?.watch?.works.length ? '查关注作品在 Danbooru 上有没有新角色（只发送作品名）' : '先在资料库里关注作品'}">立即检查</button>`},
-    {key: 'names', name: '角色名称', active: NAMES_ACTIVE.includes(nm.status), line: namesLine(nm) + (nm.error ? '：' + nm.error : ''), warn: nm.status === 'error', body: NAMES_ACTIVE.includes(nm.status) ? bar(nm.done, nm.total) : '',
-      action: `<button class="quiet small" data-task="names" ${NAMES_ACTIVE.includes(nm.status) || nm.status === 'off' || !state.names ? 'disabled' : ''} title="从 Bangumi 重新获取全部角色的中文名（只发送 tag 与作品名）">重新获取</button>`},
-    {key: 'similar', name: '相似图片', active: SIMILAR_ACTIVE.includes(sim.status), line: taskSimilar(sim), warn: sim.status === 'error', body: SIMILAR_ACTIVE.includes(sim.status) ? bar(sim.done, sim.total) : '',
-      action: `<button class="quiet small" data-task="similar" ${SIMILAR_ACTIVE.includes(sim.status) || sim.status === 'off' ? 'disabled' : ''}>重新检查</button>`},
+      action: `<button class="quiet small" data-task="index" ${INDEX_ACTIVE.includes(ix.status) || ix.status === 'off' || !state.index?.watch?.works.length ? 'disabled' : ''} title="${state.index?.watch?.works.length ? t('查关注作品在 Danbooru 上有没有新角色（只发送作品名）') : t('先在资料库里关注作品')}">${t('立即检查')}</button>`},
+    {key: 'names', name: t('角色名称'), busy: t('角色名称中'), active: NAMES_ACTIVE.includes(nm.status), line: namesLine(nm) + (nm.error ? '：' + nm.error : ''), warn: nm.status === 'error', body: NAMES_ACTIVE.includes(nm.status) ? bar(nm.done, nm.total) : '',
+      action: `<button class="quiet small" data-task="names" ${NAMES_ACTIVE.includes(nm.status) || nm.status === 'off' || !state.names ? 'disabled' : ''} title="${t('从 Bangumi 重新获取全部角色的中文名（只发送 tag 与作品名）')}">${t('重新获取')}</button>`},
+    {key: 'similar', name: t('相似图片'), busy: t('相似图片中'), active: SIMILAR_ACTIVE.includes(sim.status), off: sim.status === 'off', line: taskSimilar(sim), warn: sim.status === 'error', body: SIMILAR_ACTIVE.includes(sim.status) ? bar(sim.done, sim.total) : '',
+      action: `<button class="quiet small" data-task="similar" ${SIMILAR_ACTIVE.includes(sim.status) || sim.status === 'off' ? 'disabled' : ''}>${t('重新检查')}</button>`},
   ];
-  if (pv?.available) list.push({key: 'provenance', name: '找回画师', active: PROV_ACTIVE.includes(ps.status), warn: ps.status === 'failed',
-    line: ps.status === 'stopping' ? '正在停止…' : PROV_ACTIVE.includes(ps.status) ? `正在查找 · 第 ${(ps.index || 0) + 1}/${ps.total || 1} 步${ps.text ? ' · ' + ps.text : ''}`
-      : ps.status === 'failed' ? `上次出错：${ps.reason || ''}` : pv.runs?.[0] ? `上次 ${localTime(pv.runs[0].started_at)} · 新找到 ${number(pv.runs[0].found || 0)}` : '还没有查过',
-    body: PROV_ACTIVE.includes(ps.status) ? provenanceBars(ps) + (ps.side ? `<p class="task-side">同时进行 · ${esc(ps.side.name || ps.side.step)}${ps.side.text ? ' · ' + esc(ps.side.text) : ''}</p>${provenanceBars({progress: ps.side.progress})}` : '') : '',
-    action: PROV_ACTIVE.includes(ps.status) ? `<button class="quiet small" data-prov="stop" ${ps.status === 'stopping' ? 'disabled' : ''}>停止</button>` : provenanceArmed ? '' : '<button class="quiet small" data-prov="arm">开始…</button>',
-    log: pv.runs?.length ? ['运行记录', `<table class="settings-table"><tr><th>开始</th><th>方式</th><th>新找到</th><th>流量</th><th>结果</th></tr>${pv.runs.slice(0, 8).map(r => `<tr><td>${esc(localTime(r.started_at))}</td><td>${r.kind === 'new' ? '同步后' : r.kind === 'full' ? '手动' : '命令行'}</td><td>${number(r.found || 0)}</td><td>${(r.traffic_mb || 0).toFixed(1)} MB</td><td title="${esc(r.reason || '')}">${RUN_STATUS[r.status] || esc(r.status)}</td></tr>`).join('')}</table>`] : null});
-  if (['running', 'done', 'error'].includes(ex.status)) list.push({key: 'export', name: '导出图库', active: ex.status === 'running', warn: ex.status === 'error',
-    line: ex.status === 'running' ? '正在导出…' : ex.status === 'done' ? `已导出 ${(ex.bytes / 1048576).toFixed(0)} MB` : `导出失败：${ex.error || ''}`, body: '', action: ''});
+  if (pv?.available) list.push({key: 'provenance', name: t('找回画师'), busy: t('找回画师中'), active: PROV_ACTIVE.includes(ps.status), warn: ps.status === 'failed',
+    line: ps.status === 'stopping' ? t('正在停止…') : PROV_ACTIVE.includes(ps.status) ? t('正在查找 · 第 {step}/{steps} 步', {step: (ps.index || 0) + 1, steps: ps.total || 1}) + (ps.text ? ' · ' + ps.text : '')
+      : ps.status === 'failed' ? t('上次出错：{reason}', {reason: ps.reason || ''}) : pv.runs?.[0] ? t('上次 {time} · 新找到 {n}', {time: localTime(pv.runs[0].started_at), n: number(pv.runs[0].found || 0)}) : t('还没有查过'),
+    body: PROV_ACTIVE.includes(ps.status) ? provenanceBars(ps) + (ps.side ? `<p class="task-side">${t('同时进行')} · ${esc(ps.side.name || ps.side.step)}${ps.side.text ? ' · ' + esc(ps.side.text) : ''}</p>${provenanceBars({progress: ps.side.progress})}` : '') : '',
+    action: PROV_ACTIVE.includes(ps.status) ? `<button class="quiet small" data-prov="stop" ${ps.status === 'stopping' ? 'disabled' : ''}>${t('停止')}</button>` : provenanceArmed ? '' : `<button class="quiet small" data-prov="arm">${t('开始…')}</button>`,
+    log: pv.runs?.length ? [t('运行记录'), `<table class="settings-table"><tr><th>${t('开始')}</th><th>${t('方式')}</th><th>${t('新找到')}</th><th>${t('流量')}</th><th>${t('结果')}</th></tr>${pv.runs.slice(0, 8).map(r => `<tr><td>${esc(localTime(r.started_at))}</td><td>${r.kind === 'new' ? t('同步后') : r.kind === 'full' ? t('手动') : t('命令行')}</td><td>${number(r.found || 0)}</td><td>${(r.traffic_mb || 0).toFixed(1)} MB</td><td title="${esc(r.reason || '')}">${RUN_STATUS[r.status] || esc(r.status)}</td></tr>`).join('')}</table>`] : null});
+  if (['running', 'done', 'error'].includes(ex.status)) list.push({key: 'export', name: t('导出图库'), busy: t('导出图库中'), active: ex.status === 'running', warn: ex.status === 'error',
+    line: ex.status === 'running' ? t('正在导出…') : ex.status === 'done' ? t('已导出 {mb} MB', {mb: (ex.bytes / 1048576).toFixed(0)}) : t('导出失败：{error}', {error: ex.error || ''}), body: '', action: ''});
   return list;
 }
 // Things that wait for the person: an authorization, characters to add, a sync that needs a hand.
 function taskAsks() {
   const asks = [], p = state.provenance, missing = state.index?.check?.missing || [], s = state.sync;
-  if (provenanceArmed && p?.available) asks.push(`<div class="task-ask prov-confirm"><b>找回画师这次要访问外网，确认后才会发出：</b>
-    <ul><li>发给 Danbooru：图片的像素哈希和感知哈希（IQDB 签名，都是一串文本，不是图片）、画师名和账号</li>
-    <li>${state.accounts?.pixiv?.bound ? '用你绑定的 Pixiv 登录状态读取你的关注列表（只读）' : '没有绑定 Pixiv：只看公开作品，不含 R18'}</li>
-    <li>本次最多 ${number(p.budgets?.full || 1024)} MB；遇到拒绝、限流或验证码就停，不绕过</li></ul>
-    <p class="muted-note">授权只对这一次有效，下次开始会再问。图片本身不会上传。查过的图和画师不会重查，可以随时停止。</p>
-    <div class="prov-confirm-btns"><button class="primary" data-prov="start" data-network="1">授权并开始</button><button class="quiet" data-prov="start">只跑本地（签名识别）</button><button class="quiet" data-prov="cancel">取消</button></div></div>`);
-  if (missing.length && !INDEX_ACTIVE.includes(state.index.state.status)) asks.push(`<div class="task-ask"><span>上次检查发现 <b>${number(missing.length)}</b> 个还没收录的角色</span><button class="primary small" data-task="index-add">查看并添加…</button></div>`);
+  if (provenanceArmed && p?.available) asks.push(`<div class="task-ask prov-confirm"><b>${t('找回画师这次要访问外网，确认后才会发出：')}</b>
+    <ul><li>${t('发给 Danbooru：图片的像素哈希和感知哈希（IQDB 签名，都是一串文本，不是图片）、画师名和账号')}</li>
+    <li>${state.accounts?.pixiv?.bound ? t('用你绑定的 Pixiv 登录状态读取你的关注列表（只读）') : t('没有绑定 Pixiv：只看公开作品，不含 R18')}</li>
+    <li>${t('本次最多 {mb} MB；遇到拒绝、限流或验证码就停，不绕过', {mb: number(p.budgets?.full || 1024)})}</li></ul>
+    <p class="muted-note">${t('授权只对这一次有效，下次开始会再问。图片本身不会上传。查过的图和画师不会重查，可以随时停止。')}</p>
+    <div class="prov-confirm-btns"><button class="primary" data-prov="start" data-network="1">${t('授权并开始')}</button><button class="quiet" data-prov="start">${t('只跑本地（签名识别）')}</button><button class="quiet" data-prov="cancel">${t('取消')}</button></div></div>`);
+  if (missing.length && !INDEX_ACTIVE.includes(state.index.state.status)) asks.push(`<div class="task-ask"><span>${t('上次检查发现 {n} 个还没收录的角色', {n: `<b>${number(missing.length)}</b>`})}</span><button class="primary small" data-task="index-add">${t('查看并添加…')}</button></div>`);
   return asks;
 }
 function renderTasks() {
   const list = taskList(), active = list.filter(t => t.active), warn = list.some(t => t.warn), asks = taskAsks();
   const button = $('taskButton'), badge = $('taskBadge');
   button.classList.toggle('busy', !!active.length);
-  $('taskLabel').textContent = active.length > 1 ? `${active.length} 项进行中` : active.length ? active[0].name.replace(/^(文件夹|照片)/, '') + '中' : '任务';
-  button.title = active.length ? active.map(t => `${t.name}：${t.line}`).join('\n') : asks.length ? '有事等你确认' : warn ? '有任务出错了' : '任务：同步、检查新角色、找回画师…';
+  $('taskLabel').textContent = active.length > 1 ? t('{n} 项进行中', {n: active.length}) : active.length ? active[0].busy : t('任务');
+  button.title = active.length ? active.map(task => t('{name}：{line}', {name: task.name, line: task.line})).join('\n') : asks.length ? t('有事等你确认') : warn ? t('有任务出错了') : t('任务：同步、检查新角色、找回画师…');
   badge.hidden = !asks.length && !warn; badge.className = 'task-badge' + (warn && !asks.length ? ' warn' : '');
   if (!taskPanel.open) return;
   const order = [...active, ...list.filter(t => !t.active)];
-  const html = `<div class="task-top"><h2>任务</h2><button class="icon" data-task="close" aria-label="关闭">×</button></div>
-    ${asks.length ? `<h6>等你确认</h6><div class="task-asks">${asks.join('')}</div>` : ''}
-    <h6>${active.length ? '进行中与其他任务' : '全部任务'}</h6><div class="view-group task-group">${order.map(t => `<div class="task-item${t.active ? ' on' : ''}">
-      <div class="task-main"><span class="local-dot${t.active ? ' busy' : t.warn ? ' warn' : /未启用|没有开/.test(t.line) ? ' off' : ''}"></span><span class="task-text"><b>${t.name}</b><small>${esc(t.line)}</small></span>${t.action}</div>
-      ${t.body ? `<div class="task-body">${t.body}</div>` : ''}${t.log ? fold('task-' + t.key, t.log[0], t.log[1]) : ''}</div>`).join('')}</div>
-    <p class="task-foot">各任务是否自动运行，在<a class="link" href="#/settings">设置</a>里改。</p>`;
+  const html = `<div class="task-top"><h2>${t('任务')}</h2><button class="icon" data-task="close" aria-label="${t('关闭')}">×</button></div>
+    ${asks.length ? `<h6>${t('等你确认')}</h6><div class="task-asks">${asks.join('')}</div>` : ''}
+    <h6>${active.length ? t('进行中与其他任务') : t('全部任务')}</h6><div class="view-group task-group">${order.map(task => `<div class="task-item${task.active ? ' on' : ''}">
+      <div class="task-main"><span class="local-dot${task.active ? ' busy' : task.warn ? ' warn' : task.off || /未启用|没有开/.test(task.line) ? ' off' : ''}"></span><span class="task-text"><b>${task.name}</b><small>${esc(task.line)}</small></span>${task.action}</div>
+      ${task.body ? `<div class="task-body">${task.body}</div>` : ''}${task.log ? fold('task-' + task.key, task.log[0], task.log[1]) : ''}</div>`).join('')}</div>
+    <p class="task-foot">${t('各任务是否自动运行，在{link}里改。', {link: `<a class="link" href="#/settings">${t('设置')}</a>`})}</p>`;
   const pop = $('taskPanel');
   // Polled while jobs run: redraw only on change, so a click is never lost to a replaced button.
   if (pop.dataset.html === html) return;
@@ -3355,7 +3365,7 @@ $('taskPanel').addEventListener('click', async e => {
   try {
     if (act === 'sync') { await post('/api/sync', {}); state.sync = {status: 'scanning'}; }
     else if (act === 'index') { if (!await checkIndex()) return; }
-    else if (act === 'names') { state.names = {...state.names, ...await post('/api/names', {action: 'refresh'})}; toast('已开始重新获取角色名称'); }
+    else if (act === 'names') { state.names = {...state.names, ...await post('/api/names', {action: 'refresh'})}; toast(t('已开始重新获取角色名称')); }
     else if (act === 'similar') { await post('/api/similar', {}); state.settings = await api('/api/settings'); }
   } catch (err) { toast(err.message); } finally { b.disabled = false; }
   taskTick();

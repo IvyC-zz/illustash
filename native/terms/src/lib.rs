@@ -29,6 +29,7 @@ pub mod app_service;
 use illustash_platform::app_paths;
 mod app_photos;
 mod app_platform;
+mod app_preferences;
 mod app_profiles;
 pub mod app_recognition;
 pub mod app_research;
