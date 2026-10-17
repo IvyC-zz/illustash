@@ -265,7 +265,8 @@ class InstalledIndexAppTest(CandidateIndexAdapter, unittest.TestCase):
 
     def start_held(self):
         self.check(); self.seed_reference(); self.index({'action':'apply','tags':['carol_example']})
-        wait_until(lambda: self.ready.is_file() and self.ready.read_text().strip().isdigit(), timeout=5)
+        # The ready file follows a real index compute, which the parallel full suite can slow well past 5 s.
+        wait_until(lambda: self.ready.is_file() and self.ready.read_text().strip().isdigit(), timeout=30)
         job = json.loads((self.lib.path/'index-job.json').read_text())
         result = Path(job['folder'])/'response.json'
         self.assertTrue(result.is_file())

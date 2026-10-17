@@ -481,7 +481,7 @@ if failures: Path(sys.argv[2]).write_text(json.dumps(dict(identity=r['identity']
         self.assertEqual(sent, {'not-scanned.png', 'good.png', 'bad.png'})
         self.assertEqual((state['failed'], state['damaged'], state['imported']), (1, 2, 1), state)
         self.assertEqual(state['message'], '1 张暂时读不到（可能还在 iCloud），下次同步重试；'
-                                           '2 张图片已损坏或格式不支持，已跳过；文件改动后会重新识别')
+                                           '2 张图片已损坏或格式不支持，留在图库里但不识别；文件改动后会重新识别')
         self.assertEqual(value['damaged']['count'], 2)
         self.assertEqual(sorted(Path(p).name for p in value['damaged']['paths']), ['bad.png', 'not-scanned.png'])
         self.assertEqual(value['history'][0]['failed'], 1)
@@ -493,7 +493,7 @@ if failures: Path(sys.argv[2]).write_text(json.dumps(dict(identity=r['identity']
         value, sent = run()
         self.assertEqual(sent, {'locked.png'})
         self.assertEqual((value['state']['failed'], value['state']['damaged'], value['state']['imported']), (0, 2, 1), value['state'])
-        self.assertEqual(value['state']['message'], '2 张图片已损坏或格式不支持，已跳过；文件改动后会重新识别')
+        self.assertEqual(value['state']['message'], '2 张图片已损坏或格式不支持，留在图库里但不识别；文件改动后会重新识别')
         # The damaged file is replaced by a valid picture: the next sync recognises it, under the same UUID.
         image(folder / 'bad.png', 'yellow', (51, 31))
         settle(folder)

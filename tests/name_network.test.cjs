@@ -104,3 +104,14 @@ test('refreshing names from the task panel keeps the network status', async () =
   assert.equal(context.state.names.network, network);
   assert.equal(context.state.names.state.status, 'fetching');
 });
+
+test('names waiting for consent are not shown as a failure', () => {
+  const context = {number: String};
+  vm.createContext(context);
+  const start = source.indexOf('const NAMES_ACTIVE');
+  vm.runInContext(source.slice(start, source.indexOf('\n', source.indexOf('const namesLine', start))) + ';this.namesLine = namesLine;', context);
+  const line = context.namesLine({status: 'unauthorized'});
+  assert.doesNotMatch(line, /失败/);
+  assert.match(line, /网络与隐私/);
+  assert.equal(context.namesLine({status: 'error'}), '获取失败，将在下次启动时重试');
+});

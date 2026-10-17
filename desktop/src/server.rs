@@ -71,6 +71,8 @@ pub struct Launch {
     config: Mutex<Option<Config>>,
     /// The library of the latest start (None: whatever the command line or the registry chose), for retry.
     library: Mutex<Option<PathBuf>>,
+    /// Why startup stopped before the service could be configured; a retry cannot get past it.
+    blocked: Mutex<Option<String>>,
 }
 #[derive(Clone)]
 struct Config {
@@ -248,6 +250,12 @@ pub(crate) fn show_error(main: &WebviewWindow, message: &str, log: &VecDeque<Str
     on_start(main, &js);
 }
 
+/// Startup stopped before the service was configured: remember why, so a retry repeats it instead of waiting.
+pub(crate) fn blocked(main: &WebviewWindow, message: &str) {
+    *main.app_handle().state::<Launch>().blocked.lock().unwrap() = Some(message.into());
+    show_error(main, message, &VecDeque::new());
+}
+
 pub fn page_loaded(main: &WebviewWindow) {
     let app = main.app_handle();
     let error = app.state::<ErrorPage>().0.lock().unwrap().clone();
@@ -272,7 +280,7 @@ pub fn boot(app: AppHandle, main: WebviewWindow, bridge_port: u16, token: String
     let root = match root(&app, &args) {
         Ok(root) => root,
         Err(error) => {
-            show_error(&main, &error, &VecDeque::new());
+            blocked(&main, &error);
             return;
         }
     };
@@ -317,6 +325,8 @@ fn run(app: &AppHandle, main: &WebviewWindow, library: Option<PathBuf>) {
     let generation = app.state::<Launch>().generation.fetch_add(1, Ordering::SeqCst) + 1;
     let Some(Config { port, bridge_port, token, root, mut args }) = app.state::<Launch>().config.lock().unwrap().clone()
     else {
+        let why = app.state::<Launch>().blocked.lock().unwrap().clone().unwrap_or_else(|| "应用没有启动完成".into());
+        show_error(main, &format!("{why}。处理后请退出并重新打开 Illustash"), &VecDeque::new());
         return;
     };
     if let Some(library) = &library {

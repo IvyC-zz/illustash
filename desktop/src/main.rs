@@ -11,7 +11,7 @@ mod server;
 mod welcome;
 
 #[cfg(not(windows))]
-use tauri::menu::{Menu, MenuItem, Submenu};
+use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, Submenu};
 use tauri::{Manager, RunEvent, WebviewUrl, WebviewWindowBuilder, WindowEvent};
 
 fn main() {
@@ -63,7 +63,19 @@ fn main() {
                 // macOS keeps its native editing/quit menus and refresh command.
                 let menu = Menu::default(&handle)?;
                 let reload = MenuItem::with_id(app, "reload", "刷新页面", true, Some("CmdOrCtrl+R"))?;
-                menu.append(&Submenu::with_items(app, "视图", true, &[&reload])?)?;
+                // The default menu already has a View menu (full screen): refresh joins it instead of a second one.
+                let view = menu
+                    .items()?
+                    .into_iter()
+                    .filter_map(|item| item.as_submenu().cloned())
+                    .find(|submenu| submenu.text().is_ok_and(|text| text == "View"));
+                match view {
+                    Some(view) => {
+                        view.append(&PredefinedMenuItem::separator(app)?)?;
+                        view.append(&reload)?;
+                    }
+                    None => menu.append(&Submenu::with_items(app, "视图", true, &[&reload])?)?,
+                }
                 app.set_menu(menu)?;
             }
             let main = WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
@@ -80,14 +92,14 @@ fn main() {
                 })
                 .build()?;
             if let Err(error) = &computation {
-                server::show_error(&main, error, &std::collections::VecDeque::new());
+                server::blocked(&main, error);
                 return Ok(());
             }
             let token = bridge::token();
             let port = match bridge::start(handle.clone(), token.clone()) {
                 Ok(port) => port,
                 Err(error) => {
-                    server::show_error(&main, &format!("无法启动本机登录通道：{error}；请重新启动应用"), &std::collections::VecDeque::new());
+                    server::blocked(&main, &format!("无法启动本机登录通道：{error}；请重新启动应用"));
                     return Ok(());
                 }
             };

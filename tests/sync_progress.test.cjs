@@ -60,9 +60,9 @@ test('a finished run tells unreadable pictures, retried next time, apart from da
   const done = {status: 'done', finished_at: '10-13 09:00'};
   assert.equal(context.syncLine({...done, failed: 2}),
     '上次同步：10-13 09:00 · 2 张暂时读不到（可能还在 iCloud），下次同步重试');
-  assert.equal(context.syncLine({...done, damaged: 1}), '上次同步：10-13 09:00 · 1 张已损坏或格式不支持，已跳过');
+  assert.equal(context.syncLine({...done, damaged: 1}), '上次同步：10-13 09:00 · 1 张已损坏或格式不支持，未识别');
   assert.equal(context.syncLine({...done, failed: 2, damaged: 1, unreadable: 1}),
-    '上次同步：10-13 09:00 · 1 处暂时读不到，已有图片保留不动 · 2 张暂时读不到（可能还在 iCloud），下次同步重试 · 1 张已损坏或格式不支持，已跳过');
+    '上次同步：10-13 09:00 · 1 处暂时读不到，已有图片保留不动 · 2 张暂时读不到（可能还在 iCloud），下次同步重试 · 1 张已损坏或格式不支持，未识别');
   assert.equal(context.syncLine({...done, failed: 0, damaged: 0}), '上次同步：10-13 09:00');
 });
 
@@ -76,4 +76,26 @@ test('damaged pictures are listed where they are, the rest counted', () => {
   assert.match(html, /<bdi>D:\\Pictures\\c.jpg<\/bdi>/);
   assert.match(html, /另有 1 张未列出。/);
   assert.doesNotMatch(context.syncDamaged({count: 1, paths: ['/data/x.png']}), /未列出/);
+});
+
+test('a picture that cannot be decoded shows a plain placeholder; the viewer keeps its own message', () => {
+  const app = readFileSync(require('node:path').join(__dirname, '../web/static/app.js'), 'utf8');
+  const start = app.indexOf('// A picture the app cannot decode');
+  let listener;
+  class HTMLImageElement {
+    constructor(src, id = '') { this.id = id; this.src = src; this.replaced = null; }
+    getAttribute() { return this.src; }
+    replaceWith(node) { this.replaced = node; }
+  }
+  const c = {HTMLImageElement, document: {addEventListener(type, f, capture) { assert.equal(type, 'error'); assert.equal(capture, true); listener = f; },
+    createElement: () => ({})}};
+  vm.createContext(c);
+  vm.runInContext(app.slice(start, app.indexOf('// ---------- toast with undo', start)), c);
+  const card = new HTMLImageElement('/image?id=a&size=thumb');
+  listener({target: card});
+  assert.equal(card.replaced.className, 'img-broken');
+  assert.equal(card.replaced.textContent, '无法打开');
+  const viewer = new HTMLImageElement('/image?id=a&size=preview', 'viewerImg'), other = new HTMLImageElement('/favicon.svg');
+  listener({target: viewer}); listener({target: other});
+  assert.equal(viewer.replaced, null); assert.equal(other.replaced, null);
 });

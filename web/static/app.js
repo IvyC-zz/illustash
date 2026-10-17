@@ -114,6 +114,14 @@ document.addEventListener('click', async e => {
   if (await setNamesNetwork(true)) { input?.focus(); input?.dispatchEvent(new Event('input', {bubbles: true})); }
 });
 
+// A picture the app cannot decode (a damaged file): a plain placeholder instead of the browser's broken-image glyph.
+// The viewer has its own message (#viewerMissing).
+document.addEventListener('error', e => {
+  const img = e.target;
+  if (!(img instanceof HTMLImageElement) || img.id || !img.getAttribute('src')?.startsWith('/image?')) return;
+  const ph = document.createElement('span'); ph.className = 'img-broken'; ph.textContent = '无法打开'; img.replaceWith(ph);
+}, true);
+
 // ---------- toast with undo ----------
 function toast(message, withUndo = false) {
   $('toastText').textContent = message; $('toastUndo').hidden = !withUndo; $('toast').hidden = false;
@@ -974,6 +982,7 @@ async function undo() {
   try {
     const label = state.undo.label, r = await post('/api/undo', {id: state.undo.id}); setUndo(r.undo);
     toast('已撤销 · ' + label.replace(/^已/, '')); await reload(); refreshMeta().catch(e => error(readError(e)));
+    if (state.route.page === 'home') renderHome(true);
     if (state.route.page === 'identity') renderIdentity();
     if (state.route.page === 'groups') renderGroups(true);
     if (state.route.page === 'artist-audit') renderArtistAudit();
@@ -2406,7 +2415,7 @@ function syncLine(s) {
   const kept = s.unreadable ? ` · ${number(s.unreadable)} 处暂时读不到，已有图片保留不动` : '';
   // Pictures given up on, apart (#112): unreadable ones are tried again, damaged ones wait for their file to change.
   const gave = (s.failed ? ` · ${number(s.failed)} 张暂时读不到（可能还在 iCloud），下次同步重试` : '')
-    + (s.damaged ? ` · ${number(s.damaged)} 张已损坏或格式不支持，已跳过` : '');
+    + (s.damaged ? ` · ${number(s.damaged)} 张已损坏或格式不支持，未识别` : '');
   if (s.status === 'done') return `上次同步：${stamp(s.finished_at)}${kept}${gave}`;
   if (s.status === 'needs_recognition') return `有 ${number(s.total || 0)} 张图等待识别（识别服务未启动）${kept}`;
   if (s.status === 'interrupted') return s.message ? `同步已中断（${s.message}），可重新扫描` : '同步已中断，可重新扫描';
@@ -2420,7 +2429,7 @@ function syncDamaged(d) {
   const rows = d.paths.map(p => `<div class="setting-line lib-folder"><span class="lib-path" title="${esc(p)}"><bdi>${esc(short(p))}</bdi></span></div>`).join('');
   const more = d.count > d.paths.length ? `<p class="muted-note">另有 ${number(d.count - d.paths.length)} 张未列出。</p>` : '';
   return fold('task-sync-damaged', `${number(d.count)} 张图片已损坏或格式不支持`,
-    `<p class="muted-note">这些文件读得到，但不是能打开的图片，同步时跳过。修好或换成正常的图片后，下次同步会重新识别。</p>${rows}${more}`);
+    `<p class="muted-note">这些文件读得到，但不是能打开的图片：已经加入图库，图上显示「无法打开」，不参与识别。修好或换成正常的图片后，下次同步会重新识别。</p>${rows}${more}`);
 }
 let syncTimer = null, lastImported = 0, syncPoll = 0;
 async function pollSync() {
@@ -2436,6 +2445,8 @@ async function pollSync() {
       state.countDirty = true; state.readEpoch++;
       lastImported = s.imported || 0; await refreshMeta().catch(e => error(readError(e)));
       if (!panelPage(state.route.page) && !selCount()) reload();
+      // The home page's day groups and counts are drawn from their own read; redraw them once the sync settles.
+      else if (state.route.page === 'home' && !SYNC_ACTIVE.includes(s.status)) renderHome(true);
     }
     if (SYNC_ACTIVE.includes(was) && s.status === 'done' && s.imported) toast(`同步完成：新加入 ${number(s.imported)} 张`);
     renderTasks();
@@ -2555,7 +2566,7 @@ async function pollIndex() {
 // Chinese / Japanese names fetched from Bangumi (text queries only); a configured model API is an opt-in last resort.
 let namesTimer = 0;
 const NAMES_ACTIVE = ['fetching', 'matching', 'translating', 'running'];
-const namesLine = s => s.status === 'off' ? '当前未启用' : NAMES_ACTIVE.includes(s.status) ? `正在获取 ${s.total ? `${number(s.done || 0)} / ${number(s.total)}` : '…'}` : s.status === 'error' ? '获取失败，将在下次启动时重试' : '已是最新';
+const namesLine = s => s.status === 'off' ? '当前未启用' : NAMES_ACTIVE.includes(s.status) ? `正在获取 ${s.total ? `${number(s.done || 0)} / ${number(s.total)}` : '…'}` : s.status === 'error' ? '获取失败，将在下次启动时重试' : s.status === 'unauthorized' ? '未允许联网查询 · 可在设置 › 网络与隐私里允许' : '已是最新';
 async function renderNamesCard(fresh = true) {
   const route = state.route, token = state.token;
   if (!$('namesCard') || state.route.page !== 'settings') return;
@@ -2567,7 +2578,7 @@ async function renderNamesCard(fresh = true) {
   const row = (t, c) => c ? `<tr><td>${t}</td><td>${number(c.total)}</td><td>${number(c.zh || 0)}</td><td>${number(c.ja || 0)}</td><td>${number(c.readable || 0)}</td></tr>` : '';
   const cc = x.counts?.characters;
   card.innerHTML = cardHead('角色名称', '从 Bangumi 取角色的中文名，只发送 tag 和作品名。没有中文名时显示日文名，再没有就显示英文名；原始 tag 在悬停提示里。', 'library') + `
-    ${taskLink(namesLine(s) + (s.error ? '：' + s.error : ''), active ? 'busy' : s.status === 'error' ? 'warn' : s.status === 'off' ? 'off' : '')}
+    ${taskLink(namesLine(s) + (s.error ? '：' + s.error : ''), active ? 'busy' : s.status === 'error' ? 'warn' : ['off', 'unauthorized'].includes(s.status) ? 'off' : '')}
     ${startupSwitch('names', '启动时获取', '只查新增的角色')}
     ${x.counts ? fold('namesStats', `覆盖率${active ? '（完成后更新）' : ''}${cc ? `：${Math.round(cc.zh / Math.max(1, cc.total) * 100)}% 的角色有中文名` : ''}`, `<table class="settings-table"><tr><th></th><th>共</th><th>中文名</th><th>日文名</th><th>英文名</th></tr>${row('角色', x.counts.characters)}${row('作品', x.counts.works)}${row('皮肤', x.counts.skins)}</table>`) : ''}`;
   wireFolds(card);
@@ -3270,7 +3281,7 @@ function taskList() {
     {key: 'index', name: '检查新角色', active: INDEX_ACTIVE.includes(ix.status), line: state.index ? indexLine(ix, state.index.check) : '…', warn: ix.status === 'error',
       body: INDEX_ACTIVE.includes(ix.status) ? bar(ix.done, ix.total) : '',
       action: `<button class="quiet small" data-task="index" ${INDEX_ACTIVE.includes(ix.status) || ix.status === 'off' || !state.index?.watch?.works.length ? 'disabled' : ''} title="${state.index?.watch?.works.length ? '查关注作品在 Danbooru 上有没有新角色（只发送作品名）' : '先在资料库里关注作品'}">立即检查</button>`},
-    {key: 'names', name: '角色名称', active: NAMES_ACTIVE.includes(nm.status), line: namesLine(nm), warn: nm.status === 'error', body: NAMES_ACTIVE.includes(nm.status) ? bar(nm.done, nm.total) : '',
+    {key: 'names', name: '角色名称', active: NAMES_ACTIVE.includes(nm.status), line: namesLine(nm) + (nm.error ? '：' + nm.error : ''), warn: nm.status === 'error', body: NAMES_ACTIVE.includes(nm.status) ? bar(nm.done, nm.total) : '',
       action: `<button class="quiet small" data-task="names" ${NAMES_ACTIVE.includes(nm.status) || nm.status === 'off' || !state.names ? 'disabled' : ''} title="从 Bangumi 重新获取全部角色的中文名（只发送 tag 与作品名）">重新获取</button>`},
     {key: 'similar', name: '相似图片', active: SIMILAR_ACTIVE.includes(sim.status), line: taskSimilar(sim), warn: sim.status === 'error', body: SIMILAR_ACTIVE.includes(sim.status) ? bar(sim.done, sim.total) : '',
       action: `<button class="quiet small" data-task="similar" ${SIMILAR_ACTIVE.includes(sim.status) || sim.status === 'off' ? 'disabled' : ''}>重新检查</button>`},
