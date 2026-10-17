@@ -43,7 +43,7 @@ cargo build --release --manifest-path native/terms/Cargo.toml
 
 这是一个主要满足作者自己需求的个人项目：
 
-- 欢迎在 Issue 里报告 bug，请写明系统、版本和复现步骤；
+- 欢迎在 Issue 里报告 bug，请用「报告问题」模板，附上系统、诊断信息和复现步骤；装不上或打不开先看 [装不上怎么办](docs/INSTALL.md)；
 - 功能建议也欢迎提，但不一定会做；
 - **暂不接受代码贡献（Pull Request）**。
 
