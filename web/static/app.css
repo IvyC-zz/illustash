@@ -1302,7 +1302,9 @@ button.sidebar-bottom:hover .nav-icon{background:rgba(var(--sh),.06)}
 .task-top{display:flex;align-items:center;justify-content:space-between;margin:0 4px 6px}
 .task-top h2{margin:0;font-size:15px;font-weight:650}
 .task-pop h6{margin:12px 6px 6px;font-size:11px;font-weight:600;color:var(--muted);letter-spacing:.2px}
-.task-item{padding:10px 12px;display:grid;gap:8px}
+/* One shrinkable column: a long unbroken line inside (a damaged picture's path) must ellipsize, not widen the row past
+   the panel and push its button out of view. */
+.task-item{padding:10px 12px;display:grid;grid-template-columns:minmax(0,1fr);gap:8px}
 .task-item.on{background:color-mix(in srgb,var(--accent-soft) 45%,transparent)}
 .task-main{display:flex;align-items:center;gap:10px;font-size:12.5px}
 .task-text{flex:1;min-width:0;display:grid;gap:1px}
