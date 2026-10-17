@@ -212,7 +212,7 @@ pub(super) fn handle(request: Request, host: &Host, received: u64, text: &str, b
                 let mut out = Json::object([("path", path.to_string_lossy().as_ref().into()), ("name", name.into())]);
                 if let Err(error) = listed {
                     out.set("listed", false.into());
-                    out.set("error", error.to_string().into());
+                    out.set("error", crate::app_libraries::unlisted_reason(&error).into());
                 }
                 Ok(out)
             })

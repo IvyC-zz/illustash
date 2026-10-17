@@ -158,7 +158,9 @@ impl Options {
 impl Application {
     /// Opens and registers an explicit package. Does not bind a port or start background work.
     pub fn open(path: &Path, options: Options) -> Result<Self> {
-        Self::from_library(Library::open(path)?, Session::token()?, options, |error| error.to_string())
+        Self::from_library(Library::open(path)?, Session::token()?, options, |error| {
+            crate::app_libraries::unlisted_reason(&error)
+        })
     }
     pub(crate) fn from_library(
         library: Library,
@@ -367,8 +369,9 @@ impl Application {
         )?;
         replacement.syncer.configure_startup(&replacement.library, !self.sync_disabled)?;
         if let Err(error) = crate::app_libraries::remember(&replacement.library) {
-            eprintln!("没能记进最近图库，图库照常打开：{error}");
-            replacement.unlisted = Some(error.to_string());
+            let note = crate::app_libraries::unlisted_reason(&error);
+            eprintln!("没能记进最近图库，图库照常打开：{note}");
+            replacement.unlisted = Some(note);
         }
         let result = Json::object([
             ("path", replacement.library.display_path().to_string_lossy().as_ref().into()),

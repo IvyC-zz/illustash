@@ -273,7 +273,7 @@ fn create_library(host: &Host, body: &Json) -> Result<Json> {
     let mut out = Json::object([("path", path.into()), ("name", name.into())]);
     if let Err(error) = crate::app_libraries::remember_created(std::path::Path::new(path), name) {
         out.set("listed", false.into());
-        out.set("error", error.to_string().into());
+        out.set("error", crate::app_libraries::unlisted_reason(&error).into());
     }
     Ok(out)
 }
@@ -567,8 +567,12 @@ pub(crate) fn run(args: &[String]) -> Result<u8> {
             per_run,
         },
         |error| match &upgrade_backup {
-            Some(backup) => format!("升级已提交，没能记进最近图库：{error}；升级前备份：{}", backup.display()),
-            None => error.to_string(),
+            Some(backup) => format!(
+                "升级已提交，没能记进最近图库：{}；升级前备份：{}",
+                crate::app_libraries::unlisted_reason(&error),
+                backup.display()
+            ),
+            None => crate::app_libraries::unlisted_reason(&error),
         },
     )?;
     let host = Arc::new(Host { application, origin: format!("http://127.0.0.1:{port}") });

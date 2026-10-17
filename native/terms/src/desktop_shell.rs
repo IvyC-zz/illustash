@@ -65,7 +65,8 @@ pub fn create(root: &Path, name: &str, picks: Vec<Pick>) -> Result<Created> {
     let dest = crate::app_libraries::unique_path(name)?;
     let built = crate::app_service::build_sources(root, &dest, name, sources)?;
     let path = PathBuf::from(built["path"].as_str().ok_or_else(|| Error::Schema("建库结果缺少路径".into()))?);
-    let unlisted = crate::app_libraries::remember_created(&path, name).err().map(|e| e.to_string());
+    let unlisted =
+        crate::app_libraries::remember_created(&path, name).err().map(|e| crate::app_libraries::unlisted_reason(&e));
     Ok(Created { path, unlisted })
 }
 

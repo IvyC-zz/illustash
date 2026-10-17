@@ -201,18 +201,28 @@ fn remember_unlocked(path: &Path, name: &str, file: &Path, opened_at: &str, fron
         .map_err(|e| Error::Invalid(format!("无法序列化图库记录：{e}")))?
         + "\n";
     let parent = file.parent().ok_or_else(|| Error::Invalid("无效图库注册表路径".into()))?;
-    fs::create_dir_all(parent).map_err(|e| registry_io(e, front, parent, None))?;
+    // Every caller only says why the library is not listed (#97, #111, #176): keep the operation and its file.
+    fs::create_dir_all(parent).map_err(|e| crate::error::io_at(e, parent, None))?;
     let tmp = file.with_extension("tmp");
-    fs::write(&tmp, text).map_err(|e| registry_io(e, front, &tmp, None))?;
-    fs::rename(&tmp, file).map_err(|e| registry_io(e, front, &tmp, Some(file)))?;
+    fs::write(&tmp, text).map_err(|e| crate::error::io_at(e, &tmp, None))?;
+    fs::rename(&tmp, file).map_err(|e| crate::error::io_at(e, &tmp, Some(file)))?;
     Ok(())
 }
-fn registry_io(error: std::io::Error, front: bool, path: &Path, destination: Option<&Path>) -> Error {
-    if front {
-        return Error::Io(error);
+/// Why a library could not be listed among the recent ones, in one sentence for the page (#179): which file could not
+/// be written and, for the common case, the likely reason, instead of an internal error prefix or an errno.
+pub(crate) fn unlisted_reason(error: &Error) -> String {
+    match error {
+        Error::IoAt { source, path, destination } => {
+            let file = destination.as_deref().unwrap_or(path);
+            let why = if source.kind() == std::io::ErrorKind::PermissionDenied {
+                "没有写入权限（文件或目录可能是只读的）".to_owned()
+            } else {
+                source.to_string()
+            };
+            format!("最近图库记录（{}）写不进去：{why}", file.display())
+        }
+        other => other.to_string(),
     }
-    // library_action wraps creation's OSError as Invalid; successful-session remember retains Io.
-    Error::Invalid(crate::error::filesystem_message(&error, path, destination))
 }
 
 fn now() -> Result<String> {
@@ -389,7 +399,8 @@ mod tests {
     }
     #[cfg(target_os = "macos")]
     #[test]
-    fn created_registry_failures_have_python_oserror_text_and_session_remains_io() {
+    fn registry_failures_keep_the_failing_operation_and_its_files() {
+        // #179: creation, import and opening all only say why the library is not listed, from the same IoAt.
         let f = Fixture::new();
         let lib = f.library();
         f.write(json!({"recent":[]}));
@@ -397,11 +408,10 @@ mod tests {
         let tmp = file.with_extension("tmp");
         fs::create_dir(&tmp).unwrap();
         let before = fs::read(&file).unwrap();
-        let failure = remember_at(lib.display_path(), lib.name(), &file, "created", false).unwrap_err();
-        assert!(
-            matches!(failure, Error::Invalid(message) if message == format!("[Errno 21] Is a directory: {}", crate::http_read::python_repr(&tmp.to_string_lossy())))
-        );
-        assert!(matches!(remember_at(lib.display_path(), lib.name(), &file, "opened", true), Err(Error::Io(_))));
+        for front in [false, true] {
+            let failure = remember_at(lib.display_path(), lib.name(), &file, "created", front).unwrap_err();
+            assert!(matches!(&failure, Error::IoAt { path, destination: None, .. } if path == &tmp), "{failure:?}");
+        }
         assert_eq!(fs::read(&file).unwrap(), before);
         fs::remove_dir(&tmp).unwrap();
         fs::remove_file(&file).unwrap();
@@ -410,8 +420,10 @@ mod tests {
         fs::write(&keep, b"existing").unwrap();
         let failure = remember_at(lib.display_path(), lib.name(), &file, "created", false).unwrap_err();
         assert!(
-            matches!(failure, Error::Invalid(message) if message == format!("[Errno 21] Is a directory: {} -> {}", crate::http_read::python_repr(&tmp.to_string_lossy()), crate::http_read::python_repr(&file.to_string_lossy())))
+            matches!(&failure, Error::IoAt { path, destination: Some(to), .. } if path == &tmp && to == &file),
+            "{failure:?}"
         );
+        assert!(unlisted_reason(&failure).starts_with(&format!("最近图库记录（{}）写不进去：", file.display())));
         assert_eq!(fs::read(keep).unwrap(), b"existing");
         assert!(tmp.is_file());
     }
@@ -473,6 +485,33 @@ mod tests {
         let blocker = f.0.join("not-a-directory");
         fs::write(&blocker, "x").unwrap();
         assert!(remember_at(lib.display_path(), lib.name(), &blocker.join("libraries.json"), "now", true).is_err());
+    }
+    #[test]
+    fn unlisted_reason_names_the_registry_file_without_internal_prefixes() {
+        // #179: the page says which file could not be written and why, not 「读取失败」 or a Python-style errno.
+        let f = Fixture::new();
+        let lib = f.library();
+        f.write(json!({"recent":[]}));
+        let file = f.registry();
+        fs::create_dir(file.with_extension("tmp")).unwrap();
+        let error = remember_at(lib.display_path(), lib.name(), &file, "now", false).unwrap_err();
+        let reason = unlisted_reason(&error);
+        assert!(reason.starts_with("最近图库记录（") && reason.contains("写不进去："), "{reason}");
+        assert!(reason.contains("libraries.tmp"), "the failing write is the temporary file: {reason}");
+        for prefix in ["读取失败", "不合法", "[Errno"] {
+            assert!(!reason.contains(prefix), "{reason}");
+        }
+        let denied = crate::error::io_at(
+            std::io::Error::from(std::io::ErrorKind::PermissionDenied),
+            &file.with_extension("tmp"),
+            Some(&file),
+        );
+        let reason = unlisted_reason(&denied);
+        assert!(
+            reason.contains("libraries.json") && reason.ends_with("没有写入权限（文件或目录可能是只读的）"),
+            "{reason}"
+        );
+        assert_eq!(unlisted_reason(&Error::Invalid("无效图库注册表路径".into())), "不合法：无效图库注册表路径");
     }
     #[test]
     fn concurrent_hosts_never_lose_each_others_registry_updates() {
