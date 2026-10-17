@@ -150,6 +150,25 @@ class NativeFirstInstallTest(unittest.TestCase):
         # Compare parsed paths: on Windows the registry's JSON escapes every backslash.
         self.assertIn(made['path'], [entry['path'] for entry in json.loads(registry.read_text(encoding='utf-8'))['recent']])
 
+    def test_opening_with_blocked_registry_still_opens_and_says_why(self):
+        # #176: listing only spares picking the library again next time; it opens even when the registry cannot be
+        # written, and the libraries answer says why once. Without a failure the answer carries no such field.
+        self.start(self.create())
+        self.assertNotIn('unlisted', json.loads(self.request('/api/libraries')['body']))
+        response = self.request('/api/libraries/new', {'kind': 'folder', 'folder': str(self.folder), 'name': '另一个'})
+        self.assertEqual(response['status'], 200, response['body'])
+        made = json.loads(response['body'])
+        registry = self.root / 'support/libraries.json'
+        before = registry.read_bytes()
+        (self.root / 'support/libraries.tmp').mkdir()
+        response = self.request('/api/libraries/open', {'path': made['path']})
+        self.assertEqual(response['status'], 200, response['body'])
+        info = json.loads(self.request('/api/libraries')['body'])
+        self.assertEqual(Path(info['current']).resolve(), Path(made['path']).resolve())
+        self.assertTrue(info['unlisted'])
+        self.assertEqual(registry.read_bytes(), before)
+        (self.root / 'support/libraries.tmp').rmdir()
+
     def test_existing_user_creating_another_library_keeps_the_first_and_its_guide(self):
         # #97: a second library starts its own guide; the first library, its sources and its guide stay as they were.
         first = self.create()

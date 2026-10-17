@@ -163,5 +163,6 @@
   "进行中与其他任务": "Running and other tasks",
   "全部任务": "All tasks",
   "各任务是否自动运行，在{link}里改。": "Whether tasks run automatically is set in {link}.",
-  "已开始重新获取角色名称": "Fetching character names again"
+  "已开始重新获取角色名称": "Fetching character names again",
+  "没能把这个图库记进最近图库：{why}。图库照常可用，只是下次启动时可能不会自动打开它。": "Could not add this library to the recent ones: {why}. The library works as usual, but it may not open automatically next time."
 }

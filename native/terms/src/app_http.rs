@@ -566,12 +566,9 @@ pub(crate) fn run(args: &[String]) -> Result<u8> {
             sync_disabled,
             per_run,
         },
-        |error| {
-            if let Some(backup) = &upgrade_backup {
-                Error::Schema(format!("升级已提交，服务注册失败：{error}；升级前备份：{}", backup.display()))
-            } else {
-                error
-            }
+        |error| match &upgrade_backup {
+            Some(backup) => format!("升级已提交，没能记进最近图库：{error}；升级前备份：{}", backup.display()),
+            None => error.to_string(),
         },
     )?;
     let host = Arc::new(Host { application, origin: format!("http://127.0.0.1:{port}") });

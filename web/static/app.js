@@ -3733,6 +3733,8 @@ async function replayGuide() {
     await meta;
     window.splash?.ready();
     taskTick();
+    // The library opened although it could not be listed among the recent ones (#176): say so once.
+    api('/api/libraries').then(x => { if (x?.unlisted) error(t('没能把这个图库记进最近图库：{why}。图库照常可用，只是下次启动时可能不会自动打开它。', {why: x.unlisted})); }).catch(() => {});
     guideAfterBoot();
   } catch (e) { window.splash?.ready(); error('启动失败：' + e.message + '。请检查启动终端，然后刷新页面。'); }
 })();

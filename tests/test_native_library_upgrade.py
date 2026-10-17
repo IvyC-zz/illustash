@@ -427,24 +427,27 @@ class NativeLibraryUpgradeTest(unittest.TestCase):
         before, source, config = database(lib.db), lib.source.read_bytes(), (lib.path / 'library.json').read_bytes()
         existing = {p.relative_to(lib.path).as_posix() for p in lib.path.rglob('*.sqlite')}
         self.support.mkdir(parents=True, exist_ok=True)
+        registry = self.support / 'libraries.json'
+        registry_before = registry.read_bytes() if registry.exists() else None
         blocked = self.support / 'libraries.tmp'; blocked.mkdir()
-        port = free_port()
-        result = self.failed(lib, port=port)
-        self.assertIn('升级已提交，服务注册失败'.encode(), result.stderr)
-        self.assertIn('升级前备份'.encode(), result.stderr)
+        # #176: listing the library among the recent ones failing does not stop it from opening; the page is told
+        # why, with the pre-upgrade backup, and the upgrade stays committed (never reported as a rollback).
+        process, origin = self.start(lib)
+        libraries = json.loads(fetch(origin, {'url': '/api/libraries'}, origin)['body'])
+        self.assertIn('升级已提交，没能记进最近图库', libraries['unlisted'])
         backups = self.backups(lib, existing)
         self.assertEqual(len(backups), 1)
-        self.assertIn(str(backups[0]).encode(), result.stderr)
+        self.assertIn(str(backups[0]), libraries['unlisted'])
         self.assertEqual(database(backups[0]), before)
         self.assertEqual(lib.source.read_bytes(), source)
         self.assertEqual((lib.path / 'library.json').read_bytes(), config)
         with closing(sqlite3.connect(lib.db)) as c:
             self.assertEqual(c.execute("SELECT value FROM meta WHERE key='terms_schema'").fetchone()[0], '7')
-        # Registration follows the committed migration; this failure is never reported as rollback.
-        with socket.socket() as listener:
-            listener.bind(('127.0.0.1', port))
+        self.assertEqual(registry.read_bytes() if registry.exists() else None, registry_before)
+        self.stop(process)
         blocked.rmdir()
         process, origin = self.start(lib, upgrade=False)
+        self.assertNotIn('unlisted', json.loads(fetch(origin, {'url': '/api/libraries'}, origin)['body']))
         self.reads(lib, origin)
         self.stop(process)
         current = database(lib.db)
