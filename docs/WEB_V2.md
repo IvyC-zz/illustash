@@ -23,6 +23,15 @@
 - `GET /api/onboarding` 返回 `guide`、`capability`（识别与索引 worker 是否配置、共享索引里的角色参考数、本次会话的识别自检状态）、`results`（可见图片、已识别即有 WD 分级、认出角色的图片与角色数、未识别）；带 `?works=1` 再返回推荐作品。`POST /api/onboarding` 的 `action` 为 `step`（带 `step`）、`skip`、`done`、`reopen`、`tick`（带 `item`）、`seen`（带 `key`：names、works）、`hide`、`check`；`check` 用 `--check` 启动一次识别 worker（实际加载模型），结果只留在本次会话，没有 worker 时直接报告缺失。
 - 推荐作品：按已认出角色的图片数取前 5 部。角色已归到作品的按作品计；否则取角色 tag 末尾的作品限定词（`name_(作品)`），与 WD 普通画面标签同名的限定词（如 `swimsuit`）不算。没有限定词的角色本地不推断。「关注」用 `/api/works` 的 `from_tag` 建好（或复用）链接 Danbooru tag 的作品，再加入关注列表。
 
+## 界面语言（2026-10-18，#173）
+
+界面语言整个 App 共用，不按图库或浏览器分开：存在应用数据目录的 `preferences.json`（和 `libraries.json` 同一处，`ILLUSTASH_APP_SUPPORT` 可改），`{"language": "system" | "zh-CN" | "en"}`，默认 `system`。文件缺失、读不了或内容不对都按 `system` 处理，不影响页面打开；写入与 `libraries.json` 相同，持锁读改写、临时文件改名，保留文件里其他键。在「设置 › 通用 › 语言」切换（跟随系统 / 简体中文 / English，语言名不翻译），保存后页面重新载入。页面从 `/i18n.js` 得到当前设置；`GET /api/settings` 不含它，回复保持旧录制的字节。`POST /api/preferences` 只接受 `{"language": …}`，其他键或取值返回 400，成功返回 `{"preferences": {"language": …}}`。偏好不授权联网、不启动任务。
+
+- **翻译方式**：用中文原文当键（gettext 式）。前端写 `t('中文原文')`，参数用 `{n}`、`{name}` 占位：`t('{n} 项进行中', {n})`。英文页面有译文就显示英文，没有就照常显示中文，所以可以分块迁移，没迁到的文字不会坏。`t()` 只返回文本，插进 HTML 时照旧由调用处转义；需要带链接或加粗时把 HTML 作为参数传入，不写进译文。静态页面里的文字用 `data-t`（元素文本）和 `data-t-attr="title aria-label"`（列出的属性）标记，`i18n.js` 在 `app.js` 之前替换一次。
+- **加载**：`/i18n.js` 由原生宿主拼出：先写 `self.ILLUSTASH_LANGUAGE`（当前设置）和 `self.ILLUSTASH_EN`（`web/static/locales/en.json` 解析后重新序列化；文件坏了按空表处理，界面保持中文），再接 `web/static/i18n.js`，不缓存。`index.html` 在 `splash.js`、`app.js` 之前加载它。`system` 按 `navigator.languages` 的第一项决定：`zh` 开头用中文，其余用英文。页面的 `lang` 属性跟着设成 `zh-CN` 或 `en`。
+- **检查**：`tests/i18n.test.cjs`（本机全量的 Node 测试）收集 `web/static/*.js` 里的 `t('…')` 字面量和 `index.html` 的标记文字，要求 `t()` 只用单引号或双引号字面量，`en.json` 没有代码不再用的键，译文的占位符与中文一致；没翻译的条目只报告数量，不算失败。在测试里只运行 `app.js` 片段的，用 `tests/i18n_zh.cjs` 提供中文页面的 `t()`。
+- **范围**：已迁移左侧导航、顶栏（含视图选项、R18 按钮、撤销提示）、设置页导航与「通用」、任务面板的标题和固定文字；状态行（同步、角色名称、相似图片等）、其余页面、后端返回的文字和桌面外壳按 #173 的后续阶段迁移。
+
 ## 数据模型与迁移
 
 - `entities.parent_id` 指向父角色，`variant` 保存子标签。实测按 **相同 base_tag + 相同 copyright + skin 为空** 唯一匹配父角色，不能用 char_id 直接等于 base_tag。没有唯一匹配时创建稳定的本地父实体，不猜角色。在当前快照上得到 540 个变体、19 个本地父实体。

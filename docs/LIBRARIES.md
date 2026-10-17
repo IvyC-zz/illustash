@@ -145,7 +145,7 @@ L0 实际做法和设计稿的差别：
 | `review/char-index/`、`game-chars/`、`char-anchors.npy`、`char-anchors.txt` | 原生索引编排、识别与研究 worker | 共享索引 / 锚点；索引更新可写，不能当实验缓存清掉 | SHARED；不随基础包 |
 | `review/char-patch/` | `app_index` 的 watch、state、更新临时区和租约 | 跨运行持久状态，也含可重新获取的中间产物；须逐对象判断 | SHARED；不随包 |
 | `<图库>.pilib/` | `app_library`、同步、缩略图、升级备份 | 用户拥有；source / library 双库、特征、缩略图与备份随包保存 | 用户数据，不进安装包 |
-| `APP_SUPPORT/libraries.json`、设置与账号 | `app_libraries`、设置与原生账号入口 | 用户应用数据，和 SHARED 分开 | 不随包；凭据不参与研究整理 |
+| `APP_SUPPORT/libraries.json`、`preferences.json`（界面语言）、设置与账号 | `app_libraries`、`app_preferences`、设置与原生账号入口 | 用户应用数据，和 SHARED 分开 | 不随包；凭据不参与研究整理 |
 | `review/identity-metadata-*`、`identity-bank-*`、评测与测试图库输出 | 已删除的身份研究工具、`eval_bench.py`、`test_libraries.py`（#186） | 研究输入或输出，可能含私有 UUID / 文件引用；已有数据保留 | 不随包；新输出显式指定 `_scratch/research/` |
 | `review/pi.db`、`library.sqlite`、`full-features.npy`、`full-manifest.csv` 的旧布局入口 | 研究工具与裸库兼容入口 | 可能是指向个人图库的链接；只看链接类别不能推定可删除 | 不随包；不跟随链接做清理 |
 | `tools/` | 构建、检查与验收脚本 | 按入口和实际调用判断职责；保留现行消费者 | Python 源码不进任何安装包；旧 Python 计算代码（原 `web/*.py`、`provenance/`）已在 #9 删除 |

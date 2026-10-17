@@ -13,7 +13,8 @@ use std::{
 };
 use tiny_http::{Header, Response, StatusCode};
 
-pub const ROUTES: &[&str] = &["/", "/app.js", "/app.css", "/theme.js", "/favicon.svg", "/splash.js", "/image"];
+pub const ROUTES: &[&str] =
+    &["/", "/app.js", "/app.css", "/theme.js", "/favicon.svg", "/splash.js", "/i18n.js", "/image"];
 
 pub enum Failure {
     Status(u16),
@@ -26,7 +27,16 @@ impl From<Error> for Failure {
 }
 pub enum Prepared {
     Static(PathBuf, &'static str),
-    Image { source: PathBuf, target: PathBuf, bound: u32 },
+    /// web/static/i18n.js after the language setting and the English table (#173).
+    I18n {
+        script: PathBuf,
+        english: PathBuf,
+    },
+    Image {
+        source: PathBuf,
+        target: PathBuf,
+        bound: u32,
+    },
 }
 pub struct File {
     bytes: Vec<u8>,
@@ -36,6 +46,10 @@ pub struct File {
 
 pub fn prepare(library: &Library, root: &Path, url: &str) -> Result<Prepared, Failure> {
     let path = url.split('?').next().unwrap_or(url);
+    if path == "/i18n.js" {
+        let folder = root.join("web/static");
+        return Ok(Prepared::I18n { script: folder.join("i18n.js"), english: folder.join("locales/en.json") });
+    }
     if path != "/image" {
         let (name, kind) = match path {
             "/" => ("index.html", "text/html"),
@@ -176,6 +190,15 @@ impl Images {
             Prepared::Static(path, kind) => {
                 Ok(File { bytes: fs::read(path).map_err(Error::from)?, kind, cache: false })
             }
+            Prepared::I18n { script, english } => Ok(File {
+                bytes: i18n_script(
+                    &crate::app_preferences::language(),
+                    &fs::read(script).map_err(Error::from)?,
+                    &english,
+                ),
+                kind: "text/javascript",
+                cache: false,
+            }),
             Prepared::Image { source, target, bound } => {
                 let bytes = self.cached(&source, &target, bound).map_err(|e| {
                     eprintln!("HTTP image: {e}");
@@ -220,6 +243,27 @@ impl Images {
         result?;
         Ok(bytes)
     }
+}
+/// The page reads the setting synchronously before app.js runs, so the first paint is already in its language.
+/// The table is parsed and written back as JSON: a broken or missing file leaves the interface in Chinese.
+fn i18n_script(language: &str, script: &[u8], english: &Path) -> Vec<u8> {
+    let table = fs::read(english)
+        .map_err(|e| e.to_string())
+        .and_then(|bytes| {
+            serde_json::from_slice::<serde_json::Map<String, serde_json::Value>>(&bytes).map_err(|e| e.to_string())
+        })
+        .unwrap_or_else(|e| {
+            eprintln!("HTTP i18n: {}: {e}", english.display());
+            serde_json::Map::new()
+        });
+    let mut out = format!(
+        "self.ILLUSTASH_LANGUAGE = {};\nself.ILLUSTASH_EN = {};\n",
+        serde_json::Value::from(language),
+        serde_json::Value::Object(table)
+    )
+    .into_bytes();
+    out.extend_from_slice(script);
+    out
 }
 fn generate(source: &Path, bound: u32) -> io::Result<Vec<u8>> {
     let mut reader = BufReader::new(fs::File::open(source)?);
@@ -390,6 +434,30 @@ pub fn response(file: File) -> Response<Box<dyn Read + Send>> {
 mod tests {
     use super::*;
     use std::sync::atomic::Ordering;
+    #[test]
+    fn i18n_script_prefixes_setting_and_parsed_table() {
+        let mut nonce = [0u8; 12];
+        getrandom::fill(&mut nonce).unwrap();
+        let root = std::env::temp_dir().join(format!("illustash-i18n-{:x}", Sha256::digest(nonce)));
+        fs::create_dir(&root).unwrap();
+        let english = root.join("en.json");
+        fs::write(&english, "{\"设置\": \"Settings\", \"共 {n} 张\": \"{n} pictures\"}").unwrap();
+        let out = String::from_utf8(i18n_script("en", b"/* script */", &english)).unwrap();
+        assert_eq!(
+            out,
+            "self.ILLUSTASH_LANGUAGE = \"en\";\nself.ILLUSTASH_EN = {\"共 {n} 张\":\"{n} pictures\",\"设置\":\"Settings\"};\n/* script */"
+        );
+        // Missing or broken tables fall back to an empty one: the page stays in Chinese instead of failing.
+        fs::write(&english, "{broken").unwrap();
+        assert!(String::from_utf8(i18n_script("system", b"", &english))
+            .unwrap()
+            .ends_with("self.ILLUSTASH_EN = {};\n"));
+        fs::remove_file(&english).unwrap();
+        assert!(String::from_utf8(i18n_script("zh-CN", b"", &english))
+            .unwrap()
+            .starts_with("self.ILLUSTASH_LANGUAGE = \"zh-CN\";"));
+        fs::remove_dir_all(root).unwrap();
+    }
     #[test]
     fn clear_waits_for_generation_and_aliases_share_gate() {
         let mut nonce = [0u8; 12];

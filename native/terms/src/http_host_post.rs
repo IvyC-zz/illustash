@@ -323,6 +323,9 @@ pub(super) fn handle(request: Request, host: &Host, received: u64, text: &str, b
                 host.index_automatic,
             )
         }),
+        // App-wide, so not part of /api/settings, whose reply stays as recorded; pages read it from /i18n.js.
+        "/api/preferences" => crate::app_preferences::set_json(text)
+            .map(|_| Json::object([("preferences", crate::app_preferences::info())])),
         "/api/backup" => crate::app_settings::backup(&session.library)
             .map(|path| Json::object([("path", path.to_string_lossy().as_ref().into())])),
         "/api/libraries/new" => create_library(host, &body),
