@@ -118,9 +118,16 @@ class NativeSyncTest(unittest.TestCase):
         script.write_text('#!'+sys.executable+'\n'+r"""
 import hashlib,json,sys,time,os
 from pathlib import Path
-import numpy as np
 r=json.loads(Path(sys.argv[1]).read_text())
 mode=MODE
+def slow_report(stage,processed):
+    prog=Path(os.environ['ILLUSTASH_RECOGNITION_PROGRESS']);tmp=prog.with_suffix('.tmp')
+    tmp.write_text(json.dumps(dict(format='illustash-recognition-progress/1',task_id=r['identity']['task_id'],stage=stage,total=len(r['assets']),processed=processed,failed=0)))
+    tmp.replace(prog)
+# The first report goes out before NumPy loads: on a machine running the full parallel check, that import
+# alone can take longer than the slow mode's idle window.
+if mode=='slow': slow_report('preparing',0)
+import numpy as np
 if mode=='hang':
     # Written whole, then renamed: a test that sees the file reads the full pid (#132).
     (Path(r['output'])/'pid.tmp').write_text(str(os.getpid()));os.replace(Path(r['output'])/'pid.tmp',Path(r['output'])/'pid')
@@ -173,12 +180,11 @@ if mode in ('stream','stream-hang'):
     Path(sys.argv[2]).write_text(json.dumps(dict(identity=r['identity'],packages=[str(Path(r['output'])/f'batch-{i}') for i in range(len(r['assets']))],failed=[])))
     sys.exit(0)
 if mode=='slow':
-    # Steady progress, each step well inside the idle window, the whole run longer than it.
-    prog=Path(os.environ['ILLUSTASH_RECOGNITION_PROGRESS'])
-    for stage,processed in [('preparing',0)]+[('recognising',i) for i in range(len(r['assets'])+1)]:
-        tmp=prog.with_suffix('.tmp')
-        tmp.write_text(json.dumps(dict(format='illustash-recognition-progress/1',task_id=r['identity']['task_id'],stage=stage,total=len(r['assets']),processed=processed,failed=0)))
-        tmp.replace(prog);time.sleep(.4)
+    # Steady progress every 0.7 s, well inside the idle window; six steps make the run (about 4.9 s)
+    # longer than that window whatever the number of assets.
+    for step in range(6):
+        time.sleep(.7);slow_report('recognising',len(r['assets'])*step//5)
+    time.sleep(.7)
 p=Path(r['output'])/'result';p.mkdir()
 ids=[a['id'] for a in r['assets']]
 (p/'labels.jsonl').write_text('\n'.join(json.dumps(dict(asset=u,dim='rating',value='general',confidence=.9)) for u in ids))
@@ -275,9 +281,9 @@ if failures: Path(sys.argv[2]).write_text(json.dumps(dict(identity=r['identity']
         for uuid in ('E','F'):
             self.photo(uuid,'com.atebits.Tweetie2')
             original=self.library/f'originals/{uuid}/{uuid}.png';original.parent.mkdir(parents=True);original.write_bytes(b'synthetic')
-        # The worker runs about 2 s, longer than the 1.5 s idle window; progress arrives every 0.4 s.
-        # The first report includes interpreter/NumPy startup, so allow room for a loaded machine.
-        self.env['ILLUSTASH_RECOGNITION_TIMEOUT_MS']='1500'
+        # The worker runs about 4.9 s, longer than the 2.5 s idle window; progress arrives every 0.7 s.
+        # Its first report comes before NumPy loads, so a loaded machine's startup stays inside the window.
+        self.env['ILLUSTASH_RECOGNITION_TIMEOUT_MS']='2500'
         self.worker('slow')
         value=self.sync()
         self.assertEqual(value['state']['status'],'done',value)
