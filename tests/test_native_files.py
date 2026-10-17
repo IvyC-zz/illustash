@@ -114,10 +114,11 @@ class NativeFilesTest(unittest.TestCase):
         preferences = self.support / 'preferences.json'
         self.assertEqual(served(), 'system')
         self.assertFalse(preferences.exists())
-        self.assertEqual(json.loads(self.request('/api/settings')['body'])['preferences'], {'language': 'system'})
         changed = self.request('/api/preferences', {'language': 'en'})
         self.assertEqual(changed['status'], 200)
-        self.assertEqual(json.loads(changed['body'])['preferences'], {'language': 'en'})
+        self.assertEqual(json.loads(changed['body']), {'preferences': {'language': 'en'}})
+        # /api/settings keeps its recorded reply; the language travels with /i18n.js.
+        self.assertNotIn('preferences', json.loads(self.request('/api/settings')['body']))
         self.assertEqual(json.loads(preferences.read_text(encoding='utf-8')), {'language': 'en'})
         self.assertEqual(served(), 'en')
         for body in ({'language': 'fr'}, {'language': 'en', 'theme': 'dark'}, {}):

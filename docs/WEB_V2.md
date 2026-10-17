@@ -25,7 +25,7 @@
 
 ## 界面语言（2026-10-18，#173）
 
-界面语言整个 App 共用，不按图库或浏览器分开：存在应用数据目录的 `preferences.json`（和 `libraries.json` 同一处，`ILLUSTASH_APP_SUPPORT` 可改），`{"language": "system" | "zh-CN" | "en"}`，默认 `system`。文件缺失、读不了或内容不对都按 `system` 处理，不影响页面打开；写入与 `libraries.json` 相同，持锁读改写、临时文件改名，保留文件里其他键。在「设置 › 通用 › 语言」切换（跟随系统 / 简体中文 / English，语言名不翻译），保存后页面重新载入。`GET /api/settings` 返回 `preferences.language`；`POST /api/preferences` 只接受 `{"language": …}`，其他键或取值返回 400，成功返回与 `GET /api/settings` 相同的内容。偏好不授权联网、不启动任务。
+界面语言整个 App 共用，不按图库或浏览器分开：存在应用数据目录的 `preferences.json`（和 `libraries.json` 同一处，`ILLUSTASH_APP_SUPPORT` 可改），`{"language": "system" | "zh-CN" | "en"}`，默认 `system`。文件缺失、读不了或内容不对都按 `system` 处理，不影响页面打开；写入与 `libraries.json` 相同，持锁读改写、临时文件改名，保留文件里其他键。在「设置 › 通用 › 语言」切换（跟随系统 / 简体中文 / English，语言名不翻译），保存后页面重新载入。页面从 `/i18n.js` 得到当前设置；`GET /api/settings` 不含它，回复保持旧录制的字节。`POST /api/preferences` 只接受 `{"language": …}`，其他键或取值返回 400，成功返回 `{"preferences": {"language": …}}`。偏好不授权联网、不启动任务。
 
 - **翻译方式**：用中文原文当键（gettext 式）。前端写 `t('中文原文')`，参数用 `{n}`、`{name}` 占位：`t('{n} 项进行中', {n})`。英文页面有译文就显示英文，没有就照常显示中文，所以可以分块迁移，没迁到的文字不会坏。`t()` 只返回文本，插进 HTML 时照旧由调用处转义；需要带链接或加粗时把 HTML 作为参数传入，不写进译文。静态页面里的文字用 `data-t`（元素文本）和 `data-t-attr="title aria-label"`（列出的属性）标记，`i18n.js` 在 `app.js` 之前替换一次。
 - **加载**：`/i18n.js` 由原生宿主拼出：先写 `self.ILLUSTASH_LANGUAGE`（当前设置）和 `self.ILLUSTASH_EN`（`web/static/locales/en.json` 解析后重新序列化；文件坏了按空表处理，界面保持中文），再接 `web/static/i18n.js`，不缓存。`index.html` 在 `splash.js`、`app.js` 之前加载它。`system` 按 `navigator.languages` 的第一项决定：`zh` 开头用中文，其余用英文。页面的 `lang` 属性跟着设成 `zh-CN` 或 `en`。

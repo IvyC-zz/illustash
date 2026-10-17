@@ -40,7 +40,7 @@ fn read(file: &Path) -> Map<String, Value> {
         .unwrap_or_default()
 }
 
-/// `preferences` in GET /api/settings.
+/// The reply of POST /api/preferences: `{"language": …}`.
 pub(crate) fn info() -> Json {
     Json::object([("language", language().into())])
 }

@@ -131,13 +131,10 @@ fn settings(
     provenance_enabled: bool,
     index_automatic: bool,
 ) -> Result<Json> {
-    let mut payload = crate::app_settings::info(
+    crate::app_settings::info(
         library,
         &forced_off(library, names_enabled, sync_disabled, provenance_enabled, index_automatic),
-    )?;
-    // App-wide, not per library (#173); the cache-clear reply keeps its recorded shape without it.
-    payload.set("preferences", crate::app_preferences::info());
-    Ok(payload)
+    )
 }
 
 fn handle(mut request: Request, host: &Host, received: u64) {
