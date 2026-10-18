@@ -15,6 +15,46 @@ pub const PIXIV_NO_WINDOW: &str = "Pixiv 登录在桌面 app 的登录窗口里�
 fn invalid(message: impl Into<String>) -> Error {
     Error::Invalid(message.into())
 }
+/// What went wrong with a Pixiv query, for the callers that retry it or take it as a lost login (#204). They branch on
+/// this, never on the words, which stay in the error.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Pixiv {
+    /// Pixiv did not accept the login (HTTP 401, or a body saying so).
+    Refused,
+    /// The desktop app's login window has no Pixiv login.
+    NoLogin,
+    /// The request failed on the way and may succeed if tried again.
+    Failed,
+    /// The request made from the desktop app's login window failed; the window may still be loading.
+    WindowFailed,
+    /// Anything else, including a failed call to the desktop app (`app_desktop::unanswered`).
+    Other,
+}
+#[derive(Debug)]
+struct PixivError {
+    kind: Pixiv,
+    error: Error,
+}
+impl PixivError {
+    fn new(kind: Pixiv, message: impl Into<String>) -> Self {
+        PixivError { kind, error: invalid(message) }
+    }
+    /// The desktop app did not answer or refused the call.
+    fn unanswered(&self) -> bool {
+        matches!(&self.error, Error::Invalid(m) if crate::app_desktop::unanswered(m))
+    }
+}
+impl From<Error> for PixivError {
+    fn from(error: Error) -> Self {
+        PixivError { kind: Pixiv::Other, error }
+    }
+}
+impl From<PixivError> for Error {
+    fn from(e: PixivError) -> Self {
+        e.error
+    }
+}
+type PixivResult<T> = std::result::Result<T, PixivError>;
 /// Non-secret facts for background consumers. Authorization is passed by the
 /// caller's task policy and is never derived from presence of credentials.
 pub fn network_state(authorized: bool) -> Result<Value> {
@@ -129,12 +169,12 @@ fn read_json(response: ureq::Response) -> Result<Json> {
 }
 /// Authorized query transport for #51; callers must provide explicit network authorization.
 /// A saved login does not imply authorization; app-backed requests never fall back to cookies.
-pub fn pixiv_get(path: &str, authorized: bool, session: Option<&str>, in_app: bool) -> Result<Json> {
+fn pixiv_get(path: &str, authorized: bool, session: Option<&str>, in_app: bool) -> PixivResult<Json> {
     if !authorized {
-        return Err(invalid("尚未授权联网"));
+        return Err(invalid("尚未授权联网").into());
     }
     if !path.starts_with("/ajax/") || path.contains(['\r', '\n']) {
-        return Err(invalid("只允许 Pixiv ajax 查询"));
+        return Err(invalid("只允许 Pixiv ajax 查询").into());
     }
     if in_app {
         let route =
@@ -142,7 +182,7 @@ pub fn pixiv_get(path: &str, authorized: bool, session: Option<&str>, in_app: bo
         let reply = desktop("GET", &route, 120)?;
         let status = reply.get("status").map(Json::integer).unwrap_or(0);
         if status == 401 {
-            return Err(invalid("Pixiv 没有接受这个登录状态"));
+            return Err(PixivError::new(Pixiv::Refused, "Pixiv 没有接受这个登录状态"));
         }
         if status == 404 {
             return Ok(Json::Scalar(Value::Null));
@@ -151,13 +191,13 @@ pub fn pixiv_get(path: &str, authorized: bool, session: Option<&str>, in_app: bo
             || status == 429
             || (status == 503 && reply.get("body").map(Json::text).unwrap_or("").to_lowercase().contains("maintenance"))
         {
-            return Err(invalid("Pixiv 服务拒绝请求"));
+            return Err(invalid("Pixiv 服务拒绝请求").into());
         }
         if !(200..300).contains(&status) {
-            return Err(invalid("Pixiv 窗口里的请求失败"));
+            return Err(PixivError::new(Pixiv::WindowFailed, "Pixiv 窗口里的请求失败"));
         }
         return crate::http_json::parse_python(reply.get("body").map(Json::text).unwrap_or(""))
-            .map_err(|_| invalid("Pixiv 响应不正确"));
+            .map_err(|_| invalid("Pixiv 响应不正确").into());
     }
     let base = match std::env::var("ILLUSTASH_PIXIV_BASE") {
         Ok(base) => {
@@ -171,7 +211,7 @@ pub fn pixiv_get(path: &str, authorized: bool, session: Option<&str>, in_app: bo
                 || u.query().is_some()
                 || u.fragment().is_some()
             {
-                return Err(invalid("Pixiv 替身只允许本机带端口 HTTP"));
+                return Err(invalid("Pixiv 替身只允许本机带端口 HTTP").into());
             }
             base.trim_end_matches('/').to_owned()
         }
@@ -186,20 +226,20 @@ pub fn pixiv_get(path: &str, authorized: bool, session: Option<&str>, in_app: bo
         req = req.set("Cookie", &format!("PHPSESSID={s}"));
     }
     match req.call() {
-        Ok(r) => read_json(r),
-        Err(ureq::Error::Status(401, _)) => Err(invalid("Pixiv 没有接受这个登录状态")),
+        Ok(r) => Ok(read_json(r)?),
+        Err(ureq::Error::Status(401, _)) => Err(PixivError::new(Pixiv::Refused, "Pixiv 没有接受这个登录状态")),
         Err(ureq::Error::Status(404, _)) => Ok(Json::Scalar(Value::Null)),
-        Err(ureq::Error::Status(403 | 429, _)) => Err(invalid("Pixiv 服务拒绝请求")),
+        Err(ureq::Error::Status(403 | 429, _)) => Err(invalid("Pixiv 服务拒绝请求").into()),
         Err(ureq::Error::Status(503, response)) => {
             let mut reason = String::new();
             let _ = response.into_reader().take(4096).read_to_string(&mut reason);
-            Err(invalid(if reason.to_lowercase().contains("maintenance") {
-                "Pixiv 服务拒绝请求"
+            Err(if reason.to_lowercase().contains("maintenance") {
+                invalid("Pixiv 服务拒绝请求").into()
             } else {
-                "Pixiv 请求失败"
-            }))
+                PixivError::new(Pixiv::Failed, "Pixiv 请求失败")
+            })
         }
-        Err(_) => Err(invalid("Pixiv 请求失败")),
+        Err(_) => Err(PixivError::new(Pixiv::Failed, "Pixiv 请求失败")),
     }
 }
 // Account validation owns one Net-equivalent policy across its two queries.
@@ -209,7 +249,7 @@ fn account_query(
     session: Option<&str>,
     in_app: bool,
     last: &mut Option<std::time::Instant>,
-) -> Result<Json> {
+) -> PixivResult<Json> {
     for attempt in 0..3 {
         if let Some(started) = last {
             let elapsed = started.elapsed();
@@ -219,11 +259,7 @@ fn account_query(
         }
         *last = Some(std::time::Instant::now());
         match pixiv_get(path, true, session, in_app) {
-            Err(Error::Invalid(ref message))
-                if attempt < 2
-                    && (["Pixiv 请求失败", "Pixiv 窗口里的请求失败"].contains(&message.as_str())
-                        || crate::app_desktop::unanswered(message)) =>
-            {
+            Err(e) if attempt < 2 && (matches!(e.kind, Pixiv::Failed | Pixiv::WindowFailed) || e.unanswered()) => {
                 std::thread::sleep(Duration::from_secs(2 * (attempt + 1)));
             }
             result => return result,
@@ -231,11 +267,14 @@ fn account_query(
     }
     unreachable!()
 }
-fn who(uid: &str, session: Option<&str>, in_app: bool) -> Result<Json> {
+fn who(uid: &str, session: Option<&str>, in_app: bool) -> PixivResult<Json> {
     let mut last = None;
     let extra = match account_query("/ajax/user/extra?lang=ja", session, in_app, &mut last) {
-        Err(Error::Invalid(message)) if message == "Pixiv 没有接受这个登录状态" => {
-            return Err(invalid("Pixiv 没有接受这个登录状态（可能已退出或过期）（Pixiv 返回 HTTP 401）"));
+        Err(PixivError { kind: Pixiv::Refused, .. }) => {
+            return Err(PixivError::new(
+                Pixiv::Refused,
+                "Pixiv 没有接受这个登录状态（可能已退出或过期）（Pixiv 返回 HTTP 401）",
+            ));
         }
         result => result?,
     };
@@ -255,7 +294,10 @@ fn who(uid: &str, session: Option<&str>, in_app: bool) -> Result<Json> {
                     .collect::<String>()
             )
         };
-        return Err(invalid(format!("Pixiv 没有接受这个登录状态（可能已退出或过期）（Pixiv 返回 {why}）")));
+        return Err(PixivError::new(
+            Pixiv::Refused,
+            format!("Pixiv 没有接受这个登录状态（可能已退出或过期）（Pixiv 返回 {why}）"),
+        ));
     }
     let user = account_query(&format!("/ajax/user/{uid}?lang=ja"), session, in_app, &mut last)?;
     Ok(Json::object([
@@ -396,10 +438,10 @@ fn action_inner(library: &Library, action: &str, body: &Json) -> Result<Json> {
                 let uid = s.get("userId").map(Json::text).unwrap_or("");
                 let w = who(uid, None, true);
                 match w {
-                    Err(Error::Invalid(ref msg))
-                        if (msg == "Pixiv 窗口里的请求失败" || crate::app_desktop::unanswered(msg))
+                    Err(e)
+                        if (e.kind == Pixiv::WindowFailed || e.unanswered())
                             && s.get("loginOpen").is_some_and(crate::app_service::truthy) => {}
-                    Err(e) => return Err(e),
+                    Err(e) => return Err(e.into()),
                     Ok(mut w) => {
                         w.set("via", "app".into());
                         let entry = checked(w);
@@ -437,7 +479,7 @@ fn action_inner(library: &Library, action: &str, body: &Json) -> Result<Json> {
                 let w = if in_app {
                     let state = desktop("GET", "/pixiv/session", 30)?;
                     if !state.get("loggedIn").is_some_and(crate::app_service::truthy) {
-                        Err(invalid("登录窗口里没有 Pixiv 登录"))
+                        Err(PixivError::new(Pixiv::NoLogin, "登录窗口里没有 Pixiv 登录"))
                     } else {
                         who(state.get("userId").map(Json::text).unwrap_or(""), None, true)
                     }
@@ -457,15 +499,13 @@ fn action_inner(library: &Library, action: &str, body: &Json) -> Result<Json> {
                         result = Some(w);
                         break;
                     }
-                    Err(Error::Invalid(ref msg))
-                        if msg.starts_with("Pixiv 没有接受这个登录状态") || msg == "登录窗口里没有 Pixiv 登录" =>
-                    {
-                        expired_detail = msg.clone();
+                    Err(PixivError { kind: Pixiv::Refused | Pixiv::NoLogin, error: Error::Invalid(msg) }) => {
+                        expired_detail = msg;
                         if in_app && attempt == 0 {
                             std::thread::sleep(Duration::from_secs(5));
                         }
                     }
-                    Err(e) => return Err(e),
+                    Err(e) => return Err(e.into()),
                 }
             }
             let ok = result.is_some();
@@ -604,7 +644,7 @@ mod tests {
     #[test]
     fn unauthorized_transport_stops_before_reading_any_credentials_or_bridge() {
         assert!(
-            matches!(pixiv_get("/ajax/user/extra", false, Some("synthetic"), true), Err(Error::Invalid(message)) if message=="尚未授权联网")
+            matches!(pixiv_get("/ajax/user/extra", false, Some("synthetic"), true), Err(PixivError { kind: Pixiv::Other, error: Error::Invalid(message) }) if message=="尚未授权联网")
         );
     }
     #[test]

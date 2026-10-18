@@ -185,17 +185,30 @@ impl<'de> Deserialize<'de> for Json {
 /// Evidence uses Python json.loads: non-finite constants and arbitrary-size integers are valid.
 /// Decode only HTTP values; serde's global map/number features (and persistence) remain unchanged.
 pub fn parse_python(input: &str) -> crate::Result<Json> {
-    parse(input, false)
+    parse(input, false).map_err(|(_, e)| e)
 }
 /// Request errors follow CPython JSONDecodeError; evidence callers retain the original refusal behavior.
 pub(crate) fn parse_request(input: &str) -> crate::Result<Json> {
-    parse(input, true)
+    parse(input, true).map_err(|(_, e)| e)
 }
-fn parse(input: &str, request_errors: bool) -> crate::Result<Json> {
+/// Why evidence JSON was refused, for callers that treat some refusals differently (#204); the error keeps the words.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Refusal {
+    Malformed,
+    /// A string escapes half of a UTF-16 surrogate pair.
+    LoneSurrogate,
+    TooDeep,
+}
+/// `parse_python`, saying which kind of refusal a failure is.
+pub(crate) fn parse_python_refusal(input: &str) -> std::result::Result<Json, (Refusal, crate::Error)> {
+    parse(input, false)
+}
+fn parse(input: &str, request_errors: bool) -> std::result::Result<Json, (Refusal, crate::Error)> {
     struct Parser<'a> {
         s: &'a str,
         at: usize,
         request_errors: bool,
+        refusal: Refusal,
     }
     impl Parser<'_> {
         fn ws(&mut self) {
@@ -292,10 +305,15 @@ fn parse(input: &str, request_errors: bool) -> crate::Result<Json> {
                 }
                 if !escaped && *b == b'"' {
                     return serde_json::from_str(&self.s[start..self.at]).map_err(|e| {
+                        let e = e.to_string();
+                        // serde_json has no public error codes: its own (English) message names a lone surrogate.
+                        if self.request_errors || e.starts_with("lone leading surrogate") {
+                            self.refusal = Refusal::LoneSurrogate;
+                        }
                         crate::Error::Invalid(if self.request_errors {
                             "请求 JSON 包含 Rust 字符串无法表示的孤立 surrogate".into()
                         } else {
-                            e.to_string()
+                            e
                         })
                     });
                 }
@@ -305,6 +323,7 @@ fn parse(input: &str, request_errors: bool) -> crate::Result<Json> {
         }
         fn value(&mut self, depth: usize) -> crate::Result<Json> {
             if depth > 1000 {
+                self.refusal = Refusal::TooDeep;
                 return Err(crate::Error::Invalid("证据 JSON 递归过深".into()));
             }
             self.ws();
@@ -432,14 +451,16 @@ fn parse(input: &str, request_errors: bool) -> crate::Result<Json> {
             }
         }
     }
-    let mut parser = Parser { s: input, at: 0, request_errors };
-    let v = parser.value(0)?;
-    parser.ws();
-    if parser.at == input.len() {
-        Ok(v)
-    } else {
-        parser.fail("Extra data", parser.at)
-    }
+    let mut parser = Parser { s: input, at: 0, request_errors, refusal: Refusal::Malformed };
+    let v = parser.value(0).and_then(|v| {
+        parser.ws();
+        if parser.at == input.len() {
+            Ok(v)
+        } else {
+            parser.fail("Extra data", parser.at)
+        }
+    });
+    v.map_err(|e| (parser.refusal, e))
 }
 
 #[cfg(test)]
@@ -505,6 +526,26 @@ mod tests {
             matches!(parse_request(r#""\ud800""#), Err(crate::Error::Invalid(message)) if message.contains("孤立 surrogate"))
         );
         assert_eq!(parse_request(r#""\ud83d\ude42""#).unwrap().text(), "🙂");
+    }
+    #[test]
+    fn refusals_say_which_kind_without_the_words() {
+        let kind = |text: &str| parse_python_refusal(text).map(|_| ()).map_err(|(kind, _)| kind);
+        // A trailing half alone, or a leading half followed by another escape: serde_json calls both lone surrogates.
+        assert_eq!(kind(r#"{"a": "\udc00"}"#), Err(Refusal::LoneSurrogate));
+        assert_eq!(kind(r#""\ud800\u0041""#), Err(Refusal::LoneSurrogate));
+        // A leading half followed by plain text is an unfinished escape to serde_json, as before #204.
+        assert_eq!(kind(r#""\ud800x""#), Err(Refusal::Malformed));
+        assert_eq!(kind(r#""\x""#), Err(Refusal::Malformed));
+        for text in ["{", "1.5e999x", "[1,]"] {
+            assert_eq!(kind(text), Err(Refusal::Malformed), "{text}");
+        }
+        // A thousand levels need more than a test thread's stack in a debug build.
+        let deep = std::thread::Builder::new().stack_size(256 << 20).spawn(move || {
+            assert_eq!(kind(&format!("{}{}", "[".repeat(1001), "]".repeat(1001))), Ok(()));
+            parse_python_refusal(&"[".repeat(1002)).unwrap_err()
+        });
+        let (refusal, error) = deep.unwrap().join().unwrap();
+        assert_eq!((refusal, error.to_string().as_str()), (Refusal::TooDeep, "不合法：证据 JSON 递归过深"));
     }
     #[test]
     fn float_and_string_bytes_match_python_not_just_semantic_json() {

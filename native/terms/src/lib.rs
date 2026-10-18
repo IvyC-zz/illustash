@@ -170,6 +170,7 @@ pub use illustash_core::configure;
 mod app_name_sources;
 mod app_names;
 pub(crate) use illustash_core::name_codecs;
+pub(crate) use illustash_core::undo_labels;
 
 mod app_index;
 pub(crate) mod app_provenance;
