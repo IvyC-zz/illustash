@@ -1,6 +1,6 @@
 //! tests/reference/web/artists.py（#9 已删除） read contract. Auxiliary provenance stays read-only and shares the request transaction.
 use crate::{
-    http_json::Json,
+    http_json::{Json, Refusal},
     http_read::{flag, rows, strings},
     Error, Result,
 };
@@ -194,11 +194,9 @@ fn py_repr(v: &Json) -> String {
     }
 }
 fn reason(method: &str, data: &str) -> Result<Json> {
-    let value = match crate::http_json::parse_python(if data.is_empty() { "{}" } else { data }) {
+    let value = match crate::http_json::parse_python_refusal(if data.is_empty() { "{}" } else { data }) {
         Ok(v) => v,
-        Err(Error::Invalid(message)) if message.contains("surrogate") || message.contains("递归") => {
-            return Err(Error::Invalid(message))
-        }
+        Err((Refusal::LoneSurrogate | Refusal::TooDeep, e)) => return Err(e),
         Err(_) => Json::Object(Vec::new()),
     };
     if !matches!(value, Json::Object(_)) {

@@ -99,6 +99,13 @@ fn select_for(c: &Connection, table: &str, select: &'static str) -> Result<&'sta
     Ok(if table == "candidates" && !crate::character_projection::policy(c)? { CANDIDATES_RESOLVED } else { select })
 }
 
+const CANDIDATE_SCOPE: (&str, &str) = (
+    "FROM term_active_evidence active",
+    "FROM candidate_scope scoped CROSS JOIN term_assets scoped_asset
+               ON scoped_asset.namespace='library' AND scoped_asset.key=scoped.uuid
+             CROSS JOIN term_active_evidence active ON active.asset_id=scoped_asset.id",
+);
+
 /// 核心维护兼容表时，按图重算兼容 `candidates`（= 由当前有效证据全量算出的那几行）。
 pub(crate) fn refresh_candidates(c: &Connection, uuids: &[String]) -> Result<()> {
     c.execute_batch(
@@ -113,12 +120,7 @@ pub(crate) fn refresh_candidates(c: &Connection, uuids: &[String]) -> Result<()>
     // 小范围由图片驱动；原计划会先扫描全库证据并分组，最后才过滤图片。
     // 全量 refresh 保留原计划，避免为大集合增加逐图索引探测。
     let select = if uuids.len() <= 4096 {
-        select.replace(
-            "FROM term_active_evidence active",
-            "FROM candidate_scope scoped CROSS JOIN term_assets scoped_asset
-               ON scoped_asset.namespace='library' AND scoped_asset.key=scoped.uuid
-             CROSS JOIN term_active_evidence active ON active.asset_id=scoped_asset.id",
-        )
+        crate::character_projection::scoped(select, CANDIDATE_SCOPE.0, CANDIDATE_SCOPE.1)?
     } else {
         select.to_owned()
     };
@@ -996,6 +998,8 @@ fn baseline(target: &Target, anchor: i64, row: &Row) -> Want {
 
 /// hybrid 下撤销过这次旧合并：关系上有 `Store.undo` 那条固定理由的决议。
 const MERGE_UNDONE_IN_HYBRID: &str = "撤销历史合并；原归属无法区分的认领待确认";
+/// 旧版撤销时追加的审计决议，理由都以它开头；旧表里没有别的标记，这是已写下的数据，不随文案或翻译变。
+const UNDO_REASON_PREFIX: &str = "撤销";
 
 /// 未撤销的步骤按 id 排成每个目标的事件序列；已撤销的步骤的效果已被还原，不算——除了在 hybrid 下撤销的旧合并。
 fn history(tx: &Connection, hybrid: bool) -> Result<BTreeMap<Target, Vec<(i64, Event)>>> {
@@ -1390,7 +1394,7 @@ fn sync_relations(tx: &Connection, terms: &HashMap<String, TermId>, r: &mut Repo
     for (id, relation_id, status, reason, created_at) in decisions {
         let (action, kind) = match attached.get(&id) {
             Some(&a) => (Some(a), None),
-            None if reason.starts_with("撤销") => (None, Some("undo_audit")),
+            None if reason.starts_with(UNDO_REASON_PREFIX) => (None, Some("undo_audit")),
             None => (None, Some("migration")),
         };
         let anchor = action.unwrap_or_else(|| anchors.get(&relation_id).copied().unwrap_or(0));

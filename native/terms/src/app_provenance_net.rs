@@ -13,6 +13,8 @@ pub(super) struct Net {
     agent: ureq::Agent,
     last: HashMap<String, Instant>,
     stopped: HashMap<String, String>,
+    /// Pixiv answered 401 to a logged-in request: the login has expired (#204: decided by this, not the words).
+    login_expired: bool,
     base: Option<String>,
     pub binding: Option<Value>,
     session: Option<String>,
@@ -40,6 +42,7 @@ impl Net {
             agent: ureq::AgentBuilder::new().redirects(0).timeout(Duration::from_secs(30)).build(),
             last: HashMap::new(),
             stopped: HashMap::new(),
+            login_expired: false,
             base,
             binding: None,
             session: None,
@@ -171,6 +174,7 @@ impl Net {
                 let reason = "登录已失效（HTTP 401）";
                 crate::app_accounts::mark_pixiv(None, Some(crate::app_accounts::PIXIV_EXPIRED), Some(reason))?;
                 self.stopped.insert(host.into(), reason.into());
+                self.login_expired = true;
                 return Err(Error::Network(reason.into()));
             }
             if (200..300).contains(&code) || [401, 404].contains(&code) {
@@ -208,9 +212,11 @@ impl Net {
         else {
             return Ok(());
         };
+        let mut refused = false;
         let result = (|| {
             let extra = self.json(ctx, "https://www.pixiv.net/ajax/user/extra?lang=ja")?;
             if extra["error"] == true || extra.is_null() {
+                refused = true;
                 return Err(Error::Network("Pixiv 没有接受这个登录状态".into()));
             }
             let user = self.json(ctx, &format!("https://www.pixiv.net/ajax/user/{uid}?lang=ja"))?;
@@ -225,7 +231,7 @@ impl Net {
         })();
         if let Err(e) = result {
             let msg = e.to_string();
-            if msg.contains("登录已失效") || msg.contains("没有接受这个登录状态") {
+            if refused || self.login_expired {
                 crate::app_accounts::mark_pixiv(None, Some(crate::app_accounts::PIXIV_EXPIRED), Some(&msg))?;
                 self.stopped.insert("www.pixiv.net".into(), crate::app_accounts::PIXIV_EXPIRED.into());
                 if in_app && kind != "new" {

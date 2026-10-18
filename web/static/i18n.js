@@ -55,7 +55,7 @@ function t(text, params) {
 // backend's templates is in exactly one of the two, so a new template has to say which its placeholders are.
 const BACKEND_NESTED = new Set(['cleanup', 'duration', 'e', 'error', 'label', 'm', 'message', 'msg', 'note', 'reason', 'said', 'step', 'why']);
 const BACKEND_DATA = new Set(['CONFLICT_RETRIES', 'FORMAT', 'MAX_ASSETS', 'MAX_DATA_BYTES', 'MAX_LINE_BYTES', 'SCHEMA_VERSION',
-  'WORKER_KIND_ENV', 'action', 'arg', 'artist', 'artists', 'at', 'attempt', 'auto', 'available', 'backup', 'before', 'candidates',
+  'WORKER_KIND_ENV', 'action', 'anchor', 'arg', 'artist', 'artists', 'at', 'attempt', 'auto', 'available', 'backup', 'before', 'candidates',
   'changed', 'choice', 'cid', 'code', 'context', 'core', 'differs', 'distance', 'done', 'entity', 'expected', 'fetched', 'field',
   'file', 'found', 'full', 'host', 'id', 'image', 'key', 'kind', 'left', 'library_id', 'limit', 'listed', 'loaded', 'matches',
   'max', 'mb', 'method', 'missing', 'moved', 'n', 'name', 'named', 'namespace', 'needed', 'no', 'object', 'origin', 'other',
