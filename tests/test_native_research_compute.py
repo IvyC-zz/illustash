@@ -60,7 +60,10 @@ class NativeResearchComputeTest(unittest.TestCase):
         input_path, output = snapshot / 'request.json', snapshot / 'response.json'
         input_path.write_text(json.dumps(request), encoding='utf-8')
         # Empty PATH proves this calculator itself never delegates learning to Python/a subprocess.
-        env = os.environ | dict(PATH='', ILLUSTASH_SHARED=str(anchors), ILLUSTASH_RESEARCH_PROGRESS=str(snapshot / 'progress.json'))
+        # The fixed answers come from the prototype-only algorithm; the discriminative claims (#156) stay off here
+        # and are covered by their Rust tests and tests/test_native_research.py.
+        env = os.environ | dict(PATH='', ILLUSTASH_SHARED=str(anchors), ILLUSTASH_RESEARCH_PROGRESS=str(snapshot / 'progress.json'),
+                                ILLUSTASH_TEST_PROTOTYPES_ONLY='1')
         env.pop('ILLUSTASH_WORKER_PYTHON', None)
         result = subprocess.run([str(self.binary), str(input_path), str(output)], env=env,
                                 capture_output=True, timeout=30)
