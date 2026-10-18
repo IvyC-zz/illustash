@@ -1,6 +1,16 @@
 //! 会话 POST 业务路由；入口安全检查由 app_http 保持。
 use super::*;
 
+/// Requests a session answers while its package is damaged: none of them writes to the package's databases.
+const DAMAGED_ALLOWS: [&str; 6] = [
+    "/api/libraries/open",
+    "/api/libraries/new",
+    "/api/libraries/import",
+    "/api/libraries/forget",
+    "/api/backup",
+    "/api/preferences",
+];
+
 pub(super) fn handle(request: Request, host: &Host, received: u64, text: &str, body: Json) {
     // A native chooser's prompt in the page's language (#173).
     let language = header(&request, "X-Illustash-Language").map(str::to_owned);
@@ -59,6 +69,14 @@ pub(super) fn handle(request: Request, host: &Host, received: u64, text: &str, b
     if !host.accepts(&session, received) || header(&request, "X-CSRF-Token") != Some(session.token.as_str()) {
         respond(request, error("会话已过期，请刷新页面"), 403, "core");
         return;
+    }
+    // A damaged package takes no more writes (#212): only leaving it, backing up library.sqlite and app-wide choices.
+    if let Some(damage) = session.damage() {
+        if !DAMAGED_ALLOWS.contains(&request.url()) {
+            drop(session);
+            failure(request, damage.error(), true);
+            return;
+        }
     }
     if request.url() == "/api/cache" {
         if !matches!(body.get("action"), Some(Json::Scalar(serde_json::Value::String(action))) if action == "clear") {
@@ -418,6 +436,7 @@ pub(super) fn handle(request: Request, host: &Host, received: u64, text: &str, b
             Ok(Json::object([("ok", true.into())]))
         })(),
         "/api/libraries/export" => host.exports.start(&session.library, session.generation),
+        "/api/integrity" => Ok(session.check_now()),
         "/api/libraries/open" => (|| {
             let path = body
                 .get("path")

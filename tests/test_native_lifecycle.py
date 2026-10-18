@@ -117,9 +117,11 @@ def startup(db):
     return {**STARTUP_DEFAULT, **(json.loads(row[0]) if row else {})}
 
 
-def files(root):
+def files(root, running=False):
+    """Every package file by content. `running`: a host has the package open, and its background check may update
+    the package's check record at any time (#212), so the record is left out."""
     return {p.relative_to(root).as_posix(): hashlib.sha256(p.read_bytes()).hexdigest()
-            for p in root.rglob('*') if p.is_file()}
+            for p in root.rglob('*') if p.is_file() and not (running and p.name == '.illustash-checks.json')}
 
 
 class NativeLifecycleTest(unittest.TestCase):
@@ -844,11 +846,11 @@ class NativeLifecycleTest(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertEqual(before, files(broken.path))
         for args in (['--python', str(self.bin / 'python')], ['--upstream', '41002']):
-            before = files(self.lib.path)
+            before = files(self.lib.path, running=True)
             result = subprocess.run([str(self.binary), 'http', '--no-auto-sync', '--library', str(self.lib.path),
                                      '--port', str(free_port()), *args], env=self.env, capture_output=True, timeout=5)
             self.assertNotEqual(result.returncode, 0)
-            self.assertEqual(before, files(self.lib.path))
+            self.assertEqual(before, files(self.lib.path, running=True))
         self.assertFalse(self.sentinel.exists())
 
     def test_retired_forward_route_is_rejected_and_exit_releases_port(self):
@@ -877,7 +879,7 @@ class NativeLifecycleTest(unittest.TestCase):
         self.assertEqual(self.request('/api/bootstrap')['status'], 200)
 
     def test_all_retired_parameters_reject_before_side_effects(self):
-        before = files(self.lib.path)
+        before = files(self.lib.path, running=True)
         for arg in ('--python=unused', '--upstream=12345', '--route=GET:/api/assets=core',
                     '--refresh', '--source=unused', '--db=unused', '--cache=unused',
                     '--identity=hybrid', '--no-similar', '--'):
@@ -885,7 +887,7 @@ class NativeLifecycleTest(unittest.TestCase):
                                     capture_output=True, timeout=5)
             self.assertNotEqual(result.returncode, 0, arg)
             self.assertIn('已退役', result.stderr.decode(), arg)
-        self.assertEqual(before, files(self.lib.path))
+        self.assertEqual(before, files(self.lib.path, running=True))
         help_result = subprocess.run([str(self.binary), 'http', '--help'], env=self.env,
                                      capture_output=True, timeout=5)
         self.assertEqual(help_result.returncode, 0)

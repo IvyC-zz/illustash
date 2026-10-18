@@ -260,6 +260,10 @@ window.showError = (msg, log) => {
   const pre = document.getElementById('log');
   pre.textContent = log || ''; pre.hidden = !log;
 };
+// 检查发现图库数据库损坏时外壳调用（#212）：说明怎么处理，按钮同启动失败。note 是本地服务的中文原文，经 tb() 翻译。
+window.showDamage = note => {
+  window.showError(tb(note), '');
+};
 // 外壳发现图库是旧格式时调用（#193）：说明升级会发生什么，用户确认后外壳带 --upgrade 重新启动本地服务。
 // note 是本地服务的中文原文，和图库页一样经 tb() 翻译。
 window.showUpgrade = (name, note) => {

@@ -1702,7 +1702,7 @@
   "Unsupported：照片图库只在 macOS 上可用": "Unsupported: the Photos library is only available on macOS",
   "无法定位用户目录": "Cannot find the user's folder",
   "正在打开图库": "Opening the library",
-  "正在检查图库数据（{label}）": "Checking library data ({label})",
+  "上次没有正常关闭，正在检查图库数据（{label}）": "The library wasn't closed normally last time; checking its data ({label})",
   "兼容宿主参数已退役：{arg}；HTTP 默认使用原生宿主，升级请使用 --upgrade": "The compatibility host option is retired: {arg}; HTTP uses the native host by default, use --upgrade to upgrade",
   "{arg} 缺少值": "{arg} needs a value",
   "sync-limit 必须是非负整数": "sync-limit must be a non-negative integer",
@@ -2367,5 +2367,14 @@
   "升级并打开": "Upgrade and open",
   "这个图库已升级到新格式，旧版本的 Illustash 打不开它了。升级前的备份在：\n{backup}\n\n要回到旧版本，先装回旧版，再用这份备份恢复。": "This library has been upgraded to the new format, so older versions of Illustash can't open it any more. The backup from before the upgrade is at:\n{backup}\n\nTo go back to an older version, reinstall it, then restore from this backup.",
   "图库已升级": "Library upgraded",
-  "知道了": "OK"
+  "知道了": "OK",
+  "这个图库的整理记录数据库（library.sqlite）已损坏，为保护数据已停止写入。请退出 Illustash，把图库文件夹里的 library.sqlite 连同旁边的 library.sqlite-wal、library.sqlite-shm 一起移到别处保存，再从 backups 文件夹里选最近的一份备份复制回来、改名为 library.sqlite，然后重新打开。最近一次备份之后的整理会丢失。": "This library's curation database (library.sqlite) is damaged, so nothing more is written to it. Quit Illustash, move library.sqlite together with library.sqlite-wal and library.sqlite-shm next to it out of the library folder for safekeeping, then copy the most recent backup from the backups folder back in, rename it to library.sqlite and open the library again. Curation done after that backup is lost.",
+  "这个图库的识别结果数据库（source.sqlite）已损坏，为保护数据已停止写入；人工整理记录在 library.sqlite 里，没有受影响。目前还不能在 app 里重建 source.sqlite：请退出 Illustash，保持图库文件夹原样，不要删除或替换其中的文件；想多留一份保险，可以把整个图库文件夹复制到别处。": "This library's recognition database (source.sqlite) is damaged, so nothing more is written to it; your curation is in library.sqlite and is not affected. source.sqlite can't be rebuilt in the app yet: quit Illustash and leave the library folder as it is, without deleting or replacing any files in it; to be extra safe, you can copy the whole library folder somewhere else.",
+  "图库数据库损坏，导入已取消": "A library database is damaged; the import was cancelled",
+  "还没有检查过": "never",
+  "正在检查 {file}，{percent}%": "Checking {file}, {percent}%",
+  "上次检查：library.sqlite {library}，source.sqlite {source}": "Last checked: library.sqlite {library}, source.sqlite {source}",
+  "上次检查没有完成：{error}": "The last check didn't finish: {error}",
+  "数据库检查": "Database check",
+  "每次打开图库后会在后台检查识别结果数据库，整理记录数据库每 7 天检查一次；上次没有正常关闭时，打开前先检查两个库。": "After a library opens, its recognition database is checked in the background, and its curation database every 7 days; if it wasn't closed normally last time, both are checked before it opens."
 }
