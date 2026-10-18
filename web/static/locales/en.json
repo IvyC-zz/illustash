@@ -2379,6 +2379,7 @@
   "抢救时没能重建 {name}：{e}": "Could not rebuild {name} during the rescue: {e}",
   "抢救结果不属于这个图库": "The rescue result does not belong to this library",
   "抢救结果已不在图库里，请重新抢救": "The rescue result is no longer in the library; please rescue again",
+  "磁盘空间不足：抢救需要约 {needed} MiB，可用 {available} MiB。请先腾出空间再抢救": "Not enough disk space: the rescue needs about {needed} MiB, {available} MiB is free. Free up some space, then rescue",
   "--rescue-source 不可与 --upgrade 或 --backup 同用": "--rescue-source cannot be used with --upgrade or --backup",
   "「{name}」的识别结果数据库已损坏": "The recognition results database of “{name}” is damaged",
   "抢救重建": "Rescue and rebuild",

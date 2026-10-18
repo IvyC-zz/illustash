@@ -36,6 +36,8 @@ const BUILDING: &str = "source.rescue.sqlite";
 /// What the folder scans of the new file leave for the next refresh of library.sqlite (`app_folder`'s journal).
 const BUILDING_JOURNAL: &str = "source.rescue.scan-pending.json";
 
+/// Room beyond the damaged file's size that the new file and SQLite's own temporary files may need.
+const SPACE_MARGIN: u64 = 256 << 20;
 /// What the person is told while it runs: the stage and the fraction of the whole rescue.
 pub(crate) type Step<'a> = &'a dyn Fn(&str, f64);
 const READING: &str = "正在抢救识别结果数据库：读出还能读的数据";
@@ -148,6 +150,17 @@ fn build(library: &Library, reference: Option<&Path>, stop: &AtomicBool, step: S
                 path = path.display()
             )));
         }
+    }
+    // The new file is built beside the damaged one: about as large, its indices included. Said before any reading,
+    // instead of SQLite's "disk is full" partway through.
+    let needed = fs::metadata(library.source())?.len().saturating_add(SPACE_MARGIN);
+    let available = crate::platform_filesystem::available_space(library.instance_path())?;
+    if needed > available {
+        return Err(Error::Invalid(format!(
+            "磁盘空间不足：抢救需要约 {needed} MiB，可用 {available} MiB。请先腾出空间再抢救",
+            needed = needed.div_ceil(1 << 20),
+            available = available >> 20
+        )));
     }
     let target = library.instance_path().join(BUILDING);
     let mut report = Report::default();
