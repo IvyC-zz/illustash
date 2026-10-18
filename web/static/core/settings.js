@@ -4,6 +4,7 @@
 // libraries, accounts, pixivWaiting, updates) until the page state is split; outside core/ nothing writes those
 // fields. onSettings(what, detail) tells after each read or change; what is data, libraries, accounts, pixiv or
 // updates.
+import {t, said} from './i18n.js';
 import {session, api, post, shared, leaveSession} from './session.js';
 import {state} from './state.js';
 import {listeners} from './events.js';
@@ -45,6 +46,10 @@ export async function loadAbout() {
 export async function allowNames(allow) {
   state.names = {...state.names, ...await api('/api/names', {method: 'POST', body: JSON.stringify({action: 'network', allow})})};
 }
+// A Danbooru name lookup (tag and work names only): its results, or why it failed. Without this library's consent
+// the backend refuses with 显示名联网尚未授权; any other failure is a real network or service error.
+export const remoteNames = path => api(path).then(found => ({found}), e => ({found: null, unauthorized: said(e.said, '显示名联网尚未授权'), reason: e.message}));
+export const remoteNote = r => r.unauthorized ? t('查 Danbooru 需要先允许这个图库联网查询名称（只发送文字）') : t('Danbooru 暂时连不上：{reason}', {reason: r.reason});
 export async function saveModelApi(body) { state.names = {...state.names, ...await post('/api/names', {action: 'model_api', ...body})}; }
 export const testModelApi = () => post('/api/names', {action: 'model_api_test'});
 

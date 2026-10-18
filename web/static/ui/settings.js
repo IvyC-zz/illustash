@@ -9,13 +9,27 @@ import {state} from '../core/state.js';
 import {REASONS, FOLD_OPTIONS} from '../core/labels.js';
 import {SYNC_ACTIVE, INDEX_ACTIVE, NAMES_ACTIVE, PROV_ACTIVE, syncLine, indexLine, namesLine, importLine, importActive, pollSync, pollIndex,
   pollNamesSoon, loadProvenance, importStarted, pollImports, cancelImport, indexAction} from '../core/jobs.js';
-import {onSettings, loadSettingsData, saveStartup, saveFold, backupNow, clearCache, saveLanguage, loadAbout, saveModelApi, testModelApi,
+import {onSettings, allowNames, loadSettingsData, saveStartup, saveFold, backupNow, clearCache, saveLanguage, loadAbout, saveModelApi, testModelApi,
   loadLibraries, libraryRequest, pollExport, chooseFolders, openLibraryRequest, libraryOpened, loadAccounts, accountRequest,
   waitPixivLogin, stopPixivLogin, checkUpdates, updatesPost, updatesTick} from '../core/settings.js';
 import {$, toast, error, readFailure, fold, wireFolds} from './dom.js';
 import {confirmAction} from './dialog.js';
 import {openTasks} from './tasks.js';
 import {app} from './app_parts.js';
+
+// ---------- names: this library's consent to look names up online ----------
+// Name text queries (tag and work names only) need this library's consent: the backend refuses with
+// 显示名联网尚未授权 until it is given. Any other failure is a real network or service error.
+const NAMES_NOTE = t('允许这个图库联网查询名称吗？\n\n会把你输入的角色名、作品名，以及图库里角色的 Danbooru tag 和作品名发给 Danbooru 和 Bangumi，用来搜索角色、作品和补全中文名。不会发送图片。\n\n允许后对这个图库一直有效，可以在「设置 › 网络与隐私」里随时撤销。');
+export const namesAllowButton = `<button type="button" class="link-button" data-names-allow>${t('允许查询…')}</button>`;
+export async function setNamesNetwork(allow) {
+  if (allow && !await confirmAction(NAMES_NOTE, t('允许联网查询名称'))) return false;
+  try {
+    await allowNames(allow);
+  } catch (err) { toast(err.message); return false; }
+  toast(allow ? t('已允许这个图库联网查询名称') : t('已撤销名称联网查询'));
+  return true;
+}
 
 // ---------- new characters for the external index (native/terms/src/app_index.rs) ----------
 let indexArmed = null;
@@ -522,6 +536,19 @@ export async function onLibrariesClick(e) {
 
 // The settings pages' handlers and what follows a read or change of their data. Called once, when the page starts.
 export function wireSettings() {
+  // 设置 › 网络与隐私: grant or revoke, then redraw the card.
+  document.addEventListener('click', async e => {
+    const b = e.target.closest('[data-names-network]');
+    if (b && await setNamesNetwork(b.dataset.namesNetwork === '1')) { renderSettings(false); app.drawGuide(); }
+  });
+  // The 允许查询… button under a search: once allowed, search again for what was typed.
+  document.addEventListener('click', async e => {
+    const b = e.target.closest('[data-names-allow]');
+    if (!b) return;
+    e.preventDefault();
+    const input = b.closest('dialog, .combo, .watch-add, #picker')?.querySelector('input');
+    if (await setNamesNetwork(true)) { input?.focus(); input?.dispatchEvent(new Event('input', {bubbles: true})); }
+  });
   onSettings((what, detail) => {
     if (what === 'data') {
       if (detail.error) error(readError(detail.error));

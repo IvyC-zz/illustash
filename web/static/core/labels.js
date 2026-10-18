@@ -6,3 +6,5 @@ export const RELATION_NAMES = {identical: t('完全相同'), duplicate: t('重�
 export const FOLD_OPTIONS = [['identical', RELATION_NAMES.identical, t('像素一样的不同文件')], ['duplicate', RELATION_NAMES.duplicate, t('同一张图缩放或重新压缩过')], ['subtle', RELATION_NAMES.subtle, t('只差表情、签名、小物件（< 2%）')],
   ['edit', RELATION_NAMES.edit, t('加字水印、调色、色块或马赛克')], ['crop', RELATION_NAMES.crop, t('一张是另一张的裁剪')], ['variant', RELATION_NAMES.variant, t('同一张画改了局部或重新上色')]];
 export const RELATION_KINDS = [['', t('全部')], ...['duplicate', 'subtle', 'variant', 'crop', 'edit'].map(k => [k, RELATION_NAMES[k]])];
+// Display names come from the server (中文 → 日文 → readable English); the original tag only shows on hover.
+export const nameTip = c => !c ? '' : c.tag && c.tag !== c.name ? c.tag + (c.name_source === 'model' ? ' · ' + t('机器翻译') : c.name_source === 'wiki' ? ' · ' + t('来自 Danbooru 别名') : '') : c.name;

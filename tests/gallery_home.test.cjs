@@ -137,7 +137,7 @@ test('undo and a finished sync redraw the home page, whose day groups come from 
   const g = {state, SYNC_ACTIVE, onJob: fn => (g.off = onJob(fn)), async refreshMeta() {}, error() {}, readError: e => e, guideRefresh() {},
     panelPage: p => p === 'home', selCount: () => 0, reload() { calls.push('reload'); }, renderHome(keep) { calls.push(['home', keep]); }};
   vm.createContext(g);
-  vm.runInContext(source.slice(source.indexOf('// What a background job'), source.indexOf('// Name text queries')), g);
+  vm.runInContext(source.slice(source.indexOf('// What a background job'), source.indexOf('// A picture the app cannot decode')), g);
   await pollSync();
   g.off();
   assert.deepEqual(calls, [['home', true]]);
