@@ -1,6 +1,8 @@
 // #34: answers that arrive after the page has moved on, or out of order, never wind the interface back,
 // and a background refresh of the settings card keeps what is being typed.
-const {test} = require('node:test');
+const {test, before} = require('node:test');
+const web = require('./web.cjs');   // core/ modules (#199)
+before(web.ready);
 const assert = require('node:assert/strict');
 const {readFileSync} = require('node:fs');
 const vm = require('node:vm');
@@ -37,23 +39,22 @@ test('a group page answer that arrives after navigating home does not take over 
 });
 
 test('an older sync answer that arrives last does not move the state back', async () => {
-  const answers = [];
-  const c = {
-    state: {sync: {status: 'scanning'}, route: {page: 'library'}}, SYNC_ACTIVE: ['scanning', 'recognising', 'importing'],
-    api: () => new Promise(resolve => answers.push(resolve)), refreshMeta: async () => {}, panelPage: () => true,
-    selCount: () => 0, reload() {}, toast() {}, renderTasks() {}, number: String, error() {}, readError: e => e.message, guideRefresh() {},
-    timers: [], setTimeout(fn, ms) { this.timers.push(ms); return this.timers.length; }, clearTimeout() {},
-  };
-  vm.createContext(Object.assign(c, zh.page));
-  vm.runInContext(section('let syncTimer', '// ---------- new characters'), c);
-  const older = c.pollSync(), newer = c.pollSync();
-  answers[1]({state: {status: 'done', imported: 2}, history: [{id: 2}]});
-  await newer;
-  answers[0]({state: {status: 'scanning'}, history: [{id: 1}]});
-  await older;
-  assert.equal(c.state.sync.status, 'done');
-  assert.deepEqual(c.state.syncHistory, [{id: 2}]);
-  assert.deepEqual(c.timers, []);  // finished: nothing polls again, and the stale answer schedules nothing
+  // core/jobs.js polls the sync; its timers are the page's setTimeout.
+  const {state, pollSync} = web.core(), answers = [], timers = [];
+  Object.assign(state, {sync: {status: 'scanning'}, route: {page: 'library'}});
+  globalThis.fetch = () => new Promise(resolve => answers.push(body => resolve({status: 200, ok: true, json: async () => body})));
+  const setTimeout = globalThis.setTimeout;
+  globalThis.setTimeout = (fn, ms) => { timers.push(ms); return 0; };
+  try {
+    const older = pollSync(), newer = pollSync();
+    answers[1]({state: {status: 'done', imported: 2}, history: [{id: 2}]});
+    await newer;
+    answers[0]({state: {status: 'scanning'}, history: [{id: 1}]});
+    await older;
+  } finally { globalThis.setTimeout = setTimeout; }
+  assert.equal(state.sync.status, 'done');
+  assert.deepEqual(state.syncHistory, [{id: 2}]);
+  assert.deepEqual(timers, []);  // finished: nothing polls again, and the stale answer schedules nothing
 });
 
 test('the new-library name is kept as it is typed, so a card refresh restores it', () => {

@@ -2,15 +2,16 @@
 // and one change runs at a time — a write, or the undo of one. No DOM: a layout draws the undo control from onLatest().
 import {t, tb, I18N} from './i18n.js';
 import {post} from './session.js';
+import {listeners} from './events.js';
 // latest: {id, label} of the step undo would revert, or null. busy: a change or an undo is running.
 export const edits = {latest: null, busy: false};
-const listeners = new Set();
-// Returns a function that removes the listener again.
-export const onLatest = fn => { listeners.add(fn); return () => listeners.delete(fn); };
+const changed = listeners();
+// fn(edits) after each change; returns a function that removes the listener again.
+export const onLatest = changed.on;
 // Also called after busy changes, so the controls follow it.
 export function setLatest(step) {
   edits.latest = step;
-  for (const fn of listeners) fn(edits);
+  changed.emit(edits);
 }
 // Reverts the latest step; resolves to its label (as sent), with the next step already set.
 export async function undoLatest() {

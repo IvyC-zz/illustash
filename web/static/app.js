@@ -3,11 +3,15 @@
 // Native ES modules (#199): core/ holds what any layout can reuse and never touches the DOM (requests and the
 // session, edits and undo, formatting, preferences); ui/ is this desktop layout. This file is still the rest.
 import {t, tb, said, I18N} from './core/i18n.js';
-import {esc, isMac, shortcut, number, dateText, monthText, work} from './core/format.js';
+import {esc, isMac, shortcut, number, dateText, monthText, work, bytes, stamp, localStamp, pct, localTime} from './core/format.js';
 import {prefs} from './core/prefs.js';
-import {session, adoptToken, onPost, api, post, readError} from './core/session.js';
+import {state} from './core/state.js';
+import {session, adoptToken, onPost, api, post, shared, readError} from './core/session.js';
 import {edits, setLatest, undoLatest, undoneText} from './core/edits.js';
-import {$, platformHints, toast, wireToast, error, readFailure} from './ui/dom.js';
+import {SYNC_ACTIVE, INDEX_ACTIVE, NAMES_ACTIVE, SIMILAR_ACTIVE, PROV_ACTIVE, onJob, syncLine, indexLine, namesLine, similarLine,
+  importLine, importActive, pollSync, pollIndex, pollNamesSoon, loadProvenance, startSync, importStarted, pollImports, cancelImport} from './core/jobs.js';
+import {$, platformHints, toast, wireToast, error, readFailure, fold, wireFolds} from './ui/dom.js';
+import {wireTasks, openTasks, taskList, taskTick} from './ui/tasks.js';
 platformHints(document.body);
 // Display names come from the server (中文 → 日文 → readable English); the original tag only shows on hover.
 const nameTip = c => !c ? '' : c.tag && c.tag !== c.name ? c.tag + (c.name_source === 'model' ? ' · ' + t('机器翻译') : c.name_source === 'wiki' ? ' · ' + t('来自 Danbooru 别名') : '') : c.name;
@@ -17,14 +21,7 @@ const sliderToSize = v => Math.round(SIZE_MIN * Math.pow(SIZE_MAX / SIZE_MIN, v 
 const sizeToSlider = s => Math.round(100 * Math.log(s / SIZE_MIN) / Math.log(SIZE_MAX / SIZE_MIN));
 const PAGE = 100;
 
-const state = {
-  route: {page: 'library'},
-  chars: [], charMap: new Map(), pins: [], char: null, pools: {unmatched: 0, skipped: 0}, dupInfo: {groups: 0, mixed: 0}, exclInfo: {count: 0, reasons: {}}, pendingCount: 0, sync: {status: 'off'}, syncHistory: [], settings: null, recentCount: 0, maybeCount: 0, userTags: [],
-  items: [], total: 0, readEpoch: 0, pages: new Set(), pending: new Set(), generation: 0, dataVersion: 0, gridKey: '',
-  cols: 1, cellW: 180, rowH: 250, gap: 12, size: Math.min(SIZE_MAX, Math.max(SIZE_MIN, prefs.get('size', 185))), fit: prefs.get('fit', false),
-  selecting: false, sel: {all: false, ids: new Set(), exclude: new Set()}, anchor: -1, cursor: -1,
-  focused: null, detail: null, viewer: -1, armed: null, nsfw: ['', 'hide', 'only'].includes(prefs.get('nsfw', '')) ? prefs.get('nsfw', '') : '',
-};
+state.size = Math.min(SIZE_MAX, Math.max(SIZE_MIN, prefs.get('size', 185)));
 let abortList, searchTimer, pageTimer, pickerTimer, detailGen = 0;
 
 // A write the backend accepted: the counts and reads that may have changed, and the guide's next step.
@@ -34,13 +31,33 @@ onPost((path, body) => {
   // Prevent an older metadata read from overwriting the just-completed mutation.
   if (metaPending) { metaRevision++; metaFull ||= path !== '/api/tag'; }
 });
-async function checkIndex() {
-  const token = session.token;
-  if (!await confirmAction(t('本次检查会联网查询 Danbooru，只发送关注作品的 tag，不发送图库图片。允许本次检查联网吗？'), t('检查新角色')) || token !== session.token) return false;
-  const result = await post('/api/index', {action: 'check', allow_network: true});
-  if (token !== session.token) return false;
-  state.index = result; return true;
-}
+// What a background job's answer changes outside the task panel: the library's counts and pictures, the settings
+// cards that show the job, and the guide.
+onJob(async (job, change) => {
+  if (job === 'sync') {
+    if (change.arrived) {
+      state.countDirty = true; state.readEpoch++;
+      await refreshMeta().catch(e => error(readError(e)));
+      if (!panelPage(state.route.page) && !selCount()) reload();
+      // The home page's day groups and counts are drawn from their own read; redraw them once the sync settles.
+      else if (state.route.page === 'home' && !SYNC_ACTIVE.includes(state.sync.status)) renderHome(true);
+    }
+    guideRefresh(change.ended);
+  } else if (job === 'index') {
+    const s = state.index.state;
+    if (change.ended && s.status === 'done') { state.countDirty = true; state.readEpoch++; await refreshMeta().catch(e => error(readError(e))); }
+    if (s.status !== change.was && state.route.page === 'settings') renderIndexCard(false);
+    if (s.status !== change.was && state.route.section === 'works') drawShelf();
+  } else if (job === 'names') {
+    renderNamesCard(false);
+    if (change.ended) refreshMeta();
+  } else if (job === 'provenance') renderProvenanceCard();
+  else if (job === 'import') {
+    const task = state.importTask;
+    if (change.ended) { toast(importLine(task)); if (task.status === 'done' && task.kind === 'archive') loadLibraries(); }
+    renderLibrariesCard();
+  }
+});
 
 // Name text queries (tag and work names only) need this library's consent: the backend refuses with
 // 显示名联网尚未授权 until it is given. Any other failure is a real network or service error.
@@ -2228,17 +2245,7 @@ const RELATION_NAMES = {identical: t('完全相同'), duplicate: t('重复'), su
 const FOLD_OPTIONS = [['identical', RELATION_NAMES.identical, t('像素一样的不同文件')], ['duplicate', RELATION_NAMES.duplicate, t('同一张图缩放或重新压缩过')], ['subtle', RELATION_NAMES.subtle, t('只差表情、签名、小物件（< 2%）')],
   ['edit', RELATION_NAMES.edit, t('加字水印、调色、色块或马赛克')], ['crop', RELATION_NAMES.crop, t('一张是另一张的裁剪')], ['variant', RELATION_NAMES.variant, t('同一张画改了局部或重新上色')]];
 const RELATION_KINDS = [['', t('全部')], ...['duplicate', 'subtle', 'variant', 'crop', 'edit'].map(k => [k, RELATION_NAMES[k]])];
-const SIMILAR_ACTIVE = ['reading', 'pairing', 'comparing', 'waiting'];
 let similarTimer = 0;
-function similarLine(s) {
-  if (s.status === 'reading') return t('正在读图算签名 {done}/{total}', {done: number(s.done || 0), total: number(s.total || 0)});
-  if (s.status === 'pairing') return t('正在找候选…');
-  if (s.status === 'comparing') return t('正在逐对比较 {done}/{total} · 已找到 {found} 对', {done: number(s.done || 0), total: number(s.total || 0), found: number(s.found || 0)});
-  if (s.status === 'waiting') return tb(s.message) || t('输入有变化，稍后自动重试');
-  if (s.status === 'error') return t('出错：{reason}', {reason: tb(s.message || '')});
-  if (s.status === 'off') return t('本次启动关闭了相似检测');
-  return s.at ? t('上次检查 {time}', {time: stamp(s.at)}) : '';
-}
 async function renderSimilar() {
   if (state.route.page !== 'similar') return;
   clearTimeout(similarTimer);
@@ -2335,88 +2342,15 @@ async function decideIdentity(i, act) {
   finally { identity.busy.delete(i); }
 }
 
-// ---------- Photos sync & settings ----------
-const SYNC_ACTIVE = ['scanning', 'recognising', 'importing'];
-const bytes = n => n >= 1e9 ? (n / 1e9).toFixed(1) + ' GB' : n >= 1e6 ? (n / 1e6).toFixed(1) + ' MB' : Math.round(n / 1e3) + ' KB';
-const stamp = t => (t || '').replace('T', ' ').slice(5, 16);
-// Unix seconds → local "MM-DD hh:mm".
-const localStamp = sec => { const d = new Date(sec * 1000), p = n => String(n).padStart(2, '0'); return `${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`; };
-const syncBar = (s, bar) => s.status === 'recognising' && s.stage !== 'preparing' ? bar(s.done, s.total)
-  : s.status === 'importing' && s.import_total ? bar(s.import_done, s.import_total) : '';
-// Recognition and import are counted apart: done/total are images recognised or given up on,
-// import_done/import_total the recognised ones written into the library.
-function syncLine(s) {
-  if (s.status === 'scanning') return s.scan_total == null ? t('正在检查来源…') : t('正在检查文件 {done}/{total}', {done: number(s.scanned || 0), total: number(s.scan_total)});
-  if (s.status === 'importing') {
-    if (!s.import_total) return t('正在导入…');
-    return s.stage === 'verifying' ? t('正在校验识别结果（{n} 张）…', {n: number(s.import_total)})
-      : t('正在导入识别结果 {done}/{total}', {done: number(s.import_done || 0), total: number(s.import_total)});
-  }
-  if (s.status === 'recognising') {
-    if (s.stage === 'preparing') return t('正在加载识别模型（共 {n} 张）…', {n: number(s.total || 0)});
-    const failed = s.failed ? ' · ' + t('{n} 张无法识别', {n: number(s.failed)}) : '';
-    const left = s.ms_per_image && s.total > s.done ? ' · ' + t('约 {n} 分钟', {n: Math.max(1, Math.round((s.total - s.done) * s.ms_per_image / 60000))}) : '';
-    const imported = s.import_done ? ' · ' + t('已导入 {n}', {n: number(s.import_done)}) : '';
-    return t('正在识别新图片 {done}/{total}', {done: number(s.done || 0), total: number(s.total || 0)}) + failed + imported + left;
-  }
-  // Paths the scan could not read keep their pictures; the next sync reads them again.
-  const kept = s.unreadable ? ' · ' + t('{n} 处暂时读不到，已有图片保留不动', {n: number(s.unreadable)}) : '';
-  // Pictures given up on, apart (#112): unreadable ones are tried again, damaged ones wait for their file to change.
-  const gave = (s.failed ? ' · ' + t('{n} 张暂时读不到（可能还在 iCloud），下次同步重试', {n: number(s.failed)}) : '')
-    + (s.damaged ? ' · ' + t('{n} 张已损坏或格式不支持，未识别', {n: number(s.damaged)}) : '');
-  if (s.status === 'done') return t('上次同步：{time}', {time: stamp(s.finished_at)}) + kept + gave;
-  if (s.status === 'needs_recognition') return t('有 {n} 张图等待识别（识别服务未启动）', {n: number(s.total || 0)}) + kept;
-  if (s.status === 'interrupted') return s.message ? t('同步已中断（{reason}），可重新扫描', {reason: tb(s.message)}) : t('同步已中断，可重新扫描');
-  if (s.status === 'error') return t('同步失败');
-  return t('本地图库');
-}
-// Pictures whose files open but are not images the app can read: where they are, as on the library page.
-function syncDamaged(d) {
-  if (!d?.count) return '';
-  const short = p => p.replace(/^\/Users\/[^/]+/, '~');
-  const rows = d.paths.map(p => `<div class="setting-line lib-folder"><span class="lib-path" title="${esc(p)}"><bdi>${esc(short(p))}</bdi></span></div>`).join('');
-  const more = d.count > d.paths.length ? `<p class="muted-note">${t('另有 {n} 张未列出。', {n: number(d.count - d.paths.length)})}</p>` : '';
-  return fold('task-sync-damaged', t('{n} 张图片已损坏或格式不支持', {n: number(d.count)}),
-    `<p class="muted-note">${t('这些文件读得到，但不是能打开的图片：已经加入图库，图上显示「无法打开」，不参与识别。修好或换成正常的图片后，下次同步会重新识别。')}</p>${rows}${more}`);
-}
-let syncTimer = null, lastImported = 0, syncPoll = 0;
-async function pollSync() {
-  clearTimeout(syncTimer);
-  // Polls overlap (task panel, timer, after a start): an older answer arriving last must not wind the state back.
-  const poll = ++syncPoll;
-  try {
-    const {state: s, history, damaged} = await api('/api/sync');
-    if (poll !== syncPoll) return;
-    const was = state.sync.status;
-    state.sync = s; state.syncHistory = history; state.syncDamaged = damaged;
-    if ((s.imported || 0) > lastImported || (SYNC_ACTIVE.includes(was) && !SYNC_ACTIVE.includes(s.status))) {
-      state.countDirty = true; state.readEpoch++;
-      lastImported = s.imported || 0; await refreshMeta().catch(e => error(readError(e)));
-      if (!panelPage(state.route.page) && !selCount()) reload();
-      // The home page's day groups and counts are drawn from their own read; redraw them once the sync settles.
-      else if (state.route.page === 'home' && !SYNC_ACTIVE.includes(s.status)) renderHome(true);
-    }
-    if (SYNC_ACTIVE.includes(was) && s.status === 'done' && s.imported) toast(t('同步完成：新加入 {n} 张', {n: number(s.imported)}));
-    renderTasks();
-    guideRefresh(SYNC_ACTIVE.includes(was) && !SYNC_ACTIVE.includes(s.status));
-    if (SYNC_ACTIVE.includes(s.status)) syncTimer = setTimeout(pollSync, 2000);
-  } catch (e) { if (poll === syncPoll) syncTimer = setTimeout(pollSync, 10000); }
-}
 // ---------- new characters for the external index (native/terms/src/app_index.rs) ----------
 const WORK_NAMES = {blue_archive: t('蔚蓝档案'), 'arknights:_endfield': t('明日方舟：终末地'), wuthering_waves: t('鸣潮'), 'meitantei_precure!': t('名侦探光之美少女'),
   genshin_impact: t('原神'), 'honkai:_star_rail': t('崩坏：星穹铁道'), honkai_impact_3rd: t('崩坏 3'), zenless_zone_zero: t('绝区零'), arknights: t('明日方舟')};
 const workName = w => state.workNames?.get(w) || WORK_NAMES[w] || work(w);
-const INDEX_ACTIVE = ['checking', 'fetching', 'cleaning', 'building', 'scanning', 'importing'];
-let indexTimer = 0, indexArmed = null, indexSkip = new Set(), watchDraft = '';
-function indexLine(s, check) {
-  const n = s.total ? ` ${number(s.done || 0)}/${number(s.total)}` : '';
-  return {checking: t('正在检查 Danbooru…'), fetching: t('正在下载参考图') + n, cleaning: t('正在处理参考图'), building: t('正在更新角色特征'), scanning: t('正在重新扫描图库'), importing: t('正在导入图库'),
-    error: t('检查失败：{reason}', {reason: tb(s.message || '')})}[s.status] || (check ? t('上次检查：{time} · 待添加 {n} 个角色', {time: stamp(check.checked_at), n: number(check.missing.length)}) : t('尚未检查'));
-}
+let indexArmed = null, indexSkip = new Set(), watchDraft = '';
 async function renderIndexCard(fresh = true) {
   const route = state.route, token = session.token;
   if (!$('indexCard') || state.route.page !== 'settings') return;
-  if (fresh || !state.index) { try { const value = await settingsRequest('/api/index'); if (route !== state.route || token !== session.token) return; state.index = value; } catch (e) { if (route === state.route && token === session.token) readFailure($('indexCard'), e); return; } }
+  if (fresh || !state.index) { try { const value = await shared('/api/index'); if (route !== state.route || token !== session.token) return; state.index = value; } catch (e) { if (route === state.route && token === session.token) readFailure($('indexCard'), e); return; } }
   const card = $('indexCard'), x = state.index; if (!x || !card) return;
   const s = x.state, active = INDEX_ACTIVE.includes(s.status), watched = x.watch.works.length;
   // Which works are watched is decided on each work in 资料库 · 作品; here only how the check runs.
@@ -2489,36 +2423,12 @@ function wireWatchAdd(x, add) {
   menu.onclick = e => { const b = e.target.closest('[data-i]'); if (b) pick(Number(b.dataset.i)); };
   if (document.activeElement === input || watchDraft) { input.focus(); input.setSelectionRange(input.value.length, input.value.length); }
 }
-async function pollIndex() {
-  clearTimeout(indexTimer);
-  const was = state.index?.state.status;
-  try {
-    const progress = await api('/api/index?progress=1');
-    // The full read (works, check results) only when something may have changed; the idle tick stays light.
-    state.index = !state.index?.works || (!INDEX_ACTIVE.includes(progress.state?.status) && progress.state?.status !== was)
-      ? await settingsRequest('/api/index') : {...state.index, ...progress};
-  } catch (e) { indexTimer = setTimeout(pollIndex, 10000); return; }
-  const s = state.index.state;
-  if (INDEX_ACTIVE.includes(was) && !INDEX_ACTIVE.includes(s.status)) {
-    if (s.status === 'done') { state.countDirty = true; state.readEpoch++; toast(s.kind === 'drop' ? t('已移除，{n} 张图片已重新识别', {n: number(s.changed)}) : t('已添加 {added} 个角色，{n} 张图片的识别结果已更新', {added: number(s.added), n: number(s.changed)})); await refreshMeta().catch(e => error(readError(e))); }
-    else if (s.status === 'checked') toast(s.found ? t('发现 {n} 个可添加的角色，在任务面板里添加', {n: number(s.found)}) : t('未发现新角色'));
-    else if (s.status === 'error') toast(t('角色索引更新失败：{reason}', {reason: tb(s.message || '')}));
-  }
-  if (state.route.page === 'settings' && s.status !== was) renderIndexCard(false);
-  if (state.route.section === 'works' && s.status !== was) drawShelf();
-  renderTasks();
-  if (INDEX_ACTIVE.includes(s.status)) indexTimer = setTimeout(pollIndex, 2000);
-}
-
 // ---------- display names ----------
 // Chinese / Japanese names fetched from Bangumi (text queries only); a configured model API is an opt-in last resort.
-let namesTimer = 0;
-const NAMES_ACTIVE = ['fetching', 'matching', 'translating', 'running'];
-const namesLine = s => s.status === 'off' ? t('当前未启用') : NAMES_ACTIVE.includes(s.status) ? t('正在获取 {progress}', {progress: s.total ? `${number(s.done || 0)} / ${number(s.total)}` : '…'}) : s.status === 'error' ? t('获取失败，将在下次启动时重试') : s.status === 'unauthorized' ? t('未允许联网查询 · 可在设置 › 网络与隐私里允许') : t('已是最新');
 async function renderNamesCard(fresh = true) {
   const route = state.route, token = session.token;
   if (!$('namesCard') || state.route.page !== 'settings') return;
-  if (fresh || !state.names) { try { const value = await settingsRequest('/api/names'); if (route !== state.route || token !== session.token) return; state.names = value; } catch (e) { if (route === state.route && token === session.token) readFailure($('namesCard'), e); return; } }
+  if (fresh || !state.names) { try { const value = await shared('/api/names'); if (route !== state.route || token !== session.token) return; state.names = value; } catch (e) { if (route === state.route && token === session.token) readFailure($('namesCard'), e); return; } }
   // The page may have been re-rendered while waiting: always work on the card that is on screen now.
   const card = $('namesCard'), x = state.names; if (!card) return; if (!x) { card.hidden = true; return; }
   card.hidden = false;
@@ -2531,7 +2441,7 @@ async function renderNamesCard(fresh = true) {
     ${x.counts ? fold('namesStats', t('覆盖率') + (active ? t('（完成后更新）') : '') + (cc ? t('：{p}% 的角色有中文名', {p: Math.round(cc.zh / Math.max(1, cc.total) * 100)}) : ''), `<table class="settings-table"><tr><th></th><th>${t('共')}</th><th>${t('中文名')}</th><th>${t('日文名')}</th><th>${t('英文名')}</th></tr>${row(t('角色'), x.counts.characters)}${row(t('作品'), x.counts.works)}${row(t('皮肤'), x.counts.skins)}</table>`) : ''}`;
   wireFolds(card);
   renderModelCard();
-  if (fresh && active) { clearTimeout(namesTimer); namesTimer = setTimeout(pollNames, 2000); }
+  if (fresh && active) pollNamesSoon();
 }
 // Optional OpenAI-compatible model used only to translate names that Bangumi does not have.
 const modelHost = m => { try { return new URL(m?.base || 'https://api.deepseek.com').host; } catch (e) { return '—'; } };
@@ -2559,36 +2469,8 @@ function renderModelCard() {
     if ($('modelTest')) $('modelTest').disabled = false;
   };
 }
-async function pollNames() {
-  clearTimeout(namesTimer);
-  const was = NAMES_ACTIVE.includes(state.names?.state?.status);
-  try {
-    const progress = await api('/api/names?progress=1');
-    // Keep the existing coverage/settings while running; refresh them once on completion.
-    state.names = !state.names?.counts || (was && !NAMES_ACTIVE.includes(progress.state?.status)) ? await api('/api/names') : {...state.names, ...progress};
-  } catch (e) { namesTimer = setTimeout(pollNames, 10000); return; }
-  const now = NAMES_ACTIVE.includes(state.names.state?.status);
-  renderNamesCard(false);
-  renderTasks();
-  if (was && !now) refreshMeta();
-  if (now) namesTimer = setTimeout(pollNames, 2000);
-}
-// Collapsible blocks whose open/closed state survives re-renders and reloads.
-const fold = (key, summary, body) => `<details class="more" data-fold-key="${key}"${prefs.get('settingsOpen', {})[key] ? ' open' : ''}><summary>${summary}</summary><div class="more-body">${body}</div></details>`;
-function wireFolds(root) {
-  for (const d of root.querySelectorAll('details[data-fold-key]')) {
-    if (d.dataset.foldWired) continue;
-    d.dataset.foldWired = '1';
-    d.ontoggle = () => { const o = prefs.get('settingsOpen', {}); if (d.open) o[d.dataset.foldKey] = true; else delete o[d.dataset.foldKey]; prefs.set('settingsOpen', o); };
-  }
-}
-// Coalesce identical in-flight reads; a slow card never delays the local settings shell.
-const settingsRequests = new Map(), settingsMarkup = new WeakMap();
+const settingsMarkup = new WeakMap();
 let settingsLoading = null;
-function settingsRequest(path) {
-  if (!settingsRequests.has(path)) settingsRequests.set(path, api(path).finally(() => settingsRequests.delete(path)));
-  return settingsRequests.get(path);
-}
 function loadSettingsData(refresh = false) {
   if (settingsLoading) return settingsLoading;
   const token = session.token;
@@ -2596,7 +2478,7 @@ function loadSettingsData(refresh = false) {
     .filter(([key]) => refresh || !state[key]);
   if (!missing.length) return;
   settingsLoading = Promise.all(missing.map(async ([key, path]) => {
-    try { const value = await settingsRequest(path); if (token !== session.token) return; state[key] = key === 'fold' ? value.kinds : value; }
+    try { const value = await shared(path); if (token !== session.token) return; state[key] = key === 'fold' ? value.kinds : value; }
     catch (e) { if (token !== session.token) return; error(readError(e)); }
     if (state.route.page === 'settings') renderSettings(false);
   })).finally(() => { settingsLoading = null; });
@@ -2650,7 +2532,6 @@ function startupSwitch(key, name, hint) {
   const info = state.settings; if (!info?.startup) return '';
   return `<label class="switch-line"><span><b>${name}</b><small>${hint} · ${t('下次启动时生效')}</small>${(info.forced_off || []).includes(key) ? `<em>${t('这次启动已用命令行参数关闭')}</em>` : ''}</span><input type="checkbox" class="switch" data-startup="${key}" ${info.startup[key] ? 'checked' : ''}></label>`;
 }
-const taskSimilar = s => s.status === 'off' ? t('这次启动没有开相似检测') : similarLine(s) || t('已是最新');
 // A status line whose controls live in the task panel.
 const taskLink = (line, dot = '') => `<div class="setting-line set-status"><span><span class="local-dot${dot ? ' ' + dot : ''}"></span>${esc(line)}</span><button class="quiet small" data-open-tasks>${t('在任务面板查看')}</button></div>`;
 const CREDITS = [
@@ -2664,7 +2545,7 @@ const CREDITS = [
   ['Pillow · NumPy · ONNX Runtime', '', t('图像处理与模型推理'), 'https://onnxruntime.ai']];
 async function renderAbout() {
   const route = state.route, token = session.token;
-  if (!state.about) { try { const value = await settingsRequest('/api/about'); if (route !== state.route || token !== session.token) return; state.about = value; } catch (e) { if (route === state.route && token === session.token) readFailure($('setAbout'), e); return; } }
+  if (!state.about) { try { const value = await shared('/api/about'); if (route !== state.route || token !== session.token) return; state.about = value; } catch (e) { if (route === state.route && token === session.token) readFailure($('setAbout'), e); return; } }
   const card = $('setAbout'), a = state.about; if (!card || !a) return;
   const version = `${a.version}${a.channel ? ' ' + tb(a.channel) : ''}`;
   const diag = [[t('应用'), a.name], [t('版本'), version], [t('构建'), a.build || '—'], [t('数据库架构'), a.schema], [a.runtime ? t('运行时') : 'Python', a.runtime || a.python], [t('系统'), a.platform],
@@ -2787,11 +2668,12 @@ async function setLanguage(language) {
 $('settingsPage').addEventListener('click', e => {
   const b = e.target.closest('[data-open-tasks]'); if (!b) return;
   e.stopPropagation();
-  if (b.dataset.openTasks === 'provenance') provenanceArmed = true;
-  toggleTasks(true);
+  openTasks({armProvenance: b.dataset.openTasks === 'provenance'});
 });
 
 // ---------- misc wiring ----------
+wireTasks({confirm: confirmAction, indexAdd: () => openIndexAdd(),
+  tick: open => open && !state.libraries ? [loadLibraries()] : [], ticked: () => updatesTick()});
 $('undoButton').onclick = undo; $('helpButton').onclick = () => $('help').showModal();
 $('sidebarToggle').onclick = () => { if (innerWidth <= 760) $('sidebar').classList.toggle('mobile-open'); else $('sidebar').hidden = !$('sidebar').hidden; requestAnimationFrame(() => renderGrid()); };
 for (const dialog of document.querySelectorAll('dialog')) dialog.addEventListener('click', e => { if (e.target === dialog) { const r = dialog.getBoundingClientRect(); if (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) dialog.close(); } });
@@ -2865,37 +2747,8 @@ function renderLibrariesCard() {
     ${data.libraries.length > 1 || dev ? `<table class="settings-table lib-table"><tr><th>${t('这台电脑上的图库')}</th>${dev ? `<th>${t('测试画像')}</th>` : ''}<th></th></tr>${data.libraries.map(row).join('')}</table>` : ''}
     <p class="muted-note">${t('导出的 zip 包含识别结果、人工整理记录和来源配置，不含模型连接设置或联网授权，可以换电脑或发给别人。导入后需重新设置模型接口，并自行确认名称查询的联网授权；旧版导出包也会清除这些设置。个人备份请保留完整图库目录。')}${ex.status === 'done' ? '' : EXPORT_LEAVES_OUT}</p>`);
 }
-// #88: an archive or recognition-result import runs as a background task. The card shows the step it is on, with real
-// counts only (bytes unpacked, files read, pictures written), a cancel button while it runs, and how it ended.
-const IMPORT_ACTIVE = ['running', 'stopping'];
-const importActive = () => IMPORT_ACTIVE.includes(state.importTask?.status);
-const IMPORT_STAGES = {
-  archive: {reading: t('正在读取归档'), unpacking: t('正在解压'), cleaning: t('正在清除模型连接设置和联网授权'), checking: t('正在检查新图库能否打开'), publishing: t('正在登记新图库')},
-  recognition: {models: t('正在核对模型指纹'), reading: t('正在读取结果包'), verifying: t('正在校验识别结果'), writing: t('正在写入识别结果'), committing: t('正在提交'), projecting: t('正在更新图库索引')},
-};
-const mib = n => (n / 1048576).toFixed(n < 10485760 ? 1 : 0);
-function importCount(job) {
-  if (job.done == null || !job.total) return '';
-  if (job.stage === 'unpacking') return ` ${mib(job.done)}/${mib(job.total)} MB`;
-  if (job.stage === 'reading') return t('（第 {n}/{total} 个文件）', {n: Math.min(job.done + 1, job.total), total: job.total});
-  return ' ' + t('{done}/{total} 张', {done: number(job.done), total: number(job.total)});
-}
-function importLine(job) {
-  if (!job || job.status === 'idle') return '';
-  const recognition = job.kind === 'recognition';
-  const name = job.file ? t('「{file}」', {file: job.file}) : '';
-  if (job.status === 'running') return (recognition ? t('导入识别结果{name}：{step}', {name, step: (IMPORT_STAGES[job.kind] || {})[job.stage] || t('正在准备')}) : t('导入归档{name}：{step}', {name, step: (IMPORT_STAGES[job.kind] || {})[job.stage] || t('正在准备')})) + importCount(job) + '…';
-  if (job.status === 'stopping') return recognition ? t('正在取消导入识别结果{name}…', {name}) : t('正在取消导入归档{name}…', {name});
-  if (job.status === 'cancelled') return t('{reason}；图库没有改动。', {reason: tb(job.reason) || t('导入已取消')});
-  if (job.status === 'error') return recognition ? t('导入识别结果{name}失败：{reason}', {name, reason: tb(job.error)}) : t('导入归档{name}失败：{reason}', {name, reason: tb(job.error)});
-  if (job.status !== 'done') return '';
-  const r = job.result || {};
-  // Published but not listed (#111): opening it lists it; importing again would make a second, numbered library.
-  if (job.kind === 'archive' && r.listed === false) return t('已导入「{name}」，保存在 {path}，但没能加入最近图库列表：{reason}。打开它会再试一次加入列表；再导入会另建一个带编号的图库。模型接口与名称联网授权需重新设置。', {name: r.name, path: String(r.path).replace(/^\/Users\/[^/]+/, '~'), reason: tb(r.error)});
-  if (job.kind === 'archive') return t('已导入「{name}」，模型接口与名称联网授权需重新设置。', {name: r.name});
-  if (r.status === 'pending') return t('识别结果已导入，后续处理尚未完成（{reason}）。', {reason: tb(r.error) || t('可稍后恢复')});
-  return r.duplicate ? t('这份识别结果之前已经导入过。') : t('识别结果已导入。');
-}
+// #88: an import runs as a background task (core/jobs.js). The card shows its line, a cancel button while it runs, and
+// how it ended.
 function importBlock(job) {
   const line = importLine(job); if (!line) return '';
   const r = job.result || {};
@@ -2950,34 +2803,9 @@ const removingSources = new Set();
 async function libraryAction(action, body = {}, token = session.token) {
   try { return await api('/api/libraries/' + action, {method: 'POST', body: JSON.stringify(body), headers: {'X-CSRF-Token': token}}); } catch (err) { toast(err.message); return null; }
 }
-// Polls overlap (the start answer, the timer, a cancel): an older answer arriving last must not wind the state back,
-// and an answer for a page that has since changed session is dropped (#34).
-let importTimer = null, importPoll = 0;
-async function pollImports() {
-  clearTimeout(importTimer);
-  const poll = ++importPoll, token = session.token;
-  try {
-    const job = await api('/api/imports');
-    if (poll !== importPoll || token !== session.token) return;
-    const was = state.importTask;
-    state.importTask = job;
-    if (IMPORT_ACTIVE.includes(was?.status) && was.id === job.id && !IMPORT_ACTIVE.includes(job.status)) importEnded(job);
-    renderLibrariesCard();
-    if (IMPORT_ACTIVE.includes(job.status)) importTimer = setTimeout(pollImports, 700);
-  } catch { if (poll === importPoll && token === session.token) importTimer = setTimeout(pollImports, 5000); }
-}
-function importEnded(job) {
-  toast(importLine(job));
-  if (job.status === 'done' && job.kind === 'archive') loadLibraries();
-}
 async function startImport(path) {
   const r = await libraryAction('import', {path});
-  if (!r?.task) return;
-  state.importTask = r.task; renderLibrariesCard(); pollImports();
-}
-async function cancelImport() {
-  try { await api('/api/imports/cancel', {method: 'POST', body: '{}'}); } catch (err) { toast(err.message); }
-  pollImports();
+  if (r?.task) importStarted(r.task);
 }
 async function pollExport() {
   for (let i = 0; i < 2400 && state.libraries?.export?.status === 'running'; i++) { await new Promise(r => setTimeout(r, 1500)); await loadLibraries(); }
@@ -3039,7 +2867,7 @@ $('settingsPage').addEventListener('click', async e => {
   }
   else if (d.forgetLibrary) { if (await libraryAction('forget', {path: d.forgetLibrary})) loadLibraries(); }
   else if ('libExport' in d) { if (await libraryAction('export')) { await loadLibraries(); pollExport(); } }
-  else if ('importCancel' in d) { btn.disabled = true; await cancelImport(); }
+  else if ('importCancel' in d) { btn.disabled = true; try { await cancelImport(); } catch (err) { toast(err.message); } }
 });
 // A library in an older format opens only after the person agrees to upgrade it (#193): the backend says so, the
 // page asks with the backend's own explanation, then asks again with upgrade. The new page says where the backup is.
@@ -3172,34 +3000,8 @@ $('settingsPage').addEventListener('click', async e => {
   }
 });
 
-// ---------- 找回画师 (docs/PROVENANCE.md section 8): the provenance worker runs as a child process of the server ----------
-let provenanceTimer = 0, provenanceArmed = false;
+// ---------- 找回画师 (docs/PROVENANCE.md section 8): the settings card; the run's polling is core/jobs.js ----------
 const provenanceDrawn = new WeakMap();
-async function loadProvenance() {
-  clearTimeout(provenanceTimer);
-  const was = state.provenance?.state?.status;
-  try { state.provenance = await api('/api/provenance'); } catch {
-    // One failed read must not end the polling of a run that is going on: keep what was shown and try again.
-    if (['running', 'stopping'].includes(was)) provenanceTimer = setTimeout(loadProvenance, 4000);
-    else { state.provenance = null; renderProvenanceCard(); renderTasks(); }
-    return;
-  }
-  renderProvenanceCard(); renderTasks();
-  const s = state.provenance?.state?.status;
-  if (['running', 'stopping'].includes(s)) provenanceTimer = setTimeout(loadProvenance, 1500);
-}
-const RUN_STATUS = {done: t('完成'), stopped: t('已停止'), failed: t('出错'), running: t('进行中')};
-const pct = (n, total) => total ? `${(n / total * 100).toFixed(1)}%` : '—';
-// provenance.sqlite keeps SQLite's UTC timestamps.
-const localTime = utc => { const d = new Date(String(utc || '').replace(' ', 'T') + 'Z'); return isNaN(d) ? '' : `${d.getMonth() + 1}-${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; };
-// Progress bars from the worker's numbers (docs/BACKEND_TASKS.md): this step's items, and traffic against the run's cap.
-function provenanceBars(s) {
-  const p = s.progress; if (!p || !p.total) return '';
-  const bar = (label, done, total, detail) => `<div class="prov-bar-row"><span class="prov-bar-label">${label}</span><span class="prov-bar" role="progressbar" aria-valuemin="0" aria-valuemax="${total}" aria-valuenow="${done}"><span style="width:${Math.min(100, done / total * 100).toFixed(1)}%"></span></span><span class="prov-bar-num">${detail}</span></div>`;
-  // Two levels when the step has them (本地比对: all artists, then the current artist's works), then traffic.
-  const sub = p.sub_total ? bar(esc(tb(p.sub_label) || t('当前')), p.sub_done || 0, p.sub_total, `${number(p.sub_done || 0)} / ${number(p.sub_total)}`) : '';
-  return `<div class="prov-bars">${bar(esc(tb(p.label) || t('进度')), p.done || 0, p.total, `${number(p.done || 0)} / ${number(p.total)}${p.found != null ? ' · ' + t('对上 {n}', {n: number(p.found)}) : ''}`)}${sub}${p.mb != null && s.budget_mb ? bar(t('流量'), p.mb, s.budget_mb, `${number(Math.round(p.mb))} / ${number(s.budget_mb)} MB`) : ''}</div>`;
-}
 function renderProvenanceCard() {
   const card = $('setProvenance'); if (!card || state.route.page !== 'settings') return;
   const p = state.provenance;
@@ -3219,123 +3021,12 @@ function renderProvenanceCard() {
   provenanceDrawn.set(card, html); card.innerHTML = html;
   wireFolds(card);
 }
-$('taskPanel').addEventListener('click', async e => {
-  const b = e.target.closest('[data-prov]'); if (!b) return;
-  // 开始 first shows what leaves the machine; the authorization covers this one run only.
-  if (b.dataset.prov === 'arm' || b.dataset.prov === 'cancel') { provenanceArmed = b.dataset.prov === 'arm'; renderTasks(); return; }
-  b.disabled = true;
-  const body = {action: b.dataset.prov};
-  if (b.dataset.prov === 'start') { body.allow_network = b.dataset.network === '1'; provenanceArmed = false; }
-  try { state.provenance = await post('/api/provenance', body); } catch (err) { toast(err.message); }
-  loadProvenance();
-});
 $('settingsPage').addEventListener('change', async e => {
   if (e.target.id !== 'provAuto') return;
   try { await post('/api/startup', {provenance: e.target.checked}); toast(e.target.checked ? t('同步后会自动查新图的画师') : t('同步后不再自动查画师')); }
   catch (err) { toast(err.message); e.target.checked = !e.target.checked; }
   loadProvenance();
 });
-
-// ---------- 任务面板 (#199): every background job's progress, confirmations and manual runs in one place ----------
-// Each job keeps its own endpoint and poller; this only gathers them. While any job runs, its poller re-arms
-// itself every 2 s; otherwise a slow tick (fast while the panel is open) catches jobs started elsewhere.
-const taskPanel = {open: false, timer: 0, settingsAt: 0};
-const PROV_ACTIVE = ['running', 'stopping'];
-function taskList() {
-  const s = state.sync, ix = state.index?.state || {}, nm = state.names?.state || {}, sim = state.settings?.tasks?.similar || {status: 'off'};
-  const pv = state.provenance, ps = pv?.state || {}, ex = state.libraries?.export || {};
-  const folder = !(state.settings?.package?.sources || state.libraries?.info?.sources || []).some(x => x.kind === 'photos');
-  const bar = (done, total) => total ? `<div class="progress"><span style="width:${Math.min(100, Math.round((done || 0) / total * 100))}%"></span></div>` : '';
-  const list = [
-    {key: 'sync', name: folder ? t('文件夹同步') : t('照片同步'), busy: t('同步中'), active: SYNC_ACTIVE.includes(s.status), off: s.status === 'off', line: s.status === 'off' ? t('这次启动没有开同步') : syncLine(s),
-      warn: ['error', 'needs_recognition', 'interrupted'].includes(s.status), body: syncBar(s, bar) + (SYNC_ACTIVE.includes(s.status) ? '' : syncDamaged(state.syncDamaged)),
-      action: `<button class="quiet small" data-task="sync" ${SYNC_ACTIVE.includes(s.status) || s.status === 'off' ? 'disabled' : ''}>${t('立即同步')}</button>`,
-      log: state.syncHistory?.length ? [t('同步记录'), `<table class="settings-table"><tr><th>${t('时间')}</th><th>${t('新增')}</th><th>${t('移除', {context: 'column'})}</th><th>${t('导入')}</th><th>${t('失败')}</th></tr>${state.syncHistory.slice(0, 8).map(r => `<tr><td>${esc(stamp(r.started_at))}</td><td>${number(r.found)}</td><td>${number(r.removed)}</td><td>${number(r.imported)}</td><td>${number(r.failed)}</td></tr>`).join('')}</table>`] : null},
-    {key: 'index', name: t('检查新角色'), busy: t('检查新角色中'), active: INDEX_ACTIVE.includes(ix.status), line: state.index ? indexLine(ix, state.index.check) : '…', warn: ix.status === 'error',
-      body: INDEX_ACTIVE.includes(ix.status) ? bar(ix.done, ix.total) : '',
-      action: `<button class="quiet small" data-task="index" ${INDEX_ACTIVE.includes(ix.status) || ix.status === 'off' || !state.index?.watch?.works.length ? 'disabled' : ''} title="${state.index?.watch?.works.length ? t('查关注作品在 Danbooru 上有没有新角色（只发送作品名）') : t('先在资料库里关注作品')}">${t('立即检查')}</button>`},
-    {key: 'names', name: t('角色名称'), busy: t('角色名称中'), active: NAMES_ACTIVE.includes(nm.status), off: nm.status === 'off', line: namesLine(nm) + (nm.error ? t('：{reason}', {reason: tb(nm.error)}) : ''), warn: nm.status === 'error', body: NAMES_ACTIVE.includes(nm.status) ? bar(nm.done, nm.total) : '',
-      action: `<button class="quiet small" data-task="names" ${NAMES_ACTIVE.includes(nm.status) || nm.status === 'off' || !state.names ? 'disabled' : ''} title="${t('从 Bangumi 重新获取全部角色的中文名（只发送 tag 与作品名）')}">${t('重新获取')}</button>`},
-    {key: 'similar', name: t('相似图片'), busy: t('相似图片中'), active: SIMILAR_ACTIVE.includes(sim.status), off: sim.status === 'off', line: taskSimilar(sim), warn: sim.status === 'error', body: SIMILAR_ACTIVE.includes(sim.status) ? bar(sim.done, sim.total) : '',
-      action: `<button class="quiet small" data-task="similar" ${SIMILAR_ACTIVE.includes(sim.status) || sim.status === 'off' ? 'disabled' : ''}>${t('重新检查')}</button>`},
-  ];
-  if (pv?.available) list.push({key: 'provenance', name: t('找回画师'), busy: t('找回画师中'), active: PROV_ACTIVE.includes(ps.status), warn: ps.status === 'failed',
-    line: ps.status === 'stopping' ? t('正在停止…') : PROV_ACTIVE.includes(ps.status) ? t('正在查找 · 第 {step}/{steps} 步', {step: (ps.index || 0) + 1, steps: ps.total || 1}) + (ps.text ? ' · ' + tb(ps.text) : '')
-      : ps.status === 'failed' ? t('上次出错：{reason}', {reason: tb(ps.reason || '')}) : pv.runs?.[0] ? t('上次 {time} · 新找到 {n}', {time: localTime(pv.runs[0].started_at), n: number(pv.runs[0].found || 0)}) : t('还没有查过'),
-    body: PROV_ACTIVE.includes(ps.status) ? provenanceBars(ps) + (ps.side ? `<p class="task-side">${t('同时进行')} · ${esc(tb(ps.side.name || ps.side.step))}${ps.side.text ? ' · ' + esc(tb(ps.side.text)) : ''}</p>${provenanceBars({progress: ps.side.progress})}` : '') : '',
-    action: PROV_ACTIVE.includes(ps.status) ? `<button class="quiet small" data-prov="stop" ${ps.status === 'stopping' ? 'disabled' : ''}>${t('停止')}</button>` : provenanceArmed ? '' : `<button class="quiet small" data-prov="arm">${t('开始…')}</button>`,
-    log: pv.runs?.length ? [t('运行记录'), `<table class="settings-table"><tr><th>${t('开始')}</th><th>${t('方式')}</th><th>${t('新找到')}</th><th>${t('流量')}</th><th>${t('结果')}</th></tr>${pv.runs.slice(0, 8).map(r => `<tr><td>${esc(localTime(r.started_at))}</td><td>${r.kind === 'new' ? t('同步后') : r.kind === 'full' ? t('手动') : t('命令行')}</td><td>${number(r.found || 0)}</td><td>${(r.traffic_mb || 0).toFixed(1)} MB</td><td title="${esc(tb(r.reason || ''))}">${RUN_STATUS[r.status] || esc(r.status)}</td></tr>`).join('')}</table>`] : null});
-  if (['running', 'done', 'error'].includes(ex.status)) list.push({key: 'export', name: t('导出图库'), busy: t('导出图库中'), active: ex.status === 'running', warn: ex.status === 'error',
-    line: ex.status === 'running' ? t('正在导出…') : ex.status === 'done' ? t('已导出 {mb} MB', {mb: (ex.bytes / 1048576).toFixed(0)}) : t('导出失败：{error}', {error: tb(ex.error || '')}), body: '', action: ''});
-  return list;
-}
-// Things that wait for the person: an authorization, characters to add, a sync that needs a hand.
-function taskAsks() {
-  const asks = [], p = state.provenance, missing = state.index?.check?.missing || [], s = state.sync;
-  if (provenanceArmed && p?.available) asks.push(`<div class="task-ask prov-confirm"><b>${t('找回画师这次要访问外网，确认后才会发出：')}</b>
-    <ul><li>${t('发给 Danbooru：图片的像素哈希和感知哈希（IQDB 签名，都是一串文本，不是图片）、画师名和账号')}</li>
-    <li>${state.accounts?.pixiv?.bound ? t('用你绑定的 Pixiv 登录状态读取你的关注列表（只读）') : t('没有绑定 Pixiv：只看公开作品，不含 R18')}</li>
-    <li>${t('本次最多 {mb} MB；遇到拒绝、限流或验证码就停，不绕过', {mb: number(p.budgets?.full || 1024)})}</li></ul>
-    <p class="muted-note">${t('授权只对这一次有效，下次开始会再问。图片本身不会上传。查过的图和画师不会重查，可以随时停止。')}</p>
-    <div class="prov-confirm-btns"><button class="primary" data-prov="start" data-network="1">${t('授权并开始')}</button><button class="quiet" data-prov="start">${t('只跑本地（签名识别）')}</button><button class="quiet" data-prov="cancel">${t('取消')}</button></div></div>`);
-  if (missing.length && !INDEX_ACTIVE.includes(state.index.state.status)) asks.push(`<div class="task-ask"><span>${t('上次检查发现 {n} 个还没收录的角色', {n: `<b>${number(missing.length)}</b>`})}</span><button class="primary small" data-task="index-add">${t('查看并添加…')}</button></div>`);
-  return asks;
-}
-function renderTasks() {
-  const list = taskList(), active = list.filter(t => t.active), warn = list.some(t => t.warn), asks = taskAsks();
-  const button = $('taskButton'), badge = $('taskBadge');
-  button.classList.toggle('busy', !!active.length);
-  $('taskLabel').textContent = active.length > 1 ? t('{n} 项进行中', {n: active.length}) : active.length ? active[0].busy : t('任务');
-  button.title = active.length ? active.map(task => t('{name}：{line}', {name: task.name, line: task.line})).join('\n') : asks.length ? t('有事等你确认') : warn ? t('有任务出错了') : t('任务：同步、检查新角色、找回画师…');
-  badge.hidden = !asks.length && !warn; badge.className = 'task-badge' + (warn && !asks.length ? ' warn' : '');
-  if (!taskPanel.open) return;
-  const order = [...active, ...list.filter(t => !t.active)];
-  const html = `<div class="task-top"><h2>${t('任务')}</h2><button class="icon" data-task="close" aria-label="${t('关闭')}">×</button></div>
-    ${asks.length ? `<h6>${t('等你确认')}</h6><div class="task-asks">${asks.join('')}</div>` : ''}
-    <h6>${active.length ? t('进行中与其他任务') : t('全部任务')}</h6><div class="view-group task-group">${order.map(task => `<div class="task-item${task.active ? ' on' : ''}">
-      <div class="task-main"><span class="local-dot${task.active ? ' busy' : task.warn ? ' warn' : task.off ? ' off' : ''}"></span><span class="task-text"><b>${task.name}</b><small>${esc(task.line)}</small></span>${task.action}</div>
-      ${task.body ? `<div class="task-body">${task.body}</div>` : ''}${task.log ? fold('task-' + task.key, task.log[0], task.log[1]) : ''}</div>`).join('')}</div>
-    <p class="task-foot">${t('各任务是否自动运行，在{link}里改。', {link: `<a class="link" href="#/settings">${t('设置')}</a>`})}</p>`;
-  const pop = $('taskPanel');
-  // Polled while jobs run: redraw only on change, so a click is never lost to a replaced button.
-  if (pop.dataset.html === html) return;
-  pop.dataset.html = html; pop.innerHTML = html; wireFolds(pop);
-}
-async function taskTick() {
-  clearTimeout(taskPanel.timer);
-  const jobs = [pollSync(), pollIndex(), pollNames(), loadProvenance()];
-  // The similar job's state comes with /api/settings, which also measures the caches: read it only when looked at.
-  if (taskPanel.open && Date.now() - taskPanel.settingsAt > (SIMILAR_ACTIVE.includes(state.settings?.tasks?.similar?.status) ? 2500 : 15000)) { taskPanel.settingsAt = Date.now(); jobs.push(settingsRequest('/api/settings').then(s => { state.settings = s; }).catch(e => error(readError(e)))); }
-  if (taskPanel.open && !state.libraries) jobs.push(loadLibraries());
-  await Promise.allSettled(jobs);
-  renderTasks();
-  updatesTick();
-  taskPanel.timer = setTimeout(taskTick, taskPanel.open ? 3000 : 30000);
-}
-function toggleTasks(open = !taskPanel.open) {
-  taskPanel.open = open; $('taskPanel').hidden = !open;
-  $('taskButton').setAttribute('aria-expanded', open); $('taskButton').classList.toggle('on', open);
-  if (open) { delete $('taskPanel').dataset.html; renderTasks(); taskTick(); }
-  else provenanceArmed = false;
-}
-$('taskButton').onclick = e => { e.stopPropagation(); toggleTasks(); };
-$('taskPanel').addEventListener('click', async e => {
-  e.stopPropagation();
-  const b = e.target.closest('[data-task]'); if (!b) { if (e.target.closest('a[href]')) toggleTasks(false); return; }
-  const act = b.dataset.task;
-  if (act === 'close') { toggleTasks(false); return; }
-  if (act === 'index-add') { openIndexAdd(); return; }
-  b.disabled = true;
-  try {
-    if (act === 'sync') { await post('/api/sync', {}); state.sync = {status: 'scanning'}; }
-    else if (act === 'index') { if (!await checkIndex()) return; }
-    else if (act === 'names') { state.names = {...state.names, ...await post('/api/names', {action: 'refresh'})}; toast(t('已开始重新获取角色名称')); }
-    else if (act === 'similar') { await post('/api/similar', {}); state.settings = await api('/api/settings'); }
-  } catch (err) { toast(err.message); } finally { b.disabled = false; }
-  taskTick();
-});
-document.addEventListener('click', e => { if (taskPanel.open && !e.target.closest('#taskPanel, dialog')) toggleTasks(false); });
-document.addEventListener('keydown', e => { if (e.key === 'Escape' && taskPanel.open && !document.querySelector('dialog[open]')) { toggleTasks(false); e.stopImmediatePropagation(); } }, true);
 
 // ---------- 画师抽查: acceptance of 找回画师 (docs/PROVENANCE.md section 8) ----------
 // A fixed random sample (the server orders by a hash of the id), answered with the same 是 TA / 不是 as the detail
@@ -3573,7 +3264,7 @@ function drawGuideNotice() {
 }
 $('guideNotice').addEventListener('click', async e => {
   if (e.target.closest('[data-guide-check]')) { await guideAction({action: 'check'}); drawGuide(); setTimeout(() => guideRefresh(true), 1500); }
-  if (e.target.closest('[data-guide-sync]')) { try { await post('/api/sync', {}); state.sync = {status: 'scanning'}; pollSync(); } catch (err) { toast(err.message); } drawGuide(); }
+  if (e.target.closest('[data-guide-sync]')) { try { await startSync(); pollSync(); } catch (err) { toast(err.message); } drawGuide(); }
 });
 
 // ----- the tour: one real element lit up at a time -----

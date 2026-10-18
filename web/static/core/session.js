@@ -5,17 +5,18 @@
 // The page stops instead, and drops responses that arrive afterwards.
 // Only this module writes session.token and session.stale; everything else reads them.
 import {t, tb, said, I18N} from './i18n.js';
+import {listeners} from './events.js';
 export const session = {token: '', stale: false};
 export const STALE = t('图库已在其他窗口切换或重新打开，请重新载入页面');
-const staleListeners = new Set(), postListeners = new Set();
+const stopped = listeners(), written = listeners();
 // fn() runs once, when the page stops. Each returns a function that removes the listener again.
-export const onStale = fn => { staleListeners.add(fn); return () => staleListeners.delete(fn); };
+export const onStale = stopped.on;
 // fn(path, body) runs after every write the backend accepted.
-export const onPost = fn => { postListeners.add(fn); return () => postListeners.delete(fn); };
+export const onPost = written.on;
 export function staleSession() {
   if (session.stale) return;
   session.stale = true;
-  for (const fn of staleListeners) fn();
+  stopped.emit();
 }
 export function adoptToken(token) {
   if (!session.token) session.token = token;
@@ -37,7 +38,14 @@ export async function api(path, options = {}) {
 export async function post(path, body) {
   const result = await api(path, {method: 'POST', body: JSON.stringify(body)});
   if (path === '/api/suggest') return result;  // read-only; POST only carries the selection
-  for (const fn of postListeners) fn(path, body);
+  written.emit(path, body);
   return result;
+}
+// One read per path in flight: whoever asks for the same path meanwhile shares its answer (the settings page reads
+// several cards' data at once, and the task panel some of the same).
+const reads = new Map();
+export function shared(path) {
+  if (!reads.has(path)) reads.set(path, api(path).finally(() => reads.delete(path)));
+  return reads.get(path);
 }
 export function readError(e) { return t('读取失败：{reason}', {reason: e?.message || String(e)}); }

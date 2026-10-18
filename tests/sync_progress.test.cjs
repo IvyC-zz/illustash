@@ -1,15 +1,17 @@
 // Run with: node --test tests/sync_progress.test.cjs
-const {test} = require('node:test');
+// The sync's words are core/jobs.js; the damaged pictures' list is the task panel's (ui/tasks.js; #199).
+const {test, before} = require('node:test');
 const assert = require('node:assert/strict');
 const {readFileSync} = require('node:fs');
 const vm = require('node:vm');
+const web = require('./web.cjs');
 const zh = require('./i18n_zh.cjs');   // t() of a Chinese page (#173)
-const source = readFileSync(require('node:path').join(__dirname, '../web/static/app.js'), 'utf8');
-const code = source.slice(source.indexOf('const syncBar ='), source.indexOf('let syncTimer'));
-const esc = v => String(v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
-const context = {number: n => String(n), stamp: t => t, esc, fold: (key, summary, body) => `[${key}|${summary}]${body}`};
-vm.createContext(Object.assign(context, zh.page));
-vm.runInContext(code + ';this.syncLine = syncLine; this.syncBar = syncBar; this.syncDamaged = syncDamaged;', context);
+const context = {};
+before(async () => {
+  await web.ready();
+  const {syncLine, syncBar} = web.core(), {syncDamaged} = await web.load('ui/tasks.js');
+  Object.assign(context, {syncLine, syncBar, syncDamaged});
+});
 const bar = (done, total) => `${done}/${total}`;
 
 test('model loading shows the stage, not a count of recognised images', () => {
@@ -50,15 +52,15 @@ test('batches imported during recognition are counted while it runs', () => {
 });
 
 test('a finished run says which pictures it kept because their paths could not be read', () => {
-  assert.equal(context.syncLine({status: 'done', finished_at: '10-11 21:00'}), '上次同步：10-11 21:00');
-  assert.equal(context.syncLine({status: 'done', finished_at: '10-11 21:00', unreadable: 2}),
+  assert.equal(context.syncLine({status: 'done', finished_at: '2026-10-11T21:00:00'}), '上次同步：10-11 21:00');
+  assert.equal(context.syncLine({status: 'done', finished_at: '2026-10-11T21:00:00', unreadable: 2}),
     '上次同步：10-11 21:00 · 2 处暂时读不到，已有图片保留不动');
   assert.equal(context.syncLine({status: 'needs_recognition', total: 3, unreadable: 1}),
     '有 3 张图等待识别（识别服务未启动） · 1 处暂时读不到，已有图片保留不动');
 });
 
 test('a finished run tells unreadable pictures, retried next time, apart from damaged ones, skipped (#112)', () => {
-  const done = {status: 'done', finished_at: '10-13 09:00'};
+  const done = {status: 'done', finished_at: '2026-10-13T09:00:00'};
   assert.equal(context.syncLine({...done, failed: 2}),
     '上次同步：10-13 09:00 · 2 张暂时读不到（可能还在 iCloud），下次同步重试');
   assert.equal(context.syncLine({...done, damaged: 1}), '上次同步：10-13 09:00 · 1 张已损坏或格式不支持，未识别');
@@ -71,9 +73,9 @@ test('damaged pictures are listed where they are, the rest counted', () => {
   assert.equal(context.syncDamaged(undefined), '');
   assert.equal(context.syncDamaged({count: 0, paths: []}), '');
   const html = context.syncDamaged({count: 3, paths: ['/Users/someone/Pictures/a<b>.png', 'D:\\Pictures\\c.jpg']});
-  assert.match(html, /^\[task-sync-damaged\|3 张图片已损坏或格式不支持\]/);
+  assert.match(html, /^<details class="more" data-fold-key="task-sync-damaged"><summary>3 张图片已损坏或格式不支持<\/summary>/);
   assert.match(html, /修好或换成正常的图片后，下次同步会重新识别/);
-  assert.match(html, /title="\/Users\/someone\/Pictures\/a&lt;b>.png"><bdi>~\/Pictures\/a&lt;b>.png<\/bdi>/);
+  assert.match(html, /title="\/Users\/someone\/Pictures\/a&lt;b&gt;.png"><bdi>~\/Pictures\/a&lt;b&gt;.png<\/bdi>/);
   assert.match(html, /<bdi>D:\\Pictures\\c.jpg<\/bdi>/);
   assert.match(html, /另有 1 张未列出。/);
   assert.doesNotMatch(context.syncDamaged({count: 1, paths: ['/data/x.png']}), /未列出/);

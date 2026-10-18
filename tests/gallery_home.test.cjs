@@ -130,7 +130,15 @@ test('undo and a finished sync redraw the home page, whose day groups come from 
   assert.deepEqual(calls, ['reload', ['home', true]]);
   assert.equal(edits.latest, null);
   calls.length = 0;
-  vm.runInContext('let syncTimer = 0, syncPoll = 0, lastImported = 0;' + source.slice(source.indexOf('async function pollSync()'), source.indexOf('// ---------- new characters')) + ';this.pollSync = pollSync;', c);
-  await c.pollSync();
+  // The sync's poller is core/jobs.js; what its end redraws is app.js's onJob listener.
+  const {state, pollSync, onJob, SYNC_ACTIVE} = web.core();
+  Object.assign(state, {route: {page: 'home'}, sync: {status: 'scanning'}});
+  globalThis.fetch = async () => ({status: 200, ok: true, json: async () => ({state: {status: 'done', imported: 1}, history: [], damaged: null})});
+  const g = {state, SYNC_ACTIVE, onJob: fn => (g.off = onJob(fn)), async refreshMeta() {}, error() {}, readError: e => e, guideRefresh() {},
+    panelPage: p => p === 'home', selCount: () => 0, reload() { calls.push('reload'); }, renderHome(keep) { calls.push(['home', keep]); }};
+  vm.createContext(g);
+  vm.runInContext(source.slice(source.indexOf('// What a background job'), source.indexOf('// Name text queries')), g);
+  await pollSync();
+  g.off();
   assert.deepEqual(calls, [['home', true]]);
 });

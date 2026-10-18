@@ -2,6 +2,7 @@
 // the undo button in the toolbar. Their state lives in core/session.js and core/edits.js.
 import {t, tb} from '../core/i18n.js';
 import {esc, isMac, shortcut} from '../core/format.js';
+import {prefs} from '../core/prefs.js';
 import {session, STALE, onStale, readError} from '../core/session.js';
 import {onLatest} from '../core/edits.js';
 export const $ = id => document.getElementById(id);
@@ -36,3 +37,13 @@ onLatest(({latest, busy}) => {
   $('undoButton').disabled = !latest || busy;
   $('undoButton').title = latest ? t('撤销：{label}（{key}）', {label: tb(latest.label), key: shortcut('Z')}) : t('暂无可撤销操作');
 });
+// Collapsible blocks whose open/closed state survives re-renders and reloads.
+export const fold = (key, summary, body) => `<details class="more" data-fold-key="${key}"${prefs.get('settingsOpen', {})[key] ? ' open' : ''}><summary>${summary}</summary><div class="more-body">${body}</div></details>`;
+export function wireFolds(root) {
+  for (const d of root.querySelectorAll('details[data-fold-key]')) {
+    if (d.dataset.foldWired) continue;
+    d.dataset.foldWired = '1';
+    d.ontoggle = () => { const o = prefs.get('settingsOpen', {}); if (d.open) o[d.dataset.foldKey] = true; else delete o[d.dataset.foldKey]; prefs.set('settingsOpen', o); };
+  }
+}
+// Coalesce identical in-flight reads; a slow card never delays the local settings shell.

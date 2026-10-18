@@ -1,5 +1,7 @@
 // Run with: node --test tests/name_network.test.cjs
-const {test} = require('node:test');
+const {test, before} = require('node:test');
+const web = require('./web.cjs');   // core/jobs.js (#199)
+before(web.ready);
 const assert = require('node:assert/strict');
 const {readFileSync} = require('node:fs');
 const vm = require('node:vm');
@@ -70,7 +72,7 @@ test('saving or clearing model settings keeps the grant and revoke control avail
       toast() {}, renderSettings() { rendered.push(context.state.names.network); },
     };
     vm.createContext(Object.assign(context, zh.page));
-    vm.runInContext(source.slice(source.indexOf('function renderModelCard()'), source.indexOf('async function pollNames()'))
+    vm.runInContext(source.slice(source.indexOf('function renderModelCard()'), source.indexOf('const settingsMarkup'))
       + ';renderModelCard();', context);
     controls.modelSave.onclick();
     await new Promise(resolve => setImmediate(resolve));
@@ -84,35 +86,22 @@ test('saving or clearing model settings keeps the grant and revoke control avail
 });
 
 test('refreshing names from the task panel keeps the network status', async () => {
-  const network = {authorized: true, this_run: false, granted_at: 'synthetic-time'};
-  let handler;
-  const context = {
-    state: {names: {network, state: {status: 'idle'}}},
-    $() { return {addEventListener(event, callback) { handler = callback; }}; },
-    async post(path, body) {
-      assert.equal(path, '/api/names'); assert.equal(body.action, 'refresh');
-      return {state: {status: 'fetching'}};
-    },
-    toast() {}, taskTick() {},
+  // The panel's button runs core/jobs.js refreshNames().
+  const network = {authorized: true, this_run: false, granted_at: 'synthetic-time'}, {state, refreshNames} = web.core();
+  state.names = {network, state: {status: 'idle'}};
+  globalThis.fetch = async (path, options) => {
+    assert.equal(path, '/api/names'); assert.equal(JSON.parse(options.body).action, 'refresh');
+    return {status: 200, ok: true, json: async () => ({state: {status: 'fetching'}})};
   };
-  vm.createContext(Object.assign(context, zh.page));
-  vm.runInContext(source.slice(source.lastIndexOf("$('taskPanel').addEventListener('click'"),
-    source.indexOf("document.addEventListener('click', e => { if (taskPanel.open")), context);
-  await handler({
-    stopPropagation() {},
-    target: {closest() { return {dataset: {task: 'names'}}; }},
-  });
-  assert.equal(context.state.names.network, network);
-  assert.equal(context.state.names.state.status, 'fetching');
+  await refreshNames();
+  assert.equal(state.names.network, network);
+  assert.equal(state.names.state.status, 'fetching');
 });
 
 test('names waiting for consent are not shown as a failure', () => {
-  const context = {number: String};
-  vm.createContext(Object.assign(context, zh.page));
-  const start = source.indexOf('const NAMES_ACTIVE');
-  vm.runInContext(source.slice(start, source.indexOf('\n', source.indexOf('const namesLine', start))) + ';this.namesLine = namesLine;', context);
-  const line = context.namesLine({status: 'unauthorized'});
+  const {namesLine} = web.core();
+  const line = namesLine({status: 'unauthorized'});
   assert.doesNotMatch(line, /失败/);
   assert.match(line, /网络与隐私/);
-  assert.equal(context.namesLine({status: 'error'}), '获取失败，将在下次启动时重试');
+  assert.equal(namesLine({status: 'error'}), '获取失败，将在下次启动时重试');
 });
