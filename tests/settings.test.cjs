@@ -1,13 +1,17 @@
-const {test} = require('node:test');
+const {test, before} = require('node:test');
+const web = require('./web.cjs');   // core/ modules (#199)
+before(web.ready);
 const assert = require('node:assert/strict');
 const {readFileSync} = require('node:fs');
 const vm = require('node:vm');
 const zh = require('./i18n_zh.cjs');   // t() of a Chinese page (#173)
 const source = readFileSync(require('node:path').join(__dirname, '../web/static/app.js'), 'utf8');
-const helpers = source.slice(source.indexOf('const settingsRequests ='), source.indexOf('// One page per question'));
+const helpers = source.slice(source.indexOf('const settingsMarkup ='), source.indexOf('// One page per question'));
+// Reads go through core/session.js (shared() lets callers share one read per path); api answers them here.
 function harness(api, extra = {}) {
-  const renders = [], errors = [];
-  const c = {api, session: {token: ''}, state: {route: {page: 'settings'}}, document: {activeElement: null},
+  const renders = [], errors = [], {session, shared} = web.core();
+  globalThis.fetch = path => { const answer = api(path); return Promise.resolve({status: 200, ok: true, json: () => answer}); };
+  const c = {api, shared, session, state: {route: {page: 'settings'}}, document: {activeElement: null},
     error: message => errors.push(message), readError: e => '读取失败：' + e.message, renderSettings: fetch => renders.push(fetch), ...extra};
   vm.createContext(Object.assign(c, zh.page)); vm.runInContext(helpers, c);
   return {c, renders, errors};
@@ -19,7 +23,7 @@ test('cold load starts all four reads concurrently and shares in-flight requests
   const {c, renders} = harness(path => { calls.push(path); return new Promise(resolve => pending.set(path, resolve)); });
   const load = c.loadSettingsData();
   assert.equal(c.loadSettingsData(), load);
-  const same = c.settingsRequest('/api/names');
+  const same = c.shared('/api/names');
   assert.deepEqual(calls, ['/api/settings','/api/fold','/api/index','/api/names']);
   pending.get('/api/fold')({kinds: ['duplicate']}); await tick();
   assert.deepEqual(c.state.fold, ['duplicate']);
@@ -93,31 +97,36 @@ test('work tree lists children under their parent, with counts and the watch swi
   assert.ok(root.innerHTML.includes('<b>parent</b>') && !root.innerHTML.includes('<b>child</b>'));
 });
 
-function indexHarness(initialStatus, nextStatus) {
-  const calls = [], renders = [];
-  const c = {indexTimer: 0, INDEX_ACTIVE: ['checking','fetching','importing'],
-    state: {route: {page:'settings'}, index: {state:{status:initialStatus}, works:[], history:[]}},
-    api: async path => {calls.push(path); return {state:{status:nextStatus,done:2,total:10}};},
-    settingsRequest: async path => {calls.push(path);return {state:{status:nextStatus},works:[],check:{found:1}};},
-    clearTimeout() {}, setTimeout() {}, renderIndexCard() {renders.push('index');}, renderTasks() {renders.push('tasks');}, drawShelf() {},
-    $: () => null, indexLine: () => '', toast() {}, refreshMeta: async () => {}, number: String};
-  vm.createContext(Object.assign(c, zh.page));
-  vm.runInContext(source.slice(source.indexOf('async function pollIndex()'),source.indexOf('// ---------- display names')),c);
-  return {c,calls,renders};
+// The index's poller is core/jobs.js; what it redraws outside the task panel is app.js's onJob listener.
+async function indexHarness(initialStatus, nextStatus) {
+  const calls = [], renders = [], {state, pollIndex, onJob, SYNC_ACTIVE} = web.core();
+  Object.assign(state, {route: {page: 'settings'}, index: {state: {status: initialStatus}, works: [], history: []}});
+  globalThis.fetch = async path => {
+    calls.push(path);
+    const body = path.includes('progress=1') ? {state: {status: nextStatus, done: 2, total: 10}} : {state: {status: nextStatus}, works: [], check: {found: 1}};
+    return {status: 200, ok: true, json: async () => body};
+  };
+  const g = {state, SYNC_ACTIVE, onJob: fn => offs.push(onJob(fn)), renderIndexCard() { renders.push('index'); }, drawShelf() {}, refreshMeta: async () => {}, error() {}, readError: e => e};
+  const offs = [];
+  vm.createContext(g);
+  vm.runInContext(source.slice(source.indexOf('// What a background job'), source.indexOf('// Name text queries')), g);
+  offs.push(onJob(() => { renders.push('tasks'); }));   // as the task panel does
+  const setTimeout = globalThis.setTimeout;
+  globalThis.setTimeout = () => 0;
+  try { await pollIndex(); } finally { globalThis.setTimeout = setTimeout; for (const off of offs) off(); }
+  return {calls, renders};
 }
 
 test('index progress does not reload work list or rebuild the editor', async () => {
-  const {c,calls,renders} = indexHarness('checking','checking');
-  await c.pollIndex();
-  assert.deepEqual(calls,['/api/index?progress=1']);
-  assert.deepEqual(renders,['tasks']);
+  const {calls, renders} = await indexHarness('checking', 'checking');
+  assert.deepEqual(calls, ['/api/index?progress=1']);
+  assert.deepEqual(renders, ['tasks']);
 });
 
 test('index completion fetches updated results once', async () => {
-  const {c,calls,renders} = indexHarness('checking','checked');
-  await c.pollIndex();
-  assert.deepEqual(calls,['/api/index?progress=1','/api/index']);
-  assert.deepEqual(renders,['index','tasks']);
+  const {calls, renders} = await indexHarness('checking', 'checked');
+  assert.deepEqual(calls, ['/api/index?progress=1', '/api/index']);
+  assert.deepEqual(renders, ['index', 'tasks']);
 });
 
 test('new work data invalidates a collapsed editor even when its summary is unchanged', () => {

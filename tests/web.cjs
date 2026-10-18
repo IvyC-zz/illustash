@@ -20,10 +20,10 @@ async function ready() {
   globalThis.self = {ILLUSTASH_LANGUAGE: page.code, ILLUSTASH_LANGUAGES: names, ILLUSTASH_TABLES: page.tables};
   globalThis.document = {documentElement: {}, querySelectorAll: () => []};
   vm.runInThisContext(readFileSync(path.join(STATIC, 'i18n.js'), 'utf8'), {filename: path.join(STATIC, 'i18n.js')});
-  loaded = Object.assign({}, ...await Promise.all(['i18n', 'format', 'prefs', 'session', 'edits'].map(name => load(`core/${name}.js`))));
+  loaded = Object.assign({}, ...await Promise.all(['i18n', 'format', 'prefs', 'session', 'edits', 'state', 'jobs'].map(name => load(`core/${name}.js`))));
 }
 // What core/ exports, with a new session and nothing to undo, also for a context that runs a slice of app.js not
-// yet moved.
+// yet moved. The rest of core/state.js is the test's to set.
 function core() {
   if (!loaded) throw new Error('call before(web.ready) first');
   Object.assign(loaded.session, {token: '', stale: false});

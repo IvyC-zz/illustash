@@ -31,7 +31,7 @@ for (const [name, code, method] of [['works', shelfRead, 'renderShelf'], ['chara
   });
 }
 test('a late failed watch query cannot overwrite newer local results', async () => {
-  const code = source.slice(source.indexOf('function wireWatchAdd('), source.indexOf('async function pollIndex('));
+  const code = source.slice(source.indexOf('function wireWatchAdd('), source.indexOf('// ---------- display names'));
   const pending = []; const input = {value: 'A', setAttribute() {}}, menu = {};
   const c = {URLSearchParams, state: {}, session: {token: 'a'}, readError, $: id => id === 'watchAdd' ? input : menu, api: () => new Promise((resolve, reject) => pending.push({resolve, reject})), esc: s => s, workName: s => s, number: String, setTimeout: () => 0, clearTimeout() {}, document: {activeElement: null}, watchDraft: ''};
   vm.createContext(Object.assign(c, zh.page)); vm.runInContext(code, c); c.wireWatchAdd({watch: {works: []}}, () => {});

@@ -1,7 +1,11 @@
 // #88: an archive or recognition-result import runs as a background task. The library card shows the step it is on
 // with real counts only, a cancel button while it runs and how it ended; late or out-of-order answers (#34) never wind
 // it back, and the end is announced once.
-const {test} = require('node:test');
+const {test, before, afterEach} = require('node:test');
+const web = require('./web.cjs');   // the import's poller and words are core/jobs.js (#199)
+before(web.ready);
+let cleanup = () => {};
+afterEach(() => { cleanup(); cleanup = () => {}; });
 const assert = require('node:assert/strict');
 const {readFileSync} = require('node:fs');
 const vm = require('node:vm');
@@ -11,21 +15,20 @@ const section = (a, b) => source.slice(source.indexOf(a), source.indexOf(b, sour
 const esc = s => String(s).replace(/[&<>"]/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'})[c]);
 
 function card(importTask) {
-  const node = {innerHTML: ''};
+  const node = {innerHTML: ''}, {state, importLine, importActive} = web.core();
+  Object.assign(state, {route: {page: 'settings'}, importTask, libraries: {
+    info: {name: '合成图库', path: '/tmp/synthetic.pilib', sources: [], test: null},
+    current: '/tmp/synthetic.pilib', home: '/tmp', libraries: [], export: {status: 'idle'}}});
   const c = {
-    $: id => (id === 'setLibraries' ? node : null), esc, IS_MAC: false, devMode: false, number: String,
+    state, importLine, importActive, $: id => (id === 'setLibraries' ? node : null), esc, IS_MAC: false, devMode: false, number: String,
     origins: () => [['x', 'X']], cardHead: title => `<h2>${title}</h2>`,
     setSettingsHTML: (card, html) => { card.innerHTML = html; return true; },
     libForm: {open: false, folders: {}, name: '', photos: false},
-    state: {route: {page: 'settings'}, importTask, libraries: {
-      info: {name: '合成图库', path: '/tmp/synthetic.pilib', sources: [], test: null},
-      current: '/tmp/synthetic.pilib', home: '/tmp', libraries: [], export: {status: 'idle'}}},
   };
   vm.createContext(Object.assign(c, zh.page));
-  vm.runInContext(section('function renderLibrariesCard()', '// Gallery pages have no Tauri dialog permission') +
-    ';this.importLine = importLine;', c);
+  vm.runInContext(section('function renderLibrariesCard()', '// Gallery pages have no Tauri dialog permission'), c);
   c.renderLibrariesCard();
-  return {html: node.innerHTML, line: c.importLine};
+  return {html: node.innerHTML, line: importLine};
 }
 const running = (extra = {}) => ({status: 'running', kind: 'archive', id: 't1', file: '合成.zip', ...extra});
 
@@ -62,22 +65,27 @@ test('a stopping or finished import has no cancel button and says how it ended',
   assert.doesNotMatch(card(undefined).html, /import-line/);
 });
 
+// core/jobs.js polls; app.js starts an import and, from its onJob listener, announces the end and lists a new library.
 function poller(token = 'session') {
-  const answers = [], timers = [], toasts = [], posted = [];
+  const answers = [], timers = [], toasts = [], posted = [], offs = [];
   let rendered = 0, libraries = 0;
+  const {state, session, onJob, pollImports, importStarted, cancelImport, importLine, SYNC_ACTIVE} = web.core();
+  session.token = token;
+  Object.assign(state, {route: {page: 'settings'}, importTask: undefined});
+  globalThis.fetch = (path, options) => {
+    if (path === '/api/imports/cancel') { posted.push(options); return Promise.resolve({status: 200, ok: true, json: async () => ({status: 'stopping'})}); }
+    return new Promise(resolve => answers.push(body => resolve({status: 200, ok: true, json: async () => body})));
+  };
+  const setTimeout = globalThis.setTimeout;
+  globalThis.setTimeout = (fn, ms) => { timers.push(ms); return timers.length; };
   const c = {
-    session: {token}, state: {route: {page: 'settings'}},
-    api: (path, options) => {
-      if (path === '/api/imports/cancel') { posted.push(options); return Promise.resolve({status: 'stopping'}); }
-      return new Promise(resolve => answers.push(resolve));
-    },
+    state, session, SYNC_ACTIVE, importLine, importStarted, pollImports, cancelImport, onJob: fn => offs.push(onJob(fn)),
     libraryAction: async () => ({started: true, task: running()}),
     renderLibrariesCard: () => { rendered++; }, loadLibraries: () => { libraries++; }, toast: m => toasts.push(m),
-    setTimeout: (fn, ms) => { timers.push(ms); return timers.length; }, clearTimeout() {}, number: String, esc,
   };
   vm.createContext(Object.assign(c, zh.page));
-  vm.runInContext(section('const IMPORT_ACTIVE', '// #41: the shareable export') +
-    section('let importTimer', 'async function pollExport()'), c);
+  vm.runInContext(section('// What a background job', '// Name text queries') + section('async function startImport(', 'async function pollExport()'), c);
+  cleanup = () => { globalThis.setTimeout = setTimeout; for (const off of offs) off(); };
   return {c, answers, timers, toasts, posted, rendered: () => rendered, libraries: () => libraries};
 }
 

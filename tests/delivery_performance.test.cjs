@@ -143,7 +143,7 @@ test('successful writes invalidate an in-flight metadata read before UI refresh 
   const {post, onPost} = web.core();
   globalThis.fetch = async () => ({status: 200, ok: true, json: async () => ({ok: true})});
   c.post = post; c.onPost = fn => (c.unlisten = onPost(fn));
-  vm.runInContext(section('onPost((path, body) =>', 'async function checkIndex('), c);
+  vm.runInContext(section('onPost((path, body) =>', '// What a background job'), c);
   const first = c.refreshMeta(); await tick();
   await c.post('/api/suggest', {});
   assert.equal(c.state.readEpoch, 0); assert.equal(c.state.countDirty, undefined);
