@@ -11,6 +11,8 @@ use std::time::{Duration, Instant};
 
 use tauri::{AppHandle, Manager, Url, WebviewWindow};
 
+use crate::i18n::{tr, tr_with};
+
 const PORT: u16 = 8765;
 const READY: &str = "图库已启动：";
 const PROGRESS: &str = "启动进度：";
@@ -94,7 +96,7 @@ fn root(app: &AppHandle, args: &[String]) -> Result<PathBuf, String> {
     let mut explicit = std::env::var_os("ILLUSTASH_ROOT").map(PathBuf::from);
     for (i, arg) in args.iter().enumerate() {
         if arg == "--root" {
-            explicit = Some(PathBuf::from(args.get(i + 1).ok_or("--root 缺少路径")?));
+            explicit = Some(PathBuf::from(args.get(i + 1).ok_or_else(|| tr("--root 缺少路径"))?));
         } else if let Some(value) = arg.strip_prefix("--root=") {
             explicit = Some(PathBuf::from(value));
         }
@@ -119,17 +121,11 @@ fn root(app: &AppHandle, args: &[String]) -> Result<PathBuf, String> {
 
 fn validate_root(root: PathBuf) -> Result<PathBuf, String> {
     let root = root.canonicalize().map_err(|e| {
-        format!(
-            "找不到应用资源（{}）：{e}；请重新安装或指定 --root",
-            root.display()
-        )
+        tr_with("找不到应用资源（{path}）：{error}；请重新安装或指定 --root", &[("path", &root.display()), ("error", &e)])
     })?;
     for file in ["web/static/index.html", "tags/tags_v3.csv"] {
         if !root.join(file).is_file() {
-            return Err(format!(
-                "应用资源缺失：{}；请重新安装或指定 --root",
-                root.join(file).display()
-            ));
+            return Err(tr_with("应用资源缺失：{path}；请重新安装或指定 --root", &[("path", &root.join(file).display())]));
         }
     }
     Ok(root)
@@ -325,8 +321,8 @@ fn run(app: &AppHandle, main: &WebviewWindow, library: Option<PathBuf>) {
     let generation = app.state::<Launch>().generation.fetch_add(1, Ordering::SeqCst) + 1;
     let Some(Config { port, bridge_port, token, root, mut args }) = app.state::<Launch>().config.lock().unwrap().clone()
     else {
-        let why = app.state::<Launch>().blocked.lock().unwrap().clone().unwrap_or_else(|| "应用没有启动完成".into());
-        show_error(main, &format!("{why}。处理后请退出并重新打开 Illustash"), &VecDeque::new());
+        let why = app.state::<Launch>().blocked.lock().unwrap().clone().unwrap_or_else(|| tr("应用没有启动完成"));
+        show_error(main, &tr_with("{why}。处理后请退出并重新打开 Illustash", &[("why", &why)]), &VecDeque::new());
         return;
     };
     if let Some(library) = &library {
@@ -351,7 +347,7 @@ fn run(app: &AppHandle, main: &WebviewWindow, library: Option<PathBuf>) {
         Err(e) => {
             show_error(
                 &main,
-                &format!("找不到核心 HTTP 程序：{e}"),
+                &tr_with("找不到核心 HTTP 程序：{error}", &[("error", &e)]),
                 &VecDeque::new(),
             );
             return;
@@ -384,7 +380,7 @@ fn run(app: &AppHandle, main: &WebviewWindow, library: Option<PathBuf>) {
         Err(e) => {
             show_error(
                 &main,
-                &format!("无法启动本地服务（{}）：{e}", script.display()),
+                &tr_with("无法启动本地服务（{path}）：{error}", &[("path", &script.display()), ("error", &e)]),
                 &VecDeque::new(),
             );
             return;
@@ -398,7 +394,7 @@ fn run(app: &AppHandle, main: &WebviewWindow, library: Option<PathBuf>) {
                 let _ = child.wait();
                 show_error(
                     &main,
-                    &format!("无法管理本地服务进程：{error}；请重新启动应用"),
+                    &tr_with("无法管理本地服务进程：{error}；请重新启动应用", &[("error", &error)]),
                     &VecDeque::new(),
                 );
                 return;
@@ -410,7 +406,7 @@ fn run(app: &AppHandle, main: &WebviewWindow, library: Option<PathBuf>) {
         let _ = child.wait();
         show_error(
             &main,
-            &format!("无法连接本地服务：{error}；请重新启动应用"),
+            &tr_with("无法连接本地服务：{error}；请重新启动应用", &[("error", &error)]),
             &VecDeque::new(),
         );
         return;
@@ -486,7 +482,7 @@ fn run(app: &AppHandle, main: &WebviewWindow, library: Option<PathBuf>) {
                 app.state::<Child>().stop();
                 show_error(
                     &main,
-                    "本地服务 30 秒没有任何进展，已停止；可以重试，或选择其他图库",
+                    &tr("本地服务 30 秒没有任何进展，已停止；可以重试，或选择其他图库"),
                     &log.lock().unwrap(),
                 );
                 return;
@@ -500,9 +496,9 @@ fn run(app: &AppHandle, main: &WebviewWindow, library: Option<PathBuf>) {
         thread::sleep(Duration::from_millis(100));
         let why = match status {
             Ok(Some(s)) => {
-                format!("本地服务已退出（{s}）；请查看下方日志，可以重试或选择其他图库")
+                tr_with("本地服务已退出（{status}）；请查看下方日志，可以重试或选择其他图库", &[("status", &s)])
             }
-            Err(e) => format!("本地服务异常：{e}；请重新启动应用"),
+            Err(e) => tr_with("本地服务异常：{error}；请重新启动应用", &[("error", &e)]),
             _ => unreachable!(),
         };
         show_error(&main, &why, &log.lock().unwrap());

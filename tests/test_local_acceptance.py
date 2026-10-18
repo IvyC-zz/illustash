@@ -36,7 +36,7 @@ class LocalAcceptanceTests(unittest.TestCase):
         self.write('Cargo.lock', 'lock')
         self.write('config.json', '{}')
         self.write('docs/contract.md', 'consumed contract')
-        self.write('.gitignore', 'packaging/desktop-resources/\nmodels/\n.venv/\ndesktop/dist/splash.js\ndesktop/gen/\n:memory:*\n')
+        self.write('.gitignore', 'packaging/desktop-resources/\nmodels/\n.venv/\ndesktop/dist/splash.js\ndesktop/dist/i18n.js\ndesktop/gen/\n:memory:*\n')
         self.write(acceptance.NOTES, '纯验收说明')
         self.commit()
         self.environment = {'host': 'synthetic', 'os': 'synthetic', 'arch': 'test',
@@ -102,16 +102,21 @@ class LocalAcceptanceTests(unittest.TestCase):
 
     def test_generated_desktop_outputs_do_not_change_effective_inputs(self):
         self.write(acceptance.SPLASH_SOURCE, 'tracked splash')
+        self.write(acceptance.I18N_SOURCE, 'tracked i18n')
         self.commit()
         before = acceptance.inputs(self.root)
         self.write(acceptance.SPLASH, 'tracked splash')
+        self.write(acceptance.I18N, 'tracked i18n')
         for name in acceptance.TAURI_METADATA:
             self.write(name, '{}')
         self.assertEqual(acceptance.inputs(self.root), before)
-        self.assertEqual(len(acceptance.generated_outputs(self.root)), 5)
-        self.write(acceptance.SPLASH, 'stale splash')
-        with self.assertRaisesRegex(ValueError, '不一致'):
-            acceptance.generated_outputs(self.root)
+        self.assertEqual(len(acceptance.generated_outputs(self.root)), 6)
+        for copy, source in acceptance.COPIES.items():
+            with self.subTest(copy=copy):
+                self.write(copy, 'stale copy')
+                with self.assertRaisesRegex(ValueError, '不一致'):
+                    acceptance.generated_outputs(self.root)
+                self.write(copy, (self.root / source).read_text())
 
     def test_splash_source_change_invalidates_and_requires_new_copy(self):
         self.write(acceptance.SPLASH_SOURCE, 'old source')
@@ -149,15 +154,17 @@ class LocalAcceptanceTests(unittest.TestCase):
 
     def test_generated_desktop_full_fixture_records_and_reuses(self):
         self.write(acceptance.SPLASH_SOURCE, 'tracked splash')
+        self.write(acceptance.I18N_SOURCE, 'tracked i18n')
         self.write('desktop/Cargo.toml', '# synthetic descriptor')
         generate = '#!/bin/bash\nmkdir -p desktop/dist desktop/gen/schemas\ncp web/static/splash.js desktop/dist/splash.js\n'
+        generate += 'cp web/static/i18n.js desktop/dist/i18n.js\n'
         generate += ''.join("printf '{}' > " + name + '\n' for name in sorted(acceptance.TAURI_METADATA))
         self.write('tools/check_all.sh', generate)
         self.commit()
         self.run_fixture()
         state = self.root / '.venv/local-acceptance'
         payload = json.loads((state / 'result.json').read_text())['payload']
-        self.assertEqual(len(payload['generated_outputs']), 5)
+        self.assertEqual(len(payload['generated_outputs']), 6)
         self.write(acceptance.NOTES, 'notes after synthetic generation')
         self.commit()
         self.run_fixture('result')

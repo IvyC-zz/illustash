@@ -3,6 +3,8 @@
 //! and a compute directory without a matching manifest is an error on every platform.
 use std::{ffi::OsString, path::Path};
 
+use crate::i18n::{tr, tr_with};
+
 /// 四类计算共用一个 worker 程序，宿主启动时显式传入 kind（#37）。
 const WORKER_KEYS: [&str; 4] = [
     "ILLUSTASH_RESEARCH_WORKER",
@@ -62,22 +64,22 @@ fn full_bundle(
 ) -> Result<bool, String> {
     match std::fs::symlink_metadata(compute) {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
-        Err(error) => return Err(format!("完整安装包目录不可用：{error}；{reinstall}")),
+        Err(error) => return Err(tr_with("完整安装包目录不可用：{error}；{reinstall}", &[("error", &error), ("reinstall", &reinstall)])),
         Ok(_) => {}
     }
     let manifest = std::fs::read(compute.join("manifest.json"))
-        .map_err(|e| format!("完整安装包 manifest 不可用：{e}；{reinstall}"))?;
+        .map_err(|e| tr_with("完整安装包 manifest 不可用：{error}；{reinstall}", &[("error", &e), ("reinstall", &reinstall)]))?;
     let manifest: serde_json::Value = serde_json::from_slice(&manifest)
-        .map_err(|e| format!("完整安装包 manifest 损坏：{e}；{reinstall}"))?;
+        .map_err(|e| tr_with("完整安装包 manifest 损坏：{error}；{reinstall}", &[("error", &e), ("reinstall", &reinstall)]))?;
     if manifest["format"] != 1
         || manifest["variant"] != "research"
         || manifest["platform"] != platform
     {
-        return Err(format!("完整安装包 manifest 类型不匹配；{reinstall}"));
+        return Err(tr_with("完整安装包 manifest 类型不匹配；{reinstall}", &[("reinstall", &reinstall)]));
     }
     for relative in required {
         if !compute.join(relative).is_file() || !manifest["files"][relative].is_string() {
-            return Err(format!("完整安装包组件缺失：{relative}；{reinstall}"));
+            return Err(tr_with("完整安装包组件缺失：{path}；{reinstall}", &[("path", relative), ("reinstall", &reinstall)]));
         }
     }
     Ok(true)
@@ -92,7 +94,7 @@ fn defaults(
         compute,
         "win32",
         &WINDOWS_FILES,
-        "请重新安装 Windows 完整版；如要改用基础版，请先卸载完整版再安装基础版",
+        &tr("请重新安装 Windows 完整版；如要改用基础版，请先卸载完整版再安装基础版"),
     )? {
         return Ok(Vec::new());
     }
@@ -119,7 +121,7 @@ fn defaults(
             Path::new(&local).join("Illustash/Shared").into_os_string(),
         ));
     } else {
-        return Err("无法定位 LOCALAPPDATA；请检查 Windows 用户环境后重启".into());
+        return Err(tr("无法定位 LOCALAPPDATA；请检查 Windows 用户环境后重启"));
     }
     Ok(values)
 }
@@ -130,7 +132,7 @@ fn macos_defaults(
     home: Option<OsString>,
     shared: Option<OsString>,
 ) -> Result<Vec<(&'static str, OsString)>, String> {
-    if !full_bundle(compute, "darwin", &MACOS_FILES, "请重新安装 macOS 完整版")? {
+    if !full_bundle(compute, "darwin", &MACOS_FILES, &tr("请重新安装 macOS 完整版"))? {
         return Ok(Vec::new());
     }
     #[cfg(unix)]
@@ -146,9 +148,7 @@ fn macos_defaults(
                 .permissions()
                 .mode();
             if mode & 0o111 == 0 {
-                return Err(format!(
-                    "完整安装包组件不可执行：{relative}；请重新安装 macOS 完整版"
-                ));
+                return Err(tr_with("完整安装包组件不可执行：{path}；请重新安装 macOS 完整版", &[("path", &relative)]));
             }
         }
     }
@@ -159,7 +159,7 @@ fn macos_defaults(
                 .filter(|p| !p.is_empty())
                 .map(std::path::PathBuf::from)
                 .filter(|p| p.is_absolute())
-                .ok_or("无法定位 HOME；请检查 macOS 用户环境后重启")?;
+                .ok_or_else(|| tr("无法定位 HOME；请检查 macOS 用户环境后重启"))?;
             home.join("Library/Application Support/Illustash/Shared")
                 .into_os_string()
         }
@@ -185,7 +185,7 @@ pub fn configure() -> Result<(), String> {
     let contents = exe
         .parent()
         .and_then(Path::parent)
-        .ok_or("无法定位应用安装目录")?;
+        .ok_or_else(|| tr("无法定位应用安装目录"))?;
     let compute = contents.join("Resources/compute");
     for (key, value) in macos_defaults(
         &compute,
@@ -202,7 +202,7 @@ pub fn configure() -> Result<(), String> {
 #[cfg(windows)]
 pub fn configure() -> Result<(), String> {
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
-    let compute = exe.parent().ok_or("无法定位安装目录")?.join("compute");
+    let compute = exe.parent().ok_or_else(|| tr("无法定位安装目录"))?.join("compute");
     for (key, value) in defaults(&compute, std::env::var_os("LOCALAPPDATA"))? {
         if std::env::var_os(key).is_none() {
             std::env::set_var(key, value);

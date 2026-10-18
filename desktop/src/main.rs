@@ -5,6 +5,7 @@
 mod bridge;
 #[cfg(any(windows, target_os = "macos", test))]
 mod bundled_workers;
+mod i18n;
 mod pixiv;
 mod picker;
 mod server;
@@ -62,7 +63,7 @@ fn main() {
             {
                 // macOS keeps its native editing/quit menus and refresh command.
                 let menu = Menu::default(&handle)?;
-                let reload = MenuItem::with_id(app, "reload", "刷新页面", true, Some("CmdOrCtrl+R"))?;
+                let reload = MenuItem::with_id(app, "reload", i18n::tr("刷新页面"), true, Some("CmdOrCtrl+R"))?;
                 // The default menu already has a View menu (full screen): refresh joins it instead of a second one.
                 let view = menu
                     .items()?
@@ -74,12 +75,13 @@ fn main() {
                         view.append(&PredefinedMenuItem::separator(app)?)?;
                         view.append(&reload)?;
                     }
-                    None => menu.append(&Submenu::with_items(app, "视图", true, &[&reload])?)?,
+                    None => menu.append(&Submenu::with_items(app, i18n::tr("视图"), true, &[&reload])?)?,
                 }
                 app.set_menu(menu)?;
             }
             let main = WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
                 .title("Illustash")
+                .initialization_script(i18n::page_script())
                 .inner_size(1280.0, 840.0)
                 .min_inner_size(720.0, 480.0)
                 .on_page_load(|window, payload| {
@@ -99,7 +101,7 @@ fn main() {
             let port = match bridge::start(handle.clone(), token.clone()) {
                 Ok(port) => port,
                 Err(error) => {
-                    server::blocked(&main, &format!("无法启动本机登录通道：{error}；请重新启动应用"));
+                    server::blocked(&main, &i18n::tr_with("无法启动本机登录通道：{error}；请重新启动应用", &[("error", &error)]));
                     return Ok(());
                 }
             };

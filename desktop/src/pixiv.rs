@@ -55,7 +55,7 @@ fn window(app: &AppHandle) -> Result<WebviewWindow, String> {
     }
     let blank = WebviewUrl::External(Url::parse("about:blank").unwrap());
     let builder = WebviewWindowBuilder::new(app, LABEL, blank)
-        .title("登录 Pixiv")
+        .title(crate::i18n::tr("登录 Pixiv"))
         .inner_size(1000.0, 780.0)
         .visible(false)
         .on_new_window(|_, _| NewWindowResponse::Allow) // 登录页可能开第三方登录的弹窗
@@ -76,7 +76,7 @@ fn window(app: &AppHandle) -> Result<WebviewWindow, String> {
         });
     #[cfg(target_os = "macos")]
     let builder = builder.data_store_identifier(STORE);
-    let win = builder.build().map_err(|e| format!("打不开 Pixiv 窗口：{e}"))?;
+    let win = builder.build().map_err(|e| crate::i18n::tr_with("打不开 Pixiv 窗口：{error}", &[("error", &e)]))?;
     let hide = win.clone();
     win.on_window_event(move |event| {
         if let WindowEvent::CloseRequested { api, .. } = event {
@@ -104,7 +104,7 @@ fn open(win: &WebviewWindow, url: &str) -> Result<(), String> {
     while page.loads == before || page.host.as_deref() != target.host_str() {
         let left = deadline.saturating_duration_since(Instant::now());
         if left.is_zero() {
-            return Err("Pixiv 页面加载超时".into());
+            return Err(crate::i18n::tr("Pixiv 页面加载超时"));
         }
         page = state.loaded.wait_timeout(page, left).unwrap().0;
     }
@@ -158,7 +158,7 @@ pub fn fetch(app: &AppHandle, path: &str) -> Result<Value, String> {
     let win = window(app)?;
     if !on_pixiv(&win) {
         if state.login_open.load(Ordering::SeqCst) {
-            return Err("用户正在 Pixiv 窗口里登录".into()); // 不把用户正在用的页面换走
+            return Err(crate::i18n::tr("用户正在 Pixiv 窗口里登录")); // 不把用户正在用的页面换走
         }
         open(&win, HOME)?;
     }
@@ -176,7 +176,7 @@ pub fn fetch(app: &AppHandle, path: &str) -> Result<Value, String> {
         id = serde_json::to_string(&id).unwrap()
     );
     let sent = win.eval(&js).map_err(|e| e.to_string());
-    let reply = sent.and_then(|_| rx.recv_timeout(REPLY_TIMEOUT).map_err(|_| "Pixiv 窗口没有返回结果".to_string()));
+    let reply = sent.and_then(|_| rx.recv_timeout(REPLY_TIMEOUT).map_err(|_| crate::i18n::tr("Pixiv 窗口没有返回结果")));
     state.pending.lock().unwrap().remove(&id);
     reply
 }

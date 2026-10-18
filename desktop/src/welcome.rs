@@ -10,6 +10,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use tauri::{AppHandle, Manager, State};
 
+use crate::i18n::tr;
 use crate::{picker, server};
 
 #[derive(Deserialize)]
@@ -30,7 +31,7 @@ pub fn welcome_pick(app: AppHandle, kind: String, multiple: bool) -> Result<Valu
 pub fn welcome_open(app: AppHandle, path: String) -> Result<(), String> {
     let path = PathBuf::from(path);
     if !illustash_terms::desktop_shell::is_library(&path) {
-        return Err("这个文件夹不是图库（找不到 library.json）".into());
+        return Err(tr("这个文件夹不是图库（找不到 library.json）"));
     }
     server::restart(&app, Some(path));
     Ok(())
@@ -50,7 +51,7 @@ pub struct Requests {
 impl Requests {
     fn once(&self, id: &str, work: impl FnOnce() -> Answer) -> Answer {
         if id.is_empty() {
-            return Err("缺少请求编号；请重新启动应用".into());
+            return Err(tr("缺少请求编号；请重新启动应用"));
         }
         {
             let mut seen = self.seen.lock().unwrap();
@@ -104,10 +105,10 @@ fn create(app: &AppHandle, name: String, sources: Vec<Source>) -> Result<Value, 
                 preset: s.preset.unwrap_or_default(),
             }),
             "photos" => Ok(Pick::Photos),
-            _ => Err("请选择来源".to_string()),
+            _ => Err(tr("请选择来源")),
         })
         .collect::<Result<Vec<_>, _>>()?;
-    let root = server::resource_root(app).ok_or("应用资源不可用；请重新启动应用")?;
+    let root = server::resource_root(app).ok_or_else(|| tr("应用资源不可用；请重新启动应用"))?;
     let created = illustash_terms::desktop_shell::create(&root, &name, picks).map_err(|e| e.to_string())?;
     if let Some(error) = created.unlisted {
         return Ok(json!({"created": created.path, "error": error}));
@@ -148,7 +149,7 @@ fn import_archive(app: &AppHandle, import: &Import, path: String) -> Result<(), 
     let cancel = {
         let mut slot = import.cancel.lock().unwrap();
         if slot.is_some() {
-            return Err("已经在导入另一个图库".into());
+            return Err(tr("已经在导入另一个图库"));
         }
         slot.insert(Arc::new(AtomicBool::new(false))).clone()
     };
@@ -171,7 +172,7 @@ fn import_archive(app: &AppHandle, import: &Import, path: String) -> Result<(), 
             server::restart(app, Some(library));
             Ok(())
         }
-        Err(_) if cancel.load(Ordering::SeqCst) => Err("已取消导入".into()),
+        Err(_) if cancel.load(Ordering::SeqCst) => Err(tr("已取消导入")),
         Err(error) => Err(error.to_string()),
     }
 }

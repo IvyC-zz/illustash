@@ -21,7 +21,7 @@ pub fn token() -> String {
 
 pub fn start(app: AppHandle, token: String) -> Result<u16, Box<dyn std::error::Error>> {
     let server = Server::http("127.0.0.1:0").map_err(|e| e.to_string())?;
-    let port = server.server_addr().to_ip().map(|a| a.port()).ok_or("通道没有端口")?;
+    let port = server.server_addr().to_ip().map(|a| a.port()).ok_or_else(|| crate::i18n::tr("通道没有端口"))?;
     thread::spawn(move || {
         for request in server.incoming_requests() {
             let (app, token) = (app.clone(), token.clone());

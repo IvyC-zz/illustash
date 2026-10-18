@@ -6,8 +6,9 @@
 // app.js reports progress through window.splash.status(text) and window.splash.ready().
 // The desktop shell's start page plays the same animation while the local service starts (progress, settled, halt),
 // then opens the library with ?launched: that load starts from the finished icon instead of folding again.
-// The start page has no i18n.js (#173): its text stays Chinese until the shell is translated.
-const SPLASH_READY = typeof t === 'function' ? t('准备好了') : '准备好了';
+// Both pages load i18n.js first (#173); the shell's start page gets its language from the shell (desktop/src/i18n.rs).
+// Taken here, outside the animation, whose own t is the time.
+const SPLASH_READY = t('准备好了');
 (() => {
   const root = document.getElementById('splash');
   if (!root) return;
