@@ -1,7 +1,7 @@
 // The settings pages (desktop layout, #199): each page's cards, their forms and buttons. What they read and change is
 // core/settings.js (and core/jobs.js for the jobs' own cards); parts of the page still in app.js are reached through
 // ui/app_parts.js.
-import {t, tb, I18N} from '../core/i18n.js';
+import {t, tb, said, I18N} from '../core/i18n.js';
 import {esc, isMac, number, bytes, stamp, localStamp, pct, localTime} from '../core/format.js';
 import {prefs} from '../core/prefs.js';
 import {session, shared, readError} from '../core/session.js';
