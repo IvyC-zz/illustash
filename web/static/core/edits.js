@@ -1,5 +1,6 @@
 // Edits and their undo (#199). Every write is undoable: the backend answers each one with the latest step it can undo,
 // and one change runs at a time — a write, or the undo of one. No DOM: a layout draws the undo control from onLatest().
+import {t, tb, I18N} from './i18n.js';
 import {post} from './session.js';
 // latest: {id, label} of the step undo would revert, or null. busy: a change or an undo is running.
 export const edits = {latest: null, busy: false};

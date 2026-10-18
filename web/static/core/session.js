@@ -4,6 +4,7 @@
 // starts a new session; adopting its token would send this page's selection, dialogs and queued work to that library.
 // The page stops instead, and drops responses that arrive afterwards.
 // Only this module writes session.token and session.stale; everything else reads them.
+import {t, tb, said, I18N} from './i18n.js';
 export const session = {token: '', stale: false};
 export const STALE = t('图库已在其他窗口切换或重新打开，请重新载入页面');
 const staleListeners = new Set(), postListeners = new Set();

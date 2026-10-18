@@ -1,5 +1,6 @@
 // The desktop layout's page-wide pieces (#199): element lookup, the toast with its undo button, the error banner and
 // the undo button in the toolbar. Their state lives in core/session.js and core/edits.js.
+import {t, tb} from '../core/i18n.js';
 import {esc, isMac, shortcut} from '../core/format.js';
 import {session, STALE, onStale, readError} from '../core/session.js';
 import {onLatest} from '../core/edits.js';
