@@ -6,7 +6,7 @@
 //! library.sqlite once every seven days; settings can start both at once. Upgrades, imports and backups keep their
 //! own checks. Damage stops the session writing (POST requests answer with what to do, tasks and durable recovery
 //! stop), and the next opening checks again before anything else.
-use crate::app_library::{inspect_file, Library, Report, Verdict};
+use crate::app_library::{inspect_file, Library, Report, Verdict, Watch};
 use crate::http_json::Json;
 use crate::{Error, Result};
 use serde::{Deserialize, Serialize};
@@ -279,8 +279,20 @@ impl Checker {
                 let report: Report = Arc::new(move |done| {
                     shown.lock().expect("integrity status lock poisoned").running = Some((database, done));
                 });
-                report(0.0);
-                let result = inspect_file(&path, Some(report), Some(stop.clone()));
+                let mut journal = path.clone().into_os_string();
+                journal.push("-journal");
+                let watch = Watch { stop: Some(stop.clone()), writer: Some(PathBuf::from(journal)) };
+                // A writer that starts meanwhile gets the file: the check stops, waits for quiet and starts over.
+                let result = loop {
+                    if !quiet(watch.writer.as_deref().expect("watched journal"), &stop) {
+                        break Ok(Verdict::Yielded);
+                    }
+                    report(0.0);
+                    match inspect_file(&path, Some(report.clone()), watch.clone()) {
+                        Ok(Verdict::Yielded) if !stop.load(Ordering::SeqCst) => continue,
+                        result => break result,
+                    }
+                };
                 if stop.load(Ordering::SeqCst) {
                     break;
                 }
@@ -293,6 +305,7 @@ impl Checker {
                         }
                         break;
                     }
+                    Ok(Verdict::Yielded) => Ok(()),
                     Err(error) => Err(error),
                 };
                 if let Err(error) = recorded {
@@ -343,6 +356,25 @@ impl Checker {
         ])
     }
 }
+/// Returns at once when no writer's journal is there, else once none has been seen for two seconds; false when the
+/// check is stopped meanwhile.
+fn quiet(journal: &Path, stop: &AtomicBool) -> bool {
+    const QUIET: Duration = Duration::from_secs(2);
+    let mut since = None;
+    let mut seen = false;
+    loop {
+        if stop.load(Ordering::SeqCst) {
+            return false;
+        }
+        if journal.exists() {
+            (seen, since) = (true, None);
+        } else if !seen || since.get_or_insert_with(Instant::now).elapsed() >= QUIET {
+            return true;
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+}
+
 impl Drop for Checker {
     fn drop(&mut self) {
         self.stop();

@@ -144,7 +144,7 @@ impl Library {
                 let (base, span) = weights[index];
                 Arc::new(move |done: f64| p(label, base + span * done)) as Report
             });
-            let verdict = inspect_file(&path, report, None)?;
+            let verdict = inspect_file(&path, report, Watch::default())?;
             let damaged = matches!(verdict, Verdict::Damaged(_));
             found.push((label, verdict));
             if damaged {
@@ -252,9 +252,10 @@ enum Checks {
 }
 
 pub(crate) fn check_database(conn: &Connection) -> Result<()> {
-    match check_database_reporting(conn, None, None)? {
+    match check_database_reporting(conn, None, Watch::default())? {
         Verdict::Sound => Ok(()),
         Verdict::Damaged(result) => Err(Error::Schema(format!("图库数据库损坏：{result}"))),
+        Verdict::Yielded => unreachable!("a check that watches no writer never yields"),
     }
 }
 
@@ -264,13 +265,31 @@ pub(crate) enum Verdict {
     Sound,
     /// SQLite's own description of the first problem it found.
     Damaged(String),
+    /// Another connection started writing the file: the check stopped and released its read lock (`Watch::writer`).
+    Yielded,
+}
+
+/// What a running check watches besides its progress. `stop` interrupts it, which is an error, not a verdict.
+/// `writer` is the file's rollback journal (#212): source.sqlite is not in WAL mode, so a check's read lock, held for
+/// up to a minute on a large library, would make its writers (sync, recognition imports) give up after their short
+/// busy timeouts. The check polls for the journal a writer creates before it commits and steps aside at once.
+#[derive(Clone, Default)]
+pub(crate) struct Watch {
+    pub(crate) stop: Option<Arc<AtomicBool>>,
+    pub(crate) writer: Option<PathBuf>,
+}
+impl Watch {
+    /// How often the check looks for the journal: well within the shortest writer busy timeout (250 ms).
+    const POLL: Duration = Duration::from_millis(20);
 }
 pub(crate) type Report = Arc<dyn Fn(f64) + Send + Sync + std::panic::RefUnwindSafe>;
 
-/// One file's full check on its own read-only connection. Setting `stop` interrupts it within about a hundred SQLite
-/// steps; that is an error, not a verdict.
-pub(crate) fn inspect_file(path: &Path, progress: Option<Report>, stop: Option<Arc<AtomicBool>>) -> Result<Verdict> {
-    check_database_reporting(&read_connection(path)?, progress, stop)
+/// One file's full check on its own read-only connection, watched as `watch` says.
+pub(crate) fn inspect_file(path: &Path, progress: Option<Report>, watch: Watch) -> Result<Verdict> {
+    if watch.writer.as_ref().is_some_and(|journal| journal.exists()) {
+        return Ok(Verdict::Yielded);
+    }
+    check_database_reporting(&read_connection(path)?, progress, watch)
 }
 
 /// quick_check reads every page, then (for tables) every row again to check constraints; SQLite 3.43+ calls
@@ -284,13 +303,11 @@ pub(crate) fn inspect_file(path: &Path, progress: Option<Report>, stop: Option<A
 /// other connections' idle pages, and the second pass then misses nothing (#84).
 ///
 /// A file SQLite reports as corrupt or as not a database at all is damaged as well, whichever statement finds it.
-fn check_database_reporting(
-    conn: &Connection,
-    progress: Option<Report>,
-    stop: Option<Arc<AtomicBool>>,
-) -> Result<Verdict> {
+fn check_database_reporting(conn: &Connection, progress: Option<Report>, watch: Watch) -> Result<Verdict> {
     const READS: f64 = 1.5;
-    let watched = progress.is_some() || stop.is_some();
+    let Watch { stop, writer } = watch;
+    let watched = progress.is_some() || stop.is_some() || writer.is_some();
+    let yielded = Arc::new(AtomicBool::new(false));
     if watched {
         let pages: i64 = match conn.query_row("PRAGMA page_count", [], |row| row.get(0)) {
             Ok(pages) => pages,
@@ -303,11 +320,19 @@ fn check_database_reporting(
         if let Some(progress) = &progress {
             progress(0.0);
         }
+        let (flag, mut polled) = (yielded.clone(), std::time::Instant::now());
         conn.progress_handler(
             100,
             Some(move || {
                 if let Some(report) = &report {
                     report(((page_requests(handle) - start).max(0) as f64 / expected).min(0.99));
+                }
+                if let Some(journal) = writer.as_ref().filter(|_| polled.elapsed() >= Watch::POLL) {
+                    polled = std::time::Instant::now();
+                    if journal.exists() {
+                        flag.store(true, Ordering::SeqCst);
+                        return true;
+                    }
                 }
                 stop.as_ref().is_some_and(|stop| stop.load(Ordering::SeqCst))
             }),
@@ -316,6 +341,9 @@ fn check_database_reporting(
     let result: rusqlite::Result<String> = conn.query_row("PRAGMA quick_check(1)", [], |row| row.get(0));
     if watched {
         conn.progress_handler(0, None::<fn() -> bool>);
+    }
+    if yielded.load(Ordering::SeqCst) {
+        return Ok(Verdict::Yielded);
     }
     match result {
         Ok(text) if text == "ok" => {

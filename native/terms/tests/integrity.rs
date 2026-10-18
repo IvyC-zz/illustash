@@ -303,4 +303,38 @@ fn checks_after_a_crash_in_the_background_and_on_request_and_stop_writing_on_dam
     host.crash();
     let (_, errors) = Host::launch(&root, &overdue).err().expect("damaged library.sqlite must not open");
     assert!(errors.contains("library.sqlite"), "{errors}");
+
+    // source.sqlite has a rollback journal: a writer with the shortest busy timeout the application uses (250 ms)
+    // still commits while the background check runs, which steps aside and starts over once the writer is done.
+    let busy = create("busy");
+    {
+        let c = Connection::open(busy.join("source.sqlite")).unwrap();
+        c.execute_batch(
+            "WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<400000)
+             INSERT INTO synthetic_bulk(body) SELECT printf('%0100d-%d', i, i) || hex(randomblob(450)) FROM n;",
+        )
+        .unwrap();
+    }
+    let host = Host::launch(&root, &busy).unwrap();
+    let start = Instant::now();
+    loop {
+        let status = host.get("/api/integrity");
+        if status["running"]["database"] == "source.sqlite" && status["running"]["done"].as_f64().unwrap() > 0.05 {
+            break;
+        }
+        assert!(status["running"].is_object(), "the check ended before a writer could meet it: {status}");
+        assert!(start.elapsed() < Duration::from_secs(60), "{status}");
+        thread::sleep(Duration::from_millis(20));
+    }
+    let writer = Connection::open(busy.join("source.sqlite")).unwrap();
+    writer.busy_timeout(Duration::from_millis(250)).unwrap();
+    writer
+        .execute_batch("BEGIN IMMEDIATE; INSERT INTO synthetic_bulk(body) VALUES ('written during the check'); COMMIT;")
+        .unwrap();
+    drop(writer);
+    let status = host.checked();
+    assert!(status["damaged"].is_null(), "{status}");
+    assert!(status["error"].is_null(), "{status}");
+    assert!(status["checked"]["source.sqlite"].as_i64().unwrap() >= now() - 120, "{status}");
+    host.quit();
 }
