@@ -320,7 +320,8 @@ pub fn claims(
                 let d_pos = near[h].iter().copied().fold(f32::INFINITY, f32::min);
                 let d_neg = away[h].iter().copied().fold(f32::INFINITY, f32::min);
                 if d_pos <= GATE && d_pos < d_neg {
-                    out.insert((known[i].clone(), entity.clone()), 1.0 - d_pos as f64);
+                    // A confirmed image is its own nearest one; f32 rounding can make that distance negative.
+                    out.insert((known[i].clone(), entity.clone()), 1.0 - d_pos.max(0.0) as f64);
                 }
             }
         }
@@ -461,6 +462,8 @@ mod tests {
         assert!(!a.contains("far"), "outside the gate: {a:?}");
         assert!(!a.contains("removed") && !a.contains("closer"), "nearer a removed image: {a:?}");
         assert!(out.keys().all(|(u, e)| !u.starts_with('U') || e == "B"), "index says B: {out:?}");
+        // Confirmed images are claimed too; rounding must not push their score past 1 (Core rejects it).
+        assert!(out.values().all(|s| (0.0..=1.0).contains(s)), "{out:?}");
         let score = out[&("near".to_string(), "A".to_string())];
         let a_rows: Vec<_> = (0..400).map(|i| f.rows[f.row[&format!("A{i}")]].clone()).collect();
         let d = numeric::distances(&[f.rows[f.row["near"]].clone()], &a_rows).unwrap()[0]
