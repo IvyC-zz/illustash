@@ -94,6 +94,8 @@ export function indexEndText(s) {
   return '';
 }
 
+// Watch list, minimum posts, dropping a character: the answer is the index's new state.
+export async function indexAction(body) { state.index = await post('/api/index', body); }
 // A check reaches Danbooru, so it is asked for each time (confirm(message, title) resolves to the answer); a library
 // switched meanwhile is not checked.
 export async function checkIndex(confirm) {

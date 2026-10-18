@@ -17,7 +17,7 @@ function render(language, d) {
     hashFor: route => '#/' + route.page + '?artist=' + route.artist, number: String};
   vm.createContext(c);
   vm.runInContext(read('i18n.js'), c);
-  vm.runInContext(section('function artistSection(d, ident)', '// ---------- 检查更新'), c);
+  vm.runInContext(section('function artistSection(d, ident)', '// ---------- 新图库的首次引导'), c);
   return c.artistSection(d, {});
 }
 const maybe = {id: 'a1', name: '合成画师', reason: '合成理由', homes: [{url: 'https://example.com/a1', label: 'example', site: 'Example'}]};

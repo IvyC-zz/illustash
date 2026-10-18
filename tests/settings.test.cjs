@@ -1,19 +1,27 @@
-const {test, before} = require('node:test');
-const web = require('./web.cjs');   // core/ modules (#199)
-before(web.ready);
+const {test, before, afterEach} = require('node:test');
+const web = require('./web.cjs');   // core/settings.js, ui/settings.js (#199)
 const assert = require('node:assert/strict');
 const {readFileSync} = require('node:fs');
 const vm = require('node:vm');
 const zh = require('./i18n_zh.cjs');   // t() of a Chinese page (#173)
 const source = readFileSync(require('node:path').join(__dirname, '../web/static/app.js'), 'utf8');
-const helpers = source.slice(source.indexOf('const settingsMarkup ='), source.indexOf('// One page per question'));
-// Reads go through core/session.js (shared() lets callers share one read per path); api answers them here.
-function harness(api, extra = {}) {
-  const renders = [], errors = [], {session, shared} = web.core();
+let ui, off = () => {};
+before(async () => { await web.ready(); ui = await web.load('ui/settings.js'); });
+afterEach(() => { off(); off = () => {}; });
+// A settings page that has read nothing yet; api answers its reads. What the page does on each part that arrives is
+// ui/settings.js's onSettings listener: an error goes to the banner, and the settings page redraws (renderSettings(false)).
+function harness(api) {
+  const renders = [], errors = [], core = web.core(), {state} = core;
+  for (const key of ['settings', 'fold', 'index', 'names']) delete state[key];
+  state.route = {page: 'settings'};
   globalThis.fetch = path => { const answer = api(path); return Promise.resolve({status: 200, ok: true, json: () => answer}); };
-  const c = {api, shared, session, state: {route: {page: 'settings'}}, document: {activeElement: null},
-    error: message => errors.push(message), readError: e => '读取失败：' + e.message, renderSettings: fetch => renders.push(fetch), ...extra};
-  vm.createContext(Object.assign(c, zh.page)); vm.runInContext(helpers, c);
+  globalThis.document = {activeElement: null};
+  off = core.onSettings((what, detail) => {
+    if (what !== 'data') return;
+    if (detail.error) errors.push(core.readError(detail.error));
+    if (state.route.page === 'settings') renders.push(false);
+  });
+  const c = {state, loadSettingsData: core.loadSettingsData, shared: core.shared, setSettingsHTML: ui.setSettingsHTML, document: globalThis.document};
   return {c, renders, errors};
 }
 const tick = () => new Promise(resolve => setImmediate(resolve));
@@ -150,4 +158,34 @@ test('returning to settings refreshes cached data once without clearing it', asy
   await load;
   assert.equal(calls.length,4);
   assert.equal(c.state.names.updated,true);
+});
+
+test('the names and new-characters cards read their data when they open', async () => {
+  const {state} = web.core(), nodes = {};
+  state.route = {page: 'settings'};
+  const card = () => ({hidden: true, innerHTML: '', contains: () => false, querySelectorAll: () => []});
+  globalThis.document = {getElementById: id => nodes[id] ||= card(), activeElement: null};
+  globalThis.fetch = async path => ({status: 200, ok: true, json: async () => path === '/api/names'
+    ? {state: {status: 'idle'}, counts: {characters: {total: 2, zh: 1}}}
+    : {state: {status: 'idle'}, works: [], watch: {works: [], min_posts: 50}, history: [], mb_per_character: 2}});
+  await ui.renderNamesCard();
+  await ui.renderIndexCard();
+  assert.match(nodes.namesCard.innerHTML, /角色名称/);
+  assert.match(nodes.indexCard.innerHTML, /检查新角色/);
+});
+
+test('an older library is opened only after the person agrees to upgrade it (#193)', async () => {
+  // openLibrary() is ui/settings.js: the backend's refusal names the upgrade, the page asks, then asks again with upgrade.
+  const sent = [], nodes = {}, dialogs = [];
+  const element = () => ({hidden: true, textContent: '', innerHTML: '', contains: () => false});
+  globalThis.document = {getElementById: id => nodes[id] ||= element(), activeElement: null, body: {append(d) { dialogs.push(d); setImmediate(() => d.close('')); }},
+    createElement() { const parts = {}; return {setAttribute() {}, querySelector: s => parts[s] ||= {}, showModal() {}, remove() {}, close(v = '') { this.returnValue = v; this.onclose(); }}; }};
+  globalThis.fetch = async (path, options) => {
+    sent.push(JSON.parse(options.body));
+    return {status: 409, ok: false, json: async () => ({error: '这个图库需要升级到新格式才能打开。升级后旧版本的 Illustash 打不开它；升级前会自动备份，升级没有完成时图库保持原样。'})};
+  };
+  const setTimeout = globalThis.setTimeout; globalThis.setTimeout = () => 0;
+  try { await ui.openLibrary('/tmp/synthetic.pilib', '合成'); } finally { globalThis.setTimeout = setTimeout; }
+  assert.deepEqual(sent, [{path: '/tmp/synthetic.pilib'}]);
+  assert.equal(dialogs.length, 1, 'asked before upgrading; declined, so nothing more was sent');
 });

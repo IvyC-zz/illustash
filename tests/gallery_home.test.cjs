@@ -6,7 +6,7 @@ const vm = require('node:vm');
 const zh = require('./i18n_zh.cjs');   // t() of a Chinese page (#173)
 const fs = require('node:fs');
 const source = fs.readFileSync(require('node:path').join(__dirname, '../web/static/app.js'), 'utf8');
-const geometry = source.slice(source.indexOf('const isSquare ='), source.indexOf('const REASONS ='));
+const geometry = source.slice(source.indexOf('const isSquare ='), source.indexOf('// How many images the machine thinks'));
 function grid(total = 103, fit = true) {
   const state = {size:185, total, fit, dataVersion:0, items:Array.from({length:total}, (_,i) => ({width:[300,800,400,1200][i%4],height:600})), route:{page:'library'}};
   const elements = {viewport:{clientWidth:1002, scrollTop:0},grid:{getBoundingClientRect:()=>({left:10,top:20})}};

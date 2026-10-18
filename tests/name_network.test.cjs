@@ -10,13 +10,16 @@ const source = readFileSync(require('node:path').join(__dirname, '../web/static/
 const code = source.slice(source.indexOf('// Name text queries'), source.indexOf('// 设置 › 网络与隐私'));
 
 function harness({fail, confirm = true} = {}) {
-  const calls = [], toasts = [], dialogs = [];
+  const calls = [], toasts = [], dialogs = [], {state, allowNames} = web.core();
+  state.names = {counts: {}};
+  // The grant itself is core/settings.js allowNames(), through the page's fetch.
+  globalThis.fetch = async (path, options) => { calls.push([path, options?.body]); return {status: 200, ok: true, json: async () => ({network: {authorized: JSON.parse(options.body).allow}})}; };
   const context = {
-    state: {names: {counts: {}}},
+    state, allowNames,
     async api(path, options) {
       calls.push([path, options?.body]);
       if (fail) throw Object.assign(new Error(fail), {said: fail});   // as api() throws
-      return path === '/api/names' ? {network: {authorized: JSON.parse(options.body).allow}} : [{tag: 'synthetic'}];
+      return [{tag: 'synthetic'}];
     },
     async confirmAction(message, title) { dialogs.push(title); return confirm; },
     toast(m) { toasts.push(m); },
@@ -59,27 +62,27 @@ test('granting asks first and sends nothing when declined; revoking does not ask
 });
 
 test('saving or clearing model settings keeps the grant and revoke control available', async () => {
+  // The model card is ui/settings.js; saving goes through core/settings.js saveModelApi().
+  const {renderModelCard} = await web.load('ui/settings.js');
   for (const authorized of [true, false]) {
-    const network = {authorized, this_run: false, granted_at: authorized ? 'synthetic-time' : null};
-    const controls = Object.fromEntries(['modelCard', 'modelSave', 'modelClear', 'modelTest', 'modelBase', 'modelName', 'modelKey']
-      .map(id => [id, {value: ''}]));
-    const calls = [], rendered = [];
-    const context = {
-      state: {names: {network, model_api: {configured: true}}},
-      $(id) { return controls[id]; },
-      esc(value) { return value; }, cardHead() { return ''; }, setSettingsHTML() { return true; },
-      async post(path, body) { calls.push([path, body]); return {model_api: {configured: body.key !== null}, counts: {total: 2}}; },
-      toast() {}, renderSettings() { rendered.push(context.state.names.network); },
+    const network = {authorized, this_run: false, granted_at: authorized ? 'synthetic-time' : null}, {state} = web.core();
+    const controls = Object.fromEntries(['modelCard', 'modelSave', 'modelClear', 'modelTest', 'modelBase', 'modelName', 'modelKey', 'toast', 'toastText', 'toastUndo']
+      .map(id => [id, {value: '', contains: () => false}]));
+    const calls = [];
+    Object.assign(state, {route: {page: 'library'}, names: {network, model_api: {configured: true}}});
+    globalThis.document = {getElementById: id => controls[id], activeElement: null};
+    globalThis.fetch = async (path, options) => {
+      const body = JSON.parse(options.body); calls.push([path, body]);
+      return {status: 200, ok: true, json: async () => ({model_api: {configured: body.key !== null}, counts: {total: 2}})};
     };
-    vm.createContext(Object.assign(context, zh.page));
-    vm.runInContext(source.slice(source.indexOf('function renderModelCard()'), source.indexOf('const settingsMarkup'))
-      + ';renderModelCard();', context);
-    controls.modelSave.onclick();
+    renderModelCard();
+    await controls.modelSave.onclick();
     await new Promise(resolve => setImmediate(resolve));
+    assert.equal(state.names.network, network);
     await controls.modelClear.onclick();
-    assert.deepEqual(rendered, [network, network]);
-    assert.equal(context.state.names.network, network);
-    assert.equal(context.state.names.model_api.configured, false);
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(state.names.network, network);
+    assert.equal(state.names.model_api.configured, false);
     assert.equal(calls.length, 2);
     assert.ok(calls.every(([path, body]) => path === '/api/names' && body.action === 'model_api'));
   }

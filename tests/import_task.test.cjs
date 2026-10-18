@@ -3,7 +3,8 @@
 // it back, and the end is announced once.
 const {test, before, afterEach} = require('node:test');
 const web = require('./web.cjs');   // the import's poller and words are core/jobs.js (#199)
-before(web.ready);
+let settings;
+before(async () => { await web.ready(); settings = await web.load('ui/settings.js'); });
 let cleanup = () => {};
 afterEach(() => { cleanup(); cleanup = () => {}; });
 const assert = require('node:assert/strict');
@@ -14,20 +15,14 @@ const source = readFileSync(require('node:path').join(__dirname, '../web/static/
 const section = (a, b) => source.slice(source.indexOf(a), source.indexOf(b, source.indexOf(a)));
 const esc = s => String(s).replace(/[&<>"]/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'})[c]);
 
+// The library card is ui/settings.js; the import's words and state are core/jobs.js.
 function card(importTask) {
-  const node = {innerHTML: ''}, {state, importLine, importActive} = web.core();
+  const node = {innerHTML: '', contains: () => false}, {state, importLine} = web.core();
   Object.assign(state, {route: {page: 'settings'}, importTask, libraries: {
     info: {name: '合成图库', path: '/tmp/synthetic.pilib', sources: [], test: null},
     current: '/tmp/synthetic.pilib', home: '/tmp', libraries: [], export: {status: 'idle'}}});
-  const c = {
-    state, importLine, importActive, $: id => (id === 'setLibraries' ? node : null), esc, IS_MAC: false, devMode: false, number: String,
-    origins: () => [['x', 'X']], cardHead: title => `<h2>${title}</h2>`,
-    setSettingsHTML: (card, html) => { card.innerHTML = html; return true; },
-    libForm: {open: false, folders: {}, name: '', photos: false},
-  };
-  vm.createContext(Object.assign(c, zh.page));
-  vm.runInContext(section('function renderLibrariesCard()', '// Gallery pages have no Tauri dialog permission'), c);
-  c.renderLibrariesCard();
+  globalThis.document = {getElementById: id => (id === 'setLibraries' ? node : null), activeElement: null};
+  settings.renderLibrariesCard();
   return {html: node.innerHTML, line: importLine};
 }
 const running = (extra = {}) => ({status: 'running', kind: 'archive', id: 't1', file: '合成.zip', ...extra});
@@ -65,7 +60,8 @@ test('a stopping or finished import has no cancel button and says how it ended',
   assert.doesNotMatch(card(undefined).html, /import-line/);
 });
 
-// core/jobs.js polls; app.js starts an import and, from its onJob listener, announces the end and lists a new library.
+// core/jobs.js polls; the library card (ui/settings.js) starts an import; app.js's onJob listener announces the end and
+// lists a new library.
 function poller(token = 'session') {
   const answers = [], timers = [], toasts = [], posted = [], offs = [];
   let rendered = 0, libraries = 0;
@@ -74,17 +70,18 @@ function poller(token = 'session') {
   Object.assign(state, {route: {page: 'settings'}, importTask: undefined});
   globalThis.fetch = (path, options) => {
     if (path === '/api/imports/cancel') { posted.push(options); return Promise.resolve({status: 200, ok: true, json: async () => ({status: 'stopping'})}); }
+    if (path === '/api/libraries/import') return Promise.resolve({status: 200, ok: true, json: async () => ({started: true, task: running()})});
     return new Promise(resolve => answers.push(body => resolve({status: 200, ok: true, json: async () => body})));
   };
   const setTimeout = globalThis.setTimeout;
   globalThis.setTimeout = (fn, ms) => { timers.push(ms); return timers.length; };
   const c = {
     state, session, SYNC_ACTIVE, importLine, importStarted, pollImports, cancelImport, onJob: fn => offs.push(onJob(fn)),
-    libraryAction: async () => ({started: true, task: running()}),
+    startImport: settings.startImport,
     renderLibrariesCard: () => { rendered++; }, loadLibraries: () => { libraries++; }, toast: m => toasts.push(m),
   };
   vm.createContext(Object.assign(c, zh.page));
-  vm.runInContext(section('// What a background job', '// Name text queries') + section('async function startImport(', 'async function pollExport()'), c);
+  vm.runInContext(section('// What a background job', '// Name text queries'), c);
   cleanup = () => { globalThis.setTimeout = setTimeout; for (const off of offs) off(); };
   return {c, answers, timers, toasts, posted, rendered: () => rendered, libraries: () => libraries};
 }
