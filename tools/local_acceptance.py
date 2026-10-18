@@ -27,6 +27,10 @@ COMMAND = ['bash', 'tools/check_all.sh']
 ORT_SESSION = ':memory:.ses'
 SPLASH = 'desktop/dist/splash.js'
 SPLASH_SOURCE = 'web/static/splash.js'
+I18N = 'desktop/dist/i18n.js'
+I18N_SOURCE = 'web/static/i18n.js'
+# desktop/build.rs 复制到启动页的脚本：必须与已跟踪源逐字节一致。
+COPIES = {SPLASH: SPLASH_SOURCE, I18N: I18N_SOURCE}
 # 锁定 Tauri 2.7/2.10 的生成位置；不豁免整个 gen 或 dist。
 TAURI_METADATA = frozenset({
     'desktop/gen/schemas/acl-manifests.json',
@@ -78,7 +82,7 @@ def inputs(root):
         path = os.fsdecode(name)
         if path.startswith(OUTPUTS) or '__pycache__' in Path(path).parts or path.endswith('.pyc') or Path(path).name == '.DS_Store':
             continue
-        if path in {SPLASH, ORT_SESSION} or path in TAURI_METADATA:
+        if path in COPIES or path == ORT_SESSION or path in TAURI_METADATA:
             item = root / path
             if item.is_symlink() or not item.is_file() or any(parent.is_symlink() for parent in item.parents if parent != root and root in parent.parents):
                 raise ValueError('桌面生成输出必须为本工作区内普通文件。')
@@ -97,20 +101,20 @@ def generated_outputs(root, require_generated=False):
     """有效输入保持不变时可新生成；已测输出随后必须原样匹配。"""
     values = []
     if require_generated and (root / 'desktop/Cargo.toml').exists():
-        if any(not (root / name).is_file() for name in {SPLASH} | TAURI_METADATA):
+        if any(not (root / name).is_file() for name in set(COPIES) | TAURI_METADATA):
             raise ValueError('完整桌面检查未留下要求的 splash/Tauri 生成输出。')
-    for relative in sorted({SPLASH, ORT_SESSION} | TAURI_METADATA):
+    for relative in sorted(set(COPIES) | {ORT_SESSION} | TAURI_METADATA):
         path = root / relative
         if path.is_symlink() or any(parent.is_symlink() for parent in path.parents if parent != root and root in parent.parents):
             raise ValueError('桌面生成输出不能是符号链接。')
         if not path.exists():
             continue
         data = path.read_bytes()
-        if relative == SPLASH:
-            source = root / SPLASH_SOURCE
-            tracked = git(root, 'ls-tree', 'HEAD', '--', SPLASH_SOURCE).split()
+        if relative in COPIES:
+            source = root / COPIES[relative]
+            tracked = git(root, 'ls-tree', 'HEAD', '--', COPIES[relative]).split()
             if not tracked or tracked[0] != b'100644' or source.is_symlink() or data != source.read_bytes():
-                raise ValueError('生成 splash.js 与已跟踪 web/static/splash.js 不一致。')
+                raise ValueError(f'生成 {Path(relative).name} 与已跟踪 {COPIES[relative]} 不一致。')
         elif relative == ORT_SESSION:
             # ORT 1.30 import 的本地会话 sidecar：时间戳 + UUID，无模型/账号输入。
             if not re.fullmatch(rb'[0-9]{13}\n[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}\n?', data):
