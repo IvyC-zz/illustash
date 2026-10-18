@@ -2,6 +2,7 @@
 ; kind (compute\bin\illustash-<kind>.exe) and a second resources\ next to compute\. NSIS
 ; overwrites files but never removes ones the new package no longer ships, and the new
 ; uninstaller does not know them, so remove them before copying the new layout.
+!include "${__FILEDIR__}\nsis-hooks.nsh"
 !macro NSIS_HOOK_PREINSTALL
   Delete "$INSTDIR\compute\bin\illustash-research.exe"
   Delete "$INSTDIR\compute\bin\illustash-index.exe"
