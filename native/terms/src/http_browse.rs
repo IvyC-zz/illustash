@@ -91,23 +91,20 @@ fn exists(c: &Connection, sql: &str, args: &[&str]) -> Result<bool> {
     Ok(count(c, &format!("SELECT EXISTS({sql})"), args)? != 0)
 }
 /// Parameter conversion runs before opening any databases, as in the Python dispatcher.
-pub(crate) fn preflight(path: &str, q: &HashMap<String, String>) -> Option<(Json, u16)> {
+fn preflight(path: &str, q: &HashMap<String, String>) -> Result<()> {
     let keys: Vec<(&str, &str)> = match path {
         "/api/assets" | "/api/ids" => vec![("offset", "0"), ("limit", "100")],
         "/api/home" => vec![("days", "5")],
-        _ => return None,
+        _ => return Ok(()),
     };
     let mut parsed = Vec::new();
     for (k, d) in keys {
-        match python_int(q.get(k).map(String::as_str).unwrap_or(d)) {
-            Ok(n) => parsed.push(n),
-            Err(e) => return Some((Json::object([("error", e.into())]), 400)),
-        }
+        parsed.push(python_int(q.get(k).map(String::as_str).unwrap_or(d)).map_err(Error::Invalid)?);
     }
     if path == "/api/assets" && (!(0..=10000000).contains(&parsed[0]) || !(1..=200).contains(&parsed[1])) {
-        return Some((Json::object([("error", "分页参数不正确".into())]), 400));
+        return Err(Error::Invalid("分页参数不正确".into()));
     }
-    None
+    Ok(())
 }
 fn attach_provenance(c: &Connection, context: &LibraryContext) -> Result<()> {
     if let Some(library) = &context.library {
@@ -542,9 +539,7 @@ fn decorate(c: &Connection, page: &mut [Json]) -> Result<()> {
     Ok(())
 }
 pub fn validate(path: &str, q: &HashMap<String, String>) -> Result<()> {
-    if let Some((j, _)) = preflight(path, q) {
-        return Err(Error::Invalid(get(&j, "error").text().into()));
-    }
+    preflight(path, q)?;
     if path == "/api/ids" {
         let offset = python_int(q.get("offset").map(String::as_str).unwrap_or("0")).map_err(Error::Invalid)?;
         let limit = python_int(q.get("limit").map(String::as_str).unwrap_or("100")).map_err(Error::Invalid)?;

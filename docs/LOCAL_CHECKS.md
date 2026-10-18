@@ -94,6 +94,7 @@ PR 应明确区分“当前 head 上完整执行退出 0”和“当前候选仅
 
 **启动与操作**：
 - 启动用 `tart run --no-graphics --vnc-experimental [--dir=名字:路径:ro] <副本>`。不加 `--no-graphics` 时，tart 会在本机打开「屏幕共享」并占住 VNC 连接。VNC 只在测试期间开着，监听所有网卡，用的是随机口令。
+- 同一时间只开一台虚拟机（2026-10-18，见 [AGENTS.md](../AGENTS.md)）：把上面的命令包在 `collab_run.py run --slot vm -- tart run …` 里放后台运行，虚拟机运行期间占着 vm 槽，`tart stop` 后释放；别的会话要开虚拟机时会排队，`collab_run.py status` 能看到是谁开着。不能前台运行的虚拟机（例如 UTM 的 `utmctl start` 会立即返回），用 `collab_run.py run --slot vm --` 包住一个等它关机的命令。不测的时候就关掉，不要让虚拟机空跑。
 - 截图、点击、输入走 VNC，不需要虚拟机里的系统授权。命令走 `tart exec`：它用的是虚拟化通道，不依赖网络，以当前登录的用户身份运行。`tart exec` 第一次访问「下载」或管理用户时，虚拟机里会弹出授权框，要用 VNC 点允许。
 - VNC 下滚轮和 Cmd 组合键不可靠：滚动靠拖滚动条，退出等操作走菜单栏；在原生文件选择器里直接输入 `/`，就能打开「前往文件夹」。
 

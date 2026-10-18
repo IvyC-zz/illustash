@@ -13,6 +13,7 @@ use crate::{
 use rusqlite::params;
 use serde_json::{json, Value};
 use std::{
+    cell::Cell,
     io::Read,
     path::{Path, PathBuf},
     process::Command,
@@ -441,6 +442,7 @@ impl Runner {
             );
             let (kind, steps, budget) = (kind.to_owned(), steps.to_string(), *budget);
             self.task = Some(Task::start(identity, None, move |ctx| {
+                let stall = Stall { after: timeout, happened: Cell::new(false) };
                 let result = run(
                     &ctx,
                     &lib,
@@ -452,12 +454,12 @@ impl Runner {
                     &only,
                     &artists,
                     worker.as_deref(),
-                    timeout,
+                    &stall,
                     &state,
                     &delivery,
                 );
                 if let Err(e) = &result {
-                    let timed_out = e.to_string().contains("无进展超时");
+                    let timed_out = stall.happened.get();
                     let status = if ctx.check().is_err() && !timed_out { "stopped" } else { "failed" };
                     let reason = if status == "stopped" { "已手动停止或超时".into() } else { e.to_string() };
                     if let Ok(c) = cache::connect(&lib.instance_path().join("provenance.sqlite")) {
@@ -522,6 +524,12 @@ fn active(task: Option<&Task>, status: Status) -> bool {
     task.is_some_and(Task::running) && !matches!(status, Status::Done | Status::Failed | Status::Stopped)
 }
 
+/// How long a research worker may go without progress, and whether this run's worker did (#204): the run's end
+/// tells a stall from a stop by this, not by the error's words.
+struct Stall {
+    after: Duration,
+    happened: Cell<bool>,
+}
 #[allow(clippy::too_many_arguments)]
 fn run(
     ctx: &TaskContext,
@@ -534,7 +542,7 @@ fn run(
     only: &[String],
     artists: &[String],
     worker: Option<&Path>,
-    timeout: Duration,
+    stall: &Stall,
     state: &Arc<Mutex<State>>,
     delivery: &Arc<Mutex<Json>>,
 ) -> Result<()> {
@@ -572,11 +580,11 @@ fn run(
                     "x_following" => sources::x_following(ctx, &staged, &mut net)?,
                     "pixiv_following" => sources::pixiv_following(ctx, &staged, &mut net)?,
                     "pixel_hash" | "iqdb" => {
-                        let v = compute(ctx, lib, &dir, step, only, artists, worker, timeout, &mut net, state)?;
+                        let v = compute(ctx, lib, &dir, step, only, artists, worker, stall, &mut net, state)?;
                         let v = sources::validate_hashes(lib, &staged, step, &v, only)?;
                         sources::hashes(ctx, &staged, &mut net, step, &v)?
                     }
-                    _ => compute(ctx, lib, &dir, step, only, artists, worker, timeout, &mut net, state)?,
+                    _ => compute(ctx, lib, &dir, step, only, artists, worker, stall, &mut net, state)?,
                 }
             };
         if result.get("failed").and_then(Value::as_u64).unwrap_or(0) > 0 {
@@ -666,7 +674,7 @@ fn compute(
     only: &[String],
     artists: &[String],
     worker: Option<&Path>,
-    timeout: Duration,
+    stall: &Stall,
     net: &mut net::Net,
     state: &Arc<Mutex<State>>,
 ) -> Result<Value> {
@@ -727,8 +735,9 @@ fn compute(
                     }
                 }
             }
-            if heartbeat.elapsed() > timeout {
+            if heartbeat.elapsed() > stall.after {
                 ctx.cancel();
+                stall.happened.set(true);
                 failure = Some(Error::Invalid("研究 worker 无进展超时".into()));
                 break;
             }
