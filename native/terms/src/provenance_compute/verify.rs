@@ -124,7 +124,7 @@ impl Progress {
         local_match::progress(
             request,
             sequence,
-            json!({"log":format!("本地比对：第 {artist}/{artists} 位画师，作品 {work}/{works}，已下载小图 {fetched} 张，比对上 {found} 张，流量 {mb} MB",artist=(self.done+1).min(self.artists),artists=self.artists,work=self.works,works=self.planned,fetched=self.fetched,found=self.found,mb=format!("{mb:.0}")),
+            json!({"log":format!("本地比对：第 {artist}/{artists} 位画师，作品 {work}/{works}，已下载小图 {fetched} 张，比对上 {found} 张，流量 {mb} MB",artist=(self.done+1).min(self.artists),artists=self.artists,work=self.works,works=self.planned,fetched=self.fetched,found=self.found,mb=format_args!("{mb:.0}")),
             "progress":{"label":"画师","done":self.done,"total":self.artists,"found":self.found,"mb":(mb*10.).round_ties_even()/10.,"sub_label":"作品","sub_done":self.works,"sub_total":self.planned}}),
         )?;
         Ok(())

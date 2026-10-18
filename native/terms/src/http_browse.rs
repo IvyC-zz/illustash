@@ -403,11 +403,11 @@ impl PageDisplay {
         let name_ids = Json::Array(name_ids).dump();
         let mut names = HashMap::new();
         for r in rows(c, "SELECT entity,skin_only,name,name_source,zh,ja,en,tag FROM term_name_display WHERE entity IN (SELECT value FROM json_each(?))", &[&name_ids])? {
-            names.insert((get(&r, "entity").text().to_owned(), get(&r, "skin_only").integer() != 0), Json::object([
+            names.insert((get(&r, "entity").text().to_owned(), get(&r, "skin_only").integer() != 0), crate::http_read::shown_info(Json::object([
                 ("name", get(&r, "name")), ("name_source", get(&r, "name_source")),
                 ("names", Json::object([("zh", get(&r, "zh")), ("ja", get(&r, "ja")), ("en", get(&r, "en"))])),
                 ("tag", get(&r, "tag")),
-            ]));
+            ])));
         }
         let mut nodes = HashMap::new();
         if c.query_row("SELECT value FROM meta WHERE key='identity_policy'", [], |r| r.get::<_, String>(0))

@@ -63,6 +63,24 @@ pub(crate) fn locales(folder: &Path) -> Vec<Locale> {
     found
 }
 
+/// Text the backend itself shows outside the page (the macOS file chooser's prompt), in the language the page named
+/// (`X-Illustash-Language`): that table's entry keyed by the Chinese, or the Chinese. What the page shows it translates
+/// itself (web/static/i18n.js tb()), so the backend's replies and records stay Chinese.
+pub(crate) fn tr(root: &Path, language: Option<&str>, text: &str) -> String {
+    let Some(code) = language.filter(|code| valid_code(code)) else { return text.into() };
+    let table = fs::read(locales_folder(root).join(format!("{code}.json")))
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<Map<String, Value>>(&bytes).ok());
+    let entry = table.as_ref().and_then(|table| table.get(text));
+    match entry {
+        Some(Value::String(out)) if !out.is_empty() => out.clone(),
+        Some(Value::Object(forms)) => {
+            forms.get("other").and_then(Value::as_str).filter(|o| !o.is_empty()).unwrap_or(text).into()
+        }
+        _ => text.into(),
+    }
+}
+
 fn offered(language: &str, locales: &[Locale]) -> bool {
     language == SYSTEM || language == SOURCE || locales.iter().any(|locale| locale.code == language)
 }
@@ -165,6 +183,21 @@ mod tests {
     impl Drop for Fixture {
         fn drop(&mut self) {
             let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[test]
+    fn backend_text_takes_the_named_table_or_stays_chinese() {
+        let f = Fixture::new();
+        let root = f.0.join("root");
+        let folder = locales_folder(&root);
+        fs::create_dir_all(&folder).unwrap();
+        fs::write(folder.join("en.json"), r#"{"@name": "English", "选择图片文件夹": "Choose a picture folder", "{n} 张": {"one": "{n} picture", "other": "{n} pictures"}}"#).unwrap();
+        assert_eq!(tr(&root, Some("en"), "选择图片文件夹"), "Choose a picture folder");
+        assert_eq!(tr(&root, Some("en"), "{n} 张"), "{n} pictures");
+        assert_eq!(tr(&root, Some("en"), "没有译文"), "没有译文");
+        for language in [None, Some("zh-CN"), Some("fr"), Some("../en"), Some("EN")] {
+            assert_eq!(tr(&root, language, "选择图片文件夹"), "选择图片文件夹", "{language:?}");
         }
     }
 

@@ -1171,9 +1171,9 @@ pub fn verify_choice(c: &Connection, kind: &str, key: &str, choice: &Choice) -> 
     if *choice != full {
         return Err(Error::Conflict(format!(
             "按键选名与整库载入不一致（{kind} {key}）：{choice} ≠ {full}",
-            key = format!("{key:?}"),
-            choice = format!("{choice:?}"),
-            full = format!("{full:?}")
+            key = format_args!("{key:?}"),
+            choice = format_args!("{choice:?}"),
+            full = format_args!("{full:?}")
         )));
     }
     Ok(())

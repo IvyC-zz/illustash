@@ -570,7 +570,7 @@ pub fn relate(a: &Loaded, b: &Loaded) -> Result<Value> {
                 "duplicate" if a.size != b.size => "同一张图（尺寸不同）".into(),
                 "duplicate" => "同一张图（重新压缩过）".into(),
                 "variant" if r.changed <= DIFFERENT => {
-                    format!("局部不同，约占画面 {percent}%", percent = format!("{:.0}", r.changed * 100.))
+                    format!("局部不同，约占画面 {percent}%", percent = format_args!("{:.0}", r.changed * 100.))
                 }
                 "variant" => "线稿相同，大面积重新上色或修改".into(),
                 "edit" => match r.how {
@@ -622,7 +622,7 @@ pub fn relate(a: &Loaded, b: &Loaded) -> Result<Value> {
         for b in &r.boxes {
             boxes_big.push(json!({"x":x+b["x"].as_f64().expect("numeric box")*w,"y":y+b["y"].as_f64().expect("numeric box")*h,"w":b["w"].as_f64().expect("numeric box")*w,"h":b["h"].as_f64().expect("numeric box")*h}));
         }
-        let percent = format!("{:.0}", w * h * 100.);
+        let percent = format_args!("{:.0}", w * h * 100.);
         let mut note = if flip {
             format!("左图是右图的一部分（约占 {percent}%）")
         } else {

@@ -2,11 +2,15 @@
 use super::*;
 
 pub(super) fn handle(request: Request, host: &Host, received: u64, text: &str, body: Json) {
+    // A native chooser's prompt in the page's language (#173).
+    let language = header(&request, "X-Illustash-Language").map(str::to_owned);
+    let translate = |text: &str| crate::app_preferences::tr(&host.root, language.as_deref(), text);
     if request.url() == "/api/libraries/choose" {
         let result = crate::app_platform::choose(
             body.get("kind").map(Json::text).unwrap_or(""),
             body.get("multiple").is_some_and(truthy),
             &crate::platform_process::stopping,
+            &translate,
         )
         .map_err(management_error);
         if !host.current(received) {
@@ -23,7 +27,7 @@ pub(super) fn handle(request: Request, host: &Host, received: u64, text: &str, b
     // a switch must never deliver the chosen file into a replacement package.
     let mut body = body;
     if request.url() == "/api/accounts/x/import" && !body.get("path").is_some_and(truthy) {
-        match crate::app_platform::choose("archive", false, &crate::platform_process::stopping)
+        match crate::app_platform::choose("archive", false, &crate::platform_process::stopping, &translate)
             .map_err(management_error)
         {
             Ok(picked) => {

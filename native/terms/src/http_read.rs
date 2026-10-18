@@ -141,6 +141,52 @@ fn choice(v: Choice) -> Json {
         ),
     ])
 }
+// Names for a page in another language than Chinese (#173 stage 3). The page says its language in a request header
+// (app_http.rs); a request without it, any background task, and every write see the names exactly as before.
+thread_local! {
+    static ROMAN: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+/// While it lives, this thread's reads show names for a page in `language` (`X-Illustash-Language`).
+pub(crate) struct PageLanguage(bool);
+impl PageLanguage {
+    pub(crate) fn set(language: Option<&str>) -> Self {
+        let roman = language.is_some_and(|l| {
+            let primary = l.split('-').next().unwrap_or("").to_ascii_lowercase();
+            !primary.is_empty() && primary != "zh"
+        });
+        PageLanguage(ROMAN.replace(roman))
+    }
+}
+impl Drop for PageLanguage {
+    fn drop(&mut self) {
+        ROMAN.set(self.0);
+    }
+}
+fn roman() -> bool {
+    ROMAN.get()
+}
+/// The name shown on a page in another language: a name you gave stays; otherwise the English name, then the
+/// Danbooru tag made readable (Hatsune Miku), which is romanized for Japanese characters; then the name as chosen.
+pub(crate) fn shown_name(name: String, source: &str, en: Option<String>, tag: &str, character: bool) -> String {
+    if !roman() || source == "user" {
+        return name;
+    }
+    match en.filter(|en| !en.is_empty()) {
+        Some(en) => en,
+        None if !tag.is_empty() => crate::names_view::readable(tag, character),
+        None => name,
+    }
+}
+pub(crate) fn shown_info(mut info: Json) -> Json {
+    if roman() {
+        let name = info.get("name").map(|v| v.text().to_owned()).unwrap_or_default();
+        let source = info.get("name_source").map(|v| v.text().to_owned()).unwrap_or_default();
+        let en = info.get("names").and_then(|n| n.get("en")).map(|v| v.text().to_owned()).filter(|en| !en.is_empty());
+        let tag = info.get("tag").map(|v| v.text().to_owned()).unwrap_or_default();
+        info.set("name", shown_name(name, &source, en, &tag, true).into());
+    }
+    info
+}
 pub(crate) fn register_names(c: &Connection) -> Result<()> {
     if flag(c, "terms_names")? {
         return register_projected_names(c);
@@ -162,16 +208,23 @@ pub(crate) fn register_names(c: &Connection) -> Result<()> {
     let f = rusqlite::functions::FunctionFlags::SQLITE_UTF8;
     c.create_scalar_function("entity_name", 1, f, move |ctx| {
         let id = ctx.get::<Option<String>>(0)?.unwrap_or_default();
-        Ok(names.get(&(id, 0)).and_then(|v| v.get("name")).map(|v| v.text().to_owned()).unwrap_or_default())
+        Ok(names
+            .get(&(id, 0))
+            .map(|v| shown_info(v.clone()))
+            .and_then(|v| v.get("name").map(|v| v.text().to_owned()))
+            .unwrap_or_default())
     })?;
     c.create_scalar_function("entity_info", 2, f, move |ctx| {
         let id = ctx.get::<Option<String>>(0)?.unwrap_or_default();
         let skin = ctx.get::<i64>(1)?;
-        Ok(shown.get(&(id, i64::from(skin != 0))).cloned().unwrap_or(Json::Object(Vec::new())).dump())
+        Ok(shown.get(&(id, i64::from(skin != 0))).cloned().map(shown_info).unwrap_or(Json::Object(Vec::new())).dump())
     })?;
     c.create_scalar_function("work_name", 1, f, move |ctx| {
         let key = ctx.get::<String>(0)?;
-        fallback.choose("work", &key).map(|v| v.name).map_err(|e| rusqlite::Error::UserFunctionError(Box::new(e)))
+        fallback
+            .choose("work", &key)
+            .map(|v| shown_name(v.name, &v.source, v.names[2].clone(), &key, false))
+            .map_err(|e| rusqlite::Error::UserFunctionError(Box::new(e)))
     })?;
     Ok(())
 }
@@ -180,27 +233,36 @@ pub(crate) fn register_names(c: &Connection) -> Result<()> {
 // reuse stale names, and an empty page does not load every identity's legacy names.
 fn register_projected_names(c: &Connection) -> Result<()> {
     let f = rusqlite::functions::FunctionFlags::SQLITE_UTF8;
-    let mut names: HashMap<String, String> = HashMap::new();
+    // Memoized per page language too: a connection may outlive one request.
+    let mut names: HashMap<(bool, String), String> = HashMap::new();
     c.create_scalar_function("entity_name", 1, f, move |ctx| {
         let id = ctx.get::<Option<String>>(0)?.unwrap_or_default();
-        if let Some(name) = names.get(&id) {
+        let key = (roman(), id);
+        if let Some(name) = names.get(&key) {
             return Ok(name.clone());
         }
         // SAFETY: HTTP owns the connection on one thread. The non-owning handle
         // stays within this callback and reads the same request transaction.
         let c = unsafe { ctx.get_connection()? };
-        let name: String = c
-            .query_row("SELECT name FROM term_name_display WHERE entity=? AND skin_only=0", [&id], |r| r.get(0))
-            .optional()?
-            .unwrap_or_default();
-        names.insert(id, name.clone());
+        let name: String = if key.0 {
+            c.query_row(
+                "SELECT name,name_source,en,tag FROM term_name_display WHERE entity=? AND skin_only=0",
+                [&key.1],
+                |r| Ok(shown_name(r.get(0)?, &r.get::<_, String>(1)?, r.get(2)?, &r.get::<_, String>(3)?, true)),
+            )
+        } else {
+            c.query_row("SELECT name FROM term_name_display WHERE entity=? AND skin_only=0", [&key.1], |r| r.get(0))
+        }
+        .optional()?
+        .unwrap_or_default();
+        names.insert(key, name.clone());
         Ok(name)
     })?;
-    let mut shown: HashMap<(String, i64), String> = HashMap::new();
+    let mut shown: HashMap<(bool, String, i64), String> = HashMap::new();
     c.create_scalar_function("entity_info", 2, f, move |ctx| {
         let id = ctx.get::<Option<String>>(0)?.unwrap_or_default();
         let skin = i64::from(ctx.get::<i64>(1)? != 0);
-        let key = (id, skin);
+        let key = (roman(), id, skin);
         if let Some(info) = shown.get(&key) {
             return Ok(info.clone());
         }
@@ -209,9 +271,9 @@ fn register_projected_names(c: &Connection) -> Result<()> {
         let info = c
             .query_row(
                 "SELECT name,name_source,zh,ja,en,tag FROM term_name_display WHERE entity=? AND skin_only=?",
-                params![&key.0, skin],
+                params![&key.1, skin],
                 |r| {
-                    Ok(Json::object([
+                    Ok(shown_info(Json::object([
                         ("name", r.get::<_, String>(0)?.into()),
                         ("name_source", r.get::<_, String>(1)?.into()),
                         (
@@ -223,7 +285,7 @@ fn register_projected_names(c: &Connection) -> Result<()> {
                             ]),
                         ),
                         ("tag", r.get::<_, String>(5)?.into()),
-                    ])
+                    ]))
                     .dump())
                 },
             )
@@ -232,22 +294,27 @@ fn register_projected_names(c: &Connection) -> Result<()> {
         shown.insert(key, info.clone());
         Ok(info)
     })?;
-    let mut chosen: HashMap<String, String> = HashMap::new();
+    let mut chosen: HashMap<(bool, String), String> = HashMap::new();
     c.create_scalar_function("work_name", 1, f, move |ctx| {
-        let key = ctx.get::<String>(0)?;
+        let key = (roman(), ctx.get::<String>(0)?);
         if let Some(name) = chosen.get(&key) {
             return Ok(name.clone());
         }
         // SAFETY: as above; the fallback also reads this transaction, never a new connection.
         let c = unsafe { ctx.get_connection()? };
-        let name: Option<String> = c
-            .query_row("SELECT name FROM term_name_choice WHERE kind='work' AND key=?", [&key], |r| r.get(0))
-            .optional()?;
+        let name: Option<String> = if key.0 {
+            c.query_row("SELECT name,name_source,en FROM term_name_choice WHERE kind='work' AND key=?", [&key.1], |r| {
+                Ok(shown_name(r.get(0)?, &r.get::<_, String>(1)?, r.get(2)?, &key.1, false))
+            })
+        } else {
+            c.query_row("SELECT name FROM term_name_choice WHERE kind='work' AND key=?", [&key.1], |r| r.get(0))
+        }
+        .optional()?;
         let name = match name {
             Some(name) => name,
             // A key the projection does not hold: chosen from that key's own rows (#105), no library-wide load.
-            None => crate::names_view::choose_key(&c, "work", &key)
-                .map(|v| v.name)
+            None => crate::names_view::choose_key(&c, "work", &key.1)
+                .map(|v| shown_name(v.name, &v.source, v.names[2].clone(), &key.1, false))
                 .map_err(|e| rusqlite::Error::UserFunctionError(Box::new(e)))?,
         };
         chosen.insert(key, name.clone());
@@ -570,6 +637,41 @@ mod tests {
         c.execute("INSERT INTO term_name_display VALUES ('x',0,'before','user','中','日',NULL,'tag')", []).unwrap();
         c.execute("INSERT INTO term_name_choice VALUES ('work','covered','projected','user',NULL,NULL,NULL)", [])
             .unwrap();
+    }
+    #[test]
+    fn a_page_in_another_language_shows_english_or_romanized_names() {
+        let c = Connection::open_in_memory().unwrap();
+        fixture(&c);
+        c.execute("INSERT INTO term_name_display VALUES ('m',0,'初音未来','bangumi','初音未来','初音ミク',NULL,'hatsune_miku_(append)')", [])
+            .unwrap();
+        c.execute(
+            "INSERT INTO term_name_display VALUES ('r',0,'雷姆','bangumi','雷姆','レム','Rem','rem_(re:zero)')",
+            [],
+        )
+        .unwrap();
+        c.execute("INSERT INTO term_name_choice VALUES ('work','genshin_impact','原神','builtin',NULL,NULL,NULL)", [])
+            .unwrap();
+        register_names(&c).unwrap();
+        let shown = |c: &Connection| -> Vec<String> {
+            [
+                "entity_name('m')",
+                "entity_name('r')",
+                "entity_name('x')",
+                "work_name('genshin_impact')",
+                "json_extract(entity_info('m',0),'$.name')",
+            ]
+            .iter()
+            .map(|f| c.query_row(&format!("SELECT {f}"), [], |r| r.get(0)).unwrap())
+            .collect()
+        };
+        assert_eq!(shown(&c), ["初音未来", "雷姆", "before", "原神", "初音未来"]);
+        {
+            let _page = PageLanguage::set(Some("en"));
+            // Your own name stays; then the English name; then the tag made readable.
+            assert_eq!(shown(&c), ["Hatsune Miku", "Rem", "before", "Genshin Impact", "Hatsune Miku"]);
+        }
+        let _page = PageLanguage::set(Some("zh-TW"));
+        assert_eq!(shown(&c), ["初音未来", "雷姆", "before", "原神", "初音未来"]);
     }
     #[test]
     fn projected_names_do_not_load_legacy_tables() {

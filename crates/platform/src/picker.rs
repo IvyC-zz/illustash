@@ -20,7 +20,8 @@ impl Kind {
             Self::Archive => "archive",
         }
     }
-    fn title(&self) -> &'static str {
+    /// The chooser's prompt, in Chinese; the caller may show it translated (`choose`'s `title`).
+    pub fn title(&self) -> &'static str {
         match self {
             Self::Folder => "选择图片文件夹",
             Self::Library => "选择图库（.pilib）",
@@ -35,11 +36,18 @@ pub enum Choice {
     Cancelled,
     Unsupported,
 }
-pub fn choose(kind: Kind, multiple: bool, stopping: &dyn Fn() -> bool, timeout: Duration) -> Result<Choice> {
+pub fn choose(
+    kind: Kind,
+    title: &str,
+    multiple: bool,
+    stopping: &dyn Fn() -> bool,
+    timeout: Duration,
+) -> Result<Choice> {
     if !cfg!(target_os = "macos") {
         return Ok(Choice::Unsupported);
     }
-    let title = kind.title();
+    // An AppleScript string literal.
+    let title = title.replace('\\', "\\\\").replace('"', "\\\"");
     let kind = kind.id();
     let command = if matches!(kind, "folder" | "library") { "choose folder" } else { "choose file" };
     let filter = if matches!(kind, "zip" | "archive") { " of type {\"zip\", \"public.zip-archive\"}" } else { "" };

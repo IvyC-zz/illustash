@@ -565,7 +565,7 @@ fn verify_projection(c: &Connection, kind: &str) -> Result<()> {
             "局部显示投影与整表重建不一致：局部 {scoped} 行、整表 {full} 行，第一处不同：{differs}",
             scoped = scoped.len(),
             full = full.len(),
-            differs = format!("{differs:?}")
+            differs = format_args!("{differs:?}")
         )));
     }
     record_verified(kind)

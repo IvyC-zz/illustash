@@ -232,8 +232,8 @@ fn object<'a>(v: &'a Value, at: &str, required: &[&str], optional: &[&str]) -> R
     if !missing.is_empty() || !unknown.is_empty() {
         return invalid(format!(
             "{at} 缺少字段 {missing}，未知字段 {unknown}",
-            missing = format!("{missing:?}"),
-            unknown = format!("{unknown:?}")
+            missing = format_args!("{missing:?}"),
+            unknown = format_args!("{unknown:?}")
         ));
     }
     Ok(map)

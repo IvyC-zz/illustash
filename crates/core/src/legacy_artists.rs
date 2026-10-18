@@ -393,8 +393,8 @@ fn sync_verdicts(
             "图 {image} 的画师 {artist} 在核心里是 {core}，artist_verdicts 里是 {table}（表被绕过历史改过？）",
             image = differ.0,
             artist = differ.1,
-            core = format!("{:?}", effective.get(differ)),
-            table = format!("{:?}", current.get(differ))
+            core = format_args!("{:?}", effective.get(differ)),
+            table = format_args!("{:?}", current.get(differ))
         )));
     }
     Ok((added, steps.len(), touched))
