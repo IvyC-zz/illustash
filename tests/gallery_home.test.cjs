@@ -1,4 +1,6 @@
-const {test} = require('node:test');
+const {test, before} = require('node:test');
+const web = require('./web.cjs');   // core/ modules (#199)
+before(web.ready);
 const assert = require('node:assert/strict');
 const vm = require('node:vm');
 const zh = require('./i18n_zh.cjs');   // t() of a Chinese page (#173)
@@ -111,10 +113,12 @@ test('opening the app lands on 首页; the library has its own hash and old quer
   assert.deepEqual([c.parseHash().page,c.parseHash().day],['library','2026-10-02']);
 });
 test('undo and a finished sync redraw the home page, whose day groups come from their own read', async () => {
-  const calls = [];
+  const calls = [], {edits, setLatest, undoLatest, undoneText} = web.core();
+  edits.latest = {id: 7, label: '已将 1 张移出 A'};
+  globalThis.fetch = async () => ({status: 200, ok: true, json: async () => ({undo: null})});
   const c = {
-    state: {undo: {id: 7, label: '已将 1 张移出 A'}, busy: false, route: {page: 'home'}, sync: {status: 'scanning'}, focused: null, viewer: -1},
-    async post() { return {undo: null}; }, setUndo(u) { c.state.undo = u; }, toast() {}, async reload() { calls.push('reload'); },
+    state: {route: {page: 'home'}, sync: {status: 'scanning'}, focused: null, viewer: -1},
+    edits, setLatest, undoLatest, undoneText, toast() {}, async reload() { calls.push('reload'); },
     async refreshMeta() {}, error() {}, readError: e => e, renderHome(keep) { calls.push(['home', keep]); },
     renderIdentity() {}, renderGroups() {}, renderArtistAudit() {}, inspect() {}, selCount: () => 0, renderTasks() {}, guideRefresh() {},
     SYNC_ACTIVE: ['scanning'], number: String, clearTimeout() {}, setTimeout() {}, panelPage: p => p === 'home',
@@ -124,6 +128,7 @@ test('undo and a finished sync redraw the home page, whose day groups come from 
   vm.runInContext(source.slice(source.indexOf('async function undo()'), source.indexOf('async function sweep()')) + ';this.undo = undo;', c);
   await c.undo();
   assert.deepEqual(calls, ['reload', ['home', true]]);
+  assert.equal(edits.latest, null);
   calls.length = 0;
   vm.runInContext('let syncTimer = 0, syncPoll = 0, lastImported = 0;' + source.slice(source.indexOf('async function pollSync()'), source.indexOf('// ---------- new characters')) + ';this.pollSync = pollSync;', c);
   await c.pollSync();

@@ -66,7 +66,7 @@ function poller(token = 'session') {
   const answers = [], timers = [], toasts = [], posted = [];
   let rendered = 0, libraries = 0;
   const c = {
-    state: {token, route: {page: 'settings'}},
+    session: {token}, state: {route: {page: 'settings'}},
     api: (path, options) => {
       if (path === '/api/imports/cancel') { posted.push(options); return Promise.resolve({status: 'stopping'}); }
       return new Promise(resolve => answers.push(resolve));
@@ -116,7 +116,7 @@ test('an answer for a page whose session changed meanwhile is dropped', async ()
   const p = poller();
   p.c.state.importTask = running();
   const pending = p.c.pollImports();
-  p.c.state.token = 'replacement';
+  p.c.session.token = 'replacement';
   p.answers[0]({...running(), status: 'done', result: {name: '合成'}});
   await pending;
   assert.equal(p.c.state.importTask.status, 'running');

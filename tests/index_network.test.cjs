@@ -6,7 +6,7 @@ const source = require('node:fs').readFileSync(require('node:path').join(__dirna
 const helper = source.slice(source.indexOf('async function checkIndex()'), source.indexOf('const NAMES_NOTE'));
 function harness(confirmAction) {
   const calls = [];
-  const c = {state: {token: 'library-a'}, confirmAction, post: async (path, body) => { calls.push({path, body}); return {state: {status: 'checking'}}; }};
+  const c = {session: {token: 'library-a'}, state: {}, confirmAction, post: async (path, body) => { calls.push({path, body}); return {state: {status: 'checking'}}; }};
   vm.createContext(Object.assign(c, zh.page)); vm.runInContext(helper, c);
   return {c, calls};
 }
@@ -21,7 +21,7 @@ test('cancel sends no check; every accepted run requests consent again', async (
 test('a library change during confirmation cannot authorize the new library', async () => {
   let resolve;
   const {c, calls} = harness(() => new Promise(r => { resolve = r; }));
-  const result = c.checkIndex(); c.state.token = 'library-b'; resolve(true);
+  const result = c.checkIndex(); c.session.token = 'library-b'; resolve(true);
   assert.equal(await result, false); assert.equal(calls.length, 0);
 });
 test('the task button is usable immediately after cancelled confirmation', async () => {

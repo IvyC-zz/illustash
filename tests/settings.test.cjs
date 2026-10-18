@@ -7,7 +7,7 @@ const source = readFileSync(require('node:path').join(__dirname, '../web/static/
 const helpers = source.slice(source.indexOf('const settingsRequests ='), source.indexOf('// One page per question'));
 function harness(api, extra = {}) {
   const renders = [], errors = [];
-  const c = {api, state: {route: {page: 'settings'}}, document: {activeElement: null},
+  const c = {api, session: {token: ''}, state: {route: {page: 'settings'}}, document: {activeElement: null},
     error: message => errors.push(message), readError: e => '读取失败：' + e.message, renderSettings: fetch => renders.push(fetch), ...extra};
   vm.createContext(Object.assign(c, zh.page)); vm.runInContext(helpers, c);
   return {c, renders, errors};

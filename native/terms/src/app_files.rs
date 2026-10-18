@@ -15,6 +15,22 @@ use tiny_http::{Header, Response, StatusCode};
 
 pub const ROUTES: &[&str] =
     &["/", "/app.js", "/app.css", "/theme.js", "/favicon.svg", "/splash.js", "/i18n.js", "/image"];
+/// Folders of the page's ES modules under web/static (#199): core/ never touches the DOM and can serve any layout,
+/// ui/ is the desktop layout. A module is /<folder>/<name>.js, its name in lowercase letters, digits, - and _.
+const MODULE_FOLDERS: &[&str] = &["/core/", "/ui/"];
+/// The module's folder under web/static and its file name.
+fn module(path: &str) -> Option<(&'static str, &str)> {
+    let folder = MODULE_FOLDERS.iter().find(|folder| path.starts_with(**folder))?;
+    let file = &path[folder.len()..];
+    let name = file.strip_suffix(".js")?;
+    let plain = !name.is_empty()
+        && name.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-' || b == b'_');
+    plain.then_some((folder.trim_matches('/'), file))
+}
+/// Whether `path` (without its query) is a static file, a module or a picture.
+pub fn serves(path: &str) -> bool {
+    ROUTES.contains(&path) || module(path).is_some()
+}
 
 pub enum Failure {
     Status(u16),
@@ -49,6 +65,14 @@ pub fn prepare(library: &Library, root: &Path, url: &str) -> Result<Prepared, Fa
     if path == "/i18n.js" {
         let script = root.join("web/static/i18n.js");
         return Ok(Prepared::I18n { script, locales: crate::app_preferences::locales_folder(root) });
+    }
+    if let Some((folder, file)) = module(path) {
+        let script = root.join("web/static").join(folder).join(file);
+        return if script.is_file() {
+            Ok(Prepared::Static(script, "text/javascript"))
+        } else {
+            Err(Failure::Status(404))
+        };
     }
     if path != "/image" {
         let (name, kind) = match path {
@@ -470,6 +494,33 @@ mod tests {
             "self.ILLUSTASH_LANGUAGE = \"system\";\nself.ILLUSTASH_LANGUAGES = {};\nself.ILLUSTASH_TABLES = {};\n"
         );
         fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn modules_are_plain_names_in_their_folders() {
+        for path in ["/core/session.js", "/ui/dom.js", "/core/a_b-2.js", "/app.js", "/image"] {
+            assert!(serves(path), "{path}");
+        }
+        for path in [
+            "/core/../app.js",
+            "/core/a/b.js",
+            "/core/Session.js",
+            "/core/.js",
+            "/core/a.mjs",
+            "/other/a.js",
+            "/core",
+            "/core/",
+            "/js/a.js",
+        ] {
+            assert!(!serves(path), "{path}");
+        }
+        // Every module the page has is served.
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../web/static");
+        for folder in MODULE_FOLDERS.iter().map(|folder| folder.trim_matches('/')) {
+            for entry in fs::read_dir(root.join(folder)).unwrap() {
+                let name = entry.unwrap().file_name().into_string().unwrap();
+                assert!(serves(&format!("/{folder}/{name}")), "{folder}/{name}");
+            }
+        }
     }
     #[test]
     fn clear_waits_for_generation_and_aliases_share_gate() {
