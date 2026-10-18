@@ -2,6 +2,7 @@
 """Build allowlisted portable artifacts; Python is a build tool, never a base dependency."""
 import argparse
 import hashlib
+import importlib.util
 import json
 import os
 import re
@@ -13,6 +14,13 @@ import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
 RESEARCH_OPENBLAS_IDENTITIES = json.loads((ROOT / 'crates/platform/src/research_openblas.json').read_text())
+
+def version_errors(root=ROOT):
+    """tools/version.py check: every place carrying the version agrees with native/terms/application.json (#189)."""
+    spec = importlib.util.spec_from_file_location('illustash_version', ROOT / 'tools/version.py')
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.check(root)
 
 def copy(source, destination):
     if source.is_symlink():
@@ -356,6 +364,8 @@ def main():
     for destination in (args.output, args.archive, args.desktop_resources, args.desktop_compute, args.macos_desktop_compute):
         if destination is not None and destination.exists():
             parser.error(f'output already exists: {destination}; choose a fresh path')
+    if errors := version_errors():
+        parser.error('版本号不一致，先运行 python3 tools/version.py --sync：\n' + '\n'.join(errors))
     try:
         rust_licenses()
         if args.models:
