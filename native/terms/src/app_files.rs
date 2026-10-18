@@ -27,10 +27,10 @@ impl From<Error> for Failure {
 }
 pub enum Prepared {
     Static(PathBuf, &'static str),
-    /// web/static/i18n.js after the language setting and the English table (#173).
+    /// web/static/i18n.js after the language setting and the tables of web/static/locales (#173, #182).
     I18n {
         script: PathBuf,
-        english: PathBuf,
+        locales: PathBuf,
     },
     Image {
         source: PathBuf,
@@ -47,8 +47,8 @@ pub struct File {
 pub fn prepare(library: &Library, root: &Path, url: &str) -> Result<Prepared, Failure> {
     let path = url.split('?').next().unwrap_or(url);
     if path == "/i18n.js" {
-        let folder = root.join("web/static");
-        return Ok(Prepared::I18n { script: folder.join("i18n.js"), english: folder.join("locales/en.json") });
+        let script = root.join("web/static/i18n.js");
+        return Ok(Prepared::I18n { script, locales: crate::app_preferences::locales_folder(root) });
     }
     if path != "/image" {
         let (name, kind) = match path {
@@ -190,15 +190,12 @@ impl Images {
             Prepared::Static(path, kind) => {
                 Ok(File { bytes: fs::read(path).map_err(Error::from)?, kind, cache: false })
             }
-            Prepared::I18n { script, english } => Ok(File {
-                bytes: i18n_script(
-                    &crate::app_preferences::language(),
-                    &fs::read(script).map_err(Error::from)?,
-                    &english,
-                ),
-                kind: "text/javascript",
-                cache: false,
-            }),
+            Prepared::I18n { script, locales } => {
+                let locales = crate::app_preferences::locales(&locales);
+                let language = crate::app_preferences::language(&locales);
+                let bytes = i18n_script(&language, &fs::read(script).map_err(Error::from)?, &locales);
+                Ok(File { bytes, kind: "text/javascript", cache: false })
+            }
             Prepared::Image { source, target, bound } => {
                 let bytes = self.cached(&source, &target, bound).map_err(|e| {
                     eprintln!("HTTP image: {e}");
@@ -245,21 +242,23 @@ impl Images {
     }
 }
 /// The page reads the setting synchronously before app.js runs, so the first paint is already in its language.
-/// The table is parsed and written back as JSON: a broken or missing file leaves the interface in Chinese.
-fn i18n_script(language: &str, script: &[u8], english: &Path) -> Vec<u8> {
-    let table = fs::read(english)
-        .map_err(|e| e.to_string())
-        .and_then(|bytes| {
-            serde_json::from_slice::<serde_json::Map<String, serde_json::Value>>(&bytes).map_err(|e| e.to_string())
-        })
-        .unwrap_or_else(|e| {
-            eprintln!("HTTP i18n: {}: {e}", english.display());
-            serde_json::Map::new()
-        });
+/// Every language on offer is listed by name for the settings. Tables go only for the language set: `system`
+/// is resolved from the browser's languages, which only the page knows, so then every table goes and i18n.js
+/// picks one; fetching it afterwards would make app.js wait and flash Chinese first (#182). Tables are parsed
+/// and written back as JSON: a broken or missing file is left out and its text stays in Chinese.
+fn i18n_script(language: &str, script: &[u8], locales: &[crate::app_preferences::Locale]) -> Vec<u8> {
+    use serde_json::{Map, Value};
+    let names: Map<String, Value> = locales.iter().map(|l| (l.code.clone(), l.name.as_str().into())).collect();
+    let tables: Map<String, Value> = locales
+        .iter()
+        .filter(|l| language == "system" || l.code == language)
+        .map(|l| (l.code.clone(), Value::Object(l.table.clone())))
+        .collect();
     let mut out = format!(
-        "self.ILLUSTASH_LANGUAGE = {};\nself.ILLUSTASH_EN = {};\n",
-        serde_json::Value::from(language),
-        serde_json::Value::Object(table)
+        "self.ILLUSTASH_LANGUAGE = {};\nself.ILLUSTASH_LANGUAGES = {};\nself.ILLUSTASH_TABLES = {};\n",
+        Value::from(language),
+        Value::Object(names),
+        Value::Object(tables)
     )
     .into_bytes();
     out.extend_from_slice(script);
@@ -435,27 +434,41 @@ mod tests {
     use super::*;
     use std::sync::atomic::Ordering;
     #[test]
-    fn i18n_script_prefixes_setting_and_parsed_table() {
+    fn i18n_script_prefixes_setting_names_and_tables() {
         let mut nonce = [0u8; 12];
         getrandom::fill(&mut nonce).unwrap();
         let root = std::env::temp_dir().join(format!("illustash-i18n-{:x}", Sha256::digest(nonce)));
-        fs::create_dir(&root).unwrap();
-        let english = root.join("en.json");
-        fs::write(&english, "{\"设置\": \"Settings\", \"共 {n} 张\": \"{n} pictures\"}").unwrap();
-        let out = String::from_utf8(i18n_script("en", b"/* script */", &english)).unwrap();
+        let folder = crate::app_preferences::locales_folder(&root);
+        fs::create_dir_all(&folder).unwrap();
+        fs::write(
+            folder.join("en.json"),
+            "{\"@name\": \"English\", \"设置\": \"Settings\", \"共 {n} 张\": \"{n} pictures\"}",
+        )
+        .unwrap();
+        fs::write(folder.join("ja.json"), "{\"@name\": \"日本語\", \"设置\": \"設定\"}").unwrap();
+        fs::write(folder.join("fr.json"), "{broken").unwrap();
+        let locales = crate::app_preferences::locales(&folder);
+        let script = |language| String::from_utf8(i18n_script(language, b"/* script */", &locales)).unwrap();
+        const NAMES: &str = "self.ILLUSTASH_LANGUAGES = {\"en\":\"English\",\"ja\":\"日本語\"};\n";
+        // A language set: only its table. The broken fr.json is neither offered nor sent.
         assert_eq!(
-            out,
-            "self.ILLUSTASH_LANGUAGE = \"en\";\nself.ILLUSTASH_EN = {\"共 {n} 张\":\"{n} pictures\",\"设置\":\"Settings\"};\n/* script */"
+            script("en"),
+            format!("self.ILLUSTASH_LANGUAGE = \"en\";\n{NAMES}self.ILLUSTASH_TABLES = {{\"en\":{{\"@name\":\"English\",\"共 {{n}} 张\":\"{{n}} pictures\",\"设置\":\"Settings\"}}}};\n/* script */")
         );
-        // Missing or broken tables fall back to an empty one: the page stays in Chinese instead of failing.
-        fs::write(&english, "{broken").unwrap();
-        assert!(String::from_utf8(i18n_script("system", b"", &english))
-            .unwrap()
-            .ends_with("self.ILLUSTASH_EN = {};\n"));
-        fs::remove_file(&english).unwrap();
-        assert!(String::from_utf8(i18n_script("zh-CN", b"", &english))
-            .unwrap()
-            .starts_with("self.ILLUSTASH_LANGUAGE = \"zh-CN\";"));
+        assert!(script("ja").ends_with(&format!(
+            "{NAMES}self.ILLUSTASH_TABLES = {{\"ja\":{{\"@name\":\"日本語\",\"设置\":\"設定\"}}}};\n/* script */"
+        )));
+        // Chinese needs no table; following the system sends every one, for the page to choose.
+        assert!(script("zh-CN").ends_with("self.ILLUSTASH_TABLES = {};\n/* script */"));
+        let system = script("system");
+        let tables = system.lines().nth(2).unwrap().strip_prefix("self.ILLUSTASH_TABLES = ").unwrap();
+        let tables: serde_json::Value = serde_json::from_str(tables.strip_suffix(';').unwrap()).unwrap();
+        assert_eq!(tables.as_object().unwrap().keys().collect::<Vec<_>>(), ["en", "ja"]);
+        // No tables at all leave the page in Chinese instead of failing.
+        assert_eq!(
+            String::from_utf8(i18n_script("system", b"", &[])).unwrap(),
+            "self.ILLUSTASH_LANGUAGE = \"system\";\nself.ILLUSTASH_LANGUAGES = {};\nself.ILLUSTASH_TABLES = {};\n"
+        );
         fs::remove_dir_all(root).unwrap();
     }
     #[test]
