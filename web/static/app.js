@@ -44,8 +44,6 @@ let abortList, toastTimer, searchTimer, pageTimer, pickerTimer, detailGen = 0;
 // The page belongs to the session it booted with. Another window or caller that switches (or reopens)
 // the library starts a new session; adopting its token would send this page's selection, dialogs and
 // queued work to that library. The page stops instead, and drops responses that arrive afterwards.
-// The backend's exact message, compared as is (never translated).
-const SESSION_EXPIRED = '会话已过期，请刷新页面';
 const STALE = t('图库已在其他窗口切换或重新打开，请重新载入页面');
 function adoptToken(token) {
   if (!state.token) state.token = token;
@@ -64,9 +62,10 @@ async function api(path, options = {}) {
   if (state.stale) throw new Error(STALE);
   const response = await fetch(path, {...options, headers: {'Content-Type': 'application/json', 'X-CSRF-Token': state.token, ...options.headers}});
   const result = await response.json();
-  if (response.status === 403 && result.error === SESSION_EXPIRED) staleSession();
+  if (response.status === 403 && said(result.error, '会话已过期，请刷新页面')) staleSession();
   if (state.stale) throw new Error(STALE);
-  if (!response.ok) throw new Error(result.error || t('请求失败'));
+  // The backend's message in the page's language; e.said keeps it as sent, to test with said.
+  if (!response.ok) throw Object.assign(new Error(tb(result.error) || t('请求失败')), {said: result.error});
   return result;
 }
 async function post(path, body) {
@@ -90,11 +89,10 @@ async function checkIndex() {
 }
 
 // Name text queries (tag and work names only) need this library's consent: the backend refuses with
-// this exact message until it is given. Any other failure is a real network or service error.
-const NAMES_UNAUTHORIZED = '显示名联网尚未授权';
+// 显示名联网尚未授权 until it is given. Any other failure is a real network or service error.
 const NAMES_NOTE = t('允许这个图库联网查询名称吗？\n\n会把你输入的角色名、作品名，以及图库里角色的 Danbooru tag 和作品名发给 Danbooru 和 Bangumi，用来搜索角色、作品和补全中文名。不会发送图片。\n\n允许后对这个图库一直有效，可以在「设置 › 网络与隐私」里随时撤销。');
 // A Danbooru name lookup: its results, or why it failed.
-const remoteNames = path => api(path).then(found => ({found}), e => ({found: null, unauthorized: e.message === NAMES_UNAUTHORIZED, reason: e.message}));
+const remoteNames = path => api(path).then(found => ({found}), e => ({found: null, unauthorized: said(e.said, '显示名联网尚未授权'), reason: e.message}));
 const remoteNote = r => r.unauthorized ? t('查 Danbooru 需要先允许这个图库联网查询名称（只发送文字）') : t('Danbooru 暂时连不上：{reason}', {reason: r.reason});
 const namesAllowButton = `<button type="button" class="link-button" data-names-allow>${t('允许查询…')}</button>`;
 async function setNamesNetwork(allow) {
@@ -3547,11 +3545,10 @@ function drawGuide() {
 
 // ----- the problem bar: recognition missing or its self-check failed, or a sync that stopped (while it lasts, #97) -----
 function syncTrouble() {
-  // The backend's message is matched as it is sent (Chinese until the backend text is translated, #173 stage 3).
-  const s = state.sync, said = s.message ? `（${esc(s.message)}）` : '', missing = /不存在或无法访问/.test(s.message || '');
-  if (s.status === 'interrupted') return t('同步没有做完{said}：已经加入和识别的图都保留了，再同步一次会接着处理剩下的。', {said});
+  const s = state.sync, message = s.message ? `（${esc(tb(s.message))}）` : '', missing = said(s.message, '文件夹不存在或无法访问：{path}');
+  if (s.status === 'interrupted') return t('同步没有做完{said}：已经加入和识别的图都保留了，再同步一次会接着处理剩下的。', {said: message});
   if (s.status !== 'error') return '';
-  return t('同步出错了{said}：已经加入和识别的图都保留了。', {said}) + (missing
+  return t('同步出错了{said}：已经加入和识别的图都保留了。', {said: message}) + (missing
     ? t('检查来源文件夹是否还在、外接硬盘是否接上，或者在 {link} 里换一个文件夹，然后再同步一次。', {link: `<a class="link" href="#/settings/library">${t('设置 › 图库')}</a>`})
     : t('可以再同步一次；还不行的话，反馈时附上「设置 › 关于」里的诊断信息。'));
 }

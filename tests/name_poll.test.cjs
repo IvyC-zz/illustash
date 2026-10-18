@@ -22,7 +22,7 @@ function harness(status = 'running', fail = false) {
     clearTimeout() {}, setTimeout(fn, delay) { timers.push(delay); return 1; },
     renderNamesCard() {}, renderTasks() {}, refreshMeta() { calls.push('refreshMeta'); },
   };
-  vm.createContext(Object.assign(context, {t: zh}));
+  vm.createContext(Object.assign(context, zh.page));
   vm.runInContext(poll, context);
   return {context, calls, timers, names};
 }

@@ -31,8 +31,8 @@ function harness() {
       return respond(200, path === '/api/tag' ? {ok: true} : []);
     },
   };
-  vm.createContext(Object.assign(c, {t: zh}));
-  vm.runInContext(section('const SESSION_EXPIRED', 'function readError('), c);
+  vm.createContext(Object.assign(c, zh.page));
+  vm.runInContext(section('const STALE', 'function readError('), c);
   vm.runInContext(section('let metaPending', '// ---------- chrome'), c);
   return {c, server, banner: () => nodes.errorBanner};
 }

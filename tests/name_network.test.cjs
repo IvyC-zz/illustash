@@ -5,7 +5,7 @@ const {readFileSync} = require('node:fs');
 const vm = require('node:vm');
 const zh = require('./i18n_zh.cjs');   // t() of a Chinese page (#173)
 const source = readFileSync(require('node:path').join(__dirname, '../web/static/app.js'), 'utf8');
-const code = source.slice(source.indexOf('const NAMES_UNAUTHORIZED'), source.indexOf('// 设置 › 网络与隐私'));
+const code = source.slice(source.indexOf('// Name text queries'), source.indexOf('// 设置 › 网络与隐私'));
 
 function harness({fail, confirm = true} = {}) {
   const calls = [], toasts = [], dialogs = [];
@@ -13,14 +13,14 @@ function harness({fail, confirm = true} = {}) {
     state: {names: {counts: {}}},
     async api(path, options) {
       calls.push([path, options?.body]);
-      if (fail) throw new Error(fail);
+      if (fail) throw Object.assign(new Error(fail), {said: fail});   // as api() throws
       return path === '/api/names' ? {network: {authorized: JSON.parse(options.body).allow}} : [{tag: 'synthetic'}];
     },
     async confirmAction(message, title) { dialogs.push(title); return confirm; },
     toast(m) { toasts.push(m); },
     document: {addEventListener() {}},
   };
-  vm.createContext(Object.assign(context, {t: zh}));
+  vm.createContext(Object.assign(context, zh.page));
   vm.runInContext(code + ';this.remoteNames = remoteNames; this.remoteNote = remoteNote; this.setNamesNetwork = setNamesNetwork;', context);
   return {context, calls, toasts, dialogs};
 }
@@ -69,7 +69,7 @@ test('saving or clearing model settings keeps the grant and revoke control avail
       async post(path, body) { calls.push([path, body]); return {model_api: {configured: body.key !== null}, counts: {total: 2}}; },
       toast() {}, renderSettings() { rendered.push(context.state.names.network); },
     };
-    vm.createContext(Object.assign(context, {t: zh}));
+    vm.createContext(Object.assign(context, zh.page));
     vm.runInContext(source.slice(source.indexOf('function renderModelCard()'), source.indexOf('async function pollNames()'))
       + ';renderModelCard();', context);
     controls.modelSave.onclick();
@@ -95,7 +95,7 @@ test('refreshing names from the task panel keeps the network status', async () =
     },
     toast() {}, taskTick() {},
   };
-  vm.createContext(Object.assign(context, {t: zh}));
+  vm.createContext(Object.assign(context, zh.page));
   vm.runInContext(source.slice(source.lastIndexOf("$('taskPanel').addEventListener('click'"),
     source.indexOf("document.addEventListener('click', e => { if (taskPanel.open")), context);
   await handler({
@@ -108,7 +108,7 @@ test('refreshing names from the task panel keeps the network status', async () =
 
 test('names waiting for consent are not shown as a failure', () => {
   const context = {number: String};
-  vm.createContext(Object.assign(context, {t: zh}));
+  vm.createContext(Object.assign(context, zh.page));
   const start = source.indexOf('const NAMES_ACTIVE');
   vm.runInContext(source.slice(start, source.indexOf('\n', source.indexOf('const namesLine', start))) + ';this.namesLine = namesLine;', context);
   const line = context.namesLine({status: 'unauthorized'});

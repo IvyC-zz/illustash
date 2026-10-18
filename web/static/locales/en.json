@@ -1203,5 +1203,6 @@
   "关闭大图或详情，或取消选择": "Close the large view or details, or clear the selection",
   "自动识别结果默认生效，仅需移除错误项。人工判定优先于自动识别，不会被后续识别覆盖。所有操作均可撤销。": "Automatic recognition counts by default; you only remove what is wrong. Your decisions take precedence and are never overwritten by later recognition. Everything is undoable.",
   "展开": "Show",
-  "收起": "Hide"
+  "收起": "Hide",
+  "join\u0004；": "; "
 }

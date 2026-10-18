@@ -27,7 +27,7 @@ function guide({status = 'active', step = 'welcome', ticked = [], seen = [], hid
     reply: {guide: {status, step, ticked, seen, hidden}, capability: {recognition: true, index: true, anchors: 0, check: {status: 'ok'}},
       results: {total: 0, recognized: 0, with_character: 0, unmatched: 0, characters: 0, ...results}, works},
   };
-  vm.createContext(Object.assign(c, {t: zh}));
+  vm.createContext(Object.assign(c, zh.page));
   vm.runInContext(section('// ---------- 新图库的首次引导', '(async () => {'), c);
   return c;
 }
