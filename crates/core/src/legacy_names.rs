@@ -526,8 +526,8 @@ fn verify_incremental(c: &Connection, kind: &str) -> Result<()> {
     full?;
     if r.changed.values().any(|v| v.as_i64() != Some(0)) {
         return Err(Error::Conflict(format!(
-            "增量名字镜像与整表重建不一致（{kind}）：整表重建还要改 {}",
-            Value::Object(r.changed)
+            "增量名字镜像与整表重建不一致（{kind}）：整表重建还要改 {changed}",
+            changed = Value::Object(r.changed)
         )));
     }
     record_verified(&format!("mirror_{kind}"))
@@ -562,9 +562,10 @@ fn verify_projection(c: &Connection, kind: &str) -> Result<()> {
     if scoped != full {
         let differs = scoped.iter().zip(&full).find(|(a, b)| a != b);
         return Err(Error::Conflict(format!(
-            "局部显示投影与整表重建不一致：局部 {} 行、整表 {} 行，第一处不同：{differs:?}",
-            scoped.len(),
-            full.len()
+            "局部显示投影与整表重建不一致：局部 {scoped} 行、整表 {full} 行，第一处不同：{differs}",
+            scoped = scoped.len(),
+            full = full.len(),
+            differs = format!("{differs:?}")
         )));
     }
     record_verified(kind)
@@ -622,7 +623,7 @@ pub fn cutover_with_backup(conn: &mut Connection, backup: &crate::backup::Requir
         compare(&tx, &mut r)?;
     }
     if !r.clean() {
-        return Err(Error::Conflict(format!("名字收编核对没有通过，不切换：{}", r.to_json())));
+        return Err(Error::Conflict(format!("名字收编核对没有通过，不切换：{report}", report = r.to_json())));
     }
     for table in GUARDED {
         crate::schema::guard(&tx, table)?;

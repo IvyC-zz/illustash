@@ -231,7 +231,7 @@ fn fetch(review: &Path, row: &Value, features: &mut dyn FnMut(&image::RgbImage) 
         }
     }
     if posts.len() < 3 {
-        return clean::reject(review, row, &format!("Danbooru 上可用的全年龄单人图只有 {} 张", posts.len()));
+        return clean::reject(review, row, &format!("Danbooru 上可用的全年龄单人图只有 {n} 张", n = posts.len()));
     }
     let n = posts.len() as f64;
     let mut core: Vec<_> = general

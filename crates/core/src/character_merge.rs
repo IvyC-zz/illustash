@@ -139,8 +139,12 @@ pub fn merge(c: &Connection, args: &Value) -> Result<Value> {
         "variants": variants, "aliases": added, "pins": pins, "reviews": reviews, "uuids": touched,
     }})];
     let mut shown = Shown::new();
-    let label =
-        format!("已将 {} 合并到 {}（{} 条人工结论）", shown.name(c, &source)?, shown.name(c, &target)?, moved.len());
+    let label = format!(
+        "已将 {left} 合并到 {right}（{moved} 条人工结论）",
+        left = shown.name(c, &source)?,
+        right = shown.name(c, &target)?,
+        moved = moved.len()
+    );
     relabel(c, action, &label)?;
     finish_action(c, action, "merge", before)?;
     Ok(json!({"action": action}))

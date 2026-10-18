@@ -147,7 +147,11 @@ impl Package {
                 return invalid(format!("{name} 不是普通文件"));
             }
             if meta.len() != spec.bytes {
-                return invalid(format!("{name} 大小是 {}，清单写的是 {}", meta.len(), spec.bytes));
+                return invalid(format!(
+                    "{name} 大小是 {size}，清单写的是 {listed}",
+                    size = meta.len(),
+                    listed = spec.bytes
+                ));
             }
             let mut hasher = Sha256::new();
             let mut file = fs::File::open(&path)?;
@@ -211,7 +215,7 @@ fn fingerprint(manifest: &Manifest) -> String {
 fn read_small(path: &Path, limit: u64) -> Result<String> {
     let meta = fs::symlink_metadata(path).map_err(|e| Error::Invalid(format!("{}：{e}", path.display())))?;
     if !meta.file_type().is_file() || meta.len() > limit {
-        return invalid(format!("{} 不是普通文件或超过 {limit} 字节", path.display()));
+        return invalid(format!("{path} 不是普通文件或超过 {limit} 字节", path = path.display()));
     }
     Ok(fs::read_to_string(path)?)
 }
@@ -226,7 +230,11 @@ fn object<'a>(v: &'a Value, at: &str, required: &[&str], optional: &[&str]) -> R
     let unknown: Vec<_> =
         map.keys().filter(|k| !required.contains(&k.as_str()) && !optional.contains(&k.as_str())).collect();
     if !missing.is_empty() || !unknown.is_empty() {
-        return invalid(format!("{at} 缺少字段 {missing:?}，未知字段 {unknown:?}"));
+        return invalid(format!(
+            "{at} 缺少字段 {missing}，未知字段 {unknown}",
+            missing = format!("{missing:?}"),
+            unknown = format!("{unknown:?}")
+        ));
     }
     Ok(map)
 }
@@ -380,7 +388,7 @@ pub fn parse_manifest(text_in: &str) -> Result<Manifest> {
         let o = object(item, &at, &["asset", "status", "error"], &["task_id"])?;
         let asset = asset_ref(&o["asset"], &format!("{at}.asset"))?;
         if !seen.insert(asset.clone()) {
-            return invalid(format!("{at} 重复：{}:{}", asset.namespace, asset.id));
+            return invalid(format!("{at} 重复：{namespace}:{id}", namespace = asset.namespace, id = asset.id));
         }
         let status = match o["status"].as_str() {
             Some("completed") => Status::Completed,
@@ -534,7 +542,7 @@ fn parse_rows(manifest: &Manifest, reader: impl BufRead) -> Result<Vec<Row>> {
             other => other,
         })?;
         if !ids.insert(row.id.clone()) {
-            return invalid(format!("evidence.jsonl 第 {n} 行：证据 id 重复：{}", row.id));
+            return invalid(format!("evidence.jsonl 第 {n} 行：证据 id 重复：{id}", id = row.id));
         }
         let target = match &row.target {
             Target::Image { asset, term } => {

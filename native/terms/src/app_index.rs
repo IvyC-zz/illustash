@@ -845,7 +845,7 @@ fn patch(
 }
 fn validate(lib: &Library, v: &protocol::IndexResponse, file: &Path) -> Result<()> {
     let field_error =
-        |field: &str, message: &str| Error::Invalid(format!("{}: 字段 {field}: {message}", file.display()));
+        |field: &str, message: &str| Error::Invalid(format!("{file}: 字段 {field}: {message}", file = file.display()));
     let chars = &v.characters;
     if chars.len() > 100000 {
         return Err(field_error("characters", "索引角色结果不正确"));
@@ -956,10 +956,9 @@ fn commit(
             let _ = std::fs::remove_dir_all(&folder);
             return bad("索引计算输入已改变，请重试检查");
         };
-        let result = job
-            .result
-            .as_ref()
-            .ok_or_else(|| Error::Invalid(format!("{}: 字段 result: ready job 缺少结果", journal.display())))?;
+        let result = job.result.as_ref().ok_or_else(|| {
+            Error::Invalid(format!("{file}: 字段 result: ready job 缺少结果", file = journal.display()))
+        })?;
         validate(lib, result, journal)?;
         let old =
             crate::app_migrate_data::rows(&src, "SELECT uuid,value,round(conf,4) FROM labels WHERE dim='char_ext'")?;

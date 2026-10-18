@@ -199,7 +199,7 @@ pub fn command(c: &Connection, args: &Value) -> Result<Value> {
             if !matches!(status, "accepted" | "rejected" | "proposed") || reason.trim().is_empty() {
                 return Err(invalid("请保存明确的关系决议及理由"));
             }
-            c.execute("INSERT INTO actions(label,before_json) VALUES ('已保存身份关系决议','[]')", [])?;
+            c.execute("INSERT INTO actions(label,before_json) VALUES (?,'[]')", ["已保存身份关系决议"])?;
             let action = c.last_insert_rowid();
             let result = decide(c, id, status, reason.trim(), Some(action), "migration")?;
             character_graph::rebuild(c)?;

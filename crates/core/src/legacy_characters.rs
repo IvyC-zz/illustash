@@ -494,7 +494,7 @@ pub fn cutover_with_backup(conn: &mut Connection, backup: &crate::backup::Requir
     let mut r = Report::default();
     sync_in(&tx, &mut r)?;
     if !r.clean() {
-        return Err(Error::Conflict(format!("角色收编核对没有通过，不切换：{}", r.to_json())));
+        return Err(Error::Conflict(format!("角色收编核对没有通过，不切换：{report}", report = r.to_json())));
     }
     // 第 4 版起不再冻结旧人工表（回退靠切换前的自动备份）；兼容表 `identity_baseline` 照旧由核心维护。
     let triggers: Vec<String> = tx
@@ -560,7 +560,7 @@ fn samples(conn: &Connection, sql: &str) -> Result<Vec<Value>> {
                         rusqlite::types::ValueRef::Integer(v) => json!(v),
                         rusqlite::types::ValueRef::Real(v) => json!(v),
                         rusqlite::types::ValueRef::Text(t) => json!(String::from_utf8_lossy(t)),
-                        rusqlite::types::ValueRef::Blob(b) => json!(format!("<{} 字节>", b.len())),
+                        rusqlite::types::ValueRef::Blob(b) => json!(format!("<{n} 字节>", n = b.len())),
                     })
                 })
                 .collect::<rusqlite::Result<Vec<_>>>()

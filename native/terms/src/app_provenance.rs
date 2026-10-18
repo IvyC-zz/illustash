@@ -42,10 +42,11 @@ fn read_json(path: &Path) -> Result<Value> {
     let options = crate::platform_filesystem::read_nofollow_options();
     options.open(path)?.take(1048577).read_to_end(&mut b)?;
     if b.len() > 1048576 {
-        return invalid(&format!("{}: worker 响应过大", path.display()));
+        return invalid(&format!("{file}: worker 响应过大", file = path.display()));
     }
     crate::strict_json::parse(
-        std::str::from_utf8(&b).map_err(|e| Error::Invalid(format!("{}: worker 响应编码无效: {e}", path.display())))?,
+        std::str::from_utf8(&b)
+            .map_err(|e| Error::Invalid(format!("{file}: worker 响应编码无效: {e}", file = path.display())))?,
     )
     .map_err(|e| Error::Invalid(format!("{}: {e}", path.display())))
 }
@@ -112,7 +113,7 @@ impl Runner {
         let owned = lock(&lease);
         if let Some(c) = c.as_ref().filter(|_| owned) {
             c.execute("INSERT OR IGNORE INTO pending_runs(kind) SELECT kind FROM runs WHERE status IN ('running','stopping') AND kind='new'",[])?;
-            c.execute("UPDATE runs SET status='stopped',reason=CASE WHEN reason='' THEN '中途退出' ELSE reason END,finished_at=datetime('now') WHERE status IN ('running','stopping')",[])?;
+            c.execute("UPDATE runs SET status='stopped',reason=CASE WHEN reason='' THEN ? ELSE reason END,finished_at=datetime('now') WHERE status IN ('running','stopping')",["中途退出"])?;
         }
         if owned {
             unlock(&lease);

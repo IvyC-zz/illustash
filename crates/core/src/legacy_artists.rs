@@ -64,7 +64,7 @@ pub fn sync(conn: &mut Connection, provenance: &Path) -> Result<Report> {
 pub fn sync_with_attachment(conn: &mut Connection, provenance: &Path, attachment: &Path) -> Result<Report> {
     crate::schema::require_current(conn)?;
     if !provenance.is_file() {
-        return Err(Error::Invalid(format!("找不到 {}", provenance.display())));
+        return Err(Error::Invalid(format!("找不到 {path}", path = provenance.display())));
     }
     attached(conn, Some(attachment), false)
 }
@@ -335,10 +335,10 @@ fn sync_verdicts(
     let orphans: Vec<&Pair> = current.keys().filter(|p| !steps.contains_key(*p)).collect();
     if !orphans.is_empty() {
         return Err(Error::Conflict(format!(
-            "有 {} 条画师判断找不到对应的历史步骤（例如图 {} 的画师 {}），不能确定挂在哪一步",
-            orphans.len(),
-            orphans[0].0,
-            orphans[0].1
+            "有 {n} 条画师判断找不到对应的历史步骤（例如图 {image} 的画师 {artist}），不能确定挂在哪一步",
+            n = orphans.len(),
+            image = orphans[0].0,
+            artist = orphans[0].1
         )));
     }
     let mut added = 0;
@@ -390,11 +390,11 @@ fn sync_verdicts(
             .find(|p| current.get(*p) != effective.get(*p))
             .expect("两边不等就有一对不同");
         return Err(Error::Conflict(format!(
-            "图 {} 的画师 {} 在核心里是 {:?}，artist_verdicts 里是 {:?}（表被绕过历史改过？）",
-            differ.0,
-            differ.1,
-            effective.get(differ),
-            current.get(differ)
+            "图 {image} 的画师 {artist} 在核心里是 {core}，artist_verdicts 里是 {table}（表被绕过历史改过？）",
+            image = differ.0,
+            artist = differ.1,
+            core = format!("{:?}", effective.get(differ)),
+            table = format!("{:?}", current.get(differ))
         )));
     }
     Ok((added, steps.len(), touched))

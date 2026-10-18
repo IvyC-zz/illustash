@@ -89,7 +89,11 @@ pub(super) fn clean(review: &Path, selected: &HashSet<String>) -> Result<()> {
             let distance = anchors::cross(std::slice::from_ref(&anchor), &known)?.remove(0);
             let closest = distance.iter().enumerate().min_by(|(i, a), (j, b)| a.total_cmp(b).then(i.cmp(j)));
             if let Some((i, d)) = closest.filter(|(_, d)| **d < 0.03) {
-                reason = Some(format!("与已有角色 {} 几乎相同（距离 {:.3}）：多为其伴生物或皮肤", known_ids[i], d));
+                reason = Some(format!(
+                    "与已有角色 {id} 几乎相同（距离 {distance}）：多为其伴生物或皮肤",
+                    id = known_ids[i],
+                    distance = format!("{d:.3}")
+                ));
             } else if !accepted.is_empty() {
                 let d = anchors::cross(&[anchor], &accepted)?.remove(0);
                 if let Some((i, d)) = d
@@ -99,8 +103,9 @@ pub(super) fn clean(review: &Path, selected: &HashSet<String>) -> Result<()> {
                     .filter(|(_, d)| **d < 0.03)
                 {
                     reason = Some(format!(
-                        "与补充角色 {} 是同一人（距离 {:.3}）：变身前后、本体与皮肤等，并入其别名",
-                        accepted_ids[i], d
+                        "与补充角色 {id} 是同一人（距离 {distance}）：变身前后、本体与皮肤等，并入其别名",
+                        id = accepted_ids[i],
+                        distance = format!("{d:.3}")
                     ));
                     meta["same_as"] = json!(accepted_ids[i]);
                 }

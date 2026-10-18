@@ -566,8 +566,12 @@ pub fn relate(a: &Loaded, b: &Loaded) -> Result<Value> {
         }
         if !["similar", "unrelated"].contains(&r.kind) {
             let mut note = match r.kind {
-                "duplicate" => format!("同一张图{}", if a.size != b.size { "（尺寸不同）" } else { "（重新压缩过）" }),
-                "variant" if r.changed <= DIFFERENT => format!("局部不同，约占画面 {:.0}%", r.changed * 100.),
+                // Whole sentences, or a note and its suffix, so the page can translate them (i18n.js tb()).
+                "duplicate" if a.size != b.size => "同一张图（尺寸不同）".into(),
+                "duplicate" => "同一张图（重新压缩过）".into(),
+                "variant" if r.changed <= DIFFERENT => {
+                    format!("局部不同，约占画面 {percent}%", percent = format!("{:.0}", r.changed * 100.))
+                }
                 "variant" => "线稿相同，大面积重新上色或修改".into(),
                 "edit" => match r.how {
                     Some("tone") => "整体调色或亮度不同",
@@ -585,7 +589,11 @@ pub fn relate(a: &Loaded, b: &Loaded) -> Result<Value> {
             }
             if r.kind == "edit" {
                 if let Some(side) = r.edited {
-                    note += if side == "a" { "（改动在左图）" } else { "（改动在右图）" };
+                    note = if side == "a" {
+                        format!("{note}（改动在左图）")
+                    } else {
+                        format!("{note}（改动在右图）")
+                    };
                 }
             }
             return Ok(
@@ -614,14 +622,14 @@ pub fn relate(a: &Loaded, b: &Loaded) -> Result<Value> {
         for b in &r.boxes {
             boxes_big.push(json!({"x":x+b["x"].as_f64().expect("numeric box")*w,"y":y+b["y"].as_f64().expect("numeric box")*h,"w":b["w"].as_f64().expect("numeric box")*w,"h":b["h"].as_f64().expect("numeric box")*h}));
         }
-        let mut note = format!(
-            "{}是{}的一部分（约占 {:.0}%）",
-            if flip { "左图" } else { "右图" },
-            if flip { "右图" } else { "左图" },
-            w * h * 100.
-        );
+        let percent = format!("{:.0}", w * h * 100.);
+        let mut note = if flip {
+            format!("左图是右图的一部分（约占 {percent}%）")
+        } else {
+            format!("右图是左图的一部分（约占 {percent}%）")
+        };
         if ["variant", "edit"].contains(&r.kind) && r.changed >= 0.02 {
-            note += "，重叠处也有改动";
+            note = format!("{note}，重叠处也有改动");
         }
         let (ba, bb) = if flip { (r.boxes, boxes_big) } else { (boxes_big, r.boxes) };
         return Ok(

@@ -108,8 +108,8 @@ fn picker_result(output: std::process::Output, multiple: bool) -> Result<Choice>
             return Ok(Choice::Cancelled);
         }
         return Err(Error::Invalid(format!(
-            "无法打开选择窗口：{}",
-            stderr.chars().rev().take(120).collect::<String>().chars().rev().collect::<String>()
+            "无法打开选择窗口：{reason}",
+            reason = stderr.chars().rev().take(120).collect::<String>().chars().rev().collect::<String>()
         )));
     }
     let text = std::str::from_utf8(&output.stdout).map_err(|e| Error::Invalid(e.to_string()))?;

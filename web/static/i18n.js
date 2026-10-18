@@ -57,7 +57,8 @@ const backendPattern = (() => {
     if (!found) {
       const parts = template.split(/\{(\w+)\}/), literal = parts.filter((_, i) => i % 2 === 0);
       found = {template, names: parts.filter((_, i) => i % 2), literal, weight: literal.join('').length,
-        re: new RegExp('^' + literal.map(escape).join('([\\s\\S]*?)') + '$')};
+        // {n} is a count (plural forms pick by it); any other placeholder stands for any text.
+        re: new RegExp('^' + literal.map((text, i) => (i ? parts[2 * i - 1] === 'n' ? '(\\d[\\d,.]*)' : '([\\s\\S]*?)' : '') + escape(text)).join('') + '$')};
       patterns.set(template, found);
     }
     return found;

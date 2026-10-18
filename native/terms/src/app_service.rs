@@ -451,7 +451,7 @@ pub(crate) fn build_sources(
 /// 只打开已有的库：路径不存在时 SQLite 会新建空文件，先拒绝。
 pub(crate) fn existing(db: &Path) -> crate::Result<rusqlite::Connection> {
     if !db.is_file() {
-        return Err(Error::Invalid(format!("找不到数据库：{}", db.display())));
+        return Err(Error::Invalid(format!("找不到数据库：{path}", path = db.display())));
     }
     crate::open(db)
 }

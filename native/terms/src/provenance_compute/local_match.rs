@@ -183,7 +183,11 @@ pub(super) fn run(request: &Request, sequence: &mut u64) -> Result<Value> {
         return Ok(json!({"pictures":0,"matches":0,"stopped":""}));
     }
     let total: usize = c.query_row("SELECT count(*) FROM ref_sigs WHERE colour IS NOT NULL", [], |r| r.get(0))?;
-    progress(request, sequence, json!({"log":format!("本地重比新图：{} 张新图 × {total} 个已存签名",new.len())}))?;
+    progress(
+        request,
+        sequence,
+        json!({"log":format!("本地重比新图：{n} 张新图 × {total} 个已存签名", n = new.len())}),
+    )?;
     let x: Vec<_> = new.iter().flat_map(|&i| lib.x[i * GRID..(i + 1) * GRID].iter().copied()).collect();
     let (mut matches, mut done) = (0usize, 0usize);
     let mut statement =

@@ -88,9 +88,9 @@ pub(crate) fn names(c: &Connection, progress: bool) -> Result<Json> {
             let loaded = loaded_counts(c)?;
             if counts.dump() != loaded.dump() {
                 return Err(Error::Conflict(format!(
-                    "按投影统计的名字覆盖与整库载入不一致：{} ≠ {}",
-                    counts.dump(),
-                    loaded.dump()
+                    "按投影统计的名字覆盖与整库载入不一致：{projected} ≠ {loaded}",
+                    projected = counts.dump(),
+                    loaded = loaded.dump()
                 )));
             }
             crate::legacy_names::record_verified("names_counts")?;

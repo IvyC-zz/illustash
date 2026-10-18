@@ -506,15 +506,23 @@ fn answer(c: &Connection, args: &Value) -> Result<Value> {
         let mut shown = Shown::new();
         let label = if yes.is_empty() {
             match &other {
-                Some(o) => format!("已将 {} 张从 {} 换成 {}", no.len(), shown.name(c, &entity)?, shown.name(c, o)?),
-                None => format!("已将 {} 张移出 {}", no.len(), shown.name(c, &entity)?),
+                Some(o) => {
+                    format!(
+                        "已将 {n} 张从 {name} 换成 {other}",
+                        n = no.len(),
+                        name = shown.name(c, &entity)?,
+                        other = shown.name(c, o)?
+                    )
+                }
+                None => format!("已将 {n} 张移出 {name}", n = no.len(), name = shown.name(c, &entity)?),
             }
         } else {
-            let mut label = format!("已确认 {} 张是 {}", yes.len(), shown.name(c, &entity)?);
-            if !no.is_empty() {
-                label += &format!("，移出 {} 张", no.len());
+            // Whole sentences, so the page can translate each (web/static/i18n.js tb()).
+            let (n, name) = (yes.len(), shown.name(c, &entity)?);
+            match no.len() {
+                0 => format!("已确认 {n} 张是 {name}"),
+                removed => format!("已确认 {n} 张是 {name}，移出 {removed} 张"),
             }
-            label
         };
         let action = begin_action(c, &label)?;
         let mut touched: Vec<String> = Vec::new();
@@ -574,12 +582,13 @@ fn answer_audit(c: &Connection, args: &Value) -> Result<Value> {
         }
     }
     let before = writes.iter().map(|(i, e, _)| snapshot(c, i, Some(e))).collect::<Result<Vec<_>>>()?;
-    let parts: Vec<String> = [(yes.len(), "是"), (no.len(), "不是")]
-        .iter()
-        .filter(|(n, _)| *n > 0)
-        .map(|(n, word)| format!("{n} 张{word}"))
-        .collect();
-    let action = begin_action(c, &format!("随机抽查：{}", parts.join("，")))?;
+    let label = match (yes.len(), no.len()) {
+        (0, 0) => "随机抽查：".to_owned(),
+        (yes, 0) => format!("随机抽查：{yes} 张是"),
+        (0, no) => format!("随机抽查：{no} 张不是"),
+        (yes, no) => format!("随机抽查：{yes} 张是，{no} 张不是"),
+    };
+    let action = begin_action(c, &label)?;
     for (i, e, st) in &writes {
         put_assertion(c, At::Action(action), i, e, st, "review")?;
     }
@@ -634,7 +643,12 @@ fn reassign(c: &Connection, args: &Value) -> Result<Value> {
     for n in &new_ids {
         names.push(shown.name(c, n)?);
     }
-    let label = format!("已将 {} 张从 {} 换成 {}", works(c, &ids)?, names[0], names[1..].join("、"));
+    let label = format!(
+        "已将 {n} 张从 {name} 换成 {other}",
+        n = works(c, &ids)?,
+        name = names[0],
+        other = names[1..].join("、")
+    );
     let action = begin_action(c, &label)?;
     let mut before = Vec::new();
     for ident in &ids {
@@ -664,7 +678,7 @@ fn sweep(c: &Connection, args: &Value) -> Result<Value> {
         .query_map([&entity], |r| r.get(0))?
         .collect::<rusqlite::Result<_>>()?;
     let before = ids.iter().map(|i| snapshot(c, i, Some(&entity))).collect::<Result<Vec<_>>>()?;
-    let label = format!("已将 {} 标为已检查（{} 张）", Shown::new().name(c, &entity)?, works(c, &ids)?);
+    let label = format!("已将 {name} 标为已检查（{n} 张）", name = Shown::new().name(c, &entity)?, n = works(c, &ids)?);
     let action = begin_action(c, &label)?;
     for i in &ids {
         put_assertion(c, At::Action(action), i, &entity, "confirmed", "sweep")?;
@@ -863,8 +877,7 @@ fn undo_anchor(c: &Connection, anchor: &Value) -> Result<()> {
         c.prepare_cached("INSERT INTO identity_anchor_decisions VALUES (?,?,?,?,?)")?
             .execute(rusqlite::params_from_iter(values))?;
     }
-    c.prepare_cached("INSERT INTO identity_anchor_history(entity,reference,decision,reason) VALUES (?,?,'undo','撤销锚点修正；需要重建和校准')")?.execute(
-        [entity, reference],
-    )?;
+    c.prepare_cached("INSERT INTO identity_anchor_history(entity,reference,decision,reason) VALUES (?,?,'undo',?)")?
+        .execute([entity, reference, "撤销锚点修正；需要重建和校准"])?;
     character_projection::memberships(c, None)
 }

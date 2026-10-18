@@ -375,9 +375,9 @@ pub(crate) fn import(
             .map_err(invalid)?;
     if needed > available {
         return Err(invalid(format!(
-            "磁盘空间不足：导入需要约 {} MiB，可用 {} MiB",
-            needed.div_ceil(1 << 20),
-            available >> 20
+            "磁盘空间不足：导入需要约 {needed} MiB，可用 {available} MiB",
+            needed = needed.div_ceil(1 << 20),
+            available = available >> 20
         )));
     }
     import_cancelled(cancel)?;

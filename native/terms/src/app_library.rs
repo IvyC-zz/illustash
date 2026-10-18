@@ -202,7 +202,7 @@ fn truthy(value: &Value) -> bool {
 }
 pub(crate) fn read_connection(path: &Path) -> Result<Connection> {
     if !path.is_file() {
-        return Err(Error::Invalid(format!("图库缺少已有数据库：{}", path.display())));
+        return Err(Error::Invalid(format!("图库缺少已有数据库：{path}", path = path.display())));
     }
     // No CREATE flag, no migrations or journal mode changes. URI interpretation is deliberately disabled
     // for package paths, so names containing '?' or '#' cannot silently refer to a different file.

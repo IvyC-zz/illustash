@@ -102,8 +102,10 @@ const backendKeys = new Set(rust.map(([, , text]) => text));
 // Backend text that never reaches the page: the command line, test harnesses, logs and panics. Only the coverage
 // report leaves it out; a table may still translate it.
 const NOT_SHOWN = /^(?:native\/terms\/src\/(?:cli|read_harness)\.rs|native\/terms\/src\/bin\/|crates\/iqdb\/)/;
-const shownBackend = () => new Set(rust.filter(([file, , , before]) => !NOT_SHOWN.test(path.relative(ROOT, file).split(path.sep).join('/'))
-  && !/(?:e?print(?:ln)?!|panic!|unreachable!|expect|assert\w*!)\(\s*$/.test(before)).map(([, , text]) => text));
+// SQL is left out too, and the pieces http_app.rs parses old undo labels with (" 张移出 ").
+const shownBackend = () => new Set(rust.filter(([file, , text, before]) => !NOT_SHOWN.test(path.relative(ROOT, file).split(path.sep).join('/'))
+  && !/(?:e?print(?:ln)?!|panic!|unreachable!|expect|assert\w*!)\(\s*$/.test(before)
+  && !/\b(?:CREATE|SELECT|INSERT|UPDATE|DELETE)\b/.test(text) && text.trim() === text).map(([, , text]) => text));
 
 function usedKeys() {
   const used = new Set(), dynamic = [];
@@ -297,6 +299,8 @@ test('backend text: an exact entry, else the most specific template; what placeh
   assert.equal(tb('已将 3 张移出 雪（跳过 1 张）'), 'Removed 3 from 雪 (skipped 1)'.replace('skipped 1', '1 skipped'));
   // A template with no Chinese wording of its own never matches; text no template fits stays as sent.
   assert.equal(tb('甲：乙'), '甲：乙');
+  // {n} only stands for a number.
+  assert.equal(tb('已将 几 张移出 雪'), '已将 几 张移出 雪');
   assert.equal(tb('没有模板的话'), '没有模板的话');
   assert.equal(tb('Plain English'), 'Plain English');
   assert.equal(tb(null), null);

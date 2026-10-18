@@ -117,13 +117,13 @@ impl Clock {
 fn human(d: Duration) -> String {
     let ms = d.as_millis();
     if ms < 1000 {
-        format!("{ms} 毫秒")
+        format!("{n} 毫秒", n = ms)
     } else if ms < 120_000 {
-        format!("{} 秒", ms / 1000)
+        format!("{n} 秒", n = ms / 1000)
     } else if ms < 7_200_000 {
-        format!("{} 分钟", ms / 60_000)
+        format!("{n} 分钟", n = ms / 60_000)
     } else {
-        format!("{} 小时", ms / 3_600_000)
+        format!("{n} 小时", n = ms / 3_600_000)
     }
 }
 #[derive(Clone)]
@@ -168,8 +168,8 @@ impl TaskContext {
         }
         let deadline = self.clock.deadline;
         Some(match (reason, deadline.idle, deadline.limit) {
-            (IDLE, Some(idle), _) => format!("任务超时：{}没有进展", human(idle)),
-            (LIMIT, _, Some(limit)) => format!("任务超时：超过 {}上限", human(limit)),
+            (IDLE, Some(idle), _) => format!("任务超时：{duration}没有进展", duration = human(idle)),
+            (LIMIT, _, Some(limit)) => format!("任务超时：超过 {duration}上限", duration = human(limit)),
             _ => "任务已取消".into(),
         })
     }

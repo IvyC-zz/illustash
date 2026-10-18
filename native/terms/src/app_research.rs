@@ -848,10 +848,9 @@ fn run(
                         }
                     }
                 }
-                let caches = response
-                    .tables
-                    .as_ref()
-                    .ok_or_else(|| Error::Invalid(format!("{}: 字段 tables: 缺少结果表", output.display())))?;
+                let caches = response.tables.as_ref().ok_or_else(|| {
+                    Error::Invalid(format!("{file}: 字段 tables: 缺少结果表", file = output.display()))
+                })?;
                 let expected: Vec<&str> = if kind == "similar" {
                     vec!["image_sigs", "relations", "similar_paired", "similar_retry"]
                 } else if regroup {

@@ -78,7 +78,7 @@ fn failure(error: ureq::Error, timeout: u64) -> String {
             } else if transport.kind() == ureq::ErrorKind::ConnectionFailed {
                 "连不上桌面 app 的本机通道".into()
             } else {
-                format!("本机通道连接中断（{}）", transport.kind())
+                format!("本机通道连接中断（{kind}）", kind = transport.kind())
             }
         }
     }
