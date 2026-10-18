@@ -39,6 +39,14 @@ const CONFLICT_RETRIES: u32 = 5;
 fn input_changed(e: &Error) -> bool {
     matches!(e, Error::Conflict(m) if m == INPUT_CHANGED || m == LEARNING_CHANGED)
 }
+/// A run that stepped aside for a source writer (`Writers`). Learning and similar runs end and recovery starts them
+/// again once no sync runs; a query waits for the writer to finish and asks again, up to `CONFLICT_RETRIES` times.
+const YIELDED: &str = "图库正在写入，研究稍后继续";
+fn yielded(e: &Error) -> bool {
+    matches!(e, Error::Conflict(m) if m == YIELDED)
+}
+/// How long the writer must have been gone before a run that stepped aside starts again.
+const STEP_ASIDE: Duration = Duration::from_secs(2);
 fn retry_base() -> Duration {
     Duration::from_millis(
         std::env::var("ILLUSTASH_RESEARCH_RETRY_MS").ok().and_then(|s| s.parse().ok()).unwrap_or(2000),
@@ -232,6 +240,8 @@ fn hash_table(c: &Connection, h: &mut Sha256, table: &str, ctx: &TaskContext) ->
     let mut rows = q.query([])?;
     while let Some(r) = rows.next()? {
         ctx.check()?;
+        #[cfg(test)]
+        tests::pause_row();
         feed(h, b"row");
         for i in 0..n {
             match r.get_ref(i)? {
@@ -353,6 +363,70 @@ fn read_snapshot<T>(dbs: &[&Connection], read: impl FnOnce() -> Result<T>) -> Re
     }
     value
 }
+/// source.sqlite keeps a rollback journal, so a read transaction on it holds a lock that makes its writers (sync,
+/// recognition imports) give up after their 250 ms busy timeout (#226). Research reads source for as long as hashing
+/// and copying the whole file takes, which on a large library is far longer. Its source reads watch for the journal a
+/// writer creates before it commits and step aside at once, like the background integrity check (#212).
+struct Writers {
+    journal: PathBuf,
+    seen: Arc<AtomicBool>,
+}
+impl Writers {
+    /// How often a read looks for the journal: well within the writers' busy timeout.
+    const POLL: Duration = Duration::from_millis(20);
+    fn of(source: &Path) -> Self {
+        let mut journal = source.as_os_str().to_owned();
+        journal.push("-journal");
+        Self { journal: journal.into(), seen: Arc::default() }
+    }
+    fn writing(&self) -> bool {
+        self.journal.exists()
+    }
+    /// Between steps that are not SQL statements (backup steps).
+    fn check(&self) -> Result<()> {
+        if self.seen.load(Ordering::SeqCst) || self.writing() {
+            self.seen.store(true, Ordering::SeqCst);
+            return Err(Error::Conflict(YIELDED.into()));
+        }
+        Ok(())
+    }
+    /// Runs `read` with `src` interrupted once a writer's journal appears; any error then is the yield.
+    fn read<T>(&self, src: &Connection, read: impl FnOnce() -> Result<T>) -> Result<T> {
+        self.check()?;
+        let (journal, seen) = (self.journal.clone(), self.seen.clone());
+        let mut polled = std::time::Instant::now();
+        src.progress_handler(
+            100,
+            Some(move || {
+                if polled.elapsed() >= Self::POLL {
+                    polled = std::time::Instant::now();
+                    if journal.exists() {
+                        seen.store(true, Ordering::SeqCst);
+                    }
+                }
+                seen.load(Ordering::SeqCst)
+            }),
+        );
+        let result = read();
+        src.progress_handler(0, None::<fn() -> bool>);
+        match result {
+            Err(_) if self.seen.load(Ordering::SeqCst) => Err(Error::Conflict(YIELDED.into())),
+            result => result,
+        }
+    }
+    /// Until no writer's journal has been seen for a moment; an error when the task stops meanwhile.
+    fn wait(&self, ctx: &TaskContext) -> Result<()> {
+        let mut quiet = std::time::Instant::now();
+        while quiet.elapsed() < STEP_ASIDE {
+            ctx.check()?;
+            if self.writing() {
+                quiet = std::time::Instant::now();
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        Ok(())
+    }
+}
 fn data_version(c: &Connection) -> Result<i64> {
     Ok(c.query_row("PRAGMA data_version", [], |r| r.get(0))?)
 }
@@ -426,11 +500,14 @@ impl Drop for Scratch {
         let _ = fs::remove_dir_all(&self.0);
     }
 }
-fn backup(c: &Connection, path: &Path, ctx: &TaskContext) -> Result<()> {
+fn backup(c: &Connection, path: &Path, ctx: &TaskContext, writers: Option<&Writers>) -> Result<()> {
     let mut out = crate::sqlite::open(path)?;
     let copy = rusqlite::backup::Backup::new(c, &mut out)?;
     loop {
         ctx.check()?;
+        if let Some(writers) = writers {
+            writers.check()?;
+        }
         match copy.step(256)? {
             rusqlite::backup::StepResult::Done => break,
             rusqlite::backup::StepResult::More => {}
@@ -478,6 +555,8 @@ pub struct Research {
     retry_at: Option<std::time::Instant>,
     /// Set when automatic conflict retries ran out; recovery then waits for an explicit start.
     exhausted: Arc<AtomicBool>,
+    /// Set when the last run stepped aside for a source writer (`YIELDED`); recovery starts it again soon.
+    stepped_aside: Arc<AtomicBool>,
 }
 impl Research {
     pub fn new(generation: u64, session: &str, similar_enabled: bool) -> Self {
@@ -491,6 +570,7 @@ impl Research {
             paused: false,
             retry_at: None,
             exhausted: Arc::new(AtomicBool::new(false)),
+            stepped_aside: Arc::new(AtomicBool::new(false)),
         }
     }
     pub fn state(&self) -> Json {
@@ -559,6 +639,7 @@ impl Research {
         self.paused = false;
         self.retry_at = None;
         self.exhausted.store(false, Ordering::SeqCst);
+        self.stepped_aside.store(false, Ordering::SeqCst);
         if ["similar", "regroup"].contains(&kind) {
             let c = crate::sqlite::open(library.db())?;
             crate::configure(&c)?;
@@ -574,16 +655,26 @@ impl Research {
         let state = self.state.clone();
         let anchors = self.anchors.clone();
         let exhausted = self.exhausted.clone();
+        let stepped_aside = self.stepped_aside.clone();
         let timeout: u64 =
             std::env::var("ILLUSTASH_RESEARCH_TIMEOUT_MS").ok().and_then(|s| s.parse().ok()).unwrap_or(1800000);
         sweep_scratch(&std::env::temp_dir(), Duration::from_millis(timeout.saturating_mul(2)).max(SCRATCH_AGE));
         let running = json!({"status": match kind.as_str(){"similar"=>"pairing","relate"=>"comparing","oc"=>"grouping",_=>"learning"}});
         *state.lock().expect("research state mutex poisoned") = running.clone().into();
         self.task = Some(Task::start(identity, Some(Duration::from_millis(timeout)), move |ctx| {
-            let mut attempt = 0;
+            let (mut attempt, mut stepped) = (0, 0);
             let result = loop {
                 // Each attempt takes a fresh snapshot; a stale result was rejected and never published.
                 match run(&library, &ctx, &worker, &kind, args.clone(), &state, &anchors) {
+                    Err(e) if yielded(&e) && ["oc", "relate"].contains(&kind.as_str()) => {
+                        if stepped == CONFLICT_RETRIES {
+                            break Err(Error::Conflict("图库一直在写入，查询未完成，请稍后重试".into()));
+                        }
+                        stepped += 1;
+                        if let Err(e) = Writers::of(&library.source()).wait(&ctx) {
+                            break Err(e);
+                        }
+                    }
                     Err(e) if input_changed(&e) && !["oc", "relate"].contains(&kind.as_str()) => {
                         if attempt == CONFLICT_RETRIES {
                             exhausted.store(true, Ordering::SeqCst);
@@ -630,6 +721,16 @@ impl Research {
                     }
                     Ok(())
                 }
+                Err(e) if yielded(&e) => {
+                    // Not a failure: the pending work stays as it is, without an error, for recovery to start again.
+                    stepped_aside.store(true, Ordering::SeqCst);
+                    *state.lock().expect("research state mutex poisoned") =
+                        Json::object([("status", "waiting".into()), ("message", YIELDED.into())]).into();
+                    if let Some(tx) = reply {
+                        let _ = tx.send(Err(Error::Invalid(e.to_string())));
+                    }
+                    Err(e)
+                }
                 Err(e) => {
                     if !["oc", "relate"].contains(&kind.as_str()) {
                         if let Ok(c) = crate::sqlite::open(library.db()) {
@@ -659,7 +760,8 @@ impl Research {
     }
     /// Start pending learning/similarity work. Not while a sync runs: its batch imports leave
     /// `imported` events that one run after the sync coalesces, instead of learning competing
-    /// with recognition for the CPU between batches.
+    /// with recognition for the CPU between batches. A run that stepped aside for a source writer
+    /// (#226) starts again shortly after, on the same terms.
     pub fn recover(&mut self, library: &Library, sync_busy: bool) -> Result<()> {
         if !configured()
             || library.frozen()
@@ -679,7 +781,9 @@ impl Research {
                 self.paused = true;
                 return Ok(());
             }
-            self.retry_at = Some(std::time::Instant::now() + Duration::from_secs(60));
+            let wait =
+                if self.stepped_aside.swap(false, Ordering::SeqCst) { STEP_ASIDE } else { Duration::from_secs(60) };
+            self.retry_at = Some(std::time::Instant::now() + wait);
             return Ok(());
         }
         let c = crate::sqlite::open(library.db())?;
@@ -708,11 +812,12 @@ fn run(
     let c = crate::app_library::read_connection(&library.db())?;
     let src = crate::app_library::read_connection(&library.source())?;
     let inputs = Inputs::new(library, anchors, kind, &args);
+    let writers = Writers::of(&library.source());
     // Snapshot/version from the same read transactions.
-    let (version, events, intents, regroup, learning) = read_snapshot(&[&c, &src], || {
+    let (version, events, intents, regroup, learning) = writers.read(&src, || read_snapshot(&[&c, &src], || {
         let version = fingerprint(&c, &src, &inputs, ctx)?;
-        backup(&c, &scratch.0.join("library.sqlite"), ctx)?;
-        backup(&src, &scratch.0.join("source.sqlite"), ctx)?;
+        backup(&c, &scratch.0.join("library.sqlite"), ctx, None)?;
+        backup(&src, &scratch.0.join("source.sqlite"), ctx, Some(&writers))?;
         let events: Vec<i64> = c
             .prepare(
                 "SELECT id FROM backend_effects WHERE status='pending' AND kind IN ('verdict','imported','index_changed') ORDER BY id",
@@ -746,7 +851,7 @@ fn run(
             Value::Null
         };
         Ok((version, events, intents, regroup, learning))
-    })?;
+    }))?;
     let request = protocol::value(&protocol::ResearchRequest {
         format: protocol::Format::Research,
         identity: ctx.identity(),
@@ -816,79 +921,81 @@ fn run(
     ctx.receive(&response.identity, || {
         let mut src = crate::app_library::read_connection(&library.source())?;
         let src = src.transaction()?;
-        if !inputs.scope.publishes() {
-            // A query publishes nothing: one read transaction checks its inputs and its answer.
-            let c = crate::app_library::read_connection(&library.db())?;
-            return read_snapshot(&[&c], || {
-                if fingerprint(&c, &src, &inputs, ctx)? != version {
-                    return Err(Error::Conflict(INPUT_CHANGED.into()));
-                }
-                validate_query(&c, kind, &Value::Object(response.result.clone()), &args)?;
-                ordered.get("result").cloned().ok_or_else(bad)
-            });
-        }
-        let mut c = crate::sqlite::open(library.db())?;
-        crate::configure(&c)?;
-        confirm(
-            &mut c,
-            &src,
-            &inputs,
-            &version,
-            ctx,
-            || {},
-            |tx| {
-                crate::schema::begin_writing(&tx)?;
-                if kind != "similar" {
-                    if let Some(batch) = response.learning.as_ref().filter(|v| !v.is_null()) {
-                        if batch["token"] != learning {
-                            return Err(bad());
+        writers.read(&src, || {
+            if !inputs.scope.publishes() {
+                // A query publishes nothing: one read transaction checks its inputs and its answer.
+                let c = crate::app_library::read_connection(&library.db())?;
+                return read_snapshot(&[&c], || {
+                    if fingerprint(&c, &src, &inputs, ctx)? != version {
+                        return Err(Error::Conflict(INPUT_CHANGED.into()));
+                    }
+                    validate_query(&c, kind, &Value::Object(response.result.clone()), &args)?;
+                    ordered.get("result").cloned().ok_or_else(bad)
+                });
+            }
+            let mut c = crate::sqlite::open(library.db())?;
+            crate::configure(&c)?;
+            confirm(
+                &mut c,
+                &src,
+                &inputs,
+                &version,
+                ctx,
+                || {},
+                |tx| {
+                    crate::schema::begin_writing(&tx)?;
+                    if kind != "similar" {
+                        if let Some(batch) = response.learning.as_ref().filter(|v| !v.is_null()) {
+                            if batch["token"] != learning {
+                                return Err(bad());
+                            }
+                            if crate::character_learning::publish_tx(&tx, batch)?["status"] == "stale" {
+                                return Err(Error::Conflict(LEARNING_CHANGED.into()));
+                            }
                         }
-                        if crate::character_learning::publish_tx(&tx, batch)?["status"] == "stale" {
-                            return Err(Error::Conflict(LEARNING_CHANGED.into()));
+                    }
+                    let caches = response.tables.as_ref().ok_or_else(|| {
+                        Error::Invalid(format!("{file}: 字段 tables: 缺少结果表", file = output.display()))
+                    })?;
+                    let expected: Vec<&str> = if kind == "similar" {
+                        vec!["image_sigs", "relations", "similar_paired", "similar_retry"]
+                    } else if regroup {
+                        let mut v = vec!["clusters", "cluster_info"];
+                        if kind == "events" && args["similar"] == true {
+                            v.extend(["image_sigs", "relations", "similar_paired", "similar_retry"]);
+                        }
+                        v
+                    } else {
+                        vec![]
+                    };
+                    if caches.keys().map(String::as_str).collect::<std::collections::BTreeSet<_>>()
+                        != expected.iter().copied().collect()
+                    {
+                        return Err(bad());
+                    }
+                    let mut published = Published::default();
+                    for table in expected.iter() {
+                        publish_table(&tx, table, &caches[*table], ctx, &mut published)?;
+                    }
+                    if expected.contains(&"relations") {
+                        crate::app_migrate_data::early_groups(&tx, &src)?;
+                        crate::character_projection::fold(&tx)?;
+                    }
+                    validate_references(&tx, &expected, &published)?;
+                    if kind == "events" {
+                        for id in events {
+                            tx.execute("UPDATE backend_effects SET status='done',error='' WHERE id=?", [id])?;
                         }
                     }
-                }
-                let caches = response.tables.as_ref().ok_or_else(|| {
-                    Error::Invalid(format!("{file}: 字段 tables: 缺少结果表", file = output.display()))
-                })?;
-                let expected: Vec<&str> = if kind == "similar" {
-                    vec!["image_sigs", "relations", "similar_paired", "similar_retry"]
-                } else if regroup {
-                    let mut v = vec!["clusters", "cluster_info"];
-                    if kind == "events" && args["similar"] == true {
-                        v.extend(["image_sigs", "relations", "similar_paired", "similar_retry"]);
+                    for id in intents {
+                        tx.execute("UPDATE research_runs SET status='done',error='' WHERE id=?", [id])?;
                     }
-                    v
-                } else {
-                    vec![]
-                };
-                if caches.keys().map(String::as_str).collect::<std::collections::BTreeSet<_>>()
-                    != expected.iter().copied().collect()
-                {
-                    return Err(bad());
-                }
-                let mut published = Published::default();
-                for table in expected.iter() {
-                    publish_table(&tx, table, &caches[*table], ctx, &mut published)?;
-                }
-                if expected.contains(&"relations") {
-                    crate::app_migrate_data::early_groups(&tx, &src)?;
-                    crate::character_projection::fold(&tx)?;
-                }
-                validate_references(&tx, &expected, &published)?;
-                if kind == "events" {
-                    for id in events {
-                        tx.execute("UPDATE backend_effects SET status='done',error='' WHERE id=?", [id])?;
-                    }
-                }
-                for id in intents {
-                    tx.execute("UPDATE research_runs SET status='done',error='' WHERE id=?", [id])?;
-                }
-                ctx.check()?;
-                crate::schema::commit_writing(tx)?;
-                ordered.get("result").cloned().ok_or_else(bad)
-            },
-        )
+                    ctx.check()?;
+                    crate::schema::commit_writing(tx)?;
+                    ordered.get("result").cloned().ok_or_else(bad)
+                },
+            )
+        })
     })
 }
 /// What a publication wrote to relations and signatures (#31): rowids of the rows inserted or rewritten, and
@@ -1607,6 +1714,86 @@ mod tests {
             let tables = serde_json::Map::from_iter([("relations".to_string(), bad.clone())]);
             assert!(publish(&tx, &tables, &f.ctx).is_err(), "{bad}");
         }
+    }
+
+    thread_local! {
+        /// A slow disk for this thread's fingerprints: the pause after each row read.
+        static ROW_PAUSE: std::cell::Cell<Duration> = const { std::cell::Cell::new(Duration::ZERO) };
+    }
+    pub(super) fn pause_row() {
+        let pause = ROW_PAUSE.with(std::cell::Cell::get);
+        if !pause.is_zero() {
+            std::thread::sleep(pause);
+        }
+    }
+
+    /// #226: a source writer with the sync's 250 ms busy timeout commits while research reads source, both while a
+    /// run takes its snapshot and while its result is checked before publication. Without stepping aside the reader
+    /// holds its lock for the whole read (about two seconds here) and the commit fails with "database is locked".
+    #[test]
+    fn source_reads_step_aside_for_a_writer() {
+        let f = Fixture::new();
+        f.source()
+            .execute_batch(
+                "CREATE TABLE synthetic_bulk(id INTEGER PRIMARY KEY,value BLOB);
+                 WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<2000)
+                 INSERT INTO synthetic_bulk SELECT i,randomblob(64) FROM n;",
+            )
+            .unwrap();
+        let path = f.root.join("source.sqlite");
+        // Commits once the read below is well under way; returns how the commit went.
+        let writer = |key: &'static str| {
+            let (started, wait) = mpsc::channel::<()>();
+            let path = path.clone();
+            let handle = std::thread::spawn(move || {
+                wait.recv().unwrap();
+                std::thread::sleep(Duration::from_millis(200));
+                let c = crate::sqlite::open(&path).unwrap();
+                c.busy_timeout(Duration::from_millis(250)).unwrap();
+                c.execute_batch(&format!("BEGIN IMMEDIATE; INSERT INTO characters VALUES ('{key}',1); COMMIT;"))
+            });
+            (started, handle)
+        };
+        ROW_PAUSE.with(|p| p.set(Duration::from_millis(1)));
+
+        let (started, handle) = writer("synthetic-a");
+        let (app, src) = (f.app(), f.source());
+        let writers = Writers::of(&path);
+        started.send(()).unwrap();
+        let read = writers.read(&src, || {
+            read_snapshot(&[&app, &src], || {
+                fingerprint(&app, &src, &f.inputs(Scope::Learning), &f.ctx)?;
+                backup(&src, &f.root.join("snapshot.sqlite"), &f.ctx, Some(&writers))
+            })
+        });
+        assert_eq!(handle.join().unwrap().map_err(|e| e.to_string()), Ok(()));
+        assert!(matches!(&read, Err(e) if yielded(e)), "{read:?}");
+
+        ROW_PAUSE.with(|p| p.set(Duration::ZERO));
+        let version = f.version(Scope::Learning);
+        ROW_PAUSE.with(|p| p.set(Duration::from_millis(1)));
+        let (started, handle) = writer("synthetic-b");
+        let (mut app, mut src) = (f.app(), f.source());
+        let writers = Writers::of(&path);
+        started.send(()).unwrap();
+        // As in `run`, the source transaction ends with the publication step that read it.
+        let checked = (|| {
+            let src = src.transaction()?;
+            writers.read(&src, || {
+                confirm(&mut app, &src, &f.inputs(Scope::Learning), &version, &f.ctx, || {}, |tx| Ok(tx.commit()?))
+            })
+        })();
+        assert_eq!(handle.join().unwrap().map_err(|e| e.to_string()), Ok(()));
+        assert!(matches!(&checked, Err(e) if yielded(e)), "{checked:?}");
+
+        // A writer already at work: the read does not start.
+        ROW_PAUSE.with(|p| p.set(Duration::ZERO));
+        let c = crate::sqlite::open(&path).unwrap();
+        c.execute_batch("BEGIN IMMEDIATE; INSERT INTO characters VALUES ('synthetic-c',1);").unwrap();
+        let src = f.source();
+        assert!(matches!(Writers::of(&path).read(&src, || Ok(())), Err(e) if yielded(&e)));
+        c.execute_batch("COMMIT").unwrap();
+        assert!(Writers::of(&path).read(&src, || Ok(())).is_ok());
     }
 
     #[test]
