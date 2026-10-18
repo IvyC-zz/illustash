@@ -1,7 +1,7 @@
 // What the backend decides must not hang on the words it shows (#204), the Rust counterpart of the page's rule in
 // tests/i18n.test.cjs: rewording or translating a message must not change what the program does. Outside test
 // modules, no Chinese string literal is compared (==, !=, a match pattern) or searched for (contains, starts_with, …);
-// branch on an error's kind (crates/core/src/error.rs Kind) or a stored field instead.
+// give the failure a kind to branch on, or read a stored field (docs/WEB_V2.md).
 const {test} = require('node:test');
 const assert = require('node:assert/strict');
 const {readFileSync, readdirSync} = require('node:fs');
