@@ -67,7 +67,7 @@ cargo build --release --manifest-path native/terms/Cargo.toml
 2. **发布提交**：就是合入版本号的那个 main 提交。先做完 Windows 构建与验收，再在这个提交上跑本机全量（`tools/check_all.sh`），都通过才往下走。
 3. **打包**：两个平台各自打安装包（做法见 [安装与平台](BACKEND_TASKS.md#独立安装与可选计算包)），在 macOS 虚拟机和 Windows 干净环境里装一遍、打开合成图库。首个内测版起每个平台只发不含模型的小安装包，模型首次使用时下载（#168）。每个安装包算 SHA-256（`shasum -a 256 FILE`，Windows 用 `certutil -hashfile FILE SHA256`），写进 `SHA256SUMS.txt`。
 4. **tag**：`git tag -a vX.Y.Z -m "Illustash X.Y.Z" <发布提交>`，再 `git push origin vX.Y.Z`。
-5. **GitHub Release**：`gh release create vX.Y.Z <安装包…> SHA256SUMS.txt --title "Illustash X.Y.Z" --notes-file NOTES.md`；预发布版加 `--prerelease`。仓库里不放 CHANGELOG.md，更新说明只写在 Release 正文：从上一个 tag 以来合入 main 的 PR 标题整理（`gh pr list --state merged --base main --search "merged:>YYYY-MM-DD"`），按用户看得到的变化写；会升级图库格式的版本单独标明，并写清回退办法：装回旧版，再用升级前的自动备份恢复（见上文「启动参数」末尾）。
+5. **GitHub Release**：`gh release create vX.Y.Z <安装包…> SHA256SUMS.txt --title "Illustash X.Y.Z" --notes-file NOTES.md`；预发布版加 `--prerelease`。仓库里不放 CHANGELOG.md，更新说明只写在 Release 正文：从上一个 tag 以来合入 main 的 PR 标题整理（`gh pr list --state merged --base main --search "merged:>YYYY-MM-DD"`），按用户看得到的变化写；会升级图库格式的版本单独标明，并写清回退办法：装回旧版，再用升级前的自动备份恢复（见上文「启动参数」末尾）。每个 Release 的说明都要写上 macOS 用户更新后的两步（2026-10-18 用户定，#192）：第一次打开新版本时，要在「系统设置 › 隐私与安全性」里重新放行一次；用 iCloud 照片作来源的，第一次同步时要重新允许访问照片。原因是安装包用临时签名，每个版本的签名不同。写法链接 [装不上、打不开怎么办](INSTALL.md#更新到新版本之后)。
 6. **检查更新能看到它**（#191）：应用读的是本库 GitHub Releases 的版本列表，只认 `vX.Y.Z` 形式的 tag，跳过草稿；正式版用户不会收到预发布版（标了 prerelease 或 tag 带后缀的），预发布版用户会收到更新的预发布版和正式版。发布后用上一个版本在「设置 › 关于」点「检查更新」，确认能看到新版本，「打开下载页」打开的是这个 Release。
 
 ## 图库包
