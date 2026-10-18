@@ -314,7 +314,7 @@ test('the backend messages the page tests are templates of the backend', () => {
   assert.ok(count > 0);
 });
 
-test('backend text: an exact entry, else the most specific template; what placeholders held is translated too', () => {
+test('backend text: an exact entry, else the most specific template; a nested message it holds is translated too', () => {
   const table = {'同步失败：{reason}': 'Sync failed: {reason}', '文件夹不存在或无法访问：{path}': 'Folder missing or unreadable: {path}',
     '已将 {n} 张移出 {name}': {one: 'Removed {n} picture from {name}', other: 'Removed {n} pictures from {name}'},
     '已将 {n} 张移出 {name}（跳过 {skipped} 张）': 'Removed {n} from {name} ({skipped} skipped)', '{a}：{b}': '{a}: {b}',
@@ -347,6 +347,54 @@ test('backend text: an exact entry, else the most specific template; what placeh
   const semi = page('en', [], {en: {...table, '甲；乙 {n} 张': 'A; B {n}', '丙 {n} 处': 'C {n}'}}).context;
   assert.equal(vm.runInContext('tb', semi)('丙 2 处；甲；乙 3 张'), 'C 2; A; B 3');
   assert.ok(!said(undefined, '其他'));
+});
+
+// #198: the backend's text holds the user's data too. Only a placeholder that holds a nested message of the backend's
+// own is translated again; every placeholder of the backend's templates says which it is.
+test('each placeholder of the backend templates is either a nested message or data', () => {
+  const {context} = page('en');
+  const nested = vm.runInContext('BACKEND_NESTED', context), data = vm.runInContext('BACKEND_DATA', context);
+  for (const name of nested) assert.ok(!data.has(name), `${name} is in both lists`);
+  const templates = new Set(shownBackend());
+  for (const table of Object.values(locales)) for (const key of Object.keys(table)) if (backendKeys.has(key)) templates.add(key);
+  const seen = new Set();
+  for (const template of templates) {
+    // The same templates tb() matches: ones with Chinese wording of their own.
+    if (!/\p{Script=Han}/u.test(template.replace(/\{\w+\}/g, ''))) continue;
+    for (const name of placeholders(template)) {
+      seen.add(name);
+      assert.ok(nested.has(name) || data.has(name), `{${name}} of "${template}": add it to BACKEND_NESTED or BACKEND_DATA in i18n.js`);
+    }
+  }
+  for (const name of [...nested, ...data]) assert.ok(seen.has(name), `no backend template has {${name}} any more: drop it from i18n.js`);
+});
+
+test("the user's names in a backend message stay as they are", () => {
+  const en = page('en', [], {en: english}), zh = page('zh-CN', [], {en: english});
+  const tb = text => vm.runInContext('tb', en.context)(text), said = (...a) => vm.runInContext('said', en.context)(...a);
+  // A tag named like a table key.
+  assert.equal(english['未识别'], 'Unidentified');
+  assert.equal(tb('已给 3 张加上标签 未识别'), 'Added tag 未识别 to 3 pictures');
+  assert.equal(tb('已从 1 张去掉标签 未识别'), english['已从 {n} 张去掉标签 {name}'].one.replace('{n}', '1').replace('{name}', '未识别'));
+  // A character whose name reads like a template, or holds its wording.
+  assert.equal(tb('已将 2 张移出 已将 3 张移出 雪'), 'Removed 2 pictures from 已将 3 张移出 雪');
+  assert.equal(tb('已将 2 张设为 已将张'), english['已将 {n} 张设为 {name}'].other.replace('{n}', '2').replace('{name}', '已将张'));
+  assert.equal(tb('已将 1 张移出 未识别'), 'Removed 1 picture from 未识别');
+  // A nested message is still translated, and data inside it stays as it is.
+  assert.equal(tb('任务超时：10 分钟没有进展'), english['任务超时：{duration}没有进展'].replace('{duration}', english['{n} 分钟'].other.replace('{n}', '10')));
+  assert.equal(tb('冲突：文件夹不存在或无法访问：/合成/未识别'),
+    english['冲突：{m}'].replace('{m}', english['文件夹不存在或无法访问：{path}'].replace('{path}', '/合成/未识别')));
+  // said() reads a backend prefix, never a ： inside data.
+  assert.ok(said('冲突：会话已过期，请刷新页面', '会话已过期，请刷新页面'));
+  assert.ok(said('同步失败：不合法：文件夹不存在或无法访问：/合成/甲', '文件夹不存在或无法访问：{path}'));
+  assert.ok(!said('已给 1 张加上 甲：会话已过期，请刷新页面', '会话已过期，请刷新页面'));
+  assert.ok(!said('已将 1 张移出 甲：文件夹不存在或无法访问：乙', '文件夹不存在或无法访问：{path}'));
+  assert.ok(!said('没有标签「未识别：文件夹不存在或无法访问：乙」', '文件夹不存在或无法访问：{path}'));
+  // A Chinese page shows the backend's text as sent, and said() reads it the same.
+  const zhTb = vm.runInContext('tb', zh.context), zhSaid = vm.runInContext('said', zh.context);
+  for (const text of ['已给 3 张加上标签 未识别', '已将 2 张移出 已将 3 张移出 雪', '冲突：文件夹不存在或无法访问：/合成/未识别']) assert.equal(zhTb(text), text);
+  assert.ok(zhSaid('冲突：会话已过期，请刷新页面', '会话已过期，请刷新页面'));
+  assert.ok(!zhSaid('已给 1 张加上 甲：会话已过期，请刷新页面', '会话已过期，请刷新页面'));
 });
 
 test('marked page text is translated only on a page in another language', () => {
