@@ -4,6 +4,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
+const zh = require('./i18n_zh.cjs');   // t() of a Chinese page (#173)
 const source = fs.readFileSync('web/static/app.js', 'utf8');
 const section = (a, b) => source.slice(source.indexOf(a), source.indexOf(b, source.indexOf(a)));
 const tick = () => new Promise(resolve => setImmediate(resolve));
@@ -30,7 +31,7 @@ function harness() {
       return respond(200, path === '/api/tag' ? {ok: true} : []);
     },
   };
-  vm.createContext(c);
+  vm.createContext(Object.assign(c, {t: zh}));
   vm.runInContext(section('const SESSION_EXPIRED', 'function readError('), c);
   vm.runInContext(section('let metaPending', '// ---------- chrome'), c);
   return {c, server, banner: () => nodes.errorBanner};

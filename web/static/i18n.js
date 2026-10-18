@@ -4,6 +4,8 @@
 // the English table from locales/en.json, keyed by the Chinese text itself (gettext style). t('中文原文', {n: 3})
 // shows the English entry on an English page and the Chinese otherwise, so text not yet translated keeps working.
 // Placeholders are {name}. Static markup opts in with data-t (its text) and data-t-attr="title aria-label".
+// The same Chinese meaning two things takes a context, as gettext's msgctxt: t('移除', {context: 'column'}) looks up
+// "column\u0004移除" in the table and still shows 移除 on a Chinese page.
 const I18N = (() => {
   const preference = self.ILLUSTASH_LANGUAGE || 'system';
   const first = (navigator.languages && navigator.languages[0]) || navigator.language || 'zh';
@@ -11,7 +13,8 @@ const I18N = (() => {
   return {preference, language, table: language === 'en' ? self.ILLUSTASH_EN || {} : {}};
 })();
 function t(text, params) {
-  const out = Object.hasOwn(I18N.table, text) && I18N.table[text] ? I18N.table[text] : text;
+  const key = params?.context ? params.context + '\u0004' + text : text;
+  const out = Object.hasOwn(I18N.table, key) && I18N.table[key] ? I18N.table[key] : text;
   return params ? out.replace(/\{(\w+)\}/g, (all, key) => Object.hasOwn(params, key) ? String(params[key]) : all) : out;
 }
 function translateMarkup(root) {

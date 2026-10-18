@@ -1365,8 +1365,8 @@ a.shelf-link:hover{color:var(--accent-ink)}
 .shelf-todo{border-radius:14px;background:color-mix(in srgb,var(--warn) 9%,var(--sheet));padding:12px 14px}
 .shelf-todo summary{display:flex;gap:10px;align-items:baseline;font-size:12.5px;cursor:pointer;list-style:none}
 .shelf-todo summary::-webkit-details-marker{display:none}
-.shelf-todo summary::after{content:"展开";margin-left:auto;color:var(--accent-ink);font-size:12px}
-.shelf-todo[open] summary::after{content:"收起"}
+.shelf-todo summary::after{content:attr(data-more);margin-left:auto;color:var(--accent-ink);font-size:12px}
+.shelf-todo[open] summary::after{content:attr(data-less)}
 .shelf-todo summary b{white-space:nowrap}
 .shelf-todo summary span{color:var(--ink2);flex:1;min-width:0}
 .shelf-todo summary::after{white-space:nowrap}

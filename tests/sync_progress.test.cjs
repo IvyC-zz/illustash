@@ -3,11 +3,12 @@ const {test} = require('node:test');
 const assert = require('node:assert/strict');
 const {readFileSync} = require('node:fs');
 const vm = require('node:vm');
+const zh = require('./i18n_zh.cjs');   // t() of a Chinese page (#173)
 const source = readFileSync(require('node:path').join(__dirname, '../web/static/app.js'), 'utf8');
 const code = source.slice(source.indexOf('const syncBar ='), source.indexOf('let syncTimer'));
 const esc = v => String(v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
 const context = {number: n => String(n), stamp: t => t, esc, fold: (key, summary, body) => `[${key}|${summary}]${body}`};
-vm.createContext(context);
+vm.createContext(Object.assign(context, {t: zh}));
 vm.runInContext(code + ';this.syncLine = syncLine; this.syncBar = syncBar; this.syncDamaged = syncDamaged;', context);
 const bar = (done, total) => `${done}/${total}`;
 
@@ -89,7 +90,7 @@ test('a picture that cannot be decoded shows a plain placeholder; the viewer kee
   }
   const c = {HTMLImageElement, document: {addEventListener(type, f, capture) { assert.equal(type, 'error'); assert.equal(capture, true); listener = f; },
     createElement: () => ({})}};
-  vm.createContext(c);
+  vm.createContext(Object.assign(c, {t: zh}));
   vm.runInContext(app.slice(start, app.indexOf('// ---------- toast with undo', start)), c);
   const card = new HTMLImageElement('/image?id=a&size=thumb');
   listener({target: card});

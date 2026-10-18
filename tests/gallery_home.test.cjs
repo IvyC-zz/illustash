@@ -1,6 +1,7 @@
 const {test} = require('node:test');
 const assert = require('node:assert/strict');
 const vm = require('node:vm');
+const zh = require('./i18n_zh.cjs');   // t() of a Chinese page (#173)
 const fs = require('node:fs');
 const source = fs.readFileSync(require('node:path').join(__dirname, '../web/static/app.js'), 'utf8');
 const geometry = source.slice(source.indexOf('const isSquare ='), source.indexOf('const REASONS ='));
@@ -8,7 +9,7 @@ function grid(total = 103, fit = true) {
   const state = {size:185, total, fit, dataVersion:0, items:Array.from({length:total}, (_,i) => ({width:[300,800,400,1200][i%4],height:600})), route:{page:'library'}};
   const elements = {viewport:{clientWidth:1002, scrollTop:0},grid:{getBoundingClientRect:()=>({left:10,top:20})}};
   const c = {state, MAX_HEIGHT:3e7, viewOpts:{captions:true}, browsing:()=>true, $:id=>elements[id], prefs:{set(){}}, renderGrid(){}};
-  vm.createContext(c); vm.runInContext(geometry+';Object.assign(this,{rowCount,rowStart,imageRatio})',c); c.layout(); return c;
+  vm.createContext(Object.assign(c, {t: zh})); vm.runInContext(geometry+';Object.assign(this,{rowCount,rowStart,imageRatio})',c); c.layout(); return c;
 }
 const rowsOf=c=>Array.from({length:c.rowCount()},(_,r)=>{const out=[];for(let i=c.rowStart(r);i<c.rowStart(r+1);i++)out.push(c.cardRect(i));return out;});
 test('justified rows pack around the target height, fill the width and keep each ratio; the last row stays target-sized and left-aligned',()=>{
@@ -64,7 +65,7 @@ function homeHarness(api){
   const observer={observes:0,disconnects:0,unobserve(){},observe(){this.observes++;},disconnect(){this.disconnects++;}};
   const c={home,homeObserver:observer,homeWidth:1000,state:{route:{page:'home'},nsfw:'',items:[{uuid:'old'}],total:1},
     api,URLSearchParams, $:id=>id==='homeSentinel'?sentinel:{querySelectorAll:()=>[]},homeDay:g=>`<section>${g.day}</section>`,syncStrip(){},toast(){}};
-  vm.createContext(c);vm.runInContext(source.slice(source.indexOf('async function moreHome()'),source.indexOf('const ratio =')),c);
+  vm.createContext(Object.assign(c, {t: zh}));vm.runInContext(source.slice(source.indexOf('async function moreHome()'),source.indexOf('const ratio =')),c);
   return {c,home,sentinel,observer};
 }
 test('home appends only new dates and items; repeated concurrent clicks share the request',async()=>{
@@ -94,7 +95,7 @@ test('within-day requests after navigation cannot change the library or remove a
   const day={day:'2026-10-02',items:[{uuid:'old'}],count:10};
   const c={home:{days:[day],gen:1},state:{route:{page:'home'},nsfw:'',items:[{uuid:'library'}],total:1},
     api:()=>new Promise(r=>resolve=r),URLSearchParams,toast(){}, $:()=>{throw Error('stale response must not query DOM');}};
-  vm.createContext(c);vm.runInContext(source.slice(source.indexOf('const dayLoading ='),source.indexOf('function drawHome()')),c);
+  vm.createContext(Object.assign(c, {t: zh}));vm.runInContext(source.slice(source.indexOf('const dayLoading ='),source.indexOf('function drawHome()')),c);
   const pending=c.moreOfDay(day.day);c.state.route.page='library';resolve({items:[{uuid:'new'}]});await pending;
   assert.equal(day.items.length,1);assert.equal(c.state.items[0].uuid,'library');
   c.state.route.page='home';const old=c.moreOfDay(day.day);c.home.gen++;
@@ -103,7 +104,7 @@ test('within-day requests after navigation cannot change the library or remove a
 });
 test('opening the app lands on 首页; the library has its own hash and old query links still open it',()=>{
   const c={location:{hash:''},URLSearchParams,prefs:{get:(k,f)=>f},LEAD_PAGES:[]};
-  vm.createContext(c); vm.runInContext(source.slice(source.indexOf('function parseHash()'),source.indexOf('const LEAD_PAGES'))+';const defaultSort=()=>"newest";this.parseHash=parseHash;this.hashFor=hashFor;',c);
+  vm.createContext(Object.assign(c, {t: zh})); vm.runInContext(source.slice(source.indexOf('function parseHash()'),source.indexOf('const LEAD_PAGES'))+';const defaultSort=()=>"newest";this.parseHash=parseHash;this.hashFor=hashFor;',c);
   for(const hash of ['','#','#/']){ c.location.hash=hash; assert.equal(c.parseHash().page,'home'); }
   c.location.hash='#/?artist=a1'; assert.deepEqual([c.parseHash().page,c.parseHash().artist],['library','a1']);
   c.location.hash=c.hashFor({page:'library',day:'2026-10-02'}); assert.equal(c.location.hash,'#/library?day=2026-10-02');
@@ -119,7 +120,7 @@ test('undo and a finished sync redraw the home page, whose day groups come from 
     SYNC_ACTIVE: ['scanning'], number: String, clearTimeout() {}, setTimeout() {}, panelPage: p => p === 'home',
     async api() { return {state: {status: 'done', imported: 1}, history: [], damaged: null}; },
   };
-  vm.createContext(c);
+  vm.createContext(Object.assign(c, {t: zh}));
   vm.runInContext(source.slice(source.indexOf('async function undo()'), source.indexOf('async function sweep()')) + ';this.undo = undo;', c);
   await c.undo();
   assert.deepEqual(calls, ['reload', ['home', true]]);
