@@ -251,3 +251,11 @@ fn refused_after_characters_moved_to_the_core() {
     c.execute("INSERT INTO meta VALUES (?1,'core')", [CHARACTERS_IN_CORE]).unwrap();
     assert!(matches!(sync(&mut c), Err(Error::Conflict(_))));
 }
+
+#[test]
+fn candidate_scope_anchor_appears_once_under_both_policies() {
+    for select in [CANDIDATES_RESOLVED, compat_select("candidates").unwrap()] {
+        let scoped = crate::character_projection::scoped(select, CANDIDATE_SCOPE.0, CANDIDATE_SCOPE.1).unwrap();
+        assert_eq!(scoped.matches("FROM candidate_scope scoped").count(), 1);
+    }
+}
