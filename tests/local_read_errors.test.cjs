@@ -3,15 +3,12 @@ const web = require('./web.cjs');   // readError() is core/session.js, readFailu
 let readError, readFailure;
 before(async () => { await web.ready(); ({readError} = web.core()); ({readFailure} = await web.load('ui/dom.js')); });
 const assert = require('node:assert/strict');
-const vm = require('node:vm');
-const zh = require('./i18n_zh.cjs');   // t() of a Chinese page (#173)
-const source = require('node:fs').readFileSync(require('node:path').join(__dirname, '../web/static/app.js'), 'utf8');
-const twoStage = source.slice(source.indexOf('function twoStage('), source.indexOf('async function editProfile('));
 const tick = () => new Promise(r => setImmediate(r));
 test('a local search failure reports its cause and never queries remote or offers creation', async () => {
+  // twoStage() is ui/palette.js: the local search first, then Danbooru.
+  const {twoStage} = await web.load('ui/palette.js');
   let remoteCalls = 0, extraCalls = 0; const frames = [];
-  const c = {readError}; vm.createContext(Object.assign(c, zh.page)); vm.runInContext(twoStage, c);
-  c.twoStage(async () => { throw new Error('database locked'); }, async () => { remoteCalls++; }, () => { extraCalls++; return [{items: [{create: 'new'}]}]; })('name', f => frames.push(f));
+  twoStage(async () => { throw new Error('database locked'); }, async () => { remoteCalls++; }, () => { extraCalls++; return [{items: [{create: 'new'}]}]; })('name', f => frames.push(f));
   await tick(); assert.equal(remoteCalls, 0); assert.equal(extraCalls, 0);
   assert.equal(frames[0][0].note, '读取失败：database locked'); assert.equal(frames[0][0].items.length, 0);
 });
