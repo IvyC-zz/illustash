@@ -33,14 +33,26 @@ pub(crate) struct UpgradeFailure {
 impl fmt::Display for UpgradeFailure {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if self.committed {
-            write!(f, "升级已提交，后续处理失败：{}", self.error)?;
+            match &self.backup {
+                Some(backup) => write!(
+                    f,
+                    "升级已提交，后续处理失败：{error}；升级前备份：{backup}",
+                    error = self.error,
+                    backup = backup.display()
+                ),
+                None => write!(f, "升级已提交，后续处理失败：{error}", error = self.error),
+            }
         } else {
-            write!(f, "升级未提交：{}", self.error)?;
+            match &self.backup {
+                Some(backup) => write!(
+                    f,
+                    "升级未提交：{error}；升级前备份：{backup}",
+                    error = self.error,
+                    backup = backup.display()
+                ),
+                None => write!(f, "升级未提交：{error}", error = self.error),
+            }
         }
-        if let Some(backup) = &self.backup {
-            write!(f, "；升级前备份：{}", backup.display())?;
-        }
-        Ok(())
     }
 }
 impl std::error::Error for UpgradeFailure {}

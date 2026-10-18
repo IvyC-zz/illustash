@@ -21,7 +21,7 @@ function card(importTask) {
       info: {name: '合成图库', path: '/tmp/synthetic.pilib', sources: [], test: null},
       current: '/tmp/synthetic.pilib', home: '/tmp', libraries: [], export: {status: 'idle'}}},
   };
-  vm.createContext(Object.assign(c, {t: zh}));
+  vm.createContext(Object.assign(c, zh.page));
   vm.runInContext(section('function renderLibrariesCard()', '// Gallery pages have no Tauri dialog permission') +
     ';this.importLine = importLine;', c);
   c.renderLibrariesCard();
@@ -75,7 +75,7 @@ function poller(token = 'session') {
     renderLibrariesCard: () => { rendered++; }, loadLibraries: () => { libraries++; }, toast: m => toasts.push(m),
     setTimeout: (fn, ms) => { timers.push(ms); return timers.length; }, clearTimeout() {}, number: String, esc,
   };
-  vm.createContext(Object.assign(c, {t: zh}));
+  vm.createContext(Object.assign(c, zh.page));
   vm.runInContext(section('const IMPORT_ACTIVE', '// #41: the shareable export') +
     section('let importTimer', 'async function pollExport()'), c);
   return {c, answers, timers, toasts, posted, rendered: () => rendered, libraries: () => libraries};

@@ -44,8 +44,6 @@ let abortList, toastTimer, searchTimer, pageTimer, pickerTimer, detailGen = 0;
 // The page belongs to the session it booted with. Another window or caller that switches (or reopens)
 // the library starts a new session; adopting its token would send this page's selection, dialogs and
 // queued work to that library. The page stops instead, and drops responses that arrive afterwards.
-// The backend's exact message, compared as is (never translated).
-const SESSION_EXPIRED = '会话已过期，请刷新页面';
 const STALE = t('图库已在其他窗口切换或重新打开，请重新载入页面');
 function adoptToken(token) {
   if (!state.token) state.token = token;
@@ -62,11 +60,14 @@ function staleSession() {
 }
 async function api(path, options = {}) {
   if (state.stale) throw new Error(STALE);
-  const response = await fetch(path, {...options, headers: {'Content-Type': 'application/json', 'X-CSRF-Token': state.token, ...options.headers}});
+  // A page in another language says so: the backend then shows English or romanized names (#173).
+  const language = I18N.language === 'zh-CN' ? {} : {'X-Illustash-Language': I18N.language};
+  const response = await fetch(path, {...options, headers: {'Content-Type': 'application/json', 'X-CSRF-Token': state.token, ...language, ...options.headers}});
   const result = await response.json();
-  if (response.status === 403 && result.error === SESSION_EXPIRED) staleSession();
+  if (response.status === 403 && said(result.error, '会话已过期，请刷新页面')) staleSession();
   if (state.stale) throw new Error(STALE);
-  if (!response.ok) throw new Error(result.error || t('请求失败'));
+  // The backend's message in the page's language; e.said keeps it as sent, to test with said.
+  if (!response.ok) throw Object.assign(new Error(tb(result.error) || t('请求失败')), {said: result.error});
   return result;
 }
 async function post(path, body) {
@@ -90,11 +91,10 @@ async function checkIndex() {
 }
 
 // Name text queries (tag and work names only) need this library's consent: the backend refuses with
-// this exact message until it is given. Any other failure is a real network or service error.
-const NAMES_UNAUTHORIZED = '显示名联网尚未授权';
+// 显示名联网尚未授权 until it is given. Any other failure is a real network or service error.
 const NAMES_NOTE = t('允许这个图库联网查询名称吗？\n\n会把你输入的角色名、作品名，以及图库里角色的 Danbooru tag 和作品名发给 Danbooru 和 Bangumi，用来搜索角色、作品和补全中文名。不会发送图片。\n\n允许后对这个图库一直有效，可以在「设置 › 网络与隐私」里随时撤销。');
 // A Danbooru name lookup: its results, or why it failed.
-const remoteNames = path => api(path).then(found => ({found}), e => ({found: null, unauthorized: e.message === NAMES_UNAUTHORIZED, reason: e.message}));
+const remoteNames = path => api(path).then(found => ({found}), e => ({found: null, unauthorized: said(e.said, '显示名联网尚未授权'), reason: e.message}));
 const remoteNote = r => r.unauthorized ? t('查 Danbooru 需要先允许这个图库联网查询名称（只发送文字）') : t('Danbooru 暂时连不上：{reason}', {reason: r.reason});
 const namesAllowButton = `<button type="button" class="link-button" data-names-allow>${t('允许查询…')}</button>`;
 async function setNamesNetwork(allow) {
@@ -137,7 +137,7 @@ $('toast').addEventListener('mouseleave', () => { toastTimer = setTimeout(() => 
 $('toastUndo').onclick = () => undo();
 function setUndo(value) {
   state.undo = value; $('undoButton').disabled = !value || state.busy;
-  $('undoButton').title = value ? t('撤销：{label}（{key}）', {label: value.label, key: shortcut('Z')}) : t('暂无可撤销操作');
+  $('undoButton').title = value ? t('撤销：{label}（{key}）', {label: tb(value.label), key: shortcut('Z')}) : t('暂无可撤销操作');
 }
 
 // ---------- routing ----------
@@ -966,7 +966,7 @@ async function mutate(path, body, leaving, {advance = false} = {}) {
   try {
     const r = await post(path, body); setUndo(r.undo);
     state.selecting = false; clearSelection();
-    toast(r.undo.label, true);
+    toast(tb(r.undo.label), true);
     if (gone) { await new Promise(done => setTimeout(done, Math.max(0, 170 - (performance.now() - started)))); collapse(gone); }
     await reload(); if (state.route.page === 'home') renderHome(true); metaSoon(path === '/api/tag');
     if (state.focused) inspect(state.focused, true);
@@ -988,7 +988,7 @@ async function undo() {
   if (!state.undo || state.busy) return; state.busy = true;
   try {
     const label = state.undo.label, r = await post('/api/undo', {id: state.undo.id}); setUndo(r.undo);
-    toast(t('已撤销 · {label}', {label: label.replace(/^已/, '')})); await reload(); refreshMeta().catch(e => error(readError(e)));
+    toast(t('已撤销 · {label}', {label: I18N.language === 'zh-CN' ? label.replace(/^已/, '') : tb(label)})); await reload(); refreshMeta().catch(e => error(readError(e)));
     if (state.route.page === 'home') renderHome(true);
     if (state.route.page === 'identity') renderIdentity();
     if (state.route.page === 'groups') renderGroups(true);
@@ -1154,7 +1154,7 @@ function mergeCharacter(c) {
   openPicker({title: t('把 {name} 合并到…', {name: c.name}), placeholder: t('输入同一个人的另一个角色'), jump: true, exclude: [c.id],
     sentence: e => t('把 {name} 并入 {target}：图、人工结论、子标签和别名都过去，可撤销', {name: c.name, target: e.name}),
     pick: async e => {
-      try { const r = await post('/api/merge', {source: c.id, target: e.id}); setUndo(r.undo); toast(r.undo.label, true); await refreshMeta(); go(charRoute(e.id)); }
+      try { const r = await post('/api/merge', {source: c.id, target: e.id}); setUndo(r.undo); toast(tb(r.undo.label), true); await refreshMeta(); go(charRoute(e.id)); }
       catch (err) { toast(err.message); }
     }});
 }
@@ -1278,7 +1278,7 @@ async function editProfile(c) {
     q('#pfSave').disabled = true;
     try {
       const r = await post('/api/character/profile', body);
-      close(); setUndo(r.undo); toast(r.undo.label, true);
+      close(); setUndo(r.undo); toast(tb(r.undo.label), true);
       state.localLinks = null; await refreshMeta(); renderHeading();
     } catch (err) { q('#pfSave').disabled = false; toast(err.message); }
   };
@@ -1303,7 +1303,7 @@ async function openLocalLinks() {
   count();
   for (const b of d.querySelectorAll('[data-merge]')) b.onclick = async () => {
     const x = merges.find(m => m.id === b.dataset.merge); b.disabled = true;
-    try { const r = await post('/api/merge', {source: x.id, target: x.target.id}); setUndo(r.undo); toast(r.undo.label, true); b.closest('.link-row').remove(); await refreshMeta(); refreshLocalLinks(); }
+    try { const r = await post('/api/merge', {source: x.id, target: x.target.id}); setUndo(r.undo); toast(tb(r.undo.label), true); b.closest('.link-row').remove(); await refreshMeta(); refreshLocalLinks(); }
     catch (e) { b.disabled = false; toast(e.message); }
   };
   d.querySelector('form').onsubmit = async e => {
@@ -1311,7 +1311,7 @@ async function openLocalLinks() {
     const chosen = links.filter(x => d.querySelector(`[data-link="${CSS.escape(x.id)}"]`)?.checked).map(x => ({id: x.id, tag: x.tag}));
     if (!chosen.length) return;
     $('llApply').disabled = true; $('llApply').textContent = t('正在关联…');
-    try { const r = await post('/api/local-links', {items: chosen}); close(); setUndo(r.undo); toast(r.undo.label, true); await refreshMeta(); refreshLocalLinks(); }
+    try { const r = await post('/api/local-links', {items: chosen}); close(); setUndo(r.undo); toast(tb(r.undo.label), true); await refreshMeta(); refreshLocalLinks(); }
     catch (err) { count(); toast(err.message); }
   };
   d.showModal();
@@ -1344,7 +1344,7 @@ async function openRelate(ids) {
   const shown = r.pairs.filter(p => p.kind !== 'unrelated'), rest = r.pairs.length - shown.length;
   const summary = [...r.same.map(g => t('第 {list} 张是同一张图', {list: g.map(no).join(t('、'))})), ...(r.missing.length ? [t('{n} 张读不到原图（可能还在 iCloud），没有比较', {n: number(r.missing.length)})] : [])];
   $('relateBody').innerHTML = `${summary.length ? `<p class="rel-summary">${summary.map(esc).join(t('；'))}</p>` : ''}
-    ${shown.map(p => `<section class="rel-pair"><div class="rel-head"><span class="rel-kind k-${p.kind}">${esc(p.label)}</span><span>${esc(p.note || '')}</span></div>
+    ${shown.map(p => `<section class="rel-pair"><div class="rel-head"><span class="rel-kind k-${p.kind}">${esc(tb(p.label))}</span><span>${esc(tb(p.note || ''))}</span></div>
       <div class="rel-figs">${figure(p.a, p.boxes_a)}${figure(p.b, p.boxes_b)}</div></section>`).join('')}
     ${rest ? `<p class="muted-note">${shown.length ? t('另外 {n} 对是不同的图', {n: number(rest)}) : t('{n} 对是不同的图', {n: number(rest)})}</p>` : ''}
     <p class="dialog-note">${t('红框：两张不一样的地方；蓝色虚线：小图在大图里的位置。逐像素比较得出，只在本机计算，结果不保存。')}</p>`;
@@ -2293,8 +2293,8 @@ function similarLine(s) {
   if (s.status === 'reading') return t('正在读图算签名 {done}/{total}', {done: number(s.done || 0), total: number(s.total || 0)});
   if (s.status === 'pairing') return t('正在找候选…');
   if (s.status === 'comparing') return t('正在逐对比较 {done}/{total} · 已找到 {found} 对', {done: number(s.done || 0), total: number(s.total || 0), found: number(s.found || 0)});
-  if (s.status === 'waiting') return s.message || t('输入有变化，稍后自动重试');
-  if (s.status === 'error') return t('出错：{reason}', {reason: s.message || ''});
+  if (s.status === 'waiting') return tb(s.message) || t('输入有变化，稍后自动重试');
+  if (s.status === 'error') return t('出错：{reason}', {reason: tb(s.message || '')});
   if (s.status === 'off') return t('本次启动关闭了相似检测');
   return s.at ? t('上次检查 {time}', {time: stamp(s.at)}) : '';
 }
@@ -2425,7 +2425,7 @@ function syncLine(s) {
     + (s.damaged ? ' · ' + t('{n} 张已损坏或格式不支持，未识别', {n: number(s.damaged)}) : '');
   if (s.status === 'done') return t('上次同步：{time}', {time: stamp(s.finished_at)}) + kept + gave;
   if (s.status === 'needs_recognition') return t('有 {n} 张图等待识别（识别服务未启动）', {n: number(s.total || 0)}) + kept;
-  if (s.status === 'interrupted') return s.message ? t('同步已中断（{reason}），可重新扫描', {reason: s.message}) : t('同步已中断，可重新扫描');
+  if (s.status === 'interrupted') return s.message ? t('同步已中断（{reason}），可重新扫描', {reason: tb(s.message)}) : t('同步已中断，可重新扫描');
   if (s.status === 'error') return t('同步失败');
   return t('本地图库');
 }
@@ -2470,7 +2470,7 @@ let indexTimer = 0, indexArmed = null, indexSkip = new Set(), watchDraft = '';
 function indexLine(s, check) {
   const n = s.total ? ` ${number(s.done || 0)}/${number(s.total)}` : '';
   return {checking: t('正在检查 Danbooru…'), fetching: t('正在下载参考图') + n, cleaning: t('正在处理参考图'), building: t('正在更新角色特征'), scanning: t('正在重新扫描图库'), importing: t('正在导入图库'),
-    error: t('检查失败：{reason}', {reason: s.message || ''})}[s.status] || (check ? t('上次检查：{time} · 待添加 {n} 个角色', {time: stamp(check.checked_at), n: number(check.missing.length)}) : t('尚未检查'));
+    error: t('检查失败：{reason}', {reason: tb(s.message || '')})}[s.status] || (check ? t('上次检查：{time} · 待添加 {n} 个角色', {time: stamp(check.checked_at), n: number(check.missing.length)}) : t('尚未检查'));
 }
 async function renderIndexCard(fresh = true) {
   const route = state.route, token = state.token;
@@ -2486,7 +2486,7 @@ async function renderIndexCard(fresh = true) {
     <p class="settings-note">${t('每次检查前确认联网，只允许本次运行。')}</p>
     ${x.history.length ? fold('indexHistory', t('最近添加的角色（{n} 个）', {n: number(x.history.reduce((n, h) => n + h.characters.length, 0))}), `<table class="settings-table">${x.history.flatMap(h => h.characters.map(c => `<tr><td>${esc(stamp(h.at))}</td>
       <td>${c.entity && c.status === 'added' ? `<a class="link" href="${charHash(c.entity.id)}">${esc(c.entity.name)}</a>` : esc(c.tag || c.short_tag)}</td>
-      <td>${c.status === 'added' ? t('匹配 {n} 张', {n: number(c.entity?.count ?? c.claims)}) : c.status === 'dropped' ? t('已移除') : t('未添加：{reason}', {reason: esc(c.reason || '')})}</td>
+      <td>${c.status === 'added' ? t('匹配 {n} 张', {n: number(c.entity?.count ?? c.claims)}) : c.status === 'dropped' ? t('已移除') : t('未添加：{reason}', {reason: esc(tb(c.reason || ''))})}</td>
       <td>${c.status === 'added' && c.entity ? `<button class="quiet small${indexArmed === c.short_tag ? ' armed' : ''}" data-drop="${esc(c.short_tag)}" ${active ? 'disabled' : ''} title="${t('从索引中移除这个角色：重新扫描后它匹配的图恢复原状，以后检查不再提示')}">${indexArmed === c.short_tag ? t('再点一次确认移除') : t('移除')}</button>` : ''}</td></tr>`)).join('')}</table>`) : ''}`, x.works)) return;
   wireFolds(card);
   const act = async body => { try { state.index = await post('/api/index', body); renderIndexCard(false); pollIndex(); } catch (e) { toast(e.message); } };
@@ -2561,7 +2561,7 @@ async function pollIndex() {
   if (INDEX_ACTIVE.includes(was) && !INDEX_ACTIVE.includes(s.status)) {
     if (s.status === 'done') { state.countDirty = true; state.readEpoch++; toast(s.kind === 'drop' ? t('已移除，{n} 张图片已重新识别', {n: number(s.changed)}) : t('已添加 {added} 个角色，{n} 张图片的识别结果已更新', {added: number(s.added), n: number(s.changed)})); await refreshMeta().catch(e => error(readError(e))); }
     else if (s.status === 'checked') toast(s.found ? t('发现 {n} 个可添加的角色，在任务面板里添加', {n: number(s.found)}) : t('未发现新角色'));
-    else if (s.status === 'error') toast(t('角色索引更新失败：{reason}', {reason: s.message || ''}));
+    else if (s.status === 'error') toast(t('角色索引更新失败：{reason}', {reason: tb(s.message || '')}));
   }
   if (state.route.page === 'settings' && s.status !== was) renderIndexCard(false);
   if (state.route.section === 'works' && s.status !== was) drawShelf();
@@ -2585,7 +2585,7 @@ async function renderNamesCard(fresh = true) {
   const row = (label, c) => c ? `<tr><td>${label}</td><td>${number(c.total)}</td><td>${number(c.zh || 0)}</td><td>${number(c.ja || 0)}</td><td>${number(c.readable || 0)}</td></tr>` : '';
   const cc = x.counts?.characters;
   card.innerHTML = cardHead(t('角色名称'), t('从 Bangumi 取角色的中文名，只发送 tag 和作品名。没有中文名时显示日文名，再没有就显示英文名；原始 tag 在悬停提示里。'), 'library') + `
-    ${taskLink(namesLine(s) + (s.error ? '：' + s.error : ''), active ? 'busy' : s.status === 'error' ? 'warn' : ['off', 'unauthorized'].includes(s.status) ? 'off' : '')}
+    ${taskLink(namesLine(s) + (s.error ? t('：{reason}', {reason: tb(s.error)}) : ''), active ? 'busy' : s.status === 'error' ? 'warn' : ['off', 'unauthorized'].includes(s.status) ? 'off' : '')}
     ${startupSwitch('names', t('启动时获取'), t('只查新增的角色'))}
     ${x.counts ? fold('namesStats', t('覆盖率') + (active ? t('（完成后更新）') : '') + (cc ? t('：{p}% 的角色有中文名', {p: Math.round(cc.zh / Math.max(1, cc.total) * 100)}) : ''), `<table class="settings-table"><tr><th></th><th>${t('共')}</th><th>${t('中文名')}</th><th>${t('日文名')}</th><th>${t('英文名')}</th></tr>${row(t('角色'), x.counts.characters)}${row(t('作品'), x.counts.works)}${row(t('皮肤'), x.counts.skins)}</table>`) : ''}`;
   wireFolds(card);
@@ -2614,7 +2614,7 @@ function renderModelCard() {
   if ($('modelClear')) $('modelClear').onclick = () => save({key: null}, t('API key 已清除'));
   if ($('modelTest')) $('modelTest').onclick = async () => {
     $('modelTest').disabled = true;
-    try { const r = await post('/api/names', {action: 'model_api_test'}); toast(r.ok === false ? t('连接失败：{reason}', {reason: r.error || t('未知错误')}) : t('连接成功')); } catch (e) { toast(t('连接失败：{reason}', {reason: e.message})); }
+    try { const r = await post('/api/names', {action: 'model_api_test'}); toast(r.ok === false ? t('连接失败：{reason}', {reason: tb(r.error) || t('未知错误')}) : t('连接成功')); } catch (e) { toast(t('连接失败：{reason}', {reason: e.message})); }
     if ($('modelTest')) $('modelTest').disabled = false;
   };
 }
@@ -2725,9 +2725,9 @@ async function renderAbout() {
   const route = state.route, token = state.token;
   if (!state.about) { try { const value = await settingsRequest('/api/about'); if (route !== state.route || token !== state.token) return; state.about = value; } catch (e) { if (route === state.route && token === state.token) readFailure($('setAbout'), e); return; } }
   const card = $('setAbout'), a = state.about; if (!card || !a) return;
-  const version = `${a.version}${a.channel ? ' ' + a.channel : ''}`;
+  const version = `${a.version}${a.channel ? ' ' + tb(a.channel) : ''}`;
   const diag = [[t('应用'), a.name], [t('版本'), version], [t('构建'), a.build || '—'], [t('数据库架构'), a.schema], [a.runtime ? t('运行时') : 'Python', a.runtime || a.python], [t('系统'), a.platform],
-    ...Object.entries(a.libraries || {}).map(([k, v]) => [k, v || t('未安装')])];
+    ...Object.entries(a.libraries || {}).map(([k, v]) => [tb(k), tb(v) || t('未安装')])];
   card.innerHTML = `<div class="about-head"><img src="/favicon.svg" alt="" width="44" height="44"><div><h2 class="about-name">${esc(a.name)}</h2><p class="muted-note">${t('版本 {v}', {v: esc(version)})}${a.build ? ' · ' + t('构建 {build}', {build: esc(a.build)}) : ''}</p></div></div>
     <p class="settings-note">${t('在本机识别、整理收藏的插画和里面的角色。图片和识别数据都只在这台电脑上。')}</p>
     <div class="about-actions"><button class="quiet" id="aboutGuide">${t('新手引导')}</button><button class="quiet" id="aboutKeys">${t('键盘快捷键')}</button><button class="quiet" id="aboutCopy">${t('复制诊断信息')}</button></div>
@@ -2773,7 +2773,7 @@ async function renderSettings(fetchMissing = true, refresh = false) {
   const segment = (name, options, current) => `<div class="segmented" data-setting="${name}">${options.map(([v, label]) => `<button class="${current === v ? 'on' : ''}" data-value="${v}">${label}</button>`).join('')}</div>`;
   // Per-app counts exist only for the Photos source (pictures saved by X or Pixiv); a folder library has none.
   const apps = Object.entries(runs.find(r => r.sources)?.sources || {}).sort((a, b) => b[1].photos - a[1].photos);
-  const appRow = ([, v]) => `<tr><td title="${esc(v.name)}">${esc(v.name)}</td><td>${number(v.photos)}</td><td>${v.collected ? number(v.collected) : '—'}</td></tr>`;
+  const appRow = ([, v]) => `<tr><td title="${esc(v.name)}">${esc(tb(v.name))}</td><td>${number(v.photos)}</td><td>${v.collected ? number(v.collected) : '—'}</td></tr>`;
   const sort = prefs.get('sortLibrary', 'newest'), csort = prefs.get('sortCharacter', 'suspicious');
   const s = state.sync;
   const body = {
@@ -2871,7 +2871,7 @@ $('settingsPage').addEventListener('input', e => {
   else if (e.target.id === 'libPhotos') libForm.photos = e.target.checked;
 });
 // The backend lists the origins it knows (#111); the fallback covers the legacy layout without library info.
-const origins = () => { const list = state.libraries?.info?.origins; return list?.length ? list.map(o => [o.id, o.label]) : ORIGINS; };
+const origins = () => { const list = state.libraries?.info?.origins; return list?.length ? list.map(o => [o.id, tb(o.label)]) : ORIGINS; };
 function renderLibrariesCard() {
   const card = $('setLibraries'); if (!card || state.route.page !== 'settings') return;
   const data = state.libraries;
@@ -2899,7 +2899,7 @@ function renderLibrariesCard() {
   const ex = data.export || {};
   const exportLine = ex.status === 'running' ? `<p class="muted-note">${t('正在导出到 {path}…', {path: esc(home(ex.path))})}</p>`
     : ex.status === 'done' ? `<p class="muted-note">${t('已导出：{path}（{mb} MB）。', {path: esc(home(ex.path)), mb: (ex.bytes / 1048576).toFixed(0)})}${EXPORT_LEAVES_OUT}</p>`
-    : ex.status === 'error' ? `<p class="muted-note">${t('导出失败：{reason}', {reason: esc(ex.error)})}</p>` : '';
+    : ex.status === 'error' ? `<p class="muted-note">${t('导出失败：{reason}', {reason: esc(tb(ex.error))})}</p>` : '';
   const f = libForm;
   const form = !f.open ? '' : `<div class="lib-form">
       <p class="muted-note">${t('按图片来自哪里分别添加文件夹，每类可以有多个。子文件夹会一起读取；图片保留在原位置，不复制。选 X 或 Pixiv 的文件夹才能用以图搜图、画师回查。')}</p>
@@ -2908,7 +2908,7 @@ function renderLibrariesCard() {
         <button class="quiet" data-lib-pick="${id}">${t('添加文件夹…')}</button></div>`).join('')}</div>
       ${IS_MAC ? `<label class="lib-photos"><input type="checkbox" id="libPhotos" ${f.photos ? 'checked' : ''}> ${t('同时读取 iCloud 照片（本机「照片」图库，按存图的 App 区分 X 和 Pixiv）')}</label>` : ''}
       <div class="setting-line"><span>${t('名字')}<small class="line-hint">${t('保存在 {path}', {path: esc(home(data.home))})}</small></span><input class="lib-input" id="libName" placeholder="${t('新图库')}" value="${esc(f.name)}"></div>
-      ${f.created ? `<div class="lib-created"><p>${t('{done}，保存在 {path}，但没能加入最近图库列表：{reason}', {done: `<b>${t('图库已经建好')}</b>`, path: `<bdi>${esc(home(f.created.path))}</bdi>`, reason: esc(f.created.error)})}</p>
+      ${f.created ? `<div class="lib-created"><p>${t('{done}，保存在 {path}，但没能加入最近图库列表：{reason}', {done: `<b>${t('图库已经建好')}</b>`, path: `<bdi>${esc(home(f.created.path))}</bdi>`, reason: esc(tb(f.created.error))})}</p>
         <p class="muted-note">${t('打开它会再试一次加入列表；再点创建会另建一个带编号的图库。')}</p>
         <p><button class="primary" data-open-library="${esc(f.created.path)}" data-name="${esc(f.created.name)}">${t('打开这个图库')}</button> <button class="quiet" data-lib-again>${t('仍然新建一个')}</button></p></div>`
         : `<p><button class="primary" data-lib-create>${t('创建并打开')}</button> <button class="quiet" data-lib-cancel>${t('取消')}</button></p>`}</div>`;
@@ -2941,14 +2941,14 @@ function importLine(job) {
   const name = job.file ? t('「{file}」', {file: job.file}) : '';
   if (job.status === 'running') return (recognition ? t('导入识别结果{name}：{step}', {name, step: (IMPORT_STAGES[job.kind] || {})[job.stage] || t('正在准备')}) : t('导入归档{name}：{step}', {name, step: (IMPORT_STAGES[job.kind] || {})[job.stage] || t('正在准备')})) + importCount(job) + '…';
   if (job.status === 'stopping') return recognition ? t('正在取消导入识别结果{name}…', {name}) : t('正在取消导入归档{name}…', {name});
-  if (job.status === 'cancelled') return t('{reason}；图库没有改动。', {reason: job.reason || t('导入已取消')});
-  if (job.status === 'error') return recognition ? t('导入识别结果{name}失败：{reason}', {name, reason: job.error}) : t('导入归档{name}失败：{reason}', {name, reason: job.error});
+  if (job.status === 'cancelled') return t('{reason}；图库没有改动。', {reason: tb(job.reason) || t('导入已取消')});
+  if (job.status === 'error') return recognition ? t('导入识别结果{name}失败：{reason}', {name, reason: tb(job.error)}) : t('导入归档{name}失败：{reason}', {name, reason: tb(job.error)});
   if (job.status !== 'done') return '';
   const r = job.result || {};
   // Published but not listed (#111): opening it lists it; importing again would make a second, numbered library.
-  if (job.kind === 'archive' && r.listed === false) return t('已导入「{name}」，保存在 {path}，但没能加入最近图库列表：{reason}。打开它会再试一次加入列表；再导入会另建一个带编号的图库。模型接口与名称联网授权需重新设置。', {name: r.name, path: String(r.path).replace(/^\/Users\/[^/]+/, '~'), reason: r.error});
+  if (job.kind === 'archive' && r.listed === false) return t('已导入「{name}」，保存在 {path}，但没能加入最近图库列表：{reason}。打开它会再试一次加入列表；再导入会另建一个带编号的图库。模型接口与名称联网授权需重新设置。', {name: r.name, path: String(r.path).replace(/^\/Users\/[^/]+/, '~'), reason: tb(r.error)});
   if (job.kind === 'archive') return t('已导入「{name}」，模型接口与名称联网授权需重新设置。', {name: r.name});
-  if (r.status === 'pending') return t('识别结果已导入，后续处理尚未完成（{reason}）。', {reason: r.error || t('可稍后恢复')});
+  if (r.status === 'pending') return t('识别结果已导入，后续处理尚未完成（{reason}）。', {reason: tb(r.error) || t('可稍后恢复')});
   return r.duplicate ? t('这份识别结果之前已经导入过。') : t('识别结果已导入。');
 }
 function importBlock(job) {
@@ -3241,8 +3241,8 @@ function provenanceBars(s) {
   const p = s.progress; if (!p || !p.total) return '';
   const bar = (label, done, total, detail) => `<div class="prov-bar-row"><span class="prov-bar-label">${label}</span><span class="prov-bar" role="progressbar" aria-valuemin="0" aria-valuemax="${total}" aria-valuenow="${done}"><span style="width:${Math.min(100, done / total * 100).toFixed(1)}%"></span></span><span class="prov-bar-num">${detail}</span></div>`;
   // Two levels when the step has them (本地比对: all artists, then the current artist's works), then traffic.
-  const sub = p.sub_total ? bar(esc(p.sub_label || t('当前')), p.sub_done || 0, p.sub_total, `${number(p.sub_done || 0)} / ${number(p.sub_total)}`) : '';
-  return `<div class="prov-bars">${bar(esc(p.label || t('进度')), p.done || 0, p.total, `${number(p.done || 0)} / ${number(p.total)}${p.found != null ? ' · ' + t('对上 {n}', {n: number(p.found)}) : ''}`)}${sub}${p.mb != null && s.budget_mb ? bar(t('流量'), p.mb, s.budget_mb, `${number(Math.round(p.mb))} / ${number(s.budget_mb)} MB`) : ''}</div>`;
+  const sub = p.sub_total ? bar(esc(tb(p.sub_label) || t('当前')), p.sub_done || 0, p.sub_total, `${number(p.sub_done || 0)} / ${number(p.sub_total)}`) : '';
+  return `<div class="prov-bars">${bar(esc(tb(p.label) || t('进度')), p.done || 0, p.total, `${number(p.done || 0)} / ${number(p.total)}${p.found != null ? ' · ' + t('对上 {n}', {n: number(p.found)}) : ''}`)}${sub}${p.mb != null && s.budget_mb ? bar(t('流量'), p.mb, s.budget_mb, `${number(Math.round(p.mb))} / ${number(s.budget_mb)} MB`) : ''}</div>`;
 }
 function renderProvenanceCard() {
   const card = $('setProvenance'); if (!card || state.route.page !== 'settings') return;
@@ -3254,7 +3254,7 @@ function renderProvenanceCard() {
   const total = cov ? Object.values(cov.pictures || {}).reduce((a, b) => a + b, 0) : 0;
   const html = cardHead(t('找回画师'), t('逐张查图的画师：用像素哈希和 IQDB 签名（只发哈希文本，不发图片）在 Danbooru 查原帖，并比对你关注的画师。结果在详情面板的「画师」里，可以点「不是 TA」纠正。')) + `
     ${cov ? `<div class="prov-stats">${covLine(t('X 的图有画师'), 'x')}${covLine(t('Pixiv 的图有画师'), 'pixiv')}${covLine(t('其他来源有画师'), 'other')}<div class="prov-stat"><b>${pct(cov.with_original_post || 0, total)}</b><span>${t('能对到原帖')}<small>${t('{n} 张', {n: number(cov.with_original_post || 0)})}</small></span></div></div>` : ''}
-    <div class="setting-line set-status"><span><span class="local-dot${busy ? ' busy' : s.status === 'failed' ? ' warn' : ''}"></span>${busy ? t('正在查找…') : s.status === 'failed' && s.reason ? t('上次出错：{reason}', {reason: esc(s.reason)}) : p.runs?.[0] ? t('上次 {time} · 新找到 {n}', {time: esc(localTime(p.runs[0].started_at)), n: number(p.runs[0].found || 0)}) : t('还没有查过')}</span>${busy ? `<button class="quiet small" data-open-tasks>${t('在任务面板查看')}</button>` : `<button class="quiet small" data-open-tasks="provenance">${t('查找画师…')}</button>`}</div>
+    <div class="setting-line set-status"><span><span class="local-dot${busy ? ' busy' : s.status === 'failed' ? ' warn' : ''}"></span>${busy ? t('正在查找…') : s.status === 'failed' && s.reason ? t('上次出错：{reason}', {reason: esc(tb(s.reason))}) : p.runs?.[0] ? t('上次 {time} · 新找到 {n}', {time: esc(localTime(p.runs[0].started_at)), n: number(p.runs[0].found || 0)}) : t('还没有查过')}</span>${busy ? `<button class="quiet small" data-open-tasks>${t('在任务面板查看')}</button>` : `<button class="quiet small" data-open-tasks="provenance">${t('查找画师…')}</button>`}</div>
     <label class="switch-line"><span><b>${t('同步后自动查新图')}${scope('library')}</b><small>${p.auto_network ? t('新加入的图做签名识别、查像素哈希、比对新找到的画师；每次最多 {mb} MB', {mb: number(p.budgets?.new || 50)}) : t('新加入的图只在本机做签名识别；要联网查，在任务面板里每次授权')}${p.frozen ? ' · ' + t('测试图库不同步，这个开关不起作用') : ''}</small></span><input type="checkbox" class="switch" id="provAuto" ${p.auto ? 'checked' : ''}></label>
     ${cov ? `<a class="setting-line set-link" href="#/artist-audit"><span>${t('画师抽查')}<small class="line-hint">${t('随机抽 50 张，逐张判断找到的画师对不对')}</small></span><span>›</span></a>` : ''}
     ${state.accounts && !state.accounts.pixiv?.bound ? `<p class="settings-note net-foot">${t('登录 Pixiv 后才能比对 R18 作品、查 Pixiv 上的相关画师（见下方「账号」）。')}</p>` : ''}`;
@@ -3298,19 +3298,19 @@ function taskList() {
     {key: 'index', name: t('检查新角色'), busy: t('检查新角色中'), active: INDEX_ACTIVE.includes(ix.status), line: state.index ? indexLine(ix, state.index.check) : '…', warn: ix.status === 'error',
       body: INDEX_ACTIVE.includes(ix.status) ? bar(ix.done, ix.total) : '',
       action: `<button class="quiet small" data-task="index" ${INDEX_ACTIVE.includes(ix.status) || ix.status === 'off' || !state.index?.watch?.works.length ? 'disabled' : ''} title="${state.index?.watch?.works.length ? t('查关注作品在 Danbooru 上有没有新角色（只发送作品名）') : t('先在资料库里关注作品')}">${t('立即检查')}</button>`},
-    {key: 'names', name: t('角色名称'), busy: t('角色名称中'), active: NAMES_ACTIVE.includes(nm.status), off: nm.status === 'off', line: namesLine(nm) + (nm.error ? t('：{reason}', {reason: nm.error}) : ''), warn: nm.status === 'error', body: NAMES_ACTIVE.includes(nm.status) ? bar(nm.done, nm.total) : '',
+    {key: 'names', name: t('角色名称'), busy: t('角色名称中'), active: NAMES_ACTIVE.includes(nm.status), off: nm.status === 'off', line: namesLine(nm) + (nm.error ? t('：{reason}', {reason: tb(nm.error)}) : ''), warn: nm.status === 'error', body: NAMES_ACTIVE.includes(nm.status) ? bar(nm.done, nm.total) : '',
       action: `<button class="quiet small" data-task="names" ${NAMES_ACTIVE.includes(nm.status) || nm.status === 'off' || !state.names ? 'disabled' : ''} title="${t('从 Bangumi 重新获取全部角色的中文名（只发送 tag 与作品名）')}">${t('重新获取')}</button>`},
     {key: 'similar', name: t('相似图片'), busy: t('相似图片中'), active: SIMILAR_ACTIVE.includes(sim.status), off: sim.status === 'off', line: taskSimilar(sim), warn: sim.status === 'error', body: SIMILAR_ACTIVE.includes(sim.status) ? bar(sim.done, sim.total) : '',
       action: `<button class="quiet small" data-task="similar" ${SIMILAR_ACTIVE.includes(sim.status) || sim.status === 'off' ? 'disabled' : ''}>${t('重新检查')}</button>`},
   ];
   if (pv?.available) list.push({key: 'provenance', name: t('找回画师'), busy: t('找回画师中'), active: PROV_ACTIVE.includes(ps.status), warn: ps.status === 'failed',
-    line: ps.status === 'stopping' ? t('正在停止…') : PROV_ACTIVE.includes(ps.status) ? t('正在查找 · 第 {step}/{steps} 步', {step: (ps.index || 0) + 1, steps: ps.total || 1}) + (ps.text ? ' · ' + ps.text : '')
-      : ps.status === 'failed' ? t('上次出错：{reason}', {reason: ps.reason || ''}) : pv.runs?.[0] ? t('上次 {time} · 新找到 {n}', {time: localTime(pv.runs[0].started_at), n: number(pv.runs[0].found || 0)}) : t('还没有查过'),
-    body: PROV_ACTIVE.includes(ps.status) ? provenanceBars(ps) + (ps.side ? `<p class="task-side">${t('同时进行')} · ${esc(ps.side.name || ps.side.step)}${ps.side.text ? ' · ' + esc(ps.side.text) : ''}</p>${provenanceBars({progress: ps.side.progress})}` : '') : '',
+    line: ps.status === 'stopping' ? t('正在停止…') : PROV_ACTIVE.includes(ps.status) ? t('正在查找 · 第 {step}/{steps} 步', {step: (ps.index || 0) + 1, steps: ps.total || 1}) + (ps.text ? ' · ' + tb(ps.text) : '')
+      : ps.status === 'failed' ? t('上次出错：{reason}', {reason: tb(ps.reason || '')}) : pv.runs?.[0] ? t('上次 {time} · 新找到 {n}', {time: localTime(pv.runs[0].started_at), n: number(pv.runs[0].found || 0)}) : t('还没有查过'),
+    body: PROV_ACTIVE.includes(ps.status) ? provenanceBars(ps) + (ps.side ? `<p class="task-side">${t('同时进行')} · ${esc(tb(ps.side.name || ps.side.step))}${ps.side.text ? ' · ' + esc(tb(ps.side.text)) : ''}</p>${provenanceBars({progress: ps.side.progress})}` : '') : '',
     action: PROV_ACTIVE.includes(ps.status) ? `<button class="quiet small" data-prov="stop" ${ps.status === 'stopping' ? 'disabled' : ''}>${t('停止')}</button>` : provenanceArmed ? '' : `<button class="quiet small" data-prov="arm">${t('开始…')}</button>`,
-    log: pv.runs?.length ? [t('运行记录'), `<table class="settings-table"><tr><th>${t('开始')}</th><th>${t('方式')}</th><th>${t('新找到')}</th><th>${t('流量')}</th><th>${t('结果')}</th></tr>${pv.runs.slice(0, 8).map(r => `<tr><td>${esc(localTime(r.started_at))}</td><td>${r.kind === 'new' ? t('同步后') : r.kind === 'full' ? t('手动') : t('命令行')}</td><td>${number(r.found || 0)}</td><td>${(r.traffic_mb || 0).toFixed(1)} MB</td><td title="${esc(r.reason || '')}">${RUN_STATUS[r.status] || esc(r.status)}</td></tr>`).join('')}</table>`] : null});
+    log: pv.runs?.length ? [t('运行记录'), `<table class="settings-table"><tr><th>${t('开始')}</th><th>${t('方式')}</th><th>${t('新找到')}</th><th>${t('流量')}</th><th>${t('结果')}</th></tr>${pv.runs.slice(0, 8).map(r => `<tr><td>${esc(localTime(r.started_at))}</td><td>${r.kind === 'new' ? t('同步后') : r.kind === 'full' ? t('手动') : t('命令行')}</td><td>${number(r.found || 0)}</td><td>${(r.traffic_mb || 0).toFixed(1)} MB</td><td title="${esc(tb(r.reason || ''))}">${RUN_STATUS[r.status] || esc(r.status)}</td></tr>`).join('')}</table>`] : null});
   if (['running', 'done', 'error'].includes(ex.status)) list.push({key: 'export', name: t('导出图库'), busy: t('导出图库中'), active: ex.status === 'running', warn: ex.status === 'error',
-    line: ex.status === 'running' ? t('正在导出…') : ex.status === 'done' ? t('已导出 {mb} MB', {mb: (ex.bytes / 1048576).toFixed(0)}) : t('导出失败：{error}', {error: ex.error || ''}), body: '', action: ''});
+    line: ex.status === 'running' ? t('正在导出…') : ex.status === 'done' ? t('已导出 {mb} MB', {mb: (ex.bytes / 1048576).toFixed(0)}) : t('导出失败：{error}', {error: tb(ex.error || '')}), body: '', action: ''});
   return list;
 }
 // Things that wait for the person: an authorization, characters to add, a sync that needs a hand.
@@ -3429,7 +3429,7 @@ async function renderArtistAudit() {
     if (state.busy) return; state.busy = true; b.disabled = true;
     try {
       const r = await post('/api/artist/verdict', {ids: [b.dataset.uuid], artist: b.dataset.artist, verdict: b.dataset.aa || null, name: b.dataset.name});
-      setUndo(r.undo); toast(r.undo.label, true);
+      setUndo(r.undo); toast(tb(r.undo.label), true);
     } catch (e) { toast(e.message); }
     finally { state.busy = false; setUndo(state.undo); }
     renderArtistAudit();
@@ -3461,7 +3461,7 @@ async function artistLookup(body, label, after) {
     if (['running', 'stopping'].includes(s.status)) { lookupTimer = setTimeout(poll, 1500); return; }
     const found = s.found || 0;
     toast(['done', 'stopped'].includes(s.status) ? (found ? t('找到 {n} 张图的画师', {n: number(found)}) : t('没有找到新的画师'))
-      : t('查找没有完成：{reason}', {reason: s.reason || s.status}));
+      : t('查找没有完成：{reason}', {reason: tb(s.reason) || s.status}));
     after?.(found);
   };
   lookupTimer = setTimeout(poll, 1500);
@@ -3488,7 +3488,7 @@ function artistSection(d, ident) {
   // 「也许是 TA」: a group recommendation or a signature read on the picture (native/terms/src/http_artists.rs); 是 TA settles it.
   const maybe = a => `<div class="artist-row artist-maybe"><div class="artist-top"><span class="artist-maybe-name">${t('也许是 {name}', {name: `<a class="artist-name" href="${hashFor({page: 'library', artist: a.id})}" ` + TIPT + `>${esc(a.name)}</a>`})}</span>
       <span class="artist-judge"><button data-artist-verdict="yes" data-artist="${esc(a.id)}" data-name="${esc(a.name)}" title="${t('确认是 TA 画的')}">${t('是 TA')}</button><button data-artist-verdict="no" data-artist="${esc(a.id)}" data-name="${esc(a.name)}" title="${t('不是 TA 画的：不再推荐')}">${t('不是')}</button></span></div>
-      <div class="artist-reason">${esc(a.reason || '')}</div>
+      <div class="artist-reason">${esc(tb(a.reason || ''))}</div>
       ${a.homes.length ? `<div class="artist-homes">${a.homes.map(h => link(h.url, h.label, t('在 {site} 打开 TA 的主页', {site: h.site}))).join(' · ')}</div>` : ''}
       <button class="quiet artist-find-more" data-artist-more="${esc(a.id)}" data-name="${esc(a.name)}" title="${t('下载 TA 公开作品的小缩略图，在本机比对：是同一张图就能确定')}">${t('找 TA 的其他图')}</button></div>`;
   return `<section class="inspector-section"><h3 class="section-title">${t('画师')}</h3>${(d.artists || []).map(artist).join('')}${(d.maybe || []).map(maybe).join('')}${!d.artists?.length ? find : ''}
@@ -3547,11 +3547,10 @@ function drawGuide() {
 
 // ----- the problem bar: recognition missing or its self-check failed, or a sync that stopped (while it lasts, #97) -----
 function syncTrouble() {
-  // The backend's message is matched as it is sent (Chinese until the backend text is translated, #173 stage 3).
-  const s = state.sync, said = s.message ? `（${esc(s.message)}）` : '', missing = /不存在或无法访问/.test(s.message || '');
-  if (s.status === 'interrupted') return t('同步没有做完{said}：已经加入和识别的图都保留了，再同步一次会接着处理剩下的。', {said});
+  const s = state.sync, message = s.message ? `（${esc(tb(s.message))}）` : '', missing = said(s.message, '文件夹不存在或无法访问：{path}');
+  if (s.status === 'interrupted') return t('同步没有做完{said}：已经加入和识别的图都保留了，再同步一次会接着处理剩下的。', {said: message});
   if (s.status !== 'error') return '';
-  return t('同步出错了{said}：已经加入和识别的图都保留了。', {said}) + (missing
+  return t('同步出错了{said}：已经加入和识别的图都保留了。', {said: message}) + (missing
     ? t('检查来源文件夹是否还在、外接硬盘是否接上，或者在 {link} 里换一个文件夹，然后再同步一次。', {link: `<a class="link" href="#/settings/library">${t('设置 › 图库')}</a>`})
     : t('可以再同步一次；还不行的话，反馈时附上「设置 › 关于」里的诊断信息。'));
 }
@@ -3561,7 +3560,7 @@ function drawGuideNotice() {
   if (guideOn() && c?.recognition && check.status === 'idle' && !guideChecked) { guideChecked = true; guideAction({action: 'check'}).then(() => setTimeout(() => guideRefresh(true), 1500)); }
   if (guideOn() && check.status === 'checking') setTimeout(() => guideRefresh(true), 1500);
   const problem = !guideOn() ? '' : !c.recognition ? t('这个安装没有识别组件：图片会加入图库、可以手动整理，但不会自动认出角色。安装 Illustash 完整版后就能自动识别。')
-    : check.status === 'failed' ? t('识别组件没能启动（{reason}）。图片仍会加入图库；可以重新检查，或重新安装完整版。', {reason: esc(check.message || '')}) : '';
+    : check.status === 'failed' ? t('识别组件没能启动（{reason}）。图片仍会加入图库；可以重新检查，或重新安装完整版。', {reason: esc(tb(check.message || ''))}) : '';
   const trouble = guideOn() && !problem ? syncTrouble() : '';
   el.hidden = !problem && !trouble;
   el.innerHTML = problem ? `<span>${problem}</span>${c.recognition ? `<button class="quiet small" data-guide-check>${t('重新检查')}</button>` : ''}`

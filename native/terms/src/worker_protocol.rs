@@ -5,8 +5,14 @@ use serde_json::{Map, Value};
 use std::path::{Path, PathBuf};
 
 pub(crate) fn parse<T: DeserializeOwned>(value: Value, file: &Path) -> Result<T> {
-    serde_path_to_error::deserialize(value)
-        .map_err(|e| Error::Invalid(format!("{}: 字段 {}: {}", file.display(), e.path(), e.inner())))
+    serde_path_to_error::deserialize(value).map_err(|e| {
+        Error::Invalid(format!(
+            "{file}: 字段 {field}: {message}",
+            file = file.display(),
+            field = e.path(),
+            message = e.inner()
+        ))
+    })
 }
 pub(crate) fn read<T: DeserializeOwned>(file: &Path) -> Result<T> {
     let bytes = std::fs::read(file).map_err(|e| crate::error::io_at(e, file, None))?;

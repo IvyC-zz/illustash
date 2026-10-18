@@ -9,7 +9,7 @@ function harness(api, extra = {}) {
   const renders = [], errors = [];
   const c = {api, state: {route: {page: 'settings'}}, document: {activeElement: null},
     error: message => errors.push(message), readError: e => '读取失败：' + e.message, renderSettings: fetch => renders.push(fetch), ...extra};
-  vm.createContext(Object.assign(c, {t: zh})); vm.runInContext(helpers, c);
+  vm.createContext(Object.assign(c, zh.page)); vm.runInContext(helpers, c);
   return {c, renders, errors};
 }
 const tick = () => new Promise(resolve => setImmediate(resolve));
@@ -71,7 +71,7 @@ function shelfHarness(works, watch = []) {
       index: {works, watch: {works: watch, pending_tags: []}, check: {missing: [{copyright: 'tag_a'}]}}},
     $: () => root, esc: String, number: String, prefs: {get: () => ({})}, watchDraft: '', WORK_NAMES: {},
     wireWatchAdd() {}, wireFolds() {}, adoptWatch() {}};
-  vm.createContext(Object.assign(c, {t: zh}));
+  vm.createContext(Object.assign(c, zh.page));
   const start = source.indexOf('const shelf = {');
   vm.runInContext(source.slice(start, source.indexOf('async function saveWatch', start)), c);
   return {c, root};
@@ -101,7 +101,7 @@ function indexHarness(initialStatus, nextStatus) {
     settingsRequest: async path => {calls.push(path);return {state:{status:nextStatus},works:[],check:{found:1}};},
     clearTimeout() {}, setTimeout() {}, renderIndexCard() {renders.push('index');}, renderTasks() {renders.push('tasks');}, drawShelf() {},
     $: () => null, indexLine: () => '', toast() {}, refreshMeta: async () => {}, number: String};
-  vm.createContext(Object.assign(c, {t: zh}));
+  vm.createContext(Object.assign(c, zh.page));
   vm.runInContext(source.slice(source.indexOf('async function pollIndex()'),source.indexOf('// ---------- display names')),c);
   return {c,calls,renders};
 }

@@ -148,8 +148,9 @@ fn sync_tags(tx: &Connection, report: &mut Report) -> Result<()> {
     if let Some(orphan) = current.iter().find(|p| !steps.contains_key(*p)) {
         let n = current.iter().filter(|p| !steps.contains_key(*p)).count();
         return Err(Error::Conflict(format!(
-            "有 {n} 条用户标签找不到对应的历史步骤（例如图 {} 的标签 {}），不能确定挂在哪一步",
-            orphan.0, orphan.1
+            "有 {n} 条用户标签找不到对应的历史步骤（例如图 {image} 的标签 {tag}），不能确定挂在哪一步",
+            image = orphan.0,
+            tag = orphan.1
         )));
     }
     let mut assets: HashMap<String, AssetId> = HashMap::new();
@@ -209,7 +210,11 @@ fn sync_tags(tx: &Connection, report: &mut Report) -> Result<()> {
         .collect::<rusqlite::Result<_>>()?;
     if effective != current {
         let differ = current.symmetric_difference(&effective).next().expect("两边不等就有一对不同");
-        return Err(Error::Conflict(format!("图 {} 的标签 {} 在核心和 asset_tags 里不一致", differ.0, differ.1)));
+        return Err(Error::Conflict(format!(
+            "图 {image} 的标签 {tag} 在核心和 asset_tags 里不一致",
+            image = differ.0,
+            tag = differ.1
+        )));
     }
     project(tx, &touched.into_iter().collect::<Vec<_>>())?;
     Ok(())

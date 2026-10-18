@@ -51,7 +51,7 @@ fn create<F: FnOnce(&Connection) -> Result<()>>(
     }
     let folder = absolute(folder)?;
     if !folder.is_dir() {
-        return Err(Error::Invalid(format!("不是文件夹：{}", folder.display())));
+        return Err(Error::Invalid(format!("不是文件夹：{path}", path = folder.display())));
     }
     let folder = crate::app_paths::canonical(&folder).map_err(|e| crate::error::io_at(e, &folder, None))?;
     // The origin is what the user says; without one it is 「其他」, never guessed from the folder name.
@@ -90,7 +90,7 @@ pub enum NewSource {
 pub(crate) fn folder_source(id: &str, folder: &Path, preset: &str, others: &[PathBuf]) -> Result<(PathBuf, Value)> {
     let folder = absolute(folder)?;
     if !folder.is_dir() {
-        return Err(Error::Invalid(format!("不是文件夹：{}", folder.display())));
+        return Err(Error::Invalid(format!("不是文件夹：{path}", path = folder.display())));
     }
     let folder = crate::app_paths::canonical(&folder).map_err(|e| crate::error::io_at(e, &folder, None))?;
     if crate::origin::find(preset).is_none() {
@@ -98,9 +98,9 @@ pub(crate) fn folder_source(id: &str, folder: &Path, preset: &str, others: &[Pat
     }
     if let Some(other) = others.iter().find(|other| crate::app_paths::overlaps(&folder, other)) {
         return Err(Error::Invalid(format!(
-            "{} 与已添加的文件夹 {} 重叠：同一个文件夹不能添加两次，也不能和它的上级或下级文件夹同时添加",
-            folder.display(),
-            other.display()
+            "{path} 与已添加的文件夹 {other} 重叠：同一个文件夹不能添加两次，也不能和它的上级或下级文件夹同时添加",
+            path = folder.display(),
+            other = other.display()
         )));
     }
     let entry = json!({"id":id,"kind":"folder","path":text(&folder)?,"preset":preset,"preset_origin":"user"});
@@ -144,7 +144,7 @@ fn create_package<F: FnOnce(&Connection) -> Result<()>>(
     }
     if let Some(reference) = reference {
         if !reference.is_file() {
-            return Err(Error::Invalid(format!("缺少参考库 {}", reference.display())));
+            return Err(Error::Invalid(format!("缺少参考库 {path}", path = reference.display())));
         }
     }
     // Exclusive acquisition: existing directories, files, and even dangling symlinks never enter cleanup.
@@ -378,7 +378,7 @@ fn check(c: &Connection) -> Result<()> {
 
 pub(crate) fn creation_error(error: Error, reference: &Path) -> Error {
     match error {
-        Error::Invalid(message) if message == format!("缺少参考库 {}", reference.display()) => {
+        Error::Invalid(message) if message == format!("缺少参考库 {path}", path = reference.display()) => {
             Error::Invalid(format!("{message}（python -m web.library export-reference）"))
         }
         Error::IoAt { source, path, destination } => {

@@ -82,8 +82,8 @@ pub fn work_for(
     let work = new_id(id)?;
     c.execute("INSERT INTO entities(id,name,kind) VALUES (?,'','work')", [&work])?;
     c.execute(
-        "INSERT INTO work_review(entity_id,status,note) VALUES (?,'confirmed','从 Danbooru 角色的作品自动建立')",
-        [&work],
+        "INSERT INTO work_review(entity_id,status,note) VALUES (?1,'confirmed',?2)",
+        [work.as_str(), "从 Danbooru 角色的作品自动建立"],
     )?;
     c.execute("INSERT INTO links(system,key,entity_id,source) VALUES ('danbooru',?,?,'user')", [copyright, &work])?;
     c.execute(
@@ -223,8 +223,8 @@ fn apply(c: &Connection, p: &Value, touched: &mut Vec<String>) -> Result<Value> 
         if !tag.is_empty() {
             if let Some(owner) = tag_owner(c, tag, Some(&entity))? {
                 return Err(Error::Invalid(format!(
-                    "{} 已经关联了 {tag}：它们是同一个角色的话，请用「合并到另一个角色」",
-                    Shown::new().name(c, &owner)?
+                    "{name} 已经关联了 {tag}：它们是同一个角色的话，请用「合并到另一个角色」",
+                    name = Shown::new().name(c, &owner)?
                 )));
             }
             c.execute(
@@ -290,7 +290,7 @@ pub fn link_local(c: &Connection, args: &Value) -> Result<Value> {
     let Some(items) = args["items"].as_array().filter(|a| (1..=200).contains(&a.len())) else {
         return invalid("请选择要关联的角色");
     };
-    let action = begin_action(c, &format!("已把 {} 个自建角色关联到 Danbooru", items.len()))?;
+    let action = begin_action(c, &format!("已把 {n} 个自建角色关联到 Danbooru", n = items.len()))?;
     let mut before = Vec::new();
     let mut touched = Vec::new();
     for (i, item) in items.iter().enumerate() {

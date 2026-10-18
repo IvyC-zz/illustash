@@ -139,6 +139,9 @@ fn settings(
 
 fn handle(mut request: Request, host: &Host, received: u64) {
     let write = request.method().as_str() == "POST";
+    // Names for the page's language (#173): only reads take it (and the read-only suggestions, http_host_post.rs),
+    // so nothing a write stores ever depends on it.
+    let _language = crate::http_read::PageLanguage::set(header(&request, "X-Illustash-Language").filter(|_| !write));
     // Security checks precede body reads. A partial body must not hold the library lock.
     {
         let session = host.session.read().expect("app_http session lock poisoned");
@@ -337,7 +340,7 @@ fn create_folder_library(host: &Host, body: &Json, dest: &Path, name: &str) -> R
     // Non-strict resolution precedes directory/preset validation, matching new_folder_library.
     let folder = crate::app_paths::resolve(&folder)?;
     if !folder.is_dir() {
-        return Err(Error::Invalid(format!("不是文件夹：{}", folder.display())));
+        return Err(Error::Invalid(format!("不是文件夹：{path}", path = folder.display())));
     }
     let preset = match body.get("preset").filter(|v| truthy(v)) {
         Some(Json::Scalar(serde_json::Value::String(value))) => Some(value.as_str()),
@@ -568,9 +571,9 @@ pub(crate) fn run(args: &[String]) -> Result<u8> {
         },
         |error| match &upgrade_backup {
             Some(backup) => format!(
-                "升级已提交，没能记进最近图库：{}；升级前备份：{}",
-                crate::app_libraries::unlisted_reason(&error),
-                backup.display()
+                "升级已提交，没能记进最近图库：{reason}；升级前备份：{backup}",
+                reason = crate::app_libraries::unlisted_reason(&error),
+                backup = backup.display()
             ),
             None => crate::app_libraries::unlisted_reason(&error),
         },

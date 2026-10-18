@@ -42,7 +42,7 @@ fn next_test_key(counter: &std::path::Path) -> Result<u64> {
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
     while std::fs::OpenOptions::new().write(true).create_new(true).open(&lock).is_err() {
         if std::time::Instant::now() > deadline {
-            return Err(Error::Invalid(format!("测试键计数器被占用：{}", lock.display())));
+            return Err(Error::Invalid(format!("测试键计数器被占用：{path}", path = lock.display())));
         }
         std::thread::sleep(std::time::Duration::from_millis(1));
     }
@@ -708,7 +708,7 @@ pub fn import_package_with(
 ) -> Result<Imported> {
     let m = &pkg.manifest;
     if m.library_id != library_id {
-        return invalid(format!("证据包属于图库 {}，不是 {library_id}", m.library_id));
+        return invalid(format!("证据包属于图库 {owner}，不是 {library_id}", owner = m.library_id));
     }
     let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
     if let Some(id) = tx
@@ -728,7 +728,11 @@ pub fn import_package_with(
     let mut assets: HashMap<&AssetRef, AssetId> = HashMap::new();
     for outcome in &m.assets {
         let Some(id) = live_asset(&tx, &outcome.asset, new_assets)? else {
-            return invalid(format!("图 {}:{} 不在这个图库里或已移除", outcome.asset.namespace, outcome.asset.id));
+            return invalid(format!(
+                "图 {namespace}:{id} 不在这个图库里或已移除",
+                namespace = outcome.asset.namespace,
+                id = outcome.asset.id
+            ));
         };
         assets.insert(&outcome.asset, id);
     }
@@ -746,8 +750,8 @@ pub fn import_package_with(
     let mut snapshot_rows: BTreeSet<i64> = BTreeSet::new();
     for info in &pkg.terms {
         let at = |e: Error| match e {
-            Error::Invalid(msg) => Error::Invalid(format!("terms.jsonl 第 {} 行：{msg}", info.line)),
-            Error::Conflict(msg) => Error::Conflict(format!("terms.jsonl 第 {} 行：{msg}", info.line)),
+            Error::Invalid(msg) => Error::Invalid(format!("terms.jsonl 第 {n} 行：{msg}", n = info.line)),
+            Error::Conflict(msg) => Error::Conflict(format!("terms.jsonl 第 {n} 行：{msg}", n = info.line)),
             e => e,
         };
         let (term, _) =
@@ -766,8 +770,8 @@ pub fn import_package_with(
     }
     for row in &pkg.rows {
         let at = |e: Error| match e {
-            Error::Invalid(msg) => Error::Invalid(format!("evidence.jsonl 第 {} 行：{msg}", row.line)),
-            Error::Conflict(msg) => Error::Conflict(format!("evidence.jsonl 第 {} 行：{msg}", row.line)),
+            Error::Invalid(msg) => Error::Invalid(format!("evidence.jsonl 第 {n} 行：{msg}", n = row.line)),
+            Error::Conflict(msg) => Error::Conflict(format!("evidence.jsonl 第 {n} 行：{msg}", n = row.line)),
             e => e,
         };
         let score = row.score.as_ref().map(|s| (s.value, s.metric.as_str()));
@@ -898,8 +902,10 @@ pub(crate) fn add_evidence(conn: &Connection, e: &NewEvidence) -> Result<bool> {
         Some(fp) if fp == fingerprint => return Ok(false),
         Some(_) => {
             return Err(Error::Conflict(format!(
-                "{} {} 第 {} 版对这个目标已有不同的结果；算法或模型变了请升版本号",
-                e.source, e.method, e.version
+                "{source} {method} 第 {version} 版对这个目标已有不同的结果；算法或模型变了请升版本号",
+                source = e.source,
+                method = e.method,
+                version = e.version
             )))
         }
         None => {}
@@ -983,7 +989,9 @@ fn resolve<'p>(
                 *created += 1;
                 id
             }
-            None => return invalid(format!("证据包不能新建「{}」词条（{system}:{key}）", kind.policy().name)),
+            None => {
+                return invalid(format!("证据包不能新建「{kind}」词条（{system}:{key}）", kind = kind.policy().name))
+            }
         },
     };
     let hit = (id, term_key(conn, id)?);

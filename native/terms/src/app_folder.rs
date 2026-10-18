@@ -22,7 +22,7 @@ pub(crate) fn scan(
 ) -> Result<Scan> {
     let root = Path::new(source["path"].as_str().ok_or_else(|| Error::Invalid("来源缺少路径".into()))?);
     if !root.is_dir() {
-        return Err(Error::Invalid(format!("文件夹不存在或无法访问：{}", root.display())));
+        return Err(Error::Invalid(format!("文件夹不存在或无法访问：{path}", path = root.display())));
     }
     let sid = source["id"].as_str().ok_or_else(|| Error::Invalid("来源缺少 id".into()))?;
     let preset = source["preset"].as_str().unwrap_or("other");

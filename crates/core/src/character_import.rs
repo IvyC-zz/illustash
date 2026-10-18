@@ -314,8 +314,8 @@ impl Album<'_> {
             let anchor: i64 =
                 self.c.prepare_cached("SELECT coalesce(max(id),0) FROM actions")?.query_row([], |r| r.get(0))?;
             self.c
-                .prepare_cached("INSERT INTO term_batches(kind,anchor,label) VALUES ('album',?,'相册导入')")?
-                .execute([anchor])?;
+                .prepare_cached("INSERT INTO term_batches(kind,anchor,label) VALUES ('album',?,?)")?
+                .execute(rusqlite::params![anchor, "相册导入"])?;
             self.batch = Some((self.c.last_insert_rowid(), anchor));
         }
         let (b, a) = self.batch.expect("有批次");

@@ -10,19 +10,23 @@ fn failure(context: &str, error: impl std::fmt::Display) -> Error {
 static RUNTIME: OnceLock<std::result::Result<std::path::PathBuf, String>> = OnceLock::new();
 /// Call before constructing sessions; one subprocess binds one installed runtime.
 pub fn initialise(runtime: &Path) -> Result<()> {
-    let requested = runtime.canonicalize().map_err(|e| failure(&format!("运行库 {}", runtime.display()), e))?;
+    let requested =
+        runtime.canonicalize().map_err(|e| failure(&format!("运行库 {path}", path = runtime.display()), e))?;
     let loaded = RUNTIME.get_or_init(|| {
         // The binding's loader panics on invalid ABI/symbols. Contain it at the worker boundary
         // and retain the explicit path in the diagnostic rather than falling back to PATH.
         std::panic::catch_unwind(|| ort::init_from(requested.display()).commit())
-            .map_err(|_| format!("无法加载 {}（需要 ONNX Runtime >=1.22，含 OrtGetApiBase）", requested.display()))
+            .map_err(|_| {
+                format!("无法加载 {path}（需要 ONNX Runtime >=1.22，含 OrtGetApiBase）", path = requested.display())
+            })
             .and_then(|result| result.map(|_| requested.clone()).map_err(|e| e.to_string()))
     });
     match loaded {
         Ok(loaded) if loaded == &requested => Ok(()),
-        Ok(loaded) => {
-            Err(failure("运行库", format!("进程已绑定 {}，拒绝切换 {}", loaded.display(), requested.display())))
-        }
+        Ok(loaded) => Err(failure(
+            "运行库",
+            format!("进程已绑定 {loaded}，拒绝切换 {path}", loaded = loaded.display(), path = requested.display()),
+        )),
         Err(error) => Err(failure("运行库", error)),
     }
 }

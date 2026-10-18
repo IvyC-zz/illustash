@@ -36,7 +36,8 @@ impl ModelFiles {
     }
 }
 pub(crate) fn hash(path: &Path, check: &dyn Fn() -> Result<()>) -> Result<String> {
-    let mut file = fs::File::open(path).map_err(|e| Error::Invalid(format!("模型/锚点 {}: {e}", path.display())))?;
+    let mut file =
+        fs::File::open(path).map_err(|e| Error::Invalid(format!("模型/锚点 {path}: {e}", path = path.display())))?;
     let mut digest = Sha256::new();
     let mut buffer = [0; 65536];
     loop {

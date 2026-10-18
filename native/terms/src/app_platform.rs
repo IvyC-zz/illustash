@@ -3,7 +3,13 @@
 use crate::{http_json::Json, Error, Result};
 use std::time::Duration;
 
-pub fn choose(kind: &str, multiple: bool, stopping: &dyn Fn() -> bool) -> Result<Json> {
+/// `translate` gives the fallback chooser's prompt in the page's language (app_preferences::tr).
+pub fn choose(
+    kind: &str,
+    multiple: bool,
+    stopping: &dyn Fn() -> bool,
+    translate: &dyn Fn(&str) -> String,
+) -> Result<Json> {
     let choice_kind = match kind {
         "folder" => illustash_platform::picker::Kind::Folder,
         "library" => illustash_platform::picker::Kind::Library,
@@ -35,7 +41,8 @@ pub fn choose(kind: &str, multiple: bool, stopping: &dyn Fn() -> bool) -> Result
         }
         return Ok(selection(kind, paths, multiple));
     }
-    let choice = illustash_platform::picker::choose(choice_kind, multiple, stopping, Duration::from_secs(600))?;
+    let title = translate(choice_kind.title());
+    let choice = illustash_platform::picker::choose(choice_kind, &title, multiple, stopping, Duration::from_secs(600))?;
     let paths = match choice {
         illustash_platform::picker::Choice::Selected(paths) => paths,
         illustash_platform::picker::Choice::Cancelled => vec![],

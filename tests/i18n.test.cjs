@@ -1,7 +1,8 @@
 // Translation consistency (#173, #182): every t('…') literal and every data-t / data-t-attr text in the page matches
 // each table in web/static/locales/<code>.json, which has no keys the code no longer uses, and whose placeholders,
 // contexts and plural forms fit the Chinese. Text not yet translated falls back to Chinese: it is counted and reported
-// per language, never a failure.
+// per language, never a failure. The backend's own text (#173 stage 3) is a Chinese string literal in its Rust source
+// (native/terms/src, crates/*/src); the page translates it with tb(), and its tables may hold those literals too.
 const {test} = require('node:test');
 const assert = require('node:assert/strict');
 const {readFileSync, readdirSync} = require('node:fs');
@@ -46,9 +47,74 @@ function markupKeys(html) {
   return keys;
 }
 
+// Every Chinese string literal of the backend's Rust source outside its test modules, as the program holds it.
+const ROOT = path.join(__dirname, '..');
+function rustFiles() {
+  const out = [];
+  const walk = dir => {
+    for (const entry of readdirSync(dir, {withFileTypes: true})) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) { if (entry.name !== 'tests') walk(full); }
+      else if (entry.name.endsWith('.rs') && entry.name !== 'tests.rs') out.push(full);
+    }
+  };
+  walk(path.join(ROOT, 'native/terms/src'));
+  for (const crate of readdirSync(path.join(ROOT, 'crates'))) walk(path.join(ROOT, 'crates', crate, 'src'));
+  return out.sort();
+}
+function rustUnescape(body) {
+  return body.replace(/\\(?:\n\s*|u\{([0-9a-fA-F]+)\}|x([0-9a-fA-F]{2})|(.))/g, (all, code, hex, c) =>
+    code ? String.fromCodePoint(parseInt(code, 16)) : hex ? String.fromCharCode(parseInt(hex, 16))
+      : c === undefined ? '' : ({n: '\n', t: '\t', r: '\r', 0: '\0'})[c] ?? c);
+}
+// [file, line, text, the code just before it] for each literal; comments and char literals are skipped.
+function rustLiterals(file) {
+  let src = readFileSync(file, 'utf8');
+  const tests = src.search(/\n#\[cfg\(test\)\]\s*\n\s*(?:pub(?:\(crate\))? )?mod \w+\s*\{/);
+  if (tests >= 0) src = src.slice(0, tests);
+  const out = [];
+  let line = 1;
+  for (let i = 0; i < src.length;) {
+    const c = src[i], rest = src.slice(i, i + 12);
+    if (c === '\n') { line++; i++; continue; }
+    if (rest.startsWith('//')) { const j = src.indexOf('\n', i); i = j < 0 ? src.length : j; continue; }
+    if (rest.startsWith('/*')) { const j = src.indexOf('*/', i); line += src.slice(i, j).split('\n').length - 1; i = j + 2; continue; }
+    const raw = !/[\w]/.test(src[i - 1] || '') && rest.match(/^b?r(#*)"/);
+    if (raw) {
+      const start = i + raw[0].length, end = src.indexOf('"' + raw[1], start), text = src.slice(start, end);
+      out.push([file, line, text, src.slice(Math.max(0, i - 60), i)]);
+      line += text.split('\n').length - 1; i = end + 1 + raw[1].length; continue;
+    }
+    if (c === "'") { const char = rest.match(/^'(?:\\u\{[0-9a-fA-F]+\}|\\.|[^\\'])'/); i += char ? char[0].length : 1; continue; }
+    if (c === '"') {
+      let j = i + 1;
+      while (src[j] !== '"') j += src[j] === '\\' ? 2 : 1;
+      const body = src.slice(i + 1, j);
+      out.push([file, line, rustUnescape(body), src.slice(Math.max(0, i - 60), i)]);
+      line += body.split('\n').length - 1; i = j + 1; continue;
+    }
+    i++;
+  }
+  return out.filter(([, , text]) => /\p{Script=Han}/u.test(text));
+}
+const rust = rustFiles().flatMap(rustLiterals);
+// The release channel the about page shows comes from the build's metadata, not a literal.
+const application = path.join(ROOT, 'native/terms/application.json');
+rust.push([application, 1, JSON.parse(readFileSync(application, 'utf8')).channel, '']);
+const backendKeys = new Set(rust.map(([, , text]) => text));
+// Backend text that never reaches the page: the command line, test harnesses, logs and panics. Only the coverage
+// report leaves it out; a table may still translate it.
+const NOT_SHOWN = /^(?:native\/terms\/src\/(?:cli|read_harness)\.rs|native\/terms\/src\/bin\/|crates\/iqdb\/)/;
+// SQL is left out too, and the pieces http_app.rs parses old undo labels with (" 张移出 ").
+const shownBackend = () => new Set(rust.filter(([file, , text, before]) => !NOT_SHOWN.test(path.relative(ROOT, file).split(path.sep).join('/'))
+  && !/(?:e?print(?:ln)?!|panic!|unreachable!|expect|assert\w*!)\(\s*$/.test(before)
+  && !/\b(?:CREATE|SELECT|INSERT|UPDATE|DELETE)\b/.test(text) && text.trim() === text).map(([, , text]) => text));
+
 function usedKeys() {
   const used = new Set(), dynamic = [];
   for (const name of scripts) { const found = scriptKeys(name); found.keys.forEach(k => used.add(k)); dynamic.push(...found.dynamic); }
+  // i18n.js only translates what it is handed, apart from the joiner of backend messages.
+  used.add('join\u0004；');
   markupKeys(read('index.html')).forEach(k => used.add(k));
   return {used, dynamic};
 }
@@ -97,10 +163,12 @@ test('every table matches the code: no unused keys, matching placeholders, plura
     let translated = 0;
     for (const [key, value] of Object.entries(table)) {
       if (key.startsWith('@')) { assert.equal(key, '@name', `${code}.json: unknown ${key}`); continue; }
-      assert.ok(used.has(key), `${code}.json has a key no code uses: ${key}`);
-      if (checkEntry(code, key, value)) translated++;
+      assert.ok(used.has(key) || backendKeys.has(key), `${code}.json has a key no code uses: ${key}`);
+      if (checkEntry(code, key, value) && used.has(key)) translated++;
     }
     console.log(`${code} (${table['@name']}): ${translated}/${used.size} texts translated, ${used.size - translated} fall back to Chinese`);
+    const backend = [...shownBackend()], done = backend.filter(key => table[key] && (typeof table[key] === 'string' || table[key].other));
+    console.log(`${code} (${table['@name']}): backend ${done.length}/${backend.length} texts translated, ${backend.length - done.length} fall back to Chinese`);
   }
 });
 
@@ -185,9 +253,8 @@ test('t() translates, falls back to Chinese and fills placeholders', () => {
 });
 
 // What the page decides must not hang on the words it shows: on an English page a test against Chinese text never
-// matches. Use a status field instead. Matching a message the backend sends is allowed only where listed, until the
-// backend sends codes (#173 stage 3).
-const BACKEND_MESSAGES = ['不存在或无法访问'];
+// matches. Use a status field instead, or for a message the backend sends, said(text, '模板'): the backend's text
+// stays Chinese in any page language and its template is its code, which must be a literal of the backend's source.
 test('stylesheets show no Chinese of their own', () => {
   // CSS cannot call t(): generated text comes from an attribute the page fills, as content: attr(data-more).
   for (const name of readdirSync(STATIC).filter(n => n.endsWith('.css')))
@@ -198,11 +265,61 @@ test('no logic tests the Chinese text the page shows', () => {
     read(name).split('\n').forEach((line, i) => {
       if (/^\s*\/\//.test(line)) return;
       for (const m of line.matchAll(/\/((?:\\.|[^/\n])*\p{Script=Han}(?:\\.|[^/\n])*)\/[a-z]*\.test\(|\.(?:includes|startsWith|endsWith|indexOf)\(\s*(['"])([^'"]*\p{Script=Han}[^'"]*)\2/gu)) {
-        const text = m[1] ?? m[3];
-        assert.ok(BACKEND_MESSAGES.includes(text), `${name}:${i + 1} tests Chinese text: ${m[0]}`);
+        assert.fail(`${name}:${i + 1} tests Chinese text: ${m[0]}`);
       }
     });
   }
+});
+
+test('the backend messages the page tests are templates of the backend', () => {
+  let count = 0;
+  for (const name of scripts) {
+    const source = read(name);
+    for (const call of source.matchAll(/(?<![\w.$])said\(/g)) {
+      if (/^\s*\/\//.test(source.slice(source.lastIndexOf('\n', call.index) + 1, call.index))) continue;
+      const literal = source.slice(call.index).match(/^said\([^,()]*(?:\([^()]*\))?[^,()]*,\s*(['"])((?:\\.|(?!\1)[^\\\n])*)\1\s*\)/);
+      assert.ok(literal, `${name}:${source.slice(0, call.index).split('\n').length}: said() takes a quoted template`);
+      const template = unescape(literal[1], literal[2]);
+      assert.ok(backendKeys.has(template), `${name}: the backend has no such text: ${template}`);
+      count++;
+    }
+  }
+  assert.ok(count > 0);
+});
+
+test('backend text: an exact entry, else the most specific template; what placeholders held is translated too', () => {
+  const table = {'同步失败：{reason}': 'Sync failed: {reason}', '文件夹不存在或无法访问：{path}': 'Folder missing or unreadable: {path}',
+    '已将 {n} 张移出 {name}': {one: 'Removed {n} picture from {name}', other: 'Removed {n} pictures from {name}'},
+    '已将 {n} 张移出 {name}（跳过 {skipped} 张）': 'Removed {n} from {name} ({skipped} skipped)', '{a}：{b}': '{a}: {b}',
+    '其他': 'Other', '会话已过期，请刷新页面': 'Session expired, reload the page', 'join\u0004；': '; '};
+  const en = page('en', [], {en: table}), zh = page('zh-CN', [], {en: table});
+  const tb = text => vm.runInContext('tb', en.context)(text), said = (...a) => vm.runInContext('said', en.context)(...a);
+  assert.equal(tb('其他'), 'Other');
+  assert.equal(tb('会话已过期，请刷新页面'), 'Session expired, reload the page');
+  assert.equal(tb('同步失败：文件夹不存在或无法访问：/合成/甲'), 'Sync failed: Folder missing or unreadable: /合成/甲');
+  assert.equal(tb('已将 1 张移出 雪'), 'Removed 1 picture from 雪');
+  assert.equal(tb('已将 3 张移出 雪'), 'Removed 3 pictures from 雪');
+  assert.equal(tb('已将 3 张移出 雪（跳过 1 张）'), 'Removed 3 from 雪 (skipped 1)'.replace('skipped 1', '1 skipped'));
+  // A template with no Chinese wording of its own never matches; text no template fits stays as sent.
+  assert.equal(tb('甲：乙'), '甲：乙');
+  // {n} only stands for a number.
+  assert.equal(tb('已将 几 张移出 雪'), '已将 几 张移出 雪');
+  assert.equal(tb('没有模板的话'), '没有模板的话');
+  assert.equal(tb('Plain English'), 'Plain English');
+  assert.equal(tb(null), null);
+  assert.equal(vm.runInContext('tb', zh.context)('已将 3 张移出 雪'), '已将 3 张移出 雪');
+  // said() reads the backend's text as sent, whatever the page's language.
+  assert.ok(said('会话已过期，请刷新页面', '会话已过期，请刷新页面'));
+  assert.ok(said('文件夹不存在或无法访问：/合成/甲', '文件夹不存在或无法访问：{path}'));
+  assert.ok(said('同步失败：文件夹不存在或无法访问：/合成/甲', '文件夹不存在或无法访问：{path}'));
+  assert.ok(!said('文件夹不存在或无法访问：/合成/甲', '同步失败：{reason}'));
+  assert.ok(!said('不是：会话已过期，请刷新页面了', '会话已过期，请刷新页面'));
+  // Messages joined with ；, each translated.
+  assert.equal(tb('其他；已将 1 张移出 雪；没有模板'), 'Other; Removed 1 picture from 雪; 没有模板');
+  // A message that has a ； of its own stays whole.
+  const semi = page('en', [], {en: {...table, '甲；乙 {n} 张': 'A; B {n}', '丙 {n} 处': 'C {n}'}}).context;
+  assert.equal(vm.runInContext('tb', semi)('丙 2 处；甲；乙 3 张'), 'C 2; A; B 3');
+  assert.ok(!said(undefined, '其他'));
 });
 
 test('marked page text is translated only on a page in another language', () => {

@@ -219,7 +219,7 @@ pub(crate) fn unlisted_reason(error: &Error) -> String {
             } else {
                 source.to_string()
             };
-            format!("最近图库记录（{}）写不进去：{why}", file.display())
+            format!("最近图库记录（{path}）写不进去：{why}", path = file.display())
         }
         other => other.to_string(),
     }

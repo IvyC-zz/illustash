@@ -85,7 +85,7 @@ pub(crate) fn action_label(c: &Connection, r: &Json) -> Result<String> {
     });
     if let Some(n) = swap.filter(|_| ids.len() == 2) {
         if let (Some(left), Some(right)) = (entity_name(c, &ids[0])?, entity_name(c, &ids[1])?) {
-            return Ok(format!("已将 {n} 张从 {left} 换成 {right}"));
+            return Ok(format!("已将 {n} 张从 {name} 换成 {other}", name = left, other = right));
         }
     }
     let sweep = label

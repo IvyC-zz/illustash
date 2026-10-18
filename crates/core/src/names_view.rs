@@ -1169,7 +1169,12 @@ pub fn choose_key(c: &Connection, kind: &str, key: &str) -> Result<Choice> {
 pub fn verify_choice(c: &Connection, kind: &str, key: &str, choice: &Choice) -> Result<()> {
     let full = View::load_uncounted(c, false)?.choose(kind, key)?;
     if *choice != full {
-        return Err(Error::Conflict(format!("按键选名与整库载入不一致（{kind} {key:?}）：{choice:?} ≠ {full:?}")));
+        return Err(Error::Conflict(format!(
+            "按键选名与整库载入不一致（{kind} {key}）：{choice} ≠ {full}",
+            key = format_args!("{key:?}"),
+            choice = format_args!("{choice:?}"),
+            full = format_args!("{full:?}")
+        )));
     }
     Ok(())
 }

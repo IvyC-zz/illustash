@@ -267,8 +267,8 @@ fn edit_work(c: &Connection, args: &Value) -> Result<Value> {
                 Some(Value::String(_)) => {
                     c.execute("UPDATE links SET current=0 WHERE entity_id=? AND system='danbooru'", [&ident])?;
                     c.execute(
-                        "UPDATE work_review SET status='confirmed',note='外部链接已由用户清空' WHERE entity_id=?",
-                        [&ident],
+                        "UPDATE work_review SET status='confirmed',note=?2 WHERE entity_id=?1",
+                        [ident.as_str(), "外部链接已由用户清空"],
                     )?;
                 }
                 _ => {}
@@ -453,8 +453,10 @@ fn work_evidence(c: &Connection, args: &Value) -> Result<Value> {
         }
         let mut note = None;
         if choices.len() != 1 {
-            note =
-                Some(format!("多个作品上级，需人工选择：{}", choices.iter().cloned().collect::<Vec<_>>().join(", ")));
+            note = Some(format!(
+                "多个作品上级，需人工选择：{works}",
+                works = choices.iter().cloned().collect::<Vec<_>>().join(", ")
+            ));
         } else {
             let parent_tag = choices.iter().next().expect("一个");
             let Some(parent) = ids.get(parent_tag).cloned() else { continue };

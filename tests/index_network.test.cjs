@@ -7,7 +7,7 @@ const helper = source.slice(source.indexOf('async function checkIndex()'), sourc
 function harness(confirmAction) {
   const calls = [];
   const c = {state: {token: 'library-a'}, confirmAction, post: async (path, body) => { calls.push({path, body}); return {state: {status: 'checking'}}; }};
-  vm.createContext(Object.assign(c, {t: zh})); vm.runInContext(helper, c);
+  vm.createContext(Object.assign(c, zh.page)); vm.runInContext(helper, c);
   return {c, calls};
 }
 test('cancel sends no check; every accepted run requests consent again', async () => {
@@ -29,7 +29,7 @@ test('the task button is usable immediately after cancelled confirmation', async
   const code = source.slice(start, source.indexOf("document.addEventListener('click', e => { if (taskPanel.open", start));
   let click; const button = {dataset: {task: 'index'}, disabled: false};
   const c = {$: () => ({addEventListener: (_, handler) => { click = handler; }}), checkIndex: async () => false, taskTick: () => assert.fail('cancel starts no task'), toast: () => assert.fail('cancel is not an error')};
-  vm.createContext(Object.assign(c, {t: zh})); vm.runInContext(code, c);
+  vm.createContext(Object.assign(c, zh.page)); vm.runInContext(code, c);
   await click({stopPropagation() {}, target: {closest: () => button}});
   assert.equal(button.disabled, false);
 });

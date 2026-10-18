@@ -20,7 +20,7 @@ function render(exportState) {
       info: {name: '合成图库', path: '/tmp/synthetic.pilib', sources: [], test: null},
       current: '/tmp/synthetic.pilib', home: '/tmp', libraries: [], export: exportState}},
   };
-  vm.createContext(Object.assign(c, {t: zh}));
+  vm.createContext(Object.assign(c, zh.page));
   vm.runInContext(section('function renderLibrariesCard()', '// Gallery pages have no Tauri dialog permission'), c);
   c.renderLibrariesCard();
   return card.innerHTML;
