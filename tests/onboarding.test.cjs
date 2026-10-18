@@ -1,34 +1,26 @@
 // #96: the first-run guide, taught on the real interface. Which library starts it, what the checklist ticks after each
 // change, and which question is asked when.
-const {test} = require('node:test');
+const {test, before} = require('node:test');
 const assert = require('node:assert/strict');
-const {readFileSync} = require('node:fs');
-const vm = require('node:vm');
-const zh = require('./i18n_zh.cjs');   // t() of a Chinese page (#173)
-const source = readFileSync(require('node:path').join(__dirname, '../web/static/app.js'), 'utf8');
-const section = (a, b) => source.slice(source.indexOf(a), source.indexOf(b, source.indexOf(a)));
-const element = () => ({hidden: false, innerHTML: '', dataset: {}, style: {}, offsetWidth: 300, offsetHeight: 120,
-  classList: {add() {}, remove() {}, toggle() {}}, addEventListener() {}, querySelector: () => element(), querySelectorAll: () => []});
+const web = require('./web.cjs');   // core/ and ui/guide.js (#199)
 const plain = v => JSON.parse(JSON.stringify(v));
+let guideUi, core;
+before(async () => { await web.ready(); guideUi = await web.load('ui/guide.js'); });
 
-function guide({status = 'active', step = 'welcome', ticked = [], seen = [], hidden = false, results = {}, works, names, sync = {status: 'done'}, route = 'home', index, updates, tasks = []} = {}) {
-  const nodes = {}, posted = [];
-  const c = {
-    state: {token: 't', route: {page: route}, sync, names, index, updates}, posted, nodes, taskList: () => tasks,
-    $: id => nodes[id] ||= element(), esc: s => String(s ?? ''), number: n => String(n), toast() {}, shortcut: k => '⌘' + k,
-    SYNC_ACTIVE: ['scanning', 'recognising', 'importing'], syncLine: s => 'line:' + s.status, WORK_NAMES: {blue_archive: '蔚蓝档案'},
-    setTimeout: () => 0, requestAnimationFrame() {}, addEventListener() {}, innerWidth: 1200, innerHeight: 800, go() {},
-    document: {querySelector: () => null, getElementById: () => null, addEventListener() {}},
-    post: async (path, body) => { posted.push([path, body]); return {id: 'w1', watch: {works: ['w1']}}; },
-    api: async (path, options) => {
-      if (options?.method === 'POST') { const body = JSON.parse(options.body); posted.push(['/api/onboarding', body]); return c.reply; }
-      return c.reply;
-    },
+// The guide (ui/guide.js) on a fake page; the backend answers with `reply`. A task that runs is a sync that runs.
+function guide({status = 'active', step = 'welcome', ticked = [], seen = [], hidden = false, results = {}, works, names, sync = {status: 'done'}, route = 'home', index, updates} = {}) {
+  const posted = [];
+  core = web.core(); core.session.token = 't';
+  Object.assign(core.state, {route: {page: route}, sync, names, index, updates, guide: undefined});
+  const {el} = web.fakePage();
+  globalThis.requestAnimationFrame = () => 0;
+  const c = {...guideUi, state: core.state, posted, nodes: new Proxy({}, {get: (_, id) => el(id)}),
     reply: {guide: {status, step, ticked, seen, hidden}, capability: {recognition: true, index: true, anchors: 0, check: {status: 'ok'}},
-      results: {total: 0, recognized: 0, with_character: 0, unmatched: 0, characters: 0, ...results}, works},
+      results: {total: 0, recognized: 0, with_character: 0, unmatched: 0, characters: 0, ...results}, works}};
+  globalThis.fetch = async (path, options) => {
+    if (options?.method === 'POST') posted.push([path, JSON.parse(options.body)]);
+    return {status: 200, ok: true, json: async () => path.startsWith('/api/onboarding') ? c.reply : {}};
   };
-  vm.createContext(Object.assign(c, zh.page));
-  vm.runInContext(section('// ---------- 新图库的首次引导', '(async () => {'), c);
   return c;
 }
 
@@ -119,7 +111,7 @@ test('a newer release is offered outside the guide, but not while a task runs or
   assert.match(c.nodes.nudge.innerHTML, /有新版本 0\.2\.0/);
   assert.match(c.nodes.nudge.innerHTML, /现在是 0\.1\.0/);
   assert.match(c.nodes.nudge.innerHTML, /data-nudge="open"/);
-  const busy = guide({status: 'off', updates, tasks: [{key: 'sync', active: true}]});
+  const busy = guide({status: 'off', updates, sync: {status: 'recognising'}});
   await busy.loadGuide();
   busy.drawNudge();
   assert.equal(busy.nodes.nudge.innerHTML, '', 'not while a task runs');
@@ -134,7 +126,7 @@ test('a newer release is offered outside the guide, but not while a task runs or
 test('the tour speaks of the running sync at the tasks stop', async () => {
   const c = guide({step: 'tasks', sync: {status: 'recognising'}, results: {total: 30}});
   await c.loadGuide();
-  assert.match(c.tourStop('tasks').text, /line:recognising/);
+  assert.ok(c.tourStop('tasks').text.includes(core.syncLine(c.state.sync)));
   assert.match(c.tourStop('welcome').next, /带我看看/);
 });
 

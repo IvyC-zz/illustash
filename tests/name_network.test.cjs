@@ -1,27 +1,31 @@
 // Run with: node --test tests/name_network.test.cjs
-const {test} = require('node:test');
+const {test, before} = require('node:test');
+const web = require('./web.cjs');   // core/ and ui/settings.js (#199)
+let settings;
+before(async () => { await web.ready(); settings = await web.load('ui/settings.js'); });
 const assert = require('node:assert/strict');
-const {readFileSync} = require('node:fs');
-const vm = require('node:vm');
-const zh = require('./i18n_zh.cjs');   // t() of a Chinese page (#173)
-const source = readFileSync(require('node:path').join(__dirname, '../web/static/app.js'), 'utf8');
-const code = source.slice(source.indexOf('// Name text queries'), source.indexOf('// 设置 › 网络与隐私'));
-
+// Lookups are core/settings.js (remoteNames, remoteNote); asking for consent is ui/settings.js setNamesNetwork(), with the
+// page's own dialog (ui/dialog.js) and toast (ui/dom.js), here on a fake page.
 function harness({fail, confirm = true} = {}) {
-  const calls = [], toasts = [], dialogs = [];
-  const context = {
-    state: {names: {counts: {}}},
-    async api(path, options) {
-      calls.push([path, options?.body]);
-      if (fail) throw Object.assign(new Error(fail), {said: fail});   // as api() throws
-      return path === '/api/names' ? {network: {authorized: JSON.parse(options.body).allow}} : [{tag: 'synthetic'}];
-    },
-    async confirmAction(message, title) { dialogs.push(title); return confirm; },
-    toast(m) { toasts.push(m); },
-    document: {addEventListener() {}},
+  const calls = [], toasts = [], dialogs = [], core = web.core(), nodes = {};
+  core.state.names = {counts: {}}; core.state.route = {page: 'library'};
+  globalThis.fetch = async (path, options) => {
+    calls.push([path, options?.body]);
+    if (fail) return {status: 400, ok: false, json: async () => ({error: fail})};
+    return {status: 200, ok: true, json: async () => path === '/api/names' ? {network: {authorized: JSON.parse(options.body).allow}} : [{tag: 'synthetic'}]};
   };
-  vm.createContext(Object.assign(context, zh.page));
-  vm.runInContext(code + ';this.remoteNames = remoteNames; this.remoteNote = remoteNote; this.setNamesNetwork = setNamesNetwork;', context);
+  const element = () => ({hidden: true, set textContent(v) { if (this === nodes.toastText) toasts.push(v); }});
+  globalThis.document = {getElementById: id => nodes[id] ||= element(), body: {append(d) {
+    dialogs.push(d.querySelector('h2').textContent);
+    setImmediate(() => d.close(confirm ? 'ok' : ''));   // the person answers
+  }}, createElement() {
+    const parts = {};
+    return {returnValue: '', setAttribute() {}, querySelector: selector => parts[selector] ||= {}, showModal() {}, remove() {},
+      close(value = '') { this.returnValue = value; this.onclose(); }};
+  }};
+  const setTimeout = globalThis.setTimeout; globalThis.setTimeout = () => 0;
+  const context = {state: core.state, remoteNames: core.remoteNames, remoteNote: core.remoteNote,
+    setNamesNetwork: async allow => { try { return await settings.setNamesNetwork(allow); } finally { globalThis.setTimeout = setTimeout; } }};
   return {context, calls, toasts, dialogs};
 }
 
@@ -57,62 +61,49 @@ test('granting asks first and sends nothing when declined; revoking does not ask
 });
 
 test('saving or clearing model settings keeps the grant and revoke control available', async () => {
+  // The model card is ui/settings.js; saving goes through core/settings.js saveModelApi().
+  const {renderModelCard} = await web.load('ui/settings.js');
   for (const authorized of [true, false]) {
-    const network = {authorized, this_run: false, granted_at: authorized ? 'synthetic-time' : null};
-    const controls = Object.fromEntries(['modelCard', 'modelSave', 'modelClear', 'modelTest', 'modelBase', 'modelName', 'modelKey']
-      .map(id => [id, {value: ''}]));
-    const calls = [], rendered = [];
-    const context = {
-      state: {names: {network, model_api: {configured: true}}},
-      $(id) { return controls[id]; },
-      esc(value) { return value; }, cardHead() { return ''; }, setSettingsHTML() { return true; },
-      async post(path, body) { calls.push([path, body]); return {model_api: {configured: body.key !== null}, counts: {total: 2}}; },
-      toast() {}, renderSettings() { rendered.push(context.state.names.network); },
+    const network = {authorized, this_run: false, granted_at: authorized ? 'synthetic-time' : null}, {state} = web.core();
+    const controls = Object.fromEntries(['modelCard', 'modelSave', 'modelClear', 'modelTest', 'modelBase', 'modelName', 'modelKey', 'toast', 'toastText', 'toastUndo']
+      .map(id => [id, {value: '', contains: () => false}]));
+    const calls = [];
+    Object.assign(state, {route: {page: 'library'}, names: {network, model_api: {configured: true}}});
+    globalThis.document = {getElementById: id => controls[id], activeElement: null};
+    globalThis.fetch = async (path, options) => {
+      const body = JSON.parse(options.body); calls.push([path, body]);
+      return {status: 200, ok: true, json: async () => ({model_api: {configured: body.key !== null}, counts: {total: 2}})};
     };
-    vm.createContext(Object.assign(context, zh.page));
-    vm.runInContext(source.slice(source.indexOf('function renderModelCard()'), source.indexOf('async function pollNames()'))
-      + ';renderModelCard();', context);
-    controls.modelSave.onclick();
+    renderModelCard();
+    await controls.modelSave.onclick();
     await new Promise(resolve => setImmediate(resolve));
+    assert.equal(state.names.network, network);
     await controls.modelClear.onclick();
-    assert.deepEqual(rendered, [network, network]);
-    assert.equal(context.state.names.network, network);
-    assert.equal(context.state.names.model_api.configured, false);
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(state.names.network, network);
+    assert.equal(state.names.model_api.configured, false);
     assert.equal(calls.length, 2);
     assert.ok(calls.every(([path, body]) => path === '/api/names' && body.action === 'model_api'));
   }
 });
 
 test('refreshing names from the task panel keeps the network status', async () => {
-  const network = {authorized: true, this_run: false, granted_at: 'synthetic-time'};
-  let handler;
-  const context = {
-    state: {names: {network, state: {status: 'idle'}}},
-    $() { return {addEventListener(event, callback) { handler = callback; }}; },
-    async post(path, body) {
-      assert.equal(path, '/api/names'); assert.equal(body.action, 'refresh');
-      return {state: {status: 'fetching'}};
-    },
-    toast() {}, taskTick() {},
+  // The panel's button runs core/jobs.js refreshNames().
+  const network = {authorized: true, this_run: false, granted_at: 'synthetic-time'}, {state, refreshNames} = web.core();
+  state.names = {network, state: {status: 'idle'}};
+  globalThis.fetch = async (path, options) => {
+    assert.equal(path, '/api/names'); assert.equal(JSON.parse(options.body).action, 'refresh');
+    return {status: 200, ok: true, json: async () => ({state: {status: 'fetching'}})};
   };
-  vm.createContext(Object.assign(context, zh.page));
-  vm.runInContext(source.slice(source.lastIndexOf("$('taskPanel').addEventListener('click'"),
-    source.indexOf("document.addEventListener('click', e => { if (taskPanel.open")), context);
-  await handler({
-    stopPropagation() {},
-    target: {closest() { return {dataset: {task: 'names'}}; }},
-  });
-  assert.equal(context.state.names.network, network);
-  assert.equal(context.state.names.state.status, 'fetching');
+  await refreshNames();
+  assert.equal(state.names.network, network);
+  assert.equal(state.names.state.status, 'fetching');
 });
 
 test('names waiting for consent are not shown as a failure', () => {
-  const context = {number: String};
-  vm.createContext(Object.assign(context, zh.page));
-  const start = source.indexOf('const NAMES_ACTIVE');
-  vm.runInContext(source.slice(start, source.indexOf('\n', source.indexOf('const namesLine', start))) + ';this.namesLine = namesLine;', context);
-  const line = context.namesLine({status: 'unauthorized'});
+  const {namesLine} = web.core();
+  const line = namesLine({status: 'unauthorized'});
   assert.doesNotMatch(line, /失败/);
   assert.match(line, /网络与隐私/);
-  assert.equal(context.namesLine({status: 'error'}), '获取失败，将在下次启动时重试');
+  assert.equal(namesLine({status: 'error'}), '获取失败，将在下次启动时重试');
 });

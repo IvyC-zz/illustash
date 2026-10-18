@@ -1,25 +1,23 @@
-// Runs the production polling code with a deterministic clock and delayed responses.
-const {test} = require('node:test');
+// Runs the production polling code (core/settings.js) with a deterministic clock and delayed responses.
+const {test, before, afterEach} = require('node:test');
 const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const vm = require('node:vm');
-const zh = require('./i18n_zh.cjs');   // t() of a Chinese page (#173)
-const source = fs.readFileSync(require('node:path').join(__dirname, '../web/static/app.js'), 'utf8');
-const code = source.slice(source.indexOf('let pixivPoll = null;'), source.indexOf('async function accountAction'));
+const web = require('./web.cjs');   // the login wait is core/settings.js (#199)
+before(web.ready);
+let restore = () => {};
+afterEach(() => { restore(); restore = () => {}; });
 function harness() {
   let now = 0, next = 0;
   const timers = new Map(), requests = [], messages = [];
-  const ctx = {
-    state: {}, AbortController, Date: {now: () => now}, t: zh,
-    setTimeout(fn) { timers.set(++next, fn); return next; },
-    clearTimeout(id) { timers.delete(id); },
-    renderAccountsCard() {}, loadAccounts() {}, toast: text => messages.push(text),
-    api(path, options) {
-      return new Promise((resolve, reject) => requests.push({resolve, reject, signal: options.signal}));
-    },
-  };
-  vm.createContext(ctx); vm.runInContext(code, ctx);
-  return {ctx, timers, requests, messages,
+  const core = web.core(), saved = {now: Date.now, setTimeout: globalThis.setTimeout, clearTimeout: globalThis.clearTimeout, fetch: globalThis.fetch};
+  Date.now = () => now;
+  globalThis.setTimeout = fn => { timers.set(++next, fn); return next; };
+  globalThis.clearTimeout = id => { timers.delete(id); };
+  globalThis.fetch = (path, options) => path === '/api/accounts' ? Promise.resolve({status: 200, ok: true, json: async () => ({})})
+    : new Promise((resolve, reject) => requests.push({resolve: body => resolve({status: 200, ok: true, json: async () => body}), reject, signal: options.signal}));
+  // What the settings page tells: the account bound, or why the wait ended.
+  const off = core.onSettings((what, detail) => { if (what === 'pixiv') messages.push(detail.error ? detail.error.message : 'bound'); });
+  restore = () => { core.stopPixivLogin(); off(); Object.assign(globalThis, {setTimeout: saved.setTimeout, clearTimeout: saved.clearTimeout, fetch: saved.fetch}); Date.now = saved.now; };
+  return {ctx: core, timers, requests, messages,
     elapse(ms) { now += ms; },
     tick() { const [id, fn] = timers.entries().next().value; timers.delete(id); return fn(); },
   };

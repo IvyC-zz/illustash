@@ -8,7 +8,7 @@ pub(super) fn handle(request: Request, host: &Host, received: u64) {
         return;
     }
     let path = request.url().split('?').next().unwrap_or(request.url());
-    if crate::app_files::ROUTES.contains(&path) {
+    if crate::app_files::serves(path) {
         // Resolve the old session's asset under the lock; decoding and socket writes must not
         // delay switching. The resulting request never reopens the replacement library.
         let result = crate::app_files::prepare(&session.library, &host.root, request.url());

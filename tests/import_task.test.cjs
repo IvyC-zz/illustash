@@ -1,31 +1,24 @@
 // #88: an archive or recognition-result import runs as a background task. The library card shows the step it is on
 // with real counts only, a cancel button while it runs and how it ended; late or out-of-order answers (#34) never wind
 // it back, and the end is announced once.
-const {test} = require('node:test');
+const {test, before, afterEach} = require('node:test');
+const web = require('./web.cjs');   // the import's poller and words are core/jobs.js (#199)
+let settings, effects;
+before(async () => { await web.ready(); settings = await web.load('ui/settings.js'); effects = await web.load('ui/effects.js'); });
+let cleanup = () => {};
+afterEach(() => { cleanup(); cleanup = () => {}; });
 const assert = require('node:assert/strict');
-const {readFileSync} = require('node:fs');
-const vm = require('node:vm');
-const zh = require('./i18n_zh.cjs');   // t() of a Chinese page (#173)
-const source = readFileSync(require('node:path').join(__dirname, '../web/static/app.js'), 'utf8');
-const section = (a, b) => source.slice(source.indexOf(a), source.indexOf(b, source.indexOf(a)));
 const esc = s => String(s).replace(/[&<>"]/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'})[c]);
 
+// The library card is ui/settings.js; the import's words and state are core/jobs.js.
 function card(importTask) {
-  const node = {innerHTML: ''};
-  const c = {
-    $: id => (id === 'setLibraries' ? node : null), esc, IS_MAC: false, devMode: false, number: String,
-    origins: () => [['x', 'X']], cardHead: title => `<h2>${title}</h2>`,
-    setSettingsHTML: (card, html) => { card.innerHTML = html; return true; },
-    libForm: {open: false, folders: {}, name: '', photos: false},
-    state: {route: {page: 'settings'}, importTask, libraries: {
-      info: {name: '合成图库', path: '/tmp/synthetic.pilib', sources: [], test: null},
-      current: '/tmp/synthetic.pilib', home: '/tmp', libraries: [], export: {status: 'idle'}}},
-  };
-  vm.createContext(Object.assign(c, zh.page));
-  vm.runInContext(section('function renderLibrariesCard()', '// Gallery pages have no Tauri dialog permission') +
-    ';this.importLine = importLine;', c);
-  c.renderLibrariesCard();
-  return {html: node.innerHTML, line: c.importLine};
+  const node = {innerHTML: '', contains: () => false}, {state, importLine} = web.core();
+  Object.assign(state, {route: {page: 'settings'}, importTask, libraries: {
+    info: {name: '合成图库', path: '/tmp/synthetic.pilib', sources: [], test: null},
+    current: '/tmp/synthetic.pilib', home: '/tmp', libraries: [], export: {status: 'idle'}}});
+  globalThis.document = {getElementById: id => (id === 'setLibraries' ? node : null), activeElement: null};
+  settings.renderLibrariesCard();
+  return {html: node.innerHTML, line: importLine};
 }
 const running = (extra = {}) => ({status: 'running', kind: 'archive', id: 't1', file: '合成.zip', ...extra});
 
@@ -62,25 +55,29 @@ test('a stopping or finished import has no cancel button and says how it ended',
   assert.doesNotMatch(card(undefined).html, /import-line/);
 });
 
+// core/jobs.js polls; the library card (ui/settings.js) starts an import; ui/effects.js afterJob(), as app.js wires it,
+// announces the end and lists a new library. The page is a fake one; the import's own timers are the ones counted.
 function poller(token = 'session') {
-  const answers = [], timers = [], toasts = [], posted = [];
-  let rendered = 0, libraries = 0;
-  const c = {
-    state: {token, route: {page: 'settings'}},
-    api: (path, options) => {
-      if (path === '/api/imports/cancel') { posted.push(options); return Promise.resolve({status: 'stopping'}); }
-      return new Promise(resolve => answers.push(resolve));
-    },
-    libraryAction: async () => ({started: true, task: running()}),
-    renderLibrariesCard: () => { rendered++; }, loadLibraries: () => { libraries++; }, toast: m => toasts.push(m),
-    setTimeout: (fn, ms) => { timers.push(ms); return timers.length; }, clearTimeout() {}, number: String, esc,
+  const answers = [], timers = [], toasts = [], posted = [], offs = [];
+  let libraries = 0;
+  const core = web.core(), {state, session, onJob} = core;
+  session.token = token;
+  Object.assign(state, {route: {page: 'settings'}, importTask: undefined});
+  const page = web.fakePage();
+  Object.defineProperty(page.el('toastText'), 'textContent', {set: m => toasts.push(m), get: () => toasts.at(-1) || ''});
+  globalThis.fetch = (path, options) => {
+    if (path === '/api/imports/cancel') { posted.push(options); return Promise.resolve({status: 200, ok: true, json: async () => ({status: 'stopping'})}); }
+    if (path === '/api/libraries/import') return Promise.resolve({status: 200, ok: true, json: async () => ({started: true, task: running()})});
+    if (path === '/api/libraries') { libraries++; return Promise.resolve({status: 200, ok: true, json: async () => ({})}); }
+    return new Promise(resolve => answers.push(body => resolve({status: 200, ok: true, json: async () => body})));
   };
-  vm.createContext(Object.assign(c, zh.page));
-  vm.runInContext(section('const IMPORT_ACTIVE', '// #41: the shareable export') +
-    section('let importTimer', 'async function pollExport()'), c);
-  return {c, answers, timers, toasts, posted, rendered: () => rendered, libraries: () => libraries};
+  const setTimeout = globalThis.setTimeout;
+  globalThis.setTimeout = (fn, ms) => { if (ms === 700 || ms === 5000) timers.push(ms); return timers.length; };
+  offs.push(onJob(effects.afterJob));
+  const c = {state, session, pollImports: core.pollImports, cancelImport: core.cancelImport, startImport: settings.startImport};
+  cleanup = () => { globalThis.setTimeout = setTimeout; for (const off of offs) off(); };
+  return {c, answers, timers, toasts, posted, libraries: () => libraries};
 }
-
 test('starting polls until the end; an older answer arriving last does not wind the state back', async () => {
   const p = poller();
   await p.c.startImport('/tmp/合成.zip');
@@ -116,7 +113,7 @@ test('an answer for a page whose session changed meanwhile is dropped', async ()
   const p = poller();
   p.c.state.importTask = running();
   const pending = p.c.pollImports();
-  p.c.state.token = 'replacement';
+  p.c.session.token = 'replacement';
   p.answers[0]({...running(), status: 'done', result: {name: '合成'}});
   await pending;
   assert.equal(p.c.state.importTask.status, 'running');

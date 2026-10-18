@@ -1,15 +1,23 @@
-const {test} = require('node:test');
+const {test, before, afterEach} = require('node:test');
+const web = require('./web.cjs');   // core/settings.js, ui/settings.js (#199)
 const assert = require('node:assert/strict');
-const {readFileSync} = require('node:fs');
-const vm = require('node:vm');
-const zh = require('./i18n_zh.cjs');   // t() of a Chinese page (#173)
-const source = readFileSync(require('node:path').join(__dirname, '../web/static/app.js'), 'utf8');
-const helpers = source.slice(source.indexOf('const settingsRequests ='), source.indexOf('// One page per question'));
-function harness(api, extra = {}) {
-  const renders = [], errors = [];
-  const c = {api, state: {route: {page: 'settings'}}, document: {activeElement: null},
-    error: message => errors.push(message), readError: e => '读取失败：' + e.message, renderSettings: fetch => renders.push(fetch), ...extra};
-  vm.createContext(Object.assign(c, zh.page)); vm.runInContext(helpers, c);
+let ui, off = () => {};
+before(async () => { await web.ready(); ui = await web.load('ui/settings.js'); });
+afterEach(() => { off(); off = () => {}; });
+// A settings page that has read nothing yet; api answers its reads. What the page does on each part that arrives is
+// ui/settings.js's onSettings listener: an error goes to the banner, and the settings page redraws (renderSettings(false)).
+function harness(api) {
+  const renders = [], errors = [], core = web.core(), {state} = core;
+  for (const key of ['settings', 'fold', 'index', 'names']) delete state[key];
+  state.route = {page: 'settings'};
+  globalThis.fetch = path => { const answer = api(path); return Promise.resolve({status: 200, ok: true, json: () => answer}); };
+  globalThis.document = {activeElement: null};
+  off = core.onSettings((what, detail) => {
+    if (what !== 'data') return;
+    if (detail.error) errors.push(core.readError(detail.error));
+    if (state.route.page === 'settings') renders.push(false);
+  });
+  const c = {state, loadSettingsData: core.loadSettingsData, shared: core.shared, setSettingsHTML: ui.setSettingsHTML, document: globalThis.document};
   return {c, renders, errors};
 }
 const tick = () => new Promise(resolve => setImmediate(resolve));
@@ -19,7 +27,7 @@ test('cold load starts all four reads concurrently and shares in-flight requests
   const {c, renders} = harness(path => { calls.push(path); return new Promise(resolve => pending.set(path, resolve)); });
   const load = c.loadSettingsData();
   assert.equal(c.loadSettingsData(), load);
-  const same = c.settingsRequest('/api/names');
+  const same = c.shared('/api/names');
   assert.deepEqual(calls, ['/api/settings','/api/fold','/api/index','/api/names']);
   pending.get('/api/fold')({kinds: ['duplicate']}); await tick();
   assert.deepEqual(c.state.fold, ['duplicate']);
@@ -64,23 +72,20 @@ test('unchanged card and active form edits do not replace DOM', () => {
   assert.equal(writes, 2);
 });
 
-// 资料库 · 作品 (#198): the work tree replaces the settings page's work table.
-function shelfHarness(works, watch = []) {
-  const root = {className: '', innerHTML: '', querySelectorAll: () => []};
-  const c = {state: {route: {page: 'characters', section: 'works'}, chars: [{work_id: 'a'}, {work_id: 'a'}, {work_id: 'b'}],
-      index: {works, watch: {works: watch, pending_tags: []}, check: {missing: [{copyright: 'tag_a'}]}}},
-    $: () => root, esc: String, number: String, prefs: {get: () => ({})}, watchDraft: '', WORK_NAMES: {},
-    wireWatchAdd() {}, wireFolds() {}, adoptWatch() {}};
-  vm.createContext(Object.assign(c, zh.page));
-  const start = source.indexOf('const shelf = {');
-  vm.runInContext(source.slice(start, source.indexOf('async function saveWatch', start)), c);
-  return {c, root};
+// 资料库 · 作品 (#198): the work tree replaces the settings page's work table. The shelf is ui/catalog.js.
+async function shelfHarness(works, watch = []) {
+  const root = {className: '', innerHTML: '', querySelectorAll: () => [], setAttribute() {}};
+  const catalog = await web.load('ui/catalog.js'), {state} = web.core();
+  Object.assign(state, {route: {page: 'characters', section: 'works'}, chars: [{work_id: 'a'}, {work_id: 'a'}, {work_id: 'b'}],
+    index: {works, watch: {works: watch, pending_tags: []}, check: {missing: [{copyright: 'tag_a'}]}}});
+  globalThis.document = {getElementById: () => root, activeElement: null};
+  return {c: catalog, root};
 }
-test('work tree lists children under their parent, with counts and the watch switch', () => {
+test('work tree lists children under their parent, with counts and the watch switch', async () => {
   const works = [{id: 'b', name: 'child', parent_id: 'a', count: 1, watchable: false},
     {id: 'a', name: 'parent', parent_id: null, count: 9, tag: 'tag_a', watchable: true},
     {id: 'c', name: 'orphan', parent_id: 'gone', count: 3, status: 'pending', watchable: false}];
-  const {c, root} = shelfHarness(works, ['a']);
+  const {c, root} = await shelfHarness(works, ['a']);
   c.drawShelf();
   const html = root.innerHTML, order = ['parent', 'child', 'orphan'].map(n => html.indexOf(`<b>${n}</b>`));
   assert.deepEqual([...order].sort((x, y) => x - y), order);
@@ -89,35 +94,39 @@ test('work tree lists children under their parent, with counts and the watch swi
   assert.match(html, /data-watch="b"\s+disabled/);
   assert.match(html, /\+1 个新角色/);
   assert.match(html, /链接待确认/);
-  vm.runInContext("shelf.filter = 'watched'", c); c.drawShelf();
+  c.shelf.filter = 'watched'; c.drawShelf();
   assert.ok(root.innerHTML.includes('<b>parent</b>') && !root.innerHTML.includes('<b>child</b>'));
 });
 
-function indexHarness(initialStatus, nextStatus) {
-  const calls = [], renders = [];
-  const c = {indexTimer: 0, INDEX_ACTIVE: ['checking','fetching','importing'],
-    state: {route: {page:'settings'}, index: {state:{status:initialStatus}, works:[], history:[]}},
-    api: async path => {calls.push(path); return {state:{status:nextStatus,done:2,total:10}};},
-    settingsRequest: async path => {calls.push(path);return {state:{status:nextStatus},works:[],check:{found:1}};},
-    clearTimeout() {}, setTimeout() {}, renderIndexCard() {renders.push('index');}, renderTasks() {renders.push('tasks');}, drawShelf() {},
-    $: () => null, indexLine: () => '', toast() {}, refreshMeta: async () => {}, number: String};
-  vm.createContext(Object.assign(c, zh.page));
-  vm.runInContext(source.slice(source.indexOf('async function pollIndex()'),source.indexOf('// ---------- display names')),c);
-  return {c,calls,renders};
+// The index's poller is core/jobs.js; what it redraws outside the task panel is ui/effects.js afterJob(), as app.js
+// wires it: here the settings card, drawn on a fake page.
+async function indexHarness(initialStatus, nextStatus) {
+  const calls = [], renders = [], {state, pollIndex, onJob} = web.core(), {afterJob} = await web.load('ui/effects.js');
+  Object.assign(state, {route: {page: 'settings'}, index: {state: {status: initialStatus}, works: [], history: [], watch: {works: [], min_posts: 50}}});
+  const page = web.fakePage();
+  Object.defineProperty(page.el('indexCard'), 'innerHTML', {set() { renders.push('index'); }, get: () => ''});
+  globalThis.fetch = async path => {
+    calls.push(path);
+    const body = path.includes('progress=1') ? {state: {status: nextStatus, done: 2, total: 10}} : {state: {status: nextStatus}, works: [], history: [], watch: {works: [], min_posts: 50}, check: {found: 1, missing: [], checked_at: '2026-10-18T00:00:00'}};
+    return {status: 200, ok: true, json: async () => body};
+  };
+  const offs = [onJob(afterJob), onJob(() => { renders.push('tasks'); })];   // the second as the task panel does
+  const setTimeout = globalThis.setTimeout;
+  globalThis.setTimeout = () => 0;
+  try { await pollIndex(); } finally { globalThis.setTimeout = setTimeout; for (const off of offs) off(); }
+  return {calls, renders};
 }
 
 test('index progress does not reload work list or rebuild the editor', async () => {
-  const {c,calls,renders} = indexHarness('checking','checking');
-  await c.pollIndex();
-  assert.deepEqual(calls,['/api/index?progress=1']);
-  assert.deepEqual(renders,['tasks']);
+  const {calls, renders} = await indexHarness('checking', 'checking');
+  assert.deepEqual(calls, ['/api/index?progress=1']);
+  assert.deepEqual(renders, ['tasks']);
 });
 
 test('index completion fetches updated results once', async () => {
-  const {c,calls,renders} = indexHarness('checking','checked');
-  await c.pollIndex();
-  assert.deepEqual(calls,['/api/index?progress=1','/api/index']);
-  assert.deepEqual(renders,['index','tasks']);
+  const {calls, renders} = await indexHarness('checking', 'checked');
+  assert.deepEqual(calls, ['/api/index?progress=1', '/api/index']);
+  assert.deepEqual(renders, ['index', 'tasks']);
 });
 
 test('new work data invalidates a collapsed editor even when its summary is unchanged', () => {
@@ -141,4 +150,34 @@ test('returning to settings refreshes cached data once without clearing it', asy
   await load;
   assert.equal(calls.length,4);
   assert.equal(c.state.names.updated,true);
+});
+
+test('the names and new-characters cards read their data when they open', async () => {
+  const {state} = web.core(), nodes = {};
+  state.route = {page: 'settings'};
+  const card = () => ({hidden: true, innerHTML: '', contains: () => false, querySelectorAll: () => []});
+  globalThis.document = {getElementById: id => nodes[id] ||= card(), activeElement: null};
+  globalThis.fetch = async path => ({status: 200, ok: true, json: async () => path === '/api/names'
+    ? {state: {status: 'idle'}, counts: {characters: {total: 2, zh: 1}}}
+    : {state: {status: 'idle'}, works: [], watch: {works: [], min_posts: 50}, history: [], mb_per_character: 2}});
+  await ui.renderNamesCard();
+  await ui.renderIndexCard();
+  assert.match(nodes.namesCard.innerHTML, /角色名称/);
+  assert.match(nodes.indexCard.innerHTML, /检查新角色/);
+});
+
+test('an older library is opened only after the person agrees to upgrade it (#193)', async () => {
+  // openLibrary() is ui/settings.js: the backend's refusal names the upgrade, the page asks, then asks again with upgrade.
+  const sent = [], nodes = {}, dialogs = [];
+  const element = () => ({hidden: true, textContent: '', innerHTML: '', contains: () => false});
+  globalThis.document = {getElementById: id => nodes[id] ||= element(), activeElement: null, body: {append(d) { dialogs.push(d); setImmediate(() => d.close('')); }},
+    createElement() { const parts = {}; return {setAttribute() {}, querySelector: s => parts[s] ||= {}, showModal() {}, remove() {}, close(v = '') { this.returnValue = v; this.onclose(); }}; }};
+  globalThis.fetch = async (path, options) => {
+    sent.push(JSON.parse(options.body));
+    return {status: 409, ok: false, json: async () => ({error: '这个图库需要升级到新格式才能打开。升级后旧版本的 Illustash 打不开它；升级前会自动备份，升级没有完成时图库保持原样。'})};
+  };
+  const setTimeout = globalThis.setTimeout; globalThis.setTimeout = () => 0;
+  try { await ui.openLibrary('/tmp/synthetic.pilib', '合成'); } finally { globalThis.setTimeout = setTimeout; }
+  assert.deepEqual(sent, [{path: '/tmp/synthetic.pilib'}]);
+  assert.equal(dialogs.length, 1, 'asked before upgrading; declined, so nothing more was sent');
 });

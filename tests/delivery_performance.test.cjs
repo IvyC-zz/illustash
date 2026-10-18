@@ -1,21 +1,14 @@
 const test = require('node:test');
+const web = require('./web.cjs');   // core/ modules (#199)
+test.before(web.ready);
 const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const vm = require('node:vm');
-const zh = require('./i18n_zh.cjs');   // t() of a Chinese page (#173)
-const source = fs.readFileSync('web/static/app.js', 'utf8');
 const tick = () => new Promise(resolve => setImmediate(resolve));
-const section = (a, b) => source.slice(source.indexOf(a), source.indexOf(b, source.indexOf(a)));
+// The metadata read is core/meta.js; api answers the page's requests.
 function metaHarness(api) {
-  const nodes = {}, paints = [];
-  const c = {URLSearchParams, api, state: {nsfw: '', chars: [], dupInfo: {}, exclInfo: {}, route: {page: 'library'}},
-    $: id => nodes[id] ||= {}, setUndo() {}, navCount() {}, fetchChar: async () => null,
-    renderChrome: () => paints.push('chrome'), renderSettings() {}, renderIndexBody() {}, guideAfterPost() {},
-    document: {createElement: () => ({})}};
-  vm.createContext(Object.assign(c, zh.page));
-  vm.runInContext(section('const STALE', 'async function api('), c);
-  vm.runInContext(section('let metaPending', '// ---------- chrome'), c);
-  return c;
+  const {session, state, refreshMeta} = web.core();
+  Object.assign(state, {nsfw: '', chars: [], dupInfo: {}, exclInfo: {}, route: {page: 'library'}, char: null, readEpoch: 0, countDirty: undefined});
+  globalThis.fetch = path => Promise.resolve(api(path)).then(body => ({status: 200, ok: true, json: async () => body}));
+  return {state, session, refreshMeta};
 }
 function value(path, name = 'current') {
   if (path.startsWith('/api/bootstrap')) return {token: name, undo: null, total: 1};
@@ -31,7 +24,7 @@ test('same-turn metadata requests coalesce, initial bootstrap is reused', async 
   await first;
   assert.equal(calls.length, 4);
   assert.ok(calls.every(p => !p.startsWith('/api/bootstrap')));
-  assert.equal(c.state.token, 'seed');
+  assert.equal(c.session.token, 'seed');
 });
 test('in-flight changes trigger one trailing refresh and stale responses never apply', async () => {
   const pending = [];
@@ -41,12 +34,12 @@ test('in-flight changes trigger one trailing refresh and stale responses never a
   assert.equal(c.refreshMeta(), first); assert.equal(c.refreshMeta(), first);
   for (const p of pending.splice(0)) p.resolve(value(p.path, 'old'));
   await tick();
-  assert.equal(c.state.token, undefined);
+  assert.equal(c.session.token, '');
   assert.equal(pending.length, 5);
   assert.ok(pending.find(p => p.path.startsWith('/api/identity/count')).path.includes('nsfw=hide'));
   for (const p of pending.splice(0)) p.resolve(value(p.path, 'fresh'));
   await first;
-  assert.equal(c.state.token, 'fresh');
+  assert.equal(c.session.token, 'fresh');
   assert.equal(c.state.chars[0].id, 'fresh');
 });
 test('tag-only refresh avoids characters, pools and counts', async () => {
@@ -60,7 +53,7 @@ test('failed metadata refresh releases the in-flight request for retry', async (
   let fail = true;
   const c = metaHarness(async path => {if (fail) throw Error('offline'); return value(path);});
   await assert.rejects(c.refreshMeta(), /offline/);
-  fail = false; await c.refreshMeta(); assert.equal(c.state.token, 'current');
+  fail = false; await c.refreshMeta(); assert.equal(c.session.token, 'current');
 });
 
 class Element {
@@ -79,9 +72,11 @@ function documentMock() {
     return {set innerHTML(value) {this.content = {firstElementChild: Object.assign(new Element(), {html: value})};}};
   }};
 }
+// reconcileSections() is ui/dom.js (#199).
+let reconcileSections;
+test.before(async () => { ({reconcileSections} = await web.load('ui/dom.js')); });
 test('section updates preserve unaffected nodes and support reorder/removal', () => {
-  const c = {document: documentMock()}; vm.createContext(Object.assign(c, zh.page));
-  vm.runInContext(section('function reconcileSections', 'function renderIndexBody'), c);
+  globalThis.document = documentMock(); const c = {reconcileSections};
   const root = new Element();
   c.reconcileSections(root, [['a','A'],['b','B'],['c','C']]);
   const [a,b,cc] = root.children; const before = root.moves;
@@ -91,75 +86,95 @@ test('section updates preserve unaffected nodes and support reorder/removal', ()
   c.reconcileSections(root, [['c','C'],['b','B']]);
   assert.deepEqual(root.children, [cc,b]);
 });
+// The grid is ui/grid.js, on a fake page; its timers and reads are the test's.
+let grid;
+test.before(async () => { grid = await web.load('ui/grid.js'); });
+function gridPage({items = [], total = items.length, scrollTop = 0} = {}) {
+  const page = web.fakePage(), {state} = web.core();
+  Object.assign(page.el('viewport'), {scrollTop, clientHeight: 200, clientWidth: 202});
+  Object.assign(state, {size: 100, fit: false, total, items, route: {page: 'library'}, dataVersion: 2e6 + Math.random(), gridKey: '',
+    pages: new Set(), pending: new Set(), generation: 1, readEpoch: 0, countDirty: false, sel: {all: false, ids: new Set(), exclude: new Set()}});
+  return {page, state};
+}
+const quietTimers = () => { const saved = [globalThis.setTimeout, globalThis.requestAnimationFrame]; globalThis.setTimeout = () => 0; return () => { [globalThis.setTimeout, globalThis.requestAnimationFrame] = saved; }; };
 test('virtual grid keeps overlapping cards, updates changed items and relayouts columns', () => {
-  const grid = new Element(), viewport = {scrollTop: 0, clientHeight: 200};
-  const c = {document: documentMock(), $: id => id === 'grid' ? grid : viewport,
-    state: {cols: 2, cellW: 100, rowH: 100, gap: 0, total: 30, fit: false, route: {page: 'library'}, dataVersion: 0,
-      items: Array.from({length: 30}, (_, i) => ({uuid: String(i), memberships: []}))},
-    layout() {}, cardHTML: item => item.uuid, isSquare: () => true, syncCards() {}, clearTimeout() {}, setTimeout() {}, pageTimer: null, PAGE: 100};
-  vm.createContext(Object.assign(c, zh.page)); vm.runInContext(section('let gridLayoutKey', 'const captionH ='), c);
-  vm.runInContext(section('function renderGrid', 'function syncCards'), c);
-  c.renderGrid(); const originals = [...grid.children]; assert.equal(originals.length, 8);
-  viewport.scrollTop = 100; c.renderGrid();
-  assert.equal(grid.children.length, 10); originals.forEach((el,i) => assert.equal(grid.children[i], el));
-  c.state.items[5] = {...c.state.items[5]}; c.state.dataVersion++; c.renderGrid();
-  assert.notEqual(grid.children[5], originals[5]); assert.equal(grid.children[4], originals[4]);
-  viewport.scrollTop = 400; c.renderGrid();
-  assert.equal(grid.children[0].dataset.index, 4); assert.equal(grid.children[0], originals[4]);
-  c.state.cols = 3; c.renderGrid();
-  assert.equal(grid.children[0].style.left, '0px');
+  const restore = quietTimers();
+  try {
+    const {page, state} = gridPage({items: Array.from({length: 30}, (_, i) => ({uuid: String(i), memberships: [], width: 100, height: 100}))});
+    const el = page.el('grid'), viewport = page.el('viewport'), shown = top => grid.rowStart(Math.min(grid.rowCount(), state.fit ? grid.rowAt(top + 200) + 2 : Math.ceil((top + 200) / state.rowH) + 2)) - grid.rowStart(Math.max(0, grid.rowAt(top) - 2));
+    grid.renderGrid(); const originals = [...el.children]; assert.equal(originals.length, shown(0));
+    viewport.scrollTop = 100; grid.renderGrid();
+    assert.equal(el.children.length, shown(100)); originals.forEach((card, i) => assert.equal(el.children[i], card));
+    state.items[5] = {...state.items[5]}; state.dataVersion++; grid.renderGrid();
+    assert.notEqual(el.children[5], originals[5]); assert.equal(el.children[4], originals[4]);
+    viewport.scrollTop = 400; grid.renderGrid();
+    const first = grid.rowStart(Math.max(0, grid.rowAt(400) - 2));
+    assert.equal(Number(el.children[0].dataset.index), first); assert.equal(el.children[0], originals[first]);
+    state.size = 60; grid.renderGrid();
+    assert.equal(el.children[0].style.left, '0px');
+  } finally { restore(); }
 });
 test('scroll bursts schedule a single render per frame', () => {
-  const callbacks = [], renders = [];
-  const c = {requestAnimationFrame: f => {callbacks.push(f); return callbacks.length;}, renderGrid: () => renders.push(1),
-    $: () => ({addEventListener() {}}), ResizeObserver: class {observe() {}}};
-  vm.createContext(Object.assign(c, zh.page)); vm.runInContext(section('let gridFrame', '// ---------- zoom'), c);
-  for (let i = 0; i < 50; i++) c.scheduleGrid();
-  assert.equal(callbacks.length, 1); callbacks.shift()(); assert.equal(renders.length, 1);
-  c.scheduleGrid(); assert.equal(callbacks.length, 1);
+  const callbacks = [], saved = globalThis.requestAnimationFrame;
+  globalThis.requestAnimationFrame = f => { callbacks.push(f); return callbacks.length; };
+  try {
+    const {page} = gridPage(); page.el('grid').hidden = true;
+    for (let i = 0; i < 50; i++) grid.scheduleGrid();
+    assert.equal(callbacks.length, 1); callbacks.shift()();
+    grid.scheduleGrid(); assert.equal(callbacks.length, 1);
+  } finally { globalThis.requestAnimationFrame = saved; }
 });
 test('pagination skips recount and obsolete completion cannot clear a newer pending page', async () => {
-  let finish; const calls = [];
-  const c = {state: {pages: new Set(), pending: new Set(), total: 200, generation: 1, readEpoch: 0, items: []},
-    pageUrl: (offset, count) => {assert.equal(count, false); return String(offset);},
-    api: path => {calls.push(path); return new Promise(resolve => finish = resolve);},
-    abortList: null, renderGrid() {}, error() {}, reload: async () => calls.push('reload')};
-  vm.createContext(Object.assign(c, zh.page)); vm.runInContext(section('async function loadPage', 'function updateCount'), c);
-  const old = c.loadPage(100);
-  c.state.generation++; c.state.pending = new Set([100]);
-  finish({items: []}); await old;
-  assert.ok(c.state.pending.has(100)); assert.equal(c.state.pages.size, 0);
-  c.state.pending.clear(); c.state.countDirty = true; await c.loadPage(100);
-  assert.deepEqual(calls, ['100','reload']);
+  let finish; const calls = [], restore = quietTimers();
+  try {
+    const {state} = gridPage({total: 200}); state.items = [];
+    globalThis.fetch = path => { calls.push(path); return new Promise(resolve => finish = body => resolve({status: 200, ok: true, json: async () => body})); };
+    const old = grid.loadPage(100);
+    assert.match(calls[0], /offset=100/); assert.match(calls[0], /count=0/);
+    state.generation++; state.pending = new Set([100]);
+    finish({items: []}); await old;
+    assert.ok(state.pending.has(100)); assert.equal(state.pages.size, 0);
+    // A count that may have changed is read again with the first page, not with this one.
+    state.pending.clear(); state.countDirty = true; const recount = grid.loadPage(100);
+    await new Promise(r => setImmediate(r));
+    assert.equal(calls.length, 2); assert.doesNotMatch(calls[1], /count=0/);
+    finish({total: 200, items: []}); await recount;
+  } finally { restore(); }
 });
 
 test('successful writes invalidate an in-flight metadata read before UI refresh starts', async () => {
   const pending = [];
-  const c = metaHarness((path, options) => options?.method === 'POST' ? Promise.resolve({ok:true}) : new Promise(resolve => pending.push({path,resolve})));
+  const c = metaHarness(path => path === '/api/tag' || path === '/api/suggest' ? {ok: true} : new Promise(resolve => pending.push({path,resolve})));
   c.state.readEpoch = 0;
-  vm.runInContext(section('async function post(', 'function error('), c);
+  // Writes go through core/session.js; ui/effects.js afterWrite() counts them, as app.js wires it.
+  const {post, onPost} = web.core(), {afterWrite} = await web.load('ui/effects.js');
+  c.state.guide = undefined;
+  Object.assign(c, {post, unlisten: onPost(afterWrite)});
   const first = c.refreshMeta(); await tick();
   await c.post('/api/suggest', {});
   assert.equal(c.state.readEpoch, 0); assert.equal(c.state.countDirty, undefined);
   await c.post('/api/tag', {});
   assert.equal(c.state.readEpoch, 1); assert.equal(c.state.countDirty, true);
   for (const p of pending.splice(0)) p.resolve(value(p.path, 'stale'));
-  await tick(); assert.equal(c.state.token, undefined);
+  await tick(); assert.equal(c.session.token, '');
   for (const p of pending.splice(0)) p.resolve(value(p.path, 'after-write'));
-  await first; assert.equal(c.state.token, 'after-write');
+  await first; assert.equal(c.session.token, 'after-write');
+  c.unlisten();
 });
 test('reload counts only its first page and retries if data changed during the read', async () => {
-  const nodes = {}, pending = [], counts = [];
-  const c = {AbortController, state: {route: {page:'library'}, generation:0, readEpoch:0, pending:new Set()},
-    abortList:null, $:id=>nodes[id] ||= {}, panelPage:()=>false, layout(){}, error(){}, visibleOffsets:()=>[0,100],
-    pageUrl:(offset,count)=>{counts.push(count);return offset;}, api:()=>new Promise(resolve=>pending.push(resolve)),
-    renderGrid(){}, updateCount(){}, renderSelection(){}, renderHeading(){}};
-  vm.createContext(Object.assign(c, zh.page));vm.runInContext(section('async function reload(', 'async function loadPage('),c);
-  const result=c.reload(); c.state.readEpoch++;
-  pending.splice(0).forEach((resolve,i)=>resolve({total:i===0?200:null,items:[]})); await tick();
-  assert.equal(c.state.total,undefined);
-  pending.splice(0).forEach((resolve,i)=>resolve({total:i===0?201:null,items:[]}));await result;
-  assert.deepEqual(counts,[true,false,true,false]);assert.equal(c.state.total,201);assert.equal(c.state.countDirty,false);
+  const pending = [], restore = quietTimers();
+  try {
+    const {state} = gridPage({total: 0}); state.items = [];
+    globalThis.fetch = path => new Promise(resolve => pending.push({path, resolve: body => resolve({status: 200, ok: true, json: async () => body})}));
+    const result = grid.reload(); state.readEpoch++;
+    await new Promise(r => setImmediate(r));
+    const first = pending.splice(0); assert.doesNotMatch(first[0].path, /count=0/); assert.ok(first.slice(1).every(p => /count=0/.test(p.path)));
+    first.forEach((p, i) => p.resolve({total: i === 0 ? 200 : null, items: []})); await new Promise(r => setImmediate(r)); await new Promise(r => setImmediate(r));
+    assert.notEqual(state.total, 200);   // data changed during the read: its answer is not used
+    const again = pending.splice(0); assert.ok(again.length >= 1); assert.doesNotMatch(again[0].path, /count=0/);
+    again.forEach((p, i) => p.resolve({total: i === 0 ? 201 : null, items: []})); await result;
+    assert.equal(state.total, 201); assert.equal(state.countDirty, false);
+  } finally { restore(); }
 });
 test('bootstrap seed is discarded when data or NSFW changes before the batch starts', async () => {
   for (const mutate of [c => c.state.readEpoch++, c => c.state.nsfw = 'hide']) {
@@ -169,7 +184,7 @@ test('bootstrap seed is discarded when data or NSFW changes before the batch sta
     const result = c.refreshMeta({boot:{token:'old',total:1}});
     mutate(c); await result;
     assert.equal(calls.filter(p => p.startsWith('/api/bootstrap')).length, 1);
-    assert.equal(c.state.token, 'fresh');
+    assert.equal(c.session.token, 'fresh');
   }
 });
 
@@ -183,9 +198,8 @@ test('metadata requests summaries outside directory and full rows inside directo
   assert.ok(!calls.find(p => p.startsWith('/api/characters')).includes('summary=1'));
 });
 test('active character retains full variant counts rather than summary rows', async () => {
-  const c = metaHarness(async path => value(path, 'person'));
+  const c = metaHarness(async path => path.startsWith('/api/characters?id=') ? [{id: 'person', variants: [{id: 'skin', count: 7}]}] : value(path, 'person'));
   c.state.char = {id: 'person'};
-  c.fetchChar = async id => ({id, variants: [{id: 'skin', count: 7}]});
   await c.refreshMeta();
   assert.equal(c.state.char.variants[0].count, 7);
 });
@@ -202,43 +216,43 @@ test('navigation into directory during summary read triggers a full trailing rea
   for (const p of pending.splice(0)) p.resolve(value(p.path));
   await task;
 });
-test('group append, answer and selection preserve unaffected section nodes', () => {
+// The look-alike groups page is ui/review.js.
+test('group append, answer and selection preserve unaffected section nodes', async () => {
+  const review = await web.load('ui/review.js'), {state} = web.core();
   const sections = new Element(), controls = {}, more = {}, nodes = {regroup: {}, moreGroups: {addEventListener() {}}};
   const root = {querySelector: selector => ({'.gsecs': sections, '.groups-controls': controls, '.groups-more': more})[selector],
     set innerHTML(_) { throw Error('must not replace all groups'); }};
-  const c = {document: documentMock(), $: id => id === 'groupsPage' ? root : nodes[id], number: String, esc: String,
-    stamp: String, state: {pools: {unmatched: 100}}, groups: {list: [], shown: 2, off: new Map(), learner: {}},
-    groupSection: g => `<section>${g.cid}:${JSON.stringify([...(c.groups.off.get(g.cid) || [])])}</section>`};
-  vm.createContext(Object.assign(c, zh.page));
-  vm.runInContext(section('function reconcileSections', '// Kept for callers'), c);
-  vm.runInContext(section('function drawGroups()', 'function groupSection'), c);
-  c.groups.list = [1, 2, 3].map(cid => ({cid, size: 2}));
-  c.drawGroups(); const [a, b] = sections.children;
-  c.groups.shown = 3; c.drawGroups(); const third = sections.children[2];
+  globalThis.document = Object.assign(documentMock(), {getElementById: id => id === 'groupsPage' ? root : nodes[id] || null});
+  state.pools = {unmatched: 100};
+  const group = cid => ({cid, size: 2, members: ['u', 'v'].map(x => x + cid)});
+  Object.assign(review.groups, {list: [1, 2, 3].map(group), shown: 2, off: new Map(), learner: {}});
+  review.drawGroups(); const [a, b] = sections.children;
+  review.groups.shown = 3; review.drawGroups(); const third = sections.children[2];
   assert.equal(sections.children[0], a); assert.equal(sections.children[1], b);
-  c.groups.list.shift(); c.drawGroups();
+  review.groups.list.shift(); review.drawGroups();
   assert.deepEqual(sections.children, [b, third]);
-  c.groups.off.set(2, new Set(['u'])); c.drawGroups();
+  review.groups.off.set(2, new Set(['u2'])); review.drawGroups();
   assert.notEqual(sections.children[0], b); assert.equal(sections.children[1], third);
 });
 test('older group reads cannot overwrite a newer R18-filtered response', async () => {
-  const pending = [], nodes = {}, c = {state: {route: {page: 'groups'}, nsfw: ''}, groups: {revision: 0},
-    $: id => nodes[id] ||= {}, closeInspector() {}, drawGroups() {},
-    api: path => new Promise(resolve => pending.push({path, resolve}))};
-  vm.createContext(Object.assign(c, zh.page)); vm.runInContext(section('async function renderGroups', 'function drawGroups'), c);
-  const old = c.renderGroups();
-  c.state.nsfw = 'hide'; const fresh = c.renderGroups();
-  pending[1].resolve({clusters: [{cid: 2, size: 2}], learner: {}}); await fresh;
-  pending[0].resolve({clusters: [{cid: 1, size: 2}], learner: {}}); await old;
-  assert.equal(c.groups.list[0].cid, 2);
+  const review = await web.load('ui/review.js'), {state} = web.core(), pending = [];
+  web.fakePage(); globalThis.requestAnimationFrame ??= () => 0;   // closing the inspector redraws the grid next frame
+  Object.assign(state, {route: {page: 'groups'}, nsfw: '', pools: {unmatched: 0}});
+  globalThis.fetch = path => new Promise(resolve => pending.push({path, resolve: body => resolve({status: 200, ok: true, json: async () => body})}));
+  const old = review.renderGroups(); await new Promise(r => setImmediate(r));
+  state.nsfw = 'hide'; const fresh = review.renderGroups(); await new Promise(r => setImmediate(r));
+  pending[1].resolve({clusters: [{cid: 2, size: 2, members: ['a', 'b']}], learner: {}}); await fresh;
+  pending[0].resolve({clusters: [{cid: 1, size: 2, members: ['c', 'd']}], learner: {}}); await old;
+  assert.equal(review.groups.list[0].cid, 2);
 });
 
 test('a library page finishing after navigation cannot overwrite home items', async () => {
-  let resolve, paints = 0;
-  const c = {state:{route:{page:'library'},pages:new Set(),pending:new Set(),total:200,generation:1,readEpoch:0,items:[]},
-    pageUrl:()=>'/api/assets',api:()=>new Promise(r=>resolve=r),abortList:null,renderGrid(){paints++;},error(){throw Error('stale error');}};
-  vm.createContext(Object.assign(c, zh.page));vm.runInContext(section('async function loadPage', 'function updateCount'),c);
-  const pending=c.loadPage(100);c.state.route={page:'home'};c.state.items=[{uuid:'home'}];
-  resolve({items:[{uuid:'old-library'}]});await pending;
-  assert.equal(c.state.items.length,1);assert.equal(c.state.items[0].uuid,'home');assert.equal(paints,0);
+  let resolve; const restore = quietTimers();
+  try {
+    const {state} = gridPage({total: 200}); state.items = [];
+    globalThis.fetch = () => new Promise(r => resolve = body => r({status: 200, ok: true, json: async () => body}));
+    const before = state.dataVersion, pending = grid.loadPage(100); state.route = {page: 'home'}; state.items = [{uuid: 'home'}];
+    resolve({items: [{uuid: 'old-library'}]}); await pending;
+    assert.equal(state.items.length, 1); assert.equal(state.items[0].uuid, 'home'); assert.equal(state.dataVersion, before);
+  } finally { restore(); }
 });

@@ -1,15 +1,18 @@
-const {test} = require('node:test');
+const {test, before} = require('node:test');
+const web = require('./web.cjs');   // core/ modules, ui/grid.js (#199)
+let gridModule, homeModule;
+before(async () => { await web.ready(); gridModule = await web.load('ui/grid.js'); homeModule = await web.load('ui/home.js'); });
 const assert = require('node:assert/strict');
-const vm = require('node:vm');
-const zh = require('./i18n_zh.cjs');   // t() of a Chinese page (#173)
-const fs = require('node:fs');
-const source = fs.readFileSync(require('node:path').join(__dirname, '../web/static/app.js'), 'utf8');
-const geometry = source.slice(source.indexOf('const isSquare ='), source.indexOf('const REASONS ='));
+// The grid's geometry is ui/grid.js; a hidden grid element keeps renderGrid() from drawing.
+let layouts = 0;
 function grid(total = 103, fit = true) {
-  const state = {size:185, total, fit, dataVersion:0, items:Array.from({length:total}, (_,i) => ({width:[300,800,400,1200][i%4],height:600})), route:{page:'library'}};
-  const elements = {viewport:{clientWidth:1002, scrollTop:0},grid:{getBoundingClientRect:()=>({left:10,top:20})}};
-  const c = {state, MAX_HEIGHT:3e7, viewOpts:{captions:true}, browsing:()=>true, $:id=>elements[id], prefs:{set(){}}, renderGrid(){}};
-  vm.createContext(Object.assign(c, zh.page)); vm.runInContext(geometry+';Object.assign(this,{rowCount,rowStart,imageRatio})',c); c.layout(); return c;
+  const {state} = web.core(), page = web.fakePage();
+  Object.assign(page.el('viewport'), {clientWidth: 1002, scrollTop: 0});
+  Object.assign(page.el('grid'), {hidden: true, getBoundingClientRect: () => ({left: 10, top: 20})});
+  // A new data version for each grid, so the layout is never one cached from an earlier test.
+  Object.assign(state, {size: 185, total, fit, dataVersion: 1e6 + ++layouts, items: Array.from({length: total}, (_, i) => ({width: [300, 800, 400, 1200][i % 4], height: 600})), route: {page: 'library'}});
+  gridModule.viewOpts.captions = true;
+  const c = {...gridModule, state, $: page.el}; c.layout(); return c;
 }
 const rowsOf=c=>Array.from({length:c.rowCount()},(_,r)=>{const out=[];for(let i=c.rowStart(r);i<c.rowStart(r+1);i++)out.push(c.cardRect(i));return out;});
 test('justified rows pack around the target height, fill the width and keep each ratio; the last row stays target-sized and left-aligned',()=>{
@@ -59,20 +62,23 @@ test('square mode and zoom keep predictable geometry; toggling fit anchors the s
   const row=c.rowAt(c.$('viewport').scrollTop); assert.ok(c.rowStart(row)<=anchor && anchor<c.rowStart(row+1));
   c.toggleFit();assert.equal(c.state.fit,false);
 });
+// The home page is ui/home.js; its state is home, the observer included; the page is a fake one.
 function homeHarness(api){
-  const home={days:[{day:'2026-10-02',items:[{uuid:'old'}]}],next:'2026-10-02',gen:1,loading:false};
-  const sentinel={html:'',textContent:'',insertAdjacentHTML(where,html){assert.equal(where,'beforebegin');this.html+=html;}};
-  const observer={observes:0,disconnects:0,unobserve(){},observe(){this.observes++;},disconnect(){this.disconnects++;}};
-  const c={home,homeObserver:observer,homeWidth:1000,state:{route:{page:'home'},nsfw:'',items:[{uuid:'old'}],total:1},
-    api,URLSearchParams, $:id=>id==='homeSentinel'?sentinel:{querySelectorAll:()=>[]},homeDay:g=>`<section>${g.day}</section>`,syncStrip(){},toast(){}};
-  vm.createContext(Object.assign(c, zh.page));vm.runInContext(source.slice(source.indexOf('async function moreHome()'),source.indexOf('const ratio =')),c);
-  return {c,home,sentinel,observer};
+  const {home, moreHome} = homeModule, {state} = web.core(), page = web.fakePage(), el = page.document.getElementById;
+  Object.assign(home, {days: [{day: '2026-10-02', items: [{uuid: 'old'}]}], next: '2026-10-02', gen: 1, loading: false, width: 1000});
+  const sentinel = {html: '', textContent: '', insertAdjacentHTML(where, html) { assert.equal(where, 'beforebegin'); this.html += html; }};
+  home.observer = {observes: 0, disconnects: 0, unobserve() {}, observe() { this.observes++; }, disconnect() { this.disconnects++; }};
+  Object.assign(state, {route: {page: 'home'}, nsfw: '', items: [{uuid: 'old'}], total: 1});
+  page.document.getElementById = id => id === 'homeSentinel' ? sentinel : el(id);
+  globalThis.fetch = path => Promise.resolve().then(() => api(path)).then(body => ({status: 200, ok: true, json: async () => body}));
+  return {c: {moreHome, state}, home, sentinel, observer: home.observer};
 }
+const sections = html => [...html.matchAll(/data-day="([^"]+)"/g)].map(m => m[1]);
 test('home appends only new dates and items; repeated concurrent clicks share the request',async()=>{
   let resolve,calls=0; const h=homeHarness(()=>{calls++;return new Promise(r=>resolve=r);});
-  const pending=h.c.moreHome(); await h.c.moreHome();assert.equal(calls,1);
-  resolve({days:[{day:'2026-10-02',items:[]},{day:'2026-10-01',items:[{uuid:'new'}]},{day:'2026-10-01',items:[]}],next:'2026-10-01'});await pending;
-  assert.equal(h.sentinel.html,'<section>2026-10-01</section>');assert.equal(h.home.days.length,2);assert.equal(h.c.state.items.length,2);assert.equal(h.observer.observes,1);
+  const pending=h.c.moreHome(); await h.c.moreHome(); await new Promise(r => setImmediate(r)); assert.equal(calls,1);
+  resolve({days:[{day:'2026-10-02',items:[],characters:[]},{day:'2026-10-01',items:[{uuid:'new', width: 100, height: 100, memberships: []}],characters:[],count:1},{day:'2026-10-01',items:[],characters:[]}],next:'2026-10-01'});await pending;
+  assert.deepEqual(sections(h.sentinel.html),['2026-10-01']);assert.equal(h.home.days.length,2);assert.equal(h.c.state.items.length,2);assert.equal(h.observer.observes,1);
 });
 test('home errors release loading without resubscribing and permit an explicit retry',async()=>{
   let calls=0;const h=homeHarness(async()=>{calls++;if(calls===1)throw Error('failed');return {days:[],next:''};});
@@ -80,52 +86,52 @@ test('home errors release loading without resubscribing and permit an explicit r
   await h.c.moreHome();assert.equal(calls,2);assert.equal(h.sentinel.textContent,'已经到底了');
 });
 test('home responses after page changes are discarded',async()=>{
-  let resolve;const h=homeHarness(()=>new Promise(r=>resolve=r));const pending=h.c.moreHome();
+  let resolve;const h=homeHarness(()=>new Promise(r=>resolve=r));const pending=h.c.moreHome(); await new Promise(r => setImmediate(r));
   h.c.state.route.page='library';resolve({days:[{day:'2026-10-01',items:[]}],next:''});await pending;
   assert.equal(h.home.days.length,1);assert.equal(h.sentinel.html,'');assert.equal(h.observer.observes,0);
 });
 test('an older home request cannot unlock or append into a new home generation',async()=>{
-  let resolve;const h=homeHarness(()=>new Promise(r=>resolve=r));const pending=h.c.moreHome();
+  let resolve;const h=homeHarness(()=>new Promise(r=>resolve=r));const pending=h.c.moreHome(); await new Promise(r => setImmediate(r));
   h.home.gen++;h.home.loading=true;resolve({days:[],next:''});await pending;
   assert.equal(h.home.loading,true);assert.equal(h.home.next,'2026-10-02');
 });
 
 test('within-day requests after navigation cannot change the library or remove a newer generation lock', async()=>{
   let resolve;
+  const {home, moreOfDay, dayLoading} = homeModule, {state} = web.core(), page = web.fakePage();
   const day={day:'2026-10-02',items:[{uuid:'old'}],count:10};
-  const c={home:{days:[day],gen:1},state:{route:{page:'home'},nsfw:'',items:[{uuid:'library'}],total:1},
-    api:()=>new Promise(r=>resolve=r),URLSearchParams,toast(){}, $:()=>{throw Error('stale response must not query DOM');}};
-  vm.createContext(Object.assign(c, zh.page));vm.runInContext(source.slice(source.indexOf('const dayLoading ='),source.indexOf('function drawHome()')),c);
-  const pending=c.moreOfDay(day.day);c.state.route.page='library';resolve({items:[{uuid:'new'}]});await pending;
-  assert.equal(day.items.length,1);assert.equal(c.state.items[0].uuid,'library');
-  c.state.route.page='home';const old=c.moreOfDay(day.day);c.home.gen++;
-  vm.runInContext("dayLoading.clear();dayLoading.add('2026-10-02')",c);
-  resolve({items:[]});await old;assert.equal(vm.runInContext("dayLoading.has('2026-10-02')",c),true);
+  Object.assign(home, {days: [day], gen: 1}); Object.assign(state, {route: {page: 'home'}, nsfw: '', items: [{uuid: 'library'}], total: 1});
+  globalThis.fetch = () => new Promise(r => resolve = body => r({status: 200, ok: true, json: async () => body}));
+  page.document.getElementById = () => { throw Error('stale response must not query DOM'); };
+  const pending=moreOfDay(day.day); await new Promise(r => setImmediate(r)); state.route.page='library';resolve({items:[{uuid:'new'}]});await pending;
+  assert.equal(day.items.length,1);assert.equal(state.items[0].uuid,'library');
+  state.route.page='home';const old=moreOfDay(day.day); await new Promise(r => setImmediate(r)); home.gen++;
+  dayLoading.clear(); dayLoading.add('2026-10-02');
+  resolve({items:[]});await old;assert.equal(dayLoading.has('2026-10-02'),true);
 });
 test('opening the app lands on 首页; the library has its own hash and old query links still open it',()=>{
-  const c={location:{hash:''},URLSearchParams,prefs:{get:(k,f)=>f},LEAD_PAGES:[]};
-  vm.createContext(Object.assign(c, zh.page)); vm.runInContext(source.slice(source.indexOf('function parseHash()'),source.indexOf('const LEAD_PAGES'))+';const defaultSort=()=>"newest";this.parseHash=parseHash;this.hashFor=hashFor;',c);
+  // core/route.js reads the page's location.
+  const {parseHash, hashFor} = web.core(), c = {parseHash, hashFor, location: globalThis.location = {hash: ''}};
   for(const hash of ['','#','#/']){ c.location.hash=hash; assert.equal(c.parseHash().page,'home'); }
   c.location.hash='#/?artist=a1'; assert.deepEqual([c.parseHash().page,c.parseHash().artist],['library','a1']);
   c.location.hash=c.hashFor({page:'library',day:'2026-10-02'}); assert.equal(c.location.hash,'#/library?day=2026-10-02');
   assert.deepEqual([c.parseHash().page,c.parseHash().day],['library','2026-10-02']);
 });
 test('undo and a finished sync redraw the home page, whose day groups come from their own read', async () => {
-  const calls = [];
-  const c = {
-    state: {undo: {id: 7, label: '已将 1 张移出 A'}, busy: false, route: {page: 'home'}, sync: {status: 'scanning'}, focused: null, viewer: -1},
-    async post() { return {undo: null}; }, setUndo(u) { c.state.undo = u; }, toast() {}, async reload() { calls.push('reload'); },
-    async refreshMeta() {}, error() {}, readError: e => e, renderHome(keep) { calls.push(['home', keep]); },
-    renderIdentity() {}, renderGroups() {}, renderArtistAudit() {}, inspect() {}, selCount: () => 0, renderTasks() {}, guideRefresh() {},
-    SYNC_ACTIVE: ['scanning'], number: String, clearTimeout() {}, setTimeout() {}, panelPage: p => p === 'home',
-    async api() { return {state: {status: 'done', imported: 1}, history: [], damaged: null}; },
-  };
-  vm.createContext(Object.assign(c, zh.page));
-  vm.runInContext(source.slice(source.indexOf('async function undo()'), source.indexOf('async function sweep()')) + ';this.undo = undo;', c);
-  await c.undo();
-  assert.deepEqual(calls, ['reload', ['home', true]]);
-  calls.length = 0;
-  vm.runInContext('let syncTimer = 0, syncPoll = 0, lastImported = 0;' + source.slice(source.indexOf('async function pollSync()'), source.indexOf('// ---------- new characters')) + ';this.pollSync = pollSync;', c);
-  await c.pollSync();
-  assert.deepEqual(calls, [['home', true]]);
+  // undo() is ui/grid.js and the end of a sync ui/effects.js afterJob(); the home page redraws from its own read.
+  const homeReads = [], {edits, state} = web.core(), {afterJob} = await web.load('ui/effects.js');
+  web.fakePage();
+  edits.latest = {id: 7, label: '已将 1 张移出 A'};
+  Object.assign(state, {route: {page: 'home'}, sync: {status: 'scanning'}, focused: null, viewer: -1, guide: undefined});
+  const answer = path => path.startsWith('/api/home') ? (homeReads.push(path), {days: [], next: ''}) : path === '/api/undo' ? {undo: null}
+    : path === '/api/sync' ? {state: {status: 'done', imported: 1}, history: [], damaged: null} : path.startsWith('/api/bootstrap') ? {token: '', total: 0, undo: null} : [];
+  globalThis.fetch = async path => ({status: 200, ok: true, json: async () => answer(path)});
+  await gridModule.undo(); await new Promise(r => setImmediate(r));
+  assert.equal(homeReads.length, 1);
+  assert.equal(edits.latest, null);
+  const {pollSync, onJob} = web.core(), off = onJob(afterJob);
+  Object.assign(state, {sync: {status: 'scanning'}});
+  await pollSync(); await new Promise(r => setImmediate(r));
+  off();
+  assert.equal(homeReads.length, 2);
 });
