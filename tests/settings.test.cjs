@@ -159,3 +159,17 @@ test('returning to settings refreshes cached data once without clearing it', asy
   assert.equal(calls.length,4);
   assert.equal(c.state.names.updated,true);
 });
+
+test('the names and new-characters cards read their data when they open', async () => {
+  const {state} = web.core(), nodes = {};
+  state.route = {page: 'settings'};
+  const card = () => ({hidden: true, innerHTML: '', contains: () => false, querySelectorAll: () => []});
+  globalThis.document = {getElementById: id => nodes[id] ||= card(), activeElement: null};
+  globalThis.fetch = async path => ({status: 200, ok: true, json: async () => path === '/api/names'
+    ? {state: {status: 'idle'}, counts: {characters: {total: 2, zh: 1}}}
+    : {state: {status: 'idle'}, works: [], watch: {works: [], min_posts: 50}, history: [], mb_per_character: 2}});
+  await ui.renderNamesCard();
+  await ui.renderIndexCard();
+  assert.match(nodes.namesCard.innerHTML, /角色名称/);
+  assert.match(nodes.indexCard.innerHTML, /检查新角色/);
+});

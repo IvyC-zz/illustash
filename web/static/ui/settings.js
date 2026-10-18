@@ -4,7 +4,7 @@
 import {t, tb, I18N} from '../core/i18n.js';
 import {esc, isMac, number, bytes, stamp, localStamp, pct, localTime} from '../core/format.js';
 import {prefs} from '../core/prefs.js';
-import {session, readError} from '../core/session.js';
+import {session, shared, readError} from '../core/session.js';
 import {state} from '../core/state.js';
 import {REASONS, FOLD_OPTIONS} from '../core/labels.js';
 import {SYNC_ACTIVE, INDEX_ACTIVE, NAMES_ACTIVE, PROV_ACTIVE, syncLine, indexLine, namesLine, importLine, importActive, pollSync, pollIndex,
