@@ -22,8 +22,9 @@ const CODE = /^[a-z]{2,3}(-[A-Za-z0-9]{1,8})*$/;
 const locales = Object.fromEntries(readdirSync(path.join(STATIC, 'locales')).filter(name => name.endsWith('.json'))
   .map(name => [name.slice(0, -5), JSON.parse(read('locales/' + name))]));
 const english = locales.en;
-// i18n.js itself only translates text handed to it.
-const scripts = readdirSync(STATIC).filter(name => name.endsWith('.js') && name !== 'i18n.js');
+// i18n.js itself only translates text handed to it. The page's modules (core/, ui/; #199) are scripts too.
+const scripts = readdirSync(STATIC, {recursive: true}).map(name => name.split(path.sep).join('/'))
+  .filter(name => name.endsWith('.js') && name !== 'i18n.js').sort();
 const placeholders = text => [...text.matchAll(/\{(\w+)\}/g)].map(m => m[1]).sort();
 const unescape = (quote, body) => vm.runInNewContext(quote + body + quote);
 
@@ -249,15 +250,15 @@ test('plural forms follow the language and {n}; Chinese and plain entries are un
   assert.equal(zh.t('{n} 张', {n: 1}), '1 张');
 });
 
-test('numbers and dates follow the page language; Chinese keeps its wording', () => {
-  // The helpers as app.js has them, run against an I18N of each language.
-  const source = readFileSync(path.join(STATIC, 'app.js'), 'utf8');
-  const helpers = source.slice(source.indexOf('const number ='), source.indexOf('const work ='));
-  const run = (language, code) => { const {context} = page(language, [], {en: english}); vm.runInContext(helpers + ';globalThis.out = ' + code, context); return context.out; };
-  assert.equal(run('zh-CN', 'number(12345)'), '12,345');
-  assert.equal(run('zh-CN', "dateText(2025, 5, 3, true) + '|' + dateText(2026, 5, 3) + '|' + dateText('2026', '05', '03') + '|' + monthText('2026', '05')"),
+test('numbers and dates follow the page language; Chinese keeps its wording', async () => {
+  // core/format.js (#199) reads the I18N of the page it runs in.
+  const {number, dateText, monthText} = await import(require('node:url').pathToFileURL(path.join(STATIC, 'core/format.js')).href);
+  const saved = globalThis.I18N;
+  const run = (language, code) => { globalThis.I18N = page(language, [], {en: english}).I18N; try { return code(); } finally { globalThis.I18N = saved; } };
+  assert.equal(run('zh-CN', () => number(12345)), '12,345');
+  assert.equal(run('zh-CN', () => dateText(2025, 5, 3, true) + '|' + dateText(2026, 5, 3) + '|' + dateText('2026', '05', '03') + '|' + monthText('2026', '05')),
     '2025 年 5 月 3 日|5 月 3 日|05 月 03 日|2026 年 05 月');
-  assert.equal(run('en', "number(12345) + '|' + dateText(2025, 5, 3, true) + '|' + dateText('2026', '05', '03') + '|' + monthText('2026', '05')"),
+  assert.equal(run('en', () => number(12345) + '|' + dateText(2025, 5, 3, true) + '|' + dateText('2026', '05', '03') + '|' + monthText('2026', '05')),
     '12,345|5/3/2025|5/3|May 2026');
 });
 

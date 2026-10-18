@@ -1,24 +1,37 @@
-const {test} = require('node:test');
+// Shortcut names follow the system: ⌘ on Apple systems, Ctrl elsewhere (core/core.js, ui/dom.js; #199).
+const {test, before} = require('node:test');
 const assert = require('node:assert/strict');
-const {readFileSync} = require('node:fs');
-const vm = require('node:vm');
-const source = readFileSync(require('node:path').join(__dirname, '../web/static/app.js'), 'utf8');
-const hints = source.slice(source.indexOf('const isMac ='), source.indexOf('const number ='));
-for (const platform of ['MacIntel', 'Win32', 'Linux x86_64']) {
-  test(`shortcut help and titles on ${platform}`, () => {
-    const nodes = [{nodeValue:'⌘K'}, {nodeValue:'⌘+ / ⌘− · 捏合'}];
-    const button = {title:'跳到角色（⌘K）'};
+const web = require('./web.cjs');
+let core, dom;
+before(async () => { await web.ready(); core = web.core(); dom = await web.load('ui/dom.js'); });
+
+test('Apple systems are told apart by their platform name', () => {
+  for (const platform of ['MacIntel', 'iPhone', 'iPad']) assert.equal(core.macLike(platform), true, platform);
+  for (const platform of ['Win32', 'Linux x86_64', '', undefined]) assert.equal(core.macLike(platform), false, String(platform));
+});
+for (const mac of [true, false]) {
+  test(`shortcut help and titles ${mac ? 'on a Mac' : 'elsewhere'}`, () => {
+    assert.equal(core.shortcut('Z', mac), mac ? '⌘Z' : 'Ctrl+Z');
+    const nodes = [{nodeValue: '⌘K'}, {nodeValue: '⌘+ / ⌘− · 捏合'}];
+    const button = {title: '跳到角色（⌘K）'};
     let index = 0;
     const walker = {nextNode() { this.currentNode = nodes[index++]; return !!this.currentNode; }};
-    const context = {navigator:{platform}, NodeFilter:{SHOW_TEXT:4}, document:{body:{querySelectorAll:() => [button]}, createTreeWalker:() => walker}};
-    vm.createContext(context); vm.runInContext(hints, context);
-    assert.equal(vm.runInContext("shortcut('Z')", context), platform === 'MacIntel' ? '⌘Z' : 'Ctrl+Z');
-    const undoButton = {};
-    context.state = {}; context.$ = () => undoButton; Object.assign(context, require('./i18n_zh.cjs').page);
-    vm.runInContext(source.slice(source.indexOf('function setUndo('), source.indexOf('// ---------- routing')), context);
-    vm.runInContext("setUndo({label:'合成撤销'})", context);
-    assert.equal(undoButton.title, platform === 'MacIntel' ? '撤销：合成撤销（⌘Z）' : '撤销：合成撤销（Ctrl+Z）');
-    assert.equal(nodes[0].nodeValue, platform === 'MacIntel' ? '⌘K' : 'Ctrl+K');
-    assert.equal(button.title, platform === 'MacIntel' ? '跳到角色（⌘K）' : '跳到角色（Ctrl+K）');
+    globalThis.NodeFilter = {SHOW_TEXT: 4};
+    globalThis.document = {createTreeWalker: () => walker};
+    dom.platformHints({querySelectorAll: () => [button]}, mac);
+    assert.deepEqual(nodes.map(n => n.nodeValue), mac ? ['⌘K', '⌘+ / ⌘− · 捏合'] : ['Ctrl+K', 'Ctrl++ / Ctrl+− · 捏合']);
+    assert.equal(button.title, mac ? '跳到角色（⌘K）' : '跳到角色（Ctrl+K）');
   });
 }
+test('the undo button names the step and the shortcut of this system', () => {
+  const button = {};
+  globalThis.document = {getElementById: id => id === 'undoButton' ? button : null};
+  core.setLatest({id: 1, label: '合成撤销'});
+  assert.equal(button.title, `撤销：合成撤销（${core.shortcut('Z')}）`);
+  assert.equal(button.disabled, false);
+  core.edits.busy = true; core.setLatest(core.edits.latest);
+  assert.equal(button.disabled, true);
+  core.edits.busy = false; core.setLatest(null);
+  assert.equal(button.title, '暂无可撤销操作');
+  assert.equal(button.disabled, true);
+});

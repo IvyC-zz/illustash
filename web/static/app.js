@@ -1,24 +1,13 @@
-'use strict';
 // Illustash front end: plain JS, no build step. Machine identities count by default;
 // the user only removes what is wrong. Every write is undoable.
-const $ = id => document.getElementById(id);
-const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-// Keep displayed modifiers consistent across static help and dynamic messages.
-const isMac = /Mac|iPhone|iPad|iPod/.test(navigator.userAgentData?.platform || navigator.platform || '');
-const shortcut = key => isMac ? `⌘${key}` : `Ctrl+${key}`;
-function platformHints(root) {
-  if (isMac) return;
-  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
-  while (walker.nextNode()) walker.currentNode.nodeValue = walker.currentNode.nodeValue.replace(/⌘(?=\s|$)/g, 'Ctrl').replaceAll('⌘', 'Ctrl+');
-  for (const el of root.querySelectorAll('[title]')) el.title = el.title.replace(/⌘(?=\s|$)/g, 'Ctrl').replaceAll('⌘', 'Ctrl+');
-}
+// Native ES modules (#199): core/ holds what any layout can reuse and never touches the DOM (requests and the
+// session, edits and undo, formatting, preferences); ui/ is this desktop layout. This file is still the rest.
+import {esc, isMac, shortcut, number, dateText, monthText, work} from './core/format.js';
+import {prefs} from './core/prefs.js';
+import {session, adoptToken, onPost, api, post, readError} from './core/session.js';
+import {edits, setLatest, undoLatest, undoneText} from './core/edits.js';
+import {$, platformHints, toast, wireToast, error, readFailure} from './ui/dom.js';
 platformHints(document.body);
-const number = n => Number(n || 0).toLocaleString(I18N.locale);
-// Dates (#182): Chinese keeps its own spacing (「5 月 3 日」); other languages follow Intl.
-const dateText = (y, m, d, withYear) => I18N.language === 'zh-CN' ? (withYear ? `${y} 年 ` : '') + `${m} 月 ${d} 日`
-  : new Intl.DateTimeFormat(I18N.locale, withYear ? {year: 'numeric', month: 'numeric', day: 'numeric'} : {month: 'numeric', day: 'numeric'}).format(new Date(+y, m - 1, +d));
-const monthText = (y, m) => I18N.language === 'zh-CN' ? `${y} 年 ${m} 月` : new Intl.DateTimeFormat(I18N.locale, {year: 'numeric', month: 'short'}).format(new Date(+y, m - 1, 1));
-const work = w => (w || '').replaceAll('_', ' ');
 // Display names come from the server (中文 → 日文 → readable English); the original tag only shows on hover.
 const nameTip = c => !c ? '' : c.tag && c.tag !== c.name ? c.tag + (c.name_source === 'model' ? ' · ' + t('机器翻译') : c.name_source === 'wiki' ? ' · ' + t('来自 Danbooru 别名') : '') : c.name;
 // Zoom is a continuous target column width; the grid snaps to whole columns and animates between them.
@@ -26,67 +15,29 @@ const SIZE_MIN = 72, SIZE_MAX = 480, MAX_HEIGHT = 3e7;
 const sliderToSize = v => Math.round(SIZE_MIN * Math.pow(SIZE_MAX / SIZE_MIN, v / 100));
 const sizeToSlider = s => Math.round(100 * Math.log(s / SIZE_MIN) / Math.log(SIZE_MAX / SIZE_MIN));
 const PAGE = 100;
-const prefs = {
-  get(key, fallback) { try { const v = localStorage.getItem('pi.' + key); return v === null ? fallback : JSON.parse(v); } catch { return fallback; } },
-  set(key, value) { try { localStorage.setItem('pi.' + key, JSON.stringify(value)); } catch {} },
-};
 
 const state = {
-  route: {page: 'library'}, token: '', stale: false, undo: null, busy: false,
+  route: {page: 'library'},
   chars: [], charMap: new Map(), pins: [], char: null, pools: {unmatched: 0, skipped: 0}, dupInfo: {groups: 0, mixed: 0}, exclInfo: {count: 0, reasons: {}}, pendingCount: 0, sync: {status: 'off'}, syncHistory: [], settings: null, recentCount: 0, maybeCount: 0, userTags: [],
   items: [], total: 0, readEpoch: 0, pages: new Set(), pending: new Set(), generation: 0, dataVersion: 0, gridKey: '',
   cols: 1, cellW: 180, rowH: 250, gap: 12, size: Math.min(SIZE_MAX, Math.max(SIZE_MIN, prefs.get('size', 185))), fit: prefs.get('fit', false),
   selecting: false, sel: {all: false, ids: new Set(), exclude: new Set()}, anchor: -1, cursor: -1,
   focused: null, detail: null, viewer: -1, armed: null, nsfw: ['', 'hide', 'only'].includes(prefs.get('nsfw', '')) ? prefs.get('nsfw', '') : '',
 };
-let abortList, toastTimer, searchTimer, pageTimer, pickerTimer, detailGen = 0;
+let abortList, searchTimer, pageTimer, pickerTimer, detailGen = 0;
 
-// The page belongs to the session it booted with. Another window or caller that switches (or reopens)
-// the library starts a new session; adopting its token would send this page's selection, dialogs and
-// queued work to that library. The page stops instead, and drops responses that arrive afterwards.
-const STALE = t('图库已在其他窗口切换或重新打开，请重新载入页面');
-function adoptToken(token) {
-  if (!state.token) state.token = token;
-  else if (token !== state.token) staleSession();
-  return !state.stale;
-}
-function staleSession() {
-  if (state.stale) return;
-  state.stale = true;
-  const banner = $('errorBanner'), reload = document.createElement('button');
-  banner.textContent = t('{reason}。这个页面已停止读写，未保存的输入不会提交。', {reason: STALE});
-  reload.type = 'button'; reload.textContent = t('重新载入'); reload.onclick = () => location.reload();
-  banner.append(reload); banner.hidden = false;
-}
-async function api(path, options = {}) {
-  if (state.stale) throw new Error(STALE);
-  // A page in another language says so: the backend then shows English or romanized names (#173).
-  const language = I18N.language === 'zh-CN' ? {} : {'X-Illustash-Language': I18N.language};
-  const response = await fetch(path, {...options, headers: {'Content-Type': 'application/json', 'X-CSRF-Token': state.token, ...language, ...options.headers}});
-  const result = await response.json();
-  if (response.status === 403 && said(result.error, '会话已过期，请刷新页面')) staleSession();
-  if (state.stale) throw new Error(STALE);
-  // The backend's message in the page's language; e.said keeps it as sent, to test with said.
-  if (!response.ok) throw Object.assign(new Error(tb(result.error) || t('请求失败')), {said: result.error});
-  return result;
-}
-async function post(path, body) {
-  const result = await api(path, {method: 'POST', body: JSON.stringify(body)});
-  if (path === '/api/suggest') return result;  // read-only; POST only carries the selection
+// A write the backend accepted: the counts and reads that may have changed, and the guide's next step.
+onPost((path, body) => {
   guideAfterPost(path, body);
   state.countDirty = true; state.readEpoch++;
   // Prevent an older metadata read from overwriting the just-completed mutation.
   if (metaPending) { metaRevision++; metaFull ||= path !== '/api/tag'; }
-  return result;
-}
-function error(message) { if (state.stale) return; $('errorBanner').textContent = message; $('errorBanner').hidden = !message; }
-function readError(e) { return t('读取失败：{reason}', {reason: e?.message || String(e)}); }
-function readFailure(node, e) { if (node) { node.hidden = false; node.innerHTML = `<p class="empty" role="alert">${esc(readError(e))}</p>`; } }
+});
 async function checkIndex() {
-  const token = state.token;
-  if (!await confirmAction(t('本次检查会联网查询 Danbooru，只发送关注作品的 tag，不发送图库图片。允许本次检查联网吗？'), t('检查新角色')) || token !== state.token) return false;
+  const token = session.token;
+  if (!await confirmAction(t('本次检查会联网查询 Danbooru，只发送关注作品的 tag，不发送图库图片。允许本次检查联网吗？'), t('检查新角色')) || token !== session.token) return false;
   const result = await post('/api/index', {action: 'check', allow_network: true});
-  if (token !== state.token) return false;
+  if (token !== session.token) return false;
   state.index = result; return true;
 }
 
@@ -128,17 +79,7 @@ document.addEventListener('error', e => {
 }, true);
 
 // ---------- toast with undo ----------
-function toast(message, withUndo = false) {
-  $('toastText').textContent = message; $('toastUndo').hidden = !withUndo; $('toast').hidden = false;
-  clearTimeout(toastTimer); toastTimer = setTimeout(() => { $('toast').hidden = true; }, withUndo ? 6000 : 3500);
-}
-$('toast').addEventListener('mouseenter', () => clearTimeout(toastTimer));
-$('toast').addEventListener('mouseleave', () => { toastTimer = setTimeout(() => { $('toast').hidden = true; }, 2500); });
-$('toastUndo').onclick = () => undo();
-function setUndo(value) {
-  state.undo = value; $('undoButton').disabled = !value || state.busy;
-  $('undoButton').title = value ? t('撤销：{label}（{key}）', {label: tb(value.label), key: shortcut('Z')}) : t('暂无可撤销操作');
-}
+wireToast(() => undo());
 
 // ---------- routing ----------
 function parseHash() {
@@ -251,7 +192,7 @@ async function refreshMetaOnce(full, revision, bootSeed) {
   const currentChar = charId && (detail || (directory && (chars.find(c => c.id === charId) || await fetchChar(charId))));
   if (revision !== metaRevision || nsfw.get('nsfw') !== state.nsfw || !adoptToken(boot.token)) return;
   state.userTags = tags;
-  setUndo(boot.undo);
+  setLatest(boot.undo);
   state.pools = Object.fromEntries(pools.map(p => [p.kind, p.count]));
   state.chars = chars; state.charMap = new Map(chars.map(c => [c.id, c]));
   state.workNames = new Map(chars.filter(c => c.work && c.work_name).map(c => [c.work, c.work_name]));
@@ -889,7 +830,7 @@ async function answerAudit(yes) {
   if (ids.length) mutate('/api/audit/answer', {ids, ...(yes ? {yes: ids} : {no: ids})}, false, {advance: true});
 }
 function runBarAction(act) {
-  const n = selCount(), r = state.route; if (!n || state.busy) return;
+  const n = selCount(), r = state.route; if (!n || edits.busy) return;
   const payload = () => ({...selectionPayload(), confirm: n > 500});
   const fromName = state.char?.name;
   if (act === 'audit_yes' || act === 'audit_no') { answerAudit(act === 'audit_yes'); return; }
@@ -957,14 +898,14 @@ function currentItem() {
   return i >= 0 ? state.items[i] : uuid === hold?.uuid ? hold.item : state.viewerItem?.uuid === uuid ? state.viewerItem : null;
 }
 async function mutate(path, body, leaving, {advance = false} = {}) {
-  if (state.busy) return; state.busy = true; document.body.classList.add('busy');
+  if (edits.busy) return; edits.busy = true; document.body.classList.add('busy');
   const started = performance.now();
   const advanceFrom = advance && state.viewer >= 0 ? state.viewerItem?.uuid : null;
   if (advance) hold = null; else holdCurrent();
   const gone = leaving ? new Set(body.ids || state.items.filter(x => x && isSelected(x.uuid)).map(x => x.uuid)) : null;
   if (gone) for (const el of $('grid').children) if (gone.has(el.dataset.id)) el.classList.add('leaving');
   try {
-    const r = await post(path, body); setUndo(r.undo);
+    const r = await post(path, body); setLatest(r.undo);
     state.selecting = false; clearSelection();
     toast(tb(r.undo.label), true);
     if (gone) { await new Promise(done => setTimeout(done, Math.max(0, 170 - (performance.now() - started)))); collapse(gone); }
@@ -977,7 +918,7 @@ async function mutate(path, body, leaving, {advance = false} = {}) {
     }
     return true;
   } catch (e) { toast(e.message); for (const el of $('grid').querySelectorAll('.leaving')) el.classList.remove('leaving'); }
-  finally { state.busy = false; document.body.classList.remove('busy'); setUndo(state.undo); }
+  finally { edits.busy = false; document.body.classList.remove('busy'); setLatest(edits.latest); }
 }
 function collapse(gone) {
   const kept = []; let removed = 0;
@@ -985,10 +926,9 @@ function collapse(gone) {
   kept.length = state.total - removed; state.items = kept; state.total = kept.length; state.dataVersion++; renderGrid(true); updateCount();
 }
 async function undo() {
-  if (!state.undo || state.busy) return; state.busy = true;
+  if (!edits.latest || edits.busy) return; edits.busy = true;
   try {
-    const label = state.undo.label, r = await post('/api/undo', {id: state.undo.id}); setUndo(r.undo);
-    toast(t('已撤销 · {label}', {label: I18N.language === 'zh-CN' ? label.replace(/^已/, '') : tb(label)})); await reload(); refreshMeta().catch(e => error(readError(e)));
+    toast(undoneText(await undoLatest())); await reload(); refreshMeta().catch(e => error(readError(e)));
     if (state.route.page === 'home') renderHome(true);
     if (state.route.page === 'identity') renderIdentity();
     if (state.route.page === 'groups') renderGroups(true);
@@ -998,7 +938,7 @@ async function undo() {
   } catch (e) {
     // The history may have moved on (another window, or a failure after the server committed): show its latest step.
     toast(e.message); refreshMeta().catch(err => error(readError(err)));
-  } finally { state.busy = false; setUndo(state.undo); }
+  } finally { edits.busy = false; setLatest(edits.latest); }
 }
 async function sweep() {
   const c = state.char; if (!c?.unchecked) return;
@@ -1154,7 +1094,7 @@ function mergeCharacter(c) {
   openPicker({title: t('把 {name} 合并到…', {name: c.name}), placeholder: t('输入同一个人的另一个角色'), jump: true, exclude: [c.id],
     sentence: e => t('把 {name} 并入 {target}：图、人工结论、子标签和别名都过去，可撤销', {name: c.name, target: e.name}),
     pick: async e => {
-      try { const r = await post('/api/merge', {source: c.id, target: e.id}); setUndo(r.undo); toast(tb(r.undo.label), true); await refreshMeta(); go(charRoute(e.id)); }
+      try { const r = await post('/api/merge', {source: c.id, target: e.id}); setLatest(r.undo); toast(tb(r.undo.label), true); await refreshMeta(); go(charRoute(e.id)); }
       catch (err) { toast(err.message); }
     }});
 }
@@ -1278,7 +1218,7 @@ async function editProfile(c) {
     q('#pfSave').disabled = true;
     try {
       const r = await post('/api/character/profile', body);
-      close(); setUndo(r.undo); toast(tb(r.undo.label), true);
+      close(); setLatest(r.undo); toast(tb(r.undo.label), true);
       state.localLinks = null; await refreshMeta(); renderHeading();
     } catch (err) { q('#pfSave').disabled = false; toast(err.message); }
   };
@@ -1303,7 +1243,7 @@ async function openLocalLinks() {
   count();
   for (const b of d.querySelectorAll('[data-merge]')) b.onclick = async () => {
     const x = merges.find(m => m.id === b.dataset.merge); b.disabled = true;
-    try { const r = await post('/api/merge', {source: x.id, target: x.target.id}); setUndo(r.undo); toast(tb(r.undo.label), true); b.closest('.link-row').remove(); await refreshMeta(); refreshLocalLinks(); }
+    try { const r = await post('/api/merge', {source: x.id, target: x.target.id}); setLatest(r.undo); toast(tb(r.undo.label), true); b.closest('.link-row').remove(); await refreshMeta(); refreshLocalLinks(); }
     catch (e) { b.disabled = false; toast(e.message); }
   };
   d.querySelector('form').onsubmit = async e => {
@@ -1311,7 +1251,7 @@ async function openLocalLinks() {
     const chosen = links.filter(x => d.querySelector(`[data-link="${CSS.escape(x.id)}"]`)?.checked).map(x => ({id: x.id, tag: x.tag}));
     if (!chosen.length) return;
     $('llApply').disabled = true; $('llApply').textContent = t('正在关联…');
-    try { const r = await post('/api/local-links', {items: chosen}); close(); setUndo(r.undo); toast(tb(r.undo.label), true); await refreshMeta(); refreshLocalLinks(); }
+    try { const r = await post('/api/local-links', {items: chosen}); close(); setLatest(r.undo); toast(tb(r.undo.label), true); await refreshMeta(); refreshLocalLinks(); }
     catch (err) { count(); toast(err.message); }
   };
   d.showModal();
@@ -1626,11 +1566,11 @@ async function loadActivity() {
   if (state.route.page === 'characters') drawCast();
 }
 async function searchIndex() {
-  const route = state.route, token = state.token;
+  const route = state.route, token = session.token;
   const q = $('charSearch').value.trim();
   if (!q) { cast.list = null; drawCast(); return; }
-  let list; try { list = await api('/api/characters?min=1&q=' + encodeURIComponent(q) + '&nsfw=' + state.nsfw); } catch (e) { if (route === state.route && token === state.token && q === $('charSearch').value.trim()) readFailure($('charIndex'), e); return; }
-  if (route === state.route && token === state.token && q === $('charSearch').value.trim()) { cast.list = list; drawCast(); }
+  let list; try { list = await api('/api/characters?min=1&q=' + encodeURIComponent(q) + '&nsfw=' + state.nsfw); } catch (e) { if (route === state.route && token === session.token && q === $('charSearch').value.trim()) readFailure($('charIndex'), e); return; }
+  if (route === state.route && token === session.token && q === $('charSearch').value.trim()) { cast.list = list; drawCast(); }
 }
 // Replace only the sections whose HTML changed, so covers that did not change are not reloaded.
 function reconcileSections(container, sections, empty = t('没有匹配的角色')) {
@@ -1756,11 +1696,11 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape' && cast.pop &
 // Watching a work means the index check asks Danbooru (work name only) for characters the local index lacks.
 const shelf = {q: '', filter: 'all'};
 async function renderShelf() {
-  const route = state.route, token = state.token;
+  const route = state.route, token = session.token;
   $('hint').textContent = t('点作品名看它的角色 · 检查关注作品的新角色前会确认联网');
   drawShelf();
-  let x; try { x = await api('/api/index'); } catch (e) { if (route === state.route && token === state.token) readFailure($('charIndex'), e); return; }
-  if (route !== state.route || token !== state.token) return;
+  let x; try { x = await api('/api/index'); } catch (e) { if (route === state.route && token === session.token) readFailure($('charIndex'), e); return; }
+  if (route !== state.route || token !== session.token) return;
   if (x) state.index = x;
   if (state.route.page === 'characters' && state.route.section === 'works') { renderHeading(); drawShelf(); }
 }
@@ -1886,7 +1826,7 @@ function workDialog(w) {
 }
 // Characters the last index check found on Danbooru for watched works; adding one downloads ~20 public reference pictures.
 function openIndexAdd(tag = '') {
-  const token = state.token, x = state.index, list = (x?.check?.missing || []).filter(r => !tag || r.copyright === tag);
+  const token = session.token, x = state.index, list = (x?.check?.missing || []).filter(r => !tag || r.copyright === tag);
   if (!list.length) return;
   const d = document.createElement('dialog'); d.className = 'palette profile-dialog index-add';
   d.innerHTML = `<form method="dialog"><div class="dialog-top"><h2>${t('添加新角色')}</h2><button type="button" class="icon" data-close aria-label="${t('关闭')}">×</button></div>
@@ -1906,7 +1846,7 @@ function openIndexAdd(tag = '') {
   q('[data-close]').onclick = () => d.close();
   d.onclose = async () => {
     const tags = picks().filter(b => b.checked).map(b => b.dataset.pick), ok = d.returnValue === 'ok'; d.remove();
-    if (!ok || !tags.length || token !== state.token) return;
+    if (!ok || !tags.length || token !== session.token) return;
     try { state.index = await post('/api/index', {action: 'apply', tags, allow_network: true}); toast(t('开始添加 {n} 个角色，进度在任务面板里', {n: number(tags.length)})); pollIndex(); renderIndexBody(); }
     catch (e) { toast(e.message); }
   };
@@ -1927,9 +1867,9 @@ document.addEventListener('keydown', e => {
   if (key === 'r' && !mod && !panelPage(state.route.page)) { e.preventDefault(); toggleFit(); return; }
   if (key === 'h' && !mod) { e.preventDefault(); setNsfw(state.nsfw === 'hide' ? '' : 'hide'); return; }
   if (e.key === '/' && $('search')) { e.preventDefault(); $('search').focus(); return; }
-  if ((key === 'y' || key === 'n') && !mod && !state.busy && state.route.page === 'audit' && selCount() && state.viewer < 0) { e.preventDefault(); answerAudit(key === 'y'); return; }
-  if ((key === 'y' || key === 'n') && !mod && !state.busy && state.question && [state.focused, state.viewer >= 0 && state.viewerItem?.uuid].includes(state.question.ident)) { e.preventDefault(); answerAsk(key === 'y' ? 'yes' : 'no'); return; }
-  if (state.busy || $('grid').hidden) return;
+  if ((key === 'y' || key === 'n') && !mod && !edits.busy && state.route.page === 'audit' && selCount() && state.viewer < 0) { e.preventDefault(); answerAudit(key === 'y'); return; }
+  if ((key === 'y' || key === 'n') && !mod && !edits.busy && state.question && [state.focused, state.viewer >= 0 && state.viewerItem?.uuid].includes(state.question.ident)) { e.preventDefault(); answerAsk(key === 'y' ? 'yes' : 'no'); return; }
+  if (edits.busy || $('grid').hidden) return;
   if (e.key === ' ') { e.preventDefault(); if (state.viewer >= 0) closeViewer(); else openViewer(state.cursor >= 0 ? state.cursor : state.focused ? indexOf(state.focused) : 0); return; }
   if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key)) {
     e.preventDefault();
@@ -2190,7 +2130,7 @@ function askCardHTML() {
 }
 function redrawAskCard() { const el = $('askCard'), html = askCardHTML(); if (!el) return drawHome(); if (!html) { el.remove(); return; } const t = document.createElement('div'); t.innerHTML = html; el.replaceWith(t.firstElementChild); }
 async function submitAskCard(how) {
-  const b = home.ask; if (!b || state.busy) return;
+  const b = home.ask; if (!b || edits.busy) return;
   const ids = b.items.map(x => x.uuid), no = ids.filter(u => home.askOff.has(u)), yes = ids.filter(u => !home.askOff.has(u));
   home.askSkip.push(b.entity); home.askOff = new Set();
   if (how === 'later') {
@@ -2374,7 +2314,7 @@ async function renderIdentity(more = false) {
   for (const b of $('groupsPage').querySelectorAll('[data-act]')) b.onclick = () => decideIdentity(Number(b.dataset.i), b.dataset.act);
 }
 async function decideIdentity(i, act) {
-  const x = identity.items[i]; if (!x || identity.busy.has(i) || state.busy) return;
+  const x = identity.items[i]; if (!x || identity.busy.has(i) || edits.busy) return;
   const card = $('groupsPage').querySelector(`.pair-card[data-i="${i}"]`);
   identity.busy.add(i); card?.classList.add('working');
   // A duplicate is shown under the side with more images.
@@ -2384,7 +2324,7 @@ async function decideIdentity(i, act) {
         a_of_b: {a: x.a.id, b: x.b.id, kind: 'form_of'}, different: {a: x.a.id, b: x.b.id, kind: 'different_from'}}[act]};
   try {
     const r = act === 'skip' ? await post('/api/identity/skip', {a: x.a.id, b: x.b.id}) : await post('/api/identity/decision', body);
-    setUndo(r.undo); toast(act === 'skip' ? t('已暂不判断') : {same: t('已把 {a} 并入 {b}', {a: small.name, b: big.name}), b_of_a: t('{a} 已作为 {b} 的一种形态', {a: x.b.name, b: x.a.name}),
+    setLatest(r.undo); toast(act === 'skip' ? t('已暂不判断') : {same: t('已把 {a} 并入 {b}', {a: small.name, b: big.name}), b_of_a: t('{a} 已作为 {b} 的一种形态', {a: x.b.name, b: x.a.name}),
       a_of_b: t('{a} 已作为 {b} 的一种形态', {a: x.a.name, b: x.b.name}), different: t('已记下 {a} 和 {b} 是不同角色', {a: x.a.name, b: x.b.name})}[act], true);
     card?.classList.add('leaving');
     await new Promise(done => setTimeout(done, 170));
@@ -2473,9 +2413,9 @@ function indexLine(s, check) {
     error: t('检查失败：{reason}', {reason: tb(s.message || '')})}[s.status] || (check ? t('上次检查：{time} · 待添加 {n} 个角色', {time: stamp(check.checked_at), n: number(check.missing.length)}) : t('尚未检查'));
 }
 async function renderIndexCard(fresh = true) {
-  const route = state.route, token = state.token;
+  const route = state.route, token = session.token;
   if (!$('indexCard') || state.route.page !== 'settings') return;
-  if (fresh || !state.index) { try { const value = await settingsRequest('/api/index'); if (route !== state.route || token !== state.token) return; state.index = value; } catch (e) { if (route === state.route && token === state.token) readFailure($('indexCard'), e); return; } }
+  if (fresh || !state.index) { try { const value = await settingsRequest('/api/index'); if (route !== state.route || token !== session.token) return; state.index = value; } catch (e) { if (route === state.route && token === session.token) readFailure($('indexCard'), e); return; } }
   const card = $('indexCard'), x = state.index; if (!x || !card) return;
   const s = x.state, active = INDEX_ACTIVE.includes(s.status), watched = x.watch.works.length;
   // Which works are watched is decided on each work in 资料库 · 作品; here only how the check runs.
@@ -2499,7 +2439,7 @@ async function renderIndexCard(fresh = true) {
 // Work picker: works your library already has (instant, local names and aliases), then Danbooru
 // copyright tags for the typed text (only the text goes out). Picking one yields an exact tag.
 function wireWatchAdd(x, add) {
-  const token = state.token, input = $('watchAdd'), menu = $('watchMenu'), watched = new Set(x.watch.works);
+  const token = session.token, input = $('watchAdd'), menu = $('watchMenu'), watched = new Set(x.watch.works);
   let list = [], index = 0, gen = 0, localTimer = 0, remoteTimer = 0;
   const row = (r, i) => `<button class="picker-item watch-option${i === index ? ' on' : ''}" data-i="${i}" role="option" ${watched.has(r.id) || (r.id && !r.watchable) ? 'disabled' : ''}>
     <span class="watch-name">${esc(r.name || workName(r.tag))}</span><small>${esc(r.tag || t('D 站上还没有这个作品'))}</small>
@@ -2513,15 +2453,15 @@ function wireWatchAdd(x, add) {
   const highlight = () => { for (const b of menu.querySelectorAll('[data-i]')) b.classList.toggle('on', Number(b.dataset.i) === index); menu.querySelector('.on')?.scrollIntoView({block: 'nearest'}); };
   const search = async () => {
     const q = input.value.trim(), g = ++gen;
-    let local; try { local = await api('/api/works?' + new URLSearchParams({q})); } catch (e) { if (g === gen && token === state.token && input === $('watchAdd')) render([], esc(readError(e))); return; }
-    if (g !== gen || token !== state.token || input !== $('watchAdd')) return;
+    let local; try { local = await api('/api/works?' + new URLSearchParams({q})); } catch (e) { if (g === gen && token === session.token && input === $('watchAdd')) render([], esc(readError(e))); return; }
+    if (g !== gen || token !== session.token || input !== $('watchAdd')) return;
     if (!q) { render([{label: t('你的图库里还没关注的作品'), items: local.filter(r => !watched.has(r.id)).slice(0, 10)}]); return; }
     const mine = local.slice(0, 8);
     render([{label: t('你的图库里有'), items: mine}], t('正在查 Danbooru…（只发送你输入的文字）'));
     clearTimeout(remoteTimer);
     remoteTimer = setTimeout(async () => {
       const result = await remoteNames('/api/works?' + new URLSearchParams({q, remote: 1})), remote = result.found;
-      if (g !== gen || token !== state.token || input !== $('watchAdd')) return;
+      if (g !== gen || token !== session.token || input !== $('watchAdd')) return;
       const posts = new Map((remote || []).map(r => [r.tag, r.posts]));
       for (const r of mine) if (posts.has(r.tag)) r.posts = posts.get(r.tag);
       const known = new Set(mine.map(r => r.tag));
@@ -2575,9 +2515,9 @@ let namesTimer = 0;
 const NAMES_ACTIVE = ['fetching', 'matching', 'translating', 'running'];
 const namesLine = s => s.status === 'off' ? t('当前未启用') : NAMES_ACTIVE.includes(s.status) ? t('正在获取 {progress}', {progress: s.total ? `${number(s.done || 0)} / ${number(s.total)}` : '…'}) : s.status === 'error' ? t('获取失败，将在下次启动时重试') : s.status === 'unauthorized' ? t('未允许联网查询 · 可在设置 › 网络与隐私里允许') : t('已是最新');
 async function renderNamesCard(fresh = true) {
-  const route = state.route, token = state.token;
+  const route = state.route, token = session.token;
   if (!$('namesCard') || state.route.page !== 'settings') return;
-  if (fresh || !state.names) { try { const value = await settingsRequest('/api/names'); if (route !== state.route || token !== state.token) return; state.names = value; } catch (e) { if (route === state.route && token === state.token) readFailure($('namesCard'), e); return; } }
+  if (fresh || !state.names) { try { const value = await settingsRequest('/api/names'); if (route !== state.route || token !== session.token) return; state.names = value; } catch (e) { if (route === state.route && token === session.token) readFailure($('namesCard'), e); return; } }
   // The page may have been re-rendered while waiting: always work on the card that is on screen now.
   const card = $('namesCard'), x = state.names; if (!card) return; if (!x) { card.hidden = true; return; }
   card.hidden = false;
@@ -2650,13 +2590,13 @@ function settingsRequest(path) {
 }
 function loadSettingsData(refresh = false) {
   if (settingsLoading) return settingsLoading;
-  const token = state.token;
+  const token = session.token;
   const missing = [['settings', '/api/settings'], ['fold', '/api/fold'], ['index', '/api/index'], ['names', '/api/names']]
     .filter(([key]) => refresh || !state[key]);
   if (!missing.length) return;
   settingsLoading = Promise.all(missing.map(async ([key, path]) => {
-    try { const value = await settingsRequest(path); if (token !== state.token) return; state[key] = key === 'fold' ? value.kinds : value; }
-    catch (e) { if (token !== state.token) return; error(readError(e)); }
+    try { const value = await settingsRequest(path); if (token !== session.token) return; state[key] = key === 'fold' ? value.kinds : value; }
+    catch (e) { if (token !== session.token) return; error(readError(e)); }
     if (state.route.page === 'settings') renderSettings(false);
   })).finally(() => { settingsLoading = null; });
   return settingsLoading;
@@ -2722,8 +2662,8 @@ const CREDITS = [
   [t('Bangumi 番组计划'), '', t('角色中文名称'), 'https://bgm.tv'],
   ['Pillow · NumPy · ONNX Runtime', '', t('图像处理与模型推理'), 'https://onnxruntime.ai']];
 async function renderAbout() {
-  const route = state.route, token = state.token;
-  if (!state.about) { try { const value = await settingsRequest('/api/about'); if (route !== state.route || token !== state.token) return; state.about = value; } catch (e) { if (route === state.route && token === state.token) readFailure($('setAbout'), e); return; } }
+  const route = state.route, token = session.token;
+  if (!state.about) { try { const value = await settingsRequest('/api/about'); if (route !== state.route || token !== session.token) return; state.about = value; } catch (e) { if (route === state.route && token === session.token) readFailure($('setAbout'), e); return; } }
   const card = $('setAbout'), a = state.about; if (!card || !a) return;
   const version = `${a.version}${a.channel ? ' ' + tb(a.channel) : ''}`;
   const diag = [[t('应用'), a.name], [t('版本'), version], [t('构建'), a.build || '—'], [t('数据库架构'), a.schema], [a.runtime ? t('运行时') : 'Python', a.runtime || a.python], [t('系统'), a.platform],
@@ -2971,7 +2911,7 @@ let confirmationOpen = false;
 function confirmAction(message, title = t('确认操作'), ok = t('确认'), cancel = true) {
   if (confirmationOpen) return Promise.resolve(false);
   confirmationOpen = true;
-  const token = state.token, route = state.route;
+  const token = session.token, route = state.route;
   return new Promise(resolve => {
     const d = document.createElement('dialog'); d.className = 'palette profile-dialog';
     d.setAttribute('aria-label', title);
@@ -2988,7 +2928,7 @@ function confirmAction(message, title = t('确认操作'), ok = t('确认'), can
       if (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) d.close();
     };
     d.onclose = () => {
-      const ok = d.returnValue === 'ok' && token === state.token && route === state.route;
+      const ok = d.returnValue === 'ok' && token === session.token && route === state.route;
       d.remove(); confirmationOpen = false; resolve(ok);
     };
     document.body.append(d); d.showModal();
@@ -3006,7 +2946,7 @@ async function pickFolders() {
   }
 }
 const removingSources = new Set();
-async function libraryAction(action, body = {}, token = state.token) {
+async function libraryAction(action, body = {}, token = session.token) {
   try { return await api('/api/libraries/' + action, {method: 'POST', body: JSON.stringify(body), headers: {'X-CSRF-Token': token}}); } catch (err) { toast(err.message); return null; }
 }
 // Polls overlap (the start answer, the timer, a cancel): an older answer arriving last must not wind the state back,
@@ -3014,16 +2954,16 @@ async function libraryAction(action, body = {}, token = state.token) {
 let importTimer = null, importPoll = 0;
 async function pollImports() {
   clearTimeout(importTimer);
-  const poll = ++importPoll, token = state.token;
+  const poll = ++importPoll, token = session.token;
   try {
     const job = await api('/api/imports');
-    if (poll !== importPoll || token !== state.token) return;
+    if (poll !== importPoll || token !== session.token) return;
     const was = state.importTask;
     state.importTask = job;
     if (IMPORT_ACTIVE.includes(was?.status) && was.id === job.id && !IMPORT_ACTIVE.includes(job.status)) importEnded(job);
     renderLibrariesCard();
     if (IMPORT_ACTIVE.includes(job.status)) importTimer = setTimeout(pollImports, 700);
-  } catch { if (poll === importPoll && token === state.token) importTimer = setTimeout(pollImports, 5000); }
+  } catch { if (poll === importPoll && token === session.token) importTimer = setTimeout(pollImports, 5000); }
 }
 function importEnded(job) {
   toast(importLine(job));
@@ -3083,10 +3023,10 @@ $('settingsPage').addEventListener('click', async e => {
   else if (d.libRemove) {
     if (removingSources.has(d.libRemove)) return;
     removingSources.add(d.libRemove);
-    const token = state.token, route = state.route;
+    const token = session.token, route = state.route;
     try {
       const ask = await libraryAction('sources/remove', {source: d.libRemove}, token); if (!ask) return;
-      if (token !== state.token || route !== state.route) return;
+      if (token !== session.token || route !== state.route) return;
       if (!await confirmAction(t('这个来源的 {n} 张图会从图库移除。人工整理记录会保留，重新添加同一个文件夹可以恢复。确定移除吗？', {n: number(ask.count)}), t('移除来源'))) return;
       const r = await libraryAction('sources/remove', {source: d.libRemove, confirm: 1}, token);
       await loadLibraries();
@@ -3112,7 +3052,7 @@ async function openLibrary(path, name, upgrade = false) {
     toast(err.message); return;
   }
   // This page's state belongs to the library it left: no reads or writes until the reload below.
-  state.stale = true;
+  session.stale = true;
   toast(t('正在打开「{name}」…', {name}));
   for (let i = 0; i < 120; i++) {
     await new Promise(r => setTimeout(r, 700));
@@ -3442,12 +3382,12 @@ async function renderArtistAudit() {
     ${d.items.length < d.pool ? `<p class="aa-more"><button class="quiet" id="aaMore">${t('再加 10 张')}</button></p>` : ''}`;
   $('viewport').scrollTop = scroll;
   for (const b of $('groupsPage').querySelectorAll('[data-aa]')) b.onclick = async () => {
-    if (state.busy) return; state.busy = true; b.disabled = true;
+    if (edits.busy) return; edits.busy = true; b.disabled = true;
     try {
       const r = await post('/api/artist/verdict', {ids: [b.dataset.uuid], artist: b.dataset.artist, verdict: b.dataset.aa || null, name: b.dataset.name});
-      setUndo(r.undo); toast(tb(r.undo.label), true);
+      setLatest(r.undo); toast(tb(r.undo.label), true);
     } catch (e) { toast(e.message); }
-    finally { state.busy = false; setUndo(state.undo); }
+    finally { edits.busy = false; setLatest(edits.latest); }
     renderArtistAudit();
   };
   $('aaMore')?.addEventListener('click', () => { prefs.set('artistAuditN', n + 10); renderArtistAudit(); });
@@ -3465,8 +3405,8 @@ async function lookupAllowed() {
   return true;
 }
 async function artistLookup(body, label, after) {
-  const token = state.token;
-  if (!await lookupAllowed() || token !== state.token) return;
+  const token = session.token;
+  if (!await lookupAllowed() || token !== session.token) return;
   try { await api('/api/provenance', {method: 'POST', body: JSON.stringify(body), headers: {'X-CSRF-Token': token}}); } catch (err) { toast(err.message); return; }
   toast(label);
   clearTimeout(lookupTimer);
@@ -3569,17 +3509,17 @@ let guideChecked = false, guideLoadedAt = 0, guideWorksAt = 0, tourAt = -1, chec
 const guideOn = () => !!state.guide && state.guide.guide.status !== 'off';
 const guideActive = () => ['new', 'active'].includes(state.guide?.guide?.status);
 async function loadGuide(works = false) {
-  const token = state.token, value = await api('/api/onboarding' + (works ? '?works=1' : ''));
-  if (token !== state.token) return null;
+  const token = session.token, value = await api('/api/onboarding' + (works ? '?works=1' : ''));
+  if (token !== session.token) return null;
   state.guide = {...value, works: value.works || state.guide?.works};
   guideLoadedAt = Date.now();
   return value;
 }
 async function guideAction(body) {
-  const token = state.token;
+  const token = session.token;
   try {
     const value = await api('/api/onboarding', {method: 'POST', body: JSON.stringify(body)});
-    if (token === state.token) state.guide = {...value, works: value.works || state.guide?.works};
+    if (token === session.token) state.guide = {...value, works: value.works || state.guide?.works};
     return true;
   } catch (e) { toast(e.message); return false; }
 }
@@ -3814,7 +3754,7 @@ async function replayGuide() {
 (async () => {
   try {
     const bootNsfw = state.nsfw;
-    const boot = await api('/api/bootstrap?' + new URLSearchParams({nsfw: bootNsfw})); adoptToken(boot.token); setUndo(boot.undo);
+    const boot = await api('/api/bootstrap?' + new URLSearchParams({nsfw: bootNsfw})); adoptToken(boot.token); setLatest(boot.undo);
     if (boot.read_only) toast(boot.read_only);   // the library could not be switched to the terms core: read-only
     navCount('countLibrary', boot.total);
     window.splash?.status(t('正在整理 {n} 张图…', {n: number(boot.total)}));

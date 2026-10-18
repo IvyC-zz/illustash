@@ -1,4 +1,6 @@
 const test = require('node:test');
+const web = require('./web.cjs');   // core/ modules (#199)
+test.before(web.ready);
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
@@ -8,12 +10,12 @@ const tick = () => new Promise(resolve => setImmediate(resolve));
 const section = (a, b) => source.slice(source.indexOf(a), source.indexOf(b, source.indexOf(a)));
 function metaHarness(api) {
   const nodes = {}, paints = [];
-  const c = {URLSearchParams, api, state: {nsfw: '', chars: [], dupInfo: {}, exclInfo: {}, route: {page: 'library'}},
-    $: id => nodes[id] ||= {}, setUndo() {}, navCount() {}, fetchChar: async () => null,
+  const {session, adoptToken} = web.core();
+  const c = {URLSearchParams, api, session, adoptToken, state: {nsfw: '', chars: [], dupInfo: {}, exclInfo: {}, route: {page: 'library'}},
+    $: id => nodes[id] ||= {}, setLatest() {}, navCount() {}, fetchChar: async () => null,
     renderChrome: () => paints.push('chrome'), renderSettings() {}, renderIndexBody() {}, guideAfterPost() {},
     document: {createElement: () => ({})}};
   vm.createContext(Object.assign(c, zh.page));
-  vm.runInContext(section('const STALE', 'async function api('), c);
   vm.runInContext(section('let metaPending', '// ---------- chrome'), c);
   return c;
 }
@@ -31,7 +33,7 @@ test('same-turn metadata requests coalesce, initial bootstrap is reused', async 
   await first;
   assert.equal(calls.length, 4);
   assert.ok(calls.every(p => !p.startsWith('/api/bootstrap')));
-  assert.equal(c.state.token, 'seed');
+  assert.equal(c.session.token, 'seed');
 });
 test('in-flight changes trigger one trailing refresh and stale responses never apply', async () => {
   const pending = [];
@@ -41,12 +43,12 @@ test('in-flight changes trigger one trailing refresh and stale responses never a
   assert.equal(c.refreshMeta(), first); assert.equal(c.refreshMeta(), first);
   for (const p of pending.splice(0)) p.resolve(value(p.path, 'old'));
   await tick();
-  assert.equal(c.state.token, undefined);
+  assert.equal(c.session.token, '');
   assert.equal(pending.length, 5);
   assert.ok(pending.find(p => p.path.startsWith('/api/identity/count')).path.includes('nsfw=hide'));
   for (const p of pending.splice(0)) p.resolve(value(p.path, 'fresh'));
   await first;
-  assert.equal(c.state.token, 'fresh');
+  assert.equal(c.session.token, 'fresh');
   assert.equal(c.state.chars[0].id, 'fresh');
 });
 test('tag-only refresh avoids characters, pools and counts', async () => {
@@ -60,7 +62,7 @@ test('failed metadata refresh releases the in-flight request for retry', async (
   let fail = true;
   const c = metaHarness(async path => {if (fail) throw Error('offline'); return value(path);});
   await assert.rejects(c.refreshMeta(), /offline/);
-  fail = false; await c.refreshMeta(); assert.equal(c.state.token, 'current');
+  fail = false; await c.refreshMeta(); assert.equal(c.session.token, 'current');
 });
 
 class Element {
@@ -135,18 +137,23 @@ test('pagination skips recount and obsolete completion cannot clear a newer pend
 
 test('successful writes invalidate an in-flight metadata read before UI refresh starts', async () => {
   const pending = [];
-  const c = metaHarness((path, options) => options?.method === 'POST' ? Promise.resolve({ok:true}) : new Promise(resolve => pending.push({path,resolve})));
+  const c = metaHarness(path => new Promise(resolve => pending.push({path,resolve})));
   c.state.readEpoch = 0;
-  vm.runInContext(section('async function post(', 'function error('), c);
+  // Writes go through core/session.js; app.js counts them in its onPost listener.
+  const {post, onPost} = web.core();
+  globalThis.fetch = async () => ({status: 200, ok: true, json: async () => ({ok: true})});
+  c.post = post; c.onPost = fn => (c.unlisten = onPost(fn));
+  vm.runInContext(section('onPost((path, body) =>', 'async function checkIndex('), c);
   const first = c.refreshMeta(); await tick();
   await c.post('/api/suggest', {});
   assert.equal(c.state.readEpoch, 0); assert.equal(c.state.countDirty, undefined);
   await c.post('/api/tag', {});
   assert.equal(c.state.readEpoch, 1); assert.equal(c.state.countDirty, true);
   for (const p of pending.splice(0)) p.resolve(value(p.path, 'stale'));
-  await tick(); assert.equal(c.state.token, undefined);
+  await tick(); assert.equal(c.session.token, '');
   for (const p of pending.splice(0)) p.resolve(value(p.path, 'after-write'));
-  await first; assert.equal(c.state.token, 'after-write');
+  await first; assert.equal(c.session.token, 'after-write');
+  c.unlisten();
 });
 test('reload counts only its first page and retries if data changed during the read', async () => {
   const nodes = {}, pending = [], counts = [];
@@ -169,7 +176,7 @@ test('bootstrap seed is discarded when data or NSFW changes before the batch sta
     const result = c.refreshMeta({boot:{token:'old',total:1}});
     mutate(c); await result;
     assert.equal(calls.filter(p => p.startsWith('/api/bootstrap')).length, 1);
-    assert.equal(c.state.token, 'fresh');
+    assert.equal(c.session.token, 'fresh');
   }
 });
 

@@ -4,35 +4,40 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
+const web = require('./web.cjs');   // core/session.js and ui/dom.js (#199)
 const zh = require('./i18n_zh.cjs');   // t() of a Chinese page (#173)
 const source = fs.readFileSync('web/static/app.js', 'utf8');
 const section = (a, b) => source.slice(source.indexOf(a), source.indexOf(b, source.indexOf(a)));
 const tick = () => new Promise(resolve => setImmediate(resolve));
+let dom;
+test.before(async () => { await web.ready(); dom = await web.load('ui/dom.js'); });
 
-// A server whose session can be replaced by "another window"; every request is recorded.
+// A server whose session can be replaced by "another window"; every request is recorded. Requests and the session
+// are core/session.js, the banner is ui/dom.js; the metadata refresh is still a slice of app.js.
 function harness() {
   const server = {token: 'session-a', chars: [{id: 'a-char'}], requests: [], hold: null};
   const nodes = {};
   const element = () => ({hidden: true, textContent: '', children: [], append(child) { this.children.push(child); }});
   const respond = (status, body) => ({status, ok: status < 400, json: async () => body});
+  globalThis.document = {getElementById: id => nodes[id] ||= element(), createElement: element};
+  globalThis.location = {reload() { c.reloaded = true; }};
+  globalThis.fetch = async (path, options = {}) => {
+    server.requests.push({path, method: options.method || 'GET', token: options.headers['X-CSRF-Token']});
+    if (server.hold) await server.hold;
+    if (options.method === 'POST' && options.headers['X-CSRF-Token'] !== server.token)
+      return respond(403, {error: '会话已过期，请刷新页面'});
+    if (path.startsWith('/api/bootstrap')) return respond(200, {token: server.token, undo: null, total: 1});
+    if (path.startsWith('/api/characters')) return respond(200, server.chars);
+    if (path.startsWith('/api/identity/count')) return respond(200, {total: 0});
+    return respond(200, path === '/api/tag' ? {ok: true} : []);
+  };
+  const {session, adoptToken, staleSession, api, post} = web.core();
   const c = {
-    URLSearchParams, state: {nsfw: '', token: '', stale: false, route: {page: 'library'}, chars: [], dupInfo: {}, exclInfo: {},
+    URLSearchParams, session, adoptToken, staleSession, api, post, error: dom.error, state: {nsfw: '', route: {page: 'library'}, chars: [], dupInfo: {}, exclInfo: {},
       readEpoch: 0, sel: {all: false, ids: new Set(['same-uuid']), exclude: new Set()}},
-    $: id => nodes[id] ||= element(), document: {createElement: element}, location: {reload() { c.reloaded = true; }}, guideAfterPost() {},
-    setUndo() {}, navCount() {}, fetchChar: async () => null, renderChrome() {}, renderSettings() {}, renderIndexBody() {},
-    async fetch(path, options = {}) {
-      server.requests.push({path, method: options.method || 'GET', token: options.headers['X-CSRF-Token']});
-      if (server.hold) await server.hold;
-      if (options.method === 'POST' && options.headers['X-CSRF-Token'] !== server.token)
-        return respond(403, {error: '会话已过期，请刷新页面'});
-      if (path.startsWith('/api/bootstrap')) return respond(200, {token: server.token, undo: null, total: 1});
-      if (path.startsWith('/api/characters')) return respond(200, server.chars);
-      if (path.startsWith('/api/identity/count')) return respond(200, {total: 0});
-      return respond(200, path === '/api/tag' ? {ok: true} : []);
-    },
+    $: id => nodes[id] ||= element(), setLatest() {}, navCount() {}, fetchChar: async () => null, renderChrome() {}, renderSettings() {}, renderIndexBody() {},
   };
   vm.createContext(Object.assign(c, zh.page));
-  vm.runInContext(section('const STALE', 'function readError('), c);
   vm.runInContext(section('let metaPending', '// ---------- chrome'), c);
   return {c, server, banner: () => nodes.errorBanner};
 }
@@ -47,8 +52,8 @@ test('a new session seen by a metadata refresh stops the page instead of adoptin
   assert.equal(c.state.chars[0].id, 'a-char');
   switchElsewhere(server);
   await c.refreshMeta();
-  assert.equal(c.state.token, 'session-a');
-  assert.equal(c.state.stale, true);
+  assert.equal(c.session.token, 'session-a');
+  assert.equal(c.session.stale, true);
   assert.equal(c.state.chars[0].id, 'a-char');   // B's rows never mix into A's page
   assert.match(banner().textContent, /其他窗口切换或重新打开/);
   assert.equal(banner().hidden, false);
@@ -64,7 +69,7 @@ test('a write rejected as an expired session also stops the page', async () => {
   c.adoptToken((await c.api('/api/bootstrap')).token);
   switchElsewhere(server);
   await assert.rejects(c.post('/api/tag', {ids: ['same-uuid'], tag: 'first'}), /重新载入页面/);
-  assert.equal(c.state.stale, true);
+  assert.equal(c.session.stale, true);
   const sent = server.requests.length;
   await assert.rejects(c.api('/api/assets'), /重新载入页面/);
   await assert.rejects(c.post('/api/tag', {ids: ['same-uuid'], tag: 'second'}), /重新载入页面/);
@@ -87,6 +92,6 @@ test('the same session keeps working and its token is adopted once', async () =>
   assert.equal(c.adoptToken('session-a'), true);
   await c.refreshMeta();
   assert.deepEqual(await c.post('/api/tag', {ids: ['same-uuid'], tag: 'ok'}), {ok: true});
-  assert.equal(c.state.stale, false);
+  assert.equal(c.session.stale, false);
   assert.deepEqual(writes(server).map(r => r.token), ['session-a']);
 });

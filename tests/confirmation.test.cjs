@@ -14,7 +14,7 @@ function harness() {
       showModal() {this.open = true;}, close(value = '') {this.returnValue = value; this.open = false; this.onclose();},
       remove() {this.removed = true;}, getBoundingClientRect: () => ({left:10,right:100,top:10,bottom:100})};
   }};
-  const c = {document, state: {token:'synthetic-token',route:{page:'settings'}}, removingSources: new Set(), confirm() {throw new Error('must not use plugin confirm');}, number: String,
+  const c = {document, session: {token:'synthetic-token'}, state: {route:{page:'settings'}}, removingSources: new Set(), confirm() {throw new Error('must not use plugin confirm');}, number: String,
     localStorage: {getItem: k => consent.get(k), setItem: (k,v) => consent.set(k,v)},
     $: id => id === 'settingsPage' ? {addEventListener(event, callback) {click = callback;}} : {contains: () => true},
     libraryAction: async (action, body) => {calls.push({action, body}); return body.confirm ? {removed:2} : {count:2};},
@@ -68,7 +68,7 @@ test('rapid repeated removal has one preview, dialog and commit', async () => {
 });
 for (const change of ['token','route']) test(`confirmation after ${change} change cannot submit`, async () => {
   const h = harness(), pending = h.remove(); await tick();
-  if (change === 'token') h.c.state.token = 'replacement-session';
+  if (change === 'token') h.c.session.token = 'replacement-session';
   else h.c.state.route = {page:'home'};
   h.dialogs[0].close('ok'); await pending;
   assert.equal(h.calls.length,1);

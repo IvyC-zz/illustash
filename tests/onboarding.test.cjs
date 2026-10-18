@@ -14,7 +14,7 @@ const plain = v => JSON.parse(JSON.stringify(v));
 function guide({status = 'active', step = 'welcome', ticked = [], seen = [], hidden = false, results = {}, works, names, sync = {status: 'done'}, route = 'home', index, updates, tasks = []} = {}) {
   const nodes = {}, posted = [];
   const c = {
-    state: {token: 't', route: {page: route}, sync, names, index, updates}, posted, nodes, taskList: () => tasks,
+    session: {token: 't'}, state: {route: {page: route}, sync, names, index, updates}, posted, nodes, taskList: () => tasks,
     $: id => nodes[id] ||= element(), esc: s => String(s ?? ''), number: n => String(n), toast() {}, shortcut: k => '⌘' + k,
     SYNC_ACTIVE: ['scanning', 'recognising', 'importing'], syncLine: s => 'line:' + s.status, WORK_NAMES: {blue_archive: '蔚蓝档案'},
     setTimeout: () => 0, requestAnimationFrame() {}, addEventListener() {}, innerWidth: 1200, innerHeight: 800, go() {},
