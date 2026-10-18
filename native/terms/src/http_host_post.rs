@@ -434,7 +434,28 @@ pub(super) fn handle(request: Request, host: &Host, received: u64, text: &str, b
             if !path.join("library.json").is_file() {
                 return Err(Error::Invalid("不是图库包".into()));
             }
-            host.switch_locked(&mut session, received, &path)
+            // A package in an older format opens only after the person agrees to upgrade it (#193); it is looked at
+            // only once opening failed, so libraries in the current format pay nothing for this.
+            match host.switch_locked(&mut session, received, &path) {
+                Err(Error::Schema(why)) => match crate::app_upgrade::needed(&path) {
+                    None => Err(Error::Schema(why)),
+                    Some(_) if !body.get("upgrade").is_some_and(truthy) => {
+                        Err(Error::Conflict(crate::app_upgrade::NEEDED.into()))
+                    }
+                    Some(prepared) => {
+                        // Said as it happened: not committed (the package is as it was) or committed, with the backup.
+                        let report = crate::app_upgrade::run(&prepared)
+                            .map_err(|failure| Error::Invalid(failure.to_string()))?;
+                        let backup = crate::app_upgrade::shown(&report.backup);
+                        drop(report);
+                        let mut out = host.switch_locked(&mut session, received, &path)?;
+                        session.upgraded = Some(backup.clone());
+                        out.set("upgraded", Json::object([("backup", backup.as_str().into())]));
+                        Ok(out)
+                    }
+                },
+                other => other,
+            }
         })(),
         _ => {
             unavailable(request);

@@ -127,6 +127,10 @@ pub(super) fn handle(request: Request, host: &Host, received: u64) {
             if let Some(why) = &session.unlisted {
                 p.set("unlisted", why.as_str().into());
             }
+            // Only after an upgrade on opening (#193): where the pre-upgrade backup is.
+            if let Some(backup) = &session.upgraded {
+                p.set("upgraded", Json::object([("backup", backup.as_str().into())]));
+            }
             Some((p, 200))
         }),
         _ if !crate::http_read::remote(request.url()) => {

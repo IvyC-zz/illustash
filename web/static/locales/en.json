@@ -2365,5 +2365,11 @@
   "GitHub 的回复不是版本列表": "GitHub's reply is not a list of releases",
   "检查更新的测试服务只允许本机 HTTP 端口": "The update check test service must be a plain HTTP port on this machine",
   "未知参数": "Unknown parameter",
-  "参数取值不正确": "Invalid parameter value"
+  "参数取值不正确": "Invalid parameter value",
+  "这个图库需要升级到新格式才能打开。升级后旧版本的 Illustash 打不开它；升级前会自动备份，升级没有完成时图库保持原样。": "This library needs to be upgraded to the new format before it can open. Older versions of Illustash can't open it after the upgrade; it is backed up automatically first, and stays as it was if the upgrade doesn't complete.",
+  "「{name}」需要升级": "\"{name}\" needs an upgrade",
+  "升级并打开": "Upgrade and open",
+  "这个图库已升级到新格式，旧版本的 Illustash 打不开它了。升级前的备份在：\n{backup}\n\n要回到旧版本，先装回旧版，再用这份备份恢复。": "This library has been upgraded to the new format, so older versions of Illustash can't open it any more. The backup from before the upgrade is at:\n{backup}\n\nTo go back to an older version, reinstall it, then restore from this backup.",
+  "图库已升级": "Library upgraded",
+  "知道了": "OK"
 }

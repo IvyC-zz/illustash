@@ -422,6 +422,62 @@ class NativeLibraryUpgradeTest(unittest.TestCase):
         self.reads(lib, origin)
         self.stop(process)
 
+    def test_switching_to_an_old_library_asks_first_and_a_failed_upgrade_changes_nothing(self):
+        # #193: the page's library switch, not only --upgrade at startup.
+        current, _ = self.package(6, 'current')
+        process, origin = self.start(current)
+        old, _ = self.package(5, 'old')
+        needed = '这个图库需要升级到新格式才能打开。升级后旧版本的 Illustash 打不开它；升级前会自动备份，升级没有完成时图库保持原样。'
+
+        def post(url, body):
+            token = json.loads(fetch(origin, {'url': '/api/bootstrap'}, origin)['body'])['token']
+            out = fetch(origin, {'url': url, 'method': 'POST', 'body': json.dumps(body).encode(),
+                                 'headers': {'Content-Type': 'application/json', 'X-CSRF-Token': token}}, origin)
+            return out['status'], json.loads(out['body'])
+
+        def opened():
+            return json.loads(fetch(origin, {'url': '/api/settings'}, origin)['body'])['package']['path']
+
+        existing = {p.relative_to(old.path).as_posix() for p in old.path.rglob('*.sqlite')}
+        before, source = database(old.db), old.source.read_bytes()
+        # Asked first: nothing written, no backup, the open library stays.
+        self.assertEqual(post('/api/libraries/open', {'path': str(old.path)}), (409, {'error': needed}))
+        self.assertEqual((database(old.db), old.source.read_bytes(), self.backups(old, existing)), (before, source, []))
+        self.assertEqual(opened(), str(current.path))
+        # A failed upgrade says so, keeps the package as it was and the current library open.
+        with closing(sqlite3.connect(old.db)) as c:
+            c.execute("CREATE TRIGGER fail_upgrade BEFORE INSERT ON meta WHEN NEW.key='terms_schema' AND NEW.value='7' "
+                      "BEGIN SELECT RAISE(ABORT,'synthetic-upgrade-failure'); END")
+            c.commit()
+        failing = database(old.db)
+        status, body = post('/api/libraries/open', {'path': str(old.path), 'upgrade': True})
+        self.assertEqual(status, 400)
+        self.assertTrue(body['error'].startswith('升级未提交：'), body)
+        self.assertIn('synthetic-upgrade-failure', body['error'])
+        self.assertEqual((database(old.db), old.source.read_bytes()), (failing, source))
+        self.assertEqual(len(self.backups(old, existing)), 1)
+        self.assertEqual(opened(), str(current.path))
+        with closing(sqlite3.connect(old.db)) as c:
+            c.execute('DROP TRIGGER fail_upgrade'); c.commit()
+        self.assertEqual(database(old.db), before)
+        # Agreed: backed up, upgraded and opened; the page learns where the backup is.
+        existing = {p.relative_to(old.path).as_posix() for p in old.path.rglob('*.sqlite')}
+        status, body = post('/api/libraries/open', {'path': str(old.path), 'upgrade': True})
+        self.assertEqual(status, 200, body)
+        backup = Path(body['upgraded']['backup'])
+        self.assertEqual(self.backups(old, existing), [backup])
+        self.assertEqual(database(backup), before)
+        wait_until(lambda: opened() == str(old.path), timeout=10)
+        listed = json.loads(fetch(origin, {'url': '/api/libraries'}, origin)['body'])
+        self.assertEqual(listed['upgraded'], {'backup': str(backup)})
+        # Now in the current format: switching back and forth asks nothing more.
+        self.assertEqual(post('/api/libraries/open', {'path': str(current.path)})[0], 200)
+        wait_until(lambda: opened() == str(current.path), timeout=10)
+        self.assertNotIn('upgraded', json.loads(fetch(origin, {'url': '/api/libraries'}, origin)['body']))
+        self.assertEqual(post('/api/libraries/open', {'path': str(old.path)})[0], 200)
+        self.stop(process)
+        self.assertFalse(self.sentinel.exists())
+
     def test_committed_upgrade_registry_failure_recovers_with_plain_start_and_repeated_flag_is_noop(self):
         lib, _ = self.package(6, 'registration-recovery')
         before, source, config = database(lib.db), lib.source.read_bytes(), (lib.path / 'library.json').read_bytes()

@@ -16,6 +16,17 @@ pub fn startup_library() -> Option<PathBuf> {
     crate::app_libraries::startup().ok()
 }
 
+/// After the service failed to open `path`: the library's name when an explicit upgrade would open it (#193).
+/// Read-only; the shell then asks before starting the service again with `--upgrade`.
+pub fn upgrade_needed(path: &Path) -> Option<String> {
+    crate::app_upgrade::needed(path).map(|prepared| prepared.name().to_owned())
+}
+
+/// The text the shell shows above its upgrade button, the same the library page shows (#193).
+pub fn upgrade_note() -> &'static str {
+    crate::app_upgrade::NEEDED
+}
+
 /// A folder the user picked is a library package only if it carries library.json.
 pub fn is_library(path: &Path) -> bool {
     path.join("library.json").is_file()

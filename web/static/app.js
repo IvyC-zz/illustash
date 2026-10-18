@@ -2967,7 +2967,8 @@ const EXPORT_LEAVES_OUT = t('不含图片、画师出处缓存和导入过的 X 
 // Gallery pages have no Tauri dialog permission. Keep confirmation inside the page;
 // window.confirm may be replaced with an async plugin function by the desktop shell.
 let confirmationOpen = false;
-function confirmAction(message, title = t('确认操作')) {
+// `ok` names the confirming button; without `cancel` the dialog only informs.
+function confirmAction(message, title = t('确认操作'), ok = t('确认'), cancel = true) {
   if (confirmationOpen) return Promise.resolve(false);
   confirmationOpen = true;
   const token = state.token, route = state.route;
@@ -2976,8 +2977,9 @@ function confirmAction(message, title = t('确认操作')) {
     d.setAttribute('aria-label', title);
     d.innerHTML = `<form method="dialog"><div class="dialog-top"><h2></h2><button type="button" class="icon" data-close aria-label="${t('关闭')}">×</button></div>
       <p class="muted-note" style="white-space:pre-line"></p>
-      <div class="dialog-actions"><button value="cancel" class="quiet" autofocus>${t('取消')}</button><button value="ok" class="primary">${t('确认')}</button></div></form>`;
+      <div class="dialog-actions">${cancel ? `<button value="cancel" class="quiet" autofocus>${t('取消')}</button>` : ''}<button value="ok" class="primary"></button></div></form>`;
     d.querySelector('h2').textContent = title;
+    d.querySelector('[value="ok"]').textContent = ok;
     d.querySelector('p').textContent = message;
     d.querySelector('[data-close]').onclick = () => d.close();
     d.onclick = e => {
@@ -3098,8 +3100,17 @@ $('settingsPage').addEventListener('click', async e => {
   else if ('libExport' in d) { if (await libraryAction('export')) { await loadLibraries(); pollExport(); } }
   else if ('importCancel' in d) { btn.disabled = true; await cancelImport(); }
 });
-async function openLibrary(path, name) {
-  try { await api('/api/libraries/open', {method: 'POST', body: JSON.stringify({path})}); } catch (err) { toast(err.message); return; }
+// A library in an older format opens only after the person agrees to upgrade it (#193): the backend says so, the
+// page asks with the backend's own explanation, then asks again with upgrade. The new page says where the backup is.
+async function openLibrary(path, name, upgrade = false) {
+  try { await api('/api/libraries/open', {method: 'POST', body: JSON.stringify(upgrade ? {path, upgrade: true} : {path})}); }
+  catch (err) {
+    if (!upgrade && said(err.said, '这个图库需要升级到新格式才能打开。升级后旧版本的 Illustash 打不开它；升级前会自动备份，升级没有完成时图库保持原样。')) {
+      if (await confirmAction(err.message, t('「{name}」需要升级', {name}), t('升级并打开'))) return openLibrary(path, name, true);
+      return;
+    }
+    toast(err.message); return;
+  }
   // This page's state belongs to the library it left: no reads or writes until the reload below.
   state.stale = true;
   toast(t('正在打开「{name}」…', {name}));
@@ -3815,7 +3826,14 @@ async function replayGuide() {
     window.splash?.ready();
     taskTick();
     // The library opened although it could not be listed among the recent ones (#176): say so once.
-    api('/api/libraries').then(x => { if (x?.unlisted) error(t('没能把这个图库记进最近图库：{why}。图库照常可用，只是下次启动时可能不会自动打开它。', {why: x.unlisted})); }).catch(() => {});
+    api('/api/libraries').then(x => {
+      if (x?.unlisted) error(t('没能把这个图库记进最近图库：{why}。图库照常可用，只是下次启动时可能不会自动打开它。', {why: x.unlisted}));
+      // Once per upgrade in this browser: the backup outlives the session that made it (#193).
+      if (x?.upgraded && prefs.get('upgradeNoticed', '') !== x.upgraded.backup) {
+        prefs.set('upgradeNoticed', x.upgraded.backup);
+        confirmAction(t('这个图库已升级到新格式，旧版本的 Illustash 打不开它了。升级前的备份在：\n{backup}\n\n要回到旧版本，先装回旧版，再用这份备份恢复。', {backup: x.upgraded.backup}), t('图库已升级'), t('知道了'), false);
+      }
+    }).catch(() => {});
     guideAfterBoot();
   } catch (e) { window.splash?.ready(); error(t('启动失败：{reason}。请检查启动终端，然后刷新页面。', {reason: e.message})); }
 })();

@@ -62,6 +62,39 @@ impl From<Error> for UpgradeFailure {
     }
 }
 
+/// What the page and the desktop shell say before asking to upgrade (#193). Pages recognise it by this text.
+pub(crate) const NEEDED: &str =
+    "这个图库需要升级到新格式才能打开。升级后旧版本的 Illustash 打不开它；升级前会自动备份，升级没有完成时图库保持原样。";
+
+/// Whether a package that failed to open is one an explicit upgrade can open, checked read-only.
+pub(crate) fn needed(path: &Path) -> Option<ValidatedUpgrade> {
+    prepare(path).ok()
+}
+
+/// Upgrade a prepared package, saying what happened on the terminal as `--upgrade` does.
+pub(crate) fn run(prepared: &ValidatedUpgrade) -> std::result::Result<UpgradeReport, UpgradeFailure> {
+    let report = upgrade(prepared)?;
+    eprintln!(
+        "图库升级已提交：terms {} → {}；升级前备份：{}{}",
+        report.before,
+        report.after,
+        report.backup.display(),
+        if report.maintenance_pending { "；空间维护待重试" } else { "" }
+    );
+    Ok(report)
+}
+
+/// The backup's path as the page shows it: without Windows' verbatim `\\?\` prefix when it is not needed.
+pub(crate) fn shown(path: &Path) -> String {
+    crate::app_paths::canonical(path).unwrap_or_else(|_| path.to_owned()).to_string_lossy().into_owned()
+}
+
+impl ValidatedUpgrade {
+    pub(crate) fn name(&self) -> &str {
+        self.library.name()
+    }
+}
+
 /// No SQLite writes, backups, session registration, or source-index refresh.
 pub(crate) fn prepare(path: &Path) -> Result<ValidatedUpgrade> {
     let library = Library::open_for_upgrade(path)?;
