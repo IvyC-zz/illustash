@@ -59,6 +59,17 @@ cargo build --release --manifest-path native/terms/Cargo.toml
 
 2026-10-05 起 macOS 与 Windows 的四类计算（识别、索引、学习/相似、溯源）全部原生执行，包内不带 Python 与计算源码；2026-10-13 起四类共用一个 `bin/illustash-worker`，宿主用 `ILLUSTASH_WORKER_KIND` 显式传入种类；Linux 不提供计算包（已冻结，见 [README](../README.md)）。完整安装包、平台门槛与依赖边界见 [安装与平台](BACKEND_TASKS.md#独立安装与可选计算包)。
 
+### 发布
+
+2026-10-16 用户定（#165），步骤见 #190；先手动发一两次，再决定哪些步骤做成脚本。发布与否、推 tag、建 Release 都由用户决定或明确授权。
+
+1. **版本号**：SemVer，tag 写作 `vX.Y.Z`；内测包可加预发布后缀（`0.2.0-beta.1`），关于页渠道仍显示「预览版」。凡是升级图库格式的版本至少升次版本号。在 main 上用 `python3 tools/version.py --set X.Y.Z` 改版本号，同步迁移清单指纹，经 PR 合入 main。
+2. **发布提交**：就是合入版本号的那个 main 提交。先做完 Windows 构建与验收，再在这个提交上跑本机全量（`tools/check_all.sh`），都通过才往下走。
+3. **打包**：两个平台各自打安装包（做法见 [安装与平台](BACKEND_TASKS.md#独立安装与可选计算包)），在 macOS 虚拟机和 Windows 干净环境里装一遍、打开合成图库。首个内测版起每个平台只发不含模型的小安装包，模型首次使用时下载（#168）。每个安装包算 SHA-256（`shasum -a 256 FILE`，Windows 用 `certutil -hashfile FILE SHA256`），写进 `SHA256SUMS.txt`。
+4. **tag**：`git tag -a vX.Y.Z -m "Illustash X.Y.Z" <发布提交>`，再 `git push origin vX.Y.Z`。
+5. **GitHub Release**：`gh release create vX.Y.Z <安装包…> SHA256SUMS.txt --title "Illustash X.Y.Z" --notes-file NOTES.md`；预发布版加 `--prerelease`。仓库里不放 CHANGELOG.md，更新说明只写在 Release 正文：从上一个 tag 以来合入 main 的 PR 标题整理（`gh pr list --state merged --base main --search "merged:>YYYY-MM-DD"`），按用户看得到的变化写；会升级图库格式的版本单独标明，并写清回退办法：装回旧版，再用升级前的自动备份恢复（见上文「启动参数」末尾）。
+6. **检查更新能看到它**（#191）：应用读的是本库 GitHub Releases 的版本列表，只认 `vX.Y.Z` 形式的 tag，跳过草稿；正式版用户不会收到预发布版（标了 prerelease 或 tag 带后缀的），预发布版用户会收到更新的预发布版和正式版。发布后用上一个版本在「设置 › 关于」点「检查更新」，确认能看到新版本，「打开下载页」打开的是这个 Release。
+
 ## 图库包
 
 - `library.json`：包清单、来源与已移除来源记录。
