@@ -47,3 +47,25 @@ export function wireFolds(root) {
   }
 }
 // Coalesce identical in-flight reads; a slow card never delays the local settings shell.
+// Replace only the sections whose HTML changed, so covers that did not change are not reloaded.
+export function reconcileSections(container, sections, empty = t('没有匹配的角色')) {
+  if (!sections.length) { container.innerHTML = `<p class="empty">${empty}</p>`; return; }
+  const old = new Map([...container.children].map(el => [el._sectionKey, el]));
+  let cursor = container.firstElementChild;
+  const keep = new Set();
+  for (const [key, html] of sections) {
+    let el = old.get(key);
+    if (!el || el._sectionHTML !== html) {
+      const previous = el;
+      const template = document.createElement('template'); template.innerHTML = html;
+      el = template.content.firstElementChild; el._sectionKey = key; el._sectionHTML = html;
+      if (previous) { previous.replaceWith(el); if (cursor === previous) cursor = el; }
+    }
+    if (el !== cursor) container.insertBefore(el, cursor);
+    else cursor = cursor.nextElementSibling;
+    keep.add(el);
+  }
+  for (const el of [...container.children]) if (!keep.has(el)) el.remove();
+}
+// The magnifier in search boxes.
+export const searchIcon = () => '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="10" cy="10" r="6.5"/><path d="m15 15 5 5"/></svg>';

@@ -81,7 +81,7 @@ function poller(token = 'session') {
     renderLibrariesCard: () => { rendered++; }, loadLibraries: () => { libraries++; }, toast: m => toasts.push(m),
   };
   vm.createContext(Object.assign(c, zh.page));
-  vm.runInContext(section('// What a background job', '// Name text queries'), c);
+  vm.runInContext(section('// What a background job', '// A picture the app cannot decode'), c);
   cleanup = () => { globalThis.setTimeout = setTimeout; for (const off of offs) off(); };
   return {c, answers, timers, toasts, posted, rendered: () => rendered, libraries: () => libraries};
 }

@@ -81,9 +81,11 @@ function documentMock() {
     return {set innerHTML(value) {this.content = {firstElementChild: Object.assign(new Element(), {html: value})};}};
   }};
 }
+// reconcileSections() is ui/dom.js (#199).
+let reconcileSections;
+test.before(async () => { ({reconcileSections} = await web.load('ui/dom.js')); });
 test('section updates preserve unaffected nodes and support reorder/removal', () => {
-  const c = {document: documentMock()}; vm.createContext(Object.assign(c, zh.page));
-  vm.runInContext(section('function reconcileSections', 'function renderIndexBody'), c);
+  globalThis.document = documentMock(); const c = {reconcileSections};
   const root = new Element();
   c.reconcileSections(root, [['a','A'],['b','B'],['c','C']]);
   const [a,b,cc] = root.children; const before = root.moves;
@@ -213,11 +215,11 @@ test('group append, answer and selection preserve unaffected section nodes', () 
   const sections = new Element(), controls = {}, more = {}, nodes = {regroup: {}, moreGroups: {addEventListener() {}}};
   const root = {querySelector: selector => ({'.gsecs': sections, '.groups-controls': controls, '.groups-more': more})[selector],
     set innerHTML(_) { throw Error('must not replace all groups'); }};
-  const c = {document: documentMock(), $: id => id === 'groupsPage' ? root : nodes[id], number: String, esc: String,
+  globalThis.document = documentMock();
+  const c = {document: globalThis.document, reconcileSections, $: id => id === 'groupsPage' ? root : nodes[id], number: String, esc: String,
     stamp: String, state: {pools: {unmatched: 100}}, groups: {list: [], shown: 2, off: new Map(), learner: {}},
     groupSection: g => `<section>${g.cid}:${JSON.stringify([...(c.groups.off.get(g.cid) || [])])}</section>`};
   vm.createContext(Object.assign(c, zh.page));
-  vm.runInContext(section('function reconcileSections', '// Kept for callers'), c);
   vm.runInContext(section('function drawGroups()', 'function groupSection'), c);
   c.groups.list = [1, 2, 3].map(cid => ({cid, size: 2}));
   c.drawGroups(); const [a, b] = sections.children;

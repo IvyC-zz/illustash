@@ -25,7 +25,7 @@ function harness(status = 'running', fail = false) {
   // app.js's onJob listener: the card is redrawn, and the end refreshes what names the page shows.
   const offs = [], g = {state: core.state, onJob: fn => offs.push(core.onJob(fn)), renderNamesCard() {}, refreshMeta() { calls.push('refreshMeta'); }};
   vm.createContext(g);
-  vm.runInContext(source.slice(source.indexOf('// What a background job'), source.indexOf('// Name text queries')), g);
+  vm.runInContext(source.slice(source.indexOf('// What a background job'), source.indexOf('// A picture the app cannot decode')), g);
   restore = () => { globalThis.setTimeout = setTimeout; for (const off of offs) off(); };
   return {state: core.state, pollNames: core.pollNames, calls, timers, names};
 }

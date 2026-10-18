@@ -76,23 +76,20 @@ test('unchanged card and active form edits do not replace DOM', () => {
   assert.equal(writes, 2);
 });
 
-// 资料库 · 作品 (#198): the work tree replaces the settings page's work table.
-function shelfHarness(works, watch = []) {
-  const root = {className: '', innerHTML: '', querySelectorAll: () => []};
-  const c = {state: {route: {page: 'characters', section: 'works'}, chars: [{work_id: 'a'}, {work_id: 'a'}, {work_id: 'b'}],
-      index: {works, watch: {works: watch, pending_tags: []}, check: {missing: [{copyright: 'tag_a'}]}}},
-    $: () => root, esc: String, number: String, prefs: {get: () => ({})}, watchDraft: '', WORK_NAMES: {},
-    wireWatchAdd() {}, wireFolds() {}, adoptWatch() {}};
-  vm.createContext(Object.assign(c, zh.page));
-  const start = source.indexOf('const shelf = {');
-  vm.runInContext(source.slice(start, source.indexOf('async function saveWatch', start)), c);
-  return {c, root};
+// 资料库 · 作品 (#198): the work tree replaces the settings page's work table. The shelf is ui/catalog.js.
+async function shelfHarness(works, watch = []) {
+  const root = {className: '', innerHTML: '', querySelectorAll: () => [], setAttribute() {}};
+  const catalog = await web.load('ui/catalog.js'), {state} = web.core();
+  Object.assign(state, {route: {page: 'characters', section: 'works'}, chars: [{work_id: 'a'}, {work_id: 'a'}, {work_id: 'b'}],
+    index: {works, watch: {works: watch, pending_tags: []}, check: {missing: [{copyright: 'tag_a'}]}}});
+  globalThis.document = {getElementById: () => root, activeElement: null};
+  return {c: catalog, root};
 }
-test('work tree lists children under their parent, with counts and the watch switch', () => {
+test('work tree lists children under their parent, with counts and the watch switch', async () => {
   const works = [{id: 'b', name: 'child', parent_id: 'a', count: 1, watchable: false},
     {id: 'a', name: 'parent', parent_id: null, count: 9, tag: 'tag_a', watchable: true},
     {id: 'c', name: 'orphan', parent_id: 'gone', count: 3, status: 'pending', watchable: false}];
-  const {c, root} = shelfHarness(works, ['a']);
+  const {c, root} = await shelfHarness(works, ['a']);
   c.drawShelf();
   const html = root.innerHTML, order = ['parent', 'child', 'orphan'].map(n => html.indexOf(`<b>${n}</b>`));
   assert.deepEqual([...order].sort((x, y) => x - y), order);
@@ -101,7 +98,7 @@ test('work tree lists children under their parent, with counts and the watch swi
   assert.match(html, /data-watch="b"\s+disabled/);
   assert.match(html, /\+1 个新角色/);
   assert.match(html, /链接待确认/);
-  vm.runInContext("shelf.filter = 'watched'", c); c.drawShelf();
+  c.shelf.filter = 'watched'; c.drawShelf();
   assert.ok(root.innerHTML.includes('<b>parent</b>') && !root.innerHTML.includes('<b>child</b>'));
 });
 
@@ -117,7 +114,7 @@ async function indexHarness(initialStatus, nextStatus) {
   const g = {state, SYNC_ACTIVE, onJob: fn => offs.push(onJob(fn)), renderIndexCard() { renders.push('index'); }, drawShelf() {}, refreshMeta: async () => {}, error() {}, readError: e => e};
   const offs = [];
   vm.createContext(g);
-  vm.runInContext(source.slice(source.indexOf('// What a background job'), source.indexOf('// Name text queries')), g);
+  vm.runInContext(source.slice(source.indexOf('// What a background job'), source.indexOf('// A picture the app cannot decode')), g);
   offs.push(onJob(() => { renders.push('tasks'); }));   // as the task panel does
   const setTimeout = globalThis.setTimeout;
   globalThis.setTimeout = () => 0;

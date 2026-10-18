@@ -1,32 +1,34 @@
 // Run with: node --test tests/name_network.test.cjs
 const {test, before} = require('node:test');
-const web = require('./web.cjs');   // core/jobs.js (#199)
-before(web.ready);
+const web = require('./web.cjs');   // core/ and ui/settings.js (#199)
+let settings;
+before(async () => { await web.ready(); settings = await web.load('ui/settings.js'); });
 const assert = require('node:assert/strict');
 const {readFileSync} = require('node:fs');
 const vm = require('node:vm');
 const zh = require('./i18n_zh.cjs');   // t() of a Chinese page (#173)
-const source = readFileSync(require('node:path').join(__dirname, '../web/static/app.js'), 'utf8');
-const code = source.slice(source.indexOf('// Name text queries'), source.indexOf('// 设置 › 网络与隐私'));
-
+// Lookups are core/settings.js (remoteNames, remoteNote); asking for consent is ui/settings.js setNamesNetwork(), with the
+// page's own dialog (ui/dialog.js) and toast (ui/dom.js), here on a fake page.
 function harness({fail, confirm = true} = {}) {
-  const calls = [], toasts = [], dialogs = [], {state, allowNames} = web.core();
-  state.names = {counts: {}};
-  // The grant itself is core/settings.js allowNames(), through the page's fetch.
-  globalThis.fetch = async (path, options) => { calls.push([path, options?.body]); return {status: 200, ok: true, json: async () => ({network: {authorized: JSON.parse(options.body).allow}})}; };
-  const context = {
-    state, allowNames,
-    async api(path, options) {
-      calls.push([path, options?.body]);
-      if (fail) throw Object.assign(new Error(fail), {said: fail});   // as api() throws
-      return [{tag: 'synthetic'}];
-    },
-    async confirmAction(message, title) { dialogs.push(title); return confirm; },
-    toast(m) { toasts.push(m); },
-    document: {addEventListener() {}},
+  const calls = [], toasts = [], dialogs = [], core = web.core(), nodes = {};
+  core.state.names = {counts: {}}; core.state.route = {page: 'library'};
+  globalThis.fetch = async (path, options) => {
+    calls.push([path, options?.body]);
+    if (fail) return {status: 400, ok: false, json: async () => ({error: fail})};
+    return {status: 200, ok: true, json: async () => path === '/api/names' ? {network: {authorized: JSON.parse(options.body).allow}} : [{tag: 'synthetic'}]};
   };
-  vm.createContext(Object.assign(context, zh.page));
-  vm.runInContext(code + ';this.remoteNames = remoteNames; this.remoteNote = remoteNote; this.setNamesNetwork = setNamesNetwork;', context);
+  const element = () => ({hidden: true, set textContent(v) { if (this === nodes.toastText) toasts.push(v); }});
+  globalThis.document = {getElementById: id => nodes[id] ||= element(), body: {append(d) {
+    dialogs.push(d.querySelector('h2').textContent);
+    setImmediate(() => d.close(confirm ? 'ok' : ''));   // the person answers
+  }}, createElement() {
+    const parts = {};
+    return {returnValue: '', setAttribute() {}, querySelector: selector => parts[selector] ||= {}, showModal() {}, remove() {},
+      close(value = '') { this.returnValue = value; this.onclose(); }};
+  }};
+  const setTimeout = globalThis.setTimeout; globalThis.setTimeout = () => 0;
+  const context = {state: core.state, remoteNames: core.remoteNames, remoteNote: core.remoteNote,
+    setNamesNetwork: async allow => { try { return await settings.setNamesNetwork(allow); } finally { globalThis.setTimeout = setTimeout; } }};
   return {context, calls, toasts, dialogs};
 }
 
