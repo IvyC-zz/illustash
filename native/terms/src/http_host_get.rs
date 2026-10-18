@@ -132,6 +132,10 @@ pub(super) fn handle(request: Request, host: &Host, received: u64) {
             if let Some(backup) = &session.upgraded {
                 p.set("upgraded", Json::object([("backup", backup.as_str().into())]));
             }
+            // Only after a rescue of source.sqlite on opening (#228): what it did and where the damaged file went.
+            if let Some(report) = &session.rescued {
+                p.set("rescued", report.clone());
+            }
             Some((p, 200))
         }),
         _ if !crate::http_read::remote(request.url()) => {

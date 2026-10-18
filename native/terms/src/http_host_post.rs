@@ -2,7 +2,8 @@
 use super::*;
 
 /// Requests a session answers while its package is damaged: none of them writes to the package's databases.
-const DAMAGED_ALLOWS: [&str; 6] = [
+const DAMAGED_ALLOWS: [&str; 7] = [
+    "/api/integrity/rescue",
     "/api/libraries/open",
     "/api/libraries/new",
     "/api/libraries/import",
@@ -437,6 +438,8 @@ pub(super) fn handle(request: Request, host: &Host, received: u64, text: &str, b
         })(),
         "/api/libraries/export" => host.exports.start(&session.library, session.generation),
         "/api/integrity" => Ok(session.check_now()),
+        "/api/integrity/rescue" => crate::app_create::optional_reference(&host.reference)
+            .and_then(|reference| session.start_rescue(reference.map(Path::to_owned))),
         "/api/libraries/open" => (|| {
             let path = body
                 .get("path")
@@ -452,6 +455,23 @@ pub(super) fn handle(request: Request, host: &Host, received: u64, text: &str, b
             let path = expand_path(path)?;
             if !path.join("library.json").is_file() {
                 return Err(Error::Invalid("不是图库包".into()));
+            }
+            // The session's own package with its rescued source.sqlite ready (#228): put in place as it opens again.
+            let own = crate::app_paths::canonical(&path).is_ok_and(|p| p == session.library.instance_path());
+            if own && session.rescue.ready() {
+                return host.reopen_rescued(&mut session, received);
+            }
+            // Another package whose source.sqlite a check found damaged: rescued first when the person agreed to.
+            let mut rescued = None;
+            if !own && body.get("rescue").is_some_and(truthy) {
+                let reference = crate::app_create::optional_reference(&host.reference)?;
+                rescued = Some(crate::app_service::rescue_package(&path, None, reference, &|_, _| {})?.json());
+            }
+            if let Some(report) = rescued {
+                let mut out = host.switch_locked(&mut session, received, &path)?;
+                session.rescued = Some(report.clone());
+                out.set("rescued", report);
+                return Ok(out);
             }
             // A package in an older format opens only after the person agrees to upgrade it (#193); it is looked at
             // only once opening failed, so libraries in the current format pay nothing for this.

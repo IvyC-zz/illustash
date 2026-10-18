@@ -1,10 +1,12 @@
 // Database checks on the page (#212): the 「数据库检查」 line of the settings data card and the notice when a check found
-// damage. The checks themselves are core/integrity.js.
+// damage, with 「抢救重建」 when it is in source.sqlite (#228). The checks themselves are core/integrity.js.
 import {t, tb} from '../core/i18n.js';
 import {esc, localStamp} from '../core/format.js';
 import {state} from '../core/state.js';
-import {onIntegrity, pollIntegrity, checkNow} from '../core/integrity.js';
+import {onIntegrity, pollIntegrity, checkNow, rescueNow} from '../core/integrity.js';
+import {loadLibraries} from '../core/settings.js';
 import {$, toast} from './dom.js';
+import {openLibrary} from './settings.js';
 function integrityLine() {
   const g = state.integrity, run = g?.running;
   const when = file => g.checked?.[file] ? localStamp(g.checked[file]) : t('还没有检查过');
@@ -20,10 +22,33 @@ export function renderIntegrityLine() {
   $('integrityLine').innerHTML = integrityLine();
   $('checkNow').onclick = async () => { try { await checkNow(); } catch (e) { toast(e.message); } };
 }
+// source.sqlite damaged: the rescue's button, then its progress, or why it did not finish (it can be started again).
+function rescueLine(rescue) {
+  if (rescue?.running) return `<p class="damage-line">${esc(t('正在抢救：{stage}，{percent}%', {stage: tb(rescue.running.stage), percent: Math.floor(rescue.running.done * 100)}))}</p>`;
+  if (rescue?.ready) return `<p class="damage-line">${esc(t('抢救完成，正在重新打开图库…'))}</p>`;
+  const failed = rescue?.error ? `<p class="damage-line">${esc(t('抢救没有完成：{error}', {error: tb(rescue.error)}))}</p>` : '';
+  return `${failed}<p class="damage-line"><button class="small" id="rescueNow">${t('抢救重建')}</button></p>`;
+}
 function showDamage() {
-  const damaged = state.integrity?.damaged;
-  $('damageBanner').textContent = damaged ? tb(damaged.message) : ''; $('damageBanner').hidden = !damaged;
+  const g = state.integrity, damaged = g?.damaged;
+  const rescuable = damaged?.database === 'source.sqlite';
+  $('damageBanner').innerHTML = damaged ? esc(tb(damaged.message)) + (rescuable ? rescueLine(g.rescue) : '') : '';
+  $('damageBanner').hidden = !damaged;
+  if ($('rescueNow')) $('rescueNow').onclick = async () => {
+    $('rescueNow').disabled = true;
+    try { await rescueNow(); } catch (e) { toast(e.message); $('rescueNow') && ($('rescueNow').disabled = false); }
+  };
+}
+// The new source.sqlite is put in place as the library opens again; the reopened page says what the rescue did.
+let reopening = false;
+async function reopenRescued() {
+  if (reopening || !state.integrity?.rescue?.ready) return;
+  reopening = true;
+  await loadLibraries();
+  const lib = state.libraries;
+  if (lib?.current) await openLibrary(lib.current, lib.info?.name || '');
+  reopening = false;
 }
 export function wireIntegrity() {
-  onIntegrity(() => { showDamage(); renderIntegrityLine(); });
+  onIntegrity(() => { showDamage(); renderIntegrityLine(); reopenRescued(); });
 }

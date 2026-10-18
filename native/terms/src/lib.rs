@@ -33,6 +33,7 @@ mod app_platform;
 mod app_preferences;
 mod app_profiles;
 pub mod app_recognition;
+mod app_rescue;
 pub mod app_research;
 pub mod app_resources;
 mod app_settings;

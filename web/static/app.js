@@ -73,6 +73,16 @@ for (const dialog of document.querySelectorAll('dialog')) dialog.addEventListene
         prefs.set('upgradeNoticed', x.upgraded.backup);
         confirmAction(t('这个图库已升级到新格式，旧版本的 Illustash 打不开它了。升级前的备份在：\n{backup}\n\n要回到旧版本，先装回旧版，再用这份备份恢复。', {backup: x.upgraded.backup}), t('图库已升级'), t('知道了'), false);
       }
+      // Once per rescue in this browser (#228): what it kept, what is recognized again, where the damaged file went.
+      const r = x?.rescued;
+      if (r?.damaged_copy && prefs.get('rescueNoticed', '') !== r.damaged_copy) {
+        prefs.set('rescueNoticed', r.damaged_copy);
+        const lines = [t('识别结果数据库已经重建。从损坏的文件里读回了 {salvaged} 张图的记录，按整理记录找回了 {kept} 张图的 ID。', {salvaged: number(r.salvaged), kept: number(r.kept)})];
+        if (r.new) lines.push(t('{n} 张图没有找到原来的 ID，按新图处理。', {n: number(r.new)}));
+        if (r.pending) lines.push(t('{n} 张图需要重新识别，会在同步时进行。', {n: number(r.pending)}));
+        lines.push(t('损坏的文件留在：\n{path}\n确认图库一切正常后可以删掉它。', {path: r.damaged_copy}));
+        confirmAction(lines.join('\n\n'), t('抢救完成'), t('知道了'), false);
+      }
     }).catch(() => {});
     guideAfterBoot();
   } catch (e) { window.splash?.ready(); error(t('启动失败：{reason}。请检查启动终端，然后刷新页面。', {reason: e.message})); }

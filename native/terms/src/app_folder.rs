@@ -1,6 +1,6 @@
 //! 文件夹来源盘点：只读来源文件；source 提交与应用刷新是两个可重试边界。
 use crate::{Error, Result};
-use rusqlite::{params, OpenFlags};
+use rusqlite::{params, OpenFlags, OptionalExtension};
 use serde_json::{json, Value};
 use std::{
     collections::{HashMap, HashSet},
@@ -14,11 +14,44 @@ pub(crate) struct Scan {
     pub counts: Value,
     pub changed: Vec<String>,
 }
+/// The IDs pictures had before source.sqlite was lost (#228): by full path, then by content. Rescuing a damaged
+/// source.sqlite scans with them, so a picture the rescue could not read back keeps its ID and its curation.
+#[derive(Default)]
+pub(crate) struct Earlier {
+    pub by_path: HashMap<String, String>,
+    /// Several pictures can share content: each ID is given to one of them only.
+    pub by_hash: HashMap<String, Vec<String>>,
+    /// The content each ID had, to tell whether its recognition results still describe the picture.
+    pub hash_of: HashMap<String, String>,
+    /// IDs already given out, in this scan or an earlier one of the same rescue.
+    pub given: HashSet<String>,
+}
+impl Earlier {
+    fn claim(&mut self, path: &str, hash: &str, taken: &HashSet<String>) -> Option<String> {
+        let free = |u: &String, given: &HashSet<String>| !taken.contains(u) && !given.contains(u);
+        let found =
+            self.by_path.get(path).filter(|u| free(u, &self.given)).cloned().or_else(|| {
+                self.by_hash.get(hash).and_then(|ids| ids.iter().find(|u| free(u, &self.given)).cloned())
+            })?;
+        self.given.insert(found.clone());
+        Some(found)
+    }
+}
 pub(crate) fn scan(
     source: &Value,
     db: &Path,
     check: &dyn Fn() -> Result<()>,
     progress: &dyn Fn(usize, usize),
+) -> Result<Scan> {
+    scan_with(source, db, check, progress, None)
+}
+/// `scan`, giving a new picture its earlier ID when `earlier` knows it (a rescue, #228).
+pub(crate) fn scan_with(
+    source: &Value,
+    db: &Path,
+    check: &dyn Fn() -> Result<()>,
+    progress: &dyn Fn(usize, usize),
+    mut earlier: Option<&mut Earlier>,
 ) -> Result<Scan> {
     let root = Path::new(source["path"].as_str().ok_or_else(|| Error::Invalid("来源缺少路径".into()))?);
     if !root.is_dir() {
@@ -41,6 +74,14 @@ pub(crate) fn scan(
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     let known: HashMap<String, Old> = known_order.iter().cloned().collect();
+    // Pictures some source still has on file keep the ID they have there; only the others can take an earlier one.
+    let taken = match earlier {
+        Some(_) => tx
+            .prepare("SELECT asset FROM files")?
+            .query_map([], |r| r.get::<_, String>(0))?
+            .collect::<rusqlite::Result<HashSet<_>>>()?,
+        None => HashSet::new(),
+    };
     let trashed = tx
         .prepare("SELECT uuid FROM assets WHERE source_id=? AND coalesce(trashed,0)=1")?
         .query_map([sid], |r| r.get::<_, String>(0))?
@@ -80,7 +121,7 @@ pub(crate) fn scan(
             movable.entry(old.2.clone()).or_default().push_back((p.clone(), old.3.clone()));
         }
     }
-    let (mut new, mut moved, mut changed) = (0, 0, Vec::new());
+    let (mut new, mut moved, mut kept, mut changed) = (0, 0, 0, Vec::new());
     let journal_path = db.with_extension("scan-pending.json");
     let mut journal: serde_json::Map<String, Value> = if journal_path.exists() {
         serde_json::from_str(&fs::read_to_string(&journal_path)?).map_err(|e| Error::Invalid(e.to_string()))?
@@ -145,6 +186,29 @@ pub(crate) fn scan(
             if trashed.contains(&asset) {
                 back.push(asset.clone());
             }
+        } else if let Some(u) = earlier.as_deref_mut().and_then(|e| e.claim(&f.path.to_string_lossy(), &f.hash, &taken))
+        {
+            asset = u;
+            kept += 1;
+            let name = f.path.file_name().expect("app_folder internal invariant").to_string_lossy().into_owned();
+            let (w, h, added) = describe(&f);
+            let had: Option<Option<String>> =
+                tx.query_row("SELECT stable_hash FROM assets WHERE uuid=?", [&asset], |r| r.get(0)).optional()?;
+            let before = match had {
+                Some(hash) => {
+                    tx.execute("UPDATE assets SET filename=?,width=?,height=?,trashed=0,stable_hash=?,orig_size=?,src_kind='orig',src_path=?,in_scope=1,source_id=?,preset=? WHERE uuid=?",params![name,w,h,f.hash,f.size,f.path.to_string_lossy(),sid,preset,asset])?;
+                    hash
+                }
+                None => {
+                    tx.execute("INSERT INTO assets(uuid,filename,width,height,added_at,hidden,trashed,stable_hash,orig_size,src_kind,src_path,in_scope,source_id,preset) VALUES (?,?,?,?,?,0,0,?,?,'orig',?,1,?,?)",params![asset,name,w,h,added,f.hash,f.size,f.path.to_string_lossy(),sid,preset])?;
+                    earlier.as_deref().and_then(|e| e.hash_of.get(&asset).cloned())
+                }
+            };
+            // Results for other content no longer describe this picture: it is recognized again.
+            if before.as_deref() != Some(f.hash.as_str()) {
+                tx.execute("DELETE FROM labels WHERE uuid=?", [&asset])?;
+                tx.execute("DELETE FROM embeddings WHERE uuid=?", [&asset])?;
+            }
         } else {
             asset = crate::store::new_key()?.to_uppercase();
             new += 1;
@@ -189,6 +253,9 @@ pub(crate) fn scan(
     let mut counts = json!({"new":new,"returned":back.len(),"gone":vanished.len(),"moved":moved,"changed":changed.len(),"sources":{sid:{"name":format!("{}（{}）",name,root.file_name().unwrap_or_default().to_string_lossy()),"photos":total-vanished.len() as i64,"collected":total-vanished.len() as i64}}});
     if !unreadable.is_empty() {
         counts["unreadable"] = json!(unreadable.len());
+    }
+    if earlier.is_some() {
+        counts["kept"] = json!(kept);
     }
     Ok(Scan { counts, changed })
 }

@@ -378,11 +378,20 @@ export async function startImport(path) {
 }
 // A library in an older format opens only after the person agrees to upgrade it (#193): the backend says so, the
 // page asks with the backend's own explanation, then asks again with upgrade. The new page says where the backup is.
-export async function openLibrary(path, name, upgrade = false) {
-  try { await openLibraryRequest(path, upgrade); }
+// A library whose source.sqlite a check found damaged is offered the rescue the same way (#228); it runs before the
+// library opens, which can take minutes on a large one.
+export async function openLibrary(path, name, agreed = null) {
+  try { await openLibraryRequest(path, agreed); }
   catch (err) {
-    if (!upgrade && said(err.said, '这个图库需要升级到新格式才能打开。升级后旧版本的 Illustash 打不开它；升级前会自动备份，升级没有完成时图库保持原样。')) {
-      if (await confirmAction(err.message, t('「{name}」需要升级', {name}), t('升级并打开'))) return openLibrary(path, name, true);
+    if (!agreed && said(err.said, '这个图库需要升级到新格式才能打开。升级后旧版本的 Illustash 打不开它；升级前会自动备份，升级没有完成时图库保持原样。')) {
+      if (await confirmAction(err.message, t('「{name}」需要升级', {name}), t('升级并打开'))) return openLibrary(path, name, 'upgrade');
+      return;
+    }
+    if (!agreed && said(err.said, '这个图库的识别结果数据库（source.sqlite）已损坏，为保护数据已停止写入；人工整理记录在 library.sqlite 里，没有受影响。可以点「抢救重建」：还读得出的识别结果和每张图的 ID 都会保留，读不出的部分重新扫描来源文件夹、重新识别；损坏的文件移到图库的 backups 文件夹里留存。抢救前请确认来源文件夹都能访问。')) {
+      if (await confirmAction(err.message, t('「{name}」的识别结果数据库已损坏', {name}), t('抢救重建'))) {
+        toast(t('正在抢救「{name}」的识别结果数据库，可能要几分钟…', {name}));
+        return openLibrary(path, name, 'rescue');
+      }
       return;
     }
     toast(err.message); return;

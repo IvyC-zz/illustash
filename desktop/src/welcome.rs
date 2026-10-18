@@ -211,6 +211,12 @@ pub fn startup_upgrade(app: AppHandle) {
     server::upgrade(&app);
 }
 
+/// Rescue the library's damaged source.sqlite, after the person chose 「抢救重建」 on the start page (#228).
+#[tauri::command(async)]
+pub fn startup_rescue(app: AppHandle) {
+    server::rescue(&app);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
