@@ -200,7 +200,10 @@ impl Health {
         let mut next = record.clone();
         change(&mut next);
         let target = self.dir.join(RECORD);
-        let temp = self.dir.join(format!("{RECORD}.{}.tmp", crate::store::new_key()?));
+        // Not store::new_key: tests replay a fixed sequence of keys, and this file must not consume one.
+        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let temp =
+            self.dir.join(format!("{RECORD}.{}-{}.tmp", std::process::id(), NEXT.fetch_add(1, Ordering::SeqCst)));
         fs::write(&temp, serde_json::to_vec(&next).map_err(|e| Error::Invalid(e.to_string()))?)?;
         if let Err(e) = fs::rename(&temp, &target) {
             let _ = fs::remove_file(&temp);
