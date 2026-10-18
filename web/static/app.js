@@ -2,6 +2,7 @@
 // the user only removes what is wrong. Every write is undoable.
 // Native ES modules (#199): core/ holds what any layout can reuse and never touches the DOM (requests and the
 // session, edits and undo, formatting, preferences); ui/ is this desktop layout. This file is still the rest.
+import {t, tb, said, I18N} from './core/i18n.js';
 import {esc, isMac, shortcut, number, dateText, monthText, work} from './core/format.js';
 import {prefs} from './core/prefs.js';
 import {session, adoptToken, onPost, api, post, readError} from './core/session.js';

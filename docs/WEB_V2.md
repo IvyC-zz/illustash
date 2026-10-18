@@ -14,13 +14,13 @@
 
 ## 前端模块（2026-10-18，#199）
 
-页面脚本是浏览器原生 ES 模块，没有构建步骤：`index.html` 用 `<script type="module" src="/app.js">` 载入入口，`i18n.js`、`splash.js`、`theme.js` 仍是普通脚本，先于它执行，`t()`、`tb()`、`said()`、`I18N` 是全局的。`app.js` 正按 #199 的顺序拆开，目前拆出的部分：
+页面脚本是浏览器原生 ES 模块，没有构建步骤：`index.html` 用 `<script type="module" src="/app.js">` 载入入口，`i18n.js`、`splash.js`、`theme.js` 仍是普通脚本，先于它执行。`i18n.js` 保持普通脚本，因为桌面外壳的启动页和 `splash.js` 也用它；模块从 `core/i18n.js` 导入 `t()`、`tb()`、`said()`、`I18N`，实现只在 `i18n.js` 一处。`app.js` 正按 #199 的顺序拆开，目前拆出的部分：
 
 - `web/static/core/`：任何布局都能复用的一层（以后的移动端也用），不引用 `document`、`$()` 和元素 ID，可以直接在 Node 里导入。`format.js`（转义、数字、日期、快捷键名）、`prefs.js`（浏览器本地偏好）、`session.js`（`api()` / `post()`、会话令牌与过期：页面只属于启动时的会话，见 #33）、`edits.js`（最近一步可撤销的操作、撤销，以及「同一时间只做一项修改」的锁）。会话令牌和过期标记只由 `session.js` 写，撤销状态只由 `edits.js` 写；界面通过 `onStale()`、`onPost()`、`onLatest()` 得知变化，各返回一个取消监听的函数。
 - `web/static/ui/`：桌面布局。`dom.js`（`$()`、`⌘` 改写为 Ctrl、提示条与其中的撤销、错误横幅、工具栏的撤销按钮）。
 - 其余仍在 `app.js`，状态在它的 `state` 里。
 
-原生宿主按 `/core/<名>.js`、`/ui/<名>.js` 提供这两个文件夹里的模块（名字只含小写字母、数字、`-`、`_`），新增模块不用改路由。Node 测试用 `tests/web.cjs` 导入模块（`before(web.ready)` 后 `web.core()` 给出重置过会话的导出）；尚未拆出的部分仍截取 `app.js` 片段运行，把模块的导出放进它的上下文。
+原生宿主按 `/core/<名>.js`、`/ui/<名>.js` 提供这两个文件夹里的模块（名字只含小写字母、数字、`-`、`_`），新增模块不用改路由。Node 测试用 `tests/web.cjs` 导入模块：它先运行 `i18n.js`（默认中文页面，`web.language('en')` 在载入前换语言，一个测试文件一种语言），`before(web.ready)` 后 `web.core()` 给出重置过会话的导出；尚未拆出的部分仍截取 `app.js` 片段运行，把模块的导出放进它的上下文。
 
 ## 新图库引导（2026-10-12，#96）
 

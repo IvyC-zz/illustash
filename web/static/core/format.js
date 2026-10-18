@@ -1,5 +1,6 @@
 // Formatting shared by every layout (#199): escaping, numbers, dates and shortcut names. No DOM; the page's language
 // comes from I18N (web/static/i18n.js).
+import {I18N} from './i18n.js';
 export const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 // Keep displayed modifiers consistent across static help and dynamic messages.
 export const macLike = platform => /Mac|iPhone|iPad|iPod/.test(platform || '');
