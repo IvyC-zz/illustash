@@ -173,3 +173,19 @@ test('the names and new-characters cards read their data when they open', async 
   assert.match(nodes.namesCard.innerHTML, /角色名称/);
   assert.match(nodes.indexCard.innerHTML, /检查新角色/);
 });
+
+test('an older library is opened only after the person agrees to upgrade it (#193)', async () => {
+  // openLibrary() is ui/settings.js: the backend's refusal names the upgrade, the page asks, then asks again with upgrade.
+  const sent = [], nodes = {}, dialogs = [];
+  const element = () => ({hidden: true, textContent: '', innerHTML: '', contains: () => false});
+  globalThis.document = {getElementById: id => nodes[id] ||= element(), activeElement: null, body: {append(d) { dialogs.push(d); setImmediate(() => d.close('')); }},
+    createElement() { const parts = {}; return {setAttribute() {}, querySelector: s => parts[s] ||= {}, showModal() {}, remove() {}, close(v = '') { this.returnValue = v; this.onclose(); }}; }};
+  globalThis.fetch = async (path, options) => {
+    sent.push(JSON.parse(options.body));
+    return {status: 409, ok: false, json: async () => ({error: '这个图库需要升级到新格式才能打开。升级后旧版本的 Illustash 打不开它；升级前会自动备份，升级没有完成时图库保持原样。'})};
+  };
+  const setTimeout = globalThis.setTimeout; globalThis.setTimeout = () => 0;
+  try { await ui.openLibrary('/tmp/synthetic.pilib', '合成'); } finally { globalThis.setTimeout = setTimeout; }
+  assert.deepEqual(sent, [{path: '/tmp/synthetic.pilib'}]);
+  assert.equal(dialogs.length, 1, 'asked before upgrading; declined, so nothing more was sent');
+});
