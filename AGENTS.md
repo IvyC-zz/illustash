@@ -47,6 +47,10 @@ Claude Code 通过 `CLAUDE.md` 引入本文件，Codex 等直接读本文件。�
 - 本地全量对齐 `.github/workflows/ci.yml`，默认包含原生固定契约空 PATH 重放。升级验收使用 `tests/fixtures/library_upgrade` 中由历史 v5/v6 产出者一次性生成的合成旧图库，不在检查时构建历史版本；升级测试不能跳过。脚本依赖 Python 3.12（`CHECK_ALL_PYTHON` 可指定解释器）、Node 22、Rust stable（含 rustfmt/clippy），Python 依赖与历史构建缓存放在被忽略的 `.venv/check-all/`；只支持 macOS（Linux 已冻结，见 README），Windows 单列验收。只允许 CI 同样允许的平台限制和真实图库数据缺失跳过，不访问真实图库补齐数据。
 - 2026-10-12 用户定：本机同一时间只跑一个重型检查。`tools/check_all.sh`、`tools/local_acceptance.py run` 和单独的 release 构建，通过 agent-collab skill 的 `scripts/collab_run.py run -- <命令>` 运行（路径按所在 harness 的 skill 安装位置；没装这个 skill 的环境照常直接运行）：槽位被占时排队，用 `collab_run.py status` 查看谁在跑；长命令放后台运行，免得排队时被工具超时打断。从本机经 SSH 发起的 Windows 构建与验收用 `--slot windows`，与本机检查互不阻塞。定向测试不用排队。
 - 2026-10-15 用户定：在 Mac 上启动 App 做实机测试（图形界面走查、安装、首次流程、Gatekeeper、断网），一律在 macOS 虚拟机里做，不在本机直接启动，以免影响用户日常用的正式版及其图库、设置和钥匙串。`tools/check_all.sh`、单元测试等不启动 App 的检查照旧在本机跑。虚拟机做不了的项目（iCloud 照片、性能数字）先在 Issue 里说明，用户同意后才在本机用隔离目录做。做法见 [本地验收](docs/LOCAL_CHECKS.md#macos-实机测试虚拟机)。
+- 2026-10-18 用户定，补充 2026-10-12 的排队规则（多个会话并行时，没排队的构建、计时和虚拟机会把机器压满，全量变慢、计时测试误报）：
+  1. 计时、性能测量（启动耗时、吞吐、基准）和单独的 release 构建一样，经 `collab_run.py run -- <命令>` 占 heavy 槽再做；在别人跑全量时测出的数字不算数。
+  2. 虚拟机用 `--slot vm`，同一时间只开一台：`collab_run.py run --slot vm -- tart run …` 放后台运行，虚拟机关机即释放；不测的时候就关掉。
+  3. heavy 槽被占时，照常写代码、跑小的定向测试；对时间敏感的测试在高负载下失败，先排除负载影响再下结论（#219）。
 - 读不到 GitHub 的代理（禁网沙箱）：由 Lead 把 Issue 正文贴给它，它的进度和结果由 Lead 代写进 PR。
 - 合并到 main、推送标签、关闭别人开的 Issue 由用户决定或明确授权。
 - 每个会话都必须知道的约束写在本文件，不写在 Issue 里：Issue 不会自动进上下文。

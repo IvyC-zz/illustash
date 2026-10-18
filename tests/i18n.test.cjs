@@ -113,7 +113,7 @@ const backendKeys = new Set(rust.map(([, , text]) => text));
 // Backend text that never reaches the page: the command line, test harnesses, logs and panics. Only the coverage
 // report leaves it out; a table may still translate it.
 const NOT_SHOWN = /^(?:native\/terms\/src\/(?:cli|read_harness)\.rs|native\/terms\/src\/bin\/|crates\/iqdb\/)/;
-// SQL is left out too, and the pieces http_app.rs parses old undo labels with (" 张移出 ").
+// SQL is left out too, and pieces of a sentence (text with leading or trailing spaces).
 const shownBackend = () => new Set(rust.filter(([file, , text, before]) => !NOT_SHOWN.test(path.relative(ROOT, file).split(path.sep).join('/'))
   && !/(?:e?print(?:ln)?!|panic!|unreachable!|expect|assert\w*!)\(\s*$/.test(before)
   && !/\b(?:CREATE|SELECT|INSERT|UPDATE|DELETE)\b/.test(text) && text.trim() === text).map(([, , text]) => text));
