@@ -11,6 +11,12 @@ const vm = require('node:vm');
 
 const STATIC = path.join(__dirname, '../web/static');
 const read = name => readFileSync(path.join(STATIC, name), 'utf8');
+// The desktop shell shares the tables (#173 stage 4): its start page calls t() like the library page, its Rust code
+// calls tr("…") / tr_with("…", …) (desktop/src/i18n.rs).
+const DESKTOP = path.join(__dirname, '../desktop');
+const shellPage = readFileSync(path.join(DESKTOP, 'dist/index.html'), 'utf8');
+const shellSources = readdirSync(path.join(DESKTOP, 'src')).filter(name => name.endsWith('.rs'))
+  .map(name => ['desktop/src/' + name, readFileSync(path.join(DESKTOP, 'src', name), 'utf8')]);
 // The same rule as native/terms/src/app_preferences.rs: a language code names the file.
 const CODE = /^[a-z]{2,3}(-[A-Za-z0-9]{1,8})*$/;
 const locales = Object.fromEntries(readdirSync(path.join(STATIC, 'locales')).filter(name => name.endsWith('.json'))
@@ -21,8 +27,8 @@ const scripts = readdirSync(STATIC).filter(name => name.endsWith('.js') && name 
 const placeholders = text => [...text.matchAll(/\{(\w+)\}/g)].map(m => m[1]).sort();
 const unescape = (quote, body) => vm.runInNewContext(quote + body + quote);
 
-function scriptKeys(name) {
-  const source = read(name), keys = [], dynamic = [];
+function scriptKeys(name, source = read(name)) {
+  const keys = [], dynamic = [];
   for (const call of source.matchAll(/(?<![\w.$])t\(\s*(['"`]?)/g)) {
     const rest = source.slice(call.index + call[0].length - call[1].length);
     const literal = call[1] && rest.match(/^(['"])((?:\\.|(?!\1)[^\\\n])*)\1\s*[,)]/);
@@ -110,12 +116,32 @@ const shownBackend = () => new Set(rust.filter(([file, , text, before]) => !NOT_
   && !/(?:e?print(?:ln)?!|panic!|unreachable!|expect|assert\w*!)\(\s*$/.test(before)
   && !/\b(?:CREATE|SELECT|INSERT|UPDATE|DELETE)\b/.test(text) && text.trim() === text).map(([, , text]) => text));
 
+// tr("…") in the shell's Rust: a plain string literal, its escapes read as JSON (\" and \\ are the same). Comment
+// lines and the functions' own definitions are not calls.
+function rustKeys(name, text) {
+  const keys = [], dynamic = [];
+  const source = text.split('\n').map(line => /^\s*\/\//.test(line) ? '' : line).join('\n');
+  for (const call of source.matchAll(/(?<![\w])(fn\s+)?tr(?:_with)?\(/g)) {
+    if (call[1]) continue;
+    const rest = source.slice(call.index + call[0].length);
+    const literal = rest.match(/^\s*"((?:\\.|[^"\\])*)"\s*[,)]/);
+    if (literal) keys.push(JSON.parse(`"${literal[1]}"`));
+    else dynamic.push(`${name}:${source.slice(0, call.index).split('\n').length}`);
+  }
+  return {keys, dynamic};
+}
+const shellScript = [...shellPage.matchAll(/<script>([\s\S]*?)<\/script>/g)].map(m => m[1]).join('\n');
+
 function usedKeys() {
   const used = new Set(), dynamic = [];
-  for (const name of scripts) { const found = scriptKeys(name); found.keys.forEach(k => used.add(k)); dynamic.push(...found.dynamic); }
+  const add = found => { found.keys.forEach(k => used.add(k)); dynamic.push(...found.dynamic); };
+  for (const name of scripts) add(scriptKeys(name));
   // i18n.js only translates what it is handed, apart from the joiner of backend messages.
   used.add('join\u0004；');
   markupKeys(read('index.html')).forEach(k => used.add(k));
+  add(scriptKeys('desktop/dist/index.html', shellScript));
+  markupKeys(shellPage).forEach(k => used.add(k));
+  for (const [name, source] of shellSources) add(rustKeys(name, source));
   return {used, dynamic};
 }
 

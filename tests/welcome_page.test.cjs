@@ -9,7 +9,7 @@ const html = readFileSync(require('node:path').join(__dirname, '../desktop/dist/
 const script = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].pop()[1];
 const section = script.slice(script.indexOf('// 欢迎页：'), script.indexOf('// 外壳在服务启动失败时调用'));
 
-function page(answers) {
+function page(answers, t = zh) {
   const nodes = {}, calls = [];
   const c = {
     calls, nodes, setInterval: () => 0, clearInterval() {},
@@ -17,7 +17,7 @@ function page(answers) {
     busy() {}, window: {},
     invoke: async (cmd, args) => { calls.push([cmd, args]); const a = answers[cmd]; return typeof a === 'function' ? a(args) : a; },
   };
-  vm.createContext(Object.assign(c, {t: zh}));
+  vm.createContext(Object.assign(c, {t}));
   vm.runInContext(section, c);
   c.window.showWelcome({origins: [{id: 'x', label: 'X'}, {id: 'pixiv', label: 'Pixiv'}], recent: [], home: '/Users/me/Pictures'});
   return c;
@@ -117,4 +117,37 @@ test('a double click opens one picker and each import or creation carries its ow
   assert.equal(ids.length, 3);
   assert.ok(ids.every(id => typeof id === 'string' && id.length > 4));
   assert.equal(new Set(ids).size, 3, 'a new click is a new request');
+});
+
+// #173 stage 4: the shell injects its language and that table before the page's scripts (desktop/src/i18n.rs), and the
+// start page loads the library page's i18n.js and translates its markup and the welcome page with them.
+test('the start page speaks the language the shell gives it', async () => {
+  const scripts = [...html.matchAll(/<script src="([^"]+)">/g)].map(m => m[1]);
+  assert.deepEqual(scripts, ['i18n.js', 'splash.js']);
+  const read = name => readFileSync(require('node:path').join(__dirname, '../web/static', name), 'utf8');
+  const context = {self: {ILLUSTASH_LANGUAGE: 'en', ILLUSTASH_LANGUAGES: {en: 'English'}, ILLUSTASH_TABLES: {en: JSON.parse(read('locales/en.json'))}},
+    navigator: {languages: ['zh-CN']}, document: {documentElement: {}, querySelectorAll: () => []}};
+  vm.createContext(context);
+  vm.runInContext(read('i18n.js'), context);
+  const en = vm.runInContext('t', context);
+  const c = page({
+    welcome_pick: () => ({paths: ['/a', '/b']}),
+    welcome_inspect: ({paths}) => paths.map(p => ok(p, p === '/a' ? 1 : 1234)),
+    welcome_create: () => { throw 'synthetic failure'; },
+  }, en);
+  assert.match(c.nodes.wcol.innerHTML, /No libraries yet/);
+  assert.match(c.nodes.wcol.innerHTML, /Open a library…/);
+  await click(c, {pick: 'x'});
+  const shown = c.nodes.wcol.innerHTML;
+  assert.match(shown, />1 picture</);
+  assert.match(shown, />1,234 pictures</);
+  assert.match(shown, /placeholder="New library"/);
+  assert.doesNotMatch(shown, /\p{Script=Han}/u);
+  // Left empty, the name is the placeholder's, in the page's language.
+  await click(c, {actW: 'create'});
+  assert.equal(c.calls.find(([cmd]) => cmd === 'welcome_create')[1].name, 'New library');
+  const zhPage = page({welcome_pick: () => ({paths: ['/a']}), welcome_inspect: ({paths}) => paths.map(p => ok(p, 1)), welcome_create: () => ({})});
+  await click(zhPage, {pick: 'x'});
+  await click(zhPage, {actW: 'create'});
+  assert.equal(zhPage.calls.find(([cmd]) => cmd === 'welcome_create')[1].name, '新图库');
 });

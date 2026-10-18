@@ -1,3 +1,4 @@
 target/
 gen/
 dist/splash.js
+dist/i18n.js
