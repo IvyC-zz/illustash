@@ -14,28 +14,26 @@ const element = () => ({hidden: false, classList: {remove() {}, toggle() {}}, li
   addEventListener(kind, fn) { this.listeners[kind] = fn; }});
 
 test('a group page answer that arrives after navigating home does not take over the page', async () => {
-  const nodes = {}, painted = [];
-  let answer, route = {page: 'group', id: '3'};
-  const c = {
-    state: {route: {page: 'home'}, nsfw: ''}, history: {replaceState() {}}, document: {querySelectorAll: () => []},
-    $: id => nodes[id] ||= element(), parseHash: () => route, defaultSort: () => 'newest', hashFor: () => '',
-    clearSelection() {}, closeInspector() {}, error: m => painted.push('error ' + m), readError: e => e.message,
-    api: () => new Promise(resolve => { answer = resolve; }), nearText: () => 'near', fetchChar: async () => null,
-    renderChrome: () => painted.push('chrome'), renderHome: () => painted.push('home'), reload: async () => painted.push('grid'),
-    showGuideNav() {}, renderStart: () => painted.push('start'),
-  };
-  vm.createContext(Object.assign(c, zh.page));
-  vm.runInContext(section('async function applyRoute()', "window.addEventListener('hashchange'"), c);
-  const toGroup = c.applyRoute();
+  // applyRoute() is ui/shell.js; the pages it opens are still app.js's (ui/app_parts.js).
+  const nodes = {}, painted = [], {applyRoute} = await web.load('ui/shell.js'), {app} = await web.load('ui/app_parts.js'), {state} = web.core();
+  let answer;
+  Object.assign(state, {route: {page: 'home'}, nsfw: ''});
+  globalThis.location = {hash: '#/g/3'}; globalThis.history = {replaceState() {}};
+  globalThis.document = {getElementById: id => nodes[id] ||= Object.assign(element(), {innerHTML: '', querySelectorAll: () => []}), querySelectorAll: () => []};
+  globalThis.fetch = () => new Promise(resolve => { answer = body => resolve({status: 200, ok: true, json: async () => body}); });
+  Object.assign(app, {clearSelection() {}, closeInspector() {}, nearText: () => 'near', guideTick() {},
+    renderHome: () => painted.push('home'), reload: async () => painted.push('grid')});
+  const toGroup = applyRoute();
   await tick();
-  route = {page: 'home'};
-  await c.applyRoute();
+  location.hash = '#/home';
+  await applyRoute();
   assert.equal(nodes.homePage.hidden, false);
   answer({clusters: [{cid: 3, near: 1, traits: ['old']}]});
   await toGroup;
   assert.equal(nodes.homePage.hidden, false);
-  assert.equal(c.state.groupTraits, undefined);
-  assert.deepEqual(painted, ['chrome', 'home']);
+  assert.equal(state.groupTraits, undefined);
+  assert.deepEqual(painted, ['home']);
+  assert.match(nodes.heading.innerHTML, /首页/);
 });
 
 test('an older sync answer that arrives last does not move the state back', async () => {

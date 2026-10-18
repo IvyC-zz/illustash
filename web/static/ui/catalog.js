@@ -14,6 +14,7 @@ import {catalog, recentOf, loadActivity as readActivity, searchCharacters, loadT
 import {$, toast, error, readFailure, wireFolds, reconcileSections, searchIcon} from './dom.js';
 import {chooseWork} from './dialog.js';
 import {namesAllowButton} from './settings.js';
+import {charHash, charRoute, go} from '../core/route.js';
 import {app} from './app_parts.js';
 
 // ---------- characters: 书架 (work tabs, posters, tiers) and 列表 ----------
@@ -55,15 +56,15 @@ const cover = (c, size = 'thumb') => c?.cover ? `<img src="/image?id=${encodeURI
 const avatar = (c, px) => `<i class="cast-av" style="width:${px}px;height:${px}px">${cover(c)}</i>`;
 function poster(c, sub, rank = 0, big = false) {
   const r = recentOf(c), skins = (c.variants || []).filter(v => v.count).length;
-  return `<a class="cast-poster" href="${app.charHash(c.id)}" title="${esc(nameTip(c))}"><span class="img">${cover(c, big ? 'medium' : 'thumb')}</span>${rank ? `<span class="rank">${rank}</span>` : ''}${r ? `<span class="pill ${rank ? 'r' : 'l'}"><i></i>+${number(r)}</span>` : ''}${!rank && skins ? `<span class="pill r">${t('{n} 个皮肤', {n: skins})}</span>` : ''}<span class="cap"><b>${c.kind === 'oc' ? `<em>${t('原创')}</em>` : ''}${esc(c.name)}</b><small>${sub}</small></span></a>`;
+  return `<a class="cast-poster" href="${charHash(c.id)}" title="${esc(nameTip(c))}"><span class="img">${cover(c, big ? 'medium' : 'thumb')}</span>${rank ? `<span class="rank">${rank}</span>` : ''}${r ? `<span class="pill ${rank ? 'r' : 'l'}"><i></i>+${number(r)}</span>` : ''}${!rank && skins ? `<span class="pill r">${t('{n} 个皮肤', {n: skins})}</span>` : ''}<span class="cap"><b>${c.kind === 'oc' ? `<em>${t('原创')}</em>` : ''}${esc(c.name)}</b><small>${sub}</small></span></a>`;
 }
 const fan = chars => `<span class="cast-fan">${[1, 2, 0].map(i => `<i>${cover(chars[i])}</i>`).join('')}</span>`;
 function tiers(list, showWork) {
   const big = list.filter(c => c.count >= 20), mid = list.filter(c => c.count >= 5 && c.count < 20), small = list.filter(c => c.count < 5);
   const sub = c => (showWork && c.work_name ? esc(c.work_name) + ' · ' : '') + t('{n} 张', {n: number(c.count)});
   return (big.length ? `<section class="cast-sec"><h3>${t('主力')}<small>${t('20 张以上 · {n} 位', {n: number(big.length)})}</small></h3><div class="cast-posters">${big.map(c => poster(c, sub(c))).join('')}</div></section>` : '') +
-    (mid.length ? `<section class="cast-sec"><h3>${t('常见')}<small>${t('5–19 张 · {n} 位', {n: number(mid.length)})}</small></h3><div class="cast-roster">${mid.map(c => `<a class="cast-rs" href="${app.charHash(c.id)}" title="${esc(nameTip(c))}">${avatar(c, 72)}<b>${esc(c.name)}</b><small>${showWork && c.work_name ? esc(c.work_name) + ' · ' : ''}${t('{n} 张', {n: c.count})}</small></a>`).join('')}</div></section>` : '') +
-    (small.length ? `<section class="cast-sec"><h3>${t('偶尔')}<small>${t('不到 5 张 · {n} 位', {n: number(small.length)})}</small></h3><div class="cast-chips">${small.map(c => `<a class="cast-chip" href="${app.charHash(c.id)}" title="${esc(nameTip(c))}">${avatar(c, 22)}${esc(c.name)}<small>${c.count}</small></a>`).join('')}</div></section>` : '');
+    (mid.length ? `<section class="cast-sec"><h3>${t('常见')}<small>${t('5–19 张 · {n} 位', {n: number(mid.length)})}</small></h3><div class="cast-roster">${mid.map(c => `<a class="cast-rs" href="${charHash(c.id)}" title="${esc(nameTip(c))}">${avatar(c, 72)}<b>${esc(c.name)}</b><small>${showWork && c.work_name ? esc(c.work_name) + ' · ' : ''}${t('{n} 张', {n: c.count})}</small></a>`).join('')}</div></section>` : '') +
+    (small.length ? `<section class="cast-sec"><h3>${t('偶尔')}<small>${t('不到 5 张 · {n} 位', {n: number(small.length)})}</small></h3><div class="cast-chips">${small.map(c => `<a class="cast-chip" href="${charHash(c.id)}" title="${esc(nameTip(c))}">${avatar(c, 22)}${esc(c.name)}<small>${c.count}</small></a>`).join('')}</div></section>` : '');
 }
 function castTabs(works) {
   const recent = state.chars.filter(c => recentOf(c)).length, top = works.slice(0, 14);
@@ -83,7 +84,7 @@ function castPane(works) {
     const top = [...state.chars].sort((a, b) => b.count - a.count).slice(0, 9);
     const rec = state.chars.filter(c => recentOf(c)).sort((a, b) => recentOf(b) - recentOf(a)), max = rec[0] ? recentOf(rec[0]) : 1;
     return `<section class="cast-sec"><h3>${t('你最常看的')}<small>${t('按收藏张数')}</small></h3><div class="cast-board">${top.map((c, i) => poster(c, (c.work_name ? esc(c.work_name) + ' · ' : '') + t('{n} 张', {n: number(c.count)}), i + 1, i === 0)).join('')}</div></section>
-      ${rec.length ? `<section class="cast-sec"><h3>${t('最近 30 天在收')}<small>${t('{n} 位角色有新图', {n: number(rec.length)})}</small><button class="link-button strong" data-tab="recent">${t('全部')} ›</button></h3><div class="cast-recent">${rec.slice(0, 24).map(c => `<a class="cast-rc" href="${app.charHash(c.id)}" title="${esc(nameTip(c))}"><span class="ring" style="--p:${Math.max(8, Math.round(recentOf(c) / max * 100))}">${avatar(c, 66)}<em>+${number(recentOf(c))}</em></span><b>${esc(c.name)}</b><small>${esc(c.work_name || '')}</small></a>`).join('')}</div></section>` : ''}
+      ${rec.length ? `<section class="cast-sec"><h3>${t('最近 30 天在收')}<small>${t('{n} 位角色有新图', {n: number(rec.length)})}</small><button class="link-button strong" data-tab="recent">${t('全部')} ›</button></h3><div class="cast-recent">${rec.slice(0, 24).map(c => `<a class="cast-rc" href="${charHash(c.id)}" title="${esc(nameTip(c))}"><span class="ring" style="--p:${Math.max(8, Math.round(recentOf(c) / max * 100))}">${avatar(c, 66)}<em>+${number(recentOf(c))}</em></span><b>${esc(c.name)}</b><small>${esc(c.work_name || '')}</small></a>`).join('')}</div></section>` : ''}
       <section class="cast-sec"><h3>${t('作品')}<small>${t('{n} 部 · 按张数', {n: number(works.length)})}</small></h3><div class="cast-works">${works.slice(0, 24).map(w => `<button class="cast-wt" data-tab="${esc(w.key)}">${fan(w.chars)}<b>${esc(w.name)}</b><small>${t('{n} 位 · {images} 张', {n: number(w.chars.length), images: number(w.images)})}${w.recent ? ` · <em>+${number(w.recent)}</em>` : ''}</small></button>`).join('')}</div></section>`;
   }
   if (cast.tab === 'recent') {
@@ -112,7 +113,7 @@ export function drawCast() {
   root.className = 'char-index cast ' + cast.mode;
   reconcileSections(root, cast.mode === 'list' ? [['list', `<div class="cast-listview">${castList()}</div>`]]
     : [...(cast.list ? [] : [['tabs', castTabs(works)]]), ['pane', `<div class="cast-pane">${castPane(works)}</div>`]]);
-  const foot = (state.tagged || []).length ? `<p class="cast-tagged">${t('不算角色、只当标签：')}${state.tagged.map(x => `<a href="${app.charHash(x.id)}">${esc(x.name)}</a><small>${number(x.count)}</small>`).join('')}</p>` : '';
+  const foot = (state.tagged || []).length ? `<p class="cast-tagged">${t('不算角色、只当标签：')}${state.tagged.map(x => `<a href="${charHash(x.id)}">${esc(x.name)}</a><small>${number(x.count)}</small>`).join('')}</p>` : '';
   let el = root.querySelector('.cast-tagged'); if (el) el.remove();
   if (foot) root.insertAdjacentHTML('beforeend', foot);
   if (cast.pop) $('castPopQ')?.focus();
@@ -310,12 +311,12 @@ export function wireCatalog() {
     if (tab) { cast.tab = tab.dataset.tab; cast.pop = false; cast.popQ = ''; drawCast(); $('viewport').scrollTop = 0; $('charIndex').querySelector('.cast-tab.on')?.scrollIntoView({inline: 'center', block: 'nearest'}); return; }
     if (hit.closest('#castAll')) { cast.pop = !cast.pop; drawCast(); return; }
     if (cast.pop && !hit.closest('#castPop')) { cast.pop = false; drawCast(); return; }
-    const lib = hit.closest('[data-work-lib]'); if (lib) { app.go({page: 'library', work: lib.dataset.workLib}); return; }
+    const lib = hit.closest('[data-work-lib]'); if (lib) { go({page: 'library', work: lib.dataset.workLib}); return; }
     const s = hit.closest('[data-sort]');
     if (s) { const k = s.dataset.sort; cast.dir = cast.sort === k ? -cast.dir : (k === 'name' || k === 'work' ? 1 : -1); cast.sort = k; drawCast(); return; }
     const b = hit.closest('[data-bucket]'); if (b) { cast.bucket = b.dataset.bucket; cast.limit = 300; drawCast(); return; }
     if (hit.closest('#castMore')) { cast.limit = (cast.limit || 300) + 300; drawCast(); return; }
-    const row = hit.closest('tr[data-char]'); if (row) app.go(app.charRoute(row.dataset.char));
+    const row = hit.closest('tr[data-char]'); if (row) go(charRoute(row.dataset.char));
   });
   $('charIndex').addEventListener('input', e => { if (e.target.id === 'castPopQ') { cast.popQ = e.target.value; const pos = e.target.selectionStart; drawCast(); const i = $('castPopQ'); i?.setSelectionRange(pos, pos); } });
   document.addEventListener('keydown', e => { if (e.key === 'Escape' && cast.pop && state.route.page === 'characters') { cast.pop = false; drawCast(); } });
@@ -323,7 +324,7 @@ export function wireCatalog() {
     if (state.route.page !== 'characters') return;
     const hit = e.target, works = state.index?.works || [];
     const f = hit.closest('[data-shelf-filter]'); if (f) { shelf.filter = f.dataset.shelfFilter; drawShelf(); return; }
-    const open = hit.closest('[data-shelf-open]'); if (open) { cast.tab = open.dataset.shelfOpen; app.go({page: 'characters'}); return; }
+    const open = hit.closest('[data-shelf-open]'); if (open) { cast.tab = open.dataset.shelfOpen; go({page: 'characters'}); return; }
     const edit = hit.closest('[data-shelf-edit]'); if (edit) { const w = works.find(x => x.id === edit.dataset.shelfEdit); if (w) workDialog(w); return; }
     const adopt = hit.closest('[data-shelf-adopt]'); if (adopt) { adoptWatch({tag: adopt.dataset.shelfAdopt, name: WORK_NAMES[adopt.dataset.shelfAdopt]}); return; }
     const add = hit.closest('[data-index-add]'); if (add) openIndexAdd(add.dataset.indexAdd || '');

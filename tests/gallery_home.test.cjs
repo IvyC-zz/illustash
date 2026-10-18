@@ -105,8 +105,8 @@ test('within-day requests after navigation cannot change the library or remove a
   resolve({items:[]});await old;assert.equal(vm.runInContext("dayLoading.has('2026-10-02')",c),true);
 });
 test('opening the app lands on 首页; the library has its own hash and old query links still open it',()=>{
-  const c={location:{hash:''},URLSearchParams,prefs:{get:(k,f)=>f},LEAD_PAGES:[]};
-  vm.createContext(Object.assign(c, zh.page)); vm.runInContext(source.slice(source.indexOf('function parseHash()'),source.indexOf('const LEAD_PAGES'))+';const defaultSort=()=>"newest";this.parseHash=parseHash;this.hashFor=hashFor;',c);
+  // core/route.js reads the page's location.
+  const {parseHash, hashFor} = web.core(), c = {parseHash, hashFor, location: globalThis.location = {hash: ''}};
   for(const hash of ['','#','#/']){ c.location.hash=hash; assert.equal(c.parseHash().page,'home'); }
   c.location.hash='#/?artist=a1'; assert.deepEqual([c.parseHash().page,c.parseHash().artist],['library','a1']);
   c.location.hash=c.hashFor({page:'library',day:'2026-10-02'}); assert.equal(c.location.hash,'#/library?day=2026-10-02');

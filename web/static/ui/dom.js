@@ -26,17 +26,6 @@ export function wireToast(undo) {
 }
 export function error(message) { if (session.stale) return; $('errorBanner').textContent = message; $('errorBanner').hidden = !message; }
 export function readFailure(node, e) { if (node) { node.hidden = false; node.innerHTML = `<p class="empty" role="alert">${esc(readError(e))}</p>`; } }
-// A stopped page says so in the error banner, with a button to reload.
-onStale(() => {
-  const banner = $('errorBanner'), reload = document.createElement('button');
-  banner.textContent = t('{reason}。这个页面已停止读写，未保存的输入不会提交。', {reason: STALE});
-  reload.type = 'button'; reload.textContent = t('重新载入'); reload.onclick = () => location.reload();
-  banner.append(reload); banner.hidden = false;
-});
-onLatest(({latest, busy}) => {
-  $('undoButton').disabled = !latest || busy;
-  $('undoButton').title = latest ? t('撤销：{label}（{key}）', {label: tb(latest.label), key: shortcut('Z')}) : t('暂无可撤销操作');
-});
 // Collapsible blocks whose open/closed state survives re-renders and reloads.
 export const fold = (key, summary, body) => `<details class="more" data-fold-key="${key}"${prefs.get('settingsOpen', {})[key] ? ' open' : ''}><summary>${summary}</summary><div class="more-body">${body}</div></details>`;
 export function wireFolds(root) {
@@ -69,3 +58,17 @@ export function reconcileSections(container, sections, empty = t('没有匹配�
 }
 // The magnifier in search boxes.
 export const searchIcon = () => '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="10" cy="10" r="6.5"/><path d="m15 15 5 5"/></svg>';
+// The banner when the page stops, and the toolbar's undo button. Called once, when the page starts.
+export function wireDom() {
+  // A stopped page says so in the error banner, with a button to reload.
+  onStale(() => {
+    const banner = $('errorBanner'), reload = document.createElement('button');
+    banner.textContent = t('{reason}。这个页面已停止读写，未保存的输入不会提交。', {reason: STALE});
+    reload.type = 'button'; reload.textContent = t('重新载入'); reload.onclick = () => location.reload();
+    banner.append(reload); banner.hidden = false;
+  });
+  onLatest(({latest, busy}) => {
+    $('undoButton').disabled = !latest || busy;
+    $('undoButton').title = latest ? t('撤销：{label}（{key}）', {label: tb(latest.label), key: shortcut('Z')}) : t('暂无可撤销操作');
+  });
+}
