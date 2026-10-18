@@ -2730,6 +2730,7 @@ async function renderAbout() {
     ...Object.entries(a.libraries || {}).map(([k, v]) => [tb(k), tb(v) || t('未安装')])];
   card.innerHTML = `<div class="about-head"><img src="/favicon.svg" alt="" width="44" height="44"><div><h2 class="about-name">${esc(a.name)}</h2><p class="muted-note">${t('版本 {v}', {v: esc(version)})}${a.build ? ' · ' + t('构建 {build}', {build: esc(a.build)}) : ''}</p></div></div>
     <p class="settings-note">${t('在本机识别、整理收藏的插画和里面的角色。图片和识别数据都只在这台电脑上。')}</p>
+    <div class="setting-line" id="aboutUpdates">${updatesLine()}</div>
     <div class="about-actions"><button class="quiet" id="aboutGuide">${t('新手引导')}</button><button class="quiet" id="aboutKeys">${t('键盘快捷键')}</button><button class="quiet" id="aboutCopy">${t('复制诊断信息')}</button></div>
     ${fold('credits', t('致谢与第三方组件'), `<table class="settings-table credits">${CREDITS.map(([n, by, use, url]) => `<tr><td><a class="link" href="${url}" target="_blank" rel="noreferrer noopener">${esc(n)}</a>${by ? `<small>${esc(by)}</small>` : ''}</td><td>${esc(use)}</td></tr>`).join('')}</table><p class="settings-note net-foot">${t('完整安装包附带的 CCIP 模型依据 {license} 许可提供给你，使用和再分发均受该许可第 5 条约束：不得用于其附件 A 列出的用途，再分发时须把这些限制写进分发协议并附上许可。许可原文和各模型的来源见应用资源目录里的 resources/licenses/models/。其余组件的许可条款以其项目主页为准。', {license: '<a class="link" href="https://bigscience.huggingface.co/blog/bigscience-openrail-m" target="_blank" rel="noreferrer noopener">BigScience Open RAIL-M</a>'})}</p>`)}
     ${fold('diagnostics', t('诊断信息'), `<table class="settings-table">${diag.map(([k, v]) => `<tr><td>${esc(k)}</td><td class="mono">${esc(v)}</td></tr>`).join('')}</table>`)}`;
@@ -2755,7 +2756,9 @@ function networkCard() {
       ${row('artists', t('查找画师、找 TA 的其他图'), t('Danbooru、画师主页'), t('所选图片的哈希文本；下载画师公开作品的小图，只在本机比对'), t('只在你点按钮时'))}
       ${row('characters', t('在 Danbooru 上搜角色和作品'), 'Danbooru', t('你输入的文字；自建角色的名字（核对能否对上 Danbooru）'), net && !net.authorized ? names : t('只在你搜索或打开资料库时'))}
       ${row('artists', t('以图搜图'), 'SauceNAO', '—', acct?.saucenao?.bound ? t('已保存 key，还没有功能使用它') : t('未使用'))}
+      ${row('about', t('检查更新'), 'GitHub', t('一次普通的 HTTPS 请求，读取公开的版本列表；不发送图库里的任何信息'), state.updates?.auto ? t('启动时和之后每天自动') : t('只在你点「检查更新」时'))}
     </table>
+    ${state.updates ? `<label class="switch-line"><span><b>${t('自动检查更新')}</b><small>${t('启动时和之后每天查一次 GitHub 上有没有新版本，有新版本时提示你，不会自己下载或安装')} · ${SCOPE.shared[0]}</small></span><input type="checkbox" class="switch" data-updates-auto ${state.updates.auto ? 'checked' : ''}></label>` : ''}
     ${net ? `<div class="setting-line"><span><b>${t('名称联网查询')}</b><small>${t('角色名称和 Danbooru 搜索共用这一项授权，只发送文字')} · ${names}</small></span>
       ${net.granted_at ? `<button class="quiet" data-names-network="0">${t('撤销')}</button>` : `<button class="quiet" data-names-network="1">${t('允许…')}</button>`}</div>` : ''}
     <p class="settings-note net-foot">${t('同步、图片识别、相似图片检测、学习与分组都只在本机进行。X 的关注通过导入官方数据归档获得，不联网。')}</p>`;
@@ -2766,6 +2769,7 @@ async function renderSettings(fetchMissing = true, refresh = false) {
   closeInspector(); $('selectionBar').hidden = true; $('resultCount').textContent = ''; $('hint').textContent = '';
   if (fetchMissing) loadSettingsData(refresh);
   const [section, , , cards] = settingsSection();
+  if (fetchMissing && ['network', 'about'].includes(section)) updatesTick();
   const runs = state.syncHistory, info = state.settings;
   const reasons = state.exclInfo.reasons || {};
   const sourcesOf = info?.package?.sources || state.libraries?.info?.sources || [];
@@ -3353,6 +3357,7 @@ async function taskTick() {
   if (taskPanel.open && !state.libraries) jobs.push(loadLibraries());
   await Promise.allSettled(jobs);
   renderTasks();
+  updatesTick();
   taskPanel.timer = setTimeout(taskTick, taskPanel.open ? 3000 : 30000);
 }
 function toggleTasks(open = !taskPanel.open) {
@@ -3494,6 +3499,54 @@ function artistSection(d, ident) {
   return `<section class="inspector-section"><h3 class="section-title">${t('画师')}</h3>${(d.artists || []).map(artist).join('')}${(d.maybe || []).map(maybe).join('')}${!d.artists?.length ? find : ''}
     ${d.posts?.length ? `<div class="artist-posts"><span>${t('原帖')}</span>${d.posts.map(p => link(p.url, p.site)).join(' · ')}</div>` : ''}</section>`;
 }
+// ---------- 检查更新 (#191, native/terms/src/app_updates.rs) ----------
+// Off until the person allows it: the new-library guide asks once, 设置 › 网络与隐私 has the switch. Once allowed
+// the backend checks at each launch and once a day while the app stays open; the page only asks whether a check is
+// due. A newer release is offered at the bottom, never while a task runs, and opens the Release page in the browser:
+// nothing is downloaded or installed here. 设置 › 关于 always has a manual check.
+let updatesAt = 0, updatesPending = null, updatesDrawn = 'null';
+async function updatesPost(body) {
+  state.updates = await api('/api/updates', {method: 'POST', body: JSON.stringify(body)});
+  return state.updates;
+}
+// From taskTick: refresh the cached state now and then, run a due automatic check, offer what it found.
+async function updatesTick() {
+  if (updatesPending) return;
+  updatesPending = (async () => {
+    if (!state.updates || Date.now() - updatesAt > 600000) { state.updates = await api('/api/updates'); updatesAt = Date.now(); }
+    if (state.updates.due) await updatesPost({action: 'check', auto: true});
+  })().catch(() => {}).finally(() => {
+    updatesPending = null; drawNudge();
+    // The settings pages that show it redraw only when something changed, never under the person's typing.
+    const now = JSON.stringify(state.updates ?? null);
+    if (now !== updatesDrawn) { updatesDrawn = now; if (state.route.page === 'settings' && ['network', 'about'].includes(settingsSection()[0])) renderSettings(false); }
+  });
+}
+function updatesLine() {
+  const u = state.updates; if (!u) return `<span>${t('检查更新')}</span>`;
+  const when = u.checked_at ? t('上次检查 {time}', {time: esc(localStamp(Date.parse(u.checked_at) / 1000))}) : t('还没有检查过');
+  const status = u.newer ? t('有新版本 {version}', {version: esc(u.latest)}) : u.checked_at && !u.error ? t('已是最新版本') : '';
+  return `<span>${status || t('检查更新')}<small class="line-hint">${when}${u.error ? ' · ' + esc(tb(u.error)) : ''}${u.auto ? '' : ' · ' + t('自动检查已关闭，可在「设置 › 网络与隐私」里打开')}</small></span>
+    <span class="update-acts">${u.newer ? `<button class="primary small" data-updates-open>${t('打开下载页')}</button>` : ''}<button class="quiet small" data-updates-check>${t('检查更新')}</button></span>`;
+}
+const openRelease = () => { if (state.updates?.url) window.open(state.updates.url, '_blank', 'noopener'); };
+document.addEventListener('click', async e => {
+  if (e.target.closest('[data-updates-open]')) { openRelease(); return; }
+  const b = e.target.closest('[data-updates-check]'); if (!b) return;
+  b.disabled = true; b.textContent = t('正在检查…');
+  try { const u = await updatesPost({action: 'check'}); updatesAt = Date.now(); toast(u.error ? tb(u.error) : u.newer ? t('有新版本 {version}', {version: u.latest}) : t('已是最新版本')); }
+  catch (err) { toast(err.message); }
+  if ($('aboutUpdates')) $('aboutUpdates').innerHTML = updatesLine();
+  drawNudge();
+});
+document.addEventListener('change', async e => {
+  const box = e.target.closest('[data-updates-auto]'); if (!box) return;
+  try { await updatesPost({action: 'auto', allow: box.checked}); toast(box.checked ? t('已打开自动检查更新') : t('已关闭自动检查更新')); }
+  catch (err) { toast(err.message); box.checked = !box.checked; }
+  if (state.route.page === 'settings') renderSettings(false);
+  updatesTick();
+});
+
 // ---------- 新图库的首次引导 (#96, native/terms/src/app_onboarding.rs) ----------
 // Taught on the real interface: a few stops lit up one at a time, a checklist that ticks itself as things get done,
 // and questions asked when they matter (names once characters show, a work once the first sync is through). The
@@ -3638,20 +3691,33 @@ document.addEventListener('keydown', e => { if (tourAt >= 0 && e.key === 'Escape
 
 // ----- questions asked when they matter, once each -----
 function nextNudge() {
-  const g = state.guide; if (!guideOn() || tourAt >= 0) return null;
-  const seen = g.guide.seen || [], net = state.names?.network, idle = !SYNC_ACTIVE.includes(state.sync.status);
-  if (!seen.includes('names') && net && !net.granted_at && !net.this_run && g.results.characters > 0) return {key: 'names'};
-  if (!seen.includes('works') && idle && g.results.with_character > 0) {
-    if (!g.works && Date.now() - guideWorksAt > 30000) { guideWorksAt = Date.now(); loadGuide(true).then(drawNudge).catch(() => {}); }
-    const w = (g.works || []).find(x => x.watchable && !x.watched);
-    if (w && !(state.index?.watch?.works || []).length) return {key: 'works', w};
+  if (tourAt >= 0) return null;
+  const g = state.guide, idle = !SYNC_ACTIVE.includes(state.sync.status);
+  if (guideOn()) {
+    const seen = g.guide.seen || [], net = state.names?.network;
+    if (!seen.includes('names') && net && !net.granted_at && !net.this_run && g.results.characters > 0) return {key: 'names'};
+    // App-wide and asked once: answering either way records the choice, so no other library asks again (#191).
+    if (state.updates && state.updates.auto === null) return {key: 'updates'};
+    if (!seen.includes('works') && idle && g.results.with_character > 0) {
+      if (!g.works && Date.now() - guideWorksAt > 30000) { guideWorksAt = Date.now(); loadGuide(true).then(drawNudge).catch(() => {}); }
+      const w = (g.works || []).find(x => x.watchable && !x.watched);
+      if (w && !(state.index?.watch?.works || []).length) return {key: 'works', w};
+    }
   }
+  // A newer release waits until no task is running.
+  if (state.updates?.newer && !state.updates.dismissed && !taskList().some(task => task.active)) return {key: 'update'};
   return null;
 }
 function drawNudge() {
   const el = $('nudge'), n = nextNudge();
   if (guideOn() && !state.names && !el.dataset.names) { el.dataset.names = '1'; api('/api/names').then(v => { state.names = v; drawNudge(); }).catch(() => {}); }
-  const html = !n ? '' : n.key === 'names'
+  const html = !n ? '' : n.key === 'update'
+    ? `<div><b>${t('有新版本 {version}', {version: esc(state.updates.latest)})}</b><small>${t('现在是 {current}。在浏览器里打开下载页，下载后覆盖安装即可。', {current: esc(state.updates.current)})}</small></div>
+      <div class="nudge-acts"><button class="quiet small" data-nudge="later">${t('暂不')}</button><button class="primary small" data-nudge="open">${t('打开下载页')}</button></div>`
+    : n.key === 'updates'
+    ? `<div><b>${t('要自动检查新版本吗？')}</b><small>${t('启动时和之后每天向 GitHub 查一次有没有新版本，有就提示你；只是一次普通的 HTTPS 请求，不发送图库里的任何信息。可以在「设置 › 网络与隐私」里随时改。')}</small></div>
+      <div class="nudge-acts"><button class="quiet small" data-nudge="later">${t('不用')}</button><button class="primary small" data-nudge="allow">${t('自动检查')}</button></div>`
+    : n.key === 'names'
     ? `<div><b>${t('认出了 {n} 个角色。要联网查它们的中文名吗？', {n: number(state.guide.results.characters)})}</b><small>${t('只发送角色的 tag 和作品名，不发送图片。允许后对这个图库一直有效，可以在「设置 › 网络与隐私」里撤销。')}</small></div>
       <div class="nudge-acts"><button class="quiet small" data-nudge="later">${t('暂不')}</button><button class="primary small" data-nudge="allow">${t('允许')}</button></div>`
     : `<div><b>${t('你的图里《{work}》最多（{n} 张）', {work: esc(guideWorkName(n.w)), n: number(n.w.count)})}</b><small>${t('关注它，就能从 Danbooru 补充这部作品里本地还不认识的角色，让它们也能按长相认出来。检查时会再问一次联网。')}</small></div>
@@ -3664,6 +3730,14 @@ function drawNudge() {
 $('nudge').addEventListener('click', async e => {
   const act = e.target.closest('[data-nudge]')?.dataset.nudge, key = $('nudge').dataset.key; if (!act || !key) return;
   for (const b of $('nudge').querySelectorAll('button')) b.disabled = true;
+  // Not guide prompts: the answer is the update choice or this release, kept app-wide by the backend.
+  if (key === 'update' || key === 'updates') {
+    if (key === 'update' && act === 'open') openRelease();
+    try { await updatesPost(key === 'update' ? {action: 'dismiss'} : {action: 'auto', allow: act === 'allow'}); } catch (err) { toast(err.message); }
+    if (key === 'updates' && act === 'allow') { toast(t('已打开自动检查更新')); updatesTick(); }
+    drawGuide(); drawNudge();
+    return;
+  }
   if (act === 'allow') {
     try { state.names = {...state.names, ...await api('/api/names', {method: 'POST', body: JSON.stringify({action: 'network', allow: true})})}; toast(t('已允许这个图库联网查询名称')); }
     catch (err) { toast(err.message); }
