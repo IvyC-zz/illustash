@@ -300,6 +300,17 @@ mod tests {
         assert_eq!(tr_with("无法启动本地服务（{path}）：{error}", &[("path", &"p"), ("error", &1)]), "无法启动本地服务（p）：1");
     }
 
+    /// Read-only: the platform call answers with language tags (a system always names at least one).
+    #[cfg(any(target_os = "macos", windows))]
+    #[test]
+    fn the_system_names_its_languages() {
+        let found = system_languages();
+        assert!(!found.is_empty());
+        for tag in &found {
+            assert!(!tag.is_empty() && tag.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-'), "{tag}");
+        }
+    }
+
     #[test]
     fn the_start_page_gets_the_language_names_and_only_its_table() {
         let locales = parse(FILES);
