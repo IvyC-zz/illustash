@@ -15,6 +15,7 @@ import {onSettings, allowNames, loadSettingsData, saveStartup, saveFold, backupN
 import {$, toast, error, readFailure, fold, wireFolds} from './dom.js';
 import {confirmAction} from './dialog.js';
 import {openTasks} from './tasks.js';
+import {charHash} from '../core/route.js';
 import {app} from './app_parts.js';
 
 // ---------- names: this library's consent to look names up online ----------
@@ -46,7 +47,7 @@ export async function renderIndexCard(fresh = true) {
     <div class="setting-line"><span>${t('只提示图片较多的角色')}<small class="line-hint">${t('Danbooru 上图片少于这个数的角色不提示')}</small></span><span class="num-field"><input id="watchMin" type="number" min="20" max="5000" step="10" value="${x.watch.min_posts}"> ${t('张')}</span></div>
     <p class="settings-note">${t('每次检查前确认联网，只允许本次运行。')}</p>
     ${x.history.length ? fold('indexHistory', t('最近添加的角色（{n} 个）', {n: number(x.history.reduce((n, h) => n + h.characters.length, 0))}), `<table class="settings-table">${x.history.flatMap(h => h.characters.map(c => `<tr><td>${esc(stamp(h.at))}</td>
-      <td>${c.entity && c.status === 'added' ? `<a class="link" href="${app.charHash(c.entity.id)}">${esc(c.entity.name)}</a>` : esc(c.tag || c.short_tag)}</td>
+      <td>${c.entity && c.status === 'added' ? `<a class="link" href="${charHash(c.entity.id)}">${esc(c.entity.name)}</a>` : esc(c.tag || c.short_tag)}</td>
       <td>${c.status === 'added' ? t('匹配 {n} 张', {n: number(c.entity?.count ?? c.claims)}) : c.status === 'dropped' ? t('已移除') : t('未添加：{reason}', {reason: esc(tb(c.reason || ''))})}</td>
       <td>${c.status === 'added' && c.entity ? `<button class="quiet small${indexArmed === c.short_tag ? ' armed' : ''}" data-drop="${esc(c.short_tag)}" ${active ? 'disabled' : ''} title="${t('从索引中移除这个角色：重新扫描后它匹配的图恢复原状，以后检查不再提示')}">${indexArmed === c.short_tag ? t('再点一次确认移除') : t('移除')}</button>` : ''}</td></tr>`)).join('')}</table>`) : ''}`, x.works)) return;
   wireFolds(card);

@@ -8,16 +8,12 @@ const zh = require('./i18n_zh.cjs');   // t() of a Chinese page (#173)
 const source = fs.readFileSync('web/static/app.js', 'utf8');
 const tick = () => new Promise(resolve => setImmediate(resolve));
 const section = (a, b) => source.slice(source.indexOf(a), source.indexOf(b, source.indexOf(a)));
+// The metadata read is core/meta.js; api answers the page's requests.
 function metaHarness(api) {
-  const nodes = {}, paints = [];
-  const {session, adoptToken} = web.core();
-  const c = {URLSearchParams, api, session, adoptToken, state: {nsfw: '', chars: [], dupInfo: {}, exclInfo: {}, route: {page: 'library'}},
-    $: id => nodes[id] ||= {}, setLatest() {}, navCount() {}, fetchChar: async () => null,
-    renderChrome: () => paints.push('chrome'), renderSettings() {}, renderIndexBody() {}, guideAfterPost() {},
-    document: {createElement: () => ({})}};
-  vm.createContext(Object.assign(c, zh.page));
-  vm.runInContext(section('let metaPending', '// ---------- chrome'), c);
-  return c;
+  const {session, state, refreshMeta} = web.core();
+  Object.assign(state, {nsfw: '', chars: [], dupInfo: {}, exclInfo: {}, route: {page: 'library'}, char: null, readEpoch: 0});
+  globalThis.fetch = path => Promise.resolve(api(path)).then(body => ({status: 200, ok: true, json: async () => body}));
+  return {state, session, refreshMeta};
 }
 function value(path, name = 'current') {
   if (path.startsWith('/api/bootstrap')) return {token: name, undo: null, total: 1};
@@ -139,12 +135,12 @@ test('pagination skips recount and obsolete completion cannot clear a newer pend
 
 test('successful writes invalidate an in-flight metadata read before UI refresh starts', async () => {
   const pending = [];
-  const c = metaHarness(path => new Promise(resolve => pending.push({path,resolve})));
+  const c = metaHarness(path => path === '/api/tag' || path === '/api/suggest' ? {ok: true} : new Promise(resolve => pending.push({path,resolve})));
   c.state.readEpoch = 0;
   // Writes go through core/session.js; app.js counts them in its onPost listener.
-  const {post, onPost} = web.core();
-  globalThis.fetch = async () => ({status: 200, ok: true, json: async () => ({ok: true})});
-  c.post = post; c.onPost = fn => (c.unlisten = onPost(fn));
+  const {post, onPost, metaWritten} = web.core();
+  Object.assign(c, {post, metaWritten, guideAfterPost() {}, onPost: fn => (c.unlisten = onPost(fn))});
+  vm.createContext(c);
   vm.runInContext(section('onPost((path, body) =>', '// What a background job'), c);
   const first = c.refreshMeta(); await tick();
   await c.post('/api/suggest', {});
@@ -192,9 +188,8 @@ test('metadata requests summaries outside directory and full rows inside directo
   assert.ok(!calls.find(p => p.startsWith('/api/characters')).includes('summary=1'));
 });
 test('active character retains full variant counts rather than summary rows', async () => {
-  const c = metaHarness(async path => value(path, 'person'));
+  const c = metaHarness(async path => path.startsWith('/api/characters?id=') ? [{id: 'person', variants: [{id: 'skin', count: 7}]}] : value(path, 'person'));
   c.state.char = {id: 'person'};
-  c.fetchChar = async id => ({id, variants: [{id: 'skin', count: 7}]});
   await c.refreshMeta();
   assert.equal(c.state.char.variants[0].count, 7);
 });

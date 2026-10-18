@@ -10,7 +10,7 @@ const source = fs.readFileSync('web/static/app.js', 'utf8');
 const section = (a, b) => source.slice(source.indexOf(a), source.indexOf(b, source.indexOf(a)));
 const tick = () => new Promise(resolve => setImmediate(resolve));
 let dom;
-test.before(async () => { await web.ready(); dom = await web.load('ui/dom.js'); });
+test.before(async () => { await web.ready(); dom = await web.load('ui/dom.js'); dom.wireDom(); });
 
 // A server whose session can be replaced by "another window"; every request is recorded. Requests and the session
 // are core/session.js, the banner is ui/dom.js; the metadata refresh is still a slice of app.js.
@@ -31,14 +31,11 @@ function harness() {
     if (path.startsWith('/api/identity/count')) return respond(200, {total: 0});
     return respond(200, path === '/api/tag' ? {ok: true} : []);
   };
-  const {session, adoptToken, staleSession, api, post} = web.core();
-  const c = {
-    URLSearchParams, session, adoptToken, staleSession, api, post, error: dom.error, state: {nsfw: '', route: {page: 'library'}, chars: [], dupInfo: {}, exclInfo: {},
-      readEpoch: 0, sel: {all: false, ids: new Set(['same-uuid']), exclude: new Set()}},
-    $: id => nodes[id] ||= element(), setLatest() {}, navCount() {}, fetchChar: async () => null, renderChrome() {}, renderSettings() {}, renderIndexBody() {},
-  };
-  vm.createContext(Object.assign(c, zh.page));
-  vm.runInContext(section('let metaPending', '// ---------- chrome'), c);
+  // The metadata read is core/meta.js.
+  const {session, adoptToken, staleSession, api, post, state, refreshMeta} = web.core();
+  Object.assign(state, {nsfw: '', route: {page: 'library'}, char: null, chars: [], dupInfo: {}, exclInfo: {},
+    readEpoch: 0, sel: {all: false, ids: new Set(['same-uuid']), exclude: new Set()}});
+  const c = {session, adoptToken, staleSession, api, post, error: dom.error, state, refreshMeta};
   return {c, server, banner: () => nodes.errorBanner};
 }
 // Another window opens library B, which shares A's image UUIDs.
