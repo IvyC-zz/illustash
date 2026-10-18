@@ -4,6 +4,7 @@ const {test} = require('node:test');
 const assert = require('node:assert/strict');
 const {readFileSync} = require('node:fs');
 const vm = require('node:vm');
+const zh = require('./i18n_zh.cjs');   // t() of a Chinese page (#173)
 const source = readFileSync(require('node:path').join(__dirname, '../web/static/app.js'), 'utf8');
 const section = (a, b) => source.slice(source.indexOf(a), source.indexOf(b, source.indexOf(a)));
 const tick = () => new Promise(resolve => setImmediate(resolve));
@@ -21,7 +22,7 @@ test('a group page answer that arrives after navigating home does not take over 
     renderChrome: () => painted.push('chrome'), renderHome: () => painted.push('home'), reload: async () => painted.push('grid'),
     showGuideNav() {}, renderStart: () => painted.push('start'),
   };
-  vm.createContext(c);
+  vm.createContext(Object.assign(c, {t: zh}));
   vm.runInContext(section('async function applyRoute()', "window.addEventListener('hashchange'"), c);
   const toGroup = c.applyRoute();
   await tick();
@@ -43,7 +44,7 @@ test('an older sync answer that arrives last does not move the state back', asyn
     selCount: () => 0, reload() {}, toast() {}, renderTasks() {}, number: String, error() {}, readError: e => e.message, guideRefresh() {},
     timers: [], setTimeout(fn, ms) { this.timers.push(ms); return this.timers.length; }, clearTimeout() {},
   };
-  vm.createContext(c);
+  vm.createContext(Object.assign(c, {t: zh}));
   vm.runInContext(section('let syncTimer', '// ---------- new characters'), c);
   const older = c.pollSync(), newer = c.pollSync();
   answers[1]({state: {status: 'done', imported: 2}, history: [{id: 2}]});
@@ -58,7 +59,7 @@ test('an older sync answer that arrives last does not move the state back', asyn
 test('the new-library name is kept as it is typed, so a card refresh restores it', () => {
   const nodes = {};
   const c = {$: id => nodes[id] ||= element()};
-  vm.createContext(c);
+  vm.createContext(Object.assign(c, {t: zh}));
   vm.runInContext(section('const libForm =', '// The backend lists the origins') + ';this.libForm = libForm;', c);
   nodes.settingsPage.listeners.input({target: {id: 'libName', value: '合成新图库'}});
   nodes.settingsPage.listeners.input({target: {id: 'libPhotos', checked: true}});

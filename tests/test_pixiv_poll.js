@@ -3,13 +3,14 @@ const {test} = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
+const zh = require('./i18n_zh.cjs');   // t() of a Chinese page (#173)
 const source = fs.readFileSync(require('node:path').join(__dirname, '../web/static/app.js'), 'utf8');
 const code = source.slice(source.indexOf('let pixivPoll = null;'), source.indexOf('async function accountAction'));
 function harness() {
   let now = 0, next = 0;
   const timers = new Map(), requests = [], messages = [];
   const ctx = {
-    state: {}, AbortController, Date: {now: () => now},
+    state: {}, AbortController, Date: {now: () => now}, t: zh,
     setTimeout(fn) { timers.set(++next, fn); return next; },
     clearTimeout(id) { timers.delete(id); },
     renderAccountsCard() {}, loadAccounts() {}, toast: text => messages.push(text),

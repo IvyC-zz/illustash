@@ -20,7 +20,9 @@ function scriptKeys(name) {
   for (const call of source.matchAll(/(?<![\w.$])t\(\s*(['"`]?)/g)) {
     const rest = source.slice(call.index + call[0].length - call[1].length);
     const literal = call[1] && rest.match(/^(['"])((?:\\.|(?!\1)[^\\\n])*)\1\s*[,)]/);
-    if (literal) keys.push(unescape(literal[1], literal[2]));
+    // t('…', {context: 'x'}) is looked up as "x\u0004…" (gettext's msgctxt).
+    const context = literal && rest.slice(literal[0].length - 1).match(/^,\s*\{\s*context:\s*'([\w-]+)'/);
+    if (literal) keys.push((context ? context[1] + '\u0004' : '') + unescape(literal[1], literal[2]));
     else dynamic.push(`${name}:${source.slice(0, call.index).split('\n').length}`);
   }
   return {keys, dynamic};
@@ -85,6 +87,31 @@ test('t() translates, falls back to Chinese and fills placeholders', () => {
   assert.equal(zh.t('{n} 项进行中', {n: 3}), '3 项进行中');
   assert.equal(en.t('{a} 和 {b}', {a: 1}), '1 和 {b}');
   assert.equal(en.t('toString'), 'toString');
+  const both = {'移除': 'Remove', 'column\u0004移除': 'Removed'};
+  assert.equal(page('en', [], both).t('移除'), 'Remove');
+  assert.equal(page('en', [], both).t('移除', {context: 'column'}), 'Removed');
+  assert.equal(page('zh-CN', [], both).t('移除', {context: 'column'}), '移除');
+});
+
+// What the page decides must not hang on the words it shows: on an English page a test against Chinese text never
+// matches. Use a status field instead. Matching a message the backend sends is allowed only where listed, until the
+// backend sends codes (#173 stage 3).
+const BACKEND_MESSAGES = ['不存在或无法访问'];
+test('stylesheets show no Chinese of their own', () => {
+  // CSS cannot call t(): generated text comes from an attribute the page fills, as content: attr(data-more).
+  for (const name of readdirSync(STATIC).filter(n => n.endsWith('.css')))
+    assert.doesNotMatch(read(name), /content:\s*["'][^"']*\p{Script=Han}/u, name);
+});
+test('no logic tests the Chinese text the page shows', () => {
+  for (const name of scripts) {
+    read(name).split('\n').forEach((line, i) => {
+      if (/^\s*\/\//.test(line)) return;
+      for (const m of line.matchAll(/\/((?:\\.|[^/\n])*\p{Script=Han}(?:\\.|[^/\n])*)\/[a-z]*\.test\(|\.(?:includes|startsWith|endsWith|indexOf)\(\s*(['"])([^'"]*\p{Script=Han}[^'"]*)\2/gu)) {
+        const text = m[1] ?? m[3];
+        assert.ok(BACKEND_MESSAGES.includes(text), `${name}:${i + 1} tests Chinese text: ${m[0]}`);
+      }
+    });
+  }
 });
 
 test('marked page text is translated only on an English page', () => {

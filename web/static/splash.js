@@ -6,6 +6,8 @@
 // app.js reports progress through window.splash.status(text) and window.splash.ready().
 // The desktop shell's start page plays the same animation while the local service starts (progress, settled, halt),
 // then opens the library with ?launched: that load starts from the finished icon instead of folding again.
+// The start page has no i18n.js (#173): its text stays Chinese until the shell is translated.
+const SPLASH_READY = typeof t === 'function' ? t('准备好了') : '准备好了';
 (() => {
   const root = document.getElementById('splash');
   if (!root) return;
@@ -327,7 +329,7 @@
     const creep = real ?? (launched ? .9 + .07 * (1 - Math.exp(-since / 2.2)) : .9 * (1 - Math.exp(-since / 2.2)));
     const fillTo = plan ? creep + (1 - creep) * outCubic(seg(t, readyAt, Math.max(readyAt + .3, plan.E))) : creep;
     fillEl.style.width = `${f(100 * fillTo)}%`;
-    if (plan && t >= plan.E - .2) textEl.textContent = '准备好了';
+    if (plan && t >= plan.E - .2) textEl.textContent = SPLASH_READY;
 
     // 进入: icon and name fly to the sidebar brand while the splash's backdrop fades away
     const fx = plan ? inOut(seg(t, plan.X, plan.X + .8)) : 0;

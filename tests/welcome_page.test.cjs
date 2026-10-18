@@ -4,6 +4,7 @@ const {test} = require('node:test');
 const assert = require('node:assert/strict');
 const {readFileSync} = require('node:fs');
 const vm = require('node:vm');
+const zh = require('./i18n_zh.cjs');   // t() of a Chinese page (#173)
 const html = readFileSync(require('node:path').join(__dirname, '../desktop/dist/index.html'), 'utf8');
 const script = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].pop()[1];
 const section = script.slice(script.indexOf('// 欢迎页：'), script.indexOf('// 外壳在服务启动失败时调用'));
@@ -16,7 +17,7 @@ function page(answers) {
     busy() {}, window: {},
     invoke: async (cmd, args) => { calls.push([cmd, args]); const a = answers[cmd]; return typeof a === 'function' ? a(args) : a; },
   };
-  vm.createContext(c);
+  vm.createContext(Object.assign(c, {t: zh}));
   vm.runInContext(section, c);
   c.window.showWelcome({origins: [{id: 'x', label: 'X'}, {id: 'pixiv', label: 'Pixiv'}], recent: [], home: '/Users/me/Pictures'});
   return c;

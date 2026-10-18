@@ -4,6 +4,7 @@ const {test} = require('node:test');
 const assert = require('node:assert/strict');
 const {readFileSync} = require('node:fs');
 const vm = require('node:vm');
+const zh = require('./i18n_zh.cjs');   // t() of a Chinese page (#173)
 const source = readFileSync(require('node:path').join(__dirname, '../web/static/app.js'), 'utf8');
 const section = (a, b) => source.slice(source.indexOf(a), source.indexOf(b, source.indexOf(a)));
 const element = () => ({hidden: false, innerHTML: '', dataset: {}, style: {}, offsetWidth: 300, offsetHeight: 120,
@@ -26,7 +27,7 @@ function guide({status = 'active', step = 'welcome', ticked = [], seen = [], hid
     reply: {guide: {status, step, ticked, seen, hidden}, capability: {recognition: true, index: true, anchors: 0, check: {status: 'ok'}},
       results: {total: 0, recognized: 0, with_character: 0, unmatched: 0, characters: 0, ...results}, works},
   };
-  vm.createContext(c);
+  vm.createContext(Object.assign(c, {t: zh}));
   vm.runInContext(section('// ---------- 新图库的首次引导', '(async () => {'), c);
   return c;
 }

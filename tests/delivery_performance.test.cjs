@@ -2,6 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
+const zh = require('./i18n_zh.cjs');   // t() of a Chinese page (#173)
 const source = fs.readFileSync('web/static/app.js', 'utf8');
 const tick = () => new Promise(resolve => setImmediate(resolve));
 const section = (a, b) => source.slice(source.indexOf(a), source.indexOf(b, source.indexOf(a)));
@@ -11,7 +12,7 @@ function metaHarness(api) {
     $: id => nodes[id] ||= {}, setUndo() {}, navCount() {}, fetchChar: async () => null,
     renderChrome: () => paints.push('chrome'), renderSettings() {}, renderIndexBody() {}, guideAfterPost() {},
     document: {createElement: () => ({})}};
-  vm.createContext(c);
+  vm.createContext(Object.assign(c, {t: zh}));
   vm.runInContext(section('const SESSION_EXPIRED', 'async function api('), c);
   vm.runInContext(section('let metaPending', '// ---------- chrome'), c);
   return c;
@@ -79,7 +80,7 @@ function documentMock() {
   }};
 }
 test('section updates preserve unaffected nodes and support reorder/removal', () => {
-  const c = {document: documentMock()}; vm.createContext(c);
+  const c = {document: documentMock()}; vm.createContext(Object.assign(c, {t: zh}));
   vm.runInContext(section('function reconcileSections', 'function renderIndexBody'), c);
   const root = new Element();
   c.reconcileSections(root, [['a','A'],['b','B'],['c','C']]);
@@ -96,7 +97,7 @@ test('virtual grid keeps overlapping cards, updates changed items and relayouts 
     state: {cols: 2, cellW: 100, rowH: 100, gap: 0, total: 30, fit: false, route: {page: 'library'}, dataVersion: 0,
       items: Array.from({length: 30}, (_, i) => ({uuid: String(i), memberships: []}))},
     layout() {}, cardHTML: item => item.uuid, isSquare: () => true, syncCards() {}, clearTimeout() {}, setTimeout() {}, pageTimer: null, PAGE: 100};
-  vm.createContext(c); vm.runInContext(section('let gridLayoutKey', 'const captionH ='), c);
+  vm.createContext(Object.assign(c, {t: zh})); vm.runInContext(section('let gridLayoutKey', 'const captionH ='), c);
   vm.runInContext(section('function renderGrid', 'function syncCards'), c);
   c.renderGrid(); const originals = [...grid.children]; assert.equal(originals.length, 8);
   viewport.scrollTop = 100; c.renderGrid();
@@ -112,7 +113,7 @@ test('scroll bursts schedule a single render per frame', () => {
   const callbacks = [], renders = [];
   const c = {requestAnimationFrame: f => {callbacks.push(f); return callbacks.length;}, renderGrid: () => renders.push(1),
     $: () => ({addEventListener() {}}), ResizeObserver: class {observe() {}}};
-  vm.createContext(c); vm.runInContext(section('let gridFrame', '// ---------- zoom'), c);
+  vm.createContext(Object.assign(c, {t: zh})); vm.runInContext(section('let gridFrame', '// ---------- zoom'), c);
   for (let i = 0; i < 50; i++) c.scheduleGrid();
   assert.equal(callbacks.length, 1); callbacks.shift()(); assert.equal(renders.length, 1);
   c.scheduleGrid(); assert.equal(callbacks.length, 1);
@@ -123,7 +124,7 @@ test('pagination skips recount and obsolete completion cannot clear a newer pend
     pageUrl: (offset, count) => {assert.equal(count, false); return String(offset);},
     api: path => {calls.push(path); return new Promise(resolve => finish = resolve);},
     abortList: null, renderGrid() {}, error() {}, reload: async () => calls.push('reload')};
-  vm.createContext(c); vm.runInContext(section('async function loadPage', 'function updateCount'), c);
+  vm.createContext(Object.assign(c, {t: zh})); vm.runInContext(section('async function loadPage', 'function updateCount'), c);
   const old = c.loadPage(100);
   c.state.generation++; c.state.pending = new Set([100]);
   finish({items: []}); await old;
@@ -153,7 +154,7 @@ test('reload counts only its first page and retries if data changed during the r
     abortList:null, $:id=>nodes[id] ||= {}, panelPage:()=>false, layout(){}, error(){}, visibleOffsets:()=>[0,100],
     pageUrl:(offset,count)=>{counts.push(count);return offset;}, api:()=>new Promise(resolve=>pending.push(resolve)),
     renderGrid(){}, updateCount(){}, renderSelection(){}, renderHeading(){}};
-  vm.createContext(c);vm.runInContext(section('async function reload(', 'async function loadPage('),c);
+  vm.createContext(Object.assign(c, {t: zh}));vm.runInContext(section('async function reload(', 'async function loadPage('),c);
   const result=c.reload(); c.state.readEpoch++;
   pending.splice(0).forEach((resolve,i)=>resolve({total:i===0?200:null,items:[]})); await tick();
   assert.equal(c.state.total,undefined);
@@ -208,7 +209,7 @@ test('group append, answer and selection preserve unaffected section nodes', () 
   const c = {document: documentMock(), $: id => id === 'groupsPage' ? root : nodes[id], number: String, esc: String,
     stamp: String, state: {pools: {unmatched: 100}}, groups: {list: [], shown: 2, off: new Map(), learner: {}},
     groupSection: g => `<section>${g.cid}:${JSON.stringify([...(c.groups.off.get(g.cid) || [])])}</section>`};
-  vm.createContext(c);
+  vm.createContext(Object.assign(c, {t: zh}));
   vm.runInContext(section('function reconcileSections', '// Kept for callers'), c);
   vm.runInContext(section('function drawGroups()', 'function groupSection'), c);
   c.groups.list = [1, 2, 3].map(cid => ({cid, size: 2}));
@@ -224,7 +225,7 @@ test('older group reads cannot overwrite a newer R18-filtered response', async (
   const pending = [], nodes = {}, c = {state: {route: {page: 'groups'}, nsfw: ''}, groups: {revision: 0},
     $: id => nodes[id] ||= {}, closeInspector() {}, drawGroups() {},
     api: path => new Promise(resolve => pending.push({path, resolve}))};
-  vm.createContext(c); vm.runInContext(section('async function renderGroups', 'function drawGroups'), c);
+  vm.createContext(Object.assign(c, {t: zh})); vm.runInContext(section('async function renderGroups', 'function drawGroups'), c);
   const old = c.renderGroups();
   c.state.nsfw = 'hide'; const fresh = c.renderGroups();
   pending[1].resolve({clusters: [{cid: 2, size: 2}], learner: {}}); await fresh;
@@ -236,7 +237,7 @@ test('a library page finishing after navigation cannot overwrite home items', as
   let resolve, paints = 0;
   const c = {state:{route:{page:'library'},pages:new Set(),pending:new Set(),total:200,generation:1,readEpoch:0,items:[]},
     pageUrl:()=>'/api/assets',api:()=>new Promise(r=>resolve=r),abortList:null,renderGrid(){paints++;},error(){throw Error('stale error');}};
-  vm.createContext(c);vm.runInContext(section('async function loadPage', 'function updateCount'),c);
+  vm.createContext(Object.assign(c, {t: zh}));vm.runInContext(section('async function loadPage', 'function updateCount'),c);
   const pending=c.loadPage(100);c.state.route={page:'home'};c.state.items=[{uuid:'home'}];
   resolve({items:[{uuid:'old-library'}]});await pending;
   assert.equal(c.state.items.length,1);assert.equal(c.state.items[0].uuid,'home');assert.equal(paints,0);

@@ -3,6 +3,7 @@ const {test} = require('node:test');
 const assert = require('node:assert/strict');
 const {readFileSync} = require('node:fs');
 const vm = require('node:vm');
+const zh = require('./i18n_zh.cjs');   // t() of a Chinese page (#173)
 const source = readFileSync(require('node:path').join(__dirname, '../web/static/app.js'), 'utf8');
 const poll = source.slice(source.indexOf('async function pollNames()'), source.indexOf('// Collapsible blocks'));
 
@@ -21,7 +22,7 @@ function harness(status = 'running', fail = false) {
     clearTimeout() {}, setTimeout(fn, delay) { timers.push(delay); return 1; },
     renderNamesCard() {}, renderTasks() {}, refreshMeta() { calls.push('refreshMeta'); },
   };
-  vm.createContext(context);
+  vm.createContext(Object.assign(context, {t: zh}));
   vm.runInContext(poll, context);
   return {context, calls, timers, names};
 }

@@ -1,6 +1,7 @@
 const {test} = require('node:test');
 const assert = require('node:assert/strict');
 const vm = require('node:vm');
+const zh = require('./i18n_zh.cjs');   // t() of a Chinese page (#173)
 const source = require('node:fs').readFileSync(require('node:path').join(__dirname, '../web/static/app.js'), 'utf8');
 const tick = () => new Promise(resolve => setImmediate(resolve));
 
@@ -19,7 +20,7 @@ function harness() {
     libraryAction: async (action, body) => {calls.push({action, body}); return body.confirm ? {removed:2} : {count:2};},
     loadLibraries: async () => {}, toast() {}, pollSync() {},
     api: async (path, options) => {calls.push({path, options});}, clearTimeout() {}, setTimeout() {}};
-  vm.createContext(c);
+  vm.createContext(Object.assign(c, {t: zh}));
   vm.runInContext(source.slice(source.indexOf('let confirmationOpen ='), source.indexOf('// Native folder picker')),c);
   vm.runInContext(source.slice(source.indexOf("$('settingsPage').addEventListener('click', async e =>"),source.indexOf('async function openLibrary(')),c);
   vm.runInContext(source.slice(source.indexOf('const LOOKUP_NOTE ='),source.indexOf('const findArtists =')),c);

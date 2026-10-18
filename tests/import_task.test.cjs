@@ -5,6 +5,7 @@ const {test} = require('node:test');
 const assert = require('node:assert/strict');
 const {readFileSync} = require('node:fs');
 const vm = require('node:vm');
+const zh = require('./i18n_zh.cjs');   // t() of a Chinese page (#173)
 const source = readFileSync(require('node:path').join(__dirname, '../web/static/app.js'), 'utf8');
 const section = (a, b) => source.slice(source.indexOf(a), source.indexOf(b, source.indexOf(a)));
 const esc = s => String(s).replace(/[&<>"]/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'})[c]);
@@ -20,7 +21,7 @@ function card(importTask) {
       info: {name: '合成图库', path: '/tmp/synthetic.pilib', sources: [], test: null},
       current: '/tmp/synthetic.pilib', home: '/tmp', libraries: [], export: {status: 'idle'}}},
   };
-  vm.createContext(c);
+  vm.createContext(Object.assign(c, {t: zh}));
   vm.runInContext(section('function renderLibrariesCard()', '// Gallery pages have no Tauri dialog permission') +
     ';this.importLine = importLine;', c);
   c.renderLibrariesCard();
@@ -74,7 +75,7 @@ function poller(token = 'session') {
     renderLibrariesCard: () => { rendered++; }, loadLibraries: () => { libraries++; }, toast: m => toasts.push(m),
     setTimeout: (fn, ms) => { timers.push(ms); return timers.length; }, clearTimeout() {}, number: String, esc,
   };
-  vm.createContext(c);
+  vm.createContext(Object.assign(c, {t: zh}));
   vm.runInContext(section('const IMPORT_ACTIVE', '// #41: the shareable export') +
     section('let importTimer', 'async function pollExport()'), c);
   return {c, answers, timers, toasts, posted, rendered: () => rendered, libraries: () => libraries};

@@ -4,6 +4,7 @@ const {test} = require('node:test');
 const assert = require('node:assert/strict');
 const {readFileSync} = require('node:fs');
 const vm = require('node:vm');
+const zh = require('./i18n_zh.cjs');   // t() of a Chinese page (#173)
 const source = readFileSync(require('node:path').join(__dirname, '../web/static/app.js'), 'utf8');
 const section = (a, b) => source.slice(source.indexOf(a), source.indexOf(b, source.indexOf(a)));
 
@@ -19,7 +20,7 @@ function render(exportState) {
       info: {name: '合成图库', path: '/tmp/synthetic.pilib', sources: [], test: null},
       current: '/tmp/synthetic.pilib', home: '/tmp', libraries: [], export: exportState}},
   };
-  vm.createContext(c);
+  vm.createContext(Object.assign(c, {t: zh}));
   vm.runInContext(section('function renderLibrariesCard()', '// Gallery pages have no Tauri dialog permission'), c);
   c.renderLibrariesCard();
   return card.innerHTML;
