@@ -98,18 +98,25 @@ class NativeFilesTest(unittest.TestCase):
 
     def test_i18n_script_carries_the_app_wide_language(self):
         # #173: the language lives in preferences.json beside libraries.json and is written ahead of i18n.js.
+        # #182: with it the languages on offer, and the table of the language set, or every table for system.
         static = self.resources / 'web' / 'static'
-        script, table = (static / 'i18n.js').read_bytes(), json.loads((static / 'locales/en.json').read_text(encoding='utf-8'))
+        script = (static / 'i18n.js').read_bytes()
+        tables = {p.stem: json.loads(p.read_text(encoding='utf-8')) for p in (static / 'locales').glob('*.json')}
+        self.assertIn('en', tables)
 
         def served():
             response = self.request('/i18n.js')
             self.assertEqual((response['status'], response['route']), (200, 'core'))
             self.assertEqual(response['headers'].get('Content-Type'), 'text/javascript')
             self.assertEqual(response['headers'].get('Cache-Control'), 'no-store')
-            language, english, rest = response['body'].split(b'\n', 2)
+            language, names, sent, rest = response['body'].split(b'\n', 3)
             self.assertEqual(rest, script)
-            self.assertEqual(json.loads(english.removeprefix(b'self.ILLUSTASH_EN = ').removesuffix(b';')), table)
-            return json.loads(language.removeprefix(b'self.ILLUSTASH_LANGUAGE = ').removesuffix(b';'))
+            value = lambda line, name: json.loads(line.removeprefix(b'self.%s = ' % name).removesuffix(b';'))
+            self.assertEqual(value(names, b'ILLUSTASH_LANGUAGES'), {code: t['@name'] for code, t in tables.items()})
+            language = value(language, b'ILLUSTASH_LANGUAGE')
+            expected = tables if language == 'system' else {k: v for k, v in tables.items() if k == language}
+            self.assertEqual(value(sent, b'ILLUSTASH_TABLES'), expected)
+            return language
 
         preferences = self.support / 'preferences.json'
         self.assertEqual(served(), 'system')
@@ -121,7 +128,7 @@ class NativeFilesTest(unittest.TestCase):
         self.assertNotIn('preferences', json.loads(self.request('/api/settings')['body']))
         self.assertEqual(json.loads(preferences.read_text(encoding='utf-8')), {'language': 'en'})
         self.assertEqual(served(), 'en')
-        for body in ({'language': 'fr'}, {'language': 'en', 'theme': 'dark'}, {}):
+        for body in ({'language': 'xx'}, {'language': 'EN'}, {'language': '../en'}, {'language': 'en', 'theme': 'dark'}, {}):
             self.assertEqual(self.request('/api/preferences', body)['status'], 400, body)
         self.assertEqual(self.request('/api/preferences', {'language': 'zh-CN'}, token='bad')['status'], 403)
         self.assertEqual(served(), 'en')

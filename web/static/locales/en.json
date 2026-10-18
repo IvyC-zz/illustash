@@ -1,4 +1,5 @@
 {
+  "@name": "English",
   "首页": "Home",
   "图库": "Library",
   "资料库": "Catalog",
@@ -194,7 +195,10 @@
   "全部未识别": "All unidentified",
   "已跳过": "Skipped",
   "全部": "All",
-  "{n} 组": "{n} groups",
+  "{n} 组": {
+    "one": "{n} group",
+    "other": "{n} groups"
+  },
   "角色不一致": "Characters disagree",
   "几份副本标的角色不同；对齐后自动折叠": "The copies are tagged with different characters; they fold once aligned",
   "相似的图": "Similar pictures",
@@ -237,7 +241,7 @@
   "我的标签": "My tags",
   "画面标签": "Picture tags",
   "没有匹配的标签": "No matching tags",
-  "上次检查 {m} 月 {d} 日": "Last checked {m}/{d}",
+  "上次检查 {date}": "Last checked {date}",
   "显示全部": "Show all",
   "只看机器识别、还没检查过的图": "Only machine-identified pictures not checked yet",
   "未检查 {n}": "{n} unchecked",
@@ -245,7 +249,10 @@
   "不算角色：不出现在角色列表里，也不算多人图；图上仍挂着这个标签。在「⋯」里可以改回角色": "Not counted as a character: left out of the character list and of group-picture counts; pictures still carry this tag. Change it back under “⋯”",
   "只当标签": "Tag only",
   "原创": "Original",
-  "{n} 张": "{n} pictures",
+  "{n} 张": {
+    "one": "{n} picture",
+    "other": "{n} pictures"
+  },
   "关联后自动补中文名、别名和所属作品": "Once linked, the Chinese name, aliases and series fill in automatically",
   "关联 Danbooru…": "Link to Danbooru…",
   "把长得像的图分成一组，一组一键设为独立的原创角色": "Group look-alike pictures and make each group its own original character in one click",
@@ -493,7 +500,6 @@
   "收藏 {n} 张": "{n} saved",
   "始于 {date}": "since {date}",
   "本月 +{n}": "+{n} this month",
-  "{y} 年 {m} 月 · {n} 张": "{y}-{m} · {n} pictures",
   "同一角色": "Same character",
   "查看这张": "View this one",
   "读取图片详情…": "Loading picture details…",
@@ -548,7 +554,10 @@
   "点角色，在图库里只看 TA": "Click a character to show only them in the library",
   "其他": "Other",
   "未命名作品": "Untitled series",
-  "{n} 个皮肤": "{n} outfits",
+  "{n} 个皮肤": {
+    "one": "{n} outfit",
+    "other": "{n} outfits"
+  },
   "主力": "Mainstays",
   "20 张以上 · {n} 位": "20 or more pictures · {n}",
   "常见": "Regulars",
@@ -561,7 +570,10 @@
   "在 {n} 部作品里找": "Search {n} series",
   "没有匹配的作品": "No matching series",
   "搜索结果": "Search results",
-  "{n} 位角色": "{n} characters",
+  "{n} 位角色": {
+    "one": "{n} character",
+    "other": "{n} characters"
+  },
   "你最常看的": "Your most saved",
   "按收藏张数": "by pictures saved",
   "最近 30 天在收": "Saved in the last 30 days",
@@ -620,23 +632,17 @@
   "添加 {n} 个（约 {mb} MB）": "Add {n} (about {mb} MB)",
   "下载量超过 500 MB，网络不方便时可以分几次添加": "Over 500 MB to download; add them in several rounds on a slow connection",
   "开始添加 {n} 个角色，进度在任务面板里": "Adding {n} characters; progress is in the task panel",
-  "周日": "Sun",
-  "周一": "Mon",
-  "周二": "Tue",
-  "周三": "Wed",
-  "周四": "Thu",
-  "周五": "Fri",
-  "周六": "Sat",
   "今天": "Today",
   "昨天": "Yesterday",
-  "{y} 年 {m} 月 {d} 日": "{y}-{m}-{d}",
-  "{m} 月 {d} 日": "{m}/{d}",
   "点图片看详情 · 点角色名只看 TA": "Click a picture for details · click a name to show only them",
   "读取中…": "Loading…",
   "正在读取更早的图…": "Loading earlier pictures…",
   "已经到底了": "That's everything",
   "读取失败，重试": "Could not load; retry",
-  "共 {n} 份副本": "{n} copies",
+  "共 {n} 份副本": {
+    "one": "{n} copy",
+    "other": "{n} copies"
+  },
   "向左": "Left",
   "{n} 张没显示": "{n} not shown",
   "继续往右滑自动加载 · 或在图库里看全部": "Keep scrolling right to load more · or see all in the library",
