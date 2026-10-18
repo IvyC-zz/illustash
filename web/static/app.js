@@ -2827,7 +2827,7 @@ async function renderSettings(fetchMissing = true, refresh = false) {
   const startup = async (body, done) => { try { state.settings = await post('/api/startup', body); toast(done); } catch (e) { toast(e.message); } renderSettings(); };
   page.onchange = e => { const box = e.target.closest('[data-startup]'); if (box) startup({[box.dataset.startup]: box.checked}, t('已保存，下次启动时生效')); };
   if ($('backupNow')) $('backupNow').onclick = async () => { try { const r = await post('/api/backup', {}); toast(t('备份完成：{name}', {name: r.path.split('/').pop()})); state.settings = null; renderSettings(); } catch (e) { toast(e.message); } };
-  renderIntegrityLine();
+  if (state.integrity) renderIntegrityLine(); else if ($('integrityLine')) pollIntegrity();
   if ($('clearCache')) $('clearCache').onclick = async () => { try { const r = await post('/api/cache', {action: 'clear'}); state.settings = r; toast(t('已清除 {n} 个缩略图', {n: number(r.removed)})); renderSettings(); } catch (e) { toast(e.message); } };
   for (const g of page.querySelectorAll('[data-setting]')) for (const b of g.querySelectorAll('button')) b.onclick = () => {
     const key = g.dataset.setting, v = b.dataset.value;
@@ -3048,7 +3048,8 @@ async function pollIntegrity() {
   const token = state.token;
   try { state.integrity = await api('/api/integrity'); }
   catch { if (token === state.token) integrityTimer = setTimeout(pollIntegrity, 10000); return; }
-  if (token !== state.token) return;
+  // Asked before the page adopted its session token (the settings page opened at boot): the answer is this session's.
+  if (token && token !== state.token) return;
   const damaged = state.integrity.damaged;
   $('damageBanner').textContent = damaged ? tb(damaged.message) : ''; $('damageBanner').hidden = !damaged;
   renderIntegrityLine();

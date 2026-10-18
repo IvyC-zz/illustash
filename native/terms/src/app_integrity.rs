@@ -76,7 +76,7 @@ impl Damage {
     }
 }
 pub(crate) const LIBRARY_DAMAGED: &str = "这个图库的整理记录数据库（library.sqlite）已损坏，为保护数据已停止写入。请退出 Illustash，把图库文件夹里的 library.sqlite 连同旁边的 library.sqlite-wal、library.sqlite-shm 一起移到别处保存，再从 backups 文件夹里选最近的一份备份复制回来、改名为 library.sqlite，然后重新打开。最近一次备份之后的整理会丢失。";
-pub(crate) const SOURCE_DAMAGED: &str = "这个图库的识别结果数据库（source.sqlite）已损坏，为保护数据已停止写入；人工整理记录在 library.sqlite 里，没有受影响。目前还不能在 app 里重建 source.sqlite：请先在设置里立即备份一次整理记录，然后退出 Illustash，保持图库文件夹原样，不要删除或替换其中的文件。";
+pub(crate) const SOURCE_DAMAGED: &str = "这个图库的识别结果数据库（source.sqlite）已损坏，为保护数据已停止写入；人工整理记录在 library.sqlite 里，没有受影响。目前还不能在 app 里重建 source.sqlite：请退出 Illustash，保持图库文件夹原样，不要删除或替换其中的文件；想多留一份保险，可以把整个图库文件夹复制到别处。";
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 struct Record {
