@@ -9,7 +9,7 @@ const html = readFileSync(require('node:path').join(__dirname, '../desktop/dist/
 const script = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].pop()[1];
 const section = script.slice(script.indexOf('// 欢迎页：'), script.indexOf('// 外壳在服务启动失败时调用'));
 
-function page(answers, t = zh) {
+function page(answers, i18n = zh.page) {
   const nodes = {}, calls = [];
   const c = {
     calls, nodes, setInterval: () => 0, clearInterval() {},
@@ -17,7 +17,7 @@ function page(answers, t = zh) {
     busy() {}, window: {},
     invoke: async (cmd, args) => { calls.push([cmd, args]); const a = answers[cmd]; return typeof a === 'function' ? a(args) : a; },
   };
-  vm.createContext(Object.assign(c, {t}));
+  vm.createContext(Object.assign(c, i18n));
   vm.runInContext(section, c);
   c.window.showWelcome({origins: [{id: 'x', label: 'X'}, {id: 'pixiv', label: 'Pixiv'}], recent: [], home: '/Users/me/Pictures'});
   return c;
@@ -129,12 +129,13 @@ test('the start page speaks the language the shell gives it', async () => {
     navigator: {languages: ['zh-CN']}, document: {documentElement: {}, querySelectorAll: () => []}};
   vm.createContext(context);
   vm.runInContext(read('i18n.js'), context);
-  const en = vm.runInContext('t', context);
+  const en = {t: vm.runInContext('t', context), tb: vm.runInContext('tb', context)};
   const c = page({
     welcome_pick: () => ({paths: ['/a', '/b']}),
     welcome_inspect: ({paths}) => paths.map(p => ok(p, p === '/a' ? 1 : 1234)),
     welcome_create: () => { throw 'synthetic failure'; },
   }, en);
+  c.window.showWelcome({origins: [{id: 'x', label: 'X'}, {id: 'other', label: '其他'}], recent: [], home: '/Users/me/Pictures'});
   assert.match(c.nodes.wcol.innerHTML, /No libraries yet/);
   assert.match(c.nodes.wcol.innerHTML, /Open a library…/);
   await click(c, {pick: 'x'});
@@ -146,6 +147,9 @@ test('the start page speaks the language the shell gives it', async () => {
   // Left empty, the name is the placeholder's, in the page's language.
   await click(c, {actW: 'create'});
   assert.equal(c.calls.find(([cmd]) => cmd === 'welcome_create')[1].name, 'New library');
+  // The core's Chinese (origin names, errors) goes through tb(), as on the library page.
+  assert.match(c.nodes.wcol.innerHTML, /<h3>Other<\/h3>/);
+  assert.match(c.nodes.wcol.innerHTML, /synthetic failure/);
   const zhPage = page({welcome_pick: () => ({paths: ['/a']}), welcome_inspect: ({paths}) => paths.map(p => ok(p, 1)), welcome_create: () => ({})});
   await click(zhPage, {pick: 'x'});
   await click(zhPage, {actW: 'create'});
