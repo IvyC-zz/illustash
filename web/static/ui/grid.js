@@ -12,7 +12,11 @@ import {api, post, readError} from '../core/session.js';
 import {state} from '../core/state.js';
 import {$, error, toast} from './dom.js';
 import {renderChrome, renderHeading} from './shell.js';
-import {app} from './app_parts.js';
+import {findArtists} from './artists.js';
+import {answerAsk, closeInspector, closeViewer, ensureVisible, indexOf, inspect, openViewer, pickAlternative, showViewer, singleAction, step, zoomView} from './detail.js';
+import {drawHome, renderHome} from './home.js';
+import {jumpToCharacter, markOc, newIds, openPicker, openRelate, targets} from './palette.js';
+import {renderArtistAudit, renderGroups, renderIdentity, renderSimilar} from './review.js';
 
 // ---------- asset loading ----------
 // Zoom is a continuous target column width; the grid snaps to whole columns and animates between them.
@@ -363,7 +367,7 @@ function handleCardClick(index, e, onCheck = false) {
   state.cursor = index;
   if (e.shiftKey && state.anchor >= 0) { selectRange(state.anchor, index, true); return; }
   // The corner circle always selects, like Photos; a plain click in the library opens details.
-  if (browsing() && !onCheck && !state.selecting && !selCount() && !e.metaKey && !e.ctrlKey) { app.inspect(item.uuid); syncCards(); return; }
+  if (browsing() && !onCheck && !state.selecting && !selCount() && !e.metaKey && !e.ctrlKey) { inspect(item.uuid); syncCards(); return; }
   if (browsing() && (onCheck || e.metaKey || e.ctrlKey)) state.selecting = true;
   setSelected(item.uuid, !isSelected(item.uuid)); state.anchor = index; renderSelection();
 }
@@ -452,7 +456,7 @@ function runBarAction(act) {
   if (act === 'findartist') {
     const sel = state.sel;
     (sel.all ? api('/api/ids?' + new URLSearchParams({...filters(), limit: 500})).then(ids => ids.filter(u => !sel.exclude.has(u))) : Promise.resolve([...sel.ids].slice(0, 500)))
-      .then(ids => ids.length && app.findArtists(ids, () => reload())).catch(err => toast(err.message));
+      .then(ids => ids.length && findArtists(ids, () => reload())).catch(err => toast(err.message));
     return;
   }
   if (act === 'remove') { if (!needsArm('remove')) mutate('/api/change', {...payload(), action: 'rejected', entity: r.char}, true); }
@@ -460,20 +464,20 @@ function runBarAction(act) {
   else if (act === 'isme') { if (!needsArm('isme')) mutate('/api/change', {...payload(), action: 'confirmed', entity: r.char}, true); }
   else if (act === 'exclude' || act === 'include') { if (!needsArm(act)) mutate('/api/curate', {...payload(), action: act}, true); }
   else if (act === 'resume') { if (!needsArm('resume')) mutate('/api/change', {...payload(), action: 'resume'}, true); }
-  else if (act === 'swap') app.openPicker({title: t('把 {n} 张换成…', {n: number(n)}), sentence: e => t('把 {n} 张从 {from} 换成 {name}', {n: number(n), from: fromName, name: e.name}), exclude: [r.char], suggest: selectionPayload(), multi: true,
-    pick: list => mutate('/api/reassign', {...payload(), old: r.char, new: app.newIds(list)}, true)});
-  else if (act === 'also') app.openPicker({title: t('这 {n} 张也是…', {n: number(n)}), sentence: e => t('给 {n} 张加上 {name}', {n: number(n), name: e.name}), exclude: [r.char], suggest: selectionPayload(), multi: true,
-    pick: list => mutate('/api/change', {...payload(), action: 'confirmed', ...app.targets(list)}, false)});
-  else if (act === 'assign') app.openPicker({title: browsing() ? t('给 {n} 张加角色', {n: number(n)}) : t('把 {n} 张设为…', {n: number(n)}), sentence: e => t('把 {n} 张设为 {name}', {n: number(n), name: e.name}), suggest: selectionPayload(), multi: true,
-    pick: list => mutate('/api/change', {...payload(), action: 'confirmed', ...app.targets(list)}, !browsing())});
-  else if (act === 'oc') app.markOc(payload(), true);
-  else if (act === 'relate') app.openRelate([...state.sel.ids]);
+  else if (act === 'swap') openPicker({title: t('把 {n} 张换成…', {n: number(n)}), sentence: e => t('把 {n} 张从 {from} 换成 {name}', {n: number(n), from: fromName, name: e.name}), exclude: [r.char], suggest: selectionPayload(), multi: true,
+    pick: list => mutate('/api/reassign', {...payload(), old: r.char, new: newIds(list)}, true)});
+  else if (act === 'also') openPicker({title: t('这 {n} 张也是…', {n: number(n)}), sentence: e => t('给 {n} 张加上 {name}', {n: number(n), name: e.name}), exclude: [r.char], suggest: selectionPayload(), multi: true,
+    pick: list => mutate('/api/change', {...payload(), action: 'confirmed', ...targets(list)}, false)});
+  else if (act === 'assign') openPicker({title: browsing() ? t('给 {n} 张加角色', {n: number(n)}) : t('把 {n} 张设为…', {n: number(n)}), sentence: e => t('把 {n} 张设为 {name}', {n: number(n), name: e.name}), suggest: selectionPayload(), multi: true,
+    pick: list => mutate('/api/change', {...payload(), action: 'confirmed', ...targets(list)}, !browsing())});
+  else if (act === 'oc') markOc(payload(), true);
+  else if (act === 'relate') openRelate([...state.sel.ids]);
   else if (act === 'variant') openVariantMenu(payload);
   else if (act === 'tag') openTagPicker(payload, n, state.sel.all ? null : state.items.filter(x => x && isSelected(x.uuid)));
   else if (act === 'notlib') {
     const present = new Map(); for (const id of state.sel.ids) { const item = state.items.find(x => x?.uuid === id); for (const m of item?.memberships || []) present.set(m.id, m); }
     if (!present.size) { toast(t('所选图片还没有角色')); return; }
-    app.openPicker({title: t('这些图不是…'), items: [...present.values()], sentence: e => t('把 {name} 从 {n} 张中移出', {name: e.name, n: number(n)}), pick: e => mutate('/api/change', {...payload(), action: 'rejected', entity: e.id}, false)});
+    openPicker({title: t('这些图不是…'), items: [...present.values()], sentence: e => t('把 {name} 从 {n} 张中移出', {name: e.name, n: number(n)}), pick: e => mutate('/api/change', {...payload(), action: 'rejected', entity: e.id}, false)});
   }
 }
 // Human tags reuse the palette: existing tags, adopt a WD tag, or create one. Items already on
@@ -481,7 +485,7 @@ function runBarAction(act) {
 export function openTagPicker(payload, n, loaded, leaving = () => !!state.route.utag) {
   const present = new Map();
   for (const item of loaded || []) for (const tag of item.user_tags || []) present.set(tag, (present.get(tag) || 0) + 1);
-  app.openPicker({title: t('标签'), tagMode: true, present, placeholder: t('输入标签，或搜索 WD 通用标签…'),
+  openPicker({title: t('标签'), tagMode: true, present, placeholder: t('输入标签，或搜索 WD 通用标签…'),
     sentence: e => e.remove ? t('从 {n} 张去掉标签 {tag}', {n: number(n), tag: e.tag}) : t('给 {n} 张加上标签 {tag}', {n: number(n), tag: e.tag}),
     pick: e => mutate('/api/tag', {...payload(), tag: e.tag, add: !e.remove}, e.remove && leaving())});
 }
@@ -489,7 +493,7 @@ function openVariantMenu(payload) {
   const r = state.route, n = selCount(), items = [];
   if (r.variant) { const v = state.char.variants.find(v => v.id === r.variant); if (v) items.push({id: v.id, name: v.name, remove: true, hint: t('从所选图片去掉')}); }
   for (const v of state.char.variants) if (v.id !== r.variant) items.push({id: v.id, name: v.name, hint: t('{n} 张', {n: number(v.count)}), counted: true});
-  app.openPicker({title: t('子标签'), items, placeholder: t('筛选子标签'), sentence: e => e.remove ? t('从 {n} 张去掉 {name}', {n: number(n), name: e.name}) : t('给 {n} 张加上 {name}', {n: number(n), name: e.name}),
+  openPicker({title: t('子标签'), items, placeholder: t('筛选子标签'), sentence: e => e.remove ? t('从 {n} 张去掉 {name}', {n: number(n), name: e.name}) : t('给 {n} 张加上 {name}', {n: number(n), name: e.name}),
     pick: e => mutate('/api/change', {...payload(), action: e.remove ? 'remove_variant' : 'add_variant', entity: e.id}, !!e.remove)});
 }
 
@@ -504,13 +508,13 @@ function holdCurrent() {
   const uuid = state.viewer >= 0 ? state.viewerItem?.uuid : state.focused;
   if (!uuid) { kept.hold = null; return; }
   if (kept.hold?.uuid === uuid) return;
-  const i = app.indexOf(uuid);
+  const i = indexOf(uuid);
   kept.hold = {uuid, item: state.items[i] || state.viewerItem, prev: state.items[i - 1]?.uuid, next: state.items[i + 1]?.uuid};
 }
 export function currentItem() {
   const uuid = state.viewer >= 0 ? state.viewerItem?.uuid : state.focused;
   if (!uuid) return state.cursor >= 0 ? state.items[state.cursor] : null;
-  const i = app.indexOf(uuid);
+  const i = indexOf(uuid);
   return i >= 0 ? state.items[i] : uuid === kept.hold?.uuid ? kept.hold.item : state.viewerItem?.uuid === uuid ? state.viewerItem : null;
 }
 export async function mutate(path, body, leaving, {advance = false} = {}) {
@@ -525,12 +529,12 @@ export async function mutate(path, body, leaving, {advance = false} = {}) {
     state.selecting = false; clearSelection();
     toast(tb(r.undo.label), true);
     if (gone) { await new Promise(done => setTimeout(done, Math.max(0, 170 - (performance.now() - started)))); collapse(gone); }
-    await reload(); if (state.route.page === 'home') app.renderHome(true); metaSoon(path === '/api/tag');
-    if (state.focused) app.inspect(state.focused, true);
+    await reload(); if (state.route.page === 'home') renderHome(true); metaSoon(path === '/api/tag');
+    if (state.focused) inspect(state.focused, true);
     if (state.viewer >= 0) {
-      if (advance && advanceFrom && app.indexOf(advanceFrom) >= 0) app.showViewer(Math.min(app.indexOf(advanceFrom) + 1, state.total - 1));
-      else if (advance || !kept.hold) app.showViewer(Math.min(state.viewer, state.total - 1));
-      else { const i = app.indexOf(kept.hold.uuid); app.showViewer(i >= 0 ? i : state.viewer, i >= 0 ? state.items[i] : state.viewerItem); }
+      if (advance && advanceFrom && indexOf(advanceFrom) >= 0) showViewer(Math.min(indexOf(advanceFrom) + 1, state.total - 1));
+      else if (advance || !kept.hold) showViewer(Math.min(state.viewer, state.total - 1));
+      else { const i = indexOf(kept.hold.uuid); showViewer(i >= 0 ? i : state.viewer, i >= 0 ? state.items[i] : state.viewerItem); }
     }
     return true;
   } catch (e) { toast(e.message); for (const el of $('grid').querySelectorAll('.leaving')) el.classList.remove('leaving'); }
@@ -545,12 +549,12 @@ export async function undo() {
   if (!edits.latest || edits.busy) return; edits.busy = true;
   try {
     toast(undoneText(await undoLatest())); await reload(); refreshMeta().catch(e => error(readError(e)));
-    if (state.route.page === 'home') app.renderHome(true);
-    if (state.route.page === 'identity') app.renderIdentity();
-    if (state.route.page === 'groups') app.renderGroups(true);
-    if (state.route.page === 'artist-audit') app.renderArtistAudit();
-    if (state.focused) app.inspect(state.focused, true);
-    if (state.viewer >= 0) { const i = app.indexOf(state.viewerItem?.uuid); app.showViewer(i >= 0 ? i : state.viewer, i >= 0 ? state.items[i] : state.viewerItem); }
+    if (state.route.page === 'home') renderHome(true);
+    if (state.route.page === 'identity') renderIdentity();
+    if (state.route.page === 'groups') renderGroups(true);
+    if (state.route.page === 'artist-audit') renderArtistAudit();
+    if (state.focused) inspect(state.focused, true);
+    if (state.viewer >= 0) { const i = indexOf(state.viewerItem?.uuid); showViewer(i >= 0 ? i : state.viewer, i >= 0 ? state.items[i] : state.viewerItem); }
   } catch (e) {
     // The history may have moved on (another window, or a failure after the server committed): show its latest step.
     toast(e.message); refreshMeta().catch(err => error(readError(err)));
@@ -592,7 +596,7 @@ function renderViewPop() {
       ${viewSwitch('ask', t('偶尔问一句「是 TA 吗？」'), t('详情和首页；回答会用来学习认人'))}
     </div><div class="view-foot"><span>${t('设置会自动保存')}</span><button class="link-button strong" id="viewReset">${t('恢复默认')}</button></div>`;
   $('zoom')?.addEventListener('input', e => requestZoom(() => setSize(sliderToSize(Number(e.target.value)), undefined, undefined, true)));
-  $('viewReset').onclick = () => { Object.assign(viewOpts, VIEW_DEFAULTS); prefs.set('view', viewOpts); afterViewChange(true); renderViewPop(); if (state.route.page === 'home') app.drawHome(); };
+  $('viewReset').onclick = () => { Object.assign(viewOpts, VIEW_DEFAULTS); prefs.set('view', viewOpts); afterViewChange(true); renderViewPop(); if (state.route.page === 'home') drawHome(); };
 }
 function afterViewChange(relayout) {
   applyViewClasses();
@@ -615,10 +619,10 @@ export function setNsfw(mode) {
   state.nsfw = mode; prefs.set('nsfw', mode); renderNsfw(); state.selecting = false; clearSelection();
   toast({'': t('已显示全部内容'), hide: t('已隐藏 R18'), only: t('只看 R18')}[mode]);
   if (!panelPage(state.route.page)) reload(true);
-  else if (state.route.page === 'identity') app.renderIdentity();
-  else if (state.route.page === 'home') app.renderHome();
-  else if (state.route.page === 'groups') app.renderGroups();
-  else if (state.route.page === 'similar') app.renderSimilar();
+  else if (state.route.page === 'identity') renderIdentity();
+  else if (state.route.page === 'home') renderHome();
+  else if (state.route.page === 'groups') renderGroups();
+  else if (state.route.page === 'similar') renderSimilar();
   else if (state.route.page === 'characters') { forgetActivity(); loadActivity(); }
   refreshMeta().catch(e => error(readError(e)));
 }
@@ -676,61 +680,61 @@ export function wireGrid() {
     if (!d.moved && d.start !== null) handleCardClick(d.start, e, d.check);
     else if (d.moved && d.start !== null) state.anchor = indexAt(e.clientX, e.clientY);
   });
-  $('grid').addEventListener('dblclick', e => { const card = e.target.closest('.card[data-id]'); if (card) app.openViewer(Number(card.dataset.index)); });
+  $('grid').addEventListener('dblclick', e => { const card = e.target.closest('.card[data-id]'); if (card) openViewer(Number(card.dataset.index)); });
 
   // ---------- keyboard ----------
   document.addEventListener('keydown', e => {
     if (document.querySelector('dialog[open]')) return;
     const mod = e.metaKey || e.ctrlKey, key = e.key.toLowerCase();
-    if (mod && key === 'k') { e.preventDefault(); app.jumpToCharacter(); return; }
-    if (mod && (key === '=' || key === '+')) { e.preventDefault(); if (state.viewer >= 0) app.zoomView(1.4, innerWidth / 2, innerHeight / 2); else stepColumns(-1); return; }
-    if (mod && key === '-') { e.preventDefault(); if (state.viewer >= 0) app.zoomView(1 / 1.4, innerWidth / 2, innerHeight / 2); else stepColumns(1); return; }
+    if (mod && key === 'k') { e.preventDefault(); jumpToCharacter(); return; }
+    if (mod && (key === '=' || key === '+')) { e.preventDefault(); if (state.viewer >= 0) zoomView(1.4, innerWidth / 2, innerHeight / 2); else stepColumns(-1); return; }
+    if (mod && key === '-') { e.preventDefault(); if (state.viewer >= 0) zoomView(1 / 1.4, innerWidth / 2, innerHeight / 2); else stepColumns(1); return; }
     if (e.target.closest('input,textarea,select,[contenteditable]')) { if (e.key === 'Escape') e.target.blur(); return; }
     if (mod && key === 'z') { e.preventDefault(); undo(); return; }
     if (mod && key === 'a' && !$('grid').hidden) { e.preventDefault(); selectAll(); return; }
-    if (e.key === 'Escape') { if (state.viewer >= 0) app.closeViewer(); else if (state.focused) app.closeInspector(); else { state.selecting = false; clearSelection(); } return; }
+    if (e.key === 'Escape') { if (state.viewer >= 0) closeViewer(); else if (state.focused) closeInspector(); else { state.selecting = false; clearSelection(); } return; }
     if (key === 'r' && !mod && !panelPage(state.route.page)) { e.preventDefault(); toggleFit(); return; }
     if (key === 'h' && !mod) { e.preventDefault(); setNsfw(state.nsfw === 'hide' ? '' : 'hide'); return; }
     if (e.key === '/' && $('search')) { e.preventDefault(); $('search').focus(); return; }
     if ((key === 'y' || key === 'n') && !mod && !edits.busy && state.route.page === 'audit' && selCount() && state.viewer < 0) { e.preventDefault(); answerAudit(key === 'y'); return; }
-    if ((key === 'y' || key === 'n') && !mod && !edits.busy && state.question && [state.focused, state.viewer >= 0 && state.viewerItem?.uuid].includes(state.question.ident)) { e.preventDefault(); app.answerAsk(key === 'y' ? 'yes' : 'no'); return; }
+    if ((key === 'y' || key === 'n') && !mod && !edits.busy && state.question && [state.focused, state.viewer >= 0 && state.viewerItem?.uuid].includes(state.question.ident)) { e.preventDefault(); answerAsk(key === 'y' ? 'yes' : 'no'); return; }
     if (edits.busy || $('grid').hidden) return;
-    if (e.key === ' ') { e.preventDefault(); if (state.viewer >= 0) app.closeViewer(); else app.openViewer(state.cursor >= 0 ? state.cursor : state.focused ? app.indexOf(state.focused) : 0); return; }
+    if (e.key === ' ') { e.preventDefault(); if (state.viewer >= 0) closeViewer(); else openViewer(state.cursor >= 0 ? state.cursor : state.focused ? indexOf(state.focused) : 0); return; }
     if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key)) {
       e.preventDefault();
       const from = state.cursor < 0 ? 0 : state.cursor;
       const delta = e.key === 'ArrowLeft' ? -1 : e.key === 'ArrowRight' ? 1 : verticalStep(from, e.key === 'ArrowUp' ? -1 : 1) - from || (e.key === 'ArrowUp' ? -state.cols : state.cols);
-      if (state.viewer >= 0 || state.focused) { if (Math.abs(delta) === 1) app.step(delta); else if (state.viewer < 0) app.step(delta); return; }
+      if (state.viewer >= 0 || state.focused) { if (Math.abs(delta) === 1) step(delta); else if (state.viewer < 0) step(delta); return; }
       state.cursor = Math.max(0, Math.min(state.total - 1, (state.cursor < 0 ? 0 : state.cursor + delta)));
       if (e.shiftKey && state.items[state.cursor]) { setSelected(state.items[state.cursor].uuid, true); renderSelection(); }
       if (!state.items[state.cursor]) loadPage(Math.floor(state.cursor / PAGE) * PAGE);
-      app.ensureVisible(state.cursor); return;
+      ensureVisible(state.cursor); return;
     }
-    if (e.key === 'Enter' && state.cursor >= 0 && state.viewer < 0) { e.preventDefault(); const item = state.items[state.cursor]; if (!item) return; if (cleanup() || state.selecting) { setSelected(item.uuid, !isSelected(item.uuid)); state.anchor = state.cursor; renderSelection(); } else app.inspect(item.uuid); return; }
+    if (e.key === 'Enter' && state.cursor >= 0 && state.viewer < 0) { e.preventDefault(); const item = state.items[state.cursor]; if (!item) return; if (cleanup() || state.selecting) { setSelected(item.uuid, !isSelected(item.uuid)); state.anchor = state.cursor; renderSelection(); } else inspect(item.uuid); return; }
     const n = selCount(), page = state.route.char ? 'character' : state.route.page;
     if (mod || e.altKey && !/^[1-9]$/.test(e.key)) return;
     if (['c', 'a', 't', 's', 'g'].includes(key) || /^[1-9]$/.test(e.key)) e.preventDefault(); // keep the letter out of the palette input
-    if (e.key === 'Backspace' || e.key === 'Delete') { e.preventDefault(); if (n) runBarAction(page === 'character' ? 'remove' : browsing() ? 'notlib' : ''); else app.singleAction('remove'); return; }
-    if (key === 'c') { if (n) runBarAction(page === 'character' ? 'swap' : 'assign'); else app.singleAction(page === 'character' ? 'swap' : 'also'); return; }
-    if (key === 'a' && !mod) { if (n) runBarAction(page === 'character' ? 'also' : 'assign'); else app.singleAction('also'); return; }
+    if (e.key === 'Backspace' || e.key === 'Delete') { e.preventDefault(); if (n) runBarAction(page === 'character' ? 'remove' : browsing() ? 'notlib' : ''); else singleAction('remove'); return; }
+    if (key === 'c') { if (n) runBarAction(page === 'character' ? 'swap' : 'assign'); else singleAction(page === 'character' ? 'swap' : 'also'); return; }
+    if (key === 'a' && !mod) { if (n) runBarAction(page === 'character' ? 'also' : 'assign'); else singleAction('also'); return; }
     if (key === 't' && page === 'character' && n) { runBarAction('variant'); return; }
-    if (key === 'g') { if (n) runBarAction('tag'); else app.singleAction('tag'); return; }
-    if (key === 'x' && !mod) { const act = page === 'excluded' ? 'include' : 'exclude'; if (n) runBarAction(act); else app.singleAction(act); return; }
-    if (key === 's' && (page === 'unmatched' || page === 'group')) { if (n) runBarAction('skip'); else app.singleAction('skip'); return; }
-    if (/^[1-9]$/.test(e.key) && !n && state.detail && (state.focused || state.viewer >= 0)) { app.pickAlternative(state.detail, state.detail.uuid, Number(e.key) - 1, e.altKey); return; }
+    if (key === 'g') { if (n) runBarAction('tag'); else singleAction('tag'); return; }
+    if (key === 'x' && !mod) { const act = page === 'excluded' ? 'include' : 'exclude'; if (n) runBarAction(act); else singleAction(act); return; }
+    if (key === 's' && (page === 'unmatched' || page === 'group')) { if (n) runBarAction('skip'); else singleAction('skip'); return; }
+    if (/^[1-9]$/.test(e.key) && !n && state.detail && (state.focused || state.viewer >= 0)) { pickAlternative(state.detail, state.detail.uuid, Number(e.key) - 1, e.altKey); return; }
   });
 
   $('viewButton').onclick = e => { e.stopPropagation(); toggleViewPop(); };
   $('viewPopover').addEventListener('click', e => {
     e.stopPropagation();
-    const hs = e.target.closest('[data-hsize]'); if (hs) { viewOpts.homeSize = Number(hs.dataset.hsize); prefs.set('view', viewOpts); for (const x of $('homeSizeSeg').children) x.classList.toggle('on', x === hs); app.drawHome(); return; }
+    const hs = e.target.closest('[data-hsize]'); if (hs) { viewOpts.homeSize = Number(hs.dataset.hsize); prefs.set('view', viewOpts); for (const x of $('homeSizeSeg').children) x.classList.toggle('on', x === hs); drawHome(); return; }
     const b = e.target.closest('[data-view]'); if (!b) return;
     const key = b.dataset.view; viewOpts[key] = !viewOpts[key]; prefs.set('view', viewOpts);
     b.setAttribute('aria-checked', viewOpts[key]); b.querySelector('.view-sw').classList.toggle('on', viewOpts[key]);
     afterViewChange(key === 'captions' || key === 'hints');
-    if (['chart', 'same', 'meta'].includes(key) && state.focused && !$('inspector').hidden) app.inspect(state.focused, true);
-    if (['hero', 'people', 'marks'].includes(key) && state.route.page === 'home') app.drawHome();
-    if (key === 'ask') { if (state.focused && !$('inspector').hidden) app.inspect(state.focused, true); if (state.route.page === 'home') app.renderHome(); }
+    if (['chart', 'same', 'meta'].includes(key) && state.focused && !$('inspector').hidden) inspect(state.focused, true);
+    if (['hero', 'people', 'marks'].includes(key) && state.route.page === 'home') drawHome();
+    if (key === 'ask') { if (state.focused && !$('inspector').hidden) inspect(state.focused, true); if (state.route.page === 'home') renderHome(); }
   });
   document.addEventListener('click', () => { if (!$('viewPopover').hidden) toggleViewPop(false); });
   document.addEventListener('keydown', e => { if (e.key === 'Escape' && !$('viewPopover').hidden) { toggleViewPop(false); e.stopImmediatePropagation(); } }, true);

@@ -12,7 +12,13 @@ import {state} from '../core/state.js';
 import {cast, createWork, drawCast, drawShelf, renderIndex, renderIndexBody, searchIndex, shelf} from './catalog.js';
 import {$, error, searchIcon} from './dom.js';
 import {renderSettings, settingsSection} from './settings.js';
-import {app} from './app_parts.js';
+import {artistName} from './artists.js';
+import {closeInspector} from './detail.js';
+import {clearSelection, filters, reload, selectAll, short, sweep, toggleFit, toggleSelecting} from './grid.js';
+import {guideTick} from './guide.js';
+import {dayLabel, renderHome} from './home.js';
+import {editProfile, markOc, mergeCharacter, openLocalLinks, openRelate, splitOc, toggleMascot, toggleOc} from './palette.js';
+import {nearText, renderArtistAudit, renderGroups, renderIdentity, renderSimilar} from './review.js';
 
 // The search boxes' and the tag menu's debounce.
 let searchTimer = 0, pickerTimer = 0;
@@ -37,8 +43,8 @@ export async function applyRoute() {
   const route = parseHash(); route.sort = route.sort || defaultSort(route);
   if (route.legacy) { delete route.legacy; history.replaceState(null, '', hashFor(route)); }
   const samePage = state.route.page === route.page && state.route.id === route.id && state.route.char === route.char;   // a sub-view switch stays the same page
-  state.route = route; state.selecting = false; app.clearSelection(); state.cursor = -1; state.totalReady = false;
-  if (!samePage) app.closeInspector();
+  state.route = route; state.selecting = false; clearSelection(); state.cursor = -1; state.totalReady = false;
+  if (!samePage) closeInspector();
   $('sidebar').classList.remove('mobile-open');
   for (const a of document.querySelectorAll('.nav')) a.classList.toggle('active', a.dataset.page === route.page || (route.page === 'skipped' && a.dataset.page === 'unmatched') || (route.page === 'pending' && a.dataset.page === 'excluded') || (['groups', 'group'].includes(route.page) && a.dataset.page === 'unmatched') || (['similar', 'sgroup'].includes(route.page) && a.dataset.page === 'duplicates'));
   $('settingsLink').classList.toggle('active', route.page === 'settings');
@@ -48,7 +54,7 @@ export async function applyRoute() {
     let result; try { result = await api('/api/clusters?nsfw=' + state.nsfw); } catch (e) { if (state.route === route) error(readError(e)); return; }
     if (state.route !== route) return;  // navigated on while the groups loaded: this answer belongs to no page
     const g = result.clusters.find(x => String(x.cid) === route.id);
-    state.groupNear = g?.near ? app.nearText(g) : null; state.groupNearId = g?.near || null; state.groupTraits = g?.traits || [];
+    state.groupNear = g?.near ? nearText(g) : null; state.groupNearId = g?.near || null; state.groupTraits = g?.traits || [];
   }
   if (route.char) {
     let character; try { character = await fetchChar(route.char); } catch (e) { if (state.route === route) error(readError(e)); return; }
@@ -56,9 +62,9 @@ export async function applyRoute() {
     state.char = character || {id: route.char, name: t('角色'), work: '', count: 0, unchecked: 0, variants: []};
   }
   $('homePage').hidden = route.page !== 'home';
-  if (route.page === 'characters') app.guideTick('look');
+  if (route.page === 'characters') guideTick('look');
   renderChrome();
-  if (route.page === 'home') app.renderHome(); else if (route.page === 'characters') renderIndex(); else if (route.page === 'settings') renderSettings(true, !samePage); else if (route.page === 'groups') app.renderGroups(); else if (route.page === 'similar') app.renderSimilar(); else if (route.page === 'identity') app.renderIdentity(); else if (route.page === 'artist-audit') app.renderArtistAudit(); else await app.reload(true);
+  if (route.page === 'home') renderHome(); else if (route.page === 'characters') renderIndex(); else if (route.page === 'settings') renderSettings(true, !samePage); else if (route.page === 'groups') renderGroups(); else if (route.page === 'similar') renderSimilar(); else if (route.page === 'identity') renderIdentity(); else if (route.page === 'artist-audit') renderArtistAudit(); else await reload(true);
 }
 // ---------- chrome: heading, toolbar ----------
 // Sub-views of one sidebar entry show as tabs under its heading instead of links tucked in a corner.
@@ -107,23 +113,23 @@ export function renderChrome() {
   const variants = skins.length ? `<div class="chips-row">${[{id: '', name: t('全部'), count: state.char.count}, ...skins].map(v => `<button class="chip-filter${(r.variant || '') === v.id ? ' on' : ''}" data-variant="${esc(v.id)}">${esc(v.name)} <span>${number(v.count)}</span></button>`).join('')}</div>` : '';
   const maybeChip = r.char && !tagPage && (state.maybeCount || r.maybe || state.doubtCount || r.doubt) ? `<div class="chips-row">${state.maybeCount || r.maybe ? `<button class="chip-filter${r.maybe ? ' on' : ''}" id="maybeChip" title="${t('机器觉得像 TA，但算给了别人或没算：确认「是 TA」或「不是 TA」')}">${t('可能也是 TA')} <span>${number(state.maybeCount)}</span></button>` : ''}${state.doubtCount || r.doubt ? `<button class="chip-filter${r.doubt ? ' on' : ''}" id="doubtChip" title="${t('单人图里，另一个角色的证据几乎一样强：多半两个都不对，看一眼再决定')}">${t('可能认错')} <span>${number(state.doubtCount)}</span></button>` : ''}</div>` : '';
   const filtersHTML = r.page === 'library' ? `<div class="search-wrap">${searchIcon()}<input type="search" id="search" placeholder="${t('搜索角色、别名或文件名')}" aria-label="${t('搜索图库')}" value="${esc(r.q)}"><kbd>/</kbd></div>` +
-    (r.char ? `<button class="quiet on" id="charPill" title="${t('清除角色筛选')}">${t('角色 · {name}', {name: esc(app.short(state.char?.name || ''))})} ×</button>` : '') +
+    (r.char ? `<button class="quiet on" id="charPill" title="${t('清除角色筛选')}">${t('角色 · {name}', {name: esc(short(state.char?.name || ''))})} ×</button>` : '') +
     (r.utag ? `<button class="quiet on" id="utagPill" title="${t('清除标签筛选')}"># ${esc(r.utag)} ×</button>` : '') +
-    (r.day ? `<button class="quiet on" id="dayPill" title="${t('清除日期筛选')}">${t('{day} 加入', {day: esc(app.dayLabel(r.day))})} ×</button>` : '') +
+    (r.day ? `<button class="quiet on" id="dayPill" title="${t('清除日期筛选')}">${t('{day} 加入', {day: esc(dayLabel(r.day))})} ×</button>` : '') +
     `<div class="tag-control"><button id="tagButton" class="quiet${r.tag ? ' on' : ''}">${r.tag ? t('标签 · {tag}', {tag: esc(r.tag.replaceAll('_', ' '))}) + ' ×' : t('标签')}</button><div id="tagPopover" class="tag-popover" hidden><input id="tagSearch" type="search" placeholder="${t('我的标签，或 white_hair 这类画面标签')}" aria-label="${t('搜索标签')}"><div id="tagOptions"></div></div></div>` + maybeChip + variants : tabs;
   bar.innerHTML = filtersHTML +
     `<div class="spacer"></div><select id="sort" aria-label="${t('排序')}">${sorts.map(([v, label]) => `<option value="${v}"${r.sort === v ? ' selected' : ''}>${label}</option>`).join('')}</select>` +
     `<button class="quiet" id="selectButton" title="${cleanup() ? t('选中全部符合条件的图片') : t('进入选择模式')}">${cleanup() ? `${t('全选')} <kbd>${shortcut('A')}</kbd>` : t('选择')}</button>` +
     `<div class="icon-seg" id="fitToggle" role="group" aria-label="${t('显示方式')}"><button data-fit="0" class="${state.fit ? '' : 'on'}" title="${t('方格：裁成正方形（R）')}" aria-label="${t('方格')}">${FIT_ICONS.square}</button><button data-fit="1" class="${state.fit ? 'on' : ''}" title="${t('原始比例：完整显示整张图（R）')}" aria-label="${t('原始比例')}">${FIT_ICONS.fit}</button></div>`;
-  $('sort').onchange = e => { if (!r.char && LEAD_PAGES.includes(r.page)) prefs.set('sortUnmatched', e.target.value); replaceRoute({sort: e.target.value}); app.reload(true); };
-  $('selectButton').onclick = () => cleanup() ? app.selectAll() : app.toggleSelecting();
-  for (const b of $('fitToggle').querySelectorAll('[data-fit]')) b.onclick = () => { if (Boolean(Number(b.dataset.fit)) !== state.fit) app.toggleFit(); };
+  $('sort').onchange = e => { if (!r.char && LEAD_PAGES.includes(r.page)) prefs.set('sortUnmatched', e.target.value); replaceRoute({sort: e.target.value}); reload(true); };
+  $('selectButton').onclick = () => cleanup() ? selectAll() : toggleSelecting();
+  for (const b of $('fitToggle').querySelectorAll('[data-fit]')) b.onclick = () => { if (Boolean(Number(b.dataset.fit)) !== state.fit) toggleFit(); };
   for (const b of bar.querySelectorAll('[data-variant]')) b.onclick = () => go({...r, variant: b.dataset.variant});
   $('maybeChip')?.addEventListener('click', () => go({...r, maybe: r.maybe ? '' : '1', variant: '', check: '', doubt: ''}));
   $('doubtChip')?.addEventListener('click', () => go({...r, doubt: r.doubt ? '' : '1', variant: '', check: '', maybe: ''}));
   if (r.page === 'library') {
-    $('search').oninput = e => { clearTimeout(searchTimer); searchTimer = setTimeout(() => { replaceRoute({q: e.target.value.trim()}); app.reload(true); }, 250); };
-    $('tagButton').onclick = () => { if (r.tag) { replaceRoute({tag: ''}); renderChrome(); app.reload(true); return; } $('tagPopover').hidden = !$('tagPopover').hidden; if (!$('tagPopover').hidden) { $('tagSearch').focus(); loadTagOptions(); } };
+    $('search').oninput = e => { clearTimeout(searchTimer); searchTimer = setTimeout(() => { replaceRoute({q: e.target.value.trim()}); reload(true); }, 250); };
+    $('tagButton').onclick = () => { if (r.tag) { replaceRoute({tag: ''}); renderChrome(); reload(true); return; } $('tagPopover').hidden = !$('tagPopover').hidden; if (!$('tagPopover').hidden) { $('tagSearch').focus(); loadTagOptions(); } };
     $('charPill')?.addEventListener('click', () => go({...r, char: '', variant: '', maybe: '', check: '', sort: ''}));
     $('utagPill')?.addEventListener('click', () => go({...r, utag: ''}));
     $('dayPill')?.addEventListener('click', () => go({...r, day: ''}));
@@ -131,7 +137,7 @@ export function renderChrome() {
     $('tagOptions').onclick = e => {
       const b = e.target.closest('[data-value],[data-utag]'); if (!b) return;
       if (b.dataset.utag) { go({...r, utag: b.dataset.utag}); return; }
-      replaceRoute({tag: b.dataset.value}); renderChrome(); app.reload(true);
+      replaceRoute({tag: b.dataset.value}); renderChrome(); reload(true);
     };
   }
 }
@@ -156,19 +162,19 @@ export function renderHeading() {
     const unchecked = !tagOnly && (c.unchecked || r.check) ? ` · <a class="unchecked-link${r.check ? ' on' : ''}" href="${hashFor({...r, check: r.check ? '' : '1', maybe: ''})}" title="${r.check ? t('显示全部') : t('只看机器识别、还没检查过的图')}">${t('未检查 {n}', {n: number(c.unchecked)})}${r.check ? ' ×' : ''}</a>` : '';
     h.innerHTML = `<div class="heading-main"><h1 class="tag-title" title="${esc(nameTip(c))}">${esc(c.name)}</h1><p>${c.mascot ? `<span class="oc-badge" title="${c.mascot_origin === 'default' ? t('默认设置：老师、博士、训练员这类没有固定形象的玩家化身和吉祥物，默认只当标签。') : ''}${t('不算角色：不出现在角色列表里，也不算多人图；图上仍挂着这个标签。在「⋯」里可以改回角色')}">${t('只当标签')}</span> ` : ''}${c.kind === 'oc' ? `<span class="oc-badge">${t('原创')}</span> ` : c.work_id ? `<span title="${esc(c.work)}">${esc(c.work_name || workName(c.work))}</span> · ` : ''}${t('{n} 张', {n: number(c.count)})}${unchecked}${checked}${!c.tag && c.kind !== 'oc' && !c.label_only ? ` · <button class="link-button" id="profileNudge" title="${t('关联后自动补中文名、别名和所属作品')}">${t('关联 Danbooru…')}</button>` : ''}</p></div>
       <div class="heading-actions">${c.label_only ? `<button class="quiet" id="splitOcButton" title="${t('把长得像的图分成一组，一组一键设为独立的原创角色')}">${t('按相似细分')}</button>` : ''}${tagOnly ? '' : `<button class="quiet" id="sweepButton" ${c.unchecked ? '' : 'disabled'} title="${t('把剩下的机器识别都记为已检查；以后新识别的图会重新计入未检查')}">${t('标为已检查')}</button>`}<div class="tag-control more-control"><button class="quiet" id="moreButton" title="${t('更多操作')}" aria-label="${t('更多操作')}">⋯</button><div id="morePopover" class="tag-popover more-menu" hidden>${c.label_only || tagOnly ? '' : `<button class="picker-item" id="ocButton" title="${t('画师自己的原创角色，不属于任何作品')}">${c.kind === 'oc' ? t('取消原创角色') : t('标为原创角色')}</button>`}${c.label_only ? '' : `<button class="picker-item" id="mascotButton" title="${c.mascot ? t('恢复成角色：出现在角色列表里，同框就算多人图') : t('像佩洛洛这样的吉祥物、玩家化身：不算角色，不算多人图；图上仍挂着这个标签，可以按它筛选')}">${c.mascot ? t('算作角色') : t('不算角色，只当标签')}</button>`}<button class="picker-item" id="profileButton" title="${t('名称、别名、所属作品、Danbooru 关联')}">${t('编辑资料…')}</button><button class="picker-item" id="mergeButton" title="${t('和另一个角色是同一个人：把图和人工结论都并过去（可撤销）')}">${t('合并到另一个角色…')}</button></div></div></div>`;
-    $('sweepButton')?.addEventListener('click', app.sweep);
+    $('sweepButton')?.addEventListener('click', sweep);
     $('moreButton').onclick = () => { $('morePopover').hidden = !$('morePopover').hidden; };
-    $('mergeButton').onclick = () => { $('morePopover').hidden = true; app.mergeCharacter(c); };
-    $('profileButton').onclick = () => { $('morePopover').hidden = true; app.editProfile(c); };
-    $('profileNudge')?.addEventListener('click', () => app.editProfile(c));
-    $('ocButton')?.addEventListener('click', () => { $('morePopover').hidden = true; app.toggleOc(c); });
-    $('mascotButton')?.addEventListener('click', () => { $('morePopover').hidden = true; app.toggleMascot(c); });
-    $('splitOcButton')?.addEventListener('click', () => app.splitOc(c));
+    $('mergeButton').onclick = () => { $('morePopover').hidden = true; mergeCharacter(c); };
+    $('profileButton').onclick = () => { $('morePopover').hidden = true; editProfile(c); };
+    $('profileNudge')?.addEventListener('click', () => editProfile(c));
+    $('ocButton')?.addEventListener('click', () => { $('morePopover').hidden = true; toggleOc(c); });
+    $('mascotButton')?.addEventListener('click', () => { $('morePopover').hidden = true; toggleMascot(c); });
+    $('splitOcButton')?.addEventListener('click', () => splitOc(c));
     return;
   }
   const n = state.totalReady ? number(state.total) : '…';
   const clear = ` <a class="link" href="#/library">${t('清除筛选')}</a>`;
-  const meta = {home: [t('首页'), t('按加入日期分组') + (state.recentCount ? ' · ' + t('最近一次同步新加入 {n} 张', {n: number(state.recentCount)}) : '')], library: [r.artist ? t('画师 · {name}', {name: esc(app.artistName(r.artist))}) : r.day ? t('{day} 加入', {day: esc(app.dayLabel(r.day))}) : r.work ? esc((state.workTree || []).find(w => w.id === r.work)?.name || t('作品筛选')) : r.utag ? '# ' + esc(r.utag) : t('图库'), t('{n} 张', {n}) + (r.work ? ' · ' + t('包含所有子作品') + clear : r.artist ? ' · ' + t('按画作比对找到') + clear : '')], characters: [t('资料库'), r.section === 'works' ? t('{n} 部作品', {n: number(state.index?.works?.length || 0)}) + (state.index?.watch?.works.length ? ' · ' + t('关注 {n} 部', {n: number(state.index.watch.works.length)}) : '') : t('{n} 位角色 · {works} 部作品', {n: number(state.chars.length), works: number(new Set(state.chars.map(workKey)).size)})],
+  const meta = {home: [t('首页'), t('按加入日期分组') + (state.recentCount ? ' · ' + t('最近一次同步新加入 {n} 张', {n: number(state.recentCount)}) : '')], library: [r.artist ? t('画师 · {name}', {name: esc(artistName(r.artist))}) : r.day ? t('{day} 加入', {day: esc(dayLabel(r.day))}) : r.work ? esc((state.workTree || []).find(w => w.id === r.work)?.name || t('作品筛选')) : r.utag ? '# ' + esc(r.utag) : t('图库'), t('{n} 张', {n}) + (r.work ? ' · ' + t('包含所有子作品') + clear : r.artist ? ' · ' + t('按画作比对找到') + clear : '')], characters: [t('资料库'), r.section === 'works' ? t('{n} 部作品', {n: number(state.index?.works?.length || 0)}) + (state.index?.watch?.works.length ? ' · ' + t('关注 {n} 部', {n: number(state.index.watch.works.length)}) : '') : t('{n} 位角色 · {works} 部作品', {n: number(state.chars.length), works: number(new Set(state.chars.map(workKey)).size)})],
     recent: [t('新加入'), t('最近一次同步加入的 {n} 张，已自动识别', {n: number(state.recentCount)})],
     audit: [t('随机抽查'), t('还剩 {left} / {n} 张 · 鼠标移到角色 tag 上点 ✓ / ✗，或选中多张按 Y / N；打开大图也会问「是 TA 吗？」', {left: number(state.pools.audit || 0), n}) + (state.nsfw ? ` · <b>${t('R18 筛选开着：抽查要看全部才准，按 H 切换')}</b>` : '')],
     unmatched: [t('未识别'), t('{n} 张 · 选中后设为角色，或跳过', {n})], skipped: [t('未识别'), t('已跳过 {n} 张 · 可以恢复到未识别', {n})],
@@ -185,9 +191,9 @@ export function renderHeading() {
   const links = localLinks ? localLinks : r.page === 'group' ? `<span class="heading-links">${state.total ? `<button class="quiet" id="groupOc" title="${t('整组都是同一个原创角色：新建一个原创角色，把这组图都设为它')}">${t('整组标为原创角色')}</button>` : ''}${state.groupNear ? `<a class="quiet link" href="#/g/${state.groupNearId}">${esc(state.groupNear)} →</a>` : ''}</span>`
     : r.page === 'sgroup' && state.total >= 2 && state.total <= 12 ? `<span class="heading-links"><button class="quiet" id="sgroupRelate">${t('判断关系')}</button></span>` : '';
   h.innerHTML = `<div class="heading-main"><h1>${meta[0]}</h1><p>${meta[1]}</p></div>${links}`;
-  $('localLinksButton')?.addEventListener('click', app.openLocalLinks);
-  $('sgroupRelate')?.addEventListener('click', async () => app.openRelate(await api('/api/ids?' + new URLSearchParams({...app.filters(), limit: 12}))));
-  $('groupOc')?.addEventListener('click', () => app.markOc({filter: app.filters(), exclude: [], confirm: state.total > 500}, false, true));
+  $('localLinksButton')?.addEventListener('click', openLocalLinks);
+  $('sgroupRelate')?.addEventListener('click', async () => openRelate(await api('/api/ids?' + new URLSearchParams({...filters(), limit: 12}))));
+  $('groupOc')?.addEventListener('click', () => markOc({filter: filters(), exclude: [], confirm: state.total > 500}, false, true));
 }
 
 // The handlers this part of the page registers. Called once, when the page starts.

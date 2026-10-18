@@ -3,16 +3,11 @@
 // it back, and the end is announced once.
 const {test, before, afterEach} = require('node:test');
 const web = require('./web.cjs');   // the import's poller and words are core/jobs.js (#199)
-let settings;
-before(async () => { await web.ready(); settings = await web.load('ui/settings.js'); });
+let settings, effects;
+before(async () => { await web.ready(); settings = await web.load('ui/settings.js'); effects = await web.load('ui/effects.js'); });
 let cleanup = () => {};
 afterEach(() => { cleanup(); cleanup = () => {}; });
 const assert = require('node:assert/strict');
-const {readFileSync} = require('node:fs');
-const vm = require('node:vm');
-const zh = require('./i18n_zh.cjs');   // t() of a Chinese page (#173)
-const source = readFileSync(require('node:path').join(__dirname, '../web/static/app.js'), 'utf8');
-const section = (a, b) => source.slice(source.indexOf(a), source.indexOf(b, source.indexOf(a)));
 const esc = s => String(s).replace(/[&<>"]/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'})[c]);
 
 // The library card is ui/settings.js; the import's words and state are core/jobs.js.
@@ -60,32 +55,29 @@ test('a stopping or finished import has no cancel button and says how it ended',
   assert.doesNotMatch(card(undefined).html, /import-line/);
 });
 
-// core/jobs.js polls; the library card (ui/settings.js) starts an import; app.js's onJob listener announces the end and
-// lists a new library.
+// core/jobs.js polls; the library card (ui/settings.js) starts an import; ui/effects.js afterJob(), as app.js wires it,
+// announces the end and lists a new library. The page is a fake one; the import's own timers are the ones counted.
 function poller(token = 'session') {
   const answers = [], timers = [], toasts = [], posted = [], offs = [];
-  let rendered = 0, libraries = 0;
-  const {state, session, onJob, pollImports, importStarted, cancelImport, importLine, SYNC_ACTIVE} = web.core();
+  let libraries = 0;
+  const core = web.core(), {state, session, onJob} = core;
   session.token = token;
   Object.assign(state, {route: {page: 'settings'}, importTask: undefined});
+  const page = web.fakePage();
+  Object.defineProperty(page.el('toastText'), 'textContent', {set: m => toasts.push(m), get: () => toasts.at(-1) || ''});
   globalThis.fetch = (path, options) => {
     if (path === '/api/imports/cancel') { posted.push(options); return Promise.resolve({status: 200, ok: true, json: async () => ({status: 'stopping'})}); }
     if (path === '/api/libraries/import') return Promise.resolve({status: 200, ok: true, json: async () => ({started: true, task: running()})});
+    if (path === '/api/libraries') { libraries++; return Promise.resolve({status: 200, ok: true, json: async () => ({})}); }
     return new Promise(resolve => answers.push(body => resolve({status: 200, ok: true, json: async () => body})));
   };
   const setTimeout = globalThis.setTimeout;
-  globalThis.setTimeout = (fn, ms) => { timers.push(ms); return timers.length; };
-  const c = {
-    state, session, SYNC_ACTIVE, importLine, importStarted, pollImports, cancelImport, onJob: fn => offs.push(onJob(fn)),
-    startImport: settings.startImport,
-    renderLibrariesCard: () => { rendered++; }, loadLibraries: () => { libraries++; }, toast: m => toasts.push(m),
-  };
-  vm.createContext(Object.assign(c, zh.page));
-  vm.runInContext(section('// What a background job', '// A picture the app cannot decode'), c);
+  globalThis.setTimeout = (fn, ms) => { if (ms === 700 || ms === 5000) timers.push(ms); return timers.length; };
+  offs.push(onJob(effects.afterJob));
+  const c = {state, session, pollImports: core.pollImports, cancelImport: core.cancelImport, startImport: settings.startImport};
   cleanup = () => { globalThis.setTimeout = setTimeout; for (const off of offs) off(); };
-  return {c, answers, timers, toasts, posted, rendered: () => rendered, libraries: () => libraries};
+  return {c, answers, timers, toasts, posted, libraries: () => libraries};
 }
-
 test('starting polls until the end; an older answer arriving last does not wind the state back', async () => {
   const p = poller();
   await p.c.startImport('/tmp/合成.zip');

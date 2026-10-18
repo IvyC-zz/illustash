@@ -6,8 +6,10 @@ import {state} from '../core/state.js';
 import {api, post, shared, readError} from '../core/session.js';
 import {SYNC_ACTIVE, INDEX_ACTIVE, NAMES_ACTIVE, SIMILAR_ACTIVE, PROV_ACTIVE, RUN_STATUS, onJob, syncLine, syncBar, syncDoneText, indexLine, indexEndText,
   namesLine, taskSimilar, pollSync, pollIndex, pollNames, loadProvenance, startSync, checkIndex, refreshNames, provenanceAction} from '../core/jobs.js';
+import {loadLibraries, updatesTick} from '../core/settings.js';
 import {$, toast, error, fold, wireFolds} from './dom.js';
-const hooks = {confirm: async () => false, indexAdd() {}, tick: () => [], ticked() {}};
+import {confirmAction} from './dialog.js';
+import {openIndexAdd} from './catalog.js';
 // 开始 first shows what leaves the machine; the authorization covers this one run only.
 let provenanceArmed = false;
 // Open the panel; with armProvenance, at the authorization for a 找回画师 run.
@@ -102,10 +104,11 @@ export async function taskTick() {
   const jobs = [pollSync(), pollIndex(), pollNames(), loadProvenance()];
   // The similar job's state comes with /api/settings, which also measures the caches: read it only when looked at.
   if (taskPanel.open && Date.now() - taskPanel.settingsAt > (SIMILAR_ACTIVE.includes(state.settings?.tasks?.similar?.status) ? 2500 : 15000)) { taskPanel.settingsAt = Date.now(); jobs.push(shared('/api/settings').then(s => { state.settings = s; }).catch(e => error(readError(e)))); }
-  jobs.push(...hooks.tick(taskPanel.open));
+  // The library list (the sync task's name and the export's progress) is read once the panel is open.
+  if (taskPanel.open && !state.libraries) jobs.push(loadLibraries());
   await Promise.allSettled(jobs);
   renderTasks();
-  hooks.ticked();
+  updatesTick();
   taskPanel.timer = setTimeout(taskTick, taskPanel.open ? 3000 : 30000);
 }
 export function toggleTasks(open = !taskPanel.open) {
@@ -114,11 +117,8 @@ export function toggleTasks(open = !taskPanel.open) {
   if (open) { delete $('taskPanel').dataset.html; renderTasks(); taskTick(); }
   else provenanceArmed = false;
 }
-// The page's handlers, and what the panel needs from parts of the page not yet in modules (#199): hooks.confirm(message,
-// title) asks in a dialog, hooks.indexAdd() opens the list of characters to add, hooks.tick(open) returns the other
-// reads a tick waits for, and hooks.ticked() runs once a tick has drawn the panel. Called once, when the page starts.
-export function wireTasks(given) {
-  Object.assign(hooks, given);
+// The panel's handlers. Called once, when the page starts.
+export function wireTasks() {
   onJob(async (job, change) => {
     if (job === 'sync' && change.ended && state.sync.status === 'done' && state.sync.imported) toast(syncDoneText(state.sync));
     if (job === 'index' && change.ended && indexEndText(state.index.state)) toast(indexEndText(state.index.state));
@@ -139,11 +139,11 @@ export function wireTasks(given) {
     const b = e.target.closest('[data-task]'); if (!b) { if (e.target.closest('a[href]')) toggleTasks(false); return; }
     const act = b.dataset.task;
     if (act === 'close') { toggleTasks(false); return; }
-    if (act === 'index-add') { hooks.indexAdd(); return; }
+    if (act === 'index-add') { openIndexAdd(); return; }
     b.disabled = true;
     try {
       if (act === 'sync') await startSync();
-      else if (act === 'index') { if (!await checkIndex(hooks.confirm)) return; }
+      else if (act === 'index') { if (!await checkIndex(confirmAction)) return; }
       else if (act === 'names') { await refreshNames(); toast(t('已开始重新获取角色名称')); }
       else if (act === 'similar') { await post('/api/similar', {}); state.settings = await api('/api/settings'); }
     } catch (err) { toast(err.message); } finally { b.disabled = false; }

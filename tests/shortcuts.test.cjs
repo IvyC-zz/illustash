@@ -3,7 +3,7 @@ const {test, before} = require('node:test');
 const assert = require('node:assert/strict');
 const web = require('./web.cjs');
 let core, dom;
-before(async () => { await web.ready(); core = web.core(); dom = await web.load('ui/dom.js'); dom.wireDom(); });
+before(async () => { await web.ready(); core = web.core(); dom = await web.load('ui/dom.js'); web.fakePage(); dom.wireDom(); });
 
 test('Apple systems are told apart by their platform name', () => {
   for (const platform of ['MacIntel', 'iPhone', 'iPad']) assert.equal(core.macLike(platform), true, platform);

@@ -4,12 +4,21 @@ const {test} = require('node:test');
 const assert = require('node:assert/strict');
 const {readFileSync} = require('node:fs');
 const vm = require('node:vm');
-const zh = require('./i18n_zh.cjs');   // t() of a Chinese page (#173)
+const read = name => readFileSync(require('node:path').join(__dirname, '../web/static', name), 'utf8');
+// t() and tb() as the start page has them: the library page's i18n.js in the shell's language (#173).
+function i18n(language, tables = {}) {
+  const context = {self: {ILLUSTASH_LANGUAGE: language, ILLUSTASH_LANGUAGES: Object.fromEntries(Object.keys(tables).map(c => [c, c])), ILLUSTASH_TABLES: tables},
+    navigator: {languages: ['zh-CN']}, document: {documentElement: {}, querySelectorAll: () => []}};
+  vm.createContext(context);
+  vm.runInContext(read('i18n.js'), context);
+  return {t: vm.runInContext('t', context), tb: vm.runInContext('tb', context)};
+}
+const zh = i18n('zh-CN');
 const html = readFileSync(require('node:path').join(__dirname, '../desktop/dist/index.html'), 'utf8');
 const script = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].pop()[1];
 const section = script.slice(script.indexOf('// 欢迎页：'), script.indexOf('// 外壳在服务启动失败时调用'));
 
-function page(answers, i18n = zh.page) {
+function page(answers, words = zh) {
   const nodes = {}, calls = [];
   const c = {
     calls, nodes, setInterval: () => 0, clearInterval() {},
@@ -17,7 +26,7 @@ function page(answers, i18n = zh.page) {
     busy() {}, window: {},
     invoke: async (cmd, args) => { calls.push([cmd, args]); const a = answers[cmd]; return typeof a === 'function' ? a(args) : a; },
   };
-  vm.createContext(Object.assign(c, i18n));
+  vm.createContext(Object.assign(c, words));
   vm.runInContext(section, c);
   c.window.showWelcome({origins: [{id: 'x', label: 'X'}, {id: 'pixiv', label: 'Pixiv'}], recent: [], home: '/Users/me/Pictures'});
   return c;
@@ -124,12 +133,7 @@ test('a double click opens one picker and each import or creation carries its ow
 test('the start page speaks the language the shell gives it', async () => {
   const scripts = [...html.matchAll(/<script src="([^"]+)">/g)].map(m => m[1]);
   assert.deepEqual(scripts, ['i18n.js', 'splash.js']);
-  const read = name => readFileSync(require('node:path').join(__dirname, '../web/static', name), 'utf8');
-  const context = {self: {ILLUSTASH_LANGUAGE: 'en', ILLUSTASH_LANGUAGES: {en: 'English'}, ILLUSTASH_TABLES: {en: JSON.parse(read('locales/en.json'))}},
-    navigator: {languages: ['zh-CN']}, document: {documentElement: {}, querySelectorAll: () => []}};
-  vm.createContext(context);
-  vm.runInContext(read('i18n.js'), context);
-  const en = {t: vm.runInContext('t', context), tb: vm.runInContext('tb', context)};
+  const en = i18n('en', {en: JSON.parse(read('locales/en.json'))});
   const c = page({
     welcome_pick: () => ({paths: ['/a', '/b']}),
     welcome_inspect: ({paths}) => paths.map(p => ok(p, p === '/a' ? 1 : 1234)),

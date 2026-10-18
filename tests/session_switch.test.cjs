@@ -2,18 +2,13 @@
 // elsewhere, nothing this page holds may be sent with the new session's token.
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const vm = require('node:vm');
 const web = require('./web.cjs');   // core/session.js and ui/dom.js (#199)
-const zh = require('./i18n_zh.cjs');   // t() of a Chinese page (#173)
-const source = fs.readFileSync('web/static/app.js', 'utf8');
-const section = (a, b) => source.slice(source.indexOf(a), source.indexOf(b, source.indexOf(a)));
 const tick = () => new Promise(resolve => setImmediate(resolve));
 let dom;
-test.before(async () => { await web.ready(); dom = await web.load('ui/dom.js'); dom.wireDom(); });
+test.before(async () => { await web.ready(); dom = await web.load('ui/dom.js'); web.fakePage(); dom.wireDom(); });
 
 // A server whose session can be replaced by "another window"; every request is recorded. Requests and the session
-// are core/session.js, the banner is ui/dom.js; the metadata refresh is still a slice of app.js.
+// are core/session.js, the banner is ui/dom.js, the metadata refresh core/meta.js.
 function harness() {
   const server = {token: 'session-a', chars: [{id: 'a-char'}], requests: [], hold: null};
   const nodes = {};

@@ -4,9 +4,6 @@ const web = require('./web.cjs');   // core/ and ui/settings.js (#199)
 let settings;
 before(async () => { await web.ready(); settings = await web.load('ui/settings.js'); });
 const assert = require('node:assert/strict');
-const {readFileSync} = require('node:fs');
-const vm = require('node:vm');
-const zh = require('./i18n_zh.cjs');   // t() of a Chinese page (#173)
 // Lookups are core/settings.js (remoteNames, remoteNote); asking for consent is ui/settings.js setNamesNetwork(), with the
 // page's own dialog (ui/dialog.js) and toast (ui/dom.js), here on a fake page.
 function harness({fail, confirm = true} = {}) {

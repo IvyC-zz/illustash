@@ -60,6 +60,13 @@ export function reconcileSections(container, sections, empty = t('没有匹配�
 export const searchIcon = () => '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="10" cy="10" r="6.5"/><path d="m15 15 5 5"/></svg>';
 // The banner when the page stops, and the toolbar's undo button. Called once, when the page starts.
 export function wireDom() {
+  // A picture the app cannot decode (a damaged file): a plain placeholder instead of the browser's broken-image glyph.
+  // The viewer has its own message (#viewerMissing).
+  document.addEventListener('error', e => {
+    const img = e.target;
+    if (!(img instanceof HTMLImageElement) || img.id || !img.getAttribute('src')?.startsWith('/image?')) return;
+    const ph = document.createElement('span'); ph.className = 'img-broken'; ph.textContent = t('无法打开'); img.replaceWith(ph);
+  }, true);
   // A stopped page says so in the error banner, with a button to reload.
   onStale(() => {
     const banner = $('errorBanner'), reload = document.createElement('button');

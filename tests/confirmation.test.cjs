@@ -1,14 +1,13 @@
 // The page's own confirmation dialog (ui/dialog.js) guards source removal (ui/settings.js) and the first artist
-// lookup (still in app.js): nothing is sent until it is confirmed, in the same session and on the same page (#199).
-const {test, before} = require('node:test');
+// lookup (ui/artists.js): nothing is sent until it is confirmed, in the same session and on the same page (#199).
+const {test, before, afterEach} = require('node:test');
 const assert = require('node:assert/strict');
-const vm = require('node:vm');
 const web = require('./web.cjs');
-const zh = require('./i18n_zh.cjs');   // t() of a Chinese page (#173)
-const source = require('node:fs').readFileSync(require('node:path').join(__dirname, '../web/static/app.js'), 'utf8');
 const tick = () => new Promise(resolve => setImmediate(resolve));
-let settings, dialog;
-before(async () => { await web.ready(); settings = await web.load('ui/settings.js'); dialog = await web.load('ui/dialog.js'); });
+let settings, artists;
+before(async () => { await web.ready(); settings = await web.load('ui/settings.js'); artists = await web.load('ui/artists.js'); });
+let restore = () => {};
+afterEach(() => { restore(); restore = () => {}; });
 
 function harness() {
   const dialogs = [], calls = [], consent = new Map(), core = web.core();
@@ -25,15 +24,16 @@ function harness() {
   globalThis.fetch = async (path, options) => {
     const body = options?.body ? JSON.parse(options.body) : {};
     if (path === '/api/libraries/sources/remove') calls.push({action: 'sources/remove', body});
+    if (path === '/api/provenance') calls.push({path, options});
     const answer = path === '/api/libraries/sources/remove' ? (body.confirm ? {removed: 2} : {count: 2}) : {};
     return {status: 200, ok: true, json: async () => answer};
   };
-  // The artist lookup is still a slice of app.js.
-  const c = {session: core.session, state: core.state, confirmAction: dialog.confirmAction, number: String, toast() {}, setTimeout() {}, clearTimeout() {},
-    localStorage: {getItem: k => consent.get(k), setItem: (k,v) => consent.set(k,v)},
-    api: async (path, options) => {calls.push({path, options});}};
-  vm.createContext(Object.assign(c, zh.page));
-  vm.runInContext(source.slice(source.indexOf('const LOOKUP_NOTE ='),source.indexOf('const findArtists =')),c);
+  // The artist lookup remembers consent in localStorage; its progress polling is not run here.
+  const {localStorage, setTimeout} = globalThis;
+  globalThis.localStorage = {getItem: k => consent.get(k), setItem: (k, v) => consent.set(k, v)};
+  globalThis.setTimeout = () => 0;
+  restore = () => { globalThis.localStorage = localStorage; globalThis.setTimeout = setTimeout; };
+  const c = {session: core.session, state: core.state, findArtists: ids => artists.findArtists(ids), findArtistWorks: artist => artists.findArtistWorks(artist, 'synthetic')};
   const remove = () => settings.onLibrariesClick({target: {closest: () => ({dataset: {libRemove: 'synthetic-source'}})}});
   return {c, dialogs, calls, consent, remove};
 }
@@ -57,15 +57,15 @@ for (const dismiss of ['cancel','close','escape','backdrop']) test(`${dismiss} l
 });
 
 test('artist lookup waits for authorization and cancellation saves no consent or request', async () => {
-  const h = harness(); const pending = h.c.artistLookup({action:'lookup',ids:['synthetic']},'lookup');
+  const h = harness(); const pending = h.c.findArtists(['synthetic']);
   await tick(); assert.equal(h.calls.length,0); assert.equal(h.consent.size,0);
   h.dialogs[0].close(); await pending;
   assert.equal(h.calls.length,0); assert.equal(h.consent.size,0);
-  const accepted = h.c.artistLookup({action:'lookup',ids:['synthetic']},'lookup');
+  const accepted = h.c.findArtists(['synthetic']);
   await tick(); assert.equal(h.calls.length,0);
   h.dialogs[1].close('ok'); await accepted;
   assert.equal(h.consent.get('artistLookupOk'),'1'); assert.equal(h.calls.length,1);
-  await h.c.artistLookup({action:'artist',artist:'synthetic'},'lookup');
+  await h.c.findArtistWorks('synthetic');
   assert.equal(h.dialogs.length,2); assert.equal(h.calls.length,2);
 });
 

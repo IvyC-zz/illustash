@@ -28,14 +28,15 @@ test('a library change during confirmation cannot authorize the new library', as
   assert.equal(await result, false); assert.equal(calls.length, 0);
 });
 test('the task button is usable immediately after cancelled confirmation', async () => {
-  const {calls} = harness(), clicks = [];
-  const element = () => ({addEventListener: (type, handler) => { if (type === 'click') clicks.push(handler); }, classList: {toggle() {}}, setAttribute() {}, dataset: {}});
-  const nodes = {};
-  globalThis.document = {getElementById: id => nodes[id] ||= element(), addEventListener() {}};
+  const {calls} = harness(), {document, el} = web.fakePage();
+  // The page's own dialog (ui/dialog.js), cancelled as soon as it shows.
+  let asked = 0;
+  document.body.append = d => { asked++; d.showModal = () => { d.returnValue = 'cancel'; d.onclose(); }; };
   const {wireTasks} = await web.load('ui/tasks.js');
-  wireTasks({confirm: async () => false});
+  wireTasks();
   const button = {dataset: {task: 'index'}, disabled: false};
-  for (const click of clicks) await click({stopPropagation() {}, target: {closest: selector => selector === '[data-task]' ? button : null}});
+  for (const click of el('taskPanel').listeners.click) await click({stopPropagation() {}, target: {closest: selector => selector === '[data-task]' ? button : null}});
+  assert.equal(asked, 1);
   assert.equal(button.disabled, false);
   assert.deepEqual(calls, [], 'cancel sends nothing and starts no task');
 });
