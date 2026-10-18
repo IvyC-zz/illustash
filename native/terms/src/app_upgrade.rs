@@ -84,6 +84,11 @@ pub(crate) fn run(prepared: &ValidatedUpgrade) -> std::result::Result<UpgradeRep
     Ok(report)
 }
 
+/// The backup's path as the page shows it: without Windows' verbatim `\\?\` prefix when it is not needed.
+pub(crate) fn shown(path: &Path) -> String {
+    crate::app_paths::canonical(path).unwrap_or_else(|_| path.to_owned()).to_string_lossy().into_owned()
+}
+
 impl ValidatedUpgrade {
     pub(crate) fn name(&self) -> &str {
         self.library.name()

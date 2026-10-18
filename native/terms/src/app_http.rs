@@ -571,7 +571,7 @@ pub(crate) fn run(args: &[String]) -> Result<u8> {
         },
     )?;
     application.session.write().expect("http session lock poisoned").upgraded =
-        upgrade_backup.map(|backup| backup.to_string_lossy().into_owned());
+        upgrade_backup.map(|backup| crate::app_upgrade::shown(&backup));
     let host = Arc::new(Host { application, origin: format!("http://127.0.0.1:{port}") });
     http::install_signals();
     let desktop_parent = crate::platform_process::DesktopParent::capture();

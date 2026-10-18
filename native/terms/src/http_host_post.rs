@@ -446,7 +446,7 @@ pub(super) fn handle(request: Request, host: &Host, received: u64, text: &str, b
                         // Said as it happened: not committed (the package is as it was) or committed, with the backup.
                         let report = crate::app_upgrade::run(&prepared)
                             .map_err(|failure| Error::Invalid(failure.to_string()))?;
-                        let backup = report.backup.to_string_lossy().into_owned();
+                        let backup = crate::app_upgrade::shown(&report.backup);
                         drop(report);
                         let mut out = host.switch_locked(&mut session, received, &path)?;
                         session.upgraded = Some(backup.clone());
