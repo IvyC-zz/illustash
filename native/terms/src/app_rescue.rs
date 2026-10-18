@@ -538,7 +538,8 @@ fn earlier(target: &Path, library: &Library, folders: &[Value]) -> Result<Earlie
 }
 
 /// After the scans: folder pictures no scan found are gone, as a scan would mark them; results of pictures no record
-/// knows are dropped; and pictures without results are recognized again, so no ledger entry may say they were.
+/// knows are dropped; and pictures without results are recognized again, so no ledger entry or package record may say
+/// they were.
 fn tidy(target: &Path, library: &Library, folders: &[Value], report: &mut Report) -> Result<()> {
     let mut c = crate::sqlite::open_with_flags(target, OpenFlags::SQLITE_OPEN_READ_WRITE)?;
     let lib = crate::app_library::read_connection(&library.db())?;
@@ -573,14 +574,22 @@ fn tidy(target: &Path, library: &Library, folders: &[Value], report: &mut Report
             "DELETE FROM {table} WHERE NOT EXISTS(SELECT 1 FROM assets a WHERE a.uuid={table}.uuid) AND NOT EXISTS(SELECT 1 FROM temp.rescue_known k WHERE k.uuid={table}.uuid)"
         ))?;
     }
-    let ledger: bool = tx.query_row(
-        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='recognition_assets')",
-        [],
-        |r| r.get(0),
-    )?;
-    if ledger {
+    // The recognition ledger: an entry for a picture without results makes its new results look already imported,
+    // and a package record that covers one makes the same package recognized again (same model, same pictures, same
+    // digest) a duplicate that imports nothing.
+    let table = |name: &str| -> Result<bool> {
+        Ok(tx.query_row("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name=?)", [name], |r| {
+            r.get(0)
+        })?)
+    };
+    if table("recognition_assets")? {
         tx.execute_batch(
             "DELETE FROM recognition_assets WHERE NOT EXISTS(SELECT 1 FROM labels l WHERE l.uuid=recognition_assets.asset AND l.dim='rating')",
+        )?;
+    }
+    if table("recognition_imports")? {
+        tx.execute_batch(
+            "DELETE FROM recognition_imports WHERE CASE WHEN json_valid(assets) THEN EXISTS(SELECT 1 FROM json_each(recognition_imports.assets) j WHERE NOT EXISTS(SELECT 1 FROM labels l WHERE l.uuid=j.value AND l.dim='rating')) ELSE 1 END",
         )?;
     }
     report.pending = tx.query_row(

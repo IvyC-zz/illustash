@@ -106,11 +106,21 @@ fn pictures_get_their_ids_back_by_path_and_content_and_stale_results_go() {
     let src = crate::sqlite::open(f.source()).unwrap();
     src.execute_batch(
         "CREATE TABLE recognition_assets(asset TEXT PRIMARY KEY, digest TEXT NOT NULL, package TEXT NOT NULL);
+         CREATE TABLE recognition_imports(digest TEXT PRIMARY KEY, manifest TEXT NOT NULL, assets TEXT NOT NULL,
+             status TEXT NOT NULL, error TEXT NOT NULL DEFAULT '', imported_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
          INSERT INTO labels(uuid,dim,value,conf,source) SELECT uuid,'rating','general',0.9,'wd_v3' FROM assets;
          INSERT INTO embeddings SELECT uuid,'wd',x'00' FROM assets;
          INSERT INTO recognition_assets SELECT uuid,'synthetic','synthetic' FROM assets;",
     )
     .unwrap();
+    // One package per picture, as if each had been recognized on its own.
+    for uuid in before.values() {
+        src.execute(
+            "INSERT INTO recognition_imports(digest,manifest,assets,status) VALUES (?,'{}',?,'done')",
+            [format!("package-{uuid}"), format!("[\"{uuid}\"]")],
+        )
+        .unwrap();
+    }
     // What damage took: the folder bookkeeping, two picture rows, and d's results (its ledger entry stayed).
     let id = |rel: &str| before[rel].clone();
     src.execute_batch("DELETE FROM files; DELETE FROM asset_links;").unwrap();
@@ -143,6 +153,8 @@ fn pictures_get_their_ids_back_by_path_and_content_and_stale_results_go() {
         assert_eq!(Fixture::count(&building, &rating), results, "{rel}");
         let ledger = format!("SELECT count(*) FROM recognition_assets WHERE asset='{uuid}'");
         assert_eq!(Fixture::count(&building, &ledger), results, "{rel}");
+        let package = format!("SELECT count(*) FROM recognition_imports WHERE digest='package-{uuid}'");
+        assert_eq!(Fixture::count(&building, &package), results, "{rel}");
     }
     assert_eq!(Fixture::count(&building, "SELECT count(*) FROM assets WHERE coalesce(trashed,0)=0"), 5);
     // The damaged file stays as it was until the new one is put in place.
