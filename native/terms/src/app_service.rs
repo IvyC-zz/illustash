@@ -12,8 +12,12 @@ use std::{
 /// file lock, which the system drops with the process, so a crash never leaves the package locked. A
 /// second host (or the same package through another alias) is refused instead of treating the active
 /// owner's running work as left over from a crash.
+///
+/// The owner also keeps the package's integrity record (#212): opened when the session starts, closed when it ends
+/// normally, so a record still open at the next opening means the last session did not end normally.
 pub(crate) struct Owner {
     _lock: std::fs::File,
+    pub(crate) health: Arc<crate::app_integrity::Health>,
 }
 impl Owner {
     pub(crate) fn claim(library: &Library) -> Result<Arc<Self>> {
@@ -25,7 +29,10 @@ impl Owner {
             .write(true)
             .open(library.instance_path().join(".illustash-owner.lock"))?;
         match crate::app_file_lock::acquire_unobstructed(&file) {
-            Ok(()) => Ok(Arc::new(Self { _lock: file })),
+            Ok(()) => Ok(Arc::new(Self {
+                _lock: file,
+                health: Arc::new(crate::app_integrity::Health::load(library.instance_path())),
+            })),
             Err(e) if e.kind() == std::io::ErrorKind::WouldBlock || e.raw_os_error() == Some(33) => {
                 Err(Error::Conflict("这个图库已在另一个 Illustash 中打开；请先关闭那边，或回到那边继续使用".into()))
             }
@@ -33,6 +40,71 @@ impl Owner {
         }
     }
 }
+impl Drop for Owner {
+    /// Released by a switch, a shutdown or dropping the service: a normal end, unless a panic is unwinding.
+    fn drop(&mut self) {
+        if !std::thread::panicking() {
+            self.health.closed();
+        }
+    }
+}
+
+/// Opens `path` for a session (#212). The package is validated without the full integrity checks, then owned, and
+/// checked in full only when its last session did not end normally or damage is on record; damage refuses it.
+/// `current` is the session's own package and owner: reopening that package keeps its ownership. Opening reports
+/// the checks it runs through `progress`.
+pub(crate) fn open_owned(
+    path: &Path,
+    current: Option<(&Library, &Arc<Owner>)>,
+    progress: Option<crate::app_library::Progress>,
+) -> Result<(Library, Arc<Owner>)> {
+    let opened = Library::open_deferring_checks(path);
+    // SQLite may meet the damage while reading versions; the full checks then say which database it is in.
+    let corrupt = match &opened {
+        Err(Error::Sql(e)) => crate::app_library::corruption(e).is_some(),
+        _ => false,
+    };
+    let library = match opened {
+        Ok(library) => library,
+        Err(e) if corrupt => {
+            let library = Library::locate(path)?;
+            let owner = claim_or_reuse(&library, current)?;
+            return Err(match crate::app_integrity::check_both(&library, progress)? {
+                Some(damage) => {
+                    owner.health.damaged(damage.clone())?;
+                    damage.error()
+                }
+                None => e,
+            });
+        }
+        Err(e) => return Err(e),
+    };
+    let owner = claim_or_reuse(&library, current)?;
+    let checked = if owner.health.needs_check() {
+        if let Some(damage) = crate::app_integrity::check_both(&library, progress)? {
+            owner.health.damaged(damage.clone())?;
+            return Err(damage.error());
+        }
+        &crate::app_integrity::Database::BOTH[..]
+    } else {
+        &[]
+    };
+    owner.health.opened(checked)?;
+    Ok((library, owner))
+}
+/// A package opened through the full checks (an explicit upgrade), owned for a session.
+pub(crate) fn own_checked(library: Library) -> Result<(Library, Arc<Owner>)> {
+    let owner = Owner::claim(&library)?;
+    owner.health.opened(&crate::app_integrity::Database::BOTH)?;
+    Ok((library, owner))
+}
+fn claim_or_reuse(library: &Library, current: Option<(&Library, &Arc<Owner>)>) -> Result<Arc<Owner>> {
+    match current {
+        Some((open, owner)) if open.instance_path() == library.instance_path() => Ok(owner.clone()),
+        _ => Owner::claim(library),
+    }
+}
+
 pub(crate) struct Session {
     pub(crate) library: Library,
     /// Released when the session closes (switch or shutdown), not only when the service is dropped.
@@ -51,6 +123,10 @@ pub(crate) struct Session {
     pub(crate) unlisted: Option<String>,
     /// The pre-upgrade backup when this library was upgraded on being opened (#193): the page says where, once.
     pub(crate) upgraded: Option<String>,
+    /// Background integrity checks (#212).
+    pub(crate) checker: crate::app_integrity::Checker,
+    /// Damage was found and the session's tasks were stopped.
+    pub(crate) halted: bool,
 }
 impl Session {
     pub(crate) fn token() -> Result<String> {
@@ -93,7 +169,39 @@ impl Session {
             onboarding,
             unlisted: None,
             upgraded: None,
+            checker: Default::default(),
+            halted: false,
         })
+    }
+    /// Damage on record in this package: the session writes nothing more (#212).
+    pub(crate) fn damage(&self) -> Option<crate::app_integrity::Damage> {
+        self.owner.as_ref().and_then(|owner| owner.health.damage())
+    }
+    /// Start the background checks that are due (`delay` lets the page load first).
+    pub(crate) fn start_checks(&mut self, delay: std::time::Duration) {
+        if let Some(owner) = &self.owner {
+            let due = owner.health.due();
+            self.checker.start(&self.library, owner.health.clone(), due, delay);
+        }
+    }
+    /// `POST /api/integrity`: both databases now, unless a check is running.
+    pub(crate) fn check_now(&mut self) -> Json {
+        if let Some(owner) = &self.owner {
+            self.checker.start(
+                &self.library,
+                owner.health.clone(),
+                crate::app_integrity::Database::BOTH.to_vec(),
+                std::time::Duration::ZERO,
+            );
+        }
+        self.integrity()
+    }
+    /// `GET /api/integrity`.
+    pub(crate) fn integrity(&self) -> Json {
+        match &self.owner {
+            Some(owner) => self.checker.info(&owner.health),
+            None => Json::object([("running", serde_json::Value::Null.into())]),
+        }
     }
 }
 pub struct Application {
@@ -161,18 +269,18 @@ impl Options {
 impl Application {
     /// Opens and registers an explicit package. Does not bind a port or start background work.
     pub fn open(path: &Path, options: Options) -> Result<Self> {
-        Self::from_library(Library::open(path)?, Session::token()?, options, |error| {
+        Self::from_library(open_owned(path, None, None)?, Session::token()?, options, |error| {
             crate::app_libraries::unlisted_reason(&error)
         })
     }
+    /// `opened` is owned before any recovery below reads or rewrites the package's task state.
     pub(crate) fn from_library(
-        library: Library,
+        opened: (Library, Arc<Owner>),
         token: String,
         options: Options,
         unlisted_note: impl FnOnce(Error) -> String,
     ) -> Result<Self> {
-        // Owned before any recovery below reads or rewrites the package's task state.
-        let owner = Owner::claim(&library)?;
+        let (library, owner) = opened;
         let Options {
             root,
             names_enabled,
@@ -208,6 +316,8 @@ impl Application {
             onboarding,
             unlisted: None,
             upgraded: None,
+            checker: Default::default(),
+            halted: false,
         };
         session.syncer.resource_root = root.clone();
         session.syncer.per_run = per_run;
@@ -274,6 +384,7 @@ impl Application {
                     session.syncer.automatic(&lib, generation, &token)?;
                 }
             }
+            session.start_checks(crate::app_integrity::BACKGROUND_DELAY);
         }
         Ok(())
     }
@@ -284,6 +395,17 @@ impl Application {
         }
         let mut session = self.session.write().expect("app_http session lock poisoned");
         if self.closed.load(Ordering::SeqCst) {
+            return;
+        }
+        // Damage found in the background stops the session's tasks; nothing is recovered into a damaged package.
+        if session.damage().is_some() {
+            if !session.halted {
+                session.halted = true;
+                session.halt();
+                drop(session);
+                self.imports.cancel(crate::app_imports::DAMAGED);
+                self.exports.stop();
+            }
             return;
         }
         let library = session.library.clone();
@@ -328,13 +450,22 @@ impl Application {
 }
 impl Session {
     fn close(&mut self) {
-        self.provenance.close();
+        self.checker.stop();
+        // A damaged package gets no queued provenance work either.
+        if !self.halted {
+            self.provenance.close();
+        }
+        self.halt();
+        self.owner = None;
+    }
+    /// Damage found: stop every task without queueing or recording anything in the package.
+    fn halt(&mut self) {
+        self.provenance.stop();
         self.index.stop();
         self.onboarding.stop();
         self.research.stop();
         self.names.stop();
         self.syncer.stop();
-        self.owner = None;
     }
 }
 
@@ -353,12 +484,8 @@ impl Application {
         if !path.join("library.json").is_file() {
             return Err(Error::Invalid("不是图库包".into()));
         }
-        let library = Library::open(path)?;
         // Reopening the same physical package keeps its ownership; another one is claimed first.
-        let owner = match &session.owner {
-            Some(owner) if library.instance_path() == session.library.instance_path() => owner.clone(),
-            _ => Owner::claim(&library)?,
-        };
+        let (library, owner) = open_owned(path, session.owner.as_ref().map(|owner| (&session.library, owner)), None)?;
         let mut replacement = Session::new(
             library,
             owner,
@@ -407,6 +534,7 @@ impl Application {
                 eprintln!("同步自动启动失败：{e}");
             }
         }
+        session.start_checks(crate::app_integrity::BACKGROUND_DELAY);
         Ok(result)
     }
 }

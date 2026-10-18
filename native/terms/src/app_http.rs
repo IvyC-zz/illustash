@@ -388,12 +388,14 @@ fn startup_progress(stage: &str, done: f64) {
     let _ = std::io::Write::flush(&mut std::io::stdout());
 }
 
-/// The integrity checks read both databases in full; they are most of a large library's startup.
-fn open_reporting(path: &Path) -> Result<Library> {
+/// The integrity checks read both databases in full. Opening runs them only after the last session did not end
+/// normally (#212); they are then most of a large library's startup, so the page says why it takes long.
+fn open_reporting(path: &Path) -> Result<(Library, std::sync::Arc<crate::app_service::Owner>)> {
     startup_progress("正在打开图库", 0.0);
-    let progress: crate::app_library::Progress =
-        std::sync::Arc::new(|label, done| startup_progress(&format!("正在检查图库数据（{label}）"), done * 0.95));
-    Library::open_reporting(path, progress)
+    let progress: crate::app_library::Progress = std::sync::Arc::new(|label, done| {
+        startup_progress(&format!("上次没有正常关闭，正在检查图库数据（{label}）"), done * 0.95)
+    });
+    crate::app_service::open_owned(path, None, Some(progress))
 }
 
 pub(crate) fn run(args: &[String]) -> Result<u8> {
@@ -527,13 +529,16 @@ pub(crate) fn run(args: &[String]) -> Result<u8> {
         None
     };
     let token = Session::token()?;
+    // The explicit upgrade keeps its own full checks (#212).
     let (library, upgrade_backup) = if upgrade {
         match Library::open(&path) {
-            Ok(library) if !crate::app_legacy_upgrade::required(&library)? => (library, None),
+            Ok(library) if !crate::app_legacy_upgrade::required(&library)? => {
+                (crate::app_service::own_checked(library)?, None)
+            }
             _ => {
                 let report = crate::app_upgrade::run(&crate::app_upgrade::prepare(&path)?)
                     .map_err(|failure| Error::Schema(failure.to_string()))?;
-                (report.library, Some(report.backup))
+                (crate::app_service::own_checked(report.library)?, Some(report.backup))
             }
         }
     } else {

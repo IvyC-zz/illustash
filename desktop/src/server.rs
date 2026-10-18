@@ -257,6 +257,14 @@ fn show_upgrade(main: &WebviewWindow, name: &str) {
     on_start(main, &js);
 }
 
+/// A check found the library's data damaged (#212): what to do, with the usual retry and choices; it is replayed
+/// like a failure.
+fn show_damage(main: &WebviewWindow, note: &str) {
+    let js = format!("window.showDamage && window.showDamage({})", serde_json::to_string(note).unwrap());
+    *main.app_handle().state::<ErrorPage>().0.lock().unwrap() = Some(js.clone());
+    on_start(main, &js);
+}
+
 /// Startup stopped before the service was configured: remember why, so a retry repeats it instead of waiting.
 pub(crate) fn blocked(main: &WebviewWindow, message: &str) {
     *main.app_handle().state::<Launch>().blocked.lock().unwrap() = Some(message.into());
@@ -527,6 +535,13 @@ fn run(app: &AppHandle, main: &WebviewWindow, library: Option<PathBuf>, upgrade:
         thread::sleep(Duration::from_millis(100));
         // A library in an older format: ask before upgrading it, instead of showing a failure (#193). After a
         // failed upgrade the failure itself is shown; the package is unchanged and can be tried again.
+        // Damage a check found takes precedence: the package is refused until the database is replaced.
+        if !ready.load(Ordering::SeqCst) {
+            if let Some(note) = target.as_deref().and_then(illustash_terms::desktop_shell::damage_note) {
+                show_damage(&main, note);
+                return;
+            }
+        }
         if !upgrade && !ready.load(Ordering::SeqCst) {
             if let Some(name) = target.as_deref().and_then(illustash_terms::desktop_shell::upgrade_needed) {
                 show_upgrade(&main, &name);

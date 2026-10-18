@@ -103,6 +103,7 @@ L0 实际做法和设计稿的差别：
   thumbnails/         缩略图缓存（现在的 web-thumbnails/），可以随时删掉重建
   backups/            升级前的自动备份（现在的 library-backups/）
   album-char-map.json 相册名到角色的映射（只有从旧库迁来的图库有）
+  .illustash-owner.lock、.illustash-checks.json  会话的文件锁与检查记录（#212）
 ```
 
 `library.json`：

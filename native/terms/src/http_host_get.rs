@@ -98,6 +98,7 @@ pub(super) fn handle(request: Request, host: &Host, received: u64) {
             }
         }
         "/api/sync" => session.syncer.status(&session.library).map(|p| Some((p, 200))),
+        "/api/integrity" => Ok(Some((session.integrity(), 200))),
         // App-wide (#191): the update check's choice and last result, not the library's.
         "/api/updates" => crate::app_updates::info().map(|p| Some((p, 200))),
         "/api/onboarding" => {

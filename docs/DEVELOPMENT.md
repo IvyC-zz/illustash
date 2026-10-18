@@ -76,6 +76,7 @@ cargo build --release --manifest-path native/terms/Cargo.toml
 - `source.sqlite`：来源快照，只读，不接收人工写入。
 - `library.sqlite`：人工结论、机器证据与统一撤销历史，**不可当缓存删除**。
 - `thumbnails/`：可重建；`backups/`：`--backup` 与升级前的备份。
+- `.illustash-owner.lock`：打开它的 Illustash 持有的系统文件锁；`.illustash-checks.json`：会话是否开着、两个库上次完整检查通过的时间、检查发现的损坏（#212，见[架构方向](ARCHITECTURE_DIRECTION.md#2026-09-28-补充增量功能模块用-rust)启动一段）。都由打开图库的会话维护，不要手改。
 
 包外的共享资源（参考库、模型、研究输出）与目录职责见 [图库参考](LIBRARIES.md#2-包外的共享资源)。
 

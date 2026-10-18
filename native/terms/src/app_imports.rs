@@ -84,6 +84,7 @@ impl Observer for Progress {
 pub(crate) const CANCELLED: &str = "导入已取消";
 pub(crate) const SWITCHED: &str = "图库已切换，导入已取消";
 pub(crate) const QUITTING: &str = "程序正在退出，导入已取消";
+pub(crate) const DAMAGED: &str = "图库数据库损坏，导入已取消";
 /// How long quitting waits for a stopped import to remove what it unpacked.
 pub(crate) const QUIT_WAIT: Duration = Duration::from_secs(5);
 

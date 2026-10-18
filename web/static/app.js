@@ -26,6 +26,8 @@ import {wireHome} from './ui/home.js';
 import {wireReview} from './ui/review.js';
 import {guideAfterBoot, guideOnOpen, wireGuide} from './ui/guide.js';
 import {afterWrite, afterJob} from './ui/effects.js';
+import {pollIntegrity} from './core/integrity.js';
+import {wireIntegrity} from './ui/integrity.js';
 platformHints(document.body);
 wireDom();
 onPost(afterWrite);
@@ -42,6 +44,7 @@ wireSettings();
 wireCatalog();
 wireTasks();
 wireGuide();
+wireIntegrity();
 $('undoButton').onclick = undo; $('helpButton').onclick = () => $('help').showModal();
 $('sidebarToggle').onclick = () => { if (innerWidth <= 760) $('sidebar').classList.toggle('mobile-open'); else $('sidebar').hidden = !$('sidebar').hidden; requestAnimationFrame(() => renderGrid()); };
 for (const dialog of document.querySelectorAll('dialog')) dialog.addEventListener('click', e => { if (e.target === dialog) { const r = dialog.getBoundingClientRect(); if (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) dialog.close(); } });
@@ -61,6 +64,7 @@ for (const dialog of document.querySelectorAll('dialog')) dialog.addEventListene
     await meta;
     window.splash?.ready();
     taskTick();
+    pollIntegrity();
     // The library opened although it could not be listed among the recent ones (#176): say so once.
     api('/api/libraries').then(x => {
       if (x?.unlisted) error(t('没能把这个图库记进最近图库：{why}。图库照常可用，只是下次启动时可能不会自动打开它。', {why: x.unlisted}));

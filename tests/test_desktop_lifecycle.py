@@ -39,9 +39,10 @@ class DesktopLifecycleTest(unittest.TestCase):
                 listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             listener.bind(('127.0.0.1', self.port))
 
-    def test_startup_progress_precedes_ready_and_never_goes_back(self):
-        self.log.seek(0)
-        lines = self.log.read().decode().splitlines()
+    def progress(self, log):
+        """Startup stages, checked to precede the ready line and never go back."""
+        log.seek(0)
+        lines = log.read().decode().splitlines()
         ready = next(i for i, line in enumerate(lines) if line.startswith('图库已启动：'))
         progress = [(i, int(line.split('：', 1)[1].split(' ', 1)[0]), line.split(' ', 1)[1])
                     for i, line in enumerate(lines) if line.startswith('启动进度：')]
@@ -50,7 +51,15 @@ class DesktopLifecycleTest(unittest.TestCase):
         values = [v for _, v, _ in progress]
         self.assertEqual(values, sorted(values))
         self.assertEqual(values[0], 0)
-        self.assertIn('正在检查图库数据（source.sqlite）', {stage for _, _, stage in progress})
+        return {stage for _, _, stage in progress}
+
+    def test_startup_progress_precedes_ready_and_never_goes_back(self):
+        # A normal opening runs no full integrity check before it is ready (#212).
+        self.assertFalse(any('检查图库数据' in stage for stage in self.progress(self.log)))
+        # After a crash the next opening checks both databases first, and reports it.
+        self.process.kill(); self.process.wait(5)
+        _, log = self.start(self.lib.path)
+        self.assertIn('上次没有正常关闭，正在检查图库数据（source.sqlite）', self.progress(log))
 
     def test_eof_waits_and_releases_port_after_library_switch(self):
         second = self.package('second')
