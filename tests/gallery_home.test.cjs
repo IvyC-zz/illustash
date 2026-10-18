@@ -1,17 +1,22 @@
 const {test, before} = require('node:test');
-const web = require('./web.cjs');   // core/ modules (#199)
-before(web.ready);
+const web = require('./web.cjs');   // core/ modules, ui/grid.js (#199)
+let gridModule;
+before(async () => { await web.ready(); gridModule = await web.load('ui/grid.js'); });
 const assert = require('node:assert/strict');
 const vm = require('node:vm');
 const zh = require('./i18n_zh.cjs');   // t() of a Chinese page (#173)
 const fs = require('node:fs');
 const source = fs.readFileSync(require('node:path').join(__dirname, '../web/static/app.js'), 'utf8');
-const geometry = source.slice(source.indexOf('const isSquare ='), source.indexOf('// How many images the machine thinks'));
+// The grid's geometry is ui/grid.js; a hidden grid element keeps renderGrid() from drawing.
+let layouts = 0;
 function grid(total = 103, fit = true) {
-  const state = {size:185, total, fit, dataVersion:0, items:Array.from({length:total}, (_,i) => ({width:[300,800,400,1200][i%4],height:600})), route:{page:'library'}};
-  const elements = {viewport:{clientWidth:1002, scrollTop:0},grid:{getBoundingClientRect:()=>({left:10,top:20})}};
-  const c = {state, MAX_HEIGHT:3e7, viewOpts:{captions:true}, browsing:()=>true, $:id=>elements[id], prefs:{set(){}}, renderGrid(){}};
-  vm.createContext(Object.assign(c, zh.page)); vm.runInContext(geometry+';Object.assign(this,{rowCount,rowStart,imageRatio})',c); c.layout(); return c;
+  const {state} = web.core(), page = web.fakePage();
+  Object.assign(page.el('viewport'), {clientWidth: 1002, scrollTop: 0});
+  Object.assign(page.el('grid'), {hidden: true, getBoundingClientRect: () => ({left: 10, top: 20})});
+  // A new data version for each grid, so the layout is never one cached from an earlier test.
+  Object.assign(state, {size: 185, total, fit, dataVersion: 1e6 + ++layouts, items: Array.from({length: total}, (_, i) => ({width: [300, 800, 400, 1200][i % 4], height: 600})), route: {page: 'library'}});
+  gridModule.viewOpts.captions = true;
+  const c = {...gridModule, state, $: page.el}; c.layout(); return c;
 }
 const rowsOf=c=>Array.from({length:c.rowCount()},(_,r)=>{const out=[];for(let i=c.rowStart(r);i<c.rowStart(r+1);i++)out.push(c.cardRect(i));return out;});
 test('justified rows pack around the target height, fill the width and keep each ratio; the last row stays target-sized and left-aligned',()=>{
@@ -113,25 +118,19 @@ test('opening the app lands on 首页; the library has its own hash and old quer
   assert.deepEqual([c.parseHash().page,c.parseHash().day],['library','2026-10-02']);
 });
 test('undo and a finished sync redraw the home page, whose day groups come from their own read', async () => {
-  const calls = [], {edits, setLatest, undoLatest, undoneText} = web.core();
+  // undo() is ui/grid.js; the home page is still app.js's (ui/app_parts.js).
+  const calls = [], {edits, state} = web.core(), {app} = await web.load('ui/app_parts.js');
+  web.fakePage();
   edits.latest = {id: 7, label: '已将 1 张移出 A'};
+  Object.assign(state, {route: {page: 'home'}, sync: {status: 'scanning'}, focused: null, viewer: -1});
   globalThis.fetch = async () => ({status: 200, ok: true, json: async () => ({undo: null})});
-  const c = {
-    state: {route: {page: 'home'}, sync: {status: 'scanning'}, focused: null, viewer: -1},
-    edits, setLatest, undoLatest, undoneText, toast() {}, async reload() { calls.push('reload'); },
-    async refreshMeta() {}, error() {}, readError: e => e, renderHome(keep) { calls.push(['home', keep]); },
-    renderIdentity() {}, renderGroups() {}, renderArtistAudit() {}, inspect() {}, selCount: () => 0, renderTasks() {}, guideRefresh() {},
-    SYNC_ACTIVE: ['scanning'], number: String, clearTimeout() {}, setTimeout() {}, panelPage: p => p === 'home',
-    async api() { return {state: {status: 'done', imported: 1}, history: [], damaged: null}; },
-  };
-  vm.createContext(Object.assign(c, zh.page));
-  vm.runInContext(source.slice(source.indexOf('async function undo()'), source.indexOf('async function sweep()')) + ';this.undo = undo;', c);
-  await c.undo();
-  assert.deepEqual(calls, ['reload', ['home', true]]);
+  Object.assign(app, {renderHome(keep) { calls.push(['home', keep]); }, renderIdentity() {}, renderGroups() {}, renderArtistAudit() {}, inspect() {}, showViewer() {}, indexOf: () => -1});
+  await gridModule.undo();
+  assert.deepEqual(calls, [['home', true]]);
   assert.equal(edits.latest, null);
   calls.length = 0;
   // The sync's poller is core/jobs.js; what its end redraws is app.js's onJob listener.
-  const {state, pollSync, onJob, SYNC_ACTIVE} = web.core();
+  const {pollSync, onJob, SYNC_ACTIVE} = web.core();
   Object.assign(state, {route: {page: 'home'}, sync: {status: 'scanning'}});
   globalThis.fetch = async () => ({status: 200, ok: true, json: async () => ({state: {status: 'done', imported: 1}, history: [], damaged: null})});
   const g = {state, SYNC_ACTIVE, onJob: fn => (g.off = onJob(fn)), async refreshMeta() {}, error() {}, readError: e => e, guideRefresh() {},

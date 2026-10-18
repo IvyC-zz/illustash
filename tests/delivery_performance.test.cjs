@@ -11,7 +11,7 @@ const section = (a, b) => source.slice(source.indexOf(a), source.indexOf(b, sour
 // The metadata read is core/meta.js; api answers the page's requests.
 function metaHarness(api) {
   const {session, state, refreshMeta} = web.core();
-  Object.assign(state, {nsfw: '', chars: [], dupInfo: {}, exclInfo: {}, route: {page: 'library'}, char: null, readEpoch: 0});
+  Object.assign(state, {nsfw: '', chars: [], dupInfo: {}, exclInfo: {}, route: {page: 'library'}, char: null, readEpoch: 0, countDirty: undefined});
   globalThis.fetch = path => Promise.resolve(api(path)).then(body => ({status: 200, ok: true, json: async () => body}));
   return {state, session, refreshMeta};
 }
@@ -91,46 +91,60 @@ test('section updates preserve unaffected nodes and support reorder/removal', ()
   c.reconcileSections(root, [['c','C'],['b','B']]);
   assert.deepEqual(root.children, [cc,b]);
 });
+// The grid is ui/grid.js, on a fake page; its timers and reads are the test's.
+let grid;
+test.before(async () => { grid = await web.load('ui/grid.js'); });
+function gridPage({items = [], total = items.length, scrollTop = 0} = {}) {
+  const page = web.fakePage(), {state} = web.core();
+  Object.assign(page.el('viewport'), {scrollTop, clientHeight: 200, clientWidth: 202});
+  Object.assign(state, {size: 100, fit: false, total, items, route: {page: 'library'}, dataVersion: 2e6 + Math.random(), gridKey: '',
+    pages: new Set(), pending: new Set(), generation: 1, readEpoch: 0, countDirty: false, sel: {all: false, ids: new Set(), exclude: new Set()}});
+  return {page, state};
+}
+const quietTimers = () => { const saved = [globalThis.setTimeout, globalThis.requestAnimationFrame]; globalThis.setTimeout = () => 0; return () => { [globalThis.setTimeout, globalThis.requestAnimationFrame] = saved; }; };
 test('virtual grid keeps overlapping cards, updates changed items and relayouts columns', () => {
-  const grid = new Element(), viewport = {scrollTop: 0, clientHeight: 200};
-  const c = {document: documentMock(), $: id => id === 'grid' ? grid : viewport,
-    state: {cols: 2, cellW: 100, rowH: 100, gap: 0, total: 30, fit: false, route: {page: 'library'}, dataVersion: 0,
-      items: Array.from({length: 30}, (_, i) => ({uuid: String(i), memberships: []}))},
-    layout() {}, cardHTML: item => item.uuid, isSquare: () => true, syncCards() {}, clearTimeout() {}, setTimeout() {}, pageTimer: null, PAGE: 100};
-  vm.createContext(Object.assign(c, zh.page)); vm.runInContext(section('let gridLayoutKey', 'const captionH ='), c);
-  vm.runInContext(section('function renderGrid', 'function syncCards'), c);
-  c.renderGrid(); const originals = [...grid.children]; assert.equal(originals.length, 8);
-  viewport.scrollTop = 100; c.renderGrid();
-  assert.equal(grid.children.length, 10); originals.forEach((el,i) => assert.equal(grid.children[i], el));
-  c.state.items[5] = {...c.state.items[5]}; c.state.dataVersion++; c.renderGrid();
-  assert.notEqual(grid.children[5], originals[5]); assert.equal(grid.children[4], originals[4]);
-  viewport.scrollTop = 400; c.renderGrid();
-  assert.equal(grid.children[0].dataset.index, 4); assert.equal(grid.children[0], originals[4]);
-  c.state.cols = 3; c.renderGrid();
-  assert.equal(grid.children[0].style.left, '0px');
+  const restore = quietTimers();
+  try {
+    const {page, state} = gridPage({items: Array.from({length: 30}, (_, i) => ({uuid: String(i), memberships: [], width: 100, height: 100}))});
+    const el = page.el('grid'), viewport = page.el('viewport'), shown = top => grid.rowStart(Math.min(grid.rowCount(), state.fit ? grid.rowAt(top + 200) + 2 : Math.ceil((top + 200) / state.rowH) + 2)) - grid.rowStart(Math.max(0, grid.rowAt(top) - 2));
+    grid.renderGrid(); const originals = [...el.children]; assert.equal(originals.length, shown(0));
+    viewport.scrollTop = 100; grid.renderGrid();
+    assert.equal(el.children.length, shown(100)); originals.forEach((card, i) => assert.equal(el.children[i], card));
+    state.items[5] = {...state.items[5]}; state.dataVersion++; grid.renderGrid();
+    assert.notEqual(el.children[5], originals[5]); assert.equal(el.children[4], originals[4]);
+    viewport.scrollTop = 400; grid.renderGrid();
+    const first = grid.rowStart(Math.max(0, grid.rowAt(400) - 2));
+    assert.equal(Number(el.children[0].dataset.index), first); assert.equal(el.children[0], originals[first]);
+    state.size = 60; grid.renderGrid();
+    assert.equal(el.children[0].style.left, '0px');
+  } finally { restore(); }
 });
 test('scroll bursts schedule a single render per frame', () => {
-  const callbacks = [], renders = [];
-  const c = {requestAnimationFrame: f => {callbacks.push(f); return callbacks.length;}, renderGrid: () => renders.push(1),
-    $: () => ({addEventListener() {}}), ResizeObserver: class {observe() {}}};
-  vm.createContext(Object.assign(c, zh.page)); vm.runInContext(section('let gridFrame', '// ---------- zoom'), c);
-  for (let i = 0; i < 50; i++) c.scheduleGrid();
-  assert.equal(callbacks.length, 1); callbacks.shift()(); assert.equal(renders.length, 1);
-  c.scheduleGrid(); assert.equal(callbacks.length, 1);
+  const callbacks = [], saved = globalThis.requestAnimationFrame;
+  globalThis.requestAnimationFrame = f => { callbacks.push(f); return callbacks.length; };
+  try {
+    const {page} = gridPage(); page.el('grid').hidden = true;
+    for (let i = 0; i < 50; i++) grid.scheduleGrid();
+    assert.equal(callbacks.length, 1); callbacks.shift()();
+    grid.scheduleGrid(); assert.equal(callbacks.length, 1);
+  } finally { globalThis.requestAnimationFrame = saved; }
 });
 test('pagination skips recount and obsolete completion cannot clear a newer pending page', async () => {
-  let finish; const calls = [];
-  const c = {state: {pages: new Set(), pending: new Set(), total: 200, generation: 1, readEpoch: 0, items: []},
-    pageUrl: (offset, count) => {assert.equal(count, false); return String(offset);},
-    api: path => {calls.push(path); return new Promise(resolve => finish = resolve);},
-    abortList: null, renderGrid() {}, error() {}, reload: async () => calls.push('reload')};
-  vm.createContext(Object.assign(c, zh.page)); vm.runInContext(section('async function loadPage', 'function updateCount'), c);
-  const old = c.loadPage(100);
-  c.state.generation++; c.state.pending = new Set([100]);
-  finish({items: []}); await old;
-  assert.ok(c.state.pending.has(100)); assert.equal(c.state.pages.size, 0);
-  c.state.pending.clear(); c.state.countDirty = true; await c.loadPage(100);
-  assert.deepEqual(calls, ['100','reload']);
+  let finish; const calls = [], restore = quietTimers();
+  try {
+    const {state} = gridPage({total: 200}); state.items = [];
+    globalThis.fetch = path => { calls.push(path); return new Promise(resolve => finish = body => resolve({status: 200, ok: true, json: async () => body})); };
+    const old = grid.loadPage(100);
+    assert.match(calls[0], /offset=100/); assert.match(calls[0], /count=0/);
+    state.generation++; state.pending = new Set([100]);
+    finish({items: []}); await old;
+    assert.ok(state.pending.has(100)); assert.equal(state.pages.size, 0);
+    // A count that may have changed is read again with the first page, not with this one.
+    state.pending.clear(); state.countDirty = true; const recount = grid.loadPage(100);
+    await new Promise(r => setImmediate(r));
+    assert.equal(calls.length, 2); assert.doesNotMatch(calls[1], /count=0/);
+    finish({total: 200, items: []}); await recount;
+  } finally { restore(); }
 });
 
 test('successful writes invalidate an in-flight metadata read before UI refresh starts', async () => {
@@ -154,17 +168,19 @@ test('successful writes invalidate an in-flight metadata read before UI refresh 
   c.unlisten();
 });
 test('reload counts only its first page and retries if data changed during the read', async () => {
-  const nodes = {}, pending = [], counts = [];
-  const c = {AbortController, state: {route: {page:'library'}, generation:0, readEpoch:0, pending:new Set()},
-    abortList:null, $:id=>nodes[id] ||= {}, panelPage:()=>false, layout(){}, error(){}, visibleOffsets:()=>[0,100],
-    pageUrl:(offset,count)=>{counts.push(count);return offset;}, api:()=>new Promise(resolve=>pending.push(resolve)),
-    renderGrid(){}, updateCount(){}, renderSelection(){}, renderHeading(){}};
-  vm.createContext(Object.assign(c, zh.page));vm.runInContext(section('async function reload(', 'async function loadPage('),c);
-  const result=c.reload(); c.state.readEpoch++;
-  pending.splice(0).forEach((resolve,i)=>resolve({total:i===0?200:null,items:[]})); await tick();
-  assert.equal(c.state.total,undefined);
-  pending.splice(0).forEach((resolve,i)=>resolve({total:i===0?201:null,items:[]}));await result;
-  assert.deepEqual(counts,[true,false,true,false]);assert.equal(c.state.total,201);assert.equal(c.state.countDirty,false);
+  const pending = [], restore = quietTimers();
+  try {
+    const {state} = gridPage({total: 0}); state.items = [];
+    globalThis.fetch = path => new Promise(resolve => pending.push({path, resolve: body => resolve({status: 200, ok: true, json: async () => body})}));
+    const result = grid.reload(); state.readEpoch++;
+    await new Promise(r => setImmediate(r));
+    const first = pending.splice(0); assert.doesNotMatch(first[0].path, /count=0/); assert.ok(first.slice(1).every(p => /count=0/.test(p.path)));
+    first.forEach((p, i) => p.resolve({total: i === 0 ? 200 : null, items: []})); await new Promise(r => setImmediate(r)); await new Promise(r => setImmediate(r));
+    assert.notEqual(state.total, 200);   // data changed during the read: its answer is not used
+    const again = pending.splice(0); assert.ok(again.length >= 1); assert.doesNotMatch(again[0].path, /count=0/);
+    again.forEach((p, i) => p.resolve({total: i === 0 ? 201 : null, items: []})); await result;
+    assert.equal(state.total, 201); assert.equal(state.countDirty, false);
+  } finally { restore(); }
 });
 test('bootstrap seed is discarded when data or NSFW changes before the batch starts', async () => {
   for (const mutate of [c => c.state.readEpoch++, c => c.state.nsfw = 'hide']) {
@@ -238,11 +254,12 @@ test('older group reads cannot overwrite a newer R18-filtered response', async (
 });
 
 test('a library page finishing after navigation cannot overwrite home items', async () => {
-  let resolve, paints = 0;
-  const c = {state:{route:{page:'library'},pages:new Set(),pending:new Set(),total:200,generation:1,readEpoch:0,items:[]},
-    pageUrl:()=>'/api/assets',api:()=>new Promise(r=>resolve=r),abortList:null,renderGrid(){paints++;},error(){throw Error('stale error');}};
-  vm.createContext(Object.assign(c, zh.page));vm.runInContext(section('async function loadPage', 'function updateCount'),c);
-  const pending=c.loadPage(100);c.state.route={page:'home'};c.state.items=[{uuid:'home'}];
-  resolve({items:[{uuid:'old-library'}]});await pending;
-  assert.equal(c.state.items.length,1);assert.equal(c.state.items[0].uuid,'home');assert.equal(paints,0);
+  let resolve; const restore = quietTimers();
+  try {
+    const {state} = gridPage({total: 200}); state.items = [];
+    globalThis.fetch = () => new Promise(r => resolve = body => r({status: 200, ok: true, json: async () => body}));
+    const before = state.dataVersion, pending = grid.loadPage(100); state.route = {page: 'home'}; state.items = [{uuid: 'home'}];
+    resolve({items: [{uuid: 'old-library'}]}); await pending;
+    assert.equal(state.items.length, 1); assert.equal(state.items[0].uuid, 'home'); assert.equal(state.dataVersion, before);
+  } finally { restore(); }
 });

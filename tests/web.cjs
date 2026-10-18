@@ -30,4 +30,51 @@ function core() {
   Object.assign(loaded.edits, {latest: null, busy: false});
   return loaded;
 }
-module.exports = {load, language, ready, core};
+
+// A page made of plain objects, enough for the desktop layout's modules to draw into (#199): getElementById() makes an
+// element on first use; elements keep children, style, dataset, classes and listeners, and innerHTML as text.
+// Returns {document, el(id)}; also sets globalThis.document.
+class FakeElement {
+  constructor(tag = 'div', id = '') {
+    Object.assign(this, {tagName: tag.toUpperCase(), id, hidden: false, textContent: '', innerHTML: '', value: '', title: '', className: '',
+      style: {}, dataset: {}, children: [], parent: null, listeners: {}, attributes: {}, scrollTop: 0, clientWidth: 1000, clientHeight: 800});
+    const classes = new Set();
+    this.classList = {add: (...c) => c.forEach(x => classes.add(x)), remove: (...c) => c.forEach(x => classes.delete(x)),
+      toggle: (c, on = !classes.has(c)) => (on ? classes.add(c) : classes.delete(c), on), contains: c => classes.has(c)};
+  }
+  get firstElementChild() { return this.children[0] || null; }
+  get nextElementSibling() { return this.parent?.children[this.parent.children.indexOf(this) + 1] || null; }
+  append(...els) { for (const el of els) if (typeof el === 'object') this.insertBefore(el, null); }
+  insertBefore(el, before) {
+    el.remove?.(); const i = before ? this.children.indexOf(before) : this.children.length;
+    this.children.splice(i < 0 ? this.children.length : i, 0, el); el.parent = this; return el;
+  }
+  insertAdjacentHTML(where, html) { this.innerHTML += html; }
+  remove() { if (this.parent) { const a = this.parent.children; a.splice(a.indexOf(this), 1); this.parent = null; } }
+  replaceWith(el) { const p = this.parent; if (p) { p.insertBefore(el, this); this.remove(); } }
+  addEventListener(type, fn) { (this.listeners[type] ||= []).push(fn); }
+  removeEventListener() {}
+  setAttribute(k, v) { this.attributes[k] = String(v); }
+  getAttribute(k) { return this.attributes[k] ?? null; }
+  hasAttribute(k) { return k in this.attributes; }
+  removeAttribute(k) { delete this.attributes[k]; }
+  querySelector() { return new FakeElement(); }
+  querySelectorAll() { return []; }
+  closest() { return null; }
+  contains(el) { return el === this; }
+  matches() { return false; }
+  focus() {} blur() {} scrollIntoView() {} showModal() { this.open = true; } close() { this.open = false; } click() {}
+  getBoundingClientRect() { return {left: 0, top: 0, right: this.clientWidth, bottom: this.clientHeight, width: this.clientWidth, height: this.clientHeight}; }
+}
+function fakePage() {
+  const nodes = new Map();
+  const document = {
+    getElementById: id => { if (!nodes.has(id)) nodes.set(id, new FakeElement('div', id)); return nodes.get(id); },
+    createElement: tag => tag === 'template' ? {set innerHTML(html) { this.content = {firstElementChild: Object.assign(new FakeElement(), {html})}; }} : new FakeElement(tag),
+    querySelector: () => null, querySelectorAll: () => [], addEventListener() {}, activeElement: null,
+    body: new FakeElement('body'), documentElement: new FakeElement('html'),
+  };
+  globalThis.document = document;
+  return {document, el: id => document.getElementById(id)};
+}
+module.exports = {load, language, ready, core, fakePage, FakeElement};

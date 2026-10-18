@@ -28,7 +28,7 @@ function guide({status = 'active', step = 'welcome', ticked = [], seen = [], hid
       results: {total: 0, recognized: 0, with_character: 0, unmatched: 0, characters: 0, ...results}, works},
   };
   vm.createContext(Object.assign(c, zh.page));
-  vm.runInContext(section('// ---------- 新图库的首次引导', '(async () => {'), c);
+  vm.runInContext(section('// ---------- 新图库的首次引导', '// What the ui/ modules still reach in this file'), c);
   return c;
 }
 
