@@ -328,6 +328,23 @@ class PackagingResourcesTest(unittest.TestCase):
         self.assertIn('RMDir /r "$INSTDIR\\resources"', text)
         self.assertNotIn('worker', ''.join(line for line in text.splitlines() if line.lstrip().startswith(('Delete', 'RMDir'))))
 
+    def test_windows_installers_follow_the_display_language(self):
+        """#173: both NSIS installers have English and Simplified Chinese pages, chosen by NSIS
+        from the Windows display language without a dialog, and record it for the uninstaller."""
+        shared = ROOT / 'packaging/nsis-hooks.nsh'
+        save = 'WriteRegStr HKCU "${MANUPRODUCTKEY}" "Installer Language" $LANGUAGE'
+        self.assertIn('!macro NSIS_HOOK_POSTINSTALL', shared.read_text())
+        self.assertIn(save, shared.read_text())
+        for name in ('tauri-bundle.json', 'tauri-full.json'):
+            nsis = json.loads((ROOT / 'packaging' / name).read_text())['bundle']['windows']['nsis']
+            # English first: NSIS falls back to the first language when neither matches.
+            self.assertEqual(nsis['languages'], ['English', 'SimpChinese'], name)
+            self.assertNotIn('displayLanguageSelector', nsis, name)
+            hooks = (ROOT / 'desktop' / nsis['installerHooks']).resolve()
+            text = hooks.read_text()
+            self.assertTrue(hooks == shared or '!include "${__FILEDIR__}\\nsis-hooks.nsh"' in text, name)
+            self.assertEqual(text.count('NSIS_HOOK_POSTINSTALL'), 0 if hooks != shared else 1, name)
+
     @unittest.skipIf(os.name == 'nt', 'POSIX shell launcher execution only')
     def test_relocated_ordinary_launch_preserves_overrides_and_remains_lazy(self):
         keys = ('ILLUSTASH_ROOT', 'ILLUSTASH_MODELS', 'ILLUSTASH_SHARED',

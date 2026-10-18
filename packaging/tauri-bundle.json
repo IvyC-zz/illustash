@@ -6,7 +6,9 @@
     "targets": "all",
     "windows": {
       "nsis": {
-        "installMode": "currentUser"
+        "installMode": "currentUser",
+        "languages": ["English", "SimpChinese"],
+        "installerHooks": "../packaging/nsis-hooks.nsh"
       }
     }
   }
