@@ -3,6 +3,7 @@ use crate::{
     http::LibraryContext,
     http_json::{parse_python, Json},
     http_read::{display, rows, strings, VISIBLE},
+    undo_labels::UndoLabel,
     Error, Result,
 };
 use rusqlite::Connection;
@@ -21,15 +22,6 @@ pub(crate) fn rating(alias: &str, nsfw: &str) -> Result<String> {
 fn entity_name(c: &Connection, id: &str) -> Result<Option<String>> {
     let value = display(c, Json::object([("id", id.into())]))?;
     Ok(value.get("name").map(|v| v.text().to_owned()))
-}
-fn digits(s: &str) -> (&str, &str) {
-    let n = s
-        .char_indices()
-        .take_while(|(_, c)| crate::compat_unicode::decimal(*c).is_some())
-        .last()
-        .map(|(i, c)| i + c.len_utf8())
-        .unwrap_or(0);
-    s.split_at(n)
 }
 pub(crate) fn action_label(c: &Connection, r: &Json) -> Result<String> {
     let label = r.get("label").expect("http_app internal invariant").text();
@@ -79,20 +71,13 @@ pub(crate) fn action_label(c: &Connection, r: &Json) -> Result<String> {
         .map(|v| v.text().to_owned())
         .filter(|v| !v.is_empty() && seen.insert(v.clone()))
         .collect();
-    let swap = label.strip_prefix("已将 ").and_then(|s| {
-        let (n, rest) = digits(s);
-        (!n.is_empty() && rest.starts_with(" 张从 ") && rest.contains(" 换成 ")).then_some(n)
-    });
-    if let Some(n) = swap.filter(|_| ids.len() == 2) {
+    // The count of these steps is only in their stored label (crates/core undo_labels.rs): read it back from there.
+    if let Some(n) = UndoLabel::Swap.count(label).filter(|_| ids.len() == 2) {
         if let (Some(left), Some(right)) = (entity_name(c, &ids[0])?, entity_name(c, &ids[1])?) {
-            return Ok(format!("已将 {n} 张从 {name} 换成 {other}", name = left, other = right));
+            return Ok(UndoLabel::Swap.fill(n, &left, &right));
         }
     }
-    let sweep = label
-        .strip_prefix("已将 ")
-        .and_then(|s| s.rsplit_once(" 标为已检查（"))
-        .and_then(|(_, s)| s.strip_suffix(" 张）"))
-        .filter(|s| !s.is_empty() && digits(s).1.is_empty());
+    let sweep = UndoLabel::Sweep.count(label);
     if sweep.is_some() && ids.is_empty() {
         ids = strings(
             c,
@@ -103,20 +88,11 @@ pub(crate) fn action_label(c: &Connection, r: &Json) -> Result<String> {
     if ids.len() == 1 {
         if let Some(name) = entity_name(c, &ids[0])? {
             if let Some(n) = sweep {
-                return Ok(format!("已将 {name} 标为已检查（{n} 张）"));
+                return Ok(UndoLabel::Sweep.fill(n, &name, ""));
             }
-            for (start, ends) in
-                [("已将 ", &[" 张设为 ", " 张移出 "][..]), ("已给 ", &[" 张加上 "][..]), ("已从 ", &[" 张去掉 "][..])]
-            {
-                if let Some(s) = label.strip_prefix(start) {
-                    let (n, rest) = digits(s);
-                    if !n.is_empty() {
-                        for end in ends {
-                            if rest.starts_with(end) {
-                                return Ok(format!("{start}{n}{end}{name}"));
-                            }
-                        }
-                    }
+            for kind in [UndoLabel::Set, UndoLabel::Remove, UndoLabel::Add, UndoLabel::Drop] {
+                if let Some(n) = kind.count(label) {
+                    return Ok(kind.fill(n, &name, ""));
                 }
             }
         }
