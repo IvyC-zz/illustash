@@ -1,5 +1,5 @@
-// The core layer on an English page (#173, #182, #199); tests/format.test.cjs and tests/session_switch.test.cjs are
-// the Chinese page.
+// The core layer on an English page (#173, #182, #199), and the 画师 section's 「也许是 TA」 line (ui/artists.js, #223);
+// tests/format.test.cjs, tests/session_switch.test.cjs and tests/artist_section.test.cjs are the Chinese page.
 const {test, before} = require('node:test');
 const assert = require('node:assert/strict');
 const web = require('./web.cjs');
@@ -22,4 +22,11 @@ test('requests name the language; a refusal is shown translated and kept as sent
   assert.doesNotMatch(refused.message, /\p{Script=Han}/u);
   assert.equal(refused.said, '冲突：会话已过期，请刷新页面');
   assert.ok(said(refused.said, '会话已过期，请刷新页面'));
+});
+
+test('a maybe artist renders in English too', async () => {
+  const {artistSection} = await web.load('ui/artists.js');
+  const maybe = {id: 'a1', name: '合成画师', reason: '合成理由', homes: [{url: 'https://example.com/a1', label: 'example', site: 'Example'}]};
+  const html = artistSection({artists: [], posts: [], maybe: [maybe]}, {});
+  assert.match(html, /Maybe <a class="artist-name" href="#\/library\?artist=a1" title="Show only their pictures in the library">合成画师<\/a>/);
 });
