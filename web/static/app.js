@@ -2802,8 +2802,9 @@ async function renderSettings(fetchMissing = true, refresh = false) {
       ${startupSwitch('similar', t('启动时检测相似图片'), t('只比较新导入的图'))}
       <div class="fold-row">${FOLD_OPTIONS.map(([k, label, hint]) => `<label class="fold-option" title="${hint}"><input type="checkbox" data-fold="${k}" ${(state.fold || []).includes(k) ? 'checked' : ''} ${!state.fold ? 'disabled' : ''}><span>${label}</span><small>${hint}</small></label>`).join('')}</div>`,
     setNetwork: networkCard,
-    setData: () => cardHead(t('备份与存储'), t('备份的是应用数据库里的人工整理记录；数据库升级前会自动备份一次。恢复备份前先退出 app。')) + `
+    setData: () => cardHead(t('备份与存储'), t('备份的是应用数据库里的人工整理记录；数据库升级前会自动备份一次。恢复备份前先退出 app。') + ' ' + t('每次打开图库后会在后台检查识别结果数据库，整理记录数据库每 7 天检查一次；上次没有正常关闭时，打开前先检查两个库。')) + `
       <div class="setting-line"><span>${info ? t('共 {n} 份备份', {n: number(info.backup_count)}) + (info.backups?.[0] ? `<small class="line-hint">${t('最近一次 {time}', {time: esc(localStamp(info.backups[0].time))})}</small>` : '') : '…'}</span><button class="quiet small" id="backupNow" ${!info ? 'disabled' : ''}>${t('立即备份')}</button></div>
+      <div class="setting-line" id="integrityLine"></div>
       <div class="setting-line"><span>${t('缩略图缓存')}<small class="line-hint">${info ? t('{n} 个文件，{size}；清除后浏览时会重新生成', {n: number(info.thumbnails.files), size: bytes(info.thumbnails.bytes)}) : ''}</small></span><button class="quiet small" id="clearCache" ${info?.thumbnails.files ? '' : 'disabled'}>${t('清除')}</button></div>
       ${info?.backups?.length ? fold('backupList', t('最近的备份'), `<table class="settings-table">${info.backups.slice(0, 5).map(b => `<tr><td class="mono">${esc(b.name)}</td><td>${bytes(b.bytes)}</td></tr>`).join('')}</table>`) : ''}
       ${info ? fold('dataPaths', t('存储位置'), `<table class="settings-table">${[[t('源数据库（识别结果，可以重建）'), info.source], [t('应用数据库（人工整理，不要删）'), info.library], [t('缩略图缓存（可以放心删）'), info.thumbnails]].map(([label, d]) => `<tr><td>${label}</td><td class="mono">${esc(d.path)}</td><td>${bytes(d.bytes)}</td></tr>`).join('')}</table>`) : ''}`,
@@ -2826,6 +2827,7 @@ async function renderSettings(fetchMissing = true, refresh = false) {
   const startup = async (body, done) => { try { state.settings = await post('/api/startup', body); toast(done); } catch (e) { toast(e.message); } renderSettings(); };
   page.onchange = e => { const box = e.target.closest('[data-startup]'); if (box) startup({[box.dataset.startup]: box.checked}, t('已保存，下次启动时生效')); };
   if ($('backupNow')) $('backupNow').onclick = async () => { try { const r = await post('/api/backup', {}); toast(t('备份完成：{name}', {name: r.path.split('/').pop()})); state.settings = null; renderSettings(); } catch (e) { toast(e.message); } };
+  renderIntegrityLine();
   if ($('clearCache')) $('clearCache').onclick = async () => { try { const r = await post('/api/cache', {action: 'clear'}); state.settings = r; toast(t('已清除 {n} 个缩略图', {n: number(r.removed)})); renderSettings(); } catch (e) { toast(e.message); } };
   for (const g of page.querySelectorAll('[data-setting]')) for (const b of g.querySelectorAll('button')) b.onclick = () => {
     const key = g.dataset.setting, v = b.dataset.value;
@@ -3037,6 +3039,33 @@ async function startImport(path) {
 async function cancelImport() {
   try { await api('/api/imports/cancel', {method: 'POST', body: '{}'}); } catch (err) { toast(err.message); }
   pollImports();
+}
+// Database checks (#212): the background check after opening, 「立即检查」 in settings, and the notice when a check
+// found damage. The service then refuses every write; the notice says what to do.
+let integrityTimer;
+async function pollIntegrity() {
+  clearTimeout(integrityTimer);
+  const token = state.token;
+  try { state.integrity = await api('/api/integrity'); }
+  catch { if (token === state.token) integrityTimer = setTimeout(pollIntegrity, 10000); return; }
+  if (token !== state.token) return;
+  const damaged = state.integrity.damaged;
+  $('damageBanner').textContent = damaged ? tb(damaged.message) : ''; $('damageBanner').hidden = !damaged;
+  renderIntegrityLine();
+  if (state.integrity.running) integrityTimer = setTimeout(pollIntegrity, 2000);
+}
+function integrityLine() {
+  const g = state.integrity, run = g?.running;
+  const when = file => g.checked?.[file] ? localStamp(g.checked[file]) : t('还没有检查过');
+  const hint = !g ? '' : run ? t('正在检查 {file}，{percent}%', {file: run.database, percent: Math.floor(run.done * 100)})
+    : t('上次检查：library.sqlite {library}，source.sqlite {source}', {library: when('library.sqlite'), source: when('source.sqlite')});
+  const failed = g?.error && !run ? `<small class="line-hint">${esc(t('上次检查没有完成：{error}', {error: g.error}))}</small>` : '';
+  return `<span>${t('数据库检查')}<small class="line-hint">${esc(hint)}</small>${failed}</span><button class="quiet small" id="checkNow" ${!g || run || g.damaged ? 'disabled' : ''}>${t('立即检查')}</button>`;
+}
+function renderIntegrityLine() {
+  if (!$('integrityLine')) return;
+  $('integrityLine').innerHTML = integrityLine();
+  $('checkNow').onclick = async () => { try { state.integrity = await post('/api/integrity', {}); renderIntegrityLine(); pollIntegrity(); } catch (e) { toast(e.message); } };
 }
 async function pollExport() {
   for (let i = 0; i < 2400 && state.libraries?.export?.status === 'running'; i++) { await new Promise(r => setTimeout(r, 1500)); await loadLibraries(); }
@@ -3825,6 +3854,7 @@ async function replayGuide() {
     await meta;
     window.splash?.ready();
     taskTick();
+    pollIntegrity();
     // The library opened although it could not be listed among the recent ones (#176): say so once.
     api('/api/libraries').then(x => {
       if (x?.unlisted) error(t('没能把这个图库记进最近图库：{why}。图库照常可用，只是下次启动时可能不会自动打开它。', {why: x.unlisted}));

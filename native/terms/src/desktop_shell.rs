@@ -27,6 +27,12 @@ pub fn upgrade_note() -> &'static str {
     crate::app_upgrade::NEEDED
 }
 
+/// After the service failed to open `path`: what to do, when a check found one of its databases damaged (#212).
+/// Read-only; the record stays until a check before opening finds the database sound again.
+pub fn damage_note(path: &Path) -> Option<&'static str> {
+    crate::app_integrity::recorded_damage(path).map(|damage| damage.guidance())
+}
+
 /// A folder the user picked is a library package only if it carries library.json.
 pub fn is_library(path: &Path) -> bool {
     path.join("library.json").is_file()

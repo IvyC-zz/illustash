@@ -5,7 +5,10 @@ use serde_json::Value;
 use std::{
     fs,
     path::{Path, PathBuf},
-    sync::Arc,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
     time::Duration,
 };
 
@@ -33,20 +36,48 @@ pub struct Library {
 
 impl Library {
     pub fn open(path: &Path) -> Result<Self> {
-        Self::open_validated(path, false, None)
+        Self::open_validated(path, false, Checks::Now(None))
     }
 
     /// Same validation; a multi-GiB package's integrity checks take tens of seconds, so report them.
     pub fn open_reporting(path: &Path, progress: Progress) -> Result<Self> {
-        Self::open_validated(path, false, Some(progress))
+        Self::open_validated(path, false, Checks::Now(Some(progress)))
+    }
+
+    /// The same validation without the two full integrity checks, for a session that decides on them itself
+    /// (#212, `app_service::open_owned`): versions, core markers and the source base schema are still required.
+    pub(crate) fn open_deferring_checks(path: &Path) -> Result<Self> {
+        Self::open_validated(path, false, Checks::Deferred)
     }
 
     /// Explicit upgrade preflight only. Ordinary opening never accepts an old core.
     pub(crate) fn open_for_upgrade(path: &Path) -> Result<Self> {
-        Self::open_validated(path, true, None)
+        Self::open_validated(path, true, Checks::Now(None))
     }
 
-    fn open_validated(path: &Path, upgrade: bool, progress: Option<Progress>) -> Result<Self> {
+    fn open_validated(path: &Path, upgrade: bool, checks: Checks) -> Result<Self> {
+        let library = Self::locate(path)?;
+        if let Checks::Now(progress) = checks {
+            library.check(progress)?;
+        }
+        let mut db = read_connection(&library.db())?;
+        // One read snapshot: a concurrent migration cannot supply a mixture of version/ownership flags.
+        let tx = db.transaction()?;
+        validate_checked(&tx, upgrade)?;
+        tx.commit()?;
+        let source = read_connection(&library.source())?;
+        // Source layouts have no independent version number. Require only the established base schema;
+        // new source links/presets are not needed by the migrated reads and must never be added on open.
+        source.prepare(
+            "SELECT uuid,filename,src_path,width,height,added_at,src_kind,in_scope,trashed FROM assets LIMIT 0",
+        )?;
+        source.prepare("SELECT uuid,dim,value,conf FROM labels LIMIT 0")?;
+        // provenance.sqlite is optional: the existing HTTP readers supply empty evidence when absent.
+        Ok(library)
+    }
+
+    /// The package and its library.json, without reading either database.
+    pub(crate) fn locate(path: &Path) -> Result<Self> {
         if path.extension().and_then(|s| s.to_str()) != Some("pilib") {
             return Err(Error::Invalid("图库包的扩展名必须是 .pilib".into()));
         }
@@ -74,49 +105,53 @@ impl Library {
         }
         let ordered_config =
             serde_json::from_str(&text).map_err(|e| Error::Invalid(format!("无效 library.json：{e}")))?;
-        let library = Self { display_path: path, instance_path, config, ordered_config };
-        // Weight each check by its file size, so the overall fraction tracks the bytes actually read.
+        Ok(Self { display_path: path, instance_path, config, ordered_config })
+    }
+
+    /// Validate the same package again through its canonical path, keeping the alias the user opened for display.
+    pub(crate) fn reopen(&self) -> Result<Self> {
+        self.keep_display(Self::open_validated(&self.instance_path, false, Checks::Now(None))?)
+    }
+
+    /// `reopen` for the explicit upgrade workflow, which accepts an old core.
+    pub(crate) fn reopen_for_upgrade(&self) -> Result<Self> {
+        self.keep_display(Self::open_validated(&self.instance_path, true, Checks::Now(None))?)
+    }
+
+    /// Both full integrity checks, library.sqlite first; `progress` gets the overall fraction, each file weighted
+    /// by its size so the fraction tracks the bytes actually read. Damage is an error naming what SQLite found.
+    pub(crate) fn check(&self, progress: Option<Progress>) -> Result<()> {
+        match self.inspect(progress)?.pop() {
+            Some((_, Verdict::Damaged(result))) => Err(Error::Schema(format!("图库数据库损坏：{result}"))),
+            _ => Ok(()),
+        }
+    }
+
+    /// `check` that stops at the first damaged file and says which it was, for the session's own handling (#212).
+    pub(crate) fn inspect(&self, progress: Option<Progress>) -> Result<Vec<(&'static str, Verdict)>> {
+        let files = [("library.sqlite", self.db()), ("source.sqlite", self.source())];
         let weights = match &progress {
             Some(_) => {
-                let (db, source) = (database_bytes(&library.db())?, database_bytes(&library.source())?);
+                let (db, source) = (database_bytes(&files[0].1)?, database_bytes(&files[1].1)?);
                 let total = (db + source).max(1) as f64;
                 [(0.0, db as f64 / total), (db as f64 / total, source as f64 / total)]
             }
             None => [(0.0, 0.0); 2],
         };
-        let report = |index: usize, label: &'static str| {
-            progress.clone().map(|p| {
+        let mut found = Vec::new();
+        for (index, (label, path)) in files.into_iter().enumerate() {
+            let report = progress.clone().map(|p| {
                 let (base, span) = weights[index];
-                Arc::new(move |done: f64| p(label, base + span * done))
-                    as Arc<dyn Fn(f64) + Send + Sync + std::panic::RefUnwindSafe>
-            })
-        };
-        let mut db = read_connection(&library.db())?;
-        // One read snapshot: a concurrent migration cannot supply a mixture of version/ownership flags.
-        let tx = db.transaction()?;
-        check_database_reporting(&tx, report(0, "library.sqlite"))?;
-        validate_checked(&tx, upgrade)?;
-        tx.commit()?;
-        let source = read_connection(&library.source())?;
-        check_database_reporting(&source, report(1, "source.sqlite"))?;
-        // Source layouts have no independent version number. Require only the established base schema;
-        // new source links/presets are not needed by the migrated reads and must never be added on open.
-        source.prepare(
-            "SELECT uuid,filename,src_path,width,height,added_at,src_kind,in_scope,trashed FROM assets LIMIT 0",
-        )?;
-        source.prepare("SELECT uuid,dim,value,conf FROM labels LIMIT 0")?;
-        // provenance.sqlite is optional: the existing HTTP readers supply empty evidence when absent.
-        Ok(library)
-    }
-
-    /// Validate the same package again through its canonical path, keeping the alias the user opened for display.
-    pub(crate) fn reopen(&self) -> Result<Self> {
-        self.keep_display(Self::open_validated(&self.instance_path, false, None)?)
-    }
-
-    /// `reopen` for the explicit upgrade workflow, which accepts an old core.
-    pub(crate) fn reopen_for_upgrade(&self) -> Result<Self> {
-        self.keep_display(Self::open_validated(&self.instance_path, true, None)?)
+                Arc::new(move |done: f64| p(label, base + span * done)) as Report
+            });
+            let verdict = inspect_file(&path, report, None)?;
+            let damaged = matches!(verdict, Verdict::Damaged(_));
+            found.push((label, verdict));
+            if damaged {
+                break;
+            }
+        }
+        Ok(found)
     }
 
     fn keep_display(&self, mut library: Self) -> Result<Self> {
@@ -210,8 +245,32 @@ pub(crate) fn read_connection(path: &Path) -> Result<Connection> {
     conn.busy_timeout(Duration::from_secs(10))?;
     Ok(conn)
 }
+/// Whether opening runs the two full integrity checks first (`Now`), or leaves them to the session (#212).
+enum Checks {
+    Now(Option<Progress>),
+    Deferred,
+}
+
 pub(crate) fn check_database(conn: &Connection) -> Result<()> {
-    check_database_reporting(conn, None)
+    match check_database_reporting(conn, None, None)? {
+        Verdict::Sound => Ok(()),
+        Verdict::Damaged(result) => Err(Error::Schema(format!("图库数据库损坏：{result}"))),
+    }
+}
+
+/// What a full integrity check found. Failures that say nothing about the file (I/O, a stopped check) are errors.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum Verdict {
+    Sound,
+    /// SQLite's own description of the first problem it found.
+    Damaged(String),
+}
+pub(crate) type Report = Arc<dyn Fn(f64) + Send + Sync + std::panic::RefUnwindSafe>;
+
+/// One file's full check on its own read-only connection. Setting `stop` interrupts it within about a hundred SQLite
+/// steps; that is an error, not a verdict.
+pub(crate) fn inspect_file(path: &Path, progress: Option<Report>, stop: Option<Arc<AtomicBool>>) -> Result<Verdict> {
+    check_database_reporting(&read_connection(path)?, progress, stop)
 }
 
 /// quick_check reads every page, then (for tables) every row again to check constraints; SQLite 3.43+ calls
@@ -223,38 +282,69 @@ pub(crate) fn check_database(conn: &Connection) -> Result<()> {
 /// Misses alone are not enough: the bundled SQLite (SQLITE_ENABLE_MEMORY_MANAGEMENT) puts every connection in
 /// the process into one page-cache group, so this connection may keep a whole small file cached by recycling
 /// other connections' idle pages, and the second pass then misses nothing (#84).
+///
+/// A file SQLite reports as corrupt or as not a database at all is damaged as well, whichever statement finds it.
 fn check_database_reporting(
     conn: &Connection,
-    progress: Option<Arc<dyn Fn(f64) + Send + Sync + std::panic::RefUnwindSafe>>,
-) -> Result<()> {
+    progress: Option<Report>,
+    stop: Option<Arc<AtomicBool>>,
+) -> Result<Verdict> {
     const READS: f64 = 1.5;
-    if let Some(progress) = &progress {
-        let pages: i64 = conn.query_row("PRAGMA page_count", [], |row| row.get(0))?;
+    let watched = progress.is_some() || stop.is_some();
+    if watched {
+        let pages: i64 = match conn.query_row("PRAGMA page_count", [], |row| row.get(0)) {
+            Ok(pages) => pages,
+            Err(e) => return damage(e),
+        };
         let expected = pages.max(1) as f64 * READS;
         let handle = Handle(unsafe { conn.handle() });
         let start = page_requests(handle);
         let report = progress.clone();
-        progress(0.0);
+        if let Some(progress) = &progress {
+            progress(0.0);
+        }
         conn.progress_handler(
             100,
             Some(move || {
-                report(((page_requests(handle) - start).max(0) as f64 / expected).min(0.99));
-                false
+                if let Some(report) = &report {
+                    report(((page_requests(handle) - start).max(0) as f64 / expected).min(0.99));
+                }
+                stop.as_ref().is_some_and(|stop| stop.load(Ordering::SeqCst))
             }),
         );
     }
     let result: rusqlite::Result<String> = conn.query_row("PRAGMA quick_check(1)", [], |row| row.get(0));
-    if let Some(progress) = &progress {
+    if watched {
         conn.progress_handler(0, None::<fn() -> bool>);
-        if result.is_ok() {
-            progress(1.0);
+    }
+    match result {
+        Ok(text) if text == "ok" => {
+            if let Some(progress) = &progress {
+                progress(1.0);
+            }
+            Ok(Verdict::Sound)
         }
+        Ok(text) => Ok(Verdict::Damaged(text)),
+        Err(e) => damage(e),
     }
-    let result = result?;
-    if result != "ok" {
-        return Err(Error::Schema(format!("图库数据库损坏：{result}")));
+}
+
+/// SQLite's corruption and not-a-database results are the file's own state; anything else stays an error.
+pub(crate) fn damage(error: rusqlite::Error) -> Result<Verdict> {
+    match corruption(&error) {
+        Some(detail) => Ok(Verdict::Damaged(detail)),
+        None => Err(error.into()),
     }
-    Ok(())
+}
+pub(crate) fn corruption(error: &rusqlite::Error) -> Option<String> {
+    match error {
+        rusqlite::Error::SqliteFailure(e, message)
+            if matches!(e.code, rusqlite::ErrorCode::DatabaseCorrupt | rusqlite::ErrorCode::NotADatabase) =>
+        {
+            Some(message.clone().unwrap_or_else(|| e.to_string()))
+        }
+        _ => None,
+    }
 }
 
 /// The connection's own handle, read only from its progress callback (same thread, inside its step).
