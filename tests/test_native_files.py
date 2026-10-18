@@ -138,6 +138,88 @@ class NativeFilesTest(unittest.TestCase):
         self.assertFalse(self.sentinel.exists())
 
 
+    def test_update_check_is_app_wide_asks_first_and_checks_each_launch(self):
+        # #191: GitHub's releases list, here a local stand-in (ILLUSTASH_UPDATE_BASE); nothing leaves the machine.
+        from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+        import threading
+        seen, replies = [], []
+
+        class GitHub(BaseHTTPRequestHandler):
+            def do_GET(self):
+                seen.append((self.path, self.headers.get('User-Agent'), self.headers.get('Cookie')))
+                status, body = replies[0] if replies else (200, b'[]')
+                self.send_response(status); self.send_header('Content-Type', 'application/json')
+                self.send_header('Content-Length', str(len(body))); self.end_headers(); self.wfile.write(body)
+
+            def log_message(self, *args):
+                pass
+
+        server = ThreadingHTTPServer(('127.0.0.1', 0), GitHub)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.addCleanup(server.server_close); self.addCleanup(server.shutdown)
+        releases = json.dumps([{'tag_name': 'v100.0.0-beta.1', 'draft': False, 'prerelease': True},
+                               {'tag_name': 'v99.1.0', 'draft': True, 'prerelease': False},
+                               {'tag_name': 'v99.0.0', 'draft': False, 'prerelease': False}]).encode()
+        replies.append((200, releases))
+
+        def launch():
+            self.stop(self.process)
+            self.env['ILLUSTASH_UPDATE_BASE'] = f'http://127.0.0.1:{server.server_port}/'
+            self.process, self.log = self.start(self.lib.path)
+            self.token = json.loads(self.request('/api/bootstrap')['body'])['token']
+
+        def updates(body=None):
+            response = self.request('/api/updates', body)
+            self.assertEqual((response['status'], response['route']), (200, 'core'), response['body'])
+            return json.loads(response['body'])
+
+        launch()
+        state = updates()
+        current = json.loads(self.request('/api/about')['body'])['version']
+        self.assertEqual({k: state[k] for k in ('current', 'auto', 'checked_at', 'latest', 'newer', 'due')},
+                         {'current': current, 'auto': None, 'checked_at': None, 'latest': None, 'newer': False, 'due': False})
+        self.assertEqual(state['address'], 'https://api.github.com/repos/shio-vinyl/illustash/releases')
+        # Not allowed yet: an automatic check answers without the network.
+        self.assertFalse(updates({'action': 'check', 'auto': True})['due'])
+        self.assertEqual(seen, [])
+        self.assertTrue(updates({'action': 'auto', 'allow': True})['due'])
+        state = updates({'action': 'check', 'auto': True})
+        self.assertEqual(len(seen), 1)
+        self.assertEqual(seen[0], ('/repos/shio-vinyl/illustash/releases?per_page=30', 'Illustash-update-check', None))
+        self.assertEqual((state['latest'], state['newer'], state['due'], state['error']), ('99.0.0', True, False, None))
+        self.assertEqual(state['url'], 'https://github.com/shio-vinyl/illustash/releases/tag/v99.0.0')
+        # Once per launch however many pages ask; a manual check is always the person's click.
+        updates({'action': 'check', 'auto': True})
+        self.assertEqual(len(seen), 1)
+        replies[0] = (500, b'{}')
+        state = updates({'action': 'check'})
+        self.assertEqual((len(seen), state['latest'], state['error']), (2, '99.0.0', 'GitHub 返回了错误（HTTP 500）'))
+        self.assertTrue(updates({'action': 'dismiss'})['dismissed'])
+        # App-wide: the choice sits beside the language in preferences.json, the result in updates.json.
+        self.assertEqual(json.loads((self.support / 'preferences.json').read_text(encoding='utf-8')), {'update_check': 'auto'})
+        self.assertEqual(json.loads((self.support / 'updates.json').read_text(encoding='utf-8'))['dismissed'], '99.0.0')
+        # The next launch checks again even within the day.
+        replies[0] = (200, releases)
+        launch()
+        self.assertTrue(updates()['due'])
+        state = updates({'action': 'check', 'auto': True})
+        self.assertEqual((len(seen), state['error'], state['dismissed']), (3, None, True))
+        # Turned off: the next launch does not check.
+        updates({'action': 'auto', 'allow': False})
+        launch()
+        self.assertFalse(updates({'action': 'check', 'auto': True})['due'])
+        self.assertEqual(len(seen), 3)
+        for body in ({}, {'action': 'install'}, {'action': 'auto'}, {'action': 'check', 'url': 'https://example.com/'}):
+            self.assertEqual(self.request('/api/updates', body)['status'], 400, body)
+        self.assertEqual(self.request('/api/updates', {'action': 'check'}, token='bad')['status'], 403)
+        self.assertEqual(len(seen), 3)
+        # Only a plain HTTP port on this machine may stand in for GitHub.
+        self.env['ILLUSTASH_UPDATE_BASE'] = 'https://example.com/'
+        self.stop(self.process); self.process, self.log = self.start(self.lib.path)
+        self.token = json.loads(self.request('/api/bootstrap')['body'])['token']
+        self.assertEqual(updates({'action': 'check'})['error'], '检查更新的测试服务只允许本机 HTTP 端口')
+        self.assertFalse(self.sentinel.exists())
+
     def test_old_cache_hits_original_bytes_and_signed_key(self):
         path = asset(self, 'cache-雪', Image.new('RGB', (10, 12), 'red'))
         for mtime in (1_700_000_000_123_456_789, -1_234_567_890):

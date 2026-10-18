@@ -23,6 +23,14 @@ pub(super) fn handle(request: Request, host: &Host, received: u64, text: &str, b
         }
         return;
     }
+    // App-wide and possibly a network round trip (#191): never holds the session, so switching is not delayed.
+    if request.url() == "/api/updates" {
+        match crate::app_updates::post(&body) {
+            Ok(value) => respond(request, value, 200, "core"),
+            Err(e) => failure(request, e, true),
+        }
+        return;
+    }
     // The native archive picker runs without holding the session; cancellation or
     // a switch must never deliver the chosen file into a replacement package.
     let mut body = body;

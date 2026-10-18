@@ -11,10 +11,10 @@ const element = () => ({hidden: false, innerHTML: '', dataset: {}, style: {}, of
   classList: {add() {}, remove() {}, toggle() {}}, addEventListener() {}, querySelector: () => element(), querySelectorAll: () => []});
 const plain = v => JSON.parse(JSON.stringify(v));
 
-function guide({status = 'active', step = 'welcome', ticked = [], seen = [], hidden = false, results = {}, works, names, sync = {status: 'done'}, route = 'home', index} = {}) {
+function guide({status = 'active', step = 'welcome', ticked = [], seen = [], hidden = false, results = {}, works, names, sync = {status: 'done'}, route = 'home', index, updates, tasks = []} = {}) {
   const nodes = {}, posted = [];
   const c = {
-    state: {token: 't', route: {page: route}, sync, names, index}, posted, nodes,
+    state: {token: 't', route: {page: route}, sync, names, index, updates}, posted, nodes, taskList: () => tasks,
     $: id => nodes[id] ||= element(), esc: s => String(s ?? ''), number: n => String(n), toast() {}, shortcut: k => '⌘' + k,
     SYNC_ACTIVE: ['scanning', 'recognising', 'importing'], syncLine: s => 'line:' + s.status, WORK_NAMES: {blue_archive: '蔚蓝档案'},
     setTimeout: () => 0, requestAnimationFrame() {}, addEventListener() {}, innerWidth: 1200, innerHeight: 800, go() {},
@@ -83,6 +83,52 @@ test('after the first sync the most-pictured followable work is offered, with it
   await busy.loadGuide(true);
   busy.drawNudge();
   assert.equal(busy.nodes.nudge.innerHTML, '', 'not while the sync is still running');
+});
+
+test('automatic update checks are asked once by the guide, app-wide (#191)', async () => {
+  const names = {network: {granted_at: '2026-10-12'}};
+  const c = guide({names, updates: {auto: null, newer: false}});
+  await c.loadGuide();
+  c.drawNudge();
+  assert.match(c.nodes.nudge.innerHTML, /要自动检查新版本吗/);
+  assert.match(c.nodes.nudge.innerHTML, /不发送图库里的任何信息/);
+  assert.match(c.nodes.nudge.innerHTML, /data-nudge="allow"/);
+  // Answered either way (here or in another library): not asked again.
+  for (const auto of [true, false]) {
+    const answered = guide({names, updates: {auto, newer: false}});
+    await answered.loadGuide();
+    answered.drawNudge();
+    assert.equal(answered.nodes.nudge.innerHTML, '', String(auto));
+  }
+  // The names question comes first; a library whose guide is over never asks.
+  const both = guide({results: {characters: 3}, names: {network: {authorized: false}}, updates: {auto: null}});
+  await both.loadGuide();
+  both.drawNudge();
+  assert.match(both.nodes.nudge.innerHTML, /要联网查它们的中文名吗/);
+  const over = guide({status: 'off', updates: {auto: null}});
+  await over.loadGuide();
+  over.drawNudge();
+  assert.equal(over.nodes.nudge.innerHTML, '');
+});
+
+test('a newer release is offered outside the guide, but not while a task runs or once dismissed (#191)', async () => {
+  const updates = {auto: true, newer: true, dismissed: false, latest: '0.2.0', current: '0.1.0', url: 'https://github.com/shio-vinyl/illustash/releases/tag/v0.2.0'};
+  const c = guide({status: 'off', updates});
+  await c.loadGuide();
+  c.drawNudge();
+  assert.match(c.nodes.nudge.innerHTML, /有新版本 0\.2\.0/);
+  assert.match(c.nodes.nudge.innerHTML, /现在是 0\.1\.0/);
+  assert.match(c.nodes.nudge.innerHTML, /data-nudge="open"/);
+  const busy = guide({status: 'off', updates, tasks: [{key: 'sync', active: true}]});
+  await busy.loadGuide();
+  busy.drawNudge();
+  assert.equal(busy.nodes.nudge.innerHTML, '', 'not while a task runs');
+  for (const other of [{dismissed: true}, {newer: false}]) {
+    const quiet = guide({status: 'off', updates: {...updates, ...other}});
+    await quiet.loadGuide();
+    quiet.drawNudge();
+    assert.equal(quiet.nodes.nudge.innerHTML, '', JSON.stringify(other));
+  }
 });
 
 test('the tour speaks of the running sync at the tasks stop', async () => {

@@ -38,6 +38,7 @@ mod app_settings;
 mod app_sources;
 mod app_sync;
 pub mod app_tasks;
+mod app_updates;
 mod app_upgrade;
 mod image_samples;
 pub mod index_compute;
