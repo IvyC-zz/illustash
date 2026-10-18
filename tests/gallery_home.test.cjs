@@ -1,12 +1,8 @@
 const {test, before} = require('node:test');
 const web = require('./web.cjs');   // core/ modules, ui/grid.js (#199)
-let gridModule;
-before(async () => { await web.ready(); gridModule = await web.load('ui/grid.js'); });
+let gridModule, homeModule;
+before(async () => { await web.ready(); gridModule = await web.load('ui/grid.js'); homeModule = await web.load('ui/home.js'); });
 const assert = require('node:assert/strict');
-const vm = require('node:vm');
-const zh = require('./i18n_zh.cjs');   // t() of a Chinese page (#173)
-const fs = require('node:fs');
-const source = fs.readFileSync(require('node:path').join(__dirname, '../web/static/app.js'), 'utf8');
 // The grid's geometry is ui/grid.js; a hidden grid element keeps renderGrid() from drawing.
 let layouts = 0;
 function grid(total = 103, fit = true) {
@@ -66,20 +62,23 @@ test('square mode and zoom keep predictable geometry; toggling fit anchors the s
   const row=c.rowAt(c.$('viewport').scrollTop); assert.ok(c.rowStart(row)<=anchor && anchor<c.rowStart(row+1));
   c.toggleFit();assert.equal(c.state.fit,false);
 });
+// The home page is ui/home.js; its state is home, the observer included; the page is a fake one.
 function homeHarness(api){
-  const home={days:[{day:'2026-10-02',items:[{uuid:'old'}]}],next:'2026-10-02',gen:1,loading:false};
-  const sentinel={html:'',textContent:'',insertAdjacentHTML(where,html){assert.equal(where,'beforebegin');this.html+=html;}};
-  const observer={observes:0,disconnects:0,unobserve(){},observe(){this.observes++;},disconnect(){this.disconnects++;}};
-  const c={home,homeObserver:observer,homeWidth:1000,state:{route:{page:'home'},nsfw:'',items:[{uuid:'old'}],total:1},
-    api,URLSearchParams, $:id=>id==='homeSentinel'?sentinel:{querySelectorAll:()=>[]},homeDay:g=>`<section>${g.day}</section>`,syncStrip(){},toast(){}};
-  vm.createContext(Object.assign(c, zh.page));vm.runInContext(source.slice(source.indexOf('async function moreHome()'),source.indexOf('const ratio =')),c);
-  return {c,home,sentinel,observer};
+  const {home, moreHome} = homeModule, {state} = web.core(), page = web.fakePage(), el = page.document.getElementById;
+  Object.assign(home, {days: [{day: '2026-10-02', items: [{uuid: 'old'}]}], next: '2026-10-02', gen: 1, loading: false, width: 1000});
+  const sentinel = {html: '', textContent: '', insertAdjacentHTML(where, html) { assert.equal(where, 'beforebegin'); this.html += html; }};
+  home.observer = {observes: 0, disconnects: 0, unobserve() {}, observe() { this.observes++; }, disconnect() { this.disconnects++; }};
+  Object.assign(state, {route: {page: 'home'}, nsfw: '', items: [{uuid: 'old'}], total: 1});
+  page.document.getElementById = id => id === 'homeSentinel' ? sentinel : el(id);
+  globalThis.fetch = path => Promise.resolve().then(() => api(path)).then(body => ({status: 200, ok: true, json: async () => body}));
+  return {c: {moreHome, state}, home, sentinel, observer: home.observer};
 }
+const sections = html => [...html.matchAll(/data-day="([^"]+)"/g)].map(m => m[1]);
 test('home appends only new dates and items; repeated concurrent clicks share the request',async()=>{
   let resolve,calls=0; const h=homeHarness(()=>{calls++;return new Promise(r=>resolve=r);});
-  const pending=h.c.moreHome(); await h.c.moreHome();assert.equal(calls,1);
-  resolve({days:[{day:'2026-10-02',items:[]},{day:'2026-10-01',items:[{uuid:'new'}]},{day:'2026-10-01',items:[]}],next:'2026-10-01'});await pending;
-  assert.equal(h.sentinel.html,'<section>2026-10-01</section>');assert.equal(h.home.days.length,2);assert.equal(h.c.state.items.length,2);assert.equal(h.observer.observes,1);
+  const pending=h.c.moreHome(); await h.c.moreHome(); await new Promise(r => setImmediate(r)); assert.equal(calls,1);
+  resolve({days:[{day:'2026-10-02',items:[],characters:[]},{day:'2026-10-01',items:[{uuid:'new', width: 100, height: 100, memberships: []}],characters:[],count:1},{day:'2026-10-01',items:[],characters:[]}],next:'2026-10-01'});await pending;
+  assert.deepEqual(sections(h.sentinel.html),['2026-10-01']);assert.equal(h.home.days.length,2);assert.equal(h.c.state.items.length,2);assert.equal(h.observer.observes,1);
 });
 test('home errors release loading without resubscribing and permit an explicit retry',async()=>{
   let calls=0;const h=homeHarness(async()=>{calls++;if(calls===1)throw Error('failed');return {days:[],next:''};});
@@ -87,27 +86,28 @@ test('home errors release loading without resubscribing and permit an explicit r
   await h.c.moreHome();assert.equal(calls,2);assert.equal(h.sentinel.textContent,'已经到底了');
 });
 test('home responses after page changes are discarded',async()=>{
-  let resolve;const h=homeHarness(()=>new Promise(r=>resolve=r));const pending=h.c.moreHome();
+  let resolve;const h=homeHarness(()=>new Promise(r=>resolve=r));const pending=h.c.moreHome(); await new Promise(r => setImmediate(r));
   h.c.state.route.page='library';resolve({days:[{day:'2026-10-01',items:[]}],next:''});await pending;
   assert.equal(h.home.days.length,1);assert.equal(h.sentinel.html,'');assert.equal(h.observer.observes,0);
 });
 test('an older home request cannot unlock or append into a new home generation',async()=>{
-  let resolve;const h=homeHarness(()=>new Promise(r=>resolve=r));const pending=h.c.moreHome();
+  let resolve;const h=homeHarness(()=>new Promise(r=>resolve=r));const pending=h.c.moreHome(); await new Promise(r => setImmediate(r));
   h.home.gen++;h.home.loading=true;resolve({days:[],next:''});await pending;
   assert.equal(h.home.loading,true);assert.equal(h.home.next,'2026-10-02');
 });
 
 test('within-day requests after navigation cannot change the library or remove a newer generation lock', async()=>{
   let resolve;
+  const {home, moreOfDay, dayLoading} = homeModule, {state} = web.core(), page = web.fakePage();
   const day={day:'2026-10-02',items:[{uuid:'old'}],count:10};
-  const c={home:{days:[day],gen:1},state:{route:{page:'home'},nsfw:'',items:[{uuid:'library'}],total:1},
-    api:()=>new Promise(r=>resolve=r),URLSearchParams,toast(){}, $:()=>{throw Error('stale response must not query DOM');}};
-  vm.createContext(Object.assign(c, zh.page));vm.runInContext(source.slice(source.indexOf('const dayLoading ='),source.indexOf('function drawHome()')),c);
-  const pending=c.moreOfDay(day.day);c.state.route.page='library';resolve({items:[{uuid:'new'}]});await pending;
-  assert.equal(day.items.length,1);assert.equal(c.state.items[0].uuid,'library');
-  c.state.route.page='home';const old=c.moreOfDay(day.day);c.home.gen++;
-  vm.runInContext("dayLoading.clear();dayLoading.add('2026-10-02')",c);
-  resolve({items:[]});await old;assert.equal(vm.runInContext("dayLoading.has('2026-10-02')",c),true);
+  Object.assign(home, {days: [day], gen: 1}); Object.assign(state, {route: {page: 'home'}, nsfw: '', items: [{uuid: 'library'}], total: 1});
+  globalThis.fetch = () => new Promise(r => resolve = body => r({status: 200, ok: true, json: async () => body}));
+  page.document.getElementById = () => { throw Error('stale response must not query DOM'); };
+  const pending=moreOfDay(day.day); await new Promise(r => setImmediate(r)); state.route.page='library';resolve({items:[{uuid:'new'}]});await pending;
+  assert.equal(day.items.length,1);assert.equal(state.items[0].uuid,'library');
+  state.route.page='home';const old=moreOfDay(day.day); await new Promise(r => setImmediate(r)); home.gen++;
+  dayLoading.clear(); dayLoading.add('2026-10-02');
+  resolve({items:[]});await old;assert.equal(dayLoading.has('2026-10-02'),true);
 });
 test('opening the app lands on 首页; the library has its own hash and old query links still open it',()=>{
   // core/route.js reads the page's location.
@@ -118,26 +118,20 @@ test('opening the app lands on 首页; the library has its own hash and old quer
   assert.deepEqual([c.parseHash().page,c.parseHash().day],['library','2026-10-02']);
 });
 test('undo and a finished sync redraw the home page, whose day groups come from their own read', async () => {
-  // undo() is ui/grid.js; the home page is still app.js's (ui/app_parts.js).
-  const calls = [], {edits, state} = web.core(), {app} = await web.load('ui/app_parts.js');
+  // undo() is ui/grid.js and the end of a sync ui/effects.js afterJob(); the home page redraws from its own read.
+  const homeReads = [], {edits, state} = web.core(), {afterJob} = await web.load('ui/effects.js');
   web.fakePage();
   edits.latest = {id: 7, label: '已将 1 张移出 A'};
-  Object.assign(state, {route: {page: 'home'}, sync: {status: 'scanning'}, focused: null, viewer: -1});
-  globalThis.fetch = async () => ({status: 200, ok: true, json: async () => ({undo: null})});
-  Object.assign(app, {renderHome(keep) { calls.push(['home', keep]); }, renderIdentity() {}, renderGroups() {}, renderArtistAudit() {}, inspect() {}, showViewer() {}, indexOf: () => -1});
-  await gridModule.undo();
-  assert.deepEqual(calls, [['home', true]]);
+  Object.assign(state, {route: {page: 'home'}, sync: {status: 'scanning'}, focused: null, viewer: -1, guide: undefined});
+  const answer = path => path.startsWith('/api/home') ? (homeReads.push(path), {days: [], next: ''}) : path === '/api/undo' ? {undo: null}
+    : path === '/api/sync' ? {state: {status: 'done', imported: 1}, history: [], damaged: null} : path.startsWith('/api/bootstrap') ? {token: '', total: 0, undo: null} : [];
+  globalThis.fetch = async path => ({status: 200, ok: true, json: async () => answer(path)});
+  await gridModule.undo(); await new Promise(r => setImmediate(r));
+  assert.equal(homeReads.length, 1);
   assert.equal(edits.latest, null);
-  calls.length = 0;
-  // The sync's poller is core/jobs.js; what its end redraws is app.js's onJob listener.
-  const {pollSync, onJob, SYNC_ACTIVE} = web.core();
-  Object.assign(state, {route: {page: 'home'}, sync: {status: 'scanning'}});
-  globalThis.fetch = async () => ({status: 200, ok: true, json: async () => ({state: {status: 'done', imported: 1}, history: [], damaged: null})});
-  const g = {state, SYNC_ACTIVE, onJob: fn => (g.off = onJob(fn)), async refreshMeta() {}, error() {}, readError: e => e, guideRefresh() {},
-    panelPage: p => p === 'home', selCount: () => 0, reload() { calls.push('reload'); }, renderHome(keep) { calls.push(['home', keep]); }};
-  vm.createContext(g);
-  vm.runInContext(source.slice(source.indexOf('// What a background job'), source.indexOf('// A picture the app cannot decode')), g);
-  await pollSync();
-  g.off();
-  assert.deepEqual(calls, [['home', true]]);
+  const {pollSync, onJob} = web.core(), off = onJob(afterJob);
+  Object.assign(state, {sync: {status: 'scanning'}});
+  await pollSync(); await new Promise(r => setImmediate(r));
+  off();
+  assert.equal(homeReads.length, 2);
 });

@@ -3,10 +3,9 @@
 // and settings it has; its end reads them once; a failed poll keeps what it has and backs off.
 const {test, before, afterEach} = require('node:test');
 const assert = require('node:assert/strict');
-const vm = require('node:vm');
 const web = require('./web.cjs');
-const source = require('node:fs').readFileSync(require('node:path').join(__dirname, '../web/static/app.js'), 'utf8');
-before(web.ready);
+let effects;
+before(async () => { await web.ready(); effects = await web.load('ui/effects.js'); });
 let restore = () => {};
 afterEach(() => { restore(); restore = () => {}; });
 
@@ -14,7 +13,10 @@ function harness(status = 'running', fail = false) {
   const calls = [], timers = [], core = web.core();
   const names = {state: {status: 'running'}, counts: {characters: {total: 10, zh: 5}}, model_api: {configured: true}};
   Object.assign(core.state, {route: {page: 'settings'}, names});
+  web.fakePage();
   globalThis.fetch = async url => {
+    // The end of a run refreshes what names the page shows: a metadata read (core/meta.js), recorded as one call.
+    if (!url.startsWith('/api/names')) { if (url.startsWith('/api/bootstrap')) calls.push('refreshMeta'); return {status: 200, ok: true, json: async () => url.startsWith('/api/bootstrap') ? {token: '', total: 0} : []}; }
     calls.push(url);
     if (fail) throw new Error('offline');
     const body = url.includes('progress=1') ? {state: {status, done: 10, total: 10}} : {...names, state: {status}, counts: {characters: {total: 10, zh: 9}}};
@@ -22,10 +24,8 @@ function harness(status = 'running', fail = false) {
   };
   const setTimeout = globalThis.setTimeout;
   globalThis.setTimeout = (fn, delay) => { timers.push(delay); return 1; };
-  // app.js's onJob listener: the card is redrawn, and the end refreshes what names the page shows.
-  const offs = [], g = {state: core.state, onJob: fn => offs.push(core.onJob(fn)), renderNamesCard() {}, refreshMeta() { calls.push('refreshMeta'); }};
-  vm.createContext(g);
-  vm.runInContext(source.slice(source.indexOf('// What a background job'), source.indexOf('// A picture the app cannot decode')), g);
+  // ui/effects.js afterJob(), as app.js wires it: the card is redrawn, and the end refreshes what names the page shows.
+  const offs = [core.onJob(effects.afterJob)];
   restore = () => { globalThis.setTimeout = setTimeout; for (const off of offs) off(); };
   return {state: core.state, pollNames: core.pollNames, calls, timers, names};
 }

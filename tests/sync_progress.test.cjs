@@ -2,10 +2,7 @@
 // The sync's words are core/jobs.js; the damaged pictures' list is the task panel's (ui/tasks.js; #199).
 const {test, before} = require('node:test');
 const assert = require('node:assert/strict');
-const {readFileSync} = require('node:fs');
-const vm = require('node:vm');
 const web = require('./web.cjs');
-const zh = require('./i18n_zh.cjs');   // t() of a Chinese page (#173)
 const context = {};
 before(async () => {
   await web.ready();
@@ -81,19 +78,19 @@ test('damaged pictures are listed where they are, the rest counted', () => {
   assert.doesNotMatch(context.syncDamaged({count: 1, paths: ['/data/x.png']}), /未列出/);
 });
 
-test('a picture that cannot be decoded shows a plain placeholder; the viewer keeps its own message', () => {
-  const app = readFileSync(require('node:path').join(__dirname, '../web/static/app.js'), 'utf8');
-  const start = app.indexOf('// A picture the app cannot decode');
-  let listener;
+test('a picture that cannot be decoded shows a plain placeholder; the viewer keeps its own message', async () => {
+  // wireDom() (ui/dom.js) listens for image errors on the whole page.
+  const dom = await web.load('ui/dom.js'), listeners = [];
   class HTMLImageElement {
     constructor(src, id = '') { this.id = id; this.src = src; this.replaced = null; }
     getAttribute() { return this.src; }
     replaceWith(node) { this.replaced = node; }
   }
-  const c = {HTMLImageElement, document: {addEventListener(type, f, capture) { assert.equal(type, 'error'); assert.equal(capture, true); listener = f; },
-    createElement: () => ({})}};
-  vm.createContext(Object.assign(c, zh.page));
-  vm.runInContext(app.slice(start, app.indexOf('// ---------- toast with undo', start)), c);
+  globalThis.HTMLImageElement = HTMLImageElement;
+  const page = web.fakePage();
+  page.document.addEventListener = (type, f, capture) => { if (type === 'error') { assert.equal(capture, true); listeners.push(f); } };
+  dom.wireDom();
+  const [listener] = listeners;
   const card = new HTMLImageElement('/image?id=a&size=thumb');
   listener({target: card});
   assert.equal(card.replaced.className, 'img-broken');

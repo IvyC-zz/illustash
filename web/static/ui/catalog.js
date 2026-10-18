@@ -1,6 +1,5 @@
 // The 资料库 (desktop layout, #199): the characters' shelf and list, the works tree with its watch switches, and the
-// dialogs to edit a work and add new characters. What they read and change is core/catalog.js; routing and the
-// heading are still app.js (ui/app_parts.js).
+// dialogs to edit a work and add new characters. What they read and change is core/catalog.js.
 import {t} from '../core/i18n.js';
 import {esc, number} from '../core/format.js';
 import {prefs} from '../core/prefs.js';
@@ -15,19 +14,21 @@ import {$, toast, error, readFailure, wireFolds, reconcileSections, searchIcon} 
 import {chooseWork} from './dialog.js';
 import {namesAllowButton} from './settings.js';
 import {charHash, charRoute, go} from '../core/route.js';
-import {app} from './app_parts.js';
+import {refreshMeta} from '../core/meta.js';
+import {closeInspector} from './detail.js';
+import {renderHeading} from './shell.js';
 
 // ---------- characters: 书架 (work tabs, posters, tiers) and 列表 ----------
 // What the 角色 page shows: shelf or list, which work tab, a search's results, the list's sort and bucket.
 export const cast = {mode: prefs.get('castMode', 'shelf'), tab: 'all', list: null, sort: 'count', dir: -1, bucket: 'all', pop: false, popQ: ''};
 export async function renderIndex() {
-  $('grid').hidden = true; $('empty').hidden = true; $('settingsPage').hidden = true; $('groupsPage').hidden = true; $('charIndex').hidden = false; app.closeInspector(); $('selectionBar').hidden = true;
+  $('grid').hidden = true; $('empty').hidden = true; $('settingsPage').hidden = true; $('groupsPage').hidden = true; $('charIndex').hidden = false; closeInspector(); $('selectionBar').hidden = true;
   $('resultCount').textContent = '';
   if (state.route.section === 'works') { renderShelf(); return; }
   $('hint').textContent = t('点角色，在图库里只看 TA');
   cast.list = null; cast.pop = false;
   if (state.chars.some(c => c.summary)) {
-    try { await app.refreshMeta(); } catch (e) { error(e.message); return; }
+    try { await refreshMeta(); } catch (e) { error(e.message); return; }
     if (state.route.page !== 'characters') return;
   }
   drawCast();
@@ -37,7 +38,7 @@ export async function renderIndex() {
 }
 // Own characters whose name is a Danbooru tag (asks Danbooru with those names only; none → no request).
 export async function refreshLocalLinks() {
-  if (await loadLocalLinks() && state.route.page === 'characters') app.renderHeading();
+  if (await loadLocalLinks() && state.route.page === 'characters') renderHeading();
 }
 export async function loadActivity() {
   let fresh; try { fresh = await readActivity(); } catch (e) { error(readError(e)); return; }
@@ -128,7 +129,7 @@ export async function renderShelf() {
   drawShelf();
   try { await loadIndex(); } catch (e) { if (route === state.route && token === session.token) readFailure($('charIndex'), e); return; }
   if (route !== state.route || token !== session.token) return;
-  if (state.route.page === 'characters' && state.route.section === 'works') { app.renderHeading(); drawShelf(); }
+  if (state.route.page === 'characters' && state.route.section === 'works') { renderHeading(); drawShelf(); }
 }
 // A watch toggle needs a Danbooru work tag the person has checked; the index check searches by that tag.
 function watchSwitch(w) {
@@ -173,7 +174,7 @@ export function drawShelf() {
 async function saveWatchList(works) {
   try { await saveWatch(works); }
   catch (e) { toast(e.message); }
-  renderIndexBody(); app.renderHeading();
+  renderIndexBody(); renderHeading();
 }
 // From the Danbooru search: an existing local work with that tag, or one the person picks or creates for it.
 async function adoptWatch(r) {
@@ -210,8 +211,8 @@ function workDialog(w) {
       try {
         const id = await saveWork(w?.id, {name, parent, tag});
         await loadWorkTree().catch(e => error(readError(e)));
-        await app.refreshMeta().catch(e => error(readError(e)));
-        renderIndexBody(); app.renderHeading();
+        await refreshMeta().catch(e => error(readError(e)));
+        renderIndexBody(); renderHeading();
         resolve({id, name});
       } catch (err) { toast(err.message); resolve(null); }
     };

@@ -11,12 +11,13 @@ import {state} from '../core/state.js';
 import {$, readFailure} from './dom.js';
 import {PAGE, currentItem, kept, loadPage, mutate, openTagPicker, renderGrid, rowHeight, rowOf, rowTop, syncCards, viewOpts} from './grid.js';
 import {newIds, openPicker, stage, targets} from './palette.js';
-import {app} from './app_parts.js';
+import {artistSection, findArtistWorks, findArtists} from './artists.js';
+import {markHomeFocus} from './home.js';
 
 // Which inspector read is current: a slower, older one never paints over it.
 let detailGen = 0;
 // ---------- inspector ----------
-export function closeInspector() { detailGen++; if (state.viewer < 0) kept.hold = null; state.focused = null; state.detail = null; if (state.viewer < 0) state.question = null; $('inspector').hidden = true; app.markHomeFocus(); syncCards(); requestAnimationFrame(() => renderGrid()); }
+export function closeInspector() { detailGen++; if (state.viewer < 0) kept.hold = null; state.focused = null; state.detail = null; if (state.viewer < 0) state.question = null; $('inspector').hidden = true; markHomeFocus(); syncCards(); requestAnimationFrame(() => renderGrid()); }
 function identityChips(d, compact = false) {
   const r = state.route;
   const chips = d.memberships.map(m => `<div class="identity"><span class="dot ${m.status}" title="${m.status === 'machine' ? t('机器识别') : m.origin === 'album' ? t('相簿') : t('人工确认')} · ${esc(evidence(m.evidence))}"></span><a class="identity-name" href="${charHash(m.id)}" title="${esc(m.name)}">${esc(m.name)}</a><span class="identity-actions"><button class="icon small" data-swap="${esc(m.id)}" title="${t('换成…（C）')}">⇄</button><button class="icon small" data-not="${esc(m.id)}" title="${t('不是 TA（⌫）')}">×</button></span>
@@ -50,7 +51,7 @@ async function loadCharStats(id, ident, gen) {
   for (const b of $('charStats').querySelectorAll('[data-copy]')) b.onclick = () => inspect(b.dataset.copy);
 }
 export async function inspect(ident, quiet = false) {
-  const gen = ++detailGen; state.focused = ident; $('inspector').hidden = false; app.markHomeFocus();
+  const gen = ++detailGen; state.focused = ident; $('inspector').hidden = false; markHomeFocus();
   if (!quiet) $('inspector').innerHTML = `<div class="loading-line">${t('读取图片详情…')}</div>`;
   syncCards(); requestAnimationFrame(() => renderGrid());
   try {
@@ -70,7 +71,7 @@ export async function inspect(ident, quiet = false) {
         <div id="charStats" class="cc-stats"></div></section>`
         : `<section class="inspector-section cc-card"><div class="cc-name muted">${d.unknown ? t('已跳过') : t('还没认出是谁')}</div>${pendingNote}</section>`}
       <section class="inspector-section"><h3 class="section-title">${t('角色')}</h3>${identityChips(d)}${(d.tag_identities || []).length ? `<div class="tag-ids"><span>${t('标签')}</span>${d.tag_identities.map(x => `<a class="variant-chip" href="${charHash(x.id)}" title="${t('只当标签、不算角色的身份；点开可以改回角色')}">${esc(x.name)}</a>`).join('')}</div>` : ''}</section>
-      ${app.artistSection(d, ident)}
+      ${artistSection(d, ident)}
       <section class="inspector-section"><h3 class="section-title">${t('我的标签')}</h3><div class="user-tags">${(d.user_tags || []).map(tag => `<span class="variant-chip"><a href="#/?utag=${encodeURIComponent(tag)}"># ${esc(tag)}</a><button data-untag="${esc(tag)}" title="${t('去掉标签')}">×</button></span>`).join('')}<button class="variant-add" id="addTag">＋ ${t('标签')} <kbd>G</kbd></button></div></section>
       ${d.duplicates?.length ? `<section class="inspector-section"><h3 class="section-title">${t('重复副本 · 共 {n} 份', {n: d.duplicates.length + 1})}</h3><div class="dup-list">${d.duplicates.map(x => `<button class="dup-copy" data-copy="${esc(x.uuid)}" title="${t('查看这份副本')}"><img src="/image?id=${encodeURIComponent(x.uuid)}&size=thumb" alt="" loading="lazy"><span><b>${x.pos}/${x.size}</b> ${esc((x.added_at || '').slice(0, 10))}<br><small>${x.names.length ? x.names.map(esc).join(' · ') : t('未识别')}</small></span></button>`).join('')}</div></section>` : ''}
       ${viewOpts.meta ? `<section class="inspector-section"><dl class="facts"><div><dt>${t('尺寸')}</dt><dd class="mono">${number(d.width)} × ${number(d.height)}</dd></div><div><dt>${t('加入')}</dt><dd class="mono">${esc((d.added_at || '').slice(0, 16).replace('T', ' '))}</dd></div><div><dt>${t('文件')}</dt><dd title="${esc(d.filename)}">${esc(d.filename)}</dd></div><div><dt>${t('文件形态')}</dt><dd>${d.src_kind === 'deriv' ? t('本地副本') : t('原图')}</dd></div></dl></section>
@@ -91,8 +92,8 @@ export async function inspect(ident, quiet = false) {
       const v = b.dataset.artistVerdict || null;
       mutate('/api/artist/verdict', {ids: [ident], artist: b.dataset.artist, verdict: v, name: b.dataset.name}, v === 'no' && state.route.artist === b.dataset.artist);
     };
-    $('inspector').querySelector('[data-artist-find]')?.addEventListener('click', () => app.findArtists([ident], () => inspect(ident, true)));
-    for (const b of $('inspector').querySelectorAll('[data-artist-more]')) b.onclick = () => app.findArtistWorks(b.dataset.artistMore, b.dataset.name, () => inspect(ident, true));
+    $('inspector').querySelector('[data-artist-find]')?.addEventListener('click', () => findArtists([ident], () => inspect(ident, true)));
+    for (const b of $('inspector').querySelectorAll('[data-artist-more]')) b.onclick = () => findArtistWorks(b.dataset.artistMore, b.dataset.name, () => inspect(ident, true));
     for (const b of $('inspector').querySelectorAll('[data-untag]')) b.onclick = () => mutate('/api/tag', {ids: [ident], tag: b.dataset.untag, add: false}, state.route.utag === b.dataset.untag);
     $('resumeOne')?.addEventListener('click', () => mutate('/api/change', {ids: [ident], action: 'resume'}, state.route.page === 'skipped'));
     bindIdentity($('inspector'), d, ident); bindAsk($('inspector'), d, ident);

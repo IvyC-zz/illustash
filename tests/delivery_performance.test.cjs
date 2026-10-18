@@ -2,12 +2,7 @@ const test = require('node:test');
 const web = require('./web.cjs');   // core/ modules (#199)
 test.before(web.ready);
 const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const vm = require('node:vm');
-const zh = require('./i18n_zh.cjs');   // t() of a Chinese page (#173)
-const source = fs.readFileSync('web/static/app.js', 'utf8');
 const tick = () => new Promise(resolve => setImmediate(resolve));
-const section = (a, b) => source.slice(source.indexOf(a), source.indexOf(b, source.indexOf(a)));
 // The metadata read is core/meta.js; api answers the page's requests.
 function metaHarness(api) {
   const {session, state, refreshMeta} = web.core();
@@ -151,11 +146,10 @@ test('successful writes invalidate an in-flight metadata read before UI refresh 
   const pending = [];
   const c = metaHarness(path => path === '/api/tag' || path === '/api/suggest' ? {ok: true} : new Promise(resolve => pending.push({path,resolve})));
   c.state.readEpoch = 0;
-  // Writes go through core/session.js; app.js counts them in its onPost listener.
-  const {post, onPost, metaWritten} = web.core();
-  Object.assign(c, {post, metaWritten, guideAfterPost() {}, onPost: fn => (c.unlisten = onPost(fn))});
-  vm.createContext(c);
-  vm.runInContext(section('onPost((path, body) =>', '// What a background job'), c);
+  // Writes go through core/session.js; ui/effects.js afterWrite() counts them, as app.js wires it.
+  const {post, onPost} = web.core(), {afterWrite} = await web.load('ui/effects.js');
+  c.state.guide = undefined;
+  Object.assign(c, {post, unlisten: onPost(afterWrite)});
   const first = c.refreshMeta(); await tick();
   await c.post('/api/suggest', {});
   assert.equal(c.state.readEpoch, 0); assert.equal(c.state.countDirty, undefined);
@@ -222,35 +216,34 @@ test('navigation into directory during summary read triggers a full trailing rea
   for (const p of pending.splice(0)) p.resolve(value(p.path));
   await task;
 });
-test('group append, answer and selection preserve unaffected section nodes', () => {
+// The look-alike groups page is ui/review.js.
+test('group append, answer and selection preserve unaffected section nodes', async () => {
+  const review = await web.load('ui/review.js'), {state} = web.core();
   const sections = new Element(), controls = {}, more = {}, nodes = {regroup: {}, moreGroups: {addEventListener() {}}};
   const root = {querySelector: selector => ({'.gsecs': sections, '.groups-controls': controls, '.groups-more': more})[selector],
     set innerHTML(_) { throw Error('must not replace all groups'); }};
-  globalThis.document = documentMock();
-  const c = {document: globalThis.document, reconcileSections, $: id => id === 'groupsPage' ? root : nodes[id], number: String, esc: String,
-    stamp: String, state: {pools: {unmatched: 100}}, groups: {list: [], shown: 2, off: new Map(), learner: {}},
-    groupSection: g => `<section>${g.cid}:${JSON.stringify([...(c.groups.off.get(g.cid) || [])])}</section>`};
-  vm.createContext(Object.assign(c, zh.page));
-  vm.runInContext(section('function drawGroups()', 'function groupSection'), c);
-  c.groups.list = [1, 2, 3].map(cid => ({cid, size: 2}));
-  c.drawGroups(); const [a, b] = sections.children;
-  c.groups.shown = 3; c.drawGroups(); const third = sections.children[2];
+  globalThis.document = Object.assign(documentMock(), {getElementById: id => id === 'groupsPage' ? root : nodes[id] || null});
+  state.pools = {unmatched: 100};
+  const group = cid => ({cid, size: 2, members: ['u', 'v'].map(x => x + cid)});
+  Object.assign(review.groups, {list: [1, 2, 3].map(group), shown: 2, off: new Map(), learner: {}});
+  review.drawGroups(); const [a, b] = sections.children;
+  review.groups.shown = 3; review.drawGroups(); const third = sections.children[2];
   assert.equal(sections.children[0], a); assert.equal(sections.children[1], b);
-  c.groups.list.shift(); c.drawGroups();
+  review.groups.list.shift(); review.drawGroups();
   assert.deepEqual(sections.children, [b, third]);
-  c.groups.off.set(2, new Set(['u'])); c.drawGroups();
+  review.groups.off.set(2, new Set(['u2'])); review.drawGroups();
   assert.notEqual(sections.children[0], b); assert.equal(sections.children[1], third);
 });
 test('older group reads cannot overwrite a newer R18-filtered response', async () => {
-  const pending = [], nodes = {}, c = {state: {route: {page: 'groups'}, nsfw: ''}, groups: {revision: 0},
-    $: id => nodes[id] ||= {}, closeInspector() {}, drawGroups() {},
-    api: path => new Promise(resolve => pending.push({path, resolve}))};
-  vm.createContext(Object.assign(c, zh.page)); vm.runInContext(section('async function renderGroups', 'function drawGroups'), c);
-  const old = c.renderGroups();
-  c.state.nsfw = 'hide'; const fresh = c.renderGroups();
-  pending[1].resolve({clusters: [{cid: 2, size: 2}], learner: {}}); await fresh;
-  pending[0].resolve({clusters: [{cid: 1, size: 2}], learner: {}}); await old;
-  assert.equal(c.groups.list[0].cid, 2);
+  const review = await web.load('ui/review.js'), {state} = web.core(), pending = [];
+  web.fakePage(); globalThis.requestAnimationFrame ??= () => 0;   // closing the inspector redraws the grid next frame
+  Object.assign(state, {route: {page: 'groups'}, nsfw: '', pools: {unmatched: 0}});
+  globalThis.fetch = path => new Promise(resolve => pending.push({path, resolve: body => resolve({status: 200, ok: true, json: async () => body})}));
+  const old = review.renderGroups(); await new Promise(r => setImmediate(r));
+  state.nsfw = 'hide'; const fresh = review.renderGroups(); await new Promise(r => setImmediate(r));
+  pending[1].resolve({clusters: [{cid: 2, size: 2, members: ['a', 'b']}], learner: {}}); await fresh;
+  pending[0].resolve({clusters: [{cid: 1, size: 2, members: ['c', 'd']}], learner: {}}); await old;
+  assert.equal(review.groups.list[0].cid, 2);
 });
 
 test('a library page finishing after navigation cannot overwrite home items', async () => {

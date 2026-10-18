@@ -1,10 +1,6 @@
 const {test, before, afterEach} = require('node:test');
 const web = require('./web.cjs');   // core/settings.js, ui/settings.js (#199)
 const assert = require('node:assert/strict');
-const {readFileSync} = require('node:fs');
-const vm = require('node:vm');
-const zh = require('./i18n_zh.cjs');   // t() of a Chinese page (#173)
-const source = readFileSync(require('node:path').join(__dirname, '../web/static/app.js'), 'utf8');
 let ui, off = () => {};
 before(async () => { await web.ready(); ui = await web.load('ui/settings.js'); });
 afterEach(() => { off(); off = () => {}; });
@@ -102,20 +98,19 @@ test('work tree lists children under their parent, with counts and the watch swi
   assert.ok(root.innerHTML.includes('<b>parent</b>') && !root.innerHTML.includes('<b>child</b>'));
 });
 
-// The index's poller is core/jobs.js; what it redraws outside the task panel is app.js's onJob listener.
+// The index's poller is core/jobs.js; what it redraws outside the task panel is ui/effects.js afterJob(), as app.js
+// wires it: here the settings card, drawn on a fake page.
 async function indexHarness(initialStatus, nextStatus) {
-  const calls = [], renders = [], {state, pollIndex, onJob, SYNC_ACTIVE} = web.core();
-  Object.assign(state, {route: {page: 'settings'}, index: {state: {status: initialStatus}, works: [], history: []}});
+  const calls = [], renders = [], {state, pollIndex, onJob} = web.core(), {afterJob} = await web.load('ui/effects.js');
+  Object.assign(state, {route: {page: 'settings'}, index: {state: {status: initialStatus}, works: [], history: [], watch: {works: [], min_posts: 50}}});
+  const page = web.fakePage();
+  Object.defineProperty(page.el('indexCard'), 'innerHTML', {set() { renders.push('index'); }, get: () => ''});
   globalThis.fetch = async path => {
     calls.push(path);
-    const body = path.includes('progress=1') ? {state: {status: nextStatus, done: 2, total: 10}} : {state: {status: nextStatus}, works: [], check: {found: 1}};
+    const body = path.includes('progress=1') ? {state: {status: nextStatus, done: 2, total: 10}} : {state: {status: nextStatus}, works: [], history: [], watch: {works: [], min_posts: 50}, check: {found: 1, missing: [], checked_at: '2026-10-18T00:00:00'}};
     return {status: 200, ok: true, json: async () => body};
   };
-  const g = {state, SYNC_ACTIVE, onJob: fn => offs.push(onJob(fn)), renderIndexCard() { renders.push('index'); }, drawShelf() {}, refreshMeta: async () => {}, error() {}, readError: e => e};
-  const offs = [];
-  vm.createContext(g);
-  vm.runInContext(source.slice(source.indexOf('// What a background job'), source.indexOf('// A picture the app cannot decode')), g);
-  offs.push(onJob(() => { renders.push('tasks'); }));   // as the task panel does
+  const offs = [onJob(afterJob), onJob(() => { renders.push('tasks'); })];   // the second as the task panel does
   const setTimeout = globalThis.setTimeout;
   globalThis.setTimeout = () => 0;
   try { await pollIndex(); } finally { globalThis.setTimeout = setTimeout; for (const off of offs) off(); }

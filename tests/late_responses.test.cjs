@@ -4,36 +4,35 @@ const {test, before} = require('node:test');
 const web = require('./web.cjs');   // core/ modules (#199)
 before(web.ready);
 const assert = require('node:assert/strict');
-const {readFileSync} = require('node:fs');
-const vm = require('node:vm');
-const zh = require('./i18n_zh.cjs');   // t() of a Chinese page (#173)
-const source = readFileSync(require('node:path').join(__dirname, '../web/static/app.js'), 'utf8');
-const section = (a, b) => source.slice(source.indexOf(a), source.indexOf(b, source.indexOf(a)));
 const tick = () => new Promise(resolve => setImmediate(resolve));
 const element = () => ({hidden: false, classList: {remove() {}, toggle() {}}, listeners: {},
   addEventListener(kind, fn) { this.listeners[kind] = fn; }});
 
 test('a group page answer that arrives after navigating home does not take over the page', async () => {
-  // applyRoute() is ui/shell.js; the pages it opens are still app.js's (ui/app_parts.js).
-  const nodes = {}, painted = [], {applyRoute} = await web.load('ui/shell.js'), {app} = await web.load('ui/app_parts.js'), {state} = web.core();
+  // applyRoute() is ui/shell.js; the home page is ui/home.js; the page is a fake one.
+  const requests = [], {applyRoute} = await web.load('ui/shell.js'), {state} = web.core();
   let answer;
-  Object.assign(state, {route: {page: 'home'}, nsfw: ''});
+  Object.assign(state, {route: {page: 'home'}, nsfw: '', guide: undefined});
   globalThis.location = {hash: '#/g/3'}; globalThis.history = {replaceState() {}};
-  globalThis.document = {getElementById: id => nodes[id] ||= Object.assign(element(), {innerHTML: '', querySelectorAll: () => []}), querySelectorAll: () => []};
-  globalThis.fetch = () => new Promise(resolve => { answer = body => resolve({status: 200, ok: true, json: async () => body}); });
-  Object.assign(app, {clearSelection() {}, closeInspector() {}, nearText: () => 'near', guideTick() {},
-    renderHome: () => painted.push('home'), reload: async () => painted.push('grid')});
+  globalThis.requestAnimationFrame ??= () => 0;
+  const page = web.fakePage(), el = page.el;
+  globalThis.fetch = path => {
+    requests.push(path);
+    if (path.startsWith('/api/clusters')) return new Promise(resolve => { answer = body => resolve({status: 200, ok: true, json: async () => body}); });
+    return Promise.resolve({status: 200, ok: true, json: async () => path.startsWith('/api/home') ? {days: [], next: ''} : []});
+  };
   const toGroup = applyRoute();
   await tick();
   location.hash = '#/home';
   await applyRoute();
-  assert.equal(nodes.homePage.hidden, false);
+  assert.equal(el('homePage').hidden, false);
   answer({clusters: [{cid: 3, near: 1, traits: ['old']}]});
   await toGroup;
-  assert.equal(nodes.homePage.hidden, false);
+  assert.equal(el('homePage').hidden, false);
   assert.equal(state.groupTraits, undefined);
-  assert.deepEqual(painted, ['home']);
-  assert.match(nodes.heading.innerHTML, /首页/);
+  assert.match(el('heading').innerHTML, /首页/);
+  assert.ok(requests.some(p => p.startsWith('/api/home')));
+  assert.ok(!requests.some(p => p.startsWith('/api/assets')), 'the group page never reads its pictures');
 });
 
 test('an older sync answer that arrives last does not move the state back', async () => {

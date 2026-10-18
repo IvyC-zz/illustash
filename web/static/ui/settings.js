@@ -1,6 +1,5 @@
 // The settings pages (desktop layout, #199): each page's cards, their forms and buttons. What they read and change is
-// core/settings.js (and core/jobs.js for the jobs' own cards); parts of the page still in app.js are reached through
-// ui/app_parts.js.
+// core/settings.js (and core/jobs.js for the jobs' own cards).
 import {t, tb, said, I18N} from '../core/i18n.js';
 import {esc, isMac, number, bytes, stamp, localStamp, pct, localTime} from '../core/format.js';
 import {prefs} from '../core/prefs.js';
@@ -16,7 +15,10 @@ import {$, toast, error, readFailure, fold, wireFolds} from './dom.js';
 import {confirmAction} from './dialog.js';
 import {openTasks} from './tasks.js';
 import {charHash} from '../core/route.js';
-import {app} from './app_parts.js';
+import {refreshMeta} from '../core/meta.js';
+import {closeInspector} from './detail.js';
+import {setNsfw} from './grid.js';
+import {drawGuide, drawNudge, replayGuide} from './guide.js';
 
 // ---------- names: this library's consent to look names up online ----------
 // Name text queries (tag and work names only) need this library's consent: the backend refuses with
@@ -180,7 +182,7 @@ async function renderAbout() {
     ${fold('diagnostics', t('诊断信息'), `<table class="settings-table">${diag.map(([k, v]) => `<tr><td>${esc(k)}</td><td class="mono">${esc(v)}</td></tr>`).join('')}</table>`)}`;
   wireFolds(card);
   $('aboutKeys').onclick = () => $('help').showModal();
-  $('aboutGuide').onclick = () => app.replayGuide();
+  $('aboutGuide').onclick = () => replayGuide();
   $('aboutCopy').onclick = async () => {
     try { await navigator.clipboard.writeText(diag.map(([k, v]) => `${k}: ${v}`).join('\n')); toast(t('诊断信息已复制')); } catch (e) { toast(t('无法访问剪贴板')); }
   };
@@ -210,7 +212,7 @@ function networkCard() {
 export async function renderSettings(fetchMissing = true, refresh = false) {
   if (state.route.page !== 'settings') return;
   $('grid').hidden = true; $('empty').hidden = true; $('charIndex').hidden = true; $('groupsPage').hidden = true; $('settingsPage').hidden = false;
-  app.closeInspector(); $('selectionBar').hidden = true; $('resultCount').textContent = ''; $('hint').textContent = '';
+  closeInspector(); $('selectionBar').hidden = true; $('resultCount').textContent = ''; $('hint').textContent = '';
   if (fetchMissing) loadSettingsData(refresh);
   const [section, , , cards] = settingsSection();
   if (fetchMissing && ['network', 'about'].includes(section)) updatesTick();
@@ -264,7 +266,7 @@ export async function renderSettings(fetchMissing = true, refresh = false) {
   wireFolds(page);
   for (const box of page.querySelectorAll('[data-fold]')) box.onchange = async () => {
     const kinds = [...page.querySelectorAll('[data-fold]:checked')].map(b => b.dataset.fold);
-    try { await saveFold(kinds); await app.refreshMeta(); toast(t('已更新，「重复」页现在有 {n} 组', {n: number(state.dupInfo.groups)})); }
+    try { await saveFold(kinds); await refreshMeta(); toast(t('已更新，「重复」页现在有 {n} 组', {n: number(state.dupInfo.groups)})); }
     catch (e) { toast(e.message); box.checked = !box.checked; }
   };
   const startup = async (body, done) => { try { await saveStartup(body); toast(done); } catch (e) { toast(e.message); } renderSettings(); };
@@ -275,7 +277,7 @@ export async function renderSettings(fetchMissing = true, refresh = false) {
     const key = g.dataset.setting, v = b.dataset.value;
     if (key === 'language') { setLanguage(v); return; }
     if (key === 'fit' && state.fit !== (v === '1')) { state.fit = !state.fit; prefs.set('fit', state.fit); }
-    if (key === 'nsfw') app.setNsfw(v);
+    if (key === 'nsfw') setNsfw(v);
     if (key === 'theme') { prefs.set('theme', v); window.applyTheme?.(); }
     if (key === 'sortLibrary' || key === 'sortCharacter') prefs.set(key, v);
     renderSettings();
@@ -540,7 +542,7 @@ export function wireSettings() {
   // 设置 › 网络与隐私: grant or revoke, then redraw the card.
   document.addEventListener('click', async e => {
     const b = e.target.closest('[data-names-network]');
-    if (b && await setNamesNetwork(b.dataset.namesNetwork === '1')) { renderSettings(false); app.drawGuide(); }
+    if (b && await setNamesNetwork(b.dataset.namesNetwork === '1')) { renderSettings(false); drawGuide(); }
   });
   // The 允许查询… button under a search: once allowed, search again for what was typed.
   document.addEventListener('click', async e => {
@@ -562,7 +564,7 @@ export function wireSettings() {
     } else if (what === 'accounts') renderAccountsCard();
     else if (what === 'pixiv') toast(detail.error ? detail.error.message : t('已绑定 Pixiv：{name}', {name: detail.bound.name || detail.bound.user_id}));
     else if (what === 'updates') {
-      app.drawNudge();
+      drawNudge();
       // The settings pages that show it redraw only when something changed, never under the person's typing.
       const now = JSON.stringify(state.updates ?? null);
       if (now !== updatesDrawn) { updatesDrawn = now; if (state.route.page === 'settings' && ['network', 'about'].includes(settingsSection()[0])) renderSettings(false); }
@@ -617,7 +619,7 @@ export function wireSettings() {
     try { const u = await checkUpdates(); toast(u.error ? tb(u.error) : u.newer ? t('有新版本 {version}', {version: u.latest}) : t('已是最新版本')); }
     catch (err) { toast(err.message); }
     if ($('aboutUpdates')) $('aboutUpdates').innerHTML = updatesLine();
-    app.drawNudge();
+    drawNudge();
   });
   document.addEventListener('change', async e => {
     const box = e.target.closest('[data-updates-auto]'); if (!box) return;
