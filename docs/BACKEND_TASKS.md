@@ -100,7 +100,7 @@ Windows 计算任务使用挂起创建 → 私有 kill-on-close Job → 恢复�
 
 2026-10-01 在 x64 Windows 11 家庭版开发机上实测（#72）。这台机器装有系统级 Python 3.12，所以只证明产品进程树不调用 Python，不等于干净环境；干净环境复验见 #90。
 
-**构建**：需要 MSVC 生成工具（VC 工具集和 Windows SDK）、Rust stable（`x86_64-pc-windows-msvc`）、Tauri CLI 2 和 WebView2；`packaging/build.py` 遵守 `CARGO_TARGET_DIR`。`tauri build --bundles nsis,msi --config ../packaging/tauri-bundle.json` 产出 NSIS 和 MSI，安装到 `C:\Program Files\Illustash\`，资源在其下的 `resources\`。NSIS 需要 Tauri 官方发布的 NSIS 工具及 `nsis_tauri_utils.dll`；直连下载超时可在构建机下载并按 bundler 固定校验值核对，放入工具缓存，不关闭校验或修改系统安全策略。仓库用 `.gitattributes` 固定 LF：Git for Windows 默认 `core.autocrlf=true`，否则签出后静态资源、标签表和测试夹具的字节都会变。
+**构建**：需要 MSVC 生成工具（VC 工具集和 Windows SDK）、Rust stable（`x86_64-pc-windows-msvc`）、Tauri CLI 2 和 WebView2；`packaging/build.py` 遵守 `CARGO_TARGET_DIR`。`tauri build --bundles nsis,msi --config ../packaging/tauri-bundle.json` 产出 NSIS 和 MSI，安装到 `C:\Program Files\Illustash\`，资源在其下的 `resources\`。NSIS 安装界面按 Windows 显示语言用简体中文或英文，MSI 只有英文，见 [界面语言](WEB_V2.md#界面语言2026-10-18173)。NSIS 需要 Tauri 官方发布的 NSIS 工具及 `nsis_tauri_utils.dll`；直连下载超时可在构建机下载并按 bundler 固定校验值核对，放入工具缓存，不关闭校验或修改系统安全策略。仓库用 `.gitattributes` 固定 LF：Git for Windows 默认 `core.autocrlf=true`，否则签出后静态资源、标签表和测试夹具的字节都会变。
 
 **运行时行为**：
 - Windows 不创建原生顶部菜单，应用内侧栏和导航保留；macOS 保留原有原生菜单。帮助、按钮提示及动态撤销等按平台显示 `Ctrl` 或 `⌘`。
