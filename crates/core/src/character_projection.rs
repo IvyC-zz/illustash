@@ -27,6 +27,30 @@ const MULTI: &[&str] = &[
     "6+boys",
 ];
 
+// 旧 SQL 原样保存，增量范围插在下列锚点上（锚点, 替换成）。
+const EVIDENCE_SCOPE: (&str, &str) = ("GROUP BY", "WHERE v.uuid IN (SELECT uuid FROM touched) GROUP BY");
+const SINGLE_SCOPE: (&str, &str) = ("value='solo'", "value='solo' AND g.uuid IN (SELECT uuid FROM touched)");
+const LEAD_SCOPE: (&str, &str) = ("value='1girl'", "value='1girl' AND g.uuid IN (SELECT uuid FROM touched)");
+const MEMBERS_SELECT: &str = "memberships SELECT ";
+const MEMBERS_FILTER: &str = " WHERE NOT EXISTS(SELECT 1 FROM entities t";
+const MEMBERS_FROM: &str = "FROM membership_rules m WHERE ";
+
+fn once<'a>(sql: &str, anchor: &'a str) -> Result<&'a str> {
+    match sql.matches(anchor).count() {
+        1 => Ok(anchor),
+        n => Err(Error::Schema(format!("SQL 里的锚点应恰好出现一次，实际 {n} 次：{anchor}"))),
+    }
+}
+
+/// 在锚点处插入范围条件。锚点不是恰好一处就报错：SQL 的写法一变，不能悄悄丢掉过滤、退回整库。
+pub(crate) fn scoped(sql: &str, anchor: &str, with: &str) -> Result<String> {
+    Ok(sql.replacen(once(sql, anchor)?, with, 1))
+}
+
+fn split<'s>(sql: &'s str, anchor: &str) -> Result<(&'s str, &'s str)> {
+    Ok(sql.split_once(once(sql, anchor)?).expect("锚点已确认出现一次"))
+}
+
 pub fn policy(c: &Connection) -> Result<bool> {
     let mode: Option<String> =
         c.query_row("SELECT value FROM meta WHERE key='identity_policy'", [], |r| r.get(0)).optional()?;
@@ -61,13 +85,7 @@ fn evidence_in(c: &Connection, uuids: Option<&[String]>, hybrid: bool) -> Result
     touch(c, uuids)?;
     if uuids.is_some() {
         c.execute("DELETE FROM family_evidence WHERE uuid IN (SELECT uuid FROM touched)", [])?;
-        c.execute(
-            &sql.replace(
-                "                  GROUP BY",
-                "WHERE v.uuid IN (SELECT uuid FROM touched)\n                  GROUP BY",
-            ),
-            [],
-        )?;
+        c.execute(&scoped(sql, EVIDENCE_SCOPE.0, EVIDENCE_SCOPE.1)?, [])?;
     } else {
         c.execute("DELETE FROM family_evidence", [])?;
         c.execute(sql, [])?;
@@ -77,14 +95,10 @@ fn evidence_in(c: &Connection, uuids: Option<&[String]>, hybrid: bool) -> Result
 
 pub fn single(c: &Connection, uuids: Option<&[String]>) -> Result<()> {
     touch(c, uuids)?;
-    for (table, sql, tag) in [("single_assets", SINGLE, "solo"), ("lead_assets", LEAD, "1girl")] {
+    for (table, sql, (anchor, with)) in [("single_assets", SINGLE, SINGLE_SCOPE), ("lead_assets", LEAD, LEAD_SCOPE)] {
         let scope = if uuids.is_some() { " WHERE uuid IN (SELECT uuid FROM touched)" } else { "" };
         c.execute(&format!("DELETE FROM {table}{scope}"), [])?;
-        let sql = if uuids.is_some() {
-            sql.replace(&format!("value='{tag}'"), &format!("value='{tag}' AND g.uuid IN (SELECT uuid FROM touched)"))
-        } else {
-            sql.to_owned()
-        };
+        let sql = if uuids.is_some() { scoped(sql, anchor, with)? } else { sql.to_owned() };
         c.execute(&sql, params_from_iter(MULTI))?;
     }
     Ok(())
@@ -102,13 +116,7 @@ fn memberships_in(c: &Connection, uuids: Option<&[String]>, core: bool) -> Resul
     if uuids.is_none() {
         // 两张归属表共享同一组规则结果；原规则及排序键原样计算，临时集合仅存在于这次事务。
         c.execute_batch("DROP TABLE IF EXISTS temp.projected_membership_rules;")?;
-        let select = MEMBERS
-            .split_once("SELECT ")
-            .expect("归属 SQL 包含 SELECT")
-            .1
-            .rsplit_once(" WHERE NOT EXISTS(SELECT 1 FROM entities t")
-            .expect("归属 SQL 包含标签过滤")
-            .0;
+        let select = split(split(MEMBERS, MEMBERS_SELECT)?.1, MEMBERS_FILTER)?.0;
         c.execute(&format!("CREATE TEMP TABLE projected_membership_rules AS SELECT {select}"), [])?;
     }
     for (table, sql) in [("memberships", MEMBERS), ("tag_memberships", TAGS)] {
@@ -126,7 +134,7 @@ fn memberships_in(c: &Connection, uuids: Option<&[String]>, core: bool) -> Resul
             c.execute(&format!("{} AND m.uuid IN (SELECT uuid FROM touched)", sql.trim_end()), [])?;
         } else {
             c.execute(&format!("DELETE FROM {table}"), [])?;
-            let materialized = sql.split_once("FROM membership_rules m WHERE ").expect("归属 SQL 包含标签过滤").1;
+            let materialized = split(sql, MEMBERS_FROM)?.1;
             c.execute(
                 &format!("INSERT INTO {table} SELECT m.* FROM projected_membership_rules m WHERE {materialized}"),
                 [],
@@ -234,4 +242,41 @@ pub(crate) fn refresh_delayed(c: &Connection) -> Result<()> {
 pub fn fold(c: &Connection) -> Result<()> {
     c.execute(FOLD, [])?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn every_scope_anchor_is_replaced_exactly_once() {
+        for sql in [DEFAULT, HYBRID] {
+            let scoped = scoped(sql, EVIDENCE_SCOPE.0, EVIDENCE_SCOPE.1).unwrap();
+            assert_eq!(scoped.matches("IN (SELECT uuid FROM touched)").count(), 1);
+            // 与原先按 18 个空格替换的结果只差空白。
+            let before = sql.replace(
+                "                  GROUP BY",
+                "WHERE v.uuid IN (SELECT uuid FROM touched)\n                  GROUP BY",
+            );
+            assert!(scoped.split_whitespace().eq(before.split_whitespace()));
+        }
+        for (sql, (anchor, with)) in [(SINGLE, SINGLE_SCOPE), (LEAD, LEAD_SCOPE)] {
+            let scoped = scoped(sql, anchor, with).unwrap();
+            assert_eq!(scoped.matches("g.uuid IN (SELECT uuid FROM touched)").count(), 1);
+        }
+        assert!(split(MEMBERS, MEMBERS_SELECT).unwrap().1.starts_with("m.uuid,m.entity,"));
+        assert!(split(MEMBERS, MEMBERS_FILTER).is_ok());
+        for sql in [MEMBERS, TAGS] {
+            assert!(split(sql, MEMBERS_FROM).is_ok());
+        }
+    }
+
+    #[test]
+    fn missing_or_repeated_anchor_is_an_error() {
+        let reflowed = DEFAULT.replace("GROUP BY", "GROUP\n BY");
+        assert!(matches!(scoped(&reflowed, EVIDENCE_SCOPE.0, EVIDENCE_SCOPE.1), Err(Error::Schema(_))));
+        assert!(matches!(scoped("a GROUP BY b GROUP BY c", "GROUP BY", "x"), Err(Error::Schema(_))));
+        assert!(matches!(split("a b", "c"), Err(Error::Schema(_))));
+        assert_eq!(scoped("a GROUP BY b", "GROUP BY", "x GROUP BY").unwrap(), "a x GROUP BY b");
+    }
 }
