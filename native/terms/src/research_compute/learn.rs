@@ -306,7 +306,13 @@ pub fn learn(
         }
     }
     let uuids = snapshot::strings(&c, "SELECT uuid FROM assets", &[])?;
-    let strong = discriminate::claims(&c, f, &marks, &artwork_groups(&c)?, &uuids)?;
+    // Test-only: `ILLUSTASH_TEST_PROTOTYPES_ONLY` leaves out the discriminative claims (#156), so the fixed answers
+    // recorded from the prototype-only algorithm (tests/test_native_research_compute.py) still apply. The product never sets it.
+    let strong = if std::env::var_os("ILLUSTASH_TEST_PROTOTYPES_ONLY").is_some() {
+        BTreeMap::new()
+    } else {
+        discriminate::claims(&c, f, &marks, &artwork_groups(&c)?, &uuids)?
+    };
     let (claims, weak) = claims(f, &uuids, &protos, anchors, &strong)?;
     let batch = json!({"v":1,"token":token,"relearned":dirty.len(),"prototypes":protos,"learn_state":states,"proto_claims":claims,"weak_claims":weak});
     drop(c);

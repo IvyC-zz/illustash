@@ -221,6 +221,27 @@ Path(sys.argv[2]).write_text(json.dumps(v,allow_nan=False))
         wait_until(settled,timeout=20)
         return result,seen,len(self.versions())-runs
 
+    def test_discriminative_claims_publish_within_core_score_range(self):
+        # #156: the package's external index candidates switch the discriminative claims on, and they claim
+        # Alice's confirmed seeds too. A seed is its own nearest confirmed image; f32 rounding can put that
+        # distance just below 0, and one score past 1 makes Core's publication check reject the whole batch.
+        self.stop(self.process)
+        rng=np.random.default_rng(156)
+        with sqlite3.connect(self.lib.source) as c:
+            for i in range(6):
+                v=rng.normal(0,.03,768).astype(np.float32);v[0]=1;v/=np.linalg.norm(v)
+                c.execute("UPDATE embeddings SET vec=? WHERE uuid=? AND model='ccip'",(v.tobytes(),'seed'+str(i)))
+        self.restart()
+        self.poke_event()
+        wait_until(lambda:self.pending()==0,timeout=20)
+        self.finished()
+        claims=self.rows(['proto_claims'])['proto_claims']
+        seeds={u:s for u,e,s in claims if e==self.alice and u.startswith('seed')}
+        self.assertEqual(sorted(seeds),['seed'+str(i) for i in range(6)],claims)
+        self.assertTrue(all(0<=s<=1 for _,_,s in claims),claims)
+        # Only the discriminative claim scores a seed by its distance to itself.
+        self.assertIn(1.0,seeds.values(),claims)
+
     def test_unread_tables_written_inflight_do_not_invalidate_learning(self):
         # #29: preferences, name caches/settings and sync history are no research input.
         before=self.rows(['clusters'])
