@@ -3,7 +3,6 @@ const {test, before, afterEach} = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const web = require('./web.cjs');
-const source = fs.readFileSync(require('node:path').join(__dirname, '../web/static/app.js'), 'utf8');
 before(web.ready);
 let restore = () => {};
 afterEach(() => { restore(); restore = () => {}; });
@@ -33,5 +32,6 @@ test('a run is polled from any page and polling stops once it is over', async ()
   assert.deepEqual(h.timers, [1500]);
 });
 test('entering the settings page always reads again', () => {
-  assert.match(source, /if \(\$\('setProvenance'\)\.innerHTML\) renderProvenanceCard\(\); loadProvenance\(\);/);
+  const settings = fs.readFileSync(require('node:path').join(__dirname, '../web/static/ui/settings.js'), 'utf8');
+  assert.match(settings, /if \(\$\('setProvenance'\)\.innerHTML\) renderProvenanceCard\(\); loadProvenance\(\);/);
 });

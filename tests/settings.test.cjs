@@ -1,19 +1,27 @@
-const {test, before} = require('node:test');
-const web = require('./web.cjs');   // core/ modules (#199)
-before(web.ready);
+const {test, before, afterEach} = require('node:test');
+const web = require('./web.cjs');   // core/settings.js, ui/settings.js (#199)
 const assert = require('node:assert/strict');
 const {readFileSync} = require('node:fs');
 const vm = require('node:vm');
 const zh = require('./i18n_zh.cjs');   // t() of a Chinese page (#173)
 const source = readFileSync(require('node:path').join(__dirname, '../web/static/app.js'), 'utf8');
-const helpers = source.slice(source.indexOf('const settingsMarkup ='), source.indexOf('// One page per question'));
-// Reads go through core/session.js (shared() lets callers share one read per path); api answers them here.
-function harness(api, extra = {}) {
-  const renders = [], errors = [], {session, shared} = web.core();
+let ui, off = () => {};
+before(async () => { await web.ready(); ui = await web.load('ui/settings.js'); });
+afterEach(() => { off(); off = () => {}; });
+// A settings page that has read nothing yet; api answers its reads. What the page does on each part that arrives is
+// ui/settings.js's onSettings listener: an error goes to the banner, and the settings page redraws (renderSettings(false)).
+function harness(api) {
+  const renders = [], errors = [], core = web.core(), {state} = core;
+  for (const key of ['settings', 'fold', 'index', 'names']) delete state[key];
+  state.route = {page: 'settings'};
   globalThis.fetch = path => { const answer = api(path); return Promise.resolve({status: 200, ok: true, json: () => answer}); };
-  const c = {api, shared, session, state: {route: {page: 'settings'}}, document: {activeElement: null},
-    error: message => errors.push(message), readError: e => '读取失败：' + e.message, renderSettings: fetch => renders.push(fetch), ...extra};
-  vm.createContext(Object.assign(c, zh.page)); vm.runInContext(helpers, c);
+  globalThis.document = {activeElement: null};
+  off = core.onSettings((what, detail) => {
+    if (what !== 'data') return;
+    if (detail.error) errors.push(core.readError(detail.error));
+    if (state.route.page === 'settings') renders.push(false);
+  });
+  const c = {state, loadSettingsData: core.loadSettingsData, shared: core.shared, setSettingsHTML: ui.setSettingsHTML, document: globalThis.document};
   return {c, renders, errors};
 }
 const tick = () => new Promise(resolve => setImmediate(resolve));

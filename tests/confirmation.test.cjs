@@ -1,30 +1,40 @@
-const {test} = require('node:test');
+// The page's own confirmation dialog (ui/dialog.js) guards source removal (ui/settings.js) and the first artist
+// lookup (still in app.js): nothing is sent until it is confirmed, in the same session and on the same page (#199).
+const {test, before} = require('node:test');
 const assert = require('node:assert/strict');
 const vm = require('node:vm');
+const web = require('./web.cjs');
 const zh = require('./i18n_zh.cjs');   // t() of a Chinese page (#173)
 const source = require('node:fs').readFileSync(require('node:path').join(__dirname, '../web/static/app.js'), 'utf8');
 const tick = () => new Promise(resolve => setImmediate(resolve));
+let settings, dialog;
+before(async () => { await web.ready(); settings = await web.load('ui/settings.js'); dialog = await web.load('ui/dialog.js'); });
 
 function harness() {
-  const dialogs = [], calls = [], consent = new Map();
-  let click;
-  const document = {body: {append(d) { dialogs.push(d); }}, createElement() {
+  const dialogs = [], calls = [], consent = new Map(), core = web.core();
+  core.session.token = 'synthetic-token'; core.state.route = {page: 'settings'};
+  const element = () => ({hidden: true, textContent: '', classList: {toggle() {}}, contains: () => true});
+  const nodes = {};
+  globalThis.document = {body: {append(d) { dialogs.push(d); }}, getElementById: id => nodes[id] ||= element(), createElement() {
     const nodes = {};
     return {returnValue: '', setAttribute() {}, querySelector(selector) {return nodes[selector] ||= {};},
       showModal() {this.open = true;}, close(value = '') {this.returnValue = value; this.open = false; this.onclose();},
       remove() {this.removed = true;}, getBoundingClientRect: () => ({left:10,right:100,top:10,bottom:100})};
   }};
-  const c = {document, session: {token:'synthetic-token'}, state: {route:{page:'settings'}}, removingSources: new Set(), confirm() {throw new Error('must not use plugin confirm');}, number: String,
+  // Removing a source first asks how many pictures it holds, then removes with confirm: 1.
+  globalThis.fetch = async (path, options) => {
+    const body = options?.body ? JSON.parse(options.body) : {};
+    if (path === '/api/libraries/sources/remove') calls.push({action: 'sources/remove', body});
+    const answer = path === '/api/libraries/sources/remove' ? (body.confirm ? {removed: 2} : {count: 2}) : {};
+    return {status: 200, ok: true, json: async () => answer};
+  };
+  // The artist lookup is still a slice of app.js.
+  const c = {session: core.session, state: core.state, confirmAction: dialog.confirmAction, number: String, toast() {}, setTimeout() {}, clearTimeout() {},
     localStorage: {getItem: k => consent.get(k), setItem: (k,v) => consent.set(k,v)},
-    $: id => id === 'settingsPage' ? {addEventListener(event, callback) {click = callback;}} : {contains: () => true},
-    libraryAction: async (action, body) => {calls.push({action, body}); return body.confirm ? {removed:2} : {count:2};},
-    loadLibraries: async () => {}, toast() {}, pollSync() {},
-    api: async (path, options) => {calls.push({path, options});}, clearTimeout() {}, setTimeout() {}};
+    api: async (path, options) => {calls.push({path, options});}};
   vm.createContext(Object.assign(c, zh.page));
-  vm.runInContext(source.slice(source.indexOf('let confirmationOpen ='), source.indexOf('// Native folder picker')),c);
-  vm.runInContext(source.slice(source.indexOf("$('settingsPage').addEventListener('click', async e =>"),source.indexOf('async function openLibrary(')),c);
   vm.runInContext(source.slice(source.indexOf('const LOOKUP_NOTE ='),source.indexOf('const findArtists =')),c);
-  const remove = () => click({target:{closest:()=>({dataset:{libRemove:'synthetic-source'}})}});
+  const remove = () => settings.onLibrariesClick({target: {closest: () => ({dataset: {libRemove: 'synthetic-source'}})}});
   return {c, dialogs, calls, consent, remove};
 }
 

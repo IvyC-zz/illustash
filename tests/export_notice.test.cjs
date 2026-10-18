@@ -2,29 +2,18 @@
 // and that moving to another computer needs the X archive imported again, once per state of the export.
 const {test, before} = require('node:test');
 const web = require('./web.cjs');   // the import's words and state are core/ (#199)
-before(web.ready);
+let settings;
+before(async () => { await web.ready(); settings = await web.load('ui/settings.js'); });
 const assert = require('node:assert/strict');
-const {readFileSync} = require('node:fs');
-const vm = require('node:vm');
-const zh = require('./i18n_zh.cjs');   // t() of a Chinese page (#173)
-const source = readFileSync(require('node:path').join(__dirname, '../web/static/app.js'), 'utf8');
-const section = (a, b) => source.slice(source.indexOf(a), source.indexOf(b, source.indexOf(a)));
 
+// The library card is ui/settings.js.
 function render(exportState) {
-  const card = {innerHTML: ''}, {state, importLine, importActive} = web.core();
+  const card = {innerHTML: '', contains: () => false}, {state} = web.core();
   Object.assign(state, {route: {page: 'settings'}, importTask: undefined, libraries: {
     info: {name: '合成图库', path: '/tmp/synthetic.pilib', sources: [], test: null},
     current: '/tmp/synthetic.pilib', home: '/tmp', libraries: [], export: exportState}});
-  const c = {
-    state, importLine, importActive, $: id => (id === 'setLibraries' ? card : null), esc: String, IS_MAC: false, devMode: false,
-    origins: () => [['x', 'X']], cardHead: title => `<h2>${title}</h2>`,
-    // #34 routes card markup through setSettingsHTML; render straight into the card here.
-    setSettingsHTML: (card, html) => { card.innerHTML = html; return true; },
-    libForm: {open: false, folders: {}, name: '', photos: false},
-  };
-  vm.createContext(Object.assign(c, zh.page));
-  vm.runInContext(section('function renderLibrariesCard()', '// Gallery pages have no Tauri dialog permission'), c);
-  c.renderLibrariesCard();
+  globalThis.document = {getElementById: id => (id === 'setLibraries' ? card : null), activeElement: null};
+  settings.renderLibrariesCard();
   return card.innerHTML;
 }
 const notice = '不含图片、画师出处缓存和导入过的 X 关注列表；在新电脑上要回查画师，需要重新导入 X 归档。';

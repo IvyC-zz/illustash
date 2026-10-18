@@ -18,6 +18,9 @@ export function staleSession() {
   session.stale = true;
   stopped.emit();
 }
+// The page is leaving its library (opening another restarts the server): no reads or writes until it reloads, and
+// no banner, since the reload follows.
+export function leaveSession() { session.stale = true; }
 export function adoptToken(token) {
   if (!session.token) session.token = token;
   else if (token !== session.token) staleSession();

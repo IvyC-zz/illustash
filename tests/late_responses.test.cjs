@@ -57,13 +57,10 @@ test('an older sync answer that arrives last does not move the state back', asyn
   assert.deepEqual(timers, []);  // finished: nothing polls again, and the stale answer schedules nothing
 });
 
-test('the new-library name is kept as it is typed, so a card refresh restores it', () => {
-  const nodes = {};
-  const c = {$: id => nodes[id] ||= element()};
-  vm.createContext(Object.assign(c, zh.page));
-  vm.runInContext(section('const libForm =', '// The backend lists the origins') + ';this.libForm = libForm;', c);
-  nodes.settingsPage.listeners.input({target: {id: 'libName', value: '合成新图库'}});
-  nodes.settingsPage.listeners.input({target: {id: 'libPhotos', checked: true}});
-  assert.equal(c.libForm.name, '合成新图库');
-  assert.equal(c.libForm.photos, true);
+test('the new-library name is kept as it is typed, so a card refresh restores it', async () => {
+  const {onLibraryInput, libForm} = await web.load('ui/settings.js');
+  onLibraryInput({target: {id: 'libName', value: '合成新图库'}});
+  onLibraryInput({target: {id: 'libPhotos', checked: true}});
+  assert.equal(libForm.name, '合成新图库');
+  assert.equal(libForm.photos, true);
 });
