@@ -7,7 +7,7 @@
 //! 选择集的复制品展开、目标身份、原归属这些核心在自己的事务里重新核验。
 //! 新步骤的 `before_json` 是 `[{"terms":{"v":2,"type":…,"before":[旧形状的快照…]}}]`。
 use crate::character_labels::{works, Shown};
-use crate::{character_json, character_projection, Error, Result};
+use crate::{character_json, character_projection, undo_labels::UndoLabel, Error, Result};
 use rusqlite::{params, Connection, OptionalExtension};
 use serde_json::{json, Map, Value};
 use std::collections::BTreeSet;
@@ -423,12 +423,12 @@ fn change(c: &Connection, args: &Value) -> Result<Value> {
     }
     let (name, n) = (names.join("、"), works(c, &ids)?);
     let label = match action {
-        "confirmed" => format!("已将 {n} 张设为 {name}"),
-        "rejected" => format!("已将 {n} 张移出 {name}"),
+        "confirmed" => UndoLabel::Set.fill(&n.to_string(), &name, ""),
+        "rejected" => UndoLabel::Remove.fill(&n.to_string(), &name, ""),
         "unknown" => format!("已跳过 {n} 张"),
         "resume" => format!("已恢复 {n} 张"),
-        "add_variant" => format!("已给 {n} 张加上 {name}"),
-        _ => format!("已从 {n} 张去掉 {name}"),
+        "add_variant" => UndoLabel::Add.fill(&n.to_string(), &name, ""),
+        _ => UndoLabel::Drop.fill(&n.to_string(), &name, ""),
     };
     let step = begin_action(c, &label)?;
     for (entity, scope) in &targets {
@@ -506,15 +506,8 @@ fn answer(c: &Connection, args: &Value) -> Result<Value> {
         let mut shown = Shown::new();
         let label = if yes.is_empty() {
             match &other {
-                Some(o) => {
-                    format!(
-                        "已将 {n} 张从 {name} 换成 {other}",
-                        n = no.len(),
-                        name = shown.name(c, &entity)?,
-                        other = shown.name(c, o)?
-                    )
-                }
-                None => format!("已将 {n} 张移出 {name}", n = no.len(), name = shown.name(c, &entity)?),
+                Some(o) => UndoLabel::Swap.fill(&no.len().to_string(), &shown.name(c, &entity)?, &shown.name(c, o)?),
+                None => UndoLabel::Remove.fill(&no.len().to_string(), &shown.name(c, &entity)?, ""),
             }
         } else {
             // Whole sentences, so the page can translate each (web/static/i18n.js tb()).
@@ -643,12 +636,7 @@ fn reassign(c: &Connection, args: &Value) -> Result<Value> {
     for n in &new_ids {
         names.push(shown.name(c, n)?);
     }
-    let label = format!(
-        "已将 {n} 张从 {name} 换成 {other}",
-        n = works(c, &ids)?,
-        name = names[0],
-        other = names[1..].join("、")
-    );
+    let label = UndoLabel::Swap.fill(&works(c, &ids)?.to_string(), &names[0], &names[1..].join("、"));
     let action = begin_action(c, &label)?;
     let mut before = Vec::new();
     for ident in &ids {
@@ -678,7 +666,7 @@ fn sweep(c: &Connection, args: &Value) -> Result<Value> {
         .query_map([&entity], |r| r.get(0))?
         .collect::<rusqlite::Result<_>>()?;
     let before = ids.iter().map(|i| snapshot(c, i, Some(&entity))).collect::<Result<Vec<_>>>()?;
-    let label = format!("已将 {name} 标为已检查（{n} 张）", name = Shown::new().name(c, &entity)?, n = works(c, &ids)?);
+    let label = UndoLabel::Sweep.fill(&works(c, &ids)?.to_string(), &Shown::new().name(c, &entity)?, "");
     let action = begin_action(c, &label)?;
     for i in &ids {
         put_assertion(c, At::Action(action), i, &entity, "confirmed", "sweep")?;
