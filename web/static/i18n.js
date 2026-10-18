@@ -46,9 +46,22 @@ function t(text, params) {
 // (sync records, undo labels) keep their bytes, and the backend never needs the page's language. Its Chinese
 // templates are keys of the same tables, written exactly as in the Rust source ("已将 {n} 张移出 {name}"), so the
 // template is the message's code. tb(text) shows a backend message in the page's language: an entry keyed by the
-// whole text, or else the template whose wording matches it, each {name} standing for any text; what a placeholder
-// stood for is translated the same way (a reason may itself be a backend message). Old records translate as long as
-// their template is still in the table; anything else stays as sent.
+// whole text, or else the template whose wording matches it, each {name} standing for any text. Old records translate
+// as long as their template is still in the table; anything else stays as sent.
+// What a placeholder stood for (#198): a nested message of the backend's own — an error, a reason, a step, a duration
+// it wrote — is translated the same way; anything else is data, which the user, the library or the outside world
+// named (a tag, a character, a path, a key, a number), and is shown as sent, even when it reads like a table key
+// (a tag named 未识别). A name in neither list counts as data. tests/i18n.test.cjs checks that each placeholder of the
+// backend's templates is in exactly one of the two, so a new template has to say which its placeholders are.
+const BACKEND_NESTED = new Set(['cleanup', 'duration', 'e', 'error', 'label', 'm', 'message', 'msg', 'note', 'reason', 'said', 'step', 'why']);
+const BACKEND_DATA = new Set(['CONFLICT_RETRIES', 'FORMAT', 'MAX_ASSETS', 'MAX_DATA_BYTES', 'MAX_LINE_BYTES', 'SCHEMA_VERSION',
+  'WORKER_KIND_ENV', 'action', 'anchor', 'arg', 'artist', 'artists', 'at', 'attempt', 'auto', 'available', 'backup', 'before', 'candidates',
+  'changed', 'choice', 'cid', 'code', 'context', 'core', 'differs', 'distance', 'done', 'entity', 'expected', 'fetched', 'field',
+  'file', 'found', 'full', 'host', 'id', 'image', 'key', 'kind', 'left', 'library_id', 'limit', 'listed', 'loaded', 'matches',
+  'max', 'mb', 'method', 'missing', 'moved', 'n', 'name', 'named', 'namespace', 'needed', 'no', 'object', 'origin', 'other',
+  'owner', 'path', 'pending', 'percent', 'producer', 'projected', 'removed', 'report', 'requested', 'result', 'right', 'schema',
+  'scoped', 'shown', 'size', 'source', 'status', 'system', 'table', 'tag', 'timeout', 'total', 'trigger', 'unknown', 'v',
+  'version', 'work', 'works', 'yes']);
 const backendPattern = (() => {
   const escape = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const patterns = new Map();
@@ -56,9 +69,12 @@ const backendPattern = (() => {
     let found = patterns.get(template);
     if (!found) {
       const parts = template.split(/\{(\w+)\}/), literal = parts.filter((_, i) => i % 2 === 0);
-      found = {template, names: parts.filter((_, i) => i % 2), literal, weight: literal.join('').length,
-        // {n} is a count (plural forms pick by it); any other placeholder stands for any text.
-        re: new RegExp('^' + literal.map((text, i) => (i ? parts[2 * i - 1] === 'n' ? '(\\d[\\d,.]*)' : '([\\s\\S]*?)' : '') + escape(text)).join('') + '$')};
+      const names = parts.filter((_, i) => i % 2);
+      // {n} is a count (plural forms pick by it); any other placeholder stands for any text. For tb(), data never
+      // holds a ；, which joins the backend's messages: "已将 1 张移出 雪；其他" is two messages, not a name 雪；其他.
+      const pattern = data => new RegExp('^' + literal.map((text, i) => (i ? names[i - 1] === 'n' ? '(\\d[\\d,.]*)'
+        : data && !BACKEND_NESTED.has(names[i - 1]) ? '([^；]*?)' : '([\\s\\S]*?)' : '') + escape(text)).join('') + '$');
+      found = {template, names, literal, weight: literal.join('').length, re: pattern(false), shown: pattern(true)};
       patterns.set(template, found);
     }
     return found;
@@ -78,8 +94,8 @@ function backendEntry(text, depth, split = true) {
   // The most specific template wins: the one with the most wording of its own.
   for (const p of backendTemplates()) {
     if (!text.startsWith(p.literal[0]) || !text.endsWith(p.literal.at(-1))) continue;
-    const m = p.re.exec(text);
-    if (m) return t(p.template, Object.fromEntries(p.names.map((name, i) => [name, tb(m[i + 1], depth + 1)])));
+    const m = p.shown.exec(text);
+    if (m) return t(p.template, Object.fromEntries(p.names.map((name, i) => [name, BACKEND_NESTED.has(name) ? tb(m[i + 1], depth + 1) : m[i + 1]])));
   }
   // Several messages the backend joined with ；, which may also be inside one: the longest runs that fit.
   const parts = split ? text.split('；') : [];
@@ -103,11 +119,16 @@ function tb(text, depth = 0) {
   return out;
 }
 // Whether the backend sent the message of this template, whatever the page's language: the code to test. The
-// message may come with the backend's prefixes ("不合法：…"), so the template may also match what follows a ：.
+// message may come with the backend's prefixes ("不合法：…", "同步失败：…"), so the template may also match what
+// follows a ：, as long as everything before it is such prefixes: words of Chinese alone. A ： inside data, as in
+// "已给 1 张加上 甲：会话已过期，请刷新页面", follows a space, a digit or a placeholder's text, and never counts (#198).
 function said(text, template) {
   if (typeof text !== 'string') return false;
   const re = backendPattern(template).re;
-  for (let at = 0; at >= 0; at = text.indexOf('：', at) + 1 || -1) if (text.slice(at) === template || re.test(text.slice(at))) return true;
+  for (let at = 0; at >= 0; at = text.indexOf('：', at) + 1 || -1) {
+    if (at && !/^(?:\p{Script=Han}+：)+$/u.test(text.slice(0, at))) break;
+    if (text.slice(at) === template || re.test(text.slice(at))) return true;
+  }
   return false;
 }
 function translateMarkup(root) {
