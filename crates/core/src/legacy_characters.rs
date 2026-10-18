@@ -99,6 +99,13 @@ fn select_for(c: &Connection, table: &str, select: &'static str) -> Result<&'sta
     Ok(if table == "candidates" && !crate::character_projection::policy(c)? { CANDIDATES_RESOLVED } else { select })
 }
 
+const CANDIDATE_SCOPE: (&str, &str) = (
+    "FROM term_active_evidence active",
+    "FROM candidate_scope scoped CROSS JOIN term_assets scoped_asset
+               ON scoped_asset.namespace='library' AND scoped_asset.key=scoped.uuid
+             CROSS JOIN term_active_evidence active ON active.asset_id=scoped_asset.id",
+);
+
 /// 核心维护兼容表时，按图重算兼容 `candidates`（= 由当前有效证据全量算出的那几行）。
 pub(crate) fn refresh_candidates(c: &Connection, uuids: &[String]) -> Result<()> {
     c.execute_batch(
@@ -113,12 +120,7 @@ pub(crate) fn refresh_candidates(c: &Connection, uuids: &[String]) -> Result<()>
     // 小范围由图片驱动；原计划会先扫描全库证据并分组，最后才过滤图片。
     // 全量 refresh 保留原计划，避免为大集合增加逐图索引探测。
     let select = if uuids.len() <= 4096 {
-        select.replace(
-            "FROM term_active_evidence active",
-            "FROM candidate_scope scoped CROSS JOIN term_assets scoped_asset
-               ON scoped_asset.namespace='library' AND scoped_asset.key=scoped.uuid
-             CROSS JOIN term_active_evidence active ON active.asset_id=scoped_asset.id",
-        )
+        crate::character_projection::scoped(select, CANDIDATE_SCOPE.0, CANDIDATE_SCOPE.1)?
     } else {
         select.to_owned()
     };
