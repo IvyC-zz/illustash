@@ -205,6 +205,12 @@ pub fn startup_retry(app: AppHandle) {
     server::restart(&app, None);
 }
 
+/// Upgrade the library that failed to open, after the person agreed on the start page (#193).
+#[tauri::command(async)]
+pub fn startup_upgrade(app: AppHandle) {
+    server::upgrade(&app);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

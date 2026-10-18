@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-startup-upgrade"
+description = "Enables the startup_upgrade command without any pre-configured scope."
+commands.allow = ["startup_upgrade"]
+
+[[permission]]
+identifier = "deny-startup-upgrade"
+description = "Denies the startup_upgrade command without any pre-configured scope."
+commands.deny = ["startup_upgrade"]

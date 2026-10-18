@@ -22,7 +22,7 @@ body{margin:0;height:100vh;overflow:hidden;background:#f6f5fd}
 #splash .sp-fill{display:block;height:100%;width:0;border-radius:2px;background:var(--accent)}
 /* 启动失败：卡片停下，进度条换成原因和最后几行输出 */
 .sp-error{display:none;margin-top:18px;max-width:560px;padding:0 24px;text-align:center}
-.sp-error p{margin:0;color:var(--ink);font-size:13px}
+.sp-error p{margin:0;color:var(--ink);font-size:13px;white-space:pre-line}
 .sp-error pre{text-align:left;white-space:pre-wrap;font-size:12px;color:var(--muted);max-height:40vh;overflow:auto;margin:12px 0 0}
 .failed #splash .sp-status{display:none}
 .failed .sp-error{display:block}
@@ -78,7 +78,8 @@ button{font:inherit;color:inherit;cursor:pointer}
 </style></head>
 <body>
 <div id="splash" data-shell><div class="sp-bg"></div><div class="sp-col"><div class="sp-icon"><svg viewBox="302 291 650 650" fill="none"></svg></div><div class="sp-name">Illustash</div><div class="sp-status"><span class="sp-text" data-t>正在启动本地服务…</span><span class="sp-track"><span class="sp-fill"></span></span><button class="sp-switch" id="switch" data-t>选择其他图库</button></div><div class="sp-error"><p id="msg"></p><pre id="log" hidden></pre>
-<div class="sp-actions"><button class="btn primary" data-act="retry" data-t>重试</button><button class="btn" data-act="choose" data-t>选择其他图库</button><button class="btn" data-act="create" data-t>新建图库</button></div></div></div></div>
+<div class="sp-actions" id="failActs"><button class="btn primary" data-act="retry" data-t>重试</button><button class="btn" data-act="choose" data-t>选择其他图库</button><button class="btn" data-act="create" data-t>新建图库</button></div>
+<div class="sp-actions" id="upgradeActs" hidden><button class="btn primary" data-act="upgrade" data-t>升级并打开</button><button class="btn" data-act="choose" data-t>选择其他图库</button></div></div></div></div>
 <div id="welcome"><div class="w-col" id="wcol"></div></div>
 <!-- i18n.js、splash.js 由 desktop/build.rs 从 web/static/ 复制过来，两边用同一份；语言和译文表由外壳在页面加载前注入（desktop/src/i18n.rs） -->
 <script src="i18n.js"></script>
@@ -101,9 +102,10 @@ window.launch = async url => {
 const invoke = (cmd, args) => window.__TAURI_INTERNALS__.invoke(cmd, args);
 const busy = on => document.querySelectorAll('button').forEach(b => { b.disabled = on; });
 document.getElementById('switch').onclick = () => { busy(true); invoke('startup_choose', {create: false}); };
-document.querySelector('.sp-actions').onclick = e => {
+for (const acts of document.querySelectorAll('.sp-actions')) acts.onclick = e => {
   const act = e.target.closest('[data-act]')?.dataset.act; if (!act) return;
   busy(true);
+  if (act === 'upgrade') { invoke('startup_upgrade'); return; }
   invoke(act === 'retry' ? 'startup_retry' : 'startup_choose', act === 'retry' ? {} : {create: act === 'create'});
 };
 // 欢迎页：没有能打开的图库、用户改选或启动失败后改选时显示。三个入口：新建（按出处分栏添加文件夹，出处由用户指定）、
@@ -252,8 +254,19 @@ window.showError = (msg, log) => {
   document.body.classList.add('failed');
   window.splash?.halt();
   busy(false);
+  document.getElementById('failActs').hidden = false; document.getElementById('upgradeActs').hidden = true;
   document.getElementById('msg').textContent = msg;
   const pre = document.getElementById('log');
   pre.textContent = log || ''; pre.hidden = !log;
+};
+// 外壳发现图库是旧格式时调用（#193）：说明升级会发生什么，用户确认后外壳带 --upgrade 重新启动本地服务。
+// note 是本地服务的中文原文，和图库页一样经 tb() 翻译。
+window.showUpgrade = (name, note) => {
+  document.body.classList.add('failed');
+  window.splash?.halt();
+  busy(false);
+  document.getElementById('failActs').hidden = true; document.getElementById('upgradeActs').hidden = false;
+  document.getElementById('msg').textContent = `${t('「{name}」需要升级', {name})}\n${tb(note)}`;
+  const pre = document.getElementById('log'); pre.textContent = ''; pre.hidden = true;
 };
 </script></body></html>

@@ -531,16 +531,8 @@ pub(crate) fn run(args: &[String]) -> Result<u8> {
         match Library::open(&path) {
             Ok(library) if !crate::app_legacy_upgrade::required(&library)? => (library, None),
             _ => {
-                let prepared = crate::app_upgrade::prepare(&path)?;
-                let report =
-                    crate::app_upgrade::upgrade(&prepared).map_err(|failure| Error::Schema(failure.to_string()))?;
-                eprintln!(
-                    "图库升级已提交：terms {} → {}；升级前备份：{}{}",
-                    report.before,
-                    report.after,
-                    report.backup.display(),
-                    if report.maintenance_pending { "；空间维护待重试" } else { "" }
-                );
+                let report = crate::app_upgrade::run(&crate::app_upgrade::prepare(&path)?)
+                    .map_err(|failure| Error::Schema(failure.to_string()))?;
                 (report.library, Some(report.backup))
             }
         }
@@ -578,6 +570,8 @@ pub(crate) fn run(args: &[String]) -> Result<u8> {
             None => crate::app_libraries::unlisted_reason(&error),
         },
     )?;
+    application.session.write().expect("http session lock poisoned").upgraded =
+        upgrade_backup.map(|backup| backup.to_string_lossy().into_owned());
     let host = Arc::new(Host { application, origin: format!("http://127.0.0.1:{port}") });
     http::install_signals();
     let desktop_parent = crate::platform_process::DesktopParent::capture();

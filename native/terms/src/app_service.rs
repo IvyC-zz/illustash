@@ -49,6 +49,8 @@ pub(crate) struct Session {
     /// Why this library could not be listed among the recent ones when it was opened (#176). Listing only spares
     /// picking it again next time, so the library opens anyway and the page says so once.
     pub(crate) unlisted: Option<String>,
+    /// The pre-upgrade backup when this library was upgraded on being opened (#193): the page says where, once.
+    pub(crate) upgraded: Option<String>,
 }
 impl Session {
     pub(crate) fn token() -> Result<String> {
@@ -90,6 +92,7 @@ impl Session {
             research,
             onboarding,
             unlisted: None,
+            upgraded: None,
         })
     }
 }
@@ -204,6 +207,7 @@ impl Application {
             research,
             onboarding,
             unlisted: None,
+            upgraded: None,
         };
         session.syncer.resource_root = root.clone();
         session.syncer.per_run = per_run;

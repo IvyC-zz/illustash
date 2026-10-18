@@ -246,6 +246,17 @@ pub(crate) fn show_error(main: &WebviewWindow, message: &str, log: &VecDeque<Str
     on_start(main, &js);
 }
 
+/// The start page asks whether to upgrade the library named `name` (#193); it is replayed like a failure.
+fn show_upgrade(main: &WebviewWindow, name: &str) {
+    let js = format!(
+        "window.showUpgrade && window.showUpgrade({}, {})",
+        serde_json::to_string(name).unwrap(),
+        serde_json::to_string(illustash_terms::desktop_shell::upgrade_note()).unwrap()
+    );
+    *main.app_handle().state::<ErrorPage>().0.lock().unwrap() = Some(js.clone());
+    on_start(main, &js);
+}
+
 /// Startup stopped before the service was configured: remember why, so a retry repeats it instead of waiting.
 pub(crate) fn blocked(main: &WebviewWindow, message: &str) {
     *main.app_handle().state::<Launch>().blocked.lock().unwrap() = Some(message.into());
@@ -283,9 +294,9 @@ pub fn boot(app: AppHandle, main: WebviewWindow, bridge_port: u16, token: String
     let explicit = args.iter().any(|a| a == "--library" || a.starts_with("--library="));
     *app.state::<Launch>().config.lock().unwrap() = Some(Config { port, bridge_port, token, root, args });
     if explicit {
-        run(&app, &main, None);
+        run(&app, &main, None, false);
     } else if let Some(library) = illustash_terms::desktop_shell::startup_library() {
-        run(&app, &main, Some(library));
+        run(&app, &main, Some(library), false);
     } else {
         welcome(&app, &main, false);
     }
@@ -294,6 +305,16 @@ pub fn boot(app: AppHandle, main: WebviewWindow, bridge_port: u16, token: String
 /// Stop the current local service (if any) and start one on `library` (None: the same as last time),
 /// on a fresh start page.
 pub fn restart(app: &AppHandle, library: Option<PathBuf>) {
+    start_again(app, library, false);
+}
+
+/// The person agreed on the start page to upgrade the library that failed to open (#193): start the service on
+/// it again with `--upgrade`, which backs it up first and leaves it unchanged when the upgrade does not complete.
+pub fn upgrade(app: &AppHandle) {
+    start_again(app, None, true);
+}
+
+fn start_again(app: &AppHandle, library: Option<PathBuf>, upgrade: bool) {
     let Some(main) = app.get_webview_window("main") else { return };
     app.state::<Launch>().generation.fetch_add(1, Ordering::SeqCst);
     app.state::<Child>().stop();
@@ -301,7 +322,7 @@ pub fn restart(app: &AppHandle, library: Option<PathBuf>) {
     app.state::<StartupPage>().0.lock().unwrap().take();
     let library = library.or_else(|| app.state::<Launch>().library.lock().unwrap().clone());
     let _ = main.navigate(start_page());
-    run(app, &main, library);
+    run(app, &main, library, upgrade);
 }
 
 /// Stop the current local service (if any) and show the welcome page; `create` opens its new-library form.
@@ -317,7 +338,7 @@ pub fn welcome(app: &AppHandle, main: &WebviewWindow, create: bool) {
     app.state::<Child>().stop();
 }
 
-fn run(app: &AppHandle, main: &WebviewWindow, library: Option<PathBuf>) {
+fn run(app: &AppHandle, main: &WebviewWindow, library: Option<PathBuf>, upgrade: bool) {
     let generation = app.state::<Launch>().generation.fetch_add(1, Ordering::SeqCst) + 1;
     let Some(Config { port, bridge_port, token, root, mut args }) = app.state::<Launch>().config.lock().unwrap().clone()
     else {
@@ -338,6 +359,16 @@ fn run(app: &AppHandle, main: &WebviewWindow, library: Option<PathBuf>) {
         }
         args = kept;
         args.extend(["--library".to_owned(), library.to_string_lossy().into_owned()]);
+    }
+    // The library this service opens, to ask about an upgrade if opening it fails (#193).
+    let target = library.clone().or_else(|| {
+        let at = args.iter().position(|a| a == "--library");
+        at.and_then(|i| args.get(i + 1))
+            .map(PathBuf::from)
+            .or_else(|| args.iter().find_map(|a| a.strip_prefix("--library=")).map(PathBuf::from))
+    });
+    if upgrade {
+        args.push("--upgrade".to_owned());
     }
     *app.state::<Launch>().library.lock().unwrap() = library;
     app.state::<Child>().stopping.store(false, Ordering::SeqCst);
@@ -494,6 +525,14 @@ fn run(app: &AppHandle, main: &WebviewWindow, library: Option<PathBuf>) {
             return;
         }
         thread::sleep(Duration::from_millis(100));
+        // A library in an older format: ask before upgrading it, instead of showing a failure (#193). After a
+        // failed upgrade the failure itself is shown; the package is unchanged and can be tried again.
+        if !upgrade && !ready.load(Ordering::SeqCst) {
+            if let Some(name) = target.as_deref().and_then(illustash_terms::desktop_shell::upgrade_needed) {
+                show_upgrade(&main, &name);
+                return;
+            }
+        }
         let why = match status {
             Ok(Some(s)) => {
                 tr_with("本地服务已退出（{status}）；请查看下方日志，可以重试或选择其他图库", &[("status", &s)])
