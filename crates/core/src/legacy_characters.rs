@@ -996,6 +996,8 @@ fn baseline(target: &Target, anchor: i64, row: &Row) -> Want {
 
 /// hybrid 下撤销过这次旧合并：关系上有 `Store.undo` 那条固定理由的决议。
 const MERGE_UNDONE_IN_HYBRID: &str = "撤销历史合并；原归属无法区分的认领待确认";
+/// 旧版撤销时追加的审计决议，理由都以它开头；旧表里没有别的标记，这是已写下的数据，不随文案或翻译变。
+const UNDO_REASON_PREFIX: &str = "撤销";
 
 /// 未撤销的步骤按 id 排成每个目标的事件序列；已撤销的步骤的效果已被还原，不算——除了在 hybrid 下撤销的旧合并。
 fn history(tx: &Connection, hybrid: bool) -> Result<BTreeMap<Target, Vec<(i64, Event)>>> {
@@ -1390,7 +1392,7 @@ fn sync_relations(tx: &Connection, terms: &HashMap<String, TermId>, r: &mut Repo
     for (id, relation_id, status, reason, created_at) in decisions {
         let (action, kind) = match attached.get(&id) {
             Some(&a) => (Some(a), None),
-            None if reason.starts_with("撤销") => (None, Some("undo_audit")),
+            None if reason.starts_with(UNDO_REASON_PREFIX) => (None, Some("undo_audit")),
             None => (None, Some("migration")),
         };
         let anchor = action.unwrap_or_else(|| anchors.get(&relation_id).copied().unwrap_or(0));
