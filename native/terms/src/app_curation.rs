@@ -50,9 +50,9 @@ pub(crate) fn curate(c: &mut Connection, context: &LibraryContext, body: &Json) 
         .collect::<rusqlite::Result<_>>()?;
     let count = ids.iter().map(|id| groups.get(id).unwrap_or(id)).collect::<HashSet<_>>().len();
     let label = match action {
-        "exclude" => format!("已排除 {count} 张"),
-        "include" => format!("已收录 {count} 张"),
-        _ => format!("已将 {count} 张交回自动规则"),
+        "exclude" => format!("已排除 {n} 张", n = count),
+        "include" => format!("已收录 {n} 张", n = count),
+        _ => format!("已将 {n} 张交回自动规则", n = count),
     };
     tx.execute(
         "INSERT INTO actions(label,before_json) VALUES (?,?)",

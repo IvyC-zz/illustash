@@ -572,10 +572,10 @@ fn refresh(library: &Library, run_id: i64, cancel: &AtomicBool) -> Result<(Value
 fn failure_message(failed: u64, damaged: u64) -> String {
     let mut parts = Vec::new();
     if failed > 0 {
-        parts.push(format!("{failed} 张暂时读不到（可能还在 iCloud），下次同步重试"));
+        parts.push(format!("{n} 张暂时读不到（可能还在 iCloud），下次同步重试", n = failed));
     }
     if damaged > 0 {
-        parts.push(format!("{damaged} 张图片已损坏或格式不支持，留在图库里但不识别；文件改动后会重新识别"));
+        parts.push(format!("{n} 张图片已损坏或格式不支持，留在图库里但不识别；文件改动后会重新识别", n = damaged));
     }
     parts.join("；")
 }
@@ -584,7 +584,7 @@ fn with_unreadable(unreadable: u64, message: String) -> String {
     if unreadable == 0 {
         return message;
     }
-    let note = format!("{unreadable} 处文件或文件夹暂时读不到，其中已有的图片保留不动；恢复访问后再同步");
+    let note = format!("{n} 处文件或文件夹暂时读不到，其中已有的图片保留不动；恢复访问后再同步", n = unreadable);
     if message.is_empty() {
         note
     } else {

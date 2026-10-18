@@ -156,6 +156,9 @@ impl PageLanguage {
         });
         PageLanguage(ROMAN.replace(roman))
     }
+    pub(crate) fn with<T>(self, read: impl FnOnce() -> T) -> T {
+        read()
+    }
 }
 impl Drop for PageLanguage {
     fn drop(&mut self) {

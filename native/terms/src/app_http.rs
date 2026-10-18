@@ -139,10 +139,9 @@ fn settings(
 
 fn handle(mut request: Request, host: &Host, received: u64) {
     let write = request.method().as_str() == "POST";
-    // Names for the page's language (#173): only reads (and the read-only suggestions) take it, so nothing a
-    // write stores ever depends on it.
-    let read = !write || request.url().split('?').next() == Some("/api/suggest");
-    let _language = crate::http_read::PageLanguage::set(header(&request, "X-Illustash-Language").filter(|_| read));
+    // Names for the page's language (#173): only reads take it (and the read-only suggestions, http_host_post.rs),
+    // so nothing a write stores ever depends on it.
+    let _language = crate::http_read::PageLanguage::set(header(&request, "X-Illustash-Language").filter(|_| !write));
     // Security checks precede body reads. A partial body must not hold the library lock.
     {
         let session = host.session.read().expect("app_http session lock poisoned");

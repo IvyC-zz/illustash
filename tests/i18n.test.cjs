@@ -98,6 +98,9 @@ function rustLiterals(file) {
   return out.filter(([, , text]) => /\p{Script=Han}/u.test(text));
 }
 const rust = rustFiles().flatMap(rustLiterals);
+// The release channel the about page shows comes from the build's metadata, not a literal.
+const application = path.join(ROOT, 'native/terms/application.json');
+rust.push([application, 1, JSON.parse(readFileSync(application, 'utf8')).channel, '']);
 const backendKeys = new Set(rust.map(([, , text]) => text));
 // Backend text that never reaches the page: the command line, test harnesses, logs and panics. Only the coverage
 // report leaves it out; a table may still translate it.
@@ -313,6 +316,9 @@ test('backend text: an exact entry, else the most specific template; what placeh
   assert.ok(!said('不是：会话已过期，请刷新页面了', '会话已过期，请刷新页面'));
   // Messages joined with ；, each translated.
   assert.equal(tb('其他；已将 1 张移出 雪；没有模板'), 'Other; Removed 1 picture from 雪; 没有模板');
+  // A message that has a ； of its own stays whole.
+  const semi = page('en', [], {en: {...table, '甲；乙 {n} 张': 'A; B {n}', '丙 {n} 处': 'C {n}'}}).context;
+  assert.equal(vm.runInContext('tb', semi)('丙 2 处；甲；乙 3 张'), 'C 2; A; B 3');
   assert.ok(!said(undefined, '其他'));
 });
 

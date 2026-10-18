@@ -317,7 +317,9 @@ pub(super) fn handle(request: Request, host: &Host, received: u64, text: &str, b
                     .map(|_| Json::object([("started", true.into())]))
             }
         }
-        "/api/suggest" => crate::http_local::suggest(&session.context(&host.tags), &body),
+        // Read-only, so its names follow the page's language like other reads (app_http.rs).
+        "/api/suggest" => crate::http_read::PageLanguage::set(language.as_deref())
+            .with(|| crate::http_local::suggest(&session.context(&host.tags), &body)),
         "/api/startup" => crate::app_settings::set_startup_json(&session.library, text).and_then(|_| {
             settings(
                 &session.library,

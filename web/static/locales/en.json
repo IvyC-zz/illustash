@@ -1674,9 +1674,6 @@
   "新图库创建失败：{error}；清理本次新目录失败：{cleanup}": "Creating the new library failed: {error}; cleaning up its new folder also failed: {cleanup}",
   "参考库结构不支持当前读取与同步：{e}": "The reference library's structure does not support reading and syncing now: {e}",
   "新图库数据库完整性检查失败": "The new library's database failed its integrity check",
-  "已排除 {count} 张": "Excluded {count}",
-  "已收录 {count} 张": "Included {count}",
-  "已将 {count} 张交回自动规则": "Handed {count} back to the automatic rules",
   "未知关系": "Unknown relation",
   "图库缺少源库": "The library has no source database",
   "桌面 app 没有响应或拒绝请求": "The desktop app did not answer or refused the request",
@@ -1970,9 +1967,6 @@
   "原生同步没有支持的来源": "Native sync has no supported source",
   "识别导入恢复未完成": "Recovering the recognition import is unfinished",
   "有 {pending} 张图等待识别；本次启动没有识别 worker": "{pending} pictures are waiting for recognition; there is no recognition worker in this run",
-  "{failed} 张暂时读不到（可能还在 iCloud），下次同步重试": "{failed} could not be read for now (they may still be in iCloud); the next sync will try again",
-  "{damaged} 张图片已损坏或格式不支持，留在图库里但不识别；文件改动后会重新识别": "{damaged} pictures are damaged or in an unsupported format; they stay in the library but are not identified, and will be identified again once the file changes",
-  "{unreadable} 处文件或文件夹暂时读不到，其中已有的图片保留不动；恢复访问后再同步": "{unreadable} files or folders could not be read for now; pictures already in them stay as they are. Sync again once they can be reached",
   "source.sqlite: assets.src_path 必须为字符串": "source.sqlite: assets.src_path must be a string",
   "识别进程异常退出：{status}": "The recognition process exited unexpectedly: {status}",
   "识别响应不合法": "The recognition reply is not valid",
@@ -2248,8 +2242,28 @@
   "已暂不判断一对角色": "Left a pair of characters undecided for now",
   "中途退出": "Quit partway",
   "已保存身份关系决议": "Saved an identity relation decision",
-  "撤销锚点修正；需要重建和校准": "Undid an anchor correction; needs rebuilding and calibrating",
   "外部链接已由用户清空": "You cleared the external link",
   "从 Danbooru 角色的作品自动建立": "Created automatically from a Danbooru character's series",
-  "相册导入": "Album import"
+  "相册导入": "Album import",
+  "{n} 张图片已损坏或格式不支持，留在图库里但不识别；文件改动后会重新识别": {
+    "one": "{n} picture is damaged or in an unsupported format; it stays in the library but is not identified, and will be identified again once the file changes",
+    "other": "{n} pictures are damaged or in an unsupported format; they stay in the library but are not identified, and will be identified again once the file changes"
+  },
+  "{n} 处文件或文件夹暂时读不到，其中已有的图片保留不动；恢复访问后再同步": {
+    "one": "{n} file or folder could not be read for now; pictures already in it stay as they are. Sync again once it can be reached",
+    "other": "{n} files or folders could not be read for now; pictures already in them stay as they are. Sync again once they can be reached"
+  },
+  "已排除 {n} 张": {
+    "one": "Excluded {n} picture",
+    "other": "Excluded {n} pictures"
+  },
+  "已收录 {n} 张": {
+    "one": "Included {n} picture",
+    "other": "Included {n} pictures"
+  },
+  "已将 {n} 张交回自动规则": {
+    "one": "Handed {n} picture back to the automatic rules",
+    "other": "Handed {n} pictures back to the automatic rules"
+  },
+  "预览版": "Preview"
 }

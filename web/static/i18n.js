@@ -71,24 +71,31 @@ const backendTemplates = (() => {
     && /\p{Script=Han}/u.test(key.replace(/\{\w+\}/g, ''))).map(backendPattern).sort((a, b) => b.weight - a.weight);
 })();
 const backendShown = new Map();
+// The translation of a backend text, or undefined when no entry or template fits it.
+function backendEntry(text, depth, split = true) {
+  if (Object.hasOwn(I18N.table, text) && I18N.table[text]) return t(text);
+  if (depth >= 3) return undefined;
+  // The most specific template wins: the one with the most wording of its own.
+  for (const p of backendTemplates()) {
+    if (!text.startsWith(p.literal[0]) || !text.endsWith(p.literal.at(-1))) continue;
+    const m = p.re.exec(text);
+    if (m) return t(p.template, Object.fromEntries(p.names.map((name, i) => [name, tb(m[i + 1], depth + 1)])));
+  }
+  // Several messages the backend joined with ；, which may also be inside one: the longest runs that fit.
+  const parts = split ? text.split('；') : [];
+  if (parts.length < 2) return undefined;
+  const out = [];
+  for (let i = 0; i < parts.length;) {
+    let j = parts.length - (i ? 0 : 1), found;
+    for (; j > i; j--) if ((found = backendEntry(parts.slice(i, j).join('；'), depth + 1, false)) !== undefined) break;
+    if (j === i) { out.push(parts[i]); i++; } else { out.push(found); i = j; }
+  }
+  return out.join(t('；', {context: 'join'}));
+}
 function tb(text, depth = 0) {
   if (I18N.language === 'zh-CN' || typeof text !== 'string' || !/\p{Script=Han}/u.test(text)) return text;
-  if (Object.hasOwn(I18N.table, text)) return t(text);
   if (!depth && backendShown.has(text)) return backendShown.get(text);
-  let out = text;
-  if (depth < 3) {
-    // The most specific template wins: the one with the most wording of its own.
-    for (const p of backendTemplates()) {
-      if (!text.startsWith(p.literal[0]) || !text.endsWith(p.literal.at(-1))) continue;
-      const m = p.re.exec(text);
-      if (!m) continue;
-      const params = Object.fromEntries(p.names.map((name, i) => [name, tb(m[i + 1], depth + 1)]));
-      out = t(p.template, params);
-      break;
-    }
-    // Several messages the backend joined with ；, when no template covers the whole.
-    if (out === text && text.includes('；')) out = text.split('；').map(part => tb(part, depth + 1)).join(t('；', {context: 'join'}));
-  }
+  const out = backendEntry(text, depth) ?? text;
   if (!depth) {
     if (backendShown.size > 5000) backendShown.clear();
     backendShown.set(text, out);

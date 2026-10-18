@@ -877,7 +877,8 @@ fn undo_anchor(c: &Connection, anchor: &Value) -> Result<()> {
         c.prepare_cached("INSERT INTO identity_anchor_decisions VALUES (?,?,?,?,?)")?
             .execute(rusqlite::params_from_iter(values))?;
     }
-    c.prepare_cached("INSERT INTO identity_anchor_history(entity,reference,decision,reason) VALUES (?,?,'undo',?)")?
-        .execute([entity, reference, "撤销锚点修正；需要重建和校准"])?;
+    c.prepare_cached("INSERT INTO identity_anchor_history(entity,reference,decision,reason) VALUES (?,?,'undo','撤销锚点修正；需要重建和校准')")?.execute(
+        [entity, reference],
+    )?;
     character_projection::memberships(c, None)
 }
