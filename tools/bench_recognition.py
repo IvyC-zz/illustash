@@ -447,12 +447,24 @@ def main():
             print(f'阶段分解第 {trial} 次完成', flush=True)
         after = conditions()
         result = summarise(args, generated, before, after, trials, stages)
+        result['inputs'] = {name: sha256(path) for name, path in (
+            ('wd', resources / 'models/wd_swinv2_v3_emb.onnx'), ('ccip', resources / 'models/ccip/model_feat.onnx'),
+            ('runtime', resources / 'onnxruntime' / RUNTIME))}
         out.write_text(json.dumps(result, ensure_ascii=False, indent=1), encoding='utf-8')
         report(result)
         print(f'结果：{out}')
     finally:
         if owned and not args.keep:
             shutil.rmtree(args.work, ignore_errors=True)
+
+
+def sha256(path):
+    import hashlib
+    digest = hashlib.sha256()
+    with path.open('rb') as f:
+        for block in iter(lambda: f.read(1 << 20), b''):
+            digest.update(block)
+    return digest.hexdigest()
 
 
 def summarise(args, generated, before, after, trials, stages):
