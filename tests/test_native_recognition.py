@@ -107,7 +107,7 @@ class NativeRecognitionTest(unittest.TestCase):
         for table in ('assets','assertions','asset_tags','memberships','general_hits','asset_rating'):
             self.assertEqual(snapshot(self.lib.db)[table],expected['db'][table],table)
         # `actions` by the #201 baseline: core v8 added two columns to it.
-        self.assertTrue(self.rec.baseline('old import', self.lib.path))
+        self.assertTrue(self.rec.baseline('old import', self.lib.path, only={'app': ['actions']}))
         self.assertEqual(snapshot(self.lib.db)['actions'],before)
         source=snapshot(self.lib.source); app=snapshot(self.lib.db)
         self.assertTrue(self.import_result(p)['duplicate'])

@@ -249,11 +249,12 @@ class Expectations:
         self.states += 1
         return Digests(value, slot)
 
-    def baseline(self, label, package, rename=None):
+    def baseline(self, label, package, rename=None, only=None):
         """The #201 baseline of a library package at a named point (fresh libraries the tests compare whole):
         recorded when recording, otherwise compared with what was recorded, if anything was. ``rename`` maps
-        values made at random (generated keys) to stable names first."""
-        return _check_baseline((self.module, self.test, f'@{label}'), baseline_state(Path(package), rename))
+        values made at random (generated keys) to stable names first; ``only`` ({db: [tables]}) compares just those
+        tables of the recorded state."""
+        return _check_baseline((self.module, self.test, f'@{label}'), baseline_state(Path(package), rename), only)
 
     def package(self, label, path, library=True):
         """恢复冻结的合成输入包，数据库文本中的临时路径按本轮根目录还原。"""
@@ -508,7 +509,7 @@ def _baseline_file(module):
         return json.load(f)
 
 
-def _check_baseline(slot, state):
+def _check_baseline(slot, state, only=None):
     """Record ``state`` for ``slot`` (module, test, key) when recording; otherwise True unless a baseline was
     recorded for it and differs (the difference is printed)."""
     module, test, key = slot
@@ -516,6 +517,9 @@ def _check_baseline(slot, state):
         _record_baseline(module, test, key, state)
         return True
     want = _baseline_file(module).get(test, {}).get(key)
+    if only is not None:
+        pick = lambda s: {db: {t: s.get(db, {}).get(t) for t in tables} for db, tables in only.items()}
+        state, want = pick(state), want if want is None else pick(want)
     if want is not None:
         want, state = _without_volatile(want), _without_volatile(state)
     if want == state:
