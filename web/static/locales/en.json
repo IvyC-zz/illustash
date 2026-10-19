@@ -2475,5 +2475,12 @@
   "模型文件": "Model files",
   "{n} 字节": {"one": "{n} byte", "other": "{n} bytes"},
   "{path} 没能下载，每个来源都试过了": "Couldn't download {path}; every source was tried",
-  "{source}：{why}": "{source}: {why}"
+  "{source}：{why}": "{source}: {why}",
+  "正在识别或下载，等它结束再删除": "Recognizing or downloading; delete once it has finished",
+  "删除已下载的模型": "Delete the downloaded models",
+  "删除已下载的识别模型（约 {size}）？删除后要重新下载或从文件导入，才能识别新加入的图片；已经识别的结果都保留。": "Delete the downloaded recognition models (about {size})? New pictures can only be recognized after downloading or importing them again; results already recognized are kept.",
+  "删除识别模型": "Delete recognition models",
+  "识别模型已删除": "Recognition models deleted",
+  "这个安装自带识别模型，不能删除": "This installation comes with its recognition models; they can't be deleted",
+  "正在识别图片，等它结束再删除识别模型": "Pictures are being recognized; delete the recognition models once it has finished"
 }

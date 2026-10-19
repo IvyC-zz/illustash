@@ -13,6 +13,7 @@
 | `migration_inventory.py` | 生产迁移边界清点，规格在 `tests/migration_inventory.json` |
 | `gen_casefold.py`、`gen_http_unicode.py` | 生成 `crates/core` 的 casefold 与 Unicode 表 |
 | `test_native_contracts.sh`、`bench_native_contracts.sh` | 空 PATH 重放固定契约；契约基准，见 [TERMS_PERFORMANCE.md](TERMS_PERFORMANCE.md) |
+| `bench_recognition.py` | 整应用识别吞吐基准（合成图片，扫描到识别、导入完成），见 [TERMS_PERFORMANCE.md 第 6 节](TERMS_PERFORMANCE.md#6-整应用识别吞吐基准) |
 | `verify_read_http.py` | 原生测试用的 HTTP 逐字节对照辅助 |
 | `build_provenance_probe.py`、`windows_acceptance.py`、`windows_research_acceptance.py` | 溯源候选构建、Windows 基础版与研究包验收 |
 | `build_db.py` | 重建旧格式分析源库；`test_native_library_upgrade` 用它造旧库 |

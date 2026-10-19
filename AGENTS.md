@@ -43,18 +43,19 @@ Claude Code 通过 `CLAUDE.md` 引入本文件，Codex 等直接读本文件。�
   3. 全量通过后，如果后续提交只改本机不会编译的平台专用代码（如 `cfg(windows)`）及迁移清单指纹，可以用该平台的定向构建、clippy 和相关测试代替重跑本机全量；PR 描述分别写明全量通过的 head 和最终 head 及各自覆盖。
   4. 只改文档（Markdown，不含脚本、配置和代码注释）的 PR 不跑全量，只检查相对链接。
 - 2026-10-18 用户定：合入 main 改由**集成会话**统一做（合并队列），以下优先于上面关于「PR 最终 head」的规定：
-  1. 开发会话只做定向检查和平台相关验收（Windows、虚拟机、浏览器走查），做完把 PR 转为 Ready 并写明「待集成」；**不再自己跑本机全量，也不自己合并**。
+  1. 开发会话只做定向检查和平台相关验收（Windows、虚拟机、浏览器走查），做完把 PR 转为 Ready 并写明「待集成」；**不再自己跑本机全量，也不自己合并**。改了 Rust 代码的 PR，转 Ready 之前要对改过的 Cargo 项目跑过 `cargo fmt --check` 和 clippy，参数与 `tools/check_all.sh` 相同，结果写进 PR 描述（2026-10-19 用户定，#240；具体命令见[本地验收](docs/LOCAL_CHECKS.md#合并队列集成会话)）。
   2. 只有集成会话跑本机全量、执行合并：把最新 main 和一批 Ready 的 PR 依次合到候选分支上，有冲突的退回原会话、这一批不带它（例外：只有迁移清单指纹冲突时由集成会话重算，见[本地验收](docs/LOCAL_CHECKS.md#合并队列集成会话)）；在候选上跑一次全量。「全量通过」指这个候选上一次完整运行通过，并且合并后 main 的内容（tree）与候选相同。失败时定位到具体 PR 并退回。
   3. 用户批准后，集成会话按测过的顺序合入，在每个 PR 里写明候选 head、同批 PR 和全量结果。界面级、只改文档的 PR 照旧不需要全量，也由集成会话按顺序合入。做法见 [本地验收](docs/LOCAL_CHECKS.md#合并队列集成会话)。
-- 2026-10-03 用户批准：验收叙述收尾可按有效输入复用完整全量事实，仅限 `docs/acceptance/local-summary.md`；默认其他所有文档均影响指纹。由 `tools/local_acceptance.py` 在固定 detached worktree 串行执行并签名记录，保留原已测 commit/tree 和环境，不冒称新候选已重建。机制合并验证前其他会话不得采用；固定验收区缓存不随开发任务清理。失效规则、候选提交、取结果和释放窗口见 [本地验收](docs/LOCAL_CHECKS.md)。
+- 2026-10-03 用户批准：验收叙述收尾可按有效输入复用完整全量事实，仅限 `docs/acceptance/local-summary.md`；默认其他所有文档均影响指纹。由 `tools/local_acceptance.py` 在固定 detached worktree 串行执行并签名记录，保留原已测 commit/tree 和环境，不冒称新候选已重建。机制合并验证前其他会话不得采用。固定验收区的 target 等构建缓存可以删除（2026-10-19 用户定，#240），下次使用时冷编译；`local_acceptance` 机制、外层记录和密钥保留。失效规则、候选提交、取结果和释放窗口见 [本地验收](docs/LOCAL_CHECKS.md)。
 - 2026-10-02 用户定：GitHub Actions 仅保留 `workflow_dispatch`，所有实际 job 同时要求运行 ref 为 `refs/heads/main`；推送、开 PR、合并均不自动运行。其他分支在 UI 仍可能被选择并留下跳过的 run 记录，但不执行任务。新分支从最新 main 创建；旧分支合入前必须保留这套事件及 job 限制，不能重新引入自动触发。
 - 本地全量对齐 `.github/workflows/ci.yml`，默认包含原生固定契约空 PATH 重放。升级验收使用 `tests/fixtures/library_upgrade` 中由历史 v5/v6 产出者一次性生成的合成旧图库，不在检查时构建历史版本；升级测试不能跳过。脚本依赖 Python 3.12（`CHECK_ALL_PYTHON` 可指定解释器）、Node 22、Rust stable（含 rustfmt/clippy），Python 依赖与历史构建缓存放在被忽略的 `.venv/check-all/`；只支持 macOS（Linux 已冻结，见 README），Windows 单列验收。只允许 CI 同样允许的平台限制和真实图库数据缺失跳过，不访问真实图库补齐数据。
 - 2026-10-12 用户定：本机同一时间只跑一个重型检查。`tools/check_all.sh`、`tools/local_acceptance.py run` 和单独的 release 构建，通过 agent-collab skill 的 `scripts/collab_run.py run -- <命令>` 运行（路径按所在 harness 的 skill 安装位置；没装这个 skill 的环境照常直接运行）：槽位被占时排队，用 `collab_run.py status` 查看谁在跑；长命令放后台运行，免得排队时被工具超时打断。从本机经 SSH 发起的 Windows 构建与验收用 `--slot windows`，与本机检查互不阻塞。定向测试不用排队。
 - 2026-10-15 用户定：在 Mac 上启动 App 做实机测试（图形界面走查、安装、首次流程、Gatekeeper、断网），一律在 macOS 虚拟机里做，不在本机直接启动，以免影响用户日常用的正式版及其图库、设置和钥匙串。`tools/check_all.sh`、单元测试等不启动 App 的检查照旧在本机跑。虚拟机做不了的项目（iCloud 照片、性能数字）先在 Issue 里说明，用户同意后才在本机用隔离目录做。做法见 [本地验收](docs/LOCAL_CHECKS.md#macos-实机测试虚拟机)。
 - 2026-10-18 用户定，补充 2026-10-12 的排队规则（多个会话并行时，没排队的构建、计时和虚拟机会把机器压满，全量变慢、计时测试误报）：
-  1. 计时、性能测量（启动耗时、吞吐、基准）和单独的 release 构建一样，经 `collab_run.py run -- <命令>` 占 heavy 槽再做；在别人跑全量时测出的数字不算数。
+  1. 计时、性能测量（启动耗时、吞吐、基准）用 `collab_run.py timing -- <命令>`：同时占 heavy 和 vm 两个槽，并等整机 CPU 空闲（默认连续 30 秒占用不超过 10%）才开始（2026-10-19 用户定，#240）。单独的 release 构建照旧经 `collab_run.py run` 占 heavy 槽。在别人跑全量、开着虚拟机或机器没闲下来时测出的数字不算数。
   2. 虚拟机用 `--slot vm`，同一时间只开一台：`collab_run.py run --slot vm -- tart run …` 放后台运行，虚拟机关机即释放；不测的时候就关掉。
   3. heavy 槽被占时，照常写代码、跑小的定向测试；对时间敏感的测试在高负载下失败，先排除负载影响再下结论（#219）。
+- 2026-10-19 用户定（#240）：开发会话的编译和定向测试（`cargo build/test/clippy/check`、`python -m unittest`）默认经 `collab_run.py bg -- <命令>` 以后台优先级运行，把性能核留给全量和计时；全量、计时和单独的 release 构建本身不降级。全量在跑时这些命令会慢很多，甚至几乎停住，这是预期的。经 SSH 在 Windows 机上跑的不受此限。重型、计时和后台三类命令由钩子按本机配置拦截，没按规定运行时照提示改写即可。做法、拦截范围和运行历史见[本地验收](docs/LOCAL_CHECKS.md#本机资源排队计时与后台优先级)。
 - 读不到 GitHub 的代理（禁网沙箱）：由 Lead 把 Issue 正文贴给它，它的进度和结果由 Lead 代写进 PR。
 - 合并到 main、推送标签、关闭别人开的 Issue 由用户决定或明确授权。
 - 每个会话都必须知道的约束写在本文件，不写在 Issue 里：Issue 不会自动进上下文。
@@ -122,6 +123,6 @@ Claude Code 通过 `CLAUDE.md` 引入本文件，Codex 等直接读本文件。�
 ### 6. 提交前自查
 
 - 本次改动有没有新增任务单、流水或原始样本？有就挪走。
-- 本次源码改动是否同步 `tests/migration_inventory.json` 的报告用 `sources` 指纹？更新指纹不等于批准新增迁移边界；边界和归属仍须按原门槛检查。
+- 本次源码改动是否同步 `tests/migration_inventory.json` 的报告用 `sources` 指纹（`python -m tools.migration_inventory sync-sources`）？更新指纹不等于批准新增迁移边界；边界和归属仍须按原门槛检查。
 - 有没有让某篇文档里的状态句过期？
 - Markdown 相对链接是否都还指向存在的文件？

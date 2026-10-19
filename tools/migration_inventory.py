@@ -4,6 +4,7 @@
 check 仅阻塞新增 HTTP 分支、数据库写/动态执行点、启动/CLI 入口或缺失归属。
 普通源码改动仅报告。研究/测试/生成代码按类别保留，无逐文件指纹门槛。
 scan 输出当前边界；expand 展开归属、验收及删除条件；均不更新已审核规格。
+fmt 把规格写成规范格式；sync-sources 只把报告用的 sources 指纹改成当前值，不动边界与归属。
 """
 import argparse
 import ast
@@ -264,9 +265,33 @@ def check(root, spec):
     return errors, current
 
 
+def dump_spec(spec):
+    """Canonical bytes: each top-level key, and each entry of a top-level object or list, on its own compact line.
+
+    Two branches that refresh different sources fingerprints then touch different lines and git merges them;
+    sources entries are also separated by a blank line, since git treats edits to adjacent lines as a conflict.
+    Key order is kept as written except sources, which is sorted like scan().
+    """
+    if isinstance(spec.get('sources'), dict):
+        spec = {**spec, 'sources': dict(sorted(spec['sources'].items()))}
+    compact = lambda value: json.dumps(value, ensure_ascii=False, separators=(',', ':'))
+    items = []
+    for key, value in spec.items():
+        if isinstance(value, dict) and value:
+            entries, brackets = [compact(k) + ':' + compact(v) for k, v in value.items()], '{}'
+        elif isinstance(value, list) and value:
+            entries, brackets = [compact(v) for v in value], '[]'
+        else:
+            items.append(compact(key) + ':' + compact(value))
+            continue
+        separator = ',\n\n' if key == 'sources' else ',\n'
+        items.append(compact(key) + ':' + brackets[0] + '\n' + separator.join(' ' + e for e in entries) + '\n' + brackets[1])
+    return '{\n' + ',\n'.join(items) + '\n}\n'
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('command', choices=('check', 'scan', 'report', 'expand'), nargs='?', default='check')
+    parser.add_argument('command', choices=('check', 'scan', 'report', 'expand', 'fmt', 'sync-sources'), nargs='?', default='check')
     parser.add_argument('--root', type=Path, default=ROOT)
     parser.add_argument('--spec', type=Path, default=SPEC)
     args = parser.parse_args(argv)
@@ -275,8 +300,24 @@ def main(argv=None):
     if args.command == 'scan':
         print(json.dumps(scan(args.root), ensure_ascii=False, indent=2))
         return 0
-    spec = json.loads(args.spec.read_text(encoding='utf-8'))
+    text = args.spec.read_text(encoding='utf-8')
+    spec = json.loads(text)
+    if args.command == 'fmt':
+        args.spec.write_text(dump_spec(spec), encoding='utf-8')
+        return 0
     errors, current = check(args.root, spec)
+    if args.command == 'sync-sources':
+        if any(e.startswith('迁移边界清单损坏') for e in errors):
+            print(errors[0], file=sys.stderr)
+            return 1
+        changed = sorted(set(spec.get('sources', {}).items()) ^ set(current['sources'].items()))
+        spec['sources'] = current['sources']
+        text = dump_spec(spec)
+        args.spec.write_text(text, encoding='utf-8')
+        current['warnings'] = []
+        print(f'已同步 {len({path for path, _ in changed})} 个文件的指纹（只改 sources，不批准新增边界）')
+    if text != dump_spec(spec):
+        errors.append('清单格式不规范：运行 python -m tools.migration_inventory fmt')
     if args.command == 'expand':
         for site in current['sites']:
             rule = assigned(site, spec)
