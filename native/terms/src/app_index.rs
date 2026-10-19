@@ -266,6 +266,8 @@ fn candidates(lib: &Library, shared: &Path, dir: &Path, net: &crate::app_name_so
 }
 
 pub(crate) struct Updater {
+    /// The resource root: where the recognition models are looked for (#168).
+    resources: PathBuf,
     shared: PathBuf,
     dir: PathBuf,
     journal: PathBuf,
@@ -288,6 +290,7 @@ impl Updater {
     ) -> Result<Self> {
         let shared = crate::app_resources::shared_path(root)?;
         Ok(Self {
+            resources: root.to_owned(),
             dir: shared.join("char-patch"),
             shared,
             journal: lib.instance_path().join("index-job.json"),
@@ -501,6 +504,9 @@ impl Updater {
         if action != "check" && action != "resume" && std::env::var_os("ILLUSTASH_INDEX_WORKER").is_none() {
             return bad("角色索引计算 worker 未配置");
         };
+        if action != "check" && action != "resume" && crate::app_models::waiting(&self.resources) {
+            return bad("识别模型还没下载；下载后才能更新角色索引");
+        }
         self.task.take();
         let identity = TaskIdentity::new(lib, self.generation, &self.session)?;
         let lib = lib.clone();

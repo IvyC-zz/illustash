@@ -361,7 +361,9 @@ fn run_with(
         }
         if pending > 0 {
             if let Some(ctx) = context {
-                if let Some(worker) = std::env::var_os("ILLUSTASH_RECOGNITION_WORKER") {
+                let worker =
+                    std::env::var_os("ILLUSTASH_RECOGNITION_WORKER").filter(|_| !crate::app_models::waiting(root));
+                if let Some(worker) = worker {
                     recognise(
                         library,
                         ctx,
@@ -389,7 +391,11 @@ fn run_with(
         let message = with_unreadable(
             unreadable,
             if pending > 0 {
-                format!("有 {pending} 张图等待识别；本次启动没有识别 worker")
+                if crate::app_models::waiting(root) {
+                    format!("有 {pending} 张图等待识别；{why}", why = crate::app_models::MISSING)
+                } else {
+                    format!("有 {pending} 张图等待识别；本次启动没有识别 worker")
+                }
             } else {
                 String::new()
             },

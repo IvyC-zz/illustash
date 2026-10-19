@@ -10,6 +10,8 @@ import {state} from '../core/state.js';
 import {$, toast} from './dom.js';
 import {openRelease} from './settings.js';
 import {taskList} from './tasks.js';
+import {modelsNotice} from './models.js';
+import {modelsWaiting, modelsFinished, onModels} from '../core/models.js';
 
 // ---------- 新图库的首次引导 (#96, native/terms/src/app_onboarding.rs) ----------
 // Taught on the real interface: a few stops lit up one at a time, a checklist that ticks itself as things get done,
@@ -74,10 +76,17 @@ function syncTrouble() {
 }
 export function drawGuideNotice() {
   const el = $('guideNotice'), g = state.guide; if (!el) return;
+  // An install without its models (#168): shown in every library until they are in place, guide or not.
+  const models = modelsNotice();
+  if (models || el.dataset.models) {
+    el.dataset.models = models ? '1' : '';
+    if (models) { el.hidden = false; if (el.dataset.html !== models) { el.dataset.html = models; el.innerHTML = models; } return; }
+    el.dataset.html = '';
+  }
   const c = g?.capability, check = c?.check || {};
-  if (guideOn() && c?.recognition && check.status === 'idle' && !guideChecked) { guideChecked = true; guideAction({action: 'check'}).then(() => setTimeout(() => guideRefresh(true), 1500)); }
+  if (guideOn() && c?.recognition && !modelsWaiting() && check.status === 'idle' && !guideChecked) { guideChecked = true; guideAction({action: 'check'}).then(() => setTimeout(() => guideRefresh(true), 1500)); }
   if (guideOn() && check.status === 'checking') setTimeout(() => guideRefresh(true), 1500);
-  const problem = !guideOn() ? '' : !c.recognition ? t('这个安装没有识别组件：图片会加入图库、可以手动整理，但不会自动认出角色。安装 Illustash 完整版后就能自动识别。')
+  const problem = !guideOn() || modelsWaiting() ? '' : !c.recognition ? t('这个安装没有识别组件：图片会加入图库、可以手动整理，但不会自动认出角色。安装 Illustash 完整版后就能自动识别。')
     : check.status === 'failed' ? t('识别组件没能启动（{reason}）。图片仍会加入图库；可以重新检查，或重新安装完整版。', {reason: esc(tb(check.message || ''))}) : '';
   const trouble = guideOn() && !problem ? syncTrouble() : '';
   el.hidden = !problem && !trouble;
@@ -228,6 +237,11 @@ export async function replayGuide() {
 
 // The handlers this part of the page registers. Called once, when the page starts.
 export function wireGuide() {
+  // The models just arrived: check that recognition starts, as on opening a new library.
+  onModels(async before => {
+    if (modelsFinished(before) && state.models.status === 'ready' && guideOn()) { await guideAction({action: 'check'}); setTimeout(() => guideRefresh(true), 1500); }
+    drawGuideNotice();
+  });
   $('guideNotice').addEventListener('click', async e => {
     if (e.target.closest('[data-guide-check]')) { await guideAction({action: 'check'}); drawGuide(); setTimeout(() => guideRefresh(true), 1500); }
     if (e.target.closest('[data-guide-photos]')) location.href = PHOTOS_PRIVACY;

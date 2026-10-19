@@ -41,9 +41,12 @@ NOTICES = {'licenses/LICENSE': 'LICENSE', 'licenses/THIRD_PARTY.md': 'docs/THIRD
 # and committed with crates.json; staging only checks them against the lock files and copies (#161).
 RUST_LICENSES = ROOT / 'packaging/rust-licenses'
 RUST_WORKSPACES = ('native/terms', 'desktop', 'crates/iqdb')
-# Original texts of the bundled models' licenses, committed with their sources and SHA-256 (#8).
-# Every package that carries models carries them; there is no other source.
+# Original texts of the models' licenses, committed with their sources and SHA-256 (#8). Every computation
+# package carries them, with the models or without (then the app downloads the models on first use, #168);
+# there is no other source.
 MODEL_LICENSES = ROOT / 'packaging/model-licenses'
+# The recognition models under resources/models/ (native/terms/models.json): a package has all of them or none.
+MODEL_FILES = tuple(entry['path'] for entry in json.loads((ROOT / 'native/terms/models.json').read_text())['files'])
 # One worker binary serves all four kinds; the host passes the kind per launch (#37).
 WORKER_KINDS = ('research', 'index', 'provenance', 'recognition')
 
@@ -155,9 +158,9 @@ def stage(destination, binaries, research=False, desktop=None, iqdb=None, models
         raise ValueError('output already exists; choose a new directory')
     if (models or openblas_site or ort_dylib or ort_licenses) and not research:
         raise ValueError('models/runtime require --research')
-    # Checked before creating output: a package with models but without their licenses is never staged,
+    # Checked before creating output: a computation package without the models' licenses is never staged,
     # nor any package whose Rust license texts lag behind the lock files.
-    model_notices = model_licenses() if models else []
+    model_notices = model_licenses() if research else []
     rust_licenses()
     if research and sys.platform not in ('darwin', 'win32'):
         # Linux is frozen: no computation package ships there (README).
@@ -191,10 +194,10 @@ def stage(destination, binaries, research=False, desktop=None, iqdb=None, models
         copy(ROOT / 'crates/iqdb/Cargo.lock', destination / 'dependencies/iqdb-Cargo.lock')
         copy(binaries / ('illustash-worker' + suffix), destination / 'bin' / ('illustash-worker' + suffix))
         if models:
-            for name in ('wd_swinv2_v3_emb.onnx', 'ccip/model_feat.onnx', 'ccip/model_metrics.onnx', 'ccip/metrics.json'):
+            for name in MODEL_FILES:
                 copy(models / name, destination / 'resources/models' / name)
-            for installed, path in model_notices:
-                copy(path, destination / installed)
+        for installed, path in model_notices:
+            copy(path, destination / installed)
         if ort_dylib:
             library = 'onnxruntime.dll' if sys.platform == 'win32' else 'libonnxruntime.dylib'
             copy(ort_dylib, destination / 'resources/onnxruntime' / library)
@@ -237,14 +240,22 @@ def check_windows_crt(source):
                                  f'{path.relative_to(source)}: {", ".join(dependencies)}')
 
 
+def bundled_models(present):
+    """All model files or none (#168): without them the app downloads them on first use."""
+    found = [name for name in MODEL_FILES if present(f'resources/models/{name}')]
+    if found and len(found) != len(MODEL_FILES):
+        missing = [name for name in MODEL_FILES if name not in found]
+        raise ValueError(f'models must be all present or all absent; missing resources/models/{missing[0]}')
+    return bool(found)
+
+
 def desktop_compute(source, destination):
-    """Installer-only layout, reused by the existing worker adapters unchanged."""
+    """Installer-only layout, reused by the existing worker adapters unchanged. The models are optional (#168)."""
     if sys.platform != 'win32':
         raise ValueError('full desktop installers require Windows')
+    bundled_models(lambda relative: (source / relative).is_file())
     for required in ('bin/illustash-worker.exe', *(f'resources/{name}' for name in NOTICES),
-                     'resources/models/wd_swinv2_v3_emb.onnx',
-                     'resources/models/ccip/model_feat.onnx', 'resources/models/ccip/model_metrics.onnx',
-                     'resources/models/ccip/metrics.json', 'resources/openblas/openblas.dll',
+                     'resources/openblas/openblas.dll',
                      'resources/licenses/openblas/LICENSE.txt', 'resources/onnxruntime/onnxruntime.dll',
                      'resources/licenses/onnxruntime/LICENSE', 'resources/licenses/onnxruntime/ThirdPartyNotices.txt',
                      *(installed for installed, _ in model_licenses())):
@@ -270,13 +281,11 @@ def desktop_compute(source, destination):
 
 
 def macos_desktop_compute(source, destination):
-    """Copy a complete portable resource layout into the macOS App compute bundle."""
+    """Copy a complete portable resource layout into the macOS App compute bundle. The models are optional (#168)."""
     if sys.platform != 'darwin':
         raise ValueError('macOS desktop computation requires a macOS artifact')
     required = (
         'resources/web/static/index.html', 'resources/tags/tags_v3.csv',
-        'resources/models/wd_swinv2_v3_emb.onnx', 'resources/models/ccip/model_feat.onnx',
-        'resources/models/ccip/model_metrics.onnx', 'resources/models/ccip/metrics.json',
         'resources/onnxruntime/libonnxruntime.dylib',
         'resources/licenses/onnxruntime/LICENSE',
         'resources/licenses/onnxruntime/ThirdPartyNotices.txt',
@@ -288,6 +297,7 @@ def macos_desktop_compute(source, destination):
     manifest = json.loads((source / 'manifest.json').read_text())
     if (manifest.get('format'), manifest.get('variant'), manifest.get('platform')) != (1, 'research', 'darwin'):
         raise ValueError('expected a staged macOS research manifest')
+    bundled_models(lambda relative: relative in manifest['files'])
     for relative in required:
         path = source / relative
         if path.is_symlink() or not path.is_file() or relative not in manifest['files']:
@@ -348,19 +358,18 @@ def main():
     parser.add_argument('--iqdb', type=Path, help='built optional IQDB executable')
     parser.add_argument('--desktop', type=Path, help='optional native desktop executable (portable layout)')
     parser.add_argument('--desktop-resources', type=Path, help='also stage resources for Tauri bundling')
-    parser.add_argument('--desktop-compute', type=Path, help='stage full Windows installer computation resources')
-    parser.add_argument('--macos-desktop-compute', type=Path, help='stage complete macOS App computation resources')
+    parser.add_argument('--desktop-compute', type=Path, help='stage Windows installer computation resources (without --models: the release package; the app downloads the models)')
+    parser.add_argument('--macos-desktop-compute', type=Path, help='stage macOS App computation resources (without --models: the release package; the app downloads the models)')
     args = parser.parse_args()
     if (args.models or args.openblas_site or args.ort_dylib or args.ort_licenses) and not args.research:
         parser.error('models/runtime require --research')
     if bool(args.ort_dylib) != bool(args.ort_licenses):
         parser.error('--ort-dylib and --ort-licenses must be supplied together')
-    if args.desktop_compute and not (args.research and args.models and args.openblas_site
-                                     and args.ort_dylib and args.ort_licenses):
-        parser.error('--desktop-compute requires --research, --models, --openblas-site, --ort-dylib and --ort-licenses')
-    if args.macos_desktop_compute and not (sys.platform == 'darwin' and args.research and args.models
+    if args.desktop_compute and not (args.research and args.openblas_site and args.ort_dylib and args.ort_licenses):
+        parser.error('--desktop-compute requires --research, --openblas-site, --ort-dylib and --ort-licenses')
+    if args.macos_desktop_compute and not (sys.platform == 'darwin' and args.research
                                          and args.ort_dylib and args.ort_licenses):
-        parser.error('--macos-desktop-compute requires macOS, --research, --models, --ort-dylib and --ort-licenses')
+        parser.error('--macos-desktop-compute requires macOS, --research, --ort-dylib and --ort-licenses')
     for destination in (args.output, args.archive, args.desktop_resources, args.desktop_compute, args.macos_desktop_compute):
         if destination is not None and destination.exists():
             parser.error(f'output already exists: {destination}; choose a fresh path')
@@ -368,7 +377,7 @@ def main():
         parser.error('版本号不一致，先运行 python3 tools/version.py --sync：\n' + '\n'.join(errors))
     try:
         rust_licenses()
-        if args.models:
+        if args.research:
             model_licenses()
     except ValueError as error:
         parser.error(str(error))
