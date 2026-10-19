@@ -40,7 +40,9 @@ export function syncLine(s) {
   const gave = (s.failed ? ' · ' + t('{n} 张暂时读不到（可能还在 iCloud），下次同步重试', {n: number(s.failed)}) : '')
     + (s.damaged ? ' · ' + t('{n} 张已损坏或格式不支持，未识别', {n: number(s.damaged)}) : '');
   if (s.status === 'done') return t('上次同步：{time}', {time: stamp(s.finished_at)}) + kept + gave;
-  if (s.status === 'needs_recognition') return t('有 {n} 张图等待识别（识别服务未启动）', {n: number(s.total || 0)}) + kept;
+  // An install that downloads its models (#168) waits for them; otherwise the recognition service is missing.
+  if (s.status === 'needs_recognition') return (state.models?.on_demand && state.models.status !== 'ready'
+    ? t('有 {n} 张图等待识别（识别模型还没下载）', {n: number(s.total || 0)}) : t('有 {n} 张图等待识别（识别服务未启动）', {n: number(s.total || 0)})) + kept;
   if (s.status === 'interrupted') return s.message ? t('同步已中断（{reason}），可重新扫描', {reason: tb(s.message)}) : t('同步已中断，可重新扫描');
   if (s.status === 'error') return t('同步失败');
   return t('本地图库');

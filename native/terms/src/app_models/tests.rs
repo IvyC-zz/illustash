@@ -299,6 +299,12 @@ fn bytes_that_do_not_match_the_manifest_are_refused_from_every_source() {
     let message = job["message"].as_str().unwrap();
     assert!(message.contains("sub/feat.onnx") && message.contains("SHA-256"), "{message}");
     assert!(message.contains("127.0.0.1"), "{message}");
+    assert_eq!(job["failed_file"], "sub/feat.onnx");
+    let source = host(&server.base);
+    assert_eq!(
+        job["failures"],
+        json!([{"source": source, "why": "SHA-256 与清单不符，已丢弃"}, {"source": source, "why": "SHA-256 与清单不符，已丢弃"}])
+    );
     assert!(!place.root.exists());
     let partial = partial_dir(&place.root);
     assert!(partial.join("big.onnx").is_file(), "finished files are kept for the next try");

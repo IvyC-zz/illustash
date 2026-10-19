@@ -10,6 +10,8 @@ import {loadLibraries, updatesTick} from '../core/settings.js';
 import {$, toast, error, fold, wireFolds} from './dom.js';
 import {confirmAction} from './dialog.js';
 import {openIndexAdd} from './catalog.js';
+import {modelsLine, modelsBar, modelsActions} from './models.js';
+import {loadModels, onModels} from '../core/models.js';
 // 开始 first shows what leaves the machine; the authorization covers this one run only.
 let provenanceArmed = false;
 // Open the panel; with armProvenance, at the authorization for a 找回画师 run.
@@ -63,6 +65,10 @@ export function taskList() {
     body: PROV_ACTIVE.includes(ps.status) ? provenanceBars(ps) + (ps.side ? `<p class="task-side">${t('同时进行')} · ${esc(tb(ps.side.name || ps.side.step))}${ps.side.text ? ' · ' + esc(tb(ps.side.text)) : ''}</p>${provenanceBars({progress: ps.side.progress})}` : '') : '',
     action: PROV_ACTIVE.includes(ps.status) ? `<button class="quiet small" data-prov="stop" ${ps.status === 'stopping' ? 'disabled' : ''}>${t('停止')}</button>` : provenanceArmed ? '' : `<button class="quiet small" data-prov="arm">${t('开始…')}</button>`,
     log: pv.runs?.length ? [t('运行记录'), `<table class="settings-table"><tr><th>${t('开始')}</th><th>${t('方式')}</th><th>${t('新找到')}</th><th>${t('流量')}</th><th>${t('结果')}</th></tr>${pv.runs.slice(0, 8).map(r => `<tr><td>${esc(localTime(r.started_at))}</td><td>${r.kind === 'new' ? t('同步后') : r.kind === 'full' ? t('手动') : t('命令行')}</td><td>${number(r.found || 0)}</td><td>${(r.traffic_mb || 0).toFixed(1)} MB</td><td title="${esc(tb(r.reason || ''))}">${RUN_STATUS[r.status] || esc(r.status)}</td></tr>`).join('')}</table>`] : null});
+  // An install without its models (#168): until they are in place, and while a download or import runs.
+  const m = state.models;
+  if (m?.on_demand && (m.status !== 'ready' || m.job?.status === 'running')) list.push({key: 'models', name: t('识别模型'), busy: t('下载识别模型中'),
+    active: m.job?.status === 'running', warn: m.job?.status === 'failed', line: modelsLine(m), body: modelsBar(m), action: modelsActions(m, true)});
   if (['running', 'done', 'error'].includes(ex.status)) list.push({key: 'export', name: t('导出图库'), busy: t('导出图库中'), active: ex.status === 'running', warn: ex.status === 'error',
     line: ex.status === 'running' ? t('正在导出…') : ex.status === 'done' ? t('已导出 {mb} MB', {mb: (ex.bytes / 1048576).toFixed(0)}) : t('导出失败：{error}', {error: tb(ex.error || '')}), body: '', action: ''});
   return list;
@@ -102,6 +108,8 @@ export function renderTasks() {
 export async function taskTick() {
   clearTimeout(taskPanel.timer);
   const jobs = [pollSync(), pollIndex(), pollNames(), loadProvenance()];
+  // The models' own poller runs while they download; this catches a download started in another window.
+  if (taskPanel.open || !state.models) jobs.push(loadModels());
   // The similar job's state comes with /api/settings, which also measures the caches: read it only when looked at.
   if (taskPanel.open && Date.now() - taskPanel.settingsAt > (SIMILAR_ACTIVE.includes(state.settings?.tasks?.similar?.status) ? 2500 : 15000)) { taskPanel.settingsAt = Date.now(); jobs.push(shared('/api/settings').then(s => { state.settings = s; }).catch(e => error(readError(e)))); }
   // The library list (the sync task's name and the export's progress) is read once the panel is open.
@@ -119,6 +127,8 @@ export function toggleTasks(open = !taskPanel.open) {
 }
 // The panel's handlers. Called once, when the page starts.
 export function wireTasks() {
+  // The models' download (#168) keeps its own poller: the button and panel follow each read.
+  onModels(() => renderTasks());
   onJob(async (job, change) => {
     if (job === 'sync' && change.ended && state.sync.status === 'done' && state.sync.imported) toast(syncDoneText(state.sync));
     if (job === 'index' && change.ended && indexEndText(state.index.state)) toast(indexEndText(state.index.state));

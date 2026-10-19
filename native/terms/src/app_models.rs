@@ -311,7 +311,7 @@ impl Models {
         self.cancel.store(false, Ordering::SeqCst);
         *self.job.lock().expect("models job mutex poisoned") = Some(json!({
             "kind": kind, "status": "running", "done": 0, "total": total, "speed": 0, "source": null, "file": null,
-            "message": null, "proxy": null, "results": [],
+            "message": null, "proxy": null, "results": [], "failed_file": null, "failures": [],
         }));
         std::thread::spawn(move || {
             let outcome = work(self);
@@ -560,7 +560,6 @@ fn download(models: &Models, place: &Place) -> std::result::Result<Value, Stop> 
             )));
         }
     }
-    // A source on this machine (a local mirror, tests) never goes through the proxy.
     let (direct, proxied) = (agent(None), agent(place.proxy.as_deref()));
     let mut meter = Meter::new(models, 0);
     for entry in &place.manifest.files {
@@ -571,15 +570,18 @@ fn download(models: &Models, place: &Place) -> std::result::Result<Value, Stop> 
         let mut tried = Vec::new();
         let mut done = false;
         for (label, address) in place.sources(entry) {
+            // A source on this machine (a local mirror, tests) never goes through the proxy.
+            let local = url::Url::parse(&address)
+                .is_ok_and(|u| matches!(u.host_str(), Some("127.0.0.1" | "localhost" | "[::1]")));
+            let via = if local { None } else { place.proxy.as_deref().map(host) };
             models.set(|job| {
                 job["source"] = label.clone().into();
                 job["file"] = entry.path.clone().into();
+                job["proxy"] = via.into();
             });
             // A connection that drops part way continues from where it stopped, a few times, on the same source.
             let mut drops = 0;
             loop {
-                let local = url::Url::parse(&address)
-                    .is_ok_and(|u| matches!(u.host_str(), Some("127.0.0.1" | "localhost" | "[::1]")));
                 match fetch(if local { &direct } else { &proxied }, &address, &partial, entry, &mut meter) {
                     Ok(()) => {
                         done = true;
@@ -591,7 +593,7 @@ fn download(models: &Models, place: &Place) -> std::result::Result<Value, Stop> 
                         eprintln!("models: {label} {}: {why}; retrying", entry.path);
                     }
                     Err(Failure::Retry(why) | Failure::Next(why)) => {
-                        tried.push(format!("{source} 出错：{why}", source = label));
+                        tried.push((label.clone(), why));
                         break;
                     }
                 }
@@ -601,10 +603,17 @@ fn download(models: &Models, place: &Place) -> std::result::Result<Value, Stop> 
             }
         }
         if !done {
+            // Each source's reason apart, so the page can show (and translate) them one by one.
+            models.set(|job| {
+                job["failed_file"] = entry.path.clone().into();
+                job["failures"] = tried.iter().map(|(source, why)| json!({"source": source, "why": why})).collect();
+            });
+            let reasons: Vec<String> =
+                tried.iter().map(|(source, why)| format!("{source} 出错：{why}")).collect();
             return Err(Stop::Failed(format!(
                 "{path} 下载失败（{reason}）",
                 path = entry.path,
-                reason = tried.join("；")
+                reason = reasons.join("；")
             )));
         }
         meter.finish(entry.size);
@@ -811,10 +820,7 @@ fn post_at(models: &'static Models, place: Place, body: &Json) -> Result<Json> {
             }
             let total = place.manifest.files.iter().map(|e| e.size).sum();
             let job = place.clone();
-            models.start("download", total, move |models| {
-                models.set(|state| state["proxy"] = job.proxy.as_deref().map(host).into());
-                download(models, &job)
-            })?;
+            models.start("download", total, move |models| download(models, &job))?;
         }
         "import" => {
             let paths: Vec<PathBuf> = fields
