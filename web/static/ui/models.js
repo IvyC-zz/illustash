@@ -4,7 +4,7 @@
 import {t, tb} from '../core/i18n.js';
 import {esc, bytes, number} from '../core/format.js';
 import {state} from '../core/state.js';
-import {SYNC_ACTIVE, startSync, pollSync} from '../core/jobs.js';
+import {SYNC_ACTIVE, INDEX_ACTIVE, startSync, pollSync} from '../core/jobs.js';
 import {loadModels, modelsPost, modelsWaiting, modelsFinished, onModels} from '../core/models.js';
 import {$, toast} from './dom.js';
 import {confirmAction} from './dialog.js';
@@ -44,6 +44,12 @@ export function modelsFailures(m = state.models) {
   const list = m?.job?.status === 'failed' ? m.job.failures || [] : [];
   return list.length ? `<ul class="models-results">${list.map(f => `<li class="mismatch">${esc(t('{source}：{why}', {source: f.source, why: tb(f.why)}))}</li>`).join('')}</ul>` : '';
 }
+// In place in an install that downloads them (user 2026-10-19, #168): they can be deleted, not while in use.
+export function deleteButton(m = state.models) {
+  if (!m?.on_demand || m.status !== 'ready') return '';
+  const busy = running(m) || SYNC_ACTIVE.includes(state.sync?.status) || INDEX_ACTIVE.includes(state.index?.state?.status);
+  return `<div class="models-acts"><button class="quiet small" data-models="delete" ${busy ? `disabled title="${t('正在识别或下载，等它结束再删除')}"` : ''}>${t('删除已下载的模型')}</button></div>`;
+}
 export const manualLink = (m = state.models) => m?.manual ? `<a class="link" href="${esc(m.manual)}" target="_blank" rel="noreferrer noopener">${t('手动下载说明')}</a>` : '';
 // What an import made of each chosen file.
 const RESULT = {accepted: () => t('已接收'), mismatch: () => t('SHA-256 不符，已拒绝'), unknown: () => t('不是需要的模型文件'), already: () => t('已经有了')};
@@ -68,7 +74,7 @@ export function renderModelsCard() {
   const html = `<h2>${t('识别模型')}<span class="set-scope" title="${t('保存在这台电脑上，所有图库共用')}">${t('所有图库共用')}</span></h2>
     <p class="settings-note">${m.on_demand ? t('图片识别要用 WD 和 CCIP 两个模型，安装包里没有带，第一次使用时下载。每个文件都按应用里写好的大小和 SHA-256 核对，对不上就不用，从哪里下载都一样安全。') : t('这个安装自带识别模型。')}</p>
     <div class="setting-line"><span>${esc(modelsLine(m))}${m.status === 'ready' ? '' : `<small class="line-hint">${manualLink(m)}</small>`}</span></div>
-    ${modelsBar(m)}${modelsFailures(m)}${importSummary(m.job)}${m.status === 'ready' ? '' : `<div class="models-acts">${modelsActions(m)}</div>`}
+    ${modelsBar(m)}${modelsFailures(m)}${importSummary(m.job)}${m.status === 'ready' ? deleteButton(m) : `<div class="models-acts">${modelsActions(m)}</div>`}
     ${m.on_demand ? `<div class="form-grid"><label for="modelMirror">${t('Hugging Face 镜像')}</label><input id="modelMirror" value="${esc(m.mirror)}" placeholder="${esc(m.mirror_default)}" spellcheck="false" autocomplete="off"></div>
     <p class="settings-note">${t('先从这个地址下载，不行再换 ModelScope。填 {hf} 就是直连 Hugging Face。', {hf: 'https://huggingface.co'})}</p>
     <div class="sync-now form-actions"><div class="spacer"></div>
@@ -85,7 +91,11 @@ async function act(what) {
     if (what === 'download') await modelsPost({action: 'download'});
     else if (what === 'cancel') await modelsPost({action: 'cancel'});
     else if (what === 'import') { const r = await modelsPost({action: 'import'}); if (r.cancelled) return; }
-    else if (what === 'discard') {
+    else if (what === 'delete') {
+      if (!await confirmAction(t('删除已下载的识别模型（约 {size}）？删除后要重新下载或从文件导入，才能识别新加入的图片；已经识别的结果都保留。', {size: bytes(state.models.total)}), t('删除识别模型'), t('删除'))) return;
+      await modelsPost({action: 'delete'});
+      toast(t('识别模型已删除'));
+    } else if (what === 'discard') {
       if (!await confirmAction(t('删除已经下载但还没完成的部分？下次要从头下载。'), t('删除未完成的部分'), t('删除'))) return;
       await modelsPost({action: 'discard'});
     } else if (what === 'mirror' || what === 'mirror-reset') {

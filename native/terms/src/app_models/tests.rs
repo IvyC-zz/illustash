@@ -193,6 +193,8 @@ impl Fixture {
             preferences,
             modelscope: format!("{}/ms", server.base),
             proxy: None,
+            on_demand: true,
+            in_use: false,
         }
     }
     fn hf(&self, path: &str) -> String {
@@ -381,6 +383,8 @@ fn imported_files_and_zip_entries_are_matched_by_hash_whatever_their_names() {
         preferences: fixture.dir.join("preferences.json"),
         modelscope: "https://modelscope.invalid".into(),
         proxy: None,
+        on_demand: true,
+        in_use: false,
     };
     let chosen = fixture.dir.join("downloads");
     fs::create_dir_all(&chosen).unwrap();
@@ -507,6 +511,10 @@ fn system_proxy_settings_are_read_for_https() {
     let split = win.replace("127.0.0.1:7890", "http=a.local:1;https=b.local:2;socks=c.local:3");
     assert_eq!(windows_proxy(&split).as_deref(), Some("http://b.local:2"));
     assert_eq!(windows_proxy("    ProxyEnable    REG_DWORD    0x1\r\n"), None);
+    // reg.exe by its full path, never from PATH.
+    assert_eq!(reg_exe(Some(r"D:\Win".into())), Path::new(r"D:\Win").join("System32").join("reg.exe"));
+    assert_eq!(reg_exe(None), Path::new(r"C:\Windows").join("System32").join("reg.exe"));
+    assert_eq!(reg_exe(Some("".into())), reg_exe(None));
 }
 
 #[test]
@@ -526,4 +534,59 @@ fn the_built_in_manifest_lists_the_packaged_models() {
     assert_eq!(configured_root(Path::new("/r"), None), Path::new("/r/models"));
     assert_eq!(configured_root(Path::new("/r"), Some(Path::new("m"))), Path::new("/r/m"));
     assert_eq!(partial_dir(Path::new("/s/models/pack.1")), Path::new("/s/models/pack.1.partial"));
+}
+
+#[test]
+fn downloaded_models_are_deleted_only_when_this_install_downloads_them_and_nothing_uses_them() {
+    let fixture = Fixture::new();
+    let server = server(fixture.routes(&[], Mode::Normal, true));
+    let place = fixture.place(&server);
+    let models = models();
+    post(models, &place, json!({"action": "download"})).unwrap();
+    assert_eq!(finished(models)["status"], "done");
+    installed(&fixture, &place);
+    for (change, message) in [
+        ((|p: &mut Place| p.on_demand = false) as fn(&mut Place), "自带识别模型"),
+        (|p: &mut Place| p.in_use = true, "正在识别图片"),
+    ] {
+        let mut refused = place.clone();
+        change(&mut refused);
+        let error = post(models, &refused, json!({"action": "delete"})).unwrap_err().to_string();
+        assert!(error.contains(message), "{error}");
+        assert!(ready_at(&place.root, fixture.manifest));
+    }
+    // A part of a later download is removed too.
+    fs::create_dir_all(partial_dir(&place.root)).unwrap();
+    fs::write(partial_dir(&place.root).join("left.part"), b"x").unwrap();
+    let out = post(models, &place, json!({"action": "delete"})).unwrap();
+    assert_eq!(out["status"], "missing");
+    assert_eq!(out["have"], 0);
+    assert_eq!(out["job"], Value::Null);
+    assert!(!place.root.exists() && !partial_dir(&place.root).exists());
+    assert!(!place.root.with_file_name("synthetic.1.deleting").exists());
+    assert!(fs::read_dir(place.root.parent().unwrap()).unwrap().next().is_none());
+    // Deleting again is harmless.
+    assert_eq!(post(models, &place, json!({"action": "delete"})).unwrap()["status"], "missing");
+}
+
+#[cfg(windows)]
+#[test]
+fn the_system_reg_exe_is_called_by_its_full_path_and_read() {
+    use std::os::windows::process::CommandExt;
+    let reg = reg_exe(std::env::var_os("SystemRoot"));
+    assert!(reg.is_absolute() && reg.is_file(), "{}", reg.display());
+    // An empty PATH: the full path alone must find it.
+    let out = std::process::Command::new(&reg)
+        .args(["query", r"HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings"])
+        .env("PATH", "")
+        .creation_flags(0x08000000)
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    let text = String::from_utf8_lossy(&out.stdout);
+    // Whatever this machine's setting, reading it never fails, and a proxy is only reported when enabled.
+    if windows_proxy(&text).is_some() {
+        assert!(text.contains("0x1"));
+    }
+    let _ = system_proxy();
 }
