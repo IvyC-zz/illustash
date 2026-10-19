@@ -111,15 +111,15 @@ pub fn generate(request: &Value) -> Result<Value> {
     }
     // Random raw CCIP-shaped vectors: claims cost depends on the anchor count, not their meaning.
     let shared = PathBuf::from(request["shared"].as_str().ok_or("shared missing")?);
+    // One anchor per character: the snapshot requires unique anchor ids.
     let anchors = request["anchors"].as_u64().ok_or("anchors missing")? as usize;
-    let characters = request["characters"].as_u64().ok_or("characters missing")? as usize;
     fs::create_dir_all(shared.join("char-index"))?;
     let mut rng = Rng::new(seed ^ 0xA5A5);
     let rows: Vec<Vec<f32>> = (0..anchors).map(|_| (0..768).map(|_| rng.unit() - 0.5).collect()).collect();
     fs::write(shared.join("char-anchors.npy"), producer::npy(&rows, 768)?)?;
-    let ids: Vec<String> = (0..anchors).map(|i| format!("synthetic-character-{:04}", i % characters)).collect();
+    let ids: Vec<String> = (0..anchors).map(|i| format!("synthetic-character-{i:05}")).collect();
     fs::write(shared.join("char-anchors.txt"), ids.join("\n") + "\n")?;
-    Ok(json!({"files":files,"characters":(0..characters).map(|i| format!("synthetic-character-{i:04}")).collect::<Vec<_>>()}))
+    Ok(json!({"files":files,"characters":ids}))
 }
 
 fn ms(started: Instant) -> f64 {

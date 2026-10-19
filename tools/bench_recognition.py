@@ -22,7 +22,7 @@
       --compute native/terms/target/release/examples/recognition-compute \\
       --models <含 wd_swinv2_v3_emb.onnx 与 ccip/model_feat.onnx 的目录> \\
       --runtime <libonnxruntime.dylib 或 onnxruntime.dll> [--openblas <Windows 的 openblas.dll>] \\
-      [--images 200] [--anchors 2000] [--characters 500] [--trials 3] [--work <空目录>] [--out result.json]
+      [--images 200] [--anchors 2000] [--trials 3] [--work <空目录>] [--out result.json]
 结果 JSON 写到 --out（默认 <work>/result.json），并打印摘要。只依赖标准库。
 """
 import argparse
@@ -410,7 +410,6 @@ def main():
     parser.add_argument('--openblas', type=Path, required=WINDOWS)
     parser.add_argument('--images', type=int, default=200)
     parser.add_argument('--anchors', type=int, default=2000)
-    parser.add_argument('--characters', type=int, default=500)
     parser.add_argument('--trials', type=int, default=3)
     parser.add_argument('--seed', type=int, default=213)
     parser.add_argument('--work', type=Path)
@@ -431,8 +430,7 @@ def main():
         base, resources = layout(args, args.work)
         images, shared = args.work / 'images', args.work / 'shared'
         generated = run_json(args.compute, {'mode': 'bench-generate', 'folder': str(images), 'count': args.images,
-                                          'seed': args.seed, 'shared': str(shared), 'anchors': args.anchors,
-                                          'characters': args.characters}, args.work, os.environ.copy())
+                                          'seed': args.seed, 'shared': str(shared), 'anchors': args.anchors}, args.work, os.environ.copy())
         files = sorted(Path(f['path']) for f in generated['files'])
         trials, stages = [], []
         for trial in range(1, args.trials + 1):
@@ -487,7 +485,7 @@ def summarise(args, generated, before, after, trials, stages):
     files = generated['files']
     return {
         'format': 'illustash-recognition-bench/1',
-        'dataset': {'images': count, 'seed': args.seed, 'anchors': args.anchors, 'characters': args.characters,
+        'dataset': {'images': count, 'seed': args.seed, 'anchors': args.anchors,
                     'bytes': sum(f['bytes'] for f in files),
                     'megapixels': sum(f['width'] * f['height'] for f in files) / 1e6},
         'conditions': {'before': before, 'after': after, 'memory_kind': Probe.kind, 'trials': args.trials},
@@ -516,8 +514,8 @@ def summarise(args, generated, before, after, trials, stages):
 
 def report(result):
     d, e, s = result['dataset'], result['end_to_end'], result['stages']
-    print(f'\n合成 {d["images"]} 张（{d["megapixels"]:.0f} MP，{d["bytes"] / 2**20:.0f} MiB），锚点 {d["anchors"]} 条 / '
-          f'{d["characters"]} 个角色；{result["conditions"]["trials"]} 次中位数')
+    print(f'\n合成 {d["images"]} 张（{d["megapixels"]:.0f} MP，{d["bytes"] / 2**20:.0f} MiB），锚点 {d["anchors"]} 个角色各一条；'
+          f'{result["conditions"]["trials"]} 次中位数')
     print(f'端到端：{e["total_ms"] / 1000:.1f} s，每张 {e["per_image_ms"]:.0f} ms')
     names = {'scan_and_register': '扫描与登记', 'recognise_to_first_image': '启动 worker 到第一张',
              'recognise_rest': '其余识别', 'final_import': '收尾导入'}
