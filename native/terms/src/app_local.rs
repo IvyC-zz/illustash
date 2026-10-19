@@ -282,7 +282,7 @@ mod tests {
               ('danbooru','idle_tag','idle',1,'import','2026-10-07 06:00:07');
              INSERT INTO names(entity_id,lang,value,source,role,preferred,position) VALUES
               ('tagless','ja','タグナシ','index','display',0,0),('hidden','zh','隐','user','display',1,0);
-             INSERT INTO display_names VALUES ('character','','en','wiki','Empty key'),('skin','outfit_x','zh','index','外套');
+             INSERT INTO term_key_names VALUES ('character','','en','wiki','Empty key'),('skin','outfit_x','zh','index','外套');
              INSERT INTO candidates VALUES ('a','tagless','WD',0.9),('a','hidden','WD',0.9),('a','skin1','WD',0.9),
               ('a','skin2','WD',0.9),('a','merged','WD',0.9),('a','own','WD',0.9),('a','loose','WD',0.9);",
         )

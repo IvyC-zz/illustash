@@ -628,8 +628,8 @@ mod tests {
           CREATE TABLE links(system TEXT,key TEXT,entity_id TEXT,current INTEGER,added_at TEXT);
           CREATE TABLE names(entity_id TEXT,lang TEXT,value TEXT,source TEXT,preferred INTEGER,role TEXT);
           INSERT INTO names VALUES ('x','zh','x','user',1,'display');
-          CREATE TABLE display_names(kind TEXT,key TEXT,lang TEXT,source TEXT,value TEXT);
-          INSERT INTO display_names VALUES ('work','unprojected','zh','user','未投影🙂');
+          CREATE TABLE term_key_names(kind TEXT,key TEXT,lang TEXT,source TEXT,value TEXT);
+          INSERT INTO term_key_names VALUES ('work','unprojected','zh','user','未投影🙂');
           CREATE TABLE term_key_aliases(kind TEXT,key TEXT,value TEXT,position INTEGER);
           CREATE TABLE assets(uuid TEXT PRIMARY KEY);
           CREATE TABLE memberships(uuid TEXT,entity TEXT);
@@ -681,7 +681,7 @@ mod tests {
         let c = Connection::open_in_memory().unwrap();
         fixture(&c);
         // Projected entity/covered-work lookups have no reason to build View.
-        c.execute_batch("DROP TABLE links; DROP TABLE names; DROP TABLE display_names;").unwrap();
+        c.execute_batch("DROP TABLE links; DROP TABLE names; DROP TABLE term_key_names;").unwrap();
         register_names(&c).unwrap();
         let values: (String, String, String, String) = c
             .query_row(
@@ -719,7 +719,7 @@ mod tests {
             let tx = c.transaction().unwrap();
             register_names(&tx).unwrap();
             let writer = crate::sqlite::open(&path).unwrap();
-            writer.execute_batch("UPDATE term_name_display SET name='after'; UPDATE term_name_choice SET name='new work'; UPDATE display_names SET value='新🙂';").unwrap();
+            writer.execute_batch("UPDATE term_name_display SET name='after'; UPDATE term_name_choice SET name='new work'; UPDATE term_key_names SET value='新🙂';").unwrap();
             // First use is AFTER the concurrent commit, including the legacy fallback.
             for _ in 0..2 {
                 let values: (String, String, String, String) = tx

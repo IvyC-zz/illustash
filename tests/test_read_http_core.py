@@ -103,42 +103,35 @@ class ArtistReadHTTPTest(HTTPHarness):
         package = self.root/'Artists #雪?.pilib'
         ids = self.rec.value('ids')
         self.sync('artists'); self.publish()
-        for core in (False,True):
-            if core:
-                self.sync('switched'); self.publish()
-            if not core:
-                # json.loads accepts nonfinite values and integers beyond f64 precision.
-                for count in ('NaN','Infinity','-Infinity','1e400','123456789012345678901234567890',
-                              '{"z":"雪🙂", "a":[1.0,true,null]}', 'null', 'true', '"text"'):
-                    with self.connect(package/'provenance.sqlite') as pc:
-                        pc.execute("UPDATE image_artists SET evidence=? WHERE artist_id='C'",('{"count":'+count+'}',)); pc.commit()
-                    self.pair('/api/artist-audit')
-                with self.connect(package/'provenance.sqlite') as pc:
-                    pc.execute("UPDATE image_artists SET evidence='{}' WHERE artist_id='C'"); pc.commit()
-            for id in ('A','B','C','M','D','N','missing','雪🙂',''):
-                self.pair('/api/artist?'+urlencode({'id':id}))
-            self.assertTrue(json.loads(self.pair('/api/artists')['body']))
-            for n in ('1','2','50','500','0','bad'):
-                self.pair('/api/artist-audit?'+urlencode({'n':n}))
-            result=json.loads(self.pair('/api/artist-audit')['body'])
-            self.assertEqual(result['pool'],2)
-            self.assertEqual([x['uuid'] for x in result['items']],sorted(ids[:2],key=lambda a:hashlib.sha1(f'artist-audit-v1:{a}'.encode()).hexdigest()))
-            sample=next(x for x in result['items'] if x['uuid']==ids[0])
-            self.assertTrue(sample['artists']); self.assertEqual(len(sample['maybe']),2)
-            self.assertTrue(sample['artists'][0]['homes']); self.assertTrue(sample['posts'])
-            prov=package/'provenance.sqlite'; parked=package/'parked-provenance.sqlite'
-            prov.rename(parked)
-            try:
-                no_aux=json.loads(self.pair('/api/artist-audit')['body'])
-                self.assertEqual(no_aux['pool'],2 if core else 0)
-                if core: self.assertTrue(no_aux['items']); self.assertTrue(all(not x['posts'] for x in no_aux['items']))
-                self.pair('/api/artist?id=A')
-                prov.mkdir()  # exists, but cannot be opened as a SQLite database
-                self.assertEqual(self.pair('/api/artist-audit?n=bad')['status'],400)
-                self.assertEqual(self.pair('/api/artist-audit')['status'],500)
-                self.assertEqual(self.pair('/api/artist?id=A')['status'],200 if core else 500)
-                self.pair('/api/entities')  # an unrelated auxiliary failure must not affect local reads
-            finally:
-                if prov.is_dir(): prov.rmdir()
-                parked.rename(prov)
+        # First the library before it switched to the core (no `meta`): refused since core v8 (#201, only switched
+        # libraries are kept), and the core no longer keeps the legacy name tables its reads fell back to.
+        for _ in range(32):
+            self.rec.skip('response')
+        self.sync('switched'); self.publish()
+        for id in ('A','B','C','M','D','N','missing','雪🙂',''):
+            self.pair('/api/artist?'+urlencode({'id':id}))
+        self.assertTrue(json.loads(self.pair('/api/artists')['body']))
+        for n in ('1','2','50','500','0','bad'):
+            self.pair('/api/artist-audit?'+urlencode({'n':n}))
+        result=json.loads(self.pair('/api/artist-audit')['body'])
+        self.assertEqual(result['pool'],2)
+        self.assertEqual([x['uuid'] for x in result['items']],sorted(ids[:2],key=lambda a:hashlib.sha1(f'artist-audit-v1:{a}'.encode()).hexdigest()))
+        sample=next(x for x in result['items'] if x['uuid']==ids[0])
+        self.assertTrue(sample['artists']); self.assertEqual(len(sample['maybe']),2)
+        self.assertTrue(sample['artists'][0]['homes']); self.assertTrue(sample['posts'])
+        prov=package/'provenance.sqlite'; parked=package/'parked-provenance.sqlite'
+        prov.rename(parked)
+        try:
+            no_aux=json.loads(self.pair('/api/artist-audit')['body'])
+            self.assertEqual(no_aux['pool'],2)
+            self.assertTrue(no_aux['items']); self.assertTrue(all(not x['posts'] for x in no_aux['items']))
+            self.pair('/api/artist?id=A')
+            prov.mkdir()  # exists, but cannot be opened as a SQLite database
+            self.assertEqual(self.pair('/api/artist-audit?n=bad')['status'],400)
+            self.assertEqual(self.pair('/api/artist-audit')['status'],500)
+            self.assertEqual(self.pair('/api/artist?id=A')['status'],200)
+            self.pair('/api/entities')  # an unrelated auxiliary failure must not affect local reads
+        finally:
+            if prov.is_dir(): prov.rmdir()
+            parked.rename(prov)
 

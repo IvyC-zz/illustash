@@ -62,7 +62,7 @@ pub fn put(c: &Connection, kind: &str, key: &str, lang: &str, source: &str, valu
             }
         }
         let v = v.trim_matches(|c: char| c.is_whitespace() || ('\u{1c}'..='\u{1f}').contains(&c));
-        c.prepare_cached("INSERT OR IGNORE INTO display_names VALUES (?,?,?,?,?)")?
+        c.prepare_cached("INSERT OR IGNORE INTO term_key_names VALUES (?,?,?,?,?)")?
             .execute([kind, key, lang, source, v])?;
     }
     Ok(())
@@ -83,7 +83,7 @@ fn replace(c: &Connection, kind: &str, key: &str, source: &str, values: &[Value]
             )?
             .execute([source, key])?;
         }
-        c.prepare_cached("DELETE FROM display_names WHERE kind=? AND key=? AND source=?")?
+        c.prepare_cached("DELETE FROM term_key_names WHERE kind=? AND key=? AND source=?")?
             .execute([kind, key, source])?;
     }
     for pair in values {

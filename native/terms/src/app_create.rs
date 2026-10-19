@@ -9,6 +9,8 @@ use std::{
 };
 
 const APPLICATION: &str = include_str!("app_create_schema.sql");
+/// 内置作品名写进核心的 `term_key_names`，所以在核心迁移之后。
+const BUILTIN_NAMES: &str = include_str!("app_create_names.sql");
 const SOURCE: &str = include_str!("app_source_schema.sql");
 
 pub fn create_folder(
@@ -290,17 +292,7 @@ pub(crate) fn complete_source(c: &Connection) -> Result<()> {
 }
 pub(crate) fn names_triggers(c: &Connection) -> Result<()> {
     c.execute("INSERT OR IGNORE INTO meta VALUES ('names_version','0')", [])?;
-    for table in ["entities", "links", "names", "display_names"] {
-        if !c.query_row("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name=?)", [table], |r| {
-            r.get::<_, bool>(0)
-        })? {
-            continue;
-        }
-        for event in ["INSERT", "UPDATE", "DELETE"] {
-            c.execute_batch(&format!("CREATE TRIGGER IF NOT EXISTS names_version_{table}_{} AFTER {event} ON {table}\n                        BEGIN UPDATE meta SET value=CAST(value AS INTEGER)+1 WHERE key='names_version'; END",event.to_ascii_lowercase()))?;
-        }
-    }
-    Ok(())
+    crate::legacy_names::version_triggers(c)
 }
 fn source_index(c: &Connection) -> Result<Value> {
     let mut query = c.prepare("SELECT * FROM characters")?;
@@ -353,6 +345,9 @@ fn initialize_application<F: FnOnce(&Connection) -> Result<()>>(
     tx.execute_batch(APPLICATION)?;
     tx.commit()?;
     crate::migrate(&mut c)?;
+    let tx = c.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    tx.execute_batch(BUILTIN_NAMES)?;
+    tx.commit()?;
     crate::legacy_artists::cutover(&mut c, None)?;
     crate::legacy_labels::cutover(&mut c)?;
     crate::legacy_characters::cutover(&mut c)?;
@@ -561,7 +556,7 @@ mod tests {
         assert_eq!(count(&c, "SELECT count(*) FROM prefs"), 0);
         assert_eq!(count(&c, "SELECT count(*) FROM backend_effects"), 0);
         assert_eq!(
-            count(&c, "SELECT count(*) FROM display_names WHERE kind='work' AND lang='zh' AND source='builtin'"),
+            count(&c, "SELECT count(*) FROM term_key_names WHERE kind='work' AND lang='zh' AND source='builtin'"),
             22
         );
         assert_eq!(

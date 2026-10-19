@@ -94,11 +94,11 @@ pub fn hits(c: &Connection, query: &str) -> Result<Hits> {
         &[&like],
         false,
     )?;
-    for (table, field) in [("display_names", "value"), ("term_key_aliases", "value")] {
+    for (table, field) in [("term_key_names", "value"), ("term_key_aliases", "value")] {
         for (kind, join) in
             [("work", "JOIN entities e ON e.work=t.key"), ("skin", "JOIN entities e ON e.variant=t.key")]
         {
-            let source = if table == "display_names" { "AND t.source<>'danbooru'" } else { "" };
+            let source = if table == "term_key_names" { "AND t.source<>'danbooru'" } else { "" };
             s.add(
                 &format!(
                     "SELECT coalesce(e.parent_id,e.id),t.{field} FROM {table} t {join} WHERE t.kind=? AND t.{field} LIKE ? ESCAPE '\\' {source}"
@@ -204,7 +204,7 @@ mod tests {
                work_id TEXT);
              CREATE TABLE links(system TEXT, key TEXT, entity_id TEXT, current INTEGER);
              CREATE TABLE names(entity_id TEXT, value TEXT);
-             CREATE TABLE display_names(kind TEXT, key TEXT, lang TEXT, source TEXT, value TEXT);
+             CREATE TABLE term_key_names(kind TEXT, key TEXT, lang TEXT, source TEXT, value TEXT);
              CREATE TABLE term_key_aliases(kind TEXT, key TEXT, value TEXT, position INTEGER);
              INSERT INTO entities VALUES ('w','work',NULL,'','','',NULL),
                ('a','character',NULL,'blue_archive','','','w'),('s','skin','a','','','swimsuit',NULL);

@@ -1,6 +1,6 @@
 //! 名字的显示投影（docs/TERMS_NAMES_PLAN.md N1）：逐条移植 tests/reference/web/names.py（#9 已删除） 的 `View`（`entity_rows`、`load`、`choose`、
 //! `entity`、`base`、`own_name`）和词表（`PRIORITY`、`SKINS`、`WORK_NAMES`、`readable`、`skin_zh`）。
-//! 输入是名字的兼容表（`entities`、当前 `links`、`names`、`display_names`），输出两张投影表：
+//! 输入是名字的兼容表（`entities`、当前 `links`、`names`）和按文字键的显示名 `term_key_names`，输出两张投影表：
 //! - `term_name_display(entity, skin_only, …)`：`View.entity(id, skin_only)`；
 //! - `term_name_choice(kind, key, …)`：`View.choose(kind, key)`，键的范围是人物的 tag、作品文字（`entities.work` 与
 //!   qualifier 链接）、皮肤 variant。
@@ -290,10 +290,10 @@ impl View {
         }
         let mut names: HashMap<(String, String), Vec<NameRow>> = HashMap::new();
         let has_display: bool =
-            c.query_row("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name='display_names')", [], |r| r.get(0))?;
+            c.query_row("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name='term_key_names')", [], |r| r.get(0))?;
         if has_display {
             for row in c
-                .prepare("SELECT kind,key,lang,source,value FROM display_names WHERE source<>'danbooru'")?
+                .prepare("SELECT kind,key,lang,source,value FROM term_key_names WHERE source<>'danbooru'")?
                 .query_map([], |r| {
                     Ok((
                         r.get::<_, String>(0)?,
@@ -1080,10 +1080,10 @@ impl Scope {
         }
         let mut names: HashMap<(String, String), Vec<NameRow>> = HashMap::new();
         let has_display: bool =
-            c.query_row("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name='display_names')", [], |r| r.get(0))?;
+            c.query_row("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name='term_key_names')", [], |r| r.get(0))?;
         if has_display {
             let mut display = c.prepare_cached(
-                "SELECT lang,source,value FROM display_names WHERE kind=? AND key=? AND source<>'danbooru' ORDER BY rowid",
+                "SELECT lang,source,value FROM term_key_names WHERE kind=? AND key=? AND source<>'danbooru'",
             )?;
             for (kind, key) in wanted {
                 let found: Vec<NameRow> = display
@@ -1108,7 +1108,7 @@ impl Scope {
 }
 
 /// 一个文字键的选名（#105 A5b），与 `View::load(c)?.choose(kind, key)` 逐项相同，只读这个键用得到的行：它在
-/// `display_names` 里的行；人物键另加 tag 是它、会把显示名并进人物键的身份（`View::spoken`）自己的显示名。`choose`
+/// `term_key_names` 里的行；人物键另加 tag 是它、会把显示名并进人物键的身份（`View::spoken`）自己的显示名。`choose`
 /// 的结果与行的先后无关（排序键含来源和值，并列的行给出同一个名字），所以不必按整库载入的顺序读。
 ///
 /// 读的是选名的输入，不是显示投影：在事务里调用时读到的就是本事务待提交的名字（名字更新器的模型预演），也覆盖投影
@@ -1117,10 +1117,10 @@ impl Scope {
 pub fn choose_key(c: &Connection, kind: &str, key: &str) -> Result<Choice> {
     let mut rows: Vec<NameRow> = Vec::new();
     let has_display: bool =
-        c.query_row("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name='display_names')", [], |r| r.get(0))?;
+        c.query_row("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name='term_key_names')", [], |r| r.get(0))?;
     if has_display {
         let mut display = c.prepare_cached(
-            "SELECT lang,source,value FROM display_names WHERE kind=? AND key=? AND source<>'danbooru' ORDER BY rowid",
+            "SELECT lang,source,value FROM term_key_names WHERE kind=? AND key=? AND source<>'danbooru'",
         )?;
         for row in display.query_map([kind, key], |r| {
             Ok(NameRow { lang: r.get(0)?, source: r.get(1)?, value: r.get(2)?, preferred: false })
@@ -1211,7 +1211,7 @@ mod tests {
               PRIMARY KEY(system,key));
              CREATE TABLE names(entity_id TEXT,lang TEXT,value TEXT,source TEXT,role TEXT,preferred INTEGER NOT NULL DEFAULT 0,
               position INTEGER NOT NULL DEFAULT 0,PRIMARY KEY(entity_id,role,lang,source,value));
-             CREATE TABLE display_names(kind TEXT,key TEXT,lang TEXT,source TEXT,value TEXT,PRIMARY KEY(kind,key,lang,source,value));
+             CREATE TABLE term_key_names(kind TEXT,key TEXT,lang TEXT,source TEXT,value TEXT,PRIMARY KEY(kind,key,lang,source,value));
              INSERT INTO entities VALUES ('e1','character',NULL,'',NULL,0,'series_w'),('e2','character',NULL,'',NULL,0,''),
               ('s1','skin','e1','swimsuit_x',NULL,0,''),('w1','work',NULL,'',NULL,0,''),('m1','character',NULL,'','e1',0,'');
              INSERT INTO links VALUES ('danbooru','synth_(series_w)','e1',1,'2026-01-01'),('wd','synth_(series_w)','e2',1,'2026-01-02'),
@@ -1220,7 +1220,7 @@ mod tests {
              -- Rows tied on (preferred,value) whose rowid order differs from the primary key order.
              INSERT INTO names VALUES ('e1','zh','同名','index','display',0,0),('e1','ja','同名','wiki','display',0,0),
               ('e2','en','Other','wiki','display',0,0),('m1','zh','并入名','index','display',0,0);
-             INSERT INTO display_names VALUES ('skin','swimsuit_x','zh','index','皮肤名'),('work','series_w','zh','bangumi','作品名');",
+             INSERT INTO term_key_names VALUES ('skin','swimsuit_x','zh','index','皮肤名'),('work','series_w','zh','bangumi','作品名');",
         )
         .unwrap();
         c
@@ -1259,7 +1259,7 @@ mod tests {
               ('danbooru','old_tag','e4',0,'2026-01-12');
              INSERT INTO names VALUES ('m2','zh','成员名','index','display',0,0),('e4','zh','卡','index','display',0,0),
               ('b1','zh','无标签一','index','display',0,0),('b2','ja','無標籤二','index','display',0,0);
-             INSERT INTO display_names VALUES ('character','member_tag','ja','wiki','メンバー');",
+             INSERT INTO term_key_names VALUES ('character','member_tag','ja','wiki','メンバー');",
         )
         .unwrap();
         rebuild(&c).unwrap();
@@ -1278,19 +1278,19 @@ mod tests {
             ("DELETE FROM names WHERE entity_id='m2'", Some(&["e3", "m2", "s3"])),
             // Shared skin variant: both skins and their parents.
             (
-                "INSERT INTO display_names VALUES ('skin','swimsuit_x','ja','wiki','ミズギ')",
+                "INSERT INTO term_key_names VALUES ('skin','swimsuit_x','ja','wiki','ミズギ')",
                 Some(&["e1", "e2", "m1", "s1", "s2"]),
             ),
             // Work text: the work with that qualifier; `entities.work` keeps the key in range.
-            ("DELETE FROM display_names WHERE kind='work' AND key='series_w'", Some(&["w1"])),
-            ("INSERT INTO display_names VALUES ('character','ccip_tag','zh','bangumi','新卡')", Some(&["e4"])),
+            ("DELETE FROM term_key_names WHERE kind='work' AND key='series_w'", Some(&["w1"])),
+            ("INSERT INTO term_key_names VALUES ('character','ccip_tag','zh','bangumi','新卡')", Some(&["e4"])),
             (
-                "INSERT INTO display_names VALUES ('character','member_tag','zh','bangumi','成员键')",
+                "INSERT INTO term_key_names VALUES ('character','member_tag','zh','bangumi','成员键')",
                 Some(&["e3", "m2", "s3"]),
             ),
             // Linked without a tag: every tagless identity shares the ("character","") key → whole rebuild.
             ("UPDATE names SET value='无标签改' WHERE entity_id='b1'", None),
-            ("INSERT INTO display_names VALUES ('skin','','zh','index','空')", None),
+            ("INSERT INTO term_key_names VALUES ('skin','','zh','index','空')", None),
         ];
         for (sql, read) in cases {
             let tx = c.transaction().unwrap();
@@ -1398,14 +1398,14 @@ mod tests {
              INSERT INTO links VALUES ('danbooru','','e5',1,'2026-01-14'),('danbooru','shadowed','e5',1,'2026-01-15');
              INSERT INTO names VALUES ('e5','en','Shadow','wiki','display',0,0),('e5','zh','影','user','display',1,0),
               ('s1','zh','皮肤自名','index','display',0,0);
-             INSERT INTO display_names VALUES ('character','','zh','wiki','空键'),('work','unlisted','zh','bangumi','未收录'),
+             INSERT INTO term_key_names VALUES ('character','','zh','wiki','空键'),('work','unlisted','zh','bangumi','未收录'),
               ('character','nobody','ja','index','ダレ'),('character','synth_(series_w)','en','danbooru','Ignored'),
               ('work','touhou','zh','bangumi','东方');",
         )
         .unwrap();
         let keys = |c: &Connection| -> BTreeSet<(String, String)> {
             let mut keys: BTreeSet<(String, String)> = c
-                .prepare("SELECT kind,key FROM display_names UNION SELECT kind,key FROM term_name_choice")
+                .prepare("SELECT kind,key FROM term_key_names UNION SELECT kind,key FROM term_name_choice")
                 .unwrap()
                 .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
                 .unwrap()
@@ -1439,7 +1439,7 @@ mod tests {
             "UPDATE names SET value='改名' WHERE entity_id='e1' AND lang='zh';
              INSERT INTO names VALUES ('e2','zh','另一个','bangumi','display',1,0),('b1','ja','ムヒョウ','index','display',0,0);
              DELETE FROM names WHERE entity_id='e5' AND source='user';
-             INSERT INTO display_names VALUES ('skin','swimsuit_x','zh','user','用户皮肤'),('work','series_w','zh','user','用户作品');
+             INSERT INTO term_key_names VALUES ('skin','swimsuit_x','zh','user','用户皮肤'),('work','series_w','zh','user','用户作品');
              UPDATE links SET current=0 WHERE entity_id='e2';",
         )
         .unwrap();
