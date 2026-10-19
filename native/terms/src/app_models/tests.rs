@@ -568,3 +568,25 @@ fn downloaded_models_are_deleted_only_when_this_install_downloads_them_and_nothi
     // Deleting again is harmless.
     assert_eq!(post(models, &place, json!({"action": "delete"})).unwrap()["status"], "missing");
 }
+
+#[cfg(windows)]
+#[test]
+fn the_system_reg_exe_is_called_by_its_full_path_and_read() {
+    use std::os::windows::process::CommandExt;
+    let reg = reg_exe(std::env::var_os("SystemRoot"));
+    assert!(reg.is_absolute() && reg.is_file(), "{}", reg.display());
+    // An empty PATH: the full path alone must find it.
+    let out = std::process::Command::new(&reg)
+        .args(["query", r"HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings"])
+        .env("PATH", "")
+        .creation_flags(0x08000000)
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    let text = String::from_utf8_lossy(&out.stdout);
+    // Whatever this machine's setting, reading it never fails, and a proxy is only reported when enabled.
+    if windows_proxy(&text).is_some() {
+        assert!(text.contains("0x1"));
+    }
+    let _ = system_proxy();
+}
