@@ -117,12 +117,52 @@ fn fingerprint(c: &Connection, rows: &[Entity]) -> Result<String> {
     }
     Ok(crate::strict_json::sha256_hex(dump(&json!(values)).as_bytes()))
 }
+/// Index names first in Japanese, Chinese, then other languages.
+const INDEX_ORDER: &str = "ORDER BY CASE lang WHEN 'ja' THEN 0 WHEN 'zh' THEN 1 ELSE 2 END, value";
 fn aliases(c: &Connection, kind: &str, key: &str, query: bool) -> Result<Vec<String>> {
-    let (index, wiki): (Vec<(String, String)>, Vec<String>) = if kind == "character" {
+    let pairs = |sql: &str, params: &[&dyn rusqlite::ToSql]| -> Result<Vec<(String, String)>> {
+        Ok(c.prepare(sql)?.query_map(params, |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<rusqlite::Result<_>>()?)
+    };
+    let values = |sql: &str, params: &[&dyn rusqlite::ToSql]| -> Result<Vec<String>> {
+        Ok(c.prepare(sql)?.query_map(params, |r| r.get(0))?.collect::<rusqlite::Result<_>>()?)
+    };
+    let (index, wiki) = if kind == "character" {
         let id = crate::names_commands::tag_entities(c, key)?.first().cloned();
-        (c.prepare("SELECT lang,value FROM names WHERE entity_id=? AND role='display' AND source='index' ORDER BY CASE lang WHEN 'ja' THEN 0 WHEN 'zh' THEN 1 ELSE 2 END,value")?.query_map([&id],|r|Ok((r.get(0)?,r.get(1)?)))?.collect::<rusqlite::Result<_>>()?,c.prepare("SELECT value FROM names WHERE entity_id=? AND role='alias' AND source IN ('danbooru','bangumi') ORDER BY position,value")?.query_map([&id],|r|r.get(0))?.collect::<rusqlite::Result<_>>()?)
+        let index = pairs(
+            &format!(
+                "SELECT lang, value
+                 FROM names
+                 WHERE entity_id = ? AND role = 'display' AND source = 'index'
+                 {INDEX_ORDER}"
+            ),
+            &[&id],
+        )?;
+        let wiki = values(
+            "SELECT value
+             FROM names
+             WHERE entity_id = ? AND role = 'alias' AND source IN ('danbooru', 'bangumi')
+             ORDER BY position, value",
+            &[&id],
+        )?;
+        (index, wiki)
     } else {
-        (c.prepare("SELECT lang,value FROM display_names WHERE kind=? AND key=? AND source='index' ORDER BY CASE lang WHEN 'ja' THEN 0 WHEN 'zh' THEN 1 ELSE 2 END,value")?.query_map([kind,key],|r|Ok((r.get(0)?,r.get(1)?)))?.collect::<rusqlite::Result<_>>()?,c.prepare("SELECT value FROM name_aliases WHERE kind=? AND key=? ORDER BY position")?.query_map([kind,key],|r|r.get(0))?.collect::<rusqlite::Result<_>>()?)
+        let index = pairs(
+            &format!(
+                "SELECT lang, value
+                 FROM display_names
+                 WHERE kind = ? AND key = ? AND source = 'index'
+                 {INDEX_ORDER}"
+            ),
+            &[&kind, &key],
+        )?;
+        let wiki = values(
+            "SELECT value
+             FROM term_key_aliases
+             WHERE kind = ? AND key = ?
+             ORDER BY position",
+            &[&kind, &key],
+        )?;
+        (index, wiki)
     };
     let mut out: Vec<_> = index.iter().filter(|r| r.0 == "ja").map(|r| r.1.clone()).chain(wiki).collect();
     if !query {

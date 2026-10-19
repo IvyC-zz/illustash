@@ -92,7 +92,6 @@ pub(crate) fn forget_content(tx: &Connection, src: &Connection, changed: &[Strin
 const UNREAD: &[&str] = &[
     "backend_effects",
     "display_names",
-    "name_aliases",
     "name_cache",
     "name_settings",
     "names",

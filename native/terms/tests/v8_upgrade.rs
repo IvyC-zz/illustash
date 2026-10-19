@@ -1,7 +1,8 @@
 //! The core version 8 upgrade (#201) on a version 7 library from the comparison baseline: upgraded only when the
-//! legacy tables and `term_*` agree and every domain was switched to the core, and then with counted history steps'
-//! kind and count filled in. A refused upgrade leaves the library exactly as it was. (Every checkpoint of
-//! `baseline.rs` is upgraded the same way; this file covers the refusals and what the comparison leaves out.)
+//! legacy tables and `term_*` agree and every domain was switched to the core, and then with the aliases moved to the
+//! core and counted history steps' kind and count filled in. A refused upgrade leaves the library exactly as it was.
+//! (Every checkpoint of `baseline.rs` is upgraded the same way; this file covers the refusals and what the comparison
+//! leaves out.)
 use rusqlite::Connection;
 use serde_json::Value;
 use std::fs;
@@ -75,7 +76,7 @@ fn exact(db: &Path) -> std::collections::BTreeMap<String, Vec<String>> {
 }
 
 #[test]
-fn a_consistent_library_upgrades_and_counted_steps_get_their_kind_and_count() {
+fn a_consistent_library_upgrades_retires_the_alias_table_and_fills_in_counted_steps() {
     let lib = library("consistent");
     {
         let c = Connection::open(&lib.db).unwrap();
@@ -85,8 +86,28 @@ fn a_consistent_library_upgrades_and_counted_steps_get_their_kind_and_count() {
         )
         .unwrap();
     }
+    let aliases = |c: &Connection, table: &str| -> Vec<(String, String, String, i64)> {
+        c.prepare(&format!("SELECT kind, key, value, position FROM {table} ORDER BY kind, key, value"))
+            .unwrap()
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))
+            .unwrap()
+            .map(Result::unwrap)
+            .collect()
+    };
+    // An alias the core's copy does not have yet: the legacy table is the authority up to version 7.
+    write(
+        &Connection::open(&lib.db).unwrap(),
+        "INSERT INTO name_aliases VALUES ('work','synthetic_work','合成别名',0)",
+    );
+    let before = aliases(&Connection::open(&lib.db).unwrap(), "name_aliases");
+    assert!(before.iter().any(|a| a.2 == "合成别名"));
     assert_eq!(upgrade(&lib.db).unwrap(), "{\"from\":7,\"to\":8}\n");
     let c = Connection::open(&lib.db).unwrap();
+    assert_eq!(aliases(&c, "term_key_aliases"), before, "the aliases move to the core unchanged");
+    let legacy: bool = c
+        .query_row("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name = 'name_aliases')", [], |r| r.get(0))
+        .unwrap();
+    assert!(!legacy, "the legacy alias table is dropped");
     let filled: Vec<(String, Option<String>, Option<String>)> = c
         .prepare("SELECT label,label_kind,label_count FROM actions ORDER BY id DESC LIMIT 4")
         .unwrap()

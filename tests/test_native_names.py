@@ -20,7 +20,7 @@ import urllib.parse
 from unittest.mock import patch
 
 from tests import test_native_lifecycle as lifecycle
-from tests.fixed_expectations import unclocked
+from tests.fixed_expectations import RETIRED, unclocked
 from tests.test_read_http import INTERRUPT, SPAWN, free_port, wait_until
 from tests.name_providers import Providers
 from tools.verify_read_http import fetch
@@ -137,7 +137,9 @@ class NativeNamesTest(unittest.TestCase):
         self.finish()
         # All formal/core name tables and unchanged history; exclude nondeterministic timing/budget/cache bookkeeping.
         with closing(sqlite3.connect(self.lib.db)) as new:
-            self.assertEqual(expected,name_tables(new))
+            actual=name_tables(new)
+            # Legacy tables core v8 dropped (#201): their content is compared in the term_* tables that replaced them.
+            self.assertEqual({t:rows for t,rows in expected.items() if t in actual or t not in RETIRED},actual)
             self.assertEqual(new.execute("SELECT value FROM meta WHERE key='names_projected'").fetchone(),new.execute("SELECT value FROM meta WHERE key='names_version'").fetchone())
         self.assertTrue(all(status=='done' and not error for _,status,error in self.events()))
         self.assertFalse(self.sentinel.exists())

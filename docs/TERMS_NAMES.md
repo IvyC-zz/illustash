@@ -22,7 +22,7 @@
 |---|---|---|
 | `names`（角色、皮肤、作品的行） | `term_names`，按原样存（来源、语言、display / alias、首选、顺序；用户名字就是来源 `user`，决定 N3） | 兼容表 `names` |
 | `display_names` | `term_key_names` | 兼容表 |
-| `name_aliases` | `term_key_aliases` | 兼容表 |
+| `name_aliases` | `term_key_aliases` | 核心第 8 版起删除，核心直接读写 `term_key_aliases`（[TERMS_SCHEMA.md](TERMS_SCHEMA.md) 第 14 节） |
 | 选名规则 `View`（`choose`、`entity`、`base`、`own_name`）与词表 `SKINS`、`WORK_NAMES`、`readable`、`skin_zh` | 逐条移植（`crates/core/src/names_view.rs`），算成显示投影 `term_name_display`（每个身份的完整名与皮肤短名）、`term_name_choice`（每个文字键） | 显示读路径读投影（第 3 节） |
 | `names.search_hits` | 逐条移植（`names_search.rs`），命令 `names-search` | `search_hits` 调核心 |
 

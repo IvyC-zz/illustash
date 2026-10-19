@@ -1,7 +1,8 @@
 //! 名字收编（docs/TERMS_NAMES_PLAN.md N2）：`names`、`display_names`、`name_aliases` 三张 Python 表收进核心主数据。
 //! - `names`（按身份）→ `term_names`，只动角色 / 皮肤 / 作品（`term_tree` 里的词条）的行；画师、用户概念的名字不碰。
 //! - `display_names`（按文字键：作品 qualifier、皮肤 variant）→ `term_key_names`。
-//! - `name_aliases`（按文字键的别名，搜索用）→ `term_key_aliases`。
+//! - `name_aliases`（按文字键的别名，搜索用）→ `term_key_aliases`。核心第 8 版起 `term_key_aliases` 是唯一权威，
+//!   旧表在升级时同步一次后删除（`retire_aliases`，#201）。
 //!
 //! 与角色收编相同的套路：只读旧表、把主数据补到与旧表一致、再由主数据生成结果与旧表逐行比对；一个事务，预检失败或
 //! 有差异都整次回滚。名字表是状态不是历史（改名的撤销快照在 actions 里，由角色撤销处理），没有「出处」要解释。
@@ -20,7 +21,7 @@ CREATE TABLE IF NOT EXISTS term_key_aliases(
 ";
 
 /// 旧表 → 核心：每对（旧的样子，核心生成的样子），列一一对应。
-const PAIRS: [(&str, &str, &str); 3] = [
+const PAIRS: [(&str, &str, &str); 2] = [
     (
         "names",
         "SELECT entity_id,lang,value,source,role,preferred,position FROM names",
@@ -31,11 +32,6 @@ const PAIRS: [(&str, &str, &str); 3] = [
         "display_names",
         "SELECT kind,key,lang,source,value FROM display_names",
         "SELECT kind,key,lang,source,value FROM term_key_names",
-    ),
-    (
-        "name_aliases",
-        "SELECT kind,key,value,position FROM name_aliases",
-        "SELECT kind,key,value,position FROM term_key_aliases",
     ),
 ];
 
@@ -124,16 +120,35 @@ fn mirror(c: &Connection, r: &mut Report) -> Result<()> {
     let added =
         c.execute("INSERT OR IGNORE INTO term_key_names SELECT kind,key,lang,source,value FROM display_names", [])?;
     r.changed.insert("display_names".into(), json!(removed + added));
-    let removed = c.execute(
-        "DELETE FROM term_key_aliases WHERE (kind,key,value,position) NOT IN (SELECT kind,key,value,position FROM name_aliases)",
+    Ok(())
+}
+
+/// 核心第 8 版（#201）：`term_key_aliases` 成为别名的唯一权威。旧表 `name_aliases` 还在时（升级前的库、新建库的空
+/// 旧表），照它整表同步一次——它在第 7 版里是权威——核对一致后删掉。旧表不在时什么都不做。
+pub(crate) fn retire_aliases(c: &Connection) -> Result<()> {
+    let exists: bool = c.query_row(
+        "SELECT EXISTS(SELECT 1 FROM main.sqlite_master WHERE type='table' AND name='name_aliases')",
         [],
+        |r| r.get(0),
     )?;
-    let added = c.execute(
-        "INSERT INTO term_key_aliases SELECT kind,key,value,position FROM name_aliases WHERE true
-         ON CONFLICT(kind,key,value) DO UPDATE SET position=excluded.position WHERE position<>excluded.position",
-        [],
+    if !exists {
+        return Ok(());
+    }
+    c.execute_batch(
+        "DELETE FROM term_key_aliases
+         WHERE (kind, key, value, position) NOT IN (SELECT kind, key, value, position FROM name_aliases);
+         INSERT INTO term_key_aliases
+         SELECT kind, key, value, position FROM name_aliases WHERE true
+         ON CONFLICT(kind, key, value) DO UPDATE SET position = excluded.position
+         WHERE position <> excluded.position;",
     )?;
-    r.changed.insert("name_aliases".into(), json!(removed + added));
+    let (old, new) =
+        ("SELECT kind,key,value,position FROM name_aliases", "SELECT kind,key,value,position FROM term_key_aliases");
+    let differ = count(c, &format!("{old} EXCEPT {new}"))? + count(c, &format!("{new} EXCEPT {old}"))?;
+    if differ > 0 {
+        return Err(Error::Schema(format!("旧别名表与词条核心不一致，没有升级：{differ} 行")));
+    }
+    c.execute_batch("DROP TABLE name_aliases")?;
     Ok(())
 }
 
@@ -198,7 +213,7 @@ const PROJECTED: &str = "names_projected";
 /// 显示投影可以先于主数据镜像完成，两者分别记版本，避免事务中途读取后再次重建。
 const DISPLAY_PROJECTED: &str = "names_display_projected";
 /// 切换后由核心维护、加写保护的名字兼容表。
-pub const GUARDED: [&str; 3] = ["names", "display_names", "name_aliases"];
+pub const GUARDED: [&str; 2] = ["names", "display_names"];
 
 pub fn names_in_core(c: &Connection) -> Result<bool> {
     Ok(c.query_row("SELECT EXISTS(SELECT 1 FROM meta WHERE key=?1 AND value='core')", [NAMES_IN_CORE], |r| r.get(0))?)
@@ -234,7 +249,6 @@ pub fn track(c: &Connection) -> Result<()> {
     c.execute_batch(
         "CREATE TEMP TABLE IF NOT EXISTS names_dirty_entities(id TEXT PRIMARY KEY);
         CREATE TEMP TABLE IF NOT EXISTS names_dirty_keys(kind TEXT,key TEXT,PRIMARY KEY(kind,key));
-        CREATE TEMP TABLE IF NOT EXISTS names_dirty_aliases(kind TEXT,key TEXT,PRIMARY KEY(kind,key));
         CREATE TEMP TABLE IF NOT EXISTS names_dirty_full(value INTEGER PRIMARY KEY);
         CREATE TEMP TABLE IF NOT EXISTS names_old_entities(id TEXT PRIMARY KEY,present INTEGER NOT NULL,kind TEXT,
          parent_id TEXT,variant TEXT,merged_into TEXT,original INTEGER,work TEXT);
@@ -242,7 +256,7 @@ pub fn track(c: &Connection) -> Result<()> {
         CREATE TEMP TABLE IF NOT EXISTS names_old_links(system TEXT,key TEXT,entity_id TEXT,current INTEGER,added_at TEXT);
         CREATE TEMP TABLE IF NOT EXISTS names_scope_ids(id TEXT PRIMARY KEY);
         CREATE TEMP TABLE IF NOT EXISTS names_scope_keys(kind TEXT,key TEXT,PRIMARY KEY(kind,key));
-        DELETE FROM names_dirty_entities; DELETE FROM names_dirty_keys; DELETE FROM names_dirty_aliases;
+        DELETE FROM names_dirty_entities; DELETE FROM names_dirty_keys;
         DELETE FROM names_dirty_full; DELETE FROM names_old_entities; DELETE FROM names_old_links_seen;
         DELETE FROM names_old_links; DELETE FROM names_scope_ids; DELETE FROM names_scope_keys;",
     )?;
@@ -293,27 +307,6 @@ pub fn track(c: &Connection) -> Result<()> {
                 AFTER {event} ON main.{table}{when} BEGIN {body} END;"
             ))?;
         }
-    }
-    // 别名表不在 `names_version` 的触发器里，单独记下受影响的键，提交时只同步这些键（#102 A1）。
-    let aliases: bool = c.query_row(
-        "SELECT EXISTS(SELECT 1 FROM main.sqlite_master WHERE type='table' AND name='name_aliases')",
-        [],
-        |r| r.get(0),
-    )?;
-    for event in ["INSERT", "UPDATE", "DELETE"].into_iter().filter(|_| aliases) {
-        let mut body = String::new();
-        for side in ["old", "new"] {
-            if (event == "INSERT" && side == "old") || (event == "DELETE" && side == "new") {
-                continue;
-            }
-            body.push_str(&format!(
-                "INSERT INTO names_dirty_aliases SELECT {side}.kind,{side}.key WHERE NOT EXISTS(SELECT 1 FROM names_dirty_aliases WHERE kind={side}.kind AND key={side}.key);"
-            ));
-        }
-        c.execute_batch(&format!(
-            "CREATE TEMP TRIGGER IF NOT EXISTS track_names_name_aliases_{event}
-            AFTER {event} ON main.name_aliases BEGIN {body} END;"
-        ))?;
     }
     Ok(())
 }
@@ -427,62 +420,19 @@ fn mirror_changed(c: &Connection) -> Result<()> {
     Ok(())
 }
 
-/// 别名表只影响搜索，不在 `names_version` 的触发器里：提交前按本事务记下的键同步（#102 A1）。没有追踪（这个连接
-/// 没开过核心写事务）时退回整表同步。`term_key_aliases` 是 WITHOUT ROWID 表，写入顺序不影响比较。
-fn mirror_aliases_changed(c: &Connection) -> Result<bool> {
-    let tracked: bool =
-        c.query_row("SELECT EXISTS(SELECT 1 FROM sqlite_temp_master WHERE name='names_dirty_aliases')", [], |r| {
-            r.get(0)
-        })?;
-    if !tracked {
-        mirror_aliases(c)?;
-        return Ok(false);
-    }
-    if !c.query_row("SELECT EXISTS(SELECT 1 FROM names_dirty_aliases)", [], |r| r.get::<_, bool>(0))? {
-        return Ok(true);
-    }
-    c.execute_batch(
-        "DELETE FROM term_key_aliases WHERE (kind,key) IN (SELECT kind,key FROM names_dirty_aliases)
-         AND NOT EXISTS(SELECT 1 FROM name_aliases a WHERE a.kind=term_key_aliases.kind AND a.key=term_key_aliases.key
-          AND a.value=term_key_aliases.value AND a.position=term_key_aliases.position);
-        INSERT INTO term_key_aliases SELECT a.kind,a.key,a.value,a.position FROM names_dirty_aliases d
-         CROSS JOIN name_aliases a ON a.kind=d.kind AND a.key=d.key WHERE true
-         ON CONFLICT(kind,key,value) DO UPDATE SET position=excluded.position WHERE position<>excluded.position;",
-    )?;
-    Ok(true)
-}
-
-/// 整表同步别名：多的删、少的加。只用于没有追踪的事务和对照核对。
-fn mirror_aliases(c: &Connection) -> Result<()> {
-    c.execute(
-        "DELETE FROM term_key_aliases WHERE (kind,key,value,position) NOT IN (SELECT kind,key,value,position FROM name_aliases)",
-        [],
-    )?;
-    c.execute(
-        "INSERT INTO term_key_aliases SELECT kind,key,value,position FROM name_aliases WHERE true
-         ON CONFLICT(kind,key,value) DO UPDATE SET position=excluded.position WHERE position<>excluded.position",
-        [],
-    )?;
-    Ok(())
-}
-
 /// 每个核心写事务提交前（schema::commit_writing）：名字已在核心、且这个事务改到了名字相关的数据，就在同一事务里
-/// 补齐主数据、维护显示投影。名字行使用依赖闭包，结构变更 / 过期状态回退整表。别名每个事务只同步一次（#102 A1）。
+/// 补齐主数据、维护显示投影。名字行使用依赖闭包，结构变更 / 过期状态回退整表。别名由命令直接写 `term_key_aliases`
+/// （核心第 8 版），不在这里同步。
 pub fn after_write(c: &Connection) -> Result<()> {
     if !names_in_core(c)? {
         return Ok(());
     }
     let version = meta(c, "names_version")?;
     if version.is_some() && version == meta(c, PROJECTED)? {
-        // 名字版本没变：别名表不在版本触发器里，仍可能改过。
-        if mirror_aliases_changed(c)? {
-            verify_incremental(c, "aliases")?;
-        }
         return Ok(());
     }
     if tracked_master(c)? {
         mirror_changed(c)?;
-        mirror_aliases_changed(c)?;
         verify_incremental(c, "names")?;
     } else {
         mirror(c, &mut Report::default())?;
