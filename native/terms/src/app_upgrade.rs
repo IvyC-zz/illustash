@@ -71,6 +71,15 @@ pub(crate) fn needed(path: &Path) -> Option<ValidatedUpgrade> {
     prepare(path).ok()
 }
 
+/// Why a package that failed to open cannot be upgraded by this version, when the `pre-v8` version can (#201): what
+/// the page says instead of an internal failure.
+pub(crate) fn pre_v8(path: &Path) -> Option<String> {
+    match prepare(path) {
+        Err(Error::Schema(why)) if why.contains(PRE_V8) => Some(why),
+        _ => None,
+    }
+}
+
 /// Upgrade a prepared package, saying what happened on the terminal as `--upgrade` does.
 pub(crate) fn run(prepared: &ValidatedUpgrade) -> std::result::Result<UpgradeReport, UpgradeFailure> {
     let report = upgrade(prepared)?;
@@ -419,6 +428,7 @@ mod tests {
         f.connection().execute("DELETE FROM meta WHERE key='terms_names'", []).unwrap();
         assert!(prepare(&f.0).unwrap_err().to_string().contains("pre-v8"));
         assert!(Library::open(&f.0).unwrap_err().to_string().contains("pre-v8"));
+        assert!(pre_v8(&f.0).is_some_and(|why| why.contains("pre-v8")));
         assert_eq!(f.backups(), 0);
     }
     #[test]
