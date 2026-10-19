@@ -100,10 +100,26 @@ class BrowseReadHTTPTest(HTTPHarness):
         package = self.root/name
         self.sync('expanded'); self.publish()
         source = Path(self.rec.value('source'))
-        # First the library before it switched to the core (no `meta`): refused since core v8 (#201, only switched
-        # libraries are kept), and the core no longer keeps the legacy name tables its reads fell back to.
-        for _ in range(294):
-            self.rec.skip('response')
+        # The library before it switched to the core (no `meta`) is refused since core v8 (#201, only switched libraries
+        # are kept), so its 294 recorded replies are not read live any more. The same 294 requests follow on the library
+        # after it switched, restored at this core version; 288 of its recorded replies are byte-identical to the ones
+        # before the switch, so those are compared with the live v8 replies as well. The other 6 differ because the
+        # switch itself changed the artist attribution (the Python-era artist tables no supported library has): the
+        # details of `a` and `extra-0`, artist A's assets, count and ids, and artist A with an unreadable provenance
+        # database (500 before the switch, 200 after).
+        legacy = [self.rec.value('response') for _ in range(294)]
+        artists_before_switch = {266, 267, 275, 276, 277, 290}
+        compared = []
+        recorded = self.pair
+        def pair(path, *args, **kwargs):
+            reference = recorded(path, *args, **kwargs)
+            if len(compared) not in artists_before_switch:
+                before = legacy[len(compared)]
+                self.assertEqual((before['status'], before['body']), (reference['status'], reference['body']), path)
+            compared.append(path)
+            return reference
+        self.pair = pair
+        self.addCleanup(vars(self).pop, 'pair', None)
         self.sync('switched'); self.publish()
         for nsfw in ('','hide','only'):
             for pool in ('','duplicates','excluded','unmatched','pending','recent','audit'):
@@ -140,5 +156,6 @@ class BrowseReadHTTPTest(HTTPHarness):
             self.assertEqual(self.pair('/api/detail?id=missing')['status'],400)
             self.assertEqual(self.pair('/api/detail?id=a')['status'],500)
         finally:prov.rmdir();parked.rename(prov)
+        self.assertEqual(len(compared), 294)
 
 
