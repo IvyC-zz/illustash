@@ -2,7 +2,7 @@
 import {WORK_NAMES} from '../core/catalog.js';
 import {esc, number, shortcut} from '../core/format.js';
 import {said, t, tb} from '../core/i18n.js';
-import {SYNC_ACTIVE, pollSync, startSync, syncLine} from '../core/jobs.js';
+import {PHOTOS_PRIVACY, SYNC_ACTIVE, photosHelp, photosRefused, pollSync, startSync, syncLine} from '../core/jobs.js';
 import {go} from '../core/route.js';
 import {api, post, session} from '../core/session.js';
 import {allowNames, updatesPost, updatesTick} from '../core/settings.js';
@@ -67,6 +67,7 @@ function syncTrouble() {
   const s = state.sync, message = s.message ? `（${esc(tb(s.message))}）` : '', missing = said(s.message, '文件夹不存在或无法访问：{path}');
   if (s.status === 'interrupted') return t('同步没有做完{said}：已经加入和识别的图都保留了，再同步一次会接着处理剩下的。', {said: message});
   if (s.status !== 'error') return '';
+  if (photosRefused(s)) return photosHelp();
   return t('同步出错了{said}：已经加入和识别的图都保留了。', {said: message}) + (missing
     ? t('检查来源文件夹是否还在、外接硬盘是否接上，或者在 {link} 里换一个文件夹，然后再同步一次。', {link: `<a class="link" href="#/settings/library">${t('设置 › 图库')}</a>`})
     : t('可以再同步一次；还不行的话，反馈时附上「设置 › 关于」里的诊断信息。'));
@@ -81,7 +82,8 @@ export function drawGuideNotice() {
   const trouble = guideOn() && !problem ? syncTrouble() : '';
   el.hidden = !problem && !trouble;
   el.innerHTML = problem ? `<span>${problem}</span>${c.recognition ? `<button class="quiet small" data-guide-check>${t('重新检查')}</button>` : ''}`
-    : trouble ? `<span>${trouble}</span><button class="quiet small" data-guide-sync>${t('再同步一次')}</button>` : '';
+    : trouble ? `<span>${trouble}</span>${photosRefused(state.sync) ? `<button class="quiet small" data-guide-photos>${t('打开系统设置')}</button>`
+      : `<button class="quiet small" data-guide-sync>${t('再同步一次')}</button>`}` : '';
 }
 // ----- the tour: one real element lit up at a time -----
 export function tourStop(id) {
@@ -228,6 +230,7 @@ export async function replayGuide() {
 export function wireGuide() {
   $('guideNotice').addEventListener('click', async e => {
     if (e.target.closest('[data-guide-check]')) { await guideAction({action: 'check'}); drawGuide(); setTimeout(() => guideRefresh(true), 1500); }
+    if (e.target.closest('[data-guide-photos]')) location.href = PHOTOS_PRIVACY;
     if (e.target.closest('[data-guide-sync]')) { try { await startSync(); pollSync(); } catch (err) { toast(err.message); } drawGuide(); }
   });
 
