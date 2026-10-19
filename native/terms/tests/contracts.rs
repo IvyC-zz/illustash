@@ -342,6 +342,7 @@ fn interrupted_task_recovery_contract() {
 }
 
 /// A reply as JSON (the benchmark reads values from replies).
+#[cfg(unix)]
 fn request_json(origin: &str, url: &str, body: Option<&Value>, token: &str) -> (u16, Value, Map<String, Value>) {
     let (status, raw, headers) = request(origin, url, body, token);
     (status, serde_json::from_str(&raw).unwrap_or(Value::Null), headers)
