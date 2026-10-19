@@ -25,7 +25,7 @@
 use flate2::read::GzDecoder;
 use regex::Regex;
 use rusqlite::{types::ValueRef, Connection};
-use serde_json::Value;
+use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs;
@@ -33,6 +33,9 @@ use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 use std::sync::LazyLock;
+
+#[path = "common/baseline.rs"]
+mod baseline;
 
 static CLOCK: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})?").unwrap());
@@ -405,7 +408,15 @@ fn op(call: &Value) -> String {
 
 /// Replay one case under `under`; returns the first few differences. Every incremental names check the build
 /// makes is appended to `verified` (#102).
-fn case(name: &str, calls: &[Value], blobs: &Value, bin: &Path, under: &Path, verified: &Path) -> Vec<String> {
+fn case(
+    name: &str,
+    calls: &[Value],
+    blobs: &Value,
+    bin: &Path,
+    under: &Path,
+    verified: &Path,
+    mut record: Option<&mut Recorder>,
+) -> Vec<String> {
     let temp = under.join(format!("illustash-replay-{}-{}", std::process::id(), short(name)));
     let _ = fs::remove_dir_all(&temp);
     fs::create_dir_all(temp.join("root")).unwrap();
@@ -438,11 +449,19 @@ fn case(name: &str, calls: &[Value], blobs: &Value, bin: &Path, under: &Path, ve
     let mut mapping = HashMap::new();
     let mut serve: Option<Serve> = None;
     let mut problems = Vec::new();
+    if let Some(r) = record.as_deref_mut() {
+        r.roots = roots.roots.iter().map(|(_, token)| token.clone()).collect();
+    }
     for (i, call) in calls.iter().enumerate() {
         let at = format!("{name} #{i} {}", op(call));
+        if let Some(r) = record.as_deref_mut() {
+            r.observe(call, &roots, &mapping);
+        }
         environment(call, blobs, &roots, &mapping);
         let sub = |text: &str, mapping: &HashMap<String, String>| roots.sub(&remap(text, mapping));
         let db = call.get("db").and_then(Value::as_str).map(|d| PathBuf::from(sub(d, &mapping)));
+        let kept = record.as_deref_mut().map(|r| r.begin(call, &roots, &mapping, db.as_deref(), &counter));
+        let mut raw_reply = String::new();
         let before: HashSet<String> =
             db.as_deref().map(|d| volatile(d, &masks)).unwrap_or_default().into_iter().collect();
         let outputs = if call["mode"] == "cli" {
@@ -486,6 +505,7 @@ fn case(name: &str, calls: &[Value], blobs: &Value, bin: &Path, under: &Path, ve
             s.stdin.flush().unwrap();
             let mut reply = String::new();
             s.stdout.read_line(&mut reply).unwrap();
+            raw_reply.clone_from(&reply);
             let reply: Value = serde_json::from_str(&reply).unwrap();
             vec![("code", reply["code"].clone()), ("result", Value::from(reply["result"].to_string()))]
         };
@@ -568,6 +588,9 @@ fn case(name: &str, calls: &[Value], blobs: &Value, bin: &Path, under: &Path, ve
             problems.push(problem);
             break; // later steps would only repeat the same divergence
         }
+        if let (Some(r), Some(kept)) = (record.as_deref_mut(), kept) {
+            r.finish(kept, call, &outputs, &raw_reply, db.as_deref(), &roots);
+        }
     }
     drop(serve);
     let _ = fs::remove_dir_all(&temp);
@@ -608,6 +631,7 @@ fn replay_in(module: &str, under: &Path) {
                             bin,
                             under,
                             &verified,
+                            None,
                         ));
                     }
                 })
@@ -722,12 +746,16 @@ fn verified_checks(path: &Path) -> BTreeMap<String, usize> {
 }
 
 macro_rules! modules {
-    ($($name:ident),* $(,)?) => {$(
-        #[test]
-        fn $name() {
-            replay(stringify!($name));
-        }
-    )*};
+    ($($name:ident),* $(,)?) => {
+        $(
+            #[test]
+            fn $name() {
+                replay(stringify!($name));
+            }
+        )*
+        /// Every recorded module, for `record_baseline`.
+        const MODULES: &[&str] = &[$(stringify!($name)),*];
+    };
 }
 
 modules!(
@@ -769,4 +797,367 @@ fn uuid_segment_in_temp_path() {
     }
     let outer = Cleanup(std::env::temp_dir().join(format!("illustash-replay-{}-uuid", std::process::id())));
     replay_in("test_terms_core", &outer.0.join(UUID_SEGMENT));
+}
+
+// ---- Recording the new baseline (#201 step 1) ----
+//
+// Explicit only: `ILLUSTASH_RECORD_BASELINE=1 cargo test --test replay record_baseline -- --ignored`, on main
+// while main still matches the recordings above (every case is checked against them as it is recorded). Writes
+// `tests/fixtures/baseline/<module>.json.gz`, replayed by `tests/baseline.rs`; see `common/baseline.rs` for what
+// is compared.
+
+/// Commands that serve only the legacy tables: run while recording, left out of the baseline (#201).
+const LEGACY_OPS: [&str; 9] = [
+    "sync-artists",
+    "sync-characters",
+    "sync-names",
+    "verify-characters",
+    "verify-names",
+    "cutover-artists",
+    "cutover-labels",
+    "cutover-characters",
+    "cutover-names",
+];
+
+/// A kept call between `begin` and `finish`.
+struct Pending {
+    entry: serde_json::Map<String, Value>,
+    before: baseline::State,
+}
+
+/// One case's baseline as it is recorded.
+#[derive(Default)]
+struct Recorder {
+    roots: Vec<String>,
+    calls: Vec<Value>,
+    blobs: BTreeMap<String, String>,
+    /// Paths whose state the next kept call must put in place (loaded, written or deleted by the recording's
+    /// environment, or changed by a left-out call).
+    dirty: std::collections::BTreeSet<PathBuf>,
+    /// Copies from databases in the state the baseline accounts for, in order, with that state.
+    copies: Vec<(PathBuf, PathBuf, Option<baseline::State>)>,
+    counter_moved: bool,
+    /// Learning stamps in replies, in order of appearance (inputs refer to them by position).
+    stamps: Vec<String>,
+    expected: HashMap<PathBuf, baseline::State>,
+    left_out: usize,
+    rebased: usize,
+}
+
+fn version_masks<'a>(roots: &'a dyn Fn(&str) -> String) -> baseline::Masks<'a> {
+    baseline::Masks { roots, version: illustash_terms::SCHEMA_VERSION }
+}
+
+fn db_state(path: &Path, roots: &Roots) -> baseline::State {
+    if !path.exists() {
+        return baseline::State::new();
+    }
+    let norm = |t: &str| roots.norm(t);
+    baseline::state(&open(path), &version_masks(&norm))
+}
+
+impl Recorder {
+    fn blob(&mut self, text: String) -> String {
+        let id = short(&text);
+        self.blobs.insert(id.clone(), text);
+        id
+    }
+
+    /// Notes the recording's file operations for `call`, before `environment` applies them.
+    fn observe(&mut self, call: &Value, roots: &Roots, mapping: &HashMap<String, String>) {
+        let Some(env) = call.get("env").and_then(Value::as_object) else { return };
+        let sub = |text: &str| PathBuf::from(roots.sub(&remap(text, mapping)));
+        for (key, value) in env {
+            let path = sub(key);
+            match value.get("copy").and_then(Value::as_str) {
+                Some(from) if !self.dirty.contains(&sub(from)) => {
+                    let from = sub(from);
+                    let state =
+                        self.expected.get(&from).cloned().or_else(|| from.exists().then(|| db_state(&from, roots)));
+                    self.dirty.remove(&path);
+                    self.copies.push((from, path, state));
+                }
+                _ => {
+                    self.dirty.insert(path);
+                }
+            }
+        }
+    }
+
+    /// A kept call: the environment it needs and its inputs; `None` for a call left out of the baseline.
+    fn begin(
+        &mut self,
+        call: &Value,
+        roots: &Roots,
+        mapping: &HashMap<String, String>,
+        db: Option<&Path>,
+        counter: &Path,
+    ) -> Option<Pending> {
+        let left_out = LEGACY_OPS.contains(&op(call).as_str())
+            || db.is_some_and(|d| baseline::is_database(d) && baseline::before_cutover(&open(d)));
+        if left_out {
+            self.left_out += 1;
+            return None;
+        }
+        let tokens = |text: &str| baseline::scrub(&roots.norm(text));
+        let mut env = Vec::new();
+        for (from, to, state) in std::mem::take(&mut self.copies) {
+            env.push(json!({"path": tokens(&to.to_string_lossy()), "copy": tokens(&from.to_string_lossy())}));
+            match state {
+                Some(state) => self.expected.insert(to, state),
+                None => self.expected.remove(&to),
+            };
+        }
+        for path in std::mem::take(&mut self.dirty) {
+            let at = tokens(&path.to_string_lossy());
+            if !path.exists() {
+                env.push(json!({"path": at, "delete": true}));
+                self.expected.remove(&path);
+            } else if baseline::is_database(&path) {
+                let c = open(&path);
+                let dump = baseline::dump(&c, &tokens);
+                let check = Connection::open_in_memory().unwrap();
+                baseline::restore(&check, &roots.sub(&dump.tables), &roots.sub(&dump.rows), &roots.sub(&dump.objects));
+                let as_dumped = |t: &str| roots.sub(&tokens(t));
+                let (rebuilt, original) = (baseline::exact(&check, &|t| t.to_owned()), baseline::exact(&c, &as_dumped));
+                if rebuilt != original {
+                    let differ: Vec<String> = original
+                        .iter()
+                        .filter(|(k, v)| rebuilt.get(*k) != Some(*v))
+                        .map(|(k, v)| {
+                            format!(
+                                "{k}: {:?} / rebuilt {:?}",
+                                v.iter().take(3).collect::<Vec<_>>(),
+                                rebuilt.get(k).map(|r| r.iter().take(3).collect::<Vec<_>>())
+                            )
+                        })
+                        .chain(
+                            rebuilt.keys().filter(|k| !original.contains_key(*k)).map(|k| format!("{k}: only rebuilt")),
+                        )
+                        .collect();
+                    panic!("{at}: the dump does not rebuild the database: {differ:?}");
+                }
+                let terms = baseline::terms_version(&c);
+                drop(c);
+                let parts = [self.blob(dump.tables), self.blob(dump.rows), self.blob(dump.objects)];
+                env.push(json!({"path": at, "db": parts, "terms": terms}));
+                self.expected.insert(path.clone(), db_state(&path, roots));
+            } else {
+                let bytes = fs::read(&path).unwrap();
+                let text = match String::from_utf8(bytes) {
+                    Ok(text) => tokens(&text),
+                    Err(e) => format!("x:{}", hex(e.as_bytes())),
+                };
+                let id = self.blob(text);
+                env.push(json!({"path": at, "file": id}));
+                self.expected.remove(&path);
+            }
+        }
+        let mut entry = serde_json::Map::new();
+        entry.insert("mode".into(), call["mode"].clone());
+        if !env.is_empty() {
+            entry.insert("env".into(), Value::Array(env));
+        }
+        if std::mem::take(&mut self.counter_moved) {
+            let n: u64 = fs::read_to_string(counter).unwrap().trim().parse().unwrap();
+            entry.insert("counter".into(), json!(n));
+        }
+        let actual = |text: &str| self.input(&baseline::scrub(&roots.norm(&roots.sub(&remap(text, mapping)))));
+        if call["mode"] == "cli" {
+            let args: Vec<Value> =
+                call["args"].as_array().unwrap().iter().map(|a| json!(actual(a.as_str().unwrap()))).collect();
+            entry.insert("args".into(), Value::Array(args));
+            if let Some(stdin) = call["stdin"].as_str() {
+                entry.insert("stdin".into(), json!(actual(stdin)));
+            }
+        } else {
+            entry.insert("input".into(), serde_json::from_str(&actual(&call["input"].to_string())).unwrap());
+        }
+        if let Some(d) = db {
+            entry.insert("db".into(), json!(tokens(&d.to_string_lossy())));
+        }
+        let before = match db {
+            Some(d) => {
+                let actual = db_state(d, roots);
+                let want = self.expected.get(d).cloned().unwrap_or_default();
+                if actual != want {
+                    // Changed outside the calls the baseline keeps (another kept call's database, say): recorded.
+                    entry.insert("before".into(), baseline::delta(&want, &actual));
+                    self.rebased += 1;
+                }
+                actual
+            }
+            None => baseline::State::new(),
+        };
+        Some(Pending { entry, before })
+    }
+
+    /// Input text with learning stamps written as the reply they came from (`<stamp@N>`).
+    fn input(&self, text: &str) -> String {
+        STAMPS
+            .replace_all(text, |c: &regex::Captures| {
+                let at = self.stamps.iter().rposition(|s| *s == c[0]).unwrap_or_else(|| {
+                    panic!("input stamp {} appears in no earlier kept reply", &c[0]);
+                });
+                format!("<stamp@{at}>")
+            })
+            .into_owned()
+    }
+
+    fn finish(
+        &mut self,
+        pending: Option<Pending>,
+        call: &Value,
+        outputs: &[(&str, Value)],
+        raw_reply: &str,
+        db: Option<&Path>,
+        roots: &Roots,
+    ) {
+        let Some(Pending { mut entry, before }) = pending else {
+            // Left out: whatever it may have written is put in place before the next kept call.
+            self.counter_moved = true;
+            if let Some(d) = db {
+                self.dirty.insert(d.to_path_buf());
+            }
+            for arg in call.get("args").and_then(Value::as_array).into_iter().flatten() {
+                let path = PathBuf::from(arg.as_str().unwrap());
+                if path.is_absolute() && baseline::is_database(&path) {
+                    self.dirty.insert(path);
+                }
+            }
+            return;
+        };
+        let norm = |t: &str| roots.norm(t);
+        let masks = version_masks(&norm);
+        let mut seen = |text: &str| self.stamps.extend(STAMPS.find_iter(text).map(|m| m.as_str().to_owned()));
+        if call["mode"] == "cli" {
+            for (key, value) in outputs {
+                match *key {
+                    "code" => {
+                        entry.insert("code".into(), value.clone());
+                    }
+                    key => {
+                        let text = value.as_str().unwrap();
+                        seen(text);
+                        entry.insert(key.into(), json!(masks.output(text)));
+                    }
+                }
+            }
+        } else {
+            seen(raw_reply);
+            entry.insert("reply".into(), json!(masks.output(raw_reply.trim_end_matches(['\r', '\n']))));
+        }
+        if let Some(d) = db {
+            let after = db_state(d, roots);
+            let change = baseline::delta(&before, &after);
+            if change.as_object().is_some_and(|o| !o.is_empty()) {
+                entry.insert("change".into(), change);
+            }
+            self.expected.insert(d.to_path_buf(), after);
+        }
+        self.calls.push(Value::Object(entry));
+    }
+}
+
+/// Records one module's baseline; panics if the recording above no longer matches (the baseline must be main's
+/// behaviour while main still behaves as recorded).
+fn record_module(module: &str, out: &Path) -> Value {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join(format!("tests/fixtures/replay/{module}.json.gz"));
+    let mut text = String::new();
+    GzDecoder::new(fs::File::open(&path).unwrap()).read_to_string(&mut text).unwrap();
+    let data: Value = serde_json::from_str(&text).unwrap();
+    let bin = Path::new(env!("CARGO_BIN_EXE_illustash-terms"));
+    let verified = std::env::temp_dir().join(format!("illustash-record-{}-{module}.verified", std::process::id()));
+    let work: Vec<(&String, &Value)> = data["cases"].as_object().unwrap().iter().collect();
+    let threads = std::thread::available_parallelism().map_or(2, |n| n.get().min(4));
+    let next = std::sync::atomic::AtomicUsize::new(0);
+    let results: Vec<(String, Recorder, Vec<String>)> = std::thread::scope(|s| {
+        let workers: Vec<_> = (0..threads)
+            .map(|_| {
+                s.spawn(|| {
+                    let mut found = Vec::new();
+                    loop {
+                        let i = next.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                        let Some((name, case_data)) = work.get(i) else { break found };
+                        let mut r = Recorder::default();
+                        let problems = case(
+                            name,
+                            case_data["calls"].as_array().unwrap(),
+                            &data["blobs"],
+                            bin,
+                            &std::env::temp_dir(),
+                            &verified,
+                            Some(&mut r),
+                        );
+                        found.push(((*name).clone(), r, problems));
+                    }
+                })
+            })
+            .collect();
+        workers.into_iter().flat_map(|w| w.join().unwrap()).collect()
+    });
+    let _ = fs::remove_file(&verified);
+    let problems: Vec<&String> = results.iter().flat_map(|(_, _, p)| p).collect();
+    assert!(problems.is_empty(), "{module}: main no longer matches the recordings, not recording:\n{problems:?}");
+    let mut blobs = BTreeMap::new();
+    let mut cases = serde_json::Map::new();
+    let mut retired = Vec::new();
+    let (mut kept, mut left_out, mut rebased) = (0, 0, 0);
+    for (name, r, _) in results {
+        left_out += r.left_out;
+        rebased += r.rebased;
+        if r.calls.is_empty() {
+            retired.push(name);
+            continue;
+        }
+        kept += r.calls.len();
+        blobs.extend(r.blobs);
+        cases.insert(name, json!({"roots": r.roots, "calls": r.calls}));
+    }
+    retired.sort();
+    let summary = json!({"module": module, "cases": cases.len(), "kept_calls": kept, "left_out_calls": left_out,
+        "rebased_calls": rebased, "retired_cases": retired});
+    eprintln!("{summary}");
+    let target = out.join(format!("{module}.json.gz"));
+    if cases.is_empty() {
+        // Nothing the core still serves once the legacy tables are gone: the module retires.
+        let _ = fs::remove_file(&target);
+        return summary;
+    }
+    let document = json!({
+        "format": baseline::FORMAT,
+        "module": module,
+        "recorded": {"terms_version": illustash_terms::SCHEMA_VERSION, "commit": head()},
+        "retired_cases": summary["retired_cases"],
+        "left_out_calls": left_out,
+        "blobs": blobs,
+        "cases": cases,
+    });
+    let file = fs::File::create(target).unwrap();
+    let mut gz = flate2::write::GzEncoder::new(file, flate2::Compression::best());
+    gz.write_all(serde_json::to_string(&document).unwrap().as_bytes()).unwrap();
+    gz.finish().unwrap();
+    summary
+}
+
+fn head() -> String {
+    let out = Command::new("git").args(["rev-parse", "HEAD"]).current_dir(env!("CARGO_MANIFEST_DIR")).output().unwrap();
+    String::from_utf8(out.stdout).unwrap().trim().to_owned()
+}
+
+#[test]
+#[ignore = "records the #201 baseline; explicit only"]
+fn record_baseline() {
+    assert!(std::env::var_os("ILLUSTASH_RECORD_BASELINE").is_some(), "set ILLUSTASH_RECORD_BASELINE to record");
+    let out = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/baseline");
+    fs::create_dir_all(&out).unwrap();
+    let only = std::env::var("ILLUSTASH_RECORD_ONLY").ok();
+    let mut summaries = Vec::new();
+    for module in MODULES {
+        if only.as_deref().is_some_and(|o| o != *module) {
+            continue;
+        }
+        summaries.push(record_module(module, &out));
+    }
+    eprintln!("{}", serde_json::to_string_pretty(&summaries).unwrap());
 }

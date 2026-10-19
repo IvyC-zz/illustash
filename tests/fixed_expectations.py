@@ -11,6 +11,8 @@ import lzma
 import os
 import re
 import sqlite3
+import struct
+import sys
 import tarfile
 import unittest
 from contextlib import closing
@@ -81,8 +83,9 @@ def _hash(value):
 
 
 def library_digests(lib):
-    return {name: table_digests(lib.path / filename) for name, filename in
-            (('app', 'library.sqlite'), ('source', 'source.sqlite'), ('provenance', 'provenance.sqlite'))}
+    return Live({name: table_digests(lib.path / filename) for name, filename in
+                 (('app', 'library.sqlite'), ('source', 'source.sqlite'), ('provenance', 'provenance.sqlite'))},
+                baseline_state(lib.path))
 
 
 class Library:
@@ -123,6 +126,7 @@ class Expectations:
         self.test = 'tests.' + test_id.removeprefix('tests.')
         self.aliases = []      # (actual, placeholder)
         self.position = 0
+        self.states = 0        # state() calls so far: the #201 baseline keys a state by its number
         try:
             data = _load(self.module)
         except AssertionError:
@@ -237,8 +241,18 @@ class Expectations:
         return self._decode(self._next(label)['value'])
 
     def state(self, label):
-        """A reference library state, kept as digests; compares equal to a live ``library_digests``."""
-        return Digests(self._next(label)['value'])
+        """A reference library state, kept as digests; compares equal to a live ``library_digests``.
+        Compared with a live state, it also holds the #201 baseline recorded for this state (see ``Live``)."""
+        value = self._next(label)['value']
+        slot = (self.module, self.test, f'{self.states}:{label}')
+        self.states += 1
+        return Digests(value, slot)
+
+    def baseline(self, label, package, rename=None):
+        """The #201 baseline of a library package at a named point (fresh libraries the tests compare whole):
+        recorded when recording, otherwise compared with what was recorded, if anything was. ``rename`` maps
+        values made at random (generated keys) to stable names first."""
+        return _check_baseline((self.module, self.test, f'@{label}'), baseline_state(Path(package), rename))
 
     def package(self, label, path, library=True):
         """恢复冻结的合成输入包，数据库文本中的临时路径按本轮根目录还原。"""
@@ -275,8 +289,9 @@ class Expectations:
 
 class Digests:
     """Per-table digests of a reference library state; equal to a live state with the same digests."""
-    def __init__(self, tree):
+    def __init__(self, tree, slot=None):
         self.tree = tree
+        self.slot = slot
 
     def __getitem__(self, key):
         value = self.tree[key]
@@ -285,6 +300,12 @@ class Digests:
     def __eq__(self, other):
         if isinstance(other, Digests):
             return self.tree == other.tree
+        if isinstance(other, Live):
+            equal = self.tree == dict(other)
+            if equal and self.slot is not None:
+                # Equal by the recordings above: the live state by the #201 rules is that state's baseline.
+                return _check_baseline(self.slot, other.baseline)
+            return equal
         if isinstance(other, dict):
             return self.tree == other
         return NotImplemented
@@ -365,5 +386,129 @@ def _load(module):
     return data
 
 
+# ---- The comparison baseline of the first public test release (#201) ----
+#
+# Core v8 drops the legacy tables, so the digests above (whole schema, every table, rowids) stop matching. Where a
+# recorded state is compared with a live one, the live state is also taken by the rules of
+# native/terms/tests/common/baseline.rs and compared with a baseline recorded from main on core version 7:
+# every table except RETIRED, typed cells, rows as a multiset (implicit rowids not compared), run-specific strings
+# and clocks as above, learning stamps masked, a few meta values by what they mean. Recorded with
+# ILLUSTASH_RECORD_BASELINE=1 into fixtures/baseline_states/<module>.json.gz.
+
+BASELINE_STATES = FIXTURES.parent / 'baseline_states'
+RETIRED = frozenset({'entities', 'links', 'work_review', 'names', 'display_names', 'name_aliases', 'identity_baseline'})
+SKIP_COLUMNS = frozenset({('term_packages', 'manifest'), ('term_evidence', 'fingerprint')})
+STAMP = re.compile(r'learning-v1:[0-9a-f]{64}')
+TERMS_VERSION = int(re.search(r'pub const SCHEMA_VERSION: i64 = (\d+);',
+                              (Path(__file__).resolve().parents[1] / 'crates/core/src/schema.rs').read_text()).group(1))
+RECORDING = bool(os.environ.get('ILLUSTASH_RECORD_BASELINE'))
 
 
+class Live(dict):
+    """A live ``library_digests``: the digests, and the same state by the #201 rules (``baseline``)."""
+    def __init__(self, digests, baseline):
+        super().__init__(digests)
+        self.baseline = baseline
+
+
+def _meta_value(key, value, names_version):
+    if key == 'terms_schema' and value == str(TERMS_VERSION):
+        return '<terms-version>'
+    if key == 'names_version':
+        return '<names_version>'
+    if key in ('names_projected', 'names_display_projected'):
+        return '<names_version>' if value == names_version else '<stale>'
+    if key == 'identity_graph_version':
+        return '<derived>'
+    return value
+
+
+def _cell(value, rename):
+    if isinstance(value, float):
+        return {'real': struct.pack('>d', value).hex()}
+    if isinstance(value, bytes):
+        return {'blob': value.hex()}
+    if isinstance(value, str):
+        for old, new in rename.items():
+            value = value.replace(old, new)
+        return STAMP.sub('<stamp>', unclocked(value))
+    return value
+
+
+def _database_state(path, rename):
+    with closing(sqlite3.connect(Path(path).resolve().as_uri() + '?mode=ro', uri=True)) as c:
+        c.execute('BEGIN')
+        names = [n for (n,) in c.execute("SELECT name FROM sqlite_schema WHERE type='table' "
+                                         "AND name NOT LIKE 'sqlite_%' ORDER BY name")]
+        names_version = None
+        if 'meta' in names:
+            row = c.execute("SELECT value FROM meta WHERE key='names_version'").fetchone()
+            names_version = row[0] if row else None
+        out = {}
+        for name in names:
+            if name in RETIRED:
+                continue
+            columns = [r[1] for r in c.execute('PRAGMA table_info(' + quote(name) + ')')]
+            keep = [i for i, col in enumerate(columns) if (name, col) not in SKIP_COLUMNS]
+            rows = []
+            for raw in c.execute('SELECT * FROM ' + quote(name)):
+                cells = [_cell(raw[i], rename) for i in keep]
+                if name == 'meta' and isinstance(raw[0], str) and isinstance(raw[1], str):
+                    cells[1] = _cell(_meta_value(raw[0], raw[1], names_version), rename)
+                rows.append(json.dumps(cells, ensure_ascii=False, separators=(',', ':')))
+            out[name] = {'columns': [columns[i] for i in keep], 'rows': sorted(rows)}
+        return out
+
+
+def baseline_state(package, rename=None):
+    package = Path(package)
+    return {name: _database_state(package / filename, rename or {}) for name, filename in
+            (('app', 'library.sqlite'), ('source', 'source.sqlite'), ('provenance', 'provenance.sqlite'))
+            if (package / filename).exists()}
+
+
+@lru_cache(maxsize=None)
+def _baseline_file(module):
+    path = BASELINE_STATES / f'{module}.json.gz'
+    if not path.exists():
+        return {}
+    with gzip.open(path, 'rt', encoding='utf-8') as f:
+        return json.load(f)
+
+
+def _check_baseline(slot, state):
+    """Record ``state`` for ``slot`` (module, test, key) when recording; otherwise True unless a baseline was
+    recorded for it and differs (the difference is printed)."""
+    module, test, key = slot
+    if RECORDING:
+        _record_baseline(module, test, key, state)
+        return True
+    want = _baseline_file(module).get(test, {}).get(key)
+    if want is None or want == state:
+        return True
+    for db in sorted(set(want) | set(state)):
+        for table in sorted(set(want.get(db, {})) | set(state.get(db, {}))):
+            w, g = want.get(db, {}).get(table), state.get(db, {}).get(table)
+            if w != g:
+                print(f'#201 baseline {test} {key} {db}.{table}: baseline {w!r:.400}, live {g!r:.400}', file=sys.stderr)
+    return False
+
+
+def _record_baseline(module, test, key, state):
+    """Merged into the module's file under a lock: the fixed suite runs test classes in several processes."""
+    import fcntl
+    BASELINE_STATES.mkdir(exist_ok=True)
+    path = BASELINE_STATES / f'{module}.json.gz'
+    import tempfile
+    with open(Path(tempfile.gettempdir()) / f'illustash-baseline-{module}.lock', 'w') as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        data = {}
+        if path.exists():
+            with gzip.open(path, 'rt', encoding='utf-8') as f:
+                data = json.load(f)
+        recorded = data.setdefault(test, {})
+        if key in recorded and recorded[key] != state:
+            raise AssertionError(f'#201 baseline {test} {key}: two different live states compared equal to it')
+        recorded[key] = state
+        with gzip.GzipFile(path, 'wb', mtime=0) as f:
+            f.write(json.dumps(data, ensure_ascii=False, sort_keys=True, separators=(',', ':')).encode('utf-8'))

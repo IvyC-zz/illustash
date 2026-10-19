@@ -364,6 +364,8 @@ class NativeLifecycleTest(unittest.TestCase):
                 old = self.rec.value('old library')
                 self.assertEqual(old['source'], comparator.state(dest / 'source.sqlite'))
                 self.assertEqual(old['application'], comparator.state(dest / 'library.sqlite', application=True))
+                comparator.rec = self.rec
+                comparator.baseline(f'fresh library {kind} {index}', dest)
                 config = json.loads((dest / 'library.json').read_text())
                 self.assertEqual({k: v for k, v in old['config'].items() if k not in {'id', 'created_at'}},
                                  {k: v for k, v in config.items() if k not in {'id', 'created_at'}})
