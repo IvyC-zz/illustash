@@ -8,7 +8,7 @@ import tempfile
 
 import numpy as np
 from tests import native_commands as core
-from tests.fixed_expectations import fixed_values
+from tests.fixed_expectations import fixed_values, upgrade_recorded
 
 
 @lru_cache(None)
@@ -124,6 +124,7 @@ def seed(test, root):
     for kind, filename in [('library','app.sqlite'), ('source','source.db')]:
         with closing(sqlite3.connect(root / filename)) as c, c:
             c.executescript(decode(record['seed'][kind], root))
+    upgrade_recorded(root / 'app.sqlite')
     test.fixed = decode(record, root)
     test.fixed_position = test.oc_position = 0
     return Store(root, test.fixed), record['attrs']

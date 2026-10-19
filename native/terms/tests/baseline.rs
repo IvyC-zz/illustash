@@ -1,11 +1,11 @@
 //! The comparison baseline of the first public test release (#201), replayed against this build.
 //!
-//! `tests/fixtures/baseline/` holds the scenarios of the recordings in `tests/fixtures/replay/`, recorded from
-//! main on core version 7 (`replay.rs`, `record_baseline`): every call the core still serves once the legacy
+//! `tests/fixtures/baseline/` holds the scenarios of the former Python-era call recordings, recorded from main on
+//! core version 7 (`record_baseline` in the former `tests/replay.rs`, PR #239): every call the core still serves once the legacy
 //! tables are gone, its replies, and what it changed in the call's database. Calls that only served the legacy
 //! tables (`sync-*`, `verify-*`, `cutover-*`, and calls on a library not yet switched to the core) are not in
-//! it: the database they left is a checkpoint, put in place before the next call, and upgraded first when it is
-//! at the core version the baseline was recorded on. What is compared, and how, is in `common/baseline.rs`.
+//! it: the database they left is a checkpoint, put in place before the next call, and upgraded first when it is a
+//! switched library at the core version the baseline was recorded on. What is compared, and how, is in `common/baseline.rs`.
 //!
 //! Each case runs in its own directory with its own key counter (`ILLUSTASH_TEST_KEY_COUNTER`), restored at
 //! checkpoints, so the core makes the same keys as when recorded; learning stamps hash clocks and are passed on
@@ -116,6 +116,8 @@ struct Replay<'a> {
     serve: Option<Serve>,
     expected: HashMap<PathBuf, baseline::State>,
     stamps: Vec<String>,
+    /// Checkpoints whose upgrade changed compared content: named when a later comparison fails.
+    upgraded: Vec<String>,
 }
 
 impl Replay<'_> {
@@ -124,11 +126,16 @@ impl Replay<'_> {
     }
 
     fn state(&self, path: &Path) -> baseline::State {
+        self.state_at(path, illustash_terms::SCHEMA_VERSION)
+    }
+
+    /// The compared content, `version` being the current core version (a checkpoint as recorded: the recorded one).
+    fn state_at(&self, path: &Path, version: i64) -> baseline::State {
         if !path.exists() {
             return baseline::State::new();
         }
         let norm = |t: &str| self.roots.norm(t);
-        baseline::state(&open(path), &baseline::Masks { roots: &norm, version: illustash_terms::SCHEMA_VERSION })
+        baseline::state(&open(path), &baseline::Masks { roots: &norm, version })
     }
 
     fn output(&self, text: &str) -> String {
@@ -161,9 +168,12 @@ impl Replay<'_> {
             } else if let Some(parts) = entry.get("db").and_then(Value::as_array) {
                 let [tables, rows, objects] = [&parts[0], &parts[1], &parts[2]].map(|p| self.roots.sub(self.blob(p)));
                 baseline::restore(&open(&path), &tables, &rows, &objects);
-                let base = self.state(&path);
-                if entry["terms"].as_i64() == Some(self.recorded) {
-                    self.upgrade(&path, &base)?;
+                let base = self.state_at(&path, self.recorded);
+                // A checkpoint no later call of the baseline uses can be a library not yet switched: not upgradable.
+                if entry["terms"].as_i64() == Some(self.recorded) && !baseline::before_cutover(&open(&path)) {
+                    if let Some(change) = self.upgrade(&path, &base)? {
+                        self.upgraded.push(change);
+                    }
                 }
                 self.expected.insert(path, base);
             } else {
@@ -180,9 +190,9 @@ impl Replay<'_> {
     }
 
     /// A checkpoint at the recorded core version is upgraded to this build's before the next call, as the user's
-    /// libraries are; the upgrade must leave the compared content as it was. Backups it makes are removed, so the
-    /// directory looks as it did when recorded.
-    fn upgrade(&self, path: &Path, base: &baseline::State) -> Result<(), String> {
+    /// libraries are. Backups it makes are removed, so the directory looks as it did when recorded. Returns what the
+    /// upgrade changed in the compared content, if anything.
+    fn upgrade(&self, path: &Path, base: &baseline::State) -> Result<Option<String>, String> {
         let backups = path.parent().unwrap().join("library-backups");
         let existing: Vec<PathBuf> =
             fs::read_dir(&backups).map(|d| d.map(|e| e.unwrap().path()).collect()).unwrap_or_default();
@@ -210,15 +220,16 @@ impl Replay<'_> {
                 let _ = fs::remove_dir(&backups);
             }
         }
+        // What the upgrade changed (repairing an outdated mirror, say) is not a failure by itself: every later call
+        // is compared against the baseline, so it fails there if the change shows; then the change is named too.
         let after = self.state(path);
-        if after != *base {
-            return Err(format!(
-                "upgrading checkpoint {} changed the compared content: {:?}",
+        Ok((after != *base).then(|| {
+            format!(
+                "upgrading checkpoint {} changed {:?}",
                 self.roots.norm(&path.to_string_lossy()),
                 baseline::differences(base, &after, 5)
-            ));
-        }
-        Ok(())
+            )
+        }))
     }
 
     fn input(&self, text: &str) -> Result<String, String> {
@@ -357,13 +368,15 @@ fn case(name: &str, data: &Value, blobs: &Value, recorded: i64, bin: &Path, veri
         serve: None,
         expected: HashMap::new(),
         stamps: Vec::new(),
+        upgraded: Vec::new(),
     };
     let mut problem = None;
     for (i, call) in data["calls"].as_array().unwrap().iter().enumerate() {
         let op = call.get("args").and_then(|a| a[0].as_str()).or_else(|| call["input"]["op"].as_str()).unwrap_or("");
         let at = format!("{} #{i} {op}", replay.name);
         if let Err(e) = replay.call(&at, call) {
-            problem = Some(e);
+            problem =
+                Some(if replay.upgraded.is_empty() { e } else { format!("{e}\n  ({})", replay.upgraded.join("; ")) });
             break; // later calls would only repeat the divergence
         }
     }

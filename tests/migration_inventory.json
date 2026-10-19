@@ -5,7 +5,7 @@
 
  "crates/core/src/backup.rs":"c47266c42468b701668128636674e794ee519f367098e0da043d38572c8f11af",
 
- "crates/core/src/character_commands.rs":"9f8eafc47c1ec0d7c5d20ee326cebd41a182ce5bace8f9a1c1578c564243081c",
+ "crates/core/src/character_commands.rs":"c09e52c7324b8df8ac341261571cd83270ee6e9959be76ee1279224a5a0657ab",
 
  "crates/core/src/character_evidence.rs":"82c6945707aca9c63cce93a5500b49e19b8e7dd3f84df2bcf4da71912e460da2",
 
@@ -51,11 +51,11 @@
 
  "crates/core/src/legacy_artists.rs":"15845824e53b11c73f27e5eadb8da96dbebca7b1032c7a14ae7f03b635f57f63",
 
- "crates/core/src/legacy_characters.rs":"75786df769fae6b7f7e474309e6acc14e9ca3569ea9efd0bb736906f34b59d22",
+ "crates/core/src/legacy_characters.rs":"d7caab17f504f9857a385fecddd3392a200557b1f2c50dbabddd83e63082a611",
 
  "crates/core/src/legacy_labels.rs":"eaa733d59157f5f32a3b691dfb8039de6d88386250d12adc02f38d7d85869dc1",
 
- "crates/core/src/legacy_names.rs":"b7cf92e231da84c585e9aa41e844ba0a7e470d6244bffff9f05fbcb7335ece5e",
+ "crates/core/src/legacy_names.rs":"e8465e30ba8ffaaf227114e107a9e6592ffd6071f0490cecb8e2387eed5860d3",
 
  "crates/core/src/lib.rs":"cb0fbed51bbe3c36681f85893737a8ef0cce8dbb430130a0de8ea7bbce5b4f49",
 
@@ -63,19 +63,19 @@
 
  "crates/core/src/names_search.rs":"bd63b8e0937aa1a869eacfe9cdb01ab8fa7f475c36a8e1330d6bf1adeb23c1a6",
 
- "crates/core/src/names_view.rs":"2ba44de691be501ffa3df056338be123a37173cab39c5c754c75c2c5280cdbcb",
+ "crates/core/src/names_view.rs":"c23b1535ded10399f067ec0748e5d4b6102b1a7e5c6690a8abaf572a55d2ac76",
 
  "crates/core/src/origin.rs":"a591702ad6138d1f9f88b044d0896262d2531ec4fa3e2b18a602a64b6682f0f3",
 
  "crates/core/src/package.rs":"2c951060a10859148705790dd270f5bb15112970f0888dc31de126bc74471220",
 
- "crates/core/src/schema.rs":"53b8b1c22a2b289c7ed21ef110ec6747b2f9733f2902757e95bc8d7c227247dc",
+ "crates/core/src/schema.rs":"0623c40de2bc5bcc744af6c802e48f1836fac63810273add58355dfd3383ab3b",
 
- "crates/core/src/store.rs":"ac647ffd51cf571322d3d20f9dbb01a7de642424aca99a723fb9762ad447fa9e",
+ "crates/core/src/store.rs":"cac0fcd0d3383d61317f0c36497f6a8cd087d1529a594cfcfcbfc01ec74feebd",
 
  "crates/core/src/strict_json.rs":"3c5bb30315590779a991508c485b508a3410a635905b96dd2cb976b952b391da",
 
- "crates/core/src/undo_labels.rs":"05908ecc384d6a5a6c1b6ae117f66fd7faf9ca2f9b0dc37bb8a99685efb81642",
+ "crates/core/src/undo_labels.rs":"95993da52d1fae92b21c7e01e541928455209d70b8fb8cfb6b58ac53e17dd7fc",
 
  "crates/iqdb/src/main.rs":"786432535d0db00c223b400299ef033238cb0e22b02c25cc896aadf099d33ba8",
 
@@ -155,13 +155,13 @@
 
  "native/terms/src/app_characters.rs":"0379cfaf9e6353208f3beedb97a0d7d0b45934c2986c136a0b0dd5d71e67220f",
 
- "native/terms/src/app_commands.rs":"6e3e02f958c8287a61a59a95fed623c59ce5e1b476ae38743cac39ffda4e06a1",
+ "native/terms/src/app_commands.rs":"7de96bb84df0a3d83131d7bf081895e0991797897c3a44f42b09bf70032025b1",
 
- "native/terms/src/app_create.rs":"7a14bcf725923a1f3343f83f77a616e1e9df467c72c2512b771afb302e85b8bc",
+ "native/terms/src/app_create.rs":"de6ce631d7e56b2e4fa444d71f3d6717d5b6f7ccb3e630db638958ecdcad729d",
 
  "native/terms/src/app_create_schema.sql":"62ab636102cf5897b65a2b64dd54d2e7a35098e3b19d5dce792c57b5c2c23541",
 
- "native/terms/src/app_curation.rs":"ff39abf9e203255a48d2885cad85a2e4485eae7952ce558f9a5ee5e846a1cedc",
+ "native/terms/src/app_curation.rs":"9cd78aaefb7f924a30ac48044cc23f8a02082bd4229473e055aaf1a64eaca786",
 
  "native/terms/src/app_desktop.rs":"3ee08a852ef9b8d3e266a12e9b6f0f7dc4726e90de1846879cfb2d3b18473145",
 
@@ -171,7 +171,7 @@
 
  "native/terms/src/app_folder.rs":"2e466b75258b3a1db42f5e6224ca3a5a4fd89cc2ad9e6cad2738e264c33f4555",
 
- "native/terms/src/app_http.rs":"9933f62b698718c91446b707721b582fd762a16eb7b500809ef6301be56823e7",
+ "native/terms/src/app_http.rs":"e82740b31fac3c9b82607d292068d476f5d78c8c12929d0b8091e17f2154931b",
 
  "native/terms/src/app_identity.rs":"f9ace5a1574b8775637e7b3654e603a5db3fc9e4434a7d0e24b45e3d3a14b112",
 
@@ -181,15 +181,13 @@
 
  "native/terms/src/app_integrity.rs":"143aa1bbd662b8ea08636a6d58b4a8acc32095ba41526b579c32af9873adc6cc",
 
- "native/terms/src/app_legacy_upgrade.rs":"80df352878a4eb6fe793ccd9a4102c9e2be72ff3a9451c3472f3fd9bd8f76955",
+ "native/terms/src/app_libraries.rs":"e230fac5c3d21945de40f60dac40d7429a10baba9f223c8f608c8e52b41344ab",
 
- "native/terms/src/app_libraries.rs":"c06a0d90339e04989b319223e2a4d270d01f29ef1292d48c31353e26e0fdccbf",
-
- "native/terms/src/app_library.rs":"7861a0f410c706776f203eec4c939b2249b11b9d491ce0c370c9b92c51a9ae72",
+ "native/terms/src/app_library.rs":"422af22778c37af3ae41931736a51f2169505a52db946de16617c4a403c52109",
 
  "native/terms/src/app_local.rs":"b8d92a4fd457e8298d29baec5cf13f7e041e1160019dd700c7e642e82786a0bb",
 
- "native/terms/src/app_migrate.rs":"01cd4f4bc69e211a9c2f7921c2cc21bc4dc6dc505e81f4751f0ff1b4f4334df8",
+ "native/terms/src/app_migrate.rs":"265b8367ae67814e6b7acffdbcbd6df051f33f8e92401785124c25cdc911d386",
 
  "native/terms/src/app_migrate_data.rs":"383c6344eb375b758b76694aa631317779dae9b0a82abc5accf5289424d942ea",
 
@@ -215,7 +213,7 @@
 
  "native/terms/src/app_name_sources.rs":"2c5dddb5cd580e838536b56c9cc437f7628da22b33852b3c74a0b964e58fc275",
 
- "native/terms/src/app_names.rs":"6bb9c675c9f1a1cfc4351872bf63433ad62112228754d1cf29de4a78fe2d1827",
+ "native/terms/src/app_names.rs":"2c5617cdc3c66e8841b8639060ee0dd4f5cfac53746bc6d55a970b47d33aa146",
 
  "native/terms/src/app_onboarding.rs":"c93c4fc7aba68cbfff824fc5e5bb41b831597708b23b04afebb05c9a4f763570",
 
@@ -235,7 +233,7 @@
 
  "native/terms/src/app_provenance_sources.rs":"e94f052ad27ab3196794a01ff151636f324dc1c45c90b3b397bc8f6ab4fd2a1b",
 
- "native/terms/src/app_recognition.rs":"2fe29f4b8815ddaefc5b651e7379d0336dc2e2d93d43947c9dd3ce359d8093fd",
+ "native/terms/src/app_recognition.rs":"1cae206a301ad4281ae0549b0f46c2b25ba9a3abbcdd022d84ac796ff7bc4a2b",
 
  "native/terms/src/app_rescue.rs":"16274da1a0b1683ea0f652c79200cbc2b95ea62732c137c3ae08e7943601a9f0",
 
@@ -245,7 +243,7 @@
 
  "native/terms/src/app_service.rs":"0b8880a74567c3730ed45ff59022dbea9b8c487835ceee4ddde5f4b58c9405bb",
 
- "native/terms/src/app_settings.rs":"95d6abe22dc065263ca829c47c5189de633e43868383965e00edc6f0c804db19",
+ "native/terms/src/app_settings.rs":"c49121e8b8c97f04336e2039e75a95c06294d10ff97557be40e5ab8873a52a86",
 
  "native/terms/src/app_source_empty.sql":"601047d24a614c055ea7ce648777dbd4f27b45ce32ac90d2099cfa5ffb58f9ea",
 
@@ -259,7 +257,7 @@
 
  "native/terms/src/app_updates.rs":"c7d3c6a736bfa4662a2e4f7a99607e0905ef7437975c440bb66ebc002521ced2",
 
- "native/terms/src/app_upgrade.rs":"d75585f1b3780ccda88be7013f58324a2c2e3866ea015baa37ad71f38d55c3f3",
+ "native/terms/src/app_upgrade.rs":"ededcd6aba1d44c1bf7e9b4045ebaf0e54ca99377f40a66e61a9bd0e3f98e6a7",
 
  "native/terms/src/bin/illustash-terms.rs":"04ee80bb280034a16f8ddd9fe97e8de0700713259c44f76858f70b8713d4c594",
 
@@ -271,7 +269,7 @@
 
  "native/terms/src/http.rs":"75e56008addadf106bddd3ef0b38b3bd68bc90112d603a3a5b0e104a5510deec",
 
- "native/terms/src/http_app.rs":"27a4465ad622f5f823f8c2fe0bba66d3b9d15fbcd13e622acd965ba6c3877470",
+ "native/terms/src/http_app.rs":"5f2f40e315c389480e3a90d065d83635ae87091c683d788b8f7a247ffc9046d4",
 
  "native/terms/src/http_artists.rs":"58c13b0a5892c45c3ee12401bb32d765f8e3a220dfdc28baf0d4289b3f8b21d0",
 
@@ -281,7 +279,7 @@
 
  "native/terms/src/http_host_get.rs":"45f1fd1271ff9a12d02a35ce379105abc0d629b15383cb7ff69629909f1c2c8a",
 
- "native/terms/src/http_host_post.rs":"d0f9102bfe283b9474cebf0a05fece3fb84ff9ea32f825b63324abb796c9fb30",
+ "native/terms/src/http_host_post.rs":"8aa72f555eefb5d607c73ae55ecfbf0a25b7d359f09a18cc20968bc5ae5129d7",
 
  "native/terms/src/http_json.rs":"5e348e2087ebec6ce369d3c5136a0311921f303a746246e91bef8dd9215a1478",
 
@@ -307,7 +305,7 @@
 
  "native/terms/src/index_generation.rs":"556ad63a4bb7b8d30e3191d466b91744b29f23fd4fc53fa40ffb9f13b54946e6",
 
- "native/terms/src/lib.rs":"63cc730101513b220e79545ec1350aed82616c1458915ecfeb018d5cc2cc07e9",
+ "native/terms/src/lib.rs":"5be7b0f476d26d63a457ed509aa0f658d54ebd31adf8b9d2e24dc1abffc8b878",
 
  "native/terms/src/platform_process.rs":"66a45606b4a65b14b2725679bbae0e7e5445e63fddede8e804c2e8d4cca893b0",
 
@@ -476,13 +474,12 @@
  "crates/core/src/character_structure.rs":{"database-write":[[0,5],[19,5],[30,3],[8,4],[207,2],[223,2],9,[241,6],32]},
  "native/terms/src/http_json.rs":{"database-write":[[11,6]]},
  "native/terms/src/bin/illustash-terms.rs":{"entrypoint":[10]},
- "crates/core/src/schema.rs":{"database-write":{"@0":19,"DROP TABLE IF EXISTS:identity_claims":1,"DROP TABLE IF EXISTS:identity_calibration":1,"@185":5,"CREATE TABLE:terms_compact_new":1,"INSERT INTO:terms_compact_new":1,"ALTER TABLE:terms_compact_new":1,"@2":3,"VACUUM":2,"@53":1,"@49":1,"CREATE TABLE:term_assets":1,"CREATE INDEX:term_assets_md5":1,"CREATE TABLE:terms":1,"CREATE INDEX:terms_kind":1,"CREATE TRIGGER:terms_kind_insert":1,"@11":27,"CREATE TRIGGER:terms_kind_update|UPDATE:of":1,"CREATE TRIGGER:terms_key_permanent|UPDATE:of":1,"CREATE TABLE:term_names":1,"CREATE INDEX:term_names_value":1,"CREATE TABLE:term_links":1,"CREATE INDEX:term_links_term":1,"CREATE TABLE:term_relations":1,"CREATE INDEX:term_relations_b":1,"CREATE TABLE:term_packages":1,"CREATE TABLE:term_evidence":1,"CREATE INDEX:term_evidence_term":1,"CREATE TRIGGER:term_evidence_append_only_update|UPDATE:on":1,"CREATE TRIGGER:term_evidence_append_only_delete":1,"CREATE TABLE:term_verdicts":1,"CREATE INDEX:term_verdicts_image":2,"CREATE INDEX:term_verdicts_relation":2,"CREATE INDEX:term_verdicts_action":2,"CREATE TRIGGER:term_verdicts_append_only_update|UPDATE:on":2,"CREATE TRIGGER:term_verdicts_append_only_delete":2,"CREATE TABLE:term_projection":1,"CREATE INDEX:term_projection_term":1,"CREATE VIEW:term_effective_verdicts":2,"CREATE VIEW:term_relation_states":2,"@192":1,"DROP TABLE IF EXISTS:legacy_asset_tags":1,"@193":1,"@20":1,"@65":1,"CREATE TABLE:term_evidence_sets_v3":1,"CREATE TABLE:term_evidence_set_assets_v3":1,"CREATE TABLE:term_evidence_set_rows_v3":1,"CREATE TABLE:term_active_evidence_v3":1,"INSERT INTO:term_evidence_sets_v3":1,"INSERT INTO:term_evidence_set_assets_v3":1,"INSERT INTO:term_evidence_set_rows_v3":1,"INSERT INTO:term_active_evidence_v3":1,"DROP VIEW:term_current_evidence":1,"DROP TABLE:term_active_evidence":1,"DROP TABLE:term_evidence_set_rows":1,"DROP TABLE:term_evidence_set_assets":1,"DROP TABLE:term_evidence_sets":1,"ALTER TABLE:term_evidence_sets_v3":1,"ALTER TABLE:term_evidence_set_assets_v3":1,"ALTER TABLE:term_evidence_set_rows_v3":1,"ALTER TABLE:term_active_evidence_v3":1,"CREATE INDEX:term_evidence_set_rows_evidence":2,"CREATE TRIGGER:term_evidence_set_rows_match":2,"CREATE TRIGGER:term_evidence_sets_append_only_update|UPDATE:on":2,"CREATE TRIGGER:term_evidence_sets_append_only_delete":2,"CREATE TRIGGER:term_evidence_set_assets_append_only_update|UPDATE:on":2,"CREATE TRIGGER:term_evidence_set_assets_append_only_delete":2,"CREATE TRIGGER:term_evidence_set_rows_append_only_update|UPDATE:on":2,"CREATE TRIGGER:term_evidence_set_rows_append_only_delete":2,"CREATE VIEW:term_current_evidence":2,"@1":2,"CREATE TABLE:term_batches":1,"CREATE TRIGGER:term_batches_append_only_update|UPDATE:on":1,"CREATE TRIGGER:term_batches_append_only_delete":1,"CREATE TABLE:term_verdicts_v2":1,"INSERT INTO:term_verdicts_v2":1,"DROP VIEW:term_relation_states":1,"DROP VIEW:term_effective_verdicts":1,"DROP TABLE:term_verdicts":1,"ALTER TABLE:term_verdicts_v2":1,"CREATE INDEX:term_verdicts_batch":1,"CREATE TRIGGER:term_verdicts_batch_anchor":1,"CREATE VIEW:term_relation_latest":1,"CREATE TABLE:term_evidence_sets":1,"CREATE TABLE:term_evidence_set_assets":1,"CREATE TABLE:term_evidence_set_rows":1,"CREATE TABLE:term_active_evidence":1,"CREATE TABLE:term_identity_baseline":1,"CREATE TABLE:term_tree":1,"CREATE INDEX:term_tree_parent":1,"CREATE INDEX:term_tree_work":1,"CREATE TABLE:term_legacy_ids":1}},
+ "crates/core/src/schema.rs":{"database-write":{"@0":20,"DROP TABLE IF EXISTS:identity_claims":1,"DROP TABLE IF EXISTS:identity_calibration":1,"@185":5,"CREATE TABLE:terms_compact_new":1,"INSERT INTO:terms_compact_new":1,"ALTER TABLE:terms_compact_new":1,"@2":3,"VACUUM":2,"@53":1,"@49":1,"CREATE TABLE:term_assets":1,"CREATE INDEX:term_assets_md5":1,"CREATE TABLE:terms":1,"CREATE INDEX:terms_kind":1,"CREATE TRIGGER:terms_kind_insert":1,"@11":27,"CREATE TRIGGER:terms_kind_update|UPDATE:of":1,"CREATE TRIGGER:terms_key_permanent|UPDATE:of":1,"CREATE TABLE:term_names":1,"CREATE INDEX:term_names_value":1,"CREATE TABLE:term_links":1,"CREATE INDEX:term_links_term":1,"CREATE TABLE:term_relations":1,"CREATE INDEX:term_relations_b":1,"CREATE TABLE:term_packages":1,"CREATE TABLE:term_evidence":1,"CREATE INDEX:term_evidence_term":1,"CREATE TRIGGER:term_evidence_append_only_update|UPDATE:on":1,"CREATE TRIGGER:term_evidence_append_only_delete":1,"CREATE TABLE:term_verdicts":1,"CREATE INDEX:term_verdicts_image":2,"CREATE INDEX:term_verdicts_relation":2,"CREATE INDEX:term_verdicts_action":2,"CREATE TRIGGER:term_verdicts_append_only_update|UPDATE:on":2,"CREATE TRIGGER:term_verdicts_append_only_delete":2,"CREATE TABLE:term_projection":1,"CREATE INDEX:term_projection_term":1,"CREATE VIEW:term_effective_verdicts":2,"CREATE VIEW:term_relation_states":2,"@192":1,"DROP TABLE IF EXISTS:legacy_asset_tags":1,"@193":1,"@20":1,"@65":1,"CREATE TABLE:term_evidence_sets_v3":1,"CREATE TABLE:term_evidence_set_assets_v3":1,"CREATE TABLE:term_evidence_set_rows_v3":1,"CREATE TABLE:term_active_evidence_v3":1,"INSERT INTO:term_evidence_sets_v3":1,"INSERT INTO:term_evidence_set_assets_v3":1,"INSERT INTO:term_evidence_set_rows_v3":1,"INSERT INTO:term_active_evidence_v3":1,"DROP VIEW:term_current_evidence":1,"DROP TABLE:term_active_evidence":1,"DROP TABLE:term_evidence_set_rows":1,"DROP TABLE:term_evidence_set_assets":1,"DROP TABLE:term_evidence_sets":1,"ALTER TABLE:term_evidence_sets_v3":1,"ALTER TABLE:term_evidence_set_assets_v3":1,"ALTER TABLE:term_evidence_set_rows_v3":1,"ALTER TABLE:term_active_evidence_v3":1,"CREATE INDEX:term_evidence_set_rows_evidence":2,"CREATE TRIGGER:term_evidence_set_rows_match":2,"CREATE TRIGGER:term_evidence_sets_append_only_update|UPDATE:on":2,"CREATE TRIGGER:term_evidence_sets_append_only_delete":2,"CREATE TRIGGER:term_evidence_set_assets_append_only_update|UPDATE:on":2,"CREATE TRIGGER:term_evidence_set_assets_append_only_delete":2,"CREATE TRIGGER:term_evidence_set_rows_append_only_update|UPDATE:on":2,"CREATE TRIGGER:term_evidence_set_rows_append_only_delete":2,"CREATE VIEW:term_current_evidence":2,"@1":2,"CREATE TABLE:term_batches":1,"CREATE TRIGGER:term_batches_append_only_update|UPDATE:on":1,"CREATE TRIGGER:term_batches_append_only_delete":1,"CREATE TABLE:term_verdicts_v2":1,"INSERT INTO:term_verdicts_v2":1,"DROP VIEW:term_relation_states":1,"DROP VIEW:term_effective_verdicts":1,"DROP TABLE:term_verdicts":1,"ALTER TABLE:term_verdicts_v2":1,"CREATE INDEX:term_verdicts_batch":1,"CREATE TRIGGER:term_verdicts_batch_anchor":1,"CREATE VIEW:term_relation_latest":1,"CREATE TABLE:term_evidence_sets":1,"CREATE TABLE:term_evidence_set_assets":1,"CREATE TABLE:term_evidence_set_rows":1,"CREATE TABLE:term_active_evidence":1,"CREATE TABLE:term_identity_baseline":1,"CREATE TABLE:term_tree":1,"CREATE INDEX:term_tree_parent":1,"CREATE INDEX:term_tree_work":1,"CREATE TABLE:term_legacy_ids":1,"ALTER TABLE:actions":1,"@35":1}},
  "crates/core/src/character_merge.rs":{"database-write":{"@8":4,"UPDATE:prefs":2,"UPDATE:reviews":2,"@0":1,"@28":1}},
  "crates/core/src/names_view.rs":{"database-write":{"CREATE TABLE IF NOT EXISTS:term_name_display":1,"CREATE TABLE IF NOT EXISTS:term_name_choice":1,"DELETE FROM:term_name_display|DELETE FROM:term_name_choice":1,"INSERT INTO:term_name_display":1,"dynamic-or-wrapper":8,"INSERT INTO:term_name_choice":1,"INSERT INTO:names_scope_ids":1,"INSERT INTO:names_scope_keys":1,"INSERT OR REPLACE INTO:term_name_display":1,"DELETE FROM:term_name_display":1,"INSERT OR REPLACE INTO:term_name_choice":1,"DELETE FROM:term_name_choice":1}},
  "desktop/src/server.rs":{"entrypoint":[[4,3]]},
  "crates/core/src/character_sql/lead_assets.sql":{"database-write":["INSERT INTO:lead_assets"]},
  "native/terms/src/wd_pending.rs":{"database-write":[[0,2]]},
- "native/terms/src/app_legacy_upgrade.rs":{"database-write":[[0,13],[7,3],1]},
  "native/terms/src/http_characters.rs":{"http-branch":[[85,4],[240,2],[16,2],[82,2],[84,3],[91,3],[93,4]],"database-write":[187,202]},
  "crates/core/src/character_graph.rs":{"database-write":["INSERT OR IGNORE INTO:term_identity_baseline",[0,9],209,[7,3],189,204,219,"DELETE FROM:graph_projection","INSERT INTO:graph_projection",183,197,9,"UPDATE:term_tree",72,8,2]},
  "native/terms/src/app_source_empty.sql":{"database-write":["CREATE TABLE:assets","CREATE TABLE:labels","CREATE INDEX:idx_labels_dim_val","CREATE INDEX:idx_labels_uuid","CREATE TABLE:decisions","CREATE TABLE:runs","CREATE TABLE:embeddings","CREATE TABLE:characters","CREATE TABLE:character_aliases"]},
@@ -511,7 +508,7 @@
  "start-web.command":{"entrypoint":["shell-script"]},
  "native/terms/src/cli.rs":{"cli-entry":["recognition-import","folder-scan","photos-scan","library-scan","library-create","http","serve","wd-pending","names-command","names-project","names-search","cutover-names","sync-names","verify-names","cutover-characters","character-command","verify-characters","identity-command","learning-snapshot","publish-learning","reproject-characters","validate","migrate","sync-artists","sync-characters","cutover-artists","cutover-labels","import","judge","tag","reproject","undo"],"database-write":[[0,3],3,1]},
  "crates/core/src/character_sql/fold.sql":{"database-write":["UPDATE:duplicates"]},
- "crates/core/src/character_commands.rs":{"database-write":{"@0":10,"@184":5,"@198":1,"DELETE FROM:identity_scopes":2,"DELETE FROM:identity_suspended":2,"INSERT INTO:identity_scopes":1,"@14":1,"@15":1,"INSERT OR REPLACE INTO:assertions":1,"DELETE FROM:assertions":2,"INSERT INTO:assertions":1,"@18":1,"@35":3,"INSERT OR IGNORE INTO:deferred":1,"DELETE FROM:deferred":5,"INSERT OR REPLACE INTO:asked":2,"INSERT INTO:reviews":1,"INSERT OR REPLACE INTO:identity_uncertain":1,"@175":1,"INSERT INTO:deferred":1,"@190":1,"DELETE FROM:identity_anchor_decisions":1,"INSERT INTO:identity_anchor_decisions":1,"INSERT INTO:identity_anchor_history":1}},
+ "crates/core/src/character_commands.rs":{"database-write":{"@0":10,"@184":5,"@198":1,"DELETE FROM:identity_scopes":2,"DELETE FROM:identity_suspended":2,"INSERT INTO:identity_scopes":1,"@14":1,"@15":1,"INSERT OR REPLACE INTO:assertions":1,"DELETE FROM:assertions":2,"INSERT INTO:assertions":1,"@18":1,"@35":4,"INSERT OR IGNORE INTO:deferred":1,"DELETE FROM:deferred":5,"INSERT OR REPLACE INTO:asked":2,"INSERT INTO:reviews":1,"INSERT OR REPLACE INTO:identity_uncertain":1,"@175":1,"INSERT INTO:deferred":1,"@190":1,"DELETE FROM:identity_anchor_decisions":1,"INSERT INTO:identity_anchor_decisions":1,"INSERT INTO:identity_anchor_history":1}},
  "native/terms/src/http_host_get.rs":{"http-branch":[17,97,42,39,"/api/similar|/api/clusters",[26,2],41,43,"/api/settings","/api/libraries",291,293,295,296,305]},
  "native/terms/src/app_create.rs":{"database-write":[7,[0,7],200,"CREATE INDEX:if",27,[1,2],232,210,"CREATE TRIGGER IF NOT EXISTS:names_version_|UPDATE:meta"]},
  "native/terms/src/app_index.rs":{"database-write":[[0,7],34,[1,5],33,283,284,285,286,[208,2],12,[199,2],287,249,201,[3,2]],"entrypoint":[4]},
@@ -584,7 +581,7 @@
  {"patterns":["native/terms/src/app_commands.rs","native/terms/src/app_characters.rs","native/terms/src/app_profiles.rs"],"current_runtime":"rust","policy":"application","storage_domain":"app"},
  {"patterns":["native/terms/src/app_create_schema.sql","native/terms/src/app_library.rs","native/terms/src/app_settings.rs","native/terms/src/app_sources.rs"],"current_runtime":"rust","policy":"lifecycle","storage_domain":"app"},
  {"patterns":["native/terms/src/app_recognition.rs"],"policy":"result-import","current_runtime":"rust-recognition-import-resume","storage_domain":"source-and-app"},
- {"patterns":["native/terms/src/app_legacy_upgrade.rs","native/terms/src/app_migrate.rs","native/terms/src/app_migrate_data.rs","native/terms/src/app_migration_sql/*.sql"],"policy":"lifecycle","current_runtime":"rust-historical-library-upgrade","storage_domain":"app"},
+ {"patterns":["native/terms/src/app_migrate.rs","native/terms/src/app_migrate_data.rs","native/terms/src/app_migration_sql/*.sql"],"policy":"lifecycle","current_runtime":"rust-historical-library-upgrade","storage_domain":"app"},
  {"patterns":["native/terms/src/bin/illustash-terms.rs","native/terms/src/cli.rs","crates/core/src/error.rs","native/terms/src/lib.rs","crates/core/src/package.rs","native/terms/src/service.rs","crates/core/src/store.rs","crates/core/src/strict_json.rs","native/terms/src/wd_pending.rs","native/terms/src/app_identity.rs","crates/core/src/character_*.rs","crates/core/src/character_sql/*.sql","crates/core/src/legacy_*.rs","crates/core/src/names_*.rs"],"policy":"application","current_runtime":"rust-core","storage_domain":"app"},
  {"patterns":[".claude/launch.json","start-web.command"],"current_runtime":"shell-dependent-on-python-host","policy":"lifecycle","storage_domain":"no-db"},
  {"patterns":["crates/iqdb/src/main.rs","crates/iqdb/src/signature.rs"],"current_runtime":"rust-core","policy":"application","storage_domain":"no-db"},

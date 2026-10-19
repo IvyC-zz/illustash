@@ -23,6 +23,23 @@ fn entity_name(c: &Connection, id: &str) -> Result<Option<String>> {
     let value = display(c, Json::object([("id", id.into())]))?;
     Ok(value.get("name").map(|v| v.text().to_owned()))
 }
+/// The latest step still to undo, with what `action_label` reads.
+pub(crate) const LAST_ACTION: &str = "
+    SELECT id, label, ts, before_json, label_kind, label_count
+    FROM actions
+    WHERE undone = 0
+    ORDER BY id DESC
+    LIMIT 1";
+
+/// A counted step's kind and count (core v8, #201): stored with the step, earlier steps filled in by the upgrade.
+fn counted(r: &Json) -> Option<(UndoLabel, String)> {
+    let text = |key| match r.get(key) {
+        Some(Json::Scalar(serde_json::Value::String(s))) => Some(s.as_str()),
+        _ => None,
+    };
+    Some((UndoLabel::parse(text("label_kind")?)?, text("label_count")?.to_owned()))
+}
+
 pub(crate) fn action_label(c: &Connection, r: &Json) -> Result<String> {
     let label = r.get("label").expect("http_app internal invariant").text();
     let before = parse_python(r.get("before_json").expect("http_app internal invariant").text())?;
@@ -71,13 +88,13 @@ pub(crate) fn action_label(c: &Connection, r: &Json) -> Result<String> {
         .map(|v| v.text().to_owned())
         .filter(|v| !v.is_empty() && seen.insert(v.clone()))
         .collect();
-    // The count of these steps is only in their stored label (crates/core undo_labels.rs): read it back from there.
-    if let Some(n) = UndoLabel::Swap.count(label).filter(|_| ids.len() == 2) {
+    let counted = counted(r);
+    if let Some((UndoLabel::Swap, n)) = counted.as_ref().filter(|_| ids.len() == 2) {
         if let (Some(left), Some(right)) = (entity_name(c, &ids[0])?, entity_name(c, &ids[1])?) {
             return Ok(UndoLabel::Swap.fill(n, &left, &right));
         }
     }
-    let sweep = UndoLabel::Sweep.count(label);
+    let sweep = counted.as_ref().filter(|(kind, _)| *kind == UndoLabel::Sweep).map(|(_, n)| n);
     if sweep.is_some() && ids.is_empty() {
         ids = strings(
             c,
@@ -90,10 +107,8 @@ pub(crate) fn action_label(c: &Connection, r: &Json) -> Result<String> {
             if let Some(n) = sweep {
                 return Ok(UndoLabel::Sweep.fill(n, &name, ""));
             }
-            for kind in [UndoLabel::Set, UndoLabel::Remove, UndoLabel::Add, UndoLabel::Drop] {
-                if let Some(n) = kind.count(label) {
-                    return Ok(kind.fill(n, &name, ""));
-                }
+            if let Some((kind, n)) = counted.as_ref().filter(|(kind, _)| *kind != UndoLabel::Swap) {
+                return Ok(kind.fill(n, &name, ""));
             }
         }
     }
@@ -119,11 +134,7 @@ pub fn read(c: &Connection, context: &LibraryContext, q: &HashMap<String, String
         |r| r.get(0),
     )?;
     let indexed: String = c.query_row("SELECT value FROM meta WHERE key='indexed'", [], |r| r.get(0))?;
-    let undo = if let Some(r) =
-        rows(c, "SELECT id,label,ts,before_json FROM actions WHERE undone=0 ORDER BY id DESC LIMIT 1", &[])?
-            .into_iter()
-            .next()
-    {
+    let undo = if let Some(r) = rows(c, LAST_ACTION, &[])?.into_iter().next() {
         Json::object([
             ("id", r.get("id").expect("http_app internal invariant").clone()),
             ("label", action_label(c, &r)?.into()),

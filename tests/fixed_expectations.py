@@ -12,6 +12,7 @@ import os
 import re
 import sqlite3
 import struct
+import subprocess
 import sys
 import tarfile
 import unittest
@@ -248,11 +249,12 @@ class Expectations:
         self.states += 1
         return Digests(value, slot)
 
-    def baseline(self, label, package, rename=None):
+    def baseline(self, label, package, rename=None, only=None):
         """The #201 baseline of a library package at a named point (fresh libraries the tests compare whole):
         recorded when recording, otherwise compared with what was recorded, if anything was. ``rename`` maps
-        values made at random (generated keys) to stable names first."""
-        return _check_baseline((self.module, self.test, f'@{label}'), baseline_state(Path(package), rename))
+        values made at random (generated keys) to stable names first; ``only`` ({db: [tables]}) compares just those
+        tables of the recorded state."""
+        return _check_baseline((self.module, self.test, f'@{label}'), baseline_state(Path(package), rename), only)
 
     def package(self, label, path, library=True):
         """恢复冻结的合成输入包，数据库文本中的临时路径按本轮根目录还原。"""
@@ -275,6 +277,9 @@ class Expectations:
             target.write_bytes(data)
             if not raw and name.endswith(('.sqlite', '.db')) and rebase:
                 _rebase(target, rebase, self._from_placeholders)
+            # Libraries (not their backups) are upgraded to this core version (#201).
+            if Path(name).name in ('library.sqlite', 'app.sqlite') and not {'backups', 'library-backups'} & set(Path(name).parts):
+                upgrade_recorded(target)
         return Library(path) if library else path
 
     def skip(self, label):
@@ -301,11 +306,15 @@ class Digests:
         if isinstance(other, Digests):
             return self.tree == other.tree
         if isinstance(other, Live):
-            equal = self.tree == dict(other)
-            if equal and self.slot is not None:
-                # Equal by the recordings above: the live state by the #201 rules is that state's baseline.
-                return _check_baseline(self.slot, other.baseline)
-            return equal
+            if RECORDING:
+                # Recording (core version 7 only, PR #239): equal by the recordings above, the live state by the
+                # #201 rules is that state's baseline.
+                equal = self.tree == dict(other)
+                return equal and (self.slot is None or _check_baseline(self.slot, other.baseline))
+            if self.slot is None:
+                return self.tree == dict(other)
+            # Core v8 changed the schema and retired tables these digests cover: the #201 baseline is the reference.
+            return _check_baseline(self.slot, other.baseline)
         if isinstance(other, dict):
             return self.tree == other
         return NotImplemented
@@ -349,6 +358,28 @@ def _rebase(path, pairs, convert=None):
         for _, sql in triggers:
             c.execute(sql)
         c.commit()
+
+
+def upgrade_recorded(db):
+    """A recorded library at an older core version (7) is upgraded as the user's libraries are before a test uses it
+    (#201), with the core's own command; the backup it makes is removed, so the directory is as it was."""
+    with closing(sqlite3.connect(db)) as c:
+        has_meta = c.execute("SELECT 1 FROM sqlite_schema WHERE type='table' AND name='meta'").fetchone()
+        row = c.execute("SELECT value FROM meta WHERE key='terms_schema'").fetchone() if has_meta else None
+    if row is None or not 0 < int(row[0]) < TERMS_VERSION:
+        return
+    binary = os.environ.get('ILLUSTASH_TERMS_BIN')
+    if not binary:
+        raise unittest.SkipTest('set ILLUSTASH_TERMS_BIN: recorded packages are upgraded to this core version first')
+    backups = Path(db).parent / 'library-backups'
+    existing = set(backups.iterdir()) if backups.exists() else None
+    done = subprocess.run([binary, 'migrate', '--db', str(db)], capture_output=True)
+    if done.returncode:
+        raise AssertionError(f'upgrading {db}: {done.stderr.decode(errors="replace")}')
+    for made in set(backups.iterdir()) - (existing or set()):
+        made.unlink()
+    if existing is None:
+        backups.rmdir()
 
 
 def _is_path(text):
@@ -397,7 +428,9 @@ def _load(module):
 
 BASELINE_STATES = FIXTURES.parent / 'baseline_states'
 RETIRED = frozenset({'entities', 'links', 'work_review', 'names', 'display_names', 'name_aliases', 'identity_baseline'})
-SKIP_COLUMNS = frozenset({('term_packages', 'manifest'), ('term_evidence', 'fingerprint')})
+# The last two were added by core v8 (#201): what the history shows from them is compared in the replies.
+SKIP_COLUMNS = frozenset({('term_packages', 'manifest'), ('term_evidence', 'fingerprint'),
+                          ('actions', 'label_kind'), ('actions', 'label_count')})
 STAMP = re.compile(r'learning-v1:[0-9a-f]{64}')
 TERMS_VERSION = int(re.search(r'pub const SCHEMA_VERSION: i64 = (\d+);',
                               (Path(__file__).resolve().parents[1] / 'crates/core/src/schema.rs').read_text()).group(1))
@@ -476,7 +509,7 @@ def _baseline_file(module):
         return json.load(f)
 
 
-def _check_baseline(slot, state):
+def _check_baseline(slot, state, only=None):
     """Record ``state`` for ``slot`` (module, test, key) when recording; otherwise True unless a baseline was
     recorded for it and differs (the difference is printed)."""
     module, test, key = slot
@@ -484,14 +517,45 @@ def _check_baseline(slot, state):
         _record_baseline(module, test, key, state)
         return True
     want = _baseline_file(module).get(test, {}).get(key)
-    if want is None or want == state:
+    if only is not None:
+        pick = lambda s: {db: {t: s.get(db, {}).get(t) for t in tables} for db, tables in only.items()}
+        state, want = pick(state), want if want is None else pick(want)
+    if want is not None:
+        want, state = _without_volatile(want), _without_volatile(state)
+    if want == state:
         return True
+    if want is None:
+        print(f'#201 baseline {test} {key}: nothing recorded for this state', file=sys.stderr)
+        return False
     for db in sorted(set(want) | set(state)):
         for table in sorted(set(want.get(db, {})) | set(state.get(db, {}))):
             w, g = want.get(db, {}).get(table), state.get(db, {}).get(table)
             if w != g:
                 print(f'#201 baseline {test} {key} {db}.{table}: baseline {w!r:.400}, live {g!r:.400}', file=sys.stderr)
     return False
+
+
+# Python side only: evidence packages the host builds from source labels carry the time they were made, and the package
+# fingerprint hashes it (the manifest itself is left out on both sides). The core replays have no such packages.
+VOLATILE = frozenset({('term_packages', 'fingerprint')})
+
+
+def _without_volatile(state):
+    out = {}
+    for db, tables in state.items():
+        out[db] = {}
+        for name, table in tables.items():
+            drop = [i for i, column in enumerate(table['columns']) if (name, column) in VOLATILE]
+            if not drop:
+                out[db][name] = table
+                continue
+            keep = [i for i in range(len(table['columns'])) if i not in drop]
+            rows = []
+            for row in table['rows']:
+                cells = json.loads(row)
+                rows.append(json.dumps([cells[i] for i in keep], ensure_ascii=False, separators=(',', ':')))
+            out[db][name] = {'columns': [table['columns'][i] for i in keep], 'rows': sorted(rows)}
+    return out
 
 
 def _record_baseline(module, test, key, state):

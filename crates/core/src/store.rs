@@ -21,7 +21,7 @@ pub type ActionId = i64;
 /// 新词条的 key：随机 UUID v4，永不改变。
 ///
 /// 只供测试：设置 `ILLUSTASH_TEST_KEY_COUNTER` 为一个计数文件时，按文件里的计数依次生成可复现的键，
-/// 测试与固定期望（native/terms/tests/replay.rs 与 tests/fixed_expectations.py，#9 时录下）因此得到同样的键和同样的排序。
+/// 测试与固定期望（native/terms/tests/baseline.rs 等新对照基准与 tests/fixed_expectations.py，#201）因此得到同样的键和同样的排序。
 /// 计数在旁边的锁文件下递增，同一宿主的多个线程和并行的命令行进程也不会取到同一个数。产品从不设置它。
 pub fn new_key() -> Result<String> {
     let mut b = [0u8; 16];

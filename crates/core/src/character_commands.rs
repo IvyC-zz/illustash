@@ -324,6 +324,19 @@ pub(crate) fn begin_action(c: &Connection, label: &str) -> Result<i64> {
     Ok(c.last_insert_rowid())
 }
 
+/// 按张数写提示的步骤（`undo_labels`）：提示之外，种类和张数存进 `label_kind`、`label_count`，读的一边用它们把提示里的
+/// 角色换成现在的名字（核心第 8 版，#201）。
+fn begin_counted(c: &Connection, kind: UndoLabel, n: usize, name: &str, other: &str) -> Result<i64> {
+    let count = n.to_string();
+    let action = begin_action(c, &kind.fill(&count, name, other))?;
+    c.prepare_cached("UPDATE actions SET label_kind=?,label_count=? WHERE id=?")?.execute(params![
+        kind.name(),
+        count,
+        action
+    ])?;
+    Ok(action)
+}
+
 pub(crate) fn finish_action(c: &Connection, action: i64, kind: &str, before: Vec<Value>) -> Result<()> {
     let envelope = json!([{"terms": {"v": 2, "type": kind, "before": before}}]);
     c.prepare_cached("UPDATE actions SET before_json=? WHERE id=?")?.execute(params![envelope.to_string(), action])?;
@@ -422,15 +435,14 @@ fn change(c: &Connection, args: &Value) -> Result<Value> {
         names.push(shown.name(c, t)?);
     }
     let (name, n) = (names.join("、"), works(c, &ids)?);
-    let label = match action {
-        "confirmed" => UndoLabel::Set.fill(&n.to_string(), &name, ""),
-        "rejected" => UndoLabel::Remove.fill(&n.to_string(), &name, ""),
-        "unknown" => format!("已跳过 {n} 张"),
-        "resume" => format!("已恢复 {n} 张"),
-        "add_variant" => UndoLabel::Add.fill(&n.to_string(), &name, ""),
-        _ => UndoLabel::Drop.fill(&n.to_string(), &name, ""),
+    let step = match action {
+        "confirmed" => begin_counted(c, UndoLabel::Set, n, &name, "")?,
+        "rejected" => begin_counted(c, UndoLabel::Remove, n, &name, "")?,
+        "unknown" => begin_action(c, &format!("已跳过 {n} 张"))?,
+        "resume" => begin_action(c, &format!("已恢复 {n} 张"))?,
+        "add_variant" => begin_counted(c, UndoLabel::Add, n, &name, "")?,
+        _ => begin_counted(c, UndoLabel::Drop, n, &name, "")?,
     };
-    let step = begin_action(c, &label)?;
     for (entity, scope) in &targets {
         for ident in scope {
             put_assertion(c, At::Action(step), ident, entity, status, "review")?;
@@ -504,20 +516,25 @@ fn answer(c: &Connection, args: &Value) -> Result<Value> {
             }
         }
         let mut shown = Shown::new();
-        let label = if yes.is_empty() {
+        let action = if yes.is_empty() {
             match &other {
-                Some(o) => UndoLabel::Swap.fill(&no.len().to_string(), &shown.name(c, &entity)?, &shown.name(c, o)?),
-                None => UndoLabel::Remove.fill(&no.len().to_string(), &shown.name(c, &entity)?, ""),
+                Some(o) => {
+                    let (name, other) = (shown.name(c, &entity)?, shown.name(c, o)?);
+                    begin_counted(c, UndoLabel::Swap, no.len(), &name, &other)?
+                }
+                None => begin_counted(c, UndoLabel::Remove, no.len(), &shown.name(c, &entity)?, "")?,
             }
         } else {
             // Whole sentences, so the page can translate each (web/static/i18n.js tb()).
             let (n, name) = (yes.len(), shown.name(c, &entity)?);
-            match no.len() {
-                0 => format!("已确认 {n} 张是 {name}"),
-                removed => format!("已确认 {n} 张是 {name}，移出 {removed} 张"),
-            }
+            begin_action(
+                c,
+                &match no.len() {
+                    0 => format!("已确认 {n} 张是 {name}"),
+                    removed => format!("已确认 {n} 张是 {name}，移出 {removed} 张"),
+                },
+            )?
         };
-        let action = begin_action(c, &label)?;
         let mut touched: Vec<String> = Vec::new();
         for (scope, e, status) in &writes {
             for ident in scope {
@@ -636,8 +653,7 @@ fn reassign(c: &Connection, args: &Value) -> Result<Value> {
     for n in &new_ids {
         names.push(shown.name(c, n)?);
     }
-    let label = UndoLabel::Swap.fill(&works(c, &ids)?.to_string(), &names[0], &names[1..].join("、"));
-    let action = begin_action(c, &label)?;
+    let action = begin_counted(c, UndoLabel::Swap, works(c, &ids)?, &names[0], &names[1..].join("、"))?;
     let mut before = Vec::new();
     for ident in &ids {
         let pairs =
@@ -666,8 +682,7 @@ fn sweep(c: &Connection, args: &Value) -> Result<Value> {
         .query_map([&entity], |r| r.get(0))?
         .collect::<rusqlite::Result<_>>()?;
     let before = ids.iter().map(|i| snapshot(c, i, Some(&entity))).collect::<Result<Vec<_>>>()?;
-    let label = UndoLabel::Sweep.fill(&works(c, &ids)?.to_string(), &Shown::new().name(c, &entity)?, "");
-    let action = begin_action(c, &label)?;
+    let action = begin_counted(c, UndoLabel::Sweep, works(c, &ids)?, &Shown::new().name(c, &entity)?, "")?;
     for i in &ids {
         put_assertion(c, At::Action(action), i, &entity, "confirmed", "sweep")?;
     }

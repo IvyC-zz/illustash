@@ -1170,6 +1170,8 @@ mod matching_tests {
                 c.execute_batch("PRAGMA foreign_keys=OFF").unwrap();
                 c.execute_batch(&scenario[field].as_str().unwrap().replace("@ROOT@", &root_text)).unwrap();
             }
+            // Saved at core version 7: upgraded as the user's libraries are (#201).
+            crate::migrate(&mut Connection::open(root.join("library.sqlite")).unwrap()).unwrap();
             Self { root, tag: scenario["entity"].as_str().unwrap().to_owned() }
         }
         fn db(&self) -> Connection {
@@ -1619,6 +1621,8 @@ mod sources_tests {
                 c.execute_batch("PRAGMA foreign_keys=OFF").unwrap();
                 c.execute_batch(&data["base"][field].as_str().unwrap().replace("@ROOT@", &root_text)).unwrap();
             }
+            // Saved at core version 7: upgraded as the user's libraries are (#201).
+            crate::migrate(&mut Connection::open(root.join("library.sqlite")).unwrap()).unwrap();
             Self { root }
         }
         fn db(&self) -> Connection {

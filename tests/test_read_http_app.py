@@ -26,11 +26,16 @@ class AppReadHTTPTest(HTTPHarness):
             ('first null merge retained', [{'merge': None}, {'merge': {'source': ids[0], 'target': ids[1], 'moved': []}}]),
             ('已将 2 张设为 stale', [{'terms': {'v': 2, 'before': [{'entity': ids[0]}]}}]),
         ]
+        # Steps from before core v8: its upgrade filled in the kind and count of the counted ones (#201).
+        counted = {'已将 2 张设为 stale': 'set', '已将 2 张移出 stale': 'remove', '已给 2 张加上 stale': 'add',
+                   '已从 2 张去掉 stale': 'drop', '已将 2 张从 old 换成 new': 'swap', '已将 stale 标为已检查（2 张）': 'sweep'}
         for label, before in samples:
             with self.connect() as c:
                 # A fixed time instead of the column's CURRENT_TIMESTAMP default: compared with recorded bytes.
-                ident = c.execute("INSERT INTO actions(label,before_json,ts) VALUES (?,?,'2026-10-01 00:00:00')",
-                                  (label, json.dumps(before))).lastrowid
+                kind = counted.get(label)
+                ident = c.execute("INSERT INTO actions(label,before_json,ts,label_kind,label_count) "
+                                  "VALUES (?,?,'2026-10-01 00:00:00',?,?)",
+                                  (label, json.dumps(before), kind, kind and '2')).lastrowid
                 if not before:
                     c.execute('INSERT OR REPLACE INTO reviews(entity,action_id) VALUES (?,?)', (ids[0], ident))
                 c.commit()

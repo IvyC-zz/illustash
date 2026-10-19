@@ -127,7 +127,7 @@ S5 在真实数据里修掉两个实现 bug：
 - `tools/bench_terms_characters.py`：合成副本基准。
 
 测试（2026-10-07 起，#9）：
-- `native/terms/tests/replay.rs`：原 Python 契约与双跑测试（`test_terms_characters_contract`、`test_terms_character_*`、`test_terms_characters_cutover`、`test_identity*`、`test_lead`、`test_web_v2`、`test_works` 等，按原模块名各一项）在仍通过固定快照时录下的全部核心调用，用当前 `illustash-terms` 重放，逐步对照输出和各表状态摘要。录制无法重做：参考实现已删除。夹具在 `native/terms/tests/fixtures/replay/`，比较口径写在 `replay.rs` 开头；
+- `native/terms/tests/baseline.rs`（2026-10-19 起，#201 新对照基准，接替原 `replay.rs` 的录制，比较规则见 `tests/common/baseline.rs`）：原 Python 契约与双跑测试（`test_terms_characters_contract`、`test_terms_character_*`、`test_terms_characters_cutover`、`test_identity*`、`test_lead`、`test_web_v2`、`test_works` 等，按原模块名各一项）的场景，由 main（核心第 7 版）录下核心仍服务的调用，用当前 `illustash-terms` 重放，逐步对照输出和各表内容。夹具在 `native/terms/tests/fixtures/baseline/`；
 - Rust `crates/core/src/legacy_characters/tests.rs` 等。
 
 ## 7. 体积与性能

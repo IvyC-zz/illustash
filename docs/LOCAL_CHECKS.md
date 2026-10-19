@@ -58,8 +58,7 @@
 | 事务、证据、人工历史、投影和业务规则 | `crates/core/src/` 的测试模块、`crates/core/tests/` | 直接调用核心，多数用内存 SQLite；适合规则的边界组合 |
 | 文件、凭据、进程、系统数学库等平台能力 | `crates/platform/src/` 的测试模块、`crates/platform/tests/` | 以真实平台边界为准；其他平台的证据单列 |
 | 宿主任务状态、取消、切库与提交顺序 | `native/terms/src/` 的测试模块；`tests/test_native_lifecycle.py`、`test_native_sync.py`、`test_native_research.py`、`test_native_provenance.py` 等 | 模块内测试可控制实际任务阶段；HTTP 测试验证调用方看到的状态和结果 |
-| 旧行为与旧图库兼容 | `native/terms/tests/replay.rs`、`contracts.rs`；`tests/fixed_expectations.py`、`test_native_library_upgrade.py` | 使用提交的录制或历史合成包；期望独立于当前候选输出 |
-| 第一个公开测试版的对照基准（#201） | `native/terms/tests/baseline.rs`、`baseline_http.rs`，比较规则在 `tests/common/baseline.rs`；Python 侧在 `tests/fixed_expectations.py` 末尾 | 由 main（核心第 7 版）录制，核心 v8 起取代上一行的旧录制，见下文 |
+| 旧行为与旧图库兼容 | `native/terms/tests/baseline.rs`、`contracts.rs`、`v8_upgrade.rs`，比较规则在 `tests/common/baseline.rs`；`tests/fixed_expectations.py`、`test_native_library_upgrade.py` | 使用提交的录制或历史合成包；期望独立于当前候选输出；对照基准见下文 |
 | 数值、图像及计算发布 | `tests/test_native_*_compute.py`、`test_native_*_production.py` | 显式指定候选 examples/worker；固定数值由 `*_expectations.py` 读取，Windows 差异另有覆盖文件 |
 | 界面、资源装配与检查工具 | `tests/*.test.cjs`、`test_pixiv_poll.js`、`test_packaging*.py`、`test_local_acceptance.py`、`test_architecture.py` | JS 与合成工具测试不等于 GUI 或完整安装验收 |
 
@@ -73,9 +72,9 @@
 
 ### 固定期望与共享夹具
 
-`tests/fixtures/reference_recordings/` 按测试 ID 和调用顺序取值，`native/terms/tests/fixtures/replay/` 按模块重放核心调用；改测试模块、类名、方法名或取值顺序之前先查读取方。`tests/image_expectations.py`、`index_expectations.py` 等是冻结答案的读取器，旧模块名出现在这些文件里不表示旧业务实现仍在执行。比较失败先区分输入、路径/时钟归一化、平台差异和产品行为变化；原生输出不得刷新旧答案。产品决定确需改变期望时，按架构参考的规则在对应 PR 说明。
+`tests/fixtures/reference_recordings/` 按测试 ID 和调用顺序取值，`native/terms/tests/fixtures/baseline/` 按模块重放核心调用；改测试模块、类名、方法名或取值顺序之前先查读取方。`tests/image_expectations.py`、`index_expectations.py` 等是冻结答案的读取器，旧模块名出现在这些文件里不表示旧业务实现仍在执行。比较失败先区分输入、路径/时钟归一化、平台差异和产品行为变化；原生输出不得刷新旧答案。产品决定确需改变期望时，按架构参考的规则在对应 PR 说明。
 
-**新对照基准（#201）**：核心 v8 删掉旧兼容表后，上面三类旧录制（24 组核心调用重放、4 组 HTTP 固定契约、Python 固定期望里的整库摘要）都比较全部表、schema 和隐式 rowid，会一起失效。2026-10-19 起用当时的 main 在同样的场景上另录了一份新基准，放在 `native/terms/tests/fixtures/baseline/` 和 `tests/fixtures/baseline_states/`：接口回复按字节比较；每次调用之后比较除退役旧表以外的全部表内容，不比 schema 和隐式 rowid；只服务旧表的调用（`sync-*`、`verify-*`、`cutover-*` 和未切换完的库上的调用）不进新基准，它们留下的库作为检查点，在下一个保留的调用之前载入，处于录制时核心版本的检查点先升级。比较规则写在 `native/terms/tests/common/baseline.rs` 开头，两边共用；Python 侧照同样的规则，在录下的状态与实时状态比较时一并比对。比较规则由用户 2026-10-19 确认（#201）；核心 v8 第一次改表结构之前，新旧两套并存，都要通过。录制只在 main 仍与旧录制一致时进行：`ILLUSTASH_RECORD_BASELINE=1` 下运行 `cargo test --test replay record_baseline -- --ignored`、`cargo test --test contracts`，以及 Python 固定期望的相关模块；录制过程中旧录制照常核对，不一致就不录。
+**对照基准（#201）**：Python 时代的三类旧录制（24 组核心调用重放、4 组 HTTP 固定契约、Python 固定期望里的整库摘要）比较全部表、schema 和隐式 rowid，核心 v8 改表结构后都会失效。2026-10-19 用当时的 main（核心第 7 版）在同样的场景上另录了一份新基准，放在 `native/terms/tests/fixtures/baseline/` 和 `tests/fixtures/baseline_states/`：接口回复按字节比较；每次调用之后比较除退役旧表以外的全部表内容，不比 schema 和隐式 rowid；只服务旧表的调用（`sync-*`、`verify-*`、`cutover-*` 和未切换完的库上的调用）不进新基准，它们留下的库作为检查点，在下一个保留的调用之前载入，处于录制时核心版本的检查点先升级。比较规则写在 `native/terms/tests/common/baseline.rs` 开头，两边共用；Python 侧照同样的规则，在录下的状态与实时状态比较时一并比对。比较规则由用户 2026-10-19 确认（#201）。核心第 8 版起旧的核心重放和契约录制已删除，新基准是唯一对照；Python 固定期望的整库摘要在录下的状态与实时状态比较时改用新基准。录制当时在旧录制照常核对、一致时进行（PR #239 的 `record_baseline`，随旧录制一起删除，留在 git 历史里）；新基准不重录，被测输出不得用来刷新它。v8 新加的列在比较器里逐项登记排除（`SKIP_COLUMNS`，写明原因）。
 
 HTTP 测试共用 `tests/test_read_http.py` 的端口、等待和进程清理工具；多种原生测试借用 `tests/test_native_lifecycle.py` 的建包与宿主方法，worker 启动与进程存在性工具在 `tests/native_worker_fixture.py`。测试对宿主的 HTTP 请求统一经 `tools/verify_read_http.py` 的 `fetch`：每个请求一条短连接，读完响应后以 RST 关闭，本机不留 TIME_WAIT。逐个正常关闭时，并行全套约 1.5 万个连接会在 Windows 上耗尽默认的 16,384 个临时端口（#140）。新增大量请求或轮询时沿用 `fetch`，不要另起逐次关闭的客户端；只有验证连接本身行为（半包、卡住、慢读）的测试才自建 socket。修改这些共享方法须检查实际使用它们的测试类，别只看定义文件。提取 helper 时避免把带 `test_*` 方法的 `TestCase` 作为模块级别名留给 discover；`__module__` 还可能参与固定录制的定位，移动前须核对。
 

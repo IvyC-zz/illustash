@@ -19,7 +19,6 @@ mod app_http;
 mod app_identity;
 mod app_imports;
 mod app_integrity;
-mod app_legacy_upgrade;
 mod app_libraries;
 pub mod app_library;
 mod app_local;

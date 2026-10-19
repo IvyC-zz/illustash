@@ -68,8 +68,7 @@ pub(crate) fn initialized(c: &Connection) -> Result<()> {
     Ok(())
 }
 pub(crate) fn last_action(c: &Connection) -> Result<Json> {
-    let rows =
-        http_read::rows(c, "SELECT id,label,ts,before_json FROM actions WHERE undone=0 ORDER BY id DESC LIMIT 1", &[])?;
+    let rows = http_read::rows(c, crate::http_app::LAST_ACTION, &[])?;
     let Some(row) = rows.into_iter().next() else {
         return Ok(None::<String>.into());
     };

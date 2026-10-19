@@ -507,7 +507,7 @@ pub(super) fn handle(request: Request, host: &Host, received: u64, text: &str, b
             // only once opening failed, so libraries in the current format pay nothing for this.
             match host.switch_locked(&mut session, received, &path) {
                 Err(Error::Schema(why)) => match crate::app_upgrade::needed(&path) {
-                    None => Err(Error::Schema(why)),
+                    None => Err(crate::app_upgrade::pre_v8(&path).map_or(Error::Schema(why), Error::Invalid)),
                     Some(_) if !body.get("upgrade").is_some_and(truthy) => {
                         Err(Error::Conflict(crate::app_upgrade::NEEDED.into()))
                     }

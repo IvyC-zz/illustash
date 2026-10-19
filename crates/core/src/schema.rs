@@ -195,7 +195,7 @@ pub const HUMAN_ORIGINS: [&str; 3] = ["user", "album", "legacy"];
 /// 证据来源不能冒充人。
 pub const RESERVED_SOURCES: [&str; 5] = ["user", "human", "album", "legacy", "verdict"];
 
-pub const SCHEMA_VERSION: i64 = 7;
+pub const SCHEMA_VERSION: i64 = 8;
 
 /// 可替换的机器证据（`source`, `method`）：按有效批次生效（`term_active_evidence`），成功的空结果让旧证据失效。
 /// 其余来源的证据全部有效。与 V2 里 `term_evidence_sets` 的 CHECK 一致，加一种要一次迁移。
@@ -227,6 +227,77 @@ fn v7(conn: &Connection) -> Result<()> {
          DROP TABLE IF EXISTS identity_calibration;
          DELETE FROM meta WHERE key IN ('identity_calibration_active','identity_bank_error');",
     )?;
+    Ok(())
+}
+
+/// 第 8 版（#201）：旧兼容表退役的第一步。
+/// - 已有核心表的库（升级前版本 ≥ 1）里有旧表（`entities`）时，四个领域必须都已切到核心，旧表与 `term_*` 必须逐表
+///   一致（角色、名字两套核对；名字先照旧表同步一次，与核心每次写时做的一样），否则拒绝升级、整体回滚：没切换完的
+///   旧图库先用 `pre-v8` 版本升级。还没有核心表的库
+///   （新建的库，以及应用层已经拒绝打开的更早的旧图库）不在这里拦。
+/// - `actions` 加 `label_kind`、`label_count`：按张数写提示的几种步骤的种类和张数（`undo_labels`）。之前的步骤按
+///   已存的提示回填一次，撤销载荷 `before_json` 不动。
+fn v8(conn: &Connection) -> Result<()> {
+    let has = |table: &str| -> Result<bool> {
+        Ok(conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name=?1)",
+            [table],
+            |r| r.get(0),
+        )?)
+    };
+    // 迁移结束才写新版本号，这里读到的还是升级前的版本。
+    if version(conn)? > 0 && has("entities")? {
+        let flag = |key: &str| -> Result<Option<String>> {
+            Ok(conn.query_row("SELECT value FROM meta WHERE key=?1", [key], |r| r.get(0)).optional()?)
+        };
+        let flags = ["terms_artists", "terms_labels", "terms_characters", "terms_names"]
+            .map(flag)
+            .into_iter()
+            .collect::<Result<Vec<_>>>()?;
+        let switched = flags.iter().all(|v| v.as_deref() == Some("core"));
+        let untouched = flags.iter().all(Option::is_none)
+            && !conn.query_row("SELECT EXISTS(SELECT 1 FROM entities)", [], |r| r.get::<_, bool>(0))?;
+        if switched {
+            let characters = crate::legacy_characters::verify_in(conn)?;
+            if !characters.clean() {
+                return Err(Error::Schema(format!(
+                    "旧兼容表与词条核心不一致，没有升级：{report}",
+                    report = characters.to_json()
+                )));
+            }
+            let names = crate::legacy_names::sync_in(conn)?;
+            if !names.clean() {
+                return Err(Error::Schema(format!(
+                    "旧名字表与词条核心不一致，没有升级：{report}",
+                    report = names.to_json()
+                )));
+            }
+        } else if !untouched {
+            return Err(Error::Schema(
+                "这个图库还没有完全切换到词条核心，新版本不再直接升级它：请先用 pre-v8 版本打开并升级，再用新版本打开"
+                    .into(),
+            ));
+        }
+    }
+    let columns: Vec<String> = conn
+        .prepare("SELECT name FROM pragma_table_info('actions')")?
+        .query_map([], |r| r.get(0))?
+        .collect::<rusqlite::Result<_>>()?;
+    for column in ["label_kind", "label_count"] {
+        if !columns.iter().any(|c| c == column) {
+            conn.execute_batch(&format!("ALTER TABLE actions ADD COLUMN {column} TEXT"))?;
+        }
+    }
+    let labels: Vec<(i64, String)> = conn
+        .prepare("SELECT id,label FROM actions WHERE label_kind IS NULL ORDER BY id")?
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
+        .collect::<rusqlite::Result<_>>()?;
+    let mut fill = conn.prepare("UPDATE actions SET label_kind=?1,label_count=?2 WHERE id=?3")?;
+    for (id, label) in labels {
+        if let Some((kind, n)) = crate::undo_labels::UndoLabel::recognize(&label) {
+            fill.execute(rusqlite::params![kind.name(), n, id])?;
+        }
+    }
     Ok(())
 }
 
@@ -345,7 +416,7 @@ CREATE TABLE IF NOT EXISTS actions(id INTEGER PRIMARY KEY AUTOINCREMENT,label TE
 ";
 
 /// 每个版本一段，按顺序执行；已发布的段不再修改。
-const MIGRATIONS: [fn(&Connection) -> Result<()>; 7] = [v1, v2, v3, v4, v5, v6, v7];
+const MIGRATIONS: [fn(&Connection) -> Result<()>; 8] = [v1, v2, v3, v4, v5, v6, v7, v8];
 
 fn v1(conn: &Connection) -> Result<()> {
     Ok(conn.execute_batch(V1)?)

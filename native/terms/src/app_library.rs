@@ -409,8 +409,9 @@ pub(crate) fn validate_application(conn: &Connection, upgrade: bool) -> Result<(
 }
 fn validate_checked(conn: &Connection, upgrade: bool) -> Result<()> {
     if upgrade {
-        return crate::app_legacy_upgrade::validate(conn);
+        return crate::app_upgrade::validate(conn);
     }
+    crate::app_upgrade::refuse_unswitched(conn)?;
     require_meta(conn, "schema_version", APPLICATION_SCHEMA)?;
     crate::schema::require_current(conn)?;
     for marker in CORE_MARKERS {
@@ -454,7 +455,7 @@ mod tests {
             fs::create_dir_all(&package).unwrap();
             fs::write(package.join("library.json"), r#"{"format":1,"id":"synthetic","name":"合成图库","sources":[{"kind":"folder","id":"s1","path":"/synthetic-only"}],"test":{"name":"合成","id":"persona"},"extra":"retain"}"#).unwrap();
             let db = crate::sqlite::open(package.join("library.sqlite")).unwrap();
-            db.execute_batch("CREATE TABLE meta(key TEXT PRIMARY KEY,value TEXT); INSERT INTO meta VALUES ('schema_version','36'),('terms_schema','7'),('terms_artists','core'),('terms_labels','core'),('terms_characters','core'),('terms_names','core');").unwrap();
+            db.execute_batch(&format!("CREATE TABLE meta(key TEXT PRIMARY KEY,value TEXT); INSERT INTO meta VALUES ('schema_version','36'),('terms_schema','{v}'),('terms_artists','core'),('terms_labels','core'),('terms_characters','core'),('terms_names','core');", v = crate::SCHEMA_VERSION)).unwrap();
             let src = crate::sqlite::open(package.join("source.sqlite")).unwrap();
             src.execute_batch("CREATE TABLE assets(uuid TEXT,filename TEXT,src_path TEXT,width INTEGER,height INTEGER,added_at TEXT,src_kind TEXT,in_scope INTEGER,trashed INTEGER); CREATE TABLE labels(uuid TEXT,dim TEXT,value TEXT,conf REAL);").unwrap();
             Self { root, package }
@@ -510,11 +511,12 @@ mod tests {
     }
     #[test]
     fn rejects_each_version_and_core_marker_without_upgrading() {
+        let (older, newer) = ((crate::SCHEMA_VERSION - 1).to_string(), (crate::SCHEMA_VERSION + 1).to_string());
         for (key, value) in [
             ("schema_version", "35"),
             ("schema_version", "37"),
-            ("terms_schema", "6"),
-            ("terms_schema", "8"),
+            ("terms_schema", older.as_str()),
+            ("terms_schema", newer.as_str()),
             ("terms_schema", "bad"),
             ("terms_artists", "legacy"),
             ("terms_labels", "legacy"),

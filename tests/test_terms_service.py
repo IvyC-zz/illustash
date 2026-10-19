@@ -11,6 +11,7 @@ import unittest
 from pathlib import Path
 
 from tests import native_commands as core
+from tests.fixed_expectations import upgrade_recorded
 
 
 class Channel:
@@ -71,6 +72,7 @@ class Service(unittest.TestCase):
         self.alice,self.bob = seed['alice'],seed['bob']
         with sqlite3.connect(self.db) as c:
             c.executescript(seed['library'].replace('@ROOT@',str(self.root)))
+        upgrade_recorded(self.db)
         self.start()
 
     def start(self):

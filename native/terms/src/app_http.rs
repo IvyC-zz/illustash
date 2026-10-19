@@ -547,9 +547,7 @@ pub(crate) fn run(args: &[String]) -> Result<u8> {
     // The explicit upgrade keeps its own full checks (#212).
     let (library, upgrade_backup) = if upgrade {
         match Library::open(&path) {
-            Ok(library) if !crate::app_legacy_upgrade::required(&library)? => {
-                (crate::app_service::own_checked(library)?, None)
-            }
+            Ok(library) => (crate::app_service::own_checked(library)?, None),
             _ => {
                 let report = crate::app_upgrade::run(&crate::app_upgrade::prepare(&path)?)
                     .map_err(|failure| Error::Schema(failure.to_string()))?;
