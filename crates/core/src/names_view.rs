@@ -309,12 +309,22 @@ impl View {
         let mut own: HashMap<String, Vec<NameRow>> = HashMap::new();
         for row in c
             .prepare(
-                "SELECT entity_id,lang,value,source,preferred FROM names WHERE role='display' ORDER BY preferred DESC,value",
+                "SELECT t.key, n.lang, n.value, n.source, n.preferred
+                 FROM term_names n
+                 JOIN term_tree r ON r.term_id = n.term_id
+                 JOIN terms t ON t.id = n.term_id
+                 WHERE n.role = 'display'
+                 ORDER BY n.preferred DESC, n.value, n.seq",
             )?
             .query_map([], |r| {
                 Ok((
                     r.get::<_, String>(0)?,
-                    NameRow { lang: r.get(1)?, value: r.get(2)?, source: r.get(3)?, preferred: r.get::<_, i64>(4)? != 0 },
+                    NameRow {
+                        lang: r.get(1)?,
+                        value: r.get(2)?,
+                        source: r.get(3)?,
+                        preferred: r.get::<_, i64>(4)? != 0,
+                    },
                 ))
             })?
         {
@@ -1048,8 +1058,10 @@ impl Scope {
         }
         let mut own: HashMap<String, Vec<NameRow>> = HashMap::new();
         let mut rows = c.prepare_cached(
-            "SELECT lang,value,source,preferred FROM names WHERE entity_id=? AND role='display'
-             ORDER BY preferred DESC,value,rowid",
+            "SELECT lang, value, source, preferred
+             FROM term_names
+             WHERE term_id = (SELECT id FROM terms WHERE key = ?) AND role = 'display'
+             ORDER BY preferred DESC, value, seq",
         )?;
         for id in entities.keys() {
             let found: Vec<NameRow> = rows
@@ -1132,8 +1144,10 @@ pub fn choose_key(c: &Connection, kind: &str, key: &str) -> Result<Choice> {
         let mut f = Fetched::default();
         let candidates = if key.is_empty() { untagged(c)? } else { f.tagged(c, key)? };
         let mut own = c.prepare_cached(
-            "SELECT lang,value,source,preferred FROM names WHERE entity_id=? AND role='display'
-             ORDER BY preferred DESC,value,rowid",
+            "SELECT lang, value, source, preferred
+             FROM term_names
+             WHERE term_id = (SELECT id FROM terms WHERE key = ?) AND role = 'display'
+             ORDER BY preferred DESC, value, seq",
         )?;
         for id in candidates {
             if !f.get(c, &id)?.is_some_and(|e| View::spoken(e) && e.tag == key) {
@@ -1199,6 +1213,19 @@ fn untagged(c: &Connection) -> Result<Vec<String>> {
 mod tests {
     use super::*;
 
+    /// Display names of identities by key, in this order (`seq` follows it, as `character_names::put_name` assigns it).
+    fn named(rows: &[(&str, &str, &str, &str, i64)]) -> String {
+        rows.iter()
+            .map(|(key, lang, value, source, preferred)| {
+                format!(
+                    "INSERT INTO term_names(term_id,lang,value,source,role,preferred,position,seq) VALUES
+                     ((SELECT id FROM terms WHERE key='{key}'),'{lang}','{value}','{source}','display',{preferred},0,
+                      (SELECT coalesce(max(seq),0)+1 FROM term_names));"
+                )
+            })
+            .collect()
+    }
+
     /// Name inputs only, names already in the core so `legacy_names::track` records changes.
     fn library() -> Connection {
         let c = Connection::open_in_memory().unwrap();
@@ -1209,19 +1236,31 @@ mod tests {
               merged_into TEXT,original INTEGER,work TEXT NOT NULL DEFAULT '');
              CREATE TABLE links(system TEXT,key TEXT,entity_id TEXT,current INTEGER NOT NULL DEFAULT 1,added_at TEXT,
               PRIMARY KEY(system,key));
-             CREATE TABLE names(entity_id TEXT,lang TEXT,value TEXT,source TEXT,role TEXT,preferred INTEGER NOT NULL DEFAULT 0,
-              position INTEGER NOT NULL DEFAULT 0,PRIMARY KEY(entity_id,role,lang,source,value));
+             CREATE TABLE terms(id INTEGER PRIMARY KEY,key TEXT NOT NULL UNIQUE);
+             CREATE TABLE term_tree(term_id INTEGER PRIMARY KEY);
+             -- New identities become terms at once, as the commands make them (`legacy_characters::born`).
+             CREATE TRIGGER born AFTER INSERT ON entities BEGIN
+               INSERT INTO terms(key) VALUES (NEW.id);
+               INSERT INTO term_tree SELECT id FROM terms WHERE key=NEW.id;
+             END;
+             CREATE TABLE term_names(term_id INTEGER,lang TEXT,value TEXT,source TEXT,role TEXT,preferred INTEGER NOT NULL DEFAULT 0,
+              position INTEGER NOT NULL DEFAULT 0,seq INTEGER,PRIMARY KEY(term_id,role,lang,source,value));
              CREATE TABLE term_key_names(kind TEXT,key TEXT,lang TEXT,source TEXT,value TEXT,PRIMARY KEY(kind,key,lang,source,value));
              INSERT INTO entities VALUES ('e1','character',NULL,'',NULL,0,'series_w'),('e2','character',NULL,'',NULL,0,''),
               ('s1','skin','e1','swimsuit_x',NULL,0,''),('w1','work',NULL,'',NULL,0,''),('m1','character',NULL,'','e1',0,'');
              INSERT INTO links VALUES ('danbooru','synth_(series_w)','e1',1,'2026-01-01'),('wd','synth_(series_w)','e2',1,'2026-01-02'),
               ('danbooru','synth_swimsuit','s1',1,'2026-01-03'),('qualifier','series_w','w1',1,'2026-01-04'),
               ('danbooru','merged_tag','m1',1,'2026-01-05');
-             -- Rows tied on (preferred,value) whose rowid order differs from the primary key order.
-             INSERT INTO names VALUES ('e1','zh','同名','index','display',0,0),('e1','ja','同名','wiki','display',0,0),
-              ('e2','en','Other','wiki','display',0,0),('m1','zh','并入名','index','display',0,0);
              INSERT INTO term_key_names VALUES ('skin','swimsuit_x','zh','index','皮肤名'),('work','series_w','zh','bangumi','作品名');",
         )
+        .unwrap();
+        // Rows tied on (preferred,value) whose `seq` order differs from the primary key order.
+        c.execute_batch(&named(&[
+            ("e1", "zh", "同名", "index", 0),
+            ("e1", "ja", "同名", "wiki", 0),
+            ("e2", "en", "Other", "wiki", 0),
+            ("m1", "zh", "并入名", "index", 0),
+        ]))
         .unwrap();
         c
     }
@@ -1257,10 +1296,15 @@ mod tests {
               ('danbooru','member_tag','m2',1,'2026-01-08'),('ccip_base','[\"ccip_tag\",1]','e4',1,'2026-01-09'),
               ('bangumi','b1','b1',1,'2026-01-10'),('danbooru','s3_tag','s3',1,'2026-01-13'),('bangumi','b2','b2',1,'2026-01-11'),
               ('danbooru','old_tag','e4',0,'2026-01-12');
-             INSERT INTO names VALUES ('m2','zh','成员名','index','display',0,0),('e4','zh','卡','index','display',0,0),
-              ('b1','zh','无标签一','index','display',0,0),('b2','ja','無標籤二','index','display',0,0);
              INSERT INTO term_key_names VALUES ('character','member_tag','ja','wiki','メンバー');",
         )
+        .unwrap();
+        c.execute_batch(&named(&[
+            ("m2", "zh", "成员名", "index", 0),
+            ("e4", "zh", "卡", "index", 0),
+            ("b1", "zh", "无标签一", "index", 0),
+            ("b2", "ja", "無標籤二", "index", 0),
+        ]))
         .unwrap();
         rebuild(&c).unwrap();
         c
@@ -1272,10 +1316,16 @@ mod tests {
         let before = projection(&c);
         let cases: [(&str, Option<&[&str]>); 9] = [
             // Own name of a character: its tag-mate (e2 via wd), its skin and the character key.
-            ("UPDATE names SET value='改名' WHERE entity_id='e1' AND lang='zh'", Some(&["e1", "e2", "m1", "s1", "s2"])),
+            (
+                "UPDATE term_names SET value='改名' WHERE term_id=(SELECT id FROM terms WHERE key='e1') AND lang='zh'",
+                Some(&["e1", "e2", "m1", "s1", "s2"]),
+            ),
             // A member's name: the nameless character it was merged into borrows it.
-            ("UPDATE names SET value='成员改名' WHERE entity_id='m2'", Some(&["e3", "m2", "s3"])),
-            ("DELETE FROM names WHERE entity_id='m2'", Some(&["e3", "m2", "s3"])),
+            (
+                "UPDATE term_names SET value='成员改名' WHERE term_id=(SELECT id FROM terms WHERE key='m2')",
+                Some(&["e3", "m2", "s3"]),
+            ),
+            ("DELETE FROM term_names WHERE term_id=(SELECT id FROM terms WHERE key='m2')", Some(&["e3", "m2", "s3"])),
             // Shared skin variant: both skins and their parents.
             (
                 "INSERT INTO term_key_names VALUES ('skin','swimsuit_x','ja','wiki','ミズギ')",
@@ -1289,7 +1339,7 @@ mod tests {
                 Some(&["e3", "m2", "s3"]),
             ),
             // Linked without a tag: every tagless identity shares the ("character","") key → whole rebuild.
-            ("UPDATE names SET value='无标签改' WHERE entity_id='b1'", None),
+            ("UPDATE term_names SET value='无标签改' WHERE term_id=(SELECT id FROM terms WHERE key='b1')", None),
             ("INSERT INTO term_key_names VALUES ('skin','','zh','index','空')", None),
         ];
         for (sql, read) in cases {
@@ -1326,7 +1376,9 @@ mod tests {
             "UPDATE entities SET merged_into='e3' WHERE id='e4'",
             "INSERT INTO entities VALUES ('n1','character',NULL,'',NULL,0,'');
              INSERT INTO links VALUES ('danbooru','new_tag','n1',1,'2026-01-20');
-             INSERT INTO names VALUES ('n1','zh','新人','index','display',0,0)",
+             INSERT INTO term_names(term_id,lang,value,source,role,preferred,position,seq) VALUES
+              ((SELECT id FROM terms WHERE key='n1'),'zh','新人','index','display',0,0,
+               (SELECT coalesce(max(seq),0)+1 FROM term_names))",
             // REPLACE takes m2's link without firing the DELETE trigger.
             "INSERT OR REPLACE INTO links VALUES ('danbooru','member_tag','e4',1,'2026-01-14')",
             "UPDATE entities SET work='series_new' WHERE id='e2'",
@@ -1396,12 +1448,16 @@ mod tests {
         c.execute_batch(
             "INSERT INTO entities VALUES ('e5','character',NULL,'',NULL,0,'');
              INSERT INTO links VALUES ('danbooru','','e5',1,'2026-01-14'),('danbooru','shadowed','e5',1,'2026-01-15');
-             INSERT INTO names VALUES ('e5','en','Shadow','wiki','display',0,0),('e5','zh','影','user','display',1,0),
-              ('s1','zh','皮肤自名','index','display',0,0);
              INSERT INTO term_key_names VALUES ('character','','zh','wiki','空键'),('work','unlisted','zh','bangumi','未收录'),
               ('character','nobody','ja','index','ダレ'),('character','synth_(series_w)','en','danbooru','Ignored'),
               ('work','touhou','zh','bangumi','东方');",
         )
+        .unwrap();
+        c.execute_batch(&named(&[
+            ("e5", "en", "Shadow", "wiki", 0),
+            ("e5", "zh", "影", "user", 1),
+            ("s1", "zh", "皮肤自名", "index", 0),
+        ]))
         .unwrap();
         let keys = |c: &Connection| -> BTreeSet<(String, String)> {
             let mut keys: BTreeSet<(String, String)> = c
@@ -1435,10 +1491,11 @@ mod tests {
         // Pending writes of an open transaction (the model preview): read as written, before any projection refresh.
         let tx = c.transaction().unwrap();
         crate::legacy_names::track(&tx).unwrap();
+        tx.execute_batch(&named(&[("e2", "zh", "另一个", "bangumi", 1), ("b1", "ja", "ムヒョウ", "index", 0)]))
+            .unwrap();
         tx.execute_batch(
-            "UPDATE names SET value='改名' WHERE entity_id='e1' AND lang='zh';
-             INSERT INTO names VALUES ('e2','zh','另一个','bangumi','display',1,0),('b1','ja','ムヒョウ','index','display',0,0);
-             DELETE FROM names WHERE entity_id='e5' AND source='user';
+            "UPDATE term_names SET value='改名' WHERE term_id=(SELECT id FROM terms WHERE key='e1') AND lang='zh';
+             DELETE FROM term_names WHERE term_id=(SELECT id FROM terms WHERE key='e5') AND source='user';
              INSERT INTO term_key_names VALUES ('skin','swimsuit_x','zh','user','用户皮肤'),('work','series_w','zh','user','用户作品');
              UPDATE links SET current=0 WHERE entity_id='e2';",
         )

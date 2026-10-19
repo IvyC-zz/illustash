@@ -28,11 +28,14 @@ pub const RETIRED: [&str; 7] =
 /// the baseline (recorded on core version 7) cannot hold (rule 5, each named with the reason):
 /// - `actions.label_kind` / `label_count`: a counted step's kind and count (#201); what the history shows from them
 ///   is compared in the replies.
-pub const SKIP_COLUMNS: [(&str, &str); 4] = [
+/// - `term_names.seq`: the order of names, filled from the former `names` rowids (#201); the orders the readers take
+///   from it are compared in the replies.
+pub const SKIP_COLUMNS: [(&str, &str); 5] = [
     ("term_packages", "manifest"),
     ("term_evidence", "fingerprint"),
     ("actions", "label_kind"),
     ("actions", "label_count"),
+    ("term_names", "seq"),
 ];
 
 static CLOCK: LazyLock<Regex> =

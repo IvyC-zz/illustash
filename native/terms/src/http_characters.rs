@@ -257,14 +257,27 @@ fn profile(c: &Connection, e: &str) -> Result<Json> {
         return bad("请编辑角色本身，子标签跟随角色");
     }
     let shown = display(c, Json::object([("id", id.clone().into())]))?;
-    let user=strings(c,"SELECT value FROM names WHERE entity_id=? AND role='display' AND source='user' ORDER BY preferred DESC LIMIT 1",&[&id])?.into_iter().next().unwrap_or_default();
+    let user = strings(
+        c,
+        "SELECT value
+         FROM term_names
+         WHERE term_id = (SELECT id FROM terms WHERE key = ?) AND role = 'display' AND source = 'user'
+         ORDER BY preferred DESC
+         LIMIT 1",
+        &[&id],
+    )?
+    .into_iter()
+    .next()
+    .unwrap_or_default();
     let tag =
         strings(c, "SELECT key FROM links WHERE entity_id=? AND system='danbooru' AND current=1 LIMIT 1", &[&id])?
             .into_iter()
             .next()
             .unwrap_or_default();
     let other: i64 = c.query_row(
-        "SELECT count(DISTINCT value) FROM names WHERE entity_id=? AND role='alias' AND source<>'user'",
+        "SELECT count(DISTINCT value)
+         FROM term_names
+         WHERE term_id = (SELECT id FROM terms WHERE key = ?) AND role = 'alias' AND source <> 'user'",
         [&id],
         |r| r.get(0),
     )?;
@@ -279,7 +292,10 @@ fn profile(c: &Connection, e: &str) -> Result<Json> {
             "aliases",
             array(strings(
                 c,
-                "SELECT value FROM names WHERE entity_id=? AND role='alias' AND source='user' ORDER BY position,value",
+                "SELECT value
+                 FROM term_names
+                 WHERE term_id = (SELECT id FROM terms WHERE key = ?) AND role = 'alias' AND source = 'user'
+                 ORDER BY position, value",
                 &[&id],
             )?),
         ),

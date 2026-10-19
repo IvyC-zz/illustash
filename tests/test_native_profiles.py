@@ -119,7 +119,7 @@ class NativeProfilesTest(unittest.TestCase):
     def test_transaction_fault_rolls_back_creation_and_profiles(self):
         for lib in (self.left,self.right):
             with closing(sqlite3.connect(lib.db)) as c:
-                c.execute("CREATE TRIGGER fail_profile BEFORE INSERT ON names WHEN NEW.value='故障' BEGIN SELECT RAISE(ABORT,'synthetic failure'); END");c.commit()
+                c.execute("CREATE TRIGGER fail_profile BEFORE INSERT ON term_names WHEN NEW.value='故障' BEGIN SELECT RAISE(ABORT,'synthetic failure'); END");c.commit()
         self.pair('/api/entities',{'name':'故障'},500)
         self.pair('/api/character/profile',{'entity':self.alice,'name':'故障'},500)
 
@@ -128,13 +128,13 @@ class NativeProfilesTest(unittest.TestCase):
         def works():
             with closing(sqlite3.connect(self.right.db)) as c:
                 return {name: ident for ident, name in c.execute(
-                    "SELECT e.id,n.value FROM entities e JOIN names n ON n.entity_id=e.id AND n.role='display' WHERE e.kind='work'")}
+                    "SELECT e.id,n.value FROM entities e JOIN terms t ON t.key=e.id JOIN term_names n ON n.term_id=t.id AND n.role='display' WHERE e.kind='work'")}
         def work_of(entity):
             with closing(sqlite3.connect(self.right.db)) as c:
                 return c.execute('SELECT work_id FROM entities WHERE id=?', (entity,)).fetchone()[0]
         before = works()
         with closing(sqlite3.connect(self.right.db)) as c:
-            c.execute("CREATE TRIGGER fail_profile BEFORE INSERT ON names WHEN NEW.value='故障' BEGIN SELECT RAISE(ABORT,'synthetic failure'); END"); c.commit()
+            c.execute("CREATE TRIGGER fail_profile BEFORE INSERT ON term_names WHEN NEW.value='故障' BEGIN SELECT RAISE(ABORT,'synthetic failure'); END"); c.commit()
         failed = self.post(self.origin, '/api/character/profile', {'entity': self.alice, 'name': '故障', 'work': {'create': '合成新作品'}})
         self.assertEqual(failed['status'], 500, failed['body'])
         self.assertEqual(works(), before)
@@ -189,7 +189,7 @@ class NativeProfilesTest(unittest.TestCase):
         # a committed operation answers 200 and the event stays pending for recovery.
         self.assertEqual(response['status'],200,response['body'])
         with closing(sqlite3.connect(self.right.db)) as c:
-            self.assertEqual(c.execute("SELECT value FROM names WHERE entity_id=? AND source='user' AND role='display'",(self.alice,)).fetchone()[0],'已提交')
+            self.assertEqual(c.execute("SELECT n.value FROM term_names n JOIN terms t ON t.id=n.term_id WHERE t.key=? AND n.source='user' AND n.role='display'",(self.alice,)).fetchone()[0],'已提交')
             self.assertEqual(c.execute("SELECT status FROM backend_effects WHERE kind='verdict' ORDER BY id DESC LIMIT 1").fetchone()[0],'pending')
             self.assertEqual(c.execute("SELECT count(*) FROM backend_effects WHERE kind LIKE 'names:%' AND status='pending'").fetchone()[0],1)
             c.execute('DROP TRIGGER fail_ack');c.commit()
