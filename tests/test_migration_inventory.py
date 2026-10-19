@@ -1,6 +1,8 @@
 """M0 narrow gates; fixtures are source text only, never live libraries or servers."""
+import contextlib
 import copy
 import importlib.util
+import io
 import json
 from pathlib import Path
 import tempfile
@@ -33,15 +35,47 @@ class MigrationInventoryTest(unittest.TestCase):
         return inventory.check(self.root, self.spec)[0]
 
     def test_current_repository_has_owned_production_boundaries(self):
-        spec = json.loads((ROOT / 'tests/migration_inventory.json').read_text())
+        text = (ROOT / 'tests/migration_inventory.json').read_text(encoding='utf-8')
+        spec = json.loads(text)
         errors, current = inventory.check(ROOT, spec)
         self.assertEqual([], errors)
         self.assertEqual([], current['warnings'])
-        self.assertLess((ROOT / 'tests/migration_inventory.json').stat().st_size, 72_000)
+        self.assertEqual(inventory.dump_spec(spec), text, '运行 python -m tools.migration_inventory fmt')
+        # The budget counts content, not the one-entry-per-line whitespace.
+        self.assertLess(len(json.dumps(spec, ensure_ascii=False, separators=(',', ':')).encode()), 72_000)
         self.assertNotIn('coverage', spec)
         self.assertNotIn('sites', spec)
         self.assertNotIn('tools/verify_read_http.py', spec['sources'])
         self.assertNotIn('native/terms/src/casefold.rs', spec['sources'])
+
+    def test_canonical_format_is_lossless_and_puts_each_fingerprint_on_its_own_line(self):
+        spec = {'sources': {'web/b.py': '2', 'web/a.py': '1'}, 'format': 2, 'retained_references': [],
+                'boundaries': {'web/a.py': {'database-write': [[0, 2], 'INSERT INTO:t']}}, 'boundary_keys': ['UPDATE:t']}
+        text = inventory.dump_spec(spec)
+        self.assertEqual(json.loads(text), spec)
+        self.assertEqual(inventory.dump_spec(json.loads(text)), text)
+        self.assertEqual(text.splitlines()[1:6], ['"sources":{', ' "web/a.py":"1",', '', ' "web/b.py":"2"', '},'])
+        self.assertIn('\n"retained_references":[],\n', text)
+        self.assertIn('\n "web/a.py":{"database-write":[[0,2],"INSERT INTO:t"]}\n', text)
+        self.assertTrue(text.endswith('\n]\n}\n'))
+
+    def test_fmt_and_sync_sources_rewrite_only_format_and_fingerprints(self):
+        spec_path = self.root / 'spec.json'
+        stale = {**self.spec, 'sources': {'web/server.py': 'old', 'web/deleted.py': 'gone'}}
+        spec_path.write_text(json.dumps(stale), encoding='utf-8')
+        args = ['--root', str(self.root), '--spec', str(spec_path)]
+        with contextlib.redirect_stderr(io.StringIO()) as stderr, contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(inventory.main(['check', *args]), 1)
+        self.assertIn('清单格式不规范', stderr.getvalue())
+        self.assertEqual(inventory.main(['fmt', *args]), 0)
+        self.assertEqual(json.loads(spec_path.read_text(encoding='utf-8')), stale)
+        self.path.write_text(self.source + '\nsubprocess.Popen(["new-worker"])\n')
+        with contextlib.redirect_stderr(io.StringIO()) as stderr, contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(inventory.main(['sync-sources', *args]), 1)
+        self.assertIn('新增迁移边界', stderr.getvalue())
+        synced = json.loads(spec_path.read_text(encoding='utf-8'))
+        self.assertEqual(synced, {**stale, 'sources': inventory.scan(self.root)['sources']})
+        self.assertEqual(spec_path.read_text(encoding='utf-8'), inventory.dump_spec(synced))
 
     def test_boundary_dictionary_preserves_counts_and_rejects_corrupt_references(self):
         baseline=inventory.recorded_boundaries(self.spec)
