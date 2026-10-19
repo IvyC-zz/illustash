@@ -78,7 +78,7 @@ pub fn merge(c: &Connection, args: &Value) -> Result<Value> {
         .collect::<rusqlite::Result<_>>()?;
     c.execute("UPDATE entities SET parent_id=? WHERE parent_id=?", [&target, &source])?;
     let mut carried: Vec<(String, String, String)> = c
-        .prepare("SELECT lang,value,source FROM names WHERE entity_id=?")?
+        .prepare(&format!("SELECT lang, value, source FROM term_names WHERE term_id = {}", character_names::TERM_OF))?
         .query_map([&source], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
         .collect::<rusqlite::Result<_>>()?;
     for key in c
@@ -177,7 +177,11 @@ pub fn undo(c: &Connection, action: i64, m: &Value) -> Result<()> {
             _ => ("", a.as_str().unwrap_or(""), "legacy"),
         };
         c.execute(
-            "DELETE FROM names WHERE entity_id=? AND role='alias' AND lang=? AND value=? AND source=?",
+            &format!(
+                "DELETE FROM term_names
+                 WHERE term_id = {} AND role = 'alias' AND lang = ? AND value = ? AND source = ?",
+                character_names::TERM_OF
+            ),
             [target, lang, value, src],
         )?;
     }

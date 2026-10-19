@@ -4,7 +4,7 @@
 //! uuid 填进去再执行一次。这样调用方抽 uuid 的次数和先后与旧代码相同。
 use crate::character_commands::{begin_action, finish_action, hybrid, invalid, require_entity, text};
 use crate::character_labels::{lang_of, Shown};
-use crate::character_names::strip;
+use crate::character_names::{strip, NEXT_SEQ, TERM_OF};
 use crate::{character_graph, character_names, character_projection, legacy_characters, Error, Result};
 use rusqlite::{params, Connection, OptionalExtension};
 use serde_json::{json, Value};
@@ -81,6 +81,7 @@ pub fn work_for(
     }
     let work = new_id(id)?;
     c.execute("INSERT INTO entities(id,name,kind) VALUES (?,'','work')", [&work])?;
+    legacy_characters::born(c, &work, "user")?;
     c.execute(
         "INSERT INTO work_review(entity_id,status,note) VALUES (?1,'confirmed',?2)",
         [work.as_str(), "从 Danbooru 角色的作品自动建立"],
@@ -147,7 +148,11 @@ fn snapshot(c: &Connection, entity: &str) -> Result<Value> {
         c.query_row("SELECT work,work_id FROM entities WHERE id=?", [entity], |r| Ok((r.get(0)?, r.get(1)?)))?;
     let links = danbooru_links(c, entity)?;
     let names: Vec<Value> = c
-        .prepare("SELECT lang,value,source,role,preferred,position FROM names WHERE entity_id=? AND source='user'")?
+        .prepare(&format!(
+            "SELECT lang, value, source, role, preferred, position
+             FROM term_names
+             WHERE term_id = {TERM_OF} AND source = 'user'"
+        ))?
         .query_map([entity], |r| {
             Ok(json!([
                 r.get::<_, String>(0)?,
@@ -189,7 +194,10 @@ fn apply(c: &Connection, p: &Value, touched: &mut Vec<String>) -> Result<Value> 
         if name.is_empty() && (oc != 0 || !linked) {
             return invalid("没有关联 Danbooru 的角色需要一个名称");
         }
-        c.execute("DELETE FROM names WHERE entity_id=? AND role='display' AND source='user'", [&entity])?;
+        c.execute(
+            &format!("DELETE FROM term_names WHERE term_id = {TERM_OF} AND role = 'display' AND source = 'user'"),
+            [&entity],
+        )?;
         if !name.is_empty() {
             character_names::put_name(c, &entity, lang_of(name), "user", name, "display", 0, 1)?;
         }
@@ -201,7 +209,10 @@ fn apply(c: &Connection, p: &Value, touched: &mut Vec<String>) -> Result<Value> 
         }) else {
             return invalid("别名最多 50 个，每个 1–120 个字符");
         };
-        c.execute("DELETE FROM names WHERE entity_id=? AND role='alias' AND source='user'", [&entity])?;
+        c.execute(
+            &format!("DELETE FROM term_names WHERE term_id = {TERM_OF} AND role = 'alias' AND source = 'user'"),
+            [&entity],
+        )?;
         let mut seen: Vec<&str> = Vec::new();
         for a in list {
             let a = strip(a.as_str().expect("validated internal text field"));
@@ -298,9 +309,13 @@ pub fn link_local(c: &Connection, args: &Value) -> Result<Value> {
         let values = |sql: &str| -> Result<Vec<String>> {
             Ok(c.prepare(sql)?.query_map([&entity], |r| r.get(0))?.collect::<rusqlite::Result<_>>()?)
         };
-        let typed = values("SELECT value FROM names WHERE entity_id=? AND role='display' AND source='user'")?;
-        let kept =
-            values("SELECT value FROM names WHERE entity_id=? AND role='alias' AND source='user' ORDER BY position")?;
+        let typed = values(&format!(
+            "SELECT value FROM term_names WHERE term_id = {TERM_OF} AND role = 'display' AND source = 'user'"
+        ))?;
+        let kept = values(&format!(
+            "SELECT value FROM term_names WHERE term_id = {TERM_OF} AND role = 'alias' AND source = 'user'
+             ORDER BY position"
+        ))?;
         let mut p = item.clone();
         p["entity"] = item["id"].clone();
         p["name"] = json!("");
@@ -320,10 +335,13 @@ pub fn link_local(c: &Connection, args: &Value) -> Result<Value> {
 /// `_undo_profile`：用户名字、Danbooru 链接、作品按快照恢复，皮肤的 work 跟随。
 pub fn undo(c: &Connection, p: &Value) -> Result<bool> {
     let entity = text(&p["entity"], "资料快照不完整")?;
-    c.execute("DELETE FROM names WHERE entity_id=? AND source='user'", [entity])?;
+    c.execute(&format!("DELETE FROM term_names WHERE term_id = {TERM_OF} AND source = 'user'"), [entity])?;
     for n in p["names"].as_array().into_iter().flatten() {
         c.execute(
-            "INSERT OR REPLACE INTO names(entity_id,lang,value,source,role,preferred,position) VALUES (?,?,?,?,?,?,?)",
+            &format!(
+                "INSERT OR REPLACE INTO term_names(term_id, lang, value, source, role, preferred, position, seq)
+                 VALUES ({TERM_OF}, ?, ?, ?, ?, ?, ?, {NEXT_SEQ})"
+            ),
             params![entity, n[0].as_str(), n[1].as_str(), n[2].as_str(), n[3].as_str(), n[4].as_i64(), n[5].as_i64()],
         )?;
     }

@@ -150,6 +150,12 @@ pub(crate) fn refresh_candidates(c: &Connection, uuids: &[String]) -> Result<()>
     Ok(())
 }
 
+/// 新建的身份立即镜像成词条（#201）：名字直接写 `term_names`，要用到它的词条 id。按建出来的先后调用，词条 id 的
+/// 分配顺序与命令末尾一次镜像时相同（按 `entities` 的 rowid）；其余列由命令末尾的 `mirror_state` 照常补齐。
+pub(crate) fn born(c: &Connection, id: &str, origin: &str) -> Result<()> {
+    mirror_state(c, &[id.to_owned()], origin)
+}
+
 /// 结构状态（实体的列、work_review、链接）由核心照旧 SQL 写进兼容表之后，把这些身份镜像进 `terms` / `term_tree` /
 /// `term_links`。映射与 S2 收编相同；新身份的 origin 是 `origin`。链接已属于别的类型的词条时拒绝。
 pub(crate) fn mirror_state(c: &Connection, ids: &[String], origin: &str) -> Result<()> {

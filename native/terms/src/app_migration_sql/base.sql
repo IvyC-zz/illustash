@@ -21,10 +21,6 @@ CREATE TABLE IF NOT EXISTS relations(a TEXT NOT NULL,b TEXT NOT NULL,kind TEXT N
 CREATE TABLE IF NOT EXISTS links(system TEXT NOT NULL,key TEXT NOT NULL,entity_id TEXT NOT NULL REFERENCES entities(id),
  current INTEGER NOT NULL DEFAULT 1,source TEXT NOT NULL,added_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,PRIMARY KEY(system,key));
 CREATE INDEX IF NOT EXISTS links_entity ON links(entity_id,system);
-CREATE TABLE IF NOT EXISTS names(entity_id TEXT NOT NULL REFERENCES entities(id),lang TEXT NOT NULL DEFAULT '' CHECK(lang IN ('','zh','ja','en')),
- value TEXT NOT NULL,source TEXT NOT NULL,role TEXT NOT NULL CHECK(role IN ('display','alias')),preferred INTEGER NOT NULL DEFAULT 0,
- position INTEGER NOT NULL DEFAULT 0,PRIMARY KEY(entity_id,role,lang,source,value));
-CREATE INDEX IF NOT EXISTS names_value ON names(value COLLATE NOCASE);
 CREATE TABLE IF NOT EXISTS asked(uuid TEXT NOT NULL,entity TEXT NOT NULL,kind TEXT NOT NULL,
  answer TEXT NOT NULL CHECK(answer IN ('yes','no','later')),action_id INTEGER,asked_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
  PRIMARY KEY(uuid,entity));

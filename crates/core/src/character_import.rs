@@ -84,6 +84,7 @@ fn entity(
     c.prepare_cached("INSERT INTO entities(id,name,work,kind,work_id) VALUES (?,'',?,'character',(SELECT entity_id FROM links WHERE system='qualifier' AND key=?))")?.execute(
         [&ident, work, work],
     )?;
+    legacy_characters::born(c, &ident, "legacy:characters")?;
     link(c, &ident, system, key)?;
     if !name.is_empty() && name != key {
         character_names::alias(c, &ident, name, "index", "")?;

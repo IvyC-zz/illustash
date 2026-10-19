@@ -100,43 +100,62 @@ class BrowseReadHTTPTest(HTTPHarness):
         package = self.root/name
         self.sync('expanded'); self.publish()
         source = Path(self.rec.value('source'))
-        for core in (False,True):
-            if core:
-                self.sync('switched'); self.publish()
-            for nsfw in ('','hide','only'):
-                for pool in ('','duplicates','excluded','unmatched','pending','recent','audit'):
-                    for order in ('newest','oldest','hinted','suspicious'):
-                        filters={'pool':pool,'order':order,'nsfw':nsfw}
-                        self.pair('/api/assets?'+urlencode({**filters,'limit':3}))
-                        self.pair('/api/ids?'+urlencode({**filters,'limit':3}))
-                        self.pair('/api/assets/count?'+urlencode(filters))
-                self.pair('/api/review-pools?'+urlencode({'nsfw':nsfw}))
-                self.pair('/api/home?'+urlencode({'nsfw':nsfw,'days':3}))
-                self.pair('/api/assets?'+urlencode({'tag':'blue_hair','nsfw':nsfw}))
-            for filters in ({'dup':'mixed'},{'pool':'cluster','cluster':'7'},{'pool':'similar','cluster':'9'},
-                            {'pool':'excluded','reason':'manual'},{'day':'2026-09-23'}):
-                self.pair('/api/assets?'+urlencode(filters))
-            for id in ('a','extra-0','extra-1','extra-2','extra-3','extra-4','extra-5','extra-6','extra-7'):
-                detail=json.loads(self.pair('/api/detail?'+urlencode({'id':id}))['body'])
-                if id=='a':self.assertTrue(detail['posts']);self.assertTrue(detail['artists'])
-            for artist in ('A','B','M','missing'):
-                for path in ('assets','assets/count','ids'):
-                    self.pair('/api/'+path+'?'+urlencode({'artist':artist}))
-            # Auxiliary failure cannot mask missing images or invalid earlier filters.
-            source_parked=source.with_suffix('.parked')
-            source.rename(source_parked)
-            try:
-                self.assertEqual(self.pair('/api/detail?id=missing')['status'],400)
-                self.assertEqual(self.pair('/api/detail?id=a')['status'],500)
-                self.pair('/api/assets')
-            finally:source_parked.rename(source)
-            prov=package/'provenance.sqlite';parked=package/'provenance.parked'
-            prov.rename(parked);prov.mkdir()
-            try:
-                self.assertEqual(self.pair('/api/assets?artist=A')['status'],200 if core else 500)
-                self.assertEqual(self.pair('/api/assets?artist=A&day=bad')['status'],400)
-                self.assertEqual(self.pair('/api/detail?id=missing')['status'],400)
-                self.assertEqual(self.pair('/api/detail?id=a')['status'],500)
-            finally:prov.rmdir();parked.rename(prov)
+        # The library before it switched to the core (no `meta`) is refused since core v8 (#201, only switched libraries
+        # are kept), so its 294 recorded replies are not read live any more. The same 294 requests follow on the library
+        # after it switched, restored at this core version; 288 of its recorded replies are byte-identical to the ones
+        # before the switch, so those are compared with the live v8 replies as well. The other 6 differ because the
+        # switch itself changed the artist attribution (the Python-era artist tables no supported library has): the
+        # details of `a` and `extra-0`, artist A's assets, count and ids, and artist A with an unreadable provenance
+        # database (500 before the switch, 200 after).
+        legacy = [self.rec.value('response') for _ in range(294)]
+        artists_before_switch = {266, 267, 275, 276, 277, 290}
+        compared = []
+        recorded = self.pair
+        def pair(path, *args, **kwargs):
+            reference = recorded(path, *args, **kwargs)
+            if len(compared) not in artists_before_switch:
+                before = legacy[len(compared)]
+                self.assertEqual((before['status'], before['body']), (reference['status'], reference['body']), path)
+            compared.append(path)
+            return reference
+        self.pair = pair
+        self.addCleanup(vars(self).pop, 'pair', None)
+        self.sync('switched'); self.publish()
+        for nsfw in ('','hide','only'):
+            for pool in ('','duplicates','excluded','unmatched','pending','recent','audit'):
+                for order in ('newest','oldest','hinted','suspicious'):
+                    filters={'pool':pool,'order':order,'nsfw':nsfw}
+                    self.pair('/api/assets?'+urlencode({**filters,'limit':3}))
+                    self.pair('/api/ids?'+urlencode({**filters,'limit':3}))
+                    self.pair('/api/assets/count?'+urlencode(filters))
+            self.pair('/api/review-pools?'+urlencode({'nsfw':nsfw}))
+            self.pair('/api/home?'+urlencode({'nsfw':nsfw,'days':3}))
+            self.pair('/api/assets?'+urlencode({'tag':'blue_hair','nsfw':nsfw}))
+        for filters in ({'dup':'mixed'},{'pool':'cluster','cluster':'7'},{'pool':'similar','cluster':'9'},
+                        {'pool':'excluded','reason':'manual'},{'day':'2026-09-23'}):
+            self.pair('/api/assets?'+urlencode(filters))
+        for id in ('a','extra-0','extra-1','extra-2','extra-3','extra-4','extra-5','extra-6','extra-7'):
+            detail=json.loads(self.pair('/api/detail?'+urlencode({'id':id}))['body'])
+            if id=='a':self.assertTrue(detail['posts']);self.assertTrue(detail['artists'])
+        for artist in ('A','B','M','missing'):
+            for path in ('assets','assets/count','ids'):
+                self.pair('/api/'+path+'?'+urlencode({'artist':artist}))
+        # Auxiliary failure cannot mask missing images or invalid earlier filters.
+        source_parked=source.with_suffix('.parked')
+        source.rename(source_parked)
+        try:
+            self.assertEqual(self.pair('/api/detail?id=missing')['status'],400)
+            self.assertEqual(self.pair('/api/detail?id=a')['status'],500)
+            self.pair('/api/assets')
+        finally:source_parked.rename(source)
+        prov=package/'provenance.sqlite';parked=package/'provenance.parked'
+        prov.rename(parked);prov.mkdir()
+        try:
+            self.assertEqual(self.pair('/api/assets?artist=A')['status'],200)
+            self.assertEqual(self.pair('/api/assets?artist=A&day=bad')['status'],400)
+            self.assertEqual(self.pair('/api/detail?id=missing')['status'],400)
+            self.assertEqual(self.pair('/api/detail?id=a')['status'],500)
+        finally:prov.rmdir();parked.rename(prov)
+        self.assertEqual(len(compared), 294)
 
 

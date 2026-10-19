@@ -86,11 +86,11 @@ pub(crate) fn forget_content(tx: &Connection, src: &Connection, changed: &[Strin
     crate::character_projection::fold(tx)
 }
 /// Application tables that no research calculator, learning stamp or result check reads (#29):
-/// preferences, name-source settings (model keys, traffic counters), name caches, the legacy names table,
+/// preferences, name-source settings (model keys, traffic counters), name caches,
 /// sync history and the research queues themselves. Writing them never invalidates a result. Every
 /// other table, including one added later, stays an input of learning.
 const UNREAD: &[&str] =
-    &["backend_effects", "name_cache", "name_settings", "names", "prefs", "research_runs", "sync_added", "sync_runs"];
+    &["backend_effects", "name_cache", "name_settings", "prefs", "research_runs", "sync_added", "sync_runs"];
 /// `meta` rows that are not inputs: the names version counts writes to name tables (triggers).
 const UNREAD_META: &str = "'names_version'";
 /// What one research kind's result is computed from (#29, docs/ARCHITECTURE_DIRECTION.md).
@@ -1216,12 +1216,12 @@ mod tests {
                  CREATE TABLE prefs(key TEXT PRIMARY KEY,value TEXT NOT NULL);
                  CREATE TABLE name_cache(key TEXT PRIMARY KEY,value TEXT NOT NULL);
                  CREATE TABLE name_settings(key TEXT PRIMARY KEY,value TEXT NOT NULL);
-                 CREATE TABLE names(entity_id TEXT,value TEXT);
+                 CREATE TABLE term_names(term_id INTEGER,value TEXT);
                  CREATE TABLE term_key_names(kind TEXT,key TEXT,value TEXT);
                  CREATE TABLE sync_runs(id INTEGER PRIMARY KEY,status TEXT);
                  CREATE TABLE backend_effects(id INTEGER PRIMARY KEY,kind TEXT,status TEXT DEFAULT 'pending');
                  CREATE TABLE entities(id TEXT PRIMARY KEY);
-                 CREATE TRIGGER names_version_names AFTER INSERT ON names
+                 CREATE TRIGGER names_version_term_names AFTER INSERT ON term_names
                    BEGIN UPDATE meta SET value=CAST(value AS INTEGER)+1 WHERE key='names_version'; END;
                  CREATE TABLE assertions(uuid TEXT,entity TEXT,status TEXT);
                  CREATE TABLE memberships(uuid TEXT,entity TEXT);
@@ -1314,9 +1314,9 @@ mod tests {
             ("name cache", Box::new(|| app("INSERT INTO name_cache VALUES ('synthetic','{}')")), &[]),
             ("name traffic", Box::new(|| app("INSERT INTO name_settings VALUES ('traffic_reserved','42')")), &[]),
             ("model key", Box::new(|| app("INSERT INTO name_settings VALUES ('model_key','synthetic')")), &[]),
-            ("names + names_version", Box::new(|| app("INSERT INTO names VALUES ('e1','合成')")), &[]),
-            // Display names by text key live in the core table since core v8 (#201); core name tables are learning
-            // inputs, as the mirror made them before.
+            // Names live in the core tables since core v8 (#201); core name tables are learning inputs, as the mirror
+            // made them before. The names version itself is not an input (`UNREAD_META`).
+            ("names + names_version", Box::new(|| app("INSERT INTO term_names VALUES (1,'合成')")), &[Learning]),
             (
                 "display names",
                 Box::new(|| app("INSERT INTO term_key_names VALUES ('character','e1','合成')")),

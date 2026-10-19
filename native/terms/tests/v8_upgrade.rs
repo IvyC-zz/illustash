@@ -115,6 +115,9 @@ fn a_consistent_library_upgrades_retires_the_key_tables_and_fills_in_counted_ste
     let before = Connection::open(&lib.db).unwrap();
     let old_aliases = rows(&before, &aliases.replace("{}", "name_aliases"));
     let old_display = rows(&before, &display.replace("{}", "display_names"));
+    let old_names =
+        rows(&before, "SELECT entity_id, lang, value, source, role, preferred, position FROM names ORDER BY rowid");
+    assert!(old_names.len() > 1);
     assert!(old_aliases.iter().any(|a| a.contains("合成别名")) && old_display.iter().any(|a| a.contains("合成作品名")));
     drop(before);
     assert_eq!(upgrade(&lib.db).unwrap(), "{\"from\":7,\"to\":8}\n");
@@ -122,10 +125,30 @@ fn a_consistent_library_upgrades_retires_the_key_tables_and_fills_in_counted_ste
     assert_eq!(rows(&c, &aliases.replace("{}", "term_key_aliases")), old_aliases, "aliases move to the core unchanged");
     assert_eq!(rows(&c, &display.replace("{}", "term_key_names")), old_display, "display names move unchanged");
     assert!(!exists(&c, "name_aliases") && !exists(&c, "display_names"), "the legacy tables are dropped");
+    // The names keep their order: `seq` takes the former rowids.
+    let names = "SELECT t.key, n.lang, n.value, n.source, n.role, n.preferred, n.position
+                 FROM term_names n JOIN terms t ON t.id = n.term_id JOIN term_tree r ON r.term_id = n.term_id ORDER BY n.seq";
+    assert_eq!(rows(&c, names), old_names, "names move to the core in their order");
+    assert!(!exists(&c, "names"));
     // The names version now counts writes to the core's display names, as it counted the legacy table's.
     let version = names_version(&c);
     c.execute("INSERT INTO term_key_names VALUES ('skin','synthetic_skin','zh','user','合成皮肤名')", []).unwrap();
     assert_eq!(names_version(&c), version + 1);
+    // … and to the core's names of characters, skins and works, not to artists' names.
+    c.execute(
+        "INSERT INTO term_names(term_id, lang, value, source, role, seq)
+         SELECT term_id, 'zh', '合成名', 'user', 'alias', 0 FROM term_tree LIMIT 1",
+        [],
+    )
+    .unwrap();
+    assert_eq!(names_version(&c), version + 2);
+    c.execute_batch(
+        "INSERT INTO terms(key, kind, origin) VALUES ('synthetic_artist', 'artist', 'user');
+         INSERT INTO term_names(term_id, lang, value, source, role)
+         SELECT id, 'zh', '合成画师', 'user', 'display' FROM terms WHERE key = 'synthetic_artist';",
+    )
+    .unwrap();
+    assert_eq!(names_version(&c), version + 2);
     let filled: Vec<(String, Option<String>, Option<String>)> = c
         .prepare("SELECT label,label_kind,label_count FROM actions ORDER BY id DESC LIMIT 4")
         .unwrap()

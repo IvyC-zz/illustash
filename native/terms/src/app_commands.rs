@@ -393,7 +393,7 @@ mod tests {
             let mut c = crate::open(&db).unwrap();
             crate::migrate(&mut c).unwrap();
             c.execute_batch("CREATE TABLE assets(uuid TEXT PRIMARY KEY,added_at TEXT); INSERT INTO assets VALUES ('a','2026-10-01'),('copy','2026-10-01'),('b','2026-09-30'); CREATE TABLE duplicates(uuid TEXT PRIMARY KEY,grp TEXT,pos INTEGER,hidden INTEGER); INSERT INTO duplicates VALUES ('a','g',0,0),('copy','g',1,1); CREATE TABLE excluded(uuid TEXT PRIMARY KEY,reason TEXT,origin TEXT); CREATE TABLE curation(uuid TEXT PRIMARY KEY,status TEXT,origin TEXT,created_at TEXT DEFAULT CURRENT_TIMESTAMP); CREATE TABLE auto_rules(uuid TEXT PRIMARY KEY,kind TEXT,reason TEXT); CREATE TABLE prefs(key TEXT PRIMARY KEY,value TEXT); CREATE TABLE asked(uuid TEXT,action_id INTEGER); CREATE TABLE reviews(entity TEXT,action_id INTEGER); CREATE TABLE backend_effects(id INTEGER PRIMARY KEY,kind TEXT,status TEXT NOT NULL DEFAULT 'pending',error TEXT NOT NULL DEFAULT '',created_at TEXT DEFAULT CURRENT_TIMESTAMP); INSERT INTO meta VALUES ('terms_artists','core'),('terms_labels','core'),('terms_characters','core'),('terms_names','core');").unwrap();
-            c.execute_batch("CREATE TABLE entities(id TEXT PRIMARY KEY); CREATE TABLE links(entity_id TEXT); CREATE TABLE names(entity_id TEXT); INSERT INTO meta VALUES ('names_version','0'),('names_projected','0');").unwrap();
+            c.execute_batch("CREATE TABLE entities(id TEXT PRIMARY KEY); CREATE TABLE links(entity_id TEXT); INSERT INTO meta VALUES ('names_version','0'),('names_projected','0');").unwrap();
             c.execute_batch(crate::legacy_labels::VIEWS).unwrap();
             let context = LibraryContext {
                 db,
