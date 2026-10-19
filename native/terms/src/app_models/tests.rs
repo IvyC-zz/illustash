@@ -511,6 +511,10 @@ fn system_proxy_settings_are_read_for_https() {
     let split = win.replace("127.0.0.1:7890", "http=a.local:1;https=b.local:2;socks=c.local:3");
     assert_eq!(windows_proxy(&split).as_deref(), Some("http://b.local:2"));
     assert_eq!(windows_proxy("    ProxyEnable    REG_DWORD    0x1\r\n"), None);
+    // reg.exe by its full path, never from PATH.
+    assert_eq!(reg_exe(Some(r"D:\Win".into())), Path::new(r"D:\Win").join("System32").join("reg.exe"));
+    assert_eq!(reg_exe(None), Path::new(r"C:\Windows").join("System32").join("reg.exe"));
+    assert_eq!(reg_exe(Some("".into())), reg_exe(None));
 }
 
 #[test]

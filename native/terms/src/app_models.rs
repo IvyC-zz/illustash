@@ -213,12 +213,18 @@ fn system_proxy() -> Option<String> {
 #[cfg(windows)]
 fn system_proxy() -> Option<String> {
     use std::os::windows::process::CommandExt;
-    let out = std::process::Command::new("reg")
+    let out = std::process::Command::new(reg_exe(std::env::var_os("SystemRoot")))
         .args(["query", r"HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings"])
         .creation_flags(0x08000000) // CREATE_NO_WINDOW
         .output()
         .ok()?;
     windows_proxy(&String::from_utf8_lossy(&out.stdout))
+}
+/// `reg.exe` by its full path, never looked up on PATH: `%SystemRoot%\System32`, else `C:\Windows\System32`.
+#[cfg(any(windows, test))]
+fn reg_exe(system_root: Option<std::ffi::OsString>) -> PathBuf {
+    let root = system_root.filter(|r| !r.is_empty()).map(PathBuf::from).unwrap_or_else(|| PathBuf::from(r"C:\Windows"));
+    root.join("System32").join("reg.exe")
 }
 #[cfg(not(any(target_os = "macos", windows)))]
 fn system_proxy() -> Option<String> {
