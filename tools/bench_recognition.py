@@ -219,6 +219,10 @@ def conditions():
         usage = subprocess.run(['top', '-l', '2', '-n', '0', '-s', '1'], capture_output=True, text=True).stdout
         idle = [line.rsplit(',', 1)[-1].split('%')[0] for line in usage.splitlines() if line.startswith('CPU usage')]
         out['cpu_busy_percent_1s'] = round(100 - float(idle[-1]), 1) if idle else None
+        battery = subprocess.run(['pmset', '-g', 'batt'], capture_output=True, text=True).stdout
+        out['power'] = battery.split("'")[1] if battery.count("'") >= 2 else None
+        settings = subprocess.run(['pmset', '-g'], capture_output=True, text=True).stdout
+        out['low_power_mode'] = any(line.split()[:2] == ['lowpowermode', '1'] for line in settings.splitlines())
         commands = subprocess.run(['ps', '-axo', 'comm='], capture_output=True, text=True).stdout.splitlines()
         # 正在运行的虚拟机进程（tart 与 UTM 的 Apple 后端、UTM 的 QEMU 后端）；只开着 UTM 应用不算。
         out['vms'] = sorted({Path(c).name for c in commands
