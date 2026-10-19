@@ -216,8 +216,9 @@ def conditions():
         out.update(cpu=sysctl('machdep.cpu.brand_string'), memory_bytes=int(sysctl('hw.memsize')),
                    load=list(os.getloadavg()))
         commands = subprocess.run(['ps', '-axo', 'comm='], capture_output=True, text=True).stdout.splitlines()
+        # 正在运行的虚拟机进程（tart 与 UTM 的 Apple 后端、UTM 的 QEMU 后端）；只开着 UTM 应用不算。
         out['vms'] = sorted({Path(c).name for c in commands
-                             if 'Virtualization.VirtualMachine' in c or Path(c).name in ('tart', 'qemu-system-aarch64', 'UTM')})
+                             if 'Virtualization.VirtualMachine' in c or 'QEMULauncher' in c or 'qemu-system' in c})
     else:
         out['cpu'] = platform.processor()
 
