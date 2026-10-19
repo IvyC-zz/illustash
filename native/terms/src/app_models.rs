@@ -148,6 +148,10 @@ struct Place {
     modelscope: String,
     /// Read when the request arrives, so a proxy switched on in the system settings counts from the next click.
     proxy: Option<String>,
+    /// The models are this install's to download, and so to delete (`ILLUSTASH_MODELS_ON_DEMAND`).
+    on_demand: bool,
+    /// The session is recognising or updating the character index: the models are in use.
+    in_use: bool,
 }
 impl Place {
     fn app(resources: &Path) -> Result<Self> {
@@ -164,6 +168,8 @@ impl Place {
             preferences: crate::app_paths::app_support(&crate::app_paths::user_home()?).join("preferences.json"),
             modelscope,
             proxy: None,
+            on_demand: on_demand(),
+            in_use: false,
         })
     }
     fn mirror(&self) -> String {
@@ -796,10 +802,13 @@ pub(crate) fn info(resources: &Path) -> Result<Json> {
 /// - `{"action": "import", "paths": [...]}` checks and installs chosen files (the page asks the native chooser first);
 /// - `{"action": "cancel"}` stops the running job, keeping what is downloaded;
 /// - `{"action": "discard"}` deletes the unfinished part;
-/// - `{"action": "mirror", "mirror": "https://…" | null}` sets the mirror (null: the default).
-pub(crate) fn post(resources: &Path, body: &Json) -> Result<Json> {
+/// - `{"action": "mirror", "mirror": "https://…" | null}` sets the mirror (null: the default);
+/// - `{"action": "delete"}` deletes the downloaded models (user 2026-10-19, #168): only an install that downloads
+///   them, never while a job runs or `in_use` (the session recognises or updates the character index).
+pub(crate) fn post(resources: &Path, body: &Json, in_use: bool) -> Result<Json> {
     let mut place = Place::app(resources)?;
     place.proxy = proxy();
+    place.in_use = in_use;
     post_at(&APP, place, body)
 }
 
@@ -808,7 +817,7 @@ fn post_at(models: &'static Models, place: Place, body: &Json) -> Result<Json> {
     let Some(fields) = body.as_object() else { return Err(Error::Invalid("未知操作".into())) };
     let action = fields.get("action").and_then(Value::as_str).unwrap_or("");
     let allowed: &[&str] = match action {
-        "download" | "cancel" | "discard" => &["action"],
+        "download" | "cancel" | "discard" | "delete" => &["action"],
         "import" => &["action", "paths"],
         "mirror" => &["action", "mirror"],
         _ => return Err(Error::Invalid("未知操作".into())),
@@ -843,6 +852,34 @@ fn post_at(models: &'static Models, place: Place, body: &Json) -> Result<Json> {
         "discard" => {
             if models.running.load(Ordering::SeqCst) {
                 return Err(Error::Invalid("模型正在下载或导入，请先取消".into()));
+            }
+            let partial = partial_dir(&place.root);
+            if partial.exists() {
+                fs::remove_dir_all(&partial)?;
+            }
+            *models.job.lock().expect("models job mutex poisoned") = None;
+        }
+        "delete" => {
+            if !place.on_demand {
+                return Err(Error::Invalid("这个安装自带识别模型，不能删除".into()));
+            }
+            if models.running.load(Ordering::SeqCst) {
+                return Err(Error::Invalid("模型正在下载或导入，请先取消".into()));
+            }
+            if place.in_use {
+                return Err(Error::Invalid("正在识别图片，等它结束再删除识别模型".into()));
+            }
+            // Renamed first, so a removal stopped half way never leaves something that looks like the models.
+            let doomed = place.root.with_file_name(format!(
+                "{}.deleting",
+                place.root.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()
+            ));
+            if doomed.exists() {
+                fs::remove_dir_all(&doomed)?;
+            }
+            if place.root.exists() {
+                fs::rename(&place.root, &doomed)?;
+                fs::remove_dir_all(&doomed)?;
             }
             let partial = partial_dir(&place.root);
             if partial.exists() {

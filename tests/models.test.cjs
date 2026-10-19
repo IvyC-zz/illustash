@@ -94,3 +94,15 @@ test('pictures waiting for the models say so in the sync line', () => {
   context.state.models = models({on_demand: false});
   assert.equal(context.syncLine({status: 'needs_recognition', total: 3}), '有 3 张图等待识别（识别服务未启动）');
 });
+
+test('downloaded models can be deleted, but not while something uses them', () => {
+  context.state.models = models({status: 'ready'});
+  context.state.sync = {status: 'done'};
+  assert.match(context.deleteButton(), /data-models="delete" >删除已下载的模型</);
+  context.state.sync = {status: 'recognising'};
+  assert.match(context.deleteButton(), /data-models="delete" disabled title="正在识别或下载，等它结束再删除"/);
+  context.state.sync = {status: 'done'};
+  assert.match(context.deleteButton(models({status: 'ready', job: {status: 'running'}})), /disabled/);
+  assert.equal(context.deleteButton(models({status: 'ready', on_demand: false})), '', 'models that came with the install stay');
+  assert.equal(context.deleteButton(models()), '', 'nothing to delete yet');
+});

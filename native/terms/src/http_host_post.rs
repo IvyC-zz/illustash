@@ -61,7 +61,12 @@ pub(super) fn handle(request: Request, host: &Host, received: u64, text: &str, b
                 }
             }
         }
-        match crate::app_models::post(&host.root, &body) {
+        // Deleting the models waits while this session's recognition or character index uses them.
+        let in_use = body.get("action").map(Json::text) == Some("delete") && {
+            let session = host.session.read().expect("http_host_post session lock poisoned");
+            session.syncer.running() || session.index.writing()
+        };
+        match crate::app_models::post(&host.root, &body, in_use) {
             Ok(value) => respond(request, value, 200, "core"),
             Err(e) => failure(request, e, true),
         }
