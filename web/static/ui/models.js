@@ -24,7 +24,7 @@ export function modelsLine(m = state.models) {
   if (j?.status === 'failed' && j.failed_file) return t('{path} 没能下载，每个来源都试过了', {path: j.failed_file});
   if (j?.status === 'failed') return t('下载没有完成：{reason}', {reason: tb(j.message || '')});
   if (j?.status === 'cancelled') return t('已取消，下好的部分会保留，下次接着下');
-  return m.have ? t('还差 {left}（已有 {have}）', {left: bytes(left(m)), have: bytes(m.have)}) : t('还没下载（约 {size}）', {size: bytes(m.total)});
+  return m.have ? t('还缺 {list}（已有 {have}）', {list: m.missing.join(t('、')), have: bytes(m.have)}) : t('还没下载（约 {size}）', {size: bytes(m.total)});
 }
 export function modelsBar(m = state.models) {
   const j = m?.job; if (!running(m) || !j.total) return '';
@@ -34,10 +34,10 @@ export function modelsBar(m = state.models) {
 export function modelsActions(m = state.models, compact = false) {
   if (!m || m.status === 'ready') return '';
   if (running(m)) return `<button class="quiet small" data-models="cancel">${t('取消')}</button>`;
-  const download = `<button class="primary small" data-models="download">${m.have ? t('继续下载（还差 {left}）', {left: bytes(left(m))}) : t('下载模型（约 {size}）', {size: bytes(m.total)})}</button>`;
+  const download = `<button class="primary small" data-models="download">${m.have ? t('继续下载（还差 {left}）', {left: fileSize(left(m))}) : t('下载模型（约 {size}）', {size: bytes(m.total)})}</button>`;
   if (compact) return download;
   return `${download}<button class="quiet small" data-models="import">${t('从文件导入…')}</button>`
-    + (m.partial ? `<button class="quiet small" data-models="discard">${t('删除未完成的部分')}</button>` : '');
+    + (m.partial && m.have ? `<button class="quiet small" data-models="discard">${t('删除未完成的部分')}</button>` : '');
 }
 // Why each source failed for the file that stopped the download.
 export function modelsFailures(m = state.models) {

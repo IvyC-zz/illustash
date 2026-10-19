@@ -29,8 +29,13 @@ test('the download button says how much; nothing starts without it', () => {
   assert.match(actions, /data-models="import"/);
   assert.doesNotMatch(actions, /discard/);
   // A part already here: continue, and the unfinished part can be deleted.
-  const part = models({have: 100 * MB, partial: true});
+  const part = models({have: 100 * MB, partial: true, missing: ['wd_swinv2_v3_emb.onnx', 'ccip/model_feat.onnx']});
+  assert.equal(context.modelsLine(part), '还缺 wd_swinv2_v3_emb.onnx、ccip/model_feat.onnx（已有 100.0 MB）');
   assert.match(context.modelsActions(part), /继续下载（还差 518.0 MB）/);
+  // Only a small file left: its size in bytes, not 0 KB.
+  assert.match(context.modelsActions(models({have: 618 * MB - 147, partial: true})), /继续下载（还差 147 字节）/);
+  // A failed first attempt leaves an empty folder: nothing to delete.
+  assert.doesNotMatch(context.modelsActions(models({have: 0, partial: true})), /discard/);
   assert.match(context.modelsActions(part), /data-models="discard"/);
   assert.equal(context.modelsActions(part, true).includes('import'), false, 'the task panel shows the main button only');
   assert.equal(context.modelsActions(models({status: 'ready'})), '');
