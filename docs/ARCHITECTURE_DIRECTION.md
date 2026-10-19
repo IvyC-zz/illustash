@@ -195,7 +195,7 @@ Tauri 桌面外壳（`desktop/`）是第一个 Rust 部分，只负责启动核�
 
 ### 迁移覆盖与对照工具
 
-`tests/migration_inventory.json` 记录生产入口与写入的最终归属、当前运行时、存储域、验收及删除条件；研究、测试和生成代码按目录或类别保留，生产可达工具另列例外。`python -m tools.migration_inventory check` 只在新增 HTTP 路由/分支、数据库写入点、启动/CLI 入口或归属缺失时失败，普通实现变化只报告。`expand` 按当前源码位置展开归属，`report` 输出覆盖摘要；静态候选含动态 SQL/包装调用，数量不代表正式写入数量或迁移完成率。工具要求 Python 3.12，不属于基础版运行依赖。
+`tests/migration_inventory.json` 记录生产入口与写入的最终归属、当前运行时、存储域、验收及删除条件；研究、测试和生成代码按目录或类别保留，生产可达工具另列例外。`python -m tools.migration_inventory check` 只在新增 HTTP 路由/分支、数据库写入点、启动/CLI 入口、归属缺失或文件不是规范格式时失败，普通实现变化只报告。规范格式是顶层每个键、顶层对象或列表的每一项各占一行（`sources` 指纹每个文件一行，之间再空一行，因为 git 把相邻行的改动算作冲突），让改不同文件指纹的分支能被 git 自动合并；`fmt` 按此格式写回，`sync-sources` 只把报告用的 `sources` 刷新为当前指纹。`expand` 按当前源码位置展开归属，`report` 输出覆盖摘要；静态候选含动态 SQL/包装调用，数量不代表正式写入数量或迁移完成率。工具要求 Python 3.12，不属于基础版运行依赖。
 
 `tools/verify_read_http.py` 对确定性读取严格比较状态码与原始响应字节，拒绝将随机 `/api/ask` 加入字节等同语料。M0 的写 HTTP 对照骨架 `tools/verify_write_http.py` 已于 2026-10-05 随参考实现删除（#186）。
 

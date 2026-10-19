@@ -122,6 +122,6 @@ Claude Code 通过 `CLAUDE.md` 引入本文件，Codex 等直接读本文件。�
 ### 6. 提交前自查
 
 - 本次改动有没有新增任务单、流水或原始样本？有就挪走。
-- 本次源码改动是否同步 `tests/migration_inventory.json` 的报告用 `sources` 指纹？更新指纹不等于批准新增迁移边界；边界和归属仍须按原门槛检查。
+- 本次源码改动是否同步 `tests/migration_inventory.json` 的报告用 `sources` 指纹（`python -m tools.migration_inventory sync-sources`）？更新指纹不等于批准新增迁移边界；边界和归属仍须按原门槛检查。
 - 有没有让某篇文档里的状态句过期？
 - Markdown 相对链接是否都还指向存在的文件？
