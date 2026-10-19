@@ -216,5 +216,7 @@ pub fn stages(request: &Value) -> Result<Value> {
         producer::write_complete(&path, &task.task_id, &ids, &sidecar)?;
         packages.push(json!({"assets":ids.len(),"ms":ms(t)}));
     }
-    Ok(json!({"load_ms":load_ms,"snapshot_ms":snapshot_ms,"anchors":snapshot.vectors.len(),"images":rows,"packages":packages}))
+    Ok(
+        json!({"load_ms":load_ms,"snapshot_ms":snapshot_ms,"anchors":snapshot.vectors.len(),"images":rows,"packages":packages}),
+    )
 }
