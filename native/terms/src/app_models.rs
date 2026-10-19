@@ -128,10 +128,12 @@ fn base(text: &str) -> std::result::Result<String, String> {
 fn host(address: &str) -> String {
     url::Url::parse(address)
         .ok()
-        .and_then(|u| u.host_str().map(|h| match u.port() {
-            Some(port) => format!("{h}:{port}"),
-            None => h.to_owned(),
-        }))
+        .and_then(|u| {
+            u.host_str().map(|h| match u.port() {
+                Some(port) => format!("{h}:{port}"),
+                None => h.to_owned(),
+            })
+        })
         .unwrap_or_default()
 }
 
@@ -177,7 +179,10 @@ impl Place {
         let (hf, ms) = (&entry.hf, &entry.modelscope);
         [
             (host(&mirror), format!("{mirror}/{}/resolve/{}/{}", hf.repo, hf.revision, hf.file)),
-            (host(&self.modelscope), format!("{}/models/{}/resolve/{}/{}", self.modelscope, ms.repo, ms.revision, ms.file)),
+            (
+                host(&self.modelscope),
+                format!("{}/models/{}/resolve/{}/{}", self.modelscope, ms.repo, ms.revision, ms.file),
+            ),
         ]
     }
 }
@@ -244,7 +249,7 @@ fn windows_proxy(text: &str) -> Option<String> {
             })
         })
     };
-    if !field("ProxyEnable").is_some_and(|v| v.trim() == "0x1") {
+    if field("ProxyEnable").is_none_or(|v| v.trim() != "0x1") {
         return None;
     }
     let server = field("ProxyServer").filter(|s| !s.trim().is_empty())?;
@@ -441,8 +446,7 @@ fn fetch(
     }
     let mut digest = hash_existing(&mut file, length, meter)?;
     if length < entry.size {
-        let mut request =
-            agent.get(address).set("User-Agent", "Illustash-models").set("Accept-Encoding", "identity");
+        let mut request = agent.get(address).set("User-Agent", "Illustash-models").set("Accept-Encoding", "identity");
         if length > 0 {
             request = request.set("Range", &format!("bytes={length}-"));
         }
@@ -549,8 +553,8 @@ fn present(root: &Path, partial: &Path, manifest: &Manifest) -> u64 {
 fn download(models: &Models, place: &Place) -> std::result::Result<Value, Stop> {
     let partial = partial_dir(&place.root);
     fs::create_dir_all(&partial)?;
-    let needed = place.manifest.files.iter().map(|e| e.size).sum::<u64>()
-        - present(&place.root, &partial, place.manifest);
+    let needed =
+        place.manifest.files.iter().map(|e| e.size).sum::<u64>() - present(&place.root, &partial, place.manifest);
     if let Ok(free) = crate::platform_filesystem::available_space(&partial) {
         if free < needed + (64 << 20) {
             return Err(Stop::Failed(format!(
@@ -608,8 +612,7 @@ fn download(models: &Models, place: &Place) -> std::result::Result<Value, Stop> 
                 job["failed_file"] = entry.path.clone().into();
                 job["failures"] = tried.iter().map(|(source, why)| json!({"source": source, "why": why})).collect();
             });
-            let reasons: Vec<String> =
-                tried.iter().map(|(source, why)| format!("{source} 出错：{why}")).collect();
+            let reasons: Vec<String> = tried.iter().map(|(source, why)| format!("{source} 出错：{why}")).collect();
             return Err(Stop::Failed(format!(
                 "{path} 下载失败（{reason}）",
                 path = entry.path,
@@ -698,24 +701,25 @@ fn import(models: &Models, place: &Place, paths: &[PathBuf]) -> std::result::Res
     let wanted = |size: u64| manifest.files.iter().find(|e| e.size == size);
     let mut results = Vec::new();
     let mut meter = Meter::new(models, 0);
-    let mut take = |name: String, size: u64, reader: &mut dyn Read, meter: &mut Meter| -> std::result::Result<(), Stop> {
-        let result = match wanted(size) {
-            None => "unknown",
-            Some(entry) if has(&place.root, entry) || has(&partial, entry) => "already",
-            Some(entry) => {
-                models.set(|job| job["file"] = entry.path.clone().into());
-                let ok = copy_checked(reader, &partial, entry, meter)?;
-                meter.finish(entry.size);
-                if ok {
-                    "accepted"
-                } else {
-                    "mismatch"
+    let mut take =
+        |name: String, size: u64, reader: &mut dyn Read, meter: &mut Meter| -> std::result::Result<(), Stop> {
+            let result = match wanted(size) {
+                None => "unknown",
+                Some(entry) if has(&place.root, entry) || has(&partial, entry) => "already",
+                Some(entry) => {
+                    models.set(|job| job["file"] = entry.path.clone().into());
+                    let ok = copy_checked(reader, &partial, entry, meter)?;
+                    meter.finish(entry.size);
+                    if ok {
+                        "accepted"
+                    } else {
+                        "mismatch"
+                    }
                 }
-            }
+            };
+            results.push(json!({"name": name, "result": result, "path": wanted(size).map(|e| e.path.clone())}));
+            Ok(())
         };
-        results.push(json!({"name": name, "result": result, "path": wanted(size).map(|e| e.path.clone())}));
-        Ok(())
-    };
     for path in paths {
         let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
         let unreadable = |e: std::io::Error| Stop::Failed(format!("读不到所选文件 {name}：{error}", error = e));
@@ -743,7 +747,6 @@ fn import(models: &Models, place: &Place, paths: &[PathBuf]) -> std::result::Res
             take(name, u64::MAX, &mut empty, &mut meter)?;
         }
     }
-    drop(take);
     let complete = manifest.files.iter().all(|e| has(&place.root, e) || has(&partial, e));
     if complete && !ready_at(&place.root, manifest) {
         activate(&place.root, &partial, manifest)?;

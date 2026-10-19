@@ -352,8 +352,8 @@ fn run_with(
         }
         if pending > 0 {
             if let Some(ctx) = context {
-                let worker = std::env::var_os("ILLUSTASH_RECOGNITION_WORKER")
-                    .filter(|_| !crate::app_models::waiting(root));
+                let worker =
+                    std::env::var_os("ILLUSTASH_RECOGNITION_WORKER").filter(|_| !crate::app_models::waiting(root));
                 if let Some(worker) = worker {
                     recognise(
                         library,

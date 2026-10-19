@@ -27,10 +27,12 @@ struct Route {
     mode: Mode,
     served: AtomicUsize,
 }
+/// (path, Range header) of each request the server saw.
+type Hits = Arc<Mutex<Vec<(String, Option<String>)>>>;
 struct Server {
     base: String,
     /// (path, Range header) of every request.
-    hits: Arc<Mutex<Vec<(String, Option<String>)>>>,
+    hits: Hits,
 }
 fn serve(routes: Vec<(&str, Vec<u8>, Mode)>) -> Server {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
@@ -66,18 +68,23 @@ fn serve(routes: Vec<(&str, Vec<u8>, Mode)>) -> Server {
                 }
                 seen.lock().unwrap().push((path.clone(), range.clone()));
                 let Some(route) = routes.get(&path) else {
-                    let _ = stream.write_all(b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+                    let _ =
+                        stream.write_all(b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
                     return;
                 };
                 let first_time = route.served.fetch_add(1, Ordering::SeqCst) == 0;
                 let mut body = route.body.clone();
                 match &route.mode {
                     Mode::Missing => {
-                        let _ = stream.write_all(b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+                        let _ = stream
+                            .write_all(b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
                         return;
                     }
                     Mode::Redirect(to) => {
-                        let _ = write!(stream, "HTTP/1.1 302 Found\r\nLocation: {to}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+                        let _ = write!(
+                            stream,
+                            "HTTP/1.1 302 Found\r\nLocation: {to}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                        );
                         return;
                     }
                     Mode::Corrupt => body.iter_mut().for_each(|b| *b ^= 0x5a),
@@ -408,15 +415,25 @@ fn imported_files_and_zip_entries_are_matched_by_hash_whatever_their_names() {
     let info: Value = serde_json::from_str(&info_at(models, &place).dump()).unwrap();
     assert_eq!(info["missing"], json!(["sub/metrics.json"]));
     fs::write(chosen.join("metrics.json"), &fixture.files[2].1).unwrap();
-    post(models, &place, json!({"action": "import", "paths": [chosen.join("metrics.json"), chosen.join("model (1).onnx")]}))
-        .unwrap();
+    post(
+        models,
+        &place,
+        json!({"action": "import", "paths": [chosen.join("metrics.json"), chosen.join("model (1).onnx")]}),
+    )
+    .unwrap();
     let job = finished(models);
     assert_eq!(job["results"][0]["result"], "accepted");
     installed(&fixture, &place);
     // Once enabled, the same file again is reported as already there.
     post(models, &place, json!({"action": "import", "paths": [chosen.join("model (1).onnx")]})).unwrap();
     assert_eq!(finished(models)["results"][0]["result"], "already");
-    for bad in [json!({"action": "import"}), json!({"action": "import", "paths": []}), json!({"action": "import", "paths": [""]}), json!({"action": "x"}), json!({"action": "cancel", "extra": 1})] {
+    for bad in [
+        json!({"action": "import"}),
+        json!({"action": "import", "paths": []}),
+        json!({"action": "import", "paths": [""]}),
+        json!({"action": "x"}),
+        json!({"action": "cancel", "extra": 1}),
+    ] {
         assert!(post(models, &place, bad).is_err());
     }
 }
@@ -449,12 +466,28 @@ fn the_mirror_is_an_https_address_kept_with_the_other_preferences() {
     let out = post(models, &place, json!({"action": "mirror", "mirror": "https://hf.example.org/"})).unwrap();
     assert_eq!(out["mirror"], "https://hf.example.org");
     assert_eq!(out["sources"][0], "hf.example.org");
-    assert_eq!(place.sources(&fixture.manifest.files[1])[0].1, "https://hf.example.org/org/repo/resolve/abc123/upstream/sub/feat.onnx");
-    assert_eq!(place.sources(&fixture.manifest.files[1])[1].1, format!("{}/ms/models/org/repo/resolve/master/upstream/sub/feat.onnx", server.base));
-    for bad in ["http://hf.example.org", "ftp://x", "https://u:p@hf.example.org", "https://hf.example.org/?a=1", "http://127.0.0.1/", "x"] {
+    assert_eq!(
+        place.sources(&fixture.manifest.files[1])[0].1,
+        "https://hf.example.org/org/repo/resolve/abc123/upstream/sub/feat.onnx"
+    );
+    assert_eq!(
+        place.sources(&fixture.manifest.files[1])[1].1,
+        format!("{}/ms/models/org/repo/resolve/master/upstream/sub/feat.onnx", server.base)
+    );
+    for bad in [
+        "http://hf.example.org",
+        "ftp://x",
+        "https://u:p@hf.example.org",
+        "https://hf.example.org/?a=1",
+        "http://127.0.0.1/",
+        "x",
+    ] {
         assert!(post(models, &place, json!({"action": "mirror", "mirror": bad})).is_err(), "{bad}");
     }
-    assert_eq!(post(models, &place, json!({"action": "mirror", "mirror": "https://huggingface.co"})).unwrap()["mirror"], "https://huggingface.co");
+    assert_eq!(
+        post(models, &place, json!({"action": "mirror", "mirror": "https://huggingface.co"})).unwrap()["mirror"],
+        "https://huggingface.co"
+    );
     let out = post(models, &place, json!({"action": "mirror", "mirror": null})).unwrap();
     assert_eq!(out["mirror"], "https://mirror.invalid");
     let prefs = crate::app_updates::read(&place.preferences);
@@ -480,7 +513,10 @@ fn system_proxy_settings_are_read_for_https() {
 fn the_built_in_manifest_lists_the_packaged_models() {
     let m = manifest();
     let paths: Vec<_> = m.files.iter().map(|e| e.path.as_str()).collect();
-    assert_eq!(paths, ["wd_swinv2_v3_emb.onnx", "ccip/model_feat.onnx", "ccip/model_metrics.onnx", "ccip/metrics.json"]);
+    assert_eq!(
+        paths,
+        ["wd_swinv2_v3_emb.onnx", "ccip/model_feat.onnx", "ccip/model_metrics.onnx", "ccip/metrics.json"]
+    );
     for e in &m.files {
         assert_eq!(e.sha256.len(), 64);
         assert!(e.hf.revision.len() == 40, "the Hugging Face address is pinned to a commit");
