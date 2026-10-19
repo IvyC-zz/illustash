@@ -86,8 +86,21 @@ impl Deadline {
 const RUNNING: u8 = 0;
 const IDLE: u8 = 1;
 const LIMIT: u8 = 2;
+/// Where a deadline reads the time: the monotonic clock, or in unit tests one moved by hand, so the
+/// deadline rules are checked without depending on how fast a loaded machine runs (#219).
+#[derive(Clone, Default)]
+struct Time(Option<Arc<Mutex<Instant>>>);
+impl Time {
+    fn now(&self) -> Instant {
+        match &self.0 {
+            None => Instant::now(),
+            Some(manual) => *manual.lock().unwrap_or_else(|e| e.into_inner()),
+        }
+    }
+}
 struct Clock {
     deadline: Deadline,
+    time: Time,
     started: Instant,
     progressed: Mutex<Instant>,
     /// Why the task stopped by itself (IDLE/LIMIT), kept so cancellation and timeout stay apart.
@@ -95,7 +108,7 @@ struct Clock {
 }
 impl Clock {
     fn reason(&self) -> u8 {
-        let now = Instant::now();
+        let now = self.time.now();
         let reason = if self.deadline.limit.is_some_and(|d| now >= self.started + d) {
             LIMIT
         } else if self
@@ -179,7 +192,7 @@ impl TaskContext {
     }
     /// Real work happened: restart the idle window. No effect on the total limit.
     pub fn progressed(&self) {
-        *self.clock.progressed.lock().unwrap_or_else(|e| e.into_inner()) = Instant::now();
+        *self.clock.progressed.lock().unwrap_or_else(|e| e.into_inner()) = self.clock.time.now();
     }
     pub fn cancel(&self) {
         self.cancel.store(true, Ordering::SeqCst);
@@ -248,12 +261,21 @@ impl Task {
         deadline: Deadline,
         work: impl FnOnce(TaskContext) -> Result<()> + Send + 'static,
     ) -> Self {
-        let now = Instant::now();
+        Self::start_timed(identity, deadline, Time::default(), work)
+    }
+    fn start_timed(
+        identity: TaskIdentity,
+        deadline: Deadline,
+        time: Time,
+        work: impl FnOnce(TaskContext) -> Result<()> + Send + 'static,
+    ) -> Self {
+        let now = time.now();
         let context = TaskContext {
             identity,
             cancel: Arc::new(AtomicBool::new(false)),
             clock: Arc::new(Clock {
                 deadline,
+                time,
                 started: now,
                 progressed: Mutex::new(now),
                 expired: AtomicU8::new(RUNNING),
@@ -342,61 +364,77 @@ mod tests {
         assert!(worker_kind("illustash-index", Some("research")).unwrap_err().contains("index，但"));
         assert!(worker_kind("illustash-terms", None).is_err());
     }
-    /// Run `work` under `deadline` and return its error message and whether it timed out.
-    fn stopped(deadline: Deadline, work: impl FnOnce(&TaskContext) + Send + 'static) -> (String, bool) {
-        let result = Arc::new(Mutex::new(None));
-        let out = result.clone();
-        let mut task = Task::start_with(identity(), deadline, move |ctx| {
-            work(&ctx);
-            let error = loop {
-                if let Err(e) = ctx.check() {
-                    break e;
-                }
-                thread::sleep(Duration::from_millis(1));
-            };
-            *out.lock().unwrap() = Some((error.to_string(), ctx.timed_out()));
-            Err(error)
+    impl Time {
+        fn manual() -> Self {
+            Self(Some(Arc::new(Mutex::new(Instant::now()))))
+        }
+        fn advance(&self, by: Duration) {
+            *self.0.as_ref().expect("manual clock").lock().unwrap() += by;
+        }
+    }
+    /// A task that runs until it stops, its deadline read from a clock that moves only when told.
+    fn waiting(deadline: Deadline) -> (Task, Time) {
+        let time = Time::manual();
+        let task = Task::start_timed(identity(), deadline, time.clone(), |ctx| loop {
+            ctx.check()?;
+            thread::sleep(Duration::from_millis(1));
         });
-        assert!(task.wait(Duration::from_secs(5)));
-        assert_eq!(task.outcome(), TaskOutcome::Cancelled);
-        let value = result.lock().unwrap().take().unwrap();
-        value
+        (task, time)
     }
     #[test]
     fn idle_deadline_follows_progress_and_limit_bounds_the_whole_task() {
-        let idle = Deadline { idle: Some(Duration::from_millis(80)), limit: None };
+        let (mut task, time) = waiting(Deadline { idle: Some(Duration::from_millis(80)), limit: None });
+        let ctx = task.context();
         // Steady progress keeps the task alive well past one idle window.
-        let started = Instant::now();
-        let last = Arc::new(Mutex::new(started));
-        let seen = last.clone();
-        let (message, timed_out) = stopped(idle, move |ctx| {
-            while started.elapsed() < Duration::from_millis(400) {
-                *seen.lock().unwrap() = Instant::now();
-                ctx.progressed();
-                assert!(ctx.check().is_ok(), "progressing task stopped");
-                thread::sleep(Duration::from_millis(20));
-            }
-        });
-        // Expiry is no earlier than one idle window after the last progress, however late a sleep ran.
-        assert!(started.elapsed() >= Duration::from_millis(400));
-        assert!(last.lock().unwrap().elapsed() >= Duration::from_millis(80));
-        assert_eq!((message.as_str(), timed_out), ("不合法：任务超时：80 毫秒没有进展", true));
-        let limit = Deadline { idle: Some(Duration::from_secs(60)), limit: Some(Duration::from_millis(150)) };
-        let (message, timed_out) = stopped(limit, |ctx| ctx.progressed());
-        assert_eq!((message.as_str(), timed_out), ("不合法：任务超时：超过 150 毫秒上限", true));
+        for _ in 0..10 {
+            time.advance(Duration::from_millis(79));
+            assert!(ctx.check().is_ok(), "progressing task stopped");
+            ctx.progressed();
+        }
+        // It expires one full idle window after the last progress, not before.
+        time.advance(Duration::from_millis(79));
+        assert!(ctx.check().is_ok());
+        time.advance(Duration::from_millis(1));
+        assert_eq!(ctx.check().unwrap_err().to_string(), "不合法：任务超时：80 毫秒没有进展");
+        assert!(ctx.timed_out());
+        assert!(task.wait(Duration::from_secs(10)));
+        assert_eq!(task.outcome(), TaskOutcome::Cancelled);
+        // Progress restarts only the idle window; the total limit still counts from the start.
+        let (mut task, time) =
+            waiting(Deadline { idle: Some(Duration::from_secs(60)), limit: Some(Duration::from_millis(150)) });
+        let ctx = task.context();
+        for _ in 0..2 {
+            time.advance(Duration::from_millis(70));
+            ctx.progressed();
+            assert!(ctx.check().is_ok());
+        }
+        time.advance(Duration::from_millis(10));
+        assert_eq!(ctx.check().unwrap_err().to_string(), "不合法：任务超时：超过 150 毫秒上限");
+        assert!(ctx.timed_out());
+        assert!(task.wait(Duration::from_secs(10)));
         assert_eq!(super::human(Duration::from_secs(600)), "10 分钟");
         assert_eq!(super::human(Duration::from_secs(86_400)), "24 小时");
     }
     #[test]
-    fn cancellation_is_never_reported_as_timeout() {
+    fn idle_deadline_on_the_real_clock_stops_a_task_without_progress() {
+        // Waiting out a short window only gets longer on a busy machine, so this cannot fail early.
         let mut task =
             Task::start_with(identity(), Deadline { idle: Some(Duration::from_millis(30)), limit: None }, |ctx| loop {
                 ctx.check()?;
                 thread::sleep(Duration::from_millis(1));
             });
         let ctx = task.context();
+        assert!(task.wait(Duration::from_secs(30)));
+        assert!(ctx.timed_out());
+        assert_eq!(ctx.check().unwrap_err().to_string(), "不合法：任务超时：30 毫秒没有进展");
+        assert_eq!(task.outcome(), TaskOutcome::Cancelled);
+    }
+    #[test]
+    fn cancellation_is_never_reported_as_timeout() {
+        let (mut task, time) = waiting(Deadline { idle: Some(Duration::from_millis(30)), limit: None });
+        let ctx = task.context();
         task.stop();
-        thread::sleep(Duration::from_millis(60));
+        time.advance(Duration::from_millis(60));
         assert!(!ctx.timed_out());
         assert_eq!(ctx.check().unwrap_err().to_string(), "不合法：任务已取消");
         assert_eq!(task.outcome(), TaskOutcome::Cancelled);
@@ -458,7 +496,10 @@ mod tests {
         ] {
             let file = std::env::temp_dir().join(format!("illustash-group-{}", identity().task_id));
             let output = file.clone();
-            let mut task = Task::start(identity(), timeout, move |ctx| {
+            // The timeout runs on a clock moved only once the group is published: a slow shell start can
+            // no longer be killed before it writes the file.
+            let time = Time::manual();
+            let mut task = Task::start_timed(identity(), Deadline::fixed(timeout), time.clone(), move |ctx| {
                 let mut cmd = Command::new("/bin/sh");
                 cmd.arg("-c").arg(format!("sleep 60 & echo $$ > '{}'; {script}", output.display()));
                 let status = ctx.process(&mut cmd)?;
@@ -468,7 +509,7 @@ mod tests {
                     Err(Error::Invalid("worker failed".into()))
                 }
             });
-            let until = Instant::now() + Duration::from_secs(2);
+            let until = Instant::now() + Duration::from_secs(10);
             let pgid = loop {
                 if let Ok(text) = std::fs::read_to_string(&file) {
                     if let Ok(pgid) = text.trim().parse::<i32>() {
@@ -478,12 +519,13 @@ mod tests {
                 assert!(Instant::now() < until, "worker did not publish its process group");
                 thread::sleep(Duration::from_millis(1));
             };
+            time.advance(Duration::from_millis(60));
             if cancel {
                 task.stop();
             } else {
-                assert!(task.wait(Duration::from_secs(2)));
+                assert!(task.wait(Duration::from_secs(10)));
             }
-            let until = Instant::now() + Duration::from_secs(2);
+            let until = Instant::now() + Duration::from_secs(10);
             while unsafe { libc::kill(-pgid, 0) } == 0 && Instant::now() < until {
                 thread::sleep(Duration::from_millis(10));
             }
