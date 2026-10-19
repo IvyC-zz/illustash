@@ -428,9 +428,10 @@ def _load(module):
 
 BASELINE_STATES = FIXTURES.parent / 'baseline_states'
 RETIRED = frozenset({'entities', 'links', 'work_review', 'names', 'display_names', 'name_aliases', 'identity_baseline'})
-# The last two were added by core v8 (#201): what the history shows from them is compared in the replies.
+# The last three were added by core v8 (#201): what the history shows from the two `actions` columns, and the orders
+# readers take from `term_names.seq`, are compared in the replies.
 SKIP_COLUMNS = frozenset({('term_packages', 'manifest'), ('term_evidence', 'fingerprint'),
-                          ('actions', 'label_kind'), ('actions', 'label_count')})
+                          ('actions', 'label_kind'), ('actions', 'label_count'), ('term_names', 'seq')})
 STAMP = re.compile(r'learning-v1:[0-9a-f]{64}')
 TERMS_VERSION = int(re.search(r'pub const SCHEMA_VERSION: i64 = (\d+);',
                               (Path(__file__).resolve().parents[1] / 'crates/core/src/schema.rs').read_text()).group(1))

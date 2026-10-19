@@ -46,6 +46,7 @@ fn create_entity(c: &Connection, args: &Value) -> Result<Value> {
         "INSERT INTO entities(id,name,kind,artist,original) VALUES (?,'','character',?,?)",
         params![id, artist, (kind == "oc") as i64],
     )?;
+    legacy_characters::born(c, &id, "user")?;
     character_names::put_name(c, &id, text(&args["lang"], "缺少名字的语言")?, "user", name, "display", 0, 1)?;
     created(c, std::slice::from_ref(&id))?;
     Ok(json!({"id": id}))
@@ -58,6 +59,7 @@ fn create_linked(c: &Connection, args: &Value) -> Result<Value> {
     }
     let id = new_id(&args["id"])?;
     c.execute("INSERT INTO entities(id,name,kind) VALUES (?,'','character')", [&id])?;
+    legacy_characters::born(c, &id, "user")?;
     c.execute("INSERT INTO links(system,key,entity_id,source) VALUES ('danbooru',?,?,'user')", [tag, &id])?;
     let mut ids = vec![id.clone()];
     let work = work_for(
@@ -91,6 +93,7 @@ fn shared_oc(c: &Connection, args: &Value) -> Result<Value> {
     }
     let id = new_id(&args["id"])?;
     c.execute("INSERT INTO entities(id,name,kind,original,label_only) VALUES (?,'','character',1,1)", [&id])?;
+    legacy_characters::born(c, &id, "user")?;
     character_names::put_name(c, &id, "zh", "user", SHARED_OC, "display", 0, 1)?;
     created(c, std::slice::from_ref(&id))?;
     Ok(json!({"id": id}))
@@ -203,6 +206,7 @@ fn work_create(c: &Connection, args: &Value) -> Result<String> {
     }
     let ident = new_id(&args["id"])?;
     c.execute("INSERT INTO entities(id,name,kind,parent_id) VALUES (?,'','work',?)", params![ident, parent])?;
+    legacy_characters::born(c, &ident, "user")?;
     c.execute("INSERT INTO work_review(entity_id,parent_locked) VALUES (?,1)", [&ident])?;
     character_names::put_name(c, &ident, text(&args["lang"], "缺少名字的语言")?, "user", title, "display", 0, 1)?;
     if let Some(tag) = args["tag"].as_str().filter(|t| !t.is_empty()) {
@@ -435,6 +439,7 @@ fn work_evidence(c: &Connection, args: &Value) -> Result<Value> {
             e => e,
         })?;
         c.execute("INSERT INTO entities(id,name,kind) VALUES (?,'','work')", [&ident])?;
+        legacy_characters::born(c, &ident, "user")?;
         let readable =
             args["readable"][&tag].as_str().ok_or_else(|| Error::Invalid(format!("缺少作品 {tag} 的可读名")))?;
         character_names::put_name(c, &ident, "en", "index", readable, "display", 0, 0)?;

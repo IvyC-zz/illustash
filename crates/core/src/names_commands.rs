@@ -2,7 +2,7 @@
 //! `{"op": …}`（或 `{"op": "batch", "ops": [...]}`），一个核心事务。NameUpdater（联网补名字）和相册标题的写入走这里，
 //! 逐行照 tests/reference/web/names.py（#9 已删除） 的 `put`、`tag_entities`、`NameUpdater.replace` / `aliases` / `seed` 与 tests/reference/web/store.py（#9 已删除） 的
 //! `Store.alias`。名字切到核心之后，旧表是兼容表（写保护），提交时由 `legacy_names::after_write` 补齐主数据、重建投影。
-use crate::character_names::{alias, put_name};
+use crate::character_names::{alias, put_name, TERM_OF};
 use crate::schema::{begin_writing, commit_writing};
 use crate::{names_view, Error, Result};
 use rusqlite::{Connection, TransactionBehavior};
@@ -72,14 +72,17 @@ pub fn put(c: &Connection, kind: &str, key: &str, lang: &str, source: &str, valu
 fn replace(c: &Connection, kind: &str, key: &str, source: &str, values: &[Value]) -> Result<()> {
     if kind == "character" {
         for entity in tag_entities(c, key)? {
-            c.prepare_cached("DELETE FROM names WHERE entity_id=? AND source=? AND role='display'")?
-                .execute([&entity, source])?;
+            c.prepare_cached(&format!(
+                "DELETE FROM term_names WHERE term_id = {TERM_OF} AND source = ? AND role = 'display'"
+            ))?
+            .execute([&entity, source])?;
         }
     } else {
         if kind == "work" {
             c.prepare_cached(
-                "DELETE FROM names WHERE role='display' AND source=? AND entity_id IN
-                 (SELECT entity_id FROM links WHERE system='qualifier' AND key=?)",
+                "DELETE FROM term_names WHERE role = 'display' AND source = ? AND term_id IN (
+                   SELECT t.id FROM links l JOIN terms t ON t.key = l.entity_id
+                   WHERE l.system = 'qualifier' AND l.key = ?)",
             )?
             .execute([source, key])?;
         }
@@ -97,8 +100,10 @@ fn replace(c: &Connection, kind: &str, key: &str, source: &str, values: &[Value]
 fn danbooru_aliases(c: &Connection, kind: &str, tag: &str, values: &[Value]) -> Result<()> {
     let values: Vec<&str> = values.iter().map(|v| text(v, "别名不正确")).collect::<Result<_>>()?;
     let write = |entity: &str| -> Result<()> {
-        c.prepare_cached("DELETE FROM names WHERE entity_id=? AND role='alias' AND source='danbooru'")?
-            .execute([entity])?;
+        c.prepare_cached(&format!(
+            "DELETE FROM term_names WHERE term_id = {TERM_OF} AND role = 'alias' AND source = 'danbooru'"
+        ))?
+        .execute([entity])?;
         for (i, value) in values.iter().enumerate() {
             put_name(c, entity, "", "danbooru", value, "alias", i as i64, 0)?;
         }
@@ -142,8 +147,10 @@ pub fn one(c: &Connection, op: &Value) -> Result<()> {
         }
         // NameUpdater.seed：索引给的名字，先删掉这个身份原有的索引名。
         "seed_index" => {
-            c.prepare_cached("DELETE FROM names WHERE entity_id=? AND role='display' AND source='index'")?
-                .execute([s("entity")?])?;
+            c.prepare_cached(&format!(
+                "DELETE FROM term_names WHERE term_id = {TERM_OF} AND role = 'display' AND source = 'index'"
+            ))?
+            .execute([s("entity")?])?;
             for lang in ["zh", "ja", "en"] {
                 put(c, "character", s("key")?, lang, "index", &op["names"][lang])?;
             }

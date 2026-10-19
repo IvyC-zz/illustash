@@ -89,8 +89,11 @@ pub fn hits(c: &Connection, query: &str) -> Result<Hits> {
     s.add(&tags.replace("{0}", "l.key"), &[&like], true)?;
     s.add(&tags.replace("{0}", "replace(l.key,'_',' ')"), &[&like], false)?;
     s.add(
-        "SELECT coalesce(e.parent_id,e.id),n.value FROM names n JOIN entities e ON e.id=n.entity_id
-                     WHERE n.value LIKE ? ESCAPE '\\'",
+        "SELECT coalesce(e.parent_id, e.id), n.value
+         FROM term_names n
+         JOIN terms t ON t.id = n.term_id
+         JOIN entities e ON e.id = t.key
+         WHERE n.value LIKE ? ESCAPE '\\'",
         &[&like],
         false,
     )?;
@@ -129,7 +132,16 @@ pub fn hits(c: &Connection, query: &str) -> Result<Hits> {
     let mut at: HashMap<String, usize> = HashMap::new();
     {
         let mut stmt = c.prepare(
-            "SELECT n.entity_id,n.value FROM names n JOIN entities e ON e.id=n.entity_id WHERE e.kind='work' UNION SELECT l.entity_id,l.key FROM links l JOIN entities e ON e.id=l.entity_id WHERE e.kind='work'",
+            "SELECT t.key, n.value
+             FROM term_names n
+             JOIN terms t ON t.id = n.term_id
+             JOIN entities e ON e.id = t.key
+             WHERE e.kind = 'work'
+             UNION
+             SELECT l.entity_id, l.key
+             FROM links l
+             JOIN entities e ON e.id = l.entity_id
+             WHERE e.kind = 'work'",
         )?;
         let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
         for row in rows {
@@ -203,13 +215,15 @@ mod tests {
             "CREATE TABLE entities(id TEXT PRIMARY KEY, kind TEXT, parent_id TEXT, work TEXT, artist TEXT, variant TEXT,
                work_id TEXT);
              CREATE TABLE links(system TEXT, key TEXT, entity_id TEXT, current INTEGER);
-             CREATE TABLE names(entity_id TEXT, value TEXT);
+             CREATE TABLE terms(id INTEGER PRIMARY KEY, key TEXT);
+             CREATE TABLE term_names(term_id INTEGER, value TEXT);
              CREATE TABLE term_key_names(kind TEXT, key TEXT, lang TEXT, source TEXT, value TEXT);
              CREATE TABLE term_key_aliases(kind TEXT, key TEXT, value TEXT, position INTEGER);
              INSERT INTO entities VALUES ('w','work',NULL,'','','',NULL),
                ('a','character',NULL,'blue_archive','','','w'),('s','skin','a','','','swimsuit',NULL);
              INSERT INTO links VALUES ('danbooru','alice_(blue_archive)','a',1),('danbooru','ip_tag','w',1);
-             INSERT INTO names VALUES ('a','爱丽丝');",
+             INSERT INTO terms VALUES (1,'a');
+             INSERT INTO term_names VALUES (1,'爱丽丝');",
         )
         .unwrap();
         let h = hits(&c, "爱丽丝").unwrap();

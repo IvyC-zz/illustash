@@ -106,7 +106,22 @@ fn fingerprint(c: &Connection, rows: &[Entity]) -> Result<String> {
     for r in rows {
         values.push(json!([r.id, r.parent, r.work, r.variant, r.keys]));
         // Automatic display writes must not invalidate the task's own source fingerprint.
-        values.push(json!(c.prepare("SELECT lang,value,source,role,preferred,position FROM names WHERE entity_id=? AND source='user' ORDER BY lang,value,source,role,position")?.query_map([&r.id],|r|Ok(json!([r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,String>(2)?,r.get::<_,String>(3)?,r.get::<_,i64>(4)?,r.get::<_,i64>(5)?])))?.collect::<rusqlite::Result<Vec<_>>>()?));
+        values.push(json!(c
+            .prepare(
+                "SELECT lang, value, source, role, preferred, position
+             FROM term_names
+             WHERE term_id = (SELECT id FROM terms WHERE key = ?) AND source = 'user'
+             ORDER BY lang, value, source, role, position"
+            )?
+            .query_map([&r.id], |r| Ok(json!([
+                r.get::<_, String>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, String>(2)?,
+                r.get::<_, String>(3)?,
+                r.get::<_, i64>(4)?,
+                r.get::<_, i64>(5)?
+            ])))?
+            .collect::<rusqlite::Result<Vec<_>>>()?));
     }
     let works = dump(&json!(rows.iter().map(|r| r.work.as_str()).collect::<BTreeSet<_>>()));
     values.push(json!(crate::app_migrate_data::rows_with(c,"SELECT system,key,entity_id,current FROM links WHERE entity_id IN (SELECT entity_id FROM links WHERE system='qualifier' AND key IN (SELECT value FROM json_each(?))) ORDER BY system,key,entity_id",[works])?));
@@ -131,16 +146,16 @@ fn aliases(c: &Connection, kind: &str, key: &str, query: bool) -> Result<Vec<Str
         let index = pairs(
             &format!(
                 "SELECT lang, value
-                 FROM names
-                 WHERE entity_id = ? AND role = 'display' AND source = 'index'
+                 FROM term_names
+                 WHERE term_id = (SELECT id FROM terms WHERE key = ?) AND role = 'display' AND source = 'index'
                  {INDEX_ORDER}"
             ),
             &[&id],
         )?;
         let wiki = values(
             "SELECT value
-             FROM names
-             WHERE entity_id = ? AND role = 'alias' AND source IN ('danbooru', 'bangumi')
+             FROM term_names
+             WHERE term_id = (SELECT id FROM terms WHERE key = ?) AND role = 'alias' AND source IN ('danbooru', 'bangumi')
              ORDER BY position, value",
             &[&id],
         )?;
@@ -199,7 +214,14 @@ fn enrich(source: &mut Source, kind: &str, key: &str, work: &str) -> Result<Vec<
     // Search candidates are assembled in memory; no intermediate remote aliases can overwrite a concurrent edit.
     let id = crate::names_commands::tag_entities(&c, key)?.first().cloned();
     let index: Vec<(String, String)> = if kind == "character" {
-        c.prepare("SELECT lang,value FROM names WHERE entity_id=? AND role='display' AND source='index' ORDER BY CASE lang WHEN 'ja' THEN 0 WHEN 'zh' THEN 1 ELSE 2 END,value")?.query_map([&id],|r|Ok((r.get(0)?,r.get(1)?)))?.collect::<rusqlite::Result<_>>()?
+        c.prepare(&format!(
+            "SELECT lang, value
+             FROM term_names
+             WHERE term_id = (SELECT id FROM terms WHERE key = ?) AND role = 'display' AND source = 'index'
+             {INDEX_ORDER}"
+        ))?
+        .query_map([&id], |r| Ok((r.get(0)?, r.get(1)?)))?
+        .collect::<rusqlite::Result<_>>()?
     } else {
         c.prepare(&format!(
             "SELECT lang, value
@@ -212,7 +234,10 @@ fn enrich(source: &mut Source, kind: &str, key: &str, work: &str) -> Result<Vec<
     };
     let extra: Vec<String> = if kind == "character" {
         c.prepare(
-            "SELECT value FROM names WHERE entity_id=? AND role='alias' AND source='bangumi' ORDER BY position,value",
+            "SELECT value
+             FROM term_names
+             WHERE term_id = (SELECT id FROM terms WHERE key = ?) AND role = 'alias' AND source = 'bangumi'
+             ORDER BY position, value",
         )?
         .query_map([&id], |r| r.get(0))?
         .collect::<rusqlite::Result<_>>()?
@@ -1993,7 +2018,7 @@ mod sources_tests {
             let mut c = lib.db();
             let tx = c.transaction().unwrap();
             crate::schema::begin_writing(&tx).unwrap();
-            tx.execute("DELETE FROM names WHERE source='model'", []).unwrap();
+            tx.execute("DELETE FROM term_names WHERE source='model'", []).unwrap();
             tx.execute("DELETE FROM name_cache WHERE key LIKE '[\"done\",%'", []).unwrap();
             crate::schema::commit_writing(tx).unwrap();
         }

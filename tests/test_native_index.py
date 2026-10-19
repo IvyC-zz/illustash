@@ -387,7 +387,7 @@ def projection(path):
         ids=dict(c.execute("SELECT entity_id,system||':'||key FROM links WHERE system IN ('ccip','qualifier')"))
         def canon(rows):return sorted([tuple(unclocked(ids.get(v,v)) for v in r) for r in rows],key=repr)
         return {table:canon(c.execute(sql)) for table,sql in {
-          'names':'SELECT entity_id,lang,value,source,role,preferred,position FROM names',
+          'names':'SELECT t.key,n.lang,n.value,n.source,n.role,n.preferred,n.position FROM term_names n JOIN terms t ON t.id=n.term_id JOIN term_tree r ON r.term_id=n.term_id',
           'links':'SELECT system,key,entity_id,current FROM links',
           'memberships':'SELECT uuid,entity,status FROM memberships',
           'candidates':'SELECT uuid,entity,score,source FROM candidates',

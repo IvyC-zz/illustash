@@ -382,7 +382,12 @@ fn entities(c: &Connection, q: &str) -> Result<Json> {
     let ranking = if q.is_empty() { "" } else { "sm.rank DESC," };
     let sql=format!("SELECT e.id,entity_name(e.id) AS name,e.work,e.kind,e.artist,e.label_only,e.mascot,e.parent_id,
       (SELECT count(*) FROM (SELECT uuid FROM memberships WHERE entity=e.id UNION ALL SELECT uuid FROM tag_memberships WHERE entity=e.id) m WHERE {VISIBLE}) AS count,
-      (SELECT group_concat(value,' · ') FROM (SELECT DISTINCT n.value FROM names n WHERE n.entity_id=e.id AND n.value LIKE ? ESCAPE '\\' AND n.value<>entity_name(e.id) LIMIT 2)) AS matched
+      (SELECT group_concat(value,' · ') FROM (
+         SELECT DISTINCT n.value
+         FROM term_names n
+         WHERE n.term_id = (SELECT id FROM terms WHERE key = e.id)
+           AND n.value LIKE ? ESCAPE '\\' AND n.value <> entity_name(e.id)
+         LIMIT 2)) AS matched
       FROM entities e {matched} WHERE e.parent_id IS NULL AND e.kind<>'work' AND e.merged_into IS NULL ORDER BY {ranking}count DESC,entity_name(e.id) LIMIT 30");
     let result = rows(c, &sql, &[&like(&q)])?.into_iter().map(|v| display(c, v)).collect::<Result<Vec<_>>>()?;
     c.execute("DELETE FROM name_matches", [])?;
@@ -395,7 +400,7 @@ pub(crate) fn works(c: &Connection, q: &str) -> Result<Json> {
         let id=v.get("id").expect("http_read internal invariant").text();
         let count:i64=c.query_row(&format!("{TREE} SELECT count(DISTINCT m.uuid) FROM memberships m JOIN entities e ON e.id=m.entity WHERE e.work_id IN (SELECT id FROM tree) AND {VISIBLE}"),[id],|r|r.get(0))?;
         let mut values=vec![v.get("name").expect("http_read internal invariant").text().to_owned(),v.get("tag").expect("http_read internal invariant").text().to_owned(),v.get("qualifier").expect("http_read internal invariant").text().to_owned()];
-        values.extend(strings(c,"SELECT value FROM names WHERE entity_id=?",&[id])?);
+        values.extend(strings(c, "SELECT value FROM term_names WHERE term_id = (SELECT id FROM terms WHERE key = ?)", &[id])?);
         let watchable=!v.get("tag").expect("http_read internal invariant").text().is_empty();v.set("count",count.into());v.set("watchable",watchable.into());
         if needle.is_empty() || values.iter().any(|s|normalize(s).contains(&needle)||normalize(&s.replace('_'," ")).contains(&needle)){result.push(v);}
     }
@@ -626,8 +631,12 @@ mod tests {
           CREATE TABLE entities(id TEXT PRIMARY KEY,kind TEXT,parent_id TEXT,variant TEXT,merged_into TEXT,original INTEGER,work TEXT,artist TEXT,label_only INTEGER,mascot INTEGER,work_id TEXT);
           INSERT INTO entities VALUES ('x','character',NULL,'',NULL,0,'','',0,0,NULL);
           CREATE TABLE links(system TEXT,key TEXT,entity_id TEXT,current INTEGER,added_at TEXT);
-          CREATE TABLE names(entity_id TEXT,lang TEXT,value TEXT,source TEXT,preferred INTEGER,role TEXT);
-          INSERT INTO names VALUES ('x','zh','x','user',1,'display');
+          CREATE TABLE terms(id INTEGER PRIMARY KEY,key TEXT);
+          INSERT INTO terms VALUES (1,'x');
+          CREATE TABLE term_tree(term_id INTEGER PRIMARY KEY);
+          INSERT INTO term_tree VALUES (1);
+          CREATE TABLE term_names(term_id INTEGER,lang TEXT,value TEXT,source TEXT,preferred INTEGER,role TEXT,seq INTEGER);
+          INSERT INTO term_names VALUES (1,'zh','x','user',1,'display',1);
           CREATE TABLE term_key_names(kind TEXT,key TEXT,lang TEXT,source TEXT,value TEXT);
           INSERT INTO term_key_names VALUES ('work','unprojected','zh','user','未投影🙂');
           CREATE TABLE term_key_aliases(kind TEXT,key TEXT,value TEXT,position INTEGER);
@@ -681,7 +690,7 @@ mod tests {
         let c = Connection::open_in_memory().unwrap();
         fixture(&c);
         // Projected entity/covered-work lookups have no reason to build View.
-        c.execute_batch("DROP TABLE links; DROP TABLE names; DROP TABLE term_key_names;").unwrap();
+        c.execute_batch("DROP TABLE links; DROP TABLE term_names; DROP TABLE term_key_names;").unwrap();
         register_names(&c).unwrap();
         let values: (String, String, String, String) = c
             .query_row(
@@ -700,7 +709,7 @@ mod tests {
         // A work key outside the projection reads only its own display names (#105).
         let c = Connection::open_in_memory().unwrap();
         fixture(&c);
-        c.execute_batch("DROP TABLE entities; DROP TABLE links; DROP TABLE names;").unwrap();
+        c.execute_batch("DROP TABLE entities; DROP TABLE links; DROP TABLE term_names;").unwrap();
         register_names(&c).unwrap();
         let name: String = c.query_row("SELECT work_name('unprojected')", [], |r| r.get(0)).unwrap();
         assert_eq!(name, "未投影🙂");

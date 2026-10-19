@@ -266,6 +266,7 @@ mod tests {
         let mut c = Connection::open(root.join("library.sqlite")).unwrap();
         c.execute_batch("PRAGMA foreign_keys=OFF").unwrap();
         c.execute_batch(&data["base"]["library"].as_str().unwrap().replace("@ROOT@", &root.to_string_lossy())).unwrap();
+        crate::migrate(&mut c).unwrap();
         let tx = c.transaction().unwrap();
         crate::schema::begin_writing(&tx).unwrap();
         tx.execute_batch(
@@ -280,8 +281,18 @@ mod tests {
               ('danbooru','swim_tag','skin1',1,'import','2026-10-07 06:00:03'),('danbooru','outfit_tag','skin2',1,'import','2026-10-07 06:00:08'),('danbooru','merged_tag','merged',1,'import','2026-10-07 06:00:04'),
               ('danbooru','own_tag','own',1,'import','2026-10-07 06:00:05'),('danbooru','loose_tag','loose',0,'import','2026-10-07 06:00:06'),
               ('danbooru','idle_tag','idle',1,'import','2026-10-07 06:00:07');
-             INSERT INTO names(entity_id,lang,value,source,role,preferred,position) VALUES
-              ('tagless','ja','タグナシ','index','display',0,0),('hidden','zh','隐','user','display',1,0);
+             -- The identities become terms, as the commands that create them do (`legacy_characters::born`).
+             INSERT INTO terms(key,kind,origin) SELECT id,kind,'user' FROM entities
+              WHERE id IN ('tagless','hidden','skin1','skin2','merged','own','loose','idle') ORDER BY rowid;
+             INSERT INTO term_tree(term_id,parent_id,merged_into,work_id,work_text)
+              SELECT t.id,e.parent_id,e.merged_into,e.work_id,e.work FROM entities e JOIN terms t ON t.key=e.id
+              WHERE e.id IN ('tagless','hidden','skin1','skin2','merged','own','loose','idle');
+             INSERT INTO term_names(term_id,lang,value,source,role,preferred,position,seq) VALUES
+              ((SELECT id FROM terms WHERE key='tagless'),'ja','タグナシ','index','display',0,0,
+               (SELECT coalesce(max(seq),0)+1 FROM term_names));
+             INSERT INTO term_names(term_id,lang,value,source,role,preferred,position,seq) VALUES
+              ((SELECT id FROM terms WHERE key='hidden'),'zh','隐','user','display',1,0,
+               (SELECT coalesce(max(seq),0)+1 FROM term_names));
              INSERT INTO term_key_names VALUES ('character','','en','wiki','Empty key'),('skin','outfit_x','zh','index','外套');
              INSERT INTO candidates VALUES ('a','tagless','WD',0.9),('a','hidden','WD',0.9),('a','skin1','WD',0.9),
               ('a','skin2','WD',0.9),('a','merged','WD',0.9),('a','own','WD',0.9),('a','loose','WD',0.9);",

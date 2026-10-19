@@ -1,10 +1,20 @@
-//! 名字这一步不收编（方案第 10 节）：`names` 仍是 Python 的表。核心命令需要写用户名字和别名时，逐行照
-//! tests/reference/web/names.py（#9 已删除） `put_name` 与 tests/reference/web/store.py（#9 已删除） `Store.alias` 的语义写。
+//! 角色、皮肤、作品的名字（`term_names`，按词条）。核心第 8 版（#201）起这里直接写 `term_names`，语义逐行照
+//! tests/reference/web/names.py（#9 已删除） `put_name` 与 tests/reference/web/store.py（#9 已删除） `Store.alias`。
+//!
+//! 身份（`entities.id`）就是词条的 `terms.key`；新建的身份在建出来时就镜像成词条（`legacy_characters::mirror_state`），
+//! 所以写名字时总能找到它的词条。`seq` 是名字的先后（旧表 `names` 的 rowid）：新行取当前最大值加一，与 SQLite 分配
+//! rowid 的规则相同；`ON CONFLICT DO UPDATE` 保留原值。
 use crate::{Error, Result};
 use rusqlite::{params, Connection, OptionalExtension};
 
 /// tests/reference/web/names.py（#9 已删除） PRIORITY 的来源。
 const SOURCES: [&str; 7] = ["user", "bangumi", "index", "danbooru", "wiki", "builtin", "model"];
+
+/// 一个身份的词条 id：`term_id = (SELECT id FROM terms WHERE key = ?)`。
+pub const TERM_OF: &str = "(SELECT id FROM terms WHERE key = ?)";
+
+/// 新一行名字的先后：当前最大值加一。
+pub const NEXT_SEQ: &str = "(SELECT coalesce(max(seq), 0) + 1 FROM term_names)";
 
 /// Python `str.strip()` 去掉的空白（比 Rust 的 White_Space 多 \x1c–\x1f）。
 pub fn strip(value: &str) -> &str {
@@ -35,13 +45,17 @@ pub fn put_name(
         return Ok(());
     }
     if preferred != 0 && role == "display" {
-        c.prepare_cached("UPDATE names SET preferred=0 WHERE entity_id=? AND lang=? AND role='display'")?
-            .execute([entity, lang])?;
+        c.prepare_cached(&format!(
+            "UPDATE term_names SET preferred = 0
+             WHERE term_id = {TERM_OF} AND lang = ? AND role = 'display'"
+        ))?
+        .execute([entity, lang])?;
     }
-    c.prepare_cached(
-        "INSERT INTO names(entity_id,lang,value,source,role,preferred,position) VALUES (?,?,?,?,?,?,?)
-         ON CONFLICT(entity_id,role,lang,source,value) DO UPDATE SET preferred=max(preferred,excluded.preferred)",
-    )?
+    c.prepare_cached(&format!(
+        "INSERT INTO term_names(term_id, lang, value, source, role, preferred, position, seq)
+         VALUES ({TERM_OF}, ?, ?, ?, ?, ?, ?, {NEXT_SEQ})
+         ON CONFLICT(term_id, role, lang, source, value) DO UPDATE SET preferred = max(preferred, excluded.preferred)"
+    ))?
     .execute(params![entity, lang, value, source, role, preferred, position])?;
     Ok(())
 }
@@ -49,7 +63,9 @@ pub fn put_name(
 /// `Store.alias`：只供搜索的名字；这个身份已有同值的别名就不再加。返回是否加了一行。
 pub fn alias(c: &Connection, entity: &str, value: &str, source: &str, lang: &str) -> Result<bool> {
     let exists = c
-        .prepare_cached("SELECT 1 FROM names WHERE entity_id=? AND role='alias' AND value=?")?
+        .prepare_cached(&format!(
+            "SELECT 1 FROM term_names WHERE term_id = {TERM_OF} AND role = 'alias' AND value = ?"
+        ))?
         .query_row([entity, strip(value)], |_| Ok(()))
         .optional()?
         .is_some();

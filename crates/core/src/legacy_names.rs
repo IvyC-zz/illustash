@@ -1,14 +1,9 @@
-//! 名字收编（docs/TERMS_NAMES_PLAN.md N2）：`names`、`display_names`、`name_aliases` 三张 Python 表收进核心主数据。
-//! - `names`（按身份）→ `term_names`，只动角色 / 皮肤 / 作品（`term_tree` 里的词条）的行；画师、用户概念的名字不碰。
-//! - `display_names`（按文字键：作品 qualifier、皮肤 variant）→ `term_key_names`。
-//! - `name_aliases`（按文字键的别名，搜索用）→ `term_key_aliases`。
+//! 名字的核心数据（docs/TERMS_NAMES.md）：按身份的名字 `term_names`、按文字键的显示名 `term_key_names` 与别名
+//! `term_key_aliases`，以及由它们算出的显示投影的维护（`after_write`、`refresh_projection`）。
 //!
-//! 核心第 8 版（#201）起 `term_key_names`、`term_key_aliases` 是唯一权威，旧表在升级时同步一次后删除
-//! （`retire_display_names`、`retire_aliases`）；只剩 `names` 还由旧表同步。
-//!
-//! 与角色收编相同的套路：只读旧表、把主数据补到与旧表一致、再由主数据生成结果与旧表逐行比对；一个事务，预检失败或
-//! 有差异都整次回滚。名字表是状态不是历史（改名的撤销快照在 actions 里，由角色撤销处理），没有「出处」要解释。
-//! 可以反复运行；旧表没变时不改任何行。
+//! 核心第 8 版（#201）起这三张表是唯一权威，名字命令直接写它们（`character_names`、`names_commands`）。原先由核心维护的
+//! 兼容表 `names`、`display_names`、`name_aliases` 在升级时照旧表同步一次、逐行核对后删除（`retire_names`、
+//! `retire_display_names`、`retire_aliases`）。
 use crate::{Error, Result};
 use rusqlite::{Connection, TransactionBehavior};
 use serde_json::{json, Map, Value};
@@ -21,14 +16,6 @@ CREATE TABLE IF NOT EXISTS term_key_aliases(
  kind TEXT NOT NULL, key TEXT NOT NULL, value TEXT NOT NULL, position INTEGER NOT NULL,
  PRIMARY KEY(kind,key,value)) WITHOUT ROWID;
 ";
-
-/// 旧表 → 核心：每对（旧的样子，核心生成的样子），列一一对应。
-const PAIRS: [(&str, &str, &str); 1] = [(
-    "names",
-    "SELECT entity_id,lang,value,source,role,preferred,position FROM names",
-    "SELECT t.key,n.lang,n.value,n.source,n.role,n.preferred,n.position FROM term_names n
-         JOIN terms t ON t.id=n.term_id JOIN term_tree r ON r.term_id=t.id",
-)];
 
 #[derive(Default, Debug)]
 pub struct Report {
@@ -73,44 +60,6 @@ fn samples(c: &Connection, sql: &str) -> Result<Vec<Value>> {
     Ok(rows.collect::<rusqlite::Result<_>>()?)
 }
 
-fn preflight(c: &Connection, r: &mut Report) -> Result<()> {
-    for (check, sql) in [
-        ("名字属于不在核心里的身份", "SELECT entity_id FROM names WHERE entity_id NOT IN (SELECT t.key FROM terms t JOIN term_tree r ON r.term_id=t.id)"),
-        ("名字为空或超过 200 字", "SELECT entity_id,value FROM names WHERE length(value) NOT BETWEEN 1 AND 200"),
-        ("名字的语言或角色不合约定", "SELECT entity_id,lang,role FROM names WHERE lang NOT IN ('','zh','ja','en') OR role NOT IN ('display','alias')"),
-        ("首选不是 0 / 1", "SELECT entity_id,preferred FROM names WHERE preferred NOT IN (0,1)"),
-    ] {
-        let n = count(c, sql)?;
-        if n > 0 {
-            r.preflight.push(json!({"check": check, "count": n, "samples": samples(c, sql)?}));
-        }
-    }
-    Ok(())
-}
-
-/// 主数据补到与旧表一致：多的删、少的加（整行比较，首选、顺序变了就是一删一加）。返回每张表改了多少行。
-fn mirror(c: &Connection, r: &mut Report) -> Result<()> {
-    let names_scope = "term_id IN (SELECT term_id FROM term_tree)";
-    let removed = c.execute(
-        &format!(
-            "DELETE FROM term_names WHERE {names_scope} AND (term_id,lang,value,source,role,preferred,position) NOT IN (
-               SELECT t.id,n.lang,n.value,n.source,n.role,n.preferred,n.position FROM names n JOIN terms t ON t.key=n.entity_id)"
-        ),
-        [],
-    )?;
-    let added = c.execute(
-        "INSERT INTO term_names(term_id,lang,value,source,role,preferred,position)
-         SELECT t.id,n.lang,n.value,n.source,n.role,n.preferred,n.position FROM names n
-         JOIN terms t ON t.key=n.entity_id JOIN term_tree r ON r.term_id=t.id
-         WHERE NOT EXISTS(SELECT 1 FROM term_names x WHERE x.term_id=t.id AND x.role=n.role AND x.lang=n.lang
-                          AND x.source=n.source AND x.value=n.value AND x.preferred=n.preferred AND x.position=n.position)
-         ON CONFLICT(term_id,role,lang,source,value) DO UPDATE SET preferred=excluded.preferred,position=excluded.position",
-        [],
-    )?;
-    r.changed.insert("names".into(), json!(removed + added));
-    Ok(())
-}
-
 /// 核心第 8 版（#201）退役一张旧兼容表。旧表不在时什么都不做，返回 None。旧表还在时（升级前的库）它在第 7 版里是
 /// 权威：先照它整表同步核心表（`sync`），再按 `columns` 双向逐行核对；一致就删掉旧表。返回仍不一致的行数。
 fn retire(c: &Connection, legacy: &str, core: &str, columns: &str, sync: &str) -> Result<Option<i64>> {
@@ -146,29 +95,115 @@ pub(crate) fn retire_aliases(c: &Connection) -> Result<()> {
 }
 
 /// 核心第 8 版：`term_key_names` 成为按文字键的显示名的唯一权威，旧表 `display_names` 同步、核对后删掉（`retire`）。
-/// 旧表上的名字版本触发器随表删除，改装到 `term_key_names` 上（`version_triggers`）。读显示名的结果与行的先后无关
-/// （`names_view::choose_key`），所以旧表的插入顺序不用保留。
+/// 读显示名的结果与行的先后无关（`names_view::choose_key`），所以旧表的插入顺序不用保留。
 pub(crate) fn retire_display_names(c: &Connection) -> Result<()> {
-    let versioned: bool = c.query_row(
-        "SELECT EXISTS(SELECT 1 FROM main.sqlite_master WHERE type = 'trigger' AND name = 'names_version_display_names_insert')",
-        [],
-        |r| r.get(0),
-    )?;
     let sync = "DELETE FROM term_key_names
          WHERE (kind, key, lang, source, value) NOT IN (SELECT kind, key, lang, source, value FROM display_names);
          INSERT OR IGNORE INTO term_key_names SELECT kind, key, lang, source, value FROM display_names;";
     if let Some(differs @ 1..) = retire(c, "display_names", "term_key_names", "kind, key, lang, source, value", sync)? {
         return Err(Error::Schema(format!("旧显示名表与词条核心不一致，没有升级：{differs} 行")));
     }
-    if versioned {
-        version_triggers(c)?;
-    }
     Ok(())
 }
 
+/// 核心第 8 版：`term_names` 成为角色、皮肤、作品名字的唯一权威（画师的名字本来就在这里）。所有库都给它加上名字的
+/// 先后 `seq`（见 `character_names`）。旧表 `names` 还在时（升级前的库）它在第 7 版里是权威，核心每次写都照它同步
+/// 镜像：先照它整表同步一次（之前版本留下的过期镜像随之补上），再逐行核对；一致就按旧表的 rowid 填 `seq`，删掉
+/// 旧表。返回核对报告；不干净时什么都没删，调用方拒绝升级。
+pub(crate) fn retire_names(c: &Connection) -> Result<Report> {
+    let has_seq: bool =
+        c.query_row("SELECT EXISTS(SELECT 1 FROM pragma_table_info('term_names') WHERE name = 'seq')", [], |r| {
+            r.get(0)
+        })?;
+    if !has_seq {
+        c.execute_batch(
+            "ALTER TABLE term_names ADD COLUMN seq INTEGER;
+             CREATE INDEX term_names_seq ON term_names(seq);",
+        )?;
+    }
+    let mut r = Report::default();
+    let exists: bool = c.query_row(
+        "SELECT EXISTS(SELECT 1 FROM main.sqlite_master WHERE type = 'table' AND name = 'names')",
+        [],
+        |r| r.get(0),
+    )?;
+    if !exists {
+        return Ok(r);
+    }
+    // 主数据补到与旧表一致：多的删、少的加（整行比较，首选、顺序变了就是一删一加）。只动 `term_tree` 里的词条。
+    let in_tree = "term_id IN (SELECT term_id FROM term_tree)";
+    let removed = c.execute(
+        &format!(
+            "DELETE FROM term_names
+             WHERE {in_tree} AND (term_id, lang, value, source, role, preferred, position) NOT IN (
+               SELECT t.id, n.lang, n.value, n.source, n.role, n.preferred, n.position
+               FROM names n JOIN terms t ON t.key = n.entity_id)"
+        ),
+        [],
+    )?;
+    let added = c.execute(
+        "INSERT INTO term_names(term_id, lang, value, source, role, preferred, position)
+         SELECT t.id, n.lang, n.value, n.source, n.role, n.preferred, n.position
+         FROM names n JOIN terms t ON t.key = n.entity_id JOIN term_tree r ON r.term_id = t.id
+         WHERE NOT EXISTS(
+           SELECT 1 FROM term_names x
+           WHERE x.term_id = t.id AND x.role = n.role AND x.lang = n.lang AND x.source = n.source
+             AND x.value = n.value AND x.preferred = n.preferred AND x.position = n.position)
+         ON CONFLICT(term_id, role, lang, source, value) DO UPDATE SET
+           preferred = excluded.preferred, position = excluded.position",
+        [],
+    )?;
+    r.changed.insert("names".into(), json!(removed + added));
+    let old = "SELECT entity_id, lang, value, source, role, preferred, position FROM names";
+    let new = "SELECT t.key, n.lang, n.value, n.source, n.role, n.preferred, n.position
+               FROM term_names n JOIN terms t ON t.id = n.term_id JOIN term_tree r ON r.term_id = t.id";
+    let (missing_sql, extra_sql) = (format!("{old} EXCEPT {new}"), format!("{new} EXCEPT {old}"));
+    let (missing, extra) = (count(c, &missing_sql)?, count(c, &extra_sql)?);
+    let mut entry = json!({"old": count(c, old)?, "core": count(c, new)?, "missing": missing, "extra": extra});
+    if missing > 0 {
+        entry["missing_samples"] = json!(samples(c, &missing_sql)?);
+    }
+    if extra > 0 {
+        entry["extra_samples"] = json!(samples(c, &extra_sql)?);
+    }
+    r.tables.insert("names".into(), entry);
+    if !r.clean() {
+        return Ok(r);
+    }
+    c.execute_batch(&format!(
+        "UPDATE term_names SET seq = (
+           SELECT n.rowid FROM names n JOIN terms t ON t.key = n.entity_id
+           WHERE t.id = term_names.term_id AND n.role = term_names.role AND n.lang = term_names.lang
+             AND n.source = term_names.source AND n.value = term_names.value)
+         WHERE {in_tree};
+         DROP TABLE names;"
+    ))?;
+    Ok(r)
+}
+
 /// 名字版本 `meta.names_version`：这几张表每改一行就加一，显示投影据此判断是否过期（`projection_current`）。由应用层
-/// 建库时装上（不在的表跳过）；核心第 8 版把 `display_names` 上的那一组换到 `term_key_names` 上。
-pub const VERSIONED: [&str; 4] = ["entities", "links", "names", "term_key_names"];
+/// 建库时装上（不在的表跳过）；核心第 8 版在旧表退役之后把 `names`、`display_names` 上的两组换到 `term_names`、
+/// `term_key_names` 上（`versioned` 为真时调用 `version_triggers`）。
+/// `term_names` 只算角色、皮肤、作品（`term_tree` 里的词条）的名字，画师的名字不算，与原来只数 `names` 相同。
+pub const VERSIONED: [&str; 4] = ["entities", "links", "term_names", "term_key_names"];
+
+/// 这个库装过名字版本触发器（应用层建的库）。
+pub(crate) fn versioned(c: &Connection) -> Result<bool> {
+    Ok(c.query_row(
+        "SELECT EXISTS(SELECT 1 FROM main.sqlite_master WHERE type = 'trigger' AND name GLOB 'names_version_*')",
+        [],
+        |r| r.get(0),
+    )?)
+}
+
+/// `term_names` 的一行是不是角色、皮肤、作品的名字（触发器里用）。
+fn in_tree(event: &str) -> &'static str {
+    match event {
+        "INSERT" => "NEW.term_id IN (SELECT term_id FROM term_tree)",
+        "DELETE" => "OLD.term_id IN (SELECT term_id FROM term_tree)",
+        _ => "OLD.term_id IN (SELECT term_id FROM term_tree) OR NEW.term_id IN (SELECT term_id FROM term_tree)",
+    }
+}
 
 pub fn version_triggers(c: &Connection) -> Result<()> {
     for table in VERSIONED {
@@ -180,8 +215,9 @@ pub fn version_triggers(c: &Connection) -> Result<()> {
             continue;
         }
         for event in ["INSERT", "UPDATE", "DELETE"] {
+            let when = if table == "term_names" { format!(" WHEN {}", in_tree(event)) } else { String::new() };
             c.execute_batch(&format!(
-                "CREATE TRIGGER IF NOT EXISTS names_version_{table}_{} AFTER {event} ON {table}\n                        BEGIN UPDATE meta SET value=CAST(value AS INTEGER)+1 WHERE key='names_version'; END",
+                "CREATE TRIGGER IF NOT EXISTS names_version_{table}_{} AFTER {event} ON {table}{when}\n                        BEGIN UPDATE meta SET value=CAST(value AS INTEGER)+1 WHERE key='names_version'; END",
                 event.to_ascii_lowercase()
             ))?;
         }
@@ -189,68 +225,26 @@ pub fn version_triggers(c: &Connection) -> Result<()> {
     Ok(())
 }
 
-/// 由主数据生成的样子与旧表逐行比较。
-pub fn compare(c: &Connection, r: &mut Report) -> Result<()> {
-    for (table, old, new) in PAIRS {
-        let (missing_sql, extra_sql) = (format!("{old} EXCEPT {new}"), format!("{new} EXCEPT {old}"));
-        let (missing, extra) = (count(c, &missing_sql)?, count(c, &extra_sql)?);
-        let mut entry = json!({"old": count(c, old)?, "core": count(c, new)?, "missing": missing, "extra": extra});
-        if missing > 0 {
-            entry["missing_samples"] = json!(samples(c, &missing_sql)?);
-        }
-        if extra > 0 {
-            entry["extra_samples"] = json!(samples(c, &extra_sql)?);
-        }
-        r.tables.insert(table.into(), entry);
-    }
-    Ok(())
-}
-
-/// 核心第 8 版迁移（#201）：名字的旧表还是权威，核心每次写都照它同步镜像（之前版本留下的过期镜像也由下一次写补上），
-/// 所以升级时先在迁移的事务里整表同步一次，再逐行比较；同步之后仍不一致才拒绝升级。
-pub(crate) fn sync_in(c: &Connection) -> Result<Report> {
-    let mut r = Report::default();
-    mirror(c, &mut r)?;
-    compare(c, &mut r)?;
-    Ok(r)
-}
-
-/// `illustash-terms sync-names`：前提是角色已切到核心（名字挂在角色的词条上）。一个事务，通过才提交。
+/// `illustash-terms verify-names`：名字只在核心里，没有旧表要比，报告总是干净的（保留命令，第 4 步随兼容层删除）。
 pub fn verify(conn: &mut Connection) -> Result<Report> {
     crate::schema::require_current(conn)?;
-    let mut r = Report::default();
-    compare(conn, &mut r)?;
-    r.committed = r.clean();
-    Ok(r)
+    Ok(Report { committed: true, ..Report::default() })
 }
 
+/// `illustash-terms sync-names`：同上，没有要同步的旧表。前提仍是角色已切到核心。
 pub fn sync(conn: &mut Connection) -> Result<Report> {
     crate::schema::require_current(conn)?;
-    let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-    if !crate::legacy_characters::characters_in_core(&tx)? {
+    if !crate::legacy_characters::characters_in_core(conn)? {
         return Err(Error::Conflict("先把角色切到词条核心，再收编名字".into()));
     }
-    let mut r = Report::default();
-    preflight(&tx, &mut r)?;
-    if !r.preflight.is_empty() {
-        return Ok(r);
-    }
-    mirror(&tx, &mut r)?;
-    compare(&tx, &mut r)?;
-    if r.clean() {
-        tx.commit()?;
-        r.committed = true;
-    }
-    Ok(r)
+    Ok(Report { committed: true, ..Report::default() })
 }
 
 pub const NAMES_IN_CORE: &str = "terms_names";
-/// 主数据与投影都已同步的 `names_version`（`VERSIONED` 几张表的触发器递增它）。
+/// 显示投影已同步的 `names_version`（`VERSIONED` 几张表的触发器递增它）。
 const PROJECTED: &str = "names_projected";
-/// 显示投影可以先于主数据镜像完成，两者分别记版本，避免事务中途读取后再次重建。
+/// 事务中途重建过显示投影时的版本，避免提交时再次重建（`refresh_projection`）。
 const DISPLAY_PROJECTED: &str = "names_display_projected";
-/// 切换后由核心维护、加写保护的名字兼容表。
-pub const GUARDED: [&str; 1] = ["names"];
 
 pub fn names_in_core(c: &Connection) -> Result<bool> {
     Ok(c.query_row("SELECT EXISTS(SELECT 1 FROM meta WHERE key=?1 AND value='core')", [NAMES_IN_CORE], |r| r.get(0))?)
@@ -320,9 +314,11 @@ pub fn track(c: &Connection) -> Result<()> {
                     if (event == "INSERT" && side == "old") || (event == "DELETE" && side == "new") {
                         continue;
                     }
-                    if table == "names" {
+                    if table == "term_names" {
+                        // 只记角色、皮肤、作品的名字（画师的名字也在这张表里，与显示投影无关）。
                         body.push_str(&format!(
-                            "INSERT INTO names_dirty_entities SELECT {side}.entity_id WHERE NOT EXISTS(SELECT 1 FROM names_dirty_entities WHERE id={side}.entity_id);"
+                            "INSERT INTO names_dirty_entities SELECT t.key FROM main.terms t JOIN main.term_tree r ON r.term_id=t.id
+                             WHERE t.id={side}.term_id AND NOT EXISTS(SELECT 1 FROM names_dirty_entities WHERE id=t.key);"
                         ));
                     } else {
                         body.push_str(&format!(
@@ -425,8 +421,8 @@ fn structure_triggers(c: &Connection) -> Result<Vec<&'static str>> {
     Ok(columns)
 }
 
-/// 本事务的名字相关改动都被追踪到了：名字主数据与显示投影都按记下的身份和键增量维护（结构变化也一样，#104）。
-/// 若开始时投影已经过期（值 2），来源未被本事务完整追踪，保留全量同步。
+/// 本事务的名字相关改动都被追踪到了：显示投影按记下的身份和键增量维护（结构变化也一样，#104）。若开始时投影已经
+/// 过期（值 2），来源未被本事务完整追踪，整表重建。
 fn tracked_master(c: &Connection) -> Result<bool> {
     let exists: bool =
         c.query_row("SELECT EXISTS(SELECT 1 FROM sqlite_temp_master WHERE name='names_dirty_full')", [], |r| r.get(0))?;
@@ -434,29 +430,8 @@ fn tracked_master(c: &Connection) -> Result<bool> {
         && !c.query_row("SELECT EXISTS(SELECT 1 FROM names_dirty_full WHERE value=2)", [], |r| r.get::<_, bool>(0))?)
 }
 
-/// 按本事务记下的身份补齐名字主数据。由 dirty 表驱动（`CROSS JOIN` 固定连接顺序），不扫整张 `names`、`terms`
-/// （#102 A2）。`term_names` 是普通表，固定契约连隐藏 rowid 一起比较，所以插入仍按 `names` 的 rowid
-/// 顺序（原计划整表扫描 `names` 的顺序），新行分到的 rowid 与原来相同。
-fn mirror_changed(c: &Connection) -> Result<()> {
-    c.execute_batch(
-        "DELETE FROM term_names WHERE term_id IN (
-            SELECT t.id FROM names_dirty_entities d CROSS JOIN terms t ON t.key=d.id CROSS JOIN term_tree r ON r.term_id=t.id)
-        AND NOT EXISTS(SELECT 1 FROM names n JOIN terms t ON t.key=n.entity_id
-            WHERE t.id=term_names.term_id AND n.lang=term_names.lang AND n.value=term_names.value
-            AND n.source=term_names.source AND n.role=term_names.role
-            AND n.preferred=term_names.preferred AND n.position=term_names.position);
-        INSERT INTO term_names(term_id,lang,value,source,role,preferred,position)
-        SELECT t.id,n.lang,n.value,n.source,n.role,n.preferred,n.position FROM names_dirty_entities d
-        CROSS JOIN names n ON n.entity_id=d.id CROSS JOIN terms t ON t.key=n.entity_id
-        CROSS JOIN term_tree r ON r.term_id=t.id WHERE true ORDER BY n.rowid
-        ON CONFLICT(term_id,role,lang,source,value) DO UPDATE SET preferred=excluded.preferred,position=excluded.position;",
-    )?;
-    Ok(())
-}
-
 /// 每个核心写事务提交前（schema::commit_writing）：名字已在核心、且这个事务改到了名字相关的数据，就在同一事务里
-/// 补齐主数据、维护显示投影。名字行使用依赖闭包，结构变更 / 过期状态回退整表。别名由命令直接写 `term_key_aliases`
-/// （核心第 8 版），不在这里同步。
+/// 维护显示投影。名字行使用依赖闭包，结构变更 / 过期状态回退整表。名字本身由命令直接写 `term_*`（核心第 8 版）。
 pub fn after_write(c: &Connection) -> Result<()> {
     if !names_in_core(c)? {
         return Ok(());
@@ -464,12 +439,6 @@ pub fn after_write(c: &Connection) -> Result<()> {
     let version = meta(c, "names_version")?;
     if version.is_some() && version == meta(c, PROJECTED)? {
         return Ok(());
-    }
-    if tracked_master(c)? {
-        mirror_changed(c)?;
-        verify_incremental(c, "names")?;
-    } else {
-        mirror(c, &mut Report::default())?;
     }
     refresh_projection(c, &mut None)?;
     c.execute(
@@ -505,25 +474,6 @@ pub fn record_verified(kind: &str) -> Result<()> {
 #[cfg(not(feature = "verify-incremental"))]
 pub fn record_verified(_kind: &str) -> Result<()> {
     Ok(())
-}
-
-/// 增量镜像之后、同一事务里：在保存点里再跑一遍整表同步，它不应改动任何一行；随后回滚保存点。
-fn verify_incremental(c: &Connection, kind: &str) -> Result<()> {
-    if !verifying() {
-        return Ok(());
-    }
-    c.execute_batch("SAVEPOINT verify_incremental")?;
-    let mut r = Report::default();
-    let full = mirror(c, &mut r);
-    c.execute_batch("ROLLBACK TO verify_incremental; RELEASE verify_incremental")?;
-    full?;
-    if r.changed.values().any(|v| v.as_i64() != Some(0)) {
-        return Err(Error::Conflict(format!(
-            "增量名字镜像与整表重建不一致（{kind}）：整表重建还要改 {changed}",
-            changed = Value::Object(r.changed)
-        )));
-    }
-    record_verified(&format!("mirror_{kind}"))
 }
 
 /// 局部维护显示投影之后、同一事务里（#103）：两张投影表与保存点里整表重建的结果逐行逐列相同；随后回滚保存点。
@@ -564,9 +514,8 @@ fn verify_projection(c: &Connection, kind: &str) -> Result<()> {
     record_verified(kind)
 }
 
-/// 事务中途要读显示名（核心生成历史文案，character_labels）：这个事务改过名字相关的数据就先重建显示投影。只重建投影
-/// （它只读兼容表），不补主数据、也不记 `names_projected`：主数据按 `term_tree` 挑身份，事务里后面的结构镜像可能还没
-/// 做；显示版本单独记录，提交时仍补主数据，但只在版本再次变化时重建投影。
+/// 事务中途要读显示名（核心生成历史文案，character_labels）：这个事务改过名字相关的数据就先重建显示投影，不记
+/// `names_projected`：显示版本单独记录，提交时只在版本再次变化时重建投影。
 /// `seen`：调用方上次重建时的版本，没变就不再重建。
 pub fn refresh_projection(c: &Connection, seen: &mut Option<String>) -> Result<()> {
     let version = meta(c, "names_version")?;
@@ -593,8 +542,8 @@ pub fn refresh_projection(c: &Connection, seen: &mut Option<String>) -> Result<(
     Ok(())
 }
 
-/// `illustash-terms cutover-names`：一个事务里最后一次收编（必须零差异）、整表建投影、名字兼容表加写保护、写
-/// `terms_names=core`。前提是角色已在核心。已经切过就什么都不做，返回 None；失败什么都不留。
+/// `illustash-terms cutover-names`：一个事务里写 `terms_names=core`、整表建投影（核心第 8 版起名字只在核心里，没有
+/// 旧表要收编；新建图库仍经这一步）。前提是角色已在核心。已经切过就什么都不做，返回 None；失败什么都不留。
 pub fn cutover_with_backup(conn: &mut Connection, backup: &crate::backup::RequiredBackup) -> Result<Option<Report>> {
     crate::schema_rules::migrate_with_backup(conn, backup)?;
     if names_in_core(conn)? {
@@ -609,22 +558,9 @@ pub fn cutover_with_backup(conn: &mut Connection, backup: &crate::backup::Requir
         return Err(Error::Conflict("先把角色切到词条核心，再切名字".into()));
     }
     crate::schema::begin_writing(&tx)?;
-    let mut r = Report::default();
-    preflight(&tx, &mut r)?;
-    if r.preflight.is_empty() {
-        mirror(&tx, &mut r)?;
-        compare(&tx, &mut r)?;
-    }
-    if !r.clean() {
-        return Err(Error::Conflict(format!("名字收编核对没有通过，不切换：{report}", report = r.to_json())));
-    }
-    for table in GUARDED {
-        crate::schema::guard(&tx, table)?;
-    }
     tx.execute("INSERT OR REPLACE INTO meta(key,value) VALUES (?1,'core')", [NAMES_IN_CORE])?;
     tx.execute("INSERT OR IGNORE INTO meta(key,value) VALUES ('names_version','0')", [])?;
     after_write(&tx)?;
     crate::schema::commit_writing(tx)?;
-    r.committed = true;
-    Ok(Some(r))
+    Ok(Some(Report { committed: true, ..Report::default() }))
 }

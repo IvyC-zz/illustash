@@ -20,7 +20,7 @@ import urllib.parse
 from unittest.mock import patch
 
 from tests import test_native_lifecycle as lifecycle
-from tests.fixed_expectations import RETIRED, unclocked
+from tests.fixed_expectations import RETIRED, SKIP_COLUMNS, unclocked
 from tests.test_read_http import INTERRUPT, SPAWN, free_port, wait_until
 from tests.name_providers import Providers
 from tools.verify_read_http import fetch
@@ -227,12 +227,12 @@ class NativeNamesTest(unittest.TestCase):
         self.assertEqual(self.request('/api/names',{'action':'refresh'})['status'],200)
         self.assertTrue(self.service.entered.wait(3))
         self.assertEqual(self.request('/api/names',{'action':'refresh'})['status'],400)
-        with closing(sqlite3.connect(self.lib.db)) as c: before=c.execute('SELECT * FROM names ORDER BY entity_id,value').fetchall()
+        with closing(sqlite3.connect(self.lib.db)) as c: before=c.execute(NAMES+' ORDER BY t.key,n.value').fetchall()
         with ThreadPoolExecutor() as pool:
             switched=pool.submit(self.request,'/api/libraries/open',{'path':str(second.path)})
             time.sleep(.1);self.service.release.set()
             self.assertEqual(switched.result(timeout=5)['status'],200)
-        with closing(sqlite3.connect(self.lib.db)) as c: self.assertEqual(before,c.execute('SELECT * FROM names ORDER BY entity_id,value').fetchall())
+        with closing(sqlite3.connect(self.lib.db)) as c: self.assertEqual(before,c.execute(NAMES+' ORDER BY t.key,n.value').fetchall())
         self.assertTrue(any(s=='pending' for _,s,_ in self.events()))
         self.assertFalse(self.sentinel.exists())
     def test_exit_waits_cancellation_and_keeps_pending_for_recovery(self):
@@ -273,12 +273,12 @@ class NativeNamesTest(unittest.TestCase):
         self.enable_error()
         self.assertTrue(any(s=='pending' for _,s,_ in self.events()))
         with closing(sqlite3.connect(self.lib.db)) as c:
-            formal=c.execute('SELECT * FROM names ORDER BY entity_id,role,source,value').fetchall()
+            formal=c.execute(NAMES+' ORDER BY t.key,n.role,n.source,n.value').fetchall()
         self.stop(self.process)
         with sqlite3.connect(self.lib.db) as c:c.execute('DROP TRIGGER synthetic_ack_failure')
         self.process,self.log=self.start(self.lib.path);self.finish()
         wait_until(lambda:all(s=='done' for _,s,_ in self.events()),timeout=8)
-        with closing(sqlite3.connect(self.lib.db)) as c:self.assertEqual(formal,c.execute('SELECT * FROM names ORDER BY entity_id,role,source,value').fetchall())
+        with closing(sqlite3.connect(self.lib.db)) as c:self.assertEqual(formal,c.execute(NAMES+' ORDER BY t.key,n.role,n.source,n.value').fetchall())
 
     def test_query_source_changed_while_pending_rejects_old_name(self):
         self.enable();ident=self.alice
@@ -348,10 +348,17 @@ class NativeNamesTest(unittest.TestCase):
 
 
 
+# The names of characters, skins and works by identity key (the former `names` table, core v8 keeps them in term_names).
+NAMES="SELECT t.key,n.lang,n.value,n.source,n.role,n.preferred,n.position FROM term_names n JOIN terms t ON t.id=n.term_id JOIN term_tree r ON r.term_id=n.term_id"
+
+
 def name_tables(c):
-    """Formal/core name tables and history, rows sorted; clock-like text as <clock>."""
+    """Formal/core name tables and history, rows sorted; clock-like text as <clock>. Columns core v8 added are left out,
+    as the comparison baseline leaves them out (SKIP_COLUMNS)."""
     tables=[r[0] for r in c.execute("SELECT name FROM sqlite_master WHERE type='table' AND (name IN ('names','display_names','name_aliases','actions') OR name LIKE 'term_name%' OR name IN ('term_key_names','term_key_aliases'))")]
-    return {table:sorted([[unclocked(v) for v in row] for row in c.execute(f'SELECT * FROM "{table}"')],key=repr) for table in tables}
+    def columns(table):
+        return ','.join(f'"{name}"' for _,name,*_ in c.execute(f'PRAGMA table_info("{table}")') if (table,name) not in SKIP_COLUMNS)
+    return {table:sorted([[unclocked(v) for v in row] for row in c.execute(f'SELECT {columns(table)} FROM "{table}"')],key=repr) for table in tables}
 
 
 if __name__=='__main__':unittest.main()
