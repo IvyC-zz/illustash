@@ -243,6 +243,22 @@ class DesktopComputeStagingTest(unittest.TestCase):
             self.assertFalse((root / 'incomplete').exists())
             with patch.object(build.sys, 'platform', 'darwin'), self.assertRaisesRegex(ValueError, 'Windows'):
                 build.desktop_compute(source, root / 'mac')
+            (root / 'onnxruntime.dll').write_bytes(b'fixture')
+            (root / 'onnxruntime.dll').rename(source / 'resources/onnxruntime/onnxruntime.dll')
+            (source / 'resources/licenses/models/ccip/BigScience-OpenRAIL-M.pdf').write_bytes(
+                (build.MODEL_LICENSES / 'ccip/BigScience-OpenRAIL-M.pdf').read_bytes())
+            # #168: the release installer has no models; only some of them is refused.
+            (source / 'resources/models/ccip/metrics.json').unlink()
+            with patch.object(build.sys, 'platform', 'win32'), patch.object(build, 'check_windows_crt'), self.assertRaisesRegex(ValueError, 'all present or all absent; missing resources/models/ccip/metrics.json'):
+                build.desktop_compute(source, root / 'partial models')
+            self.assertFalse((root / 'partial models').exists())
+            shutil.rmtree(source / 'resources/models')
+            release = root / 'release'
+            with patch.object(build.sys, 'platform', 'win32'), patch.object(build, 'check_windows_crt'), patch.dict(build.RESEARCH_OPENBLAS_IDENTITIES, {hashlib.sha256(b'fixture').hexdigest(): dict(version='synthetic', numpy='synthetic')}, clear=True):
+                build.desktop_compute(source, release)
+            files = json.loads((release / 'manifest.json').read_text())['files']
+            self.assertFalse(any(name.startswith('resources/models/') for name in files))
+            self.assertIn('resources/licenses/models/ccip/BigScience-OpenRAIL-M.pdf', files)
 
 
 class WindowsCRTTest(unittest.TestCase):

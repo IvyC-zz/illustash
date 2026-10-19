@@ -42,6 +42,31 @@ pub(super) fn handle(request: Request, host: &Host, received: u64, text: &str, b
         }
         return;
     }
+    // App-wide (#168): the model download runs on its own thread and outlives a library switch. Importing without
+    // paths asks the native chooser first, without holding the session.
+    if request.url() == "/api/models" {
+        let mut body = body;
+        if body.get("action").map(Json::text) == Some("import") && body.get("paths").is_none() {
+            match crate::app_platform::choose("models", true, &crate::platform_process::stopping, &translate) {
+                Ok(picked) => match picked.get("paths") {
+                    Some(paths @ Json::Array(list)) if !list.is_empty() => body.set("paths", paths.clone()),
+                    _ => {
+                        respond(request, Json::object([("cancelled", true.into())]), 200, "core");
+                        return;
+                    }
+                },
+                Err(e) => {
+                    failure(request, management_error(e), true);
+                    return;
+                }
+            }
+        }
+        match crate::app_models::post(&host.root, &body) {
+            Ok(value) => respond(request, value, 200, "core"),
+            Err(e) => failure(request, e, true),
+        }
+        return;
+    }
     // The native archive picker runs without holding the session; cancellation or
     // a switch must never deliver the chosen file into a replacement package.
     let mut body = body;

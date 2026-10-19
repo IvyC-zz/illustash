@@ -176,7 +176,7 @@ impl Session {
         let index = crate::app_index::Updater::new(&library, root, generation, &token, index_network, index_automatic)?;
         let similar = crate::app_settings::startup(&library)?.get("similar").is_some_and(truthy);
         let research = crate::app_research::Research::new(generation, &token, similar);
-        let onboarding = crate::app_onboarding::Onboarding::new(generation, &token);
+        let onboarding = crate::app_onboarding::Onboarding::new(generation, &token).with_resources(root);
         Ok(Self {
             library,
             owner: Some(owner),
@@ -338,7 +338,7 @@ impl Application {
         let similar_enabled = crate::app_settings::startup(&library)?.get("similar").is_some_and(truthy);
         let mut research = crate::app_research::Research::new(1, &token, similar_enabled);
         research.anchors = reference.parent().expect("internal file path must have a parent").to_owned();
-        let onboarding = crate::app_onboarding::Onboarding::new(1, &token);
+        let onboarding = crate::app_onboarding::Onboarding::new(1, &token).with_resources(&root);
         let mut session = Session {
             library,
             owner: Some(owner),

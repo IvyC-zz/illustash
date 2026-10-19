@@ -1,0 +1,37 @@
+{
+  "format": 1,
+  "pack": "wd-swinv2-v3_ccip-caformer-24.1",
+  "manual": "https://github.com/shio-vinyl/illustash/blob/main/docs/INSTALL.md#识别模型",
+  "mirror": "https://hf-mirror.com",
+  "modelscope": "https://modelscope.cn",
+  "files": [
+    {
+      "path": "wd_swinv2_v3_emb.onnx",
+      "size": 467461052,
+      "sha256": "ae25f5f12b2d5891728fb7768fa63d65bf13a83d6d4823e3a1bf7b42875c74ff",
+      "hf": {"repo": "deepghs/wd14_tagger_with_embeddings", "revision": "4ec31f2aeabf66353f3ee3ccd20d2f07e716851b", "file": "SmilingWolf/wd-swinv2-tagger-v3/model.onnx"},
+      "modelscope": {"repo": "deepghs/wd14_tagger_with_embeddings", "revision": "master", "file": "SmilingWolf/wd-swinv2-tagger-v3/model.onnx"}
+    },
+    {
+      "path": "ccip/model_feat.onnx",
+      "size": 150248245,
+      "sha256": "4ea118d16496274f4f6e08d3afc768cc592389e8f7f32f8732ce2215c228ac5f",
+      "hf": {"repo": "deepghs/ccip_onnx", "revision": "eb2acdd29af1703388d3d0c04221add322bc9110", "file": "ccip-caformer-24-randaug-pruned/model_feat.onnx"},
+      "modelscope": {"repo": "deepghs/ccip_onnx", "revision": "master", "file": "ccip-caformer-24-randaug-pruned/model_feat.onnx"}
+    },
+    {
+      "path": "ccip/model_metrics.onnx",
+      "size": 1649,
+      "sha256": "7e4646fdfbe369ad485b227ec47ac4092c98b8deef3af44e19fdbd8ba7bc25c1",
+      "hf": {"repo": "deepghs/ccip_onnx", "revision": "eb2acdd29af1703388d3d0c04221add322bc9110", "file": "ccip-caformer-24-randaug-pruned/model_metrics.onnx"},
+      "modelscope": {"repo": "deepghs/ccip_onnx", "revision": "master", "file": "ccip-caformer-24-randaug-pruned/model_metrics.onnx"}
+    },
+    {
+      "path": "ccip/metrics.json",
+      "size": 147,
+      "sha256": "b5535577288e22940b853192cd1661e45c7615b7d89b49a8745c2c81685552d4",
+      "hf": {"repo": "deepghs/ccip_onnx", "revision": "eb2acdd29af1703388d3d0c04221add322bc9110", "file": "ccip-caformer-24-randaug-pruned/metrics.json"},
+      "modelscope": {"repo": "deepghs/ccip_onnx", "revision": "master", "file": "ccip-caformer-24-randaug-pruned/metrics.json"}
+    }
+  ]
+}

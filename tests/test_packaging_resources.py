@@ -199,8 +199,9 @@ class PackagingResourcesTest(unittest.TestCase):
                        iqdb=self.iqdb, ort_dylib=runtime, ort_licenses=notices)
         self.assertFalse((self.root / 'incomplete-notices/manifest.json').exists())
 
-    def test_model_licenses_ship_verbatim_with_models(self):
-        """#8: packages with models carry the committed license originals; nothing else is a source."""
+    def test_model_licenses_ship_verbatim_with_every_computation_package(self):
+        """#8: computation packages carry the committed license originals, with the models or without them
+        (#168: then the app downloads the models); nothing else is a source."""
         registry = json.loads((pack.MODEL_LICENSES / 'sources.json').read_text())['files']
         self.assertEqual(sorted(registry), ['ccip/BigScience-OpenRAIL-M.pdf', 'ccip/deepghs-ccip-README.md',
                                             'ccip/deepghs-ccip_onnx-README.md', 'wd-swinv2-tagger-v3/LICENSE-2.0.txt',
@@ -222,7 +223,11 @@ class PackagingResourcesTest(unittest.TestCase):
             self.assertEqual((output / name).read_bytes(), source.read_bytes())
         without = self.root / 'without models'
         pack.stage(without, self.binaries, research=True, iqdb=self.iqdb)
-        self.assertFalse((without / 'resources/licenses/models').exists())
+        self.assertEqual(sorted(name for name in self.manifest(without)['files']
+                                if name.startswith('resources/licenses/models/')), shipped)
+        self.assertFalse((without / 'resources/models').exists())
+        self.assertEqual(pack.MODEL_FILES, ('wd_swinv2_v3_emb.onnx', 'ccip/model_feat.onnx',
+                                            'ccip/model_metrics.onnx', 'ccip/metrics.json'))
 
     def test_packages_with_models_refuse_incomplete_model_licenses(self):
         def broken(name, change):
@@ -490,6 +495,38 @@ class MacDesktopResourcesTest(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'component missing'):
                 pack.macos_desktop_compute(source, self.root / 'incomplete')
             self.assertFalse((self.root / 'incomplete').exists())
+
+
+    def test_release_app_has_no_models_and_a_partial_set_is_refused(self):
+        """#168: without --models the App carries no model file (the app downloads them); never only some."""
+        runtime = self.root / 'runtime-marker'
+        runtime.write_bytes(b'synthetic runtime')
+        notices = self.root / 'notices'
+        notices.mkdir()
+        for name in ('LICENSE', 'ThirdPartyNotices.txt'):
+            (notices / name).write_text('synthetic notice')
+        with patch.object(pack.sys, 'platform', 'darwin'):
+            if os.name == 'nt':
+                for name in ('illustash-terms', 'illustash-worker'):
+                    (self.binaries / name).write_bytes(b'synthetic marker:' + name.encode())
+            source = self.root / 'portable'
+            pack.stage(source, self.binaries, research=True, iqdb=self.iqdb, ort_dylib=runtime, ort_licenses=notices)
+            output = self.root / 'Release.app/Contents/Resources/compute'
+            pack.macos_desktop_compute(source, output)
+            installed = self.manifest(output)
+            assert_desktop_contract(self, installed, 'darwin', 'MACOS_FILES')
+            self.assertFalse(any(name.startswith('resources/models/') for name in installed['files']))
+            self.assertTrue(any(name.startswith('resources/licenses/models/') for name in installed['files']))
+            # A staged layout that lists only some models is neither package.
+            manifest = json.loads((source / 'manifest.json').read_text())
+            model = source / 'resources/models/wd_swinv2_v3_emb.onnx'
+            model.parent.mkdir(parents=True)
+            model.write_bytes(b'synthetic')
+            manifest['files']['resources/models/wd_swinv2_v3_emb.onnx'] = hashlib.sha256(b'synthetic').hexdigest()
+            (source / 'manifest.json').write_text(json.dumps(manifest))
+            with self.assertRaisesRegex(ValueError, 'all present or all absent; missing resources/models/ccip/model_feat'):
+                pack.macos_desktop_compute(source, self.root / 'partial')
+            self.assertFalse((self.root / 'partial').exists())
 
 
 class WindowsOpenBLASResourcesTest(unittest.TestCase):
