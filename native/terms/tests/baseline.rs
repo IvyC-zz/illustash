@@ -431,9 +431,10 @@ fn replay(module: &str) {
     );
 }
 
-/// Modules that commit no name changes on the incremental path (searches only, or whole rebuilds): every other
-/// module must have run the core's incremental-vs-full check at least once.
-const UNVERIFIED: [&str; 2] = ["test_terms_names_contract", "test_terms_names_projection"];
+/// Modules that commit no name changes on the incremental path (searches only, whole rebuilds, or only aliases, which
+/// the core writes directly since #201): every other module must have run the core's incremental-vs-full check at
+/// least once.
+const UNVERIFIED: [&str; 3] = ["test_terms_core", "test_terms_names_contract", "test_terms_names_projection"];
 
 macro_rules! modules {
     ($($name:ident),* $(,)?) => {$(

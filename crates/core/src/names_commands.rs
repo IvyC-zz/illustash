@@ -109,8 +109,8 @@ fn danbooru_aliases(c: &Connection, kind: &str, tag: &str, values: &[Value]) -> 
             write(&entity)?;
         }
     } else {
-        c.prepare_cached("DELETE FROM name_aliases WHERE kind=? AND key=?")?.execute([kind, tag])?;
-        let mut insert = c.prepare_cached("INSERT INTO name_aliases VALUES (?,?,?,?)")?;
+        c.prepare_cached("DELETE FROM term_key_aliases WHERE kind=? AND key=?")?.execute([kind, tag])?;
+        let mut insert = c.prepare_cached("INSERT INTO term_key_aliases VALUES (?,?,?,?)")?;
         for (i, value) in values.iter().enumerate() {
             insert.execute(rusqlite::params![kind, tag, value, i as i64])?;
         }

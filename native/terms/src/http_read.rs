@@ -630,7 +630,7 @@ mod tests {
           INSERT INTO names VALUES ('x','zh','x','user',1,'display');
           CREATE TABLE display_names(kind TEXT,key TEXT,lang TEXT,source TEXT,value TEXT);
           INSERT INTO display_names VALUES ('work','unprojected','zh','user','未投影🙂');
-          CREATE TABLE name_aliases(kind TEXT,key TEXT,value TEXT);
+          CREATE TABLE term_key_aliases(kind TEXT,key TEXT,value TEXT,position INTEGER);
           CREATE TABLE assets(uuid TEXT PRIMARY KEY);
           CREATE TABLE memberships(uuid TEXT,entity TEXT);
           CREATE TABLE tag_memberships(uuid TEXT,entity TEXT);

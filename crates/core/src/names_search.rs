@@ -94,7 +94,7 @@ pub fn hits(c: &Connection, query: &str) -> Result<Hits> {
         &[&like],
         false,
     )?;
-    for (table, field) in [("display_names", "value"), ("name_aliases", "value")] {
+    for (table, field) in [("display_names", "value"), ("term_key_aliases", "value")] {
         for (kind, join) in
             [("work", "JOIN entities e ON e.work=t.key"), ("skin", "JOIN entities e ON e.variant=t.key")]
         {
@@ -205,7 +205,7 @@ mod tests {
              CREATE TABLE links(system TEXT, key TEXT, entity_id TEXT, current INTEGER);
              CREATE TABLE names(entity_id TEXT, value TEXT);
              CREATE TABLE display_names(kind TEXT, key TEXT, lang TEXT, source TEXT, value TEXT);
-             CREATE TABLE name_aliases(kind TEXT, key TEXT, value TEXT, position INTEGER);
+             CREATE TABLE term_key_aliases(kind TEXT, key TEXT, value TEXT, position INTEGER);
              INSERT INTO entities VALUES ('w','work',NULL,'','','',NULL),
                ('a','character',NULL,'blue_archive','','','w'),('s','skin','a','','','swimsuit',NULL);
              INSERT INTO links VALUES ('danbooru','alice_(blue_archive)','a',1),('danbooru','ip_tag','w',1);

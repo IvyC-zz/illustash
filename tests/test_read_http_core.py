@@ -66,14 +66,16 @@ class CoreReadHTTPTest(HTTPHarness):
     def test_equal_sort_keys_and_legacy_name_fallback(self):
         ties=self.root/'ties'; ties.mkdir(exist_ok=True)
         self.sync('ties'); self.publish()
-        for core in (False,True):
-            if core:
-                self.sync('switched'); self.publish()
-            for path in ('/api/entities', '/api/entities?q='+urlencode({'q':'排序平局'}).split('=',1)[1], '/api/works', '/api/works?'+urlencode({'q':'作品平局'})):
-                self.pair(path)
-            # Explicitly check repeated requests with identical SQL sort keys.
-            first=self.pair('/api/entities?'+urlencode({'q':'排序平局'}))['body']
-            self.assertEqual(first,self.pair('/api/entities?'+urlencode({'q':'排序平局'}))['body'])
+        # First the library before it switched to the core (no `meta`): refused since core v8 (#201, only switched
+        # libraries are kept), and the core no longer keeps the legacy tables its reads fell back to.
+        for _ in range(6):
+            self.rec.skip('response')
+        self.sync('switched'); self.publish()
+        for path in ('/api/entities', '/api/entities?q='+urlencode({'q':'排序平局'}).split('=',1)[1], '/api/works', '/api/works?'+urlencode({'q':'作品平局'})):
+            self.pair(path)
+        # Explicitly check repeated requests with identical SQL sort keys.
+        first=self.pair('/api/entities?'+urlencode({'q':'排序平局'}))['body']
+        self.assertEqual(first,self.pair('/api/entities?'+urlencode({'q':'排序平局'}))['body'])
 
     def test_gzip_accept_encoding_retains_headers_and_core_execution(self):
         baseline = self.pair('/api/entities')['body']
