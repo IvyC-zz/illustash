@@ -28,8 +28,21 @@ pub fn read(raw: &str) -> Result<(PathBuf, Vec<Value>)> {
     } else {
         PathBuf::from(raw)
     };
-    let photos = crate::sqlite::open_with_flags(root.join("database/Photos.sqlite"), OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+    let db = root.join("database/Photos.sqlite");
+    // SQLite reports a refused open only as "unable to open database file"; the file itself says why (#202).
+    if let Err(error) = std::fs::File::open(&db) {
+        if error.raw_os_error() == Some(libc::EPERM) {
+            return Err(illustash_core::error::io_at(error, &db, None));
+        }
+    }
+    let photos = crate::sqlite::open_with_flags(&db, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
     photos.busy_timeout(std::time::Duration::from_millis(250))?;
     let rows=crate::source_rows::rows(&photos,"SELECT a.ZUUID,a.Z_PK,a.ZWIDTH,a.ZHEIGHT,a.ZADDEDDATE,a.ZHIDDEN,a.ZDIRECTORY,a.ZFILENAME,coalesce(d.ZIMPORTEDBYBUNDLEIDENTIFIER,''),d.ZORIGINALSTABLEHASH,d.ZORIGINALFILESIZE FROM ZASSET a LEFT JOIN ZADDITIONALASSETATTRIBUTES d ON a.ZADDITIONALATTRIBUTES=d.Z_PK WHERE a.ZKIND=0 AND a.ZTRASHEDSTATE=0")?;
     Ok((root, rows))
+}
+
+/// macOS privacy settings have not given this app the Photos library (#202): the system refuses the open with EPERM,
+/// where file permissions would give EACCES. Asking the person to allow it in System Settings is the only way on.
+pub fn denied(error: &Error) -> bool {
+    matches!(error, Error::IoAt { source, .. } if source.raw_os_error() == Some(libc::EPERM))
 }
