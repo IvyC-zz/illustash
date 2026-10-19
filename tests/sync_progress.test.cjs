@@ -99,3 +99,30 @@ test('a picture that cannot be decoded shows a plain placeholder; the viewer kee
   listener({target: viewer}); listener({target: other});
   assert.equal(viewer.replaced, null); assert.equal(other.replaced, null);
 });
+
+test('a sync the system refused the Photos library says what to do, by its code and not its words (#202)', async () => {
+  const message = '[Errno 1] Operation not permitted: \'/Users/someone/Pictures/合成.photoslibrary/database/Photos.sqlite\'';
+  const refused = {status: 'error', problem: 'photos_permission', message};
+  assert.equal(context.syncLine(refused), '同步失败：没有访问照片图库的权限');
+  assert.equal(context.syncLine({status: 'error', message}), '同步失败');
+  // The task panel asks for it, with a button to the settings page; clicking it opens that address only.
+  const core = web.core(), {el} = web.fakePage();
+  Object.assign(core.state, {sync: refused, syncHistory: []});
+  globalThis.fetch = () => new Promise(() => {});
+  globalThis.location = {href: ''};
+  const {toggleTasks, wireTasks} = await web.load('ui/tasks.js');
+  wireTasks(); toggleTasks(true);
+  const html = el('taskPanel').innerHTML;
+  assert.match(html, /<h6>等你确认<\/h6>.*没有访问照片图库的权限。到「系统设置 › 隐私与安全性 › 照片」里打开 Illustash，退出并重新打开后再同步。/s);
+  assert.match(html, /data-task="photos-privacy">打开系统设置</);
+  assert.doesNotMatch(html, /Operation not permitted/);
+  const button = {dataset: {task: 'photos-privacy'}, disabled: false};
+  for (const click of el('taskPanel').listeners.click) await click({stopPropagation() {}, target: {closest: selector => selector === '[data-task]' ? button : null}});
+  assert.equal(globalThis.location.href, core.PHOTOS_PRIVACY);
+  assert.equal(core.PHOTOS_PRIVACY, /PHOTOS_PRIVACY: &str =\s*"([^"]+)"/.exec(require('node:fs').readFileSync(`${__dirname}/../desktop/src/server.rs`, 'utf8'))[1]);
+  // Any other failure asks nothing.
+  Object.assign(core.state, {sync: {status: 'error', message}});
+  toggleTasks(false); toggleTasks(true);
+  assert.doesNotMatch(el('taskPanel').innerHTML, /photos-privacy/);
+  toggleTasks(false);
+});

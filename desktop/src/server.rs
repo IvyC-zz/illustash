@@ -226,8 +226,14 @@ pub fn keep_inside(url: &Url) -> bool {
     }
 }
 
+/// System Settings › Privacy & Security › Photos, where the page sends a sync that was refused the library (#202).
+pub const PHOTOS_PRIVACY: &str =
+    "x-apple.systempreferences:com.apple.preference.security?Privacy_Photos";
+
 pub fn open_outside(url: &Url) {
-    if matches!(url.scheme(), "http" | "https") {
+    if matches!(url.scheme(), "http" | "https")
+        || (cfg!(target_os = "macos") && url.as_str() == PHOTOS_PRIVACY)
+    {
         #[cfg(target_os = "macos")]
         let _ = Command::new("open").arg(url.as_str()).spawn();
         #[cfg(target_os = "windows")]
@@ -616,6 +622,11 @@ mod tests {
         ] {
             assert!(progress(bad).is_none(), "{bad}");
         }
+    }
+    #[test]
+    fn photos_privacy_link_is_matched_as_written() {
+        // The page's link (web/static/core/jobs.js) arrives parsed; only this exact address leaves the window (#202).
+        assert_eq!(Url::parse(PHOTOS_PRIVACY).unwrap().as_str(), PHOTOS_PRIVACY);
     }
     #[test]
     fn missing_resources_give_reinstall_action() {
