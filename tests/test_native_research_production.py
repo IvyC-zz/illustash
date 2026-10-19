@@ -27,6 +27,10 @@ from tests.native_worker_fixture import command as fixture_command, exists as pr
 from tests.fixed_expectations import unclocked
 from tests.test_read_http import wait_until
 
+# Research limits in these tests. Product default is 30 minutes; neither value changes it.
+WIDE_TIMEOUT_MS = '120000'
+STALL_TIMEOUT_MS = '3000'
+
 
 @unittest.skipUnless(sys.platform in ('darwin', 'win32'), 'Linux is frozen: no local computation')
 class InstalledResearchComputeTest(compute.NativeResearchComputeTest):
@@ -191,7 +195,9 @@ class NativeResearchPublicationTest(unittest.TestCase):
         self.stop(self.process)
         self.worker = self.bin / ('illustash-research.exe' if os.name == 'nt' else 'illustash-research')
         shutil.copy2(self.candidate_worker, self.worker)
-        self.env.update(ILLUSTASH_RESEARCH_WORKER=str(self.worker), ILLUSTASH_RESEARCH_TIMEOUT_MS='5000')
+        # A limit far beyond any real compute here, even on a busy machine: the tests wait for results with
+        # their own bounds, and only the timeout case below sets a short one (#219).
+        self.env.update(ILLUSTASH_RESEARCH_WORKER=str(self.worker), ILLUSTASH_RESEARCH_TIMEOUT_MS=WIDE_TIMEOUT_MS)
         self.env.pop('ILLUSTASH_WORKER_PYTHON', None)
         # Keep the #151 base fixture learning-only; #152 extends it below.
         with sqlite3.connect(self.lib.source) as c:
@@ -244,10 +250,12 @@ Path({str(self.pid)!r}+'.tmp').write_text(str(os.getpid()));os.replace({str(self
 if mode=='replay':
     Path(sys.argv[2]).write_bytes(Path({str(self.saved)!r}).read_bytes())
     sys.exit(0)
-code=subprocess.call([{str(self.worker)!r},sys.argv[1],sys.argv[2]])
-if code: sys.exit(code)
-if mode=='pass': sys.exit(0)
-Path({str(self.saved)!r}).write_bytes(Path(sys.argv[2]).read_bytes())
+# 'stall' holds a process tree without computing first, so a short deadline only has to fit this start.
+if mode!='stall':
+    code=subprocess.call([{str(self.worker)!r},sys.argv[1],sys.argv[2]])
+    if code: sys.exit(code)
+    if mode=='pass': sys.exit(0)
+    Path({str(self.saved)!r}).write_bytes(Path(sys.argv[2]).read_bytes())
 child=subprocess.Popen([sys.executable,'-c','import time;time.sleep(30)'])
 Path({str(self.child)!r}+'.tmp').write_text(str(child.pid));os.replace({str(self.child)!r}+'.tmp',{str(self.child)!r})
 Path({str(self.ready)!r}).write_text('native calculated')
@@ -264,7 +272,8 @@ child.terminate();child.wait()
         for path in (self.ready, self.release, self.pid, self.child):
             path.unlink(missing_ok=True)
         self.assertEqual(self.request('/api/regroup', {})['body'], b'{"started": true}')
-        wait_until(self.ready.exists, timeout=5)
+        # The ready file follows a real research compute, which a busy machine can slow well past 5 s.
+        wait_until(self.ready.exists, timeout=30)
         self.assertTrue(self.saved.exists())
         return int(self.pid.read_text()), int(self.child.read_text())
 
@@ -333,16 +342,19 @@ child.terminate();child.wait()
         self.assertEqual(self.state()['status'], 'idle')
         self.assertEqual(self.rows(list(before)), before)
         self.stop(self.process)
-        self.env['ILLUSTASH_RESEARCH_TIMEOUT_MS'] = '1500'
+        # The timeout must not depend on how fast a real compute runs (#219): the stalled tree it stops
+        # needs only an interpreter start and a spawn inside the window.
+        self.env['ILLUSTASH_RESEARCH_TIMEOUT_MS'] = STALL_TIMEOUT_MS
+        self.mode.write_text('stall')
         for path in (self.ready, self.pid, self.child):
             path.unlink(missing_ok=True)
         self.restart()
-        wait_until(self.ready.exists, timeout=5)
+        wait_until(self.ready.exists, timeout=10)
         self.finished('error')
         self.no_processes((int(self.pid.read_text()), int(self.child.read_text())))
         self.assertEqual(self.rows(list(before)), before)
         self.stop(self.process)
-        self.env.update(ILLUSTASH_RESEARCH_WORKER=str(self.worker), ILLUSTASH_RESEARCH_TIMEOUT_MS='5000')
+        self.env.update(ILLUSTASH_RESEARCH_WORKER=str(self.worker), ILLUSTASH_RESEARCH_TIMEOUT_MS=WIDE_TIMEOUT_MS)
         self.restart()
         self.finished()
         self.assertFalse(self.sentinel.exists())
@@ -365,7 +377,7 @@ child.terminate();child.wait()
         self.token = json.loads(self.request('/api/bootstrap')['body'])['token']
         # Opening the old package can resume its pending intent. Await/hold that owned task.
         self.request('/api/regroup', {})
-        wait_until(self.ready.exists, timeout=5)
+        wait_until(self.ready.exists, timeout=30)
         pids = int(self.pid.read_text()), int(self.child.read_text())
         self.stop(self.process)
         self.no_processes(pids)

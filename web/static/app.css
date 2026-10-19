@@ -850,6 +850,13 @@ body:has(#settingsPage:not([hidden])) .nudge{display:none}
 .cl-panel .link-button{margin:4px 0 0 -4px}
 .guide-notice{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:0 0 8px;padding:8px 12px;border-radius:10px;font-size:12.5px;line-height:1.5;
   background:color-mix(in srgb,var(--warn) 12%,var(--sheet))}
+.models-notice{display:flex;flex-direction:column;gap:6px;flex:1;min-width:0}
+.models-notice .progress{margin:0}
+.models-acts{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+#setModels .models-acts{margin:4px 0 10px}
+.models-results{margin:4px 0 0;padding-left:18px;font-size:12px;line-height:1.6}
+.models-files td:first-child{white-space:nowrap}
+.models-results .mismatch,.models-results .unknown{color:var(--warn)}
 @media (prefers-reduced-motion:reduce){.tour,.tour-hole,.tour-bubble,.nudge,.cl-ring .cl-done{transition:opacity .15s;animation:none}.checklist.pulse .cl-pill,.cl-item.just .cl-check,.cl-panel{animation:none}}
 @media (max-width:600px){.nudge{flex-direction:column;align-items:stretch}.nudge-acts{justify-content:flex-end}}
 .lib-created{margin-top:8px;padding:10px 12px;border-radius:10px;box-shadow:0 0 0 1px var(--warn);font-size:12.5px;line-height:1.55}

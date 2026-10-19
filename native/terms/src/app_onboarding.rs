@@ -188,10 +188,22 @@ pub(crate) struct Onboarding {
     task: Option<Task>,
     generation: u64,
     session: String,
+    /// The resource root: where the recognition models are looked for (#168).
+    resources: std::path::PathBuf,
 }
 impl Onboarding {
     pub fn new(generation: u64, session: &str) -> Self {
-        Self { check: Arc::new(Mutex::new(json!({"status": "idle"}))), task: None, generation, session: session.into() }
+        Self {
+            check: Arc::new(Mutex::new(json!({"status": "idle"}))),
+            task: None,
+            generation,
+            session: session.into(),
+            resources: crate::app_resources::default_root(),
+        }
+    }
+    pub fn with_resources(mut self, root: &Path) -> Self {
+        self.resources = root.to_owned();
+        self
     }
     pub fn stop(&mut self) {
         if let Some(mut task) = self.task.take() {
@@ -209,6 +221,8 @@ impl Onboarding {
         json!({
             "recognition": Self::worker("ILLUSTASH_RECOGNITION_WORKER").is_some(),
             "index": Self::worker("ILLUSTASH_INDEX_WORKER").is_some(),
+            // An installer without models (#168): recognition waits until they are downloaded or imported.
+            "models_waiting": crate::app_models::waiting(&self.resources),
             "anchors": anchors,
             "check": self.check.lock().expect("onboarding check mutex poisoned").clone(),
         })
@@ -224,6 +238,11 @@ impl Onboarding {
                 json!({"status": "failed", "message": "没有识别组件"});
             return Ok(());
         };
+        if crate::app_models::waiting(&self.resources) {
+            *self.check.lock().expect("onboarding check mutex poisoned") =
+                json!({"status": "failed", "message": crate::app_models::MISSING});
+            return Ok(());
+        }
         *self.check.lock().expect("onboarding check mutex poisoned") = json!({"status": "checking"});
         let state = self.check.clone();
         let identity = TaskIdentity::new(lib, self.generation, &self.session)?;

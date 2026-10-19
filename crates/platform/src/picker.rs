@@ -10,6 +10,8 @@ pub enum Kind {
     Library,
     Zip,
     Archive,
+    /// Model files downloaded by hand (#168): several files, ONNX, JSON or ZIP.
+    Models,
 }
 impl Kind {
     fn id(&self) -> &'static str {
@@ -18,6 +20,7 @@ impl Kind {
             Self::Library => "library",
             Self::Zip => "zip",
             Self::Archive => "archive",
+            Self::Models => "models",
         }
     }
     /// The chooser's prompt, in Chinese; the caller may show it translated (`choose`'s `title`).
@@ -27,6 +30,7 @@ impl Kind {
             Self::Library => "选择图库（.pilib）",
             Self::Zip => "选择导出的图库（.zip）",
             Self::Archive => "选择 X 数据归档（.zip）",
+            Self::Models => "选择下载好的模型文件（.onnx、.json 或 .zip）",
         }
     }
 }
