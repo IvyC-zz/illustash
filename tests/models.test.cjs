@@ -11,7 +11,7 @@ before(async () => {
 });
 const MB = 1e6;
 const models = (fields = {}) => ({on_demand: true, status: 'missing', total: 618 * MB, have: 0, partial: false, missing: ['a'], job: null,
-  manual: 'https://github.com/shio-vinyl/illustash/blob/main/docs/MODELS.md', mirror: 'https://hf-mirror.com', mirror_default: 'https://hf-mirror.com',
+  manual: 'https://github.com/shio-vinyl/illustash/blob/main/docs/INSTALL.md#识别模型', mirror: 'https://hf-mirror.com', mirror_default: 'https://hf-mirror.com',
   sources: ['hf-mirror.com', 'modelscope.cn'], files: [], location: '/synthetic', ...fields});
 
 test('only an install that downloads its models waits for them', () => {

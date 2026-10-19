@@ -1,7 +1,7 @@
 {
   "format": 1,
   "pack": "wd-swinv2-v3_ccip-caformer-24.1",
-  "manual": "https://github.com/shio-vinyl/illustash/blob/main/docs/MODELS.md",
+  "manual": "https://github.com/shio-vinyl/illustash/blob/main/docs/INSTALL.md#识别模型",
   "mirror": "https://hf-mirror.com",
   "modelscope": "https://modelscope.cn",
   "files": [
