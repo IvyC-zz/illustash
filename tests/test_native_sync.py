@@ -10,6 +10,13 @@ from pathlib import Path
 from tests.test_native_folder import NativeFolderHTTPTest
 from tests import photos_fixture
 from tests.test_native_human_labels import snapshot
+from tests.test_read_http import wait_until
+
+# An idle window for the tests whose worker must not be taken for stalled: far longer than a worker start
+# on a busy machine (#219). The product default is 10 minutes and stays so.
+WIDE_IDLE_MS=8000
+# How long the paced worker's next report waits after the host shows the last one.
+PACE_S=.8
 
 class NativeSyncTest(unittest.TestCase):
     setUpClass = classmethod(NativeFolderHTTPTest.setUpClass.__func__)
@@ -120,13 +127,18 @@ import hashlib,json,sys,time,os
 from pathlib import Path
 r=json.loads(Path(sys.argv[1]).read_text())
 mode=MODE
-def slow_report(stage,processed):
+def paced_report(stage,processed):
     prog=Path(os.environ['ILLUSTASH_RECOGNITION_PROGRESS']);tmp=prog.with_suffix('.tmp')
     tmp.write_text(json.dumps(dict(format='illustash-recognition-progress/1',task_id=r['identity']['task_id'],stage=stage,total=len(r['assets']),processed=processed,failed=0)))
     tmp.replace(prog)
-# The first report goes out before NumPy loads: on a machine running the full parallel check, that import
-# alone can take longer than the slow mode's idle window.
-if mode=='slow': slow_report('preparing',0)
+def wait_for(name):
+    # Until the test lets the worker go on; a forgotten worker gives up instead of holding the run forever.
+    go=Path(sys.argv[0]).parent/name;until=time.monotonic()+120
+    while not go.exists():
+        if time.monotonic()>until: sys.exit(8)
+        time.sleep(.01)
+# The first report goes out before NumPy loads: on a busy machine that import alone takes seconds.
+if mode=='paced': paced_report('preparing',0)
 import numpy as np
 if mode=='hang':
     # Written whole, then renamed: a test that sees the file reads the full pid (#132).
@@ -134,20 +146,16 @@ if mode=='hang':
     time.sleep(60)
 if mode=='fail': sys.exit(7)
 if mode=='progress':
-    # A stale task's value first (ignored), then this task's; hold until the test releases it.
+    # A stale task's value first (ignored), then this task's, each next one once the test has seen the last.
     prog=Path(os.environ['ILLUSTASH_RECOGNITION_PROGRESS'])
     def report(stage,processed,failed=0,task=r['identity']['task_id']):
         tmp=prog.with_suffix('.tmp')
         tmp.write_text(json.dumps(dict(format='illustash-recognition-progress/1',task_id=task,stage=stage,total=len(r['assets']),processed=processed,failed=failed)))
         tmp.replace(prog)
     report('recognising',len(r['assets']),task='stale-task');time.sleep(.5)
-    report('preparing',0);time.sleep(.5)
-    report('recognising',1);time.sleep(.5)
-    report('recognising',2)
-    release=Path(sys.argv[0]).parent/'release'
-    for _ in range(1000):
-        if release.exists(): break
-        time.sleep(.01)
+    report('preparing',0);wait_for('go-1')
+    report('recognising',1);wait_for('go-2')
+    report('recognising',2);wait_for('release')
 (Path(sys.argv[0]).parent/'last-request').write_text(json.dumps([a['id'] for a in r['assets']]))
 failures=[]
 if mode in ('classify','classify-legacy'):
@@ -179,12 +187,11 @@ if mode in ('stream','stream-hang'):
         time.sleep(.6)
     Path(sys.argv[2]).write_text(json.dumps(dict(identity=r['identity'],packages=[str(Path(r['output'])/f'batch-{i}') for i in range(len(r['assets']))],failed=[])))
     sys.exit(0)
-if mode=='slow':
-    # Steady progress every 0.7 s, well inside the idle window; six steps make the run (about 4.9 s)
-    # longer than that window whatever the number of assets.
-    for step in range(6):
-        time.sleep(.7);slow_report('recognising',len(r['assets'])*step//5)
-    time.sleep(.7)
+if mode=='paced':
+    # Each next report, and then the result, waits for the test to let it go: the test sets the pace (#219).
+    for step in range(1,len(r['assets'])+2):
+        wait_for(f'step-{step}')
+        if step<=len(r['assets']): paced_report('recognising',step)
 p=Path(r['output'])/'result';p.mkdir()
 ids=[a['id'] for a in r['assets']]
 (p/'labels.jsonl').write_text('\n'.join(json.dumps(dict(asset=u,dim='rating',value='general',confidence=.9)) for u in ids))
@@ -212,13 +219,15 @@ if failures: Path(sys.argv[2]).write_text(json.dumps(dict(identity=r['identity']
 
     def finish(self):
         import time
-        for _ in range(300):
+        # Longer than the widest idle window here: a stalled worker is stopped by the host, not by this wait.
+        until=time.monotonic()+60
+        while time.monotonic()<until:
             response=self.request('/api/sync')
             self.assertEqual(response['status'],200)
             value=json.loads(response['body'])
             if value['state']['status'] not in ('scanning','importing','recognising'): return value
             time.sleep(.02)
-        self.fail('sync did not finish')
+        self.fail(f'sync did not finish: {value}')
 
     def test_native_library_new_worker_per_run_failure_retry_and_identity(self):
         self.worker(per_run=1)
@@ -249,20 +258,21 @@ if failures: Path(sys.argv[2]).write_text(json.dumps(dict(identity=r['identity']
         self.assertFalse(self.sentinel.exists())
 
     def test_native_library_new_worker_progress_before_exit(self):
-        import time
         for uuid in ('E','F'):
             self.photo(uuid,'com.atebits.Tweetie2')
             original=self.library/f'originals/{uuid}/{uuid}.png';original.parent.mkdir(parents=True);original.write_bytes(b'synthetic')
         self.worker('progress')
         self.assertEqual(self.request('/api/sync',{})['body'],b'{"started": true}')
         seen=[]
-        for _ in range(1000):
+        def shown(stage,done):
             s=json.loads(self.request('/api/sync')['body'])['state']
             seen.append({k:s.get(k) for k in ('status','stage','done','total','failed')})
-            if s['status']=='recognising' and s.get('stage')=='recognising' and s.get('done')==2: break
-            time.sleep(.01)
-        else:
-            self.fail(seen[-5:])
+            if s['status'] not in ('scanning','importing','recognising'): self.fail(seen[-5:])
+            return s['status']=='recognising' and s.get('stage')==stage and s.get('done')==done
+        # The worker moves on only once the test has seen each value, however slowly either side runs (#219).
+        wait_until(lambda: shown('preparing',0),timeout=60);(self.root/'go-1').touch()
+        wait_until(lambda: shown('recognising',1),timeout=60);(self.root/'go-2').touch()
+        wait_until(lambda: shown('recognising',2),timeout=60)
         total=seen[-1]['total']
         self.assertGreaterEqual(total,3)
         self.assertEqual(seen[-1]['failed'],0)
@@ -278,20 +288,38 @@ if failures: Path(sys.argv[2]).write_text(json.dumps(dict(identity=r['identity']
                          (total,total,total,total,total))
 
     def test_native_library_new_worker_deadline_follows_progress_and_reports_why(self):
-        for uuid in ('E','F'):
+        import time
+        photos='EFGHIJKLMN'
+        for uuid in photos:
             self.photo(uuid,'com.atebits.Tweetie2')
             original=self.library/f'originals/{uuid}/{uuid}.png';original.parent.mkdir(parents=True);original.write_bytes(b'synthetic')
-        # The worker runs about 4.9 s, longer than the 2.5 s idle window; progress arrives every 0.7 s.
-        # Its first report comes before NumPy loads, so a loaded machine's startup stays inside the window.
-        self.env['ILLUSTASH_RECOGNITION_TIMEOUT_MS']='2500'
-        self.worker('slow')
-        value=self.sync()
+        # The worker reports once per image and the test lets each next report go a moment after the host
+        # shows the last one, so the run outlives the idle window on progress alone. The window is wide, so a
+        # slow worker start on a busy machine still reports in time (#219); the deadline rules themselves are
+        # unit-tested on a hand-moved clock (app_tasks).
+        self.env['ILLUSTASH_RECOGNITION_TIMEOUT_MS']=str(WIDE_IDLE_MS)
+        self.worker('paced')
+        self.assertEqual(self.request('/api/sync',{})['body'],b'{"started": true}')
+        def shown(stage,done):
+            state=json.loads(self.request('/api/sync')['body'])['state']
+            if state['status'] not in ('scanning','importing','recognising'): self.fail(state)
+            return state['status']=='recognising' and state.get('stage')==stage and state.get('done')==done and state
+        total=wait_until(lambda: shown('preparing',0),timeout=60)['total']
+        self.assertEqual(total,len(photos)+1)
+        first=time.monotonic()
+        for step in range(1,total+2):
+            time.sleep(PACE_S)
+            (self.root/f'step-{step}').touch()
+            if step<=total: wait_until(lambda: shown('recognising',step),timeout=60)
+        value=self.finish()
         self.assertEqual(value['state']['status'],'done',value)
         self.assertEqual(value['state']['done'],value['state']['total'])
-        # The same steady worker is stopped by the total limit, with that reason kept.
-        with sqlite3.connect(self.lib.source) as c: c.execute("DELETE FROM labels WHERE uuid IN ('E','F')")
+        self.assertGreater(time.monotonic()-first,WIDE_IDLE_MS/1000)
+        # The same worker, never let past its first report, is stopped by the total limit with that reason kept.
+        for step in self.root.glob('step-*'): step.unlink()
+        with sqlite3.connect(self.lib.source) as c: c.execute(f"DELETE FROM labels WHERE uuid IN ({','.join('?'*len(photos))})",tuple(photos))
         self.env.update(ILLUSTASH_RECOGNITION_TIMEOUT_MS='60000',ILLUSTASH_RECOGNITION_MAX_MS='1000')
-        self.worker('slow')
+        self.worker('paced')
         value=self.sync()
         self.assertEqual(value['state']['status'],'interrupted',value)
         self.assertEqual(value['state']['message'],'任务超时：超过 1 秒上限')
@@ -302,12 +330,13 @@ if failures: Path(sys.argv[2]).write_text(json.dumps(dict(identity=r['identity']
         for uuid in ('E','F'):
             self.photo(uuid,'com.atebits.Tweetie2')
             original=self.library/f'originals/{uuid}/{uuid}.png';original.parent.mkdir(parents=True);original.write_bytes(b'synthetic')
-        # Two batches finish, then the worker stalls past the idle window.
-        self.env['ILLUSTASH_RECOGNITION_TIMEOUT_MS']='2000'
+        # Two batches finish, then the worker stalls past the idle window. The window is wide, so loading
+        # NumPy before the first batch on a busy machine cannot be taken for the stall (#219).
+        self.env['ILLUSTASH_RECOGNITION_TIMEOUT_MS']=str(WIDE_IDLE_MS)
         self.worker('stream-hang')
         value=self.sync()
         self.assertEqual(value['state']['status'],'interrupted',value)
-        self.assertEqual(value['state']['message'],'任务超时：2 秒没有进展')
+        self.assertEqual(value['state']['message'],f'任务超时：{WIDE_IDLE_MS//1000} 秒没有进展')
         first=json.loads((self.root/'last-request').read_text())
         self.assertEqual(len(first),3)
         # The folder asset is counted when the scan imports it; a streamed batch counts only the
