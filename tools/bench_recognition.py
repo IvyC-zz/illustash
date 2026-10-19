@@ -215,6 +215,10 @@ def conditions():
             return subprocess.run(['sysctl', '-n', key], capture_output=True, text=True).stdout.strip()
         out.update(cpu=sysctl('machdep.cpu.brand_string'), memory_bytes=int(sysctl('hw.memsize')),
                    load=list(os.getloadavg()))
+        # 负载均值把虚拟机等的等待线程也算进去；整机 CPU 占用与 Windows 同口径（1 秒）。
+        usage = subprocess.run(['top', '-l', '2', '-n', '0', '-s', '1'], capture_output=True, text=True).stdout
+        idle = [line.rsplit(',', 1)[-1].split('%')[0] for line in usage.splitlines() if line.startswith('CPU usage')]
+        out['cpu_busy_percent_1s'] = round(100 - float(idle[-1]), 1) if idle else None
         commands = subprocess.run(['ps', '-axo', 'comm='], capture_output=True, text=True).stdout.splitlines()
         # 正在运行的虚拟机进程（tart 与 UTM 的 Apple 后端、UTM 的 QEMU 后端）；只开着 UTM 应用不算。
         out['vms'] = sorted({Path(c).name for c in commands
