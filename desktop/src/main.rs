@@ -48,7 +48,8 @@ fn main() {
             welcome::welcome_import_cancel,
             welcome::startup_choose,
             welcome::startup_retry,
-            welcome::startup_upgrade
+            welcome::startup_upgrade,
+            welcome::startup_rescue
         ])
         .on_menu_event(|app, event| {
             if event.id() == "reload" {

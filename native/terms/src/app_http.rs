@@ -398,6 +398,15 @@ fn open_reporting(path: &Path) -> Result<(Library, std::sync::Arc<crate::app_ser
     crate::app_service::open_owned(path, None, Some(progress))
 }
 
+/// `--rescue-source` (#228): the desktop shell's 「抢救重建」 after a check found source.sqlite damaged. The rescue
+/// reports its stages like the checks; the library then opens as usual.
+fn rescue_reporting(path: &Path, root: &Path) -> Result<crate::app_rescue::Report> {
+    let reference = crate::app_resources::reference_path(root)?;
+    let reference = crate::app_create::optional_reference(&reference)?;
+    let step = |stage: &str, done: f64| startup_progress(stage, done * 0.9);
+    crate::app_service::rescue_package(path, None, reference, &step)
+}
+
 pub(crate) fn run(args: &[String]) -> Result<u8> {
     // Pipe ownership is captured before initialization, so even an early parent crash
     // leads to the normal stop/join path. Never read CLI stdin unless explicitly requested.
@@ -436,6 +445,7 @@ pub(crate) fn run(args: &[String]) -> Result<u8> {
     let mut per_run = 0usize;
     let mut backup = false;
     let mut upgrade = false;
+    let mut rescue = false;
     let mut expanded = Vec::new();
     for arg in args {
         if let Some((key, value)) = arg.split_once('=') {
@@ -450,7 +460,7 @@ pub(crate) fn run(args: &[String]) -> Result<u8> {
     while let Some(arg) = iter.next() {
         match arg.as_str() {
             "--help" => {
-                println!("illustash-terms http --library PACKAGE [--root ROOT] [--port PORT] [--backup | --upgrade] [--no-open] [--no-sync | --no-auto-sync] [--sync-limit N] [--no-names] [--names-network] [--no-provenance] [--allow-provenance-network] [--no-index-check | --index-check] [--index-network]");
+                println!("illustash-terms http --library PACKAGE [--root ROOT] [--port PORT] [--backup | --upgrade | --rescue-source] [--no-open] [--no-sync | --no-auto-sync] [--sync-limit N] [--no-names] [--names-network] [--no-provenance] [--allow-provenance-network] [--no-index-check | --index-check] [--index-network]");
                 return Ok(0);
             }
             "--native" | "--no-open" => {}
@@ -488,6 +498,7 @@ pub(crate) fn run(args: &[String]) -> Result<u8> {
             }
             "--backup" => backup = true,
             "--upgrade" => upgrade = true,
+            "--rescue-source" => rescue = true,
             "--library" | "--root" | "--port" | "--route" | "--sync-limit" => {
                 let value = iter.next().ok_or_else(|| Error::Invalid(format!("{arg} 缺少值")))?;
                 match arg.as_str() {
@@ -516,6 +527,9 @@ pub(crate) fn run(args: &[String]) -> Result<u8> {
     if upgrade && backup {
         return Err(Error::Invalid("--upgrade 不可与 --backup 同用".into()));
     }
+    if rescue && (upgrade || backup) {
+        return Err(Error::Invalid("--rescue-source 不可与 --upgrade 或 --backup 同用".into()));
+    }
     if backup {
         let library = Library::open(&path)?;
         println!("{}", crate::app_settings::backup(&library)?.display());
@@ -529,6 +543,7 @@ pub(crate) fn run(args: &[String]) -> Result<u8> {
         None
     };
     let token = Session::token()?;
+    let mut rescued = None;
     // The explicit upgrade keeps its own full checks (#212).
     let (library, upgrade_backup) = if upgrade {
         match Library::open(&path) {
@@ -542,6 +557,9 @@ pub(crate) fn run(args: &[String]) -> Result<u8> {
             }
         }
     } else {
+        if rescue {
+            rescued = Some(rescue_reporting(&path, &root)?);
+        }
         (open_reporting(&path)?, None)
     };
     let server = match server {
@@ -575,8 +593,11 @@ pub(crate) fn run(args: &[String]) -> Result<u8> {
             None => crate::app_libraries::unlisted_reason(&error),
         },
     )?;
-    application.session.write().expect("http session lock poisoned").upgraded =
-        upgrade_backup.map(|backup| crate::app_upgrade::shown(&backup));
+    {
+        let mut session = application.session.write().expect("http session lock poisoned");
+        session.upgraded = upgrade_backup.map(|backup| crate::app_upgrade::shown(&backup));
+        session.rescued = rescued.map(|report: crate::app_rescue::Report| report.json());
+    }
     let host = Arc::new(Host { application, origin: format!("http://127.0.0.1:{port}") });
     http::install_signals();
     let desktop_parent = crate::platform_process::DesktopParent::capture();

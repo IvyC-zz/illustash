@@ -1,6 +1,7 @@
 // Database checks (#212): the background check after opening, 「立即检查」 in settings, and damage a check found. The
 // service then refuses every write and says what to do. state.integrity is GET /api/integrity: running {database,
-// done} or null, checked {file: seconds or null}, damaged {database, message} or null, error.
+// done} or null, checked {file: seconds or null}, damaged {database, message} or null, error, and rescue {running
+// {stage, done} or null, ready, error}: rebuilding a damaged source.sqlite in the background (#228).
 import {session, api, post} from './session.js';
 import {state} from './state.js';
 import {listeners} from './events.js';
@@ -21,9 +22,16 @@ export async function pollIntegrity() {
   } catch { if (poll === latest && token === session.token) timer = setTimeout(pollIntegrity, 10000); return; }
   await changed.emit();
   if (state.integrity.running) timer = setTimeout(pollIntegrity, 2000);
+  else if (state.integrity.rescue?.running) timer = setTimeout(pollIntegrity, 1000);
 }
 export async function checkNow() {
   state.integrity = await post('/api/integrity', {});
+  await changed.emit();
+  pollIntegrity();
+}
+// 「抢救重建」 (#228): the session stays stopped while the new source.sqlite is built; ready means it can be put in place.
+export async function rescueNow() {
+  state.integrity = await post('/api/integrity/rescue', {});
   await changed.emit();
   pollIntegrity();
 }

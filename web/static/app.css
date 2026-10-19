@@ -129,6 +129,7 @@ select{height:32px;border:1px solid var(--line);background:var(--sheet);color:va
 .footer{height:36px;display:flex;justify-content:space-between;align-items:center;font-size:11px;color:var(--muted);flex-shrink:0;gap:10px}
 .empty{min-height:250px;display:flex;align-items:center;justify-content:center;text-align:center;color:var(--muted);line-height:1.8;padding:40px}
 #errorBanner,#damageBanner{border:1px solid #eadfd2;background:#fbf6ef;color:#8d6644;border-radius:7px;padding:10px;margin-bottom:12px;font-size:12px}
+#damageBanner .damage-line{margin:8px 0 0}
 
 /* character index */
 .char-index{padding-bottom:30px}

@@ -33,6 +33,12 @@ pub fn damage_note(path: &Path) -> Option<&'static str> {
     crate::app_integrity::recorded_damage(path).map(|damage| damage.guidance())
 }
 
+/// Whether that damage is in source.sqlite, which the start page offers to rescue (#228, `--rescue-source`).
+pub fn damage_rescuable(path: &Path) -> bool {
+    crate::app_integrity::recorded_damage(path)
+        .is_some_and(|damage| damage.database == crate::app_integrity::Database::Source)
+}
+
 /// A folder the user picked is a library package only if it carries library.json.
 pub fn is_library(path: &Path) -> bool {
     path.join("library.json").is_file()

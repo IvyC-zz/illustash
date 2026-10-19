@@ -92,6 +92,24 @@ pub(crate) fn open_owned(
     owner.health.opened(checked)?;
     Ok((library, owner))
 }
+/// Rescues the damaged source.sqlite of `path` before it is opened (#228): owns the package (keeping the session's own
+/// ownership when it is that package), builds the new file and puts it in place. Only damage on record in
+/// source.sqlite is rescued; damaged library.sqlite keeps its own guidance.
+pub(crate) fn rescue_package(
+    path: &Path,
+    current: Option<(&Library, &Arc<Owner>)>,
+    reference: Option<&Path>,
+    step: crate::app_rescue::Step,
+) -> Result<crate::app_rescue::Report> {
+    let library = Library::locate(path)?;
+    let owner = claim_or_reuse(&library, current)?;
+    match owner.health.damage() {
+        Some(damage) if damage.database == crate::app_integrity::Database::Source => {}
+        Some(damage) => return Err(damage.error()),
+        None => return Err(Error::Invalid(crate::app_integrity::NOTHING_TO_RESCUE.into())),
+    }
+    crate::app_rescue::rescue(&library, &owner.health, reference, &AtomicBool::new(false), step)
+}
 /// A package opened through the full checks (an explicit upgrade), owned for a session.
 pub(crate) fn own_checked(library: Library) -> Result<(Library, Arc<Owner>)> {
     let owner = Owner::claim(&library)?;
@@ -125,6 +143,10 @@ pub(crate) struct Session {
     pub(crate) upgraded: Option<String>,
     /// Background integrity checks (#212).
     pub(crate) checker: crate::app_integrity::Checker,
+    /// Rescuing a damaged source.sqlite in the background (#228).
+    pub(crate) rescue: crate::app_rescue::Rescuer,
+    /// What the rescue did when this library was opened with a rescued source.sqlite: the page says so, once.
+    pub(crate) rescued: Option<Json>,
     /// Damage was found and the session's tasks were stopped.
     pub(crate) halted: bool,
 }
@@ -170,6 +192,8 @@ impl Session {
             unlisted: None,
             upgraded: None,
             checker: Default::default(),
+            rescue: Default::default(),
+            rescued: None,
             halted: false,
         })
     }
@@ -196,12 +220,25 @@ impl Session {
         }
         self.integrity()
     }
-    /// `GET /api/integrity`.
+    /// `GET /api/integrity`, with the rescue of a damaged source.sqlite (#228).
     pub(crate) fn integrity(&self) -> Json {
-        match &self.owner {
+        let mut info = match &self.owner {
             Some(owner) => self.checker.info(&owner.health),
             None => Json::object([("running", serde_json::Value::Null.into())]),
+        };
+        info.set("rescue", self.rescue.info());
+        info
+    }
+    /// `POST /api/integrity/rescue`: build a new source.sqlite in the background while the session stays stopped.
+    pub(crate) fn start_rescue(&mut self, reference: Option<PathBuf>) -> Result<Json> {
+        match self.damage() {
+            Some(damage) if damage.database == crate::app_integrity::Database::Source => {}
+            Some(damage) => return Err(damage.error()),
+            None => return Err(Error::Invalid(crate::app_integrity::NOTHING_TO_RESCUE.into())),
         }
+        self.checker.stop();
+        self.rescue.start(&self.library, reference);
+        Ok(self.integrity())
     }
 }
 pub struct Application {
@@ -317,6 +354,8 @@ impl Application {
             unlisted: None,
             upgraded: None,
             checker: Default::default(),
+            rescue: Default::default(),
+            rescued: None,
             halted: false,
         };
         session.syncer.resource_root = root.clone();
@@ -451,6 +490,7 @@ impl Application {
 impl Session {
     fn close(&mut self) {
         self.checker.stop();
+        self.rescue.stop();
         // A damaged package gets no queued provenance work either.
         if !self.halted {
             self.provenance.close();
@@ -536,6 +576,30 @@ impl Application {
         }
         session.start_checks(crate::app_integrity::BACKGROUND_DELAY);
         Ok(result)
+    }
+}
+
+impl Application {
+    /// Opens the session's own package again with its rescued source.sqlite in place of the damaged one (#228).
+    pub(crate) fn reopen_rescued(&self, session: &mut Session, received: u64) -> Result<Json> {
+        self.check_open()?;
+        if !self.accepts(session, received) {
+            return Err(Error::Conflict("会话已过期，请刷新页面".into()));
+        }
+        let package = session.library.instance_path().to_owned();
+        let rebuilt =
+            session.rescue.take(&package).ok_or_else(|| Error::Invalid("抢救结果已不在图库里，请重新抢救".into()))?;
+        let owner = session.owner.clone().ok_or_else(|| Error::Conflict("应用服务已关闭".into()))?;
+        // Nothing of this session may have source.sqlite open while it is replaced.
+        session.checker.stop();
+        session.halt();
+        self.exports.stop();
+        let report = crate::app_rescue::install(&session.library, &owner.health, rebuilt)?.json();
+        let path = session.library.display_path().to_owned();
+        let mut out = self.switch_locked(session, received, &path)?;
+        session.rescued = Some(report.clone());
+        out.set("rescued", report);
+        Ok(out)
     }
 }
 

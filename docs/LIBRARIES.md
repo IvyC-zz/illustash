@@ -101,7 +101,7 @@ L0 实际做法和设计稿的差别：
   provenance.sqlite   溯源模块自己的库（第一阶段再建）
   features/           本图库的 CCIP 特征（现在的 full-features.npy + full-manifest.csv）
   thumbnails/         缩略图缓存（现在的 web-thumbnails/），可以随时删掉重建
-  backups/            升级前的自动备份（现在的 library-backups/）
+  backups/            library.sqlite 的备份（升级前自动、设置里手动）；抢救后留存的损坏 source.sqlite（source-damaged-*.sqlite，#228）
   album-char-map.json 相册名到角色的映射（只有从旧库迁来的图库有）
   .illustash-owner.lock、.illustash-checks.json  会话的文件锁与检查记录（#212）
 ```
@@ -189,6 +189,7 @@ CREATE INDEX asset_links_asset ON asset_links(asset);
   - Photos 来源：由 `library.json` 里 `apps` 的映射决定（原生来源实现见 `crates/core/src/origin.rs` 与 `crates/platform/src/platform_photos.rs`）；
   - 文件夹来源：取该来源的 `preset`。
 - 同一张图跨设备、跨来源时靠 `md5` 对上；文件被移动或改名时，重扫先按路径找，找不到再按 `md5` 找，都找不到才算新图。
+- `source.sqlite` 损坏时，文件夹图片的 uuid 靠 `library.sqlite` 认回（#228）：它的 `assets.src_path` 记着每张在库图片的完整路径，`meta` 里的 `folder_hash:<uuid>` 记着内容 md5（图片移出图库后也保留）。`library.sqlite` 的每份备份因此都带着与其中整理记录一致的对照表；应用内抢救按它重扫，见 [ARCHITECTURE_DIRECTION.md](ARCHITECTURE_DIRECTION.md) 开库检查一节。
 
 ## 4. 来源
 

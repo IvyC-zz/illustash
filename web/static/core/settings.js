@@ -70,10 +70,11 @@ export async function chooseFolders() {
   const r = await api('/api/libraries/choose', {method: 'POST', body: JSON.stringify({kind: 'folder', multiple: true})});
   return r?.paths || [];
 }
-// Opening another library restarts the server on it (upgrade: true agrees to upgrade an older one, #193). This page
-// then belongs to the library it leaves: it stops reading and writing at once. Throws what the backend refused.
-export async function openLibraryRequest(path, upgrade = false) {
-  await api('/api/libraries/open', {method: 'POST', body: JSON.stringify(upgrade ? {path, upgrade: true} : {path})});
+// Opening another library restarts the server on it. `agreed` is what the person agreed to first: 'upgrade' an older
+// one (#193) or 'rescue' its damaged source.sqlite (#228). This page then belongs to the library it leaves: it stops
+// reading and writing at once. Throws what the backend refused.
+export async function openLibraryRequest(path, agreed = null) {
+  await api('/api/libraries/open', {method: 'POST', body: JSON.stringify(agreed ? {path, [agreed]: true} : {path})});
   leaveSession();
 }
 // Whether the server came back on that library, within about 80 s.

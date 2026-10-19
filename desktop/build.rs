@@ -53,6 +53,7 @@ fn main() {
         "startup_choose",
         "startup_retry",
         "startup_upgrade",
+        "startup_rescue",
     ];
     tauri_build::try_build(
         tauri_build::Attributes::new()

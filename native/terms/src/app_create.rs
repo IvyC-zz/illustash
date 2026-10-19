@@ -207,10 +207,10 @@ fn create_package<F: FnOnce(&Connection) -> Result<()>>(
     }
     result
 }
-fn quote_id(value: &str) -> String {
+pub(crate) fn quote_id(value: &str) -> String {
     format!("\"{}\"", value.replace('"', "\"\""))
 }
-fn file_uri(path: &Path) -> Result<String> {
+pub(crate) fn file_uri(path: &Path) -> Result<String> {
     let mut uri = String::from("file:");
     for byte in text(&crate::sqlite::path(path))?.bytes() {
         if byte.is_ascii_alphanumeric() || b"/-._~".contains(&byte) {
@@ -221,7 +221,7 @@ fn file_uri(path: &Path) -> Result<String> {
     }
     Ok(uri + "?mode=ro")
 }
-fn initialize_source(path: &Path, reference: Option<&Path>) -> Result<()> {
+pub(crate) fn initialize_source(path: &Path, reference: Option<&Path>) -> Result<()> {
     let mut c = crate::sqlite::open_with_flags(
         path,
         OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_CREATE | OpenFlags::SQLITE_OPEN_URI,
@@ -254,14 +254,7 @@ fn initialize_source(path: &Path, reference: Option<&Path>) -> Result<()> {
     } else {
         tx.execute_batch(include_str!("app_source_empty.sql"))?;
     }
-    let columns: Vec<String> =
-        tx.prepare("PRAGMA table_info(assets)")?.query_map([], |r| r.get(1))?.collect::<rusqlite::Result<_>>()?;
-    for column in ["source_id", "preset"] {
-        if !columns.iter().any(|v| v == column) {
-            tx.execute_batch(&format!("ALTER TABLE assets ADD COLUMN {column} TEXT"))?;
-        }
-    }
-    tx.execute_batch(SOURCE)?;
+    complete_source(&tx)?;
     // Fail before publication if the supplied reference cannot support current source reads/imports.
     for sql in [
         "SELECT uuid,filename,src_path,width,height,added_at,src_kind,in_scope,trashed,hidden,stable_hash,orig_size,source_id,preset FROM assets LIMIT 0",
@@ -281,6 +274,18 @@ fn initialize_source(path: &Path, reference: Option<&Path>) -> Result<()> {
         c.execute("DETACH DATABASE ref", [])?;
     }
     check(&c)?;
+    Ok(())
+}
+/// The asset columns and folder bookkeeping every current source has; also after a rescue (#228).
+pub(crate) fn complete_source(c: &Connection) -> Result<()> {
+    let columns: Vec<String> =
+        c.prepare("PRAGMA table_info(assets)")?.query_map([], |r| r.get(1))?.collect::<rusqlite::Result<_>>()?;
+    for column in ["source_id", "preset"] {
+        if !columns.iter().any(|v| v == column) {
+            c.execute_batch(&format!("ALTER TABLE assets ADD COLUMN {column} TEXT"))?;
+        }
+    }
+    c.execute_batch(SOURCE)?;
     Ok(())
 }
 pub(crate) fn names_triggers(c: &Connection) -> Result<()> {

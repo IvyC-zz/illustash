@@ -257,10 +257,10 @@ fn show_upgrade(main: &WebviewWindow, name: &str) {
     on_start(main, &js);
 }
 
-/// A check found the library's data damaged (#212): what to do, with the usual retry and choices; it is replayed
-/// like a failure.
-fn show_damage(main: &WebviewWindow, note: &str) {
-    let js = format!("window.showDamage && window.showDamage({})", serde_json::to_string(note).unwrap());
+/// A check found the library's data damaged (#212): what to do, with the usual retry and choices, or 「抢救重建」 when
+/// the damage is in source.sqlite (#228); it is replayed like a failure.
+fn show_damage(main: &WebviewWindow, note: &str, rescue: bool) {
+    let js = format!("window.showDamage && window.showDamage({}, {rescue})", serde_json::to_string(note).unwrap());
     *main.app_handle().state::<ErrorPage>().0.lock().unwrap() = Some(js.clone());
     on_start(main, &js);
 }
@@ -302,9 +302,9 @@ pub fn boot(app: AppHandle, main: WebviewWindow, bridge_port: u16, token: String
     let explicit = args.iter().any(|a| a == "--library" || a.starts_with("--library="));
     *app.state::<Launch>().config.lock().unwrap() = Some(Config { port, bridge_port, token, root, args });
     if explicit {
-        run(&app, &main, None, false);
+        run(&app, &main, None, Start::Open);
     } else if let Some(library) = illustash_terms::desktop_shell::startup_library() {
-        run(&app, &main, Some(library), false);
+        run(&app, &main, Some(library), Start::Open);
     } else {
         welcome(&app, &main, false);
     }
@@ -313,16 +313,31 @@ pub fn boot(app: AppHandle, main: WebviewWindow, bridge_port: u16, token: String
 /// Stop the current local service (if any) and start one on `library` (None: the same as last time),
 /// on a fresh start page.
 pub fn restart(app: &AppHandle, library: Option<PathBuf>) {
-    start_again(app, library, false);
+    start_again(app, library, Start::Open);
 }
 
 /// The person agreed on the start page to upgrade the library that failed to open (#193): start the service on
 /// it again with `--upgrade`, which backs it up first and leaves it unchanged when the upgrade does not complete.
 pub fn upgrade(app: &AppHandle) {
-    start_again(app, None, true);
+    start_again(app, None, Start::Upgrade);
 }
 
-fn start_again(app: &AppHandle, library: Option<PathBuf>, upgrade: bool) {
+/// The person chose 「抢救重建」 on the start page after a check found source.sqlite damaged (#228): start the
+/// service on the library again with `--rescue-source`, which rebuilds it and then opens it; the start page shows the
+/// rescue's progress.
+pub fn rescue(app: &AppHandle) {
+    start_again(app, None, Start::Rescue);
+}
+
+/// How the service is started on a library: as usual, or after the person agreed to upgrade or rescue it.
+#[derive(Clone, Copy, PartialEq)]
+enum Start {
+    Open,
+    Upgrade,
+    Rescue,
+}
+
+fn start_again(app: &AppHandle, library: Option<PathBuf>, start: Start) {
     let Some(main) = app.get_webview_window("main") else { return };
     app.state::<Launch>().generation.fetch_add(1, Ordering::SeqCst);
     app.state::<Child>().stop();
@@ -330,7 +345,7 @@ fn start_again(app: &AppHandle, library: Option<PathBuf>, upgrade: bool) {
     app.state::<StartupPage>().0.lock().unwrap().take();
     let library = library.or_else(|| app.state::<Launch>().library.lock().unwrap().clone());
     let _ = main.navigate(start_page());
-    run(app, &main, library, upgrade);
+    run(app, &main, library, start);
 }
 
 /// Stop the current local service (if any) and show the welcome page; `create` opens its new-library form.
@@ -346,7 +361,7 @@ pub fn welcome(app: &AppHandle, main: &WebviewWindow, create: bool) {
     app.state::<Child>().stop();
 }
 
-fn run(app: &AppHandle, main: &WebviewWindow, library: Option<PathBuf>, upgrade: bool) {
+fn run(app: &AppHandle, main: &WebviewWindow, library: Option<PathBuf>, start: Start) {
     let generation = app.state::<Launch>().generation.fetch_add(1, Ordering::SeqCst) + 1;
     let Some(Config { port, bridge_port, token, root, mut args }) = app.state::<Launch>().config.lock().unwrap().clone()
     else {
@@ -375,8 +390,10 @@ fn run(app: &AppHandle, main: &WebviewWindow, library: Option<PathBuf>, upgrade:
             .map(PathBuf::from)
             .or_else(|| args.iter().find_map(|a| a.strip_prefix("--library=")).map(PathBuf::from))
     });
-    if upgrade {
-        args.push("--upgrade".to_owned());
+    match start {
+        Start::Open => {}
+        Start::Upgrade => args.push("--upgrade".to_owned()),
+        Start::Rescue => args.push("--rescue-source".to_owned()),
     }
     *app.state::<Launch>().library.lock().unwrap() = library;
     app.state::<Child>().stopping.store(false, Ordering::SeqCst);
@@ -535,14 +552,17 @@ fn run(app: &AppHandle, main: &WebviewWindow, library: Option<PathBuf>, upgrade:
         thread::sleep(Duration::from_millis(100));
         // A library in an older format: ask before upgrading it, instead of showing a failure (#193). After a
         // failed upgrade the failure itself is shown; the package is unchanged and can be tried again.
-        // Damage a check found takes precedence: the package is refused until the database is replaced.
-        if !ready.load(Ordering::SeqCst) {
+        // Damage a check found takes precedence: the package is refused until the database is replaced. A rescue
+        // that did not finish shows its own failure instead (#228); the package is as it was, the damage still on
+        // record, so retrying offers the rescue again.
+        if start != Start::Rescue && !ready.load(Ordering::SeqCst) {
             if let Some(note) = target.as_deref().and_then(illustash_terms::desktop_shell::damage_note) {
-                show_damage(&main, note);
+                let rescue = target.as_deref().is_some_and(illustash_terms::desktop_shell::damage_rescuable);
+                show_damage(&main, note, rescue);
                 return;
             }
         }
-        if !upgrade && !ready.load(Ordering::SeqCst) {
+        if start == Start::Open && !ready.load(Ordering::SeqCst) {
             if let Some(name) = target.as_deref().and_then(illustash_terms::desktop_shell::upgrade_needed) {
                 show_upgrade(&main, &name);
                 return;
