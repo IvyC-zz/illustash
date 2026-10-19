@@ -78,6 +78,22 @@ pub fn verify(conn: &mut Connection) -> Result<Report> {
     Ok(report)
 }
 
+/// 核心第 8 版迁移（#201）在它自己的事务里做的同一个核对：旧兼容表与由核心主数据生成的样子逐表一致才升级。
+/// 只建连接内的 TEMP 影子，结束即清掉。
+pub(crate) fn verify_in(tx: &Connection) -> Result<Report> {
+    let identity = table_exists(tx, "identity_relations")?;
+    let mut report = Report::default();
+    shadow(tx, identity, true)?;
+    compare_columns(tx, identity, &mut report, true, UNMAPPED)?;
+    clear_shadow(tx)?;
+    Ok(report)
+}
+
+/// `entities` columns the core never carried (`ENTITY_COLUMNS` keeps them for the table's shape): no reader uses
+/// them and the upgrade drops them with the table, so the version 8 check does not compare them. The switch required
+/// them empty, but a library can carry later stray values (a test fixture writing `name` directly, say).
+const UNMAPPED: &[&str] = &["name", "external_key", "tag"];
+
 /// Shared read mapping for S3 commands/full rebuild. The whitelist is the S2 contract.
 /// 策略未设置时，候选的身份沿破坏式合并解析到代表（`_candidate` 与 `merge` 都这样写旧表）；hybrid 下是原始身份。
 const CANDIDATES_RESOLVED: &str = "WITH RECURSIVE chain(term,key,depth) AS (
@@ -1476,11 +1492,16 @@ fn compare(tx: &Connection, identity: bool, r: &mut Report) -> Result<()> {
 }
 
 fn compare_with_baseline(tx: &Connection, identity: bool, r: &mut Report, baseline: bool) -> Result<()> {
+    compare_columns(tx, identity, r, baseline, &[])
+}
+
+/// `compare_with_baseline` leaving the `skip` columns of every table out.
+fn compare_columns(tx: &Connection, identity: bool, r: &mut Report, baseline: bool, skip: &[&str]) -> Result<()> {
     let mut pairs: Vec<(String, String, String)> = COMPAT
         .iter()
         .filter(|c| !c.identity || identity)
         .map(|c| {
-            let cols = c.columns.join(",");
+            let cols = c.columns.iter().filter(|col| !skip.contains(col)).copied().collect::<Vec<_>>().join(",");
             (
                 c.table.to_owned(),
                 format!("SELECT {cols} FROM main.{}", c.table),

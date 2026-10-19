@@ -541,7 +541,10 @@ mod tests {
         assert_eq!(
             count(
                 &c,
-                "SELECT count(*) FROM meta WHERE key IN ('schema_version','terms_schema') AND value IN ('36','7')"
+                &format!(
+                    "SELECT count(*) FROM meta WHERE key IN ('schema_version','terms_schema') AND value IN ('36','{}')",
+                    crate::SCHEMA_VERSION
+                )
             ),
             2
         );

@@ -1,8 +1,8 @@
 //! 撤销栈里按张数写的几种提示：写（`character_commands`）和读（native/terms `http_app.rs` 把提示里的角色换成现在的名字）
 //! 共用这一份句式，改措辞时两边一起变（#204）。
 //!
-//! 读是在解析已存的数据格式，不是一般的文字判断：这些步骤的撤销载荷里只有快照，没有操作种类和张数，张数只记在提示里。
-//! #201 在撤销载荷里存下操作种类和张数之后，`count` 和读的那一边可以删掉。
+//! 核心第 8 版起（#201），这几种步骤把种类和张数存在 `actions.label_kind`、`label_count`，读的一边用它们填句式，
+//! 不再解析提示。`count` / `recognize` 只剩第 8 版迁移用：给之前的步骤解析一次已存的提示，回填这两列。
 use crate::compat_unicode::decimal;
 
 /// 一种提示句式。占位：`{n}` 张数，`{name}` 角色，`{other}` 换成的角色。
@@ -19,6 +19,29 @@ pub enum UndoLabel {
 impl UndoLabel {
     pub const ALL: [UndoLabel; 6] =
         [UndoLabel::Set, UndoLabel::Remove, UndoLabel::Add, UndoLabel::Drop, UndoLabel::Swap, UndoLabel::Sweep];
+
+    /// 存进 `actions.label_kind` 的名字。
+    pub fn name(self) -> &'static str {
+        match self {
+            UndoLabel::Set => "set",
+            UndoLabel::Remove => "remove",
+            UndoLabel::Add => "add",
+            UndoLabel::Drop => "drop",
+            UndoLabel::Swap => "swap",
+            UndoLabel::Sweep => "sweep",
+        }
+    }
+
+    pub fn parse(name: &str) -> Option<UndoLabel> {
+        UndoLabel::ALL.into_iter().find(|kind| kind.name() == name)
+    }
+
+    /// 已存的提示是哪种句式、记的张数：按第 8 版之前读的一边的顺序试（换成、标为已检查，再是其余四种）。
+    pub fn recognize(label: &str) -> Option<(UndoLabel, &str)> {
+        [UndoLabel::Swap, UndoLabel::Sweep, UndoLabel::Set, UndoLabel::Remove, UndoLabel::Add, UndoLabel::Drop]
+            .into_iter()
+            .find_map(|kind| kind.count(label).map(|n| (kind, n)))
+    }
 
     pub fn template(self) -> &'static str {
         match self {

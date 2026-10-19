@@ -1,8 +1,9 @@
 //! The comparison baseline of the first public test release (#201 step 1): what the replayed
 //! scenarios must keep producing once the legacy tables are gone (core v8).
 //!
-//! Recorded from main by `replay.rs` (`record_baseline`, explicit only) and replayed by
-//! `baseline.rs`. Comparison rules (agreed in #201; keep both sides on this one module):
+//! Recorded from main on core version 7 by the former `tests/replay.rs` (`record_baseline`) and `tests/contracts.rs`
+//! (PR #239; both in git history), replayed by `baseline.rs` and `contracts.rs`. Comparison rules (agreed in #201;
+//! the Python fixed expectations follow the same rules in `tests/fixed_expectations.py`):
 //! - replies are compared as bytes after `Masks::output`: temporary roots, clocks, learning
 //!   stamps, operating-system error text and the current core version;
 //! - after every call, every table of the call's database except `RETIRED` is compared row for
@@ -10,7 +11,7 @@
 //!   are columns and compared like any other, implicit rowids are not;
 //! - `meta` keeps its keys; `META_RULES` says how some values are compared;
 //! - the database schema itself is not compared (v8 changes it; it has tests of its own).
-#![allow(dead_code)] // shared by replay.rs (records) and baseline.rs (replays); each uses part of it
+#![allow(dead_code)] // shared by baseline.rs and contracts.rs; each uses part of it
 use regex::Regex;
 use rusqlite::{types::ValueRef, Connection};
 use serde_json::{json, Map, Value};
@@ -23,8 +24,16 @@ pub const FORMAT: i64 = 1;
 pub const RETIRED: [&str; 7] =
     ["entities", "links", "work_review", "names", "display_names", "name_aliases", "identity_baseline"];
 
-/// Columns left out, as in the recordings before (hashes over packaging details).
-pub const SKIP_COLUMNS: [(&str, &str); 2] = [("term_packages", "manifest"), ("term_evidence", "fingerprint")];
+/// Columns left out: hashes over packaging details, as in the recordings before; and columns core v8 added, which
+/// the baseline (recorded on core version 7) cannot hold (rule 5, each named with the reason):
+/// - `actions.label_kind` / `label_count`: a counted step's kind and count (#201); what the history shows from them
+///   is compared in the replies.
+pub const SKIP_COLUMNS: [(&str, &str); 4] = [
+    ("term_packages", "manifest"),
+    ("term_evidence", "fingerprint"),
+    ("actions", "label_kind"),
+    ("actions", "label_count"),
+];
 
 static CLOCK: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})?").unwrap());

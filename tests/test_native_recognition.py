@@ -104,8 +104,10 @@ class NativeRecognitionTest(unittest.TestCase):
         self.assertEqual(actual,expected['result'])
         self.assertEqual(source_now,expected['source'])
         # Random identity IDs/timestamps are checked by existing core golden tests; these tags/results are deterministic.
-        for table in ('assets','assertions','asset_tags','memberships','general_hits','asset_rating','actions'):
+        for table in ('assets','assertions','asset_tags','memberships','general_hits','asset_rating'):
             self.assertEqual(snapshot(self.lib.db)[table],expected['db'][table],table)
+        # `actions` by the #201 baseline: core v8 added two columns to it.
+        self.assertTrue(self.rec.baseline('old import', self.lib.path))
         self.assertEqual(snapshot(self.lib.db)['actions'],before)
         source=snapshot(self.lib.source); app=snapshot(self.lib.db)
         self.assertTrue(self.import_result(p)['duplicate'])

@@ -72,7 +72,9 @@ class NativeResearchComputeTest(unittest.TestCase):
     @staticmethod
     def rows(path):
         with sqlite3.connect(path) as c:
-            return {table: c.execute('SELECT * FROM ' + table + ' ORDER BY 1,2').fetchall()
+            # `actions` as recorded: core v8 added two columns (#201), compared through the history replies.
+            columns = {'actions': 'id,label,before_json,ts,undone'}
+            return {table: c.execute(f"SELECT {columns.get(table, '*')} FROM {table} ORDER BY 1,2").fetchall()
                     for table in ('prototypes', 'learn_state', 'proto_claims', 'weak_claims', 'assertions', 'actions', 'memberships')}
 
     def compare_learning(self, *, mutate=None, patched_anchors=False):

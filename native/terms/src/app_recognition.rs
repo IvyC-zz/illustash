@@ -720,7 +720,7 @@ mod tests {
         let run = || -> Result<()> {
             fs::write(root.join("library.json"), r#"{"format":1,"id":"synthetic","name":"synthetic","sources":[]}"#)?;
             let app = crate::sqlite::open(root.join("library.sqlite"))?;
-            app.execute_batch("CREATE TABLE meta(key TEXT PRIMARY KEY,value TEXT); INSERT INTO meta VALUES ('schema_version','36'),('terms_schema','7'),('terms_artists','core'),('terms_labels','core'),('terms_characters','core'),('terms_names','core'),('recognition_projection:d','1'); CREATE TABLE backend_effects(id INTEGER PRIMARY KEY,kind TEXT,status TEXT,error TEXT); INSERT INTO backend_effects VALUES (1,'imported','pending','');")?;
+            app.execute_batch(&format!("CREATE TABLE meta(key TEXT PRIMARY KEY,value TEXT); INSERT INTO meta VALUES ('schema_version','36'),('terms_schema','{v}'),('terms_artists','core'),('terms_labels','core'),('terms_characters','core'),('terms_names','core'),('recognition_projection:d','1'); CREATE TABLE backend_effects(id INTEGER PRIMARY KEY,kind TEXT,status TEXT,error TEXT); INSERT INTO backend_effects VALUES (1,'imported','pending','');", v = crate::SCHEMA_VERSION))?;
             let source = crate::sqlite::open(root.join("source.sqlite"))?;
             source.execute_batch("CREATE TABLE assets(uuid TEXT,filename TEXT,src_path TEXT,width INTEGER,height INTEGER,added_at TEXT,src_kind TEXT,in_scope INTEGER,trashed INTEGER); CREATE TABLE labels(uuid TEXT,dim TEXT,value TEXT,conf REAL);")?;
             source.execute_batch(SCHEMA)?;

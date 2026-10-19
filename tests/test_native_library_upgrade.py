@@ -30,7 +30,7 @@ from unittest.mock import patch
 from PIL import Image
 
 from tests import test_native_lifecycle as lifecycle
-from tests.fixed_expectations import Library, Expectations
+from tests.fixed_expectations import Library, Expectations, TERMS_VERSION, baseline_state
 from tests.synthetic_source import synthetic_reference
 from tests.test_read_http import INTERRUPT, SPAWN, free_port, wait_until
 from tools.build_db import SCHEMA as SOURCE_SCHEMA
@@ -90,13 +90,13 @@ class NativeLibraryUpgradeTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls, producers=False):
         cls.binaries = {}
-        for version, variable in ((7, 'ILLUSTASH_TERMS_BIN'), (5, 'ILLUSTASH_TERMS_V5_BIN'),
+        for version, variable in (('current', 'ILLUSTASH_TERMS_BIN'), (5, 'ILLUSTASH_TERMS_V5_BIN'),
                                   (6, 'ILLUSTASH_TERMS_V6_BIN'))[:3 if producers else 1]:
             configured = os.environ.get(variable)
             if not configured or not Path(configured).is_file():
                 raise unittest.SkipTest(f'set {variable} explicitly; absence is not upgrade acceptance')
             cls.binaries[version] = Path(configured).resolve()
-        cls.resources = Path(os.environ.get('ILLUSTASH_NATIVE_ROOT') or cls.binaries[7].parents[4]).resolve()
+        cls.resources = Path(os.environ.get('ILLUSTASH_NATIVE_ROOT') or cls.binaries['current'].parents[4]).resolve()
 
     def setUp(self):
         temp = tempfile.TemporaryDirectory(prefix='illustash-native-upgrade-')
@@ -154,7 +154,7 @@ class NativeLibraryUpgradeTest(unittest.TestCase):
     def args(self, lib, *, upgrade=True, port=None, sync=False):
         # Migration/history/undo comparisons exclude independent startup tasks.
         # Default automatic sync is exercised separately with genuine source DDL.
-        return [str(self.binaries[7]), 'http', '--no-names', *([] if sync else ['--no-sync']), '--library', str(lib.path),
+        return [str(self.binaries['current']), 'http', '--no-names', *([] if sync else ['--no-sync']), '--library', str(lib.path),
                 '--port', str(port or free_port()), '--root', str(self.resources), *(['--upgrade'] if upgrade else [])]
 
     def failed(self, lib, *, upgrade=True, port=None):
@@ -234,7 +234,7 @@ class NativeLibraryUpgradeTest(unittest.TestCase):
                 before, source = database(lib.db), lib.source.read_bytes()
                 existing = {p.relative_to(lib.path).as_posix() for p in lib.path.rglob('*.sqlite')}
                 baseline = self.root / f'baseline-v{version}.pilib'; shutil.copytree(lib.path, baseline)
-                expected = subprocess.run([str(self.binaries[7]), 'migrate', '--db', str(baseline / 'library.sqlite')],
+                expected = subprocess.run([str(self.binaries['current']), 'migrate', '--db', str(baseline / 'library.sqlite')],
                                           env=self.env, capture_output=True, timeout=20)
                 self.assertEqual(expected.returncode, 0, expected.stderr)
                 # Compare equivalent startup consumers: the bare migrate CLI leaves verdict
@@ -242,7 +242,9 @@ class NativeLibraryUpgradeTest(unittest.TestCase):
                 # The former Python consumer's result is recorded (tests/fixed_expectations.py).
                 self.rec.package(f'drained-v{version}', baseline)
                 process, origin = self.start(lib)
-                self.assertEqual(database(lib.db), database(baseline / 'library.sqlite'))
+                # By the #201 rules: the recorded drained package is at core version 7 and was upgraded on restore,
+                # so its physical rows may sit at other rowids than after one direct upgrade.
+                self.assertEqual(baseline_state(lib.path)['app'], baseline_state(baseline)['app'])
                 upgraded = database(lib.db)
                 self.assertEqual(lib.source.read_bytes(), source)
                 backups = self.backups(lib, existing)
@@ -250,17 +252,19 @@ class NativeLibraryUpgradeTest(unittest.TestCase):
                 self.assertEqual(database(backups[0]), before)
                 self.reads(lib, origin)
                 with closing(sqlite3.connect(lib.db)) as c:
-                    self.assertEqual(c.execute("SELECT value FROM meta WHERE key='terms_schema'").fetchone()[0], '7')
+                    self.assertEqual(c.execute("SELECT value FROM meta WHERE key='terms_schema'").fetchone()[0], str(TERMS_VERSION))
                     self.assertEqual(c.execute("SELECT count(*) FROM sqlite_schema WHERE name IN ('identity_claims','identity_calibration')").fetchone()[0], 0)
                 self.stop(process)
                 results = []
                 for db in (lib.db, baseline / 'library.sqlite'):
-                    out = subprocess.run([str(self.binaries[7]), 'undo', '--db', str(db), '--action', str(action)],
+                    out = subprocess.run([str(self.binaries['current']), 'undo', '--db', str(db), '--action', str(action)],
                                          env=self.env, capture_output=True, timeout=20)
                     self.assertEqual(out.returncode, 0, out.stderr)
                     results.append(out.stdout)
                 self.assertEqual(*results)
-                self.assertEqual(database(lib.db), database(baseline / 'library.sqlite'))
+                # By the #201 rules: the recorded drained package is at core version 7 and was upgraded on restore,
+                # so its physical rows may sit at other rowids than after one direct upgrade.
+                self.assertEqual(baseline_state(lib.path)['app'], baseline_state(baseline)['app'])
                 process, origin = self.start(lib, upgrade=False)
                 self.reads(lib, origin)
                 self.stop(process)
@@ -365,7 +369,7 @@ class NativeLibraryUpgradeTest(unittest.TestCase):
                     self.assertIn('数据库错误：no such column: stable_hash', message)
                     self.assertIn('SELECT uuid,stable_hash FROM assets', message)
                 with closing(sqlite3.connect(lib.db)) as c:
-                    self.assertEqual(c.execute("SELECT value FROM meta WHERE key='terms_schema'").fetchone()[0], '7')
+                    self.assertEqual(c.execute("SELECT value FROM meta WHERE key='terms_schema'").fetchone()[0], str(TERMS_VERSION))
                 self.assertEqual(database(lib.source), source)
                 backups = self.backups(lib, existing)
                 self.assertEqual(len(backups), 1)
@@ -402,7 +406,7 @@ class NativeLibraryUpgradeTest(unittest.TestCase):
     def test_injected_migration_failure_rolls_back_and_retains_preupgrade_backup(self):
         lib, _ = self.package(5, 'rollback')
         with closing(sqlite3.connect(lib.db)) as c:
-            c.execute("CREATE TRIGGER fail_upgrade BEFORE INSERT ON meta WHEN NEW.key='terms_schema' AND NEW.value='7' "
+            c.execute("CREATE TRIGGER fail_upgrade BEFORE INSERT ON meta WHEN NEW.key='terms_schema' AND NEW.value='" + str(TERMS_VERSION) + "' "
                       "BEGIN SELECT RAISE(ABORT,'synthetic-upgrade-failure'); END")
             c.commit()
         before, source = database(lib.db), lib.source.read_bytes()
@@ -446,7 +450,7 @@ class NativeLibraryUpgradeTest(unittest.TestCase):
         self.assertEqual(opened(), str(current.path))
         # A failed upgrade says so, keeps the package as it was and the current library open.
         with closing(sqlite3.connect(old.db)) as c:
-            c.execute("CREATE TRIGGER fail_upgrade BEFORE INSERT ON meta WHEN NEW.key='terms_schema' AND NEW.value='7' "
+            c.execute("CREATE TRIGGER fail_upgrade BEFORE INSERT ON meta WHEN NEW.key='terms_schema' AND NEW.value='" + str(TERMS_VERSION) + "' "
                       "BEGIN SELECT RAISE(ABORT,'synthetic-upgrade-failure'); END")
             c.commit()
         failing = database(old.db)
@@ -498,7 +502,7 @@ class NativeLibraryUpgradeTest(unittest.TestCase):
         self.assertEqual(lib.source.read_bytes(), source)
         self.assertEqual((lib.path / 'library.json').read_bytes(), config)
         with closing(sqlite3.connect(lib.db)) as c:
-            self.assertEqual(c.execute("SELECT value FROM meta WHERE key='terms_schema'").fetchone()[0], '7')
+            self.assertEqual(c.execute("SELECT value FROM meta WHERE key='terms_schema'").fetchone()[0], str(TERMS_VERSION))
         self.assertEqual(registry.read_bytes() if registry.exists() else None, registry_before)
         self.stop(process)
         blocked.rmdir()

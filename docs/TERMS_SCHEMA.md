@@ -1,6 +1,6 @@
 # 词条核心 schema
 
-状态：现行参考，2026-10-01。当前词条 schema 为 **7**，应用 schema 为 **36**，包格式为 **1**；第 1 版见第 1–4 节，第 2–7 版的增量见第 7–12 节，宿主退役后的兼容职责与恢复边界见第 13 节。画师、标签、角色 / 皮肤 / 作品都已收编：[TERMS_ARTISTS.md](TERMS_ARTISTS.md)、[TERMS_LABELS.md](TERMS_LABELS.md)、[TERMS_CHARACTERS.md](TERMS_CHARACTERS.md)。下面第 1–6 节是第 1 版交付时写的，已按现状更正的地方都有注明（2026-09-29，词条第 4、5 步 S6）。
+状态：现行参考，2026-10-19。当前词条 schema 为 **8**，应用 schema 为 **36**，包格式为 **1**；第 1 版见第 1–4 节，第 2–7 版的增量见第 7–12 节，第 8 版见第 14 节，宿主退役后的兼容职责与恢复边界见第 13 节。画师、标签、角色 / 皮肤 / 作品都已收编：[TERMS_ARTISTS.md](TERMS_ARTISTS.md)、[TERMS_LABELS.md](TERMS_LABELS.md)、[TERMS_CHARACTERS.md](TERMS_CHARACTERS.md)。下面第 1–6 节是第 1 版交付时写的，已按现状更正的地方都有注明（2026-09-29，词条第 4、5 步 S6）。
 
 2026-09-28，[TERMS.md](TERMS.md) 第 4 节第 1 步的交付。代码在 `native/terms/`（Rust crate `illustash-terms`，rusqlite 自持连接），证据包格式见 [EVIDENCE_PACKAGES.md](EVIDENCE_PACKAGES.md)。
 
@@ -183,7 +183,7 @@ cargo clippy --manifest-path native/terms/Cargo.toml --all-targets -- -D warning
 
 ## 13. 宿主退役后的兼容结构职责（2026-10-01）
 
-Python HTTP / Store 退出生产包不等于数据库读写消费者退出。下表是现行结构的保留规则，文件路径均相对 `native/terms/src/`；旧表名不作为删除依据。核心版本仍为 7、应用版本仍为 36、包格式仍为 1，不新增空的升版步骤。
+Python HTTP / Store 退出生产包不等于数据库读写消费者退出。下表是现行结构的保留规则，文件路径均相对 `native/terms/src/`；旧表名不作为删除依据。（2026-10-01 时核心版本为 7；之后的第 8 版见第 14 节。）
 
 | 结构 | 结论与实际消费者 |
 |---|---|
@@ -210,4 +210,14 @@ Python HTTP / Store 退出生产包不等于数据库读写消费者退出。下
 
 源库保留 `assets`、`labels`、`decisions`、`characters`、`character_aliases`、`runs`、`asset_links`、`files`：`app_migrate_data.rs` / `app_recognition.rs` 将来源事实导入核心，`app_sync.rs` / `app_folder.rs` 维护盘点，`app_create.rs` 克隆角色索引、别名和模型运行参考，`web/infer.py（#9 已删除）` 及离线工具仍使用来源格式。历史包的 `shards` 及未知附加表不属于宿主桥接清理，保留原 DDL、typed cells 和 rowid；没有消费者不代表获准丢弃用户包中的研究记录。源库无统一单独整数 schema 版本，升级检查所需列与索引。溯源库独立的版本与证据/任务恢复见 [PROVENANCE.md](PROVENANCE.md)，不与同名 source `runs` 混淆。
 
-升级与回退按 [ARCHITECTURE_DIRECTION.md](ARCHITECTURE_DIRECTION.md)「已有核心库的显式升级边界」执行：词条 5/6 → 7 仅提交应用库，源库保持原样；旧应用/源结构在隔离副本构建并通过 `app_legacy_upgrade.rs` 的 DELETE journal 附加事务发布。这个受限发布机制不能推导成同步、识别、索引或 worker 的跨库原子事务；它们各自提交、恢复。注册或提交后事件失败要报告已提交，不能冒称回滚。恢复前停止所有连接；词条升级恢复应用库备份，旧源/应用升级恢复成对数据库与配置，并处理旧 WAL/SHM。禁止直接用旧程序打开新格式。
+升级与回退按 [ARCHITECTURE_DIRECTION.md](ARCHITECTURE_DIRECTION.md)「已有核心库的显式升级边界」执行：词条 5/6/7 → 8 仅提交应用库，源库保持原样；没切换完的旧图库不再升级（第 14 节）。同步、识别、索引和 worker 各自提交、恢复，没有跨库原子事务。注册或提交后事件失败要报告已提交，不能冒称回滚。恢复前停止所有连接；词条升级恢复应用库备份，并处理旧 WAL/SHM。禁止直接用旧程序打开新格式。
+
+## 14. 第 8 版（2026-10-19，#201 第 2 步）
+
+#201 让 `term_*` 成为唯一权威、收掉旧兼容表的第一步（方案与用户决定见 #201；之后各领域切换时，第 8 版的迁移内容随 PR 累积，第一个公开测试版发布前定稿，中间形态不写迁移）。这一步不删表，旧兼容表照旧是名字、链接、实体结构的权威。
+
+- **升级核对**：已有核心表的库（升级前版本 ≥ 1）里有旧表时，四个领域必须都已切到核心（`terms_artists`、`terms_labels`、`terms_characters`、`terms_names` 都是 `core`），否则拒绝升级并提示先用 `pre-v8` 版本（git 标签，指向 v8 之前最后一个 main）打开升级。切换完的库先照旧表把名字镜像整表同步一次（与核心每次写时做的一样，之前版本留下的过期镜像随之补上），再用角色、名字两套现有核对逐表比较旧表与 `term_*`（`entities` 的 `name`、`external_key`、`tag` 三列核心从不承载、也没有读者，不比），有差异就拒绝升级、整体回滚，错误里带样例。还没有核心表的库（新建的库）不在这里拦。
+- **撤销提示的种类和张数**：`actions` 加 `label_kind`、`label_count` 两列（可空）。按张数写提示的六种角色步骤（设为、移出、加上、去掉、换成、标为已检查，`crates/core/src/undo_labels.rs`）写入时一并存下；之前的步骤在升级时按已存的提示解析一次回填。撤销载荷 `before_json` 不动（Python 时代的旧步骤载荷是数组，没有地方加键）。读历史时（`http_app::action_label`）用这两列把提示里的角色换成现在的名字，不再解析提示。
+- 升级沿用现有入口：桌面和网页的升级界面（#193）、`http --upgrade`、`illustash-terms migrate`；升级前备份 `library-backups/terms-v<旧版>-before-v8-*.sqlite`，失败整体回滚。应用层（`app_upgrade.rs`）对没切换完的旧图库（应用 schema 36 以前、切换标记缺失或未完成、更早的 source 布局或缺索引元数据）打开和升级都直接拒绝，提示先用 `pre-v8` 版本；原来为它们准备的分阶段成对发布路径已删除。
+- 对照：新对照基准（`native/terms/tests/baseline.rs`、`contracts.rs`，规则见 `native/terms/tests/common/baseline.rs`）的每个 v7 检查点都经这次升级再重放，接口回复逐字节不变；新加的两列在比较器里登记排除，由历史提示的回复比较覆盖。`native/terms/tests/v8_upgrade.rs` 覆盖拒绝（旧表与核心不一致、没切换完）不留痕和回填。
+

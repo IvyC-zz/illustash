@@ -270,7 +270,7 @@ mod tests {
         fn library(&self) -> Library {
             let path = self.package("current");
             let db = crate::sqlite::open(path.join("library.sqlite")).unwrap();
-            db.execute_batch("CREATE TABLE meta(key TEXT PRIMARY KEY,value TEXT); INSERT INTO meta VALUES ('schema_version','36'),('terms_schema','7'),('terms_artists','core'),('terms_labels','core'),('terms_characters','core'),('terms_names','core');").unwrap();
+            db.execute_batch(&format!("CREATE TABLE meta(key TEXT PRIMARY KEY,value TEXT); INSERT INTO meta VALUES ('schema_version','36'),('terms_schema','{v}'),('terms_artists','core'),('terms_labels','core'),('terms_characters','core'),('terms_names','core');", v = crate::SCHEMA_VERSION)).unwrap();
             let source = crate::sqlite::open(path.join("source.sqlite")).unwrap();
             source.execute_batch("CREATE TABLE assets(uuid TEXT,filename TEXT,src_path TEXT,width INTEGER,height INTEGER,added_at TEXT,src_kind TEXT,in_scope INTEGER,trashed INTEGER); CREATE TABLE labels(uuid TEXT,dim TEXT,value TEXT,conf REAL);").unwrap();
             Library::open(&path).unwrap()

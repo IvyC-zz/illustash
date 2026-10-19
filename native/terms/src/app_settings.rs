@@ -448,7 +448,7 @@ mod tests {
             fs::create_dir_all(&path).unwrap();
             fs::write(path.join("library.json"), r#"{"format":1,"id":"synthetic","name":"合成"}"#).unwrap();
             let db = crate::sqlite::open(path.join("library.sqlite")).unwrap();
-            db.execute_batch("CREATE TABLE meta(key TEXT PRIMARY KEY,value TEXT); INSERT INTO meta VALUES ('schema_version','36'),('terms_schema','7'),('terms_artists','core'),('terms_labels','core'),('terms_characters','core'),('terms_names','core'); CREATE TABLE prefs(key TEXT PRIMARY KEY,value TEXT NOT NULL); CREATE TABLE actions(id INTEGER PRIMARY KEY,label TEXT); CREATE TABLE evidence(value TEXT);").unwrap();
+            db.execute_batch(&format!("CREATE TABLE meta(key TEXT PRIMARY KEY,value TEXT); INSERT INTO meta VALUES ('schema_version','36'),('terms_schema','{v}'),('terms_artists','core'),('terms_labels','core'),('terms_characters','core'),('terms_names','core'); CREATE TABLE prefs(key TEXT PRIMARY KEY,value TEXT NOT NULL); CREATE TABLE actions(id INTEGER PRIMARY KEY,label TEXT); CREATE TABLE evidence(value TEXT);", v = crate::SCHEMA_VERSION)).unwrap();
             drop(db);
             let source = crate::sqlite::open(path.join("source.sqlite")).unwrap();
             source.execute_batch("CREATE TABLE assets(uuid TEXT,filename TEXT,src_path TEXT,width INTEGER,height INTEGER,added_at TEXT,src_kind TEXT,in_scope INTEGER,trashed INTEGER);CREATE TABLE labels(uuid TEXT,dim TEXT,value TEXT,conf REAL);").unwrap();

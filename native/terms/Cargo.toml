@@ -61,12 +61,12 @@ serde_json = "1"
 name = "read-http"
 required-features = ["test-read-host"]
 
-# The replay tests (tests/replay.rs) hash every table after each recorded call; an unoptimised
+# The baseline replay (tests/baseline.rs) reads every table after each recorded call; an unoptimised
 # bundled SQLite makes that the slowest part of `cargo test`.
 [profile.dev.package.libsqlite3-sys]
 opt-level = 3
 
-# tests/replay.rs digests every table after each of ~13,000 recorded calls; unoptimized dependencies (hashing,
+# tests/baseline.rs compares every table after each of ~9,000 recorded calls; unoptimized dependencies (hashing,
 # regex masking, JSON, gzip, SQLite bindings) dominate its time (#130). Our own crates stay at the dev level, so
 # editing them rebuilds as fast as before.
 [profile.dev.package."*"]

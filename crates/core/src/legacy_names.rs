@@ -154,6 +154,15 @@ pub fn compare(c: &Connection, r: &mut Report) -> Result<()> {
     Ok(())
 }
 
+/// 核心第 8 版迁移（#201）：名字的旧表还是权威，核心每次写都照它同步镜像（之前版本留下的过期镜像也由下一次写补上），
+/// 所以升级时先在迁移的事务里整表同步一次，再逐行比较；同步之后仍不一致才拒绝升级。
+pub(crate) fn sync_in(c: &Connection) -> Result<Report> {
+    let mut r = Report::default();
+    mirror(c, &mut r)?;
+    compare(c, &mut r)?;
+    Ok(r)
+}
+
 /// `illustash-terms sync-names`：前提是角色已切到核心（名字挂在角色的词条上）。一个事务，通过才提交。
 pub fn verify(conn: &mut Connection) -> Result<Report> {
     crate::schema::require_current(conn)?;

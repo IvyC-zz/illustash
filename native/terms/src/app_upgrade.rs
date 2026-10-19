@@ -1,5 +1,6 @@
-//! Explicit upgrades of format-1 packages. Initialized core-5/6 packages keep the terms-only
-//! workflow; historical application/source schemas and initialization use staged pair publication.
+//! Explicit upgrades of format-1 packages: libraries switched to the core in every domain (core 5 to the version before
+//! this build's) upgrade in one application-database transaction after a backup. Libraries from before the switch are
+//! refused; the `pre-v8` version upgrades them first (#201, user decision 2026-10-19).
 use crate::{
     app_library::{self, Library},
     Error, Result,
@@ -14,7 +15,6 @@ use std::{
 pub(crate) struct ValidatedUpgrade {
     library: Library,
     before: i64,
-    legacy: bool,
 }
 #[derive(Debug)]
 pub(crate) struct UpgradeReport {
@@ -100,32 +100,54 @@ pub(crate) fn prepare(path: &Path) -> Result<ValidatedUpgrade> {
     let library = Library::open_for_upgrade(path)?;
     let mut c = app_library::read_connection(&library.db())?;
     let tx = c.transaction()?;
-    let strict = preflight_application(&tx).and_then(|v| {
-        preflight_source(&library)?;
-        Ok(v)
-    });
-    let legacy = strict.is_err();
-    let before = if let Ok(v) = strict {
-        v
-    } else {
-        crate::app_legacy_upgrade::validate(&tx)?;
-        crate::schema::version(&tx)?
-    };
-    if !legacy || Library::open(path).is_err() || crate::app_legacy_upgrade::required(&library)? {
-        tx.commit()?;
-        Ok(ValidatedUpgrade { library, before, legacy })
-    } else {
-        Err(Error::Schema("当前图库无需升级".into()))
+    let before = preflight_application(&tx)?;
+    preflight_source(&library)?;
+    tx.commit()?;
+    Ok(ValidatedUpgrade { library, before })
+}
+
+/// What a library from before the switch to the core is told: this version no longer upgrades it (#201).
+pub(crate) const PRE_V8: &str =
+    "这个图库还没有完全切换到词条核心，这个版本不再升级它：请先用 pre-v8 版本打开并升级，再用这个版本打开。";
+
+/// A library some domain of which was never switched to the core (application schema before 36, or a switch marker
+/// missing or unfinished): refused with `PRE_V8`, read-only.
+pub(crate) fn refuse_unswitched(c: &Connection) -> Result<()> {
+    let has_meta: bool =
+        c.query_row("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='meta')", [], |r| r.get(0))?;
+    if !has_meta {
+        return Ok(());
     }
+    let older = meta(c, "schema_version")?.and_then(|v| v.parse::<i64>().ok()).is_none_or(|v| v < 36);
+    let mut unswitched = false;
+    for key in ["terms_artists", "terms_labels", "terms_characters", "terms_names"] {
+        unswitched |= meta(c, key)?.as_deref() != Some("core");
+    }
+    if older || unswitched {
+        return Err(Error::Schema(PRE_V8.into()));
+    }
+    Ok(())
+}
+
+/// The read-only checks of a package an explicit upgrade may open: a switched library at an older core version.
+pub(crate) fn validate(c: &Connection) -> Result<()> {
+    app_library::check_database(c)?;
+    if meta(c, "schema_version")?.is_some_and(|v| v.parse::<i64>().map_or(true, |v| v > 36)) {
+        return Err(Error::Schema("应用库版本较新或无效，已停止迁移".into()));
+    }
+    refuse_unswitched(c)?;
+    if !(0..=crate::SCHEMA_VERSION).contains(&crate::schema::version(c)?) {
+        return Err(Error::Schema("词条版本较新，已停止迁移".into()));
+    }
+    if !matches!(meta(c, "identity_policy")?.as_deref(), None | Some("") | Some("hybrid") | Some("v2")) {
+        return Err(Error::Schema("未知身份策略，已停止迁移".into()));
+    }
+    Ok(())
 }
 
 /// One application SQLite commit. Failure before commit rolls it back; restoration is explicit.
 pub(crate) fn upgrade(prepared: &ValidatedUpgrade) -> std::result::Result<UpgradeReport, UpgradeFailure> {
-    if prepared.legacy {
-        crate::app_legacy_upgrade::upgrade(&prepared.library)
-    } else {
-        upgrade_with(prepared, |_| Ok(()), |_| Ok(()))
-    }
+    upgrade_with(prepared, |_| Ok(()), |_| Ok(()))
 }
 fn upgrade_with<B, A>(
     prepared: &ValidatedUpgrade,
@@ -189,7 +211,7 @@ fn preflight_source(library: &Library) -> Result<()> {
         "SELECT source_id,path,size,mtime_ns,md5,asset FROM files LIMIT 0",
         "SELECT * FROM characters LIMIT 0", "SELECT * FROM character_aliases LIMIT 0", "SELECT * FROM runs LIMIT 0",
     ] {
-        tx.prepare(sql).map_err(|e| Error::Schema(format!("source schema 尚不兼容，需要另行显式升级：{e}")))?;
+        tx.prepare(sql).map_err(|e| Error::Schema(format!("source schema 是更早的布局（{e}）。{PRE_V8}")))?;
     }
     tx.commit()?;
     Ok(())
@@ -197,7 +219,7 @@ fn preflight_source(library: &Library) -> Result<()> {
 fn preflight_application(c: &Connection) -> Result<i64> {
     app_library::validate_application(c, true)?;
     let app = meta(c, "schema_version")?;
-    if app.as_deref() != Some("36") || !matches!(crate::schema::version(c)?, 5 | 6) {
+    if app.as_deref() != Some("36") || !(5..crate::SCHEMA_VERSION).contains(&crate::schema::version(c)?) {
         return Err(Error::Schema("需要应用升级".into()));
     }
     for key in ["terms_artists", "terms_labels", "terms_characters", "terms_names"] {
@@ -212,7 +234,7 @@ fn preflight_application(c: &Connection) -> Result<i64> {
     // Opening cannot silently compensate for unbuilt indexes or the Store.initialize write path.
     for key in ["indexed", "general_indexed", "rating_indexed", "names_version"] {
         if meta(c, key)?.is_none() {
-            return Err(Error::Schema(format!("应用初始化或索引未完成：缺少 {key}，本批升级不补跑索引")));
+            return Err(Error::Schema(format!("应用初始化或索引未完成：缺少 {key}。{PRE_V8}")));
         }
     }
     // All established schema-36 application read objects and core-5 storage must already exist.
@@ -322,7 +344,10 @@ mod tests {
             assert_eq!(db_before, fs::read(f.0.join("library.sqlite")).unwrap());
             assert_eq!(f.backups(), 0);
             let report = upgrade(&prepared).unwrap();
-            assert_eq!((report.before, report.after, report.maintenance_pending), (version, 7, false));
+            assert_eq!(
+                (report.before, report.after, report.maintenance_pending),
+                (version, crate::SCHEMA_VERSION, false)
+            );
             assert_eq!(report.library.display_path(), f.0);
             assert_eq!(f.backups(), 1);
             let backup = app_library::read_connection(&report.backup).unwrap();
@@ -367,7 +392,7 @@ mod tests {
         assert!(failure.committed);
         assert!(failure.to_string().contains("升级已提交"));
         assert!(failure.backup.as_ref().unwrap().is_file());
-        assert_eq!(crate::schema::version(&f.connection()).unwrap(), 7);
+        assert_eq!(crate::schema::version(&f.connection()).unwrap(), crate::SCHEMA_VERSION);
         assert!(Library::open(&f.0).is_ok());
     }
     #[test]
@@ -381,13 +406,19 @@ mod tests {
             assert_eq!(before, fs::read(f.0.join("library.sqlite")).unwrap());
             assert_eq!(f.backups(), 0);
         }
+        // Layouts from before the core 5 era: the pre-v8 version upgrades them (#201).
         let f = Fixture::new(5);
         crate::sqlite::open(f.0.join("source.sqlite")).unwrap().execute_batch("DROP TABLE files").unwrap();
-        assert!(prepare(&f.0).is_ok()); // Explicit source upgrade now creates files.
+        assert!(prepare(&f.0).unwrap_err().to_string().contains("pre-v8"));
         assert_eq!(f.backups(), 0);
         let f = Fixture::new(5);
         f.connection().execute("DELETE FROM meta WHERE key='indexed'", []).unwrap();
-        assert!(prepare(&f.0).is_ok());
+        assert!(prepare(&f.0).unwrap_err().to_string().contains("pre-v8"));
+        assert_eq!(f.backups(), 0);
+        let f = Fixture::new(5);
+        f.connection().execute("DELETE FROM meta WHERE key='terms_names'", []).unwrap();
+        assert!(prepare(&f.0).unwrap_err().to_string().contains("pre-v8"));
+        assert!(Library::open(&f.0).unwrap_err().to_string().contains("pre-v8"));
         assert_eq!(f.backups(), 0);
     }
     #[test]
