@@ -80,8 +80,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .collect::<illustash_terms::Result<Vec<_>>>()?;
             json!({"distances": distances,"orders":orders})
         }
+        "bench-generate" => bench::generate(&request)?,
+        "bench-stages" => bench::stages(&request)?,
         _ => return Err("unsupported mode".into()),
     };
     fs::write(output, serde_json::to_vec(&result)?)?;
     Ok(())
 }
+
+#[path = "recognition_compute/bench.rs"]
+mod bench;
