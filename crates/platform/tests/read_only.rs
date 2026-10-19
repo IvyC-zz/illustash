@@ -74,3 +74,29 @@ fn photos_reads_only_explicit_fixture_and_preserves_database() {
     assert!(photos::path(&root, "SYNTHETIC", "..", "b.png").is_err());
     assert_eq!(fs::read(db).unwrap(), before);
 }
+#[test]
+fn photos_refused_by_the_system_is_told_apart_from_other_failures() {
+    // EPERM is what macOS privacy settings answer; plain file modes answer EACCES and keep the database error (#202).
+    let at = std::path::Path::new("Photos.sqlite");
+    let refused = illustash_core::error::io_at(std::io::Error::from_raw_os_error(libc::EPERM), at, None);
+    assert!(photos::denied(&refused));
+    let locked = illustash_core::error::io_at(std::io::Error::from_raw_os_error(libc::EACCES), at, None);
+    assert!(!photos::denied(&locked));
+    assert!(!photos::denied(&Error::Io(std::io::Error::from_raw_os_error(libc::EPERM))));
+    assert!(!photos::denied(&Error::Invalid("synthetic".into())));
+}
+#[cfg(unix)]
+#[test]
+fn photos_database_without_read_permission_is_not_called_refused() {
+    use std::os::unix::fs::PermissionsExt;
+    let f = Fixture::new();
+    fs::create_dir(f.0.join("database")).unwrap();
+    let db = f.0.join("database/Photos.sqlite");
+    sqlite::open(&db).unwrap().execute_batch("CREATE TABLE ZASSET(ZUUID)").unwrap();
+    fs::set_permissions(&db, fs::Permissions::from_mode(0o000)).unwrap();
+    let result = photos::read(f.0.to_str().unwrap());
+    fs::set_permissions(&db, fs::Permissions::from_mode(0o644)).unwrap();
+    let error = result.unwrap_err();
+    assert!(matches!(error, Error::Sql(_)), "{error}");
+    assert!(!photos::denied(&error));
+}

@@ -16,6 +16,12 @@ export const onJob = changed.on;
 
 // ---------- sync ----------
 export const SYNC_ACTIVE = ['scanning', 'recognising', 'importing'];
+// The system refused this app the Photos library (#202): the backend names it with a code, never in the error's words.
+// The way out is System Settings › Privacy & Security › Photos, then quitting and reopening; the desktop shell opens
+// this one address outside the window (desktop/src/server.rs PHOTOS_PRIVACY), a browser asks first.
+export const photosRefused = s => s.status === 'error' && s.problem === 'photos_permission';
+export const PHOTOS_PRIVACY = 'x-apple.systempreferences:com.apple.preference.security?Privacy_Photos';
+export const photosHelp = () => t('没有访问照片图库的权限。到「系统设置 › 隐私与安全性 › 照片」里打开 Illustash，退出并重新打开后再同步。');
 export const syncBar = (s, bar) => s.status === 'recognising' && s.stage !== 'preparing' ? bar(s.done, s.total)
   : s.status === 'importing' && s.import_total ? bar(s.import_done, s.import_total) : '';
 // Recognition and import are counted apart: done/total are images recognised or given up on,
@@ -44,7 +50,7 @@ export function syncLine(s) {
   if (s.status === 'needs_recognition') return (state.models?.on_demand && state.models.status !== 'ready'
     ? t('有 {n} 张图等待识别（识别模型还没下载）', {n: number(s.total || 0)}) : t('有 {n} 张图等待识别（识别服务未启动）', {n: number(s.total || 0)})) + kept;
   if (s.status === 'interrupted') return s.message ? t('同步已中断（{reason}），可重新扫描', {reason: tb(s.message)}) : t('同步已中断，可重新扫描');
-  if (s.status === 'error') return t('同步失败');
+  if (s.status === 'error') return photosRefused(s) ? t('同步失败：没有访问照片图库的权限') : t('同步失败');
   return t('本地图库');
 }
 let syncTimer = null, lastImported = 0, syncPoll = 0;

@@ -103,6 +103,7 @@ impl Syncer {
                     "import_total",
                     "unreadable",
                     "damaged",
+                    "problem",
                 ]
                 .iter()
                 .filter_map(|k| state.get(k).map(|v| ((*k).to_string(), v.clone())))
@@ -268,6 +269,8 @@ fn run_with(
     let run_id = c.last_insert_rowid();
     drop(c);
     let mut counts = json!({"found":0,"removed":0,"imported":0,"failed":0});
+    // What the person has to do about a failure, as a code the page words (#202); the message stays the error's own.
+    let problem = std::cell::Cell::new(None);
     let result: Result<(&str, String, Value)> = (|| {
         let recovery = crate::app_recognition::resume(library, cancel, &crate::app_research::dispatch)?;
         if recovery["status"] != "done" {
@@ -293,7 +296,13 @@ fn run_with(
                     .collect::<Vec<_>>();
                 (scan.counts, order)
             } else {
-                crate::app_photos::scan_ordered(source, &library.source(), &|| check(cancel), &progress)?
+                crate::app_photos::scan_ordered(source, &library.source(), &|| check(cancel), &progress).inspect_err(
+                    |e| {
+                        if crate::platform_photos::denied(e) {
+                            problem.set(Some("photos_permission"));
+                        }
+                    },
+                )?
             };
             scanned += done_in_source.get();
             unreadable += scan["unreadable"].as_u64().unwrap_or(0);
@@ -408,9 +417,11 @@ fn run_with(
     };
     c.execute("UPDATE sync_runs SET status=?,message=?,found=?,removed=?,imported=?,failed=?,finished_at=datetime('now','localtime') WHERE id=?",params![status,message,counts["found"].as_u64(),counts["removed"].as_u64(),counts["imported"].as_u64(),counts["failed"].as_u64(),run_id])?;
     if let Err(e) = &result {
-        update(
-            json!({"found":counts["found"],"removed":counts["removed"],"imported":counts["imported"],"failed":counts["failed"],"message":stop_message(cancel, context, e)}),
-        );
+        let mut fields = json!({"found":counts["found"],"removed":counts["removed"],"imported":counts["imported"],"failed":counts["failed"],"message":stop_message(cancel, context, e)});
+        if let Some(problem) = problem.get() {
+            fields["problem"] = json!(problem);
+        }
+        update(fields);
     }
     if let Some(fields) = terminal.into_inner() {
         publish(fields);

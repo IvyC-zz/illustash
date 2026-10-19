@@ -143,6 +143,18 @@ test('after a stopped or failed sync the problem bar says nothing is lost and wh
     assert.match(c.nodes.guideNotice.innerHTML, expected);
     assert.match(c.nodes.guideNotice.innerHTML, /data-guide-sync/);
   }
+  // The system refused the Photos library (#202): what to do and where, by the backend's code; syncing again won't help.
+  const refused = guide({sync: {status: 'error', problem: 'photos_permission', message: '[Errno 1] Operation not permitted: \'/合成/Photos.sqlite\''}});
+  await refused.loadGuide();
+  refused.drawGuideNotice();
+  assert.match(refused.nodes.guideNotice.innerHTML, /「系统设置 › 隐私与安全性 › 照片」里打开 Illustash，退出并重新打开后再同步/);
+  assert.match(refused.nodes.guideNotice.innerHTML, /data-guide-photos>打开系统设置</);
+  assert.doesNotMatch(refused.nodes.guideNotice.innerHTML, /data-guide-sync|Operation not permitted/);
+  globalThis.location = {href: ''}; globalThis.addEventListener = () => {};
+  refused.wireGuide();
+  delete globalThis.addEventListener;
+  for (const click of refused.nodes.guideNotice.listeners.click) await click({target: {closest: selector => selector === '[data-guide-photos]' ? {} : null}});
+  assert.equal(globalThis.location.href, core.PHOTOS_PRIVACY);
   const fine = guide({sync: {status: 'done'}});
   await fine.loadGuide();
   fine.drawGuideNotice();
