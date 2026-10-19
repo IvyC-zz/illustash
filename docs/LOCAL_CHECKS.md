@@ -22,6 +22,33 @@
 
 全量耗时包含依赖准备、fmt/clippy、测试编译、Rust/JS/Python 执行、release 构建和空 PATH 重放；Python 汇总及 Rust 重放各只是其中一部分。比较时写明已测 head、平台、进程数、数据口径和缓存是否已存在，分别列出编译与执行时间。当前 Rust 重放缓存每个场景的路径替换规则并预筛无目标字符串的单元格；`native/terms/Cargo.toml` 的 dev profile 优化第三方依赖，自有 core/platform 和修改过的 tiny_http 保持未优化。依赖重编的单次总时长、测试执行时间与固定验收缓存复用是不同口径，不能合成一个提速数字。
 
+## 本机资源：排队、计时与后台优先级
+
+规则见 [AGENTS.md](../AGENTS.md) 2026-10-12、2026-10-18、2026-10-19 的条目，这里写做法。工具是 agent-collab skill 的 `scripts/collab_run.py`（路径按所在 harness 的 skill 安装位置），槽位是本机文件锁，没有常驻进程。
+
+| 用途 | 命令 | 行为 |
+|---|---|---|
+| 全量、`local_acceptance.py run`、单独的 release 构建 | `collab_run.py run -- <命令>` | 占 heavy 槽，被占时排队 |
+| 计时、性能测量 | `collab_run.py timing -- <命令>` | 同时占 heavy 和 vm（要么都拿到，要么都不占），再等整机 CPU 连续 30 秒占用不超过 10% 才开始；15 分钟内等不到就放开槽位、退出 75，并列出最占 CPU 的进程。`--idle-cpu`、`--idle-for`、`--idle-timeout` 可调，调过的值写进 PR 的测量口径 |
+| 虚拟机 | `collab_run.py run --slot vm -- tart run …` | 见下文「macOS 实机测试」 |
+| Windows 远端构建与验收 | `collab_run.py run --slot windows -- …` | 与本机槽位互不阻塞 |
+| 开发期的编译和定向测试 | `collab_run.py bg -- <命令>` | 不排队，直接以后台优先级运行 |
+
+`bg` 在 macOS 上用 `taskpolicy -b`：进程只跑能效核，磁盘 I/O 被节流，cargo、rustc、测试进程和 Python 子进程都继承（`ps -o pri=` 显示 4，普通进程是 31）。其他系统退回 `nice -n 10`，没设 `CARGO_BUILD_JOBS` 时设为核数的一半。在 `run` / `timing` 里面调用 `bg` 时保持正常优先级，所以全量和计时不会被降级。对时间敏感的定向测试在后台优先级下失败时，先在 `run` 里重跑排除负载，再下结论（#219）。
+
+**拦截**：Claude Code 和 Codex 都接了 `PreToolUse` 钩子，按本机的 `~/.config/agent-collab/run.json` 拦下没按规定运行的命令，并给出改写后的完整命令。2026-10-19 起的范围：
+
+- heavy：`tools/check_all.sh`、`tools/local_acceptance.py run`、`cargo build --release` / `-r`、`cargo test --release`、`cargo tauri build`、`python -m tests.run_fixed_suite`
+- 计时：`tools/bench_recognition.py`（新加的计时脚本也应加进来）
+- windows：`tools/windows_acceptance.py`、`tools/windows_research_acceptance.py`
+- 后台：`cargo build`、`cargo test`、`cargo clippy`、`cargo check`、`cargo nextest`、`python -m unittest`；直接写 `taskpolicy -b …` 也放行，经 SSH 在别的机器上跑的不管
+
+钩子只看代理直接发起的命令，脚本内部调用的（例如 `check_all.sh` 里的 cargo）不受影响。`cargo run` 不在范围内：常驻的宿主进程不应长期占着槽位或被降级。
+
+**运行历史**：每次 `run`、`timing`、`bg` 结束（包括排不上、等不到空闲而放弃的）都追加一行到状态目录的 `history.jsonl`：模式、槽位、会话、仓库、命令、排队、等空闲和执行的秒数、退出码、开始时的负载，以及当时别的槽位是否被占。`collab_run.py history` 按槽位汇总最近 7 天（次数、失败、放弃、排队和执行时长的中位数与最大值），`--raw N` 列出最近 N 次。讨论排队代价、全量耗时时以这里的数据为准，引用时写明时间范围。
+
+**回退**：钩子环境里设 `COLLAB_RUN_GUARD=0` 关闭全部拦截；只想取消某一类，从 `run.json` 删掉对应规则。`bg` 不改变任何持久状态，不用就是回退。
+
 ## 修改测试的导航
 
 业务契约和固定期望的比较规则见 [架构参考](ARCHITECTURE_DIRECTION.md)；本节说明测试分工、依赖和修改方法，测试入口与合并门槛仍按上文及 AGENTS.md。
@@ -62,7 +89,7 @@ HTTP 测试共用 `tests/test_read_http.py` 的端口、等待和进程清理工
 
 ## 固定验收窗口
 
-固定路径为 Git 公共目录所在仓库的 `.venv/local-acceptance/worktree`，由 `tools/local_acceptance.py` 建立 detached worktree。它与主工作区及开发 worktree 的源码、target 分开；只在固定路径现场构建，不复制其他目录的 Tauri target。开发 worktree 的缓存可按原规则清理，固定验收 worktree、它的 target / `.venv/check-all` 以及外层记录不能随普通任务收尾删除。
+固定路径为 Git 公共目录所在仓库的 `.venv/local-acceptance/worktree`，由 `tools/local_acceptance.py` 建立 detached worktree。它与主工作区及开发 worktree 的源码、target 分开；只在固定路径现场构建，不复制其他目录的 Tauri target。开发 worktree 的缓存可按原规则清理。固定验收 worktree 本身和外层记录、密钥不随普通任务收尾删除；它的 target 等构建缓存可以删除（2026-10-19 用户定，#240），下次 `run` 时在固定路径冷编译，不影响已有记录的校验。
 
 开发方先提交候选、做定向检查，在 PR 交接完整 SHA 和所需资源。父会话安排窗口后，从本仓库任一 worktree 执行：
 
