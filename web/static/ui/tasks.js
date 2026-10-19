@@ -5,7 +5,7 @@ import {esc, number, stamp, localTime} from '../core/format.js';
 import {state} from '../core/state.js';
 import {api, post, shared, readError} from '../core/session.js';
 import {SYNC_ACTIVE, INDEX_ACTIVE, NAMES_ACTIVE, SIMILAR_ACTIVE, PROV_ACTIVE, RUN_STATUS, onJob, syncLine, syncBar, syncDoneText, indexLine, indexEndText,
-  namesLine, taskSimilar, pollSync, pollIndex, pollNames, loadProvenance, startSync, checkIndex, refreshNames, provenanceAction} from '../core/jobs.js';
+  namesLine, taskSimilar, pollSync, pollIndex, pollNames, loadProvenance, startSync, checkIndex, refreshNames, provenanceAction, PHOTOS_PRIVACY, photosHelp, photosRefused} from '../core/jobs.js';
 import {loadLibraries, updatesTick} from '../core/settings.js';
 import {$, toast, error, fold, wireFolds} from './dom.js';
 import {confirmAction} from './dialog.js';
@@ -76,6 +76,7 @@ function taskAsks() {
     <li>${t('本次最多 {mb} MB；遇到拒绝、限流或验证码就停，不绕过', {mb: number(p.budgets?.full || 1024)})}</li></ul>
     <p class="muted-note">${t('授权只对这一次有效，下次开始会再问。图片本身不会上传。查过的图和画师不会重查，可以随时停止。')}</p>
     <div class="prov-confirm-btns"><button class="primary" data-prov="start" data-network="1">${t('授权并开始')}</button><button class="quiet" data-prov="start">${t('只跑本地（签名识别）')}</button><button class="quiet" data-prov="cancel">${t('取消')}</button></div></div>`);
+  if (photosRefused(s)) asks.push(`<div class="task-ask"><span>${photosHelp()}</span><button class="primary small" data-task="photos-privacy">${t('打开系统设置')}</button></div>`);
   if (missing.length && !INDEX_ACTIVE.includes(state.index.state.status)) asks.push(`<div class="task-ask"><span>${t('上次检查发现 {n} 个还没收录的角色', {n: `<b>${number(missing.length)}</b>`})}</span><button class="primary small" data-task="index-add">${t('查看并添加…')}</button></div>`);
   return asks;
 }
@@ -140,6 +141,7 @@ export function wireTasks() {
     const act = b.dataset.task;
     if (act === 'close') { toggleTasks(false); return; }
     if (act === 'index-add') { openIndexAdd(); return; }
+    if (act === 'photos-privacy') { location.href = PHOTOS_PRIVACY; return; }
     b.disabled = true;
     try {
       if (act === 'sync') await startSync();
