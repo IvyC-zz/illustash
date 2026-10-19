@@ -5,12 +5,12 @@
 
 两部分，同一批图片：
   端到端：重定位布局里启动 release 宿主 illustash-terms，以 folder 来源新建图库，POST /api/sync，
-    每 20 ms 轮询 GET /api/sync 直到完成；宿主照常拉起 illustash-recognition（即 illustash-worker）
-    识别并边识别边导入。记录墙钟总时间与分段、宿主和 worker 的峰值内存与 CPU 时间。
+    每 50 ms 轮询 GET /api/sync 直到完成；宿主照常拉起 illustash-recognition（即 illustash-worker）
+    识别并边识别边导入。记录墙钟总时间与分段，以及宿主和 worker 的峰值内存与 CPU 时间（每 20 ms 采样）。
   阶段分解：examples/recognition-compute 的 bench-stages 在一个进程里按 worker 的顺序逐张处理同一批图，给每一步计时：
     解码、WD（含预处理）、CCIP（含预处理）、检测与分级（WD 概率转标签与分级 + 角色锚点认领）、
-    写结果包；写库取端到端里宿主在识别阶段用掉的 CPU 时间（导入校验、写 source/应用库、投影，
-    含状态轮询的少量开销）。
+    写结果包；写库取端到端里宿主在识别阶段用掉的 CPU 时间（导入校验、写 source/应用库、投影），
+    状态轮询的开销在同步完成后按同样频率空轮询校准并扣除。
 每项跑 --trials 次（默认 3），报告中位数。
 
 用法（仓库根目录）。计时必须占 heavy 槽，Windows 验收机经 SSH 发起时用 --slot windows：
@@ -48,7 +48,9 @@ from tools.verify_read_http import fetch  # noqa: E402
 WINDOWS = os.name == 'nt'
 EXE = '.exe' if WINDOWS else ''
 RUNNING = ('scanning', 'importing', 'recognising')
-POLL = 0.02
+POLL = 0.02  # 内存与 CPU 采样
+STATUS_POLL = 0.05  # GET /api/sync；每次请求的宿主 CPU 事后校准扣除
+CALIBRATION = 100
 SPAWN = {'creationflags': subprocess.CREATE_NEW_PROCESS_GROUP} if WINDOWS else {}
 INTERRUPT = signal.CTRL_BREAK_EVENT if WINDOWS else signal.SIGINT
 RUNTIME = 'onnxruntime.dll' if WINDOWS else 'libonnxruntime.dylib'
@@ -180,6 +182,7 @@ class Sampler(threading.Thread):
         self.stop = threading.Event()
 
     def mark(self, label):
+        self.host.sample()
         self.marks[label] = (self.host.cpu, sum(p.cpu for p in self.workers.values()))
 
     def run(self):
@@ -337,15 +340,17 @@ def end_to_end(args, base, resources, images, shared, characters, trial):
                                 'headers': {'Content-Type': 'application/json', 'X-CSRF-Token': token}}, origin)
         if answer['status'] != 200:
             raise SystemExit(f'POST /api/sync：{answer["status"]} {answer["body"][:300]!r}')
-        timeline, marks, state = [], {}, {}
+        timeline, marks, state, polls = [], {}, {}, 0
         while True:
             state = json.loads(fetch(origin, {'url': '/api/sync'}, origin)['body'])['state']
+            polls += 1
             now = (time.perf_counter() - started) * 1000
             row = [state.get(k) for k in ('status', 'stage', 'done', 'import_done', 'imported')]
             if not timeline or timeline[-1][1:] != row:
                 timeline.append([round(now, 1)] + row)
             if state.get('status') == 'recognising' and 'recognising' not in marks:
                 marks['recognising'] = now
+                marks['polls_before_recognising'] = polls
                 sampler.mark('recognising')
             if state.get('status') == 'recognising' and state.get('done') and 'first' not in marks:
                 marks['first'] = now
@@ -355,9 +360,14 @@ def end_to_end(args, base, resources, images, shared, characters, trial):
                 break
             if now > 3600_000:
                 raise SystemExit('同步超过一小时未完成')
-            time.sleep(POLL)
+            time.sleep(STATUS_POLL)
         total_ms = (time.perf_counter() - started) * 1000
         sampler.mark('end')
+        # 同样频率空轮询已完成的宿主，量出每次 GET /api/sync 的宿主 CPU，从识别阶段里扣掉。
+        for _ in range(CALIBRATION):
+            json.loads(fetch(origin, {'url': '/api/sync'}, origin)['body'])
+            time.sleep(STATUS_POLL)
+        sampler.mark('calibrated')
         sampler.finish()
     finally:
         if host.poll() is None:
@@ -380,14 +390,17 @@ def end_to_end(args, base, resources, images, shared, characters, trial):
     if len(workers) != 1:
         raise SystemExit(f'应当恰好看到一个识别 worker：{[(p.pid, p.name) for p in sampler.workers.values()]}')
     worker = workers[0]
-    host_cpu = sampler.marks['end'][0] - sampler.marks['recognising'][0]
+    per_poll = (sampler.marks['calibrated'][0] - sampler.marks['end'][0]) / CALIBRATION
+    raw = sampler.marks['end'][0] - sampler.marks['recognising'][0]
+    host_cpu = raw - per_poll * (polls - marks['polls_before_recognising'])
     return {'total_ms': total_ms, 'per_image_ms': total_ms / count,
             'phases_ms': {'scan_and_register': marks['recognising'],
                           'recognise_to_first_image': marks['first'] - marks['recognising'],
                           'recognise_rest': marks['recognised'] - marks['first'],
                           'final_import': total_ms - marks['recognised']},
             'host_peak_bytes': sampler.host.peak, 'worker_peak_bytes': worker.peak,
-            'host_cpu_s_recognising': host_cpu, 'host_cpu_s_scan': sampler.marks['recognising'][0] - sampler.marks['start'][0],
+            'host_cpu_s_recognising': host_cpu, 'host_cpu_s_recognising_raw': raw,
+            'poll_cpu_ms': per_poll * 1000, 'polls': polls, 'host_cpu_s_scan': sampler.marks['recognising'][0] - sampler.marks['start'][0],
             'worker_cpu_s': worker.cpu, 'state': state, 'timeline': timeline, 'package': str(package)}
 
 
