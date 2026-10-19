@@ -123,13 +123,6 @@ class CharacterReadHTTPTest(HTTPHarness):
 
 def rename(c, entity, name):
     """Replace an identity's names by one preferred user name, without the core."""
-    if c.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='names'").fetchone():
-        # Before the names switch (#247) the legacy table is the authority, guarded against writers other than the core.
-        c.execute("INSERT INTO meta VALUES ('terms_writer','1')")
-        c.execute("DELETE FROM names WHERE entity_id=?",(entity,))
-        c.execute("INSERT INTO names(entity_id,lang,value,source,role,preferred,position) VALUES (?,'zh',?,'user','display',1,0)",(entity,name))
-        c.execute("DELETE FROM meta WHERE key='terms_writer'")
-        return
     c.execute("DELETE FROM term_names WHERE term_id=(SELECT id FROM terms WHERE key=?)",(entity,))
     c.execute("INSERT INTO term_names(term_id,lang,value,source,role,preferred,position,seq) VALUES "
               "((SELECT id FROM terms WHERE key=?),'zh',?,'user','display',1,0,(SELECT coalesce(max(seq),0)+1 FROM term_names))",(entity,name))
