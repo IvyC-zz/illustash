@@ -244,24 +244,63 @@ class InstalledIndexAppTest(CandidateIndexAdapter, unittest.TestCase):
         self.assertEqual(self.env['PATH'], '')
         return entity
 
-    def hold_after_actual_compute(self):
-        self.ready, self.gate = self.root/'adapter-ready', self.root/'release-adapter'
+    def launch_through(self, shell, python):
+        """Restart the host with a launcher around the installed adapter: `shell` on POSIX, `python` on Windows."""
         launcher = self.root/'controlled-adapter'
-        launcher.write_text('#!/bin/sh\n'+shlex.quote(str(self.adapter))+' "$@" || exit $?\n'+
-                            '/bin/echo "$$" > '+shlex.quote(str(self.ready))+'\n'+
-                            'while [ ! -f '+shlex.quote(str(self.gate))+' ]; do /bin/sleep 0.02; done\n')
         if os.name == 'nt':
-            launcher.write_text('import os,sys,time,subprocess\nfrom pathlib import Path\n'
-                + 'p=subprocess.run(['+repr(str(self.adapter))+']+sys.argv[1:])\n'
-                + 'if p.returncode: sys.exit(p.returncode)\n'
-                + 'Path('+repr(str(self.ready))+').write_text(str(os.getpid()))\n'
-                + 'while not Path('+repr(str(self.gate))+').exists(): time.sleep(.02)\n')
+            launcher.write_text(python)
             launcher = Path(command(launcher))
         else:
+            launcher.write_text('#!/bin/sh\n' + shell)
             launcher.chmod(0o755)
         self.stop(self.process)
-        self.addCleanup(self.gate.touch)
         self.env['ILLUSTASH_INDEX_WORKER'] = str(launcher); self.restart()
+
+    def hold_after_actual_compute(self):
+        self.ready, self.gate = self.root/'adapter-ready', self.root/'release-adapter'
+        self.addCleanup(self.gate.touch)
+        self.launch_through(
+            shlex.quote(str(self.adapter))+' "$@" || exit $?\n'+
+            '/bin/echo "$$" > '+shlex.quote(str(self.ready))+'\n'+
+            'while [ ! -f '+shlex.quote(str(self.gate))+' ]; do /bin/sleep 0.02; done\n',
+            'import os,sys,time,subprocess\nfrom pathlib import Path\n'
+            + 'p=subprocess.run(['+repr(str(self.adapter))+']+sys.argv[1:])\n'
+            + 'if p.returncode: sys.exit(p.returncode)\n'
+            + 'Path('+repr(str(self.ready))+').write_text(str(os.getpid()))\n'
+            + 'while not Path('+repr(str(self.gate))+').exists(): time.sleep(.02)\n')
+
+    def hold_saved_compute(self, timeout_ms):
+        """Like hold_after_actual_compute, but the actual calculator's result is made beforehand under the
+        default deadline: that run saves it and then fails, so nothing is published and its prepared job
+        stays for a retry. The host resumes that job on restart, under `timeout_ms`, and the launcher only
+        puts the saved result back in the job folder, so a short deadline need not fit a real compute on a
+        busy machine (#219)."""
+        self.ready, self.gate = self.root/'adapter-ready', self.root/'release-adapter'
+        saved = self.root/'saved-response.json'
+        self.addCleanup(self.gate.touch)
+        self.env.pop('ILLUSTASH_INDEX_TIMEOUT_MS', None)
+        self.launch_through(
+            shlex.quote(str(self.adapter))+' "$@" || exit $?\n/bin/cp "$2" '+shlex.quote(str(saved))+' || exit $?\nexit 9\n',
+            'import shutil,subprocess,sys\n'
+            + 'p=subprocess.run(['+repr(str(self.adapter))+']+sys.argv[1:])\n'
+            + 'if p.returncode: sys.exit(p.returncode)\n'
+            + 'shutil.copyfile(sys.argv[2],'+repr(str(saved))+')\nsys.exit(9)\n')
+        self.check(); self.seed_reference(); self.index({'action':'apply','tags':['carol_example']})
+        result = self.finish()
+        self.assertEqual(result['state']['status'], 'error', result)
+        self.assertTrue(saved.is_file()); self.assertTrue((self.lib.path/'index-job.json').is_file())
+        self.env['ILLUSTASH_INDEX_TIMEOUT_MS'] = timeout_ms
+        self.launch_through(
+            '/bin/cp '+shlex.quote(str(saved))+' "$2" || exit $?\n'+
+            '/bin/echo "$$" > '+shlex.quote(str(self.ready))+'\n'+
+            'while [ ! -f '+shlex.quote(str(self.gate))+' ]; do /bin/sleep 0.02; done\n',
+            'import os,shutil,sys,time\nfrom pathlib import Path\n'
+            + 'shutil.copyfile('+repr(str(saved))+',sys.argv[2])\n'
+            + 'Path('+repr(str(self.ready))+').write_text(str(os.getpid()))\n'
+            + 'while not Path('+repr(str(self.gate))+').exists(): time.sleep(.02)\n')
+        wait_until(lambda: self.ready.is_file() and self.ready.read_text().strip().isdigit(), timeout=30)
+        job = json.loads((self.lib.path/'index-job.json').read_text())
+        self.assertTrue((Path(job['folder'])/'response.json').is_file())
 
     def start_held(self):
         self.check(); self.seed_reference(); self.index({'action':'apply','tags':['carol_example']})
@@ -361,11 +400,11 @@ class InstalledIndexAppTest(CandidateIndexAdapter, unittest.TestCase):
         self.assertFalse(self.sentinel.exists())
 
     def test_timeout_cancels_after_actual_compute_without_formal_writes(self):
-        # Allow the actual calculator to start before the deliberately held result times out.
-        self.env['ILLUSTASH_INDEX_TIMEOUT_MS'] = '5000'
-        self.hold_after_actual_compute(); before = snapshot(self.lib.source); self.start_held()
+        # The deadline covers only putting back a result computed beforehand, never a real compute (#219).
+        before = snapshot(self.lib.source); self.hold_saved_compute(timeout_ms='5000')
         worker_pid = int(self.ready.read_text()); result = self.finish()
         self.assertEqual(result['state']['status'], 'error', result)
+        self.assertIn('超时', result['state']['message'])
         wait_until(lambda: not process_exists(worker_pid), timeout=3)
         for table in ('characters','character_aliases','labels'):
             self.assertEqual(snapshot(self.lib.source)[table], before[table])

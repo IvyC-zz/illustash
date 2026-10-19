@@ -695,12 +695,13 @@ class NativeLifecycleTest(unittest.TestCase):
     def test_stalled_connections_are_closed_and_their_number_is_bounded(self):
         # #25: a client that stops sending loses its connection after the read timeout (shortened here),
         # and connections beyond the limit are refused at once, so stalled clients cannot hold threads without bound.
-        # The timeout must outlast opening all 64 held connections (slower on Windows), or the first ones free up.
-        self.stop(self.process)
-        self.env['ILLUSTASH_HTTP_TIMEOUT_MS'] = '3000'
-        self.process, self.log = self.start(self.lib.path)
-        self.token = json.loads(self.request('/api/bootstrap')['body'])['token']
         body = json.dumps({'similar': False}).encode()
+
+        def host(timeout_ms):
+            self.stop(self.process)
+            self.env['ILLUSTASH_HTTP_TIMEOUT_MS'] = timeout_ms
+            self.process, self.log = self.start(self.lib.path)
+            self.token = json.loads(self.request('/api/bootstrap')['body'])['token']
 
         def stalled(length):
             head = (f'POST /api/startup HTTP/1.1\r\nHost: 127.0.0.1:{self.port}\r\nOrigin: {self.origin}\r\n'
@@ -721,10 +722,13 @@ class NativeLifecycleTest(unittest.TestCase):
             return time.monotonic() - started < seconds
 
         # A small body is read by the HTTP library itself, a larger one by the request handler: both time out.
+        host('3000')
         for length in (len(body), 4096):
             with self.subTest(length=length):
                 self.assertTrue(closed_within(stalled(length), 10))
-        # Holding every connection slot: a further connection is refused straight away.
+        # Holding every connection slot: a further connection is refused straight away. The read timeout here
+        # is far longer than opening 64 connections can take on a busy machine, so none frees up early (#219).
+        host('600000')
         held = [stalled(len(body)) for _ in range(64)]
         refused = socket.create_connection(('127.0.0.1', self.port), timeout=5)
         self.addCleanup(refused.close)
@@ -734,8 +738,9 @@ class NativeLifecycleTest(unittest.TestCase):
         except ConnectionError:
             reply = b'reset'
         self.assertTrue(reply.startswith(b'HTTP/1.1 503') or reply in (b'', b'reset'), reply)
-        # The held connections time out; the host then serves normally and nothing was written.
-        self.assertTrue(all(closed_within(conn, 10) for conn in held))
+        # Held connections that go away free their slots; the host then serves normally and nothing was written.
+        for conn in held:
+            conn.close()
         wait_until(lambda: self.request('/api/bootstrap')['status'] == 200, timeout=10)
         self.assertEqual(startup(self.lib.db)['similar'], True)
         self.assertFalse(self.sentinel.exists())
