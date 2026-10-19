@@ -144,9 +144,9 @@ pub(crate) fn retire_aliases(c: &Connection) -> Result<()> {
     )?;
     let (old, new) =
         ("SELECT kind,key,value,position FROM name_aliases", "SELECT kind,key,value,position FROM term_key_aliases");
-    let differ = count(c, &format!("{old} EXCEPT {new}"))? + count(c, &format!("{new} EXCEPT {old}"))?;
-    if differ > 0 {
-        return Err(Error::Schema(format!("旧别名表与词条核心不一致，没有升级：{differ} 行")));
+    let differs = count(c, &format!("{old} EXCEPT {new}"))? + count(c, &format!("{new} EXCEPT {old}"))?;
+    if differs > 0 {
+        return Err(Error::Schema(format!("旧别名表与词条核心不一致，没有升级：{differs} 行")));
     }
     c.execute_batch("DROP TABLE name_aliases")?;
     Ok(())
