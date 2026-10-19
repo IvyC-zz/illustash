@@ -101,6 +101,8 @@ pub(super) fn handle(request: Request, host: &Host, received: u64) {
         "/api/integrity" => Ok(Some((session.integrity(), 200))),
         // App-wide (#191): the update check's choice and last result, not the library's.
         "/api/updates" => crate::app_updates::info().map(|p| Some((p, 200))),
+        // App-wide (#168): whether the recognition models are in place, and the download or import in progress.
+        "/api/models" => crate::app_models::info(&host.root).map(|p| Some((p, 200))),
         "/api/onboarding" => {
             let works = crate::http_read::query(request.url()).get("works").is_some_and(|v| v == "1");
             crate::app_onboarding::Onboarding::read(&session, &host.root, &session.context(&host.tags), works)

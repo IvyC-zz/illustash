@@ -15,9 +15,10 @@ pub fn choose(
         "library" => illustash_platform::picker::Kind::Library,
         "zip" => illustash_platform::picker::Kind::Zip,
         "archive" => illustash_platform::picker::Kind::Archive,
+        "models" => illustash_platform::picker::Kind::Models,
         _ => return Err(Error::Invalid("未知的选择类型".into())),
     };
-    if multiple && kind != "folder" {
+    if multiple && !matches!(kind, "folder" | "models") {
         return Err(Error::Invalid("此类型不支持多选".into()));
     }
     if crate::app_desktop::available() {

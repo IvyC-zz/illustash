@@ -23,6 +23,7 @@ mod app_legacy_upgrade;
 mod app_libraries;
 pub mod app_library;
 mod app_local;
+pub mod app_models;
 mod app_migrate;
 mod app_migrate_data;
 mod app_onboarding;

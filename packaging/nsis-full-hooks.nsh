@@ -12,4 +12,7 @@
   IfFileExists "$INSTDIR\resources\web\static\index.html" 0 +3
   IfFileExists "$INSTDIR\resources\tags\tags_v3.csv" 0 +2
   RMDir /r "$INSTDIR\resources"
+  ; The release package carries no models (#168): an older full install's would stay behind unused and
+  ; unlisted. A full package copies its own again.
+  RMDir /r "$INSTDIR\compute\resources\models"
 !macroend

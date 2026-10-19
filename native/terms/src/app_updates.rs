@@ -141,7 +141,7 @@ pub(crate) fn current() -> Version {
 fn support() -> Result<PathBuf> {
     Ok(app_support(&user_home()?))
 }
-fn read(file: &Path) -> Map<String, Value> {
+pub(crate) fn read(file: &Path) -> Map<String, Value> {
     fs::read_to_string(file)
         .ok()
         .and_then(|text| serde_json::from_str::<Value>(&text).ok())
@@ -152,7 +152,7 @@ fn read(file: &Path) -> Map<String, Value> {
         .unwrap_or_default()
 }
 /// Read-modify-write under the same lock and rename as libraries.json; other keys are kept.
-fn update(file: &Path, change: impl FnOnce(&mut Map<String, Value>)) -> Result<()> {
+pub(crate) fn update(file: &Path, change: impl FnOnce(&mut Map<String, Value>)) -> Result<()> {
     crate::app_libraries::registry_locked(file, || {
         let mut fields = read(file);
         change(&mut fields);

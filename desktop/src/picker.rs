@@ -11,9 +11,10 @@ pub fn choose(app: &AppHandle, kind: &str, multiple: bool) -> Result<Value, Stri
         "library" => tr("选择图库（.pilib）"),
         "zip" => tr("选择导出的图库（.zip）"),
         "archive" => tr("选择 X 数据归档（.zip）"),
+        "models" => tr("选择下载好的模型文件（.onnx、.json 或 .zip）"),
         _ => return Err(tr("未知的选择类型")),
     };
-    if multiple && kind != "folder" {
+    if multiple && !matches!(kind, "folder" | "models") {
         return Err(tr("此类型不支持多选"));
     }
     let mut dialog = app.dialog().file().set_title(title);
@@ -23,6 +24,7 @@ pub fn choose(app: &AppHandle, kind: &str, multiple: bool) -> Result<Value, Stri
     let selected = match kind {
         "folder" if multiple => dialog.blocking_pick_folders(),
         "folder" | "library" => dialog.blocking_pick_folder().map(|p| vec![p]),
+        "models" => dialog.add_filter(tr("模型文件"), &["onnx", "json", "zip"]).blocking_pick_files(),
         _ => dialog.add_filter("ZIP", &["zip"]).blocking_pick_file().map(|p| vec![p]),
     };
     let paths: Vec<String> = selected.unwrap_or_default().into_iter().map(|p| {
