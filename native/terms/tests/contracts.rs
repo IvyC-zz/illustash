@@ -9,6 +9,9 @@ use std::process::{Child, Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
 
+#[path = "common/baseline.rs"]
+mod baseline;
+
 struct Sandbox(PathBuf);
 impl Drop for Sandbox {
     fn drop(&mut self) {
@@ -158,6 +161,11 @@ fn equal(actual: &Value, expected: &Value, path: &str) {
     }
 }
 fn request(origin: &str, url: &str, body: Option<&Value>, token: &str) -> (u16, Value, Map<String, Value>) {
+    let (status, _, payload, headers) = request_raw(origin, url, body, token);
+    (status, payload, headers)
+}
+/// The reply as sent, too (#201 baseline).
+fn request_raw(origin: &str, url: &str, body: Option<&Value>, token: &str) -> (u16, String, Value, Map<String, Value>) {
     let req = if body.is_some() { ureq::post(&format!("{origin}{url}")) } else { ureq::get(&format!("{origin}{url}")) }
         .set("Accept-Encoding", "identity")
         .set("Origin", origin)
@@ -174,7 +182,9 @@ fn request(origin: &str, url: &str, body: Option<&Value>, token: &str) -> (u16, 
             headers.insert(k.into(), json!(v));
         }
     }
-    (status, response.into_json().unwrap(), headers)
+    let raw = response.into_string().unwrap();
+    let payload = serde_json::from_str(&raw).unwrap_or(Value::Null);
+    (status, raw, payload, headers)
 }
 fn prepare(category: &str) -> (Value, Sandbox, PathBuf, PathBuf) {
     let fixture: Value = serde_json::from_slice(
@@ -246,6 +256,10 @@ fn launch(root: &Path, package: &Path, category: &str, binary: &Path) -> (Host, 
         .env("ILLUSTASH_PYTHON_SENTINEL", root.join("python-launched"))
         // The core's incremental-vs-full check (#102; test builds only).
         .env("ILLUSTASH_TEST_VERIFY_INCREMENTAL", root.join("verified"));
+    // Keys the core makes come from a counter while recording the #201 baseline, so that they can be compared.
+    if recording() {
+        command.env("ILLUSTASH_TEST_KEY_COUNTER", root.join("key-counter"));
+    }
     // Winsock loads its providers through %SystemRoot%; nothing else is passed through.
     #[cfg(windows)]
     command.env("SystemRoot", std::env::var_os("SystemRoot").expect("SystemRoot"));
@@ -278,8 +292,12 @@ fn launch(root: &Path, package: &Path, category: &str, binary: &Path) -> (Host, 
 }
 fn replay(category: &str) {
     let (fixture, _scratch, root, package) = prepare(category);
+    let mut record = recording().then(|| Recording::new(category, &fixture, &package, &root));
     let (_host, origin, token) = launch(&root, &package, category, Path::new(env!("CARGO_BIN_EXE_illustash-terms")));
     equal(&state(&package, &root, &fixture), &fixture["startup"], "startup");
+    if let Some(r) = record.as_mut() {
+        r.startup(&package, &root);
+    }
     if category == "upgrade_v6" {
         let backups = fs::read_dir(package.join("library-backups"))
             .unwrap()
@@ -307,8 +325,8 @@ fn replay(category: &str) {
         } else {
             0
         };
-        let (status, mut payload, headers) =
-            request(&origin, url, body, if step["bad_token"] == true { "bad" } else { &token });
+        let (status, raw, mut payload, headers) =
+            request_raw(&origin, url, body, if step["bad_token"] == true { "bad" } else { &token });
         assert_eq!(json!(status), step["status"], "status {category} step {i} {url}");
         if category == "task_recovery" && body.is_some() {
             let start = Instant::now();
@@ -328,10 +346,16 @@ fn replay(category: &str) {
                 payload = payload[key].clone();
             }
             equal(&normalize(payload, &root, &fixture), &step["response"], &format!("{category}/{i}/HTTP"));
-            equal(&Value::Object(headers), &step["headers"], &format!("{category}/{i}/headers"));
+            equal(&Value::Object(headers.clone()), &step["headers"], &format!("{category}/{i}/headers"));
         }
         // Errors compare only status, but must also preserve the recorded DB invariants.
         equal(&state(&package, &root, &fixture), &step["state"], &format!("{category}/{i}/database"));
+        if let Some(r) = record.as_mut() {
+            r.step(step, status, &raw, &headers, &package, &root);
+        }
+    }
+    if let Some(r) = record {
+        r.write();
     }
     assert!(!root.join("python-launched").exists());
     let checks = fs::read_to_string(root.join("verified")).unwrap_or_default();
@@ -479,4 +503,136 @@ fn benchmark_release_host() {
         println!("BENCH {key} {}", value.as_f64().unwrap());
     }
     assert!(!root.join("python-launched").exists());
+}
+
+// ---- Recording the new baseline (#201 step 1) ----
+//
+// Explicit only: `ILLUSTASH_RECORD_BASELINE=1 cargo test --test contracts`, on main while main still matches the
+// contracts above (each step is checked against them as it is recorded). Writes
+// `tests/fixtures/baseline/contracts/<category>.json.gz`, replayed by `tests/baseline_http.rs`.
+
+fn recording() -> bool {
+    std::env::var_os("ILLUSTASH_RECORD_BASELINE").is_some()
+}
+
+const DATABASES: [&str; 3] = ["source.sqlite", "library.sqlite", "provenance.sqlite"];
+
+fn masks_text(root: &Path) -> impl Fn(&str) -> String + '_ {
+    move |text: &str| {
+        let real = root.to_str().unwrap();
+        // As written, and escaped inside JSON text (Windows paths).
+        let escaped = json!(real).to_string();
+        text.replace(&escaped[1..escaped.len() - 1], "@ROOT@").replace(real, "@ROOT@")
+    }
+}
+
+fn baseline_states(package: &Path, root: &Path) -> BTreeMap<String, baseline::State> {
+    let roots = masks_text(root);
+    let masks = baseline::Masks { roots: &roots, version: illustash_terms::SCHEMA_VERSION };
+    DATABASES
+        .iter()
+        .filter(|name| package.join(name).exists())
+        .map(|name| {
+            let c =
+                Connection::open_with_flags(package.join(name), rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY).unwrap();
+            (name.to_string(), baseline::state(&c, &masks))
+        })
+        .collect()
+}
+
+fn state_delta(before: &BTreeMap<String, baseline::State>, after: &BTreeMap<String, baseline::State>) -> Value {
+    let empty = baseline::State::new();
+    let mut out = Map::new();
+    for name in DATABASES {
+        if before.contains_key(name) || after.contains_key(name) {
+            let change = baseline::delta(before.get(name).unwrap_or(&empty), after.get(name).unwrap_or(&empty));
+            if change.as_object().is_some_and(|o| !o.is_empty()) {
+                out.insert(name.into(), change);
+            }
+        }
+    }
+    Value::Object(out)
+}
+
+use std::collections::BTreeMap;
+
+struct Recording {
+    category: String,
+    document: Map<String, Value>,
+    last: BTreeMap<String, baseline::State>,
+    steps: Vec<Value>,
+}
+
+impl Recording {
+    fn new(category: &str, fixture: &Value, package: &Path, root: &Path) -> Self {
+        let before = baseline_states(package, root);
+        let mut document = Map::new();
+        document.insert("format".into(), json!(baseline::FORMAT));
+        document.insert("category".into(), json!(category));
+        document.insert("recorded".into(), json!({"terms_version": illustash_terms::SCHEMA_VERSION}));
+        // The inputs, as the contract materializes them (the contract fixtures retire with core v8).
+        document.insert("input".into(), fixture["input"].clone());
+        Recording { category: category.into(), document, last: before, steps: Vec::new() }
+    }
+
+    fn startup(&mut self, package: &Path, root: &Path) {
+        let after = baseline_states(package, root);
+        self.document.insert("startup".into(), state_delta(&self.last, &after));
+        self.last = after;
+    }
+
+    fn step(
+        &mut self,
+        step: &Value,
+        status: u16,
+        raw: &str,
+        headers: &Map<String, Value>,
+        package: &Path,
+        root: &Path,
+    ) {
+        let roots = masks_text(root);
+        let masks = baseline::Masks { roots: &roots, version: illustash_terms::SCHEMA_VERSION };
+        let mut entry = Map::new();
+        for key in ["url", "body", "bad_token"] {
+            entry.insert(key.into(), step[key].clone());
+        }
+        entry.insert("status".into(), json!(status));
+        entry.insert("headers".into(), Value::Object(headers.clone()));
+        let reply = match step["projection"].as_str() {
+            // Only this part of the reply is the shared contract (the rest reports scan progress): compared as
+            // canonical JSON.
+            Some(key) => {
+                entry.insert("projection".into(), json!(key));
+                serde_json::from_str::<Value>(raw).unwrap()[key].to_string()
+            }
+            None => raw.to_owned(),
+        };
+        entry.insert("reply".into(), json!(session_token(&masks.output(&reply))));
+        let after = baseline_states(package, root);
+        let change = state_delta(&self.last, &after);
+        if change.as_object().is_some_and(|o| !o.is_empty()) {
+            entry.insert("change".into(), change);
+        }
+        self.last = after;
+        self.steps.push(Value::Object(entry));
+    }
+
+    fn write(mut self) {
+        self.document.insert("steps".into(), Value::Array(std::mem::take(&mut self.steps)));
+        let out = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/baseline/contracts");
+        fs::create_dir_all(&out).unwrap();
+        let file = fs::File::create(out.join(format!("{}.json.gz", self.category))).unwrap();
+        let mut gz = flate2::write::GzEncoder::new(file, flate2::Compression::best());
+        std::io::Write::write_all(&mut gz, serde_json::to_string(&Value::Object(self.document)).unwrap().as_bytes())
+            .unwrap();
+        gz.finish().unwrap();
+    }
+}
+
+/// Session tokens are random: `"token": "<session-token>"`.
+fn session_token(text: &str) -> String {
+    regex::Regex::new(r#"("token":\s*)"[0-9a-f]{32,}""#)
+        .unwrap()
+        .replace_all(text, r#"$1"<session-token>""#)
+        .into_owned()
 }

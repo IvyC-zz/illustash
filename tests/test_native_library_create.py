@@ -139,6 +139,13 @@ class NativeLibraryCreateTest(unittest.TestCase):
                 data[table] = sorted(rows, key=repr)
             return schema, data
 
+    def baseline(self, label, dest):
+        """The fresh library by the #201 baseline rules, the generated character keys named as in ``state``."""
+        with closing(sqlite3.connect(dest / 'library.sqlite')) as c:
+            linked = c.execute("SELECT l.key,t.key FROM term_links l JOIN terms t ON t.id=l.term_id "
+                               "WHERE l.system='ccip' AND l.current=1 AND t.kind='character' ORDER BY l.key").fetchall()
+        self.assertTrue(self.rec.baseline(label, dest, {ident: '<generated-character:' + key + '>' for key, ident in linked}))
+
     def test_fresh_full_schema_data_names_defaults_without_python_or_scan(self):
         name = '合成 ✨'
         dest = self.root / 'native.pilib'
@@ -162,6 +169,7 @@ class NativeLibraryCreateTest(unittest.TestCase):
         # directory read the same rows from both.
         self.assertEqual(expected['source'], self.state(dest / 'source.sqlite'))
         self.assertEqual(expected['application'], self.state(dest / 'library.sqlite', application=True))
+        self.baseline('fresh library', dest)
         self.assertEqual(reference_before, tree(self.shared))
         self.assertEqual(folder_before, tree(self.folder))
         self.assertFalse((self.support / 'libraries.json').exists())
