@@ -69,7 +69,7 @@
 
  "crates/core/src/package.rs":"2c951060a10859148705790dd270f5bb15112970f0888dc31de126bc74471220",
 
- "crates/core/src/schema.rs":"8af272da55046692c75f03f709e21241af6efb1664bc7af2807c8bd48e64ecf2",
+ "crates/core/src/schema.rs":"0623c40de2bc5bcc744af6c802e48f1836fac63810273add58355dfd3383ab3b",
 
  "crates/core/src/store.rs":"cac0fcd0d3383d61317f0c36497f6a8cd087d1529a594cfcfcbfc01ec74feebd",
 
@@ -257,7 +257,7 @@
 
  "native/terms/src/app_updates.rs":"c7d3c6a736bfa4662a2e4f7a99607e0905ef7437975c440bb66ebc002521ced2",
 
- "native/terms/src/app_upgrade.rs":"fa6c0bd8a28218de1aa824d7b26cbad7af55f1b0850641e55f0acedc95d0236f",
+ "native/terms/src/app_upgrade.rs":"ededcd6aba1d44c1bf7e9b4045ebaf0e54ca99377f40a66e61a9bd0e3f98e6a7",
 
  "native/terms/src/bin/illustash-terms.rs":"04ee80bb280034a16f8ddd9fe97e8de0700713259c44f76858f70b8713d4c594",
 
@@ -279,7 +279,7 @@
 
  "native/terms/src/http_host_get.rs":"45f1fd1271ff9a12d02a35ce379105abc0d629b15383cb7ff69629909f1c2c8a",
 
- "native/terms/src/http_host_post.rs":"d0f9102bfe283b9474cebf0a05fece3fb84ff9ea32f825b63324abb796c9fb30",
+ "native/terms/src/http_host_post.rs":"8aa72f555eefb5d607c73ae55ecfbf0a25b7d359f09a18cc20968bc5ae5129d7",
 
  "native/terms/src/http_json.rs":"5e348e2087ebec6ce369d3c5136a0311921f303a746246e91bef8dd9215a1478",
 

@@ -220,7 +220,7 @@ fn preflight_source(library: &Library) -> Result<()> {
         "SELECT source_id,path,size,mtime_ns,md5,asset FROM files LIMIT 0",
         "SELECT * FROM characters LIMIT 0", "SELECT * FROM character_aliases LIMIT 0", "SELECT * FROM runs LIMIT 0",
     ] {
-        tx.prepare(sql).map_err(|e| Error::Schema(format!("source schema 是更早的布局（{e}）。{PRE_V8}")))?;
+        tx.prepare(sql).map_err(|e| Error::Schema(format!("source schema 是更早的布局（{e}）。{why}", why = PRE_V8)))?;
     }
     tx.commit()?;
     Ok(())
@@ -243,7 +243,7 @@ fn preflight_application(c: &Connection) -> Result<i64> {
     // Opening cannot silently compensate for unbuilt indexes or the Store.initialize write path.
     for key in ["indexed", "general_indexed", "rating_indexed", "names_version"] {
         if meta(c, key)?.is_none() {
-            return Err(Error::Schema(format!("应用初始化或索引未完成：缺少 {key}。{PRE_V8}")));
+            return Err(Error::Schema(format!("应用初始化或索引未完成：缺少 {key}。{why}", why = PRE_V8)));
         }
     }
     // All established schema-36 application read objects and core-5 storage must already exist.

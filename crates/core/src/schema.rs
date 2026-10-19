@@ -260,11 +260,17 @@ fn v8(conn: &Connection) -> Result<()> {
         if switched {
             let characters = crate::legacy_characters::verify_in(conn)?;
             if !characters.clean() {
-                return Err(Error::Schema(format!("旧兼容表与词条核心不一致，没有升级：{}", characters.to_json())));
+                return Err(Error::Schema(format!(
+                    "旧兼容表与词条核心不一致，没有升级：{report}",
+                    report = characters.to_json()
+                )));
             }
             let names = crate::legacy_names::sync_in(conn)?;
             if !names.clean() {
-                return Err(Error::Schema(format!("旧名字表与词条核心不一致，没有升级：{}", names.to_json())));
+                return Err(Error::Schema(format!(
+                    "旧名字表与词条核心不一致，没有升级：{report}",
+                    report = names.to_json()
+                )));
             }
         } else if !untouched {
             return Err(Error::Schema(
