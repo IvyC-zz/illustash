@@ -609,11 +609,12 @@ class NativeLifecycleTest(unittest.TestCase):
                     c.execute('PRAGMA journal_mode=DELETE')
                 unchanged = files(upgrade.path)
                 response = self.request('/api/libraries/open', {'path': str(upgrade.path)})
-                # Legacy LibraryError reaches the generic write failure boundary (500).
-                # Do not invoke the Python open path: it would schedule a restart/upgrade.
-                self.assertEqual(response['status'], 500)
+                # A library from before the switch to the core: core v8 no longer upgrades it and says to use the
+                # pre-v8 version (#201, user decision 2026-10-19; it used to be the generic write failure, 500).
+                self.assertEqual(response['status'], 400)
                 self.assertEqual(response['body'], json.dumps({
-                    'error': '保存失败，未提交的操作已回滚；请查看启动终端'}, ensure_ascii=False).encode())
+                    'error': '这个图库还没有完全切换到词条核心，这个版本不再升级它：请先用 pre-v8 版本打开并升级，再用这个版本打开。'},
+                    ensure_ascii=False).encode())
                 self.assertEqual(unchanged, files(upgrade.path))
                 self.assertEqual(before, dump(target.db))
                 self.assertEqual(json.loads(self.request('/api/bootstrap')['body'])['token'], new_token)
