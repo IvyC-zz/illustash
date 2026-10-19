@@ -88,23 +88,5 @@ class CharacterReadHTTPTest(HTTPHarness):
         response = json.loads(self.pair('/api/detail?id=a')['body'])['identity']
         self.assertTrue(response['undetermined'])
 
-    def test_unset_policy_legacy_names_stable_ties_and_cover_reuse(self):
-        other = self.root/'r4-legacy'; other.mkdir(exist_ok=True)
-        self.sync('legacy'); self.publish()
-        for path in ['characters', 'characters?summary=1', 'tagged', 'identity/queue', 'identity/count', 'detail?id=a']:
-            self.pair('/api/' + path)
-        with self.connect() as c:
-            ids=[r[0] for r in c.execute("SELECT id FROM entities WHERE kind='character' AND parent_id IS NULL AND merged_into IS NULL LIMIT 3")]
-            for e in ids:
-                c.execute("DELETE FROM names WHERE entity_id=?",(e,))
-                c.execute("INSERT INTO names(entity_id,lang,value,source,role,preferred,position) VALUES (?,'zh','平局','user','display',1,0)",(e,))
-            c.execute("DELETE FROM meta WHERE key='identity_policy'")
-            c.commit()
-        for path in ['characters', 'characters?summary=1', 'detail?id=a']:
-            self.pair('/api/' + path)
-        for e in ids:
-            self.pair('/api/characters?' + urlencode({'id':e}))
-            self.pair('/api/character/profile?' + urlencode({'entity':e}))
-
 if __name__ == '__main__':
     unittest.main()

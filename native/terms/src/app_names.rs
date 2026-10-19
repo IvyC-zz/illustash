@@ -149,7 +149,7 @@ fn aliases(c: &Connection, kind: &str, key: &str, query: bool) -> Result<Vec<Str
         let index = pairs(
             &format!(
                 "SELECT lang, value
-                 FROM display_names
+                 FROM term_key_names
                  WHERE kind = ? AND key = ? AND source = 'index'
                  {INDEX_ORDER}"
             ),
@@ -174,7 +174,14 @@ fn aliases(c: &Connection, kind: &str, key: &str, query: bool) -> Result<Vec<Str
     Ok(out)
 }
 fn matched(c: &Connection, work: &str) -> Result<Vec<Value>> {
-    let n=c.prepare("SELECT lang,value FROM display_names WHERE kind='work' AND key=? AND source='bangumi' AND lang IN ('ja','zh')")?.query_map([work],|r|Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?)))?.collect::<rusqlite::Result<HashMap<_,_>>>()?;
+    let n = c
+        .prepare(
+            "SELECT lang, value
+             FROM term_key_names
+             WHERE kind = 'work' AND key = ? AND source = 'bangumi' AND lang IN ('ja', 'zh')",
+        )?
+        .query_map([work], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?
+        .collect::<rusqlite::Result<HashMap<_, _>>>()?;
     Ok(match (n.get("ja"), n.get("zh")) {
         (Some(ja), Some(zh)) => vec![json!({"name":ja,"name_cn":zh})],
         _ => vec![],
@@ -194,7 +201,14 @@ fn enrich(source: &mut Source, kind: &str, key: &str, work: &str) -> Result<Vec<
     let index: Vec<(String, String)> = if kind == "character" {
         c.prepare("SELECT lang,value FROM names WHERE entity_id=? AND role='display' AND source='index' ORDER BY CASE lang WHEN 'ja' THEN 0 WHEN 'zh' THEN 1 ELSE 2 END,value")?.query_map([&id],|r|Ok((r.get(0)?,r.get(1)?)))?.collect::<rusqlite::Result<_>>()?
     } else {
-        c.prepare("SELECT lang,value FROM display_names WHERE kind=? AND key=? AND source='index' ORDER BY CASE lang WHEN 'ja' THEN 0 WHEN 'zh' THEN 1 ELSE 2 END,value")?.query_map([kind,key],|r|Ok((r.get(0)?,r.get(1)?)))?.collect::<rusqlite::Result<_>>()?
+        c.prepare(&format!(
+            "SELECT lang, value
+             FROM term_key_names
+             WHERE kind = ? AND key = ? AND source = 'index'
+             {INDEX_ORDER}"
+        ))?
+        .query_map([kind, key], |r| Ok((r.get(0)?, r.get(1)?)))?
+        .collect::<rusqlite::Result<_>>()?
     };
     let extra: Vec<String> = if kind == "character" {
         c.prepare(
@@ -1279,8 +1293,10 @@ mod matching_tests {
         let count = p.calls().len();
         lib.refresh(&p, false).unwrap();
         assert_eq!(p.calls().len(), count, "answered from the cache");
-        let danbooru: i64 =
-            lib.db().query_row("SELECT count(*) FROM display_names WHERE source='danbooru'", [], |r| r.get(0)).unwrap();
+        let danbooru: i64 = lib
+            .db()
+            .query_row("SELECT count(*) FROM term_key_names WHERE source='danbooru'", [], |r| r.get(0))
+            .unwrap();
         assert_eq!(danbooru, 0);
     }
 
@@ -1391,7 +1407,7 @@ mod matching_tests {
         let shown: i64 = lib
             .db()
             .query_row(
-                "SELECT count(*) FROM display_names WHERE kind='character' AND key=? AND value='巴尔泽布'",
+                "SELECT count(*) FROM term_key_names WHERE kind='character' AND key=? AND value='巴尔泽布'",
                 [&lib.tag],
                 |r| r.get(0),
             )

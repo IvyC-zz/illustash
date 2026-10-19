@@ -103,7 +103,7 @@ cargo clippy --manifest-path native/terms/Cargo.toml --all-targets -- -D warning
 | `proto_claims`、`weak_claims`、`prototypes`、`learn_state`、`identity_canonical`、`identity_scopes`、`identity_suspended`、`identity_uncertain`、`identity_claims`、`identity_anchor_*` | 判定器私有状态，没有另建核心表 | 原表，核心写 |
 | `memberships`、`tag_memberships`、`family_evidence`、`single_assets`、`lead_assets` | 由核心执行旧 SQL 算出；人物、皮肤那一片镜像进 `term_projection` | 兼容表 |
 | `names`（角色、皮肤、作品的） | `term_names`（按词条；画师的名字本来就在这里） | 兼容表，加写保护（第 10 节） |
-| `display_names` | `term_key_names`（按文字键） | 兼容表，加写保护 |
+| `display_names` | `term_key_names`（按文字键） | 第 8 版删除（第 14 节） |
 | `name_aliases` | `term_key_aliases` | 第 8 版删除（第 14 节） |
 | 选名规则（tests/reference/web/names.py（#9 已删除） 的 `View`） | 显示投影 `term_name_display`、`term_name_choice` | Python 的显示读路径读投影 |
 | `relations`（图片相似关系） | 不收编 | 原表 |
@@ -154,7 +154,7 @@ cargo clippy --manifest-path native/terms/Cargo.toml --all-targets -- -D warning
 
 | 表 | 内容 | 谁写 |
 |---|---|---|
-| `term_key_names(kind, key, lang, source, value)` | 按文字键的名字（作品的 qualifier、皮肤的 variant），= `display_names` | 名字收编（`sync-names` / `cutover-names`）；切换后由核心每个写事务从兼容表补齐 |
+| `term_key_names(kind, key, lang, source, value)` | 按文字键的名字（作品的 qualifier、皮肤的 variant），原 `display_names` | 第 8 版起是唯一权威，核心名字命令直接写，在名字版本触发器里（第 14 节）；第 5–7 版由核心写事务从兼容表补齐 |
 | `term_key_aliases(kind, key, value, position)` | 按文字键的别名（搜索用），原 `name_aliases` | 第 8 版起是唯一权威，核心名字命令直接写（第 14 节）；第 5–7 版由核心写事务按本事务改到的键从兼容表同步 |
 | `term_name_display(entity, skin_only, name, name_source, zh, ja, en, tag)` | 显示投影：每个身份的 `View.entity(id)` 与 `View.entity(id, skin_only=True)`（`crates/core/src/names_view.rs`） | 核心整表重建：切换时一次；之后凡是改了 `names_version` 的核心写事务，提交前在同一事务里维护（`legacy_names::after_write`）：按依赖闭包重写受影响的行、删掉失效的行（名字行、身份和链接的变化都一样；闭包过大等少数情况整表重建，[TERMS_NAMES.md](TERMS_NAMES.md) 第 3 节）；命令要在事务中途读名字时（历史文案）先重建投影 |
 | `term_name_choice(kind, key, name, name_source, zh, ja, en)` | 按文字键的选名结果 `View.choose(kind, key)`，键的范围：人物的 tag、作品文字（`entities.work` 与 qualifier 链接）、皮肤 variant | 同上 |
@@ -193,7 +193,7 @@ Python HTTP / Store 退出生产包不等于数据库读写消费者退出。下
 | `identity_baseline`、`identity_canonical`、`identity_scopes`、`identity_suspended`、`identity_uncertain` | 保留。`character_graph.rs` / `character_projection.rs` 的基线、代表身份、成员范围和不确定归属；`character_commands.rs` 修改与撤销，`character_learning.rs` 快照指纹读取。基线顺序有语义。 |
 | `identity_anchor_decisions`、`identity_anchor_history`、`identity_pairs`、`meta.identity_bank` | 保留。`http_anchors.rs` / `http_characters.rs` 读取锚点及距离，`character_commands.rs` 裁决和撤销追加锚点历史；`character_learning.rs` 使用锚点决议。`identity_pairs` 的持久距离仍供现行读取，不因没有日常写入口删除历史缓存。 |
 | `memberships`、`tag_memberships`、`family_evidence`、`single_assets`、`lead_assets` | 保留。`character_projection.rs` 和 `character_sql/` 的判定 SQL 生成；`http_browse.rs` / `http_characters.rs` 读取；研究计算 `web/learn.py（#9 已删除）` / `web/identity.py（#9 已删除）` 使用隔离快照。 |
-| `names`、`display_names` | 保留。`names_commands.rs` 写入并经 `legacy_names::after_write` 补齐核心名字；`names_search.rs` / `names_view.rs` 读取。人工资料历史和撤销仍需原行。 |
+| `names` | 保留。`names_commands.rs` 写入并经 `legacy_names::after_write` 补齐核心名字；`names_search.rs` / `names_view.rs` 读取。人工资料历史和撤销仍需原行。 |
 | `asset_tags`、`general_hits`、`asset_rating` | 保留为核心派生视图。`legacy_labels.rs` 切换时删除同名旧物理表并安装视图；`http_browse.rs` / `http_app.rs` 以及角色判定 SQL 读取。不能把视图当作已退役物理表删掉。 |
 | `actions`、`meta`、`term_legacy_ids` | 保留。`actions.before_json`、`undone` 与物理行 ID 是统一历史/撤销输入；`character_commands.rs`、`legacy_artists.rs`、`legacy_characters.rs` 用它们恢复旧动作及旧关系/决议 ID。`meta` 保存版本、切换标记、写保护钥匙与恢复状态。 |
 | `term_identity_baseline`、`term_tree` | 保留。核心正式结构状态，由 `legacy_characters.rs` / `character_graph.rs` 维护；不是可丢弃的影子。 |
@@ -219,6 +219,13 @@ Python HTTP / Store 退出生产包不等于数据库读写消费者退出。下
 - **升级核对**：已有核心表的库（升级前版本 ≥ 1）里有旧表时，四个领域必须都已切到核心（`terms_artists`、`terms_labels`、`terms_characters`、`terms_names` 都是 `core`），否则拒绝升级并提示先用 `pre-v8` 版本（git 标签，指向 v8 之前最后一个 main）打开升级。切换完的库先照旧表把名字镜像整表同步一次（与核心每次写时做的一样，之前版本留下的过期镜像随之补上），再用角色、名字两套现有核对逐表比较旧表与 `term_*`（`entities` 的 `name`、`external_key`、`tag` 三列核心从不承载、也没有读者，不比），有差异就拒绝升级、整体回滚，错误里带样例。还没有核心表的库（新建的库）不在这里拦。
 - **撤销提示的种类和张数**：`actions` 加 `label_kind`、`label_count` 两列（可空）。按张数写提示的六种角色步骤（设为、移出、加上、去掉、换成、标为已检查，`crates/core/src/undo_labels.rs`）写入时一并存下；之前的步骤在升级时按已存的提示解析一次回填。撤销载荷 `before_json` 不动（Python 时代的旧步骤载荷是数组，没有地方加键）。读历史时（`http_app::action_label`）用这两列把提示里的角色换成现在的名字，不再解析提示。
 - **别名**（第 3 步第一个领域）：`term_key_aliases` 是唯一权威。Danbooru 别名命令（`names_commands.rs`）直接写它，名字搜索（`names_search.rs`）和读取接口（`app_names.rs`）读它；核心写事务不再从旧表同步别名。升级时（`legacy_names::retire_aliases`）照旧表 `name_aliases` 整表同步一次，核对一致后删表，不一致就拒绝升级。新建图库不再建这张表。
+- **显示名**（第二个领域）：`term_key_names` 是按文字键的显示名的唯一权威。
+  - 写：名字命令（`names_commands.rs` 的 `put` / `replace`）直接写它。
+  - 读：选名（`names_view.rs`）、名字搜索、读取接口（`app_names.rs`）都读它。选名结果与行的先后无关，所以不需要旧表的插入顺序，`term_key_names` 不加顺序列。
+  - 名字版本 `names_version` 的触发器从 `display_names` 换到 `term_key_names`（`legacy_names::VERSIONED`、`version_triggers`），增量维护显示投影时按它记下改过的键。
+  - 升级时（`legacy_names::retire_display_names`）照旧表整表同步一次，核对一致后删表并改装触发器，不一致就拒绝升级。
+  - 新建图库不再建 `display_names`；22 条内置作品中文名在核心迁移之后写进 `term_key_names`（`app_create_names.sql`）。
+  - 研究指纹照旧计入 `term_key_names`：之前镜像表也在指纹里，所以写显示名对研究结果的影响不变。
 - 升级沿用现有入口：桌面和网页的升级界面（#193）、`http --upgrade`、`illustash-terms migrate`；升级前备份 `library-backups/terms-v<旧版>-before-v8-*.sqlite`，失败整体回滚。应用层（`app_upgrade.rs`）对没切换完的旧图库（应用 schema 36 以前、切换标记缺失或未完成、更早的 source 布局或缺索引元数据）打开和升级都直接拒绝，提示先用 `pre-v8` 版本；原来为它们准备的分阶段成对发布路径已删除。
 - 对照：新对照基准（`native/terms/tests/baseline.rs`、`contracts.rs`，规则见 `native/terms/tests/common/baseline.rs`）的每个 v7 检查点都经这次升级再重放，接口回复逐字节不变；新加的两列在比较器里登记排除，由历史提示的回复比较覆盖。`native/terms/tests/v8_upgrade.rs` 覆盖拒绝（旧表与核心不一致、没切换完）不留痕和回填。
 

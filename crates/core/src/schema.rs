@@ -235,7 +235,8 @@ fn v7(conn: &Connection) -> Result<()> {
 ///   一致（角色、名字两套核对；名字先照旧表同步一次，与核心每次写时做的一样），否则拒绝升级、整体回滚：没切换完的
 ///   旧图库先用 `pre-v8` 版本升级。还没有核心表的库
 ///   （新建的库，以及应用层已经拒绝打开的更早的旧图库）不在这里拦。
-/// - 别名：`term_key_aliases` 成为唯一权威，旧表 `name_aliases` 同步一次后删除（`legacy_names::retire_aliases`）。
+/// - 别名、显示名：`term_key_aliases`、`term_key_names` 成为唯一权威，旧表 `name_aliases`、`display_names` 同步一次
+///   后删除（`legacy_names::retire_aliases`、`retire_display_names`）。
 /// - `actions` 加 `label_kind`、`label_count`：按张数写提示的几种步骤的种类和张数（`undo_labels`）。之前的步骤按
 ///   已存的提示回填一次，撤销载荷 `before_json` 不动。
 fn v8(conn: &Connection) -> Result<()> {
@@ -281,6 +282,7 @@ fn v8(conn: &Connection) -> Result<()> {
         }
     }
     crate::legacy_names::retire_aliases(conn)?;
+    crate::legacy_names::retire_display_names(conn)?;
     let columns: Vec<String> = conn
         .prepare("SELECT name FROM pragma_table_info('actions')")?
         .query_map([], |r| r.get(0))?

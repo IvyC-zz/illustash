@@ -21,7 +21,7 @@
 | 旧 | 核心主数据 | 切换后 Python 读到的 |
 |---|---|---|
 | `names`（角色、皮肤、作品的行） | `term_names`，按原样存（来源、语言、display / alias、首选、顺序；用户名字就是来源 `user`，决定 N3） | 兼容表 `names` |
-| `display_names` | `term_key_names` | 兼容表 |
+| `display_names` | `term_key_names` | 核心第 8 版起删除，核心直接读写 `term_key_names`（[TERMS_SCHEMA.md](TERMS_SCHEMA.md) 第 14 节） |
 | `name_aliases` | `term_key_aliases` | 核心第 8 版起删除，核心直接读写 `term_key_aliases`（[TERMS_SCHEMA.md](TERMS_SCHEMA.md) 第 14 节） |
 | 选名规则 `View`（`choose`、`entity`、`base`、`own_name`）与词表 `SKINS`、`WORK_NAMES`、`readable`、`skin_zh` | 逐条移植（`crates/core/src/names_view.rs`），算成显示投影 `term_name_display`（每个身份的完整名与皮肤短名）、`term_name_choice`（每个文字键） | 显示读路径读投影（第 3 节） |
 | `names.search_hits` | 逐条移植（`names_search.rs`），命令 `names-search` | `search_hits` 调核心 |
@@ -39,15 +39,15 @@ Python 里的词表副本仍给 NameUpdater 用，两边由测试钉住相同。
 **写**：
 - NameUpdater 的整批替换、Danbooru / Bangumi 别名、索引种子，以及相册标题别名，都走核心命令 `names-command`。报错文字与旧代码相同，核心拒绝时转成 `ValueError`。
 - 用户改名、别名、合并、作品编辑，本来就在角色的核心命令里。
-- 所有核心写事务的统一提交点 `schema::commit_writing` 会检查：`names_version` 变了，就在同一事务里补齐名字主数据、维护显示投影。主数据按本事务 TEMP 触发器记下的身份和键增量补齐，查询由这些记录驱动、不扫整张 `names` / `terms` / `display_names`，`term_names` 仍按 `names` 的 rowid 顺序插入；别名表不在版本触发器里，按记下的键每个事务同步一次（2026-10-13，#102）。测试构建（`illustash-core` 的 `verify-incremental` 特性）设了 `ILLUSTASH_TEST_VERIFY_INCREMENTAL` 时，每次增量之后在保存点里再跑一遍整表同步，必须零改动；录制重放和固定契约都打开它。
-- 显示投影：本事务只改了名字行（`names`、`display_names`）时，从记下的身份和键出发按索引求依赖闭包（身份 → 它的人物键、子身份、它并入的身份；键 → tag / variant / qualifier 是这个键的身份），只为闭包和选名要读的身份（父身份、并入者、同 tag 的身份）载入快照，重写这些身份和键的投影行；`entities` 上没有索引的 `variant`、`merged_into`、`work` 各一条扫描语句，只在闭包里有对应的键或身份时执行，按用户决定只记录、不加索引。闭包碰到空 tag 的人物键或空 variant 的皮肤键时整表重建（2026-10-13，#103）。
+- 所有核心写事务的统一提交点 `schema::commit_writing` 会检查：`names_version` 变了，就在同一事务里补齐名字主数据、维护显示投影。主数据按本事务 TEMP 触发器记下的身份和键增量补齐，查询由这些记录驱动、不扫整张 `names` / `terms`，`term_names` 仍按 `names` 的 rowid 顺序插入（2026-10-13，#102）。核心第 8 版起别名和按文字键的显示名由命令直接写 `term_key_aliases`、`term_key_names`，不再同步。测试构建（`illustash-core` 的 `verify-incremental` 特性）设了 `ILLUSTASH_TEST_VERIFY_INCREMENTAL` 时，每次增量之后在保存点里再跑一遍整表同步，必须零改动；录制重放和固定契约都打开它。
+- 显示投影：本事务只改了名字行（`names`、`term_key_names`）时，从记下的身份和键出发按索引求依赖闭包（身份 → 它的人物键、子身份、它并入的身份；键 → tag / variant / qualifier 是这个键的身份），只为闭包和选名要读的身份（父身份、并入者、同 tag 的身份）载入快照，重写这些身份和键的投影行；`entities` 上没有索引的 `variant`、`merged_into`、`work` 各一条扫描语句，只在闭包里有对应的键或身份时执行，按用户决定只记录、不加索引。闭包碰到空 tag 的人物键或空 variant 的皮肤键时整表重建（2026-10-13，#103）。
 - 身份或链接变化（作品移动、新建、合并与撤销合并、父子与变体、导入）也局部维护：TEMP 触发器在一个身份第一次被改动时存下它事务开始时的行和链接（`INSERT OR REPLACE` 会顶掉的行也先存下），闭包从变化前、变化后两侧出发——两侧的人物键、皮肤键、作品键都重算，变化前并入的身份也重算；不再存在的身份删掉两行显示投影，库里不再出现的键删掉选择行。事务中途为历史文案刷新过投影的，那次写过的身份和键在提交时按最终状态再算一遍。只改投影不读的列（如 `entities.name`、`links.source`）不算结构变化。闭包大到全库八分之一以上时（例如批量导入）整表重建（2026-10-14，#104）。
 - 测试构建打开上面的开关时，每次局部维护后在保存点里整表重建，两张投影逐行逐列比较，按只改名字、改过结构、退回整表三类分别计数。
 - Python 直接写名字表会被写保护拒绝。
 
 **读**：
 - `names.view(c)`：名字已在核心时给 `ProjectedView`，接口与 `View` 相同，按 `names_version` 在连接之间共享快照；否则给 `View`。三个 SQL 函数 `entity_name` / `entity_info` / `work_name` 经它注册，嵌着它们的 34 处查询一行没改。`Store._display_reader`、`names.action_label`、NameUpdater 的统计与翻译前检查也都用它。
-- 投影只收库里出现过的键。别的键（任意 tag 的 `work_name`、词表里有但库里没有的作品、空 tag 的人物键）按这个键自己的行现算（`names_view::choose_key`）：它在 `display_names` 里的行，人物键另加 tag 是它、会把显示名并进人物键的身份的显示名；选名结果与行的先后无关，不必整库载入。空 tag 的人物键要扫描 `links` 找没有 tag 的身份，只记录、不加索引（2026-10-14，#105）。
+- 投影只收库里出现过的键。别的键（任意 tag 的 `work_name`、词表里有但库里没有的作品、空 tag 的人物键）按这个键自己的行现算（`names_view::choose_key`）：它在 `term_key_names` 里的行，人物键另加 tag 是它、会把显示名并进人物键的身份的显示名；选名结果与行的先后无关，不必整库载入。空 tag 的人物键要扫描 `links` 找没有 tag 的身份，只记录、不加索引（2026-10-14，#105）。
 - 名字更新器不再整库载入：选作品名、模型预演、皮肤翻译前检查都用 `choose_key`。模型预演仍在回滚的事务里写入待提交改动，再按键现算，读到的是改动后的名字，不必先刷新显示投影。提交时投影按闭包维护；闭包碰到空 tag 或空 variant 时整表重建（这时整库载入一次）（2026-10-14，#105；#102 的整批快照已删）。
 - `/api/names` 的统计：名字已在核心、且 `names_version` 等于 `names_projected`（投影与名字表一致）时，身份和键的筛选在 SQL 里做，各键的选名从 `term_name_choice` 按种类汇总，只有投影外的键（空 tag 的人物键）交给 `choose_key`；否则退回一次整库载入（2026-10-14，#105）。
 - 测试构建打开上面的核对开关时，`choose_key` 的每次选名、`/api/names` 的投影统计都与同一事务里整库载入的结果比较，分别记为 `choice`、`names_counts`。

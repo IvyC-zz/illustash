@@ -33,9 +33,6 @@ CREATE TABLE IF NOT EXISTS asked(uuid TEXT NOT NULL,entity TEXT NOT NULL,kind TE
 CREATE INDEX IF NOT EXISTS asked_entity ON asked(entity,answer,asked_at);
 CREATE TABLE IF NOT EXISTS audit_sample(uuid TEXT PRIMARY KEY,entity TEXT NOT NULL,stratum TEXT NOT NULL,
  solo INTEGER NOT NULL,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
-CREATE TABLE IF NOT EXISTS display_names(
- kind TEXT NOT NULL, key TEXT NOT NULL, lang TEXT NOT NULL, source TEXT NOT NULL, value TEXT NOT NULL,
- PRIMARY KEY(kind,key,lang,source,value));
 CREATE TABLE IF NOT EXISTS name_cache(key TEXT PRIMARY KEY,value TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS name_settings(key TEXT PRIMARY KEY,value TEXT NOT NULL);
 
@@ -190,25 +187,3 @@ CREATE TABLE IF NOT EXISTS backend_effects(
     id INTEGER PRIMARY KEY, kind TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending',
     error TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
 INSERT OR REPLACE INTO meta VALUES ('schema_version','36');
-INSERT OR IGNORE INTO display_names VALUES ('work','touhou','zh','builtin','东方Project');
-INSERT OR IGNORE INTO display_names VALUES ('work','hololive','zh','builtin','hololive');
-INSERT OR IGNORE INTO display_names VALUES ('work','nijisanji','zh','builtin','彩虹社');
-INSERT OR IGNORE INTO display_names VALUES ('work','vocaloid','zh','builtin','VOCALOID');
-INSERT OR IGNORE INTO display_names VALUES ('work','fate','zh','builtin','Fate');
-INSERT OR IGNORE INTO display_names VALUES ('work','idolmaster','zh','builtin','偶像大师');
-INSERT OR IGNORE INTO display_names VALUES ('work','kancolle','zh','builtin','舰队Collection');
-INSERT OR IGNORE INTO display_names VALUES ('work','azur_lane','zh','builtin','碧蓝航线');
-INSERT OR IGNORE INTO display_names VALUES ('work','girls''_frontline','zh','builtin','少女前线');
-INSERT OR IGNORE INTO display_names VALUES ('work','pokemon','zh','builtin','宝可梦');
-INSERT OR IGNORE INTO display_names VALUES ('work','genshin_impact','zh','builtin','原神');
-INSERT OR IGNORE INTO display_names VALUES ('work','arknights','zh','builtin','明日方舟');
-INSERT OR IGNORE INTO display_names VALUES ('work','blue_archive','zh','builtin','蔚蓝档案');
-INSERT OR IGNORE INTO display_names VALUES ('work','honkai:_star_rail','zh','builtin','崩坏：星穹铁道');
-INSERT OR IGNORE INTO display_names VALUES ('work','zenless_zone_zero','zh','builtin','绝区零');
-INSERT OR IGNORE INTO display_names VALUES ('work','wuthering_waves','zh','builtin','鸣潮');
-INSERT OR IGNORE INTO display_names VALUES ('work','honkai_impact_3rd','zh','builtin','崩坏3');
-INSERT OR IGNORE INTO display_names VALUES ('work','umamusume','zh','builtin','赛马娘');
-INSERT OR IGNORE INTO display_names VALUES ('work','love_live!','zh','builtin','LoveLive!');
-INSERT OR IGNORE INTO display_names VALUES ('work','bang_dream!','zh','builtin','BanG Dream!');
-INSERT OR IGNORE INTO display_names VALUES ('work','project_sekai','zh','builtin','世界计划');
-INSERT OR IGNORE INTO display_names VALUES ('work','princess_connect!','zh','builtin','公主连结');
