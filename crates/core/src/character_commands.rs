@@ -1,6 +1,7 @@
 //! S3 角色业务命令（docs/TERMS_CHARACTERS_PLAN.md 第 8 节）：一个命令一个核心事务，逐行照 tests/reference/web/store.py（#9 已删除） 的旧写法。
 //!
-//! 写法：兼容表（`assertions`……）照旧 SQL 写；人工结论同时追加成 `term_verdicts`（挂在这一步上）。身份、结构、
+//! 写法：人工结论追加成 `term_verdicts`（挂在这一步上，它是权威），同时维护派生表 `assertions`（每个 (图, 身份) 的
+//! 有效结论）。身份、结构、
 //! 链接、名字、作品复核直接写 `terms` / `term_tree` / `term_links` / `term_names`（核心第 8 版，#201）。
 //! 历史文案由核心按旧代码逐字生成（character_labels，名字 N5）；按筛选条件的选择集由调用方算好传进来（算不出时交来
 //! 旧代码的拒绝文案 `asked_refused`，核心在旧代码算选择集的那一步报出，检查的先后不变）；
@@ -205,10 +206,10 @@ pub(crate) fn sql_value(v: &Value) -> rusqlite::types::Value {
     }
 }
 
-// ---- 人工结论：兼容表 + 裁决历史 ----
+// ---- 人工结论：裁决历史 + 派生表 `assertions` ----
 
 /// hybrid 下 `assertions` 上的触发器语义（`identity.activate`）：写一条结论就删掉该 (图, 身份) 的 scope / suspended，
-/// 所在等价组多于一个成员时按组成员重写 scope。切换后兼容表上没有这些触发器，由这里代替。
+/// 所在等价组多于一个成员时按组成员重写 scope。切换后 `assertions` 上没有这些触发器，由这里代替。
 pub(crate) fn scope_on_insert(c: &Connection, u: &str, e: &str) -> Result<()> {
     c.prepare_cached("DELETE FROM identity_scopes WHERE uuid=? AND entity=?")?.execute([u, e])?;
     c.prepare_cached("DELETE FROM identity_suspended WHERE uuid=? AND entity=?")?.execute([u, e])?;
@@ -257,7 +258,7 @@ fn asset_id(c: &Connection, uuid: &str) -> Result<i64> {
     Ok(c.last_insert_rowid())
 }
 
-/// 追加一条 (图, 身份) 裁决。verdict：yes / no / clear；via 是兼容表 `assertions.origin`。
+/// 追加一条 (图, 身份) 裁决。verdict：yes / no / clear；via 是 `assertions.origin`。
 pub(crate) fn verdict(c: &Connection, at: At, uuid: &str, entity: &str, verdict: &str, via: &str) -> Result<()> {
     let (action, batch, anchor) = match at {
         At::Action(a) => (Some(a), None, a),
@@ -287,7 +288,7 @@ pub(crate) fn delete_assertion(c: &Connection, at: At, u: &str, e: &str, via: &s
     verdict(c, at, u, e, "clear", via)
 }
 
-/// 撤销后：兼容表的这一行 = 核心里的有效裁决（与 Python 按快照 DELETE + INSERT 的效果相同，含触发器语义）。
+/// 撤销后：`assertions` 的这一行 = 核心里的有效裁决（与 Python 按快照 DELETE + INSERT 的效果相同，含触发器语义）。
 pub(crate) fn refresh_assertion(c: &Connection, u: &str, e: &str) -> Result<()> {
     let effective: Option<(String, String)> = c.prepare_cached("SELECT v.verdict,v.via FROM term_effective_verdicts v JOIN term_assets a ON a.id=v.asset_id AND a.namespace='library'
               JOIN terms t ON t.id=v.term_id WHERE a.key=? AND t.key=?")?.query_row(

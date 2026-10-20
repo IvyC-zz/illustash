@@ -230,11 +230,10 @@ fn v7(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
-/// 第 8 版（#201）：旧兼容表退役的第一步。
-/// - 已有核心表的库（升级前版本 ≥ 1）里有旧表（`entities`）时，四个领域必须都已切到核心，旧表与 `term_*` 必须逐表
-///   一致（角色、名字两套核对；名字在退役时核对，见下），否则拒绝升级、整体回滚：没切换完的
-///   旧图库先用 `pre-v8` 版本升级。还没有核心表的库
-///   （新建的库，以及应用层已经拒绝打开的更早的旧图库）不在这里拦。
+/// 第 8 版（#201）：旧兼容表退役。
+/// - 已有核心表的库（升级前版本 ≥ 1）里有旧表（`entities`）时，四个领域必须都已切到核心，否则拒绝升级、整体回滚：
+///   没切换完的旧图库先用 `pre-v8` 版本升级。还没有核心表的库（新建的库，以及应用层已经拒绝打开的更早的旧图库）不在
+///   这里拦。各张旧表在退役时与核心逐行核对（见下）。`assertions`、`candidates` 是核心维护的派生表，不在这里比。
 /// - 链接、作品复核、身份基线：`term_links`、`term_tree` 的复核三列、`term_identity_baseline` 成为唯一权威，旧表
 ///   `links`、`work_review`、`identity_baseline` 逐行核对后删除（`legacy_characters::retire_*`，不一致就拒绝升级）。
 /// - 别名、显示名、名字：`term_key_aliases`、`term_key_names`、`term_names` 成为唯一权威，旧表 `name_aliases`、
@@ -269,15 +268,7 @@ fn v8(conn: &Connection) -> Result<()> {
         let switched = flags.iter().all(|v| v.as_deref() == Some("core"));
         let untouched = flags.iter().all(Option::is_none)
             && !conn.query_row("SELECT EXISTS(SELECT 1 FROM entities)", [], |r| r.get::<_, bool>(0))?;
-        if switched {
-            let characters = crate::legacy_characters::verify_in(conn)?;
-            if !characters.clean() {
-                return Err(Error::Schema(format!(
-                    "旧兼容表与词条核心不一致，没有升级：{report}",
-                    report = characters.to_json()
-                )));
-            }
-        } else if !untouched {
+        if !switched && !untouched {
             return Err(Error::Schema(
                 "这个图库还没有完全切换到词条核心，新版本不再直接升级它：请先用 pre-v8 版本打开并升级，再用新版本打开"
                     .into(),
@@ -324,7 +315,14 @@ fn v8(conn: &Connection) -> Result<()> {
 
 /// 迁移与首次角色切换共用；调用方持有写事务，失败时表、索引、触发器整体回滚。
 pub(crate) fn compact_characters(conn: &Connection) -> Result<()> {
-    crate::legacy_characters::clear_shadow(conn)?;
+    // 早期收编核对留在库里的持久影子表（`shadow_*`）：没有读者，不把校验副本永久留在图库里。
+    let shadows: Vec<String> = conn
+        .prepare("SELECT name FROM main.sqlite_master WHERE type='table' AND name GLOB 'shadow_*'")?
+        .query_map([], |r| r.get(0))?
+        .collect::<rusqlite::Result<_>>()?;
+    for table in shadows {
+        conn.execute_batch(&format!("DROP TABLE \"{table}\""))?;
+    }
     let legacy: bool = conn.pragma_query_value(None, "legacy_alter_table", |r| r.get(0))?;
     conn.pragma_update(None, "legacy_alter_table", true)?;
     let result = (|| -> Result<()> {
