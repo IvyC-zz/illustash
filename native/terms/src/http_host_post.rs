@@ -474,7 +474,7 @@ fn open(host: &Host, received: u64, session: &mut Session, body: &Json) -> Resul
             Some(prepared) => {
                 // Said as it happened: not committed (the package is as it was) or committed, with the backup.
                 let report =
-                    crate::app_upgrade::run(&prepared).map_err(|failure| Error::Invalid(failure.to_string()))?;
+                    crate::app_upgrade::run(&prepared, None).map_err(|failure| Error::Invalid(failure.to_string()))?;
                 let backup = crate::app_upgrade::shown(&report.backup);
                 drop(report);
                 let mut out = host.switch_locked(session, received, &path)?;

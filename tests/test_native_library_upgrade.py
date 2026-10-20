@@ -24,6 +24,7 @@ import sqlite3
 import subprocess
 import tempfile
 import threading
+import time
 import unittest
 from unittest.mock import patch
 
@@ -425,6 +426,45 @@ class NativeLibraryUpgradeTest(unittest.TestCase):
         self.assertEqual(backups[0].read_bytes(), saved)
         self.reads(lib, origin)
         self.stop(process)
+
+    def test_desktop_upgrade_reports_its_stages_and_stays_alive_through_steps_that_cannot_report(self):
+        # #267: the desktop shell stops a service that prints nothing for 30 seconds before it is ready
+        # (desktop/src/server.rs, STALL). The checks report as they read; the backup, the migration and the space
+        # reclamation cannot, so the host repeats its last progress line. The pause stands in for a large library's
+        # backup: without the repeats it alone would leave a gap of PAUSE seconds.
+        PAUSE = 16
+        lib, _ = self.package(6, 'slow')
+        existing = {p.relative_to(lib.path).as_posix() for p in lib.path.rglob('*.sqlite')}
+        env = {**self.env, 'ILLUSTASH_DESKTOP_STDIN': '1', 'ILLUSTASH_TEST_UPGRADE_PAUSE_MS': str(PAUSE * 1000)}
+        process = subprocess.Popen(self.args(lib), env=env, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                   stderr=subprocess.DEVNULL, **SPAWN)
+        self.addCleanup(self.stop, process)
+        self.addCleanup(process.stdout.close)
+        process.stdin.write(b'\x01'); process.stdin.flush()
+        started, lines = time.monotonic(), []
+
+        def read():
+            for raw in process.stdout:
+                lines.append((time.monotonic(), raw.decode().rstrip('\r\n')))
+                if raw.decode().startswith('图库已启动：'):
+                    return
+        reader = threading.Thread(target=read, daemon=True)
+        reader.start(); reader.join(PAUSE + 60)
+        self.assertTrue(lines and lines[-1][1].startswith('图库已启动：'), lines)
+        times = [started] + [at for at, _ in lines]
+        self.assertLess(max(b - a for a, b in zip(times, times[1:])), PAUSE * 0.75, lines)
+        progress = [line.split('：', 1)[1].split(' ', 1) for _, line in lines if line.startswith('启动进度：')]
+        permille = [int(p) for p, _ in progress]
+        self.assertEqual(permille, sorted(permille))
+        stages = [stage for _, stage in progress]
+        firsts = [stages.index(stage) for stage in ('正在打开图库', '正在检查图库数据（library.sqlite）',
+                                                    '正在检查图库数据（source.sqlite）', '正在备份图库', '正在升级图库',
+                                                    '正在核对升级后的图库数据')]
+        self.assertEqual(firsts, sorted(firsts), stages)
+        self.assertGreaterEqual(stages.count('正在备份图库'), 2, stages)
+        self.assertEqual(len(self.backups(lib, existing)), 1)
+        process.stdin.close()
+        self.assertEqual(process.wait(20), 0)
 
     def test_switching_to_an_old_library_asks_first_and_a_failed_upgrade_changes_nothing(self):
         # #193: the page's library switch, not only --upgrade at startup.

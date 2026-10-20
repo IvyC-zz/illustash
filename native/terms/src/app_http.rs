@@ -373,19 +373,69 @@ fn expand_path(value: &str) -> Result<PathBuf> {
 /// Desktop startup protocol: `启动进度：<per mille> <stage>` lines precede the ready line. The shell shows
 /// them and treats each as a sign of life; the CLI prints nothing extra.
 fn startup_progress(stage: &str, done: f64) {
-    static LAST: std::sync::Mutex<Option<(u32, String)>> = std::sync::Mutex::new(None);
     if std::env::var_os("ILLUSTASH_DESKTOP_STDIN").is_none() {
         return;
     }
     let permille = (done.clamp(0.0, 1.0) * 1000.0) as u32;
-    let mut last = LAST.lock().expect("startup progress lock poisoned");
+    let mut last = LAST_PROGRESS.lock().expect("startup progress lock poisoned");
     // One line per visible change: at most about a thousand for any library size.
-    if last.as_ref().is_some_and(|(p, s)| *p == permille && s == stage) {
+    if last.as_ref().is_some_and(|(p, s, _)| *p == permille && s == stage) {
         return;
     }
-    *last = Some((permille, stage.to_owned()));
+    *last = Some((permille, stage.to_owned(), Instant::now()));
     println!("启动进度：{permille} {stage}");
     let _ = std::io::Write::flush(&mut std::io::stdout());
+}
+/// The last startup progress line and when it was printed.
+static LAST_PROGRESS: std::sync::Mutex<Option<(u32, String, Instant)>> = std::sync::Mutex::new(None);
+
+/// While it lives, the last startup progress line is printed again whenever `every` passed without one (#267).
+/// The shell stops a service that says nothing for 30 seconds; the upgrade's backup, migration and space
+/// reclamation run inside SQLite, report nothing and may take minutes on a large library. Only steps that are
+/// running in this process are kept alive: the guard ends with them.
+struct Keepalive {
+    stop: Option<std::sync::mpsc::Sender<()>>,
+    thread: Option<thread::JoinHandle<()>>,
+}
+impl Keepalive {
+    const EVERY: Duration = Duration::from_secs(5);
+    fn start(every: Duration, print: fn(&str)) -> Self {
+        let (stop, stopped) = std::sync::mpsc::channel::<()>();
+        let thread = thread::spawn(move || {
+            while let Err(std::sync::mpsc::RecvTimeoutError::Timeout) = stopped.recv_timeout(every / 5) {
+                let mut last = LAST_PROGRESS.lock().expect("startup progress lock poisoned");
+                if let Some((permille, stage, at)) = last.as_mut().filter(|(_, _, at)| at.elapsed() >= every) {
+                    *at = Instant::now();
+                    print(&format!("启动进度：{permille} {stage}"));
+                }
+            }
+        });
+        Self { stop: Some(stop), thread: Some(thread) }
+    }
+}
+impl Drop for Keepalive {
+    fn drop(&mut self) {
+        drop(self.stop.take());
+        if let Some(thread) = self.thread.take() {
+            let _ = thread.join();
+        }
+    }
+}
+fn print_progress_line(line: &str) {
+    println!("{line}");
+    let _ = std::io::Write::flush(&mut std::io::stdout());
+}
+
+/// `--upgrade` from the desktop start page: the upgrade's stages as startup progress, kept alive through the steps
+/// that cannot report (#267).
+fn upgrade_reporting(path: &Path) -> Result<crate::app_upgrade::UpgradeReport> {
+    startup_progress("正在打开图库", 0.0);
+    let prepared = crate::app_upgrade::prepare(path)?;
+    let _alive = std::env::var_os("ILLUSTASH_DESKTOP_STDIN")
+        .is_some()
+        .then(|| Keepalive::start(Keepalive::EVERY, print_progress_line));
+    let progress: crate::app_upgrade::Progress = std::sync::Arc::new(startup_progress);
+    crate::app_upgrade::run(&prepared, Some(progress)).map_err(|failure| Error::Schema(failure.to_string()))
 }
 
 /// The integrity checks read both databases in full. Opening runs them only after the last session did not end
@@ -544,13 +594,13 @@ pub(crate) fn run(args: &[String]) -> Result<u8> {
     };
     let token = Session::token()?;
     let mut rescued = None;
-    // The explicit upgrade keeps its own full checks (#212).
+    // The explicit upgrade runs its own full checks, once, under its writer lock (#212, #267). A package already in
+    // the current format (an upgrade committed by an earlier attempt, say) opens as usual.
     let (library, upgrade_backup) = if upgrade {
-        match Library::open(&path) {
-            Ok(library) => (crate::app_service::own_checked(library)?, None),
-            _ => {
-                let report = crate::app_upgrade::run(&crate::app_upgrade::prepare(&path)?)
-                    .map_err(|failure| Error::Schema(failure.to_string()))?;
+        match Library::open_deferring_checks(&path) {
+            Ok(_) => (open_reporting(&path)?, None),
+            Err(_) => {
+                let report = upgrade_reporting(&path)?;
                 (crate::app_service::own_checked(report.library)?, Some(report.backup))
             }
         }
@@ -647,6 +697,28 @@ pub(crate) fn run(args: &[String]) -> Result<u8> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn keepalive_repeats_the_last_progress_line_only_while_it_lives() {
+        use super::{Keepalive, LAST_PROGRESS};
+        use std::{
+            thread,
+            time::{Duration, Instant},
+        };
+        static PRINTED: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+        fn print(line: &str) {
+            PRINTED.lock().unwrap().push(line.to_owned());
+        }
+        *LAST_PROGRESS.lock().unwrap() = Some((600, "正在备份图库".into(), Instant::now()));
+        let alive = Keepalive::start(Duration::from_millis(40), print);
+        thread::sleep(Duration::from_millis(300));
+        drop(alive);
+        let printed = PRINTED.lock().unwrap().clone();
+        assert!(printed.len() >= 2, "{printed:?}");
+        assert!(printed.iter().all(|line| line == "启动进度：600 正在备份图库"), "{printed:?}");
+        thread::sleep(Duration::from_millis(120));
+        assert_eq!(PRINTED.lock().unwrap().len(), printed.len(), "nothing after the guard ends");
+        *LAST_PROGRESS.lock().unwrap() = None;
+    }
     #[test]
     fn creation_name_keeps_python_truthiness_repr_and_whitespace() {
         for (input, expected) in [
