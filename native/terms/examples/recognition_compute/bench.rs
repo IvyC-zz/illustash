@@ -126,15 +126,17 @@ fn ms(started: Instant) -> f64 {
     started.elapsed().as_secs_f64() * 1000.
 }
 
-/// Same builder as recognition_compute::session for WD (CPU provider, 4 intra-op threads).
+/// Same builder as recognition_compute::session for WD (CPU provider, session::WD_THREADS).
 /// The first picture is checked bit for bit against ModelSessions::infer, so a drift in the
 /// production configuration fails the benchmark instead of timing something else.
 fn wd_session(path: &Path) -> Result<Session> {
-    Ok(Session::builder()?
+    let mut builder = Session::builder()?
         .with_execution_providers([CPUExecutionProvider::default().build()])?
-        .with_log_level(LogLevel::Error)?
-        .with_intra_threads(4)?
-        .commit_from_file(path)?)
+        .with_log_level(LogLevel::Error)?;
+    if let Some(threads) = session::WD_THREADS {
+        builder = builder.with_intra_threads(threads)?;
+    }
+    Ok(builder.commit_from_file(path)?)
 }
 
 fn wd_run(session: &mut Session, input: Vec<f32>) -> Result<(Vec<f32>, Vec<f32>)> {

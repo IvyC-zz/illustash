@@ -97,7 +97,9 @@ class RecognitionModelTest(unittest.TestCase):
             path = cls.layout / f'generated-{i}.{"jpg" if mode == "JPEG" else "png"}'
             image.save(path)
             cls.images.append(path)
-        options = ort.SessionOptions(); options.log_severity_level = 3; options.intra_op_num_threads = 4
+        options = ort.SessionOptions(); options.log_severity_level = 3
+        if sys.platform != 'win32':  # WD threads as session::WD_THREADS: ORT default on Windows, 4 elsewhere
+            options.intra_op_num_threads = 4
         wd = ort.InferenceSession(str(models / 'wd_swinv2_v3_emb.onnx'), options, providers=['CPUExecutionProvider'])
         options = ort.SessionOptions(); options.log_severity_level = 3
         ccip = ort.InferenceSession(str(models / 'ccip/model_feat.onnx'), options, providers=['CPUExecutionProvider'])
