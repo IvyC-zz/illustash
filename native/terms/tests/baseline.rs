@@ -54,6 +54,10 @@ impl Roots {
     }
 
     fn norm(&self, text: &str) -> String {
+        // Every spelling is an absolute path, so text without a `/` (most cells) has none of them.
+        if !text.contains('/') {
+            return text.to_owned();
+        }
         let mut text = text.to_owned();
         for (real, token) in &self.spellings {
             text = text.replace(real.as_str(), token);
@@ -385,7 +389,17 @@ fn case(name: &str, data: &Value, blobs: &Value, recorded: i64, bin: &Path, veri
     problem
 }
 
+/// SQLite counts every allocation under one process-wide mutex unless told not to (`SQLITE_CONFIG_MEMSTATUS`). Each
+/// state read opens the databases and parses their schemas again, so the replay threads of all modules queued on that
+/// mutex for most of the replay's time. Nothing here reads those counts.
+static SQLITE_CONFIG: std::sync::Once = std::sync::Once::new();
+
 fn replay(module: &str) {
+    SQLITE_CONFIG.call_once(|| {
+        // SAFETY: before any connection of this process (every test starts here); takes one int argument.
+        let done = unsafe { rusqlite::ffi::sqlite3_config(rusqlite::ffi::SQLITE_CONFIG_MEMSTATUS, 0) };
+        assert_eq!(done, rusqlite::ffi::SQLITE_OK, "SQLITE_CONFIG_MEMSTATUS");
+    });
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join(format!("tests/fixtures/baseline/{module}.json.gz"));
     let mut text = String::new();
     GzDecoder::new(fs::File::open(&path).unwrap()).read_to_string(&mut text).unwrap();
