@@ -1,6 +1,6 @@
 # 开发说明
 
-状态：现行参考，2026-10-06。从 README 移出的开发者内容：构建、运行形态、图库包结构、目录、文档地图与检查流程。面向使用者的介绍见 [README](../README.md)。
+状态：现行参考，2026-10-20；「发布」一节还没按实际发布走过一次（#190）。从 README 移出的开发者内容：构建、运行形态、图库包结构、目录、文档地图与检查流程。面向使用者的介绍见 [README](../README.md)。
 
 核心是 Rust：`crates/core` 管业务规则、证据、人工裁决、关系、历史与投影，`crates/platform` 管平台能力，`crates/iqdb` 在本地算 IQDB 签名；`native/terms` 是应用宿主（CLI、HTTP、任务编排），`desktop/` 是只做启动与登录窗口的 Tauri 外壳。数据在 SQLite，推理固定 CPU ONNX Runtime，模型不进仓库、打包时按白名单加入。
 
@@ -61,14 +61,40 @@ cargo build --release --manifest-path native/terms/Cargo.toml
 
 ### 发布
 
-2026-10-16 用户定（#165），步骤见 #190；先手动发一两次，再决定哪些步骤做成脚本。发布与否、推 tag、建 Release 都由用户决定或明确授权。
+2026-10-16 用户定（#165）：先手动发一两次，再决定哪些步骤做成脚本；更新说明只写在 GitHub Release 正文，仓库里不放 CHANGELOG.md。**推 tag、建 Release、把 Release 草稿公开，每一步都要用户明确授权**；发布与否和时间也由用户决定。升版本号的 PR 由开发会话做，全量和合入由集成会话做，打包、验收和发布由负责这次发布的会话做。验收结果、安装包哈希写在这次发布的 Issue 里，不进仓库。
 
-1. **版本号**：SemVer，tag 写作 `vX.Y.Z`；内测包可加预发布后缀（`0.2.0-beta.1`），关于页渠道仍显示「预览版」。凡是升级图库格式的版本至少升次版本号。在 main 上用 `python3 tools/version.py --set X.Y.Z` 改版本号，同步迁移清单指纹，经 PR 合入 main。
-2. **发布提交**：就是合入版本号的那个 main 提交。先做完 Windows 构建与验收，再在这个提交上跑本机全量（`tools/check_all.sh`），都通过才往下走。
-3. **打包**：两个平台各自打安装包（做法见 [安装与平台](BACKEND_TASKS.md#独立安装与可选计算包)），在 macOS 虚拟机和 Windows 干净环境里装一遍、打开合成图库。首个内测版起每个平台只发不含模型的小安装包，模型首次使用时下载（#168）。每个安装包算 SHA-256（`shasum -a 256 FILE`，Windows 用 `certutil -hashfile FILE SHA256`），写进 `SHA256SUMS.txt`。
-4. **tag**：`git tag -a vX.Y.Z -m "Illustash X.Y.Z" <发布提交>`，再 `git push origin vX.Y.Z`。
-5. **GitHub Release**：`gh release create vX.Y.Z <安装包…> SHA256SUMS.txt --title "Illustash X.Y.Z" --notes-file NOTES.md`；预发布版加 `--prerelease`。仓库里不放 CHANGELOG.md，更新说明只写在 Release 正文：从上一个 tag 以来合入 main 的 PR 标题整理（`gh pr list --state merged --base main --search "merged:>YYYY-MM-DD"`），按用户看得到的变化写；会升级图库格式的版本单独标明，并写清回退办法：装回旧版，再用升级前的自动备份恢复（见上文「启动参数」末尾）。每个 Release 的说明都要写上 macOS 用户更新后的两步（2026-10-18 用户定，#192）：第一次打开新版本时，要在「系统设置 › 隐私与安全性」里重新放行一次；用 iCloud 照片作来源的，第一次同步时要重新允许访问照片。原因是安装包用临时签名，每个版本的签名不同。写法链接 [装不上、打不开怎么办](INSTALL.md#更新到新版本之后)。
-6. **检查更新能看到它**（#191）：应用读的是本库 GitHub Releases 的版本列表，只认 `vX.Y.Z` 形式的 tag，跳过草稿；正式版用户不会收到预发布版（标了 prerelease 或 tag 带后缀的），预发布版用户会收到更新的预发布版和正式版。发布后用上一个版本在「设置 › 关于」点「检查更新」，确认能看到新版本，「打开下载页」打开的是这个 Release。
+1. **定版本号**：SemVer，tag 写作 `vX.Y.Z`，内测包可加预发布后缀（`0.2.0-beta.1`）。凡是升级图库格式的版本至少升次版本号。是否升级图库格式，对照上一个 tag 和发布提交的三个格式版本号：词条 schema（`crates/core/src/schema.rs` 的 `SCHEMA_VERSION`）、应用 schema（`native/terms/src/app_library.rs` 的 `APPLICATION_SCHEMA`）、包格式（同一文件的 `FORMAT`），任何一个变了就是：
+
+   ```sh
+   git grep -n -E 'pub const (SCHEMA_VERSION|APPLICATION_SCHEMA|FORMAT):' <上一个tag> <发布提交> -- crates/core/src/schema.rs native/terms/src/app_library.rs
+   ```
+
+   首个公开测试版没有上一个 tag，用现在的 `0.1.0`（#165）。关于页的渠道「预览版」是 `application.json` 的 `channel`，与检查更新无关；检查更新只看版本号带不带后缀（第 10 步），所以装了不带后缀版本的人收不到带后缀的版本。
+2. **升版本号并同步**：从最新 main 开分支，`python3 tools/version.py --set X.Y.Z` 改 `native/terms/application.json`，并同步 `desktop/tauri.conf.json`、五个 crate（`native/terms`、`desktop`、`crates/core`、`crates/platform`、`crates/iqdb`）的 `Cargo.toml` 和各自 `Cargo.lock` 里本项目的包；再运行 `python -m tools.migration_inventory sync-sources` 同步迁移清单指纹。`python3 tools/version.py` 不带参数只检查：一致时打印「版本号一致：X.Y.Z」，不一致时逐处列出并退出 1。另外两道检查：全量里的 `tests/test_version.py`，以及 `packaging/build.py` 不一致就拒绝打包。这个 PR 按普通代码级别走合并队列，转 Ready 写「待集成」。版本号已经是要发的值时跳过这一步。
+3. **发布提交与本机全量**：集成会话把版本号 PR 编进一批，在候选 head 上经 `collab_run.py run -- bash tools/check_all.sh` 跑全量（占 heavy 槽，做法见 [合并队列](LOCAL_CHECKS.md#合并队列集成会话)），用户批准后合入。发布提交就是这一批合完后的 main 提交，它的 tree 与通过全量的候选 head 相同（`git rev-parse <发布提交>^{tree} <候选head>^{tree}` 两行一样）。main 在那之后又合入了不跑全量的 PR（界面级、只改文档），要带上它们就请集成会话在 main 当前提交上补跑一次全量，以它为发布提交。
+4. **两个平台打包**：首个内测版起每个平台只发不含模型的小安装包，模型第一次使用时下载（#168）；打法与完整包相同，只是不传 `--models`，参数说明见 [安装与平台](BACKEND_TASKS.md#独立安装与可选计算包)。两边都从发布提交的干净检出构建（例如 `git worktree add --detach <目录> <发布提交>`）：关于页的构建号取自 `git rev-parse --short HEAD`，已跟踪文件有改动时带 `-dirty`，发出去的包不能带。release 构建按 [本机资源](LOCAL_CHECKS.md#本机资源排队计时与后台优先级) 的规定排队。
+   - **macOS（Apple 芯片）**：`collab_run.py run -- python3 packaging/build.py --research --ort-dylib FILE --ort-licenses DIR --output NEW_PATH --macos-desktop-compute packaging/desktop-compute`，再在 `desktop/` 运行 `collab_run.py run -- cargo tauri build --bundles app --config ../packaging/tauri-full-macos.json`。产物 `Illustash.app` 是临时签名（`codesign -dv` 显示 `Signature=adhoc`），用 `ditto -c -k --keepParent Illustash.app <文件名>.zip` 压成 zip 发布，#7、#192 的虚拟机验收用的就是这种 zip。
+   - **Windows x64**：在 Windows 验收机上检出发布提交，从本机经 SSH 发起，外面包 `collab_run.py run --slot windows --`：`python packaging/build.py --research --openblas-site DIR --ort-dylib FILE --ort-licenses DIR --output NEW_PATH --desktop-compute packaging/desktop-compute`，再在 `desktop/` 运行 `cargo tauri build --bundles nsis --config ../packaging/tauri-full.json`。只发 NSIS 安装包（当前用户安装），不发 MSI。ONNX Runtime 的构建办法见 [安装与平台](BACKEND_TASKS.md#独立安装与可选计算包)。
+5. **两个平台验收**：用要发布的那个文件验收，只用合成数据。
+   - **macOS** 在 Tart 虚拟机里做（做法见 [macOS 实机测试](LOCAL_CHECKS.md#macos-实机测试虚拟机)，经 `collab_run.py run --slot vm` 占 vm 槽）：新建标准用户，用虚拟机里的 Safari 下载 zip（带上隔离标记），装进「应用程序」，按 [装不上、打不开怎么办](INSTALL.md#macos) 放行；之后核对关于页的版本是 X.Y.Z、构建号是发布提交的短哈希且不带 `-dirty`，下载模型，建合成图库，同步并识别。
+   - **Windows** 在 Windows 验收机上做：装 NSIS 包，同样核对关于页、下载模型、建合成图库、同步并识别。
+   - 从第二次发布起，两边都在装了上一个 Release 的环境里覆盖安装，确认 [更新到新版本之后](INSTALL.md#更新到新版本之后) 写的仍然成立；升级图库格式的版本，再用上一个版本建的合成图库走一遍界面里的升级（#193）。
+   - 验收发现问题时，修复照常走 PR；还没打 tag 的版本号不用改，发布提交换成修复合入后的 main 提交，从第 3 步重来。
+6. **SHA-256**：Windows 安装包取回本机后，验收机上 `certutil -hashfile FILE SHA256` 的结果要与本机 `shasum -a 256 FILE` 一致。在安装包所在目录运行 `shasum -a 256 <zip> <exe> > SHA256SUMS.txt`，文件里只有文件名，不带路径。
+7. **打 tag**（用户授权后）：`git tag -a vX.Y.Z -m "Illustash X.Y.Z" <发布提交>`，再 `git push origin vX.Y.Z`。tag 名必须是 `v` 加 `application.json` 里的版本号原样，可用 `git show vX.Y.Z:native/terms/application.json` 核对。
+8. **建 GitHub Release**（用户授权后）：先建草稿，`gh release create vX.Y.Z --verify-tag --draft --title "Illustash X.Y.Z" --notes-file <说明文件> <zip> <exe> SHA256SUMS.txt`。`--verify-tag` 让 gh 在远端没有这个 tag 时停下，而不是在默认分支上自己建一个。带后缀的版本加 `--prerelease`；不带后缀的版本不要加，否则正式版用户收不到（检查更新也认 GitHub 的 prerelease 标记）。草稿对外不可见，检查更新也看不到；在网页上核对正文和三个文件、下载一个核对哈希之后，再经用户同意 `gh release edit vX.Y.Z --draft=false` 公开。公开后，打开了自动检查的用户下次启动（或开着满 24 小时）就会看到提示。
+9. **更新说明**（Release 正文，说明文件放在仓库外，不提交）：
+   - 内容来源是这期间合入 main 的 PR：`git log --first-parent --merges --format=%s <上一个tag>..<发布提交>` 列出每个「Merge pull request #N」，标题用 `gh pr list --state merged --base main --limit 500 --json number,title` 取（默认只列 30 个，要加 `--limit`）。按用户看得到的变化整理，不照抄标题；只涉及内部重构、测试、文档的不写。首个公开测试版没有上一个 tag，写这一版能做什么、已知限制和安装办法。
+   - 每个 Release 都写：macOS 更新后的两步（2026-10-18 用户定，#192）：第一次打开新版本要在「系统设置 › 隐私与安全性」里重新放行一次，用 iCloud 照片作来源的第一次同步时要重新允许访问照片，原因是临时签名每个版本都不同，链接 [更新到新版本之后](INSTALL.md#更新到新版本之后)；安装包不带模型，第一次使用时下载，链接 [识别模型](INSTALL.md#识别模型)；用 `SHA256SUMS.txt` 核对下载的文件。
+   - 升级图库格式的版本，开头标明「本版会升级图库格式」：打开旧图库时会先询问，升级前自动备份，升级后旧版本打不开；回退办法是装回旧版，再用升级前的备份恢复，备份位置在升级完成后应用会显示一次（规则见 [架构方向](ARCHITECTURE_DIRECTION.md#已有核心库的显式升级边界)）。
+10. **检查更新能看到它**（#191，A 档；机制见 [Web 界面](WEB_V2.md#界面语言2026-10-18173) 检查更新一段）：应用不带账号请求 `https://api.github.com/repos/shio-vinyl/illustash/releases?per_page=30`，只读每项的 `tag_name`、`draft`、`prerelease`，不看正文和资源文件，所以资源文件名不影响检查。一个 Release 要被提示，需要：
+    - 已公开，不是草稿；
+    - tag 是 `v` 加不带 `+build` 的 SemVer（`v0.2.0`、`v0.2.0-beta.1`），不带 `v`、少一段或带 `+` 的都被忽略；
+    - 在接口返回的第一页（30 个）里；
+    - 比本机的版本新；带后缀或标了 prerelease 的，只提示给本身是预发布版本的安装。
+
+    「打开下载页」打开的是程序按版本号拼出的 `https://github.com/shio-vinyl/illustash/releases/tag/vX.Y.Z`，不取回复里的链接。请求不跟随重定向，仓库改名或转移后，已经发出去的版本检查更新都会失败。公开后用 `gh api 'repos/shio-vinyl/illustash/releases?per_page=30' --jq '.[] | [.tag_name, .draft, .prerelease] | @tsv'` 核对（登录后的 gh 也能看到草稿，应用看不到）；从第二次发布起，再在虚拟机里用上一个版本在「设置 › 关于」点「检查更新」，确认提示新版本，「打开下载页」打开的是这个 Release。
+11. **发布之后**：第一次发布后，改掉 [README](../README.md)「现状」和 [装不上、打不开怎么办](INSTALL.md) 开头「还没有正式发布」的状态句。
 
 ## 图库包
 
