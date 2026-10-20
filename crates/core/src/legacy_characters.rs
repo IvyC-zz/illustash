@@ -3,100 +3,21 @@
 //! - 身份、链接、作品复核、身份基线、身份关系：旧表 `entities`、`links`、`work_review`、`identity_baseline` 和
 //!   `identity_relations` 等四张关系表在升级时逐行核对后删除（`retire_*`），之后只在 `terms`、`term_tree`、
 //!   `term_links`、`term_identity_baseline`、`term_relations` 等核心表里。
-//! - 还没切的兼容表 `assertions`、`candidates` 由核心照 `term_*` 维护（`COMPAT`、`refresh_candidates`）；升级时
-//!   由核心主数据生成 TEMP 影子与旧表逐表比对（`verify_in`），不一致就拒绝升级。
-//! - 写保护名单 `GUARDED`、第 4 版删掉的冻结副本 `FROZEN_COPIES`。
+//! - `assertions`、`candidates` 是核心维护的派生表（与 `memberships` 一样，#201 第 4 步用户决定），不是兼容层：
+//!   人工结论的权威是 `term_verdicts`，候选的权威是证据批次（`character_projection::refresh_candidates`）。
+//! - 写保护名单 `GUARDED`、第 4 版删掉的冻结副本 `FROZEN_COPIES`。原来升级时由核心主数据生成影子表、与兼容表逐表
+//!   比对的机制随第 4 步删除。
 //!
 //! 原来的收编同步、切换与核对命令（`sync-characters`、`cutover-characters`、`verify-characters`）随第 4 步删除：第 8 版
 //! 拒绝没切换完的图库，它们再也遇不到真实数据；新建图库见 `new_library`。
 
-use crate::schema::guard;
 use crate::strict_json::sha256_hex;
 use crate::{Error, Result};
 use rusqlite::{Connection, OptionalExtension};
-use serde_json::{json, Value};
-use std::collections::BTreeMap;
 
 pub const ORIGIN: &str = "legacy:characters";
 /// 角色在核心里的标记（新建图库由 `new_library` 写）。
 pub const CHARACTERS_IN_CORE: &str = "terms_characters";
-pub const SHADOW: &str = "shadow_";
-/// 报告里每类问题最多带几条样例。
-const SAMPLES: usize = 5;
-
-/// 一张兼容表：旧表名、列、由核心生成这些列的 SELECT。
-struct Compat {
-    table: &'static str,
-    columns: &'static [&'static str],
-    select: &'static str,
-}
-
-/// 核心第 8 版迁移（#201）在它自己的事务里做的同一个核对：旧兼容表与由核心主数据生成的样子逐表一致才升级。
-/// 只建连接内的 TEMP 影子，结束即清掉。
-pub(crate) fn verify_in(tx: &Connection) -> Result<Report> {
-    let mut report = Report::default();
-    shadow(tx)?;
-    compare(tx, &mut report)?;
-    clear_shadow(tx)?;
-    Ok(report)
-}
-
-/// Shared read mapping for S3 commands/full rebuild. The whitelist is the S2 contract.
-/// 策略未设置时，候选的身份沿破坏式合并解析到代表（`_candidate` 与 `merge` 都这样写旧表）；hybrid 下是原始身份。
-const CANDIDATES_RESOLVED: &str = "WITH RECURSIVE chain(term,key,depth) AS (
-   SELECT r.term_id,t.key,0 FROM term_tree r JOIN terms t ON t.id=r.term_id
-   UNION ALL SELECT c.term,r2.merged_into,c.depth+1 FROM chain c JOIN terms t2 ON t2.key=c.key
-    JOIN term_tree r2 ON r2.term_id=t2.id WHERE r2.merged_into IS NOT NULL AND r2.merged_into<>'' AND c.depth<16),
-  resolved(term,key) AS (SELECT term,key FROM chain c WHERE depth=(SELECT max(depth) FROM chain x WHERE x.term=c.term))
- SELECT a.key,k.key,CASE e.source WHEN 'wd' THEN 'WD' ELSE 'CCIP' END,max(e.score)
- FROM term_active_evidence active
- JOIN term_evidence_set_rows current_row ON current_row.set_id=active.set_id
- JOIN term_evidence e ON e.id=current_row.evidence_id AND e.asset_id=active.asset_id
-   AND e.source=active.source AND active.method IN (e.method,'*')
- JOIN term_assets a ON a.id=e.asset_id AND a.namespace='library'
- JOIN resolved k ON k.term=e.term_id
- WHERE e.source||'.'||e.method IN ('wd.wd_character','ccip_index.char_ext')
- GROUP BY a.key,k.key,e.source";
-
-fn select_for(c: &Connection, table: &str, select: &'static str) -> Result<&'static str> {
-    Ok(if table == "candidates" && !crate::character_projection::policy(c)? { CANDIDATES_RESOLVED } else { select })
-}
-
-const CANDIDATE_SCOPE: (&str, &str) = (
-    "FROM term_active_evidence active",
-    "FROM candidate_scope scoped CROSS JOIN term_assets scoped_asset
-               ON scoped_asset.namespace='library' AND scoped_asset.key=scoped.uuid
-             CROSS JOIN term_active_evidence active ON active.asset_id=scoped_asset.id",
-);
-
-/// 核心维护兼容表时，按图重算兼容 `candidates`（= 由当前有效证据全量算出的那几行）。
-pub(crate) fn refresh_candidates(c: &Connection, uuids: &[String]) -> Result<()> {
-    c.execute_batch(
-        "CREATE TEMP TABLE IF NOT EXISTS candidate_scope(uuid TEXT PRIMARY KEY); DELETE FROM candidate_scope;",
-    )?;
-    let mut put = c.prepare_cached("INSERT OR IGNORE INTO candidate_scope VALUES (?)")?;
-    for u in uuids {
-        put.execute([u])?;
-    }
-    c.execute("DELETE FROM candidates WHERE uuid IN (SELECT uuid FROM candidate_scope)", [])?;
-    let select = select_for(c, "candidates", compat_select("candidates")?)?;
-    // 小范围由图片驱动；原计划会先扫描全库证据并分组，最后才过滤图片。
-    // 全量 refresh 保留原计划，避免为大集合增加逐图索引探测。
-    let select = if uuids.len() <= 4096 {
-        crate::character_projection::scoped(select, CANDIDATE_SCOPE.0, CANDIDATE_SCOPE.1)?
-    } else {
-        select.to_owned()
-    };
-    c.execute(
-        &format!(
-            "WITH rebuilt(uuid,entity,source,score) AS ({select})
-             INSERT INTO candidates(uuid,entity,source,score) SELECT * FROM rebuilt WHERE uuid IN (SELECT uuid FROM candidate_scope)"
-        ),
-        [],
-    )?;
-    Ok(())
-}
-
 /// 核心第 8 版（#201）：`term_links` 成为角色、皮肤、作品链接的唯一权威（`character_links`）。旧表 `links` 还在时
 /// （升级前的库），每条改链接的命令都同步镜像过（`mirror_state`），所以按原来的兼容表映射逐行核对，与角色的核对
 /// 一样不一致就拒绝升级；一致就删掉旧表。旧表不在时什么都不做。
@@ -289,55 +210,7 @@ fn differ(c: &Connection, old: &str, new: &str) -> Result<i64> {
     Ok(count(format!("{old} EXCEPT {new}"))? + count(format!("{new} EXCEPT {old}"))?)
 }
 
-pub(crate) fn compat_select(table: &str) -> Result<&'static str> {
-    COMPAT
-        .iter()
-        .find(|item| item.table == table)
-        .map(|item| item.select)
-        .ok_or_else(|| Error::Invalid(format!("未知角色兼容表：{table}")))
-}
-
-/// 生成顺序即插入顺序（被引用的在前），删除时倒过来。
-const COMPAT: &[Compat] = &[
-    Compat {
-        table: "assertions",
-        columns: &["uuid", "entity", "status", "origin"],
-        select: "SELECT a.key,t.key,CASE v.verdict WHEN 'yes' THEN 'confirmed' ELSE 'rejected' END,v.via
-         FROM term_effective_verdicts v JOIN term_assets a ON a.id=v.asset_id AND a.namespace='library'
-         JOIN term_tree r ON r.term_id=v.term_id JOIN terms t ON t.id=v.term_id",
-    },
-    Compat {
-        table: "candidates",
-        columns: &["uuid", "entity", "source", "score"],
-        select: "SELECT a.key,t.key,CASE e.source WHEN 'wd' THEN 'WD' ELSE 'CCIP' END,max(e.score)
-         FROM term_active_evidence active
- JOIN term_evidence_set_rows current_row ON current_row.set_id=active.set_id
- JOIN term_evidence e ON e.id=current_row.evidence_id AND e.asset_id=active.asset_id
-   AND e.source=active.source AND active.method IN (e.method,'*')
- JOIN term_assets a ON a.id=e.asset_id AND a.namespace='library'
-         JOIN term_tree r ON r.term_id=e.term_id JOIN terms t ON t.id=e.term_id
-         WHERE e.source||'.'||e.method IN ('wd.wd_character','ccip_index.char_ext')
-         GROUP BY a.key,t.key,e.source",
-    },
-];
-
-/// 升级时的核对：每张兼容表的旧表行数、影子行数、旧表有而影子没有、影子有而旧表没有（含样例）。
-#[derive(Debug, Default)]
-pub struct Report {
-    pub tables: BTreeMap<String, Value>,
-}
-
-impl Report {
-    pub fn clean(&self) -> bool {
-        self.tables.values().all(|t| t["missing"] == 0 && t["extra"] == 0)
-    }
-
-    pub fn to_json(&self) -> Value {
-        json!({ "tables": self.tables })
-    }
-}
-
-/// 切换后由核心写、Python 只读的表（写保护，见 schema::guard）：兼容表（含身份基线）、归属派生表、角色判定器的私有状态、
+/// 切换后由核心写、Python 只读的表（写保护，见 schema::guard）：人工结论与候选（`assertions`、`candidates`）和归属的派生表、角色判定器的私有状态、
 /// 学习产物，以及相册导入的 `imported`。`deferred`、`asked`、`reviews` 由核心命令一起写，但 Python 撤销自己的步骤
 /// （旧的零成员 sweep、curate、identity_skip）时照旧要删它们的行；`duplicates`、`excluded`、`auto_rules` 仍有
 /// Python 的写入口（curate、相似分组）。这些都不在里面。
@@ -398,29 +271,6 @@ fn columns(conn: &Connection, table: &str) -> Result<Vec<String>> {
         .collect::<rusqlite::Result<_>>()?)
 }
 
-/// 查询的前几行，给报告当样例。
-fn samples(conn: &Connection, sql: &str) -> Result<Vec<Value>> {
-    let mut stmt = conn.prepare(&format!("SELECT * FROM ({sql}) LIMIT {SAMPLES}"))?;
-    let n = stmt.column_count();
-    let rows = stmt
-        .query_map([], |x| {
-            (0..n)
-                .map(|i| {
-                    Ok(match x.get_ref(i)? {
-                        rusqlite::types::ValueRef::Null => Value::Null,
-                        rusqlite::types::ValueRef::Integer(v) => json!(v),
-                        rusqlite::types::ValueRef::Real(v) => json!(v),
-                        rusqlite::types::ValueRef::Text(t) => json!(String::from_utf8_lossy(t)),
-                        rusqlite::types::ValueRef::Blob(b) => json!(format!("<{n} 字节>", n = b.len())),
-                    })
-                })
-                .collect::<rusqlite::Result<Vec<_>>>()
-                .map(Value::Array)
-        })?
-        .collect::<rusqlite::Result<_>>()?;
-    Ok(rows)
-}
-
 pub(crate) fn fingerprint16(legacy: &str) -> Vec<u8> {
     let hex = if legacy.len() == 64 && legacy.bytes().all(|b| b.is_ascii_hexdigit()) {
         legacy.to_ascii_lowercase()
@@ -428,83 +278,6 @@ pub(crate) fn fingerprint16(legacy: &str) -> Vec<u8> {
         sha256_hex(legacy.as_bytes())
     };
     (0..16).map(|i| u8::from_str_radix(&hex[2 * i..2 * i + 2], 16).expect("十六进制")).collect()
-}
-
-// ---- 影子兼容表与比对 ----
-
-/// 旧表的建表语句改成影子表：换表名，去掉外键（旧数据的外键 Python 不强制，悬空引用在比对里报出来）。
-pub(crate) fn shadow_ddl(sql: &str, table: &str) -> Result<String> {
-    let open = sql.find('(').ok_or_else(|| Error::Schema(format!("看不懂 {table} 的建表语句")))?;
-    let mut body = sql[open..].to_owned();
-    while let Some(at) = body.find("REFERENCES") {
-        // REFERENCES 名字(列)
-        let rest = &body[at..];
-        let close = rest.find(')').ok_or_else(|| Error::Schema(format!("看不懂 {table} 的外键")))?;
-        body.replace_range(at..at + close + 1, "");
-    }
-    Ok(format!("CREATE TABLE {SHADOW}{table}{body}"))
-}
-
-/// 已完成比对的影子没有运行时读者，不把校验副本永久留在图库里。
-pub(crate) fn clear_shadow(c: &Connection) -> Result<()> {
-    for definition in COMPAT.iter().rev() {
-        c.execute_batch(&format!("DROP TABLE IF EXISTS {SHADOW}{}", definition.table))?;
-    }
-    Ok(())
-}
-
-/// 由核心主数据生成连接内的 TEMP 影子兼容表（建表语句照旧表，去掉外键），只读不写主文件。
-fn shadow(tx: &Connection) -> Result<()> {
-    for c in COMPAT.iter().rev() {
-        tx.execute_batch(&format!("DROP TABLE IF EXISTS {SHADOW}{}", c.table))?;
-    }
-    for c in COMPAT {
-        let sql: String =
-            tx.query_row("SELECT sql FROM main.sqlite_master WHERE type='table' AND name=?1", [c.table], |x| x.get(0))?;
-        let ddl = shadow_ddl(&sql, c.table)?.replacen("CREATE TABLE", "CREATE TEMP TABLE", 1);
-        tx.execute_batch(&ddl)?;
-        let select = select_for(tx, c.table, c.select)?;
-        tx.execute(&format!("INSERT INTO {SHADOW}{}({}) {}", c.table, c.columns.join(","), select), [])?;
-        guard(tx, &format!("{SHADOW}{}", c.table))?;
-    }
-    Ok(())
-}
-
-fn compare(tx: &Connection, r: &mut Report) -> Result<()> {
-    let mut pairs: Vec<(String, String, String)> = COMPAT
-        .iter()
-        .map(|c| {
-            let cols = c.columns.join(",");
-            (
-                c.table.to_owned(),
-                format!("SELECT {cols} FROM main.{}", c.table),
-                format!("SELECT {cols} FROM {SHADOW}{}", c.table),
-            )
-        })
-        .collect();
-    if table_exists(tx, "identity_baseline")? {
-        pairs.push((
-            "identity_baseline".into(),
-            "SELECT rowid,id,parent_id,variant,kind,merged_into FROM identity_baseline".into(),
-            "SELECT seq,id,parent_id,variant,kind,merged_into FROM term_identity_baseline".into(),
-        ));
-    }
-    for (table, old, new) in pairs {
-        let count = |sql: &str| -> Result<i64> {
-            Ok(tx.query_row(&format!("SELECT count(*) FROM ({sql})"), [], |x| x.get(0))?)
-        };
-        let (missing_sql, extra_sql) = (format!("{old} EXCEPT {new}"), format!("{new} EXCEPT {old}"));
-        let (missing, extra) = (count(&missing_sql)?, count(&extra_sql)?);
-        let mut entry = json!({"old": count(&old)?, "shadow": count(&new)?, "missing": missing, "extra": extra});
-        if missing > 0 {
-            entry["missing_samples"] = json!(samples(tx, &missing_sql)?);
-        }
-        if extra > 0 {
-            entry["extra_samples"] = json!(samples(tx, &extra_sql)?);
-        }
-        r.tables.insert(table, entry);
-    }
-    Ok(())
 }
 
 #[cfg(test)]

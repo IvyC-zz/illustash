@@ -32,15 +32,6 @@ fn library_from(old: &str) -> Connection {
 }
 
 #[test]
-fn shadow_tables_copy_the_old_shape_without_foreign_keys() {
-    let sql = "CREATE TABLE links(system TEXT NOT NULL,key TEXT NOT NULL,entity_id TEXT NOT NULL REFERENCES entities(id),\n current INTEGER NOT NULL DEFAULT 1,PRIMARY KEY(system,key))";
-    assert_eq!(
-        shadow_ddl(sql, "links").unwrap(),
-        "CREATE TABLE shadow_links(system TEXT NOT NULL,key TEXT NOT NULL,entity_id TEXT NOT NULL ,\n current INTEGER NOT NULL DEFAULT 1,PRIMARY KEY(system,key))"
-    );
-}
-
-#[test]
 fn a_library_whose_columns_came_in_another_order_upgrades_the_same() {
     const REAL: &str = "CREATE TABLE entities(id TEXT PRIMARY KEY,name TEXT NOT NULL,work TEXT NOT NULL DEFAULT '',external_key TEXT UNIQUE, variant TEXT NOT NULL DEFAULT '', parent_id TEXT REFERENCES entities(id), tag TEXT, merged_into TEXT REFERENCES entities(id), kind TEXT NOT NULL DEFAULT '', artist TEXT NOT NULL DEFAULT '', work_id TEXT REFERENCES entities(id), original INTEGER NOT NULL DEFAULT 0, label_only INTEGER NOT NULL DEFAULT 0, mascot INTEGER NOT NULL DEFAULT 0, mascot_origin TEXT);";
     let line = OLD.lines().find(|l| l.starts_with("CREATE TABLE entities(")).unwrap();
@@ -58,12 +49,4 @@ fn a_library_whose_columns_came_in_another_order_upgrades_the_same() {
     let c = library_from(&OLD.replace(line, REAL));
     assert_eq!(identities(&c), identities(&library()));
     assert_eq!(identities(&c).len(), 4);
-}
-
-#[test]
-fn candidate_scope_anchor_appears_once_under_both_policies() {
-    for select in [CANDIDATES_RESOLVED, compat_select("candidates").unwrap()] {
-        let scoped = crate::character_projection::scoped(select, CANDIDATE_SCOPE.0, CANDIDATE_SCOPE.1).unwrap();
-        assert_eq!(scoped.matches("FROM candidate_scope scoped").count(), 1);
-    }
 }

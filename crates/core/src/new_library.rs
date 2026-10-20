@@ -5,7 +5,7 @@
 //! - 三个空的全库证据批次：溯源一个，候选的 CCIP、WD 各一个（producer 是空候选表的摘要），与原来切换时写下的相同；
 //! - 画师：删掉 `artist_verdicts`；
 //! - 标签：`asset_tags`、`general_hits`、`asset_rating` 换成核心之上的同名视图（`legacy_labels::VIEWS`）；
-//! - 角色：删掉 `assertions` 上的身份触发器，兼容表与核心独占的表加写保护，派生表压缩成 WITHOUT ROWID；
+//! - 角色：删掉 `assertions` 上的身份触发器，派生表与核心独占的表加写保护，派生表压缩成 WITHOUT ROWID；
 //! - 名字：`names_version` 从 0 起，建显示投影；
 //! - 四个切换标记 `terms_*=core`。
 use crate::schema::{begin_writing, commit_writing, guard};

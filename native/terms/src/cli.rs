@@ -6,7 +6,7 @@
 //!   `{"op": …, …}`；一个核心事务，`effect` 给出时同事务写 backend_effects。
 //! - `learning-snapshot --db <library.sqlite>`：S3 学习输入的版本化指纹（只读）。
 //! - `publish-learning --db <library.sqlite>`：标准输入给完整学习批次；原子发布或返回 stale。
-//! - `reproject-characters --db <library.sqlite>`：S3 从兼容表重算角色派生表（尚非完整 term_* 重建）。
+//! - `reproject-characters --db <library.sqlite>`：S3 从人工结论与候选（`assertions`、`candidates`）重算角色的归属派生表。
 //! - `reproject --db <library.sqlite>`：由证据和裁决整表重建投影（投影随时可以算回来）。
 //! - `undo --db <library.sqlite> --action <id>`：撤销最近一步，且它必须正是 `<id>`、由词条核心写入。
 //!   由 tests/reference/web/terms_core.py（#9 已删除） 调用。
