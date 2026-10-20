@@ -1,6 +1,7 @@
 //! S3 / D6: optimistic learning publication. The stamp is taken before the Python
 //! training snapshot; BEGIN IMMEDIATE checks it before any write. A change between
 //! stamp and snapshot conservatively rejects, never publishes stale training.
+use crate::character_entities::ENTITIES;
 use crate::character_links::LINKS;
 use crate::{character_projection, schema, Error, Result};
 use rusqlite::{
@@ -53,9 +54,18 @@ fn stamp(c: &Connection) -> Result<String> {
     feed(&mut h, b"character-learning-v1");
     for &table in INPUTS {
         feed(&mut h, table.as_bytes());
-        // The character links and the identity baseline live in core tables since core v8 (#201); they are read in
-        // the former tables' shape, so the same rows give the same stamp.
+        // The identities, the character links and the identity baseline live in core tables since core v8 (#201);
+        // they are read in the former tables' shape (the identities without the three columns the core never
+        // carried), so the same rows give the same stamp.
         let (stored, from) = match table {
+            "entities" => (
+                "term_tree",
+                format!(
+                    "(SELECT id, kind, work, variant, parent_id, merged_into, artist, label_only, mascot, mascot_origin,
+                       work_id, original
+                     FROM {ENTITIES})"
+                ),
+            ),
             "links" => {
                 ("term_links", format!("(SELECT system, key, entity_id, current, source, added_at FROM {LINKS})"))
             }

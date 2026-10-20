@@ -80,10 +80,11 @@ class NativeIqdbQueueTest(unittest.TestCase):
         with sqlite3.connect(self.library / 'library.sqlite') as c:
             c.executescript('''
                 CREATE TABLE duplicates(grp TEXT, uuid TEXT); CREATE TABLE similar_groups(gid TEXT, uuid TEXT);
-                CREATE TABLE entities(id INTEGER PRIMARY KEY, original INTEGER, label_only INTEGER);
+                CREATE TABLE terms(id INTEGER PRIMARY KEY, key, kind TEXT); CREATE TABLE term_tree(term_id INTEGER PRIMARY KEY, parent_id, merged_into, work_id, work_text, variant, artist, label_only INTEGER, mascot INTEGER, mascot_origin, original INTEGER, seq INTEGER);
                 CREATE TABLE memberships(entity INTEGER, uuid TEXT); CREATE TABLE clusters(cid TEXT, uuid TEXT);
                 CREATE TABLE asset_rating(uuid TEXT PRIMARY KEY, rating TEXT);
-                INSERT INTO entities VALUES (1,1,0),(2,1,0),(3,0,0);
+                INSERT INTO terms VALUES (1,1,'character'),(2,2,'character'),(3,3,'character');
+                INSERT INTO term_tree(term_id,original,label_only,seq) VALUES (1,1,0,1),(2,1,0,2),(3,0,0,3);
                 INSERT INTO memberships VALUES (1,'oc0'),(1,'oc1'),(1,'oc2'),(1,'oc3'),(2,'oc-solved-a'),(2,'oc-solved-b'),(3,'x0');''')
             c.executemany('INSERT INTO asset_rating VALUES (?,?)', [
                 ('x0', 'general'), ('x1', 'questionable'), ('x2', 'explicit'), ('x3', 'sensitive'),

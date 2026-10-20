@@ -8,6 +8,7 @@
 //! 与旧代码相同地先用 SQLite 的 `LIKE`（只对 ASCII 不分大小写）筛，再按 Python 的 `str.casefold()` 比较
 //! （`casefold.rs`）；SQL 语句逐字照搬，行的顺序也就相同（作品命中那一段按行的顺序后者覆盖前者，旧代码如此）。
 use crate::casefold::casefold;
+use crate::character_entities::ENTITIES;
 use crate::character_links::LINKS;
 use crate::names_view::{readable, skin_zh, WORK_NAMES};
 use crate::Result;
@@ -71,7 +72,7 @@ pub fn hits(c: &Connection, query: &str) -> Result<Hits> {
     let like = s.like.clone();
     for field in ["work", "artist", "variant"] {
         s.add(
-            &format!("SELECT coalesce(parent_id,id),{field} FROM entities WHERE {field} LIKE ? ESCAPE '\\'"),
+            &format!("SELECT coalesce(parent_id,id),{field} FROM {ENTITIES} WHERE {field} LIKE ? ESCAPE '\\'"),
             &[&like],
             false,
         )?;
@@ -79,7 +80,7 @@ pub fn hits(c: &Connection, query: &str) -> Result<Hits> {
     for field in ["work", "variant"] {
         s.add(
             &format!(
-                "SELECT coalesce(parent_id,id),replace({field},'_',' ') FROM entities WHERE replace({field},'_',' ') LIKE ? ESCAPE '\\'"
+                "SELECT coalesce(parent_id,id),replace({field},'_',' ') FROM {ENTITIES} WHERE replace({field},'_',' ') LIKE ? ESCAPE '\\'"
             ),
             &[&like],
             false,
@@ -88,7 +89,7 @@ pub fn hits(c: &Connection, query: &str) -> Result<Hits> {
     let tags = format!(
         "SELECT coalesce(e.parent_id, e.id), {{0}}
          FROM {LINKS} l
-         JOIN entities e ON e.id = l.entity_id
+         JOIN {ENTITIES} e ON e.id = l.entity_id
          WHERE e.kind <> 'work'
            AND l.core_system IN ('danbooru', 'wd_character', 'photos_album', 'ccip', 'ccip_base', 'bangumi')
            AND {{0}} LIKE ? ESCAPE '\\'"
@@ -96,18 +97,19 @@ pub fn hits(c: &Connection, query: &str) -> Result<Hits> {
     s.add(&tags.replace("{0}", "l.key"), &[&like], true)?;
     s.add(&tags.replace("{0}", "replace(l.key,'_',' ')"), &[&like], false)?;
     s.add(
-        "SELECT coalesce(e.parent_id, e.id), n.value
-         FROM term_names n
-         JOIN terms t ON t.id = n.term_id
-         JOIN entities e ON e.id = t.key
-         WHERE n.value LIKE ? ESCAPE '\\'",
+        &format!(
+            "SELECT coalesce(e.parent_id, e.id), n.value
+             FROM term_names n
+             JOIN terms t ON t.id = n.term_id
+             JOIN {ENTITIES} e ON e.id = t.key
+             WHERE n.value LIKE ? ESCAPE '\\'"
+        ),
         &[&like],
         false,
     )?;
     for (table, field) in [("term_key_names", "value"), ("term_key_aliases", "value")] {
-        for (kind, join) in
-            [("work", "JOIN entities e ON e.work=t.key"), ("skin", "JOIN entities e ON e.variant=t.key")]
-        {
+        for (kind, column) in [("work", "work"), ("skin", "variant")] {
+            let join = format!("JOIN {ENTITIES} e ON e.{column}=t.key");
             let source = if table == "term_key_names" { "AND t.source<>'danbooru'" } else { "" };
             s.add(
                 &format!(
@@ -125,7 +127,7 @@ pub fn hits(c: &Connection, query: &str) -> Result<Hits> {
     if !builtin.is_empty() {
         let marks = vec!["?"; builtin.len()].join(",");
         let mut stmt =
-            c.prepare(&format!("SELECT coalesce(parent_id,id),work FROM entities WHERE work IN ({marks})"))?;
+            c.prepare(&format!("SELECT coalesce(parent_id,id),work FROM {ENTITIES} WHERE work IN ({marks})"))?;
         let rows =
             stmt.query_map(params_from_iter(builtin.iter()), |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
         for row in rows {
@@ -142,12 +144,12 @@ pub fn hits(c: &Connection, query: &str) -> Result<Hits> {
             "SELECT t.key, n.value
              FROM term_names n
              JOIN terms t ON t.id = n.term_id
-             JOIN entities e ON e.id = t.key
+             JOIN {ENTITIES} e ON e.id = t.key
              WHERE e.kind = 'work'
              UNION
              SELECT l.entity_id, l.key
              FROM {LINKS} l
-             JOIN entities e ON e.id = l.entity_id
+             JOIN {ENTITIES} e ON e.id = l.entity_id
              WHERE e.kind = 'work'"
         ))?;
         let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
@@ -167,10 +169,10 @@ pub fn hits(c: &Connection, query: &str) -> Result<Hits> {
         }
     }
     {
-        let mut stmt = c.prepare(
-            "WITH RECURSIVE tree(id) AS (SELECT id FROM entities WHERE id=? AND kind='work'
- UNION SELECT e.id FROM entities e JOIN tree t ON e.parent_id=t.id WHERE e.kind='work') SELECT id FROM entities WHERE kind='character' AND work_id IN (SELECT id FROM tree)",
-        )?;
+        let mut stmt = c.prepare(&format!(
+            "WITH RECURSIVE tree(id) AS (SELECT id FROM {ENTITIES} WHERE id=? AND kind='work'
+ UNION SELECT e.id FROM {ENTITIES} e JOIN tree t ON e.parent_id=t.id WHERE e.kind='work') SELECT id FROM {ENTITIES} WHERE kind='character' AND work_id IN (SELECT id FROM tree)"
+        ))?;
         for (ident, r) in &work_hits {
             let rows = stmt.query_map([ident], |row| row.get::<_, String>(0))?;
             for character in rows {
@@ -179,8 +181,9 @@ pub fn hits(c: &Connection, query: &str) -> Result<Hits> {
         }
     }
     {
-        let mut stmt =
-            c.prepare("SELECT parent_id,variant FROM entities WHERE parent_id IS NOT NULL AND variant<>''")?;
+        let mut stmt = c.prepare(&format!(
+            "SELECT parent_id,variant FROM {ENTITIES} WHERE parent_id IS NOT NULL AND variant<>''"
+        ))?;
         let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
         for row in rows {
             let (ident, variant) = row?;
@@ -219,18 +222,17 @@ mod tests {
     fn ranks_and_the_combined_query() {
         let c = Connection::open_in_memory().unwrap();
         c.execute_batch(
-            "CREATE TABLE entities(id TEXT PRIMARY KEY, kind TEXT, parent_id TEXT, work TEXT, artist TEXT, variant TEXT,
-               work_id TEXT);
-             CREATE TABLE terms(id INTEGER PRIMARY KEY, key TEXT);
-             CREATE TABLE term_tree(term_id INTEGER PRIMARY KEY);
+            "CREATE TABLE terms(id INTEGER PRIMARY KEY, key TEXT, kind TEXT);
+             CREATE TABLE term_tree(term_id INTEGER PRIMARY KEY, parent_id TEXT, merged_into TEXT, work_id TEXT,
+               work_text TEXT, variant TEXT, artist TEXT, label_only INTEGER, mascot INTEGER, mascot_origin TEXT,
+               original INTEGER, seq INTEGER);
              CREATE TABLE term_links(system TEXT, key TEXT, term_id INTEGER, current INTEGER, source TEXT, added_at TEXT);
              CREATE TABLE term_names(term_id INTEGER, value TEXT);
              CREATE TABLE term_key_names(kind TEXT, key TEXT, lang TEXT, source TEXT, value TEXT);
              CREATE TABLE term_key_aliases(kind TEXT, key TEXT, value TEXT, position INTEGER);
-             INSERT INTO entities VALUES ('w','work',NULL,'','','',NULL),
-               ('a','character',NULL,'blue_archive','','','w'),('s','skin','a','','','swimsuit',NULL);
-             INSERT INTO terms VALUES (1,'a'),(2,'w'),(3,'s');
-             INSERT INTO term_tree VALUES (1),(2),(3);
+             INSERT INTO terms VALUES (1,'a','character'),(2,'w','work'),(3,'s','skin');
+             INSERT INTO term_tree(term_id, parent_id, work_id, work_text, variant, artist, seq)
+             VALUES (2,NULL,NULL,'','','',1),(1,NULL,'w','blue_archive','','',2),(3,'a',NULL,'','swimsuit','',3);
              INSERT INTO term_links VALUES ('danbooru','alice_(blue_archive)',1,1,'',''),('danbooru','ip_tag',2,1,'','');
              INSERT INTO term_names VALUES (1,'爱丽丝');",
         )

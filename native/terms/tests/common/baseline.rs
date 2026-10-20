@@ -30,13 +30,53 @@ pub const RETIRED: [&str; 7] =
 ///   is compared in the replies.
 /// - `term_names.seq`: the order of names, filled from the former `names` rowids (#201); the orders the readers take
 ///   from it are compared in the replies.
-pub const SKIP_COLUMNS: [(&str, &str); 5] = [
+/// - `term_tree`'s identity attributes and `seq`: the attributes moved there from `terms.attrs` (#201) and are compared
+///   in `terms.attrs` (`ATTRIBUTES`); `seq` is the order of identities, filled from the former `entities` rowids, and
+///   the orders the readers take from it are compared in the replies.
+pub const SKIP_COLUMNS: [(&str, &str); 12] = [
     ("term_packages", "manifest"),
     ("term_evidence", "fingerprint"),
     ("actions", "label_kind"),
     ("actions", "label_count"),
     ("term_names", "seq"),
+    ("term_tree", "variant"),
+    ("term_tree", "artist"),
+    ("term_tree", "label_only"),
+    ("term_tree", "mascot"),
+    ("term_tree", "mascot_origin"),
+    ("term_tree", "original"),
+    ("term_tree", "seq"),
 ];
+
+/// The identity attributes core v8 moved from `terms.attrs` to `term_tree` (#201), in the order the earlier mirror
+/// wrote them. An identity's `terms.attrs` is compared as that object built from its `term_tree` row, as written
+/// before; other terms keep theirs.
+pub const ATTRIBUTES: [&str; 6] = ["variant", "artist", "label_only", "mascot", "mascot_origin", "original"];
+
+/// The query a table is read with (`terms`: `ATTRIBUTES`).
+fn select(c: &Connection, name: &str, columns: &[String]) -> String {
+    let moved: bool = name == "terms"
+        && c.query_row("SELECT EXISTS(SELECT 1 FROM pragma_table_info('term_tree') WHERE name='variant')", [], |r| {
+            r.get(0)
+        })
+        .unwrap();
+    if !moved {
+        return format!("SELECT * FROM \"{name}\"");
+    }
+    let object = ATTRIBUTES.iter().map(|a| format!("'{a}',r.{a}")).collect::<Vec<_>>().join(",");
+    let list = columns
+        .iter()
+        .map(|col| {
+            if col == "attrs" {
+                format!("CASE WHEN r.term_id IS NULL THEN t.attrs ELSE json_object({object}) END")
+            } else {
+                format!("t.\"{col}\"")
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+    format!("SELECT {list} FROM terms t LEFT JOIN term_tree r ON r.term_id=t.id")
+}
 
 static CLOCK: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})?").unwrap());
@@ -154,7 +194,7 @@ pub fn state(c: &Connection, masks: &Masks) -> State {
         let keep: Vec<usize> =
             (0..all.len()).filter(|&i| !SKIP_COLUMNS.contains(&(name.as_str(), all[i].as_str()))).collect();
         let mut table = Table { columns: keep.iter().map(|&i| all[i].clone()).collect(), rows: BTreeMap::new() };
-        let mut s = c.prepare(&format!("SELECT * FROM \"{name}\"")).unwrap();
+        let mut s = c.prepare(&select(c, &name, &all)).unwrap();
         let mut q = s.query([]).unwrap();
         while let Some(row) = q.next().unwrap() {
             let mut cells: Vec<Value> = keep.iter().map(|&i| cell(row.get_ref(i).unwrap(), masks)).collect();

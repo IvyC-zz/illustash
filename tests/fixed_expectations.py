@@ -428,10 +428,15 @@ def _load(module):
 
 BASELINE_STATES = FIXTURES.parent / 'baseline_states'
 RETIRED = frozenset({'entities', 'links', 'work_review', 'names', 'display_names', 'name_aliases', 'identity_baseline'})
-# The last three were added by core v8 (#201): what the history shows from the two `actions` columns, and the orders
-# readers take from `term_names.seq`, are compared in the replies.
+# The rest were added by core v8 (#201): what the history shows from the two `actions` columns, and the orders
+# readers take from `term_names.seq` and `term_tree.seq`, are compared in the replies; the identity attributes moved
+# from `terms.attrs` to `term_tree` are compared in `terms.attrs` (ATTRIBUTES).
 SKIP_COLUMNS = frozenset({('term_packages', 'manifest'), ('term_evidence', 'fingerprint'),
-                          ('actions', 'label_kind'), ('actions', 'label_count'), ('term_names', 'seq')})
+                          ('actions', 'label_kind'), ('actions', 'label_count'), ('term_names', 'seq')}
+                         | {('term_tree', col) for col in ('variant', 'artist', 'label_only', 'mascot',
+                                                           'mascot_origin', 'original', 'seq')})
+# An identity's `terms.attrs` is compared as the object the earlier mirror wrote, built from its `term_tree` row.
+ATTRIBUTES = ('variant', 'artist', 'label_only', 'mascot', 'mascot_origin', 'original')
 STAMP = re.compile(r'learning-v1:[0-9a-f]{64}')
 TERMS_VERSION = int(re.search(r'pub const SCHEMA_VERSION: i64 = (\d+);',
                               (Path(__file__).resolve().parents[1] / 'crates/core/src/schema.rs').read_text()).group(1))
@@ -469,6 +474,17 @@ def _cell(value, rename):
     return value
 
 
+def _select(c, name, columns):
+    moved = name == 'terms' and c.execute(
+        "SELECT EXISTS(SELECT 1 FROM pragma_table_info('term_tree') WHERE name='variant')").fetchone()[0]
+    if not moved:
+        return 'SELECT * FROM ' + quote(name)
+    attrs = ('CASE WHEN r.term_id IS NULL THEN t.attrs ELSE json_object('
+             + ','.join(f"'{a}',r.{a}" for a in ATTRIBUTES) + ') END')
+    return ('SELECT ' + ','.join(attrs if col == 'attrs' else 't.' + quote(col) for col in columns)
+            + ' FROM terms t LEFT JOIN term_tree r ON r.term_id=t.id')
+
+
 def _database_state(path, rename):
     with closing(sqlite3.connect(Path(path).resolve().as_uri() + '?mode=ro', uri=True)) as c:
         c.execute('BEGIN')
@@ -485,7 +501,7 @@ def _database_state(path, rename):
             columns = [r[1] for r in c.execute('PRAGMA table_info(' + quote(name) + ')')]
             keep = [i for i, col in enumerate(columns) if (name, col) not in SKIP_COLUMNS]
             rows = []
-            for raw in c.execute('SELECT * FROM ' + quote(name)):
+            for raw in c.execute(_select(c, name, columns)):
                 cells = [_cell(raw[i], rename) for i in keep]
                 if name == 'meta' and isinstance(raw[0], str) and isinstance(raw[1], str):
                     cells[1] = _cell(_meta_value(raw[0], raw[1], names_version), rename)

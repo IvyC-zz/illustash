@@ -6,8 +6,9 @@ const BOB: &str = "b0b00000-0000-4000-8000-000000000002";
 const SKIN: &str = "5k1n0000-0000-4000-8000-000000000003";
 const WORK: &str = "w0rk0000-0000-4000-8000-000000000004";
 
-/// 一个小的旧库（hybrid）：作品、人物、皮肤，相册与人工结论，候选，一条继承层级关系。链接、作品复核、身份基线不再随
-/// 角色收编（核心第 8 版起只在核心表里，旧表在迁移时退役，见 `retire_*` 与 native/terms/tests/v8_upgrade.rs）。
+/// 一个小的旧库（hybrid）：作品、人物、皮肤，相册与人工结论，候选，一条继承层级关系。身份、链接、作品复核、身份基线
+/// 不再随角色收编（核心第 8 版起只在核心表里，旧表在迁移时退役，见 `retire_*` 与 native/terms/tests/v8_upgrade.rs）：
+/// 这里的身份在迁移时照旧表建成词条（核心里还没有身份）。
 fn library() -> Connection {
     library_from(OLD)
 }
@@ -44,7 +45,7 @@ fn a_small_library_syncs_with_no_differences_and_twice_adds_nothing() {
     let mut c = library();
     let r = sync(&mut c).unwrap();
     assert!(r.committed, "{}", r.to_json());
-    assert_eq!(r.tables.len(), 7);
+    assert_eq!(r.tables.len(), 6);
     let rows = |c: &Connection| -> Vec<i64> {
         [
             "terms",
@@ -64,7 +65,7 @@ fn a_small_library_syncs_with_no_differences_and_twice_adds_nothing() {
     let again = sync(&mut c).unwrap();
     assert!(again.committed);
     assert_eq!(rows(&c), before);
-    assert_eq!(again.verdicts_added + again.terms_created + again.evidence_added + again.batches_added, 0);
+    assert_eq!(again.verdicts_added + again.evidence_added + again.batches_added, 0);
     // 相册值进批次、没有事件的旧结论进锚点 0 的基线。
     assert_eq!(count(&c, "SELECT anchor FROM term_batches WHERE kind='album'"), 0);
     assert_eq!(count(&c, "SELECT count(*) FROM term_verdicts WHERE via='legacy_import' AND anchor=0"), 1);
@@ -85,18 +86,17 @@ fn the_comparison_notices_one_changed_row_in_every_compat_table() {
     assert!(sync(&mut c).unwrap().committed);
     // 每张影子表改一行（持钥匙），比对必须报出来。
     let tampers = [
-        ("entities", format!("UPDATE shadow_entities SET work='改过' WHERE id='{BOB}'")),
-        ("assertions", "UPDATE shadow_assertions SET origin='sweep' WHERE uuid='a'".into()),
-        ("candidates", "UPDATE shadow_candidates SET score=score+1e-12 WHERE uuid='a'".into()),
-        ("identity_relations", "UPDATE shadow_identity_relations SET status='proposed'".into()),
-        ("identity_evidence", "UPDATE shadow_identity_evidence SET payload=payload||' '".into()),
-        ("identity_decisions", "UPDATE shadow_identity_decisions SET previous_status='rejected'".into()),
-        ("identity_decision_evidence", "INSERT INTO shadow_identity_decision_evidence VALUES (3,'x')".into()),
+        ("assertions", "UPDATE shadow_assertions SET origin='sweep' WHERE uuid='a'"),
+        ("candidates", "UPDATE shadow_candidates SET score=score+1e-12 WHERE uuid='a'"),
+        ("identity_relations", "UPDATE shadow_identity_relations SET status='proposed'"),
+        ("identity_evidence", "UPDATE shadow_identity_evidence SET payload=payload||' '"),
+        ("identity_decisions", "UPDATE shadow_identity_decisions SET previous_status='rejected'"),
+        ("identity_decision_evidence", "INSERT INTO shadow_identity_decision_evidence VALUES (3,'x')"),
     ];
     for (table, sql) in tampers {
         let tx = c.transaction().unwrap();
         begin_writing(&tx).unwrap();
-        tx.execute(&sql, []).unwrap();
+        tx.execute(sql, []).unwrap();
         let mut r = Report::default();
         compare(&tx, true, &mut r).unwrap();
         let diff = &r.tables[table];
@@ -193,7 +193,6 @@ fn reconstruction_refuses_what_history_cannot_explain() {
 #[test]
 fn preflight_refuses_and_leaves_nothing() {
     for (sql, check) in [
-        (format!("UPDATE entities SET kind='oc' WHERE id='{BOB}'"), "entities.kind 不是 character / skin / work"),
         (
             format!("INSERT INTO identity_relations(a,b,kind) VALUES ('{ALICE}','{BOB}','duplicate_of'),('{BOB}','{ALICE}','duplicate_of')"),
             "同一对身份有两个方向的 duplicate_of",
@@ -202,38 +201,39 @@ fn preflight_refuses_and_leaves_nothing() {
         ("UPDATE meta SET value='v2' WHERE key='identity_policy'".into(), "只支持身份策略未设置或 hybrid"),
     ] {
         let mut c = library();
+        let terms = count(&c, "SELECT count(*) FROM terms");
         c.execute(&sql, []).unwrap();
         let r = sync(&mut c).unwrap();
         assert!(!r.committed);
         assert!(r.preflight.iter().any(|p| p["check"] == check), "{check}: {:?}", r.preflight);
-        assert_eq!(count(&c, "SELECT count(*) FROM terms"), 0);
+        assert_eq!(count(&c, "SELECT count(*) FROM terms"), terms);
+        assert_eq!(count(&c, "SELECT count(*) FROM term_verdicts"), 0);
         assert_eq!(count(&c, "SELECT count(*) FROM sqlite_master WHERE name LIKE 'shadow_%'"), 0);
     }
 }
 
-/// 真实「我的图库」的 entities 由历次 ALTER TABLE 加列，work_id、original 排在 label_only 之前（S5 副本上发现）。
+/// 真实「我的图库」的 entities 由历次 ALTER TABLE 加列，work_id、original 排在 label_only 之前（S5 副本上发现）。迁移
+/// 按列名读旧表，建出的身份与列序无关。
 #[test]
-fn a_library_whose_columns_came_in_another_order_syncs_the_same() {
+fn a_library_whose_columns_came_in_another_order_upgrades_the_same() {
     const REAL: &str = "CREATE TABLE entities(id TEXT PRIMARY KEY,name TEXT NOT NULL,work TEXT NOT NULL DEFAULT '',external_key TEXT UNIQUE, variant TEXT NOT NULL DEFAULT '', parent_id TEXT REFERENCES entities(id), tag TEXT, merged_into TEXT REFERENCES entities(id), kind TEXT NOT NULL DEFAULT '', artist TEXT NOT NULL DEFAULT '', work_id TEXT REFERENCES entities(id), original INTEGER NOT NULL DEFAULT 0, label_only INTEGER NOT NULL DEFAULT 0, mascot INTEGER NOT NULL DEFAULT 0, mascot_origin TEXT);";
     let line = OLD.lines().find(|l| l.starts_with("CREATE TABLE entities(")).unwrap();
+    let identities = |c: &Connection| -> Vec<String> {
+        let mut st = c.prepare(&format!("SELECT * FROM {} ORDER BY seq", crate::character_entities::ENTITIES)).unwrap();
+        let n = st.column_count();
+        st.query_map([], |x| {
+            let row = (0..n).map(|i| x.get::<_, rusqlite::types::Value>(i)).collect::<rusqlite::Result<Vec<_>>>()?;
+            Ok(format!("{row:?}"))
+        })
+        .unwrap()
+        .map(|r| r.unwrap())
+        .collect()
+    };
     let mut c = library_from(&OLD.replace(line, REAL));
-    assert_ne!(columns(&c, "entities").unwrap(), ENTITY_COLUMNS);
+    assert_eq!(identities(&c), identities(&library()));
+    assert_eq!(identities(&c).len(), 4);
     let r = sync(&mut c).unwrap();
     assert!(r.committed, "{}", r.to_json());
-    assert_eq!(
-        c.query_row("SELECT sql FROM sqlite_master WHERE name='shadow_entities'", [], |x| x.get::<_, String>(0))
-            .unwrap(),
-        shadow_ddl(REAL.trim_end_matches(';'), "entities").unwrap()
-    );
-    let first = count(&c, "SELECT count(*) FROM term_verdicts");
-    assert!(sync(&mut c).unwrap().committed);
-    assert_eq!(count(&c, "SELECT count(*) FROM term_verdicts"), first);
-    // 列的集合不同（这里多一列）仍拒绝。
-    let mut c =
-        library_from(&OLD.replace(line, &REAL.replace(", mascot_origin TEXT", ", mascot_origin TEXT, extra TEXT")));
-    let r = sync(&mut c).unwrap();
-    assert!(!r.committed);
-    assert!(r.preflight.iter().any(|p| p["check"] == "旧表的列与收编约定不同"), "{:?}", r.preflight);
 }
 
 #[test]

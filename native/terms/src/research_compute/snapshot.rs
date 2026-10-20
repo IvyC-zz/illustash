@@ -31,8 +31,16 @@ impl Snapshot {
     pub fn resolve(c: &Connection, ident: &str) -> Result<String> {
         let mut ident = ident.to_owned();
         for _ in 0..16 {
-            let merged: Option<Option<String>> =
-                c.query_row("SELECT merged_into FROM entities WHERE id=?", [&ident], |r| r.get(0)).optional()?;
+            let merged: Option<Option<String>> = c
+                .query_row(
+                    &format!(
+                        "SELECT merged_into FROM {ENTITIES} WHERE id=?",
+                        ENTITIES = crate::character_entities::ENTITIES
+                    ),
+                    [&ident],
+                    |r| r.get(0),
+                )
+                .optional()?;
             match merged.flatten().filter(|s| !s.is_empty()) {
                 Some(next) => ident = next,
                 None => break,

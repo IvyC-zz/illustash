@@ -3,10 +3,11 @@
 //! 在真要新建的那一刻以 `Error::NeedId`（退出码 5，标准错误是这个 id 在命令里的 JSON 指针）要一个，调用方抽一个
 //! uuid 填进去再执行一次。这样调用方抽 uuid 的次数和先后与旧代码相同。
 use crate::character_commands::{begin_action, finish_action, hybrid, invalid, require_entity, text};
+use crate::character_entities::{self, New, ENTITIES, OF};
 use crate::character_labels::{lang_of, Shown};
 use crate::character_links::{check_free, core_system, LINKS};
 use crate::character_names::{strip, NEXT_SEQ, TERM_OF};
-use crate::{character_graph, character_names, character_projection, legacy_characters, Error, Result};
+use crate::{character_graph, character_names, character_projection, Error, Result};
 use rusqlite::{params, Connection, OptionalExtension};
 use serde_json::{json, Value};
 
@@ -15,7 +16,7 @@ pub fn tag_owner(c: &Connection, tag: &str, besides: Option<&str>) -> Result<Opt
     let row: Option<String> = c
         .query_row(
             &format!(
-                "SELECT l.entity_id FROM {LINKS} l JOIN entities e ON e.id = l.entity_id
+                "SELECT l.entity_id FROM {LINKS} l JOIN {ENTITIES} e ON e.id = l.entity_id
                  WHERE l.core_system IN ('danbooru', 'wd_character') AND l.key = ? AND l.current = 1 AND e.kind <> 'work'
                  ORDER BY l.system = 'wd'
                  LIMIT 1"
@@ -49,7 +50,7 @@ pub fn local_work(c: &Connection, keys: &[&str]) -> Result<Option<String>> {
             let row: Option<String> = c
                 .query_row(
                     &format!(
-                        "SELECT l.entity_id FROM {LINKS} l JOIN entities e ON e.id = l.entity_id
+                        "SELECT l.entity_id FROM {LINKS} l JOIN {ENTITIES} e ON e.id = l.entity_id
                          WHERE l.core_system = ? AND l.key = ? AND e.kind = 'work' AND e.merged_into IS NULL"
                     ),
                     [system, key],
@@ -74,21 +75,13 @@ pub fn new_id(given: &Value) -> Result<String> {
 }
 
 /// `Store._work_for`：已有的作品，否则按 Danbooru 版权新建一个链接好的作品（名字是调用方给的可读名）。
-pub fn work_for(
-    c: &Connection,
-    tag: &str,
-    copyright: &str,
-    readable: &str,
-    id: &Value,
-    created: &mut Vec<String>,
-) -> Result<Option<String>> {
+pub fn work_for(c: &Connection, tag: &str, copyright: &str, readable: &str, id: &Value) -> Result<Option<String>> {
     let work = local_work(c, &[copyright, qualifier(tag)])?;
     if work.is_some() || copyright.is_empty() {
         return Ok(work);
     }
     let work = new_id(id)?;
-    c.execute("INSERT INTO entities(id,name,kind) VALUES (?,'','work')", [&work])?;
-    legacy_characters::born(c, &work, "user")?;
+    character_entities::create(c, &New { id: &work, kind: "work", ..New::default() }, "user")?;
     c.execute(crate::character_review::OPEN, params![work, "confirmed", "从 Danbooru 角色的作品自动建立", 0])?;
     check_free(c, "danbooru", copyright)?;
     c.execute(
@@ -103,7 +96,6 @@ pub fn work_for(
         [copyright, &work],
     )?;
     character_names::put_name(c, &work, "en", "index", readable, "display", 0, 0)?;
-    created.push(work.clone());
     Ok(Some(work))
 }
 
@@ -120,26 +112,24 @@ pub fn set_work(c: &Connection, entity: &str, work: Option<&str>) -> Result<()> 
         None => None,
     };
     let text = key.unwrap_or_default();
-    c.execute("UPDATE entities SET work_id=?,work=? WHERE id=?", params![work, text, entity])?;
-    c.execute("UPDATE entities SET work=? WHERE parent_id=?", [&text, entity])?;
+    c.execute(&format!("UPDATE term_tree SET work_id=?2,work_text=?3 WHERE {OF}"), params![entity, work, text])?;
+    c.execute("UPDATE term_tree SET work_text=? WHERE parent_id=?", [&text, entity])?;
     Ok(())
 }
 
 /// works.require：未合并的作品。
 pub fn require_work(c: &Connection, ident: &str) -> Result<()> {
-    if c.query_row("SELECT 1 FROM entities WHERE id=? AND kind='work' AND merged_into IS NULL", [ident], |_| Ok(()))
-        .optional()?
-        .is_none()
+    if c.query_row(
+        &format!("SELECT 1 FROM {ENTITIES} WHERE id=? AND kind='work' AND merged_into IS NULL"),
+        [ident],
+        |_| Ok(()),
+    )
+    .optional()?
+    .is_none()
     {
         return invalid("作品不存在");
     }
     Ok(())
-}
-
-fn children(c: &Connection, entity: &str) -> Result<Vec<String>> {
-    Ok(c.prepare("SELECT id FROM entities WHERE parent_id=?")?
-        .query_map([entity], |r| r.get(0))?
-        .collect::<rusqlite::Result<_>>()?)
 }
 
 fn danbooru_links(c: &Connection, entity: &str) -> Result<Vec<Value>> {
@@ -164,7 +154,9 @@ fn danbooru_links(c: &Connection, entity: &str) -> Result<Vec<Value>> {
 
 fn snapshot(c: &Connection, entity: &str) -> Result<Value> {
     let (work, work_id): (String, Option<String>) =
-        c.query_row("SELECT work,work_id FROM entities WHERE id=?", [entity], |r| Ok((r.get(0)?, r.get(1)?)))?;
+        c.query_row(&format!("SELECT work,work_id FROM {ENTITIES} WHERE id=?"), [entity], |r| {
+            Ok((r.get(0)?, r.get(1)?))
+        })?;
     let links = danbooru_links(c, entity)?;
     let names: Vec<Value> = c
         .prepare(&format!(
@@ -188,13 +180,15 @@ fn snapshot(c: &Connection, entity: &str) -> Result<Value> {
 
 /// 一个角色的资料修改（`_apply_profile`）；返回它的撤销快照。p：name / aliases / work / tag / copyright /
 /// work_id（新建作品用的 id）。缺省的字段不改（Python 的 None）。
-fn apply(c: &Connection, p: &Value, touched: &mut Vec<String>) -> Result<Value> {
+fn apply(c: &Connection, p: &Value) -> Result<Value> {
     let (entity, parent) = require_entity(c, &p["entity"])?;
     if parent.is_some() {
         return invalid("请编辑角色本身，子标签跟随角色");
     }
     let (oc, mark): (i64, i64) =
-        c.query_row("SELECT original,label_only FROM entities WHERE id=?", [&entity], |r| Ok((r.get(0)?, r.get(1)?)))?;
+        c.query_row(&format!("SELECT original,label_only FROM {ENTITIES} WHERE id=?"), [&entity], |r| {
+            Ok((r.get(0)?, r.get(1)?))
+        })?;
     let before = snapshot(c, &entity)?;
     let tag = p.get("tag").filter(|v| !v.is_null());
     let work = p.get("work").filter(|v| !v.is_null());
@@ -247,7 +241,6 @@ fn apply(c: &Connection, p: &Value, touched: &mut Vec<String>) -> Result<Value> 
             character_names::put_name(c, &entity, "", "user", a, "alias", i as i64, 0)?;
         }
     }
-    let mut created = Vec::new();
     if let Some(tag) = tag {
         if mark != 0 {
             return invalid("未细分的原创角色不能关联 Danbooru");
@@ -273,11 +266,11 @@ fn apply(c: &Connection, p: &Value, touched: &mut Vec<String>) -> Result<Value> 
                 [tag, &entity],
             )?;
             let work_id: Option<String> =
-                c.query_row("SELECT work_id FROM entities WHERE id=?", [&entity], |r| r.get(0))?;
+                c.query_row(&format!("SELECT work_id FROM {ENTITIES} WHERE id=?"), [&entity], |r| r.get(0))?;
             if work.is_none() && oc == 0 && work_id.is_none() {
                 let copyright = p["copyright"].as_str().unwrap_or("");
                 let readable = crate::names_view::readable(copyright, false);
-                let w = work_for(c, tag, copyright, &readable, &p["work_id"], &mut created)?;
+                let w = work_for(c, tag, copyright, &readable, &p["work_id"])?;
                 set_work(c, &entity, w.as_deref())?;
             }
         }
@@ -292,9 +285,6 @@ fn apply(c: &Connection, p: &Value, touched: &mut Vec<String>) -> Result<Value> 
         }
         set_work(c, &entity, work)?;
     }
-    touched.push(entity.clone());
-    touched.extend(children(c, &entity)?);
-    touched.extend(created);
     Ok(before)
 }
 
@@ -309,15 +299,13 @@ pub fn changed(c: &Connection) -> Result<()> {
 }
 
 pub fn set_profile(c: &Connection, args: &Value) -> Result<Value> {
-    let mut touched = Vec::new();
-    let before = apply(c, args, &mut touched).map_err(|e| match e {
+    let before = apply(c, args).map_err(|e| match e {
         Error::NeedId(_) => Error::NeedId("/work_id".into()),
         e => e,
     })?;
     // 文案用改完之后的名字（旧代码在写完之后读 entity_name）。
     let shown = Shown::new().name(c, text(&before["profile"]["entity"], "资料快照不完整")?)?;
     let action = begin_action(c, &format!("已更新 {shown} 的资料"))?;
-    legacy_characters::mirror_state(c, &touched, "user")?;
     if args.get("tag").is_some_and(|t| !t.is_null()) {
         changed(c)?;
     }
@@ -332,7 +320,6 @@ pub fn link_local(c: &Connection, args: &Value) -> Result<Value> {
     };
     let action = begin_action(c, &format!("已把 {n} 个自建角色关联到 Danbooru", n = items.len()))?;
     let mut before = Vec::new();
-    let mut touched = Vec::new();
     for (i, item) in items.iter().enumerate() {
         let entity = crate::character_commands::resolve(c, text(&item["id"], "请选择角色")?)?;
         let values = |sql: &str| -> Result<Vec<String>> {
@@ -349,12 +336,11 @@ pub fn link_local(c: &Connection, args: &Value) -> Result<Value> {
         p["entity"] = item["id"].clone();
         p["name"] = json!("");
         p["aliases"] = json!(kept.into_iter().chain(typed).collect::<Vec<_>>());
-        before.push(apply(c, &p, &mut touched).map_err(|e| match e {
+        before.push(apply(c, &p).map_err(|e| match e {
             Error::NeedId(_) => Error::NeedId(format!("/items/{i}/work_id")),
             e => e,
         })?);
     }
-    legacy_characters::mirror_state(c, &touched, "user")?;
     changed(c)?;
     let ids: Vec<Value> = before.iter().map(|b| b["profile"]["entity"].clone()).collect();
     finish_action(c, action, "profile", before)?;
@@ -390,16 +376,15 @@ pub fn undo(c: &Connection, p: &Value) -> Result<bool> {
         }
     }
     c.execute(
-        "UPDATE entities SET work=?1,work_id=?2 WHERE id=?3 AND (work IS NOT ?1 OR work_id IS NOT ?2)",
-        params![p["work"].as_str(), p["work_id"].as_str(), entity],
+        &format!(
+            "UPDATE term_tree SET work_text=?2,work_id=?3 WHERE {OF} AND (work_text IS NOT ?2 OR work_id IS NOT ?3)"
+        ),
+        params![entity, p["work"].as_str(), p["work_id"].as_str()],
     )?;
     c.execute(
-        "UPDATE entities SET work=?1 WHERE parent_id=?2 AND work IS NOT ?1",
+        "UPDATE term_tree SET work_text=?1 WHERE parent_id=?2 AND work_text IS NOT ?1",
         params![p["work"].as_str(), entity],
     )?;
-    let mut ids = vec![entity.to_owned()];
-    ids.extend(children(c, entity)?);
-    legacy_characters::mirror_state(c, &ids, "user")?;
     Ok(links_changed)
 }
 

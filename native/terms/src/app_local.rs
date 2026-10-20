@@ -139,9 +139,9 @@ fn projected_counts(c: &Connection) -> Result<Json> {
         .prepare(
             &format!(
             "WITH active(id) AS (SELECT entity FROM memberships UNION SELECT entity FROM candidates
-               UNION SELECT parent_id FROM entities WHERE id IN (SELECT entity FROM memberships UNION SELECT entity FROM candidates)
+               UNION SELECT parent_id FROM {ENTITIES} WHERE id IN (SELECT entity FROM memberships UNION SELECT entity FROM candidates)
                 AND parent_id IS NOT NULL),
-             shown AS MATERIALIZED (SELECT e.id,e.parent_id,coalesce(e.work,'') AS work,coalesce(e.variant,'') AS variant FROM entities e
+             shown AS MATERIALIZED (SELECT e.id,e.parent_id,coalesce(e.work,'') AS work,coalesce(e.variant,'') AS variant FROM {ENTITIES} e
                WHERE e.id IN active AND e.merged_into IS NULL AND e.kind NOT IN ('oc','work') AND coalesce(e.original,0)=0
                 AND EXISTS(SELECT 1 FROM {LINKS} l WHERE l.entity_id=e.id AND l.current=1)),
              keys(kind,key) AS (SELECT 'character',d.tag FROM shown s JOIN term_name_display d ON d.entity=s.id AND d.skin_only=0
@@ -151,7 +151,8 @@ fn projected_counts(c: &Connection) -> Result<Json> {
              SELECT k.kind,count(*),coalesce(sum(coalesce(ch.zh,'')<>''),0),coalesce(sum(coalesce(ch.ja,'')<>''),0),
               coalesce(sum(ch.name_source='readable'),0),json_group_array(k.key) FILTER (WHERE ch.kind IS NULL)
              FROM keys k LEFT JOIN term_name_choice ch ON ch.kind=k.kind AND ch.key=k.key GROUP BY k.kind",
-            LINKS = crate::character_links::LINKS
+            LINKS = crate::character_links::LINKS,
+            ENTITIES = crate::character_entities::ENTITIES
         ),
         )?
         .query_map([], |r| Ok((r.get(0)?, (r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?))))?
@@ -173,7 +174,15 @@ fn projected_counts(c: &Connection) -> Result<Json> {
 /// The counts from one library-wide load (#102): names not yet in the core, or a projection that is behind the name
 /// tables. Also the reference for the projected counts under the incremental check.
 fn loaded_counts(c: &Connection) -> Result<Json> {
-    let active:HashSet<_>=strings(c,"SELECT entity FROM memberships UNION SELECT entity FROM candidates UNION SELECT parent_id FROM entities WHERE id IN (SELECT entity FROM memberships UNION SELECT entity FROM candidates) AND parent_id IS NOT NULL",&[])?.into_iter().collect();
+    let sql = format!(
+        "SELECT entity FROM memberships
+         UNION SELECT entity FROM candidates
+         UNION SELECT parent_id
+         FROM {ENTITIES}
+         WHERE id IN (SELECT entity FROM memberships UNION SELECT entity FROM candidates) AND parent_id IS NOT NULL",
+        ENTITIES = crate::character_entities::ENTITIES
+    );
+    let active: HashSet<_> = strings(c, &sql, &[])?.into_iter().collect();
     let view = crate::names_view::View::load_with_work(c)?;
     let mut keys: [HashSet<String>; 3] = Default::default();
     for e in view.identities() {
@@ -273,17 +282,20 @@ mod tests {
         let tx = c.transaction().unwrap();
         crate::schema::begin_writing(&tx).unwrap();
         tx.execute_batch(
-            "INSERT INTO entities(id,name,work,variant,parent_id,merged_into,kind,original) VALUES
-              ('tagless','','Example','',NULL,NULL,'character',0),('hidden','','Other','',NULL,NULL,'character',0),
-              ('skin1','','Example','swimsuit','tagless',NULL,'skin',0),('skin2','','','outfit_x','tagless',NULL,'skin',0),
-              ('merged','','Example','',NULL,'tagless','character',0),('own','','Mine','',NULL,NULL,'character',1),
-              ('loose','','Loose','',NULL,NULL,'character',0),('idle','','Idle','',NULL,NULL,'character',0);
-             -- The identities become terms, as the commands that create them do (`legacy_characters::born`).
-             INSERT INTO terms(key,kind,origin) SELECT id,kind,'user' FROM entities
-              WHERE id IN ('tagless','hidden','skin1','skin2','merged','own','loose','idle') ORDER BY rowid;
-             INSERT INTO term_tree(term_id,parent_id,merged_into,work_id,work_text)
-              SELECT t.id,e.parent_id,e.merged_into,e.work_id,e.work FROM entities e JOIN terms t ON t.key=e.id
-              WHERE e.id IN ('tagless','hidden','skin1','skin2','merged','own','loose','idle');
+            "CREATE TEMP TABLE added(n INTEGER PRIMARY KEY,id TEXT,work TEXT,variant TEXT,parent_id TEXT,merged_into TEXT,
+              kind TEXT,original INTEGER);
+             INSERT INTO added(id,work,variant,parent_id,merged_into,kind,original) VALUES
+              ('tagless','Example','',NULL,NULL,'character',0),('hidden','Other','',NULL,NULL,'character',0),
+              ('skin1','Example','swimsuit','tagless',NULL,'skin',0),('skin2','','outfit_x','tagless',NULL,'skin',0),
+              ('merged','Example','',NULL,'tagless','character',0),('own','Mine','',NULL,NULL,'character',1),
+              ('loose','Loose','',NULL,NULL,'character',0),('idle','Idle','',NULL,NULL,'character',0);
+             -- New identities: a term and its row in `term_tree`, as the commands make them (`character_entities::create`).
+             INSERT INTO terms(key,kind,origin) SELECT id,kind,'user' FROM added ORDER BY n;
+             INSERT INTO term_tree(term_id,parent_id,merged_into,work_text,variant,original,seq)
+              SELECT t.id,a.parent_id,a.merged_into,a.work,a.variant,a.original,
+               (SELECT coalesce(max(seq),0) FROM term_tree)+a.n
+              FROM added a JOIN terms t ON t.key=a.id ORDER BY a.n;
+             DROP TABLE added;
              INSERT INTO term_links(system,key,term_id,current,source,added_at) VALUES
               ('bangumi','tagless',(SELECT id FROM terms WHERE key='tagless'),1,'import','2026-10-07 06:00:00'),
               -- (No empty-key link: `term_links` keys are 1–256 characters, as the mirror required before.)

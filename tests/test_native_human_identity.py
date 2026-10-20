@@ -79,7 +79,7 @@ class NativeHumanIdentityTest(unittest.TestCase):
         self.pair('/api/merge', {'source':self.alice,'target':self.bob})
         self.undo_latest(); self.undo_latest()
         with closing(sqlite3.connect(self.right.db)) as c:
-            self.assertEqual(c.execute('SELECT count(*) FROM entities WHERE merged_into IS NOT NULL').fetchone()[0], 0)
+            self.assertEqual(c.execute('SELECT count(*) FROM term_tree WHERE merged_into IS NOT NULL').fetchone()[0], 0)
 
     def test_no_policy_merge_moves_children_assertions_names_pins_and_undo(self):
         before = labels.snapshot(self.right.db)
@@ -91,8 +91,8 @@ class NativeHumanIdentityTest(unittest.TestCase):
             with closing(sqlite3.connect(lib.db)) as c: c.execute('DROP TRIGGER fail_merge'); c.commit()
         self.pair('/api/merge', {'source':self.bob,'target':self.alice})
         with closing(sqlite3.connect(self.right.db)) as c:
-            self.assertEqual(c.execute('SELECT merged_into FROM entities WHERE id=?', (self.bob,)).fetchone()[0], self.alice)
-            self.assertEqual(c.execute('SELECT parent_id FROM entities WHERE id=?', (self.variant,)).fetchone()[0], self.alice)
+            self.assertEqual(c.execute('SELECT r.merged_into FROM term_tree r JOIN terms t ON t.id=r.term_id WHERE t.key=?', (self.bob,)).fetchone()[0], self.alice)
+            self.assertEqual(c.execute('SELECT r.parent_id FROM term_tree r JOIN terms t ON t.id=r.term_id WHERE t.key=?', (self.variant,)).fetchone()[0], self.alice)
         # A previously merged source resolves to its surviving role; undo the chain in order.
         self.pair('/api/merge', {'source':self.bob,'target':self.alice}, expected=400)
         self.pair('/api/merge', {'source':self.bob,'target':self.third})
@@ -100,7 +100,7 @@ class NativeHumanIdentityTest(unittest.TestCase):
         self.undo_latest()
         after = labels.snapshot(self.right.db)
         # Physical restoration is compared to the real reference after undo, not assumed identical to pre-merge rowids.
-        for table in ('entities','prefs'):
+        for table in ('terms','term_tree','prefs'):
             self.assertEqual(before[table], after[table],table)
         self.pair('/api/merge', {'source':self.bob,'target':self.bob}, expected=400)
         self.pair('/api/merge', {'source':self.variant,'target':self.alice}, expected=400)

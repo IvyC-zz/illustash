@@ -238,7 +238,25 @@ pub(crate) fn request(c: &mut Connection, body: &Json, path: &str, prepared: Opt
                 }
                 name.into()
             };
-            let rows = http_read::rows(&tx,&format!("SELECT e.id,entity_name(e.id) AS name,e.kind,e.artist FROM entities e WHERE e.parent_id IS NULL AND e.kind<>'work' AND e.merged_into IS NULL AND (e.id IN (SELECT l.entity_id FROM {LINKS} l WHERE l.core_system IN ('danbooru','wd_character') AND l.key=? COLLATE NOCASE) OR e.id IN (SELECT t.key FROM term_names n JOIN terms t ON t.id = n.term_id WHERE n.value = ? COLLATE NOCASE AND n.role = 'alias') OR (e.id IN (SELECT t.key FROM term_names n JOIN terms t ON t.id = n.term_id WHERE n.value = ? COLLATE NOCASE AND n.source = 'user') AND NOT EXISTS(SELECT 1 FROM {LINKS} l WHERE l.entity_id=e.id)))", LINKS = crate::character_links::LINKS),&[&name,&name,&name])?;
+            let sql = format!(
+                "SELECT e.id,entity_name(e.id) AS name,e.kind,e.artist
+                 FROM {ENTITIES} e
+                 WHERE e.parent_id IS NULL AND e.kind<>'work' AND e.merged_into IS NULL
+                   AND (e.id IN (
+                          SELECT l.entity_id FROM {LINKS} l
+                          WHERE l.core_system IN ('danbooru','wd_character') AND l.key=? COLLATE NOCASE)
+                        OR e.id IN (
+                          SELECT t.key FROM term_names n JOIN terms t ON t.id = n.term_id
+                          WHERE n.value = ? COLLATE NOCASE AND n.role = 'alias')
+                        OR (e.id IN (
+                              SELECT t.key FROM term_names n JOIN terms t ON t.id = n.term_id
+                              WHERE n.value = ? COLLATE NOCASE AND n.source = 'user')
+                            AND NOT EXISTS(SELECT 1 FROM {LINKS} l WHERE l.entity_id=e.id)))
+                 ORDER BY e.seq",
+                ENTITIES = crate::character_entities::ENTITIES,
+                LINKS = crate::character_links::LINKS
+            );
+            let rows = http_read::rows(&tx, &sql, &[&name, &name, &name])?;
             if let Some(row) = rows.into_iter().next() {
                 let result = http_read::display(&tx, row)?;
                 crate::schema::commit_writing(tx)?;
@@ -261,7 +279,15 @@ pub(crate) fn request(c: &mut Connection, body: &Json, path: &str, prepared: Opt
             )
         }
         "/api/oc/shared" => {
-            let rows=http_read::rows(&tx,"SELECT e.id,entity_name(e.id) AS name,e.kind,e.artist FROM entities e WHERE label_only=1 AND merged_into IS NULL ORDER BY rowid LIMIT 1",&[])?;
+            let sql = format!(
+                "SELECT e.id,entity_name(e.id) AS name,e.kind,e.artist
+                 FROM {ENTITIES} e
+                 WHERE label_only=1 AND merged_into IS NULL
+                 ORDER BY seq
+                 LIMIT 1",
+                ENTITIES = crate::character_entities::ENTITIES
+            );
+            let rows = http_read::rows(&tx, &sql, &[])?;
             if let Some(row) = rows.into_iter().next() {
                 let result = http_read::display(&tx, row)?;
                 crate::schema::commit_writing(tx)?;

@@ -5,6 +5,7 @@
 //! 由有效证据算出；相册结论是 album 批次上的裁决，照旧只在没有结论时写。
 //! 前提：标签已切到核心（`general_hits`、`asset_rating` 是视图，跟着 `assets` 走），角色切换时检查。
 use crate::character_commands::{hybrid, resolve, verdict, At};
+use crate::character_entities::{self, New, ENTITIES, OF};
 use crate::character_evidence::{publish, Scope};
 use crate::character_links::{check_free, core_system, LINKS};
 use crate::character_names::TERM_OF;
@@ -73,32 +74,21 @@ fn link(c: &Connection, entity: &str, system: &str, key: &str) -> Result<()> {
 }
 
 /// `Store._entity`：链接到 (system, key) 的身份；没有就新建一个带这个链接的人物。
-fn entity(
-    c: &Connection,
-    ids: &Ids,
-    touched: &mut BTreeSet<String>,
-    system: &str,
-    key: &str,
-    name: &str,
-    work: &str,
-) -> Result<String> {
+fn entity(c: &Connection, ids: &Ids, system: &str, key: &str, name: &str, work: &str) -> Result<String> {
     if let Some(found) = linked(c, system, key)? {
         return Ok(found);
     }
     let ident = ids.get(system, key)?;
-    c.prepare_cached(&format!(
-        "INSERT INTO entities(id, name, work, kind, work_id)
-         VALUES (?, '', ?, 'character', (SELECT l.entity_id FROM {LINKS} l WHERE l.core_system = 'qualifier' AND l.key = ?))"
-    ))?
-    .execute(
-        [&ident, work, work],
-    )?;
-    legacy_characters::born(c, &ident, "legacy:characters")?;
+    let work_id: Option<String> = c
+        .prepare_cached(&format!("SELECT l.entity_id FROM {LINKS} l WHERE l.core_system = 'qualifier' AND l.key = ?"))?
+        .query_row([work], |r| r.get(0))
+        .optional()?;
+    let new = New { id: &ident, kind: "character", work, work_id: work_id.as_deref(), ..New::default() };
+    character_entities::create(c, &new, legacy_characters::ORIGIN)?;
     link(c, &ident, system, key)?;
     if !name.is_empty() && name != key {
         character_names::alias(c, &ident, name, "index", "")?;
     }
-    touched.insert(ident.clone());
     Ok(ident)
 }
 
@@ -107,7 +97,7 @@ fn entity(
 type Chars = HashMap<String, String>;
 type Wd = HashMap<String, BTreeSet<String>>;
 
-fn characters(c: &Connection, index: &Value, touched: &mut BTreeSet<String>) -> Result<(Chars, Wd)> {
+fn characters(c: &Connection, index: &Value) -> Result<(Chars, Wd)> {
     let ids = Ids(&index["new_ids"]);
     let identity = hybrid(c)?;
     let rows = index["characters"].as_array().cloned().unwrap_or_default();
@@ -115,11 +105,10 @@ fn characters(c: &Connection, index: &Value, touched: &mut BTreeSet<String>) -> 
     for r in &rows {
         let char_id = s(&r["char_id"]).ok_or_else(|| Error::Invalid("索引角色缺少 char_id".into()))?;
         let name = s(&r["name_zh"]).or(s(&r["name_ja"])).or(s(&r["name_en"])).unwrap_or(char_id);
-        let ident = entity(c, &ids, touched, "ccip", char_id, name, r["copyright"].as_str().unwrap_or(""))?;
+        let ident = entity(c, &ids, "ccip", char_id, name, r["copyright"].as_str().unwrap_or(""))?;
         if !identity {
-            c.prepare_cached("UPDATE entities SET variant=? WHERE id=?")?
-                .execute([s(&r["skin"]).unwrap_or(""), &ident])?;
-            touched.insert(ident.clone());
+            c.prepare_cached(&format!("UPDATE term_tree SET variant=?2 WHERE {OF}"))?
+                .execute([&ident, s(&r["skin"]).unwrap_or("")])?;
         }
         chars.insert(char_id.to_owned(), ident.clone());
         if let Some(tag) = s(&r["wd_tag"]) {
@@ -132,13 +121,12 @@ fn characters(c: &Connection, index: &Value, touched: &mut BTreeSet<String>) -> 
             }
         }
     }
-    hierarchy(c, &rows, &ids, touched)?;
+    hierarchy(c, &rows, &ids)?;
     for t in index["tags"].as_array().into_iter().flatten() {
         let (Some(char_id), Some(tag)) = (t[0].as_str(), t[1].as_str()) else { continue };
         if let Some(ident) = linked(c, "ccip", char_id)? {
             link(c, &ident, "danbooru", tag)?;
             character_names::alias(c, &ident, tag, "index", "")?;
-            touched.insert(ident);
         }
     }
     for a in index["aliases"].as_array().into_iter().flatten() {
@@ -147,32 +135,26 @@ fn characters(c: &Connection, index: &Value, touched: &mut BTreeSet<String>) -> 
             character_names::alias(c, ident, value, "index", "")?;
         }
     }
-    default_tags(c, touched)?;
+    default_tags(c)?;
     Ok((chars, wd))
 }
 
 /// `Store._default_tags`。
-pub fn default_tags(c: &Connection, touched: &mut BTreeSet<String>) -> Result<usize> {
+pub fn default_tags(c: &Connection) -> Result<usize> {
     let marks = vec!["?"; DEFAULT_TAG_KEYS.len()].join(",");
-    let changed: Vec<String> = c
+    let n = c
         .prepare_cached(&format!(
-            "SELECT id FROM entities WHERE mascot_origin IS NULL AND mascot=0 AND parent_id IS NULL AND merged_into IS NULL AND kind<>'work'
-              AND id IN (SELECT l.entity_id FROM {LINKS} l WHERE l.key IN ({marks}))"
+            "UPDATE term_tree SET mascot = 1, mascot_origin = 'default'
+             WHERE mascot_origin IS NULL AND mascot = 0 AND parent_id IS NULL AND merged_into IS NULL
+               AND term_id IN (SELECT id FROM terms WHERE kind <> 'work')
+               AND term_id IN (SELECT x.term_id FROM term_links x WHERE x.key IN ({marks}))"
         ))?
-        .query_map(params_from_iter(DEFAULT_TAG_KEYS), |r| r.get(0))?
-        .collect::<rusqlite::Result<_>>()?;
-    let n = c.prepare_cached(&format!(
-            "UPDATE entities SET mascot=1,mascot_origin='default' WHERE mascot_origin IS NULL AND mascot=0
-              AND parent_id IS NULL AND merged_into IS NULL AND kind<>'work' AND id IN (SELECT l.entity_id FROM {LINKS} l WHERE l.key IN ({marks}))"
-        ))?.execute(
-        params_from_iter(DEFAULT_TAG_KEYS),
-    )?;
-    touched.extend(changed);
+        .execute(params_from_iter(DEFAULT_TAG_KEYS))?;
     Ok(n)
 }
 
 /// `Store._hierarchy`（策略未设置与 hybrid；hybrid 下只给索引里新出现的角色套名字规则，再进基线）。
-fn hierarchy(c: &Connection, rows: &[Value], ids: &Ids, touched: &mut BTreeSet<String>) -> Result<()> {
+fn hierarchy(c: &Connection, rows: &[Value], ids: &Ids) -> Result<()> {
     let identity = hybrid(c)?;
     let known: Option<BTreeSet<String>> = if identity {
         Some(
@@ -221,7 +203,7 @@ fn hierarchy(c: &Connection, rows: &[Value], ids: &Ids, touched: &mut BTreeSet<S
             let p = by_id[matches[0].as_str()];
             let char_id = p["char_id"].as_str().unwrap_or("");
             let name = s(&p["name_zh"]).or(s(&p["name_ja"])).or(s(&p["name_en"])).unwrap_or(char_id);
-            entity(c, ids, touched, "ccip", char_id, name, &key.1)?
+            entity(c, ids, "ccip", char_id, name, &key.1)?
         } else {
             let char_id = text(&r["char_id"]);
             let base = match &key.0 {
@@ -230,17 +212,16 @@ fn hierarchy(c: &Connection, rows: &[Value], ids: &Ids, touched: &mut BTreeSet<S
             };
             let base = character_json::dump(&base, false);
             let name = key.0.clone().unwrap_or(char_id.clone());
-            entity(c, ids, touched, "ccip_base", &base, &name, &key.1)?
+            entity(c, ids, "ccip_base", &base, &name, &key.1)?
         };
         let parent = resolve(c, &parent)?;
-        c.prepare_cached("UPDATE entities SET parent_id=?,variant=?,kind='skin',work_id=NULL WHERE id=?")?
-            .execute(params![parent, skin, child])?;
-        touched.insert(child);
+        c.prepare_cached(&format!("UPDATE term_tree SET parent_id=?2,variant=?3,work_id=NULL WHERE {OF}"))?
+            .execute(params![child, parent, skin])?;
+        c.prepare_cached("UPDATE terms SET kind='skin' WHERE key=? AND kind IS NOT 'skin'")?.execute([&child])?;
     }
     if identity {
         let before: i64 =
             c.prepare_cached("SELECT count(*) FROM term_identity_baseline")?.query_row([], |r| r.get(0))?;
-        legacy_characters::mirror_state(c, &touched.iter().cloned().collect::<Vec<_>>(), "legacy:characters")?;
         character_graph::baseline(c)?;
         let after: i64 =
             c.prepare_cached("SELECT count(*) FROM term_identity_baseline")?.query_row([], |r| r.get(0))?;
@@ -254,14 +235,7 @@ fn hierarchy(c: &Connection, rows: &[Value], ids: &Ids, touched: &mut BTreeSet<S
 // ---- 候选与相册 ----
 
 /// `Store._candidate`：一条源标签 → (图, 身份, WD / CCIP, 分数)。
-fn candidate(
-    c: &Connection,
-    ids: &Ids,
-    touched: &mut BTreeSet<String>,
-    row: &Value,
-    chars: &Chars,
-    wd: &Wd,
-) -> Result<(String, String, String, f64)> {
+fn candidate(c: &Connection, ids: &Ids, row: &Value, chars: &Chars, wd: &Wd) -> Result<(String, String, String, f64)> {
     let uuid = row[0].as_str().unwrap_or("").to_owned();
     let value = row[1].as_str().unwrap_or("");
     let conf = row[2].as_f64().ok_or_else(|| Error::Invalid("候选分数不是数".into()))?;
@@ -269,7 +243,7 @@ fn candidate(
     let ident = if dim == "char_ext" {
         match chars.get(value) {
             Some(i) => i.clone(),
-            None => entity(c, ids, touched, "ccip", value, value, "")?,
+            None => entity(c, ids, "ccip", value, value, "")?,
         }
     } else {
         let matches = wd.get(value);
@@ -279,7 +253,7 @@ fn candidate(
                 Some(i) => i,
                 None => match linked(c, "danbooru", value)? {
                     Some(i) => i,
-                    None => entity(c, ids, touched, "wd", value, value, "")?,
+                    None => entity(c, ids, "wd", value, value, "")?,
                 },
             },
         }
@@ -293,7 +267,6 @@ type Rows = BTreeMap<(String, String, String), f64>;
 fn candidates(
     c: &Connection,
     ids: &Ids,
-    touched: &mut BTreeSet<String>,
     labels: &Value,
     chars: &Chars,
     wd: &Wd,
@@ -304,7 +277,7 @@ fn candidates(
         if only.is_some_and(|o| !o.contains(row[0].as_str().unwrap_or(""))) {
             continue;
         }
-        let (u, e, src, score) = candidate(c, ids, touched, row, chars, wd)?;
+        let (u, e, src, score) = candidate(c, ids, row, chars, wd)?;
         // INSERT_CANDIDATE：同键取最大。
         let slot = out.entry((u, e, src)).or_insert(score);
         *slot = slot.max(score);
@@ -334,15 +307,7 @@ impl Album<'_> {
 }
 
 /// `Store._import_decision`：相册成员只在第一次导入时变成一次人工确认；之后移出相册不会撤掉它。
-fn decision(
-    c: &Connection,
-    ids: &Ids,
-    touched: &mut BTreeSet<String>,
-    album: &mut Album,
-    row: &Value,
-    map: &Value,
-    chars: &Chars,
-) -> Result<()> {
+fn decision(c: &Connection, ids: &Ids, album: &mut Album, row: &Value, map: &Value, chars: &Chars) -> Result<()> {
     let (Some(uuid), Some(value)) = (row[0].as_str(), row[1].as_str()) else { return Ok(()) };
     if c.prepare_cached("SELECT 1 FROM imported WHERE uuid=? AND value=?")?
         .query_row([uuid, value], |_| Ok(()))
@@ -354,21 +319,19 @@ fn decision(
     let spec = &map[value];
     let ident = match spec["char_id"].as_str().and_then(|k| chars.get(k)) {
         Some(i) => i.clone(),
-        None => entity(c, ids, touched, "photos_album", value, s(&spec["album_name_ja"]).unwrap_or(value), "")?,
+        None => entity(c, ids, "photos_album", value, s(&spec["album_name_ja"]).unwrap_or(value), "")?,
     };
     let ident = resolve(c, &ident)?;
     let ident: String = c
-        .prepare_cached("SELECT coalesce(parent_id,id) FROM entities WHERE id=?")?
+        .prepare_cached(&format!("SELECT coalesce(parent_id,id) FROM {ENTITIES} WHERE id=?"))?
         .query_row([&ident], |r| r.get(0))?;
     character_names::alias(c, &ident, value, "album", "")?;
-    touched.insert(ident.clone());
     if c.prepare_cached("INSERT OR IGNORE INTO assertions VALUES (?,?,'confirmed','album')")?.execute([uuid, &ident])?
         > 0
     {
         if hybrid(c)? {
             crate::character_commands::scope_on_insert(c, uuid, &ident)?;
         }
-        legacy_characters::mirror_state(c, std::slice::from_ref(&ident), "legacy:characters")?;
         let at = album.at()?;
         verdict(c, at, uuid, &ident, "yes", "album")?;
     }
@@ -466,34 +429,27 @@ fn indexed(c: &Connection, args: &Value) -> Result<()> {
     Ok(())
 }
 
-fn finish_entities(c: &Connection, touched: &BTreeSet<String>) -> Result<()> {
-    legacy_characters::mirror_state(c, &touched.iter().cloned().collect::<Vec<_>>(), "legacy:characters")
-}
-
 // ---- 命令 ----
 
 /// `Store.refresh` 的事务部分。App 先交 WD，再以 finalize_labels 一次生成最终派生；旧调用方仍可单独 rederive。
 fn refresh(c: &Connection, args: &Value) -> Result<Value> {
-    let mut touched = BTreeSet::new();
-    let (chars, wd) = characters(c, &args["index"], &mut touched)?;
+    let (chars, wd) = characters(c, &args["index"])?;
     let ids = Ids(&args["index"]["new_ids"]);
     c.prepare_cached("DELETE FROM assets")?.execute([])?;
     insert_assets(c, &args["assets"])?;
     let valid: BTreeSet<String> =
         c.prepare_cached("SELECT uuid FROM assets")?.query_map([], |r| r.get(0))?.collect::<rusqlite::Result<_>>()?;
     duplicates(c, &args["duplicates"])?;
-    let rows = candidates(c, &ids, &mut touched, &args["labels"], &chars, &wd, Some(&valid))?;
-    finish_entities(c, &touched)?;
+    let rows = candidates(c, &ids, &args["labels"], &chars, &wd, Some(&valid))?;
     publish(c, &format!("refresh:{}", args["indexed"].as_str().unwrap_or("")), Scope::All, &rows)?;
     c.prepare_cached("DELETE FROM candidates")?.execute([])?;
     legacy_characters::refresh_candidates(c, &valid.iter().cloned().collect::<Vec<_>>())?;
     let mut album = Album { c, batch: None };
     for r in args["decisions"].as_array().into_iter().flatten() {
         if valid.contains(r[0].as_str().unwrap_or("")) {
-            decision(c, &ids, &mut touched, &mut album, r, &args["album_map"], &chars)?;
+            decision(c, &ids, &mut album, r, &args["album_map"], &chars)?;
         }
     }
-    finish_entities(c, &touched)?;
     character_projection::evidence(c, None)?;
     if args["finalize_labels"].as_bool() == Some(true) {
         rederive(c, args)?;
@@ -507,8 +463,7 @@ fn refresh(c: &Connection, args: &Value) -> Result<Value> {
 
 /// `Store.reindex_characters`。
 fn reindex(c: &Connection, args: &Value) -> Result<Value> {
-    let mut touched = BTreeSet::new();
-    let (chars, wd) = characters(c, &args["index"], &mut touched)?;
+    let (chars, wd) = characters(c, &args["index"])?;
     let ids = Ids(&args["index"]["new_ids"]);
     let known: BTreeSet<String> =
         c.prepare_cached("SELECT uuid FROM assets")?.query_map([], |r| r.get(0))?.collect::<rusqlite::Result<_>>()?;
@@ -519,8 +474,7 @@ fn reindex(c: &Connection, args: &Value) -> Result<Value> {
         }
     }
     let scope: BTreeSet<String> = uuids.iter().cloned().collect();
-    let rows = candidates(c, &ids, &mut touched, &args["labels"], &chars, &wd, Some(&scope))?;
-    finish_entities(c, &touched)?;
+    let rows = candidates(c, &ids, &args["labels"], &chars, &wd, Some(&scope))?;
     publish(c, &format!("reindex:{}", args["indexed"].as_str().unwrap_or("")), Scope::Assets(&uuids), &rows)?;
     legacy_characters::refresh_candidates(c, &uuids)?;
     character_projection::evidence(c, Some(&uuids))?;
@@ -533,7 +487,6 @@ fn reindex(c: &Connection, args: &Value) -> Result<Value> {
 
 /// `Store._import_changes`（标签已在核心：general_hits、asset_rating 是视图，不另写）。
 fn import(c: &Connection, args: &Value) -> Result<Value> {
-    let mut touched_entities = BTreeSet::new();
     let ids = Ids(&args["new_ids"]);
     let chars: Chars = c
         .prepare_cached(&format!("SELECT l.key, l.entity_id FROM {LINKS} l WHERE l.core_system = 'ccip'"))?
@@ -558,8 +511,7 @@ fn import(c: &Connection, args: &Value) -> Result<Value> {
     }
     insert_assets(c, &Value::Array(rows))?;
     let only: BTreeSet<String> = added.iter().cloned().collect();
-    let found = candidates(c, &ids, &mut touched_entities, &args["labels"], &chars, &wd, Some(&only))?;
-    finish_entities(c, &touched_entities)?;
+    let found = candidates(c, &ids, &args["labels"], &chars, &wd, Some(&only))?;
     let mut scope: Vec<String> = both.clone();
     let mut seen = BTreeSet::new();
     scope.retain(|u| seen.insert(u.clone()));
@@ -568,10 +520,9 @@ fn import(c: &Connection, args: &Value) -> Result<Value> {
     let mut album = Album { c, batch: None };
     for r in args["decisions"].as_array().into_iter().flatten() {
         if only.contains(r[0].as_str().unwrap_or("")) {
-            decision(c, &ids, &mut touched_entities, &mut album, r, &args["album_map"], &chars)?;
+            decision(c, &ids, &mut album, r, &args["album_map"], &chars)?;
         }
     }
-    finish_entities(c, &touched_entities)?;
     duplicates(c, &args["duplicates"])?;
     character_projection::evidence(c, Some(&added))?;
     character_projection::single(c, Some(&added))?;
@@ -604,9 +555,7 @@ fn rederive(c: &Connection, args: &Value) -> Result<Value> {
 
 /// 启动时的 `_default_tags`（Python 的迁移跳过核心的表后，改由核心执行）。
 fn defaults(c: &Connection) -> Result<Value> {
-    let mut touched = BTreeSet::new();
-    let n = default_tags(c, &mut touched)?;
-    finish_entities(c, &touched)?;
+    let n = default_tags(c)?;
     Ok(json!({"changed": n}))
 }
 
@@ -627,7 +576,7 @@ pub fn legacy_hierarchy(c: &Connection, index: &Value) -> Result<()> {
         return Err(Error::Schema("早期应用版本与 hybrid 标记不兼容".into()));
     }
     let rows = index["characters"].as_array().cloned().unwrap_or_default();
-    hierarchy(c, &rows, &Ids(&json!({})), &mut BTreeSet::new())?;
+    hierarchy(c, &rows, &Ids(&json!({})))?;
     for row in index["tags"].as_array().into_iter().flatten() {
         if let (Some(key), Some(tag)) = (row[0].as_str(), row[1].as_str()) {
             if let Some(id) = linked(c, "ccip", key)? {

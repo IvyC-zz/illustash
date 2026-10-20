@@ -137,6 +137,14 @@ fn a_consistent_library_upgrades_retires_the_key_tables_and_fills_in_counted_ste
     let old_baseline =
         rows(&before, "SELECT rowid, id, parent_id, variant, kind, merged_into FROM identity_baseline ORDER BY rowid");
     assert!(!old_reviews.is_empty() && !old_baseline.is_empty());
+    let identity =
+        "id, kind, work, variant, parent_id, merged_into, artist, label_only, mascot, mascot_origin, work_id, original";
+    let old_identities = rows(&before, &format!("SELECT rowid, {identity} FROM entities ORDER BY rowid"));
+    assert!(old_identities.len() > 1);
+    let old_relations = rows(&before, "SELECT * FROM identity_relations ORDER BY id");
+    let old_views: Vec<String> =
+        rows(&before, "SELECT name FROM sqlite_master WHERE type = 'view' AND sql LIKE '%entities%' ORDER BY name");
+    assert!(old_views.len() >= 5, "{old_views:?}");
     assert!(old_aliases.iter().any(|a| a.contains("合成别名")) && old_display.iter().any(|a| a.contains("合成作品名")));
     drop(before);
     assert_eq!(upgrade(&lib.db).unwrap(), "{\"from\":7,\"to\":8}\n");
@@ -164,6 +172,40 @@ fn a_consistent_library_upgrades_retires_the_key_tables_and_fills_in_counted_ste
     let baseline = "SELECT seq, id, parent_id, variant, kind, merged_into FROM term_identity_baseline ORDER BY seq";
     assert_eq!(rows(&c, baseline), old_baseline, "the identity baseline is the core's already");
     assert!(!exists(&c, "work_review") && !exists(&c, "identity_baseline"));
+    // The identities: terms and their `term_tree` rows, in their order (`seq` takes the former rowids), with the
+    // attributes as columns and nothing left in `terms.attrs`.
+    let identities = "SELECT r.seq, t.key, t.kind, r.work_text, r.variant, r.parent_id, r.merged_into, r.artist,
+                        r.label_only, r.mascot, r.mascot_origin, r.work_id, r.original
+                      FROM term_tree r JOIN terms t ON t.id = r.term_id ORDER BY r.seq";
+    assert_eq!(rows(&c, identities), old_identities, "identities move to the core unchanged");
+    let attrs: i64 = c
+        .query_row(
+            "SELECT count(*) FROM terms WHERE attrs <> '{}' AND id IN (SELECT term_id FROM term_tree)",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(attrs, 0);
+    assert!(!exists(&c, "entities"));
+    // The views read the core tables, the relations keep their rows and now refer to the terms.
+    let views: Vec<String> = rows(&c, "SELECT name FROM sqlite_master WHERE type = 'view' ORDER BY name");
+    for view in &old_views {
+        assert!(views.contains(view), "{view} is kept");
+    }
+    let left: Vec<String> = rows(&c, "SELECT name FROM sqlite_master WHERE sql LIKE '%entities%' ORDER BY name");
+    assert!(left.is_empty(), "{left:?}");
+    for view in ["family_confirmed", "membership_rules", "variant_memberships", "ambiguous_claims", "identity_nodes"] {
+        c.prepare(&format!("SELECT * FROM {view}")).unwrap().query([]).unwrap().next().unwrap();
+    }
+    assert_eq!(rows(&c, "SELECT * FROM identity_relations ORDER BY id"), old_relations);
+    let relations: String = c
+        .query_row("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'identity_relations'", [], |r| {
+            r.get(0)
+        })
+        .unwrap();
+    assert!(relations.contains("REFERENCES terms(key)"), "{relations}");
+    let broken: i64 = c.query_row("SELECT count(*) FROM pragma_foreign_key_check", [], |r| r.get(0)).unwrap();
+    assert_eq!(broken, 0);
     // The names version now counts writes to the core's display names, as it counted the legacy table's.
     let version = names_version(&c);
     c.execute("INSERT INTO term_key_names VALUES ('skin','synthetic_skin','zh','user','合成皮肤名')", []).unwrap();
@@ -191,6 +233,19 @@ fn a_consistent_library_upgrades_retires_the_key_tables_and_fills_in_counted_ste
     )
     .unwrap();
     assert_eq!(names_version(&c), version + 3);
+    // … and to the identities' own columns and kinds, not to work reviews.
+    write(
+        &c,
+        "UPDATE term_tree SET variant = 'synthetic_variant' WHERE seq = (SELECT min(seq) FROM term_tree);
+         UPDATE term_tree SET review_note = '只改复核' WHERE review_status IS NOT NULL;",
+    );
+    assert_eq!(names_version(&c), version + 4);
+    write(
+        &c,
+        "UPDATE terms SET kind = CASE kind WHEN 'skin' THEN 'character' ELSE 'skin' END
+         WHERE id = (SELECT term_id FROM term_tree ORDER BY seq LIMIT 1)",
+    );
+    assert_eq!(names_version(&c), version + 5);
     let filled: Vec<(String, Option<String>, Option<String>)> = c
         .prepare("SELECT label,label_kind,label_count FROM actions ORDER BY id DESC LIMIT 4")
         .unwrap()
@@ -211,7 +266,7 @@ fn legacy_tables_that_disagree_with_the_core_refuse_the_upgrade_and_change_nothi
         (
             "disagree-entities",
             "UPDATE entities SET work='改过' WHERE rowid=(SELECT min(rowid) FROM entities)",
-            "旧兼容表与词条核心不一致",
+            "旧身份表与词条核心不一致",
         ),
         (
             "disagree-links",

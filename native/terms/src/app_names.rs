@@ -74,15 +74,49 @@ struct Entity {
     tag: String,
 }
 fn scope(c: &Connection, entity: Option<&str>) -> Result<Vec<Entity>> {
-    let mut rows=c.prepare("SELECT id,parent_id,work,variant FROM entities WHERE merged_into IS NULL AND kind NOT IN ('oc','work') AND coalesce(original,0)=0")?.query_map([],|r|Ok(Entity{id:r.get(0)?,parent:r.get(1)?,work:r.get::<_,Option<String>>(2)?.unwrap_or_default(),variant:r.get::<_,Option<String>>(3)?.unwrap_or_default(),keys:Default::default(),tag:String::new()}))?.collect::<rusqlite::Result<Vec<_>>>()?;
+    let sql = format!(
+        "SELECT id,parent_id,work,variant
+         FROM {ENTITIES}
+         WHERE merged_into IS NULL AND kind NOT IN ('oc','work') AND coalesce(original,0)=0
+         ORDER BY seq",
+        ENTITIES = crate::character_entities::ENTITIES
+    );
+    let mut rows = c
+        .prepare(&sql)?
+        .query_map([], |r| {
+            Ok(Entity {
+                id: r.get(0)?,
+                parent: r.get(1)?,
+                work: r.get::<_, Option<String>>(2)?.unwrap_or_default(),
+                variant: r.get::<_, Option<String>>(3)?.unwrap_or_default(),
+                keys: Default::default(),
+                tag: String::new(),
+            })
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
     let active: BTreeSet<String> = if let Some(id) = entity {
         let parent: Option<Option<String>> = c
-            .query_row("SELECT parent_id FROM entities WHERE id=? AND merged_into IS NULL", [id], |r| r.get(0))
+            .query_row(
+                &format!(
+                    "SELECT parent_id FROM {ENTITIES} WHERE id=? AND merged_into IS NULL",
+                    ENTITIES = crate::character_entities::ENTITIES
+                ),
+                [id],
+                |r| r.get(0),
+            )
             .optional()?;
         let root = parent.ok_or_else(|| Error::Invalid("角色不存在".into()))?.unwrap_or_else(|| id.into());
         rows.iter().filter(|r| r.id == root || r.parent.as_deref() == Some(&root)).map(|r| r.id.clone()).collect()
     } else {
-        c.prepare("SELECT entity FROM memberships UNION SELECT entity FROM candidates UNION SELECT parent_id FROM entities WHERE id IN (SELECT entity FROM memberships UNION SELECT entity FROM candidates) AND parent_id IS NOT NULL")?.query_map([],|r|r.get(0))?.collect::<rusqlite::Result<_>>()?
+        let sql = format!(
+            "SELECT entity FROM memberships
+             UNION SELECT entity FROM candidates
+             UNION SELECT parent_id
+             FROM {ENTITIES}
+             WHERE id IN (SELECT entity FROM memberships UNION SELECT entity FROM candidates) AND parent_id IS NOT NULL",
+            ENTITIES = crate::character_entities::ENTITIES
+        );
+        c.prepare(&sql)?.query_map([], |r| r.get(0))?.collect::<rusqlite::Result<_>>()?
     };
     rows.retain(|r| active.contains(&r.id));
     let positions: HashMap<String, usize> = rows.iter().enumerate().map(|(i, r)| (r.id.clone(), i)).collect();
@@ -687,9 +721,11 @@ impl Updater {
         }
         if let Some(id) = entity {
             let c = crate::app_library::read_connection(&library.instance_path().join("library.sqlite"))?;
-            if !c.query_row("SELECT EXISTS(SELECT 1 FROM entities WHERE id=? AND merged_into IS NULL)", [id], |r| {
-                r.get::<_, bool>(0)
-            })? {
+            let sql = format!(
+                "SELECT EXISTS(SELECT 1 FROM {ENTITIES} WHERE id=? AND merged_into IS NULL)",
+                ENTITIES = crate::character_entities::ENTITIES
+            );
+            if !c.query_row(&sql, [id], |r| r.get::<_, bool>(0))? {
                 return invalid("角色不存在");
             }
         }
@@ -975,7 +1011,16 @@ fn hints(c: &Connection, rows: Vec<Value>) -> Result<Json> {
 fn local_links(source: &mut Source) -> Result<Json> {
     let c = net::db(&source.path)?;
     crate::http_read::register_names(&c)?;
-    let rows=crate::http_read::rows(&c,&format!("SELECT e.id,entity_name(e.id) AS name,(SELECT count(*) FROM memberships m WHERE m.entity=e.id) AS count FROM entities e WHERE e.kind='character' AND e.parent_id IS NULL AND e.merged_into IS NULL AND e.original=0 AND e.label_only=0 AND NOT EXISTS(SELECT 1 FROM {LINKS} l WHERE l.entity_id=e.id AND l.current=1) ORDER BY count DESC", LINKS = crate::character_links::LINKS),&[])?;
+    let sql = format!(
+        "SELECT e.id,entity_name(e.id) AS name,(SELECT count(*) FROM memberships m WHERE m.entity=e.id) AS count
+         FROM {ENTITIES} e
+         WHERE e.kind='character' AND e.parent_id IS NULL AND e.merged_into IS NULL AND e.original=0 AND e.label_only=0
+           AND NOT EXISTS(SELECT 1 FROM {LINKS} l WHERE l.entity_id=e.id AND l.current=1)
+         ORDER BY count DESC,e.seq",
+        ENTITIES = crate::character_entities::ENTITIES,
+        LINKS = crate::character_links::LINKS
+    );
+    let rows = crate::http_read::rows(&c, &sql, &[])?;
     let mut out = vec![];
     let qualifier_pattern = regex::Regex::new(r"[\s_]*\([^()]*\)$").expect("constant regular expression is valid");
     for row in rows {
@@ -1763,8 +1808,8 @@ mod sources_tests {
             let c = self.db();
             let tags: HashMap<String, String> = c
                 .prepare(
-                    "SELECT t.key,l.key FROM term_links l JOIN terms t ON t.id=l.term_id JOIN entities e ON e.id=t.key
-                     WHERE l.system='danbooru' AND l.current=1 AND e.kind<>'work'",
+                    "SELECT t.key,l.key FROM term_links l JOIN terms t ON t.id=l.term_id JOIN term_tree r ON r.term_id=t.id
+                     WHERE l.system='danbooru' AND l.current=1 AND t.kind<>'work'",
                 )
                 .unwrap()
                 .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
@@ -2028,8 +2073,13 @@ mod sources_tests {
             let mut c = lib.db();
             let tx = c.transaction().unwrap();
             crate::schema::begin_writing(&tx).unwrap();
-            tx.execute("UPDATE entities SET kind='oc' WHERE id=(SELECT t.key FROM term_links x JOIN terms t ON t.id=x.term_id WHERE x.system='danbooru' AND x.key='alice')", [])
-                .unwrap();
+            // An OC is an original character (the core has no `oc` kind).
+            tx.execute(
+                "UPDATE term_tree SET original=1
+                 WHERE term_id=(SELECT x.term_id FROM term_links x WHERE x.system='danbooru' AND x.key='alice')",
+                [],
+            )
+            .unwrap();
             crate::schema::commit_writing(tx).unwrap();
         }
         lib.run(&p, None, false).unwrap();

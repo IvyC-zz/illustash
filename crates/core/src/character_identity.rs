@@ -1,5 +1,6 @@
 //! S3 relation commands: append-only core decisions, legacy-shaped compatibility
 //! rows, full graph validation, and undo audit. The caller owns the transaction.
+use crate::character_entities::ENTITIES;
 use crate::{character_graph, character_json, legacy_characters, Error, Result};
 use rusqlite::{params, Connection, OptionalExtension};
 use serde_json::{json, Value};
@@ -35,8 +36,11 @@ pub fn propose(c: &Connection, a: &str, b: &str, kind: &str, evidence: Option<&V
     if a == b || !matches!(kind, "duplicate_of" | "form_of" | "different_from") {
         return Err(invalid("无效身份关系"));
     }
-    let count: i64 =
-        c.query_row("SELECT count(*) FROM entities WHERE id IN (?,?) AND kind<>'work'", params![a, b], |r| r.get(0))?;
+    let count: i64 = c.query_row(
+        &format!("SELECT count(*) FROM {ENTITIES} WHERE id IN (?,?) AND kind<>'work'"),
+        params![a, b],
+        |r| r.get(0),
+    )?;
     if count != 2 {
         return Err(invalid("关系端点不存在"));
     }

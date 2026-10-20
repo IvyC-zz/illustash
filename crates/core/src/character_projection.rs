@@ -32,7 +32,7 @@ const EVIDENCE_SCOPE: (&str, &str) = ("GROUP BY", "WHERE v.uuid IN (SELECT uuid 
 const SINGLE_SCOPE: (&str, &str) = ("value='solo'", "value='solo' AND g.uuid IN (SELECT uuid FROM touched)");
 const LEAD_SCOPE: (&str, &str) = ("value='1girl'", "value='1girl' AND g.uuid IN (SELECT uuid FROM touched)");
 const MEMBERS_SELECT: &str = "memberships SELECT ";
-const MEMBERS_FILTER: &str = " WHERE NOT EXISTS(SELECT 1 FROM entities t";
+const MEMBERS_FILTER: &str = " WHERE NOT EXISTS(SELECT 1 FROM terms t";
 const MEMBERS_FROM: &str = "FROM membership_rules m WHERE ";
 
 fn once<'a>(sql: &str, anchor: &'a str) -> Result<&'a str> {

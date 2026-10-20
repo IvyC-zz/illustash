@@ -1,5 +1,6 @@
 //! Line-for-line semantics of web/identity.py _graph / _project, hybrid only.
 //! Baseline order is the preserved legacy rowid (seq); representatives are b-side.
+use crate::character_entities::ENTITIES;
 use crate::{character_json, character_projection, Error, Result};
 use rusqlite::{params, Connection, OptionalExtension};
 use serde_json::{json, Value};
@@ -32,11 +33,11 @@ fn find(parent: &mut [usize], mut i: usize) -> usize {
 }
 
 pub fn baseline(c: &Connection) -> Result<()> {
-    // seq is an INTEGER PRIMARY KEY: omitted values append in SELECT row order.
-    c.prepare_cached(
+    // seq is an INTEGER PRIMARY KEY: omitted values append in SELECT row order (the identities' own order).
+    c.prepare_cached(&format!(
         "INSERT OR IGNORE INTO term_identity_baseline(id,parent_id,variant,kind,merged_into)
-        SELECT id,parent_id,variant,kind,merged_into FROM entities WHERE kind<>'work'",
-    )?
+        SELECT id,parent_id,variant,kind,merged_into FROM {ENTITIES} WHERE kind<>'work' ORDER BY seq"
+    ))?
     .execute([])?;
     Ok(())
 }
@@ -158,7 +159,7 @@ fn stored(s: &str) -> Result<Value> {
 }
 type EntityState = HashMap<String, (Option<String>, Option<String>)>;
 fn entity_state(c: &Connection) -> Result<EntityState> {
-    Ok(c.prepare_cached("SELECT id,parent_id,merged_into FROM entities")?
+    Ok(c.prepare_cached(&format!("SELECT id,parent_id,merged_into FROM {ENTITIES}"))?
         .query_map([], |r| Ok((r.get(0)?, (r.get(1)?, r.get(2)?))))?
         .collect::<rusqlite::Result<_>>()?)
 }
@@ -228,25 +229,16 @@ pub fn project(c: &Connection, g: &Graph) -> Result<Value> {
         ON CONFLICT(entity) DO UPDATE SET canonical=excluded.canonical
         WHERE identity_canonical.canonical IS NOT excluded.canonical;",
     )?;
-    // These mirrors are private. Keep exact JSON normalization, but avoid no-op writes.
+    // 只改真正变化的行：名字版本只需在可见结构改变时失效，无差别更新全部节点会触发全库写放大。
     c.execute(
-        "UPDATE term_tree SET parent_id=p.parent_id,merged_into=p.merged_into
+        "UPDATE term_tree SET parent_id=p.parent_id,variant=p.variant,merged_into=p.merged_into
       FROM graph_projection p JOIN terms t ON t.key=p.id WHERE term_tree.term_id=t.id
-      AND (term_tree.parent_id IS NOT p.parent_id OR term_tree.merged_into IS NOT p.merged_into)",
+      AND (term_tree.parent_id IS NOT p.parent_id OR term_tree.variant IS NOT p.variant
+        OR term_tree.merged_into IS NOT p.merged_into)",
         [],
     )?;
     c.execute(
-        "UPDATE terms SET kind=p.kind,attrs=json_set(terms.attrs,'$.variant',p.variant)
-      FROM graph_projection p WHERE terms.key=p.id
-      AND (terms.kind IS NOT p.kind OR terms.attrs IS NOT json_set(terms.attrs,'$.variant',p.variant))",
-        [],
-    )?;
-    // 名字版本只需在可见结构改变时失效，无差别更新全部节点会触发全库写放大。
-    c.execute(
-        "UPDATE entities SET parent_id=p.parent_id,variant=p.variant,kind=p.kind,merged_into=p.merged_into
-      FROM graph_projection p WHERE entities.id=p.id
-      AND (entities.parent_id IS NOT p.parent_id OR entities.variant IS NOT p.variant
-        OR entities.kind IS NOT p.kind OR entities.merged_into IS NOT p.merged_into)",
+        "UPDATE terms SET kind=p.kind FROM graph_projection p WHERE terms.key=p.id AND terms.kind IS NOT p.kind",
         [],
     )?;
     let version = version(c)?;

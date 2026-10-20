@@ -102,7 +102,7 @@ class CharacterReadHTTPTest(HTTPHarness):
             live(path)
         # Names written past the core, as the recording wrote them on r4-legacy.
         with self.connect() as c:
-            ids=[r[0] for r in c.execute("SELECT id FROM entities WHERE kind='character' AND parent_id IS NULL AND merged_into IS NULL LIMIT 3")]
+            ids=[r[0] for r in c.execute("SELECT t.key FROM term_tree r JOIN terms t ON t.id=r.term_id WHERE t.kind='character' AND r.parent_id IS NULL AND r.merged_into IS NULL ORDER BY t.id LIMIT 3")]
             for e in ids:
                 rename(c, e, '平局')
             c.execute("DELETE FROM meta WHERE key='identity_policy'")

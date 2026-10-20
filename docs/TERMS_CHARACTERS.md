@@ -18,7 +18,7 @@
 
 | 旧 | 核心主数据 | 切换后 Python 读到的 |
 |---|---|---|
-| `entities` | `terms`（key = 原 id，kind 原样，variant / artist / label_only / mascot / mascot_origin / original 进 `attrs`）+ `term_tree`（parent_id、merged_into、work_id、work 文字，以及 work_review 三列） | 兼容表 `entities`，列序保留旧库自己的（真实库由 `ALTER TABLE` 历史决定） |
+| `entities` | `terms`（key = 原 id，kind 原样）+ `term_tree`（parent_id、merged_into、work_id、work 文字，variant / artist / label_only / mascot / mascot_origin / original，先后 `seq` = 原 rowid，以及 work_review 三列） | 核心第 8 版起删除，命令直接读写 `terms` / `term_tree`，读者用同形的片段 `character_entities::ENTITIES`（[TERMS_SCHEMA.md](TERMS_SCHEMA.md) 第 14 节）；之前是兼容表，属性在 `terms.attrs` 里 |
 | `links` | `term_links`（角色的 `wd` 存成 `wd_character`，其余原样） | 核心第 8 版起删除，核心直接读写 `term_links`（[TERMS_SCHEMA.md](TERMS_SCHEMA.md) 第 14 节） |
 | `work_review` | `term_tree` 的三列 | 核心第 8 版起删除，命令直接读写 `term_tree`（[TERMS_SCHEMA.md](TERMS_SCHEMA.md) 第 14 节） |
 | `identity_baseline` | `term_identity_baseline`（`seq` = 原 rowid 顺序） | 核心第 8 版起删除（[TERMS_SCHEMA.md](TERMS_SCHEMA.md) 第 14 节）；之前是旧代码按原样读的兼容表，核心随主表追加 |
@@ -32,7 +32,7 @@
 | `names` 等名字表、`asked`、`reviews`、`deferred`、`duplicates`、`auto_rules`、`excluded`、`imported`、`backend_effects`、`prefs` | 外围，不收编 | 原表；属于某一步的由那一步的核心命令同事务写，`curate`、跳过配对、NameUpdater 仍由 Python 写 |
 | `relations` | 图片相似关系，与本步无关 | 不变 |
 
-加写保护的兼容表和私有表共 27 张（`legacy_characters::GUARDED`）：没有核心的写钥匙时 INSERT / UPDATE / DELETE 一律拒绝，漏改的 Python 写入会直接报错，不会悄悄成功。
+加写保护的兼容表和私有表共 25 张（`legacy_characters::GUARDED` 22 张、`schema::PRIVATE` 3 张）：没有核心的写钥匙时 INSERT / UPDATE / DELETE 一律拒绝，漏改的 Python 写入会直接报错，不会悄悄成功。
 
 **收编同步**（`illustash-terms sync-characters --db <库>`，切换前可以反复运行）：只读旧表，把 `term_*` 补到与旧表一致，再由 `term_*` 生成影子兼容表 `shadow_*`，与旧表逐行逐列比较。一个事务：预检不通过、有出处无法解释的人工结论、比较有差异，都整次回滚并报告（退出码 3）。旧表没变时重跑不新增任何行。规则细节（hybrid 下旧合并搬动的结论放进迁移批次、没有步骤的关系决议怎样排锚点等）见方案第 16 节 S2。
 

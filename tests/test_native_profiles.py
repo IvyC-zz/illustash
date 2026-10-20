@@ -43,10 +43,10 @@ class NativeProfilesTest(unittest.TestCase):
     def pair(self,url,body,expected=200):
         before=[self.rec.state('before'),labels.states(self.right)]
         with closing(sqlite3.connect(self.right.db)) as c:
-            ids={r[0] for r in c.execute('SELECT id FROM entities')}
+            ids={r[0] for r in c.execute('SELECT t.key FROM term_tree r JOIN terms t ON t.id=r.term_id')}
         native=self.post(self.origin,url,body)
         with closing(sqlite3.connect(self.right.db)) as c:
-            births=[r[0] for r in c.execute('SELECT id FROM entities ORDER BY rowid') if r[0] not in ids]
+            births=[r[0] for r in c.execute('SELECT t.key FROM term_tree r JOIN terms t ON t.id=r.term_id ORDER BY r.seq') if r[0] not in ids]
         import uuid
         actual_uuid=uuid.uuid4
         pending=iter(births)
@@ -128,10 +128,10 @@ class NativeProfilesTest(unittest.TestCase):
         def works():
             with closing(sqlite3.connect(self.right.db)) as c:
                 return {name: ident for ident, name in c.execute(
-                    "SELECT e.id,n.value FROM entities e JOIN terms t ON t.key=e.id JOIN term_names n ON n.term_id=t.id AND n.role='display' WHERE e.kind='work'")}
+                    "SELECT t.key,n.value FROM terms t JOIN term_names n ON n.term_id=t.id AND n.role='display' WHERE t.kind='work'")}
         def work_of(entity):
             with closing(sqlite3.connect(self.right.db)) as c:
-                return c.execute('SELECT work_id FROM entities WHERE id=?', (entity,)).fetchone()[0]
+                return c.execute('SELECT r.work_id FROM term_tree r JOIN terms t ON t.id=r.term_id WHERE t.key=?', (entity,)).fetchone()[0]
         before = works()
         with closing(sqlite3.connect(self.right.db)) as c:
             c.execute("CREATE TRIGGER fail_profile BEFORE INSERT ON term_names WHEN NEW.value='故障' BEGIN SELECT RAISE(ABORT,'synthetic failure'); END"); c.commit()

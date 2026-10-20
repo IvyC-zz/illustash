@@ -2,11 +2,12 @@
 //! 作品证据（`works.apply_evidence`）。逐行照 tests/reference/web/store.py（#9 已删除）、tests/reference/web/works.py（#9 已删除）；作品的可读名由调用方给，
 //! 当前显示名由核心读（character_labels）。
 use crate::character_commands::{hybrid, invalid, require_entity, text};
+use crate::character_entities::{self, New, ENTITIES, OF};
 use crate::character_links::{check_free, LINKS};
 use crate::character_names::TERM_OF;
 use crate::character_profile::{new_id, require_work, set_work, tag_owner, work_for};
 use crate::character_review::{OF as REVIEW_OF, OPEN as REVIEW_OPEN};
-use crate::{character_graph, character_names, character_projection, legacy_characters, Error, Result};
+use crate::{character_graph, character_names, character_projection, Error, Result};
 use rusqlite::{params, Connection, OptionalExtension};
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet};
@@ -28,8 +29,7 @@ fn oc_fields(args: &Value) -> Result<(String, String)> {
 }
 
 /// 新身份尚无候选或人工归属；图重建已刷新受影响图片，不再对全库重复派生。
-fn created(c: &Connection, ids: &[String]) -> Result<()> {
-    legacy_characters::mirror_state(c, ids, "user")?;
+fn created(c: &Connection) -> Result<()> {
     if hybrid(c)? {
         character_graph::rebuild(c)?;
         character_projection::refresh_delayed(c)?;
@@ -45,13 +45,10 @@ fn create_entity(c: &Connection, args: &Value) -> Result<Value> {
         return invalid("角色名称应为 1–120 个字符");
     }
     let id = new_id(&args["id"])?;
-    c.execute(
-        "INSERT INTO entities(id,name,kind,artist,original) VALUES (?,'','character',?,?)",
-        params![id, artist, (kind == "oc") as i64],
-    )?;
-    legacy_characters::born(c, &id, "user")?;
+    let new = New { id: &id, kind: "character", artist: &artist, original: (kind == "oc") as i64, ..New::default() };
+    character_entities::create(c, &new, "user")?;
     character_names::put_name(c, &id, text(&args["lang"], "缺少名字的语言")?, "user", name, "display", 0, 1)?;
-    created(c, std::slice::from_ref(&id))?;
+    created(c)?;
     Ok(json!({"id": id}))
 }
 
@@ -61,27 +58,24 @@ fn create_linked(c: &Connection, args: &Value) -> Result<Value> {
         return Ok(json!({"id": owner, "existing": true}));
     }
     let id = new_id(&args["id"])?;
-    c.execute("INSERT INTO entities(id,name,kind) VALUES (?,'','character')", [&id])?;
-    legacy_characters::born(c, &id, "user")?;
+    character_entities::create(c, &New { id: &id, kind: "character", ..New::default() }, "user")?;
     check_free(c, "danbooru", tag)?;
     c.execute(
         &format!("INSERT INTO term_links(system, key, term_id, source) VALUES ('danbooru', ?, {TERM_OF}, 'user')"),
         [tag, &id],
     )?;
-    let mut ids = vec![id.clone()];
     let work = work_for(
         c,
         tag,
         args["copyright"].as_str().unwrap_or(""),
         args["readable"].as_str().unwrap_or(""),
         &args["work_id"],
-        &mut ids,
     )?;
     set_work(c, &id, work.as_deref())?;
     if let Some(alias) = args["alias"].as_str().filter(|a| !a.is_empty()) {
         character_names::put_name(c, &id, "", "user", alias, "alias", 0, 0)?;
     }
-    created(c, &ids)?;
+    created(c)?;
     Ok(json!({"id": id}))
 }
 
@@ -90,7 +84,7 @@ pub const SHARED_OC: &str = "原创角色（未细分）";
 fn shared_oc(c: &Connection, args: &Value) -> Result<Value> {
     let row: Option<String> = c
         .query_row(
-            "SELECT id FROM entities WHERE label_only=1 AND merged_into IS NULL ORDER BY rowid LIMIT 1",
+            &format!("SELECT id FROM {ENTITIES} WHERE label_only=1 AND merged_into IS NULL ORDER BY seq LIMIT 1"),
             [],
             |r| r.get(0),
         )
@@ -99,10 +93,10 @@ fn shared_oc(c: &Connection, args: &Value) -> Result<Value> {
         return Ok(json!({"id": id, "existing": true}));
     }
     let id = new_id(&args["id"])?;
-    c.execute("INSERT INTO entities(id,name,kind,original,label_only) VALUES (?,'','character',1,1)", [&id])?;
-    legacy_characters::born(c, &id, "user")?;
+    let new = New { id: &id, kind: "character", original: 1, label_only: 1, ..New::default() };
+    character_entities::create(c, &new, "user")?;
     character_names::put_name(c, &id, "zh", "user", SHARED_OC, "display", 0, 1)?;
-    created(c, std::slice::from_ref(&id))?;
+    created(c)?;
     Ok(json!({"id": id}))
 }
 
@@ -114,7 +108,9 @@ fn set_kind(c: &Connection, args: &Value) -> Result<Value> {
         return invalid("只能标记角色本身，不能标记子标签");
     }
     let (original, label_only): (i64, i64) =
-        c.query_row("SELECT original,label_only FROM entities WHERE id=?", [&entity], |r| Ok((r.get(0)?, r.get(1)?)))?;
+        c.query_row(&format!("SELECT original,label_only FROM {ENTITIES} WHERE id=?"), [&entity], |r| {
+            Ok((r.get(0)?, r.get(1)?))
+        })?;
     if kind != "oc" && label_only != 0 {
         return invalid("未细分的原创角色只能是原创角色");
     }
@@ -134,10 +130,13 @@ fn set_kind(c: &Connection, args: &Value) -> Result<Value> {
         )?;
     }
     c.execute(
-        "UPDATE entities SET original=?,artist=?,work_id=CASE WHEN ? THEN NULL ELSE work_id END,work=CASE WHEN ? THEN '' ELSE work END WHERE id=?",
-        params![oc as i64, artist, oc, oc, entity],
+        &format!(
+            "UPDATE term_tree SET original=?2,artist=?3,work_id=CASE WHEN ?4 THEN NULL ELSE work_id END,
+              work_text=CASE WHEN ?4 THEN '' ELSE work_text END
+             WHERE {OF}"
+        ),
+        params![entity, oc as i64, artist, oc],
     )?;
-    legacy_characters::mirror_state(c, std::slice::from_ref(&entity), "user")?;
     Ok(json!({"id": entity, "kind": kind, "artist": artist}))
 }
 
@@ -147,15 +146,17 @@ fn set_mascot(c: &Connection, args: &Value) -> Result<Value> {
     if parent.is_some() {
         return invalid("只能标记角色本身，不能标记子标签");
     }
-    c.execute("UPDATE entities SET mascot=?,mascot_origin='user' WHERE id=?", params![mascot as i64, entity])?;
+    c.execute(
+        &format!("UPDATE term_tree SET mascot=?2,mascot_origin='user' WHERE {OF}"),
+        params![entity, mascot as i64],
+    )?;
     let uuids: Vec<String> = c
-        .prepare(
+        .prepare(&format!(
             "SELECT uuid FROM family_evidence WHERE entity=?1 UNION
-             SELECT s.uuid FROM assertions s JOIN entities x ON x.id=s.entity WHERE coalesce(x.parent_id,x.id)=?1",
-        )?
+             SELECT s.uuid FROM assertions s JOIN {ENTITIES} x ON x.id=s.entity WHERE coalesce(x.parent_id,x.id)=?1"
+        ))?
         .query_map([&entity], |r| r.get(0))?
         .collect::<rusqlite::Result<_>>()?;
-    legacy_characters::mirror_state(c, std::slice::from_ref(&entity), "user")?;
     if !uuids.is_empty() {
         character_projection::evidence(c, Some(&uuids))?;
         character_projection::memberships(c, Some(&uuids))?;
@@ -171,22 +172,14 @@ fn set_character_work(c: &Connection, args: &Value) -> Result<Value> {
     let work = crate::character_commands::work_arg(&args["work"])?;
     if let Some(w) = work {
         require_work(c, w)?;
-        let original: i64 = c.query_row("SELECT original FROM entities WHERE id=?", [&entity], |r| r.get(0))?;
+        let original: i64 =
+            c.query_row(&format!("SELECT original FROM {ENTITIES} WHERE id=?"), [&entity], |r| r.get(0))?;
         if original != 0 {
             return invalid("原创角色不能归属作品");
         }
     }
     set_work(c, &entity, work)?;
-    let mut ids = vec![entity.clone()];
-    ids.extend(children(c, &entity)?);
-    legacy_characters::mirror_state(c, &ids, "user")?;
     Ok(json!({"id": entity, "work_id": work}))
-}
-
-fn children(c: &Connection, entity: &str) -> Result<Vec<String>> {
-    Ok(c.prepare("SELECT id FROM entities WHERE parent_id=?")?
-        .query_map([entity], |r| r.get(0))?
-        .collect::<rusqlite::Result<_>>()?)
 }
 
 // ---- 作品（tests/reference/web/works.py（#9 已删除）） ----
@@ -194,10 +187,10 @@ fn children(c: &Connection, entity: &str) -> Result<Vec<String>> {
 /// works.TREE：作品和它的全部子作品（UNION 防旧数据成环）。
 fn descendants(c: &Connection, ident: &str) -> Result<Vec<String>> {
     require_work(c, ident)?;
-    Ok(c.prepare(
-        "WITH RECURSIVE tree(id) AS (SELECT id FROM entities WHERE id=? AND kind='work'
-          UNION SELECT e.id FROM entities e JOIN tree t ON e.parent_id=t.id WHERE e.kind='work') SELECT id FROM tree",
-    )?
+    Ok(c.prepare(&format!(
+        "WITH RECURSIVE tree(id) AS (SELECT id FROM {ENTITIES} WHERE id=? AND kind='work'
+          UNION SELECT e.id FROM {ENTITIES} e JOIN tree t ON e.parent_id=t.id WHERE e.kind='work') SELECT id FROM tree"
+    ))?
     .query_map([ident], |r| r.get(0))?
     .collect::<rusqlite::Result<_>>()?)
 }
@@ -212,8 +205,7 @@ fn work_create(c: &Connection, args: &Value) -> Result<String> {
         require_work(c, p)?;
     }
     let ident = new_id(&args["id"])?;
-    c.execute("INSERT INTO entities(id,name,kind,parent_id) VALUES (?,'','work',?)", params![ident, parent])?;
-    legacy_characters::born(c, &ident, "user")?;
+    character_entities::create(c, &New { id: &ident, kind: "work", parent_id: parent, ..New::default() }, "user")?;
     c.execute(REVIEW_OPEN, params![ident, "pending", "", 1])?;
     character_names::put_name(c, &ident, text(&args["lang"], "缺少名字的语言")?, "user", title, "display", 0, 1)?;
     if let Some(tag) = args["tag"].as_str().filter(|t| !t.is_empty()) {
@@ -266,7 +258,7 @@ fn work_move(c: &Connection, ident: &str, parent: Option<&str>) -> Result<()> {
             return invalid("作品不能挂到自身或自己的子作品下面");
         }
     }
-    c.execute("UPDATE entities SET parent_id=? WHERE id=?", params![parent, ident])?;
+    c.execute(&format!("UPDATE term_tree SET parent_id=?2 WHERE {OF}"), params![ident, parent])?;
     c.execute(&format!("UPDATE term_tree SET parent_locked = 1 WHERE {REVIEW_OF}"), [ident])?;
     Ok(())
 }
@@ -275,7 +267,6 @@ fn work_move(c: &Connection, ident: &str, parent: Option<&str>) -> Result<()> {
 fn edit_work(c: &Connection, args: &Value) -> Result<Value> {
     let action = args["action"].as_str().unwrap_or("");
     let parent = args["parent"].as_str().filter(|p| !p.is_empty());
-    let mut ids: Vec<String> = Vec::new();
     let ident = match action {
         "create" => work_create(c, args)?,
         "edit" => {
@@ -317,7 +308,7 @@ fn edit_work(c: &Connection, args: &Value) -> Result<Value> {
         "from_tag" => {
             // 在作品框里选中一个 Danbooru 版权：已有的作品，否则新建一个链接好的作品（名字是调用方给的可读名）。
             let tag = text(&args["tag"], "请选择 Danbooru 角色 tag")?;
-            match work_for(c, "x", tag, args["readable"].as_str().unwrap_or(""), &args["id"], &mut ids)? {
+            match work_for(c, "x", tag, args["readable"].as_str().unwrap_or(""), &args["id"])? {
                 Some(w) => w,
                 None => return invalid("作品不存在"),
             }
@@ -353,8 +344,6 @@ fn edit_work(c: &Connection, args: &Value) -> Result<Value> {
         }
         _ => return invalid("未知作品操作"),
     };
-    ids.push(ident.clone());
-    legacy_characters::mirror_state(c, &ids, "user")?;
     Ok(json!({"id": ident}))
 }
 
@@ -373,7 +362,7 @@ fn work_evidence(c: &Connection, args: &Value) -> Result<Value> {
     }
     let mut ids: BTreeMap<String, String> = c
         .prepare(&format!(
-            "SELECT l.key, l.entity_id FROM {LINKS} l JOIN entities e ON e.id = l.entity_id
+            "SELECT l.key, l.entity_id FROM {LINKS} l JOIN {ENTITIES} e ON e.id = l.entity_id
              WHERE l.core_system = 'danbooru' AND l.current = 1 AND e.kind = 'work'"
         ))?
         .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
@@ -394,7 +383,6 @@ fn work_evidence(c: &Connection, args: &Value) -> Result<Value> {
         seen
     };
     let (mut linked, mut pending, mut edges) = (Vec::new(), Vec::new(), Vec::new());
-    let mut touched: Vec<String> = Vec::new();
     for (key, ident) in &qualifiers {
         let status: Option<String> = c
             .query_row(&format!("SELECT review_status FROM term_tree WHERE {REVIEW_OF}"), [ident], |r| r.get(0))
@@ -413,7 +401,6 @@ fn work_evidence(c: &Connection, args: &Value) -> Result<Value> {
             let note = if !tags.contains(key) { "需人工核对作品 tag" } else { "链接已属于另一个身份" };
             c.execute(&format!("UPDATE term_tree SET review_note = ?2 WHERE {REVIEW_OF}"), [ident.as_str(), note])?;
             pending.push(json!({"id": ident, "qualifier": key, "reason": note}));
-            touched.push(ident.clone());
             continue;
         }
         check_free(c, "danbooru", key)?;
@@ -429,7 +416,6 @@ fn work_evidence(c: &Connection, args: &Value) -> Result<Value> {
         )?;
         ids.insert(key.clone(), ident.clone());
         linked.push(key.clone());
-        touched.push(ident.clone());
     }
     let mut parents: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
     for row in evidence["implications"].as_array().into_iter().flatten() {
@@ -479,8 +465,7 @@ fn work_evidence(c: &Connection, args: &Value) -> Result<Value> {
             Error::NeedId(_) => Error::NeedId(format!("/ids/{}", tag.replace('~', "~0").replace('/', "~1"))),
             e => e,
         })?;
-        c.execute("INSERT INTO entities(id,name,kind) VALUES (?,'','work')", [&ident])?;
-        legacy_characters::born(c, &ident, "user")?;
+        character_entities::create(c, &New { id: &ident, kind: "work", ..New::default() }, "user")?;
         let readable =
             args["readable"][&tag].as_str().ok_or_else(|| Error::Invalid(format!("缺少作品 {tag} 的可读名")))?;
         character_names::put_name(c, &ident, "en", "index", readable, "display", 0, 0)?;
@@ -491,7 +476,6 @@ fn work_evidence(c: &Connection, args: &Value) -> Result<Value> {
         )?;
         c.execute(REVIEW_OPEN, params![ident, "verified", "", 0])?;
         ids.insert(tag.clone(), ident.clone());
-        touched.push(ident);
     }
     for (tag, choices) in &parents {
         let Some(ident) = ids.get(tag).cloned() else { continue };
@@ -513,7 +497,7 @@ fn work_evidence(c: &Connection, args: &Value) -> Result<Value> {
             if descendants(c, &ident)?.contains(&parent) {
                 note = Some("蕴含关系成环，需人工确认".to_owned());
             } else {
-                c.execute("UPDATE entities SET parent_id=? WHERE id=?", [&parent, &ident])?;
+                c.execute(&format!("UPDATE term_tree SET parent_id=?2 WHERE {OF}"), [&ident, &parent])?;
                 edges.push(json!([tag, parent_tag]));
             }
         }
@@ -521,9 +505,7 @@ fn work_evidence(c: &Connection, args: &Value) -> Result<Value> {
             c.execute(&format!("UPDATE term_tree SET review_note = ?2 WHERE {REVIEW_OF}"), [&ident, &note])?;
             pending.push(json!({"id": ident, "tag": tag, "reason": note}));
         }
-        touched.push(ident);
     }
-    legacy_characters::mirror_state(c, &touched, "user")?;
     Ok(json!({"exact_links": linked.len(), "tree_edges": edges, "pending": pending}))
 }
 
