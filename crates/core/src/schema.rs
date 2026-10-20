@@ -405,21 +405,13 @@ fn vacuum_preserves_rowids(conn: &Connection) -> rusqlite::Result<bool> {
     Ok(true)
 }
 
-/// Upgrade and cutover rules require a backup capability; platform/default wiring stays in the API facade.
+/// The upgrade requires a backup capability; platform/default wiring stays in the API facade.
 pub fn backup_before_upgrade(
     conn: &Connection,
     before: i64,
     backup: &crate::backup::RequiredBackup,
 ) -> Result<Option<std::path::PathBuf>> {
     crate::backup::required(conn, &format!("v{before}-before-v{SCHEMA_VERSION}"), backup)
-}
-
-pub(crate) fn backup_before_cutover(
-    conn: &Connection,
-    domain: &str,
-    backup: &crate::backup::RequiredBackup,
-) -> Result<()> {
-    crate::backup::required(conn, &format!("before-cutover-{domain}"), backup).map(|_| ())
 }
 
 /// 核心写事务持有的「钥匙」：兼容表和私有表的写保护触发器在 `meta` 里看不到它时拒绝写入。
@@ -1704,7 +1696,7 @@ mod tests {
 mod required_backup_tests {
     use super::*;
     #[test]
-    fn direct_upgrade_and_cutover_refuse_backup_failure_without_changing_file_database() {
+    fn direct_upgrade_refuses_backup_failure_without_changing_file_database() {
         let root = std::env::temp_dir().join(format!("illustash-backup-boundary-{}", crate::store::new_key().unwrap()));
         std::fs::create_dir(&root).unwrap();
         let mut conn = crate::sqlite::open(root.join("library.sqlite")).unwrap();
@@ -1712,28 +1704,15 @@ mod required_backup_tests {
         std::fs::write(root.join("library-backups"), "synthetic blocker").unwrap();
         assert!(migrate(&mut conn).is_err());
         assert_eq!(version(&conn).unwrap(), 6);
-        // Same mandatory boundary for direct library API, without HTTP or CLI orchestration.
-        assert!(crate::legacy_labels::cutover(&mut conn).is_err());
-        assert_eq!(version(&conn).unwrap(), 6);
         std::fs::remove_file(root.join("library-backups")).unwrap();
         migrate(&mut conn).unwrap();
-        let held = root.join("retained-backups");
-        std::fs::rename(root.join("library-backups"), &held).unwrap();
-        std::fs::write(root.join("library-backups"), "synthetic blocker").unwrap();
-        let before: i64 = conn.query_row("SELECT count(*) FROM sqlite_master", [], |r| r.get(0)).unwrap();
-        assert!(crate::legacy_labels::cutover(&mut conn).is_err());
-        assert_eq!(version(&conn).unwrap(), SCHEMA_VERSION);
-        assert_eq!(conn.query_row("SELECT count(*) FROM sqlite_master", [], |r| r.get::<_, i64>(0)).unwrap(), before);
-        assert!(!crate::store::labels_in_core(&conn).unwrap());
-        std::fs::remove_file(root.join("library-backups")).unwrap();
-        std::fs::rename(&held, root.join("library-backups")).unwrap();
         std::fs::write(root.join("library-backups").join("sentinel"), "owned elsewhere").unwrap();
         conn.execute_batch("PRAGMA journal_mode=WAL; CREATE TABLE synthetic_rowids(value TEXT); INSERT INTO synthetic_rowids(rowid,value) VALUES (27,'committed-wal');").unwrap();
-        crate::backup::required(&conn, "before-cutover-synthetic", &crate::platform_backup::capability()).unwrap();
+        crate::backup::required(&conn, "synthetic", &crate::platform_backup::capability()).unwrap();
         let backup = std::fs::read_dir(root.join("library-backups"))
             .unwrap()
             .map(|p| p.unwrap().path())
-            .find(|p| p.file_name().unwrap().to_string_lossy().starts_with("terms-before-cutover-synthetic-"))
+            .find(|p| p.file_name().unwrap().to_string_lossy().starts_with("terms-synthetic-"))
             .unwrap();
         let restored = crate::sqlite::open_with_flags(backup, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY).unwrap();
         assert_eq!(

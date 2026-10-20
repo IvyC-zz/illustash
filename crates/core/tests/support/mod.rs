@@ -47,23 +47,3 @@ pub mod schema {
     use super::*;
 }
 pub use schema::migrate;
-pub mod legacy_artists {
-    pub use crate::legacy_artists_rules::*;
-    pub fn cutover(c: &mut Connection, p: Option<&Path>) -> Result<Option<Report>> {
-        crate::legacy_artists_rules::cutover_with_backup(c, p, &super::capability())
-    }
-    use super::*;
-}
-pub mod legacy_characters {
-    pub use crate::legacy_characters_rules::*;
-}
-pub mod legacy_labels {
-    pub use crate::legacy_labels_rules::*;
-    pub fn cutover(c: &mut Connection) -> Result<Option<Report>> {
-        crate::legacy_labels_rules::cutover_with_backup(c, &super::capability())
-    }
-    use super::*;
-}
-pub mod legacy_names {
-    pub use crate::legacy_names_rules::*;
-}

@@ -7,15 +7,16 @@ import unittest
 from pathlib import Path
 
 class RequiredBackupCliTest(unittest.TestCase):
-    """Direct shipped CLI must refuse file-backed upgrades/cutovers when backup cannot be created."""
-    def test_upgrade_and_all_cutovers_refuse_backup_failure_without_modification(self):
+    """Direct shipped CLI must refuse a file-backed upgrade when the backup cannot be created (the cutover commands
+    went with #201 step 4)."""
+    def test_upgrade_refuses_backup_failure_without_modification(self):
         binary = os.environ.get('ILLUSTASH_TERMS_BIN')
         if not binary or not Path(binary).is_file():
             self.skipTest('set ILLUSTASH_TERMS_BIN explicitly for native CLI acceptance')
         import subprocess
         with tempfile.TemporaryDirectory(prefix='illustash-required-backup-cli-') as tmp:
             root = Path(tmp)
-            for command in ('migrate', 'cutover-artists', 'cutover-labels', 'cutover-characters', 'cutover-names'):
+            for command in ('migrate',):
                 with self.subTest(command=command):
                     folder = root / command
                     folder.mkdir()

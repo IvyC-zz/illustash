@@ -98,7 +98,6 @@ class Service(unittest.TestCase):
         self.assertEqual(self.channel.process.pid,pid)
         self.channel.request(dict(op='undo',action=second['action']))
         self.channel.request(dict(op='undo',action=first['action']))
-        core.run('verify-characters','--db',self.db)
 
     def test_sql_failure_rolls_back_and_same_process_can_continue(self):
         with sqlite3.connect(self.db) as c:
@@ -186,7 +185,6 @@ class Service(unittest.TestCase):
             self.assertEqual(c.execute("SELECT count(*) FROM meta WHERE key='terms_writer'").fetchone()[0],0)
         for action, in rows:
             core.character_command(self.db,dict(op='undo',action=action))
-        core.run('verify-characters','--db',self.db)
 
     def test_cli_and_service_refuse_duplicate_json_keys(self):
         before = self.dump()
