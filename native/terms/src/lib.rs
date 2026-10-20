@@ -81,6 +81,7 @@ mod http_local;
 mod http_read;
 #[cfg(feature = "test-read-host")]
 pub mod read_harness;
+mod sql_fragments;
 pub use illustash_core::legacy_characters;
 pub use illustash_core::legacy_labels;
 pub use illustash_core::legacy_names;

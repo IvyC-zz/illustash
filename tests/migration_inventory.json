@@ -163,7 +163,7 @@
 
  "native/terms/src/app_characters.rs":"0379cfaf9e6353208f3beedb97a0d7d0b45934c2986c136a0b0dd5d71e67220f",
 
- "native/terms/src/app_commands.rs":"d9ce587eeb27055a6187d92776575e796cf817b9dc7d53665376601b9cd1fc45",
+ "native/terms/src/app_commands.rs":"e198ab866b1babe5ec1ee27a4eecf156aff1ed475f3decf549f05625204aaa5a",
 
  "native/terms/src/app_create.rs":"533af856370d74969b441f9f810e0e3563226c13c3922aa666b2ae04f07ba046",
 
@@ -187,7 +187,7 @@
 
  "native/terms/src/app_imports.rs":"e79d6a95f2cd045ef6ad0c3d0286d94a9ff82a93b03eed186e1b0ea986a60382",
 
- "native/terms/src/app_index.rs":"2c9800040a7ddcc8ace23a8904ab2324d40d517d8a0ea4f99d08b91f9cc971a9",
+ "native/terms/src/app_index.rs":"0662038f4ccbfb2d90ddfc3c3df41c1046c4ee68d81406e8d3a438f1f1e3e346",
 
  "native/terms/src/app_integrity.rs":"143aa1bbd662b8ea08636a6d58b4a8acc32095ba41526b579c32af9873adc6cc",
 
@@ -241,7 +241,7 @@
 
  "native/terms/src/app_provenance_net.rs":"77118fad8e4ee718bf670f5ebc9435962f611d3b6bfe86e6c1ac15116192be34",
 
- "native/terms/src/app_provenance_sources.rs":"e94f052ad27ab3196794a01ff151636f324dc1c45c90b3b397bc8f6ab4fd2a1b",
+ "native/terms/src/app_provenance_sources.rs":"f8341efb9e83f2fdf20effea6b492dba3192264d664d3a39fe4a90d0bce20c6d",
 
  "native/terms/src/app_recognition.rs":"1cae206a301ad4281ae0549b0f46c2b25ba9a3abbcdd022d84ac796ff7bc4a2b",
 
@@ -279,13 +279,13 @@
 
  "native/terms/src/http.rs":"75e56008addadf106bddd3ef0b38b3bd68bc90112d603a3a5b0e104a5510deec",
 
- "native/terms/src/http_app.rs":"5f2f40e315c389480e3a90d065d83635ae87091c683d788b8f7a247ffc9046d4",
+ "native/terms/src/http_app.rs":"628b4421ca8433ff7ef3857876be34126033884cf7cffd9b97918c179cda150d",
 
  "native/terms/src/http_artists.rs":"f15a054a4ccf76e05066d3e50bba89f7f72a8b507a174e4045061e3f1466c8d8",
 
- "native/terms/src/http_browse.rs":"d78caf9945fe758cdd725abdd2d5672808cca12e2f32bbdd3552cd333610b9b5",
+ "native/terms/src/http_browse.rs":"3927473efa1d18f618b1b318b1216ed7fca946cd595c168bdd3b971968b3cb53",
 
- "native/terms/src/http_characters.rs":"1de238cf552d8d0af163c3456bcb665c4f04ed2069961abd9e042e958209e0b5",
+ "native/terms/src/http_characters.rs":"c49d546d8ae641b161fb02cc48275c246bf653e4d8d66d1023916f6313392c5e",
 
  "native/terms/src/http_host_get.rs":"6bcf03eb377c31fc4c90595394e4bafd03b1f0e9f4337224062a838b3b941f77",
 
@@ -293,9 +293,9 @@
 
  "native/terms/src/http_json.rs":"9f406b4e74a52a5d869e1d16a76b8e5590eb46561d495748da0d466fc576c5ba",
 
- "native/terms/src/http_local.rs":"ea354cc3fec919162912bd504887318a66b362a60def5eec4676175d6dbe06db",
+ "native/terms/src/http_local.rs":"24f94e13b95f2452fd0d6839adbbc6b0917dae3aa30e45b3147b760aa4c1bb49",
 
- "native/terms/src/http_read.rs":"93090f326cb19fa93d1b0d4b063c2eefe202d1fb092652332876578f59d1f768",
+ "native/terms/src/http_read.rs":"60a1c953750aed7dab7cc877e368bbf4db288771a9c09372c58297310e26449e",
 
  "native/terms/src/image_samples/mod.rs":"7100452279fd5c42b3b082ce828f9f31f993166b71d81df64514e289e2a375c5",
 
@@ -315,7 +315,7 @@
 
  "native/terms/src/index_generation.rs":"556ad63a4bb7b8d30e3191d466b91744b29f23fd4fc53fa40ffb9f13b54946e6",
 
- "native/terms/src/lib.rs":"ec82d771b4677d1e633c69ee29b39fe6e0041d8c095f21d8a9064e7f76f8d061",
+ "native/terms/src/lib.rs":"c890139823d735dc00fa984d44f010c7743675b62214bfbebbb3fdc1cc8475bf",
 
  "native/terms/src/platform_process.rs":"66a45606b4a65b14b2725679bbae0e7e5445e63fddede8e804c2e8d4cca893b0",
 
@@ -358,6 +358,8 @@
  "native/terms/src/research_compute/snapshot.rs":"39818e2353f73ef4864ceb29efec4abfdee9f3c9a845c45a9cdadd8516a954ea",
 
  "native/terms/src/service.rs":"6752b797a7c721c3addf5ef7aa1aa72a537e8f71c26ce18517900595dd624064",
+
+ "native/terms/src/sql_fragments.rs":"b9c36b6ecc3f88217781bbd97e26d94d04de65f7771b48803b8ef23346464a6a",
 
  "native/terms/src/sqlite.rs":"a9d28dfd07ece00f2dd0dc9edb274636cce76f02f489b260cfb291abc9c813fc",
 

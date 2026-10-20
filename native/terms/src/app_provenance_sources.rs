@@ -37,7 +37,13 @@ pub(crate) fn artist(c: &Connection, links: &[(String, String, String)], source:
 }
 pub(super) fn x_following(ctx: &TaskContext, path: &Path, net: &mut Net) -> Result<Value> {
     let mut c = cache::connect(path)?;
-    let keys=c.prepare("SELECT key FROM leads WHERE source='x_following' AND (status='pending' OR (status='unresolved' AND next_due_at<=datetime('now'))) ORDER BY added_at,key")?.query_map([],|r|r.get::<_,String>(0))?.collect::<rusqlite::Result<Vec<_>>>()?;
+    let due = "
+        SELECT key
+        FROM leads
+        WHERE source='x_following'
+          AND (status='pending' OR (status='unresolved' AND next_due_at<=datetime('now')))
+        ORDER BY added_at,key";
+    let keys = c.prepare(due)?.query_map([], |r| r.get::<_, String>(0))?.collect::<rusqlite::Result<Vec<_>>>()?;
     let (mut asked, mut resolved, mut unresolved) = (0, 0, 0);
     let mut stopped = String::new();
     for key in keys {
@@ -98,7 +104,11 @@ pub(super) fn pixiv_following(ctx: &TaskContext, path: &Path, net: &mut Net) -> 
     }
     let mut c = cache::connect(path)?;
     let target = format!("following:{uid}");
-    let due=c.query_row("SELECT next_due_at IS NULL OR next_due_at<=datetime('now') FROM lookups WHERE target=? AND backend='pixiv_following'",[&target],|r|r.get::<_,bool>(0)).optional()?.unwrap_or(true);
+    let due = "
+        SELECT next_due_at IS NULL OR next_due_at<=datetime('now')
+        FROM lookups
+        WHERE target=? AND backend='pixiv_following'";
+    let due = c.query_row(due, [&target], |r| r.get::<_, bool>(0)).optional()?.unwrap_or(true);
     if !due {
         return Ok(json!({"candidates":0,"pages":0,"stopped":""}));
     }
@@ -217,9 +227,11 @@ fn post(c: &Connection, asset: &str, p: &Value, method: &str, score: f64) -> Res
             json!({"danbooru_post":id,"score":similarity})
         };
         let sql = if method == "pixel_hash" {
-            "INSERT OR REPLACE INTO image_artists(asset,artist_id,method,score,evidence,status) VALUES (?,?,?,?,?,'auto')"
+            "INSERT OR REPLACE INTO image_artists(asset,artist_id,method,score,evidence,status)
+             VALUES (?,?,?,?,?,'auto')"
         } else {
-            "INSERT OR IGNORE INTO image_artists(asset,artist_id,method,score,evidence,status) VALUES (?,?,?,?,?,'auto')"
+            "INSERT OR IGNORE INTO image_artists(asset,artist_id,method,score,evidence,status)
+             VALUES (?,?,?,?,?,'auto')"
         };
         c.execute(
             sql,
@@ -241,119 +253,122 @@ pub(super) fn hashes(ctx: &TaskContext, path: &Path, net: &mut Net, step: &str, 
     }
     let rows = v.as_array().ok_or_else(|| Error::Invalid("签名计算结果无效".into()))?;
     let mut c = cache::connect(path)?;
+    if step == "pixel_hash" {
+        pixel_hashes(ctx, &mut c, net, rows)
+    } else {
+        iqdb(ctx, &mut c, net, step, rows)
+    }
+}
+/// Looks the pictures' pixel hashes up on Danbooru, fifty at a time.
+fn pixel_hashes(ctx: &TaskContext, c: &mut Connection, net: &mut Net, rows: &[Value]) -> Result<Value> {
     let (mut looked, mut hits, mut unreadable, mut failed) = (0, 0, 0, 0);
     let mut stopped = String::new();
-    if step == "pixel_hash" {
-        for chunk in rows.chunks(50) {
-            let mut by_hash = BTreeMap::<String, Vec<String>>::new();
-            for row in chunk {
-                let asset = row["asset"].as_str().ok_or_else(|| Error::Invalid("签名缺少图片身份".into()))?;
-                if let Some(hash) = row["hash"].as_str() {
-                    if hash.len() != 32 || !hash.bytes().all(|b| b.is_ascii_hexdigit()) {
-                        return Err(Error::Invalid("像素哈希无效".into()));
-                    }
-                    by_hash.entry(hash.into()).or_default().push(asset.into());
-                } else {
-                    unreadable += 1;
+    for chunk in rows.chunks(50) {
+        let mut by_hash = BTreeMap::<String, Vec<String>>::new();
+        for row in chunk {
+            let asset = row["asset"].as_str().ok_or_else(|| Error::Invalid("签名缺少图片身份".into()))?;
+            if let Some(hash) = row["hash"].as_str() {
+                if hash.len() != 32 || !hash.bytes().all(|b| b.is_ascii_hexdigit()) {
+                    return Err(Error::Invalid("像素哈希无效".into()));
+                }
+                by_hash.entry(hash.into()).or_default().push(asset.into());
+            } else {
+                unreadable += 1;
+            }
+        }
+        if by_hash.is_empty() {
+            continue;
+        }
+        let mut u = url::Url::parse("https://danbooru.donmai.us/media_assets.json")
+            .expect("internal service URL must be valid");
+        for hash in by_hash.keys() {
+            u.query_pairs_mut().append_pair("search[pixel_hash][]", hash);
+        }
+        u.query_pairs_mut()
+            .append_pair("only", "id,pixel_hash,post[id,tag_string_artist,source]")
+            .append_pair("limit", "1000");
+        let answer = match net.json(ctx, u.as_str()) {
+            Ok(v) => v,
+            Err(e) => {
+                if !net.terminal_refusal() {
+                    failed += by_hash.values().map(Vec::len).sum::<usize>();
+                }
+                stopped = e.to_string();
+                break;
+            }
+        };
+        let posts = answer.as_array().ok_or_else(|| Error::Network("像素哈希响应无效".into()))?;
+        let tx = c.transaction()?;
+        for (hash, assets) in by_hash {
+            let found = posts.iter().filter(|v| v["pixel_hash"] == hash && v["post"].is_object()).collect::<Vec<_>>();
+            let result = if found.is_empty() { "miss" } else { "hit" };
+            for asset in assets {
+                for p in &found {
+                    post(&tx, &asset, &p["post"], "pixel_hash", 1.0)?;
+                }
+                tx.execute("INSERT INTO lookups(target,backend,attempts,last_at,last_result) VALUES (?,'pixel_hash',1,datetime('now'),?) ON CONFLICT(target,backend) DO UPDATE SET attempts=attempts+1,last_at=excluded.last_at,last_result=excluded.last_result",params![asset,result])?;
+                looked += 1;
+                if !found.is_empty() {
+                    hits += 1;
                 }
             }
-            if by_hash.is_empty() {
-                continue;
+        }
+        tx.commit()?;
+    }
+    let misses = looked - hits;
+    Ok(json!({
+        "looked":looked,"hits":hits,"misses":misses,"unreadable":unreadable,"failed":failed,"stopped":stopped
+    }))
+}
+/// Asks Danbooru's IQDB for each picture's best match (at most 10,000 pictures), taking it from a score of 80.
+fn iqdb(ctx: &TaskContext, c: &mut Connection, net: &mut Net, step: &str, rows: &[Value]) -> Result<Value> {
+    let (mut looked, mut hits, mut failed) = (0, 0, 0);
+    let mut stopped = String::new();
+    let mut artists = BTreeSet::new();
+    for row in rows.iter().take(10000) {
+        ctx.check()?;
+        let asset = row["asset"].as_str().ok_or_else(|| Error::Invalid("签名缺少图片身份".into()))?;
+        let result = if let Some(hash) = row["hash"].as_str() {
+            if !hash.starts_with("iqdb_") || hash.len() > 3000 {
+                return Err(Error::Invalid("IQDB 签名无效".into()));
             }
-            let mut u = url::Url::parse("https://danbooru.donmai.us/media_assets.json")
-                .expect("internal service URL must be valid");
-            for hash in by_hash.keys() {
-                u.query_pairs_mut().append_pair("search[pixel_hash][]", hash);
-            }
-            u.query_pairs_mut()
-                .append_pair("only", "id,pixel_hash,post[id,tag_string_artist,source]")
-                .append_pair("limit", "1000");
-            let answer = match net.json(ctx, u.as_str()) {
+            let answer = match net.json(ctx, &address("/iqdb_queries.json", &[("hash", hash), ("limit", "3")])) {
                 Ok(v) => v,
                 Err(e) => {
                     if !net.terminal_refusal() {
-                        failed += by_hash.values().map(Vec::len).sum::<usize>();
+                        failed += 1;
                     }
                     stopped = e.to_string();
                     break;
                 }
             };
-            let posts = answer.as_array().ok_or_else(|| Error::Network("像素哈希响应无效".into()))?;
-            let tx = c.transaction()?;
-            for (hash, assets) in by_hash {
-                let found =
-                    posts.iter().filter(|v| v["pixel_hash"] == hash && v["post"].is_object()).collect::<Vec<_>>();
-                for asset in assets {
-                    for p in &found {
-                        post(&tx, &asset, &p["post"], step, 1.0)?;
-                    }
-                    tx.execute("INSERT INTO lookups(target,backend,attempts,last_at,last_result) VALUES (?,'pixel_hash',1,datetime('now'),?) ON CONFLICT(target,backend) DO UPDATE SET attempts=attempts+1,last_at=excluded.last_at,last_result=excluded.last_result",params![asset,if found.is_empty(){"miss"}else{"hit"}])?;
-                    looked += 1;
-                    if !found.is_empty() {
-                        hits += 1;
-                    }
+            let score = |p: &Value| p["score"].as_f64().unwrap_or(0.0);
+            let best = answer.as_array().into_iter().flatten().max_by(|a, b| score(a).total_cmp(&score(b)));
+            if let Some(p) = best.filter(|p| score(p) >= 80.0 && p["post"].is_object()) {
+                let tx = c.transaction()?;
+                let score = p["score"].as_f64().expect("validated internal numeric field");
+                if post(&tx, asset, &p["post"], step, score)? {
+                    artists.insert(p["post"]["tag_string_artist"].to_string());
                 }
+                tx.commit()?;
+                hits += 1;
+                "hit"
+            } else {
+                "miss"
             }
-            tx.commit()?;
-        }
-        Ok(
-            json!({"looked":looked,"hits":hits,"misses":looked-hits,"unreadable":unreadable,"failed":failed,"stopped":stopped}),
-        )
-    } else {
-        let mut artists = BTreeSet::new();
-        for row in rows.iter().take(10000) {
-            ctx.check()?;
-            let asset = row["asset"].as_str().ok_or_else(|| Error::Invalid("签名缺少图片身份".into()))?;
-            let result = if let Some(hash) = row["hash"].as_str() {
-                if !hash.starts_with("iqdb_") || hash.len() > 3000 {
-                    return Err(Error::Invalid("IQDB 签名无效".into()));
-                }
-                let answer = match net.json(ctx, &address("/iqdb_queries.json", &[("hash", hash), ("limit", "3")])) {
-                    Ok(v) => v,
-                    Err(e) => {
-                        if !net.terminal_refusal() {
-                            failed += 1;
-                        }
-                        stopped = e.to_string();
-                        break;
-                    }
-                };
-                let best =
-                    answer.as_array().into_iter().flatten().max_by(|a, b| {
-                        a["score"].as_f64().unwrap_or(0.0).total_cmp(&b["score"].as_f64().unwrap_or(0.0))
-                    });
-                if let Some(p) = best.filter(|p| p["score"].as_f64().unwrap_or(0.0) >= 80.0 && p["post"].is_object()) {
-                    let tx = c.transaction()?;
-                    if post(
-                        &tx,
-                        asset,
-                        &p["post"],
-                        step,
-                        p["score"].as_f64().expect("validated internal numeric field"),
-                    )? {
-                        artists.insert(p["post"]["tag_string_artist"].to_string());
-                    }
-                    tx.commit()?;
-                    hits += 1;
-                    "hit"
-                } else {
-                    "miss"
-                }
-            } else {
-                "unreadable"
-            };
-            let delay = if result == "miss" {
-                "+90 days"
-            } else if result == "unreadable" {
-                "+7 days"
-            } else {
-                "+1 hour"
-            };
-            c.execute("INSERT INTO lookups(target,backend,attempts,last_at,last_result,next_due_at) VALUES (?,'iqdb',1,datetime('now'),?,datetime('now',?)) ON CONFLICT(target,backend) DO UPDATE SET attempts=attempts+1,last_at=excluded.last_at,last_result=excluded.last_result,next_due_at=excluded.next_due_at",params![asset,if result=="unreadable"{"miss"}else{result},delay])?;
-            looked += 1;
-        }
-        Ok(json!({"asked":looked,"hits":hits,"artists":artists.len(),"failed":failed,"stopped":stopped}))
+        } else {
+            "unreadable"
+        };
+        let delay = match result {
+            "miss" => "+90 days",
+            "unreadable" => "+7 days",
+            _ => "+1 hour",
+        };
+        let result = if result == "unreadable" { "miss" } else { result };
+        c.execute("INSERT INTO lookups(target,backend,attempts,last_at,last_result,next_due_at) VALUES (?,'iqdb',1,datetime('now'),?,datetime('now',?)) ON CONFLICT(target,backend) DO UPDATE SET attempts=attempts+1,last_at=excluded.last_at,last_result=excluded.last_result,next_due_at=excluded.next_due_at",params![asset,result,delay])?;
+        looked += 1;
     }
+    Ok(json!({"asked":looked,"hits":hits,"artists":artists.len(),"failed":failed,"stopped":stopped}))
 }
 pub(super) fn report(lib: &Library, path: &Path) -> Result<Value> {
     let s = crate::app_library::read_connection(&lib.source())?;
@@ -424,9 +439,12 @@ pub(super) fn report(lib: &Library, path: &Path) -> Result<Value> {
             )
         })
         .collect::<BTreeMap<_, _>>();
-    Ok(
-        json!({"pictures":total,"with_artist":formatted,"with_original_post":format!("{} ({:.1}%)",posts.len(),posts.len() as f64/pictures.len().max(1) as f64*100.0),"by_seed_source":by_source,"conflicts":owned.iter().filter(|(a,s)|pictures.contains_key(*a)&&s.len()>1).count(),"numbers":{"pictures":total,"with_artist":have,"with_original_post":posts.len()}}),
-    )
+    let with_post = format!("{} ({:.1}%)", posts.len(), posts.len() as f64 / pictures.len().max(1) as f64 * 100.0);
+    let conflicts = owned.iter().filter(|(a, s)| pictures.contains_key(*a) && s.len() > 1).count();
+    Ok(json!({
+        "pictures":total,"with_artist":formatted,"with_original_post":with_post,"by_seed_source":by_source,
+        "conflicts":conflicts,"numbers":{"pictures":total,"with_artist":have,"with_original_post":posts.len()}
+    }))
 }
 
 pub(super) fn validate_hashes(lib: &Library, path: &Path, step: &str, value: &Value, only: &[String]) -> Result<Value> {
@@ -450,7 +468,10 @@ pub(super) fn validate_hashes(lib: &Library, path: &Path, step: &str, value: &Va
             return Err(Error::Invalid("签名结果超出当前任务资产范围或重复".into()));
         }
         let done = if step == "pixel_hash" {
-            cache.query_row("SELECT EXISTS(SELECT 1 FROM lookups WHERE target=? AND backend='pixel_hash' AND last_result IN ('hit','miss'))",[asset],|r|r.get::<_,bool>(0))?
+            let looked = "
+                SELECT EXISTS(
+                  SELECT 1 FROM lookups WHERE target=? AND backend='pixel_hash' AND last_result IN ('hit','miss'))";
+            cache.query_row(looked, [asset], |r| r.get::<_, bool>(0))?
         } else {
             cache.query_row(
                 "SELECT EXISTS(SELECT 1 FROM image_artists WHERE asset=? AND status='auto')",
