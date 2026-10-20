@@ -399,14 +399,14 @@ struct Keepalive {
 }
 impl Keepalive {
     const EVERY: Duration = Duration::from_secs(5);
-    fn start(every: Duration, print: fn(&str)) -> Self {
+    fn start(every: Duration, print: fn(u32, &str)) -> Self {
         let (stop, stopped) = std::sync::mpsc::channel::<()>();
         let thread = thread::spawn(move || {
             while let Err(std::sync::mpsc::RecvTimeoutError::Timeout) = stopped.recv_timeout(every / 5) {
                 let mut last = LAST_PROGRESS.lock().expect("startup progress lock poisoned");
                 if let Some((permille, stage, at)) = last.as_mut().filter(|(_, _, at)| at.elapsed() >= every) {
                     *at = Instant::now();
-                    print(&format!("启动进度：{permille} {stage}"));
+                    print(*permille, stage);
                 }
             }
         });
@@ -421,8 +421,8 @@ impl Drop for Keepalive {
         }
     }
 }
-fn print_progress_line(line: &str) {
-    println!("{line}");
+fn print_progress_line(permille: u32, stage: &str) {
+    println!("启动进度：{permille} {stage}");
     let _ = std::io::Write::flush(&mut std::io::stdout());
 }
 
@@ -705,8 +705,8 @@ mod tests {
             time::{Duration, Instant},
         };
         static PRINTED: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
-        fn print(line: &str) {
-            PRINTED.lock().unwrap().push(line.to_owned());
+        fn print(permille: u32, stage: &str) {
+            PRINTED.lock().unwrap().push(format!("{permille} {stage}"));
         }
         *LAST_PROGRESS.lock().unwrap() = Some((600, "正在备份图库".into(), Instant::now()));
         let alive = Keepalive::start(Duration::from_millis(40), print);
@@ -714,7 +714,7 @@ mod tests {
         drop(alive);
         let printed = PRINTED.lock().unwrap().clone();
         assert!(printed.len() >= 2, "{printed:?}");
-        assert!(printed.iter().all(|line| line == "启动进度：600 正在备份图库"), "{printed:?}");
+        assert!(printed.iter().all(|line| line == "600 正在备份图库"), "{printed:?}");
         thread::sleep(Duration::from_millis(120));
         assert_eq!(PRINTED.lock().unwrap().len(), printed.len(), "nothing after the guard ends");
         *LAST_PROGRESS.lock().unwrap() = None;

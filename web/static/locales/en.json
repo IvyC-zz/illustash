@@ -2260,7 +2260,7 @@
   "只在你点「检查更新」时": "Only when you click \"Check for updates\"",
   "自动检查更新": "Check for updates automatically",
   "启动时和之后每天查一次 GitHub 上有没有新版本，有新版本时提示你，不会自己下载或安装": "Asks GitHub for a new version at launch and once a day after that, and tells you when there is one; nothing is downloaded or installed on its own",
-  "还没有检查过": "Not checked yet",
+  "还没有检查过": "never",
   "有新版本 {version}": "Version {version} is available",
   "已是最新版本": "You have the latest version",
   "自动检查已关闭，可在「设置 › 网络与隐私」里打开": "Automatic checks are off; turn them on in Settings › Network and privacy",
@@ -2315,12 +2315,17 @@
   "抢救完成，正在重新打开图库…": "Rescue finished; opening the library again…",
   "抢救没有完成：{error}": "The rescue did not finish: {error}",
   "识别结果数据库已经重建。从损坏的文件里读回了 {salvaged} 张图的记录，按整理记录找回了 {kept} 张图的 ID。": "The recognition results database has been rebuilt. Records of {salvaged} pictures were read back from the damaged file, and {kept} pictures got their IDs back from your organizing records.",
-  "{n} 张图没有找到原来的 ID，按新图处理。": {"one": "{n} picture had no earlier ID on record and is treated as new.", "other": "{n} pictures had no earlier ID on record and are treated as new."},
-  "{n} 张图需要重新识别，会在同步时进行。": {"one": "{n} picture needs to be recognized again; this happens during sync.", "other": "{n} pictures need to be recognized again; this happens during sync."},
+  "{n} 张图没有找到原来的 ID，按新图处理。": {
+    "one": "{n} picture had no earlier ID on record and is treated as new.",
+    "other": "{n} pictures had no earlier ID on record and are treated as new."
+  },
+  "{n} 张图需要重新识别，会在同步时进行。": {
+    "one": "{n} picture needs to be recognized again; this happens during sync.",
+    "other": "{n} pictures need to be recognized again; this happens during sync."
+  },
   "损坏的文件留在：\n{path}\n确认图库一切正常后可以删掉它。": "The damaged file was kept at:\n{path}\nOnce you are sure the library is fine, you can delete it.",
   "抢救完成": "Rescue finished",
   "图库数据库损坏，导入已取消": "A library database is damaged; the import was cancelled",
-  "还没有检查过": "never",
   "正在检查 {file}，{percent}%": "Checking {file}, {percent}%",
   "上次检查：library.sqlite {library}，source.sqlite {source}": "Last checked: library.sqlite {library}, source.sqlite {source}",
   "上次检查没有完成：{error}": "The last check didn't finish: {error}",
@@ -2356,12 +2361,18 @@
   "删除已经下载但还没完成的部分？下次要从头下载。": "Delete what has been downloaded but not finished? The next download starts over.",
   "删除": "Delete",
   "识别模型已就位，开始识别": "The recognition models are in place; recognition is starting",
-  "还缺 {n} 个文件": {"one": "{n} file still missing", "other": "{n} files still missing"},
+  "还缺 {n} 个文件": {
+    "one": "{n} file still missing",
+    "other": "{n} files still missing"
+  },
   "下载识别模型": "Download recognition models",
   "一次普通的 HTTPS 下载，取回模型文件；不发送图库里的任何信息": "A plain HTTPS download of the model files; nothing from your library is sent",
   "只在你点「下载」时": "Only when you click Download",
   "下载识别模型中": "Downloading recognition models",
-  "有 {n} 张图等待识别（识别模型还没下载）": {"one": "{n} picture waits for recognition (the recognition models aren't downloaded yet)", "other": "{n} pictures wait for recognition (the recognition models aren't downloaded yet)"},
+  "有 {n} 张图等待识别（识别模型还没下载）": {
+    "one": "{n} picture waits for recognition (the recognition models aren't downloaded yet)",
+    "other": "{n} pictures wait for recognition (the recognition models aren't downloaded yet)"
+  },
   "识别模型还没下载": "the recognition models aren't downloaded yet",
   "有 {pending} 张图等待识别；{why}": "{pending} pictures are waiting for recognition; {why}",
   "识别模型还没下载；下载后才能更新角色索引": "The recognition models aren't downloaded yet; the character index can be updated once they are",
@@ -2397,7 +2408,10 @@
   "ModelScope 的测试地址只允许本机 HTTP 端口": "The ModelScope test address must be a local HTTP port",
   "选择下载好的模型文件（.onnx、.json 或 .zip）": "Choose the downloaded model files (.onnx, .json or .zip)",
   "模型文件": "Model files",
-  "{n} 字节": {"one": "{n} byte", "other": "{n} bytes"},
+  "{n} 字节": {
+    "one": "{n} byte",
+    "other": "{n} bytes"
+  },
   "{path} 没能下载，每个来源都试过了": "Couldn't download {path}; every source was tried",
   "{source}：{why}": "{source}: {why}",
   "正在识别或下载，等它结束再删除": "Recognizing or downloading; delete once it has finished",
@@ -2406,5 +2420,10 @@
   "删除识别模型": "Delete recognition models",
   "识别模型已删除": "Recognition models deleted",
   "这个安装自带识别模型，不能删除": "This installation comes with its recognition models; they can't be deleted",
-  "正在识别图片，等它结束再删除识别模型": "Pictures are being recognized; delete the recognition models once it has finished"
+  "正在识别图片，等它结束再删除识别模型": "Pictures are being recognized; delete the recognition models once it has finished",
+  "正在检查图库数据（{label}）": "Checking library data ({label})",
+  "正在备份图库": "Backing up the library",
+  "正在升级图库": "Upgrading the library",
+  "正在回收图库空间": "Reclaiming the library's free space",
+  "正在核对升级后的图库数据": "Checking the upgraded library's data"
 }
