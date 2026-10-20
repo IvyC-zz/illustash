@@ -411,7 +411,7 @@ fn entities(c: &Connection, q: &str) -> Result<Json> {
       FROM {ENTITIES} e
       {matched}
       WHERE e.parent_id IS NULL AND e.kind<>'work' AND e.merged_into IS NULL
-      ORDER BY {ranking}count DESC,entity_name(e.id)
+      ORDER BY {ranking}count DESC,entity_name(e.id),e.id
       LIMIT 30");
     let result = rows(c, &sql, &[&like(&q)])?.into_iter().map(|v| display(c, v)).collect::<Result<Vec<_>>>()?;
     c.execute("DELETE FROM name_matches", [])?;

@@ -100,9 +100,10 @@ class CharacterReadHTTPTest(HTTPHarness):
         live = lambda path: self.live(self.rec.value('response'), '/api/' + path)
         for path in ['characters', 'characters?summary=1', 'tagged', 'identity/queue', 'identity/count', 'detail?id=a']:
             live(path)
-        # Names written past the core, as the recording wrote them on r4-legacy.
+        # Names written past the core, as the recording wrote them on r4-legacy: the first three characters by id (the
+        # former query read them through the `entities_parent` index).
         with self.connect() as c:
-            ids=[r[0] for r in c.execute("SELECT t.key FROM term_tree r JOIN terms t ON t.id=r.term_id WHERE t.kind='character' AND r.parent_id IS NULL AND r.merged_into IS NULL ORDER BY t.id LIMIT 3")]
+            ids=[r[0] for r in c.execute("SELECT t.key FROM term_tree r JOIN terms t ON t.id=r.term_id WHERE t.kind='character' AND r.parent_id IS NULL AND r.merged_into IS NULL ORDER BY t.key LIMIT 3")]
             for e in ids:
                 rename(c, e, '平局')
             c.execute("DELETE FROM meta WHERE key='identity_policy'")

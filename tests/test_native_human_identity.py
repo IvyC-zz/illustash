@@ -85,7 +85,7 @@ class NativeHumanIdentityTest(unittest.TestCase):
         before = labels.snapshot(self.right.db)
         for lib in (self.left,self.right):
             with closing(sqlite3.connect(lib.db)) as c:
-                c.execute("CREATE TRIGGER fail_merge BEFORE INSERT ON term_tree BEGIN SELECT RAISE(ABORT,'synthetic merge failure'); END"); c.commit()
+                c.execute("CREATE TRIGGER fail_merge BEFORE UPDATE ON term_tree BEGIN SELECT RAISE(ABORT,'synthetic merge failure'); END"); c.commit()
         self.pair('/api/merge', {'source':self.bob,'target':self.alice}, expected=500)
         for lib in (self.left,self.right):
             with closing(sqlite3.connect(lib.db)) as c: c.execute('DROP TRIGGER fail_merge'); c.commit()

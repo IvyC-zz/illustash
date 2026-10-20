@@ -252,7 +252,7 @@ pub(crate) fn request(c: &mut Connection, body: &Json, path: &str, prepared: Opt
                               SELECT t.key FROM term_names n JOIN terms t ON t.id = n.term_id
                               WHERE n.value = ? COLLATE NOCASE AND n.source = 'user')
                             AND NOT EXISTS(SELECT 1 FROM {LINKS} l WHERE l.entity_id=e.id)))
-                 ORDER BY e.seq",
+                 ORDER BY e.id",
                 ENTITIES = crate::character_entities::ENTITIES,
                 LINKS = crate::character_links::LINKS
             );

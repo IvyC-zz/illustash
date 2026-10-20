@@ -1217,7 +1217,8 @@ fn untagged(c: &Connection) -> Result<Vec<String>> {
            WHERE l.core_system IN {tag_systems} AND l.key <> '' AND l.current = 1
            UNION
            SELECT l.entity_id FROM {LINKS} l
-           WHERE l.core_system IN {tag_systems} AND l.key = '' AND l.current = 1)"
+           WHERE l.core_system IN {tag_systems} AND l.key = '' AND l.current = 1)
+         ORDER BY id"
     ))?
     .query_map([], |r| r.get(0))?
     .collect::<rusqlite::Result<_>>()?)

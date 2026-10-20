@@ -1016,7 +1016,7 @@ fn local_links(source: &mut Source) -> Result<Json> {
          FROM {ENTITIES} e
          WHERE e.kind='character' AND e.parent_id IS NULL AND e.merged_into IS NULL AND e.original=0 AND e.label_only=0
            AND NOT EXISTS(SELECT 1 FROM {LINKS} l WHERE l.entity_id=e.id AND l.current=1)
-         ORDER BY count DESC,e.seq",
+         ORDER BY count DESC,e.id",
         ENTITIES = crate::character_entities::ENTITIES,
         LINKS = crate::character_links::LINKS
     );

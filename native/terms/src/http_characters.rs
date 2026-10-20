@@ -566,7 +566,7 @@ pub fn read(c: &Connection, _context: &LibraryContext, path: &str, q: &HashMap<S
                    (SELECT count(*) FROM tag_memberships m WHERE m.entity=e.id AND {visible}{rating}) AS count
                  FROM {ENTITIES} e
                  WHERE e.mascot=1 AND e.merged_into IS NULL
-                 ORDER BY count DESC,name",
+                 ORDER BY count DESC,name,e.seq",
                 visible = visible("m"),
                 rating = rating("m", get("nsfw"))?,
             );
