@@ -107,20 +107,9 @@ class BrowseReadHTTPTest(HTTPHarness):
         # switch itself changed the artist attribution (the Python-era artist tables no supported library has): the
         # details of `a` and `extra-0`, artist A's assets, count and ids, and artist A with an unreadable provenance
         # database (500 before the switch, 200 after).
-        legacy = [self.rec.value('response') for _ in range(294)]
-        artists_before_switch = {266, 267, 275, 276, 277, 290}
-        compared = []
-        recorded = self.pair
-        def pair(path, *args, **kwargs):
-            reference = recorded(path, *args, **kwargs)
-            if len(compared) not in artists_before_switch:
-                before = legacy[len(compared)]
-                self.assertEqual((before['status'], before['body']), (reference['status'], reference['body']), path)
-            compared.append(path)
-            return reference
-        self.pair = pair
-        self.addCleanup(vars(self).pop, 'pair', None)
+        before = [self.rec.value('response') for _ in range(294)]
         self.sync('switched'); self.publish()
+        compared = self.after_switch(before, differ={266, 267, 275, 276, 277, 290})
         for nsfw in ('','hide','only'):
             for pool in ('','duplicates','excluded','unmatched','pending','recent','audit'):
                 for order in ('newest','oldest','hinted','suspicious'):

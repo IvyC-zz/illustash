@@ -66,16 +66,16 @@ class CoreReadHTTPTest(HTTPHarness):
     def test_equal_sort_keys_and_legacy_name_fallback(self):
         ties=self.root/'ties'; ties.mkdir(exist_ok=True)
         self.sync('ties'); self.publish()
-        # First the library before it switched to the core (no `meta`): refused since core v8 (#201, only switched
-        # libraries are kept), and the core no longer keeps the legacy tables its reads fell back to.
-        for _ in range(6):
-            self.rec.skip('response')
+        # The library before the switch (no `meta`, see `after_switch`): all 6 recorded replies equal the ones after it.
+        before = [self.rec.value('response') for _ in range(6)]
         self.sync('switched'); self.publish()
+        compared = self.after_switch(before, differ=set())
         for path in ('/api/entities', '/api/entities?q='+urlencode({'q':'排序平局'}).split('=',1)[1], '/api/works', '/api/works?'+urlencode({'q':'作品平局'})):
             self.pair(path)
         # Explicitly check repeated requests with identical SQL sort keys.
         first=self.pair('/api/entities?'+urlencode({'q':'排序平局'}))['body']
         self.assertEqual(first,self.pair('/api/entities?'+urlencode({'q':'排序平局'}))['body'])
+        self.assertEqual(len(compared), 6)
 
     def test_gzip_accept_encoding_retains_headers_and_core_execution(self):
         baseline = self.pair('/api/entities')['body']
@@ -103,11 +103,31 @@ class ArtistReadHTTPTest(HTTPHarness):
         package = self.root/'Artists #雪?.pilib'
         ids = self.rec.value('ids')
         self.sync('artists'); self.publish()
-        # First the library before it switched to the core (no `meta`): refused since core v8 (#201, only switched
-        # libraries are kept), and the core no longer keeps the legacy name tables its reads fell back to.
-        for _ in range(32):
-            self.rec.skip('response')
+        # The library before the switch (no `meta`, see `after_switch`): 32 recorded replies.
+        before = [self.rec.value('response') for _ in range(32)]
         self.sync('switched'); self.publish()
+        # The first 9 were recorded only before the switch: the audit with unusual evidence counts in the provenance
+        # database (json.loads accepts nonfinite values and integers beyond f64 precision). Before the switch the reason
+        # quoted that count ("nan", "inf", "True" … 张); after it the count comes from the core's attribution, which the
+        # switch also changed (artist A: 2 images before, 1 after). So they cannot equal the replies recorded before;
+        # on v8 the evidence count must not change the reply at all.
+        prov = package/'provenance.sqlite'
+        with self.connect(prov) as pc:
+            evidence = pc.execute("SELECT rowid,evidence FROM image_artists WHERE artist_id='C'").fetchall()
+        replies = []
+        for count in ('NaN','Infinity','-Infinity','1e400','123456789012345678901234567890',
+                      '{"z":"雪🙂", "a":[1.0,true,null]}', 'null', 'true', '"text"'):
+            with self.connect(prov) as pc:
+                pc.execute("UPDATE image_artists SET evidence=? WHERE artist_id='C'",('{"count":'+count+'}',)); pc.commit()
+            replies.append(verify.fetch(self.origin, {'url': '/api/artist-audit', 'headers': {}}, self.origin))
+        with self.connect(prov) as pc:
+            pc.executemany("UPDATE image_artists SET evidence=? WHERE rowid=?", [(e, r) for r, e in evidence]); pc.commit()
+        self.assertEqual({(r['status'], r['body']) for r in replies}, {(200, replies[0]['body'])})
+        # The other 23 follow after the switch. 14 equal the replies recorded before it. The 9 others differ because the
+        # switch changed the artists: M's name (a legacy artist table name before, "未知画师" after), the image counts
+        # in the audits (A: 2 → 1, and extra homes), and with the provenance database parked or unreadable the legacy
+        # reads went through it (an empty pool, no name, a 500) while the core's do not.
+        compared = self.after_switch(before[9:], differ={3, 10, 11, 12, 13, 16, 17, 18, 21})
         for id in ('A','B','C','M','D','N','missing','雪🙂',''):
             self.pair('/api/artist?'+urlencode({'id':id}))
         self.assertTrue(json.loads(self.pair('/api/artists')['body']))
@@ -119,7 +139,7 @@ class ArtistReadHTTPTest(HTTPHarness):
         sample=next(x for x in result['items'] if x['uuid']==ids[0])
         self.assertTrue(sample['artists']); self.assertEqual(len(sample['maybe']),2)
         self.assertTrue(sample['artists'][0]['homes']); self.assertTrue(sample['posts'])
-        prov=package/'provenance.sqlite'; parked=package/'parked-provenance.sqlite'
+        parked=package/'parked-provenance.sqlite'
         prov.rename(parked)
         try:
             no_aux=json.loads(self.pair('/api/artist-audit')['body'])
@@ -134,4 +154,5 @@ class ArtistReadHTTPTest(HTTPHarness):
         finally:
             if prov.is_dir(): prov.rmdir()
             parked.rename(prov)
+        self.assertEqual(len(compared), 23)
 
