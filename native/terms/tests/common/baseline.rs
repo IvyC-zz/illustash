@@ -20,9 +20,22 @@ use std::sync::LazyLock;
 
 pub const FORMAT: i64 = 1;
 
-/// The legacy tables core v8 retires: their content moves to `term_*` and is compared there.
-pub const RETIRED: [&str; 7] =
-    ["entities", "links", "work_review", "names", "display_names", "name_aliases", "identity_baseline"];
+/// The legacy tables core v8 retires: their content moves to `term_*` and is compared there. The recordings still hold
+/// the identity relation tables (they were retired after recording): their recorded changes are left out too
+/// (`apply`).
+pub const RETIRED: [&str; 11] = [
+    "entities",
+    "links",
+    "work_review",
+    "names",
+    "display_names",
+    "name_aliases",
+    "identity_baseline",
+    "identity_relations",
+    "identity_evidence",
+    "identity_decisions",
+    "identity_decision_evidence",
+];
 
 /// Columns left out: hashes over packaging details, as in the recordings before; and columns core v8 added, which
 /// the baseline (recorded on core version 7) cannot hold (rule 5, each named with the reason):
@@ -275,7 +288,7 @@ pub fn apply(before: &State, delta: &Value) -> Result<State, String> {
         }
     }
     if let Some(tables) = delta.get("tables").and_then(Value::as_object) {
-        for (name, change) in tables {
+        for (name, change) in tables.iter().filter(|(name, _)| !RETIRED.contains(&name.as_str())) {
             let table = out.entry(name.clone()).or_default();
             if let Some(columns) = change.get("columns") {
                 table.columns = columns.as_array().unwrap().iter().map(|c| c.as_str().unwrap().to_owned()).collect();

@@ -1,6 +1,7 @@
-//! S3 relation commands: append-only core decisions, legacy-shaped compatibility
-//! rows, full graph validation, and undo audit. The caller owns the transaction.
+//! S3 relation commands: append-only core decisions read back in the legacy shape
+//! (`character_relations`), full graph validation, and undo audit. The caller owns the transaction.
 use crate::character_entities::ENTITIES;
+use crate::character_relations::RELATIONS;
 use crate::{character_graph, character_json, legacy_characters, Error, Result};
 use rusqlite::{params, Connection, OptionalExtension};
 use serde_json::{json, Value};
@@ -15,6 +16,24 @@ fn relation_core(c: &Connection, id: i64) -> Result<i64> {
     c.query_row("SELECT core_id FROM term_legacy_ids WHERE kind='relation' AND legacy_id=?", [id], |r| r.get(0))
         .optional()?
         .ok_or_else(|| invalid("关系候选不存在"))
+}
+/// 一条关系现在的状态（旧编号 `id`），没有这条关系为 None。
+fn relation_status(c: &Connection, id: i64) -> Result<Option<String>> {
+    Ok(c.prepare_cached(&format!("SELECT r.status FROM {RELATIONS} r WHERE r.id = ?1"))?
+        .query_row([id], |r| r.get(0))
+        .optional()?)
+}
+/// 一对身份之间的重复关系（两个方向都算）的旧编号。原来的查询按两个方向依次走唯一索引，先 `a = ?1` 的方向。
+fn duplicate(c: &Connection, a: &str, b: &str) -> Result<Option<i64>> {
+    Ok(c.prepare_cached(&format!(
+        "SELECT r.id
+             FROM {RELATIONS} r
+             WHERE r.kind = 'duplicate_of' AND ((r.a = ?1 AND r.b = ?2) OR (r.a = ?2 AND r.b = ?1))
+             ORDER BY r.a = ?1 DESC
+             LIMIT 1"
+    ))?
+    .query_row(params![a, b], |r| r.get(0))
+    .optional()?)
 }
 fn next_id(c: &Connection, kind: &str) -> Result<i64> {
     Ok(c.query_row("SELECT coalesce(max(legacy_id),0)+1 FROM term_legacy_ids WHERE kind=?", [kind], |r| r.get(0))?)
@@ -46,14 +65,10 @@ pub fn propose(c: &Connection, a: &str, b: &str, kind: &str, evidence: Option<&V
     }
     let (a, b) = if kind == "different_from" && a > b { (b, a) } else { (a, b) };
     let existing: Option<i64> = if kind == "duplicate_of" {
-        c.query_row(
-            "SELECT id FROM identity_relations WHERE kind=?1 AND ((a=?2 AND b=?3) OR (a=?3 AND b=?2))",
-            params![kind, a, b],
-            |r| r.get(0),
-        )
-        .optional()?
+        duplicate(c, a, b)?
     } else {
-        c.query_row("SELECT id FROM identity_relations WHERE a=? AND b=? AND kind=?", params![a, b, kind], |r| r.get(0))
+        c.prepare_cached(&format!("SELECT r.id FROM {RELATIONS} r WHERE r.a = ?1 AND r.b = ?2 AND r.kind = ?3"))?
+            .query_row(params![a, b, kind], |r| r.get(0))
             .optional()?
     };
     let id = match existing {
@@ -89,7 +104,6 @@ pub fn propose(c: &Connection, a: &str, b: &str, kind: &str, evidence: Option<&V
             c.execute("INSERT INTO term_evidence(relation_id,source,method,version,data,fingerprint) VALUES (?,?,'identity_evidence',?,?,?)",params![core,source,fp,data.to_string(),legacy_characters::fingerprint16(&fp)])?;
         }
     }
-    legacy_characters::project_relation(c, id)?;
     Ok(id)
 }
 
@@ -106,7 +120,7 @@ pub fn decide(
         return Err(invalid("请保存明确的关系决议及理由"));
     }
     let core = relation_core(c, id)?;
-    let previous: String = c.query_row("SELECT status FROM identity_relations WHERE id=?", [id], |r| r.get(0))?;
+    let previous = relation_status(c, id)?.ok_or(rusqlite::Error::QueryReturnedNoRows)?;
     let reviewed: Vec<i64> = c
         .prepare("SELECT id FROM term_evidence WHERE relation_id=? AND method='identity_evidence' ORDER BY id")?
         .query_map([core], |r| r.get(0))?
@@ -154,7 +168,6 @@ pub fn decide(
         "INSERT INTO term_legacy_ids(kind,legacy_id,core_id) VALUES ('decision',?,?)",
         params![decision, decision_core],
     )?;
-    legacy_characters::project_relation(c, id)?;
     Ok(json!({"relation_id":id,"previous_status":previous,"decision_id":decision,"status":status}))
 }
 
@@ -219,8 +232,7 @@ pub fn command(c: &Connection, args: &Value) -> Result<Value> {
             let mut skipped = Vec::new();
             for id in ids {
                 let id = id.as_i64().ok_or_else(|| invalid("关系 ID 不正确"))?;
-                let previous: Option<String> =
-                    c.query_row("SELECT status FROM identity_relations WHERE id=?", [id], |r| r.get(0)).optional()?;
+                let previous = relation_status(c, id)?;
                 if previous.as_deref() != Some("proposed") {
                     continue;
                 }
@@ -289,14 +301,7 @@ pub fn undo_merge(c: &Connection, m: &Value) -> Result<()> {
         return Err(invalid("合并快照不完整"));
     }
     let (a, b) = (text(&m["source"], "合并快照不完整")?, text(&m["target"], "合并快照不完整")?);
-    let relation: Option<i64> = c
-        .query_row(
-            "SELECT id FROM identity_relations WHERE kind='duplicate_of' AND ((a=?1 AND b=?2) OR (a=?2 AND b=?1))",
-            params![a, b],
-            |r| r.get(0),
-        )
-        .optional()?;
-    let relation = relation.ok_or_else(|| invalid("旧合并缺少迁移记录，请先核验备份"))?;
+    let relation = duplicate(c, a, b)?.ok_or_else(|| invalid("旧合并缺少迁移记录，请先核验备份"))?;
     decide(c, relation, "proposed", "撤销历史合并；原归属无法区分的认领待确认", None, "undo_audit")?;
     character_graph::rebuild(c)?;
     Ok(())

@@ -1,6 +1,7 @@
 //! Line-for-line semantics of web/identity.py _graph / _project, hybrid only.
 //! Baseline order is the preserved legacy rowid (seq); representatives are b-side.
 use crate::character_entities::ENTITIES;
+use crate::character_relations::{DECISIONS, DECISION_EVIDENCE, EVIDENCE, RELATIONS};
 use crate::{character_json, character_projection, Error, Result};
 use rusqlite::{params, Connection, OptionalExtension};
 use serde_json::{json, Value};
@@ -53,8 +54,7 @@ pub fn graph(c: &Connection) -> Result<Graph> {
     let index = |s: &str| positions.get(s).copied().ok_or_else(|| invalid("关系端点不存在"));
     let accepted: Vec<(String, String, String)> = c
         .prepare_cached(&format!(
-            "WITH relations(id,a,b,kind,status) AS ({}) SELECT a,b,kind FROM relations WHERE status='accepted' ORDER BY id",
-            crate::legacy_characters::compat_select("identity_relations")?
+            "SELECT r.a, r.b, r.kind FROM {RELATIONS} r WHERE r.status = 'accepted' ORDER BY r.id"
         ))?
         .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
         .collect::<rusqlite::Result<_>>()?;
@@ -119,12 +119,23 @@ pub fn graph(c: &Connection) -> Result<Graph> {
     Ok(Graph { nodes, mapping, hierarchy, families })
 }
 
-const PENDING: &str = "SELECT DISTINCT n.character_id
-      FROM identity_relations r JOIN identity_nodes n ON n.id=r.a
-      JOIN identity_evidence e ON e.relation_id=r.id AND e.source='legacy-hierarchy'
-      WHERE r.kind='form_of' AND r.status='accepted' AND NOT EXISTS(
-        SELECT 1 FROM identity_decision_evidence x WHERE x.fingerprint=e.fingerprint
-        AND x.decision_id=(SELECT max(d.id) FROM identity_decisions d WHERE d.relation_id=r.id))";
+/// 还没复核的继承层级所在的人物：已接受的皮肤从属关系带着继承层级的证据，而关系最新的一条决议没有复核过这条证据。
+/// 每条关系最新的决议先算一次，不在每行里重算决议片段。
+fn pending_query() -> String {
+    format!(
+        "WITH latest(relation_id, id) AS (
+           SELECT d.relation_id, max(d.id) FROM {DECISIONS} d GROUP BY d.relation_id
+         )
+         SELECT DISTINCT n.character_id
+         FROM {RELATIONS} r
+         JOIN identity_nodes n ON n.id = r.a
+         JOIN {EVIDENCE} e ON e.relation_id = r.id AND e.source = 'legacy-hierarchy'
+         LEFT JOIN latest l ON l.relation_id = r.id
+         WHERE r.kind = 'form_of' AND r.status = 'accepted' AND NOT EXISTS(
+           SELECT 1 FROM {DECISION_EVIDENCE} x WHERE x.fingerprint = e.fingerprint AND x.decision_id = l.id
+         )"
+    )
+}
 
 pub fn version(c: &Connection) -> Result<String> {
     let rows: Vec<Value> = c
@@ -132,7 +143,7 @@ pub fn version(c: &Connection) -> Result<String> {
         .query_map([], |r| Ok(json!([r.get::<_, String>(0)?, r.get::<_, Option<String>>(1)?, r.get::<_, String>(2)?])))?
         .collect::<rusqlite::Result<_>>()?;
     let pending: BTreeSet<String> =
-        c.prepare_cached(PENDING)?.query_map([], |r| r.get(0))?.collect::<rusqlite::Result<_>>()?;
+        c.prepare_cached(&pending_query())?.query_map([], |r| r.get(0))?.collect::<rusqlite::Result<_>>()?;
     Ok(crate::strict_json::sha256_hex(character_json::dump(&json!([rows, pending]), true).as_bytes()))
 }
 

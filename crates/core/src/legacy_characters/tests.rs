@@ -6,8 +6,8 @@ const BOB: &str = "b0b00000-0000-4000-8000-000000000002";
 const SKIN: &str = "5k1n0000-0000-4000-8000-000000000003";
 const WORK: &str = "w0rk0000-0000-4000-8000-000000000004";
 
-/// 一个小的旧库（hybrid）：作品、人物、皮肤，人工结论、候选和一条继承层级关系。迁移时身份照旧表建成词条（核心里
-/// 还没有身份）。
+/// 一个小的旧库（hybrid）：作品、人物、皮肤，人工结论和候选。迁移时身份照旧表建成词条（核心里还没有身份）。旧的身份
+/// 关系表是空的：核心里没有关系时，旧表里的关系会让升级拒绝（`retire_relations`）。
 fn library() -> Connection {
     library_from(OLD)
 }
@@ -22,13 +22,9 @@ fn library_from(old: &str) -> Connection {
          INSERT INTO entities(id,name,work,kind,work_id) VALUES ('{WORK}','','','work',NULL),('{ALICE}','','Example','character','{WORK}'),
           ('{BOB}','','Example','character',NULL);
          INSERT INTO entities(id,name,kind,parent_id,variant,mascot,mascot_origin) VALUES ('{SKIN}','','skin','{ALICE}','alice_(summer)',1,'user');
-         INSERT INTO identity_relations(id,a,b,kind,status) VALUES (7,'{SKIN}','{ALICE}','form_of','accepted');
-         INSERT INTO identity_evidence VALUES (7,'{fp}','legacy-hierarchy','{{\"inherited_parent_id\":\"x\"}}','2026-09-03 00:00:00');
-         INSERT INTO identity_decisions VALUES (3,7,'proposed','accepted','保留既有层级并使其可撤销；不代表新增人工确认','2026-09-03 00:00:00');
          INSERT INTO actions(label,before_json) VALUES ('否定','[{{\"uuid\":\"a\",\"entity\":\"{ALICE}\",\"assertion\":{{\"status\":\"confirmed\",\"origin\":\"album\"}},\"deferred\":false}}]');
          INSERT INTO assertions VALUES ('a','{ALICE}','rejected','review'),('b','{BOB}','confirmed','legacy_import');
-         INSERT INTO candidates VALUES ('a','{ALICE}','WD',0.9),('b','{ALICE}','CCIP',0.95),('b','{BOB}','WD',0.7);",
-        fp = "ab".repeat(32)
+         INSERT INTO candidates VALUES ('a','{ALICE}','WD',0.9),('b','{ALICE}','CCIP',0.95),('b','{BOB}','WD',0.7);"
     ))
     .unwrap();
     crate::migrate(&mut c).unwrap();

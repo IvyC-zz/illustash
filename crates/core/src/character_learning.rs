@@ -54,9 +54,10 @@ fn stamp(c: &Connection) -> Result<String> {
     feed(&mut h, b"character-learning-v1");
     for &table in INPUTS {
         feed(&mut h, table.as_bytes());
-        // The identities, the character links and the identity baseline live in core tables since core v8 (#201);
-        // they are read in the former tables' shape (the identities without the three columns the core never
-        // carried), so the same rows give the same stamp.
+        // The identities, the character links, the identity baseline and the identity relations live in core tables
+        // since core v8 (#201); they are read in the former tables' shape (the identities without the three columns
+        // the core never carried), so the same rows give the same stamp.
+        let relations = crate::character_relations::TABLES.iter().find(|(name, _, _)| *name == table);
         let (stored, from) = match table {
             "entities" => (
                 "term_tree",
@@ -73,7 +74,10 @@ fn stamp(c: &Connection) -> Result<String> {
                 "term_identity_baseline",
                 "(SELECT id, parent_id, variant, kind, merged_into FROM term_identity_baseline)".to_owned(),
             ),
-            _ => (table, table.to_owned()),
+            _ => match relations {
+                Some((_, columns, fragment)) => ("term_legacy_ids", format!("(SELECT {columns} FROM {fragment})")),
+                None => (table, table.to_owned()),
+            },
         };
         let exists: bool =
             c.query_row("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name=?)", [stored], |r| {

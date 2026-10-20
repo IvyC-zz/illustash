@@ -16,6 +16,7 @@ pub mod character_merge;
 pub mod character_names;
 pub mod character_profile;
 pub mod character_projection;
+pub mod character_relations;
 pub mod character_review;
 pub mod character_structure;
 pub mod compat_text;
