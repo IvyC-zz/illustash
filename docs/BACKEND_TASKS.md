@@ -66,7 +66,15 @@ CPU ONNX Runtime 1.30.0 使用官方标签 `v1.30.0`（`f2c39fe2`），在对应
 python tools/ci_build/build.py --config Release --build_dir ORT_BUILD --build_shared_lib --parallel 4 --skip_tests --skip_submodule_sync --compile_no_warning_as_error --cmake_generator Ninja --cmake_extra_defines CMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded ONNX_USE_MSVC_STATIC_RUNTIME=ON protobuf_MSVC_STATIC_RUNTIME=ON ABSL_MSVC_STATIC_RUNTIME=ON gtest_force_shared_crt=OFF
 ```
 
-**macOS 的 CPU ONNX Runtime：来源待定**（#190）。仓库里能确定的只有这些：`packaging/build.py` 不下载，只把 `--ort-dylib` 给的文件改名为 `resources/onnxruntime/libonnxruntime.dylib`，`--ort-licenses` 目录须有该分发的 `LICENSE` 和 `ThirdPartyNotices.txt`；宿主经 `ort` crate `=2.0.0-rc.10`（`load-dynamic`，见 `native/terms/Cargo.toml`）在运行时加载它；2026-10-04 的 macOS arm64 合成对照用的是 CPU ONNX Runtime 1.30.0（见 [识别结果包](RESULT_PACKAGES.md)），与上面 Windows 那份同一版本。用哪个分发、从哪里取、文件的 SHA-256，仓库里都没有记录；首次发布前定下来写在这里，只需要 arm64（2026-10-20 用户定，macOS 只发 Apple 芯片版）。`tests/requirements.txt` 里的 Python `onnxruntime` 只用于测试对照，不是打包来源。
+**macOS 的 CPU ONNX Runtime**（#190）：用 PyPI 上 `onnxruntime` 1.30.0 的 wheel 里自带的库，#7、#192 虚拟机验收用的 macOS 完整包就是这样打的。wheel 标签 `cp312-cp312-macosx_14_0_arm64`（经 delocate 0.13.0 处理）；`--ort-dylib` 传 wheel 里的 `onnxruntime/capi/libonnxruntime.1.30.0.dylib`（Mach-O arm64，SHA-256 `b46713ea6a25a5227541c21001f6422c1ccdeaecc369aa026a61b752520325c3`），`--ort-licenses` 传 wheel 里的 `onnxruntime/` 包目录，`LICENSE` 和 `ThirdPartyNotices.txt` 都在那里。版本与上面 Windows 那份相同，但 Windows 是从源码构建的，macOS 直接用上游发布的 wheel。macOS 只需要 arm64（2026-10-20 用户定，只发 Apple 芯片版）。复现时取同一个 wheel，解压后先核对上面的哈希：
+
+```sh
+pip download onnxruntime==1.30.0 --no-deps --only-binary=:all: --platform macosx_14_0_arm64 --python-version 3.12 --implementation cp -d <目录>
+unzip <目录>/onnxruntime-1.30.0-cp312-cp312-macosx_14_0_arm64.whl -d <解压目录>
+shasum -a 256 <解压目录>/onnxruntime/capi/libonnxruntime.1.30.0.dylib
+```
+
+`packaging/build.py` 不下载，只把 `--ort-dylib` 给的文件改名为 `resources/onnxruntime/libonnxruntime.dylib`，并按原字节复制许可文件；宿主经 `ort` crate `=2.0.0-rc.10`（`load-dynamic`，见 `native/terms/Cargo.toml`）在运行时加载它。2026-10-04 的 macOS arm64 合成对照用的也是 1.30.0（见 [识别结果包](RESULT_PACKAGES.md)）。`tests/requirements.txt` 的 `onnxruntime>=1.18,<2` 只管测试对照用的 Python 环境，不决定打包用的版本。
 
 **Windows 完整安装包（2026-10-03）**：在 Windows 用 `packaging/build.py --research --models PATH --openblas-site DIR --ort-dylib FILE --ort-licenses DIR --output NEW_PATH --desktop-compute packaging/desktop-compute` 暂存，再在 `desktop/` 运行 `tauri build --bundles nsis --config ../packaging/tauri-full.json`。完整 NSIS 包的资源只在安装目录下的 `compute/`（计算程序 `illustash-worker`、核心工具、IQDB、`resources/`、模型、CPU ONNX Runtime 与固定 OpenBLAS；2026-10-05 起不含 Python 运行时与计算源码；2026-10-13 起不再另带顶层 `resources/`，见下文「产物布局」）；普通快捷方式在创建线程前为当前进程配置这些组件，核心与计算使用同一模型/标签资源根，共享可写数据默认在 `%LOCALAPPDATA%\Illustash\Shared`。显式环境配置优先，不修改系统环境；缺组件显示重装提示，不静默退回“未启用”。基础安装配置不携带 `compute/`，仍不启用计算；2026-10-12 起与 macOS 共用同一校验（#36）：只要存在 `compute/`，`manifest.json` 就必须可解析并声明 format 1、variant research、platform win32，必需组件须存在且登记在 files 中，否则启动报错并提示重装完整版或先卸载再装基础版。联网溯源、参考数据下载与账号授权保持独立；CPU 推理，不包含个人图库、锚点或凭据。回退时先卸载完整版再装基础版，避免残留完整包标记触发计算；图库与共享数据不作为安装资源卸载。
 
