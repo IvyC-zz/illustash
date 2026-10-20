@@ -8,6 +8,7 @@
 //! 与旧代码相同地先用 SQLite 的 `LIKE`（只对 ASCII 不分大小写）筛，再按 Python 的 `str.casefold()` 比较
 //! （`casefold.rs`）；SQL 语句逐字照搬，行的顺序也就相同（作品命中那一段按行的顺序后者覆盖前者，旧代码如此）。
 use crate::casefold::casefold;
+use crate::character_links::LINKS;
 use crate::names_view::{readable, skin_zh, WORK_NAMES};
 use crate::Result;
 use rusqlite::{params_from_iter, Connection};
@@ -84,8 +85,14 @@ pub fn hits(c: &Connection, query: &str) -> Result<Hits> {
             false,
         )?;
     }
-    let tags = "SELECT coalesce(e.parent_id,e.id),{0} FROM links l JOIN entities e ON e.id=l.entity_id
-              WHERE e.kind<>'work' AND l.system IN ('danbooru','wd','photos_album','ccip','ccip_base','bangumi') AND {0} LIKE ? ESCAPE '\\'";
+    let tags = format!(
+        "SELECT coalesce(e.parent_id, e.id), {{0}}
+         FROM {LINKS} l
+         JOIN entities e ON e.id = l.entity_id
+         WHERE e.kind <> 'work'
+           AND l.core_system IN ('danbooru', 'wd_character', 'photos_album', 'ccip', 'ccip_base', 'bangumi')
+           AND {{0}} LIKE ? ESCAPE '\\'"
+    );
     s.add(&tags.replace("{0}", "l.key"), &[&like], true)?;
     s.add(&tags.replace("{0}", "replace(l.key,'_',' ')"), &[&like], false)?;
     s.add(
@@ -131,7 +138,7 @@ pub fn hits(c: &Connection, query: &str) -> Result<Hits> {
     let mut work_hits: Vec<(String, i64)> = Vec::new();
     let mut at: HashMap<String, usize> = HashMap::new();
     {
-        let mut stmt = c.prepare(
+        let mut stmt = c.prepare(&format!(
             "SELECT t.key, n.value
              FROM term_names n
              JOIN terms t ON t.id = n.term_id
@@ -139,10 +146,10 @@ pub fn hits(c: &Connection, query: &str) -> Result<Hits> {
              WHERE e.kind = 'work'
              UNION
              SELECT l.entity_id, l.key
-             FROM links l
+             FROM {LINKS} l
              JOIN entities e ON e.id = l.entity_id
-             WHERE e.kind = 'work'",
-        )?;
+             WHERE e.kind = 'work'"
+        ))?;
         let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
         for row in rows {
             let (ident, term) = row?;
@@ -214,15 +221,17 @@ mod tests {
         c.execute_batch(
             "CREATE TABLE entities(id TEXT PRIMARY KEY, kind TEXT, parent_id TEXT, work TEXT, artist TEXT, variant TEXT,
                work_id TEXT);
-             CREATE TABLE links(system TEXT, key TEXT, entity_id TEXT, current INTEGER);
              CREATE TABLE terms(id INTEGER PRIMARY KEY, key TEXT);
+             CREATE TABLE term_tree(term_id INTEGER PRIMARY KEY);
+             CREATE TABLE term_links(system TEXT, key TEXT, term_id INTEGER, current INTEGER, source TEXT, added_at TEXT);
              CREATE TABLE term_names(term_id INTEGER, value TEXT);
              CREATE TABLE term_key_names(kind TEXT, key TEXT, lang TEXT, source TEXT, value TEXT);
              CREATE TABLE term_key_aliases(kind TEXT, key TEXT, value TEXT, position INTEGER);
              INSERT INTO entities VALUES ('w','work',NULL,'','','',NULL),
                ('a','character',NULL,'blue_archive','','','w'),('s','skin','a','','','swimsuit',NULL);
-             INSERT INTO links VALUES ('danbooru','alice_(blue_archive)','a',1),('danbooru','ip_tag','w',1);
-             INSERT INTO terms VALUES (1,'a');
+             INSERT INTO terms VALUES (1,'a'),(2,'w'),(3,'s');
+             INSERT INTO term_tree VALUES (1),(2),(3);
+             INSERT INTO term_links VALUES ('danbooru','alice_(blue_archive)',1,1,'',''),('danbooru','ip_tag',2,1,'','');
              INSERT INTO term_names VALUES (1,'爱丽丝');",
         )
         .unwrap();

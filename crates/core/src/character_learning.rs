@@ -1,6 +1,7 @@
 //! S3 / D6: optimistic learning publication. The stamp is taken before the Python
 //! training snapshot; BEGIN IMMEDIATE checks it before any write. A change between
 //! stamp and snapshot conservatively rejects, never publishes stale training.
+use crate::character_links::LINKS;
 use crate::{character_projection, schema, Error, Result};
 use rusqlite::{
     params,
@@ -52,17 +53,24 @@ fn stamp(c: &Connection) -> Result<String> {
     feed(&mut h, b"character-learning-v1");
     for &table in INPUTS {
         feed(&mut h, table.as_bytes());
+        // The character links live in `term_links` since core v8 (#201); they are read in the former `links` shape,
+        // so the same links give the same stamp.
+        let (stored, from) = if table == "links" {
+            ("term_links", format!("(SELECT system, key, entity_id, current, source, added_at FROM {LINKS})"))
+        } else {
+            (table, table.to_owned())
+        };
         let exists: bool =
-            c.query_row("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name=?)", [table], |r| {
+            c.query_row("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name=?)", [stored], |r| {
                 r.get(0)
             })?;
         feed(&mut h, &[u8::from(exists)]);
         if !exists {
             continue;
         }
-        let cols = c.prepare(&format!("SELECT * FROM {table}"))?.column_count();
+        let cols = c.prepare(&format!("SELECT * FROM {from}"))?.column_count();
         let order = (1..=cols).map(|n| n.to_string()).collect::<Vec<_>>().join(",");
-        let mut statement = c.prepare(&format!("SELECT * FROM {table} ORDER BY {order}"))?;
+        let mut statement = c.prepare(&format!("SELECT * FROM {from} ORDER BY {order}"))?;
         let mut rows = statement.query([])?;
         while let Some(row) = rows.next()? {
             feed(&mut h, b"row");

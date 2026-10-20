@@ -100,12 +100,13 @@ fn fingerprint(c: &Connection) -> Result<String> {
 // earlier versions: only its own works and the unresolved tags carry over, and that file is never written again.
 const WATCH_PREF: &str = "index_watch";
 fn work_for_tag(c: &Connection, tag: &str, current: bool) -> Result<Option<String>> {
-    let sql = if current {
-        "SELECT l.entity_id FROM links l JOIN entities e ON e.id=l.entity_id WHERE l.system='danbooru' AND l.key=? AND l.current=1 AND e.kind='work'"
-    } else {
-        "SELECT l.entity_id FROM links l JOIN entities e ON e.id=l.entity_id WHERE l.system='danbooru' AND l.key=? AND e.kind='work'"
-    };
-    Ok(c.query_row(sql, [tag], |r| r.get(0)).optional()?)
+    let current = if current { " AND l.current = 1" } else { "" };
+    let sql = format!(
+        "SELECT l.entity_id FROM {LINKS} l JOIN entities e ON e.id = l.entity_id
+         WHERE l.core_system = 'danbooru' AND l.key = ?{current} AND e.kind = 'work'",
+        LINKS = crate::character_links::LINKS
+    );
+    Ok(c.query_row(&sql, [tag], |r| r.get(0)).optional()?)
 }
 fn legacy_watch(c: &Connection, dir: &Path) -> Result<Value> {
     let w = read(&dir.join("watch.json"), json!({"works":DEFAULTS,"min_posts":100}));
@@ -171,7 +172,7 @@ fn set_watch(lib: &Library, dir: &Path, b: &Value) -> Result<()> {
     let tx = c.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
     crate::schema::require_current(&tx)?;
     for w in works {
-        if !tx.query_row("SELECT EXISTS(SELECT 1 FROM entities e JOIN links l ON l.entity_id=e.id WHERE e.id=? AND e.kind='work' AND l.system='danbooru' AND l.current=1)",[w.as_str().expect("watch list was validated as strings")],|r|r.get::<_,bool>(0))?{return bad("只能关注已确认 Danbooru 链接的作品")}
+        if !tx.query_row(&format!("SELECT EXISTS(SELECT 1 FROM entities e JOIN {LINKS} l ON l.entity_id=e.id WHERE e.id=? AND e.kind='work' AND l.core_system='danbooru' AND l.current=1)", LINKS = crate::character_links::LINKS),[w.as_str().expect("watch list was validated as strings")],|r|r.get::<_,bool>(0))?{return bad("只能关注已确认 Danbooru 链接的作品")}
     }
     let mut w = load_watch(&tx, dir)?;
     let mut ids = vec![];
@@ -209,9 +210,12 @@ fn candidates(lib: &Library, shared: &Path, dir: &Path, net: &crate::app_name_so
     let mut tags = vec![];
     for id in w["works"].as_array().into_iter().flatten() {
         tags.extend(
-            app.prepare("SELECT key FROM links WHERE entity_id=? AND system='danbooru' AND current=1")?
-                .query_map([id.as_str().unwrap_or("")], |r| r.get::<_, String>(0))?
-                .collect::<rusqlite::Result<Vec<_>>>()?,
+            app.prepare(&format!(
+                "SELECT l.key FROM {LINKS} l WHERE l.entity_id = ? AND l.core_system = 'danbooru' AND l.current = 1",
+                LINKS = crate::character_links::LINKS
+            ))?
+            .query_map([id.as_str().unwrap_or("")], |r| r.get::<_, String>(0))?
+            .collect::<rusqlite::Result<Vec<_>>>()?,
         );
     }
     let rejected = if dir.join("rejected").is_dir() {
@@ -351,7 +355,7 @@ impl Updater {
                 h.remove("job_id");
             }
             for r in h["characters"].as_array_mut().into_iter().flatten() {
-                let id:Option<String>=c.query_row("SELECT coalesce(e.parent_id,e.id) FROM links l JOIN entities e ON e.id=l.entity_id WHERE l.system='ccip' AND l.key=?",[r["short_tag"].as_str().unwrap_or("")],|r|r.get(0)).optional()?;
+                let id:Option<String>=c.query_row(&format!("SELECT coalesce(e.parent_id,e.id) FROM {LINKS} l JOIN entities e ON e.id=l.entity_id WHERE l.core_system='ccip' AND l.key=?", LINKS = crate::character_links::LINKS),[r["short_tag"].as_str().unwrap_or("")],|r|r.get(0)).optional()?;
                 r["entity"] = if let Some(id) = id {
                     let e=c.query_row("SELECT entity_name(e.id),(SELECT count(*) FROM memberships m WHERE m.entity=e.id AND NOT EXISTS(SELECT 1 FROM duplicates h WHERE h.uuid=m.uuid AND h.hidden=1) AND NOT EXISTS(SELECT 1 FROM excluded x WHERE x.uuid=m.uuid)) FROM entities e WHERE e.id=?",[&id],|r|Ok((r.get::<_,String>(0)?,r.get::<_,i64>(1)?)))?;
                     let mut shown = crate::http_read::display(

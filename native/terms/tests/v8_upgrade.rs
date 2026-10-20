@@ -118,6 +118,9 @@ fn a_consistent_library_upgrades_retires_the_key_tables_and_fills_in_counted_ste
     let old_names =
         rows(&before, "SELECT entity_id, lang, value, source, role, preferred, position FROM names ORDER BY rowid");
     assert!(old_names.len() > 1);
+    let old_links =
+        rows(&before, "SELECT system, key, entity_id, current, source, added_at FROM links ORDER BY system, key");
+    assert!(old_links.iter().any(|l| l.contains("Text(\"wd\")")), "{old_links:?}");
     assert!(old_aliases.iter().any(|a| a.contains("合成别名")) && old_display.iter().any(|a| a.contains("合成作品名")));
     drop(before);
     assert_eq!(upgrade(&lib.db).unwrap(), "{\"from\":7,\"to\":8}\n");
@@ -130,11 +133,19 @@ fn a_consistent_library_upgrades_retires_the_key_tables_and_fills_in_counted_ste
                  FROM term_names n JOIN terms t ON t.id = n.term_id JOIN term_tree r ON r.term_id = n.term_id ORDER BY n.seq";
     assert_eq!(rows(&c, names), old_names, "names move to the core in their order");
     assert!(!exists(&c, "names"));
+    // The links too, WD written `wd_character` in the core.
+    let links =
+        "SELECT CASE x.system WHEN 'wd_character' THEN 'wd' ELSE x.system END, x.key, t.key, x.current, x.source,
+                   x.added_at
+                 FROM term_links x JOIN terms t ON t.id = x.term_id JOIN term_tree r ON r.term_id = x.term_id
+                 ORDER BY 1, 2";
+    assert_eq!(rows(&c, links), old_links, "links move to the core unchanged");
+    assert!(!exists(&c, "links"));
     // The names version now counts writes to the core's display names, as it counted the legacy table's.
     let version = names_version(&c);
     c.execute("INSERT INTO term_key_names VALUES ('skin','synthetic_skin','zh','user','合成皮肤名')", []).unwrap();
     assert_eq!(names_version(&c), version + 1);
-    // … and to the core's names of characters, skins and works, not to artists' names.
+    // … and to the core's names and links of characters, skins and works, not to artists'.
     c.execute(
         "INSERT INTO term_names(term_id, lang, value, source, role, seq)
          SELECT term_id, 'zh', '合成名', 'user', 'alias', 0 FROM term_tree LIMIT 1",
@@ -142,13 +153,21 @@ fn a_consistent_library_upgrades_retires_the_key_tables_and_fills_in_counted_ste
     )
     .unwrap();
     assert_eq!(names_version(&c), version + 2);
+    c.execute(
+        "INSERT INTO term_links(system, key, term_id, source) SELECT 'danbooru', 'synthetic_tag', term_id, 'user' FROM term_tree LIMIT 1",
+        [],
+    )
+    .unwrap();
+    assert_eq!(names_version(&c), version + 3);
     c.execute_batch(
         "INSERT INTO terms(key, kind, origin) VALUES ('synthetic_artist', 'artist', 'user');
          INSERT INTO term_names(term_id, lang, value, source, role)
-         SELECT id, 'zh', '合成画师', 'user', 'display' FROM terms WHERE key = 'synthetic_artist';",
+         SELECT id, 'zh', '合成画师', 'user', 'display' FROM terms WHERE key = 'synthetic_artist';
+         INSERT INTO term_links(system, key, term_id, source)
+         SELECT 'pixiv', '42', id, 'user' FROM terms WHERE key = 'synthetic_artist';",
     )
     .unwrap();
-    assert_eq!(names_version(&c), version + 2);
+    assert_eq!(names_version(&c), version + 3);
     let filled: Vec<(String, Option<String>, Option<String>)> = c
         .prepare("SELECT label,label_kind,label_count FROM actions ORDER BY id DESC LIMIT 4")
         .unwrap()
@@ -165,15 +184,25 @@ fn a_consistent_library_upgrades_retires_the_key_tables_and_fills_in_counted_ste
 
 #[test]
 fn legacy_tables_that_disagree_with_the_core_refuse_the_upgrade_and_change_nothing() {
-    let lib = library("disagree");
-    write(
-        &Connection::open(&lib.db).unwrap(),
-        "UPDATE links SET current=1-current WHERE rowid=(SELECT min(rowid) FROM links)",
-    );
-    let before = exact(&lib.db);
-    let refused = upgrade(&lib.db).unwrap_err();
-    assert!(refused.contains("旧兼容表与词条核心不一致"), "{refused}");
-    assert_eq!(exact(&lib.db), before);
+    for (name, sql, refusal) in [
+        (
+            "disagree-entities",
+            "UPDATE entities SET work='改过' WHERE rowid=(SELECT min(rowid) FROM entities)",
+            "旧兼容表与词条核心不一致",
+        ),
+        (
+            "disagree-links",
+            "UPDATE links SET current=1-current WHERE rowid=(SELECT min(rowid) FROM links)",
+            "旧链接表与词条核心不一致",
+        ),
+    ] {
+        let lib = library(name);
+        write(&Connection::open(&lib.db).unwrap(), sql);
+        let before = exact(&lib.db);
+        let refused = upgrade(&lib.db).unwrap_err();
+        assert!(refused.contains(refusal), "{name}: {refused}");
+        assert_eq!(exact(&lib.db), before);
+    }
 }
 
 #[test]

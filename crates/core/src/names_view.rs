@@ -6,6 +6,7 @@
 //!   qualifier 链接）、皮肤 variant。
 //!
 //! 结果曾与旧代码全量逐字对照；现由 native/terms/tests/baseline.rs 的新对照基准（#201，含 test_terms_names_projection）重放钉住。
+use crate::character_links::LINKS;
 use crate::{Error, Result};
 use rusqlite::{params, Connection};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
@@ -267,7 +268,9 @@ impl View {
             entities.insert(e.id.clone(), e);
         }
         for row in c
-            .prepare("SELECT system,key,entity_id FROM links WHERE current=1 ORDER BY added_at,key")?
+            .prepare(&format!(
+                "SELECT l.system, l.key, l.entity_id FROM {LINKS} l WHERE l.current = 1 ORDER BY l.added_at, l.key"
+            ))?
             .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?)))?
         {
             let (system, key, ident) = row?;
@@ -534,7 +537,10 @@ impl View {
             }
         }
         for row in c
-            .prepare("SELECT work FROM entities WHERE work<>'' UNION SELECT key FROM links WHERE system='qualifier'")?
+            .prepare(&format!(
+                "SELECT work FROM entities WHERE work <> ''
+                 UNION SELECT l.key FROM {LINKS} l WHERE l.core_system = 'qualifier'"
+            ))?
             .query_map([], |r| r.get::<_, String>(0))?
         {
             keys.insert(("work".to_owned(), row?));
@@ -692,11 +698,14 @@ impl Fetched {
     /// 当前 tag 恰好是 `tag` 的身份。tag 只可能来自这几种链接（`linked_tag`），按 `links` 主键找候选，再按优先级复核。
     fn tagged(&mut self, c: &Connection, tag: &str) -> Result<Vec<String>> {
         let candidates: Vec<String> = c
-            .prepare_cached(
-                "SELECT entity_id FROM links WHERE system IN ('danbooru','wd','photos_album','ccip') AND key=?1 AND current=1
-                 UNION SELECT entity_id FROM links WHERE system='ccip_base' AND current=1
-                  AND CASE WHEN json_valid(key) THEN json_extract(key,'$[0]') END=?1",
-            )?
+            .prepare_cached(&format!(
+                "SELECT l.entity_id FROM {LINKS} l
+                 WHERE l.core_system IN ('danbooru', 'wd_character', 'photos_album', 'ccip') AND l.key = ?1 AND l.current = 1
+                 UNION
+                 SELECT l.entity_id FROM {LINKS} l
+                 WHERE l.core_system = 'ccip_base' AND l.current = 1
+                   AND CASE WHEN json_valid(l.key) THEN json_extract(l.key, '$[0]') END = ?1"
+            ))?
             .query_map([tag], |r| r.get(0))?
             .collect::<rusqlite::Result<_>>()?;
         let mut found = Vec::new();
@@ -711,7 +720,9 @@ impl Fetched {
     /// 当前 qualifier 链接是 `key` 的身份。
     fn qualified(&mut self, c: &Connection, key: &str) -> Result<Vec<String>> {
         let candidates: Vec<String> = c
-            .prepare_cached("SELECT entity_id FROM links WHERE system='qualifier' AND key=? AND current=1")?
+            .prepare_cached(&format!(
+                "SELECT l.entity_id FROM {LINKS} l WHERE l.core_system = 'qualifier' AND l.key = ? AND l.current = 1"
+            ))?
             .query_map([key], |r| r.get(0))?
             .collect::<rusqlite::Result<_>>()?;
         let mut found = Vec::new();
@@ -737,7 +748,10 @@ fn link_up(c: &Connection, e: &mut Entity, links_sql: &str) -> Result<()> {
     Ok(())
 }
 
-const LINKS_SQL: &str = "SELECT system,key FROM links WHERE entity_id=? AND current=1 ORDER BY added_at,key";
+/// 一个身份的当前链接，按 `linked_tag` 要的先后。
+static LINKS_SQL: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| {
+    format!("SELECT l.system, l.key FROM {LINKS} l WHERE l.entity_id = ? AND l.current = 1 ORDER BY l.added_at, l.key")
+});
 
 fn current_work(c: &Connection, id: &str, has_work: bool) -> Result<String> {
     if !has_work {
@@ -792,7 +806,7 @@ fn old_state(c: &Connection, id: &str, has_work: bool) -> Result<Option<(String,
     let links = if seen {
         "SELECT system,key FROM names_old_links WHERE entity_id=? AND current=1 ORDER BY added_at,key"
     } else {
-        LINKS_SQL
+        LINKS_SQL.as_str()
     };
     link_up(c, &mut e, links)?;
     Ok(Some((work, e)))
@@ -824,7 +838,7 @@ fn fetch(c: &Connection, id: &str) -> Result<Option<(i64, Entity)>> {
         })
         .optional()?;
     let Some((rowid, mut e)) = found else { return Ok(None) };
-    link_up(c, &mut e, LINKS_SQL)?;
+    link_up(c, &mut e, &LINKS_SQL)?;
     Ok(Some((rowid, e)))
 }
 
@@ -967,8 +981,9 @@ impl Scope {
             {
                 existing.insert(("work".into(), row?));
             }
-            let mut linked =
-                c.prepare_cached("SELECT EXISTS(SELECT 1 FROM links WHERE system='qualifier' AND key=?)")?;
+            let mut linked = c.prepare_cached(&format!(
+                "SELECT EXISTS(SELECT 1 FROM {LINKS} l WHERE l.core_system = 'qualifier' AND l.key = ?)"
+            ))?;
             for key in works {
                 if linked.query_row([key], |r| r.get::<_, bool>(0))? {
                     existing.insert(("work".into(), key.to_owned()));
@@ -1197,14 +1212,17 @@ pub fn verify_choice(c: &Connection, kind: &str, key: &str, choice: &Choice) -> 
 /// 链接）里的非空键，或者持有其中某种链接的空键（同一种链接按 `added_at,key` 排在前面的空键会遮住后面的非空键；
 /// 每种链接的空键全库至多一条）。调用方再逐个按 `linked_tag` 复核。
 fn untagged(c: &Connection) -> Result<Vec<String>> {
-    Ok(c.prepare_cached(
-        "SELECT id FROM entities WHERE kind<>'work' AND parent_id IS NULL AND id IN (
-          SELECT entity_id FROM links WHERE current=1
-          EXCEPT SELECT entity_id FROM links
-           WHERE system IN ('danbooru','wd','photos_album','ccip') AND key<>'' AND current=1
-          UNION SELECT entity_id FROM links
-           WHERE system IN ('danbooru','wd','photos_album','ccip') AND key='' AND current=1)",
-    )?
+    let tag_systems = "('danbooru', 'wd_character', 'photos_album', 'ccip')";
+    Ok(c.prepare_cached(&format!(
+        "SELECT id FROM entities WHERE kind <> 'work' AND parent_id IS NULL AND id IN (
+           SELECT l.entity_id FROM {LINKS} l WHERE l.current = 1
+           EXCEPT
+           SELECT l.entity_id FROM {LINKS} l
+           WHERE l.core_system IN {tag_systems} AND l.key <> '' AND l.current = 1
+           UNION
+           SELECT l.entity_id FROM {LINKS} l
+           WHERE l.core_system IN {tag_systems} AND l.key = '' AND l.current = 1)"
+    ))?
     .query_map([], |r| r.get(0))?
     .collect::<rusqlite::Result<_>>()?)
 }
@@ -1234,8 +1252,8 @@ mod tests {
              INSERT INTO meta VALUES ('terms_names','core'),('names_version','0'),('names_projected','0');
              CREATE TABLE entities(id TEXT PRIMARY KEY,kind TEXT NOT NULL,parent_id TEXT,variant TEXT NOT NULL DEFAULT '',
               merged_into TEXT,original INTEGER,work TEXT NOT NULL DEFAULT '');
-             CREATE TABLE links(system TEXT,key TEXT,entity_id TEXT,current INTEGER NOT NULL DEFAULT 1,added_at TEXT,
-              PRIMARY KEY(system,key));
+             CREATE TABLE term_links(system TEXT,key TEXT,term_id INTEGER,url TEXT NOT NULL DEFAULT '',
+              source TEXT NOT NULL DEFAULT '',current INTEGER NOT NULL DEFAULT 1,added_at TEXT,PRIMARY KEY(system,key));
              CREATE TABLE terms(id INTEGER PRIMARY KEY,key TEXT NOT NULL UNIQUE);
              CREATE TABLE term_tree(term_id INTEGER PRIMARY KEY);
              -- New identities become terms at once, as the commands make them (`legacy_characters::born`).
@@ -1248,9 +1266,9 @@ mod tests {
              CREATE TABLE term_key_names(kind TEXT,key TEXT,lang TEXT,source TEXT,value TEXT,PRIMARY KEY(kind,key,lang,source,value));
              INSERT INTO entities VALUES ('e1','character',NULL,'',NULL,0,'series_w'),('e2','character',NULL,'',NULL,0,''),
               ('s1','skin','e1','swimsuit_x',NULL,0,''),('w1','work',NULL,'',NULL,0,''),('m1','character',NULL,'','e1',0,'');
-             INSERT INTO links VALUES ('danbooru','synth_(series_w)','e1',1,'2026-01-01'),('wd','synth_(series_w)','e2',1,'2026-01-02'),
-              ('danbooru','synth_swimsuit','s1',1,'2026-01-03'),('qualifier','series_w','w1',1,'2026-01-04'),
-              ('danbooru','merged_tag','m1',1,'2026-01-05');
+             INSERT INTO term_links(system,key,term_id,current,added_at) VALUES ('danbooru','synth_(series_w)',(SELECT id FROM terms WHERE key='e1'),1,'2026-01-01'),('wd_character','synth_(series_w)',(SELECT id FROM terms WHERE key='e2'),1,'2026-01-02'),
+              ('danbooru','synth_swimsuit',(SELECT id FROM terms WHERE key='s1'),1,'2026-01-03'),('qualifier','series_w',(SELECT id FROM terms WHERE key='w1'),1,'2026-01-04'),
+              ('danbooru','merged_tag',(SELECT id FROM terms WHERE key='m1'),1,'2026-01-05');
              INSERT INTO term_key_names VALUES ('skin','swimsuit_x','zh','index','皮肤名'),('work','series_w','zh','bangumi','作品名');",
         )
         .unwrap();
@@ -1292,10 +1310,10 @@ mod tests {
               ('m2','character',NULL,'','e3',0,''),('e4','character',NULL,'',NULL,0,''),
               ('b1','character',NULL,'',NULL,0,''),('b2','character',NULL,'',NULL,0,''),('w2','work',NULL,'',NULL,0,'series_w'),
               ('s3','skin','e3','',NULL,0,'');
-             INSERT INTO links VALUES ('danbooru','synth_swimsuit_2','s2',1,'2026-01-06'),('danbooru','lonely','e3',1,'2026-01-07'),
-              ('danbooru','member_tag','m2',1,'2026-01-08'),('ccip_base','[\"ccip_tag\",1]','e4',1,'2026-01-09'),
-              ('bangumi','b1','b1',1,'2026-01-10'),('danbooru','s3_tag','s3',1,'2026-01-13'),('bangumi','b2','b2',1,'2026-01-11'),
-              ('danbooru','old_tag','e4',0,'2026-01-12');
+             INSERT INTO term_links(system,key,term_id,current,added_at) VALUES ('danbooru','synth_swimsuit_2',(SELECT id FROM terms WHERE key='s2'),1,'2026-01-06'),('danbooru','lonely',(SELECT id FROM terms WHERE key='e3'),1,'2026-01-07'),
+              ('danbooru','member_tag',(SELECT id FROM terms WHERE key='m2'),1,'2026-01-08'),('ccip_base','[\"ccip_tag\",1]',(SELECT id FROM terms WHERE key='e4'),1,'2026-01-09'),
+              ('bangumi','b1',(SELECT id FROM terms WHERE key='b1'),1,'2026-01-10'),('danbooru','s3_tag',(SELECT id FROM terms WHERE key='s3'),1,'2026-01-13'),
+              ('bangumi','b2',(SELECT id FROM terms WHERE key='b2'),1,'2026-01-11'),('danbooru','old_tag',(SELECT id FROM terms WHERE key='e4'),0,'2026-01-12');
              INSERT INTO term_key_names VALUES ('character','member_tag','ja','wiki','メンバー');",
         )
         .unwrap();
@@ -1367,23 +1385,23 @@ mod tests {
             // Old variant key stays (s2), a new one appears.
             "UPDATE entities SET variant='other_v' WHERE id='s1'",
             // A deleted identity loses its rows, and its tag key leaves the choices.
-            "DELETE FROM links WHERE entity_id='s2'; DELETE FROM entities WHERE id='s2'",
+            "DELETE FROM term_links WHERE term_id=(SELECT id FROM terms WHERE key='s2'); DELETE FROM entities WHERE id='s2'",
             // A link changes hands: e1 becomes unlinked, e3 takes the older tag and 'lonely' leaves the choices.
-            "UPDATE links SET entity_id='e3' WHERE system='danbooru' AND key='synth_(series_w)'",
+            "UPDATE term_links SET term_id=(SELECT id FROM terms WHERE key='e3') WHERE system='danbooru' AND key='synth_(series_w)'",
             // Unmerged: the nameless e3 no longer borrows its member's name.
             "UPDATE entities SET merged_into=NULL WHERE id='m2'",
             // Merged into the nameless e3, which now borrows the first named member (e4 before m2).
             "UPDATE entities SET merged_into='e3' WHERE id='e4'",
             "INSERT INTO entities VALUES ('n1','character',NULL,'',NULL,0,'');
-             INSERT INTO links VALUES ('danbooru','new_tag','n1',1,'2026-01-20');
+             INSERT INTO term_links(system,key,term_id,current,added_at) VALUES ('danbooru','new_tag',(SELECT id FROM terms WHERE key='n1'),1,'2026-01-20');
              INSERT INTO term_names(term_id,lang,value,source,role,preferred,position,seq) VALUES
               ((SELECT id FROM terms WHERE key='n1'),'zh','新人','index','display',0,0,
                (SELECT coalesce(max(seq),0)+1 FROM term_names))",
             // REPLACE takes m2's link without firing the DELETE trigger.
-            "INSERT OR REPLACE INTO links VALUES ('danbooru','member_tag','e4',1,'2026-01-14')",
+            "INSERT OR REPLACE INTO term_links(system,key,term_id,current,added_at) VALUES ('danbooru','member_tag',(SELECT id FROM terms WHERE key='e4'),1,'2026-01-14')",
             "UPDATE entities SET work='series_new' WHERE id='e2'",
             "UPDATE entities SET kind='work' WHERE id='e2'",
-            "UPDATE links SET current=0 WHERE entity_id='e4' AND system='ccip_base'",
+            "UPDATE term_links SET current=0 WHERE term_id=(SELECT id FROM terms WHERE key='e4') AND system='ccip_base'",
         ];
         let before = projection(&c);
         for sql in cases {
@@ -1401,12 +1419,12 @@ mod tests {
         crate::legacy_names::track(&tx).unwrap();
         tx.execute_batch(
             "INSERT INTO entities VALUES ('n2','character',NULL,'',NULL,0,'');
-             INSERT INTO links VALUES ('danbooru','passing_tag','n2',1,'2026-01-21');",
+             INSERT INTO term_links(system,key,term_id,current,added_at) VALUES ('danbooru','passing_tag',(SELECT id FROM terms WHERE key='n2'),1,'2026-01-21');",
         )
         .unwrap();
         rebuild_changed(&tx).unwrap();
         assert!(projection(&tx).iter().any(|r| r[0] == rusqlite::types::Value::Text("n2".into())));
-        tx.execute_batch("DELETE FROM links WHERE entity_id='n2'; DELETE FROM entities WHERE id='n2';").unwrap();
+        tx.execute_batch("DELETE FROM term_links WHERE term_id=(SELECT id FROM terms WHERE key='n2'); DELETE FROM entities WHERE id='n2';").unwrap();
         rebuild_changed(&tx).unwrap();
         let changed = projection(&tx);
         rebuild(&tx).unwrap();
@@ -1418,7 +1436,7 @@ mod tests {
         crate::legacy_names::track(&tx).unwrap();
         for i in 0..300 {
             tx.execute(&format!("INSERT INTO entities VALUES ('bulk{i}','character',NULL,'',NULL,0,'')"), []).unwrap();
-            tx.execute(&format!("INSERT INTO links VALUES ('danbooru','bulk_{i}','bulk{i}',1,'2026-01-22')"), [])
+            tx.execute(&format!("INSERT INTO term_links(system,key,term_id,current,added_at) VALUES ('danbooru','bulk_{i}',(SELECT id FROM terms WHERE key='bulk{i}'),1,'2026-01-22')"), [])
                 .unwrap();
         }
         assert_eq!(rebuild_changed(&tx).unwrap(), Maintained::Whole);
@@ -1429,7 +1447,8 @@ mod tests {
         drop(tx);
         let tx = c.transaction().unwrap();
         crate::legacy_names::track(&tx).unwrap();
-        tx.execute_batch("UPDATE links SET added_at=added_at WHERE entity_id='e1'").unwrap();
+        tx.execute_batch("UPDATE term_links SET added_at=added_at WHERE term_id=(SELECT id FROM terms WHERE key='e1')")
+            .unwrap();
         let moved: i64 = tx
             .query_row(
                 "SELECT (SELECT count(*) FROM names_old_links_seen)+(SELECT count(*) FROM names_old_entities)",
@@ -1447,7 +1466,7 @@ mod tests {
         // name never joins its tag's character key.
         c.execute_batch(
             "INSERT INTO entities VALUES ('e5','character',NULL,'',NULL,0,'');
-             INSERT INTO links VALUES ('danbooru','','e5',1,'2026-01-14'),('danbooru','shadowed','e5',1,'2026-01-15');
+             INSERT INTO term_links(system,key,term_id,current,added_at) VALUES ('danbooru','',(SELECT id FROM terms WHERE key='e5'),1,'2026-01-14'),('danbooru','shadowed',(SELECT id FROM terms WHERE key='e5'),1,'2026-01-15');
              INSERT INTO term_key_names VALUES ('character','','zh','wiki','空键'),('work','unlisted','zh','bangumi','未收录'),
               ('character','nobody','ja','index','ダレ'),('character','synth_(series_w)','en','danbooru','Ignored'),
               ('work','touhou','zh','bangumi','东方');",
@@ -1497,7 +1516,7 @@ mod tests {
             "UPDATE term_names SET value='改名' WHERE term_id=(SELECT id FROM terms WHERE key='e1') AND lang='zh';
              DELETE FROM term_names WHERE term_id=(SELECT id FROM terms WHERE key='e5') AND source='user';
              INSERT INTO term_key_names VALUES ('skin','swimsuit_x','zh','user','用户皮肤'),('work','series_w','zh','user','用户作品');
-             UPDATE links SET current=0 WHERE entity_id='e2';",
+             UPDATE term_links SET current=0 WHERE term_id=(SELECT id FROM terms WHERE key='e2');",
         )
         .unwrap();
         same(&tx);

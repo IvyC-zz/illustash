@@ -6,6 +6,8 @@
 //! 前提：标签已切到核心（`general_hits`、`asset_rating` 是视图，跟着 `assets` 走），角色切换时检查。
 use crate::character_commands::{hybrid, resolve, verdict, At};
 use crate::character_evidence::{publish, Scope};
+use crate::character_links::{check_free, core_system, LINKS};
+use crate::character_names::TERM_OF;
 use crate::{character_graph, character_json, character_names, character_projection, legacy_characters, Error, Result};
 use rusqlite::{params, params_from_iter, Connection, OptionalExtension};
 use serde_json::{json, Value};
@@ -52,8 +54,8 @@ fn linked(c: &Connection, system: &str, key: &str) -> Result<Option<String>> {
     if key.is_empty() {
         return Ok(None);
     }
-    Ok(c.prepare_cached("SELECT entity_id FROM links WHERE system=? AND key=?")?
-        .query_row([system, key], |r| r.get(0))
+    Ok(c.prepare_cached(&format!("SELECT l.entity_id FROM {LINKS} l WHERE l.core_system = ? AND l.key = ?"))?
+        .query_row([core_system(system), key], |r| r.get(0))
         .optional()?)
 }
 
@@ -62,8 +64,11 @@ fn link(c: &Connection, entity: &str, system: &str, key: &str) -> Result<()> {
     if !LINK_SYSTEMS.contains(&system) {
         return Err(Error::Invalid("未知的外部来源".into()));
     }
-    c.prepare_cached("INSERT OR IGNORE INTO links(system,key,entity_id,source) VALUES (?,?,?,'import')")?
-        .execute([system, key, entity])?;
+    check_free(c, system, key)?;
+    c.prepare_cached(&format!(
+        "INSERT OR IGNORE INTO term_links(system, key, term_id, source) VALUES (?, ?, {TERM_OF}, 'import')"
+    ))?
+    .execute([core_system(system), key, entity])?;
     Ok(())
 }
 
@@ -81,7 +86,11 @@ fn entity(
         return Ok(found);
     }
     let ident = ids.get(system, key)?;
-    c.prepare_cached("INSERT INTO entities(id,name,work,kind,work_id) VALUES (?,'',?,'character',(SELECT entity_id FROM links WHERE system='qualifier' AND key=?))")?.execute(
+    c.prepare_cached(&format!(
+        "INSERT INTO entities(id, name, work, kind, work_id)
+         VALUES (?, '', ?, 'character', (SELECT l.entity_id FROM {LINKS} l WHERE l.core_system = 'qualifier' AND l.key = ?))"
+    ))?
+    .execute(
         [&ident, work, work],
     )?;
     legacy_characters::born(c, &ident, "legacy:characters")?;
@@ -148,13 +157,13 @@ pub fn default_tags(c: &Connection, touched: &mut BTreeSet<String>) -> Result<us
     let changed: Vec<String> = c
         .prepare_cached(&format!(
             "SELECT id FROM entities WHERE mascot_origin IS NULL AND mascot=0 AND parent_id IS NULL AND merged_into IS NULL AND kind<>'work'
-              AND id IN (SELECT entity_id FROM links WHERE key IN ({marks}))"
+              AND id IN (SELECT l.entity_id FROM {LINKS} l WHERE l.key IN ({marks}))"
         ))?
         .query_map(params_from_iter(DEFAULT_TAG_KEYS), |r| r.get(0))?
         .collect::<rusqlite::Result<_>>()?;
     let n = c.prepare_cached(&format!(
             "UPDATE entities SET mascot=1,mascot_origin='default' WHERE mascot_origin IS NULL AND mascot=0
-              AND parent_id IS NULL AND merged_into IS NULL AND kind<>'work' AND id IN (SELECT entity_id FROM links WHERE key IN ({marks}))"
+              AND parent_id IS NULL AND merged_into IS NULL AND kind<>'work' AND id IN (SELECT l.entity_id FROM {LINKS} l WHERE l.key IN ({marks}))"
         ))?.execute(
         params_from_iter(DEFAULT_TAG_KEYS),
     )?;
@@ -527,7 +536,7 @@ fn import(c: &Connection, args: &Value) -> Result<Value> {
     let mut touched_entities = BTreeSet::new();
     let ids = Ids(&args["new_ids"]);
     let chars: Chars = c
-        .prepare_cached("SELECT key,entity_id FROM links WHERE system='ccip'")?
+        .prepare_cached(&format!("SELECT l.key, l.entity_id FROM {LINKS} l WHERE l.core_system = 'ccip'"))?
         .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
         .collect::<rusqlite::Result<_>>()?;
     let mut wd: Wd = HashMap::new();

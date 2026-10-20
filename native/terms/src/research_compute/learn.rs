@@ -408,7 +408,10 @@ pub fn patch_anchors(snapshot: &Snapshot, root: &Path) -> Result<Anchors> {
     }
     let c = snapshot.read()?;
     let links: HashMap<String, String> = c
-        .prepare("SELECT key,entity_id FROM links WHERE system='ccip'")?
+        .prepare(&format!(
+            "SELECT l.key, l.entity_id FROM {LINKS} l WHERE l.core_system = 'ccip'",
+            LINKS = crate::character_links::LINKS
+        ))?
         .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
         .collect::<rusqlite::Result<_>>()?;
     let mut out = Anchors::default();

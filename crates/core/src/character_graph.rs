@@ -217,7 +217,10 @@ pub fn project(c: &Connection, g: &Graph) -> Result<Value> {
             v.clone()
         } else {
             c.prepare_cached(
-                "SELECT key FROM links WHERE entity_id=? AND system='danbooru' ORDER BY current DESC LIMIT 1",
+                &format!(
+                    "SELECT l.key FROM {} l WHERE l.entity_id = ? AND l.core_system = 'danbooru' ORDER BY l.current DESC LIMIT 1",
+                    crate::character_links::LINKS
+                ),
             )?
             .query_row([&n.id], |r| r.get(0))
             .optional()?

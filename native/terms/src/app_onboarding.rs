@@ -112,8 +112,10 @@ fn suggestions(c: &Connection, general: &[String], watched: &[String]) -> Result
          WHERE NOT EXISTS(SELECT 1 FROM duplicates h WHERE h.uuid=a.uuid AND h.hidden=1)
            AND NOT EXISTS(SELECT 1 FROM excluded x WHERE x.uuid=a.uuid)",
     )?;
-    let mut tags =
-        c.prepare_cached("SELECT key FROM links WHERE entity_id=? AND system IN ('wd','danbooru','ccip')")?;
+    let mut tags = c.prepare_cached(&format!(
+        "SELECT l.key FROM {LINKS} l WHERE l.entity_id = ? AND l.core_system IN ('wd_character', 'danbooru', 'ccip')",
+        LINKS = crate::character_links::LINKS
+    ))?;
     for row in
         rows.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, Option<String>>(2)?)))?
     {
@@ -162,7 +164,12 @@ fn suggestions(c: &Connection, general: &[String], watched: &[String]) -> Result
         let (name, tag, watchable) = match &id {
             Some(id) => {
                 let (name, linked): (String, Option<String>) = c.query_row(
-                    "SELECT entity_name(?1),(SELECT key FROM links WHERE entity_id=?1 AND system='danbooru' AND current=1 LIMIT 1)",
+                    &format!(
+                        "SELECT entity_name(?1),
+                           (SELECT l.key FROM {LINKS} l
+                            WHERE l.entity_id = ?1 AND l.core_system = 'danbooru' AND l.current = 1 LIMIT 1)",
+                        LINKS = crate::character_links::LINKS
+                    ),
                     [id],
                     |r| Ok((r.get(0)?, r.get(1)?)),
                 )?;
@@ -447,15 +454,21 @@ mod tests {
     fn suggestions_group_characters_by_work_and_skip_picture_tags() {
         let (_root, lib) = fixture();
         let c = crate::sqlite::open_with_flags(lib.db(), OpenFlags::SQLITE_OPEN_READ_WRITE).unwrap();
-        // Seeded as the core would have: entities and links are written only while holding its key.
+        // Seeded as the core would have: entities are written only while holding its key; their terms and links are
+        // the core's own tables.
         c.execute("INSERT INTO meta(key,value) VALUES (?1,'1')", [crate::schema::WRITER_KEY]).unwrap();
         c.execute_batch(
             "INSERT INTO assets(uuid) VALUES ('a1'),('a2'),('a3'),('a4');
              INSERT INTO entities(id,name,kind) VALUES ('hoshino','','character'),('shiroko','','character'),
                ('swim','','character'),('miku','','character');
-             INSERT INTO links(system,key,entity_id,source) VALUES ('wd','hoshino_(blue_archive)','hoshino','import'),
-               ('wd','shiroko_(blue_archive)','shiroko','import'),('wd','artoria_(swimsuit)','swim','import'),
-               ('wd','hatsune_miku','miku','import');
+             INSERT INTO terms(key,kind,origin) SELECT id,kind,'import' FROM entities
+               WHERE id IN ('hoshino','shiroko','swim','miku') ORDER BY rowid;
+             INSERT INTO term_tree(term_id) SELECT id FROM terms WHERE key IN ('hoshino','shiroko','swim','miku');
+             INSERT INTO term_links(system,key,term_id,source) VALUES
+               ('wd_character','hoshino_(blue_archive)',(SELECT id FROM terms WHERE key='hoshino'),'import'),
+               ('wd_character','shiroko_(blue_archive)',(SELECT id FROM terms WHERE key='shiroko'),'import'),
+               ('wd_character','artoria_(swimsuit)',(SELECT id FROM terms WHERE key='swim'),'import'),
+               ('wd_character','hatsune_miku',(SELECT id FROM terms WHERE key='miku'),'import');
              INSERT INTO memberships(uuid,entity,status,sources,source_count,ccip_only,skey)
                SELECT column1,column2,'auto','WD',1,0,'' FROM (VALUES ('a1','hoshino'),('a2','hoshino'),
                ('a2','shiroko'),('a3','swim'),('a4','miku'));",

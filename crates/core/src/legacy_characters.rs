@@ -7,7 +7,8 @@
 //! - `entities` → `terms`（key = 原 id，kind 原样，`variant`、`artist`、`label_only`、`mascot`、`mascot_origin`、
 //!   `original` 进 attrs）+ `term_tree`（`parent_id`、`merged_into`、`work_id`、`work` 文字、work_review 三列）。
 //!   有 `term_tree` 行的词条就是兼容 `entities` 里的一行。
-//! - `links` → `term_links`，角色的 `wd` 改名 `wd_character`（WD 题材占了 `wd`）。
+//! - `links` → `term_links`，角色的 `wd` 改名 `wd_character`（WD 题材占了 `wd`）。核心第 8 版起 `term_links` 是唯一
+//!   权威，旧表在升级时核对后删除（`retire_links`、`character_links`）。
 //! - `identity_baseline` → `term_identity_baseline`（`seq` = 原 rowid）。
 //! - `candidates` → 证据，整表作为一个迁移批次（全库覆盖）：WD → `wd.wd_character`，CCIP → `ccip_index.char_ext`。
 //! - `assertions` → 裁决，按 `actions` 历史逐目标重建（方案第 6.2 节）：快照项挂原来那一步，破坏式合并挂合并那一步，
@@ -156,8 +157,8 @@ pub(crate) fn born(c: &Connection, id: &str, origin: &str) -> Result<()> {
     mirror_state(c, &[id.to_owned()], origin)
 }
 
-/// 结构状态（实体的列、work_review、链接）由核心照旧 SQL 写进兼容表之后，把这些身份镜像进 `terms` / `term_tree` /
-/// `term_links`。映射与 S2 收编相同；新身份的 origin 是 `origin`。链接已属于别的类型的词条时拒绝。
+/// 结构状态（实体的列、work_review）由核心照旧 SQL 写进兼容表之后，把这些身份镜像进 `terms` / `term_tree`。映射与
+/// S2 收编相同；新身份的 origin 是 `origin`。链接由命令直接写 `term_links`（核心第 8 版，`character_links`）。
 pub(crate) fn mirror_state(c: &Connection, ids: &[String], origin: &str) -> Result<()> {
     c.execute_batch("CREATE TEMP TABLE IF NOT EXISTS state_scope(id TEXT PRIMARY KEY); DELETE FROM state_scope;")?;
     let mut put = c.prepare_cached("INSERT OR IGNORE INTO state_scope VALUES (?)")?;
@@ -192,50 +193,26 @@ pub(crate) fn mirror_state(c: &Connection, ids: &[String], origin: &str) -> Resu
           OR term_tree.parent_locked IS NOT excluded.parent_locked",
         [],
     )?;
-    let foreign: Option<(String, String)> = c
-        .query_row(
-            "SELECT l.system,l.key FROM links l
-             JOIN term_links x ON x.system=CASE l.system WHEN 'wd' THEN 'wd_character' ELSE l.system END AND x.key=l.key
-             WHERE l.entity_id IN (SELECT id FROM state_scope) AND x.term_id NOT IN (SELECT term_id FROM term_tree) LIMIT 1",
-            [],
-            |x| Ok((x.get(0)?, x.get(1)?)),
-        )
-        .optional()?;
-    if let Some((system, key)) = foreign {
-        return Err(Error::Conflict(format!("链接 {system}:{key} 已属于别的类型的词条")));
+    Ok(())
+}
+
+/// 核心第 8 版（#201）：`term_links` 成为角色、皮肤、作品链接的唯一权威（`character_links`）。旧表 `links` 还在时
+/// （升级前的库），每条改链接的命令都同步镜像过（`mirror_state`），所以按原来的兼容表映射逐行核对，与角色的核对
+/// 一样不一致就拒绝升级；一致就删掉旧表。旧表不在时什么都不做。
+pub(crate) fn retire_links(c: &Connection) -> Result<()> {
+    if !table_exists(c, "links")? {
+        return Ok(());
     }
-    // 链接从这些身份移到了别的身份：跟着旧表改归属（新主人不一定在范围里）。由范围驱动（`CROSS JOIN` 固定连接顺序），
-    // 不扫整张 `links`、`term_links`（#102 A2）；`term_links` 是普通表，插入仍按 `links` 的 rowid 顺序（原计划整表扫描
-    // `links` 的顺序）。每行旧链接只对应一个 (system,key)，连接不会产生重复行。
-    c.execute(
-        "INSERT INTO term_links(system,key,term_id,url,source,current,added_at)
-         SELECT CASE l.system WHEN 'wd' THEN 'wd_character' ELSE l.system END,l.key,t.id,'',l.source,l.current,l.added_at
-         FROM state_scope s CROSS JOIN terms st ON st.key=s.id CROSS JOIN term_links x ON x.term_id=st.id
-         CROSS JOIN links l ON l.key=x.key AND l.system IN (x.system,CASE x.system WHEN 'wd_character' THEN 'wd' END)
-          AND CASE l.system WHEN 'wd' THEN 'wd_character' ELSE l.system END=x.system
-         CROSS JOIN terms t ON t.key=l.entity_id WHERE true ORDER BY l.rowid
-         ON CONFLICT(system,key) DO UPDATE SET term_id=excluded.term_id,source=excluded.source,current=excluded.current,
-          added_at=excluded.added_at
-         WHERE term_links.term_id IS NOT excluded.term_id OR term_links.source IS NOT excluded.source
-          OR term_links.current IS NOT excluded.current OR term_links.added_at IS NOT excluded.added_at",
-        [],
-    )?;
-    c.execute(
-        "DELETE FROM term_links WHERE term_id IN (SELECT t.id FROM state_scope s CROSS JOIN terms t ON t.key=s.id) AND NOT EXISTS(
-          SELECT 1 FROM links l WHERE l.system=CASE term_links.system WHEN 'wd_character' THEN 'wd' ELSE term_links.system END
-          AND l.key=term_links.key)",
-        [],
-    )?;
-    c.execute(
-        "INSERT INTO term_links(system,key,term_id,url,source,current,added_at)
-         SELECT CASE l.system WHEN 'wd' THEN 'wd_character' ELSE l.system END,l.key,t.id,'',l.source,l.current,l.added_at
-         FROM links l JOIN terms t ON t.key=l.entity_id WHERE l.entity_id IN (SELECT id FROM state_scope)
-         ON CONFLICT(system,key) DO UPDATE SET term_id=excluded.term_id,source=excluded.source,current=excluded.current,
-          added_at=excluded.added_at
-         WHERE term_links.term_id IS NOT excluded.term_id OR term_links.source IS NOT excluded.source
-          OR term_links.current IS NOT excluded.current OR term_links.added_at IS NOT excluded.added_at",
-        [],
-    )?;
+    let columns = "system, key, entity_id, current, source, added_at";
+    let (old, new) =
+        (format!("SELECT {columns} FROM links"), format!("SELECT {columns} FROM {}", crate::character_links::LINKS));
+    let count =
+        |sql: String| -> Result<i64> { Ok(c.query_row(&format!("SELECT count(*) FROM ({sql})"), [], |r| r.get(0))?) };
+    let differs = count(format!("{old} EXCEPT {new}"))? + count(format!("{new} EXCEPT {old}"))?;
+    if differs > 0 {
+        return Err(Error::Schema(format!("旧链接表与词条核心不一致，没有升级：{differs} 行")));
+    }
+    c.execute_batch("DROP TABLE links")?;
     Ok(())
 }
 
@@ -277,13 +254,6 @@ const COMPAT: &[Compat] = &[
           json_extract(t.attrs,'$.artist'),json_extract(t.attrs,'$.label_only'),json_extract(t.attrs,'$.mascot'),
           json_extract(t.attrs,'$.mascot_origin'),r.work_id,json_extract(t.attrs,'$.original')
          FROM term_tree r JOIN terms t ON t.id=r.term_id",
-        identity: false,
-    },
-    Compat {
-        table: "links",
-        columns: &["system", "key", "entity_id", "current", "source", "added_at"],
-        select: "SELECT CASE l.system WHEN 'wd_character' THEN 'wd' ELSE l.system END,l.key,t.key,l.current,l.source,l.added_at
-         FROM term_links l JOIN term_tree r ON r.term_id=l.term_id JOIN terms t ON t.id=l.term_id",
         identity: false,
     },
     Compat {
@@ -366,7 +336,6 @@ pub struct Report {
     pub terms_created: usize,
     pub terms_updated: usize,
     pub tree_changed: usize,
-    pub links_changed: usize,
     pub baseline_changed: usize,
     pub assets_added: usize,
     pub evidence_added: usize,
@@ -394,7 +363,7 @@ impl Report {
         json!({
             "committed": self.committed, "policy": self.policy,
             "terms_created": self.terms_created, "terms_updated": self.terms_updated, "tree_changed": self.tree_changed,
-            "links_changed": self.links_changed, "baseline_changed": self.baseline_changed, "assets_added": self.assets_added,
+            "baseline_changed": self.baseline_changed, "assets_added": self.assets_added,
             "evidence_added": self.evidence_added, "evidence_sets_added": self.evidence_sets_added,
             "relations_added": self.relations_added, "verdicts_added": self.verdicts_added, "batches_added": self.batches_added,
             "preflight": self.preflight, "unexplained_count": self.unexplained_count, "unexplained": self.unexplained,
@@ -436,7 +405,6 @@ fn sync_in(tx: &Connection, r: &mut Report) -> Result<()> {
     }
     let mut assets = Assets::load(tx)?;
     sync_entities(tx, r)?;
-    sync_links(tx, r)?;
     if table_exists(tx, "identity_baseline")? {
         sync_baseline(tx, r)?;
     }
@@ -459,10 +427,9 @@ fn sync_in(tx: &Connection, r: &mut Report) -> Result<()> {
 /// 学习产物，以及相册导入的 `imported`。`deferred`、`asked`、`reviews` 由核心命令一起写，但 Python 撤销自己的步骤
 /// （旧的零成员 sweep、curate、identity_skip）时照旧要删它们的行；`duplicates`、`excluded`、`auto_rules` 仍有
 /// Python 的写入口（curate、相似分组）。这些都不在里面。
-pub const GUARDED: [&str; 26] = [
+pub const GUARDED: [&str; 25] = [
     "identity_baseline",
     "entities",
-    "links",
     "work_review",
     "assertions",
     "candidates",
@@ -656,33 +623,6 @@ fn preflight(tx: &Connection, identity: bool, r: &mut Report) -> Result<()> {
     check(
         tx,
         r,
-        "links 里已有 wd_character（与角色 WD 链接改名冲突）",
-        "SELECT system,key FROM links WHERE system='wd_character'",
-    )?;
-    check(
-        tx,
-        r,
-        "links 的系统名或键超长",
-        "SELECT system,key FROM links WHERE length(system) NOT BETWEEN 1 AND 32 OR length(key) NOT BETWEEN 1 AND 256",
-    )?;
-    check(tx, r, "links.current 不是 0 / 1", "SELECT system,key,current FROM links WHERE current NOT IN (0,1)")?;
-    check(
-        tx,
-        r,
-        "链接挂在不存在的身份上",
-        "SELECT system,key,entity_id FROM links WHERE entity_id NOT IN (SELECT id FROM entities)",
-    )?;
-    check(
-        tx,
-        r,
-        "链接已属于核心里别的类型的词条",
-        "SELECT l.system,l.key,t.kind FROM links l
-         JOIN term_links x ON x.system=CASE l.system WHEN 'wd' THEN 'wd_character' ELSE l.system END AND x.key=l.key
-         JOIN terms t ON t.id=x.term_id WHERE NOT EXISTS(SELECT 1 FROM term_tree r WHERE r.term_id=t.id)",
-    )?;
-    check(
-        tx,
-        r,
         "work_review 挂在不存在的身份上",
         "SELECT entity_id FROM work_review WHERE entity_id NOT IN (SELECT id FROM entities)",
     )?;
@@ -790,30 +730,6 @@ fn sync_entities(tx: &Connection, r: &mut Report) -> Result<()> {
          WHERE (parent_id,merged_into,work_id,work_text,review_status,review_note,parent_locked)
           IS NOT (excluded.parent_id,excluded.merged_into,excluded.work_id,excluded.work_text,excluded.review_status,
                   excluded.review_note,excluded.parent_locked)",
-        [],
-    )?;
-    Ok(())
-}
-
-/// 旧链接 → 核心链接（系统名映射后的 (system, key)），属于身份词条的链接跟随旧表增删改。
-fn sync_links(tx: &Connection, r: &mut Report) -> Result<()> {
-    const WANTED: &str =
-        "SELECT CASE l.system WHEN 'wd' THEN 'wd_character' ELSE l.system END AS system,l.key,t.id AS term_id,
-      l.current,l.source,l.added_at FROM links l JOIN terms t ON t.key=l.entity_id";
-    // 按旧表主键 (system, key) 查，不要对派生表做相关子查询（那是每行扫一遍 links）。
-    r.links_changed += tx.execute(
-        "DELETE FROM term_links WHERE term_id IN (SELECT term_id FROM term_tree) AND NOT EXISTS(SELECT 1 FROM links l
-          WHERE l.system=CASE term_links.system WHEN 'wd_character' THEN 'wd' ELSE term_links.system END AND l.key=term_links.key)",
-        [],
-    )?;
-    r.links_changed += tx.execute(
-        &format!(
-            "INSERT INTO term_links(system,key,term_id,url,source,current,added_at)
-             SELECT system,key,term_id,'',source,current,added_at FROM ({WANTED}) WHERE 1
-             ON CONFLICT(system,key) DO UPDATE SET term_id=excluded.term_id,source=excluded.source,current=excluded.current,
-              added_at=excluded.added_at
-             WHERE (term_id,source,current,added_at) IS NOT (excluded.term_id,excluded.source,excluded.current,excluded.added_at)"
-        ),
         [],
     )?;
     Ok(())

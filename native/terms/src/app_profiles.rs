@@ -238,7 +238,7 @@ pub(crate) fn request(c: &mut Connection, body: &Json, path: &str, prepared: Opt
                 }
                 name.into()
             };
-            let rows = http_read::rows(&tx,"SELECT e.id,entity_name(e.id) AS name,e.kind,e.artist FROM entities e WHERE e.parent_id IS NULL AND e.kind<>'work' AND e.merged_into IS NULL AND (e.id IN (SELECT entity_id FROM links WHERE system IN ('danbooru','wd') AND key=? COLLATE NOCASE) OR e.id IN (SELECT t.key FROM term_names n JOIN terms t ON t.id = n.term_id WHERE n.value = ? COLLATE NOCASE AND n.role = 'alias') OR (e.id IN (SELECT t.key FROM term_names n JOIN terms t ON t.id = n.term_id WHERE n.value = ? COLLATE NOCASE AND n.source = 'user') AND NOT EXISTS(SELECT 1 FROM links l WHERE l.entity_id=e.id)))",&[&name,&name,&name])?;
+            let rows = http_read::rows(&tx,&format!("SELECT e.id,entity_name(e.id) AS name,e.kind,e.artist FROM entities e WHERE e.parent_id IS NULL AND e.kind<>'work' AND e.merged_into IS NULL AND (e.id IN (SELECT l.entity_id FROM {LINKS} l WHERE l.core_system IN ('danbooru','wd_character') AND l.key=? COLLATE NOCASE) OR e.id IN (SELECT t.key FROM term_names n JOIN terms t ON t.id = n.term_id WHERE n.value = ? COLLATE NOCASE AND n.role = 'alias') OR (e.id IN (SELECT t.key FROM term_names n JOIN terms t ON t.id = n.term_id WHERE n.value = ? COLLATE NOCASE AND n.source = 'user') AND NOT EXISTS(SELECT 1 FROM {LINKS} l WHERE l.entity_id=e.id)))", LINKS = crate::character_links::LINKS),&[&name,&name,&name])?;
             if let Some(row) = rows.into_iter().next() {
                 let result = http_read::display(&tx, row)?;
                 crate::schema::commit_writing(tx)?;

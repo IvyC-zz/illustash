@@ -57,7 +57,7 @@ def corpus(db, sample=16, query_limit=80):
         assets = [r[0] for r in c.execute('SELECT uuid FROM assets ORDER BY uuid')]
         artists = [r[0] for r in c.execute("SELECT key FROM terms WHERE kind='artist' ORDER BY key")]
         terms = sorted({r[0] for r in c.execute('''SELECT n.value FROM term_names n JOIN term_tree r ON r.term_id=n.term_id UNION SELECT value FROM term_key_names
-                     UNION SELECT value FROM term_key_aliases UNION SELECT key FROM links
+                     UNION SELECT value FROM term_key_aliases UNION SELECT x.key FROM term_links x JOIN term_tree r ON r.term_id=x.term_id
                      UNION SELECT work FROM entities UNION SELECT variant FROM entities''') if r[0]})
         pages = {
             'identity/queue': len(assets),

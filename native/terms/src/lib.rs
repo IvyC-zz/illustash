@@ -56,6 +56,7 @@ pub use illustash_core::character_import;
 pub use illustash_core::character_json;
 pub use illustash_core::character_labels;
 pub use illustash_core::character_learning;
+pub use illustash_core::character_links;
 pub use illustash_core::character_merge;
 pub use illustash_core::character_names;
 pub use illustash_core::character_profile;

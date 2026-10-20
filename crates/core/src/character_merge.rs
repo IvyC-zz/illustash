@@ -82,7 +82,10 @@ pub fn merge(c: &Connection, args: &Value) -> Result<Value> {
         .query_map([&source], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
         .collect::<rusqlite::Result<_>>()?;
     for key in c
-        .prepare("SELECT key FROM links WHERE entity_id=? AND system IN ('danbooru','wd')")?
+        .prepare(&format!(
+            "SELECT l.key FROM {} l WHERE l.entity_id = ? AND l.core_system IN ('danbooru', 'wd_character')",
+            crate::character_links::LINKS
+        ))?
         .query_map([&source], |r| r.get::<_, String>(0))?
     {
         carried.push((String::new(), key?, "merge".into()));
