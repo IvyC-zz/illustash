@@ -80,51 +80,13 @@ mod http_local;
 mod http_read;
 #[cfg(feature = "test-read-host")]
 pub mod read_harness;
-use illustash_core::legacy_artists as legacy_artists_rules;
-/// Compatibility API; the application supplies the mandatory backup to the core rule.
-pub mod legacy_artists {
-    pub use crate::legacy_artists_rules::*;
-    pub fn sync(conn: &mut rusqlite::Connection, provenance: &std::path::Path) -> crate::Result<Report> {
-        crate::legacy_artists_rules::sync_with_attachment(conn, provenance, &crate::sqlite::path(provenance))
-    }
-    pub fn cutover(
-        conn: &mut rusqlite::Connection,
-        provenance: Option<&std::path::Path>,
-    ) -> crate::Result<Option<Report>> {
-        crate::legacy_artists_rules::cutover_with_backup(
-            conn,
-            provenance.map(crate::sqlite::path).as_deref(),
-            &crate::platform_backup::capability(),
-        )
-    }
-}
-use illustash_core::legacy_characters as legacy_characters_rules;
-/// Compatibility API; the application supplies the mandatory backup to the core rule.
-pub mod legacy_characters {
-    pub use crate::legacy_characters_rules::*;
-    pub fn cutover(conn: &mut rusqlite::Connection) -> crate::Result<Option<Report>> {
-        crate::legacy_characters_rules::cutover_with_backup(conn, &crate::platform_backup::capability())
-    }
-}
-use illustash_core::legacy_labels as legacy_labels_rules;
-/// Compatibility API; the application supplies the mandatory backup to the core rule.
-pub mod legacy_labels {
-    pub use crate::legacy_labels_rules::*;
-    pub fn cutover(conn: &mut rusqlite::Connection) -> crate::Result<Option<Report>> {
-        crate::legacy_labels_rules::cutover_with_backup(conn, &crate::platform_backup::capability())
-    }
-}
-use illustash_core::legacy_names as legacy_names_rules;
-/// Compatibility API; the application supplies the mandatory backup to the core rule.
-pub mod legacy_names {
-    pub use crate::legacy_names_rules::*;
-    pub fn cutover(conn: &mut rusqlite::Connection) -> crate::Result<Option<Report>> {
-        crate::legacy_names_rules::cutover_with_backup(conn, &crate::platform_backup::capability())
-    }
-}
+pub use illustash_core::legacy_characters;
+pub use illustash_core::legacy_labels;
+pub use illustash_core::legacy_names;
 pub use illustash_core::names_commands;
 pub use illustash_core::names_search;
 pub use illustash_core::names_view;
+pub use illustash_core::new_library;
 pub use illustash_core::origin;
 pub use illustash_core::package;
 use illustash_core::schema as schema_rules;

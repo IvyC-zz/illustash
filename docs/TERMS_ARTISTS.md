@@ -8,13 +8,7 @@
 
 ## 1. 收编映射
 
-`crates/core/src/legacy_artists.rs`，命令行：
-
-```sh
-illustash-terms migrate --db <library.sqlite>
-illustash-terms sync-artists --db <library.sqlite> --provenance <provenance.sqlite>
-illustash-terms reproject --db <library.sqlite>     # 需要时整表重建投影
-```
+原来由 `crates/core/src/legacy_artists.rs` 和命令 `sync-artists` 做。**这条命令和收编代码已随 #201 第 4 步删除（2026-10-20）**：核心第 8 版拒绝没切换完的图库，新建图库由 `new_library` 一开始就在核心里（[TERMS_SCHEMA.md](TERMS_SCHEMA.md) 第 14 节）。下面是当时的过程，现有图库都是这样切过来的。
 
 只读溯源库（以 `mode=ro` URI 挂上），library.sqlite 的 `assets`、`actions`、`artist_verdicts` 只查不改；一个事务，失败整次回滚。可以反复运行，每次把核心补到与旧表一致：
 
@@ -58,7 +52,7 @@ illustash-terms reproject --db <library.sqlite>     # 需要时整表重建投�
 
 ## 3. 收编写路径
 
-**切换**（`legacy_artists::cutover`，命令行 `cutover-artists`）：建表或升级、最后一次收编同步，并在**同一个事务**里写下 library.sqlite 的 `meta` `terms_artists=core`。已经切过就什么都不做；切过之后 `sync-artists` 拒绝运行（核心新写的裁决不在冻结的旧表里）。没有 provenance.sqlite 的图库也能切（按空的溯源库处理，只收人工判断）。
+**切换**（原来的 `legacy_artists::cutover`，命令行 `cutover-artists`，已删除，见第 1 节）：建表或升级、最后一次收编同步，并在**同一个事务**里写下 library.sqlite 的 `meta` `terms_artists=core`。已经切过就什么都不做；切过之后 `sync-artists` 拒绝运行（核心新写的裁决不在冻结的旧表里）。没有 provenance.sqlite 的图库也能切（按空的溯源库处理，只收人工判断）。
 
 历史 Python 测试参考的服务启动时（`tests/reference/web/server.py（#9 已删除）` `adopt_artists`）：图库还没切、且找得到核心程序，就先 `Store.backup()` 备份人工知识，再切换，打印收了多少画师、证据和判断；找不到程序或切换失败，照旧用旧表并打印原因。桌面 App 里核心程序就是外壳本身（`ILLUSTASH_TERMS_BIN`）。
 

@@ -56,8 +56,8 @@ function t(text, params) {
 const BACKEND_NESTED = new Set(['cleanup', 'duration', 'e', 'error', 'label', 'm', 'message', 'msg', 'note', 'reason', 'said', 'step', 'why']);
 const BACKEND_DATA = new Set(['CONFLICT_RETRIES', 'FORMAT', 'MAX_ASSETS', 'MAX_DATA_BYTES', 'MAX_LINE_BYTES', 'SCHEMA_VERSION',
   'WORKER_KIND_ENV', 'action', 'anchor', 'arg', 'artist', 'artists', 'at', 'attempt', 'auto', 'available', 'backup', 'before', 'candidates',
-  'choice', 'cid', 'code', 'context', 'core', 'differs', 'distance', 'done', 'entity', 'expected', 'fetched', 'field',
-  'file', 'found', 'full', 'host', 'id', 'image', 'key', 'kind', 'left', 'library_id', 'limit', 'listed', 'loaded', 'matches',
+  'choice', 'cid', 'code', 'context', 'differs', 'distance', 'done', 'entity', 'expected', 'fetched', 'field',
+  'file', 'found', 'full', 'host', 'id', 'key', 'kind', 'left', 'library_id', 'limit', 'listed', 'loaded', 'matches',
   'max', 'mb', 'method', 'missing', 'moved', 'n', 'name', 'named', 'namespace', 'needed', 'no', 'object', 'origin', 'other',
   'owner', 'path', 'pending', 'percent', 'producer', 'projected', 'removed', 'report', 'requested', 'result', 'right', 'schema',
   'scoped', 'shown', 'size', 'source', 'status', 'system', 'table', 'tag', 'timeout', 'total', 'trigger', 'unknown', 'v',

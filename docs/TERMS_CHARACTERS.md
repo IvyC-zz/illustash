@@ -34,13 +34,15 @@
 
 加写保护的兼容表和私有表共 25 张（`legacy_characters::GUARDED` 22 张、`schema::PRIVATE` 3 张）：没有核心的写钥匙时 INSERT / UPDATE / DELETE 一律拒绝，漏改的 Python 写入会直接报错，不会悄悄成功。
 
-**收编同步**（`illustash-terms sync-characters --db <库>`，切换前可以反复运行）：只读旧表，把 `term_*` 补到与旧表一致，再由 `term_*` 生成影子兼容表 `shadow_*`，与旧表逐行逐列比较。一个事务：预检不通过、有出处无法解释的人工结论、比较有差异，都整次回滚并报告（退出码 3）。旧表没变时重跑不新增任何行。规则细节（hybrid 下旧合并搬动的结论放进迁移批次、没有步骤的关系决议怎样排锚点等）见方案第 16 节 S2。
+**收编同步**（原来的 `illustash-terms sync-characters --db <库>`，切换前可以反复运行；与 `verify-characters`、`cutover-characters` 一起随 #201 第 4 步删除，见第 2 节）：只读旧表，把 `term_*` 补到与旧表一致，再由 `term_*` 生成影子兼容表 `shadow_*`，与旧表逐行逐列比较。一个事务：预检不通过、有出处无法解释的人工结论、比较有差异，都整次回滚并报告（退出码 3）。旧表没变时重跑不新增任何行。规则细节（hybrid 下旧合并搬动的结论放进迁移批次、没有步骤的关系决议怎样排锚点等）见方案第 16 节 S2。
 
-`verify-characters` 从 `term_*` 全量重建兼容表并比较，切换前后都能跑，用来核对核心自身。
+`verify-characters` 原来从 `term_*` 全量重建兼容表并比较；现在只在核心第 8 版升级时做同样的核对（`legacy_characters::verify_in`，TEMP 影子，不一致就拒绝升级）。
 
 ## 2. 切换
 
-`legacy_characters::cutover`（`illustash-terms cutover-characters`），一个事务：
+**这条命令和收编代码已随 #201 第 4 步删除（2026-10-20）**：核心第 8 版拒绝没切换完的图库，新建图库由 `new_library` 一开始就在核心里（[TERMS_SCHEMA.md](TERMS_SCHEMA.md) 第 14 节）。下面是当时的过程，现有图库都是这样切过来的。
+
+原来的 `legacy_characters::cutover`（`illustash-terms cutover-characters`），一个事务：
 
 1. 前提：标签已经切到核心（`general_hits`、`asset_rating` 是视图）；身份策略未设置或 hybrid（v2 拒绝，留在旧表）。
 2. 最后一次收编同步，必须零差异。
