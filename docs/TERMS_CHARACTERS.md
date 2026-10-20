@@ -23,7 +23,7 @@
 | `work_review` | `term_tree` 的三列 | 核心第 8 版起删除，命令直接读写 `term_tree`（[TERMS_SCHEMA.md](TERMS_SCHEMA.md) 第 14 节） |
 | `identity_baseline` | `term_identity_baseline`（`seq` = 原 rowid 顺序） | 核心第 8 版起删除（[TERMS_SCHEMA.md](TERMS_SCHEMA.md) 第 14 节）；之前是旧代码按原样读的兼容表，核心随主表追加 |
 | `assertions` | `term_verdicts`：confirmed → yes，rejected → no，原 origin 存进 `via`。有步骤的挂在原来那一步的 `action_id` 上；没有步骤的进批次（`baseline`、`album`、`migration`、`undo_audit`），按锚点排进时间线 | 兼容表 = 每个目标的有效裁决 |
-| `identity_relations` / `identity_evidence` / `identity_decisions` / `identity_decision_evidence` | `term_relations`（`duplicate_of` → `same_as`，`form_of` → `contains` 端点反转，`different_from` 原样）、关系证据、关系裁决（`reviewed` = 当时看到的证据），旧 id 记在 `term_legacy_ids` | 兼容表，保留原 id；status 由最新裁决算出 |
+| `identity_relations` / `identity_evidence` / `identity_decisions` / `identity_decision_evidence` | `term_relations`（`duplicate_of` → `same_as`，`form_of` → `contains` 端点反转，`different_from` 原样）、关系证据、关系裁决（`reviewed` = 当时看到的证据），旧 id 记在 `term_legacy_ids` | 核心第 8 版起删除，命令只写核心，读者用同形的片段 `character_relations`（保留原 id；status 由最新裁决算出，[TERMS_SCHEMA.md](TERMS_SCHEMA.md) 第 14 节）；之前是兼容表 |
 | `candidates` | 证据：WD → `wd.wd_character`，CCIP → `ccip_index.char_ext`，按**证据批次**生效（每次 refresh / reindex / import 是一批，覆盖到的图上以这一批为准） | 兼容表：有效证据按 (图, 身份, 来源) 取最大分 |
 | `proto_claims`、`weak_claims`、`prototypes`、`learn_state` | 判定器私有状态，由学习批次整批替换 | 原表，核心写 |
 | `identity_canonical`、`identity_scopes`、`identity_suspended`、`identity_uncertain`、`identity_claims`、`identity_anchor_*` | 判定器私有状态 | 原表，核心写 |
@@ -32,7 +32,7 @@
 | `names` 等名字表、`asked`、`reviews`、`deferred`、`duplicates`、`auto_rules`、`excluded`、`imported`、`backend_effects`、`prefs` | 外围，不收编 | 原表；属于某一步的由那一步的核心命令同事务写，`curate`、跳过配对、NameUpdater 仍由 Python 写 |
 | `relations` | 图片相似关系，与本步无关 | 不变 |
 
-加写保护的兼容表和私有表共 25 张（`legacy_characters::GUARDED` 22 张、`schema::PRIVATE` 3 张）：没有核心的写钥匙时 INSERT / UPDATE / DELETE 一律拒绝，漏改的 Python 写入会直接报错，不会悄悄成功。
+加写保护的兼容表和私有表共 21 张（`legacy_characters::GUARDED` 18 张、`schema::PRIVATE` 3 张）：没有核心的写钥匙时 INSERT / UPDATE / DELETE 一律拒绝，漏改的 Python 写入会直接报错，不会悄悄成功。
 
 **收编同步**（原来的 `illustash-terms sync-characters --db <库>`，切换前可以反复运行；与 `verify-characters`、`cutover-characters` 一起随 #201 第 4 步删除，见第 2 节）：只读旧表，把 `term_*` 补到与旧表一致，再由 `term_*` 生成影子兼容表 `shadow_*`，与旧表逐行逐列比较。一个事务：预检不通过、有出处无法解释的人工结论、比较有差异，都整次回滚并报告（退出码 3）。旧表没变时重跑不新增任何行。规则细节（hybrid 下旧合并搬动的结论放进迁移批次、没有步骤的关系决议怎样排锚点等）见方案第 16 节 S2。
 

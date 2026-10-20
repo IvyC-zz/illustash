@@ -427,7 +427,9 @@ def _load(module):
 # ILLUSTASH_RECORD_BASELINE=1 into fixtures/baseline_states/<module>.json.gz.
 
 BASELINE_STATES = FIXTURES.parent / 'baseline_states'
-RETIRED = frozenset({'entities', 'links', 'work_review', 'names', 'display_names', 'name_aliases', 'identity_baseline'})
+# The recordings still hold the identity relation tables (retired after recording); they are left out of them too.
+RETIRED = frozenset({'entities', 'links', 'work_review', 'names', 'display_names', 'name_aliases', 'identity_baseline',
+                     'identity_relations', 'identity_evidence', 'identity_decisions', 'identity_decision_evidence'})
 # The rest were added by core v8 (#201): what the history shows from the two `actions` columns, and the orders
 # readers take from `term_names.seq` and `term_tree.seq`, are compared in the replies; the identity attributes moved
 # from `terms.attrs` to `term_tree` are compared in `terms.attrs` (ATTRIBUTES).
@@ -534,6 +536,8 @@ def _check_baseline(slot, state, only=None):
         _record_baseline(module, test, key, state)
         return True
     want = _baseline_file(module).get(test, {}).get(key)
+    if want is not None:
+        want = {db: {t: v for t, v in tables.items() if t not in RETIRED} for db, tables in want.items()}
     if only is not None:
         pick = lambda s: {db: {t: s.get(db, {}).get(t) for t in tables} for db, tables in only.items()}
         state, want = pick(state), want if want is None else pick(want)

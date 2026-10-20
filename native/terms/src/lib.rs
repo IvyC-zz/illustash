@@ -62,6 +62,7 @@ pub use illustash_core::character_merge;
 pub use illustash_core::character_names;
 pub use illustash_core::character_profile;
 pub use illustash_core::character_projection;
+pub use illustash_core::character_relations;
 pub use illustash_core::character_review;
 pub use illustash_core::character_structure;
 pub mod cli;
