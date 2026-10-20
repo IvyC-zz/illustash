@@ -74,7 +74,7 @@ class NativeHumanIdentityTest(unittest.TestCase):
         before = labels.snapshot(self.right.db)
         self.pair('/api/merge', {'source':self.bob,'target':self.alice})
         after = labels.snapshot(self.right.db)
-        for table in ('assertions','candidates','term_names','links','prefs'):
+        for table in ('assertions','candidates','term_names','term_links','prefs'):
             self.assertEqual(before[table], after[table], table)
         self.pair('/api/merge', {'source':self.alice,'target':self.bob})
         self.undo_latest(); self.undo_latest()

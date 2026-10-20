@@ -10,6 +10,7 @@ pub mod character_import;
 pub mod character_json;
 pub mod character_labels;
 pub mod character_learning;
+pub mod character_links;
 pub mod character_merge;
 pub mod character_names;
 pub mod character_profile;

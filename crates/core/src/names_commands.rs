@@ -2,6 +2,7 @@
 //! `{"op": …}`（或 `{"op": "batch", "ops": [...]}`），一个核心事务。NameUpdater（联网补名字）和相册标题的写入走这里，
 //! 逐行照 tests/reference/web/names.py（#9 已删除） 的 `put`、`tag_entities`、`NameUpdater.replace` / `aliases` / `seed` 与 tests/reference/web/store.py（#9 已删除） 的
 //! `Store.alias`。名字切到核心之后，旧表是兼容表（写保护），提交时由 `legacy_names::after_write` 补齐主数据、重建投影。
+use crate::character_links::{core_system, LINKS};
 use crate::character_names::{alias, put_name, TERM_OF};
 use crate::schema::{begin_writing, commit_writing};
 use crate::{names_view, Error, Result};
@@ -25,17 +26,26 @@ fn given(v: &Value) -> Option<&str> {
 pub fn tag_entities(c: &Connection, tag: &str) -> Result<Vec<String>> {
     for system in ["danbooru", "wd", "photos_album", "ccip"] {
         let ids: Vec<String> = c
-            .prepare_cached("SELECT entity_id FROM links WHERE system=? AND key=? AND current=1")?
-            .query_map([system, tag], |r| r.get(0))?
+            .prepare_cached(&format!(
+                "SELECT l.entity_id FROM {LINKS} l WHERE l.core_system = ? AND l.key = ? AND l.current = 1"
+            ))?
+            .query_map([core_system(system), tag], |r| r.get(0))?
             .collect::<rusqlite::Result<_>>()?;
         if !ids.is_empty() {
             return Ok(ids);
         }
     }
-    Ok(c.prepare_cached("SELECT entity_id FROM links WHERE system='ccip_base' AND json_extract(key,'$[0]')=?")?
-        .query_map([tag], |r| r.get(0))?
-        .collect::<rusqlite::Result<_>>()?)
+    Ok(c.prepare_cached(&format!(
+        "SELECT l.entity_id FROM {LINKS} l WHERE l.core_system = 'ccip_base' AND json_extract(l.key, '$[0]') = ?"
+    ))?
+    .query_map([tag], |r| r.get(0))?
+    .collect::<rusqlite::Result<_>>()?)
 }
+
+/// 作品文字（qualifier 链接）的身份。
+static QUALIFIED: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| {
+    format!("SELECT l.entity_id FROM {LINKS} l WHERE l.core_system = 'qualifier' AND l.key = ?")
+});
 
 fn entities_for(c: &Connection, sql: &str, key: &str) -> Result<Vec<String>> {
     Ok(c.prepare_cached(sql)?.query_map([key], |r| r.get(0))?.collect::<rusqlite::Result<_>>()?)
@@ -57,7 +67,7 @@ pub fn put(c: &Connection, kind: &str, key: &str, lang: &str, source: &str, valu
         }
     } else if let Some(v) = given(value) {
         if kind == "work" {
-            for entity in entities_for(c, "SELECT entity_id FROM links WHERE system='qualifier' AND key=?", key)? {
+            for entity in entities_for(c, &QUALIFIED, key)? {
                 put_name(c, &entity, lang, source, v, "display", 0, 0)?;
             }
         }
@@ -81,8 +91,8 @@ fn replace(c: &Connection, kind: &str, key: &str, source: &str, values: &[Value]
         if kind == "work" {
             c.prepare_cached(
                 "DELETE FROM term_names WHERE role = 'display' AND source = ? AND term_id IN (
-                   SELECT t.id FROM links l JOIN terms t ON t.key = l.entity_id
-                   WHERE l.system = 'qualifier' AND l.key = ?)",
+                   SELECT x.term_id FROM term_links x JOIN term_tree r ON r.term_id = x.term_id
+                   WHERE x.system = 'qualifier' AND x.key = ?)",
             )?
             .execute([source, key])?;
         }
@@ -120,7 +130,7 @@ fn danbooru_aliases(c: &Connection, kind: &str, tag: &str, values: &[Value]) -> 
             insert.execute(rusqlite::params![kind, tag, value, i as i64])?;
         }
         if kind == "work" {
-            for entity in entities_for(c, "SELECT entity_id FROM links WHERE system='qualifier' AND key=?", tag)? {
+            for entity in entities_for(c, &QUALIFIED, tag)? {
                 write(&entity)?;
             }
         }

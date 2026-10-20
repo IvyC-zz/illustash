@@ -4,6 +4,7 @@
 //! uuid 填进去再执行一次。这样调用方抽 uuid 的次数和先后与旧代码相同。
 use crate::character_commands::{begin_action, finish_action, hybrid, invalid, require_entity, text};
 use crate::character_labels::{lang_of, Shown};
+use crate::character_links::{check_free, core_system, LINKS};
 use crate::character_names::{strip, NEXT_SEQ, TERM_OF};
 use crate::{character_graph, character_names, character_projection, legacy_characters, Error, Result};
 use rusqlite::{params, Connection, OptionalExtension};
@@ -13,8 +14,12 @@ use serde_json::{json, Value};
 pub fn tag_owner(c: &Connection, tag: &str, besides: Option<&str>) -> Result<Option<String>> {
     let row: Option<String> = c
         .query_row(
-            "SELECT l.entity_id FROM links l JOIN entities e ON e.id=l.entity_id
-             WHERE l.system IN ('danbooru','wd') AND l.key=? AND l.current=1 AND e.kind<>'work' ORDER BY l.system='wd' LIMIT 1",
+            &format!(
+                "SELECT l.entity_id FROM {LINKS} l JOIN entities e ON e.id = l.entity_id
+                 WHERE l.core_system IN ('danbooru', 'wd_character') AND l.key = ? AND l.current = 1 AND e.kind <> 'work'
+                 ORDER BY l.system = 'wd'
+                 LIMIT 1"
+            ),
             [tag],
             |r| r.get(0),
         )
@@ -43,8 +48,10 @@ pub fn local_work(c: &Connection, keys: &[&str]) -> Result<Option<String>> {
         for system in ["danbooru", "qualifier"] {
             let row: Option<String> = c
                 .query_row(
-                    "SELECT l.entity_id FROM links l JOIN entities e ON e.id=l.entity_id
-                     WHERE l.system=? AND l.key=? AND e.kind='work' AND e.merged_into IS NULL",
+                    &format!(
+                        "SELECT l.entity_id FROM {LINKS} l JOIN entities e ON e.id = l.entity_id
+                         WHERE l.core_system = ? AND l.key = ? AND e.kind = 'work' AND e.merged_into IS NULL"
+                    ),
                     [system, key],
                     |r| r.get(0),
                 )
@@ -86,9 +93,16 @@ pub fn work_for(
         "INSERT INTO work_review(entity_id,status,note) VALUES (?1,'confirmed',?2)",
         [work.as_str(), "从 Danbooru 角色的作品自动建立"],
     )?;
-    c.execute("INSERT INTO links(system,key,entity_id,source) VALUES ('danbooru',?,?,'user')", [copyright, &work])?;
+    check_free(c, "danbooru", copyright)?;
     c.execute(
-        "INSERT OR IGNORE INTO links(system,key,entity_id,source) VALUES ('qualifier',?,?,'user')",
+        &format!("INSERT INTO term_links(system, key, term_id, source) VALUES ('danbooru', ?, {TERM_OF}, 'user')"),
+        [copyright, &work],
+    )?;
+    check_free(c, "qualifier", copyright)?;
+    c.execute(
+        &format!(
+            "INSERT OR IGNORE INTO term_links(system, key, term_id, source) VALUES ('qualifier', ?, {TERM_OF}, 'user')"
+        ),
         [copyright, &work],
     )?;
     character_names::put_name(c, &work, "en", "index", readable, "display", 0, 0)?;
@@ -100,7 +114,11 @@ pub fn work_for(
 pub fn set_work(c: &Connection, entity: &str, work: Option<&str>) -> Result<()> {
     let key: Option<String> = match work {
         Some(w) => c
-            .query_row("SELECT key FROM links WHERE system='qualifier' AND entity_id=? LIMIT 1", [w], |r| r.get(0))
+            .query_row(
+                &format!("SELECT l.key FROM {LINKS} l WHERE l.core_system = 'qualifier' AND l.entity_id = ? LIMIT 1"),
+                [w],
+                |r| r.get(0),
+            )
             .optional()?,
         None => None,
     };
@@ -129,7 +147,11 @@ fn children(c: &Connection, entity: &str) -> Result<Vec<String>> {
 
 fn danbooru_links(c: &Connection, entity: &str) -> Result<Vec<Value>> {
     let links: Vec<Value> = c
-        .prepare("SELECT system,key,current,source,added_at FROM links WHERE entity_id=? AND system='danbooru'")?
+        .prepare(&format!(
+            "SELECT l.system, l.key, l.current, l.source, l.added_at
+             FROM {LINKS} l
+             WHERE l.entity_id = ? AND l.core_system = 'danbooru'"
+        ))?
         .query_map([entity], |r| {
             Ok(json!([
                 r.get::<_, String>(0)?,
@@ -187,7 +209,11 @@ fn apply(c: &Connection, p: &Value, touched: &mut Vec<String>) -> Result<Value> 
         let linked = match tag {
             Some(t) => !t.as_str().unwrap_or("").is_empty(),
             None => c
-                .query_row("SELECT 1 FROM links WHERE entity_id=? AND current=1", [&entity], |_| Ok(()))
+                .query_row(
+                    &format!("SELECT 1 FROM {LINKS} l WHERE l.entity_id = ? AND l.current = 1"),
+                    [&entity],
+                    |_| Ok(()),
+                )
                 .optional()?
                 .is_some(),
         };
@@ -229,7 +255,10 @@ fn apply(c: &Connection, p: &Value, touched: &mut Vec<String>) -> Result<Value> 
         if mark != 0 {
             return invalid("未细分的原创角色不能关联 Danbooru");
         }
-        c.execute("UPDATE links SET current=0 WHERE entity_id=? AND system='danbooru'", [&entity])?;
+        c.execute(
+            &format!("UPDATE term_links SET current = 0 WHERE term_id = {TERM_OF} AND system = 'danbooru'"),
+            [&entity],
+        )?;
         let tag = tag.as_str().unwrap_or("");
         if !tag.is_empty() {
             if let Some(owner) = tag_owner(c, tag, Some(&entity))? {
@@ -238,9 +267,12 @@ fn apply(c: &Connection, p: &Value, touched: &mut Vec<String>) -> Result<Value> 
                     name = Shown::new().name(c, &owner)?
                 )));
             }
+            check_free(c, "danbooru", tag)?;
             c.execute(
-                "INSERT INTO links(system,key,entity_id,current,source) VALUES ('danbooru',?,?,1,'user')
-                 ON CONFLICT(system,key) DO UPDATE SET current=1,source='user',entity_id=excluded.entity_id",
+                &format!(
+                    "INSERT INTO term_links(system, key, term_id, current, source) VALUES ('danbooru', ?, {TERM_OF}, 1, 'user')
+                     ON CONFLICT(system, key) DO UPDATE SET current = 1, source = 'user', term_id = excluded.term_id"
+                ),
                 [tag, &entity],
             )?;
             let work_id: Option<String> =
@@ -347,11 +379,16 @@ pub fn undo(c: &Connection, p: &Value) -> Result<bool> {
     }
     let links_changed = Value::Array(danbooru_links(c, entity)?) != p["links"];
     if links_changed {
-        c.execute("DELETE FROM links WHERE entity_id=? AND system='danbooru'", [entity])?;
+        c.execute(&format!("DELETE FROM term_links WHERE term_id = {TERM_OF} AND system = 'danbooru'"), [entity])?;
         for l in p["links"].as_array().into_iter().flatten() {
+            let (system, key) = (l[0].as_str().unwrap_or(""), l[1].as_str().unwrap_or(""));
+            check_free(c, system, key)?;
             c.execute(
-                "INSERT OR REPLACE INTO links(system,key,current,source,added_at,entity_id) VALUES (?,?,?,?,?,?)",
-                params![l[0].as_str(), l[1].as_str(), l[2].as_i64(), l[3].as_str(), l[4].as_str(), entity],
+                &format!(
+                    "INSERT OR REPLACE INTO term_links(system, key, current, source, added_at, term_id)
+                     VALUES (?, ?, ?, ?, ?, {TERM_OF})"
+                ),
+                params![core_system(system), key, l[2].as_i64(), l[3].as_str(), l[4].as_str(), entity],
             )?;
         }
     }

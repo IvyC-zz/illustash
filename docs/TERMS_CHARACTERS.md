@@ -19,7 +19,7 @@
 | 旧 | 核心主数据 | 切换后 Python 读到的 |
 |---|---|---|
 | `entities` | `terms`（key = 原 id，kind 原样，variant / artist / label_only / mascot / mascot_origin / original 进 `attrs`）+ `term_tree`（parent_id、merged_into、work_id、work 文字，以及 work_review 三列） | 兼容表 `entities`，列序保留旧库自己的（真实库由 `ALTER TABLE` 历史决定） |
-| `links` | `term_links`（角色的 `wd` 存成 `wd_character`，其余原样） | 兼容表 `links`。计划里是视图；实测表的查询计划与旧版相同，就保留为表（D5） |
+| `links` | `term_links`（角色的 `wd` 存成 `wd_character`，其余原样） | 核心第 8 版起删除，核心直接读写 `term_links`（[TERMS_SCHEMA.md](TERMS_SCHEMA.md) 第 14 节） |
 | `work_review` | `term_tree` 的三列 | 兼容表 |
 | `identity_baseline` | `term_identity_baseline`（`seq` = 原 rowid 顺序） | 兼容表 `identity_baseline`：旧代码按原样读它，核心随主表追加（更正了方案第 4.1 节的「改名冻结」） |
 | `assertions` | `term_verdicts`：confirmed → yes，rejected → no，原 origin 存进 `via`。有步骤的挂在原来那一步的 `action_id` 上；没有步骤的进批次（`baseline`、`album`、`migration`、`undo_audit`），按锚点排进时间线 | 兼容表 = 每个目标的有效裁决 |

@@ -128,7 +128,7 @@ fn native_claims_replace_effective_candidate_preserve_human_and_deduplicate() {
     assert_eq!(f.import(&path, &sidecar).unwrap()["status"], "done");
     assert_eq!(count(&f.source(), "SELECT count(*) FROM labels WHERE dim='char_ext' AND value='old'"), 0);
     assert_eq!(count(&f.source(), "SELECT count(*) FROM labels WHERE dim='char_ext' AND value='new'"), 1);
-    assert_eq!(count(&f.app(),"SELECT count(*) FROM candidates c JOIN links l ON l.entity_id=c.entity AND l.system='ccip' AND l.key='old' WHERE c.source='CCIP'"),0);
+    assert_eq!(count(&f.app(),"SELECT count(*) FROM candidates c JOIN terms t ON t.key=c.entity JOIN term_links l ON l.term_id=t.id AND l.system='ccip' AND l.key='old' WHERE c.source='CCIP'"),0);
     assert_eq!(count(&f.app(),"SELECT count(*) FROM term_current_evidence WHERE source='ccip_index' AND method='char_ext' AND metric='ccip_score'"),1);
     assert_eq!(human(&f.app()), before);
     let events = count(&f.app(), "SELECT count(*) FROM backend_effects");

@@ -269,11 +269,20 @@ fn profile(c: &Connection, e: &str) -> Result<Json> {
     .into_iter()
     .next()
     .unwrap_or_default();
-    let tag =
-        strings(c, "SELECT key FROM links WHERE entity_id=? AND system='danbooru' AND current=1 LIMIT 1", &[&id])?
-            .into_iter()
-            .next()
-            .unwrap_or_default();
+    let tag = strings(
+        c,
+        &format!(
+            "SELECT l.key
+                 FROM {LINKS} l
+                 WHERE l.entity_id = ? AND l.core_system = 'danbooru' AND l.current = 1
+                 LIMIT 1",
+            LINKS = crate::character_links::LINKS
+        ),
+        &[&id],
+    )?
+    .into_iter()
+    .next()
+    .unwrap_or_default();
     let other: i64 = c.query_row(
         "SELECT count(DISTINCT value)
          FROM term_names
@@ -456,7 +465,12 @@ fn queue(c: &Connection, limit: i64, offset: i64, nsfw: &str, count_only: bool) 
         };
         add(text(&r, "a"), text(&r, "b"), distance, hint, None::<String>.into());
     }
-    for r in rows(c,"SELECT r.id,r.a,r.b,r.kind,(SELECT min(source) FROM identity_evidence e WHERE e.relation_id=r.id) AS source FROM identity_relations r WHERE r.status='proposed'",&[])? {let a=text(&r,"a");let b=text(&r,"b");let hint=if count_only{None::<String>.into()}else{let tags:HashMap<String,String>=rows(c,"SELECT entity_id,key FROM links WHERE system='danbooru' AND entity_id IN (?,?)",&[&a,&b])?.iter().map(|r|(text(r,"entity_id"),text(r,"key"))).collect();Json::object([("kind",val(&r,"kind").clone()),("subject",tags.get(&a).cloned().unwrap_or_default().into()),("object",tags.get(&b).cloned().unwrap_or_default().into()),("source",text(&r,"source").into())])};add(a,b,None::<String>.into(),hint,val(&r,"id").clone());}
+    for r in rows(c,"SELECT r.id,r.a,r.b,r.kind,(SELECT min(source) FROM identity_evidence e WHERE e.relation_id=r.id) AS source FROM identity_relations r WHERE r.status='proposed'",&[])? {let a=text(&r,"a");let b=text(&r,"b");let hint=if count_only{None::<String>.into()}else{let tags:HashMap<String,String>=rows(c,&format!(
+            "SELECT l.entity_id, l.key
+             FROM {LINKS} l
+             WHERE l.core_system = 'danbooru' AND l.entity_id IN (?, ?)",
+            LINKS = crate::character_links::LINKS
+        ),&[&a,&b])?.iter().map(|r|(text(r,"entity_id"),text(r,"key"))).collect();Json::object([("kind",val(&r,"kind").clone()),("subject",tags.get(&a).cloned().unwrap_or_default().into()),("object",tags.get(&b).cloned().unwrap_or_default().into()),("source",text(&r,"source").into())])};add(a,b,None::<String>.into(),hint,val(&r,"id").clone());}
     let total = found.len();
     if count_only {
         return Ok(Json::object([("total", (total as i64).into())]));

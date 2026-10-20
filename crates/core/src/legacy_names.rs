@@ -4,6 +4,7 @@
 //! 核心第 8 版（#201）起这三张表是唯一权威，名字命令直接写它们（`character_names`、`names_commands`）。原先由核心维护的
 //! 兼容表 `names`、`display_names`、`name_aliases` 在升级时照旧表同步一次、逐行核对后删除（`retire_names`、
 //! `retire_display_names`、`retire_aliases`）。
+use crate::character_links::LINKS;
 use crate::{Error, Result};
 use rusqlite::{Connection, TransactionBehavior};
 use serde_json::{json, Map, Value};
@@ -182,10 +183,10 @@ pub(crate) fn retire_names(c: &Connection) -> Result<Report> {
 }
 
 /// 名字版本 `meta.names_version`：这几张表每改一行就加一，显示投影据此判断是否过期（`projection_current`）。由应用层
-/// 建库时装上（不在的表跳过）；核心第 8 版在旧表退役之后把 `names`、`display_names` 上的两组换到 `term_names`、
-/// `term_key_names` 上（`versioned` 为真时调用 `version_triggers`）。
-/// `term_names` 只算角色、皮肤、作品（`term_tree` 里的词条）的名字，画师的名字不算，与原来只数 `names` 相同。
-pub const VERSIONED: [&str; 4] = ["entities", "links", "term_names", "term_key_names"];
+/// 建库时装上（不在的表跳过）；核心第 8 版在旧表退役之后把 `links`、`names`、`display_names` 上的三组换到
+/// `term_links`、`term_names`、`term_key_names` 上（`versioned` 为真时调用 `version_triggers`）。`term_links`、
+/// `term_names` 只算角色、皮肤、作品（`term_tree` 里的词条）的行，画师的不算，与原来只数 `links`、`names` 相同。
+pub const VERSIONED: [&str; 4] = ["entities", "term_links", "term_names", "term_key_names"];
 
 /// 这个库装过名字版本触发器（应用层建的库）。
 pub(crate) fn versioned(c: &Connection) -> Result<bool> {
@@ -196,7 +197,7 @@ pub(crate) fn versioned(c: &Connection) -> Result<bool> {
     )?)
 }
 
-/// `term_names` 的一行是不是角色、皮肤、作品的名字（触发器里用）。
+/// `term_names` / `term_links` 的一行是不是角色、皮肤、作品的（触发器里用）。
 fn in_tree(event: &str) -> &'static str {
     match event {
         "INSERT" => "NEW.term_id IN (SELECT term_id FROM term_tree)",
@@ -215,7 +216,11 @@ pub fn version_triggers(c: &Connection) -> Result<()> {
             continue;
         }
         for event in ["INSERT", "UPDATE", "DELETE"] {
-            let when = if table == "term_names" { format!(" WHEN {}", in_tree(event)) } else { String::new() };
+            let when = if matches!(table, "term_names" | "term_links") {
+                format!(" WHEN {}", in_tree(event))
+            } else {
+                String::new()
+            };
             c.execute_batch(&format!(
                 "CREATE TRIGGER IF NOT EXISTS names_version_{table}_{} AFTER {event} ON {table}{when}\n                        BEGIN UPDATE meta SET value=CAST(value AS INTEGER)+1 WHERE key='names_version'; END",
                 event.to_ascii_lowercase()
@@ -299,7 +304,7 @@ pub fn track(c: &Connection) -> Result<()> {
     for table in VERSIONED {
         for event in ["INSERT", "UPDATE", "DELETE"] {
             let mut body = String::new();
-            if matches!(table, "entities" | "links") {
+            if matches!(table, "entities" | "term_links") {
                 // 链接的变化由 BEFORE 触发器记下（`names_old_links_seen`），这里只记改过的身份。
                 if table == "entities" {
                     for side in ["old", "new"] {
@@ -329,7 +334,7 @@ pub fn track(c: &Connection) -> Result<()> {
             }
             let when = match (table, event) {
                 ("entities", "UPDATE") => format!(" WHEN {}", changed(&entity_columns)),
-                ("links", "UPDATE") => format!(" WHEN {}", changed(&LINK_COLUMNS)),
+                ("term_links", "UPDATE") => format!(" WHEN {}", changed(&LINK_COLUMNS)),
                 _ => String::new(),
             };
             if body.is_empty() {
@@ -346,8 +351,8 @@ pub fn track(c: &Connection) -> Result<()> {
 
 /// 显示投影读到的 `entities` 列（`names_view::View`）；表里没有的列（只建了几张表的测试库）不算。
 const ENTITY_COLUMNS: [&str; 7] = ["id", "kind", "parent_id", "variant", "merged_into", "original", "work"];
-/// 显示投影读到的 `links` 列。
-const LINK_COLUMNS: [&str; 5] = ["system", "key", "entity_id", "current", "added_at"];
+/// 显示投影读到的 `term_links` 列（身份是 `term_id`，系统名是存储里的写法）。
+const LINK_COLUMNS: [&str; 5] = ["system", "key", "term_id", "current", "added_at"];
 
 fn changed(columns: &[&str]) -> String {
     columns.iter().map(|col| format!("OLD.{col} IS NOT NEW.{col}")).collect::<Vec<_>>().join(" OR ")
@@ -396,13 +401,19 @@ fn structure_triggers(c: &Connection) -> Result<Vec<&'static str>> {
     let keep_links = |owner: &str| {
         format!(
             "INSERT INTO names_old_links SELECT l.system,l.key,l.entity_id,l.current,l.added_at
-             FROM ({owner}) o JOIN main.links l ON l.entity_id=o.id WHERE o.id NOT IN (SELECT id FROM names_old_links_seen);
+             FROM ({owner}) o JOIN {LINKS} l ON l.entity_id=o.id WHERE o.id NOT IN (SELECT id FROM names_old_links_seen);
              INSERT INTO names_old_links_seen SELECT DISTINCT o.id FROM ({owner}) o
              WHERE o.id IS NOT NULL AND o.id NOT IN (SELECT id FROM names_old_links_seen);"
         )
     };
-    let owner = |side: &str| format!("SELECT {side}.entity_id AS id");
-    let holder = "SELECT entity_id AS id FROM main.links WHERE system=NEW.system AND key=NEW.key";
+    // 链接属于哪个身份（画师等别的词条的链接没有身份，不记）。
+    let owner = |side: &str| {
+        format!(
+            "SELECT t.key AS id FROM main.terms t JOIN main.term_tree r ON r.term_id=t.id WHERE t.id={side}.term_id"
+        )
+    };
+    let holder = "SELECT t.key AS id FROM main.term_links x JOIN main.terms t ON t.id=x.term_id
+                  JOIN main.term_tree r ON r.term_id=x.term_id WHERE x.system=NEW.system AND x.key=NEW.key";
     let link_bodies = [
         ("INSERT", String::new(), format!("{}{}", keep_links(&owner("NEW")), keep_links(holder))),
         (
@@ -415,7 +426,7 @@ fn structure_triggers(c: &Connection) -> Result<Vec<&'static str>> {
     for (event, when, body) in link_bodies {
         c.execute_batch(&format!(
             "CREATE TEMP TRIGGER IF NOT EXISTS track_names_old_links_{event}
-            BEFORE {event} ON main.links{when} BEGIN {body} END;"
+            BEFORE {event} ON main.term_links{when} BEGIN {body} END;"
         ))?;
     }
     Ok(columns)

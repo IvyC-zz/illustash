@@ -6,7 +6,8 @@ const BOB: &str = "b0b00000-0000-4000-8000-000000000002";
 const SKIN: &str = "5k1n0000-0000-4000-8000-000000000003";
 const WORK: &str = "w0rk0000-0000-4000-8000-000000000004";
 
-/// 一个小的旧库（hybrid）：作品、人物、皮肤，各种链接，相册与人工结论，候选，一条继承层级关系。
+/// 一个小的旧库（hybrid）：作品、人物、皮肤，相册与人工结论，候选，一条继承层级关系。链接不再随角色收编（核心第 8 版
+/// 起只在 `term_links` 里，旧表在迁移时退役，见 `retire_links` 与 native/terms/tests/v8_upgrade.rs）。
 fn library() -> Connection {
     library_from(OLD)
 }
@@ -22,9 +23,6 @@ fn library_from(old: &str) -> Connection {
           ('{BOB}','','Example','character',NULL);
          INSERT INTO entities(id,name,kind,parent_id,variant,mascot,mascot_origin) VALUES ('{SKIN}','','skin','{ALICE}','alice_(summer)',1,'user');
          INSERT INTO work_review VALUES ('{WORK}','confirmed','',1);
-         INSERT INTO links(system,key,entity_id,current,source,added_at) VALUES
-          ('ccip','alice','{ALICE}',1,'import','2026-09-01 00:00:00'),('wd','alice_tag','{ALICE}',1,'import','2026-09-01 00:00:00'),
-          ('danbooru','bob','{BOB}',0,'user','2026-09-02 00:00:00'),('qualifier','example','{WORK}',1,'import','2026-09-01 00:00:00');
          INSERT INTO identity_baseline VALUES ('{ALICE}',NULL,'','character',NULL),('{SKIN}',NULL,'alice_(summer)','character',NULL),
           ('{BOB}',NULL,'','character',NULL);
          INSERT INTO identity_relations(id,a,b,kind,status) VALUES (7,'{SKIN}','{ALICE}','form_of','accepted');
@@ -49,7 +47,7 @@ fn a_small_library_syncs_with_no_differences_and_twice_adds_nothing() {
     let mut c = library();
     let r = sync(&mut c).unwrap();
     assert!(r.committed, "{}", r.to_json());
-    assert_eq!(r.tables.len(), 10);
+    assert_eq!(r.tables.len(), 9);
     let rows = |c: &Connection| -> Vec<i64> {
         [
             "terms",
@@ -70,8 +68,7 @@ fn a_small_library_syncs_with_no_differences_and_twice_adds_nothing() {
     assert!(again.committed);
     assert_eq!(rows(&c), before);
     assert_eq!(again.verdicts_added + again.terms_created + again.evidence_added + again.batches_added, 0);
-    // 链接改名、相册值进批次、没有事件的旧结论进锚点 0 的基线。
-    assert_eq!(count(&c, "SELECT count(*) FROM term_links WHERE system='wd_character' AND key='alice_tag'"), 1);
+    // 相册值进批次、没有事件的旧结论进锚点 0 的基线。
     assert_eq!(count(&c, "SELECT anchor FROM term_batches WHERE kind='album'"), 0);
     assert_eq!(count(&c, "SELECT count(*) FROM term_verdicts WHERE via='legacy_import' AND anchor=0"), 1);
     assert_eq!(count(&c, "SELECT count(*) FROM term_verdicts WHERE action_id=1 AND verdict='no' AND via='review'"), 1);
@@ -92,7 +89,6 @@ fn the_comparison_notices_one_changed_row_in_every_compat_table() {
     // 每张影子表改一行（持钥匙），比对必须报出来。
     let tampers = [
         ("entities", format!("UPDATE shadow_entities SET work='改过' WHERE id='{BOB}'")),
-        ("links", "UPDATE shadow_links SET current=1-current WHERE key='bob'".into()),
         ("work_review", "UPDATE shadow_work_review SET note='改过'".into()),
         ("assertions", "UPDATE shadow_assertions SET origin='sweep' WHERE uuid='a'".into()),
         ("candidates", "UPDATE shadow_candidates SET score=score+1e-12 WHERE uuid='a'".into()),

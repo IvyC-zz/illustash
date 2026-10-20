@@ -87,7 +87,10 @@ fn scope(c: &Connection, entity: Option<&str>) -> Result<Vec<Entity>> {
     rows.retain(|r| active.contains(&r.id));
     let positions: HashMap<String, usize> = rows.iter().enumerate().map(|(i, r)| (r.id.clone(), i)).collect();
     for (system, key, id) in c
-        .prepare("SELECT system,key,entity_id FROM links WHERE current=1 ORDER BY added_at,key")?
+        .prepare(&format!(
+            "SELECT l.system, l.key, l.entity_id FROM {LINKS} l WHERE l.current = 1 ORDER BY l.added_at, l.key",
+            LINKS = crate::character_links::LINKS
+        ))?
         .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?)))?
         .collect::<rusqlite::Result<Vec<_>>>()?
     {
@@ -124,7 +127,19 @@ fn fingerprint(c: &Connection, rows: &[Entity]) -> Result<String> {
             .collect::<rusqlite::Result<Vec<_>>>()?));
     }
     let works = dump(&json!(rows.iter().map(|r| r.work.as_str()).collect::<BTreeSet<_>>()));
-    values.push(json!(crate::app_migrate_data::rows_with(c,"SELECT system,key,entity_id,current FROM links WHERE entity_id IN (SELECT entity_id FROM links WHERE system='qualifier' AND key IN (SELECT value FROM json_each(?))) ORDER BY system,key,entity_id",[works])?));
+    values.push(json!(crate::app_migrate_data::rows_with(
+        c,
+        &format!(
+            "SELECT l.system, l.key, l.entity_id, l.current
+         FROM {LINKS} l
+         WHERE l.entity_id IN (
+           SELECT q.entity_id FROM {LINKS} q
+           WHERE q.core_system = 'qualifier' AND q.key IN (SELECT value FROM json_each(?)))
+         ORDER BY l.system, l.key, l.entity_id",
+            LINKS = crate::character_links::LINKS
+        ),
+        [works]
+    )?));
     if let Some(path) = c.path() {
         let src = crate::app_library::read_connection(&std::path::Path::new(path).with_file_name("source.sqlite"))?;
         let ids = dump(&json!(rows.iter().filter_map(|r| r.keys.get("ccip")).collect::<BTreeSet<_>>()));
@@ -205,7 +220,17 @@ fn matched(c: &Connection, work: &str) -> Result<Vec<Value>> {
 fn enrich(source: &mut Source, kind: &str, key: &str, work: &str) -> Result<Vec<Value>> {
     let mut c = net::db(&source.path)?;
     let wiki_tag = if kind == "work" {
-        c.query_row("SELECT d.key FROM links q JOIN links d ON d.entity_id=q.entity_id AND d.system='danbooru' AND d.current=1 WHERE q.system='qualifier' AND q.key=?",[key],|r|r.get::<_,String>(0)).optional()?
+        c.query_row(
+            &format!(
+                "SELECT d.key FROM {LINKS} q
+             JOIN {LINKS} d ON d.entity_id = q.entity_id AND d.core_system = 'danbooru' AND d.current = 1
+             WHERE q.core_system = 'qualifier' AND q.key = ?",
+                LINKS = crate::character_links::LINKS
+            ),
+            [key],
+            |r| r.get::<_, String>(0),
+        )
+        .optional()?
     } else {
         Some(key.into())
     };
@@ -950,7 +975,7 @@ fn hints(c: &Connection, rows: Vec<Value>) -> Result<Json> {
 fn local_links(source: &mut Source) -> Result<Json> {
     let c = net::db(&source.path)?;
     crate::http_read::register_names(&c)?;
-    let rows=crate::http_read::rows(&c,"SELECT e.id,entity_name(e.id) AS name,(SELECT count(*) FROM memberships m WHERE m.entity=e.id) AS count FROM entities e WHERE e.kind='character' AND e.parent_id IS NULL AND e.merged_into IS NULL AND e.original=0 AND e.label_only=0 AND NOT EXISTS(SELECT 1 FROM links l WHERE l.entity_id=e.id AND l.current=1) ORDER BY count DESC",&[])?;
+    let rows=crate::http_read::rows(&c,&format!("SELECT e.id,entity_name(e.id) AS name,(SELECT count(*) FROM memberships m WHERE m.entity=e.id) AS count FROM entities e WHERE e.kind='character' AND e.parent_id IS NULL AND e.merged_into IS NULL AND e.original=0 AND e.label_only=0 AND NOT EXISTS(SELECT 1 FROM {LINKS} l WHERE l.entity_id=e.id AND l.current=1) ORDER BY count DESC", LINKS = crate::character_links::LINKS),&[])?;
     let mut out = vec![];
     let qualifier_pattern = regex::Regex::new(r"[\s_]*\([^()]*\)$").expect("constant regular expression is valid");
     for row in rows {
@@ -1738,7 +1763,7 @@ mod sources_tests {
             let c = self.db();
             let tags: HashMap<String, String> = c
                 .prepare(
-                    "SELECT l.entity_id,l.key FROM links l JOIN entities e ON e.id=l.entity_id
+                    "SELECT t.key,l.key FROM term_links l JOIN terms t ON t.id=l.term_id JOIN entities e ON e.id=t.key
                      WHERE l.system='danbooru' AND l.current=1 AND e.kind<>'work'",
                 )
                 .unwrap()
@@ -1913,7 +1938,11 @@ mod sources_tests {
         assert_eq!(p.calls().len(), count);
         let alice: String = lib
             .db()
-            .query_row("SELECT entity_id FROM links WHERE system='danbooru' AND key='alice'", [], |r| r.get(0))
+            .query_row(
+                "SELECT t.key FROM term_links x JOIN terms t ON t.id=x.term_id WHERE x.system='danbooru' AND x.key='alice'",
+                [],
+                |r| r.get(0),
+            )
             .unwrap();
         lib.run(&p, Some(&alice), true).unwrap();
         assert_eq!(p.calls().len(), count + 3); // two wikis and the indexed Japanese character search
@@ -1999,7 +2028,7 @@ mod sources_tests {
             let mut c = lib.db();
             let tx = c.transaction().unwrap();
             crate::schema::begin_writing(&tx).unwrap();
-            tx.execute("UPDATE entities SET kind='oc' WHERE id=(SELECT entity_id FROM links WHERE system='danbooru' AND key='alice')", [])
+            tx.execute("UPDATE entities SET kind='oc' WHERE id=(SELECT t.key FROM term_links x JOIN terms t ON t.id=x.term_id WHERE x.system='danbooru' AND x.key='alice')", [])
                 .unwrap();
             crate::schema::commit_writing(tx).unwrap();
         }

@@ -235,7 +235,7 @@ class InstalledIndexAppTest(CandidateIndexAdapter, unittest.TestCase):
         self.assertTrue(expected_candidates)
         self.assertTrue({'b','c'} <= {u for u,_ in expected_candidates})
         with contextlib.closing(sqlite3.connect(self.lib.db)) as c, c:
-            row = c.execute("SELECT entity_id FROM links WHERE system='ccip' AND key='carol_example' AND current=1").fetchone()
+            row = c.execute("SELECT t.key FROM term_links x JOIN terms t ON t.id=x.term_id WHERE x.system='ccip' AND x.key='carol_example' AND x.current=1").fetchone()
             self.assertIsNotNone(row); entity = row[0]
             self.assertEqual(c.execute("SELECT uuid,score FROM candidates WHERE entity=? AND source='CCIP' ORDER BY uuid", [entity]).fetchall(), expected_candidates)
             self.assertEqual(c.execute("SELECT uuid,status FROM memberships WHERE entity=? AND uuid IN ('b','c') ORDER BY uuid", [entity]).fetchall(), [('b','machine'),('c','machine')])

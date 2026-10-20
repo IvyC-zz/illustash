@@ -563,7 +563,7 @@ mod tests {
             count(&c, "SELECT count(*) FROM sqlite_master WHERE type='trigger' AND name LIKE 'names_version_%'"),
             12
         );
-        assert_eq!(count(&c, "SELECT count(*) FROM links WHERE system='ccip'"), 3);
+        assert_eq!(count(&c, "SELECT count(*) FROM term_links WHERE system='ccip'"), 3);
         assert_eq!(count(&c, "SELECT count(*) FROM entities WHERE parent_id IS NOT NULL AND variant='swimsuit'"), 1);
         assert_eq!(count(&c, "SELECT count(*) FROM entities WHERE mascot=1 AND mascot_origin='default'"), 1);
         assert!(crate::legacy_characters::verify(&mut c).unwrap().committed);
@@ -595,7 +595,11 @@ mod tests {
         };
         let id: String = f
             .db()
-            .query_row("SELECT entity_id FROM links WHERE system='ccip' AND key='alice'", [], |r| r.get(0))
+            .query_row(
+                "SELECT t.key FROM term_links x JOIN terms t ON t.id=x.term_id WHERE x.system='ccip' AND x.key='alice'",
+                [],
+                |r| r.get(0),
+            )
             .unwrap();
         for route in crate::http_read::CORE_ROUTES {
             let target = match *route {

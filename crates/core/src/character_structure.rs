@@ -2,6 +2,8 @@
 //! 作品证据（`works.apply_evidence`）。逐行照 tests/reference/web/store.py（#9 已删除）、tests/reference/web/works.py（#9 已删除）；作品的可读名由调用方给，
 //! 当前显示名由核心读（character_labels）。
 use crate::character_commands::{hybrid, invalid, require_entity, text};
+use crate::character_links::{check_free, LINKS};
+use crate::character_names::TERM_OF;
 use crate::character_profile::{new_id, require_work, set_work, tag_owner, work_for};
 use crate::{character_graph, character_names, character_projection, legacy_characters, Error, Result};
 use rusqlite::{params, Connection, OptionalExtension};
@@ -60,7 +62,11 @@ fn create_linked(c: &Connection, args: &Value) -> Result<Value> {
     let id = new_id(&args["id"])?;
     c.execute("INSERT INTO entities(id,name,kind) VALUES (?,'','character')", [&id])?;
     legacy_characters::born(c, &id, "user")?;
-    c.execute("INSERT INTO links(system,key,entity_id,source) VALUES ('danbooru',?,?,'user')", [tag, &id])?;
+    check_free(c, "danbooru", tag)?;
+    c.execute(
+        &format!("INSERT INTO term_links(system, key, term_id, source) VALUES ('danbooru', ?, {TERM_OF}, 'user')"),
+        [tag, &id],
+    )?;
     let mut ids = vec![id.clone()];
     let work = work_for(
         c,
@@ -223,15 +229,25 @@ fn work_link(c: &Connection, ident: &str, tag: &str) -> Result<()> {
     }
     let tag = tag.to_lowercase();
     let owner: Option<String> = c
-        .query_row("SELECT entity_id FROM links WHERE system='danbooru' AND key=?", [&tag], |r| r.get(0))
+        .query_row(
+            &format!("SELECT l.entity_id FROM {LINKS} l WHERE l.core_system = 'danbooru' AND l.key = ?"),
+            [&tag],
+            |r| r.get(0),
+        )
         .optional()?;
     if owner.as_deref().is_some_and(|o| o != ident) {
         return invalid("此 tag 已链接到其他身份，不能自动合并");
     }
-    c.execute("UPDATE links SET current=0 WHERE entity_id=? AND system='danbooru'", [ident])?;
     c.execute(
-        "INSERT INTO links(system,key,entity_id,current,source) VALUES ('danbooru',?,?,1,'user')
-         ON CONFLICT(system,key) DO UPDATE SET current=1,source='user'",
+        &format!("UPDATE term_links SET current = 0 WHERE term_id = {TERM_OF} AND system = 'danbooru'"),
+        [ident],
+    )?;
+    check_free(c, "danbooru", &tag)?;
+    c.execute(
+        &format!(
+            "INSERT INTO term_links(system, key, term_id, current, source) VALUES ('danbooru', ?, {TERM_OF}, 1, 'user')
+             ON CONFLICT(system, key) DO UPDATE SET current = 1, source = 'user'"
+        ),
         [&tag, ident],
     )?;
     c.execute("UPDATE work_review SET status='confirmed',note='' WHERE entity_id=?", [ident])?;
@@ -269,7 +285,10 @@ fn edit_work(c: &Connection, args: &Value) -> Result<Value> {
             match args.get("tag") {
                 Some(Value::String(tag)) if !tag.is_empty() => work_link(c, &ident, tag)?,
                 Some(Value::String(_)) => {
-                    c.execute("UPDATE links SET current=0 WHERE entity_id=? AND system='danbooru'", [&ident])?;
+                    c.execute(
+                        &format!("UPDATE term_links SET current = 0 WHERE term_id = {TERM_OF} AND system = 'danbooru'"),
+                        [&ident],
+                    )?;
                     c.execute(
                         "UPDATE work_review SET status='confirmed',note=?2 WHERE entity_id=?1",
                         [ident.as_str(), "外部链接已由用户清空"],
@@ -347,16 +366,17 @@ fn work_evidence(c: &Connection, args: &Value) -> Result<Value> {
         }
     }
     let mut ids: BTreeMap<String, String> = c
-        .prepare(
-            "SELECT l.key,l.entity_id FROM links l JOIN entities e ON e.id=l.entity_id WHERE l.system='danbooru' AND l.current=1 AND e.kind='work'",
-        )?
+        .prepare(&format!(
+            "SELECT l.key, l.entity_id FROM {LINKS} l JOIN entities e ON e.id = l.entity_id
+             WHERE l.core_system = 'danbooru' AND l.current = 1 AND e.kind = 'work'"
+        ))?
         .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
         .collect::<rusqlite::Result<_>>()?;
     // dict(...) 的顺序就是查询的行序：遍历 qualifier 保持原查询的行序。
     let qualifiers: Vec<(String, String)> = {
         let mut seen: Vec<(String, String)> = Vec::new();
         for row in c
-            .prepare("SELECT key,entity_id FROM links WHERE system='qualifier'")?
+            .prepare(&format!("SELECT l.key, l.entity_id FROM {LINKS} l WHERE l.core_system = 'qualifier'"))?
             .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
         {
             let (k, v): (String, String) = row?;
@@ -376,7 +396,11 @@ fn work_evidence(c: &Connection, args: &Value) -> Result<Value> {
             continue;
         }
         let owner: Option<String> = c
-            .query_row("SELECT entity_id FROM links WHERE system='danbooru' AND key=?", [key], |r| r.get(0))
+            .query_row(
+                &format!("SELECT l.entity_id FROM {LINKS} l WHERE l.core_system = 'danbooru' AND l.key = ?"),
+                [key],
+                |r| r.get(0),
+            )
             .optional()?;
         if !tags.contains(key) || owner.as_ref().is_some_and(|o| o != ident) {
             let note = if !tags.contains(key) { "需人工核对作品 tag" } else { "链接已属于另一个身份" };
@@ -385,8 +409,11 @@ fn work_evidence(c: &Connection, args: &Value) -> Result<Value> {
             touched.push(ident.clone());
             continue;
         }
+        check_free(c, "danbooru", key)?;
         c.execute(
-            "INSERT OR IGNORE INTO links(system,key,entity_id,source) VALUES ('danbooru',?,?,'check')",
+            &format!(
+                "INSERT OR IGNORE INTO term_links(system, key, term_id, source) VALUES ('danbooru', ?, {TERM_OF}, 'check')"
+            ),
             [key, ident],
         )?;
         c.execute("UPDATE work_review SET status='verified',note='' WHERE entity_id=?", [ident])?;
@@ -422,9 +449,13 @@ fn work_evidence(c: &Connection, args: &Value) -> Result<Value> {
     let new_ids = &args["ids"];
     let missing: Vec<String> = needed.iter().filter(|t| !ids.contains_key(*t)).cloned().collect();
     for tag in missing {
-        if c.query_row("SELECT 1 FROM links WHERE system='danbooru' AND key=?", [&tag], |_| Ok(()))
-            .optional()?
-            .is_some()
+        if c.query_row(
+            &format!("SELECT 1 FROM {LINKS} l WHERE l.core_system = 'danbooru' AND l.key = ?"),
+            [&tag],
+            |_| Ok(()),
+        )
+        .optional()?
+        .is_some()
         {
             continue;
         }
@@ -443,7 +474,11 @@ fn work_evidence(c: &Connection, args: &Value) -> Result<Value> {
         let readable =
             args["readable"][&tag].as_str().ok_or_else(|| Error::Invalid(format!("缺少作品 {tag} 的可读名")))?;
         character_names::put_name(c, &ident, "en", "index", readable, "display", 0, 0)?;
-        c.execute("INSERT INTO links(system,key,entity_id,source) VALUES ('danbooru',?,?,'check')", [&tag, &ident])?;
+        check_free(c, "danbooru", &tag)?;
+        c.execute(
+            &format!("INSERT INTO term_links(system, key, term_id, source) VALUES ('danbooru', ?, {TERM_OF}, 'check')"),
+            [&tag, &ident],
+        )?;
         c.execute("INSERT INTO work_review(entity_id,status) VALUES (?,'verified')", [&ident])?;
         ids.insert(tag.clone(), ident.clone());
         touched.push(ident);

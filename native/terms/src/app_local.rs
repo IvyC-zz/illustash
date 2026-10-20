@@ -137,12 +137,13 @@ fn count_json(total: i64, zh: i64, ja: i64, readable: i64) -> Json {
 fn projected_counts(c: &Connection) -> Result<Json> {
     let mut sums: HashMap<String, (i64, i64, i64, i64, String)> = c
         .prepare(
+            &format!(
             "WITH active(id) AS (SELECT entity FROM memberships UNION SELECT entity FROM candidates
                UNION SELECT parent_id FROM entities WHERE id IN (SELECT entity FROM memberships UNION SELECT entity FROM candidates)
                 AND parent_id IS NOT NULL),
              shown AS MATERIALIZED (SELECT e.id,e.parent_id,coalesce(e.work,'') AS work,coalesce(e.variant,'') AS variant FROM entities e
                WHERE e.id IN active AND e.merged_into IS NULL AND e.kind NOT IN ('oc','work') AND coalesce(e.original,0)=0
-                AND EXISTS(SELECT 1 FROM links l WHERE l.entity_id=e.id AND l.current=1)),
+                AND EXISTS(SELECT 1 FROM {LINKS} l WHERE l.entity_id=e.id AND l.current=1)),
              keys(kind,key) AS (SELECT 'character',d.tag FROM shown s JOIN term_name_display d ON d.entity=s.id AND d.skin_only=0
                 WHERE s.parent_id IS NULL
                UNION SELECT 'work',work FROM shown WHERE work<>''
@@ -150,6 +151,8 @@ fn projected_counts(c: &Connection) -> Result<Json> {
              SELECT k.kind,count(*),coalesce(sum(coalesce(ch.zh,'')<>''),0),coalesce(sum(coalesce(ch.ja,'')<>''),0),
               coalesce(sum(ch.name_source='readable'),0),json_group_array(k.key) FILTER (WHERE ch.kind IS NULL)
              FROM keys k LEFT JOIN term_name_choice ch ON ch.kind=k.kind AND ch.key=k.key GROUP BY k.kind",
+            LINKS = crate::character_links::LINKS
+        ),
         )?
         .query_map([], |r| Ok((r.get(0)?, (r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?))))?
         .collect::<rusqlite::Result<_>>()?;
@@ -275,18 +278,19 @@ mod tests {
               ('skin1','','Example','swimsuit','tagless',NULL,'skin',0),('skin2','','','outfit_x','tagless',NULL,'skin',0),
               ('merged','','Example','',NULL,'tagless','character',0),('own','','Mine','',NULL,NULL,'character',1),
               ('loose','','Loose','',NULL,NULL,'character',0),('idle','','Idle','',NULL,NULL,'character',0);
-             INSERT INTO links(system,key,entity_id,current,source,added_at) VALUES
-              ('bangumi','tagless','tagless',1,'import','2026-10-07 06:00:00'),
-              ('danbooru','','hidden',1,'import','2026-10-07 06:00:01'),('danbooru','hidden_tag','hidden',1,'import','2026-10-07 06:00:02'),
-              ('danbooru','swim_tag','skin1',1,'import','2026-10-07 06:00:03'),('danbooru','outfit_tag','skin2',1,'import','2026-10-07 06:00:08'),('danbooru','merged_tag','merged',1,'import','2026-10-07 06:00:04'),
-              ('danbooru','own_tag','own',1,'import','2026-10-07 06:00:05'),('danbooru','loose_tag','loose',0,'import','2026-10-07 06:00:06'),
-              ('danbooru','idle_tag','idle',1,'import','2026-10-07 06:00:07');
              -- The identities become terms, as the commands that create them do (`legacy_characters::born`).
              INSERT INTO terms(key,kind,origin) SELECT id,kind,'user' FROM entities
               WHERE id IN ('tagless','hidden','skin1','skin2','merged','own','loose','idle') ORDER BY rowid;
              INSERT INTO term_tree(term_id,parent_id,merged_into,work_id,work_text)
               SELECT t.id,e.parent_id,e.merged_into,e.work_id,e.work FROM entities e JOIN terms t ON t.key=e.id
               WHERE e.id IN ('tagless','hidden','skin1','skin2','merged','own','loose','idle');
+             INSERT INTO term_links(system,key,term_id,current,source,added_at) VALUES
+              ('bangumi','tagless',(SELECT id FROM terms WHERE key='tagless'),1,'import','2026-10-07 06:00:00'),
+              -- (No empty-key link: `term_links` keys are 1–256 characters, as the mirror required before.)
+              ('danbooru','hidden_tag',(SELECT id FROM terms WHERE key='hidden'),1,'import','2026-10-07 06:00:02'),
+              ('danbooru','swim_tag',(SELECT id FROM terms WHERE key='skin1'),1,'import','2026-10-07 06:00:03'),('danbooru','outfit_tag',(SELECT id FROM terms WHERE key='skin2'),1,'import','2026-10-07 06:00:08'),('danbooru','merged_tag',(SELECT id FROM terms WHERE key='merged'),1,'import','2026-10-07 06:00:04'),
+              ('danbooru','own_tag',(SELECT id FROM terms WHERE key='own'),1,'import','2026-10-07 06:00:05'),('danbooru','loose_tag',(SELECT id FROM terms WHERE key='loose'),0,'import','2026-10-07 06:00:06'),
+              ('danbooru','idle_tag',(SELECT id FROM terms WHERE key='idle'),1,'import','2026-10-07 06:00:07');
              INSERT INTO term_names(term_id,lang,value,source,role,preferred,position,seq) VALUES
               ((SELECT id FROM terms WHERE key='tagless'),'ja','タグナシ','index','display',0,0,
                (SELECT coalesce(max(seq),0)+1 FROM term_names));
@@ -311,11 +315,12 @@ mod tests {
         let projected = projected_counts(&tx).unwrap();
         assert_eq!(crate::names_view::whole_loads(), start, "the projected counts load nothing library-wide");
         assert_eq!(projected.dump(), loaded_counts(&tx).unwrap().dump());
-        // alice, bob and the unprojected ("character","") key the two tagless characters share; the OC, the merged,
-        // the unlinked and the inactive identities are left out.
+        // alice, bob, hidden_tag and the unprojected ("character","") key of the tagless character; the OC, the merged,
+        // the unlinked and the inactive identities are left out. (An empty-key link that hid a tag cannot be stored
+        // since core v8: `term_links` keys are 1–256 characters.)
         let counts: serde_json::Value = serde_json::from_str(&projected.dump()).unwrap();
-        assert_eq!(counts["characters"]["total"], 3, "{counts}");
-        // The empty key's Chinese name comes from `hidden`, whose empty danbooru link hides its tag.
+        assert_eq!(counts["characters"]["total"], 4, "{counts}");
+        // The Chinese name is `hidden`'s user name, now under its own tag.
         assert_eq!(
             (&counts["characters"]["zh"], &counts["characters"]["readable"]),
             (&1.into(), &2.into()),
