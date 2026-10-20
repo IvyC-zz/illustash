@@ -11,9 +11,9 @@
 
  "crates/core/src/character_evidence.rs":"e2f40d8ec39702fcc606beaa2ac9d21abbf6c31c6df8770b0f7e3f2a9bc2623e",
 
- "crates/core/src/character_graph.rs":"4cb340317e92779595b5c37e87f584fbb95a4799275810744d9878d400040258",
+ "crates/core/src/character_graph.rs":"302edf5ee48f81c29cba5d70625882b3d9fd5e19d7d17f288fb388b28b8e5808",
 
- "crates/core/src/character_identity.rs":"050ead13b1d16717493f077f1b9673f8ead9a1fe9706e61df5f42f55f3aa5ae6",
+ "crates/core/src/character_identity.rs":"ee2a0b886abfacadf37fc7911baab014f1111a8c14a29dbc71c55aeaf1075020",
 
  "crates/core/src/character_import.rs":"d4831ac9661b0431a3e2ea75de274382f29423d19c0077db0c10e30e83b3d99a",
 
@@ -21,7 +21,7 @@
 
  "crates/core/src/character_labels.rs":"221cff8d940eef876f584db62f46c147fe7583bf55eb3a8cc46944af70f0da6f",
 
- "crates/core/src/character_learning.rs":"339791ca4517825271b3e6a8dcd926ebdb867b136bc0b20f647b7e7d9b110887",
+ "crates/core/src/character_learning.rs":"8b7db39ddfb40ac01fa3e1de0942eebd1d9f96766e218ac567033e12cc1e62cf",
 
  "crates/core/src/character_links.rs":"2e64aa135c932c55b84c4839a3427a7118c4d1a0f64a402531ef235ede5e9cc7",
 
@@ -32,6 +32,8 @@
  "crates/core/src/character_profile.rs":"875078d732098734823bafe991dd67c8d8b3e64b38a6c2692cb1ff54e81cfa75",
 
  "crates/core/src/character_projection.rs":"81d074e0f7cb16541589e7447d26c2a58dbf33085593de6ec45d464615e0396d",
+
+ "crates/core/src/character_relations.rs":"a3b3a1139aca9bd85b6d14d83338341caaf4c26e7619c1c11511793d249e6e21",
 
  "crates/core/src/character_review.rs":"fc40ede7e5fa025e408b806858da99f871dab1bd075fe36c9fe76f7309f8844a",
 
@@ -55,13 +57,13 @@
 
  "crates/core/src/error.rs":"e00d2bce525a1ecdb0dafff23a05d34b6596a5b6e528594f7e80c4f39d2b033f",
 
- "crates/core/src/legacy_characters.rs":"9e921b2a0dd2f413f4fcb9be2b1f733b85d2dcd30e587517e3c5e931cf23cf98",
+ "crates/core/src/legacy_characters.rs":"5f0c6e8caba836ab8d1fa34d0aa39dd2b00f04ee09cf9fa60fc4af56e082c014",
 
  "crates/core/src/legacy_labels.rs":"8ef55db0301b249eb077b91cac04094a7364ec849149f25b526a26b36e8dac9d",
 
  "crates/core/src/legacy_names.rs":"28b1616f9ff6d317005faa2575ecf4903efaf5d681edadf0bc00da6cfeb23757",
 
- "crates/core/src/lib.rs":"5151d6fdff1dc97cb2e907d51f69e15e6b8117427605511bf7865ad021d29226",
+ "crates/core/src/lib.rs":"23a5778fb07dae5696c4d7791620640eb60efddd37cf3be6f2aae63a4d00eeeb",
 
  "crates/core/src/names_commands.rs":"96ce0a6d5c997574f6a8bfdbfe303239202408df96a449269b3a29a394a5fd61",
 
@@ -75,7 +77,7 @@
 
  "crates/core/src/package.rs":"2c951060a10859148705790dd270f5bb15112970f0888dc31de126bc74471220",
 
- "crates/core/src/schema.rs":"20261908e12a34ca0d7232a5ae3e5d475d063a12cd90e46537076a09eb0da62c",
+ "crates/core/src/schema.rs":"b6b8df3ab185836a97a290e4537c5a5680a2ce387911019584c8387cb3ebac93",
 
  "crates/core/src/store.rs":"1711e630b19eba554f49ccb700d4f2bfb45d70cf5dd23b0ff0c58440ae76e0dd",
 
@@ -283,7 +285,7 @@
 
  "native/terms/src/http_browse.rs":"d78caf9945fe758cdd725abdd2d5672808cca12e2f32bbdd3552cd333610b9b5",
 
- "native/terms/src/http_characters.rs":"483b67fa4788a28e1788025c1568165fff55943af066f027b006e7e9b6c820ad",
+ "native/terms/src/http_characters.rs":"1de238cf552d8d0af163c3456bcb665c4f04ed2069961abd9e042e958209e0b5",
 
  "native/terms/src/http_host_get.rs":"45f1fd1271ff9a12d02a35ce379105abc0d629b15383cb7ff69629909f1c2c8a",
 
@@ -313,7 +315,7 @@
 
  "native/terms/src/index_generation.rs":"556ad63a4bb7b8d30e3191d466b91744b29f23fd4fc53fa40ffb9f13b54946e6",
 
- "native/terms/src/lib.rs":"ed733c4776169549235030ebe64a5139d7378c8ee230e90bf1efa69ec2eee723",
+ "native/terms/src/lib.rs":"ec82d771b4677d1e633c69ee29b39fe6e0041d8c095f21d8a9064e7f76f8d061",
 
  "native/terms/src/platform_process.rs":"66a45606b4a65b14b2725679bbae0e7e5445e63fddede8e804c2e8d4cca893b0",
 
@@ -469,7 +471,7 @@
  "native/terms/src/app_name_sources.rs":{"database-write":[70,[0,4],33,1,[224,2]]},
  "native/terms/src/app_migration_sql/hybrid.sql":{"database-write":["DROP VIEW IF EXISTS:identity_assignments","DROP VIEW IF EXISTS:variant_memberships",194,"DROP VIEW IF EXISTS:family_confirmed","DROP VIEW IF EXISTS:effective_assertions","CREATE VIEW:effective_assertions","CREATE VIEW:family_confirmed","CREATE VIEW:membership_rules","CREATE VIEW:variant_memberships","CREATE VIEW:identity_assignments"]},
  "native/terms/src/app_sync.rs":{"database-write":[[0,8],[238,4],"INSERT INTO:sync_runs",[2,2],5,3,"INSERT INTO:meta|UPDATE:set",1,262,34],"entrypoint":[4]},
- "crates/core/src/legacy_characters.rs":{"database-write":{"dynamic-or-wrapper":17,"DELETE FROM:candidate_scope":1,"INSERT OR IGNORE INTO:candidate_scope":1,"DELETE FROM:candidates":1,"INSERT INTO:candidates":1,"DROP TABLE:links":1,"DROP TABLE:work_review":1,"DROP TABLE:identity_baseline":1,"INSERT OR REPLACE INTO:meta":1,"ALTER TABLE:term_tree":1,"UPDATE:term_tree":3,"UPDATE:terms":1,"INSERT INTO:terms":1,"INSERT INTO:term_tree":1,"DROP TABLE:entities|DROP TABLE IF EXISTS:shadow_entities":1,"DROP TABLE:main.identity_relations":1,"CREATE TABLE:main.identity_relations":1,"INSERT INTO:main.identity_relations":1,"DROP TABLE:temp.relations_v7":1,"DROP TABLE:if":2}},
+ "crates/core/src/legacy_characters.rs":{"database-write":{"dynamic-or-wrapper":17,"DELETE FROM:candidate_scope":1,"INSERT OR IGNORE INTO:candidate_scope":1,"DELETE FROM:candidates":1,"INSERT INTO:candidates":1,"DROP TABLE:links":1,"DROP TABLE:work_review":1,"DROP TABLE:identity_baseline":1,"INSERT OR REPLACE INTO:meta":1,"ALTER TABLE:term_tree":1,"UPDATE:term_tree":3,"UPDATE:terms":1,"INSERT INTO:terms":1,"INSERT INTO:term_tree":1,"DROP TABLE:entities|DROP TABLE IF EXISTS:shadow_entities":1,"DROP TABLE:if":3}},
  "desktop/tauri.conf.json":{"entrypoint":["desktop-app"]},
  "native/terms/build.rs":{"entrypoint":[10,4]},
  "native/terms/src/app_effects.rs":{"database-write":[0,21,1]},

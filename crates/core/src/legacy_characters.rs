@@ -1,9 +1,9 @@
 //! 角色、皮肤、作品的旧兼容表在核心第 8 版里的去留（#201）。
 //!
-//! - 身份、链接、作品复核、身份基线：旧表 `entities`、`links`、`work_review`、`identity_baseline` 在升级时逐行核对后
-//!   删除（`retire_*`），之后只在 `terms`、`term_tree`、`term_links`、`term_identity_baseline` 里。
-//! - 还没切的兼容表 `assertions`、`candidates`、`identity_relations`、`identity_evidence`、`identity_decisions`、
-//!   `identity_decision_evidence` 由核心照 `term_*` 维护（`COMPAT`、`refresh_candidates`、`project_relation`）；升级时
+//! - 身份、链接、作品复核、身份基线、身份关系：旧表 `entities`、`links`、`work_review`、`identity_baseline` 和
+//!   `identity_relations` 等四张关系表在升级时逐行核对后删除（`retire_*`），之后只在 `terms`、`term_tree`、
+//!   `term_links`、`term_identity_baseline`、`term_relations` 等核心表里。
+//! - 还没切的兼容表 `assertions`、`candidates` 由核心照 `term_*` 维护（`COMPAT`、`refresh_candidates`）；升级时
 //!   由核心主数据生成 TEMP 影子与旧表逐表比对（`verify_in`），不一致就拒绝升级。
 //! - 写保护名单 `GUARDED`、第 4 版删掉的冻结副本 `FROZEN_COPIES`。
 //!
@@ -29,17 +29,14 @@ struct Compat {
     table: &'static str,
     columns: &'static [&'static str],
     select: &'static str,
-    /// 只有身份层装过（有 identity_relations）时才有。
-    identity: bool,
 }
 
 /// 核心第 8 版迁移（#201）在它自己的事务里做的同一个核对：旧兼容表与由核心主数据生成的样子逐表一致才升级。
 /// 只建连接内的 TEMP 影子，结束即清掉。
 pub(crate) fn verify_in(tx: &Connection) -> Result<Report> {
-    let identity = table_exists(tx, "identity_relations")?;
     let mut report = Report::default();
-    shadow(tx, identity)?;
-    compare(tx, identity, &mut report)?;
+    shadow(tx)?;
+    compare(tx, &mut report)?;
     clear_shadow(tx)?;
     Ok(report)
 }
@@ -150,6 +147,27 @@ pub(crate) fn retire_identity_baseline(c: &Connection) -> Result<()> {
     Ok(())
 }
 
+/// 核心第 8 版：身份关系、关系证据和决议只在核心里（`character_relations`）。旧表还在时，每条改关系的命令都按核心
+/// 重算过它们，所以逐表核对，不一致就拒绝升级；一致就删掉（引用别人的在前）。只有身份层装过的库才有这些表。
+///
+/// 放在 `retire_entities` 之前：`identity_relations` 引用 `entities`，外键开着时要先删它。
+pub(crate) fn retire_relations(c: &Connection) -> Result<()> {
+    let mut differs = 0;
+    for (table, columns, fragment) in crate::character_relations::TABLES {
+        if table_exists(c, table)? {
+            differs +=
+                differ(c, &format!("SELECT {columns} FROM {table}"), &format!("SELECT {columns} FROM {fragment}"))?;
+        }
+    }
+    if differs > 0 {
+        return Err(Error::Schema(format!("旧身份关系表与词条核心不一致，没有升级：{differs} 行")));
+    }
+    for (table, _, _) in crate::character_relations::TABLES.iter().rev() {
+        c.execute_batch(&format!("DROP TABLE IF EXISTS {table}"))?;
+    }
+    Ok(())
+}
+
 /// `term_tree` 在核心第 8 版加的列：身份的属性（原来在 `terms.attrs`，默认值与旧表 `entities` 相同）和先后 `seq`。
 const TREE_COLUMNS: [(&str, &str); 7] = [
     ("variant", "TEXT NOT NULL DEFAULT ''"),
@@ -170,12 +188,12 @@ const ENTITY_COLUMNS: &str =
 /// - `term_tree` 加属性列和先后 `seq`（`TREE_COLUMNS`），属性从 `terms.attrs` 填入，这些词条的 `attrs` 清空
 ///   （用户 2026-10-20 决定）；
 /// - 旧表 `entities` 还在时：核心里还没有身份（新建的库）就照旧表建一次；`seq` 取旧表的 rowid；然后逐行核对，不一致就
-///   拒绝升级（第 7 版里每条改身份的命令都同步镜像过）。引用它的视图改按核心表重写（列逐一对应），
-///   `identity_relations` 的外键改为 `REFERENCES terms(key)` 重建，最后删表。
+///   拒绝升级（第 7 版里每条改身份的命令都同步镜像过）。引用它的视图改按核心表重写（列逐一对应），最后删表。
 ///
-/// 放在别的旧表退役之后：外键开着，引用 `entities` 的旧表（`links`、`names`、`work_review`）都删掉了才能删它。
+/// 放在别的旧表退役之后：外键开着，引用 `entities` 的旧表（`links`、`names`、`work_review`、`identity_relations`）都
+/// 删掉了才能删它。
 pub(crate) fn retire_entities(c: &Connection) -> Result<()> {
-    // `term_tree` 和 `identity_relations` 有写保护；迁移结束时 `schema::migrate_in` 收回钥匙。
+    // `term_tree` 有写保护；迁移结束时 `schema::migrate_in` 收回钥匙。
     c.execute("INSERT OR REPLACE INTO meta(key,value) VALUES (?1,'1')", [crate::schema::WRITER_KEY])?;
     let have = columns(c, "term_tree")?;
     for (column, definition) in TREE_COLUMNS {
@@ -235,9 +253,6 @@ pub(crate) fn retire_entities(c: &Connection) -> Result<()> {
             }
         }
         rewrite_views(c)?;
-        if table_exists(c, "identity_relations")? {
-            rebuild_relations(c)?;
-        }
         c.execute_batch("DROP TABLE entities; DROP TABLE IF EXISTS shadow_entities;")?;
     }
     // 没有旧表的库（只有核心的库）：按词条 id 的先后。
@@ -267,44 +282,6 @@ fn rewrite_views(c: &Connection) -> Result<()> {
     Ok(())
 }
 
-/// `identity_relations` 的两端改为 `REFERENCES terms(key)`（`terms.key` 唯一）：行先存进临时表，照原来的建表语句（只换
-/// 外键）重建，搬回原样的行，索引和触发器照原样重建。外键开着，删表时引用它的关系证据、决议暂时悬空，所以这段推迟外键
-/// 检查，行搬回来就恢复一致。
-fn rebuild_relations(c: &Connection) -> Result<()> {
-    let sql: String = c.query_row(
-        "SELECT sql FROM main.sqlite_master WHERE type = 'table' AND name = 'identity_relations'",
-        [],
-        |r| r.get(0),
-    )?;
-    let open = sql.find('(').ok_or_else(|| Error::Schema("看不懂 identity_relations 的建表语句".into()))?;
-    let body = sql[open..].replace("REFERENCES entities(id)", "REFERENCES terms(key)");
-    let depend: Vec<String> = c
-        .prepare(
-            "SELECT sql FROM main.sqlite_master
-             WHERE tbl_name = 'identity_relations' AND type IN ('index', 'trigger') AND sql IS NOT NULL
-             ORDER BY rowid",
-        )?
-        .query_map([], |r| r.get(0))?
-        .collect::<rusqlite::Result<_>>()?;
-    let deferred: bool = c.pragma_query_value(None, "defer_foreign_keys", |r| r.get(0))?;
-    c.pragma_update(None, "defer_foreign_keys", true)?;
-    let result = (|| -> Result<()> {
-        c.execute_batch(&format!(
-            "CREATE TEMP TABLE relations_v7 AS SELECT * FROM main.identity_relations;
-             DROP TABLE main.identity_relations;
-             CREATE TABLE main.identity_relations {body};
-             INSERT INTO main.identity_relations SELECT * FROM temp.relations_v7;
-             DROP TABLE temp.relations_v7;"
-        ))?;
-        for definition in depend {
-            c.execute_batch(&definition)?;
-        }
-        Ok(())
-    })();
-    c.pragma_update(None, "defer_foreign_keys", deferred)?;
-    result
-}
-
 /// 两个查询的结果双向相差的行数。
 fn differ(c: &Connection, old: &str, new: &str) -> Result<i64> {
     let count =
@@ -320,27 +297,6 @@ pub(crate) fn compat_select(table: &str) -> Result<&'static str> {
         .ok_or_else(|| Error::Invalid(format!("未知角色兼容表：{table}")))
 }
 
-/// Rebuild only the changed relation's compatibility rows. Rebuilding all four
-/// tables per accepted edge would introduce quadratic writes on top of the old
-/// algorithm's required per-edge graph validation.
-pub(crate) fn project_relation(c: &Connection, id: i64) -> Result<()> {
-    let selected = [
-        ("identity_relations", "id=?1"),
-        ("identity_evidence", "relation_id=?1"),
-        ("identity_decisions", "relation_id=?1"),
-        ("identity_decision_evidence", "decision_id IN (SELECT id FROM identity_decisions WHERE relation_id=?1)"),
-    ];
-    for (table, filter) in selected.iter().rev() {
-        c.execute(&format!("DELETE FROM {table} WHERE {filter}"), [id])?;
-    }
-    for (table, filter) in selected {
-        let definition = COMPAT.iter().find(|d| d.table == table).expect("compatibility table");
-        let columns = definition.columns.join(",");
-        c.execute(&format!("WITH rebuilt({columns}) AS ({}) INSERT INTO {table}({columns}) SELECT {columns} FROM rebuilt WHERE {filter}", definition.select), [id])?;
-    }
-    Ok(())
-}
-
 /// 生成顺序即插入顺序（被引用的在前），删除时倒过来。
 const COMPAT: &[Compat] = &[
     Compat {
@@ -349,7 +305,6 @@ const COMPAT: &[Compat] = &[
         select: "SELECT a.key,t.key,CASE v.verdict WHEN 'yes' THEN 'confirmed' ELSE 'rejected' END,v.via
          FROM term_effective_verdicts v JOIN term_assets a ON a.id=v.asset_id AND a.namespace='library'
          JOIN term_tree r ON r.term_id=v.term_id JOIN terms t ON t.id=v.term_id",
-        identity: false,
     },
     Compat {
         table: "candidates",
@@ -363,49 +318,6 @@ const COMPAT: &[Compat] = &[
          JOIN term_tree r ON r.term_id=e.term_id JOIN terms t ON t.id=e.term_id
          WHERE e.source||'.'||e.method IN ('wd.wd_character','ccip_index.char_ext')
          GROUP BY a.key,t.key,e.source",
-        identity: false,
-    },
-    Compat {
-        table: "identity_relations",
-        columns: &["id", "a", "b", "kind", "status"],
-        select: "SELECT m.legacy_id,
-          CASE r.kind WHEN 'contains' THEN tb.key WHEN 'different_from' THEN min(ta.key,tb.key) ELSE ta.key END,
-          CASE r.kind WHEN 'contains' THEN ta.key WHEN 'different_from' THEN max(ta.key,tb.key) ELSE tb.key END,
-          CASE r.kind WHEN 'same_as' THEN 'duplicate_of' WHEN 'contains' THEN 'form_of' ELSE 'different_from' END,
-          CASE l.verdict WHEN 'yes' THEN 'accepted' WHEN 'no' THEN 'rejected' ELSE 'proposed' END
-         FROM term_legacy_ids m JOIN term_relations r ON r.id=m.core_id
-         JOIN terms ta ON ta.id=r.a JOIN terms tb ON tb.id=r.b
-         LEFT JOIN term_relation_latest l ON l.relation_id=r.id WHERE m.kind='relation'",
-        identity: true,
-    },
-    Compat {
-        table: "identity_evidence",
-        columns: &["relation_id", "fingerprint", "source", "payload", "created_at"],
-        select: "SELECT m.legacy_id,json_extract(e.data,'$.legacy_fingerprint'),e.source,json_extract(e.data,'$.payload'),
-          json_extract(e.data,'$.created_at')
-         FROM term_evidence e JOIN term_legacy_ids m ON m.kind='relation' AND m.core_id=e.relation_id
-         WHERE e.method='identity_evidence'",
-        identity: true,
-    },
-    Compat {
-        table: "identity_decisions",
-        columns: &["id", "relation_id", "previous_status", "status", "reason", "created_at"],
-        select: "SELECT d.legacy_id,m.legacy_id,
-          coalesce(lag(s.status) OVER (PARTITION BY v.relation_id ORDER BY v.id),'proposed'),s.status,v.reason,v.created_at
-         FROM term_legacy_ids d JOIN term_verdicts v ON v.id=d.core_id
-         JOIN term_legacy_ids m ON m.kind='relation' AND m.core_id=v.relation_id
-         JOIN (SELECT 'yes' AS verdict,'accepted' AS status UNION ALL SELECT 'no','rejected' UNION ALL SELECT 'clear','proposed') s
-          ON s.verdict=v.verdict
-         WHERE d.kind='decision'",
-        identity: true,
-    },
-    Compat {
-        table: "identity_decision_evidence",
-        columns: &["decision_id", "fingerprint"],
-        select: "SELECT d.legacy_id,json_extract(e.data,'$.legacy_fingerprint')
-         FROM term_legacy_ids d JOIN term_verdicts v ON v.id=d.core_id, json_each(v.reviewed) j
-         JOIN term_evidence e ON e.id=j.value WHERE d.kind='decision'",
-        identity: true,
     },
 ];
 
@@ -429,13 +341,9 @@ impl Report {
 /// 学习产物，以及相册导入的 `imported`。`deferred`、`asked`、`reviews` 由核心命令一起写，但 Python 撤销自己的步骤
 /// （旧的零成员 sweep、curate、identity_skip）时照旧要删它们的行；`duplicates`、`excluded`、`auto_rules` 仍有
 /// Python 的写入口（curate、相似分组）。这些都不在里面。
-pub const GUARDED: [&str; 22] = [
+pub const GUARDED: [&str; 18] = [
     "assertions",
     "candidates",
-    "identity_relations",
-    "identity_evidence",
-    "identity_decisions",
-    "identity_decision_evidence",
     "memberships",
     "tag_memberships",
     "family_evidence",
@@ -546,11 +454,11 @@ pub(crate) fn clear_shadow(c: &Connection) -> Result<()> {
 }
 
 /// 由核心主数据生成连接内的 TEMP 影子兼容表（建表语句照旧表，去掉外键），只读不写主文件。
-fn shadow(tx: &Connection, identity: bool) -> Result<()> {
+fn shadow(tx: &Connection) -> Result<()> {
     for c in COMPAT.iter().rev() {
         tx.execute_batch(&format!("DROP TABLE IF EXISTS {SHADOW}{}", c.table))?;
     }
-    for c in COMPAT.iter().filter(|c| !c.identity || identity) {
+    for c in COMPAT {
         let sql: String =
             tx.query_row("SELECT sql FROM main.sqlite_master WHERE type='table' AND name=?1", [c.table], |x| x.get(0))?;
         let ddl = shadow_ddl(&sql, c.table)?.replacen("CREATE TABLE", "CREATE TEMP TABLE", 1);
@@ -562,10 +470,9 @@ fn shadow(tx: &Connection, identity: bool) -> Result<()> {
     Ok(())
 }
 
-fn compare(tx: &Connection, identity: bool, r: &mut Report) -> Result<()> {
+fn compare(tx: &Connection, r: &mut Report) -> Result<()> {
     let mut pairs: Vec<(String, String, String)> = COMPAT
         .iter()
-        .filter(|c| !c.identity || identity)
         .map(|c| {
             let cols = c.columns.join(",");
             (

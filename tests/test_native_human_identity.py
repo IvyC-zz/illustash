@@ -47,7 +47,8 @@ class NativeHumanIdentityTest(unittest.TestCase):
     def test_relation_states_evidence_graph_and_undo(self):
         self.decide(evidence={'z':'证据','a':[1,0.125], 'response_ids':[7]})
         with closing(sqlite3.connect(self.right.db)) as c:
-            relation = c.execute("SELECT id FROM identity_relations WHERE kind='duplicate_of'").fetchone()[0]
+            relation = c.execute("SELECT m.legacy_id FROM term_legacy_ids m JOIN term_relations r ON r.id=m.core_id "
+                                 "WHERE m.kind='relation' AND r.kind='same_as' ORDER BY m.legacy_id").fetchone()[0]
         for status in ('rejected','proposed','accepted'):
             self.decide(relation_id=relation, status=status, a=None, b=None, kind=None)
         for _ in range(4):

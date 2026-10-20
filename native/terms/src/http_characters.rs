@@ -1,5 +1,6 @@
 //! Character/identity HTTP reads. Query order, stable post-sorts and dict insertion order follow Store.
 use crate::character_entities::ENTITIES;
+use crate::character_relations::{EVIDENCE, RELATIONS};
 use crate::{
     http::LibraryContext,
     http_json::{parse_python, Json},
@@ -435,10 +436,11 @@ fn queue(c: &Connection, limit: i64, offset: i64, nsfw: &str, count_only: bool) 
     .iter()
     .map(|r| (text(r, "entity"), number(r, "count")))
     .collect();
-    let decided: HashSet<_> = rows(c, "SELECT a,b FROM identity_relations WHERE status<>'proposed'", &[])?
-        .iter()
-        .map(|r| pair_key(&fam(&text(r, "a")), &fam(&text(r, "b"))))
-        .collect();
+    let decided: HashSet<_> =
+        rows(c, &format!("SELECT r.a, r.b FROM {RELATIONS} r WHERE r.status <> 'proposed'"), &[])?
+            .iter()
+            .map(|r| pair_key(&fam(&text(r, "a")), &fam(&text(r, "b"))))
+            .collect();
     let skipped = strings(c, "SELECT value FROM prefs WHERE key='identity_skipped'", &[])?
         .into_iter()
         .next()
@@ -507,12 +509,37 @@ fn queue(c: &Connection, limit: i64, offset: i64, nsfw: &str, count_only: bool) 
         };
         add(text(&r, "a"), text(&r, "b"), distance, hint, None::<String>.into());
     }
-    for r in rows(c,"SELECT r.id,r.a,r.b,r.kind,(SELECT min(source) FROM identity_evidence e WHERE e.relation_id=r.id) AS source FROM identity_relations r WHERE r.status='proposed'",&[])? {let a=text(&r,"a");let b=text(&r,"b");let hint=if count_only{None::<String>.into()}else{let tags:HashMap<String,String>=rows(c,&format!(
-            "SELECT l.entity_id, l.key
-             FROM {LINKS} l
-             WHERE l.core_system = 'danbooru' AND l.entity_id IN (?, ?)",
-            LINKS = crate::character_links::LINKS
-        ),&[&a,&b])?.iter().map(|r|(text(r,"entity_id"),text(r,"key"))).collect();Json::object([("kind",val(&r,"kind").clone()),("subject",tags.get(&a).cloned().unwrap_or_default().into()),("object",tags.get(&b).cloned().unwrap_or_default().into()),("source",text(&r,"source").into())])};add(a,b,None::<String>.into(),hint,val(&r,"id").clone());}
+    // 原来的旧表按 id 扫描：同一对身份的提示取 id 最小的关系。
+    let proposed = format!(
+        "SELECT r.id, r.a, r.b, r.kind,
+           (SELECT min(e.source) FROM {EVIDENCE} e WHERE e.relation_id = r.id) AS source
+         FROM {RELATIONS} r
+         WHERE r.status = 'proposed'
+         ORDER BY r.id"
+    );
+    let danbooru = format!(
+        "SELECT l.entity_id, l.key
+         FROM {LINKS} l
+         WHERE l.core_system = 'danbooru' AND l.entity_id IN (?, ?)",
+        LINKS = crate::character_links::LINKS
+    );
+    for r in rows(c, &proposed, &[])? {
+        let a = text(&r, "a");
+        let b = text(&r, "b");
+        let hint = if count_only {
+            None::<String>.into()
+        } else {
+            let tags: HashMap<String, String> =
+                rows(c, &danbooru, &[&a, &b])?.iter().map(|r| (text(r, "entity_id"), text(r, "key"))).collect();
+            Json::object([
+                ("kind", val(&r, "kind").clone()),
+                ("subject", tags.get(&a).cloned().unwrap_or_default().into()),
+                ("object", tags.get(&b).cloned().unwrap_or_default().into()),
+                ("source", text(&r, "source").into()),
+            ])
+        };
+        add(a, b, None::<String>.into(), hint, val(&r, "id").clone());
+    }
     let total = found.len();
     if count_only {
         return Ok(Json::object([("total", (total as i64).into())]));
