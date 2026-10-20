@@ -177,7 +177,7 @@ const VERIFY: (f64, f64) = (0.8, 0.95);
 ///
 /// The full integrity checks run once each, inside the writer transaction so that what they read is what is backed
 /// up and migrated: both databases before the backup, and library.sqlite, the only file written, after the commit.
-/// Until #267 the same upgrade read library.sqlite in full about eight times and source.sqlite about five
+/// Until #267 the same upgrade read library.sqlite in full ten times and source.sqlite six
 /// (opening, preflight and re-validation each checked again), none of it reported.
 pub(crate) fn upgrade(
     prepared: &ValidatedUpgrade,
