@@ -348,10 +348,7 @@ fn initialize_application<F: FnOnce(&Connection) -> Result<()>>(
     let tx = c.transaction_with_behavior(TransactionBehavior::Immediate)?;
     tx.execute_batch(BUILTIN_NAMES)?;
     tx.commit()?;
-    crate::legacy_artists::cutover(&mut c, None)?;
-    crate::legacy_labels::cutover(&mut c)?;
-    crate::legacy_characters::cutover(&mut c)?;
-    crate::legacy_names::cutover(&mut c)?;
+    crate::new_library::switch(&mut c)?;
     names_triggers(&c)?;
     after_birth(&c)?;
     drop(c);
@@ -531,7 +528,7 @@ mod tests {
             assert!(f.dest.join(sub).is_dir());
         }
         assert!(!f.dest.join("library.json.tmp").exists());
-        let mut c = f.db();
+        let c = f.db();
         assert_eq!(count(&c,"SELECT count(*) FROM meta WHERE key IN ('terms_artists','terms_labels','terms_characters','terms_names') AND value='core'"),4);
         assert_eq!(
             count(
@@ -567,8 +564,28 @@ mod tests {
         assert_eq!(count(&c, "SELECT count(*) FROM term_tree WHERE parent_id IS NOT NULL AND variant='swimsuit'"), 1);
         assert_eq!(count(&c, "SELECT count(*) FROM term_tree WHERE mascot=1 AND mascot_origin='default'"), 1);
         assert_eq!(count(&c, "SELECT count(*) FROM sqlite_master WHERE name='entities'"), 0);
-        assert!(crate::legacy_characters::verify(&mut c).unwrap().committed);
-        assert!(crate::legacy_names::verify(&mut c).unwrap().committed);
+        assert!(crate::legacy_characters::characters_in_core(&c).unwrap());
+        assert!(crate::legacy_names::names_in_core(&c).unwrap());
+        // The four domains start in the core (`new_library`): the label tables are views over it, the compatibility
+        // and core-only tables are guarded, the derived tables compacted, and the three empty whole-library evidence
+        // sets the former switch left are there.
+        assert_eq!(
+            count(&c, "SELECT count(*) FROM sqlite_master WHERE type='view' AND name IN ('asset_tags','general_hits','asset_rating')"),
+            3
+        );
+        assert_eq!(count(&c, "SELECT count(*) FROM sqlite_master WHERE name='artist_verdicts'"), 0);
+        assert_eq!(
+            count(&c, "SELECT count(*) FROM sqlite_master WHERE type='trigger' AND name='assertions_writer_insert'"),
+            1
+        );
+        assert_eq!(
+            count(&c, "SELECT count(*) FROM sqlite_master WHERE name='candidates' AND sql LIKE '%WITHOUT ROWID%'"),
+            1
+        );
+        assert_eq!(
+            count(&c, "SELECT count(*) FROM term_evidence_sets WHERE producer='legacy:provenance' OR producer LIKE 'migration:%'"),
+            3
+        );
         let src = f.source();
         for table in ["assets", "labels", "decisions", "reference_extra"] {
             assert_eq!(count(&src, &format!("SELECT count(*) FROM {table}")), 0);
@@ -692,15 +709,16 @@ mod tests {
         assert_eq!(fs::read(f.folder.join("keep")).unwrap(), b"source");
     }
     #[test]
-    fn failure_after_core_cutovers_does_not_publish_config_and_cleans_owned_databases_and_backups() {
+    fn failure_after_the_core_switch_does_not_publish_config_and_cleans_owned_databases() {
         let f = Fixture::new();
         let before = fs::read(&f.reference).unwrap();
         let result = create(&f.dest, &f.folder, None, None, Some(&f.reference), |c| {
             assert!(!f.dest.join("library.json").exists());
             assert_eq!(count(c,"SELECT count(*) FROM meta WHERE key IN ('terms_artists','terms_labels','terms_characters','terms_names') AND value='core'"),4);
-            assert!(f.dest.join("library-backups").is_dir());
+            // A new library starts in the core: nothing to back up before a switch.
+            assert!(!f.dest.join("library-backups").exists());
             c.execute_batch(
-                "CREATE TRIGGER injected BEFORE INSERT ON entities BEGIN SELECT RAISE(ABORT,'injected'); END;",
+                "CREATE TRIGGER injected BEFORE INSERT ON terms BEGIN SELECT RAISE(ABORT,'injected'); END;",
             )?;
             Ok(())
         });

@@ -26,6 +26,7 @@ pub mod name_codecs;
 pub mod names_commands;
 pub mod names_search;
 pub mod names_view;
+pub mod new_library;
 pub mod origin;
 pub mod package;
 #[path = "schema.rs"]
@@ -39,42 +40,13 @@ pub mod schema {
 }
 #[cfg(test)]
 pub use test_support::schema;
-#[path = "legacy_artists.rs"]
-mod legacy_artists_rules;
-#[cfg(not(test))]
-pub mod legacy_artists {
-    pub use super::legacy_artists_rules::*;
-}
-#[cfg(test)]
-pub use test_support::legacy_artists;
-#[path = "legacy_characters.rs"]
-mod legacy_characters_rules;
-#[cfg(not(test))]
-pub mod legacy_characters {
-    pub use super::legacy_characters_rules::*;
-}
-#[cfg(test)]
-pub use test_support::legacy_characters;
-#[path = "legacy_labels.rs"]
-mod legacy_labels_rules;
-#[cfg(not(test))]
-pub mod legacy_labels {
-    pub use super::legacy_labels_rules::*;
-}
-#[cfg(test)]
-pub use test_support::legacy_labels;
-#[path = "legacy_names.rs"]
-mod legacy_names_rules;
+pub mod legacy_characters;
+pub mod legacy_labels;
+pub mod legacy_names;
 pub use error::{Error, Result};
-#[cfg(not(test))]
-pub mod legacy_names {
-    pub use super::legacy_names_rules::*;
-}
 use rusqlite::Connection;
 pub use schema::{Kind, SCHEMA_VERSION};
 use std::time::Duration;
-#[cfg(test)]
-pub use test_support::legacy_names;
 pub fn configure(conn: &Connection) -> Result<()> {
     conn.set_prepared_statement_cache_capacity(128);
     conn.pragma_update(None, "foreign_keys", true)?;

@@ -16,7 +16,9 @@ WD 证据由 `tests/reference/web/wd_export.py（#9 已删除）` 从 source.sql
 
 ## 2. 切换
 
-`legacy_labels::cutover`（命令行 `cutover-labels`），一个事务：
+**这条命令和收编代码已随 #201 第 4 步删除（2026-10-20）**：核心第 8 版拒绝没切换完的图库，新建图库由 `new_library` 一开始就在核心里（[TERMS_SCHEMA.md](TERMS_SCHEMA.md) 第 14 节）。下面是当时的过程，现有图库都是这样切过来的。
+
+原来的 `legacy_labels::cutover`（命令行 `cutover-labels`），一个事务：
 
 1. 确认 `asset_rating` 里每张图都已有分级证据（没交齐就拒绝，报还差几张）；
 2. 收编用户标签并全体核对（核心里有效的「加上」必须与 `asset_tags` 完全相等；找不到历史步骤的标签整次回滚）；

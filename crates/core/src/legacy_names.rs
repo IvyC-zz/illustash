@@ -7,7 +7,7 @@
 use crate::character_entities::ENTITIES;
 use crate::character_links::LINKS;
 use crate::{Error, Result};
-use rusqlite::{Connection, TransactionBehavior};
+use rusqlite::Connection;
 use serde_json::{json, Map, Value};
 
 pub const TABLES: &str = "
@@ -250,21 +250,6 @@ pub fn version_triggers(c: &Connection) -> Result<()> {
         }
     }
     Ok(())
-}
-
-/// `illustash-terms verify-names`：名字只在核心里，没有旧表要比，报告总是干净的（保留命令，第 4 步随兼容层删除）。
-pub fn verify(conn: &mut Connection) -> Result<Report> {
-    crate::schema::require_current(conn)?;
-    Ok(Report { committed: true, ..Report::default() })
-}
-
-/// `illustash-terms sync-names`：同上，没有要同步的旧表。前提仍是角色已切到核心。
-pub fn sync(conn: &mut Connection) -> Result<Report> {
-    crate::schema::require_current(conn)?;
-    if !crate::legacy_characters::characters_in_core(conn)? {
-        return Err(Error::Conflict("先把角色切到词条核心，再收编名字".into()));
-    }
-    Ok(Report { committed: true, ..Report::default() })
 }
 
 pub const NAMES_IN_CORE: &str = "terms_names";
@@ -574,27 +559,4 @@ pub fn refresh_projection(c: &Connection, seen: &mut Option<String>) -> Result<(
     )?;
     *seen = version;
     Ok(())
-}
-
-/// `illustash-terms cutover-names`：一个事务里写 `terms_names=core`、整表建投影（核心第 8 版起名字只在核心里，没有
-/// 旧表要收编；新建图库仍经这一步）。前提是角色已在核心。已经切过就什么都不做，返回 None；失败什么都不留。
-pub fn cutover_with_backup(conn: &mut Connection, backup: &crate::backup::RequiredBackup) -> Result<Option<Report>> {
-    crate::schema_rules::migrate_with_backup(conn, backup)?;
-    if names_in_core(conn)? {
-        return Ok(None);
-    }
-    crate::schema_rules::backup_before_cutover(conn, "names", backup)?;
-    let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-    if names_in_core(&tx)? {
-        return Ok(None);
-    }
-    if !crate::legacy_characters::characters_in_core(&tx)? {
-        return Err(Error::Conflict("先把角色切到词条核心，再切名字".into()));
-    }
-    crate::schema::begin_writing(&tx)?;
-    tx.execute("INSERT OR REPLACE INTO meta(key,value) VALUES (?1,'core')", [NAMES_IN_CORE])?;
-    tx.execute("INSERT OR IGNORE INTO meta(key,value) VALUES ('names_version','0')", [])?;
-    after_write(&tx)?;
-    crate::schema::commit_writing(tx)?;
-    Ok(Some(Report { committed: true, ..Report::default() }))
 }

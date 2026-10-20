@@ -65,7 +65,6 @@ fn library(hybrid: bool) -> Connection {
         inputs(&c, i, &mut Seq(i as u64 * 7919 + 1));
     }
     illustash_terms::migrate(&mut c).unwrap();
-    illustash_terms::legacy_characters::sync(&mut c).unwrap();
     c
 }
 
