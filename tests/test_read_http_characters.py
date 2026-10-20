@@ -1,5 +1,7 @@
 """R4 status/raw HTTP acceptance; all mutable inputs are temporary synthetic fixtures."""
 import json
+import os
+import subprocess
 import unittest
 from urllib.parse import urlencode
 from tests.read_http_harness import HTTPHarness
@@ -87,6 +89,44 @@ class CharacterReadHTTPTest(HTTPHarness):
         self.sync('uncertain')
         response = json.loads(self.pair('/api/detail?id=a')['body'])['identity']
         self.assertTrue(response['undetermined'])
+
+    def test_unset_policy_legacy_names_stable_ties_and_cover_reuse(self):
+        # Recorded on r4-legacy, the library before it switched to the core (no `meta`; refused since core v8, #201,
+        # see `HTTPHarness.after_switch`). The root library of the same package is that library after the switch: the
+        # same rows in every table they share, restored at this core version. So the replies recorded on r4-legacy are
+        # compared with the live replies of the root library.
+        (self.root/'r4-legacy').mkdir(exist_ok=True)
+        self.sync('legacy'); self.publish(db=str(self.root/'app.sqlite'), source=str(self.root/'source.db'))
+        live = lambda path: self.live(self.rec.value('response'), '/api/' + path)
+        for path in ['characters', 'characters?summary=1', 'tagged', 'identity/queue', 'identity/count', 'detail?id=a']:
+            live(path)
+        # Names written past the core, as the recording wrote them on r4-legacy.
+        with self.connect() as c:
+            ids=[r[0] for r in c.execute("SELECT id FROM entities WHERE kind='character' AND parent_id IS NULL AND merged_into IS NULL LIMIT 3")]
+            for e in ids:
+                rename(c, e, '平局')
+            c.execute("DELETE FROM meta WHERE key='identity_policy'")
+            c.commit()
+        # A library before the switch had no display projection: its readers chose names on every read. A switched
+        # library's readers read the projection, which the core keeps with every write; names written past the core
+        # reach it when the core rebuilds it from the name tables, as `names-project` does.
+        terms = os.environ.get('ILLUSTASH_TERMS_BIN')
+        if not terms:
+            raise unittest.SkipTest('set ILLUSTASH_TERMS_BIN: the projection is rebuilt with the core command')
+        subprocess.run([terms, 'names-project', '--db', str(self.db)], check=True, capture_output=True)
+        for path in ['characters', 'characters?summary=1', 'detail?id=a']:
+            live(path)
+        for e in ids:
+            live('characters?' + urlencode({'id':e}))
+            live('character/profile?' + urlencode({'entity':e}))
+
+
+def rename(c, entity, name):
+    """Replace an identity's names by one preferred user name, without the core."""
+    c.execute("DELETE FROM term_names WHERE term_id=(SELECT id FROM terms WHERE key=?)",(entity,))
+    c.execute("INSERT INTO term_names(term_id,lang,value,source,role,preferred,position,seq) VALUES "
+              "((SELECT id FROM terms WHERE key=?),'zh',?,'user','display',1,0,(SELECT coalesce(max(seq),0)+1 FROM term_names))",(entity,name))
+
 
 if __name__ == '__main__':
     unittest.main()

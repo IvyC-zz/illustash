@@ -45,10 +45,11 @@ def binary():
     return path
 
 
-def publish(rec, server, state):
-    """Atomically publish the request context (formerly the reference server's readiness file)."""
+def publish(rec, server, state, **override):
+    """Atomically publish the request context (formerly the reference server's readiness file); `override` replaces
+    some of the recorded context's fields."""
     # The session token is recorded as is: response lengths depend on it.
-    context = rec.value('context')
+    context = {**rec.value('context'), **override}
     temp = state.with_suffix('.new')
     temp.write_text(json.dumps({**context, 'generation': secrets.token_hex(16),
                                 'tags': str(ROOT / 'tags' / 'tags_v3.csv')}), encoding='utf-8')
@@ -104,8 +105,8 @@ class HTTPHarness(unittest.TestCase):
     def connect(self, path=None):
         return closing(sqlite3.connect(path or self.db))
 
-    def publish(self):
-        type(self).context = publish(self.rec, self.server, self.state)
+    def publish(self, **override):
+        type(self).context = publish(self.rec, self.server, self.state, **override)
 
     def sync(self, label='changed'):
         """After a reference-side change: record the temporary root, or restore it."""
@@ -122,6 +123,42 @@ class HTTPHarness(unittest.TestCase):
         for h in HEADERS:
             self.assertEqual(a['headers'].get(h), b['headers'].get(h), (path, h))
         return a
+
+    # ---- Recorded replies of a library before it switched to the core (#201) ----
+    #
+    # Some recordings read a library before it switched to the core (Python-era, no `meta`). Core v8 refuses such
+    # libraries (only switched ones are kept), so these replies are not read live any more. They are compared instead
+    # with the same requests on the library after the switch, at this core version; the positions where the switch
+    # itself changed the reply are listed by each test with the reason.
+
+    def after_switch(self, before, differ):
+        """From now on each `pair` (recorded after the switch, compared with the live v8 reply) also compares the
+        reply recorded before the switch at the same position, except the positions in `differ`. Returns the list of
+        compared paths, for the caller to check that every recorded reply was reached."""
+        compared = []
+        recorded = self.pair
+
+        def pair(path, *args, **kwargs):
+            reference = recorded(path, *args, **kwargs)
+            if len(compared) < len(before) and len(compared) not in differ:
+                earlier = before[len(compared)]
+                self.assertEqual((earlier['status'], earlier['body']), (reference['status'], reference['body']), path)
+            compared.append(path)
+            return reference
+
+        self.pair = pair
+        self.addCleanup(vars(self).pop, 'pair', None)
+        return compared
+
+    def live(self, before, path, headers=None):
+        """A reply recorded before the switch, compared with the live v8 reply of the library after the switch."""
+        item = {'url': quote(path, safe='/?&=;%+#'), 'headers': headers or {}}
+        reply = verify.fetch(self.origin, item, self.origin)
+        self.assertIsNone(verify.difference(before, reply), (path, verify.difference(before, reply)))
+        self.assertEqual(reply['route'], 'core', path)
+        for h in HEADERS:
+            self.assertEqual(before['headers'].get(h), reply['headers'].get(h), (path, h))
+        return reply
 
     def corpus(self, *, sample, query_limit, keep=lambda item: True):
         return self.rec.value('corpus')
