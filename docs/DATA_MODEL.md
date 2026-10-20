@@ -2,6 +2,8 @@
 
 定稿于 2026-09-24。分三步迁移（第 7 节）：**链接、名字、作品三步代码已实现**（schema 23 → 24 → 25）；外部作品对应关系与多上级歧义保留人工确认。验收记录已删除，见开源前私有历史中的 `docs/DATA_MODEL_ACCEPTANCE.md`。
 
+本文的模型（身份、链接、名字三层）现行有效，但存储已换：2026-10-20 起（词条核心第 8 版，#201）身份在 `terms` / `term_tree`，链接在 `term_links`，名字在 `term_names`、`term_key_names`、`term_key_aliases`，第 4 节的 `entities`、`links`、`names` 和旧的 `display_names`、`name_aliases` 都已删除。表的对应见 [TERMS_SCHEMA.md](TERMS_SCHEMA.md) 第 5、14 节。
+
 ## 1. 为什么要改
 
 现在一个角色有好几种写法，每一种都有地方拿它当 key：
@@ -44,6 +46,8 @@
   - 树的初始结构用 D 站作品 tag 之间的蕴含关系自动搭建（例如 `fate/grand_order` 蕴含 `fate_(series)`，只发送 tag 文字），你再修正个别地方。
 
 ## 4. 表结构（草案）
+
+下面是 schema 25 时的写法，列的含义照旧；词条核心第 8 版起这些列分别在 `terms`（`key` = `id`、`kind`）、`term_tree`（`parent_id`、`work_id`、`original`、`merged_into` 等）、`term_links`（角色的 `wd` 存成 `wd_character`）、`term_names` 里，见本文开头。
 
 ```sql
 -- 身份
@@ -202,7 +206,7 @@ CREATE TABLE names(
 ## 9. schema 25 的兼容边界与操作入口
 
 - 库内 `kind` 使用 `work / character / skin`，原创由 `original=1` 表达。现有前端角色 API 暂保留 `kind='oc' / ''` 的兼容输出，并提供 `work_id`。
-- `work_id` 是所属作品的唯一依据；`entities.work` 暂保留为旧版名称更新器的文字上下文。旧 `display_names / name_aliases` 中的作品、服装词汇保留为缓存，作品身份自己的名称同时存入 `names`。不再用文字决定作品身份。
+- `work_id` 是所属作品的唯一依据；作品文字（原 `entities.work`，现为 `term_tree.work_text`）保留为名称更新器的文字上下文。按文字键的名字（原 `display_names / name_aliases`，现为 `term_key_names`、`term_key_aliases`）中的作品、服装词汇保留为缓存，作品身份自己的名称同时存入按身份的名字（原 `names`，现为 `term_names`）。不再用文字决定作品身份。
 - 历史作品字符串逐个保留为待核对作品及 `qualifier` 链接。只对远端确认的同名、非废弃、类别为作品的 tag 自动建立 Danbooru 链接。无匹配、非作品 tag、链接冲突与多上级全部保留待确认，不能把未核验后缀当作远端作品查询。
 - 设置 → 角色索引 → 作品管理支持新建、改名、修改上级及确认外部链接；角色的更多菜单可调整所属作品。角色页的作品分组可直接查看整棵子树的图片。所有树调整事务内防环。
 - 关注列表的 version 2 格式存作品 ID，未解析的旧 tag 保存在 `pending_tags`，检查时重新读取当前 Danbooru 链接。2026-10-05 起存在各图库的 `prefs.index_watch`；图库还没有这条记录时，从早期版本共享目录里的 `char-patch/watch.json` 推出初值（v2 文件只认领本库存在的作品 ID 并带上 `pending_tags`，v1 tag 列表用本库链接解析，没有文件时用原来的 8 个默认作品 tag），第一次保存时写入本库。共享文件只读、不再改写。
