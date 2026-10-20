@@ -20,8 +20,8 @@
 |---|---|---|
 | `entities` | `terms`（key = 原 id，kind 原样，variant / artist / label_only / mascot / mascot_origin / original 进 `attrs`）+ `term_tree`（parent_id、merged_into、work_id、work 文字，以及 work_review 三列） | 兼容表 `entities`，列序保留旧库自己的（真实库由 `ALTER TABLE` 历史决定） |
 | `links` | `term_links`（角色的 `wd` 存成 `wd_character`，其余原样） | 核心第 8 版起删除，核心直接读写 `term_links`（[TERMS_SCHEMA.md](TERMS_SCHEMA.md) 第 14 节） |
-| `work_review` | `term_tree` 的三列 | 兼容表 |
-| `identity_baseline` | `term_identity_baseline`（`seq` = 原 rowid 顺序） | 兼容表 `identity_baseline`：旧代码按原样读它，核心随主表追加（更正了方案第 4.1 节的「改名冻结」） |
+| `work_review` | `term_tree` 的三列 | 核心第 8 版起删除，命令直接读写 `term_tree`（[TERMS_SCHEMA.md](TERMS_SCHEMA.md) 第 14 节） |
+| `identity_baseline` | `term_identity_baseline`（`seq` = 原 rowid 顺序） | 核心第 8 版起删除（[TERMS_SCHEMA.md](TERMS_SCHEMA.md) 第 14 节）；之前是旧代码按原样读的兼容表，核心随主表追加 |
 | `assertions` | `term_verdicts`：confirmed → yes，rejected → no，原 origin 存进 `via`。有步骤的挂在原来那一步的 `action_id` 上；没有步骤的进批次（`baseline`、`album`、`migration`、`undo_audit`），按锚点排进时间线 | 兼容表 = 每个目标的有效裁决 |
 | `identity_relations` / `identity_evidence` / `identity_decisions` / `identity_decision_evidence` | `term_relations`（`duplicate_of` → `same_as`，`form_of` → `contains` 端点反转，`different_from` 原样）、关系证据、关系裁决（`reviewed` = 当时看到的证据），旧 id 记在 `term_legacy_ids` | 兼容表，保留原 id；status 由最新裁决算出 |
 | `candidates` | 证据：WD → `wd.wd_character`，CCIP → `ccip_index.char_ext`，按**证据批次**生效（每次 refresh / reindex / import 是一批，覆盖到的图上以这一批为准） | 兼容表：有效证据按 (图, 身份, 来源) 取最大分 |

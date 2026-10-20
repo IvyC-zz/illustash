@@ -38,18 +38,6 @@ pub fn baseline(c: &Connection) -> Result<()> {
         SELECT id,parent_id,variant,kind,merged_into FROM entities WHERE kind<>'work'",
     )?
     .execute([])?;
-    // 兼容表 identity_baseline（旧代码按原样读它）：按 seq 保留行序跟着追加。
-    let compat: bool = c
-        .prepare_cached("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='identity_baseline')")?
-        .query_row([], |r| r.get(0))?;
-    if compat {
-        c.prepare_cached(
-            "INSERT OR IGNORE INTO identity_baseline(rowid,id,parent_id,variant,kind,merged_into)
-             SELECT seq,id,parent_id,variant,kind,merged_into FROM term_identity_baseline t
-             WHERE NOT EXISTS(SELECT 1 FROM identity_baseline b WHERE b.id=t.id)",
-        )?
-        .execute([])?;
-    }
     Ok(())
 }
 

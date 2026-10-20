@@ -53,12 +53,17 @@ fn stamp(c: &Connection) -> Result<String> {
     feed(&mut h, b"character-learning-v1");
     for &table in INPUTS {
         feed(&mut h, table.as_bytes());
-        // The character links live in `term_links` since core v8 (#201); they are read in the former `links` shape,
-        // so the same links give the same stamp.
-        let (stored, from) = if table == "links" {
-            ("term_links", format!("(SELECT system, key, entity_id, current, source, added_at FROM {LINKS})"))
-        } else {
-            (table, table.to_owned())
+        // The character links and the identity baseline live in core tables since core v8 (#201); they are read in
+        // the former tables' shape, so the same rows give the same stamp.
+        let (stored, from) = match table {
+            "links" => {
+                ("term_links", format!("(SELECT system, key, entity_id, current, source, added_at FROM {LINKS})"))
+            }
+            "identity_baseline" => (
+                "term_identity_baseline",
+                "(SELECT id, parent_id, variant, kind, merged_into FROM term_identity_baseline)".to_owned(),
+            ),
+            _ => (table, table.to_owned()),
         };
         let exists: bool =
             c.query_row("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name=?)", [stored], |r| {

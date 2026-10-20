@@ -403,9 +403,10 @@ pub(crate) fn works(c: &Connection, q: &str) -> Result<Json> {
            (SELECT l.key FROM {LINKS} l WHERE l.entity_id = e.id AND l.core_system = 'qualifier' LIMIT 1) AS qualifier,
            coalesce(w.status, 'pending') AS status, w.note
          FROM entities e
-         LEFT JOIN work_review w ON w.entity_id = e.id
+         LEFT JOIN {REVIEWS} w ON w.entity_id = e.id
          WHERE e.kind = 'work' AND e.merged_into IS NULL",
-        LINKS = crate::character_links::LINKS
+        LINKS = crate::character_links::LINKS,
+        REVIEWS = crate::character_review::REVIEWS
     );
     for mut v in rows(c, &sql, &[])? {
         let id = v.get("id").expect("http_read internal invariant").text();

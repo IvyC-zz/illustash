@@ -5,6 +5,7 @@ use crate::character_commands::{hybrid, invalid, require_entity, text};
 use crate::character_links::{check_free, LINKS};
 use crate::character_names::TERM_OF;
 use crate::character_profile::{new_id, require_work, set_work, tag_owner, work_for};
+use crate::character_review::{OF as REVIEW_OF, OPEN as REVIEW_OPEN};
 use crate::{character_graph, character_names, character_projection, legacy_characters, Error, Result};
 use rusqlite::{params, Connection, OptionalExtension};
 use serde_json::{json, Value};
@@ -213,7 +214,7 @@ fn work_create(c: &Connection, args: &Value) -> Result<String> {
     let ident = new_id(&args["id"])?;
     c.execute("INSERT INTO entities(id,name,kind,parent_id) VALUES (?,'','work',?)", params![ident, parent])?;
     legacy_characters::born(c, &ident, "user")?;
-    c.execute("INSERT INTO work_review(entity_id,parent_locked) VALUES (?,1)", [&ident])?;
+    c.execute(REVIEW_OPEN, params![ident, "pending", "", 1])?;
     character_names::put_name(c, &ident, text(&args["lang"], "缺少名字的语言")?, "user", title, "display", 0, 1)?;
     if let Some(tag) = args["tag"].as_str().filter(|t| !t.is_empty()) {
         work_link(c, &ident, tag)?;
@@ -250,7 +251,10 @@ fn work_link(c: &Connection, ident: &str, tag: &str) -> Result<()> {
         ),
         [&tag, ident],
     )?;
-    c.execute("UPDATE work_review SET status='confirmed',note='' WHERE entity_id=?", [ident])?;
+    c.execute(
+        &format!("UPDATE term_tree SET review_status = 'confirmed', review_note = '' WHERE {REVIEW_OF}"),
+        [ident],
+    )?;
     Ok(())
 }
 
@@ -263,7 +267,7 @@ fn work_move(c: &Connection, ident: &str, parent: Option<&str>) -> Result<()> {
         }
     }
     c.execute("UPDATE entities SET parent_id=? WHERE id=?", params![parent, ident])?;
-    c.execute("UPDATE work_review SET parent_locked=1 WHERE entity_id=?", [ident])?;
+    c.execute(&format!("UPDATE term_tree SET parent_locked = 1 WHERE {REVIEW_OF}"), [ident])?;
     Ok(())
 }
 
@@ -290,7 +294,9 @@ fn edit_work(c: &Connection, args: &Value) -> Result<Value> {
                         [&ident],
                     )?;
                     c.execute(
-                        "UPDATE work_review SET status='confirmed',note=?2 WHERE entity_id=?1",
+                        &format!(
+                            "UPDATE term_tree SET review_status = 'confirmed', review_note = ?2 WHERE {REVIEW_OF}"
+                        ),
                         [ident.as_str(), "外部链接已由用户清空"],
                     )?;
                 }
@@ -390,8 +396,9 @@ fn work_evidence(c: &Connection, args: &Value) -> Result<Value> {
     let (mut linked, mut pending, mut edges) = (Vec::new(), Vec::new(), Vec::new());
     let mut touched: Vec<String> = Vec::new();
     for (key, ident) in &qualifiers {
-        let status: Option<String> =
-            c.query_row("SELECT status FROM work_review WHERE entity_id=?", [ident], |r| r.get(0)).optional()?;
+        let status: Option<String> = c
+            .query_row(&format!("SELECT review_status FROM term_tree WHERE {REVIEW_OF}"), [ident], |r| r.get(0))
+            .optional()?;
         if status.as_deref() == Some("confirmed") {
             continue;
         }
@@ -404,7 +411,7 @@ fn work_evidence(c: &Connection, args: &Value) -> Result<Value> {
             .optional()?;
         if !tags.contains(key) || owner.as_ref().is_some_and(|o| o != ident) {
             let note = if !tags.contains(key) { "需人工核对作品 tag" } else { "链接已属于另一个身份" };
-            c.execute("UPDATE work_review SET note=? WHERE entity_id=?", [note, ident])?;
+            c.execute(&format!("UPDATE term_tree SET review_note = ?2 WHERE {REVIEW_OF}"), [ident.as_str(), note])?;
             pending.push(json!({"id": ident, "qualifier": key, "reason": note}));
             touched.push(ident.clone());
             continue;
@@ -416,7 +423,10 @@ fn work_evidence(c: &Connection, args: &Value) -> Result<Value> {
             ),
             [key, ident],
         )?;
-        c.execute("UPDATE work_review SET status='verified',note='' WHERE entity_id=?", [ident])?;
+        c.execute(
+            &format!("UPDATE term_tree SET review_status = 'verified', review_note = '' WHERE {REVIEW_OF}"),
+            [ident],
+        )?;
         ids.insert(key.clone(), ident.clone());
         linked.push(key.clone());
         touched.push(ident.clone());
@@ -479,14 +489,14 @@ fn work_evidence(c: &Connection, args: &Value) -> Result<Value> {
             &format!("INSERT INTO term_links(system, key, term_id, source) VALUES ('danbooru', ?, {TERM_OF}, 'check')"),
             [&tag, &ident],
         )?;
-        c.execute("INSERT INTO work_review(entity_id,status) VALUES (?,'verified')", [&ident])?;
+        c.execute(REVIEW_OPEN, params![ident, "verified", "", 0])?;
         ids.insert(tag.clone(), ident.clone());
         touched.push(ident);
     }
     for (tag, choices) in &parents {
         let Some(ident) = ids.get(tag).cloned() else { continue };
         let lock: Option<i64> = c
-            .query_row("SELECT parent_locked FROM work_review WHERE entity_id=?", [&ident], |r| r.get(0))
+            .query_row(&format!("SELECT parent_locked FROM term_tree WHERE {REVIEW_OF}"), [&ident], |r| r.get(0))
             .optional()?;
         if lock.unwrap_or(0) != 0 {
             continue;
@@ -508,7 +518,7 @@ fn work_evidence(c: &Connection, args: &Value) -> Result<Value> {
             }
         }
         if let Some(note) = note {
-            c.execute("UPDATE work_review SET note=? WHERE entity_id=?", [&note, &ident])?;
+            c.execute(&format!("UPDATE term_tree SET review_note = ?2 WHERE {REVIEW_OF}"), [&ident, &note])?;
             pending.push(json!({"id": ident, "tag": tag, "reason": note}));
         }
         touched.push(ident);

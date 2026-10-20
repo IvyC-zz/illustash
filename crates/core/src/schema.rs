@@ -235,8 +235,8 @@ fn v7(conn: &Connection) -> Result<()> {
 ///   一致（角色、名字两套核对；名字在退役时核对，见下），否则拒绝升级、整体回滚：没切换完的
 ///   旧图库先用 `pre-v8` 版本升级。还没有核心表的库
 ///   （新建的库，以及应用层已经拒绝打开的更早的旧图库）不在这里拦。
-/// - 链接：`term_links` 成为角色、皮肤、作品链接的唯一权威，旧表 `links` 照旧表同步一次、逐行核对后删除
-///   （`legacy_characters::retire_links`）。
+/// - 链接、作品复核、身份基线：`term_links`、`term_tree` 的复核三列、`term_identity_baseline` 成为唯一权威，旧表
+///   `links`、`work_review`、`identity_baseline` 逐行核对后删除（`legacy_characters::retire_*`，不一致就拒绝升级）。
 /// - 别名、显示名、名字：`term_key_aliases`、`term_key_names`、`term_names` 成为唯一权威，旧表 `name_aliases`、
 ///   `display_names`、`names` 照旧表同步一次、逐行核对后删除（`legacy_names::retire_*`）；`term_names` 加名字的先后
 ///   `seq`，从 `names` 的 rowid 填入。名字版本触发器随旧表删除，改装到 `term_links`、`term_names`、`term_key_names` 上。
@@ -280,6 +280,8 @@ fn v8(conn: &Connection) -> Result<()> {
     // 旧表退役之后才把名字版本触发器装到 `term_*` 上，退役时的同步不计入 `names_version`。
     let versioned = crate::legacy_names::versioned(conn)?;
     crate::legacy_characters::retire_links(conn)?;
+    crate::legacy_characters::retire_work_review(conn)?;
+    crate::legacy_characters::retire_identity_baseline(conn)?;
     crate::legacy_names::retire_aliases(conn)?;
     crate::legacy_names::retire_display_names(conn)?;
     let names = crate::legacy_names::retire_names(conn)?;
