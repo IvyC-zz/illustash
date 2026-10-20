@@ -443,7 +443,7 @@ fn refresh(c: &Connection, args: &Value) -> Result<Value> {
     let rows = candidates(c, &ids, &args["labels"], &chars, &wd, Some(&valid))?;
     publish(c, &format!("refresh:{}", args["indexed"].as_str().unwrap_or("")), Scope::All, &rows)?;
     c.prepare_cached("DELETE FROM candidates")?.execute([])?;
-    legacy_characters::refresh_candidates(c, &valid.iter().cloned().collect::<Vec<_>>())?;
+    character_projection::refresh_candidates(c, &valid.iter().cloned().collect::<Vec<_>>())?;
     let mut album = Album { c, batch: None };
     for r in args["decisions"].as_array().into_iter().flatten() {
         if valid.contains(r[0].as_str().unwrap_or("")) {
@@ -476,7 +476,7 @@ fn reindex(c: &Connection, args: &Value) -> Result<Value> {
     let scope: BTreeSet<String> = uuids.iter().cloned().collect();
     let rows = candidates(c, &ids, &args["labels"], &chars, &wd, Some(&scope))?;
     publish(c, &format!("reindex:{}", args["indexed"].as_str().unwrap_or("")), Scope::Assets(&uuids), &rows)?;
-    legacy_characters::refresh_candidates(c, &uuids)?;
+    character_projection::refresh_candidates(c, &uuids)?;
     character_projection::evidence(c, Some(&uuids))?;
     character_projection::memberships(c, Some(&uuids))?;
     rules(c, &args["realistic"])?;
@@ -516,7 +516,7 @@ fn import(c: &Connection, args: &Value) -> Result<Value> {
     let mut seen = BTreeSet::new();
     scope.retain(|u| seen.insert(u.clone()));
     publish(c, &format!("import:{}", args["indexed"].as_str().unwrap_or("")), Scope::Assets(&scope), &found)?;
-    legacy_characters::refresh_candidates(c, &scope)?;
+    character_projection::refresh_candidates(c, &scope)?;
     let mut album = Album { c, batch: None };
     for r in args["decisions"].as_array().into_iter().flatten() {
         if only.contains(r[0].as_str().unwrap_or("")) {

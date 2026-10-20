@@ -5,7 +5,7 @@ use crate::character_commands::{
 };
 use crate::character_entities::{ENTITIES, OF};
 use crate::character_labels::Shown;
-use crate::{character_names, character_projection, legacy_characters, Error, Result};
+use crate::{character_names, character_projection, Error, Result};
 use rusqlite::{params, Connection, OptionalExtension};
 use serde_json::{json, Value};
 use std::collections::BTreeSet;
@@ -129,8 +129,8 @@ pub fn merge(c: &Connection, args: &Value) -> Result<Value> {
         }
     }
     let touched: Vec<String> = touched.into_iter().collect();
-    // 候选跟着合并走：兼容表由证据按合并解析算出，等于旧版的「搬到目标、同键取最大」。
-    legacy_characters::refresh_candidates(c, &touched)?;
+    // 候选跟着合并走：派生表 `candidates` 由证据按合并解析算出，等于旧版的「搬到目标、同键取最大」。
+    character_projection::refresh_candidates(c, &touched)?;
     character_projection::evidence(c, Some(&touched))?;
     character_projection::memberships(c, Some(&touched))?;
     let before = vec![json!({"merge": {
@@ -152,7 +152,7 @@ pub fn merge(c: &Connection, args: &Value) -> Result<Value> {
 }
 
 /// 撤销合并。hybrid 下（包括激活前留下的旧合并）：关系退回 proposed（交给 character_identity）；
-/// 策略未设置时照 `_undo_merge` 恢复。人工结论由裁决撤销自然回退，这里把兼容表对齐到有效裁决。
+/// 策略未设置时照 `_undo_merge` 恢复。人工结论由裁决撤销自然回退，这里把派生表 `assertions` 对齐到有效裁决。
 pub fn undo(c: &Connection, action: i64, m: &Value) -> Result<()> {
     if hybrid(c)? {
         return crate::character_identity::undo_merge(c, m);
@@ -241,10 +241,10 @@ fn restore_candidates(c: &Connection, action: i64, m: &Value, source: &str, targ
             );
         }
     }
-    legacy_characters::refresh_candidates(c, &scope)?;
+    character_projection::refresh_candidates(c, &scope)?;
     if current(c)? == expected {
         return Ok(());
     }
     crate::character_evidence::replace(c, &format!("undo-merge/{action}"), &scope, &expected)?;
-    legacy_characters::refresh_candidates(c, &scope)
+    character_projection::refresh_candidates(c, &scope)
 }

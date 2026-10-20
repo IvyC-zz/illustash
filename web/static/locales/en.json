@@ -1362,13 +1362,7 @@
   "数据库版本：{m}": "Database version: {m}",
   "需要新的 id：{m}": "A new id is needed: {m}",
   "链接 {system}:{key} 已属于别的类型的词条": "Link {system}:{key} already belongs to a term of another type",
-  "未知角色兼容表：{table}": "Unknown character compatibility table: {table}",
-  "<{n} 字节>": {
-    "one": "<{n} byte>",
-    "other": "<{n} bytes>"
-  },
   "看不懂 {table} 的建表语句": "Cannot read the CREATE statement of {table}",
-  "看不懂 {table} 的外键": "Cannot read the foreign keys of {table}",
   "局部显示投影与整表重建不一致：局部 {scoped} 行、整表 {full} 行，第一处不同：{differs}": "The partial display projection differs from a full rebuild: {scoped} rows partial, {full} rows full, first difference: {differs}",
   "显示名来源或语言不正确": "The display name's source or language is not valid",
   "别名不正确": "The alias is not valid",
@@ -2293,7 +2287,6 @@
   "图库已升级": "Library upgraded",
   "这个图库还没有完全切换到词条核心，这个版本不再升级它：请先用 pre-v8 版本打开并升级，再用这个版本打开。": "This library was never fully switched to the term core, and this version no longer upgrades it: open and upgrade it with the pre-v8 version first, then open it with this one.",
   "这个图库还没有完全切换到词条核心，新版本不再直接升级它：请先用 pre-v8 版本打开并升级，再用新版本打开": "This library was never fully switched to the term core, and the new version no longer upgrades it directly: open and upgrade it with the pre-v8 version first, then open it with the new one",
-  "旧兼容表与词条核心不一致，没有升级：{report}": "The legacy tables disagree with the term core; not upgraded: {report}",
   "旧名字表与词条核心不一致，没有升级：{report}": "The legacy name tables disagree with the term core; not upgraded: {report}",
   "旧别名表与词条核心不一致，没有升级：{differs} 行": "The legacy alias table disagrees with the term core; not upgraded: {differs} rows",
   "旧显示名表与词条核心不一致，没有升级：{differs} 行": "The legacy display name table disagrees with the term core; not upgraded: {differs} rows",

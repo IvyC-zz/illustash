@@ -302,11 +302,6 @@ fn legacy_tables_that_disagree_with_the_core_refuse_the_upgrade_and_change_nothi
             "旧身份表与词条核心不一致",
         ),
         (
-            "disagree-assertions",
-            "UPDATE assertions SET origin='改过' WHERE rowid=(SELECT min(rowid) FROM assertions)",
-            "旧兼容表与词条核心不一致",
-        ),
-        (
             "disagree-links",
             "UPDATE links SET current=1-current WHERE rowid=(SELECT min(rowid) FROM links)",
             "旧链接表与词条核心不一致",

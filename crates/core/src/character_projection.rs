@@ -72,6 +72,69 @@ fn touch(c: &Connection, uuids: Option<&[String]>) -> Result<()> {
     Ok(())
 }
 
+// ---- 候选（派生表 `candidates`）----
+
+/// 候选：由当前有效证据按 (图, 身份, 来源) 取最大分算出（WD → `wd.wd_character`，CCIP → `ccip_index.char_ext`）。
+/// `candidates` 与 `memberships` 一样是核心维护的派生表（#201 第 4 步用户决定），权威是证据批次；写证据的命令在同一个
+/// 事务里按图刷新它。判定 SQL 和读者按索引直接查表：从证据现算时按图的条件推不进聚合，增量重算会慢几百倍。
+const CANDIDATES: &str = "SELECT a.key,t.key,CASE e.source WHEN 'wd' THEN 'WD' ELSE 'CCIP' END,max(e.score)
+         FROM term_active_evidence active
+ JOIN term_evidence_set_rows current_row ON current_row.set_id=active.set_id
+ JOIN term_evidence e ON e.id=current_row.evidence_id AND e.asset_id=active.asset_id
+   AND e.source=active.source AND active.method IN (e.method,'*')
+ JOIN term_assets a ON a.id=e.asset_id AND a.namespace='library'
+         JOIN term_tree r ON r.term_id=e.term_id JOIN terms t ON t.id=e.term_id
+         WHERE e.source||'.'||e.method IN ('wd.wd_character','ccip_index.char_ext')
+         GROUP BY a.key,t.key,e.source";
+
+/// 策略未设置时，候选的身份沿破坏式合并解析到代表（`_candidate` 与 `merge` 都这样写旧表）；hybrid 下是原始身份。
+const CANDIDATES_RESOLVED: &str = "WITH RECURSIVE chain(term,key,depth) AS (
+   SELECT r.term_id,t.key,0 FROM term_tree r JOIN terms t ON t.id=r.term_id
+   UNION ALL SELECT c.term,r2.merged_into,c.depth+1 FROM chain c JOIN terms t2 ON t2.key=c.key
+    JOIN term_tree r2 ON r2.term_id=t2.id WHERE r2.merged_into IS NOT NULL AND r2.merged_into<>'' AND c.depth<16),
+  resolved(term,key) AS (SELECT term,key FROM chain c WHERE depth=(SELECT max(depth) FROM chain x WHERE x.term=c.term))
+ SELECT a.key,k.key,CASE e.source WHEN 'wd' THEN 'WD' ELSE 'CCIP' END,max(e.score)
+ FROM term_active_evidence active
+ JOIN term_evidence_set_rows current_row ON current_row.set_id=active.set_id
+ JOIN term_evidence e ON e.id=current_row.evidence_id AND e.asset_id=active.asset_id
+   AND e.source=active.source AND active.method IN (e.method,'*')
+ JOIN term_assets a ON a.id=e.asset_id AND a.namespace='library'
+ JOIN resolved k ON k.term=e.term_id
+ WHERE e.source||'.'||e.method IN ('wd.wd_character','ccip_index.char_ext')
+ GROUP BY a.key,k.key,e.source";
+
+/// 小范围刷新时由图片驱动：原计划会先扫描全库证据并分组，最后才过滤图片。
+const CANDIDATE_SCOPE: (&str, &str) = (
+    "FROM term_active_evidence active",
+    "FROM candidate_scope scoped CROSS JOIN term_assets scoped_asset
+               ON scoped_asset.namespace='library' AND scoped_asset.key=scoped.uuid
+             CROSS JOIN term_active_evidence active ON active.asset_id=scoped_asset.id",
+);
+
+/// 按图刷新 `candidates`（= 由当前有效证据算出的那几行）。
+pub(crate) fn refresh_candidates(c: &Connection, uuids: &[String]) -> Result<()> {
+    c.execute_batch(
+        "CREATE TEMP TABLE IF NOT EXISTS candidate_scope(uuid TEXT PRIMARY KEY); DELETE FROM candidate_scope;",
+    )?;
+    let mut put = c.prepare_cached("INSERT OR IGNORE INTO candidate_scope VALUES (?)")?;
+    for u in uuids {
+        put.execute([u])?;
+    }
+    c.execute("DELETE FROM candidates WHERE uuid IN (SELECT uuid FROM candidate_scope)", [])?;
+    let select = if policy(c)? { CANDIDATES } else { CANDIDATES_RESOLVED };
+    // 全量刷新保留原计划，避免为大集合增加逐图索引探测。
+    let select =
+        if uuids.len() <= 4096 { scoped(select, CANDIDATE_SCOPE.0, CANDIDATE_SCOPE.1)? } else { select.to_owned() };
+    c.execute(
+        &format!(
+            "WITH rebuilt(uuid,entity,source,score) AS ({select})
+             INSERT INTO candidates(uuid,entity,source,score) SELECT * FROM rebuilt WHERE uuid IN (SELECT uuid FROM candidate_scope)"
+        ),
+        [],
+    )?;
+    Ok(())
+}
+
 pub fn evidence(c: &Connection, uuids: Option<&[String]>) -> Result<()> {
     evidence_in(c, uuids, policy(c)?)
 }
@@ -158,7 +221,7 @@ fn memberships_in(c: &Connection, uuids: Option<&[String]>, core: bool) -> Resul
 }
 
 /// 切换时整片建一次人物 / 皮肤的投影镜像（此前只有核心命令按受影响的图增量维护；S5 真实副本上发现切换后这一片是空的）。
-/// 只按当前兼容表镜像，不重算派生表：旧版保留下来的增量结果（第 16 节已批准的 ≤1e-6 例外）原样进镜像。
+/// 只按当前的人工结论和候选表镜像，不重算派生表：旧版保留下来的增量结果（第 16 节已批准的 ≤1e-6 例外）原样进镜像。
 pub(crate) fn mirror_all(c: &Connection) -> Result<()> {
     mirror(c, false)
 }
@@ -268,6 +331,14 @@ mod tests {
         assert!(split(MEMBERS, MEMBERS_FILTER).is_ok());
         for sql in [MEMBERS, TAGS] {
             assert!(split(sql, MEMBERS_FROM).is_ok());
+        }
+    }
+
+    #[test]
+    fn candidate_scope_anchor_appears_once_under_both_policies() {
+        for select in [CANDIDATES_RESOLVED, CANDIDATES] {
+            let scoped = scoped(select, CANDIDATE_SCOPE.0, CANDIDATE_SCOPE.1).unwrap();
+            assert_eq!(scoped.matches("FROM candidate_scope scoped").count(), 1);
         }
     }
 
