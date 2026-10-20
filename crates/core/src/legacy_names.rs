@@ -4,6 +4,7 @@
 //! 核心第 8 版（#201）起这三张表是唯一权威，名字命令直接写它们（`character_names`、`names_commands`）。原先由核心维护的
 //! 兼容表 `names`、`display_names`、`name_aliases` 在升级时照旧表同步一次、逐行核对后删除（`retire_names`、
 //! `retire_display_names`、`retire_aliases`）。
+use crate::character_entities::ENTITIES;
 use crate::character_links::LINKS;
 use crate::{Error, Result};
 use rusqlite::{Connection, TransactionBehavior};
@@ -183,10 +184,29 @@ pub(crate) fn retire_names(c: &Connection) -> Result<Report> {
 }
 
 /// 名字版本 `meta.names_version`：这几张表每改一行就加一，显示投影据此判断是否过期（`projection_current`）。由应用层
-/// 建库时装上（不在的表跳过）；核心第 8 版在旧表退役之后把 `links`、`names`、`display_names` 上的三组换到
-/// `term_links`、`term_names`、`term_key_names` 上（`versioned` 为真时调用 `version_triggers`）。`term_links`、
-/// `term_names` 只算角色、皮肤、作品（`term_tree` 里的词条）的行，画师的不算，与原来只数 `links`、`names` 相同。
-pub const VERSIONED: [&str; 4] = ["entities", "term_links", "term_names", "term_key_names"];
+/// 建库时装上（不在的表跳过）；核心第 8 版在旧表退役之后把 `entities`、`links`、`names`、`display_names` 上的四组换到
+/// `term_tree`、`terms`、`term_links`、`term_names`、`term_key_names` 上（`versioned` 为真时调用 `version_triggers`）。
+/// - `term_tree` 只在身份的列变化时计数，作品复核三列不算（原来在 `work_review` 里，不计数）；
+/// - `terms` 只算角色、皮肤、作品改类型（原来 `entities.kind` 的变化）；
+/// - `term_links`、`term_names` 只算角色、皮肤、作品（`term_tree` 里的词条）的行，画师的不算，与原来只数 `links`、
+///   `names` 相同。
+pub const VERSIONED: [&str; 5] = ["term_tree", "terms", "term_links", "term_names", "term_key_names"];
+
+/// `term_tree` 里身份的列（原来 `entities` 的列）：改了它们才算身份变化。
+const IDENTITY_COLUMNS: [&str; 10] = [
+    "parent_id",
+    "merged_into",
+    "work_id",
+    "work_text",
+    "variant",
+    "artist",
+    "label_only",
+    "mascot",
+    "mascot_origin",
+    "original",
+];
+/// 角色、皮肤、作品改类型（`terms` 上的触发器只看这个）。
+const KIND_CHANGED: &str = "OLD.kind IS NOT NEW.kind AND NEW.id IN (SELECT term_id FROM term_tree)";
 
 /// 这个库装过名字版本触发器（应用层建的库）。
 pub(crate) fn versioned(c: &Connection) -> Result<bool> {
@@ -216,10 +236,12 @@ pub fn version_triggers(c: &Connection) -> Result<()> {
             continue;
         }
         for event in ["INSERT", "UPDATE", "DELETE"] {
-            let when = if matches!(table, "term_names" | "term_links") {
-                format!(" WHEN {}", in_tree(event))
-            } else {
-                String::new()
+            let when = match (table, event) {
+                ("terms", "UPDATE") => format!(" WHEN {KIND_CHANGED}"),
+                ("terms", _) => continue,
+                ("term_tree", "UPDATE") => format!(" WHEN {}", changed(&IDENTITY_COLUMNS)),
+                ("term_names" | "term_links", _) => format!(" WHEN {}", in_tree(event)),
+                _ => String::new(),
             };
             c.execute_batch(&format!(
                 "CREATE TRIGGER IF NOT EXISTS names_version_{table}_{} AFTER {event} ON {table}{when}\n                        BEGIN UPDATE meta SET value=CAST(value AS INTEGER)+1 WHERE key='names_version'; END",
@@ -274,10 +296,11 @@ fn meta(c: &Connection, key: &str) -> Result<Option<String>> {
 /// 重建。TEMP 表与触发器不改变持久 schema，事务回滚会一并撤销追踪状态。
 ///
 /// 身份或链接变化时（#104 A4），显示投影要同时按变化前、变化后两侧求依赖闭包：BEFORE 触发器在一个身份第一次被改动
-/// 时，把它在事务开始时的行（`names_old_entities`，`present=0` 表示原来没有）和当前链接（`names_old_links`，取过的身份
-/// 记在 `names_old_links_seen`）存下来。`INSERT OR REPLACE` 顶掉的行不会触发 DELETE 触发器，所以插入前也先存下会被
-/// 顶掉的行（按主键、`entities.external_key`、`links (system,key)`）。只改与名字无关的列（如 `entities.name`、
-/// `links.source`）不记。`names_dirty_full` 只剩值 2：事务开始时投影已过期，提交时整表重建。
+/// 时，把它在事务开始时的行（`names_old_entities`，按 `character_entities::ENTITIES` 的形状，`present=0` 表示原来
+/// 没有）和当前链接（`names_old_links`，取过的身份记在 `names_old_links_seen`）存下来。`INSERT OR REPLACE` 顶掉的行
+/// 不会触发 DELETE 触发器，所以插入前也先存下会被顶掉的行（按 `term_tree` 的主键、`term_links (system,key)`）。只改与
+/// 名字无关的列（如作品复核、`term_links.source`）不记。`names_dirty_full` 只剩值 2：事务开始时投影已过期，提交时
+/// 整表重建。
 pub fn track(c: &Connection) -> Result<()> {
     if !names_in_core(c)? {
         return Ok(());
@@ -299,19 +322,29 @@ pub fn track(c: &Connection) -> Result<()> {
     if meta(c, "names_version")? != meta(c, PROJECTED)? {
         c.execute("INSERT INTO names_dirty_full VALUES (2)", [])?;
     }
-    let entity_columns = structure_triggers(c)?;
+    structure_triggers(c)?;
     // 外层 UPSERT 的冲突策略可能覆盖触发器的 OR IGNORE，用存在性条件避免重复插入。
     for table in VERSIONED {
         for event in ["INSERT", "UPDATE", "DELETE"] {
             let mut body = String::new();
-            if matches!(table, "entities" | "term_links") {
+            if table == "terms" {
+                if event == "UPDATE" {
+                    body.push_str(
+                        "INSERT INTO names_dirty_entities SELECT NEW.key
+                         WHERE NOT EXISTS(SELECT 1 FROM names_dirty_entities WHERE id=NEW.key);",
+                    );
+                }
+            } else if matches!(table, "term_tree" | "term_links") {
                 // 链接的变化由 BEFORE 触发器记下（`names_old_links_seen`），这里只记改过的身份。
-                if table == "entities" {
+                if table == "term_tree" {
                     for side in ["old", "new"] {
                         if (event == "INSERT" && side == "old") || (event == "DELETE" && side == "new") {
                             continue;
                         }
-                        body.push_str(&format!("INSERT INTO names_dirty_entities SELECT {side}.id WHERE NOT EXISTS(SELECT 1 FROM names_dirty_entities WHERE id={side}.id);"));
+                        body.push_str(&format!(
+                            "INSERT INTO names_dirty_entities SELECT t.key FROM main.terms t
+                             WHERE t.id={side}.term_id AND NOT EXISTS(SELECT 1 FROM names_dirty_entities WHERE id=t.key);"
+                        ));
                     }
                 }
             } else {
@@ -333,7 +366,8 @@ pub fn track(c: &Connection) -> Result<()> {
                 }
             }
             let when = match (table, event) {
-                ("entities", "UPDATE") => format!(" WHEN {}", changed(&entity_columns)),
+                ("term_tree", "UPDATE") => format!(" WHEN {}", changed(&TRACKED_COLUMNS)),
+                ("terms", "UPDATE") => format!(" WHEN {KIND_CHANGED}"),
                 ("term_links", "UPDATE") => format!(" WHEN {}", changed(&LINK_COLUMNS)),
                 _ => String::new(),
             };
@@ -349,8 +383,8 @@ pub fn track(c: &Connection) -> Result<()> {
     Ok(())
 }
 
-/// 显示投影读到的 `entities` 列（`names_view::View`）；表里没有的列（只建了几张表的测试库）不算。
-const ENTITY_COLUMNS: [&str; 7] = ["id", "kind", "parent_id", "variant", "merged_into", "original", "work"];
+/// 显示投影读到的身份的列（`names_view::View`）在 `term_tree` 里的那些（`kind` 在 `terms` 上，另有触发器）。
+const TRACKED_COLUMNS: [&str; 5] = ["parent_id", "variant", "merged_into", "original", "work_text"];
 /// 显示投影读到的 `term_links` 列（身份是 `term_id`，系统名是存储里的写法）。
 const LINK_COLUMNS: [&str; 5] = ["system", "key", "term_id", "current", "added_at"];
 
@@ -358,43 +392,32 @@ fn changed(columns: &[&str]) -> String {
     columns.iter().map(|col| format!("OLD.{col} IS NOT NEW.{col}")).collect::<Vec<_>>().join(" OR ")
 }
 
-/// 变化前的身份和链接（见 `track`）。返回 `entities` 上实际存在的、投影读到的列。
-fn structure_triggers(c: &Connection) -> Result<Vec<&'static str>> {
-    let present: Vec<String> = c
-        .prepare("SELECT name FROM pragma_table_info('entities')")?
-        .query_map([], |r| r.get(0))?
-        .collect::<rusqlite::Result<_>>()?;
-    let has = |col: &str| present.iter().any(|p| p == col);
-    let columns: Vec<&'static str> = ENTITY_COLUMNS.into_iter().filter(|col| has(col)).collect();
-    let work = if has("work") { "work" } else { "''" };
+/// 变化前的身份和链接（见 `track`）。
+fn structure_triggers(c: &Connection) -> Result<()> {
     // 一行身份第一次被改动时存下它原来的样子，后面的改动不覆盖；`present=0`：事务开始时没有这一行。
     let keep = |rows: &str| {
         format!(
-            "INSERT INTO names_old_entities SELECT id,1,kind,parent_id,variant,merged_into,original,{work}
-             FROM main.entities WHERE ({rows}) AND id NOT IN (SELECT id FROM names_old_entities);"
+            "INSERT INTO names_old_entities SELECT id,1,kind,parent_id,variant,merged_into,original,work
+             FROM {ENTITIES} WHERE ({rows}) AND id NOT IN (SELECT id FROM names_old_entities);"
         )
     };
-    let replaced =
-        if has("external_key") { " OR (NEW.external_key IS NOT NULL AND external_key=NEW.external_key)" } else { "" };
-    let absent = "INSERT INTO names_old_entities(id,present) SELECT NEW.id,0
-        WHERE NOT EXISTS(SELECT 1 FROM names_old_entities WHERE id=NEW.id);";
+    let absent = "INSERT INTO names_old_entities(id,present) SELECT t.key,0 FROM main.terms t
+        WHERE t.id=NEW.term_id AND NOT EXISTS(SELECT 1 FROM names_old_entities WHERE id=t.key);";
     let entity_bodies = [
-        ("INSERT", String::new(), format!("{}{absent}", keep(&format!("id=NEW.id{replaced}")))),
+        ("term_tree", "INSERT", String::new(), format!("{}{absent}", keep("term_id=NEW.term_id"))),
         (
+            "term_tree",
             "UPDATE",
-            format!(
-                " WHEN {}{}",
-                changed(&columns),
-                if has("external_key") { " OR OLD.external_key IS NOT NEW.external_key" } else { "" }
-            ),
-            format!("{}{absent}", keep(&format!("id IN (OLD.id,NEW.id){replaced}"))),
+            format!(" WHEN {}", changed(&TRACKED_COLUMNS)),
+            format!("{}{absent}", keep("term_id IN (OLD.term_id,NEW.term_id)")),
         ),
-        ("DELETE", String::new(), keep("id=OLD.id")),
+        ("term_tree", "DELETE", String::new(), keep("term_id=OLD.term_id")),
+        ("terms", "UPDATE", format!(" WHEN {KIND_CHANGED}"), keep("term_id=OLD.id")),
     ];
-    for (event, when, body) in entity_bodies {
+    for (table, event, when, body) in entity_bodies {
         c.execute_batch(&format!(
-            "CREATE TEMP TRIGGER IF NOT EXISTS track_names_old_entities_{event}
-            BEFORE {event} ON main.entities{when} BEGIN {body} END;"
+            "CREATE TEMP TRIGGER IF NOT EXISTS track_names_old_{table}_{event}
+            BEFORE {event} ON main.{table}{when} BEGIN {body} END;"
         ))?;
     }
     // 一个身份的链接第一次被改动时存下它当时全部的链接，包括会被 REPLACE 顶掉的那一行的主人。
@@ -429,7 +452,7 @@ fn structure_triggers(c: &Connection) -> Result<Vec<&'static str>> {
             BEFORE {event} ON main.term_links{when} BEGIN {body} END;"
         ))?;
     }
-    Ok(columns)
+    Ok(())
 }
 
 /// 本事务的名字相关改动都被追踪到了：显示投影按记下的身份和键增量维护（结构变化也一样，#104）。若开始时投影已经

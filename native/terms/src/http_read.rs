@@ -1,4 +1,5 @@
 //! Deterministic HTTP reads, sharing one read transaction and the existing names rules.
+use crate::character_entities::ENTITIES;
 use crate::{
     http::LibraryContext,
     http_json::Json,
@@ -38,7 +39,18 @@ pub const CORE_ROUTES: &[&str] = &[
     "/api/clusters",
 ];
 pub const VISIBLE: &str = "NOT EXISTS(SELECT 1 FROM duplicates h WHERE h.uuid=m.uuid AND h.hidden=1) AND NOT EXISTS(SELECT 1 FROM excluded x WHERE x.uuid=m.uuid)";
-pub const TREE: &str = "WITH RECURSIVE tree(id) AS (SELECT id FROM entities WHERE id=? AND kind='work' UNION SELECT e.id FROM entities e JOIN tree t ON e.parent_id=t.id WHERE e.kind='work')";
+/// 作品和它的全部子作品（`UNION` 防旧数据成环），参数是作品 id。
+pub const TREE: &str = "WITH RECURSIVE tree(id) AS (
+  SELECT t.key
+  FROM terms t
+  JOIN term_tree r ON r.term_id=t.id
+  WHERE t.key=? AND t.kind='work'
+  UNION
+  SELECT t.key
+  FROM term_tree r
+  JOIN tree p ON r.parent_id=p.id
+  JOIN terms t ON t.id=r.term_id
+  WHERE t.kind='work')";
 
 pub(crate) use crate::compat_text::{python_repr, trim, whitespace};
 fn cut(s: &str, n: usize) -> String {
@@ -332,7 +344,15 @@ pub(crate) fn display_skin(c: &Connection, mut v: Json, skin: bool) -> Result<Js
     let id = v.get("id").expect("http_read internal invariant").text().to_owned();
     let info: String = c.query_row("SELECT entity_info(?,?)", params![&id, skin as i64], |r| r.get(0))?;
     v.extend(serde_json::from_str(&info).map_err(|e| Error::Invalid(e.to_string()))?);
-    let entity:Option<(String,bool,Option<String>)>=c.query_row("SELECT e.kind,e.original,coalesce(p.work_id,e.work_id) FROM entities e LEFT JOIN entities p ON p.id=e.parent_id AND e.kind='skin' WHERE e.id=?",[&id],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?))).optional()?;
+    let sql = format!(
+        "SELECT e.kind,e.original,coalesce(p.work_id,e.work_id)
+         FROM {ENTITIES} e
+         LEFT JOIN terms pt ON pt.key=e.parent_id AND e.kind='skin'
+         LEFT JOIN term_tree p ON p.term_id=pt.id
+         WHERE e.id=?"
+    );
+    let entity: Option<(String, bool, Option<String>)> =
+        c.query_row(&sql, [&id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).optional()?;
     let mut work = None;
     if let Some((kind, original, w)) = entity {
         if v.get("kind").is_some() && kind != "work" {
@@ -388,7 +408,11 @@ fn entities(c: &Connection, q: &str) -> Result<Json> {
          WHERE n.term_id = (SELECT id FROM terms WHERE key = e.id)
            AND n.value LIKE ? ESCAPE '\\' AND n.value <> entity_name(e.id)
          LIMIT 2)) AS matched
-      FROM entities e {matched} WHERE e.parent_id IS NULL AND e.kind<>'work' AND e.merged_into IS NULL ORDER BY {ranking}count DESC,entity_name(e.id) LIMIT 30");
+      FROM {ENTITIES} e
+      {matched}
+      WHERE e.parent_id IS NULL AND e.kind<>'work' AND e.merged_into IS NULL
+      ORDER BY {ranking}count DESC,entity_name(e.id),e.id
+      LIMIT 30");
     let result = rows(c, &sql, &[&like(&q)])?.into_iter().map(|v| display(c, v)).collect::<Result<Vec<_>>>()?;
     c.execute("DELETE FROM name_matches", [])?;
     Ok(Json::Array(result))
@@ -402,7 +426,7 @@ pub(crate) fn works(c: &Connection, q: &str) -> Result<Json> {
             WHERE l.entity_id = e.id AND l.core_system = 'danbooru' AND l.current = 1 LIMIT 1) AS tag,
            (SELECT l.key FROM {LINKS} l WHERE l.entity_id = e.id AND l.core_system = 'qualifier' LIMIT 1) AS qualifier,
            coalesce(w.status, 'pending') AS status, w.note
-         FROM entities e
+         FROM {ENTITIES} e
          LEFT JOIN {REVIEWS} w ON w.entity_id = e.id
          WHERE e.kind = 'work' AND e.merged_into IS NULL",
         LINKS = crate::character_links::LINKS,
@@ -410,7 +434,17 @@ pub(crate) fn works(c: &Connection, q: &str) -> Result<Json> {
     );
     for mut v in rows(c, &sql, &[])? {
         let id = v.get("id").expect("http_read internal invariant").text();
-        let count:i64=c.query_row(&format!("{TREE} SELECT count(DISTINCT m.uuid) FROM memberships m JOIN entities e ON e.id=m.entity WHERE e.work_id IN (SELECT id FROM tree) AND {VISIBLE}"),[id],|r|r.get(0))?;
+        let count: i64 = c.query_row(
+            &format!(
+                "{TREE}
+                 SELECT count(DISTINCT m.uuid)
+                 FROM memberships m
+                 JOIN {ENTITIES} e ON e.id=m.entity
+                 WHERE e.work_id IN (SELECT id FROM tree) AND {VISIBLE}"
+            ),
+            [id],
+            |r| r.get(0),
+        )?;
         let mut values = vec![
             v.get("name").expect("http_read internal invariant").text().to_owned(),
             v.get("tag").expect("http_read internal invariant").text().to_owned(),
@@ -611,7 +645,16 @@ pub fn read(context: &LibraryContext, url: &str) -> Result<Option<(Json, u16)>> 
     }
     let result=match path {
         "/api/user-tags"=>Json::Array(rows(&tx,&format!("SELECT tag,count(*) AS count FROM asset_tags m JOIN assets USING(uuid) WHERE {VISIBLE} AND tag LIKE ? ESCAPE '\\' GROUP BY tag ORDER BY count DESC,tag LIMIT 60"),&[&like(&cut(trim(value("q")),60))])?),
-        "/api/artists"=>Json::Array(rows(&tx,"SELECT artist,count(*) AS characters FROM entities WHERE original=1 AND artist<>'' AND merged_into IS NULL GROUP BY artist ORDER BY characters DESC,artist",&[])?),
+        "/api/artists" => {
+            let sql = format!(
+                "SELECT artist,count(*) AS characters
+                 FROM {ENTITIES}
+                 WHERE original=1 AND artist<>'' AND merged_into IS NULL
+                 GROUP BY artist
+                 ORDER BY characters DESC,artist"
+            );
+            Json::Array(rows(&tx, &sql, &[])?)
+        }
         "/api/entities"=>{register_names(&tx)?;entities(&tx,value("q"))?},
         "/api/works"=>{register_names(&tx)?;works(&tx,value("q"))?},
         "/api/artist"=>Json::object([("id",value("id").into()),("name",crate::http_artists::name_of(&tx,context.library.is_some(),value("id"))?)]),
@@ -656,13 +699,12 @@ mod tests {
     fn fixture(c: &Connection) {
         c.execute_batch("CREATE TABLE meta(key TEXT PRIMARY KEY,value TEXT);
           INSERT INTO meta VALUES ('terms_names','core');
-          CREATE TABLE entities(id TEXT PRIMARY KEY,kind TEXT,parent_id TEXT,variant TEXT,merged_into TEXT,original INTEGER,work TEXT,artist TEXT,label_only INTEGER,mascot INTEGER,work_id TEXT);
-          INSERT INTO entities VALUES ('x','character',NULL,'',NULL,0,'','',0,0,NULL);
           CREATE TABLE term_links(system TEXT,key TEXT,term_id INTEGER,current INTEGER,source TEXT,added_at TEXT);
-          CREATE TABLE terms(id INTEGER PRIMARY KEY,key TEXT);
-          INSERT INTO terms VALUES (1,'x');
-          CREATE TABLE term_tree(term_id INTEGER PRIMARY KEY);
-          INSERT INTO term_tree VALUES (1);
+          CREATE TABLE terms(id INTEGER PRIMARY KEY,key TEXT,kind TEXT);
+          INSERT INTO terms VALUES (1,'x','character');
+          CREATE TABLE term_tree(term_id INTEGER PRIMARY KEY,parent_id TEXT,merged_into TEXT,work_id TEXT,work_text TEXT,
+            variant TEXT,artist TEXT,label_only INTEGER,mascot INTEGER,mascot_origin TEXT,original INTEGER,seq INTEGER);
+          INSERT INTO term_tree VALUES (1,NULL,NULL,NULL,'','','',0,0,NULL,0,1);
           CREATE TABLE term_names(term_id INTEGER,lang TEXT,value TEXT,source TEXT,preferred INTEGER,role TEXT,seq INTEGER);
           INSERT INTO term_names VALUES (1,'zh','x','user',1,'display',1);
           CREATE TABLE term_key_names(kind TEXT,key TEXT,lang TEXT,source TEXT,value TEXT);
@@ -737,7 +779,7 @@ mod tests {
         // A work key outside the projection reads only its own display names (#105).
         let c = Connection::open_in_memory().unwrap();
         fixture(&c);
-        c.execute_batch("DROP TABLE entities; DROP TABLE term_links; DROP TABLE term_names;").unwrap();
+        c.execute_batch("DROP TABLE term_tree; DROP TABLE term_links; DROP TABLE term_names;").unwrap();
         register_names(&c).unwrap();
         let name: String = c.query_row("SELECT work_name('unprojected')", [], |r| r.get(0)).unwrap();
         assert_eq!(name, "未投影🙂");

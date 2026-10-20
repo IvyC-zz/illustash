@@ -3,6 +3,7 @@
 use crate::character_commands::{
     begin_action, delete_assertion, finish_action, hybrid, invalid, put_assertion, relabel, require_entity, text, At,
 };
+use crate::character_entities::{ENTITIES, OF};
 use crate::character_labels::Shown;
 use crate::{character_names, character_projection, legacy_characters, Error, Result};
 use rusqlite::{params, Connection, OptionalExtension};
@@ -73,10 +74,10 @@ pub fn merge(c: &Connection, args: &Value) -> Result<Value> {
         &[&source, &target],
     )?;
     let variants: Vec<String> = c
-        .prepare("SELECT id FROM entities WHERE parent_id=?")?
+        .prepare(&format!("SELECT id FROM {ENTITIES} WHERE parent_id=? ORDER BY id"))?
         .query_map([&source], |r| r.get(0))?
         .collect::<rusqlite::Result<_>>()?;
-    c.execute("UPDATE entities SET parent_id=? WHERE parent_id=?", [&target, &source])?;
+    c.execute("UPDATE term_tree SET parent_id=? WHERE parent_id=?", [&target, &source])?;
     let mut carried: Vec<(String, String, String)> = c
         .prepare(&format!("SELECT lang, value, source FROM term_names WHERE term_id = {}", character_names::TERM_OF))?
         .query_map([&source], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
@@ -114,10 +115,7 @@ pub fn merge(c: &Connection, args: &Value) -> Result<Value> {
         .query_map([&source], |r| r.get(0))?
         .collect::<rusqlite::Result<_>>()?;
     c.execute("UPDATE reviews SET entity=? WHERE entity=?", [&target, &source])?;
-    c.execute("UPDATE entities SET merged_into=? WHERE id=?", [&target, &source])?;
-    let mut ids = vec![source.clone(), target.clone()];
-    ids.extend(variants.iter().cloned());
-    legacy_characters::mirror_state(c, &ids, "user")?;
+    c.execute(&format!("UPDATE term_tree SET merged_into=?2 WHERE {OF}"), [&source, &target])?;
     let mut touched: BTreeSet<String> = BTreeSet::new();
     for r in moved.iter().chain(&kept) {
         touched.insert(r[0].as_str().expect("validated internal text field").to_owned());
@@ -162,7 +160,7 @@ pub fn undo(c: &Connection, action: i64, m: &Value) -> Result<()> {
     let source = text(&m["source"], "合并快照不完整")?;
     let target = text(&m["target"], "合并快照不完整")?;
     let list = |k: &str| m[k].as_array().cloned().unwrap_or_default();
-    c.execute("UPDATE entities SET merged_into=NULL WHERE id=?", [source])?;
+    c.execute(&format!("UPDATE term_tree SET merged_into=NULL WHERE {OF}"), [source])?;
     for row in list("moved") {
         crate::character_commands::refresh_assertion(c, text(&row[0], "合并快照不完整")?, target)?;
     }
@@ -170,7 +168,10 @@ pub fn undo(c: &Connection, action: i64, m: &Value) -> Result<()> {
         crate::character_commands::refresh_assertion(c, text(&row[0], "合并快照不完整")?, source)?;
     }
     for v in list("variants") {
-        c.execute("UPDATE entities SET parent_id=? WHERE id=?", params![source, text(&v, "合并快照不完整")?])?;
+        c.execute(
+            &format!("UPDATE term_tree SET parent_id=?2 WHERE {OF}"),
+            params![text(&v, "合并快照不完整")?, source],
+        )?;
     }
     for a in list("aliases") {
         let (lang, value, src) = match a.as_array() {
@@ -194,9 +195,6 @@ pub fn undo(c: &Connection, action: i64, m: &Value) -> Result<()> {
     for r in list("reviews") {
         c.execute("UPDATE reviews SET entity=? WHERE action_id=?", params![source, r.as_i64()])?;
     }
-    let mut ids = vec![source.to_owned(), target.to_owned()];
-    ids.extend(list("variants").iter().filter_map(|v| v.as_str().map(str::to_owned)));
-    legacy_characters::mirror_state(c, &ids, "user")?;
     let uuids: Vec<String> = list("uuids").iter().filter_map(|u| u.as_str().map(str::to_owned)).collect();
     restore_candidates(c, action, m, source, target)?;
     character_projection::evidence(c, Some(&uuids))?;

@@ -107,11 +107,12 @@ fn suggestions(c: &Connection, general: &[String], watched: &[String]) -> Result
     let general: BTreeSet<&str> = general.iter().map(String::as_str).collect();
     let mut keys: HashMap<String, Option<String>> = HashMap::new(); // entity → work key
     let mut pictures: BTreeMap<String, BTreeSet<String>> = BTreeMap::new(); // work key → assets
-    let mut rows = c.prepare(
-        "SELECT m.uuid,e.id,e.work_id FROM memberships m JOIN entities e ON e.id=m.entity JOIN assets a ON a.uuid=m.uuid
+    let mut rows = c.prepare(&format!(
+        "SELECT m.uuid,e.id,e.work_id FROM memberships m JOIN {ENTITIES} e ON e.id=m.entity JOIN assets a ON a.uuid=m.uuid
          WHERE NOT EXISTS(SELECT 1 FROM duplicates h WHERE h.uuid=a.uuid AND h.hidden=1)
            AND NOT EXISTS(SELECT 1 FROM excluded x WHERE x.uuid=a.uuid)",
-    )?;
+        ENTITIES = crate::character_entities::ENTITIES
+    ))?;
     let mut tags = c.prepare_cached(&format!(
         "SELECT l.key FROM {LINKS} l WHERE l.entity_id = ? AND l.core_system IN ('wd_character', 'danbooru', 'ccip')",
         LINKS = crate::character_links::LINKS
@@ -454,16 +455,16 @@ mod tests {
     fn suggestions_group_characters_by_work_and_skip_picture_tags() {
         let (_root, lib) = fixture();
         let c = crate::sqlite::open_with_flags(lib.db(), OpenFlags::SQLITE_OPEN_READ_WRITE).unwrap();
-        // Seeded as the core would have: entities are written only while holding its key; their terms and links are
-        // the core's own tables.
+        // Seeded as the core would have: identities (terms and their `term_tree` rows) are written only while holding
+        // its key; links are the core's own table.
         c.execute("INSERT INTO meta(key,value) VALUES (?1,'1')", [crate::schema::WRITER_KEY]).unwrap();
         c.execute_batch(
             "INSERT INTO assets(uuid) VALUES ('a1'),('a2'),('a3'),('a4');
-             INSERT INTO entities(id,name,kind) VALUES ('hoshino','','character'),('shiroko','','character'),
-               ('swim','','character'),('miku','','character');
-             INSERT INTO terms(key,kind,origin) SELECT id,kind,'import' FROM entities
-               WHERE id IN ('hoshino','shiroko','swim','miku') ORDER BY rowid;
-             INSERT INTO term_tree(term_id) SELECT id FROM terms WHERE key IN ('hoshino','shiroko','swim','miku');
+             INSERT INTO terms(key,kind,origin) VALUES ('hoshino','character','import'),('shiroko','character','import'),
+               ('swim','character','import'),('miku','character','import');
+             INSERT INTO term_tree(term_id,seq)
+               SELECT id,(SELECT coalesce(max(seq),0) FROM term_tree)+id FROM terms
+               WHERE key IN ('hoshino','shiroko','swim','miku');
              INSERT INTO term_links(system,key,term_id,source) VALUES
                ('wd_character','hoshino_(blue_archive)',(SELECT id FROM terms WHERE key='hoshino'),'import'),
                ('wd_character','shiroko_(blue_archive)',(SELECT id FROM terms WHERE key='shiroko'),'import'),

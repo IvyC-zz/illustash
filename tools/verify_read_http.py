@@ -51,14 +51,15 @@ def corpus(db, sample=16, query_limit=80):
         raise ValueError('sample 必须大于零，queries 不得为负')
     db = temporary_path(db)
     with sqlite3.connect(db.as_uri() + '?mode=ro', uri=True) as c:
-        ids = [r[0] for r in c.execute("SELECT id FROM entities WHERE merged_into IS NULL ORDER BY id")]
-        people = [r[0] for r in c.execute("SELECT id FROM entities WHERE merged_into IS NULL AND kind='character' ORDER BY id")]
-        works = [r[0] for r in c.execute("SELECT id FROM entities WHERE merged_into IS NULL AND kind='work' ORDER BY id")]
+        identities = 'SELECT t.key FROM term_tree r JOIN terms t ON t.id=r.term_id WHERE r.merged_into IS NULL'
+        ids = [r[0] for r in c.execute(f'{identities} ORDER BY t.key')]
+        people = [r[0] for r in c.execute(f"{identities} AND t.kind='character' ORDER BY t.key")]
+        works = [r[0] for r in c.execute(f"{identities} AND t.kind='work' ORDER BY t.key")]
         assets = [r[0] for r in c.execute('SELECT uuid FROM assets ORDER BY uuid')]
         artists = [r[0] for r in c.execute("SELECT key FROM terms WHERE kind='artist' ORDER BY key")]
         terms = sorted({r[0] for r in c.execute('''SELECT n.value FROM term_names n JOIN term_tree r ON r.term_id=n.term_id UNION SELECT value FROM term_key_names
                      UNION SELECT value FROM term_key_aliases UNION SELECT x.key FROM term_links x JOIN term_tree r ON r.term_id=x.term_id
-                     UNION SELECT work FROM entities UNION SELECT variant FROM entities''') if r[0]})
+                     UNION SELECT work_text FROM term_tree UNION SELECT variant FROM term_tree''') if r[0]})
         pages = {
             'identity/queue': len(assets),
         }

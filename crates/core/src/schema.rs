@@ -239,7 +239,11 @@ fn v7(conn: &Connection) -> Result<()> {
 ///   `links`、`work_review`、`identity_baseline` 逐行核对后删除（`legacy_characters::retire_*`，不一致就拒绝升级）。
 /// - 别名、显示名、名字：`term_key_aliases`、`term_key_names`、`term_names` 成为唯一权威，旧表 `name_aliases`、
 ///   `display_names`、`names` 照旧表同步一次、逐行核对后删除（`legacy_names::retire_*`）；`term_names` 加名字的先后
-///   `seq`，从 `names` 的 rowid 填入。名字版本触发器随旧表删除，改装到 `term_links`、`term_names`、`term_key_names` 上。
+///   `seq`，从 `names` 的 rowid 填入。
+/// - 身份：`terms`、`term_tree` 成为唯一权威。`term_tree` 加属性列（从 `terms.attrs` 提升）和身份的先后 `seq`（从
+///   `entities` 的 rowid 填入）；旧表 `entities` 逐行核对后删除，引用它的视图按核心表重写，`identity_relations` 的外键
+///   改为 `REFERENCES terms(key)`（`legacy_characters::retire_entities`）。
+/// - 名字版本触发器随旧表删除，改装到 `term_tree`、`terms`（类型）、`term_links`、`term_names`、`term_key_names` 上。
 /// - `actions` 加 `label_kind`、`label_count`：按张数写提示的几种步骤的种类和张数（`undo_labels`）。之前的步骤按
 ///   已存的提示回填一次，撤销载荷 `before_json` 不动。
 fn v8(conn: &Connection) -> Result<()> {
@@ -288,6 +292,7 @@ fn v8(conn: &Connection) -> Result<()> {
     if !names.clean() {
         return Err(Error::Schema(format!("旧名字表与词条核心不一致，没有升级：{report}", report = names.to_json())));
     }
+    crate::legacy_characters::retire_entities(conn)?;
     if versioned {
         crate::legacy_names::version_triggers(conn)?;
     }

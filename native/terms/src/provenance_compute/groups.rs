@@ -35,9 +35,22 @@ pub(super) fn library_groups(request: &Request) -> Result<[Groups; 5]> {
         let c = crate::app_library::read_connection(&request.library.join("library.sqlite"))?;
         // Python catches the first OperationalError around this whole ordered block.
         // Earlier tables remain loaded; later tables are not queried after a missing table.
-        for (index, sql) in ["SELECT grp,uuid FROM duplicates", "SELECT gid,uuid FROM similar_groups",
-            "SELECT m.entity,m.uuid FROM memberships m JOIN entities e ON e.id=m.entity WHERE e.original=1 AND e.label_only=0",
-            "SELECT cid,uuid FROM clusters"].iter().enumerate() {
+        let originals = format!(
+            "SELECT m.entity,m.uuid
+             FROM memberships m
+             JOIN {ENTITIES} e ON e.id=m.entity
+             WHERE e.original=1 AND e.label_only=0",
+            ENTITIES = crate::character_entities::ENTITIES
+        );
+        for (index, sql) in [
+            "SELECT grp,uuid FROM duplicates",
+            "SELECT gid,uuid FROM similar_groups",
+            originals.as_str(),
+            "SELECT cid,uuid FROM clusters",
+        ]
+        .iter()
+        .enumerate()
+        {
             let loaded = (|| -> rusqlite::Result<()> {
                 let mut statement = c.prepare(sql)?;
                 let mut rows = statement.query([])?;
@@ -49,13 +62,18 @@ pub(super) fn library_groups(request: &Request) -> Result<[Groups; 5]> {
                         _ => return Err(rusqlite::Error::InvalidQuery),
                     };
                     let asset: String = row.get(1)?;
-                    if let Some((_, members)) = groups[index].iter_mut().find(|(k, _)| *k == key) { members.push(asset); }
-                    else { groups[index].push((key, vec![asset])); }
+                    if let Some((_, members)) = groups[index].iter_mut().find(|(k, _)| *k == key) {
+                        members.push(asset);
+                    } else {
+                        groups[index].push((key, vec![asset]));
+                    }
                 }
                 Ok(())
             })();
             if let Err(error) = loaded {
-                if matches!(error, rusqlite::Error::SqliteFailure(_, _)) { break; }
+                if matches!(error, rusqlite::Error::SqliteFailure(_, _)) {
+                    break;
+                }
                 return Err(error.into());
             }
         }

@@ -1111,15 +1111,30 @@ fn validate_row(table: &str, r: &[Value]) -> Result<()> {
     }
 }
 fn validate_references(c: &Connection, expected: &[&str], published: &Published) -> Result<()> {
+    // 身份 id：`term_tree` 里的词条。
+    let ids = "SELECT t.key FROM term_tree r JOIN terms t ON t.id = r.term_id";
     for (index,sql) in [
-        "SELECT EXISTS(SELECT 1 FROM clusters WHERE uuid NOT IN (SELECT uuid FROM assets) OR cid NOT IN (SELECT cid FROM cluster_info))",
-        "SELECT EXISTS(SELECT 1 FROM cluster_info WHERE size<2 OR (near IS NOT NULL AND near NOT IN (SELECT cid FROM cluster_info)) OR (near_kind IS NOT NULL AND near_kind NOT IN ('look','trait')) OR NOT json_valid(traits))",
-        "SELECT EXISTS(SELECT 1 FROM proto_claims WHERE uuid NOT IN (SELECT uuid FROM assets) OR entity NOT IN (SELECT id FROM entities) OR score<0 OR score>1)",
-        "SELECT EXISTS(SELECT 1 FROM weak_claims WHERE uuid NOT IN (SELECT uuid FROM assets) OR entity NOT IN (SELECT id FROM entities) OR source NOT IN ('PROTO','CCIP') OR score<0 OR score>1)",
-        "SELECT EXISTS(SELECT 1 FROM prototypes WHERE entity NOT IN (SELECT id FROM entities) OR threshold<0 OR threshold>1 OR hint<threshold OR hint>1)",
+        "SELECT EXISTS(SELECT 1 FROM clusters WHERE uuid NOT IN (SELECT uuid FROM assets) OR cid NOT IN (SELECT cid FROM cluster_info))".to_owned(),
+        "SELECT EXISTS(SELECT 1 FROM cluster_info WHERE size<2 OR (near IS NOT NULL AND near NOT IN (SELECT cid FROM cluster_info)) OR (near_kind IS NOT NULL AND near_kind NOT IN ('look','trait')) OR NOT json_valid(traits))".to_owned(),
+        format!(
+            "SELECT EXISTS(
+               SELECT 1 FROM proto_claims
+               WHERE uuid NOT IN (SELECT uuid FROM assets) OR entity NOT IN ({ids}) OR score<0 OR score>1)"
+        ),
+        format!(
+            "SELECT EXISTS(
+               SELECT 1 FROM weak_claims
+               WHERE uuid NOT IN (SELECT uuid FROM assets) OR entity NOT IN ({ids})
+                 OR source NOT IN ('PROTO','CCIP') OR score<0 OR score>1)"
+        ),
+        format!(
+            "SELECT EXISTS(
+               SELECT 1 FROM prototypes
+               WHERE entity NOT IN ({ids}) OR threshold<0 OR threshold>1 OR hint<threshold OR hint>1)"
+        ),
     ].into_iter().enumerate() {
         if index<2 && !expected.contains(&"clusters") {continue;}
-        if c.query_row(sql,[],|r|r.get::<_,bool>(0))? {return Err(bad());}
+        if c.query_row(&sql,[],|r|r.get::<_,bool>(0))? {return Err(bad());}
     }
     // Relations and signatures (#31): only the rows this publication wrote are checked; every other row is the
     // stored one. A written row naming a picture no longer in the library is allowed only as the identical
@@ -1220,7 +1235,8 @@ mod tests {
                  CREATE TABLE term_key_names(kind TEXT,key TEXT,value TEXT);
                  CREATE TABLE sync_runs(id INTEGER PRIMARY KEY,status TEXT);
                  CREATE TABLE backend_effects(id INTEGER PRIMARY KEY,kind TEXT,status TEXT DEFAULT 'pending');
-                 CREATE TABLE entities(id TEXT PRIMARY KEY);
+                 CREATE TABLE terms(id INTEGER PRIMARY KEY,key TEXT UNIQUE);
+                 CREATE TABLE term_tree(term_id INTEGER PRIMARY KEY);
                  CREATE TRIGGER names_version_term_names AFTER INSERT ON term_names
                    BEGIN UPDATE meta SET value=CAST(value AS INTEGER)+1 WHERE key='names_version'; END;
                  CREATE TABLE assertions(uuid TEXT,entity TEXT,status TEXT);
@@ -1330,7 +1346,11 @@ mod tests {
                 Box::new(|| app("UPDATE meta SET value='default' WHERE key='identity_policy'")),
                 &[Learning],
             ),
-            ("entity", Box::new(|| app("INSERT INTO entities VALUES ('e2')")), &[Learning]),
+            (
+                "entity",
+                Box::new(|| app("INSERT INTO terms VALUES (2,'e2'); INSERT INTO term_tree VALUES (2)")),
+                &[Learning],
+            ),
             ("membership", Box::new(|| app("INSERT INTO memberships VALUES ('a','e1')")), &[Learning, Oc]),
             ("general tag", Box::new(|| app("INSERT INTO general_hits VALUES ('a','blue_hair')")), &[Learning, Oc]),
             ("excluded", Box::new(|| app("INSERT INTO excluded VALUES ('c')")), &[Learning, Similar, Oc]),
@@ -1510,8 +1530,10 @@ mod tests {
     }
     const SIMILAR: [&str; 4] = ["image_sigs", "relations", "similar_paired", "similar_retry"];
     fn similar_library() -> Connection {
-        let c = Connection::open_in_memory().unwrap();
+        let mut c = Connection::open_in_memory().unwrap();
         c.execute_batch(include_str!("app_create_schema.sql")).unwrap();
+        // The identities live in the core tables (`terms`, `term_tree`), as in every library.
+        crate::migrate(&mut c).unwrap();
         c.execute_batch("CREATE TABLE IF NOT EXISTS similar_paired(uuid TEXT PRIMARY KEY);CREATE TABLE IF NOT EXISTS similar_retry(a TEXT NOT NULL,b TEXT NOT NULL,PRIMARY KEY(a,b));").unwrap();
         for i in 0..20 {
             c.execute("INSERT INTO assets(uuid,src_path) VALUES (?,'')", [format!("a{i:02}")]).unwrap();

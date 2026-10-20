@@ -1,4 +1,5 @@
 //! Browsing reads preserve the Store SQL, field overwrite order and request-local snapshot.
+use crate::character_entities::ENTITIES;
 use crate::{
     http::LibraryContext,
     http_json::Json,
@@ -10,6 +11,16 @@ use std::collections::{HashMap, HashSet};
 const HINTS: &str =
     "(SELECT uuid,entity,score,0 AS weak FROM family_evidence UNION ALL SELECT uuid,entity,score,1 FROM weak_claims)";
 const MIXED:&str="EXISTS(SELECT 1 FROM duplicates y WHERE y.grp=d.grp AND y.uuid<>d.uuid AND (EXISTS(SELECT entity FROM memberships WHERE uuid=d.uuid EXCEPT SELECT entity FROM memberships WHERE uuid=y.uuid) OR EXISTS(SELECT entity FROM memberships WHERE uuid=y.uuid EXCEPT SELECT entity FROM memberships WHERE uuid=d.uuid)))";
+/// 图的归属行和身份（名字、作品文字），按图的条件 `uuid`（如 `= ?`）。
+fn members(uuid: &str) -> String {
+    format!(
+        "SELECT m.*,e.id,entity_name(e.id) AS name,e.work
+         FROM memberships m
+         JOIN {ENTITIES} e ON e.id=m.entity
+         WHERE m.uuid {uuid}
+         ORDER BY m.status='machine',name,e.id"
+    )
+}
 fn leads() -> String {
     format!("(SELECT v.* FROM {HINTS} v WHERE NOT EXISTS(SELECT 1 FROM assertions s WHERE s.uuid=v.uuid AND s.entity=v.entity AND s.status='rejected'))")
 }
@@ -20,7 +31,20 @@ fn visible(a: &str) -> String {
     format!("{} AND NOT EXISTS(SELECT 1 FROM excluded x WHERE x.uuid={a}.uuid)", unfolded(a))
 }
 fn audit_open(a: &str) -> String {
-    format!("EXISTS(SELECT 1 FROM audit_sample u WHERE u.uuid={a}.uuid) AND NOT EXISTS(SELECT 1 FROM asked k JOIN audit_sample u ON u.uuid=k.uuid AND u.entity=k.entity WHERE k.uuid={a}.uuid AND k.answer<>'later') AND NOT EXISTS(SELECT 1 FROM audit_sample u JOIN assertions s ON s.uuid=u.uuid JOIN entities e ON e.id=s.entity WHERE u.uuid={a}.uuid AND (coalesce(e.parent_id,e.id)=u.entity OR (s.status='confirmed' AND u.solo=1)))")
+    format!(
+        "EXISTS(SELECT 1 FROM audit_sample u WHERE u.uuid={a}.uuid)
+         AND NOT EXISTS(
+           SELECT 1
+           FROM asked k
+           JOIN audit_sample u ON u.uuid=k.uuid AND u.entity=k.entity
+           WHERE k.uuid={a}.uuid AND k.answer<>'later')
+         AND NOT EXISTS(
+           SELECT 1
+           FROM audit_sample u
+           JOIN assertions s ON s.uuid=u.uuid
+           JOIN {ENTITIES} e ON e.id=s.entity
+           WHERE u.uuid={a}.uuid AND (coalesce(e.parent_id,e.id)=u.entity OR (s.status='confirmed' AND u.solo=1)))"
+    )
 }
 pub(crate) fn rating(a: &str, nsfw: &str) -> Result<String> {
     match nsfw{""=>Ok(String::new()),"hide"|"only"=>Ok(format!(" AND {}coalesce({a}.uuid IN (SELECT uuid FROM asset_rating WHERE rating IN ('questionable', 'explicit')),0)",if nsfw=="hide"{"NOT "}else{""})),_=>Err(Error::Invalid("未知内容筛选".into()))}
@@ -178,24 +202,37 @@ pub(crate) fn selection(
         );
     }
     if !v("work").is_empty() {
-        if !exists(c, "SELECT 1 FROM entities WHERE id=? AND kind='work' AND merged_into IS NULL", &[v("work")])? {
+        let work = format!(
+            "SELECT 1
+             FROM {ENTITIES}
+             WHERE id=? AND kind='work' AND merged_into IS NULL"
+        );
+        if !exists(c, &work, &[v("work")])? {
             return Err(Error::Invalid("作品不存在".into()));
         }
         let ids = strings(c, &format!("{} SELECT id FROM tree", crate::http_read::TREE), &[v("work")])?;
-        clauses.push(format!("EXISTS(SELECT 1 FROM memberships m JOIN entities e ON e.id=m.entity WHERE m.uuid=a.uuid AND e.work_id IN ({}))",vec!["?";ids.len()].join(",")));
+        clauses.push(format!(
+            "EXISTS(
+               SELECT 1
+               FROM memberships m
+               JOIN {ENTITIES} e ON e.id=m.entity
+               WHERE m.uuid=a.uuid AND e.work_id IN ({marks}))",
+            marks = vec!["?"; ids.len()].join(",")
+        ));
         args.extend(ids);
     }
     if !entity.is_empty() {
         for _ in 0..16 {
-            let next: Option<Option<String>> =
-                c.query_row("SELECT merged_into FROM entities WHERE id=?", [&entity], |r| r.get(0)).optional()?;
+            let next: Option<Option<String>> = c
+                .query_row(&format!("SELECT merged_into FROM {ENTITIES} WHERE id=?"), [&entity], |r| r.get(0))
+                .optional()?;
             match next {
                 Some(Some(n)) if !n.is_empty() => entity = n,
                 _ => break,
             }
         }
         let parent: Option<Option<String>> =
-            c.query_row("SELECT parent_id FROM entities WHERE id=?", [&entity], |r| r.get(0)).optional()?;
+            c.query_row(&format!("SELECT parent_id FROM {ENTITIES} WHERE id=?"), [&entity], |r| r.get(0)).optional()?;
         match parent {
             None => return Err(Error::Invalid("角色不存在".into())),
             Some(Some(p)) if !p.is_empty() => {
@@ -208,7 +245,7 @@ pub(crate) fn selection(
             clauses.push(format!("EXISTS(SELECT 1 FROM {HINTS} v WHERE v.uuid=a.uuid AND v.entity=?) AND NOT EXISTS(SELECT 1 FROM memberships m WHERE m.uuid=a.uuid AND m.entity=?) AND NOT EXISTS(SELECT 1 FROM assertions s WHERE s.uuid=a.uuid AND s.entity=? AND s.status='rejected')"));
             args.extend(vec![entity.clone(); 3]);
         } else {
-            let mascot = exists(c, "SELECT 1 FROM entities WHERE id=? AND mascot<>0", &[&entity])?;
+            let mascot = exists(c, &format!("SELECT 1 FROM {ENTITIES} WHERE id=? AND mascot<>0"), &[&entity])?;
             clauses.push(format!(
                 "EXISTS(SELECT 1 FROM {} m WHERE m.uuid=a.uuid AND m.entity=?)",
                 if mascot { "tag_memberships" } else { "memberships" }
@@ -217,8 +254,9 @@ pub(crate) fn selection(
         }
     }
     if !variant.is_empty() {
-        let p: Option<Option<String>> =
-            c.query_row("SELECT parent_id FROM entities WHERE id=?", [&variant], |r| r.get(0)).optional()?;
+        let p: Option<Option<String>> = c
+            .query_row(&format!("SELECT parent_id FROM {ENTITIES} WHERE id=?"), [&variant], |r| r.get(0))
+            .optional()?;
         if !p.flatten().is_some_and(|p| !p.is_empty() && (entity.is_empty() || p == entity)) {
             return Err(Error::Invalid("子标签不属于该角色".into()));
         }
@@ -375,7 +413,13 @@ fn shown(c: &Connection, v: Json, skin: bool) -> Result<Json> {
 }
 fn memberships(c: &Connection, id: &str) -> Result<Vec<Json>> {
     let mut out = Vec::new();
-    for r in rows(c,"SELECT m.*,e.id,entity_name(e.id) AS name,e.work FROM memberships m JOIN entities e ON e.id=m.entity WHERE m.uuid=? ORDER BY m.status='machine',name,e.id",&[id])?{let entity=get(&r,"id");let mut item=display(c,r.clone())?;item.set("evidence",evidence(&r,&[]));item.set("variants",Json::Array(rows(c,"SELECT entity AS id,variant AS name,status FROM variant_memberships WHERE uuid=? AND parent_id=? ORDER BY variant",&[id,entity.text()])?.into_iter().map(|v|shown(c,v,true)).collect::<Result<_>>()?));out.push(item);}
+    for r in rows(c, &members("= ?"), &[id])? {
+        let entity = get(&r, "id");
+        let mut item = display(c, r.clone())?;
+        item.set("evidence", evidence(&r, &[]));
+        item.set("variants",Json::Array(rows(c,"SELECT entity AS id,variant AS name,status FROM variant_memberships WHERE uuid=? AND parent_id=? ORDER BY variant",&[id,entity.text()])?.into_iter().map(|v|shown(c,v,true)).collect::<Result<_>>()?));
+        out.push(item);
+    }
     Ok(out)
 }
 // A projected page needs only its identities, work names and hybrid nodes. Keep
@@ -393,7 +437,14 @@ impl PageDisplay {
         let mut name_ids = ids.clone();
         let ids = Json::Array(ids).dump();
         let mut entities = HashMap::new();
-        for r in rows(c, "SELECT e.id,e.kind,e.original,coalesce(p.work_id,e.work_id) AS work_id FROM entities e LEFT JOIN entities p ON p.id=e.parent_id AND e.kind='skin' WHERE e.id IN (SELECT value FROM json_each(?))", &[&ids])? {
+        let sql = format!(
+            "SELECT e.id,e.kind,e.original,coalesce(p.work_id,e.work_id) AS work_id
+             FROM {ENTITIES} e
+             LEFT JOIN terms pt ON pt.key=e.parent_id AND e.kind='skin'
+             LEFT JOIN term_tree p ON p.term_id=pt.id
+             WHERE e.id IN (SELECT value FROM json_each(?))"
+        );
+        for r in rows(c, &sql, &[&ids])? {
             entities.insert(get(&r, "id").text().to_owned(), r);
         }
         name_ids.extend(entities.values().map(|r| get(r, "work_id")));
@@ -463,9 +514,24 @@ fn decorate(c: &Connection, page: &mut [Json]) -> Result<()> {
         audit.insert(get(&r, "uuid").text().to_owned(), get(&r, "entity"));
     }
     let mut answered = HashMap::new();
-    for r in rows(c,&format!("SELECT u.uuid,coalesce((SELECT k.answer FROM asked k WHERE k.uuid=u.uuid AND k.entity=u.entity AND k.answer<>'later'),(SELECT CASE s.status WHEN 'confirmed' THEN 'yes' ELSE 'no' END FROM assertions s JOIN entities e ON e.id=s.entity WHERE s.uuid=u.uuid AND coalesce(e.parent_id,e.id)=u.entity ORDER BY s.status='confirmed' LIMIT 1),(SELECT 'no' FROM assertions s WHERE s.uuid=u.uuid AND s.status='confirmed' AND u.solo=1 LIMIT 1)) AS answer FROM audit_sample u WHERE u.uuid {selected}"),&[&ids])?{answered.insert(get(&r,"uuid").text().to_owned(),get(&r,"answer"));}
+    let answers = format!(
+        "SELECT u.uuid,coalesce(
+           (SELECT k.answer FROM asked k WHERE k.uuid=u.uuid AND k.entity=u.entity AND k.answer<>'later'),
+           (SELECT CASE s.status WHEN 'confirmed' THEN 'yes' ELSE 'no' END
+            FROM assertions s
+            JOIN {ENTITIES} e ON e.id=s.entity
+            WHERE s.uuid=u.uuid AND coalesce(e.parent_id,e.id)=u.entity
+            ORDER BY s.status='confirmed'
+            LIMIT 1),
+           (SELECT 'no' FROM assertions s WHERE s.uuid=u.uuid AND s.status='confirmed' AND u.solo=1 LIMIT 1)) AS answer
+         FROM audit_sample u
+         WHERE u.uuid {selected}"
+    );
+    for r in rows(c, &answers, &[&ids])? {
+        answered.insert(get(&r, "uuid").text().to_owned(), get(&r, "answer"));
+    }
     let variant_rows = rows(c,&format!("SELECT uuid,parent_id,entity AS id,variant AS name,status FROM variant_memberships WHERE uuid {selected} ORDER BY variant"),&[&ids])?;
-    let member_rows = rows(c,&format!("SELECT m.*,e.id,entity_name(e.id) AS name,e.work FROM memberships m JOIN entities e ON e.id=m.entity WHERE m.uuid {selected} ORDER BY m.status='machine',name,e.id"),&[&ids])?;
+    let member_rows = rows(c, &members(selected), &[&ids])?;
     let mut entity_ids = variant_rows.iter().chain(&member_rows).map(|r| get(r, "id")).collect::<Vec<_>>();
     entity_ids.extend(leads_by.values().chain(audit.values()).cloned());
     let reader = PageDisplay::load(c, entity_ids)?;
@@ -574,7 +640,14 @@ fn question(c: &Connection, id: &str) -> Result<Json> {
     .into_iter()
     .next();
     let unasked = |a: &str| format!("NOT EXISTS(SELECT 1 FROM asked k WHERE k.uuid={a}.uuid AND k.entity={a}.entity)");
-    let learnable = |a: &str| format!("NOT EXISTS(SELECT 1 FROM entities l WHERE l.id={a}.entity AND l.label_only=1)");
+    let learnable = |a: &str| {
+        format!(
+            "NOT EXISTS(
+               SELECT 1
+               FROM {ENTITIES} l
+               WHERE l.id={a}.entity AND l.label_only=1)"
+        )
+    };
     let mut ambiguous = None;
     let mut hint = None;
     if audit.is_none() {
@@ -595,7 +668,10 @@ fn question(c: &Connection, id: &str) -> Result<Json> {
         ("seed", e, None)
     };
     let name = |e: &str| -> Result<Json> {
-        Ok(c.query_row("SELECT entity_name(e.id) FROM entities e WHERE id=?", [e], |r| r.get::<_, String>(0))?.into())
+        Ok(c.query_row(&format!("SELECT entity_name(e.id) FROM {ENTITIES} e WHERE id=?"), [e], |r| {
+            r.get::<_, String>(0)
+        })?
+        .into())
     };
     let mut out = Json::object([
         ("kind", kind.into()),
@@ -628,13 +704,48 @@ fn detail(c: &Connection, context: &LibraryContext, id: &str) -> Result<Json> {
     };
     let members = memberships(c, id)?;
     out.set("memberships", Json::Array(members.clone()));
-    out.set("tag_identities",Json::Array(rows(c,"SELECT e.id,entity_name(e.id) AS name,t.status FROM tag_memberships t JOIN entities e ON e.id=t.entity WHERE t.uuid=? ORDER BY name",&[id])?));
+    let tagged = format!(
+        "SELECT e.id,entity_name(e.id) AS name,t.status
+         FROM tag_memberships t
+         JOIN {ENTITIES} e ON e.id=t.entity
+         WHERE t.uuid=?
+         ORDER BY name"
+    );
+    out.set("tag_identities", Json::Array(rows(c, &tagged, &[id])?));
     let mut ownership = members;
-    for r in rows(c,"SELECT e.id,entity_name(e.id) AS name,s.status,s.origin,v.sources,v.score FROM assertions s JOIN entities e ON e.id=s.entity LEFT JOIN family_evidence v ON v.entity=e.id AND v.uuid=s.uuid WHERE s.uuid=? AND s.status='rejected' AND e.parent_id IS NULL",&[id])?{let mut item=display(c,r.clone())?;item.set("evidence",evidence(&r,&[]));ownership.push(item);}
+    let rejected = format!(
+        "SELECT e.id,entity_name(e.id) AS name,s.status,s.origin,v.sources,v.score
+         FROM assertions s
+         JOIN {ENTITIES} e ON e.id=s.entity
+         LEFT JOIN family_evidence v ON v.entity=e.id AND v.uuid=s.uuid
+         WHERE s.uuid=? AND s.status='rejected' AND e.parent_id IS NULL"
+    );
+    for r in rows(c, &rejected, &[id])? {
+        let mut item = display(c, r.clone())?;
+        item.set("evidence", evidence(&r, &[]));
+        ownership.push(item);
+    }
     out.set("ownership", Json::Array(ownership));
-    let sql="SELECT * FROM (SELECT e.id,entity_name(e.id) AS name,e.work,v.sources,v.score,v.wd,v.ccip,v.rank,0 AS weak FROM family_evidence v JOIN entities e ON e.id=v.entity WHERE v.uuid=?1 UNION ALL SELECT e.id,entity_name(e.id),e.work,group_concat(w.source),max(w.score),NULL,max(w.score),1000,1 FROM weak_claims w JOIN entities e ON e.id=w.entity WHERE w.uuid=?1 AND NOT EXISTS(SELECT 1 FROM family_evidence f WHERE f.uuid=w.uuid AND f.entity=w.entity) GROUP BY e.id) x WHERE NOT EXISTS(SELECT 1 FROM memberships m WHERE m.uuid=?1 AND m.entity=x.id) AND NOT EXISTS(SELECT 1 FROM assertions s WHERE s.uuid=?1 AND s.entity=x.id AND s.status='rejected') ORDER BY weak,rank,score DESC LIMIT 12";
+    let sql = format!(
+        "SELECT *
+         FROM (
+           SELECT e.id,entity_name(e.id) AS name,e.work,v.sources,v.score,v.wd,v.ccip,v.rank,0 AS weak
+           FROM family_evidence v
+           JOIN {ENTITIES} e ON e.id=v.entity
+           WHERE v.uuid=?1
+           UNION ALL
+           SELECT e.id,entity_name(e.id),e.work,group_concat(w.source),max(w.score),NULL,max(w.score),1000,1
+           FROM weak_claims w
+           JOIN {ENTITIES} e ON e.id=w.entity
+           WHERE w.uuid=?1 AND NOT EXISTS(SELECT 1 FROM family_evidence f WHERE f.uuid=w.uuid AND f.entity=w.entity)
+           GROUP BY e.id) x
+         WHERE NOT EXISTS(SELECT 1 FROM memberships m WHERE m.uuid=?1 AND m.entity=x.id)
+           AND NOT EXISTS(SELECT 1 FROM assertions s WHERE s.uuid=?1 AND s.entity=x.id AND s.status='rejected')
+         ORDER BY weak,rank,score DESC
+         LIMIT 12"
+    );
     let mut alternatives = Vec::new();
-    for r in rows(c, sql, &[id])? {
+    for r in rows(c, &sql, &[id])? {
         let mut item =
             display(c, Json::object([("id", get(&r, "id")), ("name", get(&r, "name")), ("work", get(&r, "work"))]))?;
         item.set("weak", (get(&r, "weak").integer() != 0).into());
@@ -643,8 +754,28 @@ fn detail(c: &Connection, context: &LibraryContext, id: &str) -> Result<Json> {
     }
     out.set("alternatives", Json::Array(alternatives));
     out.set("single", exists(c, "SELECT 1 FROM single_assets WHERE uuid=?", &[id])?.into());
-    out.set("assertions",Json::Array(rows(c,"SELECT e.id,entity_name(e.id) AS name,s.status,s.origin FROM assertions s JOIN entities e ON e.id=s.entity WHERE s.uuid=? ORDER BY name,e.id",&[id])?.into_iter().map(|r|display(c,r)).collect::<Result<_>>()?));
-    out.set("candidates",Json::Array(rows(c,"SELECT e.id,entity_name(e.id) AS name,c.source,c.score FROM candidates c JOIN entities e ON e.id=c.entity WHERE c.uuid=? ORDER BY name,e.id",&[id])?.into_iter().map(|r|display(c,r)).collect::<Result<_>>()?));
+    let assertions = format!(
+        "SELECT e.id,entity_name(e.id) AS name,s.status,s.origin
+         FROM assertions s
+         JOIN {ENTITIES} e ON e.id=s.entity
+         WHERE s.uuid=?
+         ORDER BY name,e.id"
+    );
+    let candidates = format!(
+        "SELECT e.id,entity_name(e.id) AS name,c.source,c.score
+         FROM candidates c
+         JOIN {ENTITIES} e ON e.id=c.entity
+         WHERE c.uuid=?
+         ORDER BY name,e.id"
+    );
+    out.set(
+        "assertions",
+        Json::Array(rows(c, &assertions, &[id])?.into_iter().map(|r| display(c, r)).collect::<Result<_>>()?),
+    );
+    out.set(
+        "candidates",
+        Json::Array(rows(c, &candidates, &[id])?.into_iter().map(|r| display(c, r)).collect::<Result<_>>()?),
+    );
     out.set("unknown", exists(c, "SELECT 1 FROM deferred WHERE uuid=?", &[id])?.into());
     out.set(
         "user_tags",
@@ -668,7 +799,14 @@ fn detail(c: &Connection, context: &LibraryContext, id: &str) -> Result<Json> {
     let mut copies=rows(c,"SELECT y.uuid,y.pos,y.size,a.width,a.height,a.added_at FROM duplicates d JOIN duplicates y ON y.grp=d.grp AND y.uuid<>d.uuid JOIN assets a ON a.uuid=y.uuid WHERE d.uuid=? ORDER BY y.pos",&[id])?;
     for copy in &mut copies {
         let uuid = get(copy, "uuid");
-        copy.set("names",Json::Array(strings(c,"SELECT entity_name(e.id) FROM memberships m JOIN entities e ON e.id=m.entity WHERE m.uuid=? ORDER BY m.status='machine',1",&[uuid.text()])?.into_iter().map(Into::into).collect()));
+        let names = format!(
+            "SELECT entity_name(e.id)
+             FROM memberships m
+             JOIN {ENTITIES} e ON e.id=m.entity
+             WHERE m.uuid=?
+             ORDER BY m.status='machine',1"
+        );
+        copy.set("names", Json::Array(strings(c, &names, &[uuid.text()])?.into_iter().map(Into::into).collect()));
     }
     out.set("duplicates", Json::Array(copies));
     c.execute(
@@ -1012,8 +1150,10 @@ mod tests {
     fn page_display_matches_single_row_renderer_for_projected_names() {
         let c = Connection::open_in_memory().unwrap();
         c.execute_batch("CREATE TABLE meta(key TEXT PRIMARY KEY,value TEXT); INSERT INTO meta VALUES ('terms_names','core');
-            CREATE TABLE entities(id TEXT PRIMARY KEY,kind TEXT,original INTEGER,work_id TEXT,parent_id TEXT);
-            INSERT INTO entities VALUES ('root','character',0,'work',NULL),('skin','skin',0,'unused','root'),('oc','character',1,NULL,NULL),('unshown','character',0,NULL,NULL),('work','work',0,NULL,NULL);
+            CREATE TABLE terms(id INTEGER PRIMARY KEY,key TEXT UNIQUE,kind TEXT);
+            CREATE TABLE term_tree(term_id INTEGER PRIMARY KEY,parent_id TEXT,merged_into TEXT,work_id TEXT,work_text TEXT NOT NULL DEFAULT '',variant TEXT NOT NULL DEFAULT '',artist TEXT NOT NULL DEFAULT '',label_only INTEGER NOT NULL DEFAULT 0,mascot INTEGER NOT NULL DEFAULT 0,mascot_origin TEXT,original INTEGER NOT NULL DEFAULT 0,seq INTEGER);
+            INSERT INTO terms VALUES (1,'root','character'),(2,'skin','skin'),(3,'oc','character'),(4,'unshown','character'),(5,'work','work');
+            INSERT INTO term_tree(term_id,original,work_id,parent_id,seq) VALUES (1,0,'work',NULL,1),(2,0,'unused','root',2),(3,1,NULL,NULL,3),(4,0,NULL,NULL,4),(5,0,NULL,NULL,5);
             CREATE TABLE identity_nodes(id TEXT PRIMARY KEY,node_type TEXT,character_id TEXT,variant_id TEXT,canonical_id TEXT);
             INSERT INTO identity_nodes VALUES ('root','character','root',NULL,'root'),('skin','form','root','skin','skin');").unwrap();
         c.execute_batch(crate::names_view::TABLES).unwrap();
@@ -1066,7 +1206,10 @@ mod tests {
             std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
         ));
         let mut c = crate::sqlite::open(&path).unwrap();
-        c.execute_batch("CREATE TABLE meta(key TEXT,value TEXT);CREATE TABLE entities(id TEXT,kind TEXT,original INTEGER,work_id TEXT,parent_id TEXT);INSERT INTO entities VALUES ('alice','character',0,NULL,NULL),('bob','character',0,NULL,NULL);
+        c.execute_batch("CREATE TABLE meta(key TEXT,value TEXT);
+            CREATE TABLE terms(id INTEGER PRIMARY KEY,key TEXT UNIQUE,kind TEXT);
+            CREATE TABLE term_tree(term_id INTEGER PRIMARY KEY,parent_id TEXT,merged_into TEXT,work_id TEXT,work_text TEXT NOT NULL DEFAULT '',variant TEXT NOT NULL DEFAULT '',artist TEXT NOT NULL DEFAULT '',label_only INTEGER NOT NULL DEFAULT 0,mascot INTEGER NOT NULL DEFAULT 0,mascot_origin TEXT,original INTEGER NOT NULL DEFAULT 0,seq INTEGER);
+            INSERT INTO terms VALUES (1,'alice','character'),(2,'bob','character');INSERT INTO term_tree(term_id,seq) VALUES (1,1),(2,2);
             CREATE TABLE assets(uuid TEXT PRIMARY KEY,added_at TEXT);INSERT INTO assets VALUES ('a','2026-09-30'),('b','2026-09-30'),('c','2026-09-29'),('d','2026-09-28'),('e','2026-09-27'),('f','2026-09-26');
             CREATE TABLE duplicates(uuid TEXT,hidden INTEGER);INSERT INTO duplicates VALUES ('e',1);CREATE TABLE excluded(uuid TEXT);INSERT INTO excluded VALUES ('f');CREATE TABLE asset_rating(uuid TEXT,rating TEXT);INSERT INTO asset_rating VALUES ('c','explicit');
             CREATE TABLE memberships(uuid TEXT,entity TEXT);CREATE TABLE deferred(uuid TEXT);CREATE TABLE assertions(uuid TEXT,entity TEXT,status TEXT);

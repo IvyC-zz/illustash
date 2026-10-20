@@ -1,8 +1,8 @@
 //! 角色、皮肤、作品的名字（`term_names`，按词条）。核心第 8 版（#201）起这里直接写 `term_names`，语义逐行照
 //! tests/reference/web/names.py（#9 已删除） `put_name` 与 tests/reference/web/store.py（#9 已删除） `Store.alias`。
 //!
-//! 身份（`entities.id`）就是词条的 `terms.key`；新建的身份在建出来时就镜像成词条（`legacy_characters::mirror_state`），
-//! 所以写名字时总能找到它的词条。`seq` 是名字的先后（旧表 `names` 的 rowid）：新行取当前最大值加一，与 SQLite 分配
+//! 身份 id 就是词条的 `terms.key`；新建的身份一建出来就是词条（`character_entities::create`），所以写名字时总能找到
+//! 它的词条。`seq` 是名字的先后（旧表 `names` 的 rowid）：新行取当前最大值加一，与 SQLite 分配
 //! rowid 的规则相同；`ON CONFLICT DO UPDATE` 保留原值。
 use crate::{Error, Result};
 use rusqlite::{params, Connection, OptionalExtension};

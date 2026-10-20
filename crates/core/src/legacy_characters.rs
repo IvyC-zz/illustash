@@ -1,12 +1,11 @@
 //! 角色、皮肤、作品收编：影子同步（docs/TERMS_CHARACTERS_PLAN.md 第 12 节 S2）。
 //!
 //! 旧表仍是写入方，这里只读它们，把核心的 `term_*` 补到与旧表一致，再由 `term_*` 生成影子兼容表
-//! （`shadow_entities` 等，建表语句从旧表原样复制），与旧表逐行逐列比对。一个事务：预检失败、出处无法解释或
+//! （`shadow_assertions` 等，建表语句从旧表原样复制），与旧表逐行逐列比对。一个事务：预检失败、出处无法解释或
 //! 比对有差异，整次回滚，只带回报告。可以反复运行；旧表没变时再跑一次不新增行。
 //!
-//! - `entities` → `terms`（key = 原 id，kind 原样，`variant`、`artist`、`label_only`、`mascot`、`mascot_origin`、
-//!   `original` 进 attrs）+ `term_tree`（`parent_id`、`merged_into`、`work_id`、`work` 文字、work_review 三列）。
-//!   有 `term_tree` 行的词条就是兼容 `entities` 里的一行。
+//! - `entities` → `terms`（key = 原 id，kind 原样）+ `term_tree`（结构、作品文字、属性列、先后 `seq`）。核心第 8 版起
+//!   它们是唯一权威，旧表在升级时核对后删除（`retire_entities`、`character_entities`）。
 //! - `links` → `term_links`，角色的 `wd` 改名 `wd_character`（WD 题材占了 `wd`）。核心第 8 版起 `term_links` 是唯一
 //!   权威，旧表在升级时核对后删除（`retire_links`、`character_links`）。
 //! - `identity_baseline` → `term_identity_baseline`（`seq` = 原 rowid）。
@@ -43,24 +42,6 @@ struct Compat {
     identity: bool,
 }
 
-const ENTITY_COLUMNS: &[&str] = &[
-    "id",
-    "name",
-    "work",
-    "external_key",
-    "variant",
-    "parent_id",
-    "tag",
-    "merged_into",
-    "kind",
-    "artist",
-    "label_only",
-    "mascot",
-    "mascot_origin",
-    "work_id",
-    "original",
-];
-
 /// S3: rebuild the shadow exclusively from core master data, without resynchronizing
 /// any legacy input. A difference rolls back the check, just like S2 synchronization.
 pub fn verify(conn: &mut Connection) -> Result<Report> {
@@ -85,15 +66,10 @@ pub(crate) fn verify_in(tx: &Connection) -> Result<Report> {
     let identity = table_exists(tx, "identity_relations")?;
     let mut report = Report::default();
     shadow(tx, identity, true)?;
-    compare_columns(tx, identity, &mut report, true, UNMAPPED)?;
+    compare(tx, identity, &mut report)?;
     clear_shadow(tx)?;
     Ok(report)
 }
-
-/// `entities` columns the core never carried (`ENTITY_COLUMNS` keeps them for the table's shape): no reader uses
-/// them and the upgrade drops them with the table, so the version 8 check does not compare them. The switch required
-/// them empty, but a library can carry later stray values (a test fixture writing `name` directly, say).
-const UNMAPPED: &[&str] = &["name", "external_key", "tag"];
 
 /// Shared read mapping for S3 commands/full rebuild. The whitelist is the S2 contract.
 /// 策略未设置时，候选的身份沿破坏式合并解析到代表（`_candidate` 与 `merge` 都这样写旧表）；hybrid 下是原始身份。
@@ -151,49 +127,6 @@ pub(crate) fn refresh_candidates(c: &Connection, uuids: &[String]) -> Result<()>
     Ok(())
 }
 
-/// 新建的身份立即镜像成词条（#201）：名字直接写 `term_names`，要用到它的词条 id。按建出来的先后调用，词条 id 的
-/// 分配顺序与命令末尾一次镜像时相同（按 `entities` 的 rowid）；其余列由命令末尾的 `mirror_state` 照常补齐。
-pub(crate) fn born(c: &Connection, id: &str, origin: &str) -> Result<()> {
-    mirror_state(c, &[id.to_owned()], origin)
-}
-
-/// 结构状态（实体的列）由核心照旧 SQL 写进兼容表之后，把这些身份镜像进 `terms` / `term_tree`。映射与 S2 收编相同；
-/// 新身份的 origin 是 `origin`。链接、作品复核由命令直接写 `term_links`、`term_tree` 的复核三列（核心第 8 版，
-/// `character_links`、`character_review`），这里不碰。
-pub(crate) fn mirror_state(c: &Connection, ids: &[String], origin: &str) -> Result<()> {
-    c.execute_batch("CREATE TEMP TABLE IF NOT EXISTS state_scope(id TEXT PRIMARY KEY); DELETE FROM state_scope;")?;
-    let mut put = c.prepare_cached("INSERT OR IGNORE INTO state_scope VALUES (?)")?;
-    for id in ids {
-        put.execute([id])?;
-    }
-    c.execute(
-        &format!(
-            "INSERT INTO terms(key,kind,origin,attrs) SELECT e.id,e.kind,?1,{ATTRS} FROM entities e
-             WHERE e.id IN (SELECT id FROM state_scope) AND NOT EXISTS(SELECT 1 FROM terms t WHERE t.key=e.id)
-             ORDER BY e.rowid"
-        ),
-        [origin],
-    )?;
-    c.execute(
-        &format!(
-            "UPDATE terms SET kind=e.kind,attrs={ATTRS} FROM entities e
-             WHERE e.id=terms.key AND e.id IN (SELECT id FROM state_scope) AND (terms.kind IS NOT e.kind OR terms.attrs IS NOT {ATTRS})"
-        ),
-        [],
-    )?;
-    c.execute(
-        "INSERT INTO term_tree(term_id,parent_id,merged_into,work_id,work_text)
-         SELECT t.id,e.parent_id,e.merged_into,e.work_id,e.work
-         FROM entities e JOIN terms t ON t.key=e.id WHERE e.id IN (SELECT id FROM state_scope)
-         ON CONFLICT(term_id) DO UPDATE SET parent_id=excluded.parent_id,merged_into=excluded.merged_into,
-          work_id=excluded.work_id,work_text=excluded.work_text
-         WHERE term_tree.parent_id IS NOT excluded.parent_id OR term_tree.merged_into IS NOT excluded.merged_into
-          OR term_tree.work_id IS NOT excluded.work_id OR term_tree.work_text IS NOT excluded.work_text",
-        [],
-    )?;
-    Ok(())
-}
-
 /// 核心第 8 版（#201）：`term_links` 成为角色、皮肤、作品链接的唯一权威（`character_links`）。旧表 `links` 还在时
 /// （升级前的库），每条改链接的命令都同步镜像过（`mirror_state`），所以按原来的兼容表映射逐行核对，与角色的核对
 /// 一样不一致就拒绝升级；一致就删掉旧表。旧表不在时什么都不做。
@@ -244,6 +177,161 @@ pub(crate) fn retire_identity_baseline(c: &Connection) -> Result<()> {
     Ok(())
 }
 
+/// `term_tree` 在核心第 8 版加的列：身份的属性（原来在 `terms.attrs`，默认值与旧表 `entities` 相同）和先后 `seq`。
+const TREE_COLUMNS: [(&str, &str); 7] = [
+    ("variant", "TEXT NOT NULL DEFAULT ''"),
+    ("artist", "TEXT NOT NULL DEFAULT ''"),
+    ("label_only", "INTEGER NOT NULL DEFAULT 0"),
+    ("mascot", "INTEGER NOT NULL DEFAULT 0"),
+    ("mascot_origin", "TEXT"),
+    ("original", "INTEGER NOT NULL DEFAULT 0"),
+    ("seq", "INTEGER"),
+];
+
+/// 旧表 `entities` 与 `character_entities::ENTITIES` 共有的列，最后一列是先后（旧表的 rowid、核心的 `seq`）。核心从不
+/// 承载的 `name`、`external_key`、`tag` 不在内：没有读者，随表删除。
+const ENTITY_COLUMNS: &str =
+    "id, kind, work, variant, parent_id, merged_into, artist, label_only, mascot, mascot_origin, work_id, original";
+
+/// 核心第 8 版（#201）：身份只在 `terms`（key、kind）和 `term_tree` 里（`character_entities`）。
+/// - `term_tree` 加属性列和先后 `seq`（`TREE_COLUMNS`），属性从 `terms.attrs` 填入，这些词条的 `attrs` 清空
+///   （用户 2026-10-20 决定）；
+/// - 旧表 `entities` 还在时：核心里还没有身份（新建的库）就照旧表建一次；`seq` 取旧表的 rowid；然后逐行核对，不一致就
+///   拒绝升级（第 7 版里每条改身份的命令都同步镜像过）。引用它的视图改按核心表重写（列逐一对应），
+///   `identity_relations` 的外键改为 `REFERENCES terms(key)` 重建，最后删表。
+///
+/// 放在别的旧表退役之后：外键开着，引用 `entities` 的旧表（`links`、`names`、`work_review`）都删掉了才能删它。
+pub(crate) fn retire_entities(c: &Connection) -> Result<()> {
+    // `term_tree` 和 `identity_relations` 有写保护；迁移结束时 `schema::migrate_in` 收回钥匙。
+    c.execute("INSERT OR REPLACE INTO meta(key,value) VALUES (?1,'1')", [crate::schema::WRITER_KEY])?;
+    let have = columns(c, "term_tree")?;
+    for (column, definition) in TREE_COLUMNS {
+        if !have.iter().any(|h| h == column) {
+            c.execute_batch(&format!("ALTER TABLE term_tree ADD COLUMN {column} {definition}"))?;
+        }
+    }
+    c.execute_batch(
+        "UPDATE term_tree SET
+           variant = coalesce(json_extract(t.attrs, '$.variant'), ''),
+           artist = coalesce(json_extract(t.attrs, '$.artist'), ''),
+           label_only = coalesce(json_extract(t.attrs, '$.label_only'), 0),
+           mascot = coalesce(json_extract(t.attrs, '$.mascot'), 0),
+           mascot_origin = json_extract(t.attrs, '$.mascot_origin'),
+           original = coalesce(json_extract(t.attrs, '$.original'), 0)
+         FROM terms t
+         WHERE t.id = term_tree.term_id AND t.attrs <> '{}';
+         UPDATE terms SET attrs = '{}' WHERE attrs <> '{}' AND id IN (SELECT term_id FROM term_tree);",
+    )?;
+    if table_exists(c, "entities")? {
+        let empty = |table: &str| -> Result<bool> {
+            Ok(c.query_row(&format!("SELECT NOT EXISTS(SELECT 1 FROM {table})"), [], |r| r.get(0))?)
+        };
+        // 空的旧表可能只建了一部分列（应用层建到一半的库）：核心里也没有身份就算一致。
+        let (old_empty, core_empty) = (empty("entities")?, empty("term_tree")?);
+        if old_empty && !core_empty {
+            let differs: i64 = c.query_row("SELECT count(*) FROM term_tree", [], |r| r.get(0))?;
+            return Err(Error::Schema(format!("旧身份表与词条核心不一致，没有升级：{differs} 行")));
+        }
+        if !old_empty && core_empty {
+            c.execute(
+                "INSERT INTO terms(key, kind, origin) SELECT id, kind, ?1 FROM entities ORDER BY rowid",
+                [ORIGIN],
+            )?;
+            c.execute_batch(
+                "INSERT INTO term_tree(term_id, parent_id, merged_into, work_id, work_text, variant, artist, label_only,
+                   mascot, mascot_origin, original)
+                 SELECT t.id, e.parent_id, e.merged_into, e.work_id, e.work, e.variant, e.artist, e.label_only, e.mascot,
+                   e.mascot_origin, e.original
+                 FROM entities e
+                 JOIN terms t ON t.key = e.id
+                 ORDER BY e.rowid",
+            )?;
+        }
+        if !old_empty {
+            c.execute_batch(
+                "UPDATE term_tree SET seq = e.rowid
+                 FROM entities e
+                 JOIN terms t ON t.key = e.id
+                 WHERE t.id = term_tree.term_id",
+            )?;
+            let old = format!("SELECT {ENTITY_COLUMNS}, rowid FROM entities");
+            let new = format!("SELECT {ENTITY_COLUMNS}, seq FROM {}", crate::character_entities::ENTITIES);
+            let differs = differ(c, &old, &new)?;
+            if differs > 0 {
+                return Err(Error::Schema(format!("旧身份表与词条核心不一致，没有升级：{differs} 行")));
+            }
+        }
+        rewrite_views(c)?;
+        if table_exists(c, "identity_relations")? {
+            rebuild_relations(c)?;
+        }
+        c.execute_batch("DROP TABLE entities; DROP TABLE IF EXISTS shadow_entities;")?;
+    }
+    // 没有旧表的库（只有核心的库）：按词条 id 的先后。
+    let last: i64 = c.query_row("SELECT coalesce(max(seq), 0) FROM term_tree", [], |r| r.get(0))?;
+    c.execute("UPDATE term_tree SET seq = ?1 + term_id WHERE seq IS NULL", [last])?;
+    c.execute_batch("CREATE UNIQUE INDEX IF NOT EXISTS term_tree_seq ON term_tree(seq)")?;
+    Ok(())
+}
+
+/// 引用 `entities` 的视图（`family_confirmed`、`membership_rules`、`variant_memberships`、`ambiguous_claims`、
+/// `identity_nodes`）改按核心表重写：旧表名换成同形的 `character_entities::ENTITIES`，其余照旧。
+fn rewrite_views(c: &Connection) -> Result<()> {
+    let word = regex::Regex::new(r"\bentities\b").expect("pattern");
+    let views: Vec<(String, String)> = c
+        .prepare(
+            "SELECT name, sql FROM main.sqlite_master WHERE type = 'view' AND sql LIKE '%entities%' ORDER BY rowid",
+        )?
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
+        .collect::<rusqlite::Result<_>>()?;
+    for (name, sql) in views {
+        if !word.is_match(&sql) {
+            continue;
+        }
+        let sql = word.replace_all(&sql, regex::NoExpand(crate::character_entities::ENTITIES));
+        c.execute_batch(&format!("DROP VIEW \"{name}\"; {sql};"))?;
+    }
+    Ok(())
+}
+
+/// `identity_relations` 的两端改为 `REFERENCES terms(key)`（`terms.key` 唯一）：行先存进临时表，照原来的建表语句（只换
+/// 外键）重建，搬回原样的行，索引和触发器照原样重建。外键开着，删表时引用它的关系证据、决议暂时悬空，所以这段推迟外键
+/// 检查，行搬回来就恢复一致。
+fn rebuild_relations(c: &Connection) -> Result<()> {
+    let sql: String = c.query_row(
+        "SELECT sql FROM main.sqlite_master WHERE type = 'table' AND name = 'identity_relations'",
+        [],
+        |r| r.get(0),
+    )?;
+    let open = sql.find('(').ok_or_else(|| Error::Schema("看不懂 identity_relations 的建表语句".into()))?;
+    let body = sql[open..].replace("REFERENCES entities(id)", "REFERENCES terms(key)");
+    let depend: Vec<String> = c
+        .prepare(
+            "SELECT sql FROM main.sqlite_master
+             WHERE tbl_name = 'identity_relations' AND type IN ('index', 'trigger') AND sql IS NOT NULL
+             ORDER BY rowid",
+        )?
+        .query_map([], |r| r.get(0))?
+        .collect::<rusqlite::Result<_>>()?;
+    let deferred: bool = c.pragma_query_value(None, "defer_foreign_keys", |r| r.get(0))?;
+    c.pragma_update(None, "defer_foreign_keys", true)?;
+    let result = (|| -> Result<()> {
+        c.execute_batch(&format!(
+            "CREATE TEMP TABLE relations_v7 AS SELECT * FROM main.identity_relations;
+             DROP TABLE main.identity_relations;
+             CREATE TABLE main.identity_relations {body};
+             INSERT INTO main.identity_relations SELECT * FROM temp.relations_v7;
+             DROP TABLE temp.relations_v7;"
+        ))?;
+        for definition in depend {
+            c.execute_batch(&definition)?;
+        }
+        Ok(())
+    })();
+    c.pragma_update(None, "defer_foreign_keys", deferred)?;
+    result
+}
+
 /// 两个查询的结果双向相差的行数。
 fn differ(c: &Connection, old: &str, new: &str) -> Result<i64> {
     let count =
@@ -282,15 +370,6 @@ pub(crate) fn project_relation(c: &Connection, id: i64) -> Result<()> {
 
 /// 生成顺序即插入顺序（被引用的在前），删除时倒过来。
 const COMPAT: &[Compat] = &[
-    Compat {
-        table: "entities",
-        columns: ENTITY_COLUMNS,
-        select: "SELECT t.key,'',r.work_text,NULL,json_extract(t.attrs,'$.variant'),r.parent_id,NULL,r.merged_into,t.kind,
-          json_extract(t.attrs,'$.artist'),json_extract(t.attrs,'$.label_only'),json_extract(t.attrs,'$.mascot'),
-          json_extract(t.attrs,'$.mascot_origin'),r.work_id,json_extract(t.attrs,'$.original')
-         FROM term_tree r JOIN terms t ON t.id=r.term_id",
-        identity: false,
-    },
     Compat {
         table: "assertions",
         columns: &["uuid", "entity", "status", "origin"],
@@ -361,9 +440,6 @@ const COMPAT: &[Compat] = &[
 pub struct Report {
     pub committed: bool,
     pub policy: Option<String>,
-    pub terms_created: usize,
-    pub terms_updated: usize,
-    pub tree_changed: usize,
     pub baseline_changed: usize,
     pub assets_added: usize,
     pub evidence_added: usize,
@@ -371,7 +447,7 @@ pub struct Report {
     pub relations_added: usize,
     pub verdicts_added: usize,
     pub batches_added: usize,
-    /// 旧表不合收编条件（例如 `entities.name` 不空、链接系统名冲突）：一条都不能有。
+    /// 旧表不合收编条件（例如结论指向不存在的身份）：一条都不能有。
     pub preflight: Vec<Value>,
     /// 按历史解释不了的人工结论或关系决议：一条都不能有，否则逐条给用户看。
     pub unexplained: Vec<Value>,
@@ -390,7 +466,6 @@ impl Report {
     pub fn to_json(&self) -> Value {
         json!({
             "committed": self.committed, "policy": self.policy,
-            "terms_created": self.terms_created, "terms_updated": self.terms_updated, "tree_changed": self.tree_changed,
             "baseline_changed": self.baseline_changed, "assets_added": self.assets_added,
             "evidence_added": self.evidence_added, "evidence_sets_added": self.evidence_sets_added,
             "relations_added": self.relations_added, "verdicts_added": self.verdicts_added, "batches_added": self.batches_added,
@@ -432,7 +507,6 @@ fn sync_in(tx: &Connection, r: &mut Report) -> Result<()> {
         return Ok(());
     }
     let mut assets = Assets::load(tx)?;
-    sync_entities(tx, r)?;
     if table_exists(tx, "identity_baseline")? {
         sync_baseline(tx, r)?;
     }
@@ -455,8 +529,7 @@ fn sync_in(tx: &Connection, r: &mut Report) -> Result<()> {
 /// 学习产物，以及相册导入的 `imported`。`deferred`、`asked`、`reviews` 由核心命令一起写，但 Python 撤销自己的步骤
 /// （旧的零成员 sweep、curate、identity_skip）时照旧要删它们的行；`duplicates`、`excluded`、`auto_rules` 仍有
 /// Python 的写入口（curate、相似分组）。这些都不在里面。
-pub const GUARDED: [&str; 23] = [
-    "entities",
+pub const GUARDED: [&str; 22] = [
     "assertions",
     "candidates",
     "identity_relations",
@@ -623,41 +696,13 @@ fn preflight(tx: &Connection, identity: bool, r: &mut Report) -> Result<()> {
     if !r.preflight.is_empty() {
         return Ok(());
     }
-    check(tx, r, "entities.name 不为空（旧迁移应已清空）", "SELECT id,name FROM entities WHERE name<>''")?;
-    check(
-        tx,
-        r,
-        "entities.external_key 或 tag 不为空",
-        "SELECT id FROM entities WHERE external_key IS NOT NULL OR tag IS NOT NULL",
-    )?;
-    check(
-        tx,
-        r,
-        "entities.kind 不是 character / skin / work",
-        "SELECT id,kind FROM entities WHERE kind NOT IN ('character','skin','work')",
-    )?;
-    check(tx, r, "entities.id 超过 128 字", "SELECT id FROM entities WHERE length(id) NOT BETWEEN 1 AND 128")?;
-    check(
-        tx,
-        r,
-        "词条 key 已被别的词条占用",
-        &format!(
-            "SELECT e.id,t.kind,t.origin FROM entities e JOIN terms t ON t.key=e.id
-             WHERE NOT EXISTS(SELECT 1 FROM term_tree x WHERE x.term_id=t.id) AND t.origin<>'{ORIGIN}'"
-        ),
-    )?;
     check(
         tx,
         r,
         "人工结论指向不存在的身份",
-        "SELECT uuid,entity FROM assertions WHERE entity NOT IN (SELECT id FROM entities)",
+        &format!("SELECT uuid,entity FROM assertions WHERE entity NOT IN ({IDS})"),
     )?;
-    check(
-        tx,
-        r,
-        "候选指向不存在的身份",
-        "SELECT uuid,entity FROM candidates WHERE entity NOT IN (SELECT id FROM entities)",
-    )?;
+    check(tx, r, "候选指向不存在的身份", &format!("SELECT uuid,entity FROM candidates WHERE entity NOT IN ({IDS})"))?;
     check(
         tx,
         r,
@@ -675,7 +720,7 @@ fn preflight(tx: &Connection, identity: bool, r: &mut Report) -> Result<()> {
             tx,
             r,
             "身份关系的端点不存在",
-            "SELECT id,a,b FROM identity_relations WHERE a NOT IN (SELECT id FROM entities) OR b NOT IN (SELECT id FROM entities)",
+            &format!("SELECT id,a,b FROM identity_relations WHERE a NOT IN ({IDS}) OR b NOT IN ({IDS})"),
         )?;
         check(
             tx,
@@ -720,38 +765,10 @@ fn preflight(tx: &Connection, identity: bool, r: &mut Report) -> Result<()> {
     Ok(())
 }
 
-// ---- 身份、结构、链接、基线 ----
+// ---- 身份基线 ----
 
-const ATTRS: &str = "json_object('variant',e.variant,'artist',e.artist,'label_only',e.label_only,'mascot',e.mascot,
- 'mascot_origin',e.mascot_origin,'original',e.original)";
-
-fn sync_entities(tx: &Connection, r: &mut Report) -> Result<()> {
-    r.terms_created = tx.execute(
-        &format!(
-            "INSERT INTO terms(key,kind,origin,attrs) SELECT e.id,e.kind,'{ORIGIN}',{ATTRS} FROM entities e
-             WHERE NOT EXISTS(SELECT 1 FROM terms t WHERE t.key=e.id) ORDER BY e.rowid"
-        ),
-        [],
-    )?;
-    r.terms_updated = tx.execute(
-        &format!(
-            "UPDATE terms SET kind=e.kind,attrs={ATTRS} FROM entities e
-             WHERE e.id=terms.key AND (terms.kind IS NOT e.kind OR terms.attrs IS NOT {ATTRS})"
-        ),
-        [],
-    )?;
-    r.tree_changed = tx.execute(
-        "INSERT INTO term_tree(term_id,parent_id,merged_into,work_id,work_text)
-         SELECT t.id,e.parent_id,e.merged_into,e.work_id,e.work
-         FROM entities e JOIN terms t ON t.key=e.id WHERE 1
-         ON CONFLICT(term_id) DO UPDATE SET parent_id=excluded.parent_id,merged_into=excluded.merged_into,
-          work_id=excluded.work_id,work_text=excluded.work_text
-         WHERE (parent_id,merged_into,work_id,work_text)
-          IS NOT (excluded.parent_id,excluded.merged_into,excluded.work_id,excluded.work_text)",
-        [],
-    )?;
-    Ok(())
-}
+/// 全部身份 id（`term_tree` 里的词条）。
+const IDS: &str = "SELECT t.key FROM term_tree r JOIN terms t ON t.id = r.term_id";
 
 /// 活的身份基线：与旧表不同就整表按 rowid 顺序重写（它是判定器私有状态，不是历史）。
 fn sync_baseline(tx: &Connection, r: &mut Report) -> Result<()> {
@@ -1432,16 +1449,11 @@ fn compare(tx: &Connection, identity: bool, r: &mut Report) -> Result<()> {
 }
 
 fn compare_with_baseline(tx: &Connection, identity: bool, r: &mut Report, baseline: bool) -> Result<()> {
-    compare_columns(tx, identity, r, baseline, &[])
-}
-
-/// `compare_with_baseline` leaving the `skip` columns of every table out.
-fn compare_columns(tx: &Connection, identity: bool, r: &mut Report, baseline: bool, skip: &[&str]) -> Result<()> {
     let mut pairs: Vec<(String, String, String)> = COMPAT
         .iter()
         .filter(|c| !c.identity || identity)
         .map(|c| {
-            let cols = c.columns.iter().filter(|col| !skip.contains(col)).copied().collect::<Vec<_>>().join(",");
+            let cols = c.columns.join(",");
             (
                 c.table.to_owned(),
                 format!("SELECT {cols} FROM main.{}", c.table),

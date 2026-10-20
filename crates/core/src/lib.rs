@@ -3,6 +3,7 @@
 pub mod backup;
 pub mod casefold;
 pub mod character_commands;
+pub mod character_entities;
 pub mod character_evidence;
 pub mod character_graph;
 pub mod character_identity;

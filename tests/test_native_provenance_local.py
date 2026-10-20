@@ -102,8 +102,9 @@ class NativeLocalProvenanceTest(unittest.TestCase):
             c.execute('CREATE TABLE duplicates(grp,uuid TEXT)')
             c.executemany('INSERT INTO duplicates VALUES (?,?)', [(1, 'known'), (1, 'dup'), (2, 'conflict'), (2, 'untouched')])
             if not partial:
-                c.executescript('CREATE TABLE similar_groups(gid,uuid TEXT); CREATE TABLE memberships(entity,uuid TEXT); CREATE TABLE entities(id,original,label_only); CREATE TABLE clusters(cid,uuid TEXT);')
-                c.execute('INSERT INTO entities VALUES (1,1,0),(2,0,0)')
+                c.executescript('CREATE TABLE similar_groups(gid,uuid TEXT); CREATE TABLE memberships(entity,uuid TEXT); CREATE TABLE terms(id INTEGER PRIMARY KEY, key, kind TEXT); CREATE TABLE term_tree(term_id INTEGER PRIMARY KEY, parent_id, merged_into, work_id, work_text, variant, artist, label_only INTEGER, mascot INTEGER, mascot_origin, original INTEGER, seq INTEGER); CREATE TABLE clusters(cid,uuid TEXT);')
+                c.executescript("INSERT INTO terms VALUES (1,1,'character'),(2,2,'character');"
+                                "INSERT INTO term_tree(term_id,original,label_only,seq) VALUES (1,1,0,1),(2,0,0,2);")
                 c.executemany('INSERT INTO memberships VALUES (?,?)', [(1,'known'),(1,'oc'),(2,'ordinary')])
                 c.executemany('INSERT INTO clusters VALUES (?,?)', [(1,'known'),(1,'known2'),(1,'cluster'),(2,'known'),(2,'weak')])
         with sqlite3.connect(reference.source) as c:

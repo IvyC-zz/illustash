@@ -70,8 +70,8 @@ class BrowseReadHTTPTest(HTTPHarness):
 
     def test_decorated_paging_exact_for_core(self):
         with self.connect() as c:
-            entities=[r[0] for r in c.execute("SELECT id FROM entities WHERE kind<>'work' AND merged_into IS NULL")]
-            variants=[r[0] for r in c.execute('SELECT id FROM entities WHERE parent_id IS NOT NULL')]
+            entities=[r[0] for r in c.execute("SELECT t.key FROM term_tree r JOIN terms t ON t.id=r.term_id WHERE t.kind<>'work' AND r.merged_into IS NULL ORDER BY r.seq")]
+            variants=[r[0] for r in c.execute('SELECT t.key FROM term_tree r JOIN terms t ON t.id=r.term_id WHERE r.parent_id IS NOT NULL ORDER BY r.parent_id,t.key')]
         for nsfw in ('','hide','only'):
             for order in ('newest','oldest','suspicious','hinted'):
                 for pool in ('','unmatched','skipped','duplicates','excluded','pending','recent','audit'):

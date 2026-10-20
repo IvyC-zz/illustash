@@ -49,6 +49,7 @@ pub mod recognition_compute;
 pub mod research_compute;
 pub use illustash_core::casefold;
 pub use illustash_core::character_commands;
+pub use illustash_core::character_entities;
 pub use illustash_core::character_evidence;
 pub use illustash_core::character_graph;
 pub use illustash_core::character_identity;

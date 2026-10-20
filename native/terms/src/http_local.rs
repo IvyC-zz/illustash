@@ -1,4 +1,5 @@
 //! Local candidate selection and cached research results; no worker or network calls.
+use crate::character_entities::ENTITIES;
 use crate::{
     http::LibraryContext,
     http_json::Json,
@@ -9,9 +10,25 @@ use rusqlite::{Connection, OpenFlags};
 use std::collections::HashMap;
 pub(crate) const ROUTES: &[&str] = &["/api/ask", "/api/similar", "/api/clusters"];
 const UNASKED: &str = "NOT EXISTS(SELECT 1 FROM asked k WHERE k.uuid=m.uuid AND k.entity=m.entity)";
-const LEARNABLE: &str = "NOT EXISTS(SELECT 1 FROM entities l WHERE l.id=m.entity AND l.label_only=1)";
+const LEARNABLE: &str = "NOT EXISTS(
+  SELECT 1
+  FROM terms t
+  JOIN term_tree l ON l.term_id=t.id
+  WHERE t.key=m.entity AND l.label_only=1)";
 const REST: &str = "SELECT DISTINCT entity FROM asked WHERE answer='later' AND asked_at>=datetime('now','-7 days')";
-const HINTS: &str = "SELECT w.uuid,w.entity,w.score FROM weak_claims w JOIN single_assets o ON o.uuid=w.uuid WHERE w.source='PROTO' AND NOT EXISTS(SELECT 1 FROM asked k WHERE k.uuid=w.uuid AND k.entity=w.entity) AND NOT EXISTS(SELECT 1 FROM entities l WHERE l.id=w.entity AND l.label_only=1) AND NOT EXISTS(SELECT 1 FROM memberships m WHERE m.uuid=w.uuid AND m.entity=w.entity) AND NOT EXISTS(SELECT 1 FROM assertions s WHERE s.uuid=w.uuid AND (s.status='confirmed' OR s.entity=w.entity)) AND NOT EXISTS(SELECT 1 FROM excluded x WHERE x.uuid=w.uuid)";
+const HINTS: &str = "SELECT w.uuid,w.entity,w.score
+FROM weak_claims w
+JOIN single_assets o ON o.uuid=w.uuid
+WHERE w.source='PROTO'
+  AND NOT EXISTS(SELECT 1 FROM asked k WHERE k.uuid=w.uuid AND k.entity=w.entity)
+  AND NOT EXISTS(
+    SELECT 1
+    FROM terms t
+    JOIN term_tree l ON l.term_id=t.id
+    WHERE t.key=w.entity AND l.label_only=1)
+  AND NOT EXISTS(SELECT 1 FROM memberships m WHERE m.uuid=w.uuid AND m.entity=w.entity)
+  AND NOT EXISTS(SELECT 1 FROM assertions s WHERE s.uuid=w.uuid AND (s.status='confirmed' OR s.entity=w.entity))
+  AND NOT EXISTS(SELECT 1 FROM excluded x WHERE x.uuid=w.uuid)";
 fn get<'a>(q: &'a HashMap<String, String>, k: &str) -> &'a str {
     q.get(k).map(String::as_str).unwrap_or("")
 }
@@ -87,7 +104,8 @@ fn ask(c: &Connection, nsfw: &str, skip: &[&str]) -> Result<Json> {
     } else {
         rows(c,&format!("SELECT m.uuid,a.width,a.height FROM memberships m JOIN single_assets o ON o.uuid=m.uuid JOIN assets a ON a.uuid=m.uuid WHERE m.entity=? AND m.status='machine' AND {seen} AND {UNASKED} ORDER BY random() LIMIT 6"),&[&pick])?
     };
-    let name = c.query_row("SELECT entity_name(id) FROM entities WHERE id=?", [&pick], |r| r.get::<_, String>(0))?;
+    let name =
+        c.query_row(&format!("SELECT entity_name(id) FROM {ENTITIES} WHERE id=?"), [&pick], |r| r.get::<_, String>(0))?;
     let confirmed =
         c.query_row("SELECT count(*) FROM memberships WHERE entity=? AND status='confirmed'", [&pick], |r| {
             r.get::<_, i64>(0)
@@ -112,7 +130,19 @@ pub(crate) fn suggest(context: &LibraryContext, body: &Json) -> Result<Json> {
     for id in ids.iter().take(2000) {
         tx.execute("INSERT INTO picked VALUES (?)", [id])?;
     }
-    let selected=rows(&tx,"SELECT e.id,entity_name(e.id) AS name,e.work,count(DISTINCT v.uuid) AS count FROM (SELECT uuid,entity,score,0 AS weak FROM family_evidence UNION ALL SELECT uuid,entity,score,1 FROM weak_claims) v JOIN picked p ON p.uuid=v.uuid JOIN entities e ON e.id=v.entity WHERE NOT EXISTS(SELECT 1 FROM memberships m WHERE m.uuid=v.uuid AND m.entity=v.entity) AND NOT EXISTS(SELECT 1 FROM assertions s WHERE s.uuid=v.uuid AND s.entity=v.entity AND s.status='rejected') GROUP BY e.id ORDER BY count DESC,min(v.weak),max(v.score) DESC,name LIMIT 9",&[])?;
+    let sql = format!(
+        "SELECT e.id,entity_name(e.id) AS name,e.work,count(DISTINCT v.uuid) AS count
+         FROM (SELECT uuid,entity,score,0 AS weak FROM family_evidence
+               UNION ALL SELECT uuid,entity,score,1 FROM weak_claims) v
+         JOIN picked p ON p.uuid=v.uuid
+         JOIN {ENTITIES} e ON e.id=v.entity
+         WHERE NOT EXISTS(SELECT 1 FROM memberships m WHERE m.uuid=v.uuid AND m.entity=v.entity)
+           AND NOT EXISTS(SELECT 1 FROM assertions s WHERE s.uuid=v.uuid AND s.entity=v.entity AND s.status='rejected')
+         GROUP BY e.id
+         ORDER BY count DESC,min(v.weak),max(v.score) DESC,name
+         LIMIT 9"
+    );
+    let selected = rows(&tx, &sql, &[])?;
     let result = Json::Array(selected.into_iter().map(|r| display(&tx, r)).collect::<Result<_>>()?);
     tx.commit()?;
     Ok(result)

@@ -1,11 +1,12 @@
 //! 名字的显示投影（docs/TERMS_NAMES_PLAN.md N1）：逐条移植 tests/reference/web/names.py（#9 已删除） 的 `View`（`entity_rows`、`load`、`choose`、
 //! `entity`、`base`、`own_name`）和词表（`PRIORITY`、`SKINS`、`WORK_NAMES`、`readable`、`skin_zh`）。
-//! 输入是名字的兼容表（`entities`、当前 `links`、`names`）和按文字键的显示名 `term_key_names`，输出两张投影表：
+//! 输入是身份（`character_entities::ENTITIES`）、当前链接、名字和按文字键的显示名 `term_key_names`，输出两张投影表：
 //! - `term_name_display(entity, skin_only, …)`：`View.entity(id, skin_only)`；
-//! - `term_name_choice(kind, key, …)`：`View.choose(kind, key)`，键的范围是人物的 tag、作品文字（`entities.work` 与
+//! - `term_name_choice(kind, key, …)`：`View.choose(kind, key)`，键的范围是人物的 tag、作品文字（身份的 `work` 与
 //!   qualifier 链接）、皮肤 variant。
 //!
 //! 结果曾与旧代码全量逐字对照；现由 native/terms/tests/baseline.rs 的新对照基准（#201，含 test_terms_names_projection）重放钉住。
+use crate::character_entities::ENTITIES;
 use crate::character_links::LINKS;
 use crate::{Error, Result};
 use rusqlite::{params, Connection};
@@ -160,7 +161,7 @@ struct Entity {
     keys: BTreeMap<String, String>,
     linked: bool,
     tag: String,
-    /// 在 `entities` 里的 rowid 顺序（人物键下的名字按这个顺序拼接）。u32 落在已有的对齐空隙里，不增大快照。
+    /// 身份的先后 `seq`（原来 `entities` 的 rowid）顺序（人物键下的名字按这个顺序拼接）。u32 落在已有的对齐空隙里，不增大快照。
     seq: u32,
 }
 
@@ -170,11 +171,11 @@ pub struct View {
     merged: HashMap<String, Vec<String>>,
     names: HashMap<(String, String), Vec<NameRow>>,
     own: HashMap<String, Vec<NameRow>>,
-    /// `entities.work`，按 `seq` 排；只有 `load_with_work` 载入，否则为空。
+    /// 身份的 `work`，按 `seq` 排；只有 `load_with_work` 载入，否则为空。
     works: Vec<String>,
 }
 
-/// 一个身份在快照里的样子（`/api/names` 的统计用，免得再读一遍 `entities` 和 `links`）。
+/// 一个身份在快照里的样子（`/api/names` 的统计用，免得再读一遍身份和链接）。
 pub struct Identity<'a> {
     pub id: &'a str,
     pub kind: &'a str,
@@ -222,7 +223,7 @@ impl View {
         View::load_inner(c, false)
     }
 
-    /// 同 `load`，另带上 `entities.work`（`identities` 里的 `work`）。
+    /// 同 `load`，另带上身份的 `work`（`identities` 里的 `work`）。
     pub fn load_with_work(c: &Connection) -> Result<View> {
         View::load_inner(c, true)
     }
@@ -237,12 +238,11 @@ impl View {
         let mut entities: BTreeMap<String, Entity> = BTreeMap::new();
         let mut order: Vec<String> = Vec::new();
         let mut works: Vec<String> = Vec::new();
-        let sql = if with_work {
-            "SELECT id,kind,parent_id,variant,merged_into,coalesce(original,0),work FROM entities ORDER BY rowid"
-        } else {
-            "SELECT id,kind,parent_id,variant,merged_into,coalesce(original,0) FROM entities ORDER BY rowid"
-        };
-        for row in c.prepare(sql)?.query_map([], |r| {
+        let work = if with_work { ",work" } else { "" };
+        let sql = format!(
+            "SELECT id,kind,parent_id,variant,merged_into,coalesce(original,0){work} FROM {ENTITIES} ORDER BY seq"
+        );
+        for row in c.prepare(&sql)?.query_map([], |r| {
             Ok((
                 Entity {
                     id: r.get(0)?,
@@ -538,7 +538,7 @@ impl View {
         }
         for row in c
             .prepare(&format!(
-                "SELECT work FROM entities WHERE work <> ''
+                "SELECT work FROM {ENTITIES} WHERE work <> ''
                  UNION SELECT l.key FROM {LINKS} l WHERE l.core_system = 'qualifier'"
             ))?
             .query_map([], |r| r.get::<_, String>(0))?
@@ -668,15 +668,15 @@ fn write_changed(c: &Connection, view: &View, scope: &Scope) -> Result<(usize, u
 
 /// 名字变化时局部维护投影要读的范围（#103 A3）。`collect` 从本事务记下的身份和键出发，用按索引的定向查询求依赖
 /// 闭包（身份 `ids`、文字键 `keys`），再补上选名要读的身份：父身份、并入者、与它们同 tag 的身份。`load` 只为这些
-/// 身份建快照，`entity` / `choose` 照旧。`entities` 上没有索引的三列（皮肤 `variant`、`merged_into`、作品文字
-/// `work`）各用一条扫描语句，只在闭包里有对应的键或身份时执行（#38 2026-10-12 用户决定第 2 条；variant 同样只
+/// 身份建快照，`entity` / `choose` 照旧。`term_tree` 上没有索引的三列（皮肤 `variant`、`merged_into`、作品文字
+/// `work_text`）各用一条扫描语句，只在闭包里有对应的键或身份时执行（#38 2026-10-12 用户决定第 2 条；variant 同样只
 /// 记录、不加索引，2026-10-13）。
 struct Scope {
     ids: BTreeSet<String>,
     keys: BTreeSet<(String, String)>,
     /// `keys` 里库中出现过的（`choice_keys` 的范围）。
     existing: BTreeSet<(String, String)>,
-    /// 要载入的身份与它们在 `entities` 里的 rowid。
+    /// 要载入的身份与它们的 `seq`。
     read: BTreeMap<String, (i64, Entity)>,
     /// 本事务改过身份或链接。
     structure: bool,
@@ -753,16 +753,14 @@ static LINKS_SQL: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| {
     format!("SELECT l.system, l.key FROM {LINKS} l WHERE l.entity_id = ? AND l.current = 1 ORDER BY l.added_at, l.key")
 });
 
-fn current_work(c: &Connection, id: &str, has_work: bool) -> Result<String> {
-    if !has_work {
-        return Ok(String::new());
-    }
-    Ok(c.prepare_cached("SELECT coalesce(work,'') FROM entities WHERE id=?")?.query_row([id], |r| r.get(0))?)
+fn current_work(c: &Connection, id: &str) -> Result<String> {
+    Ok(c.prepare_cached(&format!("SELECT coalesce(work,'') FROM {ENTITIES} WHERE id=?"))?
+        .query_row([id], |r| r.get(0))?)
 }
 
-/// 事务开始时的身份与它的 `entities.work`（`legacy_names::track` 存下的；没存就是没改过，取现在的）；那时没有这个
+/// 事务开始时的身份与它的 `work`（`legacy_names::track` 存下的；没存就是没改过，取现在的）；那时没有这个
 /// 身份时 None。
-fn old_state(c: &Connection, id: &str, has_work: bool) -> Result<Option<(String, Entity)>> {
+fn old_state(c: &Connection, id: &str) -> Result<Option<(String, Entity)>> {
     use rusqlite::OptionalExtension;
     let captured = c
         .prepare_cached(
@@ -795,7 +793,7 @@ fn old_state(c: &Connection, id: &str, has_work: bool) -> Result<Option<(String,
             // 行没改过：只有链接改过时才会走到这里，链接下面按存下的重新补。
             Some((_, mut e)) => {
                 e.keys.clear();
-                (e, current_work(c, id, has_work)?)
+                (e, current_work(c, id)?)
             }
             None => return Ok(None),
         },
@@ -816,9 +814,9 @@ fn old_state(c: &Connection, id: &str, has_work: bool) -> Result<Option<(String,
 fn fetch(c: &Connection, id: &str) -> Result<Option<(i64, Entity)>> {
     use rusqlite::OptionalExtension;
     let found = c
-        .prepare_cached(
-            "SELECT rowid,id,kind,parent_id,variant,merged_into,coalesce(original,0) FROM entities WHERE id=?",
-        )?
+        .prepare_cached(&format!(
+            "SELECT seq,id,kind,parent_id,variant,merged_into,coalesce(original,0) FROM {ENTITIES} WHERE id=?"
+        ))?
         .query_row([id], |r| {
             Ok((
                 r.get::<_, i64>(0)?,
@@ -869,16 +867,12 @@ impl Scope {
             .prepare("SELECT id FROM names_old_entities UNION SELECT id FROM names_old_links_seen")?
             .query_map([], |r| r.get(0))?
             .collect::<rusqlite::Result<_>>()?;
-        let has_work: bool =
-            c.query_row("SELECT EXISTS(SELECT 1 FROM pragma_table_info('entities') WHERE name='work')", [], |r| {
-                r.get(0)
-            })?;
         for id in &moved {
             let now = match fetch(c, id)? {
-                Some((_, e)) => Some((current_work(c, id, has_work)?, e)),
+                Some((_, e)) => Some((current_work(c, id)?, e)),
                 None => None,
             };
-            for (work, e) in [old_state(c, id, has_work)?, now].into_iter().flatten() {
+            for (work, e) in [old_state(c, id)?, now].into_iter().flatten() {
                 if View::spoken(&e) && e.tag.is_empty() {
                     return Ok(None);
                 }
@@ -903,7 +897,7 @@ impl Scope {
         let mut ids: BTreeSet<String> = BTreeSet::new();
         let mut keys: BTreeSet<(String, String)> = BTreeSet::new();
         let mut existing: BTreeSet<(String, String)> = BTreeSet::new();
-        let mut children = c.prepare_cached("SELECT id FROM entities WHERE parent_id=?")?;
+        let mut children = c.prepare_cached(&format!("SELECT id FROM {ENTITIES} WHERE parent_id=?"))?;
         // 不动点：身份 → 它的人物键（会把显示名并进人物键的身份）、子身份、它并入的身份（有链接时）；键 → tag、
         // variant、qualifier 是这个键的身份。
         while !new_ids.is_empty() || !new_keys.is_empty() {
@@ -954,12 +948,12 @@ impl Scope {
                 keys.insert(key);
             }
             if !skins.is_empty() {
-                // 扫描 `entities`（variant 没有索引）。
+                // 扫描 `term_tree`（variant 没有索引）。
                 let list = json_list(skins.iter().map(String::as_str))?;
                 for row in c
-                    .prepare_cached(
-                        "SELECT id,variant FROM entities WHERE variant IN (SELECT value FROM json_each(?1))",
-                    )?
+                    .prepare_cached(&format!(
+                        "SELECT id,variant FROM {ENTITIES} WHERE variant IN (SELECT value FROM json_each(?1))"
+                    ))?
                     .query_map([&list], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?
                 {
                     let (id, variant) = row?;
@@ -971,12 +965,12 @@ impl Scope {
         }
         let works: Vec<&str> = keys.iter().filter(|(k, _)| k == "work").map(|(_, v)| v.as_str()).collect();
         if !works.is_empty() {
-            // 作品文字的范围与 `choice_keys` 相同：`entities.work`（没有索引，扫描）与任意 qualifier 链接。
+            // 作品文字的范围与 `choice_keys` 相同：身份的 `work`（没有索引，扫描）与任意 qualifier 链接。
             let list = json_list(works.iter().copied())?;
             for row in c
-                .prepare_cached(
-                    "SELECT DISTINCT work FROM entities WHERE work<>'' AND work IN (SELECT value FROM json_each(?1))",
-                )?
+                .prepare_cached(&format!(
+                    "SELECT DISTINCT work FROM {ENTITIES} WHERE work<>'' AND work IN (SELECT value FROM json_each(?1))"
+                ))?
                 .query_map([&list], |r| r.get::<_, String>(0))?
             {
                 existing.insert(("work".into(), row?));
@@ -992,7 +986,7 @@ impl Scope {
         }
         // 闭包占到全库的八分之一以上（例如一次导入很多身份）时，逐个查询不如整表重建。
         if ids.len() > 256 {
-            let total: i64 = c.query_row("SELECT count(*) FROM entities", [], |r| r.get(0))?;
+            let total: i64 = c.query_row("SELECT count(*) FROM term_tree", [], |r| r.get(0))?;
             if ids.len() as i64 * 8 > total {
                 return Ok(None);
             }
@@ -1017,10 +1011,12 @@ impl Scope {
         }
         let mut tags: BTreeSet<String> = BTreeSet::new();
         if !bases.is_empty() {
-            // 扫描 `entities`（merged_into 没有索引）。
+            // 扫描 `term_tree`（merged_into 没有索引）。
             let list = json_list(bases.iter().map(String::as_str))?;
             let members: Vec<String> = c
-                .prepare_cached("SELECT id FROM entities WHERE merged_into IN (SELECT value FROM json_each(?1))")?
+                .prepare_cached(&format!(
+                    "SELECT id FROM {ENTITIES} WHERE merged_into IN (SELECT value FROM json_each(?1))"
+                ))?
                 .query_map([&list], |r| r.get(0))?
                 .collect::<rusqlite::Result<_>>()?;
             for m in members {
@@ -1214,14 +1210,15 @@ pub fn verify_choice(c: &Connection, kind: &str, key: &str, choice: &Choice) -> 
 fn untagged(c: &Connection) -> Result<Vec<String>> {
     let tag_systems = "('danbooru', 'wd_character', 'photos_album', 'ccip')";
     Ok(c.prepare_cached(&format!(
-        "SELECT id FROM entities WHERE kind <> 'work' AND parent_id IS NULL AND id IN (
+        "SELECT id FROM {ENTITIES} WHERE kind <> 'work' AND parent_id IS NULL AND id IN (
            SELECT l.entity_id FROM {LINKS} l WHERE l.current = 1
            EXCEPT
            SELECT l.entity_id FROM {LINKS} l
            WHERE l.core_system IN {tag_systems} AND l.key <> '' AND l.current = 1
            UNION
            SELECT l.entity_id FROM {LINKS} l
-           WHERE l.core_system IN {tag_systems} AND l.key = '' AND l.current = 1)"
+           WHERE l.core_system IN {tag_systems} AND l.key = '' AND l.current = 1)
+         ORDER BY id"
     ))?
     .query_map([], |r| r.get(0))?
     .collect::<rusqlite::Result<_>>()?)
@@ -1250,21 +1247,38 @@ mod tests {
         c.execute_batch(
             "CREATE TABLE meta(key TEXT PRIMARY KEY,value TEXT NOT NULL);
              INSERT INTO meta VALUES ('terms_names','core'),('names_version','0'),('names_projected','0');
-             CREATE TABLE entities(id TEXT PRIMARY KEY,kind TEXT NOT NULL,parent_id TEXT,variant TEXT NOT NULL DEFAULT '',
-              merged_into TEXT,original INTEGER,work TEXT NOT NULL DEFAULT '');
              CREATE TABLE term_links(system TEXT,key TEXT,term_id INTEGER,url TEXT NOT NULL DEFAULT '',
               source TEXT NOT NULL DEFAULT '',current INTEGER NOT NULL DEFAULT 1,added_at TEXT,PRIMARY KEY(system,key));
-             CREATE TABLE terms(id INTEGER PRIMARY KEY,key TEXT NOT NULL UNIQUE);
-             CREATE TABLE term_tree(term_id INTEGER PRIMARY KEY);
-             -- New identities become terms at once, as the commands make them (`legacy_characters::born`).
-             CREATE TRIGGER born AFTER INSERT ON entities BEGIN
-               INSERT INTO terms(key) VALUES (NEW.id);
-               INSERT INTO term_tree SELECT id FROM terms WHERE key=NEW.id;
+             CREATE TABLE terms(id INTEGER PRIMARY KEY,key TEXT NOT NULL UNIQUE,kind TEXT NOT NULL);
+             CREATE TABLE term_tree(term_id INTEGER PRIMARY KEY,parent_id TEXT,merged_into TEXT,work_id TEXT,
+              work_text TEXT NOT NULL DEFAULT '',variant TEXT NOT NULL DEFAULT '',artist TEXT NOT NULL DEFAULT '',
+              label_only INTEGER NOT NULL DEFAULT 0,mascot INTEGER NOT NULL DEFAULT 0,mascot_origin TEXT,
+              original INTEGER NOT NULL DEFAULT 0,seq INTEGER);
+             -- The tests write identities through this view: a term and its row in `term_tree`, as the commands do
+             -- (`character_entities::create`).
+             CREATE VIEW identities(id,kind,parent_id,variant,merged_into,original,work) AS
+              SELECT t.key,t.kind,r.parent_id,r.variant,r.merged_into,r.original,r.work_text
+              FROM term_tree r JOIN terms t ON t.id=r.term_id;
+             CREATE TRIGGER identities_insert INSTEAD OF INSERT ON identities BEGIN
+               INSERT INTO terms(key,kind) VALUES (NEW.id,NEW.kind);
+               INSERT INTO term_tree(term_id,parent_id,variant,merged_into,original,work_text,seq)
+                SELECT id,NEW.parent_id,NEW.variant,NEW.merged_into,NEW.original,NEW.work,
+                 (SELECT coalesce(max(seq),0)+1 FROM term_tree)
+                FROM terms WHERE key=NEW.id;
+             END;
+             CREATE TRIGGER identities_update INSTEAD OF UPDATE ON identities BEGIN
+               UPDATE terms SET kind=NEW.kind WHERE key=OLD.id AND kind IS NOT NEW.kind;
+               UPDATE term_tree SET parent_id=NEW.parent_id,variant=NEW.variant,merged_into=NEW.merged_into,
+                original=NEW.original,work_text=NEW.work
+               WHERE term_id=(SELECT id FROM terms WHERE key=OLD.id);
+             END;
+             CREATE TRIGGER identities_delete INSTEAD OF DELETE ON identities BEGIN
+               DELETE FROM term_tree WHERE term_id=(SELECT id FROM terms WHERE key=OLD.id);
              END;
              CREATE TABLE term_names(term_id INTEGER,lang TEXT,value TEXT,source TEXT,role TEXT,preferred INTEGER NOT NULL DEFAULT 0,
               position INTEGER NOT NULL DEFAULT 0,seq INTEGER,PRIMARY KEY(term_id,role,lang,source,value));
              CREATE TABLE term_key_names(kind TEXT,key TEXT,lang TEXT,source TEXT,value TEXT,PRIMARY KEY(kind,key,lang,source,value));
-             INSERT INTO entities VALUES ('e1','character',NULL,'',NULL,0,'series_w'),('e2','character',NULL,'',NULL,0,''),
+             INSERT INTO identities VALUES ('e1','character',NULL,'',NULL,0,'series_w'),('e2','character',NULL,'',NULL,0,''),
               ('s1','skin','e1','swimsuit_x',NULL,0,''),('w1','work',NULL,'',NULL,0,''),('m1','character',NULL,'','e1',0,'');
              INSERT INTO term_links(system,key,term_id,current,added_at) VALUES ('danbooru','synth_(series_w)',(SELECT id FROM terms WHERE key='e1'),1,'2026-01-01'),('wd_character','synth_(series_w)',(SELECT id FROM terms WHERE key='e2'),1,'2026-01-02'),
               ('danbooru','synth_swimsuit',(SELECT id FROM terms WHERE key='s1'),1,'2026-01-03'),('qualifier','series_w',(SELECT id FROM terms WHERE key='w1'),1,'2026-01-04'),
@@ -1306,7 +1320,7 @@ mod tests {
         let c = library();
         c.execute_batch(TABLES).unwrap();
         c.execute_batch(
-            "INSERT INTO entities VALUES ('s2','skin','e2','swimsuit_x',NULL,0,''),('e3','character',NULL,'',NULL,0,''),
+            "INSERT INTO identities VALUES ('s2','skin','e2','swimsuit_x',NULL,0,''),('e3','character',NULL,'',NULL,0,''),
               ('m2','character',NULL,'','e3',0,''),('e4','character',NULL,'',NULL,0,''),
               ('b1','character',NULL,'',NULL,0,''),('b2','character',NULL,'',NULL,0,''),('w2','work',NULL,'',NULL,0,'series_w'),
               ('s3','skin','e3','',NULL,0,'');
@@ -1349,7 +1363,7 @@ mod tests {
                 "INSERT INTO term_key_names VALUES ('skin','swimsuit_x','ja','wiki','ミズギ')",
                 Some(&["e1", "e2", "m1", "s1", "s2"]),
             ),
-            // Work text: the work with that qualifier; `entities.work` keeps the key in range.
+            // Work text: the work with that qualifier; the identity's `work` keeps the key in range.
             ("DELETE FROM term_key_names WHERE kind='work' AND key='series_w'", Some(&["w1"])),
             ("INSERT INTO term_key_names VALUES ('character','ccip_tag','zh','bangumi','新卡')", Some(&["e4"])),
             (
@@ -1383,24 +1397,24 @@ mod tests {
         let mut c = projected();
         let cases: [&str; 10] = [
             // Old variant key stays (s2), a new one appears.
-            "UPDATE entities SET variant='other_v' WHERE id='s1'",
+            "UPDATE identities SET variant='other_v' WHERE id='s1'",
             // A deleted identity loses its rows, and its tag key leaves the choices.
-            "DELETE FROM term_links WHERE term_id=(SELECT id FROM terms WHERE key='s2'); DELETE FROM entities WHERE id='s2'",
+            "DELETE FROM term_links WHERE term_id=(SELECT id FROM terms WHERE key='s2'); DELETE FROM identities WHERE id='s2'",
             // A link changes hands: e1 becomes unlinked, e3 takes the older tag and 'lonely' leaves the choices.
             "UPDATE term_links SET term_id=(SELECT id FROM terms WHERE key='e3') WHERE system='danbooru' AND key='synth_(series_w)'",
             // Unmerged: the nameless e3 no longer borrows its member's name.
-            "UPDATE entities SET merged_into=NULL WHERE id='m2'",
+            "UPDATE identities SET merged_into=NULL WHERE id='m2'",
             // Merged into the nameless e3, which now borrows the first named member (e4 before m2).
-            "UPDATE entities SET merged_into='e3' WHERE id='e4'",
-            "INSERT INTO entities VALUES ('n1','character',NULL,'',NULL,0,'');
+            "UPDATE identities SET merged_into='e3' WHERE id='e4'",
+            "INSERT INTO identities VALUES ('n1','character',NULL,'',NULL,0,'');
              INSERT INTO term_links(system,key,term_id,current,added_at) VALUES ('danbooru','new_tag',(SELECT id FROM terms WHERE key='n1'),1,'2026-01-20');
              INSERT INTO term_names(term_id,lang,value,source,role,preferred,position,seq) VALUES
               ((SELECT id FROM terms WHERE key='n1'),'zh','新人','index','display',0,0,
                (SELECT coalesce(max(seq),0)+1 FROM term_names))",
             // REPLACE takes m2's link without firing the DELETE trigger.
             "INSERT OR REPLACE INTO term_links(system,key,term_id,current,added_at) VALUES ('danbooru','member_tag',(SELECT id FROM terms WHERE key='e4'),1,'2026-01-14')",
-            "UPDATE entities SET work='series_new' WHERE id='e2'",
-            "UPDATE entities SET kind='work' WHERE id='e2'",
+            "UPDATE identities SET work='series_new' WHERE id='e2'",
+            "UPDATE identities SET kind='work' WHERE id='e2'",
             "UPDATE term_links SET current=0 WHERE term_id=(SELECT id FROM terms WHERE key='e4') AND system='ccip_base'",
         ];
         let before = projection(&c);
@@ -1418,13 +1432,13 @@ mod tests {
         let tx = c.transaction().unwrap();
         crate::legacy_names::track(&tx).unwrap();
         tx.execute_batch(
-            "INSERT INTO entities VALUES ('n2','character',NULL,'',NULL,0,'');
+            "INSERT INTO identities VALUES ('n2','character',NULL,'',NULL,0,'');
              INSERT INTO term_links(system,key,term_id,current,added_at) VALUES ('danbooru','passing_tag',(SELECT id FROM terms WHERE key='n2'),1,'2026-01-21');",
         )
         .unwrap();
         rebuild_changed(&tx).unwrap();
         assert!(projection(&tx).iter().any(|r| r[0] == rusqlite::types::Value::Text("n2".into())));
-        tx.execute_batch("DELETE FROM term_links WHERE term_id=(SELECT id FROM terms WHERE key='n2'); DELETE FROM entities WHERE id='n2';").unwrap();
+        tx.execute_batch("DELETE FROM term_links WHERE term_id=(SELECT id FROM terms WHERE key='n2'); DELETE FROM identities WHERE id='n2';").unwrap();
         rebuild_changed(&tx).unwrap();
         let changed = projection(&tx);
         rebuild(&tx).unwrap();
@@ -1435,7 +1449,8 @@ mod tests {
         let tx = c.transaction().unwrap();
         crate::legacy_names::track(&tx).unwrap();
         for i in 0..300 {
-            tx.execute(&format!("INSERT INTO entities VALUES ('bulk{i}','character',NULL,'',NULL,0,'')"), []).unwrap();
+            tx.execute(&format!("INSERT INTO identities VALUES ('bulk{i}','character',NULL,'',NULL,0,'')"), [])
+                .unwrap();
             tx.execute(&format!("INSERT INTO term_links(system,key,term_id,current,added_at) VALUES ('danbooru','bulk_{i}',(SELECT id FROM terms WHERE key='bulk{i}'),1,'2026-01-22')"), [])
                 .unwrap();
         }
@@ -1465,7 +1480,7 @@ mod tests {
         // e5's first danbooru link has an empty key and hides the second one: e5 has no tag either. The skin s1's own
         // name never joins its tag's character key.
         c.execute_batch(
-            "INSERT INTO entities VALUES ('e5','character',NULL,'',NULL,0,'');
+            "INSERT INTO identities VALUES ('e5','character',NULL,'',NULL,0,'');
              INSERT INTO term_links(system,key,term_id,current,added_at) VALUES ('danbooru','',(SELECT id FROM terms WHERE key='e5'),1,'2026-01-14'),('danbooru','shadowed',(SELECT id FROM terms WHERE key='e5'),1,'2026-01-15');
              INSERT INTO term_key_names VALUES ('character','','zh','wiki','空键'),('work','unlisted','zh','bangumi','未收录'),
               ('character','nobody','ja','index','ダレ'),('character','synth_(series_w)','en','danbooru','Ignored'),

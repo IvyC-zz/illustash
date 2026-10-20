@@ -149,8 +149,15 @@ pub fn signatures(c: &Connection, f: &Matrix) -> Result<BTreeMap<String, String>
             digest.update(f.versions.get(&uuid).map(Vec::as_slice).unwrap_or(b"missing"));
         }
     } else {
-        let sql="SELECT coalesce(x.parent_id,x.id),s.entity,s.uuid,s.status,a.uuid IS NOT NULL FROM assertions s JOIN entities x ON x.id=s.entity LEFT JOIN assets a ON a.uuid=s.uuid ORDER BY 1,2,3";
-        let mut q = c.prepare(sql)?;
+        let sql = format!(
+            "SELECT coalesce(x.parent_id,x.id),s.entity,s.uuid,s.status,a.uuid IS NOT NULL
+             FROM assertions s
+             JOIN {ENTITIES} x ON x.id=s.entity
+             LEFT JOIN assets a ON a.uuid=s.uuid
+             ORDER BY 1,2,3",
+            ENTITIES = crate::character_entities::ENTITIES
+        );
+        let mut q = c.prepare(&sql)?;
         let mut rows = q.query([])?;
         while let Some(r) = rows.next()? {
             let family: String = r.get(0)?;
@@ -257,8 +264,16 @@ pub fn learn(
 ) -> Result<(Value, Option<Value>)> {
     let c = snapshot.read()?;
     c.execute_batch("BEGIN")?;
-    let marks: BTreeSet<_> =
-        snapshot::strings(&c, "SELECT id FROM entities WHERE label_only=1 OR mascot=1", &[])?.into_iter().collect();
+    let marks: BTreeSet<_> = snapshot::strings(
+        &c,
+        &format!(
+            "SELECT id FROM {ENTITIES} WHERE label_only=1 OR mascot=1",
+            ENTITIES = crate::character_entities::ENTITIES
+        ),
+        &[],
+    )?
+    .into_iter()
+    .collect();
     let mut current = signatures(&c, f)?;
     current.retain(|e, _| !marks.contains(e));
     let old_states = snapshot::table(&c, "learn_state")?;

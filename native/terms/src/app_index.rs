@@ -102,9 +102,10 @@ const WATCH_PREF: &str = "index_watch";
 fn work_for_tag(c: &Connection, tag: &str, current: bool) -> Result<Option<String>> {
     let current = if current { " AND l.current = 1" } else { "" };
     let sql = format!(
-        "SELECT l.entity_id FROM {LINKS} l JOIN entities e ON e.id = l.entity_id
+        "SELECT l.entity_id FROM {LINKS} l JOIN {ENTITIES} e ON e.id = l.entity_id
          WHERE l.core_system = 'danbooru' AND l.key = ?{current} AND e.kind = 'work'",
-        LINKS = crate::character_links::LINKS
+        LINKS = crate::character_links::LINKS,
+        ENTITIES = crate::character_entities::ENTITIES
     );
     Ok(c.query_row(&sql, [tag], |r| r.get(0)).optional()?)
 }
@@ -114,8 +115,14 @@ fn legacy_watch(c: &Connection, dir: &Path) -> Result<Value> {
     let mut pending = vec![];
     if w["version"] == 2 {
         for id in w["works"].as_array().into_iter().flatten().filter_map(Value::as_str) {
-            let own: bool =
-                c.query_row("SELECT EXISTS(SELECT 1 FROM entities WHERE id=? AND kind='work')", [id], |r| r.get(0))?;
+            let own: bool = c.query_row(
+                &format!(
+                    "SELECT EXISTS(SELECT 1 FROM {ENTITIES} WHERE id=? AND kind='work')",
+                    ENTITIES = crate::character_entities::ENTITIES
+                ),
+                [id],
+                |r| r.get(0),
+            )?;
             if own && !ids.contains(&json!(id)) {
                 ids.push(json!(id));
             }
@@ -172,7 +179,20 @@ fn set_watch(lib: &Library, dir: &Path, b: &Value) -> Result<()> {
     let tx = c.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
     crate::schema::require_current(&tx)?;
     for w in works {
-        if !tx.query_row(&format!("SELECT EXISTS(SELECT 1 FROM entities e JOIN {LINKS} l ON l.entity_id=e.id WHERE e.id=? AND e.kind='work' AND l.core_system='danbooru' AND l.current=1)", LINKS = crate::character_links::LINKS),[w.as_str().expect("watch list was validated as strings")],|r|r.get::<_,bool>(0))?{return bad("只能关注已确认 Danbooru 链接的作品")}
+        let linked = format!(
+            "SELECT EXISTS(
+               SELECT 1
+               FROM {ENTITIES} e
+               JOIN {LINKS} l ON l.entity_id=e.id
+               WHERE e.id=? AND e.kind='work' AND l.core_system='danbooru' AND l.current=1)",
+            ENTITIES = crate::character_entities::ENTITIES,
+            LINKS = crate::character_links::LINKS
+        );
+        if !tx
+            .query_row(&linked, [w.as_str().expect("watch list was validated as strings")], |r| r.get::<_, bool>(0))?
+        {
+            return bad("只能关注已确认 Danbooru 链接的作品");
+        }
     }
     let mut w = load_watch(&tx, dir)?;
     let mut ids = vec![];
@@ -355,9 +375,29 @@ impl Updater {
                 h.remove("job_id");
             }
             for r in h["characters"].as_array_mut().into_iter().flatten() {
-                let id:Option<String>=c.query_row(&format!("SELECT coalesce(e.parent_id,e.id) FROM {LINKS} l JOIN entities e ON e.id=l.entity_id WHERE l.core_system='ccip' AND l.key=?", LINKS = crate::character_links::LINKS),[r["short_tag"].as_str().unwrap_or("")],|r|r.get(0)).optional()?;
+                let owner = format!(
+                    "SELECT coalesce(e.parent_id,e.id)
+                     FROM {LINKS} l
+                     JOIN {ENTITIES} e ON e.id=l.entity_id
+                     WHERE l.core_system='ccip' AND l.key=?",
+                    LINKS = crate::character_links::LINKS,
+                    ENTITIES = crate::character_entities::ENTITIES
+                );
+                let id: Option<String> =
+                    c.query_row(&owner, [r["short_tag"].as_str().unwrap_or("")], |r| r.get(0)).optional()?;
                 r["entity"] = if let Some(id) = id {
-                    let e=c.query_row("SELECT entity_name(e.id),(SELECT count(*) FROM memberships m WHERE m.entity=e.id AND NOT EXISTS(SELECT 1 FROM duplicates h WHERE h.uuid=m.uuid AND h.hidden=1) AND NOT EXISTS(SELECT 1 FROM excluded x WHERE x.uuid=m.uuid)) FROM entities e WHERE e.id=?",[&id],|r|Ok((r.get::<_,String>(0)?,r.get::<_,i64>(1)?)))?;
+                    let sql = format!(
+                        "SELECT entity_name(e.id),
+                           (SELECT count(*)
+                            FROM memberships m
+                            WHERE m.entity=e.id
+                              AND NOT EXISTS(SELECT 1 FROM duplicates h WHERE h.uuid=m.uuid AND h.hidden=1)
+                              AND NOT EXISTS(SELECT 1 FROM excluded x WHERE x.uuid=m.uuid))
+                         FROM {ENTITIES} e
+                         WHERE e.id=?",
+                        ENTITIES = crate::character_entities::ENTITIES
+                    );
+                    let e = c.query_row(&sql, [&id], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)))?;
                     let mut shown = crate::http_read::display(
                         &c,
                         Json::object([("id", id.clone().into()), ("name", e.0.into()), ("count", e.1.into())]),

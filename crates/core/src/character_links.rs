@@ -24,8 +24,8 @@ pub fn core_system(system: &str) -> &str {
     }
 }
 
-/// 写一个身份的链接之前：这个 (system, key) 已属于别的类型的词条（画师等）就拒绝。原来由命令末尾的镜像检查
-/// （`legacy_characters::mirror_state`），报错相同。
+/// 写一个身份的链接之前：这个 (system, key) 已属于别的类型的词条（画师等）就拒绝。原来由命令末尾镜像旧表时检查，
+/// 报错相同。
 pub fn check_free(c: &Connection, system: &str, key: &str) -> Result<()> {
     let taken: bool = c
         .prepare_cached(

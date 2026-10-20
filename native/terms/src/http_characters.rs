@@ -1,4 +1,5 @@
 //! Character/identity HTTP reads. Query order, stable post-sorts and dict insertion order follow Store.
+use crate::character_entities::ENTITIES;
 use crate::{
     http::LibraryContext,
     http_json::{parse_python, Json},
@@ -105,7 +106,11 @@ fn characters(c: &Connection, q: &HashMap<String, String>, minimum: i64) -> Resu
         Vec::new()
     } else {
         let found: i64 = c.query_row(
-            "SELECT count(*) FROM entities WHERE id=? AND kind='work' AND merged_into IS NULL",
+            &format!(
+                "SELECT count(*)
+                 FROM {ENTITIES}
+                 WHERE id=? AND kind='work' AND merged_into IS NULL"
+            ),
             [work],
             |r| r.get(0),
         )?;
@@ -124,8 +129,32 @@ fn characters(c: &Connection, q: &HashMap<String, String>, minimum: i64) -> Resu
     }
     args.extend(work_ids);
     args.push(minimum.to_string());
-    let sql=format!("SELECT e.id,entity_name(e.id) AS name,e.work,e.kind,e.artist,e.label_only,e.mascot,e.mascot_origin,count(m.uuid) AS count,coalesce(sum(m.status='machine'),0) AS unchecked,min(CASE WHEN ?<>'hide' OR NOT coalesce(m.uuid IN (SELECT uuid FROM asset_rating WHERE rating IN ('questionable', 'explicit')),0) THEN m.uuid END) AS cover,(SELECT max(reviewed_at) FROM reviews r WHERE r.entity=e.id) AS reviewed_at FROM entities e {} LEFT JOIN {} m ON m.entity=e.id AND {}{} WHERE e.parent_id IS NULL AND e.kind<>'work' AND e.merged_into IS NULL{}{}{} GROUP BY e.id HAVING count(m.uuid)>=? ORDER BY {}count DESC,name,e.id",
-        if query.is_empty(){""}else{"JOIN name_matches sm ON sm.entity=e.id"},if ident.is_empty(){"memberships"}else{"(SELECT * FROM memberships WHERE entity=? UNION ALL SELECT * FROM tag_memberships WHERE entity=?)"},visible("m"),rating("m",nsfw)?,if ident.is_empty(){" AND e.mascot=0"}else{""},if ident.is_empty(){""}else{" AND e.id=?"},work_filter,if query.is_empty(){""}else{"sm.rank DESC,"});
+    let sql = format!(
+        "SELECT e.id,entity_name(e.id) AS name,e.work,e.kind,e.artist,e.label_only,e.mascot,e.mascot_origin,
+           count(m.uuid) AS count,coalesce(sum(m.status='machine'),0) AS unchecked,
+           min(CASE WHEN ?<>'hide'
+                      OR NOT coalesce(m.uuid IN (SELECT uuid FROM asset_rating WHERE rating IN ('questionable', 'explicit')),0)
+                    THEN m.uuid END) AS cover,
+           (SELECT max(reviewed_at) FROM reviews r WHERE r.entity=e.id) AS reviewed_at
+         FROM {ENTITIES} e
+         {matched}
+         LEFT JOIN {members} m ON m.entity=e.id AND {visible}{rating}
+         WHERE e.parent_id IS NULL AND e.kind<>'work' AND e.merged_into IS NULL{mascot}{only}{work_filter}
+         GROUP BY e.id
+         HAVING count(m.uuid)>=?
+         ORDER BY {ranking}count DESC,name,e.id",
+        matched = if query.is_empty() { "" } else { "JOIN name_matches sm ON sm.entity=e.id" },
+        members = if ident.is_empty() {
+            "memberships"
+        } else {
+            "(SELECT * FROM memberships WHERE entity=? UNION ALL SELECT * FROM tag_memberships WHERE entity=?)"
+        },
+        visible = visible("m"),
+        rating = rating("m", nsfw)?,
+        mascot = if ident.is_empty() { " AND e.mascot=0" } else { "" },
+        only = if ident.is_empty() { "" } else { " AND e.id=?" },
+        ranking = if query.is_empty() { "" } else { "sm.rank DESC," },
+    );
     // Python int is unbounded; sqlite3 rejects a minimum outside its signed 64-bit binding range.
     // Check at the SQL bind point, after the same work/rating checks as Store.characters.
     let exact_min: String = get("min")
@@ -160,7 +189,16 @@ fn characters(c: &Connection, q: &HashMap<String, String>, minimum: i64) -> Resu
         )
     };
     let mut variants: HashMap<String, Vec<Json>> = HashMap::new();
-    for r in rows(c,&format!("SELECT e.id,e.parent_id,e.variant AS name,{variant_count} AS count FROM entities e WHERE e.parent_id IN (SELECT value FROM json_each(?)) AND e.kind<>'work' AND e.merged_into IS NULL ORDER BY e.variant,e.id"),&[&ids])? {let parent=text(&r,"parent_id");variants.entry(parent).or_default().push(shown(c,r,true,!summary)?);}
+    let skins = format!(
+        "SELECT e.id,e.parent_id,e.variant AS name,{variant_count} AS count
+         FROM {ENTITIES} e
+         WHERE e.parent_id IN (SELECT value FROM json_each(?)) AND e.kind<>'work' AND e.merged_into IS NULL
+         ORDER BY e.variant,e.id"
+    );
+    for r in rows(c, &skins, &[&ids])? {
+        let parent = text(&r, "parent_id");
+        variants.entry(parent).or_default().push(shown(c, r, true, !summary)?);
+    }
     for r in &mut result {
         r.set("variants", Json::Array(variants.remove(&text(r, "id")).unwrap_or_default()));
         if summary {
@@ -247,7 +285,11 @@ fn profile(c: &Connection, e: &str) -> Result<Json> {
     let id = crate::character_commands::resolve(c, e)?;
     let row = rows(
         c,
-        "SELECT id,parent_id,kind,original,label_only,work_id FROM entities WHERE kind<>'work' AND id=?",
+        &format!(
+            "SELECT id,parent_id,kind,original,label_only,work_id
+             FROM {ENTITIES}
+             WHERE kind<>'work' AND id=?"
+        ),
         &[&id],
     )?
     .into_iter()
@@ -405,7 +447,7 @@ fn queue(c: &Connection, limit: i64, offset: i64, nsfw: &str, count_only: bool) 
     let skip: HashSet<String> =
         if let Json::Array(v) = skipped { v.iter().map(|x| x.text().to_owned()).collect() } else { HashSet::new() };
     let marks: HashSet<String> =
-        strings(c, "SELECT id FROM entities WHERE label_only=1", &[])?.iter().map(|e| fam(e)).collect();
+        strings(c, &format!("SELECT id FROM {ENTITIES} WHERE label_only=1"), &[])?.iter().map(|e| fam(e)).collect();
     let mut found: Vec<Json> = Vec::new();
     let mut keys = HashMap::new();
     let mut add = |a: String, b: String, distance: Json, hint: Json, relation: Json| {
@@ -516,15 +558,26 @@ pub fn read(c: &Connection, _context: &LibraryContext, path: &str, q: &HashMap<S
     let get = |k: &str| q.get(k).map(String::as_str).unwrap_or("");
     let int =
         |k: &str, default: &str| python_int(q.get(k).map(String::as_str).unwrap_or(default)).map_err(Error::Invalid);
-    let value=match path {
-        "/api/characters"=>characters(c,q,int("min","0")?)?,
-        "/api/tagged"=>Json::Array(rows(c,&format!("SELECT e.id,entity_name(e.id) AS name,(SELECT count(*) FROM tag_memberships m WHERE m.entity=e.id AND {}{}) AS count FROM entities e WHERE e.mascot=1 AND e.merged_into IS NULL ORDER BY count DESC,name",visible("m"),rating("m",get("nsfw"))?),&[])?),
-        "/api/character/profile"=>profile(c,get("entity"))?,
-        "/api/character/activity"=>activity(c,get("nsfw"))?,
-        "/api/character/stats"=>stats(c,get("id"),get("nsfw"),get("exclude"))?,
-        "/api/identity/count"=>queue(c,20,0,get("nsfw"),true)?,
-        "/api/identity/queue"=>queue(c,int("limit","20")?,int("offset","0")?,get("nsfw"),false)?,
-        _=>return bad("unknown character read"),
+    let value = match path {
+        "/api/characters" => characters(c, q, int("min", "0")?)?,
+        "/api/tagged" => {
+            let sql = format!(
+                "SELECT e.id,entity_name(e.id) AS name,
+                   (SELECT count(*) FROM tag_memberships m WHERE m.entity=e.id AND {visible}{rating}) AS count
+                 FROM {ENTITIES} e
+                 WHERE e.mascot=1 AND e.merged_into IS NULL
+                 ORDER BY count DESC,name,e.seq",
+                visible = visible("m"),
+                rating = rating("m", get("nsfw"))?,
+            );
+            Json::Array(rows(c, &sql, &[])?)
+        }
+        "/api/character/profile" => profile(c, get("entity"))?,
+        "/api/character/activity" => activity(c, get("nsfw"))?,
+        "/api/character/stats" => stats(c, get("id"), get("nsfw"), get("exclude"))?,
+        "/api/identity/count" => queue(c, 20, 0, get("nsfw"), true)?,
+        "/api/identity/queue" => queue(c, int("limit", "20")?, int("offset", "0")?, get("nsfw"), false)?,
+        _ => return bad("unknown character read"),
     };
     Ok((value, 200))
 }

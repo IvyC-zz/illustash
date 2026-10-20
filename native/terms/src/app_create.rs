@@ -561,11 +561,12 @@ mod tests {
         );
         assert_eq!(
             count(&c, "SELECT count(*) FROM sqlite_master WHERE type='trigger' AND name LIKE 'names_version_%'"),
-            12
+            13
         );
         assert_eq!(count(&c, "SELECT count(*) FROM term_links WHERE system='ccip'"), 3);
-        assert_eq!(count(&c, "SELECT count(*) FROM entities WHERE parent_id IS NOT NULL AND variant='swimsuit'"), 1);
-        assert_eq!(count(&c, "SELECT count(*) FROM entities WHERE mascot=1 AND mascot_origin='default'"), 1);
+        assert_eq!(count(&c, "SELECT count(*) FROM term_tree WHERE parent_id IS NOT NULL AND variant='swimsuit'"), 1);
+        assert_eq!(count(&c, "SELECT count(*) FROM term_tree WHERE mascot=1 AND mascot_origin='default'"), 1);
+        assert_eq!(count(&c, "SELECT count(*) FROM sqlite_master WHERE name='entities'"), 0);
         assert!(crate::legacy_characters::verify(&mut c).unwrap().committed);
         assert!(crate::legacy_names::verify(&mut c).unwrap().committed);
         let src = f.source();

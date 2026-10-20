@@ -9,7 +9,7 @@ class AppReadHTTPTest(HTTPHarness):
         for nsfw in ('', 'hide', 'only', 'bad'):
             self.pair('/api/bootstrap?' + urlencode({'nsfw': nsfw}))
         with self.connect() as c:
-            ids = [r[0] for r in c.execute("SELECT id FROM entities WHERE parent_id IS NULL AND kind<>'work' AND merged_into IS NULL LIMIT 2")]
+            ids = [r[0] for r in c.execute("SELECT t.key FROM term_tree r JOIN terms t ON t.id=r.term_id WHERE r.parent_id IS NULL AND t.kind<>'work' AND r.merged_into IS NULL ORDER BY t.key LIMIT 2")]
             c.execute("INSERT OR REPLACE INTO prefs VALUES ('pins',?)", (json.dumps(ids + ids + ['missing']),))
             c.commit()
         samples = [

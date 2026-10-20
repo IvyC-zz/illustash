@@ -1,11 +1,12 @@
 //! S3 角色业务命令（docs/TERMS_CHARACTERS_PLAN.md 第 8 节）：一个命令一个核心事务，逐行照 tests/reference/web/store.py（#9 已删除） 的旧写法。
 //!
-//! 写法：兼容表（`assertions`、`entities`、`links`、`work_review`……）照旧 SQL 写；人工结论同时追加成
-//! `term_verdicts`（挂在这一步上），结构状态按受影响的身份镜像进 `terms` / `term_tree` / `term_links`。
+//! 写法：兼容表（`assertions`……）照旧 SQL 写；人工结论同时追加成 `term_verdicts`（挂在这一步上）。身份、结构、
+//! 链接、名字、作品复核直接写 `terms` / `term_tree` / `term_links` / `term_names`（核心第 8 版，#201）。
 //! 历史文案由核心按旧代码逐字生成（character_labels，名字 N5）；按筛选条件的选择集由调用方算好传进来（算不出时交来
 //! 旧代码的拒绝文案 `asked_refused`，核心在旧代码算选择集的那一步报出，检查的先后不变）；
 //! 选择集的复制品展开、目标身份、原归属这些核心在自己的事务里重新核验。
 //! 新步骤的 `before_json` 是 `[{"terms":{"v":2,"type":…,"before":[旧形状的快照…]}}]`。
+use crate::character_entities::ENTITIES;
 use crate::character_labels::{works, Shown};
 use crate::{character_json, character_projection, undo_labels::UndoLabel, Error, Result};
 use rusqlite::{params, Connection, OptionalExtension};
@@ -63,7 +64,7 @@ pub fn resolve(c: &Connection, ident: &str) -> Result<String> {
     let mut ident = ident.to_owned();
     for _ in 0..16 {
         let row: Option<Option<String>> = c
-            .prepare_cached("SELECT merged_into FROM entities WHERE id=?")?
+            .prepare_cached(&format!("SELECT merged_into FROM {ENTITIES} WHERE id=?"))?
             .query_row([&ident], |r| r.get(0))
             .optional()?;
         match row {
@@ -78,7 +79,7 @@ pub fn resolve(c: &Connection, ident: &str) -> Result<String> {
 pub(crate) fn require_entity(c: &Connection, entity: &Value) -> Result<(String, Option<String>)> {
     let Some(entity) = entity.as_str() else { return invalid("请选择角色") };
     let id = resolve(c, entity)?;
-    c.prepare_cached("SELECT id,parent_id FROM entities WHERE kind<>'work' AND id=?")?
+    c.prepare_cached(&format!("SELECT id,parent_id FROM {ENTITIES} WHERE kind<>'work' AND id=?"))?
         .query_row([&id], |r| Ok((r.get(0)?, r.get(1)?)))
         .optional()?
         .ok_or_else(|| Error::Invalid("角色不存在".into()))
