@@ -11,7 +11,6 @@ from pathlib import Path
 import signal
 import sqlite3
 import sys
-import threading
 import time
 import unittest
 from concurrent.futures import ThreadPoolExecutor
@@ -38,6 +37,7 @@ class NativeResearchTest(unittest.TestCase):
         self.pid = self.root/'worker.pid'
         self.runs = self.root/'worker.runs'
         self.kinds = self.root/'worker.kinds'
+        self.gate = self.root/'worker.release'
         self.mode.write_text('ok')
         self.worker.write_text('#!'+sys.executable+'\n'+f'''import sys,os,json,time,subprocess
 from pathlib import Path
@@ -52,7 +52,11 @@ if mode=='hang':
     subprocess.Popen([sys.executable,'-c','import time;time.sleep(60)'])
     time.sleep(60)
 if mode=='crash': sys.exit(7)
-if mode=='slow': time.sleep(1)
+if mode=='held':
+    # Waits for the test's release, taken once per run: what the test does meanwhile is in flight (#263).
+    while True:
+        try: os.remove({str(self.gate)!r}); break
+        except FileNotFoundError: time.sleep(.02)
 subprocess.run([os.environ['ILLUSTASH_RESEARCH_COMPUTE_BIN'],sys.argv[1],sys.argv[2]],check=True)
 v=json.loads(Path(sys.argv[2]).read_text(encoding='utf-8'))
 if mode=='wrong': v['identity']['generation']+=1
@@ -95,6 +99,11 @@ Path(sys.argv[2]).write_text(json.dumps(v,allow_nan=False))
     def run_kinds(self): return self.kinds.read_text().split() if self.kinds.exists() else []
     def clustered(self):
         with sqlite3.connect(self.lib.db) as c: return {u for (u,) in c.execute('SELECT uuid FROM clusters')}
+    def release(self): self.gate.write_text('')
+    def retry_visibly(self):
+        # A retry shows `waiting` for its backoff only; a wider backoff lets polling see it on a busy machine (#263).
+        self.stop(self.process);self.env.update(ILLUSTASH_RESEARCH_RETRY_MS='3000',ILLUSTASH_RESEARCH_TIMEOUT_MS='60000')
+        self.restart();self.finished()
     def poke_event(self):
         with sqlite3.connect(self.lib.db) as c:c.execute("INSERT INTO backend_effects(kind) VALUES ('imported')")
     def test_real_similar_relate_cluster_and_oc_routes(self):
@@ -142,10 +151,11 @@ Path(sys.argv[2]).write_text(json.dumps(v,allow_nan=False))
         self.assertEqual(self.pending(),0)
 
     def test_inflight_human_change_cancel_switch_exit_no_process_group(self):
-        self.mode.write_text('slow')
+        self.mode.write_text('held')
         self.request('/api/regroup',{})
-        wait_until(lambda:self.pid.exists() and self.state()['status']=='learning',timeout=5)
+        wait_until(lambda:self.pid.exists() and self.state()['status']=='learning',timeout=30)
         self.request('/api/tag',{'ids':['a'],'tag':'合成'})
+        self.mode.write_text('ok');self.release()
         self.finished()
         self.mode.write_text('hang')
         self.pid.unlink(missing_ok=True)
@@ -177,13 +187,15 @@ Path(sys.argv[2]).write_text(json.dumps(v,allow_nan=False))
     def test_inflight_input_change_retries_on_fresh_snapshot(self):
         # #194: a human verdict lands while the worker computes; the stale result is rejected,
         # never published, and the task finishes by itself on a newer snapshot.
+        self.retry_visibly()
         self.assertIn('unmatched6',self.clustered())
         before=self.rows(['clusters','cluster_info','relations','prototypes'])
         runs=len(self.versions())
-        self.mode.write_text('slow')
+        self.mode.write_text('held')
         self.request('/api/regroup',{})
-        wait_until(lambda:len(self.versions())>runs and self.state()['status']=='learning',timeout=5)
+        wait_until(lambda:len(self.versions())>runs and self.state()['status']=='learning',timeout=30)
         self.assertEqual(self.request('/api/change',{'ids':['unmatched6'],'action':'confirmed','entity':self.alice})['status'],200)
+        self.mode.write_text('ok');self.release()
         seen=[]
         def settled():
             s=self.state()
@@ -208,12 +220,13 @@ Path(sys.argv[2]).write_text(json.dumps(v,allow_nan=False))
             self.assertEqual(c.execute("SELECT count(*) FROM research_runs WHERE status='pending'").fetchone()[0],0)
 
     def inflight(self, start, write):
-        """Start a run with the slow worker, commit `write` while it computes; return what was seen."""
+        """Start a run with the held worker, commit `write` before releasing it; return what was seen."""
         runs=len(self.versions())
-        self.mode.write_text('slow')
+        self.mode.write_text('held')
         result=start()
-        wait_until(lambda:len(self.versions())>runs,timeout=5)
+        wait_until(lambda:len(self.versions())>runs,timeout=30)
         with sqlite3.connect(self.lib.db) as c: write(c)
+        self.mode.write_text('ok');self.release()
         seen=[]
         def settled():
             seen.append(self.state()['status'])
@@ -269,6 +282,7 @@ Path(sys.argv[2]).write_text(json.dumps(v,allow_nan=False))
         # The verdict queues learning (an `events` run) once similar ends; under load it can start before the
         # count is read (#132). Only a second similar run would be a retry.
         self.assertEqual(self.run_kinds()[before:].count('similar'),1,(seen,self.run_kinds()[before:]))
+        self.retry_visibly()
         _,seen,runs=self.inflight(lambda:self.request('/api/similar',{}),lambda c:c.execute("INSERT INTO excluded VALUES ('b','synthetic','test')"))
         self.assertEqual(self.state()['status'],'idle',self.state())
         self.assertIn('waiting',seen)
@@ -291,19 +305,14 @@ Path(sys.argv[2]).write_text(json.dumps(v,allow_nan=False))
         self.stop(self.process);self.env['ILLUSTASH_RESEARCH_TIMEOUT_MS']='60000';self.restart();self.finished()
         before=self.rows(['clusters','cluster_info','relations','prototypes'])
         runs=len(self.versions())
-        self.mode.write_text('slow')
+        self.mode.write_text('held')
         self.request('/api/regroup',{})
-        wait_until(lambda:len(self.versions())>runs,timeout=5)
-        stop=threading.Event()
-        def write():
-            i=0
-            while not stop.is_set():
-                i+=1;self.request('/api/tag',{'ids':['a'],'tag':f'合成持续{i}'});time.sleep(0.15)
-        writer=threading.Thread(target=write);writer.start()
-        try:
-            wait_until(lambda:self.state()['status']=='error',timeout=40)
-        finally:
-            stop.set();writer.join()
+        # Every attempt sees a write that lands while it is held: the first run and all five retries.
+        for i in range(1,7):
+            wait_until(lambda:len(self.versions())-runs>=i,timeout=30)
+            self.assertEqual(self.request('/api/tag',{'ids':['a'],'tag':f'合成持续{i}'})['status'],200)
+            self.release()
+        wait_until(lambda:self.state()['status']=='error',timeout=30)
         state=self.state()
         self.assertIn('自动重试 5 次',state['message'])
         self.assertEqual(len(self.versions())-runs,6)
@@ -323,18 +332,21 @@ Path(sys.argv[2]).write_text(json.dumps(v,allow_nan=False))
         self.assertEqual(self.pending(),0)
 
     def test_ack_failure_replay_is_atomic_and_restart_recovers(self):
+        tables=['relations','prototypes','proto_claims','assertions','actions']
+        before=self.rows(tables)
         with sqlite3.connect(self.lib.db) as c:
             c.execute("CREATE TRIGGER fail_ack BEFORE UPDATE ON backend_effects WHEN NEW.status='done' BEGIN SELECT RAISE(ABORT,'synthetic ack'); END")
         with sqlite3.connect(self.lib.db) as c:c.execute("INSERT INTO backend_effects(kind) VALUES ('index_changed')")
-        self.finished() # scheduler hasn't started yet
-        wait_until(lambda:self.state()['status']=='error',timeout=15)
+        # Recovery may start the run before any request here (#263): judge the outcome, not whether it started.
+        wait_until(lambda:self.state()['status']=='error',timeout=30)
+        self.assertIn('synthetic ack',self.state()['message'])
         self.assertGreater(self.pending(),0)
-        before=self.rows(['relations','prototypes','proto_claims','assertions','actions'])
+        # The rejected acknowledgement rolled the whole publication back.
+        self.assertEqual(before,self.rows(tables))
         with sqlite3.connect(self.lib.db) as c:c.execute('DROP TRIGGER fail_ack')
         self.stop(self.process);self.restart();self.finished()
         self.assertEqual(self.pending(),0)
-        after=self.rows(['relations','prototypes','proto_claims','assertions','actions'])
-        self.assertEqual(before,after)
+        self.assertEqual(before,self.rows(tables))
 
     def test_recognition_dispatch_persists_intent_and_duplicate_does_not_repeat(self):
         import hashlib
