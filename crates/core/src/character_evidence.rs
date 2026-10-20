@@ -1,7 +1,7 @@
 //! 角色的机器候选写成证据批次（方案第 7 节）。一次成功运行 = 每个可替换来源一个批次：覆盖范围内每张图、这个来源
 //! 当前有效的证据就是本批次的行，覆盖到但没有行 = 成功的空结果。失败的运行整事务回滚，旧的有效集不动。
 //! 版本按行取内容摘要（沿用画师的 `v4/<摘要>`）：同样的结果复用原证据行，不同的另起一行。
-use crate::legacy_artists::LIBRARY;
+use crate::store::LIBRARY;
 use crate::store::{add_evidence, Claim, NewEvidence};
 use crate::strict_json::{canonical, sha256_hex};
 use crate::{Error, Result};

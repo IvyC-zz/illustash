@@ -89,6 +89,14 @@ fn exists(c: &Connection, name: &str) -> bool {
     c.query_row("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name = ?1)", [name], |r| r.get(0)).unwrap()
 }
 
+/// The first two characters, as `x` and `y` (rows of `terms`), in a version 7 library.
+const PAIR: &str = "(SELECT t.id, t.key FROM terms t JOIN entities e ON e.id = t.key WHERE e.kind = 'character'
+                     ORDER BY e.rowid LIMIT 1) x,
+                    (SELECT t.id, t.key FROM terms t JOIN entities e ON e.id = t.key WHERE e.kind = 'character'
+                     ORDER BY e.rowid LIMIT 1 OFFSET 1) y";
+
+const RELATION_TABLES: [(&str, &str, &str); 4] = illustash_terms::character_relations::TABLES;
+
 fn names_version(c: &Connection) -> i64 {
     c.query_row("SELECT CAST(value AS INTEGER) FROM meta WHERE key = 'names_version'", [], |r| r.get(0)).unwrap()
 }
@@ -121,6 +129,28 @@ fn a_consistent_library_upgrades_retires_the_key_tables_and_fills_in_counted_ste
          INSERT INTO identity_baseline(rowid, id, parent_id, variant, kind, merged_into)
           SELECT seq, id, parent_id, variant, kind, merged_into FROM term_identity_baseline WHERE id = 'synthetic_baseline'",
     );
+    // An accepted duplicate relation with its evidence and decision, in the core and as the core's commands mirrored
+    // it into the four legacy relation tables (the identities: the first two characters).
+    write(
+        &Connection::open(&lib.db).unwrap(),
+        &format!(
+            "INSERT INTO term_relations(a, b, kind) SELECT x.id, y.id, 'same_as' FROM {PAIR};
+             INSERT INTO term_legacy_ids VALUES ('relation', 9001, (SELECT max(id) FROM term_relations));
+             INSERT INTO term_evidence(relation_id, source, method, version, data, fingerprint)
+              VALUES ((SELECT max(id) FROM term_relations), 'manual', 'identity_evidence', 'synthetic',
+               '{{\"legacy_fingerprint\":\"synthetic\",\"payload\":\"{{}}\",\"created_at\":\"2026-01-01 00:00:00\"}}',
+               zeroblob(16));
+             INSERT INTO term_batches(kind, anchor, label) VALUES ('migration', 0, '合成理由');
+             INSERT INTO term_verdicts(batch_id, anchor, relation_id, verdict, origin, reason, reviewed, via, created_at)
+              VALUES ((SELECT max(id) FROM term_batches), 0, (SELECT max(id) FROM term_relations), 'yes', 'legacy',
+               '合成理由', json_array((SELECT max(id) FROM term_evidence)), 'migration', '2026-01-02 00:00:00');
+             INSERT INTO term_legacy_ids VALUES ('decision', 9001, (SELECT max(id) FROM term_verdicts));
+             INSERT INTO identity_relations SELECT 9001, x.key, y.key, 'duplicate_of', 'accepted' FROM {PAIR};
+             INSERT INTO identity_evidence VALUES (9001, 'synthetic', 'manual', '{{}}', '2026-01-01 00:00:00');
+             INSERT INTO identity_decisions VALUES (9001, 9001, 'proposed', 'accepted', '合成理由', '2026-01-02 00:00:00');
+             INSERT INTO identity_decision_evidence VALUES (9001, 'synthetic');"
+        ),
+    );
     let aliases = "SELECT kind, key, value, position FROM {} ORDER BY kind, key, value";
     let display = "SELECT kind, key, lang, source, value FROM {} ORDER BY kind, key, lang, source, value";
     let before = Connection::open(&lib.db).unwrap();
@@ -141,7 +171,11 @@ fn a_consistent_library_upgrades_retires_the_key_tables_and_fills_in_counted_ste
         "id, kind, work, variant, parent_id, merged_into, artist, label_only, mascot, mascot_origin, work_id, original";
     let old_identities = rows(&before, &format!("SELECT rowid, {identity} FROM entities ORDER BY rowid"));
     assert!(old_identities.len() > 1);
-    let old_relations = rows(&before, "SELECT * FROM identity_relations ORDER BY id");
+    let old_relations: Vec<Vec<String>> = RELATION_TABLES
+        .iter()
+        .map(|(table, columns, _)| rows(&before, &format!("SELECT {columns} FROM {table} ORDER BY 1, 2")))
+        .collect();
+    assert!(old_relations.iter().all(|r| !r.is_empty()));
     let old_views: Vec<String> =
         rows(&before, "SELECT name FROM sqlite_master WHERE type = 'view' AND sql LIKE '%entities%' ORDER BY name");
     assert!(old_views.len() >= 5, "{old_views:?}");
@@ -187,7 +221,7 @@ fn a_consistent_library_upgrades_retires_the_key_tables_and_fills_in_counted_ste
         .unwrap();
     assert_eq!(attrs, 0);
     assert!(!exists(&c, "entities"));
-    // The views read the core tables, the relations keep their rows and now refer to the terms.
+    // The views read the core tables.
     let views: Vec<String> = rows(&c, "SELECT name FROM sqlite_master WHERE type = 'view' ORDER BY name");
     for view in &old_views {
         assert!(views.contains(view), "{view} is kept");
@@ -197,13 +231,12 @@ fn a_consistent_library_upgrades_retires_the_key_tables_and_fills_in_counted_ste
     for view in ["family_confirmed", "membership_rules", "variant_memberships", "ambiguous_claims", "identity_nodes"] {
         c.prepare(&format!("SELECT * FROM {view}")).unwrap().query([]).unwrap().next().unwrap();
     }
-    assert_eq!(rows(&c, "SELECT * FROM identity_relations ORDER BY id"), old_relations);
-    let relations: String = c
-        .query_row("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'identity_relations'", [], |r| {
-            r.get(0)
-        })
-        .unwrap();
-    assert!(relations.contains("REFERENCES terms(key)"), "{relations}");
+    // The relations, their evidence and decisions are the core's: the legacy tables are gone, read in their shape the
+    // core gives the same rows.
+    for ((table, columns, fragment), old) in RELATION_TABLES.iter().zip(&old_relations) {
+        assert!(!exists(&c, table), "{table} is dropped");
+        assert_eq!(&rows(&c, &format!("SELECT {columns} FROM {fragment} ORDER BY 1, 2")), old, "{table}");
+    }
     let broken: i64 = c.query_row("SELECT count(*) FROM pragma_foreign_key_check", [], |r| r.get(0)).unwrap();
     assert_eq!(broken, 0);
     // The names version now counts writes to the core's display names, as it counted the legacy table's.
@@ -274,13 +307,18 @@ fn legacy_tables_that_disagree_with_the_core_refuse_the_upgrade_and_change_nothi
             "旧链接表与词条核心不一致",
         ),
         (
+            "disagree-relations",
+            "INSERT INTO identity_relations SELECT 9002, x.key, y.key, 'different_from', 'proposed' FROM {PAIR}",
+            "旧身份关系表与词条核心不一致",
+        ),
+        (
             "disagree-review",
             "INSERT INTO work_review SELECT id, 'confirmed', '只在旧表里', 0 FROM entities ORDER BY rowid LIMIT 1",
             "旧作品复核表与词条核心不一致",
         ),
     ] {
         let lib = library(name);
-        write(&Connection::open(&lib.db).unwrap(), sql);
+        write(&Connection::open(&lib.db).unwrap(), &sql.replace("{PAIR}", PAIR));
         let before = exact(&lib.db);
         let refused = upgrade(&lib.db).unwrap_err();
         assert!(refused.contains(refusal), "{name}: {refused}");

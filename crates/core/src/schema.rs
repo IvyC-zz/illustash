@@ -230,19 +230,21 @@ fn v7(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
-/// 第 8 版（#201）：旧兼容表退役的第一步。
-/// - 已有核心表的库（升级前版本 ≥ 1）里有旧表（`entities`）时，四个领域必须都已切到核心，旧表与 `term_*` 必须逐表
-///   一致（角色、名字两套核对；名字在退役时核对，见下），否则拒绝升级、整体回滚：没切换完的
-///   旧图库先用 `pre-v8` 版本升级。还没有核心表的库
-///   （新建的库，以及应用层已经拒绝打开的更早的旧图库）不在这里拦。
+/// 第 8 版（#201）：旧兼容表退役。
+/// - 已有核心表的库（升级前版本 ≥ 1）里有旧表（`entities`）时，四个领域必须都已切到核心，否则拒绝升级、整体回滚：
+///   没切换完的旧图库先用 `pre-v8` 版本升级。还没有核心表的库（新建的库，以及应用层已经拒绝打开的更早的旧图库）不在
+///   这里拦。各张旧表在退役时与核心逐行核对（见下）。`assertions`、`candidates` 是核心维护的派生表，不在这里比。
 /// - 链接、作品复核、身份基线：`term_links`、`term_tree` 的复核三列、`term_identity_baseline` 成为唯一权威，旧表
 ///   `links`、`work_review`、`identity_baseline` 逐行核对后删除（`legacy_characters::retire_*`，不一致就拒绝升级）。
 /// - 别名、显示名、名字：`term_key_aliases`、`term_key_names`、`term_names` 成为唯一权威，旧表 `name_aliases`、
 ///   `display_names`、`names` 照旧表同步一次、逐行核对后删除（`legacy_names::retire_*`）；`term_names` 加名字的先后
 ///   `seq`，从 `names` 的 rowid 填入。
 /// - 身份：`terms`、`term_tree` 成为唯一权威。`term_tree` 加属性列（从 `terms.attrs` 提升）和身份的先后 `seq`（从
-///   `entities` 的 rowid 填入）；旧表 `entities` 逐行核对后删除，引用它的视图按核心表重写，`identity_relations` 的外键
-///   改为 `REFERENCES terms(key)`（`legacy_characters::retire_entities`）。
+///   `entities` 的 rowid 填入）；旧表 `entities` 逐行核对后删除，引用它的视图按核心表重写
+///   （`legacy_characters::retire_entities`）。
+/// - 身份关系：`term_relations`、关系证据、关系裁决和 `term_legacy_ids` 成为唯一权威，旧表 `identity_relations`、
+///   `identity_evidence`、`identity_decisions`、`identity_decision_evidence` 逐表核对后删除
+///   （`legacy_characters::retire_relations`），在身份之前。
 /// - 名字版本触发器随旧表删除，改装到 `term_tree`、`terms`（类型）、`term_links`、`term_names`、`term_key_names` 上。
 /// - `actions` 加 `label_kind`、`label_count`：按张数写提示的几种步骤的种类和张数（`undo_labels`）。之前的步骤按
 ///   已存的提示回填一次，撤销载荷 `before_json` 不动。
@@ -266,15 +268,7 @@ fn v8(conn: &Connection) -> Result<()> {
         let switched = flags.iter().all(|v| v.as_deref() == Some("core"));
         let untouched = flags.iter().all(Option::is_none)
             && !conn.query_row("SELECT EXISTS(SELECT 1 FROM entities)", [], |r| r.get::<_, bool>(0))?;
-        if switched {
-            let characters = crate::legacy_characters::verify_in(conn)?;
-            if !characters.clean() {
-                return Err(Error::Schema(format!(
-                    "旧兼容表与词条核心不一致，没有升级：{report}",
-                    report = characters.to_json()
-                )));
-            }
-        } else if !untouched {
+        if !switched && !untouched {
             return Err(Error::Schema(
                 "这个图库还没有完全切换到词条核心，新版本不再直接升级它：请先用 pre-v8 版本打开并升级，再用新版本打开"
                     .into(),
@@ -286,6 +280,7 @@ fn v8(conn: &Connection) -> Result<()> {
     crate::legacy_characters::retire_links(conn)?;
     crate::legacy_characters::retire_work_review(conn)?;
     crate::legacy_characters::retire_identity_baseline(conn)?;
+    crate::legacy_characters::retire_relations(conn)?;
     crate::legacy_names::retire_aliases(conn)?;
     crate::legacy_names::retire_display_names(conn)?;
     let names = crate::legacy_names::retire_names(conn)?;
@@ -320,7 +315,14 @@ fn v8(conn: &Connection) -> Result<()> {
 
 /// 迁移与首次角色切换共用；调用方持有写事务，失败时表、索引、触发器整体回滚。
 pub(crate) fn compact_characters(conn: &Connection) -> Result<()> {
-    crate::legacy_characters::clear_shadow(conn)?;
+    // 早期收编核对留在库里的持久影子表（`shadow_*`）：没有读者，不把校验副本永久留在图库里。
+    let shadows: Vec<String> = conn
+        .prepare("SELECT name FROM main.sqlite_master WHERE type='table' AND name GLOB 'shadow_*'")?
+        .query_map([], |r| r.get(0))?
+        .collect::<rusqlite::Result<_>>()?;
+    for table in shadows {
+        conn.execute_batch(&format!("DROP TABLE \"{table}\""))?;
+    }
     let legacy: bool = conn.pragma_query_value(None, "legacy_alter_table", |r| r.get(0))?;
     conn.pragma_update(None, "legacy_alter_table", true)?;
     let result = (|| -> Result<()> {
@@ -405,21 +407,13 @@ fn vacuum_preserves_rowids(conn: &Connection) -> rusqlite::Result<bool> {
     Ok(true)
 }
 
-/// Upgrade and cutover rules require a backup capability; platform/default wiring stays in the API facade.
+/// The upgrade requires a backup capability; platform/default wiring stays in the API facade.
 pub fn backup_before_upgrade(
     conn: &Connection,
     before: i64,
     backup: &crate::backup::RequiredBackup,
 ) -> Result<Option<std::path::PathBuf>> {
     crate::backup::required(conn, &format!("v{before}-before-v{SCHEMA_VERSION}"), backup)
-}
-
-pub(crate) fn backup_before_cutover(
-    conn: &Connection,
-    domain: &str,
-    backup: &crate::backup::RequiredBackup,
-) -> Result<()> {
-    crate::backup::required(conn, &format!("before-cutover-{domain}"), backup).map(|_| ())
 }
 
 /// 核心写事务持有的「钥匙」：兼容表和私有表的写保护触发器在 `meta` 里看不到它时拒绝写入。
@@ -1704,7 +1698,7 @@ mod tests {
 mod required_backup_tests {
     use super::*;
     #[test]
-    fn direct_upgrade_and_cutover_refuse_backup_failure_without_changing_file_database() {
+    fn direct_upgrade_refuses_backup_failure_without_changing_file_database() {
         let root = std::env::temp_dir().join(format!("illustash-backup-boundary-{}", crate::store::new_key().unwrap()));
         std::fs::create_dir(&root).unwrap();
         let mut conn = crate::sqlite::open(root.join("library.sqlite")).unwrap();
@@ -1712,28 +1706,15 @@ mod required_backup_tests {
         std::fs::write(root.join("library-backups"), "synthetic blocker").unwrap();
         assert!(migrate(&mut conn).is_err());
         assert_eq!(version(&conn).unwrap(), 6);
-        // Same mandatory boundary for direct library API, without HTTP or CLI orchestration.
-        assert!(crate::legacy_labels::cutover(&mut conn).is_err());
-        assert_eq!(version(&conn).unwrap(), 6);
         std::fs::remove_file(root.join("library-backups")).unwrap();
         migrate(&mut conn).unwrap();
-        let held = root.join("retained-backups");
-        std::fs::rename(root.join("library-backups"), &held).unwrap();
-        std::fs::write(root.join("library-backups"), "synthetic blocker").unwrap();
-        let before: i64 = conn.query_row("SELECT count(*) FROM sqlite_master", [], |r| r.get(0)).unwrap();
-        assert!(crate::legacy_labels::cutover(&mut conn).is_err());
-        assert_eq!(version(&conn).unwrap(), SCHEMA_VERSION);
-        assert_eq!(conn.query_row("SELECT count(*) FROM sqlite_master", [], |r| r.get::<_, i64>(0)).unwrap(), before);
-        assert!(!crate::store::labels_in_core(&conn).unwrap());
-        std::fs::remove_file(root.join("library-backups")).unwrap();
-        std::fs::rename(&held, root.join("library-backups")).unwrap();
         std::fs::write(root.join("library-backups").join("sentinel"), "owned elsewhere").unwrap();
         conn.execute_batch("PRAGMA journal_mode=WAL; CREATE TABLE synthetic_rowids(value TEXT); INSERT INTO synthetic_rowids(rowid,value) VALUES (27,'committed-wal');").unwrap();
-        crate::backup::required(&conn, "before-cutover-synthetic", &crate::platform_backup::capability()).unwrap();
+        crate::backup::required(&conn, "synthetic", &crate::platform_backup::capability()).unwrap();
         let backup = std::fs::read_dir(root.join("library-backups"))
             .unwrap()
             .map(|p| p.unwrap().path())
-            .find(|p| p.file_name().unwrap().to_string_lossy().starts_with("terms-before-cutover-synthetic-"))
+            .find(|p| p.file_name().unwrap().to_string_lossy().starts_with("terms-synthetic-"))
             .unwrap();
         let restored = crate::sqlite::open_with_flags(backup, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY).unwrap();
         assert_eq!(

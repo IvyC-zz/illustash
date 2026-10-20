@@ -44,6 +44,14 @@ impl Json {
             None
         }
     }
+    /// A field the query or the code building this object always provides; a missing one is a bug.
+    #[track_caller]
+    pub(crate) fn field(&self, key: &str) -> &Json {
+        match self.get(key) {
+            Some(v) => v,
+            None => panic!("HTTP object has no field {key}"),
+        }
+    }
     pub fn text(&self) -> &str {
         if let Self::Scalar(Value::String(v)) = self {
             v
@@ -204,253 +212,6 @@ pub(crate) fn parse_python_refusal(input: &str) -> std::result::Result<Json, (Re
     parse(input, false)
 }
 fn parse(input: &str, request_errors: bool) -> std::result::Result<Json, (Refusal, crate::Error)> {
-    struct Parser<'a> {
-        s: &'a str,
-        at: usize,
-        request_errors: bool,
-        refusal: Refusal,
-    }
-    impl Parser<'_> {
-        fn ws(&mut self) {
-            while self.s.as_bytes().get(self.at).is_some_and(|b| b" \t\r\n".contains(b)) {
-                self.at += 1;
-            }
-        }
-        fn take(&mut self, b: u8) -> bool {
-            self.ws();
-            if self.s.as_bytes().get(self.at) == Some(&b) {
-                self.at += 1;
-                true
-            } else {
-                false
-            }
-        }
-        fn bad<T>(&self) -> crate::Result<T> {
-            self.fail("Expecting value", self.at)
-        }
-        fn fail<T>(&self, message: &str, at: usize) -> crate::Result<T> {
-            if !self.request_errors {
-                return Err(crate::Error::Invalid("无效 JSON 证据".into()));
-            }
-            let before = &self.s[..at];
-            let line = before.bytes().filter(|b| *b == b'\n').count() + 1;
-            let column = before.rsplit('\n').next().unwrap_or("").chars().count() + 1;
-            Err(crate::Error::Invalid(format!(
-                "{message}: line {line} column {column} (char {})",
-                before.chars().count()
-            )))
-        }
-        // CPython's scanner consumes a valid numeric prefix, leaving punctuation errors to the container.
-        fn request_number_end(&self) -> Option<usize> {
-            let bytes = self.s.as_bytes();
-            let mut at = self.at + usize::from(bytes.get(self.at) == Some(&b'-'));
-            match bytes.get(at) {
-                Some(b'0') => at += 1,
-                Some(b'1'..=b'9') => {
-                    while bytes.get(at).is_some_and(u8::is_ascii_digit) {
-                        at += 1;
-                    }
-                }
-                _ => return None,
-            }
-            if bytes.get(at) == Some(&b'.') && bytes.get(at + 1).is_some_and(u8::is_ascii_digit) {
-                at += 2;
-                while bytes.get(at).is_some_and(u8::is_ascii_digit) {
-                    at += 1;
-                }
-            }
-            if bytes.get(at).is_some_and(|b| b"eE".contains(b)) {
-                let mut end = at + 1;
-                if bytes.get(end).is_some_and(|b| b"+-".contains(b)) {
-                    end += 1;
-                }
-                if bytes.get(end).is_some_and(u8::is_ascii_digit) {
-                    while bytes.get(end).is_some_and(u8::is_ascii_digit) {
-                        end += 1;
-                    }
-                    at = end;
-                }
-            }
-            Some(at)
-        }
-        fn string(&mut self) -> crate::Result<String> {
-            self.ws();
-            let start = self.at;
-            if !self.take(b'"') {
-                return self.fail("Expecting property name enclosed in double quotes", self.at);
-            }
-            let mut escaped = false;
-            while let Some(b) = self.s.as_bytes().get(self.at) {
-                self.at += 1;
-                if self.request_errors {
-                    if !escaped && *b < 32 {
-                        return self.fail("Invalid control character at", self.at - 1);
-                    }
-                    if escaped && *b == b'u' {
-                        if !self
-                            .s
-                            .as_bytes()
-                            .get(self.at..self.at + 4)
-                            .is_some_and(|v| v.iter().all(u8::is_ascii_hexdigit))
-                        {
-                            return self.fail("Invalid \\uXXXX escape", self.at - 1);
-                        }
-                        self.at += 4;
-                        escaped = false;
-                        continue;
-                    }
-                    if escaped && !b"\"\\/bfnrt".contains(b) {
-                        return self.fail("Invalid \\escape", self.at - 2);
-                    }
-                }
-                if !escaped && *b == b'"' {
-                    return serde_json::from_str(&self.s[start..self.at]).map_err(|e| {
-                        let e = e.to_string();
-                        // serde_json has no public error codes: its own (English) message names a lone surrogate.
-                        if self.request_errors || e.starts_with("lone leading surrogate") {
-                            self.refusal = Refusal::LoneSurrogate;
-                        }
-                        crate::Error::Invalid(if self.request_errors {
-                            "请求 JSON 包含 Rust 字符串无法表示的孤立 surrogate".into()
-                        } else {
-                            e
-                        })
-                    });
-                }
-                escaped = !escaped && *b == b'\\';
-            }
-            self.fail("Unterminated string starting at", start)
-        }
-        fn value(&mut self, depth: usize) -> crate::Result<Json> {
-            if depth > 1000 {
-                self.refusal = Refusal::TooDeep;
-                return Err(crate::Error::Invalid("证据 JSON 递归过深".into()));
-            }
-            self.ws();
-            let start = self.at;
-            match self.s.as_bytes().get(self.at) {
-                Some(b'"') => return self.string().map(Into::into),
-                Some(b'{') => {
-                    self.at += 1;
-                    let mut out = Json::Object(Vec::new());
-                    if self.take(b'}') {
-                        return Ok(out);
-                    }
-                    loop {
-                        let key = self.string()?;
-                        if !self.take(b':') {
-                            return self.fail("Expecting ':' delimiter", self.at);
-                        }
-                        out.set(key, self.value(depth + 1)?);
-                        if self.take(b'}') {
-                            return Ok(out);
-                        }
-                        if !self.take(b',') {
-                            return self.fail("Expecting ',' delimiter", self.at);
-                        }
-                    }
-                }
-                Some(b'[') => {
-                    self.at += 1;
-                    let mut out = Vec::new();
-                    if self.take(b']') {
-                        return Ok(Json::Array(out));
-                    }
-                    loop {
-                        out.push(self.value(depth + 1)?);
-                        if self.take(b']') {
-                            return Ok(Json::Array(out));
-                        }
-                        if !self.take(b',') {
-                            return self.fail("Expecting ',' delimiter", self.at);
-                        }
-                    }
-                }
-                _ => {}
-            }
-            if self.request_errors {
-                if let Some(word) = ["NaN", "Infinity", "-Infinity", "true", "false", "null"]
-                    .into_iter()
-                    .find(|w| self.s[self.at..].starts_with(w))
-                {
-                    self.at += word.len();
-                } else if let Some(end) = self.request_number_end() {
-                    self.at = end;
-                } else {
-                    return self.bad();
-                }
-            } else {
-                while self.s.as_bytes().get(self.at).is_some_and(|b| !b" \t\r\n,]}".contains(b)) {
-                    self.at += 1;
-                }
-            }
-            let word = &self.s[start..self.at];
-            match word {
-                "NaN" => Ok(Json::Float(f64::NAN)),
-                "Infinity" => Ok(Json::Float(f64::INFINITY)),
-                "-Infinity" => Ok(Json::Float(f64::NEG_INFINITY)),
-                "true" => Ok(true.into()),
-                "false" => Ok(false.into()),
-                "null" => Ok(None::<String>.into()),
-                _ => {
-                    // Preserve Python JSON number grammar without f64 coercion of large integers.
-                    let bytes = word.as_bytes();
-                    let mut at = usize::from(bytes.first() == Some(&b'-'));
-                    if bytes.get(at) == Some(&b'0') {
-                        at += 1;
-                    } else {
-                        let begin = at;
-                        while bytes.get(at).is_some_and(u8::is_ascii_digit) {
-                            at += 1;
-                        }
-                        if at == begin {
-                            return self.bad();
-                        }
-                    }
-                    let mut float = false;
-                    if bytes.get(at) == Some(&b'.') {
-                        float = true;
-                        at += 1;
-                        let begin = at;
-                        while bytes.get(at).is_some_and(u8::is_ascii_digit) {
-                            at += 1;
-                        }
-                        if at == begin {
-                            return self.bad();
-                        }
-                    }
-                    if bytes.get(at).is_some_and(|b| b"eE".contains(b)) {
-                        float = true;
-                        at += 1;
-                        if bytes.get(at).is_some_and(|b| b"+-".contains(b)) {
-                            at += 1;
-                        }
-                        let begin = at;
-                        while bytes.get(at).is_some_and(u8::is_ascii_digit) {
-                            at += 1;
-                        }
-                        if at == begin {
-                            return self.bad();
-                        }
-                    }
-                    if at != bytes.len() || word.is_empty() || word == "-" {
-                        return self.bad();
-                    }
-                    if float {
-                        word.parse::<f64>().map(Json::Float).map_err(|_| crate::Error::Invalid("无效 JSON 数字".into()))
-                    } else if word.trim_start_matches('-').len() > 4300 {
-                        if self.request_errors {
-                            Err(crate::Error::Invalid(format!("Exceeds the limit (4300 digits) for integer string conversion: value has {} digits; use sys.set_int_max_str_digits() to increase the limit", word.trim_start_matches('-').len())))
-                        } else {
-                            self.bad()
-                        }
-                    } else {
-                        Ok(Json::Integer(if word == "-0" { "0".into() } else { word.into() }))
-                    }
-                }
-            }
-        }
-    }
     let mut parser = Parser { s: input, at: 0, request_errors, refusal: Refusal::Malformed };
     let v = parser.value(0).and_then(|v| {
         parser.ws();
@@ -461,6 +222,249 @@ fn parse(input: &str, request_errors: bool) -> std::result::Result<Json, (Refusa
         }
     });
     v.map_err(|e| (parser.refusal, e))
+}
+
+struct Parser<'a> {
+    s: &'a str,
+    at: usize,
+    request_errors: bool,
+    refusal: Refusal,
+}
+impl Parser<'_> {
+    fn ws(&mut self) {
+        while self.s.as_bytes().get(self.at).is_some_and(|b| b" \t\r\n".contains(b)) {
+            self.at += 1;
+        }
+    }
+    fn take(&mut self, b: u8) -> bool {
+        self.ws();
+        if self.s.as_bytes().get(self.at) == Some(&b) {
+            self.at += 1;
+            true
+        } else {
+            false
+        }
+    }
+    fn bad<T>(&self) -> crate::Result<T> {
+        self.fail("Expecting value", self.at)
+    }
+    fn fail<T>(&self, message: &str, at: usize) -> crate::Result<T> {
+        if !self.request_errors {
+            return Err(crate::Error::Invalid("无效 JSON 证据".into()));
+        }
+        let before = &self.s[..at];
+        let line = before.bytes().filter(|b| *b == b'\n').count() + 1;
+        let column = before.rsplit('\n').next().unwrap_or("").chars().count() + 1;
+        Err(crate::Error::Invalid(format!("{message}: line {line} column {column} (char {})", before.chars().count())))
+    }
+    // CPython's scanner consumes a valid numeric prefix, leaving punctuation errors to the container.
+    fn request_number_end(&self) -> Option<usize> {
+        let bytes = self.s.as_bytes();
+        let mut at = self.at + usize::from(bytes.get(self.at) == Some(&b'-'));
+        match bytes.get(at) {
+            Some(b'0') => at += 1,
+            Some(b'1'..=b'9') => at = digits_end(bytes, at),
+            _ => return None,
+        }
+        if bytes.get(at) == Some(&b'.') && bytes.get(at + 1).is_some_and(u8::is_ascii_digit) {
+            at = digits_end(bytes, at + 2);
+        }
+        if bytes.get(at).is_some_and(|b| b"eE".contains(b)) {
+            let mut end = at + 1;
+            if bytes.get(end).is_some_and(|b| b"+-".contains(b)) {
+                end += 1;
+            }
+            if bytes.get(end).is_some_and(u8::is_ascii_digit) {
+                at = digits_end(bytes, end);
+            }
+        }
+        Some(at)
+    }
+    fn string(&mut self) -> crate::Result<String> {
+        self.ws();
+        let start = self.at;
+        if !self.take(b'"') {
+            return self.fail("Expecting property name enclosed in double quotes", self.at);
+        }
+        let mut escaped = false;
+        while let Some(b) = self.s.as_bytes().get(self.at) {
+            self.at += 1;
+            if self.request_errors {
+                if !escaped && *b < 32 {
+                    return self.fail("Invalid control character at", self.at - 1);
+                }
+                if escaped && *b == b'u' {
+                    let hex = self.s.as_bytes().get(self.at..self.at + 4);
+                    if !hex.is_some_and(|v| v.iter().all(u8::is_ascii_hexdigit)) {
+                        return self.fail("Invalid \\uXXXX escape", self.at - 1);
+                    }
+                    self.at += 4;
+                    escaped = false;
+                    continue;
+                }
+                if escaped && !b"\"\\/bfnrt".contains(b) {
+                    return self.fail("Invalid \\escape", self.at - 2);
+                }
+            }
+            if !escaped && *b == b'"' {
+                return self.decoded(start);
+            }
+            escaped = !escaped && *b == b'\\';
+        }
+        self.fail("Unterminated string starting at", start)
+    }
+    /// The complete string literal from `start`, decoded by serde_json.
+    fn decoded(&mut self, start: usize) -> crate::Result<String> {
+        serde_json::from_str(&self.s[start..self.at]).map_err(|e| {
+            let e = e.to_string();
+            // serde_json has no public error codes: its own (English) message names a lone surrogate.
+            if self.request_errors || e.starts_with("lone leading surrogate") {
+                self.refusal = Refusal::LoneSurrogate;
+            }
+            crate::Error::Invalid(if self.request_errors {
+                "请求 JSON 包含 Rust 字符串无法表示的孤立 surrogate".into()
+            } else {
+                e
+            })
+        })
+    }
+    fn value(&mut self, depth: usize) -> crate::Result<Json> {
+        if depth > 1000 {
+            self.refusal = Refusal::TooDeep;
+            return Err(crate::Error::Invalid("证据 JSON 递归过深".into()));
+        }
+        self.ws();
+        let start = self.at;
+        match self.s.as_bytes().get(self.at) {
+            Some(b'"') => return self.string().map(Into::into),
+            Some(b'{') => return self.object(depth),
+            Some(b'[') => return self.array(depth),
+            _ => {}
+        }
+        self.word()?;
+        let s = self.s;
+        match &s[start..self.at] {
+            "NaN" => Ok(Json::Float(f64::NAN)),
+            "Infinity" => Ok(Json::Float(f64::INFINITY)),
+            "-Infinity" => Ok(Json::Float(f64::NEG_INFINITY)),
+            "true" => Ok(true.into()),
+            "false" => Ok(false.into()),
+            "null" => Ok(None::<String>.into()),
+            word => self.number(word),
+        }
+    }
+    fn object(&mut self, depth: usize) -> crate::Result<Json> {
+        self.at += 1;
+        let mut out = Json::Object(Vec::new());
+        if self.take(b'}') {
+            return Ok(out);
+        }
+        loop {
+            let key = self.string()?;
+            if !self.take(b':') {
+                return self.fail("Expecting ':' delimiter", self.at);
+            }
+            out.set(key, self.value(depth + 1)?);
+            if self.take(b'}') {
+                return Ok(out);
+            }
+            if !self.take(b',') {
+                return self.fail("Expecting ',' delimiter", self.at);
+            }
+        }
+    }
+    fn array(&mut self, depth: usize) -> crate::Result<Json> {
+        self.at += 1;
+        let mut out = Vec::new();
+        if self.take(b']') {
+            return Ok(Json::Array(out));
+        }
+        loop {
+            out.push(self.value(depth + 1)?);
+            if self.take(b']') {
+                return Ok(Json::Array(out));
+            }
+            if !self.take(b',') {
+                return self.fail("Expecting ',' delimiter", self.at);
+            }
+        }
+    }
+    /// Moves past a constant or number: CPython's scanner for requests, up to a delimiter for evidence.
+    fn word(&mut self) -> crate::Result<()> {
+        if !self.request_errors {
+            while self.s.as_bytes().get(self.at).is_some_and(|b| !b" \t\r\n,]}".contains(b)) {
+                self.at += 1;
+            }
+        } else if let Some(word) = ["NaN", "Infinity", "-Infinity", "true", "false", "null"]
+            .into_iter()
+            .find(|w| self.s[self.at..].starts_with(w))
+        {
+            self.at += word.len();
+        } else if let Some(end) = self.request_number_end() {
+            self.at = end;
+        } else {
+            return self.bad();
+        }
+        Ok(())
+    }
+    /// Python JSON number grammar, without f64 coercion of large integers.
+    fn number(&self, word: &str) -> crate::Result<Json> {
+        let bytes = word.as_bytes();
+        let mut at = usize::from(bytes.first() == Some(&b'-'));
+        if bytes.get(at) == Some(&b'0') {
+            at += 1;
+        } else {
+            let first = at;
+            at = digits_end(bytes, at);
+            if at == first {
+                return self.bad();
+            }
+        }
+        let mut float = false;
+        if bytes.get(at) == Some(&b'.') {
+            float = true;
+            let first = at + 1;
+            at = digits_end(bytes, first);
+            if at == first {
+                return self.bad();
+            }
+        }
+        if bytes.get(at).is_some_and(|b| b"eE".contains(b)) {
+            float = true;
+            at += 1;
+            if bytes.get(at).is_some_and(|b| b"+-".contains(b)) {
+                at += 1;
+            }
+            let first = at;
+            at = digits_end(bytes, at);
+            if at == first {
+                return self.bad();
+            }
+        }
+        if at != bytes.len() || word.is_empty() || word == "-" {
+            return self.bad();
+        }
+        let digits = word.trim_start_matches('-').len();
+        if float {
+            word.parse::<f64>().map(Json::Float).map_err(|_| crate::Error::Invalid("无效 JSON 数字".into()))
+        } else if digits <= 4300 {
+            Ok(Json::Integer(if word == "-0" { "0".into() } else { word.into() }))
+        } else if self.request_errors {
+            Err(crate::Error::Invalid(format!(
+                "Exceeds the limit (4300 digits) for integer string conversion: value has {digits} digits; \
+                 use sys.set_int_max_str_digits() to increase the limit"
+            )))
+        } else {
+            self.bad()
+        }
+    }
+}
+/// Where the run of ASCII digits starting at `at` ends.
+fn digits_end(bytes: &[u8], mut at: usize) -> usize {
+    while bytes.get(at).is_some_and(u8::is_ascii_digit) {
+        at += 1;
+    }
+    at
 }
 
 #[cfg(test)]
@@ -478,10 +482,16 @@ mod tests {
     }
     #[test]
     fn python_evidence_numbers_and_nested_order() {
-        let input = r#"{"z": NaN, "i": Infinity, "m": -Infinity, "big": 123456789012345678901234567890, "nested": {"z": false, "a": [null, -0, 1e400, 1.0]}}"#;
+        let input = concat!(
+            r#"{"z": NaN, "i": Infinity, "m": -Infinity, "big": 123456789012345678901234567890, "#,
+            r#""nested": {"z": false, "a": [null, -0, 1e400, 1.0]}}"#
+        );
         assert_eq!(
             parse_python(input).unwrap().dump(),
-            r#"{"z": NaN, "i": Infinity, "m": -Infinity, "big": 123456789012345678901234567890, "nested": {"z": false, "a": [null, 0, Infinity, 1.0]}}"#
+            concat!(
+                r#"{"z": NaN, "i": Infinity, "m": -Infinity, "big": 123456789012345678901234567890, "#,
+                r#""nested": {"z": false, "a": [null, 0, Infinity, 1.0]}}"#
+            )
         );
         assert_eq!(parse_python("2").unwrap().integer(), 2);
         assert_eq!(parse_python("-0").unwrap().integer(), 0);
@@ -522,9 +532,8 @@ mod tests {
         for text in ["01", "1e", "truefalse", "{}x", "{", "[1,]", "{\"x\":}"] {
             assert!(matches!(parse_python(text), Err(crate::Error::Invalid(message)) if message == "无效 JSON 证据"));
         }
-        assert!(
-            matches!(parse_request(r#""\ud800""#), Err(crate::Error::Invalid(message)) if message.contains("孤立 surrogate"))
-        );
+        let lone = parse_request(r#""\ud800""#);
+        assert!(matches!(lone, Err(crate::Error::Invalid(message)) if message.contains("孤立 surrogate")));
         assert_eq!(parse_request(r#""\ud83d\ude42""#).unwrap().text(), "🙂");
     }
     #[test]

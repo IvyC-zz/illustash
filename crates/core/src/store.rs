@@ -80,10 +80,8 @@ fn live_asset(conn: &Connection, asset: &AssetRef, new_assets: bool) -> Result<O
         .optional()?;
     match found {
         // 同步导入新图时，WD 证据先于 Python 把图写进 assets 交过来（docs/TERMS_LABELS.md）：允许先登记。
-        None if asset.namespace == crate::legacy_artists::LIBRARY && new_assets => {
-            Ok(Some(register_asset(conn, crate::legacy_artists::LIBRARY, &asset.id, None)?))
-        }
-        None if asset.namespace == crate::legacy_artists::LIBRARY => library_asset(conn, &asset.id),
+        None if asset.namespace == LIBRARY && new_assets => Ok(Some(register_asset(conn, LIBRARY, &asset.id, None)?)),
+        None if asset.namespace == LIBRARY => library_asset(conn, &asset.id),
         found => Ok(found),
     }
 }
@@ -107,7 +105,7 @@ pub fn library_asset(conn: &Connection, uuid: &str) -> Result<Option<AssetId>> {
     {
         return Ok(None);
     }
-    Ok(Some(register_asset(conn, crate::legacy_artists::LIBRARY, uuid, None)?))
+    Ok(Some(register_asset(conn, LIBRARY, uuid, None)?))
 }
 
 // ---- 词条、名字、链接、关系 ----
@@ -425,11 +423,14 @@ pub fn undo_in(conn: &Connection, expected: Option<ActionId>) -> Result<(Undo, b
 /// 哪些旧领域已经切到词条核心（meta 里的切换标记）。
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Handover {
-    /// `terms_artists`=`core`：画师（legacy_artists::cutover）。
+    /// `terms_artists`=`core`：画师。
     pub artists: bool,
-    /// `terms_labels`=`core`：用户标签、分级、WD 题材（legacy_labels::cutover）。
+    /// `terms_labels`=`core`：用户标签、分级、WD 题材。
     pub labels: bool,
 }
+
+/// 本图库资产的命名空间：键是 library.sqlite 的 `assets.uuid`，不区分来源是 Photos 还是文件夹。
+pub const LIBRARY: &str = "library";
 
 pub const ARTISTS_IN_CORE: &str = "terms_artists";
 pub const LABELS_IN_CORE: &str = "terms_labels";
@@ -484,6 +485,10 @@ struct Acc {
 
 /// 由证据批次重建有效集：每张图、每个可替换来源取覆盖它的最新一个批次（`all` 覆盖每一张图）。
 /// 增量维护的结果必须与它相等。返回有效集变了的图，调用方重投它们。
+pub(crate) fn ids(conn: &Connection, sql: &str) -> Result<Vec<i64>> {
+    Ok(conn.prepare(sql)?.query_map([], |x| x.get(0))?.collect::<rusqlite::Result<_>>()?)
+}
+
 pub fn rebuild_active_evidence(conn: &Connection) -> Result<Vec<AssetId>> {
     const WANTED: &str =
         "SELECT a.id AS asset_id,s.source,s.method,max(s.id) AS set_id FROM term_evidence_sets s JOIN term_assets a
@@ -498,7 +503,7 @@ pub fn rebuild_active_evidence(conn: &Connection) -> Result<Vec<AssetId>> {
       PRIMARY KEY(asset_id,source,method)) WITHOUT ROWID; DELETE FROM wanted_evidence;",
     )?;
     conn.execute(&format!("INSERT INTO wanted_evidence {WANTED}"), [])?;
-    let changed = crate::legacy_artists::ids(
+    let changed = ids(
         conn,
         &format!(
             "SELECT DISTINCT asset_id FROM (SELECT * FROM (SELECT * FROM wanted_evidence EXCEPT {HAVE})

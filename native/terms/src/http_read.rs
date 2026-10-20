@@ -4,6 +4,7 @@ use crate::{
     http::LibraryContext,
     http_json::Json,
     names_view::{Choice, View},
+    sql_fragments::{hybrid, visible, SWITCHED},
     Error, Result,
 };
 use rusqlite::{params, params_from_iter, types::ValueRef, Connection, OpenFlags, OptionalExtension};
@@ -38,7 +39,6 @@ pub const CORE_ROUTES: &[&str] = &[
     "/api/similar",
     "/api/clusters",
 ];
-pub const VISIBLE: &str = "NOT EXISTS(SELECT 1 FROM duplicates h WHERE h.uuid=m.uuid AND h.hidden=1) AND NOT EXISTS(SELECT 1 FROM excluded x WHERE x.uuid=m.uuid)";
 /// 作品和它的全部子作品（`UNION` 防旧数据成环），参数是作品 id。
 pub const TREE: &str = "WITH RECURSIVE tree(id) AS (
   SELECT t.key
@@ -52,11 +52,20 @@ pub const TREE: &str = "WITH RECURSIVE tree(id) AS (
   JOIN terms t ON t.id=r.term_id
   WHERE t.kind='work')";
 
+/// A work and all its sub-works; a work that does not exist (or was merged) is refused.
+pub(crate) fn work_tree(c: &Connection, work: &str) -> Result<Vec<String>> {
+    let found = format!("SELECT EXISTS(SELECT 1 FROM {ENTITIES} WHERE id=? AND kind='work' AND merged_into IS NULL)");
+    if !c.query_row(&found, [work], |r| r.get::<_, bool>(0))? {
+        return Err(Error::Invalid("作品不存在".into()));
+    }
+    strings(c, &format!("{TREE} SELECT id FROM tree"), &[work])
+}
+
 pub(crate) use crate::compat_text::{python_repr, trim, whitespace};
 fn cut(s: &str, n: usize) -> String {
     s.chars().take(n).collect()
 }
-fn like(s: &str) -> String {
+pub(crate) fn like(s: &str) -> String {
     format!("%{}%", s.replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_"))
 }
 pub(crate) fn normalize(s: &str) -> String {
@@ -204,8 +213,16 @@ pub(crate) fn shown_info(mut info: Json) -> Json {
 }
 pub(crate) fn register_names(c: &Connection) -> Result<()> {
     if flag(c, "terms_names")? {
-        return register_projected_names(c);
+        register_entity_name(c)?;
+        register_entity_info(c)?;
+        register_work_name(c)
+    } else {
+        register_snapshot_names(c)
     }
+}
+const NAME_FUNCTION: rusqlite::functions::FunctionFlags = rusqlite::functions::FunctionFlags::SQLITE_UTF8;
+/// The names of a library whose names are not in the core: one snapshot of every identity.
+fn register_snapshot_names(c: &Connection) -> Result<()> {
     let fallback = Arc::new(View::load(c)?);
     let mut shown = HashMap::new();
     // The snapshot already holds every identity; no second read of entities (#102).
@@ -220,8 +237,7 @@ pub(crate) fn register_names(c: &Connection) -> Result<()> {
     }
     let shown = Arc::new(shown);
     let names = shown.clone();
-    let f = rusqlite::functions::FunctionFlags::SQLITE_UTF8;
-    c.create_scalar_function("entity_name", 1, f, move |ctx| {
+    c.create_scalar_function("entity_name", 1, NAME_FUNCTION, move |ctx| {
         let id = ctx.get::<Option<String>>(0)?.unwrap_or_default();
         Ok(names
             .get(&(id, 0))
@@ -229,12 +245,12 @@ pub(crate) fn register_names(c: &Connection) -> Result<()> {
             .and_then(|v| v.get("name").map(|v| v.text().to_owned()))
             .unwrap_or_default())
     })?;
-    c.create_scalar_function("entity_info", 2, f, move |ctx| {
+    c.create_scalar_function("entity_info", 2, NAME_FUNCTION, move |ctx| {
         let id = ctx.get::<Option<String>>(0)?.unwrap_or_default();
         let skin = ctx.get::<i64>(1)?;
         Ok(shown.get(&(id, i64::from(skin != 0))).cloned().map(shown_info).unwrap_or(Json::Object(Vec::new())).dump())
     })?;
-    c.create_scalar_function("work_name", 1, f, move |ctx| {
+    c.create_scalar_function("work_name", 1, NAME_FUNCTION, move |ctx| {
         let key = ctx.get::<String>(0)?;
         fallback
             .choose("work", &key)
@@ -243,14 +259,13 @@ pub(crate) fn register_names(c: &Connection) -> Result<()> {
     })?;
     Ok(())
 }
-// Render only names actually requested, memoized for this connection/read transaction.
-// No library-wide snapshots or cross-request caches: writes and library switches cannot
-// reuse stale names, and an empty page does not load every identity's legacy names.
-fn register_projected_names(c: &Connection) -> Result<()> {
-    let f = rusqlite::functions::FunctionFlags::SQLITE_UTF8;
-    // Memoized per page language too: a connection may outlive one request.
+// The projected names below render only names actually requested, memoized for this connection/read transaction
+// and per page language too (a connection may outlive one request). No library-wide snapshots or cross-request
+// caches: writes and library switches cannot reuse stale names, and an empty page does not load every identity's
+// legacy names.
+fn register_entity_name(c: &Connection) -> Result<()> {
     let mut names: HashMap<(bool, String), String> = HashMap::new();
-    c.create_scalar_function("entity_name", 1, f, move |ctx| {
+    c.create_scalar_function("entity_name", 1, NAME_FUNCTION, move |ctx| {
         let id = ctx.get::<Option<String>>(0)?.unwrap_or_default();
         let key = (roman(), id);
         if let Some(name) = names.get(&key) {
@@ -273,15 +288,18 @@ fn register_projected_names(c: &Connection) -> Result<()> {
         names.insert(key, name.clone());
         Ok(name)
     })?;
+    Ok(())
+}
+fn register_entity_info(c: &Connection) -> Result<()> {
     let mut shown: HashMap<(bool, String, i64), String> = HashMap::new();
-    c.create_scalar_function("entity_info", 2, f, move |ctx| {
+    c.create_scalar_function("entity_info", 2, NAME_FUNCTION, move |ctx| {
         let id = ctx.get::<Option<String>>(0)?.unwrap_or_default();
         let skin = i64::from(ctx.get::<i64>(1)? != 0);
         let key = (roman(), id, skin);
         if let Some(info) = shown.get(&key) {
             return Ok(info.clone());
         }
-        // SAFETY: as above; no connection reference escapes the callback.
+        // SAFETY: as in register_entity_name; no connection reference escapes the callback.
         let c = unsafe { ctx.get_connection()? };
         let info = c
             .query_row(
@@ -309,13 +327,16 @@ fn register_projected_names(c: &Connection) -> Result<()> {
         shown.insert(key, info.clone());
         Ok(info)
     })?;
+    Ok(())
+}
+fn register_work_name(c: &Connection) -> Result<()> {
     let mut chosen: HashMap<(bool, String), String> = HashMap::new();
-    c.create_scalar_function("work_name", 1, f, move |ctx| {
+    c.create_scalar_function("work_name", 1, NAME_FUNCTION, move |ctx| {
         let key = (roman(), ctx.get::<String>(0)?);
         if let Some(name) = chosen.get(&key) {
             return Ok(name.clone());
         }
-        // SAFETY: as above; the fallback also reads this transaction, never a new connection.
+        // SAFETY: as in register_entity_name; the fallback also reads this transaction, never a new connection.
         let c = unsafe { ctx.get_connection()? };
         let name: Option<String> = if key.0 {
             c.query_row("SELECT name,name_source,en FROM term_name_choice WHERE kind='work' AND key=?", [&key.1], |r| {
@@ -341,7 +362,7 @@ pub(crate) fn display(c: &Connection, v: Json) -> Result<Json> {
     display_skin(c, v, false)
 }
 pub(crate) fn display_skin(c: &Connection, mut v: Json, skin: bool) -> Result<Json> {
-    let id = v.get("id").expect("http_read internal invariant").text().to_owned();
+    let id = v.field("id").text().to_owned();
     let info: String = c.query_row("SELECT entity_info(?,?)", params![&id, skin as i64], |r| r.get(0))?;
     v.extend(serde_json::from_str(&info).map_err(|e| Error::Invalid(e.to_string()))?);
     let sql = format!(
@@ -369,50 +390,58 @@ pub(crate) fn display_skin(c: &Connection, mut v: Json, skin: bool) -> Result<Js
         };
         v.set("work_name", name.into());
     }
-    if c.query_row("SELECT value FROM meta WHERE key='identity_policy'", [], |r| r.get::<_, String>(0))
-        .optional()?
-        .as_deref()
-        == Some("hybrid")
-    {
-        if let Some(node) =
-            rows(c, "SELECT node_type,character_id,variant_id,canonical_id FROM identity_nodes WHERE id=?", &[&id])?
-                .into_iter()
-                .next()
-        {
+    if hybrid(c)? {
+        let node = "SELECT node_type,character_id,variant_id,canonical_id FROM identity_nodes WHERE id=?";
+        if let Some(node) = rows(c, node, &[&id])?.into_iter().next() {
             v.extend(node);
         }
     }
     Ok(v)
 }
+/// Fills the temporary table `name_matches` (`entity`, `rank`) with the identities whose names match `q`, each
+/// as the identity it was merged into, with its best rank; an empty `q` leaves the table empty.
+pub(crate) fn match_names(c: &Connection, q: &str) -> Result<()> {
+    let table = "name_matches(entity TEXT PRIMARY KEY,rank INTEGER NOT NULL)";
+    c.execute_batch(&format!("CREATE TEMP TABLE IF NOT EXISTS {table}; DELETE FROM name_matches;"))?;
+    if q.is_empty() {
+        return Ok(());
+    }
+    let mut hits: HashMap<String, i64> = HashMap::new();
+    for (id, rank) in crate::names_search::hits(c, q)? {
+        let id = crate::character_commands::resolve(c, &id)?;
+        let v = hits.entry(id).or_insert(-1);
+        *v = (*v).max(rank);
+    }
+    for (id, rank) in hits {
+        c.execute("INSERT INTO name_matches VALUES (?,?)", params![id, rank])?;
+    }
+    Ok(())
+}
 fn entities(c: &Connection, q: &str) -> Result<Json> {
     let q = cut(trim(q), 160);
-    c.execute_batch("CREATE TEMP TABLE IF NOT EXISTS name_matches(entity TEXT PRIMARY KEY,rank INTEGER NOT NULL); DELETE FROM name_matches;")?;
-    if !q.is_empty() {
-        let mut hits: HashMap<String, i64> = HashMap::new();
-        for (id, rank) in crate::names_search::hits(c, &q)? {
-            let id = crate::character_commands::resolve(c, &id)?;
-            let v = hits.entry(id).or_insert(-1);
-            *v = (*v).max(rank);
-        }
-        for (id, rank) in hits {
-            c.execute("INSERT INTO name_matches VALUES (?,?)", params![id, rank])?;
-        }
-    }
+    match_names(c, &q)?;
     let matched = if q.is_empty() { "" } else { "JOIN name_matches sm ON sm.entity=e.id" };
     let ranking = if q.is_empty() { "" } else { "sm.rank DESC," };
-    let sql=format!("SELECT e.id,entity_name(e.id) AS name,e.work,e.kind,e.artist,e.label_only,e.mascot,e.parent_id,
-      (SELECT count(*) FROM (SELECT uuid FROM memberships WHERE entity=e.id UNION ALL SELECT uuid FROM tag_memberships WHERE entity=e.id) m WHERE {VISIBLE}) AS count,
-      (SELECT group_concat(value,' · ') FROM (
-         SELECT DISTINCT n.value
-         FROM term_names n
-         WHERE n.term_id = (SELECT id FROM terms WHERE key = e.id)
-           AND n.value LIKE ? ESCAPE '\\' AND n.value <> entity_name(e.id)
-         LIMIT 2)) AS matched
-      FROM {ENTITIES} e
-      {matched}
-      WHERE e.parent_id IS NULL AND e.kind<>'work' AND e.merged_into IS NULL
-      ORDER BY {ranking}count DESC,entity_name(e.id),e.id
-      LIMIT 30");
+    let sql = format!(
+        "SELECT e.id,entity_name(e.id) AS name,e.work,e.kind,e.artist,e.label_only,e.mascot,e.parent_id,
+           (SELECT count(*)
+            FROM (SELECT uuid FROM memberships WHERE entity=e.id
+                  UNION ALL
+                  SELECT uuid FROM tag_memberships WHERE entity=e.id) m
+            WHERE {visible}) AS count,
+           (SELECT group_concat(value,' · ') FROM (
+              SELECT DISTINCT n.value
+              FROM term_names n
+              WHERE n.term_id = (SELECT id FROM terms WHERE key = e.id)
+                AND n.value LIKE ? ESCAPE '\\' AND n.value <> entity_name(e.id)
+              LIMIT 2)) AS matched
+         FROM {ENTITIES} e
+         {matched}
+         WHERE e.parent_id IS NULL AND e.kind<>'work' AND e.merged_into IS NULL
+         ORDER BY {ranking}count DESC,entity_name(e.id),e.id
+         LIMIT 30",
+        visible = visible("m")
+    );
     let result = rows(c, &sql, &[&like(&q)])?.into_iter().map(|v| display(c, v)).collect::<Result<Vec<_>>>()?;
     c.execute("DELETE FROM name_matches", [])?;
     Ok(Json::Array(result))
@@ -432,30 +461,25 @@ pub(crate) fn works(c: &Connection, q: &str) -> Result<Json> {
         LINKS = crate::character_links::LINKS,
         REVIEWS = crate::character_review::REVIEWS
     );
+    let counted = format!(
+        "{TREE}
+         SELECT count(DISTINCT m.uuid)
+         FROM memberships m
+         JOIN {ENTITIES} e ON e.id=m.entity
+         WHERE e.work_id IN (SELECT id FROM tree) AND {visible}",
+        visible = visible("m")
+    );
     for mut v in rows(c, &sql, &[])? {
-        let id = v.get("id").expect("http_read internal invariant").text();
-        let count: i64 = c.query_row(
-            &format!(
-                "{TREE}
-                 SELECT count(DISTINCT m.uuid)
-                 FROM memberships m
-                 JOIN {ENTITIES} e ON e.id=m.entity
-                 WHERE e.work_id IN (SELECT id FROM tree) AND {VISIBLE}"
-            ),
-            [id],
-            |r| r.get(0),
-        )?;
-        let mut values = vec![
-            v.get("name").expect("http_read internal invariant").text().to_owned(),
-            v.get("tag").expect("http_read internal invariant").text().to_owned(),
-            v.get("qualifier").expect("http_read internal invariant").text().to_owned(),
-        ];
+        let id = v.field("id").text();
+        let count: i64 = c.query_row(&counted, [id], |r| r.get(0))?;
+        let mut values: Vec<String> =
+            ["name", "tag", "qualifier"].iter().map(|k| v.field(k).text().to_owned()).collect();
         values.extend(strings(
             c,
             "SELECT value FROM term_names WHERE term_id = (SELECT id FROM terms WHERE key = ?)",
             &[id],
         )?);
-        let watchable = !v.get("tag").expect("http_read internal invariant").text().is_empty();
+        let watchable = !v.field("tag").text().is_empty();
         v.set("count", count.into());
         v.set("watchable", watchable.into());
         if needle.is_empty()
@@ -467,22 +491,11 @@ pub(crate) fn works(c: &Connection, q: &str) -> Result<Json> {
         }
     }
     result.sort_by(|a, b| {
-        b.get("count")
-            .expect("http_read internal invariant")
+        b.field("count")
             .integer()
-            .cmp(&a.get("count").expect("http_read internal invariant").integer())
-            .then(
-                a.get("name")
-                    .expect("http_read internal invariant")
-                    .text()
-                    .cmp(b.get("name").expect("http_read internal invariant").text()),
-            )
-            .then(
-                a.get("id")
-                    .expect("http_read internal invariant")
-                    .text()
-                    .cmp(b.get("id").expect("http_read internal invariant").text()),
-            )
+            .cmp(&a.field("count").integer())
+            .then_with(|| a.field("name").text().cmp(b.field("name").text()))
+            .then_with(|| a.field("id").text().cmp(b.field("id").text()))
     });
     Ok(Json::Array(result))
 }
@@ -531,38 +544,34 @@ pub(crate) fn tag_vocabulary(context: &LibraryContext) -> Result<Arc<Vec<String>
     Ok(tags)
 }
 
+const BROWSE_ROUTES: [&str; 7] =
+    ["/api/assets", "/api/assets/count", "/api/ids", "/api/detail", "/api/home", "/api/fold", "/api/review-pools"];
+/// Module reads that render names. Counts, IDs and raw identity/prefs reads do not; their query path stays local.
+const NAMED_ROUTES: [&str; 8] = [
+    "/api/assets",
+    "/api/detail",
+    "/api/home",
+    "/api/characters",
+    "/api/tagged",
+    "/api/character/profile",
+    "/api/identity/queue",
+    "/api/bootstrap",
+];
+fn refused(message: String) -> Option<(Json, u16)> {
+    Some((Json::object([("error", message.into())]), 400))
+}
 pub fn read(context: &LibraryContext, url: &str) -> Result<Option<(Json, u16)>> {
     let q = query(url);
-    let value = |key: &str| q.get(key).map(String::as_str).unwrap_or("");
     let path = url.split('?').next().unwrap_or(url);
     if path == "/api/general-tags" {
-        let q = cut(&crate::casefold::casefold(trim(value("q"))), 80);
-        let vocabulary = tag_vocabulary(context)?;
-        let tags = vocabulary
-            .iter()
-            .filter(|n| crate::casefold::casefold(n).contains(&q))
-            .take(30)
-            .map(|n| n.as_str().into())
-            .collect();
-        return Ok(Some((Json::Array(tags), 200)));
+        return Ok(Some((general_tags(context, q.get("q").map(String::as_str).unwrap_or(""))?, 200)));
     }
-    let audit_n = if path == "/api/artist-audit" {
-        let n = q.get("n").map(String::as_str).unwrap_or("50");
-        let n = match python_int(n) {
-            Ok(n) => n,
-            Err(message) => return Ok(Some((Json::object([("error", message.into())]), 400))),
-        };
-        if !(1..=500).contains(&n) {
-            return Ok(Some((Json::object([("error", "抽查张数要在 1–500 之间".into())]), 400)));
-        }
-        n as usize
-    } else {
-        50
+    let audit_n = match audit_size(path, &q) {
+        Ok(n) => n,
+        Err(message) => return Ok(refused(message)),
     };
     let local = crate::http_local::ROUTES.contains(&path);
-    let browse =
-        ["/api/assets", "/api/assets/count", "/api/ids", "/api/detail", "/api/home", "/api/fold", "/api/review-pools"]
-            .contains(&path);
+    let browse = BROWSE_ROUTES.contains(&path);
     let characters = crate::http_characters::ROUTES.contains(&path);
     let validation = if browse {
         crate::http_browse::validate(path, &q)
@@ -573,7 +582,7 @@ pub fn read(context: &LibraryContext, url: &str) -> Result<Option<(Json, u16)>> 
     };
     match validation {
         Ok(()) => {}
-        Err(Error::Invalid(m)) => return Ok(Some((Json::object([("error", m.into())]), 400))),
+        Err(Error::Invalid(m)) => return Ok(refused(m)),
         Err(e) => return Err(e),
     }
     if path == "/api/detail" && context.source.is_none() {
@@ -586,65 +595,96 @@ pub fn read(context: &LibraryContext, url: &str) -> Result<Option<(Json, u16)>> 
         crate::sqlite::open_with_flags(&context.db, OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_URI)?;
     c.busy_timeout(std::time::Duration::from_secs(10))?;
     let tx = c.transaction()?;
-    // Startup publishes readiness before the existing background cutover finishes. Its
-    // failure reason lives in Python and can change after publication. Until all four
-    // modules are ready, bootstrap must use that live refusal, not a stale startup value.
-    if path == "/api/bootstrap"
-        && context.read_only.is_none()
-        && !tx.query_row(
-            "SELECT count(*)=4 FROM meta WHERE key IN ('terms_artists','terms_labels','terms_characters','terms_names') AND value='core'",
-            [],
-            |r| r.get::<_, bool>(0),
-        )?
-    {
+    if path == "/api/bootstrap" && context.read_only.is_none() && !switched(&tx)? {
         return Ok(None);
     }
-    let auxiliary_needed = path == "/api/artist-audit" || (path == "/api/artist" && !flag(&tx, "terms_artists")?);
+    attach_provenance(&tx, context, path)?;
+    if !(characters || browse || local || path == "/api/bootstrap") {
+        let result = read_library(&tx, context, path, &q, audit_n)?;
+        tx.commit()?;
+        return Ok(Some((result, 200)));
+    }
+    // Store.connect probes the names switch before yielding, even without a name renderer.
+    flag(&tx, "terms_names")?;
+    if local || NAMED_ROUTES.contains(&path) {
+        register_names(&tx)?;
+    }
+    let result = if local {
+        crate::http_local::read(&tx, path, &q)
+    } else if characters {
+        crate::http_characters::read(&tx, context, path, &q)
+    } else if browse {
+        crate::http_browse::read(&tx, context, path, &q)
+    } else {
+        crate::http_app::read(&tx, context, &q)
+    };
+    match result {
+        Ok(v) => {
+            tx.commit()?;
+            Ok(Some(v))
+        }
+        Err(Error::Invalid(m)) => Ok(refused(m)),
+        Err(e) => Err(e),
+    }
+}
+fn general_tags(context: &LibraryContext, q: &str) -> Result<Json> {
+    let q = cut(&crate::casefold::casefold(trim(q)), 80);
+    let vocabulary = tag_vocabulary(context)?;
+    let tags = vocabulary.iter().filter(|n| crate::casefold::casefold(n).contains(&q)).take(30);
+    Ok(Json::Array(tags.map(|n| n.as_str().into()).collect()))
+}
+/// How many pictures /api/artist-audit draws (50 for other reads), or why the request is refused.
+fn audit_size(path: &str, q: &HashMap<String, String>) -> std::result::Result<usize, String> {
+    if path != "/api/artist-audit" {
+        return Ok(50);
+    }
+    let n = python_int(q.get("n").map(String::as_str).unwrap_or("50"))?;
+    if !(1..=500).contains(&n) {
+        return Err("抽查张数要在 1–500 之间".into());
+    }
+    Ok(n as usize)
+}
+/// Whether all four modules are in the core. Startup publishes readiness before the existing background cutover
+/// finishes. Its failure reason lives in Python and can change after publication. Until all four modules are
+/// ready, bootstrap must use that live refusal, not a stale startup value.
+fn switched(c: &Connection) -> Result<bool> {
+    Ok(c.query_row(SWITCHED, [], |r| r.get::<_, bool>(0))?)
+}
+/// The artist reads that still need provenance.sqlite see it, read-only, as `prov`.
+fn attach_provenance(c: &Connection, context: &LibraryContext, path: &str) -> Result<()> {
+    let auxiliary_needed = path == "/api/artist-audit" || (path == "/api/artist" && !flag(c, "terms_artists")?);
     if let Some(library) = context.library.as_ref().filter(|_| auxiliary_needed) {
         let prov = library.join("provenance.sqlite");
         if prov.exists() {
-            tx.execute("ATTACH DATABASE ? AS prov", [sqlite_uri(&prov)])?;
+            c.execute("ATTACH DATABASE ? AS prov", [sqlite_uri(&prov)])?;
         }
     }
-    if characters || browse || local || path == "/api/bootstrap" {
-        // Store.connect probes the names switch before yielding, even without a name renderer.
-        flag(&tx, "terms_names")?;
-        // Counts, IDs and raw identity/prefs reads do not render names. Keep their query path local.
-        if [
-            "/api/assets",
-            "/api/detail",
-            "/api/home",
-            "/api/characters",
-            "/api/tagged",
-            "/api/character/profile",
-            "/api/identity/queue",
-            "/api/bootstrap",
-        ]
-        .contains(&path)
-        {
-            register_names(&tx)?;
+    Ok(())
+}
+/// Reads outside the browse, characters, local and app modules.
+fn read_library(
+    c: &Connection,
+    context: &LibraryContext,
+    path: &str,
+    q: &HashMap<String, String>,
+    audit_n: usize,
+) -> Result<Json> {
+    let value = |key: &str| q.get(key).map(String::as_str).unwrap_or("");
+    let library = context.library.is_some();
+    Ok(match path {
+        "/api/user-tags" => {
+            let sql = format!(
+                "SELECT tag,count(*) AS count
+                 FROM asset_tags m
+                 JOIN assets USING(uuid)
+                 WHERE {visible} AND tag LIKE ? ESCAPE '\\'
+                 GROUP BY tag
+                 ORDER BY count DESC,tag
+                 LIMIT 60",
+                visible = visible("m")
+            );
+            Json::Array(rows(c, &sql, &[&like(&cut(trim(value("q")), 60))])?)
         }
-        let result = if local {
-            register_names(&tx)?;
-            crate::http_local::read(&tx, path, &q)
-        } else if characters {
-            crate::http_characters::read(&tx, context, path, &q)
-        } else if browse {
-            crate::http_browse::read(&tx, context, path, &q)
-        } else {
-            crate::http_app::read(&tx, context, &q)
-        };
-        return match result {
-            Ok(v) => {
-                tx.commit()?;
-                Ok(Some(v))
-            }
-            Err(Error::Invalid(m)) => Ok(Some((Json::object([("error", m.into())]), 400))),
-            Err(e) => Err(e),
-        };
-    }
-    let result=match path {
-        "/api/user-tags"=>Json::Array(rows(&tx,&format!("SELECT tag,count(*) AS count FROM asset_tags m JOIN assets USING(uuid) WHERE {VISIBLE} AND tag LIKE ? ESCAPE '\\' GROUP BY tag ORDER BY count DESC,tag LIMIT 60"),&[&like(&cut(trim(value("q")),60))])?),
         "/api/artists" => {
             let sql = format!(
                 "SELECT artist,count(*) AS characters
@@ -653,16 +693,22 @@ pub fn read(context: &LibraryContext, url: &str) -> Result<Option<(Json, u16)>> 
                  GROUP BY artist
                  ORDER BY characters DESC,artist"
             );
-            Json::Array(rows(&tx, &sql, &[])?)
+            Json::Array(rows(c, &sql, &[])?)
         }
-        "/api/entities"=>{register_names(&tx)?;entities(&tx,value("q"))?},
-        "/api/works"=>{register_names(&tx)?;works(&tx,value("q"))?},
-        "/api/artist"=>Json::object([("id",value("id").into()),("name",crate::http_artists::name_of(&tx,context.library.is_some(),value("id"))?)]),
-        "/api/artist-audit"=>crate::http_artists::audit(&tx,context.library.is_some(),audit_n)?,
-        _=>return Err(Error::Invalid("未迁移接口".into())),
-    };
-    tx.commit()?;
-    Ok(Some((result, 200)))
+        "/api/entities" => {
+            register_names(c)?;
+            entities(c, value("q"))?
+        }
+        "/api/works" => {
+            register_names(c)?;
+            works(c, value("q"))?
+        }
+        "/api/artist" => {
+            Json::object([("id", value("id").into()), ("name", crate::http_artists::name_of(c, library, value("id"))?)])
+        }
+        "/api/artist-audit" => crate::http_artists::audit(c, library, audit_n)?,
+        _ => return Err(Error::Invalid("未迁移接口".into())),
+    })
 }
 pub(crate) fn python_int(s: &str) -> std::result::Result<i64, String> {
     let mut converted = String::new();
@@ -682,7 +728,10 @@ pub(crate) fn python_int(s: &str) -> std::result::Result<i64, String> {
     if valid {
         let digits = digits.bytes().filter(u8::is_ascii_digit).count();
         if digits > 4300 {
-            return Err(format!("Exceeds the limit (4300 digits) for integer string conversion: value has {digits} digits; use sys.set_int_max_str_digits() to increase the limit"));
+            return Err(format!(
+                "Exceeds the limit (4300 digits) for integer string conversion: value has {digits} digits; \
+                 use sys.set_int_max_str_digits() to increase the limit"
+            ));
         }
         return Ok(converted.replace('_', "").parse::<i64>().unwrap_or(if converted.starts_with('-') {
             i64::MIN
@@ -697,24 +746,29 @@ pub(crate) fn python_int(s: &str) -> std::result::Result<i64, String> {
 mod tests {
     use super::*;
     fn fixture(c: &Connection) {
-        c.execute_batch("CREATE TABLE meta(key TEXT PRIMARY KEY,value TEXT);
-          INSERT INTO meta VALUES ('terms_names','core');
-          CREATE TABLE term_links(system TEXT,key TEXT,term_id INTEGER,current INTEGER,source TEXT,added_at TEXT);
-          CREATE TABLE terms(id INTEGER PRIMARY KEY,key TEXT,kind TEXT);
-          INSERT INTO terms VALUES (1,'x','character');
-          CREATE TABLE term_tree(term_id INTEGER PRIMARY KEY,parent_id TEXT,merged_into TEXT,work_id TEXT,work_text TEXT,
-            variant TEXT,artist TEXT,label_only INTEGER,mascot INTEGER,mascot_origin TEXT,original INTEGER,seq INTEGER);
-          INSERT INTO term_tree VALUES (1,NULL,NULL,NULL,'','','',0,0,NULL,0,1);
-          CREATE TABLE term_names(term_id INTEGER,lang TEXT,value TEXT,source TEXT,preferred INTEGER,role TEXT,seq INTEGER);
-          INSERT INTO term_names VALUES (1,'zh','x','user',1,'display',1);
-          CREATE TABLE term_key_names(kind TEXT,key TEXT,lang TEXT,source TEXT,value TEXT);
-          INSERT INTO term_key_names VALUES ('work','unprojected','zh','user','未投影🙂');
-          CREATE TABLE term_key_aliases(kind TEXT,key TEXT,value TEXT,position INTEGER);
-          CREATE TABLE assets(uuid TEXT PRIMARY KEY);
-          CREATE TABLE memberships(uuid TEXT,entity TEXT);
-          CREATE TABLE tag_memberships(uuid TEXT,entity TEXT);
-          CREATE TABLE duplicates(uuid TEXT,hidden INTEGER);
-          CREATE TABLE excluded(uuid TEXT);") .unwrap();
+        c.execute_batch(
+            "CREATE TABLE meta(key TEXT PRIMARY KEY,value TEXT);
+             INSERT INTO meta VALUES ('terms_names','core');
+             CREATE TABLE term_links(system TEXT,key TEXT,term_id INTEGER,current INTEGER,source TEXT,added_at TEXT);
+             CREATE TABLE terms(id INTEGER PRIMARY KEY,key TEXT,kind TEXT);
+             INSERT INTO terms VALUES (1,'x','character');
+             CREATE TABLE term_tree(term_id INTEGER PRIMARY KEY,parent_id TEXT,merged_into TEXT,work_id TEXT,
+               work_text TEXT,variant TEXT,artist TEXT,label_only INTEGER,mascot INTEGER,mascot_origin TEXT,
+               original INTEGER,seq INTEGER);
+             INSERT INTO term_tree VALUES (1,NULL,NULL,NULL,'','','',0,0,NULL,0,1);
+             CREATE TABLE term_names(term_id INTEGER,lang TEXT,value TEXT,source TEXT,preferred INTEGER,role TEXT,
+               seq INTEGER);
+             INSERT INTO term_names VALUES (1,'zh','x','user',1,'display',1);
+             CREATE TABLE term_key_names(kind TEXT,key TEXT,lang TEXT,source TEXT,value TEXT);
+             INSERT INTO term_key_names VALUES ('work','unprojected','zh','user','未投影🙂');
+             CREATE TABLE term_key_aliases(kind TEXT,key TEXT,value TEXT,position INTEGER);
+             CREATE TABLE assets(uuid TEXT PRIMARY KEY);
+             CREATE TABLE memberships(uuid TEXT,entity TEXT);
+             CREATE TABLE tag_memberships(uuid TEXT,entity TEXT);
+             CREATE TABLE duplicates(uuid TEXT,hidden INTEGER);
+             CREATE TABLE excluded(uuid TEXT);",
+        )
+        .unwrap();
         c.execute_batch(crate::names_view::TABLES).unwrap();
         c.execute("INSERT INTO term_name_display VALUES ('x',0,'before','user','中','日',NULL,'tag')", []).unwrap();
         c.execute("INSERT INTO term_name_choice VALUES ('work','covered','projected','user',NULL,NULL,NULL)", [])
@@ -724,8 +778,12 @@ mod tests {
     fn a_page_in_another_language_shows_english_or_romanized_names() {
         let c = Connection::open_in_memory().unwrap();
         fixture(&c);
-        c.execute("INSERT INTO term_name_display VALUES ('m',0,'初音未来','bangumi','初音未来','初音ミク',NULL,'hatsune_miku_(append)')", [])
-            .unwrap();
+        c.execute(
+            "INSERT INTO term_name_display
+             VALUES ('m',0,'初音未来','bangumi','初音未来','初音ミク',NULL,'hatsune_miku_(append)')",
+            [],
+        )
+        .unwrap();
         c.execute(
             "INSERT INTO term_name_display VALUES ('r',0,'雷姆','bangumi','雷姆','レム','Rem','rem_(re:zero)')",
             [],
@@ -798,7 +856,13 @@ mod tests {
             let tx = c.transaction().unwrap();
             register_names(&tx).unwrap();
             let writer = crate::sqlite::open(&path).unwrap();
-            writer.execute_batch("UPDATE term_name_display SET name='after'; UPDATE term_name_choice SET name='new work'; UPDATE term_key_names SET value='新🙂';").unwrap();
+            writer
+                .execute_batch(
+                    "UPDATE term_name_display SET name='after';
+                     UPDATE term_name_choice SET name='new work';
+                     UPDATE term_key_names SET value='新🙂';",
+                )
+                .unwrap();
             // First use is AFTER the concurrent commit, including the legacy fallback.
             for _ in 0..2 {
                 let values: (String, String, String, String) = tx
@@ -854,7 +918,14 @@ mod tests {
                 })
                 .unwrap();
             assert_eq!(values, ("before".into(), "before".into()));
-            let missing:(String,String,String,String)=tx.query_row("SELECT entity_name('absent'),entity_info('absent',0),work_name('unprojected'),work_name('covered')",[],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?))).unwrap();
+            let missing: (String, String, String, String) = tx
+                .query_row(
+                    "SELECT entity_name('absent'),entity_info('absent',0),
+                            work_name('unprojected'),work_name('covered')",
+                    [],
+                    |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+                )
+                .unwrap();
             assert_eq!(missing, ("".into(), "{}".into(), "未投影🙂".into(), "projected".into()));
             assert_ne!(entities(&tx, "x").unwrap().dump(), "[]");
             assert_eq!(tx.query_row("SELECT count(*) FROM name_matches", [], |r| r.get::<_, i64>(0)).unwrap(), 0);

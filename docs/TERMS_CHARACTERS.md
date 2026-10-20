@@ -1,6 +1,6 @@
 # 角色、皮肤 / 变体、作品收编（词条第 4、5 步）
 
-状态：现行参考，2026-10-01。[TERMS.md](TERMS.md) 第 4 节第 4、5 步的角色、皮肤与作品收编契约，按用户决定合并；相关契约见 [TERMS_ARTISTS.md](TERMS_ARTISTS.md) 和 [TERMS_LABELS.md](TERMS_LABELS.md)。
+状态：现行参考，2026-10-20。[TERMS.md](TERMS.md) 第 4 节第 4、5 步的角色、皮肤与作品收编契约，按用户决定合并；相关契约见 [TERMS_ARTISTS.md](TERMS_ARTISTS.md) 和 [TERMS_LABELS.md](TERMS_LABELS.md)。
 
 当前生产入口由 Rust 负责，普通启动不做 Python 后台切换；升级显式使用 `http --upgrade`。本文提到的 Store/adopt_* 是保留的测试参考，原生现行行为见 [架构方向](ARCHITECTURE_DIRECTION.md#生产入口与测试参考)。
 
@@ -10,11 +10,11 @@
 - 角色（人物、原创角色、吉祥物、只当标签）、皮肤 / 变体、作品树；
 - 人工结论（含相册导入）、身份关系与决议（hybrid）、候选、学习产物，以及由它们算出的归属。
 
-**不在范围**：名字按 D4 这一步不收编，表和选名规则都还在 Python，核心命令只按原语义写用户名字和别名（方案第 10 节是下一步的契约）。身份策略 v2 按 D1 不支持。
+**不在范围**：名字按 D4 这一步不收编，表和选名规则都还在 Python，核心命令只按原语义写用户名字和别名（之后的名字那一步见 [TERMS_NAMES.md](TERMS_NAMES.md)）。身份策略 v2 按 D1 不支持。
 
 ## 1. 映射
 
-原则是**等价迁移**：旧表的每个读者读到的东西不变，规则原样执行。旧表变成由核心维护的**兼容表**（同名同形、加写保护），核心另存主数据。
+原则是**等价迁移**：旧表的每个读者读到的东西不变，规则原样执行。旧表变成由核心维护的**兼容表**（同名同形、加写保护），核心另存主数据。核心第 8 版（#201）起，身份、链接、作品复核、身份基线和身份关系的兼容表已删除，命令直接读写核心；留下的 `assertions`、`candidates` 和归属表定为核心维护的派生表，判定器私有状态照旧（[TERMS_SCHEMA.md](TERMS_SCHEMA.md) 第 13、14 节）。
 
 | 旧 | 核心主数据 | 切换后 Python 读到的 |
 |---|---|---|
@@ -22,25 +22,27 @@
 | `links` | `term_links`（角色的 `wd` 存成 `wd_character`，其余原样） | 核心第 8 版起删除，核心直接读写 `term_links`（[TERMS_SCHEMA.md](TERMS_SCHEMA.md) 第 14 节） |
 | `work_review` | `term_tree` 的三列 | 核心第 8 版起删除，命令直接读写 `term_tree`（[TERMS_SCHEMA.md](TERMS_SCHEMA.md) 第 14 节） |
 | `identity_baseline` | `term_identity_baseline`（`seq` = 原 rowid 顺序） | 核心第 8 版起删除（[TERMS_SCHEMA.md](TERMS_SCHEMA.md) 第 14 节）；之前是旧代码按原样读的兼容表，核心随主表追加 |
-| `assertions` | `term_verdicts`：confirmed → yes，rejected → no，原 origin 存进 `via`。有步骤的挂在原来那一步的 `action_id` 上；没有步骤的进批次（`baseline`、`album`、`migration`、`undo_audit`），按锚点排进时间线 | 兼容表 = 每个目标的有效裁决 |
-| `identity_relations` / `identity_evidence` / `identity_decisions` / `identity_decision_evidence` | `term_relations`（`duplicate_of` → `same_as`，`form_of` → `contains` 端点反转，`different_from` 原样）、关系证据、关系裁决（`reviewed` = 当时看到的证据），旧 id 记在 `term_legacy_ids` | 兼容表，保留原 id；status 由最新裁决算出 |
-| `candidates` | 证据：WD → `wd.wd_character`，CCIP → `ccip_index.char_ext`，按**证据批次**生效（每次 refresh / reindex / import 是一批，覆盖到的图上以这一批为准） | 兼容表：有效证据按 (图, 身份, 来源) 取最大分 |
+| `assertions` | `term_verdicts`：confirmed → yes，rejected → no，原 origin 存进 `via`。有步骤的挂在原来那一步的 `action_id` 上；没有步骤的进批次（`baseline`、`album`、`migration`、`undo_audit`），按锚点排进时间线 | 核心维护的派生表 = 每个目标的有效裁决（第 8 版起不算兼容层，[TERMS_SCHEMA.md](TERMS_SCHEMA.md) 第 14 节） |
+| `identity_relations` / `identity_evidence` / `identity_decisions` / `identity_decision_evidence` | `term_relations`（`duplicate_of` → `same_as`，`form_of` → `contains` 端点反转，`different_from` 原样）、关系证据、关系裁决（`reviewed` = 当时看到的证据），旧 id 记在 `term_legacy_ids` | 核心第 8 版起删除，命令只写核心，读者用同形的片段 `character_relations`（保留原 id；status 由最新裁决算出，[TERMS_SCHEMA.md](TERMS_SCHEMA.md) 第 14 节）；之前是兼容表 |
+| `candidates` | 证据：WD → `wd.wd_character`，CCIP → `ccip_index.char_ext`，按**证据批次**生效（每次 refresh / reindex / import 是一批，覆盖到的图上以这一批为准） | 核心维护的派生表：有效证据按 (图, 身份, 来源) 取最大分（第 8 版起不算兼容层，[TERMS_SCHEMA.md](TERMS_SCHEMA.md) 第 14 节） |
 | `proto_claims`、`weak_claims`、`prototypes`、`learn_state` | 判定器私有状态，由学习批次整批替换 | 原表，核心写 |
 | `identity_canonical`、`identity_scopes`、`identity_suspended`、`identity_uncertain`、`identity_claims`、`identity_anchor_*` | 判定器私有状态 | 原表，核心写 |
-| `memberships`、`tag_memberships`、`family_evidence`、`single_assets`、`lead_assets` | 投影：核心执行 `crates/core/src/character_sql/` 里逐字保存的旧 SQL；按图增量重算时把范围条件插在固定锚点上，锚点不是恰好出现一次就报错，不会悄悄退回整库（#200）。合成数据上增量与全量逐行一致由 `native/terms/tests/character_projection.rs` 钉住。人物、皮肤的归属另外镜像进 `term_projection`（目前没有读者） | 兼容表 |
+| `memberships`、`tag_memberships`、`family_evidence`、`single_assets`、`lead_assets` | 投影：核心执行 `crates/core/src/character_sql/` 里逐字保存的旧 SQL；按图增量重算时把范围条件插在固定锚点上，锚点不是恰好出现一次就报错，不会悄悄退回整库（#200）。合成数据上增量与全量逐行一致由 `native/terms/tests/character_projection.rs` 钉住。人物、皮肤的归属另外镜像进 `term_projection`（目前没有读者） | 核心维护的派生表（第 8 版起不算兼容层） |
 | `membership_rules` 等规则视图 | — | 原样 |
-| `names` 等名字表、`asked`、`reviews`、`deferred`、`duplicates`、`auto_rules`、`excluded`、`imported`、`backend_effects`、`prefs` | 外围，不收编 | 原表；属于某一步的由那一步的核心命令同事务写，`curate`、跳过配对、NameUpdater 仍由 Python 写 |
+| `asked`、`reviews`、`deferred`、`duplicates`、`auto_rules`、`excluded`、`imported`、`backend_effects`、`prefs` | 外围，不收编 | 原表；属于某一步的由那一步的核心命令同事务写，`curate`、跳过配对、NameUpdater 仍由 Python 写 |
 | `relations` | 图片相似关系，与本步无关 | 不变 |
 
-加写保护的兼容表和私有表共 25 张（`legacy_characters::GUARDED` 22 张、`schema::PRIVATE` 3 张）：没有核心的写钥匙时 INSERT / UPDATE / DELETE 一律拒绝，漏改的 Python 写入会直接报错，不会悄悄成功。
+加写保护的派生表、判定器私有表和核心私有表共 21 张（`legacy_characters::GUARDED` 18 张、`schema::PRIVATE` 3 张）：没有核心的写钥匙时 INSERT / UPDATE / DELETE 一律拒绝，漏改的 Python 写入会直接报错，不会悄悄成功。
 
-**收编同步**（`illustash-terms sync-characters --db <库>`，切换前可以反复运行）：只读旧表，把 `term_*` 补到与旧表一致，再由 `term_*` 生成影子兼容表 `shadow_*`，与旧表逐行逐列比较。一个事务：预检不通过、有出处无法解释的人工结论、比较有差异，都整次回滚并报告（退出码 3）。旧表没变时重跑不新增任何行。规则细节（hybrid 下旧合并搬动的结论放进迁移批次、没有步骤的关系决议怎样排锚点等）见方案第 16 节 S2。
+**收编同步**（原来的 `illustash-terms sync-characters --db <库>`，切换前可以反复运行；与 `verify-characters`、`cutover-characters` 一起随 #201 第 4 步删除，见第 2 节）：只读旧表，把 `term_*` 补到与旧表一致，再由 `term_*` 生成影子兼容表 `shadow_*`，与旧表逐行逐列比较。一个事务：预检不通过、有出处无法解释的人工结论、比较有差异，都整次回滚并报告（退出码 3）。旧表没变时重跑不新增任何行。规则细节（hybrid 下旧合并搬动的结论放进迁移批次、没有步骤的关系决议怎样排锚点等）见方案第 16 节 S2。
 
-`verify-characters` 从 `term_*` 全量重建兼容表并比较，切换前后都能跑，用来核对核心自身。
+`verify-characters` 原来从 `term_*` 全量重建兼容表并比较。第 8 版升级时曾沿用同样的核对（`legacy_characters::verify_in`，TEMP 影子），随 #201 第 4 步删除：被删的旧表在退役时各自与核心核对，留下的派生表随时可以由权威重算。
 
 ## 2. 切换
 
-`legacy_characters::cutover`（`illustash-terms cutover-characters`），一个事务：
+**这条命令和收编代码已随 #201 第 4 步删除（2026-10-20）**：核心第 8 版拒绝没切换完的图库，新建图库由 `new_library` 一开始就在核心里（[TERMS_SCHEMA.md](TERMS_SCHEMA.md) 第 14 节）。下面是当时的过程，现有图库都是这样切过来的。
+
+原来的 `legacy_characters::cutover`（`illustash-terms cutover-characters`），一个事务：
 
 1. 前提：标签已经切到核心（`general_hits`、`asset_rating` 是视图）；身份策略未设置或 hybrid（v2 拒绝，留在旧表）。
 2. 最后一次收编同步，必须零差异。
@@ -66,7 +68,7 @@
 - 联网查到的版权。
 
 然后组装一个 JSON 命令交给核心（`illustash-terms character-command`），核心在一个事务里执行：
-- 写兼容表；
+- 写兼容表（第 8 版起身份、链接、关系直接写核心，只剩派生表）；
 - 追加 `term_verdicts` / 关系裁决；
 - 镜像 `terms` / `term_tree` / `term_links`；
 - 执行旧的投影 SQL；
@@ -139,9 +141,9 @@ S5 在真实数据里修掉两个实现 bug：
 - **日常裁决、sweep、回答**与旧版相当。关系决议、合并约为旧版 2 倍；全量 refresh 约 3.4 倍（57 秒）；新建角色 2.6 倍；reindex / 导入约 2.3 倍；撤销合计 1.6 倍。
 - `links` 的关键查询计划与旧版相同。
 
-## 8. 没有做的
+## 8. 之后的进展与没有做的
 
-- 名字投影（下一步，契约见方案第 10 节）；身份策略 v2；Windows 验收。
-- 删旧表：冻结表已在第 4 版删掉；兼容表还在，要等 Python 读路径改读核心投影之后才能去掉。
+- 名字：已收编（[TERMS_NAMES.md](TERMS_NAMES.md)）。Windows：2026-10-01 已验收（#72）。
+- 删旧表：冻结表第 4 版删掉；兼容表在核心第 8 版删掉或定为派生表（#201，[TERMS_SCHEMA.md](TERMS_SCHEMA.md) 第 14 节）。
+- 身份策略 v2：第 7 版放弃（[TERMS_SCHEMA.md](TERMS_SCHEMA.md) 第 12 节）。
 - 性能待优化清单见性能文档。
-- 回合 main 由用户决定。回合后第一次打开真实图库会自动切换（先备份）。

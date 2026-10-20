@@ -1,12 +1,14 @@
 //! Character/identity HTTP reads. Query order, stable post-sorts and dict insertion order follow Store.
 use crate::character_entities::ENTITIES;
+use crate::character_relations::{EVIDENCE, RELATIONS};
 use crate::{
     http::LibraryContext,
     http_json::{parse_python, Json},
     http_read::{display, python_int, rows, strings, trim},
+    sql_fragments::{hybrid, rating, visible},
     Error, Result,
 };
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::Connection;
 use std::collections::{BTreeSet, HashMap, HashSet};
 
 pub const ROUTES: &[&str] = &[
@@ -18,14 +20,11 @@ pub const ROUTES: &[&str] = &[
     "/api/identity/count",
     "/api/identity/queue",
 ];
-fn val<'a>(j: &'a Json, k: &str) -> &'a Json {
-    j.get(k).expect("query field")
-}
 fn text(j: &Json, k: &str) -> String {
-    val(j, k).text().to_owned()
+    j.field(k).text().to_owned()
 }
 fn number(j: &Json, k: &str) -> i64 {
-    val(j, k).integer()
+    j.field(k).integer()
 }
 fn array(v: Vec<String>) -> Json {
     Json::Array(v.into_iter().map(Json::from).collect())
@@ -50,18 +49,6 @@ fn truth(v: &Json) -> bool {
         Json::Integer(x) => x != "0",
     }
 }
-fn rating(alias: &str, nsfw: &str) -> Result<String> {
-    match nsfw {""=>Ok(String::new()),"hide"|"only"=>Ok(format!(" AND {}coalesce({alias}.uuid IN (SELECT uuid FROM asset_rating WHERE rating IN ('questionable', 'explicit')),0)",if nsfw=="hide"{"NOT "}else{""})),_=>bad("未知内容筛选")}
-}
-fn visible(a: &str) -> String {
-    format!("NOT EXISTS(SELECT 1 FROM duplicates h WHERE h.uuid={a}.uuid AND h.hidden=1) AND NOT EXISTS(SELECT 1 FROM excluded x WHERE x.uuid={a}.uuid)")
-}
-fn hybrid(c: &Connection) -> Result<bool> {
-    Ok(c.query_row("SELECT value FROM meta WHERE key='identity_policy'", [], |r| r.get::<_, String>(0))
-        .optional()?
-        .as_deref()
-        == Some("hybrid"))
-}
 fn shown(c: &Connection, mut r: Json, skin: bool, identity: bool) -> Result<Json> {
     r = display(c, r)?;
     if skin {
@@ -75,50 +62,44 @@ fn shown(c: &Connection, mut r: Json, skin: bool, identity: bool) -> Result<Json
     }
     Ok(r)
 }
-fn search(c: &Connection, q: &str) -> Result<()> {
-    c.execute_batch("CREATE TEMP TABLE IF NOT EXISTS name_matches(entity TEXT PRIMARY KEY,rank INTEGER NOT NULL); DELETE FROM name_matches;")?;
-    let mut hits = HashMap::new();
-    for (e, r) in crate::names_search::hits(c, q)? {
-        let e = crate::character_commands::resolve(c, &e)?;
-        let v = hits.entry(e).or_insert(-1);
-        *v = (*v).max(r);
-    }
-    for (e, r) in hits {
-        c.execute("INSERT INTO name_matches VALUES (?,?)", params![e, r])?;
-    }
-    Ok(())
-}
 fn characters(c: &Connection, q: &HashMap<String, String>, minimum: i64) -> Result<Json> {
     if minimum < 0 {
         return bad("最小成员数不正确");
     }
     let get = |k: &str| q.get(k).map(String::as_str).unwrap_or("");
+    let nsfw = get("nsfw");
+    let summary = get("summary") == "1";
+    let mut result =
+        character_rows(c, q, minimum)?.into_iter().map(|r| shown(c, r, false, !summary)).collect::<Result<Vec<_>>>()?;
+    if result.is_empty() {
+        return Ok(Json::Array(result));
+    }
+    let ids = Json::Array(result.iter().map(|r| r.field("id").clone()).collect()).dump();
+    let mut variants = skins(c, &ids, nsfw, summary)?;
+    for r in &mut result {
+        r.set("variants", Json::Array(variants.remove(&text(r, "id")).unwrap_or_default()));
+        if summary {
+            r.set("summary", true.into());
+        }
+    }
+    choose_covers(c, &mut result, &ids, nsfw)?;
+    if summary {
+        result = result.into_iter().map(summarized).collect();
+    }
+    Ok(Json::Array(result))
+}
+/// The characters /api/characters lists, before display: the search, work, rating and size filters of `q`.
+fn character_rows(c: &Connection, q: &HashMap<String, String>, minimum: i64) -> Result<Vec<Json>> {
+    let get = |k: &str| q.get(k).map(String::as_str).unwrap_or("");
     let query: String = trim(get("q")).chars().take(160).collect();
     let ident = get("id");
     let nsfw = get("nsfw");
-    let summary = get("summary") == "1";
     if !query.is_empty() {
-        search(c, &query)?;
+        crate::http_read::match_names(c, &query)?;
     }
     let work = get("work");
     let mut args = vec![nsfw.to_owned()];
-    let work_ids = if work.is_empty() {
-        Vec::new()
-    } else {
-        let found: i64 = c.query_row(
-            &format!(
-                "SELECT count(*)
-                 FROM {ENTITIES}
-                 WHERE id=? AND kind='work' AND merged_into IS NULL"
-            ),
-            [work],
-            |r| r.get(0),
-        )?;
-        if found == 0 {
-            return bad("作品不存在");
-        }
-        strings(c, &format!("{} SELECT id FROM tree", crate::http_read::TREE), &[work])?
-    };
+    let work_ids = if work.is_empty() { Vec::new() } else { crate::http_read::work_tree(c, work)? };
     let work_filter = if work_ids.is_empty() {
         String::new()
     } else {
@@ -133,7 +114,7 @@ fn characters(c: &Connection, q: &HashMap<String, String>, minimum: i64) -> Resu
         "SELECT e.id,entity_name(e.id) AS name,e.work,e.kind,e.artist,e.label_only,e.mascot,e.mascot_origin,
            count(m.uuid) AS count,coalesce(sum(m.status='machine'),0) AS unchecked,
            min(CASE WHEN ?<>'hide'
-                      OR NOT coalesce(m.uuid IN (SELECT uuid FROM asset_rating WHERE rating IN ('questionable', 'explicit')),0)
+                      OR NOT coalesce({nsfw},0)
                     THEN m.uuid END) AS cover,
            (SELECT max(reviewed_at) FROM reviews r WHERE r.entity=e.id) AS reviewed_at
          FROM {ENTITIES} e
@@ -143,6 +124,7 @@ fn characters(c: &Connection, q: &HashMap<String, String>, minimum: i64) -> Resu
          GROUP BY e.id
          HAVING count(m.uuid)>=?
          ORDER BY {ranking}count DESC,name,e.id",
+        nsfw = crate::sql_fragments::nsfw("m"),
         matched = if query.is_empty() { "" } else { "JOIN name_matches sm ON sm.entity=e.id" },
         members = if ident.is_empty() {
             "memberships"
@@ -155,9 +137,15 @@ fn characters(c: &Connection, q: &HashMap<String, String>, minimum: i64) -> Resu
         only = if ident.is_empty() { "" } else { " AND e.id=?" },
         ranking = if query.is_empty() { "" } else { "sm.rank DESC," },
     );
-    // Python int is unbounded; sqlite3 rejects a minimum outside its signed 64-bit binding range.
-    // Check at the SQL bind point, after the same work/rating checks as Store.characters.
-    let exact_min: String = get("min")
+    bindable_minimum(get("min"))?;
+    let mut bound: Vec<rusqlite::types::Value> = args.into_iter().map(Into::into).collect();
+    *bound.last_mut().expect("minimum argument") = minimum.into();
+    crate::http_read::typed_rows(c, &sql, &bound)
+}
+/// Python int is unbounded; sqlite3 rejects a minimum outside its signed 64-bit binding range.
+/// Checked at the SQL bind point, after the same work/rating checks as Store.characters.
+fn bindable_minimum(min: &str) -> Result<()> {
+    let exact_min: String = min
         .trim()
         .chars()
         .filter(|c| *c != '_')
@@ -169,16 +157,10 @@ fn characters(c: &Connection, q: &HashMap<String, String>, minimum: i64) -> Resu
             "Python int too large to convert to SQLite INTEGER",
         )))));
     }
-    let mut bound: Vec<rusqlite::types::Value> = args.into_iter().map(Into::into).collect();
-    *bound.last_mut().expect("minimum argument") = minimum.into();
-    let mut result = crate::http_read::typed_rows(c, &sql, &bound)?
-        .into_iter()
-        .map(|r| shown(c, r, false, !summary))
-        .collect::<Result<Vec<_>>>()?;
-    if result.is_empty() {
-        return Ok(Json::Array(result));
-    }
-    let ids = Json::Array(result.iter().map(|r| val(r, "id").clone()).collect()).dump();
+    Ok(())
+}
+/// The skins of the characters `ids` (a JSON list), by character, with their counts unless only a summary is asked.
+fn skins(c: &Connection, ids: &str, nsfw: &str, summary: bool) -> Result<HashMap<String, Vec<Json>>> {
     let variant_count = if summary {
         "NULL".to_owned()
     } else {
@@ -195,17 +177,30 @@ fn characters(c: &Connection, q: &HashMap<String, String>, minimum: i64) -> Resu
          WHERE e.parent_id IN (SELECT value FROM json_each(?)) AND e.kind<>'work' AND e.merged_into IS NULL
          ORDER BY e.variant,e.id"
     );
-    for r in rows(c, &skins, &[&ids])? {
+    for r in rows(c, &skins, &[ids])? {
         let parent = text(&r, "parent_id");
         variants.entry(parent).or_default().push(shown(c, r, true, !summary)?);
     }
-    for r in &mut result {
-        r.set("variants", Json::Array(variants.remove(&text(r, "id")).unwrap_or_default()));
-        if summary {
-            r.set("summary", true.into());
-        }
-    }
-    let ranked=rows(c,&format!("SELECT entity,uuid FROM (SELECT m.entity,m.uuid,row_number() OVER (PARTITION BY m.entity ORDER BY m.status='machine',coalesce(a.width>a.height,0),a.added_at DESC,m.uuid) AS rk FROM memberships m JOIN assets a ON a.uuid=m.uuid WHERE m.entity IN (SELECT value FROM json_each(?)){}) WHERE rk<=12 ORDER BY entity,rk",rating("m",nsfw)?),&[&ids])?;
+    Ok(variants)
+}
+/// Gives each character a cover: one of its best twelve visible pictures, preferring pictures of it alone and
+/// pictures no larger character already shows.
+fn choose_covers(c: &Connection, result: &mut [Json], ids: &str, nsfw: &str) -> Result<()> {
+    let ranked = format!(
+        "SELECT entity,uuid
+         FROM (
+           SELECT m.entity,m.uuid,
+             row_number() OVER (
+               PARTITION BY m.entity
+               ORDER BY m.status='machine',coalesce(a.width>a.height,0),a.added_at DESC,m.uuid) AS rk
+           FROM memberships m
+           JOIN assets a ON a.uuid=m.uuid
+           WHERE m.entity IN (SELECT value FROM json_each(?)){})
+         WHERE rk<=12
+         ORDER BY entity,rk",
+        rating("m", nsfw)?
+    );
+    let ranked = rows(c, &ranked, &[ids])?;
     let pool = array(ranked.iter().map(|r| text(r, "uuid")).collect::<BTreeSet<_>>().into_iter().collect()).dump();
     let vis: HashSet<String> = strings(
         c,
@@ -240,46 +235,41 @@ fn characters(c: &Connection, q: &HashMap<String, String>, minimum: i64) -> Resu
         let cover = opts
             .and_then(|v| v.iter().find(|u| !used.contains(*u)).or(v.first()))
             .map(|u| Json::from(u.clone()))
-            .unwrap_or_else(|| val(r, "cover").clone());
+            .unwrap_or_else(|| r.field("cover").clone());
         used.insert(cover.text().to_owned());
         r.set("cover", cover);
     }
-    if summary {
-        result = result
-            .into_iter()
-            .map(|r| {
-                let mut s = Json::Object(Vec::new());
-                for k in [
-                    "id",
-                    "name",
-                    "tag",
-                    "name_source",
-                    "work",
-                    "work_id",
-                    "work_name",
-                    "kind",
-                    "count",
-                    "unchecked",
-                    "cover",
-                    "summary",
-                ] {
-                    if let Some(v) = r.get(k) {
-                        s.set(k, v.clone());
-                    }
-                }
-                let variants = if let Json::Array(v) = val(&r, "variants") {
-                    v.iter()
-                        .map(|v| Json::object([("id", val(v, "id").clone()), ("name", val(v, "name").clone())]))
-                        .collect()
-                } else {
-                    Vec::new()
-                };
-                s.set("variants", Json::Array(variants));
-                s
-            })
-            .collect();
+    Ok(())
+}
+/// A character as the summary list shows it.
+fn summarized(r: Json) -> Json {
+    const FIELDS: [&str; 12] = [
+        "id",
+        "name",
+        "tag",
+        "name_source",
+        "work",
+        "work_id",
+        "work_name",
+        "kind",
+        "count",
+        "unchecked",
+        "cover",
+        "summary",
+    ];
+    let mut s = Json::Object(Vec::new());
+    for k in FIELDS {
+        if let Some(v) = r.get(k) {
+            s.set(k, v.clone());
+        }
     }
-    Ok(Json::Array(result))
+    let variants = if let Json::Array(v) = r.field("variants") {
+        v.iter().map(|v| Json::object([("id", v.field("id").clone()), ("name", v.field("name").clone())])).collect()
+    } else {
+        Vec::new()
+    };
+    s.set("variants", Json::Array(variants));
+    s
 }
 fn profile(c: &Connection, e: &str) -> Result<Json> {
     let id = crate::character_commands::resolve(c, e)?;
@@ -295,7 +285,7 @@ fn profile(c: &Connection, e: &str) -> Result<Json> {
     .into_iter()
     .next()
     .ok_or_else(|| Error::Invalid("角色不存在".into()))?;
-    if truth(val(&row, "parent_id")) {
+    if truth(row.field("parent_id")) {
         return bad("请编辑角色本身，子标签跟随角色");
     }
     let shown = display(c, Json::object([("id", id.clone().into())]))?;
@@ -337,7 +327,7 @@ fn profile(c: &Connection, e: &str) -> Result<Json> {
         if work.is_empty() { String::new() } else { c.query_row("SELECT entity_name(?)", [&work], |r| r.get(0))? };
     Ok(Json::object([
         ("id", id.clone().into()),
-        ("name", val(&shown, "name").clone()),
+        ("name", shown.field("name").clone()),
         ("user_name", user.into()),
         (
             "aliases",
@@ -352,7 +342,7 @@ fn profile(c: &Connection, e: &str) -> Result<Json> {
         ),
         ("other_aliases", other.into()),
         ("tag", tag.into()),
-        ("work_id", val(&row, "work_id").clone()),
+        ("work_id", row.field("work_id").clone()),
         ("work_name", name.into()),
         ("oc", (number(&row, "original") != 0).into()),
         ("label_only", (number(&row, "label_only") != 0).into()),
@@ -362,7 +352,19 @@ fn activity(c: &Connection, nsfw: &str) -> Result<Json> {
     let t = crate::platform_time::local_date(30 * 86400);
     let since = format!("{:04}-{:02}-{:02}", t.tm_year + 1900, t.tm_mon + 1, t.tm_mday);
     let mut out = Json::Object(Vec::new());
-    for r in rows(c,&format!("SELECT m.entity,sum(a.added_at>=?) AS recent,max(substr(a.added_at,1,10)) AS last FROM memberships m JOIN assets a ON a.uuid=m.uuid WHERE {}{} GROUP BY m.entity",visible("m"),rating("m",nsfw)?),&[&since])? {out.set(text(&r,"entity"),Json::object([("recent",number(&r,"recent").into()),("last",text(&r,"last").into())]));}
+    let sql = format!(
+        "SELECT m.entity,sum(a.added_at>=?) AS recent,max(substr(a.added_at,1,10)) AS last
+         FROM memberships m
+         JOIN assets a ON a.uuid=m.uuid
+         WHERE {}{}
+         GROUP BY m.entity",
+        visible("m"),
+        rating("m", nsfw)?
+    );
+    for r in rows(c, &sql, &[&since])? {
+        let last = Json::object([("recent", number(&r, "recent").into()), ("last", text(&r, "last").into())]);
+        out.set(text(&r, "entity"), last);
+    }
     Ok(out)
 }
 fn stats(c: &Connection, id: &str, nsfw: &str, exclude: &str) -> Result<Json> {
@@ -370,7 +372,14 @@ fn stats(c: &Connection, id: &str, nsfw: &str, exclude: &str) -> Result<Json> {
         return bad("缺少角色");
     }
     let where_ = format!("m.entity=? AND {}{}", visible("m"), rating("m", nsfw)?);
-    let per=rows(c,&format!("SELECT substr(a.added_at,1,7) AS month,count(*) AS count FROM memberships m JOIN assets a ON a.uuid=m.uuid WHERE {where_} GROUP BY 1"),&[id])?;
+    let monthly = format!(
+        "SELECT substr(a.added_at,1,7) AS month,count(*) AS count
+         FROM memberships m
+         JOIN assets a ON a.uuid=m.uuid
+         WHERE {where_}
+         GROUP BY 1"
+    );
+    let per = rows(c, &monthly, &[id])?;
     let mut dated: Vec<String> = per.iter().map(|r| text(r, "month")).filter(|s| !s.is_empty()).collect();
     dated.sort();
     let t = crate::platform_time::local_date(0);
@@ -389,7 +398,15 @@ fn stats(c: &Connection, id: &str, nsfw: &str, exclude: &str) -> Result<Json> {
         }
     }
     months.reverse();
-    let recent=strings(c,&format!("SELECT m.uuid FROM memberships m JOIN assets a ON a.uuid=m.uuid WHERE {where_} AND m.uuid<>? ORDER BY a.added_at DESC,m.uuid LIMIT 4"),&[id,exclude])?;
+    let recent = format!(
+        "SELECT m.uuid
+         FROM memberships m
+         JOIN assets a ON a.uuid=m.uuid
+         WHERE {where_} AND m.uuid<>?
+         ORDER BY a.added_at DESC,m.uuid
+         LIMIT 4"
+    );
+    let recent = strings(c, &recent, &[id, exclude])?;
     Ok(Json::object([
         ("count", per.iter().map(|r| number(r, "count")).sum::<i64>().into()),
         ("first", dated.first().cloned().unwrap_or_default().into()),
@@ -420,51 +437,59 @@ fn numeric(j: &Json) -> Option<f64> {
         _ => None,
     }
 }
-fn queue(c: &Connection, limit: i64, offset: i64, nsfw: &str, count_only: bool) -> Result<Json> {
-    if !(1..=100).contains(&limit) || offset < 0 {
-        return bad("分页参数不正确");
+/// The pairs of identities the identity queue may ask about, each pair once by family: the shortest distance and the
+/// first hint (with its relation) found for it.
+struct Pairs {
+    family: HashMap<String, String>,
+    counts: HashMap<String, i64>,
+    decided: HashSet<(String, String)>,
+    skip: HashSet<String>,
+    marks: HashSet<String>,
+    found: Vec<Json>,
+    keys: HashMap<(String, String), usize>,
+}
+impl Pairs {
+    /// `shown`: the content filter on the memberships `m` that count.
+    fn load(c: &Connection, shown: &str) -> Result<Self> {
+        let family = people(c)?;
+        let fam = |e: &str| family.get(e).cloned().unwrap_or_else(|| e.to_owned());
+        let counted =
+            format!("SELECT entity,count(*) AS count FROM memberships m WHERE {}{shown} GROUP BY entity", visible("m"));
+        let counts = rows(c, &counted, &[])?.iter().map(|r| (text(r, "entity"), number(r, "count"))).collect();
+        let decided = rows(c, &format!("SELECT r.a, r.b FROM {RELATIONS} r WHERE r.status <> 'proposed'"), &[])?
+            .iter()
+            .map(|r| pair_key(&fam(&text(r, "a")), &fam(&text(r, "b"))))
+            .collect();
+        let skipped = strings(c, "SELECT value FROM prefs WHERE key='identity_skipped'", &[])?
+            .into_iter()
+            .next()
+            .unwrap_or_else(|| "[]".into());
+        let skip = match parse_python(&skipped)? {
+            Json::Array(v) => v.iter().map(|x| x.text().to_owned()).collect(),
+            _ => HashSet::new(),
+        };
+        let marks =
+            strings(c, &format!("SELECT id FROM {ENTITIES} WHERE label_only=1"), &[])?.iter().map(|e| fam(e)).collect();
+        Ok(Self { family, counts, decided, skip, marks, found: Vec::new(), keys: HashMap::new() })
     }
-    let shown = rating("m", nsfw)?;
-    let nodes = people(c)?;
-    let fam = |e: &str| nodes.get(e).cloned().unwrap_or_else(|| e.to_owned());
-    let counts: HashMap<String, i64> = rows(
-        c,
-        &format!("SELECT entity,count(*) AS count FROM memberships m WHERE {}{shown} GROUP BY entity", visible("m")),
-        &[],
-    )?
-    .iter()
-    .map(|r| (text(r, "entity"), number(r, "count")))
-    .collect();
-    let decided: HashSet<_> = rows(c, "SELECT a,b FROM identity_relations WHERE status<>'proposed'", &[])?
-        .iter()
-        .map(|r| pair_key(&fam(&text(r, "a")), &fam(&text(r, "b"))))
-        .collect();
-    let skipped = strings(c, "SELECT value FROM prefs WHERE key='identity_skipped'", &[])?
-        .into_iter()
-        .next()
-        .unwrap_or_else(|| "[]".into());
-    let skipped = parse_python(&skipped)?;
-    let skip: HashSet<String> =
-        if let Json::Array(v) = skipped { v.iter().map(|x| x.text().to_owned()).collect() } else { HashSet::new() };
-    let marks: HashSet<String> =
-        strings(c, &format!("SELECT id FROM {ENTITIES} WHERE label_only=1"), &[])?.iter().map(|e| fam(e)).collect();
-    let mut found: Vec<Json> = Vec::new();
-    let mut keys = HashMap::new();
-    let mut add = |a: String, b: String, distance: Json, hint: Json, relation: Json| {
-        let a = fam(&a);
-        let b = fam(&b);
+    fn family(&self, e: &str) -> String {
+        self.family.get(e).cloned().unwrap_or_else(|| e.to_owned())
+    }
+    fn add(&mut self, a: &str, b: &str, distance: Json, hint: Json, relation: Json) {
+        let (a, b) = (self.family(a), self.family(b));
         let key = pair_key(&a, &b);
         if a == b
-            || marks.contains(&a)
-            || marks.contains(&b)
-            || decided.contains(&key)
-            || skip.contains(&format!("{}|{}", key.0, key.1))
-            || counts.get(&a).copied().unwrap_or(0) == 0
-            || counts.get(&b).copied().unwrap_or(0) == 0
+            || self.marks.contains(&a)
+            || self.marks.contains(&b)
+            || self.decided.contains(&key)
+            || self.skip.contains(&format!("{}|{}", key.0, key.1))
+            || self.counts.get(&a).copied().unwrap_or(0) == 0
+            || self.counts.get(&b).copied().unwrap_or(0) == 0
         {
             return;
         }
-        let i = *keys.entry(key).or_insert_with(|| {
+        let found = &mut self.found;
+        let i = *self.keys.entry(key).or_insert_with(|| {
             found.push(Json::object([
                 ("a", a.clone().into()),
                 ("b", b.clone().into()),
@@ -476,43 +501,86 @@ fn queue(c: &Connection, limit: i64, offset: i64, nsfw: &str, count_only: bool) 
         });
         let item = &mut found[i];
         if let Some(d) = numeric(&distance) {
-            if numeric(val(item, "distance")).is_none_or(|old| d < old) {
+            if numeric(item.field("distance")).is_none_or(|old| d < old) {
                 item.set("distance", distance);
             }
         }
-        if truth(&hint) && !truth(val(item, "hint")) {
+        if truth(&hint) && !truth(item.field("hint")) {
             item.set("hint", hint);
             item.set("relation_id", relation);
         }
-    };
+    }
+}
+/// Pairs the recognizer found close; their Danbooru relation is the hint.
+fn close_pairs(c: &Connection, pairs: &mut Pairs, count_only: bool) -> Result<()> {
     for r in rows(c, "SELECT a,b,original_distance,distance,evidence_json FROM identity_pairs", &[])? {
         let mut hint = None::<String>.into();
         let distance = if count_only {
             None::<String>.into()
         } else {
-            let e = parse_python(val(&r, "evidence_json").text())?;
+            let e = parse_python(r.field("evidence_json").text())?;
             if ["relation", "subject", "object"].iter().all(|k| e.get(k).is_some_and(truth)) {
                 hint = Json::object([
-                    ("kind", val(&e, "relation").clone()),
-                    ("subject", val(&e, "subject").clone()),
-                    ("object", val(&e, "object").clone()),
+                    ("kind", e.field("relation").clone()),
+                    ("subject", e.field("subject").clone()),
+                    ("object", e.field("object").clone()),
                     ("source", "Danbooru".into()),
                 ]);
             }
-            if numeric(val(&r, "distance")).is_some() {
-                val(&r, "distance").clone()
+            if numeric(r.field("distance")).is_some() {
+                r.field("distance").clone()
             } else {
-                val(&r, "original_distance").clone()
+                r.field("original_distance").clone()
             }
         };
-        add(text(&r, "a"), text(&r, "b"), distance, hint, None::<String>.into());
+        pairs.add(&text(&r, "a"), &text(&r, "b"), distance, hint, None::<String>.into());
     }
-    for r in rows(c,"SELECT r.id,r.a,r.b,r.kind,(SELECT min(source) FROM identity_evidence e WHERE e.relation_id=r.id) AS source FROM identity_relations r WHERE r.status='proposed'",&[])? {let a=text(&r,"a");let b=text(&r,"b");let hint=if count_only{None::<String>.into()}else{let tags:HashMap<String,String>=rows(c,&format!(
-            "SELECT l.entity_id, l.key
-             FROM {LINKS} l
-             WHERE l.core_system = 'danbooru' AND l.entity_id IN (?, ?)",
-            LINKS = crate::character_links::LINKS
-        ),&[&a,&b])?.iter().map(|r|(text(r,"entity_id"),text(r,"key"))).collect();Json::object([("kind",val(&r,"kind").clone()),("subject",tags.get(&a).cloned().unwrap_or_default().into()),("object",tags.get(&b).cloned().unwrap_or_default().into()),("source",text(&r,"source").into())])};add(a,b,None::<String>.into(),hint,val(&r,"id").clone());}
+    Ok(())
+}
+/// Relations still proposed, with their Danbooru tags as the hint.
+fn proposed_pairs(c: &Connection, pairs: &mut Pairs, count_only: bool) -> Result<()> {
+    // 原来的旧表按 id 扫描：同一对身份的提示取 id 最小的关系。
+    let proposed = format!(
+        "SELECT r.id, r.a, r.b, r.kind,
+           (SELECT min(e.source) FROM {EVIDENCE} e WHERE e.relation_id = r.id) AS source
+         FROM {RELATIONS} r
+         WHERE r.status = 'proposed'
+         ORDER BY r.id"
+    );
+    let danbooru = format!(
+        "SELECT l.entity_id, l.key
+         FROM {LINKS} l
+         WHERE l.core_system = 'danbooru' AND l.entity_id IN (?, ?)",
+        LINKS = crate::character_links::LINKS
+    );
+    for r in rows(c, &proposed, &[])? {
+        let a = text(&r, "a");
+        let b = text(&r, "b");
+        let hint = if count_only {
+            None::<String>.into()
+        } else {
+            let tags: HashMap<String, String> =
+                rows(c, &danbooru, &[&a, &b])?.iter().map(|r| (text(r, "entity_id"), text(r, "key"))).collect();
+            Json::object([
+                ("kind", r.field("kind").clone()),
+                ("subject", tags.get(&a).cloned().unwrap_or_default().into()),
+                ("object", tags.get(&b).cloned().unwrap_or_default().into()),
+                ("source", text(&r, "source").into()),
+            ])
+        };
+        pairs.add(&a, &b, None::<String>.into(), hint, r.field("id").clone());
+    }
+    Ok(())
+}
+fn queue(c: &Connection, limit: i64, offset: i64, nsfw: &str, count_only: bool) -> Result<Json> {
+    if !(1..=100).contains(&limit) || offset < 0 {
+        return bad("分页参数不正确");
+    }
+    let shown = rating("m", nsfw)?;
+    let mut pairs = Pairs::load(c, &shown)?;
+    close_pairs(c, &mut pairs, count_only)?;
+    proposed_pairs(c, &mut pairs, count_only)?;
+    let Pairs { mut found, counts, .. } = pairs;
     let total = found.len();
     if count_only {
         return Ok(Json::object([("total", (total as i64).into())]));
@@ -521,13 +589,21 @@ fn queue(c: &Connection, limit: i64, offset: i64, nsfw: &str, count_only: bool) 
         let n = |v: &Json| counts[&text(v, "a")] + counts[&text(v, "b")];
         n(y).cmp(&n(x)).then(text(x, "a").cmp(&text(y, "a"))).then(text(x, "b").cmp(&text(y, "b")))
     });
+    let samples = format!(
+        "SELECT m.uuid
+         FROM memberships m
+         WHERE m.entity=? AND {}{shown}
+         ORDER BY m.status='confirmed' DESC,m.score DESC,m.uuid
+         LIMIT 4",
+        visible("m")
+    );
     let mut items = page(found, offset, limit);
     for x in &mut items {
         for side in ["a", "b"] {
             let e = text(x, side);
             let name: String = c.query_row("SELECT entity_info(?,0)", [&e], |r| r.get(0))?;
             let info = parse_python(&name)?;
-            let samples=strings(c,&format!("SELECT m.uuid FROM memberships m WHERE m.entity=? AND {}{shown} ORDER BY m.status='confirmed' DESC,m.score DESC,m.uuid LIMIT 4",visible("m")),&[&e])?;
+            let samples = strings(c, &samples, &[&e])?;
             x.set(
                 side,
                 Json::object([
@@ -544,7 +620,16 @@ fn queue(c: &Connection, limit: i64, offset: i64, nsfw: &str, count_only: bool) 
 }
 pub(crate) fn assignments(c: &Connection, id: &str) -> Result<Json> {
     let (a, mut p) = if hybrid(c)? {
-        (rows(c,"SELECT m.uuid,m.entity AS character_id,v.entity AS variant_id,m.status,m.origin FROM memberships m LEFT JOIN (SELECT entity,parent_id FROM variant_memberships WHERE uuid=?) v ON v.parent_id=m.entity WHERE m.uuid=?",&[id,id])?,rows(c,"SELECT options_json,reason FROM identity_uncertain WHERE uuid=? UNION ALL SELECT options_json,reason FROM identity_suspended WHERE uuid=?",&[id,id])?)
+        let assigned = "
+            SELECT m.uuid,m.entity AS character_id,v.entity AS variant_id,m.status,m.origin
+            FROM memberships m
+            LEFT JOIN (SELECT entity,parent_id FROM variant_memberships WHERE uuid=?) v ON v.parent_id=m.entity
+            WHERE m.uuid=?";
+        let undetermined = "
+            SELECT options_json,reason FROM identity_uncertain WHERE uuid=?
+            UNION ALL
+            SELECT options_json,reason FROM identity_suspended WHERE uuid=?";
+        (rows(c, assigned, &[id, id])?, rows(c, undetermined, &[id, id])?)
     } else {
         (Vec::new(), Vec::new())
     };

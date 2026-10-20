@@ -1,6 +1,6 @@
 # 词条核心 schema
 
-状态：现行参考，2026-10-19。当前词条 schema 为 **8**，应用 schema 为 **36**，包格式为 **1**；第 1 版见第 1–4 节，第 2–7 版的增量见第 7–12 节，第 8 版见第 14 节，宿主退役后的兼容职责与恢复边界见第 13 节。画师、标签、角色 / 皮肤 / 作品都已收编：[TERMS_ARTISTS.md](TERMS_ARTISTS.md)、[TERMS_LABELS.md](TERMS_LABELS.md)、[TERMS_CHARACTERS.md](TERMS_CHARACTERS.md)。下面第 1–6 节是第 1 版交付时写的，已按现状更正的地方都有注明（2026-09-29，词条第 4、5 步 S6）。
+状态：现行参考，2026-10-20。当前词条 schema 为 **8**，应用 schema 为 **36**，包格式为 **1**；第 1 版见第 1–4 节，第 2–7 版的增量见第 7–12 节，第 8 版见第 14 节，宿主退役后的兼容职责与恢复边界见第 13 节。画师、标签、角色 / 皮肤 / 作品、名字都已收编，第 8 版起 `term_*` 是唯一权威，旧兼容表已删除（第 14 节）：[TERMS_ARTISTS.md](TERMS_ARTISTS.md)、[TERMS_LABELS.md](TERMS_LABELS.md)、[TERMS_CHARACTERS.md](TERMS_CHARACTERS.md)。下面第 1–6 节是第 1 版交付时写的，已按现状更正的地方都有注明（2026-09-29，词条第 4、5 步 S6）。
 
 2026-09-28，[TERMS.md](TERMS.md) 第 4 节第 1 步的交付。代码在 `native/terms/`（Rust crate `illustash-terms`，rusqlite 自持连接），证据包格式见 [EVIDENCE_PACKAGES.md](EVIDENCE_PACKAGES.md)。
 
@@ -84,7 +84,7 @@ cargo clippy --manifest-path native/terms/Cargo.toml --all-targets -- -D warning
 第 1 版这里写的是预想，有三处与实际不符，已更正：
 - `relations` 是图片相似关系，不是作品层级，没有收编；作品树在 `term_tree`。
 - 名字表在角色那一步**没有**收编（D4）；之后的名字那一步（第 5 版）收编了，见第 10 节。
-- 角色的归属没有收编进 `term_projection`：旧表都还在，成为由核心维护、加写保护的**兼容表**，`term_projection` 只是人物 / 皮肤归属的镜像。
+- 角色的归属没有收编进 `term_projection`：归属表都还在，由核心维护、加写保护（原称**兼容表**，第 8 版起定为派生表，第 14 节），`term_projection` 只是人物 / 皮肤归属的镜像。
 
 | 现有 | 收编到 | 切换后的旧表 |
 |---|---|---|
@@ -97,11 +97,11 @@ cargo clippy --manifest-path native/terms/Cargo.toml --all-targets -- -D warning
 | `links` | `term_links`（角色的 `wd` 存成 `wd_character`） | 第 8 版删除（第 14 节） |
 | `work_review` | `term_tree` | 第 8 版删除（第 14 节） |
 | `identity_baseline` | `term_identity_baseline` | 第 8 版删除（第 14 节） |
-| `identity_relations`、`identity_evidence`、`identity_decisions`、`identity_decision_evidence` | `term_relations`（`same_as` / `contains` / `different_from`）、关系证据、关系裁决，旧 id 在 `term_legacy_ids` | 兼容表，另冻结一份 `legacy_*` |
-| `assertions` | `term_verdicts`（有步骤的挂原 `action_id`，没有步骤的进 `term_batches`） | 兼容表，另冻结一份 `legacy_assertions` |
-| `candidates` | `term_evidence`（`wd.wd_character`、`ccip_index.char_ext`，按证据批次生效） | 兼容表 |
+| `identity_relations`、`identity_evidence`、`identity_decisions`、`identity_decision_evidence` | `term_relations`（`same_as` / `contains` / `different_from`）、关系证据、关系裁决，旧 id 在 `term_legacy_ids` | 第 8 版删除（第 14 节） |
+| `assertions` | `term_verdicts`（有步骤的挂原 `action_id`，没有步骤的进 `term_batches`） | 核心维护的派生表（第 14 节；原来是兼容表，第 4 版之前另冻结一份 `legacy_assertions`） |
+| `candidates` | `term_evidence`（`wd.wd_character`、`ccip_index.char_ext`，按证据批次生效） | 核心维护的派生表（第 14 节） |
 | `proto_claims`、`weak_claims`、`prototypes`、`learn_state`、`identity_canonical`、`identity_scopes`、`identity_suspended`、`identity_uncertain`、`identity_claims`、`identity_anchor_*` | 判定器私有状态，没有另建核心表 | 原表，核心写 |
-| `memberships`、`tag_memberships`、`family_evidence`、`single_assets`、`lead_assets` | 由核心执行旧 SQL 算出；人物、皮肤那一片镜像进 `term_projection` | 兼容表 |
+| `memberships`、`tag_memberships`、`family_evidence`、`single_assets`、`lead_assets` | 由核心执行旧 SQL 算出；人物、皮肤那一片镜像进 `term_projection` | 核心维护的派生表 |
 | `names`（角色、皮肤、作品的） | `term_names`（按词条；画师的名字本来就在这里） | 第 8 版删除（第 14 节） |
 | `display_names` | `term_key_names`（按文字键） | 第 8 版删除（第 14 节） |
 | `name_aliases` | `term_key_aliases` | 第 8 版删除（第 14 节） |
@@ -161,7 +161,7 @@ cargo clippy --manifest-path native/terms/Cargo.toml --all-targets -- -D warning
 
 按身份的名字进 `term_names`（第 1 版就有的表，画师的名字已经在里面），只收角色、皮肤、作品（`term_tree` 里的词条）的行；第 8 版起它是这些名字的唯一权威（第 14 节）。`meta.names_projected` 记投影重建时的 `names_version`。
 
-切换（`cutover-names`，前提是角色已在核心）：一个事务里最后一次收编（必须零差异）、`names`、`display_names`、`name_aliases` 加写保护、写 `terms_names=core`、整表建投影。之后 Python 的名字写入都走 `names-command`，显示读 `term_name_*`，搜索走 `names-search`。
+切换（`cutover-names`，前提是角色已在核心）：一个事务里最后一次收编（必须零差异）、`names`、`display_names`、`name_aliases` 加写保护、写 `terms_names=core`、整表建投影。之后 Python 的名字写入都走 `names-command`，显示读 `term_name_*`，搜索走 `names-search`。这个命令和别的收编、切换命令已随 #201 第 4 步删除（第 14 节）。
 
 ## 11. 第 6 版（2026-09-30，派生表物理压缩）
 
@@ -171,11 +171,11 @@ cargo clippy --manifest-path native/terms/Cargo.toml --all-targets -- -D warning
 
 2026-10-01 起，提交后的 VACUUM 先检查物理行安全性：存在无索引、无 INTEGER PRIMARY KEY 的隐式 rowid 表时跳过整库空间回收并清理 pending，保留物理行，不在每次启动重复尝试。已有 WITHOUT ROWID 派生表转换仍提交；文件可能保留空闲页。安全检查只在空间维护 pending 时读取 schema 元数据，不扫描业务行；正常启动不做整库检查。只有索引或整数主键保护物理行的表才允许 VACUUM；忙或空间不足仍保留待重试标记。升级和直接 cutover 的备份都用 SQLite backup API，保留 WAL 与隐式 rowid。
 
-历史核验留下的持久 shadow_* 副本被清除；之后 verify-characters 用连接内 TEMP 影子逐表精确比较，结束即清除，不反复扩大主文件。收编预演的持久影子保持原协议。提交后仅在 terms_compact_pending 标记存在时做 VACUUM；忙或空间不足时，升级已经成功、数据有效，空间回收延后至下次启动重试，成功后清标记。不会每次正常启动都 VACUUM。
+历史核验留下的持久 shadow_* 副本被清除（同一步也在第 8 版之前的升级里执行）；之后的核对用连接内 TEMP 影子逐表精确比较，结束即清除，不反复扩大主文件（这套影子核对随 #201 第 4 步删除）。提交后仅在 terms_compact_pending 标记存在时做 VACUUM；忙或空间不足时，升级已经成功、数据有效，空间回收延后至下次启动重试，成功后清标记。不会每次正常启动都 VACUUM。
 
 合成库：191,152,128 → 143,118,336 字节，为旧库 90,427,392 字节的 1.583×。备份另占 179,621,888 字节，不计入活跃库比例；迁移仍需要备份及 SQLite 临时空间。没有降低题材证据入库阈值。
 
-直接调用四类 cutover 命令时，核心也会在切换前生成 `library-backups/terms-before-cutover-领域-唯一值.sqlite`，覆盖绕过 App 入口的调用。备份失败停止切换，重复切换不再产生备份；App 原有备份保留。
+直接调用四类 cutover 命令时，核心也会在切换前生成 `library-backups/terms-before-cutover-领域-唯一值.sqlite`（这些命令已随 #201 第 4 步删除）。
 
 ## 12. 第 7 版（2026-09-30，放弃身份策略 v2）
 
@@ -188,17 +188,17 @@ Python HTTP / Store 退出生产包不等于数据库读写消费者退出。下
 | 结构 | 结论与实际消费者 |
 |---|---|
 | `entities` | 第 8 版删除（第 14 节）：身份只在 `terms` / `term_tree` 里。（`links`、`work_review` 也在第 8 版删除。） |
-| `assertions`、`candidates` | 保留。`character_graph.rs`、`character_import.rs` 与 `character_projection.rs` 执行 hybrid 判定和镜像；`http_browse.rs`、`http_characters.rs` 读取；`character_commands.rs` 撤销仍恢复人工认领。 |
-| `identity_relations`、`identity_evidence`、`identity_decisions`、`identity_decision_evidence` | 保留（第 8 版起 `identity_relations` 的两端引用 `terms(key)`）。`character_identity.rs` 提议关系、`character_graph.rs` 重建身份图，`legacy_characters.rs` 从核心映射关系/决议；`http_characters.rs` 读取。 |
+| `assertions`、`candidates` | 保留，第 8 版起是核心维护的派生表（第 14 节）：权威分别是 `term_verdicts` 和证据批次。`character_commands.rs` 写人工结论时同事务维护 `assertions`、撤销时按有效裁决对齐；写证据的命令同事务按图刷新 `candidates`（`character_projection::refresh_candidates`）；判定 SQL、`http_browse.rs`、`http_characters.rs` 按索引读。 |
+| `identity_relations`、`identity_evidence`、`identity_decisions`、`identity_decision_evidence` | 第 8 版删除（第 14 节）：关系、关系证据和决议只在核心里，读者按同形片段 `character_relations.rs` 读。 |
 | `identity_canonical`、`identity_scopes`、`identity_suspended`、`identity_uncertain` | 保留（`identity_baseline` 第 8 版删除，基线只在 `term_identity_baseline` 里）。`character_graph.rs` / `character_projection.rs` 的基线、代表身份、成员范围和不确定归属；`character_commands.rs` 修改与撤销，`character_learning.rs` 快照指纹读取。基线顺序有语义。 |
 | `identity_anchor_decisions`、`identity_anchor_history`、`identity_pairs`、`meta.identity_bank` | 保留。`http_anchors.rs` / `http_characters.rs` 读取锚点及距离，`character_commands.rs` 裁决和撤销追加锚点历史；`character_learning.rs` 使用锚点决议。`identity_pairs` 的持久距离仍供现行读取，不因没有日常写入口删除历史缓存。 |
 | `memberships`、`tag_memberships`、`family_evidence`、`single_assets`、`lead_assets` | 保留。`character_projection.rs` 和 `character_sql/` 的判定 SQL 生成；`http_browse.rs` / `http_characters.rs` 读取；研究计算 `web/learn.py（#9 已删除）` / `web/identity.py（#9 已删除）` 使用隔离快照。 |
 | `asset_tags`、`general_hits`、`asset_rating` | 保留为核心派生视图。`legacy_labels.rs` 切换时删除同名旧物理表并安装视图；`http_browse.rs` / `http_app.rs` 以及角色判定 SQL 读取。不能把视图当作已退役物理表删掉。 |
-| `actions`、`meta`、`term_legacy_ids` | 保留。`actions.before_json`、`undone` 与物理行 ID 是统一历史/撤销输入；`character_commands.rs`、`legacy_artists.rs`、`legacy_characters.rs` 用它们恢复旧动作及旧关系/决议 ID。`meta` 保存版本、切换标记、写保护钥匙与恢复状态。 |
+| `actions`、`meta`、`term_legacy_ids` | 保留。`actions.before_json`、`undone` 与物理行 ID 是统一历史/撤销输入；`character_commands.rs`、`store.rs` 用它们恢复旧动作，`character_relations.rs`、`character_identity.rs` 按 `term_legacy_ids` 给出旧关系/决议 ID。`meta` 保存版本、切换标记、写保护钥匙与恢复状态。 |
 | `term_identity_baseline`、`term_tree` | 保留。核心正式结构状态：身份由 `character_entities.rs` 建出，结构、资料、合并、导入命令和 `character_graph.rs` 直接写；不是可丢弃的影子。 |
 | `term_*` 证据、批次、有效集、名字与投影；`terms` | 保留。`store.rs` / `package.rs` 导入正式证据、裁决与投影；`names_commands.rs` / `names_view.rs` 维护名字。追加证据/批次与已撤销动作不能仅按当前投影裁剪。 |
-| `artist_verdicts`、`legacy_asset_tags`、六张 `legacy_*` 冻结副本 | 已有 v4 条件删除，沿用 `schema::v4` 与各 `cutover`。未切换的 `artist_verdicts` 仍是 `legacy_artists.rs` 的升级输入；不能提前删除。六张表的确切名单见 `legacy_characters::FROZEN_COPIES`。 |
-| 持久 `shadow_*` | 已切角色库沿用 v6 清理；核验改用 TEMP 影子。未切换的收编预演仍由 `legacy_characters.rs` 使用，不新增无条件删除。 |
+| `artist_verdicts`、`legacy_asset_tags`、六张 `legacy_*` 冻结副本 | 已有 v4 条件删除（`schema::v4`）；新建图库由 `new_library` 删掉 `artist_verdicts`。六张表的确切名单见 `legacy_characters::FROZEN_COPIES`。 |
+| 持久 `shadow_*` | 已切角色库沿用 v6 清理（按名字前缀删）。影子核对与收编预演随 #201 第 4 步删除。 |
 | `identity_claims`、`identity_calibration` 及两个退役 meta 键 | 已有 v7 删除，见第 12 节；不重复建第二个删除迁移。 |
 
 `family_confirmed`、`membership_rules`、`variant_memberships`、`ambiguous_claims`、`identity_nodes` 等派生视图保留：新建图库由 `app_create_schema.sql` 建出，第 8 版迁移把其中读 `entities` 的改为读核心表（第 14 节），用于现行归属规则和 `http_characters.rs` 读取，不是旧路由转发的存储。
@@ -211,11 +211,11 @@ Python HTTP / Store 退出生产包不等于数据库读写消费者退出。下
 
 升级与回退按 [ARCHITECTURE_DIRECTION.md](ARCHITECTURE_DIRECTION.md)「已有核心库的显式升级边界」执行：词条 5/6/7 → 8 仅提交应用库，源库保持原样；没切换完的旧图库不再升级（第 14 节）。同步、识别、索引和 worker 各自提交、恢复，没有跨库原子事务。注册或提交后事件失败要报告已提交，不能冒称回滚。恢复前停止所有连接；词条升级恢复应用库备份，并处理旧 WAL/SHM。禁止直接用旧程序打开新格式。
 
-## 14. 第 8 版（2026-10-19，#201 第 2 步）
+## 14. 第 8 版（2026-10-19 起，#201）
 
-#201 让 `term_*` 成为唯一权威、收掉旧兼容表的第一步（方案与用户决定见 #201；之后各领域切换时，第 8 版的迁移内容随 PR 累积，第一个公开测试版发布前定稿，中间形态不写迁移）。第 2 步不删表；第 3 步按领域（别名 → 显示名 → 名字 → 链接 → 实体与作品结构）逐个把权威切到 `term_*`，每个领域一个 PR，切完的旧表在第 8 版迁移里删除。还没切的旧兼容表照旧是权威。
+#201 让 `term_*` 成为唯一权威、收掉旧兼容表（方案与用户决定见 #201；第 8 版的迁移内容随各 PR 累积，第一个公开测试版发布前定稿，中间形态不写迁移）。做法：第 2 步加升级核对和撤销提示的两列；第 3 步按领域（别名 → 显示名 → 名字 → 链接 → 身份与作品结构）逐个把权威切到 `term_*`，切完的旧表在第 8 版迁移里核对后删除；第 4 步删掉收编与切换的机制，身份关系表切到核心，`assertions`、`candidates` 定为派生表。现在角色、皮肤、作品的身份、结构、名字、链接、关系都只在核心里；留下的旧形表只有核心维护的派生表、判定器私有状态和标签视图（第 13 节）。
 
-- **升级核对**：已有核心表的库（升级前版本 ≥ 1）里有旧表时，四个领域必须都已切到核心（`terms_artists`、`terms_labels`、`terms_characters`、`terms_names` 都是 `core`），否则拒绝升级并提示先用 `pre-v8` 版本（git 标签，指向 v8 之前最后一个 main）打开升级。切换完的库用角色的现有核对逐表比较旧表与 `term_*`；身份、链接、作品复核、身份基线和名字的旧表在退役时各自核对（见下）。有差异就拒绝升级、整体回滚，错误里带样例。还没有核心表的库（新建的库）不在这里拦。
+- **升级核对**：已有核心表的库（升级前版本 ≥ 1）里有旧表时，四个领域必须都已切到核心（`terms_artists`、`terms_labels`、`terms_characters`、`terms_names` 都是 `core`），否则拒绝升级并提示先用 `pre-v8` 版本（git 标签，指向 v8 之前最后一个 main）打开升级。切换完的库里，各张旧表在退役时各自与 `term_*` 核对（见下各领域）；有差异就拒绝升级、整体回滚，错误里带样例。还没有核心表的库（新建的库）不在这里拦。
 - **撤销提示的种类和张数**：`actions` 加 `label_kind`、`label_count` 两列（可空）。按张数写提示的六种角色步骤（设为、移出、加上、去掉、换成、标为已检查，`crates/core/src/undo_labels.rs`）写入时一并存下；之前的步骤在升级时按已存的提示解析一次回填。撤销载荷 `before_json` 不动（Python 时代的旧步骤载荷是数组，没有地方加键）。读历史时（`http_app::action_label`）用这两列把提示里的角色换成现在的名字，不再解析提示。
 - **别名**（第 3 步第一个领域）：`term_key_aliases` 是唯一权威。Danbooru 别名命令（`names_commands.rs`）直接写它，名字搜索（`names_search.rs`）和读取接口（`app_names.rs`）读它；核心写事务不再从旧表同步别名。升级时（`legacy_names::retire_aliases`）照旧表 `name_aliases` 整表同步一次，核对一致后删表，不一致就拒绝升级。新建图库不再建这张表。
 - **显示名**（第二个领域）：`term_key_names` 是按文字键的显示名的唯一权威。
@@ -232,7 +232,7 @@ Python HTTP / Store 退出生产包不等于数据库读写消费者退出。下
   - 读：选名（`names_view.rs`）、名字搜索、`http_read`、`http_characters`、`app_names`、`app_profiles` 都读 `term_names`；整表扫描的读者限定在 `term_tree` 里的词条，不把画师的名字算进去。
   - 名字版本 `names_version` 的触发器从 `names` 换到 `term_names`，只在角色、皮肤、作品的名字变化时计数（触发器带 `term_tree` 条件），画师名字的写入不计数，与原来只数 `names` 相同。增量维护显示投影时按词条找回身份 id。核心写事务不再有名字镜像，`after_write` 只维护显示投影。
   - 升级时（`legacy_names::retire_names`）照旧表整表同步一次、逐行核对，一致就填 `seq` 并删表，不一致就拒绝升级。三张名字旧表都退役之后才装新的版本触发器，退役时的同步不计入 `names_version`。
-  - `cutover-names`、`sync-names`、`verify-names` 保留命令：切换只写 `terms_names=core` 并建投影，后两个没有旧表要比，报告总是干净的；第 4 步随兼容层删除。
+  - `cutover-names`、`sync-names`、`verify-names` 随第 4 步删除（见下）。
   - 新建图库不再建 `names`。
   - 研究指纹照旧计入 `term_names`（之前镜像表也在指纹里），写名字对研究结果的影响不变。
 - **链接**（第四个领域）：`term_links` 是角色、皮肤、作品链接的唯一权威（画师等别的词条的链接本来就在这里，`(system, key)` 全局唯一）。
@@ -253,8 +253,22 @@ Python HTTP / Store 退出生产包不等于数据库读写消费者退出。下
   - 写：新身份由 `character_entities::create` 一次写进 `terms` 和 `term_tree`（原来的 `INSERT INTO entities` 加命令末尾的镜像）；改结构和属性直接改 `term_tree`，改类型改 `terms.kind`。`mirror_state`、`born` 随之删除。
   - 名字版本 `names_version` 的触发器从 `entities` 换到 `term_tree`（只在身份的列变化时计数，复核三列和 `seq` 不算）和 `terms`（只算角色、皮肤、作品改类型）；显示投影追踪「改动前的身份」的 BEFORE 触发器也改挂这两张表，记下的行是 `ENTITIES` 的形状。
   - 角色学习发布的输入指纹里 `entities` 这一项改按片段读（不含三列），数据不变时指纹不变。
-  - 升级时（`legacy_characters::retire_entities`，放在别的旧表退役之后，因为外键开着时引用 `entities` 的表要先删）：核心里还没有身份（新建的库）就照旧表建一次；然后逐行核对（含 rowid 与 `seq`），不一致就拒绝升级（第 7 版每条改身份的命令都同步镜像过，不先同步）。引用 `entities` 的视图按核心表重写（表名换成片段，列逐一对应）；`identity_relations` 的两端改为 `REFERENCES terms(key)`，照原来的建表语句重建，行、索引和触发器原样保留；最后删表。核心从不承载的三列随表删除。`entities` 移出角色收编的兼容表清单、写保护清单和预检。
+  - 升级时（`legacy_characters::retire_entities`，放在别的旧表退役之后，因为外键开着时引用 `entities` 的表要先删）：核心里还没有身份（新建的库）就照旧表建一次；然后逐行核对（含 rowid 与 `seq`），不一致就拒绝升级（第 7 版每条改身份的命令都同步镜像过，不先同步）。引用 `entities` 的视图按核心表重写（表名换成片段，列逐一对应）；最后删表。引用 `entities` 的 `identity_relations` 在这之前已经退役（见下）。核心从不承载的三列随表删除。`entities` 移出角色收编的兼容表清单、写保护清单和预检。
   - 新建图库照旧由 `app_create_schema.sql` 建出 `entities` 和旧形的视图，同一个第 8 版迁移把它们改成上面的样子（建库与升级走一条路）。
+- **身份关系**（第 4 步二的后一半）：`term_relations`、关系证据（带 `relation_id`、方法 `identity_evidence` 的 `term_evidence`）、关系裁决（带 `relation_id` 的 `term_verdicts`）和旧编号 `term_legacy_ids` 是唯一权威。
+  - 读：`character_relations` 的四个片段 `RELATIONS`、`EVIDENCE`、`DECISIONS`、`DECISION_EVIDENCE` 给出与原来四张表同形的行（列序同原表；`RELATIONS` 另带核心关系 id `core_id`），是原来核心每次写后重算这几张表用的同一段映射。读者：提议与决议（找已有关系、读现在的状态）、身份图（已接受的关系、未复核的继承层级）、身份对比读取（`http_characters`）、角色学习的输入指纹（按原来的列序读，数据不变时指纹不变）。原来没写 ORDER BY 的读者按旧查询计划的实际顺序补上：待定关系按 `id`；找一对身份之间的重复关系时先 `a` 是第一个参数的方向（原来按两个方向依次走唯一索引）。
+  - 写：命令只写核心；原来写完按核心重算兼容表的 `project_relation` 删除。
+  - 升级时（`legacy_characters::retire_relations`，放在身份之前，因为 `identity_relations` 引用 `entities`）：四张旧表与片段逐表核对，第 7 版每条改关系的命令都重算过它们，所以不一致就拒绝升级；一致就删表（引用别人的在前）。四张表移出写保护清单。
+  - 新建图库照旧由 `app_create_schema.sql` 建出四张空表，同一个第 8 版迁移删掉。
+- **第 4 步（一）：删除收编与切换的机制**（用户 2026-10-20 决定）：
+  - 删除的：命令 `sync-*`、`verify-*`、`cutover-*`（画师、标签、角色、名字），以及它们背后的收编同步、收编预检、按历史重建人工结论（S2）、画师从溯源库收编（`legacy_artists.rs` 整个删除，资产命名空间 `LIBRARY` 移到 `store`）、标签与名字的切换。第 8 版拒绝没切换完的图库，它们再也遇不到真实数据。
+  - 新建图库：原来在空表上依次跑四个领域的切换，现在由 `new_library::switch` 在一个核心写事务里做完，结果与原来逐行相同：三个空的全库证据批次（溯源；候选的 CCIP、WD）、删 `artist_verdicts`、标签三张表换成视图、删 `assertions` 上的身份触发器、派生表与核心独占的表加写保护、派生表压缩、四个切换标记、`names_version` 从 0 起并建显示投影。新建图库不再产生切换前备份（没有要备份的数据）。
+  - 保留的：各 `retire_*`，写保护名单 `GUARDED`，标签视图 `legacy_labels::VIEWS` 与 `concept_by_name`，名字投影的维护。读切换标记的运行时检查暂时保留。
+  - 第 4 步二：四张身份关系表切到核心（见上）；`assertions`、`candidates` 定为派生表（见下）；Python 时代的输出习惯另见 #252，发布后做；核心 5/6/7 → 8 的升级路径保留。
+- **人工结论与候选是派生表**（第 4 步二的前一半，用户 2026-10-20 决定）：`assertions`、`candidates` 与 `memberships`、`family_evidence` 同等对待，不算兼容层。
+  - 权威：人工结论是 `term_verdicts`（`assertions` = 每个 (图, 身份) 的有效裁决），候选是证据批次（`candidates` = 当前有效证据按 (图, 身份, 来源) 取最大分；策略未设置时身份沿破坏式合并解析到代表）。核心命令在同一个事务里维护它们（`character_commands` 写结论与撤销、`character_projection::refresh_candidates` 按图刷新候选），表、索引、写保护照旧，判定 SQL 和读者按索引直接查。
+  - 为什么不改成从核心现算：实测（#201 评论，合成 5 万张图，负载下只看量级）判定 SQL 的增量重算从约 0.5 ms 变成约 230 ms，浏览里逐张查「被否定过」从约 0.2 ms 变成约 650 ms。有效裁决视图要对全部裁决开窗，候选要对全部证据聚合，按图的条件推不进去。
+  - 原来第 8 版升级时由核心主数据生成 TEMP 影子、与兼容表逐表比对的机制（`verify_in`、`COMPAT`、影子表）随之删除：派生表随时可以由权威重算，各张旧表在退役时各自核对。
 - 升级沿用现有入口：桌面和网页的升级界面（#193）、`http --upgrade`、`illustash-terms migrate`；升级前备份 `library-backups/terms-v<旧版>-before-v8-*.sqlite`，失败整体回滚。应用层（`app_upgrade.rs`）对没切换完的旧图库（应用 schema 36 以前、切换标记缺失或未完成、更早的 source 布局或缺索引元数据）打开和升级都直接拒绝，提示先用 `pre-v8` 版本；原来为它们准备的分阶段成对发布路径已删除。
-- 对照：新对照基准（`native/terms/tests/baseline.rs`、`contracts.rs`，规则见 `native/terms/tests/common/baseline.rs`）的每个 v7 检查点都经这次升级再重放，接口回复逐字节不变；新加的列（`actions` 两列、`term_names.seq`、`term_tree.seq`）在比较器里登记排除，由历史提示和读者排序的回复比较覆盖；身份的属性在比较器里照原来的形状算进 `terms.attrs` 比较（`term_tree` 上的属性列不另比）。`native/terms/tests/v8_upgrade.rs` 覆盖拒绝（身份、链接或作品复核的旧表与核心不一致、没切换完）不留痕、回填，以及各张旧表的内容原样进入核心、视图改读核心表、`identity_relations` 的外键。
+- 对照：新对照基准（`native/terms/tests/baseline.rs`、`contracts.rs`，规则见 `native/terms/tests/common/baseline.rs`）的每个 v7 检查点都经这次升级再重放，接口回复逐字节不变；退役的旧表（含基准录制之后才退役的四张身份关系表，它们录下的变化一并略去）不比，内容在核心表里比；新加的列（`actions` 两列、`term_names.seq`、`term_tree.seq`）在比较器里登记排除，由历史提示和读者排序的回复比较覆盖；身份的属性在比较器里照原来的形状算进 `terms.attrs` 比较（`term_tree` 上的属性列不另比）。`native/terms/tests/v8_upgrade.rs` 覆盖拒绝（身份、身份关系、链接或作品复核的旧表与核心不一致、没切换完）不留痕、回填，以及各张旧表的内容原样进入核心、视图改读核心表、身份关系按片段读出原来的行。
 
