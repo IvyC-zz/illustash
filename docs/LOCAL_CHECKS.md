@@ -29,7 +29,7 @@
 | 用途 | 命令 | 行为 |
 |---|---|---|
 | 全量、`local_acceptance.py run`、单独的 release 构建 | `collab_run.py run -- <命令>` | 占 heavy 槽，被占时排队 |
-| 计时、性能测量 | `collab_run.py timing -- <命令>` | 同时占 heavy 和 vm（要么都拿到，要么都不占），再等整机 CPU 连续 30 秒占用不超过 10% 才开始；15 分钟内等不到就放开槽位、退出 75，并列出最占 CPU 的进程。`--idle-cpu`、`--idle-for`、`--idle-timeout` 可调，调过的值写进 PR 的测量口径 |
+| 计时、性能测量 | `collab_run.py timing -- <命令>` | 等待期间不占槽：先等 heavy 和 vm 都空出、且没有普通 `run` 在排队（有就让它们先走），再等整机 CPU 最近 30 秒平均占用不超过 20%，然后同时占两个槽开始；已开跑的照常跑完。槽位空着、CPU 却累计 15 分钟都没闲下来，就退出 75 并列出最占 CPU 的进程。门槛可在 `run.json` 的 `timing` 一节或用 `--idle-cpu`、`--idle-for`、`--idle-timeout` 调。开跑时 stderr 有一行 `CPU idle: …% busy on average over the last 30s (max …; limit …)`，照抄进 PR 的测量口径 |
 | 虚拟机 | `collab_run.py run --slot vm -- tart run …` | 见下文「macOS 实机测试」 |
 | Windows 远端构建与验收 | `collab_run.py run --slot windows -- …` | 与本机槽位互不阻塞 |
 | 开发期的编译和定向测试 | `collab_run.py bg -- <命令>` | 不排队，直接以后台优先级运行 |
@@ -44,6 +44,8 @@
 - 后台：`cargo build`、`cargo test`、`cargo clippy`、`cargo check`、`cargo nextest`、`python -m unittest`；直接写 `taskpolicy -b …` 也放行，经 SSH 在别的机器上跑的不管
 
 钩子只看代理直接发起的命令，脚本内部调用的（例如 `check_all.sh` 里的 cargo）不受影响。`cargo run` 不在范围内：常驻的宿主进程不应长期占着槽位或被降级。
+
+`status` 区分三种状态：`heavy #0 running`（占着槽在跑）、`waiting for an idle CPU, holds no slot`（在等空闲，不占槽）、`waiting for the slot`（在排队）。2026-10-21 之前启动的计时进程用旧逻辑，等空闲时仍占着槽，显示为 `held, not started`，等它自己超时或开跑。
 
 **运行历史**：每次 `run`、`timing`、`bg` 结束（包括排不上、等不到空闲而放弃的）都追加一行到状态目录的 `history.jsonl`：模式、槽位、会话、仓库、命令、排队、等空闲和执行的秒数、退出码、开始时的负载，以及当时别的槽位是否被占。`collab_run.py history` 按槽位汇总最近 7 天（次数、失败、放弃、排队和执行时长的中位数与最大值），`--raw N` 列出最近 N 次。讨论排队代价、全量耗时时以这里的数据为准，引用时写明时间范围。
 
