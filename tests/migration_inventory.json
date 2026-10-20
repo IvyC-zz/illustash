@@ -277,7 +277,7 @@
 
  "native/terms/src/desktop_shell.rs":"da29ec13b1627ef6209d295d40e4b4a896385053da04ba54ec89c32d711edffb",
 
- "native/terms/src/http.rs":"75e56008addadf106bddd3ef0b38b3bd68bc90112d603a3a5b0e104a5510deec",
+ "native/terms/src/http.rs":"24a4bb039d5b09e45025eb97583f135b2f511e6d73c8f8fe1bdfdd0467e69b30",
 
  "native/terms/src/http_app.rs":"628b4421ca8433ff7ef3857876be34126033884cf7cffd9b97918c179cda150d",
 
@@ -291,7 +291,7 @@
 
  "native/terms/src/http_host_post.rs":"ce4bbeb64e45db192a867d0e30d55910302d03cb51d7112125a2a8aee6203eb3",
 
- "native/terms/src/http_json.rs":"9f406b4e74a52a5d869e1d16a76b8e5590eb46561d495748da0d466fc576c5ba",
+ "native/terms/src/http_json.rs":"08ca9bcb17db4f8d9a38c25794d7958fa11e1ac35d176990b7a2aca92539b482",
 
  "native/terms/src/http_local.rs":"24f94e13b95f2452fd0d6839adbbc6b0917dae3aa30e45b3147b760aa4c1bb49",
 
@@ -319,7 +319,7 @@
 
  "native/terms/src/platform_process.rs":"66a45606b4a65b14b2725679bbae0e7e5445e63fddede8e804c2e8d4cca893b0",
 
- "native/terms/src/read_harness.rs":"0a2ea64de2ccac34a5791978fe64abd5e5b042257191552fea408efed64849ab",
+ "native/terms/src/read_harness.rs":"858e975d3a99b4228250120f9120281a0ea4e0413deae915f27068df1a00ce84",
 
  "native/terms/src/recognition_compute/anchor_snapshot.rs":"ac96b3a6beff4b71c663ab1a7698d05d37317f1af16a6af7becf4e04616103ce",
 

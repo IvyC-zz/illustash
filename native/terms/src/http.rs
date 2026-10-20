@@ -40,7 +40,7 @@ pub(crate) fn json_response(
 ) -> io::Result<Response<Box<dyn Read + Send>>> {
     let accepted =
         request.headers().iter().find(|h| h.field.equiv("Accept-Encoding")).map(|h| h.value.as_str()).unwrap_or("");
-    let mut bytes = payload.dump().into_bytes();
+    let mut bytes = payload.dump_reply().into_bytes();
     let mut encoding = None;
     if bytes.len() >= 1024 && accepts_gzip(accepted) {
         let mtime =
