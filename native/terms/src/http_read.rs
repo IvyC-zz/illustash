@@ -4,6 +4,7 @@ use crate::{
     http::LibraryContext,
     http_json::Json,
     names_view::{Choice, View},
+    sql_fragments::{hybrid, visible, SWITCHED},
     Error, Result,
 };
 use rusqlite::{params, params_from_iter, types::ValueRef, Connection, OpenFlags, OptionalExtension};
@@ -38,9 +39,6 @@ pub const CORE_ROUTES: &[&str] = &[
     "/api/similar",
     "/api/clusters",
 ];
-/// A picture `m` that is neither a hidden duplicate nor excluded.
-pub const VISIBLE: &str = "NOT EXISTS(SELECT 1 FROM duplicates h WHERE h.uuid=m.uuid AND h.hidden=1) \
-                           AND NOT EXISTS(SELECT 1 FROM excluded x WHERE x.uuid=m.uuid)";
 /// 作品和它的全部子作品（`UNION` 防旧数据成环），参数是作品 id。
 pub const TREE: &str = "WITH RECURSIVE tree(id) AS (
   SELECT t.key
@@ -54,11 +52,20 @@ pub const TREE: &str = "WITH RECURSIVE tree(id) AS (
   JOIN terms t ON t.id=r.term_id
   WHERE t.kind='work')";
 
+/// A work and all its sub-works; a work that does not exist (or was merged) is refused.
+pub(crate) fn work_tree(c: &Connection, work: &str) -> Result<Vec<String>> {
+    let found = format!("SELECT EXISTS(SELECT 1 FROM {ENTITIES} WHERE id=? AND kind='work' AND merged_into IS NULL)");
+    if !c.query_row(&found, [work], |r| r.get::<_, bool>(0))? {
+        return Err(Error::Invalid("作品不存在".into()));
+    }
+    strings(c, &format!("{TREE} SELECT id FROM tree"), &[work])
+}
+
 pub(crate) use crate::compat_text::{python_repr, trim, whitespace};
 fn cut(s: &str, n: usize) -> String {
     s.chars().take(n).collect()
 }
-fn like(s: &str) -> String {
+pub(crate) fn like(s: &str) -> String {
     format!("%{}%", s.replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_"))
 }
 pub(crate) fn normalize(s: &str) -> String {
@@ -355,7 +362,7 @@ pub(crate) fn display(c: &Connection, v: Json) -> Result<Json> {
     display_skin(c, v, false)
 }
 pub(crate) fn display_skin(c: &Connection, mut v: Json, skin: bool) -> Result<Json> {
-    let id = v.get("id").expect("http_read internal invariant").text().to_owned();
+    let id = v.field("id").text().to_owned();
     let info: String = c.query_row("SELECT entity_info(?,?)", params![&id, skin as i64], |r| r.get(0))?;
     v.extend(serde_json::from_str(&info).map_err(|e| Error::Invalid(e.to_string()))?);
     let sql = format!(
@@ -383,8 +390,7 @@ pub(crate) fn display_skin(c: &Connection, mut v: Json, skin: bool) -> Result<Js
         };
         v.set("work_name", name.into());
     }
-    let policy = "SELECT value FROM meta WHERE key='identity_policy'";
-    if c.query_row(policy, [], |r| r.get::<_, String>(0)).optional()?.as_deref() == Some("hybrid") {
+    if hybrid(c)? {
         let node = "SELECT node_type,character_id,variant_id,canonical_id FROM identity_nodes WHERE id=?";
         if let Some(node) = rows(c, node, &[&id])?.into_iter().next() {
             v.extend(node);
@@ -392,21 +398,28 @@ pub(crate) fn display_skin(c: &Connection, mut v: Json, skin: bool) -> Result<Js
     }
     Ok(v)
 }
-fn entities(c: &Connection, q: &str) -> Result<Json> {
-    let q = cut(trim(q), 160);
+/// Fills the temporary table `name_matches` (`entity`, `rank`) with the identities whose names match `q`, each
+/// as the identity it was merged into, with its best rank; an empty `q` leaves the table empty.
+pub(crate) fn match_names(c: &Connection, q: &str) -> Result<()> {
     let table = "name_matches(entity TEXT PRIMARY KEY,rank INTEGER NOT NULL)";
     c.execute_batch(&format!("CREATE TEMP TABLE IF NOT EXISTS {table}; DELETE FROM name_matches;"))?;
-    if !q.is_empty() {
-        let mut hits: HashMap<String, i64> = HashMap::new();
-        for (id, rank) in crate::names_search::hits(c, &q)? {
-            let id = crate::character_commands::resolve(c, &id)?;
-            let v = hits.entry(id).or_insert(-1);
-            *v = (*v).max(rank);
-        }
-        for (id, rank) in hits {
-            c.execute("INSERT INTO name_matches VALUES (?,?)", params![id, rank])?;
-        }
+    if q.is_empty() {
+        return Ok(());
     }
+    let mut hits: HashMap<String, i64> = HashMap::new();
+    for (id, rank) in crate::names_search::hits(c, q)? {
+        let id = crate::character_commands::resolve(c, &id)?;
+        let v = hits.entry(id).or_insert(-1);
+        *v = (*v).max(rank);
+    }
+    for (id, rank) in hits {
+        c.execute("INSERT INTO name_matches VALUES (?,?)", params![id, rank])?;
+    }
+    Ok(())
+}
+fn entities(c: &Connection, q: &str) -> Result<Json> {
+    let q = cut(trim(q), 160);
+    match_names(c, &q)?;
     let matched = if q.is_empty() { "" } else { "JOIN name_matches sm ON sm.entity=e.id" };
     let ranking = if q.is_empty() { "" } else { "sm.rank DESC," };
     let sql = format!(
@@ -415,7 +428,7 @@ fn entities(c: &Connection, q: &str) -> Result<Json> {
             FROM (SELECT uuid FROM memberships WHERE entity=e.id
                   UNION ALL
                   SELECT uuid FROM tag_memberships WHERE entity=e.id) m
-            WHERE {VISIBLE}) AS count,
+            WHERE {visible}) AS count,
            (SELECT group_concat(value,' · ') FROM (
               SELECT DISTINCT n.value
               FROM term_names n
@@ -426,7 +439,8 @@ fn entities(c: &Connection, q: &str) -> Result<Json> {
          {matched}
          WHERE e.parent_id IS NULL AND e.kind<>'work' AND e.merged_into IS NULL
          ORDER BY {ranking}count DESC,entity_name(e.id),e.id
-         LIMIT 30"
+         LIMIT 30",
+        visible = visible("m")
     );
     let result = rows(c, &sql, &[&like(&q)])?.into_iter().map(|v| display(c, v)).collect::<Result<Vec<_>>>()?;
     c.execute("DELETE FROM name_matches", [])?;
@@ -452,7 +466,8 @@ pub(crate) fn works(c: &Connection, q: &str) -> Result<Json> {
          SELECT count(DISTINCT m.uuid)
          FROM memberships m
          JOIN {ENTITIES} e ON e.id=m.entity
-         WHERE e.work_id IN (SELECT id FROM tree) AND {VISIBLE}"
+         WHERE e.work_id IN (SELECT id FROM tree) AND {visible}",
+        visible = visible("m")
     );
     for mut v in rows(c, &sql, &[])? {
         let id = v.field("id").text();
@@ -633,11 +648,7 @@ fn audit_size(path: &str, q: &HashMap<String, String>) -> std::result::Result<us
 /// finishes. Its failure reason lives in Python and can change after publication. Until all four modules are
 /// ready, bootstrap must use that live refusal, not a stale startup value.
 fn switched(c: &Connection) -> Result<bool> {
-    let sql = "
-        SELECT count(*)=4
-        FROM meta
-        WHERE key IN ('terms_artists','terms_labels','terms_characters','terms_names') AND value='core'";
-    Ok(c.query_row(sql, [], |r| r.get::<_, bool>(0))?)
+    Ok(c.query_row(SWITCHED, [], |r| r.get::<_, bool>(0))?)
 }
 /// The artist reads that still need provenance.sqlite see it, read-only, as `prov`.
 fn attach_provenance(c: &Connection, context: &LibraryContext, path: &str) -> Result<()> {
@@ -666,10 +677,11 @@ fn read_library(
                 "SELECT tag,count(*) AS count
                  FROM asset_tags m
                  JOIN assets USING(uuid)
-                 WHERE {VISIBLE} AND tag LIKE ? ESCAPE '\\'
+                 WHERE {visible} AND tag LIKE ? ESCAPE '\\'
                  GROUP BY tag
                  ORDER BY count DESC,tag
-                 LIMIT 60"
+                 LIMIT 60",
+                visible = visible("m")
             );
             Json::Array(rows(c, &sql, &[&like(&cut(trim(value("q")), 60))])?)
         }

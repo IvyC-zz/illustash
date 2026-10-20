@@ -2,23 +2,14 @@
 use crate::{
     http::LibraryContext,
     http_json::{parse_python, Json},
-    http_read::{display, rows, strings, VISIBLE},
+    http_read::{display, rows, strings},
+    sql_fragments::{hybrid, rating, visible, SWITCHED},
     undo_labels::UndoLabel,
     Error, Result,
 };
 use rusqlite::Connection;
 use std::collections::{HashMap, HashSet};
 
-pub(crate) fn rating(alias: &str, nsfw: &str) -> Result<String> {
-    if !["", "hide", "only"].contains(&nsfw) {
-        return Err(Error::Invalid("未知内容筛选".into()));
-    }
-    Ok(if nsfw.is_empty() {
-        String::new()
-    } else {
-        format!(" AND {}coalesce({alias}.uuid IN (SELECT uuid FROM asset_rating WHERE rating IN ('questionable', 'explicit')),0)", if nsfw=="hide" { "NOT " } else { "" })
-    })
-}
 fn entity_name(c: &Connection, id: &str) -> Result<Option<String>> {
     let value = display(c, Json::object([("id", id.into())]))?;
     Ok(value.get("name").map(|v| v.text().to_owned()))
@@ -41,8 +32,8 @@ fn counted(r: &Json) -> Option<(UndoLabel, String)> {
 }
 
 pub(crate) fn action_label(c: &Connection, r: &Json) -> Result<String> {
-    let label = r.get("label").expect("http_app internal invariant").text();
-    let before = parse_python(r.get("before_json").expect("http_app internal invariant").text())?;
+    let label = r.field("label").text();
+    let before = parse_python(r.field("before_json").text())?;
     let before = if let Json::Array(v) = &before {
         if v.len() == 1 && matches!(&v[0], Json::Object(fields) if fields.len()==1) {
             v[0].get("terms")
@@ -96,11 +87,7 @@ pub(crate) fn action_label(c: &Connection, r: &Json) -> Result<String> {
     }
     let sweep = counted.as_ref().filter(|(kind, _)| *kind == UndoLabel::Sweep).map(|(_, n)| n);
     if sweep.is_some() && ids.is_empty() {
-        ids = strings(
-            c,
-            "SELECT entity FROM reviews WHERE action_id=?",
-            &[&r.get("id").expect("http_app internal invariant").integer().to_string()],
-        )?;
+        ids = strings(c, "SELECT entity FROM reviews WHERE action_id=?", &[&r.field("id").integer().to_string()])?;
     }
     if ids.len() == 1 {
         if let Some(name) = entity_name(c, &ids[0])? {
@@ -117,13 +104,9 @@ pub(crate) fn action_label(c: &Connection, r: &Json) -> Result<String> {
 pub fn read(c: &Connection, context: &LibraryContext, q: &HashMap<String, String>) -> Result<(Json, u16)> {
     let nsfw = q.get("nsfw").map(String::as_str).unwrap_or("");
     let rated = rating("a", nsfw)?;
-    let visible = VISIBLE.replace("m.uuid", "a.uuid");
+    let visible = visible("a");
     let total: i64 = c.query_row(&format!("SELECT count(*) FROM assets a WHERE {visible}{rated}"), [], |r| r.get(0))?;
-    let hybrid: bool =
-        c.query_row("SELECT EXISTS(SELECT 1 FROM meta WHERE key='identity_policy' AND value='hybrid')", [], |r| {
-            r.get(0)
-        })?;
-    let confirmed = if hybrid {
+    let confirmed = if hybrid(c)? {
         "SELECT uuid FROM family_confirmed"
     } else {
         "SELECT uuid FROM assertions WHERE status='confirmed'"
@@ -136,9 +119,9 @@ pub fn read(c: &Connection, context: &LibraryContext, q: &HashMap<String, String
     let indexed: String = c.query_row("SELECT value FROM meta WHERE key='indexed'", [], |r| r.get(0))?;
     let undo = if let Some(r) = rows(c, LAST_ACTION, &[])?.into_iter().next() {
         Json::object([
-            ("id", r.get("id").expect("http_app internal invariant").clone()),
+            ("id", r.field("id").clone()),
             ("label", action_label(c, &r)?.into()),
-            ("ts", r.get("ts").expect("http_app internal invariant").clone()),
+            ("ts", r.field("ts").clone()),
         ])
     } else {
         None::<String>.into()
@@ -146,8 +129,7 @@ pub fn read(c: &Connection, context: &LibraryContext, q: &HashMap<String, String
     let read_only = if let Some(reason) = &context.read_only {
         Some(reason.clone())
     } else {
-        let switched:bool=c.query_row("SELECT count(*)=4 FROM meta WHERE key IN ('terms_artists','terms_labels','terms_characters','terms_names') AND value='core'",[],|r|r.get(0))?;
-        if switched {
+        if c.query_row(SWITCHED, [], |r| r.get::<_, bool>(0))? {
             None
         } else {
             Some("图库正在切换到词条核心，完成前只读".into())

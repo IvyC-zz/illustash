@@ -255,7 +255,7 @@ change/reassign 的选择方式二选一：
 ### 数据与 API
 
 - `curation(uuid,status,origin,created_at)` 是人工决定（`included / excluded`），**不可重建**，永远优先于规则，刷新不覆盖。`auto_rules`、`excluded` 为派生表；`excluded` = 人工排除，或规则排除且没有人工决定。写操作在同一事务内按图重算；测试 `tearDown` 核对它与重新计算的结果一致。
-- `VISIBLE` = 未被折叠 且 未被排除，用于全部列表、`/api/ids`、按条件批量操作和各类计数。`pool=excluded`（可加 `reason=photo|screenshot|text|manual`），`pool=pending`；重复页不显示已排除的图。
+- `VISIBLE` = 未被折叠 且 未被排除，用于全部列表、`/api/ids`、按条件批量操作和各类计数。`pool=excluded`（可加 `reason=photo|screenshot|text|manual`），`pool=pending`；重复页不显示已排除的图。这个条件、内容筛选（R18 指评级 `questionable`、`explicit`）以及其他 HTTP 读取共用的 SQL 条件，只在 `native/terms/src/sql_fragments.rs` 里定义一处（#205）。
 - `POST /api/curate {ids|filter,exclude,action}`，`action=exclude|include|reset`；会扩展到同组副本，整批撤销。每张图返回 `excluded`（原因）；详情返回 `excluded:{reason,origin}`、`curation`、`pending`；`/api/review-pools` 增加 `excluded:{count,reasons}` 与 `pending`。`schema_version` 升为 9。
 - **前端**：侧栏「已排除」，按原因筛选，右上角进入「待确认」；已排除页选中后「恢复收录」，待确认页「排除 / 保留」；其他页面的选择栏和详情里有「排除」，快捷键 X（在已排除页为恢复收录）。
 - **真实库**：图库约少 1%，未识别相应减少；有图的角色少了 28 个（只出现在照片/截图上）。角色列表 97 ms、未识别 86 ms、已排除页 23 ms、侧栏计数 54 ms。

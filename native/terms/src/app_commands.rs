@@ -61,7 +61,7 @@ pub(crate) fn core_error(error: impl Into<Error>) -> Error {
 }
 pub(crate) fn initialized(c: &Connection) -> Result<()> {
     crate::schema::require_current(c)?;
-    let ready: bool = c.query_row("SELECT count(*)=4 FROM meta WHERE key IN ('terms_artists','terms_labels','terms_characters','terms_names') AND value='core'", [], |r| r.get(0))?;
+    let ready: bool = c.query_row(crate::sql_fragments::SWITCHED, [], |r| r.get(0))?;
     if !ready {
         return Err(Error::Conflict("图库正在切换到词条核心，完成前只读".into()));
     }

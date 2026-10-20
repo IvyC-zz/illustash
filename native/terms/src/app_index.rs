@@ -281,7 +281,8 @@ fn candidates(lib: &Library, shared: &Path, dir: &Path, net: &crate::app_name_so
                 continue;
             }
             seen.insert(tag.to_owned());
-            rows.push(json!({"tag":tag,"short_tag":id,"copyright":cp,"post_count":posts,"overlap":(overlap*1000.0).round()/1000.0}));
+            let overlap = (overlap * 1000.0).round() / 1000.0;
+            rows.push(json!({"tag":tag,"short_tag":id,"copyright":cp,"post_count":posts,"overlap":overlap}));
             n += 1;
         }
         counts.insert(cp, if related.is_empty() { Value::Null } else { json!(n) });
@@ -390,11 +391,10 @@ impl Updater {
                         "SELECT entity_name(e.id),
                            (SELECT count(*)
                             FROM memberships m
-                            WHERE m.entity=e.id
-                              AND NOT EXISTS(SELECT 1 FROM duplicates h WHERE h.uuid=m.uuid AND h.hidden=1)
-                              AND NOT EXISTS(SELECT 1 FROM excluded x WHERE x.uuid=m.uuid))
+                            WHERE m.entity=e.id AND {visible})
                          FROM {ENTITIES} e
                          WHERE e.id=?",
+                        visible = crate::sql_fragments::visible("m"),
                         ENTITIES = crate::character_entities::ENTITIES
                     );
                     let e = c.query_row(&sql, [&id], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)))?;
@@ -561,7 +561,12 @@ impl Updater {
             self.state.clone(),
             self.network || b["allow_network"] == true,
         );
-        *state.lock().expect("index state mutex poisoned") = json!({"status":if action=="check"{"checking"}else if action=="drop"{"building"}else{"fetching"},"started_at":now()}).into();
+        let status = match action {
+            "check" => "checking",
+            "drop" => "building",
+            _ => "fetching",
+        };
+        *state.lock().expect("index state mutex poisoned") = json!({"status":status,"started_at":now()}).into();
         self.task = Some(Task::start(
             identity,
             Some(Duration::from_millis(
@@ -573,12 +578,11 @@ impl Updater {
 
                     if b["action"] == "check" {
                         let checked = candidates(&lib, &shared, &dir, &net)?;
+                        let found =
+                            checked["missing"].as_array().expect("candidates always returns a missing array").len();
                         ctx.check()?;
                         write_check(&dir.join("check.json"), &checked)?;
-                        update(
-                            &state,
-                            json!({"status":"checked","found":checked["missing"].as_array().expect("candidates always returns a missing array").len(),"finished_at":now()}),
-                        );
+                        update(&state, json!({"status":"checked","found":found,"finished_at":now()}));
                         Ok(())
                     } else {
                         patch(
@@ -594,10 +598,8 @@ impl Updater {
                 };
                 let result = run();
                 if let Err(ref e) = result {
-                    update(
-                        &state,
-                        json!({"status":"error","message":e.to_string().chars().take(300).collect::<String>(),"finished_at":now()}),
-                    );
+                    let message = e.to_string().chars().take(300).collect::<String>();
+                    update(&state, json!({"status":"error","message":message,"finished_at":now()}));
                 }
                 result
             },
@@ -718,47 +720,8 @@ fn patch(
 ) -> Result<()> {
     let (shared, dir, journal) = (paths.shared, paths.dir, paths.journal);
     let _lock = SharedLock::acquire(dir, ctx)?;
-    let mut job: protocol::IndexJob = if journal.exists() {
-        protocol::read(journal)?
-    } else {
-        let src = crate::app_library::read_connection(&lib.source())?;
-        let id = &ctx.identity().task_id;
-        let folder = lib.instance_path().join("index-jobs").join(id);
-        std::fs::create_dir_all(&folder)?;
-        let mut prepared = PreparedStage(folder.clone(), false);
-        backup_db(&src, &folder.join("pi.db"), ctx)?;
-        copy_tree(&shared.join("char-index"), &folder.join("char-index"), ctx)?;
-        copy_tree(&shared.join("game-chars"), &folder.join("game-chars"), ctx)?;
-        copy_tree(&dir.join("raw"), &folder.join("char-patch/raw"), ctx)?;
-        copy_tree(&dir.join("rejected"), &folder.join("char-patch/rejected"), ctx)?;
-        for name in ["full-features.npy", "full-manifest.csv"] {
-            let from = lib.instance_path().join("features").join(name);
-            if from.exists() {
-                std::fs::copy(from, folder.join(name))?;
-            }
-        }
-        let album = lib.instance_path().join("album-char-map.json");
-        if album.exists() {
-            std::fs::copy(album, folder.join("album-char-map.json"))?;
-        } else {
-            write(&folder.join("album-char-map.json"), &json!({"map":{}}))?;
-        }
-        std::fs::create_dir_all(folder.join("char-patch/rejected"))?;
-        let mut plan = read(&dir.join("plan.json"), json!([])).as_array().cloned().unwrap_or_default();
-        for r in rows {
-            if !plan.iter().any(|x| x["short_tag"] == r["short_tag"]) {
-                plan.push(r.clone());
-            }
-        }
-        write(&folder.join("char-patch/plan.json"), &json!(plan))?;
-        let job = protocol::parse(
-            json!({"version":1,"package":lib.instance_path(),"job_id":id,"identity":ctx.identity(),"action":b["action"],"reason":b["reason"],"rows":rows,"folder":folder,"before":fingerprint(&crate::app_library::read_connection(&folder.join("pi.db"))?)?,"phase":"prepared"}),
-            journal,
-        )?;
-        write(journal, &protocol::value(&job)?)?;
-        prepared.1 = true;
-        job
-    };
+    let mut job: protocol::IndexJob =
+        if journal.exists() { protocol::read(journal)? } else { prepare_job(lib, paths, b, rows, ctx)? };
     if job.version != 1 || job.package != lib.instance_path() {
         return bad("索引恢复包实例不匹配");
     };
@@ -772,119 +735,9 @@ fn patch(
         job.identity = ctx.identity().clone();
         write(journal, &protocol::value(&job)?)?;
         if job.action == protocol::IndexAction::Apply {
-            let rows = &job.rows;
-            for (i, r) in rows.iter().enumerate() {
-                ctx.check()?;
-                let cid = r.short_tag.as_str();
-                if !safe(cid) {
-                    return bad("索引角色 ID 不正确");
-                };
-                update(state, json!({"status":"fetching","done":i,"total":rows.len()}));
-                if meta(&folder, cid)["source"] == "danbooru-patch" {
-                    continue;
-                }
-                let posts = net.fetch(
-                    &crate::app_name_sources::url(
-                        &net.db_base,
-                        "/posts.json",
-                        &[
-                            ("tags", format!("{} solo rating:g,s", r.tag)),
-                            ("limit", "20".into()),
-                            ("only", "id,tag_string_general,media_asset".into()),
-                        ],
-                    ),
-                    None,
-                    None,
-                )?;
-                let Some(posts) = posts.as_array().filter(|p| p.len() <= 20) else {
-                    return bad("参考图帖子响应不正确");
-                };
-                let mut refs = vec![];
-                for p in posts {
-                    let variant =
-                        p["media_asset"]["variants"].as_array().into_iter().flatten().find(|v| v["type"] == "720x720");
-                    if let Some(v) = variant {
-                        let pid = p["id"].as_u64().ok_or_else(|| Error::Invalid("参考图帖子 ID 不正确".into()))?;
-                        let path = folder.join("char-patch/img").join(cid).join(format!("{pid}.img"));
-                        if let Err(e) = download(v["url"].as_str().unwrap_or(""), &path, ctx, net.authorized, &net.path)
-                        {
-                            ctx.check()?;
-                            if matches!(e, Error::Network(_)) {
-                                continue;
-                            } else {
-                                return Err(e);
-                            }
-                        }
-                        refs.push(json!({"id":pid,"path":path,"general":p["tag_string_general"]}));
-                    }
-                }
-                write(&folder.join("char-patch").join(format!("{cid}-refs.json")), &json!(refs))?;
-            }
+            fetch_references(&job.rows, &folder, net, ctx, state)?;
         }
-        let request = protocol::value(&protocol::IndexRequest {
-            format: protocol::Format::Index,
-            identity: ctx.identity(),
-            before: &job.before,
-            action: job.action,
-            rows: &job.rows,
-            reason: &job.reason,
-            review: &folder,
-        })?;
-        write(&folder.join("request.json"), &request)?;
-        update(state, json!({"status":"building"}));
-        let executable = std::env::var_os("ILLUSTASH_INDEX_WORKER")
-            .ok_or_else(|| Error::Invalid("角色索引计算 worker 未配置".into()))?;
-        let process_ctx = ctx.clone();
-        let worker_folder = folder.clone();
-        let process = std::thread::spawn(move || {
-            process_ctx.process(
-                std::process::Command::new(executable)
-                    .env(crate::app_tasks::WORKER_KIND_ENV, "index")
-                    .arg(worker_folder.join("request.json"))
-                    .arg(worker_folder.join("response.json")),
-            )
-        });
-        while !process.is_finished() {
-            if ctx.check().is_err() {
-                ctx.cancel();
-            } else {
-                let p = read(&folder.join("progress.json"), Value::Null);
-                if p["identity"] == json!(ctx.identity()) {
-                    let step = match p["step"].as_str() {
-                        Some("fetch") => Some("fetching"),
-                        Some("clean") => Some("cleaning"),
-                        Some("build") => Some("building"),
-                        Some("scan") => Some("scanning"),
-                        _ => None,
-                    };
-                    if let Some(step) = step {
-                        let mut fields = json!({"status":step});
-                        for key in ["done", "total"] {
-                            if let Some(n) = p[key].as_u64().filter(|n| *n <= 100000) {
-                                fields[key] = n.into();
-                            }
-                        }
-                        update(state, fields);
-                    }
-                }
-            }
-            std::thread::sleep(Duration::from_millis(20));
-        }
-        let status = process.join().map_err(|_| Error::Invalid("索引计算进程等待失败".into()))??;
-        if !status.success() {
-            return bad("角色索引计算 worker 失败");
-        };
-        ctx.check()?;
-        if std::fs::metadata(folder.join("response.json"))?.len() > 64_000_000 {
-            return bad("索引结果超过 64 MB");
-        }
-        let response: protocol::IndexResponse = protocol::read(&folder.join("response.json"))?;
-        if &response.identity != ctx.identity()
-            || response.format != protocol::Format::Index
-            || response.before != job.before
-        {
-            return bad("索引结果身份或版本不匹配");
-        };
+        let response = compute(&job, &folder, ctx, state)?;
         validate(lib, &response, &folder.join("response.json"))?;
         job.result = Some(response);
         job.phase = protocol::JobPhase::Ready;
@@ -892,6 +745,182 @@ fn patch(
     }
     ctx.receive(ctx.identity(), || commit(lib, shared, dir, journal, &mut job, ctx, state))?;
     Ok(())
+}
+/// A new job: its own folder holding a snapshot of source.sqlite and every input the worker reads, and its journal.
+fn prepare_job(
+    lib: &Library,
+    paths: &PatchPaths<'_>,
+    b: &Value,
+    rows: &[Value],
+    ctx: &TaskContext,
+) -> Result<protocol::IndexJob> {
+    let (shared, dir, journal) = (paths.shared, paths.dir, paths.journal);
+    let src = crate::app_library::read_connection(&lib.source())?;
+    let id = &ctx.identity().task_id;
+    let folder = lib.instance_path().join("index-jobs").join(id);
+    std::fs::create_dir_all(&folder)?;
+    let mut prepared = PreparedStage(folder.clone(), false);
+    backup_db(&src, &folder.join("pi.db"), ctx)?;
+    copy_tree(&shared.join("char-index"), &folder.join("char-index"), ctx)?;
+    copy_tree(&shared.join("game-chars"), &folder.join("game-chars"), ctx)?;
+    copy_tree(&dir.join("raw"), &folder.join("char-patch/raw"), ctx)?;
+    copy_tree(&dir.join("rejected"), &folder.join("char-patch/rejected"), ctx)?;
+    for name in ["full-features.npy", "full-manifest.csv"] {
+        let from = lib.instance_path().join("features").join(name);
+        if from.exists() {
+            std::fs::copy(from, folder.join(name))?;
+        }
+    }
+    let album = lib.instance_path().join("album-char-map.json");
+    if album.exists() {
+        std::fs::copy(album, folder.join("album-char-map.json"))?;
+    } else {
+        write(&folder.join("album-char-map.json"), &json!({"map":{}}))?;
+    }
+    std::fs::create_dir_all(folder.join("char-patch/rejected"))?;
+    let mut plan = read(&dir.join("plan.json"), json!([])).as_array().cloned().unwrap_or_default();
+    for r in rows {
+        if !plan.iter().any(|x| x["short_tag"] == r["short_tag"]) {
+            plan.push(r.clone());
+        }
+    }
+    write(&folder.join("char-patch/plan.json"), &json!(plan))?;
+    let before = fingerprint(&crate::app_library::read_connection(&folder.join("pi.db"))?)?;
+    let job = protocol::parse(
+        json!({
+            "version":1,"package":lib.instance_path(),"job_id":id,"identity":ctx.identity(),"action":b["action"],
+            "reason":b["reason"],"rows":rows,"folder":folder,"before":before,"phase":"prepared"
+        }),
+        journal,
+    )?;
+    write(journal, &protocol::value(&job)?)?;
+    prepared.1 = true;
+    Ok(job)
+}
+/// Downloads up to twenty Danbooru reference pictures of each new character, unless its index is already patched.
+fn fetch_references(
+    rows: &[protocol::IndexRow],
+    folder: &Path,
+    net: &crate::app_name_sources::Source,
+    ctx: &TaskContext,
+    state: &Mutex<State>,
+) -> Result<()> {
+    for (i, r) in rows.iter().enumerate() {
+        ctx.check()?;
+        let cid = r.short_tag.as_str();
+        if !safe(cid) {
+            return bad("索引角色 ID 不正确");
+        };
+        update(state, json!({"status":"fetching","done":i,"total":rows.len()}));
+        if meta(folder, cid)["source"] == "danbooru-patch" {
+            continue;
+        }
+        let query = [
+            ("tags", format!("{} solo rating:g,s", r.tag)),
+            ("limit", "20".into()),
+            ("only", "id,tag_string_general,media_asset".into()),
+        ];
+        let posts = net.fetch(&crate::app_name_sources::url(&net.db_base, "/posts.json", &query), None, None)?;
+        let Some(posts) = posts.as_array().filter(|p| p.len() <= 20) else {
+            return bad("参考图帖子响应不正确");
+        };
+        let mut refs = vec![];
+        for p in posts {
+            let variant =
+                p["media_asset"]["variants"].as_array().into_iter().flatten().find(|v| v["type"] == "720x720");
+            if let Some(v) = variant {
+                let pid = p["id"].as_u64().ok_or_else(|| Error::Invalid("参考图帖子 ID 不正确".into()))?;
+                let path = folder.join("char-patch/img").join(cid).join(format!("{pid}.img"));
+                if let Err(e) = download(v["url"].as_str().unwrap_or(""), &path, ctx, net.authorized, &net.path) {
+                    ctx.check()?;
+                    if matches!(e, Error::Network(_)) {
+                        continue;
+                    } else {
+                        return Err(e);
+                    }
+                }
+                refs.push(json!({"id":pid,"path":path,"general":p["tag_string_general"]}));
+            }
+        }
+        write(&folder.join("char-patch").join(format!("{cid}-refs.json")), &json!(refs))?;
+    }
+    Ok(())
+}
+/// Runs the index worker on the job's folder, passing on its progress, and reads back its checked response.
+fn compute(
+    job: &protocol::IndexJob,
+    folder: &Path,
+    ctx: &TaskContext,
+    state: &Mutex<State>,
+) -> Result<protocol::IndexResponse> {
+    let request = protocol::value(&protocol::IndexRequest {
+        format: protocol::Format::Index,
+        identity: ctx.identity(),
+        before: &job.before,
+        action: job.action,
+        rows: &job.rows,
+        reason: &job.reason,
+        review: folder,
+    })?;
+    write(&folder.join("request.json"), &request)?;
+    update(state, json!({"status":"building"}));
+    let executable = std::env::var_os("ILLUSTASH_INDEX_WORKER")
+        .ok_or_else(|| Error::Invalid("角色索引计算 worker 未配置".into()))?;
+    let process_ctx = ctx.clone();
+    let worker_folder = folder.to_owned();
+    let process = std::thread::spawn(move || {
+        process_ctx.process(
+            std::process::Command::new(executable)
+                .env(crate::app_tasks::WORKER_KIND_ENV, "index")
+                .arg(worker_folder.join("request.json"))
+                .arg(worker_folder.join("response.json")),
+        )
+    });
+    while !process.is_finished() {
+        if ctx.check().is_err() {
+            ctx.cancel();
+        } else {
+            report_progress(folder, ctx, state);
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let status = process.join().map_err(|_| Error::Invalid("索引计算进程等待失败".into()))??;
+    if !status.success() {
+        return bad("角色索引计算 worker 失败");
+    };
+    ctx.check()?;
+    if std::fs::metadata(folder.join("response.json"))?.len() > 64_000_000 {
+        return bad("索引结果超过 64 MB");
+    }
+    let response: protocol::IndexResponse = protocol::read(&folder.join("response.json"))?;
+    if &response.identity != ctx.identity()
+        || response.format != protocol::Format::Index
+        || response.before != job.before
+    {
+        return bad("索引结果身份或版本不匹配");
+    };
+    Ok(response)
+}
+/// Passes on the step and counts the worker last wrote to progress.json, when they are this job's.
+fn report_progress(folder: &Path, ctx: &TaskContext, state: &Mutex<State>) {
+    let p = read(&folder.join("progress.json"), Value::Null);
+    if p["identity"] != json!(ctx.identity()) {
+        return;
+    }
+    let step = match p["step"].as_str() {
+        Some("fetch") => "fetching",
+        Some("clean") => "cleaning",
+        Some("build") => "building",
+        Some("scan") => "scanning",
+        _ => return,
+    };
+    let mut fields = json!({"status":step});
+    for key in ["done", "total"] {
+        if let Some(n) = p[key].as_u64().filter(|n| *n <= 100000) {
+            fields[key] = n.into();
+        }
+    }
+    update(state, fields);
 }
 fn validate(lib: &Library, v: &protocol::IndexResponse, file: &Path) -> Result<()> {
     let field_error =
@@ -987,155 +1016,179 @@ fn commit(
     let id = job.job_id.clone();
     let folder = job.folder.clone();
     let mut src = writer(&lib.source())?;
+    if let Some(stored) = stored_run(&src, &id)? {
+        *job = stored;
+    } else {
+        commit_source(lib, shared, dir, journal, job, ctx, &mut src)?;
+    }
+    publish(shared, dir, &folder, job)?;
+    update(state, json!({"status":"importing"}));
+    let changed = import(lib, &src, job, ctx)?;
+    let drop = job.action == protocol::IndexAction::Drop;
+    let chars = outcomes(job, shared, dir, &src)?;
+    record(dir, &id, &chars, changed, drop)?;
+    prune_backups(dir)?;
+    let added = chars.iter().filter(|r| r["status"] == "added").count();
+    // Clean up before reporting done: whoever sees done must find no journal or job folder left (#123).
+    std::fs::remove_file(journal)?;
+    let _ = std::fs::remove_dir_all(&folder);
+    update(
+        state,
+        json!({"status":"done","kind":if drop{"drop"}else{"add"},"added":added,"changed":changed,"finished_at":now()}),
+    );
+    pause_after_done();
+    Ok(())
+}
+/// The job as source.sqlite recorded it when an earlier attempt committed it.
+fn stored_run(src: &Connection, id: &str) -> Result<Option<protocol::IndexJob>> {
     let has_runs: bool =
         src.query_row("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name='native_index_runs')", [], |r| r.get(0))?;
-    let stored: Option<String> = if has_runs {
-        src.query_row("SELECT result FROM native_index_runs WHERE id=?", [&id], |r| r.get(0)).optional()?
-    } else {
-        None
-    };
-    if let Some(stored) = stored {
-        *job = protocol::parse(
-            serde_json::from_str(&stored)
-                .map_err(|e| Error::Invalid(format!("source.sqlite native_index_runs.result: {e}")))?,
-            Path::new("source.sqlite native_index_runs.result"),
-        )?;
-    } else {
-        if fingerprint(&src)? != job.before {
-            std::fs::remove_file(journal)?;
-            let _ = std::fs::remove_dir_all(&folder);
-            return bad("索引计算输入已改变，请重试检查");
-        };
-        let result = job.result.as_ref().ok_or_else(|| {
-            Error::Invalid(format!("{file}: 字段 result: ready job 缺少结果", file = journal.display()))
-        })?;
-        validate(lib, result, journal)?;
-        let old =
-            crate::app_migrate_data::rows(&src, "SELECT uuid,value,round(conf,4) FROM labels WHERE dim='char_ext'")?;
-        let new = &result.labels;
-        let old_set = old.iter().map(|r| r.to_string()).collect::<BTreeSet<_>>();
-        let new_set = new
-            .iter()
-            .map(|r| json!([r.0, r.1, (r.2 * 10000.0).round() / 10000.0]).to_string())
-            .collect::<BTreeSet<_>>();
-        let changed = old_set
-            .symmetric_difference(&new_set)
-            .map(|s| {
-                let row: (String, String, f64) = protocol::parse(
-                    serde_json::from_str(s).map_err(|e| Error::Invalid(e.to_string()))?,
-                    Path::new("source.sqlite labels"),
-                )?;
-                Ok(row.0)
-            })
-            .collect::<Result<BTreeSet<_>>>()?;
-        job.extra.insert("changed".into(), json!(changed));
-        let backup = dir.join("backup").join(&id);
-        std::fs::create_dir_all(&backup)?;
-        backup_db(&src, &backup.join("characters.sqlite"), ctx)?;
-        for name in ["char-anchors.npy", "char-anchors.txt"] {
-            if shared.join(name).exists() {
-                std::fs::copy(shared.join(name), backup.join(name))?;
-            }
-        }
-        let tx = src.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-        if fingerprint(&tx)? != job.before {
-            std::fs::remove_file(journal)?;
-            let _ = std::fs::remove_dir_all(&folder);
-            return bad("索引计算输入已改变");
-        };
-        tx.execute_batch("CREATE TABLE IF NOT EXISTS native_index_runs(id TEXT PRIMARY KEY,result TEXT NOT NULL)")?;
-        tx.execute("DELETE FROM character_aliases", [])?;
-        tx.execute("DELETE FROM characters", [])?;
-        let cols = tx
-            .prepare("PRAGMA table_info(characters)")?
-            .query_map([], |r| r.get::<_, String>(1))?
-            .collect::<rusqlite::Result<Vec<_>>>()?;
-        for r in &result.characters {
-            let vals = cols
-                .iter()
-                .map(|k| {
-                    if k == "char_id" {
-                        rusqlite::types::Value::Text(r.char_id.clone())
-                    } else {
-                        sql_value(r.columns.get(k).unwrap_or(&Value::Null))
-                    }
-                })
-                .collect::<Vec<_>>();
-            tx.execute(
-                &format!("INSERT INTO characters ({}) VALUES ({})", cols.join(","), vec!["?"; cols.len()].join(",")),
-                rusqlite::params_from_iter(vals),
-            )?;
-        }
-        let alias_cols = tx
-            .prepare("PRAGMA table_info(character_aliases)")?
-            .query_map([], |r| r.get::<_, String>(1))?
-            .collect::<rusqlite::Result<Vec<_>>>()?;
-        for r in &result.aliases {
-            if alias_cols.iter().any(|c| c == "kind") {
-                tx.execute(
-                    "INSERT OR IGNORE INTO character_aliases(char_id,alias,kind) VALUES (?,?,?)",
-                    params![r.0, r.1, r.2],
-                )?;
-            } else {
-                tx.execute("INSERT OR IGNORE INTO character_aliases(char_id,alias) VALUES (?,?)", params![r.0, r.1])?;
-            }
-        }
-        tx.execute("DELETE FROM labels WHERE dim='char_ext'", [])?;
-        let label_cols = tx
-            .prepare("PRAGMA table_info(labels)")?
-            .query_map([], |r| r.get::<_, String>(1))?
-            .collect::<rusqlite::Result<Vec<_>>>()?;
-        for r in &result.labels {
-            if ["source", "model_ver", "run_id"].iter().all(|k| label_cols.iter().any(|c| c == k)) {
-                tx.execute("INSERT INTO labels(uuid,dim,value,conf,source,model_ver,run_id) VALUES (?,'char_ext',?,?,'char_index',?,?)",params![r.0,r.1,r.2,format!("character_index@2025-09-25+danbooru@{}",chrono::Local::now().format("%Y-%m-%d")),format!("char-scan-{id}")])?;
-                continue;
-            }
-            tx.execute("INSERT INTO labels(uuid,dim,value,conf) VALUES (?,'char_ext',?,?)", params![r.0, r.1, r.2])?;
-        }
-        let result = job.result.take();
-        tx.execute("INSERT INTO native_index_runs VALUES (?,?)", params![id, protocol::value(&job)?.to_string()])?;
-        job.result = result;
-        ctx.check()?;
-        tx.commit()?;
+    if !has_runs {
+        return Ok(None);
     }
-    // Files are copied from an immutable validated job. Repeating this boundary is safe after a crash.
-    // Shared files are staged beside their targets first: a failed copy or a full disk leaves the
-    // published set untouched. Only then are they renamed into place inside one publication
-    // generation, so readers never take a mix of old and new files (index_generation).
+    let stored: Option<String> =
+        src.query_row("SELECT result FROM native_index_runs WHERE id=?", [id], |r| r.get(0)).optional()?;
+    let Some(stored) = stored else { return Ok(None) };
+    Ok(Some(protocol::parse(
+        serde_json::from_str(&stored)
+            .map_err(|e| Error::Invalid(format!("source.sqlite native_index_runs.result: {e}")))?,
+        Path::new("source.sqlite native_index_runs.result"),
+    )?))
+}
+/// Writes the validated result into source.sqlite with the job recorded beside it, after a backup; refused (and the
+/// job dropped) when the inputs changed since the job was prepared.
+fn commit_source(
+    lib: &Library,
+    shared: &Path,
+    dir: &Path,
+    journal: &Path,
+    job: &mut protocol::IndexJob,
+    ctx: &TaskContext,
+    src: &mut Connection,
+) -> Result<()> {
+    let folder = job.folder.clone();
+    let changed_inputs = |message: &str| -> Result<()> {
+        std::fs::remove_file(journal)?;
+        let _ = std::fs::remove_dir_all(&folder);
+        bad(message)
+    };
+    if fingerprint(src)? != job.before {
+        return changed_inputs("索引计算输入已改变，请重试检查");
+    };
+    let result = job
+        .result
+        .as_ref()
+        .ok_or_else(|| Error::Invalid(format!("{file}: 字段 result: ready job 缺少结果", file = journal.display())))?;
+    validate(lib, result, journal)?;
+    let changed = changed_labels(src, result)?;
+    job.extra.insert("changed".into(), json!(changed));
+    let backup = dir.join("backup").join(&job.job_id);
+    std::fs::create_dir_all(&backup)?;
+    backup_db(src, &backup.join("characters.sqlite"), ctx)?;
+    for name in ["char-anchors.npy", "char-anchors.txt"] {
+        if shared.join(name).exists() {
+            std::fs::copy(shared.join(name), backup.join(name))?;
+        }
+    }
+    let tx = src.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+    if fingerprint(&tx)? != job.before {
+        return changed_inputs("索引计算输入已改变");
+    };
+    let result = job.result.as_ref().ok_or_else(|| Error::Invalid("ready job 缺少结果".into()))?;
+    write_result(&tx, result, &job.job_id)?;
+    let result = job.result.take();
+    tx.execute("INSERT INTO native_index_runs VALUES (?,?)", params![job.job_id, protocol::value(&job)?.to_string()])?;
+    job.result = result;
+    ctx.check()?;
+    tx.commit()?;
+    Ok(())
+}
+/// The pictures whose index labels the result changes.
+fn changed_labels(src: &Connection, result: &protocol::IndexResponse) -> Result<BTreeSet<String>> {
+    let old = crate::app_migrate_data::rows(src, "SELECT uuid,value,round(conf,4) FROM labels WHERE dim='char_ext'")?;
+    let old_set = old.iter().map(|r| r.to_string()).collect::<BTreeSet<_>>();
+    let new_set = result
+        .labels
+        .iter()
+        .map(|r| json!([r.0, r.1, (r.2 * 10000.0).round() / 10000.0]).to_string())
+        .collect::<BTreeSet<_>>();
+    old_set
+        .symmetric_difference(&new_set)
+        .map(|s| {
+            let row: (String, String, f64) = protocol::parse(
+                serde_json::from_str(s).map_err(|e| Error::Invalid(e.to_string()))?,
+                Path::new("source.sqlite labels"),
+            )?;
+            Ok(row.0)
+        })
+        .collect()
+}
+/// The columns of `table` in source.sqlite, which differ between library versions.
+fn columns(c: &Connection, table: &str) -> Result<Vec<String>> {
+    Ok(c.prepare(&format!("PRAGMA table_info({table})"))?
+        .query_map([], |r| r.get::<_, String>(1))?
+        .collect::<rusqlite::Result<Vec<_>>>()?)
+}
+/// Replaces the characters, their aliases and the index labels with the result's.
+fn write_result(tx: &Connection, result: &protocol::IndexResponse, id: &str) -> Result<()> {
+    tx.execute_batch("CREATE TABLE IF NOT EXISTS native_index_runs(id TEXT PRIMARY KEY,result TEXT NOT NULL)")?;
+    tx.execute("DELETE FROM character_aliases", [])?;
+    tx.execute("DELETE FROM characters", [])?;
+    let cols = columns(tx, "characters")?;
+    for r in &result.characters {
+        let vals = cols
+            .iter()
+            .map(|k| {
+                if k == "char_id" {
+                    rusqlite::types::Value::Text(r.char_id.clone())
+                } else {
+                    sql_value(r.columns.get(k).unwrap_or(&Value::Null))
+                }
+            })
+            .collect::<Vec<_>>();
+        tx.execute(
+            &format!("INSERT INTO characters ({}) VALUES ({})", cols.join(","), vec!["?"; cols.len()].join(",")),
+            rusqlite::params_from_iter(vals),
+        )?;
+    }
+    let alias_cols = columns(tx, "character_aliases")?;
+    for r in &result.aliases {
+        if alias_cols.iter().any(|c| c == "kind") {
+            let p = params![r.0, r.1, r.2];
+            tx.execute("INSERT OR IGNORE INTO character_aliases(char_id,alias,kind) VALUES (?,?,?)", p)?;
+        } else {
+            tx.execute("INSERT OR IGNORE INTO character_aliases(char_id,alias) VALUES (?,?)", params![r.0, r.1])?;
+        }
+    }
+    tx.execute("DELETE FROM labels WHERE dim='char_ext'", [])?;
+    let label_cols = columns(tx, "labels")?;
+    for r in &result.labels {
+        if ["source", "model_ver", "run_id"].iter().all(|k| label_cols.iter().any(|c| c == k)) {
+            sourced_label(tx, r, id)?;
+            continue;
+        }
+        tx.execute("INSERT INTO labels(uuid,dim,value,conf) VALUES (?,'char_ext',?,?)", params![r.0, r.1, r.2])?;
+    }
+    Ok(())
+}
+/// One index label, with where it came from, in a library whose labels record that.
+fn sourced_label(c: &Connection, r: &(String, String, f64), id: &str) -> Result<()> {
+    let model = format!("character_index@2025-09-25+danbooru@{}", chrono::Local::now().format("%Y-%m-%d"));
+    let p = params![r.0, r.1, r.2, model, format!("char-scan-{id}")];
+    let sql =
+        "INSERT INTO labels(uuid,dim,value,conf,source,model_ver,run_id) VALUES (?,'char_ext',?,?,'char_index',?,?)";
+    c.execute(sql, p)?;
+    Ok(())
+}
+/// Files are copied from an immutable validated job. Repeating this boundary is safe after a crash.
+/// Shared files are staged beside their targets first: a failed copy or a full disk leaves the
+/// published set untouched. Only then are they renamed into place inside one publication
+/// generation, so readers never take a mix of old and new files (index_generation).
+fn publish(shared: &Path, dir: &Path, folder: &Path, job: &protocol::IndexJob) -> Result<()> {
     let allowed = job.rows.iter().map(|r| r.short_tag.as_str()).collect::<BTreeSet<_>>();
     let mut staged: Vec<(PathBuf, PathBuf)> = Vec::new();
     let mut retired: Vec<PathBuf> = Vec::new();
-    let stage = |from: &Path, to: PathBuf, staged: &mut Vec<(PathBuf, PathBuf)>| -> Result<()> {
-        std::fs::create_dir_all(to.parent().expect("index file path must have a parent"))?;
-        let name = to.file_name().expect("index file path must have a name").to_string_lossy().into_owned();
-        let tmp = to.with_file_name(format!(".{name}.{}.tmp", crate::store::new_key()?));
-        staged.push((tmp.clone(), to));
-        std::fs::copy(from, tmp)?;
-        Ok(())
-    };
-    let staging = (|| -> Result<()> {
-        for cid in &allowed {
-            if !safe(cid) {
-                return bad("索引文件 ID 不正确");
-            };
-            for ext in ["json", "npy"] {
-                let from = folder.join("char-index").join(format!("{cid}.{ext}"));
-                let to = shared.join("char-index").join(format!("{cid}.{ext}"));
-                if from.exists() {
-                    stage(&from, to, &mut staged)?;
-                } else if to.exists() {
-                    retired.push(to);
-                }
-            }
-        }
-        for name in ["char-anchors.npy", "char-anchors.txt"] {
-            if folder.join(name).exists() {
-                stage(&folder.join(name), shared.join(name), &mut staged)?;
-            }
-        }
-        Ok(())
-    })();
-    if let Err(e) = staging {
+    if let Err(e) = stage_all(shared, folder, &allowed, &mut staged, &mut retired) {
         for (tmp, _) in &staged {
             let _ = std::fs::remove_file(tmp);
         }
@@ -1160,11 +1213,51 @@ fn commit(
             write(&dir.join("rejected").join(format!("{cid}.json")), &read(&rejected, Value::Null))?;
         }
     }
-    write(&dir.join("plan.json"), &read(&folder.join("char-patch/plan.json"), json!([])))?;
-    update(state, json!({"status":"importing"}));
+    write(&dir.join("plan.json"), &read(&folder.join("char-patch/plan.json"), json!([])))
+}
+/// Copies each new index file beside its target (`staged`: temporary and final path) and lists the files the job
+/// removes (`retired`).
+fn stage_all(
+    shared: &Path,
+    folder: &Path,
+    allowed: &BTreeSet<&str>,
+    staged: &mut Vec<(PathBuf, PathBuf)>,
+    retired: &mut Vec<PathBuf>,
+) -> Result<()> {
+    let mut stage = |from: &Path, to: PathBuf| -> Result<()> {
+        std::fs::create_dir_all(to.parent().expect("index file path must have a parent"))?;
+        let name = to.file_name().expect("index file path must have a name").to_string_lossy().into_owned();
+        let tmp = to.with_file_name(format!(".{name}.{}.tmp", crate::store::new_key()?));
+        staged.push((tmp.clone(), to));
+        std::fs::copy(from, tmp)?;
+        Ok(())
+    };
+    for cid in allowed {
+        if !safe(cid) {
+            return bad("索引文件 ID 不正确");
+        };
+        for ext in ["json", "npy"] {
+            let from = folder.join("char-index").join(format!("{cid}.{ext}"));
+            let to = shared.join("char-index").join(format!("{cid}.{ext}"));
+            if from.exists() {
+                stage(&from, to)?;
+            } else if to.exists() {
+                retired.push(to);
+            }
+        }
+    }
+    for name in ["char-anchors.npy", "char-anchors.txt"] {
+        if folder.join(name).exists() {
+            stage(&folder.join(name), shared.join(name))?;
+        }
+    }
+    Ok(())
+}
+/// Reindexes the library from the changed labels, once per job: returns how many memberships changed.
+fn import(lib: &Library, src: &Connection, job: &protocol::IndexJob, ctx: &TaskContext) -> Result<i64> {
     let mut app = writer(&lib.db())?;
     crate::http_read::register_names(&app)?;
-    let marker = format!("index_job:{id}");
+    let marker = format!("index_job:{}", job.job_id);
     let tx = app.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
     crate::schema::begin_writing(&tx)?;
     let done: Option<String> =
@@ -1172,18 +1265,27 @@ fn commit(
     let changed = if let Some(n) = done {
         n.parse::<i64>().unwrap_or(0)
     } else {
-        let list = job.extra.get("changed").unwrap_or(&Value::Null).to_string();
-        let labels=crate::app_migrate_data::rows_with(&src,"SELECT uuid,value,conf,dim FROM labels WHERE ((dim='character' AND conf>=0.35) OR dim='char_ext') AND uuid IN (SELECT value FROM json_each(?))",[list])?;
+        let uuids = job.extra.get("changed").unwrap_or(&Value::Null);
+        let labels = crate::app_migrate_data::rows_with(
+            src,
+            "SELECT uuid,value,conf,dim
+             FROM labels
+             WHERE ((dim='character' AND conf>=0.35) OR dim='char_ext') AND uuid IN (SELECT value FROM json_each(?))",
+            [uuids.to_string()],
+        )?;
         let realistic = crate::app_migrate_data::rows(
-            &src,
+            src,
             "SELECT uuid FROM labels WHERE dim='general' AND value='realistic' AND conf>=0.15",
         )?
         .iter()
         .map(|r| r[0].clone())
         .collect::<Vec<_>>();
+        let index = crate::app_migrate_data::index(src)?;
         let out = crate::character_commands::command(
             &tx,
-            &json!({"op":"reindex","index":crate::app_migrate_data::index(&src)?,"uuids":job.extra.get("changed").unwrap_or(&Value::Null),"labels":labels,"realistic":realistic,"indexed":id}),
+            &json!({
+                "op":"reindex","index":index,"uuids":uuids,"labels":labels,"realistic":realistic,"indexed":job.job_id
+            }),
         )?;
         let n = out["changed"].as_i64().unwrap_or(0);
         tx.execute("INSERT INTO meta VALUES (?,?)", params![marker, n.to_string()])?;
@@ -1193,13 +1295,17 @@ fn commit(
     };
     ctx.check()?;
     crate::schema::commit_writing(tx)?;
+    Ok(changed)
+}
+/// What became of each character of the job: dropped, added with its claims, or rejected with the reason.
+fn outcomes(job: &protocol::IndexJob, shared: &Path, dir: &Path, src: &Connection) -> Result<Vec<Value>> {
     let mut chars = vec![];
-    let drop = job.action == protocol::IndexAction::Drop;
     for row in &job.rows {
         let mut r = protocol::value(row)?;
         let cid = row.short_tag.clone();
-        if drop {
-            r = json!({"tag":r["tag"],"short_tag":cid,"copyright":r["copyright"],"status":"dropped","reason":job.reason.as_deref().unwrap_or("").trim()});
+        if job.action == protocol::IndexAction::Drop {
+            let reason = job.reason.as_deref().unwrap_or("").trim();
+            r = json!({"tag":r["tag"],"short_tag":cid,"copyright":r["copyright"],"status":"dropped","reason":reason});
         } else if meta(shared, &cid)["source"] == "danbooru-patch" {
             let n: i64 = src.query_row(
                 "SELECT count(DISTINCT uuid) FROM labels WHERE dim='char_ext' AND value=?",
@@ -1217,6 +1323,10 @@ fn commit(
         }
         chars.push(r);
     }
+    Ok(chars)
+}
+/// Takes the added characters off the last check's missing list and records the job in the history, once.
+fn record(dir: &Path, id: &str, chars: &[Value], changed: i64, drop: bool) -> Result<()> {
     let mut check = read(&dir.join("check.json"), Value::Null);
     if !drop && !check.is_null() {
         let done = chars.iter().map(|r| r["short_tag"].clone()).collect::<Vec<_>>();
@@ -1226,11 +1336,11 @@ fn commit(
         write(&dir.join("check.json"), &check)?;
     }
     let mut ledger = read(&dir.join("native-history.json"), json!({}));
-    let record = if let Some(record) = ledger.get(&id) {
+    let record = if let Some(record) = ledger.get(id) {
         record.clone()
     } else {
         let record = json!({"at":now(),"kind":if drop{"drop"}else{"add"},"characters":chars,"changed":changed});
-        ledger[&id] = record.clone();
+        ledger[id] = record.clone();
         write(&dir.join("native-history.json"), &ledger)?;
         record
     };
@@ -1240,6 +1350,10 @@ fn commit(
         history.insert(0, record);
         write(&dir.join("history.json"), &json!(history))?;
     }
+    Ok(())
+}
+/// Keeps the five newest source backups.
+fn prune_backups(dir: &Path) -> Result<()> {
     let mut backups = std::fs::read_dir(dir.join("backup"))?
         .filter_map(|e| e.ok())
         .filter(|e| e.file_name().to_str().is_some_and(|n| n.len() == 32 && n.bytes().all(|b| b.is_ascii_hexdigit())))
@@ -1249,15 +1363,6 @@ fn commit(
     for e in backups.into_iter().take(excess) {
         let _ = std::fs::remove_dir_all(e.path());
     }
-    let added = chars.iter().filter(|r| r["status"] == "added").count();
-    // Clean up before reporting done: whoever sees done must find no journal or job folder left (#123).
-    std::fs::remove_file(journal)?;
-    let _ = std::fs::remove_dir_all(&folder);
-    update(
-        state,
-        json!({"status":"done","kind":if drop{"drop"}else{"add"},"added":added,"changed":changed,"finished_at":now()}),
-    );
-    pause_after_done();
     Ok(())
 }
 

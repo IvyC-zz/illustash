@@ -4,13 +4,30 @@ use crate::{
     http::LibraryContext,
     http_json::Json,
     http_read::{display, flag, python_int, rows, strings, trim, typed_rows},
+    sql_fragments::{
+        hybrid, leads, learnable, proto_hints, rating, unasked, unclaimed, unfolded, visible, HINTS, NSFW_RATINGS,
+    },
     Error, Result,
 };
 use rusqlite::{types::Value, Connection, OptionalExtension};
 use std::collections::{HashMap, HashSet};
-const HINTS: &str =
-    "(SELECT uuid,entity,score,0 AS weak FROM family_evidence UNION ALL SELECT uuid,entity,score,1 FROM weak_claims)";
-const MIXED:&str="EXISTS(SELECT 1 FROM duplicates y WHERE y.grp=d.grp AND y.uuid<>d.uuid AND (EXISTS(SELECT entity FROM memberships WHERE uuid=d.uuid EXCEPT SELECT entity FROM memberships WHERE uuid=y.uuid) OR EXISTS(SELECT entity FROM memberships WHERE uuid=y.uuid EXCEPT SELECT entity FROM memberships WHERE uuid=d.uuid)))";
+/// Duplicate `d` is in a group whose copies do not all belong to the same identities.
+const MIXED: &str = "EXISTS(
+  SELECT 1
+  FROM duplicates y
+  WHERE y.grp=d.grp AND y.uuid<>d.uuid
+    AND (EXISTS(SELECT entity FROM memberships WHERE uuid=d.uuid
+                EXCEPT SELECT entity FROM memberships WHERE uuid=y.uuid)
+      OR EXISTS(SELECT entity FROM memberships WHERE uuid=y.uuid
+                EXCEPT SELECT entity FROM memberships WHERE uuid=d.uuid)))";
+/// Picture `a` is in the unmatched pool: no identity, no tag identity, not deferred.
+fn unmatched(a: &str) -> String {
+    format!(
+        "NOT EXISTS(SELECT 1 FROM memberships m WHERE m.uuid={a}.uuid) \
+         AND NOT EXISTS(SELECT 1 FROM tag_memberships t WHERE t.uuid={a}.uuid) \
+         AND NOT EXISTS(SELECT 1 FROM deferred d WHERE d.uuid={a}.uuid)"
+    )
+}
 /// 图的归属行和身份（名字、作品文字），按图的条件 `uuid`（如 `= ?`）。
 fn members(uuid: &str) -> String {
     format!(
@@ -20,15 +37,6 @@ fn members(uuid: &str) -> String {
          WHERE m.uuid {uuid}
          ORDER BY m.status='machine',name,e.id"
     )
-}
-fn leads() -> String {
-    format!("(SELECT v.* FROM {HINTS} v WHERE NOT EXISTS(SELECT 1 FROM assertions s WHERE s.uuid=v.uuid AND s.entity=v.entity AND s.status='rejected'))")
-}
-fn unfolded(a: &str) -> String {
-    format!("NOT EXISTS(SELECT 1 FROM duplicates h WHERE h.uuid={a}.uuid AND h.hidden=1)")
-}
-fn visible(a: &str) -> String {
-    format!("{} AND NOT EXISTS(SELECT 1 FROM excluded x WHERE x.uuid={a}.uuid)", unfolded(a))
 }
 fn audit_open(a: &str) -> String {
     format!(
@@ -45,9 +53,6 @@ fn audit_open(a: &str) -> String {
            JOIN {ENTITIES} e ON e.id=s.entity
            WHERE u.uuid={a}.uuid AND (coalesce(e.parent_id,e.id)=u.entity OR (s.status='confirmed' AND u.solo=1)))"
     )
-}
-pub(crate) fn rating(a: &str, nsfw: &str) -> Result<String> {
-    match nsfw{""=>Ok(String::new()),"hide"|"only"=>Ok(format!(" AND {}coalesce({a}.uuid IN (SELECT uuid FROM asset_rating WHERE rating IN ('questionable', 'explicit')),0)",if nsfw=="hide"{"NOT "}else{""})),_=>Err(Error::Invalid("未知内容筛选".into()))}
 }
 pub(crate) fn day_bounds(day: &str) -> Result<(String, String)> {
     let bad = || Error::Invalid("日期不正确".into());
@@ -165,62 +170,104 @@ fn digit_extra(c: char) -> bool {
     ];
     R.iter().any(|&(a, b)| (a..=b).contains(&(c as u32)))
 }
+/// The filters /api/assets (and the commands acting on a browse selection) accept.
+const FILTERS: [&str; 15] = [
+    "entity", "variant", "status", "q", "tag", "utag", "pool", "order", "nsfw", "dup", "reason", "cluster", "work",
+    "day", "artist",
+];
+/// A browse selection being built: SQL clauses on picture `a` and their arguments, one of which may be the
+/// cluster or similar-group id, bound as an integer.
+struct Filter {
+    clauses: Vec<String>,
+    args: Vec<String>,
+    numeric_index: Option<usize>,
+}
+impl Filter {
+    fn add(&mut self, clause: impl Into<String>, args: impl IntoIterator<Item = String>) {
+        self.clauses.push(clause.into());
+        self.args.extend(args);
+    }
+}
+/// The selection's SQL condition on assets `a`, its arguments and its ordering. Each check refuses in the order the
+/// Python Store did.
 pub(crate) fn selection(
     c: &Connection,
     context: &LibraryContext,
     f: &HashMap<String, String>,
 ) -> Result<(String, Vec<Value>, String)> {
-    let allowed = [
-        "entity", "variant", "status", "q", "tag", "utag", "pool", "order", "nsfw", "dup", "reason", "cluster", "work",
-        "day", "artist",
-    ];
-    if f.keys().any(|k| !allowed.contains(&k.as_str())) {
+    if f.keys().any(|k| !FILTERS.contains(&k.as_str())) {
         return Err(Error::Invalid("筛选参数不正确".into()));
     }
     let v = |k| value(f, k);
-    let mut entity = v("entity").to_owned();
-    let mut variant = v("variant").to_owned();
-    let mut clauses = vec!["1".to_owned()];
-    let mut args = Vec::new();
-    let mut numeric_index = None;
+    let mut filter = Filter { clauses: vec!["1".to_owned()], args: Vec::new(), numeric_index: None };
     if !v("day").is_empty() {
         let (lo, hi) = day_bounds(v("day"))?;
-        clauses.push("a.added_at>=? AND a.added_at<?".into());
-        args.extend([lo, hi]);
+        filter.add("a.added_at>=? AND a.added_at<?", [lo, hi]);
     }
     if !v("artist").is_empty() {
         if context.library.is_none() {
             return Err(Error::Invalid("这个图库还没有画师数据".into()));
         }
-        clauses.push("a.uuid IN (SELECT value FROM json_each(?))".into());
         if !flag(c, "terms_artists")? {
             attach_provenance(c, context)?;
         }
-        args.push(
-            Json::Array(crate::http_artists::assets_of(c, true, v("artist"))?.into_iter().map(Into::into).collect())
-                .dump(),
-        );
+        let assets = crate::http_artists::assets_of(c, true, v("artist"))?;
+        let assets = Json::Array(assets.into_iter().map(Into::into).collect()).dump();
+        filter.add("a.uuid IN (SELECT value FROM json_each(?))", [assets]);
     }
     if !v("work").is_empty() {
-        let work = format!(
-            "SELECT 1
-             FROM {ENTITIES}
-             WHERE id=? AND kind='work' AND merged_into IS NULL"
-        );
-        if !exists(c, &work, &[v("work")])? {
-            return Err(Error::Invalid("作品不存在".into()));
-        }
-        let ids = strings(c, &format!("{} SELECT id FROM tree", crate::http_read::TREE), &[v("work")])?;
-        clauses.push(format!(
+        let ids = crate::http_read::work_tree(c, v("work"))?;
+        let clause = format!(
             "EXISTS(
                SELECT 1
                FROM memberships m
                JOIN {ENTITIES} e ON e.id=m.entity
                WHERE m.uuid=a.uuid AND e.work_id IN ({marks}))",
             marks = vec!["?"; ids.len()].join(",")
-        ));
-        args.extend(ids);
+        );
+        filter.add(clause, ids);
     }
+    let entity = identity_filter(c, f, &mut filter)?;
+    let pool = v("pool");
+    pool_filter(pool, v("cluster"), &mut filter)?;
+    filter.clauses.push(match pool {
+        "duplicates" => "NOT EXISTS(SELECT 1 FROM excluded x WHERE x.uuid=a.uuid)".into(),
+        "excluded" => unfolded("a"),
+        _ => visible("a"),
+    });
+    if !v("reason").is_empty() {
+        if pool != "excluded" || !["photo", "screenshot", "text", "manual"].contains(&v("reason")) {
+            return Err(Error::Invalid("未知排除原因".into()));
+        }
+        filter.add("EXISTS(SELECT 1 FROM excluded x WHERE x.uuid=a.uuid AND x.reason=?)", [v("reason").into()]);
+    }
+    let dup = v("dup");
+    if dup == "mixed" {
+        filter.add(format!("EXISTS(SELECT 1 FROM duplicates d WHERE d.uuid=a.uuid AND {MIXED})"), []);
+    } else if !dup.is_empty() {
+        return Err(Error::Invalid("未知重复筛选".into()));
+    }
+    let status = f.get("status").map(String::as_str).unwrap_or("all");
+    status_filter(status, &entity, &mut filter)?;
+    search_filter(c, v("q"), &mut filter)?;
+    label_filter(c, context, v("tag"), v("nsfw"), &mut filter)?;
+    if !v("utag").is_empty() {
+        filter.add("a.uuid IN (SELECT uuid FROM asset_tags WHERE tag=?)", [v("utag").into()]);
+    }
+    let order = f.get("order").map(String::as_str).unwrap_or("newest");
+    let ordering = ordering(order, pool, dup, status, &entity)?;
+    let args = bound(filter.args, filter.numeric_index, v("cluster"))?;
+    Ok((filter.clauses.join(" AND "), args, ordering))
+}
+/// The character (and skin) filter: a merged character is followed to the one it was merged into, and a skin
+/// selects its character with the skin as the variant. Returns the character selected, if any.
+fn identity_filter(c: &Connection, f: &HashMap<String, String>, filter: &mut Filter) -> Result<String> {
+    let mut entity = value(f, "entity").to_owned();
+    let mut variant = value(f, "variant").to_owned();
+    let parent_of = |id: &str| -> Result<Option<Option<String>>> {
+        let sql = format!("SELECT parent_id FROM {ENTITIES} WHERE id=?");
+        Ok(c.query_row(&sql, [id], |r| r.get(0)).optional()?)
+    };
     if !entity.is_empty() {
         for _ in 0..16 {
             let next: Option<Option<String>> = c
@@ -231,9 +278,7 @@ pub(crate) fn selection(
                 _ => break,
             }
         }
-        let parent: Option<Option<String>> =
-            c.query_row(&format!("SELECT parent_id FROM {ENTITIES} WHERE id=?"), [&entity], |r| r.get(0)).optional()?;
-        match parent {
+        match parent_of(&entity)? {
             None => return Err(Error::Invalid("角色不存在".into())),
             Some(Some(p)) if !p.is_empty() => {
                 variant = entity;
@@ -241,138 +286,179 @@ pub(crate) fn selection(
             }
             _ => {}
         }
-        if v("status") == "maybe" {
-            clauses.push(format!("EXISTS(SELECT 1 FROM {HINTS} v WHERE v.uuid=a.uuid AND v.entity=?) AND NOT EXISTS(SELECT 1 FROM memberships m WHERE m.uuid=a.uuid AND m.entity=?) AND NOT EXISTS(SELECT 1 FROM assertions s WHERE s.uuid=a.uuid AND s.entity=? AND s.status='rejected')"));
-            args.extend(vec![entity.clone(); 3]);
+        if value(f, "status") == "maybe" {
+            let maybe = format!(
+                "EXISTS(SELECT 1 FROM {HINTS} v WHERE v.uuid=a.uuid AND v.entity=?)
+                 AND NOT EXISTS(SELECT 1 FROM memberships m WHERE m.uuid=a.uuid AND m.entity=?)
+                 AND NOT EXISTS(SELECT 1 FROM assertions s WHERE s.uuid=a.uuid AND s.entity=? AND s.status='rejected')"
+            );
+            filter.add(maybe, vec![entity.clone(); 3]);
         } else {
             let mascot = exists(c, &format!("SELECT 1 FROM {ENTITIES} WHERE id=? AND mascot<>0"), &[&entity])?;
-            clauses.push(format!(
-                "EXISTS(SELECT 1 FROM {} m WHERE m.uuid=a.uuid AND m.entity=?)",
-                if mascot { "tag_memberships" } else { "memberships" }
-            ));
-            args.push(entity.clone());
+            let members = if mascot { "tag_memberships" } else { "memberships" };
+            filter
+                .add(format!("EXISTS(SELECT 1 FROM {members} m WHERE m.uuid=a.uuid AND m.entity=?)"), [entity.clone()]);
         }
     }
     if !variant.is_empty() {
-        let p: Option<Option<String>> = c
-            .query_row(&format!("SELECT parent_id FROM {ENTITIES} WHERE id=?"), [&variant], |r| r.get(0))
-            .optional()?;
+        let p = parent_of(&variant)?;
         if !p.flatten().is_some_and(|p| !p.is_empty() && (entity.is_empty() || p == entity)) {
             return Err(Error::Invalid("子标签不属于该角色".into()));
         }
-        clauses.push("EXISTS(SELECT 1 FROM variant_memberships v WHERE v.uuid=a.uuid AND v.entity=?)".into());
-        args.push(variant);
+        filter.add("EXISTS(SELECT 1 FROM variant_memberships v WHERE v.uuid=a.uuid AND v.entity=?)", [variant]);
     }
-    let pool = v("pool");
-    match pool{
- "unmatched"=>clauses.extend(["NOT EXISTS(SELECT 1 FROM memberships m WHERE m.uuid=a.uuid)","NOT EXISTS(SELECT 1 FROM tag_memberships t WHERE t.uuid=a.uuid)","NOT EXISTS(SELECT 1 FROM deferred d WHERE d.uuid=a.uuid)"].map(String::from)),
- "skipped"=>clauses.push("EXISTS(SELECT 1 FROM deferred d WHERE d.uuid=a.uuid)".into()),"duplicates"=>clauses.push("EXISTS(SELECT 1 FROM duplicates d WHERE d.uuid=a.uuid)".into()),"excluded"=>clauses.push("EXISTS(SELECT 1 FROM excluded x WHERE x.uuid=a.uuid)".into()),
- "cluster"|"similar"=>{let cluster=v("cluster");if cluster.is_empty()||!cluster.chars().all(|c|crate::compat_unicode::decimal(c).is_some()||digit_extra(c)){return Err(Error::Invalid(if pool=="cluster"{"请指定分组"}else{"请指定相似组"}.into()))}let n=python_int(cluster).map_err(Error::Invalid)?;numeric_index=Some(args.len());if pool=="cluster"{clauses.extend(["EXISTS(SELECT 1 FROM clusters k WHERE k.uuid=a.uuid AND k.cid=?)","NOT EXISTS(SELECT 1 FROM memberships m WHERE m.uuid=a.uuid)","NOT EXISTS(SELECT 1 FROM deferred d WHERE d.uuid=a.uuid)"].map(String::from));}else{clauses.push("EXISTS(SELECT 1 FROM similar_groups g WHERE g.uuid=a.uuid AND g.gid=?)".into())}args.push(n.to_string());},
- "recent"=>clauses.push("EXISTS(SELECT 1 FROM sync_added s WHERE s.uuid=a.uuid AND s.run_id=(SELECT max(run_id) FROM sync_added))".into()),"audit"=>clauses.push("EXISTS(SELECT 1 FROM audit_sample u WHERE u.uuid=a.uuid)".into()),"pending"=>clauses.push("EXISTS(SELECT 1 FROM auto_rules r WHERE r.uuid=a.uuid AND r.kind='pending') AND NOT EXISTS(SELECT 1 FROM curation k WHERE k.uuid=a.uuid)".into()),""=>{},_=>return Err(Error::Invalid("未知图片池".into()))}
-    clauses.push(match pool {
-        "duplicates" => "NOT EXISTS(SELECT 1 FROM excluded x WHERE x.uuid=a.uuid)".into(),
-        "excluded" => unfolded("a"),
-        _ => visible("a"),
-    });
-    if !v("reason").is_empty() {
-        if pool != "excluded" || !["photo", "screenshot", "text", "manual"].contains(&v("reason")) {
-            return Err(Error::Invalid("未知排除原因".into()));
+    Ok(entity)
+}
+/// The picture pool (`pool`), with the group id `cluster` for the cluster and similar pools.
+fn pool_filter(pool: &str, cluster: &str, filter: &mut Filter) -> Result<()> {
+    match pool {
+        "unmatched" => filter.add(unmatched("a"), []),
+        "skipped" => filter.add("EXISTS(SELECT 1 FROM deferred d WHERE d.uuid=a.uuid)", []),
+        "duplicates" => filter.add("EXISTS(SELECT 1 FROM duplicates d WHERE d.uuid=a.uuid)", []),
+        "excluded" => filter.add("EXISTS(SELECT 1 FROM excluded x WHERE x.uuid=a.uuid)", []),
+        "cluster" | "similar" => {
+            if cluster.is_empty()
+                || !cluster.chars().all(|c| crate::compat_unicode::decimal(c).is_some() || digit_extra(c))
+            {
+                return Err(Error::Invalid(if pool == "cluster" { "请指定分组" } else { "请指定相似组" }.into()));
+            }
+            let n = python_int(cluster).map_err(Error::Invalid)?;
+            filter.numeric_index = Some(filter.args.len());
+            let clause = if pool == "cluster" {
+                format!("EXISTS(SELECT 1 FROM clusters k WHERE k.uuid=a.uuid AND k.cid=?) AND {}", unclaimed("a"))
+            } else {
+                "EXISTS(SELECT 1 FROM similar_groups g WHERE g.uuid=a.uuid AND g.gid=?)".into()
+            };
+            filter.add(clause, [n.to_string()]);
         }
-        clauses.push("EXISTS(SELECT 1 FROM excluded x WHERE x.uuid=a.uuid AND x.reason=?)".into());
-        args.push(v("reason").into());
+        "recent" => filter.add(
+            "EXISTS(SELECT 1 FROM sync_added s WHERE s.uuid=a.uuid AND s.run_id=(SELECT max(run_id) FROM sync_added))",
+            [],
+        ),
+        "audit" => filter.add("EXISTS(SELECT 1 FROM audit_sample u WHERE u.uuid=a.uuid)", []),
+        "pending" => filter.add(
+            "EXISTS(SELECT 1 FROM auto_rules r WHERE r.uuid=a.uuid AND r.kind='pending')
+             AND NOT EXISTS(SELECT 1 FROM curation k WHERE k.uuid=a.uuid)",
+            [],
+        ),
+        "" => {}
+        _ => return Err(Error::Invalid("未知图片池".into())),
     }
-    let dup = v("dup");
-    if dup == "mixed" {
-        clauses.push(format!("EXISTS(SELECT 1 FROM duplicates d WHERE d.uuid=a.uuid AND {MIXED})"));
-    } else if !dup.is_empty() {
-        return Err(Error::Invalid("未知重复筛选".into()));
-    }
-    let status = f.get("status").map(String::as_str).unwrap_or("all");
+    Ok(())
+}
+/// The membership state filter (`status`), for the selected character if there is one.
+fn status_filter(status: &str, entity: &str, filter: &mut Filter) -> Result<()> {
+    let of_entity = (!entity.is_empty()).then(|| entity.to_owned());
     match status {
         "maybe" if entity.is_empty() => return Err(Error::Invalid("「可能也是」需要指定角色".into())),
         "maybe" | "all" => {}
         "confirmed" | "machine" => {
-            clauses.push(format!(
-                "EXISTS(SELECT 1 FROM memberships m WHERE m.uuid=a.uuid AND m.status=?{})",
-                if entity.is_empty() { "" } else { " AND m.entity=?" }
-            ));
-            args.push(status.into());
-            if !entity.is_empty() {
-                args.push(entity.clone())
-            }
+            let only = if entity.is_empty() { "" } else { " AND m.entity=?" };
+            let clause = format!("EXISTS(SELECT 1 FROM memberships m WHERE m.uuid=a.uuid AND m.status=?{only})");
+            filter.add(clause, std::iter::once(status.to_owned()).chain(of_entity));
         }
         "ambiguous" => {
-            clauses.push(format!(
-                "EXISTS(SELECT 1 FROM ambiguous_claims x WHERE x.uuid=a.uuid{})",
-                if entity.is_empty() { "" } else { " AND x.entity=?" }
-            ));
-            if !entity.is_empty() {
-                args.push(entity.clone())
-            }
+            let only = if entity.is_empty() { "" } else { " AND x.entity=?" };
+            filter.add(format!("EXISTS(SELECT 1 FROM ambiguous_claims x WHERE x.uuid=a.uuid{only})"), of_entity);
         }
-        "unknown" => clauses.push("EXISTS(SELECT 1 FROM deferred d WHERE d.uuid=a.uuid)".into()),
+        "unknown" => filter.add("EXISTS(SELECT 1 FROM deferred d WHERE d.uuid=a.uuid)", []),
         _ => return Err(Error::Invalid("未知筛选状态".into())),
     }
-    let query = trim(v("q")).chars().take(160).collect::<String>();
-    if !query.is_empty() {
-        let hits = crate::names_search::hits(c, &query)?;
-        let mut search = "a.filename LIKE ? ESCAPE '\\'".to_owned();
-        args.push(format!("%{}%", query.replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_")));
-        if !hits.is_empty() {
-            search += &format!(
-                " OR a.uuid IN (SELECT uuid FROM memberships WHERE entity IN ({}))",
-                vec!["?"; hits.len()].join(",")
-            );
-            args.extend(hits.into_keys());
-        }
-        clauses.push(format!("({search})"));
+    Ok(())
+}
+/// The search box (`q`): file names, and the pictures of the identities whose names match.
+fn search_filter(c: &Connection, q: &str, filter: &mut Filter) -> Result<()> {
+    let query = trim(q).chars().take(160).collect::<String>();
+    if query.is_empty() {
+        return Ok(());
     }
-    let tag = v("tag");
-    let nsfw = v("nsfw");
+    let hits = crate::names_search::hits(c, &query)?;
+    let mut search = "a.filename LIKE ? ESCAPE '\\'".to_owned();
+    let mut args = vec![crate::http_read::like(&query)];
+    if !hits.is_empty() {
+        let marks = vec!["?"; hits.len()].join(",");
+        search += &format!(" OR a.uuid IN (SELECT uuid FROM memberships WHERE entity IN ({marks}))");
+        args.extend(hits.into_keys());
+    }
+    filter.add(format!("({search})"), args);
+    Ok(())
+}
+/// The general tag (`tag`) and content (`nsfw`) filters. With core labels, a tag among NSFW pictures only is one
+/// query on the term projection.
+fn label_filter(c: &Connection, context: &LibraryContext, tag: &str, nsfw: &str, filter: &mut Filter) -> Result<()> {
     let combined = !tag.is_empty() && nsfw == "only" && flag(c, "terms_labels")?;
     if !tag.is_empty() {
         if !crate::http_read::tag_vocabulary(context)?.iter().any(|t| t == tag) {
             return Err(Error::Invalid("请选择已有的通用标签".into()));
         }
-        clauses.push(if combined{"a.uuid IN (SELECT ta.key FROM term_projection rated JOIN term_assets ta ON ta.id=rated.asset_id AND ta.namespace='library' WHERE rated.state IN ('machine','confirmed') AND rated.term_id IN (SELECT t.id FROM terms t JOIN term_links l ON l.term_id=t.id AND l.system='wd_rating' WHERE t.kind='rating' AND l.key IN ('questionable', 'explicit')) AND EXISTS(SELECT 1 FROM term_projection tagged WHERE tagged.asset_id=rated.asset_id AND tagged.state IN ('machine','confirmed') AND tagged.term_id IN (SELECT t.id FROM terms t JOIN term_links l ON l.term_id=t.id AND l.system='wd' WHERE t.kind='topic' AND l.key=?)))"}else{"a.uuid IN (SELECT uuid FROM general_hits WHERE value=?)"}.into());
-        args.push(tag.into());
+        let clause = if combined {
+            format!(
+                "a.uuid IN (
+                   SELECT ta.key
+                   FROM term_projection rated
+                   JOIN term_assets ta ON ta.id=rated.asset_id AND ta.namespace='library'
+                   WHERE rated.state IN ('machine','confirmed')
+                     AND rated.term_id IN (
+                       SELECT t.id
+                       FROM terms t
+                       JOIN term_links l ON l.term_id=t.id AND l.system='wd_rating'
+                       WHERE t.kind='rating' AND l.key IN ({NSFW_RATINGS}))
+                     AND EXISTS(
+                       SELECT 1
+                       FROM term_projection tagged
+                       WHERE tagged.asset_id=rated.asset_id AND tagged.state IN ('machine','confirmed')
+                         AND tagged.term_id IN (
+                           SELECT t.id
+                           FROM terms t
+                           JOIN term_links l ON l.term_id=t.id AND l.system='wd'
+                           WHERE t.kind='topic' AND l.key=?)))"
+            )
+        } else {
+            "a.uuid IN (SELECT uuid FROM general_hits WHERE value=?)".into()
+        };
+        filter.add(clause, [tag.into()]);
     }
     if ["hide", "only"].contains(&nsfw) && !combined {
-        let hit = "a.uuid IN (SELECT uuid FROM asset_rating WHERE rating IN ('questionable', 'explicit'))";
-        clauses.push(if nsfw == "hide" { format!("NOT coalesce({hit},0)") } else { hit.into() });
+        let hit = crate::sql_fragments::nsfw("a");
+        filter.add(if nsfw == "hide" { format!("NOT coalesce({hit},0)") } else { hit }, []);
     } else if !nsfw.is_empty() && !["hide", "only"].contains(&nsfw) {
         return Err(Error::Invalid("未知内容筛选".into()));
     }
-    if !v("utag").is_empty() {
-        clauses.push("a.uuid IN (SELECT uuid FROM asset_tags WHERE tag=?)".into());
-        args.push(v("utag").into());
-    }
-    let order = f.get("order").map(String::as_str).unwrap_or("newest");
+    Ok(())
+}
+/// The ORDER BY of a selection (`order`); every ordering ends in the primary key.
+fn ordering(order: &str, pool: &str, dup: &str, status: &str, entity: &str) -> Result<String> {
     if !["newest", "oldest", "suspicious", "hinted"].contains(&order) {
         return Err(Error::Invalid("未知排序".into()));
     }
-    let mut ordering = format!("a.added_at {},a.uuid", if order == "oldest" { "ASC" } else { "DESC" });
-    if (pool == "duplicates" || !dup.is_empty()) && order != "suspicious" {
-        ordering=format!("(SELECT d.grp_added FROM duplicates d WHERE d.uuid=a.uuid) {},(SELECT d.grp FROM duplicates d WHERE d.uuid=a.uuid),(SELECT d.pos FROM duplicates d WHERE d.uuid=a.uuid),a.uuid",if order=="oldest"{"ASC"}else{"DESC"});
-    }
-    if status == "maybe" && order == "suspicious" {
-        ordering = format!(
-            "(SELECT min(v.weak)*10-max(v.score) FROM {HINTS} v WHERE v.uuid=a.uuid AND v.entity='{}'),a.uuid",
-            entity.replace('\'', "''")
-        );
+    let direction = if order == "oldest" { "ASC" } else { "DESC" };
+    let quoted = entity.replace('\'', "''");
+    Ok(if status == "maybe" && order == "suspicious" {
+        format!(
+            "(SELECT min(v.weak)*10-max(v.score) FROM {HINTS} v WHERE v.uuid=a.uuid AND v.entity='{quoted}'),a.uuid"
+        )
     } else if order == "hinted" {
-        ordering = format!(
+        format!(
             "coalesce((SELECT min(v.weak)*10-max(v.score) FROM {} v WHERE v.uuid=a.uuid),99),a.added_at DESC,a.uuid",
             leads()
-        );
+        )
     } else if order == "suspicious" {
-        ordering = format!(
-            "(SELECT min(m.skey) FROM memberships m WHERE m.uuid=a.uuid{}),a.uuid",
-            if entity.is_empty() { String::new() } else { format!(" AND m.entity='{}'", entity.replace('\'', "''")) }
-        );
-    }
+        let only = if entity.is_empty() { String::new() } else { format!(" AND m.entity='{quoted}'") };
+        format!("(SELECT min(m.skey) FROM memberships m WHERE m.uuid=a.uuid{only}),a.uuid")
+    } else if pool == "duplicates" || !dup.is_empty() {
+        format!(
+            "(SELECT d.grp_added FROM duplicates d WHERE d.uuid=a.uuid) {direction},\
+             (SELECT d.grp FROM duplicates d WHERE d.uuid=a.uuid),\
+             (SELECT d.pos FROM duplicates d WHERE d.uuid=a.uuid),a.uuid"
+        )
+    } else {
+        format!("a.added_at {direction},a.uuid")
+    })
+}
+/// The arguments as SQL values: the group id an integer, the rest text.
+fn bound(args: Vec<String>, numeric_index: Option<usize>, cluster: &str) -> Result<Vec<Value>> {
     if numeric_index.is_some() {
-        let digits = v("cluster")
+        let digits = cluster
             .chars()
             .map(|c| (b'0' + crate::compat_unicode::decimal(c).expect("http_browse internal invariant")) as char)
             .collect::<String>();
@@ -382,7 +468,7 @@ pub(crate) fn selection(
             return Err(Error::Io(std::io::Error::other("Python int too large to convert to SQLite INTEGER")));
         }
     }
-    let args = args
+    Ok(args
         .into_iter()
         .enumerate()
         .map(|(i, v)| {
@@ -392,8 +478,7 @@ pub(crate) fn selection(
                 Value::Text(v)
             }
         })
-        .collect();
-    Ok((clauses.join(" AND "), args, ordering))
+        .collect())
 }
 fn evidence(v: &Json, fields: &[&str]) -> Json {
     let mut sources =
@@ -417,7 +502,15 @@ fn memberships(c: &Connection, id: &str) -> Result<Vec<Json>> {
         let entity = get(&r, "id");
         let mut item = display(c, r.clone())?;
         item.set("evidence", evidence(&r, &[]));
-        item.set("variants",Json::Array(rows(c,"SELECT entity AS id,variant AS name,status FROM variant_memberships WHERE uuid=? AND parent_id=? ORDER BY variant",&[id,entity.text()])?.into_iter().map(|v|shown(c,v,true)).collect::<Result<_>>()?));
+        let variants = rows(
+            c,
+            "SELECT entity AS id,variant AS name,status
+             FROM variant_memberships
+             WHERE uuid=? AND parent_id=?
+             ORDER BY variant",
+            &[id, entity.text()],
+        )?;
+        item.set("variants", Json::Array(variants.into_iter().map(|v| shown(c, v, true)).collect::<Result<_>>()?));
         out.push(item);
     }
     Ok(out)
@@ -450,22 +543,31 @@ impl PageDisplay {
         name_ids.extend(entities.values().map(|r| get(r, "work_id")));
         let name_ids = Json::Array(name_ids).dump();
         let mut names = HashMap::new();
-        for r in rows(c, "SELECT entity,skin_only,name,name_source,zh,ja,en,tag FROM term_name_display WHERE entity IN (SELECT value FROM json_each(?))", &[&name_ids])? {
-            names.insert((get(&r, "entity").text().to_owned(), get(&r, "skin_only").integer() != 0), crate::http_read::shown_info(Json::object([
-                ("name", get(&r, "name")), ("name_source", get(&r, "name_source")),
+        let displayed = "
+            SELECT entity,skin_only,name,name_source,zh,ja,en,tag
+            FROM term_name_display
+            WHERE entity IN (SELECT value FROM json_each(?))";
+        for r in rows(c, displayed, &[&name_ids])? {
+            let info = Json::object([
+                ("name", get(&r, "name")),
+                ("name_source", get(&r, "name_source")),
                 ("names", Json::object([("zh", get(&r, "zh")), ("ja", get(&r, "ja")), ("en", get(&r, "en"))])),
                 ("tag", get(&r, "tag")),
-            ])));
+            ]);
+            let key = (get(&r, "entity").text().to_owned(), get(&r, "skin_only").integer() != 0);
+            names.insert(key, crate::http_read::shown_info(info));
         }
         let mut nodes = HashMap::new();
-        if c.query_row("SELECT value FROM meta WHERE key='identity_policy'", [], |r| r.get::<_, String>(0))
-            .optional()?
-            .as_deref()
-            == Some("hybrid")
-        {
-            for mut r in rows(c, "SELECT id,node_type,character_id,variant_id,canonical_id FROM identity_nodes WHERE id IN (SELECT value FROM json_each(?))", &[&ids])? {
+        if hybrid(c)? {
+            let identities = "
+                SELECT id,node_type,character_id,variant_id,canonical_id
+                FROM identity_nodes
+                WHERE id IN (SELECT value FROM json_each(?))";
+            for mut r in rows(c, identities, &[&ids])? {
                 let id = get(&r, "id").text().to_owned();
-                if let Json::Object(fields) = &mut r { fields.retain(|(k, _)| k != "id"); }
+                if let Json::Object(fields) = &mut r {
+                    fields.retain(|(k, _)| k != "id");
+                }
                 nodes.insert(id, r);
             }
         }
@@ -500,17 +602,70 @@ impl PageDisplay {
         v
     }
 }
-/// One batched page, retaining first best lead and Python dict overwrite semantics.
-fn decorate(c: &Connection, page: &mut [Json]) -> Result<()> {
-    if page.is_empty() {
-        return Ok(());
+/// Shows identities on one page: from the page's batched names when they are projected, else one by one.
+struct Renderer<'a> {
+    c: &'a Connection,
+    page: Option<PageDisplay>,
+}
+impl Renderer<'_> {
+    fn display(&self, v: Json, skin: bool) -> Result<Json> {
+        match &self.page {
+            Some(page) => Ok(page.display(v, skin)),
+            None => shown(self.c, v, skin),
+        }
     }
-    let ids = Json::Array(page.iter().map(|v| get(v, "uuid")).collect()).dump();
-    let selected = "IN (SELECT value FROM json_each(?))";
+}
+/// The page's tables keyed by picture: its own tags, deferral, duplicate group and exclusion.
+struct PageExtras {
+    tags: HashMap<String, Vec<Json>>,
+    deferred: HashSet<String>,
+    duplicates: HashMap<String, Json>,
+    excluded: HashMap<String, Json>,
+}
+impl PageExtras {
+    fn load(c: &Connection, ids: &str) -> Result<Self> {
+        let selected = "IN (SELECT value FROM json_each(?))";
+        let mut tags: HashMap<String, Vec<Json>> = HashMap::new();
+        for r in rows(c, &format!("SELECT uuid,tag FROM asset_tags WHERE uuid {selected} ORDER BY tag"), &[ids])? {
+            tags.entry(get(&r, "uuid").text().into()).or_default().push(get(&r, "tag"));
+        }
+        let deferred =
+            strings(c, &format!("SELECT uuid FROM deferred WHERE uuid {selected}"), &[ids])?.into_iter().collect();
+        let mut duplicates = HashMap::new();
+        for r in rows(c, &format!("SELECT uuid,grp,size,pos FROM duplicates WHERE uuid {selected}"), &[ids])? {
+            duplicates.insert(
+                get(&r, "uuid").text().to_owned(),
+                Json::object([("grp", get(&r, "grp")), ("size", get(&r, "size")), ("pos", get(&r, "pos"))]),
+            );
+        }
+        let mut excluded = HashMap::new();
+        for r in rows(c, &format!("SELECT uuid,reason FROM excluded WHERE uuid {selected}"), &[ids])? {
+            excluded.insert(get(&r, "uuid").text().to_owned(), get(&r, "reason"));
+        }
+        Ok(Self { tags, deferred, duplicates, excluded })
+    }
+}
+/// The best lead on each unclaimed picture of the page (`ids`, a JSON list), the first one in lead order.
+fn page_leads(c: &Connection, ids: &str) -> Result<HashMap<String, Json>> {
+    let sql = format!(
+        "SELECT v.uuid,v.entity
+         FROM {} v
+         WHERE v.uuid IN (SELECT value FROM json_each(?))
+           AND NOT EXISTS(SELECT 1 FROM memberships m WHERE m.uuid=v.uuid)
+         ORDER BY v.weak,v.score DESC",
+        leads()
+    );
     let mut leads_by = HashMap::new();
-    for r in rows(c,&format!("SELECT v.uuid,v.entity FROM {} v WHERE v.uuid {selected} AND NOT EXISTS(SELECT 1 FROM memberships m WHERE m.uuid=v.uuid) ORDER BY v.weak,v.score DESC",leads()),&[&ids])?{leads_by.entry(get(&r,"uuid").text().to_owned()).or_insert(get(&r,"entity"));}
+    for r in rows(c, &sql, &[ids])? {
+        leads_by.entry(get(&r, "uuid").text().to_owned()).or_insert(get(&r, "entity"));
+    }
+    Ok(leads_by)
+}
+/// The audited identity of each sampled picture on the page, and the answer it already has.
+fn page_audit(c: &Connection, ids: &str) -> Result<(HashMap<String, Json>, HashMap<String, Json>)> {
+    let selected = "IN (SELECT value FROM json_each(?))";
     let mut audit = HashMap::new();
-    for r in rows(c, &format!("SELECT uuid,entity FROM audit_sample WHERE uuid {selected}"), &[&ids])? {
+    for r in rows(c, &format!("SELECT uuid,entity FROM audit_sample WHERE uuid {selected}"), &[ids])? {
         audit.insert(get(&r, "uuid").text().to_owned(), get(&r, "entity"));
     }
     let mut answered = HashMap::new();
@@ -527,23 +682,20 @@ fn decorate(c: &Connection, page: &mut [Json]) -> Result<()> {
          FROM audit_sample u
          WHERE u.uuid {selected}"
     );
-    for r in rows(c, &answers, &[&ids])? {
+    for r in rows(c, &answers, &[ids])? {
         answered.insert(get(&r, "uuid").text().to_owned(), get(&r, "answer"));
     }
-    let variant_rows = rows(c,&format!("SELECT uuid,parent_id,entity AS id,variant AS name,status FROM variant_memberships WHERE uuid {selected} ORDER BY variant"),&[&ids])?;
-    let member_rows = rows(c, &members(selected), &[&ids])?;
-    let mut entity_ids = variant_rows.iter().chain(&member_rows).map(|r| get(r, "id")).collect::<Vec<_>>();
-    entity_ids.extend(leads_by.values().chain(audit.values()).cloned());
-    let reader = PageDisplay::load(c, entity_ids)?;
-    let display = |v: Json, skin| -> Result<Json> {
-        match &reader {
-            Some(reader) => Ok(reader.display(v, skin)),
-            None => shown(c, v, skin),
-        }
-    };
+    Ok((audit, answered))
+}
+/// Each picture's memberships, shown, with their skins.
+fn page_members(
+    renderer: &Renderer,
+    variant_rows: Vec<Json>,
+    member_rows: Vec<Json>,
+) -> Result<HashMap<String, Vec<Json>>> {
     let mut variants: HashMap<(String, String), Vec<Json>> = HashMap::new();
     for r in variant_rows {
-        let item = display(
+        let item = renderer.display(
             Json::object([("id", get(&r, "id")), ("name", get(&r, "name")), ("status", get(&r, "status"))]),
             true,
         )?;
@@ -551,49 +703,49 @@ fn decorate(c: &Connection, page: &mut [Json]) -> Result<()> {
     }
     let mut members: HashMap<String, Vec<Json>> = HashMap::new();
     for r in member_rows {
-        let mut item = display(r.clone(), false)?;
+        let mut item = renderer.display(r.clone(), false)?;
         item.set("evidence", evidence(&r, &[]));
-        item.set(
-            "variants",
-            Json::Array(
-                variants
-                    .get(&(get(&r, "uuid").text().into(), get(&r, "id").text().into()))
-                    .cloned()
-                    .unwrap_or_default(),
-            ),
-        );
+        let key = (get(&r, "uuid").text().into(), get(&r, "id").text().into());
+        item.set("variants", Json::Array(variants.get(&key).cloned().unwrap_or_default()));
         members.entry(get(&r, "uuid").text().into()).or_default().push(item);
     }
-    let mut tags: HashMap<String, Vec<Json>> = HashMap::new();
-    for r in rows(c, &format!("SELECT uuid,tag FROM asset_tags WHERE uuid {selected} ORDER BY tag"), &[&ids])? {
-        tags.entry(get(&r, "uuid").text().into()).or_default().push(get(&r, "tag"));
+    Ok(members)
+}
+/// One batched page, retaining first best lead and Python dict overwrite semantics.
+fn decorate(c: &Connection, page: &mut [Json]) -> Result<()> {
+    if page.is_empty() {
+        return Ok(());
     }
-    let deferred: HashSet<_> =
-        strings(c, &format!("SELECT uuid FROM deferred WHERE uuid {selected}"), &[&ids])?.into_iter().collect();
-    let mut duplicates = HashMap::new();
-    for r in rows(c, &format!("SELECT uuid,grp,size,pos FROM duplicates WHERE uuid {selected}"), &[&ids])? {
-        duplicates.insert(
-            get(&r, "uuid").text().to_owned(),
-            Json::object([("grp", get(&r, "grp")), ("size", get(&r, "size")), ("pos", get(&r, "pos"))]),
-        );
-    }
-    let mut excluded = HashMap::new();
-    for r in rows(c, &format!("SELECT uuid,reason FROM excluded WHERE uuid {selected}"), &[&ids])? {
-        excluded.insert(get(&r, "uuid").text().to_owned(), get(&r, "reason"));
-    }
+    let ids = Json::Array(page.iter().map(|v| get(v, "uuid")).collect()).dump();
+    let selected = "IN (SELECT value FROM json_each(?))";
+    let leads_by = page_leads(c, &ids)?;
+    let (audit, answered) = page_audit(c, &ids)?;
+    let variants = format!(
+        "SELECT uuid,parent_id,entity AS id,variant AS name,status
+         FROM variant_memberships
+         WHERE uuid {selected}
+         ORDER BY variant"
+    );
+    let variant_rows = rows(c, &variants, &[&ids])?;
+    let member_rows = rows(c, &members(selected), &[&ids])?;
+    let mut entity_ids = variant_rows.iter().chain(&member_rows).map(|r| get(r, "id")).collect::<Vec<_>>();
+    entity_ids.extend(leads_by.values().chain(audit.values()).cloned());
+    let renderer = Renderer { c, page: PageDisplay::load(c, entity_ids)? };
+    let members = page_members(&renderer, variant_rows, member_rows)?;
+    let extras = PageExtras::load(c, &ids)?;
     for row in page {
         let id = get(row, "uuid").text().to_owned();
         let m = members.get(&id).cloned().unwrap_or_default();
         row.set("memberships", Json::Array(m.clone()));
         row.set("confirmed", Json::Array(m.into_iter().filter(|m| get(m, "status").text() == "confirmed").collect()));
-        row.set("unknown", deferred.contains(&id).into());
-        row.set("user_tags", Json::Array(tags.get(&id).cloned().unwrap_or_default()));
-        row.set("dup", duplicates.get(&id).cloned().unwrap_or_else(null));
-        row.set("excluded", excluded.get(&id).cloned().unwrap_or_else(null));
+        row.set("unknown", extras.deferred.contains(&id).into());
+        row.set("user_tags", Json::Array(extras.tags.get(&id).cloned().unwrap_or_default()));
+        row.set("dup", extras.duplicates.get(&id).cloned().unwrap_or_else(null));
+        row.set("excluded", extras.excluded.get(&id).cloned().unwrap_or_else(null));
         for (key, map) in [("hint", &leads_by), ("audit", &audit)] {
             let mut info = null();
             if let Some(e) = map.get(&id) {
-                let shown = display(Json::object([("id", e.clone())]), false)?;
+                let shown = renderer.display(Json::object([("id", e.clone())]), false)?;
                 info = Json::object([("id", get(&shown, "id")), ("name", get(&shown, "name"))]);
                 if key == "audit" {
                     info.set("answer", answered.get(&id).cloned().unwrap_or_else(null));
@@ -639,20 +791,21 @@ fn question(c: &Connection, id: &str) -> Result<Json> {
     )?
     .into_iter()
     .next();
-    let unasked = |a: &str| format!("NOT EXISTS(SELECT 1 FROM asked k WHERE k.uuid={a}.uuid AND k.entity={a}.entity)");
-    let learnable = |a: &str| {
-        format!(
-            "NOT EXISTS(
-               SELECT 1
-               FROM {ENTITIES} l
-               WHERE l.id={a}.entity AND l.label_only=1)"
-        )
-    };
     let mut ambiguous = None;
     let mut hint = None;
     if audit.is_none() {
-        ambiguous=rows(c,&format!("SELECT m.entity,m.rival FROM ambiguous_claims m WHERE m.uuid=? AND {} AND {} ORDER BY m.margin LIMIT 1",unasked("m"),learnable("m")),&[id])?.into_iter().next();
-        hint=strings(c,&format!("SELECT w.entity FROM weak_claims w JOIN single_assets o ON o.uuid=w.uuid WHERE w.source='PROTO' AND {} AND {} AND NOT EXISTS(SELECT 1 FROM memberships m WHERE m.uuid=w.uuid AND m.entity=w.entity) AND NOT EXISTS(SELECT 1 FROM assertions s WHERE s.uuid=w.uuid AND (s.status='confirmed' OR s.entity=w.entity)) AND NOT EXISTS(SELECT 1 FROM excluded x WHERE x.uuid=w.uuid) AND w.uuid=? ORDER BY w.score DESC LIMIT 1",unasked("w"),learnable("w")),&[id])?.into_iter().next();
+        let closest = format!(
+            "SELECT m.entity,m.rival
+             FROM ambiguous_claims m
+             WHERE m.uuid=? AND {} AND {}
+             ORDER BY m.margin
+             LIMIT 1",
+            unasked("m"),
+            learnable("m")
+        );
+        ambiguous = rows(c, &closest, &[id])?.into_iter().next();
+        let hinted = format!("{} AND w.uuid=? ORDER BY w.score DESC LIMIT 1", proto_hints("w.entity"));
+        hint = strings(c, &hinted, &[id])?.into_iter().next();
     }
     let confirmed = |e: &str| count(c, "SELECT count(*) FROM memberships WHERE entity=? AND status='confirmed'", &[e]);
     let (kind, entity, rival) = if let Some(e) = audit {
@@ -663,7 +816,20 @@ fn question(c: &Connection, id: &str) -> Result<Json> {
         ("ambiguous", get(&r, "entity").text().to_owned(), Some(get(&r, "rival").text().to_owned()))
     } else {
         let mut found = None;
-        for e in strings(c,&format!("SELECT m.entity FROM memberships m JOIN single_assets o ON o.uuid=m.uuid WHERE m.uuid=? AND m.status='machine' AND {} AND {}",unasked("m"),learnable("m")),&[id])?{if confirmed(&e)?<5{found=Some(e);break;}}
+        let seeds = format!(
+            "SELECT m.entity
+             FROM memberships m
+             JOIN single_assets o ON o.uuid=m.uuid
+             WHERE m.uuid=? AND m.status='machine' AND {} AND {}",
+            unasked("m"),
+            learnable("m")
+        );
+        for e in strings(c, &seeds, &[id])? {
+            if confirmed(&e)? < 5 {
+                found = Some(e);
+                break;
+            }
+        }
         let Some(e) = found else { return Ok(null()) };
         ("seed", e, None)
     };
@@ -712,7 +878,59 @@ fn detail(c: &Connection, context: &LibraryContext, id: &str) -> Result<Json> {
          ORDER BY name"
     );
     out.set("tag_identities", Json::Array(rows(c, &tagged, &[id])?));
-    let mut ownership = members;
+    out.set("ownership", ownership(c, id, members)?);
+    out.set("alternatives", alternatives(c, id)?);
+    out.set("single", exists(c, "SELECT 1 FROM single_assets WHERE uuid=?", &[id])?.into());
+    let assertions = format!(
+        "SELECT e.id,entity_name(e.id) AS name,s.status,s.origin
+         FROM assertions s
+         JOIN {ENTITIES} e ON e.id=s.entity
+         WHERE s.uuid=?
+         ORDER BY name,e.id"
+    );
+    let candidates = format!(
+        "SELECT e.id,entity_name(e.id) AS name,c.source,c.score
+         FROM candidates c
+         JOIN {ENTITIES} e ON e.id=c.entity
+         WHERE c.uuid=?
+         ORDER BY name,e.id"
+    );
+    let displayed = |sql: &str| -> Result<Json> {
+        Ok(Json::Array(rows(c, sql, &[id])?.into_iter().map(|r| display(c, r)).collect::<Result<_>>()?))
+    };
+    out.set("assertions", displayed(&assertions)?);
+    out.set("candidates", displayed(&candidates)?);
+    out.set("unknown", exists(c, "SELECT 1 FROM deferred WHERE uuid=?", &[id])?.into());
+    let tags = strings(c, "SELECT tag FROM asset_tags WHERE uuid=? ORDER BY tag", &[id])?;
+    out.set("user_tags", Json::Array(tags.into_iter().map(Into::into).collect()));
+    out.set(
+        "excluded",
+        rows(c, "SELECT reason,origin FROM excluded WHERE uuid=?", &[id])?.into_iter().next().unwrap_or_else(null),
+    );
+    let curated = rows(c, "SELECT status FROM curation WHERE uuid=?", &[id])?.into_iter().next();
+    out.set("curation", curated.as_ref().map(|v| get(v, "status")).unwrap_or_else(null));
+    out.set(
+        "pending",
+        (curated.is_none() && exists(c, "SELECT 1 FROM auto_rules WHERE uuid=? AND kind='pending'", &[id])?).into(),
+    );
+    out.set("duplicates", copies(c, id)?);
+    let source = context.source.as_ref().ok_or_else(|| Error::Invalid("HTTP 图库状态缺少 source".into()))?;
+    c.execute("ATTACH DATABASE ? AS src", [crate::http_read::sqlite_uri(source)])?;
+    let tags = "
+        SELECT value,conf
+        FROM src.labels
+        WHERE uuid=? AND dim='general' AND conf>=0.35
+        ORDER BY conf DESC
+        LIMIT 24";
+    out.set("tags", Json::Array(rows(c, tags, &[id])?));
+    out.set("identity", crate::http_characters::assignments(c, id)?);
+    out.set("question", question(c, id)?);
+    attach_provenance(c, context)?;
+    out.extend(crate::http_artists::for_asset(c, context.library.is_some(), id, None, false)?);
+    Ok(out)
+}
+/// The picture's memberships followed by the families a person rejected on it.
+fn ownership(c: &Connection, id: &str, mut members: Vec<Json>) -> Result<Json> {
     let rejected = format!(
         "SELECT e.id,entity_name(e.id) AS name,s.status,s.origin,v.sources,v.score
          FROM assertions s
@@ -723,9 +941,12 @@ fn detail(c: &Connection, context: &LibraryContext, id: &str) -> Result<Json> {
     for r in rows(c, &rejected, &[id])? {
         let mut item = display(c, r.clone())?;
         item.set("evidence", evidence(&r, &[]));
-        ownership.push(item);
+        members.push(item);
     }
-    out.set("ownership", Json::Array(ownership));
+    Ok(Json::Array(members))
+}
+/// Up to twelve other identities the evidence points to on the picture, strong leads first.
+fn alternatives(c: &Connection, id: &str) -> Result<Json> {
     let sql = format!(
         "SELECT *
          FROM (
@@ -752,80 +973,37 @@ fn detail(c: &Connection, context: &LibraryContext, id: &str) -> Result<Json> {
         item.set("evidence", evidence(&r, &["wd", "ccip"]));
         alternatives.push(item);
     }
-    out.set("alternatives", Json::Array(alternatives));
-    out.set("single", exists(c, "SELECT 1 FROM single_assets WHERE uuid=?", &[id])?.into());
-    let assertions = format!(
-        "SELECT e.id,entity_name(e.id) AS name,s.status,s.origin
-         FROM assertions s
-         JOIN {ENTITIES} e ON e.id=s.entity
-         WHERE s.uuid=?
-         ORDER BY name,e.id"
+    Ok(Json::Array(alternatives))
+}
+/// The picture's other copies in its duplicate group, with the names of the identities on each.
+fn copies(c: &Connection, id: &str) -> Result<Json> {
+    let copies = "
+        SELECT y.uuid,y.pos,y.size,a.width,a.height,a.added_at
+        FROM duplicates d
+        JOIN duplicates y ON y.grp=d.grp AND y.uuid<>d.uuid
+        JOIN assets a ON a.uuid=y.uuid
+        WHERE d.uuid=?
+        ORDER BY y.pos";
+    let names = format!(
+        "SELECT entity_name(e.id)
+         FROM memberships m
+         JOIN {ENTITIES} e ON e.id=m.entity
+         WHERE m.uuid=?
+         ORDER BY m.status='machine',1"
     );
-    let candidates = format!(
-        "SELECT e.id,entity_name(e.id) AS name,c.source,c.score
-         FROM candidates c
-         JOIN {ENTITIES} e ON e.id=c.entity
-         WHERE c.uuid=?
-         ORDER BY name,e.id"
-    );
-    out.set(
-        "assertions",
-        Json::Array(rows(c, &assertions, &[id])?.into_iter().map(|r| display(c, r)).collect::<Result<_>>()?),
-    );
-    out.set(
-        "candidates",
-        Json::Array(rows(c, &candidates, &[id])?.into_iter().map(|r| display(c, r)).collect::<Result<_>>()?),
-    );
-    out.set("unknown", exists(c, "SELECT 1 FROM deferred WHERE uuid=?", &[id])?.into());
-    out.set(
-        "user_tags",
-        Json::Array(
-            strings(c, "SELECT tag FROM asset_tags WHERE uuid=? ORDER BY tag", &[id])?
-                .into_iter()
-                .map(Into::into)
-                .collect(),
-        ),
-    );
-    out.set(
-        "excluded",
-        rows(c, "SELECT reason,origin FROM excluded WHERE uuid=?", &[id])?.into_iter().next().unwrap_or_else(null),
-    );
-    let curated = rows(c, "SELECT status FROM curation WHERE uuid=?", &[id])?.into_iter().next();
-    out.set("curation", curated.as_ref().map(|v| get(v, "status")).unwrap_or_else(null));
-    out.set(
-        "pending",
-        (curated.is_none() && exists(c, "SELECT 1 FROM auto_rules WHERE uuid=? AND kind='pending'", &[id])?).into(),
-    );
-    let mut copies=rows(c,"SELECT y.uuid,y.pos,y.size,a.width,a.height,a.added_at FROM duplicates d JOIN duplicates y ON y.grp=d.grp AND y.uuid<>d.uuid JOIN assets a ON a.uuid=y.uuid WHERE d.uuid=? ORDER BY y.pos",&[id])?;
+    let mut copies = rows(c, copies, &[id])?;
     for copy in &mut copies {
         let uuid = get(copy, "uuid");
-        let names = format!(
-            "SELECT entity_name(e.id)
-             FROM memberships m
-             JOIN {ENTITIES} e ON e.id=m.entity
-             WHERE m.uuid=?
-             ORDER BY m.status='machine',1"
-        );
         copy.set("names", Json::Array(strings(c, &names, &[uuid.text()])?.into_iter().map(Into::into).collect()));
     }
-    out.set("duplicates", Json::Array(copies));
-    c.execute(
-        "ATTACH DATABASE ? AS src",
-        [crate::http_read::sqlite_uri(
-            context.source.as_ref().ok_or_else(|| Error::Invalid("HTTP 图库状态缺少 source".into()))?,
-        )],
-    )?;
-    out.set("tags",Json::Array(rows(c,"SELECT value,conf FROM src.labels WHERE uuid=? AND dim='general' AND conf>=0.35 ORDER BY conf DESC LIMIT 24",&[id])?));
-    out.set("identity", crate::http_characters::assignments(c, id)?);
-    out.set("question", question(c, id)?);
-    attach_provenance(c, context)?;
-    out.extend(crate::http_artists::for_asset(c, context.library.is_some(), id, None, false)?);
-    Ok(out)
+    Ok(Json::Array(copies))
 }
 fn pools(c: &Connection, nsfw: &str) -> Result<Json> {
     let r = rating("a", nsfw)?;
     let seen = format!("{}{r}", visible("a"));
-    let row=rows(c,&format!("SELECT count(*) AS n,min(a.uuid) AS cover FROM assets a WHERE {seen} AND NOT EXISTS(SELECT 1 FROM memberships m WHERE m.uuid=a.uuid) AND NOT EXISTS(SELECT 1 FROM tag_memberships t WHERE t.uuid=a.uuid) AND NOT EXISTS(SELECT 1 FROM deferred d WHERE d.uuid=a.uuid)"),&[])?.remove(0);
+    let unmatched =
+        format!("SELECT count(*) AS n,min(a.uuid) AS cover FROM assets a WHERE {seen} AND {}", unmatched("a"));
+    let row = rows(c, &unmatched, &[])?.remove(0);
     let skipped = count(c, &format!("SELECT count(*) FROM deferred a JOIN assets USING(uuid) WHERE {seen}"), &[])?;
     let listed = format!("NOT EXISTS(SELECT 1 FROM excluded x WHERE x.uuid=d.uuid){}", rating("d", nsfw)?);
     let dups =
@@ -842,8 +1020,19 @@ fn pools(c: &Connection, nsfw: &str) -> Result<Json> {
         excluded += get(&x, "n").integer();
         reasons.set(get(&x, "reason").text(), get(&x, "n"));
     }
-    let recent=count(c,&format!("SELECT count(*) FROM sync_added a WHERE run_id=(SELECT max(run_id) FROM sync_added) AND {seen} AND EXISTS(SELECT 1 FROM assets x WHERE x.uuid=a.uuid)"),&[])?;
-    let pending=count(c,&format!("SELECT count(*) FROM auto_rules a WHERE kind='pending' AND {seen} AND NOT EXISTS(SELECT 1 FROM curation k WHERE k.uuid=a.uuid)"),&[])?;
+    let recent = format!(
+        "SELECT count(*)
+         FROM sync_added a
+         WHERE run_id=(SELECT max(run_id) FROM sync_added) AND {seen}
+           AND EXISTS(SELECT 1 FROM assets x WHERE x.uuid=a.uuid)"
+    );
+    let recent = count(c, &recent, &[])?;
+    let pending = format!(
+        "SELECT count(*)
+         FROM auto_rules a
+         WHERE kind='pending' AND {seen} AND NOT EXISTS(SELECT 1 FROM curation k WHERE k.uuid=a.uuid)"
+    );
+    let pending = count(c, &pending, &[])?;
     let audit = count(c, &format!("SELECT count(*) FROM assets a WHERE {} AND {seen}", audit_open("a")), &[])?;
     let basic = |kind: &str, name: &str, n: Json, cover: Json| {
         Json::object([("kind", kind.into()), ("name", name.into()), ("count", n), ("cover", cover)])
@@ -880,15 +1069,39 @@ fn home(c: &Connection, q: &HashMap<String, String>) -> Result<Json> {
         args.push(Value::Text(before.to_owned()));
     }
     args.push(Value::Integer(days));
-    let groups=typed_rows(c,&format!("SELECT substr(a.added_at,1,10) AS day,count(*) AS n FROM assets a WHERE {seen} AND a.added_at IS NOT NULL{} GROUP BY 1 ORDER BY 1 DESC LIMIT ?",if before.is_empty(){""}else{" AND a.added_at<?"}),&args)?;
+    let groups = format!(
+        "SELECT substr(a.added_at,1,10) AS day,count(*) AS n
+         FROM assets a
+         WHERE {seen} AND a.added_at IS NOT NULL{before}
+         GROUP BY 1
+         ORDER BY 1 DESC
+         LIMIT ?",
+        before = if before.is_empty() { "" } else { " AND a.added_at<?" }
+    );
+    let groups = typed_rows(c, &groups, &args)?;
+    let day_people = format!(
+        "SELECT m.entity,count(*) AS n
+         FROM memberships m
+         JOIN assets a ON a.uuid=m.uuid
+         WHERE a.added_at>=? AND a.added_at<? AND {seen}
+         GROUP BY m.entity
+         ORDER BY n DESC,m.entity"
+    );
+    let latest = format!(
+        "SELECT a.uuid,a.width,a.height
+         FROM assets a
+         WHERE a.added_at>=? AND a.added_at<? AND {seen}
+         ORDER BY a.added_at DESC,a.uuid
+         LIMIT ?"
+    );
     let mut result = Vec::new();
     let mut all = Vec::new();
     let mut lengths = Vec::new();
     for g in groups {
         let day = get(&g, "day");
         let (lo, hi) = day_bounds(day.text())?;
-        let people=rows(c,&format!("SELECT m.entity,count(*) AS n FROM memberships m JOIN assets a ON a.uuid=m.uuid WHERE a.added_at>=? AND a.added_at<? AND {seen} GROUP BY m.entity ORDER BY n DESC,m.entity"),&[&lo,&hi])?;
-        let items=typed_rows(c,&format!("SELECT a.uuid,a.width,a.height FROM assets a WHERE a.added_at>=? AND a.added_at<? AND {seen} ORDER BY a.added_at DESC,a.uuid LIMIT ?"),&[Value::Text(lo.clone()),Value::Text(hi.clone()),Value::Integer(18)])?;
+        let people = rows(c, &day_people, &[&lo, &hi])?;
+        let items = typed_rows(c, &latest, &[Value::Text(lo.clone()), Value::Text(hi.clone()), Value::Integer(18)])?;
         lengths.push(items.len());
         all.extend(items);
         let mut chars = Vec::new();
@@ -955,7 +1168,21 @@ fn date_page_pays(c: &Connection, offset: i64, limit: i64) -> Result<bool> {
     }
     let all = count(c, "SELECT count(*) FROM assets", &[])?;
     let most_nsfw = all - (all * DATE_PAGE_MIN_KEPT_PERMILLE + 999) / 1000;
-    let nsfw = count(c, &format!("SELECT count(*) FROM (SELECT 1 FROM term_projection WHERE state IN ('machine','confirmed') AND term_id IN (SELECT l.term_id FROM term_links l JOIN terms t ON t.id=l.term_id AND t.kind='rating' WHERE l.system='wd_rating' AND l.key IN ('questionable','explicit')) LIMIT {})", most_nsfw + 1), &[])?;
+    let nsfw = format!(
+        "SELECT count(*)
+         FROM (
+           SELECT 1
+           FROM term_projection
+           WHERE state IN ('machine','confirmed')
+             AND term_id IN (
+               SELECT l.term_id
+               FROM term_links l
+               JOIN terms t ON t.id=l.term_id AND t.kind='rating'
+               WHERE l.system='wd_rating' AND l.key IN ({NSFW_RATINGS}))
+           LIMIT {})",
+        most_nsfw + 1
+    );
+    let nsfw = count(c, &nsfw, &[])?;
     Ok(nsfw <= most_nsfw && (offset + limit) * 2 <= all - nsfw)
 }
 pub fn read(c: &Connection, context: &LibraryContext, path: &str, q: &HashMap<String, String>) -> Result<(Json, u16)> {
@@ -973,84 +1200,71 @@ pub fn read(c: &Connection, context: &LibraryContext, path: &str, q: &HashMap<St
         "/api/review-pools" => pools(c, value(q, "nsfw"))?,
         "/api/detail" => detail(c, context, value(q, "id"))?,
         "/api/home" => home(c, q)?,
-        "/api/assets" | "/api/assets/count" | "/api/ids" => {
-            let mut f = q.clone();
-            let offset = if path == "/api/assets/count" {
-                0
-            } else {
-                python_int(q.get("offset").map(String::as_str).unwrap_or("0")).map_err(Error::Invalid)?
-            };
-            let limit = if path == "/api/assets/count" {
-                100
-            } else {
-                python_int(q.get("limit").map(String::as_str).unwrap_or("100")).map_err(Error::Invalid)?
-            };
-            if path == "/api/ids" {
-                f.remove("offset");
-                f.remove("limit");
-            } else if path == "/api/assets" {
-                f.retain(|k, _| {
-                    [
-                        "entity", "status", "q", "order", "pool", "tag", "variant", "utag", "nsfw", "dup", "reason",
-                        "cluster", "work", "day", "artist",
-                    ]
-                    .contains(&k.as_str())
-                });
-            }
-            let (where_, mut args, order) = selection(c, context, &f)?;
-            let total_sql = format!("SELECT count(*) AS total FROM assets a WHERE {where_}");
-            if path == "/api/assets/count" {
-                Json::object([("total", get(&typed_rows(c, &total_sql, &args)?.remove(0), "total"))])
-            } else if path == "/api/ids" {
-                args.extend([Value::Integer(limit), Value::Integer(offset)]);
-                Json::Array(
-                    typed_rows(
-                        c,
-                        &format!("SELECT a.uuid FROM assets a WHERE {where_} ORDER BY {order} LIMIT ? OFFSET ?"),
-                        &args,
-                    )?
-                    .iter()
-                    .map(|r| get(r, "uuid"))
-                    .collect(),
-                )
-            } else {
-                let total_needed = value(q, "count") != "0";
-                let nsfw = value(q, "nsfw");
-                // A rating-filtered total copies the matches once, then counts and sorts the copy, so the
-                // rating subquery and other filters run once. Only the plain library view hiding NSFW in date
-                // order (#48) may page assets through assets_date instead, when date_page_pays() estimates
-                // the copy and its sort cost more than counting twice. Both read one transaction snapshot
-                // and every ordering ends in the primary key, so either path returns the same rows in the
-                // same order.
-                let date_page = total_needed
-                    && nsfw == "hide"
-                    && order.starts_with("a.added_at ")
-                    && f.iter().all(|(k, v)| k == "nsfw" || k == "order" || v.is_empty())
-                    && date_page_pays(c, offset, limit)?;
-                let (total, sql) = if total_needed && !nsfw.is_empty() && !date_page {
-                    c.execute(&format!("CREATE TEMP TABLE selected_assets AS SELECT a.uuid,a.width,a.height,a.added_at FROM assets a WHERE {where_}"),rusqlite::params_from_iter(&args))?;
-                    let n = count(c, "SELECT count(*) FROM selected_assets", &[])?;
-                    args.clear();
-                    (
-                        n.into(),
-                        format!(
-                            "SELECT a.uuid,a.width,a.height FROM selected_assets a ORDER BY {order} LIMIT ? OFFSET ?"
-                        ),
-                    )
-                } else {
-                    let total =
-                        if total_needed { get(&typed_rows(c, &total_sql, &args)?.remove(0), "total") } else { null() };
-                    (total,format!("SELECT a.uuid,a.width,a.height FROM assets a WHERE {where_} ORDER BY {order} LIMIT ? OFFSET ?"))
-                };
-                args.extend([Value::Integer(limit), Value::Integer(offset)]);
-                let mut items = typed_rows(c, &sql, &args)?;
-                decorate(c, &mut items)?;
-                Json::object([("items", Json::Array(items)), ("total", total), ("offset", offset.into())])
-            }
-        }
+        "/api/assets" | "/api/assets/count" | "/api/ids" => assets(c, context, path, q)?,
         _ => return Err(Error::Invalid("未迁移浏览接口".into())),
     };
     Ok((result, 200))
+}
+/// The selection's count (/api/assets/count), its ids (/api/ids) or one page of it (/api/assets).
+fn assets(c: &Connection, context: &LibraryContext, path: &str, q: &HashMap<String, String>) -> Result<Json> {
+    let mut f = q.clone();
+    let paged = |k: &str, default: &str| -> Result<i64> {
+        if path == "/api/assets/count" {
+            return Ok(if k == "offset" { 0 } else { 100 });
+        }
+        python_int(q.get(k).map(String::as_str).unwrap_or(default)).map_err(Error::Invalid)
+    };
+    let offset = paged("offset", "0")?;
+    let limit = paged("limit", "100")?;
+    if path == "/api/ids" {
+        f.remove("offset");
+        f.remove("limit");
+    } else if path == "/api/assets" {
+        f.retain(|k, _| FILTERS.contains(&k.as_str()));
+    }
+    let (where_, mut args, order) = selection(c, context, &f)?;
+    let total_sql = format!("SELECT count(*) AS total FROM assets a WHERE {where_}");
+    if path == "/api/assets/count" {
+        return Ok(Json::object([("total", get(&typed_rows(c, &total_sql, &args)?.remove(0), "total"))]));
+    }
+    if path == "/api/ids" {
+        args.extend([Value::Integer(limit), Value::Integer(offset)]);
+        let sql = format!("SELECT a.uuid FROM assets a WHERE {where_} ORDER BY {order} LIMIT ? OFFSET ?");
+        return Ok(Json::Array(typed_rows(c, &sql, &args)?.iter().map(|r| get(r, "uuid")).collect()));
+    }
+    let total_needed = value(q, "count") != "0";
+    let nsfw = value(q, "nsfw");
+    // A rating-filtered total copies the matches once, then counts and sorts the copy, so the
+    // rating subquery and other filters run once. Only the plain library view hiding NSFW in date
+    // order (#48) may page assets through assets_date instead, when date_page_pays() estimates
+    // the copy and its sort cost more than counting twice. Both read one transaction snapshot
+    // and every ordering ends in the primary key, so either path returns the same rows in the
+    // same order.
+    let date_page = total_needed
+        && nsfw == "hide"
+        && order.starts_with("a.added_at ")
+        && f.iter().all(|(k, v)| k == "nsfw" || k == "order" || v.is_empty())
+        && date_page_pays(c, offset, limit)?;
+    let (total, sql) = if total_needed && !nsfw.is_empty() && !date_page {
+        let copy = format!(
+            "CREATE TEMP TABLE selected_assets AS
+             SELECT a.uuid,a.width,a.height,a.added_at FROM assets a WHERE {where_}"
+        );
+        c.execute(&copy, rusqlite::params_from_iter(&args))?;
+        let n = count(c, "SELECT count(*) FROM selected_assets", &[])?;
+        args.clear();
+        (n.into(), format!("SELECT a.uuid,a.width,a.height FROM selected_assets a ORDER BY {order} LIMIT ? OFFSET ?"))
+    } else {
+        let total = if total_needed { get(&typed_rows(c, &total_sql, &args)?.remove(0), "total") } else { null() };
+        (
+            total,
+            format!("SELECT a.uuid,a.width,a.height FROM assets a WHERE {where_} ORDER BY {order} LIMIT ? OFFSET ?"),
+        )
+    };
+    args.extend([Value::Integer(limit), Value::Integer(offset)]);
+    let mut items = typed_rows(c, &sql, &args)?;
+    decorate(c, &mut items)?;
+    Ok(Json::object([("items", Json::Array(items)), ("total", total), ("offset", offset.into())]))
 }
 
 // Cached groups are also available without research workers.
@@ -1063,15 +1277,38 @@ pub(crate) fn similar_groups(c: &Connection, kind: &str, nsfw: &str) -> Result<J
     let b = format!("{}{}", visible("b"), rating("b", nsfw)?);
     let mut members: Vec<(Json, Vec<Json>)> = Vec::new();
     let mut group_positions = HashMap::new();
-    for r in rows(c,&format!("SELECT g.gid,g.uuid FROM similar_groups g JOIN assets a ON a.uuid=g.uuid WHERE {a} ORDER BY g.gid,a.added_at DESC"),&[])? {
-        let gid=get(&r,"gid");
-        let pos=*group_positions.entry(gid.integer()).or_insert_with(||{
-            let pos=members.len();members.push((gid,Vec::new()));pos
+    let grouped = format!(
+        "SELECT g.gid,g.uuid
+         FROM similar_groups g
+         JOIN assets a ON a.uuid=g.uuid
+         WHERE {a}
+         ORDER BY g.gid,a.added_at DESC"
+    );
+    for r in rows(c, &grouped, &[])? {
+        let gid = get(&r, "gid");
+        let pos = *group_positions.entry(gid.integer()).or_insert_with(|| {
+            members.push((gid, Vec::new()));
+            members.len() - 1
         });
-        members[pos].1.push(get(&r,"uuid"));
+        members[pos].1.push(get(&r, "uuid"));
     }
+    let related = format!(
+        "SELECT g.gid,r.kind,count(*) AS n
+         FROM relations r
+         JOIN similar_groups g ON g.uuid=r.a
+         JOIN similar_groups h ON h.uuid=r.b AND h.gid=g.gid
+         JOIN assets a ON a.uuid=r.a
+         JOIN assets b ON b.uuid=r.b
+         WHERE {a} AND {b}
+         GROUP BY g.gid,r.kind"
+    );
     let mut kinds: HashMap<i64, Json> = HashMap::new();
-    for r in rows(c,&format!("SELECT g.gid,r.kind,count(*) AS n FROM relations r JOIN similar_groups g ON g.uuid=r.a JOIN similar_groups h ON h.uuid=r.b AND h.gid=g.gid JOIN assets a ON a.uuid=r.a JOIN assets b ON b.uuid=r.b WHERE {a} AND {b} GROUP BY g.gid,r.kind"),&[])?{if KINDS.contains(&get(&r,"kind").text()){kinds.entry(get(&r,"gid").integer()).or_insert_with(||Json::Object(Vec::new())).set(get(&r,"kind").text(),get(&r,"n"));}}
+    for r in rows(c, &related, &[])? {
+        if KINDS.contains(&get(&r, "kind").text()) {
+            let group = kinds.entry(get(&r, "gid").integer()).or_insert_with(|| Json::Object(Vec::new()));
+            group.set(get(&r, "kind").text(), get(&r, "n"));
+        }
+    }
     Ok(Json::Array(
         members
             .into_iter()
@@ -1091,7 +1328,21 @@ pub(crate) fn similar_groups(c: &Connection, kind: &str, nsfw: &str) -> Result<J
     ))
 }
 pub(crate) fn clusters(c: &Connection, nsfw: &str) -> Result<Json> {
-    let mut groups=rows(c,&format!("SELECT i.cid,i.near,i.near_dist,i.near_kind,i.traits,i.built_at,count(k.uuid) AS size,group_concat(k.uuid) AS members FROM cluster_info i JOIN clusters k ON k.cid=i.cid JOIN assets a ON a.uuid=k.uuid WHERE {}{} AND NOT EXISTS(SELECT 1 FROM memberships m WHERE m.uuid=k.uuid) AND NOT EXISTS(SELECT 1 FROM deferred d WHERE d.uuid=k.uuid) GROUP BY i.cid HAVING count(k.uuid)>=2 ORDER BY size DESC,i.cid",visible("a"),rating("a",nsfw)?),&[])?;
+    let clustered = format!(
+        "SELECT i.cid,i.near,i.near_dist,i.near_kind,i.traits,i.built_at,
+           count(k.uuid) AS size,group_concat(k.uuid) AS members
+         FROM cluster_info i
+         JOIN clusters k ON k.cid=i.cid
+         JOIN assets a ON a.uuid=k.uuid
+         WHERE {}{} AND {}
+         GROUP BY i.cid
+         HAVING count(k.uuid)>=2
+         ORDER BY size DESC,i.cid",
+        visible("a"),
+        rating("a", nsfw)?,
+        unclaimed("k")
+    );
+    let mut groups = rows(c, &clustered, &[])?;
     let mut members = HashMap::new();
     let mut ordered = Vec::new();
     for r in &groups {
@@ -1106,15 +1357,24 @@ pub(crate) fn clusters(c: &Connection, nsfw: &str) -> Result<Json> {
     let mut first = HashSet::new();
     let mut votes: HashMap<i64, Vec<(String, i64)>> = HashMap::new();
     let mut vote_positions = HashMap::new();
-    for r in rows(c,&format!("SELECT v.uuid,v.entity FROM {} v WHERE v.uuid IN (SELECT value FROM json_each(?)) ORDER BY v.weak,v.score DESC",leads()),&[&page])? {
-        let u=get(&r,"uuid").text().to_owned();
+    let leading = format!(
+        "SELECT v.uuid,v.entity
+         FROM {} v
+         WHERE v.uuid IN (SELECT value FROM json_each(?))
+         ORDER BY v.weak,v.score DESC",
+        leads()
+    );
+    for r in rows(c, &leading, &[&page])? {
+        let u = get(&r, "uuid").text().to_owned();
         if first.insert(u.clone()) {
-            let entity=get(&r,"entity").text().to_owned();
-            let cid=members[&u];let group=votes.entry(cid).or_default();
-            let pos=*vote_positions.entry((cid,entity.clone())).or_insert_with(||{
-                let pos=group.len();group.push((entity,0));pos
+            let entity = get(&r, "entity").text().to_owned();
+            let cid = members[&u];
+            let group = votes.entry(cid).or_default();
+            let pos = *vote_positions.entry((cid, entity.clone())).or_insert_with(|| {
+                group.push((entity, 0));
+                group.len() - 1
             });
-            group[pos].1+=1;
+            group[pos].1 += 1;
         }
     }
     for r in &mut groups {
@@ -1146,16 +1406,30 @@ pub(crate) fn clusters(c: &Connection, nsfw: &str) -> Result<Json> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    /// The core identity tree, as the fixtures here need it.
+    const TERM_TREE: &str = "CREATE TABLE term_tree(term_id INTEGER PRIMARY KEY,parent_id TEXT,merged_into TEXT,
+        work_id TEXT,work_text TEXT NOT NULL DEFAULT '',variant TEXT NOT NULL DEFAULT '',
+        artist TEXT NOT NULL DEFAULT '',
+        label_only INTEGER NOT NULL DEFAULT 0,mascot INTEGER NOT NULL DEFAULT 0,mascot_origin TEXT,
+        original INTEGER NOT NULL DEFAULT 0,seq INTEGER);";
     #[test]
     fn page_display_matches_single_row_renderer_for_projected_names() {
         let c = Connection::open_in_memory().unwrap();
-        c.execute_batch("CREATE TABLE meta(key TEXT PRIMARY KEY,value TEXT); INSERT INTO meta VALUES ('terms_names','core');
-            CREATE TABLE terms(id INTEGER PRIMARY KEY,key TEXT UNIQUE,kind TEXT);
-            CREATE TABLE term_tree(term_id INTEGER PRIMARY KEY,parent_id TEXT,merged_into TEXT,work_id TEXT,work_text TEXT NOT NULL DEFAULT '',variant TEXT NOT NULL DEFAULT '',artist TEXT NOT NULL DEFAULT '',label_only INTEGER NOT NULL DEFAULT 0,mascot INTEGER NOT NULL DEFAULT 0,mascot_origin TEXT,original INTEGER NOT NULL DEFAULT 0,seq INTEGER);
-            INSERT INTO terms VALUES (1,'root','character'),(2,'skin','skin'),(3,'oc','character'),(4,'unshown','character'),(5,'work','work');
-            INSERT INTO term_tree(term_id,original,work_id,parent_id,seq) VALUES (1,0,'work',NULL,1),(2,0,'unused','root',2),(3,1,NULL,NULL,3),(4,0,NULL,NULL,4),(5,0,NULL,NULL,5);
-            CREATE TABLE identity_nodes(id TEXT PRIMARY KEY,node_type TEXT,character_id TEXT,variant_id TEXT,canonical_id TEXT);
-            INSERT INTO identity_nodes VALUES ('root','character','root',NULL,'root'),('skin','form','root','skin','skin');").unwrap();
+        c.execute_batch(TERM_TREE).unwrap();
+        c.execute_batch(
+            "CREATE TABLE meta(key TEXT PRIMARY KEY,value TEXT); INSERT INTO meta VALUES ('terms_names','core');
+             CREATE TABLE terms(id INTEGER PRIMARY KEY,key TEXT UNIQUE,kind TEXT);
+             INSERT INTO terms VALUES
+               (1,'root','character'),(2,'skin','skin'),(3,'oc','character'),(4,'unshown','character'),
+               (5,'work','work');
+             INSERT INTO term_tree(term_id,original,work_id,parent_id,seq) VALUES
+               (1,0,'work',NULL,1),(2,0,'unused','root',2),(3,1,NULL,NULL,3),(4,0,NULL,NULL,4),(5,0,NULL,NULL,5);
+             CREATE TABLE identity_nodes(id TEXT PRIMARY KEY,node_type TEXT,character_id TEXT,variant_id TEXT,
+               canonical_id TEXT);
+             INSERT INTO identity_nodes VALUES
+               ('root','character','root',NULL,'root'),('skin','form','root','skin','skin');",
+        )
+        .unwrap();
         c.execute_batch(crate::names_view::TABLES).unwrap();
         for (id, name) in [("root", "人物🙂"), ("skin", "人物 · 泳装"), ("oc", "OC"), ("work", "作品")] {
             for skin in [0, 1] {
@@ -1206,18 +1480,35 @@ mod tests {
             std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
         ));
         let mut c = crate::sqlite::open(&path).unwrap();
-        c.execute_batch("CREATE TABLE meta(key TEXT,value TEXT);
-            CREATE TABLE terms(id INTEGER PRIMARY KEY,key TEXT UNIQUE,kind TEXT);
-            CREATE TABLE term_tree(term_id INTEGER PRIMARY KEY,parent_id TEXT,merged_into TEXT,work_id TEXT,work_text TEXT NOT NULL DEFAULT '',variant TEXT NOT NULL DEFAULT '',artist TEXT NOT NULL DEFAULT '',label_only INTEGER NOT NULL DEFAULT 0,mascot INTEGER NOT NULL DEFAULT 0,mascot_origin TEXT,original INTEGER NOT NULL DEFAULT 0,seq INTEGER);
-            INSERT INTO terms VALUES (1,'alice','character'),(2,'bob','character');INSERT INTO term_tree(term_id,seq) VALUES (1,1),(2,2);
-            CREATE TABLE assets(uuid TEXT PRIMARY KEY,added_at TEXT);INSERT INTO assets VALUES ('a','2026-09-30'),('b','2026-09-30'),('c','2026-09-29'),('d','2026-09-28'),('e','2026-09-27'),('f','2026-09-26');
-            CREATE TABLE duplicates(uuid TEXT,hidden INTEGER);INSERT INTO duplicates VALUES ('e',1);CREATE TABLE excluded(uuid TEXT);INSERT INTO excluded VALUES ('f');CREATE TABLE asset_rating(uuid TEXT,rating TEXT);INSERT INTO asset_rating VALUES ('c','explicit');
-            CREATE TABLE memberships(uuid TEXT,entity TEXT);CREATE TABLE deferred(uuid TEXT);CREATE TABLE assertions(uuid TEXT,entity TEXT,status TEXT);
-            CREATE TABLE family_evidence(uuid TEXT,entity TEXT,score REAL);INSERT INTO family_evidence VALUES ('a','bob',.92),('b','alice',.92),('c','alice',.91),('d','bob',.9);CREATE TABLE weak_claims(uuid TEXT,entity TEXT,score REAL);
-            CREATE TABLE similar_groups(uuid TEXT,gid INTEGER);INSERT INTO similar_groups VALUES ('a',1),('b',1),('c',1),('d',1),('e',1),('f',1);
-            CREATE TABLE relations(a TEXT,b TEXT,kind TEXT);INSERT INTO relations VALUES ('a','b','identical'),('b','c','subtle'),('c','d','edit'),('e','f','duplicate');
-            CREATE TABLE clusters(uuid TEXT,cid INTEGER);INSERT INTO clusters VALUES ('a',7),('b',7),('c',7),('d',7),('e',7),('f',7);CREATE TABLE cluster_info(cid INTEGER,near TEXT,near_dist REAL,near_kind TEXT,traits TEXT,built_at TEXT);INSERT INTO cluster_info VALUES (7,'near',.125,'character','{\"z\":1,\"a\":2}','2026-09-30');
-            CREATE INDEX weak_uuid ON weak_claims(uuid,entity);CREATE INDEX cluster_cid ON clusters(cid,uuid);").unwrap();
+        c.execute_batch(TERM_TREE).unwrap();
+        c.execute_batch(
+            "CREATE TABLE meta(key TEXT,value TEXT);
+             CREATE TABLE terms(id INTEGER PRIMARY KEY,key TEXT UNIQUE,kind TEXT);
+             INSERT INTO terms VALUES (1,'alice','character'),(2,'bob','character');
+             INSERT INTO term_tree(term_id,seq) VALUES (1,1),(2,2);
+             CREATE TABLE assets(uuid TEXT PRIMARY KEY,added_at TEXT);
+             INSERT INTO assets VALUES ('a','2026-09-30'),('b','2026-09-30'),('c','2026-09-29'),('d','2026-09-28'),
+               ('e','2026-09-27'),('f','2026-09-26');
+             CREATE TABLE duplicates(uuid TEXT,hidden INTEGER);INSERT INTO duplicates VALUES ('e',1);
+             CREATE TABLE excluded(uuid TEXT);INSERT INTO excluded VALUES ('f');
+             CREATE TABLE asset_rating(uuid TEXT,rating TEXT);INSERT INTO asset_rating VALUES ('c','explicit');
+             CREATE TABLE memberships(uuid TEXT,entity TEXT);CREATE TABLE deferred(uuid TEXT);
+             CREATE TABLE assertions(uuid TEXT,entity TEXT,status TEXT);
+             CREATE TABLE family_evidence(uuid TEXT,entity TEXT,score REAL);
+             INSERT INTO family_evidence VALUES ('a','bob',.92),('b','alice',.92),('c','alice',.91),('d','bob',.9);
+             CREATE TABLE weak_claims(uuid TEXT,entity TEXT,score REAL);
+             CREATE TABLE similar_groups(uuid TEXT,gid INTEGER);
+             INSERT INTO similar_groups VALUES ('a',1),('b',1),('c',1),('d',1),('e',1),('f',1);
+             CREATE TABLE relations(a TEXT,b TEXT,kind TEXT);
+             INSERT INTO relations VALUES
+               ('a','b','identical'),('b','c','subtle'),('c','d','edit'),('e','f','duplicate');
+             CREATE TABLE clusters(uuid TEXT,cid INTEGER);
+             INSERT INTO clusters VALUES ('a',7),('b',7),('c',7),('d',7),('e',7),('f',7);
+             CREATE TABLE cluster_info(cid INTEGER,near TEXT,near_dist REAL,near_kind TEXT,traits TEXT,built_at TEXT);
+             INSERT INTO cluster_info VALUES (7,'near',.125,'character','{\"z\":1,\"a\":2}','2026-09-30');
+             CREATE INDEX weak_uuid ON weak_claims(uuid,entity);CREATE INDEX cluster_cid ON clusters(cid,uuid);",
+        )
+        .unwrap();
         let f = rusqlite::functions::FunctionFlags::SQLITE_UTF8;
         c.create_scalar_function("entity_info", 2, f, |ctx| {
             let id: String = ctx.get(0)?;
@@ -1250,7 +1541,8 @@ mod tests {
             rating_filtered_pages(extra);
         }
     }
-    fn rating_filtered_pages(extra: usize) {
+    /// A synthetic library for the rating pages: eight rated pictures and `extra` excluded general ones (`z00`…).
+    fn rating_library(extra: usize) -> (std::path::PathBuf, std::path::PathBuf, Vec<String>) {
         let root = std::env::temp_dir().join(format!(
             "illustash-browse-rating-pages-{}-{extra}-{}",
             std::process::id(),
@@ -1262,27 +1554,48 @@ mod tests {
         let c = crate::sqlite::open(dest.join("library.sqlite")).unwrap();
         let extras = (0..extra).map(|i| format!("z{i:02}")).collect::<Vec<_>>();
         for z in &extras {
-            c.execute("INSERT INTO assets(uuid,filename,width,height,added_at) VALUES (?1,?1||'.png',1,1,'2026-09-01 10:00:00')", [z])
-                .unwrap();
+            c.execute(
+                "INSERT INTO assets(uuid,filename,width,height,added_at)
+                 VALUES (?1,?1||'.png',1,1,'2026-09-01 10:00:00')",
+                [z],
+            )
+            .unwrap();
             c.execute("INSERT INTO excluded VALUES (?,'photo','manual')", [z]).unwrap();
         }
         // Insertion order differs from every expected order, so rowid order cannot pass by accident.
-        c.execute_batch("INSERT INTO assets(uuid,filename,width,height,added_at) VALUES
-            ('e1','e1.png',1,1,'2026-09-28 10:00:00'),('a3','a3.png',1,1,'2026-09-30 10:00:00'),
-            ('c1','c1.png',1,1,NULL),('b2','b2.png',1,1,'2026-09-29 10:00:00'),
-            ('a2','a2.png',1,1,'2026-09-30 10:00:00'),('d1','d1.png',1,1,'2026-09-28 10:00:00'),
-            ('b1','b1.png',1,1,'2026-09-29 10:00:00'),('a1','a1.png',1,1,'2026-09-30 10:00:00');
-            INSERT INTO duplicates VALUES ('d1','g','2',1,'2026-09-28 10:00:00',0,1),('b2','g','2',0,'2026-09-28 10:00:00',1,0);
-            INSERT INTO excluded VALUES ('e1','photo','manual');
-            INSERT INTO terms(key,kind,origin) VALUES ('synthetic-general','rating','synthetic'),('synthetic-sensitive','rating','synthetic'),
-             ('synthetic-questionable','rating','synthetic'),('synthetic-explicit','rating','synthetic');
-            INSERT INTO term_links(system,key,term_id,source) SELECT 'wd_rating',substr(key,11),id,'synthetic' FROM terms WHERE key LIKE 'synthetic-%';
-            INSERT INTO term_assets(namespace,key) SELECT 'library',uuid FROM assets;
-            INSERT INTO term_projection(asset_id,term_id,state) SELECT ta.id,t.id,'machine' FROM (VALUES
-             ('a1','general'),('a2','explicit'),('b1','questionable'),('b2','sensitive'),('c1','general'),('d1','explicit'),('e1','explicit')) r
-             JOIN term_assets ta ON ta.namespace='library' AND ta.key=r.column1 JOIN terms t ON t.key='synthetic-'||r.column2;
-            INSERT INTO term_projection(asset_id,term_id,state) SELECT ta.id,t.id,'machine' FROM term_assets ta
-             JOIN terms t ON t.key='synthetic-general' WHERE ta.key LIKE 'z%';").unwrap();
+        c.execute_batch(
+            "INSERT INTO assets(uuid,filename,width,height,added_at) VALUES
+               ('e1','e1.png',1,1,'2026-09-28 10:00:00'),('a3','a3.png',1,1,'2026-09-30 10:00:00'),
+               ('c1','c1.png',1,1,NULL),('b2','b2.png',1,1,'2026-09-29 10:00:00'),
+               ('a2','a2.png',1,1,'2026-09-30 10:00:00'),('d1','d1.png',1,1,'2026-09-28 10:00:00'),
+               ('b1','b1.png',1,1,'2026-09-29 10:00:00'),('a1','a1.png',1,1,'2026-09-30 10:00:00');
+             INSERT INTO duplicates VALUES
+               ('d1','g','2',1,'2026-09-28 10:00:00',0,1),('b2','g','2',0,'2026-09-28 10:00:00',1,0);
+             INSERT INTO excluded VALUES ('e1','photo','manual');
+             INSERT INTO terms(key,kind,origin) VALUES
+               ('synthetic-general','rating','synthetic'),('synthetic-sensitive','rating','synthetic'),
+               ('synthetic-questionable','rating','synthetic'),('synthetic-explicit','rating','synthetic');
+             INSERT INTO term_links(system,key,term_id,source)
+               SELECT 'wd_rating',substr(key,11),id,'synthetic' FROM terms WHERE key LIKE 'synthetic-%';
+             INSERT INTO term_assets(namespace,key) SELECT 'library',uuid FROM assets;
+             INSERT INTO term_projection(asset_id,term_id,state)
+               SELECT ta.id,t.id,'machine'
+               FROM (VALUES ('a1','general'),('a2','explicit'),('b1','questionable'),('b2','sensitive'),
+                            ('c1','general'),('d1','explicit'),('e1','explicit')) r
+               JOIN term_assets ta ON ta.namespace='library' AND ta.key=r.column1
+               JOIN terms t ON t.key='synthetic-'||r.column2;
+             INSERT INTO term_projection(asset_id,term_id,state)
+               SELECT ta.id,t.id,'machine'
+               FROM term_assets ta
+               JOIN terms t ON t.key='synthetic-general'
+               WHERE ta.key LIKE 'z%';",
+        )
+        .unwrap();
+        (root, dest, extras)
+    }
+    fn rating_filtered_pages(extra: usize) {
+        let (root, dest, extras) = rating_library(extra);
+        let c = crate::sqlite::open(dest.join("library.sqlite")).unwrap();
         // Both libraries hold four NSFW assets: 4/8 kept is below the threshold, 16/20 above it.
         let pays = |offset, limit| date_page_pays(&c, offset, limit).unwrap();
         if extra == 0 {
