@@ -95,8 +95,8 @@ cargo clippy --manifest-path native/terms/Cargo.toml --all-targets -- -D warning
 | `asset_tags` | `terms`（concept）+ `term_verdicts` | 冻结为 `legacy_asset_tags`，同名视图 |
 | `entities` | `terms`（character / skin / work，属性进 `attrs`）+ `term_tree` | 兼容表 |
 | `links` | `term_links`（角色的 `wd` 存成 `wd_character`） | 第 8 版删除（第 14 节） |
-| `work_review` | `term_tree` | 兼容表 |
-| `identity_baseline` | `term_identity_baseline` | 兼容表 |
+| `work_review` | `term_tree` | 第 8 版删除（第 14 节） |
+| `identity_baseline` | `term_identity_baseline` | 第 8 版删除（第 14 节） |
 | `identity_relations`、`identity_evidence`、`identity_decisions`、`identity_decision_evidence` | `term_relations`（`same_as` / `contains` / `different_from`）、关系证据、关系裁决，旧 id 在 `term_legacy_ids` | 兼容表，另冻结一份 `legacy_*` |
 | `assertions` | `term_verdicts`（有步骤的挂原 `action_id`，没有步骤的进 `term_batches`） | 兼容表，另冻结一份 `legacy_assertions` |
 | `candidates` | `term_evidence`（`wd.wd_character`、`ccip_index.char_ext`，按证据批次生效） | 兼容表 |
@@ -187,10 +187,10 @@ Python HTTP / Store 退出生产包不等于数据库读写消费者退出。下
 
 | 结构 | 结论与实际消费者 |
 |---|---|
-| `entities`、`work_review` | 保留。`character_profile.rs`、`character_structure.rs`、`character_merge.rs` 写资料、归属与合并；`http_characters.rs` / `http_read.rs` 读取；`legacy_characters.rs` 在核心写事务内重建镜像。（`links` 第 8 版删除，第 14 节。） |
+| `entities` | 保留。`character_profile.rs`、`character_structure.rs`、`character_merge.rs` 写资料、归属与合并；`http_characters.rs` / `http_read.rs` 读取；`legacy_characters.rs` 在核心写事务内重建镜像。（`links`、`work_review` 第 8 版删除，第 14 节。） |
 | `assertions`、`candidates` | 保留。`character_graph.rs`、`character_import.rs` 与 `character_projection.rs` 执行 hybrid 判定和镜像；`http_browse.rs`、`http_characters.rs` 读取；`character_commands.rs` 撤销仍恢复人工认领。 |
 | `identity_relations`、`identity_evidence`、`identity_decisions`、`identity_decision_evidence` | 保留。`character_identity.rs` 提议关系、`character_graph.rs` 重建身份图，`legacy_characters.rs` 从核心映射关系/决议；`http_characters.rs` 读取。 |
-| `identity_baseline`、`identity_canonical`、`identity_scopes`、`identity_suspended`、`identity_uncertain` | 保留。`character_graph.rs` / `character_projection.rs` 的基线、代表身份、成员范围和不确定归属；`character_commands.rs` 修改与撤销，`character_learning.rs` 快照指纹读取。基线顺序有语义。 |
+| `identity_canonical`、`identity_scopes`、`identity_suspended`、`identity_uncertain` | 保留（`identity_baseline` 第 8 版删除，基线只在 `term_identity_baseline` 里）。`character_graph.rs` / `character_projection.rs` 的基线、代表身份、成员范围和不确定归属；`character_commands.rs` 修改与撤销，`character_learning.rs` 快照指纹读取。基线顺序有语义。 |
 | `identity_anchor_decisions`、`identity_anchor_history`、`identity_pairs`、`meta.identity_bank` | 保留。`http_anchors.rs` / `http_characters.rs` 读取锚点及距离，`character_commands.rs` 裁决和撤销追加锚点历史；`character_learning.rs` 使用锚点决议。`identity_pairs` 的持久距离仍供现行读取，不因没有日常写入口删除历史缓存。 |
 | `memberships`、`tag_memberships`、`family_evidence`、`single_assets`、`lead_assets` | 保留。`character_projection.rs` 和 `character_sql/` 的判定 SQL 生成；`http_browse.rs` / `http_characters.rs` 读取；研究计算 `web/learn.py（#9 已删除）` / `web/identity.py（#9 已删除）` 使用隔离快照。 |
 | `asset_tags`、`general_hits`、`asset_rating` | 保留为核心派生视图。`legacy_labels.rs` 切换时删除同名旧物理表并安装视图；`http_browse.rs` / `http_app.rs` 以及角色判定 SQL 读取。不能把视图当作已退役物理表删掉。 |
@@ -242,6 +242,11 @@ Python HTTP / Store 退出生产包不等于数据库读写消费者退出。下
   - 角色学习发布的输入指纹（`character_learning`）里 `links` 这一项改按共用片段、原来的列序读，数据不变时指纹不变。
   - 升级时（`legacy_characters::retire_links`）按原来的兼容表映射逐行核对旧表与 `term_links`：链接在第 7 版里由每条命令同步镜像，所以与角色核对一样，不一致就拒绝升级（不先同步）；一致就删表。`links` 移出角色收编的兼容表清单和写保护清单，收编预检里只针对 `links` 的几项一并删除。
   - 新建图库不再建 `links`。
+- **作品复核与身份基线**（第五个领域的第一部分；`entities` 本身另做，见 #201 的待决定事项）：
+  - 作品复核只在 `term_tree` 的复核三列里（`review_status`、`review_note`、`parent_locked`，三列同为空就是没有复核行）。结构、资料命令直接读写它（`character_review`：与原表同形的读法 `REVIEWS`、定位一个身份复核行的条件 `OF`、新作品的复核行 `OPEN`），读取层的作品列表读 `REVIEWS`。`mirror_state` 和角色收编的 `term_tree` 同步不再碰这三列。
+  - 身份基线早已以 `term_identity_baseline` 为准，`character_graph::baseline` 不再给旧表追加副本；角色学习的输入指纹改按原来的列读核心表，数据不变时指纹不变。
+  - 升级时（`legacy_characters::retire_work_review`、`retire_identity_baseline`）逐行核对（基线连 rowid / `seq` 一起），不一致就拒绝升级，一致就删表。两张表移出角色收编的兼容表清单和写保护清单。
+  - 新建图库不再建这两张表。
 - 升级沿用现有入口：桌面和网页的升级界面（#193）、`http --upgrade`、`illustash-terms migrate`；升级前备份 `library-backups/terms-v<旧版>-before-v8-*.sqlite`，失败整体回滚。应用层（`app_upgrade.rs`）对没切换完的旧图库（应用 schema 36 以前、切换标记缺失或未完成、更早的 source 布局或缺索引元数据）打开和升级都直接拒绝，提示先用 `pre-v8` 版本；原来为它们准备的分阶段成对发布路径已删除。
 - 对照：新对照基准（`native/terms/tests/baseline.rs`、`contracts.rs`，规则见 `native/terms/tests/common/baseline.rs`）的每个 v7 检查点都经这次升级再重放，接口回复逐字节不变；新加的列（`actions` 两列、`term_names.seq`）在比较器里登记排除，由历史提示和读者排序的回复比较覆盖。`native/terms/tests/v8_upgrade.rs` 覆盖拒绝（角色或链接的旧表与核心不一致、没切换完）不留痕、回填，以及各张旧表的内容原样进入核心。
 

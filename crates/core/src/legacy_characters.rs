@@ -157,8 +157,9 @@ pub(crate) fn born(c: &Connection, id: &str, origin: &str) -> Result<()> {
     mirror_state(c, &[id.to_owned()], origin)
 }
 
-/// 结构状态（实体的列、work_review）由核心照旧 SQL 写进兼容表之后，把这些身份镜像进 `terms` / `term_tree`。映射与
-/// S2 收编相同；新身份的 origin 是 `origin`。链接由命令直接写 `term_links`（核心第 8 版，`character_links`）。
+/// 结构状态（实体的列）由核心照旧 SQL 写进兼容表之后，把这些身份镜像进 `terms` / `term_tree`。映射与 S2 收编相同；
+/// 新身份的 origin 是 `origin`。链接、作品复核由命令直接写 `term_links`、`term_tree` 的复核三列（核心第 8 版，
+/// `character_links`、`character_review`），这里不碰。
 pub(crate) fn mirror_state(c: &Connection, ids: &[String], origin: &str) -> Result<()> {
     c.execute_batch("CREATE TEMP TABLE IF NOT EXISTS state_scope(id TEXT PRIMARY KEY); DELETE FROM state_scope;")?;
     let mut put = c.prepare_cached("INSERT OR IGNORE INTO state_scope VALUES (?)")?;
@@ -181,16 +182,13 @@ pub(crate) fn mirror_state(c: &Connection, ids: &[String], origin: &str) -> Resu
         [],
     )?;
     c.execute(
-        "INSERT INTO term_tree(term_id,parent_id,merged_into,work_id,work_text,review_status,review_note,parent_locked)
-         SELECT t.id,e.parent_id,e.merged_into,e.work_id,e.work,w.status,w.note,w.parent_locked
-         FROM entities e JOIN terms t ON t.key=e.id LEFT JOIN work_review w ON w.entity_id=e.id WHERE e.id IN (SELECT id FROM state_scope)
+        "INSERT INTO term_tree(term_id,parent_id,merged_into,work_id,work_text)
+         SELECT t.id,e.parent_id,e.merged_into,e.work_id,e.work
+         FROM entities e JOIN terms t ON t.key=e.id WHERE e.id IN (SELECT id FROM state_scope)
          ON CONFLICT(term_id) DO UPDATE SET parent_id=excluded.parent_id,merged_into=excluded.merged_into,
-          work_id=excluded.work_id,work_text=excluded.work_text,review_status=excluded.review_status,
-          review_note=excluded.review_note,parent_locked=excluded.parent_locked
+          work_id=excluded.work_id,work_text=excluded.work_text
          WHERE term_tree.parent_id IS NOT excluded.parent_id OR term_tree.merged_into IS NOT excluded.merged_into
-          OR term_tree.work_id IS NOT excluded.work_id OR term_tree.work_text IS NOT excluded.work_text
-          OR term_tree.review_status IS NOT excluded.review_status OR term_tree.review_note IS NOT excluded.review_note
-          OR term_tree.parent_locked IS NOT excluded.parent_locked",
+          OR term_tree.work_id IS NOT excluded.work_id OR term_tree.work_text IS NOT excluded.work_text",
         [],
     )?;
     Ok(())
@@ -206,14 +204,51 @@ pub(crate) fn retire_links(c: &Connection) -> Result<()> {
     let columns = "system, key, entity_id, current, source, added_at";
     let (old, new) =
         (format!("SELECT {columns} FROM links"), format!("SELECT {columns} FROM {}", crate::character_links::LINKS));
-    let count =
-        |sql: String| -> Result<i64> { Ok(c.query_row(&format!("SELECT count(*) FROM ({sql})"), [], |r| r.get(0))?) };
-    let differs = count(format!("{old} EXCEPT {new}"))? + count(format!("{new} EXCEPT {old}"))?;
+    let differs = differ(c, &old, &new)?;
     if differs > 0 {
         return Err(Error::Schema(format!("旧链接表与词条核心不一致，没有升级：{differs} 行")));
     }
     c.execute_batch("DROP TABLE links")?;
     Ok(())
+}
+
+/// 核心第 8 版：作品复核只在 `term_tree` 的复核三列里（`character_review`）。旧表 `work_review` 还在时，每条改它的
+/// 命令都同步镜像过，所以逐行核对，不一致就拒绝升级；一致就删掉旧表。
+pub(crate) fn retire_work_review(c: &Connection) -> Result<()> {
+    if !table_exists(c, "work_review")? {
+        return Ok(());
+    }
+    let old = "SELECT entity_id, status, note, parent_locked FROM work_review".to_owned();
+    let new = format!("SELECT entity_id, status, note, parent_locked FROM {}", crate::character_review::REVIEWS);
+    let differs = differ(c, &old, &new)?;
+    if differs > 0 {
+        return Err(Error::Schema(format!("旧作品复核表与词条核心不一致，没有升级：{differs} 行")));
+    }
+    c.execute_batch("DROP TABLE work_review")?;
+    Ok(())
+}
+
+/// 核心第 8 版：身份基线只在 `term_identity_baseline` 里（`seq` 是原来的 rowid）。旧表 `identity_baseline` 是给旧代码
+/// 追加的副本，逐行核对（连 rowid 一起），不一致就拒绝升级；一致就删掉旧表。
+pub(crate) fn retire_identity_baseline(c: &Connection) -> Result<()> {
+    if !table_exists(c, "identity_baseline")? {
+        return Ok(());
+    }
+    let old = "SELECT rowid, id, parent_id, variant, kind, merged_into FROM identity_baseline";
+    let new = "SELECT seq, id, parent_id, variant, kind, merged_into FROM term_identity_baseline";
+    let differs = differ(c, old, new)?;
+    if differs > 0 {
+        return Err(Error::Schema(format!("旧身份基线表与词条核心不一致，没有升级：{differs} 行")));
+    }
+    c.execute_batch("DROP TABLE identity_baseline")?;
+    Ok(())
+}
+
+/// 两个查询的结果双向相差的行数。
+fn differ(c: &Connection, old: &str, new: &str) -> Result<i64> {
+    let count =
+        |sql: String| -> Result<i64> { Ok(c.query_row(&format!("SELECT count(*) FROM ({sql})"), [], |r| r.get(0))?) };
+    Ok(count(format!("{old} EXCEPT {new}"))? + count(format!("{new} EXCEPT {old}"))?)
 }
 
 pub(crate) fn compat_select(table: &str) -> Result<&'static str> {
@@ -254,13 +289,6 @@ const COMPAT: &[Compat] = &[
           json_extract(t.attrs,'$.artist'),json_extract(t.attrs,'$.label_only'),json_extract(t.attrs,'$.mascot'),
           json_extract(t.attrs,'$.mascot_origin'),r.work_id,json_extract(t.attrs,'$.original')
          FROM term_tree r JOIN terms t ON t.id=r.term_id",
-        identity: false,
-    },
-    Compat {
-        table: "work_review",
-        columns: &["entity_id", "status", "note", "parent_locked"],
-        select: "SELECT t.key,r.review_status,r.review_note,r.parent_locked FROM term_tree r JOIN terms t ON t.id=r.term_id
-         WHERE r.review_status IS NOT NULL",
         identity: false,
     },
     Compat {
@@ -427,10 +455,8 @@ fn sync_in(tx: &Connection, r: &mut Report) -> Result<()> {
 /// 学习产物，以及相册导入的 `imported`。`deferred`、`asked`、`reviews` 由核心命令一起写，但 Python 撤销自己的步骤
 /// （旧的零成员 sweep、curate、identity_skip）时照旧要删它们的行；`duplicates`、`excluded`、`auto_rules` 仍有
 /// Python 的写入口（curate、相似分组）。这些都不在里面。
-pub const GUARDED: [&str; 25] = [
-    "identity_baseline",
+pub const GUARDED: [&str; 23] = [
     "entities",
-    "work_review",
     "assertions",
     "candidates",
     "identity_relations",
@@ -623,12 +649,6 @@ fn preflight(tx: &Connection, identity: bool, r: &mut Report) -> Result<()> {
     check(
         tx,
         r,
-        "work_review 挂在不存在的身份上",
-        "SELECT entity_id FROM work_review WHERE entity_id NOT IN (SELECT id FROM entities)",
-    )?;
-    check(
-        tx,
-        r,
         "人工结论指向不存在的身份",
         "SELECT uuid,entity FROM assertions WHERE entity NOT IN (SELECT id FROM entities)",
     )?;
@@ -721,15 +741,13 @@ fn sync_entities(tx: &Connection, r: &mut Report) -> Result<()> {
         [],
     )?;
     r.tree_changed = tx.execute(
-        "INSERT INTO term_tree(term_id,parent_id,merged_into,work_id,work_text,review_status,review_note,parent_locked)
-         SELECT t.id,e.parent_id,e.merged_into,e.work_id,e.work,w.status,w.note,w.parent_locked
-         FROM entities e JOIN terms t ON t.key=e.id LEFT JOIN work_review w ON w.entity_id=e.id WHERE 1
+        "INSERT INTO term_tree(term_id,parent_id,merged_into,work_id,work_text)
+         SELECT t.id,e.parent_id,e.merged_into,e.work_id,e.work
+         FROM entities e JOIN terms t ON t.key=e.id WHERE 1
          ON CONFLICT(term_id) DO UPDATE SET parent_id=excluded.parent_id,merged_into=excluded.merged_into,
-          work_id=excluded.work_id,work_text=excluded.work_text,review_status=excluded.review_status,
-          review_note=excluded.review_note,parent_locked=excluded.parent_locked
-         WHERE (parent_id,merged_into,work_id,work_text,review_status,review_note,parent_locked)
-          IS NOT (excluded.parent_id,excluded.merged_into,excluded.work_id,excluded.work_text,excluded.review_status,
-                  excluded.review_note,excluded.parent_locked)",
+          work_id=excluded.work_id,work_text=excluded.work_text
+         WHERE (parent_id,merged_into,work_id,work_text)
+          IS NOT (excluded.parent_id,excluded.merged_into,excluded.work_id,excluded.work_text)",
         [],
     )?;
     Ok(())

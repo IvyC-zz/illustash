@@ -6,8 +6,8 @@ const BOB: &str = "b0b00000-0000-4000-8000-000000000002";
 const SKIN: &str = "5k1n0000-0000-4000-8000-000000000003";
 const WORK: &str = "w0rk0000-0000-4000-8000-000000000004";
 
-/// 一个小的旧库（hybrid）：作品、人物、皮肤，相册与人工结论，候选，一条继承层级关系。链接不再随角色收编（核心第 8 版
-/// 起只在 `term_links` 里，旧表在迁移时退役，见 `retire_links` 与 native/terms/tests/v8_upgrade.rs）。
+/// 一个小的旧库（hybrid）：作品、人物、皮肤，相册与人工结论，候选，一条继承层级关系。链接、作品复核、身份基线不再随
+/// 角色收编（核心第 8 版起只在核心表里，旧表在迁移时退役，见 `retire_*` 与 native/terms/tests/v8_upgrade.rs）。
 fn library() -> Connection {
     library_from(OLD)
 }
@@ -22,9 +22,6 @@ fn library_from(old: &str) -> Connection {
          INSERT INTO entities(id,name,work,kind,work_id) VALUES ('{WORK}','','','work',NULL),('{ALICE}','','Example','character','{WORK}'),
           ('{BOB}','','Example','character',NULL);
          INSERT INTO entities(id,name,kind,parent_id,variant,mascot,mascot_origin) VALUES ('{SKIN}','','skin','{ALICE}','alice_(summer)',1,'user');
-         INSERT INTO work_review VALUES ('{WORK}','confirmed','',1);
-         INSERT INTO identity_baseline VALUES ('{ALICE}',NULL,'','character',NULL),('{SKIN}',NULL,'alice_(summer)','character',NULL),
-          ('{BOB}',NULL,'','character',NULL);
          INSERT INTO identity_relations(id,a,b,kind,status) VALUES (7,'{SKIN}','{ALICE}','form_of','accepted');
          INSERT INTO identity_evidence VALUES (7,'{fp}','legacy-hierarchy','{{\"inherited_parent_id\":\"x\"}}','2026-09-03 00:00:00');
          INSERT INTO identity_decisions VALUES (3,7,'proposed','accepted','保留既有层级并使其可撤销；不代表新增人工确认','2026-09-03 00:00:00');
@@ -47,7 +44,7 @@ fn a_small_library_syncs_with_no_differences_and_twice_adds_nothing() {
     let mut c = library();
     let r = sync(&mut c).unwrap();
     assert!(r.committed, "{}", r.to_json());
-    assert_eq!(r.tables.len(), 9);
+    assert_eq!(r.tables.len(), 7);
     let rows = |c: &Connection| -> Vec<i64> {
         [
             "terms",
@@ -89,14 +86,12 @@ fn the_comparison_notices_one_changed_row_in_every_compat_table() {
     // 每张影子表改一行（持钥匙），比对必须报出来。
     let tampers = [
         ("entities", format!("UPDATE shadow_entities SET work='改过' WHERE id='{BOB}'")),
-        ("work_review", "UPDATE shadow_work_review SET note='改过'".into()),
         ("assertions", "UPDATE shadow_assertions SET origin='sweep' WHERE uuid='a'".into()),
         ("candidates", "UPDATE shadow_candidates SET score=score+1e-12 WHERE uuid='a'".into()),
         ("identity_relations", "UPDATE shadow_identity_relations SET status='proposed'".into()),
         ("identity_evidence", "UPDATE shadow_identity_evidence SET payload=payload||' '".into()),
         ("identity_decisions", "UPDATE shadow_identity_decisions SET previous_status='rejected'".into()),
         ("identity_decision_evidence", "INSERT INTO shadow_identity_decision_evidence VALUES (3,'x')".into()),
-        ("identity_baseline", format!("UPDATE term_identity_baseline SET variant='x' WHERE id='{BOB}'")),
     ];
     for (table, sql) in tampers {
         let tx = c.transaction().unwrap();

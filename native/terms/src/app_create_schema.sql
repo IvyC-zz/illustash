@@ -41,8 +41,6 @@ ALTER TABLE entities ADD COLUMN mascot_origin TEXT;
 ALTER TABLE entities ADD COLUMN work_id TEXT REFERENCES entities(id);
 ALTER TABLE entities ADD COLUMN original INTEGER NOT NULL DEFAULT 0;
 CREATE INDEX IF NOT EXISTS entities_work_id ON entities(work_id);
-CREATE TABLE IF NOT EXISTS work_review(entity_id TEXT PRIMARY KEY REFERENCES entities(id),
-        status TEXT NOT NULL DEFAULT 'pending',note TEXT NOT NULL DEFAULT '',parent_locked INTEGER NOT NULL DEFAULT 0);
 
 CREATE INDEX IF NOT EXISTS entities_parent ON entities(parent_id,id);
 CREATE TABLE IF NOT EXISTS reviews(entity TEXT NOT NULL,reviewed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,action_id INTEGER PRIMARY KEY);
@@ -146,8 +144,6 @@ CREATE TABLE IF NOT EXISTS identity_decisions(
  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
 CREATE TABLE IF NOT EXISTS identity_decision_evidence(decision_id INTEGER NOT NULL,fingerprint TEXT NOT NULL,
  PRIMARY KEY(decision_id,fingerprint));
-CREATE TABLE IF NOT EXISTS identity_baseline(
- id TEXT PRIMARY KEY,parent_id TEXT,variant TEXT,kind TEXT,merged_into TEXT);
 CREATE TABLE IF NOT EXISTS identity_canonical(entity TEXT PRIMARY KEY,canonical TEXT NOT NULL);
 CREATE INDEX IF NOT EXISTS identity_canonical_root ON identity_canonical(canonical,entity);
 CREATE TABLE IF NOT EXISTS identity_scopes(uuid TEXT NOT NULL,entity TEXT NOT NULL,members_json TEXT NOT NULL,

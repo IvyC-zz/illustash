@@ -89,10 +89,7 @@ pub fn work_for(
     let work = new_id(id)?;
     c.execute("INSERT INTO entities(id,name,kind) VALUES (?,'','work')", [&work])?;
     legacy_characters::born(c, &work, "user")?;
-    c.execute(
-        "INSERT INTO work_review(entity_id,status,note) VALUES (?1,'confirmed',?2)",
-        [work.as_str(), "从 Danbooru 角色的作品自动建立"],
-    )?;
+    c.execute(crate::character_review::OPEN, params![work, "confirmed", "从 Danbooru 角色的作品自动建立", 0])?;
     check_free(c, "danbooru", copyright)?;
     c.execute(
         &format!("INSERT INTO term_links(system, key, term_id, source) VALUES ('danbooru', ?, {TERM_OF}, 'user')"),

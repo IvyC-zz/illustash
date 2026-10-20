@@ -110,6 +110,17 @@ fn a_consistent_library_upgrades_retires_the_key_tables_and_fills_in_counted_ste
         "INSERT INTO name_aliases VALUES ('work','synthetic_work','合成别名',0);
          INSERT INTO display_names VALUES ('work','synthetic_work','zh','user','合成作品名')",
     );
+    // A work review and a baseline row both sides already hold, as the core's commands mirrored them.
+    write(
+        &Connection::open(&lib.db).unwrap(),
+        "INSERT INTO work_review SELECT id, 'confirmed', '合成备注', 1 FROM entities ORDER BY rowid LIMIT 1;
+         UPDATE term_tree SET review_status = 'confirmed', review_note = '合成备注', parent_locked = 1
+          WHERE term_id = (SELECT t.id FROM terms t JOIN entities e ON e.id = t.key ORDER BY e.rowid LIMIT 1);
+         INSERT INTO term_identity_baseline(id, parent_id, variant, kind, merged_into)
+          VALUES ('synthetic_baseline', NULL, '', 'character', NULL);
+         INSERT INTO identity_baseline(rowid, id, parent_id, variant, kind, merged_into)
+          SELECT seq, id, parent_id, variant, kind, merged_into FROM term_identity_baseline WHERE id = 'synthetic_baseline'",
+    );
     let aliases = "SELECT kind, key, value, position FROM {} ORDER BY kind, key, value";
     let display = "SELECT kind, key, lang, source, value FROM {} ORDER BY kind, key, lang, source, value";
     let before = Connection::open(&lib.db).unwrap();
@@ -121,6 +132,11 @@ fn a_consistent_library_upgrades_retires_the_key_tables_and_fills_in_counted_ste
     let old_links =
         rows(&before, "SELECT system, key, entity_id, current, source, added_at FROM links ORDER BY system, key");
     assert!(old_links.iter().any(|l| l.contains("Text(\"wd\")")), "{old_links:?}");
+    let old_reviews =
+        rows(&before, "SELECT entity_id, status, note, parent_locked FROM work_review ORDER BY entity_id");
+    let old_baseline =
+        rows(&before, "SELECT rowid, id, parent_id, variant, kind, merged_into FROM identity_baseline ORDER BY rowid");
+    assert!(!old_reviews.is_empty() && !old_baseline.is_empty());
     assert!(old_aliases.iter().any(|a| a.contains("合成别名")) && old_display.iter().any(|a| a.contains("合成作品名")));
     drop(before);
     assert_eq!(upgrade(&lib.db).unwrap(), "{\"from\":7,\"to\":8}\n");
@@ -141,6 +157,13 @@ fn a_consistent_library_upgrades_retires_the_key_tables_and_fills_in_counted_ste
                  ORDER BY 1, 2";
     assert_eq!(rows(&c, links), old_links, "links move to the core unchanged");
     assert!(!exists(&c, "links"));
+    // The work reviews and the identity baseline too (the baseline's `seq` is the former rowid).
+    let reviews = "SELECT t.key, r.review_status, r.review_note, r.parent_locked
+                   FROM term_tree r JOIN terms t ON t.id = r.term_id WHERE r.review_status IS NOT NULL ORDER BY t.key";
+    assert_eq!(rows(&c, reviews), old_reviews, "work reviews move to the core unchanged");
+    let baseline = "SELECT seq, id, parent_id, variant, kind, merged_into FROM term_identity_baseline ORDER BY seq";
+    assert_eq!(rows(&c, baseline), old_baseline, "the identity baseline is the core's already");
+    assert!(!exists(&c, "work_review") && !exists(&c, "identity_baseline"));
     // The names version now counts writes to the core's display names, as it counted the legacy table's.
     let version = names_version(&c);
     c.execute("INSERT INTO term_key_names VALUES ('skin','synthetic_skin','zh','user','合成皮肤名')", []).unwrap();
@@ -194,6 +217,11 @@ fn legacy_tables_that_disagree_with_the_core_refuse_the_upgrade_and_change_nothi
             "disagree-links",
             "UPDATE links SET current=1-current WHERE rowid=(SELECT min(rowid) FROM links)",
             "旧链接表与词条核心不一致",
+        ),
+        (
+            "disagree-review",
+            "INSERT INTO work_review SELECT id, 'confirmed', '只在旧表里', 0 FROM entities ORDER BY rowid LIMIT 1",
+            "旧作品复核表与词条核心不一致",
         ),
     ] {
         let lib = library(name);
