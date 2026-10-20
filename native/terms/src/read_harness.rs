@@ -33,7 +33,7 @@ pub fn current_library(state: &Path) -> Result<LibraryContext> {
 }
 
 fn refused(status: u16, message: &str, route: &str) -> Response<Box<dyn Read + Send>> {
-    let body = Json::object([("error", message.into())]).dump().into_bytes();
+    let body = Json::object([("error", message.into())]).dump_reply().into_bytes();
     let n = body.len();
     Response::new(
         StatusCode(status),

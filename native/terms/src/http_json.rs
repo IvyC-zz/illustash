@@ -66,20 +66,31 @@ impl Json {
             _ => 0,
         }
     }
+    /// Python json.dumps text. Callers also re-parse it strictly, which is how requests holding NaN/Infinity are
+    /// refused; keep those constants here and use `dump_reply` for what goes out over HTTP.
     pub fn dump(&self) -> String {
+        self.dumped(false)
+    }
+    /// The HTTP reply body: `dump`, but NaN/Infinity (which JSON.parse refuses) are written as null (#265).
+    pub fn dump_reply(&self) -> String {
+        self.dumped(true)
+    }
+    fn dumped(&self, reply: bool) -> String {
         let mut out = Vec::new();
-        self.write(&mut out);
+        self.write(&mut out, reply);
         String::from_utf8(out).expect("JSON is UTF-8")
     }
     // One output buffer; large pages must not allocate/join a string for every
     // nested field. Retain the existing Python float formatter and separators.
-    fn write(&self, out: &mut Vec<u8>) {
+    fn write(&self, out: &mut Vec<u8>, reply: bool) {
         match self {
             Self::Scalar(Value::String(v)) => serde_json::to_writer(out, v).expect("JSON string"),
             Self::Scalar(v) => out.extend_from_slice(crate::character_json::dump(v, false).as_bytes()),
             Self::Integer(v) => out.extend_from_slice(v.as_bytes()),
-            // Python writes NaN/Infinity, which JSON.parse refuses; evidence may still hold them (#265).
-            Self::Float(v) if !v.is_finite() => out.extend_from_slice(b"null"),
+            Self::Float(v) if reply && !v.is_finite() => out.extend_from_slice(b"null"),
+            Self::Float(v) if v.is_nan() => out.extend_from_slice(b"NaN"),
+            Self::Float(v) if *v == f64::INFINITY => out.extend_from_slice(b"Infinity"),
+            Self::Float(v) if *v == f64::NEG_INFINITY => out.extend_from_slice(b"-Infinity"),
             Self::Float(v) => out.extend_from_slice(crate::character_json::dump(&Value::from(*v), false).as_bytes()),
             Self::Array(v) => {
                 out.push(b'[');
@@ -87,7 +98,7 @@ impl Json {
                     if i != 0 {
                         out.extend_from_slice(b", ");
                     }
-                    v.write(out);
+                    v.write(out, reply);
                 }
                 out.push(b']');
             }
@@ -99,7 +110,7 @@ impl Json {
                     }
                     serde_json::to_writer(&mut *out, k).expect("JSON key");
                     out.extend_from_slice(b": ");
-                    v.write(out);
+                    v.write(out, reply);
                 }
                 out.push(b'}');
             }
@@ -485,20 +496,33 @@ mod tests {
             r#"{"z": NaN, "i": Infinity, "m": -Infinity, "big": 123456789012345678901234567890, "#,
             r#""nested": {"z": false, "a": [null, -0, 1e400, 1.0]}}"#
         );
-        let dumped = parse_python(input).unwrap().dump();
+        let parsed = parse_python(input).unwrap();
         assert_eq!(
-            dumped,
+            parsed.dump(),
+            concat!(
+                r#"{"z": NaN, "i": Infinity, "m": -Infinity, "big": 123456789012345678901234567890, "#,
+                r#""nested": {"z": false, "a": [null, 0, Infinity, 1.0]}}"#
+            )
+        );
+        // The reply is accepted by a strict parser; the non-finite values are null in it.
+        let reply = parsed.dump_reply();
+        assert_eq!(
+            reply,
             concat!(
                 r#"{"z": null, "i": null, "m": null, "big": 123456789012345678901234567890, "#,
                 r#""nested": {"z": false, "a": [null, 0, null, 1.0]}}"#
             )
         );
-        // A strict parser accepts the reply; the non-finite values are null in it.
-        let strict: Value = serde_json::from_str(&dumped).unwrap();
+        let strict: Value = serde_json::from_str(&reply).unwrap();
         for pointer in ["/z", "/i", "/m", "/nested/a/2"] {
             assert_eq!(strict.pointer(pointer), Some(&Value::Null), "{pointer}");
         }
-        assert_eq!(Json::Array(vec![Json::Float(f64::NAN), Json::Float(f64::NEG_INFINITY)]).dump(), "[null, null]");
+        assert_eq!(
+            Json::Array(vec![Json::Float(f64::NAN), Json::Float(f64::NEG_INFINITY)]).dump_reply(),
+            "[null, null]"
+        );
+        // Requests are refused by re-parsing `dump` strictly, so it must keep the constants.
+        assert!(serde_json::from_str::<Value>(&parse_request(r#"{"id": NaN}"#).unwrap().dump()).is_err());
         assert_eq!(parse_python("2").unwrap().integer(), 2);
         assert_eq!(parse_python("-0").unwrap().integer(), 0);
         for invalid in ["+1", "01", "-.2", "1.", "[1,]", "{}x", "{\"a\":}", "1e", ""] {
@@ -519,16 +543,10 @@ mod tests {
         // Python's json.loads/json.dumps(ensure_ascii=False) on malformed, edge and randomly mutated
         // texts: [text, parsed, re-dumped text or error message].
         let cases: Value = serde_json::from_slice(&recorded("request_cases.json.gz")).unwrap();
-        let mut non_finite = 0;
         for case in cases.as_array().unwrap() {
             let text = case[0].as_str().unwrap();
-            let mut expected = case[2].as_str().unwrap().to_owned();
+            let expected = case[2].as_str().unwrap();
             if case[1].as_bool().unwrap() {
-                // Python re-dumps NaN/Infinity as is; HTTP replies write null (#265).
-                if expected.contains("NaN") || expected.contains("Infinity") {
-                    non_finite += 1;
-                    expected = expected.replace("-Infinity", "null").replace("Infinity", "null").replace("NaN", "null");
-                }
                 assert_eq!(parse_request(text).unwrap().dump(), expected, "{text:?}");
             } else {
                 assert!(
@@ -538,8 +556,6 @@ mod tests {
                 );
             }
         }
-        // Only the one case written for non-finite constants; a string mentioning NaN would need its own handling.
-        assert_eq!(non_finite, 1);
     }
     #[test]
     fn request_mode_does_not_change_evidence_errors_or_silently_replace_surrogates() {
