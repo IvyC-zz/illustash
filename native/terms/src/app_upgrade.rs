@@ -9,6 +9,7 @@ use rusqlite::{Connection, OpenFlags, OptionalExtension, TransactionBehavior};
 use std::{
     fmt,
     path::{Path, PathBuf},
+    sync::Arc,
 };
 
 #[derive(Debug)]
@@ -66,7 +67,8 @@ impl From<Error> for UpgradeFailure {
 pub(crate) const NEEDED: &str =
     "这个图库需要升级到新格式才能打开。升级后旧版本的 Illustash 打不开它；升级前会自动备份，升级没有完成时图库保持原样。";
 
-/// Whether a package that failed to open is one an explicit upgrade can open, checked read-only.
+/// Whether a package that failed to open is one an explicit upgrade can open, checked read-only from versions,
+/// markers and schemas: no full integrity check, so a large library is asked about at once (#267).
 pub(crate) fn needed(path: &Path) -> Option<ValidatedUpgrade> {
     prepare(path).ok()
 }
@@ -80,9 +82,15 @@ pub(crate) fn pre_v8(path: &Path) -> Option<String> {
     }
 }
 
+/// What the upgrade is doing, for the desktop start page: the stage and the fraction of the whole upgrade.
+pub(crate) type Progress = app_library::Progress;
+
 /// Upgrade a prepared package, saying what happened on the terminal as `--upgrade` does.
-pub(crate) fn run(prepared: &ValidatedUpgrade) -> std::result::Result<UpgradeReport, UpgradeFailure> {
-    let report = upgrade(prepared)?;
+pub(crate) fn run(
+    prepared: &ValidatedUpgrade,
+    progress: Option<Progress>,
+) -> std::result::Result<UpgradeReport, UpgradeFailure> {
+    let report = upgrade(prepared, progress)?;
     eprintln!(
         "图库升级已提交：terms {} → {}；升级前备份：{}{}",
         report.before,
@@ -104,9 +112,10 @@ impl ValidatedUpgrade {
     }
 }
 
-/// No SQLite writes, backups, session registration, or source-index refresh.
+/// No SQLite writes, backups, session registration, or source-index refresh; no full integrity check either:
+/// `upgrade` runs it once under its writer lock, before the backup (#267).
 pub(crate) fn prepare(path: &Path) -> Result<ValidatedUpgrade> {
-    let library = Library::open_for_upgrade(path)?;
+    let library = Library::open_for_upgrade_deferring_checks(path)?;
     let mut c = app_library::read_connection(&library.db())?;
     let tx = c.transaction()?;
     let before = preflight_application(&tx)?;
@@ -139,8 +148,8 @@ pub(crate) fn refuse_unswitched(c: &Connection) -> Result<()> {
 }
 
 /// The read-only checks of a package an explicit upgrade may open: a switched library at an older core version.
+/// The full integrity check is not among them: whoever opens runs it once (`Library::check`, or `upgrade`).
 pub(crate) fn validate(c: &Connection) -> Result<()> {
-    app_library::check_database(c)?;
     if meta(c, "schema_version")?.is_some_and(|v| v.parse::<i64>().map_or(true, |v| v > 36)) {
         return Err(Error::Schema("应用库版本较新或无效，已停止迁移".into()));
     }
@@ -154,12 +163,31 @@ pub(crate) fn validate(c: &Connection) -> Result<()> {
     Ok(())
 }
 
+/// The stages of an upgrade and the fraction of the whole each starts at. The checks before the backup read both
+/// databases in full and take most of the time; the backup, the migration and the space reclamation report nothing
+/// while they run (the desktop host keeps the start page alive meanwhile); the check after the commit reads
+/// library.sqlite again.
+const CHECKED: f64 = 0.6;
+const BACKUP: f64 = 0.6;
+const MIGRATE: f64 = 0.7;
+const COMPACT: f64 = 0.75;
+const VERIFY: (f64, f64) = (0.8, 0.95);
+
 /// One application SQLite commit. Failure before commit rolls it back; restoration is explicit.
-pub(crate) fn upgrade(prepared: &ValidatedUpgrade) -> std::result::Result<UpgradeReport, UpgradeFailure> {
-    upgrade_with(prepared, |_| Ok(()), |_| Ok(()))
+///
+/// The full integrity checks run once each, inside the writer transaction so that what they read is what is backed
+/// up and migrated: both databases before the backup, and library.sqlite, the only file written, after the commit.
+/// Until #267 the same upgrade read library.sqlite in full ten times and source.sqlite six
+/// (opening, preflight and re-validation each checked again), none of it reported.
+pub(crate) fn upgrade(
+    prepared: &ValidatedUpgrade,
+    progress: Option<Progress>,
+) -> std::result::Result<UpgradeReport, UpgradeFailure> {
+    upgrade_with(prepared, progress, |_| Ok(()), |_| Ok(()))
 }
 fn upgrade_with<B, A>(
     prepared: &ValidatedUpgrade,
+    progress: Option<Progress>,
     before_commit: B,
     after_commit: A,
 ) -> std::result::Result<UpgradeReport, UpgradeFailure>
@@ -167,8 +195,13 @@ where
     B: FnOnce(&Connection) -> Result<()>,
     A: FnOnce(&Library) -> Result<()>,
 {
+    let stage = |text: &str, done: f64| {
+        if let Some(progress) = &progress {
+            progress(text, done)
+        }
+    };
     // Repeat package validation: a prepared handle is not permission to upgrade a changed package.
-    let current = prepared.library.reopen_for_upgrade()?;
+    let current = prepared.library.reopen_for_upgrade_deferring_checks()?;
     if current.instance_path() != prepared.library.instance_path() || current.config() != prepared.library.config() {
         return Err(Error::Conflict("升级预检后图库包已改变，请重新预检".into()).into());
     }
@@ -183,6 +216,13 @@ where
             return Err(Error::Conflict("升级预检后词条版本已改变，请重新预检".into()));
         }
         preflight_source(&current)?;
+        // Damage stops the upgrade before any backup. Other writers are excluded from here to the commit.
+        current.check(progress.clone().map(|p| {
+            Arc::new(move |label: &str, done: f64| p(&format!("正在检查图库数据（{label}）"), done * CHECKED))
+                as Progress
+        }))?;
+        stage("正在备份图库", BACKUP);
+        pause_for_tests();
         // An independent reader sees the committed state while this transaction excludes other writers.
         // SQLite backup preserves implicit rowids; VACUUM INTO would rewrite them in the recovery copy.
         let snapshot = app_library::read_connection(&current.db())?;
@@ -191,16 +231,25 @@ where
         backup = prepared_backup.path().map(std::path::Path::to_owned);
         drop(snapshot);
         let backup_path = backup.clone().ok_or_else(|| Error::Invalid("升级前备份没有生成".into()))?;
+        stage("正在升级图库", MIGRATE);
         crate::schema_rules::migrate_prepared_in(&tx, crate::SCHEMA_VERSION, &prepared_backup)?;
         before_commit(&tx)?;
         tx.commit()?;
         committed = true;
         // Same post-commit maintenance as the existing core CLI. Busy/disk failures retain its retry marker.
+        if meta(&c, "terms_compact_pending")?.is_some() {
+            stage("正在回收图库空间", COMPACT);
+        }
         crate::schema::compact_pending(&c);
         let maintenance_pending = meta(&c, "terms_compact_pending")?.is_some();
         drop(c);
         after_commit(&current)?;
-        let library = current.reopen()?;
+        // source.sqlite was not written and was checked before the backup; library.sqlite is checked again.
+        let library = current.reopen_deferring_checks()?;
+        library.check_application(progress.clone().map(|p| {
+            Arc::new(move |done: f64| p("正在核对升级后的图库数据", VERIFY.0 + (VERIFY.1 - VERIFY.0) * done))
+                as app_library::Report
+        }))?;
         Ok(UpgradeReport { library, before, after: crate::SCHEMA_VERSION, backup: backup_path, maintenance_pending })
     })();
     result.map_err(|error| UpgradeFailure { error, backup, committed })
@@ -208,10 +257,17 @@ where
 fn meta(c: &Connection, key: &str) -> Result<Option<String>> {
     Ok(c.query_row("SELECT value FROM meta WHERE key=?", [key], |r| r.get(0)).optional()?)
 }
+/// Test-only: `ILLUSTASH_TEST_UPGRADE_PAUSE_MS` makes the step after the checks take that long, as the backup and the
+/// migration of a large library do, without reporting anything (#267).
+fn pause_for_tests() {
+    if let Some(ms) = std::env::var("ILLUSTASH_TEST_UPGRADE_PAUSE_MS").ok().and_then(|v| v.parse().ok()) {
+        std::thread::sleep(std::time::Duration::from_millis(ms));
+    }
+}
+/// The source schema the upgraded library reads; its full check is `upgrade`'s.
 fn preflight_source(library: &Library) -> Result<()> {
     let mut c = app_library::read_connection(&library.source())?;
     let tx = c.transaction()?;
-    app_library::check_database(&tx)?;
     for sql in [
         "SELECT uuid,filename,src_path,width,height,added_at,src_kind,in_scope,trashed,source_id,preset FROM assets LIMIT 0",
         "SELECT uuid,dim,value,conf FROM labels LIMIT 0",
@@ -226,7 +282,7 @@ fn preflight_source(library: &Library) -> Result<()> {
     Ok(())
 }
 fn preflight_application(c: &Connection) -> Result<i64> {
-    app_library::validate_application(c, true)?;
+    validate(c)?;
     let app = meta(c, "schema_version")?;
     if app.as_deref() != Some("36") || !(5..crate::SCHEMA_VERSION).contains(&crate::schema::version(c)?) {
         return Err(Error::Schema("需要应用升级".into()));
@@ -347,7 +403,7 @@ mod tests {
             let prepared = prepare(&f.0).unwrap();
             assert_eq!(db_before, fs::read(f.0.join("library.sqlite")).unwrap());
             assert_eq!(f.backups(), 0);
-            let report = upgrade(&prepared).unwrap();
+            let report = upgrade(&prepared, None).unwrap();
             assert_eq!(
                 (report.before, report.after, report.maintenance_pending),
                 (version, crate::SCHEMA_VERSION, false)
@@ -368,6 +424,7 @@ mod tests {
         let p = prepare(&f.0).unwrap();
         let failure = upgrade_with(
             &p,
+            None,
             |tx| {
                 tx.execute("INSERT INTO prefs VALUES ('injected','must roll back')", [])?;
                 Err(Error::Invalid("synthetic failure".into()))
@@ -391,8 +448,8 @@ mod tests {
     fn post_commit_failure_never_claims_rollback() {
         let f = Fixture::new(6);
         let p = prepare(&f.0).unwrap();
-        let failure =
-            upgrade_with(&p, |_| Ok(()), |_| Err(Error::Invalid("synthetic startup failure".into()))).unwrap_err();
+        let failure = upgrade_with(&p, None, |_| Ok(()), |_| Err(Error::Invalid("synthetic startup failure".into())))
+            .unwrap_err();
         assert!(failure.committed);
         assert!(failure.to_string().contains("升级已提交"));
         assert!(failure.backup.as_ref().unwrap().is_file());
@@ -431,10 +488,71 @@ mod tests {
         let f = Fixture::new(5);
         let p = prepare(&f.0).unwrap();
         fs::write(f.0.join("library.json"), r#"{"format":1,"id":"different","name":"changed"}"#).unwrap();
-        let failure = upgrade(&p).unwrap_err();
+        let failure = upgrade(&p, None).unwrap_err();
         assert!(!failure.committed);
         assert!(failure.backup.is_none());
         assert_eq!(f.backups(), 0);
         assert_eq!(crate::schema::version(&f.connection()).unwrap(), 5);
+    }
+    /// Some pages of synthetic rows in a table of their own, then garbage over one of them: only a full check finds it.
+    fn damage(db: &Path) {
+        let c = crate::sqlite::open(db).unwrap();
+        c.execute_batch(
+            "CREATE TABLE synthetic_bulk(id INTEGER PRIMARY KEY, body TEXT); CREATE INDEX synthetic_bulk_body ON synthetic_bulk(body);
+             WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<4000)
+             INSERT INTO synthetic_bulk SELECT i, printf('%0100d', i) FROM n;",
+        )
+        .unwrap();
+        c.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |_| Ok(())).unwrap();
+        let size: usize = c.query_row("PRAGMA page_size", [], |r| r.get(0)).unwrap();
+        let count: usize = c.query_row("PRAGMA page_count", [], |r| r.get(0)).unwrap();
+        drop(c);
+        let mut bytes = fs::read(db).unwrap();
+        let start = (count - 3) * size;
+        for (i, byte) in bytes[start..start + size].iter_mut().enumerate() {
+            *byte = (i as u8).wrapping_mul(37) ^ 0xA5;
+        }
+        fs::write(db, bytes).unwrap();
+    }
+    #[test]
+    fn asking_reads_no_data_and_the_upgrade_checks_before_its_backup() {
+        // Whether to offer the upgrade is read from versions and schemas (#267): damage only a full check finds does
+        // not delay or change the question. The upgrade's own check finds it before any backup or write.
+        let f = Fixture::new(5);
+        damage(&f.0.join("source.sqlite"));
+        let before = fs::read(f.0.join("library.sqlite")).unwrap();
+        let p = prepare(&f.0).unwrap();
+        assert!(needed(&f.0).is_some());
+        let failure = upgrade(&p, None).unwrap_err();
+        assert!(!failure.committed && failure.backup.is_none(), "{failure}");
+        assert!(failure.to_string().contains("图库数据库损坏"), "{failure}");
+        assert_eq!(f.backups(), 0);
+        assert_eq!(before, fs::read(f.0.join("library.sqlite")).unwrap());
+    }
+    #[test]
+    fn the_upgrade_reports_its_stages_in_order() {
+        for version in [5, 6] {
+            let f = Fixture::new(version);
+            let seen = Arc::new(std::sync::Mutex::new(Vec::<(String, f64)>::new()));
+            let record = seen.clone();
+            let progress: Progress = Arc::new(move |stage: &str, done: f64| {
+                record.lock().unwrap().push((stage.to_owned(), done));
+            });
+            upgrade(&prepare(&f.0).unwrap(), Some(progress)).unwrap();
+            let seen = seen.lock().unwrap();
+            let stages: Vec<&str> = seen.iter().map(|(stage, _)| stage.as_str()).collect();
+            let first =
+                |stage: &str| stages.iter().position(|s| *s == stage).unwrap_or_else(|| panic!("{stage}: {stages:?}"));
+            let order = [
+                first("正在检查图库数据（library.sqlite）"),
+                first("正在检查图库数据（source.sqlite）"),
+                first("正在备份图库"),
+                first("正在升级图库"),
+                first("正在核对升级后的图库数据"),
+            ];
+            assert!(order.windows(2).all(|w| w[0] < w[1]), "{stages:?}");
+            assert!(seen.windows(2).all(|w| w[0].1 <= w[1].1), "{seen:?}");
+            assert!(seen.iter().all(|(_, done)| (0.0..=VERIFY.1).contains(done)), "{seen:?}");
+        }
     }
 }

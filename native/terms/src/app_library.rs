@@ -50,9 +50,16 @@ impl Library {
         Self::open_validated(path, false, Checks::Deferred)
     }
 
-    /// Explicit upgrade preflight only. Ordinary opening never accepts an old core.
+    /// A package an explicit upgrade may open, both full checks included (an imported archive is checked the way
+    /// the upgrade will check it). Ordinary opening never accepts an old core.
     pub(crate) fn open_for_upgrade(path: &Path) -> Result<Self> {
         Self::open_validated(path, true, Checks::Now(None))
+    }
+
+    /// `open_for_upgrade` without the two full integrity checks: whether to offer the upgrade is decided from versions,
+    /// markers and schemas alone, and the upgrade runs the checks itself, once, under its writer lock (#267).
+    pub(crate) fn open_for_upgrade_deferring_checks(path: &Path) -> Result<Self> {
+        Self::open_validated(path, true, Checks::Deferred)
     }
 
     fn open_validated(path: &Path, upgrade: bool, checks: Checks) -> Result<Self> {
@@ -109,13 +116,28 @@ impl Library {
     }
 
     /// Validate the same package again through its canonical path, keeping the alias the user opened for display.
+    #[cfg(test)]
     pub(crate) fn reopen(&self) -> Result<Self> {
         self.keep_display(Self::open_validated(&self.instance_path, false, Checks::Now(None))?)
     }
 
-    /// `reopen` for the explicit upgrade workflow, which accepts an old core.
-    pub(crate) fn reopen_for_upgrade(&self) -> Result<Self> {
-        self.keep_display(Self::open_validated(&self.instance_path, true, Checks::Now(None))?)
+    /// `reopen` for the explicit upgrade workflow, which accepts an old core. Without the full checks: the upgrade
+    /// runs them itself while it holds the writer lock (#267).
+    pub(crate) fn reopen_for_upgrade_deferring_checks(&self) -> Result<Self> {
+        self.keep_display(Self::open_validated(&self.instance_path, true, Checks::Deferred)?)
+    }
+
+    /// `reopen` without the full checks, for the upgrade after its commit: it checks only the database it wrote.
+    pub(crate) fn reopen_deferring_checks(&self) -> Result<Self> {
+        self.keep_display(Self::open_validated(&self.instance_path, false, Checks::Deferred)?)
+    }
+
+    /// The full check of library.sqlite alone, `progress` getting its fraction; damage is an error as in `check`.
+    pub(crate) fn check_application(&self, progress: Option<Report>) -> Result<()> {
+        match inspect_file(&self.db(), progress, Watch::default())? {
+            Verdict::Damaged(result) => Err(Error::Schema(format!("图库数据库损坏：{result}"))),
+            _ => Ok(()),
+        }
     }
 
     /// Both full integrity checks, library.sqlite first; `progress` gets the overall fraction, each file weighted
@@ -251,6 +273,7 @@ enum Checks {
     Deferred,
 }
 
+#[cfg(test)]
 pub(crate) fn check_database(conn: &Connection) -> Result<()> {
     match check_database_reporting(conn, None, Watch::default())? {
         Verdict::Sound => Ok(()),
@@ -403,10 +426,6 @@ pub(crate) fn require_meta(conn: &Connection, key: &str, expected: &str) -> Resu
     Ok(())
 }
 /// Same read-only version/ownership checks for opening and the locked upgrade snapshot.
-pub(crate) fn validate_application(conn: &Connection, upgrade: bool) -> Result<()> {
-    check_database(conn)?;
-    validate_checked(conn, upgrade)
-}
 fn validate_checked(conn: &Connection, upgrade: bool) -> Result<()> {
     if upgrade {
         return crate::app_upgrade::validate(conn);
