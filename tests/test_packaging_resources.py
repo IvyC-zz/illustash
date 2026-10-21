@@ -193,6 +193,21 @@ class PackagingResourcesTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, '--research'):
             pack.stage(self.root / 'wrong-variant', self.binaries, ort_dylib=runtime, ort_licenses=notices)
         self.assertFalse((self.root / 'wrong-variant').exists())
+        # #271: DirectML.dll only goes with the Windows runtime, and its package must be complete.
+        directml = self.root / 'directml'
+        for source in list(pack.DIRECTML_FILES.values())[1:]:
+            (directml / source).parent.mkdir(parents=True, exist_ok=True)
+            (directml / source).write_bytes(b'synthetic')
+        with patch.object(pack.sys, 'platform', 'darwin'), self.assertRaisesRegex(ValueError, 'Windows ORT'):
+            pack.stage(self.root / 'directml-mac', self.binaries, research=True, ort_dylib=runtime,
+                       ort_licenses=notices, directml=directml)
+        with patch.object(pack.sys, 'platform', 'win32'), self.assertRaisesRegex(ValueError, 'Windows ORT'):
+            pack.stage(self.root / 'directml-alone', self.binaries, research=True, directml=directml)
+        with patch.object(pack.sys, 'platform', 'win32'), self.assertRaisesRegex(FileNotFoundError, 'DirectML.dll'):
+            pack.stage(self.root / 'directml-incomplete', self.binaries, research=True, ort_dylib=runtime,
+                       ort_licenses=notices, directml=directml)
+        for name in ('directml-mac', 'directml-alone', 'directml-incomplete'):
+            self.assertFalse((self.root / name).exists())
         (notices / 'ThirdPartyNotices.txt').unlink()
         with self.assertRaisesRegex(FileNotFoundError, 'ThirdPartyNotices'):
             pack.stage(self.root / 'incomplete-notices', self.binaries, research=True,
@@ -545,6 +560,11 @@ class WindowsOpenBLASResourcesTest(unittest.TestCase):
         self.ort_licenses.mkdir()
         for name in ('LICENSE', 'ThirdPartyNotices.txt'):
             (self.ort_licenses / name).write_bytes(b'synthetic ORT notice')
+        # A synthetic Microsoft.AI.DirectML package directory (#271).
+        self.directml = self.root / 'Microsoft.AI.DirectML.synthetic'
+        for source in pack.DIRECTML_FILES.values():
+            (self.directml / source).parent.mkdir(parents=True, exist_ok=True)
+            (self.directml / source).write_bytes(b'synthetic DirectML package file:' + source.encode())
         self.dll = libs / 'fixed.dll'
         self.dll.write_bytes(b'synthetic registered DLL, never executable')
         self.digest = hashlib.sha256(self.dll.read_bytes()).hexdigest()
@@ -572,9 +592,15 @@ class WindowsOpenBLASResourcesTest(unittest.TestCase):
         output = self.root / 'portable'
         with patch.object(pack.sys, 'platform', 'win32'):
             pack.stage(output, self.binaries, research=True, iqdb=self.iqdb, models=self.models,
-                       openblas_site=runtime, ort_dylib=self.ort, ort_licenses=self.ort_licenses)
+                       openblas_site=runtime, ort_dylib=self.ort, ort_licenses=self.ort_licenses,
+                       directml=self.directml)
             manifest = self.manifest(output)
             self.assertEqual(manifest['files']['resources/openblas/openblas.dll'], self.digest)
+            for installed, source in pack.DIRECTML_FILES.items():
+                self.assertEqual(manifest['files'][installed],
+                                 hashlib.sha256((self.directml / source).read_bytes()).hexdigest())
+            self.assertEqual(manifest['files']['resources/onnxruntime/backends.json'],
+                             hashlib.sha256(pack.WINDOWS_ORT_BACKENDS.read_bytes()).hexdigest())
             self.assertFalse(any(name.startswith(('workers/', 'runtime/')) for name in manifest['files']))
             self.assertNotIn('ILLUSTASH_WORKER_PYTHON', (output / 'start.cmd').read_text())
             for source in self.notices.rglob('*'):
@@ -633,7 +659,8 @@ class WindowsOpenBLASResourcesTest(unittest.TestCase):
         desktop = self.root / 'race desktop'
         with patch.object(pack.sys, 'platform', 'win32'):
             pack.stage(portable, self.binaries, research=True, iqdb=self.iqdb, models=self.models,
-                       openblas_site=runtime, ort_dylib=self.ort, ort_licenses=self.ort_licenses)
+                       openblas_site=runtime, ort_dylib=self.ort, ort_licenses=self.ort_licenses,
+                       directml=self.directml)
             with patch.object(pack, 'copy', side_effect=corrupt), self.assertRaisesRegex(ValueError, 'changed while staging desktop'):
                 pack.desktop_compute(portable, desktop)
         self.assertFalse((desktop / 'manifest.json').exists())

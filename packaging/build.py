@@ -45,6 +45,15 @@ RUST_WORKSPACES = ('native/terms', 'desktop', 'crates/iqdb')
 # package carries them, with the models or without (then the app downloads the models on first use, #168);
 # there is no other source.
 MODEL_LICENSES = ROOT / 'packaging/model-licenses'
+# DirectML for the Windows ONNX Runtime (#271): the DLL that runtime loads from its own folder, and the NuGet
+# package's license texts, taken from the explicit Microsoft.AI.DirectML package directory the runtime was built with.
+DIRECTML_FILES = {'resources/onnxruntime/DirectML.dll': 'bin/x64-win/DirectML.dll',
+                  'resources/licenses/directml/LICENSE.txt': 'LICENSE.txt',
+                  'resources/licenses/directml/LICENSE-CODE.txt': 'LICENSE-CODE.txt',
+                  'resources/licenses/directml/ThirdPartyNotices.txt': 'ThirdPartyNotices.txt'}
+# Which backend that runtime build runs each model on, installed beside it (native/terms recognition_compute/backend.rs
+# RUNTIME_BACKENDS): replacing the runtime folder, e.g. with Windows ML, changes the backends without code changes.
+WINDOWS_ORT_BACKENDS = ROOT / 'packaging/onnxruntime/windows-backends.json'
 # The recognition models under resources/models/ (native/terms/models.json): a package has all of them or none.
 MODEL_FILES = tuple(entry['path'] for entry in json.loads((ROOT / 'native/terms/models.json').read_text())['files'])
 # One worker binary serves all four kinds; the host passes the kind per launch (#37).
@@ -152,7 +161,7 @@ def research_openblas(site):
     return candidates[0]
 
 def stage(destination, binaries, research=False, desktop=None, iqdb=None, models=None, openblas_site=None,
-          ort_dylib=None, ort_licenses=None):
+          ort_dylib=None, ort_licenses=None, directml=None):
     destination = destination.resolve()
     if destination.exists():
         raise ValueError('output already exists; choose a new directory')
@@ -167,6 +176,12 @@ def stage(destination, binaries, research=False, desktop=None, iqdb=None, models
         raise ValueError('computation packages require macOS or Windows')
     if bool(ort_dylib) != bool(ort_licenses):
         raise ValueError('ORT runtime requires its LICENSE and ThirdPartyNotices.txt directory')
+    if directml and (sys.platform != 'win32' or not ort_dylib):
+        raise ValueError('DirectML goes with the Windows ORT runtime')
+    if directml:
+        for source in DIRECTML_FILES.values():
+            if not (directml / source).is_file():
+                raise FileNotFoundError(f'DirectML package file missing: {directml / source}')
     openblas = None
     if openblas_site:
         if sys.platform != 'win32':
@@ -203,6 +218,10 @@ def stage(destination, binaries, research=False, desktop=None, iqdb=None, models
             copy(ort_dylib, destination / 'resources/onnxruntime' / library)
             for name in ('LICENSE', 'ThirdPartyNotices.txt'):
                 copy(ort_licenses / name, destination / 'resources/licenses/onnxruntime' / name)
+        if directml:
+            for installed, source in DIRECTML_FILES.items():
+                copy(directml / source, destination / installed)
+            copy(WINDOWS_ORT_BACKENDS, destination / 'resources/onnxruntime/backends.json')
         if openblas:
             dll, notices, digest = openblas
             installed = destination / 'resources/openblas/openblas.dll'
@@ -258,6 +277,7 @@ def desktop_compute(source, destination):
                      'resources/openblas/openblas.dll',
                      'resources/licenses/openblas/LICENSE.txt', 'resources/onnxruntime/onnxruntime.dll',
                      'resources/licenses/onnxruntime/LICENSE', 'resources/licenses/onnxruntime/ThirdPartyNotices.txt',
+                     *DIRECTML_FILES, 'resources/onnxruntime/backends.json',
                      *(installed for installed, _ in model_licenses())):
         if not (source / required).is_file():
             raise ValueError(f'full installer component missing: {required}')
@@ -353,6 +373,7 @@ def main():
     parser.add_argument('--openblas-site', type=Path, help='Windows: site-packages holding the fixed NumPy wheel (numpy.libs OpenBLAS DLL and its licenses)')
     parser.add_argument('--ort-dylib', type=Path, help='explicit existing CPU ORT dynamic library; installed under resources/onnxruntime')
     parser.add_argument('--ort-licenses', type=Path, help='directory containing this ORT distribution LICENSE and ThirdPartyNotices.txt')
+    parser.add_argument('--directml', type=Path, help='Windows: the Microsoft.AI.DirectML NuGet package directory the ORT runtime was built with (DirectML.dll and its licenses)')
     parser.add_argument('--profile', choices=('release', 'dev'), default='release')
     parser.add_argument('--binaries', type=Path, help='use already built release binaries')
     parser.add_argument('--iqdb', type=Path, help='built optional IQDB executable')
@@ -365,8 +386,11 @@ def main():
         parser.error('models/runtime require --research')
     if bool(args.ort_dylib) != bool(args.ort_licenses):
         parser.error('--ort-dylib and --ort-licenses must be supplied together')
-    if args.desktop_compute and not (args.research and args.openblas_site and args.ort_dylib and args.ort_licenses):
-        parser.error('--desktop-compute requires --research, --openblas-site, --ort-dylib and --ort-licenses')
+    if args.directml and not (sys.platform == 'win32' and args.ort_dylib):
+        parser.error('--directml requires Windows and --ort-dylib')
+    if args.desktop_compute and not (args.research and args.openblas_site and args.ort_dylib and args.ort_licenses
+                                     and args.directml):
+        parser.error('--desktop-compute requires --research, --openblas-site, --ort-dylib, --ort-licenses and --directml')
     if args.macos_desktop_compute and not (sys.platform == 'darwin' and args.research
                                          and args.ort_dylib and args.ort_licenses):
         parser.error('--macos-desktop-compute requires macOS, --research, --ort-dylib and --ort-licenses')
@@ -388,7 +412,7 @@ def main():
     if args.research and args.iqdb is None:
         subprocess.run(['cargo', 'build', '--locked', '--release', '--manifest-path', str(ROOT / 'crates/iqdb/Cargo.toml')], check=True, cwd=ROOT)
     stage(args.output, binaries, args.research, args.desktop, args.iqdb, args.models, args.openblas_site,
-          args.ort_dylib, args.ort_licenses)
+          args.ort_dylib, args.ort_licenses, args.directml)
     if args.desktop_compute:
         desktop_compute(args.output, args.desktop_compute)
     if args.macos_desktop_compute:
