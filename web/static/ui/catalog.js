@@ -111,7 +111,8 @@ function castList() {
 export function drawCast() {
   if (state.route.page !== 'characters' || state.route.section) return;
   const works = castWorks(), root = $('charIndex');
-  root.className = 'char-index cast ' + cast.mode;
+  // Prefixed: a bare 'shelf' would pick up the 作品 page's .shelf (narrow flex column, #274).
+  root.className = 'char-index cast cast-' + cast.mode;
   reconcileSections(root, cast.mode === 'list' ? [['list', `<div class="cast-listview">${castList()}</div>`]]
     : [...(cast.list ? [] : [['tabs', castTabs(works)]]), ['pane', `<div class="cast-pane">${castPane(works)}</div>`]]);
   const foot = (state.tagged || []).length ? `<p class="cast-tagged">${t('不算角色、只当标签：')}${state.tagged.map(x => `<a href="${charHash(x.id)}">${esc(x.name)}</a><small>${number(x.count)}</small>`).join('')}</p>` : '';

@@ -949,6 +949,8 @@ body:has(#settingsPage:not([hidden])) .nudge{display:none}
 
 /* 角色页：书架 / 列表 */
 .cast{padding-bottom:28px}
+/* The shelf's spacing between the sticky tabs, the pane and the footer; full width, unlike the 作品 page's .shelf (#274). */
+.cast-shelf{display:flex;flex-direction:column;gap:14px}
 .cast-av{display:block;border-radius:50%;overflow:hidden;background:var(--soft);box-shadow:inset 0 0 0 1px var(--hair);flex:none}
 .cast-av img{width:100%;height:100%;object-fit:cover;display:block}
 .cast-tabs{position:sticky;top:0;z-index:4;display:flex;align-items:center;gap:8px;margin:0 calc(-1 * var(--gutter));padding:4px var(--gutter) 12px;background:color-mix(in srgb,var(--sheet) 88%,transparent);-webkit-backdrop-filter:blur(18px) saturate(1.5);backdrop-filter:blur(18px) saturate(1.5)}
@@ -996,7 +998,7 @@ body:has(#settingsPage:not([hidden])) .nudge{display:none}
 .cast-board .cast-poster:first-child .rank{font-size:72px;left:20px;top:10px}
 .cast-posters{display:grid;grid-template-columns:repeat(auto-fill,minmax(158px,1fr));gap:14px}
 .cast-posters .cast-poster{aspect-ratio:3/4}
-.cast-recent{display:flex;gap:16px;overflow-x:auto;padding:4px 4px 12px;scrollbar-width:thin}
+.cast-recent{display:flex;gap:16px;overflow-x:auto;padding:4px 40px 12px 4px;scrollbar-width:thin;-webkit-mask-image:linear-gradient(90deg,#000 calc(100% - 48px),transparent);mask-image:linear-gradient(90deg,#000 calc(100% - 48px),transparent)}
 .cast-rc{flex:none;width:84px;display:grid;justify-items:center;gap:4px;text-align:center}
 .cast-rc .ring{position:relative;width:72px;height:72px;border-radius:50%;padding:3px;background:conic-gradient(var(--accent) calc(var(--p)*1%),var(--accent-soft) 0);transition:transform .2s var(--ease)}
 .cast-rc:hover .ring{transform:scale(1.05)}
