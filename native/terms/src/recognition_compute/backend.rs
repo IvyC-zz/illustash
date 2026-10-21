@@ -23,11 +23,17 @@ use std::{
 /// and anyone ruling the accelerator out set it. Empty and `0` mean unset.
 pub const CPU_ONLY_ENV: &str = "ILLUSTASH_CPU_ONLY";
 /// Whether this build has an accelerated backend at all; the setting is offered only where it does.
-pub const AVAILABLE: bool = cfg!(all(target_os = "macos", target_arch = "aarch64"));
+pub const AVAILABLE: bool =
+    cfg!(any(all(target_os = "macos", target_arch = "aarch64"), all(windows, target_arch = "x86_64")));
 /// The compiled CoreML models, one folder per key (cache_key), under the shared folder.
 const COREML_CACHE: &str = "coreml-cache";
 /// What the last worker used, and why it fell back, per model: read by GET /api/models.
 pub const STATUS_FILE: &str = "acceleration.json";
+/// Beside the ONNX Runtime library: which backend that runtime build is meant to run each model on, e.g.
+/// `{"format": 1, "wd": "directml", "ccip": "directml"}` (#271). The runtime and its backends are one unit of
+/// configuration: replacing the runtime folder (say, with Windows ML's) changes the backends without touching
+/// this code. Without the file the platform default in `Acceleration::backend` applies.
+pub const RUNTIME_BACKENDS: &str = "backends.json";
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Model {
@@ -64,6 +70,41 @@ impl Backend {
             Self::DirectMl => "directml",
         }
     }
+    fn named(name: &str) -> Option<Self> {
+        [Self::Cpu, Self::CoreMl, Self::DirectMl].into_iter().find(|b| b.name() == name)
+    }
+}
+
+/// The runtime's RUNTIME_BACKENDS: `Ok(None)` without the file; an unreadable or unknown entry is an error, and then
+/// every model stays on the CPU rather than guessing.
+fn declared(runtime: &Path) -> std::result::Result<Option<[Backend; 2]>, String> {
+    let Some(file) = runtime.parent().map(|d| d.join(RUNTIME_BACKENDS)).filter(|f| f.exists()) else {
+        return Ok(None);
+    };
+    let fail = |e: &dyn std::fmt::Display| format!("{}: {e}", file.display());
+    let value: Value = serde_json::from_slice(&fs::read(&file).map_err(|e| fail(&e))?).map_err(|e| fail(&e))?;
+    if value.get("format").and_then(Value::as_u64) != Some(1) {
+        return Err(fail(&"format 应为 1"));
+    }
+    let backend = |model: Model| {
+        value
+            .get(model.name())
+            .and_then(Value::as_str)
+            .and_then(Backend::named)
+            .ok_or_else(|| fail(&format!("{} 应为 cpu、coreml 或 directml", model.name())))
+    };
+    Ok(Some([backend(Model::Wd)?, backend(Model::Ccip)?]))
+}
+/// RUNTIME_BACKENDS of the runtime this process bound (session::initialise), read once it is bound; before that
+/// (no runtime yet) the platform default applies and nothing is cached.
+fn runtime_backends() -> std::result::Result<Option<[Backend; 2]>, String> {
+    static DECLARED: std::sync::OnceLock<std::result::Result<Option<[Backend; 2]>, String>> =
+        std::sync::OnceLock::new();
+    let runtime = super::session::runtime();
+    if runtime.as_os_str().is_empty() {
+        return Ok(None);
+    }
+    DECLARED.get_or_init(|| declared(&runtime)).clone()
 }
 
 /// One worker's choice: the switch (setting and CPU_ONLY_ENV) and where the shared folder is.
@@ -81,15 +122,33 @@ impl Acceleration {
         let forced = std::env::var_os(CPU_ONLY_ENV).is_some_and(|v| !v.is_empty() && v != "0");
         Self { enabled: AVAILABLE && !forced && crate::app_preferences::acceleration(), shared: shared.map(Into::into) }
     }
-    /// The platform policy (#213): on macOS only CCIP goes to CoreML. WD on CoreML is no faster, takes about ten
-    /// minutes to compile and caches 2.1 GB.
+    /// What the bound runtime declares (RUNTIME_BACKENDS), else the platform default (#213): on macOS only CCIP goes
+    /// to CoreML (WD on CoreML is no faster, takes about ten minutes to compile and caches 2.1 GB); on Windows both go
+    /// to DirectML (#271).
     pub fn backend(&self, model: Model) -> Backend {
         if !self.enabled {
             return Backend::Cpu;
         }
-        match model {
+        let default = match model {
             Model::Ccip if cfg!(target_os = "macos") => Backend::CoreMl,
+            _ if cfg!(windows) => Backend::DirectMl,
             _ => Backend::Cpu,
+        };
+        match runtime_backends() {
+            Ok(Some([wd, ccip])) => {
+                if model == Model::Wd {
+                    wd
+                } else {
+                    ccip
+                }
+            }
+            Ok(None) => default,
+            // An unreadable declaration: the CPU rather than a guess, and said where the settings page shows it.
+            Err(reason) => {
+                eprintln!("识别加速：{} 改用 CPU：{reason}", model.name());
+                self.record(model, default, Backend::Cpu, Some(&reason));
+                Backend::Cpu
+            }
         }
     }
     /// The accelerator's part of the session: providers, pinned shapes, cache. CPU sessions never come here.
@@ -114,6 +173,10 @@ impl Acceleration {
                     provider = provider.with_model_cache_dir(cache.display());
                 }
                 builder.with_execution_providers([provider.build().error_on_failure()]).map_err(failed)
+            }
+            // With the batch pinned DirectML can plan the whole graph when the session is built.
+            Backend::DirectMl if cfg!(windows) => {
+                builder.with_dimension_override(model.batch(), 1).and_then(super::directml::configure).map_err(failed)
             }
             Backend::DirectMl | Backend::Cpu => Err(Error::Invalid(format!("{} 不在本平台", backend.name()))),
         }
@@ -252,9 +315,33 @@ mod tests {
         let off = Acceleration::cpu();
         assert_eq!((off.backend(Model::Wd), off.backend(Model::Ccip)), (Backend::Cpu, Backend::Cpu));
         let on = Acceleration { enabled: true, shared: None };
-        assert_eq!(on.backend(Model::Wd), Backend::Cpu, "WD stays on the CPU everywhere for now");
-        let ccip = if cfg!(target_os = "macos") { Backend::CoreMl } else { Backend::Cpu };
-        assert_eq!(on.backend(Model::Ccip), ccip);
+        let (wd, ccip) = if cfg!(target_os = "macos") {
+            (Backend::Cpu, Backend::CoreMl)
+        } else if cfg!(windows) {
+            (Backend::DirectMl, Backend::DirectMl)
+        } else {
+            (Backend::Cpu, Backend::Cpu)
+        };
+        assert_eq!((on.backend(Model::Wd), on.backend(Model::Ccip)), (wd, ccip));
+    }
+    #[test]
+    fn the_runtime_declares_its_backends() {
+        let root = temp("declared");
+        let runtime = root.join("onnxruntime.dll");
+        assert_eq!(declared(&runtime), Ok(None), "no file: the platform default");
+        let file = root.join(RUNTIME_BACKENDS);
+        fs::write(&file, r#"{"format": 1, "wd": "cpu", "ccip": "directml"}"#).unwrap();
+        assert_eq!(declared(&runtime), Ok(Some([Backend::Cpu, Backend::DirectMl])));
+        for bad in [
+            r#"{"format": 2, "wd": "cpu", "ccip": "cpu"}"#,
+            r#"{"format": 1, "wd": "cuda", "ccip": "cpu"}"#,
+            r#"{"format": 1, "wd": "cpu"}"#,
+            "not json",
+        ] {
+            fs::write(&file, bad).unwrap();
+            assert!(declared(&runtime).is_err(), "{bad}");
+        }
+        fs::remove_dir_all(root).unwrap();
     }
     #[cfg(target_os = "macos")]
     #[test]
