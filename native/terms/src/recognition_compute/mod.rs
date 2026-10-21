@@ -2,6 +2,7 @@
 //! Raw embeddings remain unnormalised; learning owns its Features cache.
 pub mod anchor_snapshot;
 pub mod anchors;
+pub mod backend;
 pub mod claims;
 pub mod models;
 pub mod preprocess;

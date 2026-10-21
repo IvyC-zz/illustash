@@ -26,6 +26,11 @@ export async function modelsPost(body) {
   const value = await api('/api/models', {method: 'POST', body: JSON.stringify(body)});
   return value.cancelled ? value : adopt(value);
 }
+// 「使用 GPU 加速识别」 (#270), app-wide in preferences.json; the models state carries it, so it is read again.
+export async function saveAcceleration(on) {
+  await api('/api/preferences', {method: 'POST', body: JSON.stringify({acceleration: on})});
+  return loadModels();
+}
 // This install downloads its models and they are not in place yet: recognition waits.
 export const modelsWaiting = (m = state.models) => !!m?.on_demand && m.status !== 'ready';
 // A job that has just finished, and how: once, when the state read says it stopped running.

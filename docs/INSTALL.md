@@ -65,6 +65,12 @@
 
 Hugging Face 的地址固定在上游的某个提交上，上游以后改动也不影响；镜像站把 `https://huggingface.co` 换成镜像地址即可。下载后可以自己核对：macOS 用 `shasum -a 256 文件`，Windows 用 `certutil -hashfile 文件 SHA256`。模型的许可见 [第三方组件与许可](THIRD_PARTY.md#模型与数据)。
 
+### 识别加速（macOS）
+
+在 Apple 芯片的 Mac 上，识别默认用 GPU 和神经引擎（Core ML）计算角色特征，比只用 CPU 快；角色判定和只用 CPU 时一致，向量只有浮点舍入级的差别。第一次识别前会先把模型编译一遍（几秒），编好的放在 `~/Library/Application Support/Illustash/Shared/coreml-cache/`（约 300 MB），之后每次启动识别只要不到一秒。模型、ONNX Runtime 或 macOS 版本变了，旧的会自动删掉重新编译；这个文件夹可以随时删除，下次识别时重新生成。
+
+加速用不了（编译失败、缓存损坏、运行出错）时，这次识别自动改用 CPU，不影响结果；「设置 › 数据 › 识别模型」里会写出原因。想只用 CPU，把那里的「使用 GPU 加速识别」关掉，下次识别时生效。
+
 ## Windows
 
 - 安装包装在当前用户下，不需要管理员权限。

@@ -114,6 +114,17 @@ Windows 计算任务使用挂起创建 → 私有 kill-on-close Job → 恢复�
 
 独立产物的专项验证与完整平台门槛分开：干净 macOS 由 #71 承接；Windows 的构建、安装和基础功能已由 #72 在开发机上实测，用户 2026-10-02 取消了 #90 的无 Python 干净 Windows 专项复验；取消关闭不计为该环境验收通过。打包脚本成功不代表这些门槛已通过。
 
+## 识别的执行后端
+
+2026-10-21 起（#270）。识别和索引 worker 的 ONNX 会话按平台选执行后端（`native/terms/src/recognition_compute/backend.rs`），CPU 是参考：
+
+- **macOS（Apple 芯片）**：CCIP 走 Core ML（MLProgram 格式、全部计算单元，动态 batch 维固定为 1；不固定时 Core ML 几乎不接节点），WD 仍用 CPU（Core ML 下 WD 不更快，编译要约 10 分钟、缓存 2.1 GB，#213）。打包不变：现在带的 PyPI `onnxruntime` 1.30.0 arm64 动态库自带 Core ML 执行后端，ort `load-dynamic` 下直接注册。
+- **Windows**：DirectML 由 #271 接在同一层上；在它合入之前全部用 CPU。
+- **编译缓存**：`<共享目录>/coreml-cache/<键>/`（默认 `~/Library/Application Support/Illustash/Shared/coreml-cache/`）。键是模型文件、ONNX Runtime 动态库和 `SystemVersion.plist` 内容的 SHA-256，任何一个变了就换一个文件夹，旧的在下次建会话时删掉。第一次编译 CCIP 约 4 s，之后每个 worker 加载约 0.65 s；识别 worker 和索引 worker 同时启动时用 `compile.lock` 排队，只编译一次。
+- **退回 CPU**：加速会话建不起来，或运行时出错、输出校验不过时，这一张在新建的 CPU 会话上重算，这个 worker 余下的都用 CPU；Core ML 的缓存文件夹删掉（它可能就是坏的），下次 worker 重新编译。每个模型请求的、实际用的后端和原因记在 `<共享目录>/acceleration.json`，`GET /api/models` 的 `acceleration.last` 原样返回，设置页据此提示（[Web 界面](WEB_V2.md#识别模型2026-10-19168)）。模型或运行库本身坏了（CPU 也加载不了）不算加速失败：报 CPU 的错误，不写记录、不留缓存文件夹。
+- **开关**：`preferences.json` 的 `acceleration`（默认开，「设置 › 数据 › 识别模型 › 使用 GPU 加速识别」）；`ILLUSTASH_CPU_ONLY=1` 强制全部用 CPU，优先于设置，给逐位验收和排查用。关掉时会话的建法与 #270 之前完全相同。
+- **结果**：加速后端与 CPU 的差别是 fp32 舍入级（#213：CCIP 余弦 ≥ 0.99999999999958，角色距离最多变 1.3e-7，判定和最近邻不变）。已有图库的向量是 CPU 算的，换后端后同一张图重新识别，向量不再逐位相同，判定不变。研究计算的固定期望和 `tests/fixtures` 的录制重放用提交的向量，不跑模型，不受影响。`tests.platform_recognition_models`、`tests.platform_index_models` 设 `ILLUSTASH_CPU_ONLY=1` 与 Python ORT CPU 参考逐位比较；`tests.platform_recognition_models.AcceleratedRecognitionTest` 在有加速后端的平台上按容差比较（CCIP 余弦 ≥ 0.9999999999、距离差 ≤ 1e-6，角色、置信度、最近邻和 WD 输出不变），并验证缓存损坏时退回 CPU。性能见 [性能](TERMS_PERFORMANCE.md#6-整应用识别吞吐基准)。
+
 ## Windows
 
 2026-10-01 在 x64 Windows 11 家庭版开发机上实测（#72）。这台机器装有系统级 Python 3.12，所以只证明产品进程树不调用 Python，不等于干净环境；干净环境复验见 #90。

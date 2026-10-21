@@ -253,7 +253,8 @@ pub fn run(request: Request, resources: &Path, models: &Path, runtime: &Path, sh
     let snapshot = super::anchor_snapshot::Snapshot::load(shared, &identity.package.join("source.sqlite"))?;
     let specs = model_specs(resources, models)?;
     let tags = Tags::load(&resources.join("tags/tags_v3.csv"))?;
-    let mut sessions = ModelSessions::load(models, runtime)?;
+    let acceleration = super::backend::Acceleration::from_env(Some(shared));
+    let mut sessions = ModelSessions::load(models, runtime, &acceleration)?;
     progress.write("recognising");
     let mut packages = Vec::new();
     let mut sidecars = Vec::new();
@@ -317,7 +318,9 @@ pub fn worker(arguments: &[String]) -> Result<()> {
         illustash_platform::platform_research_math::windows_backend_identity().map_err(invalid)?;
         let tags = Tags::load(&resources.join("tags/tags_v3.csv"))?;
         let _ = model_specs(&resources, models)?;
-        let _ = ModelSessions::load(models, &runtime)?;
+        // Builds the accelerated session too, so the first sync after setup finds CoreML's model compiled.
+        let shared = crate::app_resources::shared_path(&resources).ok();
+        let _ = ModelSessions::load(models, &runtime, &super::backend::Acceleration::from_env(shared.as_deref()))?;
         if tags.is_empty() {
             return Err(invalid("标签表为空"));
         }

@@ -800,7 +800,15 @@ fn info_at(models: &Models, place: &Place) -> Json {
 
 /// GET /api/models.
 pub(crate) fn info(resources: &Path) -> Result<Json> {
-    Ok(info_at(&APP, &Place::app(resources)?))
+    Ok(with_acceleration(resources, info_at(&APP, &Place::app(resources)?)))
+}
+
+/// 「使用 GPU 加速识别」 (#270) sits on the models card: whether this build has an accelerator, the switch
+/// (POST /api/preferences) and what the last worker used, per model (recognition_compute/backend.rs).
+fn with_acceleration(resources: &Path, mut value: Json) -> Json {
+    let shared = crate::app_resources::shared_path(resources).ok();
+    value.set("acceleration", Json::from(crate::recognition_compute::backend::info(shared.as_deref())));
+    value
 }
 
 /// POST /api/models:
@@ -815,7 +823,7 @@ pub(crate) fn post(resources: &Path, body: &Json, in_use: bool) -> Result<Json> 
     let mut place = Place::app(resources)?;
     place.proxy = proxy();
     place.in_use = in_use;
-    post_at(&APP, place, body)
+    post_at(&APP, place, body).map(|value| with_acceleration(resources, value))
 }
 
 fn post_at(models: &'static Models, place: Place, body: &Json) -> Result<Json> {

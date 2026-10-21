@@ -1,5 +1,6 @@
 //! App-wide preferences (#173): one preferences.json beside libraries.json, shared by every library and browser
-//! (the desktop shell reads it in a later stage). Only the interface language lives here; unknown keys are kept.
+//! (the desktop shell reads it in a later stage). The interface language and 「使用 GPU 加速识别」 (#270/#271, read by
+//! the recognition and index workers, recognition_compute/backend.rs) live here; unknown keys are kept.
 //! The languages on offer are the tables in web/static/locales (#182): adding one needs no code.
 use crate::{
     app_paths::{app_support, user_home},
@@ -111,31 +112,52 @@ fn read(file: &Path) -> Map<String, Value> {
         .unwrap_or_default()
 }
 
-/// The reply of POST /api/preferences: `{"language": …}`.
-pub(crate) fn info(locales: &[Locale]) -> Json {
-    Json::object([("language", language(locales).into())])
+/// Whether recognition may use the GPU or Neural Engine: on unless switched off. Like the language, a missing or
+/// broken file means the default. Workers read it when they start, so a change applies from the next sync.
+pub(crate) fn acceleration() -> bool {
+    file().map(|file| acceleration_at(&file)).unwrap_or(true)
+}
+fn acceleration_at(file: &Path) -> bool {
+    read(file).get("acceleration").and_then(Value::as_bool).unwrap_or(true)
 }
 
-/// POST /api/preferences: `{"language": "en"}`. Preferences never grant network or start tasks.
+/// The reply of POST /api/preferences: `{"language": …, "acceleration": …}`.
+pub(crate) fn info(locales: &[Locale]) -> Json {
+    Json::object([("language", language(locales).into()), ("acceleration", acceleration().into())])
+}
+
+/// POST /api/preferences: `{"language": "en"}` or `{"acceleration": false}`, or both. Preferences never grant
+/// network or start tasks.
 pub(crate) fn set_json(body: &str, locales: &[Locale]) -> Result<()> {
     let Json::Object(changes) = crate::http_json::parse_request(body)? else {
         return Err(Error::Invalid("未知设置".into()));
     };
-    if changes.is_empty() || changes.iter().any(|(key, _)| key != "language") {
+    if changes.is_empty() || changes.iter().any(|(key, _)| key != "language" && key != "acceleration") {
         return Err(Error::Invalid("未知设置".into()));
     }
-    let language = match changes.iter().find(|(key, _)| key == "language").map(|(_, value)| value) {
-        Some(Json::Scalar(Value::String(language))) if offered(language, locales) => language.clone(),
-        _ => return Err(Error::Invalid("语言取值不正确".into())),
-    };
-    set_language_at(&file()?, &language)
+    let mut validated = Vec::new();
+    for (key, value) in changes {
+        let value = match (key.as_str(), value) {
+            ("language", Json::Scalar(Value::String(language))) if offered(&language, locales) => language.into(),
+            ("language", _) => return Err(Error::Invalid("语言取值不正确".into())),
+            ("acceleration", Json::Scalar(value @ Value::Bool(_))) => value,
+            _ => return Err(Error::Invalid("开关取值不正确".into())),
+        };
+        validated.push((key, value));
+    }
+    set_at(&file()?, validated)
 }
 
+#[cfg(test)]
 fn set_language_at(file: &Path, language: &str) -> Result<()> {
+    set_at(file, vec![("language".into(), language.into())])
+}
+
+fn set_at(file: &Path, changes: Vec<(String, Value)>) -> Result<()> {
     // Hosts of different libraries share this file: same lock and rename as libraries.json.
     crate::app_libraries::registry_locked(file, || {
         let mut fields = read(file);
-        fields.insert("language".into(), language.into());
+        fields.extend(changes);
         let text =
             serde_json::to_string_pretty(&Value::Object(fields)).map_err(|e| Error::Invalid(e.to_string()))? + "\n";
         fs::create_dir_all(file.parent().ok_or_else(|| Error::Invalid("无效的偏好设置路径".into()))?)?;
@@ -285,6 +307,24 @@ mod tests {
     }
 
     #[test]
+    fn acceleration_is_on_unless_switched_off() {
+        let f = Fixture::new();
+        let file = f.file();
+        assert!(acceleration_at(&file), "no file: on");
+        fs::create_dir_all(file.parent().unwrap()).unwrap();
+        for text in
+            ["", "not json", "[]", r#"{"acceleration": "no"}"#, r#"{"acceleration": 0}"#, r#"{"acceleration": true}"#]
+        {
+            fs::write(&file, text).unwrap();
+            assert!(acceleration_at(&file), "{text}");
+        }
+        set_language_at(&file, "en").unwrap();
+        set_at(&file, vec![("acceleration".into(), false.into())]).unwrap();
+        assert!(!acceleration_at(&file));
+        assert_eq!(language_at(&file, &f.english()), "en", "the language is kept");
+    }
+
+    #[test]
     fn failed_write_keeps_the_previous_file() {
         let f = Fixture::new();
         let file = f.file();
@@ -334,6 +374,10 @@ mod tests {
             r#"{"language": ""}"#,
             r#"{"language": 1}"#,
             r#"{"language": "en", "theme": "dark"}"#,
+            r#"{"acceleration": 1}"#,
+            r#"{"acceleration": "off"}"#,
+            r#"{"acceleration": null}"#,
+            r#"{"acceleration": false, "language": "fr"}"#,
         ] {
             assert!(matches!(set_json(body, &offer), Err(Error::Invalid(_))), "{body}");
         }

@@ -1,5 +1,8 @@
-"""Explicit, opt-in CPU model acceptance; generated images/anchors only.
+"""Explicit, opt-in model acceptance; generated images/anchors only.
 
+Every case but AcceleratedRecognitionTest runs with ILLUSTASH_CPU_ONLY=1 and compares bit for bit with the
+Python ONNX Runtime CPU reference. AcceleratedRecognitionTest runs CCIP on the accelerator this platform has
+(CoreML on Apple silicon, #270) and compares within the bounds #213 measured.
 Run separately from discover. Required inputs: ILLUSTASH_TERMS_BIN,
 ILLUSTASH_RECOGNITION_ADAPTER_BIN, ILLUSTASH_RECOGNITION_COMPUTE_BIN,
 ILLUSTASH_RECOGNITION_MODELS and ILLUSTASH_ORT_DYLIB. Missing inputs fail.
@@ -122,11 +125,16 @@ class RecognitionModelTest(unittest.TestCase):
         self.shared = self.root / 'shared'; self.shared.mkdir()
         self.env = {k: v for k, v in os.environ.items() if not k.startswith('ILLUSTASH_')}
         self.env.update(PATH='', HOME=str(self.root / 'home'), USERPROFILE=str(self.root / 'home'),
-                        ILLUSTASH_APP_SUPPORT=str(self.root / 'support'), ILLUSTASH_SHARED=str(self.shared))
+                        ILLUSTASH_APP_SUPPORT=str(self.root / 'support'), ILLUSTASH_SHARED=str(self.shared),
+                        ILLUSTASH_CPU_ONLY='1')
         if sys.platform == 'win32':
             # Installed Windows launchers provide ROOT; the backend resolves only
             # ROOT/openblas/openblas.dll, without PATH or a Python/DLL override.
             self.env['ILLUSTASH_ROOT'] = str(self.resources)
+
+    def assert_ccip(self, actual, expected):
+        """CCIP vectors and the distances computed from them: bit for bit on the CPU."""
+        np.testing.assert_array_equal(actual, expected)
 
     def invoke(self, binary, request, *, env=None):
         input_path = self.root / 'request.json'
@@ -222,14 +230,15 @@ class RecognitionModelTest(unittest.TestCase):
                 row = self.reference[int(asset.split('-')[1]) % 8]
                 expected_labels.extend(labels(asset, row['probs'], self.tags))
             self.assertEqual([json.loads(line) for line in (path / 'labels.jsonl').read_text(encoding='utf-8').splitlines()], expected_labels)
-            for field in ('distance', 'threshold'):
-                np.testing.assert_array_equal(np.asarray([r[field] for r in claim['claims']], np.float32),
-                                              np.asarray([r[field] for r in expected_claims], np.float32))
+            self.assert_ccip(np.asarray([r['distance'] for r in claim['claims']], np.float32),
+                             np.asarray([r['distance'] for r in expected_claims], np.float32))
+            np.testing.assert_array_equal(np.asarray([r['threshold'] for r in claim['claims']], np.float32),
+                                          np.asarray([r['threshold'] for r in expected_claims], np.float32))
             self.assertEqual([(r['asset'], r['character'], r['confidence']) for r in claim['claims']],
                              [(r['asset'], r['character'], r['confidence']) for r in expected_claims])
             for model in ('wd', 'ccip'):
                 expected = np.asarray([self.reference[int(a.split('-')[1]) % 8][model] for a in manifest['assets']], np.float32)
-                np.testing.assert_array_equal(np.load(path / (model+'.npy')), expected)
+                (self.assert_ccip if model == 'ccip' else np.testing.assert_array_equal)(np.load(path / (model+'.npy')), expected)
             for name, fingerprint in manifest['files'].items():
                 data = (path / name).read_bytes()
                 self.assertEqual(fingerprint, dict(bytes=len(data), sha256=hashlib.sha256(data).hexdigest()))
@@ -396,3 +405,83 @@ class RecognitionModelTest(unittest.TestCase):
             self.assertEqual(c.execute("SELECT count(*) FROM assets WHERE filename='bad.png'").fetchone()[0], 1)
         self.stop(process)
         self.assertEqual(process.returncode, 0)
+
+
+def accelerator():
+    """The accelerated CCIP backend this platform has (recognition_compute/backend.rs), or None."""
+    import platform
+    return 'coreml' if sys.platform == 'darwin' and platform.machine() == 'arm64' else None
+
+
+@unittest.skipUnless(accelerator(), 'no accelerated recognition backend on this platform')
+class AcceleratedRecognitionTest(RecognitionModelTest):
+    """The setting's default: CCIP on the accelerator. #213 measured fp32 rounding differences only (cosine
+    >= 0.99999999999958 on 24 public pictures); the bound here leaves room, and every decision must stay."""
+    COSINE = 0.9999999999
+
+    def setUp(self):
+        super().setUp()
+        del self.env['ILLUSTASH_CPU_ONLY']
+
+    def status(self):
+        return json.loads((self.shared / 'acceleration.json').read_text(encoding='utf-8'))
+
+    def infer(self):
+        return self.invoke(self.compute, dict(mode='infer', models=str(self.resources / 'models'),
+                           runtime=str(self.runtime), tags=str(self.resources / 'tags/tags_v3.csv'),
+                           shared=str(self.shared), images=list(map(str, self.images))))
+
+    def test_raw_probabilities_vectors_and_labels(self):
+        got = self.infer()
+        self.assertEqual(self.status()['ccip'], dict(self.status()['ccip'], requested=accelerator(), used=accelerator(), reason=None))
+        cache = [p for p in (self.shared / 'coreml-cache').iterdir() if p.is_dir()]
+        self.assertEqual(len(cache), 1, 'one compiled model, keyed by content')
+        self.assertTrue(any(cache[0].rglob('*')), 'the compiled model is cached')
+        reference = np.asarray([r['ccip'] for r in self.reference], np.float64)
+        for i, (expected, actual) in enumerate(zip(self.reference, got)):
+            # WD stays on the CPU: bit for bit, and so are its labels.
+            for key in ('probs', 'wd'):
+                np.testing.assert_array_equal(np.asarray(actual[key], np.float32), expected[key])
+            self.assertEqual(actual['labels'], labels('synthetic', expected['probs'], self.tags))
+            feature = np.asarray(actual['ccip'], np.float64)
+            cosine = feature @ reference[i] / np.linalg.norm(feature) / np.linalg.norm(reference[i])
+            self.assertGreaterEqual(cosine, self.COSINE, i)
+            # The nearest of the others is the same picture, as on the CPU.
+            others = [j for j in range(len(reference)) if j != i]
+            nearest = lambda v: max(others, key=lambda j: v @ reference[j] / np.linalg.norm(v) / np.linalg.norm(reference[j]))
+            self.assertEqual(nearest(feature), nearest(reference[i]), i)
+        # Again, from the compiled cache: the same outputs, bit for bit.
+        self.assertEqual([r['ccip'] for r in self.infer()], [r['ccip'] for r in got])
+
+    def assert_ccip(self, actual, expected):
+        # Distances of 0.01–0.15 decide; a change of 1e-6 is two orders below the 1.3e-7 to 1e-4 steps that matter.
+        np.testing.assert_allclose(actual, expected, rtol=0, atol=1e-6)
+
+    # test_candidate_batches_bad_image_and_synthetic_anchor_claims runs as inherited: WD outputs and labels bit for
+    # bit, CCIP vectors and distances through assert_ccip, characters and confidences exactly.
+
+    def test_installed_no_anchor_bad_image_and_explicit_dependency_failures(self):
+        self.skipTest('the CPU case covers dependency failures; nothing accelerated is involved')
+
+    def test_relocated_native_sync_first_incremental_bad_image_and_human_preservation(self):
+        self.skipTest('the CPU case covers sync; its stored vectors are compared bit for bit')
+
+    def test_damaged_cache_is_dropped_and_the_cpu_takes_over(self):
+        self.infer()
+        cache = next(p for p in (self.shared / 'coreml-cache').iterdir() if p.is_dir())
+        for path in sorted(cache.rglob('*'), reverse=True):
+            if path.is_file():
+                path.write_bytes(b'damaged')
+        got = self.infer()
+        status = self.status()['ccip']
+        if status['used'] == 'cpu':
+            # The damaged copy could not be loaded: this worker used the CPU and the copy is gone.
+            self.assertTrue(status['reason'])
+            self.assertFalse(cache.exists())
+            for expected, actual in zip(self.reference, got):
+                np.testing.assert_array_equal(np.asarray(actual['ccip'], np.float32), expected['ccip'])
+        else:
+            # Or CoreML noticed and compiled again; either way the outputs are sound.
+            self.assertEqual(status['reason'], None)
+        self.infer()
+        self.assertEqual(self.status()['ccip']['used'], accelerator(), 'the next worker compiles again')
