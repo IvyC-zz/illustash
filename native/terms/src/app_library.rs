@@ -116,7 +116,8 @@ impl Library {
     }
 
     /// Validate the same package again through its canonical path, keeping the alias the user opened for display.
-    #[cfg(test)]
+    /// Only the Unix symlink test uses it.
+    #[cfg(all(test, unix))]
     pub(crate) fn reopen(&self) -> Result<Self> {
         self.keep_display(Self::open_validated(&self.instance_path, false, Checks::Now(None))?)
     }
