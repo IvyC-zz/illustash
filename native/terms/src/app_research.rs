@@ -45,6 +45,24 @@ const YIELDED: &str = "图库正在写入，研究稍后继续";
 fn yielded(e: &Error) -> bool {
     matches!(e, Error::Conflict(m) if m == YIELDED)
 }
+/// The application database kept changing between the publication check and its write lock, round after round
+/// (#275). Not a failure: the result is not published and the run waits, then tries again.
+const BUSY: &str = "图库一直在写入，研究稍后继续";
+fn busy(e: &Error) -> bool {
+    matches!(e, Error::Conflict(m) if m == BUSY)
+}
+/// Waits `d`; an error when the task stops meanwhile.
+fn pause(ctx: &TaskContext, d: Duration) -> Result<()> {
+    let until = std::time::Instant::now() + d;
+    loop {
+        ctx.check()?;
+        let now = std::time::Instant::now();
+        if now >= until {
+            return Ok(());
+        }
+        std::thread::sleep((until - now).min(Duration::from_millis(50)));
+    }
+}
 /// How long the writer must have been gone before a run that stepped aside starts again.
 const STEP_ASIDE: Duration = Duration::from_secs(2);
 fn retry_base() -> Duration {
@@ -214,7 +232,7 @@ fn file_metadata(h: &mut Sha256, path: &Path) {
     }
 }
 /// Ordered typed rows of one table (or a missing-table marker).
-fn hash_table(c: &Connection, h: &mut Sha256, table: &str, ctx: &TaskContext) -> Result<()> {
+fn hash_table(c: &Connection, h: &mut Sha256, table: &str, check: &dyn Fn() -> Result<()>) -> Result<()> {
     feed(h, table.as_bytes());
     let exists: bool =
         c.query_row("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name=?)", [table], |r| r.get(0))?;
@@ -229,7 +247,7 @@ fn hash_table(c: &Connection, h: &mut Sha256, table: &str, ctx: &TaskContext) ->
     let mut q = c.prepare(&format!("SELECT * FROM \"{quoted}\"{filter} ORDER BY {order}"))?;
     let mut rows = q.query([])?;
     while let Some(r) = rows.next()? {
-        ctx.check()?;
+        check()?;
         #[cfg(test)]
         tests::pause_row();
         feed(h, b"row");
@@ -258,7 +276,13 @@ fn hash_table(c: &Connection, h: &mut Sha256, table: &str, ctx: &TaskContext) ->
     Ok(())
 }
 /// `only`: the tables to hash; `None` hashes every table except `skip`.
-fn hash_db(c: &Connection, h: &mut Sha256, only: Option<&[&str]>, skip: &[&str], ctx: &TaskContext) -> Result<()> {
+fn hash_db(
+    c: &Connection,
+    h: &mut Sha256,
+    only: Option<&[&str]>,
+    skip: &[&str],
+    check: &dyn Fn() -> Result<()>,
+) -> Result<()> {
     let tables = match only {
         Some(tables) => tables.iter().map(|t| t.to_string()).collect(),
         None => c
@@ -270,33 +294,52 @@ fn hash_db(c: &Connection, h: &mut Sha256, only: Option<&[&str]>, skip: &[&str],
             .collect::<Vec<_>>(),
     };
     for table in tables {
-        ctx.check()?;
-        hash_table(c, h, &table, ctx)?;
+        check()?;
+        hash_table(c, h, &table, check)?;
     }
     Ok(())
 }
-/// Shared anchor files are read within one complete index publication (index_generation).
+/// A run's input fingerprint: its application part (`app_digest`) and its source part (`source_digest`). They are
+/// read separately so that work on the application database never happens while research holds source.sqlite's
+/// read lock without looking for its writers (#275).
 fn fingerprint(app: &Connection, src: &Connection, inputs: &Inputs<'_>, ctx: &TaskContext) -> Result<String> {
+    let check = || ctx.check();
+    Ok(combine(&app_digest(app, inputs, &check)?, &source_digest(src, inputs, &check)?))
+}
+fn combine(app: &[u8], source: &[u8]) -> String {
+    let mut h = Sha256::new();
+    feed(&mut h, app);
+    feed(&mut h, source);
+    format!("{:x}", h.finalize())
+}
+fn source_digest(src: &Connection, inputs: &Inputs<'_>, check: &dyn Fn() -> Result<()>) -> Result<Vec<u8>> {
+    let mut h = Sha256::new();
+    hash_db(src, &mut h, inputs.scope.source(), &["backend_effects", "research_runs"], check)?;
+    Ok(h.finalize().to_vec())
+}
+/// The application tables, shared files and original images. Shared anchor files are read within one complete index
+/// publication (index_generation). `check` runs between rows and file blocks: a stop, and a source writer when the
+/// caller holds source's read lock.
+fn app_digest(app: &Connection, inputs: &Inputs<'_>, check: &dyn Fn() -> Result<()>) -> Result<Vec<u8>> {
     if inputs.scope == Scope::Learning {
-        crate::index_generation::stable(inputs.anchors, || fingerprint_once(app, src, inputs, ctx))
+        crate::index_generation::stable(inputs.anchors, || app_digest_once(app, inputs, check))
     } else {
-        fingerprint_once(app, src, inputs, ctx)
+        app_digest_once(app, inputs, check)
     }
 }
-fn fingerprint_once(app: &Connection, src: &Connection, inputs: &Inputs<'_>, ctx: &TaskContext) -> Result<String> {
+fn app_digest_once(app: &Connection, inputs: &Inputs<'_>, check: &dyn Fn() -> Result<()>) -> Result<Vec<u8>> {
     let mut h = Sha256::new();
     feed(&mut h, format!("{:?}", inputs.scope).as_bytes());
-    hash_db(app, &mut h, inputs.scope.app(), UNREAD, ctx)?;
-    hash_db(src, &mut h, inputs.scope.source(), &["backend_effects", "research_runs"], ctx)?;
+    hash_db(app, &mut h, inputs.scope.app(), UNREAD, check)?;
     // Base feature/anchor files are inputs too. Changed vectors invalidate an in-flight result.
     for p in inputs.files()? {
-        ctx.check()?;
+        check()?;
         let name = p.to_string_lossy();
         h.update(name.as_bytes());
         if let Ok(mut f) = fs::File::open(p) {
             let mut bytes = [0; 65536];
             loop {
-                ctx.check()?;
+                check()?;
                 let n = f.read(&mut bytes)?;
                 if n == 0 {
                     break;
@@ -310,7 +353,7 @@ fn fingerprint_once(app: &Connection, src: &Connection, inputs: &Inputs<'_>, ctx
         Scope::Learning | Scope::Similar => {
             let mut q = app.prepare("SELECT src_path FROM assets ORDER BY uuid")?;
             for path in q.query_map([], |r| r.get::<_, Option<String>>(0))? {
-                ctx.check()?;
+                check()?;
                 file_metadata(&mut h, Path::new(&path?.unwrap_or_default()));
             }
         }
@@ -320,7 +363,7 @@ fn fingerprint_once(app: &Connection, src: &Connection, inputs: &Inputs<'_>, ctx
                 "SELECT uuid,src_path FROM assets WHERE uuid IN (SELECT value FROM json_each(?)) ORDER BY uuid",
             )?;
             for row in q.query_map([ids], |r| Ok((r.get::<_, String>(0)?, r.get::<_, Option<String>>(1)?)))? {
-                ctx.check()?;
+                check()?;
                 let (uuid, path) = row?;
                 let path = path.unwrap_or_default();
                 feed(&mut h, uuid.as_bytes());
@@ -330,10 +373,13 @@ fn fingerprint_once(app: &Connection, src: &Connection, inputs: &Inputs<'_>, ctx
         }
         Scope::Oc => {}
     }
-    Ok(format!("{:x}", h.finalize()))
+    Ok(h.finalize().to_vec())
 }
-/// Rounds of the accept check that recompute the fingerprint outside the write lock.
+/// Rounds of one accept check; each recomputes the fingerprint outside the write lock.
 const OUTSIDE_ROUNDS: u32 = 3;
+/// How long one round waits for the application write lock before it counts as a round the inputs moved in: as long
+/// as `crate::configure` lets a connection wait (shorter in tests).
+const LOCK_WAIT: Duration = Duration::from_millis(if cfg!(test) { 300 } else { 5000 });
 /// One consistent read of each connection: everything `read` does sees the state committed when it
 /// first reads. Nothing is written, so each transaction ends with ROLLBACK.
 fn read_snapshot<T>(dbs: &[&Connection], read: impl FnOnce() -> Result<T>) -> Result<T> {
@@ -354,9 +400,10 @@ fn read_snapshot<T>(dbs: &[&Connection], read: impl FnOnce() -> Result<T>) -> Re
     value
 }
 /// source.sqlite keeps a rollback journal, so a read transaction on it holds a lock that makes its writers (sync,
-/// recognition imports) give up after their 250 ms busy timeout (#226). Research reads source for as long as hashing
-/// and copying the whole file takes, which on a large library is far longer. Its source reads watch for the journal a
-/// writer creates before it commits and step aside at once, like the background integrity check (#212).
+/// recognition imports) give up after their busy timeout (#226, `app_library::TASK_WRITE_WAIT`). Research reads
+/// source for as long as hashing and copying the whole file takes, which on a large library is far longer. Its source
+/// reads watch for the journal a writer creates before it commits and step aside at once, like the background
+/// integrity check (#212).
 struct Writers {
     journal: PathBuf,
     seen: Arc<AtomicBool>,
@@ -423,37 +470,74 @@ fn data_version(c: &Connection) -> Result<i64> {
 /// Accept-time input check for publishing kinds (#29). The fingerprint is recomputed in a read
 /// transaction, without the write lock. Under BEGIN IMMEDIATE only this connection's
 /// `PRAGMA data_version` (changed by any commit from another connection) and the shared files' stamp
-/// are compared; if either moved, the round is repeated, and the last round recomputes the fingerprint
-/// under the lock. A mismatch is always `INPUT_CHANGED`. `between` runs before each lock (test hook).
+/// are compared; if either moved, the lock is let go and the round is repeated. The fingerprint is never computed
+/// under the lock (#275): on a large library that took long enough for every other writer to give up. After
+/// `OUTSIDE_ROUNDS` rounds that each saw a commit, the check ends with `BUSY` and publishes nothing. A mismatch is
+/// always `INPUT_CHANGED`. `src` is one read transaction for the whole check, so its part of the fingerprint is read
+/// once. With `writers`, application reads, shared-file reads and the wait for the lock step aside for a source
+/// writer as the source reads do. `between` runs before each lock (test hook).
+#[allow(clippy::too_many_arguments)]
 fn confirm<T>(
-    app: &mut Connection,
+    app: &Connection,
     src: &Connection,
     inputs: &Inputs<'_>,
     version: &str,
     ctx: &TaskContext,
+    writers: Option<&Writers>,
     mut between: impl FnMut(),
     publish: impl FnOnce(rusqlite::Transaction<'_>) -> Result<T>,
 ) -> Result<T> {
-    let mut round = 1;
-    loop {
+    // Between rows and file blocks, not only between SQL steps: hashing the shared files runs no statement.
+    let check = || ctx.check().and_then(|_| writers.map_or(Ok(()), Writers::check));
+    let source = source_digest(src, inputs, &check)?;
+    for _ in 0..OUTSIDE_ROUNDS {
         let files = inputs.stamp()?;
-        let reader: &Connection = app;
-        let (fresh, seen) =
-            read_snapshot(&[reader], || Ok((fingerprint(reader, src, inputs, ctx)?, data_version(reader)?)))?;
+        let read =
+            || read_snapshot(&[app], || Ok((combine(&app_digest(app, inputs, &check)?, &source), data_version(app)?)));
+        let (fresh, seen) = match writers {
+            Some(writers) => writers.read(app, read)?,
+            None => read()?,
+        };
         if fresh != version {
             return Err(Error::Conflict(INPUT_CHANGED.into()));
         }
         between();
-        let tx = app.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let unchanged = data_version(&tx)? == seen && inputs.stamp()? == files;
-        if unchanged || round == OUTSIDE_ROUNDS {
-            if !unchanged && fingerprint(&tx, src, inputs, ctx)? != version {
-                return Err(Error::Conflict(INPUT_CHANGED.into()));
-            }
+        let Some(tx) = lock(app, ctx, writers)? else {
+            continue;
+        };
+        if data_version(&tx)? == seen && inputs.stamp()? == files {
             return publish(tx);
         }
-        round += 1;
     }
+    Err(Error::Conflict(BUSY.into()))
+}
+/// BEGIN IMMEDIATE on the application database within `LOCK_WAIT`; `None` when another writer kept the lock. The
+/// check holds the source read lock meanwhile, and SQLite runs no progress handler while it waits for a lock, so it
+/// waits in short steps and steps aside between them when a source writer appears.
+fn lock<'c>(
+    app: &'c Connection,
+    ctx: &TaskContext,
+    writers: Option<&Writers>,
+) -> Result<Option<rusqlite::Transaction<'c>>> {
+    let started = std::time::Instant::now();
+    app.busy_timeout(Writers::POLL)?;
+    let locked = loop {
+        if let Err(e) = ctx.check().and_then(|_| writers.map_or(Ok(()), Writers::check)) {
+            break Err(e);
+        }
+        match rusqlite::Transaction::new_unchecked(app, TransactionBehavior::Immediate) {
+            Ok(tx) => break Ok(Some(tx)),
+            Err(rusqlite::Error::SqliteFailure(e, _)) if e.code == rusqlite::ErrorCode::DatabaseBusy => {
+                if started.elapsed() >= LOCK_WAIT {
+                    break Ok(None);
+                }
+            }
+            Err(e) => break Err(e.into()),
+        }
+    };
+    // The wait `crate::configure` sets, for the publication's own statements.
+    app.busy_timeout(Duration::from_secs(5))?;
+    locked
 }
 /// Snapshot directories `illustash-research-<task>` are removed when their run ends, whatever the outcome
 /// (`Scratch`). Only a killed process leaves one; such a directory is removed once it is older than a day and
@@ -498,6 +582,8 @@ fn backup(c: &Connection, path: &Path, ctx: &TaskContext, writers: Option<&Write
         if let Some(writers) = writers {
             writers.check()?;
         }
+        #[cfg(test)]
+        tests::backup_step(path);
         match copy.step(256)? {
             rusqlite::backup::StepResult::Done => break,
             rusqlite::backup::StepResult::More => {}
@@ -678,17 +764,7 @@ impl Research {
                             "message": format!("输入有变化，稍后自动重试（{attempt}/{CONFLICT_RETRIES}）"),
                         })
                         .into();
-                        let until = std::time::Instant::now() + retry_base() * 2u32.pow(attempt - 1);
-                        let waited = loop {
-                            if let Err(e) = ctx.check() {
-                                break Err(e);
-                            }
-                            if std::time::Instant::now() >= until {
-                                break Ok(());
-                            }
-                            std::thread::sleep(Duration::from_millis(50));
-                        };
-                        if let Err(e) = waited {
+                        if let Err(e) = pause(&ctx, retry_base() * 2u32.pow(attempt - 1)) {
                             break Err(e);
                         }
                         *state.lock().expect("research state mutex poisoned") = running.clone().into();
@@ -711,11 +787,13 @@ impl Research {
                     }
                     Ok(())
                 }
-                Err(e) if yielded(&e) => {
-                    // Not a failure: the pending work stays as it is, without an error, for recovery to start again.
-                    stepped_aside.store(true, Ordering::SeqCst);
+                Err(e) if yielded(&e) || busy(&e) => {
+                    // Not a failure: the pending work stays as it is, without an error, for recovery to start again:
+                    // soon after a source writer, after the usual minute when the library stayed busy (#275).
+                    stepped_aside.store(yielded(&e), Ordering::SeqCst);
+                    let message = if yielded(&e) { YIELDED } else { BUSY };
                     *state.lock().expect("research state mutex poisoned") =
-                        Json::object([("status", "waiting".into()), ("message", YIELDED.into())]).into();
+                        Json::object([("status", "waiting".into()), ("message", message.into())]).into();
                     if let Some(tx) = reply {
                         let _ = tx.send(Err(Error::Invalid(e.to_string())));
                     }
@@ -788,6 +866,60 @@ impl Research {
         Ok(())
     }
 }
+/// What a run computes from: the input version and the copies in `dir`, with the pending work they cover.
+struct Snapshot {
+    version: String,
+    events: Vec<i64>,
+    intents: Vec<String>,
+    regroup: bool,
+}
+/// The copies and their version, each database read in one read transaction. The application database is read and
+/// copied first, before source.sqlite is touched: research then holds source's read lock only while it reads source
+/// itself, where it steps aside for a source writer (`Writers`). Copying the application database while holding
+/// that lock let a writer wait for the whole copy (#275).
+fn snapshot(
+    c: &Connection,
+    src: &Connection,
+    writers: &Writers,
+    inputs: &Inputs<'_>,
+    kind: &str,
+    dir: &Path,
+    ctx: &TaskContext,
+) -> Result<Snapshot> {
+    writers.read(src, || {
+        read_snapshot(&[c, src], || {
+            let app = app_digest(c, inputs, &|| ctx.check())?;
+            backup(c, &dir.join("library.sqlite"), ctx, None)?;
+            let events: Vec<i64> = c
+                .prepare(
+                    "SELECT id FROM backend_effects WHERE status='pending' AND kind IN ('verdict','imported','index_changed') ORDER BY id",
+                )?
+                .query_map([], |r| r.get(0))?
+                .collect::<rusqlite::Result<_>>()?;
+            let intents: Vec<String> =
+                if c.query_row("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name='research_runs')", [], |r| {
+                    r.get::<_, bool>(0)
+                })? {
+                    c.prepare("SELECT id FROM research_runs WHERE status='pending' AND (?='events' OR kind=?)")?
+                        .query_map(rusqlite::params![kind, kind], |r| r.get(0))?
+                        .collect::<rusqlite::Result<_>>()?
+                } else {
+                    vec![]
+                };
+            let regroup = kind == "regroup"
+                || kind == "events"
+                    && (c.query_row(
+                        "SELECT EXISTS(SELECT 1 FROM backend_effects WHERE status='pending' AND kind IN ('imported','index_changed'))",
+                        [],
+                        |r| r.get::<_, bool>(0),
+                    )? || !intents.is_empty());
+            // Source last: from its first read on, research holds its read lock.
+            let source = source_digest(src, inputs, &|| ctx.check())?;
+            backup(src, &dir.join("source.sqlite"), ctx, Some(writers))?;
+            Ok(Snapshot { version: combine(&app, &source), events, intents, regroup })
+        })
+    })
+}
 fn run(
     library: &Library,
     ctx: &TaskContext,
@@ -803,45 +935,17 @@ fn run(
     let src = crate::app_library::read_connection(&library.source())?;
     let inputs = Inputs::new(library, anchors, kind, &args);
     let writers = Writers::of(&library.source());
-    // Snapshot/version from the same read transactions.
-    let (version, events, intents, regroup, learning) = writers.read(&src, || read_snapshot(&[&c, &src], || {
-        let version = fingerprint(&c, &src, &inputs, ctx)?;
-        backup(&c, &scratch.0.join("library.sqlite"), ctx, None)?;
-        backup(&src, &scratch.0.join("source.sqlite"), ctx, Some(&writers))?;
-        let events: Vec<i64> = c
-            .prepare(
-                "SELECT id FROM backend_effects WHERE status='pending' AND kind IN ('verdict','imported','index_changed') ORDER BY id",
-            )?
-            .query_map([], |r| r.get(0))?
-            .collect::<rusqlite::Result<_>>()?;
-        let intents: Vec<String> =
-            if c.query_row("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name='research_runs')", [], |r| {
-                r.get::<_, bool>(0)
-            })? {
-                c.prepare("SELECT id FROM research_runs WHERE status='pending' AND (?='events' OR kind=?)")?
-                    .query_map(rusqlite::params![kind, kind], |r| r.get(0))?
-                    .collect::<rusqlite::Result<_>>()?
-            } else {
-                vec![]
-            };
-        let regroup = kind == "regroup"
-            || kind == "events"
-                && (c.query_row(
-                    "SELECT EXISTS(SELECT 1 FROM backend_effects WHERE status='pending' AND kind IN ('imported','index_changed'))",
-                    [],
-                    |r| r.get::<_, bool>(0),
-                )? || !intents.is_empty());
-        crate::sqlite::open(scratch.0.join("library.sqlite"))?
-            .execute("DELETE FROM name_settings WHERE key IN ('model_key','deepseek_key')", [])?;
-        // Only learning kinds publish a learning batch; the others skip its full input stamp.
-        let learning = if inputs.scope == Scope::Learning {
-            crate::character_learning::snapshot(&mut crate::sqlite::open(scratch.0.join("library.sqlite"))?)?["token"]
-                .clone()
-        } else {
-            Value::Null
-        };
-        Ok((version, events, intents, regroup, learning))
-    }))?;
+    let Snapshot { version, events, intents, regroup } = snapshot(&c, &src, &writers, &inputs, kind, &scratch.0, ctx)?;
+    // On the copy, outside the read transactions: nothing here reads the library.
+    crate::sqlite::open(scratch.0.join("library.sqlite"))?
+        .execute("DELETE FROM name_settings WHERE key IN ('model_key','deepseek_key')", [])?;
+    // Only learning kinds publish a learning batch; the others skip its full input stamp.
+    let learning = if inputs.scope == Scope::Learning {
+        crate::character_learning::snapshot(&mut crate::sqlite::open(scratch.0.join("library.sqlite"))?)?["token"]
+            .clone()
+    } else {
+        Value::Null
+    };
     let request = protocol::value(&protocol::ResearchRequest {
         format: protocol::Format::Research,
         identity: ctx.identity(),
@@ -907,86 +1011,105 @@ fn run(
     if response.format != protocol::Format::Research || response.version != version {
         return Err(bad());
     }
-    *state.lock().expect("research state mutex poisoned") = json!({"status":"importing"}).into();
-    ctx.receive(&response.identity, || {
-        let mut src = crate::app_library::read_connection(&library.source())?;
-        let src = src.transaction()?;
-        writers.read(&src, || {
-            if !inputs.scope.publishes() {
-                // A query publishes nothing: one read transaction checks its inputs and its answer.
-                let c = crate::app_library::read_connection(&library.db())?;
-                return read_snapshot(&[&c], || {
-                    if fingerprint(&c, &src, &inputs, ctx)? != version {
-                        return Err(Error::Conflict(INPUT_CHANGED.into()));
-                    }
-                    validate_query(&c, kind, &Value::Object(response.result.clone()), &args)?;
-                    ordered.get("result").cloned().ok_or_else(bad)
-                });
-            }
-            let mut c = crate::sqlite::open(library.db())?;
-            crate::configure(&c)?;
-            confirm(
-                &mut c,
-                &src,
-                &inputs,
-                &version,
-                ctx,
-                || {},
-                |tx| {
-                    crate::schema::begin_writing(&tx)?;
-                    if kind != "similar" {
-                        if let Some(batch) = response.learning.as_ref().filter(|v| !v.is_null()) {
-                            if batch["token"] != learning {
-                                return Err(bad());
+    let importing = || *state.lock().expect("research state mutex poisoned") = json!({"status":"importing"}).into();
+    importing();
+    // The result is kept while the library is too busy to check it (#275): the check runs again after a pause, up to
+    // `CONFLICT_RETRIES` times, before the run ends with `BUSY` and recovery starts it again later.
+    let publish = || {
+        ctx.receive(&response.identity, || {
+            let mut src = crate::app_library::read_connection(&library.source())?;
+            let src = src.transaction()?;
+            writers.read(&src, || {
+                if !inputs.scope.publishes() {
+                    // A query publishes nothing: one read transaction checks its inputs and its answer.
+                    let c = crate::app_library::read_connection(&library.db())?;
+                    return read_snapshot(&[&c], || {
+                        if fingerprint(&c, &src, &inputs, ctx)? != version {
+                            return Err(Error::Conflict(INPUT_CHANGED.into()));
+                        }
+                        validate_query(&c, kind, &Value::Object(response.result.clone()), &args)?;
+                        ordered.get("result").cloned().ok_or_else(bad)
+                    });
+                }
+                let c = crate::sqlite::open(library.db())?;
+                crate::configure(&c)?;
+                confirm(
+                    &c,
+                    &src,
+                    &inputs,
+                    &version,
+                    ctx,
+                    Some(&writers),
+                    || {},
+                    |tx| {
+                        crate::schema::begin_writing(&tx)?;
+                        if kind != "similar" {
+                            if let Some(batch) = response.learning.as_ref().filter(|v| !v.is_null()) {
+                                if batch["token"] != learning {
+                                    return Err(bad());
+                                }
+                                if crate::character_learning::publish_tx(&tx, batch)?["status"] == "stale" {
+                                    return Err(Error::Conflict(LEARNING_CHANGED.into()));
+                                }
                             }
-                            if crate::character_learning::publish_tx(&tx, batch)?["status"] == "stale" {
-                                return Err(Error::Conflict(LEARNING_CHANGED.into()));
+                        }
+                        let caches = response.tables.as_ref().ok_or_else(|| {
+                            Error::Invalid(format!("{file}: 字段 tables: 缺少结果表", file = output.display()))
+                        })?;
+                        let expected: Vec<&str> = if kind == "similar" {
+                            vec!["image_sigs", "relations", "similar_paired", "similar_retry"]
+                        } else if regroup {
+                            let mut v = vec!["clusters", "cluster_info"];
+                            if kind == "events" && args["similar"] == true {
+                                v.extend(["image_sigs", "relations", "similar_paired", "similar_retry"]);
+                            }
+                            v
+                        } else {
+                            vec![]
+                        };
+                        if caches.keys().map(String::as_str).collect::<std::collections::BTreeSet<_>>()
+                            != expected.iter().copied().collect()
+                        {
+                            return Err(bad());
+                        }
+                        let mut published = Published::default();
+                        for table in expected.iter() {
+                            publish_table(&tx, table, &caches[*table], ctx, &mut published)?;
+                        }
+                        if expected.contains(&"relations") {
+                            crate::app_migrate_data::early_groups(&tx, &src)?;
+                            crate::character_projection::fold(&tx)?;
+                        }
+                        validate_references(&tx, &expected, &published)?;
+                        if kind == "events" {
+                            for id in &events {
+                                tx.execute("UPDATE backend_effects SET status='done',error='' WHERE id=?", [id])?;
                             }
                         }
-                    }
-                    let caches = response.tables.as_ref().ok_or_else(|| {
-                        Error::Invalid(format!("{file}: 字段 tables: 缺少结果表", file = output.display()))
-                    })?;
-                    let expected: Vec<&str> = if kind == "similar" {
-                        vec!["image_sigs", "relations", "similar_paired", "similar_retry"]
-                    } else if regroup {
-                        let mut v = vec!["clusters", "cluster_info"];
-                        if kind == "events" && args["similar"] == true {
-                            v.extend(["image_sigs", "relations", "similar_paired", "similar_retry"]);
+                        for id in &intents {
+                            tx.execute("UPDATE research_runs SET status='done',error='' WHERE id=?", [id])?;
                         }
-                        v
-                    } else {
-                        vec![]
-                    };
-                    if caches.keys().map(String::as_str).collect::<std::collections::BTreeSet<_>>()
-                        != expected.iter().copied().collect()
-                    {
-                        return Err(bad());
-                    }
-                    let mut published = Published::default();
-                    for table in expected.iter() {
-                        publish_table(&tx, table, &caches[*table], ctx, &mut published)?;
-                    }
-                    if expected.contains(&"relations") {
-                        crate::app_migrate_data::early_groups(&tx, &src)?;
-                        crate::character_projection::fold(&tx)?;
-                    }
-                    validate_references(&tx, &expected, &published)?;
-                    if kind == "events" {
-                        for id in events {
-                            tx.execute("UPDATE backend_effects SET status='done',error='' WHERE id=?", [id])?;
-                        }
-                    }
-                    for id in intents {
-                        tx.execute("UPDATE research_runs SET status='done',error='' WHERE id=?", [id])?;
-                    }
-                    ctx.check()?;
-                    crate::schema::commit_writing(tx)?;
-                    ordered.get("result").cloned().ok_or_else(bad)
-                },
-            )
+                        ctx.check()?;
+                        crate::schema::commit_writing(tx)?;
+                        ordered.get("result").cloned().ok_or_else(bad)
+                    },
+                )
+            })
         })
-    })
+    };
+    let mut waits = 0;
+    loop {
+        match publish() {
+            Err(e) if busy(&e) && waits < CONFLICT_RETRIES => {
+                waits += 1;
+                *state.lock().expect("research state mutex poisoned") =
+                    Json::object([("status", "waiting".into()), ("message", YIELDED.into())]).into();
+                pause(ctx, retry_base() * 2u32.pow(waits - 1))?;
+                importing();
+            }
+            published => return published,
+        }
+    }
 }
 /// What a publication wrote to relations and signatures (#31): rowids of the rows inserted or rewritten, and
 /// the previous version of each row deleted or rewritten, for `validate_references`.
@@ -1286,16 +1409,17 @@ mod tests {
         }
         /// Run the accept check for `scope`; returns whether it published and how many rounds ran.
         fn confirm(&self, scope: Scope, version: &str, mut between: impl FnMut(u32)) -> (Result<()>, u32) {
-            let mut app = self.app();
+            let app = self.app();
             let mut src = self.source();
             let src = src.transaction().unwrap();
             let mut rounds = 0;
             let result = confirm(
-                &mut app,
+                &app,
                 &src,
                 &self.inputs(scope),
                 version,
                 &self.ctx,
+                None,
                 || {
                     rounds += 1;
                     between(rounds)
@@ -1456,19 +1580,17 @@ mod tests {
     }
 
     #[test]
-    fn last_round_checks_the_full_fingerprint_under_the_lock() {
+    fn rounds_end_without_publishing_while_commits_continue() {
         let f = Fixture::new();
-        // Unread commits before every lock: the last round recomputes under the lock and accepts.
+        // Unread commits before every lock: no round finds the inputs settled, and none hashes them under the lock.
         let version = f.version(Scope::Learning);
         let (result, rounds) = f.confirm(Scope::Learning, &version, |round| {
             f.app().execute("INSERT OR REPLACE INTO prefs VALUES ('synthetic',?)", [round]).unwrap();
         });
-        assert!(result.is_ok(), "{result:?}");
+        assert!(matches!(&result, Err(e) if busy(e)), "{result:?}");
         assert_eq!(rounds, OUTSIDE_ROUNDS);
-        assert!(f.published());
-        f.app().execute("DELETE FROM image_sigs WHERE uuid='published'", []).unwrap();
-        // A real input committed just before the last lock is found by that recomputation.
-        let version = f.version(Scope::Learning);
+        assert!(!f.published());
+        // A real input committed just before the last lock is found by the next check's outside round.
         let (result, rounds) = f.confirm(Scope::Learning, &version, |round| {
             let sql = if round == OUTSIDE_ROUNDS {
                 "INSERT INTO memberships VALUES ('c','e1')"
@@ -1477,9 +1599,29 @@ mod tests {
             };
             f.app().execute(sql, []).unwrap();
         });
-        assert!(conflict(&result), "{result:?}");
+        assert!(matches!(&result, Err(e) if busy(e)), "{result:?}");
         assert_eq!(rounds, OUTSIDE_ROUNDS);
+        let (result, rounds) = f.confirm(Scope::Learning, &version, |_| {});
+        assert!(conflict(&result), "{result:?}");
+        assert_eq!(rounds, 0);
         assert!(!f.published());
+    }
+
+    /// A round that cannot get the write lock within `LOCK_WAIT` counts as a round the inputs moved in.
+    #[test]
+    fn a_held_write_lock_ends_the_round() {
+        let f = Fixture::new();
+        let version = f.version(Scope::Similar);
+        let holder = f.app();
+        holder.execute_batch("BEGIN IMMEDIATE").unwrap();
+        let started = std::time::Instant::now();
+        let (result, rounds) = f.confirm(Scope::Similar, &version, |_| {});
+        assert!(started.elapsed() >= LOCK_WAIT * OUTSIDE_ROUNDS);
+        assert!(matches!(&result, Err(e) if busy(e)), "{result:?}");
+        assert_eq!(rounds, OUTSIDE_ROUNDS);
+        holder.execute_batch("ROLLBACK").unwrap();
+        assert!(f.confirm(Scope::Similar, &version, |_| {}).0.is_ok());
+        assert!(f.published());
     }
 
     /// The publication before #31: full temporary copies of relations and signatures, then every result table
@@ -1734,15 +1876,125 @@ mod tests {
         }
     }
 
+    type BackupHook = dyn FnMut(&Path);
     thread_local! {
         /// A slow disk for this thread's fingerprints: the pause after each row read.
         static ROW_PAUSE: std::cell::Cell<Duration> = const { std::cell::Cell::new(Duration::ZERO) };
+        /// Runs after each row this thread's fingerprints read: another task's work at that point.
+        static ROW_HOOK: std::cell::RefCell<Option<Box<dyn FnMut()>>> = const { std::cell::RefCell::new(None) };
+        /// Runs before each step of this thread's snapshot copies, with the copy's path.
+        static BACKUP_HOOK: std::cell::RefCell<Option<Box<BackupHook>>> = const { std::cell::RefCell::new(None) };
+    }
+    pub(super) fn backup_step(path: &Path) {
+        BACKUP_HOOK.with(|hook| {
+            if let Some(hook) = hook.borrow_mut().as_mut() {
+                hook(path);
+            }
+        });
+    }
+
+    /// #275: a source writer (recognition import, folder or Photos scan; the sync's former 250 ms busy timeout)
+    /// commits while a run copies the application database for its snapshot. The run must not hold source's read
+    /// lock then: copying runs no statement on source, so it could not see the writer, and the writer failed with
+    /// "database is locked" once the copy outlasted its wait. It commits from the copy's first step, in this thread,
+    /// so whether research holds the lock is not a matter of timing.
+    #[test]
+    fn copying_the_application_database_does_not_hold_source() {
+        let f = Fixture::new();
+        let path = f.root.join("source.sqlite");
+        let outcomes = std::rc::Rc::new(std::cell::RefCell::new(Vec::<std::result::Result<(), String>>::new()));
+        let seen = outcomes.clone();
+        let commit = path.clone();
+        BACKUP_HOOK.with(|hook| {
+            *hook.borrow_mut() = Some(Box::new(move |copy: &Path| {
+                if copy.ends_with("library.sqlite") {
+                    let c = crate::sqlite::open(&commit).unwrap();
+                    c.busy_timeout(Duration::from_millis(250)).unwrap();
+                    let n = seen.borrow().len();
+                    let done = c
+                        .execute_batch(&format!(
+                            "BEGIN IMMEDIATE; INSERT INTO characters VALUES ('synthetic-{n}',1); COMMIT;"
+                        ))
+                        .map_err(|e| e.to_string());
+                    seen.borrow_mut().push(done);
+                }
+            }))
+        });
+        let dir = f.root.join("snapshot");
+        fs::create_dir_all(&dir).unwrap();
+        let (app, src) = (f.app(), f.source());
+        let taken = snapshot(&app, &src, &Writers::of(&path), &f.inputs(Scope::Learning), "events", &dir, &f.ctx);
+        BACKUP_HOOK.with(|hook| hook.borrow_mut().take());
+        let outcomes = outcomes.borrow();
+        assert!(!outcomes.is_empty());
+        assert!(outcomes.iter().all(std::result::Result::is_ok), "{outcomes:?}");
+        // The copies and the version agree: the source copy holds the rows committed during the application copy.
+        let taken = taken.unwrap();
+        assert_eq!(taken.version, f.version(Scope::Learning));
+        let copied: i64 = crate::sqlite::open(dir.join("source.sqlite"))
+            .unwrap()
+            .query_row("SELECT count(*) FROM characters WHERE char_id LIKE 'synthetic-%'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(copied, outcomes.len() as i64);
     }
     pub(super) fn pause_row() {
         let pause = ROW_PAUSE.with(std::cell::Cell::get);
         if !pause.is_zero() {
             std::thread::sleep(pause);
         }
+        ROW_HOOK.with(|hook| {
+            if let Some(hook) = hook.borrow_mut().as_mut() {
+                hook();
+            }
+        });
+    }
+
+    /// #275: another task commits to the application database steadily (names marks each lookup done, which no
+    /// research input reads) while a learning result is checked before publication. Every 50 rows hashed it commits
+    /// with the sync's former writer settings (250 ms busy timeout). The check must never hash inputs while it holds
+    /// the write lock: that made the writer fail with "database is locked" on large libraries.
+    #[test]
+    fn steady_unread_writer_is_not_locked_out_by_the_publication_check() {
+        let f = Fixture::new();
+        f.app()
+            .execute_batch(
+                "WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<200)
+                 INSERT INTO assertions SELECT 'a','synthetic-'||i,'confirmed' FROM n;",
+            )
+            .unwrap();
+        let version = f.version(Scope::Learning);
+        let path = f.root.join("library.sqlite");
+        let outcomes = std::rc::Rc::new(std::cell::RefCell::new(Vec::<std::result::Result<(), String>>::new()));
+        let (seen, mut rows) = (outcomes.clone(), 0);
+        ROW_HOOK.with(|hook| {
+            *hook.borrow_mut() = Some(Box::new(move || {
+                rows += 1;
+                if rows % 50 == 0 {
+                    let c = crate::sqlite::open(&path).unwrap();
+                    c.busy_timeout(Duration::from_millis(250)).unwrap();
+                    let done = c
+                        .execute_batch(&format!(
+                            "BEGIN IMMEDIATE; INSERT OR REPLACE INTO name_cache VALUES ('synthetic-done','{rows}'); COMMIT;"
+                        ))
+                        .map_err(|e| e.to_string());
+                    seen.borrow_mut().push(done);
+                }
+            }))
+        });
+        let (result, rounds) = f.confirm(Scope::Learning, &version, |_| {});
+        ROW_HOOK.with(|hook| hook.borrow_mut().take());
+        let outcomes = outcomes.borrow();
+        assert!(outcomes.len() >= OUTSIDE_ROUNDS as usize, "{outcomes:?}");
+        assert!(outcomes.iter().all(std::result::Result::is_ok), "{outcomes:?}");
+        // Inputs never settled between the check and the lock: nothing is published, and the run is told to wait.
+        assert!(matches!(&result, Err(e) if busy(e)), "{result:?}");
+        assert_eq!(rounds, OUTSIDE_ROUNDS);
+        assert!(!f.published());
+        // Once the writer stops, the same check publishes at the first round.
+        let (result, rounds) = f.confirm(Scope::Learning, &version, |_| {});
+        assert!(result.is_ok(), "{result:?}");
+        assert_eq!(rounds, 1);
+        assert!(f.published());
     }
 
     /// #226: a source writer with the sync's 250 ms busy timeout commits while research reads source, both while a
@@ -1791,14 +2043,23 @@ mod tests {
         let version = f.version(Scope::Learning);
         ROW_PAUSE.with(|p| p.set(Duration::from_millis(1)));
         let (started, handle) = writer("synthetic-b");
-        let (mut app, mut src) = (f.app(), f.source());
+        let (app, mut src) = (f.app(), f.source());
         let writers = Writers::of(&path);
         started.send(()).unwrap();
         // As in `run`, the source transaction ends with the publication step that read it.
         let checked = (|| {
             let src = src.transaction()?;
             writers.read(&src, || {
-                confirm(&mut app, &src, &f.inputs(Scope::Learning), &version, &f.ctx, || {}, |tx| Ok(tx.commit()?))
+                confirm(
+                    &app,
+                    &src,
+                    &f.inputs(Scope::Learning),
+                    &version,
+                    &f.ctx,
+                    Some(&writers),
+                    || {},
+                    |tx| Ok(tx.commit()?),
+                )
             })
         })();
         assert_eq!(handle.join().unwrap().map_err(|e| e.to_string()), Ok(()));
@@ -2055,8 +2316,8 @@ mod tests {
         let started = std::time::Instant::now();
         let mut parts = [0.0; 3];
         let mut h = Sha256::new();
-        hash_db(app, &mut h, None, &["backend_effects", "research_runs"], ctx).unwrap();
-        hash_db(src, &mut h, None, &["backend_effects", "research_runs"], ctx).unwrap();
+        hash_db(app, &mut h, None, &["backend_effects", "research_runs"], &|| ctx.check()).unwrap();
+        hash_db(src, &mut h, None, &["backend_effects", "research_runs"], &|| ctx.check()).unwrap();
         parts[0] = started.elapsed().as_secs_f64() * 1000.0;
         let mut files = vec![
             features.join("full-manifest.csv"),
@@ -2158,13 +2419,13 @@ mod tests {
                     let started = Instant::now();
                     let version = f.version(scope);
                     prepare.push(ms(started.elapsed()));
-                    let mut app = f.app();
+                    let app = f.app();
                     let mut src = f.source();
                     let src = src.transaction().unwrap();
                     let started = Instant::now();
                     if !scope.publishes() {
                         // Queries check in one read transaction and take no write lock.
-                        let read = app.transaction().unwrap();
+                        let read = rusqlite::Transaction::new_unchecked(&app, TransactionBehavior::Deferred).unwrap();
                         assert_eq!(fingerprint(&read, &src, &f.inputs(scope), &f.ctx).unwrap(), version);
                         outside.push(ms(started.elapsed()));
                         lock.push(0.0);
@@ -2172,11 +2433,12 @@ mod tests {
                     }
                     let locked = std::cell::Cell::new(started);
                     confirm(
-                        &mut app,
+                        &app,
                         &src,
                         &f.inputs(scope),
                         &version,
                         &f.ctx,
+                        None,
                         || locked.set(Instant::now()),
                         |tx| {
                             tx.commit()?;

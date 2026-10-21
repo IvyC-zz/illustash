@@ -139,6 +139,20 @@ fn scope(c: &Connection, entity: Option<&str>) -> Result<Vec<Entity>> {
     Ok(rows)
 }
 fn fingerprint(c: &Connection, rows: &[Entity]) -> Result<String> {
+    fingerprint_with(c, rows, &indexed(c, rows)?)
+}
+/// The index names (source.sqlite) of `rows`' CCIP keys: the part of the source fingerprint outside the application
+/// database, read before a lookup's write transaction rather than under its lock (#275).
+fn indexed(c: &Connection, rows: &[Entity]) -> Result<Value> {
+    let Some(path) = c.path() else {
+        return Ok(Value::Null);
+    };
+    let src = crate::app_library::read_connection(&std::path::Path::new(path).with_file_name("source.sqlite"))?;
+    let ids = dump(&json!(rows.iter().filter_map(|r| r.keys.get("ccip")).collect::<BTreeSet<_>>()));
+    let rows = crate::app_migrate_data::rows_with(&src,"SELECT char_id,name_zh,name_ja,name_en FROM characters WHERE char_id IN (SELECT value FROM json_each(?)) ORDER BY char_id",[ids]);
+    Ok(json!(rows.inspect_err(|e| eprintln!("名称获取读 source.sqlite 失败：{e:?}"))?))
+}
+fn fingerprint_with(c: &Connection, rows: &[Entity], indexed: &Value) -> Result<String> {
     let mut values = vec![];
     for r in rows {
         values.push(json!([r.id, r.parent, r.work, r.variant, r.keys]));
@@ -174,10 +188,8 @@ fn fingerprint(c: &Connection, rows: &[Entity]) -> Result<String> {
         ),
         [works]
     )?));
-    if let Some(path) = c.path() {
-        let src = crate::app_library::read_connection(&std::path::Path::new(path).with_file_name("source.sqlite"))?;
-        let ids = dump(&json!(rows.iter().filter_map(|r| r.keys.get("ccip")).collect::<BTreeSet<_>>()));
-        values.push(json!(crate::app_migrate_data::rows_with(&src,"SELECT char_id,name_zh,name_ja,name_en FROM characters WHERE char_id IN (SELECT value FROM json_each(?)) ORDER BY char_id",[ids])?));
+    if !indexed.is_null() {
+        values.push(indexed.clone());
     }
     Ok(crate::strict_json::sha256_hex(dump(&json!(values)).as_bytes()))
 }
@@ -504,14 +516,33 @@ fn run(source: &mut Source, entity: Option<&str>, state: &Mutex<Value>) -> Resul
     let mut c = net::db(&source.path)?;
     let rows = scope(&c, entity)?;
     let fp = fingerprint(&c, &rows)?;
-    let previous: Option<String> =
-        c.query_row("SELECT value FROM name_cache WHERE key='[\"sources\", 1]'", [], |r| r.get(0)).optional()?;
-    let done: BTreeSet<String> = if source.force || entity.is_some() || previous.as_deref() != Some(&fp) {
+    let done: BTreeSet<String> = if entity.is_some() {
         Default::default()
     } else {
-        c.prepare("SELECT key FROM name_cache WHERE key LIKE '[\"done\",%'")?
+        // The done marks hold for the sources recorded with them. Marks for other sources, and a refresh that has not
+        // begun, start the scope over: in one transaction before any lookup, so the marks this run writes count
+        // however it ends, and a run that fails part-way repeats only what it did not finish (#275).
+        let tx = c.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        let previous: Option<String> = tx
+            .query_row(&format!("SELECT value FROM name_cache WHERE key='{SOURCES}'"), [], |r| r.get(0))
+            .optional()?;
+        let refreshing = tx
+            .query_row(&format!("SELECT 1 FROM name_cache WHERE key='{REFRESHING}'"), [], |_| Ok(()))
+            .optional()?
+            .is_some();
+        if previous.as_deref() != Some(&fp) || (source.force && !refreshing) {
+            tx.execute("DELETE FROM name_cache WHERE key LIKE '[\"done\",%'", [])?;
+            tx.execute(&format!("INSERT OR REPLACE INTO name_cache VALUES ('{SOURCES}',?)"), [&fp])?;
+            if source.force {
+                tx.execute(&format!("INSERT OR REPLACE INTO name_cache VALUES ('{REFRESHING}','1')"), [])?;
+            }
+        }
+        let done = tx
+            .prepare("SELECT key FROM name_cache WHERE key LIKE '[\"done\",%'")?
             .query_map([], |r| r.get(0))?
-            .collect::<rusqlite::Result<_>>()?
+            .collect::<rusqlite::Result<_>>()?;
+        tx.commit()?;
+        done
     };
     let mut jobs = BTreeSet::new();
     let mut seed = vec![];
@@ -558,12 +589,19 @@ fn run(source: &mut Source, entity: Option<&str>, state: &Mutex<Value>) -> Resul
     for (i, (kind, key, work)) in jobs.iter().enumerate() {
         let result = (|| {
             net::check(&source.cancel)?;
-            let job_fp = fingerprint(&c, &job_scope(&rows, kind, key, work))?;
+            let job = job_scope(&rows, kind, key, work);
+            let index = indexed(&c, &job)?;
+            let job_fp = fingerprint_with(&c, &job, &index)?;
             let ops = if *kind == "skin" { translate_skin(source, key)? } else { enrich(source, kind, key, work)? };
             net::check(&source.cancel)?;
-            // Check sources under the same write transaction as names/projections/done marker.
+            // The index names are checked just before the write transaction, so it does not wait for source.sqlite
+            // while it holds the application write lock (#275); the application sources are checked under the
+            // same write transaction as names/projections/done marker. Changed rows change the CCIP keys there.
+            if indexed(&c, &job)? != index {
+                return invalid("名称来源已改变，请重试");
+            }
             let tx = c.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-            if fingerprint(&tx, &job_scope(&scope(&tx, entity)?, kind, key, work))? != job_fp {
+            if fingerprint_with(&tx, &job_scope(&scope(&tx, entity)?, kind, key, work), &index)? != job_fp {
                 return invalid("名称来源已改变，请重试");
             }
             crate::schema::begin_writing(&tx)?;
@@ -596,11 +634,20 @@ fn run(source: &mut Source, entity: Option<&str>, state: &Mutex<Value>) -> Resul
     if let Some(e) = first_error {
         Err(e)
     } else {
-        if entity.is_none() {
-            c.execute("INSERT OR REPLACE INTO name_cache VALUES ('[\"sources\", 1]',?)", [fp])?;
+        if entity.is_none() && source.force {
+            // The refresh is complete; if this fails, its retry finds every mark and looks nothing up.
+            c.execute(&format!("DELETE FROM name_cache WHERE key='{REFRESHING}'"), [])?;
         }
         Ok(())
     }
+}
+/// The sources the done marks hold for (the fingerprint of the whole scope).
+const SOURCES: &str = "[\"sources\", 1]";
+/// A whole-scope refresh under way: its retries keep the marks it has written.
+const REFRESHING: &str = "[\"refreshing\", 1]";
+/// The wait before a failed request is retried: a minute, doubling with each failure in a row up to half an hour.
+fn retry_after(failures: u32) -> Duration {
+    Duration::from_secs(60 << failures.saturating_sub(1).min(5)).min(Duration::from_secs(1800))
 }
 fn translate_skin(source: &mut Source, key: &str) -> Result<Vec<Value>> {
     // Reuse the same translation path with no wiki/Bangumi fetch.
@@ -660,6 +707,8 @@ pub(crate) struct Updater {
     /// The library's lasting consent, shared with every Source so revoking takes effect at once.
     grant: Arc<AtomicBool>,
     retry: Instant,
+    /// Failed runs in a row, for the retry backoff (`retry_after`).
+    failures: u32,
     last_seen: i64,
 }
 impl Updater {
@@ -677,6 +726,7 @@ impl Updater {
             cli: authorized,
             grant: Arc::new(AtomicBool::new(granted)),
             retry: Instant::now(),
+            failures: 0,
             last_seen: 0,
         })
     }
@@ -733,24 +783,43 @@ impl Updater {
             return invalid("显示名正在拉取，请稍后重试");
         }
         let c = net::db(&library.instance_path().join("library.sqlite"))?;
+        if refresh && entity.is_none() {
+            // A new refresh starts over rather than continuing one that did not finish.
+            c.execute(&format!("DELETE FROM name_cache WHERE key='{REFRESHING}'"), [])?;
+        }
         c.execute(
             "INSERT INTO backend_effects(kind) VALUES (?)",
             [format!("names:{}", dump(&json!({"entity":entity,"refresh":refresh})))],
         )?;
+        // An explicit request retries the failed ones too, at once.
+        self.settle();
         self.retry = Instant::now();
         self.recover(library);
         Ok(())
+    }
+    /// Takes a finished run and sets when failed requests are next retried.
+    fn settle(&mut self) {
+        if self.thread.as_ref().is_some_and(crate::app_tasks::Task::running) {
+            return;
+        }
+        if let Some(mut t) = self.thread.take() {
+            let _ = t.wait(Duration::from_millis(0));
+            let status = self.state.lock().expect("app_names mutex poisoned")["status"].clone();
+            if status == "done" {
+                self.retry = Instant::now();
+                self.failures = 0;
+            } else if status == "error" {
+                // Counted from the end of the failed run, not its start: a long run is not retried at once (#275).
+                self.failures += 1;
+                self.retry = Instant::now() + retry_after(self.failures);
+            }
+        }
     }
     pub fn recover(&mut self, library: &Library) {
         if !self.enabled || self.thread.as_ref().is_some_and(crate::app_tasks::Task::running) {
             return;
         }
-        if let Some(mut t) = self.thread.take() {
-            let _ = t.wait(Duration::from_millis(0));
-            if self.state.lock().expect("app_names mutex poisoned")["status"] == "done" {
-                self.retry = Instant::now();
-            }
-        }
+        self.settle();
         let pending = (|| -> Result<Vec<(i64, String)>> {
             let c = crate::app_library::read_connection(&library.instance_path().join("library.sqlite"))?;
             let v = c
@@ -830,7 +899,12 @@ impl Updater {
                             s["status"] = json!("error");
                             let message = match e {
                                 Error::Invalid(s) | Error::Network(s) => s,
-                                _ => "名称数据库操作失败".into(),
+                                e => {
+                                    // Names write library.sqlite only; a failed source.sqlite read is logged
+                                    // where it happens.
+                                    eprintln!("名称获取失败：{e:?}");
+                                    format!("名称数据库操作失败：{error}", error = e)
+                                }
                             };
                             s["error"] = json!(message);
                             final_error = Some(message.clone());
@@ -878,6 +952,7 @@ impl Updater {
                 self.grant.store(allow, Ordering::SeqCst);
                 if allow {
                     // Name syncs that failed for want of authorization retry now.
+                    self.settle();
                     self.retry = Instant::now();
                     self.last_seen = 0;
                 }
@@ -2001,6 +2076,52 @@ mod sources_tests {
         p.set(|a| a.down = false);
         lib.run(&p, None, false).unwrap();
         assert_eq!(lib.char("alice").name, "爱丽丝");
+    }
+
+    /// #275: a run that fails after most lookups are done (a locked database, here a trigger standing in for one)
+    /// looks up again only what it did not finish: the finished lookups keep their done marks as written.
+    #[test]
+    fn a_failed_run_keeps_its_finished_lookups() {
+        let (p, lib) = (Providers::start(), Library::load());
+        let marks = || -> BTreeMap<String, String> {
+            lib.db()
+                .prepare("SELECT key,value FROM name_cache WHERE key LIKE '[\"done\",%'")
+                .unwrap()
+                .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+                .unwrap()
+                .collect::<rusqlite::Result<_>>()
+                .unwrap()
+        };
+        let failing = done_key("work", "Example", "");
+        lib.db()
+            .execute(
+                &format!(
+                    "CREATE TRIGGER synthetic_locked BEFORE INSERT ON name_cache WHEN NEW.key = '{}'
+                     BEGIN SELECT RAISE(ABORT, 'database is locked'); END",
+                    failing.replace('\'', "''")
+                ),
+                [],
+            )
+            .unwrap();
+        assert!(lib.run(&p, None, false).is_err());
+        assert!(!p.calls().is_empty());
+        let finished = marks();
+        assert!(!finished.is_empty() && !finished.contains_key(&failing), "{finished:?}");
+        lib.db().execute_batch("DROP TRIGGER synthetic_locked").unwrap();
+        lib.run(&p, None, false).unwrap();
+        let after = marks();
+        for (key, value) in &finished {
+            assert_eq!(after.get(key), Some(value), "{key} was looked up again");
+        }
+        assert!(after.contains_key(&failing));
+        lib.run(&p, None, false).unwrap();
+        assert_eq!(marks(), after);
+    }
+
+    #[test]
+    fn failed_runs_back_off_up_to_half_an_hour() {
+        let minutes = [1, 2, 3, 5, 6, 40].map(|n| retry_after(n).as_secs() / 60);
+        assert_eq!(minutes, [1, 2, 4, 16, 30, 30]);
     }
 
     #[test]
