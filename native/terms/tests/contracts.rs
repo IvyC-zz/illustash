@@ -222,8 +222,9 @@ fn launch(root: &Path, package: &Path, category: &str, upgrade: bool, binary: &P
         assert!(start.elapsed() < Duration::from_secs(15), "host startup timeout");
     };
     entry::enter(&line);
-    let (status, bootstrap, _) = request_json(&origin, "/api/bootstrap", None, "");
+    let (status, bootstrap, _) = request(&origin, "/api/bootstrap", None, "");
     assert_eq!(status, 200);
+    let bootstrap: Value = serde_json::from_str(&bootstrap).unwrap();
     (host, origin, bootstrap["token"].as_str().unwrap().to_string())
 }
 
