@@ -225,7 +225,7 @@ fn deadline() -> crate::app_tasks::Deadline {
 /// A cancelled or timed-out run reports why it stopped, not the step it happened to interrupt.
 fn stop_message(cancel: &AtomicBool, ctx: Option<&crate::app_tasks::TaskContext>, e: &Error) -> String {
     let stopped = if cancel.load(Ordering::SeqCst) { ctx.and_then(|c| c.stop_reason()) } else { None };
-    stopped.unwrap_or_else(|| e.to_string()).chars().take(300).collect()
+    stopped.unwrap_or_else(|| e.reason()).chars().take(300).collect()
 }
 fn now() -> String {
     chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string()

@@ -422,9 +422,9 @@ def _load(module):
 # Core v8 drops the legacy tables, so the digests above (whole schema, every table, rowids) stop matching. Where a
 # recorded state is compared with a live one, the live state is also taken by the rules of
 # native/terms/tests/common/baseline.rs and compared with a baseline recorded from main on core version 7:
-# every table except RETIRED, typed cells, rows as a multiset (implicit rowids not compared), run-specific strings
-# and clocks as above, learning stamps masked, a few meta values by what they mean. Recorded with
-# ILLUSTASH_RECORD_BASELINE=1 into fixtures/baseline_states/<module>.json.gz.
+# every table except RETIRED (and the settings rows in RETIRED_ROWS), typed cells, rows as a multiset (implicit rowids
+# not compared), run-specific strings and clocks as above, learning stamps masked, a few meta values by what they mean.
+# Recorded with ILLUSTASH_RECORD_BASELINE=1 into fixtures/baseline_states/<module>.json.gz.
 
 BASELINE_STATES = FIXTURES.parent / 'baseline_states'
 # The recordings still hold the identity relation tables (retired after recording); they are left out of them too.
@@ -542,7 +542,7 @@ def _check_baseline(slot, state, only=None):
         pick = lambda s: {db: {t: s.get(db, {}).get(t) for t in tables} for db, tables in only.items()}
         state, want = pick(state), want if want is None else pick(want)
     if want is not None:
-        want, state = _without_volatile(want), _without_volatile(state)
+        want, state = _without_retired_rows(_without_volatile(want)), _without_retired_rows(_without_volatile(state))
     if want == state:
         return True
     if want is None:
@@ -576,6 +576,24 @@ def _without_volatile(state):
                 cells = json.loads(row)
                 rows.append(json.dumps([cells[i] for i in keep], ensure_ascii=False, separators=(',', ':')))
             out[db][name] = {'columns': [table['columns'][i] for i in keep], 'rows': sorted(rows)}
+    return out
+
+
+# Rows of settings the host no longer keeps (rule 5, each named with the reason), left out of both sides by key:
+# - `name_settings.traffic_reserved`: the name sources' lasting traffic budget, removed by the user's decision of
+#   2026-10-21 (#287); the recordings made before still hold the row. The core replays never reached it.
+RETIRED_ROWS = frozenset({('name_settings', 'traffic_reserved')})
+
+
+def _without_retired_rows(state):
+    out = {}
+    for db, tables in state.items():
+        out[db] = {}
+        for name, table in tables.items():
+            keys = {key for table_name, key in RETIRED_ROWS if table_name == name}
+            if keys:
+                table = {**table, 'rows': [row for row in table['rows'] if json.loads(row)[0] not in keys]}
+            out[db][name] = table
     return out
 
 

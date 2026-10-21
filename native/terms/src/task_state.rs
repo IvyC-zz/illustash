@@ -34,6 +34,8 @@ pub(crate) enum Status {
     Waiting,
     /// Stopped on request (or by a switch or quit) before publishing anything (#88 imports).
     Cancelled,
+    /// Waits for the person to let it go on, keeping what it has (#287: an index run out of traffic).
+    Paused,
 }
 #[derive(Deserialize)]
 struct Header {

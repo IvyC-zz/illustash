@@ -55,7 +55,7 @@
 
  "crates/core/src/compat_text.rs":"ac1d740967f077c7c0f456a42c74b13df4c39535feef9d13a54b04e0f74eee2d",
 
- "crates/core/src/error.rs":"e00d2bce525a1ecdb0dafff23a05d34b6596a5b6e528594f7e80c4f39d2b033f",
+ "crates/core/src/error.rs":"272c1d6d8f7fdd40bda672cd5edbda9084714d84e82e285ac3f91527d79b5606",
 
  "crates/core/src/legacy_characters.rs":"4533c2eb5ea6489ccd277074c874db05b78b1b4a2633c4b8bd3de58eedf6d548",
 
@@ -159,7 +159,7 @@
 
  "native/terms/src/app_accounts.rs":"7d8e5561467d471a772d5be4421f23354a6326f24c84b58152fcfe3f47f55a25",
 
- "native/terms/src/app_archives.rs":"fc663f40bcc16acc1b0e46081da38994873fbd87ba4da52883b6bc4b51464010",
+ "native/terms/src/app_archives.rs":"7e3cd8abd55798961e217f88a7681db9b0a187df580f97e3662bfd93bbb6311f",
 
  "native/terms/src/app_characters.rs":"0379cfaf9e6353208f3beedb97a0d7d0b45934c2986c136a0b0dd5d71e67220f",
 
@@ -187,7 +187,7 @@
 
  "native/terms/src/app_imports.rs":"e79d6a95f2cd045ef6ad0c3d0286d94a9ff82a93b03eed186e1b0ea986a60382",
 
- "native/terms/src/app_index.rs":"0662038f4ccbfb2d90ddfc3c3df41c1046c4ee68d81406e8d3a438f1f1e3e346",
+ "native/terms/src/app_index.rs":"775578d56cd1bdb6f85f5005ebe012f798b22391b8fd08203522c3a5a115adae",
 
  "native/terms/src/app_integrity.rs":"143aa1bbd662b8ea08636a6d58b4a8acc32095ba41526b579c32af9873adc6cc",
 
@@ -221,7 +221,7 @@
 
  "native/terms/src/app_models.rs":"20ecda715e4a3e41390c03c6879e503b3aa78cb86f83fcb79ebd790d0ee4c015",
 
- "native/terms/src/app_name_sources.rs":"8650cb80f3236a5aca0bfbfff667bad49122df4449e9c4d1465edca4e759c51c",
+ "native/terms/src/app_name_sources.rs":"413387ce95f71efb251adf678dd67626611a70c50b7f1d700bec49b16712e851",
 
  "native/terms/src/app_names.rs":"2f9f195abd7fe8b2e307c35a2195b572acbd201fc3628de44a6077a4e6671118",
 
@@ -247,7 +247,7 @@
 
  "native/terms/src/app_rescue.rs":"16274da1a0b1683ea0f652c79200cbc2b95ea62732c137c3ae08e7943601a9f0",
 
- "native/terms/src/app_research.rs":"f83cc1b694deb676f6a130ac5c3ae60f86e294792100e3daa02c2e7213252049",
+ "native/terms/src/app_research.rs":"fdf91e441fc3bd223f2c56c5d40a34b5e29c1e93d3e77858d01c4046404a2820",
 
  "native/terms/src/app_resources.rs":"08b7335b22a08947938bf80fe707302cfa82c0fa19b3b3122c28cfe78499811d",
 
@@ -261,7 +261,7 @@
 
  "native/terms/src/app_sources.rs":"69b2de0b8ab8a7bc9c7b1a5853aa0277c9baeb7666e8d1d270b57c80156f7687",
 
- "native/terms/src/app_sync.rs":"a32f59fdb20b508399bc4815a0f46a41ce359fc65405e3b5dab3d8e8c6e552e0",
+ "native/terms/src/app_sync.rs":"f1c41b6bdb0563e90ad93db6cad42714fe7b2d51357947c366116f0c253d5a0a",
 
  "native/terms/src/app_tasks.rs":"3c01ae07dd99d6a8882c659f1f1cb0203a4eb1ddcc2fdccac6c06d36a19d5083",
 
@@ -365,7 +365,7 @@
 
  "native/terms/src/table_delta.rs":"f5a08f3cb085ab3087636ada454a8bcc4e8de31f4b71d1f8e204d6a6d04b712a",
 
- "native/terms/src/task_state.rs":"48e4ea79635871a7633569ab2958de5c4395c34d4666293dbdefc8f2a868fb34",
+ "native/terms/src/task_state.rs":"f4b8017e875955cf805cfff7dde03dfb800bd4bdf29f8af1a65c48041bc75e14",
 
  "native/terms/src/wd_pending.rs":"0ee1bf7d1815e0d4ad7ce6b4aeabd173bfa91d8aa46eeae869adb9c880d466af",
 

@@ -78,7 +78,8 @@ export const INDEX_ACTIVE = ['checking', 'fetching', 'cleaning', 'building', 'sc
 export function indexLine(s, check) {
   const n = s.total ? ` ${number(s.done || 0)}/${number(s.total)}` : '';
   return {checking: t('正在检查 Danbooru…'), fetching: t('正在下载参考图') + n, cleaning: t('正在处理参考图'), building: t('正在更新角色特征'), scanning: t('正在重新扫描图库'), importing: t('正在导入图库'),
-    error: t('检查失败：{reason}', {reason: tb(s.message || '')})}[s.status] || (check ? t('上次检查：{time} · 待添加 {n} 个角色', {time: stamp(check.checked_at), n: number(check.missing.length)}) : t('尚未检查'));
+    paused: t('添加角色已暂停，等你确认后继续') + n,
+    error: s.kind === 'add' ? t('添加角色失败：{reason}', {reason: tb(s.message || '')}) : s.kind === 'drop' ? t('移除角色失败：{reason}', {reason: tb(s.message || '')}) : t('检查失败：{reason}', {reason: tb(s.message || '')})}[s.status] || (check ? t('上次检查：{time} · 待添加 {n} 个角色', {time: stamp(check.checked_at), n: number(check.missing.length)}) : t('尚未检查'));
 }
 let indexTimer = 0;
 export async function pollIndex() {
@@ -98,6 +99,7 @@ export async function pollIndex() {
 export function indexEndText(s) {
   if (s.status === 'done') return s.kind === 'drop' ? t('已移除，{n} 张图片已重新识别', {n: number(s.changed)}) : t('已添加 {added} 个角色，{n} 张图片的识别结果已更新', {added: number(s.added), n: number(s.changed)});
   if (s.status === 'checked') return s.found ? t('发现 {n} 个可添加的角色，在任务面板里添加', {n: number(s.found)}) : t('未发现新角色');
+  if (s.status === 'paused') return t('添加角色已暂停，在任务面板里继续');
   if (s.status === 'error') return t('角色索引更新失败：{reason}', {reason: tb(s.message || '')});
   return '';
 }
@@ -114,6 +116,23 @@ export async function checkIndex(confirm) {
   state.index = result; return true;
 }
 
+// An add that paused (after a restart nobody allowed the network for the pictures it still lacks) goes on with a
+// new run once the person allows the network again; the pictures it has are kept (#287).
+export async function resumeIndex(confirm) {
+  const token = session.token;
+  if (!await confirm(t('继续下载参考图会联网访问 Danbooru，只下载还缺的公开参考图，已下载的不会重下。允许本次联网吗？'), t('继续添加角色')) || token !== session.token) return false;
+  const result = await post('/api/index', {action: 'resume', allow_network: true});
+  if (token !== session.token) return false;
+  state.index = result; return true;
+}
+// Giving up a paused add removes the pictures it downloaded; nothing of it was written to the library.
+export async function discardIndex(confirm) {
+  const token = session.token;
+  if (!await confirm(t('放弃这次添加？已下载的参考图会删掉，图库不受影响；以后可以重新选择要添加的角色。'), t('放弃添加'), t('放弃')) || token !== session.token) return false;
+  const result = await post('/api/index', {action: 'discard'});
+  if (token !== session.token) return false;
+  state.index = result; return true;
+}
 
 // ---------- display names: Bangumi first, an opt-in model API last ----------
 export const NAMES_ACTIVE = ['fetching', 'matching', 'translating', 'running'];

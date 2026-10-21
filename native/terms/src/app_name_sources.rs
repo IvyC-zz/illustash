@@ -186,26 +186,6 @@ impl Source {
             }
             self.check_request(local)?;
             h.next = Some(Instant::now() + Duration::from_secs_f64(interval));
-            {
-                let mut c = db(&self.path)?;
-                let tx = c.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-                let reserved: i64 = tx
-                    .query_row(
-                        "SELECT CAST(value AS INTEGER) FROM name_settings WHERE key='traffic_reserved'",
-                        [],
-                        |r| r.get(0),
-                    )
-                    .optional()?
-                    .unwrap_or(0);
-                if reserved + 2_000_000 > 500_000_000 {
-                    return network("已达到 500 MB 流量预算；继续前需要用户批准");
-                }
-                tx.execute(
-                    "INSERT OR REPLACE INTO name_settings VALUES ('traffic_reserved',?)",
-                    [(reserved + 2_000_000).to_string()],
-                )?;
-                tx.commit()?;
-            }
             let agent = ureq::AgentBuilder::new().timeout(Duration::from_secs(25)).redirects(0).build();
             let mut req = agent
                 .request(if body.is_some() { "POST" } else { "GET" }, address)
@@ -261,20 +241,11 @@ impl Source {
                 Err(_) => (None, true, "网络连接失败".into()),
             };
             if let Some((value, serialized)) = value {
-                let actual = serialized.len() + address.len() + body.map(|v| v.to_string().len()).unwrap_or(4) + 2048;
-                db(&self.path)?.execute(
-                    "UPDATE name_settings SET value=CAST(value AS INTEGER)-? WHERE key='traffic_reserved'",
-                    [(2_000_000usize.saturating_sub(actual)) as i64],
-                )?;
                 h.failures = 0;
                 check(&self.cancel)?;
                 return Ok((value, serialized));
             }
             if transient {
-                db(&self.path)?.execute(
-                    "UPDATE name_settings SET value=CAST(value AS INTEGER)-1934464 WHERE key='traffic_reserved'",
-                    [],
-                )?;
                 h.failures += 1;
                 if h.failures >= 20 {
                     retry = retry.max(180.0);
@@ -641,7 +612,7 @@ mod tests {
             HOSTS.get_or_init(Default::default).lock().unwrap().insert(format!("{host_name}:443"), host.clone());
             let held = queued.then(|| host.lock().unwrap());
             let grant = Arc::new(AtomicBool::new(true));
-            // No database is needed: a revoked request must stop before reserving traffic or sending HTTP.
+            // No database is needed: a revoked request must stop before sending HTTP.
             let source = Source::new(PathBuf::new(), Arc::new(AtomicBool::new(false)), false, false)
                 .unwrap()
                 .granted(grant.clone());

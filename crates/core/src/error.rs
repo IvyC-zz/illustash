@@ -41,6 +41,17 @@ impl fmt::Display for Error {
 
 impl std::error::Error for Error {}
 
+impl Error {
+    /// What went wrong, for a task's state the person reads: the message alone, without the kind
+    /// ("不合法：", "冲突：") that tells the code how to answer it.
+    pub fn reason(&self) -> String {
+        match self {
+            Error::Invalid(m) | Error::Network(m) | Error::Conflict(m) => m.clone(),
+            other => other.to_string(),
+        }
+    }
+}
+
 impl From<rusqlite::Error> for Error {
     fn from(e: rusqlite::Error) -> Self {
         Error::Sql(e)

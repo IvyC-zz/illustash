@@ -241,14 +241,9 @@ class NativeNamesTest(unittest.TestCase):
         self.process.send_signal(INTERRUPT);time.sleep(.1);self.service.release.set();self.process.wait(5)
         self.assertEqual(self.process.returncode,0)
         self.assertTrue(any(s=='pending' for _,s,_ in self.events()))
-    def test_transient_retry_and_traffic_budget(self):
+    def test_transient_retry(self):
         self.service.failures_left=2;self.enable()
         self.assertGreaterEqual(len(self.service.calls),3)
-        self.request('/api/names',{'action':'model_api','key':'synthetic-secret','base':self.service.base})
-        with sqlite3.connect(self.lib.db) as c:c.execute("INSERT OR REPLACE INTO name_settings VALUES ('traffic_reserved','499000000')")
-        count=len(self.service.calls);response=self.request('/api/names',{'action':'model_api_test'})
-        self.assertEqual(response['status'],200);self.assertFalse(json.loads(response['body'])['ok'])
-        self.assertEqual(len(self.service.calls),count)
     def test_profile_lookup_and_durable_event_actual_consumption(self):
         self.enable();ident=self.alice
         response=self.request('/api/character/profile',{'entity':ident,'tag':'synthetic_(Example)'})
