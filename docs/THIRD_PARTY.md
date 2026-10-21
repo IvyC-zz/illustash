@@ -39,8 +39,9 @@ python3 tools/gen_rust_licenses.py
 
 | 组件 | 平台 | 许可 |
 |---|---|---|
-| ONNX Runtime（CPU） | macOS、Windows | MIT；随包附 `LICENSE` 与 `ThirdPartyNotices.txt` |
+| ONNX Runtime | macOS、Windows | MIT；随包附 `LICENSE` 与 `ThirdPartyNotices.txt` |
 | OpenBLAS（取自固定版本 NumPy wheel） | Windows | BSD-3-Clause；随包附 wheel 的完整许可目录 |
+| DirectML 1.15.4（NuGet `Microsoft.AI.DirectML`，ONNX Runtime 构建时取用的同一个包，#271） | Windows | 「Microsoft Software License Terms」专有许可，允许随用到它的 Windows 应用分发（第 1 条）；头文件等示例代码为 MIT（`LICENSE-CODE.txt`）。随包附 `LICENSE.txt`、`LICENSE-CODE.txt` 与 `ThirdPartyNotices.txt` 原文。该许可第 2 条写明软件可能向微软发送使用数据 |
 
 ## 模型与数据
 
