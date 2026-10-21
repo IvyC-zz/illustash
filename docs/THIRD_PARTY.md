@@ -1,6 +1,6 @@
 # 第三方组件与许可
 
-状态：现行参考，2026-10-19。本项目代码以 GPL-3.0-or-later 发布（见仓库根目录 `LICENSE`）；本文列出随代码或安装包分发的第三方组件、应用第一次使用时下载的模型，以及它们的许可。模型与数据不受本项目代码许可约束，按各自许可使用。Illustash 名称与图标不随代码授权。
+状态：现行参考，2026-10-19。本项目代码以 GPL-3.0-or-later 发布（见仓库根目录 `LICENSE`），附加一项 GPLv3 第 7 条许可（`LICENSE-EXCEPTION`，2026-10-22 用户定，#271）：允许与厂商以二进制形式提供的 GPU 运行库（如 DirectML、Windows ML、Core ML）组合分发，组合的对应源码不必包含这些库本身；本文列出随代码或安装包分发的第三方组件、应用第一次使用时下载的模型，以及它们的许可。模型与数据不受本项目代码许可约束，按各自许可使用。Illustash 名称与图标不随代码授权。
 
 ## Rust 依赖
 
@@ -31,7 +31,7 @@ python3 tools/gen_rust_licenses.py
 | Unicode 字符数据 | `crates/core` 的 casefold 与 HTTP 字符表，由 `tools/gen_casefold.py`、`tools/gen_http_unicode.py` 从 Python `unicodedata`（Unicode 15.0）生成 | [Unicode License v3](https://www.unicode.org/license.txt) |
 | 标签表 | `tags/tags_v3.csv`、`tags/tags_v14.csv` | 取自 WD tagger 模型仓库的 `selected_tags.csv`（Apache-2.0）；标签名与计数源自 [Danbooru](https://danbooru.donmai.us) |
 
-每个分发产物（便携包、安装包）的 `resources/licenses/` 里有本项目 `LICENSE`、本文（`THIRD_PARTY.md`）、PocketFFT 和 LittleCMS 的许可原文，以及 Rust 依赖的许可正文 `rust-dependencies.txt`（见上节），见 [安装与平台](BACKEND_TASKS.md#独立安装与可选计算包)。
+每个分发产物（便携包、安装包）的 `resources/licenses/` 里有本项目 `LICENSE` 与 `LICENSE-EXCEPTION`、本文（`THIRD_PARTY.md`）、PocketFFT 和 LittleCMS 的许可原文，以及 Rust 依赖的许可正文 `rust-dependencies.txt`（见上节），见 [安装与平台](BACKEND_TASKS.md#独立安装与可选计算包)。
 
 ## 打包时加入的运行库
 
@@ -41,7 +41,7 @@ python3 tools/gen_rust_licenses.py
 |---|---|---|
 | ONNX Runtime | macOS、Windows | MIT；随包附 `LICENSE` 与 `ThirdPartyNotices.txt` |
 | OpenBLAS（取自固定版本 NumPy wheel） | Windows | BSD-3-Clause；随包附 wheel 的完整许可目录 |
-| DirectML 1.15.4（NuGet `Microsoft.AI.DirectML`，ONNX Runtime 构建时取用的同一个包，#271） | Windows | 「Microsoft Software License Terms」专有许可，允许随用到它的 Windows 应用分发（第 1 条）；头文件等示例代码为 MIT（`LICENSE-CODE.txt`）。随包附 `LICENSE.txt`、`LICENSE-CODE.txt` 与 `ThirdPartyNotices.txt` 原文。该许可第 2 条写明软件可能向微软发送使用数据 |
+| DirectML 1.15.4（NuGet `Microsoft.AI.DirectML`，ONNX Runtime 构建时取用的同一个包，#271） | Windows | 「Microsoft Software License Terms」专有许可，允许随用到它的 Windows 应用分发（第 1 条）；头文件等示例代码为 MIT（`LICENSE-CODE.txt`）。随包附 `LICENSE.txt`、`LICENSE-CODE.txt` 与 `ThirdPartyNotices.txt` 原文。它与本项目 GPL 的组合由 `LICENSE-EXCEPTION` 允许。该许可第 2 条写明软件可能向微软发送使用数据（是否实际发送未核实） |
 
 ## 模型与数据
 
