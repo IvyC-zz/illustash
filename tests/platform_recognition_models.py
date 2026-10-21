@@ -1,8 +1,9 @@
 """Explicit, opt-in model acceptance; generated images/anchors only.
 
 Every case but AcceleratedRecognitionTest runs with ILLUSTASH_CPU_ONLY=1 and compares bit for bit with the
-Python ONNX Runtime CPU reference. AcceleratedRecognitionTest runs CCIP on the accelerator this platform has
-(CoreML on Apple silicon, #270) and compares within the bounds #213 measured.
+Python ONNX Runtime CPU reference. AcceleratedRecognitionTest runs on the accelerator this platform has (CCIP on
+CoreML on Apple silicon, #270; WD and CCIP on DirectML on Windows x64, #271) and compares within the bounds #213
+measured.
 Run separately from discover. Required inputs: ILLUSTASH_TERMS_BIN,
 ILLUSTASH_RECOGNITION_ADAPTER_BIN, ILLUSTASH_RECOGNITION_COMPUTE_BIN,
 ILLUSTASH_RECOGNITION_MODELS and ILLUSTASH_ORT_DYLIB. Missing inputs fail.
@@ -76,6 +77,9 @@ class RecognitionModelTest(unittest.TestCase):
                   (ROOT / 'tags/tags_v3.csv', cls.resources / 'tags/tags_v3.csv')]
         copies += [(models / name, cls.resources / 'models' / name)
                    for name in ('wd_swinv2_v3_emb.onnx', 'ccip/model_feat.onnx')]
+        # The Windows runtime loads DirectML.dll from its own folder (#271), as installed.
+        copies += [(runtime.parent / name, cls.resources / 'onnxruntime' / name)
+                   for name in ('DirectML.dll',) if sys.platform == 'win32' and (runtime.parent / name).is_file()]
         for source, dest in copies:
             dest.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(source, dest)
@@ -135,6 +139,18 @@ class RecognitionModelTest(unittest.TestCase):
     def assert_ccip(self, actual, expected):
         """CCIP vectors and the distances and confidences computed from them: bit for bit on the CPU."""
         np.testing.assert_array_equal(actual, expected)
+
+    def assert_wd(self, actual, expected):
+        """WD probabilities: bit for bit on the CPU."""
+        np.testing.assert_array_equal(actual, expected)
+
+    def assert_wd_vector(self, actual, expected):
+        """WD vectors: bit for bit on the CPU."""
+        np.testing.assert_array_equal(actual, expected)
+
+    def assert_labels(self, actual, expected):
+        """Stored labels (probability >= 0.001, four decimals): exactly, on the CPU."""
+        self.assertEqual(actual, expected)
 
     def invoke(self, binary, request, *, env=None):
         input_path = self.root / 'request.json'
@@ -229,7 +245,7 @@ class RecognitionModelTest(unittest.TestCase):
             for asset in manifest['assets']:
                 row = self.reference[int(asset.split('-')[1]) % 8]
                 expected_labels.extend(labels(asset, row['probs'], self.tags))
-            self.assertEqual([json.loads(line) for line in (path / 'labels.jsonl').read_text(encoding='utf-8').splitlines()], expected_labels)
+            self.assert_labels([json.loads(line) for line in (path / 'labels.jsonl').read_text(encoding='utf-8').splitlines()], expected_labels)
             self.assert_ccip(np.asarray([r['distance'] for r in claim['claims']], np.float32),
                              np.asarray([r['distance'] for r in expected_claims], np.float32))
             np.testing.assert_array_equal(np.asarray([r['threshold'] for r in claim['claims']], np.float32),
@@ -241,7 +257,7 @@ class RecognitionModelTest(unittest.TestCase):
                              np.asarray([r['confidence'] for r in expected_claims]))
             for model in ('wd', 'ccip'):
                 expected = np.asarray([self.reference[int(a.split('-')[1]) % 8][model] for a in manifest['assets']], np.float32)
-                (self.assert_ccip if model == 'ccip' else np.testing.assert_array_equal)(np.load(path / (model+'.npy')), expected)
+                (self.assert_ccip if model == 'ccip' else self.assert_wd_vector)(np.load(path / (model+'.npy')), expected)
             for name, fingerprint in manifest['files'].items():
                 data = (path / name).read_bytes()
                 self.assertEqual(fingerprint, dict(bytes=len(data), sha256=hashlib.sha256(data).hexdigest()))
@@ -411,15 +427,24 @@ class RecognitionModelTest(unittest.TestCase):
 
 
 def accelerator():
-    """The accelerated CCIP backend this platform has (recognition_compute/backend.rs), or None."""
+    """The accelerated backend this platform has (recognition_compute/backend.rs), or None."""
     import platform
-    return 'coreml' if sys.platform == 'darwin' and platform.machine() == 'arm64' else None
+    if sys.platform == 'darwin' and platform.machine() == 'arm64':
+        return 'coreml'
+    if sys.platform == 'win32' and platform.machine() == 'AMD64':
+        return 'directml'
+    return None
+
+
+# Which models the accelerator runs; the rest stay on the CPU, bit for bit.
+ACCELERATED = {'coreml': ('ccip',), 'directml': ('wd', 'ccip')}.get(accelerator(), ())
 
 
 @unittest.skipUnless(accelerator(), 'no accelerated recognition backend on this platform')
 class AcceleratedRecognitionTest(RecognitionModelTest):
-    """The setting's default: CCIP on the accelerator. #213 measured fp32 rounding differences only (cosine
-    >= 0.99999999999958 on 24 public pictures); the bound here leaves room, and every decision must stay."""
+    """The setting's default: ACCELERATED on the accelerator. #213 measured fp32 rounding differences only (CCIP
+    cosine >= 0.99999999999958 on CoreML, >= 0.9999999999995 on DirectML); the bounds here leave room, and every
+    decision must stay."""
     COSINE = 0.9999999999
 
     def setUp(self):
@@ -436,16 +461,19 @@ class AcceleratedRecognitionTest(RecognitionModelTest):
 
     def test_raw_probabilities_vectors_and_labels(self):
         got = self.infer()
-        self.assertEqual(self.status()['ccip'], dict(self.status()['ccip'], requested=accelerator(), used=accelerator(), reason=None))
-        cache = [p for p in (self.shared / 'coreml-cache').iterdir() if p.is_dir()]
-        self.assertEqual(len(cache), 1, 'one compiled model, keyed by content')
-        self.assertTrue(any(cache[0].rglob('*')), 'the compiled model is cached')
+        for model in ACCELERATED:
+            status = self.status()[model]
+            self.assertEqual(status, dict(status, requested=accelerator(), used=accelerator(), reason=None), model)
+        if accelerator() == 'coreml':
+            cache = [p for p in (self.shared / 'coreml-cache').iterdir() if p.is_dir()]
+            self.assertEqual(len(cache), 1, 'one compiled model, keyed by content')
+            self.assertTrue(any(cache[0].rglob('*')), 'the compiled model is cached')
         reference = np.asarray([r['ccip'] for r in self.reference], np.float64)
         for i, (expected, actual) in enumerate(zip(self.reference, got)):
-            # WD stays on the CPU: bit for bit, and so are its labels.
-            for key in ('probs', 'wd'):
-                np.testing.assert_array_equal(np.asarray(actual[key], np.float32), expected[key])
-            self.assertEqual(actual['labels'], labels('synthetic', expected['probs'], self.tags))
+            # On the CPU (CoreML): bit for bit, and so are the labels; on DirectML within WD_ATOL.
+            self.assert_wd(np.asarray(actual['probs'], np.float32), expected['probs'])
+            self.assert_wd_vector(np.asarray(actual['wd'], np.float32), expected['wd'])
+            self.assert_labels(actual['labels'], labels('synthetic', expected['probs'], self.tags))
             feature = np.asarray(actual['ccip'], np.float64)
             cosine = feature @ reference[i] / np.linalg.norm(feature) / np.linalg.norm(reference[i])
             self.assertGreaterEqual(cosine, self.COSINE, i)
@@ -453,8 +481,10 @@ class AcceleratedRecognitionTest(RecognitionModelTest):
             others = [j for j in range(len(reference)) if j != i]
             nearest = lambda v: max(others, key=lambda j: v @ reference[j] / np.linalg.norm(v) / np.linalg.norm(reference[j]))
             self.assertEqual(nearest(feature), nearest(reference[i]), i)
-        # Again, from the compiled cache: the same outputs, bit for bit.
-        self.assertEqual([r['ccip'] for r in self.infer()], [r['ccip'] for r in got])
+        # Again (on CoreML from the compiled cache): the same outputs, bit for bit.
+        again = self.infer()
+        self.assertEqual([r['ccip'] for r in again], [r['ccip'] for r in got])
+        self.assertEqual([r['probs'] for r in again], [r['probs'] for r in got])
 
     def assert_ccip(self, actual, expected):
         actual, expected = np.asarray(actual, np.float64), np.asarray(expected, np.float64)
@@ -467,6 +497,35 @@ class AcceleratedRecognitionTest(RecognitionModelTest):
             # Distances of 0.01–0.15 decide, and #213 saw them move by 1.3e-7 at most.
             np.testing.assert_allclose(actual, expected, rtol=0, atol=1e-6)
 
+    # DirectML (#213 on 92 public pictures): WD probabilities at most 4.2e-6 from the CPU's, mean 2.7e-8.
+    WD_ATOL = 2e-5
+
+    def assert_wd(self, actual, expected):
+        if 'wd' not in ACCELERATED:
+            return super().assert_wd(actual, expected)
+        np.testing.assert_allclose(actual, expected, rtol=0, atol=self.WD_ATOL)
+
+    def assert_wd_vector(self, actual, expected):
+        if 'wd' not in ACCELERATED:
+            return super().assert_wd_vector(actual, expected)
+        actual, expected = np.atleast_2d(np.asarray(actual, np.float64)), np.atleast_2d(np.asarray(expected, np.float64))
+        cosine = (actual * expected).sum(1) / np.linalg.norm(actual, axis=1) / np.linalg.norm(expected, axis=1)
+        self.assertGreaterEqual(cosine.min(), self.COSINE)
+
+    def assert_labels(self, actual, expected):
+        """On DirectML a label within WD_ATOL of the 0.001 cut may come or go, and a stored confidence may move
+        by one in the fourth decimal; nothing else changes, and the tags at the decision thresholds stay."""
+        if 'wd' not in ACCELERATED:
+            return super().assert_labels(actual, expected)
+        key = lambda r: (r['asset'], r['dim'], r['value'])
+        got, want = {key(r): r['confidence'] for r in actual}, {key(r): r['confidence'] for r in expected}
+        for name in got.keys() ^ want.keys():
+            self.assertLess(abs(got.get(name, want.get(name)) - .001), self.WD_ATOL + 5e-5, name)
+        for name in got.keys() & want.keys():
+            self.assertLessEqual(abs(got[name] - want[name]), 1e-4 + 1e-9, name)
+        for cut in (.2, .35, .5, .85):
+            self.assertEqual({k for k, v in got.items() if v >= cut}, {k for k, v in want.items() if v >= cut}, cut)
+
     # test_candidate_batches_bad_image_and_synthetic_anchor_claims runs as inherited: WD outputs and labels bit for
     # bit, CCIP vectors, distances and confidences through assert_ccip, the claimed characters exactly.
 
@@ -476,6 +535,7 @@ class AcceleratedRecognitionTest(RecognitionModelTest):
     def test_relocated_native_sync_first_incremental_bad_image_and_human_preservation(self):
         self.skipTest('the CPU case covers sync; its stored vectors are compared bit for bit')
 
+    @unittest.skipUnless(accelerator() == 'coreml', 'only CoreML keeps a compiled cache')
     def test_damaged_cache_is_dropped_and_the_cpu_takes_over(self):
         self.infer()
         cache = next(p for p in (self.shared / 'coreml-cache').iterdir() if p.is_dir())

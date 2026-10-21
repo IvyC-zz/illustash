@@ -4,6 +4,7 @@ pub mod anchor_snapshot;
 pub mod anchors;
 pub mod backend;
 pub mod claims;
+mod directml;
 pub mod models;
 pub mod preprocess;
 pub mod producer;

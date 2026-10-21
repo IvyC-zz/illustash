@@ -17,12 +17,17 @@ const WORKER_KEYS: [&str; 4] = [
 
 /// Windows 完整包 compute/ 必需组件（与 packaging/build.py 的 desktop_compute 产物一致）。模型不在其中，见 [`models`]。
 #[cfg(any(windows, test))]
-const WINDOWS_FILES: [&str; 10] = [
+const WINDOWS_FILES: [&str; 15] = [
     "resources/web/static/index.html",
     "resources/tags/tags_v3.csv",
     "resources/onnxruntime/onnxruntime.dll",
     "resources/licenses/onnxruntime/LICENSE",
     "resources/licenses/onnxruntime/ThirdPartyNotices.txt",
+    "resources/onnxruntime/DirectML.dll",
+    "resources/onnxruntime/backends.json",
+    "resources/licenses/directml/LICENSE.txt",
+    "resources/licenses/directml/LICENSE-CODE.txt",
+    "resources/licenses/directml/ThirdPartyNotices.txt",
     "resources/openblas/openblas.dll",
     "resources/licenses/openblas/LICENSE.txt",
     "bin/illustash-terms.exe",

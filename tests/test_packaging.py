@@ -199,7 +199,9 @@ class DesktopComputeStagingTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp); source = root / 'artifact'; dest = root / 'compute'
             names = ['resources/onnxruntime/onnxruntime.dll', 'resources/licenses/onnxruntime/LICENSE',
-                     'resources/licenses/onnxruntime/ThirdPartyNotices.txt', 'resources/models/wd_swinv2_v3_emb.onnx',
+                     'resources/licenses/onnxruntime/ThirdPartyNotices.txt', *build.DIRECTML_FILES,
+                     'resources/onnxruntime/backends.json',
+                     'resources/models/wd_swinv2_v3_emb.onnx',
                      'resources/models/ccip/model_feat.onnx', 'resources/models/ccip/model_metrics.onnx',
                      'resources/models/ccip/metrics.json', 'resources/openblas/openblas.dll',
                      'resources/licenses/openblas/LICENSE.txt', 'resources/web/static/index.html',
@@ -245,6 +247,13 @@ class DesktopComputeStagingTest(unittest.TestCase):
                 build.desktop_compute(source, root / 'mac')
             (root / 'onnxruntime.dll').write_bytes(b'fixture')
             (root / 'onnxruntime.dll').rename(source / 'resources/onnxruntime/onnxruntime.dll')
+            # #271: nor one without DirectML.dll or its license.
+            for name in (*build.DIRECTML_FILES, 'resources/onnxruntime/backends.json'):
+                (source / name).rename(root / 'directml-moved')
+                with patch.object(build.sys, 'platform', 'win32'), self.assertRaisesRegex(ValueError, name):
+                    build.desktop_compute(source, root / 'no directml')
+                self.assertFalse((root / 'no directml').exists())
+                (root / 'directml-moved').rename(source / name)
             (source / 'resources/licenses/models/ccip/BigScience-OpenRAIL-M.pdf').write_bytes(
                 (build.MODEL_LICENSES / 'ccip/BigScience-OpenRAIL-M.pdf').read_bytes())
             # #168: the release installer has no models; only some of them is refused.

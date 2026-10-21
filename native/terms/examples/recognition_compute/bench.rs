@@ -5,7 +5,6 @@
 use illustash_terms::recognition_compute::{
     anchor_snapshot::Snapshot, backend, claims::Claims, preprocess, producer, session,
 };
-use ort::{execution_providers::CPUExecutionProvider, logging::LogLevel, session::Session, value::Tensor};
 use serde_json::{json, Value};
 use std::{
     fs,
@@ -128,26 +127,6 @@ fn ms(started: Instant) -> f64 {
     started.elapsed().as_secs_f64() * 1000.
 }
 
-/// Same builder as recognition_compute::session for WD (CPU provider, session::WD_THREADS).
-/// The first picture is checked bit for bit against ModelSessions::infer, so a drift in the
-/// production configuration fails the benchmark instead of timing something else.
-fn wd_session(path: &Path) -> Result<Session> {
-    let mut builder = Session::builder()?
-        .with_execution_providers([CPUExecutionProvider::default().build()])?
-        .with_log_level(LogLevel::Error)?;
-    if let Some(threads) = session::WD_THREADS {
-        builder = builder.with_intra_threads(threads)?;
-    }
-    Ok(builder.commit_from_file(path)?)
-}
-
-fn wd_run(session: &mut Session, input: Vec<f32>) -> Result<(Vec<f32>, Vec<f32>)> {
-    let output = session.run(ort::inputs![Tensor::from_array(([1, 448, 448, 3], input))?])?;
-    let (_, probabilities) = output[0].try_extract_tensor::<f32>()?;
-    let (_, embedding) = output[1].try_extract_tensor::<f32>()?;
-    Ok((probabilities.to_vec(), embedding.to_vec()))
-}
-
 pub fn stages(request: &Value) -> Result<Value> {
     let path = |key: &str| -> Result<PathBuf> { Ok(PathBuf::from(request[key].as_str().ok_or(key.to_owned())?)) };
     let (models, runtime, resources, shared, source, output) =
@@ -159,9 +138,11 @@ pub fn stages(request: &Value) -> Result<Value> {
 
     let started = Instant::now();
     session::initialise(&runtime)?;
-    let mut wd = wd_session(&models.join("wd_swinv2_v3_emb.onnx"))?;
-    // CCIP on the backend the worker would pick (ILLUSTASH_CPU_ONLY and the setting), as in production.
+    // WD and CCIP on the backends the worker would pick (ILLUSTASH_CPU_ONLY and the setting), as in production.
+    // The first picture is checked bit for bit against ModelSessions::infer, so a drift in the production
+    // configuration fails the benchmark instead of timing something else.
     let acceleration = backend::Acceleration::from_env(Some(&shared));
+    let mut wd = session::WdSession::load(&models.join("wd_swinv2_v3_emb.onnx"), &runtime, &acceleration)?;
     let mut ccip = session::CcipSession::load(&models.join("ccip/model_feat.onnx"), &runtime, &acceleration)?;
     let tags = producer::Tags::load(&resources.join("tags/tags_v3.csv"))?;
     let specs = producer::model_specs(&resources, &models)?;
@@ -173,7 +154,7 @@ pub fn stages(request: &Value) -> Result<Value> {
     {
         let first = producer::decode(images.first().ok_or("images empty")?)?;
         let expected = session::ModelSessions::load(&models, &runtime, &acceleration)?.infer(&first, tags.len())?;
-        let (probabilities, embedding) = wd_run(&mut wd, preprocess::wd_input(&first, 448))?;
+        let (probabilities, embedding) = wd.run(&preprocess::wd_input(&first, 448), tags.len())?;
         let feature = ccip.features(&first)?;
         let bits = |v: &[f32]| v.iter().map(|x| x.to_bits()).collect::<Vec<_>>();
         if bits(&probabilities) != bits(&expected.probabilities)
@@ -196,7 +177,7 @@ pub fn stages(request: &Value) -> Result<Value> {
             let t = Instant::now();
             let input = preprocess::wd_input(&image, 448);
             let wd_pre_ms = ms(t);
-            let (probabilities, embedding) = wd_run(&mut wd, input)?;
+            let (probabilities, embedding) = wd.run(&input, tags.len())?;
             let wd_ms = ms(t);
             let t = Instant::now();
             let feature = ccip.features(&image)?;

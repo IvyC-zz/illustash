@@ -1,6 +1,14 @@
 # 第三方组件与许可
 
-状态：现行参考，2026-10-19。本项目代码以 GPL-3.0-or-later 发布（见仓库根目录 `LICENSE`）；本文列出随代码或安装包分发的第三方组件、应用第一次使用时下载的模型，以及它们的许可。模型与数据不受本项目代码许可约束，按各自许可使用。Illustash 名称与图标不随代码授权。
+状态：现行参考，2026-10-19。本项目代码以 GPL-3.0-or-later 发布（见仓库根目录 `LICENSE`），另附一项 GPLv3 第 7 条附加许可（见下文[附加许可](#附加许可gplv3-第-7-条)）；本文列出随代码或安装包分发的第三方组件、应用第一次使用时下载的模型，以及它们的许可。模型与数据不受本项目代码许可约束，按各自许可使用。Illustash 名称与图标不随代码授权。
+
+## 附加许可（GPLv3 第 7 条）
+
+2026-10-22 用户定（#271）。`LICENSE` 保持 GPL 原文不动；Illustash 的版权人按 GPLv3 第 7 条另外给出下面这项许可，允许本程序与 DirectML 这类 GPU 推理运行库组合并一起分发、运行。它只覆盖这类运行库，不放宽对其他库的要求，也不改变这些运行库自己的许可。本文随每个分发产物放进 `resources/licenses/THIRD_PARTY.md`。正文以英文为准：
+
+> **Additional permission under GNU GPL version 3 section 7**
+>
+> If you modify this Program, or any covered work, by linking or combining it with a GPU inference runtime library, that is, a library distributed by its vendor in binary form that the Program loads at run time only to run machine-learning models on graphics or other accelerator hardware (such as Microsoft DirectML, and Windows ML or a hardware vendor's execution provider for ONNX Runtime), or with a modified version of such a library, containing parts covered by the terms of that library's license, the copyright holders of Illustash grant you additional permission to convey the resulting work. Corresponding Source for a non-source form of such a combination shall not include the source code for the parts of the library that are not covered by the GNU GPL.
 
 ## Rust 依赖
 
@@ -39,8 +47,9 @@ python3 tools/gen_rust_licenses.py
 
 | 组件 | 平台 | 许可 |
 |---|---|---|
-| ONNX Runtime（CPU） | macOS、Windows | MIT；随包附 `LICENSE` 与 `ThirdPartyNotices.txt` |
+| ONNX Runtime | macOS、Windows | MIT；随包附 `LICENSE` 与 `ThirdPartyNotices.txt` |
 | OpenBLAS（取自固定版本 NumPy wheel） | Windows | BSD-3-Clause；随包附 wheel 的完整许可目录 |
+| DirectML 1.15.4（NuGet `Microsoft.AI.DirectML`，ONNX Runtime 构建时取用的同一个包，#271） | Windows | 「Microsoft Software License Terms」专有许可，允许随用到它的 Windows 应用分发（第 1 条）；头文件等示例代码为 MIT（`LICENSE-CODE.txt`）。随包附 `LICENSE.txt`、`LICENSE-CODE.txt` 与 `ThirdPartyNotices.txt` 原文。它与本项目的组合由下文[附加许可](#附加许可gplv3-第-7-条)允许。该许可第 2 条写明软件可能收集使用信息并发送给微软，见 [装不上、打不开怎么办](INSTALL.md#windows) |
 
 ## 模型与数据
 

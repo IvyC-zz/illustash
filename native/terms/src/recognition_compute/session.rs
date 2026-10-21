@@ -75,7 +75,8 @@ fn reason(error: &Error) -> String {
     };
     text.trim().chars().take(300).collect()
 }
-fn runtime() -> PathBuf {
+/// The runtime this process bound in `initialise` (empty before).
+pub(super) fn runtime() -> PathBuf {
     RUNTIME.get().and_then(|r| r.as_ref().ok()).cloned().unwrap_or_default()
 }
 impl ModelSession {
@@ -158,36 +159,28 @@ impl CcipSession {
 /// 4 elsewhere; on the M2 more threads reach the efficiency cores and WD gets slower.
 /// Thread count does not change the CPU outputs, bit for bit.
 pub const WD_THREADS: Option<usize> = if cfg!(windows) { None } else { Some(4) };
-pub struct ModelSessions {
-    wd: ModelSession,
-    ccip: CcipSession,
+/// WD on the backend `Acceleration` picks for it; `ModelSessions` and the benchmark's stage timing
+/// (examples/recognition_compute/bench.rs) both run it, so they time what production runs.
+pub struct WdSession {
+    session: ModelSession,
 }
-pub struct ModelOutput {
-    pub probabilities: Vec<f32>,
-    pub wd: Vec<f32>,
-    pub ccip: Vec<f32>,
-}
-impl ModelSessions {
-    pub fn load(models: &Path, runtime: &Path, acceleration: &Acceleration) -> Result<Self> {
+impl WdSession {
+    pub fn load(model: &Path, runtime: &Path, acceleration: &Acceleration) -> Result<Self> {
         initialise(runtime)?;
-        let wd = ModelSession::load(&models.join("wd_swinv2_v3_emb.onnx"), Model::Wd, WD_THREADS, acceleration)?;
-        if wd.session.inputs.len() != 1 || wd.session.outputs.len() != 2 {
+        let session = ModelSession::load(model, Model::Wd, WD_THREADS, acceleration)?;
+        if session.session.inputs.len() != 1 || session.session.outputs.len() != 2 {
             return Err(failure("WD 模型", "输入/输出数量不匹配"));
         }
-        let ccip = CcipSession::load(&models.join("ccip/model_feat.onnx"), runtime, acceleration)?;
-        Ok(Self { wd, ccip })
+        Ok(Self { session })
     }
-    /// The backends WD and CCIP run on now.
-    pub fn backends(&self) -> (Backend, Backend) {
-        (self.wd.backend, self.ccip.backend())
+    /// The backend the session runs on now.
+    pub fn backend(&self) -> Backend {
+        self.session.backend
     }
-    pub fn ccip_features(&mut self, image: &RgbImage) -> Result<Vec<f32>> {
-        self.ccip.features(image)
-    }
-    pub fn infer(&mut self, image: &RgbImage, tags: usize) -> Result<ModelOutput> {
-        let (probabilities, wd) = self.wd.run(|session| {
-            let input = Tensor::from_array(([1, 448, 448, 3], super::preprocess::wd_input(image, 448)))
-                .map_err(|e| failure("WD 输入", e))?;
+    /// Tag probabilities and the 1024 raw vector values for one preprocessed 448×448 input (preprocess::wd_input).
+    pub fn run(&mut self, input: &[f32], tags: usize) -> Result<(Vec<f32>, Vec<f32>)> {
+        self.session.run(|session| {
+            let input = Tensor::from_array(([1, 448, 448, 3], input.to_vec())).map_err(|e| failure("WD 输入", e))?;
             let output = session.run(ort::inputs![input]).map_err(|e| failure("WD", e))?;
             let (shape, probabilities) = output[0].try_extract_tensor::<f32>().map_err(|e| failure("WD 概率", e))?;
             if shape[..] != [1, tags as i64] || probabilities.iter().any(|v| !v.is_finite() || !(0.0..=1.0).contains(v))
@@ -200,7 +193,33 @@ impl ModelSessions {
             }
             validate_vector(wd, 1024)?;
             Ok((probabilities.to_vec(), wd.to_vec()))
-        })?;
+        })
+    }
+}
+pub struct ModelSessions {
+    wd: WdSession,
+    ccip: CcipSession,
+}
+pub struct ModelOutput {
+    pub probabilities: Vec<f32>,
+    pub wd: Vec<f32>,
+    pub ccip: Vec<f32>,
+}
+impl ModelSessions {
+    pub fn load(models: &Path, runtime: &Path, acceleration: &Acceleration) -> Result<Self> {
+        let wd = WdSession::load(&models.join("wd_swinv2_v3_emb.onnx"), runtime, acceleration)?;
+        let ccip = CcipSession::load(&models.join("ccip/model_feat.onnx"), runtime, acceleration)?;
+        Ok(Self { wd, ccip })
+    }
+    /// The backends WD and CCIP run on now.
+    pub fn backends(&self) -> (Backend, Backend) {
+        (self.wd.backend(), self.ccip.backend())
+    }
+    pub fn ccip_features(&mut self, image: &RgbImage) -> Result<Vec<f32>> {
+        self.ccip.features(image)
+    }
+    pub fn infer(&mut self, image: &RgbImage, tags: usize) -> Result<ModelOutput> {
+        let (probabilities, wd) = self.wd.run(&super::preprocess::wd_input(image, 448), tags)?;
         let ccip = self.ccip_features(image)?;
         Ok(ModelOutput { probabilities, wd, ccip })
     }

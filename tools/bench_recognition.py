@@ -25,6 +25,7 @@ cpu 设 ILLUSTASH_CPU_ONLY=1 全部用 CPU；列了多个时每一次按列出�
       --compute native/terms/target/release/examples/recognition-compute \\
       --models <含 wd_swinv2_v3_emb.onnx 与 ccip/model_feat.onnx 的目录> \\
       --runtime <libonnxruntime.dylib 或 onnxruntime.dll> [--openblas <Windows 的 openblas.dll>] \\
+      [--directml <Windows：与 onnxruntime.dll 一起构建的 DirectML.dll>] \\
       [--images 200] [--anchors 2000] [--trials 3] [--backends default|cpu|cpu,default]
       [--work <空目录>] [--out result.json]
 结果 JSON 写到 --out（默认 <work>/result.json），并打印摘要。只依赖标准库。
@@ -279,6 +280,9 @@ def layout(args, work):
               (args.models / 'ccip/model_feat.onnx', resources / 'models/ccip/model_feat.onnx')]
     if WINDOWS:
         copies.append((args.openblas, resources / 'openblas/openblas.dll'))
+    if args.directml:
+        # 带 DirectML 的 ORT（#271）从自己所在的目录加载 DirectML.dll，与安装布局相同。
+        copies.append((args.directml, resources / 'onnxruntime/DirectML.dll'))
     for source, dest in copies:
         dest.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source, dest)
@@ -439,6 +443,7 @@ def main():
     for name in ('terms', 'worker', 'compute', 'models', 'runtime'):
         parser.add_argument(f'--{name}', type=Path, required=True)
     parser.add_argument('--openblas', type=Path, required=WINDOWS)
+    parser.add_argument('--directml', type=Path, help='Windows：与 --runtime 一起构建的 DirectML.dll')
     parser.add_argument('--images', type=int, default=200)
     parser.add_argument('--anchors', type=int, default=2000)
     parser.add_argument('--trials', type=int, default=3)
@@ -451,7 +456,7 @@ def main():
     backends = args.backends.split(',')
     if not backends or any(b not in ('default', 'cpu') for b in backends) or len(set(backends)) != len(backends):
         raise SystemExit('--backends 只能是 default、cpu，或两者用逗号连接')
-    for name in ('terms', 'worker', 'compute', 'models', 'runtime', 'openblas'):
+    for name in ('terms', 'worker', 'compute', 'models', 'runtime', 'openblas', 'directml'):
         if getattr(args, name):
             setattr(args, name, getattr(args, name).resolve(strict=True))
     owned = args.work is None
