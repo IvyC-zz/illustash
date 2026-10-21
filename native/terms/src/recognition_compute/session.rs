@@ -68,6 +68,10 @@ impl CcipSession {
         Ok(values.to_vec())
     }
 }
+/// WD intra-op threads (#213): the ONNX Runtime default (one per physical core) on Windows,
+/// 4 elsewhere; on the M2 more threads reach the efficiency cores and WD gets slower.
+/// Thread count does not change the CPU outputs, bit for bit.
+pub const WD_THREADS: Option<usize> = if cfg!(windows) { None } else { Some(4) };
 pub struct ModelSessions {
     wd: Session,
     ccip: CcipSession,
@@ -80,7 +84,7 @@ pub struct ModelOutput {
 impl ModelSessions {
     pub fn load(models: &Path, runtime: &Path) -> Result<Self> {
         initialise(runtime)?;
-        let wd = load_session(&models.join("wd_swinv2_v3_emb.onnx"), Some(4))?;
+        let wd = load_session(&models.join("wd_swinv2_v3_emb.onnx"), WD_THREADS)?;
         if wd.inputs.len() != 1 || wd.outputs.len() != 2 {
             return Err(failure("WD 模型", "输入/输出数量不匹配"));
         }
