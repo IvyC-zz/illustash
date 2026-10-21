@@ -63,6 +63,7 @@ class NativeIndexTest(unittest.TestCase):
         worker=self.root/'worker'; worker.write_text(WORKER.replace('PYTHON',os.sys.executable).replace('MODE',repr(str(self.mode))));worker.chmod(0o755)
         self.remote_rows=[dict(tag='carol_(example)',short_tag='carol_example',copyright='example',post_count=300,overlap=.9),dict(tag='dani_(example)',short_tag='dani_example',copyright='example',post_count=120,overlap=.8)]
         self.fail_network=False;self.delay=0;self.calls=[];self.posts=[]
+        self.hold_posts=False;self.posts_entered=threading.Event();self.release_posts=threading.Event()
         parent=self
         class Handler(BaseHTTPRequestHandler):
             def do_GET(self):
@@ -73,7 +74,10 @@ class NativeIndexTest(unittest.TestCase):
                     rows=[{'tag':{'name':r['tag'],'post_count':r['post_count']},'overlap_coefficient':r['overlap']} for r in parent.remote_rows]
                     rows += [{'tag':{'name':'alice','post_count':500},'overlap_coefficient':.9},{'tag':{'name':'skin_(alt)_(example)','post_count':500},'overlap_coefficient':.9}]
                     data=json.dumps({'related_tags':rows}).encode()
-                elif self.path.startswith('/posts'): data=json.dumps(parent.posts).encode()
+                elif self.path.startswith('/posts'):
+                    if 'dani_' in self.path and parent.hold_posts:
+                        parent.posts_entered.set();parent.release_posts.wait(10)
+                    data=json.dumps(parent.posts).encode()
                 else:
                     from PIL import Image
                     out=io.BytesIO();Image.new('RGB',(8,8),(int(self.path.split('/')[-1])%255,0,0)).save(out,format='PNG');data=out.getvalue()
@@ -366,6 +370,61 @@ class NativeIndexTest(unittest.TestCase):
         self.assertIn('输入已改变',v['state']['message'])
         self.assertFalse((self.lib.path/'index-job.json').exists())
         self.check();self.index({'action':'apply','tags':['carol_example']});self.assertEqual(self.finish()['state']['status'],'done')
+
+    def paused(self):
+        for _ in range(500):
+            v=self.index()
+            if v['state']['status']=='paused':return v
+            self.assertIn(v['state']['status'],('idle','checking','checked','fetching'),v)
+            time.sleep(.02)
+        self.fail('index add did not pause')
+
+    def test_add_without_network_after_restart_pauses_keeps_pictures_and_continues(self):
+        # #287: a restart resumes an unfinished add without the person's consent to go online. It waits for them
+        # instead of failing every minute, keeps the pictures it has, and goes on once they allow it.
+        self.env['ILLUSTASH_TEST_INDEX_CONSENT']='1';self.stop(self.process);self.restart()
+        port=self.remote.server_port
+        self.posts=[{'id':i,'tag_string_general':'solo','media_asset':{'variants':[{'type':'720x720','url':f'http://127.0.0.1:{port}/image/{i}'}]}} for i in range(3)]
+        self.check();self.hold_posts=True
+        self.index({'action':'apply','tags':['carol_example','dani_example'],'allow_network':True})
+        self.assertTrue(self.posts_entered.wait(10))
+        job=json.loads((self.lib.path/'index-job.json').read_text());folder=Path(job['folder'])
+        self.assertTrue((folder/'char-patch/carol_example-refs.json').is_file())
+        self.process.kill();self.process.wait();self.release_posts.set();self.hold_posts=False
+        self.assertEqual(sorted(p for p in self.calls if p.startswith('/image/')),['/image/0','/image/1','/image/2'])
+        self.restart();v=self.paused()['state']
+        self.assertEqual((v['kind'],v['done'],v['total'],v['message']),('add',1,2,'继续下载参考图需要你确认联网'),v)
+        self.assertTrue(json.loads((self.lib.path/'index-job.json').read_text())['paused'])
+        # The automatic retry leaves it waiting, and a new check or another add waits for the person too.
+        calls=len(self.calls);self.stop(self.process);self.restart();self.assertEqual(self.paused()['state'],v)
+        self.assertEqual(len(self.calls),calls)
+        for body in ({'action':'check','allow_network':True},{'action':'apply','tags':['carol_example'],'allow_network':True}):
+            self.assertEqual(self.request('/api/index',body)['status'],400)
+        # A sync while it waited changes the source; the add goes on from the library as it is now.
+        with sqlite3.connect(self.lib.source) as c:c.execute("UPDATE labels SET conf=.5 WHERE dim='character' AND uuid='b'")
+        self.index({'action':'resume','allow_network':True});v=self.finish()
+        self.assertEqual((v['state']['status'],v['state']['added']),('done',1),v)
+        # Carol's pictures were kept, Dani's fetched once; nothing was downloaded twice.
+        images=[p for p in self.calls if p.startswith('/image/')]
+        self.assertEqual(len(images),6,images)
+        self.assertFalse((self.lib.path/'index-job.json').exists())
+
+    def test_paused_add_can_be_given_up(self):
+        self.env['ILLUSTASH_TEST_INDEX_CONSENT']='1';self.stop(self.process);self.restart()
+        self.assertEqual(self.request('/api/index',{'action':'discard'})['status'],400)
+        self.check();before=snapshot(self.lib.source)
+        self.index({'action':'apply','tags':['carol_example']});v=self.paused()['state']
+        self.assertEqual((v['done'],v['total']),(0,1),v)
+        folder=Path(json.loads((self.lib.path/'index-job.json').read_text())['folder'])
+        self.assertEqual(self.index({'action':'discard'})['state'],{'status':'idle'})
+        self.assertFalse((self.lib.path/'index-job.json').exists());self.assertFalse(folder.exists())
+        for k in ('characters','character_aliases','labels'):self.assertEqual(snapshot(self.lib.source)[k],before[k])
+        self.assertEqual(self.check()['check']['missing'],self.remote_rows)
+
+    def test_failure_says_what_failed_without_the_error_kind(self):
+        self.check();self.mode.write_text('fail')
+        self.index({'action':'apply','tags':['carol_example']});v=self.finish()['state']
+        self.assertEqual((v['status'],v['kind'],v['message']),('error','add','角色索引计算 worker 失败'),v)
 
     def test_apply_source_projection_names_and_history_match_python_chain(self):
         expected=self.rec.value('python chain')

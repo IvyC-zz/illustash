@@ -262,7 +262,7 @@ Path(sys.argv[2]).write_text(json.dumps(v,allow_nan=False))
         def write(c):
             c.execute("INSERT OR REPLACE INTO prefs VALUES ('synthetic_view','grid')")
             c.execute("INSERT OR REPLACE INTO name_cache VALUES ('synthetic','{}')")
-            c.execute("INSERT OR REPLACE INTO name_settings VALUES ('traffic_reserved','42')")
+            c.execute("INSERT OR REPLACE INTO name_settings VALUES ('synthetic_setting','42')")
             c.execute("INSERT INTO sync_runs(status) VALUES ('done')")
         _,seen,runs=self.inflight(lambda:self.request('/api/regroup',{}),write)
         self.assertEqual(self.state()['status'],'idle',self.state())

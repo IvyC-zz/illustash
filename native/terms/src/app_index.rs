@@ -443,12 +443,44 @@ impl Updater {
         };
         match b["action"].as_str() {
             Some("watch") => set_watch(lib, &self.dir, &b)?,
+            // A job that paused for the person (#287): go on with a new run, or give it up before anything of it
+            // was written.
+            Some("resume") => {
+                if b.get("allow_network").is_some_and(|v| !v.is_boolean()) {
+                    return bad("联网确认必须是布尔值");
+                }
+                if busy {
+                    return bad("正在与 Photos 同步，完成后再更新角色索引");
+                }
+                if !self.journal.exists() {
+                    return bad("没有等待继续的索引任务");
+                }
+                self.next_retry = Instant::now() + Duration::from_secs(60);
+                self.start(lib, json!({"action":"resume", "allow_network":b["allow_network"]}))?;
+            }
+            Some("discard") => {
+                if self.task.as_ref().is_some_and(Task::running) {
+                    return bad("角色索引正在更新，请稍后");
+                }
+                if paused(&self.journal).is_none() {
+                    return bad("没有可以放弃的添加任务");
+                }
+                let job: protocol::IndexJob = protocol::read(&self.journal)?;
+                if job.folder.parent() == Some(lib.instance_path().join("index-jobs").as_path()) {
+                    let _ = std::fs::remove_dir_all(&job.folder);
+                }
+                std::fs::remove_file(&self.journal)?;
+                *self.state.lock().expect("index state mutex poisoned") = State::from(json!({"status":"idle"}));
+            }
             Some("check" | "apply" | "drop") => {
                 if b.get("allow_network").is_some_and(|v| !v.is_boolean()) {
                     return bad("联网确认必须是布尔值");
                 }
                 if b["action"] == "check" && !self.network && b["allow_network"] != true {
                     return bad("请先确认本次检查允许联网查询 Danbooru");
+                }
+                if paused(&self.journal).is_some() && !self.task.as_ref().is_some_and(Task::running) {
+                    return bad("上次添加角色已暂停，请先在任务面板里继续或放弃");
                 }
                 if b["action"] != "check" && busy {
                     return bad("正在与 Photos 同步，完成后再更新角色索引");
@@ -488,7 +520,13 @@ impl Updater {
             return;
         }
         if self.journal.exists() {
-            if !busy {
+            // A paused job waits for the person; after a restart it shows where it stopped.
+            if let Some(waiting) = paused(&self.journal) {
+                let mut state = self.state.lock().expect("index state mutex poisoned");
+                if state.status() == Status::Idle {
+                    *state = waiting.into();
+                }
+            } else if !busy {
                 self.next_retry = Instant::now() + Duration::from_secs(60);
                 let _ = self.start(lib, json!({"action":"resume"}));
             }
@@ -561,50 +599,70 @@ impl Updater {
             self.state.clone(),
             self.network || b["allow_network"] == true,
         );
+        // What a failure says it was: a resumed job is the add or drop it continues.
+        let kind = match (action, std::fs::read(&self.journal).ok()) {
+            ("resume", Some(bytes)) => {
+                match serde_json::from_slice::<Value>(&bytes).ok().map(|j| j["action"].clone()) {
+                    Some(Value::String(a)) if a == "drop" => "drop",
+                    _ => "add",
+                }
+            }
+            ("check", _) => "check",
+            ("drop", _) => "drop",
+            _ => "add",
+        };
         let status = match action {
             "check" => "checking",
             "drop" => "building",
             _ => "fetching",
         };
         *state.lock().expect("index state mutex poisoned") = json!({"status":status,"started_at":now()}).into();
-        self.task = Some(Task::start(
-            identity,
-            Some(Duration::from_millis(
-                std::env::var("ILLUSTASH_INDEX_TIMEOUT_MS").ok().and_then(|s| s.parse().ok()).unwrap_or(600000),
-            )),
-            move |ctx| {
-                let run = || {
-                    let net = crate::app_name_sources::Source::new(lib.db(), ctx.cancellation_arc(), network, true)?;
+        self.task = Some(Task::start_with(identity, deadline(), move |ctx| {
+            let run = || {
+                let net = crate::app_name_sources::Source::new(lib.db(), ctx.cancellation_arc(), network, true)?;
 
-                    if b["action"] == "check" {
-                        let checked = candidates(&lib, &shared, &dir, &net)?;
-                        let found =
-                            checked["missing"].as_array().expect("candidates always returns a missing array").len();
-                        ctx.check()?;
-                        write_check(&dir.join("check.json"), &checked)?;
-                        update(&state, json!({"status":"checked","found":found,"finished_at":now()}));
-                        Ok(())
-                    } else {
-                        patch(
-                            &lib,
-                            &PatchPaths { shared: &shared, dir: &dir, journal: &journal },
-                            &b,
-                            &rows,
-                            &net,
-                            &ctx,
-                            &state,
-                        )
-                    }
-                };
-                let result = run();
-                if let Err(ref e) = result {
-                    let message = e.to_string().chars().take(300).collect::<String>();
-                    update(&state, json!({"status":"error","message":message,"finished_at":now()}));
+                if b["action"] == "check" {
+                    let checked = candidates(&lib, &shared, &dir, &net)?;
+                    let found = checked["missing"].as_array().expect("candidates always returns a missing array").len();
+                    ctx.check()?;
+                    write_check(&dir.join("check.json"), &checked)?;
+                    update(&state, json!({"status":"checked","found":found,"finished_at":now()}));
+                    Ok(())
+                } else {
+                    patch(
+                        &lib,
+                        &PatchPaths { shared: &shared, dir: &dir, journal: &journal },
+                        &b,
+                        &rows,
+                        &net,
+                        &ctx,
+                        &state,
+                    )
                 }
-                result
-            },
-        ));
+            };
+            let result = run();
+            if let Err(ref e) = result {
+                // The reason alone: the error's kind ("不合法：…") is for the code, not the person (#287).
+                let message = ctx.stop_reason().unwrap_or_else(|| e.reason()).chars().take(300).collect::<String>();
+                update(&state, json!({"status":"error","kind":kind,"message":message,"finished_at":now()}));
+            }
+            result
+        }));
         Ok(())
+    }
+}
+/// An index run stops once it makes no progress for ILLUSTASH_INDEX_TIMEOUT_MS (default 10 minutes); every
+/// picture downloaded and every step the worker reports is progress, so adding many characters is not cut off
+/// at a fixed time from its start (#287). ILLUSTASH_INDEX_MAX_MS (default 24 hours) bounds the whole run.
+fn deadline() -> crate::app_tasks::Deadline {
+    let ms = |name: &str, default: u64| {
+        Duration::from_millis(
+            std::env::var(name).ok().and_then(|v| v.parse::<u64>().ok()).filter(|v| *v > 0).unwrap_or(default),
+        )
+    };
+    crate::app_tasks::Deadline {
+        idle: Some(ms("ILLUSTASH_INDEX_TIMEOUT_MS", 600_000)),
+        limit: Some(ms("ILLUSTASH_INDEX_MAX_MS", 86_400_000)),
     }
 }
 // Cross-process shared-index lock. The OS releases it on crash; no stale lock file blocks restart.
@@ -656,7 +714,12 @@ fn copy_tree(src: &Path, dst: &Path, ctx: &TaskContext) -> Result<()> {
     }
     Ok(())
 }
-fn download(address: &str, path: &Path, ctx: &TaskContext, authorized: bool, db: &Path) -> Result<()> {
+/// The most one reference picture may take.
+const PICTURE_MAX: u64 = 2_000_000;
+/// Shown while an add waits for the person, and kept in the job's journal until they let it go on (#287): after a
+/// restart or the automatic retry nobody allowed the network for this run, and pictures are still missing.
+const NETWORK_PAUSE: &str = "继续下载参考图需要你确认联网";
+fn download(address: &str, path: &Path, ctx: &TaskContext, authorized: bool) -> Result<()> {
     ctx.check()?;
     let u = url::Url::parse(address).map_err(|_| Error::Invalid("参考图地址不正确".into()))?;
     let local = matches!(u.host_str(), Some("127.0.0.1" | "localhost" | "[::1]"));
@@ -671,38 +734,47 @@ fn download(address: &str, path: &Path, ctx: &TaskContext, authorized: bool, db:
     let mut last = None;
     for _ in 0..3 {
         ctx.check()?;
-        let mut c = writer(db)?;
-        let tx = c.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-        let used: i64 = tx
-            .query_row("SELECT CAST(value AS INTEGER) FROM name_settings WHERE key='traffic_reserved'", [], |r| {
-                r.get(0)
-            })
-            .optional()?
-            .unwrap_or(0);
-        if used + 2_000_000 > 500_000_000 {
-            return Err(Error::Invalid("索引流量预算已用完".into()));
-        }
-        tx.execute(
-            "INSERT OR REPLACE INTO name_settings(key,value) VALUES ('traffic_reserved',?)",
-            [(used + 2_000_000).to_string()],
-        )?;
-        tx.commit()?;
         match ureq::AgentBuilder::new().redirects(0).timeout(Duration::from_secs(25)).build().get(address).call() {
             Ok(r) => {
                 let mut bytes = vec![];
-                r.into_reader().take(2_000_001).read_to_end(&mut bytes)?;
-                if bytes.len() > 2_000_000 {
-                    return bad("参考图超过 2 MB");
+                if r.into_reader().take(PICTURE_MAX + 1).read_to_end(&mut bytes).is_err() {
+                    last = Some(Error::Network("参考图下载失败".into()));
+                    continue;
+                }
+                if bytes.len() as u64 > PICTURE_MAX {
+                    return Err(Error::Network("参考图超过 2 MB".into()));
                 };
                 ctx.check()?;
                 std::fs::create_dir_all(path.parent().expect("index file path must have a parent"))?;
-                std::fs::write(path, bytes)?;
+                // Whole or absent: a picture kept for the next run is never one cut short.
+                let tmp = path.with_extension(format!("img.{}.tmp", crate::store::new_key()?));
+                std::fs::write(&tmp, bytes)?;
+                std::fs::rename(tmp, path)?;
+                ctx.progressed();
                 return Ok(());
             }
             Err(_) => last = Some(Error::Network("参考图下载失败".into())),
         }
     }
     Err(last.expect("download retry loop always records a failure"))
+}
+/// The journal's note of a job that waits for the person to let it go on; the automatic retry leaves it alone.
+const PAUSED: &str = "paused";
+/// Whether reaching this service needs the person's consent: any but a synthetic one on this machine, which
+/// tests may also have count as remote to see an add wait.
+fn needs_consent(base: &str) -> bool {
+    !url::Url::parse(base).is_ok_and(|u| matches!(u.host_str(), Some("127.0.0.1" | "localhost" | "[::1]")))
+        || std::env::var_os("ILLUSTASH_TEST_INDEX_CONSENT").is_some()
+}
+/// Whether a character's reference pictures are all in place in the job's folder.
+fn fetched(folder: &Path, cid: &str) -> bool {
+    meta(folder, cid)["source"] == "danbooru-patch"
+        || folder.join("char-patch").join(format!("{cid}-refs.json")).exists()
+}
+/// The state of a job that waits in its journal, if it does.
+fn paused(journal: &Path) -> Option<Value> {
+    let job: protocol::IndexJob = protocol::read(journal).ok()?;
+    job.extra.get(PAUSED).filter(|_| job.phase == protocol::JobPhase::Prepared).cloned()
 }
 struct PatchPaths<'a> {
     shared: &'a Path,
@@ -733,9 +805,21 @@ fn patch(
     }
     if job.phase == protocol::JobPhase::Prepared {
         job.identity = ctx.identity().clone();
+        // Going on: a failure from here is retried as before, and a pause is written again. A job that waited
+        // for the person may have waited through syncs; it goes on from the library as it is now, keeping the
+        // pictures it has (#287).
+        if job.extra.remove(PAUSED).is_some() {
+            job.before = snapshot_library(lib, &folder, ctx)?;
+        }
         write(journal, &protocol::value(&job)?)?;
-        if job.action == protocol::IndexAction::Apply {
-            fetch_references(&job.rows, &folder, net, ctx, state)?;
+        if job.action == protocol::IndexAction::Apply && !fetch_references(&job.rows, &folder, net, ctx, state)? {
+            let done = job.rows.iter().filter(|r| fetched(&folder, &r.short_tag)).count();
+            let paused =
+                json!({"status":"paused","kind":"add","done":done,"total":job.rows.len(),"message":NETWORK_PAUSE});
+            job.extra.insert(PAUSED.into(), paused.clone());
+            write(journal, &protocol::value(&job)?)?;
+            *state.lock().expect("index state mutex poisoned") = paused.into();
+            return Ok(());
         }
         let response = compute(&job, &folder, ctx, state)?;
         validate(lib, &response, &folder.join("response.json"))?;
@@ -755,28 +839,15 @@ fn prepare_job(
     ctx: &TaskContext,
 ) -> Result<protocol::IndexJob> {
     let (shared, dir, journal) = (paths.shared, paths.dir, paths.journal);
-    let src = crate::app_library::read_connection(&lib.source())?;
     let id = &ctx.identity().task_id;
     let folder = lib.instance_path().join("index-jobs").join(id);
     std::fs::create_dir_all(&folder)?;
     let mut prepared = PreparedStage(folder.clone(), false);
-    backup_db(&src, &folder.join("pi.db"), ctx)?;
+    let before = snapshot_library(lib, &folder, ctx)?;
     copy_tree(&shared.join("char-index"), &folder.join("char-index"), ctx)?;
     copy_tree(&shared.join("game-chars"), &folder.join("game-chars"), ctx)?;
     copy_tree(&dir.join("raw"), &folder.join("char-patch/raw"), ctx)?;
     copy_tree(&dir.join("rejected"), &folder.join("char-patch/rejected"), ctx)?;
-    for name in ["full-features.npy", "full-manifest.csv"] {
-        let from = lib.instance_path().join("features").join(name);
-        if from.exists() {
-            std::fs::copy(from, folder.join(name))?;
-        }
-    }
-    let album = lib.instance_path().join("album-char-map.json");
-    if album.exists() {
-        std::fs::copy(album, folder.join("album-char-map.json"))?;
-    } else {
-        write(&folder.join("album-char-map.json"), &json!({"map":{}}))?;
-    }
     std::fs::create_dir_all(folder.join("char-patch/rejected"))?;
     let mut plan = read(&dir.join("plan.json"), json!([])).as_array().cloned().unwrap_or_default();
     for r in rows {
@@ -785,7 +856,6 @@ fn prepare_job(
         }
     }
     write(&folder.join("char-patch/plan.json"), &json!(plan))?;
-    let before = fingerprint(&crate::app_library::read_connection(&folder.join("pi.db"))?)?;
     let job = protocol::parse(
         json!({
             "version":1,"package":lib.instance_path(),"job_id":id,"identity":ctx.identity(),"action":b["action"],
@@ -797,14 +867,40 @@ fn prepare_job(
     prepared.1 = true;
     Ok(job)
 }
+/// The job's copy of what the library may change while the job waits: the source database, the library's
+/// features and album map. The shared index files only change under index jobs, which wait for this one.
+/// Returns the fingerprint the result is checked against when it is committed.
+fn snapshot_library(lib: &Library, folder: &Path, ctx: &TaskContext) -> Result<String> {
+    let src = crate::app_library::read_connection(&lib.source())?;
+    let _ = std::fs::remove_file(folder.join("pi.db"));
+    backup_db(&src, &folder.join("pi.db"), ctx)?;
+    for name in ["full-features.npy", "full-manifest.csv"] {
+        let from = lib.instance_path().join("features").join(name);
+        if from.exists() {
+            std::fs::copy(from, folder.join(name))?;
+        } else {
+            let _ = std::fs::remove_file(folder.join(name));
+        }
+    }
+    let album = lib.instance_path().join("album-char-map.json");
+    if album.exists() {
+        std::fs::copy(album, folder.join("album-char-map.json"))?;
+    } else {
+        write(&folder.join("album-char-map.json"), &json!({"map":{}}))?;
+    }
+    fingerprint(&crate::app_library::read_connection(&folder.join("pi.db"))?)
+}
 /// Downloads up to twenty Danbooru reference pictures of each new character, unless its index is already patched.
+/// A character whose list of pictures is written is done; a later run of the same job skips it, and reuses the
+/// pictures of the one it stopped in (#287). Returns false when the characters still to fetch need the network
+/// and nobody allowed it for this run (a restart or the automatic retry): the add then waits for the person.
 fn fetch_references(
     rows: &[protocol::IndexRow],
     folder: &Path,
     net: &crate::app_name_sources::Source,
     ctx: &TaskContext,
     state: &Mutex<State>,
-) -> Result<()> {
+) -> Result<bool> {
     for (i, r) in rows.iter().enumerate() {
         ctx.check()?;
         let cid = r.short_tag.as_str();
@@ -812,8 +908,11 @@ fn fetch_references(
             return bad("索引角色 ID 不正确");
         };
         update(state, json!({"status":"fetching","done":i,"total":rows.len()}));
-        if meta(folder, cid)["source"] == "danbooru-patch" {
+        if fetched(folder, cid) {
             continue;
+        }
+        if !net.authorized && needs_consent(&net.db_base) {
+            return Ok(false);
         }
         let query = [
             ("tags", format!("{} solo rating:g,s", r.tag)),
@@ -831,20 +930,23 @@ fn fetch_references(
             if let Some(v) = variant {
                 let pid = p["id"].as_u64().ok_or_else(|| Error::Invalid("参考图帖子 ID 不正确".into()))?;
                 let path = folder.join("char-patch/img").join(cid).join(format!("{pid}.img"));
-                if let Err(e) = download(v["url"].as_str().unwrap_or(""), &path, ctx, net.authorized, &net.path) {
-                    ctx.check()?;
-                    if matches!(e, Error::Network(_)) {
-                        continue;
-                    } else {
-                        return Err(e);
+                if !path.exists() {
+                    if let Err(e) = download(v["url"].as_str().unwrap_or(""), &path, ctx, net.authorized) {
+                        ctx.check()?;
+                        if matches!(e, Error::Network(_)) {
+                            continue;
+                        } else {
+                            return Err(e);
+                        }
                     }
                 }
                 refs.push(json!({"id":pid,"path":path,"general":p["tag_string_general"]}));
             }
         }
         write(&folder.join("char-patch").join(format!("{cid}-refs.json")), &json!(refs))?;
+        ctx.progressed();
     }
-    Ok(())
+    Ok(true)
 }
 /// Runs the index worker on the job's folder, passing on its progress, and reads back its checked response.
 fn compute(
@@ -919,6 +1021,10 @@ fn report_progress(folder: &Path, ctx: &TaskContext, state: &Mutex<State>) {
         if let Some(n) = p[key].as_u64().filter(|n| *n <= 100000) {
             fields[key] = n.into();
         }
+    }
+    let before = state.lock().expect("index state mutex poisoned").value();
+    if ["status", "done", "total"].iter().any(|k| fields.get(*k).is_some_and(|v| before.get(*k) != Some(v))) {
+        ctx.progressed();
     }
     update(state, fields);
 }

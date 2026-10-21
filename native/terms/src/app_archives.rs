@@ -505,7 +505,7 @@ impl Exports {
                 Err(e) => Json::object([
                     ("status", "error".into()),
                     ("path", dest.to_string_lossy().as_ref().into()),
-                    ("error", e.to_string().chars().take(200).collect::<String>().into()),
+                    ("error", e.reason().chars().take(200).collect::<String>().into()),
                 ]),
             };
         })?;

@@ -4,7 +4,7 @@ import {t, tb} from '../core/i18n.js';
 import {esc, number, stamp, localTime} from '../core/format.js';
 import {state} from '../core/state.js';
 import {api, post, shared, readError} from '../core/session.js';
-import {SYNC_ACTIVE, INDEX_ACTIVE, NAMES_ACTIVE, SIMILAR_ACTIVE, PROV_ACTIVE, RUN_STATUS, onJob, syncLine, syncBar, syncDoneText, indexLine, indexEndText,
+import {SYNC_ACTIVE, INDEX_ACTIVE, NAMES_ACTIVE, SIMILAR_ACTIVE, PROV_ACTIVE, RUN_STATUS, onJob, syncLine, syncBar, syncDoneText, indexLine, indexEndText, resumeIndex, discardIndex,
   namesLine, taskSimilar, pollSync, pollIndex, pollNames, loadProvenance, startSync, checkIndex, refreshNames, provenanceAction, PHOTOS_PRIVACY, photosHelp, photosRefused} from '../core/jobs.js';
 import {loadLibraries, updatesTick} from '../core/settings.js';
 import {$, toast, error, fold, wireFolds} from './dom.js';
@@ -52,8 +52,8 @@ export function taskList() {
       action: `<button class="quiet small" data-task="sync" ${SYNC_ACTIVE.includes(s.status) || s.status === 'off' ? 'disabled' : ''}>${t('立即同步')}</button>`,
       log: state.syncHistory?.length ? [t('同步记录'), `<table class="settings-table"><tr><th>${t('时间')}</th><th>${t('新增')}</th><th>${t('移除', {context: 'column'})}</th><th>${t('导入')}</th><th>${t('失败')}</th></tr>${state.syncHistory.slice(0, 8).map(r => `<tr><td>${esc(stamp(r.started_at))}</td><td>${number(r.found)}</td><td>${number(r.removed)}</td><td>${number(r.imported)}</td><td>${number(r.failed)}</td></tr>`).join('')}</table>`] : null},
     {key: 'index', name: t('检查新角色'), busy: t('检查新角色中'), active: INDEX_ACTIVE.includes(ix.status), line: state.index ? indexLine(ix, state.index.check) : '…', warn: ix.status === 'error',
-      body: INDEX_ACTIVE.includes(ix.status) ? bar(ix.done, ix.total) : '',
-      action: `<button class="quiet small" data-task="index" ${INDEX_ACTIVE.includes(ix.status) || ix.status === 'off' || !state.index?.watch?.works.length ? 'disabled' : ''} title="${state.index?.watch?.works.length ? t('查关注作品在 Danbooru 上有没有新角色（只发送作品名）') : t('先在资料库里关注作品')}">${t('立即检查')}</button>`},
+      body: INDEX_ACTIVE.includes(ix.status) || ix.status === 'paused' ? bar(ix.done, ix.total) : '',
+      action: `<button class="quiet small" data-task="index" ${INDEX_ACTIVE.includes(ix.status) || ix.status === 'off' || ix.status === 'paused' || !state.index?.watch?.works.length ? 'disabled' : ''} title="${ix.status === 'paused' ? t('先继续或放弃暂停的添加') : state.index?.watch?.works.length ? t('查关注作品在 Danbooru 上有没有新角色（只发送作品名）') : t('先在资料库里关注作品')}">${t('立即检查')}</button>`},
     {key: 'names', name: t('角色名称'), busy: t('角色名称中'), active: NAMES_ACTIVE.includes(nm.status), off: nm.status === 'off', line: namesLine(nm) + (nm.error ? t('：{reason}', {reason: tb(nm.error)}) : ''), warn: nm.status === 'error', body: NAMES_ACTIVE.includes(nm.status) ? bar(nm.done, nm.total) : '',
       action: `<button class="quiet small" data-task="names" ${NAMES_ACTIVE.includes(nm.status) || nm.status === 'off' || !state.names ? 'disabled' : ''} title="${t('从 Bangumi 重新获取全部角色的中文名（只发送 tag 与作品名）')}">${t('重新获取')}</button>`},
     {key: 'similar', name: t('相似图片'), busy: t('相似图片中'), active: SIMILAR_ACTIVE.includes(sim.status), off: sim.status === 'off', line: taskSimilar(sim), warn: sim.status === 'error', body: SIMILAR_ACTIVE.includes(sim.status) ? bar(sim.done, sim.total) : '',
@@ -83,7 +83,9 @@ function taskAsks() {
     <p class="muted-note">${t('授权只对这一次有效，下次开始会再问。图片本身不会上传。查过的图和画师不会重查，可以随时停止。')}</p>
     <div class="prov-confirm-btns"><button class="primary" data-prov="start" data-network="1">${t('授权并开始')}</button><button class="quiet" data-prov="start">${t('只跑本地（签名识别）')}</button><button class="quiet" data-prov="cancel">${t('取消')}</button></div></div>`);
   if (photosRefused(s)) asks.push(`<div class="task-ask"><span>${photosHelp()}</span><button class="primary small" data-task="photos-privacy">${t('打开系统设置')}</button></div>`);
-  if (missing.length && !INDEX_ACTIVE.includes(state.index.state.status)) asks.push(`<div class="task-ask"><span>${t('上次检查发现 {n} 个还没收录的角色', {n: `<b>${number(missing.length)}</b>`})}</span><button class="primary small" data-task="index-add">${t('查看并添加…')}</button></div>`);
+  const ix = state.index?.state || {};
+  if (ix.status === 'paused') asks.push(`<div class="task-ask"><span>${t('添加角色已暂停：已下载 {done}/{total} 个角色的参考图。{reason}', {done: number(ix.done || 0), total: number(ix.total || 0), reason: esc(tb(ix.message || ''))})}</span><button class="primary small" data-task="index-resume">${t('继续下载…')}</button><button class="quiet small" data-task="index-discard">${t('放弃')}</button></div>`);
+  else if (missing.length && !INDEX_ACTIVE.includes(ix.status)) asks.push(`<div class="task-ask"><span>${t('上次检查发现 {n} 个还没收录的角色', {n: `<b>${number(missing.length)}</b>`})}</span><button class="primary small" data-task="index-add">${t('查看并添加…')}</button></div>`);
   return asks;
 }
 export function renderTasks() {
@@ -156,6 +158,8 @@ export function wireTasks() {
     try {
       if (act === 'sync') await startSync();
       else if (act === 'index') { if (!await checkIndex(confirmAction)) return; }
+      else if (act === 'index-resume') { if (!await resumeIndex(confirmAction)) return; pollIndex(); }
+      else if (act === 'index-discard') { if (!await discardIndex(confirmAction)) return; }
       else if (act === 'names') { await refreshNames(); toast(t('已开始重新获取角色名称')); }
       else if (act === 'similar') { await post('/api/similar', {}); state.settings = await api('/api/settings'); }
     } catch (err) { toast(err.message); } finally { b.disabled = false; }

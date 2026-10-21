@@ -776,9 +776,11 @@ impl Research {
                 Ok(v) => {
                     let mut public = Json::object([("status", "idle".into())]);
                     if !["oc", "relate"].contains(&kind.as_str()) {
-                        public.set("at", chrono::Local::now().format("%H:%M:%S").to_string().into());
+                        // The date too: the task panel shows "MM-DD hh:mm" from it, as for the other jobs (#287).
+                        let at = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
+                        public.set("at", at.clone().into());
                         public.extend(v.clone());
-                        public.set("learn_at", chrono::Local::now().format("%H:%M:%S").to_string().into());
+                        public.set("learn_at", at.into());
                         public.set("status", "idle".into());
                     }
                     *state.lock().expect("research state mutex poisoned") = public.into();
@@ -809,7 +811,7 @@ impl Research {
                         }
                     }
                     *state.lock().expect("research state mutex poisoned") =
-                        Json::object([("status", "error".into()), ("message", e.to_string().into())]).into();
+                        Json::object([("status", "error".into()), ("message", e.reason().into())]).into();
                     if let Some(tx) = reply {
                         let _ = tx.send(Err(Error::Invalid(e.to_string())));
                     }
@@ -1452,7 +1454,7 @@ mod tests {
         let changes: Vec<(&str, Change, &[Scope])> = vec![
             ("prefs", Box::new(|| app("INSERT INTO prefs VALUES ('synthetic_view','grid')")), &[]),
             ("name cache", Box::new(|| app("INSERT INTO name_cache VALUES ('synthetic','{}')")), &[]),
-            ("name traffic", Box::new(|| app("INSERT INTO name_settings VALUES ('traffic_reserved','42')")), &[]),
+            ("name settings", Box::new(|| app("INSERT INTO name_settings VALUES ('synthetic_setting','42')")), &[]),
             ("model key", Box::new(|| app("INSERT INTO name_settings VALUES ('model_key','synthetic')")), &[]),
             // Names live in the core tables since core v8 (#201); core name tables are learning inputs, as the mirror
             // made them before. The names version itself is not an input (`UNREAD_META`).
