@@ -133,7 +133,7 @@ class RecognitionModelTest(unittest.TestCase):
             self.env['ILLUSTASH_ROOT'] = str(self.resources)
 
     def assert_ccip(self, actual, expected):
-        """CCIP vectors and the distances computed from them: bit for bit on the CPU."""
+        """CCIP vectors and the distances and confidences computed from them: bit for bit on the CPU."""
         np.testing.assert_array_equal(actual, expected)
 
     def invoke(self, binary, request, *, env=None):
@@ -234,8 +234,11 @@ class RecognitionModelTest(unittest.TestCase):
                              np.asarray([r['distance'] for r in expected_claims], np.float32))
             np.testing.assert_array_equal(np.asarray([r['threshold'] for r in claim['claims']], np.float32),
                                           np.asarray([r['threshold'] for r in expected_claims], np.float32))
-            self.assertEqual([(r['asset'], r['character'], r['confidence']) for r in claim['claims']],
-                             [(r['asset'], r['character'], r['confidence']) for r in expected_claims])
+            self.assertEqual([(r['asset'], r['character']) for r in claim['claims']],
+                             [(r['asset'], r['character']) for r in expected_claims])
+            # The confidence is 1 - distance, so it follows the distance.
+            self.assert_ccip(np.asarray([r['confidence'] for r in claim['claims']]),
+                             np.asarray([r['confidence'] for r in expected_claims]))
             for model in ('wd', 'ccip'):
                 expected = np.asarray([self.reference[int(a.split('-')[1]) % 8][model] for a in manifest['assets']], np.float32)
                 (self.assert_ccip if model == 'ccip' else np.testing.assert_array_equal)(np.load(path / (model+'.npy')), expected)
@@ -454,11 +457,18 @@ class AcceleratedRecognitionTest(RecognitionModelTest):
         self.assertEqual([r['ccip'] for r in self.infer()], [r['ccip'] for r in got])
 
     def assert_ccip(self, actual, expected):
-        # Distances of 0.01–0.15 decide; a change of 1e-6 is two orders below the 1.3e-7 to 1e-4 steps that matter.
-        np.testing.assert_allclose(actual, expected, rtol=0, atol=1e-6)
+        actual, expected = np.asarray(actual, np.float64), np.asarray(expected, np.float64)
+        self.assertEqual(actual.shape, expected.shape)
+        if actual.ndim == 2:
+            # Raw vectors (unnormalised, values up to about 5): by direction, as the distances use them.
+            cosine = (actual * expected).sum(1) / np.linalg.norm(actual, axis=1) / np.linalg.norm(expected, axis=1)
+            self.assertGreaterEqual(cosine.min(), self.COSINE)
+        else:
+            # Distances of 0.01–0.15 decide, and #213 saw them move by 1.3e-7 at most.
+            np.testing.assert_allclose(actual, expected, rtol=0, atol=1e-6)
 
     # test_candidate_batches_bad_image_and_synthetic_anchor_claims runs as inherited: WD outputs and labels bit for
-    # bit, CCIP vectors and distances through assert_ccip, characters and confidences exactly.
+    # bit, CCIP vectors, distances and confidences through assert_ccip, the claimed characters exactly.
 
     def test_installed_no_anchor_bad_image_and_explicit_dependency_failures(self):
         self.skipTest('the CPU case covers dependency failures; nothing accelerated is involved')
