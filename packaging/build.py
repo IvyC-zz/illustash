@@ -33,7 +33,7 @@ def copy(source, destination):
 
 # Every artifact (portable ZIP, base and full installers) carries these notices under
 # resources/licenses/; the full installers' compute/ copies them with the rest of resources/.
-NOTICES = {'licenses/LICENSE': 'LICENSE', 'licenses/LICENSE-EXCEPTION': 'LICENSE-EXCEPTION', 'licenses/THIRD_PARTY.md': 'docs/THIRD_PARTY.md',
+NOTICES = {'licenses/LICENSE': 'LICENSE', 'licenses/THIRD_PARTY.md': 'docs/THIRD_PARTY.md',
            'licenses/pocketfft/LICENSE.md': 'native/terms/vendor/pocketfft/LICENSE.md',
            'licenses/LCMS.txt': 'native/terms/licenses/LCMS.txt',
            'licenses/rust-dependencies.txt': 'packaging/rust-licenses/rust-dependencies.txt'}
