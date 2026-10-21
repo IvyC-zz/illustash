@@ -106,3 +106,21 @@ test('downloaded models can be deleted, but not while something uses them', () =
   assert.equal(context.deleteButton(models({status: 'ready', on_demand: false})), '', 'models that came with the install stay');
   assert.equal(context.deleteButton(models()), '', 'nothing to delete yet');
 });
+
+test('the acceleration switch shows only where there is an accelerator, and says when it fell back (#270)', () => {
+  assert.equal(context.accelerationLine(models()), '', 'an older host without the field');
+  assert.equal(context.accelerationLine(models({acceleration: {available: false, backend: null, on: true, last: {}}})), '');
+  const on = models({acceleration: {available: true, backend: 'coreml', on: true, last: {}}});
+  assert.match(context.accelerationLine(on), /<b>使用 GPU 加速识别<\/b>/);
+  assert.match(context.accelerationLine(on), /神经引擎（Core ML）/);
+  assert.match(context.accelerationLine(on), /data-acceleration checked/);
+  assert.doesNotMatch(context.accelerationLine(on), /<em>/);
+  const off = models({acceleration: {available: true, backend: 'directml', on: false, last: {}}});
+  assert.match(context.accelerationLine(off), /用显卡计算/);
+  assert.match(context.accelerationLine(off), /data-acceleration >/);
+  const fell = {ccip: {requested: 'coreml', used: 'cpu', reason: 'coreml <ccip>: failed', at: 1}};
+  assert.match(context.accelerationLine(models({acceleration: {available: true, backend: 'coreml', on: true, last: fell}})),
+    /<em>上次没能用上加速，已改用 CPU：coreml &lt;ccip&gt;: failed<\/em>/);
+  assert.doesNotMatch(context.accelerationLine(models({acceleration: {available: true, backend: 'coreml', on: false, last: fell}})), /<em>/,
+    'switched off: nothing to explain');
+});

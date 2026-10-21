@@ -37,6 +37,17 @@ impl Earlier {
         Some(found)
     }
 }
+/// The picture's file changed: what was recognised from the old file goes, and it is recognised again. Its
+/// recognition record goes too, or the import would compare the new result with the old one and refuse it: a
+/// different picture, or the same one on another execution backend (#270), never gives the same bytes.
+fn forget_recognition(tx: &rusqlite::Transaction<'_>, asset: &str, recognised: bool) -> Result<()> {
+    tx.execute("DELETE FROM labels WHERE uuid=?", [asset])?;
+    tx.execute("DELETE FROM embeddings WHERE uuid=?", [asset])?;
+    if recognised {
+        tx.execute("DELETE FROM recognition_assets WHERE asset=?", [asset])?;
+    }
+    Ok(())
+}
 pub(crate) fn scan(
     source: &Value,
     db: &Path,
@@ -63,6 +74,12 @@ pub(crate) fn scan_with(
     c.busy_timeout(crate::app_library::TASK_WRITE_WAIT)?;
     let tx = c.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
     tx.execute_batch(include_str!("app_source_schema.sql"))?;
+    // Created by the first recognition import (app_recognition.rs); a library never recognised has none.
+    let recognised: bool = tx.query_row(
+        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='recognition_assets')",
+        [],
+        |r| r.get(0),
+    )?;
     type Old = (i64, i64, String, String);
     let known_order = tx
         .prepare("SELECT path,size,mtime_ns,md5,asset FROM files WHERE source_id=?")?
@@ -155,8 +172,7 @@ pub(crate) fn scan_with(
                 "UPDATE assets SET width=?,height=?,stable_hash=?,orig_size=? WHERE uuid=?",
                 params![w, h, f.hash, f.size, asset],
             )?;
-            tx.execute("DELETE FROM labels WHERE uuid=?", [&asset])?;
-            tx.execute("DELETE FROM embeddings WHERE uuid=?", [&asset])?;
+            forget_recognition(&tx, &asset, recognised)?;
             tx.execute(
                 "UPDATE files SET size=?,mtime_ns=?,md5=? WHERE source_id=? AND path=?",
                 params![f.size, f.mtime, f.hash, sid, f.rel],
@@ -206,8 +222,7 @@ pub(crate) fn scan_with(
             };
             // Results for other content no longer describe this picture: it is recognized again.
             if before.as_deref() != Some(f.hash.as_str()) {
-                tx.execute("DELETE FROM labels WHERE uuid=?", [&asset])?;
-                tx.execute("DELETE FROM embeddings WHERE uuid=?", [&asset])?;
+                forget_recognition(&tx, &asset, recognised)?;
             }
         } else {
             asset = crate::store::new_key()?.to_uppercase();

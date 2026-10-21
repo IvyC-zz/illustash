@@ -2,6 +2,9 @@
 
 只用本工具生成的合成图片与合成锚点，以及显式给出的二进制、模型和运行库；不读真实图库、账号或用户
 目录（HOME、USERPROFILE、ILLUSTASH_APP_SUPPORT、临时目录都指向 --work 下）。线程数用产品默认值。
+执行后端（#270）：--backends 列出要测的配置，default 是产品默认（有加速后端的平台上 CCIP 走 CoreML 等），
+cpu 设 ILLUSTASH_CPU_ONLY=1 全部用 CPU；列了多个时每一次按列出的顺序交替测，各自取中位数。编译缓存
+（Shared/coreml-cache）在各次之间保留，所以 default 的第一次含首次编译。
 
 两部分，同一批图片：
   端到端：重定位布局里启动 release 宿主 illustash-terms，以 folder 来源新建图库，POST /api/sync，
@@ -22,7 +25,8 @@
       --compute native/terms/target/release/examples/recognition-compute \\
       --models <含 wd_swinv2_v3_emb.onnx 与 ccip/model_feat.onnx 的目录> \\
       --runtime <libonnxruntime.dylib 或 onnxruntime.dll> [--openblas <Windows 的 openblas.dll>] \\
-      [--images 200] [--anchors 2000] [--trials 3] [--work <空目录>] [--out result.json]
+      [--images 200] [--anchors 2000] [--trials 3] [--backends default|cpu|cpu,default]
+      [--work <空目录>] [--out result.json]
 结果 JSON 写到 --out（默认 <work>/result.json），并打印摘要。只依赖标准库。
 """
 import argparse
@@ -282,8 +286,10 @@ def layout(args, work):
     return base, resources
 
 
-def environment(root, shared, resources, worker=None):
+def environment(root, shared, resources, worker=None, backend='default'):
     env = {k: v for k, v in os.environ.items() if not k.startswith('ILLUSTASH_')}
+    if backend == 'cpu':
+        env['ILLUSTASH_CPU_ONLY'] = '1'
     for key in ('HOME', 'USERPROFILE', 'TMPDIR', 'TEMP', 'TMP', 'APPDATA', 'LOCALAPPDATA'):
         (root / key.lower()).mkdir(parents=True, exist_ok=True)
         env[key] = str(root / key.lower())
@@ -315,9 +321,10 @@ def new_library(terms, folder, package, env, characters):
     c.close()
 
 
-def end_to_end(args, base, resources, images, shared, characters, trial):
-    root = args.work / f'trial-{trial}'
-    env = environment(root, shared, resources, base / 'bin' / f'illustash-recognition{EXE}')
+def end_to_end(args, base, resources, images, shared, characters, trial, backend):
+    root = args.work / f'trial-{trial}-{backend}'
+    env = environment(root, shared, resources, base / 'bin' / f'illustash-recognition{EXE}', backend)
+    (shared / 'acceleration.json').unlink(missing_ok=True)
     package = root / 'library.pilib'
     terms = base / 'bin' / f'illustash-terms{EXE}'
     new_library(terms, images, package, env, characters)
@@ -403,14 +410,23 @@ def end_to_end(args, base, resources, images, shared, characters, trial):
             'host_peak_bytes': sampler.host.peak, 'worker_peak_bytes': worker.peak,
             'host_cpu_s_recognising': host_cpu, 'host_cpu_s_recognising_raw': raw,
             'poll_cpu_ms': per_poll * 1000, 'polls': polls, 'host_cpu_s_scan': sampler.marks['recognising'][0] - sampler.marks['start'][0],
-            'worker_cpu_s': worker.cpu, 'state': state, 'timeline': timeline, 'package': str(package)}
+            'worker_cpu_s': worker.cpu, 'state': state, 'timeline': timeline, 'package': str(package),
+            'acceleration': used(shared)}
 
 
-def stage_run(args, resources, images, shared, source, trial, env):
-    folder = args.work / f'stages-{trial}'
+def used(shared):
+    """What the worker ran each model on (Shared/acceleration.json; absent when everything was on the CPU)."""
+    try:
+        return json.loads((shared / 'acceleration.json').read_text(encoding='utf-8'))
+    except (OSError, ValueError):
+        return {}
+
+
+def stage_run(args, resources, images, shared, source, trial, env, backend):
+    folder = args.work / f'stages-{trial}-{backend}'
     folder.mkdir()
     identity = {'package': str(source.parent), 'library_id': 'synthetic', 'generation': 1,
-                'session': '0' * 64, 'task_id': f'bench-{trial}'}
+                'session': '0' * 64, 'task_id': f'bench-{trial}-{backend}'}
     return run_json(args.compute, {'mode': 'bench-stages', 'models': str(resources / 'models'),
                                  'runtime': str(resources / 'onnxruntime' / RUNTIME),
                                  'resources': str(resources), 'shared': str(shared), 'source': str(source),
@@ -430,7 +446,11 @@ def main():
     parser.add_argument('--work', type=Path)
     parser.add_argument('--out', type=Path)
     parser.add_argument('--keep', action='store_true', help='保留 --work 下的图库与图片')
+    parser.add_argument('--backends', default='default', help='逗号分隔：default（产品默认）、cpu（ILLUSTASH_CPU_ONLY=1）')
     args = parser.parse_args()
+    backends = args.backends.split(',')
+    if not backends or any(b not in ('default', 'cpu') for b in backends) or len(set(backends)) != len(backends):
+        raise SystemExit('--backends 只能是 default、cpu，或两者用逗号连接')
     for name in ('terms', 'worker', 'compute', 'models', 'runtime', 'openblas'):
         if getattr(args, name):
             setattr(args, name, getattr(args, name).resolve(strict=True))
@@ -447,24 +467,36 @@ def main():
         generated = run_json(args.compute, {'mode': 'bench-generate', 'folder': str(images), 'count': args.images,
                                           'seed': args.seed, 'shared': str(shared), 'anchors': args.anchors}, args.work, os.environ.copy())
         files = sorted(Path(f['path']) for f in generated['files'])
-        trials, stages = [], []
+        trials, stages = {b: [] for b in backends}, {b: [] for b in backends}
         for trial in range(1, args.trials + 1):
-            trials.append(end_to_end(args, base, resources, images, shared, generated['characters'], trial))
-            print(f'端到端第 {trial} 次：{trials[-1]["total_ms"] / 1000:.1f} s', flush=True)
-        source = Path(trials[0]['package']) / 'source.sqlite'
-        env = environment(args.work / 'stages-env', shared, resources)
-        if WINDOWS:
-            env['ILLUSTASH_RESEARCH_OPENBLAS_DLL'] = str(resources / 'openblas/openblas.dll')
+            for backend in backends:
+                trials[backend].append(end_to_end(args, base, resources, images, shared, generated['characters'], trial, backend))
+                print(f'端到端第 {trial} 次（{backend}）：{trials[backend][-1]["total_ms"] / 1000:.1f} s', flush=True)
+        source = Path(trials[backends[0]][0]['package']) / 'source.sqlite'
         for trial in range(1, args.trials + 1):
-            stages.append(stage_run(args, resources, files, shared, source, trial, env))
-            print(f'阶段分解第 {trial} 次完成', flush=True)
+            for backend in backends:
+                env = environment(args.work / f'stages-env-{backend}', shared, resources, backend=backend)
+                if WINDOWS:
+                    env['ILLUSTASH_RESEARCH_OPENBLAS_DLL'] = str(resources / 'openblas/openblas.dll')
+                stages[backend].append(stage_run(args, resources, files, shared, source, trial, env, backend))
+                print(f'阶段分解第 {trial} 次（{backend}）完成', flush=True)
         after = conditions()
-        result = summarise(args, generated, before, after, trials, stages)
-        result['inputs'] = {name: sha256(path) for name, path in (
+        inputs = {name: sha256(path) for name, path in (
             ('wd', resources / 'models/wd_swinv2_v3_emb.onnx'), ('ccip', resources / 'models/ccip/model_feat.onnx'),
             ('runtime', resources / 'onnxruntime' / RUNTIME))}
+        results = {}
+        for backend in backends:
+            results[backend] = summarise(args, generated, before, after, trials[backend], stages[backend])
+            results[backend]['inputs'] = inputs
+            results[backend]['backend'] = backend
+        # One backend: the same result as before #270; several: one result each, by name.
+        result = results[backends[0]] if len(backends) == 1 else {'format': 'illustash-recognition-bench-compare/1',
+                                                                   'order': backends, 'by_backend': results}
         out.write_text(json.dumps(result, ensure_ascii=False, indent=1), encoding='utf-8')
-        report(result)
+        for backend in backends:
+            if len(backends) > 1:
+                print(f'\n==== {backend} ====')
+            report(results[backend])
         print(f'结果：{out}')
     finally:
         if owned and not args.keep:
@@ -541,6 +573,8 @@ def report(result):
     for key, label in s['labels'].items():
         print(f'  {label}：{s["per_image_ms"][key]:.1f} ms，{s["share"][key] * 100:.1f}%')
     print(f'  模型加载 {s["model_load_ms"]:.0f} ms，锚点快照 {s["snapshot_ms"]:.0f} ms（每次任务一次）')
+    used = {model: row.get('used') for t in result['trials'] for model, row in t.get('acceleration', {}).items()}
+    print(f'  执行后端：{used or "全部 CPU"}')
 
 
 if __name__ == '__main__':

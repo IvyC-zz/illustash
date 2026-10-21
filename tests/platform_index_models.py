@@ -3,6 +3,8 @@
 Requires candidate binaries and authorised model/runtime plus the independent
 eight-generated-PNG reference from PR #172. Missing inputs fail, never skip.
 This installs only the index closure, not a complete signed application.
+Runs with ILLUSTASH_CPU_ONLY=1: the fixed expectations are CPU values, bit for bit. The accelerated CCIP session
+(#270) is the one recognition uses; tests/platform_recognition_models.py compares it within rounding.
 """
 import hashlib
 import json
@@ -49,6 +51,7 @@ class IndexModelAcceptance(installed.InstalledIndexAppTest):
             super().setUp()
         finally:
             self._testMethodName = method
+        self.env['ILLUSTASH_CPU_ONLY'] = '1'
 
     def expected(self):
         # 仅此生成图专项的原算法期望；不复算、不刷新通用固定录制。

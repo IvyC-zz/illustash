@@ -4,7 +4,7 @@ mod build;
 mod clean;
 pub mod numeric;
 mod scan;
-use crate::recognition_compute::{producer, session::CcipSession};
+use crate::recognition_compute::{backend::Acceleration, producer, session::CcipSession};
 use crate::research_compute::features::{read_npy, NpyValues};
 use crate::{Error, Result};
 use serde_json::{json, Value};
@@ -127,6 +127,7 @@ pub struct Resources<'a> {
     pub tags: &'a Path,
     pub model: &'a Path,
     pub runtime: &'a Path,
+    pub acceleration: &'a Acceleration,
 }
 /// Only load CCIP on the first valid reference needing calculation; no WD or Features cache.
 pub fn run_files(input: &Path, output: &Path, resources: &Resources<'_>) -> Result<()> {
@@ -134,7 +135,7 @@ pub fn run_files(input: &Path, output: &Path, resources: &Resources<'_>) -> Resu
     let mut session = None;
     let mut features = |image: &image::RgbImage| -> Result<Vec<f32>> {
         if session.is_none() {
-            session = Some(CcipSession::load(resources.model, resources.runtime)?);
+            session = Some(CcipSession::load(resources.model, resources.runtime, resources.acceleration)?);
         }
         session.as_mut().ok_or_else(|| invalid("CCIP会话不可用"))?.features(image)
     };
@@ -264,11 +265,13 @@ pub fn worker(arguments: &[String]) -> Result<()> {
     let model = files.root.join("ccip/model_feat.onnx");
     let runtime = crate::app_resources::ort_runtime(&resources);
     let tags = resources.join("tags/tags_v3.csv");
+    let shared = crate::app_resources::shared_path(&resources).ok();
+    let acceleration = Acceleration::from_env(shared.as_deref());
     // Windows scan/anchor products need the fixed OpenBLAS backend; fail before any work.
     #[cfg(target_os = "windows")]
     illustash_platform::platform_research_math::windows_backend_identity().map_err(Error::Invalid)?;
     if arguments == ["--check"] {
-        let _ = CcipSession::load(&model, &runtime)?;
+        let _ = CcipSession::load(&model, &runtime, &acceleration)?;
         return Ok(());
     }
     if arguments.len() != 2 {
@@ -280,7 +283,7 @@ pub fn worker(arguments: &[String]) -> Result<()> {
     run_files(
         Path::new(&arguments[0]),
         Path::new(&arguments[1]),
-        &Resources { tags: &tags, model: &model, runtime: &runtime },
+        &Resources { tags: &tags, model: &model, runtime: &runtime, acceleration: &acceleration },
     )
 }
 

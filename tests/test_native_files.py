@@ -124,7 +124,8 @@ class NativeFilesTest(unittest.TestCase):
         self.assertFalse(preferences.exists())
         changed = self.request('/api/preferences', {'language': 'en'})
         self.assertEqual(changed['status'], 200)
-        self.assertEqual(json.loads(changed['body']), {'preferences': {'language': 'en'}})
+        # The reply is every app-wide preference as it now stands, not only the one changed.
+        self.assertEqual(json.loads(changed['body']), {'preferences': {'language': 'en', 'acceleration': True}})
         # /api/settings keeps its recorded reply; the language travels with /i18n.js.
         self.assertNotIn('preferences', json.loads(self.request('/api/settings')['body']))
         self.assertEqual(json.loads(preferences.read_text(encoding='utf-8')), {'language': 'en'})
@@ -132,6 +133,14 @@ class NativeFilesTest(unittest.TestCase):
         for body in ({'language': 'xx'}, {'language': 'EN'}, {'language': '../en'}, {'language': 'en', 'theme': 'dark'}, {}):
             self.assertEqual(self.request('/api/preferences', body)['status'], 400, body)
         self.assertEqual(self.request('/api/preferences', {'language': 'zh-CN'}, token='bad')['status'], 403)
+        self.assertEqual(served(), 'en')
+        # 「使用 GPU 加速识别」 (#270) shares the file and the reply; the language is kept.
+        off = self.request('/api/preferences', {'acceleration': False})
+        self.assertEqual((off['status'], json.loads(off['body'])), (200, {'preferences': {'language': 'en', 'acceleration': False}}))
+        self.assertEqual(json.loads(preferences.read_text(encoding='utf-8')), {'language': 'en', 'acceleration': False})
+        for body in ({'acceleration': 0}, {'acceleration': 'on'}, {'acceleration': None}, {'acceleration': True, 'language': 'xx'}):
+            self.assertEqual(self.request('/api/preferences', body)['status'], 400, body)
+        self.assertEqual(json.loads(preferences.read_text(encoding='utf-8')), {'language': 'en', 'acceleration': False})
         self.assertEqual(served(), 'en')
         # A hand-broken file falls back to following the system instead of failing the page.
         preferences.write_text('{broken', encoding='utf-8')

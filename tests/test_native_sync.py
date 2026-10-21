@@ -199,6 +199,10 @@ ids=[a['id'] for a in r['assets']]
 (p/'labels.jsonl').write_text('\n'.join(json.dumps(dict(asset=u,dim='rating',value='general',confidence=.9)) for u in ids))
 specs=SPECS
 for model in ('wd','ccip'): np.save(p/(model+'.npy'),np.ones((len(ids),specs[model]['dimension']),dtype='<f4'))
+if mode=='content':
+    # Vectors from the file's bytes, as a real model: another picture under the same path gives others.
+    fills=[[sum(Path(a['path']).read_bytes())%97+1] for a in r['assets']]
+    for model in ('wd','ccip'): np.save(p/(model+'.npy'),np.repeat(np.asarray(fills,dtype='<f4'),specs[model]['dimension'],axis=1))
 m=dict(format='illustash-recognition/1',library_id=r['identity']['library_id'],assets=ids,models=specs,files={f:dict(bytes=(p/f).stat().st_size,sha256=hashlib.sha256((p/f).read_bytes()).hexdigest()) for f in ('labels.jsonl','wd.npy','ccip.npy')})
 (p/'manifest.json').write_text(json.dumps(m))
 if mode=='wrong':r['identity']['generation']+=1
@@ -515,6 +519,32 @@ if failures: Path(sys.argv[2]).write_text(json.dumps(dict(identity=r['identity']
         except OSError:
             pass
         return done
+
+    def test_native_library_new_changed_picture_is_recognised_again_with_its_new_result(self):
+        # A picture replaced under the same name gives other vectors; so does the same picture on another
+        # execution backend (#270). The old recognition record goes with its labels, so the import takes the new one.
+        from tests.folder_fixture import image, settle
+        folder = self.new_folder
+        image(folder / 'changing.png', 'red')
+        self.assertEqual(self.sync()['state']['status'], 'needs_recognition')
+        self.worker('content')
+        def run():
+            self.assertEqual(self.request('/api/sync', {})['status'], 200)
+            value = self.finish()
+            self.assertEqual(value['state']['status'], 'done', value)
+            with sqlite3.connect(self.lib.source) as c:
+                return c.execute("SELECT e.vec FROM embeddings e JOIN assets a ON a.uuid=e.uuid "
+                                 "WHERE a.filename='changing.png' AND e.model='ccip'").fetchone()[0]
+        settle(folder)
+        before = run()
+        image(folder / 'changing.png', 'blue')
+        settle(folder)
+        after = run()
+        self.assertNotEqual(after, before)
+        with sqlite3.connect(self.lib.source) as c:
+            self.assertEqual(c.execute("SELECT count(*) FROM recognition_assets r JOIN assets a ON a.uuid=r.asset "
+                                       "WHERE a.filename='changing.png'").fetchone()[0], 1)
+        self.assertEqual(run(), after, 'unchanged: nothing is recognised again')
 
     def test_native_library_new_damaged_pictures_wait_for_a_change_unreadable_ones_retry(self):
         # #112: a picture that cannot be read is tried again on every sync; one read in full that

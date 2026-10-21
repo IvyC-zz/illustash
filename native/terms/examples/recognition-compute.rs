@@ -1,6 +1,6 @@
 //! Explicit-path synthetic comparison driver; never selects models or user libraries.
 use illustash_terms::recognition_compute::{
-    anchor_snapshot::Snapshot, anchors, claims::Claims, preprocess, producer, session,
+    anchor_snapshot::Snapshot, anchors, backend, claims::Claims, preprocess, producer, session,
 };
 use serde_json::{json, Value};
 use std::{fs, path::Path};
@@ -16,9 +16,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             json!({"wd":preprocess::wd_input(&image,size),"ccip":preprocess::ccip_input(&image,size)})
         }
         "infer" => {
+            // As the installed worker: accelerated unless ILLUSTASH_CPU_ONLY (the bit-for-bit acceptance sets it).
+            let shared = request["shared"].as_str().map(Path::new);
             let mut sessions = session::ModelSessions::load(
                 Path::new(request["models"].as_str().ok_or("models missing")?),
                 Path::new(request["runtime"].as_str().ok_or("runtime missing")?),
+                &backend::Acceleration::from_env(shared),
             )?;
             let tags = producer::Tags::load(Path::new(request["tags"].as_str().ok_or("tags missing")?))?;
             let mut rows = Vec::new();

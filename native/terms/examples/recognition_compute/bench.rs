@@ -2,7 +2,9 @@
 //! Synthetic inputs only; models/runtime are explicit paths, never discovered in user data.
 //! `bench-generate` writes seeded pictures and anchors; `bench-stages` repeats the worker's
 //! per-picture sequence (producer::run) with a timer around each step. The worker is unchanged.
-use illustash_terms::recognition_compute::{anchor_snapshot::Snapshot, claims::Claims, preprocess, producer, session};
+use illustash_terms::recognition_compute::{
+    anchor_snapshot::Snapshot, backend, claims::Claims, preprocess, producer, session,
+};
 use ort::{execution_providers::CPUExecutionProvider, logging::LogLevel, session::Session, value::Tensor};
 use serde_json::{json, Value};
 use std::{
@@ -158,7 +160,9 @@ pub fn stages(request: &Value) -> Result<Value> {
     let started = Instant::now();
     session::initialise(&runtime)?;
     let mut wd = wd_session(&models.join("wd_swinv2_v3_emb.onnx"))?;
-    let mut ccip = session::CcipSession::load(&models.join("ccip/model_feat.onnx"), &runtime)?;
+    // CCIP on the backend the worker would pick (ILLUSTASH_CPU_ONLY and the setting), as in production.
+    let acceleration = backend::Acceleration::from_env(Some(&shared));
+    let mut ccip = session::CcipSession::load(&models.join("ccip/model_feat.onnx"), &runtime, &acceleration)?;
     let tags = producer::Tags::load(&resources.join("tags/tags_v3.csv"))?;
     let specs = producer::model_specs(&resources, &models)?;
     let load_ms = ms(started);
@@ -168,7 +172,7 @@ pub fn stages(request: &Value) -> Result<Value> {
 
     {
         let first = producer::decode(images.first().ok_or("images empty")?)?;
-        let expected = session::ModelSessions::load(&models, &runtime)?.infer(&first, tags.len())?;
+        let expected = session::ModelSessions::load(&models, &runtime, &acceleration)?.infer(&first, tags.len())?;
         let (probabilities, embedding) = wd_run(&mut wd, preprocess::wd_input(&first, 448))?;
         let feature = ccip.features(&first)?;
         let bits = |v: &[f32]| v.iter().map(|x| x.to_bits()).collect::<Vec<_>>();

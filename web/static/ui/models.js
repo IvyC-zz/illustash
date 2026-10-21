@@ -5,7 +5,7 @@ import {t, tb} from '../core/i18n.js';
 import {esc, bytes, number} from '../core/format.js';
 import {state} from '../core/state.js';
 import {SYNC_ACTIVE, INDEX_ACTIVE, startSync, pollSync} from '../core/jobs.js';
-import {loadModels, modelsPost, modelsWaiting, modelsFinished, onModels} from '../core/models.js';
+import {loadModels, modelsPost, modelsWaiting, modelsFinished, onModels, saveAcceleration} from '../core/models.js';
 import {$, toast} from './dom.js';
 import {confirmAction} from './dialog.js';
 
@@ -67,6 +67,17 @@ export function modelsNotice() {
     ${modelsBar(m)}${running(m) ? '' : modelsFailures(m)}<div class="models-acts">${modelsActions(m)}${running(m) ? '' : manualLink(m)}</div>${running(m) ? '' : importSummary(m.job)}</div>`;
 }
 
+// 「使用 GPU 加速识别」 (#270): only where this build has an accelerator. App-wide (preferences.json); workers read
+// it when they start. If the last worker could not use the accelerator, why, and that it went on with the CPU.
+export function accelerationLine(m = state.models) {
+  const a = m?.acceleration; if (!a?.available) return '';
+  const hint = a.backend === 'coreml'
+    ? t('用 GPU 和神经引擎（Core ML）计算角色特征，识别更快，角色判定和只用 CPU 时一致。第一次会先花几秒准备。')
+    : t('用显卡计算，识别更快，角色判定和只用 CPU 时一致。');
+  const fell = Object.values(a.last || {}).find(r => a.on && r?.reason);
+  return `<label class="switch-line"><span><b>${t('使用 GPU 加速识别')}</b><small>${hint} ${t('关掉就全部用 CPU。')} · ${t('下次识别时生效')}</small>${fell ? `<em>${esc(t('上次没能用上加速，已改用 CPU：{reason}', {reason: fell.reason}))}</em>` : ''}</span><input type="checkbox" class="switch" data-acceleration ${a.on ? 'checked' : ''}></label>`;
+}
+
 // 设置 › 数据: status, where they are, the mirror, and the same buttons.
 export function renderModelsCard() {
   const card = $('setModels'), m = state.models; if (!card) return;
@@ -75,6 +86,7 @@ export function renderModelsCard() {
     <p class="settings-note">${m.on_demand ? t('图片识别要用 WD 和 CCIP 两个模型，安装包里没有带，第一次使用时下载。每个文件都按应用里写好的大小和 SHA-256 核对，对不上就不用，从哪里下载都一样安全。') : t('这个安装自带识别模型。')}</p>
     <div class="setting-line"><span>${esc(modelsLine(m))}${m.status === 'ready' ? '' : `<small class="line-hint">${manualLink(m)}</small>`}</span></div>
     ${modelsBar(m)}${modelsFailures(m)}${importSummary(m.job)}${m.status === 'ready' ? deleteButton(m) : `<div class="models-acts">${modelsActions(m)}</div>`}
+    ${accelerationLine(m)}
     ${m.on_demand ? `<div class="form-grid"><label for="modelMirror">${t('Hugging Face 镜像')}</label><input id="modelMirror" value="${esc(m.mirror)}" placeholder="${esc(m.mirror_default)}" spellcheck="false" autocomplete="off"></div>
     <p class="settings-note">${t('先从这个地址下载，不行再换 ModelScope。填 {hf} 就是直连 Hugging Face。', {hf: 'https://huggingface.co'})}</p>
     <div class="sync-now form-actions"><div class="spacer"></div>
@@ -114,6 +126,12 @@ export function wireModels() {
     const button = e.target.closest('[data-models]'); if (!button || button.disabled) return;
     button.disabled = true;
     act(button.dataset.models);
+  });
+  document.addEventListener('change', async e => {
+    const box = e.target.closest('[data-acceleration]'); if (!box) return;
+    box.disabled = true;
+    try { await saveAcceleration(box.checked); toast(t('设置已保存')); } catch (err) { toast(err.message); box.checked = !box.checked; }
+    box.disabled = false;
   });
   onModels(before => {
     renderModels();
