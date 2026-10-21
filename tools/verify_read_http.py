@@ -128,16 +128,20 @@ def output(log):
     log.flush()
     if hasattr(os, 'pread'):
         return os.pread(log.fileno(), os.fstat(log.fileno()).st_size, 0)
-    # Windows: no pread; read through a second handle. A TemporaryFile is opened delete-on-close, which a second
-    # handle may only share when it asks for that too.
-    for flags in (0, getattr(os, 'O_TEMPORARY', 0)):
-        try:
-            fd = os.open(log.name, os.O_RDONLY | getattr(os, 'O_BINARY', 0) | flags)
-        except PermissionError:
-            continue
-        with os.fdopen(fd, 'rb') as copy:
-            return copy.read()
-    raise PermissionError(f'cannot read {log.name}')
+    # Windows: no pread, and a duplicated handle shares the position. Open the file again for reading only; a
+    # TemporaryFile is delete-on-close, so the second handle must share delete access, which os.open cannot ask for.
+    import ctypes, msvcrt
+    from ctypes import wintypes
+    create = ctypes.WinDLL('kernel32', use_last_error=True).CreateFileW
+    create.argtypes = (wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD, wintypes.LPVOID, wintypes.DWORD,
+                       wintypes.DWORD, wintypes.HANDLE)
+    create.restype = wintypes.HANDLE
+    # GENERIC_READ; FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE; OPEN_EXISTING; FILE_ATTRIBUTE_NORMAL
+    handle = create(str(log.name), 0x80000000, 7, None, 3, 0x80, None)
+    if handle in (None, wintypes.HANDLE(-1).value):
+        raise ctypes.WinError(ctypes.get_last_error())
+    with os.fdopen(msvcrt.open_osfhandle(handle, os.O_RDONLY | os.O_BINARY), 'rb') as copy:
+        return copy.read()
 
 
 def ready(text, origin):
