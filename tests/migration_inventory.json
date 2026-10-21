@@ -153,7 +153,7 @@
 
  "native/terms/build.rs":"fced479cbf0f476fc33b8df84ce2af5f110034f735f811992e6bb6e0367fec7a",
 
- "native/terms/examples/recognition_compute/bench.rs":"ce3b5cccfc4a156b0221ff9636279f8ab0699c65803e2f22305c62ffdde5a413",
+ "native/terms/examples/recognition_compute/bench.rs":"ca4d6c05f7725f62866f6249b6dbb41c09a18d69f9e8e0f84157d2a3f3fe514e",
 
  "native/terms/examples/research_compute/math.rs":"4844fc1099be8a2e284e9061593d2114fecf2f95bd19c99519776c82d4f59abd",
 
@@ -179,7 +179,7 @@
 
  "native/terms/src/app_files.rs":"2d6a4b7013b350a9c6bf1ff45bcca5c3659e54f2bb97a8053a47de8764c69e7f",
 
- "native/terms/src/app_folder.rs":"cc7e30483ae4d1750f341634892fc8af6419eedec3cf0b0781f3475c3a0c7bc2",
+ "native/terms/src/app_folder.rs":"68f076c9a9d0e258bd5eff71a1c66582a244747fab9ce67f4cc53239ccba63c9",
 
  "native/terms/src/app_http.rs":"a082b5d82ea1e7832b006d07f2ef6b7921a827fab71ddaf79fd735b86874db71",
 
@@ -219,7 +219,7 @@
 
  "native/terms/src/app_migration_sql/provenance.sql":"a780f1f8837dd2c90a556539c114d56cdaa513b057fb667bf0c5c9d604f75934",
 
- "native/terms/src/app_models.rs":"20ecda715e4a3e41390c03c6879e503b3aa78cb86f83fcb79ebd790d0ee4c015",
+ "native/terms/src/app_models.rs":"e94bc747ebd7d390109cce8ac368b8d9517f4799300013551eba2f164b226491",
 
  "native/terms/src/app_name_sources.rs":"8650cb80f3236a5aca0bfbfff667bad49122df4449e9c4d1465edca4e759c51c",
 
@@ -231,7 +231,7 @@
 
  "native/terms/src/app_platform.rs":"5d20f65322df394264aedea61ab134aece0404aaa3e91dad3bb7c0cebf79316c",
 
- "native/terms/src/app_preferences.rs":"da963d7f95dbd906a343741f99ad5d2ce477eda74e306070d5489a5055d3fe7f",
+ "native/terms/src/app_preferences.rs":"56996e2d71f3bfc2317ebc72286985f5b9aa906b4d64c7621d1de4df08fca91c",
 
  "native/terms/src/app_profiles.rs":"eeab06879aa6d635442462b2f74bb728debeb70445c3802b88b7d0f9ba692f99",
 
@@ -307,7 +307,7 @@
 
  "native/terms/src/index_compute/clean.rs":"f48ae0b2efc54aa542922196364b8a2e696f5d52b58981df067858de2b1ca24c",
 
- "native/terms/src/index_compute/mod.rs":"b187300ec321cf49d1e816a353dfb057c0e7fbe5d20af07ed44f79e2bced4804",
+ "native/terms/src/index_compute/mod.rs":"e70df5ba3d558b185c86ac608942f3bf7168cd9bd28b0f1f912506400a6a58a1",
 
  "native/terms/src/index_compute/numeric.rs":"4acbfb729869ad9192bc23d91605b78ce8f864e63e2d8c076138a78ae17228d3",
 
@@ -325,17 +325,19 @@
 
  "native/terms/src/recognition_compute/anchors.rs":"950b56c3552265a5882ffae28d19fb41fa0a9fe0fa400bcf9edd2ad8dbb973aa",
 
+ "native/terms/src/recognition_compute/backend.rs":"9edc70f93d4865e97844b260762a4bf77999c40c79f77cf92c0d66c46edcd649",
+
  "native/terms/src/recognition_compute/claims.rs":"aca484ad8661e7aa1d5265a6b55609be564f59eec3f64a4994a5fb136c2e5c26",
 
- "native/terms/src/recognition_compute/mod.rs":"a79906b1532402eee229424a00ea2c6d4b1161e2fab90455c79efc74382da71a",
+ "native/terms/src/recognition_compute/mod.rs":"5143817077e20e3c1b153adbaa373e2acb3c59d85b67d10d5d145e66e209195b",
 
  "native/terms/src/recognition_compute/models.rs":"19ce57aba3158b38bc4c0f56c8567936009b3740c6009d15f880cbddd5c707ff",
 
  "native/terms/src/recognition_compute/preprocess.rs":"261b08d786e401a253e4bec9d83e5969a0e409b1209c107698d9fcf9a08149a3",
 
- "native/terms/src/recognition_compute/producer.rs":"8a1f84a9fdc42d8510ba93c54da491d3b96ed0a9ac91382353856d97b7076efd",
+ "native/terms/src/recognition_compute/producer.rs":"a9c2f93ac566196aaee555681c28844dc49590d290c40406a2981d82cc316a47",
 
- "native/terms/src/recognition_compute/session.rs":"40b20233a9fa81681a5b8af0817efbd591c4f1ed2a609625cdeb83a1ff6efcbc",
+ "native/terms/src/recognition_compute/session.rs":"107a43bfc54aa80f06d505f1607728ceb041bcfcd0170f7be7d3c20ce5de76fa",
 
  "native/terms/src/research_compute/discriminate.rs":"9fbacee2fef95dba8bb6f0c634a4e6b710fb8d484265b21a051ac2b92684fb5a",
 
@@ -465,7 +467,7 @@
  "native/terms/src/app_library.rs":{"database-write":[0,1]},
  "native/terms/src/app_migration_sql/ambiguous.sql":{"database-write":[55]},
  "native/terms/src/app_photos.rs":{"database-write":[[0,4],29,[5,2],68,1]},
- "native/terms/src/app_folder.rs":{"database-write":[[0,8],[5,5],[12,2],[180,2],222,176,182,[29,2],216,218,1]},
+ "native/terms/src/app_folder.rs":{"database-write":[[0,8],[5,5],[12,2],[180,2],222,176,182,[29,2],216,218,1,301]},
  "crates/core/src/character_sql/evidence_hybrid.sql":{"database-write":[196]},
  "native/terms/src/app_source_schema.sql":{"database-write":[121,102,138,111]},
  "crates/platform/src/platform_process.rs":{"entrypoint":[4]},

@@ -339,10 +339,10 @@ details.more>summary:hover{color:var(--ink)}
 .more-body>.settings-table:first-child{margin-top:6px}
 .hint-more{color:var(--accent);cursor:help;border-bottom:1px dotted currentColor;margin-left:4px}
 .switch-line{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:7px 0;border-bottom:1px solid var(--line);cursor:pointer}
-.switch-line>span{display:flex;flex-direction:column;gap:1px;font-size:12.5px}
+.switch-line>span{display:flex;flex-direction:column;gap:1px;font-size:12.5px;min-width:0}
 .switch-line b{font-weight:500}
 .switch-line small,.line-hint{font-size:11.5px;color:var(--muted);display:block}
-.switch-line em{font-style:normal;font-size:11px;color:#b5523b}
+.switch-line em{font-style:normal;font-size:11px;color:#b5523b;overflow-wrap:anywhere}
 .switch{appearance:none;width:32px;height:18px;border-radius:9px;background:#d4d4da;position:relative;flex:none;cursor:pointer;transition:background .15s}
 .switch::after{content:'';position:absolute;top:2px;left:2px;width:14px;height:14px;border-radius:50%;background:var(--sheet);box-shadow:0 1px 2px #0003;transition:transform .15s var(--ease)}
 .switch:checked{background:var(--accent)}

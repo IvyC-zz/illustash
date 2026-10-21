@@ -67,6 +67,14 @@ fn build(builder: SessionBuilder, path: &Path, threads: Option<usize>) -> Result
     }
     builder.commit_from_file(path).map_err(|e| failure(&path.display().to_string(), e))
 }
+/// What the settings page shows: the runtime's own words, without the error kind, at most 300 characters.
+fn reason(error: &Error) -> String {
+    let text = match error {
+        Error::Invalid(text) => text.clone(),
+        other => other.to_string(),
+    };
+    text.trim().chars().take(300).collect()
+}
 fn runtime() -> PathBuf {
     RUNTIME.get().and_then(|r| r.as_ref().ok()).cloned().unwrap_or_default()
 }
@@ -88,7 +96,7 @@ impl ModelSession {
             // A model or runtime the CPU cannot load either is not the accelerator's fault: its error, as before.
             Some(Err(e)) => match cpu_session(path, threads) {
                 Ok(session) => {
-                    acceleration.fell_back(model, requested, path, &runtime(), &e.to_string());
+                    acceleration.fell_back(model, requested, path, &runtime(), &reason(&e));
                     (session, Backend::Cpu)
                 }
                 Err(cpu) => {
@@ -105,7 +113,7 @@ impl ModelSession {
     fn run<T>(&mut self, mut run: impl FnMut(&mut Session) -> Result<T>) -> Result<T> {
         match run(&mut self.session) {
             Err(e) if self.backend != Backend::Cpu => {
-                self.acceleration.fell_back(self.model, self.backend, &self.path, &runtime(), &e.to_string());
+                self.acceleration.fell_back(self.model, self.backend, &self.path, &runtime(), &reason(&e));
                 self.session = cpu_session(&self.path, self.threads)?;
                 self.backend = Backend::Cpu;
                 run(&mut self.session)
