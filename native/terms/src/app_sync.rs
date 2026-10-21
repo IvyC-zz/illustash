@@ -233,7 +233,7 @@ fn now() -> String {
 fn writer(path: &std::path::Path) -> Result<Connection> {
     let c = crate::sqlite::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_WRITE)?;
     crate::configure(&c)?;
-    c.busy_timeout(std::time::Duration::from_millis(250))?;
+    c.busy_timeout(crate::app_library::TASK_WRITE_WAIT)?;
     Ok(c)
 }
 /// 可供 M4 复用：文件盘点后本地刷新；imported 事件与应用变更同事务提交，保留 pending 给 M4 消费。
@@ -271,6 +271,9 @@ fn run_with(
     let mut counts = json!({"found":0,"removed":0,"imported":0,"failed":0});
     // What the person has to do about a failure, as a code the page words (#202); the message stays the error's own.
     let problem = std::cell::Cell::new(None);
+    // The step and the databases it writes, for the log when it fails (#275): the message alone does not say which
+    // database was busy.
+    let step = std::cell::Cell::new("recognition resume, source.sqlite and library.sqlite");
     let result: Result<(&str, String, Value)> = (|| {
         let recovery = crate::app_recognition::resume(library, cancel, &crate::app_research::dispatch)?;
         if recovery["status"] != "done" {
@@ -279,6 +282,7 @@ fn run_with(
         let mut sources: Vec<(String, Value)> = Vec::new();
         let mut scanned = 0;
         let mut unreadable = 0;
+        step.set("scan, source.sqlite");
         for source in library.config()["sources"].as_array().into_iter().flatten() {
             let done_in_source = std::cell::Cell::new(0);
             let progress = |done, total| {
@@ -326,6 +330,7 @@ fn run_with(
             }
             // The persisted source hash, rather than this in-memory list, drives retry after app failure.
         }
+        step.set("sync record, library.sqlite");
         let c = writer(&library.db())?;
         c.execute(
             "UPDATE sync_runs SET found=?,sources=? WHERE id=?",
@@ -351,6 +356,7 @@ fn run_with(
         drop(c);
         check(cancel)?;
         update(json!({"status":"importing"}));
+        step.set("library refresh, library.sqlite");
         let (out, refreshed) = refresh(library, run_id, cancel)?;
         counts["imported"] = out["added"].clone();
         counts["removed"] = out["removed"].clone();
@@ -364,6 +370,7 @@ fn run_with(
                 let worker =
                     std::env::var_os("ILLUSTASH_RECOGNITION_WORKER").filter(|_| !crate::app_models::waiting(root));
                 if let Some(worker) = worker {
+                    step.set("recognition, source.sqlite and library.sqlite");
                     recognise(
                         library,
                         ctx,
@@ -407,6 +414,11 @@ fn run_with(
         update(fields);
         Ok((status, message, out))
     })();
+    if let Err(e) = &result {
+        if !cancel.load(Ordering::SeqCst) {
+            eprintln!("同步失败（{step}）：{e:?}", step = step.get());
+        }
+    }
     let c = writer(&library.db())?;
     let (status, message) = match &result {
         Ok((s, m, _)) => (*s, m.clone()),

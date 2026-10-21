@@ -257,6 +257,14 @@ fn truthy(value: &Value) -> bool {
         Value::Object(v) => !v.is_empty(),
     }
 }
+/// How long a background task's write connection waits for another writer (#275): the sync and its folder and Photos
+/// scans, recognition imports and name lookups. The same wait `crate::configure` gives every connection; these used
+/// 250 ms (names 2 s), shorter than the research check that hashed inputs under the write lock. Only these tasks wait
+/// on it: pages write through their own connections. The lock is now held briefly: research checks its inputs outside
+/// it and steps aside for source writers, and a name lookup does not read source.sqlite under it. A stop is noticed
+/// between statements and the desktop shell gives the host 10 seconds to quit, so one wait fits within that. A task
+/// that still finds the database busy fails as before, and the next automatic sync or the names retry tries again.
+pub(crate) const TASK_WRITE_WAIT: Duration = Duration::from_secs(5);
 pub(crate) fn read_connection(path: &Path) -> Result<Connection> {
     if !path.is_file() {
         return Err(Error::Invalid(format!("图库缺少已有数据库：{path}", path = path.display())));
