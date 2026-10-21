@@ -145,7 +145,7 @@
 
  "desktop/src/pixiv.rs":"1944e10c840a4366268dbde5189279fb8ec961851760ced3637967c53107f8e8",
 
- "desktop/src/server.rs":"b28668e8047274ca8cd4bdb9eea922722fd27a9e6e69e2dace8bd4789724a67d",
+ "desktop/src/server.rs":"4caeaeb7eef8487b26f435a87810492e2c29f1d218b638f73f6b7b6919bc42fa",
 
  "desktop/src/welcome.rs":"8b7a8ce662d60de1287e1338baacc8f22fca8ce2ea021e695643212a5d21cb95",
 
@@ -181,7 +181,7 @@
 
  "native/terms/src/app_folder.rs":"cc7e30483ae4d1750f341634892fc8af6419eedec3cf0b0781f3475c3a0c7bc2",
 
- "native/terms/src/app_http.rs":"34f2d36e4aeb0e9d85d69ef6f2b8f3f324c2bd9ba0d8fa1ca48c82ddc13495c8",
+ "native/terms/src/app_http.rs":"a082b5d82ea1e7832b006d07f2ef6b7921a827fab71ddaf79fd735b86874db71",
 
  "native/terms/src/app_identity.rs":"f9ace5a1574b8775637e7b3654e603a5db3fc9e4434a7d0e24b45e3d3a14b112",
 
@@ -223,7 +223,7 @@
 
  "native/terms/src/app_name_sources.rs":"8650cb80f3236a5aca0bfbfff667bad49122df4449e9c4d1465edca4e759c51c",
 
- "native/terms/src/app_names.rs":"5e2839908d2be2cef7a1c7f2879516dad80f1ca705d4fc29b7696fa8019d4768",
+ "native/terms/src/app_names.rs":"2f9f195abd7fe8b2e307c35a2195b572acbd201fc3628de44a6077a4e6671118",
 
  "native/terms/src/app_onboarding.rs":"caec1f3634a1d6919f0b7b34d494767d19905c1c4bc054753afc1c3d37c41608",
 
@@ -407,7 +407,7 @@
 
  "native/terms/vendor/tiny_http/src/util/task_pool.rs":"08e3cc8139d1512bb751f828e9838579d8848607e7172ae41b4033d8ecc46fdb",
 
- "start-web.command":"9abba17f30b237d5847bbb6841ad601fe3fff868a0db188676728fe851ecc894"
+ "start-web.command":"fb2d63d85652c54f0370fe7c096f4dcb9ee1bbfb5109beefe37bfb117f74d278"
 },
 "format":2,
 "retained_references":[],
@@ -501,7 +501,7 @@
  "native/terms/src/app_migrate_data.rs":{"database-write":[57,0,61,"DELETE FROM:similar_groups","INSERT INTO:similar_groups"]},
  "native/terms/src/app_migration_sql/derived.sql":{"database-write":[108,165,161,137,110,167,52,133,107,130,169,168,118,166,117,129,106,128,163,170,119,162,116,154,125,136,172,56,156,114,54,48,174,55]},
  "crates/core/src/character_profile.rs":{"database-write":{"dynamic-or-wrapper":11,"INSERT INTO:term_links":2,"INSERT OR IGNORE INTO:term_links":1,"UPDATE:term_tree":4,"DELETE FROM:term_names":3,"UPDATE:term_links":1,"UPDATE:set":1,"INSERT OR REPLACE INTO:term_names":1,"DELETE FROM:term_links":1,"INSERT OR REPLACE INTO:term_links":1}},
- "native/terms/src/app_names.rs":{"database-write":{"dynamic-or-wrapper":16,"INSERT OR REPLACE INTO:prefs":1,"DELETE FROM:prefs":1,"COMMIT":3,"ROLLBACK":1,"INSERT OR REPLACE INTO:name_cache":5,"INSERT INTO:backend_effects":1,"UPDATE:backend_effects":2,"INSERT OR IGNORE INTO:name_settings|INSERT OR IGNORE INTO:name_settings|DELETE FROM:name_settings":1,"DELETE FROM:name_settings":1,"INSERT INTO:name_settings":1,"INSERT OR REPLACE INTO:name_settings":2,"PRAGMA:c.execute_batch(\"pragma foreign_keys":2,"UPDATE:term_tree":1,"DELETE FROM:term_names":1,"DELETE FROM:name_cache":4,"CREATE TRIGGER:synthetic_locked":1,"BEGIN":1,"DROP TRIGGER:synthetic_locked":1},"http-branch":{"/api/local-links":1,"/api/entities":1}},
+ "native/terms/src/app_names.rs":{"database-write":{"dynamic-or-wrapper":16,"INSERT OR REPLACE INTO:prefs":1,"DELETE FROM:prefs":1,"COMMIT":3,"ROLLBACK":1,"INSERT OR REPLACE INTO:name_cache":5,"INSERT INTO:backend_effects":1,"UPDATE:backend_effects":2,"INSERT OR IGNORE INTO:name_settings|INSERT OR IGNORE INTO:name_settings|DELETE FROM:name_settings":1,"DELETE FROM:name_settings":2,"INSERT INTO:name_settings":1,"INSERT OR REPLACE INTO:name_settings":2,"PRAGMA:c.execute_batch(\"pragma foreign_keys":2,"UPDATE:term_tree":1,"DELETE FROM:term_names":1,"DELETE FROM:name_cache":4,"CREATE TRIGGER:synthetic_locked":1,"BEGIN":1,"DROP TRIGGER:synthetic_locked":1},"http-branch":{"/api/local-links":1,"/api/entities":1}},
  "desktop/src/main.rs":{"entrypoint":[10]},
  "native/terms/src/bin/illustash-worker.rs":{"entrypoint":[10,4]},
  "native/terms/src/app_accounts.rs":{"database-write":["PRAGMA:c.execute_batch(\"pragma journal_mode",[0,3],46,"PRAGMA:tx.execute_batch(\"pragma user_version","INSERT OR IGNORE INTO:leads",1]},
@@ -560,7 +560,8 @@
  "native/terms/src/app_create_names.sql":{"database-write":{"INSERT OR IGNORE INTO:term_key_names":22}},
  "crates/core/src/character_review.rs":{"database-write":{"UPDATE:term_tree":1}},
  "crates/core/src/character_entities.rs":{"database-write":{"INSERT INTO:terms":1,"dynamic-or-wrapper":2,"INSERT INTO:term_tree":1}},
- "crates/core/src/new_library.rs":{"database-write":{"dynamic-or-wrapper":5,"INSERT INTO:term_evidence_sets":2,"DROP TABLE IF EXISTS:artist_verdicts":1,"DROP TABLE:asset_tags|DROP TABLE:general_hits|DROP TABLE:asset_rating":1,"INSERT OR REPLACE INTO:meta":1,"INSERT OR IGNORE INTO:meta":1}}
+ "crates/core/src/new_library.rs":{"database-write":{"dynamic-or-wrapper":5,"INSERT INTO:term_evidence_sets":2,"DROP TABLE IF EXISTS:artist_verdicts":1,"DROP TABLE:asset_tags|DROP TABLE:general_hits|DROP TABLE:asset_rating":1,"INSERT OR REPLACE INTO:meta":1,"INSERT OR IGNORE INTO:meta":1}},
+ "native/terms/src/app_http.rs":{"entrypoint":{"process-start":1}}
 },
 "policies":{
  "application":{"final_owner":"rust","responsibility":"HTTP 参数/目标、人工命令、正式事务/投影；Python 包装待迁移","acceptance":"合成状态码/原始字节、返回/DB/历史/撤销/事件对照；竞争与注入失败原子回滚","deletion_condition":"Rust 调用链及无 Python 验收后删生产 Python；保留旧对照","stages":["M2","M3"]},

@@ -41,11 +41,18 @@ def run(artifact, work):
     subprocess.run([str(core),'library-create','--folder',str(folder),'--dest',str(library),'--name','Synthetic'],env=env,check=True)
     with socket.socket() as sock:
         sock.bind(('127.0.0.1',0));port=sock.getsockname()[1]
-    origin=f'http://127.0.0.1:{port}';token=''
+    origin=f'http://127.0.0.1:{port}';token='';cookie=''
     def request(path, data=None):
         payload=None if data is None else json.dumps(data).encode('utf-8')
-        req=Request(origin+path,payload,headers={'Origin':origin,'Content-Type':'application/json','X-CSRF-Token':token})
+        req=Request(origin+path,payload,headers={'Origin':origin,'Content-Type':'application/json','X-CSRF-Token':token,'Cookie':cookie})
         with urlopen(req,timeout=30) as response:return json.load(response)
+    def enter():
+        # 宿主就绪时打印带一次性码的地址，访问一次换到会话 cookie，之后每个请求都带上
+        lines=(work/'host.log').read_bytes().decode('utf-8','replace').splitlines()
+        address=next((l.split('：',1)[1].strip() for l in lines if l.startswith('图库已启动：')),None)
+        if not address:return None
+        with urlopen(Request(address),timeout=30) as response:
+            return response.headers['Set-Cookie'].split(';')[0]
     def wait(check, seconds=120):
         until=time.monotonic()+seconds
         while time.monotonic()<until:
@@ -60,7 +67,8 @@ def run(artifact, work):
                                '--no-open','--no-names','--no-index-check','--no-auto-sync'],env=env,
                               creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,stdout=log,stderr=log)
         try:
-            bootstrap=wait(lambda:request('/api/bootstrap'));token=bootstrap['token']
+            cookie=wait(enter)
+            bootstrap=request('/api/bootstrap');token=bootstrap['token']
             wait(lambda:request('/api/similar')['state']['status']=='idle')
             start=time.monotonic();request('/api/sync',{})
             def synced():

@@ -30,7 +30,7 @@ from tests.fixed_expectations import Library, Expectations, TERMS_VERSION, unclo
 from tests.synthetic_source import source_fixture as fixture, synthetic_reference
 from tests.test_read_http import INTERRUPT, SPAWN, free_port, wait_until
 from tools import verify_read_http
-from tools.verify_read_http import fetch
+from tools.verify_read_http import cookie, enter, fetch
 
 CORE_READS = (
     '/api/assets', '/api/assets/count', '/api/ids', '/api/detail?id=a', '/api/home', '/api/fold',
@@ -219,7 +219,7 @@ class NativeLifecycleTest(unittest.TestCase):
         self.addCleanup(self.stop, process)
         origin = f'http://127.0.0.1:{port}'
         try:
-            wait_until(lambda: fetch(origin, {'url': '/api/bootstrap'}, origin)['status'] == 200, timeout=5)
+            enter(origin, log, process, timeout=5)
         except AssertionError:
             log.seek(0)
             self.fail(f'native startup failed ({process.poll()}): {log.read().decode(errors="replace")}')
@@ -630,7 +630,7 @@ class NativeLifecycleTest(unittest.TestCase):
         conn = http.client.HTTPConnection('127.0.0.1', self.port, timeout=5)
         self.addCleanup(conn.close)
         conn.putrequest('POST', '/api/startup', skip_host=True)
-        for key, value in {'Host': self.origin.split('://')[1], 'Origin': self.origin,
+        for key, value in {'Host': self.origin.split('://')[1], 'Origin': self.origin, 'Cookie': cookie(self.origin),
                            'Content-Type': 'application/json', 'Content-Length': str(len(body)),
                            'X-CSRF-Token': self.token}.items():
             conn.putheader(key, value)
@@ -713,6 +713,7 @@ class NativeLifecycleTest(unittest.TestCase):
 
         def stalled(length):
             head = (f'POST /api/startup HTTP/1.1\r\nHost: 127.0.0.1:{self.port}\r\nOrigin: {self.origin}\r\n'
+                    f'Cookie: {cookie(self.origin)}\r\n'
                     f'Content-Type: application/json\r\nContent-Length: {length}\r\nX-CSRF-Token: {self.token}\r\n\r\n')
             conn = socket.create_connection(('127.0.0.1', self.port), timeout=10)
             self.addCleanup(conn.close)
@@ -767,7 +768,8 @@ class NativeLifecycleTest(unittest.TestCase):
         sock.settimeout(15)
         sock.connect(('127.0.0.1', self.port))
         sock.sendall((f'GET /api/assets?limit=200 HTTP/1.1\r\nHost: 127.0.0.1:{self.port}\r\n'
-                      f'Origin: {self.origin}\r\nAccept-Encoding: identity\r\nConnection: close\r\n\r\n').encode())
+                      f'Origin: {self.origin}\r\nCookie: {cookie(self.origin)}\r\nAccept-Encoding: identity\r\n'
+                      'Connection: close\r\n\r\n').encode())
         response = http.client.HTTPResponse(sock)
         self.addCleanup(response.close)
         response.begin()
@@ -884,7 +886,7 @@ class NativeLifecycleTest(unittest.TestCase):
             '--port', str(self.port), '--no-sync', '--no-names', '--no-index-check'],
             env=self.env, stdout=log, stderr=log, **SPAWN)
         self.addCleanup(self.stop, self.process)
-        wait_until(lambda: self.request('/api/bootstrap')['status'] == 200, timeout=5)
+        enter(self.origin, log, self.process, timeout=5)
         self.assertEqual(json.loads(self.request('/api/libraries')['body'])['current'], str(self.lib.path))
         self.assertFalse(self.sentinel.exists())
         self.stop(self.process)

@@ -15,4 +15,6 @@ if [[ -z "$CORE" || ! -x "$CORE" ]]; then
   echo '缺少词条核心程序，请先构建 native/terms 或设置 ILLUSTASH_TERMS_BIN。' >&2
   exit 1
 fi
-exec "$CORE" http --root "$PWD" "$@"
+# The host prints its address with a one-time code and, with --open, opens it in the default browser; the page
+# works only from that address. --no-open (after it) leaves the browser alone.
+exec "$CORE" http --root "$PWD" --open "$@"

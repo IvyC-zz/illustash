@@ -7,9 +7,10 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from pathlib import Path
 from tests import test_native_lifecycle as life
 from tests.test_read_http import free_port, wait_until
-from tools.verify_read_http import fetch
+from tools.verify_read_http import enter, fetch
 
 
 class DesktopLifecycleTest(unittest.TestCase):
@@ -29,7 +30,7 @@ class DesktopLifecycleTest(unittest.TestCase):
         self.addCleanup(log.close)
         self.addCleanup(lambda: process.stdin.close() if not process.stdin.closed else None)
         self.addCleanup(self.stop, process)
-        wait_until(lambda: fetch(self.origin, {'url': '/api/bootstrap'}, self.origin)['status'] == 200, timeout=10)
+        enter(self.origin, log, process, timeout=10)
         return process, log
 
     def assert_port_released(self):
@@ -82,18 +83,19 @@ class DesktopLifecycleTest(unittest.TestCase):
         self.process.stdin.close()
         self.process.wait(10)
         code = ('import json,subprocess,sys; '
-                'p=subprocess.Popen(json.loads(sys.argv[1]),stdin=subprocess.PIPE,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL); '
+                'p=subprocess.Popen(json.loads(sys.argv[1]),stdin=subprocess.PIPE,stdout=open(sys.argv[2],"wb"),stderr=subprocess.DEVNULL); '
                 'p.stdin.write(bytes([1])); p.stdin.flush(); print(p.pid,flush=True); sys.stdin.read()')
         args = [str(self.binary), 'http', '--native', '--library', str(self.lib.path),
                 '--port', str(self.port), '--root', str(self.resources), '--no-names', '--no-index-check', '--no-auto-sync']
-        parent = subprocess.Popen([sys.executable, '-c', code, json.dumps(args)],
+        log = Path(self.enterContext(tempfile.TemporaryDirectory())) / 'host.log'
+        parent = subprocess.Popen([sys.executable, '-c', code, json.dumps(args), str(log)],
                                   env={**self.env, 'ILLUSTASH_DESKTOP_STDIN': '1'},
                                   stdin=subprocess.PIPE, stdout=subprocess.PIPE)
         self.addCleanup(parent.stdin.close)
         self.addCleanup(parent.stdout.close)
         self.addCleanup(lambda: parent.kill() if parent.poll() is None else None)
         child_pid = int(parent.stdout.readline())
-        wait_until(lambda: fetch(self.origin, {'url': '/api/bootstrap'}, self.origin)['status'] == 200, timeout=10)
+        enter(self.origin, log, timeout=10)
         parent.kill(); parent.wait(5)
         def released():
             try:
@@ -137,11 +139,12 @@ class DesktopResearchLifecycleTest(unittest.TestCase):
         self.process.stdin.close(); self.process.wait(10)
         self.mode.write_text('hang'); self.pid.unlink(missing_ok=True)
         code = ('import json,subprocess,sys; '
-                'p=subprocess.Popen(json.loads(sys.argv[1]),stdin=subprocess.PIPE,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL); '
+                'p=subprocess.Popen(json.loads(sys.argv[1]),stdin=subprocess.PIPE,stdout=open(sys.argv[2],"wb"),stderr=subprocess.DEVNULL); '
                 'p.stdin.write(bytes([1])); p.stdin.flush(); print(p.pid,flush=True); sys.stdin.read()')
         args = [str(self.binary), 'http', '--native', '--library', str(self.lib.path),
                 '--port', str(self.port), '--root', str(self.resources), '--no-names', '--no-index-check', '--no-auto-sync']
-        parent = subprocess.Popen([sys.executable, '-c', code, json.dumps(args)],
+        log = Path(self.enterContext(tempfile.TemporaryDirectory())) / 'host.log'
+        parent = subprocess.Popen([sys.executable, '-c', code, json.dumps(args), str(log)],
                                   env={**self.env, 'ILLUSTASH_DESKTOP_STDIN': '1'}, stdin=subprocess.PIPE, stdout=subprocess.PIPE)
         def cleanup():
             if parent.poll() is None: parent.kill()
@@ -153,7 +156,7 @@ class DesktopResearchLifecycleTest(unittest.TestCase):
             try: os.kill(host_pid, signal.SIGTERM)
             except ProcessLookupError: pass
         self.addCleanup(stop_host_if_needed)
-        wait_until(lambda: fetch(self.origin, {'url': '/api/bootstrap'}, self.origin)['status'] == 200, timeout=10)
+        enter(self.origin, log, timeout=10)
         self.token = json.loads(self.request('/api/bootstrap')['body'])['token']
         self.assertEqual(self.request('/api/similar', {})['status'], 200)
         wait_until(self.pid.exists, timeout=5)

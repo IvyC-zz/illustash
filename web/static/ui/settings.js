@@ -95,11 +95,12 @@ export function renderModelCard() {
     </div>
     <div class="sync-now form-actions"><span class="muted-note">${m.configured ? t('已配置') : t('未配置，不会使用')}</span><div class="spacer"></div>
       ${m.configured ? `<button class="quiet" id="modelClear">${t('清除 key')}</button><button class="quiet" id="modelTest">${t('测试连接')}</button>` : ''}<button class="primary" id="modelSave">${t('保存')}</button></div>`)) return;
-  const save = async (body, done) => { try { await saveModelApi(body); toast(done); renderSettings(); } catch (e) { toast(e.message); } };
+  const save = async (body, done) => { try { await saveModelApi(body); toast(typeof done === 'function' ? done() : done); renderSettings(); } catch (e) { toast(e.message); } };
   $('modelSave').onclick = () => {
     const body = {base: $('modelBase').value.trim() || 'https://api.deepseek.com', model: $('modelName').value.trim() || 'deepseek-chat'};
     if ($('modelKey').value.trim()) body.key = $('modelKey').value.trim();
-    save(body, t('设置已保存'));
+    // The backend keeps a key only for the address it was entered for: a new address without a key clears it.
+    save(body, () => m.configured && !state.names?.model_api?.configured ? t('接口地址已更改，原来的 API key 已清除，请重新填写') : t('设置已保存'));
   };
   for (const id of ['modelBase', 'modelName', 'modelKey']) $(id).onkeydown = e => { if (e.key === 'Enter' && !e.isComposing) $('modelSave').click(); };
   if ($('modelClear')) $('modelClear').onclick = () => save({key: null}, t('API key 已清除'));

@@ -16,8 +16,8 @@ import sqlite3
 from tests import test_native_lifecycle as lifecycle
 from tests import test_native_research as research
 from tests import test_native_research_production as production
-from tests.test_read_http import free_port, wait_until
-from tools.verify_read_http import fetch
+from tests.test_read_http import free_port
+from tools.verify_read_http import enter, fetch
 
 ROOT = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location('package_build', ROOT / 'packaging/build.py')
@@ -63,7 +63,7 @@ class PackagingTest(unittest.TestCase):
                                         '--no-sync', '--no-open', '--no-names', '--no-index-check'],
                                        env=env, cwd=install, stdout=log, stderr=log, **lifecycle.SPAWN)
             try:
-                wait_until(lambda: fetch(origin, {'url': '/api/bootstrap'}, origin)['status'] == 200, timeout=8)
+                enter(origin, log, process, timeout=8)
                 for name in ('index.html', 'app.js', 'app.css', 'theme.js', 'splash.js', 'favicon.svg'):
                     url = '/' if name == 'index.html' else '/' + name
                     response = fetch(origin, {'url': url}, origin)

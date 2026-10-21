@@ -35,7 +35,7 @@ from tests.fixed_expectations import Library, Expectations, TERMS_VERSION, basel
 from tests.synthetic_source import synthetic_reference
 from tests.test_read_http import INTERRUPT, SPAWN, free_port, wait_until
 from tools.build_db import SCHEMA as SOURCE_SCHEMA
-from tools.verify_read_http import fetch
+from tools.verify_read_http import enter, fetch
 
 difference = lifecycle.difference
 
@@ -179,7 +179,7 @@ class NativeLibraryUpgradeTest(unittest.TestCase):
         process = subprocess.Popen(self.args(lib, upgrade=upgrade, port=port, sync=sync), env=self.env, stdout=log, stderr=log, **SPAWN)
         self.addCleanup(self.stop, process)
         try:
-            wait_until(lambda: fetch(origin, {'url': '/api/bootstrap'}, origin)['status'] == 200, timeout=10)
+            enter(origin, log, process, timeout=10)
         except AssertionError:
             log.seek(0)
             self.fail(f'upgrade startup failed ({process.poll()}): {log.read().decode(errors="replace")}')

@@ -21,6 +21,8 @@ use std::time::{Duration, Instant};
 
 #[path = "common/baseline.rs"]
 mod baseline;
+#[path = "common/entry.rs"]
+mod entry;
 
 const DATABASES: [&str; 3] = ["source.sqlite", "library.sqlite", "provenance.sqlite"];
 
@@ -110,6 +112,7 @@ fn request(origin: &str, url: &str, body: Option<&Value>, token: &str) -> (u16, 
     let req = if body.is_some() { ureq::post(&format!("{origin}{url}")) } else { ureq::get(&format!("{origin}{url}")) }
         .set("Accept-Encoding", "identity")
         .set("Origin", origin)
+        .set("Cookie", &entry::cookie(origin))
         .set("X-CSRF-Token", token);
     let result = if let Some(body) = body { req.send_json(body) } else { req.call() };
     let response = match result {
@@ -192,7 +195,7 @@ fn launch(root: &Path, package: &Path, category: &str, upgrade: bool, binary: &P
         .arg("--root")
         .arg(Path::new(env!("CARGO_MANIFEST_DIR")).join("../.."))
         .args(["--port", &port.to_string()])
-        .stdout(Stdio::null())
+        .stdout(Stdio::piped())
         .stderr(Stdio::inherit());
     if category != "task_recovery" {
         command.arg("--no-sync");
@@ -201,17 +204,27 @@ fn launch(root: &Path, package: &Path, category: &str, upgrade: bool, binary: &P
         command.arg("--upgrade");
     }
     let mut host = Host { child: command.spawn().unwrap(), reaped: false };
+    let (ready, lines) = std::sync::mpsc::channel();
+    let stdout = host.child.stdout.take().unwrap();
+    thread::spawn(move || {
+        for line in std::io::BufRead::lines(std::io::BufReader::new(stdout)).map_while(Result::ok) {
+            if entry::address(&line).is_some() {
+                let _ = ready.send(line);
+            }
+        }
+    });
     let start = Instant::now();
-    let token = loop {
+    let line = loop {
         assert!(host.child.try_wait().unwrap().is_none(), "host exited at startup");
-        if let Ok(r) = ureq::get(&format!("{origin}/api/bootstrap")).call() {
-            let v: Value = r.into_json().unwrap();
-            break v["token"].as_str().unwrap().to_string();
+        if let Ok(line) = lines.recv_timeout(Duration::from_millis(20)) {
+            break line;
         }
         assert!(start.elapsed() < Duration::from_secs(15), "host startup timeout");
-        thread::sleep(Duration::from_millis(20));
     };
-    (host, origin, token)
+    entry::enter(&line);
+    let (status, bootstrap, _) = request_json(&origin, "/api/bootstrap", None, "");
+    assert_eq!(status, 200);
+    (host, origin, bootstrap["token"].as_str().unwrap().to_string())
 }
 
 fn load(category: &str) -> Value {

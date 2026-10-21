@@ -14,7 +14,7 @@ from tests.test_packaging import build
 from tests import test_native_lifecycle as lifecycle
 from tests import test_native_folder as folder_tests
 from tests.test_read_http import free_port, wait_until, SPAWN
-from tools.verify_read_http import fetch
+from tools.verify_read_http import enter, fetch
 
 
 class NativeFirstInstallTest(unittest.TestCase):
@@ -64,7 +64,7 @@ class NativeFirstInstallTest(unittest.TestCase):
                                     '--no-index-check'], cwd=self.install, env=self.env,
                                    stdout=log, stderr=log, **SPAWN)
         self.addCleanup(self.stop, process)
-        wait_until(lambda: fetch(self.origin, {'url': '/api/bootstrap'}, self.origin)['status'] == 200, timeout=8)
+        enter(self.origin, log, process, timeout=8)
         self.token = json.loads(self.request('/api/bootstrap')['body'])['token']
 
     def check_sync(self, dest):

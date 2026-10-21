@@ -19,6 +19,7 @@ import unittest
 from PIL import Image, ImageChops, ImageStat, ImageDraw
 from tests import test_native_lifecycle as lifecycle
 from tests.test_native_lifecycle import NativeLifecycleTest, HEADERS
+from tools.verify_read_http import cookie
 
 
 def key(path, ident, size):
@@ -343,7 +344,7 @@ class NativeFilesTest(unittest.TestCase):
         sock = socket.socket(); self.addCleanup(sock.close)
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 4096); sock.settimeout(10)
         sock.connect(('127.0.0.1', self.port))
-        sock.sendall((f'GET /image?id=switch HTTP/1.1\r\nHost: 127.0.0.1:{self.port}\r\n'
+        sock.sendall((f'GET /image?id=switch HTTP/1.1\r\nHost: 127.0.0.1:{self.port}\r\nCookie: {cookie(self.origin)}\r\n'
                       'Connection: close\r\n\r\n').encode())
         response = http.client.HTTPResponse(sock); self.addCleanup(response.close); response.begin()
         self.assertEqual(response.status, 200)

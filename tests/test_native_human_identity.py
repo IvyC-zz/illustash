@@ -9,7 +9,7 @@ import unittest
 from tests import test_native_human_labels as labels
 from tests import test_native_human_curation as curation
 from tests.fixed_expectations import unclocked
-from tools.verify_read_http import fetch
+from tools.verify_read_http import cookie, fetch
 from tests.test_read_http import wait_until
 
 
@@ -196,7 +196,7 @@ class NativeHumanIdentityTest(unittest.TestCase):
             data=json.dumps(body).encode()
             conn=http.client.HTTPConnection('127.0.0.1',self.port,timeout=5); self.addCleanup(conn.close)
             conn.putrequest('POST',url,skip_host=True)
-            for k,v in {'Host':self.origin.split('://')[1],'Origin':self.origin,'Content-Type':'application/json',
+            for k,v in {'Host':self.origin.split('://')[1],'Origin':self.origin,'Cookie':cookie(self.origin),'Content-Type':'application/json',
                         'X-CSRF-Token':token,'Content-Length':str(len(data))}.items(): conn.putheader(k,v)
             conn.endheaders(); conn.send(data[:1])
             switched=fetch(self.origin,{'url':'/api/libraries/open','method':'POST','body':json.dumps({'path':str(newer.path)}).encode(),

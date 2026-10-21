@@ -10,7 +10,7 @@
 
 | 形态 | 入口 | 要点 |
 |---|---|---|
-| 本地 Web | `./start-web.command --library /路径/图库.pilib` | macOS 可双击；省略 `--library` 打开最近登记的图库；默认 `http://127.0.0.1:8765`，终端 Ctrl+C 停止 |
+| 本地 Web | `./start-web.command --library /路径/图库.pilib` | macOS 可双击；省略 `--library` 打开最近登记的图库；默认端口 8765，终端打印带一次性码的地址并用默认浏览器打开，页面只能从这个地址进入；终端 Ctrl+C 停止 |
 | 桌面 App | `desktop/`（Tauri 外壳） | 没有能打开的图库时显示欢迎页，可在界面里新建、打开或从导出包导入；承载 Pixiv 登录窗口 |
 | 安装包 | `python3 packaging/build.py --output OUT` | 基础版只含核心、静态界面与标签表；`--research` 追加四类原生计算适配器 |
 
@@ -27,6 +27,8 @@ cargo build --release --manifest-path native/terms/Cargo.toml
 # 打开
 ./start-web.command --library ~/Pictures/Illustash/我的图库.pilib
 ```
+
+宿主就绪时打印 `图库已启动：http://127.0.0.1:端口/?k=…`。这个地址只能用一次：第一次打开时换成会话 cookie，之后每个请求都要带它，没有就 403（见 [架构方向](ARCHITECTURE_DIRECTION.md) 中「原生宿主完成启动恢复」一段）。浏览器关掉重开丢了 cookie，就重启宿主拿新地址；用内置浏览器走查时也打开终端里打印的地址，`preview_start {url}` 写这个地址。
 
 `start-web.command` 在 `native/terms/target/{release,debug}` 里找 `illustash-terms`，也可以用 `ILLUSTASH_TERMS_BIN` 指定，找不到直接报错。服务和桌面入口都不隐式建库或升级；开库时按已保存的设置自动同步，`--no-auto-sync` 可关闭自动同步。多来源、Apple Photos 来源与出处分组见 [图库](LIBRARIES.md)。
 
@@ -47,7 +49,8 @@ cargo build --release --manifest-path native/terms/Cargo.toml
 | `--no-provenance` / `--allow-provenance-network` | 不跑溯源任务 / 允许溯源联网 |
 | `--no-index-check` / `--index-check` | 关闭 / 打开开库时的角色索引检查（默认自动） |
 | `--index-network` | 索引检查允许联网 |
-| `--native`、`--no-open` | 兼容参数，原生入口不做额外动作 |
+| `--open` / `--no-open` | 就绪后（不）用默认浏览器打开带一次性码的地址，只在 macOS 上打开；默认不打开，`start-web.command` 默认带 `--open` |
+| `--native` | 兼容参数，原生入口不做额外动作 |
 
 已退役、直接报错的参数：`--python`、`--upstream`、`--route`、`--refresh`、`--source`、`--db`、`--cache`、`--identity`、`--no-similar` 和裸 `--`。恢复旧版本要停服务、保留当前包与 WAL，再从相容版本的升级前备份恢复；不要复制正在使用的 SQLite 文件。`tools/build_db.py` 重建的是分析源库，不是应用的更新入口。
 

@@ -12,6 +12,7 @@ from PIL import Image
 from tests import test_native_lifecycle as lifecycle
 from tests.test_native_lifecycle import NativeLifecycleTest, dump
 from tests.test_native_files import asset, key
+from tools.verify_read_http import cookie
 
 
 class NativeCacheTest(unittest.TestCase):
@@ -110,7 +111,7 @@ class NativeCacheTest(unittest.TestCase):
         sock = socket.socket(); self.addCleanup(sock.close)
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 4096); sock.settimeout(10)
         sock.connect(('127.0.0.1', self.port))
-        sock.sendall((f'GET /image?id=slow HTTP/1.1\r\nHost: 127.0.0.1:{self.port}\r\n'
+        sock.sendall((f'GET /image?id=slow HTTP/1.1\r\nHost: 127.0.0.1:{self.port}\r\nCookie: {cookie(self.origin)}\r\n'
                       'Connection: close\r\n\r\n').encode())
         response = http.client.HTTPResponse(sock); self.addCleanup(response.close); response.begin()
         self.assertEqual(response.status, 200)
@@ -160,6 +161,7 @@ class NativeCacheTest(unittest.TestCase):
         sock.connect(('127.0.0.1', self.port))
         body = b'{"action":"clear"}'
         headers = (f'POST /api/cache HTTP/1.1\r\nHost: 127.0.0.1:{self.port}\r\nOrigin: {self.origin}\r\n'
+                   f'Cookie: {cookie(self.origin)}\r\n'
                    f'X-CSRF-Token: {self.token}\r\nContent-Type: application/json\r\nContent-Length: {len(body)}\r\n'
                    'Connection: close\r\n\r\n').encode()
         sock.sendall(headers + body[:1])

@@ -43,7 +43,7 @@ import time
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from tools.verify_read_http import fetch  # noqa: E402
+from tools.verify_read_http import enter, fetch  # noqa: E402
 
 WINDOWS = os.name == 'nt'
 EXE = '.exe' if WINDOWS else ''
@@ -328,18 +328,11 @@ def end_to_end(args, base, resources, images, shared, characters, trial):
                              '--root', str(resources), '--no-names', '--no-index-check', '--no-open'],
                             env=env, cwd=root, stdout=log, stderr=log, **SPAWN)
     try:
-        deadline = time.monotonic() + 30
-        while True:
-            try:
-                answer = fetch(origin, {'url': '/api/bootstrap'}, origin)
-                if answer['status'] == 200:
-                    token = json.loads(answer['body'])['token']
-                    break
-            except OSError:
-                pass
-            if time.monotonic() > deadline or host.poll() is not None:
-                raise SystemExit(f'宿主启动失败：{(root / "host.log").read_text(errors="replace")}')
-            time.sleep(.05)
+        try:
+            enter(origin, root / 'host.log', host, timeout=30)
+        except AssertionError as error:
+            raise SystemExit(f'宿主启动失败：{error}')
+        token = json.loads(fetch(origin, {'url': '/api/bootstrap'}, origin)['body'])['token']
         sampler = Sampler(host.pid)
         sampler.start()
         time.sleep(.2)

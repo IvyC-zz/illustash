@@ -63,7 +63,7 @@ class Store:
 
     def curate(self, ids, action):
         import os, subprocess
-        from tools.verify_read_http import fetch
+        from tools.verify_read_http import enter, fetch
         from tests.test_read_http import SPAWN, free_port, wait_until, stop_process
         package = Path(tempfile.mkdtemp(prefix='curation-input-', dir=self.root)).with_suffix('.pilib')
         package.mkdir()
@@ -77,12 +77,13 @@ class Store:
         origin = f'http://127.0.0.1:{port}'
         env = os.environ | {'ILLUSTASH_APP_SUPPORT':str(self.root/'support'),
                             'ILLUSTASH_SHARED':str(self.root/'absent-resources'),'ILLUSTASH_NO_KEYCHAIN':'1'}
+        log = tempfile.TemporaryFile()
         process = subprocess.Popen([str(core.binary()),'http','--library',str(package),'--root',
                                     str(Path(__file__).resolve().parents[1]),'--port',str(port),
                                     '--no-open','--no-auto-sync','--no-names','--no-provenance','--no-index-check'],
-                                   env=env,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,**SPAWN)
+                                   env=env,stdout=log,stderr=subprocess.DEVNULL,**SPAWN)
         try:
-            wait_until(lambda:fetch(origin,{'url':'/api/bootstrap'},origin)['status']==200,timeout=10)
+            enter(origin,log,process,timeout=10)
             token = json.loads(fetch(origin,{'url':'/api/bootstrap'},origin)['body'])['token']
             result = fetch(origin,{'url':'/api/curate','method':'POST',
                                    'body':json.dumps({'ids':ids,'action':action}).encode(),
@@ -91,6 +92,7 @@ class Store:
                 raise AssertionError(result)
         finally:
             stop_process(process)
+            log.close()
         with closing(sqlite3.connect(package/'library.sqlite')) as src, closing(sqlite3.connect(self.path)) as dst:
             src.backup(dst)
         return json.loads(result['body'])

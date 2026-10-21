@@ -42,12 +42,93 @@ use crate::app_service::{truthy, Application, Options, Session};
 struct Host {
     application: Application,
     origin: String,
+    entry: Entry,
 }
 impl std::ops::Deref for Host {
     type Target = Application;
     fn deref(&self) -> &Application {
         &self.application
     }
+}
+
+/// Every request carries a secret no other local process can read: 127.0.0.1 is open to every process and user on
+/// the machine, and the Host and Origin checks only stop web pages. The ready line prints the address with a
+/// one-time code; the first visit trades it for a session cookie, and requests without that cookie are refused.
+struct Entry {
+    /// `illustash-<port>`: cookies ignore ports, so a host on another port keeps its own.
+    cookie: String,
+    secret: String,
+    code: std::sync::Mutex<Option<String>>,
+}
+impl Entry {
+    fn new(port: u16) -> Result<Self> {
+        Ok(Self {
+            cookie: format!("illustash-{port}"),
+            secret: Session::token()?,
+            code: std::sync::Mutex::new(Some(Session::token()?)),
+        })
+    }
+    /// The address the ready line prints. The desktop shell reads it from stdout; the CLI prints it for the person.
+    fn address(&self, origin: &str) -> String {
+        let code = self.code.lock().expect("entry code lock poisoned");
+        format!("{origin}/?k={}", code.as_deref().unwrap_or(""))
+    }
+    fn admits(&self, request: &Request) -> bool {
+        request
+            .headers()
+            .iter()
+            .filter(|h| h.field.equiv("Cookie"))
+            .flat_map(|h| h.value.as_str().split(';'))
+            .filter_map(|pair| pair.trim().split_once('='))
+            .any(|(name, value)| name == self.cookie && same(value, &self.secret))
+    }
+    /// `GET /?k=<code>` with the unused code takes it, so a second use is refused, and returns the address to go on
+    /// to: the same query without `k`.
+    fn redeem(&self, request: &Request) -> Option<String> {
+        let (path, query) = request.url().split_once('?')?;
+        if path != "/" {
+            return None;
+        }
+        let pairs: Vec<(String, String)> = url::form_urlencoded::parse(query.as_bytes()).into_owned().collect();
+        let given = pairs.iter().find(|(k, _)| k == "k").map(|(_, v)| v.as_str())?;
+        let mut code = self.code.lock().expect("entry code lock poisoned");
+        if !code.as_deref().is_some_and(|code| same(given, code)) {
+            return None;
+        }
+        *code = None;
+        let rest = url::form_urlencoded::Serializer::new(String::new())
+            .extend_pairs(pairs.iter().filter(|(k, _)| k != "k"))
+            .finish();
+        Some(if rest.is_empty() { "/".into() } else { format!("/?{rest}") })
+    }
+    /// Sets the cookie and goes on by a refresh from this page rather than a redirect: a redirect continues the
+    /// navigation that brought the code, which is cross-site when it comes from the desktop start page, and a
+    /// SameSite=Strict cookie is not sent on it. The refresh is a navigation of 127.0.0.1's own.
+    fn enter(&self, request: Request, target: &str) {
+        let target = target.replace('&', "&amp;");
+        let body = format!(
+            "<!doctype html><html><head><meta charset=\"utf-8\"><meta http-equiv=\"refresh\" content=\"0;url={target}\"><title>Illustash</title><script src=\"/theme.js\"></script><style>html{{background:#f4f4f6}}html[data-theme=dark]{{background:#1d1d21}}</style></head><body></body></html>"
+        );
+        let cookie = format!("{}={}; HttpOnly; SameSite=Strict; Path=/", self.cookie, self.secret);
+        let headers = [
+            ("Content-Type", "text/html; charset=utf-8"),
+            ("Cache-Control", "no-store"),
+            ("X-Content-Type-Options", "nosniff"),
+            ("Referrer-Policy", "no-referrer"),
+            ("Content-Security-Policy", "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'"),
+            ("X-Illustash-Route", "core"),
+            ("Set-Cookie", cookie.as_str()),
+        ];
+        let mut response = tiny_http::Response::from_string(body);
+        for (name, value) in headers {
+            response.add_header(tiny_http::Header::from_bytes(name, value).expect("entry header is valid"));
+        }
+        let _ = request.respond(response);
+    }
+}
+/// Compares without stopping at the first difference.
+fn same(a: &str, b: &str) -> bool {
+    a.len() == b.len() && a.bytes().zip(b.bytes()).fold(0, |d, (x, y)| d | (x ^ y)) == 0
 }
 impl Session {
     fn context(&self, tags: &std::path::Path) -> http::LibraryContext {
@@ -143,23 +224,35 @@ fn handle(mut request: Request, host: &Host, received: u64) {
     // so nothing a write stores ever depends on it.
     let _language = crate::http_read::PageLanguage::set(header(&request, "X-Illustash-Language").filter(|_| !write));
     // Security checks precede body reads. A partial body must not hold the library lock.
+    let denied = if header(&request, "Host") != Some(host.origin.trim_start_matches("http://")) {
+        Some("仅允许本机地址访问")
+    } else if header(&request, "Origin").is_some_and(|v| !v.is_empty() && v != host.origin) {
+        Some("不允许跨站访问")
+    } else {
+        None
+    };
+    if let Some(message) = denied {
+        respond(request, error(message), 403, "core");
+        return;
+    }
+    if request.method().as_str() == "GET" {
+        if let Some(target) = host.entry.redeem(&request) {
+            host.entry.enter(request, &target);
+            return;
+        }
+    }
+    if !host.entry.admits(&request) {
+        respond(request, error("请用启动时显示的地址打开图库"), 403, "core");
+        return;
+    }
     {
         let session = host.session.read().expect("app_http session lock poisoned");
-        let denied = if header(&request, "Host") != Some(host.origin.trim_start_matches("http://")) {
-            Some("仅允许本机地址访问")
-        } else if header(&request, "Origin").is_some_and(|v| !v.is_empty() && v != host.origin) {
-            Some("不允许跨站访问")
-        } else if !host.accepts(&session, received)
+        if !host.accepts(&session, received)
             || (write
                 && (header(&request, "Origin") != Some(host.origin.as_str())
                     || header(&request, "X-CSRF-Token") != Some(session.token.as_str())))
         {
-            Some("会话已过期，请刷新页面")
-        } else {
-            None
-        };
-        if let Some(message) = denied {
-            respond(request, error(message), 403, "core");
+            respond(request, error("会话已过期，请刷新页面"), 403, "core");
             return;
         }
     }
@@ -496,6 +589,7 @@ pub(crate) fn run(args: &[String]) -> Result<u8> {
     let mut backup = false;
     let mut upgrade = false;
     let mut rescue = false;
+    let mut open = false;
     let mut expanded = Vec::new();
     for arg in args {
         if let Some((key, value)) = arg.split_once('=') {
@@ -510,10 +604,12 @@ pub(crate) fn run(args: &[String]) -> Result<u8> {
     while let Some(arg) = iter.next() {
         match arg.as_str() {
             "--help" => {
-                println!("illustash-terms http --library PACKAGE [--root ROOT] [--port PORT] [--backup | --upgrade | --rescue-source] [--no-open] [--no-sync | --no-auto-sync] [--sync-limit N] [--no-names] [--names-network] [--no-provenance] [--allow-provenance-network] [--no-index-check | --index-check] [--index-network]");
+                println!("illustash-terms http --library PACKAGE [--root ROOT] [--port PORT] [--backup | --upgrade | --rescue-source] [--open | --no-open] [--no-sync | --no-auto-sync] [--sync-limit N] [--no-names] [--names-network] [--no-provenance] [--allow-provenance-network] [--no-index-check | --index-check] [--index-network]");
                 return Ok(0);
             }
-            "--native" | "--no-open" => {}
+            "--native" => {}
+            "--open" => open = true,
+            "--no-open" => open = false,
             arg if [
                 "--python",
                 "--upstream",
@@ -646,15 +742,23 @@ pub(crate) fn run(args: &[String]) -> Result<u8> {
         session.upgraded = upgrade_backup.map(|backup| crate::app_upgrade::shown(&backup));
         session.rescued = rescued.map(|report: crate::app_rescue::Report| report.json());
     }
-    let host = Arc::new(Host { application, origin: format!("http://127.0.0.1:{port}") });
+    let host = Arc::new(Host { application, origin: format!("http://127.0.0.1:{port}"), entry: Entry::new(port)? });
     http::install_signals();
     let desktop_parent = crate::platform_process::DesktopParent::capture();
     let mut handlers: Vec<thread::JoinHandle<()>> = Vec::new();
     // Recover durable research work, or the established no-learner verdict notification.
     // Hold this session while recovering; no event from its database is replayed into a replacement library.
     host.start_reporting(|| startup_progress("正在恢复后台任务", 0.97))?;
-    println!("图库已启动：{}", host.origin);
+    let address = host.entry.address(&host.origin);
+    println!("图库已启动：{address}");
     std::io::Write::flush(&mut std::io::stdout())?;
+    // `start-web.command` opens the page in the default browser; elsewhere the printed address is opened by hand.
+    #[cfg(target_os = "macos")]
+    if open {
+        let _ = std::process::Command::new("/usr/bin/open").arg(&address).spawn();
+    }
+    #[cfg(not(target_os = "macos"))]
+    let _ = open;
     let mut next_recovery = Instant::now() + Duration::from_secs(1);
     while !http::stopping() && !desktop_closed.load(Ordering::SeqCst) {
         if desktop_parent.lost() {

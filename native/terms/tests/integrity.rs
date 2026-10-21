@@ -18,6 +18,9 @@ use std::{
 
 const RECORD: &str = ".illustash-checks.json";
 
+#[path = "common/entry.rs"]
+mod entry;
+
 struct Sandbox(PathBuf);
 impl Drop for Sandbox {
     fn drop(&mut self) {
@@ -90,7 +93,10 @@ impl Host {
         loop {
             match rx.recv_timeout(Duration::from_millis(50)) {
                 Ok(line) => {
-                    let ready = line.starts_with("图库已启动：");
+                    let ready = entry::address(&line).is_some();
+                    if ready {
+                        entry::enter(&line);
+                    }
                     lines.push(line);
                     if ready {
                         break;
@@ -107,12 +113,18 @@ impl Host {
         Ok(Self { child, stdin: Some(stdin), origin: format!("http://127.0.0.1:{port}"), lines })
     }
     fn get(&self, url: &str) -> Value {
-        ureq::get(&format!("{}{url}", self.origin)).call().unwrap().into_json().unwrap()
+        ureq::get(&format!("{}{url}", self.origin))
+            .set("Cookie", &entry::cookie(&self.origin))
+            .call()
+            .unwrap()
+            .into_json()
+            .unwrap()
     }
     fn post(&self, url: &str, body: Value) -> (u16, Value) {
         let token = self.get("/api/bootstrap")["token"].as_str().unwrap().to_owned();
         let response = match ureq::post(&format!("{}{url}", self.origin))
             .set("Origin", &self.origin)
+            .set("Cookie", &entry::cookie(&self.origin))
             .set("X-CSRF-Token", &token)
             .send_json(body)
         {
