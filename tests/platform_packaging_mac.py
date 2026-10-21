@@ -18,7 +18,7 @@ from tests import test_native_lifecycle as lifecycle
 from tests import test_native_research_production as production
 from tests import test_packaging as packaging_tests
 from tests.test_read_http import SPAWN, free_port, wait_until
-from tools.verify_read_http import fetch
+from tools.verify_read_http import enter, fetch
 
 
 class MacAppBootstrapTest(unittest.TestCase):
@@ -56,7 +56,7 @@ class MacAppBootstrapTest(unittest.TestCase):
         self.addCleanup(self.stop, process)
         origin = f'http://127.0.0.1:{port}'
         try:
-            wait_until(lambda: fetch(origin, {'url': '/api/bootstrap'}, origin)['status'] == 200, timeout=5)
+            enter(origin, log, process, timeout=5)
         except AssertionError:
             log.seek(0)
             self.fail(f'App bootstrap failed ({process.poll()}): {log.read().decode(errors="replace")}')

@@ -112,6 +112,74 @@ def corpus(db, sample=16, query_limit=80):
     return out
 
 
+# 本机宿主的每个请求都要带会话 cookie（发布前安全自查）：宿主就绪时在 stdout 打印带一次性码的地址，
+# 第一次访问它换到 cookie。测试和浏览器走同一条路：enter() 从宿主的输出里读就绪行、换 cookie，
+# 之后 fetch() 对同一个端点自动带上。只读 HTTP 对照宿主（read-http）不要 cookie，不调用 enter()。
+READY = '图库已启动：'
+COOKIES = {}
+_ENTERED = set()
+
+
+def output(log):
+    """What the host wrote to `log` so far (a path, or the file it inherited as stdout), without moving the
+    position it writes at."""
+    if isinstance(log, (str, os.PathLike)):
+        return Path(log).read_bytes() if Path(log).exists() else b''
+    log.flush()
+    if hasattr(os, 'pread'):
+        return os.pread(log.fileno(), os.fstat(log.fileno()).st_size, 0)
+    # Windows: no pread, and a duplicated handle shares the position. Open the file again for reading only; a
+    # TemporaryFile is delete-on-close, so the second handle must share delete access, which os.open cannot ask for.
+    import ctypes, msvcrt
+    from ctypes import wintypes
+    create = ctypes.WinDLL('kernel32', use_last_error=True).CreateFileW
+    create.argtypes = (wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD, wintypes.LPVOID, wintypes.DWORD,
+                       wintypes.DWORD, wintypes.HANDLE)
+    create.restype = wintypes.HANDLE
+    # GENERIC_READ; FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE; OPEN_EXISTING; FILE_ATTRIBUTE_NORMAL
+    handle = create(str(log.name), 0x80000000, 7, None, 3, 0x80, None)
+    if handle in (None, wintypes.HANDLE(-1).value):
+        raise ctypes.WinError(ctypes.get_last_error())
+    with os.fdopen(msvcrt.open_osfhandle(handle, os.O_RDONLY | os.O_BINARY), 'rb') as copy:
+        return copy.read()
+
+
+def ready(text, origin):
+    """The newest ready address of the host at `origin` in its output, if not entered with yet."""
+    lines = text.decode('utf-8', 'replace').splitlines() if isinstance(text, bytes) else text.splitlines()
+    for line in reversed(lines):
+        if line.startswith(READY) and line[len(READY):].startswith(origin + '/'):
+            address = line[len(READY):].strip()
+            return None if address in _ENTERED else address
+    return None
+
+
+def enter(origin, log, process=None, timeout=15):
+    """Wait for the host at `origin` to print its ready address to `log`, then trade its one-time code for the
+    session cookie as a browser would. Returns the address."""
+    deadline = time.monotonic() + timeout
+    while (address := ready(output(log), origin)) is None:
+        if process is not None and process.poll() is not None:
+            raise AssertionError(f'host exited ({process.returncode}) before it was ready: '
+                                 f'{output(log).decode(errors="replace")[-2000:]}')
+        if time.monotonic() > deadline:
+            raise AssertionError(f'host not ready within {timeout}s: {output(log).decode(errors="replace")[-2000:]}')
+        time.sleep(0.02)
+    _ENTERED.add(address)
+    COOKIES.pop(origin, None)
+    response = fetch(origin, {'url': address[len(origin):]}, origin)
+    cookie = response['headers'].get('Set-Cookie', '').split(';')[0]
+    if response['status'] != 200 or not cookie:
+        raise AssertionError(f'entering {origin} failed: {response["status"]} {response["body"][:200]!r}')
+    COOKIES[origin] = cookie
+    return address
+
+
+def cookie(origin):
+    """The Cookie header for requests to `origin` that do not go through fetch()."""
+    return COOKIES[origin]
+
+
 # struct linger：Windows 是两个 u_short，其他平台是两个 int。
 ABORTIVE_CLOSE = struct.pack('HH' if os.name == 'nt' else 'ii', 1, 0)
 
@@ -124,6 +192,8 @@ def fetch(base, item, origin, timeout=30):
         raise ValueError('Host / Origin 必须是前门的本机 HTTP origin')
     conn = http.client.HTTPConnection(url.hostname, url.port, timeout=timeout)
     headers = {'Host': public.netloc, 'Origin': origin, 'Accept-Encoding': 'identity'}
+    if base in COOKIES:
+        headers['Cookie'] = COOKIES[base]
     headers.update(item.get('headers', {}))
     # Corpus callers cannot accidentally turn compression on for JSON comparisons.
     headers['Accept-Encoding'] = 'identity'

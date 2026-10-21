@@ -9,7 +9,7 @@ from tests import test_native_human_labels as labels
 from tests import test_native_human_curation as curation
 from tests import test_native_human_identity as identity
 from tests.test_native_human_labels import states
-from tools.verify_read_http import fetch
+from tools.verify_read_http import cookie, fetch
 from tests.fixed_expectations import unclocked
 
 
@@ -188,7 +188,7 @@ class NativeHumanCharactersTest(unittest.TestCase):
             encoded = json.dumps(body).encode()
             conn = http.client.HTTPConnection('127.0.0.1', self.port, timeout=5)
             conn.putrequest('POST', url, skip_host=True)
-            for key, value in {'Host': self.origin.split('://')[1], 'Origin': self.origin,
+            for key, value in {'Host': self.origin.split('://')[1], 'Origin': self.origin, 'Cookie': cookie(self.origin),
                                'Content-Type': 'application/json', 'X-CSRF-Token': token,
                                'Content-Length': str(len(encoded))}.items(): conn.putheader(key, value)
             conn.endheaders(); conn.send(encoded[:1])

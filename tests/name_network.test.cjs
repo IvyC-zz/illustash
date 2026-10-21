@@ -87,6 +87,24 @@ test('saving or clearing model settings keeps the grant and revoke control avail
   }
 });
 
+test('saving a new model address that drops the key says the key must be entered again', async () => {
+  // The backend keeps a key only for the address it was entered for (app_names.rs configure).
+  const {renderModelCard} = await web.load('ui/settings.js');
+  for (const [kept, said] of [[true, '设置已保存'], [false, '接口地址已更改，原来的 API key 已清除，请重新填写']]) {
+    const {state} = web.core();
+    const controls = Object.fromEntries(['modelCard', 'modelSave', 'modelClear', 'modelTest', 'modelBase', 'modelName', 'modelKey', 'toast', 'toastText', 'toastUndo']
+      .map(id => [id, {value: '', contains: () => false}]));
+    controls.modelBase.value = 'https://synthetic.invalid';
+    Object.assign(state, {route: {page: 'library'}, names: {network: {}, model_api: {configured: true, base: 'https://api.deepseek.com'}}});
+    globalThis.document = {getElementById: id => controls[id], activeElement: null};
+    globalThis.fetch = async () => ({status: 200, ok: true, json: async () => ({model_api: {configured: kept}})});
+    renderModelCard();
+    controls.modelSave.onclick();
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(controls.toastText.textContent, said);
+  }
+});
+
 test('refreshing names from the task panel keeps the network status', async () => {
   // The panel's button runs core/jobs.js refreshNames().
   const network = {authorized: true, this_run: false, granted_at: 'synthetic-time'}, {state, refreshNames} = web.core();

@@ -1009,13 +1009,21 @@ fn configure(path: &std::path::Path, body: &Json) -> Result<()> {
     }
     let tx = c.transaction()?;
     tx.execute_batch("INSERT OR IGNORE INTO name_settings SELECT 'model_key',value FROM name_settings WHERE key='deepseek_key'; INSERT OR IGNORE INTO name_settings SELECT 'model_name',value FROM name_settings WHERE key='deepseek_model'; DELETE FROM name_settings WHERE key IN ('deepseek_key','deepseek_model');")?;
+    let base = base.map(|s| s.trim().trim_end_matches('/'));
+    // The key goes only to the address it was entered for: a new address without a new key clears it, and the
+    // person enters it again.
+    if let Some(b) = base {
+        if key.is_none() && b != settings(&tx)?.base {
+            tx.execute("DELETE FROM name_settings WHERE key='model_key'", [])?;
+        }
+    }
     if body.get("key").is_some() {
         tx.execute("DELETE FROM name_settings WHERE key='model_key'", [])?;
         if let Some(k) = key {
             tx.execute("INSERT INTO name_settings VALUES ('model_key',?)", [k.trim()])?;
         }
     }
-    for (k, v) in [("model_name", model), ("model_base", base.map(|s| s.trim().trim_end_matches('/')))] {
+    for (k, v) in [("model_name", model), ("model_base", base)] {
         if let Some(v) = v {
             tx.execute("INSERT OR REPLACE INTO name_settings VALUES (?,?)", [k, v])?;
         }
@@ -2250,5 +2258,26 @@ mod sources_tests {
         assert_eq!(lib.char("alice").source, "bangumi");
         assert_eq!(lib.char("bob").source, "model");
         assert_eq!(crate::names_view::whole_loads() - start, 2, "the counter sees the two reference loads above");
+    }
+
+    #[test]
+    fn a_new_model_address_clears_the_key() {
+        let lib = Library::load();
+        let path = lib.root.join("library.sqlite");
+        let set = |body: &str| configure(&path, &crate::http_json::parse_request(body).unwrap());
+        let key = || settings(&lib.db()).unwrap().key;
+        set(r#"{"key":"sk-synthetic-0000","base":"https://one.example/"}"#).unwrap();
+        assert_eq!(key().as_deref(), Some("sk-synthetic-0000"));
+        // The same address, as the settings card sends it on every save, and the model alone keep the key.
+        set(r#"{"base":"https://one.example","model":"synthetic-model"}"#).unwrap();
+        set(r#"{"model":"other-model"}"#).unwrap();
+        assert_eq!(key().as_deref(), Some("sk-synthetic-0000"));
+        // A new address without a key: the key is gone, the address is kept.
+        set(r#"{"base":"https://two.example"}"#).unwrap();
+        assert_eq!(key(), None);
+        assert_eq!(settings(&lib.db()).unwrap().base, "https://two.example");
+        // A new address with a key keeps the new key.
+        set(r#"{"key":"sk-synthetic-1111","base":"https://three.example"}"#).unwrap();
+        assert_eq!(key().as_deref(), Some("sk-synthetic-1111"));
     }
 }

@@ -31,7 +31,7 @@ from tests.fixed_expectations import Library, Expectations, library_digests, unc
 from tests.test_read_http import INTERRUPT, SPAWN, free_port, wait_until
 from tests.synthetic_source import source_fixture as fixture
 from tools import verify_read_http
-from tools.verify_read_http import fetch, temporary_path
+from tools.verify_read_http import cookie, enter, fetch, temporary_path
 
 HEADERS = ('Content-Type', 'Content-Length', 'Content-Encoding', 'Cache-Control', 'Vary',
            'X-Content-Type-Options', 'Referrer-Policy', 'Content-Security-Policy')
@@ -219,7 +219,7 @@ class NativeHumanLabelsTest(unittest.TestCase):
                                    env=self.env, stdout=log, stderr=log, **SPAWN)
         self.addCleanup(self.stop, process)
         try:
-            wait_until(lambda: fetch(self.origin, {'url': '/api/bootstrap'}, self.origin)['status'] == 200, timeout=5)
+            enter(self.origin, log, process, timeout=5)
         except AssertionError:
             log.seek(0); self.fail(f'native startup failed: {log.read().decode(errors="replace")}')
         return process
@@ -444,7 +444,7 @@ class NativeHumanLabelsTest(unittest.TestCase):
         conn = http.client.HTTPConnection('127.0.0.1', self.port, timeout=5)
         self.addCleanup(conn.close)
         conn.putrequest('POST', '/api/tag', skip_host=True)
-        for name, value in {'Host': self.origin.split('://')[1], 'Origin': self.origin,
+        for name, value in {'Host': self.origin.split('://')[1], 'Origin': self.origin, 'Cookie': cookie(self.origin),
                             'Content-Type': 'application/json', 'X-CSRF-Token': old_token,
                             'Content-Length': str(len(body))}.items():
             conn.putheader(name, value)

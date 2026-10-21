@@ -16,7 +16,7 @@ import unittest
 
 from tests import test_native_human_labels as labels
 from tests.test_native_human_labels import snapshot, states
-from tools.verify_read_http import fetch
+from tools.verify_read_http import cookie, fetch
 from tests.fixed_expectations import unclocked
 
 
@@ -232,7 +232,7 @@ class NativeHumanCurationTest(unittest.TestCase):
         conn = http.client.HTTPConnection('127.0.0.1', self.port, timeout=5)
         self.addCleanup(conn.close)
         conn.putrequest('POST', '/api/curate', skip_host=True)
-        for name, value in {'Host': self.origin.split('://')[1], 'Origin': self.origin,
+        for name, value in {'Host': self.origin.split('://')[1], 'Origin': self.origin, 'Cookie': cookie(self.origin),
                             'Content-Type': 'application/json', 'X-CSRF-Token': token,
                             'Content-Length': str(len(body))}.items():
             conn.putheader(name, value)

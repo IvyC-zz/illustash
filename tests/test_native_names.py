@@ -23,7 +23,7 @@ from tests import test_native_lifecycle as lifecycle
 from tests.fixed_expectations import RETIRED, SKIP_COLUMNS, unclocked
 from tests.test_read_http import INTERRUPT, SPAWN, free_port, wait_until
 from tests.name_providers import Providers
-from tools.verify_read_http import fetch
+from tools.verify_read_http import enter, fetch
 
 
 class TextService:
@@ -106,7 +106,7 @@ class NativeNamesTest(unittest.TestCase):
         if not getattr(self, 'enabled', False): args += ['--no-names']
         process = subprocess.Popen(args, env=self.env, stdout=log, stderr=log, **SPAWN)
         self.addCleanup(self.stop, process)
-        wait_until(lambda: fetch(self.origin, {'url':'/api/bootstrap'}, self.origin)['status']==200, timeout=5)
+        enter(self.origin, log, process, timeout=5)
         return process, log
     def setUp(self):
         self.enabled = False

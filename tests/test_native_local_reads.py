@@ -16,7 +16,7 @@ from urllib.parse import urlencode
 from tests import test_native_human_labels as labels, test_native_human_curation as curation
 from tests.fixed_expectations import unclocked
 from tests.test_native_human_labels import difference
-from tools.verify_read_http import fetch
+from tools.verify_read_http import cookie, fetch
 
 
 class NativeLocalReadsTest(unittest.TestCase):
@@ -221,7 +221,7 @@ class NativeLocalReadsTest(unittest.TestCase):
         connection=http.client.HTTPConnection('127.0.0.1',self.port,timeout=5)
         body=b'{"ids":["b"]}'
         connection.putrequest('POST','/api/suggest');connection.putheader('Host',self.origin.split('://')[1])
-        connection.putheader('Origin',self.origin);connection.putheader('X-CSRF-Token',self.token)
+        connection.putheader('Origin',self.origin);connection.putheader('Cookie',cookie(self.origin));connection.putheader('X-CSRF-Token',self.token)
         connection.putheader('Content-Type','application/json');connection.putheader('Content-Length',str(len(body)))
         connection.endheaders();connection.send(body[:3])
         replacement=self.clone(self.left,'partial-replacement');before=labels.states(replacement)

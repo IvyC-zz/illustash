@@ -24,7 +24,7 @@ import time
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from tools.verify_read_http import fetch  # noqa: E402
+from tools.verify_read_http import enter, fetch  # noqa: E402
 
 PYTHON_NAMES = {'python.exe', 'python3.exe', 'pythonw.exe', 'py.exe', 'pyw.exe'}
 MONITOR = r'''
@@ -56,7 +56,8 @@ $p = Start-Process -FilePath $exe -ArgumentList @('--library', $library, '--port
 $ready = $false
 for ($i = 0; $i -lt 120 -and -not $ready; $i++) {
   Start-Sleep -Milliseconds 500
-  try { $r = Invoke-WebRequest -UseBasicParsing "http://127.0.0.1:$port/api/bootstrap" -TimeoutSec 2; $ready = $r.StatusCode -eq 200 } catch {}
+  # 宿主就绪后才处理请求；不带会话 cookie 的请求一律 403，回了 403 就是就绪了
+  try { Invoke-WebRequest -UseBasicParsing "http://127.0.0.1:$port/api/bootstrap" -TimeoutSec 2 | Out-Null } catch { $ready = $_.Exception.Response -and [int]$_.Exception.Response.StatusCode -eq 403 }
 }
 Start-Sleep -Seconds 4
 $p.Refresh()
@@ -140,7 +141,11 @@ class Acceptance:
             p.stdin.write(b'\x01'); p.stdin.flush()
         self.roots.append(p.pid)
         origin = f'http://127.0.0.1:{port}'
-        up = self.wait(lambda: fetch(origin, {'url': '/api/bootstrap'}, origin)['status'] == 200, 15)
+        try:
+            enter(origin, self.work / f'host-{port}.log', p, timeout=15)
+            up = True
+        except AssertionError:
+            up = False
         return p, origin, up
 
     def get(self, origin, url):
@@ -286,6 +291,8 @@ class Acceptance:
         # 安全：Host/Origin/CSRF
         evil = fetch(origin, {'url': '/api/bootstrap', 'headers': {'Host': 'evil.example'}}, origin)
         self.check('拒绝外部 Host', evil['status'] == 403)
+        bare = fetch(origin, {'url': '/api/bootstrap', 'headers': {'Cookie': ''}}, origin)
+        self.check('拒绝不带会话 cookie 的读请求', bare['status'] == 403)
         bad = self.post(origin, '/api/tag', {'ids': ids[:1], 'tag': 'x'}, 'wrong-token')
         self.check('拒绝错误 CSRF 令牌', bad['status'] == 403)
         # 备份、切库、令牌轮换、导出导入

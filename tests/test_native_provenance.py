@@ -21,7 +21,7 @@ from unittest.mock import patch
 from tests import test_native_lifecycle as lifecycle
 from tests.fixed_expectations import unclocked
 from tests.test_read_http import SPAWN, wait_until
-from tools.verify_read_http import fetch
+from tools.verify_read_http import enter, fetch
 from tests import provenance_fixture as db
 
 
@@ -101,7 +101,7 @@ class NativeProvenanceTest(unittest.TestCase):
         log=tempfile.TemporaryFile();self.addCleanup(log.close)
         process=subprocess.Popen([str(self.binary),'http','--no-names','--no-auto-sync','--library',str(path),'--port',str(self.port),'--root',str(self.resources),*extra],env={**self.env,'ILLUSTASH_NO_KEYCHAIN':'1'},stdout=log,stderr=log, **SPAWN)
         self.addCleanup(self.stop,process)
-        wait_until(lambda:fetch(self.origin,{'url':'/api/bootstrap'},self.origin)['status']==200,timeout=8)
+        enter(self.origin,log,process,timeout=8)
         return process,log
     def setUp(self):
         lifecycle.NativeLifecycleTest.setUp(self)

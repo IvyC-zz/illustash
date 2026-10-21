@@ -6,6 +6,7 @@ import sqlite3
 import subprocess
 import os
 import shutil
+import tempfile
 import unittest
 from pathlib import Path
 from tests.test_native_folder import NativeFolderHTTPTest
@@ -445,17 +446,18 @@ if failures: Path(sys.argv[2]).write_text(json.dumps(dict(identity=r['identity']
     @unittest.skipUnless(shutil.which('sandbox-exec'), 'macOS/Linux only: the Photos permission is a macOS privacy setting, refused here through sandbox-exec')
     def test_native_library_new_photos_permission_refused_is_named(self):
         # macOS privacy settings refuse the Photos database with EPERM, as a sandbox denial does (#202).
-        from tests.test_read_http import SPAWN, wait_until
-        from tools.verify_read_http import fetch
+        from tests.test_read_http import SPAWN
+        from tools.verify_read_http import enter
         self.photo('D','com.atebits.Tweetie2')
         self.stop(self.process)
         database=os.path.realpath(self.library/'database/Photos.sqlite')
         profile='(version 1)(allow default)(deny file-read* (literal %s))'%json.dumps(database)
         args=[shutil.which('sandbox-exec'),'-p',profile,str(self.binary),'http','--no-auto-sync','--library',str(self.lib.path),'--port',str(self.port),
               '--root',str(self.resources),'--no-names','--no-index-check']
-        self.process=subprocess.Popen(args,env=self.env,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,**SPAWN)
+        log=tempfile.TemporaryFile();self.addCleanup(log.close)
+        self.process=subprocess.Popen(args,env=self.env,stdout=log,stderr=subprocess.DEVNULL,**SPAWN)
         self.addCleanup(self.stop,self.process)
-        wait_until(lambda: fetch(self.origin,{'url':'/api/bootstrap'},self.origin)['status']==200,timeout=5)
+        enter(self.origin,log,self.process,timeout=5)
         self.token=json.loads(self.request('/api/bootstrap')['body'])['token']
         state=self.sync()['state']
         self.assertEqual((state['status'],state['problem']),('error','photos_permission'),state)

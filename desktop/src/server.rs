@@ -149,6 +149,8 @@ fn show_progress(main: &WebviewWindow, done: f64, stage: &str) {
 
 /// The start page finishes its launch animation, then opens the library; `launched` makes that load
 /// skip the fold it just watched. If the page cannot (its script failed), open the library directly.
+/// `url` is the host's ready address with its one-time code: the first load trades it for the session cookie,
+/// so the address works once, and a new service prints a new one.
 fn launch(main: &WebviewWindow, mut url: Url, generation: u64) {
     url.query_pairs_mut().append_pair("launched", "1");
     let js = format!("window.launch && window.launch({})", serde_json::to_string(url.as_str()).unwrap());
@@ -596,6 +598,12 @@ mod tests {
                 .as_str(),
             "http://127.0.0.1:9123/"
         );
+        // The host prints its address with the one-time code that trades for the session cookie; launch() then adds
+        // `launched` and the host keeps that through the exchange.
+        let mut url = ready_url("图库已启动：http://127.0.0.1:9123/?k=0123abcd", 9123).unwrap();
+        assert_eq!(url.query(), Some("k=0123abcd"));
+        url.query_pairs_mut().append_pair("launched", "1");
+        assert_eq!(url.as_str(), "http://127.0.0.1:9123/?k=0123abcd&launched=1");
         for bad in [
             "noise 图库已启动：http://127.0.0.1:9123",
             "图库已启动：https://127.0.0.1:9123",
