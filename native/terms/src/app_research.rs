@@ -232,7 +232,7 @@ fn file_metadata(h: &mut Sha256, path: &Path) {
     }
 }
 /// Ordered typed rows of one table (or a missing-table marker).
-fn hash_table(c: &Connection, h: &mut Sha256, table: &str, ctx: &TaskContext) -> Result<()> {
+fn hash_table(c: &Connection, h: &mut Sha256, table: &str, check: &dyn Fn() -> Result<()>) -> Result<()> {
     feed(h, table.as_bytes());
     let exists: bool =
         c.query_row("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name=?)", [table], |r| r.get(0))?;
@@ -247,7 +247,7 @@ fn hash_table(c: &Connection, h: &mut Sha256, table: &str, ctx: &TaskContext) ->
     let mut q = c.prepare(&format!("SELECT * FROM \"{quoted}\"{filter} ORDER BY {order}"))?;
     let mut rows = q.query([])?;
     while let Some(r) = rows.next()? {
-        ctx.check()?;
+        check()?;
         #[cfg(test)]
         tests::pause_row();
         feed(h, b"row");
@@ -276,7 +276,13 @@ fn hash_table(c: &Connection, h: &mut Sha256, table: &str, ctx: &TaskContext) ->
     Ok(())
 }
 /// `only`: the tables to hash; `None` hashes every table except `skip`.
-fn hash_db(c: &Connection, h: &mut Sha256, only: Option<&[&str]>, skip: &[&str], ctx: &TaskContext) -> Result<()> {
+fn hash_db(
+    c: &Connection,
+    h: &mut Sha256,
+    only: Option<&[&str]>,
+    skip: &[&str],
+    check: &dyn Fn() -> Result<()>,
+) -> Result<()> {
     let tables = match only {
         Some(tables) => tables.iter().map(|t| t.to_string()).collect(),
         None => c
@@ -288,44 +294,52 @@ fn hash_db(c: &Connection, h: &mut Sha256, only: Option<&[&str]>, skip: &[&str],
             .collect::<Vec<_>>(),
     };
     for table in tables {
-        ctx.check()?;
-        hash_table(c, h, &table, ctx)?;
+        check()?;
+        hash_table(c, h, &table, check)?;
     }
     Ok(())
 }
+/// A run's input fingerprint: its application part (`app_digest`) and its source part (`source_digest`). They are
+/// read separately so that work on the application database never happens while research holds source.sqlite's
+/// read lock without looking for its writers (#275).
 fn fingerprint(app: &Connection, src: &Connection, inputs: &Inputs<'_>, ctx: &TaskContext) -> Result<String> {
-    fingerprint_with(app, &source_digest(src, inputs, ctx)?, inputs, ctx)
+    let check = || ctx.check();
+    Ok(combine(&app_digest(app, inputs, &check)?, &source_digest(src, inputs, &check)?))
 }
-/// The source tables' part of the fingerprint. The publication check reads it once: its source read transaction
-/// lasts the whole check (#275).
-fn source_digest(src: &Connection, inputs: &Inputs<'_>, ctx: &TaskContext) -> Result<Vec<u8>> {
+fn combine(app: &[u8], source: &[u8]) -> String {
     let mut h = Sha256::new();
-    hash_db(src, &mut h, inputs.scope.source(), &["backend_effects", "research_runs"], ctx)?;
+    feed(&mut h, app);
+    feed(&mut h, source);
+    format!("{:x}", h.finalize())
+}
+fn source_digest(src: &Connection, inputs: &Inputs<'_>, check: &dyn Fn() -> Result<()>) -> Result<Vec<u8>> {
+    let mut h = Sha256::new();
+    hash_db(src, &mut h, inputs.scope.source(), &["backend_effects", "research_runs"], check)?;
     Ok(h.finalize().to_vec())
 }
-/// `fingerprint` with the source part already read. Shared anchor files are read within one complete index
-/// publication (index_generation).
-fn fingerprint_with(app: &Connection, source: &[u8], inputs: &Inputs<'_>, ctx: &TaskContext) -> Result<String> {
+/// The application tables, shared files and original images. Shared anchor files are read within one complete index
+/// publication (index_generation). `check` runs between rows and file blocks: a stop, and a source writer when the
+/// caller holds source's read lock.
+fn app_digest(app: &Connection, inputs: &Inputs<'_>, check: &dyn Fn() -> Result<()>) -> Result<Vec<u8>> {
     if inputs.scope == Scope::Learning {
-        crate::index_generation::stable(inputs.anchors, || fingerprint_once(app, source, inputs, ctx))
+        crate::index_generation::stable(inputs.anchors, || app_digest_once(app, inputs, check))
     } else {
-        fingerprint_once(app, source, inputs, ctx)
+        app_digest_once(app, inputs, check)
     }
 }
-fn fingerprint_once(app: &Connection, source: &[u8], inputs: &Inputs<'_>, ctx: &TaskContext) -> Result<String> {
+fn app_digest_once(app: &Connection, inputs: &Inputs<'_>, check: &dyn Fn() -> Result<()>) -> Result<Vec<u8>> {
     let mut h = Sha256::new();
     feed(&mut h, format!("{:?}", inputs.scope).as_bytes());
-    hash_db(app, &mut h, inputs.scope.app(), UNREAD, ctx)?;
-    feed(&mut h, source);
+    hash_db(app, &mut h, inputs.scope.app(), UNREAD, check)?;
     // Base feature/anchor files are inputs too. Changed vectors invalidate an in-flight result.
     for p in inputs.files()? {
-        ctx.check()?;
+        check()?;
         let name = p.to_string_lossy();
         h.update(name.as_bytes());
         if let Ok(mut f) = fs::File::open(p) {
             let mut bytes = [0; 65536];
             loop {
-                ctx.check()?;
+                check()?;
                 let n = f.read(&mut bytes)?;
                 if n == 0 {
                     break;
@@ -339,7 +353,7 @@ fn fingerprint_once(app: &Connection, source: &[u8], inputs: &Inputs<'_>, ctx: &
         Scope::Learning | Scope::Similar => {
             let mut q = app.prepare("SELECT src_path FROM assets ORDER BY uuid")?;
             for path in q.query_map([], |r| r.get::<_, Option<String>>(0))? {
-                ctx.check()?;
+                check()?;
                 file_metadata(&mut h, Path::new(&path?.unwrap_or_default()));
             }
         }
@@ -349,7 +363,7 @@ fn fingerprint_once(app: &Connection, source: &[u8], inputs: &Inputs<'_>, ctx: &
                 "SELECT uuid,src_path FROM assets WHERE uuid IN (SELECT value FROM json_each(?)) ORDER BY uuid",
             )?;
             for row in q.query_map([ids], |r| Ok((r.get::<_, String>(0)?, r.get::<_, Option<String>>(1)?)))? {
-                ctx.check()?;
+                check()?;
                 let (uuid, path) = row?;
                 let path = path.unwrap_or_default();
                 feed(&mut h, uuid.as_bytes());
@@ -359,7 +373,7 @@ fn fingerprint_once(app: &Connection, source: &[u8], inputs: &Inputs<'_>, ctx: &
         }
         Scope::Oc => {}
     }
-    Ok(format!("{:x}", h.finalize()))
+    Ok(h.finalize().to_vec())
 }
 /// Rounds of one accept check; each recomputes the fingerprint outside the write lock.
 const OUTSIDE_ROUNDS: u32 = 3;
@@ -460,8 +474,8 @@ fn data_version(c: &Connection) -> Result<i64> {
 /// under the lock (#275): on a large library that took long enough for every other writer to give up. After
 /// `OUTSIDE_ROUNDS` rounds that each saw a commit, the check ends with `BUSY` and publishes nothing. A mismatch is
 /// always `INPUT_CHANGED`. `src` is one read transaction for the whole check, so its part of the fingerprint is read
-/// once. With `writers`, application reads and the wait for the lock step aside for a source writer as the source
-/// reads do. `between` runs before each lock (test hook).
+/// once. With `writers`, application reads, shared-file reads and the wait for the lock step aside for a source
+/// writer as the source reads do. `between` runs before each lock (test hook).
 #[allow(clippy::too_many_arguments)]
 fn confirm<T>(
     app: &Connection,
@@ -473,10 +487,13 @@ fn confirm<T>(
     mut between: impl FnMut(),
     publish: impl FnOnce(rusqlite::Transaction<'_>) -> Result<T>,
 ) -> Result<T> {
-    let source = source_digest(src, inputs, ctx)?;
+    // Between rows and file blocks, not only between SQL steps: hashing the shared files runs no statement.
+    let check = || ctx.check().and_then(|_| writers.map_or(Ok(()), Writers::check));
+    let source = source_digest(src, inputs, &check)?;
     for _ in 0..OUTSIDE_ROUNDS {
         let files = inputs.stamp()?;
-        let read = || read_snapshot(&[app], || Ok((fingerprint_with(app, &source, inputs, ctx)?, data_version(app)?)));
+        let read =
+            || read_snapshot(&[app], || Ok((combine(&app_digest(app, inputs, &check)?, &source), data_version(app)?)));
         let (fresh, seen) = match writers {
             Some(writers) => writers.read(app, read)?,
             None => read()?,
@@ -565,6 +582,8 @@ fn backup(c: &Connection, path: &Path, ctx: &TaskContext, writers: Option<&Write
         if let Some(writers) = writers {
             writers.check()?;
         }
+        #[cfg(test)]
+        tests::backup_step(path);
         match copy.step(256)? {
             rusqlite::backup::StepResult::Done => break,
             rusqlite::backup::StepResult::More => {}
@@ -847,6 +866,60 @@ impl Research {
         Ok(())
     }
 }
+/// What a run computes from: the input version and the copies in `dir`, with the pending work they cover.
+struct Snapshot {
+    version: String,
+    events: Vec<i64>,
+    intents: Vec<String>,
+    regroup: bool,
+}
+/// The copies and their version, each database read in one read transaction. The application database is read and
+/// copied first, before source.sqlite is touched: research then holds source's read lock only while it reads source
+/// itself, where it steps aside for a source writer (`Writers`). Copying the application database while holding
+/// that lock let a writer wait for the whole copy (#275).
+fn snapshot(
+    c: &Connection,
+    src: &Connection,
+    writers: &Writers,
+    inputs: &Inputs<'_>,
+    kind: &str,
+    dir: &Path,
+    ctx: &TaskContext,
+) -> Result<Snapshot> {
+    writers.read(src, || {
+        read_snapshot(&[c, src], || {
+            let app = app_digest(c, inputs, &|| ctx.check())?;
+            backup(c, &dir.join("library.sqlite"), ctx, None)?;
+            let events: Vec<i64> = c
+                .prepare(
+                    "SELECT id FROM backend_effects WHERE status='pending' AND kind IN ('verdict','imported','index_changed') ORDER BY id",
+                )?
+                .query_map([], |r| r.get(0))?
+                .collect::<rusqlite::Result<_>>()?;
+            let intents: Vec<String> =
+                if c.query_row("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name='research_runs')", [], |r| {
+                    r.get::<_, bool>(0)
+                })? {
+                    c.prepare("SELECT id FROM research_runs WHERE status='pending' AND (?='events' OR kind=?)")?
+                        .query_map(rusqlite::params![kind, kind], |r| r.get(0))?
+                        .collect::<rusqlite::Result<_>>()?
+                } else {
+                    vec![]
+                };
+            let regroup = kind == "regroup"
+                || kind == "events"
+                    && (c.query_row(
+                        "SELECT EXISTS(SELECT 1 FROM backend_effects WHERE status='pending' AND kind IN ('imported','index_changed'))",
+                        [],
+                        |r| r.get::<_, bool>(0),
+                    )? || !intents.is_empty());
+            // Source last: from its first read on, research holds its read lock.
+            let source = source_digest(src, inputs, &|| ctx.check())?;
+            backup(src, &dir.join("source.sqlite"), ctx, Some(writers))?;
+            Ok(Snapshot { version: combine(&app, &source), events, intents, regroup })
+        })
+    })
+}
 fn run(
     library: &Library,
     ctx: &TaskContext,
@@ -862,45 +935,17 @@ fn run(
     let src = crate::app_library::read_connection(&library.source())?;
     let inputs = Inputs::new(library, anchors, kind, &args);
     let writers = Writers::of(&library.source());
-    // Snapshot/version from the same read transactions.
-    let (version, events, intents, regroup, learning) = writers.read(&src, || read_snapshot(&[&c, &src], || {
-        let version = fingerprint(&c, &src, &inputs, ctx)?;
-        backup(&c, &scratch.0.join("library.sqlite"), ctx, None)?;
-        backup(&src, &scratch.0.join("source.sqlite"), ctx, Some(&writers))?;
-        let events: Vec<i64> = c
-            .prepare(
-                "SELECT id FROM backend_effects WHERE status='pending' AND kind IN ('verdict','imported','index_changed') ORDER BY id",
-            )?
-            .query_map([], |r| r.get(0))?
-            .collect::<rusqlite::Result<_>>()?;
-        let intents: Vec<String> =
-            if c.query_row("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name='research_runs')", [], |r| {
-                r.get::<_, bool>(0)
-            })? {
-                c.prepare("SELECT id FROM research_runs WHERE status='pending' AND (?='events' OR kind=?)")?
-                    .query_map(rusqlite::params![kind, kind], |r| r.get(0))?
-                    .collect::<rusqlite::Result<_>>()?
-            } else {
-                vec![]
-            };
-        let regroup = kind == "regroup"
-            || kind == "events"
-                && (c.query_row(
-                    "SELECT EXISTS(SELECT 1 FROM backend_effects WHERE status='pending' AND kind IN ('imported','index_changed'))",
-                    [],
-                    |r| r.get::<_, bool>(0),
-                )? || !intents.is_empty());
-        crate::sqlite::open(scratch.0.join("library.sqlite"))?
-            .execute("DELETE FROM name_settings WHERE key IN ('model_key','deepseek_key')", [])?;
-        // Only learning kinds publish a learning batch; the others skip its full input stamp.
-        let learning = if inputs.scope == Scope::Learning {
-            crate::character_learning::snapshot(&mut crate::sqlite::open(scratch.0.join("library.sqlite"))?)?["token"]
-                .clone()
-        } else {
-            Value::Null
-        };
-        Ok((version, events, intents, regroup, learning))
-    }))?;
+    let Snapshot { version, events, intents, regroup } = snapshot(&c, &src, &writers, &inputs, kind, &scratch.0, ctx)?;
+    // On the copy, outside the read transactions: nothing here reads the library.
+    crate::sqlite::open(scratch.0.join("library.sqlite"))?
+        .execute("DELETE FROM name_settings WHERE key IN ('model_key','deepseek_key')", [])?;
+    // Only learning kinds publish a learning batch; the others skip its full input stamp.
+    let learning = if inputs.scope == Scope::Learning {
+        crate::character_learning::snapshot(&mut crate::sqlite::open(scratch.0.join("library.sqlite"))?)?["token"]
+            .clone()
+    } else {
+        Value::Null
+    };
     let request = protocol::value(&protocol::ResearchRequest {
         format: protocol::Format::Research,
         identity: ctx.identity(),
@@ -1831,11 +1876,66 @@ mod tests {
         }
     }
 
+    type BackupHook = dyn FnMut(&Path);
     thread_local! {
         /// A slow disk for this thread's fingerprints: the pause after each row read.
         static ROW_PAUSE: std::cell::Cell<Duration> = const { std::cell::Cell::new(Duration::ZERO) };
         /// Runs after each row this thread's fingerprints read: another task's work at that point.
         static ROW_HOOK: std::cell::RefCell<Option<Box<dyn FnMut()>>> = const { std::cell::RefCell::new(None) };
+        /// Runs before each step of this thread's snapshot copies, with the copy's path.
+        static BACKUP_HOOK: std::cell::RefCell<Option<Box<BackupHook>>> = const { std::cell::RefCell::new(None) };
+    }
+    pub(super) fn backup_step(path: &Path) {
+        BACKUP_HOOK.with(|hook| {
+            if let Some(hook) = hook.borrow_mut().as_mut() {
+                hook(path);
+            }
+        });
+    }
+
+    /// #275: a source writer (recognition import, folder or Photos scan; the sync's former 250 ms busy timeout)
+    /// commits while a run copies the application database for its snapshot. The run must not hold source's read
+    /// lock then: copying runs no statement on source, so it could not see the writer, and the writer failed with
+    /// "database is locked" once the copy outlasted its wait. It commits from the copy's first step, in this thread,
+    /// so whether research holds the lock is not a matter of timing.
+    #[test]
+    fn copying_the_application_database_does_not_hold_source() {
+        let f = Fixture::new();
+        let path = f.root.join("source.sqlite");
+        let outcomes = std::rc::Rc::new(std::cell::RefCell::new(Vec::<std::result::Result<(), String>>::new()));
+        let seen = outcomes.clone();
+        let commit = path.clone();
+        BACKUP_HOOK.with(|hook| {
+            *hook.borrow_mut() = Some(Box::new(move |copy: &Path| {
+                if copy.ends_with("library.sqlite") {
+                    let c = crate::sqlite::open(&commit).unwrap();
+                    c.busy_timeout(Duration::from_millis(250)).unwrap();
+                    let n = seen.borrow().len();
+                    let done = c
+                        .execute_batch(&format!(
+                            "BEGIN IMMEDIATE; INSERT INTO characters VALUES ('synthetic-{n}',1); COMMIT;"
+                        ))
+                        .map_err(|e| e.to_string());
+                    seen.borrow_mut().push(done);
+                }
+            }))
+        });
+        let dir = f.root.join("snapshot");
+        fs::create_dir_all(&dir).unwrap();
+        let (app, src) = (f.app(), f.source());
+        let taken = snapshot(&app, &src, &Writers::of(&path), &f.inputs(Scope::Learning), "events", &dir, &f.ctx);
+        BACKUP_HOOK.with(|hook| hook.borrow_mut().take());
+        let outcomes = outcomes.borrow();
+        assert!(!outcomes.is_empty());
+        assert!(outcomes.iter().all(std::result::Result::is_ok), "{outcomes:?}");
+        // The copies and the version agree: the source copy holds the rows committed during the application copy.
+        let taken = taken.unwrap();
+        assert_eq!(taken.version, f.version(Scope::Learning));
+        let copied: i64 = crate::sqlite::open(dir.join("source.sqlite"))
+            .unwrap()
+            .query_row("SELECT count(*) FROM characters WHERE char_id LIKE 'synthetic-%'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(copied, outcomes.len() as i64);
     }
     pub(super) fn pause_row() {
         let pause = ROW_PAUSE.with(std::cell::Cell::get);
@@ -2216,8 +2316,8 @@ mod tests {
         let started = std::time::Instant::now();
         let mut parts = [0.0; 3];
         let mut h = Sha256::new();
-        hash_db(app, &mut h, None, &["backend_effects", "research_runs"], ctx).unwrap();
-        hash_db(src, &mut h, None, &["backend_effects", "research_runs"], ctx).unwrap();
+        hash_db(app, &mut h, None, &["backend_effects", "research_runs"], &|| ctx.check()).unwrap();
+        hash_db(src, &mut h, None, &["backend_effects", "research_runs"], &|| ctx.check()).unwrap();
         parts[0] = started.elapsed().as_secs_f64() * 1000.0;
         let mut files = vec![
             features.join("full-manifest.csv"),
