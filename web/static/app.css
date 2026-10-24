@@ -1072,23 +1072,7 @@ body:has(#settingsPage:not([hidden])) .nudge{display:none}
 .cast-plus{color:var(--accent-ink);font-weight:700;background:var(--accent-soft);border-radius:999px;padding:1px 8px;font-size:11.5px}
 .cast .dim{color:var(--faint)}
 .cast-more{display:block;margin:14px auto 0}
-/* A character's fan (#293): small beside its name on its page; on a poster, dealt over the blurred cover on hover */
-.cast-fan i:empty{display:none}
-.heading-who{display:flex;align-items:center;gap:16px;min-width:0}
-.heading-fan{width:104px;height:78px;margin:-6px 0 -4px;flex:none}
-.heading-fan[hidden]{display:none}
-.heading-fan i{top:4px;width:auto;height:66px;border-radius:9px;box-shadow:0 0 0 2px var(--sheet),0 8px 16px -8px rgba(var(--sh),.55)}
-.heading-fan i:nth-child(1){transform:translateX(-50%) translateX(-46%) rotate(-11deg) scale(.88)}
-.heading-fan i:nth-child(2){transform:translateX(-50%) translateX(46%) rotate(11deg) scale(.88)}
-.cast-poster .poster-fan{position:absolute;inset:0;height:auto;margin:0;pointer-events:none;opacity:0;transition:opacity .28s var(--ease)}
-.cast-poster .poster-fan i{top:6%;height:54%;width:auto;box-shadow:0 0 0 2px rgba(255,255,255,.9),0 16px 30px -12px rgba(0,0,0,.6)}
-.cast-poster .poster-fan i:nth-child(1),.cast-poster .poster-fan i:nth-child(2){transform:translateX(-50%) scale(.86)}
-.cast-poster.fanned:hover .poster-fan,.cast-poster.fanned:focus-visible .poster-fan{opacity:1}
-.cast-poster.fanned:hover .poster-fan i:nth-child(1),.cast-poster.fanned:focus-visible .poster-fan i:nth-child(1){transform:translateX(-50%) translateX(-38%) rotate(-10deg) scale(.88)}
-.cast-poster.fanned:hover .poster-fan i:nth-child(2),.cast-poster.fanned:focus-visible .poster-fan i:nth-child(2){transform:translateX(-50%) translateX(38%) rotate(10deg) scale(.88)}
-.cast-poster .img>img{transition:filter .3s var(--ease)}
-.cast-poster.fanned:hover .img>img,.cast-poster.fanned:focus-visible .img>img{filter:blur(16px) brightness(.78) saturate(1.15)}
-@media(prefers-reduced-motion:reduce){.cast-poster,.cast-poster .img,.cast-fan i,.cast-poster .poster-fan,.cast-poster .img>img{transition:none}}
+@media(prefers-reduced-motion:reduce){.cast-poster,.cast-poster .img,.cast-fan i{transition:none}}
 
 /* ===================== dark theme (html[data-theme=dark], set by theme.js) ===================== */
 :root[data-theme=dark]{color-scheme:dark;color:#ededf1;background:#1d1d21;--tour-dim:rgba(0,0,0,.66);
