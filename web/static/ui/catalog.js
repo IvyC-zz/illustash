@@ -26,7 +26,7 @@ export async function renderIndex() {
   $('grid').hidden = true; $('empty').hidden = true; $('settingsPage').hidden = true; $('groupsPage').hidden = true; $('charIndex').hidden = false; closeInspector(); $('selectionBar').hidden = true;
   $('resultCount').textContent = '';
   if (state.route.section === 'works') { renderShelf(); return; }
-  shown.clear();
+  drawn.clear();
   $('hint').textContent = t('点角色，在图库里只看 TA');
   cast.list = null; cast.pop = false;
   if (state.chars.some(c => c.summary)) {
@@ -57,38 +57,106 @@ export async function searchIndex() {
 export function renderIndexBody() { if (state.route.page !== 'characters') return; if (state.route.section === 'works') drawShelf(); else { drawCast(); loadActivity(); } }
 const cover = (c, size = 'thumb') => c?.cover ? `<img src="/image?id=${encodeURIComponent(c.cover)}&size=${size}" alt="" loading="lazy" decoding="async">` : '';
 const avatar = (c, px) => `<i class="cast-av" style="width:${px}px;height:${px}px">${cover(c)}</i>`;
-// ---------- a random picture on each poster (#293) ----------
-// A poster shows a picture of the character drawn at random each time the 资料库 opens, rather than always its cover;
-// pictures of it alone first, so the poster is not someone else's. Drawn when the poster nears the screen (one small
-// read), kept while the page redraws; the cover shows until then.
-const shown = new Map();
-const shownKey = c => `${c.id}|${state.nsfw}|${state.readEpoch}`;
-function drawPicture(c) {
+// ---------- a poster's pictures: a random one at rest, the others under the pointer (#293) ----------
+// Each time the 资料库 opens, a poster shows a picture of the character drawn at random instead of always its cover
+// (pictures of it alone first, so the poster is not someone else's). Under the pointer the poster is a small viewer:
+// across picks a picture of the same draw (up to 12, the drawn one first), down looks over the picture. The picture
+// glides after the pointer, a band at each end reaches the top or bottom, a minimap on the right shows how tall the
+// picture is and which part shows, a picture wider than the poster shows whole over a blurred copy of itself, and the
+// name fades while you look at the lower half. ← → flip and ↑ ↓ look when the poster has focus. One small read per
+// poster, when it nears the screen; kept while the page redraws; the cover shows until then.
+const drawn = new Map();
+const drawnKey = c => `${c.id}|${state.nsfw}|${state.readEpoch}`;
+function drawPictures(c) {
   const offset = Math.floor(Math.random() * Math.max(1, c.count - 11));
   return api('/api/assets?' + new URLSearchParams({entity: c.id, order: 'newest', offset, limit: 12, count: 0, ...(state.nsfw ? {nsfw: state.nsfw} : {})}))
     .then(r => {
       const items = r.items || [], alone = items.filter(x => x.memberships?.length === 1), pool = alone.length ? alone : items;
-      return pool.length ? pool[Math.floor(Math.random() * pool.length)].uuid : c.cover;
-    }, () => c.cover);
+      if (!pool.length) return [c.cover];
+      const pick = pool[Math.floor(Math.random() * pool.length)].uuid;
+      return [pick, ...items.map(x => x.uuid).filter(u => u !== pick)];
+    }, () => [c.cover]);
+}
+const LOOK_EDGE = .14;   // the band at the top and at the bottom that reaches the end
+const bigPoster = a => !!(a.closest('.cast-board') && !a.previousElementSibling);
+const lookSrc = (a, u) => `/image?id=${encodeURIComponent(u)}&size=${bigPoster(a) ? 'medium' : 'thumb'}`;
+// The poster becomes the viewer once its first picture is loaded, so the cover never flashes away to nothing.
+function lookFill(a, list) {
+  const first = new Image();
+  first.onload = first.onerror = () => {
+    if (!a.isConnected || a.look) return;
+    a.classList.add('look');
+    a.look = {list, i: 0, target: .22, at: .22, cap: 1, capTarget: 1, over: false, raf: 0};
+    const changed = list[0] !== state.charMap.get(a.dataset.char)?.cover;
+    a.querySelector('.img').outerHTML = `<span class="img look-img"><img class="bg" alt="" decoding="async" src="${first.src}"><img class="pic on${changed ? ' drawn' : ''}" alt="" decoding="async" src="${first.src}"><img class="pic" alt="" decoding="async"></span>`;
+    a.insertAdjacentHTML('beforeend', `${list.length > 1 ? `<span class="ticks">${list.map((_, i) => `<i class="${i ? '' : 'on'}"></i>`).join('')}</span>` : ''}<span class="mini" hidden><i></i></span>`);
+    lookKick(a);
+  };
+  first.src = lookSrc(a, list[0]);
+}
+// How the shown picture sits in the poster: tall (look down it), wide (show it whole) or fitting.
+function lookShape(a) {
+  const pic = a.querySelector('.look-img .pic.on'), box = a.querySelector('.look-img');
+  if (!pic?.naturalWidth) return {kind: 'fit', seen: 1};
+  const r = pic.naturalWidth / pic.naturalHeight, rb = box.clientWidth / box.clientHeight;
+  return r < rb * .94 ? {kind: 'tall', seen: r / rb} : r > rb * 1.06 ? {kind: 'wide', seen: 1} : {kind: 'fit', seen: 1};
+}
+function lookDraw(a) {
+  const L = a.look, shape = lookShape(a), reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  L.at += reduce ? L.target - L.at : (L.target - L.at) * .2;
+  L.cap += reduce ? L.capTarget - L.cap : (L.capTarget - L.cap) * .2;
+  const box = a.querySelector('.look-img'), mini = a.querySelector('.mini');
+  if (!box) { L.raf = 0; return; }
+  box.classList.toggle('whole', L.over && shape.kind === 'wide');
+  for (const p of box.querySelectorAll('.pic')) p.style.objectPosition = shape.kind === 'tall' ? `50% ${(L.at * 100).toFixed(2)}%` : '';
+  mini.hidden = !(L.over && shape.kind === 'tall' && shape.seen < .9);
+  if (!mini.hidden) { const thumb = mini.firstChild; thumb.style.height = `${shape.seen * 100}%`; thumb.style.top = `${L.at * (1 - shape.seen) * 100}%`; }
+  a.querySelector('.cap').style.opacity = L.cap.toFixed(3);
+  const moving = Math.abs(L.target - L.at) > .001 || Math.abs(L.capTarget - L.cap) > .002;
+  L.raf = moving ? requestAnimationFrame(() => lookDraw(a)) : 0;
+}
+const lookKick = a => { if (!a.look.raf) a.look.raf = requestAnimationFrame(() => lookDraw(a)); };
+// The picture to show: the hidden layer loads it, then the two layers swap with a short fade.
+function lookShow(a, i) {
+  const L = a.look; if (i === L.i) return;
+  L.i = i;
+  const box = a.querySelector('.look-img'), [p0, p1] = box.querySelectorAll('.pic'), back = p0.classList.contains('on') ? p1 : p0, front = back === p0 ? p1 : p0;
+  back.classList.remove('drawn'); back.src = lookSrc(a, L.list[i]);
+  const swap = () => { if (L.i !== i) return; back.classList.add('on'); front.classList.remove('on'); box.querySelector('.bg').src = back.src; lookKick(a); };
+  back.complete && back.naturalWidth ? swap() : back.addEventListener('load', swap, {once: true});
+  a.querySelectorAll('.ticks i').forEach((x, k) => x.classList.toggle('on', k === i));
+  for (const n of [i + 1, i + 2]) if (L.list[n]) new Image().src = lookSrc(a, L.list[n]);
+}
+function lookMove(e) {
+  const a = e.target.closest?.('.cast-poster.look'); if (!a) return;
+  const L = a.look;
+  if (e.type === 'leave') { L.over = false; L.target = .22; L.capTarget = 1; lookShow(a, 0); lookKick(a); return; }
+  const r = a.getBoundingClientRect(), fx = (e.clientX - r.left) / r.width, fy = (e.clientY - r.top) / r.height;
+  L.over = true;
+  L.target = Math.min(1, Math.max(0, (fy - LOOK_EDGE) / (1 - 2 * LOOK_EDGE)));
+  L.capTarget = 1 - .88 * Math.min(1, Math.max(0, (fy - .5) / .3));
+  lookShow(a, Math.min(L.list.length - 1, Math.max(0, Math.floor(fx * L.list.length))));
+  lookKick(a);
+}
+function lookKey(a, key) {
+  const L = a.look; L.over = true;
+  if (key === 'ArrowLeft' || key === 'ArrowRight') lookShow(a, Math.min(L.list.length - 1, Math.max(0, L.i + (key === 'ArrowLeft' ? -1 : 1))));
+  else { L.target = Math.min(1, Math.max(0, L.target + (key === 'ArrowUp' ? -.25 : .25))); L.capTarget = L.target > .5 ? .15 : 1; }
+  lookKick(a);
 }
 let nearing = null;
-function drawPictures(root) {
+function watchPosters(root) {
   nearing ||= new IntersectionObserver(es => {
     for (const e of es) {
       if (!e.isIntersecting) continue;
       nearing.unobserve(e.target);
-      const a = e.target, c = state.charMap.get(a.dataset.char); if (!c?.cover || c.count < 2) continue;
-      const key = shownKey(c);
-      if (!shown.has(key)) shown.set(key, drawPicture(c));
-      shown.get(key).then(u => {
-        const img = a.querySelector('.img img'); if (!img || u === c.cover || !a.isConnected) return;
-        const next = img.src.replace(/id=[^&]+/, 'id=' + encodeURIComponent(u));
-        if (img.src === next) return;
-        const fresh = new Image(); fresh.onload = () => { img.classList.add('drawn'); img.src = next; }; fresh.src = next;
-      });
+      const a = e.target, c = state.charMap.get(a.dataset.char); if (!c?.cover) continue;
+      const key = drawnKey(c);
+      if (!drawn.has(key)) drawn.set(key, c.count > 1 ? drawPictures(c) : Promise.resolve([c.cover]));
+      drawn.get(key).then(list => lookFill(a, list));
     }
   }, {rootMargin: '300px'});
-  for (const a of root.querySelectorAll('.cast-poster[data-char]')) nearing.observe(a);
+  for (const a of root.querySelectorAll('.cast-poster[data-char]:not(.look)')) nearing.observe(a);
 }
 function poster(c, sub, rank = 0, big = false) {
   const r = recentOf(c), skins = (c.variants || []).filter(v => v.count).length;
@@ -156,7 +224,7 @@ export function drawCast() {
   if (foot) root.insertAdjacentHTML('beforeend', foot);
   const tagged = $('taggedButton'); if (tagged) tagged.innerHTML = t('只当标签') + (state.tagged?.length ? ` <small>${number(state.tagged.length)}</small>` : '');
   if (cast.pop) $('castPopQ')?.focus();
-  drawPictures(root);
+  watchPosters(root);
 }
 
 // 只当标签 (#293): mascots and player stand-ins (the default ones included) are tags, not characters. One place to see
@@ -420,6 +488,10 @@ export function wireWatchAdd(x, add) {
 
 // The 资料库 pages' handlers. Called once, when the page starts.
 export function wireCatalog() {
+  // The posters' viewer (#293): the pointer across and down a poster, leaving it, and the arrow keys on a focused one.
+  $('charIndex').addEventListener('mousemove', lookMove);
+  $('charIndex').addEventListener('mouseout', e => { const a = e.target.closest?.('.cast-poster.look'); if (a && !a.contains(e.relatedTarget)) lookMove({type: 'leave', target: a}); });
+  $('charIndex').addEventListener('keydown', e => { const a = e.target.closest?.('.cast-poster.look'); if (a && ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key)) { e.preventDefault(); lookKey(a, e.key); } });
   $('charIndex').addEventListener('click', e => {
     if (state.route.page !== 'characters') return;
     const hit = e.target;
