@@ -4,7 +4,7 @@ import {forgetActivity, loadActivity} from '../core/catalog.js';
 import {edits, setLatest, undoLatest, undoneText} from '../core/edits.js';
 import {esc, isMac, number, shortcut} from '../core/format.js';
 import {t, tb} from '../core/i18n.js';
-import {REASONS} from '../core/labels.js';
+import {REASONS, nameWithWork} from '../core/labels.js';
 import {metaSoon, refreshMeta} from '../core/meta.js';
 import {prefs} from '../core/prefs.js';
 import {LEAD_PAGES, browsing, cleanup, defaultSort, panelPage} from '../core/route.js';
@@ -233,7 +233,7 @@ function cardHTML(item, i) {
   // A narrow picture shows its first name and a count instead of cutting every name short; hover shows all.
   const names = item.memberships.map(m => m.name), narrow = state.fit && ratio * state.cellW * 4 / 3 < 170 && names.length > 1;
   const shown = narrow ? item.memberships.slice(0, 1) : item.memberships;
-  const caption = captionH() ? `<div class="caption" title="${esc(names.join(t('、')))}">${shown.map(m => `<span class="${m.status}">${esc(m.name)}</span>`).join('<i>·</i>') || `<span class="none">${item.unknown ? t('已跳过') : t('未识别')}</span>`}${narrow ? `<small>+${names.length - 1}</small>` : ''}</div>` : '';
+  const caption = captionH() ? `<div class="caption" title="${esc(item.memberships.map(nameWithWork).join(t('、')))}">${shown.map(m => `<span class="${m.status}">${esc(m.name)}</span>`).join('<i>·</i>') || `<span class="none">${item.unknown ? t('已跳过') : t('未识别')}</span>`}${narrow ? `<small>+${names.length - 1}</small>` : ''}</div>` : '';
   const inner = `<img src="/image?id=${encodeURIComponent(item.uuid)}&size=${size}" loading="lazy" decoding="async" alt="" draggable="false">${extra}<span class="check" aria-hidden="true"></span>`;
   return `<div class="image-stage">${isSquare() ? inner : `<div class="fit-box${rawRatio(item) && rawRatio(item) !== ratio ? ' whole' : ''}">${inner}</div>`}</div>${caption}`;
 }

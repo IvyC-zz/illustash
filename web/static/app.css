@@ -1142,6 +1142,10 @@ body:has(#settingsPage:not([hidden])) .nudge{display:none}
 .cast-tagged{margin:18px 0 8px;font-size:12px;color:var(--muted);display:flex;flex-wrap:wrap;gap:4px 12px;align-items:baseline}
 .cast-tagged a{color:var(--ink2);text-decoration:none}
 .cast-tagged a:hover{color:var(--accent-ink)}
+/* The work beside a character's name, wherever there is room for it (#293) */
+.char-work{margin-left:.45em;font-size:max(11px,.62em);font-weight:500;color:var(--muted);letter-spacing:0;white-space:nowrap}
+.char-work::before{content:"· "}
+.home-cap .char-work{color:rgba(255,255,255,.72)}
 .cast-tagged small{margin-left:4px;color:var(--faint)}
 .cast-tagged .link-button{font-size:12px}
 .tagged-list{display:grid;max-height:min(52vh,420px);overflow:auto;border-top:1px solid var(--line)}
@@ -1209,17 +1213,12 @@ body:has(#settingsPage:not([hidden])) .nudge{display:none}
 /* library management (docs/LIBRARIES.md): the brand only names a test library */
 .brand-lib{max-width:74px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:9.5px;font-weight:500;color:var(--warn);margin-top:-2px}
 .brand-lib:empty{display:none}
-.lib-table td:first-child small{display:block;color:var(--muted);font-size:11px;word-break:break-all}
-.lib-table .tag-on{white-space:nowrap}
-.lib-actions{display:flex;flex-wrap:wrap;gap:6px;margin:10px 0}
-.lib-actions .quiet,.lib-table .quiet{border:1px solid var(--line)}
 .lib-form{margin:4px 0 12px;padding:10px 12px;border-radius:12px;background:var(--soft)}
 .lib-input{min-width:220px;height:30px;border:0;border-radius:999px;background:var(--sheet);padding:0 12px;font-size:12.5px;color:var(--ink);box-shadow:0 0 0 1px var(--hair)}
 .lib-pick{display:inline-flex;gap:6px;align-items:center}
 .lib-src{display:inline-flex;gap:10px;align-items:center}
-.lib-groups{display:grid;grid-template-columns:minmax(0,1fr);gap:10px;margin:8px 0}
-.lib-group h3,.lib-col h3{margin:0 0 4px;font-size:12px;font-weight:600;color:var(--ink2)}
-.lib-group>.quiet,.lib-col>.quiet{border:1px solid var(--line);margin-top:4px}
+.lib-col h3{margin:0 0 4px;font-size:12px;font-weight:600;color:var(--ink2)}
+.lib-col>.quiet{border:1px solid var(--line);margin-top:4px}
 .lib-folder{gap:10px}
 .lib-folder .lib-path{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;direction:rtl;text-align:left;color:var(--ink2);font-size:12px}
 .lib-folder .lib-src{flex-shrink:0}
@@ -1424,3 +1423,40 @@ dialog.index-add{width:min(720px,calc(100vw - 32px))}
   .shelf-bar .watch-add input{width:100%}
 }
 .img-broken{display:grid;place-items:center;width:100%;height:100%;min-height:24px;background:var(--soft);color:var(--muted);font-size:12px}
+
+/* 设置 (#293): one look for every card. Rows have a hairline above them; a row's title is 12.5px, its hint a block
+   of 11.5px grey below; sub-headings split a card into parts; buttons in a card are small outlined pills; tables use
+   the body size; the closing note gets its own hairline and room below. */
+.settings-card{padding:16px 18px 6px}
+.settings-card h2+.settings-note{margin:0 0 10px}
+.settings-card .setting-line,.settings-card .switch-line,.settings-card a.set-link{min-height:44px;padding:9px 0;border-top:1px solid var(--line);border-bottom:0;font-size:12.5px}
+.settings-card .setting-line>span:first-child:not(.lib-path),.settings-card .switch-line>span{display:flex;flex-direction:column;gap:2px;min-width:0}
+.settings-card .setting-line.set-status>span:first-child{flex-direction:row;align-items:center;gap:8px}
+.settings-card .tag-on{flex:none;white-space:nowrap}
+.settings-card .switch{margin:0}
+.settings-card details.more{margin:0;padding:10px 0;border-top:1px solid var(--line)}
+.settings-card .form-grid{margin:4px 0 10px}
+.settings-card .form-actions,.settings-card .about-actions{padding:10px 0;border-top:1px solid var(--line)}
+.settings-card .about-actions{gap:6px}
+.settings-card .settings-table th:last-child,.settings-card .settings-table td:last-child{padding-right:0}
+.settings-card .setting-line b,.settings-card .switch-line b{font-weight:600;color:var(--ink)}
+.settings-card .setting-line small,.settings-card .switch-line small,.settings-card .line-hint{display:block;font-size:11.5px;font-weight:400;color:var(--muted);line-height:1.45}
+.set-sub-note{margin:0 0 2px;font-size:11.5px;color:var(--muted)}
+.set-actions{display:flex;flex-wrap:wrap;align-items:center;gap:6px;padding:10px 0;border-top:1px solid var(--line)}
+.set-actions-label{font-size:12px;color:var(--muted);margin-right:2px}
+.settings-card .set-empty{margin:0;padding:10px 0;border-top:1px solid var(--line)}
+.settings-card button.quiet{border:1px solid var(--line);border-radius:999px;padding:4px 12px;font-size:12px;line-height:1.4}
+.settings-card button.quiet:disabled{opacity:.5}
+.set-sub,.settings-card .acct-h{margin:16px 0 6px;font-size:12px;font-weight:600;color:var(--ink2)}
+.settings-card .acct-h+.muted-note,.settings-card .acct-h+p{margin:0 0 8px;font-size:11.5px;line-height:1.55}
+.settings-card .set-foot,.settings-card .net-foot{margin:0;padding:10px 0 12px;border-top:1px solid var(--line);font-size:11.5px;line-height:1.6;color:var(--muted)}
+.settings-card .settings-table{margin:2px 0 0;font-size:12px}
+.settings-card .settings-table th{padding:6px 12px 6px 0;font-size:11px;font-weight:500;color:var(--muted);white-space:nowrap}
+.settings-card .settings-table td{padding:8px 12px 8px 0;vertical-align:top;line-height:1.5;color:var(--ink2)}
+.settings-card .settings-table td:first-child{color:var(--ink);font-weight:500}
+.settings-card .settings-table td.mono{font-weight:400}
+.settings-card .settings-table tr:last-child td{border-bottom:0}
+.net-table td:first-child{min-width:7.5em}
+.net-table td:last-child{min-width:9.5em}
+.net-table .link-button.strong{font-size:inherit;text-align:left}
+.lib-path-hint{word-break:break-all}

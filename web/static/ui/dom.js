@@ -5,6 +5,7 @@ import {esc, isMac, shortcut} from '../core/format.js';
 import {prefs} from '../core/prefs.js';
 import {session, STALE, onStale, readError} from '../core/session.js';
 import {onLatest} from '../core/edits.js';
+import {workLabel} from '../core/labels.js';
 export const $ = id => document.getElementById(id);
 // Help text and titles are written with ⌘; other systems show Ctrl.
 export function platformHints(root, mac = isMac) {
@@ -32,6 +33,8 @@ export function wireToast(undo) {
   $('toast').addEventListener('mouseleave', () => { toastTimer = setTimeout(() => { $('toast').hidden = true; }, 2500); });
   $('toastUndo').onclick = () => undo();
 }
+// The work after a character's name, in small grey text (core/labels.js workLabel).
+export const workSmall = c => { const w = workLabel(c); return w ? `<small class="char-work">${esc(w)}</small>` : ''; };
 export function error(message) { if (session.stale) return; $('errorBanner').textContent = message; $('errorBanner').hidden = !message; }
 export function readFailure(node, e) { if (node) { node.hidden = false; node.innerHTML = `<p class="empty" role="alert">${esc(readError(e))}</p>`; } }
 // Collapsible blocks whose open/closed state survives re-renders and reloads.

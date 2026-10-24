@@ -4,6 +4,7 @@ import {workName} from '../core/catalog.js';
 import {setLatest} from '../core/edits.js';
 import {esc, number} from '../core/format.js';
 import {t, tb} from '../core/i18n.js';
+import {workLabel} from '../core/labels.js';
 import {fetchChar, refreshMeta} from '../core/meta.js';
 import {prefs} from '../core/prefs.js';
 import {charRoute, go} from '../core/route.js';
@@ -54,7 +55,7 @@ async function paletteSearch() {
   else if (q) {
     let list; try { list = await api('/api/entities?q=' + encodeURIComponent(q)); } catch (e) { if (gen === p.generation && palette === p) renderPalette([{label: t('本地角色'), items: [], note: readError(e)}], q); return; }
     if (gen !== p.generation) return;
-    const items = list.filter(e => !(p.exclude || []).includes(e.id)).map(e => ({...e, hint: e.matched ? t('别名：{name}', {name: e.matched}) : charHint(e), count: e.count}));
+    const items = list.filter(e => !(p.exclude || []).includes(e.id)).map(e => ({...e, hint: e.matched ? t('别名：{name}', {name: e.matched}) : '', count: e.count}));
     sections = [{label: '', items}];
     if (!p.jump) {
       // Not in the library yet: Danbooru characters (typed text only) come in a moment; local-only creation stays last.
@@ -65,7 +66,7 @@ async function paletteSearch() {
       p.remoteTimer = setTimeout(async () => {
         const result = await remoteNames('/api/entities?' + new URLSearchParams({q, remote: 1}));
         if (gen !== p.generation || palette !== p) return;
-        remote.items = (result.found || []).map(r => ({...r, remote: true, typed: q, hint: [r.work_name, t('D 站 {n} 张', {n: number(r.posts)})].filter(Boolean).join(' · '), counted: true}));
+        remote.items = (result.found || []).map(r => ({...r, remote: true, typed: q, hint: t('D 站 {n} 张', {n: number(r.posts)}), counted: true}));
         remote.note = result.found ? '' : result.unauthorized ? t('{reason}，也可以先只在本地新建', {reason: remoteNote(result)}) : t('{reason}，可以稍后再试，或先只在本地新建', {reason: remoteNote(result)});
         remote.allow = result.unauthorized;
         // Untouched: the best match wins the highlight (the first local hit, else the first Danbooru result).
@@ -82,7 +83,7 @@ async function paletteSearch() {
     const recent = prefs.get('picks', []).filter(e => !seen.has(e.id) && !(p.exclude || []).includes(e.id));
     if (recent.length) sections.push({label: t('最近使用'), items: recent}); recent.forEach(e => seen.add(e.id));
     const top = state.chars.filter(e => !seen.has(e.id) && !(p.exclude || []).includes(e.id)).slice(0, 8);
-    if (top.length) sections.push({label: t('常用'), items: top.map(e => ({...e, hint: charHint(e)}))});
+    if (top.length) sections.push({label: t('常用'), items: top});
   }
   renderPalette(sections, q);
 }
@@ -95,9 +96,10 @@ function renderPalette(sections, q, keep = false) {
   let n = 0;
   $('pickerResults').innerHTML = sections.filter(s => s.items.length || s.note).map(s => (s.label ? `<div class="palette-label">${s.label}</div>` : '') + (s.note && !s.items.length ? `<p class="palette-note">${esc(s.note)}${s.allow ? ' ' + namesAllowButton : ''}</p>` : '') + s.items.map(e => {
     const i = n++, char = e.id && state.charMap.get(e.id), cover = char?.cover;
+    const work = p.tagMode || e.create || e.remove ? '' : e.remote ? e.work_name || '' : e.id ? workLabel(e) : '';
     const staged = p.multi && p.staged.some(x => stageKey(x) === stageKey(e));
     const add = p.multi ? `<span class="palette-add${staged ? ' on' : ''}" data-add="${i}" title="${staged ? t('已加入，再点一次取消') : t('再加一个角色（⇧+点击）')}">${staged ? '✓' : '＋'}</span>` : '';
-    return `<button class="palette-item${staged ? ' staged' : ''}" data-i="${i}" role="option">${cover ? `<img src="/image?id=${encodeURIComponent(cover)}" alt="" loading="lazy">` : `<span class="palette-glyph${e.remote ? ' remote' : ''}">${e.remote ? 'D' : e.create ? '＋' : e.remove ? '−' : e.tag ? '#' : '◌'}</span>`}<span class="palette-text"><span class="palette-name">${e.create ? (e.oc ? t('新建原创角色「{name}」', {name: esc(e.name)}) : t('新建「{name}」', {name: esc(e.name)})) : esc(e.name)}</span><small>${esc(e.hint || '')}${char && !e.counted ? ' ' + t('{n} 张', {n: number(char.count)}) : ''}</small></span>${i < 9 && !q ? `<kbd>${i + 1}</kbd>` : ''}${add}</button>`;
+    return `<button class="palette-item${staged ? ' staged' : ''}" data-i="${i}" role="option">${cover ? `<img src="/image?id=${encodeURIComponent(cover)}" alt="" loading="lazy">` : `<span class="palette-glyph${e.remote ? ' remote' : ''}">${e.remote ? 'D' : e.create ? '＋' : e.remove ? '−' : e.tag ? '#' : '◌'}</span>`}<span class="palette-text"><span class="palette-name">${e.create ? (e.oc ? t('新建原创角色「{name}」', {name: esc(e.name)}) : t('新建「{name}」', {name: esc(e.name)})) : esc(e.name)}${work ? `<small class="char-work">${esc(work)}</small>` : ''}</span><small>${esc(e.hint || '')}${char && !e.counted ? ' ' + t('{n} 张', {n: number(char.count)}) : ''}</small></span>${i < 9 && !q ? `<kbd>${i + 1}</kbd>` : ''}${add}</button>`;
   }).join('')).join('') || `<p class="palette-empty">${q ? t('没有匹配的角色') : t('输入角色 tag 或别名')}</p>`;
   for (const img of $('pickerResults').querySelectorAll('img')) img.addEventListener('error', () => img.replaceWith(Object.assign(document.createElement('span'), {className: 'palette-glyph', textContent: '◌'})), {once: true});
   highlight();
@@ -160,7 +162,6 @@ export function mergeCharacter(c) {
 }
 // ---------- original characters ----------
 // An original character (kind='oc'): an artist's own character, belonging to no work. Unnamed ones are 原创角色 N.
-const charHint = e => e.kind === 'oc' ? t('原创角色') : e.work_name || workName(e.work);
 // Quick tagging uses the one shared「原创角色（未细分）」; a look-alike group (all one person) still gets its own OC.
 export async function markOc(body, leaving, separate = false) {
   let entity; try { entity = await post(separate ? '/api/entities' : '/api/oc/shared', {kind: 'oc'}); } catch (err) { toast(err.message); return; }

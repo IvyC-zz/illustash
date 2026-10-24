@@ -49,7 +49,7 @@ export async function renderIndexCard(fresh = true) {
     ${taskLink(indexLine(s, x.check), active ? 'busy' : s.status === 'error' ? 'warn' : s.status === 'off' ? 'off' : '')}
     <a class="setting-line set-link" href="#/characters/works"><span>${t('关注的作品')}<small class="line-hint">${t('在资料库的「作品」里逐部开关')}</small></span><span>${watched ? t('{n} 部', {n: number(watched)}) : t('还没有')} ›</span></a>
     <div class="setting-line"><span>${t('只提示图片较多的角色')}<small class="line-hint">${t('Danbooru 上图片少于这个数的角色不提示')}</small></span><span class="num-field"><input id="watchMin" type="number" min="20" max="5000" step="10" value="${x.watch.min_posts}"> ${t('张')}</span></div>
-    <p class="settings-note">${t('每次检查前确认联网，只允许本次运行。')}</p>
+    <p class="set-foot">${t('每次检查前确认联网，只允许本次运行。')}</p>
     ${x.history.length ? fold('indexHistory', t('最近添加的角色（{n} 个）', {n: number(x.history.reduce((n, h) => n + h.characters.length, 0))}), `<table class="settings-table">${x.history.flatMap(h => h.characters.map(c => `<tr><td>${esc(stamp(h.at))}</td>
       <td>${c.entity && c.status === 'added' ? `<a class="link" href="${charHash(c.entity.id)}">${esc(c.entity.name)}</a>` : esc(c.tag || c.short_tag)}</td>
       <td>${c.status === 'added' ? t('匹配 {n} 张', {n: number(c.entity?.count ?? c.claims)}) : c.status === 'dropped' ? t('已移除') : t('未添加：{reason}', {reason: esc(tb(c.reason || ''))})}</td>
@@ -94,7 +94,7 @@ export function renderModelCard() {
       <label for="modelKey">API key</label><input id="modelKey" type="password" placeholder="${m.configured ? t('已配置（尾号 {hint}），留空则不修改', {hint: esc(m.hint || '')}) : t('未配置')}" spellcheck="false" autocomplete="off">
     </div>
     <div class="sync-now form-actions"><span class="muted-note">${m.configured ? t('已配置') : t('未配置，不会使用')}</span><div class="spacer"></div>
-      ${m.configured ? `<button class="quiet" id="modelClear">${t('清除 key')}</button><button class="quiet" id="modelTest">${t('测试连接')}</button>` : ''}<button class="primary" id="modelSave">${t('保存')}</button></div>`)) return;
+      ${m.configured ? `<button class="quiet small" id="modelClear">${t('清除 key')}</button><button class="quiet small" id="modelTest">${t('测试连接')}</button>` : ''}<button class="primary" id="modelSave">${t('保存')}</button></div>`)) return;
   const save = async (body, done) => { try { await saveModelApi(body); toast(typeof done === 'function' ? done() : done); renderSettings(); } catch (e) { toast(e.message); } };
   $('modelSave').onclick = () => {
     const body = {base: $('modelBase').value.trim() || 'https://api.deepseek.com', model: $('modelName').value.trim() || 'deepseek-chat'};
@@ -210,8 +210,8 @@ function networkCard() {
     </table>
     ${state.updates ? `<label class="switch-line"><span><b>${t('自动检查更新')}</b><small>${t('启动时和之后每天查一次 GitHub 上有没有新版本，有新版本时提示你，不会自己下载或安装')} · ${SCOPE.shared[0]}</small></span><input type="checkbox" class="switch" data-updates-auto ${state.updates.auto ? 'checked' : ''}></label>` : ''}
     ${net ? `<div class="setting-line"><span><b>${t('名称联网查询')}</b><small>${t('角色名称和 Danbooru 搜索共用这一项授权，只发送文字')} · ${names}</small></span>
-      ${net.granted_at ? `<button class="quiet" data-names-network="0">${t('撤销')}</button>` : `<button class="quiet" data-names-network="1">${t('允许…')}</button>`}</div>` : ''}
-    <p class="settings-note net-foot">${t('同步、图片识别、相似图片检测、学习与分组都只在本机进行。X 的关注通过导入官方数据归档获得，不联网。')}</p>`;
+      ${net.granted_at ? `<button class="quiet small" data-names-network="0">${t('撤销')}</button>` : `<button class="quiet small" data-names-network="1">${t('允许…')}</button>`}</div>` : ''}
+    <p class="set-foot">${t('同步、图片识别、相似图片检测、学习与分组都只在本机进行。X 的关注通过导入官方数据归档获得，不联网。')}</p>`;
 }
 export async function renderSettings(fetchMissing = true, refresh = false) {
   if (state.route.page !== 'settings') return;
@@ -237,7 +237,7 @@ export async function renderSettings(fetchMissing = true, refresh = false) {
       <div class="setting-line"><span>${t('R18 内容')}</span>${segment('nsfw', [['', t('显示')], ['hide', t('隐藏')], ['only', t('只看 R18')]], state.nsfw)}</div>
       <div class="setting-line"><span>${t('图库默认排序')}</span>${segment('sortLibrary', [['newest', t('最新加入')], ['oldest', t('最早加入')]], sort)}</div>
       <div class="setting-line"><span>${t('按角色筛选时的默认排序')}</span>${segment('sortCharacter', [['suspicious', t('可疑优先')], ['newest', t('最新加入')], ['oldest', t('最早加入')]], csort)}</div>
-      <p class="settings-note net-foot">${t('缩略图大小、图上显示什么、详情面板的内容，在顶栏的「视图选项」里调。')}</p>`,
+      <p class="set-foot">${t('缩略图大小、图上显示什么、详情面板的内容，在顶栏的「视图选项」里调。')}</p>`,
     // App-wide (preferences.json), so the desktop shell and every library and browser share it (#173). The choices
     // are the tables in web/static/locales (#182), each named in its own language.
     setLanguage: () => cardHead(t('语言'), '', 'shared') + `
@@ -311,23 +311,22 @@ export function renderLibrariesCard() {
   const home = p => p.replace(/^\/Users\/[^/]+/, '~'), cur = data.info, list = origins();
   const seg = (attr, value, options) => `<div class="segmented">${options.map(([v, label]) => `<button class="${v === value ? 'on' : ''}" ${attr}="${v}">${label}</button>`).join('')}</div>`;
   const editable = cur && !cur.test, last = cur?.sources.length <= 1;
-  const remove = s => editable ? `<button class="quiet" data-lib-remove="${esc(s.id)}" ${last ? `disabled title="${t('图库至少要保留一个来源')}"` : ''}>${t('移除')}</button>` : '';
+  const remove = s => editable ? `<button class="quiet small" data-lib-remove="${esc(s.id)}" ${last ? `disabled title="${t('图库至少要保留一个来源')}"` : ''}>${t('移除')}</button>` : '';
+  // #293: one list of sources, each folder's origin set on its own row, and one row of buttons to add more.
+  const originOf = s => list.some(o => o[0] === s.preset) ? s.preset : 'other';
+  const folders = !cur ? [] : cur.sources.filter(s => s.kind === 'folder').sort((a, b) => list.findIndex(o => o[0] === originOf(a)) - list.findIndex(o => o[0] === originOf(b)));
   const folderRow = s => `<div class="setting-line lib-folder"><span class="lib-path" title="${esc(s.path)}"><bdi>${esc(home(s.path))}</bdi></span>
-      <span class="lib-src">${editable ? seg(`data-lib-preset="${esc(s.id)}" data-preset`, s.preset, list) : ''}${remove(s)}</span></div>`;
-  const groups = !cur ? '' : list.map(([id, label]) => {
-    const rows = cur.sources.filter(s => s.kind === 'folder' && (list.some(o => o[0] === s.preset) ? s.preset : 'other') === id);
-    if (!rows.length && !editable) return '';
-    return `<div class="lib-group"><h3>${esc(label)}</h3>${rows.map(folderRow).join('') || `<p class="muted-note">${t('还没有文件夹')}</p>`}
-      ${editable ? `<button class="quiet" data-lib-add-source="${id}">${t('添加文件夹…')}</button>` : ''}</div>`;
-  }).join('') + (() => {
-    const photos = cur.sources.find(s => s.kind === 'photos');
-    if (photos) return `<div class="lib-group"><h3>${t('iCloud 照片')}</h3><div class="setting-line lib-folder"><span class="lib-path">${t('本机「照片」图库，按存图的 App 区分 X 和 Pixiv')}</span><span class="lib-src">${remove(photos)}</span></div></div>`;
-    return editable && IS_MAC ? `<div class="lib-group"><h3>${t('iCloud 照片')}</h3><button class="quiet" data-lib-add-photos>${t('添加 iCloud 照片')}</button></div>` : '';
-  })();
-  // Test libraries were generated by a developer tool (tools/test_libraries.py, removed in #186), so their column shows only in dev mode.
+      <span class="lib-src">${editable ? seg(`data-lib-preset="${esc(s.id)}" data-preset`, s.preset, list) : `<span class="muted-note">${esc(list.find(o => o[0] === originOf(s))[1])}</span>`}${remove(s)}</span></div>`;
+  const photos = cur?.sources.find(s => s.kind === 'photos');
+  const sources = !cur ? '' : `<h3 class="set-sub">${t('来源')}</h3>
+    ${folders.map(folderRow).join('')}${photos ? `<div class="setting-line lib-folder"><span><b>${t('iCloud 照片')}</b><small>${t('本机「照片」图库，按存图的 App 区分 X 和 Pixiv')}</small></span><span class="lib-src">${remove(photos)}</span></div>` : ''}
+    ${folders.length || photos ? '' : `<p class="muted-note set-empty">${t('还没有来源')}</p>`}
+    ${editable ? `<div class="set-actions"><span class="set-actions-label">${t('添加文件夹：')}</span>${list.map(([id, label]) => `<button class="quiet small" data-lib-add-source="${id}" title="${t('图片来自 {origin} 的文件夹，子文件夹会一起读取', {origin: esc(label)})}">${esc(label)}</button>`).join('')}${!photos && IS_MAC ? `<button class="quiet small" data-lib-add-photos>${t('添加 iCloud 照片')}</button>` : ''}</div>` : ''}`;
+  // Test libraries were generated by a developer tool (tools/test_libraries.py, removed in #186), so their label shows only in dev mode.
   const dev = devMode && data.libraries.some(l => l.test);
-  const row = l => `<tr><td>${esc(l.name)}<small>${esc(home(l.path))}</small></td>${dev ? `<td>${l.test ? esc(l.test) : '—'}</td>` : ''}<td>${l.path === data.current ? `<span class="tag-on">${t('当前')}</span>`
-    : `<button class="quiet" data-open-library="${esc(l.path)}" data-name="${esc(l.name)}">${t('打开')}</button><button class="quiet" data-forget-library="${esc(l.path)}" title="${t('只从列表里移除，不删除图库')}">${t('移出列表')}</button>`}</td></tr>`;
+  const others = data.libraries.filter(l => l.path !== data.current);
+  const row = l => `<div class="setting-line"><span><b>${esc(l.name)}${dev && l.test ? ` <span class="set-scope">${esc(l.test)}</span>` : ''}</b><small class="lib-path-hint">${esc(home(l.path))}</small></span>
+    <span class="lib-src"><button class="quiet small" data-open-library="${esc(l.path)}" data-name="${esc(l.name)}">${t('打开')}</button><button class="quiet small" data-forget-library="${esc(l.path)}" title="${t('只从列表里移除，不删除图库')}">${t('移出列表')}</button></span></div>`;
   const ex = data.export || {};
   const exportLine = ex.status === 'running' ? `<p class="muted-note">${t('正在导出到 {path}…', {path: esc(home(ex.path))})}</p>`
     : ex.status === 'done' ? `<p class="muted-note">${t('已导出：{path}（{mb} MB）。', {path: esc(home(ex.path)), mb: (ex.bytes / 1048576).toFixed(0)})}${EXPORT_LEAVES_OUT}</p>`
@@ -345,12 +344,13 @@ export function renderLibrariesCard() {
         <p><button class="primary" data-open-library="${esc(f.created.path)}" data-name="${esc(f.created.name)}">${t('打开这个图库')}</button> <button class="quiet" data-lib-again>${t('仍然新建一个')}</button></p></div>`
         : `<p><button class="primary" data-lib-create>${t('创建并打开')}</button> <button class="quiet" data-lib-cancel>${t('取消')}</button></p>`}</div>`;
   setSettingsHTML(card, `${cardHead(t('图库'), t('每个图库各自保存识别结果和人工整理记录，图片本身留在原处、不复制。切换图库时后台会重启，几秒后自动刷新。'))}
-    ${cur ? `<div class="setting-line"><span><b>${esc(cur.name)}</b><small class="line-hint lib-path-hint">${esc(home(cur.path))}</small></span><span class="tag-on">${t('当前图库')}</span></div>
-    <div class="lib-groups">${groups}</div>` : `<p class="muted-note">${t('当前是旧的数据布局（不是图库包）。')}</p>`}
-    <p class="lib-actions"><button class="quiet" data-lib-new>${t('新建图库')}</button><button class="quiet" data-lib-choose="library">${t('打开其他图库…')}</button><button class="quiet" data-lib-choose="zip" ${importActive() ? 'disabled' : ''}>${t('导入…')}</button>${cur ? `<button class="quiet" data-lib-export ${ex.status === 'running' ? 'disabled' : ''}>${t('导出当前图库')}</button>` : ''}</p>
+    ${cur ? `<div class="setting-line"><span><b>${esc(cur.name)}</b><small class="lib-path-hint">${esc(home(cur.path))}</small></span><span class="tag-on">${t('当前图库')}</span></div>
+    ${sources}` : `<p class="muted-note">${t('当前是旧的数据布局（不是图库包）。')}</p>`}
+    <h3 class="set-sub">${t('图库管理')}</h3>
+    ${others.length ? `<p class="set-sub-note">${t('这台电脑上的其他图库')}</p>${others.map(row).join('')}` : ''}
+    <div class="set-actions"><button class="quiet small" data-lib-new>${t('新建图库')}</button><button class="quiet small" data-lib-choose="library">${t('打开其他图库…')}</button><button class="quiet small" data-lib-choose="zip" ${importActive() ? 'disabled' : ''}>${t('导入…')}</button>${cur ? `<button class="quiet small" data-lib-export ${ex.status === 'running' ? 'disabled' : ''}>${t('导出当前图库')}</button>` : ''}</div>
     ${form}${exportLine}${importBlock(state.importTask)}
-    ${data.libraries.length > 1 || dev ? `<table class="settings-table lib-table"><tr><th>${t('这台电脑上的图库')}</th>${dev ? `<th>${t('测试画像')}</th>` : ''}<th></th></tr>${data.libraries.map(row).join('')}</table>` : ''}
-    <p class="muted-note">${t('导出的 zip 包含识别结果、人工整理记录和来源配置，不含模型连接设置或联网授权，可以换电脑或发给别人。导入后需重新设置模型接口，并自行确认名称查询的联网授权；旧版导出包也会清除这些设置。个人备份请保留完整图库目录。')}${ex.status === 'done' ? '' : EXPORT_LEAVES_OUT}</p>`);
+    <p class="set-foot">${t('导出的 zip 包含识别结果、人工整理记录和来源配置，不含模型连接设置或联网授权，可以换电脑或发给别人。导入后需重新设置模型接口，并自行确认名称查询的联网授权；旧版导出包也会清除这些设置。个人备份请保留完整图库目录。')}${ex.status === 'done' ? '' : EXPORT_LEAVES_OUT}</p>`);
 }
 // #88: an import runs as a background task (core/jobs.js). The card shows its line, a cancel button while it runs, and
 // how it ended.
