@@ -3,7 +3,7 @@
 import {t} from '../core/i18n.js';
 import {esc, number} from '../core/format.js';
 import {prefs} from '../core/prefs.js';
-import {session, readError} from '../core/session.js';
+import {api, session, readError} from '../core/session.js';
 import {state} from '../core/state.js';
 import {nameTip} from '../core/labels.js';
 import {pollIndex, indexAction} from '../core/jobs.js';
@@ -56,9 +56,42 @@ export async function searchIndex() {
 export function renderIndexBody() { if (state.route.page !== 'characters') return; if (state.route.section === 'works') drawShelf(); else { drawCast(); loadActivity(); } }
 const cover = (c, size = 'thumb') => c?.cover ? `<img src="/image?id=${encodeURIComponent(c.cover)}&size=${size}" alt="" loading="lazy" decoding="async">` : '';
 const avatar = (c, px) => `<i class="cast-av" style="width:${px}px;height:${px}px">${cover(c)}</i>`;
+// ---------- a character as a fan of its pictures (#293) ----------
+// A work's fan holds three of its characters; a character's holds three of its own pictures: its cover in front and
+// its two newest others behind. One local read per character, kept until the data or the filter changes.
+const fans = new Map();
+const fanKey = c => `${c.id}|${state.nsfw}|${state.readEpoch}`;
+/** The pictures of c's fan if they are read already, else null. */
+export const fanNow = c => (c?.cover && fans.get(fanKey(c))?.done) || null;
+export function fanPictures(c) {
+  if (!c?.cover) return Promise.resolve([]);
+  const key = fanKey(c);
+  if (!fans.has(key)) {
+    const entry = {done: null};
+    entry.read = api('/api/character/stats?' + new URLSearchParams({id: c.id, nsfw: state.nsfw, exclude: c.cover}))
+      .then(s => [c.cover, ...(s.recent || []).filter(u => u !== c.cover).slice(0, 2)], () => [c.cover])
+      .then(pics => (entry.done = pics));
+    fans.set(key, entry);
+  }
+  return fans.get(key).read;
+}
+// The cards back to front, as the work fan draws them: second, third, then the cover on top. A missing card stays
+// empty, and an empty card is not drawn.
+export const fanCards = (pics, size = 'thumb') => [pics[1], pics[2], pics[0]].map(u => `<i>${u ? `<img src="/image?id=${encodeURIComponent(u)}&size=${size}" alt="" decoding="async">` : ''}</i>`).join('');
+// A poster deals its fan on hover: read on the first hover, drawn into the poster's empty fan.
+function dealFan(a) {
+  const box = a.querySelector('.poster-fan'), c = state.charMap.get(a.dataset.fan);
+  if (!box || box.dataset.state || !c) return;
+  box.dataset.state = 'reading';
+  fanPictures(c).then(pics => {
+    if (pics.length < 2) { box.dataset.state = 'single'; return; }
+    box.innerHTML = fanCards(pics, a.closest('.cast-board') && !a.previousElementSibling ? 'medium' : 'thumb');
+    box.dataset.state = 'ready'; a.classList.add('fanned');
+  });
+}
 function poster(c, sub, rank = 0, big = false) {
   const r = recentOf(c), skins = (c.variants || []).filter(v => v.count).length;
-  return `<a class="cast-poster" href="${charHash(c.id)}" title="${esc(nameTip(c))}"><span class="img">${cover(c, big ? 'medium' : 'thumb')}</span>${rank ? `<span class="rank">${rank}</span>` : ''}${r ? `<span class="pill ${rank ? 'r' : 'l'}"><i></i>+${number(r)}</span>` : ''}${!rank && skins ? `<span class="pill r">${t('{n} 个皮肤', {n: skins})}</span>` : ''}<span class="cap"><b>${c.kind === 'oc' ? `<em>${t('原创')}</em>` : ''}${esc(c.name)}</b><small>${sub}</small></span></a>`;
+  return `<a class="cast-poster" href="${charHash(c.id)}" title="${esc(nameTip(c))}" data-fan="${esc(c.id)}"><span class="img">${cover(c, big ? 'medium' : 'thumb')}<span class="cast-fan poster-fan" aria-hidden="true"></span></span>${rank ? `<span class="rank">${rank}</span>` : ''}${r ? `<span class="pill ${rank ? 'r' : 'l'}"><i></i>+${number(r)}</span>` : ''}${!rank && skins ? `<span class="pill r">${t('{n} 个皮肤', {n: skins})}</span>` : ''}<span class="cap"><b>${c.kind === 'oc' ? `<em>${t('原创')}</em>` : ''}${esc(c.name)}</b><small>${sub}</small></span></a>`;
 }
 const fan = chars => `<span class="cast-fan">${[1, 2, 0].map(i => `<i>${cover(chars[i])}</i>`).join('')}</span>`;
 function tiers(list, showWork) {
@@ -385,6 +418,7 @@ export function wireWatchAdd(x, add) {
 
 // The 资料库 pages' handlers. Called once, when the page starts.
 export function wireCatalog() {
+  for (const kind of ['mouseover', 'focusin']) $('charIndex').addEventListener(kind, e => { const a = e.target.closest?.('.cast-poster[data-fan]'); if (a) dealFan(a); });
   $('charIndex').addEventListener('click', e => {
     if (state.route.page !== 'characters') return;
     const hit = e.target;
