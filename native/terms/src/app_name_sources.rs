@@ -1,4 +1,5 @@
-//! Text-only name sources. Network never holds a database transaction.
+//! Text-only name sources, and the one small preview picture of a Danbooru character (#293). Network never holds a
+//! database transaction.
 use crate::{Error, Result};
 use rusqlite::{Connection, OptionalExtension};
 use serde_json::{json, Value};
@@ -147,6 +148,39 @@ impl Source {
     }
     pub fn fetch(&self, address: &str, body: Option<&Value>, key: Option<&str>) -> Result<Value> {
         self.fetch_serialized(address, body, key).map(|(value, _)| value)
+    }
+    /// One small picture from Danbooru's CDN (a post's preview, #293), under the same consent as every name query.
+    /// At most `limit` bytes; no redirects, no other host (a synthetic service on this machine in tests).
+    pub fn picture(&self, address: &str, limit: u64) -> Result<Vec<u8>> {
+        let u = url::Url::parse(address).map_err(|_| Error::Network("预览图地址不正确".into()))?;
+        let local = matches!(u.host_str(), Some("localhost" | "127.0.0.1" | "[::1]"));
+        self.check_request(local)?;
+        if !u.username().is_empty()
+            || u.password().is_some()
+            || (local && u.scheme() != "http")
+            || (!local && (u.scheme() != "https" || u.host_str() != Some("cdn.donmai.us")))
+        {
+            return network("预览图不在 Danbooru 来源范围");
+        }
+        let response = ureq::AgentBuilder::new()
+            .timeout(Duration::from_secs(15))
+            .redirects(0)
+            .build()
+            .get(address)
+            .set("User-Agent", "illustash/0.1 (https://github.com/shio-vinyl/illustash; local library display names)")
+            .call()
+            .map_err(|_| Error::Network("预览图下载失败".into()))?;
+        let mut bytes = Vec::new();
+        response
+            .into_reader()
+            .take(limit + 1)
+            .read_to_end(&mut bytes)
+            .map_err(|_| Error::Network("预览图下载失败".into()))?;
+        if bytes.len() as u64 > limit {
+            return network("预览图过大");
+        }
+        check(&self.cancel)?;
+        Ok(bytes)
     }
     fn fetch_serialized(&self, address: &str, body: Option<&Value>, key: Option<&str>) -> Result<(Value, String)> {
         let u = url::Url::parse(address).map_err(|_| Error::Invalid("名称接口地址不正确".into()))?;
@@ -397,6 +431,48 @@ impl Source {
         }
         Ok(String::new())
     }
+}
+/// A preview is about 150 px; anything much bigger is not one.
+const PREVIEW_MAX: u64 = 512 * 1024;
+/// The preview of the best-scored all-ages (rating:g) post of a Danbooru character tag, kept as `danbooru-<sha256 of
+/// the tag>.jpg` among the library's thumbnails (cleared and counted with them). None when there is no such post.
+/// Looking it up and fetching it need the name-lookup consent, like the search that listed the tag.
+pub(crate) fn preview(source: &mut Source, thumbnails: &std::path::Path, tag: &str) -> Result<Option<Vec<u8>>> {
+    use sha2::{Digest, Sha256};
+    // One plain tag: no operators, wildcards or a second tag of its own in the search.
+    if tag.is_empty()
+        || tag.len() > 200
+        || tag.starts_with(['-', '~'])
+        || tag.chars().any(|c| c.is_whitespace() || c.is_control() || c == '*' || c == ',')
+    {
+        return fail("角色 tag 不正确");
+    }
+    let jpeg = |b: &[u8]| b.starts_with(&[0xff, 0xd8, 0xff]);
+    let path = thumbnails.join(format!("danbooru-{:x}.jpg", Sha256::digest(tag.as_bytes())));
+    if let Ok(bytes) = std::fs::read(&path) {
+        if jpeg(&bytes) {
+            return Ok(Some(bytes));
+        }
+    }
+    let fields = [
+        ("tags", format!("{tag} rating:g order:score")),
+        ("limit", "1".into()),
+        ("only", "id,preview_file_url".into()),
+    ];
+    let posts = source.cached(&url(&source.db_base, "/posts.json", &fields), None)?;
+    let Some(address) = posts.as_array().and_then(|p| p.first()).and_then(|p| p["preview_file_url"].as_str()) else {
+        return Ok(None);
+    };
+    let bytes = source.picture(address, PREVIEW_MAX)?;
+    if !jpeg(&bytes) {
+        return Ok(None);
+    }
+    std::fs::create_dir_all(thumbnails)?;
+    // Whole or absent: a reader never sees half a picture.
+    let tmp = path.with_extension(format!("{}.tmp", crate::store::new_key()?));
+    std::fs::write(&tmp, &bytes)?;
+    std::fs::rename(tmp, &path)?;
+    Ok(Some(bytes))
 }
 fn validate(value: &Value, address: &str) -> Result<()> {
     let sequence = |v: &Value| v.as_array().is_some_and(|a| a.iter().all(Value::is_object));
@@ -903,5 +979,104 @@ mod network_tests {
             assert_eq!(w.join().unwrap(), json!([]));
         }
         assert_eq!((server.calls(), server.peak.load(Ordering::SeqCst)), (4, 1));
+    }
+
+    const JPEG: &[u8] = &[0xff, 0xd8, 0xff, 0xe0, 0, 16, b'J', b'F', b'I', b'F'];
+    /// A synthetic Danbooru for the 「设为…」 previews (#293): posts.json answers one post for `known` only, whose
+    /// preview is `picture` (on this service unless absolute); anything else is a JPEG.
+    struct Previews {
+        base: String,
+        calls: Arc<AtomicUsize>,
+        stop: Arc<AtomicBool>,
+        thread: Option<std::thread::JoinHandle<()>>,
+    }
+    impl Previews {
+        fn start(known: &'static str, picture: &'static str) -> Self {
+            let server = tiny_http::Server::http("127.0.0.1:0").unwrap();
+            let base = format!("http://127.0.0.1:{}", server.server_addr().to_ip().unwrap().port());
+            let (calls, stop) = (Arc::new(AtomicUsize::new(0)), Arc::new(AtomicBool::new(false)));
+            let (c, s, b) = (calls.clone(), stop.clone(), base.clone());
+            let thread = std::thread::spawn(move || {
+                while !s.load(Ordering::SeqCst) {
+                    let Ok(Some(request)) = server.recv_timeout(Duration::from_millis(10)) else { continue };
+                    c.fetch_add(1, Ordering::SeqCst);
+                    let address = request.url().to_owned();
+                    let (path, query) = address.split_once('?').unwrap_or((&address, ""));
+                    let body = if path == "/posts.json" {
+                        let tags = url::form_urlencoded::parse(query.as_bytes())
+                            .find(|(k, _)| k == "tags")
+                            .map(|(_, v)| v.into_owned())
+                            .unwrap();
+                        assert!(tags.ends_with(" rating:g order:score"), "{tags}");
+                        let at =
+                            if picture.starts_with("https://") { picture.to_owned() } else { format!("{b}{picture}") };
+                        if tags == format!("{known} rating:g order:score") {
+                            json!([{"id": 1, "preview_file_url": at}]).to_string().into_bytes()
+                        } else {
+                            b"[]".to_vec()
+                        }
+                    } else {
+                        JPEG.to_vec()
+                    };
+                    let _ = request.respond(tiny_http::Response::from_data(body));
+                }
+            });
+            Self { base, calls, stop, thread: Some(thread) }
+        }
+        fn calls(&self) -> usize {
+            self.calls.load(Ordering::SeqCst)
+        }
+    }
+    impl Drop for Previews {
+        fn drop(&mut self) {
+            self.stop.store(true, Ordering::SeqCst);
+            self.thread.take().unwrap().join().unwrap();
+        }
+    }
+    fn previewer(lib: &Library, base: &str, authorized: bool) -> Source {
+        Source::new(lib.0.join("library.sqlite"), quiet(), authorized, false).unwrap().with_bases(base, base)
+    }
+
+    #[test]
+    fn an_all_ages_preview_is_fetched_once_and_kept_with_the_thumbnails() {
+        let (lib, server) = (Library::new(), Previews::start("rem_(re:zero)", "/preview/ab/cd/x.jpg"));
+        let thumbnails = lib.0.join("thumbnails");
+        let got = preview(&mut previewer(&lib, &server.base, true), &thumbnails, "rem_(re:zero)").unwrap();
+        assert_eq!(got.as_deref(), Some(JPEG));
+        assert_eq!(server.calls(), 2, "the post, then its preview");
+        let kept: Vec<_> =
+            std::fs::read_dir(&thumbnails).unwrap().map(|e| e.unwrap().file_name().into_string().unwrap()).collect();
+        assert_eq!(kept.len(), 1);
+        assert!(kept[0].starts_with("danbooru-") && kept[0].ends_with(".jpg"), "{kept:?}");
+        // Kept: no request again, even without the consent.
+        let again = preview(&mut previewer(&lib, &server.base, false), &thumbnails, "rem_(re:zero)").unwrap();
+        assert_eq!(again.as_deref(), Some(JPEG));
+        assert_eq!(server.calls(), 2);
+        // No all-ages post: nothing, and the answer is remembered in the name cache.
+        for _ in 0..2 {
+            let none = preview(&mut previewer(&lib, &server.base, true), &thumbnails, "nobody_(nowhere)");
+            assert!(none.unwrap().is_none());
+        }
+        assert_eq!(server.calls(), 3);
+    }
+
+    #[test]
+    fn a_preview_is_one_plain_tag_under_the_consent_and_only_from_danbooru() {
+        let (lib, server) = (Library::new(), Previews::start("rem_(re:zero)", "https://example.com/x.jpg"));
+        let thumbnails = lib.0.join("thumbnails");
+        for bad in ["", "-rem", "~rem", "rem ram", "rem,ram", "rem*", "rem\n"] {
+            let got = preview(&mut previewer(&lib, &server.base, true), &thumbnails, bad);
+            assert!(matches!(got, Err(Error::Invalid(_))), "{bad:?}");
+        }
+        // Danbooru itself without the consent: refused before anything is sent (a synthetic service on this machine
+        // needs no consent, so this one is the real address).
+        let refused = preview(&mut previewer(&lib, "https://danbooru.donmai.us", false), &thumbnails, "rem_(re:zero)");
+        assert!(matches!(refused, Err(Error::Network(m)) if m == UNAUTHORIZED));
+        assert_eq!(server.calls(), 0);
+        // A post whose preview is not on Danbooru's CDN is not followed.
+        let elsewhere = preview(&mut previewer(&lib, &server.base, true), &thumbnails, "rem_(re:zero)");
+        assert!(matches!(elsewhere, Err(Error::Network(_))));
+        assert_eq!(server.calls(), 1);
+        assert!(!thumbnails.exists());
     }
 }

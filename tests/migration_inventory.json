@@ -177,7 +177,7 @@
 
  "native/terms/src/app_effects.rs":"f57f598bf78f05133d42b33c619c298028e5af318206bdf732d3620bb20f7879",
 
- "native/terms/src/app_files.rs":"2d6a4b7013b350a9c6bf1ff45bcca5c3659e54f2bb97a8053a47de8764c69e7f",
+ "native/terms/src/app_files.rs":"d7f4edb4b02d82b0ec00bd26805ff8d8a0bc4970e2ae25f1aafa90c9e8432010",
 
  "native/terms/src/app_folder.rs":"68f076c9a9d0e258bd5eff71a1c66582a244747fab9ce67f4cc53239ccba63c9",
 
@@ -221,7 +221,7 @@
 
  "native/terms/src/app_models.rs":"e94bc747ebd7d390109cce8ac368b8d9517f4799300013551eba2f164b226491",
 
- "native/terms/src/app_name_sources.rs":"413387ce95f71efb251adf678dd67626611a70c50b7f1d700bec49b16712e851",
+ "native/terms/src/app_name_sources.rs":"b4ccc815e76018ffb21737b7d89a5338d2d8b5b6e6f9271b27aa74a6cc3bb1c8",
 
  "native/terms/src/app_names.rs":"2f9f195abd7fe8b2e307c35a2195b572acbd201fc3628de44a6077a4e6671118",
 
@@ -287,7 +287,7 @@
 
  "native/terms/src/http_characters.rs":"c49d546d8ae641b161fb02cc48275c246bf653e4d8d66d1023916f6313392c5e",
 
- "native/terms/src/http_host_get.rs":"6bcf03eb377c31fc4c90595394e4bafd03b1f0e9f4337224062a838b3b941f77",
+ "native/terms/src/http_host_get.rs":"3ecdb97a27150dbd87ceda841c7358fc09a4f910ce154746064987899f542c71",
 
  "native/terms/src/http_host_post.rs":"78cab3956c02d7b10fd3514ef336e3f97133fd22b6a9b56b1ce8c209c8d4128c",
 
@@ -524,7 +524,7 @@
  "native/terms/src/cli.rs":{"cli-entry":["recognition-import","folder-scan","photos-scan","library-scan","library-create","http","serve","wd-pending","names-command","names-project","names-search","character-command","identity-command","learning-snapshot","publish-learning","reproject-characters","validate","migrate","import","judge","tag","reproject","undo"],"database-write":[[0,3],3,1]},
  "crates/core/src/character_sql/fold.sql":{"database-write":["UPDATE:duplicates"]},
  "crates/core/src/character_commands.rs":{"database-write":{"@0":10,"@184":5,"@198":1,"DELETE FROM:identity_scopes":2,"DELETE FROM:identity_suspended":2,"INSERT INTO:identity_scopes":1,"@14":1,"@15":1,"INSERT OR REPLACE INTO:assertions":1,"DELETE FROM:assertions":2,"INSERT INTO:assertions":1,"@18":1,"@35":4,"INSERT OR IGNORE INTO:deferred":1,"DELETE FROM:deferred":5,"INSERT OR REPLACE INTO:asked":2,"INSERT INTO:reviews":1,"INSERT OR REPLACE INTO:identity_uncertain":1,"@175":1,"INSERT INTO:deferred":1,"@190":1,"DELETE FROM:identity_anchor_decisions":1,"INSERT INTO:identity_anchor_decisions":1,"INSERT INTO:identity_anchor_history":1}},
- "native/terms/src/http_host_get.rs":{"http-branch":[17,97,42,39,"/api/similar|/api/clusters",[26,2],41,43,"/api/settings","/api/libraries",291,293,295,296,305]},
+ "native/terms/src/http_host_get.rs":{"http-branch":[17,97,42,39,"/api/similar|/api/clusters",[26,2],41,43,"/api/settings","/api/libraries",291,293,295,296,305,306]},
  "native/terms/src/app_create.rs":{"database-write":{"ATTACH":1,"dynamic-or-wrapper":9,"INSERT INTO:main.":1,"CREATE INDEX:if":1,"COMMIT":3,"DETACH":1,"ALTER TABLE:assets":1,"INSERT OR IGNORE INTO:meta":1}},
  "native/terms/src/app_index.rs":{"database-write":[[0,7],34,[1,5],33,283,284,285,286,[208,2],12,[199,2],287,249,201,[3,2]],"entrypoint":[4]},
  "native/terms/src/http_browse.rs":{"http-branch":["/api/assets|/api/ids",[246,3],[77,2],[248,3],24,99,89,"/api/assets|/api/assets/count|/api/ids",[78,3]],"database-write":[[7,2],[0,2]]},
@@ -922,6 +922,7 @@
  "DROP TABLE:temp.rescue_known",
  "/api/integrity/rescue",
  "DELETE FROM:recognition_imports",
- "/api/models"
+ "/api/models",
+ "/api/entity-preview"
 ]
 }

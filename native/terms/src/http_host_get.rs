@@ -51,6 +51,10 @@ pub(super) fn handle(request: Request, host: &Host, received: u64) {
         remote_names(request, host, received, session);
         return;
     }
+    if path == "/api/entity-preview" {
+        preview(request, host, received, session);
+        return;
+    }
     if path == "/api/oc/groups" {
         drop(session);
         oc_groups(request, host, received);
@@ -90,6 +94,29 @@ fn remote_names(request: Request, host: &Host, received: u64, session: RwLockRea
         .map_err(|_| Error::Invalid("名称服务配置不正确".into()))
         .and_then(|source| crate::app_names::remote(source, request.url()));
     reply_if_current(request, host, received, result, false);
+}
+/// A Danbooru character's preview picture (#293), looked up and fetched without holding the session. 404 when
+/// Danbooru has no all-ages post of it; the page then keeps its placeholder.
+fn preview(request: Request, host: &Host, received: u64, session: RwLockReadGuard<Session>) {
+    let mut source = session.names.source(&session.library);
+    let thumbnails = session.library.thumbnails();
+    drop(session);
+    let tag = crate::http_read::query(request.url()).remove("tag").unwrap_or_default();
+    let result = source
+        .as_mut()
+        .map_err(|_| Error::Invalid("名称服务配置不正确".into()))
+        .and_then(|source| crate::app_name_sources::preview(source, &thumbnails, &tag));
+    if !host.current(received) {
+        expired(request);
+        return;
+    }
+    match result {
+        Ok(Some(bytes)) => {
+            let _ = request.respond(crate::app_files::response(crate::app_files::File::jpeg(bytes)));
+        }
+        Ok(None) => respond(request, error("Danbooru 上没有这个角色的全年龄图"), 404, "core"),
+        Err(e) => failure(request, e, false),
+    }
 }
 fn oc_groups(request: Request, host: &Host, received: u64) {
     let mut session = host.session.write().expect("http_host_get session lock poisoned");
