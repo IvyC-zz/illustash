@@ -186,7 +186,7 @@ export async function splitOc(c) {
 }
 // ---------- character profile (编辑资料) ----------
 // A search box with a result menu: `search(q)` resolves to sections [{label, items, note}], `pick(item)` takes one.
-function combo(input, menu, search, pick) {
+export function combo(input, menu, search, pick) {
   let list = [], index = 0, gen = 0, timer = 0;
   const render = sections => {
     list = sections.flatMap(x => x.items); index = Math.min(index, Math.max(0, list.length - 1));

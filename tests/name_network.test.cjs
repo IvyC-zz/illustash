@@ -65,7 +65,7 @@ test('saving or clearing model settings keeps the grant and revoke control avail
   const {renderModelCard} = await web.load('ui/settings.js');
   for (const authorized of [true, false]) {
     const network = {authorized, this_run: false, granted_at: authorized ? 'synthetic-time' : null}, {state} = web.core();
-    const controls = Object.fromEntries(['modelCard', 'modelSave', 'modelClear', 'modelTest', 'modelBase', 'modelName', 'modelKey', 'toast', 'toastText', 'toastUndo']
+    const controls = Object.fromEntries(['modelCard', 'modelSave', 'modelClear', 'modelTest', 'modelBase', 'modelName', 'modelKey', 'toast', 'toastText', 'toastAct', 'toastUndo']
       .map(id => [id, {value: '', contains: () => false}]));
     const calls = [];
     Object.assign(state, {route: {page: 'library'}, names: {network, model_api: {configured: true}}});
@@ -92,7 +92,7 @@ test('saving a new model address that drops the key says the key must be entered
   const {renderModelCard} = await web.load('ui/settings.js');
   for (const [kept, said] of [[true, '设置已保存'], [false, '接口地址已更改，原来的 API key 已清除，请重新填写']]) {
     const {state} = web.core();
-    const controls = Object.fromEntries(['modelCard', 'modelSave', 'modelClear', 'modelTest', 'modelBase', 'modelName', 'modelKey', 'toast', 'toastText', 'toastUndo']
+    const controls = Object.fromEntries(['modelCard', 'modelSave', 'modelClear', 'modelTest', 'modelBase', 'modelName', 'modelKey', 'toast', 'toastText', 'toastAct', 'toastUndo']
       .map(id => [id, {value: '', contains: () => false}]));
     controls.modelBase.value = 'https://synthetic.invalid';
     Object.assign(state, {route: {page: 'library'}, names: {network: {}, model_api: {configured: true, base: 'https://api.deepseek.com'}}});

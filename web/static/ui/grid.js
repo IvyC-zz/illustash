@@ -10,6 +10,7 @@ import {prefs} from '../core/prefs.js';
 import {LEAD_PAGES, browsing, cleanup, defaultSort, panelPage} from '../core/route.js';
 import {api, post, readError} from '../core/session.js';
 import {state} from '../core/state.js';
+import {offerWatch} from './catalog.js';
 import {$, error, toast} from './dom.js';
 import {renderChrome, renderHeading} from './shell.js';
 import {findArtists} from './artists.js';
@@ -528,6 +529,7 @@ export async function mutate(path, body, leaving, {advance = false} = {}) {
     const r = await post(path, body); setLatest(r.undo);
     state.selecting = false; clearSelection();
     toast(tb(r.undo.label), true);
+    if (path === '/api/change' && body.action === 'confirmed') offerWatch(body.entities || [body.entity]).catch(() => {});
     if (gone) { await new Promise(done => setTimeout(done, Math.max(0, 170 - (performance.now() - started)))); collapse(gone); }
     await reload(); if (state.route.page === 'home') renderHome(true); metaSoon(path === '/api/tag');
     if (state.focused) inspect(state.focused, true);

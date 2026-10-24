@@ -63,18 +63,15 @@ function homeTile(x, style, big = false) {
   const badge = viewOpts.marks && x.dup ? `<span class="home-badge" title="${t('共 {n} 份副本', {n: x.dup.size})}">×${x.dup.size}</span>` : '';
   return `<button class="home-j${state.focused === x.uuid ? ' on' : ''}" data-id="${esc(x.uuid)}" data-chars="${esc(ids)}" style="${style}"><img src="/image?id=${encodeURIComponent(x.uuid)}&size=${big ? 'medium' : 'thumb'}" alt="" loading="lazy" decoding="async" draggable="false">${badge}${big ? '' : `<span class="home-ov">${names.length ? names.map(esc).join(' · ') : x.unknown ? t('已跳过') : t('未识别')}</span>`}</button>`;
 }
-function homeRows(items, width, target) {
+// Full rows stretch to the width (a little under the target height); a row that would have to grow past ROW_GROW
+// times the target (a day with few pictures, a day's last row) keeps the target height and leaves the right side empty.
+const ROW_GROW = 1.15;
+export function homeRows(items, width, target) {
   const G = 6, rows = []; let row = [], sum = 0;
   for (const x of items) { row.push(x); sum += ratio(x); if (sum * target + G * (row.length - 1) >= width) { rows.push(row); row = []; sum = 0; } }
-  if (row.length) {
-    const fill = row.reduce((a, x) => a + ratio(x), 0) * target / width;
-    if (fill < .7 && rows.length) { const both = rows.pop().concat(row), tot = both.reduce((a, x) => a + ratio(x), 0); let acc = 0, cut = 0;
-      for (; cut < both.length - 1; cut++) { acc += ratio(both[cut]); if (acc >= tot / 2) break; }
-      rows.push(both.slice(0, cut + 1), both.slice(cut + 1)); }
-    else rows.push(row);
-  }
-  return rows.filter(r => r.length).map(r => { const s = r.reduce((a, x) => a + ratio(x), 0), fit = (width - G * (r.length - 1)) / s, h = r.length > 2 ? fit : Math.min(target * 1.8, fit);
-    return `<div class="home-row" style="height:${Math.round(h)}px">${r.map(x => homeTile(x, `flex:${ratio(x)} 1 0`)).join('')}</div>`; }).join('');
+  if (row.length) rows.push(row);
+  return rows.map(r => { const s = r.reduce((a, x) => a + ratio(x), 0), fit = (width - G * (r.length - 1)) / s, full = fit <= target * ROW_GROW, h = full ? fit : target;
+    return `<div class="home-row" style="height:${Math.round(h)}px">${r.map(x => homeTile(x, full ? `flex:${ratio(x)} 1 0` : `flex:none;width:${Math.round(ratio(x) * h)}px`)).join('')}</div>`; }).join('');
 }
 function heroTile(hero, w, h) {
   const top = hero.memberships[0];
@@ -105,12 +102,16 @@ export function homeDay(g, width) {
       <div class="home-strip" data-day="${g.day}">${hero ? heroTile(hero, heroW, heroH) : ''}<div class="strip-rows">${stripRows(rest, Math.round(rowH))}</div>
         ${g.count > g.items.length ? `<a class="strip-more" href="${hashFor({page: 'library', day: g.day})}" style="height:${heroH}px">${t('{n} 张没显示', {n: `<b>${number(g.count - g.items.length)}</b>`})}<small>${t('继续往右滑自动加载 · 或在图库里看全部')}</small></a>` : ''}</div>
       <button class="strip-nav next" data-strip="1" aria-label="${t('向右')}">${INSP_ICONS.next}</button></div>`;
-  } else if (hero) {
-    const heroH = Math.round(heroW / .72), sideW = width - heroW - 6, side = [[], []];
-    let r = 0, sum = 0, used = 0;
-    for (const x of rest) { if (r > 1) break; side[r].push(x); sum += ratio(x); used++; if (sum * rowH + 6 * (side[r].length - 1) >= sideW) { r++; sum = 0; } }
-    body = `<div class="home-top">${heroTile(hero, heroW, heroH)}<div class="home-side">${side.filter(x => x.length).map(rw => `<div class="home-row">${rw.map(x => homeTile(x, `flex:${ratio(x)} 1 0`)).join('')}</div>`).join('')}</div></div>${homeRows(rest.slice(used), width, target)}`;
-  } else body = homeRows(g.items, width, target);
+  } else {
+    // The two rows beside the hero stretch to its height and the side's width; when the second one would be mostly
+    // empty (a day with few pictures) the day is laid out without a hero instead (#293).
+    const heroH = Math.round(heroW / .72), sideW = width - heroW - 6, side = [[], []], fill = [0, 0];
+    let r = 0, used = 0;
+    if (hero) for (const x of rest) { if (r > 1) break; side[r].push(x); fill[r] += ratio(x) * rowH + 6; used++; if (fill[r] - 6 >= sideW) r++; }
+    body = hero && fill[1] - 6 >= sideW * .75
+      ? `<div class="home-top">${heroTile(hero, heroW, heroH)}<div class="home-side">${side.map(rw => `<div class="home-row">${rw.map(x => homeTile(x, `flex:${ratio(x)} 1 0`)).join('')}</div>`).join('')}</div></div>${homeRows(rest.slice(used), width, target)}`
+      : homeRows(g.items, width, target);
+  }
   const more = g.people - g.characters.length;
   const chips = g.characters.map(c => { const cover = state.charMap.get(c.id)?.cover;
     return `<a class="home-cc" href="${charHash(c.id)}" data-char="${esc(c.id)}" title="${t('在图库里只看 TA')}">${cover ? `<img src="/image?id=${encodeURIComponent(cover)}&size=thumb" alt="" loading="lazy">` : '<i></i>'}${esc(c.name)}<small>${number(c.count)}</small></a>`; }).join('');

@@ -15,8 +15,16 @@ export function platformHints(root, mac = isMac) {
 }
 let toastTimer;
 export function toast(message, withUndo = false) {
-  $('toastText').textContent = message; $('toastUndo').hidden = !withUndo; $('toast').hidden = false;
+  $('toastText').textContent = message; $('toastUndo').hidden = !withUndo; $('toastAct').hidden = true; $('toast').hidden = false;
   clearTimeout(toastTimer); toastTimer = setTimeout(() => { $('toast').hidden = true; }, withUndo ? 6000 : 3500);
+}
+// A follow-up on the toast that is showing: a few more words, and optionally a button (e.g. 关注 the work of the
+// character just set, #293). The toast then stays a little longer.
+export function toastMore(text, label = '', run = null) {
+  if ($('toast').hidden) return;
+  $('toastText').textContent += text;
+  const b = $('toastAct'); b.hidden = !label; b.textContent = label; b.onclick = () => { $('toast').hidden = true; run(); };
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => { $('toast').hidden = true; }, 9000);
 }
 // The toast stays while the pointer is on it; its undo button runs undo().
 export function wireToast(undo) {

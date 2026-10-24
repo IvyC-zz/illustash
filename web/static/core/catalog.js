@@ -32,16 +32,18 @@ export async function loadLocalLinks() {
 
 // ---------- characters by work ----------
 export const workKey = c => c.kind === 'oc' ? 'oc' : c.work_id || 'other';
+// The groups that are not works (原创角色, 未归作品) carry pseudo and come after the works (#293).
 export function castWorks() {
   const names = new Map((state.workTree || []).map(w => [w.id, w.name])), groups = new Map();
   for (const c of state.chars) {
     const k = workKey(c);
-    if (!groups.has(k)) groups.set(k, {key: k, name: k === 'oc' ? t('原创角色') : k === 'other' ? t('其他') : c.work_name || names.get(k) || t('未命名作品'), chars: [], images: 0, recent: 0});
+    if (!groups.has(k)) groups.set(k, {key: k, name: k === 'oc' ? t('原创角色') : k === 'other' ? t('未归作品') : c.work_name || names.get(k) || t('未命名作品'), pseudo: k === 'oc' || k === 'other', chars: [], images: 0, recent: 0});
     const g = groups.get(k); g.chars.push(c); g.images += c.count; g.recent += recentOf(c);
   }
   for (const g of groups.values()) g.chars.sort((a, b) => b.count - a.count);
-  return [...groups.values()].sort((a, b) => b.images - a.images);
+  return [...groups.values()].sort((a, b) => a.pseudo - b.pseudo || b.images - a.images);
 }
+export const PSEUDO_NOTES = {oc: t('画师的原创角色，不属于任何作品'), other: t('还没填所属作品的角色。在角色的「编辑资料」里填上作品，就会归到那部作品下')};
 // The list's size buckets: [key, label, test].
 export const BUCKETS = [['all', t('全部'), () => true], ['1', t('1 张'), c => c.count === 1], ['2', t('2–4 张'), c => c.count >= 2 && c.count < 5], ['5', t('5–19 张'), c => c.count >= 5 && c.count < 20], ['20', t('20–99 张'), c => c.count >= 20 && c.count < 100], ['100', t('100 张以上'), c => c.count >= 100]];
 // The list's rows: base (all characters, or a search) in one bucket, sorted by a column (dir 1 or -1).

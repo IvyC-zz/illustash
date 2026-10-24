@@ -509,6 +509,15 @@ dialog.profile-dialog{width:min(560px,calc(100vw - 32px));margin-top:8vh;overflo
 .profile-dialog .field input{width:100%;height:34px;border:1px solid var(--line);border-radius:7px;padding:0 10px;font-size:13px;background:var(--sheet)}
 .profile-dialog .field input:focus{outline:0;border-color:var(--faint);box-shadow:0 0 0 3px #9696a933}
 .profile-dialog .field small{color:var(--muted);font-size:11.5px;min-height:14px}
+.profile-dialog .field select{width:100%;height:34px;border:1px solid var(--line);border-radius:7px;padding:0 28px 0 10px;font-size:13px;background-color:var(--sheet)}
+.profile-dialog .field .opt{margin-left:8px;font-style:normal;font-weight:400;font-size:11px;color:var(--faint)}
+.profile-dialog .field small .warn{color:var(--warn)}
+.profile-dialog .dialog-lead{margin:-6px 0 0;padding:9px 12px;border-radius:9px;background:var(--accent-soft);color:var(--accent-ink);font-size:12.5px;line-height:1.5}
+.profile-dialog .check-row{display:flex;gap:10px;align-items:flex-start;font-size:12.5px;cursor:pointer}
+.profile-dialog .check-row[hidden]{display:none}
+.profile-dialog .check-row input{margin:2px 0 0;flex:none}
+.profile-dialog .check-row span{display:grid;gap:3px}
+.profile-dialog .check-row small{color:var(--muted);font-size:11.5px}
 .profile-dialog code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11.5px;background:var(--soft);border-radius:4px;padding:1px 5px}
 .combo{position:relative}
 .combo-menu{position:absolute;top:calc(100% + 4px);left:0;right:0;z-index:30;background:var(--sheet);border:1px solid var(--line);border-radius:10px;box-shadow:0 10px 35px #1c1c221c;padding:6px;max-height:280px;overflow:auto}
@@ -963,6 +972,11 @@ body:has(#settingsPage:not([hidden])) .nudge{display:none}
 .cast-tab.on{background:var(--ink);color:var(--sheet);font-weight:600}
 .cast-tab.on small{color:color-mix(in srgb,var(--sheet) 65%,transparent)}
 .cast-tab.on .cast-av{box-shadow:0 0 0 1.5px color-mix(in srgb,var(--sheet) 70%,transparent)}
+/* 原创角色 / 未归作品 are groups, not works: outlined, after the works */
+.cast-tab.pseudo{background:transparent;box-shadow:inset 0 0 0 1px var(--line);color:var(--muted)}
+.cast-tab.pseudo:hover{background:var(--soft)}
+.cast-tab.pseudo.on{background:var(--ink);box-shadow:none;color:var(--sheet)}
+.cast-wrow.pseudo span{color:var(--muted)}
 .cast-allw{flex:none;display:inline-flex;align-items:center;gap:6px;height:34px;padding:0 12px 0 14px;border:0;border-radius:999px;background:var(--sheet);box-shadow:0 0 0 1px var(--hair);font-size:12.5px;font-weight:600;color:var(--ink)}
 .cast-allw svg{width:14px;height:14px;fill:none;stroke:var(--muted);stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
 .cast-allw.on{box-shadow:0 0 0 1.5px var(--accent);color:var(--accent-ink)}
@@ -1027,6 +1041,7 @@ body:has(#settingsPage:not([hidden])) .nudge{display:none}
 .cast-tags{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
 .cast-tags span{font-size:12px;color:var(--ink2);background:var(--soft);border-radius:999px;padding:3px 10px}
 .cast-tags span.hot{background:var(--accent-soft);color:var(--accent-ink);font-weight:700}
+.cast-note{margin:8px 0 0;font-size:12px;color:var(--muted);max-width:52ch}
 .cast-head .primary{margin-left:auto}
 .cast-roster{display:grid;grid-template-columns:repeat(auto-fill,minmax(92px,1fr));gap:18px 10px}
 .cast-rs{display:grid;justify-items:center;gap:5px;text-align:center}
@@ -1128,6 +1143,13 @@ body:has(#settingsPage:not([hidden])) .nudge{display:none}
 .cast-tagged a{color:var(--ink2);text-decoration:none}
 .cast-tagged a:hover{color:var(--accent-ink)}
 .cast-tagged small{margin-left:4px;color:var(--faint)}
+.cast-tagged .link-button{font-size:12px}
+.tagged-list{display:grid;max-height:min(52vh,420px);overflow:auto;border-top:1px solid var(--line)}
+.tagged-row{display:flex;align-items:center;gap:10px;padding:7px 2px;border-bottom:1px solid var(--line);font-size:13px}
+.tagged-row a{color:var(--ink);text-decoration:none;font-weight:600}
+.tagged-row a:hover{color:var(--accent-ink)}
+.tagged-row small{color:var(--muted);font-size:11.5px}
+.tagged-list>.muted-note{padding:10px 2px}
 
 /* 随机抽查: the image's character tags float at the bottom; hover a tag for ✓ / ✗ */
 .chips .hint-add{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -1153,7 +1175,7 @@ body:has(#settingsPage:not([hidden])) .nudge{display:none}
 .gsecs{display:flex;flex-direction:column;gap:14px}
 .gsec{border:1px solid var(--line);border-radius:12px;padding:10px 12px 12px;background:var(--sheet)}
 .gsec-head{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:8px}
-.gsec-head .btn,.gsec-head .quiet{padding:3px 10px;font-size:12px;min-height:0;line-height:1.5}
+.gsec-head .btn,.gsec-head .quiet{flex:0 0 auto;padding:3px 10px;font-size:12px;min-height:0;line-height:1.5}
 .gsec-head .muted-note{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:26ch}
 .gsec-head b{font-size:13px}
 .gsec-q{margin:0 4px 0 6px;font-size:13px}
@@ -1389,9 +1411,6 @@ a.shelf-link:hover{color:var(--accent-ink)}
 .shelf-found .spacer{flex:1}
 .cast-manage{display:flex;align-items:center;gap:12px;margin-top:10px}
 .work-choice{width:100%}
-.work-dialog .form-grid{grid-template-columns:max-content minmax(0,1fr)}
-.work-dialog .form-grid input,.work-dialog .form-grid select{height:34px;border:1px solid var(--line);border-radius:8px;padding:0 10px;background-color:var(--sheet);font-size:13px}
-.work-dialog .form-grid select{padding-right:28px}
 dialog.index-add{width:min(720px,calc(100vw - 32px))}
 .index-add-list{max-height:52vh;overflow:auto}
 .index-add .dialog-actions{align-items:center}

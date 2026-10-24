@@ -8,13 +8,14 @@ import {state} from '../core/state.js';
 import {nameTip} from '../core/labels.js';
 import {pollIndex, indexAction} from '../core/jobs.js';
 import {remoteNames, remoteNote} from '../core/settings.js';
-import {catalog, recentOf, loadActivity as readActivity, searchCharacters, loadTagged, loadWorkTree, loadLocalLinks, castWorks, BUCKETS, castRows,
+import {catalog, recentOf, loadActivity as readActivity, searchCharacters, loadTagged, loadWorkTree, loadLocalLinks, castWorks, PSEUDO_NOTES, BUCKETS, castRows,
   WORK_NAMES, workName, loadIndex, searchWorks, shelfRows, saveWatch, watchTarget, saveWork} from '../core/catalog.js';
-import {$, toast, error, readFailure, wireFolds, reconcileSections, searchIcon} from './dom.js';
+import {$, toast, toastMore, error, readFailure, wireFolds, reconcileSections, searchIcon} from './dom.js';
 import {chooseWork} from './dialog.js';
+import {combo, openPicker, toggleMascot} from './palette.js';
 import {namesAllowButton} from './settings.js';
 import {charHash, charRoute, go} from '../core/route.js';
-import {refreshMeta} from '../core/meta.js';
+import {fetchChar, refreshMeta} from '../core/meta.js';
 import {closeInspector} from './detail.js';
 import {renderHeading} from './shell.js';
 
@@ -67,17 +68,18 @@ function tiers(list, showWork) {
     (mid.length ? `<section class="cast-sec"><h3>${t('常见')}<small>${t('5–19 张 · {n} 位', {n: number(mid.length)})}</small></h3><div class="cast-roster">${mid.map(c => `<a class="cast-rs" href="${charHash(c.id)}" title="${esc(nameTip(c))}">${avatar(c, 72)}<b>${esc(c.name)}</b><small>${showWork && c.work_name ? esc(c.work_name) + ' · ' : ''}${t('{n} 张', {n: c.count})}</small></a>`).join('')}</div></section>` : '') +
     (small.length ? `<section class="cast-sec"><h3>${t('偶尔')}<small>${t('不到 5 张 · {n} 位', {n: number(small.length)})}</small></h3><div class="cast-chips">${small.map(c => `<a class="cast-chip" href="${charHash(c.id)}" title="${esc(nameTip(c))}">${avatar(c, 22)}${esc(c.name)}<small>${c.count}</small></a>`).join('')}</div></section>` : '');
 }
+// 总览, the biggest works, then 原创角色 and 未归作品 at the end (#293: they are not works; 最近 30 天 lives in 总览).
 function castTabs(works) {
-  const recent = state.chars.filter(c => recentOf(c)).length, top = works.slice(0, 14);
-  const current = !['all', 'recent'].includes(cast.tab) && !top.some(w => w.key === cast.tab) ? works.find(w => w.key === cast.tab) : null;
-  const tab = (key, label, sub, lead = '') => `<button class="cast-tab${lead ? '' : ' plain'}${cast.tab === key ? ' on' : ''}" data-tab="${esc(key)}">${lead}${esc(label)}${sub ? `<small>${sub}</small>` : ''}</button>`;
-  return `<div class="cast-tabs"><div class="cast-tabrow">${tab('all', t('总览'))}${tab('recent', t('最近在收'), recent ? number(recent) : '')}${[...(current ? [current] : []), ...top].map(w => tab(w.key, w.name, number(w.images), avatar(w.chars[0], 24))).join('')}</div>
-    <button class="cast-allw${cast.pop ? ' on' : ''}" id="castAll" aria-expanded="${cast.pop}">${t('全部作品 {n}', {n: number(works.length)})}<svg viewBox="0 0 20 20" aria-hidden="true"><path d="m6 8 4 4 4-4"/></svg></button>${cast.pop ? castPop(works) : ''}</div>`;
+  const real = works.filter(w => !w.pseudo), top = real.slice(0, 14);
+  const current = !['all', 'recent'].includes(cast.tab) && !works.some(w => w.pseudo && w.key === cast.tab) && !top.some(w => w.key === cast.tab) ? works.find(w => w.key === cast.tab) : null;
+  const tab = (key, label, sub, lead = '', title = '') => `<button class="cast-tab${lead ? '' : ' plain'}${title ? ' pseudo' : ''}${cast.tab === key ? ' on' : ''}" data-tab="${esc(key)}"${title ? ` title="${esc(title)}"` : ''}>${lead}${esc(label)}${sub ? `<small>${sub}</small>` : ''}</button>`;
+  return `<div class="cast-tabs"><div class="cast-tabrow">${tab('all', t('总览'))}${[...(current ? [current] : []), ...top].map(w => tab(w.key, w.name, number(w.images), avatar(w.chars[0], 24))).join('')}${works.filter(w => w.pseudo).map(w => tab(w.key, w.name, number(w.images), '', PSEUDO_NOTES[w.key])).join('')}</div>
+    <button class="cast-allw${cast.pop ? ' on' : ''}" id="castAll" aria-expanded="${cast.pop}">${t('全部作品 {n}', {n: number(works.filter(w => !w.pseudo).length)})}<svg viewBox="0 0 20 20" aria-hidden="true"><path d="m6 8 4 4 4-4"/></svg></button>${cast.pop ? castPop(works) : ''}</div>`;
 }
 function castPop(works) {
   const q = cast.popQ.trim().toLowerCase(), list = works.filter(w => !q || w.name.toLowerCase().includes(q));
-  return `<div class="cast-pop" id="castPop"><div class="search-wrap">${searchIcon()}<input type="search" id="castPopQ" placeholder="${t('在 {n} 部作品里找', {n: number(works.length)})}" value="${esc(cast.popQ)}" autocomplete="off"></div>
-    <div class="cast-wcols">${list.map(w => `<button class="cast-wrow" data-tab="${esc(w.key)}">${avatar(w.chars[0], 20)}<span>${esc(w.name)}</span><small>${number(w.images)}</small></button>`).join('') || `<p class="muted-note">${t('没有匹配的作品')}</p>`}</div></div>`;
+  return `<div class="cast-pop" id="castPop"><div class="search-wrap">${searchIcon()}<input type="search" id="castPopQ" placeholder="${t('在 {n} 部作品里找', {n: number(works.filter(w => !w.pseudo).length)})}" value="${esc(cast.popQ)}" autocomplete="off"></div>
+    <div class="cast-wcols">${list.map(w => `<button class="cast-wrow${w.pseudo ? ' pseudo' : ''}" data-tab="${esc(w.key)}"${w.pseudo ? ` title="${esc(PSEUDO_NOTES[w.key])}"` : ''}>${avatar(w.chars[0], 20)}<span>${esc(w.name)}</span><small>${number(w.images)}</small></button>`).join('') || `<p class="muted-note">${t('没有匹配的作品')}</p>`}</div></div>`;
 }
 function castPane(works) {
   if (cast.list) return `<div class="cast-head"><div><h2>${t('搜索结果')}</h2><div class="cast-tags"><span>${t('{n} 位角色', {n: number(cast.list.length)})}</span></div></div></div>${cast.list.length ? tiers(cast.list, true) : `<p class="empty">${t('没有匹配的角色')}</p>`}`;
@@ -86,7 +88,7 @@ function castPane(works) {
     const rec = state.chars.filter(c => recentOf(c)).sort((a, b) => recentOf(b) - recentOf(a)), max = rec[0] ? recentOf(rec[0]) : 1;
     return `<section class="cast-sec"><h3>${t('你最常看的')}<small>${t('按收藏张数')}</small></h3><div class="cast-board">${top.map((c, i) => poster(c, (c.work_name ? esc(c.work_name) + ' · ' : '') + t('{n} 张', {n: number(c.count)}), i + 1, i === 0)).join('')}</div></section>
       ${rec.length ? `<section class="cast-sec"><h3>${t('最近 30 天在收')}<small>${t('{n} 位角色有新图', {n: number(rec.length)})}</small><button class="link-button strong" data-tab="recent">${t('全部')} ›</button></h3><div class="cast-recent">${rec.slice(0, 24).map(c => `<a class="cast-rc" href="${charHash(c.id)}" title="${esc(nameTip(c))}"><span class="ring" style="--p:${Math.max(8, Math.round(recentOf(c) / max * 100))}">${avatar(c, 66)}<em>+${number(recentOf(c))}</em></span><b>${esc(c.name)}</b><small>${esc(c.work_name || '')}</small></a>`).join('')}</div></section>` : ''}
-      <section class="cast-sec"><h3>${t('作品')}<small>${t('{n} 部 · 按张数', {n: number(works.length)})}</small></h3><div class="cast-works">${works.slice(0, 24).map(w => `<button class="cast-wt" data-tab="${esc(w.key)}">${fan(w.chars)}<b>${esc(w.name)}</b><small>${t('{n} 位 · {images} 张', {n: number(w.chars.length), images: number(w.images)})}${w.recent ? ` · <em>+${number(w.recent)}</em>` : ''}</small></button>`).join('')}</div></section>`;
+      <section class="cast-sec"><h3>${t('作品')}<small>${t('{n} 部 · 按张数', {n: number(works.filter(w => !w.pseudo).length)})}</small></h3><div class="cast-works">${works.slice(0, 24).map(w => `<button class="cast-wt" data-tab="${esc(w.key)}">${fan(w.chars)}<b>${esc(w.name)}</b><small>${t('{n} 位 · {images} 张', {n: number(w.chars.length), images: number(w.images)})}${w.recent ? ` · <em>+${number(w.recent)}</em>` : ''}</small></button>`).join('')}</div></section>`;
   }
   if (cast.tab === 'recent') {
     const rec = state.chars.filter(c => recentOf(c)).sort((a, b) => recentOf(b) - recentOf(a));
@@ -96,7 +98,7 @@ function castPane(works) {
   if (!w) { cast.tab = 'all'; return castPane(works); }
   const real = !['oc', 'other'].includes(w.key), info = state.index?.works?.find(x => x.id === w.key);
   const manage = real && info ? `<div class="cast-manage">${watchSwitch(info)}<button class="quiet" data-shelf-edit="${esc(w.key)}">${t('编辑作品…')}</button></div>` : '';
-  return `<div class="cast-head">${fan(w.chars)}<div><h2>${esc(w.name)}</h2><div class="cast-tags"><span>${t('{n} 位角色', {n: number(w.chars.length)})}</span><span>${t('{n} 张', {n: number(w.images)})}</span>${w.recent ? `<span class="hot">${t('近 30 天 +{n}', {n: number(w.recent)})}</span>` : ''}</div>${manage}</div>${real ? `<button class="primary" data-work-lib="${esc(w.key)}">${t('在图库里看全部')}</button>` : ''}</div>${tiers(w.chars, false)}`;
+  return `<div class="cast-head">${fan(w.chars)}<div><h2>${esc(w.name)}</h2><div class="cast-tags"><span>${t('{n} 位角色', {n: number(w.chars.length)})}</span><span>${t('{n} 张', {n: number(w.images)})}</span>${w.recent ? `<span class="hot">${t('近 30 天 +{n}', {n: number(w.recent)})}</span>` : ''}</div>${w.pseudo ? `<p class="cast-note">${esc(PSEUDO_NOTES[w.key])}</p>` : ''}${manage}</div>${real ? `<button class="primary" data-work-lib="${esc(w.key)}">${t('在图库里看全部')}</button>` : ''}</div>${tiers(w.chars, false)}`;
 }
 function castList() {
   const base = cast.list || state.chars, rows = castRows(base, cast);
@@ -115,10 +117,40 @@ export function drawCast() {
   root.className = 'char-index cast cast-' + cast.mode;
   reconcileSections(root, cast.mode === 'list' ? [['list', `<div class="cast-listview">${castList()}</div>`]]
     : [...(cast.list ? [] : [['tabs', castTabs(works)]]), ['pane', `<div class="cast-pane">${castPane(works)}</div>`]]);
-  const foot = (state.tagged || []).length ? `<p class="cast-tagged">${t('不算角色、只当标签：')}${state.tagged.map(x => `<a href="${charHash(x.id)}">${esc(x.name)}</a><small>${number(x.count)}</small>`).join('')}</p>` : '';
+  const foot = (state.tagged || []).length ? `<p class="cast-tagged">${t('不算角色、只当标签：')}${state.tagged.map(x => `<a href="${charHash(x.id)}">${esc(x.name)}</a><small>${number(x.count)}</small>`).join('')}<button class="link-button" data-tagged-manage>${t('管理…')}</button></p>` : '';
   let el = root.querySelector('.cast-tagged'); if (el) el.remove();
   if (foot) root.insertAdjacentHTML('beforeend', foot);
+  const tagged = $('taggedButton'); if (tagged) tagged.innerHTML = t('只当标签') + (state.tagged?.length ? ` <small>${number(state.tagged.length)}</small>` : '');
   if (cast.pop) $('castPopQ')?.focus();
+}
+
+// 只当标签 (#293): mascots and player stand-ins (the default ones included) are tags, not characters. One place to see
+// them all, turn a character into one, and turn one back.
+export async function openTagged() {
+  const d = document.createElement('dialog'); d.className = 'palette profile-dialog tagged-dialog';
+  d.innerHTML = `<form method="dialog"><div class="dialog-top"><h2>${t('只当标签的角色')}</h2><button type="button" class="icon" data-close aria-label="${t('关闭')}">×</button></div>
+    <p class="muted-note">${t('吉祥物、玩家化身（老师、博士、训练员这类）可以只当标签：不算角色，不出现在角色列表里，同框也不算多人图；图上仍挂着这个标签，可以按它筛选。')}</p>
+    <div class="tagged-list" id="taggedList"></div>
+    <div class="dialog-actions"><button type="button" class="quiet" id="taggedAdd">${t('把一个角色设为只当标签…')}</button><div class="spacer"></div><button value="ok" class="primary">${t('完成')}</button></div></form>`;
+  const list = () => {
+    const rows = state.tagged || [];
+    d.querySelector('#taggedList').innerHTML = rows.length ? rows.map(x => `<div class="tagged-row"><a href="${charHash(x.id)}" data-close>${esc(x.name)}</a><small>${t('{n} 张', {n: number(x.count)})}</small><div class="spacer"></div><button type="button" class="quiet small" data-untag="${esc(x.id)}">${t('改回角色')}</button></div>`).join('')
+      : `<p class="muted-note">${t('现在没有只当标签的角色。')}</p>`;
+  };
+  const refresh = async () => { await loadTagged().catch(e => error(readError(e))); if (d.open) list(); drawCast(); };
+  d.addEventListener('click', async e => {
+    if (e.target.closest('[data-close]')) { d.close(); return; }
+    const b = e.target.closest('[data-untag]'); if (!b) return;
+    b.disabled = true;
+    const x = state.tagged.find(r => r.id === b.dataset.untag);
+    await toggleMascot({id: x.id, name: x.name, mascot: true}); await refresh();
+  });
+  d.querySelector('#taggedAdd').onclick = () => openPicker({title: t('把一个角色设为只当标签'), jump: true, exclude: (state.tagged || []).map(x => x.id),
+    sentence: e => t('{name} 不再算角色，只当标签', {name: e.name}),
+    pick: async e => { await toggleMascot({id: e.id, name: e.name, mascot: false}); await refresh(); if (!d.open) d.showModal(); }});
+  d.addEventListener('close', () => d.remove());
+  document.body.append(d); list(); d.showModal();
+  refresh();
 }
 
 // ---------- 资料库 · 作品: the work tree, its Danbooru links and the watch list (#198) ----------
@@ -186,38 +218,85 @@ async function adoptWatch(r) {
     if (!state.index.watch.works.includes(id)) await saveWatchList([...state.index.watch.works, id]); else renderIndexBody();
   } catch (e) { toast(e.message); }
 }
+// After pictures are set to characters (#293): when they belong to one work, the toast offers to watch it for new
+// characters, or says it is watched already. A work without a checked Danbooru tag opens its dialog to find one.
+export async function offerWatch(ids) {
+  const chars = await Promise.all(ids.map(id => state.charMap.get(id) || fetchChar(id).catch(() => null)));
+  const works = [...new Set(chars.map(c => c?.kind === 'oc' ? null : c?.work_id).filter(Boolean))];
+  if (works.length !== 1) return;
+  let x = state.index; if (!x?.works) { try { x = await loadIndex(); } catch { return; } }
+  const w = x?.works?.find(y => y.id === works[0]); if (!w) return;
+  if (x.watch.works.includes(w.id)) { toastMore(' · ' + t('「{name}」已关注', {name: w.name})); return; }
+  toastMore('', w.watchable ? t('关注「{name}」的新角色', {name: w.name}) : t('关注「{name}」…', {name: w.name}), async () => {
+    if (!w.watchable) { const r = await workDialog(w, {watch: true}); if (r?.watch) toast(t('已关注「{name}」，检查新角色前会确认联网', {name: r.name})); return; }
+    try { await saveWatch([...state.index.watch.works, w.id]); toast(t('已关注「{name}」，检查新角色前会确认联网', {name: w.name})); renderIndexBody(); renderHeading(); }
+    catch (e) { toast(e.message); }
+  });
+}
 export async function createWork() {
   const w = await workDialog(null);
-  if (w) toast(t('已新建作品「{name}」', {name: w.name}));
+  if (w) toast(w.watch ? t('已新建作品「{name}」并关注它的新角色', {name: w.name}) : t('已新建作品「{name}」', {name: w.name}));
 }
-// One dialog for a new work and for editing one: name, parent, and the Danbooru tag the person has checked.
-function workDialog(w) {
-  const works = state.index?.works || [];
+// One dialog for a new work and for editing one: a Danbooru search that fills the tag (and the name, when empty), the
+// name, the tag the person has checked, an optional parent, and (with a tag) watching it for new characters (#293).
+function workDialog(w, {watch = false} = {}) {
+  const works = state.index?.works || [], watched = new Set(state.index?.watch?.works || []);
   return new Promise(resolve => {
     const d = document.createElement('dialog'); d.className = 'palette profile-dialog work-dialog';
     const parents = works.filter(x => !w || x.id !== w.id);
     d.innerHTML = `<form method="dialog"><div class="dialog-top"><h2>${w ? t('编辑作品') : t('新建作品')}</h2><button type="button" class="icon" data-close aria-label="${t('关闭')}">×</button></div>
-      <div class="form-grid">
-        <label for="wdName">${t('名称')}</label><input id="wdName" name="title" value="${esc(w?.name || '')}" maxlength="120" required autocomplete="off">
-        <label for="wdParent">${t('上级作品')}</label><select id="wdParent" name="parent"><option value="">${t('无（顶层）')}</option>${parents.map(x => `<option value="${esc(x.id)}" ${w?.parent_id === x.id ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}</select>
-        <label for="wdTag">Danbooru tag</label><input id="wdTag" name="tag" value="${esc(w?.tag || '')}" placeholder="${t('例如 blue_archive')}" spellcheck="false" autocomplete="off">
-      </div>
-      <p class="muted-note">${w?.status === 'pending' ? t('链接还没确认：核对过就填上 tag；留空保存表示不关联。') : t('只填核对过的 tag，不会按名字自动关联。关联后才能关注这部作品的新角色。')}</p>
-      <div class="dialog-actions"><button value="cancel" class="quiet">${t('取消')}</button><button value="ok" class="primary">${w ? t('保存') : t('新建')}</button></div></form>`;
-    d.querySelector('[data-close]').onclick = () => d.close();
+      ${watch && !w?.tag ? `<p class="dialog-lead">${t('关注要按 Danbooru 上的作品 tag 检查。先在下面找到这部作品，选中后保存就会关注。')}</p>` : ''}
+      <label class="field"><span>${t('在 Danbooru 上找')}</span><div class="combo"><input id="wdFind" autocomplete="off" spellcheck="false" placeholder="${t('输入作品名，中文、日文、英文都行')}"><div class="combo-menu" id="wdFindMenu" hidden></div></div>
+        <small>${t('选中后自动填好下面的 tag，名称空着时也一起填上。只发送你输入的文字。')}</small></label>
+      <label class="field"><span>${t('名称')}</span><input id="wdName" name="title" value="${esc(w?.name || '')}" maxlength="120" required autocomplete="off">
+        <small>${t('界面上显示的名字，用你习惯的叫法就行，和 Danbooru tag 无关，以后随时能改。')}</small></label>
+      <label class="field"><span>${t('Danbooru 作品 tag')}<em class="opt">${t('可不填')}</em></span><input id="wdTag" name="tag" value="${esc(w?.tag || '')}" placeholder="${t('例如 blue_archive')}" spellcheck="false" autocomplete="off">
+        <small id="wdTagNote"></small></label>
+      <label class="field"><span>${t('上级作品')}<em class="opt">${t('可不填')}</em></span><select id="wdParent" name="parent"><option value="">${t('无')}</option>${parents.map(x => `<option value="${esc(x.id)}" ${w?.parent_id === x.id ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}</select>
+        <small>${t('只在这部作品属于某个系列时填，比如「Fate/Grand Order」的上级是「Fate 系列」。在图库里按上级作品筛选时，下级作品的图也算在内。')}</small></label>
+      <label class="check-row" id="wdWatchRow"><input type="checkbox" id="wdWatch"><span><b>${t('关注这部作品的新角色')}</b><small>${t('定期检查 Danbooru 上这部作品还没收录的角色（只发送作品名），检查前会确认联网')}</small></span></label>
+      <div class="dialog-actions"><button type="button" class="quiet" data-close>${t('取消')}</button><button value="ok" class="primary">${w ? t('保存') : t('新建')}</button></div></form>`;
+    const q = sel => d.querySelector(sel), already = w && watched.has(w.id);
+    let filled = '';  // the name the search filled in, replaced by the next pick
+    const tagNote = () => {
+      const tag = q('#wdTag').value.trim(), owner = tag && works.find(x => x.tag === tag && x.id !== w?.id);
+      q('#wdTagNote').innerHTML = owner ? `<span class="warn">${t('图库里的「{name}」已经用了这个 tag', {name: esc(owner.name)})}</span>`
+        : w?.status === 'pending' && !tag ? t('链接还没确认：核对过就填上 tag；留空保存表示不关联。')
+        : t('用上面的搜索填，或手动填你核对过的 tag，不会按名字自动关联。填了才能关注这部作品的新角色。');
+      q('#wdWatchRow').hidden = !tag || already; if (!tag) q('#wdWatch').checked = false;
+    };
+    q('#wdTag').oninput = tagNote; tagNote();
+    q('#wdFind').addEventListener('keydown', e => { if (e.key === 'Enter') e.preventDefault(); });
+    combo(q('#wdFind'), q('#wdFindMenu'), (text, show) => {
+      if (!text) { show([]); return; }
+      show([{label: 'Danbooru', items: [], note: t('正在查 Danbooru…（只发送你输入的文字）')}]);
+      remoteNames('/api/works?' + new URLSearchParams({q: text, remote: 1})).then(r => show([r.found
+        ? {label: 'Danbooru', items: r.found.map(x => { const mine = works.find(y => y.tag === x.tag && y.id !== w?.id);
+          return {tag: x.tag, label: workName(x.tag) || x.tag, detail: x.tag, extra: mine ? t('图库里已有：{name}', {name: mine.name}) : t('D 站 {n}', {n: number(x.posts)})}; }),
+          note: r.found.length ? '' : t('没有找到这个作品。可以换个写法，比如英文或日文名')}
+        : {label: 'Danbooru', items: [], note: remoteNote(r), allow: r.unauthorized}]));
+    }, r => {
+      q('#wdTag').value = r.tag;
+      const name = q('#wdName');
+      if (!name.value.trim() || name.value === filled) name.value = filled = r.label;
+      tagNote(); q('#wdFind').value = '';
+      if (!already && (!w || watch)) q('#wdWatch').checked = true;
+    });
+    for (const b of d.querySelectorAll('[data-close]')) b.onclick = () => d.close();
     d.onclose = async () => {
-      const data = new FormData(d.querySelector('form')), ok = d.returnValue === 'ok'; d.remove();
+      const data = new FormData(q('form')), ok = d.returnValue === 'ok', watch = q('#wdWatch').checked; d.remove();
       if (!ok) { resolve(null); return; }
       const name = String(data.get('title')).trim(), parent = data.get('parent'), tag = String(data.get('tag')).trim();
       try {
         const id = await saveWork(w?.id, {name, parent, tag});
+        if (watch && tag && !state.index.watch.works.includes(id)) await saveWatch([...state.index.watch.works, id]);
         await loadWorkTree().catch(e => error(readError(e)));
         await refreshMeta().catch(e => error(readError(e)));
         renderIndexBody(); renderHeading();
-        resolve({id, name});
+        resolve({id, name, watch});
       } catch (err) { toast(err.message); resolve(null); }
     };
-    document.body.append(d); d.showModal(); d.querySelector('#wdName').focus();
+    document.body.append(d); d.showModal(); (w && !watch ? q('#wdName') : q('#wdFind')).focus();
   });
 }
 // Characters the last index check found on Danbooru for watched works; adding one downloads ~20 public reference pictures.
@@ -309,6 +388,7 @@ export function wireCatalog() {
   $('charIndex').addEventListener('click', e => {
     if (state.route.page !== 'characters') return;
     const hit = e.target;
+    if (hit.closest('[data-tagged-manage]')) { openTagged(); return; }
     const tab = hit.closest('[data-tab]');
     if (tab) { cast.tab = tab.dataset.tab; cast.pop = false; cast.popQ = ''; drawCast(); $('viewport').scrollTop = 0; $('charIndex').querySelector('.cast-tab.on')?.scrollIntoView({inline: 'center', block: 'nearest'}); return; }
     if (hit.closest('#castAll')) { cast.pop = !cast.pop; drawCast(); return; }
