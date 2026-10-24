@@ -3,7 +3,7 @@
 import {t} from '../core/i18n.js';
 import {esc, number} from '../core/format.js';
 import {prefs} from '../core/prefs.js';
-import {session, readError} from '../core/session.js';
+import {api, session, readError} from '../core/session.js';
 import {state} from '../core/state.js';
 import {nameTip} from '../core/labels.js';
 import {pollIndex, indexAction} from '../core/jobs.js';
@@ -26,6 +26,7 @@ export async function renderIndex() {
   $('grid').hidden = true; $('empty').hidden = true; $('settingsPage').hidden = true; $('groupsPage').hidden = true; $('charIndex').hidden = false; closeInspector(); $('selectionBar').hidden = true;
   $('resultCount').textContent = '';
   if (state.route.section === 'works') { renderShelf(); return; }
+  shown.clear();
   $('hint').textContent = t('点角色，在图库里只看 TA');
   cast.list = null; cast.pop = false;
   if (state.chars.some(c => c.summary)) {
@@ -56,9 +57,42 @@ export async function searchIndex() {
 export function renderIndexBody() { if (state.route.page !== 'characters') return; if (state.route.section === 'works') drawShelf(); else { drawCast(); loadActivity(); } }
 const cover = (c, size = 'thumb') => c?.cover ? `<img src="/image?id=${encodeURIComponent(c.cover)}&size=${size}" alt="" loading="lazy" decoding="async">` : '';
 const avatar = (c, px) => `<i class="cast-av" style="width:${px}px;height:${px}px">${cover(c)}</i>`;
+// ---------- a random picture on each poster (#293) ----------
+// A poster shows a picture of the character drawn at random each time the 资料库 opens, rather than always its cover;
+// pictures of it alone first, so the poster is not someone else's. Drawn when the poster nears the screen (one small
+// read), kept while the page redraws; the cover shows until then.
+const shown = new Map();
+const shownKey = c => `${c.id}|${state.nsfw}|${state.readEpoch}`;
+function drawPicture(c) {
+  const offset = Math.floor(Math.random() * Math.max(1, c.count - 11));
+  return api('/api/assets?' + new URLSearchParams({entity: c.id, order: 'newest', offset, limit: 12, count: 0, ...(state.nsfw ? {nsfw: state.nsfw} : {})}))
+    .then(r => {
+      const items = r.items || [], alone = items.filter(x => x.memberships?.length === 1), pool = alone.length ? alone : items;
+      return pool.length ? pool[Math.floor(Math.random() * pool.length)].uuid : c.cover;
+    }, () => c.cover);
+}
+let nearing = null;
+function drawPictures(root) {
+  nearing ||= new IntersectionObserver(es => {
+    for (const e of es) {
+      if (!e.isIntersecting) continue;
+      nearing.unobserve(e.target);
+      const a = e.target, c = state.charMap.get(a.dataset.char); if (!c?.cover || c.count < 2) continue;
+      const key = shownKey(c);
+      if (!shown.has(key)) shown.set(key, drawPicture(c));
+      shown.get(key).then(u => {
+        const img = a.querySelector('.img img'); if (!img || u === c.cover || !a.isConnected) return;
+        const next = img.src.replace(/id=[^&]+/, 'id=' + encodeURIComponent(u));
+        if (img.src === next) return;
+        const fresh = new Image(); fresh.onload = () => { img.classList.add('drawn'); img.src = next; }; fresh.src = next;
+      });
+    }
+  }, {rootMargin: '300px'});
+  for (const a of root.querySelectorAll('.cast-poster[data-char]')) nearing.observe(a);
+}
 function poster(c, sub, rank = 0, big = false) {
   const r = recentOf(c), skins = (c.variants || []).filter(v => v.count).length;
-  return `<a class="cast-poster" href="${charHash(c.id)}" title="${esc(nameTip(c))}"><span class="img">${cover(c, big ? 'medium' : 'thumb')}</span>${rank ? `<span class="rank">${rank}</span>` : ''}${r ? `<span class="pill ${rank ? 'r' : 'l'}"><i></i>+${number(r)}</span>` : ''}${!rank && skins ? `<span class="pill r">${t('{n} 个皮肤', {n: skins})}</span>` : ''}<span class="cap"><b>${c.kind === 'oc' ? `<em>${t('原创')}</em>` : ''}${esc(c.name)}</b><small>${sub}</small></span></a>`;
+  return `<a class="cast-poster" href="${charHash(c.id)}" title="${esc(nameTip(c))}" data-char="${esc(c.id)}"><span class="img">${cover(c, big ? 'medium' : 'thumb')}</span>${rank ? `<span class="rank">${rank}</span>` : ''}${r ? `<span class="pill ${rank ? 'r' : 'l'}"><i></i>+${number(r)}</span>` : ''}${!rank && skins ? `<span class="pill r">${t('{n} 个皮肤', {n: skins})}</span>` : ''}<span class="cap"><b>${c.kind === 'oc' ? `<em>${t('原创')}</em>` : ''}${esc(c.name)}</b><small>${sub}</small></span></a>`;
 }
 const fan = chars => `<span class="cast-fan">${[1, 2, 0].map(i => `<i>${cover(chars[i])}</i>`).join('')}</span>`;
 function tiers(list, showWork) {
@@ -122,6 +156,7 @@ export function drawCast() {
   if (foot) root.insertAdjacentHTML('beforeend', foot);
   const tagged = $('taggedButton'); if (tagged) tagged.innerHTML = t('只当标签') + (state.tagged?.length ? ` <small>${number(state.tagged.length)}</small>` : '');
   if (cast.pop) $('castPopQ')?.focus();
+  drawPictures(root);
 }
 
 // 只当标签 (#293): mascots and player stand-ins (the default ones included) are tags, not characters. One place to see

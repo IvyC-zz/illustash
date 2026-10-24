@@ -1072,7 +1072,10 @@ body:has(#settingsPage:not([hidden])) .nudge{display:none}
 .cast-plus{color:var(--accent-ink);font-weight:700;background:var(--accent-soft);border-radius:999px;padding:1px 8px;font-size:11.5px}
 .cast .dim{color:var(--faint)}
 .cast-more{display:block;margin:14px auto 0}
-@media(prefers-reduced-motion:reduce){.cast-poster,.cast-poster .img,.cast-fan i{transition:none}}
+/* The random picture a poster draws (#293) comes in softly over the cover it replaces */
+.cast-poster .img img.drawn{animation:poster-drawn .4s ease-out}
+@keyframes poster-drawn{from{opacity:.25}to{opacity:1}}
+@media(prefers-reduced-motion:reduce){.cast-poster,.cast-poster .img,.cast-fan i{transition:none}.cast-poster .img img.drawn{animation:none}}
 
 /* ===================== dark theme (html[data-theme=dark], set by theme.js) ===================== */
 :root[data-theme=dark]{color-scheme:dark;color:#ededf1;background:#1d1d21;--tour-dim:rgba(0,0,0,.66);
