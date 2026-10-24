@@ -1077,6 +1077,8 @@ body:has(#settingsPage:not([hidden])) .nudge{display:none}
 .cast-poster .img img.drawn{animation:poster-drawn .4s ease-out}
 @keyframes poster-drawn{from{opacity:.25}to{opacity:1}}
 .cast-poster.look:hover .img{transform:none}
+.cast-poster.look{touch-action:pan-y}
+.cast-poster.dragging .ticks{opacity:1}
 .cast-poster .look-img .bg{position:absolute;inset:-12%;width:124%;height:124%;filter:blur(22px) brightness(.72) saturate(1.2);opacity:0;transition:opacity .25s ease-out}
 .cast-poster .look-img.whole .bg{opacity:1}
 .cast-poster .look-img .pic{position:absolute;inset:0;object-position:50% 22%;opacity:0;transition:opacity .14s ease-out}

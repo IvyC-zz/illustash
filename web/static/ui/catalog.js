@@ -144,6 +144,38 @@ function lookKey(a, key) {
   else { L.target = Math.min(1, Math.max(0, L.target + (key === 'ArrowUp' ? -.25 : .25))); L.capTarget = L.target > .5 ? .15 : 1; }
   lookKick(a);
 }
+// A touch screen has no hovering (#300): dragging a poster sideways flips its pictures, one every LOOK_STEP px (to the
+// left for the next, as photos are swiped), and while the finger stays down, moving it up and down looks over the
+// picture. A drag that starts up or down scrolls the page (touch-action: pan-y); a tap still opens the character, and
+// the click that ends a drag does not. The picture flipped to stays when the finger lifts.
+const LOOK_STEP = 36;
+let lookDrag = null;
+function lookDown(e) {
+  if (e.pointerType === 'mouse') return;
+  const a = e.target.closest?.('.cast-poster.look');
+  lookDrag = a ? {a, id: e.pointerId, x: e.clientX, y: e.clientY, i: a.look.i, sideways: false} : null;
+}
+function lookPull(e) {
+  const d = lookDrag; if (!d || e.pointerId !== d.id) return;
+  const {a} = d, L = a.look, dx = e.clientX - d.x, dy = e.clientY - d.y;
+  if (!d.sideways) {
+    if (Math.abs(dx) < 10 || Math.abs(dx) < Math.abs(dy)) { if (Math.abs(dy) > 10) lookDrag = null; return; }
+    d.sideways = true; a.classList.add('dragging'); a.setPointerCapture?.(e.pointerId);
+  }
+  const r = a.getBoundingClientRect(), fy = (e.clientY - r.top) / r.height;
+  L.over = true;
+  L.target = Math.min(1, Math.max(0, (fy - LOOK_EDGE) / (1 - 2 * LOOK_EDGE)));
+  L.capTarget = 1 - .88 * Math.min(1, Math.max(0, (fy - .5) / .3));
+  lookShow(a, Math.min(L.list.length - 1, Math.max(0, d.i + Math.round(-dx / LOOK_STEP))));
+  lookKick(a);
+}
+function lookLift(e) {
+  const d = lookDrag; if (!d || e.pointerId !== d.id) return;
+  lookDrag = null;
+  if (!d.sideways) return;
+  const L = d.a.look; L.over = false; L.capTarget = 1;
+  d.a.classList.remove('dragging'); d.a.dragged = performance.now(); lookKick(d.a);
+}
 let nearing = null;
 function watchPosters(root) {
   nearing ||= new IntersectionObserver(es => {
@@ -492,6 +524,10 @@ export function wireCatalog() {
   $('charIndex').addEventListener('mousemove', lookMove);
   $('charIndex').addEventListener('mouseout', e => { const a = e.target.closest?.('.cast-poster.look'); if (a && !a.contains(e.relatedTarget)) lookMove({type: 'leave', target: a}); });
   $('charIndex').addEventListener('keydown', e => { const a = e.target.closest?.('.cast-poster.look'); if (a && ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key)) { e.preventDefault(); lookKey(a, e.key); } });
+  $('charIndex').addEventListener('pointerdown', lookDown);
+  $('charIndex').addEventListener('pointermove', lookPull);
+  for (const kind of ['pointerup', 'pointercancel']) $('charIndex').addEventListener(kind, lookLift);
+  $('charIndex').addEventListener('click', e => { const a = e.target.closest?.('.cast-poster.look'); if (a?.dragged && performance.now() - a.dragged < 500) { e.preventDefault(); e.stopPropagation(); } }, true);
   $('charIndex').addEventListener('click', e => {
     if (state.route.page !== 'characters') return;
     const hit = e.target;
