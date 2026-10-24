@@ -5,6 +5,7 @@ import {esc, isMac, shortcut} from '../core/format.js';
 import {prefs} from '../core/prefs.js';
 import {session, STALE, onStale, readError} from '../core/session.js';
 import {onLatest} from '../core/edits.js';
+import {workLabel} from '../core/labels.js';
 export const $ = id => document.getElementById(id);
 // Help text and titles are written with ⌘; other systems show Ctrl.
 export function platformHints(root, mac = isMac) {
@@ -15,8 +16,16 @@ export function platformHints(root, mac = isMac) {
 }
 let toastTimer;
 export function toast(message, withUndo = false) {
-  $('toastText').textContent = message; $('toastUndo').hidden = !withUndo; $('toast').hidden = false;
+  $('toastText').textContent = message; $('toastUndo').hidden = !withUndo; $('toastAct').hidden = true; $('toast').hidden = false;
   clearTimeout(toastTimer); toastTimer = setTimeout(() => { $('toast').hidden = true; }, withUndo ? 6000 : 3500);
+}
+// A follow-up on the toast that is showing: a few more words, and optionally a button (e.g. 关注 the work of the
+// character just set, #293). The toast then stays a little longer.
+export function toastMore(text, label = '', run = null) {
+  if ($('toast').hidden) return;
+  $('toastText').textContent += text;
+  const b = $('toastAct'); b.hidden = !label; b.textContent = label; b.onclick = () => { $('toast').hidden = true; run(); };
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => { $('toast').hidden = true; }, 9000);
 }
 // The toast stays while the pointer is on it; its undo button runs undo().
 export function wireToast(undo) {
@@ -24,6 +33,8 @@ export function wireToast(undo) {
   $('toast').addEventListener('mouseleave', () => { toastTimer = setTimeout(() => { $('toast').hidden = true; }, 2500); });
   $('toastUndo').onclick = () => undo();
 }
+// The work after a character's name, in small grey text (core/labels.js workLabel).
+export const workSmall = c => { const w = workLabel(c); return w ? `<small class="char-work">${esc(w)}</small>` : ''; };
 export function error(message) { if (session.stale) return; $('errorBanner').textContent = message; $('errorBanner').hidden = !message; }
 export function readFailure(node, e) { if (node) { node.hidden = false; node.innerHTML = `<p class="empty" role="alert">${esc(readError(e))}</p>`; } }
 // Collapsible blocks whose open/closed state survives re-renders and reloads.

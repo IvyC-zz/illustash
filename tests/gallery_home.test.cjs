@@ -135,3 +135,19 @@ test('undo and a finished sync redraw the home page, whose day groups come from 
   off();
   assert.equal(homeReads.length, 2);
 });
+test('home rows: full rows fill the width; a day with few pictures and a short last row keep the target height, left-aligned (#293)', () => {
+  const {homeRows} = homeModule, {state} = web.core();
+  state.focused = null;
+  const pics = (...r) => r.map((x, i) => ({uuid: 'u' + i, width: Math.round(x * 1000), height: 1000, memberships: []}));
+  const rows = html => [...html.matchAll(/class="home-row" style="height:(\d+)px">(.*?)<\/div>/g)].map(([, h, body]) => ({h: Number(h), tiles: [...body.matchAll(/class="home-j[^"]*" data-id="[^"]*" data-chars="[^"]*" style="([^"]*)"/g)].map(m => m[1])}));
+  for (const [width, set] of [[1400, pics(.66, .66, .66)], [1400, pics(.75)], [1400, pics(1.5, .66)], [700, pics(.66, 1.5, 1, .75, 1.33)], [1400, pics(.66, 1.5, 1, .75, 1.33)]]) {
+    const out = rows(homeRows(set, width, 190)), last = out.at(-1);
+    assert.equal(out.reduce((a, r) => a + r.tiles.length, 0), set.length);
+    for (const r of out.slice(0, -1)) { assert.ok(r.h <= 190 && r.h > 150, `full row ${r.h}`); assert.ok(r.tiles.every(s => !s.includes('none'))); }
+    assert.ok(last.h <= 190 * 1.15, `last row ${last.h} at ${width}`);
+    if (last.h === 190) assert.ok(last.tiles.every(s => /^flex:none;width:\d+px$/.test(s)));
+  }
+  // Nearly full: stretched to the width, not left with a gap.
+  const full = rows(homeRows(pics(1, 1, 1, 1, 1, 1, 1), 1372, 190));
+  assert.equal(full.length, 1); assert.ok(full[0].tiles.every(s => s.startsWith('flex:1 ')));
+});

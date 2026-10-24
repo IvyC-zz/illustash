@@ -4,12 +4,13 @@ import {forgetActivity, loadActivity} from '../core/catalog.js';
 import {edits, setLatest, undoLatest, undoneText} from '../core/edits.js';
 import {esc, isMac, number, shortcut} from '../core/format.js';
 import {t, tb} from '../core/i18n.js';
-import {REASONS} from '../core/labels.js';
+import {REASONS, nameWithWork} from '../core/labels.js';
 import {metaSoon, refreshMeta} from '../core/meta.js';
 import {prefs} from '../core/prefs.js';
 import {LEAD_PAGES, browsing, cleanup, defaultSort, panelPage} from '../core/route.js';
 import {api, post, readError} from '../core/session.js';
 import {state} from '../core/state.js';
+import {offerWatch} from './catalog.js';
 import {$, error, toast} from './dom.js';
 import {renderChrome, renderHeading} from './shell.js';
 import {findArtists} from './artists.js';
@@ -232,7 +233,7 @@ function cardHTML(item, i) {
   // A narrow picture shows its first name and a count instead of cutting every name short; hover shows all.
   const names = item.memberships.map(m => m.name), narrow = state.fit && ratio * state.cellW * 4 / 3 < 170 && names.length > 1;
   const shown = narrow ? item.memberships.slice(0, 1) : item.memberships;
-  const caption = captionH() ? `<div class="caption" title="${esc(names.join(t('、')))}">${shown.map(m => `<span class="${m.status}">${esc(m.name)}</span>`).join('<i>·</i>') || `<span class="none">${item.unknown ? t('已跳过') : t('未识别')}</span>`}${narrow ? `<small>+${names.length - 1}</small>` : ''}</div>` : '';
+  const caption = captionH() ? `<div class="caption" title="${esc(item.memberships.map(nameWithWork).join(t('、')))}">${shown.map(m => `<span class="${m.status}">${esc(m.name)}</span>`).join('<i>·</i>') || `<span class="none">${item.unknown ? t('已跳过') : t('未识别')}</span>`}${narrow ? `<small>+${names.length - 1}</small>` : ''}</div>` : '';
   const inner = `<img src="/image?id=${encodeURIComponent(item.uuid)}&size=${size}" loading="lazy" decoding="async" alt="" draggable="false">${extra}<span class="check" aria-hidden="true"></span>`;
   return `<div class="image-stage">${isSquare() ? inner : `<div class="fit-box${rawRatio(item) && rawRatio(item) !== ratio ? ' whole' : ''}">${inner}</div>`}</div>${caption}`;
 }
@@ -528,6 +529,7 @@ export async function mutate(path, body, leaving, {advance = false} = {}) {
     const r = await post(path, body); setLatest(r.undo);
     state.selecting = false; clearSelection();
     toast(tb(r.undo.label), true);
+    if (path === '/api/change' && body.action === 'confirmed') offerWatch(body.entities || [body.entity]).catch(() => {});
     if (gone) { await new Promise(done => setTimeout(done, Math.max(0, 170 - (performance.now() - started)))); collapse(gone); }
     await reload(); if (state.route.page === 'home') renderHome(true); metaSoon(path === '/api/tag');
     if (state.focused) inspect(state.focused, true);
