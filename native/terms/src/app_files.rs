@@ -59,6 +59,12 @@ pub struct File {
     kind: &'static str,
     cache: bool,
 }
+impl File {
+    /// A JPEG kept among the thumbnails, such as a Danbooru character's preview (#293); the page may cache it.
+    pub fn jpeg(bytes: Vec<u8>) -> Self {
+        Self { bytes, kind: "image/jpeg", cache: true }
+    }
+}
 
 pub fn prepare(library: &Library, root: &Path, url: &str) -> Result<Prepared, Failure> {
     let path = url.split('?').next().unwrap_or(url);

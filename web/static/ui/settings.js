@@ -203,7 +203,7 @@ function networkCard() {
       ${row('artists', t('找回画师'), t('Danbooru（含 IQDB）'), t('像素哈希和 IQDB 签名（一串文本，不是图片）、画师名和账号'), p?.auto_network ? t('同步后自动，每次有流量上限') : t('每次手动授权'))}
       ${row('artists', t('读取 Pixiv 关注'), 'Pixiv', t('用你在 app 里登录的状态读取关注列表（只读）'), acct?.pixiv?.bound ? t('已登录') : t('未登录，不使用'))}
       ${row('artists', t('查找画师、找 TA 的其他图'), t('Danbooru、画师主页'), t('所选图片的哈希文本；下载画师公开作品的小图，只在本机比对'), t('只在你点按钮时'))}
-      ${row('characters', t('在 Danbooru 上搜角色和作品'), 'Danbooru', t('你输入的文字；自建角色的名字（核对能否对上 Danbooru）'), net && !net.authorized ? names : t('只在你搜索或打开资料库时'))}
+      ${row('characters', t('在 Danbooru 上搜角色和作品'), 'Danbooru', t('你输入的文字；自建角色的名字（核对能否对上 Danbooru）；「设为…」里 Danbooru 候选的 tag（取一张全年龄小图）'), net && !net.authorized ? names : t('只在你搜索或打开资料库时'))}
       ${row('artists', t('以图搜图'), 'SauceNAO', '—', acct?.saucenao?.bound ? t('已保存 key，还没有功能使用它') : t('未使用'))}
       ${state.models?.on_demand ? row('data', t('下载识别模型'), esc(state.models.sources.join(t('、'))), t('一次普通的 HTTPS 下载，取回模型文件；不发送图库里的任何信息'), t('只在你点「下载」时')) : ''}
       ${row('about', t('检查更新'), 'GitHub', t('一次普通的 HTTPS 请求，读取公开的版本列表；不发送图库里的任何信息'), state.updates?.auto ? t('启动时和之后每天自动') : t('只在你点「检查更新」时'))}
