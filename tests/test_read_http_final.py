@@ -1,4 +1,4 @@
-"""Final read-route contract: every core read route on the same synthetic DB, byte for byte."""
+"""最终的读路由契约：同一个合成数据库上的每条核心读路由，逐字节比较。"""
 import json
 
 from tests.read_http_harness import HTTPHarness

@@ -1,10 +1,9 @@
-"""#37 synthetic HTTP acceptance; raw bytes, DDL, typed cells and rowids.
+"""#37 合成 HTTP 验收；比较原始字节、DDL、带类型的单元格和 rowid。
 
-Native births supply UUID inputs through the reference's existing UUID/NeedId protocol.
-The reference fetch_names callback records the observed invocation as the durable M4
-handoff used by native. The reference's responses and states are recorded through
-tests/fixed_expectations.py (#9); only clock-like text
-compares as ``<clock>``.
+原生新建对象时，通过参照已有的 UUID/NeedId 协议提供 UUID 输入。
+参照的 fetch_names 回调把观察到的调用录下来，作为原生使用的持久 M4 交接。参照的响应和状态通过
+tests/fixed_expectations.py 录制（#9）；只有类似时钟的文本
+按 ``<clock>`` 比较。
 """
 from contextlib import closing
 import json
@@ -124,7 +123,7 @@ class NativeProfilesTest(unittest.TestCase):
         self.pair('/api/character/profile',{'entity':self.alice,'name':'故障'},500)
 
     def test_profile_with_a_new_work_is_one_transaction(self):
-        # #35: a work chosen as new is made together with the profile, or not at all.
+        # #35：选为新建的作品和资料一起建出来，要么都不建。
         def works():
             with closing(sqlite3.connect(self.right.db)) as c:
                 return {name: ident for ident, name in c.execute(
@@ -171,22 +170,22 @@ class NativeProfilesTest(unittest.TestCase):
         thread=threading.Thread(target=server.serve_forever,daemon=True);thread.start()
         self.addCleanup(server.server_close);self.addCleanup(thread.join);self.addCleanup(server.shutdown)
         base=f'http://127.0.0.1:{server.server_port}'
-        self.rec.alias(base,'@COPYRIGHT@')   # cached under its URL
+        self.rec.alias(base,'@COPYRIGHT@')   # 按它的 URL 缓存
         self.stop(self.process);self.env['ILLUSTASH_COPYRIGHT_BASE']=base;self.process=self.start(self.right)
         self.token=json.loads(fetch(self.origin,{'url':'/api/bootstrap'},self.origin)['body'])['token']
         self.rec.alias(self.token,'@TOKEN@')
         self.pair('/api/entities',{'tag':'live_person','typed':'实体'})
         self.pair('/api/entities',{'tag':'live_person'})
         self.pair('/api/entities',{'tag':'second_person_(specific)'})
-        # Each side queries once, then reuses its cache; the recorded reference makes no request now.
+        # 每一边各查询一次，之后复用缓存；录制的参照现在不发请求。
         self.assertEqual(requests,['live_person']*(2 if False else 1))
 
     def test_pending_ack_failure_committed_profile_recovers_on_restart(self):
         with closing(sqlite3.connect(self.right.db)) as c:
             c.execute("CREATE TRIGGER fail_ack BEFORE UPDATE ON backend_effects WHEN OLD.kind='verdict' BEGIN SELECT RAISE(ABORT,'ack failure'); END");c.commit()
         response=self.post(self.origin,'/api/character/profile',{'entity':self.alice,'name':'已提交'})
-        # The profile save commits before its event acknowledgement fails; by user decision on 2026-10-11 (#40)
-        # a committed operation answers 200 and the event stays pending for recovery.
+        # 资料保存在事件确认失败之前就已提交；按用户 2026-10-11 的决定（#40），已提交的操作返回 200，
+        # 事件保持待处理，留待恢复。
         self.assertEqual(response['status'],200,response['body'])
         with closing(sqlite3.connect(self.right.db)) as c:
             self.assertEqual(c.execute("SELECT n.value FROM term_names n JOIN terms t ON t.id=n.term_id WHERE t.key=? AND n.source='user' AND n.role='display'",(self.alice,)).fetchone()[0],'已提交')
@@ -231,7 +230,7 @@ class NativeProfilesTest(unittest.TestCase):
         import time
         person=self.pair('/api/entities',{'name':'跨类型合成角色'})['id']
         self.pair('/api/character/profile',{'entity':person,'name':'跨类型资料','aliases':['合成别名']})
-        # Relation evidence uses the real CURRENT_TIMESTAMP. Start away from a second boundary.
+        # 关系证据用真实的 CURRENT_TIMESTAMP。开始时要离整秒边界远一些。
         while time.time()%1 > .3:time.sleep(.02)
         self.pair('/api/change',{'ids':['c'],'action':'confirmed','entity':person})
         self.pair('/api/merge',{'source':person,'target':self.alice})

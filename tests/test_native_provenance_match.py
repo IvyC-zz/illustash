@@ -1,4 +1,4 @@
-"""Independent legacy local verification contracts; all images/databases are synthetic."""
+"""独立的旧版本地验证契约；所有图片和数据库都是合成的。"""
 import json
 import sqlite3
 from pathlib import Path
@@ -37,8 +37,8 @@ class NativeProvenanceMatchTest(unittest.TestCase):
         for cache in (reference.path,Path(request['cache'])):
             with db.connect(type('Lib',(),dict(path=cache))()) as c:
                 c.execute("INSERT INTO artists(id) VALUES ('A'),('B')")
-                # The matched drawing's manual rejection lives only in core; candidate
-                # machine data does not rewrite it. Formal publication applies the verdict.
+                # 匹配到的这张图的人工否定只存在 core 里；候选的机器数据不会改写它。
+                # 正式发布时套用这个裁决。
                 c.execute("INSERT INTO image_artists(asset,artist_id,method,score,status) VALUES ('drawing','A','ocr',0.7,'candidate')")
                 for post in range(4097 if many else 1):
                     c.execute('INSERT INTO ref_sigs(site,post_id,artist_id,ratio,grid,colour,url) VALUES (?,?,?,?,?,?,?)',

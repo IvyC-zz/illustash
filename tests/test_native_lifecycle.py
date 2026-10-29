@@ -1,11 +1,9 @@
-"""M1 native lifecycle acceptance on explicit temporary packages only.
+"""M1 原生生命周期验收，只用显式给出的临时图库包。
 
-Requires ILLUSTASH_TERMS_BIN pointing to the M1 release under test; never builds or discovers
-an older binary. Python constructs fixtures only. The former Python reference server's responses,
-packages and expected states were recorded through tests/fixed_expectations.py (#9); native keys are reproducible (store::new_key test
-counter). The launched native process receives a PATH containing only failing Python sentinels.
-Folder and Photos package creation are covered; existing-library upgrades, worker task shutdown and Windows
-process-tree acceptance remain out of scope.
+需要 ILLUSTASH_TERMS_BIN 指向被测的 M1 release；从不构建或查找更旧的二进制。Python 只用来构造夹具。
+原 Python 参照服务器的响应、图库包和预期状态已通过 tests/fixed_expectations.py 录制（#9）；原生的键可以复现
+（store::new_key 的测试计数器）。启动的原生进程拿到的 PATH 里只有会失败的 Python 哨兵。
+覆盖文件夹和照片图库包的新建；现有图库的升级、worker 任务的关闭和 Windows 进程树验收不在范围内。
 """
 from contextlib import chdir, closing
 import gc
@@ -48,15 +46,13 @@ HEADERS = ('Content-Type', 'Content-Length', 'Content-Encoding', 'Cache-Control'
 
 
 def difference(left, right):
-    """Byte difference of two responses; clock-like text (the native host stamps the current time,
-    e.g. a new library's index time) is compared as `<clock>`."""
+    """两个响应的字节差异；类似时钟的文本（原生宿主会打上当前时间，例如新图库的索引时间）按 `<clock>` 比较。"""
     masked = [dict(r, body=unclocked(r['body'])) if 'body' in r else r for r in (left, right)]
     return verify_read_http.difference(*masked)
 
 
 def dump(db):
-    """Every schema and row statement, as a sorted list: equal for equal contents, whatever the
-    order of the schema rows (a restored recording may recreate triggers)."""
+    """所有结构语句和行语句，排成有序列表：内容相同就相等，不论结构行的顺序如何（恢复的录制可能会重建触发器）。"""
     with closing(sqlite3.connect(db)) as c:
         return sorted(c.iterdump())
 
@@ -65,9 +61,8 @@ IMPORT_ENDED = ('done', 'error', 'cancelled')
 
 
 def import_task(test, url, body, *, token=None, timeout=60, seen=None):
-    """#88: archive and recognition imports are background tasks. Start one, poll GET /api/imports until it
-    ends, and answer as the former synchronous request did: the start's own refusal, 200 and the result, the
-    error status and message, or 409 when it was cancelled. `seen` collects every state polled."""
+    """#88：归档导入和识别结果导入是后台任务。启动一个，轮询 GET /api/imports 直到结束，然后按原来的同步请求
+    那样应答：启动本身的拒绝、200 加结果、错误状态和消息，或者被取消时的 409。`seen` 收集轮询到的每个状态。"""
     started = test.request(url, body, token=token)
     if started['status'] != 200:
         return started
@@ -98,8 +93,8 @@ LOCAL_LIMIT = re.compile(r', "local_limit": \d+')
 
 
 def without_local_limit(value):
-    """#100 removed the local recognition limit preference. The recordings stored and answered it after every
-    other preference; this is the same recording without it (the request no longer sends it)."""
+    """#100 去掉了本地识别数量上限这项偏好设置。录制里它存放和应答时都排在其他偏好之后；这里是去掉它之后的
+    同一份录制（请求也不再发送它）。"""
     if isinstance(value, list):
         return [without_local_limit(v) for v in value]
     if isinstance(value, str):
@@ -111,15 +106,15 @@ def without_local_limit(value):
 
 
 def startup(db):
-    """The startup preferences as the application reads them (defaults plus stored changes)."""
+    """应用读到的启动偏好设置（默认值加上已存的改动）。"""
     with closing(sqlite3.connect(db)) as c:
         row = c.execute("SELECT value FROM prefs WHERE key='startup'").fetchone()
     return {**STARTUP_DEFAULT, **(json.loads(row[0]) if row else {})}
 
 
 def files(root, running=False):
-    """Every package file by content. `running`: a host has the package open, and its background check may update
-    the package's check record at any time (#212), so the record is left out."""
+    """按内容列出图库包里的每个文件。`running`：有宿主打开着这个包，它的后台检查随时可能更新包的检查记录
+    （#212），所以不含这个记录。"""
     return {p.relative_to(root).as_posix(): hashlib.sha256(p.read_bytes()).hexdigest()
             for p in root.rglob('*') if p.is_file() and not (running and p.name == '.illustash-checks.json')}
 
@@ -147,7 +142,7 @@ class NativeLifecycleTest(unittest.TestCase):
         self.home = self.root / 'home' / 'Pictures' / 'Illustash'
         self.shared.mkdir()
         NativeLifecycleTest.confine_library_helpers(self)
-        # No subprocess may silently run Python or use the caller's real app support directory.
+        # 任何子进程都不能悄悄运行 Python，或使用调用方真实的应用支持目录。
         self.sentinel = self.root / 'python-was-launched'
         self.bin = self.root / 'bin'; self.bin.mkdir()
         for name in ('python', 'python3', 'python3.12'):
@@ -159,13 +154,13 @@ class NativeLifecycleTest(unittest.TestCase):
                     'ILLUSTASH_APP_SUPPORT': str(self.support),
                     'ILLUSTASH_SHARED': str(self.shared), 'ILLUSTASH_PYTHON_SENTINEL': str(self.sentinel),
                     'ILLUSTASH_TERMS_BIN': str(self.binary),
-                    # Reproducible native keys, so recorded expectations hold (store::new_key test hook).
+                    # 原生的键可以复现，录制的预期才成立（store::new_key 的测试钩子）。
                     'ILLUSTASH_TEST_KEY_COUNTER': str(self.root / 'key-counter')}
         if self._testMethodName.startswith('test_native_library_new'):
             self.new_reference = synthetic_reference(self.shared)
             self.new_folder = self.root / 'downloads-Pixiv'; self.new_folder.mkdir()
             (self.new_folder / 'not-scanned.png').write_bytes(b'not an image')
-            # Relative/empty folder input resolves against the same isolated application root.
+            # 相对路径或空的文件夹输入，相对于同一个隔离的应用根目录解析。
             (self.root / 'tags').mkdir()
             (self.root / 'tags' / 'tags_v3.csv').write_bytes((self.resources / 'tags' / 'tags_v3.csv').read_bytes())
             self.resources = self.root
@@ -178,7 +173,7 @@ class NativeLifecycleTest(unittest.TestCase):
                                      '--name', 'first'], env=self.env, capture_output=True, timeout=20)
             self.assertEqual(result.returncode, 0, result.stderr.decode(errors='replace'))
             self.assertEqual(json.loads(result.stdout), {'path': str(first), 'name': 'first'})
-            # The package as the reference opened it (recorded; the native factory output is reproducible).
+            # 参照打开后的图库包（录制；原生新建的输出可以复现）。
             self.lib = self.rec.package('first', first)
             self.assertFalse(self.sentinel.exists())
         else:
@@ -190,7 +185,7 @@ class NativeLifecycleTest(unittest.TestCase):
         self.rec.alias(self.token, '@TOKEN@')
 
     def confine_library_helpers(self):
-        """The Python library helpers some tests build inputs with never see the real user folders."""
+        """部分测试用来构造输入的 Python 图库辅助函数，绝不会看到用户真实的文件夹。"""
         from tests import library_fixture as library
         for name, value in (('APP_SUPPORT', self.support), ('SHARED', self.shared),
                             ('HOME', self.home), ('REFERENCE', self.shared / 'reference.sqlite')):
@@ -198,7 +193,7 @@ class NativeLifecycleTest(unittest.TestCase):
             scoped.start(); self.addCleanup(scoped.stop)
 
     def package(self, name):
-        """A synthetic package as the former Python application created and refreshed it (fixed recording)."""
+        """原 Python 应用新建并刷新后的合成图库包（固定录制）。"""
         return self.rec.package(name, self.root / (name + '.pilib'))
 
     def stop(self, process):
@@ -234,7 +229,7 @@ class NativeLifecycleTest(unittest.TestCase):
         return fetch(base or self.origin, item, self.origin)
 
     def reference_response(self, url, body=None, **kwargs):
-        """The former reference server's response to the same request (recorded)."""
+        """原参照服务器对同一请求的响应（录制）。"""
         return without_local_limit(self.rec.value('response'))
 
     def pair(self, url, body=None, **kwargs):
@@ -272,13 +267,13 @@ class NativeLifecycleTest(unittest.TestCase):
         self.assertEqual(self.pair('/api/settings')['status'], 200)
         self.assertEqual(self.pair('/api/libraries')['status'], 200)
         changes = {'sync': False, 'similar': False}
-        # Compute expected DB changes on an independent clone before either HTTP write.
+        # 在两边任一 HTTP 写入之前，先在独立的克隆上算出预期的数据库改动。
         expected = without_local_limit(self.rec.value('expected dump'))
         response = self.request('/api/startup', changes)
         self.assertEqual(response['status'], 200)
         self.assertEqual(startup(self.lib.db), {**STARTUP_DEFAULT, **changes})
-        # The database by the #201 baseline: core v8 changed the schema the recorded dump spells out (`expected` is
-        # still read so the recorded values line up).
+        # 数据库按 #201 的对照基准比较：core v8 改了录制的 dump 里写明的结构（仍然读取 `expected`，
+        # 让录制的值对得上）。
         del expected
         self.assertTrue(self.rec.baseline('expected dump', self.lib.path))
         written = dump(self.lib.db)
@@ -340,10 +335,10 @@ class NativeLifecycleTest(unittest.TestCase):
                    {'kind': 'folder', 'folder': 'downloads-Pixiv/missing/..', 'name': 'nonstrict-resolution'},
                    {'kind': 'folder', 'folder': 'downloads-Pixiv/..', 'name': 'parent-folder'}]
         if kind == 'photos':
-            # Old HTTP ignores folder/preset/photos fields for this kind; preserve that contract.
+            # 旧 HTTP 对这种类型忽略 folder/preset/photos 字段；保持这个契约。
             bodies = [{**body, 'kind': kind, 'folder': ['ignored'], 'preset': 'ignored',
                        'photos': '/ignored-override'} for body in bodies[:len(names)]]
-            bodies.append({'kind': kind, 'name': names[0]})  # unique-path suffix on repeated name
+            bodies.append({'kind': kind, 'name': names[0]})  # 名字重复时加唯一路径后缀
         for index, body in enumerate(bodies):
             name = body['name']
             with self.subTest(body=body):
@@ -367,7 +362,7 @@ class NativeLifecycleTest(unittest.TestCase):
                 comparator.started = started
                 old = self.rec.value('old library')
                 self.assertEqual(old['source'], comparator.state(dest / 'source.sqlite'))
-                # The application database by the #201 baseline (core v8 changed its schema).
+                # 应用数据库按 #201 的对照基准比较（core v8 改了它的结构）。
                 comparator.state(dest / 'library.sqlite', application=True)
                 comparator.rec = self.rec
                 comparator.baseline(f'fresh library {kind} {index}', dest)
@@ -436,8 +431,8 @@ class NativeLifecycleTest(unittest.TestCase):
                 body = {**base, 'name': kind}
                 if kind == 'pictures-file':
                     pictures = self.root / 'home' / 'Pictures'
-                    # Earlier failed creates may leave empty parents; remove only empty test-owned
-                    # directories to inject a regular file, never recursively erase caller contents.
+                    # 之前失败的新建可能留下空的父目录；只删除测试自有的空目录，以便放进一个普通文件，
+                    # 绝不递归删除调用方的内容。
                     if self.home.exists():
                         self.home.rmdir()
                     if pictures.exists():
@@ -450,7 +445,7 @@ class NativeLifecycleTest(unittest.TestCase):
                     missing = self.root / 'missing-link-target.pilib'
                     dest.symlink_to(missing)
                 else:
-                    body['name'] = 'x' * 256  # ASCII bytes exceed the 255-byte component limit.
+                    body['name'] = 'x' * 256  # ASCII 字节数超过路径组件 255 字节的上限。
                 before = (dump(self.lib.source), dump(self.lib.db))
                 registry = (self.support / 'libraries.json').read_bytes()
                 try:
@@ -535,8 +530,8 @@ class NativeLifecycleTest(unittest.TestCase):
         dest = self.home / 'registry-failure.pilib'
         self.assertTrue(dest.is_relative_to(self.root))
         right = self.request('/api/libraries/new', body)
-        # #97 (2026-10-12, user decision): the published package is reported with why it is not listed, instead of
-        # the recorded 400; creating again would only make a second, numbered package.
+        # #97（2026-10-12 用户决定）：已发布的图库包照常报告，并说明它为什么没列进去，而不是返回录制里的 400；
+        # 再新建一次只会多出第二个带编号的包。
         self.assertEqual(right['status'], 200, right['body'])
         made = json.loads(right['body'])
         self.assertEqual((Path(made['path']).resolve(), made['name'], made['listed']), (dest.resolve(), 'registry-failure', False))
@@ -609,8 +604,8 @@ class NativeLifecycleTest(unittest.TestCase):
                     c.execute('PRAGMA journal_mode=DELETE')
                 unchanged = files(upgrade.path)
                 response = self.request('/api/libraries/open', {'path': str(upgrade.path)})
-                # A library from before the switch to the core: core v8 no longer upgrades it and says to use the
-                # pre-v8 version (#201, user decision 2026-10-19; it used to be the generic write failure, 500).
+                # 切换到 core 之前的图库：core v8 不再升级它，并提示改用 pre-v8 版本（#201，用户 2026-10-19 决定；
+                # 以前是通用的写入失败，500）。
                 self.assertEqual(response['status'], 400)
                 self.assertEqual(response['body'], json.dumps({
                     'error': '这个图库还没有完全切换到词条核心，这个版本不再升级它：请先用 pre-v8 版本打开并升级，再用这个版本打开。'},
@@ -635,7 +630,7 @@ class NativeLifecycleTest(unittest.TestCase):
                            'X-CSRF-Token': self.token}.items():
             conn.putheader(key, value)
         conn.endheaders(); conn.send(body[:8])
-        # The old request is in flight with an incomplete body; the second connection can switch.
+        # 旧请求还在途中，请求体不完整；第二个连接可以切换。
         self.assertEqual(self.request('/api/libraries/open', {'path': str(target.path)})['status'], 200)
         before = dump(target.db)
         conn.send(body[8:]); response = conn.getresponse(); response.read()
@@ -644,7 +639,7 @@ class NativeLifecycleTest(unittest.TestCase):
 
     @unittest.skipIf(os.name == 'nt', '目录符号链接在 Windows 上需要额外权限')
     def test_retargeted_alias_keeps_the_session_on_the_opened_library(self):
-        # A copy shares the config ID and every image UUID; only its name tells the two apart.
+        # 副本与原图库共用配置 ID 和每张图片的 UUID；只有名字能区分两者。
         self.stop(self.process)
         other = self.root / 'other.pilib'
         shutil.copytree(self.lib.path, other)
@@ -667,7 +662,7 @@ class NativeLifecycleTest(unittest.TestCase):
         self.assertIn('opened-library-tag', self.request('/api/user-tags')['body'].decode())
         package = json.loads(self.request('/api/settings')['body'])['package']
         self.assertEqual((package['path'], package['name']), (str(alias), self.lib.name))
-        # Opening the alias again is a deliberate switch: a new session on the other package.
+        # 再次打开这个别名是有意的切换：在另一个图库包上开新会话。
         old_token = self.token
         self.assertEqual(self.request('/api/libraries/open', {'path': str(alias)})['status'], 200)
         self.token = json.loads(self.request('/api/bootstrap')['body'])['token']
@@ -678,7 +673,7 @@ class NativeLifecycleTest(unittest.TestCase):
         self.assertFalse(self.sentinel.exists())
 
     def test_second_host_is_refused_while_the_first_owns_the_library(self):
-        # #24: one physical library has one owning host; a crash releases it.
+        # #24：一个物理图库只有一个所属宿主；宿主崩溃时释放。
         before = dump(self.lib.db)
         paths = [self.lib.path]
         if os.name != 'nt':
@@ -693,7 +688,7 @@ class NativeLifecycleTest(unittest.TestCase):
                 self.assertIn('另一个 Illustash', result.stderr.decode(errors='replace'))
         self.assertEqual(before, dump(self.lib.db))
         self.assertEqual(self.request('/api/startup', {'similar': False})['status'], 200)
-        # The owner crashes: the system drops its lock and the next host opens the library.
+        # 所属宿主崩溃：系统释放它的锁，下一个宿主打开图库。
         self.process.kill(); self.process.wait()
         self.process, self.log = self.start(self.lib.path)
         self.token = json.loads(self.request('/api/bootstrap')['body'])['token']
@@ -701,8 +696,8 @@ class NativeLifecycleTest(unittest.TestCase):
         self.assertFalse(self.sentinel.exists())
 
     def test_stalled_connections_are_closed_and_their_number_is_bounded(self):
-        # #25: a client that stops sending loses its connection after the read timeout (shortened here),
-        # and connections beyond the limit are refused at once, so stalled clients cannot hold threads without bound.
+        # #25：停止发送的客户端在读取超时（这里缩短了）后失去连接，超出上限的连接立即被拒绝，
+        # 所以卡住的客户端不能无限制地占用线程。
         body = json.dumps({'similar': False}).encode()
 
         def host(timeout_ms):
@@ -726,17 +721,17 @@ class NativeLifecycleTest(unittest.TestCase):
             try:
                 while conn.recv(4096):
                     pass
-            except ConnectionError:  # reset on Unix, aborted (10053) on Windows: closed either way
+            except ConnectionError:  # Unix 上是 reset，Windows 上是 aborted（10053）：总之都关闭了
                 pass
             return time.monotonic() - started < seconds
 
-        # A small body is read by the HTTP library itself, a larger one by the request handler: both time out.
+        # 小的请求体由 HTTP 库自己读取，大的由请求处理函数读取：两种都会超时。
         host('3000')
         for length in (len(body), 4096):
             with self.subTest(length=length):
                 self.assertTrue(closed_within(stalled(length), 10))
-        # Holding every connection slot: a further connection is refused straight away. The read timeout here
-        # is far longer than opening 64 connections can take on a busy machine, so none frees up early (#219).
+        # 占满所有连接槽：再来的连接立即被拒绝。这里的读取超时远长于繁忙机器上打开 64 个连接所需的时间，
+        # 所以不会有槽提前空出来（#219）。
         host('600000')
         held = [stalled(len(body)) for _ in range(64)]
         refused = socket.create_connection(('127.0.0.1', self.port), timeout=5)
@@ -747,7 +742,7 @@ class NativeLifecycleTest(unittest.TestCase):
         except ConnectionError:
             reply = b'reset'
         self.assertTrue(reply.startswith(b'HTTP/1.1 503') or reply in (b'', b'reset'), reply)
-        # Held connections that go away free their slots; the host then serves normally and nothing was written.
+        # 占着的连接断开后释放它们的槽；之后宿主正常服务，而且什么都没写入。
         for conn in held:
             conn.close()
         wait_until(lambda: self.request('/api/bootstrap')['status'] == 200, timeout=10)
@@ -761,7 +756,7 @@ class NativeLifecycleTest(unittest.TestCase):
             c.executemany('INSERT INTO assets VALUES (?,?,?,?,?,?,?)',
                           [(ident, 'synthetic.png', '', 120, 150, '2026-10-01', 'orig') for ident in ids])
             c.commit()
-        # A small receive window and ~5 MiB JSON keep the first socket under backpressure.
+        # 小的接收窗口加上约 5 MiB 的 JSON，让第一个 socket 一直处于背压之下。
         sock = socket.socket()
         self.addCleanup(sock.close)
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 4096)
@@ -792,7 +787,7 @@ class NativeLifecycleTest(unittest.TestCase):
         self.assertEqual({item['uuid'] for item in current['items']}, set('abc'))
 
     def test_upgrade_rejection_with_cold_wal_only_creates_sqlite_coordination_files(self):
-        broken = self.package('cold-wal')  # its recorded history holds 'cold-failure-history'
+        broken = self.package('cold-wal')  # 它录制的历史里有 'cold-failure-history'
         with closing(sqlite3.connect(broken.db)) as c:
             c.execute("UPDATE meta SET value='35' WHERE key='schema_version'")
             c.commit()
@@ -815,8 +810,8 @@ class NativeLifecycleTest(unittest.TestCase):
         self.assertTrue(any('cold-failure-history' in line for line in before_sql))
 
     def test_upgrade_rejection_with_active_wal_preserves_database_wal_history(self):
-        # The recorded package holds the old command's history; the meta change below stays in the WAL.
-        broken = self.package('active-wal')  # its recorded history holds 'failure-wal-history'
+        # 录制的图库包里有旧命令的历史；下面对 meta 的改动留在 WAL 里。
+        broken = self.package('active-wal')  # 它录制的历史里有 'failure-wal-history'
         with closing(sqlite3.connect(broken.db)) as keeper:
             keeper.execute('PRAGMA journal_mode=WAL')
             keeper.execute('PRAGMA wal_autocheckpoint=0')
@@ -829,8 +824,8 @@ class NativeLifecycleTest(unittest.TestCase):
                                      '--port', str(free_port())], env=self.env, capture_output=True, timeout=5)
             self.assertNotEqual(result.returncode, 0)
             after = files(broken.path)
-            # Active SQLite readers may update SHM lock/read marks. The application DB, WAL,
-            # source and all other package files remain byte-exact; full SQL includes undo history.
+            # 活动的 SQLite 读取方可能更新 SHM 的锁/读标记。应用数据库、WAL、source 和包里的所有其他文件逐字节不变；
+            # 完整的 SQL 包含撤销历史。
             self.assertEqual({k: v for k, v in before.items() if not k.endswith('-shm')},
                              {k: v for k, v in after.items() if not k.endswith('-shm')})
             self.assertEqual(before_sql, dump(broken.db))
@@ -845,7 +840,7 @@ class NativeLifecycleTest(unittest.TestCase):
                     c.execute('UPDATE meta SET value=? WHERE key=?', (value, key))
                     c.commit()
                     c.execute('PRAGMA journal_mode=DELETE')
-                c.close()  # Quiescent DELETE fixture: every package file is byte-exact.
+                c.close()  # 静止的 DELETE 模式夹具：包里每个文件都逐字节不变。
                 before = files(broken.path)
                 result = subprocess.run([str(self.binary), 'http', '--no-auto-sync', '--library', str(broken.path),
                                          '--port', str(free_port())], env=self.env, capture_output=True, timeout=5)
@@ -918,7 +913,7 @@ class NativeLifecycleTest(unittest.TestCase):
     @unittest.skipUnless(os.name == 'posix', 'macOS shell launcher acceptance')
     def test_launcher_directly_finds_rust_without_python(self):
         script = self.resources / 'start-web.command'
-        self.stop(self.process)  # one host owns a library at a time (#24)
+        self.stop(self.process)  # 同一时间一个图库只归一个宿主（#24）
         process, _ = self.start(self.lib.path, command=[str(script)])
         self.assertIsNone(process.poll())
         self.assertFalse(self.sentinel.exists())

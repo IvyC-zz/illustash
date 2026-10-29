@@ -1,8 +1,8 @@
-"""Installed provenance adapter: local steps run natively without Python.
+"""安装后的溯源适配器：本地步骤以原生方式运行，不用 Python。
 
-Reuses the explicit-probe suites with the candidate illustash-worker copied
-under its installed name. Requires ILLUSTASH_TERMS_BIN (its sibling worker) or
-ILLUSTASH_PROVENANCE_ADAPTER_BIN; only unknown steps reach the Python worker.
+复用显式探针的测试套件，把候选 illustash-worker 以安装后的名字复制过去。需要
+ILLUSTASH_TERMS_BIN（取它旁边的 worker）或 ILLUSTASH_PROVENANCE_ADAPTER_BIN；只有未知步骤才会交给
+Python worker。
 """
 import json
 import os
@@ -36,7 +36,7 @@ class Installed:
 
     def setUp(self):
         super().setUp()
-        # No interpreter is configured: a native step must never reach the Python fallback.
+        # 不配置解释器：原生步骤绝不能落到 Python 兜底。
         environment = patch.dict(os.environ)
         environment.start()
         self.addCleanup(environment.stop)
@@ -88,7 +88,7 @@ class InstalledProvenanceRoutingTest(Installed, _FixtureOnly):
 
 
 def load_tests(loader, tests, pattern):
-    # Only the installed classes; the imported base suites run from their own modules.
+    # 只跑安装后的这几个类；导入的基础套件由各自的模块运行。
     suite = unittest.TestSuite()
     for case in (InstalledLocalProvenanceTest, InstalledProvenanceMatchTest,
                  InstalledProvenanceVerifyTest, InstalledProvenanceRoutingTest):

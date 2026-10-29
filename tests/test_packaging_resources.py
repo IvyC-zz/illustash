@@ -1,4 +1,4 @@
-"""Resource staging only: marker binaries/models, no install, inference or compiler."""
+"""只测资源暂存：用标记用的二进制和模型，不安装、不推理、不用编译器。"""
 import hashlib
 import importlib.util
 import json
@@ -27,14 +27,14 @@ pack = module('build')
 
 
 def desktop_required(name):
-    """The desktop host's required-component list (desktop/src/bundled_workers.rs)."""
+    """桌面宿主的必需组件清单（desktop/src/bundled_workers.rs）。"""
     source = (ROOT / 'desktop/src/bundled_workers.rs').read_text(encoding='utf-8')
     body = re.search(rf'const {name}: \[&str; \d+\] = \[(.*?)\];', source, re.S).group(1)
     return re.findall(r'"([^"]+)"', body)
 
 
 def assert_desktop_contract(test, manifest, platform, name):
-    """The host accepts only format 1 / research / its platform and manifested components."""
+    """宿主只接受格式 1、research 变体、它自己的平台，以及清单里列出的组件。"""
     test.assertEqual((manifest['format'], manifest['variant'], manifest['platform']), (1, 'research', platform))
     required = desktop_required(name)
     test.assertTrue(required)
@@ -43,7 +43,7 @@ def assert_desktop_contract(test, manifest, platform, name):
 
 
 def assert_single_worker_and_notices(test, manifest, suffix, research=True):
-    """#37: one worker program, no duplicate executables; #8: project and third-party notices ship."""
+    """#37：只有一个 worker 程序，没有重复的可执行文件；#8：附带本项目和第三方的声明。"""
     files = manifest['files']
     binaries = {name: digest for name, digest in files.items() if name.startswith('bin/')}
     test.assertEqual(len(set(binaries.values())), len(binaries), binaries)
@@ -79,7 +79,7 @@ class PackagingResourcesTest(unittest.TestCase):
         manifest = json.loads((output / 'manifest.json').read_text())
         files = {p.relative_to(output).as_posix(): hashlib.sha256(p.read_bytes()).hexdigest()
                  for p in output.rglob('*') if p.is_file() and p.name != 'manifest.json'}
-        # The manifest must cover exactly all delivered files, not just selected names.
+        # 清单必须正好覆盖交付的全部文件，而不只是挑出来的几个名字。
         self.assertEqual(manifest['files'], files)
         self.assertTrue(all(not Path(name).is_absolute() and '..' not in Path(name).parts for name in files))
         self.assertFalse(any('unlisted-private-marker' in name for name in files))
@@ -110,7 +110,7 @@ class PackagingResourcesTest(unittest.TestCase):
         assert_single_worker_and_notices(self, plain, suffix, research=False)
         assert_single_worker_and_notices(self, complete, suffix)
         self.assertFalse((base / 'resources/licenses/models').exists())
-        # Every installed request is native: no Python calculators ship.
+        # 安装后的每个请求都是原生的：不附带 Python 计算程序。
         self.assertFalse(any(name.startswith(('workers/', 'runtime/')) for name in delta))
         self.assertFalse((base / 'workers').exists())
         self.assertFalse((base / 'runtime').exists())
@@ -167,7 +167,7 @@ class PackagingResourcesTest(unittest.TestCase):
         for name in ('LICENSE', 'ThirdPartyNotices.txt'):
             (notices / name).write_bytes(('synthetic notice:' + name).encode())
         (notices / 'unlisted-private-marker').write_bytes(b'not allowed')
-        # Cross-platform source staging only, not an installed macOS runtime check.
+        # 只测跨平台的源暂存，不检查安装后的 macOS 运行时。
         with patch.object(pack.sys, 'platform', 'darwin'):
             if os.name == 'nt':
                 for name in ('illustash-terms', 'illustash-worker'):
@@ -193,7 +193,7 @@ class PackagingResourcesTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, '--research'):
             pack.stage(self.root / 'wrong-variant', self.binaries, ort_dylib=runtime, ort_licenses=notices)
         self.assertFalse((self.root / 'wrong-variant').exists())
-        # #271: DirectML.dll only goes with the Windows runtime, and its package must be complete.
+        # #271：DirectML.dll 只随 Windows 运行时一起打包，而且它的包必须完整。
         directml = self.root / 'directml'
         for source in list(pack.DIRECTML_FILES.values())[1:]:
             (directml / source).parent.mkdir(parents=True, exist_ok=True)
@@ -215,15 +215,15 @@ class PackagingResourcesTest(unittest.TestCase):
         self.assertFalse((self.root / 'incomplete-notices/manifest.json').exists())
 
     def test_model_licenses_ship_verbatim_with_every_computation_package(self):
-        """#8: computation packages carry the committed license originals, with the models or without them
-        (#168: then the app downloads the models); nothing else is a source."""
+        """#8：计算包附带已提交的许可原文，不论是否带模型（#168：不带时由 App 下载模型）；
+        除此之外没有别的来源。"""
         registry = json.loads((pack.MODEL_LICENSES / 'sources.json').read_text())['files']
         self.assertEqual(sorted(registry), ['ccip/BigScience-OpenRAIL-M.pdf', 'ccip/deepghs-ccip-README.md',
                                             'ccip/deepghs-ccip_onnx-README.md', 'wd-swinv2-tagger-v3/LICENSE-2.0.txt',
                                             'wd-swinv2-tagger-v3/SmilingWolf-wd-swinv2-tagger-v3-README.md',
                                             'wd-swinv2-tagger-v3/deepghs-wd14_tagger_with_embeddings-README.md'])
         notice = (pack.MODEL_LICENSES / 'NOTICE.txt').read_text()
-        # The notice names every bundled model file and the license text that covers it.
+        # 声明列出每个附带的模型文件和适用于它的许可文本。
         for name in ('wd_swinv2_v3_emb.onnx', 'model_feat.onnx', 'model_metrics.onnx', 'metrics.json',
                      'wd-swinv2-tagger-v3/LICENSE-2.0.txt', 'ccip/BigScience-OpenRAIL-M.pdf'):
             self.assertIn(name, notice)
@@ -265,17 +265,17 @@ class PackagingResourcesTest(unittest.TestCase):
                 self.assertFalse(output.exists())
 
     def test_rust_licenses_cover_every_locked_crate_and_ship(self):
-        """#161: fails whenever a Cargo.lock changes without rerunning tools/gen_rust_licenses.py."""
+        """#161：只要 Cargo.lock 改了而没重新运行 tools/gen_rust_licenses.py，就失败。"""
         text = pack.rust_licenses()
         self.assertEqual(pack.NOTICES['licenses/rust-dependencies.txt'], text.relative_to(ROOT).as_posix())
         registry = json.loads((pack.RUST_LICENSES / 'crates.json').read_text())
         self.assertEqual(registry['generator'], 'cargo-about 0.9.2')
-        # The shipped index lists exactly the crates with texts, each with at least one text number.
+        # 附带的索引正好列出有许可文本的 crate，每个至少带一个文本编号。
         body = text.read_text(encoding='utf-8')
         listed = re.findall(r'^(\S+ \S+) \(.+\): \[\d+\]', body.split('\nLicense texts\n')[0], re.M)
         self.assertEqual(sorted(listed), sorted({name for entry in registry['workspaces'].values()
                                                  for name in entry['crates']}))
-        self.assertIn('tiny_http 0.12.0', listed)  # vendored path dependency
+        self.assertIn('tiny_http 0.12.0', listed)  # vendored 的路径依赖
         self.assertFalse(any(name.startswith('illustash-') for name in listed))
         for packaged in ('base', 'research'):
             output = self.root / packaged
@@ -330,15 +330,15 @@ class PackagingResourcesTest(unittest.TestCase):
                 self.assertFalse(output.exists())
 
     def test_full_installers_ship_resources_once(self):
-        """#37: full installers use compute/resources only; the base installer keeps resources/."""
+        """#37：完整安装包只用 compute/resources；基础安装包保留 resources/。"""
         def mapping(name):
             return json.loads((ROOT / 'packaging' / name).read_text())['bundle']['resources']
         self.assertEqual(mapping('tauri-bundle.json'), {'../packaging/desktop-resources/': 'resources/'})
         for name in ('tauri-full.json', 'tauri-full-macos.json'):
-            # The host roots full installs at compute/resources (bundled_workers tests), so a
-            # second top-level resources/ copy would have no consumer.
+            # 宿主以 compute/resources 作为完整安装的根（见 bundled_workers 的测试），所以顶层再放一份
+            # resources/ 不会有人用。
             self.assertEqual(mapping(name), {'../packaging/desktop-compute/': 'compute/'}, name)
-        # Upgrading an older full install must not leave the per-kind copies or resources/ behind.
+        # 升级旧的完整安装时，不能留下按类型分开的副本或 resources/。
         config = json.loads((ROOT / 'packaging/tauri-full.json').read_text())
         hooks = (ROOT / 'desktop' / config['bundle']['windows']['nsis']['installerHooks']).resolve()
         text = hooks.read_text()
@@ -349,15 +349,15 @@ class PackagingResourcesTest(unittest.TestCase):
         self.assertNotIn('worker', ''.join(line for line in text.splitlines() if line.lstrip().startswith(('Delete', 'RMDir'))))
 
     def test_windows_installers_follow_the_display_language(self):
-        """#173: both NSIS installers have English and Simplified Chinese pages, chosen by NSIS
-        from the Windows display language without a dialog, and record it for the uninstaller."""
+        """#173：两个 NSIS 安装包都有英文和简体中文页面，由 NSIS 按 Windows 显示语言选择，不弹对话框，
+        并把选择记下来供卸载程序使用。"""
         shared = ROOT / 'packaging/nsis-hooks.nsh'
         save = 'WriteRegStr HKCU "${MANUPRODUCTKEY}" "Installer Language" $LANGUAGE'
         self.assertIn('!macro NSIS_HOOK_POSTINSTALL', shared.read_text())
         self.assertIn(save, shared.read_text())
         for name in ('tauri-bundle.json', 'tauri-full.json'):
             nsis = json.loads((ROOT / 'packaging' / name).read_text())['bundle']['windows']['nsis']
-            # English first: NSIS falls back to the first language when neither matches.
+            # 英文放第一：两种都不匹配时，NSIS 退回第一种语言。
             self.assertEqual(nsis['languages'], ['English', 'SimpChinese'], name)
             self.assertNotIn('displayLanguageSelector', nsis, name)
             hooks = (ROOT / 'desktop' / nsis['installerHooks']).resolve()
@@ -493,7 +493,7 @@ class MacDesktopResourcesTest(unittest.TestCase):
                 pack.macos_desktop_compute(source, self.root / 'lost-resource')
             self.assertFalse((self.root / 'lost-resource').exists())
             lost.write_bytes(saved)
-            # #161: the Rust crates' license texts are a required component too.
+            # #161：Rust crate 的许可文本也是必需组件。
             rust = source / 'resources/licenses/rust-dependencies.txt'
             saved = rust.read_bytes()
             rust.unlink()
@@ -513,7 +513,7 @@ class MacDesktopResourcesTest(unittest.TestCase):
 
 
     def test_release_app_has_no_models_and_a_partial_set_is_refused(self):
-        """#168: without --models the App carries no model file (the app downloads them); never only some."""
+        """#168：不加 --models 时 App 不带任何模型文件（由 App 下载）；绝不只带一部分。"""
         runtime = self.root / 'runtime-marker'
         runtime.write_bytes(b'synthetic runtime')
         notices = self.root / 'notices'
@@ -532,7 +532,7 @@ class MacDesktopResourcesTest(unittest.TestCase):
             assert_desktop_contract(self, installed, 'darwin', 'MACOS_FILES')
             self.assertFalse(any(name.startswith('resources/models/') for name in installed['files']))
             self.assertTrue(any(name.startswith('resources/licenses/models/') for name in installed['files']))
-            # A staged layout that lists only some models is neither package.
+            # 只列出部分模型的暂存布局，两种包都不是。
             manifest = json.loads((source / 'manifest.json').read_text())
             model = source / 'resources/models/wd_swinv2_v3_emb.onnx'
             model.parent.mkdir(parents=True)
@@ -549,7 +549,7 @@ class WindowsOpenBLASResourcesTest(unittest.TestCase):
     manifest = PackagingResourcesTest.manifest
     """Only source staging on synthetic identities, never a Windows load/ABI test."""
     def make_runtime(self):
-        """An explicit site-packages holding the fixed NumPy wheel, plus a CPU ORT marker."""
+        """一个显式的 site-packages，里面放固定的 NumPy wheel，外加一个 CPU ORT 标记文件。"""
         site = self.root / 'explicit wheel/site-packages'
         libs = site / 'numpy.libs'
         libs.mkdir(parents=True)
@@ -560,7 +560,7 @@ class WindowsOpenBLASResourcesTest(unittest.TestCase):
         self.ort_licenses.mkdir()
         for name in ('LICENSE', 'ThirdPartyNotices.txt'):
             (self.ort_licenses / name).write_bytes(b'synthetic ORT notice')
-        # A synthetic Microsoft.AI.DirectML package directory (#271).
+        # 合成的 Microsoft.AI.DirectML 包目录（#271）。
         self.directml = self.root / 'Microsoft.AI.DirectML.synthetic'
         for source in pack.DIRECTML_FILES.values():
             (self.directml / source).parent.mkdir(parents=True, exist_ok=True)
@@ -577,12 +577,11 @@ class WindowsOpenBLASResourcesTest(unittest.TestCase):
                               {self.digest: dict(version='synthetic', numpy='synthetic')}, clear=True)
         registry.start()
         self.addCleanup(registry.stop)
-        # Marker binaries cannot be inspected by dumpbin; real CRT imports are
-        # covered independently by WindowsCRTTest and installed Windows acceptance.
+        # 标记用的二进制没法用 dumpbin 检查；真实的 CRT 导入由 WindowsCRTTest 和安装后的 Windows 验收另行覆盖。
         crt = patch.object(pack, 'check_windows_crt')
         crt.start()
         self.addCleanup(crt.stop)
-        # Only marker binaries get Windows names. This is cross-platform source testing.
+        # 只有标记用的二进制取 Windows 文件名。这是跨平台的源测试。
         for name in ('illustash-terms', 'illustash-worker'):
             (self.binaries / (name + '.exe')).write_bytes(b'synthetic marker:' + name.encode())
         return site

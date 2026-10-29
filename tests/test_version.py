@@ -1,4 +1,4 @@
-"""tools/version.py: application.json is the one source of the version number (#189)."""
+"""tools/version.py：application.json 是版本号的唯一来源（#189）。"""
 import contextlib
 import importlib.util
 import io
@@ -45,7 +45,7 @@ class VersionTests(unittest.TestCase):
         for crate in version.CRATES:
             self.assertIn(f'{crate}/Cargo.toml', paths)
             self.assertIn(f'{crate}/Cargo.lock', paths)
-        # Each lock lists this project's crates it builds, never a registry crate.
+        # 每个 lock 文件列出它构建的本项目 crate，从不列 registry crate。
         names = {(path, name) for path, name, _ in version.places(ROOT) if path.endswith('.lock')}
         self.assertIn(('desktop/Cargo.lock', 'illustash-terms'), names)
         self.assertIn(('crates/iqdb/Cargo.lock', 'illustash-iqdb'), names)
@@ -67,8 +67,7 @@ class VersionTests(unittest.TestCase):
                 if package['name'].startswith('illustash-'):
                     self.assertEqual(package['version'], '0.2.0-beta.1')
                     self.assertNotIn('source', package)
-        # Only this project's version strings changed: one per place, nothing else (a registry crate that
-        # happens to be 0.1.0 stays 0.1.0).
+        # 只改了本项目的版本字符串：每处一个，别的不动（恰好也是 0.1.0 的 registry crate 仍是 0.1.0）。
         counts = {}
         for path, _, _ in version.places(self.root):
             counts[path] = counts.get(path, 0) + 1
@@ -96,7 +95,7 @@ class VersionTests(unittest.TestCase):
         self.assertTrue(any(e.startswith('crates/iqdb/Cargo.toml: [package] version 是 0.0.9') for e in errors))
 
     def test_dependency_version_is_not_the_package_version(self):
-        # The `version = …` of a dependency table must not stand in for a missing [package] version.
+        # 依赖表里的 `version = …` 不能顶替缺失的 [package] version。
         self.edit('crates/core/Cargo.toml', 'version = "0.1.0"\n', '')
         errors = version.check(self.root)
         self.assertIn('crates/core/Cargo.toml: 找不到 [package] version', errors)
@@ -110,7 +109,7 @@ class VersionTests(unittest.TestCase):
                 version.sync(self.root, bad)
         for good in ('0.1.0', '1.10.0', '0.2.0-beta.1', '0.2.0-rc.0', '0.2.0-alpha-2'):
             self.assertTrue(version.valid(good), good)
-        self.assertEqual(version.check(self.root), [])  # refused sets changed nothing
+        self.assertEqual(version.check(self.root), [])  # 被拒绝的版本设置没有改动任何东西
         self.edit(version.SOURCE, '"version":"0.1.0"', '"version":"0.1"')
         self.assertEqual(len(version.check(self.root)), 1)
         self.assertIn('不是 SemVer', version.check(self.root)[0])

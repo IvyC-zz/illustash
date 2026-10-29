@@ -7,8 +7,7 @@ import unittest
 from pathlib import Path
 
 class RequiredBackupCliTest(unittest.TestCase):
-    """Direct shipped CLI must refuse a file-backed upgrade when the backup cannot be created (the cutover commands
-    went with #201 step 4)."""
+    """直接调用发布的 CLI：备份建不出来时，必须拒绝对文件图库升级（切换命令随 #201 第 4 步移除）。"""
     def test_upgrade_refuses_backup_failure_without_modification(self):
         binary = os.environ.get('ILLUSTASH_TERMS_BIN')
         if not binary or not Path(binary).is_file():
