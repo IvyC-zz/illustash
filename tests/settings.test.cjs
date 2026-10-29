@@ -1,11 +1,11 @@
 const {test, before, afterEach} = require('node:test');
-const web = require('./web.cjs');   // core/settings.js, ui/settings.js (#199)
+const web = require('./web.cjs');   // core/settings.js、ui/settings.js（#199）
 const assert = require('node:assert/strict');
 let ui, off = () => {};
 before(async () => { await web.ready(); ui = await web.load('ui/settings.js'); });
 afterEach(() => { off(); off = () => {}; });
-// A settings page that has read nothing yet; api answers its reads. What the page does on each part that arrives is
-// ui/settings.js's onSettings listener: an error goes to the banner, and the settings page redraws (renderSettings(false)).
+// 一个还什么都没读的设置页；api 回答它的读取。每到一部分时页面做什么，由 ui/settings.js 的 onSettings 监听器决定：
+// 错误进横幅，设置页重画（renderSettings(false)）。
 function harness(api) {
   const renders = [], errors = [], core = web.core(), {state} = core;
   for (const key of ['settings', 'fold', 'index', 'names']) delete state[key];
@@ -31,12 +31,12 @@ test('cold load starts all four reads concurrently and shares in-flight requests
   assert.deepEqual(calls, ['/api/settings','/api/fold','/api/index','/api/names']);
   pending.get('/api/fold')({kinds: ['duplicate']}); await tick();
   assert.deepEqual(c.state.fold, ['duplicate']);
-  assert.deepEqual(renders, [false]); // useful partial data paints before the slow reads complete
+  assert.deepEqual(renders, [false]); // 慢的读取完成之前，先画出已有的有用部分
   for (const path of ['/api/settings','/api/index','/api/names']) pending.get(path)({loaded: true});
   await Promise.all([load, same]);
   assert.equal(renders.length, 4);
   c.loadSettingsData();
-  assert.equal(calls.length, 4); // warm rendering never refetches
+  assert.equal(calls.length, 4); // 已有数据时再渲染不重新请求
 });
 
 test('a failed card does not block others and remains retryable', async () => {
@@ -72,7 +72,7 @@ test('unchanged card and active form edits do not replace DOM', () => {
   assert.equal(writes, 2);
 });
 
-// 资料库 · 作品 (#198): the work tree replaces the settings page's work table. The shelf is ui/catalog.js.
+// 资料库 · 作品（#198）：作品树取代设置页的作品表。书架在 ui/catalog.js。
 async function shelfHarness(works, watch = []) {
   const root = {className: '', innerHTML: '', querySelectorAll: () => [], setAttribute() {}};
   const catalog = await web.load('ui/catalog.js'), {state} = web.core();
@@ -98,8 +98,8 @@ test('work tree lists children under their parent, with counts and the watch swi
   assert.ok(root.innerHTML.includes('<b>parent</b>') && !root.innerHTML.includes('<b>child</b>'));
 });
 
-// The index's poller is core/jobs.js; what it redraws outside the task panel is ui/effects.js afterJob(), as app.js
-// wires it: here the settings card, drawn on a fake page.
+// 索引的轮询在 core/jobs.js；它在任务面板之外重画什么，由 ui/effects.js 的 afterJob() 决定（接法与 app.js 相同）：
+// 这里是画在假页面上的设置卡片。
 async function indexHarness(initialStatus, nextStatus) {
   const calls = [], renders = [], {state, pollIndex, onJob} = web.core(), {afterJob} = await web.load('ui/effects.js');
   Object.assign(state, {route: {page: 'settings'}, index: {state: {status: initialStatus}, works: [], history: [], watch: {works: [], min_posts: 50}}});
@@ -110,7 +110,7 @@ async function indexHarness(initialStatus, nextStatus) {
     const body = path.includes('progress=1') ? {state: {status: nextStatus, done: 2, total: 10}} : {state: {status: nextStatus}, works: [], history: [], watch: {works: [], min_posts: 50}, check: {found: 1, missing: [], checked_at: '2026-10-18T00:00:00'}};
     return {status: 200, ok: true, json: async () => body};
   };
-  const offs = [onJob(afterJob), onJob(() => { renders.push('tasks'); })];   // the second as the task panel does
+  const offs = [onJob(afterJob), onJob(() => { renders.push('tasks'); })];   // 第二个照任务面板的做法
   const setTimeout = globalThis.setTimeout;
   globalThis.setTimeout = () => 0;
   try { await pollIndex(); } finally { globalThis.setTimeout = setTimeout; for (const off of offs) off(); }
@@ -167,7 +167,7 @@ test('the names and new-characters cards read their data when they open', async 
 });
 
 test('an older library is opened only after the person agrees to upgrade it (#193)', async () => {
-  // openLibrary() is ui/settings.js: the backend's refusal names the upgrade, the page asks, then asks again with upgrade.
+  // openLibrary() 在 ui/settings.js：后端的拒绝指明需要升级，页面询问用户，然后带上 upgrade 再请求一次。
   const sent = [], nodes = {}, dialogs = [];
   const element = () => ({hidden: true, textContent: '', innerHTML: '', contains: () => false});
   globalThis.document = {getElementById: id => nodes[id] ||= element(), activeElement: null, body: {append(d) { dialogs.push(d); setImmediate(() => d.close('')); }},

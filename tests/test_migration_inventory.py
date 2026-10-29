@@ -1,4 +1,4 @@
-"""M0 narrow gates; fixtures are source text only, never live libraries or servers."""
+"""M0 的窄门槛；夹具只是源码文本，从不使用活的图库或服务器。"""
 import contextlib
 import copy
 import importlib.util
@@ -41,7 +41,7 @@ class MigrationInventoryTest(unittest.TestCase):
         self.assertEqual([], errors)
         self.assertEqual([], current['warnings'])
         self.assertEqual(inventory.dump_spec(spec), text, '运行 python -m tools.migration_inventory fmt')
-        # The budget counts content, not the one-entry-per-line whitespace.
+        # 预算按内容计，不计每条一行的空白。
         self.assertLess(len(json.dumps(spec, ensure_ascii=False, separators=(',', ':')).encode()), 72_000)
         self.assertNotIn('coverage', spec)
         self.assertNotIn('sites', spec)

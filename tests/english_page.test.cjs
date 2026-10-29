@@ -1,5 +1,5 @@
-// The core layer on an English page (#173, #182, #199), and the 画师 section's 「也许是 TA」 line (ui/artists.js, #223);
-// tests/format.test.cjs, tests/session_switch.test.cjs and tests/artist_section.test.cjs are the Chinese page.
+// 英文页面上的核心层（#173、#182、#199），以及画师区的「也许是 TA」一行（ui/artists.js，#223）；
+// 中文页面见 tests/format.test.cjs、tests/session_switch.test.cjs 和 tests/artist_section.test.cjs。
 const {test, before} = require('node:test');
 const assert = require('node:assert/strict');
 const web = require('./web.cjs');

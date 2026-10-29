@@ -121,7 +121,7 @@ class Store:
 
 def seed(test, root):
     name = test._testMethodName
-    # Installed worker subclasses add protocol refusal cases with the shared base input.
+    # 安装版 worker 的子类用共用的基础输入增加协议拒绝用例。
     record = records().get(name) or records()['test_prototypes_claims_weak_and_unmatched_cache_exact']
     for kind, filename in [('library','app.sqlite'), ('source','source.db')]:
         with closing(sqlite3.connect(root / filename)) as c, c:

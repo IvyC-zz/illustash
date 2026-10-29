@@ -1,4 +1,4 @@
-"""#68 owned native host: synthetic packages, pipe EOF and parent crashes only."""
+"""#68 由桌面外壳持有的原生宿主：只用合成包、管道 EOF 和父进程崩溃。"""
 import json
 import os
 import signal
@@ -41,7 +41,7 @@ class DesktopLifecycleTest(unittest.TestCase):
             listener.bind(('127.0.0.1', self.port))
 
     def progress(self, log):
-        """Startup stages, checked to precede the ready line and never go back."""
+        """启动阶段，检查它们都在就绪行之前出现且从不倒退。"""
         log.seek(0)
         lines = log.read().decode().splitlines()
         ready = next(i for i, line in enumerate(lines) if line.startswith('图库已启动：'))
@@ -55,9 +55,9 @@ class DesktopLifecycleTest(unittest.TestCase):
         return {stage for _, _, stage in progress}
 
     def test_startup_progress_precedes_ready_and_never_goes_back(self):
-        # A normal opening runs no full integrity check before it is ready (#212).
+        # 正常打开时，就绪之前不做完整的完整性检查（#212）。
         self.assertFalse(any('检查图库数据' in stage for stage in self.progress(self.log)))
-        # After a crash the next opening checks both databases first, and reports it.
+        # 崩溃之后，下一次打开先检查两个数据库，并报告这一步。
         self.process.kill(); self.process.wait(5)
         _, log = self.start(self.lib.path)
         self.assertIn('上次没有正常关闭，正在检查图库数据（source.sqlite）', self.progress(log))

@@ -1,12 +1,11 @@
-"""M2 artist/curation/fold/preferences acceptance on independent synthetic packages.
+"""M2 画师/整理/折叠/偏好设置的验收，使用各自独立的合成包。
 
-The former Python reference (seed and Server) is replayed from fixed recordings
-(tests/fixed_expectations.py, #9).
-An explicit new release is mandatory; missing binary skips do not count as acceptance.
-Success responses compare original status/bytes/headers; errors compare status only.
-The harness also compares raw DDL, all typed cells
-and physical rowids in app/source/provenance after every step. No old tests are inherited,
-no output is normalized, and no real library or library copy is opened.
+原来的 Python 参考实现（seed 和 Server）从固定录制中重放
+（tests/fixed_expectations.py，#9）。
+必须显式提供新的 release 构建；缺少二进制而跳过不算验收。
+成功的响应比较原始状态码/字节/响应头；错误只比较状态码。
+harness 还在每一步之后比较 app/source/provenance 的原始 DDL、全部带类型的单元格
+和物理 rowid。不继承旧测试，不规范化任何输出，也不打开真实图库或图库副本。
 """
 from contextlib import closing
 import http.client
@@ -26,7 +25,7 @@ class NativeHumanCurationTest(unittest.TestCase):
         labels.NativeHumanLabelsTest.setUpClass()
         cls.binary, cls.resources = labels.NativeHumanLabelsTest.binary, labels.NativeHumanLabelsTest.resources
 
-    # Composition, rather than subclassing Harness, avoids recounting its ten old tests.
+    # 用组合而不是继承 Harness，免得把它的十个旧测试再算一遍。
     clone = labels.NativeHumanLabelsTest.clone
     start = labels.NativeHumanLabelsTest.start
     stop = labels.NativeHumanLabelsTest.stop
@@ -116,7 +115,7 @@ class NativeHumanCurationTest(unittest.TestCase):
         self.pair('/api/fold', {'kinds': ['edit', 'crop']})
         self.assert_duplicates(['d', 'e', 'f', 'g', 'h'], 'hash-three', 'g', hidden=set())
         self.assertEqual(snapshot(self.right.db)['actions'], history)
-        # A valid older source without stable_hash follows relations only, without source writes.
+        # 没有 stable_hash 的合法旧 source 只按关系处理，不写入 source。
         self.seed_both()
         self.pair('/api/fold', {'kinds': ['crop', 'edit']})
         self.assert_duplicates(['e', 'f', 'g'], 'sim:e', 'g', hidden=set())
@@ -174,7 +173,7 @@ class NativeHumanCurationTest(unittest.TestCase):
         self.undo_latest()
 
     def test_committed_undo_is_reported_even_when_event_acknowledgement_fails(self):
-        # #40: a failure after the commit (acknowledging the verdict event) does not report a rollback.
+        # #40：提交之后的失败（确认裁决事件时）不报告为回滚。
         def post(url, body):
             item = {'url': url, 'method': 'POST', 'body': json.dumps(body).encode(),
                     'headers': {'Content-Type': 'application/json', 'X-CSRF-Token': self.token}}
@@ -193,7 +192,7 @@ class NativeHumanCurationTest(unittest.TestCase):
         self.assertEqual(undone['undo']['id'], first['undo']['id'])
         self.assertEqual(sql(f"SELECT undone FROM actions WHERE id={second['undo']['id']}"), [(1,)])
         self.assertGreater(sql("SELECT count(*) FROM backend_effects WHERE kind='verdict' AND status='pending'")[0][0], 0)
-        # The committed step is not undone twice, and the earlier one is still there to undo.
+        # 已提交的那一步不会被撤销两次，更早的一步仍可撤销。
         status, refused = post('/api/undo', {'id': second['undo']['id']}); self.assertEqual(status, 400, refused)
         with closing(sqlite3.connect(self.right.db)) as c:
             c.execute('DROP TRIGGER fail_ack'); c.commit()

@@ -1,7 +1,6 @@
-// What the backend decides must not hang on the words it shows (#204), the Rust counterpart of the page's rule in
-// tests/i18n.test.cjs: rewording or translating a message must not change what the program does. Outside test
-// modules, no Chinese string literal is compared (==, !=, a match pattern) or searched for (contains, starts_with, …);
-// give the failure a kind to branch on, or read a stored field (docs/WEB_V2.md).
+// 后端的判断不能取决于它显示的文字（#204），这是页面规则（tests/i18n.test.cjs）在 Rust 一侧的对应：
+// 改写或翻译一条消息不能改变程序的行为。测试模块之外，不拿中文字符串字面量做比较（==、!=、match 模式），
+// 也不拿它搜索（contains、starts_with 等）；要分支就给失败一个 kind，或者读取存储的字段（docs/WEB_V2.md）。
 const {test} = require('node:test');
 const assert = require('node:assert/strict');
 const {readFileSync, readdirSync} = require('node:fs');
@@ -22,8 +21,8 @@ function rustFiles() {
   for (const crate of readdirSync(path.join(ROOT, 'crates'))) walk(path.join(ROOT, 'crates', crate, 'src'));
   return out.sort();
 }
-// [line, text, the code just before, the code just after] for each Chinese string literal (escapes left as written);
-// comments and char literals are skipped, and so is the file's test module.
+// 每个中文字符串字面量的 [行号, 文本, 紧挨着的前文代码, 紧挨着的后文代码]（转义按原样保留）；
+// 跳过注释、字符字面量和文件里的测试模块。
 function chineseLiterals(file) {
   let src = readFileSync(file, 'utf8');
   const tests = src.search(/\n#\[cfg\(test\)\]\s*\n\s*(?:pub(?:\(crate\))? )?mod \w+\s*\{/);
@@ -51,15 +50,15 @@ function chineseLiterals(file) {
   }
   return out;
 }
-// A literal handed to a search, or one side of a comparison or a match pattern. A literal in a list is judged by
-// what the list is for: ["…", "…"].contains(&message) searches.
+// 交给搜索的字面量，或者比较、match 模式的一边。列表里的字面量按列表的用途判断：
+// ["…", "…"].contains(&message) 算搜索。
 const SEARCH = /\.(?:contains|starts_with|ends_with|strip_prefix|strip_suffix|find|rfind|split_once|rsplit_once|matches|trim_start_matches|trim_end_matches)\(\s*&?$/;
 const COMPARED = /(?:[=!]=)\s*&?$/;
 const COMPARING = /^\s*(?:[=!]=|=>|\|\s*"|if\b)/;
 const LISTED = /^(?:\s*,\s*"[^"\n]*")*\s*\]\s*\.(?:contains|iter\(\)\.any)\(/;
-// Chinese that is someone else's data, not ours to word: what the program reads, not what it shows.
+// 别人的数据里的中文，不由我们措辞：是程序读取的内容，不是它显示的内容。
 const OTHERS = new Map([
-  // A field name of Bangumi's infobox, and words in a character's name that mark a group of characters.
+  // Bangumi infobox 的一个字段名，以及角色名里表示一组角色的词。
   ['native/terms/src/app_name_sources.rs', new Set(['简体中文名', '兄妹', '姐妹', '兄弟'])],
 ]);
 

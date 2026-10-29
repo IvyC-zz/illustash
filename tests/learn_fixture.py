@@ -1,4 +1,4 @@
-"""Learning fixture: fixed old-form library input switched to the core, plus synthetic 8-dimensional features."""
+"""学习夹具：切换到核心的固定旧格式图库输入，加上合成的 8 维特征。"""
 import tempfile
 from pathlib import Path
 
@@ -12,7 +12,7 @@ MIXED = """EXISTS(SELECT 1 FROM duplicates y WHERE y.grp=d.grp AND y.uuid<>d.uui
 
 
 def assert_memberships_current(test, store):
-    """The stored memberships must equal a fresh evaluation of the ownership rules."""
+    """存储的 memberships 必须与按归属规则重新求出的结果相同。"""
     cols = 'uuid,entity,status,origin,sources,score,source_count,ccip_only'
     with store.connect() as c:
         stored = c.execute(f'SELECT {cols} FROM (SELECT * FROM memberships UNION ALL SELECT * FROM tag_memberships) ORDER BY uuid,entity').fetchall()
@@ -35,7 +35,7 @@ def unit(v):
 
 
 class Learning:
-    """setUp/tearDown/owners/learned_snapshot for learning fixtures (former tests/test_learn.py)."""
+    """学习夹具的 setUp/tearDown/owners/learned_snapshot（原 tests/test_learn.py）。"""
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         root = Path(self.temp.name)
@@ -44,11 +44,11 @@ class Learning:
         rng = np.random.default_rng(0)
         A, B = unit([1, 0, 0, 0, 0, 0, 0, 0]), unit([0, 0, 0, 0, 1, 0, 0, 0])
         near = lambda centre, spread: unit(centre + rng.normal(0, spread, 8))
-        vectors = {f's{i}': near(A, 0.08) for i in range(6)}                  # alice's confirmed images
+        vectors = {f's{i}': near(A, 0.08) for i in range(6)}                  # alice 已确认的图片
         vectors |= {'close': near(A, 0.05), 'edge': unit(A + 0.35 * unit([0, 1, 0, 0, 0, 0, 0, 0])),
                     'far': unit([0, 0, 1, 0, 0, 0, 0, 0])}
-        vectors |= {f'u{i}': near(B, 0.05) for i in range(4)}                 # a look-alike group, nobody yet
-        vectors |= {'ring': unit([0, 0, 0, 0, 0, 0, 0, 1]), 'hintb': unit([0, 0, 0, 0, 0, 0, 1, 1])}      # placed per test
+        vectors |= {f'u{i}': near(B, 0.05) for i in range(4)}                 # 一个相似组，还不属于任何人
+        vectors |= {'ring': unit([0, 0, 0, 0, 0, 0, 0, 1]), 'hintb': unit([0, 0, 0, 0, 0, 0, 1, 1])}      # 由各个测试摆放
         vectors |= {'a': unit([0, 0, 0, 1, 0, 0, 0, 0]), 'b': unit([0, 0, 0, 0, 0, 1, 0, 0]), 'c': unit([0, 0, 0, 0, 0, 0, 1, 0])}
         self.features = Features(self.store.source, np.stack(list(vectors.values())), list(vectors))
 

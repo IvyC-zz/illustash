@@ -1,4 +1,4 @@
-"""Rows for a synthetic Photos library database (former tests/test_sync.py helper)."""
+"""合成照片图库数据库的行（原 tests/test_sync.py 的辅助函数）。"""
 import sqlite3
 
 
