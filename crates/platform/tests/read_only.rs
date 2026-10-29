@@ -1,4 +1,5 @@
 //! A direct platform consumer; synthetic sources only, no application/HTTP dependency.
+#![allow(clippy::unwrap_used, reason = "集成测试里 unwrap 就是断言")]
 use illustash_platform::{platform_folder as folder, platform_photos as photos, sqlite, Error};
 use std::{fs, path::PathBuf};
 struct Fixture(PathBuf);

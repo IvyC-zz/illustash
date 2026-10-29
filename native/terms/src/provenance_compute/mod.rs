@@ -2,7 +2,6 @@
 //! every local step (pixel_hash, iqdb signatures, local_match, verify, groups).
 //! OCR computation was removed (#177); its stored evidence stays readable.
 //! App retains authorization, Task cleanup, snapshot receipt and two-library publication.
-#![cfg_attr(not(test), deny(clippy::unwrap_used))]
 mod groups;
 mod iqdb;
 mod local_match;

@@ -231,6 +231,8 @@ pub fn index_product32(
         return Ok(out);
     }
     #[cfg(target_os = "macos")]
+    // SAFETY: 上面已检查 `rows.len() == n * dimension`、`anchor.len() == dimension`、两者非零且不超过 i32；列主序 lda
+    // = n，步长为 1，`out` 有 n 个元素。
     unsafe {
         if n == 1 {
             out[0] = blas::cblas_sdot(dimension as i32, rows.as_ptr(), 1, anchor.as_ptr(), 1);
@@ -269,6 +271,7 @@ pub fn index_dot64(a: &[f64], b: &[f64]) -> Result<f64, String> {
         return Ok(0.);
     }
     #[cfg(target_os = "macos")]
+    // SAFETY: 上面已检查两个切片等长、非空且长度不超过 i32，步长为 1。
     unsafe {
         Ok(index_blas::cblas_ddot(a.len() as i32, a.as_ptr(), 1, b.as_ptr(), 1))
     }
@@ -302,6 +305,8 @@ pub fn index_product64(
         return Ok(out);
     }
     #[cfg(target_os = "macos")]
+    // SAFETY: 上面已检查 `rows.len() == n * dimension`、`anchor.len() == dimension`、两者非零且不超过 i32；
+    // 按行主序或列主序选定的 lda 与形状一致，`out` 有 n 个元素。
     unsafe {
         if n == 1 {
             out[0] = index_blas::cblas_ddot(dimension as i32, rows.as_ptr(), 1, anchor.as_ptr(), 1);

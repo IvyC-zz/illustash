@@ -8,6 +8,7 @@
 //! `--upgrade`, the way the user's libraries are (#193): one pre-upgrade backup, holding the library as it was.
 //! Replies are compared as bytes after `common/baseline.rs` masking (and the random session token); every
 //! database of the package is compared after start-up and after each request, by the rules there.
+#![allow(clippy::unwrap_used, reason = "集成测试里 unwrap 就是断言")]
 use rusqlite::Connection;
 use serde_json::{json, Map, Value};
 use std::collections::BTreeMap;
@@ -412,6 +413,7 @@ fn benchmark_release_host() {
         let start = Instant::now();
         let (mut opened, _, _) = launch(&root, &package, "benchmark", false, Path::new(&binary));
         opens.push(start.elapsed().as_secs_f64() * 1000.0);
+        // SAFETY: kill 只接收整数；子进程尚未回收，PID 不会被复用。
         unsafe {
             libc::kill(opened.child.id() as i32, libc::SIGTERM);
         }
@@ -467,8 +469,10 @@ fn benchmark_release_host() {
     switches.sort_by(f64::total_cmp);
     samples.insert("switch".into(), json!((switches[9] + switches[10]) / 2.0));
     host.child.kill().unwrap();
+    // SAFETY: libc::rusage 只含整数和 timeval，全零是合法值。
     let mut usage: libc::rusage = unsafe { std::mem::zeroed() };
     let mut status = 0;
+    // SAFETY: PID 属于尚未回收的子进程，`status`、`usage` 是本地出参。
     assert_eq!(unsafe { libc::wait4(host.child.id() as i32, &mut status, 0, &mut usage) }, host.child.id() as i32);
     // wait4 already owns reaping; Drop must never signal a potentially reused PID.
     host.reaped = true;

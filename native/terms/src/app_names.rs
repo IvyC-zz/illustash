@@ -1,4 +1,5 @@
 //! Native name task owner. Immutable package paths, durable requests and retryable failures.
+use crate::error::invalid;
 use crate::{
     app_library::Library,
     app_name_sources::{self as net, Source},
@@ -16,9 +17,6 @@ use std::{
     time::{Duration, Instant},
 };
 
-fn invalid<T>(s: &str) -> Result<T> {
-    Err(Error::Invalid(s.into()))
-}
 /// `prefs` key of a library's lasting consent to name text queries. Kept apart from the startup
 /// preferences, which never authorize network use.
 const CONSENT: &str = "names_network";

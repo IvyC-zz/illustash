@@ -1,5 +1,4 @@
 //! 原生来源同步与可选识别 worker 编排。任务固定包实例，切库/退出取消并等待。
-#![cfg_attr(not(test), deny(clippy::unwrap_used))]
 use crate::{app_library::Library, Error, Result};
 use crate::{
     task_state::{State, Status},

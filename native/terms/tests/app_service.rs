@@ -1,4 +1,5 @@
 //! Synthetic client: no HTTP server, Tauri runtime, Python or research process.
+#![allow(clippy::unwrap_used, reason = "集成测试里 unwrap 就是断言")]
 use illustash_terms::{
     app_create::NewSource,
     app_service::{self, Application, Options},

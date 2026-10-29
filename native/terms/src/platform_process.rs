@@ -12,6 +12,7 @@ mod windows_worker {
         struct OwnedHandle(Handle);
         impl Drop for OwnedHandle {
             fn drop(&mut self) {
+                // SAFETY: `OwnedHandle` 只包装已检查有效的句柄，每个只在这里关闭一次。
                 unsafe {
                     CloseHandle(self.0);
                 }
@@ -49,6 +50,7 @@ mod windows_worker {
         }
         fn creation_time(process: Handle) -> u64 {
             let (mut creation, mut exit, mut kernel, mut user) = (0, 0, 0, 0);
+            // SAFETY: `process` 是调用方持有的有效进程句柄，四个出参都是本地变量。
             assert_ne!(unsafe { GetProcessTimes(process, &mut creation, &mut exit, &mut kernel, &mut user) }, 0);
             creation
         }
@@ -75,11 +77,14 @@ mod windows_worker {
             // Publish a handle to the original child in the observing test process before
             // this leader can exit. The retained object prevents a later PID-reuse race.
             let observer = std::env::var("ILLUSTASH_JOB_OBSERVER").unwrap().parse().unwrap();
+            // SAFETY: 无指针参数；下一行断言句柄非空。
             let target = unsafe { OpenProcess(0x0040, 0, observer) }; // PROCESS_DUP_HANDLE, test fixture only
             assert!(!target.is_null());
             let target = OwnedHandle(target);
             let mut copy = std::ptr::null_mut();
             assert_ne!(
+                // SAFETY: 源进程用当前进程伪句柄，`child` 的原始句柄在 `child` 存活期间有效，`target`
+                // 是上面打开的观察进程，`copy` 是本地出参。
                 unsafe {
                     DuplicateHandle(
                         GetCurrentProcess(),
@@ -136,6 +141,7 @@ mod windows_worker {
                     thread::sleep(Duration::from_millis(10));
                 };
                 let descendant = OwnedHandle(handle as Handle);
+                // SAFETY: `descendant` 包装观察进程收到的复制句柄，此时尚未关闭。
                 assert_eq!(unsafe { GetProcessId(descendant.0) }, pid);
                 assert_eq!(creation_time(descendant.0), creation);
                 if mode == "cancel" {
@@ -147,11 +153,14 @@ mod windows_worker {
                 // asynchronous. User approved one kernel wait within the existing 5s
                 // observation limit (#124); production cleanup/timeout semantics stay intact.
                 let started = Instant::now();
+                // SAFETY: `descendant` 包装观察进程收到的复制句柄，此时尚未关闭。
                 let wait = unsafe { WaitForSingleObject(descendant.0, 5000) };
                 let mut exit = 0;
+                // SAFETY: `descendant` 的句柄尚未关闭，`exit` 是本地出参。
                 assert_ne!(unsafe { GetExitCodeProcess(descendant.0, &mut exit) }, 0);
                 eprintln!("worker cleanup mode={mode} pid={pid} creation={creation} wait={wait} exit={exit} wait_us={} outcome={:?}", started.elapsed().as_micros(), task.outcome());
                 assert_eq!(wait, 0, "residual worker descendant {pid}; mode={mode}; outcome={:?}", task.outcome());
+                // SAFETY: `descendant` 包装观察进程收到的复制句柄，此时尚未关闭。
                 assert_eq!(unsafe { GetProcessId(descendant.0) }, pid);
                 assert_eq!(creation_time(descendant.0), creation);
                 assert_eq!(exit, 1, "worker descendant did not exit through Job termination");

@@ -346,6 +346,7 @@ fn check_database_reporting(conn: &Connection, progress: Option<Report>, watch: 
             Err(e) => return damage(e),
         };
         let expected = pages.max(1) as f64 * READS;
+        // SAFETY: 只取连接的原始句柄，不转移所有权；句柄只在这个连接自己的进度回调里使用，连接在整个检查期间存活。
         let handle = Handle(unsafe { conn.handle() });
         let start = page_requests(handle);
         let report = progress.clone();
@@ -410,6 +411,8 @@ pub(crate) fn corruption(error: &rusqlite::Error) -> Option<String> {
 /// The connection's own handle, read only from its progress callback (same thread, inside its step).
 #[derive(Clone, Copy)]
 struct Handle(*mut rusqlite::ffi::sqlite3);
+// SAFETY: 句柄只在所属连接的进度回调里读取，与连接同一线程、同一次 step 内；实现 Send 只为满足回调闭包的约束，
+// 不会跨线程使用。
 unsafe impl Send for Handle {}
 impl std::panic::RefUnwindSafe for Handle {}
 
@@ -418,6 +421,7 @@ fn page_requests(handle: Handle) -> i64 {
         .into_iter()
         .map(|op| {
             let (mut current, mut high) = (0, 0);
+            // SAFETY: `handle.0` 是正在执行 step 的存活连接，出参是本地变量，reset 标志为 0 不修改统计。
             unsafe {
                 rusqlite::ffi::sqlite3_db_status(handle.0, op, &mut current, &mut high, 0);
             }

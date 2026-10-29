@@ -18,13 +18,9 @@ pub(super) struct Signature {
     pub colour: Vec<u8>,
 }
 
-fn invalid(message: &str) -> Error {
-    Error::Invalid(message.into())
-}
-
 fn normalise(grid: &[u8]) -> Result<(Vec<f32>, f32)> {
     if grid.len() != GRID {
-        return Err(invalid("溯源灰度签名长度无效"));
+        return Err(Error::invalid("溯源灰度签名长度无效"));
     }
     let mut x: Vec<_> = grid.iter().map(|&v| f32::from(v)).collect();
     let mean = crate::research_compute::contiguous_sum32(&x) / GRID as f32;
@@ -66,7 +62,7 @@ impl Library {
             if known.contains(id) {
                 continue;
             }
-            let path = path.as_deref().ok_or_else(|| invalid("原图路径缺失"))?;
+            let path = path.as_deref().ok_or_else(|| Error::invalid("原图路径缺失"))?;
             {
                 // Legacy Library skips unreadable/missing paths, never fabricates a signature.
                 if let Ok((ratio, grid)) = relation_image::signature(Path::new(path)) {
@@ -86,25 +82,26 @@ impl Library {
     }
     fn colour(&mut self, asset: &str) -> Result<&[u8]> {
         if !self.colours.contains_key(asset) {
-            let path = self.paths.get(asset).and_then(|p| p.as_deref()).ok_or_else(|| invalid("原图路径缺失"))?;
+            let path =
+                self.paths.get(asset).and_then(|p| p.as_deref()).ok_or_else(|| Error::invalid("原图路径缺失"))?;
             let colour = relation_image::reference_colour(Path::new(path))?;
             self.colours.insert(asset.to_owned(), colour);
         }
-        Ok(self.colours.get(asset).ok_or_else(|| invalid("颜色签名缺失"))?)
+        Ok(self.colours.get(asset).ok_or_else(|| Error::invalid("颜色签名缺失"))?)
     }
     fn colour_diff(&mut self, asset: &str, colour: &[u8]) -> Result<Option<f32>> {
         if colour.len() != COLOUR {
-            return Err(invalid("溯源颜色签名长度无效"));
+            return Err(Error::invalid("溯源颜色签名长度无效"));
         }
         if self.paths.get(asset).and_then(|p| p.as_deref()).is_none() {
-            return Err(invalid("原图路径缺失"));
+            return Err(Error::invalid("原图路径缺失"));
         }
         let reference = match self.colour(asset) {
             Ok(v) => v,
             Err(_) => return Ok(None),
         };
         if reference.len() != COLOUR {
-            return Err(invalid("溯源颜色签名长度无效"));
+            return Err(Error::invalid("溯源颜色签名长度无效"));
         }
         let diffs: Vec<_> = colour.iter().zip(reference).map(|(&a, &b)| (f32::from(a) - f32::from(b)).abs()).collect();
         Ok(Some(crate::research_compute::contiguous_sum32(&diffs) / COLOUR as f32))
@@ -115,7 +112,7 @@ impl Library {
             return Ok(vec![]);
         }
         if sig.colour.len() != COLOUR {
-            return Err(invalid("溯源颜色签名长度无效"));
+            return Err(Error::invalid("溯源颜色签名长度无效"));
         }
         let scores = illustash_platform::platform_research_math::cross(&self.x, self.ids.len(), &x, 1, GRID)
             .map_err(Error::Invalid)?;

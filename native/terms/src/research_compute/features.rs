@@ -9,15 +9,12 @@ use std::{
     path::Path,
 };
 
-fn invalid(message: &str) -> Error {
-    Error::Invalid(message.into())
-}
 pub fn bytes(row: &[f32]) -> Vec<u8> {
     row.iter().flat_map(|v| v.to_le_bytes()).collect()
 }
 pub fn decode(blob: &[u8]) -> Result<Vec<f32>> {
     if blob.is_empty() || blob.len() % 4 != 0 {
-        return Err(invalid("Invalid CCIP feature vector"));
+        return Err(Error::invalid("Invalid CCIP feature vector"));
     }
     Ok(blob.chunks_exact(4).map(|b| f32::from_le_bytes(b.try_into().expect("four bytes"))).collect())
 }
@@ -37,10 +34,10 @@ impl Matrix {
             || uuids.iter().collect::<HashSet<_>>().len() != uuids.len()
             || rows.iter().any(|v| v.len() != dimension)
         {
-            return Err(invalid("Feature manifest/matrix mismatch or duplicate UUID"));
+            return Err(Error::invalid("Feature manifest/matrix mismatch or duplicate UUID"));
         }
         for v in &mut rows {
-            numeric::normalise(v).map_err(|m| invalid(&m))?;
+            numeric::normalise(v).map_err(|m| Error::invalid(&m))?;
         }
         Ok(Self::normalised(uuids, rows, dimension))
     }
@@ -89,28 +86,28 @@ pub fn load(source: &Path, base: &Path) -> Result<Matrix> {
     };
     let mut matrix = match present[..] {
         [true, true] => {
-            let mut csv = csv::Reader::from_path(&paths[0]).map_err(|e| invalid(&e.to_string()))?;
+            let mut csv = csv::Reader::from_path(&paths[0]).map_err(|e| Error::invalid(e.to_string()))?;
             let col = csv
                 .headers()
-                .map_err(|e| invalid(&e.to_string()))?
+                .map_err(|e| Error::invalid(e.to_string()))?
                 .iter()
                 .position(|h| h == "uuid")
-                .ok_or_else(|| invalid("Feature manifest missing uuid"))?;
+                .ok_or_else(|| Error::invalid("Feature manifest missing uuid"))?;
             let uuids = csv
                 .records()
                 .map(|r| r.map(|r| r.get(col).unwrap_or("").trim().to_uppercase()))
                 .collect::<std::result::Result<Vec<_>, _>>()
-                .map_err(|e| invalid(&e.to_string()))?;
+                .map_err(|e| Error::invalid(e.to_string()))?;
             read_npy(&paths[1])?.into_matrix(uuids)?
         }
         [false, false] => Matrix { dimension: 768, ..Matrix::default() },
-        _ => return Err(invalid("Both feature matrix and manifest are required")),
+        _ => return Err(Error::invalid("Both feature matrix and manifest are required")),
     };
     for (u, raw) in overlay {
         let mut v = decode(&raw)?;
-        numeric::normalise(&mut v).map_err(|m| invalid(&m))?;
+        numeric::normalise(&mut v).map_err(|m| Error::invalid(&m))?;
         if v.len() != matrix.dimension {
-            return Err(invalid("CCIP feature dimension mismatch"));
+            return Err(Error::invalid("CCIP feature dimension mismatch"));
         }
         let index = if let Some(&i) = matrix.row.get(&u) {
             i
@@ -161,19 +158,19 @@ impl NpyMatrix {
     }
     pub fn into_matrix(self, uuids: Vec<String>) -> Result<Matrix> {
         if uuids.len() != self.len() || uuids.iter().collect::<HashSet<_>>().len() != uuids.len() {
-            return Err(invalid("Feature manifest/matrix mismatch or duplicate UUID"));
+            return Err(Error::invalid("Feature manifest/matrix mismatch or duplicate UUID"));
         }
         let contiguous = !self.fortran_order || self.len() <= 1 || self.dimension <= 1;
         let rows = match self.values {
             NpyValues::Float32(mut rows) => {
                 for row in &mut rows {
-                    numeric::normalise_layout(row, contiguous).map_err(|m| invalid(&m))?;
+                    numeric::normalise_layout(row, contiguous).map_err(|m| Error::invalid(&m))?;
                 }
                 rows
             }
             NpyValues::Float64(rows) => rows
                 .into_iter()
-                .map(|row| numeric::normalise64(&row, contiguous).map_err(|m| invalid(&m)))
+                .map(|row| numeric::normalise64(&row, contiguous).map_err(|m| Error::invalid(&m)))
                 .collect::<Result<_>>()?,
         };
         Ok(Matrix::normalised(uuids, rows, self.dimension))
@@ -184,7 +181,7 @@ impl NpyMatrix {
 /// Other dtypes are explicitly rejected; no pickle or expression evaluation.
 pub fn read_npy(path: &Path) -> Result<NpyMatrix> {
     let raw = fs::read(path)?;
-    let bad = || invalid("Invalid CCIP NPY matrix");
+    let bad = || Error::invalid("Invalid CCIP NPY matrix");
     if raw.get(..6) != Some(b"\x93NUMPY") {
         return Err(bad());
     }
@@ -290,7 +287,7 @@ pub fn read_npy(path: &Path) -> Result<NpyMatrix> {
         "<f8" => (false, 8),
         "=f8" => (cfg!(target_endian = "big"), 8),
         ">f8" => (true, 8),
-        _ => return Err(invalid("CCIP NPY dtype must be real float32 or float64")),
+        _ => return Err(Error::invalid("CCIP NPY dtype must be real float32 or float64")),
     };
     if dim == 0 || count.checked_mul(dim).and_then(|n| n.checked_mul(width)) != Some(raw.len() - end) {
         return Err(bad());

@@ -2,6 +2,7 @@
 //! found before opening after a crash, in the background after a normal opening, by the weekly library check and by
 //! 「立即检查」, and no write to a damaged package afterwards. Synthetic packages with deliberately overwritten pages
 //! only.
+#![allow(clippy::unwrap_used, reason = "集成测试里 unwrap 就是断言")]
 use illustash_terms::{app_create::NewSource, app_service, store};
 use rusqlite::Connection;
 use serde_json::{json, Value};

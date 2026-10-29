@@ -58,9 +58,11 @@ pub fn available_space(path: &Path) -> io::Result<u64> {
         use std::os::unix::ffi::OsStrExt;
         let path = std::ffi::CString::new(path.as_os_str().as_bytes()).map_err(io::Error::other)?;
         let mut stat = std::mem::MaybeUninit::<libc::statvfs>::uninit();
+        // SAFETY: `path` 是存活的 NUL 结尾 C 字符串，`stat` 指向足够大的未初始化缓冲区，由 statvfs 填写。
         if unsafe { libc::statvfs(path.as_ptr(), stat.as_mut_ptr()) } != 0 {
             return Err(io::Error::last_os_error());
         }
+        // SAFETY: 上面的 statvfs 返回 0，已完整写入 `stat`。
         let stat = unsafe { stat.assume_init() };
         #[allow(clippy::unnecessary_cast)] // Field widths differ between Unix platforms.
         Ok((stat.f_bavail as u64).saturating_mul(stat.f_frsize as u64))
@@ -74,6 +76,7 @@ pub fn available_space(path: &Path) -> io::Result<u64> {
         }
         let wide: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
         let mut available = 0u64;
+        // SAFETY: `wide` 是存活的 NUL 结尾 UTF-16 路径，`available` 是本地出参，另外两个出参可以为空。
         if unsafe { GetDiskFreeSpaceExW(wide.as_ptr(), &mut available, std::ptr::null_mut(), std::ptr::null_mut()) }
             == 0
         {

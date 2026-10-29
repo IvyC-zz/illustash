@@ -61,6 +61,8 @@ fn transform(bytes: &[u8], kind: &str, encrypt: bool) -> Result<Vec<u8>> {
     }
     // SAFETY: successful DPAPI returns a buffer of output.len bytes.
     let result = unsafe { std::slice::from_raw_parts(output.data, output.len as usize).to_vec() };
+    // SAFETY: `output.data` 是成功调用后 DPAPI 分配的 `output.len` 字节缓冲区；先清零再用 LocalFree 释放一次，
+    // 之后不再使用。
     unsafe {
         // Do not leave decrypted credentials in the Windows-allocated buffer.
         if !encrypt {

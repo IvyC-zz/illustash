@@ -2,7 +2,7 @@
 //! 首次同步得到了什么，以及按已认出的角色推荐可能想关注的作品。进度按图库存在 prefs（键 `onboarding`）；
 //! 记录进度不授权联网、不启动同步或索引任务。
 //! 唯一的计算是用户打开引导时一次识别组件自检（`--check`，实际加载模型），结果只留在本次会话。
-#![cfg_attr(not(test), deny(clippy::unwrap_used))]
+use crate::error::invalid;
 use crate::{
     app_library::Library,
     app_tasks::{Task, TaskIdentity},
@@ -27,10 +27,6 @@ const ITEMS: [&str; 5] = ["look", "correct", "undo", "group", "follow"];
 const PROMPTS: [&str; 2] = ["names", "works"];
 /// 推荐作品最多几部。
 const SUGGESTED: usize = 5;
-
-fn bad<T>(message: &str) -> Result<T> {
-    Err(Error::Invalid(message.into()))
-}
 
 /// 引导状态。存过的按存的来；没存过的：还没有一次同步走完的图库是新图库（`new`，界面打开时写入），
 /// 其余（升级上来的旧图库、导入的归档）不弹引导（`off`），可以从设置里重新打开。
@@ -318,7 +314,7 @@ impl Onboarding {
     pub fn post(&mut self, lib: &Library, body: &Json) -> Result<()> {
         let body: Value = serde_json::from_str(&body.dump()).map_err(|e| Error::Invalid(e.to_string()))?;
         if lib.frozen() {
-            return bad("测试图库没有引导");
+            return invalid("测试图库没有引导");
         }
         let named = |field: &str, known: &[&str], message: &str| -> Result<String> {
             body[field]
@@ -352,7 +348,7 @@ impl Onboarding {
             }
             Some("hide") => save(lib, |v| v["hidden"] = (body["hidden"] != false).into()),
             Some("check") => self.start_check(lib),
-            _ => bad("未知操作"),
+            _ => invalid("未知操作"),
         }
     }
 }

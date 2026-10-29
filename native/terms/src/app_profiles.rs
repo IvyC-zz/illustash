@@ -1,4 +1,5 @@
 //! Native character profile HTTP orchestration. Core mutations and projections share one transaction.
+use crate::error::invalid;
 use crate::{
     app_commands::{core_error, initialized, last_action},
     http_json::Json,
@@ -16,9 +17,6 @@ pub(crate) const ROUTES: &[&str] = &[
     "/api/kind",
     "/api/oc/shared",
 ];
-fn invalid<T>(s: &str) -> Result<T> {
-    Err(Error::Invalid(s.into()))
-}
 fn truthy(v: &Value) -> bool {
     match v {
         Value::Null => false,

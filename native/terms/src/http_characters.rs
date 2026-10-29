@@ -1,6 +1,7 @@
 //! Character/identity HTTP reads. Query order, stable post-sorts and dict insertion order follow Store.
 use crate::character_entities::ENTITIES;
 use crate::character_relations::{EVIDENCE, RELATIONS};
+use crate::error::invalid;
 use crate::{
     http::LibraryContext,
     http_json::{parse_python, Json},
@@ -28,9 +29,6 @@ fn number(j: &Json, k: &str) -> i64 {
 }
 fn array(v: Vec<String>) -> Json {
     Json::Array(v.into_iter().map(Json::from).collect())
-}
-fn bad<T>(s: &str) -> Result<T> {
-    Err(Error::Invalid(s.into()))
 }
 fn remove(j: &mut Json, k: &str) -> Json {
     if let Json::Object(v) = j {
@@ -64,7 +62,7 @@ fn shown(c: &Connection, mut r: Json, skin: bool, identity: bool) -> Result<Json
 }
 fn characters(c: &Connection, q: &HashMap<String, String>, minimum: i64) -> Result<Json> {
     if minimum < 0 {
-        return bad("最小成员数不正确");
+        return invalid("最小成员数不正确");
     }
     let get = |k: &str| q.get(k).map(String::as_str).unwrap_or("");
     let nsfw = get("nsfw");
@@ -286,7 +284,7 @@ fn profile(c: &Connection, e: &str) -> Result<Json> {
     .next()
     .ok_or_else(|| Error::Invalid("角色不存在".into()))?;
     if truth(row.field("parent_id")) {
-        return bad("请编辑角色本身，子标签跟随角色");
+        return invalid("请编辑角色本身，子标签跟随角色");
     }
     let shown = display(c, Json::object([("id", id.clone().into())]))?;
     let user = strings(
@@ -369,7 +367,7 @@ fn activity(c: &Connection, nsfw: &str) -> Result<Json> {
 }
 fn stats(c: &Connection, id: &str, nsfw: &str, exclude: &str) -> Result<Json> {
     if id.is_empty() {
-        return bad("缺少角色");
+        return invalid("缺少角色");
     }
     let where_ = format!("m.entity=? AND {}{}", visible("m"), rating("m", nsfw)?);
     let monthly = format!(
@@ -574,7 +572,7 @@ fn proposed_pairs(c: &Connection, pairs: &mut Pairs, count_only: bool) -> Result
 }
 fn queue(c: &Connection, limit: i64, offset: i64, nsfw: &str, count_only: bool) -> Result<Json> {
     if !(1..=100).contains(&limit) || offset < 0 {
-        return bad("分页参数不正确");
+        return invalid("分页参数不正确");
     }
     let shown = rating("m", nsfw)?;
     let mut pairs = Pairs::load(c, &shown)?;
@@ -662,7 +660,7 @@ pub fn read(c: &Connection, _context: &LibraryContext, path: &str, q: &HashMap<S
         "/api/character/stats" => stats(c, get("id"), get("nsfw"), get("exclude"))?,
         "/api/identity/count" => queue(c, 20, 0, get("nsfw"), true)?,
         "/api/identity/queue" => queue(c, int("limit", "20")?, int("offset", "0")?, get("nsfw"), false)?,
-        _ => return bad("unknown character read"),
+        _ => return invalid("unknown character read"),
     };
     Ok((value, 200))
 }
@@ -679,10 +677,10 @@ pub fn validate(path: &str, q: &HashMap<String, String>) -> Result<()> {
         .collect::<Result<Vec<_>>>()?;
     let get = |key| q.get(key).map(String::as_str).unwrap_or("");
     match path {
-        "/api/characters" if numbers[0] < 0 => return bad("最小成员数不正确"),
+        "/api/characters" if numbers[0] < 0 => return invalid("最小成员数不正确"),
         "/api/identity/queue" => {
             if !(1..=100).contains(&numbers[0]) || numbers[1] < 0 {
-                return bad("分页参数不正确");
+                return invalid("分页参数不正确");
             }
             rating("m", get("nsfw"))?;
         }
@@ -691,7 +689,7 @@ pub fn validate(path: &str, q: &HashMap<String, String>) -> Result<()> {
         }
         "/api/character/stats" => {
             if get("id").is_empty() {
-                return bad("缺少角色");
+                return invalid("缺少角色");
             }
             rating("m", get("nsfw"))?;
         }

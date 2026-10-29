@@ -44,7 +44,7 @@ pub fn pixiv_reply(webview: tauri::Webview, state: tauri::State<Pixiv>, id: Stri
     if webview.label() != LABEL {
         return;
     }
-    if let Some(tx) = state.pending.lock().unwrap().remove(&id) {
+    if let Some(tx) = state.pending.lock().expect("lock poisoned by an earlier panic").remove(&id) {
         let _ = tx.try_send(reply);
     }
 }
@@ -53,7 +53,7 @@ fn window(app: &AppHandle) -> Result<WebviewWindow, String> {
     if let Some(win) = app.get_webview_window(LABEL) {
         return Ok(win);
     }
-    let blank = WebviewUrl::External(Url::parse("about:blank").unwrap());
+    let blank = WebviewUrl::External(Url::parse("about:blank").expect("constant URL"));
     let builder = WebviewWindowBuilder::new(app, LABEL, blank)
         .title(crate::i18n::tr("登录 Pixiv"))
         .inner_size(1000.0, 780.0)
@@ -61,7 +61,7 @@ fn window(app: &AppHandle) -> Result<WebviewWindow, String> {
         .on_new_window(|_, _| NewWindowResponse::Allow) // 登录页可能开第三方登录的弹窗
         .on_page_load(|win, payload| {
             let state = win.state::<Pixiv>();
-            let mut page = state.page.lock().unwrap();
+            let mut page = state.page.lock().expect("lock poisoned by an earlier panic");
             if payload.event() == PageLoadEvent::Started {
                 page.host = None;
                 return;
@@ -89,24 +89,24 @@ fn window(app: &AppHandle) -> Result<WebviewWindow, String> {
 }
 
 fn on_pixiv(win: &WebviewWindow) -> bool {
-    win.state::<Pixiv>().page.lock().unwrap().host.as_deref() == Some(HOST)
+    win.state::<Pixiv>().page.lock().expect("lock poisoned by an earlier panic").host.as_deref() == Some(HOST)
 }
 
 /// Load `url` and wait until a page on its host has finished loading. A load finishing elsewhere (the window's first
 /// about:blank, say) does not count: a request sent from it would go out before the Pixiv page, and its cookies, are there.
 fn open(win: &WebviewWindow, url: &str) -> Result<(), String> {
-    let target = Url::parse(url).unwrap();
+    let target = Url::parse(url).expect("callers pass a constant URL");
     let state = win.state::<Pixiv>();
-    let before = state.page.lock().unwrap().loads;
+    let before = state.page.lock().expect("lock poisoned by an earlier panic").loads;
     win.navigate(target.clone()).map_err(|e| e.to_string())?;
     let deadline = Instant::now() + PAGE_TIMEOUT;
-    let mut page = state.page.lock().unwrap();
+    let mut page = state.page.lock().expect("lock poisoned by an earlier panic");
     while page.loads == before || page.host.as_deref() != target.host_str() {
         let left = deadline.saturating_duration_since(Instant::now());
         if left.is_zero() {
             return Err(crate::i18n::tr("Pixiv 页面加载超时"));
         }
-        page = state.loaded.wait_timeout(page, left).unwrap().0;
+        page = state.loaded.wait_timeout(page, left).expect("lock poisoned by an earlier panic").0;
     }
     Ok(())
 }
@@ -116,7 +116,7 @@ fn open(win: &WebviewWindow, url: &str) -> Result<(), String> {
 /// first, unless the person is using the window to log in. The caller holds `busy`.
 fn warm(win: &WebviewWindow) {
     let state = win.state::<Pixiv>();
-    if !state.page.lock().unwrap().warm && !state.login_open.load(Ordering::SeqCst) {
+    if !state.page.lock().expect("lock poisoned by an earlier panic").warm && !state.login_open.load(Ordering::SeqCst) {
         if let Err(error) = open(win, HOME) {
             eprintln!("[pixiv] 预热失败：{error}");
         }
@@ -128,7 +128,7 @@ pub fn user_id(app: &AppHandle) -> Option<String> {
     let win = window(app).ok()?;
     {
         let state = app.state::<Pixiv>();
-        let _one = state.busy.lock().unwrap();
+        let _one = state.busy.lock().expect("lock poisoned by an earlier panic");
         warm(&win);
     }
     // cookies_for_url only matches the exact host, and PHPSESSID lives on .pixiv.net; this store holds nothing but Pixiv.
@@ -154,7 +154,7 @@ pub fn fetch(app: &AppHandle, path: &str) -> Result<Value, String> {
         return Err("只允许 www.pixiv.net/ajax/ 下的路径".into());
     }
     let state = app.state::<Pixiv>();
-    let _one = state.busy.lock().unwrap();
+    let _one = state.busy.lock().expect("lock poisoned by an earlier panic");
     let win = window(app)?;
     if !on_pixiv(&win) {
         if state.login_open.load(Ordering::SeqCst) {
@@ -166,18 +166,18 @@ pub fn fetch(app: &AppHandle, path: &str) -> Result<Value, String> {
     getrandom::fill(&mut raw).map_err(|e| e.to_string())?;
     let id: String = raw.iter().map(|b| format!("{b:02x}")).collect();
     let (tx, rx) = sync_channel(1);
-    state.pending.lock().unwrap().insert(id.clone(), tx);
+    state.pending.lock().expect("lock poisoned by an earlier panic").insert(id.clone(), tx);
     let js = format!(
         "(async () => {{ let r; try {{ const res = await fetch({path}, {{credentials: 'same-origin', headers: {{Accept: 'application/json'}}}}); \
          r = {{status: res.status, cfMitigated: res.headers.get('cf-mitigated'), body: await res.text()}}; }} \
          catch (e) {{ r = {{status: 0, error: String(e)}}; }} \
          window.__TAURI_INTERNALS__.invoke('pixiv_reply', {{id: {id}, reply: r}}); }})();",
-        path = serde_json::to_string(path).unwrap(),
-        id = serde_json::to_string(&id).unwrap()
+        path = serde_json::to_string(path).expect("strings always serialize"),
+        id = serde_json::to_string(&id).expect("strings always serialize")
     );
     let sent = win.eval(&js).map_err(|e| e.to_string());
     let reply = sent.and_then(|_| rx.recv_timeout(REPLY_TIMEOUT).map_err(|_| crate::i18n::tr("Pixiv 窗口没有返回结果")));
-    state.pending.lock().unwrap().remove(&id);
+    state.pending.lock().expect("lock poisoned by an earlier panic").remove(&id);
     reply
 }
 
@@ -190,7 +190,7 @@ pub fn login(app: &AppHandle, force: bool) -> Result<(), String> {
     let state = app.state::<Pixiv>();
     state.login_open.store(true, Ordering::SeqCst);
     let target = if !force && user_id(app).is_some() { HOME } else { LOGIN };
-    win.navigate(Url::parse(target).unwrap()).map_err(|e| e.to_string())?;
+    win.navigate(Url::parse(target).expect("constant URL")).map_err(|e| e.to_string())?;
     win.show().map_err(|e| e.to_string())?;
     let _ = win.set_focus();
     Ok(())
@@ -200,11 +200,11 @@ pub fn login(app: &AppHandle, force: bool) -> Result<(), String> {
 pub fn logout(app: &AppHandle) -> Result<(), String> {
     let win = window(app)?;
     let state = app.state::<Pixiv>();
-    let _one = state.busy.lock().unwrap();
+    let _one = state.busy.lock().expect("lock poisoned by an earlier panic");
     warm(&win); // otherwise the saved cookies are not loaded yet and survive the clearing
     win.clear_all_browsing_data().map_err(|e| e.to_string())?;
     state.login_open.store(false, Ordering::SeqCst);
-    let _ = win.navigate(Url::parse("about:blank").unwrap());
+    let _ = win.navigate(Url::parse("about:blank").expect("constant URL"));
     let _ = win.hide();
     Ok(())
 }

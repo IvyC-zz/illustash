@@ -12,9 +12,6 @@ use std::{
     io::Read,
     path::Path,
 };
-fn invalid(message: impl Into<String>) -> Error {
-    Error::Invalid(message.into())
-}
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Fingerprint {
@@ -36,7 +33,7 @@ fn anchored(shared: &Path) -> Result<bool> {
     let a = shared.join("char-anchors.npy").try_exists()?;
     let b = shared.join("char-anchors.txt").try_exists()?;
     if a != b {
-        return Err(invalid("角色锚点必须同时有向量和ID文件"));
+        return Err(Error::invalid("角色锚点必须同时有向量和ID文件"));
     }
     Ok(a)
 }
@@ -74,7 +71,7 @@ impl Snapshot {
         }
         let id_bytes = read(&shared.join("char-anchors.txt"), check)?;
         let ids = std::str::from_utf8(&id_bytes)
-            .map_err(|e| invalid(e.to_string()))?
+            .map_err(|e| Error::invalid(e.to_string()))?
             .lines()
             .map(str::trim)
             .filter(|s| !s.is_empty())
@@ -152,7 +149,10 @@ fn patches(shared: &Path, check: &dyn Fn() -> Result<()>) -> Result<(HashSet<Str
         };
         if value["source"] == "danbooru-patch" {
             patched.insert(
-                path.file_stem().and_then(|s| s.to_str()).ok_or_else(|| invalid("角色索引文件名不是UTF8"))?.to_owned(),
+                path.file_stem()
+                    .and_then(|s| s.to_str())
+                    .ok_or_else(|| Error::invalid("角色索引文件名不是UTF8"))?
+                    .to_owned(),
             );
         }
         records.push(serde_json::json!([path.file_name().and_then(|s| s.to_str()), value["source"]]));
@@ -177,7 +177,7 @@ fn metadata(source: &Connection, check: &dyn Fn() -> Result<()>) -> Result<(Hash
         let p50: Option<f64> = row.get(8)?;
         let p75: Option<f64> = row.get(9)?;
         if [p90, gender, p50, p75].into_iter().flatten().any(|v| !v.is_finite()) {
-            return Err(invalid("角色锚点元数据不是有限值"));
+            return Err(Error::invalid("角色锚点元数据不是有限值"));
         }
         values.push(serde_json::json!([id, p90, copyright, wd, base, skin, posts, gender, p50, p75]));
         metadata.insert(

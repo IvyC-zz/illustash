@@ -33,7 +33,7 @@ fn main() {
             )
         })
         .collect();
-    let out = std::path::Path::new(&std::env::var("OUT_DIR").unwrap()).join("locales.rs");
+    let out = std::path::Path::new(&std::env::var("OUT_DIR").expect("cargo sets OUT_DIR for build scripts")).join("locales.rs");
     std::fs::write(
         out,
         format!("pub(crate) const LOCALES: &[(&str, &str)] = &[\n{entries}];\n"),

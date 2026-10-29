@@ -62,12 +62,17 @@ impl Owned {
         }
     }
     fn string(value: &str) -> Result<Self, i32> {
+        // SAFETY: `value` 的指针和长度在调用期间有效，CoreFoundation 复制字节；0x08000100 是 kCFStringEncodingUTF8，
+        // &str 必为合法 UTF-8。返回空指针时由 `new` 转成错误。
         unsafe { Self::new(CFStringCreateWithBytes(ptr::null(), value.as_ptr(), value.len() as isize, 0x08000100, 0)) }
     }
     fn data(value: &[u8]) -> Result<Self, i32> {
+        // SAFETY: 切片指针和长度在调用期间有效，CFDataCreate 复制字节；返回空指针时由 `new` 转成错误。
         unsafe { Self::new(CFDataCreate(ptr::null(), value.as_ptr(), value.len() as isize)) }
     }
     fn array(value: Ref) -> Result<Self, i32> {
+        // SAFETY: `&value` 指向调用期间有效的一个元素；回调是 Apple 导出的 kCFTypeArrayCallBacks，
+        // 数组自行 retain 元素。
         unsafe { Self::new(CFArrayCreate(ptr::null(), &value, 1, ptr::addr_of!(kCFTypeArrayCallBacks).cast())) }
     }
     fn dictionary(pairs: &[(Ref, Ref)]) -> Result<Self, i32> {
@@ -75,6 +80,8 @@ impl Owned {
         let values: Vec<_> = pairs.iter().map(|p| p.1).collect();
         // The callback structures are opaque to Rust: only their exported
         // addresses are passed to CoreFoundation, never read or dereferenced.
+        // SAFETY: `keys`、`values` 与 `pairs` 等长且在调用期间存活；CFType 回调让字典 retain 键值，调用返回后不再引用
+        // Rust 缓冲区。
         unsafe {
             Self::new(CFDictionaryCreate(
                 ptr::null(),
@@ -89,6 +96,7 @@ impl Owned {
 }
 impl Drop for Owned {
     fn drop(&mut self) {
+        // SAFETY: `Owned` 只包装 Create/Copy 返回的非空引用（`new` 已拒绝空指针），每个值只在这里释放一次。
         unsafe { CFRelease(self.0) }
     }
 }
@@ -112,6 +120,7 @@ impl Store {
         let service = Owned::string("Illustash")?;
         let account = Owned::string(kind)?;
         #[allow(unused_mut)]
+        // SAFETY: 只读 Security 框架导出的常量指针，加载框架时已初始化，此后不变。
         let mut pairs = unsafe {
             vec![(kSecClass, kSecClassGenericPassword), (kSecAttrService, service.0), (kSecAttrAccount, account.0)]
         };
@@ -122,6 +131,7 @@ impl Store {
             // Explicit scope for every operation. Do not set the user's search
             // list or default keychain, even temporarily.
             let list = Owned::array(keychain.0)?;
+            // SAFETY: 只读 Security 框架导出的常量指针；`keychain`、`list` 在字典创建前保持存活。
             unsafe {
                 pairs.push(if adding { (kSecUseKeychain, keychain.0) } else { (kSecMatchSearchList, list.0) });
             }
@@ -132,6 +142,7 @@ impl Store {
         #[cfg(test)]
         if !adding {
             if let Some(list) = &self.search_list {
+                // SAFETY: 只读 Security 框架导出的常量指针；`list` 在字典创建前保持存活。
                 unsafe {
                     pairs.push((kSecMatchSearchList, list.0));
                 }
@@ -145,14 +156,17 @@ impl Store {
     pub(super) fn read(&self, kind: &str) -> Result<Vec<u8>, i32> {
         let query = self.query(kind, false)?;
         let attributes =
+            // SAFETY: 只读 CoreFoundation/Security 导出的常量指针。
             unsafe { Owned::dictionary(&[(kSecReturnData, kCFBooleanTrue), (kSecMatchLimit, kSecMatchLimitOne)])? };
         let query = merge(&query, &attributes)?;
         let mut value = ptr::null();
+        // SAFETY: `query` 是存活的字典，`value` 是本地出参；成功时返回 +1 引用，下一行交给 `Owned` 释放。
         let status = unsafe { SecItemCopyMatching(query.0, &mut value) };
         if status != 0 {
             return Err(status);
         }
         let value = Owned::new(value)?;
+        // SAFETY: `value` 是非空的已拥有引用。先确认类型是 CFData 再取长度和字节指针；切片在 `value` 释放前复制进 Vec。
         unsafe {
             if CFGetTypeID(value.0) != CFDataGetTypeID() {
                 return Err(PARAM);
@@ -167,17 +181,21 @@ impl Store {
     pub(super) fn write(&self, kind: &str, bytes: &[u8]) -> Result<(), i32> {
         let data = Owned::data(bytes)?;
         let label = Owned::string(&format!("Illustash · {kind}"))?;
+        // SAFETY: 只读导出常量；`data`、`label` 在字典创建期间存活，字典 retain 它们。
         let attributes = unsafe { Owned::dictionary(&[(kSecValueData, data.0), (kSecAttrLabel, label.0)])? };
         // Resolve one item first: SecItemUpdate/Delete otherwise act on every
         // matching item across the user's search list. The former CLI acted on
         // one item, and existing ACL/identity must remain attached to that item.
         match self.first_item_query(kind) {
+            // SAFETY: `query`、`attributes` 都是存活的字典，调用不保留 Rust 指针。
             Ok(query) => status_result(unsafe { SecItemUpdate(query.0, attributes.0) }),
             Err(NOT_FOUND) => {
                 let add = merge(&self.query(kind, true)?, &attributes)?;
+                // SAFETY: `add` 是存活的字典；结果出参允许为空指针。
                 let status = unsafe { SecItemAdd(add.0, ptr::null_mut()) };
                 if status == DUPLICATE {
                     let query = self.first_item_query(kind)?;
+                    // SAFETY: `query`、`attributes` 都是存活的字典，调用不保留 Rust 指针。
                     status_result(unsafe { SecItemUpdate(query.0, attributes.0) })
                 } else {
                     status_result(status)
@@ -188,20 +206,24 @@ impl Store {
     }
     fn first_item_query(&self, kind: &str) -> Result<Owned, i32> {
         let query = self.query(kind, false)?;
+        // SAFETY: 只读 CoreFoundation/Security 导出的常量指针。
         let flags = unsafe {
             Owned::dictionary(&[(kSecReturnPersistentRef, kCFBooleanTrue), (kSecMatchLimit, kSecMatchLimitOne)])?
         };
         let lookup = merge(&query, &flags)?;
         let mut item = ptr::null();
+        // SAFETY: `lookup` 是存活的字典，`item` 是本地出参；成功时返回 +1 引用，随后交给 `Owned` 释放。
         let status = unsafe { SecItemCopyMatching(lookup.0, &mut item) };
         status_result(status)?;
         let item = Owned::new(item)?;
         let items = Owned::array(item.0)?;
+        // SAFETY: 只读导出常量；`items` 在字典创建期间存活，字典 retain 它。
         let selection = unsafe { Owned::dictionary(&[(kSecMatchItemList, items.0)])? };
         merge(&query, &selection)
     }
     pub(super) fn remove(&self, kind: &str) -> Result<(), i32> {
         match self.first_item_query(kind) {
+            // SAFETY: `query` 是存活的字典。
             Ok(query) => match unsafe { SecItemDelete(query.0) } {
                 0 | NOT_FOUND => Ok(()),
                 status => Err(status),
@@ -231,11 +253,16 @@ extern "C" {
 }
 fn merge(query: &Owned, attributes: &Owned) -> Result<Owned, i32> {
     unsafe extern "C" fn add(key: Ref, value: Ref, context: *mut c_void) {
+        // SAFETY: `context` 是 `merge` 传入的可变字典，键值由 CFDictionaryApplyFunction 在回调期间提供，
+        // 可变字典自行 retain。
         unsafe {
             CFDictionarySetValue(context.cast_const(), key, value);
         }
     }
+    // SAFETY: `query.0` 是存活的字典；返回空指针时由 `new` 转成错误。
     let combined = unsafe { Owned::new(CFDictionaryCreateMutableCopy(ptr::null(), 0, query.0))? };
+    // SAFETY: `attributes.0` 是存活的字典，`combined.0` 是刚复制出的可变字典；
+    // 回调签名与 CFDictionaryApplierFunction 一致。
     unsafe {
         CFDictionaryApplyFunction(attributes.0, add, combined.0.cast_mut());
     }
@@ -284,6 +311,7 @@ mod tests {
     impl Drop for Synthetic {
         fn drop(&mut self) {
             // Never receive a default/real keychain handle.
+            // SAFETY: 合成夹具的 `keychain` 总是本测试 SecKeychainCreate 得到的句柄，此时 `Owned` 尚未释放。
             unsafe {
                 SecKeychainDelete(self.0.keychain.as_ref().unwrap().0);
             }
@@ -325,12 +353,14 @@ mod tests {
         assert!(Store::default().query("saucenao", true).is_err());
         // Disable interaction in this isolated child, so tests cannot unlock a
         // real keychain or request user authorization. No global settings change.
+        // SAFETY: 无指针参数；只影响这个隔离的子进程。
         assert_eq!(unsafe { SecKeychainSetUserInteractionAllowed(0) }, 0);
         let root = std::path::PathBuf::from(std::env::var_os("ILLUSTASH_SYNTHETIC_KEYCHAIN_ROOT").unwrap());
         assert!(root.file_name().unwrap().to_string_lossy().starts_with("illustash-119-synthetic-keychain-"));
         let path = CString::new(root.join("synthetic.keychain").as_os_str().as_encoded_bytes()).unwrap();
         let password = b"ILLUSTASH-119-SYNTHETIC-ONLY";
         let mut keychain = ptr::null();
+        // SAFETY: `path` 是存活的 NUL 结尾 C 字符串，口令按给出的长度读取，`keychain` 是本地出参。
         let status = unsafe {
             SecKeychainCreate(
                 path.as_ptr(),
@@ -350,6 +380,7 @@ mod tests {
         // service and account. Seed via the legacy API, using only this handle.
         let legacy = b"ILLUSTASH-119-SYNTHETIC-LEGACY";
         assert_eq!(
+            // SAFETY: `keychain` 由夹具持有且存活；各缓冲区按给出的长度读取，item 出参为空。
             unsafe {
                 SecKeychainAddGenericPassword(
                     keychain,
@@ -373,6 +404,7 @@ mod tests {
         let mut length = 0;
         let mut data = ptr::null_mut();
         assert_eq!(
+            // SAFETY: `keychain` 由夹具持有且存活；`length`、`data` 是本地出参。
             unsafe {
                 SecKeychainFindGenericPassword(
                     keychain,
@@ -387,7 +419,9 @@ mod tests {
             },
             0
         );
+        // SAFETY: 上一步成功的 SecKeychainFindGenericPassword 返回了 `length` 字节的 `data`，下一行才释放。
         assert_eq!(unsafe { std::slice::from_raw_parts(data.cast::<u8>(), length as usize) }, replacement);
+        // SAFETY: `data` 来自上面成功的查找，只在这里释放一次。
         assert_eq!(unsafe { SecKeychainItemFreeContent(ptr::null(), data) }, 0);
         // Two synthetic keychains may contain the same service/account. Only
         // the first selected item must change; update/delete must not expand
@@ -395,6 +429,7 @@ mod tests {
         let second_path = CString::new(root.join("synthetic-second.keychain").as_os_str().as_encoded_bytes()).unwrap();
         let mut second_keychain = ptr::null();
         assert_eq!(
+            // SAFETY: `second_path` 是存活的 NUL 结尾 C 字符串，口令按给出的长度读取，`second_keychain` 是本地出参。
             unsafe {
                 SecKeychainCreate(
                     second_path.as_ptr(),
@@ -410,6 +445,7 @@ mod tests {
         let second = Synthetic(Store { keychain: Some(Owned::new(second_keychain).unwrap()), search_list: None });
         second.0.write(kind, b"ILLUSTASH-119-SYNTHETIC-SECOND").unwrap();
         let refs = [keychain, second_keychain];
+        // SAFETY: `refs` 是两个存活钥匙串句柄的本地数组；kCFTypeArrayCallBacks 让数组 retain 它们。
         let list = unsafe {
             Owned::new(CFArrayCreate(ptr::null(), refs.as_ptr(), 2, ptr::addr_of!(kCFTypeArrayCallBacks).cast()))
                 .unwrap()

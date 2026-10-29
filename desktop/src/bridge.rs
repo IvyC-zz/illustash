@@ -73,6 +73,6 @@ fn handle(app: &AppHandle, token: &str, request: Request) {
             Err(error) => (502, json!({"error": error})),
         }
     };
-    let header = Header::from_bytes("Content-Type", "application/json; charset=utf-8").unwrap();
+    let header = Header::from_bytes("Content-Type", "application/json; charset=utf-8").expect("constant header");
     let _ = request.respond(Response::from_string(body.to_string()).with_status_code(code).with_header(header));
 }

@@ -34,7 +34,7 @@ pub struct Child {
 impl Child {
     pub fn stop(&self) {
         self.stopping.store(true, Ordering::SeqCst);
-        let mut process = self.process.lock().unwrap();
+        let mut process = self.process.lock().expect("lock poisoned by an earlier panic");
         let Some(mut child) = process.take() else {
             return;
         };
@@ -46,7 +46,7 @@ impl Child {
                 Ok(Some(_)) => break,
                 _ if Instant::now() >= deadline => {
                     illustash_platform::platform_process::kill_owned_tree(child.id());
-                    self.job.lock().unwrap().take();
+                    self.job.lock().expect("lock poisoned by an earlier panic").take();
                     let _ = child.kill();
                     let _ = child.wait();
                     break;
@@ -54,7 +54,7 @@ impl Child {
                 _ => thread::sleep(Duration::from_millis(50)),
             }
         }
-        self.job.lock().unwrap().take();
+        self.job.lock().expect("lock poisoned by an earlier panic").take();
     }
 }
 
@@ -88,7 +88,7 @@ fn current(app: &AppHandle, generation: u64) -> bool {
     app.state::<Launch>().generation.load(Ordering::SeqCst) == generation
 }
 pub fn resource_root(app: &AppHandle) -> Option<PathBuf> {
-    app.state::<Launch>().config.lock().unwrap().as_ref().map(|c| c.root.clone())
+    app.state::<Launch>().config.lock().expect("lock poisoned by an earlier panic").as_ref().map(|c| c.root.clone())
 }
 
 /// Resource layout shared with #69: resource_dir/resources; explicit root wins.
@@ -141,9 +141,9 @@ fn progress(line: &str) -> Option<(f64, &str)> {
 fn show_progress(main: &WebviewWindow, done: f64, stage: &str) {
     let js = format!(
         "window.showProgress && window.showProgress({done}, {})",
-        serde_json::to_string(stage).unwrap()
+        serde_json::to_string(stage).expect("strings always serialize")
     );
-    *main.app_handle().state::<StartupPage>().0.lock().unwrap() = Some(js.clone());
+    *main.app_handle().state::<StartupPage>().0.lock().expect("lock poisoned by an earlier panic") = Some(js.clone());
     let _ = main.eval(&js);
 }
 
@@ -153,16 +153,16 @@ fn show_progress(main: &WebviewWindow, done: f64, stage: &str) {
 /// so the address works once, and a new service prints a new one.
 fn launch(main: &WebviewWindow, mut url: Url, generation: u64) {
     url.query_pairs_mut().append_pair("launched", "1");
-    let js = format!("window.launch && window.launch({})", serde_json::to_string(url.as_str()).unwrap());
+    let js = format!("window.launch && window.launch({})", serde_json::to_string(url.as_str()).expect("strings always serialize"));
     // Replayed if the start page (re)loads before it runs; a no-op on the library page, which has no launch().
-    *main.app_handle().state::<StartupPage>().0.lock().unwrap() = Some(js.clone());
+    *main.app_handle().state::<StartupPage>().0.lock().expect("lock poisoned by an earlier panic") = Some(js.clone());
     let _ = main.eval(&js);
     let main = main.clone();
     thread::spawn(move || {
         thread::sleep(LAUNCH_FALLBACK);
         if current(main.app_handle(), generation)
             && on_start_page(&main)
-            && main.app_handle().state::<ErrorPage>().0.lock().unwrap().is_none()
+            && main.app_handle().state::<ErrorPage>().0.lock().expect("lock poisoned by an earlier panic").is_none()
         {
             let _ = main.navigate(url);
         }
@@ -174,7 +174,7 @@ fn start_page() -> Url {
     let home = "http://tauri.localhost/index.html";
     #[cfg(not(windows))]
     let home = "tauri://localhost/index.html";
-    Url::parse(home).unwrap()
+    Url::parse(home).expect("constant URL")
 }
 
 /// Show `js`'s page on the start page: run it there now, or open the start page, which replays it on load.
@@ -247,10 +247,10 @@ pub(crate) fn show_error(main: &WebviewWindow, message: &str, log: &VecDeque<Str
     let tail: Vec<&str> = log.iter().map(String::as_str).collect();
     let js = format!(
         "window.showError && window.showError({}, {})",
-        serde_json::to_string(message).unwrap(),
-        serde_json::to_string(&tail.join("\n")).unwrap()
+        serde_json::to_string(message).expect("strings always serialize"),
+        serde_json::to_string(&tail.join("\n")).expect("strings always serialize")
     );
-    *main.app_handle().state::<ErrorPage>().0.lock().unwrap() = Some(js.clone());
+    *main.app_handle().state::<ErrorPage>().0.lock().expect("lock poisoned by an earlier panic") = Some(js.clone());
     on_start(main, &js);
 }
 
@@ -258,31 +258,31 @@ pub(crate) fn show_error(main: &WebviewWindow, message: &str, log: &VecDeque<Str
 fn show_upgrade(main: &WebviewWindow, name: &str) {
     let js = format!(
         "window.showUpgrade && window.showUpgrade({}, {})",
-        serde_json::to_string(name).unwrap(),
-        serde_json::to_string(illustash_terms::desktop_shell::upgrade_note()).unwrap()
+        serde_json::to_string(name).expect("strings always serialize"),
+        serde_json::to_string(illustash_terms::desktop_shell::upgrade_note()).expect("strings always serialize")
     );
-    *main.app_handle().state::<ErrorPage>().0.lock().unwrap() = Some(js.clone());
+    *main.app_handle().state::<ErrorPage>().0.lock().expect("lock poisoned by an earlier panic") = Some(js.clone());
     on_start(main, &js);
 }
 
 /// A check found the library's data damaged (#212): what to do, with the usual retry and choices, or 「抢救重建」 when
 /// the damage is in source.sqlite (#228); it is replayed like a failure.
 fn show_damage(main: &WebviewWindow, note: &str, rescue: bool) {
-    let js = format!("window.showDamage && window.showDamage({}, {rescue})", serde_json::to_string(note).unwrap());
-    *main.app_handle().state::<ErrorPage>().0.lock().unwrap() = Some(js.clone());
+    let js = format!("window.showDamage && window.showDamage({}, {rescue})", serde_json::to_string(note).expect("strings always serialize"));
+    *main.app_handle().state::<ErrorPage>().0.lock().expect("lock poisoned by an earlier panic") = Some(js.clone());
     on_start(main, &js);
 }
 
 /// Startup stopped before the service was configured: remember why, so a retry repeats it instead of waiting.
 pub(crate) fn blocked(main: &WebviewWindow, message: &str) {
-    *main.app_handle().state::<Launch>().blocked.lock().unwrap() = Some(message.into());
+    *main.app_handle().state::<Launch>().blocked.lock().expect("lock poisoned by an earlier panic") = Some(message.into());
     show_error(main, message, &VecDeque::new());
 }
 
 pub fn page_loaded(main: &WebviewWindow) {
     let app = main.app_handle();
-    let error = app.state::<ErrorPage>().0.lock().unwrap().clone();
-    if let Some(js) = error.or_else(|| app.state::<StartupPage>().0.lock().unwrap().clone()) {
+    let error = app.state::<ErrorPage>().0.lock().expect("lock poisoned by an earlier panic").clone();
+    if let Some(js) = error.or_else(|| app.state::<StartupPage>().0.lock().expect("lock poisoned by an earlier panic").clone()) {
         let _ = main.eval(&js);
     }
 }
@@ -308,7 +308,7 @@ pub fn boot(app: AppHandle, main: WebviewWindow, bridge_port: u16, token: String
         }
     };
     let explicit = args.iter().any(|a| a == "--library" || a.starts_with("--library="));
-    *app.state::<Launch>().config.lock().unwrap() = Some(Config { port, bridge_port, token, root, args });
+    *app.state::<Launch>().config.lock().expect("lock poisoned by an earlier panic") = Some(Config { port, bridge_port, token, root, args });
     if explicit {
         run(&app, &main, None, Start::Open);
     } else if let Some(library) = illustash_terms::desktop_shell::startup_library() {
@@ -349,9 +349,9 @@ fn start_again(app: &AppHandle, library: Option<PathBuf>, start: Start) {
     let Some(main) = app.get_webview_window("main") else { return };
     app.state::<Launch>().generation.fetch_add(1, Ordering::SeqCst);
     app.state::<Child>().stop();
-    app.state::<ErrorPage>().0.lock().unwrap().take();
-    app.state::<StartupPage>().0.lock().unwrap().take();
-    let library = library.or_else(|| app.state::<Launch>().library.lock().unwrap().clone());
+    app.state::<ErrorPage>().0.lock().expect("lock poisoned by an earlier panic").take();
+    app.state::<StartupPage>().0.lock().expect("lock poisoned by an earlier panic").take();
+    let library = library.or_else(|| app.state::<Launch>().library.lock().expect("lock poisoned by an earlier panic").clone());
     let _ = main.navigate(start_page());
     run(app, &main, library, start);
 }
@@ -363,17 +363,17 @@ pub fn welcome(app: &AppHandle, main: &WebviewWindow, create: bool) {
     state["recent"] = illustash_terms::desktop_shell::recent().into();
     state["create"] = create.into();
     let js = format!("window.showWelcome && window.showWelcome({state})");
-    app.state::<ErrorPage>().0.lock().unwrap().take();
-    *app.state::<StartupPage>().0.lock().unwrap() = Some(js.clone());
+    app.state::<ErrorPage>().0.lock().expect("lock poisoned by an earlier panic").take();
+    *app.state::<StartupPage>().0.lock().expect("lock poisoned by an earlier panic") = Some(js.clone());
     on_start(main, &js);
     app.state::<Child>().stop();
 }
 
 fn run(app: &AppHandle, main: &WebviewWindow, library: Option<PathBuf>, start: Start) {
     let generation = app.state::<Launch>().generation.fetch_add(1, Ordering::SeqCst) + 1;
-    let Some(Config { port, bridge_port, token, root, mut args }) = app.state::<Launch>().config.lock().unwrap().clone()
+    let Some(Config { port, bridge_port, token, root, mut args }) = app.state::<Launch>().config.lock().expect("lock poisoned by an earlier panic").clone()
     else {
-        let why = app.state::<Launch>().blocked.lock().unwrap().clone().unwrap_or_else(|| tr("应用没有启动完成"));
+        let why = app.state::<Launch>().blocked.lock().expect("lock poisoned by an earlier panic").clone().unwrap_or_else(|| tr("应用没有启动完成"));
         show_error(main, &tr_with("{why}。处理后请退出并重新打开 Illustash", &[("why", &why)]), &VecDeque::new());
         return;
     };
@@ -403,7 +403,7 @@ fn run(app: &AppHandle, main: &WebviewWindow, library: Option<PathBuf>, start: S
         Start::Upgrade => args.push("--upgrade".to_owned()),
         Start::Rescue => args.push("--rescue-source".to_owned()),
     }
-    *app.state::<Launch>().library.lock().unwrap() = library;
+    *app.state::<Launch>().library.lock().expect("lock poisoned by an earlier panic") = library;
     app.state::<Child>().stopping.store(false, Ordering::SeqCst);
     let (app, main) = (app.clone(), main.clone());
     let script = match std::env::current_exe() {
@@ -452,7 +452,7 @@ fn run(app: &AppHandle, main: &WebviewWindow, library: Option<PathBuf>, start: S
     };
     {
         match illustash_platform::platform_process::DesktopJob::assign(&child) {
-            Ok(job) => *app.state::<Child>().job.lock().unwrap() = Some(job),
+            Ok(job) => *app.state::<Child>().job.lock().expect("lock poisoned by an earlier panic") = Some(job),
             Err(error) => {
                 let _ = child.kill();
                 let _ = child.wait();
@@ -465,7 +465,7 @@ fn run(app: &AppHandle, main: &WebviewWindow, library: Option<PathBuf>, start: S
             }
         }
     }
-    if let Err(error) = child.stdin.as_mut().unwrap().write_all(&[1]) {
+    if let Err(error) = child.stdin.as_mut().expect("stdin is piped").write_all(&[1]) {
         let _ = child.kill();
         let _ = child.wait();
         show_error(
@@ -486,13 +486,13 @@ fn run(app: &AppHandle, main: &WebviewWindow, library: Option<PathBuf>, start: S
     ) {
         thread::spawn(move || {
             for line in BufReader::new(stream).lines().map_while(Result::ok) {
-                *active.lock().unwrap() = Instant::now();
+                *active.lock().expect("lock poisoned by an earlier panic") = Instant::now();
                 // Progress lines are consumed by the start page; the error tail keeps real output.
                 if !on_line(&line) {
                     continue;
                 }
                 eprintln!("{line}");
-                let mut log = log.lock().unwrap();
+                let mut log = log.lock().expect("lock poisoned by an earlier panic");
                 log.push_back(line);
                 if log.len() > 30 {
                     log.pop_front();
@@ -501,7 +501,7 @@ fn run(app: &AppHandle, main: &WebviewWindow, library: Option<PathBuf>, start: S
         });
     }
     let (win, flag) = (main.clone(), ready.clone());
-    pump(child.stdout.take().unwrap(), log.clone(), active.clone(), move |line| {
+    pump(child.stdout.take().expect("stdout is piped"), log.clone(), active.clone(), move |line| {
         if !current(win.app_handle(), generation) {
             return false;
         }
@@ -518,8 +518,8 @@ fn run(app: &AppHandle, main: &WebviewWindow, library: Option<PathBuf>, start: S
         }
         true
     });
-    pump(child.stderr.take().unwrap(), log.clone(), active.clone(), |_| true);
-    *app.state::<Child>().process.lock().unwrap() = Some(child);
+    pump(child.stderr.take().expect("stderr is piped"), log.clone(), active.clone(), |_| true);
+    *app.state::<Child>().process.lock().expect("lock poisoned by an earlier panic") = Some(child);
     thread::spawn(move || {
         let status = loop {
             if !current(&app, generation) || app.state::<Child>().stopping.load(Ordering::SeqCst) {
@@ -527,7 +527,7 @@ fn run(app: &AppHandle, main: &WebviewWindow, library: Option<PathBuf>, start: S
             }
             let outcome = {
                 let state = app.state::<Child>();
-                let mut process = state.process.lock().unwrap();
+                let mut process = state.process.lock().expect("lock poisoned by an earlier panic");
                 let Some(child) = process.as_mut() else {
                     return;
                 };
@@ -542,18 +542,18 @@ fn run(app: &AppHandle, main: &WebviewWindow, library: Option<PathBuf>, start: S
             if let Some(status) = outcome {
                 break status;
             }
-            if !ready.load(Ordering::SeqCst) && active.lock().unwrap().elapsed() > STALL {
+            if !ready.load(Ordering::SeqCst) && active.lock().expect("lock poisoned by an earlier panic").elapsed() > STALL {
                 app.state::<Child>().stop();
                 show_error(
                     &main,
                     &tr("本地服务 30 秒没有任何进展，已停止；可以重试，或选择其他图库"),
-                    &log.lock().unwrap(),
+                    &log.lock().expect("lock poisoned by an earlier panic"),
                 );
                 return;
             }
             thread::sleep(Duration::from_millis(50));
         };
-        app.state::<Child>().job.lock().unwrap().take();
+        app.state::<Child>().job.lock().expect("lock poisoned by an earlier panic").take();
         if !current(&app, generation) || app.state::<Child>().stopping.load(Ordering::SeqCst) {
             return;
         }
@@ -583,7 +583,7 @@ fn run(app: &AppHandle, main: &WebviewWindow, library: Option<PathBuf>, start: S
             Err(e) => tr_with("本地服务异常：{error}；请重新启动应用", &[("error", &e)]),
             _ => unreachable!(),
         };
-        show_error(&main, &why, &log.lock().unwrap());
+        show_error(&main, &why, &log.lock().expect("lock poisoned by an earlier panic"));
     });
 }
 
@@ -654,10 +654,11 @@ mod tests {
             .unwrap();
         let pid = process.id();
         let child = Child::default();
-        *child.process.lock().unwrap() = Some(process);
+        *child.process.lock().expect("lock poisoned by an earlier panic") = Some(process);
         child.stop();
         child.stop();
-        assert!(child.process.lock().unwrap().is_none());
+        assert!(child.process.lock().expect("lock poisoned by an earlier panic").is_none());
+        // SAFETY: kill 的信号 0 只检查进程是否存在，不发送信号。
         assert_eq!(unsafe { libc::kill(pid as i32, 0) }, -1);
     }
     #[cfg(unix)]

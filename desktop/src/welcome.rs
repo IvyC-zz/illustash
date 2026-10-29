@@ -54,14 +54,14 @@ impl Requests {
             return Err(tr("缺少请求编号；请重新启动应用"));
         }
         {
-            let mut seen = self.seen.lock().unwrap();
+            let mut seen = self.seen.lock().expect("lock poisoned by an earlier panic");
             if seen.iter().any(|(s, _)| s == id) {
                 eprintln!("[welcome] 同一请求再次送达，不重复执行");
                 loop {
                     if let Some((_, Some(answer))) = seen.iter().find(|(s, _)| s == id) {
                         return answer.clone();
                     }
-                    seen = self.done.wait(seen).unwrap();
+                    seen = self.done.wait(seen).expect("lock poisoned by an earlier panic");
                 }
             }
             // Only one create or import runs at a time; keep the last few answered ones.
@@ -74,7 +74,7 @@ impl Requests {
             seen.push_back((id.to_owned(), None));
         }
         let answer = work();
-        if let Some(entry) = self.seen.lock().unwrap().iter_mut().find(|(s, _)| s == id) {
+        if let Some(entry) = self.seen.lock().expect("lock poisoned by an earlier panic").iter_mut().find(|(s, _)| s == id) {
             entry.1 = Some(answer.clone());
         }
         self.done.notify_all();
@@ -147,16 +147,16 @@ pub fn welcome_import(
 
 fn import_archive(app: &AppHandle, import: &Import, path: String) -> Result<(), String> {
     let cancel = {
-        let mut slot = import.cancel.lock().unwrap();
+        let mut slot = import.cancel.lock().expect("lock poisoned by an earlier panic");
         if slot.is_some() {
             return Err(tr("已经在导入另一个图库"));
         }
         slot.insert(Arc::new(AtomicBool::new(false))).clone()
     };
-    *import.state.lock().unwrap() = json!({"stage": "reading"});
+    *import.state.lock().expect("lock poisoned by an earlier panic") = json!({"stage": "reading"});
     let state = import.state.clone();
     let report = move |stage: &'static str, count: Option<(u64, u64)>| {
-        let mut state = state.lock().unwrap();
+        let mut state = state.lock().expect("lock poisoned by an earlier panic");
         match count {
             Some((done, total)) => {
                 state["done"] = done.into();
@@ -166,7 +166,7 @@ fn import_archive(app: &AppHandle, import: &Import, path: String) -> Result<(), 
         }
     };
     let result = illustash_terms::desktop_shell::import(&PathBuf::from(path), &cancel, &report);
-    import.cancel.lock().unwrap().take();
+    import.cancel.lock().expect("lock poisoned by an earlier panic").take();
     match result {
         Ok(library) => {
             server::restart(app, Some(library));
@@ -180,13 +180,13 @@ fn import_archive(app: &AppHandle, import: &Import, path: String) -> Result<(), 
 /// The running import's stage and byte counts (`{}` when none runs).
 #[tauri::command]
 pub fn welcome_import_status(import: State<'_, Import>) -> Value {
-    if import.cancel.lock().unwrap().is_some() { import.state.lock().unwrap().clone() } else { json!({}) }
+    if import.cancel.lock().expect("lock poisoned by an earlier panic").is_some() { import.state.lock().expect("lock poisoned by an earlier panic").clone() } else { json!({}) }
 }
 
 /// Stop the running import before its library is published; what it unpacked is removed.
 #[tauri::command]
 pub fn welcome_import_cancel(import: State<'_, Import>) {
-    if let Some(cancel) = import.cancel.lock().unwrap().as_ref() {
+    if let Some(cancel) = import.cancel.lock().expect("lock poisoned by an earlier panic").as_ref() {
         cancel.store(true, Ordering::SeqCst);
     }
 }
@@ -263,6 +263,6 @@ mod tests {
         for i in 0..20 {
             requests.once(&format!("x{i}"), || Ok(Value::Null)).unwrap();
         }
-        assert!(requests.seen.lock().unwrap().len() <= 8);
+        assert!(requests.seen.lock().expect("lock poisoned by an earlier panic").len() <= 8);
     }
 }

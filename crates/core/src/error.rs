@@ -42,6 +42,10 @@ impl fmt::Display for Error {
 impl std::error::Error for Error {}
 
 impl Error {
+    /// `Error::Invalid` 的简写；返回 `Result` 的写法见 [`invalid`]。
+    pub fn invalid(message: impl Into<String>) -> Self {
+        Error::Invalid(message.into())
+    }
     /// What went wrong, for a task's state the person reads: the message alone, without the kind
     /// ("不合法：", "冲突：") that tells the code how to answer it.
     pub fn reason(&self) -> String {
@@ -64,8 +68,9 @@ impl From<std::io::Error> for Error {
     }
 }
 
-pub(crate) fn invalid<T>(message: impl Into<String>) -> Result<T> {
-    Err(Error::Invalid(message.into()))
+/// 以 `Error::Invalid` 失败，供 `return invalid("…")` 一类写法使用。
+pub fn invalid<T>(message: impl Into<String>) -> Result<T> {
+    Err(Error::invalid(message))
 }
 
 /// Preserve legacy OSError text at the two explicit creation/registry boundaries.

@@ -12,9 +12,6 @@ use std::{
 static ACCOUNT_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 pub const PIXIV_EXPIRED: &str = "Pixiv 登录已过期，请到设置页「绑定的账号」重新登录";
 pub const PIXIV_NO_WINDOW: &str = "Pixiv 登录在桌面 app 的登录窗口里，现在不是从桌面 app 启动的";
-fn invalid(message: impl Into<String>) -> Error {
-    Error::Invalid(message.into())
-}
 /// What went wrong with a Pixiv query, for the callers that retry it or take it as a lost login (#204). They branch on
 /// this, never on the words, which stay in the error.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -37,7 +34,7 @@ struct PixivError {
 }
 impl PixivError {
     fn new(kind: Pixiv, message: impl Into<String>) -> Self {
-        PixivError { kind, error: invalid(message) }
+        PixivError { kind, error: Error::invalid(message) }
     }
     /// The desktop app did not answer or refused the call.
     fn unanswered(&self) -> bool {
@@ -96,7 +93,7 @@ fn support() -> Result<PathBuf> {
 }
 fn check(kind: &str) -> Result<()> {
     if !["pixiv", "saucenao"].contains(&kind) {
-        return Err(invalid("未知的账号类型"));
+        return Err(Error::invalid("未知的账号类型"));
     }
     Ok(())
 }
@@ -150,7 +147,7 @@ pub fn desktop_available() -> bool {
 }
 pub fn desktop(method: &str, route: &str, timeout: u64) -> Result<Json> {
     if !desktop_available() {
-        return Err(invalid("不是从 Illustash 桌面 app 启动的，用不了 Pixiv 登录窗口"));
+        return Err(Error::invalid("不是从 Illustash 桌面 app 启动的，用不了 Pixiv 登录窗口"));
     }
     crate::app_desktop::request(method, route, timeout)
 }
@@ -160,21 +157,21 @@ fn read_json(response: ureq::Response) -> Result<Json> {
         .into_reader()
         .take(5 * 1024 * 1024 + 1)
         .read_to_end(&mut bytes)
-        .map_err(|_| invalid("账号服务响应读取失败"))?;
+        .map_err(|_| Error::invalid("账号服务响应读取失败"))?;
     if bytes.len() > 5 * 1024 * 1024 {
-        return Err(invalid("账号服务响应超过限额"));
+        return Err(Error::invalid("账号服务响应超过限额"));
     }
-    let s = std::str::from_utf8(&bytes).map_err(|_| invalid("账号服务响应编码不正确"))?;
-    crate::http_json::parse_python(s).map_err(|_| invalid("账号服务响应不正确"))
+    let s = std::str::from_utf8(&bytes).map_err(|_| Error::invalid("账号服务响应编码不正确"))?;
+    crate::http_json::parse_python(s).map_err(|_| Error::invalid("账号服务响应不正确"))
 }
 /// Authorized query transport for #51; callers must provide explicit network authorization.
 /// A saved login does not imply authorization; app-backed requests never fall back to cookies.
 fn pixiv_get(path: &str, authorized: bool, session: Option<&str>, in_app: bool) -> PixivResult<Json> {
     if !authorized {
-        return Err(invalid("尚未授权联网").into());
+        return Err(Error::invalid("尚未授权联网").into());
     }
     if !path.starts_with("/ajax/") || path.contains(['\r', '\n']) {
-        return Err(invalid("只允许 Pixiv ajax 查询").into());
+        return Err(Error::invalid("只允许 Pixiv ajax 查询").into());
     }
     if in_app {
         let route =
@@ -191,17 +188,17 @@ fn pixiv_get(path: &str, authorized: bool, session: Option<&str>, in_app: bool) 
             || status == 429
             || (status == 503 && reply.get("body").map(Json::text).unwrap_or("").to_lowercase().contains("maintenance"))
         {
-            return Err(invalid("Pixiv 服务拒绝请求").into());
+            return Err(Error::invalid("Pixiv 服务拒绝请求").into());
         }
         if !(200..300).contains(&status) {
             return Err(PixivError::new(Pixiv::WindowFailed, "Pixiv 窗口里的请求失败"));
         }
         return crate::http_json::parse_python(reply.get("body").map(Json::text).unwrap_or(""))
-            .map_err(|_| invalid("Pixiv 响应不正确").into());
+            .map_err(|_| Error::invalid("Pixiv 响应不正确").into());
     }
     let base = match std::env::var("ILLUSTASH_PIXIV_BASE") {
         Ok(base) => {
-            let u = url::Url::parse(&base).map_err(|_| invalid("合成 Pixiv 服务地址不正确"))?;
+            let u = url::Url::parse(&base).map_err(|_| Error::invalid("合成 Pixiv 服务地址不正确"))?;
             if u.scheme() != "http"
                 || u.host_str() != Some("127.0.0.1")
                 || u.port().is_none()
@@ -211,7 +208,7 @@ fn pixiv_get(path: &str, authorized: bool, session: Option<&str>, in_app: bool) 
                 || u.query().is_some()
                 || u.fragment().is_some()
             {
-                return Err(invalid("Pixiv 替身只允许本机带端口 HTTP").into());
+                return Err(Error::invalid("Pixiv 替身只允许本机带端口 HTTP").into());
             }
             base.trim_end_matches('/').to_owned()
         }
@@ -229,12 +226,12 @@ fn pixiv_get(path: &str, authorized: bool, session: Option<&str>, in_app: bool) 
         Ok(r) => Ok(read_json(r)?),
         Err(ureq::Error::Status(401, _)) => Err(PixivError::new(Pixiv::Refused, "Pixiv 没有接受这个登录状态")),
         Err(ureq::Error::Status(404, _)) => Ok(Json::Scalar(Value::Null)),
-        Err(ureq::Error::Status(403 | 429, _)) => Err(invalid("Pixiv 服务拒绝请求").into()),
+        Err(ureq::Error::Status(403 | 429, _)) => Err(Error::invalid("Pixiv 服务拒绝请求").into()),
         Err(ureq::Error::Status(503, response)) => {
             let mut reason = String::new();
             let _ = response.into_reader().take(4096).read_to_string(&mut reason);
             Err(if reason.to_lowercase().contains("maintenance") {
-                invalid("Pixiv 服务拒绝请求").into()
+                Error::invalid("Pixiv 服务拒绝请求").into()
             } else {
                 PixivError::new(Pixiv::Failed, "Pixiv 请求失败")
             })
@@ -317,7 +314,7 @@ fn clean(value: &str) -> Result<String> {
     let re = regex::Regex::new(r"PHPSESSID=([^;\s]+)").expect("constant regular expression is valid");
     let raw = re.captures(value).map(|c| c[1].to_owned()).unwrap_or_else(|| value.trim().to_owned());
     if !regex::Regex::new(r"^\d+_[A-Za-z0-9]+$").expect("constant regular expression is valid").is_match(&raw) {
-        return Err(invalid("PHPSESSID 的格式不对"));
+        return Err(Error::invalid("PHPSESSID 的格式不对"));
     }
     Ok(raw)
 }
@@ -353,7 +350,7 @@ pub fn status() -> Result<Json> {
 pub fn pixiv_binding() -> Result<Value> {
     let _guard = ACCOUNT_LOCK.lock().expect("app_accounts mutex poisoned");
     serde_json::from_str(&meta()?.get("pixiv").cloned().unwrap_or(Json::Object(vec![])).dump())
-        .map_err(|_| invalid("账号元数据格式不正确"))
+        .map_err(|_| Error::invalid("账号元数据格式不正确"))
 }
 fn updated_pixiv(mut meta: Json, who: Option<&Value>, problem: Option<&str>, detail: Option<&str>) -> Json {
     let mut entry = meta.get("pixiv").cloned().unwrap_or(Json::Object(vec![]));
@@ -388,7 +385,7 @@ pub fn mark_pixiv(who: Option<&Value>, problem: Option<&str>, detail: Option<&st
     let m = updated_pixiv(meta()?, who, problem, detail);
     save(&m)?;
     serde_json::from_str(&m.get("pixiv").expect("app_accounts internal invariant").dump())
-        .map_err(|_| invalid("账号元数据格式不正确"))
+        .map_err(|_| Error::invalid("账号元数据格式不正确"))
 }
 /// HTTP mutation is serialized with the current session by the native host. No
 /// background task survives the request, and a switch waits for bounded I/O.
@@ -400,7 +397,7 @@ pub(crate) fn action(library: &Library, action: &str, body: &Json) -> Result<Jso
         if action == "x/import" { None } else { Some(ACCOUNT_LOCK.lock().expect("app_accounts mutex poisoned")) };
     action_inner(library, action, body).map_err(|e| match e {
         Error::Invalid(_) => e,
-        _ => invalid("账号操作失败"),
+        _ => Error::invalid("账号操作失败"),
     })
 }
 fn action_inner(library: &Library, action: &str, body: &Json) -> Result<Json> {
@@ -410,7 +407,7 @@ fn action_inner(library: &Library, action: &str, body: &Json) -> Result<Json> {
         "saucenao" => {
             let key = value.trim();
             if key.len() != 40 || !key.bytes().all(|b| b.is_ascii_hexdigit()) {
-                return Err(invalid("SauceNAO 的 API key 应该是 40 位十六进制字符"));
+                return Err(Error::invalid("SauceNAO 的 API key 应该是 40 位十六进制字符"));
             }
             put("saucenao", key)?;
             let entry = checked(Json::Object(vec![]));
@@ -468,10 +465,10 @@ fn action_inner(library: &Library, action: &str, body: &Json) -> Result<Json> {
             let in_app = app(&meta);
             let s = if in_app { None } else { secret_inner("pixiv")? };
             if !in_app && s.is_none() {
-                return Err(invalid("还没有绑定 Pixiv"));
+                return Err(Error::invalid("还没有绑定 Pixiv"));
             }
             if in_app && !desktop_available() {
-                return Err(invalid(PIXIV_NO_WINDOW));
+                return Err(Error::invalid(PIXIV_NO_WINDOW));
             }
             let mut result = None;
             let mut expired_detail = String::new();
@@ -548,7 +545,7 @@ fn action_inner(library: &Library, action: &str, body: &Json) -> Result<Json> {
             let n = import_archive(library, &expanded)?;
             Ok(Json::object([("new", n.into()), ("path", path.into())]))
         }
-        _ => Err(invalid("未知操作")),
+        _ => Err(Error::invalid("未知操作")),
     }
 }
 fn following_file(path: &Path) -> Result<PathBuf> {
@@ -569,7 +566,7 @@ fn following_file(path: &Path) -> Result<PathBuf> {
         }
     }
     found.sort();
-    found.into_iter().next().ok_or_else(|| invalid("没有找到 data/following.js"))
+    found.into_iter().next().ok_or_else(|| Error::invalid("没有找到 data/following.js"))
 }
 pub fn import_archive(library: &Library, path: &Path) -> Result<i64> {
     const LIMIT: u64 = 64 * 1024 * 1024;
@@ -577,17 +574,17 @@ pub fn import_archive(library: &Library, path: &Path) -> Result<i64> {
     if path.is_dir() {
         fs::File::open(following_file(path)?)?.take(LIMIT + 1).read_to_string(&mut text)?;
     } else {
-        let mut zip = zip::ZipArchive::new(fs::File::open(path)?).map_err(|_| invalid("归档格式不正确"))?;
+        let mut zip = zip::ZipArchive::new(fs::File::open(path)?).map_err(|_| Error::invalid("归档格式不正确"))?;
         let index = (0..zip.len())
             .find(|i| zip.by_index(*i).is_ok_and(|f| f.name().ends_with("data/following.js")))
-            .ok_or_else(|| invalid("归档里没有 data/following.js"))?;
-        zip.by_index(index).map_err(|_| invalid("归档读取失败"))?.take(LIMIT + 1).read_to_string(&mut text)?;
+            .ok_or_else(|| Error::invalid("归档里没有 data/following.js"))?;
+        zip.by_index(index).map_err(|_| Error::invalid("归档读取失败"))?.take(LIMIT + 1).read_to_string(&mut text)?;
     }
     if text.len() as u64 > LIMIT {
-        return Err(invalid("关注列表超过限额"));
+        return Err(Error::invalid("关注列表超过限额"));
     }
-    let (_, data) = text.split_once('=').ok_or_else(|| invalid("关注列表格式不正确"))?;
-    let records: Vec<Value> = serde_json::from_str(data).map_err(|_| invalid("关注列表格式不正确"))?;
+    let (_, data) = text.split_once('=').ok_or_else(|| Error::invalid("关注列表格式不正确"))?;
+    let records: Vec<Value> = serde_json::from_str(data).map_err(|_| Error::invalid("关注列表格式不正确"))?;
     let mut ids = Vec::new();
     for item in records {
         if let Some(id) = item.get("following").and_then(|v| v.get("accountId")) {
@@ -595,13 +592,13 @@ pub fn import_archive(library: &Library, path: &Path) -> Result<i64> {
                 Value::String(s) => s.clone(),
                 Value::Number(n) => n.to_string(),
                 Value::Null => continue,
-                _ => return Err(invalid("关注账号 ID 不正确")),
+                _ => return Err(Error::invalid("关注账号 ID 不正确")),
             };
             if s.is_empty() {
                 continue;
             }
             if !s.bytes().all(|b| b.is_ascii_digit()) {
-                return Err(invalid("关注账号 ID 不正确"));
+                return Err(Error::invalid("关注账号 ID 不正确"));
             }
             ids.push(s);
         }
@@ -611,7 +608,7 @@ pub fn import_archive(library: &Library, path: &Path) -> Result<i64> {
     c.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;")?;
     let version: i64 = c.query_row("PRAGMA user_version", [], |r| r.get(0))?;
     if version > 5 {
-        return Err(invalid("provenance.sqlite 版本比程序新"));
+        return Err(Error::invalid("provenance.sqlite 版本比程序新"));
     }
     let tx = c.transaction()?;
     if version < 5 {
@@ -629,7 +626,7 @@ pub fn import_archive(library: &Library, path: &Path) -> Result<i64> {
     }
     // One prepared bulk statement preserves input order/OR IGNORE semantics,
     // and avoids repeatedly crossing SQLite for existing archive IDs.
-    let data = serde_json::to_string(&ids).map_err(|_| invalid("关注列表格式不正确"))?;
+    let data = serde_json::to_string(&ids).map_err(|_| Error::invalid("关注列表格式不正确"))?;
     let count = tx.execute(
         "INSERT OR IGNORE INTO leads(source,system,key) SELECT 'x_following','x_id',value FROM json_each(?)",
         [data],

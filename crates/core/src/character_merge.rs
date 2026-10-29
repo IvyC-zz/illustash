@@ -1,10 +1,11 @@
 //! 合并两个身份（`Store.merge`）。hybrid 下是一条 `duplicate_of` 决议（交给 character_identity）；
 //! 策略未设置时是破坏式合并，逐行照旧代码，撤销照 `Store._undo_merge`。
 use crate::character_commands::{
-    begin_action, delete_assertion, finish_action, hybrid, invalid, put_assertion, relabel, require_entity, text, At,
+    begin_action, delete_assertion, finish_action, hybrid, put_assertion, relabel, require_entity, text, At,
 };
 use crate::character_entities::{ENTITIES, OF};
 use crate::character_labels::Shown;
+use crate::error::invalid;
 use crate::{character_names, character_projection, Error, Result};
 use rusqlite::{params, Connection, OptionalExtension};
 use serde_json::{json, Value};

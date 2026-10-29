@@ -1,6 +1,5 @@
 //! One-shot research calculator shared by learning (#151) and image relations (#152).
 //! App Research keeps task identity, cancellation, fingerprint checks and formal publication.
-#![cfg_attr(not(test), deny(clippy::unwrap_used))]
 mod discriminate;
 pub mod features;
 mod groups;

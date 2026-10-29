@@ -9,10 +9,6 @@ use std::{fs, path::PathBuf};
 #[cfg(target_os = "macos")]
 #[path = "platform_credentials_macos.rs"]
 mod macos;
-#[cfg(any(target_os = "macos", windows))]
-fn invalid(message: impl Into<String>) -> crate::Error {
-    crate::Error::Invalid(message.into())
-}
 pub fn support() -> Result<PathBuf> {
     // 显式配置时不要求能定位主目录，与原来的求值顺序一致。
     if let Some(configured) = std::env::var_os("ILLUSTASH_APP_SUPPORT") {
@@ -43,7 +39,7 @@ pub fn read(kind: &str) -> Result<Option<String>> {
 pub fn write(kind: &str, value: &str) -> Result<()> {
     if keychain() {
         #[cfg(target_os = "macos")]
-        macos::Store::default().write(kind, value.as_bytes()).map_err(|_| invalid("写入钥匙串失败"))?;
+        macos::Store::default().write(kind, value.as_bytes()).map_err(|_| crate::Error::invalid("写入钥匙串失败"))?;
         #[cfg(not(target_os = "macos"))]
         unreachable!("macOS only");
     } else if cfg!(windows) {
@@ -88,7 +84,8 @@ fn windows_secret(kind: &str) -> Result<String> {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(String::new()),
         Err(e) => return Err(e.into()),
     };
-    String::from_utf8(dpapi::unprotect(&bytes, kind)?).map_err(|_| invalid("Windows 凭据格式无效，请重新绑定"))
+    String::from_utf8(dpapi::unprotect(&bytes, kind)?)
+        .map_err(|_| crate::Error::invalid("Windows 凭据格式无效，请重新绑定"))
 }
 #[cfg(windows)]
 fn windows_put(kind: &str, value: &str) -> Result<()> {
