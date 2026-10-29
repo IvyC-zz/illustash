@@ -1,18 +1,17 @@
-//! Rescuing a damaged source.sqlite inside the app (#228, user decision 2026-10-19).
+//! 在 App 里抢救损坏的 source.sqlite（#228，用户 2026-10-19 决定）。
 //!
-//! The recognition results in source.sqlite can be made again; the picture IDs the curation records in library.sqlite
-//! point at cannot: a folder picture's ID was made at random when it was first scanned. A rescue therefore
+//! source.sqlite 里的识别结果可以重新生成；library.sqlite 里人工记录指向的图片 ID 不能：文件夹图片的 ID 是第一次
+//! 扫描时随机生成的。因此抢救时
 //!
-//! 1. copies every row SQLite can still read into a new file with the damaged file's own schema, keeping IDs and
-//!    rowids, stepping over pages it cannot read (indices, triggers and views are made after the rows);
-//! 2. scans the folder sources into the new file, giving each picture it could not read back the ID it had: by full
-//!    path, then by content, from the rows it did read and from library.sqlite (`assets.src_path` and the
-//!    `folder_hash:<uuid>` records, which every backup of library.sqlite carries as well). Photos IDs are Photos'
-//!    own, so the next sync finds those again by itself;
-//! 3. leaves to recognition the pictures whose results it could not read.
+//! 1. 把 SQLite 还能读出的每一行复制到一个新文件里，新文件用损坏文件自己的 schema，保留 ID 和 rowid，跳过读不出的
+//!    页（索引、触发器和视图在写完行之后再建）；
+//! 2. 把各文件夹来源扫描进新文件，让没能读回的图片拿回原来的 ID：先按完整路径，再按内容，依据是读出的行和
+//!    library.sqlite（`assets.src_path` 以及 `folder_hash:<uuid>` 记录，library.sqlite 的每份备份里也都有）。
+//!    Photos 的 ID 是 Photos 自己的，下一次同步会自己重新找到；
+//! 3. 结果没能读回的图片留给识别。
 //!
-//! Nothing in the package changes until the new file is complete and checked: it is built beside the damaged one, which
-//! then moves to backups/ (kept, never deleted here) as the new one takes its name, when nothing has either open.
+//! 新文件完整建好并检查通过之前，图库包里什么都不变：新文件建在损坏文件旁边；等两个文件都没有被打开时，损坏文件
+//! 移到 backups/（保留，这里从不删除），新文件接替它的名字。
 use crate::app_folder::Earlier;
 use crate::app_integrity::Health;
 use crate::app_library::Library;
@@ -31,35 +30,35 @@ use std::{
     thread::JoinHandle,
 };
 
-/// The new file while it is being built, beside source.sqlite in the package.
+/// 正在建的新文件，在图库包里 source.sqlite 的旁边。
 const BUILDING: &str = "source.rescue.sqlite";
-/// What the folder scans of the new file leave for the next refresh of library.sqlite (`app_folder`'s journal).
+/// 新文件的文件夹扫描留给下一次刷新 library.sqlite 的内容（`app_folder` 的日志）。
 const BUILDING_JOURNAL: &str = "source.rescue.scan-pending.json";
 
-/// Room beyond the damaged file's size that the new file and SQLite's own temporary files may need.
+/// 在损坏文件大小之外，新文件和 SQLite 自己的临时文件可能还需要的空间。
 const SPACE_MARGIN: u64 = 256 << 20;
-/// What the person is told while it runs: the stage and the fraction of the whole rescue.
+/// 运行期间告诉用户的内容：所处阶段，以及占整个抢救的比例。
 pub(crate) type Step<'a> = &'a dyn Fn(&str, f64);
 const READING: &str = "正在抢救识别结果数据库：读出还能读的数据";
 const SCANNING: &str = "正在抢救识别结果数据库：重新扫描来源文件夹";
 const FINISHING: &str = "正在抢救识别结果数据库：检查新数据库";
 
-/// What a rescue did, for the page and the log.
+/// 抢救做了什么，给页面和日志用。
 #[derive(Clone, Debug, Default, PartialEq)]
 pub(crate) struct Report {
-    /// Tables in which some rows could not be read.
+    /// 有些行读不出的表。
     pub(crate) damaged: Vec<String>,
-    /// Not even the list of tables could be read: the new file started from an empty source.
+    /// 连表的清单都读不出：新文件从空的源库开始。
     pub(crate) schema_lost: bool,
-    /// Pictures read back from the damaged file.
+    /// 从损坏文件里读回的图片数。
     pub(crate) salvaged: i64,
-    /// Pictures the scans gave back their earlier ID.
+    /// 扫描时拿回原来 ID 的图片数。
     pub(crate) kept: i64,
-    /// Pictures the scans found under a new ID: they had none on record.
+    /// 扫描时以新 ID 找到的图片数：记录里没有它们的 ID。
     pub(crate) new: i64,
-    /// Pictures waiting for recognition in the new file.
+    /// 新文件里等待识别的图片数。
     pub(crate) pending: i64,
-    /// Where the damaged file went (after `install`).
+    /// 损坏文件去了哪里（`install` 之后）。
     pub(crate) damaged_copy: Option<PathBuf>,
 }
 impl Report {
@@ -82,27 +81,27 @@ impl Report {
     }
 }
 
-/// A complete, checked new source.sqlite waiting beside the damaged one.
+/// 一个完整、检查过的新 source.sqlite，在损坏文件旁边等着。
 #[derive(Clone, Debug)]
 pub(crate) struct Rebuilt {
     package: PathBuf,
     pub(crate) report: Report,
 }
 
-/// Removes what an unfinished rescue left in the package.
+/// 删掉没完成的抢救留在图库包里的东西。
 fn discard(package: &Path) {
     for name in [BUILDING.to_owned(), format!("{BUILDING}-journal"), BUILDING_JOURNAL.to_owned()] {
         let _ = fs::remove_file(package.join(name));
     }
 }
 
-/// The damaged file's layout as SQLite lists it, read on a connection of its own.
+/// SQLite 列出的损坏文件的结构，用单独的连接读取。
 struct Schema {
     page_size: i64,
     auto_vacuum: i64,
     user_version: i64,
     application_id: i64,
-    /// (type, name, sql) in the file's own order.
+    /// (type, name, sql)，按文件自己的顺序。
     entries: Vec<(String, String, String)>,
 }
 fn read_schema(path: &Path) -> Result<Schema> {
@@ -121,8 +120,8 @@ fn read_schema(path: &Path) -> Result<Schema> {
     Ok(schema)
 }
 
-/// Builds the new file beside the damaged source.sqlite of `library`; nothing else in the package changes. Every
-/// folder source must be readable: a picture of one that is not would be scanned later, under a new ID.
+/// 在 `library` 损坏的 source.sqlite 旁边建新文件；图库包里其他东西都不变。每个文件夹来源都必须可读：
+/// 不可读的来源里的图片会在之后以新 ID 被扫描进来。
 pub(crate) fn rebuild(library: &Library, reference: Option<&Path>, stop: &AtomicBool, step: Step) -> Result<Rebuilt> {
     let package = library.instance_path().to_owned();
     discard(&package);
@@ -151,8 +150,7 @@ fn build(library: &Library, reference: Option<&Path>, stop: &AtomicBool, step: S
             )));
         }
     }
-    // The new file is built beside the damaged one: about as large, its indices included. Said before any reading,
-    // instead of SQLite's "disk is full" partway through.
+    // 新文件建在损坏文件旁边：大小差不多，含索引。在读任何东西之前就说明，而不是中途让 SQLite 报「disk is full」。
     let needed = fs::metadata(library.source())?.len().saturating_add(SPACE_MARGIN);
     let available = crate::platform_filesystem::available_space(library.instance_path())?;
     if needed > available {
@@ -182,7 +180,7 @@ fn build(library: &Library, reference: Option<&Path>, stop: &AtomicBool, step: S
     if report.schema_lost {
         crate::app_create::initialize_source(&target, reference)?;
     } else if let Some(reference) = reference {
-        // The character tables came from the reference library: what could not be read comes back from there.
+        // 角色表来自参考图库：读不出的部分从那里取回。
         let lost = report.damaged.iter().filter(|t| ["characters", "character_aliases"].contains(&t.as_str()));
         let lost = lost.cloned().collect::<Vec<_>>();
         if !lost.is_empty() {
@@ -218,7 +216,7 @@ fn build(library: &Library, reference: Option<&Path>, stop: &AtomicBool, step: S
     Ok(report)
 }
 
-/// Rows of every table the damaged file still lists, then its indices, triggers and views.
+/// 损坏文件仍列出的每张表的行，然后是它的索引、触发器和视图。
 fn salvage(
     c: &mut Connection,
     damaged: &Path,
@@ -228,7 +226,7 @@ fn salvage(
     report: &mut Report,
 ) -> Result<()> {
     c.execute_batch(&format!("PRAGMA page_size={}; PRAGMA auto_vacuum={};", schema.page_size, schema.auto_vacuum))?;
-    // The damaged file has a connection of its own: what SQLite meets there stays out of the new file's writes.
+    // 损坏文件用单独的连接：SQLite 在那里遇到的问题不会混进新文件的写入。
     let old = crate::app_library::read_connection(damaged)?;
     let tables = schema
         .entries
@@ -237,12 +235,12 @@ fn salvage(
         .collect::<Vec<_>>();
     let tx = c.transaction()?;
     for (_, name, sql) in &tables {
-        // A virtual table makes its own shadow tables, which the list then names again.
+        // 虚拟表会自己建影子表，而清单里随后又会列出这些影子表。
         if let Err(error) = tx.execute_batch(sql) {
             eprintln!("抢救时没能建表 {name}：{error}");
         }
     }
-    // Each table's share of the reading is its span of rowids: the rows it may hold.
+    // 每张表在读取进度中的份额是它的 rowid 跨度：它可能有的行数。
     let spans = tables
         .iter()
         .map(|(_, name, sql)| Table::new(&old, name, sql).map(|t| t.span()))
@@ -275,13 +273,13 @@ fn salvage(
     Ok(())
 }
 
-/// One table of the damaged file and how its rows are read back.
+/// 损坏文件里的一张表，以及怎样读回它的行。
 struct Table {
     name: String,
     columns: Vec<String>,
-    /// Ordinary tables are read in rowid order, so a read can resume past an unreadable page.
+    /// 普通表按 rowid 顺序读，这样读取可以越过读不出的页继续。
     rowid: bool,
-    /// The rowid is a column of its own (no INTEGER PRIMARY KEY names it), copied as well.
+    /// rowid 是单独的一列（没有 INTEGER PRIMARY KEY 指代它），也一并复制。
     hidden_rowid: bool,
     first: Option<i64>,
     last: Option<i64>,
@@ -318,7 +316,7 @@ impl Table {
             _ => 1.0,
         }
     }
-    /// Copies the readable rows of `old` into the same table of `c`; true when some could not be read.
+    /// 把 `old` 里可读的行复制到 `c` 的同名表；有读不出的行时返回 true。
     fn copy(&self, old: &Connection, c: &Connection, stop: &AtomicBool, progress: &mut dyn FnMut(f64)) -> Result<bool> {
         if self.columns.is_empty() {
             return Ok(false);
@@ -336,7 +334,7 @@ impl Table {
         ))?;
         let columns = self.columns.iter().map(|n| crate::app_create::quote_id(n)).collect::<Vec<_>>().join(",");
         if !self.rowid {
-            // No order to resume in: the rows before the first unreadable one.
+            // 没有可以接着读的顺序：只取第一行读不出的行之前的那些。
             let mut select = old.prepare(&format!("SELECT {columns} FROM {quoted}"))?;
             let mut rows = select.query([])?;
             loop {
@@ -362,7 +360,7 @@ impl Table {
         let fraction =
             |at: i64| if last > first { ((at as f64 - first) / (last - first)).clamp(0.0, 1.0) } else { 0.0 };
         let mut after = i64::MIN;
-        // The row a resume pointed at: when it cannot be read either, it is passed over.
+        // 续读指向的那一行：如果它也读不出，就跳过它。
         let mut resumed_at = None;
         let mut lost = false;
         let mut count = 0u64;
@@ -415,8 +413,8 @@ impl Table {
     }
 }
 
-/// Whether a salvaged row went into the new file. The new file is sound, so SQLite reporting damage while writing it
-/// means the row's own content (read from the damaged file only as it is written) is unreadable.
+/// 抢救出的一行是否写进了新文件。新文件是完好的，所以写入时 SQLite 报损坏，说明这一行自己的内容（只在写入时才从
+/// 损坏文件里读取）读不出。
 fn written(result: rusqlite::Result<usize>) -> Result<bool> {
     match result {
         Ok(_) => Ok(true),
@@ -425,12 +423,12 @@ fn written(result: rusqlite::Result<usize>) -> Result<bool> {
     }
 }
 
-/// After a read failed past rowid `after`: the smallest rowid beyond it that a seek can reach, if any. Seeks start at
-/// growing distances until one lands past the damage, then narrow down to where readable rows begin again.
+/// 在 rowid `after` 之后读取失败后：seek 能到达的大于它的最小 rowid（如果有）。seek 先以越来越大的距离试探，
+/// 直到落在损坏之后，再逐步收窄到可读的行重新开始的位置。
 fn resume(seek: &mut rusqlite::Statement, after: i64) -> Result<Option<i64>> {
     let mut probe =
         |from: i64| -> Option<Option<i64>> { seek.query_row([from], |r| r.get::<_, i64>(0)).optional().ok() };
-    // Distances and midpoints in i128: the rowid range spans all of i64.
+    // 距离和中点用 i128 计算：rowid 的范围覆盖整个 i64。
     let (mut low, mut high, mut found) = (after as i128, None, None);
     let mut distance: i128 = 1;
     loop {
@@ -464,7 +462,7 @@ fn resume(seek: &mut rusqlite::Statement, after: i64) -> Result<Option<i64>> {
     Ok(found)
 }
 
-/// Rows of `tables` from the reference library, matching columns only, where the rescue could not read them.
+/// 抢救没能读出的地方，从参考图库取 `tables` 的行，只取匹配的列。
 fn refill(target: &Path, reference: &Path, tables: &[String]) -> Result<()> {
     let c = crate::sqlite::open_with_flags(target, OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_URI)?;
     c.execute("ATTACH DATABASE ? AS ref", [crate::app_create::file_uri(reference)?])?;
@@ -488,8 +486,8 @@ fn refill(target: &Path, reference: &Path, tables: &[String]) -> Result<()> {
     Ok(())
 }
 
-/// What the new file and library.sqlite know about earlier IDs. Folder bookkeeping rows whose picture row was lost
-/// cannot stand: they leave the new file, and their picture comes back through the scan under the same ID.
+/// 新文件和 library.sqlite 对原有 ID 知道些什么。图片行已丢失的文件夹记账行不能留下：它们离开新文件，
+/// 对应的图片经扫描以同一个 ID 回来。
 fn earlier(target: &Path, library: &Library, folders: &[Value]) -> Result<Earlier> {
     let mut earlier = Earlier::default();
     let add = |earlier: &mut Earlier, uuid: String, path: Option<String>, hash: Option<String>| {
@@ -501,7 +499,7 @@ fn earlier(target: &Path, library: &Library, folders: &[Value]) -> Result<Earlie
             earlier.by_hash.entry(hash).or_default().push(uuid);
         }
     };
-    // library.sqlite first: its curation records point at these IDs.
+    // 先读 library.sqlite：它的人工记录指向这些 ID。
     let lib = crate::app_library::read_connection(&library.db())?;
     let hashes = lib
         .prepare("SELECT substr(key,13),value FROM meta WHERE key LIKE 'folder\\_hash:%' ESCAPE '\\'")?
@@ -550,9 +548,8 @@ fn earlier(target: &Path, library: &Library, folders: &[Value]) -> Result<Earlie
     Ok(earlier)
 }
 
-/// After the scans: folder pictures no scan found are gone, as a scan would mark them; results of pictures no record
-/// knows are dropped; and pictures without results are recognized again, so no ledger entry or package record may say
-/// they were.
+/// 扫描之后：没有被任何扫描找到的文件夹图片按扫描的做法标为已消失；没有任何记录认识的图片的结果丢弃；
+/// 没有结果的图片重新识别，所以不能有台账条目或包记录说它们已识别过。
 fn tidy(target: &Path, library: &Library, folders: &[Value], report: &mut Report) -> Result<()> {
     let mut c = crate::sqlite::open_with_flags(target, OpenFlags::SQLITE_OPEN_READ_WRITE)?;
     let lib = crate::app_library::read_connection(&library.db())?;
@@ -587,9 +584,8 @@ fn tidy(target: &Path, library: &Library, folders: &[Value], report: &mut Report
             "DELETE FROM {table} WHERE NOT EXISTS(SELECT 1 FROM assets a WHERE a.uuid={table}.uuid) AND NOT EXISTS(SELECT 1 FROM temp.rescue_known k WHERE k.uuid={table}.uuid)"
         ))?;
     }
-    // The recognition ledger: an entry for a picture without results makes its new results look already imported,
-    // and a package record that covers one makes the same package recognized again (same model, same pictures, same
-    // digest) a duplicate that imports nothing.
+    // 识别台账：没有结果的图片若有台账条目，它的新结果会看起来已经导入过；覆盖了这类图片的包记录，会让同一个包再次
+    // 识别（同一模型、同样的图片、同样的摘要）时被当作重复，什么也不导入。
     let table = |name: &str| -> Result<bool> {
         Ok(tx.query_row("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name=?)", [name], |r| {
             r.get(0)
@@ -615,8 +611,8 @@ fn tidy(target: &Path, library: &Library, folders: &[Value], report: &mut Report
     Ok(())
 }
 
-/// Puts the rebuilt file in place of the damaged source.sqlite, which moves to backups/. Nothing may have either file
-/// open (the caller owns the package and has closed its connections). The record then has the damage cleared.
+/// 把重建好的文件放到损坏的 source.sqlite 的位置，损坏文件移到 backups/。两个文件都不能被打开（调用方持有图库包，
+/// 并已关闭它的连接）。之后记录里的损坏标记被清除。
 pub(crate) fn install(library: &Library, health: &Health, rebuilt: Rebuilt) -> Result<Report> {
     let package = library.instance_path();
     if rebuilt.package != package {
@@ -647,7 +643,7 @@ pub(crate) fn install(library: &Library, health: &Health, rebuilt: Rebuilt) -> R
         }
     }
     if let Err(error) = fs::rename(&building, &source) {
-        // The damaged file goes back: the package is as it was.
+        // 损坏文件放回去：图库包恢复原样。
         let _ = fs::rename(&kept, &source);
         return Err(error.into());
     }
@@ -666,7 +662,7 @@ pub(crate) fn install(library: &Library, health: &Health, rebuilt: Rebuilt) -> R
     Ok(report)
 }
 
-/// The rescue's folder scans leave changed pictures for the next refresh of library.sqlite, under the new file's name.
+/// 抢救的文件夹扫描把改变的图片留给下一次刷新 library.sqlite，记在新文件的名字下。
 fn merge_journal(package: &Path, source: &Path) -> Result<()> {
     let building = package.join(BUILDING_JOURNAL);
     if !building.exists() {
@@ -685,7 +681,7 @@ fn merge_journal(package: &Path, source: &Path) -> Result<()> {
     Ok(())
 }
 
-/// A rescue of the package `library`, owned by the caller, from start to finish: built, then put in place.
+/// 对调用方持有的图库包 `library` 做一次从头到尾的抢救：先建好，再放到位。
 pub(crate) fn rescue(
     library: &Library,
     health: &Health,
@@ -704,8 +700,7 @@ struct State {
     error: Option<String>,
 }
 
-/// A session's rescue in the background (#228): the session stays stopped meanwhile, writing nothing; the new file is
-/// put in place when the page opens the library again.
+/// 会话在后台进行的抢救（#228）：这期间会话保持停止，什么都不写；页面再次打开图库时，新文件放到位。
 #[derive(Default)]
 pub(crate) struct Rescuer {
     stop: Arc<AtomicBool>,
@@ -716,7 +711,7 @@ impl Rescuer {
     pub(crate) fn running(&self) -> bool {
         self.thread.as_ref().is_some_and(|thread| !thread.is_finished())
     }
-    /// Starts building; false when a rescue is running or one is ready.
+    /// 开始建新文件；已有抢救在运行或已有建好的结果时返回 false。
     pub(crate) fn start(&mut self, library: &Library, reference: Option<PathBuf>) -> bool {
         if self.running() || self.state.lock().expect("rescue state lock poisoned").ready.is_some() {
             return false;
@@ -750,11 +745,11 @@ impl Rescuer {
         }));
         true
     }
-    /// A finished rebuild waits to be put in place.
+    /// 建好的重建结果等着放到位。
     pub(crate) fn ready(&self) -> bool {
         !self.running() && self.state.lock().expect("rescue state lock poisoned").ready.is_some()
     }
-    /// The finished rebuild of `package`, for putting it in place.
+    /// `package` 建好的重建结果，用来放到位。
     pub(crate) fn take(&mut self, package: &Path) -> Option<Rebuilt> {
         if self.running() {
             return None;
@@ -766,7 +761,7 @@ impl Rescuer {
             None
         }
     }
-    /// Stops a running rescue and drops a finished one that was never put in place.
+    /// 停止正在运行的抢救，并丢弃从未放到位的已完成结果。
     pub(crate) fn stop(&mut self) {
         self.stop.store(true, Ordering::SeqCst);
         if let Some(thread) = self.thread.take() {
@@ -776,7 +771,7 @@ impl Rescuer {
             discard(&rebuilt.package);
         }
     }
-    /// For `GET /api/integrity`: `{running: {stage, done} | null, ready, error}`.
+    /// 给 `GET /api/integrity` 用：`{running: {stage, done} | null, ready, error}`。
     pub(crate) fn info(&self) -> Json {
         let state = self.state.lock().expect("rescue state lock poisoned");
         let running = match state.running.as_ref().filter(|_| self.running()) {

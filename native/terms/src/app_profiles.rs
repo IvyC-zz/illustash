@@ -1,4 +1,4 @@
-//! Native character profile HTTP orchestration. Core mutations and projections share one transaction.
+//! 原生的角色资料 HTTP 编排。核心改动和投影共用一个事务。
 use crate::error::invalid;
 use crate::{
     app_commands::{core_error, initialized, last_action},
@@ -56,7 +56,7 @@ fn oc(v: &Value) -> Result<(String, String)> {
 fn shown(c: &Connection, id: &str) -> Result<Json> {
     http_read::display(c, Json::object([("id", id.into())]))
 }
-/// The fields of `body` a handler reads, and of each object in its `items` (/api/local-links) the `item_fields`.
+/// handler 读取的 `body` 字段；`items`（/api/local-links）里每个对象则取 `item_fields`。
 fn picked(body: &Json, fields: &[&str], item_fields: &[&str]) -> Json {
     fn pick(v: &Json, keys: &[&str]) -> Json {
         Json::object(keys.iter().filter_map(|k| v.get(k).map(|v| (*k, v.clone()))))
@@ -71,7 +71,7 @@ fn picked(body: &Json, fields: &[&str], item_fields: &[&str]) -> Json {
     }
     selected
 }
-/// The `items` of /api/local-links: 1–200 objects.
+/// /api/local-links 的 `items`：1–200 个对象。
 fn link_items(v: &Value) -> Result<&Vec<Value>> {
     match v["items"].as_array().filter(|a| (1..=200).contains(&a.len()) && a.iter().all(Value::is_object)) {
         Some(items) => Ok(items),
@@ -139,33 +139,33 @@ fn copyright(c: &Connection, tag: &str, prepared: Option<&Prepared>) -> Result<S
 fn run(c: &Connection, args: &Value) -> Result<Value> {
     crate::character_commands::command(c, args).map_err(core_error)
 }
-/// The `id` a core command answers with.
+/// 核心命令回复里的 `id`。
 fn made(out: &Value) -> String {
     out["id"].as_str().expect("validated internal text field").to_owned()
 }
-/// Name requests share the mutation transaction; the native updater acknowledges successful application.
+/// 名称请求与改动共用事务；原生更新器确认应用成功。
 fn names(c: &Connection, id: Option<&str>) -> Result<()> {
     let kind = format!("names:{}", crate::character_json::dump(&json!({"entity":id,"refresh":false}), false));
     c.execute("INSERT INTO backend_effects(kind) VALUES (?)", [kind])?;
     Ok(())
 }
-/// What a request answers once its transaction is committed.
+/// 事务提交后请求的回复。
 enum Reply {
-    /// An identity that already existed, rendered in the transaction; nothing changed, so no names to register.
+    /// 早已存在的身份，在事务内渲染；什么都没改，所以没有要登记的名称。
     Existing(Json),
-    /// The identity's display, from these fields or, without them, from the stored identity.
+    /// 身份的显示内容，取自这些字段；没有字段时取自已存的身份。
     Shown(String, Option<Json>),
-    /// The profile saved, with its undo.
+    /// 保存好的资料，附带撤销。
     Saved(String),
-    /// The identities linked, with their undo.
+    /// 关联好的身份，附带撤销。
     Linked(Json),
-    /// The work, as /api/works lists it.
+    /// 作品，与 /api/works 列出的形式相同。
     Work(String),
-    /// The core command's own answer.
+    /// 核心命令自己的回复。
     Answer(Json),
 }
 impl Reply {
-    /// The reply after commit; names are registered again, so it shows what the request wrote.
+    /// 提交后的回复；名称会重新登记，所以显示的是请求写入的内容。
     fn render(self, c: &Connection) -> Result<Json> {
         match self {
             Reply::Existing(v) | Reply::Answer(v) => Ok(v),
@@ -184,7 +184,7 @@ impl Reply {
 }
 pub(crate) fn request(c: &mut Connection, body: &Json, path: &str, prepared: Option<&Prepared>) -> Result<Json> {
     initialized(c)?;
-    // The Python handlers consume only these fields; unused NaN/large integers are irrelevant.
+    // Python handler 只用这些字段；用不到的 NaN 和大整数无关紧要。
     let linked = body.get("tag").is_some_and(crate::app_service::truthy);
     let fields: &[&str] = match path {
         "/api/entities" if linked => &["tag", "typed"],
@@ -225,15 +225,14 @@ pub(crate) fn request(c: &mut Connection, body: &Json, path: &str, prepared: Opt
     http_read::register_names(c)?;
     reply.render(c)
 }
-/// The first of `sql`'s identities, displayed, if there is one.
+/// `sql` 查到的第一个身份，带显示内容；可能没有。
 fn existing(c: &Connection, sql: &str, args: &[&str]) -> Result<Option<Reply>> {
     match http_read::rows(c, sql, args)?.into_iter().next() {
         Some(row) => Ok(Some(Reply::Existing(http_read::display(c, row)?))),
         None => Ok(None),
     }
 }
-/// The identity a Danbooru tag belongs to; when none does, it is made, with its work's copyright and the typed name
-/// as an alias.
+/// Danbooru tag 所属的身份；还没有时新建一个，带上其作品的 copyright，并把输入的名字作为别名。
 fn linked_entity(c: &Connection, v: &Value, prepared: Option<&Prepared>) -> Result<Reply> {
     let t = tag(&v["tag"])?;
     let id = if let Some(owner) = crate::character_profile::tag_owner(c, &t, None)? {
@@ -246,11 +245,11 @@ fn linked_entity(c: &Connection, v: &Value, prepared: Option<&Prepared>) -> Resu
         let readable = crate::names_view::readable(&cp, false);
         made(&run(c, &json!({"op":"create_linked","tag":t,"alias":alias,"copyright":cp,"readable":readable}))?)
     };
-    // Render only after after_write has rebuilt the display projection.
+    // 等 after_write 重建了显示投影之后才渲染。
     names(c, Some(&id))?;
     Ok(Reply::Shown(id, None))
 }
-/// The next free «原创角色 N» among the names people gave.
+/// 用户起的名字里下一个没被占用的«原创角色 N»。
 fn next_oc_name(c: &Connection) -> Result<String> {
     let taken = http_read::strings(
         c,
@@ -265,7 +264,7 @@ fn next_oc_name(c: &Connection) -> Result<String> {
         .find(|n| !taken.contains(n))
         .expect("app_profiles internal invariant"))
 }
-/// A named identity: an unlinked one already called so (or one linked under that tag or alias), else a new one.
+/// 有名字的身份：已叫这个名字的未关联身份（或以该 tag 或别名关联的身份），否则新建一个。
 fn new_entity(c: &Connection, v: &Value) -> Result<Reply> {
     let (kind, artist) = oc(v)?;
     let name = if kind == "oc" && (v["name"].is_null() || v["name"] == "") {
@@ -309,7 +308,7 @@ fn new_entity(c: &Connection, v: &Value) -> Result<Reply> {
     ]);
     Ok(Reply::Shown(id, Some(fields)))
 }
-/// The one shared original character, made the first time.
+/// 唯一一个共用的原创角色，第一次用到时新建。
 fn shared_oc(c: &Connection) -> Result<Reply> {
     let sql = format!(
         "SELECT e.id,entity_name(e.id) AS name,e.kind,e.artist
@@ -332,8 +331,8 @@ fn shared_oc(c: &Connection) -> Result<Reply> {
     Ok(Reply::Shown(id, Some(fields)))
 }
 fn profile(c: &Connection, mut v: Value, prepared: Option<&Prepared>) -> Result<Reply> {
-    // A work chosen as new ({"create": name}) or from a Danbooru tag ({"tag": tag}) is made in this
-    // same transaction: a failed profile write leaves no orphan work, and one save is one request.
+    // 新建的作品（{"create": name}）或按 Danbooru tag 选的作品（{"tag": tag}）在同一个事务里建立：
+    // 资料写入失败不会留下孤立的作品，保存一次就是一个请求。
     if v["work"].is_object() {
         let work = v["work"].take();
         let mut w = json!({"op":"edit_work","ident":null,"id":null});
@@ -365,7 +364,7 @@ fn profile(c: &Connection, mut v: Value, prepared: Option<&Prepared>) -> Result<
 }
 fn local_links(c: &Connection, v: &Value, prepared: Option<&Prepared>) -> Result<Reply> {
     let mut plan = Vec::new();
-    // Validate the entire plan before external lookups, matching _link_args.
+    // 在外部查询之前校验整个计划，与 _link_args 一致。
     for item in link_items(v)? {
         plan.push((item["id"].clone(), tag(&item["tag"])?));
     }

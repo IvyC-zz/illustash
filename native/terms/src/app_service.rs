@@ -1,4 +1,4 @@
-//! In-process application lifecycle. Transport framing and security stay in app_http.
+//! 进程内的应用生命周期。传输分帧和安全仍在 app_http。
 use crate::http_json::Json;
 use crate::{app_library::Library, Error, Result};
 use std::{
@@ -8,13 +8,12 @@ use std::{
         Arc, RwLock,
     },
 };
-/// The host that opened a physical package owns it until it switches away, shuts down or exits: an OS
-/// file lock, which the system drops with the process, so a crash never leaves the package locked. A
-/// second host (or the same package through another alias) is refused instead of treating the active
-/// owner's running work as left over from a crash.
+/// 打开某个物理图库包的宿主持有它，直到切换走、关闭或退出：用的是操作系统的文件锁，进程结束时系统会释放它，
+/// 所以崩溃后图库包绝不会一直被锁着。第二个宿主（或通过另一个别名打开同一个图库包）会被拒绝，而不是把当前持有者
+/// 正在进行的工作当成崩溃留下的残余。
 ///
-/// The owner also keeps the package's integrity record (#212): opened when the session starts, closed when it ends
-/// normally, so a record still open at the next opening means the last session did not end normally.
+/// 持有者还负责图库包的完整性记录（#212）：会话开始时打开，正常结束时关闭，所以下次打开时记录仍处于打开状态，
+/// 就说明上一次会话没有正常结束。
 pub(crate) struct Owner {
     _lock: std::fs::File,
     pub(crate) health: Arc<crate::app_integrity::Health>,
@@ -41,7 +40,7 @@ impl Owner {
     }
 }
 impl Drop for Owner {
-    /// Released by a switch, a shutdown or dropping the service: a normal end, unless a panic is unwinding.
+    /// 切换、关闭或丢弃服务时释放：这是正常结束，除非正处于 panic 展开中。
     fn drop(&mut self) {
         if !std::thread::panicking() {
             self.health.closed();
@@ -49,17 +48,16 @@ impl Drop for Owner {
     }
 }
 
-/// Opens `path` for a session (#212). The package is validated without the full integrity checks, then owned, and
-/// checked in full only when its last session did not end normally or damage is on record; damage refuses it.
-/// `current` is the session's own package and owner: reopening that package keeps its ownership. Opening reports
-/// the checks it runs through `progress`.
+/// 为会话打开 `path`（#212）。先校验图库包但不做完整性全检，然后持有它；只有上一次会话没有正常结束或记录里有损坏时
+/// 才做全检；有损坏就拒绝打开。`current` 是会话自己的图库包和持有者：重新打开同一个图库包时保留其持有权。
+/// 打开时通过 `progress` 报告正在做的检查。
 pub(crate) fn open_owned(
     path: &Path,
     current: Option<(&Library, &Arc<Owner>)>,
     progress: Option<crate::app_library::Progress>,
 ) -> Result<(Library, Arc<Owner>)> {
     let opened = Library::open_deferring_checks(path);
-    // SQLite may meet the damage while reading versions; the full checks then say which database it is in.
+    // SQLite 可能在读取版本时就遇到损坏；之后的全检会说明损坏在哪个数据库里。
     let corrupt = match &opened {
         Err(Error::Sql(e)) => crate::app_library::corruption(e).is_some(),
         _ => false,
@@ -92,9 +90,8 @@ pub(crate) fn open_owned(
     owner.health.opened(checked)?;
     Ok((library, owner))
 }
-/// Rescues the damaged source.sqlite of `path` before it is opened (#228): owns the package (keeping the session's own
-/// ownership when it is that package), builds the new file and puts it in place. Only damage on record in
-/// source.sqlite is rescued; damaged library.sqlite keeps its own guidance.
+/// 在打开 `path` 之前抢救它损坏的 source.sqlite（#228）：持有图库包（是会话自己的图库包时沿用会话的持有权），
+/// 建好新文件并放到位。只抢救记录在案的 source.sqlite 损坏；library.sqlite 损坏时仍按它自己的提示处理。
 pub(crate) fn rescue_package(
     path: &Path,
     current: Option<(&Library, &Arc<Owner>)>,
@@ -110,7 +107,7 @@ pub(crate) fn rescue_package(
     }
     crate::app_rescue::rescue(&library, &owner.health, reference, &AtomicBool::new(false), step)
 }
-/// A package opened through the full checks (an explicit upgrade), owned for a session.
+/// 经过完整检查打开的图库包（显式升级），为会话持有。
 pub(crate) fn own_checked(library: Library) -> Result<(Library, Arc<Owner>)> {
     let owner = Owner::claim(&library)?;
     owner.health.opened(&crate::app_integrity::Database::BOTH)?;
@@ -125,7 +122,7 @@ fn claim_or_reuse(library: &Library, current: Option<(&Library, &Arc<Owner>)>) -
 
 pub(crate) struct Session {
     pub(crate) library: Library,
-    /// Released when the session closes (switch or shutdown), not only when the service is dropped.
+    /// 在会话关闭（切换或关闭）时释放，而不只是在服务被丢弃时。
     pub(crate) owner: Option<Arc<Owner>>,
     pub(crate) token: String,
     pub(crate) generation: u64,
@@ -136,18 +133,17 @@ pub(crate) struct Session {
     pub(crate) auto_sync: bool,
     pub(crate) research: crate::app_research::Research,
     pub(crate) onboarding: crate::app_onboarding::Onboarding,
-    /// Why this library could not be listed among the recent ones when it was opened (#176). Listing only spares
-    /// picking it again next time, so the library opens anyway and the page says so once.
+    /// 打开这个图库时它为什么没能列入最近使用的图库（#176）。列入只是省得下次再选一遍，所以图库照样打开，页面提示一次。
     pub(crate) unlisted: Option<String>,
-    /// The pre-upgrade backup when this library was upgraded on being opened (#193): the page says where, once.
+    /// 这个图库在打开时被升级过的话，升级前的备份（#193）：页面提示一次备份在哪里。
     pub(crate) upgraded: Option<String>,
-    /// Background integrity checks (#212).
+    /// 后台完整性检查（#212）。
     pub(crate) checker: crate::app_integrity::Checker,
-    /// Rescuing a damaged source.sqlite in the background (#228).
+    /// 在后台抢救损坏的 source.sqlite（#228）。
     pub(crate) rescue: crate::app_rescue::Rescuer,
-    /// What the rescue did when this library was opened with a rescued source.sqlite: the page says so, once.
+    /// 这个图库以抢救过的 source.sqlite 打开时，抢救做了什么：页面提示一次。
     pub(crate) rescued: Option<Json>,
-    /// Damage was found and the session's tasks were stopped.
+    /// 发现了损坏，会话的任务已停止。
     pub(crate) halted: bool,
 }
 impl Session {
@@ -156,7 +152,7 @@ impl Session {
         getrandom::fill(&mut bytes).map_err(|e| Error::Invalid(e.to_string()))?;
         Ok(bytes.iter().map(|b| format!("{b:02x}")).collect())
     }
-    #[allow(clippy::too_many_arguments)] // Session options mirror independent startup task flags.
+    #[allow(clippy::too_many_arguments)] // 会话选项对应彼此独立的启动任务开关。
     fn new(
         library: Library,
         owner: Arc<Owner>,
@@ -197,18 +193,18 @@ impl Session {
             halted: false,
         })
     }
-    /// Damage on record in this package: the session writes nothing more (#212).
+    /// 这个图库包记录在案的损坏：会话不再写入任何东西（#212）。
     pub(crate) fn damage(&self) -> Option<crate::app_integrity::Damage> {
         self.owner.as_ref().and_then(|owner| owner.health.damage())
     }
-    /// Start the background checks that are due (`delay` lets the page load first).
+    /// 启动到期的后台检查（`delay` 让页面先加载）。
     pub(crate) fn start_checks(&mut self, delay: std::time::Duration) {
         if let Some(owner) = &self.owner {
             let due = owner.health.due();
             self.checker.start(&self.library, owner.health.clone(), due, delay);
         }
     }
-    /// `POST /api/integrity`: both databases now, unless a check is running.
+    /// `POST /api/integrity`：立即检查两个数据库，除非已有检查在运行。
     pub(crate) fn check_now(&mut self) -> Json {
         if let Some(owner) = &self.owner {
             self.checker.start(
@@ -220,7 +216,7 @@ impl Session {
         }
         self.integrity()
     }
-    /// `GET /api/integrity`, with the rescue of a damaged source.sqlite (#228).
+    /// `GET /api/integrity`，附带损坏的 source.sqlite 的抢救状态（#228）。
     pub(crate) fn integrity(&self) -> Json {
         let mut info = match &self.owner {
             Some(owner) => self.checker.info(&owner.health),
@@ -229,7 +225,7 @@ impl Session {
         info.set("rescue", self.rescue.info());
         info
     }
-    /// `POST /api/integrity/rescue`: build a new source.sqlite in the background while the session stays stopped.
+    /// `POST /api/integrity/rescue`：会话保持停止，在后台建一个新的 source.sqlite。
     pub(crate) fn start_rescue(&mut self, reference: Option<PathBuf>) -> Result<Json> {
         match self.damage() {
             Some(damage) if damage.database == crate::app_integrity::Database::Source => {}
@@ -251,7 +247,7 @@ pub struct Application {
     pub(crate) sync_disabled: bool,
     pub(crate) images: crate::app_files::Images,
     pub(crate) exports: crate::app_archives::Exports,
-    /// Recognition-result and archive imports, one at a time, outside the session lock (#26, #88).
+    /// 识别结果导入和归档导入，一次一个，在会话锁之外进行（#26、#88）。
     pub(crate) imports: crate::app_imports::Imports,
     pub(crate) names_enabled: bool,
     pub(crate) names_network: bool,
@@ -273,7 +269,7 @@ pub(crate) fn truthy(value: &Json) -> bool {
         _ => true,
     }
 }
-/// Explicit application configuration; no socket, desktop or client is required.
+/// 显式的应用配置；不需要套接字、桌面或客户端。
 #[derive(Clone, Debug)]
 pub struct Options {
     pub root: PathBuf,
@@ -304,13 +300,13 @@ impl Options {
     }
 }
 impl Application {
-    /// Opens and registers an explicit package. Does not bind a port or start background work.
+    /// 打开并登记一个显式指定的图库包。不绑定端口，也不启动后台工作。
     pub fn open(path: &Path, options: Options) -> Result<Self> {
         Self::from_library(open_owned(path, None, None)?, Session::token()?, options, |error| {
             crate::app_libraries::unlisted_reason(&error)
         })
     }
-    /// `opened` is owned before any recovery below reads or rewrites the package's task state.
+    /// 在下面任何恢复步骤读取或改写图库包的任务状态之前，`opened` 已被持有。
     pub(crate) fn from_library(
         opened: (Library, Arc<Owner>),
         token: String,
@@ -388,7 +384,7 @@ impl Application {
 }
 
 impl Application {
-    /// Starts the established tasks and durable-event recovery; no transport is involved.
+    /// 启动既定的任务和持久事件的恢复；不涉及传输层。
     pub fn start(&self) -> Result<()> {
         self.check_open()?;
         self.start_reporting(|| {})
@@ -427,7 +423,7 @@ impl Application {
         }
         Ok(())
     }
-    /// Replays durable work only while holding its original library instance.
+    /// 只在持有原来那个图库实例时重放持久化的工作。
     pub fn recover(&self) {
         if self.closed.load(Ordering::SeqCst) {
             return;
@@ -436,7 +432,7 @@ impl Application {
         if self.closed.load(Ordering::SeqCst) {
             return;
         }
-        // Damage found in the background stops the session's tasks; nothing is recovered into a damaged package.
+        // 后台发现的损坏会停止会话的任务；不向损坏的图库包恢复任何东西。
         if session.damage().is_some() {
             if !session.halted {
                 session.halted = true;
@@ -459,8 +455,7 @@ impl Application {
             eprintln!("native verdict事件恢复失败：{error}");
         }
     }
-    /// Stops and joins the current session's tasks and exports; a running import gets a bounded wait to remove
-    /// what it unpacked.
+    /// 停止当前会话的任务和导出并等待它们结束；正在进行的导入有一段有限的等待时间，用来删除它解开的文件。
     pub fn shutdown(&self) {
         let mut session = self.session.write().expect("application session lock poisoned");
         if self.closed.swap(true, Ordering::SeqCst) {
@@ -472,12 +467,12 @@ impl Application {
         self.exports.shutdown();
         self.imports.shutdown(crate::app_imports::QUIT_WAIT);
     }
-    /// Capture when accepting work, before body IO, scheduling or lock waits.
+    /// 在接受工作时取得，早于读取请求体、调度或等待锁。
     pub fn generation(&self) -> u64 {
         self.generation.load(Ordering::SeqCst)
     }
-    /// Execute against the accepted physical instance, rechecking after the lock wait.
-    /// Package files resolve through the canonical path fixed at opening, so display aliases cannot retarget them.
+    /// 针对接受时的那个物理实例执行，等到锁之后再复核。
+    /// 图库包里的文件按打开时确定的规范路径解析，所以显示用的别名无法让它们指向别处。
     pub fn with_library<T>(&self, received: u64, operation: impl FnOnce(&Library) -> Result<T>) -> Result<T> {
         let session = self.session.read().expect("application session lock poisoned");
         self.check_open()?;
@@ -491,14 +486,14 @@ impl Session {
     fn close(&mut self) {
         self.checker.stop();
         self.rescue.stop();
-        // A damaged package gets no queued provenance work either.
+        // 损坏的图库包也不会再得到排队的溯源工作。
         if !self.halted {
             self.provenance.close();
         }
         self.halt();
         self.owner = None;
     }
-    /// Damage found: stop every task without queueing or recording anything in the package.
+    /// 发现损坏：停止所有任务，不在图库包里排队或记录任何东西。
     fn halt(&mut self) {
         self.provenance.stop();
         self.index.stop();
@@ -510,7 +505,7 @@ impl Session {
 }
 
 impl Application {
-    /// Switch an explicitly named package, rejecting work accepted by any previous instance.
+    /// 切换到一个显式指定的图库包，拒绝任何之前实例接受的工作。
     pub fn switch(&self, received: u64, path: &Path) -> Result<PathBuf> {
         let mut session = self.session.write().expect("application session lock poisoned");
         self.switch_locked(&mut session, received, path)?;
@@ -524,7 +519,7 @@ impl Application {
         if !path.join("library.json").is_file() {
             return Err(Error::Invalid("不是图库包".into()));
         }
-        // Reopening the same physical package keeps its ownership; another one is claimed first.
+        // 重新打开同一个物理图库包时保留其持有权；其他图库包要先取得持有权。
         let (library, owner) = open_owned(path, session.owner.as_ref().map(|owner| (&session.library, owner)), None)?;
         let mut replacement = Session::new(
             library,
@@ -555,7 +550,7 @@ impl Application {
 
         session.close();
         self.exports.stop();
-        // An import does not follow a switch: it stops before publishing and the replacement session starts clean.
+        // 导入不会跟着切换走：它在发布之前停止，替换后的会话从干净的状态开始。
         self.imports.cancel(crate::app_imports::SWITCHED);
         *session = replacement;
         let library = session.library.clone();
@@ -580,7 +575,7 @@ impl Application {
 }
 
 impl Application {
-    /// Opens the session's own package again with its rescued source.sqlite in place of the damaged one (#228).
+    /// 用抢救好的 source.sqlite 代替损坏的那个，重新打开会话自己的图库包（#228）。
     pub(crate) fn reopen_rescued(&self, session: &mut Session, received: u64) -> Result<Json> {
         self.check_open()?;
         if !self.accepts(session, received) {
@@ -590,7 +585,7 @@ impl Application {
         let rebuilt =
             session.rescue.take(&package).ok_or_else(|| Error::Invalid("抢救结果已不在图库里，请重新抢救".into()))?;
         let owner = session.owner.clone().ok_or_else(|| Error::Conflict("应用服务已关闭".into()))?;
-        // Nothing of this session may have source.sqlite open while it is replaced.
+        // 替换期间，这个会话的任何部分都不得打开着 source.sqlite。
         session.checker.stop();
         session.halt();
         self.exports.stop();
@@ -624,8 +619,8 @@ impl Application {
         }
     }
 }
-/// Explicit creation uses the same factory and reference rule as HTTP and the welcome shell.
-/// A published package survives a subsequent registry failure.
+/// 显式创建与 HTTP 和欢迎页外壳使用同样的工厂和参考规则。
+/// 已发布的图库包在之后登记失败时仍然保留。
 pub fn create(root: &Path, dest: &Path, name: &str, sources: Vec<crate::app_create::NewSource>) -> Result<PathBuf> {
     let created = build_sources(root, dest, name, sources)?;
     let path = created["path"].as_str().ok_or_else(|| Error::Schema("建库结果缺少路径".into()))?;
@@ -725,8 +720,8 @@ mod tests {
         service.switch_locked(&mut session, received, &second).unwrap();
         drop(session);
         assert!(matches!(thread.join().unwrap(), Err(Error::Conflict(_))));
-        // These tasks occupy the real Session Syncer slot. Its existing stop path must cancel
-        // and join them; the service cannot report switching/closing while their gate is held.
+        // 这些任务占用真实的 Session Syncer 槽位。它现有的停止路径必须取消并等待它们结束；
+        // 持有它们的关口期间，服务不能报告正在切换或关闭。
         for finish in ["switch", "shutdown", "drop"] {
             let target_service = if finish == "drop" {
                 std::sync::Arc::new(Application::open(&first, options.clone()).unwrap())
