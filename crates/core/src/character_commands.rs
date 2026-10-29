@@ -524,7 +524,7 @@ fn answer(c: &Connection, args: &Value) -> Result<Value> {
                 None => begin_counted(c, UndoLabel::Remove, no.len(), &shown.name(c, &entity)?, "")?,
             }
         } else {
-            // Whole sentences, so the page can translate each (web/static/i18n.js tb()).
+            // 写成整句，页面才能逐句翻译（web/static/i18n.js tb()）。
             let (n, name) = (yes.len(), shown.name(c, &entity)?);
             begin_action(
                 c,

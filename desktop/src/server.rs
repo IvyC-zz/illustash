@@ -17,13 +17,12 @@ const PORT: u16 = 8765;
 const READY: &str = "图库已启动：";
 const PROGRESS: &str = "启动进度：";
 const STOP_GRACE: Duration = Duration::from_secs(10);
-/// The fold takes about three seconds; past this the start page is assumed unable to open the library itself.
+/// 折叠动画大约三秒；超过这个时间就认为启动页没法自己打开图库。
 const LAUNCH_FALLBACK: Duration = Duration::from_secs(8);
-/// A large library's integrity check alone takes tens of seconds, so only silence counts as a hang:
-/// every output line, including each progress report, restarts this window.
+/// 大图库光完整性检查就要几十秒，所以只有一直没有输出才算卡住：每一行输出，包括每次进度报告，都重新开始计时。
 const STALL: Duration = Duration::from_secs(30);
 
-/// Only the native host spawned by this window. Stop waits for its task cleanup.
+/// 只管这个窗口启动的原生宿主。停止时等它清理完任务。
 #[derive(Default)]
 pub struct Child {
     process: Mutex<Option<std::process::Child>>,
@@ -38,7 +37,7 @@ impl Child {
         let Some(mut child) = process.take() else {
             return;
         };
-        // Closing our write end also survives abnormal parent exit, on every platform.
+        // 关闭我们这一端的写入在父进程异常退出时同样有效，所有平台都是。
         drop(child.stdin.take());
         let deadline = Instant::now() + STOP_GRACE;
         loop {
@@ -61,19 +60,19 @@ impl Child {
 #[derive(Default)]
 pub struct ErrorPage(Mutex<Option<String>>);
 
-/// The latest startup progress script, replayed if the start page (re)loads after it was sent.
+/// 最近一次的启动进度脚本；发出之后启动页（重新）加载时再执行一遍。
 #[derive(Default)]
 pub struct StartupPage(Mutex<Option<String>>);
 
-/// One local service at a time. Every start takes a new generation; progress, ready and exit from an older
-/// one (cancelled from the start page, or replaced by a retry or another library) are ignored.
+/// 同一时间只有一个本地服务。每次启动取一个新的 generation；旧 generation（在启动页上取消，或被重试、
+/// 另一个图库取代）的进度、就绪和退出都忽略。
 #[derive(Default)]
 pub struct Launch {
     generation: AtomicU64,
     config: Mutex<Option<Config>>,
-    /// The library of the latest start (None: whatever the command line or the registry chose), for retry.
+    /// 最近一次启动的图库（None：命令行或登记表选的那个），供重试用。
     library: Mutex<Option<PathBuf>>,
-    /// Why startup stopped before the service could be configured; a retry cannot get past it.
+    /// 服务还没配置好启动就停下的原因；重试也过不去。
     blocked: Mutex<Option<String>>,
 }
 #[derive(Clone)]
@@ -91,7 +90,7 @@ pub fn resource_root(app: &AppHandle) -> Option<PathBuf> {
     app.state::<Launch>().config.lock().expect("lock poisoned by an earlier panic").as_ref().map(|c| c.root.clone())
 }
 
-/// Resource layout shared with #69: resource_dir/resources; explicit root wins.
+/// 与 #69 共用的资源布局：resource_dir/resources；明确给出的 root 优先。
 fn root(app: &AppHandle, args: &[String]) -> Result<PathBuf, String> {
     let mut explicit = std::env::var_os("ILLUSTASH_ROOT").map(PathBuf::from);
     for (i, arg) in args.iter().enumerate() {
@@ -131,7 +130,7 @@ fn validate_root(root: PathBuf) -> Result<PathBuf, String> {
     Ok(root)
 }
 
-/// `启动进度：<per mille> <stage>` from the native host, as (fraction, stage).
+/// 原生宿主输出的 `启动进度：<per mille> <stage>`，解析为 (fraction, stage)。
 fn progress(line: &str) -> Option<(f64, &str)> {
     let (permille, stage) = line.strip_prefix(PROGRESS)?.split_once(' ')?;
     let permille: u32 = permille.parse().ok().filter(|n| *n <= 1000)?;
@@ -147,14 +146,13 @@ fn show_progress(main: &WebviewWindow, done: f64, stage: &str) {
     let _ = main.eval(&js);
 }
 
-/// The start page finishes its launch animation, then opens the library; `launched` makes that load
-/// skip the fold it just watched. If the page cannot (its script failed), open the library directly.
-/// `url` is the host's ready address with its one-time code: the first load trades it for the session cookie,
-/// so the address works once, and a new service prints a new one.
+/// 启动页播完启动动画再打开图库；`launched` 让这次加载跳过刚看过的折叠动画。页面做不到时（脚本出错），
+/// 直接打开图库。`url` 是宿主就绪时给出的带一次性码的地址：第一次加载拿它换会话 cookie，
+/// 所以这个地址只能用一次，新的服务会打印新的地址。
 fn launch(main: &WebviewWindow, mut url: Url, generation: u64) {
     url.query_pairs_mut().append_pair("launched", "1");
     let js = format!("window.launch && window.launch({})", serde_json::to_string(url.as_str()).expect("strings always serialize"));
-    // Replayed if the start page (re)loads before it runs; a no-op on the library page, which has no launch().
+    // 启动页在它执行之前（重新）加载时再执行一遍；在图库页上什么都不做，图库页没有 launch()。
     *main.app_handle().state::<StartupPage>().0.lock().expect("lock poisoned by an earlier panic") = Some(js.clone());
     let _ = main.eval(&js);
     let main = main.clone();
@@ -177,7 +175,7 @@ fn start_page() -> Url {
     Url::parse(home).expect("constant URL")
 }
 
-/// Show `js`'s page on the start page: run it there now, or open the start page, which replays it on load.
+/// 在启动页上显示 `js` 对应的页面：当前就在启动页则立即执行，否则打开启动页，由它在加载时再执行。
 fn on_start(main: &WebviewWindow, js: &str) {
     if main.url().is_ok() && !on_start_page(main) {
         let _ = main.navigate(start_page());
@@ -200,7 +198,7 @@ fn ready_url(line: &str, port: u16) -> Option<Url> {
     .then_some(url)
 }
 
-/// 8765 as usual when free (the page keeps its origin, so its local settings survive); any free port otherwise.
+/// 8765 空闲时照常用它（页面的 origin 不变，本地设置得以保留）；否则用任意空闲端口。
 fn free_port() -> u16 {
     TcpListener::bind(("127.0.0.1", PORT))
         .or_else(|_| TcpListener::bind(("127.0.0.1", 0)))
@@ -209,7 +207,7 @@ fn free_port() -> u16 {
         .unwrap_or(PORT)
 }
 
-/// Links in the main window: the local server stays inside, everything else opens in the default browser.
+/// 主窗口里的链接：本地服务器留在窗口里，其他一律用默认浏览器打开。
 pub fn keep_inside(url: &Url) -> bool {
     match url.scheme() {
         "tauri" | "about" | "data" | "blob" => true,
@@ -228,7 +226,7 @@ pub fn keep_inside(url: &Url) -> bool {
     }
 }
 
-/// System Settings › Privacy & Security › Photos, where the page sends a sync that was refused the library (#202).
+/// 系统设置 › 隐私与安全性 › 照片：同步被拒绝访问照片图库时，页面把用户引到这里（#202）。
 pub const PHOTOS_PRIVACY: &str =
     "x-apple.systempreferences:com.apple.preference.security?Privacy_Photos";
 
@@ -254,7 +252,7 @@ pub(crate) fn show_error(main: &WebviewWindow, message: &str, log: &VecDeque<Str
     on_start(main, &js);
 }
 
-/// The start page asks whether to upgrade the library named `name` (#193); it is replayed like a failure.
+/// 启动页询问是否升级名为 `name` 的图库（#193）；和失败页一样会再执行。
 fn show_upgrade(main: &WebviewWindow, name: &str) {
     let js = format!(
         "window.showUpgrade && window.showUpgrade({}, {})",
@@ -265,15 +263,15 @@ fn show_upgrade(main: &WebviewWindow, name: &str) {
     on_start(main, &js);
 }
 
-/// A check found the library's data damaged (#212): what to do, with the usual retry and choices, or 「抢救重建」 when
-/// the damage is in source.sqlite (#228); it is replayed like a failure.
+/// 检查发现图库数据损坏（#212）：说明怎么办，带上常规的重试和选择，损坏在 source.sqlite 时则给出「抢救重建」
+/// （#228）；和失败页一样会再执行。
 fn show_damage(main: &WebviewWindow, note: &str, rescue: bool) {
     let js = format!("window.showDamage && window.showDamage({}, {rescue})", serde_json::to_string(note).expect("strings always serialize"));
     *main.app_handle().state::<ErrorPage>().0.lock().expect("lock poisoned by an earlier panic") = Some(js.clone());
     on_start(main, &js);
 }
 
-/// Startup stopped before the service was configured: remember why, so a retry repeats it instead of waiting.
+/// 服务配置好之前启动就停下了：记住原因，重试时直接再报一次，而不是等待。
 pub(crate) fn blocked(main: &WebviewWindow, message: &str) {
     *main.app_handle().state::<Launch>().blocked.lock().expect("lock poisoned by an earlier panic") = Some(message.into());
     show_error(main, message, &VecDeque::new());
@@ -287,8 +285,7 @@ pub fn page_loaded(main: &WebviewWindow) {
     }
 }
 
-/// Start the local service the command line asks for; without `--library`, the most recent library that can
-/// still be opened; with none, the welcome page.
+/// 启动命令行要求的本地服务；没有 `--library` 时打开最近一个还能打开的图库；一个都没有就显示欢迎页。
 pub fn boot(app: AppHandle, main: WebviewWindow, bridge_port: u16, token: String) {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let mut requested = None;
@@ -318,26 +315,24 @@ pub fn boot(app: AppHandle, main: WebviewWindow, bridge_port: u16, token: String
     }
 }
 
-/// Stop the current local service (if any) and start one on `library` (None: the same as last time),
-/// on a fresh start page.
+/// 停掉当前的本地服务（如果有），在新的启动页上对 `library`（None：与上次相同）启动一个。
 pub fn restart(app: &AppHandle, library: Option<PathBuf>) {
     start_again(app, library, Start::Open);
 }
 
-/// The person agreed on the start page to upgrade the library that failed to open (#193): start the service on
-/// it again with `--upgrade`, which backs it up first and leaves it unchanged when the upgrade does not complete.
+/// 用户在启动页上同意升级打开失败的图库（#193）：用 `--upgrade` 再次对它启动服务，
+/// 这会先备份，升级没完成时图库保持不变。
 pub fn upgrade(app: &AppHandle) {
     start_again(app, None, Start::Upgrade);
 }
 
-/// The person chose 「抢救重建」 on the start page after a check found source.sqlite damaged (#228): start the
-/// service on the library again with `--rescue-source`, which rebuilds it and then opens it; the start page shows the
-/// rescue's progress.
+/// 检查发现 source.sqlite 损坏后，用户在启动页上选了「抢救重建」（#228）：用 `--rescue-source` 再次对这个图库
+/// 启动服务，它先重建再打开；启动页显示抢救的进度。
 pub fn rescue(app: &AppHandle) {
     start_again(app, None, Start::Rescue);
 }
 
-/// How the service is started on a library: as usual, or after the person agreed to upgrade or rescue it.
+/// 对图库启动服务的方式：照常启动，或在用户同意升级、抢救之后启动。
 #[derive(Clone, Copy, PartialEq)]
 enum Start {
     Open,
@@ -356,7 +351,7 @@ fn start_again(app: &AppHandle, library: Option<PathBuf>, start: Start) {
     run(app, &main, library, start);
 }
 
-/// Stop the current local service (if any) and show the welcome page; `create` opens its new-library form.
+/// 停掉当前的本地服务（如果有），显示欢迎页；`create` 打开它的新建图库表单。
 pub fn welcome(app: &AppHandle, main: &WebviewWindow, create: bool) {
     app.state::<Launch>().generation.fetch_add(1, Ordering::SeqCst);
     let mut state = illustash_terms::desktop_shell::describe();
@@ -378,7 +373,7 @@ fn run(app: &AppHandle, main: &WebviewWindow, library: Option<PathBuf>, start: S
         return;
     };
     if let Some(library) = &library {
-        // A library picked on the start page replaces the one on the command line.
+        // 在启动页上选的图库取代命令行里的那个。
         let mut kept = Vec::new();
         let mut iter = args.into_iter();
         while let Some(arg) = iter.next() {
@@ -391,7 +386,7 @@ fn run(app: &AppHandle, main: &WebviewWindow, library: Option<PathBuf>, start: S
         args = kept;
         args.extend(["--library".to_owned(), library.to_string_lossy().into_owned()]);
     }
-    // The library this service opens, to ask about an upgrade if opening it fails (#193).
+    // 这个服务要打开的图库，打开失败时用来询问是否升级（#193）。
     let target = library.clone().or_else(|| {
         let at = args.iter().position(|a| a == "--library");
         at.and_then(|i| args.get(i + 1))
@@ -487,7 +482,7 @@ fn run(app: &AppHandle, main: &WebviewWindow, library: Option<PathBuf>, start: S
         thread::spawn(move || {
             for line in BufReader::new(stream).lines().map_while(Result::ok) {
                 *active.lock().expect("lock poisoned by an earlier panic") = Instant::now();
-                // Progress lines are consumed by the start page; the error tail keeps real output.
+                // 进度行交给启动页；错误尾部只保留真正的输出。
                 if !on_line(&line) {
                     continue;
                 }
@@ -558,11 +553,9 @@ fn run(app: &AppHandle, main: &WebviewWindow, library: Option<PathBuf>, start: S
             return;
         }
         thread::sleep(Duration::from_millis(100));
-        // A library in an older format: ask before upgrading it, instead of showing a failure (#193). After a
-        // failed upgrade the failure itself is shown; the package is unchanged and can be tried again.
-        // Damage a check found takes precedence: the package is refused until the database is replaced. A rescue
-        // that did not finish shows its own failure instead (#228); the package is as it was, the damage still on
-        // record, so retrying offers the rescue again.
+        // 旧格式的图库：先询问再升级，而不是显示失败（#193）。升级失败后显示失败本身；图库包没有改动，可以再试。
+        // 检查发现的损坏优先：在数据库被替换之前图库包一律拒绝打开。没做完的抢救改为显示它自己的失败（#228）；
+        // 图库包保持原样，损坏记录仍在，所以重试时会再次提供抢救。
         if start != Start::Rescue && !ready.load(Ordering::SeqCst) {
             if let Some(note) = target.as_deref().and_then(illustash_terms::desktop_shell::damage_note) {
                 let rescue = target.as_deref().is_some_and(illustash_terms::desktop_shell::damage_rescuable);
@@ -598,8 +591,7 @@ mod tests {
                 .as_str(),
             "http://127.0.0.1:9123/"
         );
-        // The host prints its address with the one-time code that trades for the session cookie; launch() then adds
-        // `launched` and the host keeps that through the exchange.
+        // 宿主打印带一次性码的地址，这个码用来换会话 cookie；launch() 再加上 `launched`，宿主在交换过程中保留它。
         let mut url = ready_url("图库已启动：http://127.0.0.1:9123/?k=0123abcd", 9123).unwrap();
         assert_eq!(url.query(), Some("k=0123abcd"));
         url.query_pairs_mut().append_pair("launched", "1");
@@ -633,7 +625,7 @@ mod tests {
     }
     #[test]
     fn photos_privacy_link_is_matched_as_written() {
-        // The page's link (web/static/core/jobs.js) arrives parsed; only this exact address leaves the window (#202).
+        // 页面的链接（web/static/core/jobs.js）到这里时已经解析过；只有正好是这个地址才会离开窗口（#202）。
         assert_eq!(Url::parse(PHOTOS_PRIVACY).unwrap().as_str(), PHOTOS_PRIVACY);
     }
     #[test]
@@ -679,7 +671,7 @@ mod tests {
         let mut bystander = Command::new("/bin/sleep").arg("60").spawn().unwrap();
         illustash_platform::platform_process::kill_owned_tree(host.id());
         host.wait().unwrap();
-        // The killed descendant cannot still execute; a transient zombie may await reaping.
+        // 被杀掉的后代进程不可能还在执行；可能有一个等待回收的短暂僵尸进程。
         let state = Command::new("/bin/ps")
             .args(["-o", "stat=", "-p", &descendant.to_string()])
             .output()

@@ -1,5 +1,5 @@
 #!/bin/sh
-# Same fixed synthetic dataset, explicit release hosts, exactly 3 independent trials.
+# 同一份固定的合成数据集，明确指定的 release 宿主，正好 3 轮独立试验。
 set -eu
 runner=${1:?usage: bench_native_contracts.sh /absolute/release/contracts /absolute/main-host /absolute/candidate-host}
 baseline=${2:?explicit main release host required}
@@ -20,8 +20,8 @@ for trial in 1 2 3; do
         awk -v label="$label" -v trial="$trial" '$1 == "BENCH" {print label, $2, trial, $3}' "$owned/trial.log" >> "$owned/samples.tsv"
     done
 done
-# Reads/human operations use trial means; open uses 7-launch median, switch uses 20-switch median.
-# Every latency includes actual host lifecycle/loopback IO; report median of three trial values.
+# 读取和人工操作取每轮的平均值；打开取 7 次启动的中位数，切换取 20 次切换的中位数。
+# 每个延迟都包含宿主实际的生命周期和回环 IO；报告三轮数值的中位数。
 awk '
 function median(a,b,c,t) {if(a>b){t=a;a=b;b=t} if(b>c){t=b;b=c;c=t} if(a>b){t=a;a=b;b=t} return b}
 {n[$1,$2]++; v[$1,$2,$3]=$4; keys[$2]=1}

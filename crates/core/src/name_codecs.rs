@@ -1,4 +1,4 @@
-//! Unicode codec membership for the existing wiki language rule. Inclusive ranges, hexadecimal.
+//! 现有 wiki 语言规则用到的各编码所含 Unicode 字符。闭区间，十六进制。
 pub const GB2312: &str = concat!(
     "0-7f,a4-a4,a7-a8,b0-b1,d7-d7,e0-e1,e8-ea,ec-ed,f2-f3,f7-f7,f9-fa,fc-fc,",
     "101-101,113-113,11b-11b,12b-12b,14d-14d,16b-16b,1ce-1ce,1d0-1d0,1d2-1d2,1d4-1d4,1d6-1d6,1d8-1d8,",

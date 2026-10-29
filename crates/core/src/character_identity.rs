@@ -1,5 +1,5 @@
-//! S3 relation commands: append-only core decisions read back in the legacy shape
-//! (`character_relations`), full graph validation, and undo audit. The caller owns the transaction.
+//! S3 关系命令：只追加的核心决定，按旧版形状（`character_relations`）读回；完整的图校验和撤销审计。
+//! 事务归调用方。
 use crate::character_entities::ENTITIES;
 use crate::character_relations::RELATIONS;
 use crate::{character_graph, character_json, legacy_characters, Error, Result};
@@ -104,7 +104,7 @@ pub fn propose(c: &Connection, a: &str, b: &str, kind: &str, evidence: Option<&V
     Ok(id)
 }
 
-/// None action is a non-user batch, not a fabricated undo-stack entry.
+/// action 为 None 表示非用户发起的批次，不伪造撤销栈条目。
 pub fn decide(
     c: &Connection,
     id: i64,
