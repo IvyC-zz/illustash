@@ -23,7 +23,7 @@ from unittest.mock import patch
 from tests.fixed_expectations import Expectations
 from tests.synthetic_source import synthetic_reference
 
-# 原工厂的来源类型，即随产品提供的预设选项。
+# 原工厂的出处，即随产品提供的预设选项。
 PRESETS = ('x', 'pixiv', 'other')
 
 
@@ -186,7 +186,7 @@ class NativeLibraryCreateTest(unittest.TestCase):
                 self.assertEqual(result.returncode, 0, result.stderr.decode(errors='replace'))
                 config = json.loads((dest / 'library.json').read_text())
                 self.assertEqual(config['name'], self.folder.name)
-                # 原生工厂从不根据文件夹名猜测来源类型（#107）：不选预设就是「其他」。
+                # 原生工厂从不根据文件夹名猜测出处（#107）：不选预设就是「其他」。
                 expected = self.rec.value('source')
                 self.assertEqual(config['sources'], [expected])
         self.assertFalse(self.sentinel.exists())

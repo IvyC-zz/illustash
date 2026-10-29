@@ -390,7 +390,7 @@ fn edit_work(c: &Connection, mut v: Value) -> Result<Reply> {
     }
     Ok(Reply::Work(made(&run(c, &v)?)))
 }
-/// /api/kind and /api/character/mascot.
+/// /api/kind 和 /api/character/mascot。
 fn set_field(c: &Connection, mut v: Value, path: &str) -> Result<Reply> {
     v["op"] = json!(match path {
         "/api/kind" => "set_kind",
