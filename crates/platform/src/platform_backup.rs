@@ -1,4 +1,4 @@
-//! Mandatory file-backed SQLite backup; private reservation, WAL/rowid-preserving copy and owned failure cleanup.
+//! 必需的、落到文件的 SQLite 备份：私有的预留文件，保留 WAL 和 rowid 的复制，失败时只清理自己建的文件。
 use crate::{Error, Result};
 #[cfg(test)]
 use rusqlite::Connection;
@@ -18,7 +18,7 @@ fn reserve_backup(path: &std::path::Path, purpose: &str) -> Result<std::path::Pa
     Ok(backup)
 }
 
-/// No empty/default backup implementation: success returns the owned backup path.
+/// 没有空的或默认的备份实现：成功时返回归调用方所有的备份路径。
 pub fn capability() -> crate::backup::RequiredBackup {
     crate::backup::RequiredBackup::new(
         reserve_backup,

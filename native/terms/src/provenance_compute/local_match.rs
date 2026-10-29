@@ -1,4 +1,4 @@
-//! Existing provenance.verify local drawing comparison. Only machine cache is writable.
+//! 沿用 provenance.verify 的本地画作比对。只有机器缓存可写。
 use super::{check_owner, write, Request};
 use crate::{research_compute::relation_image, Error, Result};
 use rusqlite::{params, Connection};
@@ -64,7 +64,7 @@ impl Library {
             }
             let path = path.as_deref().ok_or_else(|| Error::invalid("原图路径缺失"))?;
             {
-                // Legacy Library skips unreadable/missing paths, never fabricates a signature.
+                // 旧 Library 跳过不可读或缺失的路径，从不编造签名。
                 if let Ok((ratio, grid)) = relation_image::signature(Path::new(path)) {
                     sigs.push((id.clone(), ratio, grid));
                 }
@@ -117,10 +117,10 @@ impl Library {
         let scores = illustash_platform::platform_research_math::cross(&self.x, self.ids.len(), &x, 1, GRID)
             .map_err(Error::Invalid)?;
         let mut hits = vec![];
-        // Python scalar np.log(ratio) is f64 here, unlike local_run's f32 array.
+        // 这里对应 Python 标量 np.log(ratio)，是 f64，不同于 local_run 的 f32 数组。
         let lr = sig.ratio.ln();
         for (i, score) in scores.into_iter().enumerate() {
-            // NumPy 2.x promotes the scalar result to the array's float32 dtype.
+            // NumPy 2.x 把标量结果提升为数组的 float32 dtype。
             if score >= 0.9 && (self.logr[i] - lr as f32).abs() <= 0.03 && self.spread[i] >= 6. {
                 let asset = self.ids[i].clone();
                 if self.colour_diff(&asset, &sig.colour)?.is_some_and(|diff| diff < 12.) {
@@ -141,7 +141,7 @@ pub(super) fn record(
     url: &str,
     score: f32,
 ) -> Result<()> {
-    // Python round(float(score)*100, 1) uses decimal round-to-even, not f32 round.
+    // Python 的 round(float(score)*100, 1) 按十进制四舍六入五成双，不是 f32 取整。
     let similarity =
         format!("{:.1}", f64::from(score) * 100.).parse::<f64>().map_err(|e| Error::Invalid(e.to_string()))?;
     c.execute("INSERT OR IGNORE INTO image_sources(asset,site,post_id,url,artist_id,method,similarity) VALUES (?,?,?,?,?,'gallery_match',?)",
@@ -238,7 +238,7 @@ pub(super) fn run(request: &Request, sequence: &mut u64) -> Result<Value> {
                         continue;
                     }
                     let asset = lib.ids[k].clone();
-                    // Legacy local_run catches ValueError from its per-hit colour reshape.
+                    // 旧 local_run 捕获逐个命中做颜色 reshape 时的 ValueError。
                     if row.5.len() != COLOUR {
                         continue;
                     }

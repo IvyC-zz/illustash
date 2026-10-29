@@ -1,5 +1,5 @@
-//! Start suspended, attach to a private kill-on-close job, then resume. No child can
-//! spawn an unowned descendant between CreateProcess and AssignProcessToJobObject.
+//! 先以挂起状态启动，加入私有的、关闭即杀的 job，再恢复运行。这样在 CreateProcess 和
+//! AssignProcessToJobObject 之间，子进程无法派生出不归 job 管的后代。
 use std::{
     ffi::c_void,
     io,
@@ -85,7 +85,7 @@ extern "system" {
     fn Process32FirstW(snapshot: Handle, entry: *mut ProcessEntry) -> i32;
     fn Process32NextW(snapshot: Handle, entry: *mut ProcessEntry) -> i32;
 }
-/// Same direct-parent identity that the legacy worker obtains with os.getppid().
+/// 与旧 worker 用 os.getppid() 得到的直接父进程身份相同。
 pub(super) fn parent_pid() -> io::Result<u32> {
     // SAFETY: 无指针参数；返回的句柄在下面检查 INVALID_HANDLE_VALUE 后交给 `OwnedHandle`。
     let raw = unsafe { CreateToolhelp32Snapshot(2, 0) }; // TH32CS_SNAPPROCESS
@@ -129,7 +129,7 @@ impl ProcessJob {
         }
         let job = OwnedHandle(handle);
         let mut limits = ExtendedLimit::default();
-        limits.basic.flags = 0x2000; // JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE, no breakaway
+        limits.basic.flags = 0x2000; // JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE，不允许 breakaway
                                      // SAFETY: `handle` 是刚创建的作业；信息类 9 是 JobObjectExtendedLimitInformation，
                                      // `limits` 是对应布局的 repr(C) 结构，长度按实际大小传入。
         if unsafe {
@@ -162,8 +162,8 @@ impl ProcessJob {
     }
 }
 fn resume(process: u32) -> io::Result<()> {
-    // Rust 1.82 has no stable ChildExt::main_thread_handle. A suspended freshly
-    // created process has one thread; use the documented Toolhelp/ResumeThread API.
+    // Rust 1.82 没有稳定的 ChildExt::main_thread_handle。刚创建的挂起进程只有一个线程；
+    // 用有文档的 Toolhelp/ResumeThread API。
     // SAFETY: 无指针参数；返回的句柄在下面检查 INVALID_HANDLE_VALUE 后交给 `OwnedHandle`。
     let handle = unsafe { CreateToolhelp32Snapshot(4, 0) }; // TH32CS_SNAPTHREAD
     if handle == -1isize as Handle {
@@ -194,8 +194,8 @@ fn resume(process: u32) -> io::Result<()> {
 }
 impl Drop for ProcessJob {
     fn drop(&mut self) {
-        // Keep the job open until every descendant has exited, even if the leader
-        // has already exited. Closing the last handle also protects host crashes.
+        // 即使组长进程已经退出，也要等所有后代都退出后才关闭 job。
+        // 宿主崩溃时，关闭最后一个句柄同样能起到保护作用。
         // SAFETY: `self.job` 在 `ProcessJob` 存活期间有效；信息类 1 是 JobObjectBasicAccountingInformation，`info`
         // 是对应布局的 repr(C) 结构，长度按实际大小传入。
         unsafe {

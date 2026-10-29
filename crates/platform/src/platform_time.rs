@@ -1,11 +1,11 @@
-//! Host calendar conversion; libc normalization and failure behavior are unchanged.
+//! 宿主的日历换算；保持 libc 的规整化和失败行为不变。
 pub fn local_timestamp(tm: &mut libc::tm) -> libc::time_t {
     #[cfg(unix)]
     {
         // SAFETY: `tm` 是独占的可变引用，mktime 只读写这个结构。
         unsafe { libc::mktime(tm) }
     }
-    // UCRT exports mktime as the header inline over _mktime64, as used by Python.
+    // UCRT 的 mktime 是头文件里包在 _mktime64 外面的内联函数，Python 用的也是它。
     #[cfg(windows)]
     {
         extern "C" {
@@ -49,7 +49,7 @@ mod tests {
     }
     #[test]
     fn local_date_preserves_host_calendar() {
-        // Compare against the host API within a stable second, without changing TZ.
+        // 在同一秒之内与宿主 API 的结果比较，不改 TZ。
         for _ in 0..10 {
             // SAFETY: time 的出参为空。
             let before = unsafe { libc::time(std::ptr::null_mut()) };

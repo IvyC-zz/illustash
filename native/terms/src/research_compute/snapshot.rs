@@ -1,4 +1,4 @@
-//! Narrow adapter for the explicit disposable snapshot, never an application Store.
+//! 显式的一次性快照的窄适配器，从不是应用的 Store。
 use crate::{Error, Result};
 use rusqlite::{Connection, OpenFlags, OptionalExtension};
 use serde_json::Value;
@@ -49,8 +49,8 @@ impl Snapshot {
         Ok(ident)
     }
     pub fn publish_learning(&self, batch: &Value) -> Result<Value> {
-        // Only the existing validated core publication can write the isolated library.
-        // The application repeats validation/publication against the original token and fingerprint.
+        // 只有现有的、经过校验的 core 发布能写这个隔离的图库。
+        // 应用会按原来的 token 和指纹再做一遍校验和发布。
         let mut c = crate::sqlite::open_with_flags(&self.library, OpenFlags::SQLITE_OPEN_READ_WRITE)?;
         crate::configure(&c)?;
         crate::character_learning::publish(&mut c, batch)
@@ -61,7 +61,7 @@ pub fn strings(c: &Connection, sql: &str, args: &[&dyn rusqlite::ToSql]) -> Resu
     Ok(c.prepare(sql)?.query_map(args, |r| r.get(0))?.collect::<rusqlite::Result<_>>()?)
 }
 pub fn table(c: &Connection, name: &str) -> Result<Vec<Value>> {
-    // Result extraction is restricted to the only cache tables owned by this issue.
+    // 结果提取只限于本 issue 所属的那两张缓存表。
     if !["prototypes", "learn_state"].contains(&name) {
         return Err(Error::Invalid("unknown learning table".into()));
     }

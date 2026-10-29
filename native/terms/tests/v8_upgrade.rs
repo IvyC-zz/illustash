@@ -1,8 +1,6 @@
-//! The core version 8 upgrade (#201) on a version 7 library from the comparison baseline: upgraded only when the
-//! legacy tables and `term_*` agree and every domain was switched to the core, and then with the aliases and display
-//! names moved to the core and counted history steps' kind and count filled in. A refused upgrade leaves the library
-//! exactly as it was. (Every checkpoint of `baseline.rs` is upgraded the same way; this file covers the refusals and
-//! what the comparison leaves out.)
+//! 在对照基准里的第 7 版图库上做词条核心第 8 版升级（#201）：只有旧表与 `term_*` 一致、且每个领域都已切换到词条核心时
+//! 才升级；升级时把别名和显示名移进词条核心，并为带数量的历史步骤补上种类和数量。拒绝升级时图库保持原样，一点不变。
+//! （`baseline.rs` 的每个检查点都以同样方式升级；本文件覆盖拒绝的情况和对照没有涵盖的部分。）
 #![allow(clippy::unwrap_used, reason = "集成测试里 unwrap 就是断言")]
 use rusqlite::Connection;
 use serde_json::Value;
@@ -14,8 +12,7 @@ use std::process::Command;
 #[path = "common/baseline.rs"]
 mod baseline;
 
-/// A switched version 7 library with characters, links, names and history steps (the first checkpoint of the golden
-/// name-writes scenario).
+/// 已切换的第 7 版图库，含角色、链接、名称和历史步骤（golden 名称写入场景的第一个检查点）。
 const CASE: &str = "tests.test_terms_golden.GoldenNameWrites.test_core_name_writes_match_the_snapshot";
 
 struct Library {
@@ -52,7 +49,7 @@ fn library(name: &str) -> Library {
     Library { dir, db }
 }
 
-/// Runs the core's upgrade; Ok(stdout) or Err(stderr).
+/// 运行词条核心的升级；成功返回 Ok(stdout)，失败返回 Err(stderr)。
 fn upgrade(db: &Path) -> Result<String, String> {
     let done = Command::new(env!("CARGO_BIN_EXE_illustash-terms")).args(["migrate", "--db"]).arg(db).output().unwrap();
     let (out, err) =
@@ -64,7 +61,7 @@ fn upgrade(db: &Path) -> Result<String, String> {
     }
 }
 
-/// Writes a guarded table as an earlier version (or a bug) might have left it.
+/// 按早期版本（或某个 bug）可能留下的样子写入受保护的表。
 fn write(c: &Connection, sql: &str) {
     c.execute_batch(&format!(
         "INSERT INTO meta VALUES ('terms_writer','1'); {sql}; DELETE FROM meta WHERE key='terms_writer';"
@@ -76,7 +73,7 @@ fn exact(db: &Path) -> std::collections::BTreeMap<String, Vec<String>> {
     baseline::exact(&Connection::open(db).unwrap(), &|t| t.to_owned())
 }
 
-/// Every row of a query, as text (enough to compare two tables' contents).
+/// 查询的每一行，转成文本（足以比较两张表的内容）。
 fn rows(c: &Connection, sql: &str) -> Vec<String> {
     let mut st = c.prepare(sql).unwrap();
     let n = st.column_count();
@@ -90,7 +87,7 @@ fn exists(c: &Connection, name: &str) -> bool {
     c.query_row("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name = ?1)", [name], |r| r.get(0)).unwrap()
 }
 
-/// The first two characters, as `x` and `y` (rows of `terms`), in a version 7 library.
+/// 第 7 版图库里的前两个角色，记作 `x` 和 `y`（`terms` 的行）。
 const PAIR: &str = "(SELECT t.id, t.key FROM terms t JOIN entities e ON e.id = t.key WHERE e.kind = 'character'
                      ORDER BY e.rowid LIMIT 1) x,
                     (SELECT t.id, t.key FROM terms t JOIN entities e ON e.id = t.key WHERE e.kind = 'character'
@@ -113,13 +110,13 @@ fn a_consistent_library_upgrades_retires_the_key_tables_and_fills_in_counted_ste
         )
         .unwrap();
     }
-    // Rows the core's copies do not have yet: the legacy tables are the authority up to version 7.
+    // 词条核心的副本里还没有的行：到第 7 版为止，旧表是权威数据。
     write(
         &Connection::open(&lib.db).unwrap(),
         "INSERT INTO name_aliases VALUES ('work','synthetic_work','合成别名',0);
          INSERT INTO display_names VALUES ('work','synthetic_work','zh','user','合成作品名')",
     );
-    // A work review and a baseline row both sides already hold, as the core's commands mirrored them.
+    // 一条作品复核和一行基线，两边都已经有了，就像词条核心的命令镜像写入的那样。
     write(
         &Connection::open(&lib.db).unwrap(),
         "INSERT INTO work_review SELECT id, 'confirmed', '合成备注', 1 FROM entities ORDER BY rowid LIMIT 1;
@@ -130,8 +127,8 @@ fn a_consistent_library_upgrades_retires_the_key_tables_and_fills_in_counted_ste
          INSERT INTO identity_baseline(rowid, id, parent_id, variant, kind, merged_into)
           SELECT seq, id, parent_id, variant, kind, merged_into FROM term_identity_baseline WHERE id = 'synthetic_baseline'",
     );
-    // An accepted duplicate relation with its evidence and decision, in the core and as the core's commands mirrored
-    // it into the four legacy relation tables (the identities: the first two characters).
+    // 一条已接受的重复关系及其证据和决定，写在词条核心里，也像词条核心的命令那样镜像写进四张旧关系表
+    // （涉及的身份是前两个角色）。
     write(
         &Connection::open(&lib.db).unwrap(),
         &format!(
@@ -187,12 +184,12 @@ fn a_consistent_library_upgrades_retires_the_key_tables_and_fills_in_counted_ste
     assert_eq!(rows(&c, &aliases.replace("{}", "term_key_aliases")), old_aliases, "aliases move to the core unchanged");
     assert_eq!(rows(&c, &display.replace("{}", "term_key_names")), old_display, "display names move unchanged");
     assert!(!exists(&c, "name_aliases") && !exists(&c, "display_names"), "the legacy tables are dropped");
-    // The names keep their order: `seq` takes the former rowids.
+    // 名称保持原有顺序：`seq` 取原来的 rowid。
     let names = "SELECT t.key, n.lang, n.value, n.source, n.role, n.preferred, n.position
                  FROM term_names n JOIN terms t ON t.id = n.term_id JOIN term_tree r ON r.term_id = n.term_id ORDER BY n.seq";
     assert_eq!(rows(&c, names), old_names, "names move to the core in their order");
     assert!(!exists(&c, "names"));
-    // The links too, WD written `wd_character` in the core.
+    // 链接也一样，WD 在词条核心里写作 `wd_character`。
     let links =
         "SELECT CASE x.system WHEN 'wd_character' THEN 'wd' ELSE x.system END, x.key, t.key, x.current, x.source,
                    x.added_at
@@ -200,15 +197,14 @@ fn a_consistent_library_upgrades_retires_the_key_tables_and_fills_in_counted_ste
                  ORDER BY 1, 2";
     assert_eq!(rows(&c, links), old_links, "links move to the core unchanged");
     assert!(!exists(&c, "links"));
-    // The work reviews and the identity baseline too (the baseline's `seq` is the former rowid).
+    // 作品复核和身份基线也一样（基线的 `seq` 是原来的 rowid）。
     let reviews = "SELECT t.key, r.review_status, r.review_note, r.parent_locked
                    FROM term_tree r JOIN terms t ON t.id = r.term_id WHERE r.review_status IS NOT NULL ORDER BY t.key";
     assert_eq!(rows(&c, reviews), old_reviews, "work reviews move to the core unchanged");
     let baseline = "SELECT seq, id, parent_id, variant, kind, merged_into FROM term_identity_baseline ORDER BY seq";
     assert_eq!(rows(&c, baseline), old_baseline, "the identity baseline is the core's already");
     assert!(!exists(&c, "work_review") && !exists(&c, "identity_baseline"));
-    // The identities: terms and their `term_tree` rows, in their order (`seq` takes the former rowids), with the
-    // attributes as columns and nothing left in `terms.attrs`.
+    // 身份：词条及其 `term_tree` 行，保持原有顺序（`seq` 取原来的 rowid），属性改成列，`terms.attrs` 里不再留东西。
     let identities = "SELECT r.seq, t.key, t.kind, r.work_text, r.variant, r.parent_id, r.merged_into, r.artist,
                         r.label_only, r.mascot, r.mascot_origin, r.work_id, r.original
                       FROM term_tree r JOIN terms t ON t.id = r.term_id ORDER BY r.seq";
@@ -222,7 +218,7 @@ fn a_consistent_library_upgrades_retires_the_key_tables_and_fills_in_counted_ste
         .unwrap();
     assert_eq!(attrs, 0);
     assert!(!exists(&c, "entities"));
-    // The views read the core tables.
+    // 视图读取词条核心的表。
     let views: Vec<String> = rows(&c, "SELECT name FROM sqlite_master WHERE type = 'view' ORDER BY name");
     for view in &old_views {
         assert!(views.contains(view), "{view} is kept");
@@ -232,19 +228,18 @@ fn a_consistent_library_upgrades_retires_the_key_tables_and_fills_in_counted_ste
     for view in ["family_confirmed", "membership_rules", "variant_memberships", "ambiguous_claims", "identity_nodes"] {
         c.prepare(&format!("SELECT * FROM {view}")).unwrap().query([]).unwrap().next().unwrap();
     }
-    // The relations, their evidence and decisions are the core's: the legacy tables are gone, read in their shape the
-    // core gives the same rows.
+    // 关系及其证据和决定都归词条核心：旧表已删除，按旧表的形状读词条核心，得到相同的行。
     for ((table, columns, fragment), old) in RELATION_TABLES.iter().zip(&old_relations) {
         assert!(!exists(&c, table), "{table} is dropped");
         assert_eq!(&rows(&c, &format!("SELECT {columns} FROM {fragment} ORDER BY 1, 2")), old, "{table}");
     }
     let broken: i64 = c.query_row("SELECT count(*) FROM pragma_foreign_key_check", [], |r| r.get(0)).unwrap();
     assert_eq!(broken, 0);
-    // The names version now counts writes to the core's display names, as it counted the legacy table's.
+    // 现在名称版本号统计的是对词条核心显示名的写入，就像以前统计旧表的写入一样。
     let version = names_version(&c);
     c.execute("INSERT INTO term_key_names VALUES ('skin','synthetic_skin','zh','user','合成皮肤名')", []).unwrap();
     assert_eq!(names_version(&c), version + 1);
-    // … and to the core's names and links of characters, skins and works, not to artists'.
+    // ……也统计对词条核心里角色、皮肤和作品的名称与链接的写入，不统计画师的。
     c.execute(
         "INSERT INTO term_names(term_id, lang, value, source, role, seq)
          SELECT term_id, 'zh', '合成名', 'user', 'alias', 0 FROM term_tree LIMIT 1",
@@ -267,7 +262,7 @@ fn a_consistent_library_upgrades_retires_the_key_tables_and_fills_in_counted_ste
     )
     .unwrap();
     assert_eq!(names_version(&c), version + 3);
-    // … and to the identities' own columns and kinds, not to work reviews.
+    // ……也统计对身份自身的列和种类的写入，不统计作品复核。
     write(
         &c,
         "UPDATE term_tree SET variant = 'synthetic_variant' WHERE seq = (SELECT min(seq) FROM term_tree);

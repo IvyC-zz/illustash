@@ -1,6 +1,5 @@
-//! Similarity calculator over an explicit isolated snapshot. Caches are returned
-//! to App Research for the existing validation/publication; this owns no scheduler.
-//! When the request allows it (#31), each cache is returned as the change list against the snapshot.
+//! 在显式的隔离快照上做相似计算。缓存交还给 App Research，走现有的校验和发布；这里不持有调度器。
+//! 请求允许时（#31），每个缓存都以相对快照的变更列表返回。
 use super::{
     features::Matrix,
     numeric::{pair_block_rows, sum32},
@@ -103,7 +102,7 @@ pub fn ccip_pairs(features: &Matrix, ids: &[String], query: Option<&HashSet<Stri
     Ok(pairs)
 }
 pub(crate) fn table(c: &rusqlite::Connection, name: &str) -> Result<Vec<Value>> {
-    // Exact existing table shapes, including historical rows not in active assets.
+    // 与现有表的形状完全一致，包括不在活动资产里的历史行。
     if !["image_sigs", "relations", "similar_paired", "similar_retry"].contains(&name) {
         return Err(Error::Invalid("unknown similarity table".into()));
     }
@@ -146,7 +145,7 @@ fn decode_grid(value: &Value) -> Result<Vec<u8>> {
         .collect()
 }
 fn replace(rows: &mut Vec<Value>, row: Value) {
-    // INSERT OR REPLACE removes the old row, then appends it (SQLite rowid order).
+    // INSERT OR REPLACE 先删掉旧行，再追加到末尾（SQLite 的 rowid 顺序）。
     rows.retain(|r| r[0] != row[0]);
     rows.push(row);
 }
@@ -168,15 +167,14 @@ fn load_cached(
     }
     Ok(image)
 }
-/// #31: `delete` (primary keys of snapshot rows that go) and `append` (rows added after the rows that
-/// stay, in order) turn the snapshot table into `new` with the rowid order a full rewrite gives. A table
-/// without a primary key is returned whole.
+/// #31：`delete`（要去掉的快照行的主键）和 `append`（按顺序追加在保留行之后的行）把快照表变成 `new`，
+/// rowid 顺序与整表重写得到的相同。没有主键的表整表返回。
 pub(crate) fn changes(c: &rusqlite::Connection, name: &str, old: &[Value], new: Vec<Value>) -> Result<Value> {
     let mut columns: Vec<(i64, usize)> = c
         .prepare("SELECT pk,cid FROM pragma_table_info(?)")?
         .query_map([name], |r| Ok((r.get(0)?, r.get(1)?)))?
         .collect::<rusqlite::Result<_>>()?;
-    // A table the snapshot does not have yet has no rows to delete; App creates it with its key.
+    // 快照里还没有的表没有要删的行；App 会按它的键建表。
     let present = !columns.is_empty();
     columns.retain(|(pk, _)| *pk > 0);
     columns.sort();
@@ -272,7 +270,7 @@ pub fn scan(snapshot: &Snapshot, features: &Matrix, delta: bool) -> Result<(Valu
             Ok(r) => {
                 found += usize::from(GROUPING.contains(&r["kind"].as_str().unwrap_or("")));
                 relations.retain(|r| !(r[0] == *a && r[1] == *b));
-                // SQLite's CURRENT_TIMESTAMP uses UTC seconds; checked_at remains a cache timestamp.
+                // SQLite 的 CURRENT_TIMESTAMP 用 UTC 秒；checked_at 仍是缓存时间戳。
                 relations.push(json!([
                     a,
                     b,

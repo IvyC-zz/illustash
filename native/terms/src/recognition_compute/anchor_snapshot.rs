@@ -1,4 +1,4 @@
-//! One authorised task snapshot. No feature cache or quadratic work in write/receive locks.
+//! 一份经授权的任务快照。写入锁和接收锁内不做特征缓存，也不做平方级的计算。
 use super::{
     anchors::{self, AnchorIndex, Claim, Metadata},
     models::hash,
@@ -55,7 +55,7 @@ impl Snapshot {
     pub fn load(shared: &Path, source: &Path) -> Result<Self> {
         Self::load_checked(shared, source, &|| Ok(()))
     }
-    /// Anchors, ids and per-character files from one complete index publication (index_generation).
+    /// 来自同一次完整索引发布（index_generation）的锚点、id 和逐角色文件。
     pub(crate) fn load_checked(shared: &Path, source: &Path, check: &dyn Fn() -> Result<()>) -> Result<Self> {
         crate::index_generation::stable(shared, || Self::load_once(shared, source, check))
     }
@@ -100,7 +100,7 @@ impl Snapshot {
         let limits = anchors::claim_thresholds(&ids, &index, &patched)?;
         Ok(Self { fingerprint, vectors: matrix, index, limits })
     }
-    /// Linear authoritative recheck under the source lease: no matrix/index construction.
+    /// 在源库租约下做线性的权威复查：不构建矩阵或索引。
     pub(crate) fn fingerprint(
         shared: &Path,
         source: &Connection,

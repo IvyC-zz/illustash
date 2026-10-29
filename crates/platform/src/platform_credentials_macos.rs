@@ -1,5 +1,5 @@
-//! File-based generic passwords, compatible with the former `security` CLI.
-//! No subprocess or environment override participates in native keychain access.
+//! 文件型钥匙串里的通用密码项，与以前使用的 `security` 命令行兼容。
+//! 原生钥匙串访问不经过子进程，也不受环境变量覆盖影响。
 use std::{ffi::c_void, ptr};
 type Ref = *const c_void;
 const NOT_FOUND: i32 = -25300;
@@ -50,8 +50,8 @@ extern "C" {
     #[cfg(test)]
     static kSecUseKeychain: Ref;
 }
-// CF Create/Copy values are owned. Dictionaries retain their keys and values
-// using Apple's CFType callbacks; no borrowed Rust buffer escapes an API call.
+// CF 的 Create/Copy 返回值归我们所有。字典用 Apple 的 CFType 回调 retain 键和值；
+// 借用的 Rust 缓冲区不会在 API 调用之外继续被引用。
 struct Owned(Ref);
 impl Owned {
     fn new(value: Ref) -> Result<Self, i32> {
@@ -78,8 +78,7 @@ impl Owned {
     fn dictionary(pairs: &[(Ref, Ref)]) -> Result<Self, i32> {
         let keys: Vec<_> = pairs.iter().map(|p| p.0).collect();
         let values: Vec<_> = pairs.iter().map(|p| p.1).collect();
-        // The callback structures are opaque to Rust: only their exported
-        // addresses are passed to CoreFoundation, never read or dereferenced.
+        // 回调结构对 Rust 是不透明的：只把导出的地址传给 CoreFoundation，从不读取或解引用。
         // SAFETY: `keys`、`values` 与 `pairs` 等长且在调用期间存活；CFType 回调让字典 retain 键值，调用返回后不再引用
         // Rust 缓冲区。
         unsafe {
@@ -102,8 +101,8 @@ impl Drop for Owned {
 }
 #[derive(Default)]
 pub(super) struct Store {
-    // Only unit tests can supply a keychain. Shipped code uses the existing
-    // user search list/default keychain, never the Data Protection keychain.
+    // 只有单元测试能指定钥匙串。发布的代码使用用户现有的搜索列表和默认钥匙串，
+    // 从不使用 Data Protection 钥匙串。
     #[cfg(test)]
     keychain: Option<Owned>,
     #[cfg(test)]
@@ -113,8 +112,8 @@ impl Store {
     fn query(&self, kind: &str, adding: bool) -> Result<Owned, i32> {
         #[cfg(test)]
         if self.keychain.is_none() && (self.search_list.is_none() || adding) {
-            // Test builds must fail closed without an explicit synthetic scope;
-            // a search-list-only fixture must never add to a default keychain.
+            // 测试构建没有显式的合成范围时必须直接失败；
+            // 只给了搜索列表的夹具绝不能往默认钥匙串里添加条目。
             return Err(PARAM);
         }
         let service = Owned::string("Illustash")?;
@@ -128,8 +127,7 @@ impl Store {
         let _ = adding;
         #[cfg(test)]
         let search_list = if let Some(keychain) = &self.keychain {
-            // Explicit scope for every operation. Do not set the user's search
-            // list or default keychain, even temporarily.
+            // 每个操作都显式指定范围。不修改用户的搜索列表或默认钥匙串，临时修改也不行。
             let list = Owned::array(keychain.0)?;
             // SAFETY: 只读 Security 框架导出的常量指针；`keychain`、`list` 在字典创建前保持存活。
             unsafe {
@@ -183,9 +181,8 @@ impl Store {
         let label = Owned::string(&format!("Illustash · {kind}"))?;
         // SAFETY: 只读导出常量；`data`、`label` 在字典创建期间存活，字典 retain 它们。
         let attributes = unsafe { Owned::dictionary(&[(kSecValueData, data.0), (kSecAttrLabel, label.0)])? };
-        // Resolve one item first: SecItemUpdate/Delete otherwise act on every
-        // matching item across the user's search list. The former CLI acted on
-        // one item, and existing ACL/identity must remain attached to that item.
+        // 先定位到一个条目：否则 SecItemUpdate/Delete 会作用于用户搜索列表里所有匹配的条目。
+        // 以前的命令行只操作一个条目，已有的 ACL 和身份必须仍挂在这个条目上。
         match self.first_item_query(kind) {
             // SAFETY: `query`、`attributes` 都是存活的字典，调用不保留 Rust 指针。
             Ok(query) => status_result(unsafe { SecItemUpdate(query.0, attributes.0) }),
@@ -310,7 +307,7 @@ mod tests {
     struct Synthetic(Store);
     impl Drop for Synthetic {
         fn drop(&mut self) {
-            // Never receive a default/real keychain handle.
+            // 从不拿到默认或真实钥匙串的句柄。
             // SAFETY: 合成夹具的 `keychain` 总是本测试 SecKeychainCreate 得到的句柄，此时 `Owned` 尚未释放。
             unsafe {
                 SecKeychainDelete(self.0.keychain.as_ref().unwrap().0);
@@ -324,7 +321,7 @@ mod tests {
             let root = std::env::temp_dir().join(format!("illustash-119-synthetic-keychain-{}", std::process::id()));
             assert!(!root.exists());
             std::fs::create_dir(&root).unwrap();
-            // A trap executable catches any regression to PATH-based security.
+            // 放一个陷阱可执行文件，一旦退回到按 PATH 调用 security 就会被发现。
             let trap = root.join("security");
             std::fs::write(&trap, "#!/bin/sh\nexit 99\n").unwrap();
             use std::os::unix::fs::PermissionsExt;
@@ -351,8 +348,7 @@ mod tests {
         }
         assert!(Store::default().query("saucenao", false).is_err());
         assert!(Store::default().query("saucenao", true).is_err());
-        // Disable interaction in this isolated child, so tests cannot unlock a
-        // real keychain or request user authorization. No global settings change.
+        // 在这个隔离的子进程里禁用交互，测试就无法解锁真实钥匙串或请求用户授权。不改全局设置。
         // SAFETY: 无指针参数；只影响这个隔离的子进程。
         assert_eq!(unsafe { SecKeychainSetUserInteractionAllowed(0) }, 0);
         let root = std::path::PathBuf::from(std::env::var_os("ILLUSTASH_SYNTHETIC_KEYCHAIN_ROOT").unwrap());
@@ -376,8 +372,8 @@ mod tests {
         let store = &fixture.0;
         let kind = "saucenao";
         assert_eq!(store.read(kind), Err(NOT_FOUND));
-        // The former CLI stores this same legacy generic-password item type,
-        // service and account. Seed via the legacy API, using only this handle.
+        // 以前的命令行存的就是同样的旧式通用密码条目类型、服务和账号。
+        // 用旧 API 预先写入，只使用这个句柄。
         let legacy = b"ILLUSTASH-119-SYNTHETIC-LEGACY";
         assert_eq!(
             // SAFETY: `keychain` 由夹具持有且存活；各缓冲区按给出的长度读取，item 出参为空。
@@ -399,8 +395,7 @@ mod tests {
         let replacement = "ILLUSTASH-119-SYNTHETIC-合成\0密钥".as_bytes();
         store.write(kind, replacement).unwrap();
         assert_eq!(store.read(kind).unwrap(), replacement);
-        // Reverse compatibility: the legacy API still sees exactly the updated
-        // bytes; update did not create another modern/Data Protection item.
+        // 反向兼容：旧 API 读到的正好是更新后的字节；更新没有另建新式或 Data Protection 条目。
         let mut length = 0;
         let mut data = ptr::null_mut();
         assert_eq!(
@@ -423,9 +418,8 @@ mod tests {
         assert_eq!(unsafe { std::slice::from_raw_parts(data.cast::<u8>(), length as usize) }, replacement);
         // SAFETY: `data` 来自上面成功的查找，只在这里释放一次。
         assert_eq!(unsafe { SecKeychainItemFreeContent(ptr::null(), data) }, 0);
-        // Two synthetic keychains may contain the same service/account. Only
-        // the first selected item must change; update/delete must not expand
-        // into all matching entries in the search list.
+        // 两个合成钥匙串里可能有相同的服务和账号。只能改动选中的第一个条目；
+        // 更新和删除不能扩大到搜索列表里所有匹配的条目。
         let second_path = CString::new(root.join("synthetic-second.keychain").as_os_str().as_encoded_bytes()).unwrap();
         let mut second_keychain = ptr::null();
         assert_eq!(

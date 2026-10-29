@@ -1,10 +1,9 @@
-//! SQLite filenames are internal: keep display/config paths unchanged.
+//! SQLite 文件名只在内部使用：显示和配置里的路径保持不变。
 use rusqlite::{Connection, OpenFlags};
 use std::path::{Path, PathBuf};
 
-/// Win32 extended paths bypass MAX_PATH even without a longPathAware manifest.
-/// Canonicalize the parent as new database files do not exist yet. This also
-/// resolves relative paths, dot segments and UNC roots before adding the prefix.
+/// Win32 扩展路径即使没有 longPathAware 清单也不受 MAX_PATH 限制。
+/// 新的数据库文件还不存在，所以规范化的是上级目录。加前缀之前，这一步也解析了相对路径、点号段和 UNC 根。
 pub fn path(value: impl AsRef<Path>) -> PathBuf {
     let value = value.as_ref();
     #[cfg(windows)]
@@ -32,8 +31,8 @@ pub fn open(value: impl AsRef<Path>) -> rusqlite::Result<Connection> {
 pub fn open_with_flags(value: impl AsRef<Path>, flags: OpenFlags) -> rusqlite::Result<Connection> {
     #[cfg(windows)]
     {
-        // Bundled SQLite already supplies the larger mxPathname buffer. ATTACH
-        // inherits this VFS; extended filenames cover its journal/WAL files too.
+        // 内置的 SQLite 已经提供了更大的 mxPathname 缓冲区。ATTACH 沿用这个 VFS；
+        // 扩展文件名也覆盖它的 journal 和 WAL 文件。
         Connection::open_with_flags_and_vfs(path(value), flags, "win32-longpath")
     }
     #[cfg(not(windows))]

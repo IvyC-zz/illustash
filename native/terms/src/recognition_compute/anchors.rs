@@ -1,5 +1,5 @@
-//! Character-anchor computation; callers supply only their authorised snapshot.
-//! No private anchor discovery or Features cache. Metadata is from source.characters.
+//! 角色锚点计算；调用方只提供各自经授权的快照。
+//! 不发现私人锚点，没有 Features 缓存。元数据来自 source.characters。
 use crate::{Error, Result};
 use std::collections::{HashMap, HashSet};
 #[derive(Clone, Default)]
@@ -25,15 +25,15 @@ fn unit(row: &[f32]) -> Result<Vec<f32>> {
         return Err(invalid());
     }
     let squares = crate::research_compute::contiguous_sum32(&row.iter().map(|v| v * v).collect::<Vec<_>>());
-    // Finite but huge elements overflow the sum; dividing by an infinite norm would silently give an all-zero row.
+    // 有限但极大的元素会让平方和溢出；除以无穷大的范数会悄悄得到全零行。
     if !squares.is_finite() {
         return Err(Error::Invalid("特征向量数值过大，无法归一化".into()));
     }
-    // ccip.cross has a 1e-12 denominator floor, including all-zero rows.
+    // ccip.cross 的分母有 1e-12 的下限，全零行也一样。
     let norm = squares.sqrt().max(1e-12);
     Ok(row.iter().map(|v| v / norm).collect())
 }
-/// Rectangular (1-cos)/2 in f32, including the Python zero-vector floor.
+/// f32 的矩形 (1-cos)/2，包括 Python 对零向量的下限处理。
 pub fn cross(a: &[Vec<f32>], b: &[Vec<f32>]) -> Result<Vec<Vec<f32>>> {
     cross_checked(a, b, &|| Ok(()))
 }
@@ -67,8 +67,8 @@ pub(crate) fn cross_checked(a: &[Vec<f32>], b: &[Vec<f32>], check: &dyn Fn() -> 
     }
     Ok(product.chunks_exact(b.len()).map(|r| r.iter().map(|v| (1.0f32 - v) / 2.0f32).collect()).collect())
 }
-/// Direct neighbours choose the greatest score, then strictly uphill hops.
-/// This differs from connected-component/single-linkage aliasing.
+/// 直接近邻里选分数最高的，再沿严格上升的方向逐跳。
+/// 这与连通分量或单链接方式的别名合并不同。
 pub fn anchor_index(vectors: &[Vec<f32>], ids: &[String], metadata: &HashMap<String, Metadata>) -> Result<AnchorIndex> {
     anchor_index_checked(vectors, ids, metadata, &|| Ok(()))
 }
@@ -80,8 +80,8 @@ pub(crate) fn anchor_index_checked(
 ) -> Result<AnchorIndex> {
     anchor_index_blocks(vectors, ids, metadata, 1024, check)
 }
-/// Index scan preserves the legacy 1024-row BLAS shape at exact alias boundaries.
-/// Both paths keep the legacy shape, with cooperative checks around BLAS and each alias row.
+/// 索引扫描在精确的别名边界上保持旧版 1024 行的 BLAS 分块形状。
+/// 两条路径都保持旧形状，并在 BLAS 前后和每个别名行做协作式检查。
 pub(crate) fn anchor_index_for_scan(
     vectors: &[Vec<f32>],
     ids: &[String],
@@ -105,8 +105,8 @@ fn anchor_index_blocks(
         (m.gender_conf >= 0.9, !m.skin, m.post_count, ids[i].as_str())
     };
     let mut alias: Vec<usize> = (0..ids.len()).collect();
-    // Bound each uncancellable BLAS call; cancellation is checked before/after
-    // the call and for every normalization/alias row. No threshold tolerance.
+    // 给每次不可取消的 BLAS 调用划定范围；取消在调用前后检查，
+    // 每个归一化行和别名行也检查。阈值不加容差。
     for start in (0..ids.len()).step_by(rows) {
         let distances = cross_checked(&vectors[start..(start + rows).min(ids.len())], vectors, check)?;
         for (r, row) in distances.iter().enumerate() {
@@ -133,22 +133,22 @@ fn anchor_index_blocks(
     let columns = |get: fn(&Metadata) -> f32| ids.iter().map(|id| metadata.get(id).map_or(0., get)).collect();
     Ok(AnchorIndex { entities, p90: columns(|m| m.p90), p50: columns(|m| m.p50), p75: columns(|m| m.p75) })
 }
-/// Curated p90 vs explicitly patched p75; missing threshold stays zero (rank only).
+/// 一般用精选的 p90，显式补丁过的用 p75；缺失的阈值保持零（只参与排序）。
 pub fn claim_thresholds(ids: &[String], index: &AnchorIndex, patched: &HashSet<String>) -> Result<Vec<f32>> {
     if ids.len() != index.p90.len() || ids.len() != index.p75.len() {
         return Err(invalid());
     }
     Ok(ids.iter().enumerate().map(|(i, id)| if patched.contains(id) { index.p75[i] } else { index.p90[i] }).collect())
 }
-/// Scalar NumPy aquicksort ordering (including equal-value partition swaps),
-/// used by the current macOS CPU producer. Never silently substitute a stable sort.
+/// NumPy 标量 aquicksort 的排序结果（包括等值分区时的交换），当前 macOS CPU 生成器使用。
+/// 绝不悄悄换成稳定排序。
 pub fn nearest_order(values: &[f32]) -> Vec<usize> {
     fn sort(values: &[f32], indices: &mut [usize], mut depth: i32) {
         if indices.len() < 2 {
             return;
         }
         if depth < 0 {
-            // NumPy's fallback is a max heap with strict comparisons.
+            // NumPy 的回退是严格比较的最大堆。
             fn sift(values: &[f32], a: &mut [usize], mut root: usize, end: usize) {
                 loop {
                     let mut child = root * 2 + 1;
@@ -263,7 +263,7 @@ pub(crate) fn claims_checked(
     for a in nearest_order(&distances).into_iter().take(9) {
         check()?;
         let character = &index.entities[a];
-        // Python marks an alias as seen before checking the first anchor's threshold.
+        // Python 在检查第一个锚点的阈值之前就把别名标记为已见。
         if !seen.insert(character.clone()) {
             continue;
         }
@@ -287,7 +287,7 @@ mod tests {
     fn legacy_alias_block_checks_cancellation_before_after_product_and_per_row() {
         let vectors = vec![vec![1., 0.]; 129];
         let ids = (0..129).map(|i| format!("synthetic-{i}")).collect::<Vec<_>>();
-        // initial check, 129 left norms, 129 right norms, pre/post BLAS, alias rows.
+        // 初始检查、129 次左侧范数、129 次右侧范数、BLAS 前后、别名行。
         for stop in [260, 261, 262, 263] {
             let checks = std::cell::Cell::new(0usize);
             let result = anchor_index_checked(&vectors, &ids, &HashMap::new(), &|| {
@@ -343,7 +343,7 @@ mod tests {
     }
     #[test]
     fn overflowing_norm_is_refused_while_zero_rows_keep_the_floor() {
-        // #75: 2e19² overflows f32, so the old code divided by an infinite norm and returned zeros.
+        // #75：2e19² 超出 f32 范围，旧代码除以无穷大的范数，返回全零。
         let huge: Vec<f32> = vec![2e19, 0.];
         fn refused<T>(result: Result<T>) -> bool {
             matches!(result, Err(Error::Invalid(m)) if m.contains("数值过大"))
@@ -351,12 +351,12 @@ mod tests {
         assert!(refused(unit(&huge)));
         assert!(refused(cross(std::slice::from_ref(&huge), &[vec![1., 0.]])));
         assert!(refused(cross(&[vec![1., 0.]], std::slice::from_ref(&huge))));
-        // Building the anchor index and matching an image feature both fail instead of scoring 0.5 everywhere.
+        // 构建锚点索引和匹配图片特征都会失败，而不是处处给出 0.5 分。
         let ids = vec!["a".to_string(), "b".to_string()];
         assert!(refused(anchor_index_for_scan(&[vec![1., 0.], huge.clone()], &ids, &HashMap::new())));
         let index = AnchorIndex { entities: vec!["c".into()], p90: vec![], p50: vec![], p75: vec![] };
         assert!(refused(claims("a", &[vec![1., 0.]], &huge, &index, &[1.])));
-        // Largest values whose squares still sum to a finite number are normalized as before.
+        // 平方和仍是有限数的最大值照旧归一化。
         let edge: Vec<f32> = vec![1.3e19, 1.3e19];
         let norm = (edge[0] * edge[0] + edge[1] * edge[1]).sqrt();
         assert_eq!(unit(&edge).unwrap(), vec![edge[0] / norm, edge[1] / norm]);

@@ -1,4 +1,4 @@
-//! Native fallback only: no HTTP, token, generation or library session.
+//! 只是原生的后备实现：不涉及 HTTP、token、generation 或图库会话。
 use crate::{Error, Result};
 use std::{
     io::Read,
@@ -10,7 +10,7 @@ pub enum Kind {
     Library,
     Zip,
     Archive,
-    /// Model files downloaded by hand (#168): several files, ONNX, JSON or ZIP.
+    /// 手动下载的模型文件（#168）：可多选，ONNX、JSON 或 ZIP。
     Models,
 }
 impl Kind {
@@ -23,7 +23,7 @@ impl Kind {
             Self::Models => "models",
         }
     }
-    /// The chooser's prompt, in Chinese; the caller may show it translated (`choose`'s `title`).
+    /// 选择窗口的提示语，用中文写；调用方可以显示翻译后的文案（即 `choose` 的 `title`）。
     pub fn title(&self) -> &'static str {
         match self {
             Self::Folder => "选择图片文件夹",
@@ -50,12 +50,12 @@ pub fn choose(
     if !cfg!(target_os = "macos") {
         return Ok(Choice::Unsupported);
     }
-    // An AppleScript string literal.
+    // 转成 AppleScript 字符串字面量。
     let title = title.replace('\\', "\\\\").replace('"', "\\\"");
     let kind = kind.id();
     let command = if matches!(kind, "folder" | "library") { "choose folder" } else { "choose file" };
     let filter = if matches!(kind, "zip" | "archive") { " of type {\"zip\", \"public.zip-archive\"}" } else { "" };
-    // Use a list and NUL separators for multiple paths (names may contain newlines).
+    // 多个路径用列表和 NUL 分隔（文件名可能含换行）。
     let script = if multiple {
         format!("set chosen to {command} with prompt \"{title}\" with multiple selections allowed\nset resultPaths to \"\"\nrepeat with chosenPath in chosen\nset resultPaths to resultPaths & (POSIX path of chosenPath) & (ASCII character 0)\nend repeat\nreturn resultPaths")
     } else {
@@ -66,7 +66,7 @@ pub fn choose(
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .spawn()?;
-    // Drain both pipes while polling: a large multiselect must not deadlock on a full stdout pipe.
+    // 轮询的同时读空两个管道：多选的结果很大时，不能因 stdout 管道写满而死锁。
     fn drain(pipe: impl Read + Send + 'static) -> thread::JoinHandle<std::io::Result<Vec<u8>>> {
         thread::spawn(move || {
             let mut bytes = Vec::new();

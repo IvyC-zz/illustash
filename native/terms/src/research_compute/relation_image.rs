@@ -1,5 +1,5 @@
-//! Displayed-image contract of web/{similar,relate}. No ICC conversion is added.
-//! Pillow's BOX byte signature and BILINEAR mode-F arrays are distinct from IQDB's Haar input.
+//! web/{similar,relate} 的显示图片契约。不额外做 ICC 转换。
+//! Pillow 的 BOX 字节签名和 BILINEAR 模式 F 数组与 IQDB 的 Haar 输入不是一回事。
 use crate::{
     image_samples::tiff_scalar::{self, ScalarMode, ScalarSamples, ScalarTiff},
     Error, Result,
@@ -52,8 +52,8 @@ impl Plane {
         Self::new(x1 - x0, y1 - y0, self.channels, pixels)
     }
     pub fn resize(&self, width: usize, height: usize) -> Self {
-        // Each channel is a Pillow mode F image: double coefficients/accumulators,
-        // f32 storage after each axis. Never clamp or quantise these float samples.
+        // 每个通道都是一张 Pillow 模式 F 图片：系数和累加器用 double，
+        // 每个轴之后以 f32 存储。这些浮点样本绝不截断或量化。
         if vertical_first(self.width, self.height, height) {
             let swapped = Self {
                 width: self.height,
@@ -107,9 +107,8 @@ impl Plane {
         p
     }
 }
-// Image.resize in Pillow 12.3 runs vertical first for a shrinking image whose
-// current height exceeds 100 times its width, including after reducing_gap.
-// Retain that strict boundary and the existing per-axis storage/rounding.
+// Pillow 12.3 的 Image.resize 对当前高度超过宽度 100 倍的缩小图片先做垂直方向，
+// reducing_gap 之后也是如此。保留这个严格的边界，以及现有的逐轴存储和舍入。
 fn vertical_first(width: usize, height: usize, out_height: usize) -> bool {
     height > width.saturating_mul(100) && out_height < height
 }
@@ -123,9 +122,8 @@ fn transpose_pixels<T: Copy>(pixels: &[T], width: usize, height: usize, channels
     transposed
 }
 fn resample_add(pixel: f64, weight: f64, sum: f64) -> f64 {
-    // Current macOS Pillow 12.3 wheel contracts this C double multiply/add.
-    // An independent libSystem fma probe confirms the otherwise observed 1-ulp
-    // mode-F discrepancy; no epsilon or output rounding is added.
+    // 当前 macOS 的 Pillow 12.3 wheel 把这里 C 的 double 乘加收缩成 fma。
+    // 独立的 libSystem fma 探针证实了原本观察到的模式 F 1-ulp 差异；不加 epsilon，也不对输出舍入。
     #[cfg(target_os = "macos")]
     {
         pixel.mul_add(weight, sum)
@@ -147,7 +145,7 @@ enum Filter {
     Cubic,
 }
 fn coefficients(input: usize, output: usize, filter: Filter, extent: f64) -> Vec<(usize, Vec<f64>)> {
-    // Pillow's box endpoints are C floats; 12.3 precomputes reciprocal filter scale.
+    // Pillow 的 box 端点是 C float；12.3 预先算好滤波缩放的倒数。
     let scale = f64::from(extent as f32) / output as f64;
     let spread = scale.max(1.);
     let support = spread
@@ -253,8 +251,8 @@ enum IntegerMode {
     U16Big,
     I32,
 }
-// The TIFF owner returns unconverted samples. Only display owns thumbnail and
-// its per-mode storage, while signature/colour reuse the owner's RGB conversion.
+// 负责 TIFF 的模块返回未转换的样本。只有显示路径负责 thumbnail 和各模式的存储，
+// 签名和颜色则复用该模块的 RGB 转换。
 fn scalar_domain(metadata: Option<&exif::Exif>) -> bool {
     let Some(metadata) = metadata else { return false };
     let uint = |number| {
@@ -264,8 +262,8 @@ fn scalar_domain(metadata: Option<&exif::Exif>) -> bool {
         && uint(0x115).unwrap_or(1) == 1
         && matches!((uint(0x102), uint(0x153).unwrap_or(1)), (Some(16), 1) | (Some(32), 2 | 3))
 }
-// Pillow's other accepted scalar raw modes need their original I/F storage
-// before thumbnail; do not route signed16 or unsigned32 through RGB scaling.
+// Pillow 接受的其他标量原始模式在 thumbnail 之前需要保持原来的 I/F 存储；
+// 不要让 signed16 或 unsigned32 走 RGB 缩放。
 fn extra_scalar_domain(metadata: Option<&exif::Exif>) -> bool {
     let Some(m) = metadata else { return false };
     let uint = |n| m.get_field(exif::Tag(exif::Context::Tiff, n), exif::In::PRIMARY).and_then(|f| f.value.get_uint(0));
@@ -318,7 +316,7 @@ fn extra_scalar_image(mut bytes: Vec<u8>, thumbnail: bool, path_input: bool) -> 
     if big && sample == 1 && (photo == 0 || bits == 32) {
         return Err(Error::Invalid("unknown pixel mode".into()));
     }
-    // Pillow's WhiteIsZero I;16 and F raw modes do not invert scalar values.
+    // Pillow 的 WhiteIsZero I;16 和 F 原始模式不对标量值取反。
     if photo == 0 {
         drop(decoder);
         palette_as_gray(&mut bytes)?;
@@ -334,8 +332,8 @@ fn extra_scalar_image(mut bytes: Vec<u8>, thumbnail: bool, path_input: bool) -> 
         )?;
         set_tiff_uint(&mut bytes, 258, 8)?;
         if let Some(tile_width) = tile_width {
-            // Read every tile's complete encoded row, including edge padding;
-            // the original clipped-pixel stride is applied below.
+            // 读取每个 tile 完整的编码行，包括边缘填充；
+            // 原来按裁剪后像素计算的行跨度在下面应用。
             let packed_tile_width = tile_width
                 .checked_mul(12)
                 .ok_or_else(|| Error::Invalid("invalid packed TIFF tile".into()))?
@@ -377,8 +375,8 @@ fn extra_scalar_image(mut bytes: Vec<u8>, thumbnail: bool, path_input: bool) -> 
                 let (x0, y0) = ((chunk as usize % across) * cw as usize, (chunk as usize / across) * ch as usize);
                 let dw = (cw as usize).min(width as usize - x0);
                 let dh = (ch as usize).min(height as usize - y0);
-                // Pillow raw edge tile uses floor(tile_width*12/8) stride;
-                // full tile rows use the unpacker's ceil stride. Keep both.
+                // Pillow 对边缘 tile 的原始数据用 floor(tile_width*12/8) 作行跨度；
+                // 完整的 tile 行用解包器的 ceil 跨度。两者都保留。
                 let stride = if x0 + cw as usize > width as usize {
                     cw as usize * 12 / 8
                 } else {
@@ -527,9 +525,9 @@ fn load_scalar(scalar: ScalarTiff) -> Result<Loaded> {
         layout,
         icc: _,
     } = scalar;
-    // Follow the TIFF owner's measured ordinary Deflate8 consumer qualification.
-    // Pure samples remain numeric originals; Pillow's MM 32-bit libtiff rawmode
-    // reinterpretation belongs here, before orientation, thumbnail and reduce.
+    // 沿用负责 TIFF 的模块实测过的普通 Deflate8 使用条件。
+    // 纯样本保持数值原样；Pillow 对 MM 32 位 libtiff rawmode 的重新解释放在这里，
+    // 在方向处理、thumbnail 和 reduce 之前。
     let swap_32 = if big_endian && compression != 1 && matches!(mode, ScalarMode::Signed32 | ScalarMode::Float32) {
         let expected_strips =
             if layout.rows_per_strip == 0 { None } else { Some(height.div_ceil(layout.rows_per_strip) as usize) };
@@ -546,7 +544,7 @@ fn load_scalar(scalar: ScalarTiff) -> Result<Loaded> {
     } else {
         false
     };
-    // Display's filename entry has the original mmap reshape before load_end.
+    // 显示路径的文件名入口在 load_end 之前有原来的 mmap reshape。
     let (w, h) = if raw_path_mmap_eligible && (5..=8).contains(&orientation) {
         (height as usize, width as usize)
     } else {
@@ -612,8 +610,8 @@ fn decode_reader<R: BufRead + Seek + std::panic::UnwindSafe>(
         .unwrap_or(Orientation::NoTransforms);
     reader.rewind()?;
     let header = reader.fill_buf()?;
-    // PNG tRNS expands RGB/L to alpha in image's decoder; Pillow retains the
-    // original RGB/L bands, so the legacy matte condition must not see that A.
+    // image 的解码器会把 PNG 的 tRNS 展开成 RGB/L 的 alpha；Pillow 保留原来的 RGB/L 波段，
+    // 所以旧的底色合成条件不能看到这个 A。
     let png_colour = header.starts_with(b"\x89PNG\r\n\x1a\n").then(|| header.get(25).copied()).flatten();
     if (header.starts_with(b"II") || header.starts_with(b"MM")) && extra_scalar_domain(metadata.as_ref()) {
         reader.rewind()?;
@@ -626,8 +624,8 @@ fn decode_reader<R: BufRead + Seek + std::panic::UnwindSafe>(
         reader.rewind()?;
         let mut bytes = Vec::new();
         reader.read_to_end(&mut bytes)?;
-        // Signature/colour both convert before BOX and keep TIFF's load_end
-        // orientation. The owner's conversion is shared; no ICC is added here.
+        // 签名和颜色都在 BOX 之前转换，并保留 TIFF 在 load_end 里的方向处理。
+        // 共用该模块的转换；这里不加 ICC。
         let (im, _) = tiff_scalar::scalar_bytes(&bytes, is_path)?;
         limit(im.width(), im.height())?;
         return Ok((DynamicImage::ImageRgba8(im), false, false, IntegerMode::U16));
@@ -671,8 +669,8 @@ fn decode_reader<R: BufRead + Seek + std::panic::UnwindSafe>(
             reader.set_format(f);
         }
     }
-    // Pillow's TIFF decoder itself applies EXIF in load_end, including callers
-    // that do not explicitly request ImageOps.exif_transpose (_colour).
+    // Pillow 的 TIFF 解码器自己在 load_end 里应用 EXIF，包括没有显式调用
+    // ImageOps.exif_transpose 的调用方（_colour）。
     let decoder_transposes = reader.format() == Some(image::ImageFormat::Tiff);
     let (mut im, cmyk) = if reader.format() == Some(image::ImageFormat::Jpeg) {
         std::panic::catch_unwind(|| -> std::io::Result<(DynamicImage, bool)> {
@@ -694,8 +692,8 @@ fn decode_reader<R: BufRead + Seek + std::panic::UnwindSafe>(
             let p = d.read_scanlines::<u8>()?;
             d.finish()?;
             let im = if cmyk {
-                // Store non-inverted CMYK channels in a four-channel container;
-                // its fourth channel is K, never alpha. Resize before converting RGB.
+                // 把未取反的 CMYK 通道存在一个四通道容器里；
+                // 第四个通道是 K，绝不是 alpha。先缩放，再转换为 RGB。
                 DynamicImage::ImageRgba8(
                     image::RgbaImage::from_raw(w, h, p.into_iter().map(|v| 255 - v).collect())
                         .ok_or_else(|| std::io::Error::other("invalid CMYK JPEG buffer"))?,
@@ -729,8 +727,8 @@ fn decode_reader<R: BufRead + Seek + std::panic::UnwindSafe>(
         let mut bytes = Vec::new();
         input.read_to_end(&mut bytes)?;
         let im = if let Some(raw) = crate::image_samples::pnm::pnm_samples(&bytes, Some(178_956_970))? {
-            // The shared parser owns raw samples only. Keep display's original
-            // I-mode thumbnail before RGB clamp separate from PAM/hash conversion.
+            // 共用的解析器只负责原始样本。显示路径原来在 RGB 截断之前做的 I 模式 thumbnail
+            // 与 PAM/哈希的转换分开保留。
             let integer = raw.bands == 1 && raw.maxval > 255;
             let maximum = if integer { 65535. } else { 255. };
             let values: Vec<_> = raw
@@ -781,9 +779,9 @@ fn decode_reader<R: BufRead + Seek + std::panic::UnwindSafe>(
             uint(0x106) == Some(5) && uint(0x102) == Some(8) && uint(0x115) == Some(4)
         })
     {
-        // image's TIFF adapter converts CMYK to RGB with float truncation.
-        // Pillow keeps the four raw channels through thumbnail/reduce, then
-        // uses its integer RGB conversion. Reuse that existing CMYK pipeline.
+        // image 的 TIFF 适配器用浮点截断把 CMYK 转成 RGB。
+        // Pillow 在 thumbnail/reduce 期间保留四个原始通道，之后用整数的 RGB 转换。
+        // 复用现有的这条 CMYK 流程。
         let mut decoder =
             tiff::decoder::Decoder::new(reader.into_inner()).map_err(|e| Error::Invalid(e.to_string()))?;
         let (w, h) = decoder.dimensions().map_err(|e| Error::Invalid(e.to_string()))?;
@@ -834,9 +832,9 @@ fn decode_reader<R: BufRead + Seek + std::panic::UnwindSafe>(
         };
     }
     if decoder_transposes || png_colour.is_some() {
-        // Pillow's PNG/TIFF RGB(A) 16-bit raw modes discard low bytes at
-        // decode, before alpha composition or thumbnail. This is not image's
-        // rounded scaling by 257, and is not PNM's separate maxval scaling.
+        // Pillow 的 PNG/TIFF RGB(A) 16 位原始模式在解码时就丢掉低字节，
+        // 在 alpha 合成或 thumbnail 之前。这不是 image 按 257 取整的缩放，
+        // 也不是 PNM 另外按 maxval 的缩放。
         im = match im {
             DynamicImage::ImageRgb16(g) => {
                 DynamicImage::ImageRgb8(image::RgbImage::from_fn(g.width(), g.height(), |x, y| {
@@ -862,7 +860,7 @@ fn decode_reader<R: BufRead + Seek + std::panic::UnwindSafe>(
                 == Some(0)
         })
     {
-        // TIFF RGBX's fourth sample is padding, not Pillow's A band.
+        // TIFF RGBX 的第四个样本是填充，不是 Pillow 的 A 波段。
         if let DynamicImage::ImageRgba8(g) = im {
             im = DynamicImage::ImageRgb8(image::RgbImage::from_fn(g.width(), g.height(), |x, y| {
                 let p = g.get_pixel(x, y);
@@ -878,9 +876,8 @@ fn decode_reader<R: BufRead + Seek + std::panic::UnwindSafe>(
             Orientation::Rotate90 | Orientation::Rotate270 | Orientation::Rotate90FlipH | Orientation::Rotate270FlipH
         )
     {
-        // Pillow's filename mmap fast path maps raw pixels using its already
-        // swapped dimensions, before Tiff.load_end transposes. BytesIO uses the
-        // ordinary decoder and does not have this behavior. Preserve both.
+        // Pillow 按文件名走的 mmap 快速路径用已经交换过的尺寸映射原始像素，
+        // 发生在 Tiff.load_end 转置之前。BytesIO 用普通解码器，没有这个行为。两者都保留。
         im = reshape_image(im)?;
     }
     if let Some((left, top, width, height, background)) = gif_canvas {
@@ -897,10 +894,10 @@ fn decode_reader<R: BufRead + Seek + std::panic::UnwindSafe>(
     }
     Ok((im, nearest, cmyk, integer_mode))
 }
-// TIFF 0.9's image adapter rejects palette, packed grayscale and LA and reads
-// only one plane. Keep raw display samples here; ICC remains the #153 owner's job.
-// Reuse the ordinary libjpeg backend for TIFF's abbreviated JPEG strips/tiles.
-// The generic TIFF codecs use another IDCT and can change relation pixels.
+// TIFF 0.9 的 image 适配器拒绝调色板、打包灰度和 LA，并且只读一个平面。
+// 这里保留原始的显示样本；ICC 仍由 #153 的负责方处理。
+// TIFF 的缩写 JPEG 条带 / tile 复用普通的 libjpeg 后端。
+// 通用的 TIFF 编解码器用另一种 IDCT，可能改变关系比对的像素。
 fn display_jpeg_tiff(bytes: &[u8]) -> Result<(DynamicImage, bool)> {
     use tiff_display::{
         decoder::{ChunkType, Decoder},
@@ -1020,7 +1017,7 @@ fn normalise_tiff_fill(bytes: &mut [u8]) -> Result<()> {
     ranges.sort_unstable();
     let mut reversed_end = 0;
     for (start, end) in ranges {
-        // Several strips may share encoded storage; reverse their union once.
+        // 几个条带可能共用编码存储；对它们的并集只反转一次。
         for byte in &mut bytes[start.max(reversed_end)..end.max(reversed_end)] {
             *byte = byte.reverse_bits();
         }
@@ -1058,8 +1055,8 @@ fn display_tiff(mut bytes: Vec<u8>) -> Result<(DynamicImage, bool, bool)> {
         return Err(Error::Invalid(UNKNOWN_RAW_MODE.into()));
     }
     if fill == 2 && compression != 1 {
-        // TIFF FillOrder reverses encoded stream bytes, before decompression.
-        // libtiff normalises rawmode to FillOrder1 for its decoded samples.
+        // TIFF FillOrder 在解压之前反转编码流的字节。
+        // libtiff 把解码后样本的 rawmode 统一为 FillOrder1。
         drop(decoder);
         normalise_tiff_fill(&mut bytes)?;
         decoder = Decoder::new(Cursor::new(&bytes)).map_err(invalid)?;
@@ -1074,8 +1071,8 @@ fn display_tiff(mut bytes: Vec<u8>) -> Result<(DynamicImage, bool, bool)> {
     };
     if photo == 3 {
         drop(decoder);
-        // Only interpretation changes: the same locked codec decompresses raw
-        // index samples, not RGB. Original metadata and file offsets stay intact.
+        // 只改变解释方式：同一个锁定的编解码器解压的是原始的索引样本，而不是 RGB。
+        // 原来的元数据和文件偏移保持不变。
         palette_as_gray(&mut bytes)?;
         decoder = Decoder::new(Cursor::new(&bytes)).map_err(invalid)?;
     }
@@ -1109,9 +1106,9 @@ fn display_tiff(mut bytes: Vec<u8>) -> Result<(DynamicImage, bool, bool)> {
                 let index = band * per_band + chunk;
                 let (dw, dh) = decoder.chunk_data_dimensions(index as u32);
                 if !raw_planar_offsets.is_empty() {
-                    // Pillow's raw planar setup indexes rawmode[layer], so
-                    // RGB;16L/B becomes individual byte bands R/G/B/A. Retain
-                    // that byte stride rather than silently repairing old pixels.
+                    // Pillow 的原始平面设置按 rawmode[layer] 取索引，
+                    // 所以 RGB;16L/B 变成单字节的 R/G/B/A 波段。保留这个字节跨度，
+                    // 不悄悄修正旧像素。
                     let (x0, y0) = ((chunk % across) * cw as usize, (chunk / across) * ch as usize);
                     let width = (cw as usize).min(w as usize - x0);
                     let height = (ch as usize).min(h as usize - y0);
@@ -1254,7 +1251,7 @@ fn set_tiff_uint(bytes: &mut [u8], tag: u16, value: u32) -> Result<()> {
 }
 
 fn limit(w: u32, h: u32) -> std::io::Result<()> {
-    // Pillow's Image.DecompressionBombError (2 * its default MAX_IMAGE_PIXELS).
+    // Pillow 的 Image.DecompressionBombError（它默认 MAX_IMAGE_PIXELS 的 2 倍）。
     if u64::from(w) * u64::from(h) > 178_956_970 {
         Err(std::io::Error::other("image exceeds decompression limit"))
     } else {
@@ -1272,7 +1269,7 @@ fn tiff_path_mapped(metadata: Option<&exif::Exif>) -> bool {
         return false;
     }
     let (photo, bits, samples) = (uint(0x106), uint(0x102), uint(0x115).unwrap_or(1));
-    // Exactly Pillow's rawmode==mode and _MAPMODES qualification, not all TIFFs.
+    // 恰好是 Pillow 的 rawmode==mode 和 _MAPMODES 条件，不是所有 TIFF。
     (photo == Some(1) && samples == 1 && matches!(bits, Some(8 | 16)) && uint(0x153).unwrap_or(1) == 1)
         || (photo == Some(3) && samples == 1 && bits == Some(8))
         || (photo == Some(2) && samples == 4 && bits == Some(8) && uint(0x152) == Some(2))
@@ -1302,8 +1299,8 @@ fn tga_header(header: &[u8]) -> bool {
         && header[12..14] != [0, 0]
         && header[14..16] != [0, 0]
 }
-// Preserve Pillow's accepted raw modes missing from image's TGA adapter.
-// Adapt samples to an already supported header; that decoder owns orientation/RLE.
+// 保留 Pillow 接受而 image 的 TGA 适配器缺少的原始模式。
+// 把样本改写成已支持的头部格式；方向和 RLE 由那个解码器处理。
 fn display_tga(mut bytes: Vec<u8>) -> Result<DynamicImage> {
     let bad = || Error::Invalid("invalid TGA samples".into());
     if !tga_header(&bytes) {
@@ -1314,8 +1311,8 @@ fn display_tga(mut bytes: Vec<u8>) -> Result<DynamicImage> {
     limit(w, h)?;
     let kind = bytes[2];
     let depth = bytes[16];
-    // Pillow BGRA;15Z expands 5-bit values by floor(255*v/31); its inverted
-    // high bit is alpha (Unpack.c: clear → 255, set → 0).
+    // Pillow 的 BGRA;15Z 用 floor(255*v/31) 扩展 5 位值；它取反的最高位是 alpha
+    // （Unpack.c：清零 → 255，置位 → 0）。
     let expand = |sample: &[u8]| {
         let v = u16::from_le_bytes([sample[0], sample[1]]);
         let alpha = if v & 0x8000 == 0 { 255 } else { 0 };
@@ -1323,8 +1320,8 @@ fn display_tga(mut bytes: Vec<u8>) -> Result<DynamicImage> {
             .map(|v| v as u8)
     };
     if matches!(kind, 1 | 9) && bytes[1] == 1 {
-        // Palette alpha belongs to the entries, not the image descriptor.
-        // Pillow ignores these low bits for P; image's adapter requires zero.
+        // 调色板的 alpha 属于各个条目，不属于图像描述符。
+        // Pillow 对 P 模式忽略这些低位；image 的适配器要求它们为零。
         bytes[17] &= 0xf0;
     }
     if bytes[1] == 1 && bytes[7] == 16 {
@@ -1405,8 +1402,8 @@ fn display_ico(bytes: &[u8], bound: usize) -> Result<(DynamicImage, bool, bool, 
             8 - entry[2].saturating_sub(1).leading_zeros()
         }
     };
-    // Pillow sorts stable: largest area first, then *lowest* colour depth.
-    // image's ICO adapter instead prioritises highest depth before area.
+    // Pillow 稳定排序：面积最大的在前，其次是色深「最低」的。
+    // image 的 ICO 适配器则先看色深最高，再看面积。
     let entry = entries
         .chunks_exact(16)
         .enumerate()
@@ -1418,13 +1415,13 @@ fn display_ico(bytes: &[u8], bound: usize) -> Result<(DynamicImage, bool, bool, 
     let end = offset.checked_add(length).ok_or_else(bad)?;
     let mut payload = bytes.get(offset..end).ok_or_else(bad)?;
     if payload.starts_with(b"\x89PNG\r\n\x1a\n") {
-        // Accept Pillow's original RGB/L/P PNG modes; image's ICO wrapper
-        // otherwise refuses any embedded PNG that isn't RGBA.
+        // 接受 Pillow 原来的 RGB/L/P PNG 模式；否则 image 的 ICO 封装会拒绝
+        // 任何不是 RGBA 的内嵌 PNG。
         return decode_reader(Cursor::new(payload), bound, Some(image::ImageFormat::Png), false, false);
     }
     if u16::from_le_bytes([entry[6], entry[7]]) == 32 && payload.len() >= 40 {
-        // Pillow uses the stored fourth byte, ignoring AND bits for 32bpp.
-        // Some valid 32-bit icons have no AND mask (including Pillow's encoder).
+        // 32bpp 时 Pillow 用存储的第四个字节，忽略 AND 位。
+        // 有些有效的 32 位图标没有 AND 掩码（包括 Pillow 编码器生成的）。
         let field = |at| u32::from_le_bytes(payload[at..at + 4].try_into().expect("DIB header")) as usize;
         let header_size = field(0);
         if header_size >= 40 && field(16) == 0 {
@@ -1491,8 +1488,8 @@ fn gif_first_canvas<R: Read>(reader: &mut R) -> std::io::Result<(u32, u32, u32, 
                 let mut d = [0; 9];
                 reader.read_exact(&mut d)?;
                 let local = palette(reader, d[8])?;
-                // Pillow fills the first P-mode canvas with the transparent
-                // index when present, otherwise index zero (not GIF background).
+                // Pillow 有透明索引时用它填充第一张 P 模式画布，
+                // 否则用索引零（不是 GIF 的背景色）。
                 let index = usize::from(transparent.unwrap_or(0));
                 let palette = local.or(global);
                 let c = palette.as_ref().and_then(|p| p.get(index * 3..index * 3 + 3)).unwrap_or(&[0; 3]);
@@ -1529,8 +1526,8 @@ fn bmp_nearest(header: &[u8]) -> bool {
     let Some(start) = 14usize.checked_add(dib) else {
         return true;
     };
-    // Pillow BmpImagePlugin treats an identity gray palette as L (BICUBIC),
-    // except the black/white two-entry palette, which becomes mode 1 (NEAREST).
+    // Pillow 的 BmpImagePlugin 把恒等灰度调色板当作 L（BICUBIC），
+    // 只有黑白两项的调色板例外，它变成模式 1（NEAREST）。
     let identity = colors <= 256
         && (0..colors).all(|i| {
             let value = if colors == 2 { i * 255 } else { i } as u8;
@@ -1566,7 +1563,7 @@ fn flatten(im: &DynamicImage, cmyk: bool) -> Vec<u8> {
     }
 }
 fn pillow_rgb(im: &DynamicImage) -> Vec<u8> {
-    // Pillow converts integer grayscale by clamping, after any thumbnail resize.
+    // Pillow 在任何 thumbnail 缩放之后才按截断方式转换整数灰度。
     if let DynamicImage::ImageLuma16(g) = im {
         g.pixels().flat_map(|p| [p[0].min(255) as u8; 3]).collect()
     } else {
@@ -1577,7 +1574,7 @@ pub fn signature(path: &Path) -> Result<(f64, Vec<u8>)> {
     let (im, _, cmyk, _) = decode(path, 128)?;
     Ok(signature_of(&im, cmyk))
 }
-/// #153's already-authorized public thumbnail bytes, without a temporary file.
+/// #153 已经授权取得的公开缩略图字节，不经过临时文件。
 pub fn signature_bytes(bytes: &[u8]) -> Result<(f64, Vec<u8>)> {
     let (im, _, cmyk, _) = decode_reader(Cursor::new(bytes), 128, None, true, false)?;
     Ok(signature_of(&im, cmyk))
@@ -1591,8 +1588,8 @@ fn signature_of(im: &DynamicImage, cmyk: bool) -> (f64, Vec<u8>) {
         .collect();
     (size.0 as f64 / size.1 as f64, resize_bytes(&gray, size, (16, 16), 1, Filter::Box, (size.0 as f64, size.1 as f64)))
 }
-/// Existing provenance.verify._colour: draft96, drop alpha, no EXIF transform,
-/// 24x24 RGB BOX. Deliberately distinct from displayed-image signature/load.
+/// 沿用 provenance.verify._colour：draft96，丢掉 alpha，不做 EXIF 变换，24x24 RGB BOX。
+/// 有意与显示图片的签名和加载分开。
 pub fn reference_colour(path: &Path) -> Result<Vec<u8>> {
     let (im, _, cmyk, _) = decode_reader(
         BufReader::new(fs::File::open(path)?),
@@ -1655,16 +1652,15 @@ pub fn load(path: &Path) -> Result<Loaded> {
             let pixels = raw.into_iter().flat_map(|p| [p.clamp(0, 255) as f32; 3]).collect();
             return Ok(Loaded { image: Plane::new(out.0, out.1, 3, pixels)?, size });
         }
-        // Pillow's I;16 has a distinct double-coefficient, per-axis uint16
-        // resampler. It cannot use the RGB byte path before resize/clamping.
+        // Pillow 的 I;16 有一套独立的重采样器：double 系数，逐轴 uint16 存储。
+        // 它在缩放和截断之前不能走 RGB 字节路径。
         if (w / out.0 / 2).max(1) > 1 || (h / out.1 / 2).max(1) > 1 {
-            // thumbnail's reducing_gap attempts Image.reduce, which rejects I;16.
+            // thumbnail 的 reducing_gap 会尝试 Image.reduce，而它拒绝 I;16。
             return Err(Error::Invalid(WRONG_MODE.into()));
         }
         let raw = if matches!(integer_mode, IntegerMode::U16Big) && size != out {
-            // Pillow's I;16B resampler reads/writes native uint16 storage while
-            // the mode retains big endian interpretation. Preserve that old
-            // byte ordering, not an invented endian-corrected thumbnail.
+            // Pillow 的 I;16B 重采样器按本机 uint16 读写存储，而模式仍按大端解释。
+            // 保留这个旧的字节顺序，不自己发明一个修正了字节序的缩略图。
             let native: Vec<_> = g.as_raw().iter().map(|v| v.swap_bytes()).collect();
             resize_u16(&native, size, out).into_iter().map(u16::swap_bytes).collect()
         } else {
@@ -1693,7 +1689,7 @@ pub fn load(path: &Path) -> Result<Loaded> {
             .collect();
         composite(pixels, alpha)
     } else {
-        // Pillow RGBA.resize first premultiplies; this recursive resize omits reducing_gap.
+        // Pillow 的 RGBA.resize 先预乘；这次递归缩放不带 reducing_gap。
         if alpha {
             for p in raw.chunks_exact_mut(4) {
                 for c in 0..3 {
@@ -1712,8 +1708,8 @@ pub fn load(path: &Path) -> Result<Loaded> {
                     for x in 0..rw {
                         let (x1, y1) = (((x + 1) * fx).min(w), ((y + 1) * fy).min(h));
                         let n = (x1 - x * fx) * (y1 - y * fy);
-                        // Pillow 12.3 Reduce.c: float32 reciprocal, truncated
-                        // UINT32 multiplier and wrapped product, not exact division.
+                        // Pillow 12.3 Reduce.c：float32 倒数、截断的 UINT32 乘数和回绕的乘积，
+                        // 不是精确除法。
                         let multiplier = ((1u64 << 32) as f32 / (n as u32).wrapping_mul(256) as f32) as u32;
                         for c in 0..channels {
                             let mut s = 0u64;
@@ -1768,8 +1764,8 @@ fn resize_u16(pixels: &[u16], size: (usize, usize), out: (usize, usize)) -> Vec<
 }
 fn store_i32(value: f64) -> i32 {
     let value = value.round();
-    // Pillow's MSVC x64 double->INT32 storage returns INT_MIN on overflow;
-    // arm64's conversion saturates. Preserve each original platform's pixels.
+    // Pillow 在 MSVC x64 上 double->INT32 存储溢出时返回 INT_MIN；
+    // arm64 的转换则饱和。保留各平台原来的像素。
     #[cfg(target_os = "windows")]
     if value < f64::from(i32::MIN) || value > f64::from(i32::MAX) || !value.is_finite() {
         return i32::MIN;
@@ -1798,8 +1794,8 @@ fn thumbnail_32<T: Copy + Default + Into<f64>>(
                 let (x1, y1) = (((x + 1) * fx).min(w), ((y + 1) * fy).min(h));
                 let mut sum = 0.;
                 if x1 - x0 == fx && y1 - y0 == fy {
-                    // Original Reduce.c adds each full 2x2 group in its source
-                    // type, then promotes to double. Preserve I32 wrap/F32 rounds.
+                    // 原 Reduce.c 把每个完整的 2x2 组按源类型相加，再提升为 double。
+                    // 保留 I32 的回绕和 F32 的舍入。
                     for yy in (y0..y1 - 1).step_by(2) {
                         for xx in (x0..x1 - 1).step_by(2) {
                             let group = add(
@@ -1821,7 +1817,7 @@ fn thumbnail_32<T: Copy + Default + Into<f64>>(
                         }
                     }
                 } else {
-                    // Partial last rows/columns use scalar double addition.
+                    // 最后不完整的行和列用标量 double 加法。
                     for yy in y0..y1 {
                         for xx in x0..x1 {
                             sum += pixels[yy * w + xx].into();
@@ -1894,7 +1890,7 @@ mod integer_storage_tests {
         assert_eq!(store_i32(-127.5), -128);
         assert_eq!(store_i32(-2_399_141_888.), i32::MIN);
         let positive = if cfg!(target_os = "windows") { i32::MIN } else { i32::MAX };
-        // Values measured independently from Pillow on both platforms before fix.
+        // 这些值在修复之前，于两个平台上独立从 Pillow 测得。
         for value in [2_161_663_712., 2_250_244_096., 2_304_770_048.] {
             assert_eq!(store_i32(value), positive);
         }

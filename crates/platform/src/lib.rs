@@ -1,4 +1,4 @@
-//! Existing platform capabilities. Application policy and publication remain in the host.
+//! 现有的平台能力。应用策略和发布仍由宿主负责。
 #![cfg_attr(not(test), warn(clippy::unwrap_used))]
 use illustash_core::backup;
 #[cfg(test)]
