@@ -1,5 +1,4 @@
-//! App-wide credentials and desktop login; explicit account actions authorize only
-//! their validation requests. Saving a credential never authorizes background I/O.
+//! 全应用共用的凭据与桌面登录；显式的账号操作只授权它自己的验证请求。保存凭据从不授权后台 I/O。
 use crate::{app_library::Library, http_json::Json, Error, Result};
 use serde_json::{json, Value};
 use std::{
@@ -12,19 +11,19 @@ use std::{
 static ACCOUNT_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 pub const PIXIV_EXPIRED: &str = "Pixiv 登录已过期，请到设置页「绑定的账号」重新登录";
 pub const PIXIV_NO_WINDOW: &str = "Pixiv 登录在桌面 app 的登录窗口里，现在不是从桌面 app 启动的";
-/// What went wrong with a Pixiv query, for the callers that retry it or take it as a lost login (#204). They branch on
-/// this, never on the words, which stay in the error.
+/// Pixiv 查询出了什么问题，供要重试或把它当作登录失效的调用方使用（#204）。
+/// 调用方按这个分支，不按文字分支；文字留在错误里。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Pixiv {
-    /// Pixiv did not accept the login (HTTP 401, or a body saying so).
+    /// Pixiv 不接受这个登录（HTTP 401，或响应正文这样说）。
     Refused,
-    /// The desktop app's login window has no Pixiv login.
+    /// 桌面 app 的登录窗口里没有 Pixiv 登录。
     NoLogin,
-    /// The request failed on the way and may succeed if tried again.
+    /// 请求在途中失败，重试可能成功。
     Failed,
-    /// The request made from the desktop app's login window failed; the window may still be loading.
+    /// 从桌面 app 登录窗口发出的请求失败；窗口可能还在加载。
     WindowFailed,
-    /// Anything else, including a failed call to the desktop app (`app_desktop::unanswered`).
+    /// 其他情况，包括调用桌面 app 失败（`app_desktop::unanswered`）。
     Other,
 }
 #[derive(Debug)]
@@ -36,7 +35,7 @@ impl PixivError {
     fn new(kind: Pixiv, message: impl Into<String>) -> Self {
         PixivError { kind, error: Error::invalid(message) }
     }
-    /// The desktop app did not answer or refused the call.
+    /// 桌面 app 没有应答或拒绝了调用。
     fn unanswered(&self) -> bool {
         matches!(&self.error, Error::Invalid(m) if crate::app_desktop::unanswered(m))
     }
@@ -52,8 +51,7 @@ impl From<PixivError> for Error {
     }
 }
 type PixivResult<T> = std::result::Result<T, PixivError>;
-/// Non-secret facts for background consumers. Authorization is passed by the
-/// caller's task policy and is never derived from presence of credentials.
+/// 给后台使用方的非机密信息。授权由调用方的任务策略传入，从不根据有没有凭据推断。
 pub fn network_state(authorized: bool) -> Result<Value> {
     let _guard = ACCOUNT_LOCK.lock().expect("app_accounts mutex poisoned");
     let m = meta()?;
@@ -67,7 +65,7 @@ pub fn network_state(authorized: bool) -> Result<Value> {
         "pixiv_user_id":user_id,"pixiv_expired":m.get("pixiv").and_then(|p|p.get("expired")).map(Json::text),
         "saucenao_bound":secret_inner("saucenao")?.is_some()}))
 }
-/// Sensitive fields deliberately have no Debug/Serialize implementation.
+/// 敏感字段有意不实现 Debug/Serialize。
 pub struct ModelCredentials {
     pub key: Option<String>,
     pub model: String,
@@ -97,7 +95,7 @@ fn check(kind: &str) -> Result<()> {
     }
     Ok(())
 }
-/// Secret-bearing internal interface, never serialized by account HTTP responses.
+/// 带机密的内部接口，账号 HTTP 响应从不序列化它。
 pub fn secret(kind: &str) -> Result<Option<String>> {
     let _guard = ACCOUNT_LOCK.lock().expect("app_accounts mutex poisoned");
     secret_inner(kind)
@@ -164,8 +162,8 @@ fn read_json(response: ureq::Response) -> Result<Json> {
     let s = std::str::from_utf8(&bytes).map_err(|_| Error::invalid("账号服务响应编码不正确"))?;
     crate::http_json::parse_python(s).map_err(|_| Error::invalid("账号服务响应不正确"))
 }
-/// Authorized query transport for #51; callers must provide explicit network authorization.
-/// A saved login does not imply authorization; app-backed requests never fall back to cookies.
+/// #51 的已授权查询通道；调用方必须显式提供联网授权。
+/// 保存过的登录不代表授权；经桌面 app 发出的请求从不退回到 cookie。
 fn pixiv_get(path: &str, authorized: bool, session: Option<&str>, in_app: bool) -> PixivResult<Json> {
     if !authorized {
         return Err(Error::invalid("尚未授权联网").into());
@@ -239,8 +237,8 @@ fn pixiv_get(path: &str, authorized: bool, session: Option<&str>, in_app: bool) 
         Err(_) => Err(PixivError::new(Pixiv::Failed, "Pixiv 请求失败")),
     }
 }
-// Account validation owns one Net-equivalent policy across its two queries.
-// pixiv_get remains the one-request transport for task consumers to coordinate.
+// 账号验证的两次查询共用一套等同于 Net 的策略。
+// pixiv_get 仍是单次请求的通道，由任务使用方自行协调。
 fn account_query(
     path: &str,
     session: Option<&str>,
@@ -346,7 +344,7 @@ pub fn status() -> Result<Json> {
     }
     Ok(out)
 }
-/// Metadata only: no network, no desktop call and no SauceNAO/keychain lookup.
+/// 只读元数据：不联网、不调用桌面，也不查 SauceNAO 或钥匙串。
 pub fn pixiv_binding() -> Result<Value> {
     let _guard = ACCOUNT_LOCK.lock().expect("app_accounts mutex poisoned");
     serde_json::from_str(&meta()?.get("pixiv").cloned().unwrap_or(Json::Object(vec![])).dump())
@@ -355,7 +353,7 @@ pub fn pixiv_binding() -> Result<Value> {
 fn updated_pixiv(mut meta: Json, who: Option<&Value>, problem: Option<&str>, detail: Option<&str>) -> Json {
     let mut entry = meta.get("pixiv").cloned().unwrap_or(Json::Object(vec![]));
     if let Some(Value::Object(fields)) = who {
-        // _who's established insertion order must also hold for a fresh entry.
+        // _who 既定的插入顺序对新建的条目也要成立。
         for key in ["user_id", "name", "following"] {
             if let Some(value) = fields.get(key) {
                 entry.set(key, value.clone().into());
@@ -378,8 +376,7 @@ fn updated_pixiv(mut meta: Json, who: Option<&Value>, problem: Option<&str>, det
     meta.set("pixiv", entry);
     meta
 }
-/// The caller's authorized Net owns status/bytes, expiry diagnosis and retry
-/// policy; this only records the same non-secret facts as legacy mark_pixiv.
+/// 状态与字节、过期判断和重试策略由调用方已授权的 Net 负责；这里只记录与旧版 mark_pixiv 相同的非机密信息。
 pub fn mark_pixiv(who: Option<&Value>, problem: Option<&str>, detail: Option<&str>) -> Result<Value> {
     let _guard = ACCOUNT_LOCK.lock().expect("app_accounts mutex poisoned");
     let m = updated_pixiv(meta()?, who, problem, detail);
@@ -387,12 +384,10 @@ pub fn mark_pixiv(who: Option<&Value>, problem: Option<&str>, detail: Option<&st
     serde_json::from_str(&m.get("pixiv").expect("app_accounts internal invariant").dump())
         .map_err(|_| Error::invalid("账号元数据格式不正确"))
 }
-/// HTTP mutation is serialized with the current session by the native host. No
-/// background task survives the request, and a switch waits for bounded I/O.
+/// 原生宿主让 HTTP 修改与当前会话串行。请求结束后不留后台任务，切换会等待有界的 I/O。
 pub(crate) fn action(library: &Library, action: &str, body: &Json) -> Result<Json> {
-    // Convert I/O/SQLite/archive failures to the legacy Invalid (400) contract.
-    // X only mutates its captured package; do not hold the account-store lock
-    // while taking its SQLite writer lock.
+    // 把 I/O、SQLite、归档失败转成旧版的 Invalid（400）契约。
+    // X 只修改它捕获的图库包；取它的 SQLite 写锁时不要持有账号存储锁。
     let _guard =
         if action == "x/import" { None } else { Some(ACCOUNT_LOCK.lock().expect("app_accounts mutex poisoned")) };
     action_inner(library, action, body).map_err(|e| match e {
@@ -624,8 +619,8 @@ pub fn import_archive(library: &Library, path: &Path) -> Result<i64> {
         }
         tx.execute_batch("PRAGMA user_version=5")?;
     }
-    // One prepared bulk statement preserves input order/OR IGNORE semantics,
-    // and avoids repeatedly crossing SQLite for existing archive IDs.
+    // 一条预编译的批量语句保留输入顺序和 OR IGNORE 语义，
+    // 也避免为已有的归档 ID 反复进出 SQLite。
     let data = serde_json::to_string(&ids).map_err(|_| Error::invalid("关注列表格式不正确"))?;
     let count = tx.execute(
         "INSERT OR IGNORE INTO leads(source,system,key) SELECT 'x_following','x_id',value FROM json_each(?)",

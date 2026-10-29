@@ -1,12 +1,11 @@
-//! Without a configured research worker: Server._after_operation('verdict') with learner=None is a successful no-op.
-//! With a worker configured, leave events pending for app_research atomic publication.
+//! 没有配置研究 worker 时：Server._after_operation('verdict') 在 learner=None 下是成功的空操作。
+//! 配置了 worker 时，把事件留在待处理状态，由 app_research 原子发布。
 use crate::Result;
 use rusqlite::{OpenFlags, OptionalExtension, TransactionBehavior};
 use std::path::Path;
 
-/// After a human operation has committed: its result stands whatever happens here. A failure leaves the
-/// events pending for the next drain (another operation, startup or periodic recovery) and is only logged,
-/// so the response never reports a committed operation as rolled back.
+/// 人工操作提交之后调用：无论这里发生什么，它的结果都成立。失败时事件留待下次处理（另一次操作、启动或定期恢复），
+/// 只记日志，所以响应从不把已提交的操作报成已回滚。
 pub(crate) fn drain_after_commit(db: &Path) {
     if let Err(error) = drain(db) {
         eprintln!("人工操作已提交，verdict事件处理失败，稍后重试：{error}");
@@ -17,7 +16,7 @@ pub(crate) fn drain(db: &Path) -> Result<()> {
     if crate::app_research::configured() {
         return Ok(());
     }
-    // No pending work: open only a reader, create no table/connection journal or application writes.
+    // 没有待处理的工作：只打开读连接，不建表、不写连接日志，也不写应用数据。
     let read = crate::sqlite::open_with_flags(db, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
     crate::configure(&read)?;
     let pending: bool = read.query_row(
@@ -43,7 +42,7 @@ pub(crate) fn drain(db: &Path) -> Result<()> {
         let Some(id) = id else {
             return Ok(());
         };
-        // Exact no-learner verdict handler. Do not acknowledge imported/unknown events or start a worker.
+        // 与没有 learner 时的 verdict 处理完全一致。不要确认导入的或未知的事件，也不要启动 worker。
         tx.execute("UPDATE backend_effects SET status='done',error='' WHERE id=?", [id])?;
         tx.commit()?;
     }

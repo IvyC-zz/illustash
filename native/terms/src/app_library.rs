@@ -1,4 +1,4 @@
-//! Existing application packages. Opening is validation only; creation, upgrades and cutover are explicit workflows.
+//! 已有的应用图库包。打开只做校验；创建、升级和切换都是显式的流程。
 use crate::{http_json::Json, Error, Result};
 use rusqlite::{Connection, OpenFlags};
 use serde_json::Value;
@@ -16,16 +16,15 @@ pub const FORMAT: i64 = 1;
 pub const APPLICATION_SCHEMA: &str = "36";
 const CORE_MARKERS: [&str; 4] = ["terms_artists", "terms_labels", "terms_characters", "terms_names"];
 
-/// Opening progress: the database being checked and the overall fraction of both integrity checks.
-/// Called on the opening thread, often (every hundred SQLite steps); callers throttle their output.
+/// 打开进度：正在检查的数据库，以及两项完整性检查合计的完成比例。
+/// 在打开图库的线程上频繁调用（每一百个 SQLite 步骤一次）；调用方自行节流输出。
 pub type Progress = Arc<dyn Fn(&str, f64) + Send + Sync + std::panic::RefUnwindSafe>;
 
-/// Paths are immutable after validation. Session identity must additionally include a fresh session generation,
-/// since copies of a package may share its config ID. No default package or Python runtime is consulted.
+/// 路径在校验后不再改变。会话身份还必须包含一个新的会话 generation，因为图库包的副本可能共用同一个配置 ID。
+/// 不查默认图库包，也不调用 Python 运行时。
 ///
-/// Every file the package owns is reached through the canonical path fixed at opening: retargeting the alias
-/// the user opened afterwards must not redirect reads or writes to another package. The alias is kept only to
-/// show and remember what the user chose.
+/// 图库包拥有的每个文件都经打开时固定的规范路径访问：用户打开的别名之后改指别处，也不得把读写重定向到另一个图库包。
+/// 保留别名只是为了显示和记住用户选的是什么。
 #[derive(Clone, Debug)]
 pub struct Library {
     display_path: PathBuf,
@@ -39,25 +38,24 @@ impl Library {
         Self::open_validated(path, false, Checks::Now(None))
     }
 
-    /// Same validation; a multi-GiB package's integrity checks take tens of seconds, so report them.
+    /// 同样的校验；几个 GiB 的图库包完整性检查要几十秒，所以报告进度。
     pub fn open_reporting(path: &Path, progress: Progress) -> Result<Self> {
         Self::open_validated(path, false, Checks::Now(Some(progress)))
     }
 
-    /// The same validation without the two full integrity checks, for a session that decides on them itself
-    /// (#212, `app_service::open_owned`): versions, core markers and the source base schema are still required.
+    /// 同样的校验，但不做两项完整检查，给自己决定是否检查的会话使用（#212，`app_service::open_owned`）：版本、
+    /// 核心标记和来源的基础 schema 仍然必须满足。
     pub(crate) fn open_deferring_checks(path: &Path) -> Result<Self> {
         Self::open_validated(path, false, Checks::Deferred)
     }
 
-    /// A package an explicit upgrade may open, both full checks included (an imported archive is checked the way
-    /// the upgrade will check it). Ordinary opening never accepts an old core.
+    /// 显式升级可以打开的图库包，包括两项完整检查（导入的归档按升级会做的方式检查）。普通打开从不接受旧的核心。
     pub(crate) fn open_for_upgrade(path: &Path) -> Result<Self> {
         Self::open_validated(path, true, Checks::Now(None))
     }
 
-    /// `open_for_upgrade` without the two full integrity checks: whether to offer the upgrade is decided from versions,
-    /// markers and schemas alone, and the upgrade runs the checks itself, once, under its writer lock (#267).
+    /// 不做两项完整性检查的 `open_for_upgrade`：要不要提供升级只根据版本、标记和 schema 决定，
+    /// 升级自己在它的写锁下运行检查，只运行一次（#267）。
     pub(crate) fn open_for_upgrade_deferring_checks(path: &Path) -> Result<Self> {
         Self::open_validated(path, true, Checks::Deferred)
     }
@@ -68,27 +66,27 @@ impl Library {
             library.check(progress)?;
         }
         let mut db = read_connection(&library.db())?;
-        // One read snapshot: a concurrent migration cannot supply a mixture of version/ownership flags.
+        // 一次读快照：并发的迁移不会给出混杂的版本和归属标记。
         let tx = db.transaction()?;
         validate_checked(&tx, upgrade)?;
         tx.commit()?;
         let source = read_connection(&library.source())?;
-        // Source layouts have no independent version number. Require only the established base schema;
-        // new source links/presets are not needed by the migrated reads and must never be added on open.
+        // 来源的布局没有独立的版本号。只要求既定的基础 schema；
+        // 迁移后的读取用不到新的来源链接和出处预设，打开时也绝不能添加它们。
         source.prepare(
             "SELECT uuid,filename,src_path,width,height,added_at,src_kind,in_scope,trashed FROM assets LIMIT 0",
         )?;
         source.prepare("SELECT uuid,dim,value,conf FROM labels LIMIT 0")?;
-        // provenance.sqlite is optional: the existing HTTP readers supply empty evidence when absent.
+        // provenance.sqlite 是可选的：没有时，现有的 HTTP 读取方给出空的证据。
         Ok(library)
     }
 
-    /// The package and its library.json, without reading either database.
+    /// 图库包和它的 library.json，不读任何一个数据库。
     pub(crate) fn locate(path: &Path) -> Result<Self> {
         if path.extension().and_then(|s| s.to_str()) != Some("pilib") {
             return Err(Error::Invalid("图库包的扩展名必须是 .pilib".into()));
         }
-        // Display paths preserve the explicit alias, matching Python Path.absolute rather than resolve.
+        // 显示路径保留显式的别名，与 Python 的 Path.absolute 一致，而不是 resolve。
         let path = if path.is_absolute() { path.to_owned() } else { std::env::current_dir()?.join(path) };
         let instance_path = crate::app_paths::canonical(&path)?;
         if !path.is_dir() {
@@ -115,25 +113,24 @@ impl Library {
         Ok(Self { display_path: path, instance_path, config, ordered_config })
     }
 
-    /// Validate the same package again through its canonical path, keeping the alias the user opened for display.
-    /// Only the Unix symlink test uses it.
+    /// 经规范路径再次校验同一个图库包，保留用户打开时的别名用于显示。
+    /// 只有 Unix 符号链接测试使用它。
     #[cfg(all(test, unix))]
     pub(crate) fn reopen(&self) -> Result<Self> {
         self.keep_display(Self::open_validated(&self.instance_path, false, Checks::Now(None))?)
     }
 
-    /// `reopen` for the explicit upgrade workflow, which accepts an old core. Without the full checks: the upgrade
-    /// runs them itself while it holds the writer lock (#267).
+    /// 显式升级流程用的 `reopen`，接受旧的核心。不做完整检查：升级在持有写锁时自己运行它们（#267）。
     pub(crate) fn reopen_for_upgrade_deferring_checks(&self) -> Result<Self> {
         self.keep_display(Self::open_validated(&self.instance_path, true, Checks::Deferred)?)
     }
 
-    /// `reopen` without the full checks, for the upgrade after its commit: it checks only the database it wrote.
+    /// 不做完整检查的 `reopen`，给提交之后的升级使用：它只检查自己写过的数据库。
     pub(crate) fn reopen_deferring_checks(&self) -> Result<Self> {
         self.keep_display(Self::open_validated(&self.instance_path, false, Checks::Deferred)?)
     }
 
-    /// The full check of library.sqlite alone, `progress` getting its fraction; damage is an error as in `check`.
+    /// 只对 library.sqlite 做完整检查，`progress` 收到它的完成比例；损坏与 `check` 中一样是错误。
     pub(crate) fn check_application(&self, progress: Option<Report>) -> Result<()> {
         match inspect_file(&self.db(), progress, Watch::default())? {
             Verdict::Damaged(result) => Err(Error::Schema(format!("图库数据库损坏：{result}"))),
@@ -141,8 +138,8 @@ impl Library {
         }
     }
 
-    /// Both full integrity checks, library.sqlite first; `progress` gets the overall fraction, each file weighted
-    /// by its size so the fraction tracks the bytes actually read. Damage is an error naming what SQLite found.
+    /// 两项完整性检查，先查 library.sqlite；`progress` 收到合计的完成比例，每个文件按大小加权，
+    /// 让比例跟上实际读过的字节。损坏是一个错误，写明 SQLite 发现了什么。
     pub(crate) fn check(&self, progress: Option<Progress>) -> Result<()> {
         match self.inspect(progress)?.pop() {
             Some((_, Verdict::Damaged(result))) => Err(Error::Schema(format!("图库数据库损坏：{result}"))),
@@ -150,7 +147,7 @@ impl Library {
         }
     }
 
-    /// `check` that stops at the first damaged file and says which it was, for the session's own handling (#212).
+    /// 在第一个损坏的文件处停下并说明是哪个的 `check`，供会话自己处理（#212）。
     pub(crate) fn inspect(&self, progress: Option<Progress>) -> Result<Vec<(&'static str, Verdict)>> {
         let files = [("library.sqlite", self.db()), ("source.sqlite", self.source())];
         let weights = match &progress {
@@ -182,7 +179,7 @@ impl Library {
         Ok(library)
     }
 
-    /// A settings write updates the captured session's config without reopening or upgrading databases.
+    /// 设置写入时更新已捕获会话的配置，不重新打开或升级数据库。
     pub(crate) fn reload_config(&mut self) -> Result<()> {
         let text = fs::read_to_string(self.instance_path.join("library.json"))?;
         self.config = serde_json::from_str(&text).map_err(|e| Error::Invalid(e.to_string()))?;
@@ -190,12 +187,11 @@ impl Library {
         Ok(())
     }
 
-    /// The path as the user opened it, alias included: for display and the recent-libraries registry only.
+    /// 用户打开时的路径，含别名：只用于显示和最近图库登记表。
     pub fn display_path(&self) -> &Path {
         &self.display_path
     }
-    /// Canonical package identity and the root of every package file; combine it with a fresh session
-    /// generation for identity, never just config.id.
+    /// 规范的图库包身份，也是图库包每个文件的根目录；作为身份使用时要和新的会话 generation 组合，从不只用 config.id。
     pub fn instance_path(&self) -> &Path {
         &self.instance_path
     }
@@ -227,7 +223,7 @@ impl Library {
         self.config.get("test").is_some_and(truthy) || self.config.get("frozen").is_some_and(truthy)
     }
 
-    /// Same field order and nested config order as web.library.Library.info; sizes include live WAL bytes.
+    /// 字段顺序和嵌套配置的顺序与 web.library.Library.info 相同；大小包括正在使用的 WAL 字节。
     pub(crate) fn info(&self) -> Result<Json> {
         Ok(Json::object([
             ("path", self.display_path.to_str().ok_or_else(|| Error::Invalid("图库路径不是 UTF-8".into()))?.into()),
@@ -242,7 +238,7 @@ impl Library {
         ]))
     }
 
-    /// Public byte contract without exposing the HTTP-only ordered JSON representation.
+    /// 公开的字节契约，不暴露仅供 HTTP 使用的有序 JSON 表示。
     pub fn info_json(&self) -> Result<String> {
         Ok(self.info()?.dump())
     }
@@ -258,25 +254,23 @@ fn truthy(value: &Value) -> bool {
         Value::Object(v) => !v.is_empty(),
     }
 }
-/// How long a background task's write connection waits for another writer (#275): the sync and its folder and Photos
-/// scans, recognition imports and name lookups. The same wait `crate::configure` gives every connection; these used
-/// 250 ms (names 2 s), shorter than the research check that hashed inputs under the write lock. Only these tasks wait
-/// on it: pages write through their own connections. The lock is now held briefly: research checks its inputs outside
-/// it and steps aside for source writers, and a name lookup does not read source.sqlite under it. A stop is noticed
-/// between statements and the desktop shell gives the host 10 seconds to quit, so one wait fits within that. A task
-/// that still finds the database busy fails as before, and the next automatic sync or the names retry tries again.
+/// 后台任务的写连接等待另一个写入方的时长（#275）：同步及其文件夹和 Photos 扫描、识别导入、名称查询。
+/// 与 `crate::configure` 给每个连接的等待相同；这些任务以前用 250 ms（名称用 2 s），
+/// 比在写锁下对输入做哈希的研究检查还短。只有这些任务按这个时长等待：页面经各自的连接写入。现在写锁只短暂持有：
+/// 研究在锁外检查输入，并给来源写入方让路，名称查询也不在锁下读 source.sqlite。停止在语句之间就能察觉，
+/// 桌面外壳给宿主 10 秒退出，所以一次等待放得进去。仍然遇到数据库忙的任务照旧失败，由下一次自动同步或名称重试再试。
 pub(crate) const TASK_WRITE_WAIT: Duration = Duration::from_secs(5);
 pub(crate) fn read_connection(path: &Path) -> Result<Connection> {
     if !path.is_file() {
         return Err(Error::Invalid(format!("图库缺少已有数据库：{path}", path = path.display())));
     }
-    // No CREATE flag, no migrations or journal mode changes. URI interpretation is deliberately disabled
-    // for package paths, so names containing '?' or '#' cannot silently refer to a different file.
+    // 不带 CREATE 标志，不迁移，也不改日志模式。图库包路径有意不按 URI 解释，
+    // 所以含 '?' 或 '#' 的名称不会悄悄指向另一个文件。
     let conn = crate::sqlite::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
     conn.busy_timeout(Duration::from_secs(10))?;
     Ok(conn)
 }
-/// Whether opening runs the two full integrity checks first (`Now`), or leaves them to the session (#212).
+/// 打开时是先运行两项完整性检查（`Now`），还是留给会话（#212）。
 enum Checks {
     Now(Option<Progress>),
     Deferred,
@@ -291,32 +285,31 @@ pub(crate) fn check_database(conn: &Connection) -> Result<()> {
     }
 }
 
-/// What a full integrity check found. Failures that say nothing about the file (I/O, a stopped check) are errors.
+/// 一次完整性检查发现了什么。与文件本身无关的失败（I/O、检查被停止）是错误。
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum Verdict {
     Sound,
-    /// SQLite's own description of the first problem it found.
+    /// SQLite 自己对它发现的第一个问题的描述。
     Damaged(String),
-    /// Another connection started writing the file: the check stopped and released its read lock (`Watch::writer`).
+    /// 另一个连接开始写这个文件：检查停下并释放了它的读锁（`Watch::writer`）。
     Yielded,
 }
 
-/// What a running check watches besides its progress. `stop` interrupts it, which is an error, not a verdict.
-/// `writer` is the file's rollback journal (#212): source.sqlite is not in WAL mode, so a check's read lock, held for
-/// up to a minute on a large library, would make its writers (sync, recognition imports) give up after their short
-/// busy timeouts. The check polls for the journal a writer creates before it commits and steps aside at once.
+/// 运行中的检查除了进度还要盯着什么。`stop` 中断它，这是错误，不是裁决。`writer` 是这个文件的回滚日志（#212）：
+/// source.sqlite 不是 WAL 模式，检查在大图库上持有读锁可达一分钟，会让它的写入方（同步、识别导入）
+/// 在较短的忙等超时后放弃。检查轮询写入方提交之前创建的日志，一发现就立即让路。
 #[derive(Clone, Default)]
 pub(crate) struct Watch {
     pub(crate) stop: Option<Arc<AtomicBool>>,
     pub(crate) writer: Option<PathBuf>,
 }
 impl Watch {
-    /// How often the check looks for the journal: well within the shortest writer busy timeout (250 ms).
+    /// 检查查找日志的频率：远低于最短的写入方忙等超时（250 ms）。
     const POLL: Duration = Duration::from_millis(20);
 }
 pub(crate) type Report = Arc<dyn Fn(f64) + Send + Sync + std::panic::RefUnwindSafe>;
 
-/// One file's full check on its own read-only connection, watched as `watch` says.
+/// 一个文件的完整检查，用它自己的只读连接，按 `watch` 的要求盯着。
 pub(crate) fn inspect_file(path: &Path, progress: Option<Report>, watch: Watch) -> Result<Verdict> {
     if watch.writer.as_ref().is_some_and(|journal| journal.exists()) {
         return Ok(Verdict::Yielded);
@@ -324,17 +317,15 @@ pub(crate) fn inspect_file(path: &Path, progress: Option<Report>, watch: Watch) 
     check_database_reporting(&read_connection(path)?, progress, watch)
 }
 
-/// quick_check reads every page, then (for tables) every row again to check constraints; SQLite 3.43+ calls
-/// the progress handler during both passes. The pager's page requests (cache hits plus misses) track the pages
-/// visited so far; on real libraries, where the 2 MiB default cache makes nearly every request a miss, the
-/// total came to 1.4–1.6× the page count (2026-10-02), so `READS` is the expected ratio. A low estimate stalls
-/// the bar near its end, a high one ends in a short jump, which is the lesser problem.
+/// quick_check 读每一页，然后（对表）再读一遍每一行来检查约束；SQLite 3.43+ 在两遍中都调用进度处理函数。
+/// pager 的页面请求（缓存命中加未命中）跟踪到目前为止访问过的页；在真实图库上，2 MiB 的默认缓存让几乎每次请求都未命中，
+/// 合计是页数的 1.4–1.6×（2026-10-02），所以 `READS` 是预期的比例。估低了进度条会停在接近结尾处，
+/// 估高了会在结尾短暂跳一下，后者问题较小。
 ///
-/// Misses alone are not enough: the bundled SQLite (SQLITE_ENABLE_MEMORY_MANAGEMENT) puts every connection in
-/// the process into one page-cache group, so this connection may keep a whole small file cached by recycling
-/// other connections' idle pages, and the second pass then misses nothing (#84).
+/// 只看未命中不够：内置的 SQLite（SQLITE_ENABLE_MEMORY_MANAGEMENT）把进程里的每个连接放进同一个页缓存组，
+/// 所以这个连接可能靠回收其他连接的空闲页把整个小文件留在缓存里，第二遍就一次都不会未命中（#84）。
 ///
-/// A file SQLite reports as corrupt or as not a database at all is damaged as well, whichever statement finds it.
+/// SQLite 报告为损坏或根本不是数据库的文件也算损坏，不论是哪条语句发现的。
 fn check_database_reporting(conn: &Connection, progress: Option<Report>, watch: Watch) -> Result<Verdict> {
     const READS: f64 = 1.5;
     let Watch { stop, writer } = watch;
@@ -390,7 +381,7 @@ fn check_database_reporting(conn: &Connection, progress: Option<Report>, watch: 
     }
 }
 
-/// SQLite's corruption and not-a-database results are the file's own state; anything else stays an error.
+/// SQLite 的损坏和非数据库结果是文件本身的状态；其他情况仍是错误。
 pub(crate) fn damage(error: rusqlite::Error) -> Result<Verdict> {
     match corruption(&error) {
         Some(detail) => Ok(Verdict::Damaged(detail)),
@@ -408,7 +399,7 @@ pub(crate) fn corruption(error: &rusqlite::Error) -> Option<String> {
     }
 }
 
-/// The connection's own handle, read only from its progress callback (same thread, inside its step).
+/// 连接自己的句柄，只在它的进度回调里读取（同一线程，在它的 step 内）。
 #[derive(Clone, Copy)]
 struct Handle(*mut rusqlite::ffi::sqlite3);
 // SAFETY: 句柄只在所属连接的进度回调里读取，与连接同一线程、同一次 step 内；实现 Send 只为满足回调闭包的约束，
@@ -438,7 +429,7 @@ pub(crate) fn require_meta(conn: &Connection, key: &str, expected: &str) -> Resu
     }
     Ok(())
 }
-/// Same read-only version/ownership checks for opening and the locked upgrade snapshot.
+/// 打开和加锁的升级快照共用同样的只读版本和归属检查。
 fn validate_checked(conn: &Connection, upgrade: bool) -> Result<()> {
     if upgrade {
         return crate::app_upgrade::validate(conn);
@@ -630,7 +621,7 @@ mod tests {
     #[test]
     fn reports_check_progress_monotonically_by_file_size() {
         let f = Fixture::new();
-        // Synthetic bulk only: about 8 MiB in source.sqlite with an index, 0.1 MiB in library.sqlite.
+        // 只有合成的大块数据：source.sqlite 里带索引约 8 MiB，library.sqlite 里 0.1 MiB。
         let src = crate::sqlite::open(f.package.join("source.sqlite")).unwrap();
         src.execute_batch(
             "CREATE TABLE bulk(id INTEGER PRIMARY KEY, body TEXT); CREATE INDEX bulk_body ON bulk(body);
@@ -639,9 +630,8 @@ mod tests {
         )
         .unwrap();
         drop(src);
-        // Idle connections elsewhere in the process, each holding a full default cache of another copy. The
-        // bundled SQLite shares one page-cache group between connections, so the check may keep the whole
-        // file cached by recycling their pages, and its second pass then misses nothing (#84).
+        // 进程里别处的空闲连接，每个都持有另一份副本的完整默认缓存。内置的 SQLite 让各连接共用一个页缓存组，
+        // 所以检查可能靠回收它们的页把整个文件留在缓存里，第二遍就一次都不会未命中（#84）。
         let other = f.root.join("other.sqlite");
         fs::copy(f.package.join("source.sqlite"), &other).unwrap();
         for idle in [0, 8] {
@@ -664,7 +654,7 @@ mod tests {
             assert_eq!(seen.first().unwrap(), &("library.sqlite".to_string(), 0.0));
             assert_eq!(seen.last().unwrap(), &("source.sqlite".to_string(), 1.0));
             let source: Vec<f64> = seen.iter().filter(|(l, _)| l == "source.sqlite").map(|(_, d)| *d).collect();
-            // Intermediate reports during the scan itself, reaching most of the way before it completes.
+            // 扫描本身进行中的中间报告，在完成之前就走完大部分。
             assert!(source.len() > 10, "{seen:?}");
             assert!(source[source.len() - 2] > 0.8, "idle connections {idle}: {:?}", &source[source.len() - 3..]);
         }
@@ -705,7 +695,7 @@ mod tests {
     #[test]
     fn retargeted_alias_keeps_every_package_file_on_the_opened_package() {
         use std::os::unix::fs::symlink;
-        // Two packages with the same config ID; the alias first names A, then B.
+        // 两个图库包配置 ID 相同；别名先指向 A，再指向 B。
         let (a, b) = (Fixture::new(), Fixture::new());
         fs::write(b.package.join("library.json"), r#"{"format":1,"id":"synthetic","name":"另一个合成图库"}"#).unwrap();
         let alias = a.root.join("alias.pilib");
@@ -723,7 +713,7 @@ mod tests {
             (again.instance_path(), again.display_path(), again.name()),
             (home.as_path(), alias.as_path(), "合成图库")
         );
-        // Opening the alias afresh is a deliberate choice of B.
+        // 重新打开别名就是有意选了 B。
         assert_eq!(Library::open(&alias).unwrap().name(), "另一个合成图库");
     }
 }

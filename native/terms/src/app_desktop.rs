@@ -1,10 +1,10 @@
-//! Shared authenticated desktop loopback transport. Never expose its token to the web UI.
+//! 共用的、带认证的桌面本机回环通道。不要把它的 token 暴露给网页界面。
 use crate::{http_json::Json, Error, Result};
 use std::{io::Read, time::Duration};
-/// Every failed bridge call starts with this text, followed by which step failed (#147). Callers that retry or tolerate
-/// a bridge failure match the prefix (`unanswered`), never the whole message.
+/// 每次桥接调用失败都以这段文字开头，后面跟着是哪一步失败（#147）。要重试或容忍桥接失败的调用方匹配这个前缀
+/// （`unanswered`），从不匹配整条消息。
 pub const UNANSWERED: &str = "桌面 app 没有响应或拒绝请求";
-/// The error is a failed bridge call (any cause).
+/// 这个错误是一次失败的桥接调用（任何原因）。
 pub fn unanswered(message: &str) -> bool {
     message.starts_with(UNANSWERED)
 }
@@ -13,7 +13,7 @@ pub fn available() -> bool {
         .iter()
         .all(|k| std::env::var(k).is_ok_and(|v| !v.is_empty()))
 }
-/// Existing authenticated loopback bridge. No proxy, redirects, arbitrary hosts or methods.
+/// 现有的带认证本机回环桥接。不走代理，不跟随重定向，不允许任意主机或方法。
 pub fn request(method: &str, route: &str, timeout: u64) -> Result<Json> {
     if !available() {
         return Err(Error::invalid("桌面平台服务不可用"));
@@ -51,8 +51,8 @@ fn send(port: u16, token: &str, method: &str, route: &str, timeout: u64) -> Resu
     let text = std::str::from_utf8(&bytes).map_err(|_| Error::invalid("账号服务响应编码不正确"))?;
     crate::http_json::parse_python(text).map_err(|_| Error::invalid("账号服务响应不正确"))
 }
-/// Which step of the bridge call failed. The desktop answers a refusal or a failed action with `{"error": …}`
-/// (desktop/src/bridge.rs): short local text, never a token, cookie or selected path.
+/// 桥接调用是哪一步失败的。桌面端对拒绝或失败的操作回复 `{"error": …}`（desktop/src/bridge.rs）：简短的本机文字，
+/// 从不含 token、cookie 或所选路径。
 fn failure(error: ureq::Error, timeout: u64) -> String {
     match error {
         ureq::Error::Status(code, response) => {
@@ -93,7 +93,7 @@ mod tests {
         }
     }
 
-    /// One local stand-in for the desktop bridge that answers a single request with `status` and `body`.
+    /// 一个本地替身，代替桌面桥接，用 `status` 和 `body` 回答一次请求。
     fn bridge(status: u16, body: &'static str) -> u16 {
         let server = tiny_http::Server::http("127.0.0.1:0").unwrap();
         let port = server.server_addr().to_ip().unwrap().port();
@@ -107,7 +107,7 @@ mod tests {
 
     #[test]
     fn bridge_failures_say_which_step_failed() {
-        // The desktop's own refusal text comes through (a failed picker, a wrong token).
+        // 桌面端自己的拒绝文字会原样传过来（选择器失败、token 不对）。
         let port = bridge(502, r#"{"error": "选择结果不是本地路径"}"#);
         let m = message(send(port, "t", "POST", "/platform/choose?kind=folder&multiple=1", 5));
         assert_eq!(m, "桌面 app 没有响应或拒绝请求：桌面 app 回复失败（502）：选择结果不是本地路径");
@@ -115,11 +115,11 @@ mod tests {
         assert!(message(send(port, "t", "GET", "/pixiv/session", 5)).ends_with("（403）：口令不对"));
         let port = bridge(500, "not json");
         assert!(message(send(port, "t", "GET", "/pixiv/session", 5)).ends_with("桌面 app 回复失败（500）"));
-        // Nothing listening on the port.
+        // 端口上没有监听。
         let port = TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
         let m = message(send(port, "t", "GET", "/pixiv/session", 5));
         assert_eq!(m, "桌面 app 没有响应或拒绝请求：连不上桌面 app 的本机通道");
-        // Accepted but never answered.
+        // 接受了连接但一直不回答。
         let silent = TcpListener::bind("127.0.0.1:0").unwrap();
         let port = silent.local_addr().unwrap().port();
         let m = message(send(port, "t", "GET", "/pixiv/session", 1));

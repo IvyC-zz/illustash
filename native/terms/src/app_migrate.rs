@@ -1,6 +1,5 @@
-//! WD rating and topic labels from source.sqlite delivered to the core as evidence packages (folder sync and
-//! recognition imports). The Python-era library migrations that lived here went with core v8 (#201): libraries from
-//! before the switch to the core are upgraded by the `pre-v8` version.
+//! source.sqlite 里的 WD 分级和主题标签，作为证据包交给核心（文件夹同步和识别导入）。
+//! 原来在这里的 Python 时代图库迁移随核心 v8 一起去掉了（#201）：切换到核心之前的图库由 `pre-v8` 版本升级。
 use crate::{Error, Result};
 use rusqlite::Connection;
 use serde_json::{json, Value};

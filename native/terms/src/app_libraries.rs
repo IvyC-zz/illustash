@@ -1,4 +1,4 @@
-//! Recent-library registry. Listing is read-only; remembering is an explicit successful-session operation.
+//! 最近图库登记表。列出是只读的；记住图库是会话成功之后的显式操作。
 use crate::{
     app_library::Library,
     app_paths::{app_support, user_home},
@@ -21,12 +21,12 @@ pub(crate) fn remember(library: &Library) -> Result<()> {
     remember_at(library.display_path(), library.name(), &registry(&home), &now()?, true)
 }
 
-/// List a completed creation without making it the next startup/current library.
+/// 列出一个创建完成的图库，但不把它设为下次启动的图库或当前图库。
 pub(crate) fn remember_created(path: &Path, name: &str) -> Result<()> {
     let home = user_home()?;
     remember_at(path, name, &registry(&home), &now()?, false)
 }
-/// Default startup reopens the last registered package; never creates or migrates implicitly.
+/// 默认启动时重新打开最后登记的图库包；从不隐式创建或迁移。
 pub(crate) fn startup() -> Result<PathBuf> {
     recent(&registry(&user_home()?)).first().and_then(|entry| entry["path"].as_str()).map(PathBuf::from).ok_or_else(
         || Error::Invalid("没有最近图库；请用 --library 指定已初始化的 .pilib，新建请使用 library-create".into()),
@@ -35,7 +35,7 @@ pub(crate) fn startup() -> Result<PathBuf> {
 pub(crate) fn home() -> Result<PathBuf> {
     Ok(user_home()?.join("Pictures").join("Illustash"))
 }
-/// The Photos library a new Photos source points at (~/Pictures/Photos Library.photoslibrary). Configuration only.
+/// 新的 Photos 来源指向的 Photos 图库（~/Pictures/Photos Library.photoslibrary）。只是配置。
 pub(crate) fn photos_library() -> Result<PathBuf> {
     Ok(home()?.parent().expect("internal file path must have a parent").join("Photos Library.photoslibrary"))
 }
@@ -55,7 +55,7 @@ fn unique_path_at(folder: &Path, name: &str) -> Result<PathBuf> {
     Ok(path)
 }
 fn path_exists(path: &Path) -> Result<bool> {
-    // Python 3.12 Path.exists ignores these errors, but propagates e.g. NAME_MAX and permissions.
+    // Python 3.12 的 Path.exists 忽略这些错误，但会传出 NAME_MAX、权限之类的错误。
     if path.as_os_str().to_string_lossy().contains('\0') {
         return Ok(false);
     }
@@ -63,7 +63,7 @@ fn path_exists(path: &Path) -> Result<bool> {
         Ok(_) => Ok(true),
         Err(error)
             if error.kind() == std::io::ErrorKind::NotFound
-                // ErrorKind::NotADirectory was stabilized after our Rust 1.82 floor.
+                // ErrorKind::NotADirectory 稳定的时间晚于我们的最低版本 Rust 1.82。
                 || cfg!(unix) && error.raw_os_error() == Some(libc::ENOTDIR)
                 || cfg!(windows) && error.raw_os_error() == Some(267) // ERROR_DIRECTORY
                 || matches!(error.raw_os_error(), Some(libc::EBADF | libc::ELOOP)) =>
@@ -74,9 +74,8 @@ fn path_exists(path: &Path) -> Result<bool> {
     }
 }
 
-/// Hosts of different libraries share the registry: each read-modify-write holds its lock, so one host's
-/// update is never lost to another's or written through the same temporary file at once. When the lock
-/// file itself cannot be opened the update goes ahead as before and reports its own failure.
+/// 不同图库的宿主共用登记表：每次读取、修改、写回都持有它的锁，所以一个宿主的更新从不会被另一个宿主的更新冲掉，
+/// 也不会同时经同一个临时文件写入。锁文件本身打不开时，更新照旧进行，并报告它自己的失败。
 pub(crate) fn registry_locked<T>(file: &Path, update: impl FnOnce() -> Result<T>) -> Result<T> {
     let lock = file.parent().and_then(|parent| {
         fs::create_dir_all(parent).ok()?;
@@ -89,7 +88,7 @@ pub(crate) fn registry_locked<T>(file: &Path, update: impl FnOnce() -> Result<T>
             .ok()
     });
     if let Some(lock) = &lock {
-        // Another host holds it only for one small write; wait for it rather than overwrite its result.
+        // 另一个宿主只为一次小的写入持有锁；等它，而不是覆盖它的结果。
         for _ in 0..500 {
             if crate::app_file_lock::acquire(lock).is_ok() {
                 break;
@@ -124,8 +123,8 @@ fn display(path: &Path) -> Result<&str> {
 fn persona(config: &Value) -> Value {
     config.get("test").and_then(|v| v.get("persona")).cloned().unwrap_or(Value::Null)
 }
-// Unlike web.library.open_library, this does not mkdir cache directories or inspect/upgrade databases.
-// A recent card may refer to a valid config whose database still needs an explicit upgrade.
+// 与 web.library.open_library 不同，这里不创建缓存目录，也不检查或升级数据库。
+// 最近图库卡片可能指向一个有效的配置，而它的数据库仍需显式升级。
 fn recent_config(entry: &Value) -> Option<Value> {
     let path = Path::new(entry.get("path")?.as_str()?);
     if path.extension()?.to_str()? != "pilib" {
@@ -150,7 +149,7 @@ fn recent(path: &Path) -> Vec<Value> {
         .map(|entries| entries.iter().filter(|entry| recent_config(entry).is_some()).cloned().collect())
         .unwrap_or_default()
 }
-/// Recent libraries that can still be opened, most recent first: `[{path, name}]`.
+/// 仍能打开的最近图库，最近的在前：`[{path, name}]`。
 pub(crate) fn recent_entries() -> Vec<Value> {
     let Ok(home) = user_home() else { return Vec::new() };
     recent(&registry(&home))
@@ -196,20 +195,20 @@ fn remember_unlocked(path: &Path, name: &str, file: &Path, opened_at: &str, fron
         entries.push(entry);
     }
     entries.truncate(20);
-    // Keep the legacy object/array schema, Unicode, two-space indentation, trailing newline and .tmp name.
+    // 保持旧版的对象/数组结构、Unicode、两个空格缩进、结尾换行和 .tmp 文件名。
     let text = serde_json::to_string_pretty(&json!({"recent": entries}))
         .map_err(|e| Error::Invalid(format!("无法序列化图库记录：{e}")))?
         + "\n";
     let parent = file.parent().ok_or_else(|| Error::Invalid("无效图库注册表路径".into()))?;
-    // Every caller only says why the library is not listed (#97, #111, #176): keep the operation and its file.
+    // 每个调用方都只说明图库为什么没有列出（#97、#111、#176）：保留操作和它的文件。
     fs::create_dir_all(parent).map_err(|e| crate::error::io_at(e, parent, None))?;
     let tmp = file.with_extension("tmp");
     fs::write(&tmp, text).map_err(|e| crate::error::io_at(e, &tmp, None))?;
     fs::rename(&tmp, file).map_err(|e| crate::error::io_at(e, &tmp, Some(file)))?;
     Ok(())
 }
-/// Why a library could not be listed among the recent ones, in one sentence for the page (#179): which file could not
-/// be written and, for the common case, the likely reason, instead of an internal error prefix or an errno.
+/// 图库为什么没能列进最近图库，给页面的一句话（#179）：哪个文件写不进去，常见情况下还有可能的原因，
+/// 而不是内部错误前缀或 errno。
 pub(crate) fn unlisted_reason(error: &Error) -> String {
     match error {
         Error::IoAt { source, path, destination } => {
@@ -226,7 +225,7 @@ pub(crate) fn unlisted_reason(error: &Error) -> String {
 }
 
 fn now() -> Result<String> {
-    // SQLite is already bundled and uses the host's timezone/DST rules on both supported platforms.
+    // SQLite 已经内置，在两个受支持的平台上都用宿主机的时区和夏令时规则。
     let c = rusqlite::Connection::open_in_memory()?;
     let (stamp, offset): (String, i64) = c.query_row(
         "SELECT strftime('%Y-%m-%dT%H:%M:%S','now','localtime'), unixepoch('now','localtime')-unixepoch('now')",
@@ -400,7 +399,7 @@ mod tests {
     #[cfg(target_os = "macos")]
     #[test]
     fn registry_failures_keep_the_failing_operation_and_its_files() {
-        // #179: creation, import and opening all only say why the library is not listed, from the same IoAt.
+        // #179：创建、导入和打开都只说明图库为什么没有列出，来自同一个 IoAt。
         let f = Fixture::new();
         let lib = f.library();
         f.write(json!({"recent":[]}));
@@ -448,7 +447,7 @@ mod tests {
         let ordinary_file = f.0.join("ordinary-file");
         fs::write(&ordinary_file, b"synthetic").unwrap();
         assert_eq!(unique_path_at(&ordinary_file, "child").unwrap(), ordinary_file.join("child.pilib"));
-        // Path.exists follows Python's behavior for dangling symlinks; exclusive create rejects it later.
+        // Path.exists 对失效的符号链接遵循 Python 的行为；之后独占创建会拒绝它。
         #[cfg(unix)]
         {
             std::os::unix::fs::symlink(f.0.join("missing"), f.0.join("dangling.pilib")).unwrap();
@@ -488,7 +487,7 @@ mod tests {
     }
     #[test]
     fn unlisted_reason_names_the_registry_file_without_internal_prefixes() {
-        // #179: the page says which file could not be written and why, not 「读取失败」 or a Python-style errno.
+        // #179：页面说明哪个文件写不进去以及原因，而不是「读取失败」或 Python 风格的 errno。
         let f = Fixture::new();
         let lib = f.library();
         f.write(json!({"recent":[]}));
@@ -515,7 +514,7 @@ mod tests {
     }
     #[test]
     fn concurrent_hosts_never_lose_each_others_registry_updates() {
-        // Each thread stands for a host of a different library, writing the shared registry at once.
+        // 每个线程代表一个不同图库的宿主，同时写共用的登记表。
         let f = Fixture::new();
         let file = f.registry();
         let names: Vec<String> = (0..8).map(|i| format!("library-{i}")).collect();
@@ -549,7 +548,7 @@ mod tests {
             assert_eq!(stamp.as_bytes()[i], c as u8);
         }
         assert!(matches!(stamp.as_bytes()[19], b'+' | b'-'));
-        // Typecheck the production entrypoints without touching the user's environment/registry.
+        // 对生产入口做类型检查，不碰用户的环境和登记表。
         let _ = info as fn(&Library) -> Result<Json>;
         let _ = remember as fn(&Library) -> Result<()>;
         let _ = remember_created as fn(&Path, &str) -> Result<()>;
