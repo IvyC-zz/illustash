@@ -1,5 +1,5 @@
 // 数字和日期跟随页面语言；中文保留自己的措辞（core/format.js；#182、#199）。
-// tests/format_en.test.cjs 是同样的检查，在英文页面上。
+// 英文页面上的同样检查在 tests/english_page.test.cjs。
 const {test, before} = require('node:test');
 const assert = require('node:assert/strict');
 const web = require('./web.cjs');

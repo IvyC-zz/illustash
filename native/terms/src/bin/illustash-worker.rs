@@ -26,7 +26,8 @@ fn run() -> Result<u8, Box<dyn std::error::Error>> {
         let root = if root.is_absolute() { root } else { env::current_dir()?.join(root) };
         env::set_var("ILLUSTASH_RESEARCH_OPENBLAS_DLL", root.join("openblas/openblas.dll"));
     }
-    // 模型的 CPU 执行归已验证的 macOS/Windows 识别生产者负责。
+    // 模型执行（CPU，以及 macOS 的 CoreML、Windows 的 DirectML 加速，#270、#271）归已验证的 macOS/Windows
+    // 识别生产者负责。
     if illustash_terms::recognition_compute::production_adapter_enabled() && kind == "recognition" {
         illustash_terms::recognition_compute::producer::worker(&native_args)?;
         return Ok(0);

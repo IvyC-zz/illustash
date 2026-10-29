@@ -545,9 +545,9 @@ class MacDesktopResourcesTest(unittest.TestCase):
 
 
 class WindowsOpenBLASResourcesTest(unittest.TestCase):
+    """只在合成身份上暂存源文件，从不做 Windows 加载或 ABI 测试。"""
     setUp = PackagingResourcesTest.setUp
     manifest = PackagingResourcesTest.manifest
-    """Only source staging on synthetic identities, never a Windows load/ABI test."""
     def make_runtime(self):
         """一个显式的 site-packages，里面放固定的 NumPy wheel，外加一个 CPU ORT 标记文件。"""
         site = self.root / 'explicit wheel/site-packages'

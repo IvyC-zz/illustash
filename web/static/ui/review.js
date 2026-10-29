@@ -56,7 +56,7 @@ function groupSection(g) {
   return `<section class="gsec" data-cid="${g.cid}"><div class="gsec-head"><b>${t('第 {id} 组', {id: g.cid})}</b><span class="muted-note">${t('{n} 张', {n: number(g.size)})}${g.traits?.length ? ' · ' + g.traits.slice(0, 2).map(esc).join(' · ') : ''}</span>${head}<a class="quiet link gsec-open" href="#/g/${g.cid}">${t('逐张看')} →</a></div>
     <div class="gsec-imgs">${thumbs}${g.members.length > max ? `<a class="gsec-rest" href="#/g/${g.cid}">+${number(g.members.length - max)}</a>` : ''}</div>${g.near ? `<div class="group-near">${nearText(g)}</div>` : ''}</section>`;
 }
-// ---------- 整个图库里的相似图片（web/similar.py） ----------
+// ---------- 整个图库里的相似图片（native/terms/src/research_compute/similar.rs） ----------
 let similarTimer = 0;
 export async function renderSimilar() {
   if (state.route.page !== 'similar') return;
@@ -81,7 +81,7 @@ export async function renderSimilar() {
   if (busy) similarTimer = setTimeout(renderSimilar, 3000);
 }
 
-// ---------- 身份复核：相似的角色对（web/identity.py，Store.identity_queue） ----------
+// ---------- 身份复核：相似的角色对（/api/identity/queue，native/terms/src/http_characters.rs） ----------
 // 一次点击决定一对；每个决定都是一条可撤销的关系，原始记录从不移动。
 const IDENTITY_PAGE = 12;
 const identity = {items: [], total: 0, offset: 0, busy: new Set()};

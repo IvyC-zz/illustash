@@ -330,7 +330,7 @@ export async function toggleMascot(c) {
     const [fresh] = await Promise.all([fetchChar(c.id), refreshMeta(), reload()]); if (fresh) Object.assign(c, fresh); renderHeading();
   } catch (err) { toast(err.message); }
 }
-// ---------- 选中图片之间的关系（web/relate.py） ----------
+// ---------- 选中图片之间的关系（relate，native/terms/src/research_compute/relations.rs） ----------
 export async function openRelate(ids) {
   const d = $('relateDialog');
   $('relateTitle').textContent = t('{n} 张图的关系', {n: number(ids.length)});

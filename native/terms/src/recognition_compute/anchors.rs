@@ -80,8 +80,8 @@ pub(crate) fn anchor_index_checked(
 ) -> Result<AnchorIndex> {
     anchor_index_blocks(vectors, ids, metadata, 1024, check)
 }
-/// 索引扫描在精确的别名边界上保持旧版 1024 行的 BLAS 分块形状。
-/// 两条路径都保持旧形状，并在 BLAS 前后和每个别名行做协作式检查。
+/// 索引扫描在精确的别名边界上保持旧版 1024 行的 BLAS 分块形状，与 `anchor_index_checked` 相同；
+/// 但它传入的是空检查，BLAS 前后和每个别名行的协作式取消只在 `anchor_index_checked` 一路生效。
 pub(crate) fn anchor_index_for_scan(
     vectors: &[Vec<f32>],
     ids: &[String],

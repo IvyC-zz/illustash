@@ -642,8 +642,8 @@ fn audit_size(path: &str, q: &HashMap<String, String>) -> std::result::Result<us
     }
     Ok(n as usize)
 }
-/// 四个模块是否都已在核心里。启动时在既有的后台切换完成之前就发布了就绪状态。切换失败的原因在 Python 里，
-/// 发布之后还可能变化。四个模块全部就绪之前，bootstrap 必须用实时的拒绝结果，而不是过期的启动值。
+/// 四个模块是否都已在核心里。启动时在既有的后台切换完成之前就发布了就绪状态，切换结果在发布之后
+/// 还可能变化。四个模块全部就绪之前，bootstrap 必须用实时的拒绝结果，而不是过期的启动值。
 fn switched(c: &Connection) -> Result<bool> {
     Ok(c.query_row(SWITCHED, [], |r| r.get::<_, bool>(0))?)
 }
