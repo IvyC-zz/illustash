@@ -1,12 +1,11 @@
-// The page's own confirmation dialog (desktop layout, #199).
+// 页面自己的确认对话框（桌面布局，#199）。
 import {t} from '../core/i18n.js';
 import {esc} from '../core/format.js';
 import {session} from '../core/session.js';
 import {state} from '../core/state.js';
-// Gallery pages have no Tauri dialog permission. Keep confirmation inside the page;
-// window.confirm may be replaced with an async plugin function by the desktop shell.
+// 图库页面没有 Tauri 对话框权限。确认框留在页面内；window.confirm 可能被桌面外壳换成一个异步的插件函数。
 let confirmationOpen = false;
-// `ok` names the confirming button; without `cancel` the dialog only informs.
+// `ok` 是确认按钮的名字；没有 `cancel` 时对话框只作告知。
 export function confirmAction(message, title = t('确认操作'), ok = t('确认'), cancel = true) {
   if (confirmationOpen) return Promise.resolve(false);
   confirmationOpen = true;
@@ -33,7 +32,7 @@ export function confirmAction(message, title = t('确认操作'), ok = t('确认
     document.body.append(d); d.showModal();
   });
 }
-// Pick a local work (or the empty choice); resolves null when cancelled.
+// 挑一个本地作品（或空选项）；取消时解析为 null。
 export function chooseWork(title, works, selected = '', emptyLabel = t('未归类 / 无上级')) {
   return new Promise(resolve => {
     const d = document.createElement('dialog'); d.className = 'palette profile-dialog work-dialog';

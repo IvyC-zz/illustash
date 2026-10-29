@@ -1,5 +1,5 @@
-// The settings pages (desktop layout, #199): each page's cards, their forms and buttons. What they read and change is
-// core/settings.js (and core/jobs.js for the jobs' own cards).
+// 设置各页（桌面布局，#199）：每页的卡片、它们的表单和按钮。它们读取和更改的内容在 core/settings.js（任务自己的卡片在
+// core/jobs.js）。
 import {t, tb, said, I18N} from '../core/i18n.js';
 import {esc, isMac, number, bytes, stamp, localStamp, pct, localTime} from '../core/format.js';
 import {prefs} from '../core/prefs.js';
@@ -22,9 +22,9 @@ import {drawGuide, drawNudge, replayGuide} from './guide.js';
 import {renderIntegrityLine} from './integrity.js';
 import {renderModelsCard} from './models.js';
 
-// ---------- names: this library's consent to look names up online ----------
-// Name text queries (tag and work names only) need this library's consent: the backend refuses with
-// 显示名联网尚未授权 until it is given. Any other failure is a real network or service error.
+// ---------- 名称：这个图库联网查询名称的授权 ----------
+// 名称的文字查询（只有 tag 和作品名）需要这个图库授权：授权之前，后端以「显示名联网尚未授权」拒绝。其他失败都是真正的
+// 网络或服务错误。
 const NAMES_NOTE = t('允许这个图库联网查询名称吗？\n\n会把你输入的角色名、作品名，以及图库里角色的 Danbooru tag 和作品名发给 Danbooru 和 Bangumi，用来搜索角色、作品和补全中文名。不会发送图片。\n\n允许后对这个图库一直有效，可以在「设置 › 网络与隐私」里随时撤销。');
 export const namesAllowButton = `<button type="button" class="link-button" data-names-allow>${t('允许查询…')}</button>`;
 export async function setNamesNetwork(allow) {
@@ -36,7 +36,7 @@ export async function setNamesNetwork(allow) {
   return true;
 }
 
-// ---------- new characters for the external index (native/terms/src/app_index.rs) ----------
+// ---------- 外部索引的新角色（native/terms/src/app_index.rs） ----------
 let indexArmed = null;
 export async function renderIndexCard(fresh = true) {
   const route = state.route, token = session.token;
@@ -44,7 +44,7 @@ export async function renderIndexCard(fresh = true) {
   if (fresh || !state.index) { try { const value = await shared('/api/index'); if (route !== state.route || token !== session.token) return; state.index = value; } catch (e) { if (route === state.route && token === session.token) readFailure($('indexCard'), e); return; } }
   const card = $('indexCard'), x = state.index; if (!x || !card) return;
   const s = x.state, active = INDEX_ACTIVE.includes(s.status), watched = x.watch.works.length;
-  // Which works are watched is decided on each work in 资料库 · 作品; here only how the check runs.
+  // 关注哪些作品在「资料库 · 作品」里逐个作品决定；这里只管检查怎么运行。
   if (!setSettingsHTML(card, cardHead(t('检查新角色'), `${t('定期在 Danbooru 上查关注的作品有没有本地还不认识的角色，只发送作品名。')}<span class="hint-more" title="${t('添加角色时每个角色下载约 20 张公开参考图（约 {mb} MB），在本机算好特征后重新扫描图库。', {mb: x.mb_per_character})}">${t('了解详情')}</span>`, 'library') + `
     ${taskLink(indexLine(s, x.check), active ? 'busy' : s.status === 'error' ? 'warn' : s.status === 'off' ? 'off' : '')}
     <a class="setting-line set-link" href="#/characters/works"><span>${t('关注的作品')}<small class="line-hint">${t('在资料库的「作品」里逐部开关')}</small></span><span>${watched ? t('{n} 部', {n: number(watched)}) : t('还没有')} ›</span></a>
@@ -63,13 +63,13 @@ export async function renderIndexCard(fresh = true) {
   };
 }
 
-// ---------- display names ----------
-// Chinese / Japanese names fetched from Bangumi (text queries only); a configured model API is an opt-in last resort.
+// ---------- 显示名 ----------
+// 从 Bangumi 取的中文 / 日文名字（只有文字查询）；配置好的模型 API 是用户选择开启的最后手段。
 export async function renderNamesCard(fresh = true) {
   const route = state.route, token = session.token;
   if (!$('namesCard') || state.route.page !== 'settings') return;
   if (fresh || !state.names) { try { const value = await shared('/api/names'); if (route !== state.route || token !== session.token) return; state.names = value; } catch (e) { if (route === state.route && token === session.token) readFailure($('namesCard'), e); return; } }
-  // The page may have been re-rendered while waiting: always work on the card that is on screen now.
+  // 等待期间页面可能已经重新渲染：总是对现在屏幕上的那张卡片操作。
   const card = $('namesCard'), x = state.names; if (!card) return; if (!x) { card.hidden = true; return; }
   card.hidden = false;
   const s = x.state || {}, active = NAMES_ACTIVE.includes(s.status);
@@ -83,7 +83,7 @@ export async function renderNamesCard(fresh = true) {
   renderModelCard();
   if (fresh && active) pollNamesSoon();
 }
-// Optional OpenAI-compatible model used only to translate names that Bangumi does not have.
+// 可选的 OpenAI 兼容模型，只用来翻译 Bangumi 没有的名字。
 const modelHost = m => { try { return new URL(m?.base || 'https://api.deepseek.com').host; } catch (e) { return '—'; } };
 export function renderModelCard() {
   const card = $('modelCard'), m = state.names?.model_api; if (!card || !m) return;
@@ -99,7 +99,7 @@ export function renderModelCard() {
   $('modelSave').onclick = () => {
     const body = {base: $('modelBase').value.trim() || 'https://api.deepseek.com', model: $('modelName').value.trim() || 'deepseek-chat'};
     if ($('modelKey').value.trim()) body.key = $('modelKey').value.trim();
-    // The backend keeps a key only for the address it was entered for: a new address without a key clears it.
+    // 后端只为输入 key 时的那个地址保留 key：换了新地址而不带 key 会把它清掉。
     save(body, () => m.configured && !state.names?.model_api?.configured ? t('接口地址已更改，原来的 API key 已清除，请重新填写') : t('设置已保存'));
   };
   for (const id of ['modelBase', 'modelName', 'modelKey']) $(id).onkeydown = e => { if (e.key === 'Enter' && !e.isComposing) $('modelSave').click(); };
@@ -114,7 +114,7 @@ const settingsMarkup = new WeakMap();
 export function setSettingsHTML(card, html, version = null) {
   const previous = settingsMarkup.get(card);
   if (previous?.html === html && previous.version === version) return false;
-  // Background metadata updates must not erase an in-progress form edit.
+  // 后台的元数据更新不能抹掉正在编辑的表单。
   if (card.contains(document.activeElement) && document.activeElement?.matches('input,textarea,select')) return false;
   card.innerHTML = html;
   settingsMarkup.set(card, {html, version});
@@ -122,7 +122,7 @@ export function setSettingsHTML(card, html, version = null) {
 }
 function patchSettingsPage(html, section) {
   const page = $('settingsPage');
-  // Another section is another page: replace it whole. The same section patches card by card, keeping forms in progress.
+  // 另一节就是另一页：整个替换。同一节则逐张卡片修补，保留正在填的表单。
   if (page.querySelector('.settings-main')?.dataset.section !== section) {
     page.innerHTML = html;
     for (const card of page.querySelectorAll('.settings-card')) settingsMarkup.set(card, {html: card.innerHTML, version: null});
@@ -131,13 +131,13 @@ function patchSettingsPage(html, section) {
   }
   const template = document.createElement('template'); template.innerHTML = html;
   for (const card of template.content.querySelectorAll('.settings-card')) {
-    // These cards own their rendering, forms and async lifecycle.
+    // 这些卡片自己负责渲染、表单和异步生命周期。
     if (OWN_CARDS.includes(card.id)) continue;
     setSettingsHTML($(card.id), card.innerHTML);
   }
 }
-// One page per question the person brings: how it looks, where pictures come from, who is in them, who drew them,
-// what leaves the machine, where data lives. Each page lists the cards it shows (#/settings/<id>).
+// 用户带来的每个问题一页：看起来怎样、图片从哪来、图里是谁、谁画的、什么会离开本机、数据存在哪。每页列出它显示的
+// 卡片（#/settings/<id>）。
 const SETTINGS_SECTIONS = [
   ['general', t('通用'), t('语言、外观、图片网格与默认排序'), ['setDisplay', 'setLanguage']],
   ['library', t('图库'), t('当前图库、来源、同步与排除'), ['setLibraries', 'setSync', 'setExclude', 'setFold']],
@@ -148,18 +148,18 @@ const SETTINGS_SECTIONS = [
   ['about', t('关于'), t('版本、致谢与诊断信息'), ['setAbout']]];
 const OWN_CARDS = ['setLibraries', 'setProvenance', 'setAccounts', 'indexCard', 'namesCard', 'modelCard', 'setAbout', 'setModels'];
 export const settingsSection = () => SETTINGS_SECTIONS.find(s => s[0] === state.route.section) || SETTINGS_SECTIONS[0];
-// Developer-only entries (test libraries, pasting a Pixiv cookie) show only after opening the page once with ?dev.
+// 只给开发者的入口（测试图库、粘贴 Pixiv cookie）要带 ?dev 打开过一次页面后才显示。
 export const devMode = (() => { try { if (new URLSearchParams(location.search).has('dev')) prefs.set('dev', true); } catch {} return !!prefs.get('dev', false); })();
-// Where a setting is kept, so the person knows what follows them across libraries and browsers.
+// 设置保存在哪里，让用户知道哪些设置会跟着他们跨图库、跨浏览器。
 const SCOPE = {browser: [t('仅本浏览器'), t('保存在这个浏览器里，换浏览器或清除网站数据会恢复默认')], library: [t('本图库'), t('每个图库各自保存')], shared: [t('所有图库共用'), t('保存在这台电脑上，所有图库共用')]};
 const scope = key => `<span class="set-scope" title="${SCOPE[key][1]}">${SCOPE[key][0]}</span>`;
 export const cardHead = (title, note = '', key = '') => `<h2>${title}${key ? scope(key) : ''}</h2>${note ? `<p class="settings-note">${note}</p>` : ''}`;
-// A launch-time switch; --no-* flags still win for the current launch.
+// 启动时的开关；本次启动仍以 --no-* 参数为准。
 function startupSwitch(key, name, hint) {
   const info = state.settings; if (!info?.startup) return '';
   return `<label class="switch-line"><span><b>${name}</b><small>${hint} · ${t('下次启动时生效')}</small>${(info.forced_off || []).includes(key) ? `<em>${t('这次启动已用命令行参数关闭')}</em>` : ''}</span><input type="checkbox" class="switch" data-startup="${key}" ${info.startup[key] ? 'checked' : ''}></label>`;
 }
-// A status line whose controls live in the task panel.
+// 控件在任务面板里的状态行。
 const taskLink = (line, dot = '') => `<div class="setting-line set-status"><span><span class="local-dot${dot ? ' ' + dot : ''}"></span>${esc(line)}</span><button class="quiet small" data-open-tasks>${t('在任务面板查看')}</button></div>`;
 const CREDITS = [
   ['WD SwinV2 Tagger v3', 'SmilingWolf', t('图片标签与角色识别'), 'https://huggingface.co/SmilingWolf/wd-swinv2-tagger-v3'],
@@ -190,7 +190,7 @@ async function renderAbout() {
     try { await navigator.clipboard.writeText(diag.map(([k, v]) => `${k}: ${v}`).join('\n')); toast(t('诊断信息已复制')); } catch (e) { toast(t('无法访问剪贴板')); }
   };
 }
-// Every feature that talks to the network, what it sends, and whether it is on: the one place to check (#200).
+// 每个会联网的功能、它发送什么、是否开启：集中在一处查看（#200）。
 function networkCard() {
   const up = state.settings?.startup || {}, p = state.provenance, acct = state.accounts, model = state.names?.model_api;
   const net = state.names?.network, names = !net ? '' : net.granted_at ? t('已允许（{time} 起）', {time: esc(net.granted_at)}) : net.this_run ? t('本次启动已允许（命令行）') : t('未允许，不联网');
@@ -225,7 +225,7 @@ export async function renderSettings(fetchMissing = true, refresh = false) {
   const sourcesOf = info?.package?.sources || state.libraries?.info?.sources || [];
   const photos = sourcesOf.some(x => x.kind === 'photos');
   const segment = (name, options, current) => `<div class="segmented" data-setting="${name}">${options.map(([v, label]) => `<button class="${current === v ? 'on' : ''}" data-value="${v}">${label}</button>`).join('')}</div>`;
-  // Per-app counts exist only for the Photos source (pictures saved by X or Pixiv); a folder library has none.
+  // 按 App 分的计数只有照片来源才有（X 或 Pixiv 保存的图片）；文件夹图库没有。
   const apps = Object.entries(runs.find(r => r.sources)?.sources || {}).sort((a, b) => b[1].photos - a[1].photos);
   const appRow = ([, v]) => `<tr><td title="${esc(v.name)}">${esc(tb(v.name))}</td><td>${number(v.photos)}</td><td>${v.collected ? number(v.collected) : '—'}</td></tr>`;
   const sort = prefs.get('sortLibrary', 'newest'), csort = prefs.get('sortCharacter', 'suspicious');
@@ -238,8 +238,8 @@ export async function renderSettings(fetchMissing = true, refresh = false) {
       <div class="setting-line"><span>${t('图库默认排序')}</span>${segment('sortLibrary', [['newest', t('最新加入')], ['oldest', t('最早加入')]], sort)}</div>
       <div class="setting-line"><span>${t('按角色筛选时的默认排序')}</span>${segment('sortCharacter', [['suspicious', t('可疑优先')], ['newest', t('最新加入')], ['oldest', t('最早加入')]], csort)}</div>
       <p class="set-foot">${t('缩略图大小、图上显示什么、详情面板的内容，在顶栏的「视图选项」里调。')}</p>`,
-    // App-wide (preferences.json), so the desktop shell and every library and browser share it (#173). The choices
-    // are the tables in web/static/locales (#182), each named in its own language.
+    // 全应用共用（preferences.json），所以桌面外壳和每个图库、每个浏览器都共用它（#173）。可选项是 web/static/locales
+    // 里的表（#182），每个用它自己的语言命名。
     setLanguage: () => cardHead(t('语言'), '', 'shared') + `
       <div class="setting-line"><span>${t('界面语言')}<small class="line-hint">${t('切换后页面会重新载入')}</small></span>${segment('language', [['system', t('跟随系统')], ...I18N.languages.map(([code, name]) => [code, esc(name)])], I18N.preference)}</div>`,
     setSync: () => cardHead(t('同步'), t('只读读取来源里的图片，新增的导入并在本机识别；来源里删掉的图会从图库移除，人工整理记录保留。同步不联网。'), 'library') + `
@@ -265,7 +265,7 @@ export async function renderSettings(fetchMissing = true, refresh = false) {
   renderAbout();
   renderModelsCard();
   if ($('setLibraries')) { if (!$('setLibraries').innerHTML) loadLibraries(); else renderLibrariesCard(); }
-  if ($('setProvenance')) { if ($('setProvenance').innerHTML) renderProvenanceCard(); loadProvenance(); }   // the cached state at once, then fresh
+  if ($('setProvenance')) { if ($('setProvenance').innerHTML) renderProvenanceCard(); loadProvenance(); }   // 先立即显示缓存的状态，再取新的
   if ($('setAccounts') || section === 'network') { if (!state.accounts || !$('setAccounts')?.innerHTML) loadAccounts(); else renderAccountsCard(); }
   if (state.index?.works) renderIndexCard(false);
   if (state.names) renderNamesCard(false);
@@ -290,19 +290,19 @@ export async function renderSettings(fetchMissing = true, refresh = false) {
     renderSettings();
   };
 }
-// The whole page is redrawn in the new language; the setting is saved first so every window and library follows.
+// 整个页面用新语言重画；先保存设置，这样每个窗口和图库都跟着变。
 async function setLanguage(language) {
   if (language === I18N.preference) return;
   try { await saveLanguage(language); location.reload(); } catch (e) { toast(e.message); }
 }
-// ---------- libraries (docs/LIBRARIES.md): managed on the settings page; opening one restarts the server on it ----------
-// New libraries and the open library's sources are grouped by origin (#107): every folder names where its
-// pictures came from; nothing is guessed from folder names. Folders include their subfolders and may not nest.
+// ---------- 图库（docs/LIBRARIES.md）：在设置页管理；打开一个图库会让服务在它上面重启 ----------
+// 新图库和当前图库的来源按出处分组（#107）：每个文件夹都写明它的图片从哪来；不从文件夹名猜测。文件夹包含它的子文件夹，
+// 不能互相嵌套。
 const ORIGINS = [['pixiv', 'Pixiv'], ['x', 'X'], ['other', t('其他')]];
 const IS_MAC = /Mac/.test(navigator.platform);
-// created: a library published but not listed among the recent ones (#97), offered instead of creating again.
+// created：已发布但没有登记到最近图库里的图库（#97），提供它而不是再新建一个。
 export const libForm = {open: false, name: '', folders: {}, photos: false, created: null};
-// The backend lists the origins it knows (#111); the fallback covers the legacy layout without library info.
+// 后端列出它知道的出处（#111）；后备值覆盖没有图库信息的旧布局。
 const origins = () => { const list = state.libraries?.info?.origins; return list?.length ? list.map(o => [o.id, tb(o.label)]) : ORIGINS; };
 export function renderLibrariesCard() {
   const card = $('setLibraries'); if (!card || state.route.page !== 'settings') return;
@@ -312,7 +312,7 @@ export function renderLibrariesCard() {
   const seg = (attr, value, options) => `<div class="segmented">${options.map(([v, label]) => `<button class="${v === value ? 'on' : ''}" ${attr}="${v}">${label}</button>`).join('')}</div>`;
   const editable = cur && !cur.test, last = cur?.sources.length <= 1;
   const remove = s => editable ? `<button class="quiet small" data-lib-remove="${esc(s.id)}" ${last ? `disabled title="${t('图库至少要保留一个来源')}"` : ''}>${t('移除')}</button>` : '';
-  // #293: one list of sources, each folder's origin set on its own row, and one row of buttons to add more.
+  // #293：一个来源列表，每个文件夹的出处在它自己那一行设置，再加一行用来添加更多来源的按钮。
   const originOf = s => list.some(o => o[0] === s.preset) ? s.preset : 'other';
   const folders = !cur ? [] : cur.sources.filter(s => s.kind === 'folder').sort((a, b) => list.findIndex(o => o[0] === originOf(a)) - list.findIndex(o => o[0] === originOf(b)));
   const folderRow = s => `<div class="setting-line lib-folder"><span class="lib-path" title="${esc(s.path)}"><bdi>${esc(home(s.path))}</bdi></span>
@@ -322,7 +322,7 @@ export function renderLibrariesCard() {
     ${folders.map(folderRow).join('')}${photos ? `<div class="setting-line lib-folder"><span><b>${t('iCloud 照片')}</b><small>${t('本机「照片」图库，按存图的 App 区分 X 和 Pixiv')}</small></span><span class="lib-src">${remove(photos)}</span></div>` : ''}
     ${folders.length || photos ? '' : `<p class="muted-note set-empty">${t('还没有来源')}</p>`}
     ${editable ? `<div class="set-actions"><span class="set-actions-label">${t('添加文件夹：')}</span>${list.map(([id, label]) => `<button class="quiet small" data-lib-add-source="${id}" title="${t('图片来自 {origin} 的文件夹，子文件夹会一起读取', {origin: esc(label)})}">${esc(label)}</button>`).join('')}${!photos && IS_MAC ? `<button class="quiet small" data-lib-add-photos>${t('添加 iCloud 照片')}</button>` : ''}</div>` : ''}`;
-  // Test libraries were generated by a developer tool (tools/test_libraries.py, removed in #186), so their label shows only in dev mode.
+  // 测试图库是由开发者工具（tools/test_libraries.py，#186 已删除）生成的，所以它的标记只在开发模式下显示。
   const dev = devMode && data.libraries.some(l => l.test);
   const others = data.libraries.filter(l => l.path !== data.current);
   const row = l => `<div class="setting-line"><span><b>${esc(l.name)}${dev && l.test ? ` <span class="set-scope">${esc(l.test)}</span>` : ''}</b><small class="lib-path-hint">${esc(home(l.path))}</small></span>
@@ -352,8 +352,7 @@ export function renderLibrariesCard() {
     ${form}${exportLine}${importBlock(state.importTask)}
     <p class="set-foot">${t('导出的 zip 包含识别结果、人工整理记录和来源配置，不含模型连接设置或联网授权，可以换电脑或发给别人。导入后需重新设置模型接口，并自行确认名称查询的联网授权；旧版导出包也会清除这些设置。个人备份请保留完整图库目录。')}${ex.status === 'done' ? '' : EXPORT_LEAVES_OUT}</p>`);
 }
-// #88: an import runs as a background task (core/jobs.js). The card shows its line, a cancel button while it runs, and
-// how it ended.
+// #88：导入作为后台任务运行（core/jobs.js）。卡片显示它的状态行、运行期间的取消按钮，以及它是怎样结束的。
 function importBlock(job) {
   const line = importLine(job); if (!line) return '';
   const r = job.result || {};
@@ -361,9 +360,9 @@ function importBlock(job) {
     : job.status === 'done' && r.listed === false ? ` <button class="primary" data-open-library="${esc(r.path)}" data-name="${esc(r.name)}">${t('打开这个图库')}</button>` : '';
   return `<p class="muted-note import-line">${esc(line)}${button}</p>`;
 }
-// #41: the shareable export leaves out personal inputs; say so instead of implying a complete move.
+// #41：可分享的导出不包含个人输入；照实说明，而不要暗示这是一次完整的搬家。
 const EXPORT_LEAVES_OUT = t('不含图片、画师出处缓存和导入过的 X 关注列表；在新电脑上要回查画师，需要重新导入 X 归档。');
-// Native folder picker (several at once). Where none exists, a typed path stands in.
+// 系统的文件夹选择框（可一次选多个）。没有选择框的地方，用输入的路径代替。
 async function pickFolders() {
   try { return await chooseFolders(); }
   catch (err) {
@@ -380,10 +379,9 @@ export async function startImport(path) {
   const r = await libraryAction('import', {path});
   if (r?.task) importStarted(r.task);
 }
-// A library in an older format opens only after the person agrees to upgrade it (#193): the backend says so, the
-// page asks with the backend's own explanation, then asks again with upgrade. The new page says where the backup is.
-// A library whose source.sqlite a check found damaged is offered the rescue the same way (#228); it runs before the
-// library opens, which can take minutes on a large one.
+// 旧格式的图库要用户同意升级后才能打开（#193）：后端这样说明，页面用后端自己的解释询问，然后带上 upgrade 再请求一次。
+// 新页面会说明备份在哪。检查发现 source.sqlite 损坏的图库以同样的方式提供抢救（#228）；抢救在图库打开之前运行，大图库
+// 上可能要几分钟。
 export async function openLibrary(path, name, agreed = null) {
   try { await openLibraryRequest(path, agreed); }
   catch (err) {
@@ -400,13 +398,13 @@ export async function openLibrary(path, name, agreed = null) {
     }
     toast(err.message); return;
   }
-  // This page's state belongs to the library it left: no reads or writes until the reload below.
+  // 这个页面的状态属于它离开的那个图库：在下面重新载入之前不再读写。
   toast(t('正在打开「{name}」…', {name}));
   if (await libraryOpened(path)) { location.hash = '#/home'; location.reload(); return; }
   $('errorBanner').textContent = t('切换图库超时：请检查启动终端，然后刷新页面。'); $('errorBanner').hidden = false;
 }
 
-// ---------- bound accounts (docs/PROVENANCE.md section 8): shared by every library; secrets live in the Keychain ----------
+// ---------- 绑定的账号（docs/PROVENANCE.md 第 8 节）：所有图库共用；密钥存在钥匙串里 ----------
 export function renderAccountsCard() {
   const card = $('setAccounts'); if (!card || state.route.page !== 'settings') return;
   const a = state.accounts;
@@ -423,12 +421,12 @@ export function renderAccountsCard() {
     ${s.bound ? `<div class="setting-line"><span>${t('已保存 API key')}<small class="line-hint">${t('以图搜图还没有上线，现在不会使用')}</small></span><span><button class="quiet" data-acct-unbind="saucenao">${t('移除')}</button></span></div>`
       : `<div class="setting-line"><span>API key<small class="line-hint">${t('在 saucenao.com 账号页的 search-api 里；以图搜图上线前不会使用')}</small></span><span class="lib-pick"><input class="lib-input" id="acctSauce" type="password" autocomplete="off" placeholder="${t('40 位十六进制')}"><button class="quiet" data-acct-bind="saucenao">${t('保存')}</button></span></div>`}`;
 }
-// Pixiv: in the desktop app the person logs in themselves in its Pixiv window (docs/PROVENANCE.md section 8);
-// pasting PHPSESSID stays as the development entry of the plain web page.
+// Pixiv：在桌面 App 里，用户在它的 Pixiv 窗口里自己登录（docs/PROVENANCE.md 第 8 节）；粘贴 PHPSESSID 作为普通网页版的
+// 开发入口保留。
 function pixivAccount(a) {
   const p = a.pixiv, desk = a.desktop, inApp = p.via === 'app';
   const paste = label => `<div class="setting-line"><span>PHPSESSID<small class="line-hint">${t('开发用入口')}</small></span><span class="lib-pick"><input class="lib-input" id="acctPixiv" type="password" autocomplete="off" placeholder="12345678_…"><button class="quiet" data-acct-bind="pixiv">${label}</button></span></div>`;
-  // Outside dev mode the plain web page only points to the desktop app's login window.
+  // 开发模式之外，普通网页版只指向桌面 App 的登录窗口。
   const pasteHint = devMode ? `<p class="muted-note">${t('网页版（开发用）：在浏览器里登录 pixiv.net，打开开发者工具（{keys}）→ Application（Safari 为「存储空间」）→ Cookie → pixiv.net，复制 {cookie} 的值粘贴到这里。', {keys: isMac ? '⌥⌘I' : 'Ctrl+Shift+I', cookie: '<code>PHPSESSID</code>'})}</p>` : `<p class="muted-note">${t('请从 Illustash 桌面 app 打开设置，在它的 Pixiv 窗口里登录。')}</p>`;
   const login = label => state.pixivWaiting ? `<span class="muted-note">${t('正在等你在 Pixiv 窗口里登录…')}</span>` : `<button class="quiet" data-acct-login>${label}</button>`;
   if (!p.bound) {
@@ -448,7 +446,7 @@ async function accountAction(action, body = {}) {
   try { return await accountRequest(action, body); } catch (err) { toast(err.message); return null; }
 }
 
-// ---------- 找回画师 (docs/PROVENANCE.md section 8): the settings card; the run's polling is core/jobs.js ----------
+// ---------- 找回画师（docs/PROVENANCE.md 第 8 节）：设置卡片；运行的轮询在 core/jobs.js ----------
 const provenanceDrawn = new WeakMap();
 export function renderProvenanceCard() {
   const card = $('setProvenance'); if (!card || state.route.page !== 'settings') return;
@@ -464,18 +462,17 @@ export function renderProvenanceCard() {
     <label class="switch-line"><span><b>${t('同步后自动查新图')}${scope('library')}</b><small>${p.auto_network ? t('新加入的图做签名识别、查像素哈希、比对新找到的画师；每次最多 {mb} MB', {mb: number(p.budgets?.new || 50)}) : t('新加入的图只在本机做签名识别；要联网查，在任务面板里每次授权')}${p.frozen ? ' · ' + t('测试图库不同步，这个开关不起作用') : ''}</small></span><input type="checkbox" class="switch" id="provAuto" ${p.auto ? 'checked' : ''}></label>
     ${cov ? `<a class="setting-line set-link" href="#/artist-audit"><span>${t('画师抽查')}<small class="line-hint">${t('随机抽 50 张，逐张判断找到的画师对不对')}</small></span><span>›</span></a>` : ''}
     ${state.accounts && !state.accounts.pixiv?.bound ? `<p class="settings-note net-foot">${t('登录 Pixiv 后才能比对 R18 作品、查 Pixiv 上的相关画师（见下方「账号」）。')}</p>` : ''}`;
-  // Polled while a run goes: redraw only on change, so a click is never lost to a replaced button.
+  // 运行期间会轮询：只在有变化时重画，这样点击绝不会因为按钮被替换而丢失。
   if (provenanceDrawn.get(card) === html) return;
   provenanceDrawn.set(card, html); card.innerHTML = html;
   wireFolds(card);
 }
 
-// ---------- 检查更新 (#191, native/terms/src/app_updates.rs) ----------
-// Off until the person allows it: the new-library guide asks once, 设置 › 网络与隐私 has the switch. Once allowed
-// the backend checks at each launch and once a day while the app stays open; the page only asks whether a check is
-// due. A newer release is offered at the bottom, never while a task runs, and opens the Release page in the browser:
-// nothing is downloaded or installed here. 设置 › 关于 always has a manual check.
-// What the settings pages last drew of the update state: they redraw only when it changed, never under typing.
+// ---------- 检查更新（#191，native/terms/src/app_updates.rs） ----------
+// 用户允许之前关闭：新图库的向导问一次，「设置 › 网络与隐私」里有开关。允许之后，后端在每次启动时检查，App 一直开着时
+// 每天检查一次；页面只询问是否该检查了。有新版本时在底部提示，有任务运行时绝不提示，点开是在浏览器里打开 Release 页面：
+// 这里不下载也不安装任何东西。「设置 › 关于」里总有手动检查。
+// 设置各页上次画出的更新状态：只在它变了时重画，正在输入时绝不重画。
 let updatesDrawn = 'null';
 export function updatesLine() {
   const u = state.updates; if (!u) return `<span>${t('检查更新')}</span>`;
@@ -487,12 +484,12 @@ export function updatesLine() {
 export const openRelease = () => { if (state.updates?.url) window.open(state.updates.url, '_blank', 'noopener'); };
 
 
-// What is typed into the new-library form is kept as it is typed, so a background refresh of the card loses nothing.
+// 新图库表单里输入的内容随输入保存，这样卡片在后台刷新时不会丢失任何东西。
 export function onLibraryInput(e) {
   if (e.target.id === 'libName') libForm.name = e.target.value;
   else if (e.target.id === 'libPhotos') libForm.photos = e.target.checked;
 }
-// The library card's buttons.
+// 图库卡片的按钮。
 export async function onLibrariesClick(e) {
   const btn = e.target.closest('button'); if (!btn || !$('setLibraries')?.contains(btn)) return;
   const d = btn.dataset;
@@ -553,14 +550,14 @@ export async function onLibrariesClick(e) {
   else if ('importCancel' in d) { btn.disabled = true; try { await cancelImport(); } catch (err) { toast(err.message); } }
 }
 
-// The settings pages' handlers and what follows a read or change of their data. Called once, when the page starts.
+// 设置各页的处理函数，以及读取或更改它们的数据之后要做的事。页面启动时调用一次。
 export function wireSettings() {
-  // 设置 › 网络与隐私: grant or revoke, then redraw the card.
+  // 设置 › 网络与隐私：授权或撤销，然后重画卡片。
   document.addEventListener('click', async e => {
     const b = e.target.closest('[data-names-network]');
     if (b && await setNamesNetwork(b.dataset.namesNetwork === '1')) { renderSettings(false); drawGuide(); }
   });
-  // The 允许查询… button under a search: once allowed, search again for what was typed.
+  // 搜索下面的「允许查询…」按钮：一旦允许，就把输入的内容再搜一次。
   document.addEventListener('click', async e => {
     const b = e.target.closest('[data-names-allow]');
     if (!b) return;
@@ -581,12 +578,12 @@ export function wireSettings() {
     else if (what === 'pixiv') toast(detail.error ? detail.error.message : t('已绑定 Pixiv：{name}', {name: detail.bound.name || detail.bound.user_id}));
     else if (what === 'updates') {
       drawNudge();
-      // The settings pages that show it redraw only when something changed, never under the person's typing.
+      // 显示它的设置页只在有变化时重画，绝不在用户输入时重画。
       const now = JSON.stringify(state.updates ?? null);
       if (now !== updatesDrawn) { updatesDrawn = now; if (state.route.page === 'settings' && ['network', 'about'].includes(settingsSection()[0])) renderSettings(false); }
     }
   });
-  // Status lines on the settings pages hand over to the task panel, where runs are started, stopped and confirmed.
+  // 设置页上的状态行转到任务面板，运行在那里启动、停止和确认。
   $('settingsPage').addEventListener('click', e => {
     const b = e.target.closest('[data-open-tasks]'); if (!b) return;
     e.stopPropagation();

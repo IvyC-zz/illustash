@@ -1,6 +1,5 @@
-// The library's metadata (#199): characters, review pools and counts, the user's tags and the latest undo step, read
-// together; writes in between are never overwritten by an older read. No DOM: onMeta(detail) tells after each read that
-// was applied ({total, directory, queue}), or that one failed ({error}).
+// 图库的元数据（#199）：角色、复核池和计数、用户的标签以及最近的撤销步骤，一起读取；期间的写入不会被更早的读取覆盖。
+// 不碰 DOM：onMeta(detail) 在每次被采用的读取之后通知（{total, directory, queue}），或通知一次读取失败（{error}）。
 import {api, adoptToken} from './session.js';
 import {setLatest} from './edits.js';
 import {state} from './state.js';
@@ -10,10 +9,10 @@ export const onMeta = changed.on;
 const failed = error => changed.emit({error});
 export const fetchChar = async id => (await api('/api/characters?' + new URLSearchParams({id, nsfw: state.nsfw})))[0];
 let metaPending = null, metaRevision = 0, metaFull = false;
-// A write the backend accepted: an older read still in flight must not overwrite it (a tag needs only the tags again).
+// 后端接受了一次写入：仍在进行中的更早的读取不能覆盖它（标签只需要重读标签）。
 export function metaWritten(tagsOnly) { if (metaPending) { metaRevision++; metaFull ||= !tagsOnly; } }
-// After an edit the sidebar counts and character list (~0.6 s of server work) can wait until the edits stop:
-// answering Y / N in a row then costs one refresh, not one per answer.
+// 编辑之后，侧栏计数和角色列表（服务端约 0.6 s 的工作）可以等编辑停下再刷新：连续回答 Y / N 只刷新一次，而不是每个回答
+// 刷新一次。
 let metaTimer = null, metaTagsOnly = true;
 export function metaSoon(tagsOnly) {
   metaTagsOnly &&= tagsOnly; clearTimeout(metaTimer);
@@ -30,7 +29,7 @@ export function refreshMeta({tagsOnly = false, boot = null} = {}) {
         catch (e) { if (revision === metaRevision) throw e; }
         boot = null;
         if (revision === metaRevision) return;
-        // A write during an in-flight read needs a trailing fresh read, not its stale result.
+        // 读取进行中发生了写入，需要随后再读一次新的，不能用它过时的结果。
         metaFull ||= full;
       }
     } finally { metaPending = null; }
@@ -61,7 +60,7 @@ async function refreshMetaOnce(full, revision, bootSeed) {
   if (queue) state.identityCount = queue.total;
   if (state.char) state.char = (state.char.id === charId && currentChar) || state.char;
   await changed.emit({total: boot.total, directory, queue: !!queue});
-  // Moved into the directory while the summary rows were read: it needs the full rows.
+  // 读摘要行期间进入了目录：它需要完整的行。
   if (state.route.page === 'characters' && !directory) refreshMeta().catch(failed);
 }
 

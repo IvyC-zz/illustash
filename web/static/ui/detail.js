@@ -1,5 +1,4 @@
-// One picture up close (desktop layout, #199): the inspector beside the grid, the occasional 「是 TA 吗？」 question,
-// and the full-screen viewer.
+// 近看一张图（桌面布局，#199）：网格旁边的检查面板、偶尔出现的「是 TA 吗？」提问，以及全屏查看器。
 import {esc, monthText, number} from '../core/format.js';
 import {t} from '../core/i18n.js';
 import {REASONS, nameWithWork} from '../core/labels.js';
@@ -13,9 +12,9 @@ import {newIds, openPicker, stage, targets} from './palette.js';
 import {artistSection, findArtistWorks, findArtists} from './artists.js';
 import {markHomeFocus} from './home.js';
 
-// Which inspector read is current: a slower, older one never paints over it.
+// 哪一次检查面板读取是当前的：更慢、更早的那次绝不会画到它上面。
 let detailGen = 0;
-// ---------- inspector ----------
+// ---------- 检查面板 ----------
 export function closeInspector() { detailGen++; if (state.viewer < 0) kept.hold = null; state.focused = null; state.detail = null; if (state.viewer < 0) state.question = null; $('inspector').hidden = true; markHomeFocus(); syncCards(); requestAnimationFrame(() => renderGrid()); }
 function identityChips(d, compact = false) {
   const r = state.route;
@@ -25,7 +24,7 @@ function identityChips(d, compact = false) {
   return `<div class="identities">${chips || `<p class="none-yet">${d.unknown ? t('已跳过，还没有角色') : t('还没有角色')}</p>`}<button class="add-identity" data-also="1">＋ ${d.memberships.length ? t('也是…') : t('设为角色…')}</button></div>` +
     (alts ? `<div class="alts"><h3>${t('也可能是')}</h3><div class="alt-row">${alts}</div></div>` : '');
 }
-// PROTO = prototypes learned from the user's own verdicts (web/learn.py).
+// PROTO = 从用户自己的裁决学到的原型（web/learn.py）。
 const SOURCE_NAMES = {CCIP: t('外部索引'), PROTO: t('你的标注')};
 const evidence = e => !e ? '' : [e.wd != null ? `WD ${e.wd.toFixed(2)}` : '', e.ccip != null ? `${e.sources?.includes('PROTO') && !e.sources.includes('CCIP') ? SOURCE_NAMES.PROTO : SOURCE_NAMES.CCIP} ${e.ccip.toFixed(3)}` : '', !('wd' in e) && e.sources?.length ? e.sources.map(s => SOURCE_NAMES[s] || s).join(' + ') : ''].filter(Boolean).join(' · ');
 export const INSP_ICONS = {
@@ -34,7 +33,7 @@ export const INSP_ICONS = {
   expand: '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M12 3.5h4.5V8M8 16.5H3.5V12M16.5 3.5 11 9M3.5 16.5 9 11"/></svg>',
   close: '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="m5 5 10 10M15 5 5 15"/></svg>',
 };
-// Collection rhythm of the image's character: cached per character until the next write or R18 change.
+// 这张图的角色的收藏节奏：按角色缓存，直到下一次写入或 R18 切换。
 const statsCache = new Map();
 async function loadCharStats(id, ident, gen) {
   const box = $('charStats'); if (!box || (!viewOpts.chart && !viewOpts.same)) return;
@@ -114,8 +113,8 @@ function bindIdentity(root, d, ident) {
     pick: list => mutate('/api/change', {ids: [ident], action: 'confirmed', ...targets(list)}, ['unmatched', 'skipped'].includes(state.route.page))});
 }
 // ---------- 主动提问：偶尔问一句「是 TA 吗？」 ----------
-// While browsing, at most one question every few images, and none for the rest of the visit after three are passed by;
-// cleanup pages (a character, 未识别…) always show it. Answers go to /api/ask/answer and feed the learner.
+// 浏览时每隔几张图最多问一次，被略过三次后本次访问不再问；整理页（某个角色、未识别…）总是显示。回答发到
+// /api/ask/answer，供学习使用。
 const ask = {cool: 0, ignored: 0, off: false, pending: null};
 function shouldAsk(d, ident) {
   if (!viewOpts.ask || !d.question) return false;
@@ -140,12 +139,12 @@ function bindAsk(root, d, ident) {
 export function answerAsk(how) {
   const cur = state.question; if (!cur) return;
   const {q, ident} = cur; ask.pending = null; ask.ignored = 0;
-  // 随机抽查: the answered image leaves the list, so the inspector moves on to the next one.
+  // 随机抽查：回答过的图离开列表，所以检查面板移到下一张。
   if (state.route.page === 'audit' && state.viewer < 0 && state.focused === ident) { const i = indexOf(ident); state.focused = state.items[i + 1]?.uuid || state.items[i - 1]?.uuid || null; }
   const body = {ids: [ident], entity: q.entity, kind: q.kind, ...(how === 'yes' ? {yes: [ident]} : {no: [ident]}), ...(how === 'switch' ? {switch: q.rival} : {})};
   mutate('/api/ask/answer', body, how !== 'yes' && state.route.char === q.entity, {advance: state.route.page === 'audit'});
 }
-// The identity an action replaces: the current character page if it applies, else the first one.
+// 一个操作所替换的身份：当前角色页的那个身份（如果适用），否则是第一个。
 const primaryOf = d => d.memberships.find(m => m.id === state.route.char) || d.memberships[0];
 function swapOne(d, ident, from) {
   const old = d.memberships.find(m => m.id === from);
@@ -158,7 +157,7 @@ export function pickAlternative(d, ident, i, also = false) {
   if (from && !also) mutate('/api/reassign', {ids: [ident], old: from.id, new: alt.id}, state.route.char === from.id);
   else mutate('/api/change', {ids: [ident], action: 'confirmed', entity: alt.id}, ['unmatched', 'skipped'].includes(state.route.page));
 }
-// Single-image shortcuts act on the focused/cursor image when nothing is selected.
+// 没有选中任何图时，单图快捷键作用于获得焦点或光标所在的图。
 function singleTarget() { return currentItem(); }
 export async function singleAction(kind) {
   const item = singleTarget(); if (!item) return;
@@ -202,7 +201,7 @@ export function ensureVisible(i) {
   syncCards();
 }
 
-// ---------- full-screen viewer ----------
+// ---------- 全屏查看器 ----------
 const view = {scale: 1, x: 0, y: 0, fit: 1};
 export function openViewer(i) { if (i < 0 || !state.items[i]) return; state.viewer = i; $('viewer').hidden = false; document.body.classList.add('viewing'); showViewer(i); }
 export function closeViewer() { if (state.viewer < 0) return; kept.hold = null; state.viewerItem = null; state.cursor = state.viewer; $('viewer').hidden = true; document.body.classList.remove('viewing'); state.viewer = -1; ensureVisible(state.cursor); }
@@ -239,7 +238,7 @@ export function zoomView(factor, cx, cy) {
 let viewGesture = 1;
 let pan = null;
 
-// The handlers this part of the page registers. Called once, when the page starts.
+// 页面这一部分注册的处理函数。页面启动时调用一次。
 export function wireDetail() {
   $('viewerStage').addEventListener('wheel', e => {
     e.preventDefault();

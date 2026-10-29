@@ -1,5 +1,5 @@
-// Where the page is (#199): the address (#/page/section?query) read into a route and written back, and what kind of
-// page a route is. No DOM: it reads and sets location.hash and history.
+// 页面在哪（#199）：把地址（#/page/section?query）读成路由再写回去，以及一个路由是哪类页面。不碰 DOM：它读写
+// location.hash 和 history。
 import {prefs} from './prefs.js';
 import {state} from './state.js';
 
@@ -9,14 +9,14 @@ export function parseHash() {
   const parts = path.split('/').filter(Boolean), q = new URLSearchParams(query);
   const route = {page: 'library', q: q.get('q') || '', tag: q.get('tag') || '', utag: q.get('utag') || '', dup: q.get('dup') || '', reason: q.get('reason') || '', kind: q.get('kind') || '', maybe: q.get('maybe') || '', sort: q.get('sort') || '',
     work: q.get('work') || '', day: q.get('day') || '', artist: q.get('artist') || '', char: q.get('char') || '', variant: q.get('variant') || '', check: q.get('check') || '', doubt: q.get('doubt') || ''};
-  // Opening the app lands on 首页; a bare query (#/?artist=… and other old links) still means the library.
+  // 打开 App 落在首页；只有查询的地址（#/?artist=… 和其他旧链接）仍表示图库。
   if (!parts.length && !query) route.page = 'home';
-  // 资料库 (#/characters) and 设置 have sub-views of their own address: #/characters/works, #/settings/library.
+  // 资料库（#/characters）和设置有各自地址的子视图：#/characters/works、#/settings/library。
   else if (parts[0] === 'characters' || parts[0] === 'settings') Object.assign(route, {page: parts[0], section: parts[1] || ''});
   else if (['home', 'unmatched', 'skipped', 'duplicates', 'excluded', 'pending', 'recent', 'audit', 'groups', 'similar', 'identity', 'artist-audit'].includes(parts[0])) route.page = parts[0];
   else if (parts[0] === 's' && parts[1]) Object.assign(route, {page: 'sgroup', id: decodeURIComponent(parts[1])});
   else if (parts[0] === 'g' && parts[1]) Object.assign(route, {page: 'group', id: decodeURIComponent(parts[1])});
-  // Old character pages (#/c/id/skin) are now the library filtered to that character.
+  // 旧的角色页（#/c/id/skin）现在是按这个角色筛选的图库。
   else if (parts[0] === 'c' && parts[1]) Object.assign(route, {char: decodeURIComponent(parts[1]), variant: parts[2] ? decodeURIComponent(parts[2]) : '', legacy: true});
   if (route.page !== 'library') Object.assign(route, {char: '', variant: '', check: '', doubt: '', artist: ''});
   return route;
@@ -32,13 +32,13 @@ export function hashFor(r) {
 export const LEAD_PAGES = ['unmatched', 'skipped', 'group'];
 export const defaultSort = r => r.char ? prefs.get('sortCharacter', 'suspicious') : LEAD_PAGES.includes(r.page) ? prefs.get('sortUnmatched', prefs.get('sortLibrary', 'newest')) : prefs.get('sortLibrary', 'newest');
 export function go(route) { location.hash = hashFor(route); }
-// A character is a library filter, not a page of its own.
+// 角色是图库的一个筛选，不是单独的页面。
 export const charRoute = (id, variant = '') => ({page: 'library', char: id, variant});
 export const charHash = (id, variant = '') => hashFor(charRoute(id, variant));
 export function replaceRoute(patch) { Object.assign(state.route, patch); history.replaceState(null, '', hashFor(state.route)); }
-// Cleanup views (a character filter, or a review pool): click selects.
+// 整理视图（按角色筛选，或复核池）：点击即选择。
 export const cleanup = () => !!state.route.char || ['unmatched', 'skipped', 'excluded', 'pending', 'group', 'audit'].includes(state.route.page);
-// Browsing pages: click opens details, selection is opt-in.
+// 浏览页：点击打开详情，选择要主动开启。
 export const browsing = () => !state.route.char && ['library', 'duplicates', 'recent'].includes(state.route.page);
-// Pages that replace the image grid with their own panel.
+// 用自己的面板替代图片网格的页面。
 export const panelPage = page => page === 'home' || page === 'characters' || page === 'settings' || page === 'groups' || page === 'similar' || page === 'identity';
