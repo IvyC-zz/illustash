@@ -1,16 +1,16 @@
-//! SQL fragments the HTTP reads share (#205): each condition is written once here. A fragment taking an alias
-//! `a` reads the picture column `a.uuid` (or `a.entity`); the text is exactly what each reader used before.
+//! HTTP 读取共用的 SQL 片段（#205）：每个条件只在这里写一次。接受别名 `a` 的片段读取图片列
+//! `a.uuid`（或 `a.entity`）；文本与各读取方原先用的完全相同。
 use crate::{Error, Result};
 
-/// The ratings that count as NSFW (R18): an SQL list for `IN (…)`.
+/// 算作 NSFW（R18）的分级：供 `IN (…)` 使用的 SQL 列表。
 pub(crate) const NSFW_RATINGS: &str = "'questionable', 'explicit'";
 
-/// Picture `a` is rated NSFW, by the `asset_rating` view.
+/// 按 `asset_rating` 视图，图片 `a` 的分级是 NSFW。
 pub(crate) fn nsfw(a: &str) -> String {
     format!("{a}.uuid IN (SELECT uuid FROM asset_rating WHERE rating IN ({NSFW_RATINGS}))")
 }
-/// The content filter `nsfw` (`""`, `"hide"` or `"only"`) on picture `a`, as a clause appended with ` AND `;
-/// empty without a filter.
+/// 对图片 `a` 应用内容筛选 `nsfw`（`""`、`"hide"` 或 `"only"`），结果是以 ` AND ` 开头追加的子句；
+/// 不筛选时为空。
 pub(crate) fn rating(a: &str, nsfw: &str) -> Result<String> {
     match nsfw {
         "" => Ok(String::new()),
@@ -19,39 +19,39 @@ pub(crate) fn rating(a: &str, nsfw: &str) -> Result<String> {
         _ => Err(Error::Invalid("未知内容筛选".into())),
     }
 }
-/// Picture `a` is not a hidden (folded) duplicate.
+/// 图片 `a` 不是被隐藏（折叠）的重复图。
 pub(crate) fn unfolded(a: &str) -> String {
     format!("NOT EXISTS(SELECT 1 FROM duplicates h WHERE h.uuid={a}.uuid AND h.hidden=1)")
 }
-/// Picture `a` is neither a hidden duplicate nor excluded.
+/// 图片 `a` 既不是被隐藏的重复图，也没有被排除。
 pub(crate) fn visible(a: &str) -> String {
     format!("{} AND NOT EXISTS(SELECT 1 FROM excluded x WHERE x.uuid={a}.uuid)", unfolded(a))
 }
-/// Picture `a` belongs to no identity and was not deferred: the unmatched pool, without the tag identities.
+/// 图片 `a` 不属于任何身份，也没有被暂缓：即未匹配池，不含标签身份。
 pub(crate) fn unclaimed(a: &str) -> String {
     format!(
         "NOT EXISTS(SELECT 1 FROM memberships m WHERE m.uuid={a}.uuid) \
          AND NOT EXISTS(SELECT 1 FROM deferred d WHERE d.uuid={a}.uuid)"
     )
 }
-/// Every lead on a picture (`uuid`, `entity`, `score`, `weak`): family evidence, then weak claims.
+/// 图片上的全部线索（`uuid`、`entity`、`score`、`weak`）：先是家族证据，再是弱认领。
 pub(crate) const HINTS: &str =
     "(SELECT uuid,entity,score,0 AS weak FROM family_evidence UNION ALL SELECT uuid,entity,score,1 FROM weak_claims)";
-/// The pair (`a.uuid`, `a.entity`) was not rejected by a person.
+/// （`a.uuid`，`a.entity`）这一对没有被人否定。
 pub(crate) fn unrejected(a: &str) -> String {
     format!(
         "NOT EXISTS(SELECT 1 FROM assertions s WHERE s.uuid={a}.uuid AND s.entity={a}.entity AND s.status='rejected')"
     )
 }
-/// The leads of `HINTS` that a person has not rejected.
+/// `HINTS` 中没有被人否定的线索。
 pub(crate) fn leads() -> String {
     format!("(SELECT v.* FROM {HINTS} v WHERE {})", unrejected("v"))
 }
-/// Nobody has been asked about the pair (`a.uuid`, `a.entity`) yet.
+/// （`a.uuid`，`a.entity`）这一对还没有问过用户。
 pub(crate) fn unasked(a: &str) -> String {
     format!("NOT EXISTS(SELECT 1 FROM asked k WHERE k.uuid={a}.uuid AND k.entity={a}.entity)")
 }
-/// Identity `a.entity` can be learned: it is not a label-only mark.
+/// 身份 `a.entity` 可以学习：它不是只作标签用的标记。
 pub(crate) fn learnable(a: &str) -> String {
     format!(
         "NOT EXISTS(
@@ -61,7 +61,7 @@ pub(crate) fn learnable(a: &str) -> String {
   WHERE t.key={a}.entity AND l.label_only=1)"
     )
 }
-/// Prototype hints on single pictures still worth asking about, selecting `columns` of `w` (`weak_claims`).
+/// 单人图上仍值得询问的原型提示，选取 `w`（`weak_claims`）的 `columns` 列。
 pub(crate) fn proto_hints(columns: &str) -> String {
     format!(
         "SELECT {columns}
@@ -77,12 +77,12 @@ WHERE w.source='PROTO'
         learnable = learnable("w")
     )
 }
-/// All four modules are in the core: one row, true or false.
+/// 四个模块是否都已在核心里：返回一行，真或假。
 pub(crate) const SWITCHED: &str = "
     SELECT count(*)=4
     FROM meta
     WHERE key IN ('terms_artists','terms_labels','terms_characters','terms_names') AND value='core'";
-/// The library uses the hybrid identity policy (`identity_nodes` and the identity reads apply).
+/// 图库采用 hybrid 身份策略（此时使用 `identity_nodes` 和身份读取）。
 pub(crate) fn hybrid(c: &rusqlite::Connection) -> Result<bool> {
     use rusqlite::OptionalExtension;
     let policy = "SELECT value FROM meta WHERE key='identity_policy'";

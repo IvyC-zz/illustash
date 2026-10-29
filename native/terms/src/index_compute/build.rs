@@ -228,7 +228,7 @@ pub(super) fn build(review: &Path, tags: &Path) -> Result<Built> {
     }
     let mut seen = HashSet::new();
     aliases.retain(|a| seen.insert(a.clone()));
-    // Empty rebuild replaces stale anchors too, so dropping the last patch cannot leave old claims.
+    // 空的重建同样替换掉过期锚点，因此删掉最后一个补丁不会留下旧认领。
     save(&review.join("char-anchors.npy"), &vectors)?;
     fs::write(review.join("char-anchors.txt"), ids.join("\n"))?;
     Ok((rows, aliases, vectors, ids, metadata, patched))

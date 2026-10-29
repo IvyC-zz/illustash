@@ -1,4 +1,4 @@
-//! Index calculation on an App Index prepared job. No network or formal publication.
+//! 在 App Index 准备好的任务上做索引计算。不联网，也不做正式发布。
 mod build;
 mod clean;
 pub mod numeric;
@@ -22,7 +22,7 @@ pub(super) fn write(path: &Path, value: &Value) -> Result<()> {
     fs::write(path, serde_json::to_vec(value).map_err(|e| Error::invalid(e.to_string()))?)?;
     Ok(())
 }
-// Metadata's first maximum gender is observable. Value's sorted map cannot rewrite it.
+// 元数据里并列最大的性别中哪个排在前面是可观察的，不能让 Value 的有序映射改写它。
 pub(super) fn write_meta(path: &Path, value: &Value, keys: &[String]) -> Result<()> {
     use serde::ser::{Serialize, SerializeMap};
     struct Gender<'a> {
@@ -78,7 +78,7 @@ pub(super) fn files(folder: &Path, extension: &str) -> Result<Vec<PathBuf>> {
 pub(super) fn reference(path: &Path) -> Result<crate::research_compute::features::NpyMatrix> {
     checked_reference(read_npy(path)?)
 }
-// Upstream truncated files remain skippable; parsed invalid vectors fail the job.
+// 上游截断的文件仍可跳过；能解析但向量无效的，让任务失败。
 pub(super) fn optional_reference(path: &Path) -> Result<Option<crate::research_compute::features::NpyMatrix>> {
     match read_npy(path) {
         Ok(raw) => checked_reference(raw).map(Some),
@@ -126,7 +126,7 @@ pub struct Resources<'a> {
     pub runtime: &'a Path,
     pub acceleration: &'a Acceleration,
 }
-/// Only load CCIP on the first valid reference needing calculation; no WD or Features cache.
+/// 遇到第一个需要计算的有效参考图时才加载 CCIP；不加载 WD，也不用 Features 缓存。
 pub fn run_files(input: &Path, output: &Path, resources: &Resources<'_>) -> Result<()> {
     let req = read(input)?;
     let mut session = None;
@@ -207,7 +207,7 @@ fn fetch(review: &Path, row: &Value, features: &mut dyn FnMut(&image::RgbImage) 
     let mut general = std::collections::BTreeMap::<String, usize>::new();
     for r in refs {
         let path = Path::new(field(r, "path")?);
-        // Only App Index's downloaded isolated references are decoded.
+        // 只解码 App Index 下载到隔离目录的参考图。
         let permitted = match path.canonicalize() {
             Ok(actual) => actual.starts_with(review.join("char-patch/img")),
             Err(_) => path
@@ -252,7 +252,7 @@ fn fetch(review: &Path, row: &Value, features: &mut dyn FnMut(&image::RgbImage) 
     write_meta(&idx.join(format!("{cid}.json")), &meta, &["girl".into(), "boy".into()])
 }
 
-/// Installed adapter integration. The dispatcher enables this only on accepted platforms.
+/// 已安装适配器的接入点。分派器只在通过验收的平台上启用它。
 pub fn worker(arguments: &[String]) -> Result<()> {
     if !cfg!(any(target_os = "macos", target_os = "windows")) {
         return Err(Error::invalid("原生索引平台数值验收尚未完成"));
@@ -264,7 +264,7 @@ pub fn worker(arguments: &[String]) -> Result<()> {
     let tags = resources.join("tags/tags_v3.csv");
     let shared = crate::app_resources::shared_path(&resources).ok();
     let acceleration = Acceleration::from_env(shared.as_deref());
-    // Windows scan/anchor products need the fixed OpenBLAS backend; fail before any work.
+    // Windows 上 scan 和锚点的矩阵乘积需要固定的 OpenBLAS 后端；在做任何工作之前就失败。
     #[cfg(target_os = "windows")]
     illustash_platform::platform_research_math::windows_backend_identity().map_err(Error::Invalid)?;
     if arguments == ["--check"] {

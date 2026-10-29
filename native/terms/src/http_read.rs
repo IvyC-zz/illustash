@@ -1,4 +1,4 @@
-//! Deterministic HTTP reads, sharing one read transaction and the existing names rules.
+//! 确定性的 HTTP 读取，共用一个读事务和既有的名字规则。
 use crate::character_entities::ENTITIES;
 use crate::{
     http::LibraryContext,
@@ -52,7 +52,7 @@ pub const TREE: &str = "WITH RECURSIVE tree(id) AS (
   JOIN terms t ON t.id=r.term_id
   WHERE t.kind='work')";
 
-/// A work and all its sub-works; a work that does not exist (or was merged) is refused.
+/// 一个作品及其全部子作品；不存在（或已被合并）的作品会被拒绝。
 pub(crate) fn work_tree(c: &Connection, work: &str) -> Result<Vec<String>> {
     let found = format!("SELECT EXISTS(SELECT 1 FROM {ENTITIES} WHERE id=? AND kind='work' AND merged_into IS NULL)");
     if !c.query_row(&found, [work], |r| r.get::<_, bool>(0))? {
@@ -162,12 +162,12 @@ fn choice(v: Choice) -> Json {
         ),
     ])
 }
-// Names for a page in another language than Chinese (#173 stage 3). The page says its language in a request header
-// (app_http.rs); a request without it, any background task, and every write see the names exactly as before.
+// 给非中文页面显示的名字（#173 第 3 阶段）。页面在请求头里说明自己的语言（app_http.rs）；不带这个请求头的请求、
+// 所有后台任务和所有写入看到的名字都与以前完全相同。
 thread_local! {
     static ROMAN: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
-/// While it lives, this thread's reads show names for a page in `language` (`X-Illustash-Language`).
+/// 存活期间，本线程的读取按 `language`（`X-Illustash-Language`）页面的语言显示名字。
 pub(crate) struct PageLanguage(bool);
 impl PageLanguage {
     pub(crate) fn set(language: Option<&str>) -> Self {
@@ -189,8 +189,8 @@ impl Drop for PageLanguage {
 fn roman() -> bool {
     ROMAN.get()
 }
-/// The name shown on a page in another language: a name you gave stays; otherwise the English name, then the
-/// Danbooru tag made readable (Hatsune Miku), which is romanized for Japanese characters; then the name as chosen.
+/// 在其他语言页面上显示的名字：用户自己起的名字保留；否则用英文名，其次是整理成可读形式的 Danbooru 标签（如
+/// Hatsune Miku，日文角色的标签就是罗马字）；最后才是选定的名字。
 pub(crate) fn shown_name(name: String, source: &str, en: Option<String>, tag: &str, character: bool) -> String {
     if !roman() || source == "user" {
         return name;
@@ -221,11 +221,11 @@ pub(crate) fn register_names(c: &Connection) -> Result<()> {
     }
 }
 const NAME_FUNCTION: rusqlite::functions::FunctionFlags = rusqlite::functions::FunctionFlags::SQLITE_UTF8;
-/// The names of a library whose names are not in the core: one snapshot of every identity.
+/// 名字不在核心里的图库的名字：所有身份的一份快照。
 fn register_snapshot_names(c: &Connection) -> Result<()> {
     let fallback = Arc::new(View::load(c)?);
     let mut shown = HashMap::new();
-    // The snapshot already holds every identity; no second read of entities (#102).
+    // 快照已经包含所有身份；不再读第二遍 entities（#102）。
     for id in fallback.ids().cloned().collect::<Vec<_>>() {
         for skin in [0, 1] {
             if let Some((v, tag)) = fallback.entity(&id, skin != 0)? {
@@ -259,10 +259,9 @@ fn register_snapshot_names(c: &Connection) -> Result<()> {
     })?;
     Ok(())
 }
-// The projected names below render only names actually requested, memoized for this connection/read transaction
-// and per page language too (a connection may outlive one request). No library-wide snapshots or cross-request
-// caches: writes and library switches cannot reuse stale names, and an empty page does not load every identity's
-// legacy names.
+// 下面的投影名字只渲染实际请求到的名字，按本连接和读事务记忆结果，并且按页面语言分开（一个连接可能比一个请求
+// 活得久）。不做全图库快照，也不做跨请求缓存：写入和切换图库不会复用过期的名字，空页面也不会加载所有身份的
+// 旧名字。
 fn register_entity_name(c: &Connection) -> Result<()> {
     let mut names: HashMap<(bool, String), String> = HashMap::new();
     c.create_scalar_function("entity_name", 1, NAME_FUNCTION, move |ctx| {
@@ -271,8 +270,7 @@ fn register_entity_name(c: &Connection) -> Result<()> {
         if let Some(name) = names.get(&key) {
             return Ok(name.clone());
         }
-        // SAFETY: HTTP owns the connection on one thread. The non-owning handle
-        // stays within this callback and reads the same request transaction.
+        // SAFETY: HTTP 在一个线程上持有这个连接。不拥有连接的句柄只在这个回调内使用，读的是同一个请求事务。
         let c = unsafe { ctx.get_connection()? };
         let name: String = if key.0 {
             c.query_row(
@@ -299,7 +297,7 @@ fn register_entity_info(c: &Connection) -> Result<()> {
         if let Some(info) = shown.get(&key) {
             return Ok(info.clone());
         }
-        // SAFETY: as in register_entity_name; no connection reference escapes the callback.
+        // SAFETY: 同 register_entity_name；连接引用不会逃出回调。
         let c = unsafe { ctx.get_connection()? };
         let info = c
             .query_row(
@@ -336,7 +334,7 @@ fn register_work_name(c: &Connection) -> Result<()> {
         if let Some(name) = chosen.get(&key) {
             return Ok(name.clone());
         }
-        // SAFETY: as in register_entity_name; the fallback also reads this transaction, never a new connection.
+        // SAFETY: 同 register_entity_name；回退路径也读这个事务，从不打开新连接。
         let c = unsafe { ctx.get_connection()? };
         let name: Option<String> = if key.0 {
             c.query_row("SELECT name,name_source,en FROM term_name_choice WHERE kind='work' AND key=?", [&key.1], |r| {
@@ -348,7 +346,7 @@ fn register_work_name(c: &Connection) -> Result<()> {
         .optional()?;
         let name = match name {
             Some(name) => name,
-            // A key the projection does not hold: chosen from that key's own rows (#105), no library-wide load.
+            // 投影里没有的 key：只从这个 key 自己的行里选（#105），不加载整个图库。
             None => crate::names_view::choose_key(&c, "work", &key.1)
                 .map(|v| shown_name(v.name, &v.source, v.names[2].clone(), &key.1, false))
                 .map_err(|e| rusqlite::Error::UserFunctionError(Box::new(e)))?,
@@ -398,8 +396,8 @@ pub(crate) fn display_skin(c: &Connection, mut v: Json, skin: bool) -> Result<Js
     }
     Ok(v)
 }
-/// Fills the temporary table `name_matches` (`entity`, `rank`) with the identities whose names match `q`, each
-/// as the identity it was merged into, with its best rank; an empty `q` leaves the table empty.
+/// 把名字匹配 `q` 的身份填进临时表 `name_matches`（`entity`、`rank`），每个身份换成它被合并进的身份，
+/// 取最好的排名；`q` 为空时表保持为空。
 pub(crate) fn match_names(c: &Connection, q: &str) -> Result<()> {
     let table = "name_matches(entity TEXT PRIMARY KEY,rank INTEGER NOT NULL)";
     c.execute_batch(&format!("CREATE TEMP TABLE IF NOT EXISTS {table}; DELETE FROM name_matches;"))?;
@@ -516,8 +514,8 @@ pub(crate) fn sqlite_uri(path: &std::path::Path) -> String {
     format!("file:{encoded}?mode=ro")
 }
 
-// Python Store loads this immutable CSV once per startup. Cache only that vocabulary,
-// keyed by the private startup generation and CSV path; never retain a library connection.
+// Python Store 每次启动只加载一次这个不会变的 CSV。只缓存这份词表，以私有的启动 generation 和 CSV 路径为键；
+// 从不保留图库连接。
 type TagVocabulary = (String, std::path::PathBuf, Arc<Vec<String>>);
 pub(crate) fn tag_vocabulary(context: &LibraryContext) -> Result<Arc<Vec<String>>> {
     static TAGS: std::sync::Mutex<Option<TagVocabulary>> = std::sync::Mutex::new(None);
@@ -546,7 +544,7 @@ pub(crate) fn tag_vocabulary(context: &LibraryContext) -> Result<Arc<Vec<String>
 
 const BROWSE_ROUTES: [&str; 7] =
     ["/api/assets", "/api/assets/count", "/api/ids", "/api/detail", "/api/home", "/api/fold", "/api/review-pools"];
-/// Module reads that render names. Counts, IDs and raw identity/prefs reads do not; their query path stays local.
+/// 会渲染名字的模块读取。计数、ID 以及原始的身份和偏好读取不渲染；它们的查询路径保持在本地。
 const NAMED_ROUTES: [&str; 8] = [
     "/api/assets",
     "/api/detail",
@@ -604,7 +602,7 @@ pub fn read(context: &LibraryContext, url: &str) -> Result<Option<(Json, u16)>> 
         tx.commit()?;
         return Ok(Some((result, 200)));
     }
-    // Store.connect probes the names switch before yielding, even without a name renderer.
+    // Store.connect 在交出连接之前会探查名字开关，即使没有名字渲染器也一样。
     flag(&tx, "terms_names")?;
     if local || NAMED_ROUTES.contains(&path) {
         register_names(&tx)?;
@@ -633,7 +631,7 @@ fn general_tags(context: &LibraryContext, q: &str) -> Result<Json> {
     let tags = vocabulary.iter().filter(|n| crate::casefold::casefold(n).contains(&q)).take(30);
     Ok(Json::Array(tags.map(|n| n.as_str().into()).collect()))
 }
-/// How many pictures /api/artist-audit draws (50 for other reads), or why the request is refused.
+/// /api/artist-audit 抽查多少张图（其他读取为 50），或者请求被拒绝的原因。
 fn audit_size(path: &str, q: &HashMap<String, String>) -> std::result::Result<usize, String> {
     if path != "/api/artist-audit" {
         return Ok(50);
@@ -644,13 +642,12 @@ fn audit_size(path: &str, q: &HashMap<String, String>) -> std::result::Result<us
     }
     Ok(n as usize)
 }
-/// Whether all four modules are in the core. Startup publishes readiness before the existing background cutover
-/// finishes. Its failure reason lives in Python and can change after publication. Until all four modules are
-/// ready, bootstrap must use that live refusal, not a stale startup value.
+/// 四个模块是否都已在核心里。启动时在既有的后台切换完成之前就发布了就绪状态。切换失败的原因在 Python 里，
+/// 发布之后还可能变化。四个模块全部就绪之前，bootstrap 必须用实时的拒绝结果，而不是过期的启动值。
 fn switched(c: &Connection) -> Result<bool> {
     Ok(c.query_row(SWITCHED, [], |r| r.get::<_, bool>(0))?)
 }
-/// The artist reads that still need provenance.sqlite see it, read-only, as `prov`.
+/// 仍需要 provenance.sqlite 的画师读取以只读方式把它挂载为 `prov`。
 fn attach_provenance(c: &Connection, context: &LibraryContext, path: &str) -> Result<()> {
     let auxiliary_needed = path == "/api/artist-audit" || (path == "/api/artist" && !flag(c, "terms_artists")?);
     if let Some(library) = context.library.as_ref().filter(|_| auxiliary_needed) {
@@ -661,7 +658,7 @@ fn attach_provenance(c: &Connection, context: &LibraryContext, path: &str) -> Re
     }
     Ok(())
 }
-/// Reads outside the browse, characters, local and app modules.
+/// browse、characters、local 和 app 模块之外的读取。
 fn read_library(
     c: &Connection,
     context: &LibraryContext,
@@ -807,7 +804,7 @@ mod tests {
         assert_eq!(shown(&c), ["初音未来", "雷姆", "before", "原神", "初音未来"]);
         {
             let _page = PageLanguage::set(Some("en"));
-            // Your own name stays; then the English name; then the tag made readable.
+            // 自己起的名字保留；其次是英文名；再次是整理成可读形式的标签。
             assert_eq!(shown(&c), ["Hatsune Miku", "Rem", "before", "Genshin Impact", "Hatsune Miku"]);
         }
         let _page = PageLanguage::set(Some("zh-TW"));
@@ -817,7 +814,7 @@ mod tests {
     fn projected_names_do_not_load_legacy_tables() {
         let c = Connection::open_in_memory().unwrap();
         fixture(&c);
-        // Projected entity/covered-work lookups have no reason to build View.
+        // 查投影里的身份和已覆盖的作品时，没有理由构建 View。
         c.execute_batch("DROP TABLE term_links; DROP TABLE term_names; DROP TABLE term_key_names;").unwrap();
         register_names(&c).unwrap();
         let values: (String, String, String, String) = c
@@ -834,7 +831,7 @@ mod tests {
         );
         assert_eq!(values.2, "{}");
         assert_eq!(values.3, "projected");
-        // A work key outside the projection reads only its own display names (#105).
+        // 投影之外的作品 key 只读取它自己的显示名（#105）。
         let c = Connection::open_in_memory().unwrap();
         fixture(&c);
         c.execute_batch("DROP TABLE term_tree; DROP TABLE term_links; DROP TABLE term_names;").unwrap();
@@ -863,7 +860,7 @@ mod tests {
                      UPDATE term_key_names SET value='新🙂';",
                 )
                 .unwrap();
-            // First use is AFTER the concurrent commit, including the legacy fallback.
+            // 首次使用是在并发提交之后，包括旧版回退路径。
             for _ in 0..2 {
                 let values: (String, String, String, String) = tx
                     .query_row(

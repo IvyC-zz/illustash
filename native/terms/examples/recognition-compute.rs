@@ -1,4 +1,4 @@
-//! Explicit-path synthetic comparison driver; never selects models or user libraries.
+//! 按显式路径运行的合成比较驱动；从不自行选择模型或用户图库。
 use illustash_terms::recognition_compute::{
     anchor_snapshot::Snapshot, anchors, backend, claims::Claims, preprocess, producer, session,
 };
@@ -16,7 +16,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             json!({"wd":preprocess::wd_input(&image,size),"ccip":preprocess::ccip_input(&image,size)})
         }
         "infer" => {
-            // As the installed worker: accelerated unless ILLUSTASH_CPU_ONLY (the bit-for-bit acceptance sets it).
+            // 与已安装的 worker 相同：除非设了 ILLUSTASH_CPU_ONLY（逐位验收会设），否则启用加速。
             let shared = request["shared"].as_str().map(Path::new);
             let mut sessions = session::ModelSessions::load(
                 Path::new(request["models"].as_str().ok_or("models missing")?),

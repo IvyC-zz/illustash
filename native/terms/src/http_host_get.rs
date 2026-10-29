@@ -2,18 +2,18 @@
 use super::*;
 use std::sync::{mpsc::Receiver, RwLockReadGuard};
 
-/// The session this request arrived in is gone (or never was), so the page must reload.
+/// 这个请求所属的会话已经不在（或从未存在），页面必须重新加载。
 pub(super) fn expired(request: Request) {
     respond(request, error("会话已过期，请刷新页面"), 403, "core");
 }
-/// Answers with `result`; `write` says whether a failure is reported as a failed save.
+/// 用 `result` 应答；`write` 决定失败是否按保存失败报告。
 pub(super) fn reply(request: Request, result: Result<Json>, write: bool) {
     match result {
         Ok(v) => respond(request, v, 200, "core"),
         Err(e) => failure(request, e, write),
     }
 }
-/// Answers with what was worked out without the session lock, unless the session switched meanwhile.
+/// 用不持会话锁算出的结果应答，除非这期间会话已经切换。
 pub(super) fn reply_if_current(request: Request, host: &Host, received: u64, result: Result<Json>, write: bool) {
     if !host.current(received) {
         expired(request);
@@ -21,16 +21,16 @@ pub(super) fn reply_if_current(request: Request, host: &Host, received: u64, res
     }
     reply(request, result, write)
 }
-/// A research query's answer, once the task sends it.
+/// 研究查询的答复，等任务发来后返回。
 pub(super) fn waited(query: Result<Receiver<Result<Json>>>) -> Result<Json> {
     query.and_then(|rx| rx.recv().map_err(|_| Error::Invalid("研究任务已结束".into()))?)
 }
 impl Host {
-    /// The library's settings, with what this host forces off.
+    /// 图库的设置，连同本宿主强制关闭的项目。
     pub(super) fn library_settings(&self, library: &Library) -> Result<Json> {
         settings(library, self.names_enabled, self.sync_disabled, self.provenance_enabled, self.index_automatic)
     }
-    /// The tasks this host forces off for the library.
+    /// 本宿主为该图库强制关闭的任务。
     pub(super) fn library_forced_off(&self, library: &Library) -> Vec<String> {
         forced_off(library, self.names_enabled, self.sync_disabled, self.provenance_enabled, self.index_automatic)
     }
@@ -61,8 +61,8 @@ pub(super) fn handle(request: Request, host: &Host, received: u64) {
         return;
     }
     let result = read(&request, host, &session, path);
-    // The request owns its old snapshot; socket backpressure cannot block switching or DB commands.
-    // Never reopen against the replacement session to deliver this response.
+    // 请求持有自己的旧快照；套接字的背压不会阻塞切换或数据库命令。
+    // 绝不为了发出这个响应而针对替换后的会话重新打开。
     drop(session);
     match result {
         Ok(Some((payload, status))) => respond(request, payload, status, "core"),
@@ -70,8 +70,7 @@ pub(super) fn handle(request: Request, host: &Host, received: u64) {
         Err(e) => failure(request, e, false),
     }
 }
-/// Resolve the old session's asset under the lock; decoding and socket writes must not delay switching. The
-/// resulting request never reopens the replacement library.
+/// 在锁内解析旧会话的资产；解码和套接字写入不能拖慢切换。之后的请求处理从不重新打开替换后的图库。
 fn file(request: Request, host: &Host, session: RwLockReadGuard<Session>) {
     let result = crate::app_files::prepare(&session.library, &host.root, request.url());
     drop(session);
@@ -85,7 +84,7 @@ fn file(request: Request, host: &Host, session: RwLockReadGuard<Session>) {
         Err(crate::app_files::Failure::Core(e)) => failure(request, e, false),
     }
 }
-/// Names looked up on the network, without holding the session.
+/// 联网查询的名字，查询时不持有会话。
 fn remote_names(request: Request, host: &Host, received: u64, session: RwLockReadGuard<Session>) {
     let mut source = session.names.source(&session.library);
     drop(session);
@@ -95,8 +94,8 @@ fn remote_names(request: Request, host: &Host, received: u64, session: RwLockRea
         .and_then(|source| crate::app_names::remote(source, request.url()));
     reply_if_current(request, host, received, result, false);
 }
-/// A Danbooru character's preview picture (#293), looked up and fetched without holding the session. 404 when
-/// Danbooru has no all-ages post of it; the page then keeps its placeholder.
+/// Danbooru 角色的预览图（#293），查询和下载时不持有会话。Danbooru 上没有该角色的全年龄帖子时返回 404，
+/// 页面随后保留占位图。
 fn preview(request: Request, host: &Host, received: u64, session: RwLockReadGuard<Session>) {
     let mut source = session.names.source(&session.library);
     let thumbnails = session.library.thumbnails();
@@ -133,7 +132,7 @@ fn oc_groups(request: Request, host: &Host, received: u64) {
     drop(session);
     reply_if_current(request, host, received, waited(result), false);
 }
-/// Whether the URL asks for progress (`progress=1`) rather than the status.
+/// URL 要的是进度（`progress=1`）而不是状态。
 fn progress(request: &Request) -> bool {
     crate::http_read::query(request.url()).get("progress").is_some_and(|v| v == "1")
 }
@@ -168,16 +167,16 @@ fn read(request: &Request, host: &Host, session: &Session, path: &str) -> Result
         }
         "/api/sync" => session.syncer.status(&session.library).map(|p| Some((p, 200))),
         "/api/integrity" => Ok(Some((session.integrity(), 200))),
-        // App-wide (#191): the update check's choice and last result, not the library's.
+        // 全应用范围（#191）：检查更新的选项和上次结果，不属于图库。
         "/api/updates" => crate::app_updates::info().map(|p| Some((p, 200))),
-        // App-wide (#168): whether the recognition models are in place, and the download or import in progress.
+        // 全应用范围（#168）：识别模型是否就位，以及正在进行的下载或导入。
         "/api/models" => crate::app_models::info(&host.root).map(|p| Some((p, 200))),
         "/api/onboarding" => {
             let works = crate::http_read::query(request.url()).get("works").is_some_and(|v| v == "1");
             crate::app_onboarding::Onboarding::read(session, &host.root, &session.context(&host.tags), works)
                 .map(|p| Some((p, 200)))
         }
-        // The import slot belongs to the application: after a switch the page still reads why the last one stopped.
+        // 导入槽位属于应用：切换图库后，页面仍能读到上一次导入为什么停下。
         "/api/imports" => Ok(Some((host.imports.state(), 200))),
         path if crate::app_local::ROUTES.contains(&path) => {
             crate::app_local::read(&session.context(&host.tags), request.url()).map(|p| Some((p, 200)))
@@ -196,15 +195,15 @@ fn read(request: &Request, host: &Host, session: &Session, path: &str) -> Result
 fn libraries(host: &Host, session: &Session) -> Result<Json> {
     let mut p = crate::app_libraries::info(&session.library)?;
     p.set("export", host.exports.state(&session.library, session.generation));
-    // Only when listing it failed (#176): the page says so once; the usual answer is unchanged.
+    // 只在把它登记进图库列表失败时（#176）：页面提示一次；平常的应答不变。
     if let Some(why) = &session.unlisted {
         p.set("unlisted", why.as_str().into());
     }
-    // Only after an upgrade on opening (#193): where the pre-upgrade backup is.
+    // 只在打开时做过升级之后（#193）：升级前的备份在哪里。
     if let Some(backup) = &session.upgraded {
         p.set("upgraded", Json::object([("backup", backup.as_str().into())]));
     }
-    // Only after a rescue of source.sqlite on opening (#228): what it did and where the damaged file went.
+    // 只在打开时抢救过 source.sqlite 之后（#228）：做了什么，损坏的文件移到了哪里。
     if let Some(report) = &session.rescued {
         p.set("rescued", report.clone());
     }

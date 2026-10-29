@@ -1,11 +1,9 @@
-//! Minimal writes for replacing a machine cache table (#31, docs/ARCHITECTURE_DIRECTION.md).
+//! 替换机器缓存表时只写必要的行（#31，docs/ARCHITECTURE_DIRECTION.md）。
 //!
-//! Research and provenance used to publish a cache by deleting the whole table and inserting every
-//! row again, so one changed row cost a rewrite of the table. [`plan`] finds the longest prefix of the
-//! desired rows that the current table already holds in the same rowid order (matched by key); those
-//! rows stay where they are, every other current row is deleted and the remaining desired rows are
-//! appended in order. The table then holds exactly the desired rows in the desired rowid order, which
-//! is what the full rewrite left; only the rowid numbers are no longer renumbered from 1.
+//! 研究和溯源原先发布缓存的做法是删掉整张表再逐行重新插入，所以哪怕只改了一行，也要重写整张表。[`plan`]
+//! 找出目标行里最长的一段前缀，它们在当前表里已经按同样的 rowid 顺序存在（按 key 匹配）；这些行原地保留，
+//! 当前表的其余行删除，剩下的目标行按顺序追加。这样表里正好是按目标 rowid 顺序排列的目标行，与整表重写的
+//! 结果相同；只是 rowid 编号不再从 1 重新编起。
 use crate::{Error, Result};
 use rusqlite::{
     functions::FunctionFlags,
@@ -15,17 +13,17 @@ use rusqlite::{
 use sha2::{Digest, Sha256};
 use std::{collections::HashMap, hash::Hash};
 
-/// Which current rows stay and which go.
+/// 当前表中哪些行保留、哪些行删除。
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) struct Plan {
-    /// For desired row `j < kept.len()`, the index of the current row that stays in its place.
+    /// 对目标行 `j < kept.len()`，在其位置上保留的当前行的下标。
     pub kept: Vec<usize>,
-    /// Current rows that are deleted, ascending. Desired rows from `kept.len()` on are appended.
+    /// 要删除的当前行，升序。从 `kept.len()` 起的目标行追加到末尾。
     pub delete: Vec<usize>,
 }
 
-/// `same` decides whether a key-matched current row may stay for the desired row (rewritten in place
-/// by the caller if its columns differ); the first desired row that cannot stay ends the kept prefix.
+/// `same` 判断 key 匹配上的当前行能否留作对应的目标行（列有差异时由调用方原地改写）；
+/// 第一个不能保留的目标行结束保留前缀。
 pub(crate) fn plan<R, K: Eq + Hash>(
     current: &[R],
     desired: &[R],
@@ -47,7 +45,7 @@ pub(crate) fn plan<R, K: Eq + Hash>(
     Plan { kept, delete: (0..current.len()).filter(|i| !stays[*i]).collect() }
 }
 
-/// One stored value, hashable; reals compare by their bits.
+/// 一个存储的值，可哈希；浮点数按位比较。
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum Cell {
     Null,
@@ -117,8 +115,7 @@ fn digest(row: &[Cell]) -> [u8; 32] {
     }))
 }
 const DIGEST: &str = "illustash_row_digest";
-/// Rows are compared by a digest of their typed cells computed inside SQLite, so a large table (BLOB
-/// signatures, cached bodies) is never held in memory twice.
+/// 行按带类型单元格的摘要比较，摘要在 SQLite 内部计算，所以大表（BLOB 签名、缓存的正文）不会在内存里存两份。
 fn register(c: &Connection) -> Result<()> {
     c.create_scalar_function(DIGEST, -1, FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
         Ok(digest_cells((0..ctx.len()).map(|i| ctx.get_raw(i))).to_vec())
@@ -129,12 +126,12 @@ fn quote(name: &str) -> String {
     format!("\"{}\"", name.replace('"', "\"\""))
 }
 
-/// Columns of one table, its primary key and the affinity SQLite applies when storing.
+/// 一张表的列、主键，以及 SQLite 存储时应用的类型亲和性（affinity）。
 pub(crate) struct Shape {
     schema: String,
     table: String,
     columns: Vec<String>,
-    /// Positions of the primary-key columns in key order; the whole row when the table has none.
+    /// 主键列按主键顺序的位置；表没有主键时为整行。
     key: Vec<usize>,
     keyed: bool,
     affinity: Vec<Affinity>,
@@ -162,7 +159,7 @@ impl Shape {
             }
             columns.push(r.get::<_, String>(0)?);
             types.push(declared.clone());
-            // SQLite's affinity rules, the parts that change a stored number.
+            // SQLite 的亲和性规则中会改变所存数字的那部分。
             affinity.push(if declared.contains("INT") {
                 Affinity::Integer
             } else if ["CHAR", "CLOB", "TEXT", "BLOB"].iter().any(|t| declared.contains(t)) || declared.is_empty() {
@@ -170,7 +167,7 @@ impl Shape {
             } else if ["REAL", "FLOA", "DOUB"].iter().any(|t| declared.contains(t)) {
                 Affinity::Real
             } else {
-                Affinity::Integer // NUMERIC stores a lossless real as an integer, like INTEGER.
+                Affinity::Integer // NUMERIC 和 INTEGER 一样，把能无损表示的浮点数存成整数。
             });
         }
         if columns.is_empty() {
@@ -187,7 +184,7 @@ impl Shape {
     fn name(&self) -> String {
         format!("{}.{}", quote(&self.schema), quote(&self.table))
     }
-    /// The value SQLite would store for `cell` in column `i`, so a row compares equal to its stored form.
+    /// SQLite 在第 `i` 列为 `cell` 存储的值，这样一行与它存储后的形式比较时相等。
     fn stored(&self, i: usize, cell: Cell) -> Cell {
         match (self.affinity[i], cell) {
             (Affinity::Real, Cell::Int(v)) => Cell::Real((v as f64).to_bits()),
@@ -202,7 +199,7 @@ impl Shape {
             (_, cell) => cell,
         }
     }
-    /// An `INTEGER PRIMARY KEY` column is the rowid itself.
+    /// `INTEGER PRIMARY KEY` 列就是 rowid 本身。
     fn alias(&self) -> bool {
         self.keyed && self.key.len() == 1 && self.declared[self.key[0]] == "INTEGER"
     }
@@ -219,8 +216,8 @@ impl Shape {
     }
 }
 
-/// Rows written by one table publication; `old` holds the previous version of each deleted or rewritten
-/// row and `touched` the rowids of rows inserted or rewritten, for the caller's checks.
+/// 一次表发布写入的行；`old` 保存每个被删除或改写的行的旧版本，`touched` 保存插入或改写的行的 rowid，
+/// 供调用方检查。
 #[derive(Debug, Default)]
 pub(crate) struct Written {
     pub deleted: usize,
@@ -266,8 +263,8 @@ fn capture(c: &Connection, shape: &Shape, rowid: i64) -> Result<Vec<Cell>> {
     })?)
 }
 
-/// Make `main.table` hold `rows` in this rowid order, writing only rows that differ.
-/// `keep_old`: also return the previous version of rows that are deleted or rewritten.
+/// 让 `main.table` 按这个 rowid 顺序存放 `rows`，只写有差异的行。
+/// `keep_old`：同时返回被删除或改写的行的旧版本。
 pub(crate) fn sync(
     c: &Connection,
     table: &str,
@@ -326,10 +323,9 @@ pub(crate) fn sync(
     Ok(out)
 }
 
-/// Make `main.table` equal to the same table of the attached database `source`, rowids included: rows whose
-/// rowid and typed values match stay, every other row is deleted and the source's row inserted under its rowid.
-/// The comparison runs inside SQLite (EXCEPT over rowid, binary-collated values and storage classes), so neither
-/// table is loaded into memory. The source must not change meanwhile.
+/// 让 `main.table` 与挂载的数据库 `source` 中的同名表完全相同，rowid 也相同：rowid 和带类型的值都一致的行保留，
+/// 其余行删除，再按 rowid 插入 source 里的行。比较在 SQLite 内部进行（对 rowid、按 BINARY 排序规则的值和存储
+/// 类型做 EXCEPT），所以两张表都不会载入内存。期间 source 不能变化。
 pub(crate) fn mirror(c: &Connection, table: &str, source: &str) -> Result<Written> {
     let shape = Shape::of(c, "main", table)?;
     let from = Shape::of(c, source, table)?;
@@ -357,7 +353,7 @@ pub(crate) fn mirror(c: &Connection, table: &str, source: &str) -> Result<Writte
     for rowid in gone {
         out.deleted += delete.execute([rowid])?;
     }
-    // A rowid alias column carries the rowid by itself.
+    // rowid 别名列本身就带着 rowid。
     let list = shape.select_list();
     let target = if shape.alias() { list.clone() } else { format!("rowid,{list}") };
     let mut insert = c.prepare(&format!(
@@ -372,8 +368,8 @@ pub(crate) fn mirror(c: &Connection, table: &str, source: &str) -> Result<Writte
     Ok(out)
 }
 
-/// Apply a change list computed against the same table contents (research worker deltas): delete the
-/// rows with the given primary keys, each of which must exist, then append `append` in order.
+/// 应用针对相同表内容算出的变更列表（研究 worker 的增量）：删除给定主键的行（每一行都必须存在），
+/// 再按顺序追加 `append`。
 pub(crate) fn apply(
     c: &Connection,
     table: &str,
@@ -420,8 +416,7 @@ pub(crate) fn apply(
 
 #[cfg(test)]
 mod tests {
-    //! #31: synthetic tables only. The reference is the former publication: delete the whole table, then
-    //! insert the desired rows in order.
+    //! #31：只用合成表。参照是原来的发布方式：删掉整张表，再按顺序插入目标行。
     use super::*;
 
     fn ordered(c: &Connection, table: &str) -> Vec<Vec<Cell>> {
@@ -443,7 +438,7 @@ mod tests {
     const SCHEMA: &str = "CREATE TABLE sigs(uuid TEXT PRIMARY KEY,ratio REAL,grid BLOB,ok INTEGER NOT NULL);
         CREATE TABLE pairs(a TEXT NOT NULL,b TEXT NOT NULL,PRIMARY KEY(a,b));
         CREATE TABLE info(cid INTEGER PRIMARY KEY,size INTEGER NOT NULL,built_at TEXT NOT NULL);";
-    /// Deterministic generator; no external randomness.
+    /// 确定性的生成器；不用外部随机源。
     struct Lcg(u64);
     impl Lcg {
         fn next(&mut self, n: usize) -> usize {
@@ -468,8 +463,7 @@ mod tests {
             .unwrap();
         }
     }
-    /// A table changed the ways the calculators change their arrays: rows replaced and moved to the end,
-    /// rewritten in place, removed and appended.
+    /// 按计算器改动数组的方式改动一张表：行被替换并移到末尾、原地改写、删除和追加。
     fn mutate(rng: &mut Lcg, rows: &[Vec<Cell>], steps: usize, next_id: &mut usize) -> Vec<Vec<Cell>> {
         let mut rows = rows.to_vec();
         for _ in 0..steps {
@@ -507,12 +501,12 @@ mod tests {
         let key = |r: &(char, i32)| r.0;
         let same = |_: &(char, i32), _: &(char, i32)| true;
         let current = [('a', 1), ('b', 1), ('c', 1), ('d', 1)];
-        // Nothing changed: everything stays.
+        // 什么都没变：全部保留。
         assert_eq!(plan(&current, &current, key, same), Plan { kept: vec![0, 1, 2, 3], delete: vec![] });
-        // b replaced and moved to the end; c rewritten in place.
+        // b 被替换并移到末尾；c 原地改写。
         let desired = [('a', 1), ('c', 2), ('d', 1), ('b', 2)];
         assert_eq!(plan(&current, &desired, key, same), Plan { kept: vec![0, 2, 3], delete: vec![1] });
-        // A row that may not stay ends the prefix; later rows are appended again.
+        // 不能保留的行结束前缀；之后的行重新追加。
         let exact = plan(&current, &desired, key, |a, b| a == b);
         assert_eq!(exact, Plan { kept: vec![0], delete: vec![1, 2, 3] });
         assert_eq!(plan(&current, &[], key, same).delete, vec![0, 1, 2, 3]);
@@ -529,7 +523,7 @@ mod tests {
                     sig(next, 1.0 + next as f64 / 3.0, rng.next(4) > 0)
                 })
                 .collect();
-            // The current table has its own rowid history: some rows were replaced before.
+            // 当前表有它自己的 rowid 历史：有些行之前已被替换过。
             let history = rng.next(6);
             let current = mutate(&mut rng, &start, history, &mut next);
             let many = rng.next(20);
@@ -538,7 +532,7 @@ mod tests {
             let reference = open(&current);
             reference.execute("DELETE FROM sigs", []).unwrap();
             insert(&reference, "sigs", &desired);
-            // Rows in memory (research results).
+            // 内存中的行（研究结果）。
             let c = open(&current);
             let before = c.total_changes();
             let written = sync(&c, "sigs", desired.clone(), true, &|| Ok(())).unwrap();
@@ -551,7 +545,7 @@ mod tests {
             assert!(written.rows() <= current.len() + desired.len());
             assert_eq!(written.old.len(), written.deleted + written.updated);
             assert_eq!(written.touched.len(), written.updated + written.inserted);
-            // A change list computed against the stored rows (research worker): exact rows stay.
+            // 针对已存储的行算出的变更列表（研究 worker）：完全相同的行保留。
             let p = plan(&current, &desired, |r| r[0].clone(), |a, b| a == b);
             let c = open(&current);
             let delete: Vec<_> = p.delete.iter().map(|&i| vec![current[i][0].clone()]).collect();
@@ -584,7 +578,7 @@ mod tests {
             insert(&c, "sigs", &rows);
             c.execute("DELETE FROM sigs WHERE rowid % 7 = 3", []).unwrap();
             c.backup(rusqlite::DatabaseName::Main, &stage, None).unwrap();
-            // What a worker does to its staged copy: in-place updates, replacements, deletions, new rows.
+            // worker 对它的暂存副本做的改动：原地更新、替换、删除、新增行。
             let s = Connection::open(&stage).unwrap();
             let steps = [0, 1, rng.next(20)][round % 3];
             for _ in 0..steps {
@@ -606,7 +600,7 @@ mod tests {
                 .map(|r| r.unwrap())
                 .collect();
             drop(s);
-            // The former publication, for the row order it left.
+            // 原来的发布方式，用来得到它留下的行顺序。
             let reference = Connection::open_in_memory().unwrap();
             reference.execute_batch(SCHEMA).unwrap();
             insert(&reference, "sigs", &staged.iter().map(|(_, r)| r.clone()).collect::<Vec<_>>());
@@ -636,11 +630,11 @@ mod tests {
     #[test]
     fn stored_affinity_composite_and_integer_keys() {
         let c = open(&[]);
-        // An integer ratio is stored as REAL: the same row, nothing written.
+        // 整数的 ratio 存成 REAL：是同一行，什么都不写。
         c.execute("INSERT INTO sigs VALUES ('x',2,NULL,1)", []).unwrap();
         let row = vec![Cell::Text(b"x".to_vec()), Cell::Int(2), Cell::Null, Cell::Real(1f64.to_bits())];
         assert_eq!(sync(&c, "sigs", vec![row], false, &|| Ok(())).unwrap().rows(), 0);
-        // Composite keys; covering-index scans see the same rows as the full rewrite.
+        // 复合主键；覆盖索引扫描看到的行与整表重写相同。
         insert(&c, "pairs", &[vec![Cell::Text(b"b".to_vec()), Cell::Text(b"c".to_vec())]]);
         let pairs = vec![
             vec![Cell::Text(b"a".to_vec()), Cell::Text(b"b".to_vec())],
@@ -649,7 +643,7 @@ mod tests {
         let written = sync(&c, "pairs", pairs.clone(), false, &|| Ok(())).unwrap();
         assert_eq!((written.deleted, written.inserted), (1, 2));
         assert_eq!(scanned(&c, "pairs"), pairs);
-        // INTEGER PRIMARY KEY rows keep their ids; a rewritten built_at is an in-place update.
+        // INTEGER PRIMARY KEY 的行保留各自的 id；改写 built_at 是原地更新。
         insert(&c, "info", &[vec![Cell::Int(1), Cell::Int(3), Cell::Text(b"t1".to_vec())]]);
         let info = vec![
             vec![Cell::Int(1), Cell::Int(3), Cell::Text(b"t2".to_vec())],
@@ -658,12 +652,12 @@ mod tests {
         let written = sync(&c, "info", info.clone(), false, &|| Ok(())).unwrap();
         assert_eq!((written.deleted, written.updated, written.inserted), (0, 1, 1));
         assert_eq!(ordered(&c, "info"), info);
-        // A change list removes by primary key, here the whole row; a re-added row moves to the end.
+        // 变更列表按主键删除，这里主键就是整行；重新加回的行移到末尾。
         let applied = apply(&c, "pairs", &[pairs[0].clone()], vec![pairs[0].clone()], false, &|| Ok(())).unwrap();
         assert_eq!((applied.deleted, applied.inserted), (1, 1));
         let pairs = vec![pairs[1].clone(), pairs[0].clone()];
         assert_eq!(scanned(&c, "pairs"), pairs);
-        // A change list naming a row that is not stored, or of the wrong width, is refused.
+        // 变更列表里指向未存储的行，或行宽不对，都会被拒绝。
         assert!(apply(
             &c,
             "pairs",
@@ -675,7 +669,7 @@ mod tests {
         .is_err());
         assert!(apply(&c, "pairs", &[vec![Cell::Text(b"a".to_vec())]], vec![], false, &|| Ok(())).is_err());
         assert_eq!(scanned(&c, "pairs"), pairs);
-        // A wrong row width is refused before anything is written.
+        // 行宽不对时，在写入任何东西之前就拒绝。
         assert!(sync(&c, "pairs", vec![vec![Cell::Null]], false, &|| Ok(())).is_err());
         assert_eq!(scanned(&c, "pairs"), pairs);
     }

@@ -1,4 +1,4 @@
-//! Raw PNM samples for image comparison; no RGB clamp or thumbnail here.
+//! 用于图像比较的原始 PNM 采样；这里不做 RGB 截断，也不生成缩略图。
 use crate::{Error, Result};
 use image::ImageDecoder;
 use std::io::Cursor;
@@ -22,7 +22,7 @@ pub(crate) fn pnm_samples(bytes: &[u8], maximum_pixels: Option<u64>) -> Result<O
         PnmSubtype::Pixmap(encoding) => (3usize, encoding),
         PnmSubtype::Graymap(encoding) => (1usize, encoding),
         PnmSubtype::Bitmap(_) => return Ok(None),
-        // Pillow doesn't accept P7/PAM as a compressed input image.
+        // Pillow 不接受 P7/PAM 作为压缩输入图像。
         PnmSubtype::ArbitraryMap => return Err(Error::Invalid("像素哈希 P7 输入未被旧解码器支持".into())),
     };
     let maxval = header.maximal_sample();

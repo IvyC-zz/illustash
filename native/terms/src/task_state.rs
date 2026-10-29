@@ -30,11 +30,11 @@ pub(crate) enum Status {
     Grouping,
     Learning,
     Reading,
-    /// Research input changed before publication; a fresh snapshot is retried after a delay.
+    /// 研究输入在发布前发生了变化；稍后用新的快照重试。
     Waiting,
-    /// Stopped on request (or by a switch or quit) before publishing anything (#88 imports).
+    /// 在发布任何内容之前应要求停下（或因切换、退出而停下）（#88 的导入）。
     Cancelled,
-    /// Waits for the person to let it go on, keeping what it has (#287: an index run out of traffic).
+    /// 保留已有的进度，等用户允许后继续（#287：索引用完了流量）。
     Paused,
 }
 #[derive(Deserialize)]

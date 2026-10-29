@@ -1,15 +1,14 @@
-//! Publication generation of the shared character index (anchors and per-character files).
+//! 共享角色索引（锚点和每个角色的文件）的发布 generation。
 //!
-//! The index job replaces several files that readers must see as one version. It counts in
-//! `index-generation` next to them: odd while files are being replaced, even when a set is complete.
-//! A reader takes the generation before and after reading and keeps the result only if both are the
-//! same even number; otherwise it reads again. A crash during publication leaves the number odd, so
-//! readers refuse until the job's journal resume completes the set. No file means generation 0.
+//! 索引任务要替换好几个文件，读取方必须把它们当作同一个版本看到。任务在这些文件旁边的 `index-generation`
+//! 里计数：替换文件期间为奇数，一组文件齐全时为偶数。读取方在读取前后各取一次 generation，只有两次是同一个
+//! 偶数时才保留结果，否则重读。发布中途崩溃会让计数停在奇数，读取方一直拒绝，直到任务按日志恢复、把这组
+//! 文件补齐。没有这个文件表示 generation 为 0。
 use crate::{Error, Result};
 use std::{path::Path, time::Duration};
 
 const FILE: &str = "index-generation";
-/// About five seconds of retries: a publication itself only renames files that are already staged.
+/// 大约 5 秒的重试：发布本身只是给已经准备好的文件改名。
 const ATTEMPTS: usize = 50;
 const PAUSE: Duration = Duration::from_millis(100);
 
@@ -28,7 +27,7 @@ fn store(shared: &Path, generation: u64) -> Result<()> {
     Ok(())
 }
 
-/// Mark a publication as started; an unfinished one (odd) is resumed under the same number.
+/// 标记一次发布开始；未完成的发布（奇数）沿用同一个编号继续。
 pub(crate) fn start(shared: &Path) -> Result<u64> {
     let generation = current(shared)?;
     if generation % 2 == 1 {
@@ -39,14 +38,14 @@ pub(crate) fn start(shared: &Path) -> Result<u64> {
     Ok(generation + 1)
 }
 
-/// Mark the publication started by `start` as complete.
+/// 把 `start` 开始的发布标记为完成。
 pub(crate) fn finish(shared: &Path, started: u64) -> Result<()> {
     store(shared, started + 1)
 }
 
-/// Read a consistent set: retried while a publication is in progress or completes during the read.
+/// 读取一组一致的文件：有发布正在进行、或在读取期间完成时重试。
 pub(crate) fn stable<T>(shared: &Path, mut read: impl FnMut() -> Result<T>) -> Result<T> {
-    // No shared index configured: nothing is published there.
+    // 没有配置共享索引：那里不会发布任何东西。
     if shared.as_os_str().is_empty() {
         return read();
     }
@@ -80,7 +79,7 @@ mod tests {
         assert_eq!(stable(&d, || Ok(1)).unwrap(), 1);
         let started = start(&d).unwrap();
         assert_eq!((started, current(&d).unwrap()), (1, 1));
-        // A crashed publication is resumed under the same number, and readers refuse until it ends.
+        // 崩溃的发布沿用同一个编号继续，读取方一直拒绝，直到它结束。
         assert_eq!(start(&d).unwrap(), 1);
         let calls = std::cell::Cell::new(0);
         let refused = stable(&d, || {
@@ -91,7 +90,7 @@ mod tests {
         assert_eq!(calls.get(), 0);
         finish(&d, started).unwrap();
         assert_eq!(current(&d).unwrap(), 2);
-        // A publication that completes during a read makes the reader read again.
+        // 读取期间完成的发布会让读取方重读。
         let reads = std::cell::Cell::new(0);
         let value = stable(&d, || {
             reads.set(reads.get() + 1);
@@ -109,7 +108,7 @@ mod tests {
     #[test]
     fn recognition_snapshot_refuses_an_unfinished_publication() {
         let d = dir();
-        // A half-replaced pair: the ids name two anchors, the vectors file is from another version.
+        // 替换了一半的一对文件：id 列出两个锚点，向量文件却来自另一个版本。
         std::fs::write(d.join("char-anchors.txt"), "a\nb\n").unwrap();
         std::fs::write(d.join("char-anchors.npy"), b"other version").unwrap();
         start(&d).unwrap();
