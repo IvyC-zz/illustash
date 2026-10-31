@@ -245,7 +245,7 @@ pub fn run(request: Request, resources: &Path, models: &Path, runtime: &Path, sh
     let mut progress = Progress::from_env(&identity.task_id, request.assets.len());
     progress.write("preparing");
     #[cfg(target_os = "windows")]
-    illustash_platform::platform_research_math::windows_backend_identity().map_err(invalid)?;
+    illustash_platform::platform_research_math::windows_backend_identity().map_err(Error::invalid)?;
     let snapshot = super::anchor_snapshot::Snapshot::load(shared, &identity.package.join("source.sqlite"))?;
     let specs = model_specs(resources, models)?;
     let tags = Tags::load(&resources.join("tags/tags_v3.csv"))?;
@@ -311,7 +311,7 @@ pub fn worker(arguments: &[String]) -> Result<()> {
     let runtime = crate::app_resources::ort_runtime(&resources);
     if arguments == ["--check"] {
         #[cfg(target_os = "windows")]
-        illustash_platform::platform_research_math::windows_backend_identity().map_err(invalid)?;
+        illustash_platform::platform_research_math::windows_backend_identity().map_err(Error::invalid)?;
         let tags = Tags::load(&resources.join("tags/tags_v3.csv"))?;
         let _ = model_specs(&resources, models)?;
         // 同时建出加速会话，这样安装后的第一次同步就能用上已编译好的 CoreML 模型。
