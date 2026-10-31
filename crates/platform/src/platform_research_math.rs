@@ -27,9 +27,9 @@ pub fn cross(a: &[f32], m: usize, b: &[f32], p: usize, dim: usize) -> Result<Vec
         return Ok(out);
     }
     #[cfg(target_os = "macos")]
+    // SAFETY: lengths, nonempty dimensions and i32 bounds were checked above;
+    // BLAS receives only caller-owned read slices and the sized writable output.
     unsafe {
-        // SAFETY: lengths, nonempty dimensions and i32 bounds were checked above;
-        // BLAS receives only caller-owned read slices and the sized writable output.
         if m == 1 && p == 1 {
             out[0] = blas::cblas_sdot(dim as i32, a.as_ptr(), 1, b.as_ptr(), 1);
         } else if dim == 1 {
@@ -146,8 +146,8 @@ pub fn dot(a: &[f32], b: &[f32]) -> Result<f32, String> {
         return Ok(0.0);
     }
     #[cfg(target_os = "macos")]
+    // SAFETY: equal checked slice lengths, unit strides, valid nonempty storage.
     unsafe {
-        // SAFETY: equal checked slice lengths, unit strides, valid nonempty storage.
         Ok(blas::cblas_sdot(a.len() as i32, a.as_ptr(), 1, b.as_ptr(), 1))
     }
     #[cfg(target_os = "windows")]
