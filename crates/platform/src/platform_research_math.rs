@@ -27,9 +27,9 @@ pub fn cross(a: &[f32], m: usize, b: &[f32], p: usize, dim: usize) -> Result<Vec
         return Ok(out);
     }
     #[cfg(target_os = "macos")]
+    // SAFETY: 上面已检查长度、各维非空和 i32 上限；
+    // BLAS 只拿到调用方持有的只读切片和大小已定的可写输出。
     unsafe {
-        // SAFETY: 上面已检查长度、各维非空和 i32 上限；
-        // BLAS 只拿到调用方持有的只读切片和大小已定的可写输出。
         if m == 1 && p == 1 {
             out[0] = blas::cblas_sdot(dim as i32, a.as_ptr(), 1, b.as_ptr(), 1);
         } else if dim == 1 {
@@ -145,8 +145,8 @@ pub fn dot(a: &[f32], b: &[f32]) -> Result<f32, String> {
         return Ok(0.0);
     }
     #[cfg(target_os = "macos")]
+    // SAFETY: 已检查两个切片等长，步长为 1，存储有效且非空。
     unsafe {
-        // SAFETY: 已检查两个切片等长，步长为 1，存储有效且非空。
         Ok(blas::cblas_sdot(a.len() as i32, a.as_ptr(), 1, b.as_ptr(), 1))
     }
     #[cfg(target_os = "windows")]
