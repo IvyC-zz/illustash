@@ -10,6 +10,11 @@
 //! Each case runs in its own directory with its own key counter (`ILLUSTASH_TEST_KEY_COUNTER`), restored at
 //! checkpoints, so the core makes the same keys as when recorded; learning stamps hash clocks and are passed on
 //! from the reply they came from (`<stamp@N>` in an input is the N-th stamp seen in this case's replies).
+//!
+//! The baseline was recorded before import began building works from tag suffixes (#296), so every replayed call runs
+//! with `ILLUSTASH_TEST_NO_IMPORT_WORKS` (`NO_IMPORT_WORKS`), which keeps the earlier import rule, and the recordings stay
+//! as they are (user decision 2026-11-12). The new rule is covered by its own tests (`character_import`, `app_create`,
+//! `app_recognition`).
 use flate2::read::GzDecoder;
 use regex::Regex;
 use rusqlite::Connection;
@@ -27,6 +32,8 @@ mod baseline;
 static STAMPS: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"learning-v1:[0-9a-f]{64}").unwrap());
 static STAMP_REF: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"<stamp@(\d+)>").unwrap());
 const COMPANIONS: [&str; 4] = ["", "-wal", "-shm", "-journal"];
+/// Test-only: the import rule from before #296 (see the module documentation).
+const NO_IMPORT_WORKS: &str = "ILLUSTASH_TEST_NO_IMPORT_WORKS";
 
 /// A case's temporary roots: `@ROOT@`, `@ROOT_1@`, … and the real directories they stand for.
 struct Roots {
@@ -204,6 +211,7 @@ impl Replay<'_> {
             .args(["migrate", "--db"])
             .arg(path)
             .env("ILLUSTASH_TEST_KEY_COUNTER", &self.counter)
+            .env(NO_IMPORT_WORKS, "1")
             .output()
             .unwrap();
         if !done.status.success() {
@@ -279,6 +287,7 @@ impl Replay<'_> {
             let mut child = Command::new(self.bin)
                 .args(&args)
                 .env("ILLUSTASH_TEST_KEY_COUNTER", &self.counter)
+                .env(NO_IMPORT_WORKS, "1")
                 .env(VERIFY_INCREMENTAL, &self.verified)
                 .stdin(Stdio::piped())
                 .stdout(Stdio::piped())
@@ -310,6 +319,7 @@ impl Replay<'_> {
                 let mut child = Command::new(bin)
                     .arg("serve")
                     .env("ILLUSTASH_TEST_KEY_COUNTER", counter)
+                    .env(NO_IMPORT_WORKS, "1")
                     .env(VERIFY_INCREMENTAL, verified)
                     .stdin(Stdio::piped())
                     .stdout(Stdio::piped())

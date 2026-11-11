@@ -27,6 +27,10 @@ FIXTURES = Path(__file__).resolve().parent / 'fixtures' / 'reference_recordings'
 _current = None  # the running test's recorder: its run-specific strings are placeholders in digests
 CLOCK = re.compile(r'\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:\d{2})?')
 CLOCK_BYTES = re.compile(CLOCK.pattern.encode())
+# 这些期望都录在导入按 tag 后缀建作品（#296）之前：加载本模块的测试及其启动的原生进程照旧规则导入，录下的期望
+# 不改（用户 2026-11-12 定，与 native/terms/tests/baseline.rs 相同）。只供测试，产品从不设置；新规则由 #296 新加的
+# Rust 测试覆盖。
+os.environ['ILLUSTASH_TEST_NO_IMPORT_WORKS'] = '1'
 
 
 def fixed_values(name):

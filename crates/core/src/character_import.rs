@@ -103,6 +103,13 @@ pub fn not_work(text: &str) -> bool {
         || crate::names_view::skin_zh(text).is_some()
 }
 
+/// 只供测试：设置 `ILLUSTASH_TEST_NO_IMPORT_WORKS` 时，导入照 #296 之前的规则走：不新建作品，WD 结果建的角色不取
+/// tag 后缀当作品文字。对照基准（native/terms/tests/baseline.rs 与 tests/fixed_expectations.py，#201）录在 #296
+/// 之前，重放时设上它，录下的期望不改（用户 2026-11-12 定）；导入建作品由 #296 新加的测试覆盖。产品从不设置它。
+fn import_builds_works() -> bool {
+    std::env::var_os("ILLUSTASH_TEST_NO_IMPORT_WORKS").is_none()
+}
+
 /// 新角色的所属作品：按作品文字找 `qualifier` 链接；找不到、文字又不在「不是作品」的清单里，就照第 25 版迁移的写法
 /// 新建一个待核对的作品（英文可读名、按文字键已有的作品名与别名、`qualifier` 链接），同一个文字在新旧图库都是
 /// 同一个作品。
@@ -113,7 +120,7 @@ fn work_of(c: &Connection, ids: &Ids, work: &str) -> Result<Option<String>> {
     if let Some(found) = linked(c, "qualifier", work)? {
         return Ok(Some(found));
     }
-    if not_work(work) {
+    if not_work(work) || !import_builds_works() {
         return Ok(None);
     }
     let ident = ids.get("qualifier", work)?;
@@ -316,7 +323,10 @@ fn candidate(c: &Connection, ids: &Ids, row: &Value, chars: &Chars, wd: &Wd) -> 
                 None => match linked(c, "danbooru", value)? {
                     Some(i) => i,
                     // WD 结果没有索引给的作品文字：取 tag 末尾括号里的后缀（与索引取 `copyright` 的办法相同）。
-                    None => entity(c, ids, "wd", value, value, crate::character_profile::qualifier(value))?,
+                    None => {
+                        let work = if import_builds_works() { crate::character_profile::qualifier(value) } else { "" };
+                        entity(c, ids, "wd", value, value, work)?
+                    }
                 },
             },
         }
