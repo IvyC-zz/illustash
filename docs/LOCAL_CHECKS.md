@@ -156,3 +156,39 @@ PR 应明确区分“当前 head 上完整执行退出 0”和“当前候选仅
 - 验收结果按平台写在 Issue 或 PR 里，注明这是虚拟机，以及构建的提交和安装包的哈希。
 
 **做不了的**：iCloud 照片（虚拟机没登录 Apple 账户）；性能和识别速度（虚拟机里的数字没有参考价值）；Windows（Apple 芯片上只能跑 ARM 版 Windows，和用户的 x64 环境不同，Windows 仍在 x64 验收机上做）。
+
+## Windows 验收（常驻检出）
+
+2026-11-12 起（#240），Windows 验收机上的定向检查和完整 Windows 检查都在同一个常驻检出里增量编译，不再每次新建目录冷编译、跑完删掉。验收机经本机的 SSH 别名访问，主机名、IP 和 SSH 配置不写进仓库。
+
+**布局**：验收机上的 `D:\illustash-build\persistent\`。`src` 是 git 检出（本地分支 `win-acceptance`）；`sccache` 是编译缓存；`runs\<run-id>\` 放每次的步骤日志、`status.txt` 和 sccache 统计；`tools\` 放入口脚本（`run.cmd`、`run.ps1`、`pyrun.py`、`clean.ps1`）和 sccache。入口脚本和本机这一侧的驱动脚本 `win_run.sh` 都不进仓库，因为里面有 SSH 别名。
+
+**一次运行**：
+- 仓库是私有的，验收机没有 GitHub 凭据。本机打一个以验收机当前 HEAD 为基的增量 git bundle，经 scp 送过去。验收机 `git fetch` 以后 checkout 到 `win-acceptance`，再 `git clean -ffdx`，只保留 5 个 Cargo 项目的 `target`。各项目用仓库内默认的 target，不设 `CARGO_TARGET_DIR`。不用 detached HEAD，原因见 #327。
+- 环境只在 `run.cmd` 里设置：vcvars、`RUSTC_WRAPPER`（sccache）、`ILLUSTASH_*`。不改验收机的全局配置。`.cargo/config.toml` 的 crt-static 照常生效。
+- 完整检查的 14 步：core、platform、terms、desktop 的 clippy，core、platform、desktop、terms、iqdb 的 test，js，terms、examples、iqdb 的 release 构建，Python 全套。也可以只跑其中几步，或者另加定向 unittest。
+- 长任务经 WMI 启动，SSH 断开或本机休眠都不会中断。本机用 `collab_run.py run --slot windows -- win_run.sh …` 包住，轮询 `status.txt`，直到出现 `done`。
+
+**清理规则**（2026-11-12 定）：入口脚本每次同步之后检查下面三条，命中任一条就清掉 5 个项目的 target（检出保留）：
+
+- `rustc -V` 和上次记录的不同；
+- 所有 target 合计超过 40 GB（一次完整构建约 14.5 GB）；
+- D 盘剩余空间低于 30 GB。
+
+Cargo.lock 变了不清，交给增量编译处理。sccache 上限 20 GB，超了自动淘汰最旧的。手动全清（target 和 sccache 缓存）在验收机上运行 `powershell -NoProfile -ExecutionPolicy Bypass -File D:\illustash-build\persistent\tools\clean.ps1`，加 `-TargetsOnly` 时只清 target。需要隔离的特殊验收（打包、安装）仍可以临时建一个一次性目录，用完删掉。
+
+**耗时**（2026-11-12，head `687bb63`，完整 14 步，`CARGO_BUILD_JOBS=4`，单次）：
+
+| 情况 | 墙钟 |
+|---|---|
+| 冷编译（target、sccache 都是空的） | 15 分 46 秒 |
+| 同一 head 重跑 | 5 分 59 秒 |
+| 换到改了 native/terms 一处的 head | 7 分 34 秒 |
+| target 被清掉、sccache 是热的（命中 89%） | 10 分 18 秒 |
+
+重跑的下限主要是测试执行：terms 测试约 2 分 10 秒，Python 全套约 2 分 20 秒。#327 修好之前，普通检出里每次 cargo 调用都会重编 terms，重跑和小改动各因此多约 1 分钟。各步的详细数字见 #240。
+
+**注意**：
+- cmd 和 Windows PowerShell 5.1 按系统代码页（GBK）读没有 BOM 的脚本，UTF-8 中文注释可能吞掉换行：`.cmd` 只写 ASCII，`.ps1` 要带 UTF-8 BOM。
+- PowerShell 变量名不分大小写，循环变量会覆盖同名的大写变量。WMI 启动的进程，工作目录在系统目录下，脚本里一律用绝对路径。
+- 回传的输出里有 GBK 字节，用 `grep -a` 判断。验收机没装 rustfmt，fmt 在本机跑。
