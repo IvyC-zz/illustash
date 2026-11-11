@@ -15,7 +15,7 @@
 
  "crates/core/src/character_identity.rs":"ee2a0b886abfacadf37fc7911baab014f1111a8c14a29dbc71c55aeaf1075020",
 
- "crates/core/src/character_import.rs":"4615e94644656f792c9750bbb528f31f3e46ca3002343093caf359870b5d2eb8",
+ "crates/core/src/character_import.rs":"0dba0ee9b11674c090c51a10b839da779e7bee15ad637739d4b2ad353ef7912e",
 
  "crates/core/src/character_json.rs":"abc9016d18a2234e35c93398fedbd2ea2dc4b4d796e24139d3fe8e9436d0c1cd",
 
@@ -165,7 +165,7 @@
 
  "native/terms/src/app_commands.rs":"e198ab866b1babe5ec1ee27a4eecf156aff1ed475f3decf549f05625204aaa5a",
 
- "native/terms/src/app_create.rs":"533af856370d74969b441f9f810e0e3563226c13c3922aa666b2ae04f07ba046",
+ "native/terms/src/app_create.rs":"28df31087eb00e7b4901f9018730677ce3b7d0657bac8030ada08f38ce89f3ff",
 
  "native/terms/src/app_create_names.sql":"29fb8b712603ad5bfd49a20b82162ead37a45e781f949d5e1c9678bd42fa8f7f",
 
@@ -532,7 +532,7 @@
  "crates/core/src/character_sql/tag_memberships.sql":{"database-write":["INSERT INTO:tag_memberships"]},
  "crates/core/src/names_commands.rs":{"database-write":{"INSERT OR IGNORE INTO:term_key_names":1,"dynamic-or-wrapper":8,"DELETE FROM:term_names":4,"DELETE FROM:term_key_names":1,"DELETE FROM:term_key_aliases":1,"INSERT INTO:term_key_aliases":1}},
  "native/terms/src/app_profiles.rs":{"http-branch":[[23,8],[16,5],[17,7],[44,3],[83,3],[242,4],[98,3]],"database-write":[[3,3],0]},
- "crates/core/src/character_import.rs":{"database-write":{"INSERT OR IGNORE INTO:term_links":1,"dynamic-or-wrapper":14,"UPDATE:term_tree":3,"UPDATE:terms":1,"INSERT INTO:term_batches":1,"INSERT OR IGNORE INTO:assertions":1,"INSERT INTO:imported":1,"DELETE FROM:auto_rules":1,"INSERT OR IGNORE INTO:auto_rules":4,"INSERT INTO:excluded":1,"DELETE FROM:excluded":1,"DELETE FROM:touched":1,"INSERT OR IGNORE INTO:touched":1,"INSERT INTO:assets":1,"DELETE FROM:duplicates":1,"INSERT INTO:duplicates":1,"INSERT OR REPLACE INTO:meta":2,"DELETE FROM:assets":1,"DELETE FROM:candidates":1,"REINDEX":3,"INSERT OR REPLACE INTO:sync_added":1}},
+ "crates/core/src/character_import.rs":{"database-write":{"INSERT OR IGNORE INTO:term_links":1,"dynamic-or-wrapper":15,"UPDATE:term_tree":3,"UPDATE:terms":1,"INSERT INTO:term_batches":1,"INSERT OR IGNORE INTO:assertions":1,"INSERT INTO:imported":1,"DELETE FROM:auto_rules":1,"INSERT OR IGNORE INTO:auto_rules":4,"INSERT INTO:excluded":1,"DELETE FROM:excluded":1,"DELETE FROM:touched":1,"INSERT OR IGNORE INTO:touched":1,"INSERT INTO:assets":1,"DELETE FROM:duplicates":1,"INSERT INTO:duplicates":1,"INSERT OR REPLACE INTO:meta":2,"DELETE FROM:assets":1,"DELETE FROM:candidates":1,"REINDEX":3,"INSERT OR REPLACE INTO:sync_added":1}},
  "native/terms/src/http_host_post.rs":{"http-branch":[264,265,266,267,[41,2],268,247,231,74,88,24,23,16,17,44,83,242,98,80,79,76,269,100,37,95,40,42,[230,2],39,270,43,271,[26,2],272,273,276,277,278,281,292,293,295,[282,2],[275,2],[280,2],[279,2],[274,2],[294,2],296,[303,2],305]},
  "native/terms/src/app_provenance.rs":{"database-write":{"INSERT OR IGNORE INTO:pending_runs":3,"UPDATE:runs":3,"INSERT OR IGNORE INTO:native_meta":2,"dynamic-or-wrapper":4,"UPDATE:native_meta":1,"COMMIT":2,"INSERT INTO:runs":1,"DELETE FROM:pending_runs":1,"ATTACH":2,"PRAGMA:c.execute_batch(\"pragma defer_foreign_keys":1,"INSERT INTO:leads|UPDATE:set":1,"INSERT INTO:native_delivery":1},"entrypoint":{"process-start":1}},
  "crates/core/src/character_sql/evidence_default.sql":{"database-write":[196]},

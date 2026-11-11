@@ -73,16 +73,78 @@ fn link(c: &Connection, entity: &str, system: &str, key: &str) -> Result<()> {
     Ok(())
 }
 
-/// `Store._entity`：链接到 (system, key) 的身份；没有就新建一个带这个链接的人物。
+/// 不是作品的作品文字（#296）：索引把角色 tag 最后一个括号当作品文字，括号里也可能是服装、形态或人物类别。
+const NOT_WORKS: [&str; 17] = [
+    "vtuber",
+    "youtuber",
+    "streamer",
+    "voice_actor",
+    "seiyuu",
+    "real_life",
+    "person",
+    "artist",
+    "cosplayer",
+    "cosplay",
+    "mascot",
+    "original",
+    "character",
+    "male",
+    "female",
+    "costume",
+    "outfit",
+];
+
+/// 导入时不为它建作品的作品文字：人物类别（`NOT_WORKS`）、服装（`1st_costume`、`…_outfit`）、皮肤词表能整段翻译的
+/// 形态（`swimsuit`、`new_year` 等）。只看本地清单，不联网（docs/DATA_MODEL.md 第 5 节「导入」第 2 条）。
+pub fn not_work(text: &str) -> bool {
+    NOT_WORKS.contains(&text)
+        || text.ends_with("_costume")
+        || text.ends_with("_outfit")
+        || crate::names_view::skin_zh(text).is_some()
+}
+
+/// 新角色的所属作品：按作品文字找 `qualifier` 链接；找不到、文字又不在「不是作品」的清单里，就照第 25 版迁移的写法
+/// 新建一个待核对的作品（英文可读名、按文字键已有的作品名与别名、`qualifier` 链接），同一个文字在新旧图库都是
+/// 同一个作品。
+fn work_of(c: &Connection, ids: &Ids, work: &str) -> Result<Option<String>> {
+    if work.is_empty() {
+        return Ok(None);
+    }
+    if let Some(found) = linked(c, "qualifier", work)? {
+        return Ok(Some(found));
+    }
+    if not_work(work) {
+        return Ok(None);
+    }
+    let ident = ids.get("qualifier", work)?;
+    character_entities::create(c, &New { id: &ident, kind: "work", ..New::default() }, legacy_characters::ORIGIN)?;
+    link(c, &ident, "qualifier", work)?;
+    character_names::put_name(c, &ident, "en", "index", &crate::names_view::readable(work, false), "display", 0, 0)?;
+    let shown: Vec<(String, String, String)> = c
+        .prepare_cached("SELECT lang, source, value FROM term_key_names WHERE kind = 'work' AND key = ?")?
+        .query_map([work], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
+        .collect::<rusqlite::Result<_>>()?;
+    for (lang, source, value) in shown {
+        character_names::put_name(c, &ident, &lang, &source, &value, "display", 0, 0)?;
+    }
+    let aliases: Vec<(String, i64)> = c
+        .prepare_cached("SELECT value, position FROM term_key_aliases WHERE kind = 'work' AND key = ?")?
+        .query_map([work], |r| Ok((r.get(0)?, r.get(1)?)))?
+        .collect::<rusqlite::Result<_>>()?;
+    for (value, position) in aliases {
+        character_names::put_name(c, &ident, "", "danbooru", &value, "alias", position, 0)?;
+    }
+    c.prepare_cached(crate::character_review::OPEN)?.execute(params![ident, "pending", "", 0])?;
+    Ok(Some(ident))
+}
+
+/// `Store._entity`：链接到 (system, key) 的身份；没有就新建一个带这个链接的人物，作品按 `work_of`。
 fn entity(c: &Connection, ids: &Ids, system: &str, key: &str, name: &str, work: &str) -> Result<String> {
     if let Some(found) = linked(c, system, key)? {
         return Ok(found);
     }
     let ident = ids.get(system, key)?;
-    let work_id: Option<String> = c
-        .prepare_cached(&format!("SELECT l.entity_id FROM {LINKS} l WHERE l.core_system = 'qualifier' AND l.key = ?"))?
-        .query_row([work], |r| r.get(0))
-        .optional()?;
+    let work_id = work_of(c, ids, work)?;
     let new = New { id: &ident, kind: "character", work, work_id: work_id.as_deref(), ..New::default() };
     character_entities::create(c, &new, legacy_characters::ORIGIN)?;
     link(c, &ident, system, key)?;
@@ -253,7 +315,8 @@ fn candidate(c: &Connection, ids: &Ids, row: &Value, chars: &Chars, wd: &Wd) -> 
                 Some(i) => i,
                 None => match linked(c, "danbooru", value)? {
                     Some(i) => i,
-                    None => entity(c, ids, "wd", value, value, "")?,
+                    // WD 结果没有索引给的作品文字：取 tag 末尾括号里的后缀（与索引取 `copyright` 的办法相同）。
+                    None => entity(c, ids, "wd", value, value, crate::character_profile::qualifier(value))?,
                 },
             },
         }
@@ -591,6 +654,17 @@ pub fn legacy_hierarchy(c: &Connection, index: &Value) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn not_work_covers_costumes_forms_and_person_kinds_only() {
+        for text in ["vtuber", "1st_costume", "2nd_outfit", "alternate_costume", "swimsuit", "new_year", "bunny_maid"] {
+            assert!(not_work(text), "{text}");
+        }
+        for text in ["fate", "blue_archive", "kancolle", "honkai:_star_rail", "idolmaster", "Example", "swimsuit_anime"]
+        {
+            assert!(!not_work(text), "{text}");
+        }
+    }
 
     #[test]
     fn set_membership_keeps_exists_null_and_absence_semantics() {
