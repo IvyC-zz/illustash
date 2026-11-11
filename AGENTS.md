@@ -70,6 +70,10 @@ Claude Code 通过 `CLAUDE.md` 引入本文件，Codex 等直接读本文件。�
 - 暂不接受外部代码贡献；开始接受前先引入贡献者协议（CLA），保留双重授权的余地。
 - 2026-10-06 开源之前的 `#N`、`PR #N` 和短提交哈希指向开源前的私有历史（归档为 `shio-vinyl/illustash-archive`），本库查不到；新写的引用用本库编号。
 
+### 前端结构约定
+
+2026-11-12（#320，总跟踪 #316）：`web/static` 的结构约定由 `tools/check_frontend.py` 机械检查，已接进 `tools/check_all.sh` 和 `ci.yml`，规则写在脚本开头：`core/` 不得导入 `ui/`；`ui/` 不得新增循环导入；`state` 上的字段必须在 `core/state.js` 声明；不得新增 `document`/`window` 级的 `keydown`/`click` 监听和运行时 `createElement('dialog')`；一行不超过 200 字符。存量冻结在 `tools/frontend_baseline.json`（按文件和内容特征登记，不按行号），**基线只能缩小**：违规要改代码，不能往基线里加；改好一处后运行 `python tools/check_frontend.py --shrink` 删掉对应项，评审和集成会话用 `--base-ref main` 确认基线没变大。报错会写明违反了哪条约定、怎么改；方案在 [WEB_V2.md](docs/WEB_V2.md#前端模块2026-10-18199)。
+
 ## 文档维护规范
 
 2026-09-30 做过一次精简（48 篇约 9,900 行 → 26 篇约 4,800 行），删掉的原文在开源前的私有历史中。以下规则是为了不再长回去。
