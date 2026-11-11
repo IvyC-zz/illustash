@@ -14,7 +14,7 @@ pub fn local_timestamp(tm: &mut libc::tm) -> libc::time_t {
     }
 }
 
-/// The host calendar `delta` seconds before now.
+/// 「现在」往前 `delta` 秒时的本机日历时间。
 pub fn local_date(delta: i64) -> libc::tm {
     unsafe {
         let t = now() - delta;
@@ -34,6 +34,7 @@ fn now() -> libc::time_t {
     std::env::var("ILLUSTASH_TEST_TODAY")
         .ok()
         .and_then(|day| test_today(&day))
+        // SAFETY: time 的出参为空指针，只返回当前时间。
         .unwrap_or_else(|| unsafe { libc::time(std::ptr::null_mut()) })
 }
 
@@ -44,6 +45,7 @@ fn test_today(day: &str) -> Option<libc::time_t> {
     if parts.next().is_some() {
         return None;
     }
+    // SAFETY: libc::tm 只含整数（Unix 上另有可为空的时区名指针），全零是合法值。
     let mut tm: libc::tm = unsafe { std::mem::zeroed() };
     tm.tm_year = y - 1900;
     tm.tm_mon = m - 1;
@@ -51,7 +53,7 @@ fn test_today(day: &str) -> Option<libc::time_t> {
     tm.tm_hour = 12;
     tm.tm_isdst = -1;
     let stamp = local_timestamp(&mut tm);
-    // A normalized date (2026-02-30 → 03-02) is not the day asked for.
+    // 被规范化的日期（2026-02-30 → 03-02）不是要的那一天。
     (stamp != -1 && (tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday) == (y, m, d)).then_some(stamp)
 }
 
@@ -61,17 +63,21 @@ mod tests {
     #[test]
     fn test_today_is_local_noon_of_a_valid_day() {
         let stamp = test_today("2026-10-07").unwrap();
+        // SAFETY: libc::tm 只含整数（Unix 上另有可为空的时区名指针），全零是合法值。
         let mut out: libc::tm = unsafe { std::mem::zeroed() };
         #[cfg(unix)]
+        // SAFETY: `stamp`、`out` 是本地变量。
         unsafe {
             libc::localtime_r(&stamp, &mut out);
         }
         #[cfg(windows)]
+        // SAFETY: `stamp`、`out` 是本地变量。
         unsafe {
             libc::localtime_s(&mut out, &stamp);
         }
         assert_eq!((out.tm_year + 1900, out.tm_mon + 1, out.tm_mday, out.tm_hour), (2026, 10, 7, 12));
         let before = test_today("2026-10-07").unwrap() - 30 * 86400;
+        // SAFETY: `before`、`out` 是本地变量。
         unsafe {
             #[cfg(unix)]
             libc::localtime_r(&before, &mut out);
