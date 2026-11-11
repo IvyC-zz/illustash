@@ -58,6 +58,7 @@ Claude Code 通过 `CLAUDE.md` 引入本文件，Codex 等直接读本文件。�
 - 2026-10-19 用户定（#240）：开发会话的编译和定向测试（`cargo build/test/clippy/check`、`python -m unittest`）默认经 `collab_run.py bg -- <命令>` 以后台优先级运行，把性能核留给全量和计时；全量、计时和单独的 release 构建本身不降级。全量在跑时这些命令会慢很多，甚至几乎停住，这是预期的。经 SSH 在 Windows 机上跑的不受此限。重型、计时和后台三类命令由钩子按本机配置拦截，没按规定运行时照提示改写即可。做法、拦截范围和运行历史见[本地验收](docs/LOCAL_CHECKS.md#本机资源排队计时与后台优先级)。
 - 读不到 GitHub 的代理（禁网沙箱）：由 Lead 把 Issue 正文贴给它，它的进度和结果由 Lead 代写进 PR。
 - 合并到 main、推送标签、关闭别人开的 Issue 由用户决定或明确授权。
+- 2026-11-12 用户定（#316、#318）：写或改 `web/static` 界面前先看样式清单 `tools/styleguide/index.html`（浏览器直接打开，或在仓库根运行 `python3 -m http.server` 后打开 `/tools/styleguide/`）：复用里面现成的变体和类名，不新造类名和新数值；没有合适的，先在 Issue 里问。这页只在开发时用，不进发布包；改了 `app.css` 后重跑 `python3 tools/styleguide/census.py` 更新令牌统计。
 - 每个会话都必须知道的约束写在本文件，不写在 Issue 里：Issue 不会自动进上下文。
 
 ### 公开库规则
