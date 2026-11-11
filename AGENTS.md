@@ -78,6 +78,17 @@ Claude Code 通过 `CLAUDE.md` 引入本文件，Codex 等直接读本文件。�
 - Rust 的 lint 约定写在各 Cargo 项目 `Cargo.toml` 的 `[lints]` 和仓库根目录的 `clippy.toml`，由 clippy 检查：每个 unsafe 块和 `unsafe impl` 都写 `// SAFETY:`；生产代码不用 `unwrap`，确实不会失败的地方用 `expect` 写明理由；`tests/` 下的集成测试 crate 在开头写 `allow`。新建 Cargo 项目时照抄这一段 `[lints]`。
 - 构造 `Error::Invalid` 用 `illustash_core::error` 里的 `invalid(…)`（返回 `Result`）或 `Error::invalid(…)`（返回 `Error`），不在各文件另写同样的辅助函数。带固定文案的辅助函数（如 `app_research.rs` 的 `bad()`）不在此列。
 
+### Rust 写法
+
+2026-11-12 用户定：多个代理分头写过，每个文件内部一致、文件之间不一致。以 [Google Rust Style Guide](https://google.github.io/styleguide/rustguide.html) 为参考，不逐条强制。
+
+- **工具优先**：能让工具检查的写成 lint、rustfmt 或测试，不只写成文字。本节每条约定要么有对应检查，要么注明「未检查」；lint 已覆盖的条目从本节删掉，不在两处各写一份。review 里同一种偏差出现第二次，先问能不能用 lint 抓，抓不了再补一行约定。
+- **格式**：各 Cargo 项目用同一份 `rustfmt.toml`（`max_width = 120`、`use_small_heuristics = "Max"`），新建项目照抄 `crates/core/rustfmt.toml`，并把 `cargo fmt --check` 加进 `tools/check_all.sh` 和 `ci.yml`。desktop 尚未纳入，见 #314。
+- **照手册办**（未检查，除 `ptr_arg` 外）：参数接受 `&str`、`&[T]`、`Option<&T>`，不接受 `&String`、`&Vec<T>`、`&Option<T>`（clippy 的 `ptr_arg` 默认检查）；能用模式匹配或 `let … else` 就不先判断再 `unwrap`；`collect` 优先写变量类型，少用 turbofish；公开 API 写文档，会 panic 的条件和 unsafe 的前提写进文档注释。
+- **不采用手册的条目**：`use` 里允许嵌套路径（`use a::{b, c::d}`）；行宽用 120，不是 100；Chromium、Fuchsia 专属的条目（不用 async、不起线程、平铺文件、专用测试框架）不适用；「少用 `Rc`/`Arc`」不强制，任务层的 `Arc<Mutex<_>>` 按需使用。
+- **尚未决定**：中毒锁怎么处理、platform 和 desktop 的 `Result<_, String>` 是否收敛到 core 的 `Error`、公开函数的文档覆盖要不要强制。三项见 #314，定下来后写进本节并删掉这一条。
+- **存量不批量改**：多个会话并行改同一批文件，全仓改写纯风格分歧会造成大量冲突，也会动迁移清单指纹。改到哪个文件，顺手统一那个文件的写法；新写的代码照本节办理。
+
 ## 文档维护规范
 
 2026-09-30 做过一次精简（48 篇约 9,900 行 → 26 篇约 4,800 行），删掉的原文在开源前的私有历史中。以下规则是为了不再长回去。
