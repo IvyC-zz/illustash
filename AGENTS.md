@@ -83,7 +83,7 @@ Claude Code 通过 `CLAUDE.md` 引入本文件，Codex 等直接读本文件。�
 2026-11-12 用户定：多个代理分头写过，每个文件内部一致、文件之间不一致。以 [Google Rust Style Guide](https://google.github.io/styleguide/rustguide.html) 为参考，不逐条强制。
 
 - **工具优先**：能让工具检查的写成 lint、rustfmt 或测试，不只写成文字。本节每条约定要么有对应检查，要么注明「未检查」；lint 已覆盖的条目从本节删掉，不在两处各写一份。review 里同一种偏差出现第二次，先问能不能用 lint 抓，抓不了再补一行约定。
-- **格式**：各 Cargo 项目用同一份 `rustfmt.toml`（`max_width = 120`、`use_small_heuristics = "Max"`），新建项目照抄 `crates/core/rustfmt.toml`，并把 `cargo fmt --check` 加进 `tools/check_all.sh` 和 `ci.yml`。desktop 尚未纳入，见 #314。
+- **格式**：各 Cargo 项目用同一份 `rustfmt.toml`（`max_width = 120`、`use_small_heuristics = "Max"`），新建项目照抄 `crates/core/rustfmt.toml`，并把 `cargo fmt --check` 加进 `tools/check_all.sh` 和 `ci.yml`。
 - **照手册办**（未检查，除 `ptr_arg` 外）：参数接受 `&str`、`&[T]`、`Option<&T>`，不接受 `&String`、`&Vec<T>`、`&Option<T>`（clippy 的 `ptr_arg` 默认检查）；能用模式匹配或 `let … else` 就不先判断再 `unwrap`；`collect` 优先写变量类型，少用 turbofish；公开 API 写文档，会 panic 的条件和 unsafe 的前提写进文档注释。
 - **不采用手册的条目**：`use` 里允许嵌套路径（`use a::{b, c::d}`）；行宽用 120，不是 100；Chromium、Fuchsia 专属的条目（不用 async、不起线程、平铺文件、专用测试框架）不适用；「少用 `Rc`/`Arc`」不强制，任务层的 `Arc<Mutex<_>>` 按需使用。
 - **中毒锁**（未检查）：2026-11-12 用户委托代理决定（#314）。默认遇到中毒就 panic，用 `expect` 写明是哪把锁。例外：取消、截止时间、信封边界这类收尾路径（`app_tasks.rs`、`app_imports.rs`）要在 worker panic 之后仍能执行，允许无视中毒；这类取锁统一走一个辅助函数，不在调用处各写 `unwrap_or_else(into_inner)`。

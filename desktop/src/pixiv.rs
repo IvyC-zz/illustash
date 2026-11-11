@@ -176,7 +176,8 @@ pub fn fetch(app: &AppHandle, path: &str) -> Result<Value, String> {
         id = serde_json::to_string(&id).expect("strings always serialize")
     );
     let sent = win.eval(&js).map_err(|e| e.to_string());
-    let reply = sent.and_then(|_| rx.recv_timeout(REPLY_TIMEOUT).map_err(|_| crate::i18n::tr("Pixiv 窗口没有返回结果")));
+    let reply =
+        sent.and_then(|_| rx.recv_timeout(REPLY_TIMEOUT).map_err(|_| crate::i18n::tr("Pixiv 窗口没有返回结果")));
     state.pending.lock().expect("lock poisoned by an earlier panic").remove(&id);
     reply
 }
