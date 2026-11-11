@@ -26,7 +26,7 @@ import time
 import unittest
 from unittest.mock import patch
 
-from tests.fixed_expectations import Library, Expectations, TERMS_VERSION, unclocked
+from tests.fixed_expectations import Library, Expectations, RECORDED_TODAY, TERMS_VERSION, unclocked
 from tests.synthetic_source import source_fixture as fixture, synthetic_reference
 from tests.test_read_http import INTERRUPT, SPAWN, free_port, wait_until
 from tools import verify_read_http
@@ -160,7 +160,7 @@ class NativeLifecycleTest(unittest.TestCase):
                     'ILLUSTASH_SHARED': str(self.shared), 'ILLUSTASH_PYTHON_SENTINEL': str(self.sentinel),
                     'ILLUSTASH_TERMS_BIN': str(self.binary),
                     # Reproducible native keys, so recorded expectations hold (store::new_key test hook).
-                    'ILLUSTASH_TEST_KEY_COUNTER': str(self.root / 'key-counter')}
+                    'ILLUSTASH_TEST_KEY_COUNTER': str(self.root / 'key-counter'), **RECORDED_TODAY}
         if self._testMethodName.startswith('test_native_library_new'):
             self.new_reference = synthetic_reference(self.shared)
             self.new_folder = self.root / 'downloads-Pixiv'; self.new_folder.mkdir()
