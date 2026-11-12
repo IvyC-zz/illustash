@@ -148,7 +148,7 @@ impl RecognitionManifest {
     /// 同一资产的新内容也不能替换本次请求声明的输入版本。
     pub(crate) fn check_inputs(&self, expected: &std::collections::HashMap<String, String>) -> Result<()> {
         if self.inputs.len() != self.assets.len()
-            || self.assets.iter().any(|id| !expected.get(id).is_some_and(|hash| self.inputs.get(id) == Some(hash)))
+            || self.assets.iter().any(|id| expected.get(id).is_none_or(|hash| self.inputs.get(id) != Some(hash)))
         {
             return Err(Error::Conflict("识别结果的输入版本与本次请求不匹配".into()));
         }
