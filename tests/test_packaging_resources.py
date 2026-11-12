@@ -423,9 +423,12 @@ class CandidateExampleWiringTest(unittest.TestCase):
                 self.assertLess(build_at, export_at)
                 self.assertLess(export_at, discover_at)
                 self.assertIn('native/terms/target/release/examples/' + example, source)
-        self.assertIn("'refs/heads/main'", ci)
-        self.assertNotIn('\n  push:', ci)
-        self.assertNotIn('\n  pull_request:', ci)
+        # #4：只对目标为 main 的同库 PR 自动运行，不用带写权限和 secret 的 pull_request_target。
+        self.assertIn('\n  pull_request:\n    branches: [main]\n', ci)
+        self.assertNotIn('pull_request_target', ci)
+        self.assertIn('github.event.pull_request.head.repo.full_name == github.repository', ci)
+        self.assertIn('\npermissions:\n  contents: read\n', ci)
+        self.assertNotIn('secrets.', ci)
 
 
     def test_full_runners_accept_research_platform_skips_but_not_missing_candidates_or_models(self):
