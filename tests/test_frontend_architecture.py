@@ -128,6 +128,18 @@ class FrontendArchitectureTest(unittest.TestCase):
                 tree.append('ui/artists.js', f"\ndocument.addEventListener('{event}', e => {{}});\n")
                 self.assertViolation(tree, 'document-listener', f'ui/artists.js::{event}')
 
+    def test_the_overlay_manager_is_the_one_allowed_entry(self):
+        # 用户 2026-11-12 在 #343 批准：ui/overlay.js 是全局 keydown / click 监听的唯一入口，别的文件照旧报错。
+        with Tree() as tree:
+            overlay = (tree.root / STATIC / 'ui/overlay.js').read_text(encoding='utf-8')
+            self.assertIn("document.addEventListener('keydown'", overlay)
+            self.assertIn("document.addEventListener('click'", overlay)
+            tree.append('ui/overlay.js', "\ndocument.addEventListener('click', e => {});\nwindow.addEventListener('keydown', e => {});\n")
+            self.assertEqual([e for e in tree.errors() if 'document-listener' in e], [])
+        with Tree() as tree:
+            tree.append('ui/dialog.js', "\ndocument.addEventListener('keydown', e => {});\n")
+            self.assertViolation(tree, 'document-listener', 'ui/dialog.js::keydown')
+
     def test_extra_listener_in_a_file_that_already_has_some(self):
         with Tree() as tree:
             tree.append('ui/settings.js', "\ndocument.addEventListener('click', async e => {});\n")
@@ -180,27 +192,27 @@ class FrontendArchitectureTest(unittest.TestCase):
 
     def test_fixed_violation_is_reported_as_stale_not_failure(self):
         with Tree() as tree:
-            path = tree.root / STATIC / 'ui/palette.js'
+            path = tree.root / STATIC / 'ui/dialog.js'
             path.write_text(path.read_text(encoding='utf-8').replace("document.createElement('dialog')", "document.createElement('div')"),
                             encoding='utf-8')
             errors, stale = check(tree.root)
             self.assertEqual(errors, [])
-            self.assertTrue(any('dialog-element' in line and 'ui/palette.js' in line for line in stale))
+            self.assertTrue(any('dialog-element' in line and 'ui/dialog.js' in line for line in stale))
             code, output = tree.run_main('--strict-stale')
             self.assertEqual(code, 1)
             self.assertIn('--shrink', output)
 
     def test_shrink_lowers_but_never_adds(self):
         with Tree() as tree:
-            palette = tree.root / STATIC / 'ui/palette.js'
-            palette.write_text(palette.read_text(encoding='utf-8').replace("document.createElement('dialog')", "document.createElement('div')"),
+            dialog = tree.root / STATIC / 'ui/dialog.js'
+            dialog.write_text(dialog.read_text(encoding='utf-8').replace("document.createElement('dialog')", "document.createElement('div')"),
                                encoding='utf-8')
             tree.append('ui/home.js', "\nconst d = document.createElement('dialog');\n")  # a new violation
             before = tree.baseline()
             code, _ = tree.run_main('--shrink')
             after = tree.baseline()
             self.assertEqual(code, 1, 'the new violation still fails after shrinking')
-            self.assertNotIn('ui/palette.js', after['dialog-element'])
+            self.assertNotIn('ui/dialog.js', after['dialog-element'])
             self.assertNotIn('ui/home.js', after['dialog-element'])
             self.assertEqual(baseline_growth(after, before), [])
 
