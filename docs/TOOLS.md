@@ -11,6 +11,7 @@
 | `check_all.sh`、`local_acceptance.py` | 本地全量检查与固定路径验收，见 [LOCAL_CHECKS.md](LOCAL_CHECKS.md) |
 | `check_architecture.py` | crate 依赖方向检查 |
 | `check_frontend.py` | 前端结构检查：`web/static` 的依赖方向、state 声明、全局监听、对话框、超长行；基线 `frontend_baseline.json` 只能缩小（#320） |
+| `check_styleguide.py` | 样式清单页（`styleguide/`，只在开发时用、不进发布包，迁移清点不算生产代码）与实现的同步检查：`census.js` 要等于 `styleguide/census.py` 对当前 `app.css` 的输出，样例和条目标题用到的类要在 `app.css` 里有样式（#352） |
 | `migration_inventory.py` | 生产迁移边界清点，规格在 `tests/migration_inventory.json` |
 | `gen_casefold.py`、`gen_http_unicode.py` | 生成 `crates/core` 的 casefold 与 Unicode 表 |
 | `test_native_contracts.sh`、`bench_native_contracts.sh` | 空 PATH 重放固定契约；契约基准，见 [TERMS_PERFORMANCE.md](TERMS_PERFORMANCE.md) |

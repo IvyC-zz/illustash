@@ -45,6 +45,8 @@ jobs:
         run: python tools/check_architecture.py
       - name: Frontend structure
         run: python tools/check_frontend.py
+      - name: Style guide sync
+        run: python tools/check_styleguide.py
       - name: Core fmt/clippy/test/build
         run: |
           cargo fmt --manifest-path crates/core/Cargo.toml --check
