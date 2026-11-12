@@ -2,7 +2,7 @@
 
 > 状态：现行参考；2026-11-12。离线识别 v1 由 Rust 校验、导入与恢复；机器证据经 [EVIDENCE_PACKAGES.md](EVIDENCE_PACKAGES.md) 的核心接口发布。运行边界见 [ARCHITECTURE_DIRECTION.md](ARCHITECTURE_DIRECTION.md)。
 
-原生命令行和 HTTP 共用 `app_recognition::import_package` / `resume`；无新增界面。结果在 Windows 生成，导入在持有图库的主机执行。不从导入包加载代码、pickle 或模型。
+原生命令行和 HTTP 共用 `app_recognition::import_package` / `resume`；无新增界面。结果由独立计算 worker 生成，导入在持有图库的主机执行。不从导入包加载代码、pickle 或模型。
 
 ## 文件契约
 

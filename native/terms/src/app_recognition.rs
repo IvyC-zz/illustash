@@ -487,7 +487,7 @@ fn import_internal(
             Some(claims)
         } else {
             // 无锚点的 sidecar 对原生任务仍是必需的、要校验，
-            // 但保持公开的 v1 按图片和按包的指纹以及重复处理的行为。
+            // 但保持公开的 v2 按图片和按包的指纹以及重复处理的行为。
             None
         }
     } else {
