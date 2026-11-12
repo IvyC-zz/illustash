@@ -1,5 +1,5 @@
 """tools/check_frontend.py 的合成负例：在 web/static 的副本上故意违反每条规则，确认会报错。"""
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 import io
 import json
@@ -7,7 +7,7 @@ import shutil
 import subprocess
 import tempfile
 import unittest
-from tools.check_frontend import BASELINE, ROOT, STATIC, baseline_growth, check, main, strip_comments
+from tools.check_frontend import BASELINE, ROOT, STATIC, baseline_growth, check, css_declarations, main, strip_comments
 
 
 class Tree(tempfile.TemporaryDirectory):
@@ -18,6 +18,7 @@ class Tree(tempfile.TemporaryDirectory):
         base = self.root / STATIC
         base.mkdir(parents=True)
         shutil.copyfile(ROOT / STATIC / 'app.js', base / 'app.js')
+        shutil.copyfile(ROOT / STATIC / 'app.css', base / 'app.css')
         for folder in ('core', 'ui'):
             shutil.copytree(ROOT / STATIC / folder, base / folder)
         (self.root / BASELINE).parent.mkdir(parents=True)
@@ -30,6 +31,19 @@ class Tree(tempfile.TemporaryDirectory):
 
     def errors(self):
         return check(self.root)[0]
+
+    def replace(self, relative, old, new):
+        path = self.root / STATIC / relative
+        text = path.read_text(encoding='utf-8')
+        assert text.count(old) == 1, old
+        path.write_text(text.replace(old, new), encoding='utf-8')
+
+    def write_baseline(self, rules):
+        (self.root / BASELINE).write_text(json.dumps({'rules': rules}), encoding='utf-8')
+
+    def git(self, *args):
+        subprocess.run(['git', '-c', 'user.name=t', '-c', 'user.email=t@example.invalid', *args],
+                       cwd=self.root, check=True, capture_output=True)
 
     def baseline(self):
         return json.loads((self.root / BASELINE).read_text(encoding='utf-8'))['rules']
@@ -355,6 +369,145 @@ class FrontendArchitectureTest(unittest.TestCase):
             path.write_text(text.replace('// ---- 详情栏与大图：ui/detail.js ----', '// ---- 详情栏与大图：ui/home.js ----'), encoding='utf-8')
             message = self.assertViolation(tree, 'state-writer', 'ui/detail.js: state.focused（声明的写入者是 ui/home.js）')
             self.assertIn('setCursor', message)
+
+
+    # ---------- 规则 8：app.css 的字面量（#349） ----------
+    def assertCss(self, css, *needles):
+        with Tree() as tree:
+            tree.append('app.css', '\n' + css + '\n')
+            message = self.assertViolation(tree, 'css-literal', needles[0])
+            for needle in needles[1:]:
+                self.assertIn(needle, message)
+            return message
+
+    def assertCssClean(self, css):
+        with Tree() as tree:
+            tree.append('app.css', '\n' + css + '\n')
+            self.assertEqual(tree.errors(), [])
+
+    def test_hardcoded_font_size(self):
+        self.assertCss('.new-thing{font-size:12px}', 'font-size: 12px', 'var(--fs-12)', 'app.css:', '.new-thing')
+        self.assertCss('.new-thing{font:600 13px/1.4 inherit}', 'font: 13px', 'var(--fs-13)')
+        # 展示字号按 #339 的登记给出 --fs-display-N，并说明只用于一次性的大字
+        self.assertCss('.new-title{font-size:28px}', 'font-size: 28px', 'var(--fs-display-28)', '展示字号')
+        # 没有这一档：写明最近的一档，并要求先在 Issue 里问
+        self.assertCss('.new-thing{font-size:12.5px}', 'font-size: 12.5px', '没有 12.5px 这一档', 'var(--fs-12)', '先在 Issue 里问')
+
+    def test_hardcoded_color(self):
+        self.assertCss('.new-thing{color:#123456}', 'color: #123456', '没有这个颜色的令牌', '先在 Issue 里问')
+        # 和某个令牌的亮色值相同：指出那个令牌和它的暗色值，提醒核对暗色
+        self.assertCss('.new-thing{background:#F4F4F6}', 'background: #f4f4f6', 'var(--canvas)', '暗色下是 #1d1d21')
+        self.assertCss('.new-thing{border:1px solid white}', 'border: white')
+        self.assertCss('.new-thing{box-shadow:0 1px 2px rgba(0, 0, 0, 0.3)}', 'box-shadow: rgba(0,0,0,.3)')
+        self.assertCss('.new-thing{--glow:#abcdef}', '--glow: #abcdef')
+
+    def test_hardcoded_z_index(self):
+        self.assertCss('.new-layer{z-index:20}', 'z-index: 20', 'var(--z-popover)')
+        self.assertCss('.new-layer{z-index:15}', 'z-index: 15', '没有 z-index 15 这一层', '--z-bar < --z-popover', '先在 Issue 里问')
+
+    def test_hardcoded_radius_and_spacing(self):
+        self.assertCss('.new-thing{border-radius:6px}', 'border-radius: 6px', 'var(--radius-6)')
+        self.assertCss('.new-thing{border-top-left-radius:50%}', 'border-top-left-radius: 50%', 'var(--radius-round)')
+        self.assertCss('.new-thing{padding:0 8px}', 'padding: 8px', 'var(--space-8)')
+        self.assertCss('.new-thing{padding:20px 26px}', 'padding: 20px', 'var(--space-20)')
+        self.assertCss('.new-thing{gap:5px}', 'gap: 5px', '没有 5px 这一档', '先在 Issue 里问')
+        self.assertCss('@media(max-width:1px){.new-thing{column-gap:6px}}', 'column-gap: 6px')
+
+    def test_tokens_zero_and_registered_exceptions_are_fine(self):
+        self.assertCssClean(
+            # 令牌定义处：两个 :root 块里的变量声明
+            ':root{--new-tone:#abcdef;--fs-9:9px}\n:root[data-theme=dark]{--new-tone:#123}\n'
+            # 引用令牌、0、auto、var() 通道的颜色函数、透明和 currentColor
+            '.new-thing{font-size:var(--fs-12);padding:0 var(--space-8) 0 0;gap:0;z-index:0;border-radius:0;color:currentColor;'
+            'background:transparent;box-shadow:0 1px 2px rgba(var(--sh),.2);border:1px solid var(--line)}\n'
+            # 按 #339 的登记不查：margin，以及不在档位上的 18px 以上 padding、gap
+            '.new-thing{margin:7px 13px;padding:26px 18px;gap:18px 40px}\n'
+            # 注释、字符串和 url() 里的内容
+            '/* .new-thing{color:#fff;font-size:9px} */\n.new-thing::after{content:"#fff; z-index:3";background:url("data:x;#fff")}')
+
+    def test_existing_css_literals_are_frozen(self):
+        with Tree() as tree:
+            frozen = tree.baseline()['css-literal']
+            self.assertIn('font: 9px', frozen)
+            self.assertEqual(tree.errors(), [])
+            # 基线里已有的字面量，再多用一处也算新增
+            tree.append('app.css', '\n.new-thing{font:800 9px/1 inherit}\n')
+            message = self.assertViolation(tree, 'css-literal', 'font: 9px')
+            self.assertIn(f'基线允许 {frozen["font: 9px"]} 处', message)
+
+    def test_fixed_css_literal_must_be_shrunk(self):
+        with Tree() as tree:
+            tree.replace('app.css', 'font:800 9px/1', 'font:800 var(--fs-10)/1')
+            errors, stale = check(tree.root)
+            self.assertEqual(errors, [])
+            self.assertTrue(any('css-literal' in line and 'font: 9px' in line for line in stale))
+            code, output = tree.run_main('--strict-stale')
+            self.assertEqual(code, 1)
+            self.assertIn('--shrink', output)
+            tree.run_main('--shrink')
+            self.assertNotIn('font: 9px', tree.baseline()['css-literal'])
+            self.assertEqual(tree.run_main('--strict-stale')[0], 0)
+
+    def test_css_declarations_track_lines_and_nesting(self):
+        decls = css_declarations('/* a{b:c} */\n.x{color:red;background:url("a;b{c}")}\n@media(x){.y{gap:1px}}\n'
+                                 '@keyframes k{to{opacity:0}}')
+        self.assertEqual([(d.selector, d.prop, d.line) for d in decls],
+                         [('.x', 'color', 2), ('.x', 'background', 2), ('.y', 'gap', 3), ('to', 'opacity', 4)])
+        self.assertEqual(decls[2].context, ('@media(x)', '.y'))
+        self.assertEqual(decls[1].value, 'url("a;b{c}")')
+
+    # ---------- 新规则首次登记存量：--init-rule（#349） ----------
+    def test_init_rule_registers_only_a_new_rule(self):
+        with Tree() as tree:
+            before = tree.baseline()
+            tree.write_baseline({k: v for k, v in before.items() if k != 'css-literal'})
+            errors = tree.errors()
+            self.assertTrue(errors)
+            self.assertIn('--init-rule css-literal', errors[0])
+            code, output = tree.run_main('--init-rule', 'css-literal')
+            self.assertEqual(code, 0, output)
+            self.assertEqual(tree.baseline(), before)
+            self.assertEqual(tree.errors(), [])
+            # 已登记的、硬规则、不存在的规则都拒绝，基线不动
+            for name in ('css-literal', 'long-line', 'page-name', 'no-such-rule'):
+                with self.subTest(name=name), redirect_stderr(io.StringIO()):
+                    self.assertEqual(tree.run_main('--init-rule', name)[0], 1)
+            self.assertEqual(tree.baseline(), before)
+
+    def test_base_ref_accepts_a_first_registration(self):
+        with Tree() as tree:
+            full = tree.baseline()
+            tree.write_baseline({k: v for k, v in full.items() if k != 'css-literal'})
+            tree.git('init', '-q')
+            tree.git('add', str(BASELINE))
+            tree.git('commit', '-q', '-m', 'before rule 8')
+            tree.run_main('--init-rule', 'css-literal')
+            code, output = tree.run_main('--strict-stale', '--base-ref', 'HEAD')
+            self.assertEqual(code, 0, output)
+            self.assertIn('首次登记', output)
+            # 首次登记也不能多于现状
+            inflated = json.loads(json.dumps(full))
+            inflated['css-literal']['font: 9px'] += 1
+            tree.write_baseline(inflated)
+            code, output = tree.run_main('--base-ref', 'HEAD')
+            self.assertEqual(code, 1)
+            self.assertIn('首次登记多于现状', output)
+
+    def test_base_ref_rejects_a_rule_dropped_from_the_baseline(self):
+        # 基准上的脚本已经有这条规则，基线里却没有这一项：说明有人删了它，照常算基线变大
+        with Tree() as tree:
+            full = tree.baseline()
+            tree.write_baseline({k: v for k, v in full.items() if k != 'css-literal'})
+            script = tree.root / 'tools/check_frontend.py'
+            shutil.copyfile(ROOT / 'tools/check_frontend.py', script)
+            tree.git('init', '-q')
+            tree.git('add', str(BASELINE), 'tools/check_frontend.py')
+            tree.git('commit', '-q', '-m', 'rule 8 exists')
+            tree.run_main('--init-rule', 'css-literal')
+            code, output = tree.run_main('--base-ref', 'HEAD')
+            self.assertEqual(code, 1)
+            self.assertIn('基线变大', output)
+            self.assertNotIn('首次登记', output)
 
 
 if __name__ == '__main__':

@@ -10,7 +10,7 @@
 |---|---|
 | `check_all.sh`、`local_acceptance.py` | 本地全量检查与固定路径验收，见 [LOCAL_CHECKS.md](LOCAL_CHECKS.md) |
 | `check_architecture.py` | crate 依赖方向检查 |
-| `check_frontend.py` | 前端结构检查：`web/static` 的依赖方向、state 声明与写入者、全局监听、对话框、超长行、页面名判断；基线 `frontend_baseline.json` 只能缩小（#320） |
+| `check_frontend.py` | 前端结构检查：`web/static` 的依赖方向、state 声明与写入者、全局监听、对话框、超长行、页面名判断、`app.css` 的写死字面量（#349）；基线 `frontend_baseline.json` 只能缩小（#320），新规则首次登记存量用 `--init-rule` |
 | `migration_inventory.py` | 生产迁移边界清点，规格在 `tests/migration_inventory.json` |
 | `gen_casefold.py`、`gen_http_unicode.py` | 生成 `crates/core` 的 casefold 与 Unicode 表 |
 | `test_native_contracts.sh`、`bench_native_contracts.sh` | 空 PATH 重放固定契约；契约基准，见 [TERMS_PERFORMANCE.md](TERMS_PERFORMANCE.md) |
