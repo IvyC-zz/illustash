@@ -457,8 +457,8 @@ fn import_internal(
         }
     }
     let seen: bool = tx.query_row(
-        "SELECT EXISTS(SELECT 1 FROM recognition_imports WHERE digest=? OR digest LIKE ?)",
-        params![pkg.digest, format!("{}:redelivery:%", pkg.digest)],
+        "SELECT EXISTS(SELECT 1 FROM recognition_imports WHERE digest=? OR digest GLOB ?)",
+        params![pkg.digest, format!("{}:redelivery:*", pkg.digest)],
         |r| r.get(0),
     )?;
     let mut added = Vec::new();
