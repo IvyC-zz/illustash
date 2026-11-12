@@ -28,9 +28,9 @@ export function loadSettingsData(refresh = false) {
   })).finally(() => { loading = null; });
   return loading;
 }
-// 启动时的开关；本次启动仍以 --no-* 参数为准。
 // /api/settings 的最新回应；任务面板读到新的也经这里换上。
 export function setSettings(value) { state.settings = value; }
+// 启动时的开关；本次启动仍以 --no-* 参数为准。
 export async function saveStartup(body) { state.settings = await post('/api/startup', body); }
 export async function saveFold(kinds) { state.fold = (await post('/api/fold', {kinds})).kinds; }
 export async function backupNow() { const r = await post('/api/backup', {}); state.settings = null; return r; }
