@@ -24,7 +24,7 @@ function identityChips(d, compact = false) {
   return `<div class="identities">${chips || `<p class="none-yet">${d.unknown ? t('已跳过，还没有角色') : t('还没有角色')}</p>`}<button class="add-identity" data-also="1">＋ ${d.memberships.length ? t('也是…') : t('设为角色…')}</button></div>` +
     (alts ? `<div class="alts"><h3>${t('也可能是')}</h3><div class="alt-row">${alts}</div></div>` : '');
 }
-// PROTO = 从用户自己的裁决学到的原型（web/learn.py）。
+// PROTO = 从用户自己的裁决学到的原型（native/terms/src/research_compute/learn.rs）。
 const SOURCE_NAMES = {CCIP: t('外部索引'), PROTO: t('你的标注')};
 const evidence = e => !e ? '' : [e.wd != null ? `WD ${e.wd.toFixed(2)}` : '', e.ccip != null ? `${e.sources?.includes('PROTO') && !e.sources.includes('CCIP') ? SOURCE_NAMES.PROTO : SOURCE_NAMES.CCIP} ${e.ccip.toFixed(3)}` : '', !('wd' in e) && e.sources?.length ? e.sources.map(s => SOURCE_NAMES[s] || s).join(' + ') : ''].filter(Boolean).join(' · ');
 export const INSP_ICONS = {

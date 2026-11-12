@@ -27,6 +27,9 @@ FIXTURES = Path(__file__).resolve().parent / 'fixtures' / 'reference_recordings'
 _current = None  # 正在运行的测试的记录器：它这一轮特有的字符串在摘要里写作占位符
 CLOCK = re.compile(r'\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:\d{2})?')
 CLOCK_BYTES = re.compile(CLOCK.pattern.encode())
+# 录制那天（#301）。按今天算的窗口（角色「近 30 天」、「近 12 个月」）录的是这天的结果，原生侧经仅测试用的
+# ILLUSTASH_TEST_TODAY 把今天固定在这里，期望不随运行日期过期。
+RECORDED_TODAY = {'ILLUSTASH_TEST_TODAY': '2026-10-07'}
 
 
 def fixed_values(name):
