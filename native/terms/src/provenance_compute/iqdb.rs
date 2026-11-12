@@ -1,6 +1,5 @@
-//! IQDB signature queue: picks and orders the pictures to ask about, then runs the
-//! local `illustash-iqdb --hash-only` signature program. Only signatures leave
-//! this worker; the App performs the authorized Danbooru IQDB queries.
+//! IQDB 签名队列：挑出要查询的图片并排好顺序，再运行本地签名程序 `illustash-iqdb --hash-only`。
+//! 离开这个 worker 的只有签名；经授权的 Danbooru IQDB 查询由 App 执行。
 use super::{check_owner, groups, pixel_batch, write, Request};
 use crate::{Error, Result};
 use rusqlite::{params, Connection, OptionalExtension};
@@ -17,7 +16,7 @@ const BACKEND: &str = "iqdb";
 const PER_RUN: usize = 10_000;
 const PER_SAVE_RUN: usize = 3;
 const SAVE_GAP: f64 = 300.;
-// Frozen yield order (provenance/sources/iqdb.py PRIORITY); unknown pairs rank 5.5.
+// 固定的命中率顺序（provenance/sources/iqdb.py 的 PRIORITY）；未列出的组合排 5.5。
 const PRIORITY: [(&str, &str); 8] = [
     ("x", "questionable"),
     ("x", "sensitive"),
@@ -75,7 +74,7 @@ fn due(c: &Connection, asset: &str) -> Result<bool> {
     Ok(row.unwrap_or(true))
 }
 
-/// The core's existing ratings, read-only; a library without them keeps the old order.
+/// core 里已有的分级，只读；没有分级的图库保持原来的顺序。
 fn ratings(request: &Request) -> BTreeMap<String, Option<String>> {
     let path = request.library.join("library.sqlite");
     if !path.is_file() {
@@ -92,7 +91,7 @@ fn ratings(request: &Request) -> BTreeMap<String, Option<String>> {
     read().unwrap_or_default()
 }
 
-/// A permutation of the queue: four yield-prioritised slots, then one original-order slot.
+/// 队列的一个重排：四个按命中率优先的位置，接一个按原顺序的位置。
 fn prioritize(pictures: Vec<Picture>, ratings: &BTreeMap<String, Option<String>>) -> Vec<Picture> {
     let rank = |p: &Picture| {
         let rating = ratings.get(&p.asset).cloned().flatten();
@@ -118,10 +117,10 @@ fn prioritize(pictures: Vec<Picture>, ratings: &BTreeMap<String, Option<String>>
     out
 }
 
-/// Pictures in runs of saves no more than SAVE_GAP apart, oldest first.
+/// 按保存时间分段的图片，同一段内相邻两次保存间隔不超过 SAVE_GAP，最早的在前。
 fn save_runs(pictures: &[Picture]) -> Result<Vec<Vec<Picture>>> {
     let mut dated: Vec<_> = pictures.iter().filter(|p| p.added_at.as_deref().is_some_and(|a| !a.is_empty())).collect();
-    // Python sorts the stored strings, stably, before converting them to timestamps.
+    // Python 先对存储的字符串做稳定排序，再转换成时间戳。
     dated.sort_by(|a, b| a.added_at.cmp(&b.added_at));
     let (mut runs, mut last): (Vec<Vec<Picture>>, Option<f64>) = (Vec::new(), None);
     for picture in dated {
@@ -137,8 +136,7 @@ fn save_runs(pictures: &[Picture]) -> Result<Vec<Vec<Picture>>> {
     Ok(runs)
 }
 
-/// Pictures to ask about. With `only` (按需查找): just those still without an artist,
-/// in library order, even when a miss is not due yet.
+/// 要查询的图片。给了 `only`（按需查找）时：只取其中仍没有画师的，按图库顺序，即使未命中的重查时间还没到。
 fn order(request: &Request, c: &Connection) -> Result<Vec<Picture>> {
     let done = owned(c)?;
     if !request.only.is_empty() {
@@ -162,7 +160,7 @@ fn order(request: &Request, c: &Connection) -> Result<Vec<Picture>> {
     for picture in &mut todo {
         picture.added_at = added.get(&picture.asset).cloned().flatten();
     }
-    // An original character is one artist's: the first answer names the whole character.
+    // 原创角色只属于一位画师：第一个答案就确定了整个角色。
     let mut originals = HashSet::new();
     for (_, members) in &groups::library_groups(request)?[2] {
         if !members.iter().any(|u| done.contains(u)) {
@@ -195,7 +193,7 @@ pub(super) fn signature_program() -> Option<PathBuf> {
             return Some(PathBuf::from(value));
         }
     }
-    // The installed adapter ships the program beside itself.
+    // 安装版适配器把这个程序放在自己旁边。
     let sibling = std::env::current_exe()
         .ok()?
         .with_file_name(illustash_platform::platform_process::executable_name("illustash-iqdb"));
@@ -215,7 +213,7 @@ pub(super) fn run(request: &Request, sequence: &mut u64) -> Result<Value> {
     let mut lines = String::new();
     for p in &todo {
         let original = pixel_batch::original(&config, &p.asset, &p.source_id, p.src_path.as_deref())?;
-        // Python: str(original or src_path), so a missing path is the text "None".
+        // Python 是 str(original or src_path)，所以缺失的路径是文本 "None"。
         let path = match original {
             Some(path) => path.to_string_lossy().into_owned(),
             None => p.src_path.clone().unwrap_or_else(|| "None".into()),
@@ -223,7 +221,7 @@ pub(super) fn run(request: &Request, sequence: &mut u64) -> Result<Value> {
         lines.push_str(&json!({"asset": p.asset, "path": path}).to_string());
         lines.push('\n');
     }
-    // An input file avoids a pipe deadlock while stdout fills; streamed output keeps progress alive.
+    // 用输入文件，避免 stdout 写满时管道死锁；流式输出让进度持续更新。
     let input = request.mailbox.join("hash-input.jsonl");
     fs::write(&input, lines)?;
     check_owner(request.owner_pid)?;

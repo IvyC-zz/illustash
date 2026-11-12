@@ -1,11 +1,9 @@
-//! Integrity checks of a package's two databases (#212, user decision 2026-10-18).
+//! 图库包两个数据库的完整性检查（#212，用户 2026-10-18 决定）。
 //!
-//! A full check reads every page of both files: close to a minute for a library of some 50,000 pictures. Opening
-//! runs it only when the previous session did not end normally (a crash, a forced quit, a power cut) or a check
-//! has found damage. Otherwise source.sqlite is checked in the background once the library is ready, and
-//! library.sqlite once every seven days; settings can start both at once. Upgrades, imports and backups keep their
-//! own checks. Damage stops the session writing (POST requests answer with what to do, tasks and durable recovery
-//! stop), and the next opening checks again before anything else.
+//! 完整检查读两个文件的每一页：约 5 万张图的图库接近一分钟。只有上次会话没有正常结束（崩溃、强制退出、断电）
+//! 或检查发现过损坏时，打开图库才运行它。其他情况下，图库就绪后在后台检查 source.sqlite，
+//! library.sqlite 每七天检查一次；设置里可以同时启动两项。升级、导入和备份保留各自的检查。
+//! 发现损坏时会话停止写入（POST 请求回答该怎么办，任务和持久恢复停止），下次打开时先再检查一遍。
 use crate::app_library::{inspect_file, Library, Report, Verdict, Watch};
 use crate::http_json::Json;
 use crate::{Error, Result};
@@ -22,10 +20,10 @@ use std::{
     time::{Duration, Instant},
 };
 
-/// The package's check record, written only by the session that owns the package.
+/// 图库包的检查记录，只由持有该图库包的会话写入。
 pub(crate) const RECORD: &str = ".illustash-checks.json";
 const LIBRARY_EVERY: i64 = 7 * 24 * 3600;
-/// Lets the library page load before the background check competes with it for the disk.
+/// 让图库页面先加载完，后台检查再来和它抢磁盘。
 pub(crate) const BACKGROUND_DELAY: Duration = Duration::from_secs(5);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -51,11 +49,11 @@ impl Database {
     }
 }
 
-/// What a check found in one database.
+/// 一次检查在一个数据库里发现的问题。
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub(crate) struct Damage {
     pub(crate) database: Database,
-    /// SQLite's own description of the first problem, for the log and for support.
+    /// SQLite 自己对第一个问题的描述，供日志和支持使用。
     pub(crate) detail: String,
     /// Unix seconds.
     pub(crate) found: i64,
@@ -64,7 +62,7 @@ impl Damage {
     pub(crate) fn new(database: Database, detail: String) -> Self {
         Self { database, detail, found: now() }
     }
-    /// What the person can do about it. The curation records cannot be rebuilt, the recognition results can.
+    /// 用户能怎么处理。整理记录无法重建，识别结果可以。
     pub(crate) fn guidance(&self) -> &'static str {
         match self.database {
             Database::Library => LIBRARY_DAMAGED,
@@ -76,18 +74,16 @@ impl Damage {
     }
 }
 pub(crate) const LIBRARY_DAMAGED: &str = "这个图库的整理记录数据库（library.sqlite）已损坏，为保护数据已停止写入。请退出 Illustash，把图库文件夹里的 library.sqlite 连同旁边的 library.sqlite-wal、library.sqlite-shm 一起移到别处保存，再从 backups 文件夹里选最近的一份备份复制回来、改名为 library.sqlite，然后重新打开。最近一次备份之后的整理会丢失。";
-/// source.sqlite can be rescued inside the app (#228): what the startup page, the library page's notice and the
-/// library switcher offer with a 「抢救重建」 button.
+/// source.sqlite 可以在应用内抢救（#228）：启动页、图库页的提示和图库切换器配合「抢救重建」按钮显示的文字。
 pub(crate) const SOURCE_DAMAGED: &str = "这个图库的识别结果数据库（source.sqlite）已损坏，为保护数据已停止写入；人工整理记录在 library.sqlite 里，没有受影响。可以点「抢救重建」：还读得出的识别结果和每张图的 ID 都会保留，读不出的部分重新扫描来源文件夹、重新识别；损坏的文件移到图库的 backups 文件夹里留存。抢救前请确认来源文件夹都能访问。";
 pub(crate) const NOTHING_TO_RESCUE: &str = "这个图库的识别结果数据库没有发现损坏，不需要抢救";
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 struct Record {
-    /// Set while a session has the package open. Still set when the next session opens it: that one did not end
-    /// normally.
+    /// 会话打开图库包期间设置。下一个会话打开时仍然是设置状态，说明上一个会话没有正常结束。
     #[serde(default)]
     open: bool,
-    /// Unix seconds of the last full check that found each database sound.
+    /// 上次完整检查认定各数据库完好的 Unix 秒。
     #[serde(default)]
     checked: BTreeMap<Database, i64>,
     #[serde(default)]
@@ -98,8 +94,7 @@ fn now() -> i64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0)
 }
 
-/// The record as left on disk, read-only. A record that cannot be read says nothing about the last session, so it
-/// counts as one that did not end normally.
+/// 磁盘上留下的记录，只读。读不出的记录说明不了上次会话的情况，所以算作没有正常结束。
 fn read(dir: &Path) -> Record {
     match fs::read(dir.join(RECORD)) {
         Ok(bytes) => serde_json::from_slice(&bytes).unwrap_or(Record { open: true, ..Record::default() }),
@@ -108,21 +103,21 @@ fn read(dir: &Path) -> Record {
     }
 }
 
-/// The damage a check recorded in the package at `dir`, for the desktop shell after the service failed to open it.
+/// 检查记在 `dir` 处图库包里的损坏，供服务打开失败后的桌面外壳使用。
 pub(crate) fn recorded_damage(dir: &Path) -> Option<Damage> {
     read(dir).damaged
 }
 
-/// The owning session's view of the record (`app_service::Owner` holds it). Every change is written at once, through
-/// a temporary file and a rename, so a crash leaves either the old record or the new one.
+/// 持有图库包的会话所见的记录（由 `app_service::Owner` 持有）。每次改动都立即写入，经临时文件再改名，
+/// 所以崩溃后留下的要么是旧记录，要么是新记录。
 pub(crate) struct Health {
     dir: PathBuf,
     record: Mutex<Record>,
-    /// The previous session did not end normally, and no check since has found both databases sound.
+    /// 上次会话没有正常结束，并且之后还没有检查认定两个数据库都完好。
     inherited: AtomicBool,
-    /// This session marked the package open, so its normal end marks it closed again.
+    /// 这个会话把图库包标为打开，所以它正常结束时会再标为关闭。
     marked: AtomicBool,
-    /// Unix seconds when this session opened the package: a database checked since then is not due again.
+    /// 这个会话打开图库包的 Unix 秒：在那之后检查过的数据库不用再检查。
     opened: Mutex<i64>,
 }
 impl Health {
@@ -136,7 +131,7 @@ impl Health {
             opened: Mutex::new(i64::MAX),
         }
     }
-    /// Opening checks both databases first: after an abnormal end, or while damage is on record.
+    /// 打开时先检查两个数据库：在异常结束之后，或记录里有损坏时。
     pub(crate) fn needs_check(&self) -> bool {
         self.inherited.load(Ordering::SeqCst) || self.damage().is_some()
     }
@@ -146,7 +141,7 @@ impl Health {
     pub(crate) fn checked(&self) -> BTreeMap<Database, i64> {
         self.record.lock().expect("integrity record lock poisoned").checked.clone()
     }
-    /// The session opened the package, after checking `checked` (both or none) and finding them sound.
+    /// 会话打开了图库包，此前检查了 `checked`（两个都查或都不查）并认定它们完好。
     pub(crate) fn opened(&self, checked: &[Database]) -> Result<()> {
         let time = now();
         self.update(|record| {
@@ -165,13 +160,13 @@ impl Health {
         *self.opened.lock().expect("integrity record lock poisoned") = time;
         Ok(())
     }
-    /// A full check found `database` sound.
+    /// 一次完整检查认定 `database` 完好。
     pub(crate) fn passed(&self, database: Database) -> Result<()> {
         self.update(|record| {
             record.checked.insert(database, now());
         })
     }
-    /// source.sqlite was replaced by a rescued copy (#228), which the rescue checked in full.
+    /// source.sqlite 已换成抢救出的副本（#228），抢救时已完整检查过它。
     pub(crate) fn rescued(&self) -> Result<()> {
         self.update(|record| {
             record.checked.insert(Database::Source, now());
@@ -184,8 +179,7 @@ impl Health {
         eprintln!("图库数据库损坏（{}）：{}", damage.database.file(), damage.detail);
         self.update(|record| record.damaged = Some(damage))
     }
-    /// What the background checks after opening: source.sqlite unless opening just checked it, library.sqlite once
-    /// a week.
+    /// 打开后后台要检查什么：source.sqlite，除非打开时刚检查过；library.sqlite 每周一次。
     pub(crate) fn due(&self) -> Vec<Database> {
         let opened = *self.opened.lock().expect("integrity record lock poisoned");
         let checked = self.checked();
@@ -198,7 +192,7 @@ impl Health {
         }
         due
     }
-    /// The session ended normally. Damage on record keeps the next opening checking first.
+    /// 会话正常结束。记录里有损坏时，下次打开仍会先检查。
     pub(crate) fn closed(&self) {
         if !self.marked.swap(false, Ordering::SeqCst) {
             return;
@@ -212,7 +206,7 @@ impl Health {
         let mut next = record.clone();
         change(&mut next);
         let target = self.dir.join(RECORD);
-        // Not store::new_key: tests replay a fixed sequence of keys, and this file must not consume one.
+        // 不用 store::new_key：测试会重放一串固定的键，这个文件不能用掉其中一个。
         static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         let temp =
             self.dir.join(format!("{RECORD}.{}-{}.tmp", std::process::id(), NEXT.fetch_add(1, Ordering::SeqCst)));
@@ -226,8 +220,8 @@ impl Health {
     }
 }
 
-/// Both full checks before opening, library.sqlite first, each weighted by its file size for `progress`.
-/// The first damaged database ends the check.
+/// 打开前的两项完整检查，先查 library.sqlite，各按文件大小在 `progress` 里占权重。
+/// 遇到第一个损坏的数据库就结束检查。
 pub(crate) fn check_both(library: &Library, progress: Option<crate::app_library::Progress>) -> Result<Option<Damage>> {
     for (label, verdict) in library.inspect(progress)? {
         if let Verdict::Damaged(detail) = verdict {
@@ -240,13 +234,13 @@ pub(crate) fn check_both(library: &Library, progress: Option<crate::app_library:
 
 #[derive(Clone, Default)]
 struct Status {
-    /// The database being checked and the fraction done.
+    /// 正在检查的数据库和完成的比例。
     running: Option<(Database, f64)>,
-    /// Why the last background check could not finish (not damage: a missing file, an I/O error).
+    /// 上次后台检查没能完成的原因（不是损坏：文件不见了、I/O 错误）。
     error: Option<String>,
 }
 
-/// The session's background check: at most one thread, stopped with the session.
+/// 会话的后台检查：最多一个线程，随会话停止。
 #[derive(Default)]
 pub(crate) struct Checker {
     stop: Arc<AtomicBool>,
@@ -257,7 +251,7 @@ impl Checker {
     pub(crate) fn running(&self) -> bool {
         self.thread.as_ref().is_some_and(|thread| !thread.is_finished())
     }
-    /// Check `databases` in order after `delay`; false when a check is already running or nothing is asked.
+    /// 在 `delay` 之后按顺序检查 `databases`；已有检查在运行或没有要查的时返回 false。
     pub(crate) fn start(
         &mut self,
         library: &Library,
@@ -294,7 +288,7 @@ impl Checker {
                 let mut journal = path.clone().into_os_string();
                 journal.push("-journal");
                 let watch = Watch { stop: Some(stop.clone()), writer: Some(PathBuf::from(journal)) };
-                // A writer that starts meanwhile gets the file: the check stops, waits for quiet and starts over.
+                // 期间开始写入的写入方优先使用文件：检查停下，等安静后从头开始。
                 let result = loop {
                     if !quiet(watch.writer.as_deref().expect("watched journal"), &stop) {
                         break Ok(Verdict::Yielded);
@@ -335,8 +329,8 @@ impl Checker {
             let _ = thread.join();
         }
     }
-    /// `GET /api/integrity`: the check in progress, when each database was last found sound (Unix seconds, null if
-    /// never), the damage on record with what to do, and why the last background check did not finish.
+    /// `GET /api/integrity`：正在进行的检查，各数据库上次被认定完好的时间（Unix 秒，从没有则为 null），
+    /// 记录里的损坏和处理办法，以及上次后台检查没有完成的原因。
     pub(crate) fn info(&self, health: &Health) -> Json {
         let status = self.status.lock().expect("integrity status lock poisoned").clone();
         let running = match status.running.filter(|_| self.running()) {
@@ -368,8 +362,7 @@ impl Checker {
         ])
     }
 }
-/// Returns at once when no writer's journal is there, else once none has been seen for two seconds; false when the
-/// check is stopped meanwhile.
+/// 没有写入方的日志时立即返回，否则等到连续两秒都没看到日志再返回；检查期间被停止时返回 false。
 fn quiet(journal: &Path, stop: &AtomicBool) -> bool {
     const QUIET: Duration = Duration::from_secs(2);
     let mut since = None;

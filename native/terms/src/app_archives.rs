@@ -1,4 +1,4 @@
-//! Package archives and session-owned exports. Only explicit newly created staging paths are removed.
+//! 图库包归档和会话持有的导出。只删除明确新建的暂存路径。
 use crate::{app_library::Library, http_json::Json, Error, Result};
 use rusqlite::{
     backup::{Backup, StepResult},
@@ -28,8 +28,8 @@ const EXPORTED: &[&str] = &[
 fn invalid(e: impl std::fmt::Display) -> Error {
     Error::Invalid(e.to_string())
 }
-// Legacy library_action catches OSError/ValueError, but BadZipFile and decompression failures
-// reach HTTP 500. Preserve status codes without depending on exception message text.
+// 旧版 library_action 会捕获 OSError/ValueError，但 BadZipFile 和解压失败会落到 HTTP 500。
+// 保留这些状态码，不依赖异常的文字。
 fn zip_failure(error: zip::result::ZipError) -> Error {
     match error {
         zip::result::ZipError::Io(error) => invalid(error),
@@ -57,9 +57,9 @@ fn import_cancelled(cancel: &AtomicBool) -> Result<()> {
         Ok(())
     }
 }
-/// The configuration is buffered and parsed in memory; real ones are a few kilobytes.
+/// 配置读进内存解析；真实的配置只有几 KB。
 const CONFIG_LIMIT: u64 = 1 << 20;
-/// Kept free after unpacking, so an import never fills the disk the library lives on.
+/// 解包后留出的空闲空间，导入不会占满图库所在的磁盘。
 const SPACE_MARGIN: u64 = 256 << 20;
 fn random() -> Result<String> {
     let mut bytes = [0; 16];
@@ -93,13 +93,11 @@ fn copy_cancelled(mut from: impl Read, mut to: impl Write, cancel: &AtomicBool) 
         to.write_all(&bytes[..n])?;
     }
 }
-/// Only call on an export snapshot or a newly unpacked package, never the sender's database.
-/// Model connection settings (including future keys), lasting network consent and the first-run guide record
-/// (which questions were answered, what was ticked: #116) are personal.
+/// 只对导出快照或新解开的图库包调用，从不对发送方自己的数据库调用。
+/// 模型连接设置（含将来的密钥）、长期联网同意和首次引导记录（回答过哪些问题、勾过哪些项：#116）属于个人数据。
 fn sanitize_database(path: &Path, cancel: Option<Arc<AtomicBool>>) -> Result<()> {
     let mut c = crate::sqlite::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE)?;
-    // Compaction may dominate large exports. Switching libraries/closing the app must
-    // interrupt these SQLite operations as well as the streaming copy and backup.
+    // 大图库导出时压实可能占大部分时间。切换图库、关闭应用时，除了流式复制和备份，也必须能中断这些 SQLite 操作。
     c.progress_handler(1000, cancel.map(|cancel| move || cancel.load(Ordering::SeqCst)));
     c.execute_batch("PRAGMA journal_mode=DELETE; PRAGMA secure_delete=ON;")?;
     let tx = c.transaction()?;
@@ -113,9 +111,8 @@ fn sanitize_database(path: &Path, cancel: Option<Arc<AtomicBool>>) -> Result<()>
             tx.execute(sql, [])?;
         }
     }
-    // VACUUM removes secrets left in free pages by older writes with secure_delete disabled.
-    // SQLite rewrites implicit rowids only in unindexed tables. Temporary indexes preserve
-    // those identities, including historical/user tables, without changing the final schema.
+    // VACUUM 清掉旧写入在 secure_delete 关闭时留在空闲页里的机密。
+    // SQLite 只会改写无索引表的隐式 rowid。临时索引保住这些身份（含历史表和用户表），且不改变最终的 schema。
     let tables = tx
         .prepare("SELECT name FROM sqlite_schema WHERE type='table' AND name NOT LIKE 'sqlite_%'")?
         .query_map([], |r| r.get::<_, String>(0))?
@@ -144,7 +141,7 @@ fn sanitize_database(path: &Path, cancel: Option<Arc<AtomicBool>>) -> Result<()>
 pub(crate) fn export(library: &Library, dest: &Path, cancel: &Arc<AtomicBool>) -> Result<PathBuf> {
     let work = stage(dest.parent().ok_or_else(|| invalid("无效导出路径"))?)?;
     let archive = work.0.join("archive.zip");
-    // The databases first, as one consistent set; compression afterwards holds no database.
+    // 先复制数据库，作为一致的一组；之后压缩时不持有任何数据库。
     let copies = snapshot(library, &work.0, cancel)?;
     if let Some(copy) = copies.get("library.sqlite") {
         sanitize_database(copy, Some(cancel.clone()))?;
@@ -180,9 +177,8 @@ pub(crate) fn export(library: &Library, dest: &Path, cancel: &Arc<AtomicBool>) -
     fs::rename(&archive, dest)?;
     Ok(dest.to_owned())
 }
-/// Copies of the package databases that belong together: every copy is retaken until no database has committed
-/// anything between the first and the last copy (SQLite data_version), so the archive never pairs a source
-/// from before a cross-database update with an application database from after it.
+/// 一起属于这个图库包的几份数据库副本：每份都重新复制，直到第一份和最后一份之间没有任何数据库提交过（SQLite
+/// data_version），这样归档不会把跨库更新之前的 source 和更新之后的应用数据库配在一起。
 fn snapshot(library: &Library, work: &Path, cancel: &AtomicBool) -> Result<HashMap<&'static str, PathBuf>> {
     let mut readers = Vec::new();
     for rel in EXPORTED.iter().filter(|rel| rel.ends_with(".sqlite")) {
@@ -211,7 +207,7 @@ fn snapshot(library: &Library, work: &Path, cancel: &AtomicBool) -> Result<HashM
     }
     Err(invalid("导出期间图库一直在写入，请稍后再导出"))
 }
-/// Retaking a snapshot is cheap next to compressing it; a library that keeps changing is reported instead.
+/// 重新做快照比压缩便宜；一直在变的图库就报告出来。
 const SNAPSHOT_ATTEMPTS: usize = 5;
 fn backup_into(source: &rusqlite::Connection, copy: &Path, cancel: &AtomicBool) -> Result<()> {
     let mut b = crate::sqlite::open(copy)?;
@@ -249,8 +245,8 @@ impl<W: Write> Write for CheckedWriter<'_, W> {
         self.output.flush()
     }
 }
-/// Streams one entry, writing no more than the size it declares (the import's space check counts on that).
-/// `written` hears every block written, for the progress the page polls.
+/// 流式解出一项，写入量不超过它声明的大小（导入的空间检查依赖这一点）。
+/// `written` 收到每个写出的块，用于页面轮询的进度。
 fn unpack<W: Write>(
     zip: &mut ZipArchive<BufReader<File>>,
     name: &str,
@@ -262,8 +258,8 @@ fn unpack<W: Write>(
     let index = zip.index_for_name(name).ok_or_else(|| invalid("缺少归档内容"))?;
     let mut raw = zip.by_index_raw(index).map_err(zip_failure)?;
     if raw.compression() == zip::CompressionMethod::LZMA {
-        // ZIP-LZMA has a version/property-length prefix and no .lzma unpacked-size header.
-        // Adapt only that header; the decoder streams directly to the destination with size/CRC checks.
+        // ZIP-LZMA 带版本和属性长度前缀，没有 .lzma 的解压后大小头。
+        // 只改写这个头；解码器直接流式写到目标，并检查大小和 CRC。
         let (size, crc) = (raw.size(), raw.crc32());
         let mut prefix = [0; 4];
         raw.read_exact(&mut prefix).map_err(zip_read_failure)?;
@@ -302,9 +298,8 @@ fn unpack<W: Write>(
     }
     Ok(())
 }
-/// Runs as a background task (#88): `cancel` is set by the cancel button, a switch or quitting, and an import
-/// stopped before publication removes what it unpacked. `observer` hears the stages and the bytes unpacked; the
-/// new directory is kept only through its publication point.
+/// 作为后台任务运行（#88）：取消按钮、切换图库或退出时设置 `cancel`，在发布之前停下的导入会删掉它解出的内容。
+/// `observer` 收到各阶段和已解出的字节数；新目录只有走过发布点才保留。
 pub(crate) fn import(
     archive: &Path,
     cancel: &Arc<AtomicBool>,
@@ -326,7 +321,7 @@ pub(crate) fn import(
         {
             return Err(invalid("导出文件里有不认识的内容，已拒绝导入"));
         }
-        // The archive index is keyed by name, so the entries are at most the exported set.
+        // 归档索引按名称做键，所以条目最多就是导出的那一组。
         names.insert(name.to_owned());
         if name == "library.json" && file.size() > CONFIG_LIMIT {
             return Err(invalid("导出文件里的图库配置过大，已拒绝导入"));
@@ -336,7 +331,7 @@ pub(crate) fn import(
     if !names.contains("library.json") || !names.contains("source.sqlite") {
         return Err(invalid("不是导出的图库（缺少 library.json 或 source.sqlite）"));
     }
-    // Only the small configuration is buffered; database/features contents are streamed with CRC verification.
+    // 只把很小的配置读进缓冲；数据库和 features 的内容流式解出并校验 CRC。
     let mut buffer = vec![0u8; 1 << 20];
     let config_text = {
         let mut bytes = Vec::new();
@@ -367,7 +362,7 @@ pub(crate) fn import(
         .unwrap_or_else(|| archive.file_stem().unwrap_or_default().to_string_lossy().into_owned());
     let path = crate::app_libraries::unique_path(&name)?;
     fs::create_dir_all(path.parent().expect("internal file path must have a parent")).map_err(invalid)?;
-    // Unpacking writes at most the declared sizes; compaction of library.sqlite may need as much again.
+    // 解包最多写入声明的大小；library.sqlite 压实可能还要同样多。
     let library_size = zip.index_for_name("library.sqlite").map_or(Ok(0), |i| zip.by_index_raw(i).map(|f| f.size()));
     let needed = declared.saturating_add(library_size.map_err(zip_failure)?).saturating_add(SPACE_MARGIN);
     let available =
@@ -400,8 +395,8 @@ pub(crate) fn import(
         unpack(&mut zip, &name, &mut file, &mut buffer, cancel, &written)?;
         file.flush().map_err(invalid)?;
     }
-    // Old exports can still contain credentials and the sender's lasting consent.
-    // Strip them before publishing or registering this newly created package.
+    // 旧的导出仍可能含有凭据和发送方的长期同意。
+    // 在发布或登记这个新建的图库包之前去掉它们。
     let database = path.join("library.sqlite");
     observer.stage("cleaning");
     if database.try_exists()? {
@@ -421,15 +416,13 @@ pub(crate) fn import(
     );
     crate::app_settings::write_config(&path, &config).map_err(invalid)?;
     observer.stage("checking");
-    // Publish only a package that opens: a damaged database or an incomplete configuration is refused here and
-    // the new directory removed, instead of registering a library that then fails to open.
+    // 只发布能打开的图库包：数据库损坏或配置不完整在这里就拒绝并删掉新目录，不登记一个随后打不开的图库。
     if fmt_is_current(&fmt) {
         opens(&path).map_err(|e| invalid(format!("导入的图库无法打开，已取消导入：{e}")))?;
     }
     import_cancelled(cancel)?;
     observer.stage("publishing");
-    // The publication point: a cancellation that came first keeps the new directory out; one that comes during
-    // it waits, and the import then counts as done.
+    // 发布点：先到的取消让新目录不进图库；发布期间到的取消会等它完成，导入随后算作完成。
     observer.publish(&mut || {
         import_cancelled(cancel)?;
         cleanup.1 = true;
@@ -437,7 +430,7 @@ pub(crate) fn import(
     })?;
     Ok((path, name))
 }
-/// The archive declares the current package format (older ones keep their explicit upgrade path).
+/// 归档声明的是当前图库包格式（旧格式仍走它们各自的显式升级）。
 fn fmt_is_current(fmt: &Json) -> bool {
     match fmt {
         Json::Integer(v) => v.parse::<i64>().is_ok_and(|v| v == crate::app_library::FORMAT),
@@ -445,8 +438,7 @@ fn fmt_is_current(fmt: &Json) -> bool {
         _ => false,
     }
 }
-/// The same validation as opening, including both integrity checks. A package whose core still needs the
-/// explicit upgrade is valid input: it is checked the way that upgrade will check it.
+/// 与打开时相同的校验，含两项完整性检查。核心仍需显式升级的图库包是合法输入：按那次升级会做的方式检查。
 fn opens(path: &Path) -> Result<()> {
     match Library::open(path) {
         Ok(_) => Ok(()),
@@ -561,7 +553,7 @@ mod tests {
     #[test]
     #[ignore = "isolated fixture, run with synthetic support by the parent test"]
     fn snapshot_fixture() {
-        // #23: a writer commits each update to the source and then the application database, as sync does.
+        // #23：写入方像同步那样，每次更新先提交 source，再提交应用数据库。
         let root = PathBuf::from(std::env::var_os("ILLUSTASH_ARCHIVE_FIXTURE").expect("isolated fixture only"));
         let package = root.join("synthetic.pilib");
         crate::app_create::create_folder(&package, &root.join("folder"), None, None, None).unwrap();
@@ -609,7 +601,7 @@ mod tests {
         }
         stop.store(true, Ordering::SeqCst);
         assert!(writer.join().unwrap() > 0);
-        // One instant of the pair: never the application ahead of the source, nor the source a whole update ahead.
+        // 两者处在同一时刻：应用数据库从不领先 source，source 也不会领先整整一次更新。
         for outcome in outcomes {
             match outcome {
                 Ok((source, app)) => assert!(app <= source && source <= app + 1, "source {source}, app {app}"),

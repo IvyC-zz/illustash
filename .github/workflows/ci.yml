@@ -63,9 +63,12 @@ jobs:
         run: cargo clippy --locked --manifest-path native/terms/Cargo.toml --all-targets --all-features -- -D warnings
       - name: test
         run: cargo test --locked --manifest-path native/terms/Cargo.toml
-      # iqdb 只跑测试：其中 0.7071 常数须与 haar.cpp 逐位一致，不按 clippy 改；格式未统一，留待单独整理。
-      - name: iqdb test
-        run: cargo test --locked --manifest-path crates/iqdb/Cargo.toml
+      # 0.7071 常数须与 haar.cpp 逐位一致，在源码里用 #[expect(clippy::approx_constant)] 写明，不按 clippy 改。
+      - name: iqdb fmt/clippy/test
+        run: |
+          cargo fmt --manifest-path crates/iqdb/Cargo.toml --check
+          cargo clippy --locked --manifest-path crates/iqdb/Cargo.toml --all-targets -- -D warnings
+          cargo test --locked --manifest-path crates/iqdb/Cargo.toml
 
   # 跑在 macOS arm64：固定期望（tests/fixtures/ 下的录制值）在 Apple Silicon 上录制，
   # float32 结果在 x86 上差 1 ulp；另有错误文案、zsh 启动脚本等平台差异。Windows 另行处理。

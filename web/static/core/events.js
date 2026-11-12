@@ -1,6 +1,5 @@
-// Listeners for what a core module announces (#199): on(fn) adds one and returns the function that removes it. emit()
-// calls them in the order they were added: one that throws stops the rest, as a direct call would; it resolves once
-// those that return a promise have settled, and logs any that failed.
+// core 模块发出的通知的监听器（#199）：on(fn) 添加一个，返回去掉它的函数。emit() 按添加顺序调用它们：其中一个抛错就
+// 不再调用其余的，和直接调用一样；返回 promise 的都落定后它才解析，失败的记进日志。
 export function listeners() {
   const set = new Set();
   return {

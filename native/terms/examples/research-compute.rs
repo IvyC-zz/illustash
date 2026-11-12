@@ -1,4 +1,4 @@
-//! Explicit test transport for the calculator; installed workers use the same run_files function.
+//! 计算器的显式测试传输通道；已安装的 worker 使用同一个 run_files 函数。
 #[path = "research_compute/math.rs"]
 mod math;
 use std::path::PathBuf;

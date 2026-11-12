@@ -1,4 +1,4 @@
-"""Run the synthetic Python suite and fail even if a blocked request was caught."""
+"""运行合成 Python 测试集；被拦下的请求即使被捕获了也判为失败。"""
 import sys
 import unittest
 

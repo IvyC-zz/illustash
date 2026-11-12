@@ -1,7 +1,7 @@
-"""#152 independent legacy NumPy/Pillow reference and handwritten invariants.
+"""#152 独立的旧版 NumPy/Pillow 参照和手写不变量。
 
-Only synthetic images/isolated SQLite snapshots. Explicit candidate binaries;
-no build, real model, library, Photos or process discovery in these tests.
+只用合成图片和隔离的 SQLite 快照。候选二进制显式指定；
+这些测试不构建，不用真实模型、图库或照片图库，也不查找进程。
 """
 import json
 import io
@@ -50,7 +50,7 @@ class NativeRelationImagesTest(unittest.TestCase):
         return str(path)
 
     def raw_png(self, pixels, colour, depth, name, *, transparency=None):
-        # Independent encoder: no candidate codec is used to make the fixture.
+        # 独立的编码器：不用候选的编解码器制作夹具。
         height,width,channels=pixels.shape
         rows=[]
         for row in pixels:
@@ -75,7 +75,7 @@ class NativeRelationImagesTest(unittest.TestCase):
         return str(path)
 
     def raw_rgb16_tiff(self,pixels,name,*,big_endian=False):
-        # Handwritten classic TIFF: unsigned chunky RGB(A), one uncompressed strip.
+        # 手写的经典 TIFF：无符号 chunky RGB(A)，一个未压缩的 strip。
         height,width,channels=pixels.shape
         endian='>' if big_endian else '<'
         tags=[(256,4,1,width),(257,4,1,height),(258,3,channels,0),(259,3,1,1),
@@ -96,7 +96,7 @@ class NativeRelationImagesTest(unittest.TestCase):
         return str(path)
 
     def raw_byte_tiff(self,pixels,name,*,big_endian=False,planar=False,associated=False,deflate=False,rows=7,tiled=False):
-        # Independent encoder for raw channel order/alpha. No candidate encoder.
+        # 针对原始通道顺序/alpha 的独立编码器。不用候选的编码器。
         height,width,bands=pixels.shape
         bits=pixels.dtype.itemsize*8
         endian='>' if big_endian else '<'
@@ -142,8 +142,8 @@ class NativeRelationImagesTest(unittest.TestCase):
         path=self.root/name;path.write_bytes(raw);return str(path)
 
     def raw_scalar_tiff(self,pixels,name,*,big_endian=False,orientation=1,fill_order=1,rows=None,deflate=False,icc=b'synthetic ICC',planar=1,photo=1,bits=None,codec=None,palette=None):
-        # Independent classic TIFF encoder: numeric scalar bytes, real strips and
-        # optional zlib. The candidate is never used to encode an expected input.
+        # 独立的经典 TIFF 编码器：数值标量字节、真实的 strip 和可选的 zlib。
+        # 从不用候选来编码预期的输入。
         height,width=pixels.shape
         endian='>' if big_endian else '<'
         kind=pixels.dtype.kind;bits=bits or pixels.dtype.itemsize*8
@@ -314,7 +314,7 @@ class NativeRelationImagesTest(unittest.TestCase):
                (rng.normal(120,90,(31,29)).astype(np.float32),0)]
         for pixels,photo in cases:
             for big in [False,True]:
-                if big and pixels.dtype.kind=='u':continue # Old Pillow has no MM rawmode for these domains.
+                if big and pixels.dtype.kind=='u':continue # 旧 Pillow 在这些取值范围上没有 MM rawmode。
                 for deflate in [False,True]:
                     for orientation in [1,6]:
                         with self.subTest(dtype=str(pixels.dtype),photo=photo,big=big,deflate=deflate,orientation=orientation):
@@ -332,7 +332,7 @@ class NativeRelationImagesTest(unittest.TestCase):
         for kind,depth,data in ((2,16,b'\x00\x7c\xe0\x03'),(10,16,b'\x01\x00\x7c\xe0\x03'),
                                 (3,16,b'\x80\xff\x40\x20'),(11,16,b'\x01\x80\xff\x40\x20'),
                                 (3,1,b'\x80'),
-                                # BGRA;15Z high bit set: Pillow makes those pixels transparent.
+                                # BGRA;15Z 最高位置位：Pillow 把这些像素设为透明。
                                 (2,16,b'\x04\xfc\xe4\x03'),(10,16,b'\x01\x04\xfc\xe4\x83')):
             for orientation in (0,16,32,48):
                 header=bytearray(18);header[2]=kind;header[12:16]=struct.pack('<HH',2,1)
@@ -364,7 +364,7 @@ class NativeRelationImagesTest(unittest.TestCase):
         for mode in ['RGB','RGBA','L','LA','P','1']:
             with self.subTest(mode=mode):
                 self.assert_image(icon([(picture(31,(128,128)).convert(mode),24)]))
-        # Area before depth, ascending depth within equal area, first entry for exact ties.
+        # 先比面积再比位深，面积相同时按位深升序，完全相同时取第一项。
         self.assert_image(icon([(Image.new('RGBA',(32,32),'blue'),32),(picture(8,(64,64)),24)]))
         self.assert_image(icon([(Image.new('RGBA',(64,64),'blue'),32),(picture(8,(64,64)),24)]))
         self.assert_image(icon([(picture(8,(64,64)),24),(Image.new('RGB',(64,64),'red'),24)]))
@@ -415,8 +415,8 @@ class NativeRelationImagesTest(unittest.TestCase):
         x=np.arange(1025)
         pixels=np.where((x//20)%4==1,np.iinfo(np.int32).max,
                         np.where((x//20)%4==3,np.iinfo(np.int32).min,0)).astype(np.int32)[None,:]
-        # The old scalar thumbnail retains I32 between axes. macOS saturates;
-        # Windows MSVC stores INT_MIN for positive overflow, before RGB clamp.
+        # 旧的标量缩略图在两个轴之间保留 I32。macOS 上饱和；
+        # Windows MSVC 在正溢出时存 INT_MIN，发生在 RGB 截断之前。
         self.assert_image(self.raw_scalar_tiff(pixels,'i32-overflow.tiff'))
 
     def test_tiff_subbyte_gray_palette_and_fill_order_original_modes(self):
@@ -517,16 +517,16 @@ class NativeRelationImagesTest(unittest.TestCase):
 
     def test_thin_portrait_original_axis_order_byte_alpha_and_integer_modes(self):
         rng=np.random.default_rng(15219)
-        # The old Image.resize branch is strict height > width*100 and applies
-        # after reducing_gap. Cover equality, shrinking both axes and reduction.
+        # 旧的 Image.resize 分支条件是严格的 height > width*100，并在 reducing_gap 之后生效。
+        # 覆盖相等、两个轴都缩小以及 reduce 的情形。
         for shape in [(1200,12),(1201,12),(2048,6),(7001,25)]:
             for mode,channels in [('L',1),('RGB',3),('RGBA',4),('LA',2)]:
                 with self.subTest(shape=shape,mode=mode):
                     pixels=rng.integers(0,256,(*shape,channels),np.uint8)
                     im=Image.fromarray(pixels[...,0] if channels==1 else pixels,mode)
                     self.assert_image(self.save(im,f'thin-{shape}-{mode}.png'))
-        # Handwritten counterexample: each 3x3 block sums to 5. The old
-        # UINT32 reciprocal yields 0; exact (sum+4)//9 would incorrectly yield 1.
+        # 手写的反例：每个 3x3 块的和是 5。旧的 UINT32 倒数算法得到 0；
+        # 精确的 (sum+4)//9 会错误地得到 1。
         tile=np.array([[5,0,0],[0,0,0],[0,0,0]],np.uint8)
         for mode in ['L','RGB']:
             path=self.save(Image.fromarray(np.tile(tile,(2048,8))).convert(mode),f'reduce-nine-{mode}.png')
@@ -537,7 +537,7 @@ class NativeRelationImagesTest(unittest.TestCase):
         self.assert_image(self.save(Image.fromarray(pixels),'thin-gray16.png'))
 
     def test_review_original_png_bands_gray16_resize_and_bmp_palette_modes(self):
-        # Independent review counterexamples. Old Pillow outputs remain authoritative.
+        # 独立审核给出的反例。仍以旧 Pillow 的输出为准。
         for mode, colour, key, grey in [('RGB','red',(255,0,0),76),('L',128,128,128)]:
             path=self.save(Image.new(mode,(32,32),colour),mode+'-trns.png',transparency=key)
             self.assertEqual(set(similar.signature(path)[1]),{grey})
@@ -551,7 +551,7 @@ class NativeRelationImagesTest(unittest.TestCase):
         palette=Image.fromarray(raw).convert('P')
         palette.putpalette([v for i in range(256) for v in (255-i,255-i,255-i)])
         self.assert_image(self.save(palette,'palette.bmp'))
-        # Old I;16 thumbnail's reducing_gap rejects this mode via Image.reduce.
+        # 旧的 I;16 缩略图的 reducing_gap 经 Image.reduce 拒绝这个模式。
         raw=np.tile(np.array([0,65535],np.uint16),8192).reshape(2,8192)
         path=self.save(Image.fromarray(raw),'gray16-reduce.png')
         with self.assertRaisesRegex(ValueError,'image has wrong mode'):
@@ -573,8 +573,8 @@ class NativeRelationImagesTest(unittest.TestCase):
                         exif=Image.Exif();exif[274]=orientation
                         path=self.save(im,f'{mode}-{compression}-{orientation}.tiff',compression=compression,exif=exif)
                         self.assert_image(path)
-        # Handwritten invariant: this raw filename mmap is observably different
-        # from BytesIO; do not invent equality or unify the old outputs.
+        # 手写的不变量：这个按文件名打开的原始 mmap 与 BytesIO 的结果明显不同；
+        # 不要臆造相等，也不要统一旧的输出。
         exif=Image.Exif();exif[274]=5
         path=self.save(Image.fromarray(values),'mmap.tiff',exif=exif)
         self.assertEqual(similar.signature(path)[0],1.5)
@@ -613,8 +613,7 @@ class NativeRelationImagesTest(unittest.TestCase):
                 with self.subTest(shape=shape,compression=compression):
                     path=self.save(im,f'cmyk-{shape}-{compression}.tiff',compression=compression)
                     self.assert_image(path)
-        # Integer Pillow conversion, independently handwritten counterexample
-        # to image's float truncation. It must survive the TIFF decoding path.
+        # Pillow 的整数转换，是针对 image 浮点截断的独立手写反例。经过 TIFF 解码路径后它必须仍然成立。
         from tests.image_expectations import verify
         _colour = verify._colour
         im=Image.new('CMYK',(24,24),(31,127,210,90))
@@ -657,8 +656,8 @@ class NativeRelationImagesTest(unittest.TestCase):
                 im=Image.frombytes('I;16B',(shape[1],shape[0]),pixels.astype('>u2').tobytes())
                 with self.subTest(mode='I;16B',compression=compression,shape=shape):
                     self.assert_image(self.save(im,f'gray16b-{compression}-{shape}.tiff',compression=compression))
-        # Pillow's existing native-storage resampler in I;16B makes interior
-        # 0/65535 alternating pixels 128, not 32768, after the retained mode read.
+        # Pillow 现有的原生存储重采样器在 I;16B 下，按保留的模式读取后，把内部 0/65535 交替的像素变成 128，
+        # 而不是 32768。
         pixels=np.tile(np.array([0,65535],np.uint16),2048).reshape(2,2048)
         im=Image.frombytes('I;16B',(2048,2),pixels.astype('>u2').tobytes())
         path=self.save(im,'gray16b-storage.tiff')
@@ -676,8 +675,7 @@ class NativeRelationImagesTest(unittest.TestCase):
                 for compression in ['raw','tiff_lzw','tiff_adobe_deflate']:
                     with self.subTest(mode=mode,shape=shape,compression=compression):
                         self.assert_image(self.save(im,f'scalar-{mode}-{shape}-{compression}.tiff',compression=compression))
-        # Handwritten source-type counterexamples: I32 full groups wrap before
-        # double accumulation; F32 full groups round before double accumulation.
+        # 手写的源类型反例：I32 整组在 double 累加之前回绕；F32 整组在 double 累加之前舍入。
         signed=np.full((6,8192),np.iinfo(np.int32).max,np.int32)
         floats=np.tile(np.array([[16777216.,1.],[-16777216.,3.]],np.float32),(2,2048))
         for mode,values in [('I',signed),('F',floats)]:
@@ -685,9 +683,8 @@ class NativeRelationImagesTest(unittest.TestCase):
             expected,_=relate.load(path)
             self.assertEqual(set(expected.ravel()),{0})
             self.assert_image(path)
-        # The MM compressed 32-bit rawmode conversion precedes thumbnail/reduce,
-        # not only the final clamp. Encode swapped words of finite target values
-        # so the independent old decoder restores those values before resampling.
+        # MM 压缩的 32 位 rawmode 转换发生在 thumbnail/reduce 之前，而不只是在最后的截断之前。
+        # 把有限目标值的字交换后编码，让独立的旧解码器在重采样之前还原这些值。
         for shape in [(6,2048),(6,8192)]:
             for mode in ['I','F']:
                 target=(rng.integers(-1024,1025,shape,np.int32) if mode=='I'
@@ -699,9 +696,8 @@ class NativeRelationImagesTest(unittest.TestCase):
                 self.assert_image(path)
 
     def test_handwritten_tiff_scalar_endian_strips_orientation_fill_and_nonfinite(self):
-        # Fixed old-decoder words: raw MM reads its original values, whereas
-        # compressed MM libtiff retains the big-endian 32-bit rawmode after its
-        # native-endian decode. Expectations are handwritten, never candidate output.
+        # 固定的旧解码器字：原始 MM 读出原来的值，而压缩的 MM 在 libtiff 按本机字节序解码之后，
+        # 仍保留大端 32 位 rawmode。预期值是手写的，从不取候选的输出。
         signed=np.array([[np.iinfo(np.int32).min,-1,0],[127,256,np.iinfo(np.int32).max]],np.int32)
         floats=np.array([[1,2,3],[4,100,255]],np.float32)
         signed_compressed=[128,-1,0,2130706432,65536,-129]
@@ -737,10 +733,9 @@ class NativeRelationImagesTest(unittest.TestCase):
             for orientation in [1,5,6,8]:
                 path=self.raw_scalar_tiff(values,f'fill2-{rows}-{orientation}.tiff',fill_order=2,rows=rows,orientation=orientation)
                 self.assert_image(path)
-        # Unknown orientations stay unchanged in the old implementation.
+        # 旧实现中，未知的 orientation 保持不变。
         self.assert_image(self.raw_scalar_tiff(values,'unknown-orientation.tiff',orientation=65535))
-        # Former candidate-only rejection domains now require full original
-        # pixels/signature/colour parity through all five consumer entrances.
+        # 以前只有候选拒绝的取值范围，现在要求经全部五个消费入口，像素/签名/颜色都与原实现完全等价。
         for values in [signed,floats]:
             for unsupported in ['codec32946','planar2']:
                 path=self.raw_scalar_tiff(values,f'mm-unsupported-{values.dtype}-{unsupported}.tiff',big_endian=True,
@@ -834,12 +829,12 @@ class NativeRelationImagesTest(unittest.TestCase):
         self.assertIsNone(self.probe('locate', a=a, b=flat))
 
 
-# Primary-key width of each similarity cache: rows a change list deletes are named by these columns.
+# 每个相似度缓存的主键宽度：变更列表要删除的行用这些列指明。
 KEYS = {'image_sigs':1, 'relations':2, 'similar_paired':1, 'similar_retry':2}
 
 
 def applied(path, table, change):
-    """A change list `{delete, append}` applied to the snapshot table the way App publishes it."""
+    """按 App 发布的方式，把变更列表 `{delete, append}` 应用到快照表上。"""
     with sqlite3.connect(path) as c:
         exists = c.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table,)).fetchone()
         stored = [list(r) for r in c.execute('SELECT * FROM '+table+' ORDER BY rowid')] if exists else []
@@ -912,7 +907,7 @@ class NativeSimilarSnapshotTest(unittest.TestCase):
             self.assertEqual(run.returncode, 0, run.stderr.decode())
             self.assertEqual((self.root/'library.sqlite').read_bytes(), before)
             out = json.loads(output.read_text())
-            # #31: the owner that asks for change lists gets the same tables as edits of its snapshot.
+            # #31：请求变更列表的一方，得到的表与在自己快照上改出来的相同。
             run, output = self.request(delta=True)
             self.assertEqual(run.returncode, 0, run.stderr.decode())
             self.assertEqual((self.root/'library.sqlite').read_bytes(), before)
@@ -945,7 +940,7 @@ class NativeSimilarSnapshotTest(unittest.TestCase):
                         rows = [r[:-1] for r in rows]
                         expected = [r[:-1] for r in expected]
                     self.assertEqual(rows, expected, table)
-            # Simulate only App's accepted cache publication; no native candidate generates expectations.
+            # 只模拟 App 已验收的缓存发布；预期值不由任何原生候选生成。
             with sqlite3.connect(self.root/'library.sqlite') as dest, sqlite3.connect(reference/'library.sqlite') as src:
                 src.backup(dest)
             return out

@@ -1,4 +1,4 @@
-//! HTTP identity wrappers share the existing character transaction and undo protocol.
+//! HTTP 身份包装，共用现有的角色事务和撤销协议。
 use crate::{app_commands, character_json, http_json::Json, http_read, Error, Result};
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use serde_json::{json, Value};
@@ -13,7 +13,7 @@ pub(crate) fn request(c: &mut Connection, path: &str, body: &Json) -> Result<Jso
     let command = match path {
         "/api/identity/skip" => return skip(c, body),
         "/api/identity/decision" => {
-            // Store checks Python's exact int type before the core checks policy/endpoints.
+            // Store 先检查是不是 Python 的 int 类型，核心再检查策略和端点。
             let relation = argument(body, "relation_id")?;
             if !relation.is_null() && relation.as_i64().is_none_or(|id| id <= 0) {
                 return Err(Error::Invalid("关系 ID 不正确".into()));
@@ -42,7 +42,7 @@ fn skip(c: &mut Connection, body: &Json) -> Result<Json> {
         (Some(a), Some(b)) if !a.is_empty() && !b.is_empty() && a != b => (a, b),
         _ => return Err(Error::Invalid("请选择两个角色".into())),
     };
-    // Queue skip deliberately accepts arbitrary distinct keys, without role/policy resolution.
+    // 队列跳过有意接受任意两个不同的键，不解析角色或策略。
     let key = if a < b { format!("{a}|{b}") } else { format!("{b}|{a}") };
     let tx = c.transaction_with_behavior(TransactionBehavior::Immediate)?;
     let before: Option<String> =

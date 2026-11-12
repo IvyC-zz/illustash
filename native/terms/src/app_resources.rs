@@ -1,4 +1,4 @@
-//! Resource-only installed root; library state remains owned by app_libraries.
+//! 只放资源的安装根目录；图库状态仍归 app_libraries 管。
 use crate::{Error, Result};
 use std::path::{Path, PathBuf};
 pub fn installed_root(executable: &Path) -> Option<PathBuf> {
@@ -14,8 +14,7 @@ pub fn default_root() -> PathBuf {
         .or_else(|| std::env::current_exe().ok().and_then(|exe| installed_root(&exe)))
         .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../.."))
 }
-/// The ONNX Runtime the recognition and index workers load: `ILLUSTASH_ORT_DYLIB`, else the full installer's copy
-/// under the resource root.
+/// 识别和索引 worker 加载的 ONNX Runtime：`ILLUSTASH_ORT_DYLIB`，否则用完整安装包放在资源根目录下的那一份。
 pub fn ort_runtime(resources: &Path) -> PathBuf {
     let library = if cfg!(windows) {
         "onnxruntime.dll"
@@ -28,7 +27,7 @@ pub fn ort_runtime(resources: &Path) -> PathBuf {
         .map(PathBuf::from)
         .unwrap_or_else(|| resources.join("onnxruntime").join(library))
 }
-/// Shared runtime resources. Relative overrides are anchored to the resource root, never the worker CWD.
+/// 共享的运行时资源。相对路径的覆盖值以资源根目录为基准，绝不以 worker 的 CWD 为基准。
 pub fn shared_path(root: &Path) -> Result<PathBuf> {
     shared_from(root, &std::env::current_dir()?, std::env::var_os("ILLUSTASH_SHARED").as_deref().map(Path::new))
 }
@@ -40,8 +39,8 @@ fn shared_from(root: &Path, cwd: &Path, configured: Option<&Path>) -> Result<Pat
     }
     let desired = crate::app_paths::resolve(&root.join(configured))?;
     let legacy = crate::app_paths::resolve(&cwd.join(configured))?;
-    // Older index/Python consumers interpreted relative overrides from their CWD. Refuse an ambiguous
-    // switch without inspecting private data or creating a new empty index. An absolute override is explicit.
+    // 旧的索引和 Python 消费者按自己的 CWD 解释相对路径的覆盖值。拒绝这种有歧义的切换，不去检查私有数据，
+    // 也不新建空索引。绝对路径的覆盖值是明确的。
     if desired != legacy {
         for name in
             ["reference.sqlite", "char-index", "game-chars", "char-anchors.npy", "char-anchors.txt", "char-patch"]
@@ -59,7 +58,7 @@ fn shared_from(root: &Path, cwd: &Path, configured: Option<&Path>) -> Result<Pat
     }
     Ok(desired)
 }
-/// The reference library new libraries copy their character index from; it may be absent.
+/// 新图库从中复制角色索引的参考图库；可能不存在。
 pub(crate) fn reference_path(root: &Path) -> Result<PathBuf> {
     Ok(shared_path(root)?.join("reference.sqlite"))
 }

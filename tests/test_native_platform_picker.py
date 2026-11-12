@@ -1,4 +1,4 @@
-"""#109: authenticated synthetic desktop dialogs, no real filesystem picker or library."""
+"""#109：带认证的合成桌面对话框，不用真实的文件选择器，也不用真实图库。"""
 import http.server
 import json
 import threading
@@ -21,7 +21,7 @@ class Shell(http.server.BaseHTTPRequestHandler):
         self.end_headers()
         try:
             self.wfile.write(data)
-        except BrokenPipeError:  # host exit while a synthetic picker is waiting
+        except BrokenPipeError:  # 合成选择器等待时宿主退出
             pass
 
 

@@ -1,4 +1,4 @@
-//! Native HTTP entry, request context and shared response/security encoding.
+//! 原生 HTTP 入口、请求上下文，以及共用的响应与安全编码。
 use crate::Result;
 use std::{
     collections::HashMap,
@@ -7,7 +7,7 @@ use std::{
 };
 use tiny_http::{Header, Request, Response, StatusCode};
 
-/// Request-local context from the native session. Never persisted as a readiness file.
+/// 来自原生会话、只在本次请求内有效的上下文。从不持久化为就绪文件。
 #[derive(Debug)]
 pub struct LibraryContext {
     pub db: PathBuf,
@@ -31,7 +31,7 @@ fn accepts_gzip(value: &str) -> bool {
     accepted.get("gzip").or_else(|| accepted.get("*")).copied().unwrap_or(0.0) > 0.0
 }
 
-/// Identical JSON serialization, compression and security headers for both application hosts.
+/// 两个应用宿主共用完全相同的 JSON 序列化、压缩和安全响应头。
 pub(crate) fn json_response(
     request: &Request,
     payload: &crate::http_json::Json,

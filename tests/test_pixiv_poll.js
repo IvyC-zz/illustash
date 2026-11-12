@@ -1,7 +1,7 @@
-// Runs the production polling code (core/settings.js) with a deterministic clock and delayed responses.
+// 用确定性的时钟和延迟的响应运行生产环境的轮询代码（core/settings.js）。
 const {test, before, afterEach} = require('node:test');
 const assert = require('node:assert/strict');
-const web = require('./web.cjs');   // the login wait is core/settings.js (#199)
+const web = require('./web.cjs');   // 登录等待在 core/settings.js 里（#199）
 before(web.ready);
 let restore = () => {};
 afterEach(() => { restore(); restore = () => {}; });
@@ -14,7 +14,7 @@ function harness() {
   globalThis.clearTimeout = id => { timers.delete(id); };
   globalThis.fetch = (path, options) => path === '/api/accounts' ? Promise.resolve({status: 200, ok: true, json: async () => ({})})
     : new Promise((resolve, reject) => requests.push({resolve: body => resolve({status: 200, ok: true, json: async () => body}), reject, signal: options.signal}));
-  // What the settings page tells: the account bound, or why the wait ended.
+  // 设置页显示的内容：已绑定的账号，或者等待为什么结束。
   const off = core.onSettings((what, detail) => { if (what === 'pixiv') messages.push(detail.error ? detail.error.message : 'bound'); });
   restore = () => { core.stopPixivLogin(); off(); Object.assign(globalThis, {setTimeout: saved.setTimeout, clearTimeout: saved.clearTimeout, fetch: saved.fetch}); Date.now = saved.now; };
   return {ctx: core, timers, requests, messages,

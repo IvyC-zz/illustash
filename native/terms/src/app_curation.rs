@@ -1,4 +1,4 @@
-//! Human collection and folding projections, matching Store.curate/set_fold_kinds.
+//! 人工收藏和折叠投影，与 Store.curate/set_fold_kinds 一致。
 use crate::{http::LibraryContext, http_json::Json, Error, Result};
 use rusqlite::{params, params_from_iter, Connection, OpenFlags, OptionalExtension, TransactionBehavior};
 use serde_json::Value;
@@ -14,8 +14,8 @@ pub(crate) fn curate(c: &mut Connection, context: &LibraryContext, body: &Json) 
     };
     let tx = c.transaction_with_behavior(TransactionBehavior::Immediate)?;
     let ids = crate::app_commands::selected(&tx, context, body)?;
-    // Persisted JSON has Python's default ASCII escaping and field insertion order.
-    // HTTP Json/canonical JSON must not reorder or re-encode this history.
+    // 持久化的 JSON 用 Python 默认的 ASCII 转义和字段插入顺序。
+    // HTTP Json 和规范 JSON 不得对这段历史重新排序或重新编码。
     let mut before = Vec::new();
     for id in &ids {
         let had: Option<(String, String, String)> = tx
@@ -108,7 +108,7 @@ pub(crate) fn fold(c: &mut Connection, context: &LibraryContext, body: &Json) ->
     Ok(Json::object([("kinds", Json::Array(kinds.into_iter().map(Json::from).collect()))]))
 }
 
-// Python dict insertion order is observable through duplicates rowids. A union evaluates its RHS first.
+// Python dict 的插入顺序会通过 duplicates 的 rowid 体现出来。并集运算先求右侧。
 #[derive(Default)]
 struct Parents {
     index: HashMap<String, usize>,
@@ -190,7 +190,7 @@ pub(crate) fn refresh_duplicates(c: &Connection, src: &Connection, kinds: &[Stri
         });
         groups[slot].push(id);
     }
-    // Same-key groups overwrite the earlier value but keep its dict position (old Python comprehension).
+    // 同键的组覆盖先前的值，但保留它在 dict 里的位置（旧 Python 推导式的行为）。
     let mut slots: HashMap<String, usize> = HashMap::new();
     let mut keyed: Vec<(String, Vec<String>)> = Vec::new();
     for group in groups {
@@ -348,7 +348,7 @@ mod tests {
         );
         assert_eq!(bytes, fs::read(f.context.source.as_ref().unwrap()).unwrap());
         fold(&mut f.c, &f.context, &Fixture::body(r#"{"kinds":[]}"#)).unwrap();
-        assert_eq!(f.count("duplicates"), 2); // byte-identical copies still fold, but differing memberships stay visible.
+        assert_eq!(f.count("duplicates"), 2); // 字节相同的副本仍然折叠，但成员关系不同的保持可见。
         f.c.execute("DELETE FROM memberships", []).unwrap();
         fold(&mut f.c, &f.context, &Fixture::body(r#"{"kinds":[]}"#)).unwrap();
         assert_eq!(

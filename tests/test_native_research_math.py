@@ -1,7 +1,7 @@
-"""Windows narrow BLAS parity using only fixed synthetic matrices and an explicit candidate.
+"""Windows 窄 BLAS 等价测试，只用固定的合成矩阵和显式指定的候选。
 
-The reference runs in the explicitly selected existing NumPy environment. No binary builds,
-DLL discovery, real models, user installations or libraries are performed by this suite.
+参照在显式选定的现有 NumPy 环境里运行。本套件不构建二进制、不查找 DLL，也不碰真实模型、
+用户安装或图库。
 """
 import json
 import os
@@ -30,7 +30,7 @@ class WindowsResearchMathTest(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix='illustash-math-synthetic-') as temporary:
             request = Path(temporary) / 'matrix.json'
             request.write_text(json.dumps(cases), encoding='utf-8')
-            # The candidate cannot search PATH for DLLs or delegate numerical work to Python.
+            # 候选不能在 PATH 里找 DLL，也不能把数值计算交给 Python。
             return subprocess.run([str(self.binary), '--math', str(request)], env=env or (os.environ | {'PATH': ''}),
                                   capture_output=True, timeout=30)
 
@@ -64,9 +64,8 @@ class WindowsResearchMathTest(unittest.TestCase):
         self.assertEqual(actual['bits'], expected)
 
     def test_numpy_large_shapes_exact_across_threaded_blas_dispatch(self):
-        # Large GEMM/SYRK inputs exercise OpenBLAS's threaded path when the test
-        # environment selects multiple threads; each process uses the same fixed
-        # DLL and CPU/thread configuration as its independent NumPy reference.
+        # 测试环境选用多线程时，大的 GEMM/SYRK 输入会走 OpenBLAS 的多线程路径；
+        # 每个进程与它独立的 NumPy 参照使用同一个固定的 DLL 和 CPU/线程配置。
         rng = np.random.default_rng(151151)
         for dtype, bits in ((np.float32, 'u4'), (np.float64, 'u8')):
             cases, expected = [], []
@@ -96,7 +95,7 @@ class WindowsResearchMathTest(unittest.TestCase):
             result = self.probe([self.case(a, a, same=True)], env=env)
             self.assertEqual(result.returncode, 0, result.stderr.decode(errors='replace'))
             self.assertEqual(json.loads(result.stdout)['bits'], [(a @ a.T).ravel().view('u4').tolist()])
-            # An explicitly bad override must not silently switch to the good installed resource.
+            # 显式给错的覆盖不能悄悄换成安装好的正确资源。
             result = self.probe([self.case(a, a)], env=env | {'ILLUSTASH_RESEARCH_OPENBLAS_DLL': 'relative.dll'})
             self.assertNotEqual(result.returncode, 0)
             self.assertIn(b'absolute DLL path', result.stderr)
@@ -131,7 +130,7 @@ from tests import test_native_research_production as production
 
 @unittest.skipUnless(sys.platform == 'win32', 'explicit Windows native development calculator only')
 class WindowsNativeResearchComputeTest(compute.NativeResearchComputeTest):
-    """Algorithm-only comparison through the example; installed routing is tested separately."""
+    """只经 example 对照算法；安装后的路由另外测试。"""
 
 
 
@@ -147,5 +146,5 @@ class WindowsNativeResearchPublicationTest(production.NativeResearchPublicationT
         cls.candidate_worker = Path(configured).resolve()
         if not cls.candidate_worker.is_file():
             raise AssertionError('candidate development calculator missing')
-        # Existing #146 timing fixtures run the actual native example response.
-        # This verifies App publication; it is explicitly NOT native installed routing.
+        # 现有的 #146 计时夹具运行真实的原生 example 响应。
+        # 这里验证的是 App 发布，明确不是安装后的原生路由。

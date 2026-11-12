@@ -1,4 +1,4 @@
-//! Package settings and explicit application-database backups. Preferences never grant network permission or start tasks.
+//! 图库包设置和显式的应用数据库备份。偏好设置从不授予联网许可，也不启动任务。
 use crate::{app_library::Library, character_json, http_json::Json, Error, Result};
 use rusqlite::{Connection, OpenFlags, OptionalExtension, TransactionBehavior};
 use serde::{
@@ -13,11 +13,11 @@ use std::{
 };
 
 const KEYS: [&str; 5] = ["sync", "similar", "index_check", "names", "provenance"];
-/// Removed preferences (#100: the local recognition limit). A stored value is ignored and dropped on the next save.
+/// 已移除的偏好项（#100：本地识别上限）。已存的值会被忽略，并在下次保存时去掉。
 const REMOVED: [&str; 1] = ["local_limit"];
 
-// Persisted settings retain Python dict insertion order. Scalar encoding reuses the persistence serializer;
-// HTTP's ordered representation is only constructed for responses, never used to serialize stored preferences.
+// 持久化的设置保留 Python dict 的插入顺序。标量编码复用持久化的序列化器；HTTP 的有序表示只在构造回复时生成，
+// 从不用来序列化已存的偏好设置。
 #[derive(Clone, Debug)]
 pub(crate) enum SettingValue {
     Scalar(Value),
@@ -167,13 +167,13 @@ pub(crate) fn preset(library: &mut Library, source_id: &str, preset: &str) -> Re
     source.set("preset".into(), SettingValue::Scalar(preset.into()));
     source.set("preset_origin".into(), SettingValue::Scalar("user".into()));
     let response = source.clone().response();
-    // Match the existing configuration-first boundary. SQLite failure leaves an explicit retryable preset.
+    // 与现有的先写配置的边界一致。SQLite 失败时留下一个明确、可重试的出处设置。
     write_config(library.instance_path(), &config)?;
     library.reload_config()?;
     set_asset_preset(library, source_id, preset)?;
     Ok(response)
 }
-/// Every asset of the source takes the source's origin.
+/// 来源下的每张图片都采用来源的出处。
 pub(crate) fn set_asset_preset(library: &Library, source_id: &str, preset: &str) -> Result<()> {
     let mut conn = crate::sqlite::open_with_flags(library.source(), OpenFlags::SQLITE_OPEN_READ_WRITE)?;
     conn.busy_timeout(Duration::from_secs(30))?;
@@ -191,7 +191,7 @@ pub(crate) fn set_asset_preset(library: &Library, source_id: &str, preset: &str)
     Ok(())
 }
 fn connection(lib: &Library, write: bool) -> Result<Connection> {
-    // No CREATE: a removed library must never be silently replaced by a new database.
+    // 不用 CREATE：被移除的图库绝不能被新数据库悄悄顶替。
     let conn = crate::sqlite::open_with_flags(
         lib.db(),
         if write { OpenFlags::SQLITE_OPEN_READ_WRITE } else { OpenFlags::SQLITE_OPEN_READ_ONLY },
@@ -224,8 +224,8 @@ pub(crate) fn startup(lib: &Library) -> Result<Json> {
     Ok(load_startup(&connection(lib, false)?)?.response())
 }
 
-/// Commit preferences only. Session/task/network authorization belongs to the calling application session.
-/// Accept the original body so Python's first-invalid-key error precedence is retained.
+/// 只提交偏好设置。会话、任务和联网授权归调用它的应用会话管。
+/// 接收原始请求体，以保留 Python 按第一个无效键报错的先后顺序。
 pub(crate) fn set_startup_json(lib: &Library, body: &str) -> Result<()> {
     let Json::Object(changes) = crate::http_json::parse_request(body)? else {
         return Err(Error::Invalid("未知设置".into()));
@@ -250,8 +250,8 @@ pub(crate) fn set_startup_json(lib: &Library, body: &str) -> Result<()> {
         Ok(merged.persisted())
     })
 }
-/// Replace one preference with the text `change` builds from the current state. The writer lock is taken before
-/// reading, so concurrent partial updates cannot lose one another. Preferences never grant network or start tasks.
+/// 用 `change` 根据当前状态生成的文本替换一个偏好项。读取前先拿写入锁，所以并发的部分更新不会互相覆盖丢失。
+/// 偏好设置从不授予联网，也不启动任务。
 pub(crate) fn update_pref(lib: &Library, key: &str, change: impl FnOnce(&Connection) -> Result<String>) -> Result<()> {
     let mut conn = connection(lib, true)?;
     let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
@@ -360,8 +360,8 @@ pub(crate) fn info(lib: &Library, forced_off: &[String]) -> Result<Json> {
     ]))
 }
 
-/// Back up only library.sqlite, including committed WAL data, through SQLite's consistent read snapshot.
-/// The explicit action may create backups/; a settings GET never does. Reserved names cannot overwrite backups.
+/// 只备份 library.sqlite，包括已提交的 WAL 数据，通过 SQLite 的一致读快照进行。
+/// 这个显式操作可以创建 backups/；设置的 GET 从不创建。保留的名字不会覆盖已有备份。
 pub fn backup(lib: &Library) -> Result<PathBuf> {
     let source = connection(lib, false)?;
     let stamp: String = source.query_row("SELECT strftime('%Y%m%d-%H%M%S','now','localtime')", [], |r| r.get(0))?;
@@ -383,7 +383,7 @@ pub fn backup(lib: &Library) -> Result<PathBuf> {
             Err(e) => return Err(e.into()),
         }
     };
-    // Cleanup is restricted to the file successfully reserved by this invocation.
+    // 清理只限于本次调用成功占下的那个文件。
     let copied = (|| -> Result<()> {
         let mut target = crate::sqlite::open_with_flags(&dest, OpenFlags::SQLITE_OPEN_READ_WRITE)?;
         target.busy_timeout(Duration::from_secs(20))?;
@@ -625,7 +625,7 @@ mod tests {
         let page_size: usize = db.query_row("PRAGMA page_size", [], |r| r.get(0)).unwrap();
         drop(db);
         let mut bytes = fs::read(f.lib.db()).unwrap();
-        bytes[(page - 1) * page_size] = 0; // Bad data page: opening and strftime succeed; the copied database must fail quick_check.
+        bytes[(page - 1) * page_size] = 0; // 坏数据页：打开和 strftime 都能成功；复制出的数据库必须过不了 quick_check。
         fs::write(f.lib.db(), bytes).unwrap();
         assert!(backup(&f.lib).is_err());
         assert_eq!(fs::read(existing).unwrap(), b"existing");

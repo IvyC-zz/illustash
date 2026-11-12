@@ -1,7 +1,6 @@
-"""#41 native local queries: only disposable synthetic packages and original byte contracts.
+"""#41 原生本地查询：只用用完即弃的合成图库包和原有的字节契约。
 
-The former Python reference's responses and the library states it built are recorded through
-tests/fixed_expectations.py (#9).
+原 Python 参照的响应和它建出的图库状态通过 tests/fixed_expectations.py 录制（#9）。
 """
 from contextlib import closing
 from concurrent.futures import ThreadPoolExecutor
@@ -43,9 +42,8 @@ class NativeLocalReadsTest(unittest.TestCase):
         self.assertEqual(responses[1]['route'],'core')
         if expected<400:
             if url=='/api/names':
-                # #1 extends only GET /api/names. Keep the frozen reference bytes
-                # intact and append the exact unauthorized status for this fixture;
-                # compare the complete native response, including the new field.
+                # #1 只扩展了 GET /api/names。冻结的参照字节保持原样，再补上这个夹具确切的未授权状态；
+                # 比较完整的原生响应，包括新字段。
                 self.assertTrue(responses[0]['body'].endswith(b'}'))
                 responses[0]['body']=(responses[0]['body'][:-1]
                                       + b', "network": {"authorized": false, "granted_at": null, "this_run": false}}')
@@ -88,7 +86,7 @@ class NativeLocalReadsTest(unittest.TestCase):
             for x in batch['items']:self.assertEqual((x['width'],x['height']),valid[x['uuid']])
             if side=='reference':recorded=batch
         self.assertEqual(before,labels.states(self.right))
-        # The batches are random samples: the recorded reference one is the one the test continues with.
+        # 每批都是随机抽样：测试接着用录制的参照那一批。
         return recorded if kind is not None else batch
 
     def test_seed_sample_skip_later_visibility_and_answer_loop(self):
@@ -105,8 +103,8 @@ class NativeLocalReadsTest(unittest.TestCase):
         self.ask(kind='sample',entity=self.alice,allowed=eligible-seeds)
         later=sorted(eligible-seeds)[0];excluded=sorted(eligible-seeds)[1]
         self.seed_both()
-        # The recorded later answer is a relative-time input, not a permanent date.
-        # Preserve the frozen outputs while exercising an unexpired seven-day rest.
+        # 录制的「稍后」回答是相对时间的输入，不是固定日期。
+        # 保持冻结的输出不变，同时测试还没到期的七天暂缓。
         with closing(sqlite3.connect(self.right.db)) as c, c:
             c.execute("UPDATE asked SET asked_at=datetime('now') WHERE answer='later'")
         self.ask()
@@ -138,8 +136,8 @@ class NativeLocalReadsTest(unittest.TestCase):
         for url in ['/api/similar','/api/similar?kind=duplicate','/api/clusters','/api/sync','/api/index',
                     '/api/index?progress=1','/api/provenance','/api/names','/api/names?progress=1']:
             if url=='/api/provenance':
-                # #51 now supplies a coordinator even without computation workers.
-                # Use the real idle Python coordinator for the original byte contract.
+                # #51 起即使没有计算 worker 也会提供协调器，这里和其他路由一样直接对照；
+                # 原来为字节契约接入的真实空闲 Python 协调器随旧参考一起删除了（#9）。
                 pass
             result=self.get_pair(url)
             if url=='/api/similar':self.assertTrue(result['groups'])
@@ -152,8 +150,7 @@ class NativeLocalReadsTest(unittest.TestCase):
         support=self.root/'support';(support/'accounts').mkdir(exist_ok=True)
         (support/'accounts'/'saucenao').write_text('synthetic-placeholder')
         if os.name == 'nt':
-            # Seed the native DPAPI format through its local API; the reference
-            # still reads the existing synthetic plaintext file.
+            # 通过本地 API 写入原生的 DPAPI 格式；参照仍读现有的合成明文文件。
             response = fetch(self.origin, {
                 'url': '/api/accounts/saucenao', 'method': 'POST',
                 'body': json.dumps({'value': 'a' * 40}).encode('utf-8'),
@@ -178,7 +175,7 @@ class NativeLocalReadsTest(unittest.TestCase):
         self.assertEqual((info['name'],info['version'],info['channel'],info['schema']),('Illustash','0.1.0','预览版',36))
         self.assertIsNone(info['python']);self.assertTrue(info['runtime'].startswith('rustc '))
         self.assertRegex(info['build'],r'^[0-9a-f]{7,40}(?:-dirty)?$');self.assertIn('(',info['platform'])
-        # #148: the recognition components the workers would use, found where the workers look; presence only.
+        # #148：worker 会用到的识别组件，在 worker 查找的位置找到；只检查是否存在。
         library = 'onnxruntime.dll' if os.name == 'nt' else 'libonnxruntime.dylib'
         runtime = Path(os.environ.get('ILLUSTASH_ORT_DYLIB') or self.resources / 'onnxruntime' / library)
         worker = os.environ.get('ILLUSTASH_RECOGNITION_WORKER')
@@ -204,7 +201,7 @@ class NativeLocalReadsTest(unittest.TestCase):
 
 
     def test_suggest_2000_cap_nine_limit_and_no_copy_expansion(self):
-        # a/b are synthetic duplicates; selecting a alone must not include b's alternatives.
+        # a/b 是合成的重复图片；只选 a 时不能带上 b 的备选。
         self.assertEqual(self.pair('/api/suggest',{'ids':['a']}),[])
         targets=[]
         self.seed_both()

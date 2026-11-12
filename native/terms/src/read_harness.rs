@@ -1,8 +1,7 @@
-//! Test-only read host (#9): serves the core read routes (`http_read::read`) for the library
-//! context named in a state file, with the shared response encoding of the application host.
-//! It lets the read-route corpus tests compare those bytes with fixed expectations on synthetic
-//! databases in any state, including legacy ones the application host would first upgrade.
-//! Built only with the explicit `test-read-host` feature; never part of the shipped CLI.
+//! 仅供测试的读宿主（#9）：为状态文件里指定的图库上下文提供核心读路由（`http_read::read`），
+//! 响应编码与应用宿主共用。读路由语料测试借此在任意状态的合成数据库上把这些字节与固定期望比较，
+//! 包括应用宿主会先升级的旧版数据库。
+//! 只在显式开启 `test-read-host` feature 时构建；从不进入发布的 CLI。
 use crate::http::LibraryContext;
 use crate::http_json::Json;
 use crate::{Error, Result};
@@ -13,8 +12,8 @@ use std::sync::Arc;
 use std::thread;
 use tiny_http::{Header, Request, Response, Server, StatusCode};
 
-/// State file: `{"db", "generation", "source"?, "library"?, "tags"?, "token"?, "read_only"?}`,
-/// read anew for every request.
+/// 状态文件：`{"db", "generation", "source"?, "library"?, "tags"?, "token"?, "read_only"?}`，
+/// 每个请求都重新读取。
 pub fn current_library(state: &Path) -> Result<LibraryContext> {
     let value: serde_json::Value = serde_json::from_slice(&std::fs::read(state)?)
         .map_err(|e| Error::Invalid(format!("HTTP 图库状态损坏：{e}")))?;
@@ -72,14 +71,14 @@ fn handle(request: &Request, state: &Path, origin: &str) -> io::Result<Response<
             (Json::object([("error", "读取失败，请重试；详情请查看启动终端".into())]), 500)
         }
     };
-    // A republished state (another library or context) invalidates a read that raced with it.
+    // 状态被重新发布（换了图库或上下文）时，与之并发的读取作废。
     if !current_library(state).is_ok_and(|c| c.generation == context.generation) {
         return Ok(refused(503, "图库状态在读取期间改变", "unavailable"));
     }
     crate::http::json_response(request, &payload, status, "core")
 }
 
-/// `read-http --port PORT --state FILE`; runs until the process is stopped.
+/// `read-http --port PORT --state FILE`；一直运行到进程被停止。
 pub fn run(args: &[String]) -> Result<u8> {
     let mut port = None;
     let mut state = None;
@@ -98,7 +97,7 @@ pub fn run(args: &[String]) -> Result<u8> {
     let listener = TcpListener::bind(("127.0.0.1", port))?;
     let server = Server::from_listener(listener, None).map_err(|e| Error::Invalid(e.to_string()))?;
     println!("测试读宿主已启动：{origin}");
-    // One worker per request, as in the application host.
+    // 每个请求一个 worker 线程，与应用宿主相同。
     for request in server.incoming_requests() {
         let (state, origin) = (state.clone(), origin.clone());
         thread::spawn(move || {

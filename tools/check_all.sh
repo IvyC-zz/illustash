@@ -56,6 +56,8 @@ run node --test tests/*.test.cjs tests/test_pixiv_poll.js
 run cargo clippy --locked --manifest-path desktop/Cargo.toml --all-targets -- -D warnings
 run cargo test --locked --manifest-path desktop/Cargo.toml
 run cargo test --locked --manifest-path native/terms/Cargo.toml
+run cargo fmt --manifest-path crates/iqdb/Cargo.toml --check
+run cargo clippy --locked --manifest-path crates/iqdb/Cargo.toml --all-targets -- -D warnings
 run cargo test --locked --manifest-path crates/iqdb/Cargo.toml
 run cargo build --release --locked --manifest-path native/terms/Cargo.toml
 run cargo build --release --locked --manifest-path native/terms/Cargo.toml --features test-read-host --example read-http --example recognition-compute --example index-compute --example research-compute --example relation-probe --example provenance-compute

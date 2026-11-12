@@ -1,4 +1,4 @@
-"""#93: actual base artifact, isolated user, no review/shared/reference and no Python PATH."""
+"""#93：真实的基础安装产物、隔离的用户，没有 review/shared/reference，PATH 里也没有 Python。"""
 from contextlib import closing
 import hashlib
 import json
@@ -69,7 +69,7 @@ class NativeFirstInstallTest(unittest.TestCase):
 
     def check_sync(self, dest):
         result = self.sync()
-        # Recognition is optional and absent from the base install. Inventory/import must finish.
+        # 识别是可选的，基础安装里没有。清点/导入必须完成。
         self.assertEqual(result['state']['status'], 'needs_recognition', result)
         with closing(sqlite3.connect(dest / 'source.sqlite')) as c:
             self.assertEqual(c.execute('SELECT width,height,hidden,orig_size FROM assets').fetchall(),
@@ -79,7 +79,7 @@ class NativeFirstInstallTest(unittest.TestCase):
             self.assertEqual(c.execute('SELECT filename,width,height FROM assets').fetchall(), [('red.png', 31, 23)])
         self.assertEqual(hashlib.sha256((self.folder / 'red.png').read_bytes()).hexdigest(), self.before)
         self.assertFalse(list(self.root.rglob('reference.sqlite')))
-        # Exercise the embeddings invalidation branch after the first successful import.
+        # 在第一次成功导入之后走一遍 embeddings 失效的分支。
         Image.new('RGB', (19, 17), 'blue').save(self.folder / 'red.png')
         self.assertEqual(self.sync()['state']['status'], 'needs_recognition')
         with closing(sqlite3.connect(dest / 'library.sqlite')) as c:
@@ -91,7 +91,7 @@ class NativeFirstInstallTest(unittest.TestCase):
         self.check_sync(dest)
 
     def test_base_install_http_create_open_then_first_sync(self):
-        first = self.create()  # Current host requires an explicit initial library; create it with installed CLI.
+        first = self.create()  # 当前宿主要求显式给出初始图库；用安装好的 CLI 创建。
         self.start(first)
         response = self.request('/api/libraries/new', {'kind': 'folder', 'folder': str(self.folder), 'name': '合成 HTTP'})
         self.assertEqual(response['status'], 200, response['body'])
@@ -117,7 +117,7 @@ class NativeFirstInstallTest(unittest.TestCase):
         self.start(self.create())
         reference = self.install / 'resources/review/reference.sqlite'
         reference.parent.mkdir()
-        # Build only owned synthetic input, then remove exactly one synchronization dependency.
+        # 只构建测试自己持有的合成输入，然后恰好去掉一项同步依赖。
         from tests.synthetic_source import synthetic_reference
         synthetic_reference(reference.parent)
         with closing(sqlite3.connect(reference)) as c:
@@ -132,7 +132,7 @@ class NativeFirstInstallTest(unittest.TestCase):
         self.assertFalse((self.home / 'Pictures/Illustash/rejected.pilib').exists())
 
     def test_http_create_with_blocked_registry_reports_the_published_package(self):
-        # #97: only listing it failed. The answer names the package so the page offers it instead of a second one.
+        # #97：只是登记失败了。响应指明这个包，页面就提供它，而不是再建一个。
         self.start(self.create())
         registry = self.root / 'support/libraries.json'
         before = registry.read_bytes()
@@ -147,12 +147,12 @@ class NativeFirstInstallTest(unittest.TestCase):
         (self.root / 'support/libraries.tmp').rmdir()
         response = self.request('/api/libraries/open', {'path': made['path']})
         self.assertEqual(response['status'], 200, response['body'])
-        # Compare parsed paths: on Windows the registry's JSON escapes every backslash.
+        # 比较解析后的路径：在 Windows 上，登记表的 JSON 会转义每个反斜杠。
         self.assertIn(made['path'], [entry['path'] for entry in json.loads(registry.read_text(encoding='utf-8'))['recent']])
 
     def test_opening_with_blocked_registry_still_opens_and_says_why(self):
-        # #176: listing only spares picking the library again next time; it opens even when the registry cannot be
-        # written, and the libraries answer says why once. Without a failure the answer carries no such field.
+        # #176：登记只是省去下次再选一次图库；登记表写不进去时图库照样打开，图库列表的响应说明一次原因。
+        # 没有失败时响应里没有这个字段。
         self.start(self.create())
         self.assertNotIn('unlisted', json.loads(self.request('/api/libraries')['body']))
         response = self.request('/api/libraries/new', {'kind': 'folder', 'folder': str(self.folder), 'name': '另一个'})
@@ -170,7 +170,7 @@ class NativeFirstInstallTest(unittest.TestCase):
         (self.root / 'support/libraries.tmp').rmdir()
 
     def test_existing_user_creating_another_library_keeps_the_first_and_its_guide(self):
-        # #97: a second library starts its own guide; the first library, its sources and its guide stay as they were.
+        # #97：第二个图库开始它自己的引导；第一个图库、它的来源和引导保持原样。
         first = self.create()
         self.start(first)
         self.token = json.loads(self.request('/api/bootstrap')['body'])['token']

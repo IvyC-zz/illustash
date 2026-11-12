@@ -1,5 +1,5 @@
-// Checking for new characters reaches Danbooru: it asks first, every time, and a library switched while the question is
-// open is never checked (core/jobs.js checkIndex(); the task panel's button is ui/tasks.js; #199).
+// 检查新角色要访问 Danbooru：每次都先询问；询问还开着时切换了图库，就不检查（core/jobs.js 的 checkIndex()；
+// 任务面板的按钮在 ui/tasks.js；#199）。
 const {test, before} = require('node:test');
 const assert = require('node:assert/strict');
 const web = require('./web.cjs');
@@ -29,7 +29,7 @@ test('a library change during confirmation cannot authorize the new library', as
 });
 test('the task button is usable immediately after cancelled confirmation', async () => {
   const {calls} = harness(), {document, el} = web.fakePage();
-  // The page's own dialog (ui/dialog.js), cancelled as soon as it shows.
+  // 页面自己的对话框（ui/dialog.js），一显示就取消。
   let asked = 0;
   document.body.append = d => { asked++; d.showModal = () => { d.returnValue = 'cancel'; d.onclose(); }; };
   const {wireTasks} = await web.load('ui/tasks.js');

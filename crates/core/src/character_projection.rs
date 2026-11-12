@@ -1,6 +1,6 @@
-//! S3: execute the existing Python ownership SQL, without translating its rules.
-//! The SQL files are exact captures of Store._refresh_*; contract tests compare them
-//! against SQL captured from the live Python functions (including bound parameters).
+//! S3：执行现有 Python 的归属 SQL，不翻译它的规则。
+//! 这些 SQL 文件是 Store._refresh_* 的原样截取；契约测试把它们和从运行中的 Python 函数截取的 SQL
+//! （含绑定参数）比对。
 use crate::{Error, Result};
 use rusqlite::{params_from_iter, Connection, OptionalExtension};
 
@@ -226,13 +226,11 @@ pub(crate) fn mirror_all(c: &Connection) -> Result<()> {
     mirror(c, false)
 }
 
-/// Only the character/skin slice is replaced; artist/label projections stay intact.
+/// 只替换角色/皮肤这一部分；画师/标签的投影保持不动。
 fn mirror(c: &Connection, touched: bool) -> Result<()> {
-    // S2 registers assets referenced by old evidence/verdicts. A prototype can be
-    // the first evidence for another existing library image: register it here.
+    // S2 登记旧证据/裁决引用的图片。原型可能是另一张已在图库里的图片的第一条证据：在这里登记它。
     let scope = if touched { " WHERE uuid IN (SELECT uuid FROM touched)" } else { "" };
-    // library_asset's semantics, in the same sorted order: live registrations stay
-    // untouched, missing/removed ones are registered only if present in assets.
+    // 语义同 library_asset，排序也相同：现有的登记不动，缺失或已移除的只在 assets 里存在时才登记。
     c.execute(
         &format!(
             "INSERT INTO term_assets(namespace,key)
@@ -251,8 +249,8 @@ fn mirror(c: &Connection, touched: bool) -> Result<()> {
     } else {
         ""
     };
-    // Two IN lists can make SQLite probe every (term, touched asset) pair.
-    // Drive the delete by asset_id and test character ownership by primary key.
+    // 两个 IN 列表会让 SQLite 逐一探查每个（词条，受影响图片）组合。
+    // 改为按 asset_id 驱动删除，按主键判断角色归属。
     let owned = if touched {
         "EXISTS (SELECT 1 FROM term_tree r WHERE r.term_id=term_projection.term_id)"
     } else {
@@ -301,7 +299,7 @@ pub(crate) fn refresh_delayed(c: &Connection) -> Result<()> {
     Ok(())
 }
 
-/// Refresh folded identities inside the caller's existing transaction.
+/// 在调用方现有的事务里刷新折叠后的身份。
 pub fn fold(c: &Connection) -> Result<()> {
     c.execute(FOLD, [])?;
     Ok(())

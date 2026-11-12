@@ -1,5 +1,5 @@
 //! 原生角色索引：稳定查询、补丁提交和恢复；计算 worker 仅处理隔离快照。
-#![cfg_attr(not(test), deny(clippy::unwrap_used))]
+use crate::error::invalid;
 use crate::{
     app_library::Library,
     app_tasks::{Task, TaskContext, TaskIdentity},
@@ -29,9 +29,6 @@ const DEFAULTS: [&str; 8] = [
     "honkai_impact_3rd",
     "zenless_zone_zero",
 ];
-fn bad<T>(s: &str) -> Result<T> {
-    Err(Error::Invalid(s.into()))
-}
 fn now() -> String {
     chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string()
 }
@@ -95,9 +92,9 @@ fn fingerprint(c: &Connection) -> Result<String> {
         .as_bytes(),
     ))
 }
-// The watch list holds work IDs (docs/DATA_MODEL.md), which exist only in the library that owns them, so each library
-// keeps its own list and threshold in its prefs (#205). A library without one starts from the shared `watch.json` of
-// earlier versions: only its own works and the unresolved tags carry over, and that file is never written again.
+// 关注列表存的是作品 ID（docs/DATA_MODEL.md），它们只在所属的图库里存在，
+// 所以每个图库在自己的 prefs 里保存自己的列表和阈值（#205）。没有列表的图库从旧版本共用的 `watch.json` 开始：
+// 只带过来它自己的作品和未解析的 tag，那个文件以后不再写入。
 const WATCH_PREF: &str = "index_watch";
 fn work_for_tag(c: &Connection, tag: &str, current: bool) -> Result<Option<String>> {
     let current = if current { " AND l.current = 1" } else { "" };
@@ -146,7 +143,7 @@ fn load_watch(c: &Connection, dir: &Path) -> Result<Value> {
         Some(text) => serde_json::from_str(&text).map_err(|e| Error::Invalid(format!("无效的关注列表：{e}")))?,
         None => legacy_watch(c, dir)?,
     };
-    // An old tag resolves once a work in this library carries it as its current Danbooru link.
+    // 本图库里有作品把旧 tag 作为当前的 Danbooru 链接时，这个 tag 就解析出来了。
     let mut ids = w["works"].as_array().cloned().unwrap_or_default();
     let mut remaining = vec![];
     for tag in w["pending_tags"].as_array().into_iter().flatten() {
@@ -168,14 +165,14 @@ fn watch(lib: &Library, dir: &Path) -> Result<Value> {
 }
 fn set_watch(lib: &Library, dir: &Path, b: &Value) -> Result<()> {
     let Some(works) = b["works"].as_array().filter(|a| a.len() <= 40 && a.iter().all(Value::is_string)) else {
-        return bad("关注列表应为最多 40 个作品 ID");
+        return invalid("关注列表应为最多 40 个作品 ID");
     };
     let Some(n) = b["min_posts"].as_i64().filter(|n| (20..=5000).contains(n)) else {
-        return bad("最少图片数应在 20–5000 之间");
+        return invalid("最少图片数应在 20–5000 之间");
     };
     let mut c = crate::sqlite::open_with_flags(lib.db(), rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE)?;
     c.busy_timeout(Duration::from_secs(20))?;
-    // Take the writer lock first so two saves cannot drop each other's changes.
+    // 先取写锁，两次保存就不会互相丢掉对方的改动。
     let tx = c.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
     crate::schema::require_current(&tx)?;
     for w in works {
@@ -191,7 +188,7 @@ fn set_watch(lib: &Library, dir: &Path, b: &Value) -> Result<()> {
         if !tx
             .query_row(&linked, [w.as_str().expect("watch list was validated as strings")], |r| r.get::<_, bool>(0))?
         {
-            return bad("只能关注已确认 Danbooru 链接的作品");
+            return invalid("只能关注已确认 Danbooru 链接的作品");
         }
     }
     let mut w = load_watch(&tx, dir)?;
@@ -264,7 +261,7 @@ fn candidates(lib: &Library, shared: &Path, dir: &Path, net: &crate::app_name_so
         let related = rel["related_tags"].as_array().ok_or_else(|| Error::Network("索引查询响应不正确".into()))?;
         let mut n = 0;
         for r in related {
-            let Some(tag) = r["tag"]["name"].as_str() else { return bad("索引角色 tag 不正确") };
+            let Some(tag) = r["tag"]["name"].as_str() else { return invalid("索引角色 tag 不正确") };
             let id = short(tag);
             let posts = r["tag"]["post_count"].as_i64().unwrap_or(0);
             let overlap = r["overlap_coefficient"].as_f64().unwrap_or(0.0);
@@ -291,7 +288,7 @@ fn candidates(lib: &Library, shared: &Path, dir: &Path, net: &crate::app_name_so
 }
 
 pub(crate) struct Updater {
-    /// The resource root: where the recognition models are looked for (#168).
+    /// 资源根目录：在这里找识别模型（#168）。
     resources: PathBuf,
     shared: PathBuf,
     dir: PathBuf,
@@ -328,7 +325,7 @@ impl Updater {
             next_retry: Instant::now(),
         })
     }
-    /// The works this library watches for new characters (#96 marks them among the suggested works).
+    /// 这个图库关注新角色的作品（#96 在推荐作品里标出它们）。
     pub fn watched(&self, lib: &Library) -> Result<Vec<String>> {
         Ok(watch(lib, &self.dir)?["works"]
             .as_array()
@@ -439,31 +436,30 @@ impl Updater {
     pub fn post(&mut self, lib: &Library, b: &Json, busy: bool) -> Result<Json> {
         let b: Value = serde_json::from_str(&b.dump()).map_err(|e| Error::Invalid(e.to_string()))?;
         if lib.frozen() {
-            return bad("测试图库不能更新索引");
+            return invalid("测试图库不能更新索引");
         };
         match b["action"].as_str() {
             Some("watch") => set_watch(lib, &self.dir, &b)?,
-            // A job that paused for the person (#287): go on with a new run, or give it up before anything of it
-            // was written.
+            // 为等人确认而暂停的任务（#287）：用新的一次运行继续，或在它还没写入任何东西之前放弃。
             Some("resume") => {
                 if b.get("allow_network").is_some_and(|v| !v.is_boolean()) {
-                    return bad("联网确认必须是布尔值");
+                    return invalid("联网确认必须是布尔值");
                 }
                 if busy {
-                    return bad("正在与 Photos 同步，完成后再更新角色索引");
+                    return invalid("正在与 Photos 同步，完成后再更新角色索引");
                 }
                 if !self.journal.exists() {
-                    return bad("没有等待继续的索引任务");
+                    return invalid("没有等待继续的索引任务");
                 }
                 self.next_retry = Instant::now() + Duration::from_secs(60);
                 self.start(lib, json!({"action":"resume", "allow_network":b["allow_network"]}))?;
             }
             Some("discard") => {
                 if self.task.as_ref().is_some_and(Task::running) {
-                    return bad("角色索引正在更新，请稍后");
+                    return invalid("角色索引正在更新，请稍后");
                 }
                 if paused(&self.journal).is_none() {
-                    return bad("没有可以放弃的添加任务");
+                    return invalid("没有可以放弃的添加任务");
                 }
                 let job: protocol::IndexJob = protocol::read(&self.journal)?;
                 if job.folder.parent() == Some(lib.instance_path().join("index-jobs").as_path()) {
@@ -474,16 +470,16 @@ impl Updater {
             }
             Some("check" | "apply" | "drop") => {
                 if b.get("allow_network").is_some_and(|v| !v.is_boolean()) {
-                    return bad("联网确认必须是布尔值");
+                    return invalid("联网确认必须是布尔值");
                 }
                 if b["action"] == "check" && !self.network && b["allow_network"] != true {
-                    return bad("请先确认本次检查允许联网查询 Danbooru");
+                    return invalid("请先确认本次检查允许联网查询 Danbooru");
                 }
                 if paused(&self.journal).is_some() && !self.task.as_ref().is_some_and(Task::running) {
-                    return bad("上次添加角色已暂停，请先在任务面板里继续或放弃");
+                    return invalid("上次添加角色已暂停，请先在任务面板里继续或放弃");
                 }
                 if b["action"] != "check" && busy {
-                    return bad("正在与 Photos 同步，完成后再更新角色索引");
+                    return invalid("正在与 Photos 同步，完成后再更新角色索引");
                 };
                 if self.journal.exists() && b["action"] != "check" {
                     let job: protocol::IndexJob = protocol::read(&self.journal)?;
@@ -502,7 +498,7 @@ impl Updater {
                         job["rows"][0]["short_tag"] == b["char"] && job["reason"] == b["reason"]
                     };
                     if !same || job["action"] != b["action"] {
-                        return bad("上次索引任务尚待恢复，请先重试原任务");
+                        return invalid("上次索引任务尚待恢复，请先重试原任务");
                     }
                     self.next_retry = Instant::now() + Duration::from_secs(60);
                     self.start(lib, json!({"action":"resume", "allow_network":b["allow_network"]}))?;
@@ -511,7 +507,7 @@ impl Updater {
                     self.start(lib, b)?;
                 }
             }
-            _ => return bad("未知操作"),
+            _ => return invalid("未知操作"),
         };
         self.info(lib)
     }
@@ -520,7 +516,7 @@ impl Updater {
             return;
         }
         if self.journal.exists() {
-            // A paused job waits for the person; after a restart it shows where it stopped.
+            // 暂停的任务等人确认；重启之后显示它停在哪里。
             if let Some(waiting) = paused(&self.journal) {
                 let mut state = self.state.lock().expect("index state mutex poisoned");
                 if state.status() == Status::Idle {
@@ -552,7 +548,7 @@ impl Updater {
     }
     fn start(&mut self, lib: &Library, b: Value) -> Result<()> {
         if self.task.as_ref().is_some_and(Task::running) {
-            return bad("角色索引正在更新，请稍后");
+            return invalid("角色索引正在更新，请稍后");
         };
         let action = b["action"].as_str().unwrap_or("");
         let mut rows = vec![];
@@ -560,7 +556,7 @@ impl Updater {
             let check = read(&self.dir.join("check.json"), json!({}));
             let offered = check["missing"].as_array().cloned().unwrap_or_default();
             let Some(tags) = b["tags"].as_array().filter(|t| !t.is_empty()) else {
-                return bad("请从最近一次检查的结果里选择角色");
+                return invalid("请从最近一次检查的结果里选择角色");
             };
             for t in tags {
                 let r = offered
@@ -576,18 +572,18 @@ impl Updater {
             let id = b["char"].as_str().unwrap_or("");
             let m = meta(&self.shared, id);
             if m["source"] != "danbooru-patch" {
-                return bad("只能放弃从 Danbooru 补进来的角色");
+                return invalid("只能放弃从 Danbooru 补进来的角色");
             };
             if b["reason"].as_str().is_none_or(|r| r.trim().is_empty() || r.trim().chars().count() > 200) {
-                return bad("请写一句放弃的原因");
+                return invalid("请写一句放弃的原因");
             };
             rows.push(m);
         }
         if action != "check" && action != "resume" && std::env::var_os("ILLUSTASH_INDEX_WORKER").is_none() {
-            return bad("角色索引计算 worker 未配置");
+            return invalid("角色索引计算 worker 未配置");
         };
         if action != "check" && action != "resume" && crate::app_models::waiting(&self.resources) {
-            return bad("识别模型还没下载；下载后才能更新角色索引");
+            return invalid("识别模型还没下载；下载后才能更新角色索引");
         }
         self.task.take();
         let identity = TaskIdentity::new(lib, self.generation, &self.session)?;
@@ -599,7 +595,7 @@ impl Updater {
             self.state.clone(),
             self.network || b["allow_network"] == true,
         );
-        // What a failure says it was: a resumed job is the add or drop it continues.
+        // 失败时说它是什么任务：继续运行的任务就是它所接续的添加或移除。
         let kind = match (action, std::fs::read(&self.journal).ok()) {
             ("resume", Some(bytes)) => {
                 match serde_json::from_slice::<Value>(&bytes).ok().map(|j| j["action"].clone()) {
@@ -642,7 +638,7 @@ impl Updater {
             };
             let result = run();
             if let Err(ref e) = result {
-                // The reason alone: the error's kind ("不合法：…") is for the code, not the person (#287).
+                // 只写原因：错误的类别（"不合法：…"）是给代码看的，不是给人看的（#287）。
                 let message = ctx.stop_reason().unwrap_or_else(|| e.reason()).chars().take(300).collect::<String>();
                 update(&state, json!({"status":"error","kind":kind,"message":message,"finished_at":now()}));
             }
@@ -651,9 +647,8 @@ impl Updater {
         Ok(())
     }
 }
-/// An index run stops once it makes no progress for ILLUSTASH_INDEX_TIMEOUT_MS (default 10 minutes); every
-/// picture downloaded and every step the worker reports is progress, so adding many characters is not cut off
-/// at a fixed time from its start (#287). ILLUSTASH_INDEX_MAX_MS (default 24 hours) bounds the whole run.
+/// 索引运行在 ILLUSTASH_INDEX_TIMEOUT_MS（默认 10 分钟）内没有进展就停止；每下载一张图、worker 每报告一步都算进展，
+/// 所以添加很多角色不会在开始后固定的时间被截断（#287）。ILLUSTASH_INDEX_MAX_MS（默认 24 小时）限制整次运行。
 fn deadline() -> crate::app_tasks::Deadline {
     let ms = |name: &str, default: u64| {
         Duration::from_millis(
@@ -665,12 +660,12 @@ fn deadline() -> crate::app_tasks::Deadline {
         limit: Some(ms("ILLUSTASH_INDEX_MAX_MS", 86_400_000)),
     }
 }
-// Cross-process shared-index lock. The OS releases it on crash; no stale lock file blocks restart.
+// 跨进程的共享索引锁。崩溃时操作系统会释放它；不会有残留的锁文件挡住重启。
 struct SharedLock(std::fs::File);
 impl SharedLock {
     fn acquire(dir: &Path, ctx: &TaskContext) -> Result<Self> {
         if crate::app_file_lock::ensure_supported().is_err() {
-            return bad("当前平台尚不支持索引计算 worker");
+            return invalid("当前平台尚不支持索引计算 worker");
         }
         std::fs::create_dir_all(dir)?;
         let file = std::fs::OpenOptions::new()
@@ -704,7 +699,7 @@ fn copy_tree(src: &Path, dst: &Path, ctx: &TaskContext) -> Result<()> {
         ctx.check()?;
         let e = e?;
         if e.file_type()?.is_symlink() {
-            return bad("索引资源不能是符号链接");
+            return invalid("索引资源不能是符号链接");
         }
         if e.file_type()?.is_dir() {
             copy_tree(&e.path(), &dst.join(e.file_name()), ctx)?;
@@ -714,10 +709,10 @@ fn copy_tree(src: &Path, dst: &Path, ctx: &TaskContext) -> Result<()> {
     }
     Ok(())
 }
-/// The most one reference picture may take.
+/// 一张参考图最多能占的大小。
 const PICTURE_MAX: u64 = 2_000_000;
-/// Shown while an add waits for the person, and kept in the job's journal until they let it go on (#287): after a
-/// restart or the automatic retry nobody allowed the network for this run, and pictures are still missing.
+/// 添加等人确认时显示，并保留在任务日志里，直到对方让它继续（#287）：重启或自动重试之后，
+/// 没有人为这次运行允许联网，而参考图还没下载齐。
 const NETWORK_PAUSE: &str = "继续下载参考图需要你确认联网";
 fn download(address: &str, path: &Path, ctx: &TaskContext, authorized: bool) -> Result<()> {
     ctx.check()?;
@@ -729,7 +724,7 @@ fn download(address: &str, path: &Path, ctx: &TaskContext, authorized: bool) -> 
         || (!local && (u.scheme() != "https" || !matches!(u.host_str(), Some("cdn.donmai.us" | "danbooru.donmai.us"))))
         || (local && u.scheme() != "http")
     {
-        return bad("参考图来源尚未授权或不在 Danbooru 来源范围");
+        return invalid("参考图来源尚未授权或不在 Danbooru 来源范围");
     };
     let mut last = None;
     for _ in 0..3 {
@@ -746,7 +741,7 @@ fn download(address: &str, path: &Path, ctx: &TaskContext, authorized: bool) -> 
                 };
                 ctx.check()?;
                 std::fs::create_dir_all(path.parent().expect("index file path must have a parent"))?;
-                // Whole or absent: a picture kept for the next run is never one cut short.
+                // 要么完整，要么没有：留给下次运行的图从不是截断的。
                 let tmp = path.with_extension(format!("img.{}.tmp", crate::store::new_key()?));
                 std::fs::write(&tmp, bytes)?;
                 std::fs::rename(tmp, path)?;
@@ -758,20 +753,19 @@ fn download(address: &str, path: &Path, ctx: &TaskContext, authorized: bool) -> 
     }
     Err(last.expect("download retry loop always records a failure"))
 }
-/// The journal's note of a job that waits for the person to let it go on; the automatic retry leaves it alone.
+/// 任务日志里的标记，表示任务在等人让它继续；自动重试不动它。
 const PAUSED: &str = "paused";
-/// Whether reaching this service needs the person's consent: any but a synthetic one on this machine, which
-/// tests may also have count as remote to see an add wait.
+/// 访问这个服务是否需要对方同意：除了本机上的合成服务，都需要；测试也可以让合成服务算作远程，以便看到添加在等待。
 fn needs_consent(base: &str) -> bool {
     !url::Url::parse(base).is_ok_and(|u| matches!(u.host_str(), Some("127.0.0.1" | "localhost" | "[::1]")))
         || std::env::var_os("ILLUSTASH_TEST_INDEX_CONSENT").is_some()
 }
-/// Whether a character's reference pictures are all in place in the job's folder.
+/// 一个角色的参考图是否都已放在任务文件夹里。
 fn fetched(folder: &Path, cid: &str) -> bool {
     meta(folder, cid)["source"] == "danbooru-patch"
         || folder.join("char-patch").join(format!("{cid}-refs.json")).exists()
 }
-/// The state of a job that waits in its journal, if it does.
+/// 在任务日志里等待的任务的状态（如果有的话）。
 fn paused(journal: &Path) -> Option<Value> {
     let job: protocol::IndexJob = protocol::read(journal).ok()?;
     job.extra.get(PAUSED).filter(|_| job.phase == protocol::JobPhase::Prepared).cloned()
@@ -795,19 +789,18 @@ fn patch(
     let mut job: protocol::IndexJob =
         if journal.exists() { protocol::read(journal)? } else { prepare_job(lib, paths, b, rows, ctx)? };
     if job.version != 1 || job.package != lib.instance_path() {
-        return bad("索引恢复包实例不匹配");
+        return invalid("索引恢复包实例不匹配");
     };
     let folder = job.folder.clone();
     if folder.parent() != Some(lib.instance_path().join("index-jobs").as_path())
         || folder.file_name().and_then(|n| n.to_str()) != Some(job.job_id.as_str())
     {
-        return bad("索引任务目录越界");
+        return invalid("索引任务目录越界");
     }
     if job.phase == protocol::JobPhase::Prepared {
         job.identity = ctx.identity().clone();
-        // Going on: a failure from here is retried as before, and a pause is written again. A job that waited
-        // for the person may have waited through syncs; it goes on from the library as it is now, keeping the
-        // pictures it has (#287).
+        // 继续运行：从这里起的失败照旧重试，暂停会再次写入。等人确认的任务可能等过了几次同步；它从图库现在的样子继续，
+        // 保留已有的参考图（#287）。
         if job.extra.remove(PAUSED).is_some() {
             job.before = snapshot_library(lib, &folder, ctx)?;
         }
@@ -830,7 +823,7 @@ fn patch(
     ctx.receive(ctx.identity(), || commit(lib, shared, dir, journal, &mut job, ctx, state))?;
     Ok(())
 }
-/// A new job: its own folder holding a snapshot of source.sqlite and every input the worker reads, and its journal.
+/// 新任务：它自己的文件夹，里面有 source.sqlite 的快照和 worker 要读的每个输入，以及它的任务日志。
 fn prepare_job(
     lib: &Library,
     paths: &PatchPaths<'_>,
@@ -867,9 +860,9 @@ fn prepare_job(
     prepared.1 = true;
     Ok(job)
 }
-/// The job's copy of what the library may change while the job waits: the source database, the library's
-/// features and album map. The shared index files only change under index jobs, which wait for this one.
-/// Returns the fingerprint the result is checked against when it is committed.
+/// 任务等待期间图库可能改动的内容在任务里的副本：来源数据库、图库的 features 和相册映射。
+/// 共享索引文件只在索引任务里改变，而索引任务会等这个任务。
+/// 返回提交结果时用来核对的指纹。
 fn snapshot_library(lib: &Library, folder: &Path, ctx: &TaskContext) -> Result<String> {
     let src = crate::app_library::read_connection(&lib.source())?;
     let _ = std::fs::remove_file(folder.join("pi.db"));
@@ -890,10 +883,9 @@ fn snapshot_library(lib: &Library, folder: &Path, ctx: &TaskContext) -> Result<S
     }
     fingerprint(&crate::app_library::read_connection(&folder.join("pi.db"))?)
 }
-/// Downloads up to twenty Danbooru reference pictures of each new character, unless its index is already patched.
-/// A character whose list of pictures is written is done; a later run of the same job skips it, and reuses the
-/// pictures of the one it stopped in (#287). Returns false when the characters still to fetch need the network
-/// and nobody allowed it for this run (a restart or the automatic retry): the add then waits for the person.
+/// 为每个新角色下载最多二十张 Danbooru 参考图，除非它的索引已经打过补丁。写下了图片列表的角色就算完成；
+/// 同一任务后来的运行会跳过它，并复用停下时那个角色的图片（#287）。还要下载的角色需要联网、
+/// 而没有人为这次运行允许（重启或自动重试）时返回 false：这时添加等人确认。
 fn fetch_references(
     rows: &[protocol::IndexRow],
     folder: &Path,
@@ -905,7 +897,7 @@ fn fetch_references(
         ctx.check()?;
         let cid = r.short_tag.as_str();
         if !safe(cid) {
-            return bad("索引角色 ID 不正确");
+            return invalid("索引角色 ID 不正确");
         };
         update(state, json!({"status":"fetching","done":i,"total":rows.len()}));
         if fetched(folder, cid) {
@@ -921,7 +913,7 @@ fn fetch_references(
         ];
         let posts = net.fetch(&crate::app_name_sources::url(&net.db_base, "/posts.json", &query), None, None)?;
         let Some(posts) = posts.as_array().filter(|p| p.len() <= 20) else {
-            return bad("参考图帖子响应不正确");
+            return invalid("参考图帖子响应不正确");
         };
         let mut refs = vec![];
         for p in posts {
@@ -948,7 +940,7 @@ fn fetch_references(
     }
     Ok(true)
 }
-/// Runs the index worker on the job's folder, passing on its progress, and reads back its checked response.
+/// 在任务文件夹上运行索引 worker，转发它的进度，并读回它经过校验的响应。
 fn compute(
     job: &protocol::IndexJob,
     folder: &Path,
@@ -988,22 +980,22 @@ fn compute(
     }
     let status = process.join().map_err(|_| Error::Invalid("索引计算进程等待失败".into()))??;
     if !status.success() {
-        return bad("角色索引计算 worker 失败");
+        return invalid("角色索引计算 worker 失败");
     };
     ctx.check()?;
     if std::fs::metadata(folder.join("response.json"))?.len() > 64_000_000 {
-        return bad("索引结果超过 64 MB");
+        return invalid("索引结果超过 64 MB");
     }
     let response: protocol::IndexResponse = protocol::read(&folder.join("response.json"))?;
     if &response.identity != ctx.identity()
         || response.format != protocol::Format::Index
         || response.before != job.before
     {
-        return bad("索引结果身份或版本不匹配");
+        return invalid("索引结果身份或版本不匹配");
     };
     Ok(response)
 }
-/// Passes on the step and counts the worker last wrote to progress.json, when they are this job's.
+/// 转发 worker 最后写进 progress.json 的步骤和计数，如果它们属于这个任务。
 fn report_progress(folder: &Path, ctx: &TaskContext, state: &Mutex<State>) {
     let p = read(&folder.join("progress.json"), Value::Null);
     if p["identity"] != json!(ctx.identity()) {
@@ -1042,7 +1034,7 @@ fn validate(lib: &Library, v: &protocol::IndexResponse, file: &Path) -> Result<(
             return Err(field_error(&format!("characters[{index}].char_id"), "索引角色 ID 不正确"));
         }
         if !ids.insert(id) {
-            return bad("索引角色重复");
+            return invalid("索引角色重复");
         };
         for key in [
             "danbooru_tag",
@@ -1095,16 +1087,16 @@ fn validate(lib: &Library, v: &protocol::IndexResponse, file: &Path) -> Result<(
             || !ids.contains(r.1.as_str())
             || !(0.0..=1.0).contains(&r.2)
         {
-            return bad("索引认领越界");
+            return invalid("索引认领越界");
         };
         if !seen.insert((&r.0, &r.1)) {
-            return bad("索引认领重复");
+            return invalid("索引认领重复");
         }
     }
     let aliases = &v.aliases;
     for r in aliases {
         if !safe(&r.0) {
-            return bad("索引别名越界");
+            return invalid("索引别名越界");
         }
     }
     Ok(())
@@ -1135,7 +1127,7 @@ fn commit(
     record(dir, &id, &chars, changed, drop)?;
     prune_backups(dir)?;
     let added = chars.iter().filter(|r| r["status"] == "added").count();
-    // Clean up before reporting done: whoever sees done must find no journal or job folder left (#123).
+    // 报告完成之前先清理：看到完成的人必须找不到残留的任务日志或任务文件夹（#123）。
     std::fs::remove_file(journal)?;
     let _ = std::fs::remove_dir_all(&folder);
     update(
@@ -1145,7 +1137,7 @@ fn commit(
     pause_after_done();
     Ok(())
 }
-/// The job as source.sqlite recorded it when an earlier attempt committed it.
+/// 之前的尝试提交这个任务时 source.sqlite 记下的任务。
 fn stored_run(src: &Connection, id: &str) -> Result<Option<protocol::IndexJob>> {
     let has_runs: bool =
         src.query_row("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name='native_index_runs')", [], |r| r.get(0))?;
@@ -1161,8 +1153,7 @@ fn stored_run(src: &Connection, id: &str) -> Result<Option<protocol::IndexJob>> 
         Path::new("source.sqlite native_index_runs.result"),
     )?))
 }
-/// Writes the validated result into source.sqlite with the job recorded beside it, after a backup; refused (and the
-/// job dropped) when the inputs changed since the job was prepared.
+/// 备份之后，把校验过的结果连同任务记录写进 source.sqlite；如果准备任务之后输入变了，就拒绝（并放弃任务）。
 fn commit_source(
     lib: &Library,
     shared: &Path,
@@ -1176,7 +1167,7 @@ fn commit_source(
     let changed_inputs = |message: &str| -> Result<()> {
         std::fs::remove_file(journal)?;
         let _ = std::fs::remove_dir_all(&folder);
-        bad(message)
+        invalid(message)
     };
     if fingerprint(src)? != job.before {
         return changed_inputs("索引计算输入已改变，请重试检查");
@@ -1209,7 +1200,7 @@ fn commit_source(
     tx.commit()?;
     Ok(())
 }
-/// The pictures whose index labels the result changes.
+/// 结果改变了索引标签的那些图片。
 fn changed_labels(src: &Connection, result: &protocol::IndexResponse) -> Result<BTreeSet<String>> {
     let old = crate::app_migrate_data::rows(src, "SELECT uuid,value,round(conf,4) FROM labels WHERE dim='char_ext'")?;
     let old_set = old.iter().map(|r| r.to_string()).collect::<BTreeSet<_>>();
@@ -1229,13 +1220,13 @@ fn changed_labels(src: &Connection, result: &protocol::IndexResponse) -> Result<
         })
         .collect()
 }
-/// The columns of `table` in source.sqlite, which differ between library versions.
+/// source.sqlite 里 `table` 的列，不同图库版本之间有差别。
 fn columns(c: &Connection, table: &str) -> Result<Vec<String>> {
     Ok(c.prepare(&format!("PRAGMA table_info({table})"))?
         .query_map([], |r| r.get::<_, String>(1))?
         .collect::<rusqlite::Result<Vec<_>>>()?)
 }
-/// Replaces the characters, their aliases and the index labels with the result's.
+/// 用结果里的角色、别名和索引标签替换现有的。
 fn write_result(tx: &Connection, result: &protocol::IndexResponse, id: &str) -> Result<()> {
     tx.execute_batch("CREATE TABLE IF NOT EXISTS native_index_runs(id TEXT PRIMARY KEY,result TEXT NOT NULL)")?;
     tx.execute("DELETE FROM character_aliases", [])?;
@@ -1277,7 +1268,7 @@ fn write_result(tx: &Connection, result: &protocol::IndexResponse, id: &str) -> 
     }
     Ok(())
 }
-/// One index label, with where it came from, in a library whose labels record that.
+/// 一条索引标签，在会记录标签来源的图库里连同来源一起写。
 fn sourced_label(c: &Connection, r: &(String, String, f64), id: &str) -> Result<()> {
     let model = format!("character_index@2025-09-25+danbooru@{}", chrono::Local::now().format("%Y-%m-%d"));
     let p = params![r.0, r.1, r.2, model, format!("char-scan-{id}")];
@@ -1286,10 +1277,9 @@ fn sourced_label(c: &Connection, r: &(String, String, f64), id: &str) -> Result<
     c.execute(sql, p)?;
     Ok(())
 }
-/// Files are copied from an immutable validated job. Repeating this boundary is safe after a crash.
-/// Shared files are staged beside their targets first: a failed copy or a full disk leaves the
-/// published set untouched. Only then are they renamed into place inside one publication
-/// generation, so readers never take a mix of old and new files (index_generation).
+/// 文件从一个不可变、已校验的任务复制过来。崩溃后重复这一边界是安全的。
+/// 共享文件先暂存在各自目标的旁边：复制失败或磁盘写满时，已发布的那一组不受影响。
+/// 之后才在同一次发布 generation 内把它们改名到位，所以读方从不会拿到新旧混杂的文件（index_generation）。
 fn publish(shared: &Path, dir: &Path, folder: &Path, job: &protocol::IndexJob) -> Result<()> {
     let allowed = job.rows.iter().map(|r| r.short_tag.as_str()).collect::<BTreeSet<_>>();
     let mut staged: Vec<(PathBuf, PathBuf)> = Vec::new();
@@ -1321,8 +1311,7 @@ fn publish(shared: &Path, dir: &Path, folder: &Path, job: &protocol::IndexJob) -
     }
     write(&dir.join("plan.json"), &read(&folder.join("char-patch/plan.json"), json!([])))
 }
-/// Copies each new index file beside its target (`staged`: temporary and final path) and lists the files the job
-/// removes (`retired`).
+/// 把每个新的索引文件复制到目标旁边（`staged`：临时路径和最终路径），并列出任务要删除的文件（`retired`）。
 fn stage_all(
     shared: &Path,
     folder: &Path,
@@ -1340,7 +1329,7 @@ fn stage_all(
     };
     for cid in allowed {
         if !safe(cid) {
-            return bad("索引文件 ID 不正确");
+            return invalid("索引文件 ID 不正确");
         };
         for ext in ["json", "npy"] {
             let from = folder.join("char-index").join(format!("{cid}.{ext}"));
@@ -1359,7 +1348,7 @@ fn stage_all(
     }
     Ok(())
 }
-/// Reindexes the library from the changed labels, once per job: returns how many memberships changed.
+/// 根据改变的标签重新索引图库，每个任务一次：返回有多少成员关系改变。
 fn import(lib: &Library, src: &Connection, job: &protocol::IndexJob, ctx: &TaskContext) -> Result<i64> {
     let mut app = writer(&lib.db())?;
     crate::http_read::register_names(&app)?;
@@ -1403,7 +1392,7 @@ fn import(lib: &Library, src: &Connection, job: &protocol::IndexJob, ctx: &TaskC
     crate::schema::commit_writing(tx)?;
     Ok(changed)
 }
-/// What became of each character of the job: dropped, added with its claims, or rejected with the reason.
+/// 任务里每个角色的结果：已移除、已添加并带上它的认领，或被拒绝并附上原因。
 fn outcomes(job: &protocol::IndexJob, shared: &Path, dir: &Path, src: &Connection) -> Result<Vec<Value>> {
     let mut chars = vec![];
     for row in &job.rows {
@@ -1431,7 +1420,7 @@ fn outcomes(job: &protocol::IndexJob, shared: &Path, dir: &Path, src: &Connectio
     }
     Ok(chars)
 }
-/// Takes the added characters off the last check's missing list and records the job in the history, once.
+/// 把添加的角色从上次检查的缺失列表里去掉，并把任务记进历史，只做一次。
 fn record(dir: &Path, id: &str, chars: &[Value], changed: i64, drop: bool) -> Result<()> {
     let mut check = read(&dir.join("check.json"), Value::Null);
     if !drop && !check.is_null() {
@@ -1458,7 +1447,7 @@ fn record(dir: &Path, id: &str, chars: &[Value], changed: i64, drop: bool) -> Re
     }
     Ok(())
 }
-/// Keeps the five newest source backups.
+/// 保留最新的五份来源备份。
 fn prune_backups(dir: &Path) -> Result<()> {
     let mut backups = std::fs::read_dir(dir.join("backup"))?
         .filter_map(|e| e.ok())
@@ -1472,7 +1461,7 @@ fn prune_backups(dir: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Test-only widening of the moment right after a job reports done (#123); unset in production.
+/// 仅供测试：拉长任务刚报告完成之后的那一刻（#123）；生产环境不设置。
 fn pause_after_done() {
     if let Some(ms) = std::env::var("ILLUSTASH_TEST_INDEX_DONE_PAUSE_MS").ok().and_then(|v| v.parse().ok()) {
         std::thread::sleep(Duration::from_millis(ms));
@@ -1575,7 +1564,7 @@ fn backup_db(src: &Connection, path: &Path, ctx: &TaskContext) -> Result<()> {
         match copy.step(256)? {
             StepResult::Done => return Ok(()),
             StepResult::More => {}
-            _ if Instant::now() >= end => return bad("索引备份超时"),
+            _ if Instant::now() >= end => return invalid("索引备份超时"),
             _ => std::thread::sleep(Duration::from_millis(10)),
         }
     }
@@ -1607,9 +1596,8 @@ fn update(state: &Mutex<State>, fields: Value) {
     s.merge(fields);
 }
 
-/// The job state and its history for `info`, state first. A job writes its history entry before it reports
-/// done, so a done state read first always comes with a history that contains it; reading the history first
-/// could pair the previous history with the new done (#85).
+/// 给 `info` 用的任务状态和历史，先读状态。任务在报告完成之前写下它的历史条目，
+/// 所以先读到的完成状态总是带着包含它的历史；先读历史可能会把上一份历史和新的完成状态配在一起（#85）。
 fn state_and_history(state: &Mutex<State>, dir: &Path) -> (Value, Vec<Value>) {
     let state = state.lock().expect("index state mutex poisoned").value();
     let history = read(&dir.join("history.json"), json!([])).as_array().cloned().unwrap_or_default();
@@ -1622,8 +1610,7 @@ mod tests {
 
     #[test]
     fn info_never_pairs_a_done_state_with_the_previous_history() {
-        // #85: a finished job writes its history entry and then reports done. Hold the state lock while
-        // the reader starts, finish the job that way, and only then let the reader take the state.
+        // #85：完成的任务先写历史条目再报告完成。读方启动时持有状态锁，按这个顺序完成任务，然后才让读方取状态。
         let dir = std::env::temp_dir().join(format!("illustash-index-info-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         write(&dir.join("history.json"), &json!([{"kind":"add"}])).unwrap();
@@ -1633,8 +1620,7 @@ mod tests {
             let (state, dir) = (state.clone(), dir.clone());
             std::thread::spawn(move || state_and_history(&state, &dir))
         };
-        // Let the reader get as far as it can before the job finishes. Whatever it reached, a done state
-        // must come with the new history; the wait only decides whether a wrong order gets caught.
+        // 让读方在任务完成前尽量往前走。无论它走到哪，完成状态都必须带着新的历史；等待只决定错误的顺序能不能被抓到。
         std::thread::sleep(std::time::Duration::from_millis(200));
         write(&dir.join("history.json"), &json!([{"kind":"drop"},{"kind":"add"}])).unwrap();
         *held = State::from(json!({"status":"done"}));

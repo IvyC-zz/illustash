@@ -1,4 +1,5 @@
-//! Native name task owner. Immutable package paths, durable requests and retryable failures.
+//! 原生名称任务的持有者。不可变的图库包路径、持久的请求和可重试的失败。
+use crate::error::invalid;
 use crate::{
     app_library::Library,
     app_name_sources::{self as net, Source},
@@ -16,13 +17,9 @@ use std::{
     time::{Duration, Instant},
 };
 
-fn invalid<T>(s: &str) -> Result<T> {
-    Err(Error::Invalid(s.into()))
-}
-/// `prefs` key of a library's lasting consent to name text queries. Kept apart from the startup
-/// preferences, which never authorize network use.
+/// 图库对名称文本查询的长期同意在 `prefs` 里的键。与启动偏好分开存放，启动偏好从不授权联网。
 const CONSENT: &str = "names_network";
-/// When the library's consent to name text queries was given, if it was.
+/// 图库对名称文本查询给出同意的时间，如果给过的话。
 fn consent(library: &Library) -> Result<Option<String>> {
     let c = crate::app_library::read_connection(&library.instance_path().join("library.sqlite"))?;
     let prefs: bool =
@@ -141,8 +138,8 @@ fn scope(c: &Connection, entity: Option<&str>) -> Result<Vec<Entity>> {
 fn fingerprint(c: &Connection, rows: &[Entity]) -> Result<String> {
     fingerprint_with(c, rows, &indexed(c, rows)?)
 }
-/// The index names (source.sqlite) of `rows`' CCIP keys: the part of the source fingerprint outside the application
-/// database, read before a lookup's write transaction rather than under its lock (#275).
+/// `rows` 的 CCIP 键对应的索引名称（source.sqlite）：来源指纹中位于应用数据库之外的部分，在查询的写事务之前读取，
+/// 而不是在它的锁下读取（#275）。
 fn indexed(c: &Connection, rows: &[Entity]) -> Result<Value> {
     let Some(path) = c.path() else {
         return Ok(Value::Null);
@@ -156,7 +153,7 @@ fn fingerprint_with(c: &Connection, rows: &[Entity], indexed: &Value) -> Result<
     let mut values = vec![];
     for r in rows {
         values.push(json!([r.id, r.parent, r.work, r.variant, r.keys]));
-        // Automatic display writes must not invalidate the task's own source fingerprint.
+        // 自动的显示名写入不得使任务自己的来源指纹失效。
         values.push(json!(c
             .prepare(
                 "SELECT lang, value, source, role, preferred, position
@@ -193,7 +190,7 @@ fn fingerprint_with(c: &Connection, rows: &[Entity], indexed: &Value) -> Result<
     }
     Ok(crate::strict_json::sha256_hex(dump(&json!(values)).as_bytes()))
 }
-/// Index names first in Japanese, Chinese, then other languages.
+/// 索引名称先日文、再中文，然后是其他语言。
 const INDEX_ORDER: &str = "ORDER BY CASE lang WHEN 'ja' THEN 0 WHEN 'zh' THEN 1 ELSE 2 END, value";
 fn aliases(c: &Connection, kind: &str, key: &str, query: bool) -> Result<Vec<String>> {
     let pairs = |sql: &str, params: &[&dyn rusqlite::ToSql]| -> Result<Vec<(String, String)>> {
@@ -282,7 +279,7 @@ fn enrich(source: &mut Source, kind: &str, key: &str, work: &str) -> Result<Vec<
     };
     let wiki = if let Some(tag) = wiki_tag { source.wiki(&tag)? } else { vec![] };
     let alias = json!({"op":"danbooru_aliases","kind":kind,"tag":key,"values":wiki});
-    // Search candidates are assembled in memory; no intermediate remote aliases can overwrite a concurrent edit.
+    // 搜索候选在内存里组装；中间的远端别名不会覆盖并发的编辑。
     let id = crate::names_commands::tag_entities(&c, key)?.first().cloned();
     let index: Vec<(String, String)> = if kind == "character" {
         c.prepare(&format!(
@@ -438,7 +435,7 @@ fn enrich(source: &mut Source, kind: &str, key: &str, work: &str) -> Result<Vec<
         let found = net::wiki_zh(&wiki, &[zh, crate::names_view::work_name(work).unwrap_or("").into()]);
         ops.push(replace(kind, key, "wiki", found.map(|v| vec![json!(["zh", v])]).unwrap_or_default()));
     }
-    // Model reads the pending choice in a rolled-back transaction, then requests without DB locks.
+    // 模型在回滚的事务里读取待定的选择，然后在不持有数据库锁的情况下发请求。
     let settings = settings(&c)?;
     if let Some(secret) = settings.key {
         let tx = c.transaction()?;
@@ -446,7 +443,7 @@ fn enrich(source: &mut Source, kind: &str, key: &str, work: &str) -> Result<Vec<
         for op in &ops {
             crate::names_commands::one(&tx, op)?;
         }
-        // The key's own rows as this transaction wrote them (#105): no projection refresh, no library-wide load.
+        // 这个键自己的行，按这个事务写入后的样子读（#105）：不刷新投影，不做全图库加载。
         let choice = choose(&tx, kind, key)?;
         tx.rollback()?;
         if matches!(choice.source.as_str(), "readable" | "model") {
@@ -502,11 +499,11 @@ fn job_scope(rows: &[Entity], kind: &str, key: &str, work: &str) -> Vec<Entity> 
         .cloned()
         .collect()
 }
-/// A name query held back for want of consent: the task waits for it rather than failing.
+/// 因为缺少同意而暂缓的名称查询：任务等待同意，而不是失败。
 fn unauthorized(e: &Error) -> bool {
     matches!(e, Error::Network(m) if m == net::UNAUTHORIZED)
 }
-/// Keep the first real failure; a missing consent only stands when nothing else went wrong.
+/// 保留第一个真正的失败；缺少同意只在没有别的问题时才保留。
 fn keep(first: &mut Option<Error>, e: Error) {
     if first.as_ref().is_none_or(|f| unauthorized(f) && !unauthorized(&e)) {
         *first = Some(e);
@@ -519,9 +516,9 @@ fn run(source: &mut Source, entity: Option<&str>, state: &Mutex<Value>) -> Resul
     let done: BTreeSet<String> = if entity.is_some() {
         Default::default()
     } else {
-        // The done marks hold for the sources recorded with them. Marks for other sources, and a refresh that has not
-        // begun, start the scope over: in one transaction before any lookup, so the marks this run writes count
-        // however it ends, and a run that fails part-way repeats only what it did not finish (#275).
+        // 完成标记只对与它们一起记录的来源成立。属于其他来源的标记，以及还没开始的刷新，都让范围重新开始：
+        // 在任何查询之前的一个事务里完成，这样这次运行写下的标记无论怎样结束都算数，
+        // 中途失败的运行只重复它没完成的部分（#275）。
         let tx = c.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         let previous: Option<String> = tx
             .query_row(&format!("SELECT value FROM name_cache WHERE key='{SOURCES}'"), [], |r| r.get(0))
@@ -565,14 +562,14 @@ fn run(source: &mut Source, entity: Option<&str>, state: &Mutex<Value>) -> Resul
         } else {
             jobs.insert(("character", r.tag.clone(), r.work.clone()));
             if let Some(key) = r.keys.get("ccip") {
-                // The package source holds the already imported index; no external index scan.
+                // 图库包的 source 里已有导入的索引；不扫描外部索引。
                 let src = source.path.with_file_name("source.sqlite");
                 let src = crate::app_library::read_connection(&src)?;
                 if let Some(names)=src.query_row("SELECT name_zh,name_ja,name_en FROM characters WHERE char_id=?",[key],|r|Ok(json!({"zh":r.get::<_,Option<String>>(0)?,"ja":r.get::<_,Option<String>>(1)?,"en":r.get::<_,Option<String>>(2)?}))).optional()?{seed.push(json!({"op":"seed_index","entity":r.id,"key":r.tag,"names":names}));}
             }
         }
     }
-    // Works finish before characters use their language evidence.
+    // 作品先完成，角色再使用它们的语言证据。
     let mut jobs: Vec<_> = jobs.into_iter().filter(|(k, t, w)| !done.contains(&done_key(k, t, w))).collect();
     jobs.sort_by_key(|(k, _, _)| match *k {
         "work" => 0,
@@ -594,9 +591,8 @@ fn run(source: &mut Source, entity: Option<&str>, state: &Mutex<Value>) -> Resul
             let job_fp = fingerprint_with(&c, &job, &index)?;
             let ops = if *kind == "skin" { translate_skin(source, key)? } else { enrich(source, kind, key, work)? };
             net::check(&source.cancel)?;
-            // The index names are checked just before the write transaction, so it does not wait for source.sqlite
-            // while it holds the application write lock (#275); the application sources are checked under the
-            // same write transaction as names/projections/done marker. Changed rows change the CCIP keys there.
+            // 索引名称就在写事务之前检查，这样持有应用写锁时不会等 source.sqlite（#275）；应用这边的来源与名称、投影、
+            // 完成标记在同一个写事务里检查。行变了，那里的 CCIP 键就会变。
             if indexed(&c, &job)? != index {
                 return invalid("名称来源已改变，请重试");
             }
@@ -619,7 +615,7 @@ fn run(source: &mut Source, entity: Option<&str>, state: &Mutex<Value>) -> Resul
                 ],
             )?;
             net::check(&source.cancel)?;
-            // Alias mirrors and the display projection follow once at commit (legacy_names::after_write).
+            // 别名镜像和显示投影在提交时跟着更新一次（legacy_names::after_write）。
             crate::schema::commit_writing(tx)?;
             Ok(())
         })();
@@ -635,22 +631,22 @@ fn run(source: &mut Source, entity: Option<&str>, state: &Mutex<Value>) -> Resul
         Err(e)
     } else {
         if entity.is_none() && source.force {
-            // The refresh is complete; if this fails, its retry finds every mark and looks nothing up.
+            // 刷新已完成；如果这一步失败，重试会找到每个标记，什么都不再查询。
             c.execute(&format!("DELETE FROM name_cache WHERE key='{REFRESHING}'"), [])?;
         }
         Ok(())
     }
 }
-/// The sources the done marks hold for (the fingerprint of the whole scope).
+/// 完成标记所对应的来源（整个范围的指纹）。
 const SOURCES: &str = "[\"sources\", 1]";
-/// A whole-scope refresh under way: its retries keep the marks it has written.
+/// 正在进行的全范围刷新：它的重试保留它已写下的标记。
 const REFRESHING: &str = "[\"refreshing\", 1]";
-/// The wait before a failed request is retried: a minute, doubling with each failure in a row up to half an hour.
+/// 失败的请求重试前的等待：一分钟，每连续失败一次加倍，最多半小时。
 fn retry_after(failures: u32) -> Duration {
     Duration::from_secs(60 << failures.saturating_sub(1).min(5)).min(Duration::from_secs(1800))
 }
 fn translate_skin(source: &mut Source, key: &str) -> Result<Vec<Value>> {
-    // Reuse the same translation path with no wiki/Bangumi fetch.
+    // 复用同一条翻译路径，不取 wiki 或 Bangumi。
     let c = net::db(&source.path)?;
     let settings = settings(&c)?;
     let choice = choose(&c, "skin", key)?;
@@ -684,9 +680,9 @@ fn translate_skin(source: &mut Source, key: &str) -> Result<Vec<Value>> {
     Ok(vec![replace("skin", key, "model", vec![json!(["zh", value])])])
 }
 
-/// One key's choice, read from that key's own rows (#105 A5b; `names_view::choose_key`) instead of a library-wide
-/// load. In this crate's tests every choice is also compared with a library-wide load; test builds do so when the
-/// core's check is switched on (`legacy_names::verifying`).
+/// 一个键的选择，从这个键自己的行读取（#105 A5b；`names_view::choose_key`），而不是做全图库加载。
+/// 在这个 crate 的测试里，每个选择还会和全图库加载的结果比较；核心的检查打开时
+/// （`legacy_names::verifying`），测试构建也会这样比较。
 fn choose(c: &Connection, kind: &str, key: &str) -> Result<crate::names_view::Choice> {
     let choice = crate::names_view::choose_key(c, kind, key)?;
     if cfg!(test) && !crate::legacy_names::verifying() {
@@ -702,12 +698,12 @@ pub(crate) struct Updater {
     generation: u64,
     session: String,
     enabled: bool,
-    /// Authorized for this process only (`--names-network`).
+    /// 只为本进程授权（`--names-network`）。
     cli: bool,
-    /// The library's lasting consent, shared with every Source so revoking takes effect at once.
+    /// 图库的长期同意，与每个 Source 共享，所以撤销立即生效。
     grant: Arc<AtomicBool>,
     retry: Instant,
-    /// Failed runs in a row, for the retry backoff (`retry_after`).
+    /// 连续失败的运行次数，用于重试退避（`retry_after`）。
     failures: u32,
     last_seen: i64,
 }
@@ -751,14 +747,13 @@ impl Updater {
         v.set("state", self.state_json());
         Ok(v)
     }
-    /// `info` plus whether name text queries may go out (GET /api/names). The other actions keep
-    /// answering with `info` alone, as before.
+    /// `info` 加上名称文本查询能不能发出（GET /api/names）。其他操作照旧只回答 `info`。
     pub fn status(&self, library: &Library) -> Result<Json> {
         let mut v = self.info(library)?;
         v.set("network", self.network(library)?);
         Ok(v)
     }
-    /// Whether name text queries may go out, and on what grounds.
+    /// 名称文本查询能不能发出，以及依据是什么。
     pub fn network(&self, library: &Library) -> Result<Json> {
         let granted_at = consent(library)?;
         Ok(json!({"authorized": self.cli || self.grant.load(Ordering::SeqCst), "this_run": self.cli,
@@ -784,20 +779,20 @@ impl Updater {
         }
         let c = net::db(&library.instance_path().join("library.sqlite"))?;
         if refresh && entity.is_none() {
-            // A new refresh starts over rather than continuing one that did not finish.
+            // 新的刷新从头开始，而不是接着没完成的那次。
             c.execute(&format!("DELETE FROM name_cache WHERE key='{REFRESHING}'"), [])?;
         }
         c.execute(
             "INSERT INTO backend_effects(kind) VALUES (?)",
             [format!("names:{}", dump(&json!({"entity":entity,"refresh":refresh})))],
         )?;
-        // An explicit request retries the failed ones too, at once.
+        // 显式的请求也会立即重试失败的那些。
         self.settle();
         self.retry = Instant::now();
         self.recover(library);
         Ok(())
     }
-    /// Takes a finished run and sets when failed requests are next retried.
+    /// 取走已完成的运行，并设定失败的请求下次什么时候重试。
     fn settle(&mut self) {
         if self.thread.as_ref().is_some_and(crate::app_tasks::Task::running) {
             return;
@@ -809,7 +804,7 @@ impl Updater {
                 self.retry = Instant::now();
                 self.failures = 0;
             } else if status == "error" {
-                // Counted from the end of the failed run, not its start: a long run is not retried at once (#275).
+                // 从失败的运行结束时算起，而不是从开始时：长时间的运行不会立即重试（#275）。
                 self.failures += 1;
                 self.retry = Instant::now() + retry_after(self.failures);
             }
@@ -834,7 +829,7 @@ impl Updater {
             Ok(p) if !p.is_empty() => p,
             _ => return,
         };
-        // Requests left waiting for consent run again once it is granted, not on every retry tick.
+        // 等待同意的请求在同意给出后再运行，而不是每次重试计时都运行。
         let waiting = self.state.lock().expect("app_names mutex poisoned")["status"] == "unauthorized"
             && !(self.cli || self.grant.load(Ordering::SeqCst));
         if waiting || Instant::now() < self.retry {
@@ -890,7 +885,7 @@ impl Updater {
                     let mut s = state.lock().expect("app_names mutex poisoned");
                     match result {
                         Ok(()) => s["status"] = json!("done"),
-                        // Stays pending: granting consent retries it, and nothing went wrong meanwhile.
+                        // 保持待处理：给出同意会重试它，这期间也没有出错。
                         Err(e) if unauthorized(&e) => {
                             s["status"] = json!("unauthorized");
                             waiting = true;
@@ -900,8 +895,7 @@ impl Updater {
                             let message = match e {
                                 Error::Invalid(s) | Error::Network(s) => s,
                                 e => {
-                                    // Names write library.sqlite only; a failed source.sqlite read is logged
-                                    // where it happens.
+                                    // 名称只写 library.sqlite；读 source.sqlite 失败在发生的地方记日志。
                                     eprintln!("名称获取失败：{e:?}");
                                     format!("名称数据库操作失败：{error}", error = e)
                                 }
@@ -951,7 +945,7 @@ impl Updater {
                 set_consent(library, allow)?;
                 self.grant.store(allow, Ordering::SeqCst);
                 if allow {
-                    // Name syncs that failed for want of authorization retry now.
+                    // 因为没有授权而失败的名称同步现在重试。
                     self.settle();
                     self.retry = Instant::now();
                     self.last_seen = 0;
@@ -1010,8 +1004,7 @@ fn configure(path: &std::path::Path, body: &Json) -> Result<()> {
     let tx = c.transaction()?;
     tx.execute_batch("INSERT OR IGNORE INTO name_settings SELECT 'model_key',value FROM name_settings WHERE key='deepseek_key'; INSERT OR IGNORE INTO name_settings SELECT 'model_name',value FROM name_settings WHERE key='deepseek_model'; DELETE FROM name_settings WHERE key IN ('deepseek_key','deepseek_model');")?;
     let base = base.map(|s| s.trim().trim_end_matches('/'));
-    // The key goes only to the address it was entered for: a new address without a new key clears it, and the
-    // person enters it again.
+    // 密钥只发往输入它时对应的地址：换了地址而没有新密钥时清除密钥，由用户重新输入。
     if let Some(b) = base {
         if key.is_none() && b != settings(&tx)?.base {
             tx.execute("DELETE FROM name_settings WHERE key='model_key'", [])?;
@@ -1193,7 +1186,7 @@ fn local_links(source: &mut Source) -> Result<Json> {
     Ok(Json::Array(out))
 }
 
-/// Loopback provider for name tests: a handler answers each request; `None` is a 503.
+/// 名称测试用的回环提供方：每个请求由一个处理函数回答；`None` 表示 503。
 #[cfg(test)]
 mod test_provider {
     use serde_json::Value;
@@ -1244,9 +1237,9 @@ mod test_provider {
     }
 }
 
-/// Name choice on libraries switched from the old form (#9: formerly tests/test_name_matching.py).
-/// Each library state was saved from the old test's own arrangement (old-form rows, then the real
-/// start-up switch); the provider answers and expected names are the old test's, unchanged.
+/// 从旧形式切换过来的图库上的名称选择（#9：原来是 tests/test_name_matching.py）。
+/// 每种图库状态都按旧测试自己的布置保存（旧形式的行，然后是真实的启动切换）；
+/// 提供方的回答和预期的名称都沿用旧测试，没有改动。
 #[cfg(test)]
 mod matching_tests {
     use super::*;
@@ -1258,7 +1251,7 @@ mod matching_tests {
         json!({"id": id, "name": name, "infobox": infobox})
     }
 
-    /// The old test's WIKIS table: Danbooru wiki other names per tag.
+    /// 旧测试的 WIKIS 表：每个 tag 的 Danbooru wiki 其他名称。
     fn wikis() -> HashMap<String, Vec<String>> {
         let rows: [(&str, &[&str]); 7] = [
             (
@@ -1328,7 +1321,7 @@ mod matching_tests {
         calls: Vec<(String, Option<Value>)>,
     }
 
-    /// Loopback Danbooru/Bangumi stand-in answering from `Answers`.
+    /// 按 `Answers` 回答的回环 Danbooru/Bangumi 替身。
     struct Provider {
         base: String,
         answers: Arc<Mutex<Answers>>,
@@ -1376,7 +1369,7 @@ mod matching_tests {
         }
     }
 
-    /// One saved scenario restored into a fresh package directory.
+    /// 恢复到一个新图库包目录里的一个保存场景。
     struct Library {
         root: PathBuf,
         tag: String,
@@ -1402,7 +1395,7 @@ mod matching_tests {
                 c.execute_batch("PRAGMA foreign_keys=OFF").unwrap();
                 c.execute_batch(&scenario[field].as_str().unwrap().replace("@ROOT@", &root_text)).unwrap();
             }
-            // Saved at core version 7: upgraded as the user's libraries are (#201).
+            // 在核心版本 7 下保存：像用户的图库那样升级（#201）。
             crate::migrate(&mut Connection::open(root.join("library.sqlite")).unwrap()).unwrap();
             Self { root, tag: scenario["entity"].as_str().unwrap().to_owned() }
         }
@@ -1418,7 +1411,7 @@ mod matching_tests {
         fn choice(&self, kind: &str, key: &str) -> crate::names_view::Choice {
             crate::names_view::View::load(&self.db()).unwrap().choose(kind, key).unwrap()
         }
-        /// (display name, its source)
+        /// （显示名，它的来源）
         fn name(&self) -> (String, String) {
             let c = self.choice("character", &self.tag);
             (c.name, c.source)
@@ -1482,7 +1475,7 @@ mod matching_tests {
     fn reimu_never_displays_pairing_alias_and_alias_remains_searchable() {
         let (p, lib) = (Provider::start(), Library::load("hakurei_reimu|touhou||"));
         lib.refresh(&p, false).unwrap();
-        // Bangumi misses: the first Chinese wiki alias is shown, never the pairing alias.
+        // Bangumi 没有命中：显示第一个中文 wiki 别名，从不显示配对别名。
         assert_eq!(lib.name(), pair("博丽灵梦", "wiki"));
         assert!(lib.found_by("レイマリ"));
         p.set(|a| {
@@ -1490,7 +1483,7 @@ mod matching_tests {
         });
         lib.refresh(&p, true).unwrap();
         assert_eq!(lib.name().0, "博丽灵梦");
-        assert_eq!(lib.work_name("touhou"), "东方Project"); // a failed work does not gate the character
+        assert_eq!(lib.work_name("touhou"), "东方Project"); // 作品失败不会挡住角色
     }
 
     #[test]
@@ -1511,7 +1504,7 @@ mod matching_tests {
             a.related.insert(2, same);
         });
         lib.refresh(&p, true).unwrap();
-        // Bangumi abstains; the wiki's Chinese name comes before the index Japanese.
+        // Bangumi 不给结果；wiki 的中文名排在索引的日文名之前。
         assert_eq!(lib.name(), pair("圣园未花", "wiki"));
         p.set(|a| a.related.clear());
         lib.refresh(&p, true).unwrap();
@@ -1564,7 +1557,7 @@ mod matching_tests {
         let (p, lib) = (Provider::start(), Library::load("hakurei_reimu|touhou|博麗霊夢|"));
         p.set(|a| {
             a.wikis.insert("hakurei_reimu".into(), vec!["博麗霊夢".into(), "霊夢".into()]);
-            // no Chinese wiki alias
+            // 没有中文 wiki 别名
         });
         lib.refresh(&p, false).unwrap();
         lib.write(vec![replace("character", &lib.tag, "model", vec![json!(["zh", "机翻名"])])]);
@@ -1727,9 +1720,8 @@ mod matching_tests {
     }
 }
 
-/// Name sources and their priority on the old test's base library (#9: formerly tests/test_names.py).
-/// The library state was saved from that test's own arrangement after the real start-up switch;
-/// provider answers (tests/name_providers.py) and expectations are unchanged.
+/// 旧测试基础图库上的名称来源及其优先级（#9：原来是 tests/test_names.py）。
+/// 图库状态按那个测试自己的布置、在真实的启动切换之后保存；提供方的回答（tests/name_providers.py）和预期都没有改动。
 #[cfg(test)]
 mod sources_tests {
     use super::matching_tests::result;
@@ -1855,7 +1847,7 @@ mod sources_tests {
                 c.execute_batch("PRAGMA foreign_keys=OFF").unwrap();
                 c.execute_batch(&data["base"][field].as_str().unwrap().replace("@ROOT@", &root_text)).unwrap();
             }
-            // Saved at core version 7: upgraded as the user's libraries are (#201).
+            // 在核心版本 7 下保存：像用户的图库那样升级（#201）。
             crate::migrate(&mut Connection::open(root.join("library.sqlite")).unwrap()).unwrap();
             Self { root }
         }
@@ -1959,7 +1951,7 @@ mod sources_tests {
             zh(&["モルガン(Fate)", "モルガン・ル・フェ", "摩根·勒·菲", "摩根(fate)"], &[]).as_deref(),
             Some("摩根·勒·菲")
         );
-        assert_eq!(zh(&["露娜", "银冕"], &[]).as_deref(), Some("露娜")); // wiki order, not the most "Chinese-looking"
+        assert_eq!(zh(&["露娜", "银冕"], &[]).as_deref(), Some("露娜")); // 按 wiki 的顺序，而不是看起来最像中文的那个
         assert_eq!(zh(&["阿尔托莉雅·潘德拉贡〔Alter〕"], &[]).as_deref(), Some("阿尔托莉雅·潘德拉贡〔Alter〕"));
         for names in [
             &["博麗霊夢"][..],
@@ -1986,7 +1978,7 @@ mod sources_tests {
         assert_eq!(named(lib.char("bob")), pair("鲍勃", "wiki"));
         assert!(p.model_calls().is_empty());
         lib.put("character", "bob", "ja", "index", "ボブ");
-        assert_eq!(lib.char("bob").name, "鲍勃"); // Chinese first, even over a sourced Japanese name
+        assert_eq!(lib.char("bob").name, "鲍勃"); // 中文优先，即使有带来源的日文名
         p.set(|a| {
             a.wikis.insert("alice".into(), vec!["ア_リス".into(), "爱丽丝酱".into()]);
         });
@@ -2062,7 +2054,7 @@ mod sources_tests {
         p.set(|a| a.wikis.clear());
         lib.run(&p, None, false).unwrap();
         let count = p.calls().len();
-        lib.run(&p, None, false).unwrap(); // a new updater: finished names are not looked up again
+        lib.run(&p, None, false).unwrap(); // 新的更新器：已完成的名称不再查询
         assert_eq!(p.calls().len(), count);
         let alice: String = lib
             .db()
@@ -2073,7 +2065,7 @@ mod sources_tests {
             )
             .unwrap();
         lib.run(&p, Some(&alice), true).unwrap();
-        assert_eq!(p.calls().len(), count + 3); // two wikis and the indexed Japanese character search
+        assert_eq!(p.calls().len(), count + 3); // 两个 wiki，以及按已索引日文名的角色搜索
     }
 
     #[test]
@@ -2086,8 +2078,8 @@ mod sources_tests {
         assert_eq!(lib.char("alice").name, "爱丽丝");
     }
 
-    /// #275: a run that fails after most lookups are done (a locked database, here a trigger standing in for one)
-    /// looks up again only what it did not finish: the finished lookups keep their done marks as written.
+    /// #275：在大部分查询完成后失败的运行（数据库被锁，这里用一个触发器代替）只重新查询它没完成的部分：
+    /// 已完成的查询保留写下的完成标记。
     #[test]
     fn a_failed_run_keeps_its_finished_lookups() {
         let (p, lib) = (Providers::start(), Library::load());
@@ -2137,7 +2129,7 @@ mod sources_tests {
         let (p, lib) = (Providers::start(), Library::load());
         let mut source = Source::new(lib.root.join("library.sqlite"), Arc::new(AtomicBool::new(false)), false, false)
             .unwrap()
-            // Loopback providers count as local; a remote address is what consent guards.
+            // 回环提供方算作本地；同意保护的是远端地址。
             .with_bases("https://names.invalid", "https://names.invalid")
             .granted(Arc::new(AtomicBool::new(false)));
         let e = run(&mut source, None, &Mutex::new(json!({}))).unwrap_err();
@@ -2185,7 +2177,7 @@ mod sources_tests {
     fn unusable_model_answer_is_asked_once() {
         let (p, lib) = (Providers::start(), Library::load());
         lib.configure_model(&p);
-        p.set(|a| a.translation = json!({"zh":"ボブ"})); // kana: not a Chinese name
+        p.set(|a| a.translation = json!({"zh":"ボブ"})); // 假名：不是中文名
         lib.run(&p, None, false).unwrap();
         assert_ne!(lib.char("bob").source, "model");
         let asked = p.model_calls().len();
@@ -2202,7 +2194,7 @@ mod sources_tests {
             let mut c = lib.db();
             let tx = c.transaction().unwrap();
             crate::schema::begin_writing(&tx).unwrap();
-            // An OC is an original character (the core has no `oc` kind).
+            // OC 是原创角色（核心没有 `oc` 类别）。
             tx.execute(
                 "UPDATE term_tree SET original=1
                  WHERE term_id=(SELECT x.term_id FROM term_links x WHERE x.system='danbooru' AND x.key='alice')",
@@ -2246,9 +2238,9 @@ mod sources_tests {
 
     #[test]
     fn a_batch_never_loads_the_whole_library() {
-        // #105 A5b: work names, model previews and skin checks read each key's own rows, and commits project by
-        // closure. Every choice is still compared with a library-wide load here (`choose`; not counted). The preview
-        // reads the job's pending writes: alice's Bangumi name exists only in them, yet she is never sent to the model.
+        // #105 A5b：作品名称、模型预览和皮肤检查读各个键自己的行，提交按闭包投影。
+        // 这里每个选择仍会和全图库加载的结果比较（`choose`；不计数）。预览读取任务待写入的内容：
+        // alice 的 Bangumi 名称只存在于其中，但她从不会被发给模型。
         let (p, lib) = (Providers::start(), Library::load());
         lib.configure_model(&p);
         let start = crate::names_view::whole_loads();
@@ -2268,15 +2260,15 @@ mod sources_tests {
         let key = || settings(&lib.db()).unwrap().key;
         set(r#"{"key":"sk-synthetic-0000","base":"https://one.example/"}"#).unwrap();
         assert_eq!(key().as_deref(), Some("sk-synthetic-0000"));
-        // The same address, as the settings card sends it on every save, and the model alone keep the key.
+        // 同样的地址（设置卡片每次保存都会发送）以及只改模型，都保留密钥。
         set(r#"{"base":"https://one.example","model":"synthetic-model"}"#).unwrap();
         set(r#"{"model":"other-model"}"#).unwrap();
         assert_eq!(key().as_deref(), Some("sk-synthetic-0000"));
-        // A new address without a key: the key is gone, the address is kept.
+        // 新地址而没有密钥：密钥清除，地址保留。
         set(r#"{"base":"https://two.example"}"#).unwrap();
         assert_eq!(key(), None);
         assert_eq!(settings(&lib.db()).unwrap().base, "https://two.example");
-        // A new address with a key keeps the new key.
+        // 新地址带着密钥：保留新的密钥。
         set(r#"{"key":"sk-synthetic-1111","base":"https://three.example"}"#).unwrap();
         assert_eq!(key().as_deref(), Some("sk-synthetic-1111"));
     }

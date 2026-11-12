@@ -1,4 +1,4 @@
-"""#150 synthetic old-algorithm comparison; explicit candidate, no model/library discovery."""
+"""#150 与旧算法的合成对照；显式给出候选，不自动查找模型/图库。"""
 import contextlib
 import csv
 import io
@@ -37,9 +37,9 @@ class NativeIndexComputeTest(unittest.TestCase):
             return json.loads((root/'response.json').read_text())
 
     def test_merge_percentile_core_and_partition_ties(self):
-        # User-approved 2026-10-04: scalar NumPy selection/sort order on every OS.
-        # Independent oracle: macOS arm64 NumPy 2.5.3 (scalar argintroselect/aquicksort).
-        # Windows NumPy SIMD tie ordering is intentionally no longer the contract.
+        # 用户 2026-10-04 批准：所有操作系统上都用标量 NumPy 的选择/排序顺序。
+        # 独立的判定基准：macOS arm64 上的 NumPy 2.5.3（标量 argintroselect/aquicksort）。
+        # Windows 上 NumPy SIMD 对并列值的排序有意不再作为契约。
         tied_nearest = {
             3: [0, 1, 2], 5: [0, 3, 1, 4, 2], 6: [0, 3, 1, 4, 2, 5],
             9: [0, 3, 6, 1, 4, 7, 2, 5, 8], 10: [6, 9, 0, 3, 7, 4, 1, 8, 5],
@@ -62,7 +62,7 @@ class NativeIndexComputeTest(unittest.TestCase):
                 self.assertEqual(value['core'], None if keep is None else keep.tolist())
                 k = min(9,count)
                 self.assertEqual(value['nearest'], tied_nearest[count])
-                # Non-tied selection still agrees with the local independent algorithm.
+                # 没有并列时的选择仍与本地的独立算法一致。
                 unique = rng.permutation(count).astype('f4')
                 selected = np.argpartition(unique,k-1)[:k]
                 self.assertEqual(self.numeric(rows, unique)['nearest'], selected[np.argsort(unique[selected])].tolist())
@@ -101,7 +101,7 @@ class NativeIndexComputeTest(unittest.TestCase):
         return tags,rows
 
     def legacy(self, root, tags, request):
-        # Fixed algorithm reference: no model_metrics check/model loading; no numeric substitute.
+        # 固定的算法参考结果：不检查 model_metrics、不加载模型；也不用数值替代品。
         return index_expectations.legacy(self, root)
 
     def test_cached_apply_clean_build_scan_matches_algorithm_reference(self):
@@ -126,7 +126,7 @@ class NativeIndexComputeTest(unittest.TestCase):
                 np.testing.assert_array_equal(np.load(new/name),np.load(old/name))
             self.assertEqual(json.loads((new/'char-patch/rejected/twin.json').read_text()),json.loads((old/'char-patch/rejected/twin.json').read_text()))
             self.assertEqual((new/'char-scan.csv').read_text(),(old/'char-scan.csv').read_text())
-            # Isolated calculator never mutates even the snapshot's human labels.
+            # 隔离的计算程序连快照里的人工标注都不改。
             with contextlib.closing(sqlite3.connect(new/'pi.db')) as db, db:
                 self.assertEqual(db.execute("SELECT value,source FROM labels WHERE dim='general'").fetchall(),[('solo','human')])
 
@@ -145,7 +145,7 @@ class NativeIndexComputeTest(unittest.TestCase):
                 else:
                     p=subprocess.run([str(self.binary),str(new/'request.json'),str(new/'response.json')],env=os.environ|{'PATH':'','ILLUSTASH_INDEX_TAGS':str(new/'tags.csv')},capture_output=True)
                     self.assertEqual(p.returncode,0,p.stderr.decode());responses.append(json.loads((new/'response.json').read_text()))
-            # The old algorithm must show the intended distinct final business outcomes.
+            # 旧算法必须给出预期的、彼此不同的最终业务结果。
             expected={(u,c)for u,c,_ in responses[0]['labels']}
             for i,parent,within in edges:self.assertIn((f'asset{i}',f'large{parent if within else i:03}'),expected)
             self.assertEqual(responses[1]['characters'],responses[0]['characters'])
@@ -163,8 +163,8 @@ class NativeIndexComputeTest(unittest.TestCase):
             anchors=np.load(old/'char-anchors.npy');ids=(old/'char-anchors.txt').read_text().splitlines()
             with patch.object(char_scan,'cross',side_effect=lambda a,b,check=True:ccip.cross(a,b,check=False)),contextlib.redirect_stdout(io.StringIO()):
                 _,limits,_,_,entities=char_scan.anchor_index(anchors,ids,str(old/'pi.db'))
-            # Independent original Recogniser.labels decision logic, synthetic embeddings;
-            # no model/session is instantiated and this is not an inference-chain claim.
+            # 独立复写的原 Recogniser.labels 判定逻辑，用合成的 embedding；
+            # 不实例化模型/会话，也不代表推理链路的结论。
             expected=[];assets=[];features=[]
             for i,parent,within in edges:
                 asset=f'asset{i}';feature=centres[i];assets.append(asset);features.append(feature.tolist())
@@ -207,7 +207,7 @@ class NativeIndexComputeTest(unittest.TestCase):
                     a=rng.normal(size=(19,768)).astype(dtype)*.003;a[:,0]+=1
                     a=np.array(a,dtype=dtype,order=order)
                     np.save(root/'char-index/alice.npy',a)
-                    # Cached upstream rows are rebuilt without any model; patch rows untouched.
+                    # 缓存的上游行不用任何模型重建；patch 行不动。
                     request=dict(format='illustash-index/1',identity={'task_id':'dtype'},before='fixed',action='apply',rows=[],review=str(root),reason=None)
                     (root/'request.json').write_text(json.dumps(request))
                     proc=subprocess.run([str(self.binary),str(root/'request.json'),str(root/'response.json')],env=os.environ|{'PATH':'','ILLUSTASH_INDEX_TAGS':str(tags)},capture_output=True)
@@ -253,7 +253,7 @@ class NativeIndexComputeTest(unittest.TestCase):
                 self.assertEqual([r['within'] for r in csv.DictReader(f)],['1','1','0'])
 
 class NativeIndexActualCcipTest(unittest.TestCase):
-    """Explicit authorised model window only: 8 generated images, real App Index publication."""
+    """只在显式授权的模型窗口里运行：8 张生成图片，真实的 App 索引发布。"""
     @classmethod
     def setUpClass(cls):
         from tests.test_native_index import NativeIndexTest
@@ -292,10 +292,10 @@ class NativeIndexActualCcipTest(unittest.TestCase):
         old_dir=ccip.MODEL_DIR
         ccip.MODEL_DIR=str(Path(self.model).parent)
         self.addCleanup(setattr,ccip,'MODEL_DIR',old_dir)
-        cc=ccip.features(images) # independent actual model reference, same 8 generated inputs
+        cc=ccip.features(images) # 独立的真实模型参考结果，输入是同样的 8 张生成图片
         feature_root=fixture.lib.path/'features';feature_root.mkdir(exist_ok=True)
         np.save(feature_root/'full-features.npy',cc[:3]);(feature_root/'full-manifest.csv').write_text('uuid\na\nb\nc\n')
-        # Build independent old-worker expectations from the same prepared synthetic inputs.
+        # 用同样准备好的合成输入构建独立的旧 worker 期望。
         reference=fixture.root/'old-index-calculation';reference.mkdir()
         shutil.copytree(fixture.shared/'char-index',reference/'char-index')
         (reference/'game-chars').mkdir();(reference/'char-patch').mkdir()
@@ -341,5 +341,5 @@ class NativeIndexActualCcipTest(unittest.TestCase):
 
 
 def load_tests(loader, tests, pattern):
-    # The actual-model case runs only when named explicitly; missing inputs then fail.
+    # 真实模型的用例只在显式点名时运行；这时缺少输入就失败。
     return unittest.TestSuite(group for group in tests if not any(isinstance(t, NativeIndexActualCcipTest) for t in group))

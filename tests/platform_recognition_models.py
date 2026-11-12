@@ -1,15 +1,13 @@
-"""Explicit, opt-in model acceptance; generated images/anchors only.
+"""显式、需主动选择运行的模型验收；只用生成的图片/锚点。
 
-Every case but AcceleratedRecognitionTest runs with ILLUSTASH_CPU_ONLY=1 and compares bit for bit with the
-Python ONNX Runtime CPU reference. AcceleratedRecognitionTest runs on the accelerator this platform has (CCIP on
-CoreML on Apple silicon, #270; WD and CCIP on DirectML on Windows x64, #271) and compares within the bounds #213
-measured.
-Run separately from discover. Required inputs: ILLUSTASH_TERMS_BIN,
-ILLUSTASH_RECOGNITION_ADAPTER_BIN, ILLUSTASH_RECOGNITION_COMPUTE_BIN,
-ILLUSTASH_RECOGNITION_MODELS and ILLUSTASH_ORT_DYLIB. Missing inputs fail.
-The relocated resources below are a narrow recognition layout fixture, not a
-signed/full installer. Windows also requires explicit ILLUSTASH_RESEARCH_OPENBLAS_DLL matching the
-reference NumPy wheel; Linux is frozen.
+除 AcceleratedRecognitionTest 外，每个用例都以 ILLUSTASH_CPU_ONLY=1 运行，与 Python ONNX Runtime 的 CPU
+参考结果逐位比较。AcceleratedRecognitionTest 在本平台已有的加速器上运行（Apple 芯片上 CCIP 用 CoreML，#270；
+Windows x64 上 WD 和 CCIP 用 DirectML，#271），在 #213 测得的界限内比较。
+不随 discover 运行，单独运行。必需的输入：ILLUSTASH_TERMS_BIN、
+ILLUSTASH_RECOGNITION_ADAPTER_BIN、ILLUSTASH_RECOGNITION_COMPUTE_BIN、
+ILLUSTASH_RECOGNITION_MODELS 和 ILLUSTASH_ORT_DYLIB。缺少输入就失败。
+下面重新安置的资源是只够识别用的目录布局夹具，不是签名的完整安装包。Windows 还要求显式给出与参考
+NumPy wheel 匹配的 ILLUSTASH_RESEARCH_OPENBLAS_DLL；Linux 已冻结。
 """
 from contextlib import closing
 import csv
@@ -77,7 +75,7 @@ class RecognitionModelTest(unittest.TestCase):
                   (ROOT / 'tags/tags_v3.csv', cls.resources / 'tags/tags_v3.csv')]
         copies += [(models / name, cls.resources / 'models' / name)
                    for name in ('wd_swinv2_v3_emb.onnx', 'ccip/model_feat.onnx')]
-        # The Windows runtime loads DirectML.dll from its own folder (#271), as installed.
+        # Windows 上的运行库从它自己的文件夹加载 DirectML.dll（#271），与安装后一致。
         copies += [(runtime.parent / name, cls.resources / 'onnxruntime' / name)
                    for name in ('DirectML.dll',) if sys.platform == 'win32' and (runtime.parent / name).is_file()]
         for source, dest in copies:
@@ -105,7 +103,7 @@ class RecognitionModelTest(unittest.TestCase):
             image.save(path)
             cls.images.append(path)
         options = ort.SessionOptions(); options.log_severity_level = 3
-        if sys.platform != 'win32':  # WD threads as session::WD_THREADS: ORT default on Windows, 4 elsewhere
+        if sys.platform != 'win32':  # WD 线程数与 session::WD_THREADS 相同：Windows 上用 ORT 默认值，其他平台用 4
             options.intra_op_num_threads = 4
         wd = ort.InferenceSession(str(models / 'wd_swinv2_v3_emb.onnx'), options, providers=['CPUExecutionProvider'])
         options = ort.SessionOptions(); options.log_severity_level = 3
@@ -118,7 +116,7 @@ class RecognitionModelTest(unittest.TestCase):
             probabilities, embedding = wd.run(None, {wd.get_inputs()[0].name: wd_input})
             feature = ccip.run(None, {ccip.get_inputs()[0].name: ccip_input})[0]
             cls.reference.append(dict(probs=probabilities.reshape(-1), wd=embedding.reshape(-1), ccip=feature.reshape(-1)))
-        # No simultaneous Python/native model sessions during the acceptance run.
+        # 验收运行期间不同时开着 Python 和原生的模型会话。
         del wd, ccip
         cls.runtime = cls.resources / 'onnxruntime' / runtime_name
 
@@ -132,24 +130,24 @@ class RecognitionModelTest(unittest.TestCase):
                         ILLUSTASH_APP_SUPPORT=str(self.root / 'support'), ILLUSTASH_SHARED=str(self.shared),
                         ILLUSTASH_CPU_ONLY='1')
         if sys.platform == 'win32':
-            # Installed Windows launchers provide ROOT; the backend resolves only
-            # ROOT/openblas/openblas.dll, without PATH or a Python/DLL override.
+            # 安装版的 Windows 启动器提供 ROOT；后端只解析 ROOT/openblas/openblas.dll，
+            # 不用 PATH，也不接受 Python/DLL 覆盖。
             self.env['ILLUSTASH_ROOT'] = str(self.resources)
 
     def assert_ccip(self, actual, expected):
-        """CCIP vectors and the distances and confidences computed from them: bit for bit on the CPU."""
+        """CCIP 向量及由它算出的距离和置信度：在 CPU 上逐位一致。"""
         np.testing.assert_array_equal(actual, expected)
 
     def assert_wd(self, actual, expected):
-        """WD probabilities: bit for bit on the CPU."""
+        """WD 概率：在 CPU 上逐位一致。"""
         np.testing.assert_array_equal(actual, expected)
 
     def assert_wd_vector(self, actual, expected):
-        """WD vectors: bit for bit on the CPU."""
+        """WD 向量：在 CPU 上逐位一致。"""
         np.testing.assert_array_equal(actual, expected)
 
     def assert_labels(self, actual, expected):
-        """Stored labels (probability >= 0.001, four decimals): exactly, on the CPU."""
+        """存储的标签（概率 >= 0.001，四位小数）：在 CPU 上完全一致。"""
         self.assertEqual(actual, expected)
 
     def invoke(self, binary, request, *, env=None):
@@ -191,7 +189,7 @@ class RecognitionModelTest(unittest.TestCase):
         bad = self.root / 'bad.png'; bad.write_bytes(b'not an image')
         assets = [dict(id=f'asset-{i}', path=str(bad if i == 24 else self.images[i % 8])) for i in range(26)]
         output = self.root / 'output'; output.mkdir()
-        # Progress is visible while the producer still runs: sample it until the process exits.
+        # 生产方还在运行时就能看到进度：一直采样到进程退出。
         progress = self.root / 'progress.json'
         request = dict(mode='produce', resources=str(self.resources), models=str(self.resources / 'models'),
                        runtime=str(self.runtime), shared=str(self.shared),
@@ -227,7 +225,7 @@ class RecognitionModelTest(unittest.TestCase):
             path = Path(batch); manifest = json.loads((path / 'manifest.json').read_text(encoding='utf-8'))
             self.assertEqual(manifest['assets'], [f'asset-{i}' for i in (range(24) if size == 24 else (25,))])
             claim = json.loads(Path(sidecar).read_text(encoding='utf-8'))
-            # The completion marker, written last, pins exactly the finished manifest and sidecar.
+            # 最后写入的完成标记，精确锁定已完成的 manifest 和 sidecar。
             complete = json.loads((path / 'complete.json').read_text(encoding='utf-8'))
             self.assertEqual(complete, dict(format='illustash-recognition-batch/1', task_id='synthetic',
                                             assets=manifest['assets'],
@@ -252,7 +250,7 @@ class RecognitionModelTest(unittest.TestCase):
                                           np.asarray([r['threshold'] for r in expected_claims], np.float32))
             self.assertEqual([(r['asset'], r['character']) for r in claim['claims']],
                              [(r['asset'], r['character']) for r in expected_claims])
-            # The confidence is 1 - distance, so it follows the distance.
+            # 置信度是 1 - 距离，所以随距离而定。
             self.assert_ccip(np.asarray([r['confidence'] for r in claim['claims']]),
                              np.asarray([r['confidence'] for r in expected_claims]))
             for model in ('wd', 'ccip'):
@@ -309,7 +307,7 @@ class RecognitionModelTest(unittest.TestCase):
                     self.assertNotIn('ILLUSTASH_WORKER_PYTHON', result.stderr.decode(errors='replace'))
                     self.assertFalse(reply.exists())
                     self.assertEqual(source.read_bytes(), before)
-        # A valid model with an incompatible tag table must fail before publishing any batch.
+        # 模型合法但 tag 表不兼容时，必须在发布任何批次之前失败。
         resources = self.root / 'wrong-tags'; (resources / 'tags').mkdir(parents=True)
         (resources / 'tags/tags_v3.csv').write_text('name,category\ngeneral,9\n', encoding='utf-8')
         env = dict(self.env, ILLUSTASH_ROOT=str(resources),
@@ -338,8 +336,8 @@ class RecognitionModelTest(unittest.TestCase):
                               env=self.env, capture_output=True, timeout=30)
         self.assertEqual(made.returncode, 0, made.stderr.decode(errors='replace'))
         self.env['ILLUSTASH_RECOGNITION_WORKER'] = str(self.adapter)
-        # Default ROOT/models/runtime must be found from the relocated installed exe;
-        # --root on the host is its documented resource input, no worker overrides/Python.
+        # 默认的 ROOT/models/runtime 必须从重新安置的安装版 exe 找到；
+        # 宿主的 --root 是文档里写明的资源输入，没有 worker 覆盖，也没有 Python。
         self.port = free_port(); self.origin = f'http://127.0.0.1:{self.port}'
         process, _ = self.start(package, extra=('--no-open',))
         self.token = json.loads(self.request('/api/bootstrap')['body'])['token']
@@ -392,7 +390,7 @@ class RecognitionModelTest(unittest.TestCase):
         (folder / 'bad.png').write_bytes(b'not an image')
         incremental = sync()
         self.assertEqual(incremental['state']['status'], 'done', incremental)
-        # #112: read in full but not an image, so damaged and skipped until it changes, not retried.
+        # #112：完整读到了但不是图片，所以算作损坏并跳过，直到它改变；不重试。
         self.assertEqual((incremental['state']['failed'], incremental['state']['damaged']), (0, 1), incremental)
         self.assertEqual([Path(p).name for p in incremental['damaged']['paths']], ['bad.png'])
         with closing(sqlite3.connect(source)) as c:
@@ -409,12 +407,12 @@ class RecognitionModelTest(unittest.TestCase):
             self.assertEqual(after[table], expected, table)
         again = sync()
         self.assertEqual((again['state']['status'], again['state']['failed'], again['state']['damaged']), ('done', 0, 1), again)
-        # Replaced by a picture whose second half is missing: still damaged, under the same asset.
+        # 换成一张缺了后半截的图片：仍然算损坏，还是同一个资源。
         whole = self.images[3].read_bytes()
         (folder / 'bad.png').write_bytes(whole[:len(whole) // 2])
         truncated = sync()
         self.assertEqual((truncated['state']['failed'], truncated['state']['damaged']), (0, 1), truncated)
-        # Fixed: recognised on the next sync, under the same asset.
+        # 修好了：下次同步时识别，还是同一个资源。
         shutil.copy2(self.images[3], folder / 'bad.png')
         fixed = sync()
         self.assertEqual((fixed['state']['failed'], fixed['state'].get('damaged')), (0, None), fixed)
@@ -427,7 +425,7 @@ class RecognitionModelTest(unittest.TestCase):
 
 
 def accelerator():
-    """The accelerated backend this platform has (recognition_compute/backend.rs), or None."""
+    """本平台可用的加速后端（recognition_compute/backend.rs），没有则为 None。"""
     import platform
     if sys.platform == 'darwin' and platform.machine() == 'arm64':
         return 'coreml'
@@ -436,15 +434,14 @@ def accelerator():
     return None
 
 
-# Which models the accelerator runs; the rest stay on the CPU, bit for bit.
+# 加速器运行哪些模型；其余的留在 CPU 上，逐位一致。
 ACCELERATED = {'coreml': ('ccip',), 'directml': ('wd', 'ccip')}.get(accelerator(), ())
 
 
 @unittest.skipUnless(accelerator(), 'no accelerated recognition backend on this platform')
 class AcceleratedRecognitionTest(RecognitionModelTest):
-    """The setting's default: ACCELERATED on the accelerator. #213 measured fp32 rounding differences only (CCIP
-    cosine >= 0.99999999999958 on CoreML, >= 0.9999999999995 on DirectML); the bounds here leave room, and every
-    decision must stay."""
+    """设置的默认值：ACCELERATED 中的模型跑在加速器上。#213 测得的只有 fp32 舍入差异（CCIP 余弦相似度
+    CoreML 上 >= 0.99999999999958，DirectML 上 >= 0.9999999999995）；这里的界限留有余地，每个判定都必须不变。"""
     COSINE = 0.9999999999
 
     def setUp(self):
@@ -470,18 +467,18 @@ class AcceleratedRecognitionTest(RecognitionModelTest):
             self.assertTrue(any(cache[0].rglob('*')), 'the compiled model is cached')
         reference = np.asarray([r['ccip'] for r in self.reference], np.float64)
         for i, (expected, actual) in enumerate(zip(self.reference, got)):
-            # On the CPU (CoreML): bit for bit, and so are the labels; on DirectML within WD_ATOL.
+            # 在 CPU 上（CoreML 时）：逐位一致，标签也一样；DirectML 上在 WD_ATOL 以内。
             self.assert_wd(np.asarray(actual['probs'], np.float32), expected['probs'])
             self.assert_wd_vector(np.asarray(actual['wd'], np.float32), expected['wd'])
             self.assert_labels(actual['labels'], labels('synthetic', expected['probs'], self.tags))
             feature = np.asarray(actual['ccip'], np.float64)
             cosine = feature @ reference[i] / np.linalg.norm(feature) / np.linalg.norm(reference[i])
             self.assertGreaterEqual(cosine, self.COSINE, i)
-            # The nearest of the others is the same picture, as on the CPU.
+            # 其余图片里最近的那张与 CPU 上相同。
             others = [j for j in range(len(reference)) if j != i]
             nearest = lambda v: max(others, key=lambda j: v @ reference[j] / np.linalg.norm(v) / np.linalg.norm(reference[j]))
             self.assertEqual(nearest(feature), nearest(reference[i]), i)
-        # Again (on CoreML from the compiled cache): the same outputs, bit for bit.
+        # 再跑一次（CoreML 上用编译缓存）：输出相同，逐位一致。
         again = self.infer()
         self.assertEqual([r['ccip'] for r in again], [r['ccip'] for r in got])
         self.assertEqual([r['probs'] for r in again], [r['probs'] for r in got])
@@ -490,14 +487,14 @@ class AcceleratedRecognitionTest(RecognitionModelTest):
         actual, expected = np.asarray(actual, np.float64), np.asarray(expected, np.float64)
         self.assertEqual(actual.shape, expected.shape)
         if actual.ndim == 2:
-            # Raw vectors (unnormalised, values up to about 5): by direction, as the distances use them.
+            # 原始向量（未归一化，值最大约为 5）：按方向比较，与距离计算的用法一致。
             cosine = (actual * expected).sum(1) / np.linalg.norm(actual, axis=1) / np.linalg.norm(expected, axis=1)
             self.assertGreaterEqual(cosine.min(), self.COSINE)
         else:
-            # Distances of 0.01–0.15 decide, and #213 saw them move by 1.3e-7 at most.
+            # 起决定作用的是 0.01–0.15 的距离，#213 观察到它们最多变动 1.3e-7。
             np.testing.assert_allclose(actual, expected, rtol=0, atol=1e-6)
 
-    # DirectML (#213 on 92 public pictures): WD probabilities at most 4.2e-6 from the CPU's, mean 2.7e-8.
+    # DirectML（#213，92 张公开图片）：WD 概率与 CPU 的相差最多 4.2e-6，平均 2.7e-8。
     WD_ATOL = 2e-5
 
     def assert_wd(self, actual, expected):
@@ -513,8 +510,8 @@ class AcceleratedRecognitionTest(RecognitionModelTest):
         self.assertGreaterEqual(cosine.min(), self.COSINE)
 
     def assert_labels(self, actual, expected):
-        """On DirectML a label within WD_ATOL of the 0.001 cut may come or go, and a stored confidence may move
-        by one in the fourth decimal; nothing else changes, and the tags at the decision thresholds stay."""
+        """DirectML 上，距 0.001 截断线在 WD_ATOL 以内的标签可能出现或消失，存储的置信度第四位小数可能差 1；
+        其他都不变，处在判定阈值上的 tag 保持不变。"""
         if 'wd' not in ACCELERATED:
             return super().assert_labels(actual, expected)
         key = lambda r: (r['asset'], r['dim'], r['value'])
@@ -526,8 +523,8 @@ class AcceleratedRecognitionTest(RecognitionModelTest):
         for cut in (.2, .35, .5, .85):
             self.assertEqual({k for k, v in got.items() if v >= cut}, {k for k, v in want.items() if v >= cut}, cut)
 
-    # test_candidate_batches_bad_image_and_synthetic_anchor_claims runs as inherited: WD outputs and labels bit for
-    # bit, CCIP vectors, distances and confidences through assert_ccip, the claimed characters exactly.
+    # test_candidate_batches_bad_image_and_synthetic_anchor_claims 按继承来的样子运行：WD 输出和标签逐位一致，
+    # CCIP 向量、距离和置信度经 assert_ccip 比较，认领的角色完全一致。
 
     def test_installed_no_anchor_bad_image_and_explicit_dependency_failures(self):
         self.skipTest('the CPU case covers dependency failures; nothing accelerated is involved')
@@ -545,13 +542,13 @@ class AcceleratedRecognitionTest(RecognitionModelTest):
         got = self.infer()
         status = self.status()['ccip']
         if status['used'] == 'cpu':
-            # The damaged copy could not be loaded: this worker used the CPU and the copy is gone.
+            # 损坏的副本加载不了：这个 worker 改用 CPU，副本已删除。
             self.assertTrue(status['reason'])
             self.assertFalse(cache.exists())
             for expected, actual in zip(self.reference, got):
                 np.testing.assert_array_equal(np.asarray(actual['ccip'], np.float32), expected['ccip'])
         else:
-            # Or CoreML noticed and compiled again; either way the outputs are sound.
+            # 或者 CoreML 发现了问题并重新编译；不论哪种，输出都是可靠的。
             self.assertEqual(status['reason'], None)
         self.infer()
         self.assertEqual(self.status()['ccip']['used'], accelerator(), 'the next worker compiles again')

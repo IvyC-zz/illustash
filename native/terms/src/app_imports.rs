@@ -14,18 +14,18 @@ use std::{
     time::Duration,
 };
 
-/// What a long import reports while it runs, and the one point at which it publishes.
+/// 长时间的导入在运行中报告什么，以及它发布的那一个时间点。
 pub(crate) trait Observer {
-    /// The step now running; any count of the previous step is cleared.
+    /// 当前正在运行的步骤；上一步的计数清空。
     fn stage(&self, _stage: &'static str) {}
-    /// Real units of the current step (bytes unpacked, assets written, files read).
+    /// 当前步骤的实际单位（解出的字节、写入的 asset、读过的文件）。
     fn count(&self, _done: u64, _total: u64) {}
-    /// Publish once. Refused after a cancellation; a cancellation arriving meanwhile waits until it is done.
+    /// 只发布一次。取消之后拒绝发布；发布期间到达的取消等它完成。
     fn publish(&self, apply: &mut dyn FnMut() -> Result<()>) -> Result<()> {
         apply()
     }
 }
-/// Callers with their own cancellation and no one to report to (CLI, recognition worker batches).
+/// 自己处理取消、也没有报告对象的调用方（CLI、识别 worker 的批次）。
 pub(crate) struct Silent;
 impl Observer for Silent {}
 
@@ -47,7 +47,7 @@ fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
-/// Handed to the running import: its cancellation flag and its reports into the polled state.
+/// 交给正在运行的导入：它的取消标志，以及写进可轮询状态的报告。
 pub(crate) struct Progress {
     state: Arc<Mutex<State>>,
     context: TaskContext,
@@ -80,15 +80,15 @@ impl Observer for Progress {
     }
 }
 
-/// Reasons a running import was stopped, as the state reports them.
+/// 正在运行的导入被停下的原因，与状态里报告的一致。
 pub(crate) const CANCELLED: &str = "导入已取消";
 pub(crate) const SWITCHED: &str = "图库已切换，导入已取消";
 pub(crate) const QUITTING: &str = "程序正在退出，导入已取消";
 pub(crate) const DAMAGED: &str = "图库数据库损坏，导入已取消";
-/// How long quitting waits for a stopped import to remove what it unpacked.
+/// 退出时等待已停下的导入删掉它解出内容的时长。
 pub(crate) const QUIT_WAIT: Duration = Duration::from_secs(5);
 
-/// The HTTP status and message the former synchronous request answered with for this error.
+/// 以前的同步请求对这个错误回答的 HTTP 状态和消息。
 fn classify(error: Error) -> (u16, String) {
     match error {
         Error::Invalid(message) => (400, message),
@@ -111,7 +111,7 @@ struct Current {
 impl Current {
     fn snapshot(&self) -> Json {
         let state = lock(&self.state).clone();
-        // A thread that ended without a final state panicked; never leave it reported as running.
+        // 没有最终状态就结束的线程是 panic 了；不要让它一直报告为运行中。
         if matches!(state.status(), Status::Running | Status::Stopping) && !self.task.running() {
             let mut state = state;
             state.set("status", "error".into());
@@ -121,8 +121,8 @@ impl Current {
         }
         state.snapshot()
     }
-    /// Records why and marks the import stopping. The caller cancels the returned context after releasing the
-    /// slot: a cancellation may wait for a publication in progress, and polling must not wait with it.
+    /// 记下原因，并把导入标为正在停止。调用方在释放槽位之后再取消返回的上下文：
+    /// 取消可能要等正在进行的发布，轮询不能跟着等。
     fn stop(&self, reason: &'static str) -> Option<TaskContext> {
         if !self.task.running() {
             return None;
@@ -136,8 +136,8 @@ impl Current {
     }
 }
 
-/// The application's import slot. Its state outlives a switch, so the page that reloads afterwards can still read
-/// why the previous import stopped; only one import runs at a time, a stopping one included.
+/// 应用的导入槽位。它的状态在切换图库后仍然保留，这样之后重新加载的页面仍能读到上一次导入为什么停下；
+/// 同一时间只运行一个导入，正在停止的也算。
 #[derive(Default)]
 pub(crate) struct Imports {
     current: Mutex<Option<Current>>,
@@ -147,7 +147,7 @@ impl Imports {
     pub(crate) fn state(&self) -> Json {
         lock(&self.current).as_ref().map(Current::snapshot).unwrap_or_else(|| Json::object([("status", "idle".into())]))
     }
-    /// Starts `work` in the background and answers with its first state. `file` names the input for the page.
+    /// 在后台启动 `work`，回答它的初始状态。`file` 是给页面看的输入名称。
     pub(crate) fn start(
         &self,
         identity: TaskIdentity,
@@ -169,8 +169,8 @@ impl Imports {
             ("id", identity.task_id.as_str().into()),
             ("file", file.into()),
         ]))));
-        // The answer is the task as started: one that fails at once must still reach the page as running, or the
-        // page, which reports an import when a poll sees it end, never says why it failed.
+        // 回答的是刚启动时的任务：立即失败的任务也必须以运行中的状态送到页面，否则页面（它在轮询看到导入结束时才报告）
+        // 永远不会说出失败的原因。
         let answer = lock(&state).snapshot();
         let reason: Arc<Mutex<Option<&'static str>>> = Arc::default();
         let (shared, why) = (state.clone(), reason.clone());
@@ -188,7 +188,7 @@ impl Imports {
                     state.set("status", "done".into());
                     state.set("result", value);
                 }
-                // Nothing was published: the import stopped because it was asked to, whatever error that surfaced as.
+                // 什么都没有发布：导入是因为被要求才停下的，无论它表现为什么错误。
                 Err(_) if stopped && !progress.published.load(Ordering::SeqCst) => {
                     state.set("status", "cancelled".into());
                     state.set("reason", lock(&why).unwrap_or(QUITTING).into());
@@ -205,13 +205,13 @@ impl Imports {
         *current = Some(Current { task, state, reason, kind, generation });
         Ok(answer)
     }
-    /// A recognition import of this session is admitted or running: sync and index writes wait for it.
+    /// 这个会话的识别导入已被接受或正在运行：同步和索引写入要等它。
     pub(crate) fn recognition_running(&self, generation: u64) -> bool {
         lock(&self.current)
             .as_ref()
             .is_some_and(|c| c.kind == Kind::Recognition && c.generation == generation && c.task.running())
     }
-    /// Asks the running import to stop and answers with the state at that moment; the page polls for the end.
+    /// 请正在运行的导入停下，回答那一刻的状态；页面轮询直到结束。
     pub(crate) fn cancel(&self, reason: &'static str) -> Json {
         let (stopping, answer) = {
             let current = lock(&self.current);
@@ -225,7 +225,7 @@ impl Imports {
         }
         answer
     }
-    /// Quitting: refuse new imports, stop the running one and give it `wait` to remove what it unpacked.
+    /// 退出时：拒绝新的导入，停下正在运行的导入，给它 `wait` 的时间删掉它解出的内容。
     pub(crate) fn shutdown(&self, wait: Duration) {
         self.closed.store(true, Ordering::SeqCst);
         let taken = {
@@ -313,7 +313,7 @@ mod tests {
         assert_eq!(done.get("status").unwrap().text(), "done");
         assert!(done.get("stage").is_none());
         assert_eq!(done.get("result").unwrap().get("name").unwrap().text(), "合成");
-        // A finished import makes room for the next one.
+        // 导入完成后就能开始下一个。
         imports.start(identity(1), Kind::Recognition, "next", |_| Ok(Json::Object(Vec::new()))).unwrap();
         settle(&imports);
     }
@@ -354,7 +354,7 @@ mod tests {
 
     #[test]
     fn a_cancellation_during_publication_waits_and_a_published_import_is_never_reported_cancelled() {
-        // After publication the import either finishes (done) or fails in a later step (error), never "cancelled".
+        // 发布之后，导入要么完成（done），要么在之后的步骤失败（error），从不是 "cancelled"。
         for (after, status) in [(Ok(()), "done"), (Err("登记失败（合成）"), "error")] {
             let imports = Arc::new(Imports::default());
             let (inside, entered) = mpsc::channel();
@@ -375,7 +375,7 @@ mod tests {
                 let imports = imports.clone();
                 std::thread::spawn(move || imports.cancel(CANCELLED))
             };
-            // Polling is not held up by the waiting cancellation: it reads "stopping" while the cancel waits.
+            // 轮询不会被等待中的取消挡住：取消等待期间它读到 "stopping"。
             let until = Instant::now() + Duration::from_secs(5);
             while status_of(&imports) != "stopping" {
                 assert!(Instant::now() < until, "the cancellation was never recorded");
@@ -413,7 +413,7 @@ mod tests {
     fn quitting_refuses_new_imports_and_does_not_wait_forever() {
         let imports = Imports::default();
         let (ready, wait) = mpsc::channel();
-        // Blocked work that never checks its cancellation (a pipe nobody writes).
+        // 被阻塞、从不检查取消的工作（一个没人写的管道）。
         let (_hold, held) = mpsc::channel::<()>();
         imports
             .start(identity(1), Kind::Recognition, "result", move |_| {

@@ -1,5 +1,5 @@
-// Numbers and dates follow the page's language; Chinese keeps its own wording (core/format.js; #182, #199).
-// tests/format_en.test.cjs is the same on an English page.
+// 数字和日期跟随页面语言；中文保留自己的措辞（core/format.js；#182、#199）。
+// 英文页面上的同样检查在 tests/english_page.test.cjs。
 const {test, before} = require('node:test');
 const assert = require('node:assert/strict');
 const web = require('./web.cjs');

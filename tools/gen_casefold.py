@@ -1,7 +1,7 @@
-"""Generate crates/core/src/casefold.rs: Python's str.casefold() as a table, for the core's search (names_search.rs).
+"""生成 crates/core/src/casefold.rs：把 Python 的 str.casefold() 做成一张表，供核心的搜索使用（names_search.rs）。
 
-str.casefold() folds code point by code point (Unicode full case folding, no context), so a table of every code point
-it changes reproduces it exactly. Rerun with the Python that serves the app when its Unicode version changes:
+str.casefold() 逐个码位折叠（Unicode 完全大小写折叠，不看上下文），所以列出它会改变的每个码位的表就能精确重现它。
+为 App 提供服务的 Python 的 Unicode 版本变了时，用那个 Python 重新运行：
 
     python tools/gen_casefold.py
 """
