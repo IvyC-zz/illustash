@@ -2,13 +2,14 @@
 // 的内容在 core/catalog.js。
 import {t} from '../core/i18n.js';
 import {esc, number} from '../core/format.js';
+import {implement, onPage} from '../core/pages.js';
 import {prefs} from '../core/prefs.js';
 import {api, session, readError} from '../core/session.js';
 import {state} from '../core/state.js';
 import {nameTip} from '../core/labels.js';
 import {pollIndex, indexAction} from '../core/jobs.js';
 import {remoteNames, remoteNote} from '../core/settings.js';
-import {catalog, recentOf, loadActivity as readActivity, searchCharacters, loadTagged, loadWorkTree, loadLocalLinks, castWorks, PSEUDO_NOTES, BUCKETS, castRows,
+import {catalog, forgetActivity, recentOf, loadActivity as readActivity, searchCharacters, loadTagged, loadWorkTree, loadLocalLinks, castWorks, PSEUDO_NOTES, BUCKETS, castRows,
   WORK_NAMES, workName, loadIndex, searchWorks, shelfRows, saveWatch, watchTarget, saveWork} from '../core/catalog.js';
 import {$, toast, toastMore, error, readFailure, wireFolds, reconcileSections, searchIcon} from './dom.js';
 import {chooseWork, openDialog} from './dialog.js';
@@ -32,7 +33,7 @@ export async function renderIndex() {
   cast.list = null; setPop(false, 'silent', false);
   if (state.chars.some(c => c.summary)) {
     try { await refreshMeta(); } catch (e) { error(e.message); return; }
-    if (state.route.page !== 'characters') return;
+    if (!onPage(state.route, 'characters')) return;
   }
   drawCast();
   loadTagged().then(() => drawCast()).catch(e => error(readError(e)));
@@ -41,11 +42,11 @@ export async function renderIndex() {
 }
 // 名字是 Danbooru tag 的自有角色（只拿这些名字去问 Danbooru；没有就不发请求）。
 export async function refreshLocalLinks() {
-  if (await loadLocalLinks() && state.route.page === 'characters') renderHeading();
+  if (await loadLocalLinks() && onPage(state.route, 'characters')) renderHeading();
 }
 export async function loadActivity() {
   let fresh; try { fresh = await readActivity(); } catch (e) { error(readError(e)); return; }
-  if (fresh && state.route.page === 'characters') drawCast();
+  if (fresh && onPage(state.route, 'characters')) drawCast();
 }
 export async function searchIndex() {
   const route = state.route, token = session.token;
@@ -55,7 +56,7 @@ export async function searchIndex() {
   if (route === state.route && token === session.token && q === $('charSearch').value.trim()) { cast.list = list; drawCast(); }
 }
 // 留给元数据变化后刷新页面的调用方。
-export function renderIndexBody() { if (state.route.page !== 'characters') return; if (state.route.section === 'works') drawShelf(); else { drawCast(); loadActivity(); } }
+export function renderIndexBody() { if (!onPage(state.route, 'characters')) return; if (state.route.section === 'works') drawShelf(); else { drawCast(); loadActivity(); } }
 const cover = (c, size = 'thumb') => c?.cover ? `<img src="/image?id=${encodeURIComponent(c.cover)}&size=${size}" alt="" loading="lazy" decoding="async">` : '';
 const avatar = (c, px) => `<i class="cast-av" style="width:${px}px;height:${px}px">${cover(c)}</i>`;
 // ---------- 海报的图片：静止时随机一张，指针下看其他的（#293） ----------
@@ -251,7 +252,7 @@ function castList() {
     </tbody></table>${rows.length > shown.length ? `<button class="quiet cast-more" id="castMore">${t('再显示 300 位（共 {n} 位）', {n: number(rows.length)})}</button>` : ''}`;
 }
 export function drawCast() {
-  if (state.route.page !== 'characters' || state.route.section) return;
+  if (!onPage(state.route, 'characters') || state.route.section) return;
   const works = castWorks(), root = $('charIndex');
   // 带前缀：单独一个 'shelf' 会套上「作品」页的 .shelf（窄的 flex 列，#274）。
   root.className = 'char-index cast cast-' + cast.mode;
@@ -300,7 +301,7 @@ export async function renderShelf() {
   drawShelf();
   try { await loadIndex(); } catch (e) { if (route === state.route && token === session.token) readFailure($('charIndex'), e); return; }
   if (route !== state.route || token !== session.token) return;
-  if (state.route.page === 'characters' && state.route.section === 'works') { renderHeading(); drawShelf(); }
+  if (onPage(state.route, 'characters') && state.route.section === 'works') { renderHeading(); drawShelf(); }
 }
 // 关注开关需要一个用户核对过的 Danbooru 作品 tag；索引检查按这个 tag 搜索。
 function watchSwitch(w) {
@@ -313,7 +314,7 @@ function workLink(w) {
   return `<span class="shelf-link">${t('未关联 Danbooru')}</span>`;
 }
 export function drawShelf() {
-  if (state.route.page !== 'characters' || state.route.section !== 'works') return;
+  if (!onPage(state.route, 'characters') || state.route.section !== 'works') return;
   const root = $('charIndex'), x = state.index;
   root.className = 'char-index shelf';
   if (!x?.works) { root.innerHTML = `<p class="muted-note shelf-empty">${t('正在读取作品…')}</p>`; return; }
@@ -529,7 +530,7 @@ export function wireCatalog() {
   for (const kind of ['pointerup', 'pointercancel']) $('charIndex').addEventListener(kind, lookLift);
   $('charIndex').addEventListener('click', e => { const a = e.target.closest?.('.cast-poster.look'); if (a?.dragged && performance.now() - a.dragged < 500) { e.preventDefault(); e.stopPropagation(); } }, true);
   $('charIndex').addEventListener('click', e => {
-    if (state.route.page !== 'characters') return;
+    if (!onPage(state.route, 'characters')) return;
     const hit = e.target;
     if (hit.closest('[data-tagged-manage]')) { openTagged(); return; }
     const tab = hit.closest('[data-tab]');
@@ -544,7 +545,7 @@ export function wireCatalog() {
   });
   $('charIndex').addEventListener('input', e => { if (e.target.id === 'castPopQ') { cast.popQ = e.target.value; const pos = e.target.selectionStart; drawCast(); const i = $('castPopQ'); i?.setSelectionRange(pos, pos); } });
   $('charIndex').addEventListener('click', async e => {
-    if (state.route.page !== 'characters') return;
+    if (!onPage(state.route, 'characters')) return;
     const hit = e.target, works = state.index?.works || [];
     const f = hit.closest('[data-shelf-filter]'); if (f) { shelf.filter = f.dataset.shelfFilter; drawShelf(); return; }
     const open = hit.closest('[data-shelf-open]'); if (open) { cast.tab = open.dataset.shelfOpen; go({page: 'characters'}); return; }
@@ -558,3 +559,6 @@ export function wireCatalog() {
     saveWatchList(b.checked ? [...list, id] : list);
   });
 }
+
+// 资料库登记：渲染入口；切换 R18 之后只重新读收藏动态（目录由元数据读取重画）。
+implement({characters: {render: () => renderIndex(), refresh: why => { if (why === 'nsfw') { forgetActivity(); readActivity(); } }}});

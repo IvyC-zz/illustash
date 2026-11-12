@@ -2,7 +2,7 @@
 // app.js 把这些交给 onPost() 和 onJob()。
 import {SYNC_ACTIVE, importLine} from '../core/jobs.js';
 import {metaWritten, refreshMeta} from '../core/meta.js';
-import {panelPage} from '../core/route.js';
+import {onPage, pageOf} from '../core/pages.js';
 import {loadLibraries} from '../core/settings.js';
 import {readError} from '../core/session.js';
 import {state} from '../core/state.js';
@@ -10,7 +10,6 @@ import {drawShelf} from './catalog.js';
 import {error, toast} from './dom.js';
 import {reload, selCount} from './grid.js';
 import {guideAfterPost, guideRefresh} from './guide.js';
-import {renderHome} from './home.js';
 import {renderIndexCard, renderLibrariesCard, renderNamesCard, renderProvenanceCard} from './settings.js';
 
 // 后端接受了一次写入：可能变了的计数和读取，以及向导的下一步。
@@ -26,15 +25,15 @@ export async function afterJob(job, change) {
     if (change.arrived) {
       state.countDirty = true; state.readEpoch++;
       await refreshMeta().catch(e => error(readError(e)));
-      if (!panelPage(state.route.page) && !selCount()) reload();
-      // 首页的按天分组和计数来自它自己的读取；同步落定后重画一次。
-      else if (state.route.page === 'home' && !SYNC_ACTIVE.includes(state.sync.status)) renderHome(true);
+      // 面板页自己重画（首页的按天分组和计数来自它自己的读取，同步落定后重画一次）。
+      if (!pageOf(state.route).panel && !selCount()) reload();
+      else if (!SYNC_ACTIVE.includes(state.sync.status)) pageOf(state.route).refresh?.('sync');
     }
     guideRefresh(change.ended);
   } else if (job === 'index') {
     const s = state.index.state;
     if (change.ended && s.status === 'done') { state.countDirty = true; state.readEpoch++; await refreshMeta().catch(e => error(readError(e))); }
-    if (s.status !== change.was && state.route.page === 'settings') renderIndexCard(false);
+    if (s.status !== change.was && onPage(state.route, 'settings')) renderIndexCard(false);
     if (s.status !== change.was && state.route.section === 'works') drawShelf();
   } else if (job === 'names') {
     renderNamesCard(false);

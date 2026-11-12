@@ -3,6 +3,7 @@ import {WORK_NAMES} from '../core/catalog.js';
 import {esc, number, shortcut} from '../core/format.js';
 import {said, t, tb} from '../core/i18n.js';
 import {PHOTOS_PRIVACY, SYNC_ACTIVE, photosHelp, photosRefused, pollSync, startSync, syncLine} from '../core/jobs.js';
+import {onPage, pageOf} from '../core/pages.js';
 import {go} from '../core/route.js';
 import {api, post, session} from '../core/session.js';
 import {allowNames, updatesPost, updatesTick} from '../core/settings.js';
@@ -200,7 +201,7 @@ export function guideTick(item) {
 export function guideAfterPost(path, body) {
   if (!guideOn()) return;
   if (path === '/api/undo') guideTick('undo');
-  else if (path === '/api/change' && body?.action === 'confirmed' && ['groups', 'group'].includes(state.route.page)) guideTick('group');
+  else if (path === '/api/change' && body?.action === 'confirmed' && pageOf(state.route).tab === 'groups') guideTick('group');
   else if (path === '/api/change' || path === '/api/reassign') guideTick('correct');
   else if (path === '/api/index' && body?.action === 'watch' && body.works?.length) guideTick('follow');
   if (Date.now() - guideLoadedAt > 4000) guideRefresh();
@@ -232,7 +233,7 @@ async function guideWatch(w) {
 }
 export async function replayGuide() {
   if (!await guideAction({action: 'reopen'})) return;
-  if (state.route.page === 'settings') go({page: 'home'});
+  if (onPage(state.route, 'settings')) go({page: 'home'});
   await new Promise(done => setTimeout(done, 300));
   showTour(0);
 }

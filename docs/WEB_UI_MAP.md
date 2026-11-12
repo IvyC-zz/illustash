@@ -1,6 +1,6 @@
 # 前端界面清单
 
-状态：现行参考（描述现状），2026-11-12；§3 浮层一节已按 #343 改写为浮层管理器的现行说明，其余章节仍是 #321 时的口径。口径：`web/static` 在 main `687bb63` 上的代码，加隔离宿主 + 合成图库的实际走查（见末尾「核对方式」）。模块划分和文件职责见 [WEB_V2.md](WEB_V2.md)「前端模块」；本篇回答另一个问题：界面上有哪些页面、区域、浮层、快捷键，它们之间现在是什么关系。来自 #321，总跟踪 #316。
+状态：现行参考（只描述现状），2026-11-12。页面的性质集中声明在页面注册表 `web/static/core/pages.js`（#342），§2 的总表由 `tests/pages.test.cjs` 对照核对；§3 浮层一节是浮层管理器（#343）的现行说明。口径：`web/static` 在 main `687bb63` 加上 #342、#343 的改动，以及隔离宿主 + 合成图库的实际走查（见末尾「核对方式」）。模块划分和文件职责见 [WEB_V2.md](WEB_V2.md)「前端模块」；本篇回答另一个问题：界面上有哪些页面、区域、浮层、快捷键，它们之间现在是什么关系。来自 #321，总跟踪 #316。
 
 本篇不规定应该怎样，只写现在怎样。看到不一致的地方记在末尾「已知问题」，不在这里改。
 
@@ -19,13 +19,13 @@
 | 详情栏 | `#inspector` | 一张图的详情，见 §4 | `detail.js` |
 | 浮层 | 见 §3 | | |
 
-主区的 6 个面板互斥，但没有统一的切换函数：每个渲染函数（`renderHome`、`renderIndex`、`renderSettings`、`renderGroups`、`renderSimilar`、`renderIdentity`、`renderArtistAudit`、`reload`）开头各自手写一遍「隐藏另外几个、显示自己」，`#homePage` 的显隐另在 `applyRoute` 里设。
+主区的 6 个面板互斥，但没有统一的切换函数：每个渲染函数（`renderHome`、`renderIndex`、`renderSettings`、`renderGroups`、`renderSimilar`、`renderIdentity`、`renderArtistAudit`、`reload`）开头各自手写一遍「隐藏另外几个、显示自己」，`#homePage` 的显隐另在 `applyRoute` 里按注册表的 `area` 设。
 
 侧栏切换：≤760px 宽时 ☰ 切换 `.mobile-open`（抽屉），否则切换侧栏的 `hidden`；每次换页都会收起抽屉。
 
 ## 2. 页面 × 区域
 
-地址形如 `#/页面/子页?参数`（`core/route.js`）。不带路径也不带参数的 `#/` 是首页；只带参数的旧链接（`#/?artist=…`）是图库；`#/c/<id>/<皮肤>` 改写为图库的角色筛选。「角色页」不是独立页面：它是 `page: 'library'` 加 `char` 参数。
+地址形如 `#/页面/子页?参数`（`core/route.js` 读写，路径对应哪个页面由注册表登记）。不带路径也不带参数的 `#/` 是首页；只带参数的旧链接（`#/?artist=…`）是图库；`#/c/<id>/<皮肤>` 改写为图库的角色筛选。「角色页」不是独立页面：它是 `page: 'library'` 加 `char` 参数。
 
 ### 2.1 总表
 
@@ -55,41 +55,45 @@
 
 ### 2.2 侧栏高亮归属
 
-`shell.js applyRoute` 里的一条手写映射：`data-page` 等于页面名，另加 `skipped`、`groups`、`group` → 未识别；`pending` → 已排除；`similar`、`sgroup` → 重复。资料库、设置、首页、图库各自一项；`artist-audit` 没有入口，侧栏无高亮。
+注册表每个页面的 `nav` 字段（`.nav` 的 `data-page`）：`applyRoute` 点亮 `data-page` 等于它的那一项；`skipped`、`groups`、`group` 归未识别；`pending` 归已排除；`similar`、`sgroup` 归重复；`settings` 点亮侧栏底部的设置链接。资料库、首页、图库各自一项；`artist-audit` 的 `nav` 为空，侧栏无高亮。
 
 ### 2.3 点击语义
 
-`core/route.js` 里两个判断函数决定一页的点击行为，页面清单是手写的：
+注册表的 `click` 字段决定一页的点击行为，`core/route.js` 里的两个判断函数从它派生：
 
-- `browsing()`：非角色筛选下的 `library`、`duplicates`、`recent`。点击打开详情；选择需要显式进入（⌘／Ctrl 点击、左上角圆圈、工具栏「选择」、拖动）。
-- `cleanup()`：角色筛选，或 `unmatched`、`skipped`、`excluded`、`pending`、`group`、`audit`。点击切换选中；工具栏按钮是「全选」。
-- 其余（`sgroup`；首页和面板页不走网格）两个函数都为假。
+- `browsing()`（`click: 'browse'`）：非角色筛选下的 `library`、`duplicates`、`recent`。点击打开详情；选择需要显式进入（⌘／Ctrl 点击、左上角圆圈、工具栏「选择」、拖动）。
+- `cleanup()`（`click: 'cleanup'`）：角色筛选，或 `unmatched`、`skipped`、`excluded`、`pending`、`group`、`audit`。点击切换选中；工具栏按钮是「全选」。
+- `sgroup` 是 `click: 'select'`，两个函数都为假（见已知问题 4）；首页和面板页是 `'own'`，不走网格。
 - 首页有自己的点击处理：`.home-j` 打开详情，不涉及选择。
 
-另有 `panelPage()`：`home`、`characters`、`settings`、`groups`、`similar`、`identity` 为真（不用 `#grid`），`artist-audit` 不在其中。网格相关的快捷键、`reload()`、R18 切换后的重绘都用它判断。
+另有 `panel` 字段：`home`、`characters`、`settings`、`groups`、`similar`、`identity` 为真（不用 `#grid`），`artist-audit` 不在其中（见已知问题 2）。网格相关的快捷键、`reload()`、R18 切换后的重绘都用它判断。
 
 ### 2.4 标题与底栏提示
 
-标题在 `shell.js renderHeading`：角色页有专属标题（名称、张数、未检查、检查日期、「关联 Danbooru」，右侧按钮：按相似细分、标为已检查、⋯ 菜单）；其余页用一张「页面名 → [标题, 副标题]」字典；`group` 页另有「整组标为原创角色」，`sgroup` 页另有「判断关系」，资料库角色页另有「N 个自建角色能对上 Danbooru」。
+标题由各页在 `ui/shell.js` 末尾登记的 `heading` 函数返回（`[标题, 副标题, 右侧链接]`）；角色页有专属标题（`drawHeading`：名称、张数、未检查、检查日期、「关联 Danbooru」，右侧按钮：按相似细分、标为已检查、⋯ 菜单）；`group` 页另有「整组标为原创角色」，`sgroup` 页另有「判断关系」，资料库角色页另有「N 个自建角色能对上 Danbooru」。
 
-底栏提示在 `grid.js updateCount`（网格页）和各面板页的渲染函数里；空状态文案在 `grid.js reload` 里的一张字典（`unmatched`、`skipped`、`duplicates`、`excluded`、`pending`、`group`、`recent`、`audit`、`library`；角色页单独一句）。
+底栏提示（`hint`）和空状态文案（`empty`）写在注册表里，由 `grid.js` 的 `updateCount` 和 `reload` 读（网格页），各面板页的渲染函数自己写。`similar`、`sgroup`、`group`、`recent` 没有底栏提示；没有登记 `empty`／`hint` 的页面这两处为空。
 
-### 2.5 一个页面名在哪些地方被判断
+### 2.5 新增一个页面要做什么
 
-新增一个页面，现在要找的地方（按函数名，行号会漂移）：
+先在 `web/static/core/pages.js` 的 `list` 里加一个声明（可以抄一个相近的页面），再按需要在 `ui/` 里登记；`tests/pages.test.cjs` 会要求总表（§2.1）里有对应的一行，写完跑 `node --test tests/*.test.cjs`。
 
-| 文件 | 位置 | 判断什么 |
+| 要做的 | 在哪里 | 说明 |
 |---|---|---|
-| `core/route.js` | `parseHash` | 合法页面名清单；`/s/`、`/g/`、`/c/` 的特殊地址 |
-| `core/route.js` | `LEAD_PAGES`、`cleanup`、`browsing`、`panelPage`、`defaultSort` | 排序默认值、点击语义、是否占用网格 |
-| `ui/shell.js` | `metaShown` | 计数更新后重画哪个区域 |
-| `ui/shell.js` | `applyRoute` | 侧栏高亮映射；渲染函数分派；`group`/角色页的预读 |
-| `ui/shell.js` | `subTabs`、`renderChrome`、`renderHeading` | 子页签、工具栏分支、标题字典 |
-| `ui/grid.js` | `filters` | 页面 → 后端 `pool` 参数 |
-| `ui/grid.js` | `reload`、`updateCount`、`cardHTML`、`renderSelection`、`runBarAction` | 空文案、底栏提示、卡片角标、选择栏按钮、按钮动作 |
-| `ui/grid.js` | 键盘处理、`setNsfw`、`undo` | 快捷键的页面分支；R18 切换和撤销后重画哪个面板 |
-| `ui/effects.js` | `afterJob` | 同步到达新图时是否重读 |
-| `ui/guide.js` | `tourStop` | 导览站点 |
+| 声明页面 | `core/pages.js` `list` | `name`（同时是地址路径，`#/<name>`）；带编号的页面用 `prefix`（`#/g/<id>`），带子页的用 `sections`；`area` 主区；`panel`（不用 `#grid` 时为真，**主区不是 `grid` 的页面通常也要为真**）；`click`；`nav` 侧栏高亮；`toolbar`；`sorts`；`lead`（排序偏好与未识别共用）；`tabs`／`tab` 子页签；`pool`／`params` 后端查询参数；`bar` 选择栏种类；`card` 卡片角标；`empty`／`hint` 文案；`directory` 是否要完整的角色目录 |
+| 侧栏入口 | `index.html` | 一个带 `data-page` 的 `.nav`，值等于声明的 `nav` |
+| 渲染入口 | 页面所属的 `ui/*.js` 末尾 `implement({name: {render}})` | 网格页不用写（`applyRoute` 默认 `reload(true)`）；`render({samePage})` 画主区 |
+| 标题 | `ui/shell.js` 末尾 `implement({name: {heading}})` | 每个页面都要有 |
+| 数据变了之后重画 | 同上，`refresh(why)` | `why` 取 `edit`／`undo`／`sync`／`nsfw`／`view`／`ask`；面板页自己重画，网格页由 `reload()` 管 |
+| 计数到达后重画 | `onMeta(info)` | 不写则重画工具栏；图库、资料库、设置各有自己的 |
+| 进入前要读的数据 | `prepare(route)` | 目前只有 `group`；返回 `false` 表示已经导航走了 |
+| 子页签 | `ui/shell.js` `subTabs` | 在对应的 `tabs` 组里加一项；没有的组要加一个 `case` |
+| 选择栏按钮 | `ui/grid.js` `renderSelection` | 没有合适的 `bar` 种类时加一个，并检查 S／X／Y／N 快捷键（它们按 `bar` 判断） |
+| 快捷键、卡片角标 | `ui/grid.js` | 页面的 `bar`、`card` 字段决定；帮助对话框 `#help` 的快捷键表是手写的，要同步 |
+| 导览站点 | `ui/guide.js` `tourStop` | 只有导览要带用户去的页面才需要 |
+| 总表 | 本篇 §2.1 | 加一行；`tests/pages.test.cjs` 的 `ROWS` 同步加一行 |
+
+异步回应里「还在不在这一页」的判断用 `core/pages.js` 的 `onPage(route, '名')`（`home.js`、`review.js`、`catalog.js`、`settings.js` 里有不少）：它比较的是自己所属的页面，不属于上面的「性质」。`tools/check_frontend.py` 的规则 6 不允许在注册表以外的位置直接比较页面名，没有基线。
 
 ## 3. 浮层
 
@@ -208,7 +212,7 @@
 | ⌘Z | 不在输入框 | 撤销最近一步（任何页面、任何层次） |
 | ⌘A | `#grid` 可见 | 选中全部符合条件的图 |
 | Esc | 见 §3.3 | |
-| R | 非 `panelPage` | 切换方格／原比例（含大图打开时） |
+| R | 页面的 `panel` 为假（§2.3） | 切换方格／原比例（含大图打开时） |
 | H | — | 隐藏／显示 R18（任何页面） |
 | / | 页面上有 `#search`（只有图库页） | 聚焦搜索 |
 | Y / N | `audit` 页有选中、无大图 | 对选中的图回答抽查 |
@@ -277,22 +281,23 @@
 
 ## 7. 已知问题
 
-只记录，不在 #321 里改。每条标明怎么确认的（读代码／走查）。编号保留原来的：已修的从清单里删去（5、8 在 #343 修了，见 §3），其余编号不动，因为上面的章节按编号引用。
+只记录，不在 #321 里改。每条标明怎么确认的（读代码／走查）。编号保留原来的：已修的从清单里删去（5、8 在 #343 修了，见 §3），其余编号不动，因为上面的章节按编号引用。1、2、4 在 `core/pages.js` 的声明旁标了「现状，见已知问题 N」，改行为时一并改。
 
-1. **`#/recent` 是孤页。** 侧栏入口 `#navRecent` 在 `index.html` 里带 `hidden`，没有任何代码取消它；全前端也没有指向 `#/recent` 的链接。页面和 `core/route.js`、`grid.js`、`shell.js` 里为它写的分支仍在（2026-10-02 首页接手「新加入」之后遗留）。读代码；走查确认直接输入地址能打开该页，侧栏上该项仍是隐藏的。
-2. **`artist-audit` 不在 `panelPage` 里。** 它用 `#groupsPage`，但工具栏走网格页分支，会出现排序、选择、显示方式三个无用控件；按 R、H（R18）、同步到达新图都会调用 `reload()`，后者隐藏 `#groupsPage` 并显示 `#grid`（走查中按 H 之后面板被图库网格替换，计数显示整库 36 张）。读代码并走查确认。
+1. **`#/recent` 是孤页。** 侧栏入口 `#navRecent` 在 `index.html` 里带 `hidden`，没有任何代码取消它；全前端也没有指向 `#/recent` 的链接。页面的声明和 `grid.js`、`shell.js` 里为它写的分支仍在（2026-10-02 首页接手「新加入」之后遗留）。读代码；走查确认直接输入地址能打开该页，侧栏上该项仍是隐藏的。
+2. **`artist-audit` 的 `panel` 为假。** 它用 `#groupsPage`，但工具栏走网格页分支，会出现排序、选择、显示方式三个无用控件；按 R、H（R18）、同步到达新图都会调用 `reload()`，后者隐藏 `#groupsPage` 并显示 `#grid`（走查中按 H 之后面板被图库网格替换，计数显示整库 36 张）。读代码并走查确认。
 3. **首页上网格快捷键不生效。** 首页隐藏 `#grid`，键盘处理在 `$('grid').hidden` 之后才处理 Space、方向键、↵、C／A／T／S／G／X、⌫、1–9，所以首页点开详情栏后，详情栏按钮旁标的快捷键（C、X…）按了没反应；首页双击开的大图里 ←→、Space 也不生效，只有 Esc 和大图上的按钮。Y／N、⌘Z、H、Esc 在前面处理，照常。读代码并走查确认（首页点图开详情后按 →、Space、C、X、G、1 都没有反应）。
 4. **相似组页（`sgroup`）的点击语义夹在两类之间。** `browsing()` 和 `cleanup()` 都为假：点击直接切换选中，却又有「选择」按钮（进入选择模式）；↵ 在无选中时打开详情而不是选中。读代码并走查确认（走查时该页没有真实数据，借用网页内的请求改写把图库前 6 张当作相似组内容）。
 6. **换页时大图不关闭。** `applyRoute` 不调用 `closeViewer()`，所以大图打开时（例如在大图上用 ⌘K 跳到角色）页面在大图下面换了，大图继续显示旧图。读代码并走查确认：图库里开着大图（「2 / 36」）改地址到未识别后，大图仍显示原图和旧序号，再按 → 变成「3 / 12」。
 7. **选择栏在大图下面仍响应快捷键。** 大图打开时选择栏被盖住，但 C／A／⌫／X／G 仍按选中动作处理。读代码并走查确认（全选后开大图再按 G，弹出的是给全部 36 张加标签的面板）。
 9. **底栏默认隐藏。** 每页的 `#hint` 操作提示只在打开「视图选项 › 底部状态栏」后才看得到，默认用户看不到。读代码。
-10. **小的死代码。** `updateCount` 的提示字典里有 `character` 键，但页面名永远不是 `character`（角色页走 `route.char` 分支），所以该键不可达；`similar`、`sgroup`、`group`、`recent` 没有提示。读代码。
+10. **有的页面没有底栏提示。** `similar`、`sgroup`、`group`、`recent` 没有登记 `hint`。读代码。（原先提示字典里还有一个不可达的 `character` 键，注册表落地时随字典一起去掉了。）
 11. **帮助对话框里的快捷键表是手写的静态文字**，与 §5 不同步的地方：没有 Y／N 的两种用法（抽查、问题条）、⌘K 之外的 ⇧↵ 暂存、T 的限定条件。读代码。
 12. **⌘＋／⌘－ 在没有网格的页面上也会改网格缩放。** 它们在「输入框判断」之前处理，不看页面：在设置页按 ⌘＋ 再按 ⌘－，页面上看不出变化，但保存的缩略图大小（`pi.size`）从未设置变成了 166，回到图库后网格列数不同。读代码并走查确认。
 13. **整理页里选中后按 ⌫ 没有动作，也不提示。** 键盘处理对「有选中」只在角色页（移出）和浏览页（不是…）有分支，未识别、已跳过、已排除等页没有，按键被吞掉（`runBarAction('')` 什么都不做）。读代码。
+14. **整理页之间「条目离开本页」和「跳过」的判断不一致。** 详情栏里设为角色、换角色之后的离开动画只对 `unmatched`、`skipped` 生效（`group` 不在内）；卡片上「+ 角色」提示对 `unmatched`、`skipped`、`group` 都生效（`lead`）；详情栏的「跳过 S」按钮只在 `unmatched` 页出现，而 `group` 页的 S 快捷键和选择栏「跳过」都可用。#342 把这些判断收进注册表时发现，保持原样。读代码。
 
 ## 8. 核对方式
 
-- 代码：`index.html`、`app.js`、`core/route.js`、`core/state.js`、`ui/shell.js`、`ui/grid.js`、`ui/detail.js`、`ui/home.js`、`ui/tasks.js`、`ui/guide.js`、`ui/dialog.js`、`ui/palette.js`、`ui/catalog.js`、`ui/review.js`、`ui/settings.js`、`ui/artists.js` 通读或读相关部分，加 `app.css` 的 `z-index` 与 `@media`。
+- 代码：`index.html`、`app.js`、`core/route.js`、`core/pages.js`、`core/state.js`、`ui/shell.js`、`ui/grid.js`、`ui/detail.js`、`ui/home.js`、`ui/tasks.js`、`ui/guide.js`、`ui/dialog.js`、`ui/palette.js`、`ui/catalog.js`、`ui/review.js`、`ui/settings.js`、`ui/artists.js` 通读或读相关部分，加 `app.css` 的 `z-index` 与 `@media`。
 - 走查：隔离宿主（临时 HOME 与应用目录、合成文件夹图库约 40 张，不连网、不访问真实图库）上，用内置浏览器逐页核对 DOM（主区、工具栏、侧栏高亮、标题、底栏提示）、点击语义、Esc 顺序、快捷键、浮层开关与点外关闭。合成图库没有识别模型，所以角色、作品、标签、跳过、排除都是通过接口手工造的数据；没有机器识别结果，因此未识别分组、相似组、重复角色不一致、随机抽查、身份整理、画师抽查都只有空状态，其内容页只做了代码核对（相似组页借用网页内的请求改写看了点击语义）。
 - 没有覆盖：选中超过 500 张的「再点一次」、提示卡（联网、更新、关注作品）、识别组件缺失／同步中断的横幅、数据库损坏横幅、触摸屏上的行为、真实窗口外壳里的表现。这些只读了代码。
