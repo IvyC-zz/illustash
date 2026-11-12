@@ -1,14 +1,14 @@
-// The page stays bound to the session it booted with (#33): once the library is switched or reopened
-// elsewhere, nothing this page holds may be sent with the new session's token.
+// 页面始终绑定启动时的会话（#33）：图库一旦在别处切换或重新打开，
+// 本页持有的任何内容都不能带着新会话的 token 发出。
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const web = require('./web.cjs');   // core/session.js and ui/dom.js (#199)
+const web = require('./web.cjs');   // core/session.js 和 ui/dom.js（#199）
 const tick = () => new Promise(resolve => setImmediate(resolve));
 let dom;
 test.before(async () => { await web.ready(); dom = await web.load('ui/dom.js'); web.fakePage(); dom.wireDom(); });
 
-// A server whose session can be replaced by "another window"; every request is recorded. Requests and the session
-// are core/session.js, the banner is ui/dom.js, the metadata refresh core/meta.js.
+// 一个会话可被「另一个窗口」替换的服务端；每个请求都记录下来。请求和会话在 core/session.js，
+// 横幅在 ui/dom.js，元数据刷新在 core/meta.js。
 function harness() {
   const server = {token: 'session-a', chars: [{id: 'a-char'}], requests: [], hold: null};
   const nodes = {};
@@ -26,14 +26,14 @@ function harness() {
     if (path.startsWith('/api/identity/count')) return respond(200, {total: 0});
     return respond(200, path === '/api/tag' ? {ok: true} : []);
   };
-  // The metadata read is core/meta.js.
+  // 元数据读取在 core/meta.js。
   const {session, adoptToken, staleSession, api, post, state, refreshMeta} = web.core();
   Object.assign(state, {nsfw: '', route: {page: 'library'}, char: null, chars: [], dupInfo: {}, exclInfo: {},
     readEpoch: 0, sel: {all: false, ids: new Set(['same-uuid']), exclude: new Set()}});
   const c = {session, adoptToken, staleSession, api, post, error: dom.error, state, refreshMeta};
   return {c, server, banner: () => nodes.errorBanner};
 }
-// Another window opens library B, which shares A's image UUIDs.
+// 另一个窗口打开图库 B，它与 A 有相同的图片 UUID。
 const switchElsewhere = server => { server.token = 'session-b'; server.chars = [{id: 'b-char'}]; };
 const writes = server => server.requests.filter(r => r.method === 'POST');
 
@@ -46,11 +46,11 @@ test('a new session seen by a metadata refresh stops the page instead of adoptin
   await c.refreshMeta();
   assert.equal(c.session.token, 'session-a');
   assert.equal(c.session.stale, true);
-  assert.equal(c.state.chars[0].id, 'a-char');   // B's rows never mix into A's page
+  assert.equal(c.state.chars[0].id, 'a-char');   // B 的行不会混进 A 的页面
   assert.match(banner().textContent, /其他窗口切换或重新打开/);
   assert.equal(banner().hidden, false);
   banner().children[0].onclick(); assert.equal(c.reloaded, true);
-  // The kept selection names a UUID B also has: the write is refused before any request leaves.
+  // 保留的选择里有一个 B 也有的 UUID：写入在任何请求发出之前就被拒绝。
   await assert.rejects(c.post('/api/tag', {ids: [...c.state.sel.ids], tag: 'kept-selection'}), /重新载入页面/);
   assert.deepEqual(writes(server), []);
   c.error('later failure'); assert.match(banner().textContent, /其他窗口切换/);

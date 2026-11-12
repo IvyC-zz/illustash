@@ -21,18 +21,24 @@ from functools import lru_cache
 from pathlib import Path
 
 WINDOWS = os.name == 'nt'
-# A recorded path continues after its placeholder with /-separated segments.
+# 录制的路径在占位符之后接着用 / 分隔的各段。
 _TAIL = r'((?:/[^/"\'\s,;:}\]\)\\]+)*)'
 FIXTURES = Path(__file__).resolve().parent / 'fixtures' / 'reference_recordings'
-_current = None  # the running test's recorder: its run-specific strings are placeholders in digests
+_current = None  # 正在运行的测试的记录器：它这一轮特有的字符串在摘要里写作占位符
 CLOCK = re.compile(r'\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:\d{2})?')
 CLOCK_BYTES = re.compile(CLOCK.pattern.encode())
+# 这些期望都录在导入按 tag 后缀建作品（#296）之前：加载本模块的测试及其启动的原生进程照旧规则导入，录下的期望
+# 不改（用户 2026-11-12 定，与 native/terms/tests/baseline.rs 相同）。只供测试，产品从不设置；新规则由 #296 新加的
+# Rust 测试覆盖。
+os.environ['ILLUSTASH_TEST_NO_IMPORT_WORKS'] = '1'
+# 录制那天（#301）。按今天算的窗口（角色「近 30 天」、「近 12 个月」）录的是这天的结果，原生侧经仅测试用的
+# ILLUSTASH_TEST_TODAY 把今天固定在这里，期望不随运行日期过期。
+RECORDED_TODAY = {'ILLUSTASH_TEST_TODAY': '2026-10-07'}
 
 
 def fixed_values(name):
-    """A frozen value file under tests/fixtures. Values the old reference computed differently on
-    Windows (float summation order, image codecs) were recorded there too and are kept in
-    tests/fixtures/windows/ as replacements at the listed paths; they apply on Windows only."""
+    """tests/fixtures 下的一个冻结值文件。旧参考实现在 Windows 上算得不同的值（浮点求和顺序、图片编解码器）
+    也在那里录制过，作为按所列路径替换的值保存在 tests/fixtures/windows/ 里；只在 Windows 上生效。"""
     opener = lzma.open if name.endswith('.xz') else gzip.open
     with opener(FIXTURES.parent / name, 'rt', encoding='utf-8') as f:
         values = json.load(f)
@@ -48,7 +54,7 @@ def fixed_values(name):
 
 
 def unclocked(value):
-    """Clock-like text masked, in str or bytes."""
+    """把 str 或 bytes 里形似时钟的文本遮盖掉。"""
     if isinstance(value, str):
         if _current is not None:
             value = _current._to_placeholders(value)
@@ -63,7 +69,7 @@ def quote(name):
 
 
 def table_digests(path):
-    """Schema, user_version, every table (typed cells and rowids) and view (rows), each as one digest."""
+    """schema、user_version、每张表（带类型的单元格和 rowid）和每个视图（行），各取一个摘要。"""
     with closing(sqlite3.connect(Path(path).resolve().as_uri() + '?mode=ro', uri=True)) as c:
         c.execute('BEGIN')
         schema = [tuple(r) for r in c.execute('SELECT type,name,tbl_name,sql FROM sqlite_schema ORDER BY type,name')]
@@ -73,7 +79,7 @@ def table_digests(path):
                 continue
             columns = '*' if kind == 'view' or 'WITHOUT ROWID' in (sql or '').upper() else 'rowid,*'
             cursor = c.execute('SELECT ' + columns + ' FROM ' + quote(name))
-            # Text cells as compared: run-specific strings (stored temporary paths) as placeholders.
+            # 文本单元格按比较时的形式：这一轮特有的字符串（存储的临时路径）写作占位符。
             out[name] = _hash(([d[0] for d in cursor.description],
                                sorted((tuple((type(v).__name__, unclocked(v)) for v in row) for row in cursor), key=repr)))
         return out
@@ -90,7 +96,7 @@ def library_digests(lib):
 
 
 class Library:
-    """The parts of a library package the tests use: its directory and database paths."""
+    """测试用到的图库包的各个部分：它的目录和数据库路径。"""
     def __init__(self, path):
         self.path = Path(path)
         self.db, self.source = self.path / 'library.sqlite', self.path / 'source.sqlite'
@@ -100,7 +106,7 @@ class Library:
 
     @property
     def config(self):
-        """library.json as first read (then kept and changed in place, like the application's own object)."""
+        """第一次读到的 library.json（之后保留并原地修改，与应用自己的对象一样）。"""
         if not hasattr(self, '_config'):
             self._config = json.loads((self.path / 'library.json').read_text(encoding='utf-8'))
         return self._config
@@ -117,26 +123,26 @@ class Library:
 
 class Expectations:
     def __init__(self, test):
-        """Values of one test, or of a class's ``setUpClass`` when given the class."""
+        """一个测试的值；传入的是类时，取该类 ``setUpClass`` 的值。"""
         global _current
         _current = self
         kind = test if isinstance(test, type) else type(test)
         self.module = kind.__module__.split('.')[-1]
-        # Keyed by the id under the tests package, however the tests were discovered.
+        # 不论测试是怎样被发现的，都以 tests 包下的 id 为键。
         test_id = f'{kind.__module__}.{kind.__qualname__}.setUpClass' if isinstance(test, type) else test.id()
         self.test = 'tests.' + test_id.removeprefix('tests.')
         self.aliases = []      # (actual, placeholder)
         self.position = 0
-        self.states = 0        # state() calls so far: the #201 baseline keys a state by its number
+        self.states = 0        # 到目前为止的 state() 调用次数：#201 对照基准按这个序号给状态编键
         try:
             data = _load(self.module)
         except AssertionError:
             if isinstance(test, type):
                 raise
-            data = {'tests': {}, 'blobs': {}}   # a module of platform-only subclasses only
+            data = {'tests': {}, 'blobs': {}}   # 只含平台专用子类的模块
         self.entries = data['tests'].get(self.test)
         if self.entries is None and not isinstance(test, type):
-            # A platform-only subclass (e.g. the Windows OpenBLAS runs) replays its parent's recording.
+            # 平台专用的子类（如 Windows 上的 OpenBLAS 运行）重放父类的录制。
             for parent in kind.__mro__[1:]:
                 if not (isinstance(parent, type) and issubclass(parent, unittest.TestCase)) \
                         or parent is unittest.TestCase:
@@ -152,16 +158,15 @@ class Expectations:
                     self.entries = found['tests'][key]
                     break
         if self.entries is None:
-            # Never recorded: a test that only runs on another platform than the recording's, or
-            # one that uses no reference value. Its shared setup values come from the module's
-            # first recorded test (the same synthetic packages and seeds).
+            # 从未录制过：只在录制平台以外的平台上运行的测试，或者不用参考值的测试。
+            # 它共用的准备阶段的值取自本模块第一个录制过的测试（同样的合成包和种子）。
             donors = [entries for _, entries in sorted(data['tests'].items())]
             self.entries, self.donor = [], donors[0] if donors else []
         self.blobs = data['blobs']
 
     def alias(self, actual, placeholder):
-        """Register a run-specific string; the latest registration of a placeholder wins. A macOS
-        temporary path is also known by its unresolved /var spelling."""
+        """登记一个这一轮特有的字符串；同一个占位符以最后一次登记为准。macOS 的临时路径
+        也按未解析的 /var 写法识别。"""
         actual = str(actual)
         pairs = [(actual, placeholder)]
         if actual.startswith('/private/'):
@@ -175,7 +180,7 @@ class Expectations:
     def _to_placeholders(self, text):
         for actual, placeholder in self._ordered():
             if WINDOWS and _is_path(actual):
-                # Recordings spell paths with /: a Windows path (also JSON-escaped) is normalized.
+                # 录制里的路径用 /：Windows 路径（包括经过 JSON 转义的）要规范化。
                 escaped = json.dumps(actual, ensure_ascii=False)[1:-1]
                 text = re.sub(re.escape(escaped) + r'((?:\\\\[^\\"]+)*)',
                               lambda m: placeholder + m.group(1).replace('\\\\', '/'), text)
@@ -185,8 +190,7 @@ class Expectations:
         return text
 
     def _from_placeholders(self, text):
-        """This run's strings back in place; on Windows a path takes this platform's separators,
-        JSON-escaped when the text is a JSON document."""
+        """把这一轮的字符串放回原处；在 Windows 上路径改用本平台的分隔符，文本是 JSON 文档时再做 JSON 转义。"""
         if not WINDOWS:
             for actual, placeholder in self.aliases:
                 text = text.replace(placeholder, actual)
@@ -218,7 +222,7 @@ class Expectations:
             if set(value) == {'$items'}:
                 return {self._decode(k): self._decode(v) for k, v in value['$items']}
             out = {k: self._decode(v) for k, v in value.items()}
-            # A response whose body took this run's strings keeps a consistent length header.
+            # 响应体换入这一轮的字符串之后，长度响应头也随之保持一致。
             if isinstance(out.get('body'), bytes) and isinstance(out.get('headers'), dict) and 'Content-Length' in out['headers']:
                 out['headers']['Content-Length'] = str(len(out['body']))
             return out
@@ -242,30 +246,29 @@ class Expectations:
         return self._decode(self._next(label)['value'])
 
     def state(self, label):
-        """A reference library state, kept as digests; compares equal to a live ``library_digests``.
-        Compared with a live state, it also holds the #201 baseline recorded for this state (see ``Live``)."""
+        """参考图库的一个状态，以摘要形式保存；与实时的 ``library_digests`` 比较相等。
+        与实时状态比较时，它还带着为这个状态录制的 #201 对照基准（见 ``Live``）。"""
         value = self._next(label)['value']
         slot = (self.module, self.test, f'{self.states}:{label}')
         self.states += 1
         return Digests(value, slot)
 
     def baseline(self, label, package, rename=None, only=None):
-        """The #201 baseline of a library package at a named point (fresh libraries the tests compare whole):
-        recorded when recording, otherwise compared with what was recorded, if anything was. ``rename`` maps
-        values made at random (generated keys) to stable names first; ``only`` ({db: [tables]}) compares just those
-        tables of the recorded state."""
+        """图库包在某个命名时刻的 #201 对照基准（测试整体比较的新图库）：录制时录下，否则与录过的内容比较
+        （如果录过）。``rename`` 先把随机生成的值（生成的键）映射成稳定的名字；``only``（{db: [tables]}）
+        只比较录制状态里的这些表。"""
         return _check_baseline((self.module, self.test, f'@{label}'), baseline_state(Path(package), rename), only)
 
     def package(self, label, path, library=True):
         """恢复冻结的合成输入包，数据库文本中的临时路径按本轮根目录还原。"""
         path = Path(path)
         files = self._next(label)['value']
-        # Run-specific strings stored in database text (temporary roots in paths) come back as this run's.
+        # 存在数据库文本里的那一轮特有的字符串（路径里的临时根目录）换回这一轮的。
         rebase = [(p, a) for a, p in sorted(self.aliases, key=lambda x: -len(x[1]))]
         path.mkdir(parents=True, exist_ok=True)
         for name, key in files.items():
             if WINDOWS and any(c in name for c in '<>:"|?*'):
-                continue   # a name this platform cannot hold; its tests are POSIX-only
+                continue   # 本平台存不了这个文件名；相关测试只在 POSIX 上运行
             target = path / name
             target.parent.mkdir(parents=True, exist_ok=True)
             for suffix in ('-wal', '-shm', '-journal'):
@@ -277,23 +280,23 @@ class Expectations:
             target.write_bytes(data)
             if not raw and name.endswith(('.sqlite', '.db')) and rebase:
                 _rebase(target, rebase, self._from_placeholders)
-            # Libraries (not their backups) are upgraded to this core version (#201).
+            # 图库（不含其备份）升级到当前核心版本（#201）。
             if Path(name).name in ('library.sqlite', 'app.sqlite') and not {'backups', 'library-backups'} & set(Path(name).parts):
                 upgrade_recorded(target)
         return Library(path) if library else path
 
     def skip(self, label):
-        """A recorded value this platform has no counterpart for (the test documents why)."""
+        """本平台没有对应项的录制值（原因由测试写明）。"""
         self._next(label)
 
     def finish(self, test):
-        """Every recorded value must have been used."""
+        """每个录制的值都必须用到。"""
         if getattr(self, 'donor', None) is None and self.position != len(self.entries):
             test.fail(f'{self.test}: {len(self.entries) - self.position} recorded reference values not reached')
 
 
 class Digests:
-    """Per-table digests of a reference library state; equal to a live state with the same digests."""
+    """参考图库某个状态的逐表摘要；与摘要相同的实时状态相等。"""
     def __init__(self, tree, slot=None):
         self.tree = tree
         self.slot = slot
@@ -307,13 +310,13 @@ class Digests:
             return self.tree == other.tree
         if isinstance(other, Live):
             if RECORDING:
-                # Recording (core version 7 only, PR #239): equal by the recordings above, the live state by the
-                # #201 rules is that state's baseline.
+                # 录制时（只在核心版本 7 上，PR #239）：按上面的录制判断相等，按 #201 规则取的实时状态
+                # 就是该状态的对照基准。
                 equal = self.tree == dict(other)
                 return equal and (self.slot is None or _check_baseline(self.slot, other.baseline))
             if self.slot is None:
                 return self.tree == dict(other)
-            # Core v8 changed the schema and retired tables these digests cover: the #201 baseline is the reference.
+            # core v8 改了 schema，并退役了这些摘要覆盖的表：以 #201 对照基准为参考。
             return _check_baseline(self.slot, other.baseline)
         if isinstance(other, dict):
             return self.tree == other
@@ -324,9 +327,8 @@ class Digests:
 
 
 def _rebase(path, pairs, convert=None):
-    """Replace recorded run-specific strings (``pairs`` of old, new) in every text cell of the
-    ordinary tables with ``convert`` (plain replacement by default), rowids kept. Triggers are set
-    aside meanwhile (they guard writes, they are not data)."""
+    """用 ``convert``（默认是普通替换）替换普通表每个文本单元格里录制的那一轮特有的字符串（``pairs`` 为
+    旧、新对），rowid 保留。期间先把触发器移开（它们把守写入，不是数据）。"""
     if convert is None:
         def convert(text):
             for old, new in pairs:
@@ -361,8 +363,8 @@ def _rebase(path, pairs, convert=None):
 
 
 def upgrade_recorded(db):
-    """A recorded library at an older core version (7) is upgraded as the user's libraries are before a test uses it
-    (#201), with the core's own command; the backup it makes is removed, so the directory is as it was."""
+    """录制的旧核心版本（7）图库，在测试使用之前像用户的图库一样用核心自己的命令升级（#201）；
+    升级时生成的备份删除，目录保持原样。"""
     with closing(sqlite3.connect(db)) as c:
         has_meta = c.execute("SELECT 1 FROM sqlite_schema WHERE type='table' AND name='meta'").fetchone()
         row = c.execute("SELECT value FROM meta WHERE key='terms_schema'").fetchone() if has_meta else None
@@ -417,27 +419,26 @@ def _load(module):
     return data
 
 
-# ---- The comparison baseline of the first public test release (#201) ----
+# ---- 第一个公开测试版的对照基准（#201）----
 #
-# Core v8 drops the legacy tables, so the digests above (whole schema, every table, rowids) stop matching. Where a
-# recorded state is compared with a live one, the live state is also taken by the rules of
-# native/terms/tests/common/baseline.rs and compared with a baseline recorded from main on core version 7:
-# every table except RETIRED (and the settings rows in RETIRED_ROWS), typed cells, rows as a multiset (implicit rowids
-# not compared), run-specific strings and clocks as above, learning stamps masked, a few meta values by what they mean.
-# Recorded with ILLUSTASH_RECORD_BASELINE=1 into fixtures/baseline_states/<module>.json.gz.
+# core v8 删掉了旧表，上面的摘要（整个 schema、每张表、rowid）就对不上了。录制状态与实时状态比较时，
+# 实时状态还按 native/terms/tests/common/baseline.rs 的规则再取一次，与在核心版本 7 的 main 上录制的对照基准比较：
+# 除 RETIRED 之外的每张表（RETIRED_ROWS 里的设置行也除外）、带类型的单元格、行按多重集比较（不比较隐式 rowid），
+# 这一轮特有的字符串和时钟同上，学习戳遮盖，少数 meta 值按含义比较。
+# 用 ILLUSTASH_RECORD_BASELINE=1 录制到 fixtures/baseline_states/<module>.json.gz。
 
 BASELINE_STATES = FIXTURES.parent / 'baseline_states'
-# The recordings still hold the identity relation tables (retired after recording); they are left out of them too.
+# 录制里仍有身份关系表（录制之后才退役）；它们同样不参与比较。
 RETIRED = frozenset({'entities', 'links', 'work_review', 'names', 'display_names', 'name_aliases', 'identity_baseline',
                      'identity_relations', 'identity_evidence', 'identity_decisions', 'identity_decision_evidence'})
-# The rest were added by core v8 (#201): what the history shows from the two `actions` columns, and the orders
-# readers take from `term_names.seq` and `term_tree.seq`, are compared in the replies; the identity attributes moved
-# from `terms.attrs` to `term_tree` are compared in `terms.attrs` (ATTRIBUTES).
+# 其余的是 core v8 新增的（#201）：历史记录从 `actions` 这两列显示的内容，
+# 以及读取方从 `term_names.seq` 和 `term_tree.seq` 取得的顺序，在响应里比较；
+# 从 `terms.attrs` 移到 `term_tree` 的身份属性在 `terms.attrs` 里比较（ATTRIBUTES）。
 SKIP_COLUMNS = frozenset({('term_packages', 'manifest'), ('term_evidence', 'fingerprint'),
                           ('actions', 'label_kind'), ('actions', 'label_count'), ('term_names', 'seq')}
                          | {('term_tree', col) for col in ('variant', 'artist', 'label_only', 'mascot',
                                                            'mascot_origin', 'original', 'seq')})
-# An identity's `terms.attrs` is compared as the object the earlier mirror wrote, built from its `term_tree` row.
+# 身份的 `terms.attrs` 按早先镜像写入的对象比较，由它的 `term_tree` 行构造出来。
 ATTRIBUTES = ('variant', 'artist', 'label_only', 'mascot', 'mascot_origin', 'original')
 STAMP = re.compile(r'learning-v1:[0-9a-f]{64}')
 TERMS_VERSION = int(re.search(r'pub const SCHEMA_VERSION: i64 = (\d+);',
@@ -446,7 +447,7 @@ RECORDING = bool(os.environ.get('ILLUSTASH_RECORD_BASELINE'))
 
 
 class Live(dict):
-    """A live ``library_digests``: the digests, and the same state by the #201 rules (``baseline``)."""
+    """实时的 ``library_digests``：摘要，以及按 #201 规则取的同一状态（``baseline``）。"""
     def __init__(self, digests, baseline):
         super().__init__(digests)
         self.baseline = baseline
@@ -529,8 +530,8 @@ def _baseline_file(module):
 
 
 def _check_baseline(slot, state, only=None):
-    """Record ``state`` for ``slot`` (module, test, key) when recording; otherwise True unless a baseline was
-    recorded for it and differs (the difference is printed)."""
+    """录制时为 ``slot``（module、test、key）录下 ``state``；否则返回 True，除非为它录过对照基准且两者不同
+    （差异会打印出来）。"""
     module, test, key = slot
     if RECORDING:
         _record_baseline(module, test, key, state)
@@ -556,8 +557,8 @@ def _check_baseline(slot, state, only=None):
     return False
 
 
-# Python side only: evidence packages the host builds from source labels carry the time they were made, and the package
-# fingerprint hashes it (the manifest itself is left out on both sides). The core replays have no such packages.
+# 只有 Python 一侧有：宿主由来源标签构建的证据包带着构建时间，包的指纹对它做哈希（manifest 本身两边都不比较）。
+# 核心的重放没有这样的包。
 VOLATILE = frozenset({('term_packages', 'fingerprint')})
 
 
@@ -579,9 +580,9 @@ def _without_volatile(state):
     return out
 
 
-# Rows of settings the host no longer keeps (rule 5, each named with the reason), left out of both sides by key:
-# - `name_settings.traffic_reserved`: the name sources' lasting traffic budget, removed by the user's decision of
-#   2026-10-21 (#287); the recordings made before still hold the row. The core replays never reached it.
+# 宿主不再保留的设置行（第 5 条规则，每项写明原因），按键从两边去掉：
+# - `name_settings.traffic_reserved`：名称来源的长期流量预算，按用户 2026-10-21 的决定（#287）删除；
+#   之前的录制里仍有这一行。核心的重放从未走到它。
 RETIRED_ROWS = frozenset({('name_settings', 'traffic_reserved')})
 
 
@@ -598,7 +599,7 @@ def _without_retired_rows(state):
 
 
 def _record_baseline(module, test, key, state):
-    """Merged into the module's file under a lock: the fixed suite runs test classes in several processes."""
+    """加锁后合并进模块的文件：固定测试集在多个进程里运行测试类。"""
     import fcntl
     BASELINE_STATES.mkdir(exist_ok=True)
     path = BASELINE_STATES / f'{module}.json.gz'

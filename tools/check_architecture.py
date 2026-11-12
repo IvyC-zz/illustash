@@ -1,4 +1,4 @@
-"""Check declared crate dependency direction without parsing Rust or introducing a workspace."""
+"""检查声明的 crate 依赖方向，不解析 Rust，也不引入 workspace。"""
 from pathlib import Path
 import argparse
 import tomllib
@@ -13,7 +13,7 @@ ALLOWED = {'core': set(), 'platform': {'core'}, 'app': {'core', 'platform'},
 
 
 def dependencies(table):
-    """Include normal, build, dev and target-specific declarations; honor renamed packages."""
+    """包括普通、build、dev 和特定 target 的依赖声明；识别改了名的包。"""
     for key, value in table.items():
         if key in ('dependencies', 'dev-dependencies', 'build-dependencies'):
             for alias, spec in value.items():

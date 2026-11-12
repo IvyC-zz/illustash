@@ -4,11 +4,11 @@
 
 状态：现行参考，2026-10-20。名字收编已完成并合入 main；核心第 8 版（#201）起三张旧名字表删除，`term_names`、`term_key_names`、`term_key_aliases` 是唯一权威，收编与切换命令也已删除（[TERMS_SCHEMA.md](TERMS_SCHEMA.md) 第 14 节）。第 2–7 节写的是当时的切换、接线和验收，Python 部分是历史测试参考。
 
-本文是结果说明。方案、用户确认的决定（第 5 节）和逐段的实施记录（N0–N6）在 [TERMS_NAMES_PLAN.md](TERMS_NAMES_PLAN.md)；schema 在 [TERMS_SCHEMA.md](TERMS_SCHEMA.md) 第 10 节。
+本文是结果说明。方案、用户确认的决定（第 5 节）和各段（N0–N6）定下的设计在 [TERMS_NAMES_PLAN.md](TERMS_NAMES_PLAN.md)；schema 在 [TERMS_SCHEMA.md](TERMS_SCHEMA.md) 第 10、14 节。
 
 **范围**：
 - 角色、皮肤、作品的名字（`names`）、按文字键的名字与别名（`display_names`、`name_aliases`）；
-- 选名规则（`tests/reference/web/names.py（#9 已删除）` 的 `View` 与词表）、名字搜索；
+- 选名规则（旧 Python 实现的 `View` 与词表，移植到 `crates/core/src/names_view.rs`）、名字搜索；
 - 历史文案的生成，以及剩下写入口的预演（拆脚手架阶段 C 里依赖名字的部分）。
 
 **不在范围**：
@@ -35,7 +35,7 @@ Python 里的词表副本仍给 NameUpdater 用，两边由测试钉住相同。
 **这条命令和收编代码已随 #201 第 4 步删除（2026-10-20）**：核心第 8 版拒绝没切换完的图库，新建图库由 `new_library` 一开始就在核心里（[TERMS_SCHEMA.md](TERMS_SCHEMA.md) 第 14 节）。下面是当时的过程，现有图库都是这样切过来的。
 
 - 命令 `cutover-names`，前提是角色已在核心。一个事务里完成：最后一次收编（必须零差异）、三张名字表加写保护、写 `meta.terms_names=core`、整表建显示投影。
-- 服务启动时 `adopt_terms` 按「标签 → 角色 → 名字」顺序切换（`tests/reference/web/server.py（#9 已删除）` `adopt_names`）。切换前先备份；失败就留在旧表，下次启动再试。
+- 当时的 Python 服务启动时按「标签 → 角色 → 名字」顺序切换（`adopt_names`）。切换前先备份；失败就留在旧表，下次启动再试。
 - 已切换的库每次启动先跑一次核心 `migrate`（拆脚手架阶段 A 的 `upgrade_terms`）。真实图库现在是第 3 版，第一次用这个分支启动时会升到第 5 版，同时删掉冻结的旧表。
 
 ## 3. 切换之后
@@ -77,9 +77,9 @@ Python 里的词表副本仍给 NameUpdater 用，两边由测试钉住相同。
 **测试**（全量：cargo 77 + 3、clippy 零警告、JS 40、Python 816 项，跳过 11）：
 - 契约、投影、收编、写入双跑、拒绝对照（原 `test_terms_names_contract`、`test_terms_names_projection`、`test_terms_names_sync`、`test_terms_names_writes`、`test_terms_character_refusals`）：2026-10-07 起改为核心调用重放（#9）；2026-10-19 起由新对照基准 `native/terms/tests/baseline.rs` 中同名模块接替（#201，`test_terms_names_sync` 只测旧表同步，已退役），比较规则见 `tests/common/baseline.rs` 开头。
 - 选名规则：`native/terms/src/app_names.rs` 的 `matching_tests`、`sources_tests` 在原测试保存的图库状态上用同样的提供方回答驱动原生名字任务，核对原期望；传输层的重试与节奏见 `app_name_sources.rs` 的 `network_tests`。
-- 每一段都做了变异检查，见方案第 6 节。
+- 每一段都做了变异检查（故意改坏一处规则，对照能报出）。
 
-**真实副本**（N6，详见方案第 6 节）：
+**真实副本**（N6）：
 - 投影与旧 `View` 全量零差异：9,276 个身份、10,718 个文字键；收编零差异，再跑不改。
 - App 路径切换成功。三方对照零差异：名字全量、4,057 个搜索查询、4,300 多项读接口，含全部 1,478 条历史文案。
 - 双跑 26 步、连续撤销 50 步（其中 42 步是真实历史），每一步都零差异。
@@ -105,7 +105,7 @@ Python 里的词表副本仍给 NameUpdater 用，两边由测试钉住相同。
 
 ## 7. 体积与性能
 
-见方案第 6 节 N6 的表：
+2026-09-29 在真实副本上的测量（单次中位数，早于 #102–#105 的增量优化）：
 - **库体积**：没变。新表约 6.5 MB，用的是删冻结表腾出的空页。
 - **搜索**：64.7 → 34.3 毫秒。
 - **只读名字的写入口和读路径**：稍快。

@@ -1,4 +1,4 @@
-//! Source rows and historical derived groups; no filesystem scan or worker execution.
+//! 来源行和历史上的派生分组；不扫描文件系统，也不运行 worker。
 use crate::source_rows::cell;
 pub(crate) use crate::source_rows::{rows, rows_with};
 use crate::{Error, Result};

@@ -1,7 +1,7 @@
-"""Explicit #153 candidate build only; call inside an assigned build window.
+"""只用于明确的 #153 候选构建；在分配到的构建窗口内调用。
 
-LCMS overrides are removed only from child environments. Uses this worktree's
-own target, never the fixed acceptance cache. Final linked CMM must be 2.19.
+只从子进程的环境里去掉 LCMS 覆盖值。用本 worktree 自己的 target，
+从不用固定验收区的缓存。最终链接的 CMM 必须是 2.19。
 """
 import argparse
 import json

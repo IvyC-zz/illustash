@@ -1,4 +1,4 @@
-//! Raw scalar TIFF modes, followed by Pillow convert('RGB') clamp and load_end orientation.
+//! 原始标量 TIFF 模式，之后按 Pillow convert('RGB') 截断，并按 load_end 应用方向。
 use crate::{Error, Result};
 use image::{Rgba, RgbaImage};
 use std::io::Cursor;
@@ -12,7 +12,7 @@ fn invalid(e: impl std::fmt::Display) -> Error {
     Error::Invalid(e.to_string())
 }
 
-/// Pillow scalar mode, retained separately from native-endian decoded samples.
+/// Pillow 的标量模式，与按本机字节序解码出的采样分开保存。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum ScalarMode {
     Unsigned16Le, // I;16
@@ -37,7 +37,7 @@ impl ScalarSamples {
     }
 }
 
-/// Encoded layout facts; no Pillow decoder/consumer policy is inferred here.
+/// 编码布局的事实；这里不推断 Pillow 解码器或消费方的策略。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct ScalarLayout {
     pub(crate) tiled: bool,
@@ -48,8 +48,8 @@ pub(crate) struct ScalarLayout {
 }
 
 #[derive(Debug)]
-/// Encoded dimensions and numeric samples, without Pillow path reshape, clamp,
-/// orientation, ICC transformation or consumer-specific resize/display behavior.
+/// 编码的尺寸和数值采样，不含 Pillow 路径输入的形状重排、截断、方向、ICC 转换，
+/// 也不含各消费方特有的缩放或显示行为。
 pub(crate) struct ScalarTiff {
     pub(crate) width: u32,
     pub(crate) height: u32,
@@ -60,13 +60,13 @@ pub(crate) struct ScalarTiff {
     pub(crate) big_endian: bool,
     pub(crate) compression: u16,
     pub(crate) layout: ScalarLayout,
-    /// Known raw single-strip/matching-mode qualification; caller supplies path/bytes.
+    /// 已知满足原始单条带、模式匹配的条件；由调用方提供路径或字节。
     pub(crate) raw_path_mmap_eligible: bool,
 }
 
-/// Only the unsigned 16-bit/signed 32-bit/float 32-bit BlackIsZero subset.
-/// FillOrder correction is part of decoding. The returned U16/I32/F32 values are
-/// not clamped; ICC is metadata only. Other TIFF types/layouts remain gated.
+/// 只支持 BlackIsZero 下无符号 16 位、有符号 32 位、32 位浮点这个子集。
+/// FillOrder 校正属于解码的一部分。返回的 U16/I32/F32 值不截断；ICC 只作为元数据。
+/// 其他 TIFF 类型和布局仍被拦住。
 pub(crate) fn scalar_samples(bytes: &[u8]) -> Result<ScalarTiff> {
     let mut decoder = Decoder::new(Cursor::new(bytes)).map_err(invalid)?;
     let (width, height) = decoder.dimensions().map_err(invalid)?;
@@ -98,15 +98,15 @@ pub(crate) fn scalar_samples(bytes: &[u8]) -> Result<ScalarTiff> {
         predictor: decoder.find_tag_unsigned(Tag::Predictor).map_err(invalid)?.unwrap_or(1),
     };
     let fill_order: u16 = decoder.find_tag_unsigned(Tag::FillOrder).map_err(invalid)?.unwrap_or(1);
-    // Pillow's only scalar FillOrder2 raw mode is little-endian I;16R.
-    // Other modes/compressed bit-order handling are not accepted by this candidate.
+    // Pillow 唯一的标量 FillOrder2 原始模式是小端的 I;16R。
+    // 其他模式以及压缩数据的位序处理，这个候选实现都不接受。
     if fill_order != 1
         && !(fill_order == 2 && bytes.starts_with(b"II") && colour == ColorType::Gray(16) && compression == 1)
     {
         return Err(invalid("TIFF scalar FillOrder mode remains unaccepted"));
     }
-    // Restrict raw U16 to ordinary strips, so Pillow's actual mmap qualification
-    // is known: one raw tile, matching I;16/I;16B mode (not I;16R), valid buffer.
+    // 原始 U16 只接受普通条带，这样才能确定 Pillow 实际是否走 mmap：
+    // 一个原始分块、模式匹配 I;16/I;16B（不是 I;16R）、缓冲区有效。
     let mut mmap_eligible = false;
     if colour == ColorType::Gray(16) && compression == 1 {
         if layout.tiled {
@@ -143,7 +143,7 @@ pub(crate) fn scalar_samples(bytes: &[u8]) -> Result<ScalarTiff> {
         .map_err(invalid)?;
     let samples = match (mode, decoder.read_image().map_err(invalid)?) {
         (ScalarMode::Unsigned16Le | ScalarMode::Unsigned16Be, DecodingResult::U16(mut values)) => {
-            // Reverse each stored byte, preserving word byte order, before consumers clamp.
+            // 在消费方截断之前，把存储的每个字节按位反转，保持字内的字节顺序。
             if fill_order == 2 {
                 for value in &mut values {
                     *value = value.reverse_bits().rotate_left(8);
@@ -173,8 +173,8 @@ pub(crate) fn scalar_samples(bytes: &[u8]) -> Result<ScalarTiff> {
     })
 }
 
-/// Pixel identity consumer keeps its independently accepted Pillow RGB/PAM order.
-/// Other consumers must preserve their own mode/resize/display/ICC contracts.
+/// 像素身份这个消费方保持它单独验收过的 Pillow RGB/PAM 顺序。
+/// 其他消费方必须保持各自的模式、缩放、显示和 ICC 契约。
 pub(crate) fn scalar_bytes(bytes: &[u8], path_input: bool) -> Result<(RgbaImage, Option<Vec<u8>>)> {
     let ScalarTiff {
         mut width,
@@ -188,11 +188,9 @@ pub(crate) fn scalar_bytes(bytes: &[u8], path_input: bool) -> Result<(RgbaImage,
         layout,
         raw_path_mmap_eligible,
     } = scalar_samples(bytes)?;
-    // Pillow12.3 Deflate goes through libtiff, which emits native-endian words,
-    // but retains I;32BS/F;32BF rawmode for MM. The independently measured old
-    // RGB conversion therefore reinterprets reversed32-bit words on LE hosts.
-    // Keep pure samples correct. Only the measured ordinary Deflate8 layout is
-    // accepted here; do not infer other codecs, tiled/planar or predictor modes.
+    // Pillow12.3 的 Deflate 经过 libtiff，输出的是本机字节序的字，但对 MM 仍保留 I;32BS/F;32BF 的 rawmode。
+    // 因此单独实测的旧 RGB 转换在小端主机上会把字节反转的 32 位字重新解释。纯采样本身保持正确。
+    // 这里只接受实测过的普通 Deflate8 布局；不推断其他编码、分块/平面排列或 predictor 模式。
     let swap_32 = if big_endian && compression != 1 && matches!(mode, ScalarMode::Signed32 | ScalarMode::Float32) {
         let expected_strips =
             if layout.rows_per_strip == 0 { None } else { Some(height.div_ceil(layout.rows_per_strip) as usize) };
@@ -209,8 +207,8 @@ pub(crate) fn scalar_bytes(bytes: &[u8], path_input: bool) -> Result<(RgbaImage,
     } else {
         false
     };
-    // Pillow12.3 mmap I;16/I;16B path input reshapes the scalar buffer to metadata
-    // dimensions before transposing. Bytes, multi-strip, I;16R, compressed and I/F don't.
+    // Pillow12.3 对走 mmap 的 I;16/I;16B 路径输入，会在转置之前把标量缓冲区按元数据里的尺寸重排。
+    // 字节输入、多条带、I;16R、压缩数据以及 I/F 模式都不会。
     if path_input && raw_path_mmap_eligible && (5..=8).contains(&orientation) {
         std::mem::swap(&mut width, &mut height);
     }
@@ -223,7 +221,7 @@ pub(crate) fn scalar_bytes(bytes: &[u8], path_input: bool) -> Result<(RgbaImage,
             .map(|v| if swap_32 { v.swap_bytes() } else { v })
             .map(|v| v.clamp(0, 255) as u8)
             .collect(),
-        // Saturating cast: truncate fractional values, NaN/-infinity=0, +infinity=255.
+        // 饱和转换：小数截掉，NaN/-infinity=0，+infinity=255。
         (ScalarMode::Float32, ScalarSamples::F32(values)) => values
             .into_iter()
             .map(|v| if swap_32 { f32::from_bits(v.to_bits().swap_bytes()) } else { v })
@@ -243,7 +241,7 @@ pub(crate) fn scalar_bytes(bytes: &[u8], path_input: bool) -> Result<(RgbaImage,
                 6 => (height - 1 - y, x),
                 7 => (height - 1 - y, width - 1 - x),
                 8 => (y, width - 1 - x),
-                _ => (x, y), // Pillow leaves unknown Orientation values unchanged.
+                _ => (x, y), // Pillow 对未知的 Orientation 值不做变换。
             };
             let v = gray[y as usize * width as usize + x as usize];
             image.put_pixel(dx, dy, Rgba([v, v, v, 255]));
@@ -256,8 +254,8 @@ pub(crate) fn scalar_bytes(bytes: &[u8], path_input: bool) -> Result<(RgbaImage,
 mod tests {
     use super::*;
 
-    // Hand-written 3x2 BlackIsZero single-strip TIFF, orientation5, opaque ICC
-    // metadata. No sample expectations are produced by either image decoder.
+    // 手写的 3x2 BlackIsZero 单条带 TIFF，orientation5，带不透明的 ICC 元数据。
+    // 两个图像解码器都不用来生成采样期望值。
     fn fixture(big_endian: bool, bits: u16, sample: u16, fill: u16, compression: u16, payload: &[u8]) -> Vec<u8> {
         let short = |v: u16| if big_endian { v.to_be_bytes() } else { v.to_le_bytes() };
         let long = |v: u32| if big_endian { v.to_be_bytes() } else { v.to_le_bytes() };
@@ -350,8 +348,7 @@ mod tests {
 
     #[test]
     fn deflate_metadata_keeps_correct_numeric_samples_before_consumer_reinterpretation() {
-        // Literal zlib payloads of hand-written LE/MM scalar words, produced by
-        // independent Python struct/zlib. Expected numeric values are hand invariants.
+        // 手写的 LE/MM 标量字的 zlib 字面载荷，由独立的 Python struct/zlib 生成。期望的数值是手写的不变量。
         let signed = [i32::MIN, -1, 0, 127, 256, i32::MAX];
         let float_bits = [0x7fc00000u32, 0xff800000, 0x7f800000, 0xbe800000, 0x3f400000, 0x42ff8000];
         for (big, sample, hex) in [

@@ -1,4 +1,4 @@
-//! Test-only core read host for the synthetic read-route corpus tests (#9).
+//! 仅供测试的核心读宿主，用于合成读路由语料测试（#9）。
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     match illustash_terms::read_harness::run(&args) {

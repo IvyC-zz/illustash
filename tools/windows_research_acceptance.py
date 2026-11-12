@@ -1,7 +1,7 @@
-"""Verify a relocated research artifact on generated images with the bundled runtime.
+"""用随附的运行时，在生成的图片上验证搬到别处的研究产物。
 
-No real library/accounts, no third-party requests. The harness uses build-time Python;
-all product workers use the artifact's embedded interpreter. --work must not exist.
+不用真实图库和账号，不向第三方发请求。验收脚本本身用构建时的 Python；
+产品里的所有 worker 用产物内嵌的解释器。--work 必须是不存在的路径。
 """
 import argparse
 from contextlib import closing
@@ -31,7 +31,7 @@ def run(artifact, work):
          'USERPROFILE':str(work/'home'), 'APPDATA':str(work/'support'), 'LOCALAPPDATA':str(work/'local'),
          'ILLUSTASH_APP_SUPPORT':str(work/'support'), 'ILLUSTASH_SHARED':str(work/'shared'),
          'ILLUSTASH_WORKER_PYTHON':str(artifact/'runtime/python.exe')}
-    # One installed worker serves all four kinds; the host (and --check here) names the kind.
+    # 一个已安装的 worker 承担全部四种；由宿主（这里还有 --check）指定种类。
     for kind in ('research','index','provenance','recognition'):
         env['ILLUSTASH_'+kind.upper()+'_WORKER']=str(artifact/'bin/illustash-worker.exe')
     env.pop('ILLUSTASH_IQDB_BINARY',None);env.pop('ILLUSTASH_IQDB_BIN',None);env.pop('ILLUSTASH_WORKER_KIND',None)
@@ -89,7 +89,7 @@ def run(artifact, work):
                 return state if state['status']=='idle' else None
             request('/api/similar',{})
             wait(researched)
-            # Native imports of real hashes through the installed adapter.
+            # 经已安装的适配器，以原生方式导入真实的哈希。
             request('/api/provenance',{'action':'start'})
             provenance=wait(lambda:(v if (v:=request('/api/provenance'))['state']['status'] not in ('running','stopping') else None))
             assert provenance['state']['status'] in ('done','stopped'),provenance

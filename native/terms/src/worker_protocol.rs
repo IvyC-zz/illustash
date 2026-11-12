@@ -113,7 +113,7 @@ pub(crate) struct SyncAsset {
 }
 #[derive(Deserialize)]
 pub(crate) struct SyncResponse {
-    // Existing sync workers return identity/packages/failed without a format field.
+    // 既有的同步 worker 返回 identity/packages/failed，不带 format 字段。
     pub identity: TaskIdentity,
     pub packages: Vec<PathBuf>,
     pub failed: Vec<SyncFailure>,
@@ -123,12 +123,12 @@ pub(crate) struct SyncResponse {
 #[derive(Deserialize)]
 pub(crate) struct SyncFailure {
     pub uuid: String,
-    /// Workers before #112 send no reason; their failures stay retryable, as before.
+    /// #112 之前的 worker 不发送 reason；它们报的失败照旧可以重试。
     #[serde(default)]
     pub reason: FailureReason,
 }
-/// Why the worker gave up on one picture. Decided by where the error came from, never by its text:
-/// reading the file (retry next sync) or decoding bytes that were read in full (retry once they change).
+/// worker 放弃某张图的原因。按错误出在哪一步判定，从不看错误文本：读取文件时出错（下次同步重试），
+/// 或解码已完整读入的字节时出错（字节变化后再重试）。
 #[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum FailureReason {
@@ -173,7 +173,7 @@ pub(crate) struct ResearchRequest<'a> {
     pub learning_token: &'a Value,
     pub anchors: &'a Path,
     pub core: PathBuf,
-    /// The owner accepts similarity caches as change lists against the snapshot (#31).
+    /// 所有者接受以相对快照的变更列表形式提交相似度缓存（#31）。
     pub delta_tables: bool,
 }
 #[derive(Deserialize)]
@@ -200,8 +200,8 @@ pub(crate) enum ProvenanceResult {
     Counts(Map<String, Value>),
     Hashes(Vec<HashEntry>),
 }
-// Dispatch by the JSON container, without an untagged deserialize retry that erases
-// errors such as result[0].asset. serde_path_to_error can track these accessors.
+// 按 JSON 容器类型分派，不用 untagged 反序列化的逐个重试，那样会抹掉 result[0].asset 这类错误位置。
+// serde_path_to_error 能追踪这些访问路径。
 impl<'de> Deserialize<'de> for ProvenanceResult {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> std::result::Result<Self, D::Error> {
         struct Visitor;

@@ -2,16 +2,21 @@ use std::{path::Path, process::Command};
 fn main() {
     println!("cargo:rerun-if-changed=src/research_compute/relation_fft.cpp");
     println!("cargo:rerun-if-changed=vendor/pocketfft/pocketfft_hdronly.h");
-    cc::Build::new()
-        .cpp(true)
+    let mut fft = cc::Build::new();
+    fft.cpp(true)
         .std("c++11")
         .opt_level(3)
-        // NumPy 2.5.3's top-level meson.build requires strict Clang FP behavior
-        // for both C and C++; contraction changes PocketFFT's float32 bits.
+        // NumPy 2.5.3 的顶层 meson.build 要求 C 和 C++ 都使用严格的 Clang 浮点行为；
+        // 浮点收缩（contraction）会改变 PocketFFT 的 float32 结果位。
         .flag_if_supported("-ftrapping-math")
         .file("src/research_compute/relation_fft.cpp")
-        .include("vendor/pocketfft")
-        .compile("illustash_relation_fft");
+        .include("vendor/pocketfft");
+    // MSVC 默认按系统代码页读源码，中文系统上是 GBK：UTF-8 的中文注释会吞掉行尾换行，
+    // 把下一行代码也变成注释。源码里的非 ASCII 字符只在注释里，按 UTF-8 读不改变编译结果。
+    if std::env::var("CARGO_CFG_TARGET_ENV").as_deref() == Ok("msvc") {
+        fft.flag("/utf-8");
+    }
+    fft.compile("illustash_relation_fft");
     println!("cargo:rerun-if-changed=application.json");
     println!("cargo:rerun-if-changed=Cargo.lock");
     println!("cargo:rerun-if-changed=src");
@@ -36,8 +41,8 @@ fn main() {
     let mut build = run("git", &["rev-parse", "--short", "HEAD"]);
     let dirty = !run("git", &["status", "--porcelain", "--untracked-files=no"]).is_empty();
     if build.is_empty() {
-        // Sources exported by `git archive` have no .git; export-subst wrote the exported revision into this file.
-        // In a checkout it still reads `$Format:%h$`, which is not a hash and is ignored.
+        // `git archive` 导出的源码没有 .git；export-subst 把导出的版本写进了这个文件。
+        // 在检出的仓库里它仍是 `$Format:%h$`，不是哈希，会被忽略。
         let exported = std::fs::read_to_string("source-revision.txt").unwrap_or_default();
         let exported = exported.trim();
         if (7..=40).contains(&exported.len()) && exported.bytes().all(|b| b.is_ascii_hexdigit()) {

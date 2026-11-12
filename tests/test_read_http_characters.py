@@ -1,4 +1,4 @@
-"""R4 status/raw HTTP acceptance; all mutable inputs are temporary synthetic fixtures."""
+"""R4 状态/原始 HTTP 验收；所有可变输入都是临时的合成夹具。"""
 import json
 import os
 import subprocess
@@ -69,7 +69,7 @@ class CharacterReadHTTPTest(HTTPHarness):
             self.pair('/api/character/profile?' + urlencode({'entity':e}))
             self.pair('/api/character/stats?' + urlencode({'id':e,'exclude':'a'}))
         covers={r['id']:r['cover'] for r in json.loads(self.pair('/api/characters')['body'])}
-        self.assertEqual(covers[a], 'a')  # Solo, confirmed image wins over the shared machine image.
+        self.assertEqual(covers[a], 'a')  # 单人且已确认的图片优先于共用的机器识别图片。
         self.assertEqual(covers[b], 'b')
         self.assertNotEqual(covers[a], covers[b])
         self.sync('mascot')
@@ -91,26 +91,24 @@ class CharacterReadHTTPTest(HTTPHarness):
         self.assertTrue(response['undetermined'])
 
     def test_unset_policy_legacy_names_stable_ties_and_cover_reuse(self):
-        # Recorded on r4-legacy, the library before it switched to the core (no `meta`; refused since core v8, #201,
-        # see `HTTPHarness.after_switch`). The root library of the same package is that library after the switch: the
-        # same rows in every table they share, restored at this core version. So the replies recorded on r4-legacy are
-        # compared with the live replies of the root library.
+        # 在 r4-legacy 上录制，它是切换到 core 之前的图库（没有 `meta`；从 core v8 起被拒绝，#201，
+        # 见 `HTTPHarness.after_switch`）。同一个包的根图库就是切换后的这个图库：两者共有的每张表里行都相同，
+        # 按当前 core 版本恢复。所以 r4-legacy 上录制的回复与根图库的实时回复比较。
         (self.root/'r4-legacy').mkdir(exist_ok=True)
         self.sync('legacy'); self.publish(db=str(self.root/'app.sqlite'), source=str(self.root/'source.db'))
         live = lambda path: self.live(self.rec.value('response'), '/api/' + path)
         for path in ['characters', 'characters?summary=1', 'tagged', 'identity/queue', 'identity/count', 'detail?id=a']:
             live(path)
-        # Names written past the core, as the recording wrote them on r4-legacy: the first three characters by id (the
-        # former query read them through the `entities_parent` index).
+        # 绕过 core 写入名称，与录制时在 r4-legacy 上写的一样：按 id 排在前三个的角色（以前的查询经
+        # `entities_parent` 索引读到它们）。
         with self.connect() as c:
             ids=[r[0] for r in c.execute("SELECT t.key FROM term_tree r JOIN terms t ON t.id=r.term_id WHERE t.kind='character' AND r.parent_id IS NULL AND r.merged_into IS NULL ORDER BY t.key LIMIT 3")]
             for e in ids:
                 rename(c, e, '平局')
             c.execute("DELETE FROM meta WHERE key='identity_policy'")
             c.commit()
-        # A library before the switch had no display projection: its readers chose names on every read. A switched
-        # library's readers read the projection, which the core keeps with every write; names written past the core
-        # reach it when the core rebuilds it from the name tables, as `names-project` does.
+        # 切换前的图库没有显示名投影：读取方每次读取时自己挑名称。切换后的图库，读取方读投影，core 在每次写入时
+        # 维护它；绕过 core 写入的名称，要等 core 从名称表重建投影（`names-project` 所做的）才会进去。
         terms = os.environ.get('ILLUSTASH_TERMS_BIN')
         if not terms:
             raise unittest.SkipTest('set ILLUSTASH_TERMS_BIN: the projection is rebuilt with the core command')
@@ -123,7 +121,7 @@ class CharacterReadHTTPTest(HTTPHarness):
 
 
 def rename(c, entity, name):
-    """Replace an identity's names by one preferred user name, without the core."""
+    """不经过 core，把一个身份的名称换成一个首选的用户名称。"""
     c.execute("DELETE FROM term_names WHERE term_id=(SELECT id FROM terms WHERE key=?)",(entity,))
     c.execute("INSERT INTO term_names(term_id,lang,value,source,role,preferred,position,seq) VALUES "
               "((SELECT id FROM terms WHERE key=?),'zh',?,'user','display',1,0,(SELECT coalesce(max(seq),0)+1 FROM term_names))",(entity,name))

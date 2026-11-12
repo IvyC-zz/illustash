@@ -1,9 +1,9 @@
 const test = require('node:test');
-const web = require('./web.cjs');   // core/ modules (#199)
+const web = require('./web.cjs');   // core/ 下的模块（#199）
 test.before(web.ready);
 const assert = require('node:assert/strict');
 const tick = () => new Promise(resolve => setImmediate(resolve));
-// The metadata read is core/meta.js; api answers the page's requests.
+// 元数据读取在 core/meta.js；api 回答页面的请求。
 function metaHarness(api) {
   const {session, state, refreshMeta} = web.core();
   Object.assign(state, {nsfw: '', chars: [], dupInfo: {}, exclInfo: {}, route: {page: 'library'}, char: null, readEpoch: 0, countDirty: undefined});
@@ -72,7 +72,7 @@ function documentMock() {
     return {set innerHTML(value) {this.content = {firstElementChild: Object.assign(new Element(), {html: value})};}};
   }};
 }
-// reconcileSections() is ui/dom.js (#199).
+// reconcileSections() 在 ui/dom.js（#199）。
 let reconcileSections;
 test.before(async () => { ({reconcileSections} = await web.load('ui/dom.js')); });
 test('section updates preserve unaffected nodes and support reorder/removal', () => {
@@ -86,7 +86,7 @@ test('section updates preserve unaffected nodes and support reorder/removal', ()
   c.reconcileSections(root, [['c','C'],['b','B']]);
   assert.deepEqual(root.children, [cc,b]);
 });
-// The grid is ui/grid.js, on a fake page; its timers and reads are the test's.
+// 网格在 ui/grid.js，放在假页面上；它的定时器和读取由测试掌控。
 let grid;
 test.before(async () => { grid = await web.load('ui/grid.js'); });
 function gridPage({items = [], total = items.length, scrollTop = 0} = {}) {
@@ -134,7 +134,7 @@ test('pagination skips recount and obsolete completion cannot clear a newer pend
     state.generation++; state.pending = new Set([100]);
     finish({items: []}); await old;
     assert.ok(state.pending.has(100)); assert.equal(state.pages.size, 0);
-    // A count that may have changed is read again with the first page, not with this one.
+    // 可能已变的总数随第一页重新读取，不随这一页读。
     state.pending.clear(); state.countDirty = true; const recount = grid.loadPage(100);
     await new Promise(r => setImmediate(r));
     assert.equal(calls.length, 2); assert.doesNotMatch(calls[1], /count=0/);
@@ -146,7 +146,7 @@ test('successful writes invalidate an in-flight metadata read before UI refresh 
   const pending = [];
   const c = metaHarness(path => path === '/api/tag' || path === '/api/suggest' ? {ok: true} : new Promise(resolve => pending.push({path,resolve})));
   c.state.readEpoch = 0;
-  // Writes go through core/session.js; ui/effects.js afterWrite() counts them, as app.js wires it.
+  // 写入经过 core/session.js；ui/effects.js 的 afterWrite() 对它们计数，接法与 app.js 相同。
   const {post, onPost} = web.core(), {afterWrite} = await web.load('ui/effects.js');
   c.state.guide = undefined;
   Object.assign(c, {post, unlisten: onPost(afterWrite)});
@@ -170,7 +170,7 @@ test('reload counts only its first page and retries if data changed during the r
     await new Promise(r => setImmediate(r));
     const first = pending.splice(0); assert.doesNotMatch(first[0].path, /count=0/); assert.ok(first.slice(1).every(p => /count=0/.test(p.path)));
     first.forEach((p, i) => p.resolve({total: i === 0 ? 200 : null, items: []})); await new Promise(r => setImmediate(r)); await new Promise(r => setImmediate(r));
-    assert.notEqual(state.total, 200);   // data changed during the read: its answer is not used
+    assert.notEqual(state.total, 200);   // 读取期间数据变了：不采用这次的响应
     const again = pending.splice(0); assert.ok(again.length >= 1); assert.doesNotMatch(again[0].path, /count=0/);
     again.forEach((p, i) => p.resolve({total: i === 0 ? 201 : null, items: []})); await result;
     assert.equal(state.total, 201); assert.equal(state.countDirty, false);
@@ -216,7 +216,7 @@ test('navigation into directory during summary read triggers a full trailing rea
   for (const p of pending.splice(0)) p.resolve(value(p.path));
   await task;
 });
-// The look-alike groups page is ui/review.js.
+// 相似组页面在 ui/review.js。
 test('group append, answer and selection preserve unaffected section nodes', async () => {
   const review = await web.load('ui/review.js'), {state} = web.core();
   const sections = new Element(), controls = {}, more = {}, nodes = {regroup: {}, moreGroups: {addEventListener() {}}};
@@ -236,7 +236,7 @@ test('group append, answer and selection preserve unaffected section nodes', asy
 });
 test('older group reads cannot overwrite a newer R18-filtered response', async () => {
   const review = await web.load('ui/review.js'), {state} = web.core(), pending = [];
-  web.fakePage(); globalThis.requestAnimationFrame ??= () => 0;   // closing the inspector redraws the grid next frame
+  web.fakePage(); globalThis.requestAnimationFrame ??= () => 0;   // 关闭详情面板会在下一帧重画网格
   Object.assign(state, {route: {page: 'groups'}, nsfw: '', pools: {unmatched: 0}});
   globalThis.fetch = path => new Promise(resolve => pending.push({path, resolve: body => resolve({status: 200, ok: true, json: async () => body})}));
   const old = review.renderGroups(); await new Promise(r => setImmediate(r));

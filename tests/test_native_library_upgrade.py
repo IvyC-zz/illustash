@@ -1,15 +1,11 @@
-"""Explicit terms-only startup upgrade on genuinely produced historical synthetic libraries.
+"""在真正由历史版本产出的合成图库上，测试显式的、只涉及 terms 的启动升级。
 
-Set ILLUSTASH_TERMS_BIN to the release under test. The v5/v6 libraries in
-tests/fixtures/library_upgrade were produced once by the historical producers
-5e7e7f7 / d9c49b4, whose commits predate the public repository; each test starts
-from a byte-identical copy. To regenerate them, set ILLUSTASH_TERMS_V5_BIN /
-ILLUSTASH_TERMS_V6_BIN to those producers and run
-`python -m tests.test_native_library_upgrade --write-fixtures` (this needs the former Python
-application, so it only works on a checkout from before #9 removed it). The former Python
-reference's reads and startup event consumer were recorded through tests/fixed_expectations.py
-(#9). Tests never build, find a default library, or
-change an existing golden; the native host has a Python-sentinel-only PATH.
+把 ILLUSTASH_TERMS_BIN 设为被测的 release。tests/fixtures/library_upgrade 里的 v5/v6 图库由历史产出者
+5e7e7f7 / d9c49b4 一次性产出，这两个提交早于公开仓库；每个测试都从逐字节相同的副本开始。要重新生成，
+把 ILLUSTASH_TERMS_V5_BIN / ILLUSTASH_TERMS_V6_BIN 设为这两个产出者，然后运行
+`python -m tests.test_native_library_upgrade --write-fixtures`（这需要原来的 Python 应用，所以只能在 #9
+删掉它之前的检出上运行）。原 Python 参照的读取和启动事件消费者已通过 tests/fixed_expectations.py 录制
+（#9）。测试从不构建、不查找默认图库，也不改动现有的黄金数据；原生宿主的 PATH 里只有 Python 哨兵。
 """
 from contextlib import closing
 import gzip
@@ -39,8 +35,8 @@ from tools.verify_read_http import enter, fetch
 
 difference = lifecycle.difference
 
-# Actual unused hybrid tables from d9c49b4:web/identity.py:45-49. The current Python
-# constructor no longer installs them; preserve their historical definitions as v7 input.
+# 真实存在但未使用的混合表，取自 d9c49b4:web/identity.py:45-49。当前的 Python 构造函数已不再建它们；
+# 保留它们的历史定义作为 v7 输入。
 OLD_IDENTITY = '''
 CREATE TABLE IF NOT EXISTS identity_claims(uuid TEXT PRIMARY KEY,character_id TEXT,variant_id TEXT,
  status TEXT NOT NULL CHECK(status IN ('assigned','undetermined')),options_json TEXT NOT NULL,
@@ -50,8 +46,7 @@ CREATE TABLE IF NOT EXISTS identity_calibration(id TEXT PRIMARY KEY,payload TEXT
 INSERT INTO meta VALUES ('identity_calibration_active','synthetic-old'),('identity_bank_error','synthetic-old');
 '''
 
-# tools/build_db.py:SCHEMA is identical at both historical producer commits. Pin
-# it so a future source-schema change cannot silently rewrite the old input.
+# tools/build_db.py:SCHEMA 在两个历史产出者提交上完全相同。把它钉住，免得将来 source 结构的改动悄悄改写旧输入。
 HISTORICAL_SOURCE_SHA256 = '8b2c4aae7adb8e413bbe4ec309cfd523e8ae3f9bcacc6c4c6e91269aaee36c05'
 
 FIXTURES = Path(__file__).resolve().parent / 'fixtures' / 'library_upgrade'
@@ -73,7 +68,7 @@ def tree(root):
 
 
 def database(path):
-    """Exact DDL and every typed cell/rowid; cloned inputs need no UUID or clock mapping."""
+    """精确的 DDL 和每个带类型的单元格/rowid；克隆出来的输入不需要映射 UUID 或时钟。"""
     with closing(sqlite3.connect(path)) as c:
         schema = c.execute('SELECT type,name,tbl_name,sql FROM sqlite_schema ORDER BY type,name').fetchall()
         rows = {}
@@ -107,8 +102,8 @@ class NativeLibraryUpgradeTest(unittest.TestCase):
         self.shared.mkdir()
         self.reference = synthetic_reference(self.shared)
         self.assertEqual(hashlib.sha256(SOURCE_SCHEMA.encode()).hexdigest(), HISTORICAL_SOURCE_SHA256)
-        # The shared read fixture omits scan columns. Historical folder libraries
-        # cloned build_db's full source schema, including nullable stable_hash.
+        # 共用的读取夹具省略了扫描相关的列。历史上的文件夹图库照搬了 build_db 完整的 source 结构，
+        # 包括可为空的 stable_hash。
         with closing(sqlite3.connect(self.reference)) as c:
             for table in ('assets', 'labels', 'decisions', 'runs'):
                 c.execute('DROP TABLE ' + table)
@@ -135,7 +130,7 @@ class NativeLibraryUpgradeTest(unittest.TestCase):
                     'ILLUSTASH_PYTHON_SENTINEL': str(self.sentinel)}
 
     def package(self, version, name):
-        """A fresh copy of the historical v5/v6 library, its source pointed at this test's folder."""
+        """历史 v5/v6 图库的一份新副本，它的 source 指向本测试的文件夹。"""
         fixture = FIXTURES / f'v{version}'
         produced = json.loads((fixture / 'fixture.json').read_text(encoding='utf-8'))
         self.assertEqual(produced['producer'], PRODUCERS[version])
@@ -153,8 +148,8 @@ class NativeLibraryUpgradeTest(unittest.TestCase):
 
 
     def args(self, lib, *, upgrade=True, port=None, sync=False):
-        # Migration/history/undo comparisons exclude independent startup tasks.
-        # Default automatic sync is exercised separately with genuine source DDL.
+        # 迁移/历史/撤销的比较不含独立的启动任务。
+        # 默认的自动同步用真实的 source DDL 另外测试。
         return [str(self.binaries['current']), 'http', '--no-names', *([] if sync else ['--no-sync']), '--library', str(lib.path),
                 '--port', str(port or free_port()), '--root', str(self.resources), *(['--upgrade'] if upgrade else [])]
 
@@ -238,13 +233,12 @@ class NativeLibraryUpgradeTest(unittest.TestCase):
                 expected = subprocess.run([str(self.binaries['current']), 'migrate', '--db', str(baseline / 'library.sqlite')],
                                           env=self.env, capture_output=True, timeout=20)
                 self.assertEqual(expected.returncode, 0, expected.stderr)
-                # Compare equivalent startup consumers: the bare migrate CLI leaves verdict
-                # events pending, while the native HTTP host performs no-learner dispatch.
-                # The former Python consumer's result is recorded (tests/fixed_expectations.py).
+                # 比较等价的启动消费者：单独的 migrate CLI 让裁决事件留在待处理，而原生 HTTP 宿主会执行不带学习器的
+                # 分派。原 Python 消费者的结果已录制（tests/fixed_expectations.py）。
                 self.rec.package(f'drained-v{version}', baseline)
                 process, origin = self.start(lib)
-                # By the #201 rules: the recorded drained package is at core version 7 and was upgraded on restore,
-                # so its physical rows may sit at other rowids than after one direct upgrade.
+                # 按 #201 的规则：录制的已排空图库包处于 core 第 7 版，恢复时做过升级，所以它的物理行所在的 rowid
+                # 可能与直接升级一次后的不同。
                 self.assertEqual(baseline_state(lib.path)['app'], baseline_state(baseline)['app'])
                 upgraded = database(lib.db)
                 self.assertEqual(lib.source.read_bytes(), source)
@@ -263,14 +257,14 @@ class NativeLibraryUpgradeTest(unittest.TestCase):
                     self.assertEqual(out.returncode, 0, out.stderr)
                     results.append(out.stdout)
                 self.assertEqual(*results)
-                # By the #201 rules: the recorded drained package is at core version 7 and was upgraded on restore,
-                # so its physical rows may sit at other rowids than after one direct upgrade.
+                # 按 #201 的规则：录制的已排空图库包处于 core 第 7 版，恢复时做过升级，所以它的物理行所在的 rowid
+                # 可能与直接升级一次后的不同。
                 self.assertEqual(baseline_state(lib.path)['app'], baseline_state(baseline)['app'])
                 process, origin = self.start(lib, upgrade=False)
                 self.reads(lib, origin)
                 self.stop(process)
-                # Restore only a fresh, quiescent test-owned clone after all HTTP/SQLite
-                # connections above have closed. Never run an old producer against current7.
+                # 只在上面所有 HTTP/SQLite 连接都关闭之后，恢复一份新的、静止的、测试自有的克隆。
+                # 绝不对 current7 运行旧的产出者。
                 restored = self.root / f'restored-v{version}.pilib'
                 self.assertTrue(restored.is_relative_to(self.root))
                 shutil.copytree(lib.path, restored)
@@ -312,14 +306,13 @@ class NativeLibraryUpgradeTest(unittest.TestCase):
                 self.assertEqual(run['status'], 'done')
                 self.assertEqual(run['message'], '')
                 self.assertEqual(tuple(run[k] for k in ('found', 'removed', 'imported', 'failed')), (0, 0, 0, 0))
-                self.assertEqual(database(lib.source), source)  # No implicit source-schema repair.
+                self.assertEqual(database(lib.source), source)  # 不隐式修复 source 结构。
                 backups = self.backups(lib, existing)
                 self.assertEqual(len(backups), 1)
                 self.assertEqual(database(backups[0]), before)
                 self.stop(process)
 
-                # An ordinary restart creates another sync run even with --upgrade
-                # on current7; migrating is a no-op, starting sync is not.
+                # 在 current7 上即使带 --upgrade，普通重启也会再建一次同步运行；迁移什么都不做，启动同步却不是。
                 process, origin = self.start(lib, sync=True)
                 state = self.sync_finished(origin)
                 self.assertEqual(state['state']['status'], 'done', state)
@@ -328,7 +321,7 @@ class NativeLibraryUpgradeTest(unittest.TestCase):
                 self.assertEqual(self.backups(lib, existing), backups)
                 self.stop(process)
 
-                # Exercise real folder writes, not just the asset-free SELECT path.
+                # 测试真实的文件夹写入，而不只是没有图片的 SELECT 路径。
                 image = self.folder / f'synthetic-v{version}.png'
                 Image.new('RGB', (4, 3), 'red').save(image)
                 process, origin = self.start(lib, upgrade=False, sync=True)
@@ -350,9 +343,8 @@ class NativeLibraryUpgradeTest(unittest.TestCase):
                 image.unlink()
 
     def test_reduced_source_missing_hash_is_sync_error_after_successful_upgrade(self):
-        # This deliberately incomplete read-only fixture is not a historical
-        # producer schema. Reproduce the original root cause independently of
-        # the migration equivalence check instead of hiding it with --no-sync.
+        # 这个故意不完整的只读夹具不是历史产出者的结构。独立于迁移等价检查，复现原来的根本原因，
+        # 而不是用 --no-sync 把它藏起来。
         for version in (5, 6):
             with self.subTest(version=version):
                 lib, _ = self.package(version, f'missing-hash-v{version}')
@@ -428,10 +420,9 @@ class NativeLibraryUpgradeTest(unittest.TestCase):
         self.stop(process)
 
     def test_desktop_upgrade_reports_its_stages_and_stays_alive_through_steps_that_cannot_report(self):
-        # #267: the desktop shell stops a service that prints nothing for 30 seconds before it is ready
-        # (desktop/src/server.rs, STALL). The checks report as they read; the backup, the migration and the space
-        # reclamation cannot, so the host repeats its last progress line. The pause stands in for a large library's
-        # backup: without the repeats it alone would leave a gap of PAUSE seconds.
+        # #267：服务在就绪之前 30 秒没有任何输出，桌面外壳就会停掉它（desktop/src/server.rs，STALL）。检查边读边
+        # 报告；备份、迁移和空间回收做不到，所以宿主重复最后一条进度。这里的暂停代替大图库的备份：没有这些重复，
+        # 光是它就会留下 PAUSE 秒的空档。
         PAUSE = 16
         lib, _ = self.package(6, 'slow')
         existing = {p.relative_to(lib.path).as_posix() for p in lib.path.rglob('*.sqlite')}
@@ -467,7 +458,7 @@ class NativeLibraryUpgradeTest(unittest.TestCase):
         self.assertEqual(process.wait(20), 0)
 
     def test_switching_to_an_old_library_asks_first_and_a_failed_upgrade_changes_nothing(self):
-        # #193: the page's library switch, not only --upgrade at startup.
+        # #193：页面上的切换图库，而不只是启动时的 --upgrade。
         current, _ = self.package(6, 'current')
         process, origin = self.start(current)
         old, _ = self.package(5, 'old')
@@ -484,11 +475,11 @@ class NativeLibraryUpgradeTest(unittest.TestCase):
 
         existing = {p.relative_to(old.path).as_posix() for p in old.path.rglob('*.sqlite')}
         before, source = database(old.db), old.source.read_bytes()
-        # Asked first: nothing written, no backup, the open library stays.
+        # 先询问：什么都不写，不备份，已打开的图库保持不变。
         self.assertEqual(post('/api/libraries/open', {'path': str(old.path)}), (409, {'error': needed}))
         self.assertEqual((database(old.db), old.source.read_bytes(), self.backups(old, existing)), (before, source, []))
         self.assertEqual(opened(), str(current.path))
-        # A failed upgrade says so, keeps the package as it was and the current library open.
+        # 升级失败时如实说明，图库包保持原样，当前图库保持打开。
         with closing(sqlite3.connect(old.db)) as c:
             c.execute("CREATE TRIGGER fail_upgrade BEFORE INSERT ON meta WHEN NEW.key='terms_schema' AND NEW.value='" + str(TERMS_VERSION) + "' "
                       "BEGIN SELECT RAISE(ABORT,'synthetic-upgrade-failure'); END")
@@ -504,7 +495,7 @@ class NativeLibraryUpgradeTest(unittest.TestCase):
         with closing(sqlite3.connect(old.db)) as c:
             c.execute('DROP TRIGGER fail_upgrade'); c.commit()
         self.assertEqual(database(old.db), before)
-        # Agreed: backed up, upgraded and opened; the page learns where the backup is.
+        # 同意后：备份、升级并打开；页面得知备份的位置。
         existing = {p.relative_to(old.path).as_posix() for p in old.path.rglob('*.sqlite')}
         status, body = post('/api/libraries/open', {'path': str(old.path), 'upgrade': True})
         self.assertEqual(status, 200, body)
@@ -514,7 +505,7 @@ class NativeLibraryUpgradeTest(unittest.TestCase):
         wait_until(lambda: opened() == str(old.path), timeout=10)
         listed = json.loads(fetch(origin, {'url': '/api/libraries'}, origin)['body'])
         self.assertEqual(listed['upgraded'], {'backup': str(backup)})
-        # Now in the current format: switching back and forth asks nothing more.
+        # 现在已是当前格式：来回切换不再询问。
         self.assertEqual(post('/api/libraries/open', {'path': str(current.path)})[0], 200)
         wait_until(lambda: opened() == str(current.path), timeout=10)
         self.assertNotIn('upgraded', json.loads(fetch(origin, {'url': '/api/libraries'}, origin)['body']))
@@ -530,8 +521,8 @@ class NativeLibraryUpgradeTest(unittest.TestCase):
         registry = self.support / 'libraries.json'
         registry_before = registry.read_bytes() if registry.exists() else None
         blocked = self.support / 'libraries.tmp'; blocked.mkdir()
-        # #176: listing the library among the recent ones failing does not stop it from opening; the page is told
-        # why, with the pre-upgrade backup, and the upgrade stays committed (never reported as a rollback).
+        # #176：没能把图库记进最近图库，不妨碍打开它；页面会得知原因和升级前的备份，
+        # 升级保持已提交（绝不报告为回滚）。
         process, origin = self.start(lib)
         libraries = json.loads(fetch(origin, {'url': '/api/libraries'}, origin)['body'])
         self.assertIn('升级已提交，没能记进最近图库', libraries['unlisted'])
@@ -553,7 +544,7 @@ class NativeLibraryUpgradeTest(unittest.TestCase):
         current = database(lib.db)
         backup_state = {p.relative_to(lib.path).as_posix(): p.read_bytes() for p in lib.path.rglob('*.sqlite')
                         if p not in (lib.source, lib.db)}
-        process, origin = self.start(lib)  # Explicit --upgrade on current7 is an ordinary no-op.
+        process, origin = self.start(lib)  # 在 current7 上显式带 --upgrade，只是普通的空操作。
         self.reads(lib, origin)
         self.stop(process)
         self.assertEqual(database(lib.db), current)

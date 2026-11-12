@@ -1,4 +1,4 @@
-// Shortcut names follow the system: ⌘ on Apple systems, Ctrl elsewhere (core/core.js, ui/dom.js; #199).
+// 快捷键名称跟随系统：Apple 系统上是 ⌘，其他系统是 Ctrl（core/core.js、ui/dom.js；#199）。
 const {test, before} = require('node:test');
 const assert = require('node:assert/strict');
 const web = require('./web.cjs');

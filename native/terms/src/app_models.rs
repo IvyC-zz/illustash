@@ -1,19 +1,17 @@
-//! Recognition models fetched on first use (#168, user 2026-10-16): installers ship without the WD and CCIP models;
-//! the person downloads them once, or imports files they fetched themselves.
+//! 首次使用时下载的识别模型（#168，用户 2026-10-16）：安装包不带 WD 和 CCIP 模型；用户下载一次，
+//! 或者导入自己下载的文件。
 //!
-//! Safety rests on the manifest built into the app (native/terms/models.json), not on where bytes come from: every
-//! file's size and SHA-256 are listed, and a file that does not match is refused whichever source sent it. Sources,
-//! per file and in order: the Hugging Face address through a mirror (default hf-mirror, changeable in the settings,
-//! kept app-wide in preferences.json as `model_mirror`), then the ModelScope copy. No speed test.
+//! 安全依靠应用内置的清单（native/terms/models.json），而不是字节从哪里来：清单列出每个文件的大小和 SHA-256，
+//! 对不上的文件不管来自哪个来源都拒绝。来源按文件依次尝试：经镜像访问的 Hugging Face 地址（默认 hf-mirror，
+//! 可在设置里更改，作为 `model_mirror` 全应用保存在 preferences.json），然后是 ModelScope 的副本。不做测速。
 //!
-//! Location: the model root the workers use (`ILLUSTASH_MODELS`, else `<resources>/models`; app_resources). Work
-//! happens beside it in `<root>.partial/`: each file is written as `<path>.part`, renamed to its own name once its
-//! hash matches, and when all are there the folder is renamed to the root in one step (per file when the root
-//! already exists). A cancelled, failed or interrupted download never touches the root; the next run resumes from the
-//! `.part` with an HTTP Range request, or the person discards the folder.
+//! 位置：worker 使用的模型根目录（`ILLUSTASH_MODELS`，否则 `<resources>/models`；见 app_resources）。
+//! 工作在它旁边的 `<root>.partial/` 里进行：每个文件写成 `<path>.part`，哈希对上后改名为它自己的名字，
+//! 全部到齐后把整个文件夹一步改名为根目录（根目录已经存在时逐个文件改名）。取消、失败或中断的下载从不碰根目录；
+//! 下次运行用 HTTP Range 请求从 `.part` 接着下，或者用户丢弃这个文件夹。
 //!
-//! Network rules as everywhere else: nothing is downloaded until the person clicks; the request is a plain HTTPS GET
-//! carrying no library information. HTTP proxies come from the environment, else the system settings.
+//! 联网规则与其他地方一样：用户点击之前什么都不下载；请求是普通的 HTTPS GET，不带任何图库信息。
+//! HTTP 代理取自环境变量，否则取系统设置。
 use crate::{http_json::Json, Error, Result};
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -32,9 +30,9 @@ use std::{
 #[derive(Deserialize)]
 pub struct Manifest {
     pub format: u32,
-    /// Names the model folder in the shared data, so a later pack never mixes with this one.
+    /// 在共享数据里给模型文件夹命名，以后的模型包从不会和这一个混在一起。
     pub pack: String,
-    /// The project page with manual download instructions; the app links only to it.
+    /// 带手动下载说明的项目页面；应用只链接到它。
     pub manual: String,
     pub mirror: String,
     pub modelscope: String,
@@ -42,7 +40,7 @@ pub struct Manifest {
 }
 #[derive(Deserialize, Clone)]
 pub struct Entry {
-    /// Under the model root, `/`-separated.
+    /// 在模型根目录下，用 `/` 分隔。
     pub path: String,
     pub size: u64,
     pub sha256: String,
@@ -56,7 +54,7 @@ struct Origin {
     file: String,
 }
 
-/// The models this build uses.
+/// 这个构建使用的模型。
 pub fn manifest() -> &'static Manifest {
     static MANIFEST: OnceLock<Manifest> = OnceLock::new();
     MANIFEST.get_or_init(|| {
@@ -66,7 +64,7 @@ pub fn manifest() -> &'static Manifest {
     })
 }
 
-/// The model root workers load from: `ILLUSTASH_MODELS` (relative to the resource root), else `<resources>/models`.
+/// worker 加载模型的根目录：`ILLUSTASH_MODELS`（相对于资源根目录），否则 `<resources>/models`。
 pub(crate) fn root(resources: &Path) -> PathBuf {
     configured_root(resources, std::env::var_os("ILLUSTASH_MODELS").as_deref().map(Path::new))
 }
@@ -81,23 +79,21 @@ pub(crate) fn configured_root(resources: &Path, configured: Option<&Path>) -> Pa
 fn has(dir: &Path, entry: &Entry) -> bool {
     fs::symlink_metadata(dir.join(&entry.path)).is_ok_and(|m| m.is_file() && m.len() == entry.size)
 }
-/// Every model file is in place. Only verified files are ever moved into the root (see `activate`), so presence is
-/// enough here; recognition still fingerprints the files it loads (recognition_compute::models). Cheap enough for
-/// every status read.
+/// 每个模型文件都已就位。只有校验过的文件才会移进根目录（见 `activate`），所以这里看有没有就够了；
+/// 识别仍会对它加载的文件计算指纹（recognition_compute::models）。开销很小，每次读状态都可以做。
 fn ready_at(root: &Path, manifest: &Manifest) -> bool {
     manifest.files.iter().all(|entry| fs::metadata(root.join(&entry.path)).is_ok_and(|m| m.is_file()))
 }
-/// Set by the desktop shell for an installer without models (#168): recognition, the character index and the
-/// self-check wait until the models are in place, saying why. Without it nothing waits (full installers, tests
-/// and development runs keep their own model folders).
+/// 桌面外壳为不带模型的安装包设置（#168）：识别、角色索引和自检会等到模型就位，并说明原因。
+/// 不设置时什么都不等（完整安装包、测试和开发运行各有自己的模型文件夹）。
 pub(crate) fn on_demand() -> bool {
     std::env::var_os("ILLUSTASH_MODELS_ON_DEMAND").is_some_and(|v| v == "1")
 }
-/// Recognition must wait for the models to be downloaded or imported.
+/// 识别必须等模型下载或导入完成。
 pub(crate) fn waiting(resources: &Path) -> bool {
     on_demand() && !ready_at(&root(resources), manifest())
 }
-/// Why recognition cannot start yet, for the sync, index and self-check messages.
+/// 识别为什么还不能开始，用于同步、索引和自检的消息。
 pub(crate) const MISSING: &str = "识别模型还没下载";
 
 fn partial_dir(root: &Path) -> PathBuf {
@@ -108,10 +104,9 @@ fn part(dir: &Path, entry: &Entry) -> PathBuf {
     dir.join(format!("{}.part", entry.path))
 }
 
-// ---------- where to download from ----------
+// ---------- 从哪里下载 ----------
 
-/// A source base: any HTTPS address, or plain HTTP on this machine (tests and a local mirror). No credentials,
-/// query or fragment; the trailing slash is dropped.
+/// 来源的基础地址：任何 HTTPS 地址，或本机上的普通 HTTP（测试和本地镜像）。不带凭据、查询串或片段；去掉结尾的斜杠。
 fn base(text: &str) -> std::result::Result<String, String> {
     let u = url::Url::parse(text.trim()).map_err(|_| "地址无效".to_string())?;
     let local = matches!(u.host_str(), Some("127.0.0.1" | "localhost" | "[::1]")) && u.port().is_some();
@@ -137,20 +132,19 @@ fn host(address: &str) -> String {
         .unwrap_or_default()
 }
 
-/// Where the state lives: preferences.json in the app, a fixture in tests.
+/// 状态存在哪里：应用里是 preferences.json，测试里是夹具。
 #[derive(Clone)]
 struct Place {
     root: PathBuf,
     manifest: &'static Manifest,
     preferences: PathBuf,
-    /// ModelScope's base: the manifest's, or a local test server (ILLUSTASH_MODELSCOPE_BASE, plain HTTP on this
-    /// machine only).
+    /// ModelScope 的基础地址：清单里的，或本地测试服务器（ILLUSTASH_MODELSCOPE_BASE，只允许本机上的普通 HTTP）。
     modelscope: String,
-    /// Read when the request arrives, so a proxy switched on in the system settings counts from the next click.
+    /// 在请求到达时读取，所以在系统设置里打开的代理从下一次点击起生效。
     proxy: Option<String>,
-    /// The models are this install's to download, and so to delete (`ILLUSTASH_MODELS_ON_DEMAND`).
+    /// 模型由这次安装负责下载，因而也由它负责删除（`ILLUSTASH_MODELS_ON_DEMAND`）。
     on_demand: bool,
-    /// The session is recognising or updating the character index: the models are in use.
+    /// 会话正在识别或更新角色索引：模型正在使用中。
     in_use: bool,
 }
 impl Place {
@@ -179,7 +173,7 @@ impl Place {
             .and_then(|text| base(text).ok())
             .unwrap_or_else(|| self.manifest.mirror.clone())
     }
-    /// The sources for one file, in order: the Hugging Face address through the mirror, then ModelScope.
+    /// 一个文件的来源，按顺序：经镜像访问的 Hugging Face 地址，然后是 ModelScope。
     fn sources(&self, entry: &Entry) -> [(String, String); 2] {
         let mirror = self.mirror();
         let (hf, ms) = (&entry.hf, &entry.modelscope);
@@ -195,8 +189,8 @@ impl Place {
 
 // ---------- proxy ----------
 
-/// The HTTP proxy to use: `HTTPS_PROXY` / `ALL_PROXY`, else the system's HTTPS proxy (macOS network settings,
-/// Windows Internet Options). Automatic configuration (PAC) is not read: then the download goes direct.
+/// 要使用的 HTTP 代理：`HTTPS_PROXY` / `ALL_PROXY`，否则系统的 HTTPS 代理（macOS 网络设置、Windows Internet 选项）。
+/// 不读自动配置（PAC）：这时下载直连。
 fn proxy() -> Option<String> {
     for key in ["HTTPS_PROXY", "https_proxy", "ALL_PROXY", "all_proxy"] {
         if let Some(value) = std::env::var(key).ok().filter(|v| !v.trim().is_empty()) {
@@ -220,7 +214,7 @@ fn system_proxy() -> Option<String> {
         .ok()?;
     windows_proxy(&String::from_utf8_lossy(&out.stdout))
 }
-/// `reg.exe` by its full path, never looked up on PATH: `%SystemRoot%\System32`, else `C:\Windows\System32`.
+/// 按完整路径调用 `reg.exe`，从不在 PATH 上查找：`%SystemRoot%\System32`，否则 `C:\Windows\System32`。
 #[cfg(any(windows, test))]
 fn reg_exe(system_root: Option<std::ffi::OsString>) -> PathBuf {
     let root = system_root.filter(|r| !r.is_empty()).map(PathBuf::from).unwrap_or_else(|| PathBuf::from(r"C:\Windows"));
@@ -248,8 +242,8 @@ fn scutil_proxy(text: &str) -> Option<String> {
         None => format!("http://{host}"),
     })
 }
-/// `reg query …\Internet Settings`: `ProxyEnable REG_DWORD 0x1` and `ProxyServer REG_SZ host:port`, or per protocol
-/// `http=a:1;https=b:2`.
+/// `reg query …\Internet Settings`：`ProxyEnable REG_DWORD 0x1` 和 `ProxyServer REG_SZ host:port`，
+/// 或按协议的 `http=a:1;https=b:2`。
 #[cfg_attr(not(any(windows, test)), allow(dead_code))]
 fn windows_proxy(text: &str) -> Option<String> {
     let field = |key: &str| {
@@ -283,7 +277,7 @@ fn agent(proxy: Option<&str>) -> ureq::Agent {
     if let Some(address) = proxy {
         match ureq::Proxy::new(address) {
             Ok(proxy) => builder = builder.proxy(proxy),
-            // SOCKS needs a feature this build does not have: go direct rather than not at all.
+            // SOCKS 需要这个构建没有的功能：直连，总比完全连不上好。
             Err(e) => eprintln!("models: proxy {address} not usable ({e}); connecting directly"),
         }
     }
@@ -292,7 +286,7 @@ fn agent(proxy: Option<&str>) -> ureq::Agent {
 
 // ---------- the job ----------
 
-/// The one download or import this app runs at a time; switching libraries does not stop it.
+/// 这个应用同一时间只运行一个下载或导入；切换图库不会停止它。
 pub(crate) struct Models {
     job: Mutex<Option<Value>>,
     cancel: AtomicBool,
@@ -315,7 +309,7 @@ impl Models {
     fn stopped(&self) -> bool {
         self.cancel.load(Ordering::SeqCst) || crate::platform_process::stopping()
     }
-    /// Starts `work` on its own thread unless a job is running.
+    /// 在它自己的线程上启动 `work`，除非已有任务在运行。
     fn start(
         &'static self,
         kind: &str,
@@ -362,7 +356,7 @@ impl From<std::io::Error> for Stop {
     }
 }
 
-/// Bytes counted so far and a short window for the speed shown.
+/// 到目前为止计入的字节，以及计算显示速度用的一个短窗口。
 struct Meter<'a> {
     models: &'a Models,
     base: u64,
@@ -394,7 +388,7 @@ impl<'a> Meter<'a> {
         });
         Ok(())
     }
-    /// A file is finished (or skipped): its bytes join the base.
+    /// 一个文件完成了（或跳过了）：它的字节计入基数。
     fn finish(&mut self, size: u64) {
         self.base += size;
         let done = self.base;
@@ -405,9 +399,9 @@ impl<'a> Meter<'a> {
 // ---------- download ----------
 
 enum Failure {
-    /// The connection dropped part way: the bytes so far are kept; the same source may continue.
+    /// 连接中途断开：已下载的字节保留；可以从同一个来源继续。
     Retry(String),
-    /// This source cannot give this file: try the next.
+    /// 这个来源给不了这个文件：试下一个。
     Next(String),
     Stop(Stop),
 }
@@ -422,7 +416,7 @@ impl From<std::io::Error> for Failure {
     }
 }
 
-/// Reads `part` into the hash, so a resumed download is checked from its first byte.
+/// 把 `part` 读进哈希，所以接着下载的文件从第一个字节起就经过核对。
 fn hash_existing(file: &mut fs::File, length: u64, meter: &mut Meter) -> std::result::Result<Sha256, Failure> {
     let mut digest = Sha256::new();
     file.seek(SeekFrom::Start(0))?;
@@ -439,8 +433,7 @@ fn hash_existing(file: &mut fs::File, length: u64, meter: &mut Meter) -> std::re
     Ok(digest)
 }
 
-/// One attempt to complete `entry` from `address` into `<partial>/<path>.part`; on success the file has its own
-/// name in the partial folder.
+/// 从 `address` 下载 `entry` 到 `<partial>/<path>.part` 的一次尝试；成功后文件在 partial 文件夹里有了它自己的名字。
 fn fetch(
     agent: &ureq::Agent,
     address: &str,
@@ -473,7 +466,7 @@ fn fetch(
         };
         match reply.status() {
             206 => {
-                // `bytes start-end/total`: the source must continue exactly where the part stops.
+                // `bytes start-end/total`：来源必须正好从 part 结束的地方接着发。
                 let range = reply.header("Content-Range").unwrap_or("");
                 let start = range.strip_prefix("bytes ").and_then(|r| r.split('-').next()).and_then(|s| s.parse().ok());
                 let total = range.rsplit('/').next().and_then(|s| s.parse::<u64>().ok());
@@ -490,7 +483,7 @@ fn fetch(
                     return Err(Failure::Next("文件大小与清单不符".into()));
                 }
                 if length > 0 {
-                    // The source does not resume: start over.
+                    // 来源不支持续传：从头开始。
                     file.set_len(0)?;
                     length = 0;
                     digest = Sha256::new();
@@ -547,7 +540,7 @@ fn transport(t: &ureq::Transport) -> String {
     }
 }
 
-/// Bytes already on disk toward the pack: finished files and the `.part`s.
+/// 磁盘上已有的、属于这个模型包的字节：完成的文件和各个 `.part`。
 fn present(root: &Path, partial: &Path, manifest: &Manifest) -> u64 {
     manifest
         .files
@@ -586,7 +579,7 @@ fn download(models: &Models, place: &Place) -> std::result::Result<Value, Stop> 
         let mut tried = Vec::new();
         let mut done = false;
         for (label, address) in place.sources(entry) {
-            // A source on this machine (a local mirror, tests) never goes through the proxy.
+            // 本机上的来源（本地镜像、测试）从不走代理。
             let local = url::Url::parse(&address)
                 .is_ok_and(|u| matches!(u.host_str(), Some("127.0.0.1" | "localhost" | "[::1]")));
             let via = if local { None } else { place.proxy.as_deref().map(host) };
@@ -595,7 +588,7 @@ fn download(models: &Models, place: &Place) -> std::result::Result<Value, Stop> 
                 job["file"] = entry.path.clone().into();
                 job["proxy"] = via.into();
             });
-            // A connection that drops part way continues from where it stopped, a few times, on the same source.
+            // 中途断开的连接从停下的地方接着下，在同一个来源上重试几次。
             let mut drops = 0;
             loop {
                 match fetch(if local { &direct } else { &proxied }, &address, &partial, entry, &mut meter) {
@@ -619,7 +612,7 @@ fn download(models: &Models, place: &Place) -> std::result::Result<Value, Stop> 
             }
         }
         if !done {
-            // Each source's reason apart, so the page can show (and translate) them one by one.
+            // 每个来源的原因分开，让页面能逐个显示（和翻译）。
             models.set(|job| {
                 job["failed_file"] = entry.path.clone().into();
                 job["failures"] = tried.iter().map(|(source, why)| json!({"source": source, "why": why})).collect();
@@ -637,7 +630,7 @@ fn download(models: &Models, place: &Place) -> std::result::Result<Value, Stop> 
     Ok(json!({"message": null}))
 }
 
-/// All files are in `partial` (or already in the root): make them the root's in one step.
+/// 所有文件都在 `partial` 里（或已经在根目录里）：一步把它们变成根目录的文件。
 fn activate(root: &Path, partial: &Path, manifest: &Manifest) -> std::io::Result<()> {
     let record = json!({"pack": manifest.pack, "files": manifest.files.iter()
         .map(|e| json!({"path": e.path, "size": e.size, "sha256": e.sha256})).collect::<Vec<_>>()});
@@ -651,8 +644,7 @@ fn activate(root: &Path, partial: &Path, manifest: &Manifest) -> std::io::Result
         }
         Err(e) => Err(e),
         Ok(_) => {
-            // The root exists without a complete set (a portable or development folder): move the files in one by
-            // one; the root counts as ready only once the last one is there.
+            // 根目录存在但文件不全（便携版或开发用的文件夹）：逐个移入文件；最后一个到位后根目录才算就绪。
             for entry in &manifest.files {
                 if has(partial, entry) {
                     let target = root.join(&entry.path);
@@ -668,7 +660,7 @@ fn activate(root: &Path, partial: &Path, manifest: &Manifest) -> std::io::Result
 
 // ---------- import ----------
 
-/// Copies `reader` to the entry's `.part` while hashing; keeps it under its own name when the hash matches.
+/// 边计算哈希边把 `reader` 复制到条目的 `.part`；哈希对上时以它自己的名字保留。
 fn copy_checked(
     reader: &mut dyn Read,
     partial: &Path,
@@ -704,8 +696,8 @@ fn copy_checked(
     Ok(true)
 }
 
-/// The files the person chose: each file, or each entry of a ZIP, is matched by size, then by SHA-256. Names and
-/// folders do not matter (both upstream ONNX files are called model*.onnx).
+/// 用户选的文件：每个文件或 ZIP 里的每一项，先按大小、再按 SHA-256 匹配。名字和文件夹无关紧要（上游的两个 ONNX
+/// 文件都叫 model*.onnx）。
 fn import(models: &Models, place: &Place, paths: &[PathBuf]) -> std::result::Result<Value, Stop> {
     let partial = partial_dir(&place.root);
     fs::create_dir_all(&partial)?;
@@ -766,7 +758,7 @@ fn import(models: &Models, place: &Place, paths: &[PathBuf]) -> std::result::Res
     Ok(json!({"results": results}))
 }
 
-// ---------- status and requests ----------
+// ---------- 状态和请求 ----------
 
 fn info_at(models: &Models, place: &Place) -> Json {
     let manifest = place.manifest;
@@ -803,22 +795,22 @@ pub(crate) fn info(resources: &Path) -> Result<Json> {
     Ok(with_acceleration(resources, info_at(&APP, &Place::app(resources)?)))
 }
 
-/// 「使用 GPU 加速识别」 (#270) sits on the models card: whether this build has an accelerator, the switch
-/// (POST /api/preferences) and what the last worker used, per model (recognition_compute/backend.rs).
+/// 「使用 GPU 加速识别」（#270）在模型卡片上：这个构建有没有加速器、开关（POST /api/preferences），
+/// 以及上一个 worker 每个模型用的是什么（recognition_compute/backend.rs）。
 fn with_acceleration(resources: &Path, mut value: Json) -> Json {
     let shared = crate::app_resources::shared_path(resources).ok();
     value.set("acceleration", Json::from(crate::recognition_compute::backend::info(shared.as_deref())));
     value
 }
 
-/// POST /api/models:
-/// - `{"action": "download"}` starts (or resumes) the download (the person's click);
-/// - `{"action": "import", "paths": [...]}` checks and installs chosen files (the page asks the native chooser first);
-/// - `{"action": "cancel"}` stops the running job, keeping what is downloaded;
-/// - `{"action": "discard"}` deletes the unfinished part;
-/// - `{"action": "mirror", "mirror": "https://…" | null}` sets the mirror (null: the default);
-/// - `{"action": "delete"}` deletes the downloaded models (user 2026-10-19, #168): only an install that downloads
-///   them, never while a job runs or `in_use` (the session recognises or updates the character index).
+/// POST /api/models：
+/// - `{"action": "download"}` 开始（或继续）下载（用户的点击）；
+/// - `{"action": "import", "paths": [...]}` 核对并安装选中的文件（页面先调用原生选择器）；
+/// - `{"action": "cancel"}` 停止正在运行的任务，保留已下载的部分；
+/// - `{"action": "discard"}` 删除未完成的部分；
+/// - `{"action": "mirror", "mirror": "https://…" | null}` 设置镜像（null：默认值）；
+/// - `{"action": "delete"}` 删除下载的模型（用户 2026-10-19，#168）：只限会下载模型的安装，
+///   任务在运行或 `in_use`（会话正在识别或更新角色索引）时都不行。
 pub(crate) fn post(resources: &Path, body: &Json, in_use: bool) -> Result<Json> {
     let mut place = Place::app(resources)?;
     place.proxy = proxy();
@@ -883,7 +875,7 @@ fn post_at(models: &'static Models, place: Place, body: &Json) -> Result<Json> {
             if place.in_use {
                 return Err(Error::Invalid("正在识别图片，等它结束再删除识别模型".into()));
             }
-            // Renamed first, so a removal stopped half way never leaves something that looks like the models.
+            // 先改名，这样中途停下的删除从不会留下看起来像模型的东西。
             let doomed = place.root.with_file_name(format!(
                 "{}.deleting",
                 place.root.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()

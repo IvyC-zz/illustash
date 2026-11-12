@@ -12,7 +12,8 @@ pub struct Signature {
     pub sig: [[i16; COEFS]; 3],
 }
 
-/// Row then column decomposition, unnormalised, with haar.cpp's 0.7071 constant (bit-for-bit the same arithmetic).
+/// 先按行再按列分解，不归一化，用 haar.cpp 的 0.7071 常数（运算逐位相同）。
+#[expect(clippy::approx_constant, reason = "与 haar.cpp 的 0.7071 逐位一致，不能换成 FRAC_1_SQRT_2")]
 fn haar2d(a: &mut [f64]) {
     let mut t = [0.0f64; PIXELS / 2];
     for row in 0..PIXELS {
@@ -50,10 +51,12 @@ fn haar2d(a: &mut [f64]) {
     }
 }
 
-/// The NUM_COEFS largest magnitudes (index 0, the DC value, excluded), signed by the coefficient, sorted ascending.
+/// 绝对值最大的 NUM_COEFS 个系数（不含下标 0，即 DC 值），按系数正负带符号，升序排列。
 fn largest(a: &[f64]) -> [i16; COEFS] {
     let mut idx: Vec<usize> = (1..a.len()).collect();
-    idx.sort_by(|&x, &y| a[y].abs().partial_cmp(&a[x].abs()).unwrap().then(x.cmp(&y)));
+    idx.sort_by(|&x, &y| {
+        a[y].abs().partial_cmp(&a[x].abs()).expect("Haar coefficients of finite pixels are finite").then(x.cmp(&y))
+    });
     let mut out = [0i16; COEFS];
     for (o, &i) in out.iter_mut().zip(idx.iter().take(COEFS)) {
         *o = if a[i] > 0.0 { i as i16 } else { -(i as i16) };
@@ -84,7 +87,7 @@ pub fn of_image(img: &DynamicImage) -> Signature {
 }
 
 impl Signature {
-    /// `iqdb_` + the three DC doubles as 16 hex digits of their bits + 120 coefficients as 4 hex digits each (533 chars).
+    /// `iqdb_` + 三个 DC double 的位模式各写成 16 位十六进制 + 120 个系数各 4 位十六进制（共 533 个字符）。
     pub fn to_hash(&self) -> String {
         let mut s = String::with_capacity(533);
         s.push_str("iqdb_");
@@ -106,7 +109,9 @@ mod tests {
 
     #[test]
     fn hash_layout() {
-        let img = DynamicImage::ImageRgb8(image::RgbImage::from_fn(200, 150, |x, y| image::Rgb([(x % 255) as u8, (y % 255) as u8, 90])));
+        let img = DynamicImage::ImageRgb8(image::RgbImage::from_fn(200, 150, |x, y| {
+            image::Rgb([(x % 255) as u8, (y % 255) as u8, 90])
+        }));
         let h = of_image(&img).to_hash();
         assert_eq!(h.len(), 533);
         assert!(h.starts_with("iqdb_"));
@@ -114,10 +119,12 @@ mod tests {
 
     #[test]
     fn signs_and_order() {
-        let img = DynamicImage::ImageRgb8(image::RgbImage::from_fn(128, 128, |x, _| image::Rgb(if x < 64 { [250, 250, 250] } else { [10, 10, 10] })));
+        let img = DynamicImage::ImageRgb8(image::RgbImage::from_fn(128, 128, |x, _| {
+            image::Rgb(if x < 64 { [250, 250, 250] } else { [10, 10, 10] })
+        }));
         let s = of_image(&img);
         assert!(s.sig[0].windows(2).all(|w| w[0] <= w[1]));
         assert!(s.sig[0].iter().all(|&c| c != 0));
-        assert!((s.avgl[0] - 130.0 / 256.0).abs() < 0.02, "{}", s.avgl[0]); // DC ≈ mean luminance / 256 (half white, half black)
+        assert!((s.avgl[0] - 130.0 / 256.0).abs() < 0.02, "{}", s.avgl[0]); // DC ≈ 平均亮度 / 256（一半白一半黑）
     }
 }

@@ -106,7 +106,7 @@ cargo build --release --manifest-path native/terms/Cargo.toml
 - `source.sqlite`：来源快照，只读，不接收人工写入。
 - `library.sqlite`：人工结论、机器证据与统一撤销历史，**不可当缓存删除**。
 - `thumbnails/`：可重建；`backups/`：`--backup` 与升级前的备份。
-- `.illustash-owner.lock`：打开它的 Illustash 持有的系统文件锁；`.illustash-checks.json`：会话是否开着、两个库上次完整检查通过的时间、检查发现的损坏（#212，见[架构方向](ARCHITECTURE_DIRECTION.md#2026-09-28-补充增量功能模块用-rust)启动一段）。都由打开图库的会话维护，不要手改。
+- `.illustash-owner.lock`：打开它的 Illustash 持有的系统文件锁；`.illustash-checks.json`：会话是否开着、两个库上次完整检查通过的时间、检查发现的损坏（#212，见[架构方向](ARCHITECTURE_DIRECTION.md#完整性检查)）。都由打开图库的会话维护，不要手改。
 
 包外的共享资源（参考库、模型、研究输出）与目录职责见 [图库参考](LIBRARIES.md#2-包外的共享资源)。
 
@@ -141,12 +141,12 @@ illustash/
 | 产品底线与待办 | [BACKLOG.md](BACKLOG.md) |
 | 架构与迁移方向 | [ARCHITECTURE_DIRECTION.md](ARCHITECTURE_DIRECTION.md) |
 | 词条核心 | [TERMS.md](TERMS.md)、[TERMS_SCHEMA.md](TERMS_SCHEMA.md)、[TERMS_ARTISTS.md](TERMS_ARTISTS.md)、[TERMS_LABELS.md](TERMS_LABELS.md)、[TERMS_CHARACTERS.md](TERMS_CHARACTERS.md)、[TERMS_NAMES.md](TERMS_NAMES.md) |
-| 图库与界面 | [LIBRARIES.md](LIBRARIES.md)、[WEB_V2.md](WEB_V2.md)、[WEB_NAMES.md](WEB_NAMES.md)、[DATA_MODEL.md](DATA_MODEL.md) |
+| 图库与界面 | [LIBRARIES.md](LIBRARIES.md)、[WEB_V2.md](WEB_V2.md)、[WEB_UI_MAP.md](WEB_UI_MAP.md)、[WEB_NAMES.md](WEB_NAMES.md)、[DATA_MODEL.md](DATA_MODEL.md) |
 | 识别与证据 | [RESULT_PACKAGES.md](RESULT_PACKAGES.md)、[EVIDENCE_PACKAGES.md](EVIDENCE_PACKAGES.md) |
 | 溯源 | [PROVENANCE.md](PROVENANCE.md) |
 | 安装与平台 | [BACKEND_TASKS.md](BACKEND_TASKS.md) |
 | 验收与性能 | [LOCAL_CHECKS.md](LOCAL_CHECKS.md)、[TERMS_PERFORMANCE.md](TERMS_PERFORMANCE.md) |
-| 角色与名字迁移参考 | [TERMS_CHARACTERS_PLAN.md](TERMS_CHARACTERS_PLAN.md)、[TERMS_NAMES_PLAN.md](TERMS_NAMES_PLAN.md) |
+| 角色与名字的方案（移植规则与用户决定，代码注释按节号引用） | [TERMS_CHARACTERS_PLAN.md](TERMS_CHARACTERS_PLAN.md)、[TERMS_NAMES_PLAN.md](TERMS_NAMES_PLAN.md) |
 | 工具与许可 | [TOOLS.md](TOOLS.md)、[THIRD_PARTY.md](THIRD_PARTY.md) |
 | 模型勘误 | [ERRATA.md](../ERRATA.md) |
 

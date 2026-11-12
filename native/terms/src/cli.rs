@@ -311,7 +311,7 @@ fn write_verdicts(
 
 pub(crate) use crate::app_service::character_request;
 
-/// Fresh-only entry: all filesystem inputs are explicit; no current/default library is opened.
+/// 只用于新建的入口：所有文件系统输入都显式给出；不打开当前或默认图库。
 fn create_library(args: &[&str]) -> crate::Result<serde_json::Value> {
     let input = create_library_args(args)?;
     crate::app_create::create_folder(

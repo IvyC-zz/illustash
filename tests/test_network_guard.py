@@ -1,4 +1,4 @@
-"""The suite guard rejects external destinations without opening a connection."""
+"""测试套件的守卫拒绝外部目标，且不建立连接。"""
 import unittest
 import urllib.request
 from unittest import mock

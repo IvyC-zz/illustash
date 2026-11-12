@@ -1,7 +1,7 @@
-"""Native iqdb signature step against fixed historical worker values.
+"""原生 iqdb 签名步骤，与固定的历史 worker 结果对照。
 
-The candidate runs explicitly built illustash-iqdb (ILLUSTASH_IQDB_BINARY) on
-generated images; queue order, local paths and signatures match fixed recordings.
+候选在生成的图片上运行显式构建的 illustash-iqdb（ILLUSTASH_IQDB_BINARY）；队列顺序、本地路径和签名
+与固定的录制一致。
 """
 import json
 import os
@@ -58,7 +58,7 @@ class NativeIqdbQueueTest(unittest.TestCase):
                 src = self.images / f'{asset}.png'
                 Image.fromarray(rng.integers(0, 256, (24, 32, 3), np.uint8)).save(src)
             rows.append((asset, 'files', None if src is None else str(src), preset, in_scope, 0, added))
-        for i in range(8):                                   # one pixiv run of saves
+        for i in range(8):                                   # 一串连续的 pixiv 保存
             add(f'p{i}', 'pixiv', f'2025-01-01T10:{i:02d}:00')
         add('p-alone', 'pixiv', '2025-02-01T10:00:00')
         add('p-undated', 'pixiv', None)
@@ -152,7 +152,7 @@ class NativeIqdbQueueTest(unittest.TestCase):
         result, queue, hashes = got
         self.assertEqual(result, {'hashes': 'hashes.json'})
         assets = [row['asset'] for row in queue]
-        # Solved, not-yet-due, out-of-scope and 'other' pictures are never asked automatically.
+        # 已解决、还没到期、不在范围内和 'other' 的图片，都不会自动去查。
         self.assertTrue({'oc0', 'oc1', 'oc2', 'oc3', 'p-undated'} <= set(assets))
         for absent in ('x-solved', 'x-cached', 'x-out', 'other1', 'oc-solved-a'):
             self.assertNotIn(absent, assets)
@@ -164,7 +164,7 @@ class NativeIqdbQueueTest(unittest.TestCase):
         only = ['other1', 'x-solved', 'x-cached', 'p3', 'x2']
         expected = self.expected()
         self.assertEqual(self.native(self.binary, only), expected)
-        # Library order, no priority or due check; pictures with an artist are skipped.
+        # 按图库顺序，不看优先级也不查是否到期；已有画师的图片跳过。
         self.assertEqual([row['asset'] for row in expected[1]], ['p3', 'x2', 'x-cached', 'other1'])
 
     def test_missing_signature_program_reports_like_python(self):

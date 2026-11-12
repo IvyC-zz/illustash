@@ -1,5 +1,5 @@
-// openDialog (ui/dialog.js, #319): the one builder of the page's runtime modal dialogs. Closing paths (×/[data-close],
-// Esc, backdrop), the backdrop opt-out for forms with typed input, onClose before removal, and the focus hook.
+// openDialog（ui/dialog.js，#319）：页面运行时模态对话框的唯一生成处。关闭的几条路（×/[data-close]、Esc、背景）、
+// 带输入的表单不随背景关闭、onClose 先于移除运行、焦点钩子。
 const {test, before, afterEach} = require('node:test');
 const assert = require('node:assert/strict');
 const web = require('./web.cjs');

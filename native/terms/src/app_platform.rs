@@ -1,9 +1,9 @@
-//! Platform services: desktop native dialogs, with a macOS CLI fallback.
-//! Session ownership stays in app_http; this module neither opens nor writes libraries.
+//! 平台服务：桌面原生对话框，macOS 上可回退到命令行。
+//! 会话归属仍在 app_http；本模块既不打开也不写入图库。
 use crate::{http_json::Json, Error, Result};
 use std::time::Duration;
 
-/// `translate` gives the fallback chooser's prompt in the page's language (app_preferences::tr).
+/// `translate` 按页面语言给出回退选择器的提示语（app_preferences::tr）。
 pub fn choose(
     kind: &str,
     multiple: bool,
@@ -58,7 +58,7 @@ fn selection(kind: &str, paths: Vec<String>, multiple: bool) -> Json {
     let path = paths.first().map(|s| s.as_str().into()).unwrap_or_else(|| serde_json::Value::Null.into());
     let mut result = Json::object([("path", path)]);
     if kind == "folder" {
-        // Legacy single-source form expects this field; it is a neutral default, never a guess.
+        // 旧的单来源表单要这个字段；这是中性的默认值，从不是猜测。
         if !multiple && !paths.is_empty() {
             result.set("preset", "other".into());
         }

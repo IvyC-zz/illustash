@@ -1,4 +1,4 @@
-//! Default native package host with explicit creation and upgrades.
+//! 默认的原生图库包宿主，显式创建和升级。
 use crate::{app_library::Library, http, http_json::Json, Error, Result};
 use std::{
     io::Read,
@@ -16,14 +16,13 @@ mod http_host_get;
 mod http_host_post;
 
 const FORCED_OFF: [&str; 2] = ["similar", "sync"];
-/// Connections served at once (#25). A browser keeps about six per origin, so several windows stay far below it.
+/// 同时服务的连接数（#25）。浏览器对每个源大约保持六个连接，所以开几个窗口也远低于这个数。
 const MAX_CONNECTIONS: usize = 64;
-/// Request handlers running at once; pipelined requests on one connection each take one.
+/// 同时运行的请求处理数；同一连接上流水线发来的每个请求各占一个。
 const MAX_HANDLERS: usize = 128;
 
-/// The local HTTP server with per-connection bounds (#25): a client that stops sending (or reading) loses its
-/// connection after the timeout, and connections beyond the limit are refused with 503, so a slow or stalled
-/// client cannot hold threads without bound. `ILLUSTASH_HTTP_TIMEOUT_MS` shortens the timeout for tests.
+/// 每个连接都有限制的本机 HTTP 服务（#25）：停止发送（或停止读取）的客户端在超时后失去连接，超出上限的连接以 503 拒绝，
+/// 所以慢的或卡住的客户端不能无限占用线程。`ILLUSTASH_HTTP_TIMEOUT_MS` 为测试缩短超时。
 fn serve(listener: TcpListener) -> Result<Server> {
     let timeout = std::env::var("ILLUSTASH_HTTP_TIMEOUT_MS")
         .ok()
@@ -51,11 +50,10 @@ impl std::ops::Deref for Host {
     }
 }
 
-/// Every request carries a secret no other local process can read: 127.0.0.1 is open to every process and user on
-/// the machine, and the Host and Origin checks only stop web pages. The ready line prints the address with a
-/// one-time code; the first visit trades it for a session cookie, and requests without that cookie are refused.
+/// 每个请求都带一个其他本机进程读不到的密钥：127.0.0.1 对这台机器上的每个进程和用户都开放，Host 和 Origin
+/// 检查只能挡住网页。就绪行打印带一次性代码的地址；第一次访问用它换会话 cookie，没有这个 cookie 的请求一律拒绝。
 struct Entry {
-    /// `illustash-<port>`: cookies ignore ports, so a host on another port keeps its own.
+    /// `illustash-<port>`：cookie 不区分端口，所以另一个端口上的宿主保留它自己的 cookie。
     cookie: String,
     secret: String,
     code: std::sync::Mutex<Option<String>>,
@@ -68,7 +66,7 @@ impl Entry {
             code: std::sync::Mutex::new(Some(Session::token()?)),
         })
     }
-    /// The address the ready line prints. The desktop shell reads it from stdout; the CLI prints it for the person.
+    /// 就绪行打印的地址。桌面外壳从 stdout 读它；CLI 把它打印给人看。
     fn address(&self, origin: &str) -> String {
         let code = self.code.lock().expect("entry code lock poisoned");
         format!("{origin}/?k={}", code.as_deref().unwrap_or(""))
@@ -82,8 +80,8 @@ impl Entry {
             .filter_map(|pair| pair.trim().split_once('='))
             .any(|(name, value)| name == self.cookie && same(value, &self.secret))
     }
-    /// `GET /?k=<code>` with the unused code takes it, so a second use is refused, and returns the address to go on
-    /// to: the same query without `k`.
+    /// 带着未用过的代码访问 `GET /?k=<code>` 会取走这个代码，第二次使用就被拒绝，并返回接着要去的地址：
+    /// 去掉 `k` 的同一个查询串。
     fn redeem(&self, request: &Request) -> Option<String> {
         let (path, query) = request.url().split_once('?')?;
         if path != "/" {
@@ -101,9 +99,8 @@ impl Entry {
             .finish();
         Some(if rest.is_empty() { "/".into() } else { format!("/?{rest}") })
     }
-    /// Sets the cookie and goes on by a refresh from this page rather than a redirect: a redirect continues the
-    /// navigation that brought the code, which is cross-site when it comes from the desktop start page, and a
-    /// SameSite=Strict cookie is not sent on it. The refresh is a navigation of 127.0.0.1's own.
+    /// 设置 cookie，并用这个页面的刷新而不是重定向继续：重定向延续的是带来代码的那次导航，从桌面启动页来时它是跨站的，
+    /// SameSite=Strict 的 cookie 不会随它发送。刷新是 127.0.0.1 自己的导航。
     fn enter(&self, request: Request, target: &str) {
         let target = target.replace('&', "&amp;");
         let body = format!(
@@ -126,7 +123,7 @@ impl Entry {
         let _ = request.respond(response);
     }
 }
-/// Compares without stopping at the first difference.
+/// 比较时不在第一个不同处停下。
 fn same(a: &str, b: &str) -> bool {
     a.len() == b.len() && a.bytes().zip(b.bytes()).fold(0, |d, (x, y)| d | (x ^ y)) == 0
 }
@@ -220,10 +217,9 @@ fn settings(
 
 fn handle(mut request: Request, host: &Host, received: u64) {
     let write = request.method().as_str() == "POST";
-    // Names for the page's language (#173): only reads take it (and the read-only suggestions, http_host_post.rs),
-    // so nothing a write stores ever depends on it.
+    // 页面语言下的名称（#173）：只有读请求使用它（以及只读的建议，http_host_post.rs），所以写入保存的东西从不依赖它。
     let _language = crate::http_read::PageLanguage::set(header(&request, "X-Illustash-Language").filter(|_| !write));
-    // Security checks precede body reads. A partial body must not hold the library lock.
+    // 安全检查在读请求体之前。不完整的请求体不得持有图库锁。
     let denied = if header(&request, "Host") != Some(host.origin.trim_start_matches("http://")) {
         Some("仅允许本机地址访问")
     } else if header(&request, "Origin").is_some_and(|v| !v.is_empty() && v != host.origin) {
@@ -303,7 +299,7 @@ fn handle(mut request: Request, host: &Host, received: u64) {
     http_host_get::handle(request, host, received);
 }
 
-// Python library_action wraps filesystem failures as Invalid, while SQLite failures remain 500.
+// Python 的 library_action 把文件系统失败包装成 Invalid，而 SQLite 失败仍是 500。
 fn management_error(error: Error) -> Error {
     match error {
         Error::Io(e) => Error::Invalid(e.to_string()),
@@ -311,7 +307,7 @@ fn management_error(error: Error) -> Error {
     }
 }
 
-// library_action('new') deliberately accepts str(value or ''). Keep its existing repr semantics.
+// library_action('new') 有意接受 str(value or '')。保留它现有的 repr 语义。
 fn python_text(value: &Json, nested: bool) -> String {
     match value {
         Json::Scalar(serde_json::Value::String(value)) if nested => crate::http_read::python_repr(value),
@@ -355,7 +351,7 @@ fn create_library(host: &Host, body: &Json) -> Result<Json> {
             if name.contains('\0') {
                 return Err(Error::Invalid("mkdir: embedded null character in path".into()));
             }
-            // Match web.sync.PHOTOS; this is configuration only, never access the Photos package.
+            // 与 web.sync.PHOTOS 一致；这里只是配置，从不访问 Photos 图库包。
             let photos = crate::app_libraries::photos_library()?;
             crate::app_create::create_photos(&dest, &photos, Some(name), creation_reference(host)?)
         }
@@ -363,8 +359,8 @@ fn create_library(host: &Host, body: &Json) -> Result<Json> {
         _ => return Err(Error::Invalid("请选择来源".into())),
     }
     .map_err(|error| creation_error(error, &host.reference))?;
-    // Published packages survive registry failure. Creation never rotates the active session. A registry failure is
-    // reported with the published path (#97): creating again would only make a second, numbered package.
+    // 已发布的图库包在登记失败时仍然保留。创建从不轮换当前会话。登记失败时连同已发布的路径一起报告（#97）：
+    // 再创建一次只会多出一个带编号的图库包。
     let path = result["path"].as_str().ok_or_else(|| Error::Schema("建库结果缺少路径".into()))?;
     let mut out = Json::object([("path", path.into()), ("name", name.into())]);
     if let Err(error) = crate::app_libraries::remember_created(std::path::Path::new(path), name) {
@@ -373,7 +369,7 @@ fn create_library(host: &Host, body: &Json) -> Result<Json> {
     }
     Ok(out)
 }
-/// `sources: [{kind: "folder", path, preset} | {kind: "photos"}]`: every folder names its origin; none is guessed.
+/// `sources: [{kind: "folder", path, preset} | {kind: "photos"}]`：每个文件夹都写明出处；从不猜。
 fn create_sources_library(host: &Host, body: &Json, dest: &Path, name: &str) -> Result<serde_json::Value> {
     let Some(Json::Array(items)) = body.get("sources") else {
         return Err(Error::Invalid("sources 必须是数组".into()));
@@ -430,7 +426,7 @@ fn create_folder_library(host: &Host, body: &Json, dest: &Path, name: &str) -> R
     }
     let folder = expand_path(folder)?;
     let folder = if folder.is_absolute() { folder } else { host.root.join(folder) };
-    // Non-strict resolution precedes directory/preset validation, matching new_folder_library.
+    // 非严格解析在校验目录和出处预设之前，与 new_folder_library 一致。
     let folder = crate::app_paths::resolve(&folder)?;
     if !folder.is_dir() {
         return Err(Error::Invalid(format!("不是文件夹：{path}", path = folder.display())));
@@ -463,15 +459,15 @@ fn expand_path(value: &str) -> Result<PathBuf> {
     Ok(PathBuf::from(value))
 }
 
-/// Desktop startup protocol: `启动进度：<per mille> <stage>` lines precede the ready line. The shell shows
-/// them and treats each as a sign of life; the CLI prints nothing extra.
+/// 桌面启动协议：`启动进度：<per mille> <stage>` 行在就绪行之前。外壳显示这些行，
+/// 并把每一行当作仍在运行的信号；CLI 不额外打印。
 fn startup_progress(stage: &str, done: f64) {
     if std::env::var_os("ILLUSTASH_DESKTOP_STDIN").is_none() {
         return;
     }
     let permille = (done.clamp(0.0, 1.0) * 1000.0) as u32;
     let mut last = LAST_PROGRESS.lock().expect("startup progress lock poisoned");
-    // One line per visible change: at most about a thousand for any library size.
+    // 每次可见的变化一行：无论图库多大，最多大约一千行。
     if last.as_ref().is_some_and(|(p, s, _)| *p == permille && s == stage) {
         return;
     }
@@ -479,13 +475,12 @@ fn startup_progress(stage: &str, done: f64) {
     println!("启动进度：{permille} {stage}");
     let _ = std::io::Write::flush(&mut std::io::stdout());
 }
-/// The last startup progress line and when it was printed.
+/// 最近一条启动进度行和它打印的时间。
 static LAST_PROGRESS: std::sync::Mutex<Option<(u32, String, Instant)>> = std::sync::Mutex::new(None);
 
-/// While it lives, the last startup progress line is printed again whenever `every` passed without one (#267).
-/// The shell stops a service that says nothing for 30 seconds; the upgrade's backup, migration and space
-/// reclamation run inside SQLite, report nothing and may take minutes on a large library. Only steps that are
-/// running in this process are kept alive: the guard ends with them.
+/// 存活期间，只要过了 `every` 还没有新的进度行，就再打印一次最近一条启动进度行（#267）。外壳会停掉
+/// 30 秒不出声的服务；升级的备份、迁移和空间回收在 SQLite 内部运行，不报告进度，大图库上可能要几分钟。
+/// 只为本进程里正在运行的步骤保活：守卫随这些步骤结束。
 struct Keepalive {
     stop: Option<std::sync::mpsc::Sender<()>>,
     thread: Option<thread::JoinHandle<()>>,
@@ -519,8 +514,7 @@ fn print_progress_line(permille: u32, stage: &str) {
     let _ = std::io::Write::flush(&mut std::io::stdout());
 }
 
-/// `--upgrade` from the desktop start page: the upgrade's stages as startup progress, kept alive through the steps
-/// that cannot report (#267).
+/// 从桌面启动页发起的 `--upgrade`：把升级的各阶段作为启动进度，在无法报告的步骤中保活（#267）。
 fn upgrade_reporting(path: &Path) -> Result<crate::app_upgrade::UpgradeReport> {
     startup_progress("正在打开图库", 0.0);
     let prepared = crate::app_upgrade::prepare(path)?;
@@ -531,8 +525,8 @@ fn upgrade_reporting(path: &Path) -> Result<crate::app_upgrade::UpgradeReport> {
     crate::app_upgrade::run(&prepared, Some(progress)).map_err(|failure| Error::Schema(failure.to_string()))
 }
 
-/// The integrity checks read both databases in full. Opening runs them only after the last session did not end
-/// normally (#212); they are then most of a large library's startup, so the page says why it takes long.
+/// 完整性检查会完整读两个数据库。只有上次会话没有正常结束时打开图库才运行它们（#212）；
+/// 这时它们占大图库启动的大部分时间，所以页面说明为什么要这么久。
 fn open_reporting(path: &Path) -> Result<(Library, std::sync::Arc<crate::app_service::Owner>)> {
     startup_progress("正在打开图库", 0.0);
     let progress: crate::app_library::Progress = std::sync::Arc::new(|label, done| {
@@ -541,8 +535,8 @@ fn open_reporting(path: &Path) -> Result<(Library, std::sync::Arc<crate::app_ser
     crate::app_service::open_owned(path, None, Some(progress))
 }
 
-/// `--rescue-source` (#228): the desktop shell's 「抢救重建」 after a check found source.sqlite damaged. The rescue
-/// reports its stages like the checks; the library then opens as usual.
+/// `--rescue-source`（#228）：检查发现 source.sqlite 损坏后，桌面外壳的「抢救重建」。
+/// 抢救像检查那样报告各阶段；之后图库照常打开。
 fn rescue_reporting(path: &Path, root: &Path) -> Result<crate::app_rescue::Report> {
     let reference = crate::app_resources::reference_path(root)?;
     let reference = crate::app_create::optional_reference(&reference)?;
@@ -551,12 +545,12 @@ fn rescue_reporting(path: &Path, root: &Path) -> Result<crate::app_rescue::Repor
 }
 
 pub(crate) fn run(args: &[String]) -> Result<u8> {
-    // Pipe ownership is captured before initialization, so even an early parent crash
-    // leads to the normal stop/join path. Never read CLI stdin unless explicitly requested.
+    // 管道归属在初始化之前就记下，所以即使父进程很早崩溃，也会走正常的停止和 join 路径。
+    // 除非明确要求，从不读 CLI 的 stdin。
     let desktop_closed = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     if std::env::var_os("ILLUSTASH_DESKTOP_STDIN").as_deref() == Some(std::ffi::OsStr::new("1")) {
-        // The shell assigns its Windows Job before releasing this startup gate.
-        // If it dies before assignment, EOF exits before any task can start.
+        // 外壳在放开这道启动闸之前分配好它的 Windows Job。
+        // 如果它在分配之前就退出，EOF 会在任何任务启动之前退出。
         let mut gate = [0u8; 1];
         if std::io::stdin().read_exact(&mut gate).is_err() {
             return Ok(0);
@@ -681,7 +675,7 @@ pub(crate) fn run(args: &[String]) -> Result<u8> {
         println!("{}", crate::app_settings::backup(&library)?.display());
         return Ok(0);
     }
-    // Reserve the port and session entropy before any explicit upgrade commit.
+    // 在任何显式升级提交之前先占住端口和会话熵。
     let server = if upgrade {
         let listener = TcpListener::bind(("127.0.0.1", port))?;
         Some(serve(listener)?)
@@ -690,8 +684,8 @@ pub(crate) fn run(args: &[String]) -> Result<u8> {
     };
     let token = Session::token()?;
     let mut rescued = None;
-    // The explicit upgrade runs its own full checks, once, under its writer lock (#212, #267). A package already in
-    // the current format (an upgrade committed by an earlier attempt, say) opens as usual.
+    // 显式升级在它的写锁下运行自己的完整检查，只运行一次（#212、#267）。
+    // 已经是当前格式的图库包（例如之前一次尝试已提交了升级）照常打开。
     let (library, upgrade_backup) = if upgrade {
         match Library::open_deferring_checks(&path) {
             Ok(_) => (open_reporting(&path)?, None),
@@ -746,13 +740,13 @@ pub(crate) fn run(args: &[String]) -> Result<u8> {
     http::install_signals();
     let desktop_parent = crate::platform_process::DesktopParent::capture();
     let mut handlers: Vec<thread::JoinHandle<()>> = Vec::new();
-    // Recover durable research work, or the established no-learner verdict notification.
-    // Hold this session while recovering; no event from its database is replayed into a replacement library.
+    // 恢复持久化的研究工作，或既有的无 learner 裁决通知。
+    // 恢复期间持有这个会话；它的数据库里的事件不会重放进替换后的图库。
     host.start_reporting(|| startup_progress("正在恢复后台任务", 0.97))?;
     let address = host.entry.address(&host.origin);
     println!("图库已启动：{address}");
     std::io::Write::flush(&mut std::io::stdout())?;
-    // `start-web.command` opens the page in the default browser; elsewhere the printed address is opened by hand.
+    // `start-web.command` 在默认浏览器里打开页面；其他情况下手动打开打印出的地址。
     #[cfg(target_os = "macos")]
     if open {
         let _ = std::process::Command::new("/usr/bin/open").arg(&address).spawn();
@@ -765,10 +759,10 @@ pub(crate) fn run(args: &[String]) -> Result<u8> {
             break;
         }
         if let Some(request) = server.recv_timeout(Duration::from_millis(100))? {
-            // Capture before spawning/locking/body IO: queued requests belong to the receiving session.
+            // 在派生线程、加锁、读请求体之前记下：排队的请求属于接收它们的会话。
             let received = host.generation.load(Ordering::SeqCst);
             if handlers.iter().filter(|h| !h.is_finished()).count() >= MAX_HANDLERS {
-                // Bounded threads: further requests are refused at once instead of piling up.
+                // 线程有上限：更多请求立即拒绝，不堆积。
                 respond(request, error("服务繁忙，请稍后重试"), 503, "core");
             } else {
                 let host = host.clone();
@@ -788,14 +782,14 @@ pub(crate) fn run(args: &[String]) -> Result<u8> {
             }
         }
     }
-    // EOF and parent loss must cancel selectors/handlers as well as the main loop.
+    // EOF 和父进程丢失时，除了主循环，也必须取消选择器和处理线程。
     http::request_stop();
     host.shutdown();
     let deadline = Instant::now() + Duration::from_secs(8);
     while handlers.iter().any(|h| !h.is_finished()) && Instant::now() < deadline {
         thread::sleep(Duration::from_millis(25));
     }
-    // Unfinished socket bodies do not keep the executable alive. SQLite owns interrupted-write recovery.
+    // 未读完的套接字请求体不会让可执行文件继续存活。中断写入的恢复由 SQLite 负责。
     Ok(0)
 }
 

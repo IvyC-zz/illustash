@@ -1,4 +1,4 @@
-//! Synthetic formal-import regression; no models, private anchors, or external libraries.
+//! 正式导入的合成回归测试；不用模型、私有锚点或外部图库。
 use super::*;
 use crate::{
     app_tasks::TaskIdentity,
@@ -268,7 +268,7 @@ fn quadratic_index_checks_cancellation_before_product_without_source_lease() {
     let result = crate::recognition_compute::anchors::anchor_index_checked(&vectors, &ids, &HashMap::new(), &|| {
         let n = count.get() + 1;
         count.set(n);
-        // Reach a cross-product block (after normalizing both matrices), then cancel.
+        // 进入一个交叉乘积分块（两个矩阵都已归一化之后），然后取消。
         if n == 130 {
             let c = f.source();
             c.busy_timeout(std::time::Duration::ZERO)?;
@@ -283,7 +283,7 @@ fn quadratic_index_checks_cancellation_before_product_without_source_lease() {
 }
 #[test]
 fn external_model_root_is_authoritative_for_producer_and_importer() {
-    // Dedicated subprocess owns ILLUSTASH_MODELS; never change process-global env in parallel tests.
+    // 由专门的子进程设置 ILLUSTASH_MODELS；并行测试里绝不改动进程全局的环境变量。
     if std::env::var_os("ILLUSTASH_149_EXTERNAL_MODELS_TEST").is_none() {
         let parent = Fixture::new(false);
         let status = std::process::Command::new(std::env::current_exe().unwrap())
@@ -328,7 +328,7 @@ fn dense_anchor_boundary_refuses_old_scalar_claim_and_imports_empty_result() {
     let original = fs::read(&sidecar).unwrap();
     let mut value: Value = serde_json::from_slice(&original).unwrap();
     assert_eq!(value["claims"], json!([]));
-    // The actually reproduced old scalar result incorrectly had d=0 at p90=1e-6.
+    // 实际复现出的旧标量结果在 p90=1e-6 时错误地给出 d=0。
     value["claims"] = json!([{"asset":"a","character":"old","distance":0.0,"threshold":0.000001f32,"confidence":1.0}]);
     fs::write(&sidecar, serde_json::to_vec(&value).unwrap()).unwrap();
     assert!(f.import(&path, &sidecar).is_err());
@@ -339,7 +339,7 @@ fn dense_anchor_boundary_refuses_old_scalar_claim_and_imports_empty_result() {
     assert_eq!(count(&f.app(), "SELECT count(*) FROM candidates WHERE source='CCIP'"), 0);
     assert_eq!(human(&f.app()), before);
 }
-/// Records what an import reports (#88) and cancels when it reaches `cancel_at`, as the cancel button would.
+/// 记录导入报告的内容（#88），到达 `cancel_at` 时像取消按钮那样取消。
 struct Recorder {
     log: std::sync::Mutex<Vec<String>>,
     cancel_at: Option<&'static str>,
@@ -400,4 +400,53 @@ fn an_import_reports_its_real_stages_and_a_cancel_at_any_stage_before_commit_wri
         assert_no_wd(&f);
         assert_eq!(human(&f.app()), app);
     }
+}
+
+/// 新图库里 WD 认出的新角色按 tag 后缀归到作品（#296）：同一个后缀只建一个待核对的作品；不是作品的后缀不建，
+/// 角色未归类。数据全部合成。
+#[test]
+fn wd_characters_in_a_new_library_get_the_work_of_their_tag_suffix() {
+    let f = Fixture::new(false);
+    let src = f.source();
+    src.execute_batch(
+        "INSERT INTO assets(uuid,filename,src_path,width,height,added_at,src_kind,in_scope,trashed) VALUES
+           ('b','b.png','b.png',16,16,'2026-10-03','folder',1,0);
+         INSERT INTO labels(uuid,dim,value,conf,source) VALUES ('b','character','first_girl_(synthetic_work)',0.9,'wd_v3'),
+           ('b','character','second_girl_(synthetic_work)',0.8,'wd_v3'),('b','character','third_girl_(vtuber)',0.7,'wd_v3'),
+           ('b','character','fourth_girl',0.6,'wd_v3');",
+    )
+    .unwrap();
+    let mut app = f.app();
+    let tx = app.transaction_with_behavior(TransactionBehavior::Immediate).unwrap();
+    crate::schema::begin_writing(&tx).unwrap();
+    import_changes(&tx, &src, &f.library, &["b".into()]).unwrap();
+    crate::schema::commit_writing(tx).unwrap();
+    let app = f.app();
+    let works: Vec<String> = app
+        .prepare(
+            "SELECT l.key||'→'||coalesce(q.key,'-')||'→'||r.work_text FROM term_links l JOIN term_tree r ON r.term_id=l.term_id
+             LEFT JOIN terms w ON w.key=r.work_id LEFT JOIN term_links q ON q.term_id=w.id AND q.system='qualifier'
+             WHERE l.system='wd_character' ORDER BY l.key",
+        )
+        .unwrap()
+        .query_map([], |r| r.get(0))
+        .unwrap()
+        .collect::<rusqlite::Result<_>>()
+        .unwrap();
+    assert_eq!(
+        works,
+        [
+            "first_girl_(synthetic_work)→synthetic_work→synthetic_work",
+            "fourth_girl→-→",
+            "second_girl_(synthetic_work)→synthetic_work→synthetic_work",
+            "third_girl_(vtuber)→-→vtuber",
+        ]
+    );
+    assert_eq!(
+        count(
+            &app,
+            "SELECT count(*) FROM terms t JOIN term_tree r ON r.term_id=t.id WHERE t.kind='work' AND r.review_status='pending'"
+        ),
+        1
+    );
 }

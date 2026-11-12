@@ -1,4 +1,4 @@
-"""Keep synthetic urllib tests offline while allowing loopback HTTP fixtures."""
+"""让合成的 urllib 测试保持离线，同时允许回环地址上的 HTTP 夹具。"""
 import ipaddress
 import urllib.request
 from urllib.parse import urlsplit

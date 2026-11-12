@@ -1,5 +1,5 @@
-//! Exact PAM/MD5 contract, deliberately separate from display/signature decoding.
-//! Explicit LCMS2.19/scalar TIFF candidate; installed adapter remains gated.
+//! 精确的 PAM/MD5 契约，有意与显示和签名用的解码分开。
+//! 固定 LCMS2.19，加上范围很窄的标量 TIFF；安装版适配器的 pixel_hash 步骤（`pixel_batch`）用它。
 use super::pixel_icc;
 use crate::image_samples::{
     pnm::{pnm_samples, PnmSamples},
@@ -10,8 +10,8 @@ use image::{DynamicImage, ImageDecoder, ImageReader, RgbaImage};
 use md5::{Digest, Md5};
 use std::{fs, io::Cursor, path::Path};
 
-/// Hash already normalised, straight (unpremultiplied) sRGB RGBA bytes.
-/// Includes hidden RGB under alpha=0; EXIF, filename and compressed bytes are absent.
+/// 对已经归一化的直通（未预乘）sRGB RGBA 字节求哈希。
+/// 包括 alpha=0 下隐藏的 RGB；不含 EXIF、文件名和压缩后的字节。
 pub fn rgba_hash(width: u32, height: u32, pixels: &[u8]) -> Result<String> {
     let length = (width as usize).checked_mul(height as usize).and_then(|n| n.checked_mul(4));
     if width == 0 || height == 0 || length != Some(pixels.len()) {
@@ -24,8 +24,8 @@ pub fn rgba_hash(width: u32, height: u32, pixels: &[u8]) -> Result<String> {
     Ok(format!("{:x}", md5.finalize()))
 }
 
-/// Candidate only: fixed LCMS2.19 plus narrow scalar TIFF; production remains gated.
-/// Full decoder/ICC coverage is a release gate; this is not selected by the adapter.
+/// 固定 LCMS2.19，加上范围很窄的标量 TIFF。安装版适配器的 pixel_hash 步骤经 `pixel_batch` 调用这里；
+/// 函数名沿用候选阶段的叫法。
 pub fn candidate_path(path: &Path) -> Result<String> {
     let bytes = fs::read(path)?;
     candidate_bytes_with_path(&bytes, Some(path))
@@ -50,7 +50,7 @@ fn candidate_bytes_with_path(bytes: &[u8], path: Option<&Path>) -> Result<String
         icc = profile;
         image
     } else if reader.format() == Some(image::ImageFormat::Jpeg) {
-        // Full-resolution legacy RGB/CMYK decode, never recognition draft.
+        // 按旧版全分辨率解码 RGB/CMYK，从不用识别时的 draft 缩小解码。
         let (image, profile) = std::panic::catch_unwind(|| -> Result<(RgbaImage, Option<Vec<u8>>)> {
             let d = mozjpeg::Decompress::with_markers(&[mozjpeg::Marker::APP(2)]).from_mem(bytes)?;
             let profile = jpeg_icc(
@@ -79,7 +79,7 @@ fn candidate_bytes_with_path(bytes: &[u8], path: Option<&Path>) -> Result<String
         icc = profile;
         image
     } else {
-        // ImageDecoder preserves straight alpha; no matte or EXIF transpose here.
+        // ImageDecoder 保留直通 alpha；这里不做底色合成，也不按 EXIF 转置。
         let mut decoder = reader.into_decoder().map_err(|e| Error::Invalid(e.to_string()))?;
         icc = decoder.icc_profile().map_err(|e| Error::Invalid(e.to_string()))?;
         match DynamicImage::from_decoder(decoder).map_err(|e| Error::Invalid(e.to_string()))? {
@@ -103,8 +103,8 @@ fn candidate_bytes_with_path(bytes: &[u8], path: Option<&Path>) -> Result<String
     rgba_hash(image.width(), image.height(), image.as_raw())
 }
 
-// Ordinary 8-bit RGB TIFF has no alpha or Pillow mmap mode. Keep the scalar
-// consumer separate: its path-dependent reshape and clamp do not apply here.
+// 普通 8 位 RGB TIFF 没有 alpha，也没有 Pillow 的 mmap 模式。标量路径另走一处：
+// 它随路径输入而定的 reshape 和截断不适用于这里。
 fn tiff_bytes(bytes: &[u8], path_input: bool) -> Result<(RgbaImage, Option<Vec<u8>>)> {
     use image::imageops;
     use tiff::{
@@ -157,13 +157,13 @@ fn tiff_bytes(bytes: &[u8], path_input: bool) -> Result<(RgbaImage, Option<Vec<u
     Ok((image, icc))
 }
 
-/// Final-linked library guard, also exposed by the explicit candidate probe.
+/// 最终链接的库的守卫，显式候选探针也暴露这一项。
 pub fn lcms_version() -> Result<u32> {
     pixel_icc::check_version()?;
     Ok(lcms2::version())
 }
-// Preserve Pillow JPEG APP2 handling: lexicographic fragment order, and the
-// first sorted fragment's total compared to actual count (not a stricter parser).
+// 保留 Pillow 对 JPEG APP2 的处理：分片按字典序排列，并用排序后第一个分片里的总数与实际数量比较
+// （不换成更严格的解析）。
 fn jpeg_icc(mut fragments: Vec<Vec<u8>>) -> Result<Option<Vec<u8>>> {
     if fragments.is_empty() {
         return Ok(None);
@@ -178,8 +178,8 @@ fn jpeg_icc(mut fragments: Vec<Vec<u8>>) -> Result<Option<Vec<u8>>> {
     Ok(Some(fragments.into_iter().flat_map(|part| part[14..].to_vec()).collect()))
 }
 
-// Decode palette indices ourselves: the first Pillow canvas uses its transparent
-// index when present, otherwise index 0; RGB survives even under zero alpha.
+// 自己解码调色板索引：Pillow 的第一张画布有透明索引时用它，否则用索引 0；
+// alpha 为零时 RGB 也保留。
 fn gif_first_frame(bytes: &[u8]) -> Result<RgbaImage> {
     let mut options = gif::DecodeOptions::new();
     options.set_color_output(gif::ColorOutput::Indexed);
@@ -222,8 +222,8 @@ fn pnm(bytes: &[u8]) -> Result<RgbaImage> {
     let Some(PnmSamples { width, height, bands, maxval, samples }) = pnm_samples(bytes, None)? else {
         return Ok(image::load_from_memory(bytes).map_err(|e| Error::Invalid(e.to_string()))?.to_rgba8());
     };
-    // Match Pillow's value/maxval*out_max order and Python round (ties even).
-    // Gray >8bit becomes I and subsequently clamps at 255, not a 16→8 shift.
+    // 与 Pillow 的 value/maxval*out_max 运算顺序和 Python round（平局取偶）一致。
+    // 高于 8 位的灰度变成 I 模式，随后截断到 255，不是 16→8 位移。
     let out_max = if bands == 1 && maxval > 255 { 65535. } else { 255. };
     let scaled: Vec<_> = samples
         .into_iter()
@@ -242,7 +242,7 @@ mod tests {
     use super::*;
     #[test]
     fn pam_header_dimensions_and_hidden_colour_are_identity() {
-        // Independent Python hashlib over this literal PAM, never a candidate fixture.
+        // 用独立的 Python hashlib 对这个字面 PAM 求得，从不取自候选夹具。
         assert_eq!(rgba_hash(1, 1, &[12, 34, 56, 0]).unwrap(), "67222c4833b8bfd91eb0f1f2ce68ce67");
         assert_ne!(rgba_hash(1, 1, &[12, 34, 56, 0]).unwrap(), rgba_hash(1, 1, &[0, 0, 0, 0]).unwrap());
         assert_ne!(rgba_hash(2, 1, &[0; 8]).unwrap(), rgba_hash(1, 2, &[0; 8]).unwrap());

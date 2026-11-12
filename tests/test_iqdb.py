@@ -34,7 +34,7 @@ class IqdbTest(unittest.TestCase):
         self.assertEqual(self.calls,[])
 
 
-# Only helpers are reused; the original class's test methods are discovered in its own module.
+# 只复用辅助方法；原类的测试方法在它自己的模块里被发现。
 for base in reversed(fixture.NativeProvenanceTest.__mro__):
     if base in (unittest.TestCase,object):continue
     for name,value in vars(base).items():

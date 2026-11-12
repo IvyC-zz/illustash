@@ -1,7 +1,7 @@
-// #34: answers that arrive after the page has moved on, or out of order, never wind the interface back,
-// and a background refresh of the settings card keeps what is being typed.
+// #34：页面已经切走之后才到、或乱序到达的响应，不会让界面倒回去；
+// 设置卡片在后台刷新时保留正在输入的内容。
 const {test, before} = require('node:test');
-const web = require('./web.cjs');   // core/ modules (#199)
+const web = require('./web.cjs');   // core/ 下的模块（#199）
 before(web.ready);
 const assert = require('node:assert/strict');
 const tick = () => new Promise(resolve => setImmediate(resolve));
@@ -9,7 +9,7 @@ const element = () => ({hidden: false, classList: {remove() {}, toggle() {}}, li
   addEventListener(kind, fn) { this.listeners[kind] = fn; }});
 
 test('a group page answer that arrives after navigating home does not take over the page', async () => {
-  // applyRoute() is ui/shell.js; the home page is ui/home.js; the page is a fake one.
+  // applyRoute() 在 ui/shell.js；首页在 ui/home.js；页面是假的。
   const requests = [], {applyRoute} = await web.load('ui/shell.js'), {state} = web.core();
   let answer;
   Object.assign(state, {route: {page: 'home'}, nsfw: '', guide: undefined});
@@ -36,7 +36,7 @@ test('a group page answer that arrives after navigating home does not take over 
 });
 
 test('an older sync answer that arrives last does not move the state back', async () => {
-  // core/jobs.js polls the sync; its timers are the page's setTimeout.
+  // core/jobs.js 轮询同步；它的定时器是页面的 setTimeout。
   const {state, pollSync} = web.core(), answers = [], timers = [];
   Object.assign(state, {sync: {status: 'scanning'}, route: {page: 'library'}});
   globalThis.fetch = () => new Promise(resolve => answers.push(body => resolve({status: 200, ok: true, json: async () => body})));
@@ -51,7 +51,7 @@ test('an older sync answer that arrives last does not move the state back', asyn
   } finally { globalThis.setTimeout = setTimeout; }
   assert.equal(state.sync.status, 'done');
   assert.deepEqual(state.syncHistory, [{id: 2}]);
-  assert.deepEqual(timers, []);  // finished: nothing polls again, and the stale answer schedules nothing
+  assert.deepEqual(timers, []);  // 已结束：不再轮询，过期的响应也不安排任何定时器
 });
 
 test('the new-library name is kept as it is typed, so a card refresh restores it', async () => {

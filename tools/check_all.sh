@@ -34,6 +34,7 @@ run() { printf '\n== %s ==\n' "$*"; "$@"; }
 # 纯工具合成测试及测试文件语法尽早验证；改动相关测试可额外前置。
 run "$python" -m compileall -q tests
 run "$python" tools/check_architecture.py
+run "$python" tools/check_frontend.py
 run "$python" -m unittest discover -s tests -p test_local_acceptance.py -v -b
 # 旧变量不能在 release 前调用任意测试，避免读取上一候选的二进制。
 if [ -n "${CHECK_ALL_PREFLIGHT_TESTS:-}" ]; then
@@ -55,6 +56,8 @@ run node --test tests/*.test.cjs tests/test_pixiv_poll.js
 run cargo clippy --locked --manifest-path desktop/Cargo.toml --all-targets -- -D warnings
 run cargo test --locked --manifest-path desktop/Cargo.toml
 run cargo test --locked --manifest-path native/terms/Cargo.toml
+run cargo fmt --manifest-path crates/iqdb/Cargo.toml --check
+run cargo clippy --locked --manifest-path crates/iqdb/Cargo.toml --all-targets -- -D warnings
 run cargo test --locked --manifest-path crates/iqdb/Cargo.toml
 run cargo build --release --locked --manifest-path native/terms/Cargo.toml
 run cargo build --release --locked --manifest-path native/terms/Cargo.toml --features test-read-host --example read-http --example recognition-compute --example index-compute --example research-compute --example relation-probe --example provenance-compute

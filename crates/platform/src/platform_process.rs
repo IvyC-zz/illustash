@@ -9,11 +9,12 @@ mod windows_desktop;
 #[cfg(windows)]
 mod windows_worker;
 
-/// Direct parent identity for the fixed worker owner protocol; Job cleanup remains separate.
+/// 固定的 worker 归属协议用的直接父进程身份；Job 收尾另行处理。
 #[cfg(any(unix, windows))]
 pub fn parent_pid() -> std::io::Result<u32> {
     #[cfg(unix)]
     {
+        // SAFETY: getppid 无参数，总是成功。
         Ok(unsafe { libc::getppid() } as u32)
     }
     #[cfg(windows)]
@@ -40,7 +41,7 @@ pub fn worker(
         let mut group = windows_worker::ProcessJob::spawn(command)?;
         loop {
             check()?;
-            // An observer error stops the worker like cancellation: dropping the group kills it.
+            // observe 出错时像取消一样停掉 worker：drop 进程组时会杀掉它。
             observe()?;
             #[cfg(unix)]
             let status = group.0.try_wait()?;
@@ -63,7 +64,8 @@ struct ProcessGroup(std::process::Child);
 #[cfg(unix)]
 impl Drop for ProcessGroup {
     fn drop(&mut self) {
-        // SIGKILL is deterministic even for uncooperative children and leaders already exited.
+        // 即使子进程不配合、组长已经退出，SIGKILL 的结果也是确定的。
+        // SAFETY: kill 只接收整数；负 PID 指向 `spawn` 时用 process_group(0) 建立的这个进程组。
         unsafe {
             libc::kill(-(self.0.id() as i32), libc::SIGKILL);
         }
@@ -89,11 +91,13 @@ unsafe extern "system" fn console_stop(event: u32) -> i32 {
 pub fn install_signals() {
     STOP.store(false, Ordering::SeqCst);
     #[cfg(unix)]
+    // SAFETY: `signal_stop` 是 extern "C" 函数，只写一个原子量，在信号处理函数里可以安全调用。
     unsafe {
         libc::signal(libc::SIGINT, signal_stop as *const () as libc::sighandler_t);
         libc::signal(libc::SIGTERM, signal_stop as *const () as libc::sighandler_t);
     }
     #[cfg(windows)]
+    // SAFETY: `console_stop` 符合 PHANDLER_ROUTINE 签名，只写一个原子量；程序运行期间一直有效。
     unsafe {
         #[link(name = "kernel32")]
         extern "system" {
@@ -110,8 +114,8 @@ pub fn stopping() -> bool {
     STOP.load(Ordering::SeqCst)
 }
 
-/// Workers use separate process groups, so timeout cleanup must include descendants.
-/// Read only PID/PPID metadata and start from the still-unreaped owned host.
+/// worker 使用单独的进程组，所以超时收尾必须包括后代进程。
+/// 只读取 PID/PPID 元数据，从仍未回收的自有宿主进程开始。
 #[cfg(unix)]
 pub fn kill_owned_tree(pid: u32) {
     if let Ok(output) = Command::new("/bin/ps").args(["-axo", "pid=,ppid="]).output() {
@@ -135,6 +139,7 @@ pub fn kill_owned_tree(pid: u32) {
                 cursor += 1;
             }
             for child in owned.into_iter().skip(1).rev() {
+                // SAFETY: kill 只接收整数；PID 来自上面以 `pid` 为根枚举出的后代。
                 unsafe {
                     libc::kill(child as i32, libc::SIGKILL);
                 }
@@ -145,6 +150,7 @@ pub fn kill_owned_tree(pid: u32) {
     } else {
         eprintln!("无法启动进程收尾检查；继续终止自身进程组");
     }
+    // SAFETY: killpg 只接收整数；`pid` 是仍未回收的自有进程组组长，组号不会被复用。
     unsafe {
         libc::killpg(pid as i32, libc::SIGKILL);
     }
@@ -153,7 +159,7 @@ pub fn kill_owned_tree(pid: u32) {
 #[cfg(not(unix))]
 pub fn kill_owned_tree(_pid: u32) {}
 
-/// Desktop retains its existing post-spawn job assignment and piped I/O.
+/// desktop 保留现有做法：启动后再加入 job，I/O 走管道。
 #[cfg(windows)]
 pub use windows_desktop::Job as DesktopJob;
 #[cfg(not(windows))]
@@ -179,12 +185,14 @@ impl DesktopParent {
     pub fn capture() -> Self {
         Self {
             #[cfg(unix)]
+            // SAFETY: getppid 无参数，总是成功。
             pid: std::env::var_os("ILLUSTASH_DESKTOP_BRIDGE").map(|_| unsafe { libc::getppid() }),
         }
     }
     pub fn lost(&self) -> bool {
         #[cfg(unix)]
         {
+            // SAFETY: getppid 无参数，总是成功。
             self.pid.is_some_and(|pid| unsafe { libc::getppid() } != pid)
         }
         #[cfg(not(unix))]
@@ -218,6 +226,7 @@ mod tests {
     #[ignore = "isolated synthetic stop-signal subprocess"]
     fn stop_signal_fixture() {
         #[cfg(windows)]
+        // SAFETY: 这些控制台函数只接收整数；在隔离的测试子进程里调用。
         unsafe {
             #[link(name = "kernel32")]
             extern "system" {
@@ -233,6 +242,7 @@ mod tests {
         #[cfg(unix)]
         {
             install_signals();
+            // SAFETY: raise 只接收整数；处理函数已由上一行安装。
             unsafe {
                 libc::raise(libc::SIGTERM);
             }

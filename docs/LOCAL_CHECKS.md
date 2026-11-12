@@ -4,7 +4,7 @@
 
 ## 开发检查与完整入口
 
-开发 worktree 先跑新改测试和相关定向检查。`tools/check_all.sh` 先验证测试文件语法及验收工具合成测试，再执行 crates/core 与 crates/platform 独立 fmt/clippy/test/locked build、宿主 fmt/clippy、JS、桌面 clippy/test，随后执行原有 Rust、release 构建、屏蔽退役参考目录导入的 Python discover 和空 PATH 契约重放。Python 全套由 `tests.run_fixed_suite` 执行，调度和参数见下文；覆盖、失败即退出、跳过白名单不变。导入源位于 `tests/reference/`、`web/` 或 #53 已退役的旧索引工具文件时立即拒绝，任何被捕获的导入尝试也使检查失败。构建前只运行固定的测试语法、验收工具合成测试等纯轻量项。任意指定的定向测试使用 `CHECK_ALL_TARGETED_TESTS='tests.test_native_http.TestCase'`（使用完整模块路径，在仓库根执行，以实际类名为准），在本轮候选 release 核心、测试读宿主及 IQDB 准备完成并设置二进制路径之后、Python discover 之前运行；输出候选 head，不提前读取旧 target。旧变量 `CHECK_ALL_PREFLIGHT_TESTS` 非空时明确退出 2，不静默改变其含义。额外定向结果不能代替全量，也不缩小 discover 的覆盖。
+开发 worktree 先跑新改测试和相关定向检查。`tools/check_all.sh` 先验证测试文件语法及验收工具合成测试，再执行 crates/core 与 crates/platform 独立 fmt/clippy/test/locked build、宿主 fmt/clippy、JS、桌面 clippy/test，随后执行原有 Rust 与 crates/iqdb 的 fmt/clippy/test、release 构建、屏蔽退役参考目录导入的 Python discover 和空 PATH 契约重放。Python 全套由 `tests.run_fixed_suite` 执行，调度和参数见下文；覆盖、失败即退出、跳过白名单不变。导入源位于 `tests/reference/`、`web/` 或 #53 已退役的旧索引工具文件时立即拒绝，任何被捕获的导入尝试也使检查失败。构建前只运行固定的测试语法、验收工具合成测试等纯轻量项。任意指定的定向测试使用 `CHECK_ALL_TARGETED_TESTS='tests.test_native_http.TestCase'`（使用完整模块路径，在仓库根执行，以实际类名为准），在本轮候选 release 核心、测试读宿主及 IQDB 准备完成并设置二进制路径之后、Python discover 之前运行；输出候选 head，不提前读取旧 target。旧变量 `CHECK_ALL_PREFLIGHT_TESTS` 非空时明确退出 2，不静默改变其含义。额外定向结果不能代替全量，也不缩小 discover 的覆盖。
 
 当前候选的 `read-http`、`recognition-compute`、`index-compute`、`research-compute`、`relation-probe`、`provenance-compute` examples 在本轮 release 构建中显式准备，再导出各自 `ILLUSTASH_*_BIN`；研究/索引安装适配器同样显式指向本轮 `illustash-worker`。本地与 CI 使用相同接线，缺产物不能靠测试默认跳过形成通过。模型的专项授权及平台证据仍单列。
 
@@ -51,6 +51,10 @@
 
 **回退**：钩子环境里设 `COLLAB_RUN_GUARD=0` 关闭全部拦截；只想取消某一类，从 `run.json` 删掉对应规则。`bg` 不改变任何持久状态，不用就是回退。
 
+**编译缓存（sccache）**：2026-11-12 起，本机 illustash 的开发编译共用一份 sccache 缓存；全量、计时、`local_acceptance`、release 构建和 `cargo run` 不走缓存，编译行为不变。用户级的 `~/.cargo/config.toml` 用 `[build] rustc-wrapper` 指向包装脚本 `~/.local/bin/illustash-rustc-wrapper`。这个脚本只在四个条件同时满足时调 sccache：输出目录在 illustash 的检出或 worktree 里，调用的是 rustc 本身，不是 incremental 编译，进程是后台优先级。不满足时直接执行 rustc，所以本机其他 Rust 项目不受影响。这样分是因为 sccache 的编译由常驻服务进程执行，服务的优先级取自启动它的那个进程，`taskpolicy -b` 不会随每次请求传过去。服务如果由普通进程启动，`bg` 编译在未命中时会跑到性能核上；反过来，全量又会被降到能效核。官方文档规定同一份本地缓存只能由一个服务使用，所以只让后台编译用，服务也总在后台优先级下启动。仓库内的 `.cargo/config.toml` 不加 wrapper，因为 Windows 验收机和 CI 上没有 sccache。效果和测量口径见 [#240 的评论](https://github.com/shio-vinyl/illustash/issues/240#issuecomment-6806900035)。
+
+用法：`illustash-rustc-wrapper --stats` 查看命中率和缓存占用；单条命令前加 `ILLUSTASH_SCCACHE=0` 临时不用缓存；回退就删掉 `~/.cargo/config.toml` 里的 `rustc-wrapper` 一行。缓存放在 `~/Library/Caches/sccache-illustash`，上限 10 GB（`SCCACHE_CACHE_SIZE`）。加上或去掉 wrapper 都不会让已有的 target 重新编译。`local_acceptance.py` 会记录 `~/.cargo/config.toml` 的摘要，所以这个文件一改，已有的验收记录下次复用时就会以「环境改变」被拒一次，重跑一次 `local_acceptance.py run` 就能生成新记录。
+
 ## 修改测试的导航
 
 业务契约和固定期望的比较规则见 [架构参考](ARCHITECTURE_DIRECTION.md)；本节说明测试分工、依赖和修改方法，测试入口与合并门槛仍按上文及 AGENTS.md。
@@ -77,6 +81,8 @@
 `tests/fixtures/reference_recordings/` 按测试 ID 和调用顺序取值，`native/terms/tests/fixtures/baseline/` 按模块重放核心调用；改测试模块、类名、方法名或取值顺序之前先查读取方。`tests/image_expectations.py`、`index_expectations.py` 等是冻结答案的读取器，旧模块名出现在这些文件里不表示旧业务实现仍在执行。比较失败先区分输入、路径/时钟归一化、平台差异和产品行为变化；原生输出不得刷新旧答案。产品决定确需改变期望时，按架构参考的规则在对应 PR 说明。
 
 **对照基准（#201）**：Python 时代的三类旧录制（24 组核心调用重放、4 组 HTTP 固定契约、Python 固定期望里的整库摘要）比较全部表、schema 和隐式 rowid，核心 v8 改表结构后都会失效。2026-10-19 用当时的 main（核心第 7 版）在同样的场景上另录了一份新基准，放在 `native/terms/tests/fixtures/baseline/` 和 `tests/fixtures/baseline_states/`：接口回复按字节比较；每次调用之后比较除退役旧表以外的全部表内容，不比 schema 和隐式 rowid；只服务旧表的调用（`sync-*`、`verify-*`、`cutover-*` 和未切换完的库上的调用）不进新基准，它们留下的库作为检查点，在下一个保留的调用之前载入，处于录制时核心版本的检查点先升级。比较规则写在 `native/terms/tests/common/baseline.rs` 开头，两边共用；Python 侧照同样的规则，在录下的状态与实时状态比较时一并比对。比较规则由用户 2026-10-19 确认（#201）。核心第 8 版起旧的核心重放和契约录制已删除，新基准是唯一对照；Python 固定期望的整库摘要在录下的状态与实时状态比较时改用新基准。录制当时在旧录制照常核对、一致时进行（PR #239 的 `record_baseline`，随旧录制一起删除，留在 git 历史里）；新基准不重录，被测输出不得用来刷新它。v8 新加的列在比较器里逐项登记排除（`SKIP_COLUMNS`，写明原因）。`baseline.rs` 的测试进程关掉了 SQLite 的内存统计（`SQLITE_CONFIG_MEMSTATUS`）：每次读状态都重新打开库、解析 schema，各模块的重放线程原先大半时间在抢这把进程级的锁；关掉后 debug 下整个重放从约 110 s 降到约 35 s（2026-10-21，空闲时三次中位数），比较的内容不变。在这之后改用 release 构建只能再省约 7 s，线程数 4 也比 2 或 8 快，所以都没有改。
+
+新基准和 Python 固定期望都录在导入按 tag 后缀建作品（#296）之前。重放时设上只供测试的环境变量 `ILLUSTASH_TEST_NO_IMPORT_WORKS`（`baseline.rs` 在启动核心时设，`tests/fixed_expectations.py` 加载时设），导入照旧规则走，录下的期望不改（用户 2026-11-12 定）；产品从不设置它。所以对照测试不覆盖导入建作品，这一段由 `crates/core` 的 `character_import` 单元测试（「不是作品」清单）和 `native/terms` 的 `app_create`（新图库从索引导入角色时建作品）、`app_recognition`（WD 结果按 tag 后缀归作品）测试负责。
 
 HTTP 测试共用 `tests/test_read_http.py` 的端口、等待和进程清理工具；多种原生测试借用 `tests/test_native_lifecycle.py` 的建包与宿主方法，worker 启动与进程存在性工具在 `tests/native_worker_fixture.py`。测试对宿主的 HTTP 请求统一经 `tools/verify_read_http.py` 的 `fetch`：每个请求一条短连接，读完响应后以 RST 关闭，本机不留 TIME_WAIT。逐个正常关闭时，并行全套约 1.5 万个连接会在 Windows 上耗尽默认的 16,384 个临时端口（#140）。新增大量请求或轮询时沿用 `fetch`，不要另起逐次关闭的客户端；只有验证连接本身行为（半包、卡住、慢读）的测试才自建 socket。修改这些共享方法须检查实际使用它们的测试类，别只看定义文件。提取 helper 时避免把带 `test_*` 方法的 `TestCase` 作为模块级别名留给 discover；`__module__` 还可能参与固定录制的定位，移动前须核对。
 
@@ -123,7 +129,7 @@ PR 应明确区分“当前 head 上完整执行退出 0”和“当前候选仅
 
 **开发会话**：做完定向检查和平台相关验收（Windows 定向构建与测试、虚拟机走查、浏览器走查），在 PR 描述里写明结果和检查级别（界面 / 普通代码 / 数据层 / 只改文档），转为 Ready 并写「待集成」。不跑本机全量，不合并。
 
-改了 Rust 代码的 PR，转 Ready 之前先对改过的 Cargo 项目跑格式和 clippy（2026-10-19 用户定，#240；起因是第 11 批全量因为一个 PR 没过 `cargo fmt --check` 白跑一次）。参数与 `tools/check_all.sh` 相同：`crates/core`、`crates/platform`、`native/terms` 跑 `cargo fmt --manifest-path <项目>/Cargo.toml --check`；`crates/core`、`crates/platform`、`desktop` 跑 `cargo clippy --locked --manifest-path <项目>/Cargo.toml --all-targets -- -D warnings`，`native/terms` 在 `--all-targets` 后面再加 `--all-features`。clippy 经 `collab_run.py bg` 运行。之后合了最新 main 或又改了代码，要重跑。PR 描述写明在哪个 head 上跑的、结果如何。前后叠着的 PR（例如同一件事拆成几块）在描述里写明顺序。
+改了 Rust 代码的 PR，转 Ready 之前先对改过的 Cargo 项目跑格式和 clippy（2026-10-19 用户定，#240；起因是第 11 批全量因为一个 PR 没过 `cargo fmt --check` 白跑一次）。参数与 `tools/check_all.sh` 相同：`crates/core`、`crates/platform`、`crates/iqdb`、`native/terms` 跑 `cargo fmt --manifest-path <项目>/Cargo.toml --check`；`crates/core`、`crates/platform`、`crates/iqdb`、`desktop` 跑 `cargo clippy --locked --manifest-path <项目>/Cargo.toml --all-targets -- -D warnings`，`native/terms` 在 `--all-targets` 后面再加 `--all-features`。clippy 经 `collab_run.py bg` 运行。之后合了最新 main 或又改了代码，要重跑。PR 描述写明在哪个 head 上跑的、结果如何。前后叠着的 PR（例如同一件事拆成几块）在描述里写明顺序。
 
 **集成会话**，每一批：
 
@@ -156,3 +162,39 @@ PR 应明确区分“当前 head 上完整执行退出 0”和“当前候选仅
 - 验收结果按平台写在 Issue 或 PR 里，注明这是虚拟机，以及构建的提交和安装包的哈希。
 
 **做不了的**：iCloud 照片（虚拟机没登录 Apple 账户）；性能和识别速度（虚拟机里的数字没有参考价值）；Windows（Apple 芯片上只能跑 ARM 版 Windows，和用户的 x64 环境不同，Windows 仍在 x64 验收机上做）。
+
+## Windows 验收（常驻检出）
+
+2026-11-12 起（#240），Windows 验收机上的定向检查和完整 Windows 检查都在同一个常驻检出里增量编译，不再每次新建目录冷编译、跑完删掉。验收机经本机的 SSH 别名访问，主机名、IP 和 SSH 配置不写进仓库。
+
+**布局**：验收机上的 `D:\illustash-build\persistent\`。`src` 是 git 检出（本地分支 `win-acceptance`）；`sccache` 是编译缓存；`runs\<run-id>\` 放每次的步骤日志、`status.txt` 和 sccache 统计；`tools\` 放入口脚本（`run.cmd`、`run.ps1`、`pyrun.py`、`clean.ps1`）和 sccache。入口脚本和本机这一侧的驱动脚本 `win_run.sh` 都不进仓库，因为里面有 SSH 别名。
+
+**一次运行**：
+- 仓库是私有的，验收机没有 GitHub 凭据。本机打一个以验收机当前 HEAD 为基的增量 git bundle，经 scp 送过去。验收机 `git fetch` 以后 checkout 到 `win-acceptance`，再 `git clean -ffdx`，只保留 5 个 Cargo 项目的 `target`。各项目用仓库内默认的 target，不设 `CARGO_TARGET_DIR`。不用 detached HEAD，原因见 #327。
+- 环境只在 `run.cmd` 里设置：vcvars、`RUSTC_WRAPPER`（sccache）、`ILLUSTASH_*`。不改验收机的全局配置。`.cargo/config.toml` 的 crt-static 照常生效。
+- 完整检查的 14 步：core、platform、terms、desktop 的 clippy，core、platform、desktop、terms、iqdb 的 test，js，terms、examples、iqdb 的 release 构建，Python 全套。也可以只跑其中几步，或者另加定向 unittest。
+- 长任务经 WMI 启动，SSH 断开或本机休眠都不会中断。本机用 `collab_run.py run --slot windows -- win_run.sh …` 包住，轮询 `status.txt`，直到出现 `done`。
+
+**清理规则**（2026-11-12 定）：入口脚本每次同步之后检查下面三条，命中任一条就清掉 5 个项目的 target（检出保留）：
+
+- `rustc -V` 和上次记录的不同；
+- 所有 target 合计超过 40 GB（一次完整构建约 14.5 GB）；
+- D 盘剩余空间低于 30 GB。
+
+Cargo.lock 变了不清，交给增量编译处理。sccache 上限 20 GB，超了自动淘汰最旧的。手动全清（target 和 sccache 缓存）在验收机上运行 `powershell -NoProfile -ExecutionPolicy Bypass -File D:\illustash-build\persistent\tools\clean.ps1`，加 `-TargetsOnly` 时只清 target。需要隔离的特殊验收（打包、安装）仍可以临时建一个一次性目录，用完删掉。
+
+**耗时**（2026-11-12，head `687bb63`，完整 14 步，`CARGO_BUILD_JOBS=4`，单次）：
+
+| 情况 | 墙钟 |
+|---|---|
+| 冷编译（target、sccache 都是空的） | 15 分 46 秒 |
+| 同一 head 重跑 | 5 分 59 秒 |
+| 换到改了 native/terms 一处的 head | 7 分 34 秒 |
+| target 被清掉、sccache 是热的（命中 89%） | 10 分 18 秒 |
+
+重跑的下限主要是测试执行：terms 测试约 2 分 10 秒，Python 全套约 2 分 20 秒。#327 修好之前，普通检出里每次 cargo 调用都会重编 terms，重跑和小改动各因此多约 1 分钟。各步的详细数字见 #240。
+
+**注意**：
+- cmd 和 Windows PowerShell 5.1 按系统代码页（GBK）读没有 BOM 的脚本，UTF-8 中文注释可能吞掉换行：`.cmd` 只写 ASCII，`.ps1` 要带 UTF-8 BOM。
+- PowerShell 变量名不分大小写，循环变量会覆盖同名的大写变量。WMI 启动的进程，工作目录在系统目录下，脚本里一律用绝对路径。
+- 回传的输出里有 GBK 字节，用 `grep -a` 判断。验收机没装 rustfmt，fmt 在本机跑。

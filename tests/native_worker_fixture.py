@@ -1,4 +1,4 @@
-"""Explicit Python fixture launchers; production workers remain external executables."""
+"""显式的 Python 夹具启动器；生产环境的 worker 仍是外部可执行文件。"""
 import os
 from pathlib import Path
 import sys

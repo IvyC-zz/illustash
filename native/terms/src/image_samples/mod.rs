@@ -1,5 +1,3 @@
-//! Old-Pillow-equivalent sample decoders shared by relation comparison (#152)
-//! and, once it lands, pixel-hash provenance (#153).
-#![cfg_attr(not(test), deny(clippy::unwrap_used))]
+//! 与旧版 Pillow 等价的采样解码器，由关系比较（#152）和像素哈希溯源（#153）共用。
 pub(crate) mod pnm;
 pub(crate) mod tiff_scalar;

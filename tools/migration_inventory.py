@@ -39,7 +39,7 @@ def source_files(root):
             if not path.is_file() or set(rel.parts) & EXCLUDE_DIRS or path.name in GENERATED or path.name in {'tests.rs', 'old_schema.sql'}:
                 continue
             if rel.as_posix() == 'native/terms/examples/read-http.rs':
-                continue  # Explicit test-read-host feature only; never a shipped entry.
+                continue  # 只在明确开启 test-read-host feature 时才有；从不是发布的入口。
             if path.parent.name == 'tools' and path.name not in PRODUCTION_TOOLS:
                 continue
             if path.suffix in EXTENSIONS:
@@ -84,7 +84,7 @@ def python_sites(source):
             if '__name__' in test and '__main__' in constants:
                 add(node, 'entrypoint', 'python-main', test)
             elif any(n in HTTP_SCOPES for n in scope(node).split('.')) or any(s.startswith('/api/') for s in constants):
-                # Names, limits and formatting may change; paths/actions and branch multiplicity define the boundary.
+                # 名称、限制和格式可以变；边界由路径/动作和分支个数界定。
                 add(node, 'http-branch', json.dumps(sorted(set(constants)), ensure_ascii=False), test)
                 if isinstance(node, ast.If) and node.orelse and not isinstance(node.orelse[0], ast.If):
                     add(node.orelse[0], 'http-branch', '<default>', 'else: ' + test)
@@ -133,13 +133,12 @@ def text_sites(source, suffix):
             sites.append({'line': number, 'scope': '<cli>', 'kind': 'cli-entry', 'key': text.strip(',"'), 'detail': text})
         anchor = sql_anchor(text)
         if not anchor and re.search(r'\.\s*(?:execute\w*|transaction\w*|commit|rollback|backup|pragma_update)\s*\(', text):
-            # A literal SELECT is a read; multiline/variable SQL remains an explicit audit boundary.
+            # 字面量 SELECT 算读取；多行或由变量拼成的 SQL 仍算明确的审计边界。
             if not re.search(r'"\s*(?:SELECT|PRAGMA\s+[^=]+")', text, re.I):
                 anchor = 'dynamic-or-wrapper'
         if anchor:
             sites.append({'line': number, 'scope': scope, 'kind': 'database-write', 'key': anchor, 'detail': text})
-        # Static page routes added after the baseline (/i18n.js, #173; the module folders /core/ and /ui/, #199)
-        # are listed as boundaries too.
+        # 基线之后新增的静态页面路由（/i18n.js，#173；模块文件夹 /core/ 和 /ui/，#199）也列为边界。
         routes = re.findall(r'"(/(?:api/[^" ]+|image|app\.[^" ]+|i18n\.js|favicon[^" ]*|core/|ui/))"', text)
         if routes or 'Backend::Forward' in text or re.search(r'\bforward\(', text):
             key = '|'.join(routes) if routes else '<forward>'
@@ -157,7 +156,7 @@ def scan(root):
         rel = path.relative_to(root).as_posix()
         text = path.read_text(encoding='utf-8')
         candidates = python_sites(text) if path.suffix == '.py' else text_sites(text, path.suffix)
-        # ccip.py: only its function-level database writes are production boundaries.
+        # ccip.py：只有函数里的数据库写入才算生产边界。
         if rel == 'tools/ccip.py':
             candidates = [s for s in candidates if s['kind'] == 'database-write' and s['scope'] != '<module>']
         if path.suffix == '.json':
@@ -165,7 +164,7 @@ def scan(root):
             commands = [c.get('runtimeExecutable', '<dynamic>') for c in config.get('configurations', [])] if rel.startswith('.claude/') else ['desktop-app']
             candidates = [{'line': 1, 'scope': '<config>', 'kind': 'entrypoint', 'key': command, 'detail': command} for command in commands]
         if rel != 'tools/ccip.py':
-            sources[rel] = hashlib.sha256(text.encode()).hexdigest()  # reporting only, never a gate
+            sources[rel] = hashlib.sha256(text.encode()).hexdigest()  # 只用于报告，从不作为门槛
         for site in sorted(candidates, key=lambda s: (s['line'], s['kind'])):
             sites.append({'path': rel, **site})
     return {'sources': sources, 'sites': sites}
@@ -193,7 +192,7 @@ def boundary_counts(sites):
 
 
 def recorded_boundaries(spec):
-    """Lossless dictionary references for repeated boundary keys; counts stay exact."""
+    """对重复的边界键用无损的字典引用；计数保持精确。"""
     keys = spec.get('boundary_keys', [])
     if not isinstance(keys, list) or not all(isinstance(k, str) for k in keys):
         raise ValueError('boundary_keys 必须是字符串列表')
@@ -266,11 +265,10 @@ def check(root, spec):
 
 
 def dump_spec(spec):
-    """Canonical bytes: each top-level key, and each entry of a top-level object or list, on its own compact line.
+    """规范的字节形式：每个顶层键，以及顶层对象或列表的每个条目，各占紧凑的一行。
 
-    Two branches that refresh different sources fingerprints then touch different lines and git merges them;
-    sources entries are also separated by a blank line, since git treats edits to adjacent lines as a conflict.
-    Key order is kept as written except sources, which is sorted like scan().
+    这样两个分支刷新不同的 sources 指纹时改的是不同的行，git 能合并；sources 的条目之间还隔一个空行，
+    因为 git 把相邻行的改动当作冲突。键的顺序保持原样，只有 sources 和 scan() 一样排序。
     """
     if isinstance(spec.get('sources'), dict):
         spec = {**spec, 'sources': dict(sorted(spec['sources'].items()))}

@@ -16,7 +16,7 @@ def records():
 
 def encode(v):
     if isinstance(v,np.ndarray):
-        # Memory order is part of the input: the old merge accumulated in it.
+        # 内存顺序也是输入的一部分：旧的 merge 按这个顺序累加。
         order=['F'] if v.flags.f_contiguous and not v.flags.c_contiguous else []
         return {'array_key':[v.dtype.str,list(v.shape),hashlib.sha256(v.tobytes()).hexdigest()]+order}
     if isinstance(v,np.generic):return v.item()
@@ -55,7 +55,7 @@ def restore(files,root):
         else:p.write_bytes(base64.b64decode(data['bytes']))
 
 def current_files(root):
-    """The input folder as recorded entries spell it (root as @FOLDER@)."""
+    """按录制条目的写法表示的输入文件夹（根目录写作 @FOLDER@）。"""
     result={}
     for p in root.rglob('*'):
         if not p.is_file() or p.name.endswith(('-wal','-shm','-journal')):continue
@@ -63,22 +63,21 @@ def current_files(root):
         if data.startswith(b'SQLite format'):
             with closing(sqlite3.connect(p)) as c, c:result[name]={'sql':'\n'.join(c.iterdump()).replace(str(root),'@FOLDER@')}
         else:
-            # Inputs written in text mode carry CRLF on Windows; the recording was made with LF.
+            # 在 Windows 上以文本模式写入的输入带 CRLF；录制时用的是 LF。
             try:result[name]={'text':data.decode().replace('\r\n','\n').replace(str(root),'@FOLDER@')}
             except UnicodeDecodeError:result[name]={'bytes':base64.b64encode(data).decode()}
     return result
 
 def legacy(test,root):
-    """The old index run's result on this input folder; its output files are restored into it.
-    Entries of one test are taken in call order; calls recorded under a throwaway test instance
-    (``runTest``) are told apart by their input files."""
+    """旧的索引运行在这个输入文件夹上的结果；它的输出文件还原到这个文件夹里。
+    同一个测试的条目按调用顺序取用；在临时测试实例（``runTest``）下录制的调用按输入文件区分。"""
     entries=records()['legacy'][test._testMethodName]
     if test._testMethodName=='runTest':
         now=current_files(root)
-        # Entries hold the folder after the run, which rewrites the character index and adds outputs;
-        # the plan, album map and features it only reads tell the inputs apart.
+        # 条目记录的是运行之后的文件夹，运行会改写角色索引并增加输出；
+        # 靠它只读取的 plan、album map 和特征来区分输入。
         decisive=lambda name:name in ('char-patch/plan.json','album-char-map.json','full-features.npy','full-manifest.csv')
-        # The Windows recording spells names with \\ and text inputs with CRLF.
+        # Windows 的录制里文件名用 \\，文本输入带 CRLF。
         same=lambda files:{name.replace('\\','/'):({'text':data['text'].replace('\r\n','\n')} if 'text' in data else data)
                            for name,data in files.items()}
         matches=[e for e in entries if all(same(e['files']).get(name)==data for name,data in now.items() if decisive(name))]

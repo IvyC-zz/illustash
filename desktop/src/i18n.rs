@@ -1,9 +1,8 @@
-//! The shell's interface language (#173, docs/WEB_V2.md「界面语言」): the app-wide setting in preferences.json
-//! beside libraries.json, and the tables of web/static/locales, compiled in by build.rs. `tr("中文原文")` translates
-//! the shell's own text (menu, pickers, startup errors); the start page gets i18n.js and the chosen table from
-//! `page_script`. The language is settled once per launch: a change in the settings shows in the shell the next time
-//! its window opens. `system` follows the system's preferred languages here, by i18n.js's rule, and the start page is
-//! told the result, so the menu, the pickers and the start page always agree.
+//! 外壳的界面语言（#173，docs/WEB_V2.md「界面语言」）：全 App 共用的设置在 libraries.json 旁边的
+//! preferences.json 里，译文表是 web/static/locales 里的那些，由 build.rs 编译进来。`tr("中文原文")` 翻译外壳
+//! 自己的文字（菜单、选择框、启动错误）；启动页从 `page_script` 拿到 i18n.js 和选中的那份表。语言每次启动定一次：
+//! 设置改了，外壳在下次打开窗口时才显示新语言。`system` 在这里按 i18n.js 的规则跟随系统首选语言，并把结果告诉
+//! 启动页，所以菜单、选择框和启动页始终一致。
 use std::sync::OnceLock;
 
 use serde_json::{Map, Value};
@@ -11,7 +10,7 @@ use serde_json::{Map, Value};
 include!(concat!(env!("OUT_DIR"), "/locales.rs"));
 
 const SYSTEM: &str = "system";
-/// Chinese is the source text: it has no table.
+/// 中文是原文：它没有译文表。
 const SOURCE: &str = "zh-CN";
 
 struct Locale {
@@ -20,7 +19,7 @@ struct Locale {
     table: Map<String, Value>,
 }
 
-/// The same rule as native/terms/src/app_preferences.rs: `en`, `ja`, `pt-BR`, the case of the file name.
+/// 规则与 native/terms/src/app_preferences.rs 相同：`en`、`ja`、`pt-BR`，大小写同文件名。
 fn valid_code(code: &str) -> bool {
     let mut parts = code.split('-');
     let primary = parts.next().unwrap_or("");
@@ -49,8 +48,7 @@ fn locales() -> &'static [Locale] {
     LOCALES_PARSED.get_or_init(|| parse(LOCALES))
 }
 
-/// The setting as the library page reads it: a missing, unreadable or hand-broken file, or a language whose table is
-/// gone, means `system`.
+/// 按图库页的读法读设置：文件缺失、读不了或被手动改坏，或者设置的语言已没有译文表，都算 `system`。
 fn preference(text: Option<&str>, codes: &[&str]) -> String {
     let value = text.and_then(|t| serde_json::from_str::<Value>(t).ok());
     match value.as_ref().and_then(|v| v.get("language")).and_then(Value::as_str) {
@@ -64,13 +62,13 @@ fn preference_file() -> Option<String> {
     std::fs::read_to_string(illustash_platform::app_paths::app_support(&home).join("preferences.json")).ok()
 }
 
-/// web/static/i18n.js's rule for `system`: the first wanted language that has a table, by its exact code, then by its
-/// primary language (en-GB → en); any Chinese is 简体中文; nothing matching is English when there is a table.
+/// web/static/i18n.js 对 `system` 的规则：取第一个有译文表的首选语言，先按完整代码匹配，再按主语言匹配
+/// （en-GB → en）；任何中文都算简体中文；都不匹配时，有英文表就用英文。
 fn resolve(preference: &str, wanted: &[String], codes: &[&str]) -> String {
     if preference == SOURCE || codes.contains(&preference) {
         return preference.into();
     }
-    // Like navigator.language when the system names none.
+    // 系统一个都没给出时，同 navigator.language。
     let fallback = ["zh".to_owned()];
     let wanted = if wanted.is_empty() { &fallback[..] } else { wanted };
     for tag in wanted.iter().map(|w| w.to_ascii_lowercase()) {
@@ -88,9 +86,9 @@ fn resolve(preference: &str, wanted: &[String], codes: &[&str]) -> String {
     if codes.contains(&"en") { "en".into() } else { SOURCE.into() }
 }
 
-/// The language the shell shows for this launch: `zh-CN` or a table's code.
+/// 外壳这次启动显示的语言：`zh-CN` 或某份译文表的代码。
 pub fn language() -> &'static str {
-    // Unit tests never read the person's settings or system; they see the Chinese the existing tests expect.
+    // 单元测试从不读用户的设置或系统；它们看到的是现有测试预期的中文。
     if cfg!(test) {
         return SOURCE;
     }
@@ -108,7 +106,7 @@ fn table() -> Option<&'static Map<String, Value>> {
 
 fn lookup<'a>(table: Option<&'a Map<String, Value>>, text: &'a str) -> &'a str {
     let entry = table.and_then(|t| t.get(text));
-    // Plural forms pick by {n} on the page; the shell has no counts, so it takes `other`.
+    // 复数形式在页面上按 {n} 选；外壳没有计数，所以取 `other`。
     let found = entry.and_then(|e| e.as_str().or_else(|| e.get("other").and_then(Value::as_str)));
     found.filter(|s| !s.is_empty()).unwrap_or(text)
 }
@@ -121,8 +119,8 @@ fn fill(text: &str, params: &[(&str, &dyn std::fmt::Display)]) -> String {
     out
 }
 
-/// The shell's text in the language of this launch; the Chinese itself when there is no translation. Always called
-/// with a literal, so tests/i18n.test.cjs can check it against the tables.
+/// 外壳的文字，用这次启动的语言；没有译文时就是中文本身。调用时总是传字面量，
+/// 这样 tests/i18n.test.cjs 才能拿它和译文表核对。
 pub fn tr(text: &str) -> String {
     lookup(table(), text).to_owned()
 }
@@ -132,8 +130,8 @@ pub fn tr_with(text: &str, params: &[(&str, &dyn std::fmt::Display)]) -> String 
     fill(lookup(table(), text), params)
 }
 
-/// The initialization script of the main window: on the shell's own start page only (never the library page on
-/// 127.0.0.1, which gets /i18n.js from the service), the three values /i18n.js starts with, for dist/i18n.js.
+/// 主窗口的初始化脚本：只用在外壳自己的启动页上（从不用在 127.0.0.1 上的图库页，它从服务取 /i18n.js），
+/// 给出 /i18n.js 开始时用的那三个值，供 dist/i18n.js 使用。
 pub fn page_script() -> String {
     script(language(), locales())
 }
@@ -154,7 +152,7 @@ fn script(language: &str, locales: &[Locale]) -> String {
     )
 }
 
-/// The system's preferred languages, most preferred first, as language tags (`zh-Hans-CN`, `en-US`).
+/// 系统的首选语言，最优先的在前，写成语言标签（`zh-Hans-CN`、`en-US`）。
 #[cfg(target_os = "macos")]
 fn system_languages() -> Vec<String> {
     use std::ffi::{c_char, c_void, CStr};
@@ -168,7 +166,7 @@ fn system_languages() -> Vec<String> {
         fn CFStringGetCString(string: Ref, buffer: *mut c_char, size: isize, encoding: u32) -> u8;
         fn CFRelease(value: Ref);
     }
-    // SAFETY: the copied array is owned here and released once; its strings are borrowed from it while it lives.
+    // SAFETY: 复制出的数组归这里所有，只释放一次；其中的字符串在数组存活期间从它借用。
     unsafe {
         let array = CFLocaleCopyPreferredLanguages();
         if array.is_null() {
@@ -195,7 +193,7 @@ fn system_languages() -> Vec<String> {
         fn GetUserPreferredUILanguages(flags: u32, count: *mut u32, buffer: *mut u16, size: *mut u32) -> i32;
     }
     let (mut count, mut size) = (0u32, 0u32);
-    // SAFETY: the first call only reports the size; the second fills a buffer of exactly that many UTF-16 units.
+    // SAFETY: 第一次调用只报告大小；第二次填充的缓冲区正好是那么多个 UTF-16 单元。
     unsafe {
         if GetUserPreferredUILanguages(MUI_LANGUAGE_NAME, &mut count, std::ptr::null_mut(), &mut size) == 0 || size == 0 {
             return Vec::new();
@@ -204,12 +202,12 @@ fn system_languages() -> Vec<String> {
         if GetUserPreferredUILanguages(MUI_LANGUAGE_NAME, &mut count, buffer.as_mut_ptr(), &mut size) == 0 {
             return Vec::new();
         }
-        // A list of NUL-terminated names, ended by an empty one.
+        // 一串以 NUL 结尾的名称，最后以一个空名称结束。
         buffer.split(|&u| u == 0).filter(|s| !s.is_empty()).map(String::from_utf16_lossy).collect()
     }
 }
 
-/// Elsewhere (Linux is frozen) the POSIX locale variables: `en_US.UTF-8` → `en-US`.
+/// 其他平台（Linux 已冻结）用 POSIX 的 locale 变量：`en_US.UTF-8` → `en-US`。
 #[cfg(not(any(target_os = "macos", windows)))]
 fn system_languages() -> Vec<String> {
     ["LC_ALL", "LC_MESSAGES", "LANG"]
@@ -238,7 +236,7 @@ mod tests {
         let parsed = parse(FILES);
         let found: Vec<(&str, &str)> = parsed.iter().map(|l| (l.code, l.name.as_str())).collect();
         assert_eq!(found, [("en", "English"), ("fr", "Français"), ("pt-BR", "pt-BR")]);
-        // The compiled-in tables are the page's: English at least, each with its name.
+        // 编译进来的是页面的译文表：至少有英文，每份都有名称。
         assert!(locales().iter().any(|l| l.code == "en" && l.name == "English"));
     }
 
@@ -279,7 +277,7 @@ mod tests {
         ] {
             assert_eq!(resolve(preference, &wanted(tags), &codes), expected, "{preference} {tags:?}");
         }
-        // Without English, a language nobody translated stays Chinese.
+        // 没有英文表时，没人翻译的语言保持中文。
         assert_eq!(resolve("system", &wanted(&["ja"]), &["fr"]), "zh-CN");
         assert_eq!(resolve("system", &wanted(&["ja"]), &[]), "zh-CN");
     }
@@ -295,12 +293,12 @@ mod tests {
         assert_eq!(lookup(None, "设置"), "设置");
         let error = "boom";
         assert_eq!(fill("无法启动（{path}）：{error}；{error}", &[("path", &"/x"), ("error", &error)]), "无法启动（/x）：boom；boom");
-        // Unit tests see the source text.
+        // 单元测试看到的是原文。
         assert_eq!(tr("刷新页面"), "刷新页面");
         assert_eq!(tr_with("无法启动本地服务（{path}）：{error}", &[("path", &"p"), ("error", &1)]), "无法启动本地服务（p）：1");
     }
 
-    /// Read-only: the platform call answers with language tags (a system always names at least one).
+    /// 只读：平台调用返回语言标签（系统总会给出至少一个）。
     #[cfg(any(target_os = "macos", windows))]
     #[test]
     fn the_system_names_its_languages() {

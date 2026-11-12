@@ -1,4 +1,4 @@
-"""Synthetic negative manifests verify architecture enforcement, including aliases/cfg/dev/build."""
+"""用合成的反例清单验证架构约束确实生效，包括 aliases/cfg/dev/build。"""
 from pathlib import Path
 import shutil
 import tempfile

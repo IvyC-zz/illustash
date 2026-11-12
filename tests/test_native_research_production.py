@@ -1,9 +1,8 @@
-"""#151 installed adapter and existing App lifecycle, on owned synthetic packages only.
+"""#151 安装后的适配器和现有的 App 生命周期，只用测试自己的合成图库包。
 
-No binary builds/discovery: an explicit candidate host supplies its sibling worker (or
-ILLUSTASH_RESEARCH_ADAPTER_BIN). macOS direct tests run the installed native adapter with
-no Python configuration. Timing tests use the existing #146 fixture launcher/process-tree
-checks around responses produced by that actual adapter, never a mocked calculator.
+不构建也不查找二进制：由显式指定的候选宿主提供它旁边的 worker（或 ILLUSTASH_RESEARCH_ADAPTER_BIN）。
+macOS 的直接测试在不配置 Python 的情况下运行安装后的原生适配器。计时测试沿用现有 #146 夹具的启动器/进程树
+检查，围绕这个真实适配器产出的响应进行，从不 mock 计算程序。
 """
 import json
 import os
@@ -27,7 +26,7 @@ from tests.native_worker_fixture import command as fixture_command, exists as pr
 from tests.fixed_expectations import unclocked
 from tests.test_read_http import wait_until
 
-# Research limits in these tests. Product default is 30 minutes; neither value changes it.
+# 这些测试里的研究时限。产品默认值是 30 分钟；这两个值都不改变它。
 WIDE_TIMEOUT_MS = '120000'
 STALL_TIMEOUT_MS = '3000'
 
@@ -85,8 +84,7 @@ class RecognitionTransitionRoutingTest(unittest.TestCase):
             request, output = root / 'request.json', root / 'response.json'
             request.write_text(json.dumps(dict(format='illustash-recognition/1', identity=dict(synthetic=True),
                                                assets=[], output=str(root / 'result'))), encoding='utf-8')
-            # On macOS/Windows the native negative case sees only nonexistent resources
-            # below this owned root; no real model or installation is accessed.
+            # 在 macOS/Windows 上，原生的反例只看到这个测试自有根目录下不存在的资源；不访问真实的模型或安装。
             env = os.environ | dict(PATH='', ILLUSTASH_ROOT=str(root), ILLUSTASH_MODELS=str(root / 'absent-models'))
             env.pop('ILLUSTASH_WORKER_PYTHON', None)
             result = subprocess.run([str(worker), str(request), str(output)], env=env,
@@ -98,10 +96,10 @@ class RecognitionTransitionRoutingTest(unittest.TestCase):
 
 
 class RecognitionTransitionReceiptTest(unittest.TestCase):
-    """Actual App receipt of #146 synthetic v1 protocol fixtures, never model inference.
+    """App 真实接收 #146 的合成 v1 协议夹具，从不做模型推理。
 
-    Only a generated folder/PNG and model fingerprint placeholder bytes are used.
-    NativeSyncTest's worker helper is reused; its Photos setup is never invoked.
+    只用生成的文件夹/PNG 和模型指纹的占位字节。
+    复用 NativeSyncTest 的 worker 辅助函数；从不调用它的照片图库准备步骤。
     """
     setUpClass = InstalledResearchComputeTest.__dict__['setUpClass']
     _fixture_setup = folder_fixture.NativeFolderHTTPTest._fixture_setup
@@ -195,11 +193,11 @@ class NativeResearchPublicationTest(unittest.TestCase):
         self.stop(self.process)
         self.worker = self.bin / ('illustash-research.exe' if os.name == 'nt' else 'illustash-research')
         shutil.copy2(self.candidate_worker, self.worker)
-        # A limit far beyond any real compute here, even on a busy machine: the tests wait for results with
-        # their own bounds, and only the timeout case below sets a short one (#219).
+        # 时限远超这里任何真实计算所需，即使机器繁忙也是如此：
+        # 测试用自己的上限等结果，只有下面的超时用例设短时限（#219）。
         self.env.update(ILLUSTASH_RESEARCH_WORKER=str(self.worker), ILLUSTASH_RESEARCH_TIMEOUT_MS=WIDE_TIMEOUT_MS)
         self.env.pop('ILLUSTASH_WORKER_PYTHON', None)
-        # Keep the #151 base fixture learning-only; #152 extends it below.
+        # #151 的基础夹具只做学习；#152 在下面扩展它。
         with sqlite3.connect(self.lib.source) as c:
             c.execute('CREATE TABLE IF NOT EXISTS embeddings(uuid TEXT,model TEXT,vec BLOB,PRIMARY KEY(uuid,model))')
             for i in range(9):
@@ -209,7 +207,7 @@ class NativeResearchPublicationTest(unittest.TestCase):
                 c.execute('INSERT INTO assets VALUES (?,?,?,?,?,?,?,?,?)',
                           (ident, ident + '.png', str(self.lib.path / (ident + '.png')), 120, 150, '2026-10-04', 'orig', 1, 0))
                 c.execute("INSERT INTO embeddings VALUES (?,'ccip',?)", (ident, vector.tobytes()))
-        # The package as the former Python Store refreshed and confirmed it (recorded, tests/fixed_expectations.py).
+        # 原 Python Store 刷新并确认之后的图库包（录制，tests/fixed_expectations.py）。
         self.lib = self.rec.package('prepared', self.lib.path)
         self.entity = self.rec.value('entity')
         self.restart()
@@ -231,15 +229,14 @@ class NativeResearchPublicationTest(unittest.TestCase):
             return {table: c.execute('SELECT * FROM ' + table + ' ORDER BY 1').fetchall() for table in tables}
 
     def timing_fixture(self):
-        # Hold a real native response before App observes worker exit. This permits
-        # deterministic cancellation/fingerprint/replay tests without production delay flags.
+        # 在 App 看到 worker 退出之前扣住一个真实的原生响应。这样不需要生产环境的延迟开关，
+        # 就能做确定性的取消/指纹/重放测试。
         self.stop(self.process)
         self.mode, self.ready, self.release = (self.root / name for name in ('mode', 'ready', 'release'))
         self.saved = self.root / 'native-response.json'
         self.pid, self.child = self.root / 'fixture.pid', self.root / 'fixture-child.pid'
-        # Opening a package can start its own startup task. Let that real native
-        # task finish before holding an explicitly requested regroup, so deleting
-        # markers cannot erase the ready signal of an already running startup task.
+        # 打开图库包可能会启动它自己的启动任务。先让这个真实的原生任务完成，再扣住显式请求的 regroup，
+        # 免得删除标记文件时抹掉已在运行的启动任务的就绪信号。
         self.mode.write_text('pass')
         bridge = self.root / 'research-timing-fixture'
         bridge.write_text('#!' + sys.executable + '\n' + f'''import json,os,sys,subprocess,time
@@ -272,7 +269,7 @@ child.terminate();child.wait()
         for path in (self.ready, self.release, self.pid, self.child):
             path.unlink(missing_ok=True)
         self.assertEqual(self.request('/api/regroup', {})['body'], b'{"started": true}')
-        # The ready file follows a real research compute, which a busy machine can slow well past 5 s.
+        # 就绪文件要等一次真实的研究计算完成，繁忙的机器可能让它远超 5 秒。
         wait_until(self.ready.exists, timeout=30)
         self.assertTrue(self.saved.exists())
         return int(self.pid.read_text()), int(self.child.read_text())
@@ -288,7 +285,7 @@ child.terminate();child.wait()
                 return False
         for pid in pids:
             wait_until(lambda: not pid_exists(pid), timeout=5)
-        # Also retain #146's worker-group check on POSIX.
+        # 在 POSIX 上也保留 #146 的 worker 进程组检查。
         self.assertFalse(process_exists(pids[0]))
 
     def test_installed_startup_regroup_oc_original_body_and_repeat_preserve_history(self):
@@ -306,7 +303,7 @@ child.terminate();child.wait()
         self.assertFalse(self.sentinel.exists())
 
     def test_inflight_human_change_rejects_old_snapshot_then_retries(self):
-        # #194: the stale result is never published; the task retries on a new snapshot by itself.
+        # #194：过期的结果绝不发布；任务自行在新快照上重试。
         self.timing_fixture()
         before = self.rows(['prototypes', 'proto_claims', 'clusters', 'cluster_info'])
         pids = self.held()
@@ -324,7 +321,7 @@ child.terminate();child.wait()
         self.assertEqual(self.rows(['actions', 'assertions']), human)
 
     def human_input_change(self):
-        # A tag also writes history (actions), which learning reads; #29 limits each kind to what it reads.
+        # 打标签也会写历史（actions），而学习会读它；#29 让每种任务只看自己读的内容。
         self.assertEqual(self.request('/api/tag', {'ids': ['a'], 'tag': '合成旧快照'})['status'], 200)
 
     def test_cancel_timeout_and_retry_use_existing_process_tree_contract(self):
@@ -342,8 +339,8 @@ child.terminate();child.wait()
         self.assertEqual(self.state()['status'], 'idle')
         self.assertEqual(self.rows(list(before)), before)
         self.stop(self.process)
-        # The timeout must not depend on how fast a real compute runs (#219): the stalled tree it stops
-        # needs only an interpreter start and a spawn inside the window.
+        # 超时不能取决于真实计算有多快（#219）：被它停下的卡住进程树，
+        # 只需要在窗口内完成一次解释器启动和一次 spawn。
         self.env['ILLUSTASH_RESEARCH_TIMEOUT_MS'] = STALL_TIMEOUT_MS
         self.mode.write_text('stall')
         for path in (self.ready, self.pid, self.child):
@@ -375,7 +372,7 @@ child.terminate();child.wait()
         self.child.unlink(missing_ok=True)
         self.assertEqual(self.request('/api/libraries/open', {'path': str(self.lib.path)})['status'], 200)
         self.token = json.loads(self.request('/api/bootstrap')['body'])['token']
-        # Opening the old package can resume its pending intent. Await/hold that owned task.
+        # 打开旧图库包可能会恢复它待处理的意图。等待并扣住这个自有任务。
         self.request('/api/regroup', {})
         wait_until(self.ready.exists, timeout=30)
         pids = int(self.pid.read_text()), int(self.child.read_text())
@@ -400,8 +397,7 @@ child.terminate();child.wait()
         tables = ['prototypes', 'learn_state', 'proto_claims', 'weak_claims',
                   'clusters', 'cluster_info', 'actions', 'assertions', 'memberships']
         before = self.rows(tables)
-        # Reembedding all confirmed seeds onto the unmatched direction changes both
-        # the actual prototype and its machine claims. Keep the human inputs intact.
+        # 把所有已确认的种子重新嵌入到未匹配的方向上，会同时改变真实的原型和它的机器认领。人工输入保持不变。
         vector = np.zeros(768, np.float32)
         vector[1] = 1
         with sqlite3.connect(self.lib.source) as c:
@@ -431,7 +427,7 @@ child.terminate();child.wait()
             self.assertEqual(after[table], before[table], table)
         self.assertEqual([row for row in after['memberships'] if row[2] != 'machine'],
                          [row for row in before['memberships'] if row[2] != 'machine'])
-        # Successful retry must materialize the three new PROTO machine memberships.
+        # 重试成功后，必须落实三条新的 PROTO 机器归属。
         self.assertEqual({(row[0], row[1], row[3], row[5]) for row in after['memberships']
                           if row[2] == 'machine' and row[4] == 'PROTO'},
                          {(ident, self.entity, 'machine', 1.0)
@@ -445,14 +441,14 @@ child.terminate();child.wait()
 
 @unittest.skipUnless(sys.platform in ('darwin', 'win32'), 'Linux is frozen: no local computation')
 class InstalledRelationSnapshotTest(relations.NativeSimilarSnapshotTest):
-    """Same independent cache/precision reference through the actual installed adapter."""
+    """同一个独立的缓存/精度参照，经真实的安装后适配器运行。"""
     setUpClass = InstalledResearchComputeTest.__dict__['setUpClass']
 
     def setUp(self):
         super().setUp()
         self.binary = self.root / ('illustash-research.exe' if os.name == 'nt' else 'illustash-research')
         shutil.copy2(self.candidate_worker, self.binary)
-        # The parent request uses an empty PATH; forbid a configured Python too.
+        # 父请求用空 PATH；同时禁止配置好的 Python。
         scoped = unittest.mock.patch.dict(os.environ)
         scoped.start()
         self.addCleanup(scoped.stop)
@@ -461,15 +457,14 @@ class InstalledRelationSnapshotTest(relations.NativeSimilarSnapshotTest):
 
 @unittest.skipUnless(sys.platform in ('darwin', 'win32'), 'Linux is frozen: no local computation')
 class NativeRelationPublicationTest(NativeResearchPublicationTest):
-    """Mixed startup plus direct similar uses existing App atomic/lifecycle tests."""
+    """启动任务加直接 similar 的混合情形，沿用现有的 App 原子性/生命周期测试。"""
     def setUp(self):
         super().setUp()
         self.stop(self.process)
         with sqlite3.connect(self.lib.source) as c:
             for (ident,) in c.execute('SELECT uuid FROM assets').fetchall():
                 path = self.root / (ident + '.png')
-                # Identical textured images hit original early equality, keeping
-                # lifecycle tests quick without substituting a fake calculator.
+                # 纹理相同的图片命中原有的提前相等判断，让生命周期测试跑得快，而不用拿假的计算程序替代。
                 y,x=np.mgrid[:59,:87]
                 pixels=np.stack(((x*7+y*3)%256,(x*11+y*17)%256,(x*23+y*13)%256),axis=2).astype(np.uint8)
                 Image.fromarray(pixels).save(path)
@@ -493,8 +488,7 @@ class NativeRelationPublicationTest(NativeResearchPublicationTest):
 
     def timing_fixture(self):
         super().timing_fixture()
-        # Force a genuinely changed image result after the startup pass, before
-        # each inherited test captures its formal before-state.
+        # 启动那一轮之后、每个继承来的测试记录正式的修改前状态之前，强制产生一个真正改变了的图片结果。
         with sqlite3.connect(self.lib.db) as c:
             c.execute("DELETE FROM image_sigs WHERE uuid='seed0'")
             c.execute("DELETE FROM relations WHERE a='seed0' OR b='seed0'")
@@ -504,14 +498,14 @@ class NativeRelationPublicationTest(NativeResearchPublicationTest):
         before=self.rows(['image_sigs','relations'])
         pids=super().held()
         response=json.loads(self.saved.read_text(encoding='utf-8'))
-        # #31: App asks for change lists; the removed signature and its relations come back as appended rows.
+        # #31：App 请求变更列表；删掉的签名及其关系作为追加的行回来。
         self.assertIn('seed0',[r[0] for r in response['tables']['image_sigs']['append']])
         self.assertTrue(any('seed0' in r[:2] for r in response['tables']['relations']['append']))
         self.assertEqual(response['tables']['image_sigs']['delete'],[])
         return pids
 
     def human_input_change(self):
-        # Similar reads exclusions, not tags (#29): a human exclusion is the in-flight input change.
+        # similar 读排除，不读标签（#29）：人工排除就是计算期间的输入变化。
         response=self.request('/api/curate',{'ids':['a'],'action':'exclude'})
         self.assertEqual(response['status'],200,response)
 
@@ -542,7 +536,7 @@ class NativeRelationPublicationTest(NativeResearchPublicationTest):
         self.assertFalse(self.sentinel.exists())
 
     def test_unchanged_and_small_results_write_only_changed_cache_rows(self):
-        # #31: an unchanged result writes no similarity cache row; a picture computed again writes only its rows.
+        # #31：结果没变时不写相似度缓存行；重新计算的图片只写它自己的行。
         tables=('image_sigs','relations','similar_paired','similar_retry')
         self.stop(self.process)
         with sqlite3.connect(self.lib.db) as c:
@@ -575,7 +569,7 @@ class NativeRelationPublicationTest(NativeResearchPublicationTest):
         after=ordered()
         mine=lambda t,row:'seed0' in (row[:2] if t in ('relations','similar_retry') else row[:1])
         for table in tables:
-            # Other rows stay in place; the picture's rows are appended as the full replacement ordered them.
+            # 其他行留在原位；这张图片的行按完整替换时的顺序追加。
             self.assertEqual([r for r in after[table] if not mine(table,r)],kept[table],table)
             self.assertEqual(after[table][len(kept[table]):],[r for r in after[table] if mine(table,r)],table)
         self.assertEqual(after['image_sigs'],kept['image_sigs']+[r for r in before['image_sigs'] if r[0]=='seed0'])

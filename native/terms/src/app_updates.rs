@@ -1,13 +1,11 @@
-//! Update check, tier A (#191, decided in #165): ask GitHub for the newest Release, compare it with this build's
-//! version (native/terms/application.json) and let the page link to the Release page; nothing is downloaded or
-//! replaced. Network rules as everywhere else: automatic checks are off until the person allows them (asked once by
-//! the new-library guide, changeable in 设置 › 网络与隐私); once allowed, the app checks at each launch and again
-//! whenever a day has passed while it stays open (user 2026-10-18: a Mac app may run for weeks). A manual check is
-//! the person's click.
-//! The request is a plain HTTPS GET of the public releases list: no account, no library information.
+//! 检查更新 A 档（#191，在 #165 中决定）：向 GitHub 查询最新的 Release，与本构建的版本（native/terms/application.json）
+//! 比较，并让页面链接到 Release 页面；不下载也不替换任何东西。联网规则与其他地方相同：自动检查在用户允许之前一直关闭
+//! （新图库的首次引导问一次，可在「设置 › 网络与隐私」中更改）；允许后，App 每次启动时检查一次，一直开着时每过一天
+//! 再检查一次（用户 2026-10-18：Mac 上的 App 可能一开就是几周）。手动检查就是用户的点击。
+//! 请求是对公开 Release 列表的普通 HTTPS GET：不带账号，也不带图库信息。
 //!
-//! App-wide like the interface language: the choice lives in preferences.json (`update_check`: `"auto"` or
-//! `"manual"`, absent until asked); the last result in updates.json beside it.
+//! 和界面语言一样是全应用范围的：选择存在 preferences.json 里（`update_check`：`"auto"` 或 `"manual"`，
+//! 问过之前没有这个键）；最近一次结果存在旁边的 updates.json。
 use crate::{
     app_paths::{app_support, user_home},
     http_json::Json,
@@ -25,14 +23,14 @@ use std::{
 
 const REPOSITORY: &str = "shio-vinyl/illustash";
 const API: &str = "https://api.github.com/";
-/// Whether this launch (this host process) has made its automatic check; every page that opens asks, one checks.
+/// 本次启动（这个宿主进程）是否已做过自动检查；每个打开的页面都会问，只有一个去检查。
 static LAUNCH_CHECKED: AtomicBool = AtomicBool::new(false);
-/// While the app stays open, automatic checks repeat after this many seconds.
+/// App 一直开着时，自动检查每隔这么多秒重复一次。
 const DAY: i64 = 24 * 60 * 60;
-/// The releases list is small; anything larger is not GitHub's answer.
+/// Release 列表很小；更大的内容不会是 GitHub 的回复。
 const LIMIT: u64 = 2_000_000;
 
-/// SemVer 2.0.0 precedence without build metadata (tools/version.py writes the same grammar).
+/// 不含构建元数据的 SemVer 2.0.0 优先级（tools/version.py 写出的是同样的语法）。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Version {
     core: [u64; 3],
@@ -114,8 +112,8 @@ impl std::fmt::Display for Version {
     }
 }
 
-/// The newest release worth offering to a build at `current`: no drafts; prereleases (by GitHub's flag or a
-/// `-beta.1` tag) only to someone already on a prerelease. Tags are `vX.Y.Z`; others are ignored.
+/// 值得提供给 `current` 版本构建的最新 Release：不要草稿；预发布版（按 GitHub 的标记或 `-beta.1` 这类 tag）
+/// 只提供给已经在用预发布版的人。tag 的格式是 `vX.Y.Z`；其他的忽略。
 pub(crate) fn newest(releases: &Value, current: &Version) -> Option<Version> {
     releases
         .as_array()?
@@ -129,7 +127,7 @@ pub(crate) fn newest(releases: &Value, current: &Version) -> Option<Version> {
         .max()
 }
 
-/// The Release page for a version, built here rather than taken from the reply: the page only ever opens this site.
+/// 某个版本的 Release 页面，在这里拼出来而不取自回复：页面只会打开这个网站。
 pub(crate) fn page(version: &Version) -> String {
     format!("https://github.com/{REPOSITORY}/releases/tag/v{version}")
 }
@@ -151,7 +149,7 @@ pub(crate) fn read(file: &Path) -> Map<String, Value> {
         })
         .unwrap_or_default()
 }
-/// Read-modify-write under the same lock and rename as libraries.json; other keys are kept.
+/// 读-改-写，使用与 libraries.json 相同的锁和改名方式；其他键保留。
 pub(crate) fn update(file: &Path, change: impl FnOnce(&mut Map<String, Value>)) -> Result<()> {
     crate::app_libraries::registry_locked(file, || {
         let mut fields = read(file);
@@ -168,7 +166,7 @@ pub(crate) fn update(file: &Path, change: impl FnOnce(&mut Map<String, Value>)) 
     })
 }
 
-/// Where the state lives and what time it is: real files and the clock in the app, a fixture in tests.
+/// 状态存在哪里、现在几点：App 里是真实文件和时钟，测试里是夹具。
 struct Place<'a> {
     preferences: PathBuf,
     state: PathBuf,
@@ -187,7 +185,7 @@ impl Place<'static> {
     }
 }
 impl Place<'_> {
-    /// `Some(true)` automatic, `Some(false)` only by hand, `None` never asked.
+    /// `Some(true)` 自动，`Some(false)` 只手动，`None` 从没问过。
     fn auto(&self) -> Option<bool> {
         match read(&self.preferences).get("update_check").and_then(Value::as_str) {
             Some("auto") => Some(true),
@@ -195,18 +193,18 @@ impl Place<'_> {
             _ => None,
         }
     }
-    /// A day since the last check, by any launch; a clock set back also counts, rather than blocking checks for good.
+    /// 距上次检查（不论哪次启动做的）已过一天；时钟被调回也算，而不是永远挡住检查。
     fn stale(&self) -> bool {
         let state = read(&self.state);
         let at =
             state.get("checked_at").and_then(Value::as_str).and_then(|t| chrono::DateTime::parse_from_rfc3339(t).ok());
         at.is_none_or(|at| !(0..DAY).contains(&(self.now - at).num_seconds()))
     }
-    /// Allowed, and either not yet checked in this launch or a day has passed.
+    /// 已允许，并且本次启动还没检查过或已过了一天。
     fn due(&self) -> bool {
         self.auto() == Some(true) && (!self.launch.load(Atomic::SeqCst) || self.stale())
     }
-    /// Takes the automatic check that is due: this launch's first (exactly one caller gets it), or the daily one.
+    /// 领取到期的自动检查：本次启动的第一次（只有一个调用方能拿到），或每天一次的那次。
     fn claim(&self) -> bool {
         self.auto() == Some(true)
             && (self.launch.compare_exchange(false, true, Atomic::SeqCst, Atomic::SeqCst).is_ok() || self.stale())
@@ -238,7 +236,7 @@ impl Place<'_> {
                     fields.insert("latest".into(), latest.map(|v| v.to_string()).into());
                     fields.remove("error");
                 }
-                // A failed check keeps the last known release.
+                // 检查失败时保留上次已知的 Release。
                 Err(message) => {
                     fields.insert("error".into(), message.into());
                 }
@@ -247,7 +245,7 @@ impl Place<'_> {
     }
 }
 
-/// The API root: GitHub, or a local test server named by ILLUSTASH_UPDATE_BASE (plain HTTP on this machine only).
+/// API 根地址：GitHub，或由 ILLUSTASH_UPDATE_BASE 指定的本地测试服务器（只限本机上的普通 HTTP）。
 fn base() -> std::result::Result<String, String> {
     let Ok(base) = std::env::var("ILLUSTASH_UPDATE_BASE") else { return Ok(API.into()) };
     let u = url::Url::parse(&base).map_err(|_| "合成服务地址无效".to_string())?;
@@ -264,7 +262,7 @@ fn base() -> std::result::Result<String, String> {
     Ok(base)
 }
 
-/// One GET of the releases list. Failures become a short message for the page, never an error dialog.
+/// 对 Release 列表的一次 GET。失败变成给页面的一句简短说明，绝不弹错误对话框。
 fn fetch(current: &Version) -> std::result::Result<Option<Version>, String> {
     let address = format!("{}repos/{REPOSITORY}/releases?per_page=30", base()?);
     let agent = ureq::AgentBuilder::new().redirects(0).timeout(Duration::from_secs(15)).build();
@@ -296,11 +294,11 @@ pub(crate) fn info() -> Result<Json> {
     Ok(Place::app()?.info(&current()))
 }
 
-/// POST /api/updates:
-/// - `{"action": "auto", "allow": true|false}` records the choice (the guide's question or the settings switch);
-/// - `{"action": "check"}` checks now (the person's click);
-/// - `{"action": "check", "auto": true}` checks only when allowed and not yet checked in this launch, else just answers;
-/// - `{"action": "dismiss"}` stops offering the newest known release (a newer one is offered again).
+/// POST /api/updates：
+/// - `{"action": "auto", "allow": true|false}` 记下选择（首次引导的提问或设置里的开关）；
+/// - `{"action": "check"}` 立即检查（用户的点击）；
+/// - `{"action": "check", "auto": true}` 只在已允许且本次启动还没检查过时检查，否则只回复；
+/// - `{"action": "dismiss"}` 不再提示已知的最新 Release（有更新的版本时会再次提示）。
 pub(crate) fn post(body: &Json) -> Result<Json> {
     post_at(&Place::app()?, body, &current(), fetch)
 }
@@ -371,7 +369,7 @@ mod tests {
             fs::create_dir(&path).unwrap();
             Self(path)
         }
-        /// The app at `now`, in the launch whose automatic check is `launch`.
+        /// `now` 时刻的 App，处在自动检查状态为 `launch` 的那次启动里。
         fn at<'a>(&self, now: &str, launch: &'a AtomicBool) -> Place<'a> {
             Place {
                 preferences: self.0.join("preferences.json"),
@@ -453,14 +451,14 @@ mod tests {
         let info = morning.info(&v("0.1.0"));
         assert_eq!(field(&info, "auto"), Value::Null);
         assert_eq!(field(&info, "due"), json!(false));
-        // Never asked, then declined: an automatic check answers without the network and uses up nothing.
+        // 从没问过，然后被拒绝：自动检查不联网就回复，也不消耗任何东西。
         post_at(&morning, &auto(), &v("0.1.0"), fetch).unwrap();
         post_at(&morning, &body(json!({"action": "auto", "allow": false})), &v("0.1.0"), fetch).unwrap();
         post_at(&morning, &auto(), &v("0.1.0"), fetch).unwrap();
         assert_eq!(calls.get(), 0);
         assert!(!fixture.0.join("updates.json").exists());
         assert!(!launch.load(Atomic::SeqCst));
-        // Allowed: this launch checks once, however many pages ask.
+        // 已允许：本次启动只检查一次，不管有多少页面来问。
         let info = post_at(&morning, &body(json!({"action": "auto", "allow": true})), &v("0.1.0"), fetch).unwrap();
         assert_eq!((field(&info, "auto"), field(&info, "due")), (json!(true), json!(true)));
         let info = post_at(&morning, &auto(), &v("0.1.0"), fetch).unwrap();
@@ -472,17 +470,17 @@ mod tests {
         let evening = fixture.at("2026-10-18T23:00:00+08:00", &launch);
         post_at(&evening, &auto(), &v("0.1.0"), fetch).unwrap();
         assert_eq!(calls.get(), 1);
-        // A manual check is the person's click: always.
+        // 手动检查就是用户的点击：总会检查。
         post_at(&evening, &body(json!({"action": "check"})), &v("0.1.0"), fetch).unwrap();
         assert_eq!(calls.get(), 2);
-        // The next launch checks again, even an hour later.
+        // 下一次启动会再检查，即使只过了一小时。
         let relaunch = AtomicBool::new(false);
         let next = fixture.at("2026-10-19T00:00:00+08:00", &relaunch);
         assert_eq!(field(&next.info(&v("0.1.0")), "due"), json!(true));
         post_at(&next, &auto(), &v("0.1.0"), fetch).unwrap();
         post_at(&next, &auto(), &v("0.1.0"), fetch).unwrap();
         assert_eq!(calls.get(), 3);
-        // Left open: once a day has passed since the last check.
+        // 一直开着：距上次检查过了一天时检查。
         let later = fixture.at("2026-10-19T23:59:59+08:00", &relaunch);
         assert_eq!(field(&later.info(&v("0.1.0")), "due"), json!(false));
         let day = fixture.at("2026-10-20T00:00:00+08:00", &relaunch);
@@ -490,14 +488,14 @@ mod tests {
         post_at(&day, &auto(), &v("0.1.0"), fetch).unwrap();
         post_at(&day, &auto(), &v("0.1.0"), fetch).unwrap();
         assert_eq!(calls.get(), 4);
-        // A clock set back counts as due rather than blocking checks for good.
+        // 时钟被调回算作到期，而不是永远挡住检查。
         assert_eq!(field(&fixture.at("2026-10-01T00:00:00+08:00", &relaunch).info(&v("0.1.0")), "due"), json!(true));
-        // Turned off again: nothing more, launch or day.
+        // 又关掉了：不再检查，不论是新启动还是过了一天。
         post_at(&day, &body(json!({"action": "auto", "allow": false})), &v("0.1.0"), fetch).unwrap();
         let fresh = AtomicBool::new(false);
         post_at(&fixture.at("2026-10-25T00:00:00+08:00", &fresh), &auto(), &v("0.1.0"), fetch).unwrap();
         assert_eq!(calls.get(), 4);
-        // The choice sits in preferences.json beside the language.
+        // 选择存在 preferences.json 里，和语言放在一起。
         let preferences: Value =
             serde_json::from_str(&fs::read_to_string(fixture.0.join("preferences.json")).unwrap()).unwrap();
         assert_eq!(preferences, json!({"update_check": "manual"}));
@@ -528,10 +526,10 @@ mod tests {
         assert_eq!((field(&info, "newer"), field(&info, "dismissed")), (json!(true), json!(true)));
         let info = post_at(&place, &check, &v("0.1.0"), |_| Ok(Some(v("0.2.1")))).unwrap();
         assert_eq!((field(&info, "error"), field(&info, "dismissed")), (Value::Null, json!(false)));
-        // Once installed, the same release is no longer newer.
+        // 安装之后，同一个 Release 就不再算更新。
         let info = place.info(&v("0.2.1"));
         assert_eq!((field(&info, "newer"), field(&info, "url")), (json!(false), Value::Null));
-        // No release at all is a successful answer, not a failure.
+        // 一个 Release 都没有是成功的回复，不是失败。
         let info = post_at(&place, &check, &v("0.1.0"), |_| Ok(None)).unwrap();
         assert_eq!((field(&info, "latest"), field(&info, "newer")), (Value::Null, json!(false)));
     }
