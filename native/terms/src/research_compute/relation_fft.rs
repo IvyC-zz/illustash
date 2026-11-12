@@ -39,6 +39,8 @@ pub(super) fn correlation(
     let mut a = zeroed(n)?;
     let mut b = zeroed(n)?;
     // Buffers are contiguous float32 pairs, exactly the wrapper's complex64 ABI.
+    // SAFETY: 上面已核对 `big`、`template` 的长度分别是 bh×bw、th×tw，且都严格小于填充尺寸 h×w；`a`、`b` 各有
+    // h×(w/2+1)×2 个 f32，正是封装写出的 complex64 数量；封装不保留指针。
     let status = unsafe {
         illustash_relation_rfft2(big.as_ptr(), bh, bw, h, w, a.as_mut_ptr())
             | illustash_relation_rfft2(template.as_ptr(), th, tw, h, w, b.as_mut_ptr())
@@ -48,6 +50,7 @@ pub(super) fn correlation(
     }
     multiply_conjugate(&mut a, &b);
     let mut out = zeroed(real_count)?;
+    // SAFETY: `a` 有 h×(w/2+1)×2 个 f32，`out` 有 h×w 个，与封装读写的数量一致。
     if unsafe { illustash_relation_irfft2(a.as_ptr(), h, w, out.as_mut_ptr()) } != 0 {
         return Err(Error::Invalid("relation FFT inverse failed".into()));
     }
@@ -95,13 +98,16 @@ mod tests {
         let b: Vec<f32> = (0..4).map(|i| (i % 3) as f32 - 1.).collect();
         let mut fa = vec![0.; 48];
         let mut fb = vec![0.; 48];
+        // SAFETY: 输入 4×5=20 个、输出 6×(7/2+1)×2=48 个 f32，与缓冲区长度一致。
         assert_eq!(unsafe { illustash_relation_rfft2(a.as_ptr(), 4, 5, 6, 7, fa.as_mut_ptr()) }, 0);
+        // SAFETY: 输入 2×2=4 个、输出 48 个 f32，与缓冲区长度一致。
         assert_eq!(unsafe { illustash_relation_rfft2(b.as_ptr(), 2, 2, 6, 7, fb.as_mut_ptr()) }, 0);
         exact_hash(&fa, "40fc0a62c6c9e5551e9a4ffeb5ed59aa84440c747975912f0a3bb15528be35f7", "forward-a");
         exact_hash(&fb, "e15e2d677626315a3e12c52d4564e5e8a51ac476d0f465b2ff9ab44bdcd81ed9", "forward-b");
         multiply_conjugate(&mut fa, &fb);
         exact_hash(&fa, "872f9f8053bca1f14729e22ce7f133e645ca09d4968b9996e125e1d335777a58", "product");
         let mut out = vec![0.; 42];
+        // SAFETY: 输入 48 个、输出 6×7=42 个 f32，与缓冲区长度一致。
         assert_eq!(unsafe { illustash_relation_irfft2(fa.as_ptr(), 6, 7, out.as_mut_ptr()) }, 0);
         exact_hash(&out, "7e01b5c8eb703ab80e76bd24143c30312e97836ec77cfdb5fa1fe7121d6d337a", "inverse");
     }
@@ -135,7 +141,9 @@ mod tests {
         let b: Vec<f32> = (0..4).map(|i| (i % 3) as f32 - 1.).collect();
         let mut fa = vec![0.; 48];
         let mut fb = vec![0.; 48];
+        // SAFETY: 输入 4×5=20 个、输出 6×(7/2+1)×2=48 个 f32，与缓冲区长度一致。
         assert_eq!(unsafe { illustash_relation_rfft2(a.as_ptr(), 4, 5, 6, 7, fa.as_mut_ptr()) }, 0);
+        // SAFETY: 输入 2×2=4 个、输出 48 个 f32，与缓冲区长度一致。
         assert_eq!(unsafe { illustash_relation_rfft2(b.as_ptr(), 2, 2, 6, 7, fb.as_mut_ptr()) }, 0);
         exact_hash(&fa, "40fc0a62c6c9e5551e9a4ffeb5ed59aa84440c747975912f0a3bb15528be35f7", "forward-a");
         exact_hash(&fb, "e15e2d677626315a3e12c52d4564e5e8a51ac476d0f465b2ff9ab44bdcd81ed9", "forward-b");
@@ -154,6 +162,7 @@ mod tests {
         };
         exact_hash(&fa, product, "product");
         let mut out = vec![0.; 42];
+        // SAFETY: 输入 48 个、输出 6×7=42 个 f32，与缓冲区长度一致。
         assert_eq!(unsafe { illustash_relation_irfft2(fa.as_ptr(), 6, 7, out.as_mut_ptr()) }, 0);
         exact_hash(&out, inverse, "inverse");
     }

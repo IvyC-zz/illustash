@@ -1,5 +1,4 @@
 //! Index calculation on an App Index prepared job. No network or formal publication.
-#![cfg_attr(not(test), deny(clippy::unwrap_used))]
 mod build;
 mod clean;
 pub mod numeric;
@@ -15,14 +14,12 @@ use std::{
 };
 
 pub(super) const DIM: usize = 768;
-pub(super) fn invalid(s: impl Into<String>) -> Error {
-    Error::Invalid(s.into())
-}
 pub(super) fn read(path: &Path) -> Result<Value> {
-    crate::strict_json::parse(&fs::read_to_string(path)?).map_err(|e| invalid(format!("{}: {e}", path.display())))
+    crate::strict_json::parse(&fs::read_to_string(path)?)
+        .map_err(|e| Error::invalid(format!("{}: {e}", path.display())))
 }
 pub(super) fn write(path: &Path, value: &Value) -> Result<()> {
-    fs::write(path, serde_json::to_vec(value).map_err(|e| invalid(e.to_string()))?)?;
+    fs::write(path, serde_json::to_vec(value).map_err(|e| Error::invalid(e.to_string()))?)?;
     Ok(())
 }
 // Metadata's first maximum gender is observable. Value's sorted map cannot rewrite it.
@@ -51,20 +48,20 @@ pub(super) fn write_meta(path: &Path, value: &Value, keys: &[String]) -> Result<
     let Some(gender) = value["gender"].as_object() else { return write(path, value) };
     let mut bytes = Vec::new();
     let mut serializer = serde_json::Serializer::new(&mut bytes);
-    let mut map = serde::Serializer::serialize_map(&mut serializer, None).map_err(|e| invalid(e.to_string()))?;
-    for (key, entry) in value.as_object().ok_or_else(|| invalid("索引元数据不是对象"))? {
+    let mut map = serde::Serializer::serialize_map(&mut serializer, None).map_err(|e| Error::invalid(e.to_string()))?;
+    for (key, entry) in value.as_object().ok_or_else(|| Error::invalid("索引元数据不是对象"))? {
         if key == "gender" {
-            map.serialize_entry(key, &Gender { values: gender, keys }).map_err(|e| invalid(e.to_string()))?;
+            map.serialize_entry(key, &Gender { values: gender, keys }).map_err(|e| Error::invalid(e.to_string()))?;
         } else {
-            map.serialize_entry(key, entry).map_err(|e| invalid(e.to_string()))?;
+            map.serialize_entry(key, entry).map_err(|e| Error::invalid(e.to_string()))?;
         }
     }
-    map.end().map_err(|e| invalid(e.to_string()))?;
+    map.end().map_err(|e| Error::invalid(e.to_string()))?;
     fs::write(path, bytes)?;
     Ok(())
 }
 pub(super) fn field<'a>(v: &'a Value, key: &str) -> Result<&'a str> {
-    v[key].as_str().ok_or_else(|| invalid(format!("索引字段 {key} 不正确")))
+    v[key].as_str().ok_or_else(|| Error::invalid(format!("索引字段 {key} 不正确")))
 }
 pub(super) fn safe(s: &str) -> bool {
     !s.is_empty() && s.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'_')
@@ -92,14 +89,14 @@ fn checked_reference(
     raw: crate::research_compute::features::NpyMatrix,
 ) -> Result<crate::research_compute::features::NpyMatrix> {
     if raw.dimension != DIM {
-        return Err(invalid("索引向量维数必须为768"));
+        return Err(Error::invalid("索引向量维数必须为768"));
     }
     let finite = match &raw.values {
         NpyValues::Float32(r) => r.iter().flatten().all(|x| x.is_finite()),
         NpyValues::Float64(r) => r.iter().flatten().all(|x| x.is_finite()),
     };
     if !finite {
-        return Err(invalid("索引向量必须有限"));
+        return Err(Error::invalid("索引向量必须有限"));
     }
     Ok(raw)
 }
@@ -137,7 +134,7 @@ pub fn run_files(input: &Path, output: &Path, resources: &Resources<'_>) -> Resu
         if session.is_none() {
             session = Some(CcipSession::load(resources.model, resources.runtime, resources.acceleration)?);
         }
-        session.as_mut().ok_or_else(|| invalid("CCIP会话不可用"))?.features(image)
+        session.as_mut().ok_or_else(|| Error::invalid("CCIP会话不可用"))?.features(image)
     };
     let response = run_with(input, output, &req, resources.tags, &mut features)?;
     let temporary = output.with_extension("tmp");
@@ -153,22 +150,22 @@ fn run_with(
     features: &mut dyn FnMut(&image::RgbImage) -> Result<Vec<f32>>,
 ) -> Result<Value> {
     if req["format"] != "illustash-index/1" {
-        return Err(invalid("unsupported index request"));
+        return Err(Error::invalid("unsupported index request"));
     }
     let review = Path::new(field(req, "review")?).canonicalize()?;
     if input.canonicalize()?.parent() != Some(review.as_path())
         || output.file_name().and_then(|s| s.to_str()) != Some("response.json")
-        || output.parent().ok_or_else(|| invalid("worker output missing parent"))?.canonicalize()? != review
+        || output.parent().ok_or_else(|| Error::invalid("worker output missing parent"))?.canonicalize()? != review
     {
-        return Err(invalid("worker output outside isolated job"));
+        return Err(Error::invalid("worker output outside isolated job"));
     }
-    let rows = req["rows"].as_array().ok_or_else(|| invalid("索引rows不正确"))?;
+    let rows = req["rows"].as_array().ok_or_else(|| Error::invalid("索引rows不正确"))?;
     let selected = rows
         .iter()
         .map(|r| {
             let s = field(r, "short_tag")?;
             if !safe(s) {
-                return Err(invalid("索引角色ID不正确"));
+                return Err(Error::invalid("索引角色ID不正确"));
             }
             Ok(s.to_owned())
         })
@@ -183,7 +180,7 @@ fn run_with(
             clean::clean(&review, &selected)?;
         }
         Some("drop") => clean::drop(&review, &selected, field(req, "reason")?.trim())?,
-        _ => return Err(invalid("unsupported index action")),
+        _ => return Err(Error::invalid("unsupported index action")),
     }
     progress(&review, &req["identity"], "build", None, None)?;
     let (characters, aliases, vectors, ids, meta, patched) = build::build(&review, tags)?;
@@ -204,7 +201,7 @@ fn fetch(review: &Path, row: &Value, features: &mut dyn FnMut(&image::RgbImage) 
         return Ok(());
     }
     let refs = read(&patch.join(format!("{cid}-refs.json")))?;
-    let refs = refs.as_array().ok_or_else(|| invalid("参考图清单不正确"))?;
+    let refs = refs.as_array().ok_or_else(|| Error::invalid("参考图清单不正确"))?;
     let mut vectors = vec![];
     let mut posts = vec![];
     let mut general = std::collections::BTreeMap::<String, usize>::new();
@@ -219,7 +216,7 @@ fn fetch(review: &Path, row: &Value, features: &mut dyn FnMut(&image::RgbImage) 
                 .is_some_and(|p| p.starts_with(review.join("char-patch/img"))),
         };
         if !permitted || path.components().any(|c| matches!(c, std::path::Component::ParentDir)) {
-            return Err(invalid("参考图路径越界"));
+            return Err(Error::invalid("参考图路径越界"));
         }
         let image = match producer::decode(path) {
             Ok(i) => i,
@@ -258,7 +255,7 @@ fn fetch(review: &Path, row: &Value, features: &mut dyn FnMut(&image::RgbImage) 
 /// Installed adapter integration. The dispatcher enables this only on accepted platforms.
 pub fn worker(arguments: &[String]) -> Result<()> {
     if !cfg!(any(target_os = "macos", target_os = "windows")) {
-        return Err(invalid("原生索引平台数值验收尚未完成"));
+        return Err(Error::invalid("原生索引平台数值验收尚未完成"));
     }
     let resources = crate::app_resources::default_root();
     let files = crate::recognition_compute::models::ModelFiles::resolve(&resources)?;
@@ -275,11 +272,11 @@ pub fn worker(arguments: &[String]) -> Result<()> {
         return Ok(());
     }
     if arguments.len() != 2 {
-        return Err(invalid("需要 request.json response.json 或 --check"));
+        return Err(Error::invalid("需要 request.json response.json 或 --check"));
     }
     let request = read(Path::new(&arguments[0]))?;
-    let _: crate::app_tasks::TaskIdentity =
-        serde_json::from_value(request["identity"].clone()).map_err(|e| invalid(format!("索引 identity: {e}")))?;
+    let _: crate::app_tasks::TaskIdentity = serde_json::from_value(request["identity"].clone())
+        .map_err(|e| Error::invalid(format!("索引 identity: {e}")))?;
     run_files(
         Path::new(&arguments[0]),
         Path::new(&arguments[1]),
@@ -340,7 +337,7 @@ mod tests {
         let mut count = 0;
         let mut fail = |_: &image::RgbImage| {
             count += 1;
-            Err(invalid("model unavailable"))
+            Err(Error::invalid("model unavailable"))
         };
         let v = req(&p, "apply", json!([{"short_tag":"a"}]));
         assert!(run(&p, &v, &mut fail).unwrap_err().to_string().contains("model unavailable"));

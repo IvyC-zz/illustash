@@ -3,6 +3,7 @@
 //! names moved to the core and counted history steps' kind and count filled in. A refused upgrade leaves the library
 //! exactly as it was. (Every checkpoint of `baseline.rs` is upgraded the same way; this file covers the refusals and
 //! what the comparison leaves out.)
+#![allow(clippy::unwrap_used, reason = "集成测试里 unwrap 就是断言")]
 use rusqlite::Connection;
 use serde_json::Value;
 use std::fs;

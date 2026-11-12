@@ -4,14 +4,11 @@
 //! `Store.alias`。名字切到核心之后，旧表是兼容表（写保护），提交时由 `legacy_names::after_write` 补齐主数据、重建投影。
 use crate::character_links::{core_system, LINKS};
 use crate::character_names::{alias, put_name, TERM_OF};
+use crate::error::invalid;
 use crate::schema::{begin_writing, commit_writing};
 use crate::{names_view, Error, Result};
 use rusqlite::{Connection, TransactionBehavior};
 use serde_json::{json, Value};
-
-fn invalid<T>(message: &str) -> Result<T> {
-    Err(Error::Invalid(message.into()))
-}
 
 fn text<'a>(v: &'a Value, message: &str) -> Result<&'a str> {
     v.as_str().ok_or_else(|| Error::Invalid(message.into()))

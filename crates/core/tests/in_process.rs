@@ -1,4 +1,5 @@
 //! A client links only Core + rusqlite and exercises the public API in-process.
+#![allow(clippy::unwrap_used, reason = "集成测试里 unwrap 就是断言")]
 use illustash_core::{
     backup::RequiredBackup,
     package::{Package, FORMAT},

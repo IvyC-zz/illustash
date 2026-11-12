@@ -36,6 +36,7 @@ mod platform {
     use std::os::fd::AsRawFd;
 
     pub(super) fn acquire(file: &File) -> io::Result<()> {
+        // SAFETY: `file` 在借用期间保持打开，文件描述符有效。
         if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } == 0 {
             Ok(())
         } else {
@@ -48,6 +49,7 @@ mod platform {
     }
 
     pub(super) fn release(file: &File) -> io::Result<()> {
+        // SAFETY: `file` 在借用期间保持打开，文件描述符有效。
         if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_UN) } == 0 {
             Ok(())
         } else {
@@ -71,6 +73,7 @@ mod platform {
     }
     pub(super) fn acquire(file: &File) -> io::Result<()> {
         // Same region used by the compatibility msvcrt provenance lease.
+        // SAFETY: `file` 在借用期间保持打开，原始句柄有效。
         if unsafe { LockFile(file.as_raw_handle(), 0, 0, 1, 0) } == 0 {
             Err(io::Error::last_os_error())
         } else {
@@ -79,6 +82,7 @@ mod platform {
     }
     pub(super) fn acquire_unobstructed(file: &File) -> io::Result<()> {
         // Offset 2^62: far past the end of the empty file, so no read of it overlaps the lock.
+        // SAFETY: `file` 在借用期间保持打开，原始句柄有效。
         if unsafe { LockFile(file.as_raw_handle(), 0, 0x4000_0000, 1, 0) } == 0 {
             Err(io::Error::last_os_error())
         } else {
@@ -86,6 +90,7 @@ mod platform {
         }
     }
     pub(super) fn release(file: &File) -> io::Result<()> {
+        // SAFETY: `file` 在借用期间保持打开，原始句柄有效。
         if unsafe { UnlockFile(file.as_raw_handle(), 0, 0, 1, 0) } == 0 {
             Err(io::Error::last_os_error())
         } else {

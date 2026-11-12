@@ -1,4 +1,5 @@
 //! 目录形式的证据包：夹具、文件核对、符号链接和导入。只用合成数据。
+#![allow(clippy::unwrap_used, reason = "集成测试里 unwrap 就是断言")]
 
 use illustash_terms::package::{Package, Status};
 use illustash_terms::store::{import_package, register_asset, state, term_by_link};

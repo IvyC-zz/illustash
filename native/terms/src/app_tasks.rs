@@ -526,9 +526,11 @@ mod tests {
                 assert!(task.wait(Duration::from_secs(10)));
             }
             let until = Instant::now() + Duration::from_secs(10);
+            // SAFETY: kill 的信号 0 只检查进程组是否存在，不发送信号。
             while unsafe { libc::kill(-pgid, 0) } == 0 && Instant::now() < until {
                 thread::sleep(Duration::from_millis(10));
             }
+            // SAFETY: kill 的信号 0 只检查进程组是否存在，不发送信号。
             assert_ne!(unsafe { libc::kill(-pgid, 0) }, 0, "residual process group {pgid}");
             if cancel || timeout.is_some() {
                 assert_eq!(task.outcome(), TaskOutcome::Cancelled);

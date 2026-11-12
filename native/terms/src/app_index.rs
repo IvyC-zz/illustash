@@ -1,5 +1,5 @@
 //! 原生角色索引：稳定查询、补丁提交和恢复；计算 worker 仅处理隔离快照。
-#![cfg_attr(not(test), deny(clippy::unwrap_used))]
+use crate::error::invalid;
 use crate::{
     app_library::Library,
     app_tasks::{Task, TaskContext, TaskIdentity},
@@ -29,9 +29,6 @@ const DEFAULTS: [&str; 8] = [
     "honkai_impact_3rd",
     "zenless_zone_zero",
 ];
-fn bad<T>(s: &str) -> Result<T> {
-    Err(Error::Invalid(s.into()))
-}
 fn now() -> String {
     chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string()
 }
@@ -168,10 +165,10 @@ fn watch(lib: &Library, dir: &Path) -> Result<Value> {
 }
 fn set_watch(lib: &Library, dir: &Path, b: &Value) -> Result<()> {
     let Some(works) = b["works"].as_array().filter(|a| a.len() <= 40 && a.iter().all(Value::is_string)) else {
-        return bad("关注列表应为最多 40 个作品 ID");
+        return invalid("关注列表应为最多 40 个作品 ID");
     };
     let Some(n) = b["min_posts"].as_i64().filter(|n| (20..=5000).contains(n)) else {
-        return bad("最少图片数应在 20–5000 之间");
+        return invalid("最少图片数应在 20–5000 之间");
     };
     let mut c = crate::sqlite::open_with_flags(lib.db(), rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE)?;
     c.busy_timeout(Duration::from_secs(20))?;
@@ -191,7 +188,7 @@ fn set_watch(lib: &Library, dir: &Path, b: &Value) -> Result<()> {
         if !tx
             .query_row(&linked, [w.as_str().expect("watch list was validated as strings")], |r| r.get::<_, bool>(0))?
         {
-            return bad("只能关注已确认 Danbooru 链接的作品");
+            return invalid("只能关注已确认 Danbooru 链接的作品");
         }
     }
     let mut w = load_watch(&tx, dir)?;
@@ -264,7 +261,7 @@ fn candidates(lib: &Library, shared: &Path, dir: &Path, net: &crate::app_name_so
         let related = rel["related_tags"].as_array().ok_or_else(|| Error::Network("索引查询响应不正确".into()))?;
         let mut n = 0;
         for r in related {
-            let Some(tag) = r["tag"]["name"].as_str() else { return bad("索引角色 tag 不正确") };
+            let Some(tag) = r["tag"]["name"].as_str() else { return invalid("索引角色 tag 不正确") };
             let id = short(tag);
             let posts = r["tag"]["post_count"].as_i64().unwrap_or(0);
             let overlap = r["overlap_coefficient"].as_f64().unwrap_or(0.0);
@@ -439,7 +436,7 @@ impl Updater {
     pub fn post(&mut self, lib: &Library, b: &Json, busy: bool) -> Result<Json> {
         let b: Value = serde_json::from_str(&b.dump()).map_err(|e| Error::Invalid(e.to_string()))?;
         if lib.frozen() {
-            return bad("测试图库不能更新索引");
+            return invalid("测试图库不能更新索引");
         };
         match b["action"].as_str() {
             Some("watch") => set_watch(lib, &self.dir, &b)?,
@@ -447,23 +444,23 @@ impl Updater {
             // was written.
             Some("resume") => {
                 if b.get("allow_network").is_some_and(|v| !v.is_boolean()) {
-                    return bad("联网确认必须是布尔值");
+                    return invalid("联网确认必须是布尔值");
                 }
                 if busy {
-                    return bad("正在与 Photos 同步，完成后再更新角色索引");
+                    return invalid("正在与 Photos 同步，完成后再更新角色索引");
                 }
                 if !self.journal.exists() {
-                    return bad("没有等待继续的索引任务");
+                    return invalid("没有等待继续的索引任务");
                 }
                 self.next_retry = Instant::now() + Duration::from_secs(60);
                 self.start(lib, json!({"action":"resume", "allow_network":b["allow_network"]}))?;
             }
             Some("discard") => {
                 if self.task.as_ref().is_some_and(Task::running) {
-                    return bad("角色索引正在更新，请稍后");
+                    return invalid("角色索引正在更新，请稍后");
                 }
                 if paused(&self.journal).is_none() {
-                    return bad("没有可以放弃的添加任务");
+                    return invalid("没有可以放弃的添加任务");
                 }
                 let job: protocol::IndexJob = protocol::read(&self.journal)?;
                 if job.folder.parent() == Some(lib.instance_path().join("index-jobs").as_path()) {
@@ -474,16 +471,16 @@ impl Updater {
             }
             Some("check" | "apply" | "drop") => {
                 if b.get("allow_network").is_some_and(|v| !v.is_boolean()) {
-                    return bad("联网确认必须是布尔值");
+                    return invalid("联网确认必须是布尔值");
                 }
                 if b["action"] == "check" && !self.network && b["allow_network"] != true {
-                    return bad("请先确认本次检查允许联网查询 Danbooru");
+                    return invalid("请先确认本次检查允许联网查询 Danbooru");
                 }
                 if paused(&self.journal).is_some() && !self.task.as_ref().is_some_and(Task::running) {
-                    return bad("上次添加角色已暂停，请先在任务面板里继续或放弃");
+                    return invalid("上次添加角色已暂停，请先在任务面板里继续或放弃");
                 }
                 if b["action"] != "check" && busy {
-                    return bad("正在与 Photos 同步，完成后再更新角色索引");
+                    return invalid("正在与 Photos 同步，完成后再更新角色索引");
                 };
                 if self.journal.exists() && b["action"] != "check" {
                     let job: protocol::IndexJob = protocol::read(&self.journal)?;
@@ -502,7 +499,7 @@ impl Updater {
                         job["rows"][0]["short_tag"] == b["char"] && job["reason"] == b["reason"]
                     };
                     if !same || job["action"] != b["action"] {
-                        return bad("上次索引任务尚待恢复，请先重试原任务");
+                        return invalid("上次索引任务尚待恢复，请先重试原任务");
                     }
                     self.next_retry = Instant::now() + Duration::from_secs(60);
                     self.start(lib, json!({"action":"resume", "allow_network":b["allow_network"]}))?;
@@ -511,7 +508,7 @@ impl Updater {
                     self.start(lib, b)?;
                 }
             }
-            _ => return bad("未知操作"),
+            _ => return invalid("未知操作"),
         };
         self.info(lib)
     }
@@ -552,7 +549,7 @@ impl Updater {
     }
     fn start(&mut self, lib: &Library, b: Value) -> Result<()> {
         if self.task.as_ref().is_some_and(Task::running) {
-            return bad("角色索引正在更新，请稍后");
+            return invalid("角色索引正在更新，请稍后");
         };
         let action = b["action"].as_str().unwrap_or("");
         let mut rows = vec![];
@@ -560,7 +557,7 @@ impl Updater {
             let check = read(&self.dir.join("check.json"), json!({}));
             let offered = check["missing"].as_array().cloned().unwrap_or_default();
             let Some(tags) = b["tags"].as_array().filter(|t| !t.is_empty()) else {
-                return bad("请从最近一次检查的结果里选择角色");
+                return invalid("请从最近一次检查的结果里选择角色");
             };
             for t in tags {
                 let r = offered
@@ -576,18 +573,18 @@ impl Updater {
             let id = b["char"].as_str().unwrap_or("");
             let m = meta(&self.shared, id);
             if m["source"] != "danbooru-patch" {
-                return bad("只能放弃从 Danbooru 补进来的角色");
+                return invalid("只能放弃从 Danbooru 补进来的角色");
             };
             if b["reason"].as_str().is_none_or(|r| r.trim().is_empty() || r.trim().chars().count() > 200) {
-                return bad("请写一句放弃的原因");
+                return invalid("请写一句放弃的原因");
             };
             rows.push(m);
         }
         if action != "check" && action != "resume" && std::env::var_os("ILLUSTASH_INDEX_WORKER").is_none() {
-            return bad("角色索引计算 worker 未配置");
+            return invalid("角色索引计算 worker 未配置");
         };
         if action != "check" && action != "resume" && crate::app_models::waiting(&self.resources) {
-            return bad("识别模型还没下载；下载后才能更新角色索引");
+            return invalid("识别模型还没下载；下载后才能更新角色索引");
         }
         self.task.take();
         let identity = TaskIdentity::new(lib, self.generation, &self.session)?;
@@ -670,7 +667,7 @@ struct SharedLock(std::fs::File);
 impl SharedLock {
     fn acquire(dir: &Path, ctx: &TaskContext) -> Result<Self> {
         if crate::app_file_lock::ensure_supported().is_err() {
-            return bad("当前平台尚不支持索引计算 worker");
+            return invalid("当前平台尚不支持索引计算 worker");
         }
         std::fs::create_dir_all(dir)?;
         let file = std::fs::OpenOptions::new()
@@ -704,7 +701,7 @@ fn copy_tree(src: &Path, dst: &Path, ctx: &TaskContext) -> Result<()> {
         ctx.check()?;
         let e = e?;
         if e.file_type()?.is_symlink() {
-            return bad("索引资源不能是符号链接");
+            return invalid("索引资源不能是符号链接");
         }
         if e.file_type()?.is_dir() {
             copy_tree(&e.path(), &dst.join(e.file_name()), ctx)?;
@@ -729,7 +726,7 @@ fn download(address: &str, path: &Path, ctx: &TaskContext, authorized: bool) -> 
         || (!local && (u.scheme() != "https" || !matches!(u.host_str(), Some("cdn.donmai.us" | "danbooru.donmai.us"))))
         || (local && u.scheme() != "http")
     {
-        return bad("参考图来源尚未授权或不在 Danbooru 来源范围");
+        return invalid("参考图来源尚未授权或不在 Danbooru 来源范围");
     };
     let mut last = None;
     for _ in 0..3 {
@@ -795,13 +792,13 @@ fn patch(
     let mut job: protocol::IndexJob =
         if journal.exists() { protocol::read(journal)? } else { prepare_job(lib, paths, b, rows, ctx)? };
     if job.version != 1 || job.package != lib.instance_path() {
-        return bad("索引恢复包实例不匹配");
+        return invalid("索引恢复包实例不匹配");
     };
     let folder = job.folder.clone();
     if folder.parent() != Some(lib.instance_path().join("index-jobs").as_path())
         || folder.file_name().and_then(|n| n.to_str()) != Some(job.job_id.as_str())
     {
-        return bad("索引任务目录越界");
+        return invalid("索引任务目录越界");
     }
     if job.phase == protocol::JobPhase::Prepared {
         job.identity = ctx.identity().clone();
@@ -905,7 +902,7 @@ fn fetch_references(
         ctx.check()?;
         let cid = r.short_tag.as_str();
         if !safe(cid) {
-            return bad("索引角色 ID 不正确");
+            return invalid("索引角色 ID 不正确");
         };
         update(state, json!({"status":"fetching","done":i,"total":rows.len()}));
         if fetched(folder, cid) {
@@ -921,7 +918,7 @@ fn fetch_references(
         ];
         let posts = net.fetch(&crate::app_name_sources::url(&net.db_base, "/posts.json", &query), None, None)?;
         let Some(posts) = posts.as_array().filter(|p| p.len() <= 20) else {
-            return bad("参考图帖子响应不正确");
+            return invalid("参考图帖子响应不正确");
         };
         let mut refs = vec![];
         for p in posts {
@@ -988,18 +985,18 @@ fn compute(
     }
     let status = process.join().map_err(|_| Error::Invalid("索引计算进程等待失败".into()))??;
     if !status.success() {
-        return bad("角色索引计算 worker 失败");
+        return invalid("角色索引计算 worker 失败");
     };
     ctx.check()?;
     if std::fs::metadata(folder.join("response.json"))?.len() > 64_000_000 {
-        return bad("索引结果超过 64 MB");
+        return invalid("索引结果超过 64 MB");
     }
     let response: protocol::IndexResponse = protocol::read(&folder.join("response.json"))?;
     if &response.identity != ctx.identity()
         || response.format != protocol::Format::Index
         || response.before != job.before
     {
-        return bad("索引结果身份或版本不匹配");
+        return invalid("索引结果身份或版本不匹配");
     };
     Ok(response)
 }
@@ -1042,7 +1039,7 @@ fn validate(lib: &Library, v: &protocol::IndexResponse, file: &Path) -> Result<(
             return Err(field_error(&format!("characters[{index}].char_id"), "索引角色 ID 不正确"));
         }
         if !ids.insert(id) {
-            return bad("索引角色重复");
+            return invalid("索引角色重复");
         };
         for key in [
             "danbooru_tag",
@@ -1095,16 +1092,16 @@ fn validate(lib: &Library, v: &protocol::IndexResponse, file: &Path) -> Result<(
             || !ids.contains(r.1.as_str())
             || !(0.0..=1.0).contains(&r.2)
         {
-            return bad("索引认领越界");
+            return invalid("索引认领越界");
         };
         if !seen.insert((&r.0, &r.1)) {
-            return bad("索引认领重复");
+            return invalid("索引认领重复");
         }
     }
     let aliases = &v.aliases;
     for r in aliases {
         if !safe(&r.0) {
-            return bad("索引别名越界");
+            return invalid("索引别名越界");
         }
     }
     Ok(())
@@ -1176,7 +1173,7 @@ fn commit_source(
     let changed_inputs = |message: &str| -> Result<()> {
         std::fs::remove_file(journal)?;
         let _ = std::fs::remove_dir_all(&folder);
-        bad(message)
+        invalid(message)
     };
     if fingerprint(src)? != job.before {
         return changed_inputs("索引计算输入已改变，请重试检查");
@@ -1340,7 +1337,7 @@ fn stage_all(
     };
     for cid in allowed {
         if !safe(cid) {
-            return bad("索引文件 ID 不正确");
+            return invalid("索引文件 ID 不正确");
         };
         for ext in ["json", "npy"] {
             let from = folder.join("char-index").join(format!("{cid}.{ext}"));
@@ -1575,7 +1572,7 @@ fn backup_db(src: &Connection, path: &Path, ctx: &TaskContext) -> Result<()> {
         match copy.step(256)? {
             StepResult::Done => return Ok(()),
             StepResult::More => {}
-            _ if Instant::now() >= end => return bad("索引备份超时"),
+            _ if Instant::now() >= end => return invalid("索引备份超时"),
             _ => std::thread::sleep(Duration::from_millis(10)),
         }
     }

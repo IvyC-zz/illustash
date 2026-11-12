@@ -2,6 +2,7 @@
 //! picture and folder rows destroyed by overwritten pages, then rescued from the library page, from the desktop
 //! shell's `--rescue-source` and from the library switcher. Every picture keeps its ID, so its organizing stays with
 //! it. Synthetic pictures and packages only.
+#![allow(clippy::unwrap_used, reason = "集成测试里 unwrap 就是断言")]
 use illustash_terms::{app_create::NewSource, app_service, store};
 use rusqlite::Connection;
 use serde_json::{json, Value};

@@ -143,6 +143,7 @@ impl Backend {
             return Err("research OpenBLAS empty configuration".into());
         }
         let config =
+            // SAFETY: 上面已确认指针非空；OpenBLAS 返回库内静态的 NUL 结尾字符串，库在 `Backend` 存活期间不卸载。
             unsafe { CStr::from_ptr(config) }.to_str().map_err(|_| "research OpenBLAS invalid configuration")?;
         if !config.starts_with(&format!("OpenBLAS {version} "))
             || !config.split_whitespace().any(|v| v == "USE64BITINT")

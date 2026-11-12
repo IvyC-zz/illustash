@@ -1,6 +1,7 @@
 //! The native host's entry: every request needs the session cookie that only the ready line's one-time address
 //! hands out, so another local process (which can set any Host and leave Origin out) reads and writes nothing; writes
 //! still need Origin and the page token, and a new model address drops the stored key. Synthetic package only.
+#![allow(clippy::unwrap_used, reason = "集成测试里 unwrap 就是断言")]
 use illustash_terms::{app_create::NewSource, app_service, store};
 use serde_json::{json, Value};
 use std::{

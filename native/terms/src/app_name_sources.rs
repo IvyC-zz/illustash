@@ -1,5 +1,6 @@
 //! Text-only name sources, and the one small preview picture of a Danbooru character (#293). Network never holds a
 //! database transaction.
+use crate::error::invalid;
 use crate::{Error, Result};
 use rusqlite::{Connection, OptionalExtension};
 use serde_json::{json, Value};
@@ -17,12 +18,9 @@ use std::{
 fn network<T>(s: &str) -> Result<T> {
     Err(Error::Network(s.into()))
 }
-fn fail<T>(s: &str) -> Result<T> {
-    Err(Error::Invalid(s.into()))
-}
 pub(crate) fn check(cancel: &AtomicBool) -> Result<()> {
     if cancel.load(Ordering::SeqCst) || crate::platform_process::stopping() {
-        fail("名称任务已取消")
+        invalid("名称任务已取消")
     } else {
         Ok(())
     }
@@ -66,7 +64,7 @@ fn base(name: &str, default: &str) -> Result<String> {
             || u.query().is_some()
             || u.fragment().is_some()
         {
-            return fail("名称替换地址须为本机合成服务");
+            return invalid("名称替换地址须为本机合成服务");
         }
     }
     Ok(value.trim_end_matches('/').into())
@@ -445,7 +443,7 @@ pub(crate) fn preview(source: &mut Source, thumbnails: &std::path::Path, tag: &s
         || tag.starts_with(['-', '~'])
         || tag.chars().any(|c| c.is_whitespace() || c.is_control() || c == '*' || c == ',')
     {
-        return fail("角色 tag 不正确");
+        return invalid("角色 tag 不正确");
     }
     let jpeg = |b: &[u8]| b.starts_with(&[0xff, 0xd8, 0xff]);
     let path = thumbnails.join(format!("danbooru-{:x}.jpg", Sha256::digest(tag.as_bytes())));

@@ -2,6 +2,7 @@
 pub fn local_timestamp(tm: &mut libc::tm) -> libc::time_t {
     #[cfg(unix)]
     {
+        // SAFETY: `tm` 是独占的可变引用，mktime 只读写这个结构。
         unsafe { libc::mktime(tm) }
     }
     // UCRT exports mktime as the header inline over _mktime64, as used by Python.
@@ -10,11 +11,14 @@ pub fn local_timestamp(tm: &mut libc::tm) -> libc::time_t {
         extern "C" {
             fn _mktime64(tm: *mut libc::tm) -> i64;
         }
+        // SAFETY: `tm` 是独占的可变引用，_mktime64 只读写这个结构。
         unsafe { _mktime64(tm) }
     }
 }
 
 pub fn local_date(delta: i64) -> libc::tm {
+    // SAFETY: time 的出参为空；libc::tm 只含整数（Unix 上另有可为空的时区名指针），全零是合法值；`t`、`out`
+    // 是本地变量。
     unsafe {
         let t = libc::time(std::ptr::null_mut()) - delta;
         let mut out: libc::tm = std::mem::zeroed();
@@ -32,6 +36,7 @@ mod tests {
     #[test]
     fn calendar_normalizes_leap_day_and_month_boundary() {
         for (year, month, day, expected) in [(2024, 2, 29, (2024, 3, 1)), (2023, 12, 31, (2024, 1, 1))] {
+            // SAFETY: libc::tm 只含整数（Unix 上另有可为空的时区名指针），全零是合法值。
             let mut tm: libc::tm = unsafe { std::mem::zeroed() };
             tm.tm_year = year - 1900;
             tm.tm_mon = month - 1;
@@ -46,18 +51,23 @@ mod tests {
     fn local_date_preserves_host_calendar() {
         // Compare against the host API within a stable second, without changing TZ.
         for _ in 0..10 {
+            // SAFETY: time 的出参为空。
             let before = unsafe { libc::time(std::ptr::null_mut()) };
             let actual = local_date(0);
+            // SAFETY: time 的出参为空。
             let after = unsafe { libc::time(std::ptr::null_mut()) };
             if before != after {
                 continue;
             }
+            // SAFETY: libc::tm 只含整数（Unix 上另有可为空的时区名指针），全零是合法值。
             let mut expected: libc::tm = unsafe { std::mem::zeroed() };
             #[cfg(unix)]
+            // SAFETY: `before`、`expected` 是本地变量。
             unsafe {
                 libc::localtime_r(&before, &mut expected);
             }
             #[cfg(windows)]
+            // SAFETY: `before`、`expected` 是本地变量。
             unsafe {
                 libc::localtime_s(&mut expected, &before);
             }

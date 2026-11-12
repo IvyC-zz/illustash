@@ -1,5 +1,5 @@
 //! Native provenance coordination; optional computation workers never commit formal application state.
-#![cfg_attr(not(test), deny(clippy::unwrap_used))]
+use crate::error::invalid;
 use crate::{
     app_library::Library,
     app_tasks::{Task, TaskContext, TaskIdentity},
@@ -32,9 +32,6 @@ const KINDS: [(&str, &str, usize); 4] = [
     ("pick", "pixel_hash,iqdb,groups", 20),
     ("artist", "verify,groups", 200),
 ];
-fn invalid<T>(s: &str) -> Result<T> {
-    Err(Error::Invalid(s.into()))
-}
 fn now() -> String {
     chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string()
 }
@@ -43,7 +40,7 @@ fn read_json(path: &Path) -> Result<Value> {
     let options = crate::platform_filesystem::read_nofollow_options();
     options.open(path)?.take(1048577).read_to_end(&mut b)?;
     if b.len() > 1048576 {
-        return invalid(&format!("{file}: worker 响应过大", file = path.display()));
+        return invalid(format!("{file}: worker 响应过大", file = path.display()));
     }
     crate::strict_json::parse(
         std::str::from_utf8(&b)

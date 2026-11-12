@@ -14,6 +14,7 @@ mod windows_worker;
 pub fn parent_pid() -> std::io::Result<u32> {
     #[cfg(unix)]
     {
+        // SAFETY: getppid 无参数，总是成功。
         Ok(unsafe { libc::getppid() } as u32)
     }
     #[cfg(windows)]
@@ -64,6 +65,7 @@ struct ProcessGroup(std::process::Child);
 impl Drop for ProcessGroup {
     fn drop(&mut self) {
         // SIGKILL is deterministic even for uncooperative children and leaders already exited.
+        // SAFETY: kill 只接收整数；负 PID 指向 `spawn` 时用 process_group(0) 建立的这个进程组。
         unsafe {
             libc::kill(-(self.0.id() as i32), libc::SIGKILL);
         }
@@ -89,11 +91,13 @@ unsafe extern "system" fn console_stop(event: u32) -> i32 {
 pub fn install_signals() {
     STOP.store(false, Ordering::SeqCst);
     #[cfg(unix)]
+    // SAFETY: `signal_stop` 是 extern "C" 函数，只写一个原子量，在信号处理函数里可以安全调用。
     unsafe {
         libc::signal(libc::SIGINT, signal_stop as *const () as libc::sighandler_t);
         libc::signal(libc::SIGTERM, signal_stop as *const () as libc::sighandler_t);
     }
     #[cfg(windows)]
+    // SAFETY: `console_stop` 符合 PHANDLER_ROUTINE 签名，只写一个原子量；程序运行期间一直有效。
     unsafe {
         #[link(name = "kernel32")]
         extern "system" {
@@ -135,6 +139,7 @@ pub fn kill_owned_tree(pid: u32) {
                 cursor += 1;
             }
             for child in owned.into_iter().skip(1).rev() {
+                // SAFETY: kill 只接收整数；PID 来自上面以 `pid` 为根枚举出的后代。
                 unsafe {
                     libc::kill(child as i32, libc::SIGKILL);
                 }
@@ -145,6 +150,7 @@ pub fn kill_owned_tree(pid: u32) {
     } else {
         eprintln!("无法启动进程收尾检查；继续终止自身进程组");
     }
+    // SAFETY: killpg 只接收整数；`pid` 是仍未回收的自有进程组组长，组号不会被复用。
     unsafe {
         libc::killpg(pid as i32, libc::SIGKILL);
     }
@@ -179,12 +185,14 @@ impl DesktopParent {
     pub fn capture() -> Self {
         Self {
             #[cfg(unix)]
+            // SAFETY: getppid 无参数，总是成功。
             pid: std::env::var_os("ILLUSTASH_DESKTOP_BRIDGE").map(|_| unsafe { libc::getppid() }),
         }
     }
     pub fn lost(&self) -> bool {
         #[cfg(unix)]
         {
+            // SAFETY: getppid 无参数，总是成功。
             self.pid.is_some_and(|pid| unsafe { libc::getppid() } != pid)
         }
         #[cfg(not(unix))]
@@ -218,6 +226,7 @@ mod tests {
     #[ignore = "isolated synthetic stop-signal subprocess"]
     fn stop_signal_fixture() {
         #[cfg(windows)]
+        // SAFETY: 这些控制台函数只接收整数；在隔离的测试子进程里调用。
         unsafe {
             #[link(name = "kernel32")]
             extern "system" {
@@ -233,6 +242,7 @@ mod tests {
         #[cfg(unix)]
         {
             install_signals();
+            // SAFETY: raise 只接收整数；处理函数已由上一行安装。
             unsafe {
                 libc::raise(libc::SIGTERM);
             }

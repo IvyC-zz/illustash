@@ -10,6 +10,7 @@
 //! Each case runs in its own directory with its own key counter (`ILLUSTASH_TEST_KEY_COUNTER`), restored at
 //! checkpoints, so the core makes the same keys as when recorded; learning stamps hash clocks and are passed on
 //! from the reply they came from (`<stamp@N>` in an input is the N-th stamp seen in this case's replies).
+#![allow(clippy::unwrap_used, reason = "集成测试里 unwrap 就是断言")]
 use flate2::read::GzDecoder;
 use regex::Regex;
 use rusqlite::Connection;

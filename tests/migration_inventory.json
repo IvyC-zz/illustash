@@ -5,15 +5,15 @@
 
  "crates/core/src/backup.rs":"c47266c42468b701668128636674e794ee519f367098e0da043d38572c8f11af",
 
- "crates/core/src/character_commands.rs":"fd5347bc35eb6a21a7ac1294e4cdd6129d31870aaad7b2195ea6fd1fe943e501",
+ "crates/core/src/character_commands.rs":"eebaf28e9931ac07735b8471f159e42361b71c7f6ba5324b771a90bf871a9cf4",
 
  "crates/core/src/character_entities.rs":"36157140d08e8a851746438c8c578d15e3011d88f79689b335bc77fb241ed70f",
 
  "crates/core/src/character_evidence.rs":"e2f40d8ec39702fcc606beaa2ac9d21abbf6c31c6df8770b0f7e3f2a9bc2623e",
 
- "crates/core/src/character_graph.rs":"302edf5ee48f81c29cba5d70625882b3d9fd5e19d7d17f288fb388b28b8e5808",
+ "crates/core/src/character_graph.rs":"2fd7a68a81a3429aa7f6b1139660a84276df216316876d9d9608bd4e08cde00e",
 
- "crates/core/src/character_identity.rs":"ee2a0b886abfacadf37fc7911baab014f1111a8c14a29dbc71c55aeaf1075020",
+ "crates/core/src/character_identity.rs":"ca0166e4e6bcef9db5289001b9d0840cf3c66d5dc767f1d9898c5e0f974f8a1d",
 
  "crates/core/src/character_import.rs":"4615e94644656f792c9750bbb528f31f3e46ca3002343093caf359870b5d2eb8",
 
@@ -25,11 +25,11 @@
 
  "crates/core/src/character_links.rs":"2e64aa135c932c55b84c4839a3427a7118c4d1a0f64a402531ef235ede5e9cc7",
 
- "crates/core/src/character_merge.rs":"284a633924321c0015831995178871025424029f27de54005fdbccd3cdf57515",
+ "crates/core/src/character_merge.rs":"d4b4e373f565acf52f0a11c4e4c4d3775100df06e97a40b63bd812a6f8406507",
 
  "crates/core/src/character_names.rs":"12409f166cd1f00dcbd60404f3bde7a46db845bd394c0a0734a5c577a27bd673",
 
- "crates/core/src/character_profile.rs":"875078d732098734823bafe991dd67c8d8b3e64b38a6c2692cb1ff54e81cfa75",
+ "crates/core/src/character_profile.rs":"e10227e35a44cf29a502944caa1b170af992e272a5d4150d6b3e51f2c4925e3e",
 
  "crates/core/src/character_projection.rs":"a3586760f3322d0c833f2c93677feb1a9d6a25b2ca389acc163c142e85266bf6",
 
@@ -51,11 +51,11 @@
 
  "crates/core/src/character_sql/tag_memberships.sql":"df7751a7282884fc933f25f60599ac994a7d4dfdfaa62a4348eb0f1910af3034",
 
- "crates/core/src/character_structure.rs":"c8b0f5024bd46e9ac1c3336d7d942c8c68a6ae33becff5aca70f04e92fd0829e",
+ "crates/core/src/character_structure.rs":"e877cf427d78fd0c1ac4edbedd6b766e306a0e15f8f79347c86a43d065fb9bc6",
 
  "crates/core/src/compat_text.rs":"ac1d740967f077c7c0f456a42c74b13df4c39535feef9d13a54b04e0f74eee2d",
 
- "crates/core/src/error.rs":"272c1d6d8f7fdd40bda672cd5edbda9084714d84e82e285ac3f91527d79b5606",
+ "crates/core/src/error.rs":"03904a03fdf42d36150b9db3b9953d4e4033aed0ce70d1c7e735e7bd9ef0f074",
 
  "crates/core/src/legacy_characters.rs":"4533c2eb5ea6489ccd277074c874db05b78b1b4a2633c4b8bd3de58eedf6d548",
 
@@ -65,7 +65,7 @@
 
  "crates/core/src/lib.rs":"23a5778fb07dae5696c4d7791620640eb60efddd37cf3be6f2aae63a4d00eeeb",
 
- "crates/core/src/names_commands.rs":"96ce0a6d5c997574f6a8bfdbfe303239202408df96a449269b3a29a394a5fd61",
+ "crates/core/src/names_commands.rs":"55136b61cf16cb10d814ad96df0513368dcb6644efd672253c2877e7f1c868c9",
 
  "crates/core/src/names_search.rs":"624ef5beaa837758f412e0337e3599e2468eb33986ed09377ef35f5309fc883d",
 
@@ -85,13 +85,13 @@
 
  "crates/core/src/undo_labels.rs":"95993da52d1fae92b21c7e01e541928455209d70b8fb8cfb6b58ac53e17dd7fc",
 
- "crates/iqdb/src/main.rs":"786432535d0db00c223b400299ef033238cb0e22b02c25cc896aadf099d33ba8",
+ "crates/iqdb/src/main.rs":"7217e82a57f51f7eb8da319199e15a9c9aa2f8c7ccf9bee7740eacf1b25e0722",
 
- "crates/iqdb/src/signature.rs":"ed91c0fbb91c437d5fb34a29d575c44562f86c72337f7025eedcab6bd5112763",
+ "crates/iqdb/src/signature.rs":"a69781b068d06393676539d367e46d5711e7b73bafddbd39d1ba784dfc04ca3e",
 
- "crates/platform/src/app_dpapi.rs":"63dcdcaa80f7b6695f2d8e6aaef81e46ec0cf102dbb6343a7b6d1e414f760ed0",
+ "crates/platform/src/app_dpapi.rs":"f7472bd68d68814a11f78306177bc4b14fdaf307e59cfa3f86c12c177e76300a",
 
- "crates/platform/src/app_file_lock.rs":"42d5369b0ab72c489b8217cfce742ee849296e25d92e548f670f1290ecdbc790",
+ "crates/platform/src/app_file_lock.rs":"f30a78591cafe7449c13c2e28e1974d2d225a147a0d2b7af342aec6c7ec1911c",
 
  "crates/platform/src/app_paths.rs":"91aeca9fc3ca078835ae786dd57dde29f90019712c1fd937abb0bcad4fee3551",
 
@@ -103,37 +103,37 @@
 
  "crates/platform/src/platform_backup.rs":"0c177917c1a8929d8b825b9df06412ffb5948d4931a3b40ce04b7503caa13967",
 
- "crates/platform/src/platform_credentials.rs":"7bf476e853ecd42d5f024991b64b0aeb93184c4be7568ad66434b0868e7c509d",
+ "crates/platform/src/platform_credentials.rs":"37a69d8a5da140baadc45720790c4771cd25319b47e6a11ed95094b48c3c6fc1",
 
- "crates/platform/src/platform_credentials_macos.rs":"7fb02fc0199e119fa3f9b6e119eb6fb5c0ed33d2703d29cff7510b8cbb6d8362",
+ "crates/platform/src/platform_credentials_macos.rs":"1f78c683b1e0bd219f3cbadad4069926154afa1bf8ecd9b8e9d2a0b3f26d6a4e",
 
- "crates/platform/src/platform_filesystem.rs":"2d59ebfdbe53a5915c5fc1004d0a39b40884ccea012b3ee670dc6d72c74e7c4c",
+ "crates/platform/src/platform_filesystem.rs":"d92e838a0af022d4f298b9a4450e0e5cc7a1fbf9efd6ec2636cadce6ae88ff37",
 
  "crates/platform/src/platform_folder.rs":"0f025cc15d23f51f93576c255535249781765506df65e1859f2a06d168755b8e",
 
  "crates/platform/src/platform_photos.rs":"677cb48521f2fc0ec2730c6a6221c5406d4a80c299bcd025f2fbbb9ea186db55",
 
- "crates/platform/src/platform_process.rs":"ce552759db9eb4386baa704aa4506f812bacb12b120285f1fa79c8a1f29826ad",
+ "crates/platform/src/platform_process.rs":"a7e19d1831354cba0e14c62d6aa03800720433ed9a9d1fa910da752620e94162",
 
- "crates/platform/src/platform_process/windows_desktop.rs":"3c919890c9d02dd651621b6532ac2292db1b201a6102a6b311a6c36a006b3ac1",
+ "crates/platform/src/platform_process/windows_desktop.rs":"ded91a844ae6343c4ea762b31c4b841759abef5a2e9f5a179c0de9d3f66f0c42",
 
- "crates/platform/src/platform_process/windows_worker.rs":"40cd756f366e6cbd54a4e1d39efcb682c72bee5282975835f1f2bd7cdd538ff5",
+ "crates/platform/src/platform_process/windows_worker.rs":"478aa8370e7b7b065c7a3ff927f313bfc4267f3d7d43fdd63d4dce874da73116",
 
- "crates/platform/src/platform_research_math.rs":"c3f77055b7377d185441731f94e9d421d67c6dbc67fd9dd7b635d924894e58f7",
+ "crates/platform/src/platform_research_math.rs":"aee94bd00d429e16060d4080846ca1574ced2da57a66febfdc2d26e838323396",
 
- "crates/platform/src/platform_research_math/windows_openblas.rs":"e08a72b7e449e3179eee41f5f10e126d99bafedce27f36f05cbf72345f54639e",
+ "crates/platform/src/platform_research_math/windows_openblas.rs":"7fb1952cb9e00adecbefef1372c48d7dd1d76f1bee7c04e4def0c15c132634c5",
 
- "crates/platform/src/platform_system.rs":"1844a477f7769adf79ad7dc64d6100f72c6d1af25734ac7df381a0d48a102fc5",
+ "crates/platform/src/platform_system.rs":"3d541ffedf87a8bb83a350aaa6a44eec32c1ec6fb4669ed84709ad248cbd7a0d",
 
- "crates/platform/src/platform_time.rs":"9d7c80faed1d762d0f71df5bcf8f845e0422e925cf3a89c7e73115814b181faa",
+ "crates/platform/src/platform_time.rs":"2f22be4bed6c53ccb3d87a933c608b6d607de497d8c4bb7a13a8dcfbbef53249",
 
  "crates/platform/src/source_rows.rs":"a76c40abb5e05c913563f0c78fda143253b606abb705eb42daffe0abba89279b",
 
  "crates/platform/src/sqlite.rs":"54ec58346af5b5517cb5c3fed855261dfebd3072a1982abdb6c8cfeeb4f1dcd4",
 
- "desktop/build.rs":"84300b4173b3e1ffb2d00f442bd40ef7b08758ff333161c5a145b004ea16f7d9",
+ "desktop/build.rs":"5dd891efe3f9a1d948c6e9d249bd484bf64de3cf5b672568fca19c5abe63e62b",
 
- "desktop/src/bridge.rs":"d5c8c0726f58d3f44d75aba21745092e70e8a369c2fe3c1c85ebcb5a50c23eb6",
+ "desktop/src/bridge.rs":"4070a7b954d16263a903901d9b445597623706dce506d15e0862afa9c4b3c30a",
 
  "desktop/src/bundled_workers.rs":"37200daa85f08b0f523648d5096868db2be232022b8a3a35de2f0fdea81d376e",
 
@@ -143,11 +143,11 @@
 
  "desktop/src/picker.rs":"88e54eaaf2747f359f8753928a97e27ad9393780acb8824548b5454ca0fd8775",
 
- "desktop/src/pixiv.rs":"1944e10c840a4366268dbde5189279fb8ec961851760ced3637967c53107f8e8",
+ "desktop/src/pixiv.rs":"b88dd18a2491dc524d2a1d9b92f95091b979ca5eaa4a2dd39430985cf1d5c5bb",
 
- "desktop/src/server.rs":"4caeaeb7eef8487b26f435a87810492e2c29f1d218b638f73f6b7b6919bc42fa",
+ "desktop/src/server.rs":"d50312d590f1a2ff6077b2d803fc3699a1a632059880a589d726d16930a380d1",
 
- "desktop/src/welcome.rs":"8b7a8ce662d60de1287e1338baacc8f22fca8ce2ea021e695643212a5d21cb95",
+ "desktop/src/welcome.rs":"a0f76866511ac74be8a84eddcf344df1a200eb6c5c3271f35fbf827d5b8e86f4",
 
  "desktop/tauri.conf.json":"bb054aa3da9ab925a3215c27a479619e3aa69504f539e57ac6d4c2aefa8343db",
 
@@ -157,7 +157,7 @@
 
  "native/terms/examples/research_compute/math.rs":"4844fc1099be8a2e284e9061593d2114fecf2f95bd19c99519776c82d4f59abd",
 
- "native/terms/src/app_accounts.rs":"7d8e5561467d471a772d5be4421f23354a6326f24c84b58152fcfe3f47f55a25",
+ "native/terms/src/app_accounts.rs":"2f4bd590d7c1f409d7fa1eb6eba690bebba9e6288d17fef9df09de2724c57c3a",
 
  "native/terms/src/app_archives.rs":"7e3cd8abd55798961e217f88a7681db9b0a187df580f97e3662bfd93bbb6311f",
 
@@ -173,7 +173,7 @@
 
  "native/terms/src/app_curation.rs":"9cd78aaefb7f924a30ac48044cc23f8a02082bd4229473e055aaf1a64eaca786",
 
- "native/terms/src/app_desktop.rs":"3ee08a852ef9b8d3e266a12e9b6f0f7dc4726e90de1846879cfb2d3b18473145",
+ "native/terms/src/app_desktop.rs":"6ca17d7803093615eadaa329de4b965cc9eb30d4b1883ae7e8e4e199a346d691",
 
  "native/terms/src/app_effects.rs":"f57f598bf78f05133d42b33c619c298028e5af318206bdf732d3620bb20f7879",
 
@@ -187,13 +187,13 @@
 
  "native/terms/src/app_imports.rs":"e79d6a95f2cd045ef6ad0c3d0286d94a9ff82a93b03eed186e1b0ea986a60382",
 
- "native/terms/src/app_index.rs":"775578d56cd1bdb6f85f5005ebe012f798b22391b8fd08203522c3a5a115adae",
+ "native/terms/src/app_index.rs":"dbad79e6ccea5a59cd1d0b25228c157f40785b95df208b8fc4faa2d726937f17",
 
  "native/terms/src/app_integrity.rs":"143aa1bbd662b8ea08636a6d58b4a8acc32095ba41526b579c32af9873adc6cc",
 
  "native/terms/src/app_libraries.rs":"e230fac5c3d21945de40f60dac40d7429a10baba9f223c8f608c8e52b41344ab",
 
- "native/terms/src/app_library.rs":"5a151b7b65edb7063b1a2f5a9d5b4e257d0203fc8d04a119721704e7e397d00b",
+ "native/terms/src/app_library.rs":"4707dfe3a4a393daf1672ed5f8d8acda464d93e78c5d038fb1ef510d38e04b13",
 
  "native/terms/src/app_local.rs":"cda9e666f21a3be6eb966eca0c0fd40076dc70226141851cd267a74a445d693b",
 
@@ -221,11 +221,11 @@
 
  "native/terms/src/app_models.rs":"e94bc747ebd7d390109cce8ac368b8d9517f4799300013551eba2f164b226491",
 
- "native/terms/src/app_name_sources.rs":"b4ccc815e76018ffb21737b7d89a5338d2d8b5b6e6f9271b27aa74a6cc3bb1c8",
+ "native/terms/src/app_name_sources.rs":"06d27786a6ffcaaec8a37ca46405363d2395ed459df54b455235a4041740e15e",
 
- "native/terms/src/app_names.rs":"2f9f195abd7fe8b2e307c35a2195b572acbd201fc3628de44a6077a4e6671118",
+ "native/terms/src/app_names.rs":"4a1f6fa8d85d84d2bb111481ddd24f2d66c4ed3d33f2d5bbe7381909f976b070",
 
- "native/terms/src/app_onboarding.rs":"caec1f3634a1d6919f0b7b34d494767d19905c1c4bc054753afc1c3d37c41608",
+ "native/terms/src/app_onboarding.rs":"71d5bbf9fcba6603a7e9dafbb7750386d5ca59dbcd5dcf8df8217f066925ece8",
 
  "native/terms/src/app_photos.rs":"e962a4f34708387a18d62af5276f9eee3f59e6cc43de783ef90d749e0bc55aeb",
 
@@ -233,9 +233,9 @@
 
  "native/terms/src/app_preferences.rs":"56996e2d71f3bfc2317ebc72286985f5b9aa906b4d64c7621d1de4df08fca91c",
 
- "native/terms/src/app_profiles.rs":"eeab06879aa6d635442462b2f74bb728debeb70445c3802b88b7d0f9ba692f99",
+ "native/terms/src/app_profiles.rs":"df1146cd45833a19b0c1572ead638aac6d4d2be323f83234d84d67a704eb7a0a",
 
- "native/terms/src/app_provenance.rs":"2a9b841cd426d144b06e0867d10c1295062c0dfe0957db2b1156a709daa5794c",
+ "native/terms/src/app_provenance.rs":"8b34e53dfd6b6bd5ba4a796c48df6eed5366eed51e2af63bed79195de432b1da",
 
  "native/terms/src/app_provenance_cache.rs":"292be2794da44de858a1dd276f8dc17e86a22d050f51e5bb3bfbd7b07f1e7004",
 
@@ -247,7 +247,7 @@
 
  "native/terms/src/app_rescue.rs":"16274da1a0b1683ea0f652c79200cbc2b95ea62732c137c3ae08e7943601a9f0",
 
- "native/terms/src/app_research.rs":"fdf91e441fc3bd223f2c56c5d40a34b5e29c1e93d3e77858d01c4046404a2820",
+ "native/terms/src/app_research.rs":"d1a5718e364c22730e860713ebe97b4ae9d83977e8ebe651724ea41c44d79ccd",
 
  "native/terms/src/app_resources.rs":"08b7335b22a08947938bf80fe707302cfa82c0fa19b3b3122c28cfe78499811d",
 
@@ -261,9 +261,9 @@
 
  "native/terms/src/app_sources.rs":"69b2de0b8ab8a7bc9c7b1a5853aa0277c9baeb7666e8d1d270b57c80156f7687",
 
- "native/terms/src/app_sync.rs":"f1c41b6bdb0563e90ad93db6cad42714fe7b2d51357947c366116f0c253d5a0a",
+ "native/terms/src/app_sync.rs":"664639a22396081807fcafe9f8e338c7ed070dbaba9c3cc57eaed1874b0da91c",
 
- "native/terms/src/app_tasks.rs":"3c01ae07dd99d6a8882c659f1f1cb0203a4eb1ddcc2fdccac6c06d36a19d5083",
+ "native/terms/src/app_tasks.rs":"34a34570e6e484297afaeb855fd6920c799ae8954eda87fba11b271b7889676f",
 
  "native/terms/src/app_updates.rs":"c7d3c6a736bfa4662a2e4f7a99607e0905ef7437975c440bb66ebc002521ced2",
 
@@ -283,9 +283,9 @@
 
  "native/terms/src/http_artists.rs":"f15a054a4ccf76e05066d3e50bba89f7f72a8b507a174e4045061e3f1466c8d8",
 
- "native/terms/src/http_browse.rs":"3927473efa1d18f618b1b318b1216ed7fca946cd595c168bdd3b971968b3cb53",
+ "native/terms/src/http_browse.rs":"43bfb9688069d56fabb1c7dd518099df94e2dde0eff93a17941da91e10220b1e",
 
- "native/terms/src/http_characters.rs":"c49d546d8ae641b161fb02cc48275c246bf653e4d8d66d1023916f6313392c5e",
+ "native/terms/src/http_characters.rs":"be4e0b50903d4b3ffc5968f9d049e0e057f494b0006f619a8dc46efb3c2108df",
 
  "native/terms/src/http_host_get.rs":"3ecdb97a27150dbd87ceda841c7358fc09a4f910ce154746064987899f542c71",
 
@@ -297,31 +297,31 @@
 
  "native/terms/src/http_read.rs":"60a1c953750aed7dab7cc877e368bbf4db288771a9c09372c58297310e26449e",
 
- "native/terms/src/image_samples/mod.rs":"7100452279fd5c42b3b082ce828f9f31f993166b71d81df64514e289e2a375c5",
+ "native/terms/src/image_samples/mod.rs":"7936fc56c34b50cd40ed7e957143840ceb15f2d5efc06ba6da3e72a5d16819de",
 
  "native/terms/src/image_samples/pnm.rs":"d06bd15c05727badacdb5f4b5fbf2702eab55a18efd3943538e6c408fcf540cb",
 
  "native/terms/src/image_samples/tiff_scalar.rs":"67055d79b31208cebb702f40c7e9c571a88ef020906de992c3b447322d466e3d",
 
- "native/terms/src/index_compute/build.rs":"9b334bce4bdde150f89513d51950b4a193c7c1ebfca2c3a93c290a1a65424ad4",
+ "native/terms/src/index_compute/build.rs":"44dc8e7433912022c97be7c537b45562b0631450e86d61430a9bd7b32eaeb3dd",
 
- "native/terms/src/index_compute/clean.rs":"f48ae0b2efc54aa542922196364b8a2e696f5d52b58981df067858de2b1ca24c",
+ "native/terms/src/index_compute/clean.rs":"738331ec667eb1ea77b3138cc8198a05888737899f45c628780e57d5d6641bc3",
 
- "native/terms/src/index_compute/mod.rs":"e70df5ba3d558b185c86ac608942f3bf7168cd9bd28b0f1f912506400a6a58a1",
+ "native/terms/src/index_compute/mod.rs":"687027cdd013bdcef8f1103b300b356e070a26a18b084cc9bbf1e1de3b8664bf",
 
  "native/terms/src/index_compute/numeric.rs":"4acbfb729869ad9192bc23d91605b78ce8f864e63e2d8c076138a78ae17228d3",
 
- "native/terms/src/index_compute/scan.rs":"0c5464cb3a092695928deae3cbd475e884ee7c251f9ef3f423791254eaa32ee8",
+ "native/terms/src/index_compute/scan.rs":"728d5314fbeaacfa5efd2109a33aa6d2719e2aaa41ed35c003824d7932f8a2e5",
 
  "native/terms/src/index_generation.rs":"556ad63a4bb7b8d30e3191d466b91744b29f23fd4fc53fa40ffb9f13b54946e6",
 
  "native/terms/src/lib.rs":"c890139823d735dc00fa984d44f010c7743675b62214bfbebbb3fdc1cc8475bf",
 
- "native/terms/src/platform_process.rs":"66a45606b4a65b14b2725679bbae0e7e5445e63fddede8e804c2e8d4cca893b0",
+ "native/terms/src/platform_process.rs":"46906f193dc5aa14c5ba5c8e27bf2682c5cf859376422265973c6d32381e3d5a",
 
  "native/terms/src/read_harness.rs":"858e975d3a99b4228250120f9120281a0ea4e0413deae915f27068df1a00ce84",
 
- "native/terms/src/recognition_compute/anchor_snapshot.rs":"ac96b3a6beff4b71c663ab1a7698d05d37317f1af16a6af7becf4e04616103ce",
+ "native/terms/src/recognition_compute/anchor_snapshot.rs":"6af4b4539cac9f6e6b16e81e5af867fd5948428a457c37438aa44426da53192b",
 
  "native/terms/src/recognition_compute/anchors.rs":"950b56c3552265a5882ffae28d19fb41fa0a9fe0fa400bcf9edd2ad8dbb973aa",
 
@@ -337,21 +337,21 @@
 
  "native/terms/src/recognition_compute/preprocess.rs":"261b08d786e401a253e4bec9d83e5969a0e409b1209c107698d9fcf9a08149a3",
 
- "native/terms/src/recognition_compute/producer.rs":"a9c2f93ac566196aaee555681c28844dc49590d290c40406a2981d82cc316a47",
+ "native/terms/src/recognition_compute/producer.rs":"8cbf64eddd0fdd96d1612c5ecd4524be7e4fae2126d7dd5c3aaa26b4416bf2c5",
 
  "native/terms/src/recognition_compute/session.rs":"160dd10a3e0bc98b65d7f7ce71d3f53f995a18fcf58037c09ac0e1f5c054a7ba",
 
- "native/terms/src/research_compute/discriminate.rs":"9fbacee2fef95dba8bb6f0c634a4e6b710fb8d484265b21a051ac2b92684fb5a",
+ "native/terms/src/research_compute/discriminate.rs":"3c02991991c25b6f6de274c3d49edeb5a183e99743e70e658eda06d32482ebd3",
 
- "native/terms/src/research_compute/features.rs":"4ccd33c9986099f7a7b4df2c4b8822998f59726275c661ab807d48032737ec32",
+ "native/terms/src/research_compute/features.rs":"2ce93c9f976cbf454a41f26aec503273a4def8588febda034be5adf895a56f9c",
 
  "native/terms/src/research_compute/groups.rs":"aefd22a675bd8ba0ea534e3a6bfd35d7718c305c03c862cc86bcab7a1a62abd8",
 
- "native/terms/src/research_compute/mod.rs":"4189cddb20fba4fc73f58ab34cd42acaf1e5b2eed5daf37796bf4146e28d0dd0",
+ "native/terms/src/research_compute/mod.rs":"19cebf74a912f8cc736bdd2c5a56161bab2e9ad8340d676edb454fdf8245a7c7",
 
  "native/terms/src/research_compute/numeric.rs":"f9ce48331cf55805cfa9887ec4514beb98a0c1814a508c7b5dd7d2a428ed739c",
 
- "native/terms/src/research_compute/relation_fft.rs":"ca01e545b5a07fcf7e119ea0ee65d53c6475d318153ee0261e90d517b4ad7897",
+ "native/terms/src/research_compute/relation_fft.rs":"a921e678cae51cf4c3b0e67f517a9be4be2ef6c697ef901c69e30162a65ec130",
 
  "native/terms/src/research_compute/relation_image.rs":"039a9173171c107b9e9494431aa1fc3c7022a7bb2f1b955971d5f4a16b8f7c4e",
 
@@ -367,7 +367,7 @@
 
  "native/terms/src/sqlite.rs":"a9d28dfd07ece00f2dd0dc9edb274636cce76f02f489b260cfb291abc9c813fc",
 
- "native/terms/src/table_delta.rs":"f5a08f3cb085ab3087636ada454a8bcc4e8de31f4b71d1f8e204d6a6d04b712a",
+ "native/terms/src/table_delta.rs":"bbcc8870a13aec03cf19266808b5756524f8ce907726e1f372c58dc2dbd27a3e",
 
  "native/terms/src/task_state.rs":"f4b8017e875955cf805cfff7dde03dfb800bd4bdf29f8af1a65c48041bc75e14",
 

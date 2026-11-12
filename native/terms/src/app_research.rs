@@ -1,5 +1,4 @@
 //! Optional calculation workers operate on snapshots. The native owner validates and publishes.
-#![cfg_attr(not(test), deny(clippy::unwrap_used))]
 use crate::{
     app_library::Library,
     app_tasks::{Task, TaskContext, TaskIdentity},
@@ -2137,7 +2136,9 @@ mod tests {
     /// POSIX only, so this measurement and the test using it are not built on Windows.
     #[cfg(unix)]
     fn peak_rss() -> u64 {
+        // SAFETY: libc::rusage 只含整数和 timeval，全零是合法值。
         let mut usage: libc::rusage = unsafe { std::mem::zeroed() };
+        // SAFETY: `usage` 是本地结构，getrusage 只向其中写入。
         unsafe { libc::getrusage(libc::RUSAGE_SELF, &mut usage) };
         let peak = usage.ru_maxrss as u64;
         if cfg!(target_os = "macos") {

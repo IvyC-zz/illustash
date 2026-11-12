@@ -92,6 +92,7 @@ pub(crate) fn day_bounds(day: &str) -> Result<(String, String)> {
     }
     // Use the host calendar conversion, including its representable-year limits,
     // exactly where Python day_bounds calls mktime/localtime.
+    // SAFETY: libc::tm 只含整数（Unix 上另有可为空的时区名指针），全零是合法值。
     let mut tm: libc::tm = unsafe { std::mem::zeroed() };
     tm.tm_year = y - 1900;
     tm.tm_mon = m - 1;

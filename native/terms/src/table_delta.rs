@@ -6,7 +6,6 @@
 //! rows stay where they are, every other current row is deleted and the remaining desired rows are
 //! appended in order. The table then holds exactly the desired rows in the desired rowid order, which
 //! is what the full rewrite left; only the rowid numbers are no longer renumbered from 1.
-#![cfg_attr(not(test), deny(clippy::unwrap_used))]
 use crate::{Error, Result};
 use rusqlite::{
     functions::FunctionFlags,

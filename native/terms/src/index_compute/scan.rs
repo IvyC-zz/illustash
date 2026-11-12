@@ -15,22 +15,22 @@ pub(super) fn scan(
         fs::write(&manifest, "uuid\n")?;
     }
     let mut features = matrix(&fp)?;
-    let mut rdr = csv::Reader::from_path(&manifest).map_err(|e| invalid(e.to_string()))?;
+    let mut rdr = csv::Reader::from_path(&manifest).map_err(|e| Error::invalid(e.to_string()))?;
     let uuid = rdr
         .headers()
-        .map_err(|e| invalid(e.to_string()))?
+        .map_err(|e| Error::invalid(e.to_string()))?
         .iter()
         .position(|s| s == "uuid")
-        .ok_or_else(|| invalid("manifest uuid缺失"))?;
+        .ok_or_else(|| Error::invalid("manifest uuid缺失"))?;
     let mut assets = rdr
         .records()
         .map(|r| {
-            let r = r.map_err(|e| invalid(e.to_string()))?;
-            Ok(r.get(uuid).ok_or_else(|| invalid("manifest uuid缺失"))?.to_owned())
+            let r = r.map_err(|e| Error::invalid(e.to_string()))?;
+            Ok(r.get(uuid).ok_or_else(|| Error::invalid("manifest uuid缺失"))?.to_owned())
         })
         .collect::<Result<Vec<_>>>()?;
     if assets.len() != features.len() {
-        return Err(invalid("索引特征与manifest长度不匹配"));
+        return Err(Error::invalid("索引特征与manifest长度不匹配"));
     }
     let have: HashSet<_> = assets.iter().map(|s| s.trim().to_uppercase()).collect();
     let db = crate::sqlite::open_with_flags(review.join("pi.db"), rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)?;
@@ -47,12 +47,12 @@ pub(super) fn scan(
                 continue;
             }
             if blob.len() != DIM * 4 {
-                return Err(invalid("索引CCIP向量维数不正确"));
+                return Err(Error::invalid("索引CCIP向量维数不正确"));
             }
             let values: Vec<_> =
                 blob.chunks_exact(4).map(|b| f32::from_le_bytes(b.try_into().expect("four bytes"))).collect();
             if values.iter().any(|v| !v.is_finite()) {
-                return Err(invalid("索引CCIP向量必须有限"));
+                return Err(Error::invalid("索引CCIP向量必须有限"));
             }
             features.push(values);
             assets.push(id);
@@ -61,9 +61,9 @@ pub(super) fn scan(
     let mut csv = csv::WriterBuilder::new()
         .terminator(csv::Terminator::CRLF)
         .from_path(review.join("char-scan.csv"))
-        .map_err(|e| invalid(e.to_string()))?;
+        .map_err(|e| Error::invalid(e.to_string()))?;
     csv.write_record(["uuid", "char_id", "entity", "dist", "thresh", "tier", "rank", "within"])
-        .map_err(|e| invalid(e.to_string()))?;
+        .map_err(|e| Error::invalid(e.to_string()))?;
     if vectors.is_empty() || features.is_empty() {
         csv.flush()?;
         return Ok(vec![]);
@@ -107,10 +107,10 @@ pub(super) fn scan(
                     &rank.to_string(),
                     if ok { "1" } else { "0" },
                 ])
-                .map_err(|e| invalid(e.to_string()))?;
+                .map_err(|e| Error::invalid(e.to_string()))?;
                 rank += 1;
                 if ok {
-                    let confidence = 1. - rounded.parse::<f64>().map_err(|e| invalid(e.to_string()))?;
+                    let confidence = 1. - rounded.parse::<f64>().map_err(|e| Error::invalid(e.to_string()))?;
                     let row = (asset.to_owned(), entity.clone(), confidence);
                     let key = (asset.to_owned(), entity.clone());
                     if let Some(&i) = positions.get(&key) {

@@ -10,9 +10,6 @@ use std::{
     path::{Path, PathBuf},
 };
 
-fn invalid(message: impl Into<String>) -> Error {
-    Error::Invalid(message.into())
-}
 #[derive(Deserialize)]
 pub struct Request {
     pub format: String,
@@ -37,23 +34,24 @@ pub struct Tags {
 }
 impl Tags {
     pub fn load(path: &Path) -> Result<Self> {
-        let mut reader = csv::Reader::from_path(path).map_err(|e| invalid(e.to_string()))?;
-        let headers = reader.headers().map_err(|e| invalid(e.to_string()))?;
-        let name = headers.iter().position(|v| v == "name").ok_or_else(|| invalid("标签缺少 name"))?;
-        let category = headers.iter().position(|v| v == "category").ok_or_else(|| invalid("标签缺少 category"))?;
+        let mut reader = csv::Reader::from_path(path).map_err(|e| Error::invalid(e.to_string()))?;
+        let headers = reader.headers().map_err(|e| Error::invalid(e.to_string()))?;
+        let name = headers.iter().position(|v| v == "name").ok_or_else(|| Error::invalid("标签缺少 name"))?;
+        let category =
+            headers.iter().position(|v| v == "category").ok_or_else(|| Error::invalid("标签缺少 category"))?;
         let mut rows = Vec::new();
         for row in reader.records() {
-            let row = row.map_err(|e| invalid(e.to_string()))?;
+            let row = row.map_err(|e| Error::invalid(e.to_string()))?;
             let dim = match row.get(category) {
                 Some("0") => Some("general"),
                 Some("4") => Some("character"),
                 Some("9") => Some("rating"),
                 _ => None,
             };
-            rows.push((row.get(name).ok_or_else(|| invalid("标签缺少名称"))?.to_owned(), dim));
+            rows.push((row.get(name).ok_or_else(|| Error::invalid("标签缺少名称"))?.to_owned(), dim));
         }
         if rows.is_empty() {
-            return Err(invalid("标签表为空"));
+            return Err(Error::invalid("标签表为空"));
         }
         Ok(Self { rows })
     }
@@ -65,7 +63,7 @@ impl Tags {
     }
     pub fn labels(&self, asset: &str, probs: &[f32]) -> Result<Vec<Label>> {
         if probs.len() != self.rows.len() || probs.iter().any(|v| !v.is_finite() || !(0.0..=1.0).contains(v)) {
-            return Err(invalid("WD 概率与标签维度不匹配或非有限概率"));
+            return Err(Error::invalid("WD 概率与标签维度不匹配或非有限概率"));
         }
         Ok(self
             .rows
@@ -129,10 +127,10 @@ pub fn decode_bytes(bytes: &[u8], path: &Path) -> Result<RgbImage> {
             decoder.finish()?;
             RgbImage::from_raw(width, height, pixels).ok_or_else(|| std::io::Error::other("JPEG 像素长度不匹配"))
         })
-        .map_err(|_| invalid("JPEG 解码失败"))??;
+        .map_err(|_| Error::invalid("JPEG 解码失败"))??;
         Ok(image)
     } else {
-        let image = reader.decode().map_err(|e| invalid(format!("图片解码失败: {e}")))?;
+        let image = reader.decode().map_err(|e| Error::invalid(format!("图片解码失败: {e}")))?;
         // Pillow I;16.convert('RGB') clamps integer grayscale to 255; image::to_rgb8
         // instead scales the full 16-bit range. Preserve the former before resize.
         Ok(match image {
@@ -151,7 +149,7 @@ pub fn npy(rows: &[Vec<f32>], dimension: usize) -> Result<Vec<u8>> {
     let header = format!("{{'descr': '<f4', 'fortran_order': False, 'shape': ({}, {}), }}", rows.len(), dimension);
     let padding = (64 - (10 + header.len() + 1) % 64) % 64;
     let header = format!("{header}{}\n", " ".repeat(padding));
-    let length = u16::try_from(header.len()).map_err(|_| invalid("NPY header 过长"))?;
+    let length = u16::try_from(header.len()).map_err(|_| Error::invalid("NPY header 过长"))?;
     let mut output = b"\x93NUMPY\x01\x00".to_vec();
     output.extend(length.to_le_bytes());
     output.extend(header.as_bytes());
@@ -172,17 +170,17 @@ pub fn write_batch(
     ccip: &[Vec<f32>],
 ) -> Result<()> {
     if ids.is_empty() || ids.len() != wd.len() || ids.len() != ccip.len() {
-        return Err(invalid("识别批次行数不匹配"));
+        return Err(Error::invalid("识别批次行数不匹配"));
     }
     let library =
-        identity["library_id"].as_str().filter(|s| !s.is_empty()).ok_or_else(|| invalid("缺少 library_id"))?;
+        identity["library_id"].as_str().filter(|s| !s.is_empty()).ok_or_else(|| Error::invalid("缺少 library_id"))?;
     let wd = npy(wd, 1024)?;
     let ccip = npy(ccip, 768)?;
     let labels = labels
         .iter()
         .map(serde_json::to_string)
         .collect::<std::result::Result<Vec<_>, _>>()
-        .map_err(|e| invalid(e.to_string()))?
+        .map_err(|e| Error::invalid(e.to_string()))?
         .join("\n");
     fs::create_dir(path)?;
     let mut files = serde_json::Map::new();
@@ -192,7 +190,7 @@ pub fn write_batch(
         files.insert(name.into(), json!({"bytes":bytes.len(),"sha256":format!("{:x}",Sha256::digest(bytes))}));
     }
     // Manifest is written last; an interrupted batch is not importable.
-    fs::write(path.join("manifest.json"),serde_json::to_vec(&json!({"format":"illustash-recognition/1","library_id":library,"assets":ids,"models":models,"files":files})).map_err(|e|invalid(e.to_string()))?)?;
+    fs::write(path.join("manifest.json"),serde_json::to_vec(&json!({"format":"illustash-recognition/1","library_id":library,"assets":ids,"models":models,"files":files})).map_err(|e|Error::invalid(e.to_string()))?)?;
     Ok(())
 }
 /// Progress for the waiting host, at the path the host passes in ILLUSTASH_RECOGNITION_PROGRESS.
@@ -235,21 +233,21 @@ pub fn write_complete(batch: &Path, task_id: &str, ids: &[String], sidecar: &[u8
         "manifest_sha256":format!("{:x}", Sha256::digest(&manifest)),
         "sidecar_sha256":format!("{:x}", Sha256::digest(sidecar))});
     let temporary = batch.join("complete.tmp");
-    fs::write(&temporary, serde_json::to_vec(&value).map_err(|e| invalid(e.to_string()))?)?;
+    fs::write(&temporary, serde_json::to_vec(&value).map_err(|e| Error::invalid(e.to_string()))?)?;
     fs::rename(temporary, batch.join("complete.json"))?;
     Ok(())
 }
 /// Produce WD v1 batches and independently bound character-claim sidecars.
 pub fn run(request: Request, resources: &Path, models: &Path, runtime: &Path, shared: &Path) -> Result<Value> {
     if request.format != "illustash-sync/1" {
-        return Err(invalid("unsupported recognition request"));
+        return Err(Error::invalid("unsupported recognition request"));
     }
     let identity: crate::app_tasks::TaskIdentity =
-        serde_json::from_value(request.identity.clone()).map_err(|e| invalid(format!("识别 identity: {e}")))?;
+        serde_json::from_value(request.identity.clone()).map_err(|e| Error::invalid(format!("识别 identity: {e}")))?;
     let mut progress = Progress::from_env(&identity.task_id, request.assets.len());
     progress.write("preparing");
     #[cfg(target_os = "windows")]
-    illustash_platform::platform_research_math::windows_backend_identity().map_err(invalid)?;
+    illustash_platform::platform_research_math::windows_backend_identity().map_err(Error::invalid)?;
     let snapshot = super::anchor_snapshot::Snapshot::load(shared, &identity.package.join("source.sqlite"))?;
     let specs = model_specs(resources, models)?;
     let tags = Tags::load(&resources.join("tags/tags_v3.csv"))?;
@@ -297,7 +295,7 @@ pub fn run(request: Request, resources: &Path, models: &Path, runtime: &Path, sh
             snapshot.fingerprint.clone(),
             claims,
         );
-        let sidecar_bytes = serde_json::to_vec(&claim).map_err(|e| invalid(e.to_string()))?;
+        let sidecar_bytes = serde_json::to_vec(&claim).map_err(|e| Error::invalid(e.to_string()))?;
         fs::write(&sidecar, &sidecar_bytes)?;
         write_complete(&path, &identity.task_id, &ids, &sidecar_bytes)?;
         sidecars.push(sidecar);
@@ -315,26 +313,26 @@ pub fn worker(arguments: &[String]) -> Result<()> {
     let runtime = crate::app_resources::ort_runtime(&resources);
     if arguments == ["--check"] {
         #[cfg(target_os = "windows")]
-        illustash_platform::platform_research_math::windows_backend_identity().map_err(invalid)?;
+        illustash_platform::platform_research_math::windows_backend_identity().map_err(Error::invalid)?;
         let tags = Tags::load(&resources.join("tags/tags_v3.csv"))?;
         let _ = model_specs(&resources, models)?;
         // Builds the accelerated session too, so the first sync after setup finds CoreML's model compiled.
         let shared = crate::app_resources::shared_path(&resources).ok();
         let _ = ModelSessions::load(models, &runtime, &super::backend::Acceleration::from_env(shared.as_deref()))?;
         if tags.is_empty() {
-            return Err(invalid("标签表为空"));
+            return Err(Error::invalid("标签表为空"));
         }
         return Ok(());
     }
     if arguments.len() != 2 {
-        return Err(invalid("需要 request.json response.json 或 --check"));
+        return Err(Error::invalid("需要 request.json response.json 或 --check"));
     }
     let request: Request = crate::worker_protocol::read(Path::new(&arguments[0]))?;
     let _: crate::app_tasks::TaskIdentity =
-        serde_json::from_value(request.identity.clone()).map_err(|e| invalid(format!("识别 identity: {e}")))?;
+        serde_json::from_value(request.identity.clone()).map_err(|e| Error::invalid(format!("识别 identity: {e}")))?;
     let shared = crate::app_resources::shared_path(&resources)?;
     let result = run(request, &resources, models, &runtime, &shared)?;
-    fs::write(&arguments[1], serde_json::to_vec(&result).map_err(|e| invalid(e.to_string()))?)?;
+    fs::write(&arguments[1], serde_json::to_vec(&result).map_err(|e| Error::invalid(e.to_string()))?)?;
     Ok(())
 }
 

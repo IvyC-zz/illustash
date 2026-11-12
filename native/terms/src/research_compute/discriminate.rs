@@ -28,10 +28,6 @@ const MAX_ITERATIONS: usize = 300;
 const BACKTRACKS: usize = 20;
 const ARMIJO: f64 = 1e-4;
 
-fn invalid(m: String) -> Error {
-    Error::Invalid(m)
-}
-
 /// Shared training rows: `x` is row-major n x d, `xt` its transpose.
 struct Rows {
     n: usize,
@@ -61,7 +57,7 @@ struct Objective {
 fn evaluate(rows: &Rows, labels: &Labels, which: &[usize], p: &[Vec<f64>]) -> Result<Objective> {
     let (n, d, k) = (rows.n, rows.d, which.len());
     let weights: Vec<f32> = p.iter().flat_map(|v| v[..d].iter().map(|&x| x as f32)).collect();
-    let z = cross(&rows.x, n, &weights, k, d).map_err(invalid)?;
+    let z = cross(&rows.x, n, &weights, k, d).map_err(Error::invalid)?;
     let mut f = vec![0.0f64; k];
     let mut r = vec![0.0f32; k * n]; // k x n, transposed residuals
     let mut gb = vec![0.0f64; k];
@@ -80,7 +76,7 @@ fn evaluate(rows: &Rows, labels: &Labels, which: &[usize], p: &[Vec<f64>]) -> Re
             gb[c] += res;
         }
     }
-    let gw = cross(&r, k, &rows.xt, d, n).map_err(invalid)?;
+    let gw = cross(&r, k, &rows.xt, d, n).map_err(Error::invalid)?;
     let mut g = Vec::with_capacity(k);
     for (c, &j) in which.iter().enumerate() {
         let scale = C * labels.total[j];
@@ -299,7 +295,7 @@ pub fn claims(
     let mut out = BTreeMap::new();
     for block in (0..known.len()).step_by(8192) {
         let end = (block + 8192).min(known.len());
-        let z = cross(&flat[block * d..end * d], end - block, &weights, e, d).map_err(invalid)?;
+        let z = cross(&flat[block * d..end * d], end - block, &weights, e, d).map_err(Error::invalid)?;
         for (j, entity) in trained.iter().enumerate() {
             let hits: Vec<usize> = (block..end)
                 .filter(|&i| {
@@ -312,10 +308,10 @@ pub fn claims(
             }
             let query: Vec<Vec<f32>> = hits.iter().map(|&i| images[i].clone()).collect();
             let positives: Vec<Vec<f32>> = confirmed[entity].iter().map(|u| f.rows[f.row[u]].clone()).collect();
-            let near = numeric::distances(&query, &positives).map_err(invalid)?;
+            let near = numeric::distances(&query, &positives).map_err(Error::invalid)?;
             let removed: Vec<Vec<f32>> =
                 rejected.get(entity).map(|r| r.iter().map(|u| f.rows[f.row[u]].clone()).collect()).unwrap_or_default();
-            let away = numeric::distances(&query, &removed).map_err(invalid)?;
+            let away = numeric::distances(&query, &removed).map_err(Error::invalid)?;
             for (h, &i) in hits.iter().enumerate() {
                 let d_pos = near[h].iter().copied().fold(f32::INFINITY, f32::min);
                 let d_neg = away[h].iter().copied().fold(f32::INFINITY, f32::min);
