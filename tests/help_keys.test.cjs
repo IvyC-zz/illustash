@@ -1,4 +1,4 @@
-// 帮助对话框的快捷键表（#353，已知问题 11）：由 core/modes.js 的 SHORTCUTS 生成，和 ui/grid.js 的键盘处理认的键
+// 帮助对话框的快捷键表（#353）：由 core/modes.js 的 SHORTCUTS 生成，和 ui/grid.js 的键盘处理认的键
 // 一一对应；⌘ 在别的系统上写成 Ctrl。
 const {test, before} = require('node:test');
 const assert = require('node:assert/strict');

@@ -1199,7 +1199,7 @@
   "给当前这张追加角色；不在角色页、有选中时同 C": "Add another character to the current picture; outside character pages, with a selection, the same as C",
   "子标签（角色页，选中图片时）": "Sub-tags (on a character page, with pictures selected)",
   "跳过（「未识别」页和它的分组；没有选中时只在「全部未识别」）": "Skip (“Unidentified” and its groups; without a selection, only on “All unidentified”)",
-  "选详情栏或大图里「也可能是」的第几项；按住 ⌥ 改为追加": "Pick that “Might also be” in the details or the large view; hold ⌥ to add it instead",
+  "选详情栏或大图里「也可能是」的第几项；按住 ⌥（Alt）改为追加": "Pick that “Might also be” in the details or the large view; hold ⌥ (Alt) to add it instead",
   "回答「是 TA 吗？」：随机抽查页回答选中的图，详情栏或大图里回答问题条": "Answer “Is this them?”: for the selected pictures on Spot check, or the question in the details or the large view",
   "缩放图片网格；大图打开时缩放大图": "Zoom the picture grid; zoom the large view while it is open",
   "捏合 · ⌘ 滚动": "Pinch · ⌘-scroll",
