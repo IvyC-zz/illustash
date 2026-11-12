@@ -1,7 +1,7 @@
-"""#48 actual native name event consumption. Only freshly generated synthetic packages/services.
+"""#48 真实的原生名称事件消费。只用新生成的合成图库包和服务。
 
-Deterministic success bytes, formal name/projection/history rows and event acknowledgements;
-errors compare status codes. No account store, real Photos package or library copy is read.
+比较确定的成功字节、正式名称/投影/历史行和事件确认；
+出错时比较状态码。不读账号存储、真实的照片图库包或图库副本。
 """
 from contextlib import closing
 from concurrent.futures import ThreadPoolExecutor
@@ -135,10 +135,10 @@ class NativeNamesTest(unittest.TestCase):
         self.enable()
         self.assertEqual(self.request('/api/names',{'action':'refresh'})['status'],200)
         self.finish()
-        # All formal/core name tables and unchanged history; exclude nondeterministic timing/budget/cache bookkeeping.
+        # 全部正式/core 名称表和未改动的历史；不含不确定的计时、预算和缓存记账。
         with closing(sqlite3.connect(self.lib.db)) as new:
             actual=name_tables(new)
-            # Legacy tables core v8 dropped (#201): their content is compared in the term_* tables that replaced them.
+            # core v8 删掉的旧表（#201）：其内容在取代它们的 term_* 表里比较。
             self.assertEqual({t:rows for t,rows in expected.items() if t in actual or t not in RETIRED},actual)
             self.assertEqual(new.execute("SELECT value FROM meta WHERE key='names_projected'").fetchone(),new.execute("SELECT value FROM meta WHERE key='names_version'").fetchone())
         self.assertTrue(all(status=='done' and not error for _,status,error in self.events()))
@@ -185,7 +185,7 @@ class NativeNamesTest(unittest.TestCase):
         granted=json.loads(response['body'])['network']
         self.assertTrue(granted['authorized']);self.assertFalse(granted['this_run']);self.assertRegex(granted['granted_at'],r'^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d$')
         self.assertEqual(prefs(),1)
-        # The consent belongs to the library: it survives a restart and is not a startup preference.
+        # 同意属于图库：重启后仍在，也不是启动偏好设置。
         self.stop(self.process);self.process,self.log=self.start(self.lib.path)
         self.token=json.loads(self.request('/api/bootstrap')['body'])['token']
         self.assertEqual(network(),granted)
@@ -195,7 +195,7 @@ class NativeNamesTest(unittest.TestCase):
         self.assertEqual(json.loads(revoked['body'])['network'],
                          {'authorized':False,'this_run':False,'granted_at':None})
         self.assertEqual(prefs(),0)
-        # --names-network authorizes this run only and records nothing.
+        # --names-network 只授权本次运行，不记录任何东西。
         self.stop(self.process);self.process,self.log=self.start(self.lib.path,extra=('--names-network',))
         self.token=json.loads(self.request('/api/bootstrap')['body'])['token']
         self.assertEqual(network(),{'authorized':True,'this_run':True,'granted_at':None})
@@ -279,7 +279,7 @@ class NativeNamesTest(unittest.TestCase):
         self.enable();ident=self.alice
         self.service.block=True
         self.request('/api/names',{'action':'refresh','entity':ident});self.assertTrue(self.service.entered.wait(3))
-        # A user name saved meanwhile (formerly through the old Store, now the application's own route).
+        # 这期间保存了一个用户名称（以前经过旧 Store，现在走应用自己的路由）。
         edited=self.request('/api/character/profile',{'entity':ident,'name':'人工保留名'})
         self.assertEqual(edited['status'],200,edited['body'])
         self.service.release.set();state=self.finish('error')
@@ -343,13 +343,13 @@ class NativeNamesTest(unittest.TestCase):
 
 
 
-# The names of characters, skins and works by identity key (the former `names` table, core v8 keeps them in term_names).
+# 按身份键列出角色、皮肤和作品的名称（原来的 `names` 表，core v8 把它们放在 term_names 里）。
 NAMES="SELECT t.key,n.lang,n.value,n.source,n.role,n.preferred,n.position FROM term_names n JOIN terms t ON t.id=n.term_id JOIN term_tree r ON r.term_id=n.term_id"
 
 
 def name_tables(c):
-    """Formal/core name tables and history, rows sorted; clock-like text as <clock>. Columns core v8 added are left out,
-    as the comparison baseline leaves them out (SKIP_COLUMNS)."""
+    """正式/core 名称表和历史，行已排序；类似时钟的文本记为 <clock>。core v8 新增的列不取，
+    因为对照基准也不含它们（SKIP_COLUMNS）。"""
     tables=[r[0] for r in c.execute("SELECT name FROM sqlite_master WHERE type='table' AND (name IN ('names','display_names','name_aliases','actions') OR name LIKE 'term_name%' OR name IN ('term_key_names','term_key_aliases'))")]
     def columns(table):
         return ','.join(f'"{name}"' for _,name,*_ in c.execute(f'PRAGMA table_info("{table}")') if (table,name) not in SKIP_COLUMNS)

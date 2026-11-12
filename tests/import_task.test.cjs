@@ -1,8 +1,7 @@
-// #88: an archive or recognition-result import runs as a background task. The library card shows the step it is on
-// with real counts only, a cancel button while it runs and how it ended; late or out-of-order answers (#34) never wind
-// it back, and the end is announced once.
+// #88：导入归档或识别结果作为后台任务运行。图库卡片显示它进行到哪一步（只用真实计数）、运行时的取消按钮，
+// 以及结束的方式；迟到或乱序的响应（#34）不会让它倒回去，结束只通知一次。
 const {test, before, afterEach} = require('node:test');
-const web = require('./web.cjs');   // the import's poller and words are core/jobs.js (#199)
+const web = require('./web.cjs');   // 导入的轮询和文案在 core/jobs.js（#199）
 let settings, effects;
 before(async () => { await web.ready(); settings = await web.load('ui/settings.js'); effects = await web.load('ui/effects.js'); });
 let cleanup = () => {};
@@ -10,7 +9,7 @@ afterEach(() => { cleanup(); cleanup = () => {}; });
 const assert = require('node:assert/strict');
 const esc = s => String(s).replace(/[&<>"]/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'})[c]);
 
-// The library card is ui/settings.js; the import's words and state are core/jobs.js.
+// 图库卡片在 ui/settings.js；导入的文案和状态在 core/jobs.js。
 function card(importTask) {
   const node = {innerHTML: '', contains: () => false}, {state, importLine} = web.core();
   Object.assign(state, {route: {page: 'settings'}, importTask, libraries: {
@@ -47,7 +46,7 @@ test('a stopping or finished import has no cancel button and says how it ended',
     const {html} = card(task);
     assert.ok(html.includes(esc(text)), `${task.status}: ${html}`);
     assert.doesNotMatch(html, /data-import-cancel/);
-    // A stopping import still holds the slot, so a new one cannot start until it has ended.
+    // 正在停止的导入仍占着位置，它结束前不能开始新的导入。
     (task.status === 'stopping' ? assert.match : assert.doesNotMatch)(html, /data-lib-choose="zip" disabled/);
   }
   assert.doesNotMatch(card({status: 'idle'}).html, /import-line/);
@@ -55,8 +54,8 @@ test('a stopping or finished import has no cancel button and says how it ended',
   assert.doesNotMatch(card(undefined).html, /import-line/);
 });
 
-// core/jobs.js polls; the library card (ui/settings.js) starts an import; ui/effects.js afterJob(), as app.js wires it,
-// announces the end and lists a new library. The page is a fake one; the import's own timers are the ones counted.
+// core/jobs.js 负责轮询；图库卡片（ui/settings.js）开始导入；ui/effects.js 的 afterJob()（接法与 app.js 相同）
+// 通知结束并列出新图库。页面是假的；计数的是导入自己的定时器。
 function poller(token = 'session') {
   const answers = [], timers = [], toasts = [], posted = [], offs = [];
   let libraries = 0;
@@ -82,7 +81,7 @@ test('starting polls until the end; an older answer arriving last does not wind 
   const p = poller();
   await p.c.startImport('/tmp/合成.zip');
   assert.equal(p.c.state.importTask.status, 'running');
-  const older = p.c.pollImports();  // a second poll overlaps the first one
+  const older = p.c.pollImports();  // 第二次轮询与第一次重叠
   p.answers[1]({...running(), status: 'done', result: {name: '合成'}});
   await older;
   p.answers[0](running({stage: 'unpacking', done: 1, total: 2}));

@@ -1,9 +1,9 @@
-"""Generate packaging/rust-licenses/: the license texts of every third-party Rust crate (#161).
+"""生成 packaging/rust-licenses/：每个第三方 Rust crate 的许可文本（#161）。
 
-Runs cargo-about (fixed version below, offline) over the three workspaces whose lock files build the shipped
-programs and writes rust-dependencies.txt (shipped as resources/licenses/) and crates.json (what it covers,
-checked by packaging/build.py against the lock files). Rerun after any change to a Cargo.lock or to dependency
-features; crate sources must already be in the local cargo registry (`cargo fetch --manifest-path ...`):
+对构建发布程序所用 lock 文件所在的三个 workspace 运行 cargo-about（版本固定见下，离线），写出
+rust-dependencies.txt（作为 resources/licenses/ 随包发布）和 crates.json（它覆盖了哪些 crate，由 packaging/build.py
+与 lock 文件核对）。任何 Cargo.lock 或依赖 feature 改动之后都要重新运行；crate 源码必须已在本地 cargo registry 里
+（`cargo fetch --manifest-path ...`）：
 
     cargo install --locked --features cli cargo-about@0.9.2
     python3 tools/gen_rust_licenses.py [--cargo-about PATH]
@@ -28,7 +28,7 @@ spec.loader.exec_module(build)
 
 
 def lf(text):
-    # The repository checks text out as LF (.gitattributes); write exactly what will be committed.
+    # 仓库按 LF 检出文本（.gitattributes）；写出的内容要和将提交的完全一致。
     return text.replace('\r\n', '\n').replace('\r', '\n')
 
 
@@ -61,7 +61,7 @@ def main():
             locked = build.third_party_crates(ROOT / workspace / 'Cargo.lock')
             if covered - locked:
                 sys.exit(f'{workspace}: cargo-about reported crates absent from Cargo.lock: {sorted(covered - locked)}')
-            # Locked optional dependencies that no feature of any workspace member enables are never compiled.
+            # lock 文件里的可选依赖，若没有任何 workspace 成员的 feature 启用它，就从不编译。
             workspaces[workspace] = {'crates': sorted(covered), 'not_built': sorted(locked - covered)}
     def key(name):
         crate, version = name.split(' ')

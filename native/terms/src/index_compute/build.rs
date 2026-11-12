@@ -26,7 +26,7 @@ impl<'de> serde::Deserialize<'de> for OrderedGender {
     }
 }
 pub(super) fn ordered_gender(path: &Path) -> Result<Vec<(String, f64)>> {
-    let ordered: OrderedMeta = serde_json::from_slice(&fs::read(path)?).map_err(|e| invalid(e.to_string()))?;
+    let ordered: OrderedMeta = serde_json::from_slice(&fs::read(path)?).map_err(|e| Error::invalid(e.to_string()))?;
     Ok(ordered.gender.map(|g| g.0).unwrap_or_default())
 }
 pub type Built =
@@ -83,23 +83,23 @@ pub(super) fn build(review: &Path, tags: &Path) -> Result<Built> {
         let cid = meta["short_tag"]
             .as_str()
             .filter(|s| !s.is_empty())
-            .unwrap_or(path.file_stem().and_then(|s| s.to_str()).ok_or_else(|| invalid("索引文件名不是UTF8"))?)
+            .unwrap_or(path.file_stem().and_then(|s| s.to_str()).ok_or_else(|| Error::invalid("索引文件名不是UTF8"))?)
             .to_owned();
         if !safe(&cid) {
-            return Err(invalid("索引角色ID不正确"));
+            return Err(Error::invalid("索引角色ID不正确"));
         }
         gender_order.insert(cid.clone(), ordered_gender(&path)?);
         source.insert(cid, meta);
     }
     let mut wd = HashSet::new();
-    let mut csv = csv::Reader::from_path(tags).map_err(|e| invalid(e.to_string()))?;
-    let header = csv.headers().map_err(|e| invalid(e.to_string()))?.clone();
-    let category = header.iter().position(|s| s == "category").ok_or_else(|| invalid("标签category缺失"))?;
-    let name = header.iter().position(|s| s == "name").ok_or_else(|| invalid("标签name缺失"))?;
+    let mut csv = csv::Reader::from_path(tags).map_err(|e| Error::invalid(e.to_string()))?;
+    let header = csv.headers().map_err(|e| Error::invalid(e.to_string()))?.clone();
+    let category = header.iter().position(|s| s == "category").ok_or_else(|| Error::invalid("标签category缺失"))?;
+    let name = header.iter().position(|s| s == "name").ok_or_else(|| Error::invalid("标签name缺失"))?;
     for r in csv.records() {
-        let r = r.map_err(|e| invalid(e.to_string()))?;
+        let r = r.map_err(|e| Error::invalid(e.to_string()))?;
         if r.get(category) == Some("4") {
-            wd.insert(r.get(name).ok_or_else(|| invalid("标签name缺失"))?.to_owned());
+            wd.insert(r.get(name).ok_or_else(|| Error::invalid("标签name缺失"))?.to_owned());
         }
     }
     let games = games(review)?;
@@ -167,7 +167,7 @@ pub(super) fn build(review: &Path, tags: &Path) -> Result<Built> {
             (
                 "core_tags",
                 json!(serde_json::to_string(&d["core_tags"].as_array().cloned().unwrap_or_default())
-                    .map_err(|e| invalid(e.to_string()))?),
+                    .map_err(|e| Error::invalid(e.to_string()))?),
             ),
             ("n_ref", nref),
             ("anchor_p50", p50),
@@ -193,7 +193,7 @@ pub(super) fn build(review: &Path, tags: &Path) -> Result<Built> {
                 for n in rec[names].as_array().into_iter().flatten() {
                     aliases.push((
                         cid.clone(),
-                        n.as_str().ok_or_else(|| invalid("官方名字不是文本"))?.into(),
+                        n.as_str().ok_or_else(|| Error::invalid("官方名字不是文本"))?.into(),
                         kind.into(),
                     ));
                 }
@@ -220,7 +220,7 @@ pub(super) fn build(review: &Path, tags: &Path) -> Result<Built> {
         cids.extend(info["also"].as_array().into_iter().flatten().cloned());
         for cid in cids {
             aliases.push((
-                cid.as_str().ok_or_else(|| invalid("相册角色ID不是文本"))?.into(),
+                cid.as_str().ok_or_else(|| Error::invalid("相册角色ID不是文本"))?.into(),
                 album.clone(),
                 "album".into(),
             ));
@@ -228,7 +228,7 @@ pub(super) fn build(review: &Path, tags: &Path) -> Result<Built> {
     }
     let mut seen = HashSet::new();
     aliases.retain(|a| seen.insert(a.clone()));
-    // Empty rebuild replaces stale anchors too, so dropping the last patch cannot leave old claims.
+    // 空的重建同样替换掉过期锚点，因此删掉最后一个补丁不会留下旧认领。
     save(&review.join("char-anchors.npy"), &vectors)?;
     fs::write(review.join("char-anchors.txt"), ids.join("\n"))?;
     Ok((rows, aliases, vectors, ids, metadata, patched))

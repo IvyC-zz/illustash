@@ -1,12 +1,12 @@
-// #41: the library card says what a shareable export leaves out (images, provenance cache, imported X follows)
-// and that moving to another computer needs the X archive imported again, once per state of the export.
+// #41：图库卡片说明可分享的导出不含哪些内容（图片、溯源缓存、导入过的 X 关注），
+// 以及换到另一台电脑要重新导入 X 归档；导出的每种状态下只说一次。
 const {test, before} = require('node:test');
-const web = require('./web.cjs');   // the import's words and state are core/ (#199)
+const web = require('./web.cjs');   // 导入的文案和状态在 core/（#199）
 let settings;
 before(async () => { await web.ready(); settings = await web.load('ui/settings.js'); });
 const assert = require('node:assert/strict');
 
-// The library card is ui/settings.js.
+// 图库卡片在 ui/settings.js。
 function render(exportState) {
   const card = {innerHTML: '', contains: () => false}, {state} = web.core();
   Object.assign(state, {route: {page: 'settings'}, importTask: undefined, libraries: {

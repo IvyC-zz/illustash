@@ -1,4 +1,4 @@
-"""Independent legacy queue/group parity. Synthetic databases only; no automatic build."""
+"""独立的旧版队列/分组等价测试。只用合成数据库，不自动构建。"""
 import json
 import os
 from pathlib import Path

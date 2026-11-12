@@ -1,4 +1,4 @@
-//! Stable external queries and machine cache receipt stay native; signatures are computed locally.
+//! 固定的外部查询和机器缓存回执留在原生侧；签名在本地计算。
 use super::{cache, net::Net};
 use crate::{app_library::Library, app_tasks::TaskContext, Error, Result};
 use rusqlite::{params, Connection, OptionalExtension};
@@ -259,7 +259,7 @@ pub(super) fn hashes(ctx: &TaskContext, path: &Path, net: &mut Net, step: &str, 
         iqdb(ctx, &mut c, net, step, rows)
     }
 }
-/// Looks the pictures' pixel hashes up on Danbooru, fifty at a time.
+/// 用图片的像素哈希在 Danbooru 上查找，每次五十张。
 fn pixel_hashes(ctx: &TaskContext, c: &mut Connection, net: &mut Net, rows: &[Value]) -> Result<Value> {
     let (mut looked, mut hits, mut unreadable, mut failed) = (0, 0, 0, 0);
     let mut stopped = String::new();
@@ -320,7 +320,7 @@ fn pixel_hashes(ctx: &TaskContext, c: &mut Connection, net: &mut Net, rows: &[Va
         "looked":looked,"hits":hits,"misses":misses,"unreadable":unreadable,"failed":failed,"stopped":stopped
     }))
 }
-/// Asks Danbooru's IQDB for each picture's best match (at most 10,000 pictures), taking it from a score of 80.
+/// 向 Danbooru 的 IQDB 查询每张图片的最佳匹配（最多 10,000 张），得分 80 起采用。
 fn iqdb(ctx: &TaskContext, c: &mut Connection, net: &mut Net, step: &str, rows: &[Value]) -> Result<Value> {
     let (mut looked, mut hits, mut failed) = (0, 0, 0);
     let mut stopped = String::new();

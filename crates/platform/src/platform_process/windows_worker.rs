@@ -1,5 +1,5 @@
-//! Start suspended, attach to a private kill-on-close job, then resume. No child can
-//! spawn an unowned descendant between CreateProcess and AssignProcessToJobObject.
+//! 先以挂起状态启动，加入私有的、关闭即杀的 job，再恢复运行。这样在 CreateProcess 和
+//! AssignProcessToJobObject 之间，子进程无法派生出不归 job 管的后代。
 use std::{
     ffi::c_void,
     io,
@@ -85,20 +85,24 @@ extern "system" {
     fn Process32FirstW(snapshot: Handle, entry: *mut ProcessEntry) -> i32;
     fn Process32NextW(snapshot: Handle, entry: *mut ProcessEntry) -> i32;
 }
-/// Same direct-parent identity that the legacy worker obtains with os.getppid().
+/// 与旧 worker 用 os.getppid() 得到的直接父进程身份相同。
 pub(super) fn parent_pid() -> io::Result<u32> {
+    // SAFETY: 无指针参数；返回的句柄在下面检查 INVALID_HANDLE_VALUE 后交给 `OwnedHandle`。
     let raw = unsafe { CreateToolhelp32Snapshot(2, 0) }; // TH32CS_SNAPPROCESS
     if raw as isize == -1 {
         return Err(io::Error::last_os_error());
     }
     let snapshot = OwnedHandle(raw);
+    // SAFETY: ProcessEntry 是只含整数和 u16 数组的 repr(C) 结构，全零是合法值。
     let mut entry: ProcessEntry = unsafe { std::mem::zeroed() };
     entry.size = std::mem::size_of::<ProcessEntry>() as u32;
+    // SAFETY: `snapshot` 是有效的进程快照句柄，`entry` 是 size 已正确填写的本地结构。
     let mut present = unsafe { Process32FirstW(snapshot.0, &mut entry) };
     while present != 0 {
         if entry.id == std::process::id() {
             return Ok(entry.parent);
         }
+        // SAFETY: `snapshot` 是有效的进程快照句柄，`entry` 是 size 已正确填写的本地结构。
         present = unsafe { Process32NextW(snapshot.0, &mut entry) };
     }
     Err(io::Error::last_os_error())
@@ -106,6 +110,7 @@ pub(super) fn parent_pid() -> io::Result<u32> {
 struct OwnedHandle(Handle);
 impl Drop for OwnedHandle {
     fn drop(&mut self) {
+        // SAFETY: `OwnedHandle` 只包装已检查有效的句柄，每个只在这里关闭一次。
         unsafe {
             CloseHandle(self.0);
         }
@@ -117,13 +122,16 @@ pub struct ProcessJob {
 }
 impl ProcessJob {
     pub fn spawn(command: &mut Command) -> io::Result<Self> {
+        // SAFETY: 两个可选参数都传空指针：默认安全属性、匿名作业。
         let handle = unsafe { CreateJobObjectW(std::ptr::null(), std::ptr::null()) };
         if handle.is_null() {
             return Err(io::Error::last_os_error());
         }
         let job = OwnedHandle(handle);
         let mut limits = ExtendedLimit::default();
-        limits.basic.flags = 0x2000; // JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE, no breakaway
+        limits.basic.flags = 0x2000; // JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE，不允许 breakaway
+                                     // SAFETY: `handle` 是刚创建的作业；信息类 9 是 JobObjectExtendedLimitInformation，
+                                     // `limits` 是对应布局的 repr(C) 结构，长度按实际大小传入。
         if unsafe {
             SetInformationJobObject(
                 handle,
@@ -141,6 +149,7 @@ impl ProcessJob {
             .stdout(Stdio::null())
             .stderr(Stdio::null());
         let mut child = command.spawn()?;
+        // SAFETY: `handle` 是存活的作业，`child` 的原始句柄在 `child` 存活期间有效。
         if unsafe { AssignProcessToJobObject(handle, child.as_raw_handle()) } == 0 {
             let error = io::Error::last_os_error();
             let _ = child.kill();
@@ -153,35 +162,42 @@ impl ProcessJob {
     }
 }
 fn resume(process: u32) -> io::Result<()> {
-    // Rust 1.82 has no stable ChildExt::main_thread_handle. A suspended freshly
-    // created process has one thread; use the documented Toolhelp/ResumeThread API.
+    // Rust 1.82 没有稳定的 ChildExt::main_thread_handle。刚创建的挂起进程只有一个线程；
+    // 用有文档的 Toolhelp/ResumeThread API。
+    // SAFETY: 无指针参数；返回的句柄在下面检查 INVALID_HANDLE_VALUE 后交给 `OwnedHandle`。
     let handle = unsafe { CreateToolhelp32Snapshot(4, 0) }; // TH32CS_SNAPTHREAD
     if handle == -1isize as Handle {
         return Err(io::Error::last_os_error());
     }
     let snapshot = OwnedHandle(handle);
     let mut entry = ThreadEntry { size: std::mem::size_of::<ThreadEntry>() as u32, ..Default::default() };
+    // SAFETY: `snapshot` 是有效的线程快照句柄，`entry` 是 size 已正确填写的本地结构。
     let mut found = unsafe { Thread32First(snapshot.0, &mut entry) };
     while found != 0 {
         if entry.process == process {
+            // SAFETY: 无指针参数；返回的句柄在下面检查空值后交给 `OwnedHandle`。
             let handle = unsafe { OpenThread(2, 0, entry.id) }; // THREAD_SUSPEND_RESUME
             if handle.is_null() {
                 return Err(io::Error::last_os_error());
             }
             let thread = OwnedHandle(handle);
+            // SAFETY: `thread` 是刚以 THREAD_SUSPEND_RESUME 权限打开的有效线程句柄。
             if unsafe { ResumeThread(thread.0) } == u32::MAX {
                 return Err(io::Error::last_os_error());
             }
             return Ok(());
         }
+        // SAFETY: `snapshot` 是有效的线程快照句柄，`entry` 是 size 已正确填写的本地结构。
         found = unsafe { Thread32Next(snapshot.0, &mut entry) };
     }
     Err(io::Error::new(io::ErrorKind::NotFound, "worker primary thread missing"))
 }
 impl Drop for ProcessJob {
     fn drop(&mut self) {
-        // Keep the job open until every descendant has exited, even if the leader
-        // has already exited. Closing the last handle also protects host crashes.
+        // 即使组长进程已经退出，也要等所有后代都退出后才关闭 job。
+        // 宿主崩溃时，关闭最后一个句柄同样能起到保护作用。
+        // SAFETY: `self.job` 在 `ProcessJob` 存活期间有效；信息类 1 是 JobObjectBasicAccountingInformation，`info`
+        // 是对应布局的 repr(C) 结构，长度按实际大小传入。
         unsafe {
             if TerminateJobObject(self.job.0, 1) != 0 {
                 loop {

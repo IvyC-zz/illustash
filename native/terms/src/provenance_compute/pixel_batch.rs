@@ -1,4 +1,4 @@
-//! Legacy pixel-hash worker queue. Only hashes leave this local candidate.
+//! 沿用旧版的像素哈希 worker 队列。离开这个本地候选的只有哈希。
 use super::{check_owner, pixel_hash, write, Request};
 use crate::{Error, Result};
 use rusqlite::params;
@@ -30,8 +30,8 @@ pub(super) fn run(request: &Request, sequence: &mut u64) -> Result<Value> {
     for (asset, source_id, path) in &todo {
         check_owner(request.owner_pid)?;
         let original = original(&config, asset, source_id, path.as_deref())?;
-        // A missing file yields null, but Pillow Image.open(None) raises uncaught
-        // AttributeError in the old adapter: absence of an original aborts the batch.
+        // 缺失的文件得到 null，但旧适配器里 Pillow 的 Image.open(None) 会抛出未捕获的
+        // AttributeError：缺少原图会中止整批。
         let original = original.ok_or_else(|| Error::Invalid("像素哈希缺少原始文件路径".into()))?;
         let digest = pixel_hash::candidate_path(&original).ok();
         hashes.push(json!({"asset":asset,"hash":digest}));

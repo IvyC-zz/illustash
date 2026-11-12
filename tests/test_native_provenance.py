@@ -1,4 +1,4 @@
-"""#51 acceptance: fresh synthetic packages, computation substitutes and loopback queries only."""
+"""#51 验收：只用新建的合成图库包、计算替身和回环地址上的查询。"""
 from tests.native_worker_fixture import command as worker_command, source as worker_source, exists as worker_exists
 
 import contextlib
@@ -26,10 +26,10 @@ from tests import provenance_fixture as db
 
 
 def store_credential(support, kind, value):
-    """A synthetic account credential in the form the host reads on this platform.
+    """合成的账号凭据，格式与宿主在本平台上读取的一致。
 
-    Windows never reads the plaintext file: the credential is a DPAPI blob bound to the
-    account kind (crates/platform/src/app_dpapi.rs), written here the same way.
+    Windows 从不读明文文件：凭据是绑定到账号类型的 DPAPI blob（crates/platform/src/app_dpapi.rs），
+    这里用同样的方式写入。
     """
     directory = support / 'accounts'
     directory.mkdir(parents=True, exist_ok=True)
@@ -126,8 +126,8 @@ class NativeProvenanceTest(unittest.TestCase):
         self.service=http.server.ThreadingHTTPServer(('127.0.0.1',0),Handler)
         t=threading.Thread(target=self.service.serve_forever,daemon=True);t.start()
         self.addCleanup(self.service.server_close);self.addCleanup(t.join);self.addCleanup(self.service.shutdown)
-        # Only the timeout case relies on the idle limit; under load (the parallel suite, Windows #56) a worker start
-        # alone can exceed 2 seconds, so the rest use a limit that never ends their runs.
+        # 只有超时用例依赖空闲时限；负载高时（并行跑套件、Windows #56）光是 worker 启动就可能超过 2 秒，
+        # 所以其余用例用一个永远不会让运行结束的时限。
         self.env.update(ILLUSTASH_PROVENANCE_WORKER=worker_command(self.worker),ILLUSTASH_PROVENANCE_BASE=f'http://127.0.0.1:{self.service.server_port}',ILLUSTASH_PROVENANCE_IDLE_SECONDS='30')
         with sqlite3.connect(self.lib.source) as c:
             c.execute("ALTER TABLE assets ADD COLUMN preset TEXT DEFAULT 'x'")
@@ -140,7 +140,7 @@ class NativeProvenanceTest(unittest.TestCase):
     def info(self):
         value=self.request('/api/provenance');self.assertEqual(value['status'],200,value);return json.loads(value['body'])
     def finish(self,status=None):
-        # Judge the state that ended the wait: a queued run may start before a second read (#56).
+        # 按结束等待时的状态判断：排队的运行可能在第二次读取之前就开始（#56）。
         seen=[]
         def settled():
             seen[:]=[self.info()];return seen[0]['state']['status'] not in ('running','stopping')
@@ -165,7 +165,7 @@ class NativeProvenanceTest(unittest.TestCase):
         self.assertEqual(self.info()['state']['status'],'idle');self.assertFalse(db.path_of(other).exists())
         with db.connect(other) as c:before=list(c.iterdump())
         self.assertEqual(self.info()['runs'],[])
-        time.sleep(1.1) # periodic recovery also stays read-only without task intent
+        time.sleep(1.1) # 没有任务意图时，定期恢复也保持只读
         with db.connect(other) as c:self.assertEqual(before,list(c.iterdump()))
         self.assertEqual(self.request('/api/assets')['status'],200)
         self.post({'action':'artist','artist':'synthetic'});self.finish('failed')
@@ -176,7 +176,7 @@ class NativeProvenanceTest(unittest.TestCase):
         self.assertEqual(v['runs'][0]['kind'],'pick');self.assertEqual(v['delivery']['status'],'done')
         self.assertEqual(len(self.calls),1)
         self.assertTrue(self.sql("SELECT id FROM term_evidence WHERE source='provenance'"))
-        self.assertTrue(self.sql("SELECT id FROM actions")==[]) # machine import does not create manual history
+        self.assertTrue(self.sql("SELECT id FROM actions")==[]) # 机器导入不产生人工历史
         self.assertTrue(self.sql("SELECT asset FROM image_artists WHERE status='candidate'",cache=True))
         count=self.sql("SELECT count(*) FROM term_evidence WHERE source='provenance'")
         artist=self.sql("SELECT artist_id FROM image_artists WHERE asset='a'",cache=True)[0][0]
@@ -187,7 +187,7 @@ class NativeProvenanceTest(unittest.TestCase):
         self.assertEqual(history,self.sql('SELECT count(*) FROM actions'))
         self.assertTrue(self.sql("SELECT verdict FROM term_effective_verdicts WHERE verdict='no'"))
     def test_changed_picture_bytes_are_looked_up_again(self):
-        # #27: pixel results from a picture's old bytes go when its bytes change under the same UUID.
+        # #27：同一 UUID 下图片的字节变了，基于旧字节的像素结果随之去掉。
         with closing(sqlite3.connect(self.lib.source)) as c:
             c.execute('ALTER TABLE assets ADD COLUMN stable_hash TEXT')
             c.execute("UPDATE assets SET stable_hash='first-'||uuid");c.commit()
@@ -196,7 +196,7 @@ class NativeProvenanceTest(unittest.TestCase):
         artist=self.sql("SELECT artist_id FROM image_artists WHERE asset='a'",cache=True)[0][0]
         r=self.request('/api/artist/verdict',{'ids':['a'],'artist':artist,'verdict':'no'});self.assertEqual(r['status'],200,r)
         self.post({'action':'lookup','ids':['a']});self.finish('done')
-        self.assertEqual(len(self.calls),1)  # unchanged bytes reuse the earlier result
+        self.assertEqual(len(self.calls),1)  # 字节没变时复用先前的结果
         with closing(sqlite3.connect(self.lib.source)) as c:
             c.execute("UPDATE assets SET stable_hash='second' WHERE uuid='a'");c.commit()
         self.post({'action':'lookup','ids':['a']});v=self.finish('done')
@@ -208,7 +208,7 @@ class NativeProvenanceTest(unittest.TestCase):
         with db.connect(self.lib) as c:c.execute("INSERT INTO leads(source,system,key) VALUES ('x_following','x_id','123')")
         self.post({'action':'start'});v=self.finish('stopped');self.assertFalse(self.calls)
         self.assertEqual(v['runs'][0]['kind'],'full')
-        self.post({'action':'start','allow_network':True});v=self.finish('stopped') # no bound Pixiv account
+        self.post({'action':'start','allow_network':True});v=self.finish('stopped') # 没有绑定 Pixiv 账号
         self.assertEqual(self.sql("SELECT status FROM leads WHERE key='123'",cache=True),[('resolved',)])
         self.assertTrue(any('artists.json' in s for s in self.calls))
     def test_worker_missing_wrong_identity_crash_and_timeout(self):
@@ -232,19 +232,18 @@ class NativeProvenanceTest(unittest.TestCase):
         self.assertEqual(len(self.calls),1)
         self.code=200;self.post({'action':'lookup','ids':['a']});self.finish('done')
         self.assertTrue(self.sql("SELECT last_result FROM lookups WHERE backend='pixel_hash'",cache=True))
-        # Pending is set only on a stopped host: a running one replays it on its next idle tick (#56, #143).
+        # 只在宿主停下时设为待处理：运行中的宿主会在下一次空闲轮询时重放它（#56、#143）。
         self.stop(self.process)
         with db.connect(self.lib) as c:c.execute("UPDATE native_delivery SET status='pending'")
         count=self.sql('SELECT count(*) FROM term_evidence');self.restart()
         self.assertEqual(count,self.sql('SELECT count(*) FROM term_evidence'))
         self.assertFalse(self.sql("SELECT task_id FROM native_delivery WHERE status='pending'",cache=True))
     def test_refused_pending_package_is_resealed_and_later_deliveries_proceed(self):
-        # #28: a package left pending by a transient failure names an asset removed before the retry.
+        # #28：因暂时性失败而留在待处理的包，涉及一张在重试前被移除的图片。
         with closing(sqlite3.connect(self.lib.db)) as hold:
-            hold.execute('BEGIN IMMEDIATE')  # the library is busy when the run delivers its package
+            hold.execute('BEGIN IMMEDIATE')  # 运行交付它的包时图库正忙
             self.post({'action':'lookup','ids':['a']});v=self.finish('done')
-            # Stop before the library is free again: the host's periodic retry (every 60 s) must not deliver
-            # the pending package before the asset is removed (#143).
+            # 在图库空闲之前停下：宿主的定期重试（每 60 秒）不能在图片移除之前交付待处理的包（#143）。
             self.stop(self.process)
             hold.rollback()
         self.assertEqual(v['delivery']['status'],'failed')
@@ -252,7 +251,7 @@ class NativeProvenanceTest(unittest.TestCase):
         self.assertEqual(status,'pending')
         kept="SELECT count(*) FROM term_evidence e JOIN term_assets t ON t.id=e.asset_id WHERE t.key='b'"
         evidence_b=self.sql(kept)
-        # Removed the way a sync removes a picture: its row goes and the core marks it removed.
+        # 按同步移除图片的方式移除：删掉它的行，core 把它标为已移除。
         with closing(sqlite3.connect(self.lib.db)) as c:
             c.execute("DELETE FROM assets WHERE uuid='b'")
             c.execute("UPDATE term_assets SET removed_at=CURRENT_TIMESTAMP WHERE namespace='library' AND key='b'")
@@ -264,15 +263,15 @@ class NativeProvenanceTest(unittest.TestCase):
         resealed=[task for task in rows if task.startswith('resealed-')]
         self.assertEqual([rows[task] for task in resealed],['done'])
         self.assertEqual(self.info()['delivery']['status'],'done')
-        # Later research delivers; nothing is left pending and the removed picture keeps its evidence.
+        # 之后的研究正常交付；没有留下待处理的包，被移除的图片保留它的证据。
         self.post({'action':'lookup','ids':['a']});v=self.finish('done')
         self.assertEqual(v['delivery']['status'],'done')
         self.assertFalse(self.sql("SELECT task_id FROM native_delivery WHERE status='pending'",cache=True))
         self.assertEqual(self.sql(kept),evidence_b)
-        # A stale package is not retried, and a later restart seals nothing new.
+        # 过期的包不再重试，之后重启也不会封新的包。
         count=self.sql('SELECT count(*) FROM native_delivery',cache=True);self.restart()
         self.assertEqual(self.sql('SELECT count(*) FROM native_delivery',cache=True),count)
-        # A pending package whose directory is gone is settled the same way.
+        # 目录已经不在的待处理包，也照同样的方式了结。
         latest=self.sql('SELECT task_id,package FROM native_delivery ORDER BY rowid DESC LIMIT 1',cache=True)[0]
         self.stop(self.process)
         with db.connect(self.lib) as c:c.execute("UPDATE native_delivery SET status='pending' WHERE task_id=?",(latest[0],))
@@ -283,8 +282,7 @@ class NativeProvenanceTest(unittest.TestCase):
     def test_frozen_package_does_not_replay_pending_delivery(self):
         self.post({'action':'lookup','ids':['a']});self.finish('done')
         wait_until(lambda:self.sql('SELECT status FROM native_delivery',cache=True)==[('done',)],timeout=10)
-        # A running, unfrozen host replays pending deliveries on its next idle tick (#56), so the
-        # pending state is set only once that host has stopped.
+        # 运行中、未冻结的宿主会在下一次空闲轮询时重放待处理的交付（#56），所以要等宿主停下后才设置待处理状态。
         self.stop(self.process)
         with db.connect(self.lib) as c:c.execute("UPDATE native_delivery SET status='pending'")
         config=dict(self.lib.config);config['frozen']=True
@@ -319,8 +317,8 @@ class NativeProvenanceTest(unittest.TestCase):
         self.assertEqual(self.info()['state']['kind'],'new');self.post({'action':'stop'});self.finish('stopped')
 
     def test_export_contract_native_matches_python(self):
-        # The former Python exporter, importer and run report on the same lookup are recorded
-        # (tests/fixed_expectations.py); clock-like text compares as <clock>.
+        # 原 Python 导出器、导入器和运行报告在同一次查找上的结果已录制（tests/fixed_expectations.py）；
+        # 类似时钟的文本按 <clock> 比较。
         before=self.root/'reference-application.sqlite'
         with sqlite3.connect(self.lib.db) as source,sqlite3.connect(before) as target:source.backup(target)
         self.post({'action':'lookup','ids':['a']});self.finish('done')
@@ -328,12 +326,11 @@ class NativeProvenanceTest(unittest.TestCase):
         expected=self.rec.value('python export')
         for name in ('evidence.jsonl','terms.jsonl'):
             self.assertEqual(unclocked((Path(package)/name).read_text(encoding='utf-8')),unclocked(expected['files'][name]))
-        # Creation clock is transport metadata; file digests cover the (clock-bearing) bytes compared above.
+        # 创建时间是传输用的元数据；文件摘要覆盖上面比较过的（带时钟的）字节。
         self.assertEqual(manifest_shape(json.loads((Path(package)/'manifest.json').read_text())),expected['manifest'])
         native_import=self.info()['delivery']
         self.assertEqual({k:v for k,v in native_import.items() if k!='status'},expected['import'])
-        # Resolve random term IDs through stable links; compare formal evidence, projections,
-        # history and durable events against the reference import of identical bytes.
+        # 通过稳定的链接解析随机的词条 ID；把正式证据、投影、历史和持久事件，与参照导入相同字节的结果比较。
         with sqlite3.connect(self.lib.db) as actual:
             for query,rows in zip(EXPORT_QUERIES,expected['rows']):
                 self.assertEqual(json.loads(unclocked(json.dumps(actual.execute(query).fetchall(),ensure_ascii=False))),rows,query)
@@ -364,7 +361,7 @@ class NativeProvenanceTest(unittest.TestCase):
         wait_until(lambda:self.info()['state'].get('kind')=='new',timeout=5)
         self.post({'action':'start'},400)
         self.post({'action':'lookup','ids':['a']})
-        # The preempted run resumes as soon as the lookup ends, so the lookup's outcome is read from its run.
+        # 被抢占的运行在查找一结束就恢复，所以查找的结果从它自己的运行里读。
         wait_until(lambda:any(r['kind']=='pick' and r['status'] not in ('running','stopping') for r in self.info()['runs']),timeout=10)
         self.assertEqual([r['status'] for r in self.info()['runs'] if r['kind']=='pick'],['done'])
         wait_until(lambda:self.info()['state'].get('kind')=='new' and self.info()['state']['status']=='running',timeout=5)
@@ -404,7 +401,7 @@ class NativeProvenanceTest(unittest.TestCase):
         self.post({'action':'start','allow_network':True});self.finish('done')
         self.assertTrue(any('/pixiv/fetch' in path for _,path,_ in calls));self.assertTrue(all(cookie is None for _,_,cookie in calls));self.assertFalse(any('/ajax/' in path for path in self.calls))
         self.pixiv_code=401;self.post({'action':'artist','artist':'synthetic'});self.finish('done')
-        # login popup is a mocked local bridge command; no third-party login is executed.
+        # 登录弹窗是 mock 的本地桥接命令；不执行任何第三方登录。
         self.assertTrue(any(method=='POST' and '/pixiv/login' in path for method,path,_ in calls))
         self.env.pop('ILLUSTASH_DESKTOP_BRIDGE');self.env.pop('ILLUSTASH_DESKTOP_TOKEN');self.restart()
         before=len(self.calls);self.post({'action':'start','allow_network':True});self.finish('stopped')
@@ -490,8 +487,8 @@ MACHINE = ('artists', 'artist_links', 'artist_names', 'image_sources', 'image_ar
 
 
 class ProvenanceRetentionTest(unittest.TestCase):
-    """#31: run directories and machine cache writes. Reuses the harness above without running its tests twice;
-    unrecorded, so its setup values come from this module's first recorded test."""
+    """#31：运行目录和机器缓存的写入。复用上面的测试框架，但不把它的测试再跑一遍；
+    本类不录制，所以准备阶段的值来自本模块第一个录制的测试。"""
     setUpClass = NativeProvenanceTest.__dict__['setUpClass']
     package = NativeProvenanceTest.package
     stop = NativeProvenanceTest.stop
@@ -517,13 +514,12 @@ class ProvenanceRetentionTest(unittest.TestCase):
         first = self.newest_delivered()
         self.assertEqual(self.runs(), [first])
         self.assertEqual([p.name for p in (self.lib.path / '.provenance' / first).iterdir()], ['evidence'])
-        # Each package replaces the previous snapshot in the core: only the newest delivered one stays.
+        # 每个包都替换 core 里的上一个快照：只保留最新交付的那个。
         self.post({'action': 'lookup', 'ids': ['a']}); self.finish('done')
         second = self.newest_delivered()
         self.assertNotEqual(first, second)
         self.assertEqual(self.runs(), [second])
-        # A run that fails before its receive gate is never imported; it stays for inspection until the next
-        # opening or run.
+        # 在接收关口之前失败的运行绝不导入；它留着供检查，直到下一次打开或运行。
         self.env['SYNTHETIC_MODE'] = 'crash'; self.restart()
         self.post({'action': 'lookup', 'ids': ['a']}); v = self.finish()
         self.assertIn(v['state']['status'], ('failed', 'stopped'))
@@ -532,11 +528,11 @@ class ProvenanceRetentionTest(unittest.TestCase):
         self.assertTrue((self.lib.path / '.provenance' / failed[0] / 'provenance.sqlite').exists())
         self.env['SYNTHETIC_MODE'] = 'ok'; self.restart()
         self.assertEqual(self.runs(), [second])
-        # A package whose delivery failed is pending: it stays across a restart until it is delivered.
+        # 交付失败的包处于待处理：重启后仍保留，直到交付为止。
         with closing(sqlite3.connect(self.lib.db)) as hold:
             hold.execute('BEGIN IMMEDIATE')
             self.post({'action': 'lookup', 'ids': ['a']}); v = self.finish('done')
-            # Stopped while the library is busy, so the periodic retry cannot deliver it before the restart (#143).
+            # 在图库忙时停下，所以定期重试无法在重启之前交付它（#143）。
             self.stop(self.process)
             hold.rollback()
         self.assertEqual(v['delivery']['status'], 'failed')
@@ -548,7 +544,7 @@ class ProvenanceRetentionTest(unittest.TestCase):
         self.assertEqual(self.runs(), [pending])
 
     def test_done_is_reported_only_after_working_files_are_removed(self):
-        # #143: widen the moment before the cleanup; whoever reads the end state finds only the sealed package.
+        # #143：把清理前的那一刻拉长；读到结束状态的人只会看到封好的包。
         self.env['ILLUSTASH_TEST_PROVENANCE_CLEANUP_PAUSE_MS'] = '1500'; self.restart()
         self.post({'action': 'lookup', 'ids': ['a']}); self.finish('done')
         task = self.newest_delivered()
@@ -577,7 +573,7 @@ class ProvenanceRetentionTest(unittest.TestCase):
         self.post({'action': 'lookup', 'ids': ['a']}); self.finish('done')
         after = rows()
         written = self.sql('SELECT tbl,op FROM synthetic_writes', cache=True)
-        # The 4,000 synthetic rows were neither rewritten nor moved; the full rewrite wrote every row again.
+        # 4,000 条合成行既没有重写也没有挪动；而完整重写会把每一行都再写一遍。
         self.assertLess(len(written), 20, Counter(written))
         self.assertFalse([w for w in written if w[0] in ('ref_sigs',)], written)
         self.assertEqual(after['ref_sigs'], before['ref_sigs'])

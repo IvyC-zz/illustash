@@ -1,4 +1,4 @@
-//! Explicit test-only transport for independent Python relation/image references.
+//! 仅供测试的显式传输通道，供独立的 Python 关系与图像参考实现调用。
 use illustash_terms::research_compute::{
     relation_image::{self, Plane},
     relations,

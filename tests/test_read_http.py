@@ -1,4 +1,4 @@
-"""HTTP test helpers and the strict comparator tool's own tests. All state is disposable synthetic data."""
+"""HTTP 测试辅助函数，以及严格比较工具自身的测试。所有状态都是用完即弃的合成数据。"""
 import http.client
 import os
 from pathlib import Path
@@ -40,7 +40,7 @@ def wait_until(predicate, timeout=15):
 
 
 def stop_process(process):
-    """Stop a host started with ``SPAWN`` (on Windows the interrupt goes to its process group)."""
+    """停止用 ``SPAWN`` 启动的宿主（在 Windows 上，中断信号发给它的进程组）。"""
     if process.poll() is None:
         process.send_signal(INTERRUPT)
         try:
@@ -56,7 +56,7 @@ def stop_process(process):
 class ComparatorTest(unittest.TestCase):
     def test_deterministic_corpus_excludes_random_ask(self):
         with tempfile.TemporaryDirectory() as tmp:
-            # The synthetic application database as the former Python Store built it (recorded).
+            # 原 Python Store 建出来的合成应用数据库（录制）。
             root, rec = Path(tmp).resolve(), Expectations(self)
             rec.alias(root, '@ROOT@')
             rec.package('store', root, library=False)

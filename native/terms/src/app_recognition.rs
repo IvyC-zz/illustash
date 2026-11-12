@@ -50,7 +50,7 @@ fn file(path: &Path, limit: u64) -> Result<Vec<u8>> {
 pub fn model_specs(root: &Path) -> Result<Value> {
     crate::recognition_compute::models::ModelFiles::resolve(root)?.specs(&|| Ok(()))
 }
-// NPY's header is a Python literal, never executable. Parse exactly the three permitted fields.
+// NPY 的文件头是 Python 字面量，绝不执行。只按允许的三个字段精确解析。
 #[cfg(test)]
 fn vectors(raw: Vec<u8>, count: usize, dimension: usize) -> Result<Vec<u8>> {
     vectors_checked(raw, count, dimension, &|| Ok(()))
@@ -75,7 +75,7 @@ pub(crate) fn vectors_checked(
     };
     let header = raw.get(start..start + n).and_then(|b| std::str::from_utf8(b).ok()).ok_or_else(invalid)?;
     let h = header.trim();
-    // Tokenization preserves strings, and rejects extra keys/expressions instead of searching substrings.
+    // 分词时保留字符串，遇到多余的键或表达式直接拒绝，而不是在子串里查找。
     let mut tokens = Vec::new();
     let mut it = h.chars().peekable();
     while let Some(ch) = it.next() {
@@ -284,8 +284,8 @@ fn writer(path: &Path) -> Result<Connection> {
     c.busy_timeout(crate::app_library::TASK_WRITE_WAIT)?;
     Ok(c)
 }
-/// Optional research dispatcher acknowledges notification delivery, not completion of algorithms.
-/// The caller must bind this Library to its immutable package/session before invoking this API.
+/// 可选的研究分发器确认的是通知已送达，不是算法已完成。
+/// 调用这个 API 之前，调用方必须把这个 Library 绑定到它不可变的图库包和会话上。
 pub fn import_package(
     library: &Library,
     path: &Path,
@@ -295,7 +295,7 @@ pub fn import_package(
 ) -> Result<Value> {
     import_internal(library, path, root, cancel, dispatch, None, &Silent)
 }
-/// `import_package` that reports its stages and publishes its source transaction through `observer` (#88).
+/// 通过 `observer` 报告各阶段并发布源库事务的 `import_package`（#88）。
 pub(crate) fn import_package_observed(
     library: &Library,
     path: &Path,
@@ -306,7 +306,7 @@ pub(crate) fn import_package_observed(
 ) -> Result<Value> {
     import_internal(library, path, root, cancel, dispatch, None, observer)
 }
-/// Owned only by one recognition task; build before taking TaskContext::receive.
+/// 只归一个识别任务所有；在取 TaskContext::receive 之前构建。
 pub(crate) struct WorkerInputs {
     identity: crate::app_tasks::TaskIdentity,
     snapshot: crate::recognition_compute::anchor_snapshot::Snapshot,
@@ -333,7 +333,7 @@ impl WorkerInputs {
         Ok(Self { identity: identity.clone(), snapshot, models, root: root.to_owned(), shared })
     }
 }
-/// A receipt proof of full prevalidation, never a second feature/anchor cache.
+/// 完整预校验的回执凭证，绝不是第二份特征或锚点缓存。
 pub(crate) struct PreparedWorkerPackage {
     package: std::path::PathBuf,
     sidecar: std::path::PathBuf,
@@ -365,7 +365,7 @@ pub(crate) fn prepare_worker_package(
         sidecar_digest: sha(&bytes),
     })
 }
-/// Caller holds the task receipt. Only linear authoritative rechecks occur in the source transaction.
+/// 调用方持有任务回执。源库事务里只做线性的权威复核。
 pub(crate) fn import_worker_package(
     library: &Library,
     prepared: &PreparedWorkerPackage,
@@ -402,8 +402,8 @@ fn import_internal(
     observer.stage("writing");
     let mut c = writer(&library.source())?;
     let tx = c.transaction_with_behavior(TransactionBehavior::Immediate)?;
-    // Source lease freezes authoritative role metadata. Recheck bytes/identity/version,
-    // never rebuild the task's O(A²) alias index or recompute batch claims here.
+    // 源库租约冻结了权威的角色元数据。这里复核字节、身份和版本，
+    // 绝不重建任务的 O(A²) 别名索引，也不重新计算批次的认领。
     let claims = if let Some((prepared, inputs)) = claims {
         let check = || crate::app_sync::check(cancel);
         check()?;
@@ -436,8 +436,8 @@ fn import_internal(
             pkg.manifest = json!({"recognition":pkg.manifest,"character_claims":value});
             Some(claims)
         } else {
-            // No-anchor sidecars are still mandatory/validated for native tasks, but
-            // preserve the public v1 per-asset/package fingerprint and duplicate behavior.
+            // 无锚点的 sidecar 对原生任务仍是必需的、要校验，
+            // 但保持公开的 v1 按图片和按包的指纹以及重复处理的行为。
             None
         }
     } else {
@@ -524,8 +524,8 @@ fn import_internal(
     }
     observer.stage("committing");
     crate::app_sync::check(cancel)?;
-    // The publication point: nothing reaches the library unless this commit runs, and it runs only if no
-    // cancellation came first. A cancellation arriving during it waits; the projection below then pauses as pending.
+    // 发布点：只有这次提交执行了，内容才会进入图库；而且只在没有先到的取消时才执行。提交期间到达的取消会等待；
+    // 之后下面的投影以待处理状态暂停。
     let mut tx = Some(tx);
     observer.publish(&mut || Ok(tx.take().expect("the source transaction is published once").commit()?))?;
     drop(tx);
@@ -536,7 +536,7 @@ fn import_internal(
     result["duplicate"] = json!(duplicate);
     Ok(result)
 }
-/// Source committed records survive application/effect failure; projection marker and event commit together.
+/// 源库已提交的记录在应用或副作用失败后仍保留；投影标记和事件一起提交。
 pub fn resume(
     library: &Library,
     cancel: &AtomicBool,
@@ -551,7 +551,7 @@ pub fn resume(
     if !exists {
         return Ok(json!({"status":"done"}));
     }
-    // Serializes concurrent resumes for this package without a process-global or library-ID lock.
+    // 不用进程全局锁或按图库 ID 的锁，就让这个包的并发恢复串行执行。
     let tx = c.transaction_with_behavior(TransactionBehavior::Immediate)?;
     let pending = tx
         .prepare("SELECT digest,assets FROM recognition_imports WHERE status<>'done' ORDER BY rowid")?
@@ -618,7 +618,7 @@ pub fn resume(
     tx.commit()?;
     Ok(json!({"status":"done"}))
 }
-// Preserve the existing 500-ID query batches and their row order.
+// 保持现有的每批 500 个 ID 的查询分批和行顺序。
 fn source_rows(src: &Connection, sql: &str, ids: &[String]) -> Result<Vec<Value>> {
     let mut out = Vec::new();
     for chunk in ids.chunks(500) {

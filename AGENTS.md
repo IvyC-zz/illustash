@@ -70,6 +70,14 @@ Claude Code 通过 `CLAUDE.md` 引入本文件，Codex 等直接读本文件。�
 - 暂不接受外部代码贡献；开始接受前先引入贡献者协议（CLA），保留双重授权的余地。
 - 2026-10-06 开源之前的 `#N`、`PR #N` 和短提交哈希指向开源前的私有历史（归档为 `shio-vinyl/illustash-archive`），本库查不到；新写的引用用本库编号。
 
+## 代码约定
+
+2026-10-29 用户定：
+
+- 代码注释用简体中文，包括 `///`、`//!` 文档注释、Python docstring 和 unsafe 块的安全说明（`// SAFETY:` 这个前缀保留英文，clippy 按它识别）。存量的英文注释同样翻译成中文；工具指令、第三方许可声明、原样引用的外部文字和 rustdoc 的 `# Panics` 等小节标题保留原文。
+- Rust 的 lint 约定写在各 Cargo 项目 `Cargo.toml` 的 `[lints]` 和仓库根目录的 `clippy.toml`，由 clippy 检查：每个 unsafe 块和 `unsafe impl` 都写 `// SAFETY:`；生产代码不用 `unwrap`，确实不会失败的地方用 `expect` 写明理由；`tests/` 下的集成测试 crate 在开头写 `allow`。新建 Cargo 项目时照抄这一段 `[lints]`。
+- 构造 `Error::Invalid` 用 `illustash_core::error` 里的 `invalid(…)`（返回 `Result`）或 `Error::invalid(…)`（返回 `Error`），不在各文件另写同样的辅助函数。带固定文案的辅助函数（如 `app_research.rs` 的 `bad()`）不在此列。
+
 ## 文档维护规范
 
 2026-09-30 做过一次精简（48 篇约 9,900 行 → 26 篇约 4,800 行），删掉的原文在开源前的私有历史中。以下规则是为了不再长回去。

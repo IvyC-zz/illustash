@@ -1,5 +1,5 @@
-// The picture grid (desktop layout, #199): loading pages of pictures, the virtual grid and its zoom, selecting, the
-// selection bar's actions, keyboard shortcuts, view options and the R18 filter.
+// 图片网格（桌面布局，#199）：分页加载图片、虚拟网格和它的缩放、选择、选择栏的操作、键盘快捷键、视图选项和 R18
+// 筛选。
 import {forgetActivity, loadActivity} from '../core/catalog.js';
 import {edits, setLatest, undoLatest, undoneText} from '../core/edits.js';
 import {esc, isMac, number, shortcut} from '../core/format.js';
@@ -19,16 +19,16 @@ import {drawHome, renderHome} from './home.js';
 import {jumpToCharacter, markOc, newIds, openPicker, openRelate, targets} from './palette.js';
 import {renderArtistAudit, renderGroups, renderIdentity, renderSimilar} from './review.js';
 
-// ---------- asset loading ----------
-// Zoom is a continuous target column width; the grid snaps to whole columns and animates between them.
+// ---------- 加载图片 ----------
+// 缩放是一个连续的目标列宽；网格对齐到整列，并在两者之间做动画。
 const SIZE_MIN = 72, SIZE_MAX = 480, MAX_HEIGHT = 3e7;
 const sliderToSize = v => Math.round(SIZE_MIN * Math.pow(SIZE_MAX / SIZE_MIN, v / 100));
 const sizeToSlider = s => Math.round(100 * Math.log(s / SIZE_MIN) / Math.log(SIZE_MAX / SIZE_MIN));
 export const PAGE = 100;
-// The page reads in flight, and the debounce of reading the pages around the viewport.
+// 进行中的分页读取，以及读取视口附近各页的防抖。
 let abortList, pageTimer;
 export function filters() {
-  const r = state.route, sort = r.sort || defaultSort(r), f = {order: sort === 'suspicious' && r.char && state.char?.mascot ? 'newest' : sort};   // tag pages have no 可疑优先
+  const r = state.route, sort = r.sort || defaultSort(r), f = {order: sort === 'suspicious' && r.char && state.char?.mascot ? 'newest' : sort};   // 标签页没有「可疑优先」
   if (r.page === 'library') { if (r.day) f.day = r.day; if (r.work) f.work = r.work; if (r.artist) f.artist = r.artist; if (r.q) f.q = r.q; if (r.tag) f.tag = r.tag; if (r.utag) f.utag = r.utag; }
   if (r.char) { f.entity = r.char; if (r.maybe) f.status = 'maybe'; else if (r.doubt) f.status = 'ambiguous'; else { if (r.variant) f.variant = r.variant; if (r.check) f.status = 'machine'; } }
   if (r.page === 'unmatched' || r.page === 'skipped') f.pool = r.page;
@@ -48,7 +48,7 @@ function visibleOffsets() {
   const offsets = []; for (let o = Math.floor(first / PAGE) * PAGE; o < Math.max(last, 1); o += PAGE) offsets.push(o);
   return offsets.slice(0, 4);
 }
-// Fetch the visible pages first, then swap data in one step: no skeleton flash after edits.
+// 先取可见的几页，再一步换入数据：编辑之后不会闪出骨架。
 export async function reload(reset = false) {
   if (panelPage(state.route.page)) return;
   const epoch = state.readEpoch, route = state.route;
@@ -92,16 +92,14 @@ function updateCount() {
     skipped: t('点击或拖动选择 · Space 看大图'), excluded: t('点击或拖动选择 · Space 看大图 · X 恢复收录'), pending: t('点击或拖动选择 · Space 看大图 · X 排除'), audit: t('点一张或 Space 看大图 · Y 是 · N 不是 · 看不清可以跳过，换一张'), duplicates: t('同色角标为同一组 · 修改会同步到整组 · 角色不一致的组对齐后自动折叠'), library: t('点击查看 · 拖动或 {key} 点击多选 · Space 看大图', {key: isMac ? '⌘' : 'Ctrl'})}[state.route.page] || '';
 }
 
-// ---------- grid ----------
-// Square crops, or justified rows like Photos: each row packs as many images as fit near a target
-// height and stretches to the edge; the final row keeps the target height, left-aligned, so a short
-// result never turns into a few giant images.
+// ---------- 网格 ----------
+// 方形裁切，或像「照片」那样的两端对齐行：每行在目标高度附近塞进尽量多的图，并拉伸到边缘；最后一行保持目标高度、
+// 靠左，所以结果很少时不会变成几张巨大的图。
 const isSquare = () => !state.fit;
-// Box ratios are clamped so a panorama or long strip can't flatten or inflate its row; such images
-// are shown whole inside their box (letterboxed) rather than cropped.
+// 方框的宽高比有上下限，这样全景图或长条图不会把它那一行压扁或撑大；这样的图在方框里整张显示（加黑边），而不是裁切。
 const FIT_MIN = .5, FIT_MAX = 2.4;
-// Row geometry lives in reused typed arrays: rowStarts[r] is the first index of row r, rowTops[r] its top.
-// Unloaded images use the mean ratio of loaded ones, so pages arriving move rows as little as possible.
+// 行的几何数据放在复用的类型化数组里：rowStarts[r] 是第 r 行的第一个下标，rowTops[r] 是它的顶部位置。
+// 还没加载的图用已加载图片的平均宽高比，这样分页到达时各行尽量少移动。
 let gridLayoutKey = '', fitRows = 0, fitEstimate = .75;
 let rowStarts = new Int32Array(1), rowTops = new Float64Array(1), rowHeights = new Float64Array(0);
 const rawRatio = item => item?.width > 0 && item?.height > 0 ? item.width / item.height : 0;
@@ -129,7 +127,7 @@ export function cardRect(i) {
   let left = 0; for (let j = rowStart(row); j < i; j++) left += imageRatio(state.items[j]) * h + state.gap;
   return {left, top: rowTop(row), width: imageRatio(state.items[i]) * h, height: h + captionH()};
 }
-// Arrow up/down: the image in the neighbouring row whose centre is closest horizontally.
+// 方向键上/下：相邻行里中心在水平方向上最接近的那张图。
 export function verticalStep(i, dir) {
   if (!state.fit) return Math.max(0, Math.min(state.total - 1, i + dir * state.cols));
   const row = rowOf(i) + dir; if (row < 0 || row >= fitRows) return dir < 0 ? 0 : state.total - 1;
@@ -158,7 +156,7 @@ function packRows(width, target) {
     for (;;) {
       const r = imageRatio(items[i]), count = i - start + 1;
       if (count > 1 && (total + r) * target + gap * (count - 1) > width) {
-        // Take the image that overflows only when that lands closer to the target height.
+        // 只有这样更接近目标高度时，才把溢出的那张图收进来。
         const shrunk = (width - gap * (count - 1)) / (total + r), grown = (width - gap * (count - 2)) / total;
         if (target - shrunk < grown - target) { total += r; i++; }
         break;
@@ -182,9 +180,9 @@ export function layout() {
   for (;;) {
     state.cols = cols; state.cellW = Math.max(1, (width - state.gap * (cols - 1)) / cols);
     state.rowH = Math.round(state.cellW + captionH() + state.gap);
-    // A 3:4 illustration (the common case) gets the same width as a square cell.
+    // 3:4 的插画（常见情况）和方形格子同宽。
     if (state.fit) packRows(width, state.cellW * 4 / 3); else fitRows = 0;
-    // Browsers stop scrolling past ~33M px; add columns rather than break the grid.
+    // 浏览器滚过约 33M px 就不再滚动；宁可加列，也不让网格坏掉。
     if (rowTop(rowCount()) <= MAX_HEIGHT || cols > 40) break;
     cols++;
   }
@@ -197,17 +195,17 @@ export function indexAt(clientX, clientY, clamp = true) {
   if (!clamp && (x < 0 || y < 0 || y >= rowTop(rowCount()))) return -1;
   return clamp ? Math.max(0, Math.min(i, state.total - 1)) : i;
 }
-// How many images the machine thinks may also be this character (shown as a toggle on the character page).
+// 机器认为可能也是这个角色的图有多少张（在角色页上显示成一个开关）。
 async function refreshMaybe(gen) {
   const r = state.route, total = status => api('/api/assets/count?' + new URLSearchParams({entity: r.char, status, ...(state.nsfw ? {nsfw: state.nsfw} : {})})).then(x => x.total).catch(e => { error(readError(e)); return null; });
   const [count, doubt] = await Promise.all([r.maybe ? state.total : total('maybe'), r.doubt ? state.total : total('ambiguous')]);
   if (count === null || doubt === null || gen !== state.generation || (count === state.maybeCount && doubt === state.doubtCount)) return;
   state.maybeCount = count; state.doubtCount = doubt; renderChrome();
 }
-// Adjacent groups get different hues so the pairs read at a glance.
+// 相邻的组用不同的色相，这样一眼就能看出哪些是一对。
 function dupHue(key) { let h = 0; for (const ch of key) h = (h * 31 + ch.charCodeAt(0)) >>> 0; return h % 12 * 30; }
-// 随机抽查 cards: the image's character tags float at the bottom, the one being checked first and tinted. Hovering a
-// tag shows ✓ / ✗: on the checked tag they answer the audit, on the others they confirm or remove that character.
+// 随机抽查的卡片：图的角色标签浮在底部，正在抽查的那个排在最前并着色。悬停在标签上显示 ✓ / ✗：在抽查的标签上它们
+// 回答抽查，在其他标签上它们确认或去掉那个角色。
 function auditTags(item) {
   const a = item.audit, mark = {yes: '✓', no: '✗'}[a.answer] || '';
   const tag = (id, name, cls, title) => `<span class="atag ${cls}" title="${esc(title)}"><b>${mark && cls.includes('checked') ? `<i>${mark}</i>` : ''}${esc(short(name))}</b><button data-tagact="yes" data-entity="${esc(id)}" title="${t('是 {name}', {name: esc(name)})}">✓</button><button data-tagact="no" data-entity="${esc(id)}" title="${t('不是 {name}', {name: esc(name)})}">✗</button></span>`;
@@ -215,7 +213,7 @@ function auditTags(item) {
   return `<span class="chips atags">${tag(a.id, a.name, 'checked ' + (a.answer || 'open'), a.answer ? (a.answer === 'yes' ? t('抽查已答：是') : t('抽查已答：不是')) : t('抽查：是 TA 吗？'))}${others.join('')}</span>`;
 }
 function cardHTML(item, i) {
-  // In justified rows a wide image is wider than the nominal cell: size its thumbnail and caption by that.
+  // 在两端对齐的行里，宽图比名义上的格子宽：按实际宽度决定它的缩略图和说明文字。
   const r = state.route, ratio = state.fit ? imageRatio(item) : 1, size = state.cellW * Math.max(1, ratio) > 260 ? 'medium' : 'thumb';
   let extra = '';
   if (r.char) {
@@ -225,12 +223,12 @@ function cardHTML(item, i) {
   }
   if (r.char && r.maybe && state.cellW >= 120) extra += `<span class="chips"><span>${item.memberships.length ? t('现为 {name}', {name: esc(short(item.memberships[0].name))}) : t('未识别')}</span></span>`;
   if (r.page === 'excluded' && !r.reason && item.excluded && state.cellW >= 120) extra += `<span class="chips"><span>${REASONS[item.excluded] || ''}</span></span>`;
-  // 随机抽查 / 未识别 are skimmed at small sizes: their one-line badge stays down to 70 px cells.
+  // 随机抽查 / 未识别 是在小尺寸下快速浏览的：它们的单行角标一直保留到 70 px 的格子。
   if (r.page === 'audit' && item.audit && state.cellW >= 70) extra += auditTags(item);
   if (viewOpts.hints && !item.memberships.length && item.hint && state.cellW >= (r.page === 'unmatched' ? 70 : 120)) extra += `<span class="chips"><button class="hint-add" data-hint title="${t('机器觉得可能是 {name}，点一下设为 TA（可撤销）', {name: esc(item.hint.name)})}">+ ${esc(short(item.hint.name))}</button></span>`;
   if (r.page === 'duplicates' && item.dup) extra += `<span class="dup-badge" style="--dup-hue:${dupHue(item.dup.grp)}" title="${t('同一组共 {n} 份副本', {n: item.dup.size})}">${item.dup.pos}/${item.dup.size}</span>`;
   else if (item.dup && state.cellW >= 70) extra += `<span class="dup-badge folded" title="${t('共 {n} 份相同副本，操作会同步到全部', {n: item.dup.size})}">×${item.dup.size}</span>`;
-  // A narrow picture shows its first name and a count instead of cutting every name short; hover shows all.
+  // 窄图显示第一个名字和数量，而不是把每个名字都截短；悬停显示全部。
   const names = item.memberships.map(m => m.name), narrow = state.fit && ratio * state.cellW * 4 / 3 < 170 && names.length > 1;
   const shown = narrow ? item.memberships.slice(0, 1) : item.memberships;
   const caption = captionH() ? `<div class="caption" title="${esc(item.memberships.map(nameWithWork).join(t('、')))}">${shown.map(m => `<span class="${m.status}">${esc(m.name)}</span>`).join('<i>·</i>') || `<span class="none">${item.unknown ? t('已跳过') : t('未识别')}</span>`}${narrow ? `<small>+${names.length - 1}</small>` : ''}</div>` : '';
@@ -240,7 +238,7 @@ function cardHTML(item, i) {
 export function renderGrid(relayout = false) {
   if ($('grid').hidden) return;
   const v = $('viewport'), grid = $('grid');
-  // Pin the first visible image: when rows above it repack (pages arriving, a new estimate) the view stays put.
+  // 钉住第一张可见的图：它上方的行重新排布时（分页到达、新的估计值），视图保持不动。
   const anchorRow = rowAt(v.scrollTop), anchor = rowStart(anchorRow), within = v.scrollTop - rowTop(anchorRow);
   const oldLayout = gridLayoutKey;
   const before = [state.cols, state.rowH]; layout();
@@ -282,8 +280,8 @@ export function renderGrid(relayout = false) {
   }
   syncCards();
   clearTimeout(pageTimer); const gen = state.generation;
-  // Visible pages first, then about a screen above and below, so dimensions usually arrive before
-  // their rows scroll into view and justified rows don't reshuffle on screen.
+  // 先是可见的几页，然后是上方和下方大约一屏，这样尺寸通常在各行滚进视野之前就到了，两端对齐的行不会在屏幕上重新
+  // 洗牌。
   const ahead = rowStart(Math.min(rows, rowAt(v.scrollTop + 2 * v.clientHeight) + 1)), behind = rowStart(rowAt(v.scrollTop - v.clientHeight));
   pageTimer = setTimeout(() => {
     if (gen !== state.generation) return;
@@ -306,9 +304,9 @@ export function scheduleGrid() {
   if (gridFrame !== null) return;
   gridFrame = requestAnimationFrame(() => { gridFrame = null; renderGrid(); });
 }
-// ---------- zoom ----------
-// Keep the image under the pointer (or the first visible row) in place, then let cards glide
-// from their old rectangles to the new ones (FLIP), so each column step reads as one motion.
+// ---------- 缩放 ----------
+// 让指针下的图（或第一个可见的行）保持在原处，然后让卡片从旧的矩形滑到新的矩形（FLIP），这样每次换列数读起来都是
+// 一个动作。
 let zoomFrame = 0, zoomTask = null;
 function requestZoom(task) { zoomTask = task; if (!zoomFrame) zoomFrame = requestAnimationFrame(() => { zoomFrame = 0; const t = zoomTask; zoomTask = null; t?.(); }); }
 function setSize(size, clientX, clientY, fromSlider = false) {
@@ -336,13 +334,13 @@ function setSize(size, clientX, clientY, fromSlider = false) {
       {duration: 240, easing: 'cubic-bezier(.2,.7,.2,1)'});
   }
 }
-// Column steps for keyboard: one level at a time.
+// 键盘调整列数：一次一级。
 function stepColumns(delta) {
   const width = $('viewport').clientWidth - 2, cols = Math.max(1, state.cols + delta);
   setSize((width + state.gap) / cols - state.gap);
 }
 let pinchFactor = 1, pinchPoint = null, gestureStart = 0;
-// ---------- selection ----------
+// ---------- 选择 ----------
 export const selCount = () => state.sel.all ? Math.max(0, state.total - state.sel.exclude.size) : state.sel.ids.size;
 const isSelected = id => state.sel.all ? !state.sel.exclude.has(id) : state.sel.ids.has(id);
 function setSelected(id, on) {
@@ -367,13 +365,13 @@ function handleCardClick(index, e, onCheck = false) {
   const item = state.items[index]; if (!item) return;
   state.cursor = index;
   if (e.shiftKey && state.anchor >= 0) { selectRange(state.anchor, index, true); return; }
-  // The corner circle always selects, like Photos; a plain click in the library opens details.
+  // 角上的圆圈总是选择，和「照片」一样；在图库里普通点击打开详情。
   if (browsing() && !onCheck && !state.selecting && !selCount() && !e.metaKey && !e.ctrlKey) { inspect(item.uuid); syncCards(); return; }
   if (browsing() && (onCheck || e.metaKey || e.ctrlKey)) state.selecting = true;
   setSelected(item.uuid, !isSelected(item.uuid)); state.anchor = index; renderSelection();
 }
 
-// Pointer: click, drag-select across cards (like Photos), marquee from empty space, autoscroll at edges.
+// 指针：点击、在卡片上拖动选择（像「照片」那样）、从空白处拉框选择、到边缘时自动滚动。
 let drag = null;
 function applyDrag() {
   if (!drag?.moved) return;
@@ -402,7 +400,7 @@ function autoScroll() {
   if (speed) { $('viewport').scrollTop += speed * .6; applyDrag(); }
   requestAnimationFrame(autoScroll);
 }
-// ---------- selection bar & actions ----------
+// ---------- 选择栏与操作 ----------
 function renderSelection() {
   syncCards();
   const n = selCount(), bar = $('selectionBar'), r = state.route;
@@ -418,7 +416,7 @@ function renderSelection() {
     const name = state.char?.name || t('该角色');
     buttons = `<button class="primary${arm('remove')}" data-act="remove">${state.armed === 'remove' ? t('再点一次：移出 {n} 张', {n: number(n)}) : t('不是 {name}', {name: esc(short(name))})} <kbd>⌫</kbd></button><button class="quiet" data-act="swap">${t('换成…')} <kbd>C</kbd></button><button class="quiet" data-act="also">${t('也是…')} <kbd>A</kbd></button>${state.char?.variants?.length ? `<button class="quiet" data-act="variant">${t('子标签')} <kbd>T</kbd></button>` : ''}`;
   } else if (r.page === 'audit') {
-    // 随机抽查: each image asks about its own character (the dark badge); answer a whole selection at once.
+    // 随机抽查：每张图问的是它自己的角色（深色角标）；可以一次回答整个选择。
     buttons = `<button class="primary" data-act="audit_yes" title="${t('选中的图都是角标上的角色')}">${t('都是')} <kbd>Y</kbd></button><button class="quiet" data-act="audit_no" title="${t('选中的图都不是角标上的角色')}">${t('都不是')} <kbd>N</kbd></button>`;
   } else if (r.page === 'unmatched' || r.page === 'group') {
     buttons = `<button class="primary" data-act="assign">${t('设为角色…')} <kbd>C</kbd></button>${ocButton}<button class="quiet${arm('skip')}" data-act="skip">${state.armed === 'skip' ? t('再点一次：跳过 {n} 张', {n: number(n)}) : t('跳过')} <kbd>S</kbd></button>`;
@@ -481,8 +479,7 @@ function runBarAction(act) {
     openPicker({title: t('这些图不是…'), items: [...present.values()], sentence: e => t('把 {name} 从 {n} 张中移出', {name: e.name, n: number(n)}), pick: e => mutate('/api/change', {...payload(), action: 'rejected', entity: e.id}, false)});
   }
 }
-// Human tags reuse the palette: existing tags, adopt a WD tag, or create one. Items already on
-// every selected image are offered for removal.
+// 人工标签复用命令面板：已有的标签、采用一个 WD tag，或新建一个。所有选中图片上都已有的条目提供移除。
 export function openTagPicker(payload, n, loaded, leaving = () => !!state.route.utag) {
   const present = new Map();
   for (const item of loaded || []) for (const tag of item.user_tags || []) present.set(tag, (present.get(tag) || 0) + 1);
@@ -498,12 +495,10 @@ function openVariantMenu(payload) {
     pick: e => mutate('/api/change', {...payload(), action: e.remove ? 'remove_variant' : 'add_variant', entity: e.id}, !!e.remove)});
 }
 
-// Writes: fade leaving cards at once, close the gaps as soon as the server agrees,
-// then swap in fresh data without losing the scroll position.
-// Editing the image open in the viewer or the detail panel never moves you to another one: the list may reorder
-// (suspicious-first puts confirmed images last) or drop it, but it stays on screen so several edits can follow,
-// and ←/→ then continue from the neighbours it had before the first edit. Only 随机抽查 answers advance.
-// The picture kept in view while the list under it changes: {uuid, item, prev, next}.
+// 写入：立即淡出要离开的卡片，服务端一同意就合上空隙，然后换入新数据，不丢滚动位置。
+// 编辑查看器或详情面板里打开的那张图，绝不会把你带到另一张：列表可能重新排序（可疑优先会把确认过的图排到最后）或
+// 去掉它，但它留在屏幕上，好让接下来能继续编辑，之后 ←/→ 从第一次编辑之前它的邻居接着走。只有随机抽查的回答会前进。
+// 列表在下面变化时保持在视野里的那张图：{uuid, item, prev, next}。
 export const kept = {hold: null};
 function holdCurrent() {
   const uuid = state.viewer >= 0 ? state.viewerItem?.uuid : state.focused;
@@ -558,7 +553,7 @@ export async function undo() {
     if (state.focused) inspect(state.focused, true);
     if (state.viewer >= 0) { const i = indexOf(state.viewerItem?.uuid); showViewer(i >= 0 ? i : state.viewer, i >= 0 ? state.items[i] : state.viewerItem); }
   } catch (e) {
-    // The history may have moved on (another window, or a failure after the server committed): show its latest step.
+    // 历史可能已经往前走了（另一个窗口，或服务端提交之后才失败）：显示它最新的一步。
     toast(e.message); refreshMeta().catch(err => error(readError(err)));
   } finally { edits.busy = false; setLatest(edits.latest); }
 }
@@ -567,8 +562,8 @@ export async function sweep() {
   await mutate('/api/sweep', {entity: c.id}, false);
 }
 
-// ---------- view options (视图选项) ----------
-// Everything here is optional detail: the defaults stay quiet, and each switch is saved per browser.
+// ---------- 视图选项 ----------
+// 这里的一切都是可选的细节：默认保持安静，每个开关按浏览器保存。
 const VIEW_DEFAULTS = {captions: true, marks: true, hints: true, railCount: false, footer: false, chart: true, same: true, meta: true, homeSize: 1, hero: true, people: false, ask: true};
 export const viewOpts = {...VIEW_DEFAULTS, ...prefs.get('view', {})};
 function applyViewClasses() {
@@ -608,9 +603,9 @@ function toggleViewPop(open = $('viewPopover').hidden) {
   $('viewPopover').hidden = !open; $('viewButton').classList.toggle('on', open); $('viewButton').setAttribute('aria-expanded', open);
   if (open) renderViewPop();
 }
-// ---------- NSFW filter ----------
-// One click cycles 显示 → 隐藏 → 仅 NSFW; H toggles hiding. NSFW = WD rating questionable/explicit.
-// The R18 plate: hollow = everything shows, struck through = hidden, filled = R18 only.
+// ---------- NSFW 筛选 ----------
+// 一次点击在 显示 → 隐藏 → 仅 NSFW 之间循环；H 切换隐藏。NSFW = WD 评级 questionable/explicit。
+// R18 标牌：空心 = 全部显示，划线 = 隐藏，实心 = 只看 R18。
 const NSFW_TIP = {'': t('R18：显示中 · 点击隐藏（H）'), hide: t('R18：已隐藏 · 点击只看 R18'), only: t('R18：只看 R18 · 点击恢复全部')};
 const R18_ICON = '<svg class="r18" viewBox="0 0 34 20" aria-hidden="true"><rect class="plate" x="1.2" y="1.2" width="31.6" height="17.6" rx="5.5"/><text x="17" y="14.1" text-anchor="middle">R18</text><path class="cut" d="M5 17.5 29 2.5"/><path class="slash" d="M5 17.5 29 2.5"/></svg>';
 function renderNsfw() {
@@ -629,7 +624,7 @@ export function setNsfw(mode) {
   refreshMeta().catch(e => error(readError(e)));
 }
 
-// The handlers this part of the page registers. Called once, when the page starts.
+// 页面这一部分注册的处理函数。页面启动时调用一次。
 export function wireGrid() {
   state.size = Math.min(SIZE_MAX, Math.max(SIZE_MIN, prefs.get('size', 185)));
   $('viewport').addEventListener('scroll', scheduleGrid, {passive: true});
@@ -643,7 +638,7 @@ export function wireGrid() {
   $('viewport').addEventListener('gesturestart', e => { e.preventDefault(); gestureStart = state.size; });
   $('viewport').addEventListener('gesturechange', e => { e.preventDefault(); const x = e.clientX, y = e.clientY, s = gestureStart * e.scale; requestZoom(() => setSize(s, x, y)); });
 
-  // One click on a card's「+ 角色」lead: set the image to that character, same as choosing it in the picker.
+  // 在卡片的「+ 角色」引导上点一次：把图设为那个角色，和在选择器里选它一样。
   $('grid').addEventListener('click', e => {
     const hit = e.target.closest('[data-tagact]');
     if (hit) {
@@ -684,7 +679,7 @@ export function wireGrid() {
   });
   $('grid').addEventListener('dblclick', e => { const card = e.target.closest('.card[data-id]'); if (card) openViewer(Number(card.dataset.index)); });
 
-  // ---------- keyboard ----------
+  // ---------- 键盘 ----------
   document.addEventListener('keydown', e => {
     if (document.querySelector('dialog[open]')) return;
     const mod = e.metaKey || e.ctrlKey, key = e.key.toLowerCase();
@@ -715,7 +710,7 @@ export function wireGrid() {
     if (e.key === 'Enter' && state.cursor >= 0 && state.viewer < 0) { e.preventDefault(); const item = state.items[state.cursor]; if (!item) return; if (cleanup() || state.selecting) { setSelected(item.uuid, !isSelected(item.uuid)); state.anchor = state.cursor; renderSelection(); } else inspect(item.uuid); return; }
     const n = selCount(), page = state.route.char ? 'character' : state.route.page;
     if (mod || e.altKey && !/^[1-9]$/.test(e.key)) return;
-    if (['c', 'a', 't', 's', 'g'].includes(key) || /^[1-9]$/.test(e.key)) e.preventDefault(); // keep the letter out of the palette input
+    if (['c', 'a', 't', 's', 'g'].includes(key) || /^[1-9]$/.test(e.key)) e.preventDefault(); // 别让这个字母进到命令面板的输入框里
     if (e.key === 'Backspace' || e.key === 'Delete') { e.preventDefault(); if (n) runBarAction(page === 'character' ? 'remove' : browsing() ? 'notlib' : ''); else singleAction('remove'); return; }
     if (key === 'c') { if (n) runBarAction(page === 'character' ? 'swap' : 'assign'); else singleAction(page === 'character' ? 'swap' : 'also'); return; }
     if (key === 'a' && !mod) { if (n) runBarAction(page === 'character' ? 'also' : 'assign'); else singleAction('also'); return; }

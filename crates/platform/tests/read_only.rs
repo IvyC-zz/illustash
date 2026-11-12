@@ -1,4 +1,5 @@
-//! A direct platform consumer; synthetic sources only, no application/HTTP dependency.
+//! 直接调用平台层的使用方；只用合成来源，不依赖应用层或 HTTP。
+#![allow(clippy::unwrap_used, reason = "集成测试里 unwrap 就是断言")]
 use illustash_platform::{platform_folder as folder, platform_photos as photos, sqlite, Error};
 use std::{fs, path::PathBuf};
 struct Fixture(PathBuf);
@@ -76,7 +77,7 @@ fn photos_reads_only_explicit_fixture_and_preserves_database() {
 }
 #[test]
 fn photos_refused_by_the_system_is_told_apart_from_other_failures() {
-    // EPERM is what macOS privacy settings answer; plain file modes answer EACCES and keep the database error (#202).
+    // macOS 隐私设置拒绝时返回 EPERM；普通文件权限返回 EACCES，保留数据库错误（#202）。
     let at = std::path::Path::new("Photos.sqlite");
     let refused = illustash_core::error::io_at(std::io::Error::from_raw_os_error(libc::EPERM), at, None);
     assert!(photos::denied(&refused));

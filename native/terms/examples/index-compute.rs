@@ -1,4 +1,4 @@
-//! Explicit synthetic driver; production adapter calls run_files with installed resources.
+//! 显式调用的合成驱动；生产适配器用已安装的资源调用 run_files。
 use illustash_terms::{
     index_compute::{self, numeric, Resources},
     recognition_compute::backend::Acceleration,
@@ -23,7 +23,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let tags = std::env::var("ILLUSTASH_INDEX_TAGS")?;
         let model = std::env::var("ILLUSTASH_INDEX_MODEL").unwrap_or_default();
         let runtime = std::env::var("ILLUSTASH_INDEX_RUNTIME").unwrap_or_default();
-        // As the installed worker: accelerated unless ILLUSTASH_CPU_ONLY (the bit-for-bit acceptance sets it).
+        // 与已安装的 worker 相同：除非设了 ILLUSTASH_CPU_ONLY（逐位验收会设），否则启用加速。
         let shared = std::env::var_os("ILLUSTASH_SHARED").map(std::path::PathBuf::from);
         let acceleration = Acceleration::from_env(shared.as_deref());
         index_compute::run_files(

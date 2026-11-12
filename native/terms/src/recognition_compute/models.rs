@@ -1,4 +1,4 @@
-//! One authoritative resource/model path policy for production and import.
+//! 生产和导入共用的唯一一套资源/模型路径规则。
 use crate::{Error, Result};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};

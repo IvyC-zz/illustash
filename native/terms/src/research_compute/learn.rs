@@ -1,4 +1,4 @@
-//! Existing prototypes and weak rings. Human decisions and ownership are published by Core.
+//! 现有的原型和弱认领外圈。人工决定和归属由 Core 发布。
 use super::{
     discriminate,
     features::{self, Matrix},
@@ -56,7 +56,7 @@ pub fn prototypes(seeds: &[Vec<f32>], negatives: &[Vec<f32>]) -> Result<Vec<Prot
     Ok(out)
 }
 
-// Python json.dumps(..., ensure_ascii=True) separators are part of persisted learning signatures.
+// Python json.dumps(..., ensure_ascii=True) 的分隔符是持久化学习签名的一部分。
 fn python_json(value: &Value) -> String {
     match value {
         Value::Array(values) => format!("[{}]", values.iter().map(python_json).collect::<Vec<_>>().join(", ")),
@@ -192,7 +192,7 @@ fn hex_decode(s: &str) -> Result<Vec<u8>> {
         .map(|i| u8::from_str_radix(&s[i..i + 2], 16).map_err(|_| Error::Invalid("Invalid prototype bytes".into())))
         .collect()
 }
-/// Prototype claims plus the discriminative `strong` ones (higher score wins), and weak rings.
+/// 原型认领加上判别式的 `strong` 认领（分数高的胜出），以及弱认领外圈。
 fn claims(
     f: &Matrix,
     uuids: &[String],
@@ -321,8 +321,8 @@ pub fn learn(
         }
     }
     let uuids = snapshot::strings(&c, "SELECT uuid FROM assets", &[])?;
-    // Test-only: `ILLUSTASH_TEST_PROTOTYPES_ONLY` leaves out the discriminative claims (#156), so the fixed answers
-    // recorded from the prototype-only algorithm (tests/test_native_research_compute.py) still apply. The product never sets it.
+    // 仅供测试：`ILLUSTASH_TEST_PROTOTYPES_ONLY` 去掉判别式认领（#156），让按只有原型的算法录制的固定答案
+    // （tests/test_native_research_compute.py）仍然适用。产品从不设置它。
     let strong = if std::env::var_os("ILLUSTASH_TEST_PROTOTYPES_ONLY").is_some() {
         BTreeMap::new()
     } else {
@@ -335,7 +335,7 @@ pub fn learn(
     Ok((result, Some(batch)))
 }
 
-/// Patched-anchor middle tiers, including the unchanged direct-neighbour/uphill alias rule.
+/// 补丁锚点的中间档，包括不变的直接近邻 / 上升方向别名规则。
 pub fn patch_anchors(snapshot: &Snapshot, root: &Path) -> Result<Anchors> {
     let path = root.join("char-anchors.npy");
     if !path.exists() {
@@ -407,7 +407,7 @@ pub fn patch_anchors(snapshot: &Snapshot, root: &Path) -> Result<Anchors> {
             for p in paths {
                 let p = p?.path();
                 if p.extension().is_some_and(|s| s == "json") {
-                    // Python skips decoding/JSON ValueError, but propagates I/O failures.
+                    // Python 跳过解码和 JSON 的 ValueError，但 I/O 失败会往外抛。
                     let contents = fs::read(&p)?;
                     let Ok(contents) = std::str::from_utf8(&contents) else { continue };
                     if serde_json::from_str::<Value>(contents).is_ok_and(|v| v["source"] == "danbooru-patch") {
@@ -461,7 +461,7 @@ mod tests {
         let old = json!(["E", 0, encoded, threshold, 5, hint]);
         let (strong, weak) = claims(&f, &f.uuids, &[old], &Anchors::default(), &BTreeMap::new()).unwrap();
         assert!(strong.is_empty() && weak.is_empty());
-        // Evidence for the old version drift stays explicit; no tolerance or golden rewrite.
+        // 旧版本漂移的证据保持显式；不加容差，也不重写 golden。
         let promoted = json!(["E", 0, encoded, threshold, 5, 0.08815577626228333]);
         let (strong, weak) = claims(&f, &f.uuids, &[promoted], &Anchors::default(), &BTreeMap::new()).unwrap();
         assert!(strong.is_empty());

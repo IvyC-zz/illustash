@@ -1,15 +1,15 @@
 const {test, before} = require('node:test');
-const web = require('./web.cjs');   // core/ modules, ui/grid.js (#199)
+const web = require('./web.cjs');   // core/ 下的模块、ui/grid.js（#199）
 let gridModule, homeModule;
 before(async () => { await web.ready(); gridModule = await web.load('ui/grid.js'); homeModule = await web.load('ui/home.js'); });
 const assert = require('node:assert/strict');
-// The grid's geometry is ui/grid.js; a hidden grid element keeps renderGrid() from drawing.
+// 网格的几何计算在 ui/grid.js；网格元素隐藏时 renderGrid() 不绘制。
 let layouts = 0;
 function grid(total = 103, fit = true) {
   const {state} = web.core(), page = web.fakePage();
   Object.assign(page.el('viewport'), {clientWidth: 1002, scrollTop: 0});
   Object.assign(page.el('grid'), {hidden: true, getBoundingClientRect: () => ({left: 10, top: 20})});
-  // A new data version for each grid, so the layout is never one cached from an earlier test.
+  // 每个网格用新的数据版本，布局就不会是前面测试缓存下来的。
   Object.assign(state, {size: 185, total, fit, dataVersion: 1e6 + ++layouts, items: Array.from({length: total}, (_, i) => ({width: [300, 800, 400, 1200][i % 4], height: 600})), route: {page: 'library'}});
   gridModule.viewOpts.captions = true;
   const c = {...gridModule, state, $: page.el}; c.layout(); return c;
@@ -62,7 +62,7 @@ test('square mode and zoom keep predictable geometry; toggling fit anchors the s
   const row=c.rowAt(c.$('viewport').scrollTop); assert.ok(c.rowStart(row)<=anchor && anchor<c.rowStart(row+1));
   c.toggleFit();assert.equal(c.state.fit,false);
 });
-// The home page is ui/home.js; its state is home, the observer included; the page is a fake one.
+// 首页在 ui/home.js；它的状态是 home，包括 observer；页面是假的。
 function homeHarness(api){
   const {home, moreHome} = homeModule, {state} = web.core(), page = web.fakePage(), el = page.document.getElementById;
   Object.assign(home, {days: [{day: '2026-10-02', items: [{uuid: 'old'}]}], next: '2026-10-02', gen: 1, loading: false, width: 1000});
@@ -110,7 +110,7 @@ test('within-day requests after navigation cannot change the library or remove a
   resolve({items:[]});await old;assert.equal(dayLoading.has('2026-10-02'),true);
 });
 test('opening the app lands on 首页; the library has its own hash and old query links still open it',()=>{
-  // core/route.js reads the page's location.
+  // core/route.js 读取页面的 location。
   const {parseHash, hashFor} = web.core(), c = {parseHash, hashFor, location: globalThis.location = {hash: ''}};
   for(const hash of ['','#','#/']){ c.location.hash=hash; assert.equal(c.parseHash().page,'home'); }
   c.location.hash='#/?artist=a1'; assert.deepEqual([c.parseHash().page,c.parseHash().artist],['library','a1']);
@@ -118,7 +118,7 @@ test('opening the app lands on 首页; the library has its own hash and old quer
   assert.deepEqual([c.parseHash().page,c.parseHash().day],['library','2026-10-02']);
 });
 test('undo and a finished sync redraw the home page, whose day groups come from their own read', async () => {
-  // undo() is ui/grid.js and the end of a sync ui/effects.js afterJob(); the home page redraws from its own read.
+  // undo() 在 ui/grid.js，同步结束在 ui/effects.js 的 afterJob()；首页按自己的读取重画。
   const homeReads = [], {edits, state} = web.core(), {afterJob} = await web.load('ui/effects.js');
   web.fakePage();
   edits.latest = {id: 7, label: '已将 1 张移出 A'};
@@ -147,7 +147,7 @@ test('home rows: full rows fill the width; a day with few pictures and a short l
     assert.ok(last.h <= 190 * 1.15, `last row ${last.h} at ${width}`);
     if (last.h === 190) assert.ok(last.tiles.every(s => /^flex:none;width:\d+px$/.test(s)));
   }
-  // Nearly full: stretched to the width, not left with a gap.
+  // 接近满行：拉伸到整行宽度，不留空隙。
   const full = rows(homeRows(pics(1, 1, 1, 1, 1, 1, 1), 1372, 190));
   assert.equal(full.length, 1); assert.ok(full[0].tiles.every(s => s.startsWith('flex:1 ')));
 });

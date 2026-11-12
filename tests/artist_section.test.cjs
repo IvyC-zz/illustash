@@ -1,6 +1,6 @@
-// The inspector's 画师 section (ui/artists.js) with a 「也许是 TA」 suggestion: its link once read an undefined TIPT
-// (left by the #173 move to t()), so any picture with d.maybe threw a ReferenceError and the section was never drawn.
-// The English page is tests/english_page.test.cjs.
+// 详情面板里带「也许是 TA」建议的画师区（ui/artists.js）：它的链接曾读取未定义的 TIPT（#173 改用 t() 时遗留），
+// 所以凡是带 d.maybe 的图片都会抛出 ReferenceError，这一区始终画不出来。
+// 英文页面见 tests/english_page.test.cjs。
 const {test, before} = require('node:test');
 const assert = require('node:assert/strict');
 const web = require('./web.cjs');

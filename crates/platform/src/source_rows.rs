@@ -1,4 +1,4 @@
-//! Existing SQLite-to-JSON source decoding shared by read adapters and migrations.
+//! 现有的 SQLite 到 JSON 的源数据解码，读取适配层和迁移共用。
 use crate::Result;
 use rusqlite::{types::ValueRef, Connection};
 use serde_json::Value;

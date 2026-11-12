@@ -2,11 +2,12 @@
 //! 名字的语言、作品的可读名、历史文案由核心按旧代码算（名字 N5）。新建作品的 id 由调用方给：给的是 false 时，核心
 //! 在真要新建的那一刻以 `Error::NeedId`（退出码 5，标准错误是这个 id 在命令里的 JSON 指针）要一个，调用方抽一个
 //! uuid 填进去再执行一次。这样调用方抽 uuid 的次数和先后与旧代码相同。
-use crate::character_commands::{begin_action, finish_action, hybrid, invalid, require_entity, text};
+use crate::character_commands::{begin_action, finish_action, hybrid, require_entity, text};
 use crate::character_entities::{self, New, ENTITIES, OF};
 use crate::character_labels::{lang_of, Shown};
 use crate::character_links::{check_free, core_system, LINKS};
 use crate::character_names::{strip, NEXT_SEQ, TERM_OF};
+use crate::error::invalid;
 use crate::{character_graph, character_names, character_projection, Error, Result};
 use rusqlite::{params, Connection, OptionalExtension};
 use serde_json::{json, Value};

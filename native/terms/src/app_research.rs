@@ -1,5 +1,4 @@
-//! Optional calculation workers operate on snapshots. The native owner validates and publishes.
-#![cfg_attr(not(test), deny(clippy::unwrap_used))]
+//! 可选的计算 worker 在快照上工作。原生所有者负责校验和发布。
 use crate::{
     app_library::Library,
     app_tasks::{Task, TaskContext, TaskIdentity},
@@ -31,27 +30,26 @@ pub fn configured() -> bool {
 fn bad() -> Error {
     Error::Invalid("研究结果格式不正确".into())
 }
-// Publication-time conflicts: the snapshot was valid but newer input arrived. Only these retry.
+// 发布时的冲突：快照本身有效，但到了更新的输入。只有这几种会重试。
 const INPUT_CHANGED: &str = "研究输入已改变，请重试";
 const LEARNING_CHANGED: &str = "学习输入已改变";
-/// Automatic retries after an input conflict; the delay doubles from the base each time.
+/// 输入冲突后的自动重试次数；每次的延迟从基数起翻倍。
 const CONFLICT_RETRIES: u32 = 5;
 fn input_changed(e: &Error) -> bool {
     matches!(e, Error::Conflict(m) if m == INPUT_CHANGED || m == LEARNING_CHANGED)
 }
-/// A run that stepped aside for a source writer (`Writers`). Learning and similar runs end and recovery starts them
-/// again once no sync runs; a query waits for the writer to finish and asks again, up to `CONFLICT_RETRIES` times.
+/// 为源库写入方让路的运行（`Writers`）。学习和相似运行就此结束，等没有同步在运行时由恢复重新启动；查询则等写入方
+/// 完成后再问一次，最多 `CONFLICT_RETRIES` 次。
 const YIELDED: &str = "图库正在写入，研究稍后继续";
 fn yielded(e: &Error) -> bool {
     matches!(e, Error::Conflict(m) if m == YIELDED)
 }
-/// The application database kept changing between the publication check and its write lock, round after round
-/// (#275). Not a failure: the result is not published and the run waits, then tries again.
+/// 应用数据库在发布检查和取得写入锁之间一轮又一轮地变化（#275）。这不算失败：结果不发布，运行等一会儿再试。
 const BUSY: &str = "图库一直在写入，研究稍后继续";
 fn busy(e: &Error) -> bool {
     matches!(e, Error::Conflict(m) if m == BUSY)
 }
-/// Waits `d`; an error when the task stops meanwhile.
+/// 等待 `d`；期间任务停止则返回错误。
 fn pause(ctx: &TaskContext, d: Duration) -> Result<()> {
     let until = std::time::Instant::now() + d;
     loop {
@@ -63,7 +61,7 @@ fn pause(ctx: &TaskContext, d: Duration) -> Result<()> {
         std::thread::sleep((until - now).min(Duration::from_millis(50)));
     }
 }
-/// How long the writer must have been gone before a run that stepped aside starts again.
+/// 为写入方让路的运行，要等写入方消失这么久之后才重新开始。
 const STEP_ASIDE: Duration = Duration::from_secs(2);
 fn retry_base() -> Duration {
     Duration::from_millis(
@@ -78,10 +76,9 @@ const CACHES: &[(&str, usize)] = &[
     ("similar_paired", 1),
     ("similar_retry", 2),
 ];
-/// A picture whose bytes changed under the same UUID is no longer described by the similar results computed
-/// from its pixels: drop its signature, every relation it is part of and its pairing marks, so the next
-/// similar run computes them again, and rebuild the groups from what remains. Unchanged pictures keep their
-/// results. All of these are machine caches; human decisions are stored elsewhere and stay.
+/// 同一 UUID 下字节变了的图片，不再由按它的像素算出的相似结果描述：删掉它的签名、它参与的每条关系和它的配对标记，
+/// 让下一次相似运行重新计算，并用剩下的内容重建分组。没变的图片保留结果。这些都是机器缓存；人工决定存在别处，
+/// 保持不变。
 pub(crate) fn forget_content(tx: &Connection, src: &Connection, changed: &[String]) -> Result<()> {
     if changed.is_empty() {
         return Ok(());
@@ -92,7 +89,7 @@ pub(crate) fn forget_content(tx: &Connection, src: &Connection, changed: &[Strin
         "DELETE FROM relations WHERE a IN (SELECT value FROM json_each(?1)) OR b IN (SELECT value FROM json_each(?1))",
         [&list],
     )?;
-    // Created by the first similar run that publishes them.
+    // 由第一次发布它们的相似运行创建。
     if tx.query_row("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name='similar_paired')", [], |r| r.get(0))? {
         tx.execute("DELETE FROM similar_paired WHERE uuid IN (SELECT value FROM json_each(?1))", [&list])?;
         tx.execute(
@@ -103,18 +100,16 @@ pub(crate) fn forget_content(tx: &Connection, src: &Connection, changed: &[Strin
     crate::app_migrate_data::early_groups(tx, src)?;
     crate::character_projection::fold(tx)
 }
-/// Application tables that no research calculator, learning stamp or result check reads (#29):
-/// preferences, name-source settings (model keys, traffic counters), name caches,
-/// sync history and the research queues themselves. Writing them never invalidates a result. Every
-/// other table, including one added later, stays an input of learning.
+/// 没有任何研究计算器、学习戳或结果检查会读的应用表（#29）：偏好设置、名称来源设置（模型密钥、流量计数）、
+/// 名称缓存、同步历史和研究队列本身。写这些表从不会让结果失效。其他所有表，包括以后新增的表，都仍是学习的输入。
 const UNREAD: &[&str] =
     &["backend_effects", "name_cache", "name_settings", "prefs", "research_runs", "sync_added", "sync_runs"];
-/// `meta` rows that are not inputs: the names version counts writes to name tables (triggers).
+/// 不算输入的 `meta` 行：names version 统计对名称表的写入次数（触发器）。
 const UNREAD_META: &str = "'names_version'";
-/// What one research kind's result is computed from (#29, docs/ARCHITECTURE_DIRECTION.md).
+/// 某一种研究的结果由什么算出（#29，docs/ARCHITECTURE_DIRECTION.md）。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Scope {
-    /// events/regroup: learning, clustering and (events with similar) the similar scan.
+    /// events/regroup：学习、聚类，以及（events 带 similar 时）相似扫描。
     Learning,
     Similar,
     Oc,
@@ -129,7 +124,7 @@ impl Scope {
             _ => Self::Learning,
         }
     }
-    /// Application tables the calculator reads; `None` means every table except `UNREAD`.
+    /// 计算器读取的应用表；`None` 表示除 `UNREAD` 以外的所有表。
     fn app(self) -> Option<&'static [&'static str]> {
         match self {
             Self::Learning => None,
@@ -145,11 +140,11 @@ impl Scope {
             ]),
             // research_compute::groups::oc.
             Self::Oc => Some(&["duplicates", "excluded", "general_hits", "memberships"]),
-            // Only the requested assets' paths, hashed by `fingerprint_once`.
+            // 只有请求的图片的路径，由 `app_digest_once` 计算哈希。
             Self::Relate => Some(&[]),
         }
     }
-    /// Source tables the calculator reads; `None` means every table. CCIP vectors are the `embeddings` overlay.
+    /// 计算器读取的源库表；`None` 表示所有表。CCIP 向量是 `embeddings` 叠加层。
     fn source(self) -> Option<&'static [&'static str]> {
         match self {
             Self::Learning => None,
@@ -157,15 +152,15 @@ impl Scope {
             Self::Relate => Some(&[]),
         }
     }
-    /// Kinds that publish caches or learning; the others only answer a query.
+    /// 发布缓存或学习结果的种类；其他种类只回答查询。
     fn publishes(self) -> bool {
         matches!(self, Self::Learning | Self::Similar)
     }
 }
-/// The fingerprinted inputs of one run: the kind's scope plus the paths it reads outside the databases.
+/// 一次运行纳入指纹的输入：该种类的范围，加上它在数据库之外读取的路径。
 struct Inputs<'a> {
     scope: Scope,
-    /// relate: the requested assets, sorted and unique.
+    /// relate：请求的图片，排序并去重。
     ids: Vec<String>,
     features: PathBuf,
     anchors: &'a Path,
@@ -182,7 +177,7 @@ impl<'a> Inputs<'a> {
         ids.dedup();
         Self { scope, ids, features: library.instance_path().join("features"), anchors }
     }
-    /// Shared files hashed by content: base features (all but relate) and anchors (learning only).
+    /// 按内容计算哈希的共享文件：基础特征（除 relate 外都用）和锚点（只有学习用）。
     fn files(&self) -> Result<Vec<PathBuf>> {
         let mut files = vec![];
         if self.scope != Scope::Relate {
@@ -202,8 +197,7 @@ impl<'a> Inputs<'a> {
         files.sort();
         Ok(files)
     }
-    /// Cheap evidence that the shared files are unchanged: index generation plus each file's size and
-    /// modification time. Compared under the write lock instead of reading the files again.
+    /// 共享文件没变的廉价证据：索引代号加上每个文件的大小和修改时间。在写入锁下比较，而不是再读一遍文件。
     fn stamp(&self) -> Result<Vec<u8>> {
         let mut h = Sha256::new();
         if self.scope == Scope::Learning && !self.anchors.as_os_str().is_empty() {
@@ -231,7 +225,7 @@ fn file_metadata(h: &mut Sha256, path: &Path) {
         h.update(b"missing");
     }
 }
-/// Ordered typed rows of one table (or a missing-table marker).
+/// 一张表的有序、带类型的行（或表不存在的标记）。
 fn hash_table(c: &Connection, h: &mut Sha256, table: &str, check: &dyn Fn() -> Result<()>) -> Result<()> {
     feed(h, table.as_bytes());
     let exists: bool =
@@ -275,7 +269,7 @@ fn hash_table(c: &Connection, h: &mut Sha256, table: &str, check: &dyn Fn() -> R
     }
     Ok(())
 }
-/// `only`: the tables to hash; `None` hashes every table except `skip`.
+/// `only`：要计算哈希的表；`None` 计算除 `skip` 以外所有表的哈希。
 fn hash_db(
     c: &Connection,
     h: &mut Sha256,
@@ -299,9 +293,8 @@ fn hash_db(
     }
     Ok(())
 }
-/// A run's input fingerprint: its application part (`app_digest`) and its source part (`source_digest`). They are
-/// read separately so that work on the application database never happens while research holds source.sqlite's
-/// read lock without looking for its writers (#275).
+/// 一次运行的输入指纹：应用部分（`app_digest`）和源库部分（`source_digest`）。两部分分开读，这样研究持有
+/// source.sqlite 的读锁时，绝不会在不留意其写入方的情况下处理应用数据库（#275）。
 fn fingerprint(app: &Connection, src: &Connection, inputs: &Inputs<'_>, ctx: &TaskContext) -> Result<String> {
     let check = || ctx.check();
     Ok(combine(&app_digest(app, inputs, &check)?, &source_digest(src, inputs, &check)?))
@@ -317,9 +310,8 @@ fn source_digest(src: &Connection, inputs: &Inputs<'_>, check: &dyn Fn() -> Resu
     hash_db(src, &mut h, inputs.scope.source(), &["backend_effects", "research_runs"], check)?;
     Ok(h.finalize().to_vec())
 }
-/// The application tables, shared files and original images. Shared anchor files are read within one complete index
-/// publication (index_generation). `check` runs between rows and file blocks: a stop, and a source writer when the
-/// caller holds source's read lock.
+/// 应用表、共享文件和原图。共享锚点文件在一次完整的索引发布（index_generation）之内读取。`check` 在行与文件块之间
+/// 运行：检查停止，调用方持有源库读锁时还检查源库写入方。
 fn app_digest(app: &Connection, inputs: &Inputs<'_>, check: &dyn Fn() -> Result<()>) -> Result<Vec<u8>> {
     if inputs.scope == Scope::Learning {
         crate::index_generation::stable(inputs.anchors, || app_digest_once(app, inputs, check))
@@ -331,7 +323,7 @@ fn app_digest_once(app: &Connection, inputs: &Inputs<'_>, check: &dyn Fn() -> Re
     let mut h = Sha256::new();
     feed(&mut h, format!("{:?}", inputs.scope).as_bytes());
     hash_db(app, &mut h, inputs.scope.app(), UNREAD, check)?;
-    // Base feature/anchor files are inputs too. Changed vectors invalidate an in-flight result.
+    // 基础特征和锚点文件也是输入。向量变了会让进行中的结果失效。
     for p in inputs.files()? {
         check()?;
         let name = p.to_string_lossy();
@@ -348,7 +340,7 @@ fn app_digest_once(app: &Connection, inputs: &Inputs<'_>, check: &dyn Fn() -> Re
             }
         }
     }
-    // Original images: every asset for learning/similar, the requested ones for relate; OC reads none.
+    // 原图：学习和相似用全部图片，relate 用请求的那些；OC 一张也不读。
     match inputs.scope {
         Scope::Learning | Scope::Similar => {
             let mut q = app.prepare("SELECT src_path FROM assets ORDER BY uuid")?;
@@ -375,13 +367,12 @@ fn app_digest_once(app: &Connection, inputs: &Inputs<'_>, check: &dyn Fn() -> Re
     }
     Ok(h.finalize().to_vec())
 }
-/// Rounds of one accept check; each recomputes the fingerprint outside the write lock.
+/// 一次接受检查的轮数；每轮都在写入锁之外重新计算指纹。
 const OUTSIDE_ROUNDS: u32 = 3;
-/// How long one round waits for the application write lock before it counts as a round the inputs moved in: as long
-/// as `crate::configure` lets a connection wait (shorter in tests).
+/// 一轮等待应用写入锁多久后，就算作输入有变动的一轮：与 `crate::configure` 允许连接等待的时长相同（测试中更短）。
 const LOCK_WAIT: Duration = Duration::from_millis(if cfg!(test) { 300 } else { 5000 });
-/// One consistent read of each connection: everything `read` does sees the state committed when it
-/// first reads. Nothing is written, so each transaction ends with ROLLBACK.
+/// 对每个连接做一次一致的读取：`read` 所做的一切都看到首次读取时已提交的状态。什么都不写，所以每个事务都以
+/// ROLLBACK 结束。
 fn read_snapshot<T>(dbs: &[&Connection], read: impl FnOnce() -> Result<T>) -> Result<T> {
     let mut open = vec![];
     let value = (|| {
@@ -399,17 +390,15 @@ fn read_snapshot<T>(dbs: &[&Connection], read: impl FnOnce() -> Result<T>) -> Re
     }
     value
 }
-/// source.sqlite keeps a rollback journal, so a read transaction on it holds a lock that makes its writers (sync,
-/// recognition imports) give up after their busy timeout (#226, `app_library::TASK_WRITE_WAIT`). Research reads
-/// source for as long as hashing and copying the whole file takes, which on a large library is far longer. Its source
-/// reads watch for the journal a writer creates before it commits and step aside at once, like the background
-/// integrity check (#212).
+/// source.sqlite 用回滚日志，所以在它上面的读事务会持有一把锁，让它的写入方（同步、识别导入）在 busy timeout 之后
+/// 放弃（#226，`app_library::TASK_WRITE_WAIT`）。研究读源库的时长等于对整个文件计算哈希并复制的时间，在大图库上要
+/// 长得多。因此它对源库的读取会留意写入方提交前创建的日志文件，一出现就立刻让路，和后台完整性检查一样（#212）。
 struct Writers {
     journal: PathBuf,
     seen: Arc<AtomicBool>,
 }
 impl Writers {
-    /// How often a read looks for the journal: well within the writers' busy timeout.
+    /// 读取时多久查看一次日志文件：远在写入方的 busy timeout 之内。
     const POLL: Duration = Duration::from_millis(20);
     fn of(source: &Path) -> Self {
         let mut journal = source.as_os_str().to_owned();
@@ -419,7 +408,7 @@ impl Writers {
     fn writing(&self) -> bool {
         self.journal.exists()
     }
-    /// Between steps that are not SQL statements (backup steps).
+    /// 用在不是 SQL 语句的步骤之间（backup 的各步）。
     fn check(&self) -> Result<()> {
         if self.seen.load(Ordering::SeqCst) || self.writing() {
             self.seen.store(true, Ordering::SeqCst);
@@ -427,7 +416,7 @@ impl Writers {
         }
         Ok(())
     }
-    /// Runs `read` with `src` interrupted once a writer's journal appears; any error then is the yield.
+    /// 运行 `read`，一旦出现写入方的日志文件就中断 `src`；此后出现的任何错误都当作让路。
     fn read<T>(&self, src: &Connection, read: impl FnOnce() -> Result<T>) -> Result<T> {
         self.check()?;
         let (journal, seen) = (self.journal.clone(), self.seen.clone());
@@ -451,7 +440,7 @@ impl Writers {
             result => result,
         }
     }
-    /// Until no writer's journal has been seen for a moment; an error when the task stops meanwhile.
+    /// 一直等到有一小段时间没看到写入方的日志文件；期间任务停止则返回错误。
     fn wait(&self, ctx: &TaskContext) -> Result<()> {
         let mut quiet = std::time::Instant::now();
         while quiet.elapsed() < STEP_ASIDE {
@@ -467,15 +456,12 @@ impl Writers {
 fn data_version(c: &Connection) -> Result<i64> {
     Ok(c.query_row("PRAGMA data_version", [], |r| r.get(0))?)
 }
-/// Accept-time input check for publishing kinds (#29). The fingerprint is recomputed in a read
-/// transaction, without the write lock. Under BEGIN IMMEDIATE only this connection's
-/// `PRAGMA data_version` (changed by any commit from another connection) and the shared files' stamp
-/// are compared; if either moved, the lock is let go and the round is repeated. The fingerprint is never computed
-/// under the lock (#275): on a large library that took long enough for every other writer to give up. After
-/// `OUTSIDE_ROUNDS` rounds that each saw a commit, the check ends with `BUSY` and publishes nothing. A mismatch is
-/// always `INPUT_CHANGED`. `src` is one read transaction for the whole check, so its part of the fingerprint is read
-/// once. With `writers`, application reads, shared-file reads and the wait for the lock step aside for a source
-/// writer as the source reads do. `between` runs before each lock (test hook).
+/// 发布类种类在接受时的输入检查（#29）。指纹在读事务里重新计算，不持有写入锁。在 BEGIN IMMEDIATE 下只比较
+/// 本连接的 `PRAGMA data_version`（其他连接的任何提交都会改变它）和共享文件的戳；任一个变了，就放开锁重来一轮。
+/// 指纹从不在锁下计算（#275）：在大图库上这要花很久，久到其他写入方都会放弃。连续 `OUTSIDE_ROUNDS` 轮都看到
+/// 有提交时，检查以 `BUSY` 结束，什么都不发布。指纹不一致时总是 `INPUT_CHANGED`。`src` 在整个检查中是同一个读事务，
+/// 所以指纹的源库部分只读一次。带 `writers` 时，读应用库、读共享文件和等锁都像读源库一样为源库写入方让路。
+/// `between` 在每次取锁前运行（测试钩子）。
 #[allow(clippy::too_many_arguments)]
 fn confirm<T>(
     app: &Connection,
@@ -487,7 +473,7 @@ fn confirm<T>(
     mut between: impl FnMut(),
     publish: impl FnOnce(rusqlite::Transaction<'_>) -> Result<T>,
 ) -> Result<T> {
-    // Between rows and file blocks, not only between SQL steps: hashing the shared files runs no statement.
+    // 在行与文件块之间检查，不只是在 SQL 步骤之间：对共享文件计算哈希时不执行任何语句。
     let check = || ctx.check().and_then(|_| writers.map_or(Ok(()), Writers::check));
     let source = source_digest(src, inputs, &check)?;
     for _ in 0..OUTSIDE_ROUNDS {
@@ -511,9 +497,8 @@ fn confirm<T>(
     }
     Err(Error::Conflict(BUSY.into()))
 }
-/// BEGIN IMMEDIATE on the application database within `LOCK_WAIT`; `None` when another writer kept the lock. The
-/// check holds the source read lock meanwhile, and SQLite runs no progress handler while it waits for a lock, so it
-/// waits in short steps and steps aside between them when a source writer appears.
+/// 在 `LOCK_WAIT` 之内对应用数据库执行 BEGIN IMMEDIATE；其他写入方一直占着锁时返回 `None`。这期间检查持有源库读锁，
+/// 而 SQLite 等锁时不运行进度回调，所以这里分成短步等待，在步与步之间发现源库写入方就让路。
 fn lock<'c>(
     app: &'c Connection,
     ctx: &TaskContext,
@@ -535,13 +520,12 @@ fn lock<'c>(
             Err(e) => break Err(e.into()),
         }
     };
-    // The wait `crate::configure` sets, for the publication's own statements.
+    // `crate::configure` 设置的等待时长，用于发布自己的语句。
     app.busy_timeout(Duration::from_secs(5))?;
     locked
 }
-/// Snapshot directories `illustash-research-<task>` are removed when their run ends, whatever the outcome
-/// (`Scratch`). Only a killed process leaves one; such a directory is removed once it is older than a day and
-/// than twice the task deadline, so a running task never loses its own (#31).
+/// 快照目录 `illustash-research-<task>` 在其运行结束时删除，不论结果如何（`Scratch`）。只有被杀掉的进程会留下这种
+/// 目录；它比一天和两倍任务截止时长都旧时才删除，所以正在运行的任务绝不会丢掉自己的目录（#31）。
 const SCRATCH_AGE: Duration = Duration::from_secs(24 * 3600);
 fn sweep_scratch(root: &Path, age: Duration) -> usize {
     let Ok(entries) = fs::read_dir(root) else {
@@ -596,7 +580,7 @@ fn queue_schema(c: &Connection) -> Result<()> {
     c.execute_batch("CREATE TABLE IF NOT EXISTS research_runs(id TEXT PRIMARY KEY,kind TEXT NOT NULL,status TEXT NOT NULL,error TEXT NOT NULL DEFAULT '',created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);")?;
     Ok(())
 }
-/// Recognition acknowledges a durable scheduling intent; computation remains separately pending.
+/// 识别确认的是一个持久化的调度意图；计算本身另外保持待处理。
 pub fn dispatch(library: &Library, kind: &str) -> Result<()> {
     if !configured() || library.frozen() {
         return Ok(());
@@ -629,9 +613,9 @@ pub struct Research {
     pub anchors: PathBuf,
     paused: bool,
     retry_at: Option<std::time::Instant>,
-    /// Set when automatic conflict retries ran out; recovery then waits for an explicit start.
+    /// 自动冲突重试用完时设置；之后恢复要等显式的启动。
     exhausted: Arc<AtomicBool>,
-    /// Set when the last run stepped aside for a source writer (`YIELDED`); recovery starts it again soon.
+    /// 上一次运行为源库写入方让路（`YIELDED`）时设置；恢复会很快重新启动它。
     stepped_aside: Arc<AtomicBool>,
 }
 impl Research {
@@ -740,7 +724,7 @@ impl Research {
         self.task = Some(Task::start(identity, Some(Duration::from_millis(timeout)), move |ctx| {
             let (mut attempt, mut stepped) = (0, 0);
             let result = loop {
-                // Each attempt takes a fresh snapshot; a stale result was rejected and never published.
+                // 每次尝试都取新的快照；过期的结果已被拒绝，从未发布。
                 match run(&library, &ctx, &worker, &kind, args.clone(), &state, &anchors) {
                     Err(e) if yielded(&e) && ["oc", "relate"].contains(&kind.as_str()) => {
                         if stepped == CONFLICT_RETRIES {
@@ -776,7 +760,7 @@ impl Research {
                 Ok(v) => {
                     let mut public = Json::object([("status", "idle".into())]);
                     if !["oc", "relate"].contains(&kind.as_str()) {
-                        // The date too: the task panel shows "MM-DD hh:mm" from it, as for the other jobs (#287).
+                        // 日期也要：任务面板据此显示「MM-DD hh:mm」，与其他任务一样（#287）。
                         let at = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
                         public.set("at", at.clone().into());
                         public.extend(v.clone());
@@ -790,8 +774,8 @@ impl Research {
                     Ok(())
                 }
                 Err(e) if yielded(&e) || busy(&e) => {
-                    // Not a failure: the pending work stays as it is, without an error, for recovery to start again:
-                    // soon after a source writer, after the usual minute when the library stayed busy (#275).
+                    // 这不算失败：待处理的工作保持原样，不带错误，等恢复重新启动：为源库写入方让路的很快就重启，
+                    // 图库一直忙的则照常过一分钟（#275）。
                     stepped_aside.store(yielded(&e), Ordering::SeqCst);
                     let message = if yielded(&e) { YIELDED } else { BUSY };
                     *state.lock().expect("research state mutex poisoned") =
@@ -828,10 +812,8 @@ impl Research {
         }
         Ok(rx)
     }
-    /// Start pending learning/similarity work. Not while a sync runs: its batch imports leave
-    /// `imported` events that one run after the sync coalesces, instead of learning competing
-    /// with recognition for the CPU between batches. A run that stepped aside for a source writer
-    /// (#226) starts again shortly after, on the same terms.
+    /// 启动待处理的学习和相似工作。同步运行期间不启动：同步的批次导入会留下 `imported` 事件，由同步之后的一次运行
+    /// 合并处理，免得学习在批次之间和识别抢 CPU。为源库写入方让路的运行（#226）稍后按同样的条件重新启动。
     pub fn recover(&mut self, library: &Library, sync_busy: bool) -> Result<()> {
         if !configured()
             || library.frozen()
@@ -847,7 +829,7 @@ impl Research {
         }) {
             self.task.take();
             if self.exhausted.load(Ordering::SeqCst) {
-                // Ongoing writes outlasted the retries: keep the error until an explicit start or reopen.
+                // 持续的写入比重试撑得更久：保留错误，直到显式启动或重新打开。
                 self.paused = true;
                 return Ok(());
             }
@@ -859,7 +841,7 @@ impl Research {
         let c = crate::sqlite::open(library.db())?;
         crate::configure(&c)?;
         queue_schema(&c)?;
-        // An interrupted run has no receipt: its original events/intent remain pending.
+        // 被打断的运行没有回执：它原来的事件和意图仍待处理。
         c.execute("UPDATE research_runs SET status='pending' WHERE status='running'", [])?;
         let pending:bool=c.query_row("SELECT EXISTS(SELECT 1 FROM backend_effects WHERE status='pending' AND kind IN ('verdict','imported','index_changed')) OR EXISTS(SELECT 1 FROM research_runs WHERE status='pending')",[],|r|r.get(0))?;
         if pending {
@@ -868,17 +850,16 @@ impl Research {
         Ok(())
     }
 }
-/// What a run computes from: the input version and the copies in `dir`, with the pending work they cover.
+/// 一次运行据以计算的内容：输入版本和 `dir` 里的副本，以及它们覆盖的待处理工作。
 struct Snapshot {
     version: String,
     events: Vec<i64>,
     intents: Vec<String>,
     regroup: bool,
 }
-/// The copies and their version, each database read in one read transaction. The application database is read and
-/// copied first, before source.sqlite is touched: research then holds source's read lock only while it reads source
-/// itself, where it steps aside for a source writer (`Writers`). Copying the application database while holding
-/// that lock let a writer wait for the whole copy (#275).
+/// 副本及其版本，每个数据库都在一个读事务里读取。先读取并复制应用数据库，再碰 source.sqlite：这样研究只在读源库
+/// 本身时才持有源库读锁，而读源库时会为源库写入方让路（`Writers`）。以前在持有这把锁时复制应用数据库，会让写入方
+/// 等完整个复制（#275）。
 fn snapshot(
     c: &Connection,
     src: &Connection,
@@ -915,7 +896,7 @@ fn snapshot(
                         [],
                         |r| r.get::<_, bool>(0),
                     )? || !intents.is_empty());
-            // Source last: from its first read on, research holds its read lock.
+            // 源库放最后：从第一次读起，研究就持有它的读锁。
             let source = source_digest(src, inputs, &|| ctx.check())?;
             backup(src, &dir.join("source.sqlite"), ctx, Some(writers))?;
             Ok(Snapshot { version: combine(&app, &source), events, intents, regroup })
@@ -938,10 +919,10 @@ fn run(
     let inputs = Inputs::new(library, anchors, kind, &args);
     let writers = Writers::of(&library.source());
     let Snapshot { version, events, intents, regroup } = snapshot(&c, &src, &writers, &inputs, kind, &scratch.0, ctx)?;
-    // On the copy, outside the read transactions: nothing here reads the library.
+    // 在副本上、读事务之外进行：这里没有任何东西读图库。
     crate::sqlite::open(scratch.0.join("library.sqlite"))?
         .execute("DELETE FROM name_settings WHERE key IN ('model_key','deepseek_key')", [])?;
-    // Only learning kinds publish a learning batch; the others skip its full input stamp.
+    // 只有学习类的种类发布学习批次；其他种类跳过它完整的输入戳。
     let learning = if inputs.scope == Scope::Learning {
         crate::character_learning::snapshot(&mut crate::sqlite::open(scratch.0.join("library.sqlite"))?)?["token"]
             .clone()
@@ -966,7 +947,7 @@ fn run(
     let output = scratch.0.join("response.json");
     let progress = scratch.0.join("progress.json");
     fs::write(&input, serde_json::to_vec(&request).map_err(|_| bad())?)?;
-    // A separate observer is unnecessary: progress is a bounded file polled by the process API callback.
+    // 不需要单独的观察者：进度是一个大小有限的文件，由进程 API 的回调轮询。
     let mut cmd = Command::new(worker);
     cmd.env(crate::app_tasks::WORKER_KIND_ENV, "research")
         .arg(&input)
@@ -1015,15 +996,15 @@ fn run(
     }
     let importing = || *state.lock().expect("research state mutex poisoned") = json!({"status":"importing"}).into();
     importing();
-    // The result is kept while the library is too busy to check it (#275): the check runs again after a pause, up to
-    // `CONFLICT_RETRIES` times, before the run ends with `BUSY` and recovery starts it again later.
+    // 图库忙得没法检查结果时，结果先保留（#275）：暂停后再检查，最多 `CONFLICT_RETRIES` 次，然后运行以 `BUSY` 结束，
+    // 之后由恢复重新启动。
     let publish = || {
         ctx.receive(&response.identity, || {
             let mut src = crate::app_library::read_connection(&library.source())?;
             let src = src.transaction()?;
             writers.read(&src, || {
                 if !inputs.scope.publishes() {
-                    // A query publishes nothing: one read transaction checks its inputs and its answer.
+                    // 查询什么都不发布：一个读事务同时检查它的输入和答案。
                     let c = crate::app_library::read_connection(&library.db())?;
                     return read_snapshot(&[&c], || {
                         if fingerprint(&c, &src, &inputs, ctx)? != version {
@@ -1113,17 +1094,16 @@ fn run(
         }
     }
 }
-/// What a publication wrote to relations and signatures (#31): rowids of the rows inserted or rewritten, and
-/// the previous version of each row deleted or rewritten, for `validate_references`.
+/// 一次发布写入 relations 和签名的内容（#31）：插入或改写的行的 rowid，以及每个被删除或改写的行的旧版本，
+/// 供 `validate_references` 使用。
 #[derive(Default)]
 struct Published {
     touched: std::collections::HashMap<&'static str, Vec<i64>>,
     old: std::collections::HashMap<&'static str, std::collections::HashSet<Vec<crate::table_delta::Cell>>>,
 }
-/// One cache table of a result (#31). A full array (an older worker, clusters) is compared with the stored
-/// rows; a change list `{delete, append}` from the worker is applied to the rows the snapshot held, which the
-/// accepted fingerprint guarantees are still stored. Either way only differing rows are written, and the table
-/// ends as the full replacement left it: the same rows in the same rowid order.
+/// 结果里的一张缓存表（#31）。完整数组（较旧的 worker、clusters）与已存的行比较；worker 给出的变更列表
+/// `{delete, append}` 应用到快照里的那些行上，接受时的指纹保证这些行仍然存着。两种方式都只写入不同的行，
+/// 表最终与整表替换后的结果相同：同样的行，同样的 rowid 顺序。
 fn publish_table(
     c: &Connection,
     table: &str,
@@ -1175,7 +1155,7 @@ fn publish_table(
     }
     Ok(written.rows())
 }
-/// One validated result row as the values the full replacement inserted.
+/// 一行校验过的结果，表示为整表替换时插入的值。
 fn cache_row(table: &str, n: usize, row: &Value) -> Result<Vec<crate::table_delta::Cell>> {
     let r = row.as_array().filter(|r| r.len() == n).ok_or_else(bad)?;
     validate_row(table, r)?;
@@ -1261,9 +1241,8 @@ fn validate_references(c: &Connection, expected: &[&str], published: &Published)
         if index<2 && !expected.contains(&"clusters") {continue;}
         if c.query_row(&sql,[],|r|r.get::<_,bool>(0))? {return Err(bad());}
     }
-    // Relations and signatures (#31): only the rows this publication wrote are checked; every other row is the
-    // stored one. A written row naming a picture no longer in the library is allowed only as the identical
-    // previous row (history the calculator kept).
+    // relations 和签名（#31）：只检查本次发布写入的行；其他行都是原来存着的。写入的行如果指向已不在图库里的图片，
+    // 只有与原来那行完全相同时才允许（计算器保留的历史）。
     for (table, shape, missing) in [
         (
             "relations",
@@ -1323,7 +1302,7 @@ fn validate_query(c: &Connection, kind: &str, v: &Value, args: &Value) -> Result
 
 #[cfg(test)]
 mod tests {
-    //! #29: synthetic databases and files only.
+    //! #29：只用合成的数据库和文件。
     use super::*;
     use crate::app_tasks::{Task, TaskIdentity};
     use std::collections::BTreeSet;
@@ -1409,7 +1388,7 @@ mod tests {
         fn versions(&self) -> Vec<String> {
             ALL.iter().map(|s| self.version(*s)).collect()
         }
-        /// Run the accept check for `scope`; returns whether it published and how many rounds ran.
+        /// 对 `scope` 运行接受检查；返回是否发布了，以及运行了多少轮。
         fn confirm(&self, scope: Scope, version: &str, mut between: impl FnMut(u32)) -> (Result<()>, u32) {
             let app = self.app();
             let mut src = self.source();
@@ -1456,8 +1435,8 @@ mod tests {
             ("name cache", Box::new(|| app("INSERT INTO name_cache VALUES ('synthetic','{}')")), &[]),
             ("name settings", Box::new(|| app("INSERT INTO name_settings VALUES ('synthetic_setting','42')")), &[]),
             ("model key", Box::new(|| app("INSERT INTO name_settings VALUES ('model_key','synthetic')")), &[]),
-            // Names live in the core tables since core v8 (#201); core name tables are learning inputs, as the mirror
-            // made them before. The names version itself is not an input (`UNREAD_META`).
+            // 自核心 v8 起名称放在核心表里（#201）；核心名称表是学习的输入，和以前镜像时一样。
+            // names version 本身不是输入（`UNREAD_META`）。
             ("names + names_version", Box::new(|| app("INSERT INTO term_names VALUES (1,'合成')")), &[Learning]),
             (
                 "display names",
@@ -1538,13 +1517,13 @@ mod tests {
                         .unwrap();
                 }
             });
-            // The commit moved data_version, so a second round confirmed the unchanged inputs.
+            // 这次提交改变了 data_version，所以第二轮确认了输入没变。
             assert!(result.is_ok(), "{scope:?}: {result:?}");
             assert_eq!(rounds, 2, "{scope:?}");
             assert!(f.published());
             f.app().execute("DELETE FROM image_sigs WHERE uuid='published'", []).unwrap();
         }
-        // Nothing in between: one round, and the lock only compares data_version and file stamps.
+        // 中间什么都没发生：只有一轮，取锁后只比较 data_version 和文件戳。
         let version = f.version(Scope::Learning);
         assert_eq!(f.confirm(Scope::Learning, &version, |_| {}).1, 1);
     }
@@ -1552,7 +1531,7 @@ mod tests {
     #[test]
     fn relevant_commit_between_check_and_lock_is_rejected() {
         let f = Fixture::new();
-        // Committed after the outside check, before BEGIN IMMEDIATE: caught by data_version.
+        // 在外部检查之后、BEGIN IMMEDIATE 之前提交：由 data_version 发现。
         let version = f.version(Scope::Learning);
         let (result, rounds) = f.confirm(Scope::Learning, &version, |round| {
             if round == 1 {
@@ -1570,7 +1549,7 @@ mod tests {
         });
         assert!(conflict(&result), "{result:?}");
         assert!(!f.published());
-        // A shared file replaced in the same window: caught by the file stamp.
+        // 同一时间窗内替换了一个共享文件：由文件戳发现。
         let version = f.version(Scope::Learning);
         let (result, _) = f.confirm(Scope::Learning, &version, |round| {
             if round == 1 {
@@ -1584,7 +1563,7 @@ mod tests {
     #[test]
     fn rounds_end_without_publishing_while_commits_continue() {
         let f = Fixture::new();
-        // Unread commits before every lock: no round finds the inputs settled, and none hashes them under the lock.
+        // 每次取锁前都有不读的表的提交：没有一轮能等到输入稳定，也没有一轮在锁下计算哈希。
         let version = f.version(Scope::Learning);
         let (result, rounds) = f.confirm(Scope::Learning, &version, |round| {
             f.app().execute("INSERT OR REPLACE INTO prefs VALUES ('synthetic',?)", [round]).unwrap();
@@ -1592,7 +1571,7 @@ mod tests {
         assert!(matches!(&result, Err(e) if busy(e)), "{result:?}");
         assert_eq!(rounds, OUTSIDE_ROUNDS);
         assert!(!f.published());
-        // A real input committed just before the last lock is found by the next check's outside round.
+        // 在最后一次取锁前提交的真实输入，会被下一次检查的外部轮发现。
         let (result, rounds) = f.confirm(Scope::Learning, &version, |round| {
             let sql = if round == OUTSIDE_ROUNDS {
                 "INSERT INTO memberships VALUES ('c','e1')"
@@ -1609,7 +1588,7 @@ mod tests {
         assert!(!f.published());
     }
 
-    /// A round that cannot get the write lock within `LOCK_WAIT` counts as a round the inputs moved in.
+    /// 在 `LOCK_WAIT` 之内拿不到写入锁的一轮，算作输入有变动的一轮。
     #[test]
     fn a_held_write_lock_ends_the_round() {
         let f = Fixture::new();
@@ -1626,9 +1605,8 @@ mod tests {
         assert!(f.published());
     }
 
-    /// The publication before #31: full temporary copies of relations and signatures, then every result table
-    /// deleted and inserted again in result order, then the whole-table checks. The row conversion it used is
-    /// `cache_row` (moved there unchanged).
+    /// #31 之前的发布方式：先完整地临时复制 relations 和签名，再把每张结果表按结果顺序删掉重插，最后做整表检查。
+    /// 它用的行转换是 `cache_row`（原样移到了那里）。
     fn legacy_publish(tx: &Connection, tables: &serde_json::Map<String, Value>, ctx: &TaskContext) -> Result<()> {
         tx.execute_batch("CREATE TEMP TABLE research_old_relations AS SELECT * FROM relations;CREATE TEMP TABLE research_old_sigs AS SELECT * FROM image_sigs;")?;
         for (table, value) in tables {
@@ -1662,7 +1640,7 @@ mod tests {
         }
         Ok(())
     }
-    /// The current publication of the similar tables, as `run` does it.
+    /// 相似表现在的发布方式，与 `run` 的做法相同。
     fn publish(tx: &Connection, tables: &serde_json::Map<String, Value>, ctx: &TaskContext) -> Result<usize> {
         let mut published = Published::default();
         let mut written = 0;
@@ -1676,7 +1654,7 @@ mod tests {
     fn similar_library() -> Connection {
         let mut c = Connection::open_in_memory().unwrap();
         c.execute_batch(include_str!("app_create_schema.sql")).unwrap();
-        // The identities live in the core tables (`terms`, `term_tree`), as in every library.
+        // 身份放在核心表里（`terms`、`term_tree`），和每个图库一样。
         crate::migrate(&mut c).unwrap();
         c.execute_batch("CREATE TABLE IF NOT EXISTS similar_paired(uuid TEXT PRIMARY KEY);CREATE TABLE IF NOT EXISTS similar_retry(a TEXT NOT NULL,b TEXT NOT NULL,PRIMARY KEY(a,b));").unwrap();
         for i in 0..20 {
@@ -1726,8 +1704,8 @@ mod tests {
         c.query_row("SELECT count(*) FROM temp.writes", [], |r| r.get(0)).unwrap()
     }
     type Change = fn(&mut [Vec<Value>; 4]);
-    /// Rows written (full result, change list).
-    /// What a similar run does to the arrays it read (`similar::scan`): replaced rows move to the end.
+    /// 写入的行数（完整结果，变更列表）。
+    /// 相似运行对它读到的数组做的事（`similar::scan`）：被替换的行移到末尾。
     fn worker_changes() -> Vec<(&'static str, Change, [i64; 2])> {
         fn replace(rows: &mut Vec<Value>, row: Value) {
             rows.retain(|r| r[0] != row[0] || (r.as_array().unwrap().len() == 2 && r[1] != row[1]));
@@ -1739,7 +1717,7 @@ mod tests {
         vec![
             ("unchanged", |_| {}, [0, 0]),
             ("one signature", |t| replace(&mut t[0], json!(["a05", 3.5, grid(5), 1])), [2, 2]),
-            // An unreadable picture tried again; the last stored row stays where it is.
+            // 读不出的图片再试了一次；最后一行已存的行留在原处。
             ("failed again, last row", |t| replace(&mut t[0], json!(["a18", null, null, 0])), [0, 0]),
             (
                 "failed again, earlier row",
@@ -1748,7 +1726,7 @@ mod tests {
                     replace(&mut t[0], json!(["a17", 3.0, grid(17), 1]));
                     replace(&mut t[0], json!(["a18", null, null, 0]));
                 },
-                // A full result rewrites a17 in place; a change list moves it and a18 again.
+                // 完整结果原地改写 a17；变更列表则把它和 a18 再移动一次。
                 [1, 4],
             ),
             (
@@ -1863,7 +1841,7 @@ mod tests {
                 assert_eq!(publish(&tx, tables, &f.ctx).is_ok(), ok, "{name}");
             }
         }
-        // A change list against rows that are not stored, or of another shape, is refused.
+        // 针对没存着的行、或形状不同的行的变更列表会被拒绝。
         for bad in [
             json!({"delete":[["a98","a99"]],"append":[]}),
             json!({"delete":[["a00"]],"append":[]}),
@@ -1880,11 +1858,11 @@ mod tests {
 
     type BackupHook = dyn FnMut(&Path);
     thread_local! {
-        /// A slow disk for this thread's fingerprints: the pause after each row read.
+        /// 给本线程的指纹计算模拟一块慢磁盘：每读一行后的暂停。
         static ROW_PAUSE: std::cell::Cell<Duration> = const { std::cell::Cell::new(Duration::ZERO) };
-        /// Runs after each row this thread's fingerprints read: another task's work at that point.
+        /// 本线程的指纹计算每读一行后运行：模拟另一个任务在那一刻做的事。
         static ROW_HOOK: std::cell::RefCell<Option<Box<dyn FnMut()>>> = const { std::cell::RefCell::new(None) };
-        /// Runs before each step of this thread's snapshot copies, with the copy's path.
+        /// 本线程的快照复制每一步之前运行，参数是副本的路径。
         static BACKUP_HOOK: std::cell::RefCell<Option<Box<BackupHook>>> = const { std::cell::RefCell::new(None) };
     }
     pub(super) fn backup_step(path: &Path) {
@@ -1895,11 +1873,10 @@ mod tests {
         });
     }
 
-    /// #275: a source writer (recognition import, folder or Photos scan; the sync's former 250 ms busy timeout)
-    /// commits while a run copies the application database for its snapshot. The run must not hold source's read
-    /// lock then: copying runs no statement on source, so it could not see the writer, and the writer failed with
-    /// "database is locked" once the copy outlasted its wait. It commits from the copy's first step, in this thread,
-    /// so whether research holds the lock is not a matter of timing.
+    /// #275：一个源库写入方（识别导入、文件夹或 Photos 扫描；同步以前的 250 毫秒 busy timeout）在运行为快照复制应用
+    /// 数据库时提交。这时运行不得持有源库读锁：复制不在源库上执行任何语句，所以看不到写入方，复制时间一旦超过写入方的
+    /// 等待时长，写入方就会以「database is locked」失败。它从复制的第一步起就在本线程里提交，所以研究是否持有这把锁
+    /// 不取决于时机。
     #[test]
     fn copying_the_application_database_does_not_hold_source() {
         let f = Fixture::new();
@@ -1930,7 +1907,7 @@ mod tests {
         let outcomes = outcomes.borrow();
         assert!(!outcomes.is_empty());
         assert!(outcomes.iter().all(std::result::Result::is_ok), "{outcomes:?}");
-        // The copies and the version agree: the source copy holds the rows committed during the application copy.
+        // 副本和版本一致：源库副本里有应用库复制期间提交的行。
         let taken = taken.unwrap();
         assert_eq!(taken.version, f.version(Scope::Learning));
         let copied: i64 = crate::sqlite::open(dir.join("source.sqlite"))
@@ -1951,10 +1928,9 @@ mod tests {
         });
     }
 
-    /// #275: another task commits to the application database steadily (names marks each lookup done, which no
-    /// research input reads) while a learning result is checked before publication. Every 50 rows hashed it commits
-    /// with the sync's former writer settings (250 ms busy timeout). The check must never hash inputs while it holds
-    /// the write lock: that made the writer fail with "database is locked" on large libraries.
+    /// #275：学习结果在发布前检查期间，另一个任务持续向应用数据库提交（名称更新把每次查询标为完成，没有研究输入读它）。
+    /// 每计算 50 行的哈希，它就用同步以前的写入设置（250 毫秒 busy timeout）提交一次。检查持有写入锁时绝不能计算
+    /// 输入的哈希：在大图库上这曾让写入方以「database is locked」失败。
     #[test]
     fn steady_unread_writer_is_not_locked_out_by_the_publication_check() {
         let f = Fixture::new();
@@ -1988,20 +1964,19 @@ mod tests {
         let outcomes = outcomes.borrow();
         assert!(outcomes.len() >= OUTSIDE_ROUNDS as usize, "{outcomes:?}");
         assert!(outcomes.iter().all(std::result::Result::is_ok), "{outcomes:?}");
-        // Inputs never settled between the check and the lock: nothing is published, and the run is told to wait.
+        // 在检查和取锁之间输入始终没稳定：什么都不发布，运行被告知等待。
         assert!(matches!(&result, Err(e) if busy(e)), "{result:?}");
         assert_eq!(rounds, OUTSIDE_ROUNDS);
         assert!(!f.published());
-        // Once the writer stops, the same check publishes at the first round.
+        // 写入方一停，同样的检查在第一轮就发布。
         let (result, rounds) = f.confirm(Scope::Learning, &version, |_| {});
         assert!(result.is_ok(), "{result:?}");
         assert_eq!(rounds, 1);
         assert!(f.published());
     }
 
-    /// #226: a source writer with the sync's 250 ms busy timeout commits while research reads source, both while a
-    /// run takes its snapshot and while its result is checked before publication. Without stepping aside the reader
-    /// holds its lock for the whole read (about two seconds here) and the commit fails with "database is locked".
+    /// #226：研究读源库期间，一个用同步的 250 毫秒 busy timeout 的源库写入方提交，运行取快照时和发布前检查结果时
+    /// 都是如此。如果不让路，读取方在整个读取期间（这里约两秒）都持有锁，提交就会以「database is locked」失败。
     #[test]
     fn source_reads_step_aside_for_a_writer() {
         let f = Fixture::new();
@@ -2013,7 +1988,7 @@ mod tests {
             )
             .unwrap();
         let path = f.root.join("source.sqlite");
-        // Commits once the read below is well under way; returns how the commit went.
+        // 等下面的读取进行到一定程度后提交；返回提交的结果。
         let writer = |key: &'static str| {
             let (started, wait) = mpsc::channel::<()>();
             let path = path.clone();
@@ -2048,7 +2023,7 @@ mod tests {
         let (app, mut src) = (f.app(), f.source());
         let writers = Writers::of(&path);
         started.send(()).unwrap();
-        // As in `run`, the source transaction ends with the publication step that read it.
+        // 和 `run` 里一样，源库事务随读取它的发布步骤一起结束。
         let checked = (|| {
             let src = src.transaction()?;
             writers.read(&src, || {
@@ -2067,7 +2042,7 @@ mod tests {
         assert_eq!(handle.join().unwrap().map_err(|e| e.to_string()), Ok(()));
         assert!(matches!(&checked, Err(e) if yielded(e)), "{checked:?}");
 
-        // A writer already at work: the read does not start.
+        // 已经有写入方在工作：读取不会开始。
         ROW_PAUSE.with(|p| p.set(Duration::ZERO));
         let c = crate::sqlite::open(&path).unwrap();
         c.execute_batch("BEGIN IMMEDIATE; INSERT INTO characters VALUES ('synthetic-c',1);").unwrap();
@@ -2087,7 +2062,7 @@ mod tests {
         }
         fs::create_dir_all(root.join("illustash-research-scope-other")).unwrap();
         fs::create_dir_all(root.join("unrelated")).unwrap();
-        // Nothing is older than an hour.
+        // 没有哪个比一小时更旧。
         assert_eq!(sweep_scratch(&root, Duration::from_secs(3600)), 0);
         std::thread::sleep(Duration::from_millis(20));
         assert_eq!(sweep_scratch(&root, Duration::from_millis(10)), 2);
@@ -2096,8 +2071,7 @@ mod tests {
         fs::remove_dir_all(root).unwrap();
     }
 
-    /// Synthetic library of the #31 measurements: n pictures with signatures and pairing marks, a chain of
-    /// n-1 relations, no retries.
+    /// #31 测量用的合成图库：n 张图片，带签名和配对标记，n-1 条关系连成一串，没有重试。
     fn bench_library(base: &Path, n: usize) {
         let c = crate::sqlite::open(base).unwrap();
         c.execute_batch(include_str!("app_create_schema.sql")).unwrap();
@@ -2119,7 +2093,7 @@ mod tests {
         c.execute_batch("COMMIT;VACUUM;").unwrap();
     }
     type BenchMode = fn(&mut [Vec<Value>; 4], &dyn Fn(usize) -> Value);
-    /// No change; one signature replaced (moved to the end, as the calculator does); every signature replaced.
+    /// 不改变；替换一个签名（像计算器那样移到末尾）；替换每一个签名。
     fn bench_modes() -> [(&'static str, BenchMode); 3] {
         [
             ("nochange", |_, _| {}),
@@ -2133,11 +2107,13 @@ mod tests {
             }),
         ]
     }
-    /// Peak resident memory of this process so far, in bytes (macOS reports bytes, Linux KiB). `getrusage` is
-    /// POSIX only, so this measurement and the test using it are not built on Windows.
+    /// 本进程到目前为止的峰值常驻内存，单位字节（macOS 报告字节，Linux 报告 KiB）。`getrusage` 只有 POSIX 有，
+    /// 所以这项测量和用它的测试不在 Windows 上构建。
     #[cfg(unix)]
     fn peak_rss() -> u64 {
+        // SAFETY: libc::rusage 只含整数和 timeval，全零是合法值。
         let mut usage: libc::rusage = unsafe { std::mem::zeroed() };
+        // SAFETY: `usage` 是本地结构，getrusage 只向其中写入。
         unsafe { libc::getrusage(libc::RUSAGE_SELF, &mut usage) };
         let peak = usage.ru_maxrss as u64;
         if cfg!(target_os = "macos") {
@@ -2146,10 +2122,10 @@ mod tests {
             peak * 1024
         }
     }
-    /// #31 owner memory (synthetic, release; POSIX only), one result per process: first
-    /// `ILLUSTASH_RESEARCH_RSS_DIR=<dir> cargo test --release research_publish_rss -- --ignored --nocapture` writes
-    /// the libraries and responses, then each run with `ILLUSTASH_RESEARCH_RSS_RUN=<n>-<mode>-<main|delta>` parses
-    /// one response as App does and publishes it, reporting the process peak before and after.
+    /// #31 所有者内存（合成数据，release；仅 POSIX），每个进程一个结果：先用
+    /// `ILLUSTASH_RESEARCH_RSS_DIR=<dir> cargo test --release research_publish_rss -- --ignored --nocapture` 写出
+    /// 图库和响应，然后每次带 `ILLUSTASH_RESEARCH_RSS_RUN=<n>-<mode>-<main|delta>` 运行，像 App 那样解析一份响应并
+    /// 发布，报告发布前后的进程峰值。
     #[cfg(unix)]
     #[test]
     #[ignore]
@@ -2214,9 +2190,9 @@ mod tests {
         }
     }
 
-    /// #31 measurement (synthetic, release): `cargo test --release research_delta_bench -- --ignored --nocapture`.
-    /// Publication of the four similar tables only (early_groups/fold and the fingerprint are the same in both and
-    /// left out). ILLUSTASH_RESEARCH_BENCH_SIZES overrides the default 1000,10000,50000; three runs, median.
+    /// #31 测量（合成数据，release）：`cargo test --release research_delta_bench -- --ignored --nocapture`。
+    /// 只测四张相似表的发布（early_groups/fold 和指纹两边相同，不计入）。ILLUSTASH_RESEARCH_BENCH_SIZES 覆盖默认的
+    /// 1000,10000,50000；三次运行取中位数。
     #[test]
     #[ignore]
     fn research_delta_bench() {
@@ -2306,8 +2282,8 @@ mod tests {
         }
     }
 
-    /// main's fingerprint before #29, copied unchanged except that the features directory replaces
-    /// `Library`: every table of both databases except the research queues, inside the caller's lock.
+    /// #29 之前 main 的指纹，原样复制，只是用 features 目录代替 `Library`：两个数据库里除研究队列外的每张表，
+    /// 在调用方的锁内计算。
     fn main_fingerprint(
         app: &Connection,
         src: &Connection,
@@ -2343,8 +2319,9 @@ mod tests {
         (format!("{:x}", h.finalize()), parts)
     }
 
-    /// #29 measurement (synthetic, release): `cargo test --release research_fingerprint_bench -- --ignored --nocapture`.
-    /// ILLUSTASH_RESEARCH_BENCH_SIZES overrides the default 1000,10000,50000.
+    /// #29 测量（合成数据，release）：
+    /// `cargo test --release research_fingerprint_bench -- --ignored --nocapture`。
+    /// ILLUSTASH_RESEARCH_BENCH_SIZES 覆盖默认的 1000,10000,50000。
     #[test]
     #[ignore]
     fn research_fingerprint_bench() {
@@ -2426,7 +2403,7 @@ mod tests {
                     let src = src.transaction().unwrap();
                     let started = Instant::now();
                     if !scope.publishes() {
-                        // Queries check in one read transaction and take no write lock.
+                        // 查询在一个读事务里检查，不取写入锁。
                         let read = rusqlite::Transaction::new_unchecked(&app, TransactionBehavior::Deferred).unwrap();
                         assert_eq!(fingerprint(&read, &src, &f.inputs(scope), &f.ctx).unwrap(), version);
                         outside.push(ms(started.elapsed()));

@@ -1,9 +1,9 @@
-"""Explicit headless macOS App-layout bootstrap acceptance; never launches Tauri GUI.
+"""显式运行的无界面 macOS App 布局启动验收；从不启动 Tauri 图形界面。
 
-Supply this round's ILLUSTASH_DESKTOP_BIN, ILLUSTASH_TERMS_BIN,
-ILLUSTASH_RESEARCH_ADAPTER_BIN and ILLUSTASH_IQDB_BINARY. Missing artifacts fail.
-Model/ORT resources are markers: only accepted native startup learning runs.
-This does not replace signed App, Finder/GUI or real model acceptance.
+需提供本轮的 ILLUSTASH_DESKTOP_BIN、ILLUSTASH_TERMS_BIN、
+ILLUSTASH_RESEARCH_ADAPTER_BIN 和 ILLUSTASH_IQDB_BINARY，缺少产物即失败。
+模型/ORT 资源只是标记：只运行已验收的原生启动学习。
+它不能代替签名 App、Finder/图形界面或真实模型的验收。
 """
 import json
 import os
@@ -47,7 +47,7 @@ class MacAppBootstrapTest(unittest.TestCase):
             return lifecycle.NativeLifecycleTest.start(self, path, extra, command)
         port = free_port()
         log = tempfile.TemporaryFile()
-        # No explicit --root or inherited worker env may mask App bundle defaults.
+        # 不能让显式的 --root 或继承来的 worker 环境变量盖住 App 包的默认值。
         args = [str(self.app_executable), 'http', '--native', '--no-auto-sync',
                 '--library', str(path), '--port', str(port), '--no-open',
                 '--no-names', '--no-index-check', *extra]

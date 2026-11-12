@@ -44,8 +44,7 @@ fn writable(library: &Library) -> Result<()> {
     Ok(())
 }
 
-/// Add a folder (with the origin the user chose) or the Photos library. Returns the source id and whether a
-/// previously removed source came back.
+/// 添加一个文件夹（带用户选的出处）或 Photos 图库。返回来源 id，以及是否是先前移除的来源回来了。
 pub(crate) fn add(library: &mut Library, kind: &str, path: &str, preset: &str) -> Result<Json> {
     writable(library)?;
     let mut config = read(library)?;
@@ -106,14 +105,14 @@ pub(crate) fn add(library: &mut Library, kind: &str, path: &str, preset: &str) -
     write_config(library.instance_path(), &config)?;
     library.reload_config()?;
     if kind == "folder" {
-        // A folder that comes back may come back with another origin.
+        // 回来的文件夹可能换了出处。
         crate::app_settings::set_asset_preset(library, &id, preset)?;
     }
     Ok(Json::object([("id", id.as_str().into()), ("returned", back.is_some().into())]))
 }
 
-/// Without `confirm`, only report how many pictures would leave the library. With it, retire the source and mark
-/// its pictures deleted; a later sync carries that into the browsing database.
+/// 不带 `confirm` 时只报告有多少张图会离开图库。带上时移除这个来源，并把它的图标记为已删除；
+/// 之后的同步会把这一点带进浏览数据库。
 pub(crate) fn remove(library: &mut Library, source_id: &str, confirm: bool) -> Result<Json> {
     writable(library)?;
     let mut config = read(library)?;
@@ -134,8 +133,7 @@ pub(crate) fn remove(library: &mut Library, source_id: &str, confirm: bool) -> R
     if !confirm {
         return Ok(Json::object([("confirm", true.into()), ("count", count.into())]));
     }
-    // Pictures first: if writing library.json then fails, the source is still listed and its next scan
-    // finds every file present again and restores them.
+    // 先处理图片：如果之后写 library.json 失败，来源仍在列表里，下次扫描会发现所有文件都还在，并把它们恢复。
     let tx = conn.transaction()?;
     tx.execute("UPDATE assets SET trashed=1 WHERE source_id=? AND coalesce(trashed,0)=0", [source_id])?;
     tx.commit()?;
@@ -239,7 +237,7 @@ mod tests {
         assert!(library.config()["removed_sources"][0]["removed_at"].is_string());
         assert!(remove(&mut library, "s2", false).unwrap_err().to_string().contains("至少要保留一个来源"));
 
-        // Nested in an active source: refused. The same folder: comes back as s1, now with another origin.
+        // 嵌套在启用中的来源里：拒绝。同一个文件夹：以 s1 回来，现在换了出处。
         let nested = add(&mut library, "folder", f.0.join("b/inner").to_str().unwrap(), "other").unwrap_err();
         assert!(nested.to_string().contains("重叠"), "{nested}");
         let back = add(&mut library, "folder", f.0.join("a").to_str().unwrap(), "other").unwrap();

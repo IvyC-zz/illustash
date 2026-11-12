@@ -1,13 +1,12 @@
-//! DirectML for the recognition sessions on Windows (#271). The bundled ONNX Runtime is built from the v1.30.0
-//! source with `--use_dml` (docs/BACKEND_TASKS.md) and loads the DirectML.dll beside it.
+//! Windows 上识别会话用的 DirectML（#271）。随包的 ONNX Runtime 由 v1.30.0 源码加 `--use_dml` 构建
+//! （docs/BACKEND_TASKS.md），从它旁边加载 DirectML.dll。
 //!
-//! The adapter is chosen by ONNX Runtime's DirectML API (`SessionOptionsAppendExecutionProvider_DML2`): the
-//! high-performance GPU, so on a laptop with an integrated and a discrete GPU the discrete one. The older
-//! `device_id` entry point takes the adapter index, where 0 is the display adapter, usually the integrated GPU.
+//! 显卡由 ONNX Runtime 的 DirectML 接口（`SessionOptionsAppendExecutionProvider_DML2`）选：选高性能 GPU，
+//! 所以在有核显和独显的笔记本上选独显。旧的 `device_id` 入口按适配器序号选，0 是接显示器的那块，通常是核显。
 use ort::{session::builder::SessionBuilder, AsPointer};
 use std::ffi::c_void;
 
-/// `OrtDmlDeviceOptions` (dml_provider_factory.h): `OrtDmlPerformancePreference`, then `OrtDmlDeviceFilter`.
+/// `OrtDmlDeviceOptions`（dml_provider_factory.h）：先是 `OrtDmlPerformancePreference`，再是 `OrtDmlDeviceFilter`。
 #[repr(C)]
 struct DeviceOptions {
     preference: u32,
@@ -16,11 +15,11 @@ struct DeviceOptions {
 const HIGH_PERFORMANCE: u32 = 1;
 const MINIMUM_POWER: u32 = 2;
 const GPU: u32 = 1;
-/// `minimum_power` picks the power-saving GPU instead, the integrated one on a hybrid laptop: for measuring it
-/// on a machine that has both. Unset or anything else: the high-performance GPU.
+/// `minimum_power` 改选省电的 GPU，在混合模式的笔记本上就是核显：用于在两块都有的机器上测核显。
+/// 不设或设成其他值：高性能 GPU。
 const PREFERENCE_ENV: &str = "ILLUSTASH_DIRECTML_GPU";
 type Status = ort::sys::OrtStatusPtr;
-/// The head of `OrtDmlApi`, up to `SessionOptionsAppendExecutionProvider_DML2` (its sixth entry since ORT 1.17).
+/// `OrtDmlApi` 的开头部分，到 `SessionOptionsAppendExecutionProvider_DML2` 为止（ORT 1.17 起是第六项）。
 #[repr(C)]
 struct DmlApi {
     _append_by_index: *const c_void,
@@ -33,12 +32,12 @@ struct DmlApi {
 }
 
 fn status(status: Status) -> ort::Result<()> {
-    // SAFETY: a status returned by the ONNX Runtime API, released by the binding.
+    // SAFETY: ONNX Runtime API 返回的 status，由绑定负责释放。
     unsafe { ort::error::status_to_result(status) }.map_err(|e| ort::Error::new(plain(&e.to_string())))
 }
 
-/// ONNX Runtime's provider errors start with the source location and function, `<file>.cc:<line> <function> `,
-/// which name the build machine's folders: the settings page shows only the message after them.
+/// ONNX Runtime 的 provider 错误以源码位置和函数名开头（`<file>.cc:<line> <function> `），
+/// 里面带着构建机的文件夹名：设置页只显示其后的信息。
 fn plain(message: &str) -> &str {
     let Some(at) = message.find(".cc:").or_else(|| message.find(".h:")) else { return message };
     let rest = &message[at..];
@@ -48,13 +47,12 @@ fn plain(message: &str) -> &str {
     }
 }
 
-/// Session options DirectML requires (ORT's DirectML page: no memory pattern, sequential execution), then the
-/// provider on the high-performance GPU. An error here means no usable DirectX 12 GPU, driver or DirectML.dll;
-/// the caller falls back to the CPU.
+/// 先设 DirectML 要求的会话选项（ORT 的 DirectML 页面：关闭 memory pattern、按顺序执行），再在高性能 GPU 上
+/// 加 provider。这里出错说明没有可用的 DirectX 12 GPU、驱动或 DirectML.dll；调用方回退到 CPU。
 pub(super) fn configure(builder: SessionBuilder) -> ort::Result<SessionBuilder> {
     let mut builder = builder.with_memory_pattern(false)?.with_parallel_execution(false)?;
     let mut api: *const c_void = std::ptr::null();
-    // SAFETY: GetExecutionProviderApi writes a pointer to the static OrtDmlApi of the loaded runtime.
+    // SAFETY: GetExecutionProviderApi 写入一个指针，指向已加载运行库里静态的 OrtDmlApi。
     status(unsafe { (ort::api().GetExecutionProviderApi)(c"DML".as_ptr(), ort::sys::ORT_API_VERSION, &mut api) })?;
     if api.is_null() {
         return Err(ort::Error::new("ONNX Runtime 没有 DirectML 接口"));
@@ -64,7 +62,7 @@ pub(super) fn configure(builder: SessionBuilder) -> ort::Result<SessionBuilder> 
         _ => HIGH_PERFORMANCE,
     };
     let mut device = DeviceOptions { preference, filter: GPU };
-    // SAFETY: `api` points at OrtDmlApi (layout above); the options pointer is the builder's own.
+    // SAFETY: `api` 指向 OrtDmlApi（布局见上）；options 指针是 builder 自己的。
     status(unsafe { ((*api.cast::<DmlApi>()).append_with_options)(builder.ptr_mut(), &mut device) })?;
     Ok(builder)
 }
