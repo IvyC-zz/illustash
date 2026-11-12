@@ -29,6 +29,9 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 STATIC = Path('web/static')
 BASELINE = Path('tools/frontend_baseline.json')
+# 规则 3 的放行项：浮层管理器是 document 级 keydown / click 监听的唯一入口（Esc 只关栈顶一个、点外关闭都靠它在一处判断）。
+# 用户 2026-11-12 在 #343 批准，只此一个文件；别的文件新增全局监听仍然报错，也不要往基线里加。
+GLOBAL_LISTENER_ALLOWED = frozenset({'ui/overlay.js'})
 MAX_LINE = 200
 # Module files the rules look at. i18n.js / splash.js / theme.js are classic scripts, locales/ is data.
 MODULE_GLOBS = ('app.js', 'core/*.js', 'ui/*.js')
@@ -223,7 +226,7 @@ def new_rules():
         Rule('document-listener', '3', '新增了 document/window 级的 keydown / click 监听',
              '全局键盘、点击监听让 Esc 的先后、点外关闭各写一套（#316）。现有的已冻结为基线，不得新增。',
              '把监听挂在具体元素或 <dialog> 上（dialog 用 cancel/close 事件，点外关闭在 dialog 自己的 click 里判断）；'
-             '确需全局监听时，在 Issue 里提出请用户决定，由用户改本检查的规则，不要往基线里添加。'),
+             '要新开浮层就向 ui/overlay.js 登记（createLayer / openModal），它是唯一放行的入口；确需别的全局监听时，在 Issue 里提出请用户决定，由用户改本检查的规则，不要往基线里添加。'),
         Rule('dialog-element', '4', '新增了 document.createElement(\'dialog\')',
              '运行时拼出的 <dialog> 各自复制同一份外壳（#316）。现有的已冻结为基线，不得新增。',
              '复用 ui/dialog.js 里的 confirmAction / chooseWork；不够用就在 ui/dialog.js 里扩展参数，不要再在别处拼一份 dialog 外壳。'),
@@ -289,6 +292,8 @@ def run_rules(sources):
     # 3, 4, 5
     for p, s in sources.items():
         for m in LISTENER_RE.finditer(s.code):
+            if p in GLOBAL_LISTENER_ALLOWED:
+                continue
             line = s.line_of(m.start())
             rules['document-listener'].add(f'{p}::{m.group(3) or m.group(4)}', f'{STATIC}/{p}:{line}: {s.raw_line(line)[:110]}')
         for m in DIALOG_RE.finditer(s.code):
