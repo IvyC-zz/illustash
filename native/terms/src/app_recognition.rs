@@ -611,6 +611,98 @@ fn import_internal(
     result["duplicate"] = json!(duplicate);
     Ok(result)
 }
+/// 只取仍属于这次交付的有效资产；旧回执不能再发布被扫描撤销或被新交付接管的结果。
+fn delivery_ids(source: &Connection, digest: &str, ids: Vec<String>) -> Result<Vec<String>> {
+    ids.into_iter().filter_map(|id| {
+        match source.query_row(
+            "SELECT EXISTS(SELECT 1 FROM recognition_assets r JOIN assets a ON a.uuid=r.asset WHERE r.asset=? AND r.package=? AND a.in_scope=1 AND coalesce(a.trashed,0)=0)",
+            params![id, digest], |r| r.get::<_, bool>(0),
+        ) {
+            Ok(true) => Some(Ok(id)),
+            Ok(false) => None,
+            Err(e) => Some(Err(e)),
+        }
+    }).collect::<rusqlite::Result<Vec<_>>>().map_err(Into::into)
+}
+/// 同步可以撤回尚未投影、但输入已过期或缺少版本的机器结果，再扫描/识别。
+/// 应用先撤回并记录标记，源事务随后提交；中断后按同一回执幂等完成撤回，不把它重新发布。
+pub(crate) fn retire_unverifiable(library: &Library, cancel: &AtomicBool) -> Result<()> {
+    let mut source = writer(&library.source())?;
+    let exists: bool =
+        source.query_row("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name='recognition_imports')", [], |r| {
+            r.get(0)
+        })?;
+    if !exists {
+        return Ok(());
+    }
+    let tx = source.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    let pending = tx.prepare("SELECT digest,assets,manifest FROM recognition_imports WHERE status NOT IN ('done','superseded') ORDER BY rowid")?
+        .query_map([], |r| Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,String>(2)?)))?.collect::<rusqlite::Result<Vec<_>>>()?;
+    let files: bool =
+        tx.query_row("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name='files')", [], |r| r.get(0))?;
+    let mut app = writer(&library.db())?;
+    for (digest, raw_ids, raw_manifest) in pending {
+        crate::app_sync::check(cancel)?;
+        let published: bool = app.query_row(
+            "SELECT EXISTS(SELECT 1 FROM meta WHERE key=?)",
+            [format!("recognition_projection:{digest}")],
+            |r| r.get(0),
+        )?;
+        if published {
+            continue;
+        }
+        let ids = delivery_ids(&tx, &digest, serde_json::from_str(&raw_ids).map_err(|_| invalid())?)?;
+        if ids.is_empty() {
+            continue;
+        }
+        let manifest: Value = serde_json::from_str(&raw_manifest).map_err(|_| invalid())?;
+        let marker = format!("recognition_invalidated:{digest}");
+        let withdrawing: bool =
+            app.query_row("SELECT EXISTS(SELECT 1 FROM meta WHERE key=?)", [&marker], |r| r.get(0))?;
+        let stale = matches!(verify_current_inputs(&tx, &manifest, &ids, cancel), Err(Error::Conflict(_)));
+        crate::app_sync::check(cancel)?;
+        // IO/损坏记录不是输入已变化的证据：留待扫描和严格 resume 报告，不能猜测着丢弃。
+        if !withdrawing && !stale {
+            continue;
+        }
+        for id in &ids {
+            tx.execute(
+                "DELETE FROM labels WHERE uuid=? AND (source='wd_v3' OR (source='char_index' AND dim='char_ext'))",
+                [id],
+            )?;
+            tx.execute("DELETE FROM embeddings WHERE uuid=? AND model IN ('wd','ccip')", [id])?;
+            tx.execute("DELETE FROM recognition_assets WHERE asset=? AND package=?", params![id, digest])?;
+            // 下一步扫描必须重新读字节；即使文件被替换后刻意保留了 size/mtime，也会更新内容元数据。
+            if files {
+                tx.execute("UPDATE files SET size=-1 WHERE asset=?", [id])?;
+            }
+        }
+        if !withdrawing {
+            let app_tx = app.transaction_with_behavior(TransactionBehavior::Immediate)?;
+            crate::schema::begin_writing(&app_tx)?;
+            crate::app_migrate::invalidate_wd(&app_tx, &ids)?;
+            let mut visible = Vec::new();
+            for id in &ids {
+                if app_tx
+                    .query_row("SELECT EXISTS(SELECT 1 FROM assets WHERE uuid=?)", [id], |r| r.get::<_, bool>(0))?
+                {
+                    visible.push(id.clone());
+                }
+            }
+            if !visible.is_empty() {
+                import_changes(&app_tx, &tx, library, &visible)?;
+            }
+            app_tx.execute("INSERT INTO backend_effects(kind) VALUES ('imported')", [])?;
+            app_tx.execute("INSERT INTO meta VALUES (?,?)", params![marker, app_tx.last_insert_rowid().to_string()])?;
+            crate::app_sync::check(cancel)?;
+            crate::schema::commit_writing(app_tx)?;
+        }
+        tx.execute("UPDATE recognition_imports SET status='superseded',error='输入版本无法确认，未完成发布的机器结果已撤回，等待重新识别' WHERE digest=?", [&digest])?;
+    }
+    crate::app_sync::check(cancel)?;
+    tx.commit()?;
+    Ok(())
+}
 /// 源库已提交的记录在应用或副作用失败后仍保留；投影标记和事件一起提交。
 pub fn resume(
     library: &Library,
@@ -629,10 +721,10 @@ pub fn resume(
     // 不用进程全局锁或按图库 ID 的锁，就让这个包的并发恢复串行执行。
     let tx = c.transaction_with_behavior(TransactionBehavior::Immediate)?;
     let pending = tx
-        .prepare("SELECT digest,assets FROM recognition_imports WHERE status<>'done' ORDER BY rowid")?
-        .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?
+        .prepare("SELECT digest,assets,manifest FROM recognition_imports WHERE status NOT IN ('done','superseded') ORDER BY rowid")?
+        .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?)))?
         .collect::<rusqlite::Result<Vec<_>>>()?;
-    for (digest, raw) in pending {
+    for (digest, raw, raw_manifest) in pending {
         let process: Result<()> = (|| {
             crate::app_sync::check(cancel)?;
             let ids: Vec<String> = serde_json::from_str(&raw).map_err(|_| invalid())?;
@@ -647,19 +739,20 @@ pub fn resume(
                 event
             } else {
                 // 未投影的旧回执可能已有部分图片失效或由新交付接管，只交付仍属于它的逐图结果。
-                let ids = ids.into_iter().filter_map(|id| {
-                    match tx.query_row(
-                        "SELECT EXISTS(SELECT 1 FROM recognition_assets r JOIN assets a ON a.uuid=r.asset WHERE r.asset=? AND r.package=? AND a.in_scope=1 AND coalesce(a.trashed,0)=0)",
-                        params![id, digest], |r| r.get::<_, bool>(0),
-                    ) {
-                        Ok(true) => Some(Ok(id)),
-                        Ok(false) => None,
-                        Err(e) => Some(Err(e)),
-                    }
-                }).collect::<rusqlite::Result<Vec<_>>>()?;
+                let ids = delivery_ids(&tx, &digest, ids)?;
                 if ids.is_empty() {
                     return Ok(());
                 }
+                let withdrawing: bool = app.query_row(
+                    "SELECT EXISTS(SELECT 1 FROM meta WHERE key=?)",
+                    [format!("recognition_invalidated:{digest}")],
+                    |r| r.get(0),
+                )?;
+                if withdrawing {
+                    return Err(Error::Conflict("识别结果撤回尚未完成，请同步后重新识别".into()));
+                }
+                let manifest: Value = serde_json::from_str(&raw_manifest).map_err(|_| invalid())?;
+                verify_current_inputs(&tx, &manifest, &ids, cancel)?;
                 crate::app_migrate::deliver_wd(&mut app, &library.source(), library.id(), Some(&ids), true)?;
                 let src = crate::app_library::read_connection(&library.source())?;
                 let app_tx = app.transaction_with_behavior(TransactionBehavior::Immediate)?;

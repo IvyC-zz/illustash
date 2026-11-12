@@ -197,7 +197,7 @@
 
  "native/terms/src/app_local.rs":"f8fb6ea23574a2ec339f9b966e05951db2c1e8cd3b735464f51edf36ecc4bd49",
 
- "native/terms/src/app_migrate.rs":"8a3029dfe7fcd28ee8c504c110d071211dad1a2675fd0bb7f6abd7fc56c0703d",
+ "native/terms/src/app_migrate.rs":"dc7ac85b778a33def433892fe83fab3fdc283ff33c970595e8dddb6992a6cefb",
 
  "native/terms/src/app_migrate_data.rs":"53fc754cf6ad0e6f397907ca42543512e6ff550dbce8ee2218c76211258a0aa5",
 
@@ -243,7 +243,7 @@
 
  "native/terms/src/app_provenance_sources.rs":"b5b95d67aa5753245bcbac3a32d36da0094d27650df1760db62d150d5168f868",
 
- "native/terms/src/app_recognition.rs":"5bac32407520893d5fc513624db53ea4ee768ad573421a526b84b29c925dc676",
+ "native/terms/src/app_recognition.rs":"6fefc5e9f25a4f0c93b5683fe26456a2eb3881e27d48e990b1c088d1a5498de3",
 
  "native/terms/src/app_rescue.rs":"08915aa36490c06b4d43fb0ff6337d4a548b451bc15c090928b0d37e6af4456d",
 
@@ -261,7 +261,7 @@
 
  "native/terms/src/app_sources.rs":"8ee039dc596b1253783ab4256fd7befa1ce4087eee3f93b69208e7ede676c819",
 
- "native/terms/src/app_sync.rs":"297bb3ef681393f706229e5eb85d9d3a9020071247614df10437bc26b3d4fc58",
+ "native/terms/src/app_sync.rs":"0df31994c0fbe6ce19b67bae12190656d2b8906e4c157ea662321fc622cb07c3",
 
  "native/terms/src/app_tasks.rs":"edeab46a8fa6cccbf00956205a4639bb98307fab32ad62fa746c98cfb9a11a94",
 
@@ -539,7 +539,7 @@
  "native/terms/src/app_provenance.rs":{"database-write":{"INSERT OR IGNORE INTO:pending_runs":3,"UPDATE:runs":3,"INSERT OR IGNORE INTO:native_meta":2,"dynamic-or-wrapper":4,"UPDATE:native_meta":1,"COMMIT":2,"INSERT INTO:runs":1,"DELETE FROM:pending_runs":1,"ATTACH":2,"PRAGMA:c.execute_batch(\"pragma defer_foreign_keys":1,"INSERT INTO:leads|UPDATE:set":1,"INSERT INTO:native_delivery":1},"entrypoint":{"process-start":1}},
  "crates/core/src/character_sql/evidence_default.sql":{"database-write":[196]},
  "native/terms/src/app_migration_sql/artists.sql":{"database-write":["CREATE TABLE IF NOT EXISTS:artist_verdicts","CREATE INDEX IF NOT EXISTS:artist_verdicts_artist"]},
- "native/terms/src/app_recognition.rs":{"database-write":["CREATE TABLE IF NOT EXISTS:recognition_imports","CREATE TABLE IF NOT EXISTS:recognition_assets",134,[0,9],[12,2],[199,2],217,"INSERT INTO:recognition_assets","INSERT INTO:recognition_imports",[1,3],3,201,[21,2],[234,2]]},
+ "native/terms/src/app_recognition.rs":{"database-write":{"CREATE TABLE IF NOT EXISTS:recognition_imports":1,"CREATE TABLE IF NOT EXISTS:recognition_assets":1,"CREATE TABLE IF NOT EXISTS:embeddings":1,"dynamic-or-wrapper":12,"DELETE FROM:labels":3,"INSERT INTO:labels":2,"INSERT OR REPLACE INTO:embeddings":1,"INSERT INTO:recognition_assets":1,"INSERT INTO:recognition_imports":1,"COMMIT":4,"DELETE FROM:embeddings":1,"DELETE FROM:recognition_assets":1,"UPDATE:files":1,"INSERT INTO:backend_effects":2,"INSERT INTO:meta":2,"UPDATE:recognition_imports":3,"UPDATE:backend_effects":2}},
  "native/terms/src/app_sources.rs":{"database-write":[0,5,1]},
  "crates/platform/src/platform_credentials.rs":{"entrypoint":[[4,3]]},
  "crates/core/src/backup.rs":{"database-write":[0]},

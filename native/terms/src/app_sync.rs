@@ -285,10 +285,8 @@ fn run_with(
     // 当前步骤和它写入的数据库，失败时写进日志（#275）：只看 message 看不出是哪个数据库忙。
     let step = std::cell::Cell::new("recognition resume, source.sqlite and library.sqlite");
     let result: Result<(&str, String, Value)> = (|| {
-        let recovery = crate::app_recognition::resume(library, cancel, &crate::app_research::dispatch)?;
-        if recovery["status"] != "done" {
-            return Err(Error::Invalid("识别导入恢复未完成".into()));
-        }
+        // 仅撤回没有应用投影、且已确定不能验证输入的 pending；随后扫描可重新识别这些图片。
+        crate::app_recognition::retire_unverifiable(library, cancel)?;
         let mut sources: Vec<(String, Value)> = Vec::new();
         let mut scanned = 0;
         let mut unreadable = 0;
@@ -339,6 +337,12 @@ fn run_with(
                 }
             }
             // 应用库失败后靠持久化的来源哈希驱动重试，而不是这份内存里的列表。
+        }
+        // 先扫描，避免已删除/换内容的图片被旧 pending 永久挡住；仍有效的结果再恢复。
+        step.set("recognition resume, source.sqlite and library.sqlite");
+        let recovery = crate::app_recognition::resume(library, cancel, &crate::app_research::dispatch)?;
+        if recovery["status"] != "done" {
+            return Err(Error::Invalid("识别导入恢复未完成".into()));
         }
         step.set("sync record, library.sqlite");
         let c = writer(&library.db())?;
@@ -559,20 +563,7 @@ fn refresh(library: &Library, run_id: i64, cancel: &AtomicBool) -> Result<(Value
     };
     let tx = c.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
     crate::schema::begin_writing(&tx)?;
-    let mut stale_ids = Vec::new();
-    for u in &changed {
-        let ids=tx.prepare("SELECT e.id,e.asset_id FROM term_evidence e JOIN term_assets a ON a.id=e.asset_id JOIN terms t ON t.id=e.term_id WHERE a.namespace='library' AND a.key=? AND e.source='wd' AND t.kind IN ('topic','rating')")?.query_map([u],|r|Ok((r.get::<_,i64>(0)?,r.get::<_,i64>(1)?)))?.collect::<rusqlite::Result<Vec<_>>>()?;
-        for (id, asset) in ids {
-            tx.execute(
-                "INSERT OR REPLACE INTO meta VALUES (?,?)",
-                params![format!("folder_stale_wd:{id}"), asset.to_string()],
-            )?;
-            stale_ids.push(asset);
-        }
-    }
-    stale_ids.sort_unstable();
-    stale_ids.dedup();
-    crate::store::project(&tx, &stale_ids)?;
+    crate::app_migrate::invalidate_wd(&tx, &changed)?;
     for r in &live {
         tx.execute(
             "UPDATE assets SET filename=?,src_path=? WHERE uuid=?",

@@ -157,3 +157,56 @@ class RecognitionRecoveryTest(unittest.TestCase):
         self.assertFalse(self.import_package()['duplicate'])
         self.assertTrue(self.import_package()['duplicate'])
         self.assertEqual(len(self.rows(self.lib.db, 'SELECT * FROM asset_rating')), 2)
+
+    def test_stale_pending_sync_rehashes_identical_size_and_mtime(self):
+        self.stop(self.process)
+        path = self.pics / 'a.png'
+        image(path, 'blue')
+        self.scan()
+        self.manifest(self.package, tuple(self.ids.values()))
+        old = path.stat()
+        with sqlite3.connect(self.lib.db) as c:
+            c.execute("CREATE TRIGGER fail BEFORE INSERT ON assets BEGIN SELECT RAISE(ABORT,'synthetic app failure'); END")
+        self.assertEqual(self.import_package(code=2)['status'], 'pending')
+        image(path, 'red')
+        path.write_bytes(path.read_bytes().ljust(old.st_size, b'\0'))
+        self.assertEqual(path.stat().st_size, old.st_size)
+        os.utime(path, ns=(old.st_atime_ns, old.st_mtime_ns))
+        with sqlite3.connect(self.lib.db) as c:
+            c.execute('DROP TRIGGER fail')
+        # 公开恢复严格拒绝；同步会撤回未完成交付、强制重算内容元数据，然后允许生成新包。
+        denied = self.run_cli('recognition-import', '--library', str(self.lib.path), '--root', str(self.resources), '--resume', code=2)
+        self.assertEqual(denied['status'], 'pending')
+        self.scan()
+        asset = self.ids['a.png']
+        self.assertEqual(self.rows(self.lib.source, 'SELECT stable_hash FROM assets WHERE uuid=?', (asset,)),
+                         [(hashlib.md5(path.read_bytes()).hexdigest(),)])
+        self.assertEqual(self.rows(self.lib.source, 'SELECT status FROM recognition_imports'), [('superseded',)])
+        self.assertEqual(self.rows(self.lib.db, 'SELECT rating FROM asset_rating'), [])
+        self.manifest(self.package, tuple(self.ids.values()))
+        self.assertEqual(self.import_package()['status'], 'done')
+        self.assertEqual(len(self.rows(self.lib.db, 'SELECT * FROM asset_rating')), 2)
+
+    def test_legacy_pending_sync_retires_machine_results_preserving_humans(self):
+        asset = self.ids['a.png']
+        self.assertEqual(self.request('/api/tag', {'ids': [asset], 'tag': '合成人工'})['status'], 200)
+        human = self.tables(self.lib.db, ('asset_tags', 'term_verdicts', 'actions'))
+        self.stop(self.process)
+        with sqlite3.connect(self.lib.db) as c:
+            c.execute("CREATE TRIGGER fail BEFORE INSERT ON assets BEGIN SELECT RAISE(ABORT,'synthetic app failure'); END")
+        self.assertEqual(self.import_package(code=2)['status'], 'pending')
+        with sqlite3.connect(self.lib.source) as c:
+            manifest = json.loads(c.execute('SELECT manifest FROM recognition_imports').fetchone()[0])
+            manifest['format'] = 'illustash-recognition/1'
+            manifest.pop('inputs')
+            c.execute('UPDATE recognition_imports SET manifest=?', (json.dumps(manifest),))
+        with sqlite3.connect(self.lib.db) as c:
+            c.execute('DROP TRIGGER fail')
+        denied = self.run_cli('recognition-import', '--library', str(self.lib.path), '--root', str(self.resources), '--resume', code=2)
+        self.assertEqual(denied['status'], 'pending')
+        self.scan()
+        self.assertEqual(self.rows(self.lib.source, 'SELECT * FROM recognition_assets'), [])
+        self.assertEqual(self.rows(self.lib.db, 'SELECT * FROM asset_rating'), [])
+        self.assertEqual(self.tables(self.lib.db, human), human)
+        self.assertEqual(self.import_package()['status'], 'done')
+        self.assertEqual(self.tables(self.lib.db, human), human)

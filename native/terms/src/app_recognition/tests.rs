@@ -649,3 +649,40 @@ fn public_metadata_cannot_shadow_the_actual_manifest_input_binding() {
         "done"
     );
 }
+
+#[test]
+fn unprojected_legacy_is_refused_and_sync_retirement_is_restart_safe() {
+    let f = Fixture::new(false);
+    let before = human(&f.app());
+    let (path, sidecar) = f.batch("legacy", feature(1));
+    f.app()
+        .execute_batch(
+            "CREATE TRIGGER fail BEFORE INSERT ON assets BEGIN SELECT RAISE(ABORT,'synthetic app failure'); END;",
+        )
+        .unwrap();
+    assert_eq!(f.import(&path, &sidecar).unwrap()["status"], "pending");
+    f.app().execute_batch("DROP TRIGGER fail").unwrap();
+    let mut manifest: Value = serde_json::from_slice(&fs::read(path.join("manifest.json")).unwrap()).unwrap();
+    manifest["format"] = json!("illustash-recognition/1");
+    manifest.as_object_mut().unwrap().remove("inputs");
+    f.source().execute("UPDATE recognition_imports SET manifest=?", [manifest.to_string()]).unwrap();
+    let cancel = AtomicBool::new(false);
+    assert_eq!(resume(&f.library, &cancel, &|_, _| Ok(())).unwrap()["status"], "pending");
+    assert_eq!(count(&f.app(), "SELECT count(*) FROM meta WHERE key LIKE 'recognition_projection:%'"), 0);
+    // 模拟应用撤回已提交、源确认失败。重试沿持久化撤回标记完成，不重复正式导入。
+    f.source().execute_batch("CREATE TRIGGER fail BEFORE UPDATE ON recognition_imports BEGIN SELECT RAISE(ABORT,'synthetic source confirmation failure'); END;").unwrap();
+    assert!(retire_unverifiable(&f.library, &cancel).is_err());
+    assert_eq!(count(&f.app(), "SELECT count(*) FROM meta WHERE key LIKE 'recognition_invalidated:%'"), 1);
+    assert_eq!(count(&f.app(), "SELECT count(*) FROM asset_rating"), 0);
+    assert_eq!(count(&f.source(), "SELECT count(*) FROM recognition_assets"), 1);
+    let effects = count(&f.app(), "SELECT count(*) FROM backend_effects");
+    f.source().execute_batch("DROP TRIGGER fail").unwrap();
+    let reopened = Library::open(f.library.instance_path()).unwrap();
+    retire_unverifiable(&reopened, &cancel).unwrap();
+    assert_eq!(count(&f.source(), "SELECT count(*) FROM recognition_assets"), 0);
+    assert_eq!(count(&f.source(), "SELECT count(*) FROM recognition_imports WHERE status='superseded'"), 1);
+    assert_eq!(count(&f.app(), "SELECT count(*) FROM backend_effects"), effects);
+    assert_eq!(resume(&reopened, &cancel, &|_, _| Ok(())).unwrap()["status"], "done");
+    assert_eq!(f.import(&path, &sidecar).unwrap()["status"], "done");
+    assert_eq!(human(&f.app()), before);
+}
