@@ -91,13 +91,17 @@ cargo build --release --manifest-path native/terms/Cargo.toml
    - 内容来源是这期间合入 main 的 PR：`git log --first-parent --merges --format=%s <上一个tag>..<发布提交>` 列出每个「Merge pull request #N」，标题用 `gh pr list --state merged --base main --limit 500 --json number,title` 取（默认只列 30 个，要加 `--limit`）。按用户看得到的变化整理，不照抄标题；只涉及内部重构、测试、文档的不写。首个公开测试版没有上一个 tag，写这一版能做什么、已知限制和安装办法。
    - 每个 Release 都写：macOS 更新后的两步（2026-10-18 用户定，#192）：第一次打开新版本要在「系统设置 › 隐私与安全性」里重新放行一次，用 iCloud 照片作来源的第一次同步时要重新允许访问照片，原因是临时签名每个版本都不同，链接 [更新到新版本之后](INSTALL.md#更新到新版本之后)；安装包不带模型，第一次使用时下载，链接 [识别模型](INSTALL.md#识别模型)；用 `SHA256SUMS.txt` 核对下载的文件；macOS 版只支持 Apple 芯片的 Mac；请内测用户遇到装不上、打不开时按 [报告问题](INSTALL.md#报告问题) 反馈，Windows 的 SmartScreen 拦截尤其要反馈。
    - 升级图库格式的版本，开头标明「本版会升级图库格式」：打开旧图库时会先询问，升级前自动备份，升级后旧版本打不开；回退办法是装回旧版，再用升级前的备份恢复，备份位置在升级完成后应用会显示一次（规则见 [架构方向](ARCHITECTURE_DIRECTION.md#已有核心库的显式升级边界)）。
-10. **检查更新能看到它**（#191，A 档；机制见 [Web 界面](WEB_V2.md#界面语言2026-10-18173) 检查更新一段）：应用不带账号请求 `https://api.github.com/repos/shio-vinyl/illustash/releases?per_page=30`，只读每项的 `tag_name`、`draft`、`prerelease`，不看正文和资源文件，所以资源文件名不影响检查。一个 Release 要被提示，需要：
+10. **检查更新能看到它**（#191，A 档；机制见 [Web 界面](WEB_V2.md#界面语言2026-10-18173) 检查更新一段）：应用不带账号请求 `https://api.github.com/repositories/1407079068/releases?per_page=30`（`1407079068` 是本仓库在 GitHub 上的数字 ID，`gh api repos/shio-vinyl/illustash --jq .id`），只读每项的 `tag_name`、`draft`、`prerelease`，不看正文和资源文件，所以资源文件名不影响检查。一个 Release 要被提示，需要：
     - 已公开，不是草稿；
     - tag 是 `v` 加不带 `+build` 的 SemVer（`v0.2.0`、`v0.2.0-beta.1`），不带 `v`、少一段或带 `+` 的都被忽略；
     - 在接口返回的第一页（30 个）里；
     - 比本机的版本新；带后缀或标了 prerelease 的，只提示给本身是预发布版本的安装。
 
-    「打开下载页」打开的是程序按版本号拼出的 `https://github.com/shio-vinyl/illustash/releases/tag/vX.Y.Z`，不取回复里的链接。请求不跟随重定向，仓库改名或转移后，已经发出去的版本检查更新都会失败。公开后用 `gh api 'repos/shio-vinyl/illustash/releases?per_page=30' --jq '.[] | [.tag_name, .draft, .prerelease] | @tsv'` 核对（登录后的 gh 也能看到草稿，应用看不到）；从第二次发布起，再在虚拟机里用上一个版本在「设置 › 关于」点「检查更新」，确认提示新版本，「打开下载页」打开的是这个 Release。
+    「打开下载页」打开的是程序按版本号拼出的 `https://github.com/shio-vinyl/illustash/releases/tag/vX.Y.Z`，不取回复里的链接。公开后用 `gh api 'repositories/1407079068/releases?per_page=30' --jq '.[] | [.tag_name, .draft, .prerelease] | @tsv'` 核对（登录后的 gh 也能看到草稿，应用看不到）；从第二次发布起，再在虚拟机里用上一个版本在「设置 › 关于」点「检查更新」，确认提示新版本，「打开下载页」打开的是这个 Release。
+
+    **仓库改名或转移**（2026-11-12 用户定，#358）：检查更新的请求不跟随重定向，所以按仓库的数字 ID 查，不按 `账号/仓库名`。改名或转移后 ID 不变，已经发出去的版本照样查得到；「打开下载页」是在浏览器里打开的网页，由 GitHub 的网页跳转接住。按 ID 的地址是 GitHub 对改过名的仓库跳转过去的地址，但没有写进它的 REST 文档，所以这个地址返回 404 时，应用会再按 `repos/shio-vinyl/illustash/releases` 查一次，两个地址有一个可用就查得到。已经发出去的版本改不了，由此有两条约束：
+    - 改名或转移后，旧的 `shio-vinyl/illustash` 不能再建同名仓库。一建，GitHub 对旧地址的跳转就失效，已发出版本的「打开下载页」会打开那个新仓库，按名字的那次回退查到的也是它。
+    - 仓库不能删掉重建。重建后 ID 会变，已发出的版本按 ID 查不到；用原名重建时还能靠按名字的回退查到，但以后改名或转移就接不住了。
 11. **发布之后**：第一次发布后，改掉 [README](../README.md)「现状」和 [装不上、打不开怎么办](INSTALL.md) 开头「还没有正式发布」的状态句。
 
 ## 图库包
