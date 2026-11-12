@@ -194,11 +194,11 @@ async function renderAbout() {
   $('aboutKeys').onclick = () => $('help').showModal();
   $('aboutGuide').onclick = () => replayGuide();
   $('aboutCopy').onclick = async () => {
-    try { await navigator.clipboard.writeText(diagnosticText(await diagnosticReport())); toast(t('诊断信息已复制')); }
+    try { await navigator.clipboard.writeText(diagnosticText({...await diagnosticReport(), environment: Object.fromEntries(diag)})); toast(t('诊断信息已复制')); }
     catch (e) { toast(t('无法访问剪贴板，请导出诊断信息')); }
   };
   $('aboutExport').onclick = async () => {
-    try { downloadDiagnostic(await diagnosticReport()); } catch (e) { error(readError(e)); }
+    try { downloadDiagnostic({...await diagnosticReport(), environment: Object.fromEntries(diag)}); } catch (e) { error(readError(e)); }
   };
 }
 // 每个会联网的功能、它发送什么、是否开启：集中在一处查看（#200）。
