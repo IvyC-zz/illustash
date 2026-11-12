@@ -31,16 +31,15 @@ const ROWS = {
   '重复 · 相似组 N': {hash: '#/s/7', page: 'sgroup', doc: '`#/s/'},
   '已排除 · 全部 / 按原因': {hash: '#/excluded?reason=screenshot', page: 'excluded', doc: '`#/excluded'},
   '已排除 · 待确认': {hash: '#/pending', page: 'pending', doc: '`#/pending`'},
-  '新加入': {hash: '#/recent', page: 'recent', doc: '`#/recent`'},
   '随机抽查': {hash: '#/audit', page: 'audit', doc: '`#/audit`'},
   '身份整理': {hash: '#/identity', page: 'identity', doc: '`#/identity`'},
   '画师抽查': {hash: '#/artist-audit', page: 'artist-audit', doc: '`#/artist-audit`'},
 };
 // 文档里的文字 → 注册表的取值。认不出的文字让测试失败，提醒同时改两边。
-const CLICK = [[/^浏览/, 'browse'], [/^整理/, 'cleanup'], [/^\*\*选中\*\*/, 'select']];
+const CLICK = [[/^浏览/, 'browse'], [/^整理/, 'cleanup']];
 const NAV = [[/^首页/, 'home'], [/^图库/, 'library'], [/^资料库/, 'characters'], [/^未识别/, 'unmatched'], [/^重复/, 'duplicates'], [/^已排除/, 'excluded'],
-  [/^新加入/, 'recent'], [/^随机抽查/, 'audit'], [/^身份整理/, 'identity'], [/^无（设置链接高亮）/, 'settings'], [/^无/, '']];
-const TOOLBAR = [[/^空$/, 'none'], [/^仅子页签$/, 'tabs'], [/^角色｜作品/, 'index'], [/^搜索、/, 'library'], [/^同图库/, 'library'], [/^(子页签|三个子页签|排序)/, 'grid'], [/^\*\*排序/, 'grid']];
+  [/^随机抽查/, 'audit'], [/^身份整理/, 'identity'], [/^无（设置链接高亮）/, 'settings'], [/^无/, '']];
+const TOOLBAR = [[/^空$/, 'none'], [/^仅子页签$/, 'tabs'], [/^角色｜作品/, 'index'], [/^搜索、/, 'library'], [/^同图库/, 'library'], [/^(子页签|三个子页签|排序)/, 'grid']];
 const first = (table, text, what) => { const hit = table.find(([re]) => re.test(text)); assert.ok(hit, `文档里的${what}「${text}」认不出来，改了文档要同步改 tests/pages.test.cjs`); return hit[1]; };
 
 function docRows() {
@@ -77,7 +76,7 @@ test('docs/WEB_UI_MAP.md 2.1 总表的每一行都能从注册表读出，且与
   }
 });
 
-test('文档点击列里没有归到浏览／整理／选中的，注册表里是页面自己处理', () => {
+test('文档点击列里没有归到浏览／整理的，注册表里是页面自己处理', () => {
   for (const [label, , , , , , click] of docRows()) {
     const {view} = spec(ROWS[label].hash), kind = CLICK.find(([re]) => re.test(click))?.[1] || 'own';
     assert.equal(view.click, kind, label);
@@ -91,13 +90,14 @@ test('注册表里的每个页面都在总表里有一行，反过来也是', ()
 });
 
 // ---------- 与改造前手写判断逐页相同 ----------
+// 改造前的手写清单，加上 #353 的三处改动：相似组页（sgroup）归整理页，画师抽查（artist-audit）归面板页，新加入（recent）删掉。
 const OLD = {
-  cleanup: ['unmatched', 'skipped', 'excluded', 'pending', 'group', 'audit'],
-  browsing: ['library', 'duplicates', 'recent'],
-  panel: ['home', 'characters', 'settings', 'groups', 'similar', 'identity'],
+  cleanup: ['unmatched', 'skipped', 'excluded', 'pending', 'group', 'audit', 'sgroup'],
+  browsing: ['library', 'duplicates'],
+  panel: ['home', 'characters', 'settings', 'groups', 'similar', 'identity', 'artist-audit'],
   lead: ['unmatched', 'skipped', 'group'],
   nav: page => ({skipped: 'unmatched', groups: 'unmatched', group: 'unmatched', pending: 'excluded', similar: 'duplicates', sgroup: 'duplicates'})[page] || page,
-  valid: ['home', 'unmatched', 'skipped', 'duplicates', 'excluded', 'pending', 'recent', 'audit', 'groups', 'similar', 'identity', 'artist-audit'],
+  valid: ['home', 'unmatched', 'skipped', 'duplicates', 'excluded', 'pending', 'audit', 'groups', 'similar', 'identity', 'artist-audit'],
 };
 test('cleanup()、browsing()、panelPage、LEAD_PAGES、侧栏高亮和改造前的手写清单一致', () => {
   const {cleanup, browsing, defaultSort} = route, {prefs} = web.core();
@@ -116,13 +116,45 @@ test('cleanup()、browsing()、panelPage、LEAD_PAGES、侧栏高亮和改造前
   assert.equal(defaultSort({page: 'library', char: 'c1'}), prefs.get('sortCharacter', 'suspicious'));
   assert.equal(defaultSort({page: 'unmatched'}), prefs.get('sortUnmatched', prefs.get('sortLibrary', 'newest')));
   assert.equal(defaultSort({page: 'excluded'}), prefs.get('sortLibrary', 'newest'));
-  // 现状，见已知问题 2、4：artist-audit 的主区是 #groupsPage，却不算面板页；sgroup 既不是浏览也不是整理
-  assert.equal(pages.PAGES['artist-audit'].area, 'groupsPage');
-  assert.equal(pages.PAGES['artist-audit'].panel, false);
+  // #353：画师抽查是面板页，工具栏是空的；相似组页是整理页（点击切换选中、工具栏是「全选」）；新加入页没有了
+  assert.deepEqual([pages.PAGES['artist-audit'].area, pages.PAGES['artist-audit'].panel, pages.PAGES['artist-audit'].toolbar], ['groupsPage', true, 'none']);
   state.route = {page: 'sgroup', char: ''};
-  assert.deepEqual([route.cleanup(), route.browsing(), pages.PAGES.sgroup.click], [false, false, 'select']);
-  // 现状，见已知问题 1：新加入页的侧栏入口存在于声明里（index.html 里是隐藏的）
-  assert.equal(pages.PAGES.recent.nav, 'recent');
+  assert.deepEqual([route.cleanup(), route.browsing()], [true, false]);
+  assert.equal(pages.PAGES.recent, undefined);
+});
+
+test('主区是网格以外的页面都是面板页；单图快捷键的范围从注册表读', () => {
+  for (const name of pages.pageNames()) {
+    const p = pages.PAGES[name];
+    assert.equal(!!p.panel, p.area !== 'grid', `${name}：panel 与主区`);
+    assert.equal(pages.keyScope(p), p.area === 'grid' ? 'grid' : name === 'home' ? 'shown' : '', `${name}：快捷键范围`);
+  }
+  assert.equal(pages.keyScope(pages.CHARACTER), 'grid');
+});
+
+test('旧地址 #/recent 改写到首页（#353）', async () => {
+  for (const hash of ['#/recent', '#/recent?sort=oldest']) {
+    const {r} = spec(hash);
+    assert.deepEqual([r.page, r.legacy], ['home', true], hash);
+  }
+  // 原型上的名字不是旧地址
+  for (const hash of ['#/constructor', '#/toString', '#/__proto__']) assert.equal(spec(hash).r.page, 'library', hash);
+  // applyRoute 把地址就地改成首页的，侧栏点亮首页
+  const page = web.fakePage();
+  const replaced = [];
+  globalThis.history = {replaceState: (a, b, url) => replaced.push(url)};
+  globalThis.window = {addEventListener() {}};
+  globalThis.requestAnimationFrame = () => 0;
+  globalThis.fetch = () => Promise.resolve({status: 200, ok: true, json: async () => ({days: [], next: ''})});
+  const nav = [{dataset: {page: 'home'}, classList: page.el('x').classList}];
+  page.document.querySelectorAll = sel => sel === '.nav' ? nav : [];
+  const {applyRoute} = await web.load('ui/shell.js');
+  globalThis.location.hash = '#/recent';
+  await applyRoute();
+  assert.equal(state.route.page, 'home');
+  assert.deepEqual(replaced, ['#/home']);
+  assert.equal(nav[0].classList.contains('active'), true);
+  assert.equal(page.el('homePage').hidden, false);
 });
 
 test('地址：能认出的页面名、带编号的页面、子页和旧角色地址；写回去再读得到同一页', () => {
@@ -168,7 +200,6 @@ test('后端查询参数：pool、分组编号、筛选都从注册表来', () =
   assert.deepEqual(params('duplicates'), {pool: 'duplicates'});
   assert.deepEqual(params('excluded', {reason: 'screenshot'}), {pool: 'excluded', reason: 'screenshot'});
   assert.deepEqual(params('pending'), {pool: 'pending'});
-  assert.deepEqual(params('recent'), {pool: 'recent'});
   assert.deepEqual(params('audit'), {pool: 'audit'});
   assert.deepEqual(params('group', {id: '3'}), {pool: 'cluster', cluster: '3'});
   assert.deepEqual(params('sgroup', {id: '4'}), {pool: 'similar', cluster: '4'});

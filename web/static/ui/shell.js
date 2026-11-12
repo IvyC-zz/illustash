@@ -30,7 +30,7 @@ function metaShown({error: e, total, directory, queue}) {
   if (e) { error(readError(e)); return; }
   // 图库计的是你能看到的；「整理」一节计的是还需要你处理的。
   navCount('countLibrary', total); navCount('countCharacters', state.chars.length);
-  navCount('countRecent', state.recentCount); navCount('countHome', state.recentCount, t('最近一次同步新加入的图'));
+  navCount('countHome', state.recentCount, t('最近一次同步新加入的图'));
   navCount('countUnmatched', state.pools.unmatched, t('还没认出角色的图'));
   navCount('countAudit', state.pools.audit, t('随机抽查还剩几张')); $('navAudit').hidden = !state.pools.audit && viewOf(state.route).nav !== 'audit';
   navCount('countDuplicates', state.dupInfo.mixed, t('角色不一致的副本组，对齐后才会折叠'));
@@ -211,7 +211,6 @@ implement({
   home: {heading: (r, {n, clear}) => [t('首页'), t('按加入日期分组') + (state.recentCount ? ' · ' + t('最近一次同步新加入 {n} 张', {n: number(state.recentCount)}) : '')]},
   library: {heading: (r, {n, clear}) => [r.artist ? t('画师 · {name}', {name: esc(artistName(r.artist))}) : r.day ? t('{day} 加入', {day: esc(dayLabel(r.day))}) : r.work ? esc((state.workTree || []).find(w => w.id === r.work)?.name || t('作品筛选')) : r.utag ? '# ' + esc(r.utag) : t('图库'), t('{n} 张', {n}) + (r.work ? ' · ' + t('包含所有子作品') + clear : r.artist ? ' · ' + t('按画作比对找到') + clear : '')]},
   characters: {heading: (r, {n, clear}) => [t('资料库'), r.section === 'works' ? t('{n} 部作品', {n: number(state.index?.works?.length || 0)}) + (state.index?.watch?.works.length ? ' · ' + t('关注 {n} 部', {n: number(state.index.watch.works.length)}) : '') : t('{n} 位角色 · {works} 部作品', {n: number(state.chars.length), works: number(new Set(state.chars.map(workKey).filter(k => k !== 'oc' && k !== 'other')).size)}), !r.section && state.localLinks?.length ? `<span class="heading-links"><button class="quiet" id="localLinksButton" title="${t('关联后自动补中文名、别名和作品；和已有角色重复的可以合并')}">${t('{n} 个自建角色能对上 Danbooru', {n: number(state.localLinks.length)})}</button></span>` : '']},
-  recent: {heading: (r, {n, clear}) => [t('新加入'), t('最近一次同步加入的 {n} 张，已自动识别', {n: number(state.recentCount)})]},
   audit: {heading: (r, {n, clear}) => [t('随机抽查'), t('还剩 {left} / {n} 张 · 鼠标移到角色 tag 上点 ✓ / ✗，或选中多张按 Y / N；打开大图也会问「是 TA 吗？」', {left: number(state.pools.audit || 0), n}) + (state.nsfw ? ` · <b>${t('R18 筛选开着：抽查要看全部才准，按 H 切换')}</b>` : '')]},
   unmatched: {heading: (r, {n, clear}) => [t('未识别'), t('{n} 张 · 选中后设为角色，或跳过', {n})]},
   skipped: {heading: (r, {n, clear}) => [t('未识别'), t('已跳过 {n} 张 · 可以恢复到未识别', {n})]},

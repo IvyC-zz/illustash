@@ -9,6 +9,7 @@
 //   大图  大图打开（viewer >= 0）。盖住网格、选择栏和详情栏：快捷键只作用于大图里那张，被盖住的选择栏不响应
 //        （选中保留，关掉大图后照旧；在大图里改了那张图之后，和其他写入一样清空选择）。
 // 当前图的来源优先级：大图 ＞ 详情栏 ＞ 键盘光标。
+import {t} from './i18n.js';
 import {state} from './state.js';
 
 // 选中了几张：全选用「过滤条件 + 排除集」表示，张数由总数减去排除的。
@@ -51,10 +52,11 @@ export function viewerTarget(s = state) {
 // （keySelection），item 当前图（没有选中时用，决定 ⌫ 有没有可移出的角色）。
 // 返回 {bar: 动作}（交给选择栏的同名按钮）、{single: 动作}（作用于当前图），或 null：这一页没有对应的动作。
 export function keyAction(key, {view, char = false, n = 0, item = null}) {
-  const browse = view.click === 'browse';
   switch (key) {
+    // 有选中时 ⌫ 交给选择栏里标着 ⌫ 的按钮：角色页「不是 TA」、默认选择栏（图库、重复、相似组）「不是…」；
+    // 别的选择栏没有这个按钮。
     case 'remove':
-      if (n) return char ? {bar: 'remove'} : browse ? {bar: 'notlib'} : null;
+      if (n) return char ? {bar: 'remove'} : view.bar === 'default' ? {bar: 'notlib'} : null;
       return char || item?.memberships?.length ? {single: 'remove'} : null;
     case 'c': return n ? {bar: char ? 'swap' : 'assign'} : {single: char ? 'swap' : 'also'};
     case 'a': return n ? {bar: char ? 'also' : 'assign'} : {single: 'also'};
@@ -67,3 +69,36 @@ export function keyAction(key, {view, char = false, n = 0, item = null}) {
     default: return null;
   }
 }
+
+// 快捷键表：帮助对话框（index.html 的 #help）由它生成，所以帮助里写的就是这里写的。ui/grid.js 的键盘处理加减按键时，
+// 同步改这张表（tests/help_keys.test.cjs 核对两边认的键一样）；每个键在哪一页、哪个模式下做什么的细节见上面的
+// keyAction 和 docs/WEB_UI_MAP.md 第 5 节。
+//   keys   帮助里显示的键；⌘ 在别的系统上显示成 Ctrl（core/format.js 的 platformText）
+//   codes  键盘处理认的 e.key（字母小写）；鼠标、触控板的操作和命令面板里的键为空
+//   does   做什么、在哪生效
+export const SHORTCUTS = [
+  {keys: '⌘K', codes: ['k'], does: () => t('跳转到角色')},
+  {keys: '/', codes: ['/'], does: () => t('搜索图库')},
+  {keys: () => t('拖动 · Shift 点击'), codes: [], does: () => t('连续选择；在空白处拖动可框选')},
+  {keys: '⌘A', codes: ['a'], does: () => t('选中全部符合条件的图片')},
+  {keys: () => t('方向键'), codes: ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'],
+    does: () => t('移动光标，按住 Shift 同时选中；详情栏打开时换图（↑ ↓ 换到上一行、下一行），大图里 ← → 换图')},
+  {keys: '↵', codes: ['Enter'], does: () => t('整理页或选择模式下切换光标处那张的选中，浏览页打开它的详情')},
+  {keys: 'Space', codes: [' '], does: () => t('打开或关闭大图')},
+  {keys: '⌫', codes: ['Backspace', 'Delete'], does: () => t('不是这个角色：有选中时作用于选中的图（角色页移出，图库、重复等页选「不是…」），没有选中时移除当前这张的角色')},
+  {keys: 'C', codes: ['c'], does: () => t('角色页：换成别的角色；其余页：选中的图设为角色，没有选中时给当前这张加角色')},
+  {keys: 'A', codes: ['a'], does: () => t('给当前这张追加角色；不在角色页、有选中时同 C')},
+  {keys: 'T', codes: ['t'], does: () => t('子标签（角色页，选中图片时）')},
+  {keys: 'S', codes: ['s'], does: () => t('跳过（「未识别」页和它的分组；没有选中时只在「全部未识别」）')},
+  {keys: 'X', codes: ['x'], does: () => t('排除非插画内容（截图、照片等）；在「已排除」页为恢复')},
+  {keys: 'G', codes: ['g'], does: () => t('添加或移除自定义标签（与自动标签分开保存）')},
+  {keys: '1–9', codes: ['1-9'], does: () => t('选详情栏或大图里「也可能是」的第几项；按住 ⌥（Alt）改为追加')},
+  {keys: 'Y / N', codes: ['y', 'n'], does: () => t('回答「是 TA 吗？」：随机抽查页回答选中的图，详情栏或大图里回答问题条')},
+  {keys: '⌘+ / ⌘−', codes: ['=', '+', '-'], does: () => t('缩放图片网格；大图打开时缩放大图')},
+  {keys: () => t('捏合 · ⌘ 滚动'), codes: [], does: () => t('缩放图片网格；在大图上缩放大图')},
+  {keys: 'R', codes: ['r'], does: () => t('切换原比例 / 方形裁切')},
+  {keys: 'H', codes: ['h'], does: () => t('隐藏 / 显示 R18 内容（顶栏 R18 按钮还可以切换为只看 R18）')},
+  {keys: '⌘Z', codes: ['z'], does: () => t('撤销')},
+  {keys: 'Esc', codes: ['Escape'], does: () => t('关闭最上面的菜单、对话框或大图，然后是详情栏，最后取消选择；在输入框里先离开输入框')},
+  {keys: () => t('命令面板里'), codes: [], does: () => t('↑ ↓ 移动，↵ 选中，Shift ↵ 暂存多个一起设，输入框为空时 1–9 直接选')},
+];

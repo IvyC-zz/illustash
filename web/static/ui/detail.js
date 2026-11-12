@@ -4,7 +4,7 @@ import {t} from '../core/i18n.js';
 import {REASONS, nameWithWork} from '../core/labels.js';
 import {fetchChar} from '../core/meta.js';
 import {shownUuid} from '../core/modes.js';
-import {poolIs} from '../core/pages.js';
+import {poolIs, viewOf} from '../core/pages.js';
 import {charHash, cleanup, go} from '../core/route.js';
 import {api} from '../core/session.js';
 import {state} from '../core/state.js';
@@ -197,7 +197,9 @@ export async function step(delta) {
   setCursor(n); ensureVisible(n);
   if (state.viewer >= 0) showViewer(n); else inspect(state.items[n].uuid);
 }
+// 把网格滚到第 i 张可见。主区不是网格的页面（首页从详情栏、大图翻页）不按网格的行去滚。
 export function ensureVisible(i) {
+  if (viewOf(state.route).area !== 'grid') return;
   const v = $('viewport'), row = rowOf(i), top = rowTop(row), height = rowHeight(row);
   if (top < v.scrollTop) v.scrollTop = top; else if (top + height > v.scrollTop + v.clientHeight) v.scrollTop = top + height - v.clientHeight;
   syncCards();

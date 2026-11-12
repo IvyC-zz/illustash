@@ -1,13 +1,13 @@
 // 图片网格（桌面布局，#199）：分页加载图片、虚拟网格和它的缩放、选择、选择栏的操作、键盘快捷键、视图选项和 R18
 // 筛选。
 import {edits, setLatest, undoLatest, undoneText} from '../core/edits.js';
-import {esc, number, shortcut} from '../core/format.js';
+import {esc, number, platformText, shortcut} from '../core/format.js';
 import {t, tb} from '../core/i18n.js';
 import {REASONS, nameWithWork} from '../core/labels.js';
 import {metaSoon, refreshMeta} from '../core/meta.js';
 import {prefs} from '../core/prefs.js';
-import {currentSource, keyAction, keySelection, modes, selectionSize, shownUuid, viewerTarget} from '../core/modes.js';
-import {pageOf, viewOf} from '../core/pages.js';
+import {SHORTCUTS, currentSource, keyAction, keySelection, modes, selectionSize, shownUuid, viewerTarget} from '../core/modes.js';
+import {keyScope, pageOf, viewOf} from '../core/pages.js';
 import {browsing, cleanup, defaultSort} from '../core/route.js';
 import {api, post, readError} from '../core/session.js';
 import {state} from '../core/state.js';
@@ -339,6 +339,8 @@ function stepColumns(delta) {
   setSize((width + state.gap) / cols - state.gap);
 }
 let pinchFactor = 1, pinchPoint = null, gestureStart = 0;
+// 主区是不是网格：缩放网格（⌘＋／⌘－、⌘滚轮、捏合）只在这样的页面生效。
+const onGrid = () => viewOf(state.route).area === 'grid';
 // ---------- 选择 ----------
 export const selCount = () => selectionSize();
 const isSelected = id => state.sel.all ? !state.sel.exclude.has(id) : state.sel.ids.has(id);
@@ -632,13 +634,18 @@ export function wireGrid() {
   $('viewport').addEventListener('scroll', scheduleGrid, {passive: true});
   new ResizeObserver(scheduleGrid).observe($('viewport'));
 
+  // ⌘滚轮、捏合：只在主区是网格的页面缩放网格；别的页面什么也不做，也不交给浏览器缩放整页（与 ⌘＋／⌘－ 一致）。
   $('viewport').addEventListener('wheel', e => {
     if (!e.ctrlKey && !e.metaKey) return;
-    e.preventDefault(); pinchFactor *= Math.exp(-e.deltaY * .01); pinchPoint = [e.clientX, e.clientY];
+    e.preventDefault(); if (!onGrid()) return;
+    pinchFactor *= Math.exp(-e.deltaY * .01); pinchPoint = [e.clientX, e.clientY];
     requestZoom(() => { const f = pinchFactor; pinchFactor = 1; setSize(state.size * f, ...pinchPoint); });
   }, {passive: false});
   $('viewport').addEventListener('gesturestart', e => { e.preventDefault(); gestureStart = state.size; });
-  $('viewport').addEventListener('gesturechange', e => { e.preventDefault(); const x = e.clientX, y = e.clientY, s = gestureStart * e.scale; requestZoom(() => setSize(s, x, y)); });
+  $('viewport').addEventListener('gesturechange', e => {
+    e.preventDefault(); if (!onGrid()) return;
+    const x = e.clientX, y = e.clientY, s = gestureStart * e.scale; requestZoom(() => setSize(s, x, y));
+  });
 
   // 在卡片的「+ 角色」引导上点一次：把图设为那个角色，和在选择器里选它一样。
   $('grid').addEventListener('click', e => {
@@ -682,33 +689,39 @@ export function wireGrid() {
   $('grid').addEventListener('dblclick', e => { const card = e.target.closest('.card[data-id]'); if (card) openViewer(Number(card.dataset.index)); });
 
   // ---------- 键盘 ----------
-  // 按键先看最上面的模式（core/modes.js）：大图打开时它盖住选择栏，单图快捷键都作用于大图里那张。
+  // 按键先看最上面的模式（core/modes.js）：大图打开时它盖住选择栏，单图快捷键都作用于大图里那张。哪些键、在哪生效
+  // 写在 core/modes.js 的 SHORTCUTS（帮助对话框由它生成），这里加减按键要同步改那张表（tests/help_keys.test.cjs 核对）。
   document.addEventListener('keydown', e => {
     if (document.querySelector('dialog[open]')) return;
     const mod = e.metaKey || e.ctrlKey, key = e.key.toLowerCase(), m = modes();
+    const view = viewOf(state.route), scope = keyScope(view), grid = scope === 'grid';
     if (mod && key === 'k') { e.preventDefault(); jumpToCharacter(); return; }
     // ⌘＋／⌘－：大图打开时缩放大图；否则只在有网格的页面改网格列数，别的页面什么也不做（也不交给浏览器缩放）。
     if (mod && (key === '=' || key === '+' || key === '-')) {
       e.preventDefault(); const bigger = key !== '-';
       if (m.viewer) zoomView(bigger ? 1.4 : 1 / 1.4, innerWidth / 2, innerHeight / 2);
-      else if (viewOf(state.route).area === 'grid') stepColumns(bigger ? -1 : 1);
+      else if (onGrid()) stepColumns(bigger ? -1 : 1);
       return;
     }
     if (e.target.closest('input,textarea,select,[contenteditable]')) { if (e.key === 'Escape') e.target.blur(); return; }
     if (mod && key === 'z') { e.preventDefault(); undo(); return; }
     // ⌘A 是选择栏的快捷键：大图打开时选择栏被盖住，不响应。
-    if (mod && key === 'a' && !$('grid').hidden) { e.preventDefault(); if (!m.viewer) selectAll(); return; }
+    if (mod && key === 'a' && grid) { e.preventDefault(); if (!m.viewer) selectAll(); return; }
     // 浮层（含大图）的 Esc 已由浮层管理器处理；走到这里说明栈是空的，接着关详情栏、取消选择。
     if (e.key === 'Escape') { if (m.detail) closeInspector(); else quitSelecting(); return; }
     if (key === 'r' && !mod && !pageOf(state.route).panel) { e.preventDefault(); toggleFit(); return; }
     if (key === 'h' && !mod) { e.preventDefault(); setNsfw(state.nsfw === 'hide' ? '' : 'hide'); return; }
     if (e.key === '/' && $('search')) { e.preventDefault(); $('search').focus(); return; }
-    const n = keySelection(), view = viewOf(state.route), character = !!state.route.char;
+    const n = keySelection(), character = !!state.route.char;
     if ((key === 'y' || key === 'n') && !mod && !edits.busy && view.bar === 'audit' && n) { e.preventDefault(); answerAudit(key === 'y'); return; }
     if ((key === 'y' || key === 'n') && !mod && !edits.busy && state.question && [state.focused, m.viewer && state.viewerItem?.uuid].includes(state.question.ident)) { e.preventDefault(); answerAsk(key === 'y' ? 'yes' : 'no'); return; }
-    if (edits.busy || $('grid').hidden) return;
-    if (e.key === ' ') { e.preventDefault(); if (m.viewer) closeViewer(); else openViewer(viewerTarget()); return; }
+    if (edits.busy || !scope) return;
+    // 首页（scope 'shown'）没有网格光标：下面的键只作用于详情栏或大图里那张，两者都没开时不响应；方向键只有 ← → 翻页，
+    // ↑ ↓ 照常滚动页面。
+    if (!grid && !m.viewer && !m.detail) return;
+    if (e.key === ' ') { e.preventDefault(); if (m.viewer) closeViewer(); else openViewer(grid ? viewerTarget() : indexOf(state.focused)); return; }
     if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key)) {
+      if (!grid) { if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') { e.preventDefault(); step(e.key === 'ArrowLeft' ? -1 : 1); } return; }
       e.preventDefault();
       const from = state.cursor < 0 ? 0 : state.cursor;
       const delta = e.key === 'ArrowLeft' ? -1 : e.key === 'ArrowRight' ? 1 : verticalStep(from, e.key === 'ArrowUp' ? -1 : 1) - from || (e.key === 'ArrowUp' ? -state.cols : state.cols);
@@ -719,7 +732,7 @@ export function wireGrid() {
       if (!state.items[state.cursor]) loadPage(Math.floor(state.cursor / PAGE) * PAGE);
       ensureVisible(state.cursor); return;
     }
-    if (e.key === 'Enter' && state.cursor >= 0 && !m.viewer) { e.preventDefault(); const item = state.items[state.cursor]; if (!item) return; if (cleanup() || state.selecting) { setSelected(item.uuid, !isSelected(item.uuid)); state.anchor = state.cursor; renderSelection(); } else inspect(item.uuid); return; }
+    if (e.key === 'Enter' && grid && state.cursor >= 0 && !m.viewer) { e.preventDefault(); const item = state.items[state.cursor]; if (!item) return; if (cleanup() || state.selecting) { setSelected(item.uuid, !isSelected(item.uuid)); state.anchor = state.cursor; renderSelection(); } else inspect(item.uuid); return; }
     if (mod || e.altKey && !/^[1-9]$/.test(e.key)) return;
     if (['c', 'a', 't', 's', 'g'].includes(key) || /^[1-9]$/.test(e.key)) e.preventDefault(); // 别让这个字母进到命令面板的输入框里
     const remove = e.key === 'Backspace' || e.key === 'Delete';
@@ -735,6 +748,10 @@ export function wireGrid() {
     }
     if (/^[1-9]$/.test(e.key) && !n && state.detail && (m.detail || m.viewer)) { pickAlternative(state.detail, state.detail.uuid, Number(e.key) - 1, e.altKey); return; }
   });
+
+  // 帮助对话框的快捷键表从 core/modes.js 的 SHORTCUTS 生成，和键盘处理是同一张表。
+  const text = x => typeof x === 'function' ? x() : x;
+  $('helpKeys').innerHTML = SHORTCUTS.map(s => `<dt>${esc(platformText(text(s.keys)))}</dt><dd>${esc(platformText(s.does()))}</dd>`).join('');
 
   $('viewButton').onclick = e => { e.stopPropagation(); toggleViewPop(); };
   $('viewPopover').addEventListener('click', e => {

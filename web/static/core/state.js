@@ -1,6 +1,7 @@
 // 页面共享的状态（#199）：路由、图库的列表和选择、各项计数以及每个任务最近一次的回应。不碰 DOM。
 // 每个字段都在这里声明（tools/check_frontend.py 规则 2），按归属分组；每组只有一个写入者：组标题写的那个模块，
-// 其余模块只读，要改就调用组标题里列的那个模块的函数（#344）。字段的初值要与第一次写入之前读它的代码对得上，
+// 其余模块只读，要改就调用组标题里列的那个模块的函数（#344）。组标题的格式是「// ---- 说明：写入者文件（备注） ----」，
+// 冒号和括号之间只写一个文件；规则 7 按它检查别的文件有没有给这一组的字段赋值。字段的初值要与第一次写入之前读它的代码对得上，
 // 例如 doubtCount 是 null 而不是 0，「和上次一样就不重画」的比较才不会在第一次就跳过。
 // 放在别处、各自只有一个写入方的：会话（session.js），编辑和撤销（edits.js），列表变化时保持在视野里的那张图
 // （ui/grid.js 的 kept）。
@@ -24,8 +25,12 @@ export const state = {
   // ---- 资料库的数据：core/catalog.js（localLinks 别处要作废时用 forgetLocalLinks） ----
   tagged: null, workTree: null, localLinks: null,
 
-  // ---- 其余各有一个写入者的回应：core/integrity.js、core/models.js、ui/guide.js ----
-  integrity: null, models: null, guide: null,
+  // ---- 图库完整性检查的回应：core/integrity.js ----
+  integrity: null,
+  // ---- 识别模型的状态：core/models.js ----
+  models: null,
+  // ---- 上手引导的进度：ui/guide.js ----
+  guide: null,
 
   // ---- 网格的列表：ui/grid.js（首页借用它放自己的图，用 showList；写入后作废读取用 listChanged） ----
   items: [], total: 0, totalReady: false, readEpoch: 0, countDirty: false, countReload: null,
