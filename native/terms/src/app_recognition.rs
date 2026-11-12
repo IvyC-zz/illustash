@@ -535,13 +535,16 @@ fn import_internal(
         let delivery = match &delivery {
             Some(value) => value,
             None => {
-                // 兼容旧抢救流程清掉源账本、却留下应用投影的图库；也不能复用它的投影标记。
+                // 兼容源账本丢失却保留应用标记的抢救图库；投影或撤回标记都不能复用于新交付。
                 let projected = if seen {
                     false
                 } else {
                     crate::app_library::read_connection(&library.db())?.query_row(
-                        "SELECT EXISTS(SELECT 1 FROM meta WHERE key=?)",
-                        [format!("recognition_projection:{}", pkg.digest)],
+                        "SELECT EXISTS(SELECT 1 FROM meta WHERE key IN (?,?))",
+                        params![
+                            format!("recognition_projection:{}", pkg.digest),
+                            format!("recognition_invalidated:{}", pkg.digest)
+                        ],
                         |r| r.get::<_, bool>(0),
                     )?
                 };

@@ -698,7 +698,13 @@ fn unprojected_legacy_is_refused_and_sync_retirement_is_restart_safe() {
         crate::app_migrate_data::rows(&f.app(), "SELECT * FROM candidates WHERE source='CCIP'").unwrap(),
         old_candidates
     );
-    assert_eq!(f.import(&path, &sidecar).unwrap()["status"], "done");
+    // 抢救源库后即使两张账本都已丢失，应用内孤立的撤回标记仍占用旧回执键。
+    f.source().execute_batch("DELETE FROM recognition_assets; DELETE FROM recognition_imports;").unwrap();
+    assert_eq!(count(&f.app(), "SELECT count(*) FROM meta WHERE key LIKE 'recognition_projection:%'"), 0);
+    let restored = f.import(&path, &sidecar).unwrap();
+    assert_eq!(restored["status"], "done");
+    let receipt: String = f.source().query_row("SELECT digest FROM recognition_imports", [], |r| r.get(0)).unwrap();
+    assert!(receipt.starts_with(&format!("{}:redelivery:", restored["digest"].as_str().unwrap())));
     assert_eq!(human(&f.app()), before);
     assert_eq!(
         crate::app_migrate_data::rows(&f.source(), "SELECT * FROM labels WHERE source='char_index' AND dim='char_ext'")
