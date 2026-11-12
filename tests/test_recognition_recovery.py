@@ -83,7 +83,7 @@ class RecognitionRecoveryTest(unittest.TestCase):
             return connection.execute(sql, args).fetchall()
 
     def tables(self, db, names):
-        return {table: self.rows(db, f'SELECT * FROM {table} ORDER BY rowid') for table in names}
+        return {table: sorted(self.rows(db, f'SELECT * FROM {table}'), key=repr) for table in names}
 
     def test_mtime_preserves_results_and_duplicate_is_a_noop(self):
         self.assertFalse(self.import_package()['duplicate'])
