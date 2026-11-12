@@ -590,3 +590,28 @@ fn legacy_unpublished_receipts_cannot_silently_gain_input_version_protection() {
     assert_no_wd(&f);
     assert_eq!(human(&f.app()), before);
 }
+
+#[test]
+fn public_metadata_cannot_shadow_the_actual_manifest_input_binding() {
+    let f = Fixture::new(false);
+    let original = fs::read(f.input()).unwrap();
+    let (path, _) = f.batch("result", feature(0));
+    let file = path.join("manifest.json");
+    let mut manifest: Value = serde_json::from_slice(&fs::read(&file).unwrap()).unwrap();
+    let mut nested = manifest.clone();
+    fs::write(f.input(), b"replacement input").unwrap();
+    nested["inputs"]["a"] = json!(producer::input_hash(&f.input(), &|| Ok(())).unwrap());
+    manifest["recognition"] = nested;
+    fs::write(&file, manifest.to_string()).unwrap();
+    assert!(import_package(&f.library, &path, &f.resources, &AtomicBool::new(false), &|_, _| Ok(()))
+        .unwrap_err()
+        .to_string()
+        .contains("已过期"));
+    assert_no_wd(&f);
+    // 仍支持公开包原有的附加元数据，只有外层字段决定输入版本。
+    fs::write(f.input(), original).unwrap();
+    assert_eq!(
+        import_package(&f.library, &path, &f.resources, &AtomicBool::new(false), &|_, _| Ok(())).unwrap()["status"],
+        "done"
+    );
+}

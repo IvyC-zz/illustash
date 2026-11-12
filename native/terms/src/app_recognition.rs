@@ -299,7 +299,9 @@ pub(crate) fn verify_current_inputs(
     ids: &[String],
     cancel: &AtomicBool,
 ) -> Result<()> {
-    let manifest = manifest.get("recognition").unwrap_or(manifest);
+    // 公开 manifest 允许附加元数据；同名字段不能把外层 v2 的输入版本遮盖掉。
+    let manifest =
+        if manifest.get("format").is_some() { manifest } else { manifest.get("recognition").ok_or_else(invalid)? };
     if manifest["format"] == "illustash-recognition/1" {
         return Err(Error::Conflict("v1 待恢复结果没有输入内容版本，不能发布，请重新识别生成 v2 结果".into()));
     }
