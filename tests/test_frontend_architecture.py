@@ -166,9 +166,9 @@ class FrontendArchitectureTest(unittest.TestCase):
             tree.append('ui/home.js', "\nconst d = document.createElement('dialog');\n")
             message = self.assertViolation(tree, 'dialog-element', 'ui/home.js')
             self.assertIn('ui/dialog.js', message)
-        with Tree() as tree:  # a file that already has some (palette.js baselines 2)
-            tree.append('ui/palette.js', '\nconst d = document.createElement("dialog");\n')
-            self.assertViolation(tree, 'dialog-element', 'ui/palette.js')
+        with Tree() as tree:  # 基线里已经登记了存量的文件（ui/dialog.js 登记 1 处，openDialog 内的那一处）
+            tree.append('ui/dialog.js', '\nconst d = document.createElement("dialog");\n')
+            self.assertViolation(tree, 'dialog-element', 'ui/dialog.js')
 
     def test_long_line_boundary(self):
         with Tree() as tree:
@@ -192,6 +192,7 @@ class FrontendArchitectureTest(unittest.TestCase):
 
     def test_fixed_violation_is_reported_as_stale_not_failure(self):
         with Tree() as tree:
+            # 改掉基线里仍登记着的违规（ui/dialog.js 的那一处），应报「过期」而不是失败
             path = tree.root / STATIC / 'ui/dialog.js'
             path.write_text(path.read_text(encoding='utf-8').replace("document.createElement('dialog')", "document.createElement('div')"),
                             encoding='utf-8')
@@ -204,9 +205,9 @@ class FrontendArchitectureTest(unittest.TestCase):
 
     def test_shrink_lowers_but_never_adds(self):
         with Tree() as tree:
-            dialog = tree.root / STATIC / 'ui/dialog.js'
-            dialog.write_text(dialog.read_text(encoding='utf-8').replace("document.createElement('dialog')", "document.createElement('div')"),
-                               encoding='utf-8')
+            fixed = tree.root / STATIC / 'ui/dialog.js'
+            fixed.write_text(fixed.read_text(encoding='utf-8').replace("document.createElement('dialog')", "document.createElement('div')"),
+                             encoding='utf-8')
             tree.append('ui/home.js', "\nconst d = document.createElement('dialog');\n")  # a new violation
             before = tree.baseline()
             code, _ = tree.run_main('--shrink')
