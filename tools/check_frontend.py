@@ -1,20 +1,23 @@
-"""Front-end structure check for web/static (#320, part of #316).
+"""web/static 前端结构检查（#320，属于 #316）。
 
-Plain Python, no Node tooling and no build step. Freezes today's bad patterns in a baseline file and only blocks new
-ones, the way tools/check_architecture.py guards the crate direction. Rules (docs: AGENTS.md「前端结构约定」):
+纯 Python，不依赖 Node 工具，也不引入构建步骤。把现状里的坏模式冻结在基线文件里，只拦新增，做法同
+tools/check_architecture.py 对 crate 依赖方向的检查。规则（说明见 AGENTS.md「前端结构约定」）：
 
-  1 import-core-ui       core/ must not import ui/ (hard rule, no baseline)
-  1 import-cycle         import edges inside a ui/ import cycle; the existing ones are baselined, no new edge or cycle
-  2 undeclared-state     `state.<field>` must be declared in core/state.js
-  3 document-listener    no new document/window `keydown`/`click` listeners
-  4 dialog-element       no new `document.createElement('dialog')`
-  5 long-line            no new line over 200 characters (app.js, core/, ui/)
-  6 page-name            no page-name comparison outside core/pages.js (the page registry, #342; hard rule, no baseline)
+  1 import-core-ui       core/ 不得导入 ui/（硬规则，没有基线）
+  1 import-cycle         ui/ 循环导入里的导入边；现有的登记为基线，不得新增边或新的环
+  2 undeclared-state     `state.<字段>` 必须在 core/state.js 声明
+  3 document-listener    不得新增 document/window/body 级的 keydown、keyup、click、mousedown、pointerdown 监听
+  4 dialog-element       不得新增 `document.createElement('dialog')`，也不得在字符串里拼 `<dialog`
+  5 long-line            不得新增超过 200 字符的行（app.js、core/、ui/）
+  6 page-name            不得在 core/pages.js（页面注册表，#342）以外的位置比较页面名（硬规则，没有基线）
 
-Baseline (tools/frontend_baseline.json) is keyed by file + content feature (edge, field name, per-file count), never by
-line number, so edits elsewhere in a file do not invalidate it. It can only shrink: `--shrink` lowers entries and never
-adds one; `--base-ref REF` fails when the baseline is larger than the one at REF (use it in review / the merge queue).
-A new rule (e.g. rule 6, CSS literals after #317) is one more `Rule` in RULES.
+基线（tools/frontend_baseline.json）按「文件 + 内容特征」登记（导入边、字段名、每个文件的数量），不按行号，
+所以文件里别处的改动不会让它失效。基线只能缩小：`--shrink` 只调低、不新增；`--base-ref REF` 在基线比 REF
+上的大时报错；`--strict-stale` 把「基线里已不再出现的项」也算作失败，逼着改好违规的人同时收紧基线。
+tools/check_all.sh 两个都带上。新规则（例如 #317 之后的规则 6：CSS 字面量）就是 new_rules() 里多一个 Rule。
+
+已知盲区（文本级检查做不到）：规则 2 认不出 `state[key]`、`Object.assign(state, …)` 和解构写法，名为 state
+的函数参数会被误报；正则字面量与除号靠前一个字符判断，`if (ok) /re/.test(s)` 这种写法会被当成除号。
 """
 from collections import Counter
 from dataclasses import dataclass, field
@@ -29,8 +32,11 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 STATIC = Path('web/static')
 BASELINE = Path('tools/frontend_baseline.json')
+# 规则 3 的放行项：浮层管理器是 document 级 keydown / click 监听的唯一入口（Esc 只关栈顶一个、点外关闭都靠它在一处判断）。
+# 用户 2026-11-12 在 #343 批准，只此一个文件；别的文件新增全局监听仍然报错，也不要往基线里加。
+GLOBAL_LISTENER_ALLOWED = frozenset({'ui/overlay.js'})
 MAX_LINE = 200
-# Module files the rules look at. i18n.js / splash.js / theme.js are classic scripts, locales/ is data.
+# 规则检查的模块文件。i18n.js、splash.js、theme.js 是经典脚本，locales/ 是数据，都不在范围内。
 MODULE_GLOBS = ('app.js', 'core/*.js', 'ui/*.js')
 
 
@@ -41,13 +47,13 @@ _REGEX_KEYWORDS = {'return', 'typeof', 'case', 'in', 'of', 'void', 'delete', 'th
 
 
 def strip_comments(src, strings=True):
-    """Blank out comments (keeping newlines, so line numbers stay); keep strings, template text and regex literals.
-    With strings=False the text of quoted strings and template literals is blanked too (`${…}` code stays)."""
+    """把注释替换成空白（保留换行，行号不变）；字符串、模板字符串文字和正则字面量原样保留。
+    strings=False 时引号字符串和模板字符串的文字也一并抹成空白（`${…}` 里的代码保留）。"""
     keep = (lambda text: text) if strings else (lambda text: _BLANK.sub(' ', text))
     out, i, n = [], 0, len(src)
-    stack = []  # 'b' = open brace in code, 't' = `${` of a template literal
+    stack = []  # 'b' = 代码里打开的花括号，'t' = 模板字符串的 `${`
     template = False
-    tail = ''  # the last few emitted characters, to tell a regex literal from a division
+    tail = ''  # 最近输出的几个字符，用来区分正则字面量和除号
 
     def emit(piece):
         nonlocal tail
@@ -106,7 +112,7 @@ def strip_comments(src, strings=True):
 
 
 def _regex_allowed(before):
-    """A `/` starts a regex literal after an operator or `(`; after a value (name, number, `)`, `]`) it divides."""
+    """`/` 出现在运算符或 `(` 之后是正则字面量；出现在值（名字、数字、`)`、`]`）之后是除号。"""
     tail = before.rstrip()
     if not tail:
         return True
@@ -118,10 +124,10 @@ def _regex_allowed(before):
 
 @dataclass
 class Source:
-    path: str  # relative to web/static, posix
+    path: str  # 相对 web/static 的 posix 路径
     raw: str
-    code: str  # comments blanked
-    bare: str = ''  # comments and string/template text blanked (for matching identifiers)
+    code: str  # 注释已抹空
+    bare: str = ''  # 注释和字符串、模板文字都已抹空（用来匹配标识符）
 
     def line_of(self, offset):
         return self.code.count('\n', 0, offset) + 1
@@ -148,7 +154,7 @@ IMPORT_RE = re.compile(r'''\b(?:import|export)\b[^'"`;]*?\bfrom\s*(['"])(.+?)\1|
 
 
 def imports(source, known):
-    """Modules (relative to web/static) that `source` imports statically or dynamically; non-module paths are ignored."""
+    """`source` 静态或动态导入的模块（相对 web/static）；不是本目录模块的路径忽略。"""
     result = []
     for m in IMPORT_RE.finditer(source.code):
         spec = m.group(2) or m.group(4)
@@ -164,7 +170,7 @@ def imports(source, known):
 
 
 def strongly_connected(graph):
-    """Tarjan; returns the components with more than one node (or a self-loop)."""
+    """Tarjan 算法；返回多于一个节点（或带自环）的强连通分量。"""
     index, low, on, stack, out, counter = {}, {}, set(), [], [], [0]
 
     def visit(v):
@@ -200,7 +206,7 @@ class Rule:
     fix: str
     baselined: bool = True
     found: Counter = field(default_factory=Counter)
-    where: dict = field(default_factory=dict)  # key -> ["file:line: text", ...]
+    where: dict = field(default_factory=dict)  # 键 -> ["文件:行号: 内容", ...]
 
     def add(self, key, place):
         self.found[key] += 1
@@ -220,11 +226,11 @@ def new_rules():
         Rule('undeclared-state', '2', 'state 上使用了未在 core/state.js 声明的字段',
              'state 上的字段必须先在 core/state.js 的 state 对象里声明（并写初始值），现有未声明字段已冻结为基线。',
              '在 core/state.js 里加上这个字段和初始值；如果它只是某个模块自己的局部状态，改成该模块里的 let/const，不要挂在 state 上。'),
-        Rule('document-listener', '3', '新增了 document/window 级的 keydown / click 监听',
-             '全局键盘、点击监听让 Esc 的先后、点外关闭各写一套（#316）。现有的已冻结为基线，不得新增。',
+        Rule('document-listener', '3', '新增了 document/window/body 级的键盘、点击监听',
+             '全局键盘、点击监听（keydown、keyup、click、mousedown、pointerdown）让 Esc 的先后、点外关闭各写一套（#316）。现有的已冻结为基线，不得新增。',
              '把监听挂在具体元素或 <dialog> 上（dialog 用 cancel/close 事件，点外关闭在 dialog 自己的 click 里判断）；'
-             '确需全局监听时，在 Issue 里提出请用户决定，由用户改本检查的规则，不要往基线里添加。'),
-        Rule('dialog-element', '4', '新增了 document.createElement(\'dialog\')',
+             '要新开浮层就向 ui/overlay.js 登记（createLayer / openModal），它是唯一放行的入口；确需别的全局监听时，在 Issue 里提出请用户决定，由用户改本检查的规则，不要往基线里添加。'),
+        Rule('dialog-element', '4', '新增了运行时拼出的 <dialog>（createElement 或字符串里的 <dialog）',
              '运行时拼出的 <dialog> 各自复制同一份外壳（#316）。现有的已冻结为基线，不得新增。',
              '复用 ui/dialog.js 里的 confirmAction / chooseWork；不够用就在 ui/dialog.js 里扩展参数，不要再在别处拼一份 dialog 外壳。'),
         Rule('long-line', '5', f'新增了超过 {MAX_LINE} 字符的行',
@@ -239,15 +245,16 @@ def new_rules():
     ]}
 
 
-LISTENER_RE = re.compile(r'''\b(document|window)\s*\.\s*(?:addEventListener\s*\(\s*(['"`])(keydown|click)\2|on(keydown|click)\s*=(?!=))''')
-DIALOG_RE = re.compile(r'''createElement\s*\(\s*(['"`])dialog\1\s*\)''')
+LISTENER_EVENTS = 'keydown|keyup|click|mousedown|pointerdown'
+LISTENER_RE = re.compile(r'''\b(?:document(?:\s*\.\s*(?:body|documentElement))?|window)\s*\.\s*(?:addEventListener\s*\(\s*(['"`])(%s)\1|on(%s)\s*=(?!=))''' % (LISTENER_EVENTS, LISTENER_EVENTS))
+DIALOG_RE = re.compile(r'''createElement\s*\(\s*(['"`])dialog\1\s*\)|<dialog\b''')
 # 页面名判断：`page === '…'`、`route.page !== '…'`，以及 `[…].includes(route.page)`。
 PAGE_NAME_RE = re.compile(r'''(?:\b(?:route|r)\.page|\bpage)\s*[!=]==\s*['"`]|\.includes\(\s*(?:state\.)?(?:route|r)\.page\s*\)''')
 STATE_RE = re.compile(r'(?<![\w$.])state\s*\.\s*([A-Za-z_$][\w$]*)')
 
 
 def declared_state(sources):
-    """Top-level keys of the `state` object literal in core/state.js."""
+    """core/state.js 里 `state` 对象字面量的顶层字段。"""
     code = sources['core/state.js'].bare
     start = code.index('export const state = {') + len('export const state = ')
     depth, keys = 0, set()
@@ -268,29 +275,31 @@ def run_rules(sources):
     rules = new_rules()
     graph = {p: [t for t, _ in imports(s, sources)] for p, s in sources.items()}
     edges = {(p, t): s.raw_line(line) for p, s in sources.items() for t, line in imports(s, sources)}
-    # 1: core -> ui, hard
+    # 规则 1：core -> ui，硬规则
     for (p, t), text in sorted(edges.items()):
         if p.startswith('core/') and (t.startswith('ui/') or t == 'app.js'):
             rules['import-core-ui'].add(f'{p} -> {t}', f'{STATIC}/{p}: {text}')
-    # 1: edges inside import cycles
+    # 规则 1：环内的导入边
     for comp in strongly_connected({p: [t for t in ts] for p, ts in graph.items()}):
         members = set(comp)
         for (p, t), text in sorted(edges.items()):
             if p in members and t in members:
                 rules['import-cycle'].add(f'{p} -> {t}', f'{STATIC}/{p}: {text}  (in a cycle of {len(members)} files: '
                                           + ', '.join(sorted(members)) + ')')
-    # 2: state fields
+    # 规则 2：state 字段
     declared = declared_state(sources)
     for p, s in sources.items():
         for m in STATE_RE.finditer(s.bare):
             if m.group(1) not in declared:
                 line = s.line_of(m.start())
                 rules['undeclared-state'].add(m.group(1), f'{STATIC}/{p}:{line}: {s.raw_line(line)[:110]}')
-    # 3, 4, 5
+    # 规则 3、4、5
     for p, s in sources.items():
         for m in LISTENER_RE.finditer(s.code):
+            if p in GLOBAL_LISTENER_ALLOWED:
+                continue
             line = s.line_of(m.start())
-            rules['document-listener'].add(f'{p}::{m.group(3) or m.group(4)}', f'{STATIC}/{p}:{line}: {s.raw_line(line)[:110]}')
+            rules['document-listener'].add(f'{p}::{m.group(2) or m.group(3)}', f'{STATIC}/{p}:{line}: {s.raw_line(line)[:110]}')
         for m in DIALOG_RE.finditer(s.code):
             line = s.line_of(m.start())
             rules['dialog-element'].add(p, f'{STATIC}/{p}:{line}: {s.raw_line(line)[:110]}')
@@ -324,7 +333,7 @@ def write_baseline(root, data):
 
 
 def compare(rules, baseline):
-    """Returns (errors, stale): new violations beyond the baseline and baseline entries that no longer occur."""
+    """返回 (errors, stale)：超出基线的新违规，以及基线里已不再出现的项。"""
     errors, stale = [], []
     for rule in rules.values():
         base = baseline.get(rule.id, {}) if rule.baselined else {}
@@ -344,7 +353,7 @@ def compare(rules, baseline):
 
 
 def baseline_growth(current, reference):
-    """Entries in `current` that are absent from or larger than `reference` (the baseline at a base ref)."""
+    """`current` 里比 `reference`（基准 ref 上的基线）多出来或数量更大的项。"""
     grown = []
     for rule, entries in current.items():
         for key, count in entries.items():
@@ -362,7 +371,7 @@ def baseline_at(root, ref):
 
 
 def check(root=ROOT, baseline=None):
-    """Returns (errors, stale). `baseline` overrides the file (used by tests)."""
+    """返回 (errors, stale)。传入 `baseline` 时覆盖基线文件（测试用）。"""
     rules = run_rules(load_sources(root))
     if baseline is None:
         baseline = load_baseline(root)
@@ -374,10 +383,10 @@ def check(root=ROOT, baseline=None):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('--root', type=Path, default=ROOT)
-    parser.add_argument('--init', action='store_true', help='create the baseline from the current tree (only when none exists)')
-    parser.add_argument('--shrink', action='store_true', help='lower/remove baseline entries that no longer occur; never adds')
-    parser.add_argument('--base-ref', metavar='REF', help='fail if the baseline is larger than the one at this git ref')
-    parser.add_argument('--strict-stale', action='store_true', help='treat baseline entries that no longer occur as errors')
+    parser.add_argument('--init', action='store_true', help='按当前文件树建立基线（仅在基线不存在时）')
+    parser.add_argument('--shrink', action='store_true', help='调低或删除已不再出现的基线项；从不新增')
+    parser.add_argument('--base-ref', metavar='REF', help='基线比这个 git ref 上的大时报错')
+    parser.add_argument('--strict-stale', action='store_true', help='把基线里已不再出现的项算作失败')
     args = parser.parse_args(argv)
     root = args.root
     rules = run_rules(load_sources(root))

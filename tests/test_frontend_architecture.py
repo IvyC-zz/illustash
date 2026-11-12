@@ -1,4 +1,4 @@
-"""Synthetic negative cases for tools/check_frontend.py: deliberately break each rule on a copy of web/static."""
+"""tools/check_frontend.py 的合成负例：在 web/static 的副本上故意违反每条规则，确认会报错。"""
 from contextlib import redirect_stdout
 from pathlib import Path
 import io
@@ -11,7 +11,7 @@ from tools.check_frontend import BASELINE, ROOT, STATIC, baseline_growth, check,
 
 
 class Tree(tempfile.TemporaryDirectory):
-    """A scratch copy of the files the check reads, so a case can break one rule at a time."""
+    """检查所读文件的临时副本，每个用例在副本上只违反一条规则。"""
 
     def __enter__(self):
         self.root = Path(super().__enter__())
@@ -46,7 +46,7 @@ class FrontendArchitectureTest(unittest.TestCase):
         errors = tree.errors()
         matching = [e for e in errors if f'· {rule}]' in e and needle in e]
         self.assertTrue(matching, f'expected a {rule} error containing {needle!r}, got {errors}')
-        # every report names the convention and how to fix it
+        # 每条报错都写明违反的约定和改法
         self.assertIn('约定：', matching[0])
         self.assertIn('改法：', matching[0])
         return matching[0]
@@ -71,7 +71,7 @@ class FrontendArchitectureTest(unittest.TestCase):
 
     def test_new_cycle_through_a_leaf_module(self):
         with Tree() as tree:
-            # ui/dom.js is imported by the cycle but imports none of it; importing back closes a new loop.
+            # ui/dom.js 被环里的模块导入，自己不导入其中任何一个；反过来导入就闭合出新的环。
             tree.append('ui/dom.js', "\nimport {renderGrid} from './grid.js';\n")
             self.assertViolation(tree, 'import-cycle', 'ui/dom.js -> ui/grid.js')
 
@@ -128,6 +128,18 @@ class FrontendArchitectureTest(unittest.TestCase):
                 tree.append('ui/artists.js', f"\ndocument.addEventListener('{event}', e => {{}});\n")
                 self.assertViolation(tree, 'document-listener', f'ui/artists.js::{event}')
 
+    def test_the_overlay_manager_is_the_one_allowed_entry(self):
+        # 用户 2026-11-12 在 #343 批准：ui/overlay.js 是全局 keydown / click 监听的唯一入口，别的文件照旧报错。
+        with Tree() as tree:
+            overlay = (tree.root / STATIC / 'ui/overlay.js').read_text(encoding='utf-8')
+            self.assertIn("document.addEventListener('keydown'", overlay)
+            self.assertIn("document.addEventListener('click'", overlay)
+            tree.append('ui/overlay.js', "\ndocument.addEventListener('click', e => {});\nwindow.addEventListener('keydown', e => {});\n")
+            self.assertEqual([e for e in tree.errors() if 'document-listener' in e], [])
+        with Tree() as tree:
+            tree.append('ui/dialog.js', "\ndocument.addEventListener('keydown', e => {});\n")
+            self.assertViolation(tree, 'document-listener', 'ui/dialog.js::keydown')
+
     def test_extra_listener_in_a_file_that_already_has_some(self):
         with Tree() as tree:
             tree.append('ui/settings.js', "\ndocument.addEventListener('click', async e => {});\n")
@@ -141,10 +153,27 @@ class FrontendArchitectureTest(unittest.TestCase):
             tree.append('ui/artists.js', '\ndocument.onclick = () => {};\n')
             self.assertViolation(tree, 'document-listener', 'ui/artists.js::click')
 
+    def test_body_and_more_events_count_too(self):
+        cases = ["document.body.addEventListener('click', e => {});",
+                 "document.documentElement.addEventListener('keydown', e => {});",
+                 "document.addEventListener('pointerdown', e => {});",
+                 "document.addEventListener('mousedown', e => {});",
+                 "document.addEventListener('keyup', e => {});"]
+        for text in cases:
+            with self.subTest(text=text), Tree() as tree:
+                tree.append('ui/artists.js', '\n' + text + '\n')
+                self.assertViolation(tree, 'document-listener', 'ui/artists.js::')
+
+    def test_dialog_markup_in_a_string_counts(self):
+        for text in ("el.innerHTML = '<dialog class=\"x\"></dialog>';", "el.insertAdjacentHTML('beforeend', `<dialog>${x}</dialog>`);"):
+            with self.subTest(text=text), Tree() as tree:
+                tree.append('ui/home.js', '\n' + text + '\n')
+                self.assertViolation(tree, 'dialog-element', 'ui/home.js')
+
     def test_other_events_and_element_listeners_are_fine(self):
         with Tree() as tree:
             tree.append('ui/artists.js', "\ndocument.addEventListener('change', e => {});\n"
-                                         "document.body.addEventListener('click', e => {});\n"
+                                         "document.addEventListener('pointermove', e => {});\n"
                                          "button.addEventListener('keydown', e => {});\n"
                                          "// document.addEventListener('keydown', e => {});\n")
             self.assertEqual(tree.errors(), [])
@@ -154,9 +183,9 @@ class FrontendArchitectureTest(unittest.TestCase):
             tree.append('ui/home.js', "\nconst d = document.createElement('dialog');\n")
             message = self.assertViolation(tree, 'dialog-element', 'ui/home.js')
             self.assertIn('ui/dialog.js', message)
-        with Tree() as tree:  # a file that already has some (palette.js baselines 2)
-            tree.append('ui/palette.js', '\nconst d = document.createElement("dialog");\n')
-            self.assertViolation(tree, 'dialog-element', 'ui/palette.js')
+        with Tree() as tree:  # 基线里已经登记了存量的文件（ui/dialog.js 登记 1 处，openDialog 内的那一处）
+            tree.append('ui/dialog.js', '\nconst d = document.createElement("dialog");\n')
+            self.assertViolation(tree, 'dialog-element', 'ui/dialog.js')
 
     def test_new_page_name_comparison(self):
         # 页面名判断只能写在 core/pages.js 的注册表里；新增比较要报错，改写成读注册表字段
@@ -187,34 +216,35 @@ class FrontendArchitectureTest(unittest.TestCase):
 
     def test_baseline_is_not_keyed_by_line_number(self):
         with Tree() as tree:
-            # shifting every line of a file by prepending unrelated lines changes nothing
+            # 在文件开头插入无关行、让所有行号后移，检查结果不变
             path = tree.root / STATIC / 'ui/settings.js'
             path.write_text('// one\n// two\n// three\n' + path.read_text(encoding='utf-8'), encoding='utf-8')
             self.assertEqual(tree.errors(), [])
 
     def test_fixed_violation_is_reported_as_stale_not_failure(self):
         with Tree() as tree:
-            path = tree.root / STATIC / 'ui/palette.js'
+            # 改掉基线里仍登记着的违规（ui/dialog.js 的那一处），应报「过期」而不是失败
+            path = tree.root / STATIC / 'ui/dialog.js'
             path.write_text(path.read_text(encoding='utf-8').replace("document.createElement('dialog')", "document.createElement('div')"),
                             encoding='utf-8')
             errors, stale = check(tree.root)
             self.assertEqual(errors, [])
-            self.assertTrue(any('dialog-element' in line and 'ui/palette.js' in line for line in stale))
+            self.assertTrue(any('dialog-element' in line and 'ui/dialog.js' in line for line in stale))
             code, output = tree.run_main('--strict-stale')
             self.assertEqual(code, 1)
             self.assertIn('--shrink', output)
 
     def test_shrink_lowers_but_never_adds(self):
         with Tree() as tree:
-            palette = tree.root / STATIC / 'ui/palette.js'
-            palette.write_text(palette.read_text(encoding='utf-8').replace("document.createElement('dialog')", "document.createElement('div')"),
-                               encoding='utf-8')
-            tree.append('ui/home.js', "\nconst d = document.createElement('dialog');\n")  # a new violation
+            fixed = tree.root / STATIC / 'ui/dialog.js'
+            fixed.write_text(fixed.read_text(encoding='utf-8').replace("document.createElement('dialog')", "document.createElement('div')"),
+                             encoding='utf-8')
+            tree.append('ui/home.js', "\nconst d = document.createElement('dialog');\n")  # 一处新违规
             before = tree.baseline()
             code, _ = tree.run_main('--shrink')
             after = tree.baseline()
             self.assertEqual(code, 1, 'the new violation still fails after shrinking')
-            self.assertNotIn('ui/palette.js', after['dialog-element'])
+            self.assertNotIn('ui/dialog.js', after['dialog-element'])
             self.assertNotIn('ui/home.js', after['dialog-element'])
             self.assertEqual(baseline_growth(after, before), [])
 
@@ -236,7 +266,7 @@ class FrontendArchitectureTest(unittest.TestCase):
             git('commit', '-q', '-m', 'baseline')
             code, _ = tree.run_main('--base-ref', 'HEAD')
             self.assertEqual(code, 0)
-            # "make the new violation pass" by writing it into the baseline
+            # 把新违规写进基线来“让它通过”
             tree.append('ui/home.js', "\nconst d = document.createElement('dialog');\n")
             grown = tree.baseline()
             grown['dialog-element']['ui/home.js'] = 1
@@ -245,6 +275,15 @@ class FrontendArchitectureTest(unittest.TestCase):
             code, output = tree.run_main('--base-ref', 'HEAD')
             self.assertEqual(code, 1)
             self.assertIn('基线变大', output)
+
+    def test_local_and_ci_runs_are_strict(self):
+        # 本地全量与 ci.yml 保持一致：都带 --strict-stale；本地另带 --base-ref。
+        script = (ROOT / 'tools/check_all.sh').read_text(encoding='utf-8')
+        workflow = (ROOT / '.github/workflows/ci.yml').read_text(encoding='utf-8')
+        line = next(l for l in script.splitlines() if 'tools/check_frontend.py' in l and l.startswith('run '))
+        self.assertIn('--strict-stale', line)
+        self.assertIn('--base-ref', line)
+        self.assertIn('check_frontend.py --strict-stale', workflow)
 
     def test_missing_baseline_is_an_error(self):
         with Tree() as tree:

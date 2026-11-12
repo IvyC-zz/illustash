@@ -16,6 +16,7 @@ import {renderChrome, renderHeading} from './shell.js';
 import {findArtists} from './artists.js';
 import {answerAsk, closeInspector, closeViewer, ensureVisible, indexOf, inspect, openViewer, pickAlternative, showViewer, singleAction, step, zoomView} from './detail.js';
 import {jumpToCharacter, markOc, newIds, openPicker, openRelate, targets} from './palette.js';
+import {createLayer} from './overlay.js';
 
 // ---------- 加载图片 ----------
 // 缩放是一个连续的目标列宽；网格对齐到整列，并在两者之间做动画。
@@ -587,9 +588,11 @@ function afterViewChange(relayout) {
   applyViewClasses();
   if (relayout && !pageOf(state.route).panel) { layout(); renderGrid(true); }
 }
-function toggleViewPop(open = $('viewPopover').hidden) {
+// 视图选项是非模态浮层：Esc、点外关闭由浮层管理器（ui/overlay.js）统一处理。
+const viewLayer = createLayer({kind: 'popover', id: 'view-options', el: () => $('viewPopover'), anchor: () => $('viewButton'), onDismiss: reason => toggleViewPop(false, reason)});
+function toggleViewPop(open = $('viewPopover').hidden, reason) {
   $('viewPopover').hidden = !open; $('viewButton').classList.toggle('on', open); $('viewButton').setAttribute('aria-expanded', open);
-  if (open) renderViewPop();
+  if (open) { renderViewPop(); viewLayer.open(); } else viewLayer.close(reason);
 }
 // ---------- NSFW 筛选 ----------
 // 一次点击在 显示 → 隐藏 → 仅 NSFW 之间循环；H 切换隐藏。NSFW = WD 评级 questionable/explicit。
@@ -673,7 +676,8 @@ export function wireGrid() {
     if (e.target.closest('input,textarea,select,[contenteditable]')) { if (e.key === 'Escape') e.target.blur(); return; }
     if (mod && key === 'z') { e.preventDefault(); undo(); return; }
     if (mod && key === 'a' && !$('grid').hidden) { e.preventDefault(); selectAll(); return; }
-    if (e.key === 'Escape') { if (state.viewer >= 0) closeViewer(); else if (state.focused) closeInspector(); else { state.selecting = false; clearSelection(); } return; }
+    // 浮层（含大图）的 Esc 已由浮层管理器处理；走到这里说明栈是空的，接着关详情栏、取消选择。
+    if (e.key === 'Escape') { if (state.focused) closeInspector(); else { state.selecting = false; clearSelection(); } return; }
     if (key === 'r' && !mod && !pageOf(state.route).panel) { e.preventDefault(); toggleFit(); return; }
     if (key === 'h' && !mod) { e.preventDefault(); setNsfw(state.nsfw === 'hide' ? '' : 'hide'); return; }
     if (e.key === '/' && $('search')) { e.preventDefault(); $('search').focus(); return; }
@@ -717,8 +721,6 @@ export function wireGrid() {
     if (['hero', 'people', 'marks'].includes(key)) pageOf(state.route).refresh?.('view');
     if (key === 'ask') { if (state.focused && !$('inspector').hidden) inspect(state.focused, true); pageOf(state.route).refresh?.('ask'); }
   });
-  document.addEventListener('click', () => { if (!$('viewPopover').hidden) toggleViewPop(false); });
-  document.addEventListener('keydown', e => { if (e.key === 'Escape' && !$('viewPopover').hidden) { toggleViewPop(false); e.stopImmediatePropagation(); } }, true);
   applyViewClasses();
 
   $('nsfwButton').onclick = () => setNsfw({'': 'hide', hide: 'only', only: ''}[state.nsfw]);

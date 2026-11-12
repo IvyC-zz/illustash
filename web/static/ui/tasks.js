@@ -9,6 +9,7 @@ import {SYNC_ACTIVE, INDEX_ACTIVE, NAMES_ACTIVE, SIMILAR_ACTIVE, PROV_ACTIVE, RU
 import {loadLibraries, updatesTick} from '../core/settings.js';
 import {$, toast, error, fold, wireFolds} from './dom.js';
 import {confirmAction} from './dialog.js';
+import {createLayer} from './overlay.js';
 import {openIndexAdd} from './catalog.js';
 import {modelsLine, modelsBar, modelsActions} from './models.js';
 import {loadModels, onModels} from '../core/models.js';
@@ -122,11 +123,13 @@ export async function taskTick() {
   updatesTick();
   taskPanel.timer = setTimeout(taskTick, taskPanel.open ? 3000 : 30000);
 }
-export function toggleTasks(open = !taskPanel.open) {
+// 任务面板是非模态浮层：Esc、点外关闭由浮层管理器（ui/overlay.js）统一处理；它上面再开对话框时，对话框先关。
+const taskLayer = createLayer({kind: 'popover', id: 'tasks', el: () => $('taskPanel'), anchor: () => $('taskButton'), onDismiss: reason => toggleTasks(false, reason)});
+export function toggleTasks(open = !taskPanel.open, reason) {
   taskPanel.open = open; $('taskPanel').hidden = !open;
   $('taskButton').setAttribute('aria-expanded', open); $('taskButton').classList.toggle('on', open);
-  if (open) { delete $('taskPanel').dataset.html; renderTasks(); taskTick(); }
-  else provenanceArmed = false;
+  if (open) { taskLayer.open(); delete $('taskPanel').dataset.html; renderTasks(); taskTick(); }
+  else { provenanceArmed = false; taskLayer.close(reason); }
 }
 // 面板的处理函数。页面启动时调用一次。
 export function wireTasks() {
@@ -165,6 +168,4 @@ export function wireTasks() {
     } catch (err) { toast(err.message); } finally { b.disabled = false; }
     taskTick();
   });
-  document.addEventListener('click', e => { if (taskPanel.open && !e.target.closest('#taskPanel, dialog')) toggleTasks(false); });
-  document.addEventListener('keydown', e => { if (e.key === 'Escape' && taskPanel.open && !document.querySelector('dialog[open]')) { toggleTasks(false); e.stopImmediatePropagation(); } }, true);
 }
