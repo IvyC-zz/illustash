@@ -10,6 +10,7 @@ import {state} from '../core/state.js';
 import {$, toast} from './dom.js';
 import {openRelease} from './settings.js';
 import {taskList} from './tasks.js';
+import {createLayer} from './overlay.js';
 import {modelsNotice} from './models.js';
 import {modelsWaiting, modelsFinished, onModels} from '../core/models.js';
 
@@ -109,13 +110,15 @@ export function tourStop(id) {
     end: {title: t('就这些'), text: t('右下角的「上手」清单会跟着你做过的事打勾，全做完就自己消失。以后想再看一遍，在「设置 › 关于」里。'), next: t('开始用吧')},
   }[id];
 }
+// 导览是盖满页面的层：Esc 等同"跳过"，由浮层管理器（ui/overlay.js）统一处理。
+const tourLayer = createLayer({kind: 'overlay', id: 'tour', el: () => $('tour'), onDismiss: () => { closeTour(); guideAction({action: 'skip'}); }});
 function showTour(at) {
   tourAt = at; drawNudge(); drawChecklist();
-  const root = $('tour'); root.hidden = false; requestAnimationFrame(() => root.classList.add('on'));
+  const root = $('tour'); root.hidden = false; tourLayer.open(); requestAnimationFrame(() => root.classList.add('on'));
   placeTour(true);
 }
 function closeTour() {
-  tourAt = -1; const root = $('tour'); root.classList.remove('on');
+  tourAt = -1; tourLayer.close(); const root = $('tour'); root.classList.remove('on');
   setTimeout(() => { if (tourAt < 0) root.hidden = true; }, 260);
   drawGuide();
 }
@@ -254,7 +257,6 @@ export function wireGuide() {
     placeTour(true); guideAction({action: 'step', step: TOUR[tourAt]});
   });
   addEventListener('resize', () => { if (tourAt >= 0) requestAnimationFrame(() => placeTour(false)); });
-  document.addEventListener('keydown', e => { if (tourAt >= 0 && e.key === 'Escape') { e.stopImmediatePropagation(); closeTour(); guideAction({action: 'skip'}); } }, true);
 
   $('nudge').addEventListener('click', async e => {
     const act = e.target.closest('[data-nudge]')?.dataset.nudge, key = $('nudge').dataset.key; if (!act || !key) return;

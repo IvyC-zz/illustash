@@ -14,6 +14,7 @@ import {state} from '../core/state.js';
 import {refreshLocalLinks} from './catalog.js';
 import {$, toast} from './dom.js';
 import {openDialog} from './dialog.js';
+import {createLayer, openModal} from './overlay.js';
 import {mutate, reload} from './grid.js';
 import {namesAllowButton} from './settings.js';
 import {renderHeading} from './shell.js';
@@ -31,7 +32,7 @@ export async function openPicker(opts) {
   palette = {...opts, list: [], index: 0, generation: 0, staged: []};
   renderStaged();
   $('pickerSearch').value = ''; $('pickerSearch').placeholder = opts.placeholder || t('输入角色 tag 或别名…');
-  $('picker').showModal(); $('pickerSearch').focus();
+  openModal($('picker'), {backdropClose: true, id: 'picker'}); $('pickerSearch').focus();
   await paletteSearch();
 }
 async function paletteSearch() {
@@ -174,7 +175,7 @@ export async function splitOc(c) {
   const d = $('ocSplitDialog'), body = $('ocSplitBody');
   $('ocSplitTitle').textContent = t('按相似细分 · {name}', {name: c.name});
   body.innerHTML = `<p class="muted-note">${t('正在比较长相…只在本机计算')}</p>`;
-  d.showModal();
+  openModal(d, {backdropClose: true, id: 'oc-split'});
   let r; try { r = await api('/api/oc/groups?' + new URLSearchParams({entity: c.id})); } catch (e) { body.innerHTML = `<p class="muted-note">${esc(readError(e))}</p>`; return; }
   const grouped = r.groups.reduce((n, g) => n + g.length, 0);
   body.innerHTML = `<p class="muted-note">${t('{n} 张里有 {groups} 组长得像（共 {grouped} 张）；其余的不像任何一张，留在这里。', {n: number(r.total), groups: number(r.groups.length), grouped: number(grouped)})}</p>` +
@@ -188,25 +189,27 @@ export async function splitOc(c) {
 }
 // ---------- 角色资料（编辑资料） ----------
 // 带结果菜单的搜索框：`search(q)` 解析为若干部分 [{label, items, note}]，`pick(item)` 取其中一项。
+// 菜单是非模态浮层，叠在输入框所在的对话框或页面上面：Esc 只关菜单（由浮层管理器 ui/overlay.js 处理），再按一次才轮到下面那层。
 export function combo(input, menu, search, pick) {
   let list = [], index = 0, gen = 0, timer = 0;
+  const layer = createLayer({kind: 'popover', id: 'combo', el: menu, anchor: input, onDismiss: reason => show(false, reason)});
+  const show = (on, reason) => { menu.hidden = !on; if (on) layer.open(); else layer.close(reason); };
   const render = sections => {
     list = sections.flatMap(x => x.items); index = Math.min(index, Math.max(0, list.length - 1));
     let i = 0;
     menu.innerHTML = sections.filter(x => x.items.length || x.note).map(x => (x.label ? `<div class="palette-label">${esc(x.label)}</div>` : '') + (x.note ? `<p class="palette-note">${esc(x.note)}${x.allow ? ' ' + namesAllowButton : ''}</p>` : '') +
       x.items.map(r => `<button type="button" class="menu-item watch-option${i === index ? ' on' : ''}" data-i="${i++}"><span class="watch-name">${esc(r.label)}</span><small>${esc(r.detail || '')}</small><em>${esc(r.extra || '')}</em></button>`).join('')).join('');
-    menu.hidden = !menu.innerHTML;
+    show(!!menu.innerHTML);
   };
   const run = () => { const g = ++gen; clearTimeout(timer); timer = setTimeout(() => search(input.value.trim(), sections => { if (g === gen) render(sections); }), 160); };
-  const choose = i => { const r = list[i]; if (!r) return; menu.hidden = true; pick(r); };
+  const choose = i => { const r = list[i]; if (!r) return; show(false); pick(r); };
   input.addEventListener('input', () => { index = 0; run(); });
   input.addEventListener('focus', run);
-  input.addEventListener('blur', () => setTimeout(() => { menu.hidden = true; }, 150));
+  input.addEventListener('blur', () => setTimeout(() => show(false, 'outside'), 150));
   input.addEventListener('keydown', e => {
     if (menu.hidden || !list.length) return;
     if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); index = (index + (e.key === 'ArrowDown' ? 1 : list.length - 1)) % list.length; for (const b of menu.querySelectorAll('[data-i]')) b.classList.toggle('on', Number(b.dataset.i) === index); }
     else if (e.key === 'Enter') { e.preventDefault(); choose(index); }
-    else if (e.key === 'Escape') { e.stopPropagation(); menu.hidden = true; }
   });
   menu.addEventListener('mousedown', e => { const b = e.target.closest('[data-i]'); if (b) { e.preventDefault(); choose(Number(b.dataset.i)); } });
 }
@@ -287,7 +290,7 @@ export async function openLocalLinks() {
     ${merges.length ? `<p class="muted-note">${t('下面的自建角色和图库里已有的角色像是同一个，合并后图和人工结论都会过去（可撤销）：')}</p>
       <div class="link-list">${merges.map(x => `<div class="link-row"><span><b>${esc(x.name)}${x.guess ? ` <i class="guess">${t('可能是')}</i>` : ''}</b><small>${t('{n} 张', {n: number(x.count)})} → ${esc(x.target.name)} · ${esc(x.tag)}</small></span><button type="button" class="quiet" data-merge="${esc(x.id)}">${t('合并到「{name}」', {name: esc(x.target.name)})}</button></div>`).join('')}</div>` : ''}
 `;
-  const d = openDialog({title: t('关联自建角色'), body,
+  const d = openDialog({title: t('关联自建角色'), backdropClose: false, body,
     actions: `<button type="button" class="quiet" data-close>${t('关闭')}</button>${links.length ? '<button class="primary" id="llApply"></button>' : ''}`});
   const close = () => d.close();
   const count = () => { const n = d.querySelectorAll('[data-link]:checked').length; if ($('llApply')) { $('llApply').textContent = t('关联选中的 {n} 个', {n: number(n)}); $('llApply').disabled = !n; } };
@@ -326,7 +329,7 @@ export async function openRelate(ids) {
   const d = $('relateDialog');
   $('relateTitle').textContent = t('{n} 张图的关系', {n: number(ids.length)});
   $('relateBody').innerHTML = `<p class="muted-note">${t('正在逐对比较…只在本机计算')}</p>`;
-  d.showModal();
+  openModal(d, {backdropClose: true, id: 'relate'});
   let r; try { r = await post('/api/relate', {ids}); } catch (e) { $('relateBody').innerHTML = `<p class="muted-note">${esc(readError(e))}</p>`; return; }
   const no = u => ids.indexOf(u) + 1;
   const figure = (u, boxes) => `<figure class="rel-fig"><div class="rel-img"><img src="/image?id=${encodeURIComponent(u)}&size=medium" alt="">${boxes.map(b =>

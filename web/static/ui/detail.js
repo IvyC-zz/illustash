@@ -11,6 +11,7 @@ import {PAGE, currentItem, kept, loadPage, mutate, openTagPicker, renderGrid, ro
 import {newIds, openPicker, stage, targets} from './palette.js';
 import {artistSection, findArtistWorks, findArtists} from './artists.js';
 import {markHomeFocus} from './home.js';
+import {createLayer} from './overlay.js';
 
 // 哪一次检查面板读取是当前的：更慢、更早的那次绝不会画到它上面。
 let detailGen = 0;
@@ -203,8 +204,10 @@ export function ensureVisible(i) {
 
 // ---------- 全屏查看器 ----------
 const view = {scale: 1, x: 0, y: 0, fit: 1};
-export function openViewer(i) { if (i < 0 || !state.items[i]) return; state.viewer = i; $('viewer').hidden = false; document.body.classList.add('viewing'); showViewer(i); }
-export function closeViewer() { if (state.viewer < 0) return; kept.hold = null; state.viewerItem = null; state.cursor = state.viewer; $('viewer').hidden = true; document.body.classList.remove('viewing'); state.viewer = -1; ensureVisible(state.cursor); }
+// 大图是盖满页面的层：Esc 关它（焦点在层外的输入框里时让位给输入框失焦），关闭时焦点还给打开它的地方。
+const viewerLayer = createLayer({kind: 'overlay', id: 'viewer', el: () => $('viewer'), yieldToInput: true, onDismiss: reason => closeViewer(reason)});
+export function openViewer(i) { if (i < 0 || !state.items[i]) return; state.viewer = i; $('viewer').hidden = false; viewerLayer.open(); document.body.classList.add('viewing'); showViewer(i); }
+export function closeViewer(reason) { viewerLayer.close(reason); if (state.viewer < 0) return; kept.hold = null; state.viewerItem = null; state.cursor = state.viewer; $('viewer').hidden = true; document.body.classList.remove('viewing'); state.viewer = -1; ensureVisible(state.cursor); }
 export async function showViewer(i, held = null) {
   if (i < 0 && !held) { closeViewer(); return; }
   if (!held && !state.items[i]) await loadPage(Math.floor(i / PAGE) * PAGE);
@@ -255,5 +258,5 @@ export function wireDetail() {
   $('viewerStage').addEventListener('pointermove', e => { if (pan) { view.x = e.clientX - pan.x; view.y = e.clientY - pan.y; applyView(); } });
   $('viewerStage').addEventListener('pointerup', () => { pan = null; });
   $('viewerStage').addEventListener('click', e => { if (e.target === $('viewerStage') && view.scale <= 1) closeViewer(); });
-  $('viewerClose').onclick = closeViewer; $('viewerPrev').onclick = () => step(-1); $('viewerNext').onclick = () => step(1);
+  $('viewerClose').onclick = () => closeViewer(); $('viewerPrev').onclick = () => step(-1); $('viewerNext').onclick = () => step(1);
 }

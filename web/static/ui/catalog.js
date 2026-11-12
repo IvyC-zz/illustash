@@ -12,6 +12,7 @@ import {catalog, recentOf, loadActivity as readActivity, searchCharacters, loadT
   WORK_NAMES, workName, loadIndex, searchWorks, shelfRows, saveWatch, watchTarget, saveWork} from '../core/catalog.js';
 import {$, toast, toastMore, error, readFailure, wireFolds, reconcileSections, searchIcon} from './dom.js';
 import {chooseWork, openDialog} from './dialog.js';
+import {createLayer, openModal} from './overlay.js';
 import {combo, openPicker, toggleMascot} from './palette.js';
 import {namesAllowButton} from './settings.js';
 import {charHash, charRoute, go} from '../core/route.js';
@@ -28,7 +29,7 @@ export async function renderIndex() {
   if (state.route.section === 'works') { renderShelf(); return; }
   drawn.clear();
   $('hint').textContent = t('点角色，在图库里只看 TA');
-  cast.list = null; cast.pop = false;
+  cast.list = null; setPop(false, 'silent', false);
   if (state.chars.some(c => c.summary)) {
     try { await refreshMeta(); } catch (e) { error(e.message); return; }
     if (state.route.page !== 'characters') return;
@@ -207,6 +208,14 @@ function castTabs(works) {
   return `<div class="cast-tabs"><div class="cast-tabrow">${tab('all', t('总览'))}${[...(current ? [current] : []), ...top].map(w => tab(w.key, w.name, number(w.images), avatar(w.chars[0], 24))).join('')}${works.filter(w => w.pseudo).map(w => tab(w.key, w.name, number(w.images), '', PSEUDO_NOTES[w.key])).join('')}</div>
     <button class="cast-allw${cast.pop ? ' on' : ''}" id="castAll" aria-expanded="${cast.pop}">${t('全部作品 {n}', {n: number(works.filter(w => !w.pseudo).length)})}<svg viewBox="0 0 20 20" aria-hidden="true"><path d="m6 8 4 4 4-4"/></svg></button>${cast.pop ? castPop(works) : ''}</div>`;
 }
+// "全部作品"是非模态浮层：Esc、点外关闭由浮层管理器（ui/overlay.js）统一处理。它的元素每次 drawCast 都重画，所以层按 id 找。
+const popLayer = createLayer({kind: 'popover', id: 'cast-works', el: () => $('castPop'), anchor: () => $('castAll'), onDismiss: reason => setPop(false, reason)});
+function setPop(on, reason, redraw = true) {
+  cast.pop = on;
+  if (on) popLayer.open();
+  if (redraw) drawCast();
+  if (!on) popLayer.close(reason);
+}
 function castPop(works) {
   const q = cast.popQ.trim().toLowerCase(), list = works.filter(w => !q || w.name.toLowerCase().includes(q));
   return `<div class="menu cast-pop" id="castPop"><div class="search-wrap">${searchIcon()}<input type="search" id="castPopQ" placeholder="${t('在 {n} 部作品里找', {n: number(works.filter(w => !w.pseudo).length)})}" value="${esc(cast.popQ)}" autocomplete="off"></div>
@@ -259,7 +268,7 @@ export function drawCast() {
 // 只当标签（#293）：吉祥物和玩家替身（包括默认的那些）是标签，不是角色。在一处看到全部，把一个角色变成标签，或把它
 // 变回来。
 export async function openTagged() {
-  const d = openDialog({title: t('只当标签的角色'), cls: 'tagged-dialog',
+  const d = openDialog({title: t('只当标签的角色'), cls: 'tagged-dialog', backdropClose: true,
     body: `<p class="muted-note">${t('吉祥物、玩家化身（老师、博士、训练员这类）可以只当标签：不算角色，不出现在角色列表里，同框也不算多人图；图上仍挂着这个标签，可以按它筛选。')}</p>
     <div class="tagged-list" id="taggedList"></div>`,
     actions: `<button type="button" class="quiet" id="taggedAdd">${t('把一个角色设为只当标签…')}</button><div class="spacer"></div><button value="ok" class="primary">${t('完成')}</button>`});
@@ -277,7 +286,7 @@ export async function openTagged() {
   });
   d.querySelector('#taggedAdd').onclick = () => openPicker({title: t('把一个角色设为只当标签'), jump: true, exclude: (state.tagged || []).map(x => x.id),
     sentence: e => t('{name} 不再算角色，只当标签', {name: e.name}),
-    pick: async e => { await toggleMascot({id: e.id, name: e.name, mascot: false}); await refresh(); if (!d.open) d.showModal(); }});
+    pick: async e => { await toggleMascot({id: e.id, name: e.name, mascot: false}); await refresh(); if (!d.open) openModal(d, {backdropClose: true, id: 'tagged'}); }});
   list();
   refresh();
 }
@@ -432,7 +441,7 @@ export function openIndexAdd(tag = '') {
   const body = `<p class="muted-note">${t('这些角色在 Danbooru 上有、本地索引还没有。添加时每个角色下载约 20 张公开参考图（约 {mb} MB），在本机算好特征后重新扫描图库。点 tag 可以先去 Danbooru 看看。', {mb: x.mb_per_character})}</p>
     <div class="index-add-list"><table class="settings-table index-table"><tr><th><input type="checkbox" id="iaAll" aria-label="${t('全选')}" checked></th><th>${t('角色 tag')}</th><th>${t('作品')}</th><th>${t('D 站图数')}</th></tr>
       ${list.map(r => `<tr><td><input type="checkbox" data-pick="${esc(r.short_tag)}" ${indexSkip.has(r.short_tag) ? '' : 'checked'}></td><td><a class="link" href="https://danbooru.donmai.us/posts?tags=${encodeURIComponent(r.tag)}" target="_blank" rel="noreferrer noopener">${esc(r.tag)}</a></td><td>${esc(x.works.find(w => w.tag === r.copyright)?.name || workName(r.copyright))}</td><td>${number(r.post_count)}</td></tr>`).join('')}</table></div>`;
-  const d = openDialog({title: t('添加新角色'), cls: 'index-add', body,
+  const d = openDialog({title: t('添加新角色'), cls: 'index-add', backdropClose: false, body,
     actions: `<span class="muted-note" id="iaNote"></span><div class="spacer"></div><button value="cancel" class="quiet">${t('取消')}</button><button value="ok" class="primary" id="iaApply"></button>`,
     onClose: async d => {
       const tags = picks().filter(b => b.checked).map(b => b.dataset.pick), ok = d.returnValue === 'ok';
@@ -459,6 +468,9 @@ let indexSkip = new Set(), watchDraft = '';
 export function wireWatchAdd(x, add) {
   const token = session.token, input = $('watchAdd'), menu = $('watchMenu'), watched = new Set(x.watch.works);
   let list = [], index = 0, gen = 0, localTimer = 0, remoteTimer = 0;
+  // 联想菜单是非模态浮层：Esc 只关菜单（由浮层管理器 ui/overlay.js 处理）。
+  const layer = createLayer({kind: 'popover', id: 'watch-menu', el: menu, anchor: input, onDismiss: reason => { show(false, reason); input.setAttribute('aria-expanded', 'false'); }});
+  const show = (on, reason) => { menu.hidden = !on; if (on) layer.open(); else layer.close(reason); };
   const row = (r, i) => `<button class="menu-item watch-option${i === index ? ' on' : ''}" data-i="${i}" role="option" ${watched.has(r.id) || (r.id && !r.watchable) ? 'disabled' : ''}>
     <span class="watch-name">${esc(r.name || workName(r.tag))}</span><small>${esc(r.tag || t('D 站上还没有这个作品'))}</small>
     <em>${watched.has(r.id) ? t('已关注') : [r.count ? t('你有 {n} 张', {n: number(r.count)}) : '', r.posts ? t('D 站 {n}', {n: number(r.posts)}) : ''].filter(Boolean).join(' · ')}</em></button>`;
@@ -466,7 +478,7 @@ export function wireWatchAdd(x, add) {
     list = sections.flatMap(sec => sec.items); index = Math.max(0, list.findIndex(r => !watched.has(r.id)));
     let i = 0;
     menu.innerHTML = sections.filter(sec => sec.items.length).map(sec => `<div class="palette-label">${sec.label}</div>` + sec.items.map(r => row(r, i++)).join('')).join('') + (note ? `<p class="muted-note watch-note">${note}</p>` : '');
-    menu.hidden = !menu.innerHTML; input.setAttribute('aria-expanded', String(!menu.hidden));
+    show(!!menu.innerHTML); input.setAttribute('aria-expanded', String(!menu.hidden));
   };
   const highlight = () => { for (const b of menu.querySelectorAll('[data-i]')) b.classList.toggle('on', Number(b.dataset.i) === index); menu.querySelector('.on')?.scrollIntoView({block: 'nearest'}); };
   const search = async () => {
@@ -488,14 +500,13 @@ export function wireWatchAdd(x, add) {
         remote === null ? (result.unauthorized ? esc(remoteNote(result)) + ' ' + namesAllowButton : esc(t('{reason}，可以稍后再试', {reason: remoteNote(result)}))) : !mine.length && !others.length ? t('没有找到这个作品。可以换个写法，比如英文或日文名') : '');
     }, 450);
   };
-  const pick = i => { const r = list[i]; if (!r || watched.has(r.id) || (r.id && !r.watchable)) return; menu.hidden = true; add(r); };
+  const pick = i => { const r = list[i]; if (!r || watched.has(r.id) || (r.id && !r.watchable)) return; show(false); add(r); };
   input.onfocus = () => { clearTimeout(localTimer); search(); };
   input.oninput = e => { watchDraft = e.target.value; clearTimeout(localTimer); localTimer = setTimeout(search, 150); };
-  input.onblur = () => setTimeout(() => { menu.hidden = true; input.setAttribute('aria-expanded', 'false'); }, 150);
+  input.onblur = () => setTimeout(() => { show(false, 'outside'); input.setAttribute('aria-expanded', 'false'); }, 150);
   input.onkeydown = e => {
     if (e.isComposing) return;
     if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); if (list.length) { index = (index + (e.key === 'ArrowDown' ? 1 : -1) + list.length) % list.length; highlight(); } }
-    else if (e.key === 'Escape') { menu.hidden = true; }
     else if (e.key === 'Enter') {
       e.preventDefault();
       if (!menu.hidden && list[index] && !watched.has(list[index].id)) pick(index);
@@ -522,9 +533,8 @@ export function wireCatalog() {
     const hit = e.target;
     if (hit.closest('[data-tagged-manage]')) { openTagged(); return; }
     const tab = hit.closest('[data-tab]');
-    if (tab) { cast.tab = tab.dataset.tab; cast.pop = false; cast.popQ = ''; drawCast(); $('viewport').scrollTop = 0; $('charIndex').querySelector('.cast-tab.on')?.scrollIntoView({inline: 'center', block: 'nearest'}); return; }
-    if (hit.closest('#castAll')) { cast.pop = !cast.pop; drawCast(); return; }
-    if (cast.pop && !hit.closest('#castPop')) { cast.pop = false; drawCast(); return; }
+    if (tab) { cast.tab = tab.dataset.tab; cast.popQ = ''; setPop(false, 'silent', false); drawCast(); $('viewport').scrollTop = 0; $('charIndex').querySelector('.cast-tab.on')?.scrollIntoView({inline: 'center', block: 'nearest'}); return; }
+    if (hit.closest('#castAll')) { setPop(!cast.pop); return; }
     const lib = hit.closest('[data-work-lib]'); if (lib) { go({page: 'library', work: lib.dataset.workLib}); return; }
     const s = hit.closest('[data-sort]');
     if (s) { const k = s.dataset.sort; cast.dir = cast.sort === k ? -cast.dir : (k === 'name' || k === 'work' ? 1 : -1); cast.sort = k; drawCast(); return; }
@@ -533,7 +543,6 @@ export function wireCatalog() {
     const row = hit.closest('tr[data-char]'); if (row) go(charRoute(row.dataset.char));
   });
   $('charIndex').addEventListener('input', e => { if (e.target.id === 'castPopQ') { cast.popQ = e.target.value; const pos = e.target.selectionStart; drawCast(); const i = $('castPopQ'); i?.setSelectionRange(pos, pos); } });
-  document.addEventListener('keydown', e => { if (e.key === 'Escape' && cast.pop && state.route.page === 'characters') { cast.pop = false; drawCast(); } });
   $('charIndex').addEventListener('click', async e => {
     if (state.route.page !== 'characters') return;
     const hit = e.target, works = state.index?.works || [];

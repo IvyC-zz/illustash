@@ -12,7 +12,8 @@ import {setLatest} from './core/edits.js';
 import {onJob} from './core/jobs.js';
 import {$, platformHints, toast, wireToast, error, wireDom} from './ui/dom.js';
 import {wireTasks, taskTick} from './ui/tasks.js';
-import {confirmAction, isBackdropClick} from './ui/dialog.js';
+import {confirmAction} from './ui/dialog.js';
+import {openModal, wireOverlays} from './ui/overlay.js';
 import {wireSettings} from './ui/settings.js';
 import {wireCatalog} from './ui/catalog.js';
 import {refreshMeta} from './core/meta.js';
@@ -33,7 +34,8 @@ wireDom();
 onPost(afterWrite);
 onJob(afterJob);
 wireToast(() => undo());
-// 按页面原来注册它们的顺序：同一事件的处理函数按这个顺序运行（向导的 Escape 排最后）。
+// 浮层管理器的 Esc / 点外监听要排在最前（捕获阶段先于页面其余处理）；其余按页面原来注册它们的顺序。
+wireOverlays();
 wireShell();
 wireGrid();
 wirePalette();
@@ -46,9 +48,8 @@ wireTasks();
 wireGuide();
 wireIntegrity();
 wireModels();
-$('undoButton').onclick = undo; $('helpButton').onclick = () => $('help').showModal();
+$('undoButton').onclick = undo; $('helpButton').onclick = () => openModal($('help'), {backdropClose: true, id: 'help'});
 $('sidebarToggle').onclick = () => { if (innerWidth <= 760) $('sidebar').classList.toggle('mobile-open'); else $('sidebar').hidden = !$('sidebar').hidden; requestAnimationFrame(() => renderGrid()); };
-for (const dialog of document.querySelectorAll('dialog')) dialog.addEventListener('click', e => { if (isBackdropClick(dialog, e)) dialog.close(); });
 
 // 启动：本会话的 token 和撤销步骤、各项计数，然后是地址指向的页面。
 (async () => {
