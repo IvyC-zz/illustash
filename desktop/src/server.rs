@@ -577,7 +577,7 @@ fn run(app: &AppHandle, main: &WebviewWindow, library: Option<PathBuf>, start: S
                 return;
             }
         }
-        let code = match &status { Ok(Some(s)) => s.code(), Err(e) => e.raw_os_error(), _ => None };
+        let code = match &status { Ok(Some(s)) => exit_code(s), Err(e) => e.raw_os_error(), _ => None };
         let why = match status {
             Ok(Some(s)) => {
                 tr_with("本地服务已退出（{status}）；可复制诊断信息，重试或选择其他图库", &[("status", &s)])
@@ -590,9 +590,28 @@ fn run(app: &AppHandle, main: &WebviewWindow, library: Option<PathBuf>, start: S
     });
 }
 
+/// Unix 信号用负数保存，与普通退出码区分；不保存 stderr 或任意进程文字。
+fn exit_code(status: &std::process::ExitStatus) -> Option<i32> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::ExitStatusExt;
+        status.code().or_else(|| status.signal().map(|signal| -signal))
+    }
+    #[cfg(not(unix))]
+    { status.code() }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(unix)]
+    #[test]
+    fn diagnostics_distinguishes_host_exit_codes_and_signals() {
+        use std::os::unix::process::ExitStatusExt;
+        assert_eq!(exit_code(&std::process::ExitStatus::from_raw(0)), Some(0));
+        assert_eq!(exit_code(&std::process::ExitStatus::from_raw(2 << 8)), Some(2));
+        assert_eq!(exit_code(&std::process::ExitStatus::from_raw(9)), Some(-9));
+    }
     #[test]
     fn ready_requires_exact_native_origin() {
         assert_eq!(

@@ -919,6 +919,11 @@ class NativeLifecycleTest(unittest.TestCase):
         self.assertFalse(self.sentinel.exists())
 
     def test_diagnostics_http_failure_survives_restart_without_request_secrets(self):
+        with closing(http.client.HTTPConnection('127.0.0.1', self.port)) as client:
+            client.request('GET', '/api/diagnostics')
+            denied = client.getresponse()
+            self.assertEqual(denied.status, 403)
+            self.assertNotIn(b'"records"', denied.read())
         backup = self.root / 'before-diagnostic.sqlite'
         with sqlite3.connect(self.lib.db) as source, sqlite3.connect(backup) as dest:
             source.backup(dest)

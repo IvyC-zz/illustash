@@ -563,7 +563,15 @@ fn rescue_reporting(path: &Path, root: &Path) -> Result<crate::app_rescue::Repor
 }
 
 pub(crate) fn run(args: &[String]) -> Result<u8> {
-    crate::diagnostics::initialize();
+    use crate::diagnostics::{self, Operation, Publication, Stage};
+    diagnostics::initialize();
+    let result = run_inner(args);
+    if let Err(error) = &result {
+        diagnostics::failure(Operation::Host, Stage::Startup, error, Publication::Unknown);
+    }
+    result
+}
+fn run_inner(args: &[String]) -> Result<u8> {
     // 管道归属在初始化之前就记下，所以即使父进程很早崩溃，也会走正常的停止和 join 路径。
     // 除非明确要求，从不读 CLI 的 stdin。
     let desktop_closed = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));

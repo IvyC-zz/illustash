@@ -145,7 +145,7 @@
 
  "desktop/src/pixiv.rs":"53ff9d2d3f3c85f49ff59c7d1763cf7706bedf622bf6c1582cd4161156ae2486",
 
- "desktop/src/server.rs":"1c304cdeb0754be1fb17da20f23f78ecca23599219442499b2d31baff7c1a562",
+ "desktop/src/server.rs":"b3156d2b37a7cfafff201d8cde11f3bec16d27a93268fd702e2900a95df35057",
 
  "desktop/src/welcome.rs":"844d5381becb2c34419067b49577a884fba77c131159ab7a00f4b151a532bb38",
 
@@ -181,7 +181,7 @@
 
  "native/terms/src/app_folder.rs":"fd566d4d1e94e2740b9ed9a046729da88e5bd86da53c9e1c2092612e133dd4d6",
 
- "native/terms/src/app_http.rs":"4ad7924e93959106dc5db1cda86af28d889b2714fb237101bc9477f9bb75bd21",
+ "native/terms/src/app_http.rs":"90aaa1892dcf1842da7bd4e730762c20833c4e17ed573ab59fdced527c841023",
 
  "native/terms/src/app_identity.rs":"0a1013c73b59db6ad290a8bdfae5b554cef1fa36d73b3f217e029c0812fccd20",
 
