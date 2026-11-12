@@ -10,6 +10,7 @@ ones, the way tools/check_architecture.py guards the crate direction. Rules (doc
   4 dialog-element       no new `document.createElement('dialog')`
   5 long-line            no new line over 200 characters (app.js, core/, ui/)
   6 page-name            no page-name comparison outside core/pages.js (the page registry, #342; hard rule, no baseline)
+  7 state-writer         state 字段只能由 core/state.js 组标题写明的写入者文件赋值（#353；硬规则，没有基线）
 
 Baseline (tools/frontend_baseline.json) is keyed by file + content feature (edge, field name, per-file count), never by
 line number, so edits elsewhere in a file do not invalidate it. It can only shrink: `--shrink` lowers entries and never
@@ -239,6 +240,13 @@ def new_rules():
              '异步回应回来时判断「还在不在这一页」用 `onPage(route, \'名\')`；要登记渲染入口、标题、重画方式用 `implement()`。'
              '见 docs/WEB_UI_MAP.md「新增一个页面要做什么」。',
              baselined=False),
+        Rule('state-writer', '7', '在声明的写入者以外给 state 字段赋值',
+             'core/state.js 把 state 字段按归属分组，每组只有一个写入者（组标题「// ---- 说明：写入者文件（备注） ----」写明，#344）；'
+             '别的模块只读，要改就调用写入者模块的函数。没有基线。',
+             '改成调用写入者模块里写这个字段的函数（组标题括号里列了别处该用的，如 setCursor、setChar、setRoute）；'
+             '没有合适的函数，就在写入者模块里加一个导出函数，由它来赋值。确实应当换写入者或拆组时，改 core/state.js 的组标题，'
+             '并在 PR 里写明理由；不要为了通过检查在组标题里列两个文件。',
+             baselined=False),
     ]}
 
 
@@ -267,6 +275,56 @@ def declared_state(sources):
     return keys
 
 
+# 规则 7：组标题「// ---- 说明：写入者文件（备注） ----」，冒号和括号之间是写入者文件。
+GROUP_RE = re.compile(r'^\s*//\s*----\s*(.*?)\s*----\s*$')
+WRITER_FILE_RE = re.compile(r'(?:core|ui)/[\w.-]+\.js|app\.js')
+# 给 `state.<字段>` 赋值：直接赋值和复合赋值、++ / --，也包括写进字段的值里面（`state.sel.ids = …`、`state.items[i] = …`），
+# 以及 `delete state.<字段>…`、`Object.assign(state.<字段>, …)`。认不出：调用方法改容器（`state.pending.add()`）、
+# 解构赋值、`Object.assign(state, …)` 和 `state[key] = …`。
+_CHAIN = r'(?:\s*(?:\??\.\s*[A-Za-z_$][\w$]*|\[[^\]\n]*\]))*'
+STATE_WRITE_RE = re.compile(
+    r'(?<![\w$.])state\s*\.\s*([A-Za-z_$][\w$]*)' + _CHAIN
+    + r'\s*(?:(?:\*\*|<<|>>>?|&&|\|\||\?\?|[-+*/%&|^])?=(?![=>])|\+\+|--)'
+    r'|(?:\+\+|--)\s*state\s*\.\s*([A-Za-z_$][\w$]*)'
+    r'|\bdelete\s+state\s*\.\s*([A-Za-z_$][\w$]*)'
+    r'|\bObject\s*\.\s*assign\s*\(\s*state\s*\.\s*([A-Za-z_$][\w$]*)')
+
+
+def state_writers(sources):
+    """core/state.js 里每个 state 字段的写入者：返回 ({字段: 写入者文件}, [声明格式的问题])。"""
+    src = sources['core/state.js']
+    marker = 'export const state = {'
+    start = src.bare.index(marker) + len(marker) - 1
+    first_line = src.line_of(start)
+    headings, problems = [], []
+    for number, text in enumerate(src.raw.splitlines(), 1):
+        m = GROUP_RE.match(text) if number > first_line else None
+        if not m:
+            continue
+        title, colon, rest = m.group(1).partition('：')
+        files = WRITER_FILE_RE.findall(re.split(r'[（(]', rest, maxsplit=1)[0]) if colon else []
+        headings.append((number, files))
+        if len(files) != 1:
+            problems.append((number, f'组标题要写明一个写入者文件，这里写了 {len(files)} 个：{text.strip()[:90]}'))
+    writers, depth = {}, 0
+    for m in re.finditer(r"""[{}\[\]()]|'[^'\n]*'|"[^"\n]*"|`[^`]*`|([A-Za-z_$][\w$]*)\s*:(?!:)""", src.bare[start:]):
+        token = m.group(0)
+        if token in '{[(':
+            depth += 1
+        elif token in '}])':
+            depth -= 1
+            if depth == 0:
+                break
+        elif m.group(1) and depth == 1:
+            line = src.line_of(start + m.start())
+            owner = [files for number, files in headings if number < line]
+            if not owner:
+                problems.append((line, f'字段 {m.group(1)} 不在任何组标题下面，没有写明写入者'))
+            elif len(owner[-1]) == 1:
+                writers[m.group(1)] = owner[-1][0]
+    return writers, problems
+
+
 def run_rules(sources):
     rules = new_rules()
     graph = {p: [t for t, _ in imports(s, sources)] for p, s in sources.items()}
@@ -289,6 +347,17 @@ def run_rules(sources):
             if m.group(1) not in declared:
                 line = s.line_of(m.start())
                 rules['undeclared-state'].add(m.group(1), f'{STATIC}/{p}:{line}: {s.raw_line(line)[:110]}')
+    # 7: state 字段的写入者
+    writers, problems = state_writers(sources)
+    for line, text in problems:
+        rules['state-writer'].add(f'core/state.js:{line}: {text}', f'{STATIC}/core/state.js:{line}: {sources["core/state.js"].raw_line(line)[:110]}')
+    for p, s in sources.items():
+        for m in STATE_WRITE_RE.finditer(s.bare):
+            name = next(g for g in m.groups() if g)
+            owner = writers.get(name)
+            if owner and owner != p:
+                line = s.line_of(m.start())
+                rules['state-writer'].add(f'{p}: state.{name}（声明的写入者是 {owner}）', f'{STATIC}/{p}:{line}: {s.raw_line(line)[:110]}')
     # 3, 4, 5
     for p, s in sources.items():
         for m in LISTENER_RE.finditer(s.code):

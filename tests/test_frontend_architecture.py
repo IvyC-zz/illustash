@@ -103,7 +103,7 @@ class FrontendArchitectureTest(unittest.TestCase):
 
     def test_declared_state_field_is_fine(self):
         with Tree() as tree:
-            tree.append('ui/tasks.js', '\nstate.total = 1;\n')
+            tree.append('ui/tasks.js', '\nif (state.total) go();\n')
             tree.append('core/state.js', '')
             self.assertEqual(tree.errors(), [])
 
@@ -112,7 +112,8 @@ class FrontendArchitectureTest(unittest.TestCase):
             tree.append('ui/tasks.js', '\nstate.brandNewField = 1;\n')
             self.assertTrue(tree.errors())
             path = tree.root / STATIC / 'core/state.js'
-            path.write_text(path.read_text(encoding='utf-8').replace('route: {page', 'brandNewField: 0, route: {page', 1),
+            # 声明在一个写明 ui/tasks.js 是写入者的组里，规则 7 也不报
+            path.write_text(path.read_text(encoding='utf-8').replace('  // ---- 路由', '  // ---- 任务面板：ui/tasks.js ----\n  brandNewField: 0,\n  // ---- 路由', 1),
                             encoding='utf-8')
             self.assertEqual(tree.errors(), [])
 
@@ -279,6 +280,55 @@ class FrontendArchitectureTest(unittest.TestCase):
         self.assertIn('state.inTemplate', bare)
         with self.assertRaises(ValueError):
             strip_comments('const t = `unterminated')
+
+
+    # ---------- 规则 7：state 字段的写入者（#353） ----------
+    def test_state_written_outside_its_writer(self):
+        # cursor 的写入者是 ui/grid.js，focused 的是 ui/detail.js，route 的是 core/route.js
+        cases = [('ui/home.js', 'state.cursor = 3;', 'state.cursor', 'ui/grid.js'),
+                 ('ui/home.js', 'state.focused ??= null;', 'state.focused', 'ui/detail.js'),
+                 ('ui/palette.js', 'state.dataVersion++;', 'state.dataVersion', 'ui/grid.js'),
+                 ('ui/palette.js', '--state.generation;', 'state.generation', 'ui/grid.js'),
+                 ('ui/shell.js', 'state.route.sort = "x";', 'state.route', 'core/route.js'),
+                 ('ui/shell.js', 'state.sel.ids = new Set();', 'state.sel', 'ui/grid.js'),
+                 ('ui/catalog.js', 'state.items[0] = null;', 'state.items', 'ui/grid.js'),
+                 ('ui/catalog.js', 'Object.assign(state.route, {q: ""});', 'state.route', 'core/route.js'),
+                 ('app.js', 'delete state.char;', 'state.char', 'core/meta.js')]
+        for path, text, field, writer in cases:
+            with self.subTest(text=text), Tree() as tree:
+                tree.append(path, '\n' + text + '\n')
+                message = self.assertViolation(tree, 'state-writer', f'{path}: {field}（声明的写入者是 {writer}）')
+                self.assertIn(text, message)
+                self.assertIn('core/state.js', message)
+
+    def test_state_reads_and_the_writer_itself_are_fine(self):
+        with Tree() as tree:
+            tree.append('ui/home.js', '\nif (state.cursor === 3 || state.cursor >= 2 || state.cursor <= 1 || state.cursor !== 0) go(state.cursor == 1);\n'
+                                      'const f = state.items.filter(x => x).length; state.pending.add(1); const s = "state.cursor = 3";\n'
+                                      '// state.cursor = 3;\n')
+            tree.append('ui/grid.js', '\nstate.cursor = 3; state.items[0] = null; state.sel.ids = new Set();\n')
+            tree.append('core/route.js', '\nObject.assign(state.route, {q: ""});\n')
+            self.assertEqual(tree.errors(), [])
+
+    def test_state_groups_need_exactly_one_writer(self):
+        state = 'core/state.js'
+        with Tree() as tree:
+            path = tree.root / STATIC / state
+            text = path.read_text(encoding='utf-8')
+            path.write_text(text.replace('// ---- 详情栏与大图：ui/detail.js ----', '// ---- 详情栏与大图：ui/detail.js、ui/home.js ----'), encoding='utf-8')
+            self.assertViolation(tree, 'state-writer', '写了 2 个')
+        with Tree() as tree:
+            path = tree.root / STATIC / state
+            text = path.read_text(encoding='utf-8')
+            path.write_text(text.replace('// ---- 详情栏与大图：ui/detail.js ----', '// ---- 详情栏与大图 ----'), encoding='utf-8')
+            self.assertViolation(tree, 'state-writer', '写了 0 个')
+        with Tree() as tree:
+            # 换了写入者：原来的写入者再赋值就报错，新写入者不报
+            path = tree.root / STATIC / state
+            text = path.read_text(encoding='utf-8')
+            path.write_text(text.replace('// ---- 详情栏与大图：ui/detail.js ----', '// ---- 详情栏与大图：ui/home.js ----'), encoding='utf-8')
+            message = self.assertViolation(tree, 'state-writer', 'ui/detail.js: state.focused（声明的写入者是 ui/home.js）')
+            self.assertIn('setCursor', message)
 
 
 if __name__ == '__main__':
