@@ -450,3 +450,37 @@ fn wd_characters_in_a_new_library_get_the_work_of_their_tag_suffix() {
         1
     );
 }
+
+#[test]
+fn redelivery_after_invalidation_uses_new_projection_with_or_without_anchors() {
+    for anchored in [false, true] {
+        let f = Fixture::new(anchored);
+        let before = human(&f.app());
+        let (path, sidecar) = f.batch("original", feature(1));
+        let first = f.import(&path, &sidecar).unwrap();
+        assert_eq!(first["duplicate"], false);
+        f.source().execute_batch("DELETE FROM labels WHERE uuid='a'; DELETE FROM embeddings WHERE uuid='a'; DELETE FROM recognition_assets WHERE asset='a';").unwrap();
+        // 应用已经有旧投影标记：修复前会直接报 duplicate，连新投影都不尝试。
+        f.app().execute_batch("CREATE TRIGGER fail BEFORE INSERT ON assets BEGIN SELECT RAISE(ABORT,'synthetic redelivery failure'); END;").unwrap();
+        let retried = f.import(&path, &sidecar).unwrap();
+        assert_eq!(retried["digest"], first["digest"]);
+        assert_eq!(retried["duplicate"], false);
+        assert_eq!(retried["status"], "pending");
+        assert_eq!(count(&f.source(), "SELECT count(*) FROM recognition_assets"), 1);
+        assert_eq!(count(&f.source(), "SELECT count(*) FROM recognition_imports WHERE status='pending'"), 1);
+        f.app().execute_batch("DROP TRIGGER fail").unwrap();
+        let reopened = Library::open(f.library.instance_path()).unwrap();
+        assert_eq!(resume(&reopened, &AtomicBool::new(false), &|_, _| Ok(())).unwrap()["status"], "done");
+        assert_eq!(count(&f.app(), "SELECT count(*) FROM meta WHERE key LIKE 'recognition_projection:%'"), 2);
+        let events = count(&f.app(), "SELECT count(*) FROM backend_effects");
+        assert_eq!(f.import(&path, &sidecar).unwrap()["duplicate"], true);
+        assert_eq!(count(&f.app(), "SELECT count(*) FROM backend_effects"), events);
+        assert_eq!(human(&f.app()), before);
+        // 历史抢救路径会删除源包账本，却保留应用标记；新交付也必须绕开它。
+        f.source().execute_batch("DELETE FROM labels; DELETE FROM embeddings; DELETE FROM recognition_assets; DELETE FROM recognition_imports;").unwrap();
+        assert_eq!(f.import(&path, &sidecar).unwrap()["duplicate"], false);
+        assert_eq!(count(&f.app(), "SELECT count(*) FROM meta WHERE key LIKE 'recognition_projection:%'"), 3);
+        assert_eq!(f.import(&path, &sidecar).unwrap()["duplicate"], true);
+        assert_eq!(human(&f.app()), before);
+    }
+}

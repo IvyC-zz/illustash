@@ -164,14 +164,17 @@ pub(crate) fn scan_with(
         let asset;
         if let Some(old) = known.get(&f.rel) {
             asset = old.3.clone();
-            changed.push(asset.clone());
-            journal.insert(asset.clone(), json!(f.hash));
-            let (w, h, _) = describe(&f);
-            tx.execute(
-                "UPDATE assets SET width=?,height=?,stable_hash=?,orig_size=? WHERE uuid=?",
-                params![w, h, f.hash, f.size, asset],
-            )?;
-            forget_recognition(&tx, &asset, recognised)?;
+            // mtime/size 只是重算哈希的提示；内容没变时，识别结果和应用投影仍然有效。
+            if old.2 != f.hash {
+                changed.push(asset.clone());
+                journal.insert(asset.clone(), json!(f.hash));
+                let (w, h, _) = describe(&f);
+                tx.execute(
+                    "UPDATE assets SET width=?,height=?,stable_hash=?,orig_size=? WHERE uuid=?",
+                    params![w, h, f.hash, f.size, asset],
+                )?;
+                forget_recognition(&tx, &asset, recognised)?;
+            }
             tx.execute(
                 "UPDATE files SET size=?,mtime_ns=?,md5=? WHERE source_id=? AND path=?",
                 params![f.size, f.mtime, f.hash, sid, f.rel],
