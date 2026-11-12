@@ -42,6 +42,7 @@ if [ -z "$frontend_base" ]; then
   echo '注意：取不到 origin/main 或 main，跳过前端基线“变大”检查（--base-ref）；请先 git fetch origin。' >&2
 fi
 run "$python" tools/check_frontend.py --strict-stale ${frontend_base:+--base-ref "$frontend_base"}
+run "$python" tools/check_styleguide.py
 run "$python" -m unittest discover -s tests -p test_local_acceptance.py -v -b
 # 旧变量不能在 release 前调用任意测试，避免读取上一候选的二进制。
 if [ -n "${CHECK_ALL_PREFLIGHT_TESTS:-}" ]; then

@@ -35,68 +35,83 @@
 
 <section id="about">
   <h2>关于这页：是什么，怎么用</h2>
-  <p class="sg-warn sg-stale" id="sg-stale"><b>census.js 可能过期了。</b>app.css 的行数和统计时不同，重新运行 <code>python3 tools/styleguide/census.py</code> 更新令牌表。</p>
+  <p class="sg-warn sg-stale" id="sg-stale"><b>census.js 过期了。</b>app.css 和统计时不同，令牌表是旧的。重新运行 <code>python3 tools/styleguide/census.py</code>（<code>python3 tools/check_styleguide.py</code> 也会报出这一条）。</p>
   <p class="sg-lead"><b>给人看：</b>设计是否统一，一眼比较。<b>给代理看：</b>写新界面前先在这里找现成的写法，复用，不要自己造新类名、新数值。找不到合适的，先在 Issue 里问（见 <code>AGENTS.md</code>）。</p>
-  <p class="sg-lead"><b>样式是真的：</b>页面直接引用 <code>web/static/app.css</code>，没有第二套 CSS。<b>结构是抄的：</b>每个样例的 HTML 是对着 <code>web/static/ui/*.js</code> 里的字符串模板手写的，会和代码脱节。每个条目都写了“生成”：文件和函数名，改模板时回头对一下。等组件收口（#319）后，应改成直接调用生成函数。</p>
-  <p class="sg-lead"><b>怎么打开：</b>直接用浏览器打开本文件（<code>file://</code>）；或在仓库根目录运行 <code>python3 -m http.server 8000</code>，再打开 <code>/tools/styleguide/</code>（这样还会检查令牌统计是否过期）。顶部可切换亮色 / 暗色，和应用里的 <code>html[data-theme]</code> 是同一个机制。</p>
-  <p class="sg-lead"><b>不进发布包：</b><code>packaging/build.py</code> 只复制 <code>web/static/</code>，本页在 <code>tools/styleguide/</code>，不会被打进去。</p>
+  <p class="sg-lead"><b>样式是真的：</b>页面直接引用 <code>web/static/app.css</code>，没有第二套 CSS。<b>结构是抄的：</b>每个样例的 HTML 是对着 <code>web/static/ui/*.js</code> 里的字符串模板手写的。每个条目都写了“生成”：文件和函数名，改模板时回头对一下。等组件收口（#319）后，应改成直接调用生成函数。</p>
+  <p class="sg-lead"><b>有检查兜底：</b><code>tools/check_styleguide.py</code>（接在 <code>tools/check_all.sh</code> 和 CI 里）要求样例和条目标题用到的每个类都在 <code>app.css</code> 里有样式、<code>census.js</code> 和当前 <code>app.css</code> 一致。改名或删掉一个类、改了 <code>app.css</code> 没重跑统计，都会报出具体的类名、行号和改法。它查不出样例的<b>结构</b>和模板不一致，这一点仍要靠“生成”一栏人工对照。</p>
+  <p class="sg-lead"><b>怎么打开：</b>直接用浏览器打开本文件（<code>file://</code>）；或在仓库根目录运行 <code>python3 -m http.server 8000</code>，再打开 <code>/tools/styleguide/</code>（这样页面自己也会检查令牌统计是否过期）。顶部可切换亮色 / 暗色，和应用里的 <code>html[data-theme]</code> 是同一个机制。</p>
+  <p class="sg-lead"><b>不进发布包：</b><code>packaging/build.py</code> 只复制 <code>web/static/</code>，本页在 <code>tools/styleguide/</code>，不会被打进去；迁移清点（<code>tools/migration_inventory.py</code>）也把这个目录当开发工具，不算生产代码。</p>
   <p class="sg-lead"><b>浮层怎么摆在页面里：</b>应用里的 toast、选择栏、任务面板、弹出菜单是 <code>position:fixed/absolute</code>，对话框要 <code>showModal()</code>。这里用 <code>.sg-frozen</code> 把定位和入场动画关掉（<code>styleguide.css</code> 里每条一行），其余样式不动；对话框用 <code>&lt;dialog open&gt;</code>，所以没有遮罩。</p>
-  <p class="sg-lead"><b>数字的口径：</b>令牌表由 <code>census.py</code> 从 <code>app.css</code> 数出来：一处 = 一条规则里的一条声明，取值只做 <code>!important</code> / <code>0.5→.5</code> 的规范化，<b>不合并相近的取值</b>——10.5px 和 11px 就是两种。<span id="census-meta"></span>。按钮写法的次数是 <code>ui/*.js</code> 与 <code>index.html</code> 里字面的 <code>&lt;button class="…"&gt;</code> 个数（2026-11-12 的 main），动态拼出来的类名不在内。令牌现在只有颜色是成体系的，其余照现状如实列出；#317 合并后会再更新这一页。</p>
+  <p class="sg-lead"><b>数字的口径：</b>令牌表由 <code>census.py</code> 从 <code>app.css</code> 数出来：令牌的“引用”是 <code>var(--名字)</code> 出现的次数；“档位之外”的取值是一处 = 一条规则里的一条声明，取值只做 <code>!important</code> / <code>0.5→.5</code> 的规范化，<b>不合并相近的取值</b>。<span id="census-meta"></span>。按钮写法的次数是 <code>ui/*.js</code> 与 <code>index.html</code> 里字面的 <code>&lt;button class="…"&gt;</code> 个数（2026-11-12 的 main），动态拼出来的类名不在内。</p>
 </section>
 
 <!-- ======================= 令牌 ======================= -->
 <section id="tok-color">
   <h2>令牌 · 颜色</h2>
-  <p class="sg-lead">颜色是唯一成体系的令牌：<code>:root</code> 里一组变量，暗色在 <code>:root[data-theme=dark]</code> 里整组换值，组件只写 <code>var(--…)</code>。色块里的值取自 app.css 本身。</p>
-  <div class="sg-item"><header><h3>语义色（亮色 / 暗色并排）</h3><span class="sg-cls"><code>--canvas</code><code>--sheet</code><code>--ink</code>…</span></header>
-    <p class="sg-src">定义：<code>web/static/app.css</code> 第 1–5 行（亮色）、“dark theme”一节（暗色）；切换：<code>web/static/theme.js</code> 设置 <code>html[data-theme]</code>。后面的数字是 <code>var(--名字)</code> 在 app.css 里被引用的次数。</p>
+  <p class="sg-lead">颜色变量写在 <code>app.css</code> 开头的 <code>:root</code> 里，按用途分组；暗色在 <code>:root[data-theme=dark]</code> 里成对换值。<b>规则里只引用变量</b>，不写十六进制色，暗色就不用再单独覆盖。新颜色先找现成的一组；确实没有，在两个块里成对加一个变量。</p>
+  <div class="sg-item"><header><h3>语义色（亮色 / 暗色并排）</h3><span class="sg-cls"><code>--canvas</code><code>--sheet</code><code>--ink</code><code>--tone-*</code><code>--atag-*</code>…</span></header>
+    <p class="sg-src">定义：<code>web/static/app.css</code> 开头的两个主题块，分组标题就是块里的注释；切换：<code>web/static/theme.js</code> 设置 <code>html[data-theme]</code>。色块用各自主题的变量画（两栏各自带一套变量值），后面的数字是 <code>var(--名字)</code> 在 app.css 里被引用的次数。</p>
     <div class="sg-stage col" id="tok-colors"></div>
-    <p class="sg-note"><b>用法：</b>画布 <code>--canvas</code>（页面底）→ 纸面 <code>--sheet</code>（内容区、卡片、浮层）→ <code>--soft</code>（控件底、占位）；文字 <code>--ink</code> / <code>--ink2</code> / <code>--muted</code> / <code>--faint</code> 由深到浅；<code>--line</code> 实线分隔，<code>--hair</code> 是半透明发丝线（卡片轮廓、阴影的 1px 环）；强调色 <code>--accent</code>（环、勾、进度）、<code>--accent-btn</code>（按钮底，更深）、<code>--accent-soft</code>（选中底）、<code>--accent-ink</code>（强调色文字）；<code>--warn</code> 警示；<code>--r18</code> / <code>--r18-soft</code> 仅用于 R18 开关。</p>
+    <p class="sg-note"><b>基础一组的用法：</b>画布 <code>--canvas</code>（页面底）→ 纸面 <code>--sheet</code>（内容区、卡片、浮层）→ <code>--soft</code>（控件底、占位）；文字 <code>--ink</code> / <code>--ink2</code> / <code>--muted</code> / <code>--faint</code> 由深到浅；<code>--line</code> 实线分隔，<code>--hair</code> 是半透明发丝线（卡片轮廓、阴影的 1px 环）；强调色 <code>--accent</code>（环、勾、进度）、<code>--accent-btn</code>（按钮底，更深）、<code>--accent-soft</code>（选中底）、<code>--accent-ink</code>（强调色文字）；<code>--warn</code> 警示；<code>--r18</code> / <code>--r18-soft</code> 仅用于 R18 开关。<b>色调</b> <code>--tone-*-bg</code> / <code>--tone-*-ink</code> 成对用；<code>--ok</code> / <code>--bad</code> / <code>--err</code> 不随主题变。</p>
   </div>
   <div class="sg-item"><header><h3>非颜色的变量</h3></header>
-    <p class="sg-src">还有只在局部定义或由 JS 内联写入的自定义属性：<code>--gutter</code>（<code>.content</code> 上，26px；≥1600px 36px；≤1050px 16px；≤760px 12px）、<code>--dup-hue</code>（<code>ui/grid.js</code> 内联）、<code>--p</code>（最近 30 天的圆环，<code>ui/catalog.js</code> 内联）、<code>--depth</code>（作品树缩进，<code>ui/catalog.js</code> 内联）。<code>--panel</code> 在 <code>.aa-card</code> 里被引用（带回退值），但<b>从未定义过</b>。</p>
+    <p class="sg-src">主题块里不是颜色的变量，以及只在局部定义或由 JS 内联写入的自定义属性：<code>--gutter</code>（<code>.content</code> 上，26px；≥1600px 36px；≤1050px 16px；≤760px 12px）、<code>--dup-hue</code>（<code>ui/grid.js</code> 内联）、<code>--p</code>（最近 30 天的圆环，<code>ui/catalog.js</code> 内联）、<code>--depth</code>（作品树缩进，<code>ui/catalog.js</code> 内联）。<code>--panel</code> 在 <code>.aa-card</code> 里被引用（带回退值），但<b>从未定义过</b>。</p>
     <div class="sg-stage col" id="tok-other"></div></div>
-  <div class="sg-item"><header><h3>写死的颜色（没走变量）</h3><span class="sg-tag dup">待 #317 处理</span></header>
-    <p class="sg-src">这些颜色不会随主题自动换，暗色里要靠单独的覆盖规则补。</p>
+  <div class="sg-item"><header><h3>写死的颜色（没走变量）</h3><span class="sg-tag dup">存量，不要照抄</span></header>
+    <p class="sg-src">这些颜色不会随主题自动换。新代码不要再写；改到附近的规则时顺手换成变量。</p>
     <div class="sg-stage col" id="tok-literal"></div></div>
 </section>
 
 <section id="tok-font">
   <h2>令牌 · 字号</h2>
-  <p class="sg-lead">没有字号令牌，全是写死的数。下面每种取值都实际渲染出来，旁边是出现次数。基础字号是 <code>:root</code> 的 13px，实际用得最多的是 12px。</p>
-  <div class="sg-item"><header><h3>font-size 的全部取值</h3><span class="sg-tag dup">23 种 px + 复合写法</span></header>
-    <p class="sg-src">口径：<code>font-size</code> 声明，加上 <code>font</code> 简写里的字号（一处，标了“font 简写”）。</p>
+  <p class="sg-lead">正文字号是 <code>--fs-N</code> 一组档位，展示字号（大标题、空状态、启动页等一次性的大字）另有 <code>--fs-display-N</code>，不进正文档位。名字里的数字就是 px 值；新写的值取最近的一档，不要再写档位之外的数。基础字号是 <code>:root</code> 的 <code>var(--fs-13)</code>，用得最多的是 12 和 11。</p>
+  <div class="sg-item"><header><h3>正文字号</h3><span class="sg-cls"><code>--fs-10</code>…<code>--fs-22</code></span></header>
+    <div class="sg-stage col" id="tok-fs"></div></div>
+  <div class="sg-item"><header><h3>展示字号</h3><span class="sg-cls"><code>--fs-display-17</code>…<code>--fs-display-72</code></span></header>
+    <div class="sg-stage col" id="tok-fs-display"></div></div>
+  <div class="sg-item"><header><h3>档位之外的写法</h3></header>
+    <p class="sg-src">口径：<code>font-size</code> 声明与 <code>font</code> 简写里的字号，去掉整条只用令牌的。</p>
     <div class="sg-stage col" id="tok-fontsize"></div></div>
 </section>
 
 <section id="tok-rad">
   <h2>令牌 · 圆角</h2>
-  <div class="sg-item"><header><h3>border-radius 的全部取值</h3></header>
-    <p class="sg-src">口径：<code>border-radius</code> 与四个单角写法（<code>border-top-left-radius</code> 等）的声明。小块是 44px 方块上的实际效果。</p>
+  <div class="sg-item"><header><h3>圆角档位</h3><span class="sg-cls"><code>--radius-N</code><code>--radius-pill</code><code>--radius-round</code></span></header>
+    <p class="sg-src">小块是 44px 方块上的实际效果。胶囊形（按钮、芯片）用 <code>--radius-pill</code>，圆形（头像、圆点）用 <code>--radius-round</code>。</p>
+    <div class="sg-stage col" id="tok-radius-ladder"></div></div>
+  <div class="sg-item"><header><h3>档位之外的写法</h3></header>
+    <p class="sg-src">口径：<code>border-radius</code> 与四个单角写法的声明，去掉整条只用令牌（或 0）的。</p>
     <div class="sg-stage col" id="tok-radius"></div></div>
 </section>
 
 <section id="tok-sp">
   <h2>令牌 · 间距</h2>
-  <div class="sg-item"><header><h3>gap</h3></header>
-    <p class="sg-src">口径：<code>gap</code> / <code>row-gap</code> / <code>column-gap</code> 的声明。“样子”画的是两个相邻的 gap 宽度块。</p>
+  <div class="sg-item"><header><h3>间距档位</h3><span class="sg-cls"><code>--space-1</code>…<code>--space-24</code></span></header>
+    <p class="sg-src"><code>gap</code> 和 <code>padding</code> 共用一组 <code>--space-N</code>。“样子”画的是两个相邻的块，中间隔开这个宽度。</p>
+    <div class="sg-stage col" id="tok-space"></div></div>
+  <div class="sg-item"><header><h3>gap：档位之外的写法</h3></header>
+    <p class="sg-src">口径：<code>gap</code> / <code>row-gap</code> / <code>column-gap</code> 的声明，去掉整条只用令牌（或 0）的。</p>
     <div class="sg-stage col" id="tok-gap"></div></div>
-  <div class="sg-item"><header><h3>padding</h3><span class="sg-tag dup">一百多种组合</span></header>
+  <div class="sg-item"><header><h3>padding：常见组合与档位之外的写法</h3></header>
     <div class="sg-stage col" id="tok-padding"></div></div>
 </section>
 
 <section id="tok-h">
   <h2>令牌 · 控件高度</h2>
-  <div class="sg-item"><header><h3>固定高度的取值</h3></header>
-    <p class="sg-src">口径：<code>height</code> / <code>min-height</code> 里写 px 的声明（百分比、auto、0 不数）。里面既有按钮、输入框、行，也有图片区、缩略图和进度条，没有区分“控件”，只列出来供对照。常见的控件高度：输入与胶囊 30 / 32 / 34 / 36；图标按钮 24 / 30 / 36；设置行最小 44–46；侧栏项自适应。</p>
+  <div class="sg-item"><header><h3>控件高度三档</h3><span class="sg-cls"><code>--h-28</code><code>--h-32</code><code>--h-36</code></span></header>
+    <p class="sg-src"><code>--h-N</code> 只用于按钮、输入框、下拉等控件的高度；头像、缩略图和图标底板的尺寸不在其内。</p>
+    <div class="sg-stage col" id="tok-h-ladder"></div></div>
+  <div class="sg-item"><header><h3>其余固定高度</h3></header>
+    <p class="sg-src">口径：<code>height</code> / <code>min-height</code> 里写 px 的声明（百分比、auto、0 不数）。这里多是图片区、缩略图、进度条和设置行，不是控件；只列出来供对照。</p>
     <div class="sg-stage col" id="tok-height"></div></div>
 </section>
 
 <section id="tok-zi">
   <h2>令牌 · 层级</h2>
-  <div class="sg-item"><header><h3>z-index 的全部取值</h3></header>
+  <div class="sg-item"><header><h3>z-index 档位</h3><span class="sg-cls"><code>--z-*</code></span></header>
+    <p class="sg-src">由低到高：页面内局部叠放 <code>--z-page-N</code> &lt; 浮动条 &lt; 浮层 &lt; 抽屉 &lt; 菜单 &lt; 全屏浮层 &lt; 提示条 &lt; 引导 &lt; 启动页。只能新增档位，不要改数值的先后（<code>app.css</code> 里的约定）。</p>
     <div class="sg-stage col" id="tok-z"></div>
-    <p class="sg-note">全局层级大致是：卡片内的勾 / 角标 1–4 → 作品弹层 6 → 标签弹层 20、视图选项与联想菜单 30 → 选择栏 10、toast 60、查看器 40、任务面板 40、侧栏（窄屏）25 → 引导 tour 900、splash 1000。toast（60）压在查看器（40）上，所以看大图时 toast 要移到中下方（<code>body.viewing .toast</code>）。引导的清单、提示条在 790–800，比选择栏高。没有集中登记，是各处分别写的。</p>
+    <p class="sg-note">toast（<code>--z-toast</code>）压在查看器（<code>--z-overlay</code>）上，所以看大图时 toast 要移到中下方（<code>body.viewing .toast</code>）。引导的清单、提示条比选择栏高。</p>
   </div>
 </section>
 

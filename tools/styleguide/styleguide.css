@@ -1,7 +1,6 @@
-/* The style guide's own page (#318). Everything here is prefixed .sg- and only draws the guide itself: the left menu,
-   the item cards, the swatches. It never restyles an app component. The one exception is `.sg-frozen`, which switches
-   off the position:fixed/absolute and the entrance animation of floating components so they can sit in the flow of
-   this page; each such override is a single line below and says what it undoes. */
+/* 样式清单页自己的样式（#318）。这里的类都带 sg- 前缀（或是挂在 .sg-* 上的修饰类），只画清单页本身：左侧目录、
+   条目卡片、色块，不改写应用组件。唯一的例外是 `.sg-frozen`：关掉浮层组件的 position:fixed/absolute 和入场动画，
+   让它们排进页面流里；每条覆盖一行，并写明撤掉了什么。这些覆盖引用的应用类由 tools/check_styleguide.py 核对。 */
 
 :root { color-scheme: light dark; }
 :root[data-theme=light] { color-scheme: light; }
@@ -30,7 +29,7 @@ body { margin: 0; background: var(--canvas); color: var(--ink); }
 .sg-warn { margin: 0 0 14px; padding: 10px 14px; border-radius: 12px; background: color-mix(in srgb, var(--warn) 12%, var(--sheet)); font-size: 12.5px; line-height: 1.65; color: var(--ink); max-width: 100ch; }
 .sg-warn b { font-weight: 650; }
 
-/* an item: one component or token, its live samples, where it comes from */
+/* 条目：一个组件或令牌、它的实物样例、生成位置 */
 .sg-item { background: var(--sheet); border-radius: 16px; box-shadow: 0 0 0 1px var(--hair); margin: 0 0 14px; overflow: hidden; }
 .sg-item > header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 12px; padding: 12px 16px 6px; }
 .sg-item > header .sg-cls { display: flex; flex-wrap: wrap; gap: 4px; }
@@ -51,7 +50,7 @@ body { margin: 0; background: var(--canvas); color: var(--ink); }
 .sg-tag.dead { background: color-mix(in srgb, var(--r18) 14%, var(--sheet)); color: var(--ink); }
 .sg-dark { background: #121215; color: #e4e4e9; border-radius: 12px; padding: 12px; }
 
-/* tokens */
+/* 令牌 */
 .sg-swatches { display: grid; grid-template-columns: repeat(auto-fill, minmax(168px, 1fr)); gap: 8px; width: 100%; }
 .sg-sw { display: grid; grid-template-columns: 34px 1fr; gap: 8px; align-items: center; font-size: 11px; }
 .sg-sw > span { width: 34px; height: 34px; border-radius: 9px; box-shadow: inset 0 0 0 1px var(--hair); }
@@ -59,14 +58,18 @@ body { margin: 0; background: var(--canvas); color: var(--ink); }
 .sg-sw small { display: block; color: var(--muted); font-family: var(--mono); font-size: 10.5px; word-break: break-all; }
 .sg-themes { display: grid; grid-template-columns: 1fr 1fr; gap: 0; width: 100%; }
 .sg-themes > div { padding: 14px 16px; }
-.sg-themes > .l { background: #fff; color: #1b1b1f; border-radius: 12px 0 0 12px; box-shadow: inset 0 0 0 1px rgba(20,20,35,.08); }
-.sg-themes > .d { background: #28282d; color: #eeeef2; border-radius: 0 12px 12px 0; }
+/* 两栏各自带一整套主题变量（styleguide.js 内联写入），所以这里的 var() 取的是本栏主题的值 */
+.sg-themes > .sg-pane-light, .sg-themes > .sg-pane-dark { background: var(--sheet); color: var(--ink); }
+.sg-themes > .sg-pane-light { border-radius: 12px 0 0 12px; box-shadow: inset 0 0 0 1px var(--hair); }
+.sg-themes > .sg-pane-dark { border-radius: 0 12px 12px 0; }
 .sg-themes .sg-sw b { color: inherit; }
 .sg-themes .sg-sw small { color: inherit; opacity: .6; }
 .sg-themes .sg-sw > span { box-shadow: inset 0 0 0 1px rgba(128,128,140,.35); }
 .sg-themes h5 { margin: 0 0 10px; font-size: 11px; font-weight: 600; opacity: .7; }
+.sg-themes h5:first-child { font-size: 12px; opacity: 1; }
+.sg-themes .sg-swatches + h5 { margin-top: 16px; }
 .sg-themes .sg-swatches { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
-@media (max-width: 900px) { .sg-themes { grid-template-columns: 1fr; } .sg-themes > .l, .sg-themes > .d { border-radius: 12px; } .sg-layout { grid-template-columns: 1fr; } .sg-menu { position: static; max-height: none; flex-direction: row; flex-wrap: wrap; } }
+@media (max-width: 900px) { .sg-themes { grid-template-columns: 1fr; } .sg-themes > .sg-pane-light, .sg-themes > .sg-pane-dark { border-radius: 12px; } .sg-layout { grid-template-columns: 1fr; } .sg-menu { position: static; max-height: none; flex-direction: row; flex-wrap: wrap; } }
 .sg-table { width: 100%; border-collapse: collapse; font-size: 12px; }
 .sg-table th { text-align: left; font-weight: 500; color: var(--muted); padding: 5px 10px 5px 0; font-size: 11px; white-space: nowrap; }
 .sg-table td { padding: 5px 10px 5px 0; vertical-align: middle; border-top: 1px solid var(--hair); }
@@ -88,8 +91,8 @@ body { margin: 0; background: var(--canvas); color: var(--ink); }
 .sg-stale { display: none; }
 .sg-stale.on { display: block; }
 
-/* ---- .sg-frozen: a floating component, sitting in the page flow ---- */
-/* undoes position:fixed / absolute + the left/bottom anchor, the translate that centres it, and its entrance animation */
+/* ---- .sg-frozen：浮层组件排进页面流 ---- */
+/* 撤掉 position:fixed / absolute 及其 left/bottom 定位、居中用的 translate 和入场动画 */
 .sg-frozen .selection-bar, .sg-frozen .toast { position: static; transform: none; animation: none; left: auto; bottom: auto; }
 .sg-frozen .task-pop { position: static; animation: none; transform: none; left: auto; bottom: auto; }
 .sg-frozen .view-pop, .sg-frozen .cast-pop { position: static; animation: none; transform: none; width: 100%; max-width: 360px; }
@@ -104,7 +107,7 @@ body { margin: 0; background: var(--canvas); color: var(--ink); }
 .sg-frozen .inspector { height: auto; overflow: visible; }
 .sg-frozen .home-hero, .sg-frozen .home-j { position: relative; }
 
-/* placeholder pictures */
+/* 占位图 */
 .sg-img { display: block; background: linear-gradient(135deg, #b9bdf3, #f0d4e4); }
 .sg-img.b { background: linear-gradient(135deg, #a9d8cf, #e9e2b8); }
 .sg-img.c { background: linear-gradient(135deg, #d0b5ec, #a9c6f0); }
