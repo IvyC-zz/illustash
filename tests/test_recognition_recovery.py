@@ -256,3 +256,22 @@ class RecognitionRecoveryTest(unittest.TestCase):
         self.assertEqual(self.rows(self.lib.db, 'SELECT rating FROM asset_rating WHERE uuid=?', (asset,)), [('general',)])
         self.assertEqual(self.rows(self.lib.db, "SELECT reason FROM auto_rules WHERE uuid=? AND reason='photo'", (asset,)), [('photo',)])
         self.assertEqual(self.tables(self.lib.db, human), human)
+
+        # 源抢救可能丢失逐图账本，却保留应用内上次有效的照片规则。新 pending 不能提前撤掉它。
+        with sqlite3.connect(self.lib.source) as c:
+            c.execute('DELETE FROM recognition_assets WHERE asset=?', (asset,))
+        self.package = self.incoming((asset,), name='replacement-result')
+        with sqlite3.connect(self.lib.db) as c:
+            c.execute("CREATE TRIGGER fail BEFORE INSERT ON term_packages BEGIN SELECT RAISE(ABORT,'synthetic evidence failure'); END")
+        self.assertEqual(self.import_package(code=2)['status'], 'pending')
+        with sqlite3.connect(self.lib.db) as c:
+            c.execute('DROP TRIGGER fail')
+        self.pics.rename(disconnected)
+        image(second / 'e.png', 'purple')
+        self.scan()
+        self.assertEqual(self.rows(self.lib.db, "SELECT reason FROM auto_rules WHERE uuid=? AND reason='photo'", (asset,)), [('photo',)])
+        disconnected.rename(self.pics)
+        image(self.pics / 'a.png', 'blue', (51, 31))
+        self.scan()
+        self.assertEqual(self.rows(self.lib.db, "SELECT * FROM auto_rules WHERE uuid=? AND reason='photo'", (asset,)), [])
+        self.assertEqual(self.tables(self.lib.db, human), human)

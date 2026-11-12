@@ -845,8 +845,8 @@ fn source_rows(src: &Connection, sql: &str, ids: &[String]) -> Result<Vec<Value>
     }
     Ok(out)
 }
-/// 全库规则也不能偷用另一份尚未验证、未发布回执的标签；保留这些图片上一次已发布的照片规则。
-pub(crate) fn realistic(app: &Connection, src: &Connection, publishing: &[String]) -> Result<Vec<Value>> {
+/// 仍拥有有效资产、但尚无应用投影的识别回执。已投影待通知的回执不在此列。
+pub(crate) fn unpublished_assets(app: &Connection, src: &Connection) -> Result<std::collections::HashSet<String>> {
     let exists: bool =
         src.query_row("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name='recognition_imports')", [], |r| r.get(0))?;
     let mut blocked = std::collections::HashSet::new();
@@ -866,6 +866,18 @@ pub(crate) fn realistic(app: &Connection, src: &Connection, publishing: &[String
             }
         }
     }
+    Ok(blocked)
+}
+/// 索引使用整库向量并替换角色认领，不能混入尚未发布的识别输入。
+pub(crate) fn require_published_inputs(app: &Connection, src: &Connection) -> Result<()> {
+    if !unpublished_assets(app, src)?.is_empty() {
+        return Err(Error::Conflict("识别结果尚未完成发布，请恢复输入并同步后再更新索引".into()));
+    }
+    Ok(())
+}
+/// 全库规则也不能偷用另一份尚未验证、未发布回执的标签；保留这些图片上一次已发布的照片规则。
+pub(crate) fn realistic(app: &Connection, src: &Connection, publishing: &[String]) -> Result<Vec<Value>> {
+    let mut blocked = unpublished_assets(app, src)?;
     for id in publishing {
         blocked.remove(id);
     }

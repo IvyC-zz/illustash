@@ -1884,6 +1884,7 @@
   "图库至少要保留一个来源；可以先添加新来源再移除这个": "A library must keep at least one source; add a new source first, then remove this one",
   "本次启动关闭了同步（--no-sync）": "Sync is off for this run (--no-sync)",
   "原生同步没有支持的来源": "Native sync has no supported source",
+  "识别结果尚未完成发布，请恢复输入并同步后再更新索引": "Recognition results have not been published yet. Restore the inputs and sync before updating the index.",
   "识别导入恢复未完成": "Recovering the recognition import is unfinished",
   "有 {pending} 张图等待识别；本次启动没有识别 worker": "{pending} pictures are waiting for recognition; there is no recognition worker in this run",
   "source.sqlite: assets.src_path 必须为字符串": "source.sqlite: assets.src_path must be a string",
