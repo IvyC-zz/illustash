@@ -99,7 +99,7 @@ use illustash_platform::platform_folder;
 use illustash_platform::platform_photos;
 use illustash_platform::platform_system;
 use illustash_platform::platform_time;
-/// Existing API facade: every direct file-backed call receives the mandatory platform backup.
+/// 既有的 API 门面：每个直接操作文件的调用都会带上必需的平台备份能力。
 pub mod schema {
     pub use crate::schema_rules::*;
     pub fn migrate(conn: &mut rusqlite::Connection) -> crate::Result<i64> {

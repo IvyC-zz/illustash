@@ -1,5 +1,4 @@
 //! 原生来源同步与可选识别 worker 编排。任务固定包实例，切库/退出取消并等待。
-#![cfg_attr(not(test), deny(clippy::unwrap_used))]
 use crate::{app_library::Library, Error, Result};
 use crate::{
     task_state::{State, Status},
@@ -147,8 +146,7 @@ impl Syncer {
                 if ctx.check().is_err() {
                     return;
                 }
-                // Every state change comes from finished work (files checked, images recognised,
-                // batches imported), so the task keeps running for as long as it moves.
+                // 每次状态变化都来自完成的工作（检查了文件、识别了图片、导入了批次），所以只要任务在推进就一直运行。
                 ctx.progressed();
                 let apply = || -> Result<()> {
                     let mut s = state.lock().expect("sync state mutex poisoned");
@@ -208,9 +206,9 @@ impl Drop for Syncer {
         self.stop();
     }
 }
-/// Sync runs until it stops making progress, not for a fixed time from its start.
-/// ILLUSTASH_RECOGNITION_TIMEOUT_MS (default 10 minutes) is the longest stretch without any
-/// progress; ILLUSTASH_RECOGNITION_MAX_MS (default 24 hours) bounds the whole run.
+/// 同步一直运行到不再有进展为止，而不是从开始起跑固定的时长。
+/// ILLUSTASH_RECOGNITION_TIMEOUT_MS（默认 10 分钟）是最长允许的无进展时长；
+/// ILLUSTASH_RECOGNITION_MAX_MS（默认 24 小时）限定整次运行。
 fn deadline() -> crate::app_tasks::Deadline {
     let ms = |name: &str, default: u64| {
         std::time::Duration::from_millis(
@@ -222,7 +220,7 @@ fn deadline() -> crate::app_tasks::Deadline {
         limit: Some(ms("ILLUSTASH_RECOGNITION_MAX_MS", 86_400_000)),
     }
 }
-/// A cancelled or timed-out run reports why it stopped, not the step it happened to interrupt.
+/// 被取消或超时的运行报告它为什么停下，而不是碰巧被打断的那一步。
 fn stop_message(cancel: &AtomicBool, ctx: Option<&crate::app_tasks::TaskContext>, e: &Error) -> String {
     let stopped = if cancel.load(Ordering::SeqCst) { ctx.and_then(|c| c.stop_reason()) } else { None };
     stopped.unwrap_or_else(|| e.reason()).chars().take(300).collect()
@@ -269,10 +267,9 @@ fn run_with(
     let run_id = c.last_insert_rowid();
     drop(c);
     let mut counts = json!({"found":0,"removed":0,"imported":0,"failed":0});
-    // What the person has to do about a failure, as a code the page words (#202); the message stays the error's own.
+    // 用户对失败要做什么，用一个代码表示，由页面配上文字（#202）；message 仍是错误自己的。
     let problem = std::cell::Cell::new(None);
-    // The step and the databases it writes, for the log when it fails (#275): the message alone does not say which
-    // database was busy.
+    // 当前步骤和它写入的数据库，失败时写进日志（#275）：只看 message 看不出是哪个数据库忙。
     let step = std::cell::Cell::new("recognition resume, source.sqlite and library.sqlite");
     let result: Result<(&str, String, Value)> = (|| {
         let recovery = crate::app_recognition::resume(library, cancel, &crate::app_research::dispatch)?;
@@ -328,7 +325,7 @@ fn run_with(
                     sources.push((sid.clone(), entry.clone()));
                 }
             }
-            // The persisted source hash, rather than this in-memory list, drives retry after app failure.
+            // 应用库失败后靠持久化的来源哈希驱动重试，而不是这份内存里的列表。
         }
         step.set("sync record, library.sqlite");
         let c = writer(&library.db())?;
@@ -362,7 +359,7 @@ fn run_with(
         counts["removed"] = out["removed"].clone();
         let pending = out["pending"].as_u64().expect("internal sync counter must be unsigned");
         if pending == 0 {
-            // Every picture is recognised or gone: nothing is known damaged any more.
+            // 每张图都已识别或已消失：不再有已知损坏的图。
             damaged::save(library, &damaged::load(library)?, &serde_json::Map::new())?;
         }
         if pending > 0 {
@@ -458,8 +455,8 @@ fn refresh(library: &Library, run_id: i64, cancel: &AtomicBool) -> Result<(Value
         .filter(|r| !present.contains(r[0].as_str().expect("SQLite uuid column must be text")))
         .map(|r| r[0].clone())
         .collect::<Vec<_>>();
-    // Source labels are authoritative for machine freshness. Existing content metadata is persisted in meta
-    // so an application failure after source commit is retried even when the next scan sees unchanged files.
+    // 机器结果是否最新以源库标签为准。已有的内容元数据持久化在 meta 里，这样源库提交后应用库失败时，
+    // 即使下次扫描看到文件没变也会重试。
     let journal_path = library.source().with_extension("scan-pending.json");
     let journal: serde_json::Map<String, Value> = if journal_path.exists() {
         serde_json::from_str(&std::fs::read_to_string(&journal_path)?).map_err(|e| Error::Invalid(e.to_string()))?
@@ -505,8 +502,8 @@ fn refresh(library: &Library, run_id: i64, cancel: &AtomicBool) -> Result<(Value
         }
     }
     let pending:i64=src.query_row("SELECT count(*) FROM assets a WHERE in_scope=1 AND coalesce(trashed,0)=0 AND NOT EXISTS(SELECT 1 FROM labels l WHERE l.uuid=a.uuid AND l.dim='rating')",[],|r|r.get(0))?;
-    // Photos keeps the established ready-only application import. Folder inventory remains
-    // browsable before recognition, as delivered by M3; both sources share the same backlog.
+    // Photos 保持既定的做法：只有就绪的图片才导入应用库。文件夹盘点结果在识别之前就能浏览，这是 M3 交付的行为；
+    // 两种来源共用同一份待办。
     let photos_pending=src.prepare("SELECT a.uuid FROM assets a WHERE EXISTS(SELECT 1 FROM asset_links l WHERE l.asset=a.uuid AND l.system='photos' AND l.source_id=a.source_id) AND NOT EXISTS(SELECT 1 FROM labels l WHERE l.uuid=a.uuid AND l.dim='rating')")?.query_map([],|r|r.get::<_,String>(0))?.collect::<rusqlite::Result<HashSet<_>>>()?;
     let added = live
         .iter()
@@ -521,7 +518,7 @@ fn refresh(library: &Library, run_id: i64, cancel: &AtomicBool) -> Result<(Value
     let uuids =
         added.iter().map(|r| r[0].as_str().expect("SQLite uuid column must be text").to_owned()).collect::<Vec<_>>();
     check(cancel)?;
-    // WD delivery uses the established native evidence-package path; source snapshot remains read-only.
+    // WD 结果走既定的原生证据包路径交付；源库快照保持只读。
     crate::app_migrate::deliver_wd(&mut c, &library.source(), library.id(), Some(&uuids), true)?;
     let list = serde_json::to_string(&uuids).expect("UUID strings are serializable");
     let labels=crate::app_migrate_data::rows(&src,&format!("SELECT uuid,value,conf,dim FROM labels WHERE ((dim='character' AND conf>=0.35) OR dim='char_ext') AND uuid IN (SELECT value FROM json_each('{}'))",list.replace('\'',"''")))?;
@@ -584,20 +581,20 @@ fn refresh(library: &Library, run_id: i64, cancel: &AtomicBool) -> Result<(Value
     } else {
         json!({"added":0,"removed":0})
     };
-    // Changed pictures were imported above (an 'imported' event follows), so similar recomputes them.
+    // 改变的图片已在上面导入（随后有 'imported' 事件），所以 similar 会重新计算它们。
     crate::app_research::forget_content(&tx, &src, &changed)?;
     for (key, hash) in hashes {
         tx.execute("INSERT INTO meta(key,value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value WHERE value<>excluded.value", params![key, hash])?;
     }
     check(cancel)?;
     crate::schema::commit_writing(tx)?;
-    // App hash markers make retry idempotent even if removing the committed journal fails.
+    // 应用库里的哈希标记让重试是幂等的，即使删除已提交的日志失败也一样。
     if journal_path.exists() {
         std::fs::remove_file(&journal_path)?;
     }
     Ok((json!({"added":out["added"],"removed":out["removed"],"pending":pending}), uuids.into_iter().collect()))
 }
-/// Pictures given up on in this run, by what helps: wait and sync again, or fix or replace the file.
+/// 本次运行放弃的图片，按怎样处理有用来分：等一会儿再同步，或者修复、替换文件。
 fn failure_message(failed: u64, damaged: u64) -> String {
     let mut parts = Vec::new();
     if failed > 0 {
@@ -608,7 +605,7 @@ fn failure_message(failed: u64, damaged: u64) -> String {
     }
     parts.join("；")
 }
-/// Folder paths the scan could not read keep their pictures as they were; say so, so the user can retry.
+/// 扫描读不到的文件夹路径里的图片保持原样；说明这一点，让用户可以重试。
 fn with_unreadable(unreadable: u64, message: String) -> String {
     if unreadable == 0 {
         return message;
@@ -620,23 +617,22 @@ fn with_unreadable(unreadable: u64, message: String) -> String {
         format!("{note}；{message}")
     }
 }
-/// Reads the recognition worker's progress file while the host waits for it. Only a value for
-/// this task, within this request's size and moving forward is accepted; anything else is ignored,
-/// so a stale or malformed file can neither fake progress nor fail the task.
+/// 在宿主等待识别 worker 时读取它的进度文件。只接受属于本任务、不超出本次请求规模并且向前推进的值；
+/// 其他都忽略，所以过期或格式不对的文件既不能伪造进度，也不能让任务失败。
 struct ProgressWatch {
     task_id: String,
     total: usize,
     read_at: Option<std::time::Instant>,
     processed: Option<usize>,
     stage: String,
-    /// When the worker reported its first recognised image, for the time estimate.
+    /// worker 报告第一张识别完的图片的时间，用于估算剩余时间。
     started: Option<(std::time::Instant, usize)>,
 }
 impl ProgressWatch {
     fn new(task_id: &str, total: usize) -> Self {
         Self { task_id: task_id.to_owned(), total, read_at: None, processed: None, stage: String::new(), started: None }
     }
-    /// The validated (stage, processed, failed) in `bytes`, if it is newer than what was shown.
+    /// `bytes` 里校验过的 (stage, processed, failed)，前提是比已显示的更新。
     fn accept(&mut self, bytes: &[u8]) -> Option<(String, usize, usize)> {
         let v: Value = serde_json::from_slice(bytes).ok()?;
         let count = |k: &str| v[k].as_u64().and_then(|n| usize::try_from(n).ok());
@@ -658,7 +654,7 @@ impl ProgressWatch {
         (self.processed, self.stage) = (Some(processed), stage.to_owned());
         Some((stage.to_owned(), processed, failed))
     }
-    /// State fields for the sync task, at most every 200 ms.
+    /// 同步任务的状态字段，最多每 200 毫秒一次。
     fn poll(&mut self, path: &std::path::Path, unreadable: usize) -> Option<Value> {
         let now = std::time::Instant::now();
         if self.read_at.is_some_and(|t| now.duration_since(t) < std::time::Duration::from_millis(200)) {
@@ -700,8 +696,7 @@ fn recognise(
     let c = crate::app_library::read_connection(&library.source())?;
     let mut assets=crate::app_migrate_data::rows(&c,"SELECT uuid,src_path,stable_hash FROM assets a WHERE in_scope=1 AND coalesce(trashed,0)=0 AND NOT EXISTS(SELECT 1 FROM labels l WHERE l.uuid=a.uuid AND l.dim='rating') ORDER BY uuid")?;
     drop(c);
-    // Pictures that could be read but not decoded wait, unchanged, until their file changes (#112);
-    // they never take a place within per_run.
+    // 能读出但解码不了的图片保持不变地等着，直到文件改变（#112）；它们从不占用 per_run 的名额。
     let marks = damaged::load(library)?;
     let (mut kept, mut held) = (serde_json::Map::new(), serde_json::Map::new());
     let mut located = HashMap::new();
@@ -717,7 +712,7 @@ fn recognise(
                 false
             }
             Some(_) => true,
-            // Not readable right now: it is retried as such, and still known damaged if it comes back unchanged.
+            // 现在读不到：按读不到重试；如果回来时没变，仍算已知损坏。
             None => {
                 held.insert(id.to_owned(), mark.clone());
                 true
@@ -779,15 +774,13 @@ fn recognise(
     command.env(crate::app_tasks::WORKER_KIND_ENV, "recognition").arg(&request).arg(&response);
     command.env("ILLUSTASH_ROOT", crate::app_paths::resolve(root)?);
     command.env("ILLUSTASH_SHARED", crate::app_resources::shared_path(root)?);
-    // Inside the task folder, so it is cleaned up with the batches. Workers that do not write it
-    // leave the count where it is until import, as before.
+    // 放在任务文件夹里，这样会随批次一起清理。不写这个文件的 worker 和以前一样，计数停在原处直到导入。
     let progress = folder.join("progress.json");
     command.env("ILLUSTASH_RECOGNITION_PROGRESS", &progress);
     let mut watch = ProgressWatch::new(&ctx.identity().task_id, readable.len());
     let unreadable = failed.len();
-    // Only the platform-accepted shipped native route mandates sidecars. The
-    // installed Python transition keeps its existing response contract. Explicit
-    // sidecar declarations remain fully validated on every platform below.
+    // 只有平台认可的、随安装包发布的原生路线才强制要求 sidecar。
+    // 安装版的 Python 过渡方案保持现有的响应契约。显式声明的 sidecar 在下面各平台上都完整校验。
     let native_adapter = crate::recognition_compute::production_adapter_enabled()
         && std::path::Path::new(worker).file_stem().is_some_and(|name| name == "illustash-recognition");
     let mut batches = Batches {
@@ -805,8 +798,8 @@ fn recognise(
         import_done: 0,
         scanned_at: None,
     };
-    // Import each finished batch while the worker computes the next, so an interruption keeps
-    // every batch already imported; the next sync then recognises only what is left.
+    // worker 计算下一批的同时导入每个已完成的批次，这样中途被打断时已导入的批次都保留；
+    // 下一次同步只识别剩下的部分。
     let status = ctx.process_observed(&mut command, || {
         if let Some(fields) = watch.poll(&progress, unreadable) {
             update(fields);
@@ -842,7 +835,7 @@ fn recognise(
             return Err(Error::Conflict("结果超出本次识别范围或重复".into()));
         }
         if batches.streamed.contains(&path) {
-            // Imported while the worker ran; its assets are already counted as seen.
+            // 已在 worker 运行期间导入；它的图片已算作看过。
             continue;
         }
         batches.claim(&ids)?;
@@ -867,7 +860,7 @@ fn recognise(
             return Err(Error::Conflict("失败结果超出本次范围或重复".into()));
         }
         let (path, hash) = &located[id];
-        // A file that cannot even be looked at now is counted as unreadable and retried.
+        // 现在连查看都做不到的文件算作读不到，之后重试。
         match (u.reason, damaged::fingerprint(path, hash.as_deref())) {
             (protocol::FailureReason::Undecodable, Some(now)) => {
                 marked.insert(id.to_owned(), now);
@@ -884,12 +877,12 @@ fn recognise(
     damaged::save(library, &kept, &marked)?;
     counts["damaged"] = json!(skipped + found);
     counts["failed"] = json!(failed.len());
-    // Recognition is over: the reply's counts are final. Import has its own count, so the bar never
-    // moves back from recognised to imported, and nothing recognised is shown as imported.
+    // 识别结束了：回复里的计数是最终值。导入有自己的计数，所以进度条从不会从「已识别」退回到「已导入」，
+    // 也不会把识别完的显示成已导入。
     let import_total = batches.import_done + packages.iter().map(|(_, ids, _)| ids.len()).sum::<usize>();
     update(json!({"status":"importing","stage":"verifying","done":total,"total":total,"failed":failed.len(),
         "import_done":batches.import_done,"import_total":import_total}));
-    // The batches not yet imported: each is checked and imported on its own, as a streamed one.
+    // 还没导入的批次：每批单独检查和导入，与流式导入的批次一样。
     for (package, ids, claims) in packages {
         batches.import(&package, &ids, claims.as_deref(), counts, update)?;
     }
@@ -899,19 +892,19 @@ fn recognise(
     Ok(())
 }
 
-/// The recognition batches of one task: which assets they cover and which are already imported.
+/// 一个任务的识别批次：覆盖哪些图片，哪些已经导入。
 struct Batches<'a> {
     library: &'a Library,
-    /// The native route must deliver character claims with every batch.
+    /// 原生路线必须在每个批次里给出角色认领。
     require_claims: bool,
     ctx: &'a crate::app_tasks::TaskContext,
     root: &'a std::path::Path,
     folder: std::path::PathBuf,
     expected: HashSet<String>,
     seen: HashSet<String>,
-    /// Batches imported while the worker still ran.
+    /// worker 还在运行时就已导入的批次。
     streamed: HashSet<std::path::PathBuf>,
-    /// Models and anchor snapshot, loaded once, at the first batch that has character claims.
+    /// 模型和锚点快照，在第一个带角色认领的批次时加载一次。
     inputs: Option<crate::app_recognition::WorkerInputs>,
     already_counted: &'a HashSet<String>,
     run_id: i64,
@@ -919,7 +912,7 @@ struct Batches<'a> {
     scanned_at: Option<std::time::Instant>,
 }
 impl Batches<'_> {
-    /// Each asset belongs to this run and to exactly one batch.
+    /// 每张图片都属于本次运行，并且恰好属于一个批次。
     fn claim(&mut self, ids: &[String]) -> Result<()> {
         for id in ids {
             if !self.expected.contains(id) || !self.seen.insert(id.to_owned()) {
@@ -928,7 +921,7 @@ impl Batches<'_> {
         }
         Ok(())
     }
-    /// Import the batches the worker has marked complete since the last look, at most every 500 ms.
+    /// 导入 worker 自上次查看以来标记为完成的批次，最多每 500 毫秒一次。
     fn stream(&mut self, counts: &mut Value, update: &dyn Fn(Value)) -> Result<()> {
         let now = std::time::Instant::now();
         if self.scanned_at.is_some_and(|t| now.duration_since(t) < std::time::Duration::from_millis(500)) {
@@ -952,8 +945,7 @@ impl Batches<'_> {
         }
         Ok(())
     }
-    /// The assets and claims sidecar of a batch the worker has finished, checked against its
-    /// completion marker.
+    /// worker 已完成的批次的图片列表和认领 sidecar，按它的完成标记核对过。
     fn complete(&self, batch: &std::path::Path) -> Result<(Vec<String>, Option<std::path::PathBuf>)> {
         let bad = || Error::Invalid("识别批次的完成标记不合法".into());
         let marker = batch.join("complete.json");
@@ -980,7 +972,7 @@ impl Batches<'_> {
         }
         Ok((ids, claims))
     }
-    /// Check and import one batch, in its own source transaction, under this task's receipt.
+    /// 在本任务的回执下，用单独的源库事务检查并导入一个批次。
     fn import(
         &mut self,
         package: &std::path::Path,
@@ -1045,7 +1037,7 @@ impl Batches<'_> {
         Ok(())
     }
 }
-/// The asset list of a result package's manifest.
+/// 结果包 manifest 里的图片列表。
 fn manifest_assets(path: &std::path::Path) -> Result<Vec<String>> {
     let manifest = path.join("manifest.json");
     if std::fs::metadata(&manifest)?.len() > 4 * 1024 * 1024 {
@@ -1082,10 +1074,9 @@ fn remember_labels(library: &Library, ids: &[String], cancel: &AtomicBool) -> Re
     Ok(())
 }
 
-/// Pictures whose file could be read but not decoded (#112). Each is kept with what its file looked
-/// like then: size, modification time and the scan's content hash (#27). While all three stay the
-/// same the picture is skipped; any change, such as the file being replaced, makes the next sync
-/// try it again. Stored as one preference, which no research input reads, so no schema change.
+/// 文件能读出但解码不了的图片（#112）。每张都连同当时文件的样子一起记下：大小、修改时间和扫描得到的
+/// 内容哈希（#27）。三者都不变时跳过这张图；任何变化，比如文件被替换，都会让下一次同步再试一次。
+/// 存成一个偏好项，没有研究输入会读它，所以不用改 schema。
 mod damaged {
     use super::*;
     const KEY: &str = "sync_damaged";
@@ -1101,7 +1092,7 @@ mod damaged {
     fn read(c: &Connection) -> Result<Marks> {
         let value: Option<String> =
             c.query_row("SELECT value FROM prefs WHERE key=?", [KEY], |r| r.get(0)).optional()?;
-        // Unreadable marks only cost one more attempt at each picture.
+        // 标记读不出时，代价只是每张图多试一次。
         Ok(value.and_then(|v| serde_json::from_str(&v).ok()).unwrap_or_default())
     }
     pub(super) fn load(library: &Library) -> Result<Marks> {
@@ -1120,7 +1111,7 @@ mod damaged {
         }
         Ok(())
     }
-    /// How many pictures are known damaged and where the first of them are, for the sync status.
+    /// 已知损坏的图片有多少张、前几张在哪里，给同步状态用。
     pub(super) fn listing(c: &Connection) -> Result<Option<crate::http_json::Json>> {
         use crate::http_json::Json;
         let marks = read(c)?;
@@ -1146,12 +1137,12 @@ mod damaged {
             ("paths", Json::Array(paths.into_iter().map(|p| p.unwrap_or_default().into()).collect())),
         ])))
     }
-    /// The status shows this many locations; the rest are counted.
+    /// 状态里显示这么多个位置；其余的只计数。
     const LISTED: i64 = 50;
     use rusqlite::OptionalExtension;
 }
 
-/// Existing host cancellation predicate; read adapters receive it at their original checkpoints.
+/// 现有的宿主取消判断；读取适配器在原来的检查点收到它。
 pub(crate) fn check(cancel: &AtomicBool) -> Result<()> {
     if cancel.load(Ordering::SeqCst) || crate::platform_process::stopping() {
         Err(Error::Conflict("扫描已中断".into()))
@@ -1206,13 +1197,13 @@ mod tests {
         assert_eq!(watch.accept(&progress("task", "recognising", 30, 0, 0)), Some(("recognising".into(), 0, 0)));
         assert_eq!(watch.accept(&progress("task", "recognising", 30, 26, 1)), Some(("recognising".into(), 26, 1)));
         for refused in [
-            progress("other", "recognising", 30, 28, 1), // a different (stale) task
-            progress("task", "recognising", 31, 28, 1),  // a different request size
-            progress("task", "recognising", 30, 31, 1),  // more than requested
-            progress("task", "recognising", 30, 28, 29), // more failures than attempts
-            progress("task", "recognising", 30, 25, 1),  // backwards
-            progress("task", "preparing", 30, 26, 1),    // back to model loading
-            progress("task", "importing", 30, 28, 1),    // not a worker stage
+            progress("other", "recognising", 30, 28, 1), // 另一个（过期的）任务
+            progress("task", "recognising", 31, 28, 1),  // 请求规模不同
+            progress("task", "recognising", 30, 31, 1),  // 超过请求的数量
+            progress("task", "recognising", 30, 28, 29), // 失败数多于尝试数
+            progress("task", "recognising", 30, 25, 1),  // 倒退
+            progress("task", "preparing", 30, 26, 1),    // 退回加载模型阶段
+            progress("task", "importing", 30, 28, 1),    // 不是 worker 的阶段
             br#"{"task_id":"task","stage":"recognising","total":30,"processed":28,"failed":1}"#.to_vec(),
             b"{\"format\":".to_vec(),
         ] {
@@ -1322,14 +1313,14 @@ mod tests {
         options.provenance_enabled = false;
         options.index_automatic = false;
         options.auto_sync = false;
-        // Every task below executes the actual sync pipeline, in the actual session-owned slot.
+        // 下面每个任务都跑真实的同步流程，用的是会话持有的真实槽位。
         for finish in ["switch", "shutdown", "drop"] {
             for stage in ["before_source_commit", "before_application_commit", "completed"] {
                 let cancelled = stage != "completed";
                 println!("SYNC_BOUNDARY {finish} stage={stage}");
                 let first = root.join(format!("{finish}-{stage}.pilib"));
                 crate::app_create::create_folder(&first, &folder, None, None, None).unwrap();
-                // Same logical ID cannot let an old task write a different physical package.
+                // 逻辑 ID 相同也不能让旧任务写入另一个物理图库包。
                 let config_path = first.join("library.json");
                 let mut config: Value = serde_json::from_slice(&std::fs::read(&config_path).unwrap()).unwrap();
                 config["id"] = replacement.id().into();
@@ -1371,8 +1362,8 @@ mod tests {
                                 || (stage == "before_application_commit" && fields["status"] == "importing"))
                                 && !gated.swap(true, Ordering::SeqCst)
                             {
-                                // Existing callbacks bracket source commit and application refresh.
-                                // Hold precisely this boundary until cancellation has been observed.
+                                // 现有的回调正好包住源库提交和应用库刷新。
+                                // 精确地停在这个边界，直到观察到取消。
                                 ready_tx.send(()).unwrap();
                                 let deadline = std::time::Instant::now() + Duration::from_secs(5);
                                 while ctx.check().is_ok() {

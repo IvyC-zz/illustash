@@ -1,5 +1,5 @@
-// Run with: node --test tests/sync_progress.test.cjs
-// The sync's words are core/jobs.js; the damaged pictures' list is the task panel's (ui/tasks.js; #199).
+// 运行：node --test tests/sync_progress.test.cjs
+// 同步的文案在 core/jobs.js；损坏图片的列表属于任务面板（ui/tasks.js；#199）。
 const {test, before} = require('node:test');
 const assert = require('node:assert/strict');
 const web = require('./web.cjs');
@@ -79,7 +79,7 @@ test('damaged pictures are listed where they are, the rest counted', () => {
 });
 
 test('a picture that cannot be decoded shows a plain placeholder; the viewer keeps its own message', async () => {
-  // wireDom() (ui/dom.js) listens for image errors on the whole page.
+  // wireDom()（ui/dom.js）在整个页面上监听图片错误。
   const dom = await web.load('ui/dom.js'), listeners = [];
   class HTMLImageElement {
     constructor(src, id = '') { this.id = id; this.src = src; this.replaced = null; }
@@ -105,7 +105,7 @@ test('a sync the system refused the Photos library says what to do, by its code 
   const refused = {status: 'error', problem: 'photos_permission', message};
   assert.equal(context.syncLine(refused), '同步失败：没有访问照片图库的权限');
   assert.equal(context.syncLine({status: 'error', message}), '同步失败');
-  // The task panel asks for it, with a button to the settings page; clicking it opens that address only.
+  // 任务面板请求这项权限，带一个去设置页的按钮；点击只打开那个地址。
   const core = web.core(), {el} = web.fakePage();
   Object.assign(core.state, {sync: refused, syncHistory: []});
   globalThis.fetch = () => new Promise(() => {});
@@ -120,7 +120,7 @@ test('a sync the system refused the Photos library says what to do, by its code 
   for (const click of el('taskPanel').listeners.click) await click({stopPropagation() {}, target: {closest: selector => selector === '[data-task]' ? button : null}});
   assert.equal(globalThis.location.href, core.PHOTOS_PRIVACY);
   assert.equal(core.PHOTOS_PRIVACY, /PHOTOS_PRIVACY: &str =\s*"([^"]+)"/.exec(require('node:fs').readFileSync(`${__dirname}/../desktop/src/server.rs`, 'utf8'))[1]);
-  // Any other failure asks nothing.
+  // 其他失败不请求任何东西。
   Object.assign(core.state, {sync: {status: 'error', message}});
   toggleTasks(false); toggleTasks(true);
   assert.doesNotMatch(el('taskPanel').innerHTML, /photos-privacy/);

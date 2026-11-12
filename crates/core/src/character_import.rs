@@ -643,7 +643,7 @@ pub fn command(c: &Connection, op: &str, args: &Value) -> Result<Option<Value>> 
     }))
 }
 
-/// Pre-relation application migrations use only the historical hierarchy/tag portion.
+/// 关系出现之前的应用迁移只用历史上的层级/标签部分。
 pub fn legacy_hierarchy(c: &Connection, index: &Value) -> Result<()> {
     if character_projection::policy(c)? {
         return Err(Error::Schema("早期应用版本与 hybrid 标记不兼容".into()));

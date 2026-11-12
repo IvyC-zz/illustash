@@ -1,4 +1,4 @@
-//! Synthetic formal-import regression; no models, private anchors, or external libraries.
+//! 正式导入的合成回归测试；不用模型、私有锚点或外部图库。
 use super::*;
 use crate::{
     app_tasks::TaskIdentity,
@@ -268,7 +268,7 @@ fn quadratic_index_checks_cancellation_before_product_without_source_lease() {
     let result = crate::recognition_compute::anchors::anchor_index_checked(&vectors, &ids, &HashMap::new(), &|| {
         let n = count.get() + 1;
         count.set(n);
-        // Reach a cross-product block (after normalizing both matrices), then cancel.
+        // 进入一个交叉乘积分块（两个矩阵都已归一化之后），然后取消。
         if n == 130 {
             let c = f.source();
             c.busy_timeout(std::time::Duration::ZERO)?;
@@ -283,7 +283,7 @@ fn quadratic_index_checks_cancellation_before_product_without_source_lease() {
 }
 #[test]
 fn external_model_root_is_authoritative_for_producer_and_importer() {
-    // Dedicated subprocess owns ILLUSTASH_MODELS; never change process-global env in parallel tests.
+    // 由专门的子进程设置 ILLUSTASH_MODELS；并行测试里绝不改动进程全局的环境变量。
     if std::env::var_os("ILLUSTASH_149_EXTERNAL_MODELS_TEST").is_none() {
         let parent = Fixture::new(false);
         let status = std::process::Command::new(std::env::current_exe().unwrap())
@@ -328,7 +328,7 @@ fn dense_anchor_boundary_refuses_old_scalar_claim_and_imports_empty_result() {
     let original = fs::read(&sidecar).unwrap();
     let mut value: Value = serde_json::from_slice(&original).unwrap();
     assert_eq!(value["claims"], json!([]));
-    // The actually reproduced old scalar result incorrectly had d=0 at p90=1e-6.
+    // 实际复现出的旧标量结果在 p90=1e-6 时错误地给出 d=0。
     value["claims"] = json!([{"asset":"a","character":"old","distance":0.0,"threshold":0.000001f32,"confidence":1.0}]);
     fs::write(&sidecar, serde_json::to_vec(&value).unwrap()).unwrap();
     assert!(f.import(&path, &sidecar).is_err());
@@ -339,7 +339,7 @@ fn dense_anchor_boundary_refuses_old_scalar_claim_and_imports_empty_result() {
     assert_eq!(count(&f.app(), "SELECT count(*) FROM candidates WHERE source='CCIP'"), 0);
     assert_eq!(human(&f.app()), before);
 }
-/// Records what an import reports (#88) and cancels when it reaches `cancel_at`, as the cancel button would.
+/// 记录导入报告的内容（#88），到达 `cancel_at` 时像取消按钮那样取消。
 struct Recorder {
     log: std::sync::Mutex<Vec<String>>,
     cancel_at: Option<&'static str>,

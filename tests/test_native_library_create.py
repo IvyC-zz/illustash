@@ -1,12 +1,10 @@
-"""Native library-create acceptance using temporary packages and the old fresh-store baseline.
+"""原生 library-create 验收，使用临时包和旧的新建 store 对照基准。
 
-Python constructs inputs only. The explicit native process has no Python PATH, never scans the
-folder, and must not update the recent-library registry. Schema and all typed table rows including
-rowids are compared with the former Python factory's fresh store, recorded through
-tests/fixed_expectations.py (#9). That baseline received
-the same two CCIP birth UUIDs through the existing new_ids protocol; the native keys are
-reproducible (store::new_key test counter). Only the named runtime timestamp fields below are
-mapped. Requires an explicitly configured factory release.
+Python 只构造输入。显式给出的原生进程的 PATH 里没有 Python，从不扫描文件夹，也不能更新最近图库登记表。
+schema 和包括 rowid 在内的全部带类型表行，与原 Python 工厂新建的 store 比较，经
+tests/fixed_expectations.py 录制（#9）。那份对照基准通过现有的 new_ids 协议拿到同样两个 CCIP 出生 UUID；
+原生的键可以复现（store::new_key 的测试计数器）。只映射下面列出的运行时时间戳字段。
+需要显式配置的工厂 release 构建。
 """
 from contextlib import closing
 import datetime
@@ -25,7 +23,7 @@ from unittest.mock import patch
 from tests.fixed_expectations import Expectations
 from tests.synthetic_source import synthetic_reference
 
-# The former factory's origins, the shipped preset choices.
+# 原工厂的出处，即随产品提供的预设选项。
 PRESETS = ('x', 'pixiv', 'other')
 
 
@@ -53,7 +51,7 @@ class NativeLibraryCreateTest(unittest.TestCase):
         self.shared.mkdir()
         self.reference = synthetic_reference(self.shared)
         self.folder = self.root / 'downloads-Pixiv'; self.folder.mkdir()
-        # A source file must not be scanned, decoded, indexed or uploaded by the factory.
+        # 工厂不能扫描、解码、索引或上传来源文件。
         (self.folder / 'not-scanned.png').write_bytes(b'not-a-real-image')
         self.rec = Expectations(self)
         self.addCleanup(self.rec.finish, self)
@@ -68,7 +66,7 @@ class NativeLibraryCreateTest(unittest.TestCase):
                     'USERPROFILE': str(self.home), 'ILLUSTASH_APP_SUPPORT': str(self.support),
                     'ILLUSTASH_SHARED': str(self.shared), 'ILLUSTASH_PYTHON_SENTINEL': str(self.sentinel),
                     'ILLUSTASH_TERMS_BIN': str(self.binary),
-                    # Reproducible native keys (store::new_key test hook), matching the recorded baseline.
+                    # 可复现的原生键（store::new_key 的测试钩子），与录制的对照基准一致。
                     'ILLUSTASH_TEST_KEY_COUNTER': str(self.root / 'key-counter')}
 
     def command(self, dest, *, reference=None, folder=None, name=None, preset=None):
@@ -97,7 +95,7 @@ class NativeLibraryCreateTest(unittest.TestCase):
         return '<generated-time>'
 
     def state(self, path, *, application=False):
-        """Full schema and rowids/typed cells; only explicitly listed runtime clocks are mapped."""
+        """完整的 schema 和 rowid/带类型的单元格；只映射显式列出的运行时时钟。"""
         with closing(sqlite3.connect(path)) as c:
             self.assertEqual(c.execute('PRAGMA quick_check').fetchone()[0], 'ok')
             schema = c.execute('SELECT type,name,tbl_name,sql FROM sqlite_schema ORDER BY type,name').fetchall()
@@ -140,7 +138,7 @@ class NativeLibraryCreateTest(unittest.TestCase):
             return schema, data
 
     def baseline(self, label, dest):
-        """The fresh library by the #201 baseline rules, the generated character keys named as in ``state``."""
+        """按 #201 对照基准规则比较新图库，生成的角色键按 ``state`` 里的方式命名。"""
         with closing(sqlite3.connect(dest / 'library.sqlite')) as c:
             linked = c.execute("SELECT l.key,t.key FROM term_links l JOIN terms t ON t.id=l.term_id "
                                "WHERE l.system='ccip' AND l.current=1 AND t.kind='character' ORDER BY l.key").fetchall()
@@ -165,11 +163,10 @@ class NativeLibraryCreateTest(unittest.TestCase):
         self.timestamp(config['created_at'], iso=True)
         self.assertEqual({k: v for k, v in config.items() if k not in {'id', 'created_at'}},
                          {k: v for k, v in expected['config'].items() if k not in {'id', 'created_at'}})
-        # Equal states: the old Store's startup, prefs, fold kinds and empty Alice/Bob
-        # directory read the same rows from both.
+        # 状态相同：旧 Store 的启动、prefs、折叠类型和空的 Alice/Bob 目录从两边读到相同的行。
         self.assertEqual(expected['source'], self.state(dest / 'source.sqlite'))
-        # The application database's content is compared by the #201 baseline (core v8 changed its schema);
-        # `state` still checks the generated keys and clocks.
+        # 应用数据库的内容按 #201 对照基准比较（core v8 改了它的 schema）；
+        # `state` 仍检查生成的键和时钟。
         self.state(dest / 'library.sqlite', application=True)
         self.baseline('fresh library', dest)
         self.assertEqual(reference_before, tree(self.shared))
@@ -189,7 +186,7 @@ class NativeLibraryCreateTest(unittest.TestCase):
                 self.assertEqual(result.returncode, 0, result.stderr.decode(errors='replace'))
                 config = json.loads((dest / 'library.json').read_text())
                 self.assertEqual(config['name'], self.folder.name)
-                # The native factory never guesses the origin from the folder name (#107): no preset is 「其他」.
+                # 原生工厂从不根据文件夹名猜测出处（#107）：不选预设就是「其他」。
                 expected = self.rec.value('source')
                 self.assertEqual(config['sources'], [expected])
         self.assertFalse(self.sentinel.exists())

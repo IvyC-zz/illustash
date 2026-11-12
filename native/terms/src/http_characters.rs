@@ -1,6 +1,7 @@
-//! Character/identity HTTP reads. Query order, stable post-sorts and dict insertion order follow Store.
+//! 角色与身份的 HTTP 读取。查询顺序、事后的稳定排序和 dict 插入顺序都与 Store 一致。
 use crate::character_entities::ENTITIES;
 use crate::character_relations::{EVIDENCE, RELATIONS};
+use crate::error::invalid;
 use crate::{
     http::LibraryContext,
     http_json::{parse_python, Json},
@@ -28,9 +29,6 @@ fn number(j: &Json, k: &str) -> i64 {
 }
 fn array(v: Vec<String>) -> Json {
     Json::Array(v.into_iter().map(Json::from).collect())
-}
-fn bad<T>(s: &str) -> Result<T> {
-    Err(Error::Invalid(s.into()))
 }
 fn remove(j: &mut Json, k: &str) -> Json {
     if let Json::Object(v) = j {
@@ -64,7 +62,7 @@ fn shown(c: &Connection, mut r: Json, skin: bool, identity: bool) -> Result<Json
 }
 fn characters(c: &Connection, q: &HashMap<String, String>, minimum: i64) -> Result<Json> {
     if minimum < 0 {
-        return bad("最小成员数不正确");
+        return invalid("最小成员数不正确");
     }
     let get = |k: &str| q.get(k).map(String::as_str).unwrap_or("");
     let nsfw = get("nsfw");
@@ -88,7 +86,7 @@ fn characters(c: &Connection, q: &HashMap<String, String>, minimum: i64) -> Resu
     }
     Ok(Json::Array(result))
 }
-/// The characters /api/characters lists, before display: the search, work, rating and size filters of `q`.
+/// /api/characters 列出的角色（整理成显示格式之前）：按 `q` 里的搜索、作品、分级和数量筛选。
 fn character_rows(c: &Connection, q: &HashMap<String, String>, minimum: i64) -> Result<Vec<Json>> {
     let get = |k: &str| q.get(k).map(String::as_str).unwrap_or("");
     let query: String = trim(get("q")).chars().take(160).collect();
@@ -142,8 +140,8 @@ fn character_rows(c: &Connection, q: &HashMap<String, String>, minimum: i64) -> 
     *bound.last_mut().expect("minimum argument") = minimum.into();
     crate::http_read::typed_rows(c, &sql, &bound)
 }
-/// Python int is unbounded; sqlite3 rejects a minimum outside its signed 64-bit binding range.
-/// Checked at the SQL bind point, after the same work/rating checks as Store.characters.
+/// Python int 没有上限；sqlite3 会拒绝超出其有符号 64 位绑定范围的最小值。
+/// 在 SQL 绑定处检查，位于与 Store.characters 相同的作品、分级检查之后。
 fn bindable_minimum(min: &str) -> Result<()> {
     let exact_min: String = min
         .trim()
@@ -159,7 +157,7 @@ fn bindable_minimum(min: &str) -> Result<()> {
     }
     Ok(())
 }
-/// The skins of the characters `ids` (a JSON list), by character, with their counts unless only a summary is asked.
+/// 角色 `ids`（JSON 列表）的皮肤，按角色分组；除非只要摘要，否则附上各自的张数。
 fn skins(c: &Connection, ids: &str, nsfw: &str, summary: bool) -> Result<HashMap<String, Vec<Json>>> {
     let variant_count = if summary {
         "NULL".to_owned()
@@ -183,8 +181,8 @@ fn skins(c: &Connection, ids: &str, nsfw: &str, summary: bool) -> Result<HashMap
     }
     Ok(variants)
 }
-/// Gives each character a cover: one of its best twelve visible pictures, preferring pictures of it alone and
-/// pictures no larger character already shows.
+/// 给每个角色选一张封面：从它最好的十二张可见图片中挑，优先选只有它一人的图，以及还没有被图片更多的
+/// 角色用作封面的图。
 fn choose_covers(c: &Connection, result: &mut [Json], ids: &str, nsfw: &str) -> Result<()> {
     let ranked = format!(
         "SELECT entity,uuid
@@ -241,7 +239,7 @@ fn choose_covers(c: &Connection, result: &mut [Json], ids: &str, nsfw: &str) -> 
     }
     Ok(())
 }
-/// A character as the summary list shows it.
+/// 摘要列表里显示的角色。
 fn summarized(r: Json) -> Json {
     const FIELDS: [&str; 12] = [
         "id",
@@ -286,7 +284,7 @@ fn profile(c: &Connection, e: &str) -> Result<Json> {
     .next()
     .ok_or_else(|| Error::Invalid("角色不存在".into()))?;
     if truth(row.field("parent_id")) {
-        return bad("请编辑角色本身，子标签跟随角色");
+        return invalid("请编辑角色本身，子标签跟随角色");
     }
     let shown = display(c, Json::object([("id", id.clone().into())]))?;
     let user = strings(
@@ -369,7 +367,7 @@ fn activity(c: &Connection, nsfw: &str) -> Result<Json> {
 }
 fn stats(c: &Connection, id: &str, nsfw: &str, exclude: &str) -> Result<Json> {
     if id.is_empty() {
-        return bad("缺少角色");
+        return invalid("缺少角色");
     }
     let where_ = format!("m.entity=? AND {}{}", visible("m"), rating("m", nsfw)?);
     let monthly = format!(
@@ -437,8 +435,7 @@ fn numeric(j: &Json) -> Option<f64> {
         _ => None,
     }
 }
-/// The pairs of identities the identity queue may ask about, each pair once by family: the shortest distance and the
-/// first hint (with its relation) found for it.
+/// 身份队列可能询问的身份对，按家族每对只出现一次：附上这一对的最短距离和最先找到的提示（连同其关系）。
 struct Pairs {
     family: HashMap<String, String>,
     counts: HashMap<String, i64>,
@@ -449,7 +446,7 @@ struct Pairs {
     keys: HashMap<(String, String), usize>,
 }
 impl Pairs {
-    /// `shown`: the content filter on the memberships `m` that count.
+    /// `shown`：对计入数量的成员关系 `m` 应用的内容筛选。
     fn load(c: &Connection, shown: &str) -> Result<Self> {
         let family = people(c)?;
         let fam = |e: &str| family.get(e).cloned().unwrap_or_else(|| e.to_owned());
@@ -511,7 +508,7 @@ impl Pairs {
         }
     }
 }
-/// Pairs the recognizer found close; their Danbooru relation is the hint.
+/// 识别器认为相近的身份对；以它们的 Danbooru 关系作为提示。
 fn close_pairs(c: &Connection, pairs: &mut Pairs, count_only: bool) -> Result<()> {
     for r in rows(c, "SELECT a,b,original_distance,distance,evidence_json FROM identity_pairs", &[])? {
         let mut hint = None::<String>.into();
@@ -537,7 +534,7 @@ fn close_pairs(c: &Connection, pairs: &mut Pairs, count_only: bool) -> Result<()
     }
     Ok(())
 }
-/// Relations still proposed, with their Danbooru tags as the hint.
+/// 仍处于提议状态的关系，以它们的 Danbooru 标签作为提示。
 fn proposed_pairs(c: &Connection, pairs: &mut Pairs, count_only: bool) -> Result<()> {
     // 原来的旧表按 id 扫描：同一对身份的提示取 id 最小的关系。
     let proposed = format!(
@@ -574,7 +571,7 @@ fn proposed_pairs(c: &Connection, pairs: &mut Pairs, count_only: bool) -> Result
 }
 fn queue(c: &Connection, limit: i64, offset: i64, nsfw: &str, count_only: bool) -> Result<Json> {
     if !(1..=100).contains(&limit) || offset < 0 {
-        return bad("分页参数不正确");
+        return invalid("分页参数不正确");
     }
     let shown = rating("m", nsfw)?;
     let mut pairs = Pairs::load(c, &shown)?;
@@ -662,7 +659,7 @@ pub fn read(c: &Connection, _context: &LibraryContext, path: &str, q: &HashMap<S
         "/api/character/stats" => stats(c, get("id"), get("nsfw"), get("exclude"))?,
         "/api/identity/count" => queue(c, 20, 0, get("nsfw"), true)?,
         "/api/identity/queue" => queue(c, int("limit", "20")?, int("offset", "0")?, get("nsfw"), false)?,
-        _ => return bad("unknown character read"),
+        _ => return invalid("unknown character read"),
     };
     Ok((value, 200))
 }
@@ -679,10 +676,10 @@ pub fn validate(path: &str, q: &HashMap<String, String>) -> Result<()> {
         .collect::<Result<Vec<_>>>()?;
     let get = |key| q.get(key).map(String::as_str).unwrap_or("");
     match path {
-        "/api/characters" if numbers[0] < 0 => return bad("最小成员数不正确"),
+        "/api/characters" if numbers[0] < 0 => return invalid("最小成员数不正确"),
         "/api/identity/queue" => {
             if !(1..=100).contains(&numbers[0]) || numbers[1] < 0 {
-                return bad("分页参数不正确");
+                return invalid("分页参数不正确");
             }
             rating("m", get("nsfw"))?;
         }
@@ -691,7 +688,7 @@ pub fn validate(path: &str, q: &HashMap<String, String>) -> Result<()> {
         }
         "/api/character/stats" => {
             if get("id").is_empty() {
-                return bad("缺少角色");
+                return invalid("缺少角色");
             }
             rating("m", get("nsfw"))?;
         }

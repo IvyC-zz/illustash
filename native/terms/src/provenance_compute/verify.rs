@@ -1,5 +1,5 @@
-//! Public thumbnail comparison through the App's existing authorized mailbox.
-//! Credentials, pacing, budgets and formal evidence publication stay in the parent.
+//! 经 App 现有的已授权 mailbox 比对公开缩略图。
+//! 凭据、限速、预算和正式证据的发布留在父进程。
 use super::{
     check_owner, groups,
     local_match::{self, Library, Signature},
@@ -51,7 +51,7 @@ struct Network<'a> {
 impl Network<'_> {
     fn bytes(&self, url: &str, query: &[(&str, String)]) -> Result<Option<Vec<u8>>> {
         let _guard = self.gate.lock().map_err(|_| invalid("网络 mailbox 锁已损坏"))?;
-        // Scope/consent is enforced again by App. This calculator cannot open a socket.
+        // 范围和同意由 App 再检查一遍。这个计算程序不能打开 socket。
         let mut target = url.to_owned();
         if !query.is_empty() {
             let encoded = url::form_urlencoded::Serializer::new(String::new())
@@ -351,9 +351,8 @@ fn prepare(
     }
     Ok((found, todo))
 }
-// Public work objects retain wire insertion order: expansion's traffic cap can
-// depend on which matching work is handled first. Do not route this map through
-// serde_json::Value's sorted object representation.
+// 公开作品对象保留线上的插入顺序：展开时的流量上限可能取决于先处理哪个匹配的作品。
+// 不要让这个映射经过 serde_json::Value 按键排序的对象表示。
 #[derive(serde::Deserialize)]
 struct Listing {
     #[serde(default)]
@@ -490,8 +489,8 @@ fn pixiv(
     }
     plan.add(plan.all.iter().take(if probe { 30 } else { 300 }).cloned().collect::<Vec<_>>(), progress);
     let found = std::thread::scope(|scope| -> Result<usize> {
-        // Same one-thread, two-listings-ahead pipeline as the existing Python worker.
-        // Network::gate serializes its single mailbox with thumbnail downloads.
+        // 与现有 Python worker 相同的流水线：一个线程，提前两页列表。
+        // Network::gate 让唯一的 mailbox 与缩略图下载串行。
         type Task = (Vec<String>, std::sync::mpsc::Sender<Result<Vec<Value>>>);
         let (jobs, incoming) = std::sync::mpsc::channel::<Task>();
         scope.spawn(move || {

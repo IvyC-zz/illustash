@@ -6,20 +6,20 @@ use std::{
     sync::{atomic::AtomicUsize, Arc},
 };
 
-/// How the synthetic server answers one path.
+/// 合成服务器对某个路径的应答方式。
 #[derive(Clone)]
 enum Mode {
     Normal,
-    /// Ignores Range: always the whole file with 200.
+    /// 忽略 Range：总是用 200 返回整个文件。
     NoRange,
     Missing,
-    /// Same size, different bytes.
+    /// 大小相同，字节不同。
     Corrupt,
-    /// The first answer declares the full length but stops after this many bytes.
+    /// 第一次应答声明完整长度，但发送这么多字节后就中断。
     DropOnce(usize),
-    /// Sends slowly, for cancelling.
+    /// 慢速发送，用于测试取消。
     Slow,
-    /// 302 to another path (as hf-mirror sends to a CDN); the Range header must follow.
+    /// 302 到另一个路径（像 hf-mirror 跳转到 CDN 那样）；Range 头必须跟着过去。
     Redirect(String),
 }
 struct Route {
@@ -27,11 +27,11 @@ struct Route {
     mode: Mode,
     served: AtomicUsize,
 }
-/// (path, Range header) of each request the server saw.
+/// 服务器收到的每个请求的（路径，Range 头）。
 type Hits = Arc<Mutex<Vec<(String, Option<String>)>>>;
 struct Server {
     base: String,
-    /// (path, Range header) of every request.
+    /// 每个请求的（路径，Range 头）。
     hits: Hits,
 }
 fn serve(routes: Vec<(&str, Vec<u8>, Mode)>) -> Server {
@@ -133,7 +133,7 @@ fn bytes(size: usize, seed: u8) -> Vec<u8> {
 fn sha(data: &[u8]) -> String {
     format!("{:x}", Sha256::digest(data))
 }
-/// Three synthetic files of different sizes: a large one in the root, one in a subfolder, a small JSON.
+/// 三个大小不同的合成文件：根目录里一个大文件，子文件夹里一个，再加一个小 JSON。
 struct Fixture {
     dir: PathBuf,
     files: Vec<(String, Vec<u8>)>,
@@ -203,7 +203,7 @@ impl Fixture {
     fn ms(&self, path: &str) -> String {
         format!("/ms/models/org/repo/resolve/master/upstream/{path}")
     }
-    /// Every file served by one source in one mode, the others by `rest`.
+    /// 由一个来源提供全部文件：`special` 里列出的按各自模式，其余按 `rest`。
     fn routes(&self, special: &[(&str, Mode)], rest: Mode, hf: bool) -> Vec<(String, Vec<u8>, Mode)> {
         self.files
             .iter()
@@ -249,7 +249,7 @@ fn installed(fixture: &Fixture, place: &Place) {
 #[test]
 fn a_failed_source_hands_over_and_a_dropped_connection_resumes() {
     let fixture = Fixture::new();
-    // The mirror lacks the big file and redirects the others to a CDN path; ModelScope drops the big file half way.
+    // 镜像缺大文件，其他文件重定向到 CDN 路径；ModelScope 发大文件时中途断开。
     let mut routes = fixture.routes(&[("big.onnx", Mode::Missing)], Mode::Normal, true);
     let mut cdn = Vec::new();
     for route in routes.iter_mut().skip(1) {
@@ -270,13 +270,13 @@ fn a_failed_source_hands_over_and_a_dropped_connection_resumes() {
     assert_eq!(job["done"], job["total"]);
     installed(&fixture, &place);
     let hits = server.hits.lock().unwrap().clone();
-    // The big file: mirror 404, ModelScope from 0, then resumed exactly where the dropped connection stopped.
+    // 大文件：镜像 404，ModelScope 从 0 开始，然后恰好从断开的位置续传。
     let big: Vec<_> = hits.iter().filter(|(p, _)| p.ends_with("big.onnx")).cloned().collect();
     assert_eq!(big[0].0, fixture.hf("big.onnx"));
     assert_eq!(big[1], (fixture.ms("big.onnx"), None));
     assert_eq!(big[2], (fixture.ms("big.onnx"), Some("bytes=120000-".into())));
     assert_eq!(big.len(), 3);
-    // Redirected files came from the mirror's CDN; nothing else asked ModelScope.
+    // 重定向的文件来自镜像的 CDN；没有别的文件向 ModelScope 请求。
     assert!(hits.iter().any(|(p, _)| p == "/cdn/feat.onnx"));
     assert!(!hits.iter().any(|(p, _)| p.starts_with("/ms/") && !p.ends_with("big.onnx")));
     let info = post(models, &place, json!({"action": "download"})).unwrap_err();
@@ -295,7 +295,7 @@ fn bytes_that_do_not_match_the_manifest_are_refused_from_every_source() {
     assert_eq!(finished(models)["status"], "done");
     installed(&fixture, &place);
 
-    // Every source corrupt: the job fails naming the file and the hash; the root is never created.
+    // 所有来源都损坏：任务失败并指出文件和哈希；根目录始终不会创建。
     let fixture = Fixture::new();
     let mut routes = fixture.routes(&[("sub/feat.onnx", Mode::Corrupt)], Mode::Normal, true);
     routes.extend(fixture.routes(&[("sub/feat.onnx", Mode::Corrupt)], Mode::Normal, false));
@@ -388,7 +388,7 @@ fn imported_files_and_zip_entries_are_matched_by_hash_whatever_their_names() {
     };
     let chosen = fixture.dir.join("downloads");
     fs::create_dir_all(&chosen).unwrap();
-    // The big file inside a ZIP with an unrelated entry; the feature file renamed; a wrong file the JSON's size.
+    // 大文件放在带一个无关条目的 ZIP 里；特征模型文件改了名；再放一个与 JSON 大小相同但内容错误的文件。
     let archive = chosen.join("models.zip");
     let mut zip = zip::ZipWriter::new(fs::File::create(&archive).unwrap());
     let options = zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
@@ -428,7 +428,7 @@ fn imported_files_and_zip_entries_are_matched_by_hash_whatever_their_names() {
     let job = finished(models);
     assert_eq!(job["results"][0]["result"], "accepted");
     installed(&fixture, &place);
-    // Once enabled, the same file again is reported as already there.
+    // 启用之后，再导入同一个文件会报告已经就位。
     post(models, &place, json!({"action": "import", "paths": [chosen.join("model (1).onnx")]})).unwrap();
     assert_eq!(finished(models)["results"][0]["result"], "already");
     for bad in [
@@ -511,7 +511,7 @@ fn system_proxy_settings_are_read_for_https() {
     let split = win.replace("127.0.0.1:7890", "http=a.local:1;https=b.local:2;socks=c.local:3");
     assert_eq!(windows_proxy(&split).as_deref(), Some("http://b.local:2"));
     assert_eq!(windows_proxy("    ProxyEnable    REG_DWORD    0x1\r\n"), None);
-    // reg.exe by its full path, never from PATH.
+    // reg.exe 用完整路径调用，从不经 PATH 查找。
     assert_eq!(reg_exe(Some(r"D:\Win".into())), Path::new(r"D:\Win").join("System32").join("reg.exe"));
     assert_eq!(reg_exe(None), Path::new(r"C:\Windows").join("System32").join("reg.exe"));
     assert_eq!(reg_exe(Some("".into())), reg_exe(None));
@@ -555,7 +555,7 @@ fn downloaded_models_are_deleted_only_when_this_install_downloads_them_and_nothi
         assert!(error.contains(message), "{error}");
         assert!(ready_at(&place.root, fixture.manifest));
     }
-    // A part of a later download is removed too.
+    // 之后某次下载留下的部分文件也一并删除。
     fs::create_dir_all(partial_dir(&place.root)).unwrap();
     fs::write(partial_dir(&place.root).join("left.part"), b"x").unwrap();
     let out = post(models, &place, json!({"action": "delete"})).unwrap();
@@ -565,7 +565,7 @@ fn downloaded_models_are_deleted_only_when_this_install_downloads_them_and_nothi
     assert!(!place.root.exists() && !partial_dir(&place.root).exists());
     assert!(!place.root.with_file_name("synthetic.1.deleting").exists());
     assert!(fs::read_dir(place.root.parent().unwrap()).unwrap().next().is_none());
-    // Deleting again is harmless.
+    // 再删一次也无妨。
     assert_eq!(post(models, &place, json!({"action": "delete"})).unwrap()["status"], "missing");
 }
 
@@ -575,7 +575,7 @@ fn the_system_reg_exe_is_called_by_its_full_path_and_read() {
     use std::os::windows::process::CommandExt;
     let reg = reg_exe(std::env::var_os("SystemRoot"));
     assert!(reg.is_absolute() && reg.is_file(), "{}", reg.display());
-    // An empty PATH: the full path alone must find it.
+    // PATH 为空：仅凭完整路径必须能找到它。
     let out = std::process::Command::new(&reg)
         .args(["query", r"HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings"])
         .env("PATH", "")
@@ -584,7 +584,7 @@ fn the_system_reg_exe_is_called_by_its_full_path_and_read() {
         .unwrap();
     assert!(out.status.success());
     let text = String::from_utf8_lossy(&out.stdout);
-    // Whatever this machine's setting, reading it never fails, and a proxy is only reported when enabled.
+    // 无论本机怎么设置，读取都不会失败，并且只有启用时才报告代理。
     if windows_proxy(&text).is_some() {
         assert!(text.contains("0x1"));
     }

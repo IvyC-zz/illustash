@@ -231,7 +231,7 @@ pub fn judge(
     reason: &str,
     label: &str,
 ) -> Result<ActionId> {
-    // Keep argument refusal ahead of taking the write lock, as in the original command.
+    // 和原命令一样，先拒绝不合法的参数，再取写锁。
     judge_args(targets, origin, label)?;
     let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
     let action = judge_in(&tx, targets, verdict, origin, reason, label)?;
@@ -249,7 +249,7 @@ fn judge_args(targets: &[VerdictTarget], origin: &str, label: &str) -> Result<()
     Ok(())
 }
 
-/// Same judge rules inside an application-owned transaction (selection and concept creation included).
+/// 同样的裁决规则，在应用持有的事务里执行（包括选择和概念创建）。
 pub fn judge_in(
     conn: &Connection,
     targets: &[VerdictTarget],
@@ -363,7 +363,7 @@ pub fn undo(conn: &mut Connection, expected: Option<ActionId>) -> Result<Undo> {
     Ok(result)
 }
 
-/// Caller retains the transaction to add the existing character effect or handle foreign application history.
+/// 事务留给调用方，用来补上现有的角色效果，或处理外来的应用历史。
 pub fn undo_in(conn: &Connection, expected: Option<ActionId>) -> Result<(Undo, bool)> {
     crate::schema::require_current(conn)?;
     let last: Option<(ActionId, String, String)> = conn
@@ -495,8 +495,8 @@ pub fn rebuild_active_evidence(conn: &Connection) -> Result<Vec<AssetId>> {
          ON s.scope='all' OR EXISTS(SELECT 1 FROM term_evidence_set_assets x WHERE x.set_id=s.id AND x.asset_id=a.id)
          GROUP BY a.id,s.source,s.method";
     const HAVE: &str = "SELECT asset_id,source,method,set_id FROM term_active_evidence";
-    // The effective set is identical for both EXCEPT directions and the insert.
-    // Materialize it once instead of repeating the asset/batch coverage join.
+    // 两个方向的 EXCEPT 和插入用的生效集合相同。
+    // 物化一次，不再重复图片/批次覆盖的连接。
     conn.execute_batch(
         "CREATE TEMP TABLE IF NOT EXISTS wanted_evidence(
       asset_id INTEGER,source TEXT,method TEXT,set_id INTEGER,

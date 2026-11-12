@@ -40,7 +40,7 @@ assert not blocked.intersection(sys.modules)
         self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_reference_has_fixed_schema_and_only_reference_rows(self):
-        # DDL fingerprints from 67d11a65's original helpers, not a native candidate.
+        # DDL 指纹取自 67d11a65 的原始辅助函数，不是原生候选。
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             for path, digest, counts in (

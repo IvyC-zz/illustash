@@ -1,13 +1,12 @@
-//! Fixed HTTP contracts of the native host, as the comparison baseline of the first public test release (#201): the
-//! four scenarios of the former Python-reference contracts, recorded from main on core version 7 (PR #239), replayed
-//! against this build. This executable and its host child need no Python (`tools/test_native_contracts.sh` runs it
-//! with an empty PATH).
+//! 原生宿主的固定 HTTP 契约，作为第一个公开测试版的对照基准（#201）：以前 Python 参考实现契约的四个场景，
+//! 在词条核心第 7 版的 main 上录制（PR #239），对本次构建重放。这个可执行文件和它启动的宿主子进程都不需要 Python
+//! （`tools/test_native_contracts.sh` 用空 PATH 运行它）。
 //!
-//! Each scenario materializes its synthetic package, starts the host with no inherited environment (as the
-//! contracts do), and replays the requests. A library at an older core version than this build is opened with
-//! `--upgrade`, the way the user's libraries are (#193): one pre-upgrade backup, holding the library as it was.
-//! Replies are compared as bytes after `common/baseline.rs` masking (and the random session token); every
-//! database of the package is compared after start-up and after each request, by the rules there.
+//! 每个场景先生成自己的合成图库包，在不继承任何环境变量的情况下启动宿主（与契约的做法相同），再重放请求。
+//! 词条核心版本比本次构建旧的图库用 `--upgrade` 打开，与用户的图库相同（#193）：留一份升级前备份，保存图库原来的样子。
+//! 响应经 `common/baseline.rs` 的遮盖（以及随机会话 token 的遮盖）后按字节比较；图库包的每个数据库在启动后和
+//! 每次请求后都按那里的规则比较。
+#![allow(clippy::unwrap_used, reason = "集成测试里 unwrap 就是断言")]
 use rusqlite::Connection;
 use serde_json::{json, Map, Value};
 use std::collections::BTreeMap;
@@ -48,7 +47,7 @@ impl Drop for Host {
 fn text_masks(root: &Path) -> impl Fn(&str) -> String + '_ {
     move |text: &str| {
         let real = root.to_str().unwrap();
-        // As written, and escaped inside JSON text (Windows paths).
+        // 原样的写法，以及在 JSON 文本里转义后的写法（Windows 路径）。
         let escaped = json!(real).to_string();
         text.replace(&escaped[1..escaped.len() - 1], "@ROOT@").replace(real, "@ROOT@")
     }
@@ -58,7 +57,7 @@ fn states(package: &Path, root: &Path) -> BTreeMap<String, baseline::State> {
     states_at(package, root, illustash_terms::SCHEMA_VERSION)
 }
 
-/// The compared content, `version` being the current core version (the recorded inputs: the recorded one).
+/// 参与比较的内容；`version` 是当前的词条核心版本（录制的输入则用录制时的版本）。
 fn states_at(package: &Path, root: &Path, version: i64) -> BTreeMap<String, baseline::State> {
     let roots = text_masks(root);
     let masks = baseline::Masks { roots: &roots, version };
@@ -139,7 +138,7 @@ fn materialize(fixture: &Value, category: &str) -> (Sandbox, PathBuf, PathBuf) {
     )));
     fs::create_dir_all(&scratch.0).unwrap();
     let root = scratch.0.canonicalize().unwrap();
-    // Windows canonical paths carry a verbatim `\\?\` prefix the host never produces.
+    // Windows 规范化路径带有 `\\?\` 原样前缀，而宿主从不产生这种前缀。
     #[cfg(windows)]
     let root = PathBuf::from(root.to_str().unwrap().strip_prefix(r"\\?\").unwrap());
     let package = root.join("fixture.pilib");
@@ -153,7 +152,7 @@ fn materialize(fixture: &Value, category: &str) -> (Sandbox, PathBuf, PathBuf) {
             c.pragma_update(None, "foreign_keys", false).unwrap();
             c.execute_batch(&sql.replace("@ROOT@", root.to_str().unwrap())).unwrap();
         } else {
-            // Text inputs are JSON documents: the root goes in as a JSON string body.
+            // 文本输入是 JSON 文档：根目录按 JSON 字符串的内容写进去。
             let encoded = json!(root.to_str().unwrap()).to_string();
             fs::write(path, input["text"].as_str().unwrap().replace("@ROOT@", &encoded[1..encoded.len() - 1])).unwrap();
         }
@@ -238,7 +237,7 @@ fn load(category: &str) -> Value {
     fixture
 }
 
-/// One pre-upgrade backup, holding the library as it was.
+/// 恰好一份升级前备份，保存图库原来的样子。
 fn check_backup(
     package: &Path,
     root: &Path,
@@ -273,10 +272,9 @@ fn replay(category: &str) {
             .unwrap();
         baseline::terms_version(&c)
     };
-    // Recorded with `--upgrade` (upgrade_v6): the host upgrades it, as recorded. The others were at the core version
-    // of the recording; on a later core they are upgraded first with the core's own command, as `baseline.rs` does
-    // (the host's `--upgrade` would also bring these synthetic packages' older source.sqlite layout up to date, which
-    // was not part of the recording), and the pre-upgrade backup is checked and removed.
+    // 用 `--upgrade` 录制的（upgrade_v6）：与录制时一样由宿主升级。其余场景录制时就在当时的词条核心版本；
+    // 遇到更新的词条核心时，先像 `baseline.rs` 那样用词条核心自己的命令升级（宿主的 `--upgrade` 还会把这些合成图库包
+    // 较旧的 source.sqlite 布局一并更新，而这不在录制范围内），再检查并删除升级前备份。
     let upgrade = version < recorded;
     if version == recorded && recorded < illustash_terms::SCHEMA_VERSION {
         let done = Command::new(env!("CARGO_BIN_EXE_illustash-terms"))
@@ -355,15 +353,14 @@ fn interrupted_task_recovery_contract() {
     replay("task_recovery");
 }
 
-/// A reply as JSON (the benchmark reads values from replies).
+/// 把响应解析成 JSON（基准测试要从响应里读值）。
 #[cfg(unix)]
 fn request_json(origin: &str, url: &str, body: Option<&Value>, token: &str) -> (u16, Value, Map<String, Value>) {
     let (status, raw, headers) = request(origin, url, body, token);
     (status, serde_json::from_str(&raw).unwrap_or(Value::Null), headers)
 }
 
-// One independent trial per executable invocation. The shell runner takes exactly
-// three trials for each explicit release host and reports their medians.
+// 每次调用这个可执行文件做一次独立试验。shell 运行脚本对每个显式指定的 release 宿主恰好做三次试验，报告中位数。
 #[cfg(unix)]
 #[test]
 #[ignore = "explicit release performance runner only"]
@@ -373,8 +370,8 @@ fn benchmark_release_host() {
     }
     let binary = std::env::var_os("ILLUSTASH_BENCH_BINARY").expect("explicit release binary");
     let (_scratch, root, package) = materialize(&load("http_api"), "benchmark");
-    // Fixed 4096 synthetic application/source assets, two reference characters.
-    // Three original assets keep their claims; others are unclassified, no files decoded.
+    // 固定 4096 个合成的应用侧和来源侧资产，两个参考角色。
+    // 原有的三个资产保留各自的认领；其余未分类，不解码任何文件。
     for name in ["library.sqlite", "source.sqlite"] {
         let mut c = Connection::open(package.join(name)).unwrap();
         let tx = c.transaction().unwrap();
@@ -391,7 +388,7 @@ fn benchmark_release_host() {
         }
         tx.commit().unwrap();
     }
-    // A physically different package has the same library ID; every switch must open that instance.
+    // 一个物理上不同的图库包使用同一个图库 ID；每次切换都必须打开那个实例。
     fn copy_tree(from: &Path, to: &Path) {
         fs::create_dir(to).unwrap();
         for entry in fs::read_dir(from).unwrap() {
@@ -406,12 +403,13 @@ fn benchmark_release_host() {
     }
     let replacement = root.join("replacement.pilib");
     copy_tree(&package, &replacement);
-    // Measure complete process launch -> package validation/recovery -> bootstrap readiness.
+    // 测量完整过程：启动进程 -> 校验和恢复图库包 -> bootstrap 就绪。
     let mut opens = Vec::new();
     for _ in 0..7 {
         let start = Instant::now();
         let (mut opened, _, _) = launch(&root, &package, "benchmark", false, Path::new(&binary));
         opens.push(start.elapsed().as_secs_f64() * 1000.0);
+        // SAFETY: kill 只接收整数；子进程尚未回收，PID 不会被复用。
         unsafe {
             libc::kill(opened.child.id() as i32, libc::SIGTERM);
         }
@@ -467,10 +465,12 @@ fn benchmark_release_host() {
     switches.sort_by(f64::total_cmp);
     samples.insert("switch".into(), json!((switches[9] + switches[10]) / 2.0));
     host.child.kill().unwrap();
+    // SAFETY: libc::rusage 只含整数和 timeval，全零是合法值。
     let mut usage: libc::rusage = unsafe { std::mem::zeroed() };
     let mut status = 0;
+    // SAFETY: PID 属于尚未回收的子进程，`status`、`usage` 是本地出参。
     assert_eq!(unsafe { libc::wait4(host.child.id() as i32, &mut status, 0, &mut usage) }, host.child.id() as i32);
-    // wait4 already owns reaping; Drop must never signal a potentially reused PID.
+    // wait4 已经完成回收；Drop 绝不能向可能已被复用的 PID 发信号。
     host.reaped = true;
     let bytes = if cfg!(target_os = "macos") { usage.ru_maxrss as f64 } else { usage.ru_maxrss as f64 * 1024.0 };
     samples.insert("rss_mib".into(), json!(bytes / 1048576.0));

@@ -1,6 +1,5 @@
-//! Explicit upgrades of format-1 packages: libraries switched to the core in every domain (core 5 to the version before
-//! this build's) upgrade in one application-database transaction after a backup. Libraries from before the switch are
-//! refused; the `pre-v8` version upgrades them first (#201, user decision 2026-10-19).
+//! 格式 1 图库包的显式升级：所有领域都已切换到词条核心的图库（核心 5 到本构建的前一版），在备份后用一个应用数据库
+//! 事务完成升级。切换之前的图库一律拒绝；由 `pre-v8` 版本先升级它们（#201，用户 2026-10-19 决定）。
 use crate::{
     app_library::{self, Library},
     Error, Result,
@@ -63,18 +62,17 @@ impl From<Error> for UpgradeFailure {
     }
 }
 
-/// What the page and the desktop shell say before asking to upgrade (#193). Pages recognise it by this text.
+/// 页面和桌面外壳在请求升级前显示的文字（#193）。页面靠这段文字识别它。
 pub(crate) const NEEDED: &str =
     "这个图库需要升级到新格式才能打开。升级后旧版本的 Illustash 打不开它；升级前会自动备份，升级没有完成时图库保持原样。";
 
-/// Whether a package that failed to open is one an explicit upgrade can open, checked read-only from versions,
-/// markers and schemas: no full integrity check, so a large library is asked about at once (#267).
+/// 打开失败的图库包是否能由显式升级打开，只读地根据版本、标记和 schema 判断：不做完整性全检，所以大图库也能立刻
+/// 问到（#267）。
 pub(crate) fn needed(path: &Path) -> Option<ValidatedUpgrade> {
     prepare(path).ok()
 }
 
-/// Why a package that failed to open cannot be upgraded by this version, when the `pre-v8` version can (#201): what
-/// the page says instead of an internal failure.
+/// 打开失败的图库包这个版本升级不了、而 `pre-v8` 版本可以时（#201），说明原因：页面显示这段话，而不是内部错误。
 pub(crate) fn pre_v8(path: &Path) -> Option<String> {
     match prepare(path) {
         Err(Error::Schema(why)) if why.contains(PRE_V8) => Some(why),
@@ -82,10 +80,10 @@ pub(crate) fn pre_v8(path: &Path) -> Option<String> {
     }
 }
 
-/// What the upgrade is doing, for the desktop start page: the stage and the fraction of the whole upgrade.
+/// 升级正在做什么，给桌面外壳的启动页：所处阶段以及占整个升级的比例。
 pub(crate) type Progress = app_library::Progress;
 
-/// Upgrade a prepared package, saying what happened on the terminal as `--upgrade` does.
+/// 升级一个已预检的图库包，并像 `--upgrade` 那样在终端上说明结果。
 pub(crate) fn run(
     prepared: &ValidatedUpgrade,
     progress: Option<Progress>,
@@ -101,7 +99,7 @@ pub(crate) fn run(
     Ok(report)
 }
 
-/// The backup's path as the page shows it: without Windows' verbatim `\\?\` prefix when it is not needed.
+/// 页面显示的备份路径：不需要时去掉 Windows 的 verbatim 前缀 `\\?\`。
 pub(crate) fn shown(path: &Path) -> String {
     crate::app_paths::canonical(path).unwrap_or_else(|_| path.to_owned()).to_string_lossy().into_owned()
 }
@@ -112,8 +110,8 @@ impl ValidatedUpgrade {
     }
 }
 
-/// No SQLite writes, backups, session registration, or source-index refresh; no full integrity check either:
-/// `upgrade` runs it once under its writer lock, before the backup (#267).
+/// 不写 SQLite、不备份、不登记会话、不刷新源库索引；也不做完整性全检：
+/// 由 `upgrade` 在写入锁下、备份之前做一次（#267）。
 pub(crate) fn prepare(path: &Path) -> Result<ValidatedUpgrade> {
     let library = Library::open_for_upgrade_deferring_checks(path)?;
     let mut c = app_library::read_connection(&library.db())?;
@@ -124,12 +122,11 @@ pub(crate) fn prepare(path: &Path) -> Result<ValidatedUpgrade> {
     Ok(ValidatedUpgrade { library, before })
 }
 
-/// What a library from before the switch to the core is told: this version no longer upgrades it (#201).
+/// 切换到词条核心之前的图库得到的说明：这个版本不再升级它（#201）。
 pub(crate) const PRE_V8: &str =
     "这个图库还没有完全切换到词条核心，这个版本不再升级它：请先用 pre-v8 版本打开并升级，再用这个版本打开。";
 
-/// A library some domain of which was never switched to the core (application schema before 36, or a switch marker
-/// missing or unfinished): refused with `PRE_V8`, read-only.
+/// 有某个领域从未切换到词条核心的图库（应用 schema 低于 36，或者切换标记缺失或未完成）：以 `PRE_V8` 拒绝，只读。
 pub(crate) fn refuse_unswitched(c: &Connection) -> Result<()> {
     let has_meta: bool =
         c.query_row("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='meta')", [], |r| r.get(0))?;
@@ -147,8 +144,8 @@ pub(crate) fn refuse_unswitched(c: &Connection) -> Result<()> {
     Ok(())
 }
 
-/// The read-only checks of a package an explicit upgrade may open: a switched library at an older core version.
-/// The full integrity check is not among them: whoever opens runs it once (`Library::check`, or `upgrade`).
+/// 显式升级可以打开的图库包要过的只读检查：已切换、词条核心版本较旧的图库。
+/// 完整性全检不在其中：由打开的一方做一次（`Library::check` 或 `upgrade`）。
 pub(crate) fn validate(c: &Connection) -> Result<()> {
     if meta(c, "schema_version")?.is_some_and(|v| v.parse::<i64>().map_or(true, |v| v > 36)) {
         return Err(Error::Schema("应用库版本较新或无效，已停止迁移".into()));
@@ -163,22 +160,19 @@ pub(crate) fn validate(c: &Connection) -> Result<()> {
     Ok(())
 }
 
-/// The stages of an upgrade and the fraction of the whole each starts at. The checks before the backup read both
-/// databases in full and take most of the time; the backup, the migration and the space reclamation report nothing
-/// while they run (the desktop host keeps the start page alive meanwhile); the check after the commit reads
-/// library.sqlite again.
+/// 升级的各个阶段，以及每个阶段起始时占整个升级的比例。备份前的检查要完整读两个数据库，占大部分时间；
+/// 备份、迁移和空间回收运行期间不报告任何进度（这期间由桌面宿主维持启动页）；提交后的检查再读一遍 library.sqlite。
 const CHECKED: f64 = 0.6;
 const BACKUP: f64 = 0.6;
 const MIGRATE: f64 = 0.7;
 const COMPACT: f64 = 0.75;
 const VERIFY: (f64, f64) = (0.8, 0.95);
 
-/// One application SQLite commit. Failure before commit rolls it back; restoration is explicit.
+/// 一次应用 SQLite 提交。提交前失败会回滚；恢复要显式进行。
 ///
-/// The full integrity checks run once each, inside the writer transaction so that what they read is what is backed
-/// up and migrated: both databases before the backup, and library.sqlite, the only file written, after the commit.
-/// Until #267 the same upgrade read library.sqlite in full ten times and source.sqlite six
-/// (opening, preflight and re-validation each checked again), none of it reported.
+/// 完整性全检各做一次，都在写入事务内，这样检查读到的就是要备份和迁移的内容：备份前检查两个数据库，提交后检查
+/// 唯一被写入的 library.sqlite。#267 之前，同一次升级要完整读 library.sqlite 十次、source.sqlite 六次
+/// （打开、预检和重新校验各自又检查一遍），而且都不报告进度。
 pub(crate) fn upgrade(
     prepared: &ValidatedUpgrade,
     progress: Option<Progress>,
@@ -200,7 +194,7 @@ where
             progress(text, done)
         }
     };
-    // Repeat package validation: a prepared handle is not permission to upgrade a changed package.
+    // 重新校验图库包：已预检的句柄不等于允许升级一个已经改变的图库包。
     let current = prepared.library.reopen_for_upgrade_deferring_checks()?;
     if current.instance_path() != prepared.library.instance_path() || current.config() != prepared.library.config() {
         return Err(Error::Conflict("升级预检后图库包已改变，请重新预检".into()).into());
@@ -216,15 +210,15 @@ where
             return Err(Error::Conflict("升级预检后词条版本已改变，请重新预检".into()));
         }
         preflight_source(&current)?;
-        // Damage stops the upgrade before any backup. Other writers are excluded from here to the commit.
+        // 有损坏时在任何备份之前停止升级。从这里到提交，其他写入方都被排除在外。
         current.check(progress.clone().map(|p| {
             Arc::new(move |label: &str, done: f64| p(&format!("正在检查图库数据（{label}）"), done * CHECKED))
                 as Progress
         }))?;
         stage("正在备份图库", BACKUP);
         pause_for_tests();
-        // An independent reader sees the committed state while this transaction excludes other writers.
-        // SQLite backup preserves implicit rowids; VACUUM INTO would rewrite them in the recovery copy.
+        // 这个事务排除其他写入方期间，独立的读连接看到的是已提交的状态。
+        // SQLite backup 保留隐式 rowid；VACUUM INTO 会在恢复副本里重写它们。
         let snapshot = app_library::read_connection(&current.db())?;
         let prepared_backup =
             crate::schema_rules::prepare_upgrade_backup(&snapshot, before, &crate::platform_backup::capability())?;
@@ -236,7 +230,7 @@ where
         before_commit(&tx)?;
         tx.commit()?;
         committed = true;
-        // Same post-commit maintenance as the existing core CLI. Busy/disk failures retain its retry marker.
+        // 提交后的维护与现有的核心 CLI 相同。忙或磁盘失败时保留它的重试标记。
         if meta(&c, "terms_compact_pending")?.is_some() {
             stage("正在回收图库空间", COMPACT);
         }
@@ -244,7 +238,7 @@ where
         let maintenance_pending = meta(&c, "terms_compact_pending")?.is_some();
         drop(c);
         after_commit(&current)?;
-        // source.sqlite was not written and was checked before the backup; library.sqlite is checked again.
+        // source.sqlite 没有被写入，备份前已检查过；library.sqlite 再检查一次。
         let library = current.reopen_deferring_checks()?;
         library.check_application(progress.clone().map(|p| {
             Arc::new(move |done: f64| p("正在核对升级后的图库数据", VERIFY.0 + (VERIFY.1 - VERIFY.0) * done))
@@ -257,14 +251,14 @@ where
 fn meta(c: &Connection, key: &str) -> Result<Option<String>> {
     Ok(c.query_row("SELECT value FROM meta WHERE key=?", [key], |r| r.get(0)).optional()?)
 }
-/// Test-only: `ILLUSTASH_TEST_UPGRADE_PAUSE_MS` makes the step after the checks take that long, as the backup and the
-/// migration of a large library do, without reporting anything (#267).
+/// 仅供测试：`ILLUSTASH_TEST_UPGRADE_PAUSE_MS` 让检查之后的那一步花这么长时间，就像大图库的备份和迁移那样，
+/// 期间不报告任何进度（#267）。
 fn pause_for_tests() {
     if let Some(ms) = std::env::var("ILLUSTASH_TEST_UPGRADE_PAUSE_MS").ok().and_then(|v| v.parse().ok()) {
         std::thread::sleep(std::time::Duration::from_millis(ms));
     }
 }
-/// The source schema the upgraded library reads; its full check is `upgrade`'s.
+/// 升级后的图库要读的源库 schema；它的全检由 `upgrade` 做。
 fn preflight_source(library: &Library) -> Result<()> {
     let mut c = app_library::read_connection(&library.source())?;
     let tx = c.transaction()?;
@@ -296,14 +290,14 @@ fn preflight_application(c: &Connection) -> Result<i64> {
         return Err(Error::Schema("身份策略 v2 需要应用层转换，本批词条升级不支持".into()));
     }
     crate::character_projection::policy(c)?;
-    // Opening cannot silently compensate for unbuilt indexes or the Store.initialize write path.
+    // 打开时不能悄悄补上未建好的索引，也不能走 Store.initialize 的写入路径。
     for key in ["indexed", "general_indexed", "rating_indexed", "names_version"] {
         if meta(c, key)?.is_none() {
             return Err(Error::Schema(format!("应用初始化或索引未完成：缺少 {key}。{why}", why = PRE_V8)));
         }
     }
-    // All established schema-36 application read objects and core-5 storage must already exist.
-    // Preparing views expands their dependencies without mutating projections or creating temp tables.
+    // 所有已确立的 schema 36 应用读取对象和核心 5 存储都必须已经存在。
+    // 预处理视图会展开它们的依赖，而不会改动投影或建临时表。
     const OBJECTS: &str = "assets entities candidates general_hits assertions deferred imported asset_tags asset_rating actions image_sigs relations asked audit_sample name_cache name_settings reviews prefs family_evidence single_assets lead_assets duplicates curation sync_runs sync_added similar_groups clusters cluster_info prototypes weak_claims proto_claims learn_state auto_rules excluded family_confirmed membership_rules memberships tag_memberships variant_memberships ambiguous_claims identity_relations identity_evidence identity_decisions identity_decision_evidence identity_canonical identity_scopes identity_suspended identity_uncertain identity_anchor_decisions identity_anchor_history identity_pairs identity_nodes backend_effects term_assets terms term_names term_links term_relations term_packages term_evidence term_projection term_batches term_verdicts term_evidence_sets term_evidence_set_assets term_evidence_set_rows term_active_evidence term_identity_baseline term_tree term_legacy_ids term_key_names term_key_aliases term_name_display term_name_choice term_effective_verdicts term_relation_states term_relation_latest term_current_evidence";
     for object in OBJECTS.split_whitespace() {
         c.prepare(&format!("SELECT * FROM {object} LIMIT 0"))
@@ -346,8 +340,8 @@ mod tests {
     static NEXT: AtomicU64 = AtomicU64::new(0);
     struct Fixture(PathBuf);
     impl Fixture {
-        // Genuine migrate_to old core DDL, not a schema-7 database with a downgraded version marker.
-        // Full historical producer/data equivalence is separately covered by application integration tests.
+        // 用真正的 migrate_to 生成旧核心 DDL，而不是把 schema 7 数据库的版本标记改低。
+        // 历史产出方和数据的完全等价另由应用集成测试覆盖。
         fn new(version: i64) -> Self {
             let p = std::env::temp_dir().join(format!(
                 "illustash-upgrade-{}-{}.pilib",
@@ -369,8 +363,8 @@ mod tests {
             if version == 6 {
                 crate::schema::migrate_to(&mut c, 6).unwrap();
                 crate::schema::compact_pending(&c);
-                // Partial fixture construction now uses the public backup-safe Core API.
-                // Remove only this synthetic fixture's setup backup before measuring the real upgrade.
+                // 夹具的部分构建现在用公开的、备份安全的核心 API。
+                // 只删掉这个合成夹具建立时产生的备份，再测量真正的升级。
                 fs::remove_dir_all(p.join("library-backups")).unwrap();
             }
             c.execute_batch("CREATE TABLE implicit_rows(value TEXT); INSERT INTO implicit_rows(rowid,value) VALUES(27,'retain rowid');").unwrap();
@@ -467,7 +461,7 @@ mod tests {
             assert_eq!(before, fs::read(f.0.join("library.sqlite")).unwrap());
             assert_eq!(f.backups(), 0);
         }
-        // Layouts from before the core 5 era: the pre-v8 version upgrades them (#201).
+        // 核心 5 之前的布局：由 pre-v8 版本升级（#201）。
         let f = Fixture::new(5);
         crate::sqlite::open(f.0.join("source.sqlite")).unwrap().execute_batch("DROP TABLE files").unwrap();
         assert!(prepare(&f.0).unwrap_err().to_string().contains("pre-v8"));
@@ -494,7 +488,7 @@ mod tests {
         assert_eq!(f.backups(), 0);
         assert_eq!(crate::schema::version(&f.connection()).unwrap(), 5);
     }
-    /// Some pages of synthetic rows in a table of their own, then garbage over one of them: only a full check finds it.
+    /// 在一张单独的表里写几页合成行，再用垃圾数据覆盖其中一页：只有完整性全检才能发现。
     fn damage(db: &Path) {
         let c = crate::sqlite::open(db).unwrap();
         c.execute_batch(
@@ -516,8 +510,8 @@ mod tests {
     }
     #[test]
     fn asking_reads_no_data_and_the_upgrade_checks_before_its_backup() {
-        // Whether to offer the upgrade is read from versions and schemas (#267): damage only a full check finds does
-        // not delay or change the question. The upgrade's own check finds it before any backup or write.
+        // 是否提出升级只看版本和 schema（#267）：只有全检才能发现的损坏不会拖慢或改变这个提问。
+        // 升级自己的检查会在任何备份或写入之前发现它。
         let f = Fixture::new(5);
         damage(&f.0.join("source.sqlite"));
         let before = fs::read(f.0.join("library.sqlite")).unwrap();

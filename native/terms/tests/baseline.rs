@@ -1,19 +1,19 @@
-//! The comparison baseline of the first public test release (#201), replayed against this build.
+//! 第一个公开测试版的对照基准（#201），对本次构建重放。
 //!
-//! `tests/fixtures/baseline/` holds the scenarios of the former Python-era call recordings, recorded from main on
-//! core version 7 (`record_baseline` in the former `tests/replay.rs`, PR #239): every call the core still serves once the legacy
-//! tables are gone, its replies, and what it changed in the call's database. Calls that only served the legacy
-//! tables (`sync-*`, `verify-*`, `cutover-*`, and calls on a library not yet switched to the core) are not in
-//! it: the database they left is a checkpoint, put in place before the next call, and upgraded first when it is a
-//! switched library at the core version the baseline was recorded on. What is compared, and how, is in `common/baseline.rs`.
+//! `tests/fixtures/baseline/` 存放以前 Python 时代调用录制的各个场景，在词条核心第 7 版的 main 上录制（以前
+//! `tests/replay.rs` 里的 `record_baseline`，PR #239）：旧表删除后词条核心仍然提供的每个调用、它的响应，以及它对
+//! 该调用所用数据库的改动。只为旧表服务的调用（`sync-*`、`verify-*`、`cutover-*`，以及在尚未切换到词条核心的图库上的
+//! 调用）不在其中：它们留下的数据库作为检查点，在下一个调用前放好；如果它是已切换的图库、且处于录制对照基准时的
+//! 词条核心版本，就先升级。比较什么、怎么比较，见 `common/baseline.rs`。
 //!
-//! Each case runs in its own directory with its own key counter (`ILLUSTASH_TEST_KEY_COUNTER`), restored at
-//! checkpoints, so the core makes the same keys as when recorded; learning stamps hash clocks and are passed on
-//! from the reply they came from (`<stamp@N>` in an input is the N-th stamp seen in this case's replies).
+//! 每个用例在自己的目录里运行，有自己的键计数器（`ILLUSTASH_TEST_KEY_COUNTER`），在检查点处恢复，所以词条核心生成的键
+//! 与录制时相同；学习戳记里哈希了时钟，所以从产生它的响应里取出再往下传（输入中的 `<stamp@N>` 是本用例的响应里
+//! 出现的第 N 个戳记）。
 //!
 //! 基准录在导入按 tag 后缀建作品（#296）之前：每次重放的调用都设上 `ILLUSTASH_TEST_NO_IMPORT_WORKS`（`NO_IMPORT_WORKS`），
 //! 导入照旧规则走，录下的期望不改（用户 2026-11-12 定）。新规则由它自己的测试覆盖（`character_import`、`app_create`、
 //! `app_recognition`）。
+#![allow(clippy::unwrap_used, reason = "集成测试里 unwrap 就是断言")]
 use flate2::read::GzDecoder;
 use regex::Regex;
 use rusqlite::Connection;
@@ -34,11 +34,11 @@ const COMPANIONS: [&str; 4] = ["", "-wal", "-shm", "-journal"];
 /// 只供测试：#296 之前的导入规则（见模块说明）。
 const NO_IMPORT_WORKS: &str = "ILLUSTASH_TEST_NO_IMPORT_WORKS";
 
-/// A case's temporary roots: `@ROOT@`, `@ROOT_1@`, … and the real directories they stand for.
+/// 一个用例的临时根目录：`@ROOT@`、`@ROOT_1@`……以及它们代表的真实目录。
 struct Roots {
-    /// (token, real path).
+    /// （占位符，真实路径）。
     roots: Vec<(String, String)>,
-    /// (real path spelling, token), longest first: what `norm` replaces.
+    /// （真实路径的写法，占位符），最长的在前：`norm` 替换的就是这些。
     spellings: Vec<(String, String)>,
 }
 
@@ -60,7 +60,7 @@ impl Roots {
     }
 
     fn norm(&self, text: &str) -> String {
-        // Every spelling is an absolute path, so text without a `/` (most cells) has none of them.
+        // 每种写法都是绝对路径，所以不含 `/` 的文本（大多数单元格）里一个也没有。
         if !text.contains('/') {
             return text.to_owned();
         }
@@ -118,7 +118,7 @@ struct Replay<'a> {
     name: &'a str,
     blobs: &'a Value,
     bin: &'a Path,
-    /// The core version the baseline was recorded on: checkpoints at it are upgraded to this build's.
+    /// 录制对照基准时的词条核心版本：处于这个版本的检查点会升级到本次构建的版本。
     recorded: i64,
     roots: Roots,
     counter: PathBuf,
@@ -126,7 +126,7 @@ struct Replay<'a> {
     serve: Option<Serve>,
     expected: HashMap<PathBuf, baseline::State>,
     stamps: Vec<String>,
-    /// Checkpoints whose upgrade changed compared content: named when a later comparison fails.
+    /// 升级改动了比较内容的检查点：后面的比较失败时会列出它们。
     upgraded: Vec<String>,
 }
 
@@ -139,7 +139,7 @@ impl Replay<'_> {
         self.state_at(path, illustash_terms::SCHEMA_VERSION)
     }
 
-    /// The compared content, `version` being the current core version (a checkpoint as recorded: the recorded one).
+    /// 参与比较的内容；`version` 是当前的词条核心版本（按录制原样的检查点则用录制时的版本）。
     fn state_at(&self, path: &Path, version: i64) -> baseline::State {
         if !path.exists() {
             return baseline::State::new();
@@ -153,7 +153,7 @@ impl Replay<'_> {
         baseline::Masks { roots: &norm, version: illustash_terms::SCHEMA_VERSION }.output(text)
     }
 
-    /// Puts a call's files and checkpoints in place.
+    /// 把一个调用要用的文件和检查点放好。
     fn environment(&mut self, call: &Value) -> Result<(), String> {
         for entry in call.get("env").and_then(Value::as_array).into_iter().flatten() {
             let path = PathBuf::from(self.roots.sub(entry["path"].as_str().unwrap()));
@@ -179,7 +179,7 @@ impl Replay<'_> {
                 let [tables, rows, objects] = [&parts[0], &parts[1], &parts[2]].map(|p| self.roots.sub(self.blob(p)));
                 baseline::restore(&open(&path), &tables, &rows, &objects);
                 let base = self.state_at(&path, self.recorded);
-                // A checkpoint no later call of the baseline uses can be a library not yet switched: not upgradable.
+                // 对照基准里后续调用都不再用到的检查点可能是尚未切换的图库：无法升级。
                 if entry["terms"].as_i64() == Some(self.recorded) && !baseline::before_cutover(&open(&path)) {
                     if let Some(change) = self.upgrade(&path, &base)? {
                         self.upgraded.push(change);
@@ -199,9 +199,8 @@ impl Replay<'_> {
         Ok(())
     }
 
-    /// A checkpoint at the recorded core version is upgraded to this build's before the next call, as the user's
-    /// libraries are. Backups it makes are removed, so the directory looks as it did when recorded. Returns what the
-    /// upgrade changed in the compared content, if anything.
+    /// 处于录制时词条核心版本的检查点，在下一个调用前升级到本次构建的版本，与用户的图库相同。升级产生的备份会删掉，
+    /// 让目录与录制时一样。如果升级改动了比较内容，返回改动了什么。
     fn upgrade(&self, path: &Path, base: &baseline::State) -> Result<Option<String>, String> {
         let backups = path.parent().unwrap().join("library-backups");
         let existing: Vec<PathBuf> =
@@ -231,8 +230,8 @@ impl Replay<'_> {
                 let _ = fs::remove_dir(&backups);
             }
         }
-        // What the upgrade changed (repairing an outdated mirror, say) is not a failure by itself: every later call
-        // is compared against the baseline, so it fails there if the change shows; then the change is named too.
+        // 升级带来的改动（例如修复过期的镜像）本身不算失败：后面每个调用都会与对照基准比较，改动一旦显现就在那里失败，
+        // 届时也会列出这项改动。
         let after = self.state(path);
         Ok((after != *base).then(|| {
             format!(
@@ -352,15 +351,14 @@ impl Replay<'_> {
     }
 }
 
-/// The core's incremental-vs-full names check (#102; test builds only), on for every call: a divergence fails the
-/// call it happens in.
+/// 词条核心的名称增量与全量对比检查（#102；只在测试构建中），对每个调用都开启：出现分歧时，发生分歧的那个调用失败。
 const VERIFY_INCREMENTAL: &str = "ILLUSTASH_TEST_VERIFY_INCREMENTAL";
 
 fn case(name: &str, data: &Value, blobs: &Value, recorded: i64, bin: &Path, verified: &Path) -> Option<String> {
     let temp = std::env::temp_dir().join(format!("illustash-baseline-{}-{}", std::process::id(), short(name)));
     let _ = fs::remove_dir_all(&temp);
     fs::create_dir_all(temp.join("root")).unwrap();
-    // Paths in the baseline use `/`, often inside JSON text; on Windows the root is written with `/` too.
+    // 对照基准里的路径用 `/`，经常出现在 JSON 文本里；在 Windows 上根目录也写成 `/`。
     let base = if cfg!(windows) {
         temp.join("root").to_string_lossy().replace('\\', "/")
     } else {
@@ -390,7 +388,7 @@ fn case(name: &str, data: &Value, blobs: &Value, recorded: i64, bin: &Path, veri
         if let Err(e) = replay.call(&at, call) {
             problem =
                 Some(if replay.upgraded.is_empty() { e } else { format!("{e}\n  ({})", replay.upgraded.join("; ")) });
-            break; // later calls would only repeat the divergence
+            break; // 后面的调用只会重复这个分歧
         }
     }
     drop(replay);
@@ -398,14 +396,13 @@ fn case(name: &str, data: &Value, blobs: &Value, recorded: i64, bin: &Path, veri
     problem
 }
 
-/// SQLite counts every allocation under one process-wide mutex unless told not to (`SQLITE_CONFIG_MEMSTATUS`). Each
-/// state read opens the databases and parses their schemas again, so the replay threads of all modules queued on that
-/// mutex for most of the replay's time. Nothing here reads those counts.
+/// 除非明确关闭（`SQLITE_CONFIG_MEMSTATUS`），SQLite 会在一个全进程共用的互斥锁下统计每次分配。每次读取状态都要重新
+/// 打开数据库、解析表结构，于是所有模块的重放线程在重放的大部分时间里都在排队等这个锁。这里没有代码读这些统计。
 static SQLITE_CONFIG: std::sync::Once = std::sync::Once::new();
 
 fn replay(module: &str) {
     SQLITE_CONFIG.call_once(|| {
-        // SAFETY: before any connection of this process (every test starts here); takes one int argument.
+        // SAFETY: 在本进程建立任何连接之前调用（每个测试都从这里开始）；只接收一个 int 参数。
         let done = unsafe { rusqlite::ffi::sqlite3_config(rusqlite::ffi::SQLITE_CONFIG_MEMSTATUS, 0) };
         assert_eq!(done, rusqlite::ffi::SQLITE_OK, "SQLITE_CONFIG_MEMSTATUS");
     });
@@ -418,7 +415,7 @@ fn replay(module: &str) {
     let bin = Path::new(env!("CARGO_BIN_EXE_illustash-terms"));
     let work: Vec<(&String, &Value)> = data["cases"].as_object().unwrap().iter().collect();
     assert!(!work.is_empty(), "{module}: empty baseline");
-    // Cases are independent (own directory, key counter and serve process): run them on a few threads.
+    // 各用例相互独立（有自己的目录、键计数器和 serve 进程）：分到几个线程上运行。
     let verified = std::env::temp_dir().join(format!("illustash-baseline-{}-{module}.verified", std::process::id()));
     let _ = fs::remove_file(&verified);
     let threads = std::thread::available_parallelism().map_or(2, |n| n.get().min(4));
@@ -454,9 +451,8 @@ fn replay(module: &str) {
     );
 }
 
-/// Modules that commit no name changes on the incremental path (searches only, whole rebuilds, or only aliases, which
-/// the core writes directly since #201): every other module must have run the core's incremental-vs-full check at
-/// least once.
+/// 不在增量路径上提交名称改动的模块（只有搜索、整体重建，或者只有别名，而别名自 #201 起由词条核心直接写入）：
+/// 其他每个模块都必须至少运行过一次词条核心的增量与全量对比检查。
 const UNVERIFIED: [&str; 3] = ["test_terms_core", "test_terms_names_contract", "test_terms_names_projection"];
 
 macro_rules! modules {

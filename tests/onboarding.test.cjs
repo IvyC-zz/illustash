@@ -1,13 +1,12 @@
-// #96: the first-run guide, taught on the real interface. Which library starts it, what the checklist ticks after each
-// change, and which question is asked when.
+// #96：首次使用的引导，在真实界面上教。哪个图库会开始引导、每次改动后清单勾上什么、什么时候问哪个问题。
 const {test, before} = require('node:test');
 const assert = require('node:assert/strict');
-const web = require('./web.cjs');   // core/ and ui/guide.js (#199)
+const web = require('./web.cjs');   // core/ 和 ui/guide.js（#199）
 const plain = v => JSON.parse(JSON.stringify(v));
 let guideUi, core;
 before(async () => { await web.ready(); guideUi = await web.load('ui/guide.js'); });
 
-// The guide (ui/guide.js) on a fake page; the backend answers with `reply`. A task that runs is a sync that runs.
+// 引导（ui/guide.js）放在假页面上；后端用 `reply` 作答。运行的任务就是运行的同步。
 function guide({status = 'active', step = 'welcome', ticked = [], seen = [], hidden = false, results = {}, works, names, sync = {status: 'done'}, route = 'home', index, updates} = {}) {
   const posted = [];
   core = web.core(); core.session.token = 't';
@@ -85,14 +84,14 @@ test('automatic update checks are asked once by the guide, app-wide (#191)', asy
   assert.match(c.nodes.nudge.innerHTML, /要自动检查新版本吗/);
   assert.match(c.nodes.nudge.innerHTML, /不发送图库里的任何信息/);
   assert.match(c.nodes.nudge.innerHTML, /data-nudge="allow"/);
-  // Answered either way (here or in another library): not asked again.
+  // 不论怎么回答过（在这里或在另一个图库）：都不再问。
   for (const auto of [true, false]) {
     const answered = guide({names, updates: {auto, newer: false}});
     await answered.loadGuide();
     answered.drawNudge();
     assert.equal(answered.nodes.nudge.innerHTML, '', String(auto));
   }
-  // The names question comes first; a library whose guide is over never asks.
+  // 名称的问题先问；引导已结束的图库从不询问。
   const both = guide({results: {characters: 3}, names: {network: {authorized: false}}, updates: {auto: null}});
   await both.loadGuide();
   both.drawNudge();
@@ -143,7 +142,7 @@ test('after a stopped or failed sync the problem bar says nothing is lost and wh
     assert.match(c.nodes.guideNotice.innerHTML, expected);
     assert.match(c.nodes.guideNotice.innerHTML, /data-guide-sync/);
   }
-  // The system refused the Photos library (#202): what to do and where, by the backend's code; syncing again won't help.
+  // 系统拒绝访问照片图库（#202）：按后端给的代码说明该做什么、去哪里做；再同步一次没有用。
   const refused = guide({sync: {status: 'error', problem: 'photos_permission', message: '[Errno 1] Operation not permitted: \'/合成/Photos.sqlite\''}});
   await refused.loadGuide();
   refused.drawGuideNotice();

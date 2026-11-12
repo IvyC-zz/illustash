@@ -1,11 +1,11 @@
-// #95: the desktop welcome page. Picked folders are checked on the spot; a folder already read with another of the
-// same origin goes, an overlap across origins is pointed out; a failed import or creation keeps what was filled in.
+// #95：桌面欢迎页。选中的文件夹当场检查；已被同来源的另一个文件夹读到的文件夹去掉，跨来源的重叠会指出来；
+// 导入或新建失败时保留已填写的内容。
 const {test} = require('node:test');
 const assert = require('node:assert/strict');
 const {readFileSync} = require('node:fs');
 const vm = require('node:vm');
 const read = name => readFileSync(require('node:path').join(__dirname, '../web/static', name), 'utf8');
-// t() and tb() as the start page has them: the library page's i18n.js in the shell's language (#173).
+// 与启动页相同的 t() 和 tb()：图库页的 i18n.js，用外壳的语言（#173）。
 function i18n(language, tables = {}) {
   const context = {self: {ILLUSTASH_LANGUAGE: language, ILLUSTASH_LANGUAGES: Object.fromEntries(Object.keys(tables).map(c => [c, c])), ILLUSTASH_TABLES: tables},
     navigator: {languages: ['zh-CN']}, document: {documentElement: {}, querySelectorAll: () => []}};
@@ -128,8 +128,8 @@ test('a double click opens one picker and each import or creation carries its ow
   assert.equal(new Set(ids).size, 3, 'a new click is a new request');
 });
 
-// #173 stage 4: the shell injects its language and that table before the page's scripts (desktop/src/i18n.rs), and the
-// start page loads the library page's i18n.js and translates its markup and the welcome page with them.
+// #173 第 4 阶段：外壳在页面脚本之前注入它的语言和对应的表（desktop/src/i18n.rs），启动页加载图库页的
+// i18n.js，用它们翻译自己的标记和欢迎页。
 test('the start page speaks the language the shell gives it', async () => {
   const scripts = [...html.matchAll(/<script src="([^"]+)">/g)].map(m => m[1]);
   assert.deepEqual(scripts, ['i18n.js', 'splash.js']);
@@ -148,10 +148,10 @@ test('the start page speaks the language the shell gives it', async () => {
   assert.match(shown, />1,234 pictures</);
   assert.match(shown, /placeholder="New library"/);
   assert.doesNotMatch(shown, /\p{Script=Han}/u);
-  // Left empty, the name is the placeholder's, in the page's language.
+  // 名字留空时取占位文字，用页面的语言。
   await click(c, {actW: 'create'});
   assert.equal(c.calls.find(([cmd]) => cmd === 'welcome_create')[1].name, 'New library');
-  // The core's Chinese (origin names, errors) goes through tb(), as on the library page.
+  // core 给的中文（来源名、错误）经过 tb()，与图库页相同。
   assert.match(c.nodes.wcol.innerHTML, /<h3>Other<\/h3>/);
   assert.match(c.nodes.wcol.innerHTML, /synthetic failure/);
   const zhPage = page({welcome_pick: () => ({paths: ['/a']}), welcome_inspect: ({paths}) => paths.map(p => ok(p, 1)), welcome_create: () => ({})});

@@ -1,4 +1,4 @@
-"""R1–R2 raw HTTP acceptance. All databases, state and responses are synthetic/temporary."""
+"""R1–R2 原始 HTTP 验收。所有数据库、状态和响应都是合成的、临时的。"""
 import gzip
 import hashlib
 import http.client
@@ -66,13 +66,13 @@ class CoreReadHTTPTest(HTTPHarness):
     def test_equal_sort_keys_and_legacy_name_fallback(self):
         ties=self.root/'ties'; ties.mkdir(exist_ok=True)
         self.sync('ties'); self.publish()
-        # The library before the switch (no `meta`, see `after_switch`): all 6 recorded replies equal the ones after it.
+        # 切换前的图库（没有 `meta`，见 `after_switch`）：录制的 6 条回复全都与切换后的相同。
         before = [self.rec.value('response') for _ in range(6)]
         self.sync('switched'); self.publish()
         compared = self.after_switch(before, differ=set())
         for path in ('/api/entities', '/api/entities?q='+urlencode({'q':'排序平局'}).split('=',1)[1], '/api/works', '/api/works?'+urlencode({'q':'作品平局'})):
             self.pair(path)
-        # Explicitly check repeated requests with identical SQL sort keys.
+        # 显式检查 SQL 排序键相同时的重复请求。
         first=self.pair('/api/entities?'+urlencode({'q':'排序平局'}))['body']
         self.assertEqual(first,self.pair('/api/entities?'+urlencode({'q':'排序平局'}))['body'])
         self.assertEqual(len(compared), 6)
@@ -103,14 +103,13 @@ class ArtistReadHTTPTest(HTTPHarness):
         package = self.root/'Artists #雪?.pilib'
         ids = self.rec.value('ids')
         self.sync('artists'); self.publish()
-        # The library before the switch (no `meta`, see `after_switch`): 32 recorded replies.
+        # 切换前的图库（没有 `meta`，见 `after_switch`）：录制了 32 条回复。
         before = [self.rec.value('response') for _ in range(32)]
         self.sync('switched'); self.publish()
-        # The first 9 were recorded only before the switch: the audit with unusual evidence counts in the provenance
-        # database (json.loads accepts nonfinite values and integers beyond f64 precision). Before the switch the reason
-        # quoted that count ("nan", "inf", "True" … 张); after it the count comes from the core's attribution, which the
-        # switch also changed (artist A: 2 images before, 1 after). So they cannot equal the replies recorded before;
-        # on v8 the evidence count must not change the reply at all.
+        # 前 9 条只在切换前录制：溯源数据库里证据计数不寻常时的审核（json.loads 接受非有限值和超出 f64 精度的整数）。
+        # 切换前，理由里引用了这个计数（"nan"、"inf"、"True" … 张）；切换后，计数来自 core 的画师归属，
+        # 而切换也改变了归属（画师 A：切换前 2 张，切换后 1 张）。所以它们不可能与切换前录制的回复相同；
+        # 在 v8 上，证据计数完全不能改变回复。
         prov = package/'provenance.sqlite'
         with self.connect(prov) as pc:
             evidence = pc.execute("SELECT rowid,evidence FROM image_artists WHERE artist_id='C'").fetchall()
@@ -123,10 +122,9 @@ class ArtistReadHTTPTest(HTTPHarness):
         with self.connect(prov) as pc:
             pc.executemany("UPDATE image_artists SET evidence=? WHERE rowid=?", [(e, r) for r, e in evidence]); pc.commit()
         self.assertEqual({(r['status'], r['body']) for r in replies}, {(200, replies[0]['body'])})
-        # The other 23 follow after the switch. 14 equal the replies recorded before it. The 9 others differ because the
-        # switch changed the artists: M's name (a legacy artist table name before, "未知画师" after), the image counts
-        # in the audits (A: 2 → 1, and extra homes), and with the provenance database parked or unreadable the legacy
-        # reads went through it (an empty pool, no name, a 500) while the core's do not.
+        # 其余 23 条在切换后发出。14 条与切换前录制的回复相同。另外 9 条不同，因为切换改变了画师：M 的名字（切换前
+        # 是旧画师表里的名字，切换后是 "未知画师"），审核里的图片数（A：2 → 1，另有多出来的主页），以及溯源数据库被
+        # 挪走或读不了时，旧的读取要经过它（池为空、没有名字、返回 500），而 core 的读取不经过它。
         compared = self.after_switch(before[9:], differ={3, 10, 11, 12, 13, 16, 17, 18, 21})
         for id in ('A','B','C','M','D','N','missing','雪🙂',''):
             self.pair('/api/artist?'+urlencode({'id':id}))
@@ -146,11 +144,11 @@ class ArtistReadHTTPTest(HTTPHarness):
             self.assertEqual(no_aux['pool'],2)
             self.assertTrue(no_aux['items']); self.assertTrue(all(not x['posts'] for x in no_aux['items']))
             self.pair('/api/artist?id=A')
-            prov.mkdir()  # exists, but cannot be opened as a SQLite database
+            prov.mkdir()  # 存在，但不能作为 SQLite 数据库打开
             self.assertEqual(self.pair('/api/artist-audit?n=bad')['status'],400)
             self.assertEqual(self.pair('/api/artist-audit')['status'],500)
             self.assertEqual(self.pair('/api/artist?id=A')['status'],200)
-            self.pair('/api/entities')  # an unrelated auxiliary failure must not affect local reads
+            self.pair('/api/entities')  # 无关的辅助数据出错不能影响本地读取
         finally:
             if prov.is_dir(): prov.rmdir()
             parked.rename(prov)

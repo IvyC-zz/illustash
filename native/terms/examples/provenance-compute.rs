@@ -1,4 +1,4 @@
-//! Explicit synthetic probe; the installed adapter dispatches through provenance_compute::run_files.
+//! 显式调用的合成探针；已安装的适配器经 provenance_compute::run_files 分派。
 use illustash_terms::provenance_compute::{self, pixel_hash};
 use serde_json::json;
 use std::{fs, path::Path};

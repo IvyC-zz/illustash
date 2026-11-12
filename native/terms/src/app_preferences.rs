@@ -1,7 +1,6 @@
-//! App-wide preferences (#173): one preferences.json beside libraries.json, shared by every library and browser
-//! (the desktop shell reads it in a later stage). The interface language and 「使用 GPU 加速识别」 (#270/#271, read by
-//! the recognition and index workers, recognition_compute/backend.rs) live here; unknown keys are kept.
-//! The languages on offer are the tables in web/static/locales (#182): adding one needs no code.
+//! 全应用偏好设置（#173）：libraries.json 旁边的一份 preferences.json，所有图库和浏览器共用（桌面外壳在后续阶段读取）。
+//! 界面语言和「使用 GPU 加速识别」（#270/#271，由识别和索引 worker 读取，见 recognition_compute/backend.rs）放在这里；
+//! 不认识的键保留。可选的语言就是 web/static/locales 里的各张表（#182）：新增语言不用改代码。
 use crate::{
     app_paths::{app_support, user_home},
     http_json::Json,
@@ -13,12 +12,12 @@ use std::{
     path::{Path, PathBuf},
 };
 
-/// `system` follows the browser's languages (web/static/i18n.js picks among the tables); the default.
+/// `system` 跟随浏览器的语言（由 web/static/i18n.js 在各张表中挑选）；这是默认值。
 const SYSTEM: &str = "system";
-/// Chinese is the source text: it has no table and is always on offer.
+/// 中文是原文：没有表，始终可选。
 const SOURCE: &str = "zh-CN";
 
-/// One web/static/locales/<code>.json: keyed by the Chinese text, plus `"@name"`, the language named in itself.
+/// 一份 web/static/locales/<code>.json：以中文原文为键，另有 `"@name"`，即用该语言自己写的语言名。
 pub(crate) struct Locale {
     pub(crate) code: String,
     pub(crate) name: String,
@@ -29,8 +28,8 @@ pub(crate) fn locales_folder(root: &Path) -> PathBuf {
     root.join("web/static/locales")
 }
 
-/// A code names its table: `en`, `ja`, `pt-BR`. Letters, digits and hyphens only, so a code taken from a request
-/// never leaves the folder; the case must match the file name exactly.
+/// 代码对应它的表：`en`、`ja`、`pt-BR`。只允许字母、数字和连字符，所以取自请求的代码不会跑出这个文件夹；
+/// 大小写必须与文件名完全一致。
 fn valid_code(code: &str) -> bool {
     let mut parts = code.split('-');
     let primary = parts.next().unwrap_or("");
@@ -40,8 +39,8 @@ fn valid_code(code: &str) -> bool {
         && parts.all(|part| (1..=8).contains(&part.len()) && part.bytes().all(|b| b.is_ascii_alphanumeric()))
 }
 
-/// Every table in `folder` that parses as a JSON object, by code. A broken one is left out (and logged), so the
-/// settings never offer a language the page cannot show; a missing folder leaves only Chinese.
+/// `folder` 里能解析成 JSON 对象的每张表，按代码排列。坏掉的表不列入（并记日志），这样设置里不会出现页面显示不了的
+/// 语言；文件夹不存在时只剩中文。
 pub(crate) fn locales(folder: &Path) -> Vec<Locale> {
     let Ok(entries) = fs::read_dir(folder) else { return Vec::new() };
     let mut found: Vec<Locale> = entries
@@ -64,9 +63,9 @@ pub(crate) fn locales(folder: &Path) -> Vec<Locale> {
     found
 }
 
-/// Text the backend itself shows outside the page (the macOS file chooser's prompt), in the language the page named
-/// (`X-Illustash-Language`): that table's entry keyed by the Chinese, or the Chinese. What the page shows it translates
-/// itself (web/static/i18n.js tb()), so the backend's replies and records stay Chinese.
+/// 后端自己在页面之外显示的文字（macOS 文件选择器的提示语），用页面指定的语言（`X-Illustash-Language`）：
+/// 取该表里以这段中文为键的条目，没有就用中文。页面显示的内容由页面自己翻译（web/static/i18n.js tb()），
+/// 所以后端的回复和记录仍是中文。
 pub(crate) fn tr(root: &Path, language: Option<&str>, text: &str) -> String {
     let Some(code) = language.filter(|code| valid_code(code)) else { return text.into() };
     let table = fs::read(locales_folder(root).join(format!("{code}.json")))
@@ -90,8 +89,8 @@ fn file() -> Result<PathBuf> {
     Ok(app_support(&user_home()?).join("preferences.json"))
 }
 
-/// The configured language. A missing, unreadable or hand-broken file means the default, never an error:
-/// the page must still load. So does a language whose table has since gone.
+/// 已设置的语言。文件不存在、读不出或被手工改坏都按默认值处理，绝不报错：页面必须仍能加载。
+/// 语言的表后来没了也一样。
 pub(crate) fn language(locales: &[Locale]) -> String {
     file().map(|file| language_at(&file, locales)).unwrap_or_else(|_| SYSTEM.into())
 }
@@ -112,8 +111,8 @@ fn read(file: &Path) -> Map<String, Value> {
         .unwrap_or_default()
 }
 
-/// Whether recognition may use the GPU or Neural Engine: on unless switched off. Like the language, a missing or
-/// broken file means the default. Workers read it when they start, so a change applies from the next sync.
+/// 识别能否使用 GPU 或神经网络引擎：除非关掉，否则开启。和语言一样，文件不存在或坏掉都按默认值处理。
+/// worker 在启动时读取，所以改动从下一次同步起生效。
 pub(crate) fn acceleration() -> bool {
     file().map(|file| acceleration_at(&file)).unwrap_or(true)
 }
@@ -121,13 +120,13 @@ fn acceleration_at(file: &Path) -> bool {
     read(file).get("acceleration").and_then(Value::as_bool).unwrap_or(true)
 }
 
-/// The reply of POST /api/preferences: `{"language": …, "acceleration": …}`.
+/// POST /api/preferences 的回复：`{"language": …, "acceleration": …}`。
 pub(crate) fn info(locales: &[Locale]) -> Json {
     Json::object([("language", language(locales).into()), ("acceleration", acceleration().into())])
 }
 
-/// POST /api/preferences: `{"language": "en"}` or `{"acceleration": false}`, or both. Preferences never grant
-/// network or start tasks.
+/// POST /api/preferences：`{"language": "en"}` 或 `{"acceleration": false}`，或两者都给。偏好设置从不授予联网，
+/// 也不启动任务。
 pub(crate) fn set_json(body: &str, locales: &[Locale]) -> Result<()> {
     let Json::Object(changes) = crate::http_json::parse_request(body)? else {
         return Err(Error::Invalid("未知设置".into()));
@@ -154,7 +153,7 @@ fn set_language_at(file: &Path, language: &str) -> Result<()> {
 }
 
 fn set_at(file: &Path, changes: Vec<(String, Value)>) -> Result<()> {
-    // Hosts of different libraries share this file: same lock and rename as libraries.json.
+    // 不同图库的宿主共用这个文件：与 libraries.json 用同样的锁和改名方式。
     crate::app_libraries::registry_locked(file, || {
         let mut fields = read(file);
         fields.extend(changes);
@@ -189,7 +188,7 @@ mod tests {
         fn file(&self) -> PathBuf {
             self.0.join("support").join("preferences.json")
         }
-        /// A locales folder holding these files.
+        /// 放着这些文件的 locales 文件夹。
         fn locales(&self, files: &[(&str, &str)]) -> Vec<Locale> {
             let folder = self.0.join("locales");
             fs::create_dir_all(&folder).unwrap();
@@ -233,8 +232,7 @@ mod tests {
             ("ja.json", "{}"),
             ("fr.json", "{broken"),
             ("de.json", "[]"),
-            // Chinese is the source; the rest are not codes. EN.json is left to valid_code below: on a
-            // case-insensitive disk it would overwrite en.json.
+            // 中文是原文；其余几个都不是代码。EN.json 留给下面的 valid_code：在不区分大小写的磁盘上它会覆盖 en.json。
             ("zh-CN.json", "{}"),
             ("e.json", "{}"),
             ("en_US.json", "{}"),
@@ -242,7 +240,7 @@ mod tests {
             ("readme.txt", "{}"),
         ]);
         let listed: Vec<_> = found.iter().map(|l| (l.code.as_str(), l.name.as_str(), l.table.len())).collect();
-        // Without "@name" the code stands in for the name.
+        // 没有 "@name" 时用代码代替名称。
         assert_eq!(listed, [("en", "English", 3), ("ja", "ja", 0), ("pt-BR", "Português (Brasil)", 1)]);
         for code in ["en", "ja", "pt-BR", "zh-Hant", "yue-HK", "es-419"] {
             assert!(valid_code(code), "{code}");
@@ -280,7 +278,7 @@ mod tests {
         }
         fs::write(&file, r#"{"language": "zh-CN"}"#).unwrap();
         assert_eq!(language_at(&file, &english), "zh-CN");
-        // A language whose table has gone follows the system again; Chinese needs no table.
+        // 语言的表没了就重新跟随系统；中文不需要表。
         fs::write(&file, r#"{"language": "en"}"#).unwrap();
         assert_eq!(language_at(&file, &english), "en");
         assert_eq!(language_at(&file, &[]), "system");
@@ -300,7 +298,7 @@ mod tests {
         let written: Value = serde_json::from_slice(&fs::read(&file).unwrap()).unwrap();
         assert_eq!(written, serde_json::json!({"later": {"kept": true}, "language": "zh-CN"}));
         assert!(!file.with_extension("tmp").exists());
-        // A broken file is replaced rather than blocking the change.
+        // 坏掉的文件直接替换，不挡住这次修改。
         fs::write(&file, "{broken").unwrap();
         set_language_at(&file, "system").unwrap();
         assert_eq!(fs::read_to_string(&file).unwrap(), "{\n  \"language\": \"system\"\n}\n");
@@ -359,7 +357,7 @@ mod tests {
 
     #[test]
     fn request_validation_rejects_without_writing() {
-        // Each body fails before the file path is resolved, so the user's real preferences are never touched.
+        // 每个请求体都在解析文件路径之前失败，所以绝不会碰到用户真实的偏好设置。
         let f = Fixture::new();
         let offer = f.locales(&[("en.json", "{}"), ("fr.json", "{broken"), ("ja.json", r#"{"@name": "日本語"}"#)]);
         for body in [
@@ -381,7 +379,7 @@ mod tests {
         ] {
             assert!(matches!(set_json(body, &offer), Err(Error::Invalid(_))), "{body}");
         }
-        // Accepted values are exactly system, zh-CN and the tables found.
+        // 接受的值恰好是 system、zh-CN 和找到的各张表。
         for language in ["system", "zh-CN", "en", "ja"] {
             assert!(offered(language, &offer), "{language}");
         }

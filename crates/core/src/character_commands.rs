@@ -9,14 +9,11 @@
 //! 新步骤的 `before_json` 是 `[{"terms":{"v":2,"type":…,"before":[旧形状的快照…]}}]`。
 use crate::character_entities::ENTITIES;
 use crate::character_labels::{works, Shown};
+use crate::error::invalid;
 use crate::{character_json, character_projection, undo_labels::UndoLabel, Error, Result};
 use rusqlite::{params, Connection, OptionalExtension};
 use serde_json::{json, Map, Value};
 use std::collections::BTreeSet;
-
-pub(crate) fn invalid<T>(message: &str) -> Result<T> {
-    Err(Error::Invalid(message.into()))
-}
 
 pub(crate) fn text<'a>(v: &'a Value, message: &str) -> Result<&'a str> {
     v.as_str().ok_or_else(|| Error::Invalid(message.into()))
@@ -527,7 +524,7 @@ fn answer(c: &Connection, args: &Value) -> Result<Value> {
                 None => begin_counted(c, UndoLabel::Remove, no.len(), &shown.name(c, &entity)?, "")?,
             }
         } else {
-            // Whole sentences, so the page can translate each (web/static/i18n.js tb()).
+            // 写成整句，页面才能逐句翻译（web/static/i18n.js tb()）。
             let (n, name) = (yes.len(), shown.name(c, &entity)?);
             begin_action(
                 c,

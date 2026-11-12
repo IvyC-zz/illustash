@@ -1,15 +1,11 @@
-//! Discriminative strong claims next to the prototypes (#156, docs/TERMS_CHARACTERS.md).
+//! 原型之外的判别式强认领（#156，docs/TERMS_CHARACTERS.md）。
 //!
-//! One L2 logistic regression per character with at least `MIN_POSITIVES` confirmed images.
-//! Negatives are the character's rejected images, other characters' confirmed images and
-//! unjudged images the external index attributes only to other characters; the last two
-//! skip artwork groups that hold the character's own positives. A claim also needs the
-//! image to sit within `GATE` of a confirmed image and closer to it than to any rejected one.
-//! Without external index candidates the method stays off: it would only know the
-//! characters the user labelled and claims unseen lookalikes far more often.
+//! 每个至少有 `MIN_POSITIVES` 张确认图的角色训练一个 L2 逻辑回归。
+//! 负例是该角色被移出的图、其他角色的确认图，以及外部索引只归给其他角色的未裁决图；后两类跳过含有该角色
+//! 自己正例的作品组。认领还要求图片离某张确认图在 `GATE` 以内，并且离它比离任何被移出的图都近。
+//! 没有外部索引候选时这个方法不启用：它只认得用户标注过的角色，会更频繁地认领没见过的相似角色。
 //!
-//! All characters train together: rows are shared, every evaluation is two products through
-//! the research BLAS, and each character keeps its own L-BFGS memory.
+//! 所有角色一起训练：行是共享的，每次求值是经研究计算 BLAS 的两次乘积，每个角色保留自己的 L-BFGS 记忆。
 use super::{features::Matrix, numeric};
 use crate::{Error, Result};
 use illustash_platform::platform_research_math::cross;
@@ -17,7 +13,7 @@ use rusqlite::Connection;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 const MIN_POSITIVES: usize = 5;
-/// Inverse L2 strength as in scikit-learn's `C`, on the weight-normalised objective.
+/// L2 强度的倒数，与 scikit-learn 的 `C` 相同，作用在按权重归一化的目标函数上。
 const C: f64 = 10.0;
 const TAU: f64 = 0.99;
 const GATE: f32 = 0.06;
@@ -28,11 +24,7 @@ const MAX_ITERATIONS: usize = 300;
 const BACKTRACKS: usize = 20;
 const ARMIJO: f64 = 1e-4;
 
-fn invalid(m: String) -> Error {
-    Error::Invalid(m)
-}
-
-/// Shared training rows: `x` is row-major n x d, `xt` its transpose.
+/// 共享的训练行：`x` 是行主序的 n x d，`xt` 是它的转置。
 struct Rows {
     n: usize,
     d: usize,
@@ -40,7 +32,7 @@ struct Rows {
     xt: Vec<f32>,
 }
 
-/// Labels and balanced weights for every character (row-major n x e).
+/// 每个角色的标签和均衡权重（行主序 n x e）。
 struct Labels {
     e: usize,
     y: Vec<f32>,
@@ -48,7 +40,7 @@ struct Labels {
     total: Vec<f64>,
 }
 
-/// One accepted L-BFGS step per character: (s, y, 1 / s.y).
+/// 每个角色一次被接受的 L-BFGS 步：(s, y, 1 / s.y)。
 type Memory = Vec<(Vec<f64>, Vec<f64>, f64)>;
 
 struct Objective {
@@ -56,14 +48,13 @@ struct Objective {
     g: Vec<Vec<f64>>,
 }
 
-/// Weight-normalised loss and gradient for the characters in `which`, at parameters `p`
-/// (one d+1 vector each, bias last).
+/// 在参数 `p`（每个角色一个 d+1 向量，偏置在最后）处，对 `which` 里的角色求按权重归一化的损失和梯度。
 fn evaluate(rows: &Rows, labels: &Labels, which: &[usize], p: &[Vec<f64>]) -> Result<Objective> {
     let (n, d, k) = (rows.n, rows.d, which.len());
     let weights: Vec<f32> = p.iter().flat_map(|v| v[..d].iter().map(|&x| x as f32)).collect();
-    let z = cross(&rows.x, n, &weights, k, d).map_err(invalid)?;
+    let z = cross(&rows.x, n, &weights, k, d).map_err(Error::invalid)?;
     let mut f = vec![0.0f64; k];
-    let mut r = vec![0.0f32; k * n]; // k x n, transposed residuals
+    let mut r = vec![0.0f32; k * n]; // k x n，转置后的残差
     let mut gb = vec![0.0f64; k];
     for i in 0..n {
         for (c, &j) in which.iter().enumerate() {
@@ -80,7 +71,7 @@ fn evaluate(rows: &Rows, labels: &Labels, which: &[usize], p: &[Vec<f64>]) -> Re
             gb[c] += res;
         }
     }
-    let gw = cross(&r, k, &rows.xt, d, n).map_err(invalid)?;
+    let gw = cross(&r, k, &rows.xt, d, n).map_err(Error::invalid)?;
     let mut g = Vec::with_capacity(k);
     for (c, &j) in which.iter().enumerate() {
         let scale = C * labels.total[j];
@@ -97,7 +88,7 @@ fn dot(a: &[f64], b: &[f64]) -> f64 {
     a.iter().zip(b).map(|(x, y)| x * y).sum()
 }
 
-/// Batched L-BFGS from zero; returns one d+1 parameter vector per character.
+/// 从零开始的批量 L-BFGS；每个角色返回一个 d+1 的参数向量。
 fn fit(rows: &Rows, labels: &Labels) -> Result<Vec<Vec<f64>>> {
     let e = labels.e;
     let all: Vec<usize> = (0..e).collect();
@@ -169,7 +160,7 @@ fn fit(rows: &Rows, labels: &Labels) -> Result<Vec<Vec<f64>>> {
                 break;
             }
             if attempt + 1 == BACKTRACKS {
-                // No decrease left at float32 resolution: keep the current parameters.
+                // 在 float32 精度下已无法再下降：保留当前参数。
                 for j in still {
                     active[j] = false;
                 }
@@ -188,7 +179,7 @@ fn strings(c: &Connection, sql: &str) -> Result<Vec<(String, String)>> {
     Ok(c.prepare(sql)?.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<rusqlite::Result<_>>()?)
 }
 
-/// Strong claims `(uuid, entity) -> 1 - distance to the nearest confirmed image`.
+/// 强认领 `(uuid, entity) -> 1 - distance to the nearest confirmed image`。
 pub fn claims(
     c: &Connection,
     f: &Matrix,
@@ -268,7 +259,7 @@ pub fn claims(
             }
         }
     }
-    // scikit-learn's balanced class weights over each character's labelled rows.
+    // 在每个角色已标注的行上按 scikit-learn 的 balanced 方式计算类别权重。
     let mut total = vec![0.0f64; e];
     for j in 0..e {
         let (mut pos, mut neg) = (0.0f64, 0.0f64);
@@ -299,7 +290,7 @@ pub fn claims(
     let mut out = BTreeMap::new();
     for block in (0..known.len()).step_by(8192) {
         let end = (block + 8192).min(known.len());
-        let z = cross(&flat[block * d..end * d], end - block, &weights, e, d).map_err(invalid)?;
+        let z = cross(&flat[block * d..end * d], end - block, &weights, e, d).map_err(Error::invalid)?;
         for (j, entity) in trained.iter().enumerate() {
             let hits: Vec<usize> = (block..end)
                 .filter(|&i| {
@@ -312,15 +303,15 @@ pub fn claims(
             }
             let query: Vec<Vec<f32>> = hits.iter().map(|&i| images[i].clone()).collect();
             let positives: Vec<Vec<f32>> = confirmed[entity].iter().map(|u| f.rows[f.row[u]].clone()).collect();
-            let near = numeric::distances(&query, &positives).map_err(invalid)?;
+            let near = numeric::distances(&query, &positives).map_err(Error::invalid)?;
             let removed: Vec<Vec<f32>> =
                 rejected.get(entity).map(|r| r.iter().map(|u| f.rows[f.row[u]].clone()).collect()).unwrap_or_default();
-            let away = numeric::distances(&query, &removed).map_err(invalid)?;
+            let away = numeric::distances(&query, &removed).map_err(Error::invalid)?;
             for (h, &i) in hits.iter().enumerate() {
                 let d_pos = near[h].iter().copied().fold(f32::INFINITY, f32::min);
                 let d_neg = away[h].iter().copied().fold(f32::INFINITY, f32::min);
                 if d_pos <= GATE && d_pos < d_neg {
-                    // A confirmed image is its own nearest one; f32 rounding can make that distance negative.
+                    // 确认图离它最近的就是它自己；f32 舍入可能让这个距离为负。
                     out.insert((known[i].clone(), entity.clone()), 1.0 - d_pos.max(0.0) as f64);
                 }
             }
@@ -338,7 +329,7 @@ mod tests {
         v.iter().map(|x| x / n).collect()
     }
 
-    /// The 24 x 4 synthetic problem also solved by the Python reference (batch_lr.py).
+    /// 24 x 4 的合成问题，Python 参考实现（batch_lr.py）也解了同一个问题。
     fn synthetic() -> (Rows, Labels) {
         let (n, d) = (24, 4);
         let x: Vec<f32> = (0..n)
@@ -412,7 +403,7 @@ mod tests {
         }
     }
 
-    /// Two labelled characters on a circle and unjudged images the index gives to `B`.
+    /// 圆上两个已标注的角色，以及索引归给 `B` 的未裁决图。
     fn library(ccip: bool) -> (Connection, Matrix, HashMap<String, String>) {
         let c = Connection::open_in_memory().unwrap();
         c.execute_batch(
@@ -462,7 +453,7 @@ mod tests {
         assert!(!a.contains("far"), "outside the gate: {a:?}");
         assert!(!a.contains("removed") && !a.contains("closer"), "nearer a removed image: {a:?}");
         assert!(out.keys().all(|(u, e)| !u.starts_with('U') || e == "B"), "index says B: {out:?}");
-        // Confirmed images are claimed too; rounding must not push their score past 1 (Core rejects it).
+        // 确认图也会被认领；舍入不能让它们的分数超过 1（Core 会拒绝）。
         assert!(out.values().all(|s| (0.0..=1.0).contains(s)), "{out:?}");
         let score = out[&("near".to_string(), "A".to_string())];
         let a_rows: Vec<_> = (0..400).map(|i| f.rows[f.row[&format!("A{i}")]].clone()).collect();

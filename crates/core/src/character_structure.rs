@@ -1,12 +1,13 @@
 //! 身份与作品的结构命令（方案第 8 节「不进历史」的那些）：建身份、改类型、当作标签、归作品、作品编辑、
 //! 作品证据（`works.apply_evidence`）。逐行照 tests/reference/web/store.py（#9 已删除）、tests/reference/web/works.py（#9 已删除）；作品的可读名由调用方给，
 //! 当前显示名由核心读（character_labels）。
-use crate::character_commands::{hybrid, invalid, require_entity, text};
+use crate::character_commands::{hybrid, require_entity, text};
 use crate::character_entities::{self, New, ENTITIES, OF};
 use crate::character_links::{check_free, LINKS};
 use crate::character_names::TERM_OF;
 use crate::character_profile::{new_id, require_work, set_work, tag_owner, work_for};
 use crate::character_review::{OF as REVIEW_OF, OPEN as REVIEW_OPEN};
+use crate::error::invalid;
 use crate::{character_graph, character_names, character_projection, Error, Result};
 use rusqlite::{params, Connection, OptionalExtension};
 use serde_json::{json, Value};

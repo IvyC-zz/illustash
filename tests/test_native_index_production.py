@@ -1,9 +1,8 @@
-"""Installed index adapter and App receipt on owned synthetic packages.
+"""安装版的索引适配器和 App 接收结果，在测试自己持有的合成包上验收。
 
-Explicit candidate host/worker only; no build or model discovery. Normal cases
-use cached synthetic references and empty PATH without a Python worker. Fault
-launchers run the actual adapter before delaying/mutating transport receipt.
-The one real-CCIP case requires three explicit authorised resource paths.
+只用显式给出的候选宿主/worker；不构建，也不自动查找模型。正常用例使用缓存的
+合成参考结果和空的 PATH，没有 Python worker。故障启动器先运行真实的适配器，
+再延迟或篡改传输结果的接收。唯一的真实 CCIP 用例需要三个显式授权的资源路径。
 """
 import contextlib
 import hashlib
@@ -51,9 +50,9 @@ class CandidateIndexAdapter:
         (resources/'web/static/index.html').write_text('synthetic installed resource')
         (resources/'tags').mkdir()
         shutil.copy2(self.resources/'tags/tags_v3.csv', resources/'tags/tags_v3.csv')
-        (resources/'models').mkdir()  # No model, WD, runtime or Python calculator is installed.
+        (resources/'models').mkdir()  # 不安装模型、WD、运行库或 Python 计算程序。
         if sys.platform == 'win32':
-            # The fixed OpenBLAS sits where installers put it; the adapter resolves it itself.
+            # 固定的 OpenBLAS 放在安装包放置它的位置；由适配器自己找到它。
             blas = os.environ.get('ILLUSTASH_RESEARCH_OPENBLAS_DLL')
             if not blas:
                 raise AssertionError('explicit fixed OpenBLAS DLL required on Windows; no search')
@@ -126,7 +125,7 @@ class InstalledIndexComputeTest(CandidateIndexAdapter, unittest.TestCase):
                 if folder == old:
                     results.append(reference.legacy(old, tags, folder/'request.json'))
                 else:
-                    # Use fixture tags in the installed root, discovered relative to executable.
+                    # 使用安装根目录里的夹具 tags，相对可执行文件找到。
                     shutil.copy2(tags, resources/'tags/tags_v3.csv')
                     result = subprocess.run([str(adapter), str(folder/'request.json'), str(folder/'response.json')],
                                             env=self.isolated_env(resources), capture_output=True, timeout=10)
@@ -173,7 +172,7 @@ class InstalledIndexAppTest(CandidateIndexAdapter, unittest.TestCase):
         index_fixture.NativeIndexTest.setUp(self)
         self.stop(self.process)
         self.adapter, self.adapter_resources = self.install(self.root)
-        # Preserve the fixture's isolated HOME/app support/shared root and strip Python setup.
+        # 保留夹具隔离的 HOME/app support/shared 根目录，去掉 Python 相关设置。
         self.env = self.isolated_env(self.adapter_resources, self.env)
         self.env.update(PATH='', ILLUSTASH_NO_KEYCHAIN='1', ILLUSTASH_INDEX_WORKER=str(self.adapter))
         self.env.pop('ILLUSTASH_RECOGNITION_WORKER', None)
@@ -245,7 +244,7 @@ class InstalledIndexAppTest(CandidateIndexAdapter, unittest.TestCase):
         return entity
 
     def launch_through(self, shell, python):
-        """Restart the host with a launcher around the installed adapter: `shell` on POSIX, `python` on Windows."""
+        """用包着安装版适配器的启动器重启宿主：POSIX 上用 `shell`，Windows 上用 `python`。"""
         launcher = self.root/'controlled-adapter'
         if os.name == 'nt':
             launcher.write_text(python)
@@ -270,11 +269,9 @@ class InstalledIndexAppTest(CandidateIndexAdapter, unittest.TestCase):
             + 'while not Path('+repr(str(self.gate))+').exists(): time.sleep(.02)\n')
 
     def hold_saved_compute(self, timeout_ms):
-        """Like hold_after_actual_compute, but the actual calculator's result is made beforehand under the
-        default deadline: that run saves it and then fails, so nothing is published and its prepared job
-        stays for a retry. The host resumes that job on restart, under `timeout_ms`, and the launcher only
-        puts the saved result back in the job folder, so a short deadline need not fit a real compute on a
-        busy machine (#219)."""
+        """与 hold_after_actual_compute 类似，但真实计算程序的结果事先在默认时限下算好：那次运行保存结果后失败，
+        所以什么都不发布，准备好的任务留待重试。宿主重启时在 `timeout_ms` 下恢复这个任务，启动器只把保存的结果
+        放回任务文件夹，这样较短的时限不必容下繁忙机器上的一次真实计算（#219）。"""
         self.ready, self.gate = self.root/'adapter-ready', self.root/'release-adapter'
         saved = self.root/'saved-response.json'
         self.addCleanup(self.gate.touch)
@@ -304,7 +301,7 @@ class InstalledIndexAppTest(CandidateIndexAdapter, unittest.TestCase):
 
     def start_held(self):
         self.check(); self.seed_reference(); self.index({'action':'apply','tags':['carol_example']})
-        # The ready file follows a real index compute, which the parallel full suite can slow well past 5 s.
+        # 就绪文件在一次真实的索引计算之后才出现，并行跑全量时这一步可能远超 5 秒。
         wait_until(lambda: self.ready.is_file() and self.ready.read_text().strip().isdigit(), timeout=30)
         job = json.loads((self.lib.path/'index-job.json').read_text())
         result = Path(job['folder'])/'response.json'
@@ -400,7 +397,7 @@ class InstalledIndexAppTest(CandidateIndexAdapter, unittest.TestCase):
         self.assertFalse(self.sentinel.exists())
 
     def test_timeout_cancels_after_actual_compute_without_formal_writes(self):
-        # The deadline covers only putting back a result computed beforehand, never a real compute (#219).
+        # 时限只覆盖放回事先算好的结果，从不覆盖真实计算（#219）。
         before = snapshot(self.lib.source); self.hold_saved_compute(timeout_ms='5000')
         worker_pid = int(self.ready.read_text()); result = self.finish()
         self.assertEqual(result['state']['status'], 'error', result)
@@ -461,7 +458,7 @@ class InstalledIndexAppTest(CandidateIndexAdapter, unittest.TestCase):
 
 
 def load_tests(loader, tests, pattern):
-    # The actual-model case runs only when named explicitly; missing inputs then fail.
+    # 真实模型的用例只在显式点名时运行；这时缺少输入就失败。
     explicit = 'test_actual_ccip_download_to_installed_adapter_without_python'
     return unittest.TestSuite(unittest.TestSuite(t for t in group if getattr(t, '_testMethodName', None) != explicit)
                               for group in tests)

@@ -1,4 +1,4 @@
-//! HTTP-only insertion-ordered JSON. Never use this representation for stored JSON/fingerprints.
+//! 只用于 HTTP 的保持插入顺序的 JSON。绝不用这种表示来存储 JSON 或计算指纹。
 use serde::de::{Deserialize, Deserializer, MapAccess, SeqAccess, Visitor};
 use serde_json::Value;
 use std::fmt;
@@ -19,7 +19,7 @@ impl Json {
         }
         value
     }
-    // Python dict.update keeps the original position of overwritten fields.
+    // 与 Python dict.update 相同，被覆盖的字段保留原来的位置。
     pub fn set(&mut self, key: impl Into<String>, value: Json) {
         let key = key.into();
         if let Self::Object(fields) = self {
@@ -44,7 +44,7 @@ impl Json {
             None
         }
     }
-    /// A field the query or the code building this object always provides; a missing one is a bug.
+    /// 查询或构造这个对象的代码一定会提供的字段；缺了就是 bug。
     #[track_caller]
     pub(crate) fn field(&self, key: &str) -> &Json {
         match self.get(key) {
@@ -66,12 +66,12 @@ impl Json {
             _ => 0,
         }
     }
-    /// Python json.dumps text. Callers also re-parse it strictly, which is how requests holding NaN/Infinity are
-    /// refused; keep those constants here and use `dump_reply` for what goes out over HTTP.
+    /// Python json.dumps 的文本。调用方还会严格地重新解析它，含 NaN/Infinity 的请求就是这样被拒绝的；
+    /// 所以这里要保留这些常量，经 HTTP 发出的内容用 `dump_reply`。
     pub fn dump(&self) -> String {
         self.dumped(false)
     }
-    /// The HTTP reply body: `dump`, but NaN/Infinity (which JSON.parse refuses) are written as null (#265).
+    /// HTTP 应答正文：同 `dump`，但 NaN/Infinity（JSON.parse 不接受）写成 null（#265）。
     pub fn dump_reply(&self) -> String {
         self.dumped(true)
     }
@@ -80,8 +80,8 @@ impl Json {
         self.write(&mut out, reply);
         String::from_utf8(out).expect("JSON is UTF-8")
     }
-    // One output buffer; large pages must not allocate/join a string for every
-    // nested field. Retain the existing Python float formatter and separators.
+    // 只用一个输出缓冲区；大页面不能为每个嵌套字段分配并拼接一个字符串。
+    // 保留既有的 Python 浮点格式化和分隔符。
     fn write(&self, out: &mut Vec<u8>, reply: bool) {
         match self {
             Self::Scalar(Value::String(v)) => serde_json::to_writer(out, v).expect("JSON string"),
@@ -152,7 +152,7 @@ impl<T: Into<Json>> From<Option<T>> for Json {
     }
 }
 
-// Deserialize maps without serde_json::Map's sorted order (including nested evidence objects).
+// 反序列化映射时不用 serde_json::Map 的排序（包括嵌套的证据对象）。
 impl<'de> Deserialize<'de> for Json {
     fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
         struct Ordered;
@@ -200,24 +200,24 @@ impl<'de> Deserialize<'de> for Json {
         d.deserialize_any(Ordered)
     }
 }
-/// Evidence uses Python json.loads: non-finite constants and arbitrary-size integers are valid.
-/// Decode only HTTP values; serde's global map/number features (and persistence) remain unchanged.
+/// 证据按 Python json.loads 解析：非有限常量和任意大小的整数都合法。
+/// 只用于解码 HTTP 值；serde 全局的 map/number feature（以及持久化）保持不变。
 pub fn parse_python(input: &str) -> crate::Result<Json> {
     parse(input, false).map_err(|(_, e)| e)
 }
-/// Request errors follow CPython JSONDecodeError; evidence callers retain the original refusal behavior.
+/// 请求的错误与 CPython 的 JSONDecodeError 一致；证据的调用方保持原来的拒绝行为。
 pub(crate) fn parse_request(input: &str) -> crate::Result<Json> {
     parse(input, true).map_err(|(_, e)| e)
 }
-/// Why evidence JSON was refused, for callers that treat some refusals differently (#204); the error keeps the words.
+/// 证据 JSON 被拒绝的原因，供对某些拒绝另作处理的调用方使用（#204）；具体文字留在错误里。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Refusal {
     Malformed,
-    /// A string escapes half of a UTF-16 surrogate pair.
+    /// 字符串里转义了 UTF-16 代理对的一半。
     LoneSurrogate,
     TooDeep,
 }
-/// `parse_python`, saying which kind of refusal a failure is.
+/// 同 `parse_python`，并说明失败属于哪种拒绝。
 pub(crate) fn parse_python_refusal(input: &str) -> std::result::Result<Json, (Refusal, crate::Error)> {
     parse(input, false)
 }
@@ -267,7 +267,7 @@ impl Parser<'_> {
         let column = before.rsplit('\n').next().unwrap_or("").chars().count() + 1;
         Err(crate::Error::Invalid(format!("{message}: line {line} column {column} (char {})", before.chars().count())))
     }
-    // CPython's scanner consumes a valid numeric prefix, leaving punctuation errors to the container.
+    // CPython 的扫描器会吃掉合法的数字前缀，标点错误留给外层容器报告。
     fn request_number_end(&self) -> Option<usize> {
         let bytes = self.s.as_bytes();
         let mut at = self.at + usize::from(bytes.get(self.at) == Some(&b'-'));
@@ -323,11 +323,11 @@ impl Parser<'_> {
         }
         self.fail("Unterminated string starting at", start)
     }
-    /// The complete string literal from `start`, decoded by serde_json.
+    /// 从 `start` 开始的完整字符串字面量，由 serde_json 解码。
     fn decoded(&mut self, start: usize) -> crate::Result<String> {
         serde_json::from_str(&self.s[start..self.at]).map_err(|e| {
             let e = e.to_string();
-            // serde_json has no public error codes: its own (English) message names a lone surrogate.
+            // serde_json 没有公开的错误码：只能靠它自己的（英文）消息认出孤立代理项。
             if self.request_errors || e.starts_with("lone leading surrogate") {
                 self.refusal = Refusal::LoneSurrogate;
             }
@@ -399,7 +399,7 @@ impl Parser<'_> {
             }
         }
     }
-    /// Moves past a constant or number: CPython's scanner for requests, up to a delimiter for evidence.
+    /// 跳过一个常量或数字：请求按 CPython 的扫描器，证据则一直跳到分隔符。
     fn word(&mut self) -> crate::Result<()> {
         if !self.request_errors {
             while self.s.as_bytes().get(self.at).is_some_and(|b| !b" \t\r\n,]}".contains(b)) {
@@ -417,7 +417,7 @@ impl Parser<'_> {
         }
         Ok(())
     }
-    /// Python JSON number grammar, without f64 coercion of large integers.
+    /// Python 的 JSON 数字语法，大整数不强制转成 f64。
     fn number(&self, word: &str) -> crate::Result<Json> {
         let bytes = word.as_bytes();
         let mut at = usize::from(bytes.first() == Some(&b'-'));
@@ -469,7 +469,7 @@ impl Parser<'_> {
         }
     }
 }
-/// Where the run of ASCII digits starting at `at` ends.
+/// 从 `at` 开始的一串 ASCII 数字在哪里结束。
 fn digits_end(bytes: &[u8], mut at: usize) -> usize {
     while bytes.get(at).is_some_and(u8::is_ascii_digit) {
         at += 1;
@@ -504,7 +504,7 @@ mod tests {
                 r#""nested": {"z": false, "a": [null, 0, Infinity, 1.0]}}"#
             )
         );
-        // The reply is accepted by a strict parser; the non-finite values are null in it.
+        // 严格的解析器接受这个应答；其中的非有限值都是 null。
         let reply = parsed.dump_reply();
         assert_eq!(
             reply,
@@ -521,7 +521,7 @@ mod tests {
             Json::Array(vec![Json::Float(f64::NAN), Json::Float(f64::NEG_INFINITY)]).dump_reply(),
             "[null, null]"
         );
-        // Requests are refused by re-parsing `dump` strictly, so it must keep the constants.
+        // 请求靠严格地重新解析 `dump` 来拒绝，所以 `dump` 必须保留这些常量。
         assert!(serde_json::from_str::<Value>(&parse_request(r#"{"id": NaN}"#).unwrap().dump()).is_err());
         assert_eq!(parse_python("2").unwrap().integer(), 2);
         assert_eq!(parse_python("-0").unwrap().integer(), 0);
@@ -529,8 +529,8 @@ mod tests {
             assert!(parse_python(invalid).is_err(), "{invalid}");
         }
     }
-    /// Python `json` outputs recorded once (#9) by the scripts that used to run here each time
-    /// (fixed seeds; CPython 3.12): `tests/fixtures/json/`.
+    /// Python `json` 的输出，由原来每次都在这里运行的脚本录制一次（#9；固定种子，CPython 3.12）：
+    /// `tests/fixtures/json/`。
     fn recorded(name: &str) -> Vec<u8> {
         use std::io::Read;
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/json").join(name);
@@ -540,8 +540,8 @@ mod tests {
     }
     #[test]
     fn request_errors_and_valid_values_match_python_reference() {
-        // Python's json.loads/json.dumps(ensure_ascii=False) on malformed, edge and randomly mutated
-        // texts: [text, parsed, re-dumped text or error message].
+        // Python 的 json.loads/json.dumps(ensure_ascii=False) 对格式错误、边界和随机变异文本的结果：
+        // [文本, 是否解析成功, 重新输出的文本或错误消息]。
         let cases: Value = serde_json::from_slice(&recorded("request_cases.json.gz")).unwrap();
         for case in cases.as_array().unwrap() {
             let text = case[0].as_str().unwrap();
@@ -569,16 +569,16 @@ mod tests {
     #[test]
     fn refusals_say_which_kind_without_the_words() {
         let kind = |text: &str| parse_python_refusal(text).map(|_| ()).map_err(|(kind, _)| kind);
-        // A trailing half alone, or a leading half followed by another escape: serde_json calls both lone surrogates.
+        // 单独的后半个代理项，或前半个后面跟着别的转义：serde_json 都称为孤立代理项（lone surrogate）。
         assert_eq!(kind(r#"{"a": "\udc00"}"#), Err(Refusal::LoneSurrogate));
         assert_eq!(kind(r#""\ud800\u0041""#), Err(Refusal::LoneSurrogate));
-        // A leading half followed by plain text is an unfinished escape to serde_json, as before #204.
+        // 前半个代理项后面跟普通文本，serde_json 视为未完成的转义，与 #204 之前相同。
         assert_eq!(kind(r#""\ud800x""#), Err(Refusal::Malformed));
         assert_eq!(kind(r#""\x""#), Err(Refusal::Malformed));
         for text in ["{", "1.5e999x", "[1,]"] {
             assert_eq!(kind(text), Err(Refusal::Malformed), "{text}");
         }
-        // A thousand levels need more than a test thread's stack in a debug build.
+        // 一千层嵌套在 debug 构建下需要比测试线程更大的栈。
         let deep = std::thread::Builder::new().stack_size(256 << 20).spawn(move || {
             assert_eq!(kind(&format!("{}{}", "[".repeat(1001), "]".repeat(1001))), Ok(()));
             parse_python_refusal(&"[".repeat(1002)).unwrap_err()
@@ -588,8 +588,8 @@ mod tests {
     }
     #[test]
     fn float_and_string_bytes_match_python_not_just_semantic_json() {
-        // json.dumps(ensure_ascii=False) of 20,000 random finite doubles, float boundaries, ASCII and
-        // separators: both parsers must reproduce Python's bytes.
+        // json.dumps(ensure_ascii=False) 对 20,000 个随机有限 double、浮点边界值、ASCII 和分隔符的输出：
+        // 两种解析器都必须复现 Python 的字节。
         let expected = String::from_utf8(recorded("float_bytes.json.gz")).unwrap();
         let reference: Json = serde_json::from_str(&expected).unwrap();
         assert_eq!(reference.dump(), expected);

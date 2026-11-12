@@ -1,5 +1,5 @@
-//! Recognition's RGB resize contract. No EXIF rotation, ICC transform or alpha compositing:
-//! Python calls Image.convert('RGB') before resizing, unlike the thumbnail pipeline.
+//! 识别用的 RGB 缩放契约。不做 EXIF 旋转、ICC 变换和 alpha 合成：
+//! Python 在缩放前调用 Image.convert('RGB')，这一点与缩略图流程不同。
 use image::RgbImage;
 
 #[derive(Clone, Copy)]
@@ -24,9 +24,9 @@ impl Filter {
         }
     }
 }
-// Pillow's pixel-centre sampling, downsampling support and 22-bit coefficients;
-// each pass clips/rounds to u8. Float image-library filters are not interchangeable.
-// Contract source: Pillow 12.2.0 src/libImaging/Resample.c (precompute_coeffs/8bpc).
+// Pillow 的像素中心采样、缩小时的支撑范围和 22 位系数；每一遍都截断并取整到 u8。
+// 浮点的图像库滤波器不能互换。
+// 契约来源：Pillow 12.2.0 src/libImaging/Resample.c（precompute_coeffs/8bpc）。
 fn coefficients(input: u32, output: u32, filter: Filter) -> Vec<(usize, Vec<i32>)> {
     let scale = f64::from(input) / f64::from(output);
     let spread = scale.max(1.);
@@ -78,10 +78,9 @@ fn resize(input: &RgbImage, width: u32, height: u32, filter: Filter) -> RgbImage
         }))
     })
 }
-/// White square padding; odd spare pixel remains at right/bottom. BGR NHWC, 0..255 f32.
-/// The padded side x side square is virtual: samples outside the image read white instead of
-/// materialising max(w,h)^2 pixels. Coefficients, indices, fold order, shifts and clipping are
-/// those of `resize` on the materialised square, so output is bit-identical to it.
+/// 白色补成正方形；多出的奇数像素留在右边和下边。BGR NHWC，0..255 的 f32。
+/// 补边后的 side x side 正方形是虚拟的：图片外的采样读到白色，不实际生成 max(w,h)^2 个像素。
+/// 系数、索引、累加顺序、移位和截断都与 `resize` 作用在实际生成的正方形上时相同，所以输出与之逐位一致。
 pub fn wd_input(image: &RgbImage, size: u32) -> Vec<f32> {
     assert!(size > 0 && image.width() > 0 && image.height() > 0);
     let (width, height) = image.dimensions();
@@ -95,17 +94,15 @@ pub fn wd_input(image: &RgbImage, size: u32) -> Vec<f32> {
         }
     };
     let output = if size == side {
-        // `resize` skips both passes here; the output is the padded square itself.
+        // `resize` 在这里两遍都跳过；输出就是补边后的正方形本身。
         RgbImage::from_fn(size, size, padded)
     } else {
-        // Both passes map side -> size, so `resize` derives the same coefficients twice.
+        // 两遍都是 side -> size，所以 `resize` 两次算出的系数相同。
         let coeffs = coefficients(side, size, Filter::Cubic);
-        // The horizontal sums are i64 integer sums, which are exact and independent of order: per
-        // output column, |k| sums to about 1.1 * 2^22 plus half a unit of rounding per tap, so even
-        // with 4 * u32::MAX taps times 255 every partial sum stays below 2^42. A column's padding
-        // taps therefore contribute 255 * (total weight - weight over image columns), and an image
-        // row only visits the taps that land on the image: the result equals the sequential fold
-        // over the materialised square, in time linear in the image instead of in side^2 (#74).
+        // 水平方向的和是 i64 整数和，精确且与顺序无关：每个输出列的 |k| 之和约为 1.1 * 2^22，
+        // 每个抽头另加半个单位的舍入，所以即使有 4 * u32::MAX 个抽头乘以 255，每个部分和也都小于 2^42。
+        // 因此一列里补边抽头的贡献是 255 *（总权重 - 落在图片列上的权重），而图片的一行只需访问落在图片上的抽头：
+        // 结果等于在实际生成的正方形上按顺序累加，耗时与图片大小成线性，而不是与 side^2 成正比（#74）。
         let columns: Vec<(i64, std::ops::Range<usize>)> = coeffs
             .iter()
             .map(|(start, weights)| {
@@ -117,7 +114,7 @@ pub fn wd_input(image: &RgbImage, size: u32) -> Vec<f32> {
                 (255 * (total - inside_total), inside)
             })
             .collect();
-        // A padding row is white across the whole square; its horizontal result depends only on x.
+        // 补边行在整个正方形上都是白色；它的水平结果只取决于 x。
         let white: Vec<u8> = coeffs
             .iter()
             .map(|(_, weights)| {
@@ -125,7 +122,7 @@ pub fn wd_input(image: &RgbImage, size: u32) -> Vec<f32> {
                 (sum >> 22).clamp(0, 255) as u8
             })
             .collect();
-        // Horizontal pass for image rows only (size x height); padding rows come from `white`.
+        // 只对图片行做水平一遍（size x height）；补边行取自 `white`。
         let rows = RgbImage::from_fn(size, height, |x, y| {
             let (start, weights) = &coeffs[x as usize];
             let (padding, inside) = &columns[x as usize];
@@ -155,8 +152,8 @@ pub fn wd_input(image: &RgbImage, size: u32) -> Vec<f32> {
     };
     output.pixels().flat_map(|p| [f32::from(p[2]), f32::from(p[1]), f32::from(p[0])]).collect()
 }
-/// Squash BILINEAR, then CLIP normalisation in f32 with NCHW planes.
-#[allow(clippy::excessive_precision)] // Keep the published CLIP constants visibly identical to the recorded CCIP preprocessing fixture.
+/// 先用 BILINEAR 直接拉伸，再在 f32 下做 CLIP 归一化，按 NCHW 分平面。
+#[allow(clippy::excessive_precision)] // 让公开的 CLIP 常数与录制的 CCIP 预处理夹具看得出完全相同。
 pub fn ccip_input(image: &RgbImage, size: u32) -> Vec<f32> {
     assert!(size > 0 && image.width() > 0 && image.height() > 0);
     let image = resize(image, size, size, Filter::Linear);
@@ -174,12 +171,12 @@ mod tests {
         let ccip = ccip_input(&rgb, 2);
         assert_eq!(ccip.len(), 12);
         assert_eq!(ccip[0], (10f32 / 255. - 0.48145466) / 0.26862954);
-        // Preserve the published CLIP constant and the production f32 expression exactly.
+        // 原样保留公开的 CLIP 常数和生产代码里的 f32 表达式。
         #[allow(clippy::excessive_precision)]
         let expected_green = (20f32 / 255. - 0.4578275) / 0.26130258;
         assert_eq!(ccip[4], expected_green);
     }
-    /// The pre-#46 implementation: materialised white square, then the generic resize.
+    /// #46 之前的实现：实际生成白色正方形，再走通用的 resize。
     fn wd_input_materialised(image: &RgbImage, size: u32) -> Vec<f32> {
         let side = image.width().max(image.height());
         let (left, top) = ((side - image.width()) / 2, (side - image.height()) / 2);
@@ -237,10 +234,10 @@ mod tests {
         for (index, &(width, height)) in shapes.iter().enumerate() {
             let side = width.max(height);
             let image = noise(width, height, 0x4632_91ab ^ index as u32);
-            // Down/up-sampling around side; the production size 448 on a representative subset
-            // keeps the debug test fast (each 448 case costs a full 448 x 448 resize twice).
+            // 围绕 side 做缩小和放大；生产尺寸 448 只在有代表性的一部分形状上测，
+            // 让 debug 测试保持快速（每个 448 用例要做两次完整的 448 x 448 缩放）。
             let mut sizes = vec![1, 2, 16, side];
-            // side - 1 costs a near-full-size resize of the materialised square; large sides use 448 below.
+            // side - 1 要对实际生成的正方形做接近原尺寸的缩放；大的 side 用下面的 448。
             if side <= 512 {
                 sizes.push(side - 1);
             }
@@ -264,7 +261,7 @@ mod tests {
             }
         }
         assert_eq!(cases, 124);
-        // Uniform and border-heavy images: odd margins and image edges meet the padding exactly.
+        // 纯色和边缘占比大的图片：奇数边距和图片边缘正好与补边相接。
         for (width, height) in [(1, 6), (6, 1), (3, 10), (10, 3)] {
             for colour in [[0; 3], [255; 3], [254, 0, 255]] {
                 let image = RgbImage::from_pixel(width, height, image::Rgb(colour));
@@ -277,8 +274,8 @@ mod tests {
     }
     #[test]
     fn extreme_aspect_ratio_does_not_allocate_padded_square() {
-        // The materialised square would be 3 * 1_000_000^2 bytes (about 2.7 TiB); the virtual
-        // padding keeps one 4 x 1 horizontal row, the coefficients and the 4 x 4 output.
+        // 实际生成的正方形会有 3 * 1_000_000^2 字节（约 2.7 TiB）；虚拟补边只保留一行 4 x 1 的水平结果、
+        // 系数和 4 x 4 的输出。
         let image = noise(1_000_000, 1, 0x0046);
         let result = wd_input(&image, 4);
         assert_eq!(result.len(), 4 * 4 * 3);
