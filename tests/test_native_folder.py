@@ -89,7 +89,15 @@ class NativeFolderScanTest(unittest.TestCase):
         self.assertEqual((r['returned'], r['moved']), (1, 1))
         p = self.pics / 'returned.jpg'
         os.utime(p, ns=(-1234567890, -1234567890))
-        self.assertEqual(self.scan_pair()['changed'], 1)
+        # 消费但不改写旧录制；它把 mtime-only 误报为内容变化，#364 明确修正这一处。
+        self.assertEqual(self.rec.value('old scan')['result']['changed'], 1)
+        # #364：mtime-only 不再使有效标签/向量失效；这是修复后的契约，不沿用旧录制中的错误行为。
+        before = {table: snapshot(self.lib.source)[table] for table in ('labels', 'embeddings')}
+        result = subprocess.run([str(self.binary), 'folder-scan', '--db', str(self.lib.source)],
+                                input=json.dumps(self.source).encode(), capture_output=True, timeout=15, env=self.env)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout)['changed'], 0)
+        self.assertEqual({table: snapshot(self.lib.source)[table] for table in before}, before)
 
     def test_source_commit_failure_rolls_back_and_retry(self):
         before = snapshot(self.lib.source)

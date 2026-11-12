@@ -456,67 +456,94 @@ fn import_internal(
             return Err(invalid());
         }
     }
-    let duplicate: bool =
-        tx.query_row("SELECT EXISTS(SELECT 1 FROM recognition_imports WHERE digest=?)", [&pkg.digest], |r| r.get(0))?;
-    if !duplicate {
-        let mut added = Vec::new();
-        for (i, u) in pkg.ids.iter().enumerate() {
-            observer.count(i as u64, pkg.ids.len() as u64);
-            crate::app_sync::check(cancel)?;
-            let wd = &pkg.wd[i * 1024 * 4..(i + 1) * 1024 * 4];
-            let ccip = &pkg.ccip[i * 768 * 4..(i + 1) * 768 * 4];
-            let mut labels = pkg.labels[u].clone();
-            labels.sort_by(|a, b| a[0].as_str().cmp(&b[0].as_str()).then(a[1].as_str().cmp(&b[1].as_str())));
-            let mut bytes = crate::character_json::dump(&models, true).into_bytes();
-            bytes.extend(compact(&json!(labels)).as_bytes());
-            bytes.extend(wd);
-            bytes.extend(ccip);
-            if let Some(claims) = &claims {
-                let rows = claims.claims.iter().filter(|c| &c.asset == u).collect::<Vec<_>>();
-                bytes.extend(compact(&json!({"anchors":claims.anchors,"claims":rows})).as_bytes());
-            }
-            let fingerprint = sha(&bytes);
-            let old: Option<String> =
-                tx.query_row("SELECT digest FROM recognition_assets WHERE asset=?", [u], |r| r.get(0)).optional()?;
-            if let Some(old) = old {
-                if old != fingerprint {
-                    return Err(invalid());
-                }
-                continue;
-            }
-            tx.execute(
-                "DELETE FROM labels WHERE uuid=? AND source='wd_v3' AND dim IN ('general','character','rating')",
-                [u],
-            )?;
-            for label in &pkg.labels[u] {
-                tx.execute(
-                    "INSERT INTO labels(uuid,dim,value,conf,source,model_ver,run_id) VALUES (?,?,?,?,'wd_v3',?,?)",
-                    params![
-                        u,
-                        label[0].as_str(),
-                        label[1].as_str(),
-                        label[2].as_f64(),
-                        models["wd"]["version"].as_str(),
-                        format!("import:{}", pkg.digest)
-                    ],
-                )?;
-            }
-            if let Some(claims) = &claims {
-                tx.execute("DELETE FROM labels WHERE uuid=? AND source='char_index' AND dim='char_ext'", [u])?;
-                for claim in claims.claims.iter().filter(|c| &c.asset == u) {
-                    tx.execute("INSERT INTO labels(uuid,dim,value,conf,source,model_ver,run_id) VALUES (?,'char_ext',?,?,'char_index','character_index@2025-09-25',?)",params![u,claim.character,claim.confidence,format!("import:{}",pkg.digest)])?;
-                }
-            }
-            for (model, vec) in [("wd", wd), ("ccip", ccip)] {
-                tx.execute("INSERT OR REPLACE INTO embeddings VALUES (?,?,?)", params![u, model, vec])?;
-            }
-            tx.execute("INSERT INTO recognition_assets VALUES (?,?,?)", params![u, fingerprint, pkg.digest])?;
-            added.push(u.clone());
+    let seen: bool = tx.query_row(
+        "SELECT EXISTS(SELECT 1 FROM recognition_imports WHERE digest=? OR digest LIKE ?)",
+        params![pkg.digest, format!("{}:redelivery:%", pkg.digest)],
+        |r| r.get(0),
+    )?;
+    let mut added = Vec::new();
+    let mut delivery = None;
+    // 整包账本记录过去的交付，不证明每张图片的结果现在仍有效。每次重试都复核逐图指纹。
+    for (i, u) in pkg.ids.iter().enumerate() {
+        observer.count(i as u64, pkg.ids.len() as u64);
+        crate::app_sync::check(cancel)?;
+        let wd = &pkg.wd[i * 1024 * 4..(i + 1) * 1024 * 4];
+        let ccip = &pkg.ccip[i * 768 * 4..(i + 1) * 768 * 4];
+        let mut labels = pkg.labels[u].clone();
+        labels.sort_by(|a, b| a[0].as_str().cmp(&b[0].as_str()).then(a[1].as_str().cmp(&b[1].as_str())));
+        let mut bytes = crate::character_json::dump(&models, true).into_bytes();
+        bytes.extend(compact(&json!(labels)).as_bytes());
+        bytes.extend(wd);
+        bytes.extend(ccip);
+        if let Some(claims) = &claims {
+            let rows = claims.claims.iter().filter(|c| &c.asset == u).collect::<Vec<_>>();
+            bytes.extend(compact(&json!({"anchors":claims.anchors,"claims":rows})).as_bytes());
         }
+        let fingerprint = sha(&bytes);
+        let old: Option<String> =
+            tx.query_row("SELECT digest FROM recognition_assets WHERE asset=?", [u], |r| r.get(0)).optional()?;
+        if let Some(old) = old {
+            if old != fingerprint {
+                return Err(invalid());
+            }
+            continue;
+        }
+        let delivery = match &delivery {
+            Some(value) => value,
+            None => {
+                // 兼容旧抢救流程清掉源账本、却留下应用投影的图库；也不能复用它的投影标记。
+                let projected = if seen {
+                    false
+                } else {
+                    crate::app_library::read_connection(&library.db())?.query_row(
+                        "SELECT EXISTS(SELECT 1 FROM meta WHERE key=?)",
+                        [format!("recognition_projection:{}", pkg.digest)],
+                        |r| r.get::<_, bool>(0),
+                    )?
+                };
+                delivery.insert(if seen || projected {
+                    // 同包重新交付有自己的回执与投影标记；旧 done/投影记录保留为历史，不能挡住恢复。
+                    format!("{}:redelivery:{}", pkg.digest, crate::store::new_key()?)
+                } else {
+                    pkg.digest.clone()
+                })
+            }
+        };
+        tx.execute(
+            "DELETE FROM labels WHERE uuid=? AND source='wd_v3' AND dim IN ('general','character','rating')",
+            [u],
+        )?;
+        for label in &pkg.labels[u] {
+            tx.execute(
+                "INSERT INTO labels(uuid,dim,value,conf,source,model_ver,run_id) VALUES (?,?,?,?,'wd_v3',?,?)",
+                params![
+                    u,
+                    label[0].as_str(),
+                    label[1].as_str(),
+                    label[2].as_f64(),
+                    models["wd"]["version"].as_str(),
+                    format!("import:{delivery}")
+                ],
+            )?;
+        }
+        if let Some(claims) = &claims {
+            tx.execute("DELETE FROM labels WHERE uuid=? AND source='char_index' AND dim='char_ext'", [u])?;
+            for claim in claims.claims.iter().filter(|c| &c.asset == u) {
+                tx.execute("INSERT INTO labels(uuid,dim,value,conf,source,model_ver,run_id) VALUES (?,'char_ext',?,?,'char_index','character_index@2025-09-25',?)",params![u,claim.character,claim.confidence,format!("import:{delivery}")])?;
+            }
+        }
+        for (model, vec) in [("wd", wd), ("ccip", ccip)] {
+            tx.execute("INSERT OR REPLACE INTO embeddings VALUES (?,?,?)", params![u, model, vec])?;
+        }
+        tx.execute("INSERT INTO recognition_assets VALUES (?,?,?)", params![u, fingerprint, delivery])?;
+        added.push(u.clone());
+    }
+    let duplicate = seen && added.is_empty();
+    if !duplicate {
         tx.execute(
             "INSERT INTO recognition_imports(digest,manifest,assets,status) VALUES (?,?,?,'pending')",
             params![
-                pkg.digest,
+                delivery.as_deref().unwrap_or(&pkg.digest),
                 crate::character_json::dump(&pkg.manifest, true),
                 crate::character_json::dump(&json!(added), true)
             ],
@@ -571,6 +598,20 @@ pub fn resume(
             let event = if let Some(event) = event {
                 event
             } else {
+                // 未投影的旧回执可能已有部分图片失效或由新交付接管，只交付仍属于它的逐图结果。
+                let ids = ids.into_iter().filter_map(|id| {
+                    match tx.query_row(
+                        "SELECT EXISTS(SELECT 1 FROM recognition_assets r JOIN assets a ON a.uuid=r.asset WHERE r.asset=? AND r.package=? AND a.in_scope=1 AND coalesce(a.trashed,0)=0)",
+                        params![id, digest], |r| r.get::<_, bool>(0),
+                    ) {
+                        Ok(true) => Some(Ok(id)),
+                        Ok(false) => None,
+                        Err(e) => Some(Err(e)),
+                    }
+                }).collect::<rusqlite::Result<Vec<_>>>()?;
+                if ids.is_empty() {
+                    return Ok(());
+                }
                 crate::app_migrate::deliver_wd(&mut app, &library.source(), library.id(), Some(&ids), true)?;
                 let src = crate::app_library::read_connection(&library.source())?;
                 let app_tx = app.transaction_with_behavior(TransactionBehavior::Immediate)?;
