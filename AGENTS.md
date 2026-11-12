@@ -79,6 +79,10 @@ Claude Code 通过 `CLAUDE.md` 引入本文件，Codex 等直接读本文件。�
 - Rust 的 lint 约定写在各 Cargo 项目 `Cargo.toml` 的 `[lints]` 和仓库根目录的 `clippy.toml`，由 clippy 检查：每个 unsafe 块和 `unsafe impl` 都写 `// SAFETY:`；生产代码不用 `unwrap`，确实不会失败的地方用 `expect` 写明理由；`tests/` 下的集成测试 crate 在开头写 `allow`。新建 Cargo 项目时照抄这一段 `[lints]`。
 - 构造 `Error::Invalid` 用 `illustash_core::error` 里的 `invalid(…)`（返回 `Result`）或 `Error::invalid(…)`（返回 `Error`），不在各文件另写同样的辅助函数。带固定文案的辅助函数（如 `app_research.rs` 的 `bad()`）不在此列。
 
+### 前端结构约定
+
+2026-11-12（#320，总跟踪 #316）：`web/static` 的结构约定由 `tools/check_frontend.py` 机械检查，已接进 `tools/check_all.sh` 和 `ci.yml`，规则写在脚本开头：`core/` 不得导入 `ui/`；`ui/` 不得新增循环导入；`state` 上的字段必须在 `core/state.js` 声明；不得新增 `document`/`window` 级的 `keydown`/`click` 监听和运行时 `createElement('dialog')`；一行不超过 200 字符。存量冻结在 `tools/frontend_baseline.json`（按文件和内容特征登记，不按行号），**基线只能缩小**：违规要改代码，不能往基线里加；改好一处后运行 `python tools/check_frontend.py --shrink` 删掉对应项，评审和集成会话用 `--base-ref main` 确认基线没变大。报错会写明违反了哪条约定、怎么改；方案在 [WEB_V2.md](docs/WEB_V2.md#前端模块2026-10-18199)。
+
 ## 文档维护规范
 
 2026-09-30 做过一次精简（48 篇约 9,900 行 → 26 篇约 4,800 行），删掉的原文在开源前的私有历史中。以下规则是为了不再长回去。
