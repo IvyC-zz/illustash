@@ -111,7 +111,7 @@ fn models(request: Request, host: &Host, mut body: Json, translate: Translate) {
             Err(e) => return failure(request, management_error(e), true),
         }
     }
-    // 本会话的识别或角色索引正在使用模型时，删除模型要等它们用完。
+    // 本会话的识别或角色索引正在使用模型时，删除模型会被拒绝（`app_models::post` 提示等识别结束再删）。
     let in_use = body.get("action").map(Json::text) == Some("delete") && {
         let session = host.session.read().expect("http_host_post session lock poisoned");
         session.syncer.running() || session.index.writing()

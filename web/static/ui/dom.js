@@ -46,7 +46,6 @@ export function wireFolds(root) {
     d.ontoggle = () => { const o = prefs.get('settingsOpen', {}); if (d.open) o[d.dataset.foldKey] = true; else delete o[d.dataset.foldKey]; prefs.set('settingsOpen', o); };
   }
 }
-// 合并相同的进行中读取；慢的卡片绝不拖慢本地的设置外壳。
 // 只替换 HTML 变了的部分，没变的封面不会重新加载。
 export function reconcileSections(container, sections, empty = t('没有匹配的角色')) {
   if (!sections.length) { container.innerHTML = `<p class="empty">${empty}</p>`; return; }
