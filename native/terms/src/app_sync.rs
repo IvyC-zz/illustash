@@ -159,6 +159,9 @@ impl Syncer {
                 Ok(_) => Ok(()),
                 Err(e) => {
                     let mut s = state.lock().expect("sync state mutex poisoned");
+                    let stage = crate::diagnostics::stage(
+                        s.get("stage").or_else(|| s.get("status")).map(Json::text).unwrap_or(""),
+                    );
                     s.set(
                         "status",
                         (if cancel.load(Ordering::SeqCst) || crate::platform_process::stopping() {
@@ -171,7 +174,7 @@ impl Syncer {
                     if s.status() == Status::Error || ctx.timed_out() {
                         let d = crate::diagnostics::failure(
                             crate::diagnostics::Operation::Sync,
-                            crate::diagnostics::Stage::Background,
+                            stage,
                             &e,
                             crate::diagnostics::Publication::MayBePartial,
                         );

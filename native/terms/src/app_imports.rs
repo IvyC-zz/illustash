@@ -182,6 +182,20 @@ impl Imports {
             let mut state = lock(&shared);
             match result {
                 Ok(value) => {
+                    // 发布成功、投影/登记尚未完成仍是需要反馈的故障；保留业务成功结果，不能诱导重复导入。
+                    if value.get("status").map(Json::text) == Some("pending")
+                        || value.get("listed").is_some_and(|v| v.dump() == "false")
+                    {
+                        use crate::diagnostics::{self, Operation, Publication};
+                        let reason = Error::Invalid(value.get("error").map(Json::text).unwrap_or("").to_owned());
+                        let d = diagnostics::failure(
+                            if kind == Kind::Recognition { Operation::Recognition } else { Operation::Archive },
+                            diagnostics::stage(state.get("stage").map(Json::text).unwrap_or("")),
+                            &reason,
+                            Publication::Committed,
+                        );
+                        state.set("diagnostic", d.value().into());
+                    }
                     for key in ["stage", "done", "total"] {
                         state.remove(key);
                     }
@@ -404,6 +418,24 @@ mod tests {
                 assert_eq!(d.get("retry").unwrap().text(), "check_state");
             }
         }
+    }
+
+    #[test]
+    fn published_pending_result_keeps_success_and_reports_committed_diagnostic() {
+        let imports = Imports::default();
+        imports
+            .start(identity(1), Kind::Recognition, "synthetic", |p| {
+                p.publish(&mut || Ok(()))?;
+                p.stage("projecting");
+                Ok(Json::object([("status", "pending".into()), ("error", "synthetic projection failure".into())]))
+            })
+            .unwrap();
+        let end = settle(&imports);
+        assert_eq!(end.get("status").unwrap().text(), "done");
+        assert_eq!(end.get("result").unwrap().get("status").unwrap().text(), "pending");
+        let d = end.get("diagnostic").unwrap();
+        assert_eq!(d.get("publication").unwrap().text(), "committed");
+        assert_eq!(d.get("retry").unwrap().text(), "check_state");
     }
 
     #[test]

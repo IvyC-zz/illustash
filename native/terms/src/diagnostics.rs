@@ -56,6 +56,10 @@ pub enum Stage {
     Writing,
     Committing,
     Projecting,
+    Preparing,
+    Scanning,
+    Recognising,
+    Importing,
 }
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -298,6 +302,10 @@ pub(crate) fn operation(url: &str) -> Operation {
 }
 pub(crate) fn stage(value: &str) -> Stage {
     match value {
+        "preparing" => Stage::Preparing,
+        "scanning" => Stage::Scanning,
+        "recognising" => Stage::Recognising,
+        "importing" => Stage::Importing,
         "models" => Stage::Models,
         "verifying" => Stage::Verifying,
         "writing" => Stage::Writing,
