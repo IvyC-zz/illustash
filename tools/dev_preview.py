@@ -122,7 +122,8 @@ def main() -> int:
             images.mkdir(exist_ok=True)
             for i in range(args.images):
                 png(images / f'synthetic-{i + 1:03d}.png', 320 + (i % 3) * 80, 240 + (i % 4) * 60, i + 1)
-            subprocess.run([str(core), 'library-create', '--dest', str(library), '--folder', str(images)],
+            subprocess.run([str(core), 'library-create', '--dest', str(library), '--folder', str(images),
+                            '--name', '合成图库'],
                            env=env, check=True, stdout=subprocess.DEVNULL)
         print(f'隔离目录：{work}（{"保留" if keep else "退出时删除"}）', flush=True)
         host = subprocess.Popen(
