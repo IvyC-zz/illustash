@@ -1,8 +1,7 @@
-// Translation consistency (#173, #182): every t('…') literal and every data-t / data-t-attr text in the page matches
-// each table in web/static/locales/<code>.json, which has no keys the code no longer uses, and whose placeholders,
-// contexts and plural forms fit the Chinese. Text not yet translated falls back to Chinese: it is counted and reported
-// per language, never a failure. The backend's own text (#173 stage 3) is a Chinese string literal in its Rust source
-// (native/terms/src, crates/*/src); the page translates it with tb(), and its tables may hold those literals too.
+// 翻译一致性（#173、#182）：页面里每个 t('…') 字面量和每段 data-t / data-t-attr 文本都与
+// web/static/locales/<code>.json 的每张表对得上；表里没有代码已不再使用的键，占位符、上下文和复数形式与中文相符。
+// 还没翻译的文本回退为中文：按语言计数并报告，从不算失败。后端自己的文本（#173 第 3 阶段）是它 Rust 源码
+// （native/terms/src、crates/*/src）里的中文字符串字面量；页面用 tb() 翻译，表里也可以收这些字面量。
 const {test} = require('node:test');
 const assert = require('node:assert/strict');
 const {readFileSync, readdirSync} = require('node:fs');
@@ -11,19 +10,19 @@ const vm = require('node:vm');
 
 const STATIC = path.join(__dirname, '../web/static');
 const read = name => readFileSync(path.join(STATIC, name), 'utf8');
-// The desktop shell shares the tables (#173 stage 4): its start page calls t() like the library page, its Rust code
-// calls tr("…") / tr_with("…", …) (desktop/src/i18n.rs).
+// 桌面外壳共用这些表（#173 第 4 阶段）：它的启动页像图库页一样调用 t()，它的 Rust 代码调用
+// tr("…") / tr_with("…", …)（desktop/src/i18n.rs）。
 const DESKTOP = path.join(__dirname, '../desktop');
 const shellPage = readFileSync(path.join(DESKTOP, 'dist/index.html'), 'utf8');
 const shellSources = readdirSync(path.join(DESKTOP, 'src')).filter(name => name.endsWith('.rs'))
   .map(name => ['desktop/src/' + name, readFileSync(path.join(DESKTOP, 'src', name), 'utf8')]);
-// The same rule as native/terms/src/app_preferences.rs: a language code names the file.
+// 与 native/terms/src/app_preferences.rs 的规则相同：文件以语言代码命名。
 const CODE = /^[a-z]{2,3}(-[A-Za-z0-9]{1,8})*$/;
 const locales = Object.fromEntries(readdirSync(path.join(STATIC, 'locales')).filter(name => name.endsWith('.json'))
   .map(name => [name.slice(0, -5), JSON.parse(read('locales/' + name))]));
 const english = locales.en;
-// i18n.js itself only translates text handed to it, and core/i18n.js only hands its functions to modules. The page's
-// other modules (core/, ui/; #199) are scripts too.
+// i18n.js 本身只翻译交给它的文本，core/i18n.js 只把它的函数交给各模块。
+// 页面的其他模块（core/、ui/；#199）也算脚本。
 const scripts = readdirSync(STATIC, {recursive: true}).map(name => name.split(path.sep).join('/'))
   .filter(name => name.endsWith('.js') && !['i18n.js', 'core/i18n.js'].includes(name)).sort();
 const placeholders = text => [...text.matchAll(/\{(\w+)\}/g)].map(m => m[1]).sort();
@@ -34,7 +33,7 @@ function scriptKeys(name, source = read(name)) {
   for (const call of source.matchAll(/(?<![\w.$])t\(\s*(['"`]?)/g)) {
     const rest = source.slice(call.index + call[0].length - call[1].length);
     const literal = call[1] && rest.match(/^(['"])((?:\\.|(?!\1)[^\\\n])*)\1\s*[,)]/);
-    // t('…', {context: 'x'}) is looked up as "x\u0004…" (gettext's msgctxt).
+    // t('…', {context: 'x'}) 按 "x\u0004…" 查找（即 gettext 的 msgctxt）。
     const context = literal && rest.slice(literal[0].length - 1).match(/^,\s*\{\s*context:\s*'([\w-]+)'/);
     if (literal) keys.push((context ? context[1] + '\u0004' : '') + unescape(literal[1], literal[2]));
     else dynamic.push(`${name}:${source.slice(0, call.index).split('\n').length}`);
@@ -55,7 +54,7 @@ function markupKeys(html) {
   return keys;
 }
 
-// Every Chinese string literal of the backend's Rust source outside its test modules, as the program holds it.
+// 后端 Rust 源码里测试模块之外的每个中文字符串字面量，取程序里实际持有的值。
 const ROOT = path.join(__dirname, '..');
 function rustFiles() {
   const out = [];
@@ -75,7 +74,7 @@ function rustUnescape(body) {
     code ? String.fromCodePoint(parseInt(code, 16)) : hex ? String.fromCharCode(parseInt(hex, 16))
       : c === undefined ? '' : ({n: '\n', t: '\t', r: '\r', 0: '\0'})[c] ?? c);
 }
-// [file, line, text, the code just before it] for each literal; comments and char literals are skipped.
+// 每个字面量的 [文件, 行号, 文本, 紧挨着的前文代码]；跳过注释和字符字面量。
 function rustLiterals(file) {
   let src = readFileSync(file, 'utf8');
   const tests = src.search(/\n#\[cfg\(test\)\]\s*\n\s*(?:pub(?:\(crate\))? )?mod \w+\s*\{/);
@@ -106,20 +105,19 @@ function rustLiterals(file) {
   return out.filter(([, , text]) => /\p{Script=Han}/u.test(text));
 }
 const rust = rustFiles().flatMap(rustLiterals);
-// The release channel the about page shows comes from the build's metadata, not a literal.
+// 关于页显示的发布渠道来自构建的元数据，不是字面量。
 const application = path.join(ROOT, 'native/terms/application.json');
 rust.push([application, 1, JSON.parse(readFileSync(application, 'utf8')).channel, '']);
 const backendKeys = new Set(rust.map(([, , text]) => text));
-// Backend text that never reaches the page: the command line, test harnesses, logs and panics. Only the coverage
-// report leaves it out; a table may still translate it.
+// 不会到达页面的后端文本：命令行、测试 harness、日志和 panic。只有覆盖率报告不计它们；表里仍可以翻译。
 const NOT_SHOWN = /^(?:native\/terms\/src\/(?:cli|read_harness)\.rs|native\/terms\/src\/bin\/|crates\/iqdb\/)/;
-// SQL is left out too, and pieces of a sentence (text with leading or trailing spaces).
+// SQL 也不计，句子片段（首尾带空格的文本）也不计。
 const shownBackend = () => new Set(rust.filter(([file, , text, before]) => !NOT_SHOWN.test(path.relative(ROOT, file).split(path.sep).join('/'))
   && !/(?:e?print(?:ln)?!|panic!|unreachable!|expect|assert\w*!)\(\s*$/.test(before)
   && !/\b(?:CREATE|SELECT|INSERT|UPDATE|DELETE)\b/.test(text) && text.trim() === text).map(([, , text]) => text));
 
-// tr("…") in the shell's Rust: a plain string literal, its escapes read as JSON (\" and \\ are the same). Comment
-// lines and the functions' own definitions are not calls.
+// 外壳 Rust 代码里的 tr("…")：普通字符串字面量，转义按 JSON 读取（\" 和 \\ 含义相同）。
+// 注释行和这两个函数自己的定义不算调用。
 function rustKeys(name, text) {
   const keys = [], dynamic = [];
   const source = text.split('\n').map(line => /^\s*\/\//.test(line) ? '' : line).join('\n');
@@ -138,7 +136,7 @@ function usedKeys() {
   const used = new Set(), dynamic = [];
   const add = found => { found.keys.forEach(k => used.add(k)); dynamic.push(...found.dynamic); };
   for (const name of scripts) add(scriptKeys(name));
-  // i18n.js only translates what it is handed, apart from the joiner of backend messages.
+  // i18n.js 只翻译交给它的内容，后端消息的连接符除外。
   used.add('join\u0004；');
   markupKeys(read('index.html')).forEach(k => used.add(k));
   add(scriptKeys('desktop/dist/index.html', shellScript));
@@ -149,7 +147,7 @@ function usedKeys() {
 
 test('every translated text in the code is a plain literal', () => {
   const {used, dynamic} = usedKeys();
-  // A key computed at run time cannot be checked or collected for translators.
+  // 运行时算出的键无法检查，也无法收集给译者。
   assert.deepEqual(dynamic, [], 't() must be called with a single- or double-quoted literal');
   assert.ok(used.size > 0);
   for (const key of used) {
@@ -159,7 +157,7 @@ test('every translated text in the code is a plain literal', () => {
   }
 });
 
-// A table entry is a string, or plural forms for {n}: the language's Intl.PluralRules categories, always with other.
+// 表项是一个字符串，或者 {n} 的各个复数形式：取该语言 Intl.PluralRules 的类别，总要有 other。
 function checkEntry(code, key, value) {
   if (typeof value === 'string') {
     if (value) assert.deepEqual(placeholders(value), placeholders(key), `${code}: placeholders differ: ${key}`);
@@ -172,7 +170,7 @@ function checkEntry(code, key, value) {
   for (const [category, form] of Object.entries(value)) {
     assert.ok(categories.includes(category), `${code}: ${category} is not a plural form of this language: ${key}`);
     assert.equal(typeof form, 'string', `${code}: ${key} ${category}`);
-    // A form may leave out {n} ("one picture"), but never brings a placeholder of its own.
+    // 某个形式可以不含 {n}（如 "one picture"），但不能带自己的占位符。
     if (form) assert.ok(placeholders(form).every(p => placeholders(key).includes(p)), `${code}: placeholders differ: ${key} ${category}`);
   }
   if (value.other) assert.deepEqual(placeholders(value.other), placeholders(key), `${code}: placeholders differ: ${key} other`);
@@ -182,7 +180,7 @@ function checkEntry(code, key, value) {
 test('every table matches the code: no unused keys, matching placeholders, plural forms of its language', () => {
   const {used} = usedKeys();
   assert.ok(english, 'locales/en.json');
-  // Chinese is the source text, so it has no table.
+  // 中文是源文本，所以没有表。
   assert.ok(!('zh-CN' in locales), 'zh-CN is the source text, not a table');
   for (const [code, table] of Object.entries(locales)) {
     assert.match(code, CODE);
@@ -228,7 +226,7 @@ test('more tables: system takes the first browser language that has one; the set
   }
   assert.equal(page('fr', [], tables).t('设置'), 'Réglages');
   assert.equal(page('system', ['fr'], {fr: tables.fr}).I18N.language, 'fr');
-  // Without English, a language nobody translated stays Chinese.
+  // 没有英文时，没人翻译过的语言保持中文。
   assert.equal(page('system', ['ja'], {fr: tables.fr}).I18N.language, 'zh-CN');
   assert.deepEqual(JSON.parse(JSON.stringify(page('system', [], tables).I18N.languages)),
     [['zh-CN', '简体中文'], ['en', 'English'], ['fr', 'Français'], ['pt-BR', 'Português (Brasil)']]);
@@ -268,11 +266,10 @@ test('t() translates, falls back to Chinese and fills placeholders', () => {
   assert.equal(page('zh-CN', [], {en: both}).t('移除', {context: 'column'}), '移除');
 });
 
-// What the page decides must not hang on the words it shows: on an English page a test against Chinese text never
-// matches. Use a status field instead, or for a message the backend sends, said(text, '模板'): the backend's text
-// stays Chinese in any page language and its template is its code, which must be a literal of the backend's source.
+// 页面的判断不能取决于它显示的文字：在英文页面上，拿中文文本做的判断永远不会成立。改用状态字段；后端发来的消息
+// 则用 said(text, '模板')：不论页面是什么语言，后端的文本都是中文，它的模板就是它的代码，必须是后端源码里的字面量。
 test('stylesheets show no Chinese of their own', () => {
-  // CSS cannot call t(): generated text comes from an attribute the page fills, as content: attr(data-more).
+  // CSS 不能调用 t()：生成的文本来自页面填写的属性，写成 content: attr(data-more)。
   for (const name of readdirSync(STATIC).filter(n => n.endsWith('.css')))
     assert.doesNotMatch(read(name), /content:\s*["'][^"']*\p{Script=Han}/u, name);
 });
@@ -316,30 +313,30 @@ test('backend text: an exact entry, else the most specific template; a nested me
   assert.equal(tb('已将 1 张移出 雪'), 'Removed 1 picture from 雪');
   assert.equal(tb('已将 3 张移出 雪'), 'Removed 3 pictures from 雪');
   assert.equal(tb('已将 3 张移出 雪（跳过 1 张）'), 'Removed 3 from 雪 (skipped 1)'.replace('skipped 1', '1 skipped'));
-  // A template with no Chinese wording of its own never matches; text no template fits stays as sent.
+  // 自身没有中文措辞的模板从不匹配；没有模板对得上的文本保持原样。
   assert.equal(tb('甲：乙'), '甲：乙');
-  // {n} only stands for a number.
+  // {n} 只代表数字。
   assert.equal(tb('已将 几 张移出 雪'), '已将 几 张移出 雪');
   assert.equal(tb('没有模板的话'), '没有模板的话');
   assert.equal(tb('Plain English'), 'Plain English');
   assert.equal(tb(null), null);
   assert.equal(vm.runInContext('tb', zh.context)('已将 3 张移出 雪'), '已将 3 张移出 雪');
-  // said() reads the backend's text as sent, whatever the page's language.
+  // 不论页面是什么语言，said() 都按发来的原样读取后端文本。
   assert.ok(said('会话已过期，请刷新页面', '会话已过期，请刷新页面'));
   assert.ok(said('文件夹不存在或无法访问：/合成/甲', '文件夹不存在或无法访问：{path}'));
   assert.ok(said('同步失败：文件夹不存在或无法访问：/合成/甲', '文件夹不存在或无法访问：{path}'));
   assert.ok(!said('文件夹不存在或无法访问：/合成/甲', '同步失败：{reason}'));
   assert.ok(!said('不是：会话已过期，请刷新页面了', '会话已过期，请刷新页面'));
-  // Messages joined with ；, each translated.
+  // 用 ； 连接的多条消息，逐条翻译。
   assert.equal(tb('其他；已将 1 张移出 雪；没有模板'), 'Other; Removed 1 picture from 雪; 没有模板');
-  // A message that has a ； of its own stays whole.
+  // 自身带 ； 的消息保持完整。
   const semi = page('en', [], {en: {...table, '甲；乙 {n} 张': 'A; B {n}', '丙 {n} 处': 'C {n}'}}).context;
   assert.equal(vm.runInContext('tb', semi)('丙 2 处；甲；乙 3 张'), 'C 2; A; B 3');
   assert.ok(!said(undefined, '其他'));
 });
 
-// #198: the backend's text holds the user's data too. Only a placeholder that holds a nested message of the backend's
-// own is translated again; every placeholder of the backend's templates says which it is.
+// #198：后端的文本里也有用户的数据。只有装着后端自己的嵌套消息的占位符才再翻译一次；
+// 后端模板的每个占位符都要说明自己是哪一种。
 test('each placeholder of the backend templates is either a nested message or data', () => {
   const {context} = page('en');
   const nested = vm.runInContext('BACKEND_NESTED', context), data = vm.runInContext('BACKEND_DATA', context);
@@ -348,7 +345,7 @@ test('each placeholder of the backend templates is either a nested message or da
   for (const table of Object.values(locales)) for (const key of Object.keys(table)) if (backendKeys.has(key)) templates.add(key);
   const seen = new Set();
   for (const template of templates) {
-    // The same templates tb() matches: ones with Chinese wording of their own.
+    // 与 tb() 匹配的模板相同：自身带中文措辞的模板。
     if (!/\p{Script=Han}/u.test(template.replace(/\{\w+\}/g, ''))) continue;
     for (const name of placeholders(template)) {
       seen.add(name);
@@ -361,25 +358,25 @@ test('each placeholder of the backend templates is either a nested message or da
 test("the user's names in a backend message stay as they are", () => {
   const en = page('en', [], {en: english}), zh = page('zh-CN', [], {en: english});
   const tb = text => vm.runInContext('tb', en.context)(text), said = (...a) => vm.runInContext('said', en.context)(...a);
-  // A tag named like a table key.
+  // 名字和表键相同的标签。
   assert.equal(english['未识别'], 'Unidentified');
   assert.equal(tb('已给 3 张加上标签 未识别'), 'Added tag 未识别 to 3 pictures');
   assert.equal(tb('已从 1 张去掉标签 未识别'), english['已从 {n} 张去掉标签 {name}'].one.replace('{n}', '1').replace('{name}', '未识别'));
-  // A character whose name reads like a template, or holds its wording.
+  // 名字读起来像模板、或含有模板措辞的角色。
   assert.equal(tb('已将 2 张移出 已将 3 张移出 雪'), 'Removed 2 pictures from 已将 3 张移出 雪');
   assert.equal(tb('已将 2 张设为 已将张'), english['已将 {n} 张设为 {name}'].other.replace('{n}', '2').replace('{name}', '已将张'));
   assert.equal(tb('已将 1 张移出 未识别'), 'Removed 1 picture from 未识别');
-  // A nested message is still translated, and data inside it stays as it is.
+  // 嵌套消息照样翻译，里面的数据保持原样。
   assert.equal(tb('任务超时：10 分钟没有进展'), english['任务超时：{duration}没有进展'].replace('{duration}', english['{n} 分钟'].other.replace('{n}', '10')));
   assert.equal(tb('冲突：文件夹不存在或无法访问：/合成/未识别'),
     english['冲突：{m}'].replace('{m}', english['文件夹不存在或无法访问：{path}'].replace('{path}', '/合成/未识别')));
-  // said() reads a backend prefix, never a ： inside data.
+  // said() 读取后端的前缀，不会把数据里的 ： 当成前缀。
   assert.ok(said('冲突：会话已过期，请刷新页面', '会话已过期，请刷新页面'));
   assert.ok(said('同步失败：不合法：文件夹不存在或无法访问：/合成/甲', '文件夹不存在或无法访问：{path}'));
   assert.ok(!said('已给 1 张加上 甲：会话已过期，请刷新页面', '会话已过期，请刷新页面'));
   assert.ok(!said('已将 1 张移出 甲：文件夹不存在或无法访问：乙', '文件夹不存在或无法访问：{path}'));
   assert.ok(!said('没有标签「未识别：文件夹不存在或无法访问：乙」', '文件夹不存在或无法访问：{path}'));
-  // A Chinese page shows the backend's text as sent, and said() reads it the same.
+  // 中文页面按原样显示后端文本，said() 也同样读取。
   const zhTb = vm.runInContext('tb', zh.context), zhSaid = vm.runInContext('said', zh.context);
   for (const text of ['已给 3 张加上标签 未识别', '已将 2 张移出 已将 3 张移出 雪', '冲突：文件夹不存在或无法访问：/合成/未识别']) assert.equal(zhTb(text), text);
   assert.ok(zhSaid('冲突：会话已过期，请刷新页面', '会话已过期，请刷新页面'));

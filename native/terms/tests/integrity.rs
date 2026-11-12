@@ -1,7 +1,5 @@
-//! Integrity checks around opening (#212), end to end through the native host: a normal exit and a crash, damage
-//! found before opening after a crash, in the background after a normal opening, by the weekly library check and by
-//! 「立即检查」, and no write to a damaged package afterwards. Synthetic packages with deliberately overwritten pages
-//! only.
+//! 经原生宿主端到端地测试打开前后的完整性检查（#212）：正常退出和崩溃；崩溃后在打开前发现损坏、正常打开后在后台
+//! 发现、由每周的图库检查发现、由「立即检查」发现；发现之后不再写入损坏的图库包。只用故意覆写坏页的合成图库包。
 #![allow(clippy::unwrap_used, reason = "集成测试里 unwrap 就是断言")]
 use illustash_terms::{app_create::NewSource, app_service, store};
 use rusqlite::Connection;
@@ -29,12 +27,12 @@ impl Drop for Sandbox {
     }
 }
 
-/// The host as the desktop shell runs it: a startup gate on stdin, whose end is a normal exit.
+/// 按桌面外壳的方式运行的宿主：stdin 上有一道启动闸门，stdin 结束即正常退出。
 struct Host {
     child: Child,
     stdin: Option<ChildStdin>,
     origin: String,
-    /// Every stdout line, for the startup progress.
+    /// stdout 的每一行，用来看启动进度。
     lines: Vec<String>,
 }
 impl Drop for Host {
@@ -44,7 +42,7 @@ impl Drop for Host {
     }
 }
 impl Host {
-    /// Started on `package`; Err with the host's stdout and stderr when it exits before it is ready.
+    /// 在 `package` 上启动；宿主在就绪前退出时返回 Err，带上它的 stdout 和 stderr。
     fn launch(root: &Path, package: &Path) -> Result<Self, (Vec<String>, String)> {
         let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
         let port = listener.local_addr().unwrap().port();
@@ -134,7 +132,7 @@ impl Host {
         };
         (response.status(), response.into_json().unwrap())
     }
-    /// Waits for the background check to finish (it starts a few seconds after the host is ready).
+    /// 等后台检查结束（它在宿主就绪几秒后开始）。
     fn checked(&self) -> Value {
         let start = Instant::now();
         loop {
@@ -146,7 +144,7 @@ impl Host {
             thread::sleep(Duration::from_millis(100));
         }
     }
-    /// The shell's normal end: the pipe closes and the host stops its session.
+    /// 外壳的正常结束：管道关闭，宿主停止会话。
     fn quit(mut self) {
         drop(self.stdin.take());
         let start = Instant::now();
@@ -155,7 +153,7 @@ impl Host {
             thread::sleep(Duration::from_millis(20));
         }
     }
-    /// A crash: no chance to close the session.
+    /// 崩溃：没有机会关闭会话。
     fn crash(mut self) {
         self.child.kill().unwrap();
         self.child.wait().unwrap();
@@ -172,8 +170,7 @@ fn now() -> i64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64
 }
 
-/// Some pages of synthetic rows in a table of their own, so damage to them leaves every version and schema read
-/// the opening does intact: only a full check finds it.
+/// 在单独的表里放几页合成数据行，损坏这些页不影响打开时读取版本和表结构：只有完整检查才能发现。
 fn bulk(db: &Path) {
     let c = Connection::open(db).unwrap();
     c.execute_batch(
@@ -183,7 +180,7 @@ fn bulk(db: &Path) {
     )
     .unwrap();
 }
-/// Overwrite one of the last pages (synthetic_bulk's) with garbage, after folding any WAL into the file.
+/// 先把 WAL 并回文件，再用垃圾数据覆写最后几页中的一页（属于 synthetic_bulk）。
 fn corrupt(db: &Path) {
     let (size, count) = {
         let c = Connection::open(db).unwrap();
@@ -200,7 +197,7 @@ fn corrupt(db: &Path) {
     }
     fs::write(db, bytes).unwrap();
 }
-/// Both databases with their WAL files, to show nothing was written.
+/// 两个数据库及其 WAL 文件，用来证明什么都没写。
 fn files(package: &Path) -> Vec<(String, Option<Vec<u8>>)> {
     ["library.sqlite", "library.sqlite-wal", "source.sqlite", "source.sqlite-wal"]
         .into_iter()
@@ -218,7 +215,7 @@ fn checks_after_a_crash_in_the_background_and_on_request_and_stop_writing_on_dam
     for dir in ["home", "support", "shared"] {
         fs::create_dir_all(root.join(dir)).unwrap();
     }
-    // This test binary has one test: nothing else reads the process environment meanwhile.
+    // 这个测试二进制只有一个测试：此期间没有别的代码读进程环境。
     std::env::set_var("ILLUSTASH_APP_SUPPORT", root.join("support"));
     std::env::set_var("ILLUSTASH_SHARED", root.join("shared"));
     std::env::set_var("ILLUSTASH_NO_KEYCHAIN", "1");
@@ -235,7 +232,7 @@ fn checks_after_a_crash_in_the_background_and_on_request_and_stop_writing_on_dam
         package
     };
 
-    // A normal exit closes the record; a crash leaves it open. Neither opening checks before it is ready.
+    // 正常退出会把记录标为已关闭；崩溃则让它保持打开。这两次打开都不在就绪前检查。
     let crashed = create("crashed");
     let host = Host::launch(&root, &crashed).unwrap();
     assert!(!host.checking(), "{:?}", host.lines);
@@ -246,7 +243,7 @@ fn checks_after_a_crash_in_the_background_and_on_request_and_stop_writing_on_dam
     assert!(!host.checking(), "{:?}", host.lines);
     host.crash();
     assert_eq!(record(&crashed)["open"], true);
-    // The crash damaged source.sqlite: the next opening checks both first and refuses the package unchanged.
+    // 崩溃损坏了 source.sqlite：下次打开时先检查两个数据库，拒绝打开图库包，也不改动它。
     corrupt(&crashed.join("source.sqlite"));
     let before = files(&crashed);
     let (lines, errors) = Host::launch(&root, &crashed).err().expect("a damaged package must not open");
@@ -257,11 +254,11 @@ fn checks_after_a_crash_in_the_background_and_on_request_and_stop_writing_on_dam
     assert_eq!(files(&crashed), before);
     let note = illustash_terms::desktop_shell::damage_note(&crashed).expect("the shell explains the damage");
     assert!(note.contains("source.sqlite"));
-    // The damage stays on record, so the package is checked again before every opening until it is replaced.
+    // 损坏一直留在记录里，所以在被替换之前，每次打开前都会重新检查这个图库包。
     assert!(Host::launch(&root, &crashed).is_err());
     assert_eq!(files(&crashed), before);
 
-    // A normal opening checks source.sqlite in the background, finds the damage and takes no more writes.
+    // 正常打开时在后台检查 source.sqlite，发现损坏后不再接受写入。
     let damaged = create("damaged");
     corrupt(&damaged.join("source.sqlite"));
     let host = Host::launch(&root, &damaged).unwrap();
@@ -284,8 +281,7 @@ fn checks_after_a_crash_in_the_background_and_on_request_and_stop_writing_on_dam
     assert_eq!(record(&damaged)["damaged"]["database"], "source.sqlite");
     assert!(Host::launch(&root, &damaged).is_err());
 
-    // library.sqlite is checked in the background only once a week: damage to it waits for the weekly check, or
-    // for 「立即检查」.
+    // library.sqlite 每周只在后台检查一次：它的损坏要等每周的检查，或者等「立即检查」才能发现。
     let weekly = create("weekly");
     corrupt(&weekly.join("library.sqlite"));
     let yesterday = now() - 86400;
@@ -317,8 +313,8 @@ fn checks_after_a_crash_in_the_background_and_on_request_and_stop_writing_on_dam
     let (_, errors) = Host::launch(&root, &overdue).err().expect("damaged library.sqlite must not open");
     assert!(errors.contains("library.sqlite"), "{errors}");
 
-    // source.sqlite has a rollback journal: a writer with the shortest busy timeout the application uses (250 ms)
-    // still commits while the background check runs, which steps aside and starts over once the writer is done.
+    // source.sqlite 用回滚日志：后台检查运行期间，使用应用里最短忙等超时（250 ms）的写入方仍能提交；
+    // 检查会让路，等写入方完成后重新开始。
     let busy = create("busy");
     {
         let c = Connection::open(busy.join("source.sqlite")).unwrap();

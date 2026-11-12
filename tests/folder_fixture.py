@@ -1,4 +1,4 @@
-"""Synthetic folder library: a reference index plus a few generated images. Temporary directories only."""
+"""合成的文件夹图库：一份参考索引加几张生成的图片。只用临时目录。"""
 import os
 import sqlite3
 import tempfile
@@ -16,8 +16,7 @@ IMAGES = Path(__file__).resolve().parent / 'fixtures' / 'folder_images'
 
 
 def image(path, colour, size=(40, 30)):
-    """A solid-colour image. The committed copies keep the bytes independent of the local
-    encoder, so scans match recorded expectations on every platform."""
+    """一张纯色图片。用已提交的副本，字节就不依赖本机编码器，扫描结果在每个平台上都与录制的期望一致。"""
     path.parent.mkdir(parents=True, exist_ok=True)
     fixed = IMAGES / f'{colour}-{size[0]}x{size[1]}{path.suffix.lower()}'
     if fixed.is_file():
@@ -27,9 +26,8 @@ def image(path, colour, size=(40, 30)):
 
 
 def settle(*folders):
-    """Content-derived modification times for generated files, so scans that store (size, mtime)
-    match recorded expectations (#9): a rename keeps it, new content changes it. Times a test set
-    on purpose (before 2020) are kept. On macOS an earlier mtime also moves the birth time."""
+    """给生成的文件设置由内容推出的修改时间，让存储 (size, mtime) 的扫描与录制的期望一致（#9）：
+    改名不变，内容变了才变。测试有意设置的时间（2020 年之前）保留。在 macOS 上，把 mtime 改早也会让创建时间跟着变。"""
     for folder in folders:
         for path in sorted(folder.rglob('*')) if folder.exists() else ():
             if path.is_file() and path.stat().st_mtime >= 1_600_000_000:
@@ -38,7 +36,7 @@ def settle(*folders):
 
 
 class FolderSource:
-    """setUp/tearDown/rows for tests that build a synthetic folder library (former tests/test_folder.py)."""
+    """构建合成文件夹图库的测试所用的 setUp/tearDown/rows（原 tests/test_folder.py）。"""
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name).resolve()

@@ -3,12 +3,11 @@ from pathlib import Path
 import sqlite3
 
 SCHEMA = (Path(__file__).parent / 'fixtures/provenance_schema.sql').read_text()
-VERSION = 5   # the provenance cache schema version (former provenance.db.VERSION)
+VERSION = 5   # 溯源缓存的 schema 版本（原 provenance.db.VERSION）
 
 
 class Connection(sqlite3.Connection):
-    """Leaving ``with`` commits (or rolls back) and closes, so the WAL is checkpointed into the
-    file before a test reads its bytes."""
+    """离开 ``with`` 时提交（或回滚）并关闭，这样测试读取文件字节之前 WAL 已经 checkpoint 进文件。"""
     def __exit__(self, *exc):
         try:
             return super().__exit__(*exc)
@@ -17,8 +16,7 @@ class Connection(sqlite3.Connection):
 
 
 def connect(library):
-    """The provenance cache as the former Python connection opened it: WAL, foreign keys,
-    the current schema and its user_version."""
+    """按原来的 Python 连接的方式打开溯源缓存：WAL、外键、当前 schema 及其 user_version。"""
     c = sqlite3.connect(Path(library.path) / 'provenance.sqlite', timeout=30, factory=Connection)
     c.row_factory = sqlite3.Row
     c.execute('PRAGMA journal_mode=WAL')
@@ -30,7 +28,7 @@ def connect(library):
 
 
 def artist_for(c, links, source):
-    # A stable fixture key keeps generated inputs independent of a random UUID provider.
+    # 夹具用稳定的键，生成的输入就不依赖随机的 UUID 来源。
     artist = next((r[0] for s,k,_ in links for r in c.execute(
         'SELECT artist_id FROM artist_links WHERE system=? AND key=?', (s,k))), None)
     if artist is None:

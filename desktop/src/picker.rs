@@ -1,4 +1,4 @@
-//! Native platform picker. Called on bridge worker threads, never on the event loop.
+//! 平台原生的选择框。在 bridge 的 worker 线程上调用，从不在事件循环上调用。
 use serde_json::{json, Value};
 use tauri::{AppHandle, Manager};
 use tauri_plugin_dialog::DialogExt;
@@ -31,6 +31,6 @@ pub fn choose(app: &AppHandle, kind: &str, multiple: bool) -> Result<Value, Stri
         p.into_path().map_err(|_| tr("选择结果不是本地路径"))?
             .into_os_string().into_string().map_err(|_| tr("选择路径不是 UTF-8"))
     }).collect::<Result<_, _>>()?;
-    // No guessing, filesystem reads, or logs of selected private paths.
+    // 不猜测、不读文件系统，也不记录选中的私人路径。
     Ok(json!({"paths": paths}))
 }

@@ -1,4 +1,4 @@
-//! Browsing reads preserve the Store SQL, field overwrite order and request-local snapshot.
+//! 浏览读取保持 Store 的 SQL、字段覆盖顺序和只在本次请求内有效的快照。
 use crate::character_entities::ENTITIES;
 use crate::{
     http::LibraryContext,
@@ -11,7 +11,7 @@ use crate::{
 };
 use rusqlite::{types::Value, Connection, OptionalExtension};
 use std::collections::{HashMap, HashSet};
-/// Duplicate `d` is in a group whose copies do not all belong to the same identities.
+/// 重复图 `d` 所在的组里，各份副本所属的身份不完全相同。
 const MIXED: &str = "EXISTS(
   SELECT 1
   FROM duplicates y
@@ -20,7 +20,7 @@ const MIXED: &str = "EXISTS(
                 EXCEPT SELECT entity FROM memberships WHERE uuid=y.uuid)
       OR EXISTS(SELECT entity FROM memberships WHERE uuid=y.uuid
                 EXCEPT SELECT entity FROM memberships WHERE uuid=d.uuid)))";
-/// Picture `a` is in the unmatched pool: no identity, no tag identity, not deferred.
+/// 图片 `a` 在未匹配池里：没有身份，没有标签身份，也没有被暂缓。
 fn unmatched(a: &str) -> String {
     format!(
         "NOT EXISTS(SELECT 1 FROM memberships m WHERE m.uuid={a}.uuid) \
@@ -90,8 +90,7 @@ pub(crate) fn day_bounds(day: &str) -> Result<(String, String)> {
     if y == 0 || d < 1 || d > size {
         return Err(bad());
     }
-    // Use the host calendar conversion, including its representable-year limits,
-    // exactly where Python day_bounds calls mktime/localtime.
+    // 在 Python day_bounds 调用 mktime/localtime 的同一位置使用宿主系统的日历转换，包括它能表示的年份范围。
     // SAFETY: libc::tm 只含整数（Unix 上另有可为空的时区名指针），全零是合法值。
     let mut tm: libc::tm = unsafe { std::mem::zeroed() };
     tm.tm_year = y - 1900;
@@ -120,7 +119,7 @@ fn count(c: &Connection, sql: &str, args: &[&str]) -> Result<i64> {
 fn exists(c: &Connection, sql: &str, args: &[&str]) -> Result<bool> {
     Ok(count(c, &format!("SELECT EXISTS({sql})"), args)? != 0)
 }
-/// Parameter conversion runs before opening any databases, as in the Python dispatcher.
+/// 参数转换在打开任何数据库之前进行，与 Python 分派器相同。
 fn preflight(path: &str, q: &HashMap<String, String>) -> Result<()> {
     let keys: Vec<(&str, &str)> = match path {
         "/api/assets" | "/api/ids" => vec![("offset", "0"), ("limit", "100")],
@@ -145,7 +144,7 @@ fn attach_provenance(c: &Connection, context: &LibraryContext) -> Result<()> {
     }
     Ok(())
 }
-// Python isdigit includes Digit (not only Decimal) Unicode 15 characters.
+// Python 的 isdigit 包括 Unicode 15 中的 Digit 字符（不只是 Decimal）。
 fn digit_extra(c: char) -> bool {
     const R: &[(u32, u32)] = &[
         (0xb2, 0xb3),
@@ -171,13 +170,12 @@ fn digit_extra(c: char) -> bool {
     ];
     R.iter().any(|&(a, b)| (a..=b).contains(&(c as u32)))
 }
-/// The filters /api/assets (and the commands acting on a browse selection) accept.
+/// /api/assets（以及作用于浏览选区的命令）接受的筛选参数。
 const FILTERS: [&str; 15] = [
     "entity", "variant", "status", "q", "tag", "utag", "pool", "order", "nsfw", "dup", "reason", "cluster", "work",
     "day", "artist",
 ];
-/// A browse selection being built: SQL clauses on picture `a` and their arguments, one of which may be the
-/// cluster or similar-group id, bound as an integer.
+/// 正在构建的浏览选区：针对图片 `a` 的 SQL 子句及其参数，其中可能有一个是聚类或相似组的 id，按整数绑定。
 struct Filter {
     clauses: Vec<String>,
     args: Vec<String>,
@@ -189,8 +187,7 @@ impl Filter {
         self.args.extend(args);
     }
 }
-/// The selection's SQL condition on assets `a`, its arguments and its ordering. Each check refuses in the order the
-/// Python Store did.
+/// 选区针对资产 `a` 的 SQL 条件、参数和排序。各项检查按 Python Store 原来的顺序拒绝。
 pub(crate) fn selection(
     c: &Connection,
     context: &LibraryContext,
@@ -260,8 +257,8 @@ pub(crate) fn selection(
     let args = bound(filter.args, filter.numeric_index, v("cluster"))?;
     Ok((filter.clauses.join(" AND "), args, ordering))
 }
-/// The character (and skin) filter: a merged character is followed to the one it was merged into, and a skin
-/// selects its character with the skin as the variant. Returns the character selected, if any.
+/// 角色（及皮肤）筛选：已合并的角色沿合并关系找到它被并入的角色；皮肤则选中它所属的角色，并以该皮肤作为
+/// variant。返回选中的角色（如果有）。
 fn identity_filter(c: &Connection, f: &HashMap<String, String>, filter: &mut Filter) -> Result<String> {
     let mut entity = value(f, "entity").to_owned();
     let mut variant = value(f, "variant").to_owned();
@@ -310,7 +307,7 @@ fn identity_filter(c: &Connection, f: &HashMap<String, String>, filter: &mut Fil
     }
     Ok(entity)
 }
-/// The picture pool (`pool`), with the group id `cluster` for the cluster and similar pools.
+/// 图片池（`pool`）；聚类池和相似池另用组 id `cluster`。
 fn pool_filter(pool: &str, cluster: &str, filter: &mut Filter) -> Result<()> {
     match pool {
         "unmatched" => filter.add(unmatched("a"), []),
@@ -347,7 +344,7 @@ fn pool_filter(pool: &str, cluster: &str, filter: &mut Filter) -> Result<()> {
     }
     Ok(())
 }
-/// The membership state filter (`status`), for the selected character if there is one.
+/// 成员关系状态筛选（`status`）；选了角色时只针对该角色。
 fn status_filter(status: &str, entity: &str, filter: &mut Filter) -> Result<()> {
     let of_entity = (!entity.is_empty()).then(|| entity.to_owned());
     match status {
@@ -367,7 +364,7 @@ fn status_filter(status: &str, entity: &str, filter: &mut Filter) -> Result<()> 
     }
     Ok(())
 }
-/// The search box (`q`): file names, and the pictures of the identities whose names match.
+/// 搜索框（`q`）：匹配文件名，以及名字匹配的身份的图片。
 fn search_filter(c: &Connection, q: &str, filter: &mut Filter) -> Result<()> {
     let query = trim(q).chars().take(160).collect::<String>();
     if query.is_empty() {
@@ -384,8 +381,7 @@ fn search_filter(c: &Connection, q: &str, filter: &mut Filter) -> Result<()> {
     filter.add(format!("({search})"), args);
     Ok(())
 }
-/// The general tag (`tag`) and content (`nsfw`) filters. With core labels, a tag among NSFW pictures only is one
-/// query on the term projection.
+/// 普通标签（`tag`）和内容（`nsfw`）筛选。标签在核心里时，「只看 NSFW 图里的某个标签」是对词条投影的一次查询。
 fn label_filter(c: &Connection, context: &LibraryContext, tag: &str, nsfw: &str, filter: &mut Filter) -> Result<()> {
     let combined = !tag.is_empty() && nsfw == "only" && flag(c, "terms_labels")?;
     if !tag.is_empty() {
@@ -427,7 +423,7 @@ fn label_filter(c: &Connection, context: &LibraryContext, tag: &str, nsfw: &str,
     }
     Ok(())
 }
-/// The ORDER BY of a selection (`order`); every ordering ends in the primary key.
+/// 选区的 ORDER BY（`order`）；每种排序最后都按主键排。
 fn ordering(order: &str, pool: &str, dup: &str, status: &str, entity: &str) -> Result<String> {
     if !["newest", "oldest", "suspicious", "hinted"].contains(&order) {
         return Err(Error::Invalid("未知排序".into()));
@@ -456,7 +452,7 @@ fn ordering(order: &str, pool: &str, dup: &str, status: &str, entity: &str) -> R
         format!("a.added_at {direction},a.uuid")
     })
 }
-/// The arguments as SQL values: the group id an integer, the rest text.
+/// 把参数转成 SQL 值：组 id 为整数，其余为文本。
 fn bound(args: Vec<String>, numeric_index: Option<usize>, cluster: &str) -> Result<Vec<Value>> {
     if numeric_index.is_some() {
         let digits = cluster
@@ -465,7 +461,7 @@ fn bound(args: Vec<String>, numeric_index: Option<usize>, cluster: &str) -> Resu
             .collect::<String>();
         let digits = digits.trim_start_matches('0');
         if digits.len() > 19 || (digits.len() == 19 && digits > "9223372036854775807") {
-            // All filter validation precedes SQLite's Python integer binding failure.
+            // 所有筛选校验都在 SQLite 绑定 Python 整数失败之前完成。
             return Err(Error::Io(std::io::Error::other("Python int too large to convert to SQLite INTEGER")));
         }
     }
@@ -516,8 +512,7 @@ fn memberships(c: &Connection, id: &str) -> Result<Vec<Json>> {
     }
     Ok(out)
 }
-// A projected page needs only its identities, work names and hybrid nodes. Keep
-// the display overwrite order, but do not prepare several SQL queries per card.
+// 投影后的页面只需要本页的身份、作品名和 hybrid 节点。保持显示字段的覆盖顺序，但不为每张卡片准备好几条 SQL 查询。
 struct PageDisplay {
     entities: HashMap<String, Json>,
     names: HashMap<(String, bool), Json>,
@@ -603,7 +598,7 @@ impl PageDisplay {
         v
     }
 }
-/// Shows identities on one page: from the page's batched names when they are projected, else one by one.
+/// 显示一页上的身份：已投影时用本页批量取得的名字，否则逐个读取。
 struct Renderer<'a> {
     c: &'a Connection,
     page: Option<PageDisplay>,
@@ -616,7 +611,7 @@ impl Renderer<'_> {
         }
     }
 }
-/// The page's tables keyed by picture: its own tags, deferral, duplicate group and exclusion.
+/// 本页按图片索引的几张表：图片自己的标签、暂缓、重复组和排除。
 struct PageExtras {
     tags: HashMap<String, Vec<Json>>,
     deferred: HashSet<String>,
@@ -646,7 +641,7 @@ impl PageExtras {
         Ok(Self { tags, deferred, duplicates, excluded })
     }
 }
-/// The best lead on each unclaimed picture of the page (`ids`, a JSON list), the first one in lead order.
+/// 本页（`ids`，JSON 列表）每张未认领图片上最好的线索，即按线索顺序的第一条。
 fn page_leads(c: &Connection, ids: &str) -> Result<HashMap<String, Json>> {
     let sql = format!(
         "SELECT v.uuid,v.entity
@@ -662,7 +657,7 @@ fn page_leads(c: &Connection, ids: &str) -> Result<HashMap<String, Json>> {
     }
     Ok(leads_by)
 }
-/// The audited identity of each sampled picture on the page, and the answer it already has.
+/// 本页每张抽查图片被抽查的身份，以及它已有的回答。
 fn page_audit(c: &Connection, ids: &str) -> Result<(HashMap<String, Json>, HashMap<String, Json>)> {
     let selected = "IN (SELECT value FROM json_each(?))";
     let mut audit = HashMap::new();
@@ -688,7 +683,7 @@ fn page_audit(c: &Connection, ids: &str) -> Result<(HashMap<String, Json>, HashM
     }
     Ok((audit, answered))
 }
-/// Each picture's memberships, shown, with their skins.
+/// 每张图片的成员关系，整理成显示格式，并带上皮肤。
 fn page_members(
     renderer: &Renderer,
     variant_rows: Vec<Json>,
@@ -712,7 +707,7 @@ fn page_members(
     }
     Ok(members)
 }
-/// One batched page, retaining first best lead and Python dict overwrite semantics.
+/// 批量处理的一页，保持「取第一条最好线索」和 Python dict 覆盖的语义。
 fn decorate(c: &Connection, page: &mut [Json]) -> Result<()> {
     if page.is_empty() {
         return Ok(());
@@ -930,7 +925,7 @@ fn detail(c: &Connection, context: &LibraryContext, id: &str) -> Result<Json> {
     out.extend(crate::http_artists::for_asset(c, context.library.is_some(), id, None, false)?);
     Ok(out)
 }
-/// The picture's memberships followed by the families a person rejected on it.
+/// 图片的成员关系，后面跟着用户在这张图上否定过的家族。
 fn ownership(c: &Connection, id: &str, mut members: Vec<Json>) -> Result<Json> {
     let rejected = format!(
         "SELECT e.id,entity_name(e.id) AS name,s.status,s.origin,v.sources,v.score
@@ -946,7 +941,7 @@ fn ownership(c: &Connection, id: &str, mut members: Vec<Json>) -> Result<Json> {
     }
     Ok(Json::Array(members))
 }
-/// Up to twelve other identities the evidence points to on the picture, strong leads first.
+/// 证据在这张图上指向的其他身份，最多十二个，强线索在前。
 fn alternatives(c: &Connection, id: &str) -> Result<Json> {
     let sql = format!(
         "SELECT *
@@ -976,7 +971,7 @@ fn alternatives(c: &Connection, id: &str) -> Result<Json> {
     }
     Ok(Json::Array(alternatives))
 }
-/// The picture's other copies in its duplicate group, with the names of the identities on each.
+/// 图片所在重复组里的其他副本，附上每份副本上的身份名字。
 fn copies(c: &Connection, id: &str) -> Result<Json> {
     let copies = "
         SELECT y.uuid,y.pos,y.size,a.width,a.height,a.added_at
@@ -1152,17 +1147,14 @@ fn home(c: &Connection, q: &HashMap<String, String>) -> Result<Json> {
     };
     Ok(Json::object([("days", Json::Array(result)), ("next", next)]))
 }
-/// Smallest share of the library, in permille, left after hiding NSFW for the date-index page (#48).
-/// Measured on synthetic libraries (debug host, 10k and 50k assets): counting twice rebuilds the NSFW
-/// list from the term projection twice, so the date-index page only beats the filtered copy while
-/// NSFW stays a minority; see docs/TERMS_PERFORMANCE.md section 3.
+/// 走日期索引分页（#48）时，隐藏 NSFW 后图库至少还要剩下的比例，单位千分之一。
+/// 在合成图库上测得（debug 宿主，1 万和 5 万张资产）：计数两次会从词条投影重建两次 NSFW 列表，所以只有
+/// NSFW 占少数时，日期索引分页才比筛选副本快；见 docs/TERMS_PERFORMANCE.md 第 3 节。
 const DATE_PAGE_MIN_KEPT_PERMILLE: i64 = 700;
-/// Whether the plain hide-NSFW date page should skip the filtered copy. Decided before the real count
-/// from two cheap reads in the same snapshot: all assets, and the NSFW rows of the rating projection
-/// (an index range without the joins of asset_rating, stopping once the threshold is exceeded). The
-/// estimate ignores folded and excluded rows; it only chooses the path, never the result. Libraries
-/// whose labels are not core keep the copy. Deep pages keep it too, since walking the index past half
-/// the kept rows costs about another count.
+/// 只隐藏 NSFW、按日期排序的普通页面是否应跳过筛选副本。在真正计数之前，根据同一快照里两次廉价的读取决定：
+/// 全部资产数，以及分级投影里的 NSFW 行数（一段索引范围，不做 asset_rating 的连接，超过阈值就停）。
+/// 这个估计不考虑折叠和排除的行；它只决定走哪条路径，从不影响结果。标签不在核心里的图库继续用副本。
+/// 很深的分页也继续用副本，因为沿索引走过一半以上的保留行，开销约等于再计数一次。
 fn date_page_pays(c: &Connection, offset: i64, limit: i64) -> Result<bool> {
     if !flag(c, "terms_labels")? {
         return Ok(false);
@@ -1206,7 +1198,7 @@ pub fn read(c: &Connection, context: &LibraryContext, path: &str, q: &HashMap<St
     };
     Ok((result, 200))
 }
-/// The selection's count (/api/assets/count), its ids (/api/ids) or one page of it (/api/assets).
+/// 选区的数量（/api/assets/count）、id 列表（/api/ids）或其中一页（/api/assets）。
 fn assets(c: &Connection, context: &LibraryContext, path: &str, q: &HashMap<String, String>) -> Result<Json> {
     let mut f = q.clone();
     let paged = |k: &str, default: &str| -> Result<i64> {
@@ -1235,12 +1227,10 @@ fn assets(c: &Connection, context: &LibraryContext, path: &str, q: &HashMap<Stri
     }
     let total_needed = value(q, "count") != "0";
     let nsfw = value(q, "nsfw");
-    // A rating-filtered total copies the matches once, then counts and sorts the copy, so the
-    // rating subquery and other filters run once. Only the plain library view hiding NSFW in date
-    // order (#48) may page assets through assets_date instead, when date_page_pays() estimates
-    // the copy and its sort cost more than counting twice. Both read one transaction snapshot
-    // and every ordering ends in the primary key, so either path returns the same rows in the
-    // same order.
+    // 带分级筛选的总数先把匹配结果复制一次，再对副本计数和排序，这样分级子查询和其他筛选只跑一次。
+    // 只有按日期排序、隐藏 NSFW 的普通图库视图（#48）可以改用 assets_date 分页，条件是 date_page_pays()
+    // 估计复制和排序副本的开销高于计数两次。两条路径都读同一个事务快照，而且每种排序最后都按主键排，
+    // 所以返回的行和顺序完全相同。
     let date_page = total_needed
         && nsfw == "hide"
         && order.starts_with("a.added_at ")
@@ -1268,7 +1258,7 @@ fn assets(c: &Connection, context: &LibraryContext, path: &str, q: &HashMap<Stri
     Ok(Json::object([("items", Json::Array(items)), ("total", total), ("offset", offset.into())]))
 }
 
-// Cached groups are also available without research workers.
+// 没有研究 worker 时也能读到缓存的分组。
 pub(crate) fn similar_groups(c: &Connection, kind: &str, nsfw: &str) -> Result<Json> {
     const KINDS: &[&str] = &["identical", "duplicate", "subtle", "crop", "variant", "edit"];
     if !kind.is_empty() && !KINDS.contains(&kind) {
@@ -1407,7 +1397,7 @@ pub(crate) fn clusters(c: &Connection, nsfw: &str) -> Result<Json> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    /// The core identity tree, as the fixtures here need it.
+    /// 核心的身份树，按这里的夹具所需的样子建。
     const TERM_TREE: &str = "CREATE TABLE term_tree(term_id INTEGER PRIMARY KEY,parent_id TEXT,merged_into TEXT,
         work_id TEXT,work_text TEXT NOT NULL DEFAULT '',variant TEXT NOT NULL DEFAULT '',
         artist TEXT NOT NULL DEFAULT '',
@@ -1516,7 +1506,7 @@ mod tests {
             Ok(Json::object([("name", id.into())]).dump())
         })
         .unwrap();
-        // The former Python Store's clusters()/similar_groups() bytes on this database, recorded once (#9).
+        // 原 Python Store 的 clusters()/similar_groups() 在这个数据库上输出的字节，录制一次（#9）。
         let expected = include_bytes!("../tests/fixtures/json/browse_groups.json");
         let tx = c.transaction().unwrap();
         let mut actual = Vec::new();
@@ -1533,16 +1523,15 @@ mod tests {
     }
     #[test]
     fn rating_filtered_pages_keep_order_total_and_bounds() {
-        // #48: rating-filtered pages keep fixed expectations for ties, NULL dates, folded/excluded rows,
-        // the last partial page, past-the-end offsets and empty results on both paths. Without extra
-        // rows half the library is NSFW, so every page falls back to the filtered copy; twelve excluded
-        // general rows raise the kept share above the threshold, so shallow plain hide pages use
-        // assets_date while deep ones still fall back.
+        // #48：带分级筛选的页面在两条路径上对并列、NULL 日期、折叠和排除的行、最后不满的一页、越过末尾的
+        // offset 以及空结果，都保持固定期望。不加额外的行时图库一半是 NSFW，所以每一页都退回筛选副本；
+        // 加上十二个被排除的 general 行后，保留比例超过阈值，于是较浅的只隐藏 NSFW 的普通页面用 assets_date，
+        // 较深的仍然退回。
         for extra in [0usize, 12] {
             rating_filtered_pages(extra);
         }
     }
-    /// A synthetic library for the rating pages: eight rated pictures and `extra` excluded general ones (`z00`…).
+    /// 分级页面用的合成图库：八张带分级的图片，外加 `extra` 张被排除的 general 图片（`z00`…）。
     fn rating_library(extra: usize) -> (std::path::PathBuf, std::path::PathBuf, Vec<String>) {
         let root = std::env::temp_dir().join(format!(
             "illustash-browse-rating-pages-{}-{extra}-{}",
@@ -1563,7 +1552,7 @@ mod tests {
             .unwrap();
             c.execute("INSERT INTO excluded VALUES (?,'photo','manual')", [z]).unwrap();
         }
-        // Insertion order differs from every expected order, so rowid order cannot pass by accident.
+        // 插入顺序与每种期望顺序都不同，所以按 rowid 顺序不可能碰巧通过。
         c.execute_batch(
             "INSERT INTO assets(uuid,filename,width,height,added_at) VALUES
                ('e1','e1.png',1,1,'2026-09-28 10:00:00'),('a3','a3.png',1,1,'2026-09-30 10:00:00'),
@@ -1597,7 +1586,7 @@ mod tests {
     fn rating_filtered_pages(extra: usize) {
         let (root, dest, extras) = rating_library(extra);
         let c = crate::sqlite::open(dest.join("library.sqlite")).unwrap();
-        // Both libraries hold four NSFW assets: 4/8 kept is below the threshold, 16/20 above it.
+        // 两个图库都有四张 NSFW 资产：保留 4/8 低于阈值，16/20 高于阈值。
         let pays = |offset, limit| date_page_pays(&c, offset, limit).unwrap();
         if extra == 0 {
             assert!(!pays(0, 1));
@@ -1659,7 +1648,7 @@ mod tests {
                 (expected.to_vec(), *total),
                 "{query} extra={extra}"
             );
-            // The page without a total is the same rows, byte for byte.
+            // 不带总数的页面是同样的行，逐字节相同。
             let (_, untotaled, unpaged) = page(&format!("{query}&count=0"));
             assert_eq!(untotaled, "null", "{query}");
             assert_eq!(get(&body, "items").dump(), get(&unpaged, "items").dump(), "{query}");

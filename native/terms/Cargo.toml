@@ -19,20 +19,20 @@ tiny_http = "0.12"
 libc = "0.2"
 csv = "1.3"
 sha1 = "0.10"
-unicode-normalization = "=0.1.22" # Unicode 15.0, matching the Python 3.12 contract
+unicode-normalization = "=0.1.22" # Unicode 15.0，与 Python 3.12 契约一致
 flate2 = { version = "1", default-features = false, features = ["zlib"] }
 image = { version = "=0.25.6", default-features = false, features = ["png", "gif", "webp", "tiff", "bmp", "ico", "pnm", "tga"] }
 gif = "=0.13.3"
 lcms2 = { version = "=5.6.0", features = ["static"] }
 lcms2-sys = { version = "=4.0.7", default-features = false, features = ["static"] }
 kamadak-exif = "0.6"
-tiff = "=0.9.1" # Already locked by image; preserve raw CMYK before Pillow-equivalent resize.
-tiff_display = { package = "tiff", version = "=0.10.3" } # Packed/LA/planar display samples; preserves MSRV 1.82.
+tiff = "=0.9.1" # image 已锁定此版本；在与 Pillow 等价的缩放之前保留原始 CMYK。
+tiff_display = { package = "tiff", version = "=0.10.3" } # 用于紧缩、LA、平面排列的显示采样；保持 MSRV 1.82。
 mozjpeg = { version = "0.10", default-features = false, features = ["with_simd"] }
 fast_image_resize = "=4.2.3"
 md-5 = "0.10"
 chrono = "0.4"
-# CPU-only sessions; runtime is an explicit installed resource, never downloaded by Cargo.
+# 只用 CPU 的推理会话；运行库是显式安装的资源，从不由 Cargo 下载。
 ort = { version = "=2.0.0-rc.10", default-features = false, features = ["std", "load-dynamic"] }
 
 ureq = { version = "=2.12.1", features = ["json"] }
@@ -45,7 +45,7 @@ regex = "=1.13.1"
 httpdate = "=1.0.3"
 serde_path_to_error = "0.1"
 
-# The core read host for read-route tests exists only in an explicitly built example, never the shipped CLI.
+# 读路由测试用的核心读宿主只存在于需显式构建的 example 中，从不进入发布的 CLI。
 [features]
 test-read-host = ["illustash-core/verify-incremental"]
 
@@ -61,14 +61,13 @@ serde_json = "1"
 name = "read-http"
 required-features = ["test-read-host"]
 
-# The baseline replay (tests/baseline.rs) reads every table after each recorded call; an unoptimised
-# bundled SQLite makes that the slowest part of `cargo test`.
+# 对照基准重放（tests/baseline.rs）在每次录制的调用之后读取所有表；内置的 SQLite 不优化时，
+# 这会成为 `cargo test` 中最慢的部分。
 [profile.dev.package.libsqlite3-sys]
 opt-level = 3
 
-# tests/baseline.rs compares every table after each of ~9,000 recorded calls; unoptimized dependencies (hashing,
-# regex masking, JSON, gzip, SQLite bindings) dominate its time (#130). Our own crates stay at the dev level, so
-# editing them rebuilds as fast as before.
+# tests/baseline.rs 在约 9,000 次录制调用的每一次之后比较所有表；不优化的依赖（哈希、正则遮盖、JSON、gzip、
+# SQLite 绑定）占去大部分时间（#130）。我们自己的 crate 保持 dev 级别，改动它们时重新构建的速度和以前一样快。
 [profile.dev.package."*"]
 opt-level = 3
 
@@ -81,8 +80,8 @@ opt-level = 0
 [profile.dev.package.tiny_http]
 opt-level = 0
 
-# tiny_http 0.12 has no per-connection timeout or connection limit (#25); the vendored copy adds
-# `Server::from_listener_with_limits`. Every build root linking this crate repeats this patch.
+# tiny_http 0.12 没有按连接的超时和连接数上限（#25）；vendored 副本加了 `Server::from_listener_with_limits`。
+# 每个链接本 crate 的构建根都要重复这条 patch。
 [patch.crates-io]
 tiny_http = { path = "vendor/tiny_http" }
 

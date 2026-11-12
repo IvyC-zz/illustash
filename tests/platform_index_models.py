@@ -1,10 +1,9 @@
-"""Explicit macOS/Windows CCIP/index/recognition acceptance; excluded from discover.
+"""显式运行的 macOS/Windows CCIP/索引/识别验收；不参与 discover。
 
-Requires candidate binaries and authorised model/runtime plus the independent
-eight-generated-PNG reference from PR #172. Missing inputs fail, never skip.
-This installs only the index closure, not a complete signed application.
-Runs with ILLUSTASH_CPU_ONLY=1: the fixed expectations are CPU values, bit for bit. The accelerated CCIP session
-(#270) is the one recognition uses; tests/platform_recognition_models.py compares it within rounding.
+需要候选二进制、经授权的模型/运行库，以及 PR #172 里独立的八张生成 PNG 的参考结果。
+缺少输入就失败，从不跳过。这里只安装索引所需的闭包，不是完整的签名应用。
+以 ILLUSTASH_CPU_ONLY=1 运行：固定期望是 CPU 上的值，逐位一致。识别用的是加速的 CCIP 会话（#270）；
+tests/platform_recognition_models.py 在舍入误差范围内比较它。
 """
 import hashlib
 import json
@@ -23,7 +22,7 @@ from tests import test_native_index_production as installed
 
 
 class IndexModelAcceptance(installed.InstalledIndexAppTest):
-    # The ordinary fixture's macOS skip must not hide an explicit platform run.
+    # 普通夹具在 macOS 上的跳过不能把显式的平台运行也藏掉。
     __unittest_skip__ = False
 
     @classmethod
@@ -35,7 +34,7 @@ class IndexModelAcceptance(installed.InstalledIndexAppTest):
                     'ILLUSTASH_INDEX_INSTALLED_MODEL', 'ILLUSTASH_INDEX_INSTALLED_RUNTIME',
                     'ILLUSTASH_INDEX_REFERENCE_RAW')
         if sys.platform == 'win32':
-            required += ('ILLUSTASH_RESEARCH_OPENBLAS_DLL',)  # copied into the installed layout
+            required += ('ILLUSTASH_RESEARCH_OPENBLAS_DLL',)  # 复制到安装后的目录布局里
         for key in required:
             if not os.environ.get(key):
                 raise RuntimeError(f'explicit authorised input required: {key}')
@@ -77,8 +76,8 @@ class IndexModelAcceptance(installed.InstalledIndexAppTest):
 
     def restart(self, extra=()):
         if hasattr(self, 'adapter_resources'):
-            # Both host and adapter must use installed resources. The base real
-            # model case sets external paths; explicitly remove those overrides.
+            # 宿主和适配器都必须使用安装好的资源。基类的真实模型用例设置了外部路径，
+            # 这里显式去掉这些覆盖。
             for key in ('ILLUSTASH_ROOT', 'ILLUSTASH_MODELS', 'ILLUSTASH_ORT_DYLIB'):
                 self.env.pop(key, None)
             self.resources = self.adapter_resources
@@ -102,7 +101,7 @@ class IndexModelAcceptance(installed.InstalledIndexAppTest):
         input_path, output = self.root/'claims.json', self.root/'claims-output.json'
         input_path.write_text(json.dumps(request))
         env = self.env.copy()
-        if os.name == 'nt':  # The development example is not installed; name the installed DLL.
+        if os.name == 'nt':  # 开发用的 example 没有安装；指明安装好的 DLL。
             env['ILLUSTASH_RESEARCH_OPENBLAS_DLL'] = str(self.adapter_resources/'openblas/openblas.dll')
         result = subprocess.run([str(self.recognition), str(input_path), str(output)],
                                 env=env, capture_output=True, timeout=20)
@@ -134,11 +133,11 @@ class IndexModelAcceptance(installed.InstalledIndexAppTest):
         self.assertTrue(actual['tampered_rejected'])
 
     def test_real_index_then_recognition_cached_rebuild_and_drop(self):
-        # Readiness loads the installed CPU session and, on Windows, the fixed OpenBLAS.
+        # 就绪检查加载安装好的 CPU 会话，在 Windows 上还加载固定的 OpenBLAS。
         ready = subprocess.run([str(self.adapter), '--check'], env=self.env, capture_output=True, timeout=20)
         self.assertEqual(ready.returncode, 0, ready.stderr.decode(errors='replace'))
         self.assertNotIn('ILLUSTASH_RESEARCH_OPENBLAS_DLL', self.env)
-        # Exactly eight new model features, served by the owned loopback server.
+        # 恰好八个新的模型特征，由测试自己持有的回环服务器提供。
         super().test_actual_ccip_download_to_installed_adapter_without_python()
         self.assertNotIn('ILLUSTASH_MODELS', self.env)
         self.assertNotIn('ILLUSTASH_ORT_DYLIB', self.env)
@@ -146,9 +145,8 @@ class IndexModelAcceptance(installed.InstalledIndexAppTest):
         self.assertFalse((self.adapter.parent.parent/'workers').exists())
         self.assert_recognition()
 
-        # Recompute a prepared isolated review from cached raw using the real
-        # adapter without model/runtime. Public apply offers only missing roles;
-        # it does not expose a force-recompute action for an installed role.
+        # 用不带模型/运行库的真实适配器，从缓存的 raw 重新计算一份准备好的隔离 review。
+        # 公开的 apply 只提供缺少的角色；不对已安装的角色提供强制重算的操作。
         self.stop(self.process)
         raw_path = self.shared/'char-patch/raw/carol_example.npy'
         raw_digest = hashlib.sha256(raw_path.read_bytes()).hexdigest()
@@ -165,8 +163,7 @@ class IndexModelAcceptance(installed.InstalledIndexAppTest):
             shutil.copy2(self.features/name, review/name)
         with sqlite3.connect(self.lib.source) as source, sqlite3.connect(review/'pi.db') as target:
             source.backup(target)
-        # Raw feature data deliberately does not contain metadata; retain the
-        # accepted role's metadata while discarding its derived cleaned matrix.
+        # raw 特征数据有意不含元数据；保留已接受角色的元数据，丢弃由它导出的清洗后矩阵。
         (review/'char-index/carol_example.npy').unlink()
         before = len(self.calls)
         request = dict(format='illustash-index/1', identity=dict(package=str(self.lib.path),
@@ -203,7 +200,7 @@ class IndexModelAcceptance(installed.InstalledIndexAppTest):
 
 
 def load_tests(loader, tests, pattern):
-    # Select this case only, not the inherited ordinary/fault/model tests.
+    # 只选这个用例，不选继承来的普通/故障/模型测试。
     return unittest.TestSuite([IndexModelAcceptance('test_real_index_then_recognition_cached_rebuild_and_drop')])
 
 

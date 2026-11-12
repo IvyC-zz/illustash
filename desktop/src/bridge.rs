@@ -57,7 +57,7 @@ fn handle(app: &AppHandle, token: &str, request: Request) {
             (Method::Post, "/pixiv/logout") => pixiv::logout(app).map(|_| json!({"ok": true})),
             _ => Err("未知路径".to_string()),
         };
-        // Diagnostics for the terminal / Console: which call, and how Pixiv or the window answered (never bodies or cookies).
+        // 给终端 / 控制台看的诊断信息：哪个调用，Pixiv 或窗口怎样回应（从不输出正文或 cookie）。
         match &result {
             Ok(value) if route == "/pixiv/fetch" => {
                 if value["status"].as_u64() != Some(200) {

@@ -1,4 +1,4 @@
-// 首页 (desktop layout, #199): the newest pictures grouped by the day they were added, the sync strip, and the 认一认 card.
+// 首页（桌面布局，#199）：按加入日期分组的最新图片、同步条，以及「认一认」卡片。
 import {edits} from '../core/edits.js';
 import {dateText, esc, number} from '../core/format.js';
 import {I18N, t} from '../core/i18n.js';
@@ -10,12 +10,12 @@ import {INSP_ICONS, indexOf, inspect, openViewer} from './detail.js';
 import {$, toast, workSmall} from './dom.js';
 import {mutate, viewOpts} from './grid.js';
 
-// ---------- 首页: newest images grouped by the day they were added ----------
+// ---------- 首页：按加入日期分组的最新图片 ----------
 export const dayLabel = day => { const [y, m, d] = day.split('-').map(Number); const date = new Date(y, m - 1, d), now = new Date();
   const diff = Math.round((new Date(now.getFullYear(), now.getMonth(), now.getDate()) - date) / 864e5);
   return diff === 0 ? t('今天') : diff === 1 ? t('昨天') : dateText(y, m, d, y !== now.getFullYear()); };
 const weekday = day => { const [y, m, d] = day.split('-').map(Number); return new Intl.DateTimeFormat(I18N.locale, {weekday: 'short'}).format(new Date(y, m - 1, d)); };
-// The home page's state: its days, the next to read, the 认一认 card's state, and what watches the end of the list.
+// 首页的状态：它的各天、下一个要读的、「认一认」卡片的状态，以及盯着列表末尾的东西。
 export const home = {days: [], next: '', gen: 0, loading: false, ask: null, askSkip: [], askOff: new Set(), observer: null, resize: null, width: 0};
 export async function renderHome(keep = false) {
   $('grid').hidden = true; $('empty').hidden = true; $('charIndex').hidden = true; $('settingsPage').hidden = true; $('groupsPage').hidden = true; $('homePage').hidden = false;
@@ -53,7 +53,7 @@ export async function moreHome() {
   finally {
     if (gen === home.gen) {
       home.loading = false;
-      // Re-observe after every append so a sentinel still within the margin loads again.
+      // 每次追加后重新观察，这样仍在边距内的哨兵会再次加载。
       if (appended && home.next && state.route.page === 'home' && $('homeSentinel')) { home.observer?.unobserve($('homeSentinel')); home.observer?.observe($('homeSentinel')); }
     }
   }
@@ -64,8 +64,8 @@ function homeTile(x, style, big = false) {
   const badge = viewOpts.marks && x.dup ? `<span class="home-badge" title="${t('共 {n} 份副本', {n: x.dup.size})}">×${x.dup.size}</span>` : '';
   return `<button class="home-j${state.focused === x.uuid ? ' on' : ''}" data-id="${esc(x.uuid)}" data-chars="${esc(ids)}" style="${style}"${names.length ? ` title="${esc(x.memberships.map(nameWithWork).join(t('、')))}"` : ''}><img src="/image?id=${encodeURIComponent(x.uuid)}&size=${big ? 'medium' : 'thumb'}" alt="" loading="lazy" decoding="async" draggable="false">${badge}${big ? '' : `<span class="home-ov">${names.length ? names.map(esc).join(' · ') : x.unknown ? t('已跳过') : t('未识别')}</span>`}</button>`;
 }
-// Full rows stretch to the width (a little under the target height); a row that would have to grow past ROW_GROW
-// times the target (a day with few pictures, a day's last row) keeps the target height and leaves the right side empty.
+// 整行拉伸到满宽（比目标高度略矮）；需要长到目标高度 ROW_GROW 倍以上的行（图片少的一天、一天的最后一行）保持目标
+// 高度，右侧留空。
 const ROW_GROW = 1.15;
 export function homeRows(items, width, target) {
   const G = 6, rows = []; let row = [], sum = 0;
@@ -78,7 +78,7 @@ function heroTile(hero, w, h) {
   const top = hero.memberships[0];
   return `<button class="home-j home-hero${state.focused === hero.uuid ? ' on' : ''}" data-id="${esc(hero.uuid)}" data-chars="${esc(hero.memberships.map(m => m.id).join(' '))}" style="width:${w}px;height:${h}px"><img src="/image?id=${encodeURIComponent(hero.uuid)}&size=medium" alt="" loading="lazy" decoding="async" draggable="false">${top ? `<span class="home-cap"><b>${esc(top.name)}${workSmall(top)}</b>${top.tag && top.tag !== top.name ? `<small>${esc(top.tag.replaceAll('_', ' '))}</small>` : ''}</span>` : ''}</button>`;
 }
-// A day that does not fit the width scrolls sideways: the hero, then two rows filled shortest-first.
+// 宽度放不下的一天横向滚动：先是大图，然后是按最短优先填充的两行。
 function stripRows(items, rowH) {
   const rows = [[], []], w = [0, 0];
   for (const x of items) { const i = w[0] <= w[1] ? 0 : 1; rows[i].push(x); w[i] += ratio(x) * rowH + 6; }
@@ -93,7 +93,7 @@ export function homeDay(g, width) {
   const hero = viewOpts.hero && g.items.length >= 4 && width > heroW * 2.4 ? g.items.find(x => x.uuid === g.hero) || g.items[0] : null;
   const rest = hero ? g.items.filter(x => x !== hero) : g.items;
   const rowH = hero ? (Math.round(heroW / .72) - 6) / 2 : target;
-  // Natural width of the two-row strip; when it overflows (or more pictures are waiting) the day scrolls sideways.
+  // 两行条带的自然宽度；溢出时（或还有更多图片在等）这一天横向滚动。
   const natural = (hero ? heroW + 6 : 0) + rest.reduce((a, x) => a + ratio(x) * rowH + 6, 0) / 2;
   const strip = g.count > g.items.length || natural > width * 1.5;
   let body;
@@ -104,8 +104,7 @@ export function homeDay(g, width) {
         ${g.count > g.items.length ? `<a class="strip-more" href="${hashFor({page: 'library', day: g.day})}" style="height:${heroH}px">${t('{n} 张没显示', {n: `<b>${number(g.count - g.items.length)}</b>`})}<small>${t('继续往右滑自动加载 · 或在图库里看全部')}</small></a>` : ''}</div>
       <button class="strip-nav next" data-strip="1" aria-label="${t('向右')}">${INSP_ICONS.next}</button></div>`;
   } else {
-    // The two rows beside the hero stretch to its height and the side's width; when the second one would be mostly
-    // empty (a day with few pictures) the day is laid out without a hero instead (#293).
+    // 大图旁边的两行拉伸到它的高度和侧边的宽度；第二行会大半空着时（图片少的一天），这一天改为不带大图排版（#293）。
     const heroH = Math.round(heroW / .72), sideW = width - heroW - 6, side = [[], []], fill = [0, 0];
     let r = 0, used = 0;
     if (hero) for (const x of rest) { if (r > 1) break; side[r].push(x); fill[r] += ratio(x) * rowH + 6; used++; if (fill[r] - 6 >= sideW) r++; }
@@ -119,7 +118,7 @@ export function homeDay(g, width) {
   return `<section class="home-day" data-day="${g.day}"><div class="home-dh"><b>${esc(dayLabel(g.day))}</b><span>${weekday(g.day)} · ${t('{n} 张', {n: number(g.count)})}${viewOpts.people && g.people ? ' · ' + t('{n} 位角色', {n: number(g.people)}) : ''}</span><a class="home-all" href="${hashFor({page: 'library', day: g.day})}">${t('在图库里看')} ›</a></div>
     ${chips ? `<div class="home-chars">${chips}${more > 0 ? `<span class="home-more">${t('另外 {n} 位', {n: number(more)})}</span>` : ''}</div>` : ''}${body}</section>`;
 }
-// Sideways scrolling: arrows show only when there is more that way; nearing the end loads the next pictures of that day.
+// 横向滚动：只有那个方向还有内容时才显示箭头；快到尽头时加载那一天的下一批图片。
 function syncStrip(el) {
   const wrap = el.parentElement, max = el.scrollWidth - el.clientWidth - 2;
   wrap.querySelector('.prev').hidden = el.scrollLeft <= 2; wrap.querySelector('.next').hidden = el.scrollLeft >= max;
@@ -152,7 +151,7 @@ export function drawHome() {
   if (home.next) { home.observer = new IntersectionObserver(es => { if (es.some(e => e.isIntersecting)) moreHome(); }, {root: $('viewport'), rootMargin: '600px'}); home.observer.observe($('homeSentinel')); }
 }
 export function markHomeFocus() { if (state.route.page === 'home') for (const b of $('homePage').querySelectorAll('.home-j')) b.classList.toggle('on', b.dataset.id === state.focused); }
-// 首页「认一认」: one character, a few of its machine-recognised images; tap the wrong ones, then confirm the rest.
+// 首页「认一认」：一个角色，几张机器识别出的图；点掉错的，然后确认其余的。
 async function nextAsk() {
   if (!viewOpts.ask) return null;
   try { return (await api('/api/ask?' + new URLSearchParams({nsfw: state.nsfw, skip: home.askSkip.join(',')}))).batch; } catch { return null; }
@@ -174,11 +173,11 @@ async function submitAskCard(how) {
     post('/api/ask/answer', {entity: b.entity, kind: b.kind, later: ids}).catch(e => toast(e.message));
     return;
   }
-  home.ask = await nextAsk();   // the next character is ready before the page redraws
+  home.ask = await nextAsk();   // 页面重画之前下一个角色已经准备好
   await mutate('/api/ask/answer', {entity: b.entity, kind: b.kind, yes, no}, false);
 }
 
-// The handlers this part of the page registers. Called once, when the page starts.
+// 页面这一部分注册的处理函数。页面启动时调用一次。
 export function wireHome() {
   $('homePage').addEventListener('click', e => {
     if (e.target.closest('[data-home-retry]')) { moreHome(); return; }

@@ -9,7 +9,7 @@ mod windows_desktop;
 #[cfg(windows)]
 mod windows_worker;
 
-/// Direct parent identity for the fixed worker owner protocol; Job cleanup remains separate.
+/// 固定的 worker 归属协议用的直接父进程身份；Job 收尾另行处理。
 #[cfg(any(unix, windows))]
 pub fn parent_pid() -> std::io::Result<u32> {
     #[cfg(unix)]
@@ -41,7 +41,7 @@ pub fn worker(
         let mut group = windows_worker::ProcessJob::spawn(command)?;
         loop {
             check()?;
-            // An observer error stops the worker like cancellation: dropping the group kills it.
+            // observe 出错时像取消一样停掉 worker：drop 进程组时会杀掉它。
             observe()?;
             #[cfg(unix)]
             let status = group.0.try_wait()?;
@@ -64,7 +64,7 @@ struct ProcessGroup(std::process::Child);
 #[cfg(unix)]
 impl Drop for ProcessGroup {
     fn drop(&mut self) {
-        // SIGKILL is deterministic even for uncooperative children and leaders already exited.
+        // 即使子进程不配合、组长已经退出，SIGKILL 的结果也是确定的。
         // SAFETY: kill 只接收整数；负 PID 指向 `spawn` 时用 process_group(0) 建立的这个进程组。
         unsafe {
             libc::kill(-(self.0.id() as i32), libc::SIGKILL);
@@ -114,8 +114,8 @@ pub fn stopping() -> bool {
     STOP.load(Ordering::SeqCst)
 }
 
-/// Workers use separate process groups, so timeout cleanup must include descendants.
-/// Read only PID/PPID metadata and start from the still-unreaped owned host.
+/// worker 使用单独的进程组，所以超时收尾必须包括后代进程。
+/// 只读取 PID/PPID 元数据，从仍未回收的自有宿主进程开始。
 #[cfg(unix)]
 pub fn kill_owned_tree(pid: u32) {
     if let Ok(output) = Command::new("/bin/ps").args(["-axo", "pid=,ppid="]).output() {
@@ -159,7 +159,7 @@ pub fn kill_owned_tree(pid: u32) {
 #[cfg(not(unix))]
 pub fn kill_owned_tree(_pid: u32) {}
 
-/// Desktop retains its existing post-spawn job assignment and piped I/O.
+/// desktop 保留现有做法：启动后再加入 job，I/O 走管道。
 #[cfg(windows)]
 pub use windows_desktop::Job as DesktopJob;
 #[cfg(not(windows))]

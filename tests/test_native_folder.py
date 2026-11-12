@@ -1,8 +1,7 @@
-"""M3 folder scans: only owned temporary synthetic folders and packages.
+"""M3 文件夹扫描：只用测试自己持有的临时合成文件夹和包。
 
-The former Python scanner's and importer's results on the same inputs were recorded through
-tests/fixed_expectations.py (#9). Generated files get
-content-derived modification times and native keys are reproducible, so the recorded states hold.
+原 Python 扫描器和导入器在同样输入上的结果经 tests/fixed_expectations.py 录制（#9）。
+生成的文件用由内容推出的修改时间，原生的键可以复现，所以录制的状态依然成立。
 """
 from tests.native_worker_fixture import command as worker_command, source as worker_source, exists as worker_exists
 
@@ -37,7 +36,7 @@ class NativeFolderScanTest(unittest.TestCase):
         self.rec = Expectations(self)
         self.addCleanup(self.rec.finish, self)
         self.rec.alias(self.root, '@ROOT@')
-        # The package as first built (its asset keys are random): recorded, restored when replaying.
+        # 最初构建出的包（它的资源键是随机的）：已录制，重放时还原。
         self.rec.package('package', self.lib.path)
         self.env = {**os.environ, 'ILLUSTASH_TEST_KEY_COUNTER': str(self.root / 'key-counter')}
 
@@ -84,7 +83,7 @@ class NativeFolderScanTest(unittest.TestCase):
         self.assertEqual((r['new'], r['changed'], r['moved']), (1, 1, 1))
         (self.pics / 'sub' / 'b.jpg').rename(self.root / 'saved.jpg')
         self.assertEqual(self.scan_pair()['gone'], 1)
-        self.assertEqual(self.scan_pair()['gone'], 1)  # existing Python statistics count vanished paths again
+        self.assertEqual(self.scan_pair()['gone'], 1)  # 现有的 Python 统计会把消失的路径再算一次
         (self.root / 'saved.jpg').rename(self.pics / 'returned.jpg')
         r = self.scan_pair()
         self.assertEqual((r['returned'], r['moved']), (1, 1))
@@ -114,7 +113,7 @@ class NativeFolderHTTPTest(unittest.TestCase):
     def setUp(self):
         self._fixture_setup()
         if self._testMethodName.startswith('test_native_library_new'):
-            return  # The factory now validates the complete synthetic reference before publication.
+            return  # 工厂现在会在发布之前校验完整的合成参考。
         with sqlite3.connect(self.lib.source) as c:
             for column in ('hidden INTEGER', 'stable_hash TEXT', 'orig_size INTEGER'):
                 c.execute('ALTER TABLE assets ADD COLUMN ' + column)
@@ -171,7 +170,7 @@ class NativeFolderHTTPTest(unittest.TestCase):
         self.assertEqual(snapshot(self.lib.db)['actions'], before)
         detail = self.request('/api/detail?id=' + asset)
         self.assertEqual(detail['status'], 200)
-        # The asset's added time comes from the file's birth time, which only macOS lets settle() fix.
+        # 资源的添加时间来自文件的创建时间，只有 macOS 允许 settle() 固定它。
         self.assertEqual(unclocked(detail['body']), unclocked(lifecycle.NativeLifecycleTest.reference_response(self, '/api/detail?id=' + asset)['body']))
         self.assertEqual(self.request('/api/undo', {'id': undo['id']})['status'], 200)
         (folder_path / 'moved.png').rename(self.root / 'saved.png')
@@ -184,7 +183,7 @@ class NativeFolderHTTPTest(unittest.TestCase):
         self.assertFalse(self.sentinel.exists())
 
     def test_native_library_new_folder_written_back_file_returns_in_one_sync(self):
-        # #44: a file written back to the path it was removed from shows again after the first sync.
+        # #44：写回原先被移走路径的文件，第一次同步后就再次显示。
         path = self.new_folder / 'a.png'
         image(path, 'red')
         self.sync()
@@ -220,7 +219,7 @@ class NativeFolderHTTPTest(unittest.TestCase):
 
     @unittest.skipIf(os.name == 'nt', 'POSIX 权限位制造读取失败；Windows ACL 另行验证')
     def test_native_library_new_folder_unreadable_paths_keep_their_pictures(self):
-        # #43: a folder or file the scan cannot read is not gone; a real deletion still is.
+        # #43：扫描读不到的文件夹或文件不算消失；真的删除了才算。
         sub = self.new_folder / 'sub'; sub.mkdir()
         image(sub / 'a.png', 'red')
         image(self.new_folder / 'b.png', 'blue')
@@ -244,7 +243,7 @@ class NativeFolderHTTPTest(unittest.TestCase):
         self.assertEqual((state['removed'], state.get('unreadable')), (1, 1), state)
         with sqlite3.connect(self.lib.db) as c:
             self.assertEqual(c.execute('SELECT tag FROM asset_tags WHERE uuid=?', (ids['a.png'],)).fetchall(), [('人工标签',)])
-        # A known file that changed but cannot be hashed keeps its picture too.
+        # 已知文件改了内容但算不了哈希时，图片也保留。
         image(self.new_folder / 'c.png', 'yellow', (51, 31))
         settle(self.new_folder)
         (self.new_folder / 'c.png').chmod(0)
@@ -254,7 +253,7 @@ class NativeFolderHTTPTest(unittest.TestCase):
         (self.new_folder / 'c.png').chmod(0o644)
         self.assertEqual(visible(), {'a.png', 'c.png'})
         self.assertEqual((state['removed'], state.get('unreadable')), (0, 1), state)
-        # Readable again: an ordinary sync with nothing kept back, the same picture and its label.
+        # 又能读了：一次普通的同步，没有保留未处理的项，图片和它的标签都不变。
         state = self.sync()['state']
         self.assertNotIn('unreadable', state)
         with sqlite3.connect(self.lib.db) as c:
@@ -264,7 +263,7 @@ class NativeFolderHTTPTest(unittest.TestCase):
         self.assertFalse(self.sentinel.exists())
 
     def test_native_library_new_folder_changed_content_is_compared_again(self):
-        # #27: once a picture's bytes change under the same UUID, similar results from the old bytes go.
+        # #27：同一个 UUID 下图片的字节一旦变了，由旧字节得出的相似结果就去掉。
         worker = self.root / 'research-worker'
         worker.write_text('#!' + sys.executable + '\nimport os,subprocess,sys\n'
                           "subprocess.run([os.environ['ILLUSTASH_RESEARCH_COMPUTE_BIN'],sys.argv[1],sys.argv[2]],check=True)\n")
@@ -274,7 +273,7 @@ class NativeFolderHTTPTest(unittest.TestCase):
         self.stop(self.process)
         self.process, self.log = self.start(self.lib.path)
         self.token = json.loads(self.request('/api/bootstrap')['body'])['token']
-        # The same pixels in different bytes are compared; byte-identical copies are grouped and skipped.
+        # 像素相同但字节不同的会比较；字节完全相同的副本归为一组并跳过。
         first = Image.linear_gradient('L').resize((64, 48)).convert('RGB')
         first.save(self.new_folder / 'a.png')
         note = PngInfo(); note.add_text('synthetic', 'second copy')
@@ -304,7 +303,7 @@ class NativeFolderHTTPTest(unittest.TestCase):
         self.assertNotEqual(kinds, [('identical',)])
         self.assertNotEqual(changed_grid, grid)
         groups = json.loads(self.request('/api/similar')['body'])['groups']
-        self.assertEqual([list(g['kinds']) for g in groups], [[kinds[0][0]]])  # the groups follow the new result
+        self.assertEqual([list(g['kinds']) for g in groups], [[kinds[0][0]]])  # 分组跟随新的结果
         self.assertEqual(tags, [('人工标签',)])
         self.assertFalse(self.sentinel.exists())
 
@@ -320,7 +319,7 @@ class NativeFolderHTTPTest(unittest.TestCase):
             asset = c.execute("SELECT uuid FROM assets WHERE filename='a.png'").fetchone()[0]
         with sqlite3.connect(self.lib.source) as c:
             c.execute("INSERT INTO labels(uuid,dim,value,conf) VALUES (?,'rating','general',1)", (asset,))
-        # Deliver existing synthetic recognition through the same native evidence path.
+        # 把现有的合成识别结果经同一条原生证据路径交付。
         result = subprocess.run([str(self.binary), 'library-scan', '--library', str(self.lib.path)], env=self.env, capture_output=True)
         self.assertEqual(result.returncode, 0, result.stderr)
         with sqlite3.connect(self.lib.db) as c:
@@ -341,7 +340,7 @@ class NativeFolderHTTPTest(unittest.TestCase):
             self.assertEqual(c.execute('SELECT count(*) FROM asset_rating WHERE uuid=?', (asset,)).fetchone()[0], 0)
             self.assertGreater(c.execute("SELECT count(*) FROM term_evidence e JOIN terms t ON t.id=e.term_id WHERE t.kind='rating'").fetchone()[0], 0)
             self.assertGreater(c.execute("SELECT count(*) FROM meta WHERE key LIKE 'folder_stale_wd:%'").fetchone()[0], 0)
-        # Same-output recognition is a new successful delivery; immutable old evidence can be reused.
+        # 输出相同的识别也算一次新的成功交付；不可变的旧证据可以复用。
         with sqlite3.connect(self.lib.source) as c:
             c.execute("INSERT INTO labels(uuid,dim,value,conf) VALUES (?,'rating','general',1)", (asset,))
         self.sync()
@@ -360,7 +359,7 @@ class NativeFolderHTTPTest(unittest.TestCase):
                 src.backup(dest)
         image(self.new_folder / 'a.png', 'red')
         image(self.new_folder / 'b.webp', 'blue')
-        # Run both independently writing consumers within one real clock second (when recording).
+        # 让两个各自写入的消费方在同一个真实时钟秒内运行（录制时）。
         while False and time.time() % 1 > .1:
             time.sleep(.005)
         state=self.sync()
@@ -369,8 +368,8 @@ class NativeFolderHTTPTest(unittest.TestCase):
             ids = [u for u, in c.execute('SELECT uuid FROM assets ORDER BY rowid')]
         expected = self.rec.value('old import')
         self.assertEqual(snapshot(self.lib.source),expected['source'])
-        # The application database by the #201 baseline: every table except the retired ones, typed cells, rows
-        # (core v8 changed the schema; the recorded digest covered DDL, physical rowids and views).
+        # 应用数据库按 #201 对照基准比较：除已退役的表以外的每张表、带类型的单元格和行
+        # （core v8 改了 schema；录制的摘要覆盖 DDL、物理 rowid 和视图）。
         self.assertTrue(self.rec.baseline('old import', self.lib.path))
         for url in ('/api/assets','/api/ids','/api/home','/api/assets/count'):
             self.assertEqual(self.request(url)['body'],lifecycle.NativeLifecycleTest.reference_response(self, url)['body'])
@@ -393,8 +392,8 @@ class NativeFolderHTTPTest(unittest.TestCase):
         self.assertEqual((state['state']['scanned'],state['state']['scan_total']),(4,4))
 
     def test_native_library_new_folder_shutdown_completed_and_restart_retries(self):
-        # Commit-before-close is explicit. Pre-commit cancellation/rollback and join are
-        # gated in app_sync::tests::scan_boundary_fixture on the same application service.
+        # 先提交再关闭是显式的。提交前的取消/回滚和 join 由同一个应用服务上的
+        # app_sync::tests::scan_boundary_fixture 把关。
         image(self.new_folder / 'a.png', 'red')
         self.assertEqual(self.sync()['state']['status'], 'needs_recognition')
         source, app = snapshot(self.lib.source), snapshot(self.lib.db)
@@ -407,9 +406,9 @@ class NativeFolderHTTPTest(unittest.TestCase):
         self.assertFalse(self.sentinel.exists())
 
     def test_native_library_new_folder_security_concurrent_switch_and_shutdown(self):
-        # A file's size cannot order scan completion against package creation/switch.
-        # The pre-commit concurrent cancellation and duplicate start are gated in the
-        # actual run_with task owned by Application (app_sync::tests::scan_boundary_fixture).
+        # 文件大小无法决定扫描完成与包的新建/切换孰先孰后。
+        # 提交前的并发取消和重复启动，由 Application 持有的真实 run_with 任务
+        # 把关（app_sync::tests::scan_boundary_fixture）。
         image(self.new_folder / 'a.png', 'red')
         self.assertEqual(self.request('/api/sync', {}, token='wrong')['status'], 403)
         self.assertEqual(self.request('/api/sync', {})['status'], 200)
@@ -427,10 +426,10 @@ class NativeFolderHTTPTest(unittest.TestCase):
         refused=subprocess.run([str(self.binary),'library-scan','--library',str(other.path)],env=self.env,capture_output=True)
         self.assertNotEqual(refused.returncode,0)
         self.assertEqual(snapshot(other.db),before)
-        # A completed scan retains its exact committed data and terminal history.
+        # 已完成的扫描原样保留它提交的数据和最终历史记录。
         self.assertEqual(snapshot(old.db), app)
         self.assertEqual(snapshot(old.source), source)
         self.assertFalse(self.sentinel.exists())
 
-# Reuse fixtures without rediscovering their unrelated tests.
+# 复用夹具，但不再发现它们那些无关的测试。
 del NativeLifecycleTest

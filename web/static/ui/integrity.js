@@ -1,5 +1,5 @@
-// Database checks on the page (#212): the 「数据库检查」 line of the settings data card and the notice when a check found
-// damage, with 「抢救重建」 when it is in source.sqlite (#228). The checks themselves are core/integrity.js.
+// 页面上的数据库检查（#212）：设置里数据卡片的「数据库检查」一行，以及检查发现损坏时的提示，损坏在 source.sqlite
+// 时带「抢救重建」（#228）。检查本身在 core/integrity.js。
 import {t, tb} from '../core/i18n.js';
 import {esc, localStamp} from '../core/format.js';
 import {state} from '../core/state.js';
@@ -15,14 +15,14 @@ function integrityLine() {
   const failed = g?.error && !run ? `<small class="line-hint">${esc(t('上次检查没有完成：{error}', {error: g.error}))}</small>` : '';
   return `<span>${t('数据库检查')}<small class="line-hint">${esc(hint)}</small>${failed}</span><button class="quiet small" id="checkNow" ${!g || run || g.damaged ? 'disabled' : ''}>${t('立即检查')}</button>`;
 }
-// The settings data card has just been drawn: fill its line, asking first when nothing has been read yet.
+// 设置的数据卡片刚画好：填上它的那一行，还什么都没读过时先去问。
 export function renderIntegrityLine() {
   if (!$('integrityLine')) return;
   if (!state.integrity) { pollIntegrity(); return; }
   $('integrityLine').innerHTML = integrityLine();
   $('checkNow').onclick = async () => { try { await checkNow(); } catch (e) { toast(e.message); } };
 }
-// source.sqlite damaged: the rescue's button, then its progress, or why it did not finish (it can be started again).
+// source.sqlite 损坏：抢救的按钮，然后是它的进度，或它没有完成的原因（可以再次开始）。
 function rescueLine(rescue) {
   if (rescue?.running) return `<p class="damage-line">${esc(t('正在抢救：{stage}，{percent}%', {stage: tb(rescue.running.stage), percent: Math.floor(rescue.running.done * 100)}))}</p>`;
   if (rescue?.ready) return `<p class="damage-line">${esc(t('抢救完成，正在重新打开图库…'))}</p>`;
@@ -39,7 +39,7 @@ function showDamage() {
     try { await rescueNow(); } catch (e) { toast(e.message); $('rescueNow') && ($('rescueNow').disabled = false); }
   };
 }
-// The new source.sqlite is put in place as the library opens again; the reopened page says what the rescue did.
+// 新的 source.sqlite 在图库重新打开时换上；重新打开的页面会说明抢救做了什么。
 let reopening = false;
 async function reopenRescued() {
   if (reopening || !state.integrity?.rescue?.ready) return;

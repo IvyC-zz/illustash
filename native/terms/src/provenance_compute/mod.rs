@@ -1,7 +1,7 @@
-//! Native local provenance computation. The installed macOS/Windows adapter runs
-//! every local step (pixel_hash, iqdb signatures, local_match, verify, groups).
-//! OCR computation was removed (#177); its stored evidence stays readable.
-//! App retains authorization, Task cleanup, snapshot receipt and two-library publication.
+//! 原生本地溯源计算。安装版的 macOS/Windows 适配器执行全部本地步骤
+//! （pixel_hash、iqdb 签名、local_match、verify、groups）。
+//! OCR 计算已删除（#177），已存的证据仍可读取。
+//! 授权、Task 清理、快照回执和两个图库的发布仍由 App 负责。
 mod groups;
 mod iqdb;
 mod local_match;
@@ -53,19 +53,19 @@ pub fn write(path: &Path, value: &Value) -> Result<()> {
     }
     result.map_err(Error::from)
 }
-/// Steps the installed adapter runs natively.
+/// 安装版适配器原生执行的步骤。
 pub fn handles(step: &str) -> bool {
     matches!(step, "pixel_hash" | "iqdb" | "local_match" | "verify" | "groups")
 }
 
-/// Installed readiness: the IQDB signature program and the pinned colour engine.
+/// 安装版就绪检查：IQDB 签名程序和固定版本的色彩引擎。
 pub fn check() -> Result<()> {
     iqdb::signature_program().ok_or_else(|| Error::Invalid("未找到本地 IQDB 签名计算程序".into()))?;
     pixel_hash::lcms_version()?;
     Ok(())
 }
 
-/// The task owner must still be our parent; otherwise stop before touching caches.
+/// 任务所属进程必须仍是我们的父进程；否则在动缓存之前停下。
 pub(crate) fn check_owner(owner_pid: u32) -> Result<()> {
     #[cfg(any(unix, windows))]
     if illustash_platform::platform_process::parent_pid()? != owner_pid {
@@ -75,17 +75,16 @@ pub(crate) fn check_owner(owner_pid: u32) -> Result<()> {
     Ok(())
 }
 
-/// The run's staged copy of the machine cache (`request.cache`): a scratch directory the host imports only after the
-/// run succeeds. Transaction boundaries stay as they are; `synchronous=NORMAL` (WAL) only drops the flush on every
-/// commit, which a scratch copy lost to a crash never needed. Thousands of per-match commits otherwise each wait
-/// for a flush, past 30 s on a loaded Windows disk (#143).
+/// 本次运行的机器缓存暂存副本（`request.cache`）：一个临时目录，运行成功后宿主才导入。事务边界不变；
+/// `synchronous=NORMAL`（WAL）只是省掉每次提交时的刷盘，而临时副本因崩溃丢失本来就无所谓。否则几千次逐条匹配的提交
+/// 每次都要等刷盘，在负载高的 Windows 磁盘上超过 30 秒（#143）。
 pub(crate) fn staged_cache(dir: &Path) -> Result<rusqlite::Connection> {
     let c = crate::app_provenance::cache::connect(&dir.join("provenance.sqlite"))?;
     c.execute_batch("PRAGMA synchronous=NORMAL")?;
     Ok(c)
 }
 
-/// Request entry for the installed adapter and the explicit example.
+/// 安装版适配器和显式 example 的请求入口。
 pub fn run_files(input: &Path, output: &Path) -> Result<()> {
     let request = Request::read(input)?;
     if !handles(&request.step) {

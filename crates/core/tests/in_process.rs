@@ -1,4 +1,4 @@
-//! A client links only Core + rusqlite and exercises the public API in-process.
+//! 客户端只链接 Core + rusqlite，在进程内调用公开 API。
 #![allow(clippy::unwrap_used, reason = "集成测试里 unwrap 就是断言")]
 use illustash_core::{
     backup::RequiredBackup,
@@ -131,7 +131,7 @@ fn prepared_upgrade_refuses_invalid_targets_before_any_schema_write() {
         assert_eq!(scalar(&tx, "SELECT COUNT(*) FROM sqlite_master"), before);
         assert_eq!(schema::version(&tx).unwrap(), 0);
     }
-    // The refused requests leave the caller-owned transaction usable.
+    // 被拒绝的请求之后，调用方持有的事务仍然可用。
     assert_eq!(schema::migrate_prepared_in(&tx, schema::SCHEMA_VERSION, &prepared).unwrap(), 0);
     tx.commit().unwrap();
     assert_eq!(schema::version(&c).unwrap(), schema::SCHEMA_VERSION);

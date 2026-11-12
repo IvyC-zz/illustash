@@ -53,7 +53,7 @@ fn main() {
         ])
         .on_menu_event(|app, event| {
             if event.id() == "reload" {
-                // Only the library page: reloading the Pixiv window would cut a request in flight.
+                // 只刷新图库页：刷新 Pixiv 窗口会打断在途的请求。
                 if let Some(main) = app.get_webview_window("main") {
                     let _ = main.reload();
                 }
@@ -63,10 +63,10 @@ fn main() {
             let handle = app.handle().clone();
             #[cfg(not(windows))]
             {
-                // macOS keeps its native editing/quit menus and refresh command.
+                // macOS 保留原生的编辑/退出菜单和刷新命令。
                 let menu = Menu::default(&handle)?;
                 let reload = MenuItem::with_id(app, "reload", i18n::tr("刷新页面"), true, Some("CmdOrCtrl+R"))?;
-                // The default menu already has a View menu (full screen): refresh joins it instead of a second one.
+                // 默认菜单已经有 View 菜单（全屏）：刷新加进这个菜单，不另建第二个。
                 let view = menu
                     .items()?
                     .into_iter()
@@ -117,7 +117,7 @@ fn main() {
             RunEvent::WindowEvent { label, event: WindowEvent::CloseRequested { api, .. }, .. }
                 if label == "main" => {
                     api.prevent_close();
-                    handle.exit(0); // Hidden Pixiv windows must not keep the service alive.
+                    handle.exit(0); // 隐藏的 Pixiv 窗口不能让服务一直活着。
                 }
             RunEvent::Exit => {
                 if let Some(child) = handle.try_state::<server::Child>() {

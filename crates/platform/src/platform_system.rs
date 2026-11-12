@@ -1,4 +1,4 @@
-//! Host system description; preserves the about endpoint format.
+//! 宿主系统描述；保持 about 接口的格式。
 #[cfg(unix)]
 pub fn platform() -> String {
     // SAFETY: utsname 只含 c_char 数组，全零是合法值。

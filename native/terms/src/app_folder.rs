@@ -14,16 +14,16 @@ pub(crate) struct Scan {
     pub counts: Value,
     pub changed: Vec<String>,
 }
-/// The IDs pictures had before source.sqlite was lost (#228): by full path, then by content. Rescuing a damaged
-/// source.sqlite scans with them, so a picture the rescue could not read back keeps its ID and its curation.
+/// source.sqlite 丢失之前图片的 ID（#228）：先按完整路径，再按内容。抢救损坏的 source.sqlite 时带着它们扫描，
+/// 这样抢救没能读回的图片仍保留它的 ID 和整理记录。
 #[derive(Default)]
 pub(crate) struct Earlier {
     pub by_path: HashMap<String, String>,
-    /// Several pictures can share content: each ID is given to one of them only.
+    /// 几张图片可以内容相同：每个 ID 只给其中一张。
     pub by_hash: HashMap<String, Vec<String>>,
-    /// The content each ID had, to tell whether its recognition results still describe the picture.
+    /// 每个 ID 原来的内容，用来判断它的识别结果是否仍然描述这张图片。
     pub hash_of: HashMap<String, String>,
-    /// IDs already given out, in this scan or an earlier one of the same rescue.
+    /// 已经发出去的 ID，在这次扫描或同一次抢救中更早的扫描里。
     pub given: HashSet<String>,
 }
 impl Earlier {
@@ -37,9 +37,8 @@ impl Earlier {
         Some(found)
     }
 }
-/// The picture's file changed: what was recognised from the old file goes, and it is recognised again. Its
-/// recognition record goes too, or the import would compare the new result with the old one and refuse it: a
-/// different picture, or the same one on another execution backend (#270), never gives the same bytes.
+/// 图片的文件变了：从旧文件识别出的结果删掉，重新识别。它的识别记录也删掉，否则导入会把新结果和旧结果比较并拒绝：
+/// 不同的图片，或同一张图片换了执行后端（#270），从不会得到相同的字节。
 fn forget_recognition(tx: &rusqlite::Transaction<'_>, asset: &str, recognised: bool) -> Result<()> {
     tx.execute("DELETE FROM labels WHERE uuid=?", [asset])?;
     tx.execute("DELETE FROM embeddings WHERE uuid=?", [asset])?;
@@ -56,7 +55,7 @@ pub(crate) fn scan(
 ) -> Result<Scan> {
     scan_with(source, db, check, progress, None)
 }
-/// `scan`, giving a new picture its earlier ID when `earlier` knows it (a rescue, #228).
+/// `scan`，在 `earlier` 认得新图片时给它原来的 ID（抢救，#228）。
 pub(crate) fn scan_with(
     source: &Value,
     db: &Path,
@@ -74,7 +73,7 @@ pub(crate) fn scan_with(
     c.busy_timeout(crate::app_library::TASK_WRITE_WAIT)?;
     let tx = c.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
     tx.execute_batch(include_str!("app_source_schema.sql"))?;
-    // Created by the first recognition import (app_recognition.rs); a library never recognised has none.
+    // 由第一次识别导入创建（app_recognition.rs）；从没识别过的图库没有这张表。
     let recognised: bool = tx.query_row(
         "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='recognition_assets')",
         [],
@@ -91,7 +90,7 @@ pub(crate) fn scan_with(
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     let known: HashMap<String, Old> = known_order.iter().cloned().collect();
-    // Pictures some source still has on file keep the ID they have there; only the others can take an earlier one.
+    // 某个来源仍有文件的图片保留它在那里的 ID；只有其余的图片才能拿原来的 ID。
     let taken = match earlier {
         Some(_) => tx
             .prepare("SELECT asset FROM files")?
@@ -125,7 +124,7 @@ pub(crate) fn scan_with(
         progress(i + 1, total);
     }
     let present = seen.iter().map(|r| r.0.clone()).chain(hashed.iter().map(|f| f.rel.clone())).collect::<HashSet<_>>();
-    // A path that could not be read is not known to be gone: its asset stays as it is until a scan reads it.
+    // 读不了的路径不能确定已经消失：它的 asset 保持原样，直到某次扫描读到它。
     let unknown = |p: &str| unreadable.iter().any(|u| u.is_empty() || p == u || p.starts_with(&format!("{u}/")));
     let mut vanished = known_order
         .iter()
@@ -177,7 +176,7 @@ pub(crate) fn scan_with(
                 "UPDATE files SET size=?,mtime_ns=?,md5=? WHERE source_id=? AND path=?",
                 params![f.size, f.mtime, f.hash, sid, f.rel],
             )?;
-            // A file written back to the path it was removed from returns in this scan, not the next one.
+            // 文件写回到它被删掉的那个路径，会在这次扫描回来，而不是下一次。
             if trashed.contains(&asset) {
                 back.push(asset.clone());
             }
@@ -220,7 +219,7 @@ pub(crate) fn scan_with(
                     earlier.as_deref().and_then(|e| e.hash_of.get(&asset).cloned())
                 }
             };
-            // Results for other content no longer describe this picture: it is recognized again.
+            // 其他内容的结果不再描述这张图片：重新识别它。
             if before.as_deref() != Some(f.hash.as_str()) {
                 forget_recognition(&tx, &asset, recognised)?;
             }

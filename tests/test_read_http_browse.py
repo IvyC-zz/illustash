@@ -1,4 +1,4 @@
-"""R3 byte-strict browsing acceptance using only temporary synthetic libraries."""
+"""R3 逐字节严格的浏览验收，只用临时的合成图库。"""
 import json
 import os
 import unittest
@@ -54,7 +54,7 @@ class BrowseReadHTTPTest(HTTPHarness):
                       'nsfw=bad&before=bad','before=2024-02-29','before=2023-02-29',
                       'before=2024-2-9','before=0001-01-01','before=9999-12-31'):
             if os.name == 'nt' and query == 'before=9999-12-31':
-                # Recorded on POSIX (200); the Windows host cannot represent that local date (500).
+                # 在 POSIX 上录制（200）；Windows 宿主无法表示这个本地日期（500）。
                 self.rec.skip('response')
                 continue
             self.pair('/api/home?'+query)
@@ -100,13 +100,11 @@ class BrowseReadHTTPTest(HTTPHarness):
         package = self.root/name
         self.sync('expanded'); self.publish()
         source = Path(self.rec.value('source'))
-        # The library before it switched to the core (no `meta`) is refused since core v8 (#201, only switched libraries
-        # are kept), so its 294 recorded replies are not read live any more. The same 294 requests follow on the library
-        # after it switched, restored at this core version; 288 of its recorded replies are byte-identical to the ones
-        # before the switch, so those are compared with the live v8 replies as well. The other 6 differ because the
-        # switch itself changed the artist attribution (the Python-era artist tables no supported library has): the
-        # details of `a` and `extra-0`, artist A's assets, count and ids, and artist A with an unreadable provenance
-        # database (500 before the switch, 200 after).
+        # 切换到 core 之前的图库（没有 `meta`）从 core v8 起被拒绝（#201，只保留切换过的图库），所以它录制的 294 条
+        # 回复不再实时读取。接着在切换后的图库上发同样的 294 个请求，该图库按当前 core 版本恢复；它录制的回复中有
+        # 288 条与切换前逐字节相同，所以这些也与实时的 v8 回复比较。另外 6 条不同，因为切换本身改变了画师归属
+        # （Python 时代的画师表，受支持的图库都没有）：`a` 和 `extra-0` 的详情，画师 A 的 assets、count 和 ids，
+        # 以及溯源数据库读不了时的画师 A（切换前 500，切换后 200）。
         before = [self.rec.value('response') for _ in range(294)]
         self.sync('switched'); self.publish()
         compared = self.after_switch(before, differ={266, 267, 275, 276, 277, 290})
@@ -129,7 +127,7 @@ class BrowseReadHTTPTest(HTTPHarness):
         for artist in ('A','B','M','missing'):
             for path in ('assets','assets/count','ids'):
                 self.pair('/api/'+path+'?'+urlencode({'artist':artist}))
-        # Auxiliary failure cannot mask missing images or invalid earlier filters.
+        # 辅助数据出错不能掩盖缺失的图片或前面无效的筛选条件。
         source_parked=source.with_suffix('.parked')
         source.rename(source_parked)
         try:

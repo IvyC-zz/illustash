@@ -1,5 +1,5 @@
-//! Existing same-canvas/crop relation decisions. Thresholds and float32 stages
-//! follow web/relate.py; the original remains an independent algorithm reference.
+//! 沿用现有的同画布 / 裁切关系判定。阈值和 float32 各阶段照 web/relate.py；
+//! 原实现仍作为独立的算法参考。
 use super::{
     numeric::sum32,
     relation_fft,
@@ -20,8 +20,8 @@ pub const GROUPING: [&str; 6] = ["identical", "duplicate", "subtle", "crop", "va
 const KINDS: [&str; 8] = ["identical", "duplicate", "subtle", "crop", "variant", "edit", "similar", "unrelated"];
 const LABELS: [&str; 8] = ["完全相同", "重复", "细微差分", "局部重复", "差分", "局部编辑", "构图相似", "不同的图"];
 fn round(x: f64, places: i32) -> f64 {
-    // Python round(float, digits) rounds the actual binary number in decimal.
-    // Multiplying by 10^digits first introduces an extra rounding at half cases.
+    // Python 的 round(float, digits) 对实际的二进制数按十进制舍入。
+    // 先乘以 10^digits 会在恰好一半的情况下多引入一次舍入。
     format!("{x:.digits$}", digits = places as usize).parse().expect("finite decimal relation score")
 }
 fn pixel_round(x: f64) -> usize {
@@ -39,7 +39,7 @@ fn blur(x: &Plane) -> Plane {
     for y in 0..x.height {
         for xx in 0..x.width {
             for c in 0..x.channels {
-                // NumPy sum(list-of-arrays): row-major nine f32 additions, then f32 division.
+                // NumPy 的 sum(list-of-arrays)：按行主序做九次 f32 加法，再做 f32 除法。
                 let mut s = 0.;
                 for dy in -1..=1 {
                     for dx in -1..=1 {
@@ -83,8 +83,8 @@ fn difference(a: &Plane, b: &Plane, reach: isize) -> Plane {
 fn grey(x: &Plane) -> Result<Plane> {
     #[cfg(windows)]
     let pixels = {
-        // NumPy RGB[h,w,3] @ weights[3] is h distinct (w,3) GEMV calls,
-        // or DOT when w=1. Flattening the height changes BLAS tail rounding.
+        // NumPy 的 RGB[h,w,3] @ weights[3] 是 h 次独立的 (w,3) GEMV 调用，
+        // w=1 时是 DOT。把高度展平会改变 BLAS 尾部的舍入。
         let mut pixels = Vec::with_capacity(x.width * x.height);
         for row in x.pixels.chunks_exact(x.width * 3) {
             pixels.extend(
@@ -100,8 +100,8 @@ fn grey(x: &Plane) -> Result<Plane> {
 }
 fn cells(d: &Plane) -> (usize, usize, Vec<bool>) {
     let (rows, cols) = ((d.height / CELL).max(1), (d.width / CELL).max(1));
-    // Python reshape fails when a common canvas has an axis shorter than CELL.
-    // Caller reports this as an unreadable/retry pair rather than inventing cells.
+    // 公共画布有一个轴短于 CELL 时，Python 的 reshape 会失败。
+    // 调用方把这种情况报告为不可读 / 待重试的一对，而不是编造格子。
     let mut out = vec![false; rows * cols];
     for y in 0..rows {
         for x in 0..cols {
@@ -184,7 +184,7 @@ fn correlation(a: &Plane, b: &Plane) -> Result<f64> {
     let xx = dot(&a, &a).map_err(Error::Invalid)?;
     let yy = dot(&b, &b).map_err(Error::Invalid)?;
     let denominator = (xx * yy).sqrt();
-    // np scalar divided by Python max(sqrt float32, 1e-6): the nonflat branch is f32.
+    // np 标量除以 Python 的 max(sqrt float32, 1e-6)：非平坦分支是 f32。
     Ok(if denominator >= 1e-6 { f64::from(xy / denominator) } else { f64::from(xy) / 1e-6 })
 }
 fn covered(arr: &Plane, box_: (usize, usize, usize, usize), changed: &Plane) -> Option<&'static str> {
@@ -369,7 +369,7 @@ fn grey_at(x: &Plane, side: usize) -> Result<Plane> {
 fn integral(x: &Plane, squared: bool) -> Vec<f32> {
     let (h, w) = (x.height, x.width);
     let mut s = vec![0.; (h + 1) * (w + 1)];
-    // cumsum(0) then cumsum(1), each sequential f32; cannot replace by f64 recurrence.
+    // 先 cumsum(0) 再 cumsum(1)，各自按顺序做 f32 累加；不能换成 f64 递推。
     for xx in 0..w {
         let mut sum = 0.;
         for y in 0..h {
@@ -457,10 +457,9 @@ fn geomspace(start: f64, end: f64, n: usize) -> Vec<f64> {
     out[n - 1] = end;
     out
 }
-/// NCC score and normalized (left, top, width, height) coordinates.
+/// NCC 分数和归一化的 (left, top, width, height) 坐标。
 pub type Located = (f64, f64, f64, f64, f64);
-/// Minimum comparison surface for #153: decoded display pixels, NCC location and
-/// the unchanged relation classification. No global cache, model or asset access.
+/// #153 的最小比对接口：解码后的显示像素、NCC 定位和不变的关系分类。不用全局缓存、模型，也不访问资产。
 pub fn locate(big: &Plane, small: &Plane, least: f64) -> Result<Option<Located>> {
     if big.channels != 3 || small.channels != 3 {
         return Err(Error::Invalid("locate requires RGB relation arrays".into()));
@@ -566,7 +565,7 @@ pub fn relate(a: &Loaded, b: &Loaded) -> Result<Value> {
         }
         if !["similar", "unrelated"].contains(&r.kind) {
             let mut note = match r.kind {
-                // Whole sentences, or a note and its suffix, so the page can translate them (i18n.js tb()).
+                // 写完整的句子，或一条说明加后缀，这样页面才能翻译它们（i18n.js tb()）。
                 "duplicate" if a.size != b.size => "同一张图（尺寸不同）".into(),
                 "duplicate" => "同一张图（重新压缩过）".into(),
                 "variant" if r.changed <= DIFFERENT => {
@@ -688,8 +687,8 @@ pub fn relate_all(images: &[(String, Loaded)]) -> Result<Value> {
 pub fn load(path: &Path) -> Result<Loaded> {
     relation_image::load(path)
 }
-/// Query responses keep the old Python insertion order, including requested size
-/// order. This is HTTP-only serialization; stored tables/fingerprints stay unchanged.
+/// 查询响应保持旧 Python 的插入顺序，包括请求里的尺寸顺序。这只是 HTTP 的序列化；
+/// 已存的表和指纹不变。
 pub(super) fn wire_result(result: &Value, ids: &Value) -> Result<crate::http_json::Json> {
     use crate::http_json::Json;
     fn object(v: &Value, keys: &[&str]) -> Json {
@@ -735,8 +734,8 @@ mod tests {
     #[cfg(windows)]
     fn windows_grey_keeps_numpy_rowwise_dot_gemv_and_tail_bits() {
         use sha2::{Digest, Sha256};
-        // Independent NumPy 2.5.3 / pinned Windows wheel, captured before
-        // running the candidate. Each image row is its own (width,3) matrix.
+        // 独立的 NumPy 2.5.3 / 固定版本的 Windows wheel，在运行候选之前采集。
+        // 图片的每一行各自是一个 (width,3) 矩阵。
         for (width, expected) in [
             (1, "094256784222d3d11ef82a2d76fb6c4274e6f8c5a0ef8a581c4b4548bf49845b"),
             (3, "efa1fbf05614a3ce44e8824636d74ea27f6abcbfd87773e075c1f1b7d651f500"),

@@ -1,25 +1,22 @@
-// Requests and the session (#33, #199). No DOM: a layout learns that the page stopped through onStale() and that a
-// write went through through onPost().
-// The page belongs to the session it booted with. Another window or caller that switches (or reopens) the library
-// starts a new session; adopting its token would send this page's selection, dialogs and queued work to that library.
-// The page stops instead, and drops responses that arrive afterwards.
-// Only this module writes session.token and session.stale; everything else reads them.
+// 请求与会话（#33、#199）。不碰 DOM：布局通过 onStale() 得知页面已停下，通过 onPost() 得知一次写入已生效。
+// 页面属于它启动时的那个会话。另一个窗口或调用方切换（或重新打开）图库会开始新的会话；采用它的 token 会把这个页面的
+// 选择、对话框和排队的工作发到那个图库去。所以页面改为停下，并丢掉之后才到的回应。
+// 只有本模块写 session.token 和 session.stale；其他地方只读。
 import {t, tb, said, I18N} from './i18n.js';
 import {listeners} from './events.js';
 export const session = {token: '', stale: false};
 export const STALE = t('图库已在其他窗口切换或重新打开，请重新载入页面');
 const stopped = listeners(), written = listeners();
-// fn() runs once, when the page stops. Each returns a function that removes the listener again.
+// fn() 在页面停下时运行一次。每个都返回一个再把这个监听去掉的函数。
 export const onStale = stopped.on;
-// fn(path, body) runs after every write the backend accepted.
+// fn(path, body) 在后端接受的每次写入之后运行。
 export const onPost = written.on;
 export function staleSession() {
   if (session.stale) return;
   session.stale = true;
   stopped.emit();
 }
-// The page is leaving its library (opening another restarts the server): no reads or writes until it reloads, and
-// no banner, since the reload follows.
+// 页面正在离开它的图库（打开另一个会重启服务）：重新载入前不再读写，也不显示横幅，因为马上就会重新载入。
 export function leaveSession() { session.stale = true; }
 export function adoptToken(token) {
   if (!session.token) session.token = token;
@@ -28,24 +25,23 @@ export function adoptToken(token) {
 }
 export async function api(path, options = {}) {
   if (session.stale) throw new Error(STALE);
-  // A page in another language says so: the backend then shows English or romanized names (#173).
+  // 别的语言的页面会说明自己的语言：后端于是显示英文或罗马字名字（#173）。
   const language = I18N.language === 'zh-CN' ? {} : {'X-Illustash-Language': I18N.language};
   const response = await fetch(path, {...options, headers: {'Content-Type': 'application/json', 'X-CSRF-Token': session.token, ...language, ...options.headers}});
   const result = await response.json();
   if (response.status === 403 && said(result.error, '会话已过期，请刷新页面')) staleSession();
   if (session.stale) throw new Error(STALE);
-  // The backend's message in the page's language; e.said keeps it as sent, to test with said.
+  // 后端的消息，用页面的语言显示；e.said 保留发来时的原文，供 said 比对。
   if (!response.ok) throw Object.assign(new Error(tb(result.error) || t('请求失败')), {said: result.error});
   return result;
 }
 export async function post(path, body) {
   const result = await api(path, {method: 'POST', body: JSON.stringify(body)});
-  if (path === '/api/suggest') return result;  // read-only; POST only carries the selection
+  if (path === '/api/suggest') return result;  // 只读；用 POST 只是为了带上选择集
   written.emit(path, body);
   return result;
 }
-// One read per path in flight: whoever asks for the same path meanwhile shares its answer (the settings page reads
-// several cards' data at once, and the task panel some of the same).
+// 同一路径同一时间只读一次：期间请求同一路径的都共用它的回应（设置页会同时读好几张卡片的数据，任务面板也读其中一些）。
 const reads = new Map();
 export function shared(path) {
   if (!reads.has(path)) reads.set(path, api(path).finally(() => reads.delete(path)));

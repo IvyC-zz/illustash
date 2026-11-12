@@ -1,5 +1,5 @@
-//! Line-for-line semantics of web/identity.py _graph / _project, hybrid only.
-//! Baseline order is the preserved legacy rowid (seq); representatives are b-side.
+//! 逐行对应 web/identity.py _graph / _project 的语义，只支持 hybrid。
+//! 对照基准的顺序是保留下来的旧版 rowid（seq）；代表取 b 侧。
 use crate::character_entities::ENTITIES;
 use crate::character_relations::{DECISIONS, DECISION_EVIDENCE, EVIDENCE, RELATIONS};
 use crate::{character_json, character_projection, Error, Result};
@@ -31,7 +31,7 @@ fn find(parent: &mut [usize], mut i: usize) -> usize {
 }
 
 pub fn baseline(c: &Connection) -> Result<()> {
-    // seq is an INTEGER PRIMARY KEY: omitted values append in SELECT row order (the identities' own order).
+    // seq 是 INTEGER PRIMARY KEY：不给值时按 SELECT 的行序追加（即身份本身的顺序）。
     c.prepare_cached(&format!(
         "INSERT OR IGNORE INTO term_identity_baseline(id,parent_id,variant,kind,merged_into)
         SELECT id,parent_id,variant,kind,merged_into FROM {ENTITIES} WHERE kind<>'work' ORDER BY seq"

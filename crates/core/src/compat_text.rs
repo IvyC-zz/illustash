@@ -1,4 +1,4 @@
-//! Existing Python-compatible text rules shared by business and transport adapters.
+//! 业务适配器和传输适配器共用的、与现有 Python 兼容的文本规则。
 pub fn whitespace(c: char) -> bool {
     c.is_whitespace() || ('\u{1c}'..='\u{1f}').contains(&c)
 }

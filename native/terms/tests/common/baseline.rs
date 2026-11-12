@@ -1,17 +1,14 @@
-//! The comparison baseline of the first public test release (#201 step 1): what the replayed
-//! scenarios must keep producing once the legacy tables are gone (core v8).
+//! 第一个公开测试版的对照基准（#201 第 1 步）：旧表删除后（词条核心 v8），重放的各个场景必须继续产出的结果。
 //!
-//! Recorded from main on core version 7 by the former `tests/replay.rs` (`record_baseline`) and `tests/contracts.rs`
-//! (PR #239; both in git history), replayed by `baseline.rs` and `contracts.rs`. Comparison rules (agreed in #201;
-//! the Python fixed expectations follow the same rules in `tests/fixed_expectations.py`):
-//! - replies are compared as bytes after `Masks::output`: temporary roots, clocks, learning
-//!   stamps, operating-system error text and the current core version;
-//! - after every call, every table of the call's database except `RETIRED` is compared row for
-//!   row (a sorted multiset of typed cells, `Masks::text` applied to text); integer primary keys
-//!   are columns and compared like any other, implicit rowids are not;
-//! - `meta` keeps its keys; `META_RULES` says how some values are compared;
-//! - the database schema itself is not compared (v8 changes it; it has tests of its own).
-#![allow(dead_code)] // shared by baseline.rs and contracts.rs; each uses part of it
+//! 由以前的 `tests/replay.rs`（`record_baseline`）和 `tests/contracts.rs` 在词条核心第 7 版的 main 上录制
+//! （PR #239；两者都在 git 历史里），由 `baseline.rs` 和 `contracts.rs` 重放。比较规则（#201 中商定；
+//! Python 的固定期望在 `tests/fixed_expectations.py` 里遵循同样的规则）：
+//! - 响应经 `Masks::output` 遮盖后按字节比较：临时根目录、时钟、学习戳记、操作系统错误文本和当前词条核心版本；
+//! - 每个调用之后，该调用所用数据库中除 `RETIRED` 以外的每张表都逐行比较（带类型单元格的有序多重集，文本经过
+//!   `Masks::text`）；整数主键是普通列，与其他列一样比较，隐式 rowid 不比较；
+//! - `meta` 保留它的键；`META_RULES` 规定部分值如何比较；
+//! - 数据库表结构本身不比较（v8 会改动它；它有自己的测试）。
+#![allow(dead_code)] // baseline.rs 和 contracts.rs 共用；各自只用到一部分
 use regex::Regex;
 use rusqlite::{types::ValueRef, Connection};
 use serde_json::{json, Map, Value};
@@ -20,9 +17,8 @@ use std::sync::LazyLock;
 
 pub const FORMAT: i64 = 1;
 
-/// The legacy tables core v8 retires: their content moves to `term_*` and is compared there. The recordings still hold
-/// the identity relation tables (they were retired after recording): their recorded changes are left out too
-/// (`apply`).
+/// 词条核心 v8 停用的旧表：内容移到 `term_*`，在那里比较。录制里仍有身份关系表（它们在录制之后才停用）：
+/// 它们录下的改动也不计入（`apply`）。
 pub const RETIRED: [&str; 11] = [
     "entities",
     "links",
@@ -37,15 +33,12 @@ pub const RETIRED: [&str; 11] = [
     "identity_decision_evidence",
 ];
 
-/// Columns left out: hashes over packaging details, as in the recordings before; and columns core v8 added, which
-/// the baseline (recorded on core version 7) cannot hold (rule 5, each named with the reason):
-/// - `actions.label_kind` / `label_count`: a counted step's kind and count (#201); what the history shows from them
-///   is compared in the replies.
-/// - `term_names.seq`: the order of names, filled from the former `names` rowids (#201); the orders the readers take
-///   from it are compared in the replies.
-/// - `term_tree`'s identity attributes and `seq`: the attributes moved there from `terms.attrs` (#201) and are compared
-///   in `terms.attrs` (`ATTRIBUTES`); `seq` is the order of identities, filled from the former `entities` rowids, and
-///   the orders the readers take from it are compared in the replies.
+/// 不参与比较的列：对打包细节求的哈希，与以前的录制一样；以及词条核心 v8 新增、对照基准（在词条核心第 7 版上录制）
+/// 不可能有的列（第 5 条规则，每列都写明理由）：
+/// - `actions.label_kind` / `label_count`：带数量的步骤的种类和数量（#201）；历史据此显示的内容在响应里比较。
+/// - `term_names.seq`：名称的顺序，取自原来 `names` 的 rowid（#201）；读取方据此得到的顺序在响应里比较。
+/// - `term_tree` 的身份属性和 `seq`：这些属性从 `terms.attrs` 移到这里（#201），在 `terms.attrs` 里比较
+///   （`ATTRIBUTES`）；`seq` 是身份的顺序，取自原来 `entities` 的 rowid，读取方据此得到的顺序在响应里比较。
 pub const SKIP_COLUMNS: [(&str, &str); 12] = [
     ("term_packages", "manifest"),
     ("term_evidence", "fingerprint"),
@@ -61,12 +54,11 @@ pub const SKIP_COLUMNS: [(&str, &str); 12] = [
     ("term_tree", "seq"),
 ];
 
-/// The identity attributes core v8 moved from `terms.attrs` to `term_tree` (#201), in the order the earlier mirror
-/// wrote them. An identity's `terms.attrs` is compared as that object built from its `term_tree` row, as written
-/// before; other terms keep theirs.
+/// 词条核心 v8 从 `terms.attrs` 移到 `term_tree` 的身份属性（#201），顺序与以前的镜像写入时相同。
+/// 身份的 `terms.attrs` 按以前的写法、用它的 `term_tree` 行拼出这个对象来比较；其他词条保留自己的值。
 pub const ATTRIBUTES: [&str; 6] = ["variant", "artist", "label_only", "mascot", "mascot_origin", "original"];
 
-/// The query a table is read with (`terms`: `ATTRIBUTES`).
+/// 读取一张表所用的查询（`terms` 表见 `ATTRIBUTES`）。
 fn select(c: &Connection, name: &str, columns: &[String]) -> String {
     let moved: bool = name == "terms"
         && c.query_row("SELECT EXISTS(SELECT 1 FROM pragma_table_info('term_tree') WHERE name='variant')", [], |r| {
@@ -94,12 +86,12 @@ fn select(c: &Connection, name: &str, columns: &[String]) -> String {
 static CLOCK: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})?").unwrap());
 static STAMP: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"learning-v1:[0-9a-f]{64}").unwrap());
-/// Machine paths the Python-era recordings carried in their inputs (a temporary directory of the recording machine,
-/// a home directory in a script's first line): not run-specific, but not for a public repository either (#201).
+/// Python 时代的录制在输入里带着的机器路径（录制机器的临时目录、脚本首行里的主目录）：不随每次运行变化，
+/// 但也不适合放进公开仓库（#201）。
 static MACHINE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"/var/folders/[^/\s'\x22]+/[^/\s'\x22]+/T/|/Users/[^/\s'\x22]+/").unwrap());
 
-/// Recorded text with machine paths written generically; applied to everything recorded and compared.
+/// 把录制文本里的机器路径改成通用写法；对所有录制和比较的内容都适用。
 pub fn scrub(text: &str) -> String {
     MACHINE
         .replace_all(
@@ -109,14 +101,14 @@ pub fn scrub(text: &str) -> String {
         .into_owned()
 }
 
-/// The operating system's own error text and number (macOS and Windows word and number it differently).
+/// 操作系统自己的错误文本和错误号（macOS 和 Windows 的措辞和编号不同）。
 static OS_ERROR: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"[^：:\n]*\(os error \d+\)").unwrap());
 
-/// How replies and cells are masked: run-specific spellings first (temporary roots), then the rules above.
+/// 响应和单元格如何遮盖：先处理随每次运行变化的写法（临时根目录），再应用上面的规则。
 pub struct Masks<'a> {
-    /// Real temporary paths -> `@ROOT@` tokens.
+    /// 真实临时路径 -> `@ROOT@` 占位符。
     pub roots: &'a dyn Fn(&str) -> String,
-    /// The core version of the build: replies that name it are compared as "the current version".
+    /// 本次构建的词条核心版本：提到它的响应按「当前版本」比较。
     pub version: i64,
 }
 
@@ -127,8 +119,8 @@ impl Masks<'_> {
         STAMP.replace_all(&text, "<stamp>").into_owned()
     }
 
-    /// A reply as compared: `text`, operating-system error text, and the current core version where a reply
-    /// states it (`migrate`'s `from`/`to`, the version refusals, upgrade backup names).
+    /// 用于比较的响应：先做 `text`，再遮盖操作系统错误文本，以及响应里写明的当前词条核心版本
+    /// （`migrate` 的 `from`/`to`、版本拒绝信息、升级备份的文件名）。
     pub fn output(&self, text: &str) -> String {
         let text = OS_ERROR.replace_all(&self.text(text), "<os error>").into_owned();
         let v = self.version;
@@ -140,11 +132,10 @@ impl Masks<'_> {
     }
 }
 
-/// `meta` values compared by what they mean rather than as written.
-/// - `terms_schema`: the current version is `<terms-version>` (7 when recorded, 8 in core v8);
-/// - `names_version` counts writes to the tables its triggers sit on, which v8 moves: only whether the projections
-///   are up to date with it is compared;
-/// - `identity_graph_version` hashes run-specific values, as left out before.
+/// 按含义而不是按字面比较的 `meta` 值。
+/// - `terms_schema`：当前版本记作 `<terms-version>`（录制时是 7，词条核心 v8 中是 8）；
+/// - `names_version` 统计对其触发器所在表的写入，而 v8 移动了这些表：只比较各投影是否与它同步；
+/// - `identity_graph_version` 对随每次运行变化的值求哈希，与以前一样不比较。
 fn meta_value(key: &str, value: &str, names_version: Option<&str>, version: i64) -> String {
     match key {
         "terms_schema" if value == version.to_string() => "<terms-version>".into(),
@@ -156,7 +147,7 @@ fn meta_value(key: &str, value: &str, names_version: Option<&str>, version: i64)
     }
 }
 
-/// One table as compared: its columns and its rows (canonical JSON text of the masked cells) with multiplicity.
+/// 用于比较的一张表：它的列，以及带重复次数的行（遮盖后单元格的规范 JSON 文本）。
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Table {
     pub columns: Vec<String>,
@@ -186,7 +177,7 @@ pub fn tables(c: &Connection) -> Vec<String> {
     s.query_map([], |r| r.get(0)).unwrap().map(Result::unwrap).collect()
 }
 
-/// The compared content of a database.
+/// 一个数据库参与比较的内容。
 pub fn state(c: &Connection, masks: &Masks) -> State {
     let names_version: Option<String> = c
         .query_row(
@@ -223,8 +214,7 @@ pub fn state(c: &Connection, masks: &Masks) -> State {
     out
 }
 
-/// What a call changed: per table, rows removed and added (with repeats), columns when the table is new or
-/// its columns changed; tables that disappeared.
+/// 一个调用改动了什么：每张表删掉和新增的行（含重复），表是新建的或列变了时给出列；以及消失的表。
 pub fn delta(before: &State, after: &State) -> Value {
     let mut tables = Map::new();
     for (name, table) in after {
@@ -235,7 +225,7 @@ pub fn delta(before: &State, after: &State) -> Value {
         }
         let (removed, added) = match old {
             Some(t) if t.columns == table.columns => difference(&t.rows, &table.rows),
-            // Columns changed: everything that was there goes, everything there now comes.
+            // 列变了：原有的行全部算删除，现在的行全部算新增。
             Some(t) => (expand(&t.rows), expand(&table.rows)),
             None => (Vec::new(), expand(&table.rows)),
         };
@@ -264,7 +254,7 @@ fn expand(rows: &BTreeMap<String, usize>) -> Vec<String> {
     rows.iter().flat_map(|(r, n)| std::iter::repeat_n(r.clone(), *n)).collect()
 }
 
-/// Rows only in `old`, rows only in `new` (multiset difference), each in canonical order.
+/// 只在 `old` 中的行和只在 `new` 中的行（多重集之差），各自按规范顺序排列。
 fn difference(old: &BTreeMap<String, usize>, new: &BTreeMap<String, usize>) -> (Vec<String>, Vec<String>) {
     let mut removed = Vec::new();
     let mut added = Vec::new();
@@ -279,7 +269,7 @@ fn difference(old: &BTreeMap<String, usize>, new: &BTreeMap<String, usize>) -> (
     (removed, added)
 }
 
-/// `before` with a recorded `delta` applied.
+/// 把录制的 `delta` 应用到 `before` 上的结果。
 pub fn apply(before: &State, delta: &Value) -> Result<State, String> {
     let mut out = before.clone();
     if let Some(gone) = delta.get("gone").and_then(Value::as_array) {
@@ -311,7 +301,7 @@ pub fn apply(before: &State, delta: &Value) -> Result<State, String> {
     Ok(out)
 }
 
-/// The first differences between an expected and an actual state, for a failure message.
+/// 期望状态与实际状态之间的前几处差异，用于失败信息。
 pub fn differences(want: &State, got: &State, limit: usize) -> Vec<String> {
     let mut out = Vec::new();
     for name in want.keys().chain(got.keys().filter(|k| !want.contains_key(*k))) {
@@ -337,10 +327,9 @@ pub fn differences(want: &State, got: &State, limit: usize) -> Vec<String> {
     out
 }
 
-/// A database as SQL that rebuilds it with the same rowids, in three parts kept apart so that recordings share
-/// the schema: tables; rows (explicit rowids where a table has implicit ones, and `sqlite_sequence`); then
-/// indexes, views and triggers in schema order, so write-guard triggers do not see the restore. Text goes through
-/// `text` (temporary roots to tokens).
+/// 把数据库导出成能以相同 rowid 重建它的 SQL，分成三部分分开存放，让各录制共用表结构：表；行（表使用隐式 rowid 时
+/// 写出显式 rowid，另含 `sqlite_sequence`）；最后按表结构中的顺序写索引、视图和触发器，这样写入保护触发器看不到
+/// 恢复过程。文本经过 `text`（临时根目录换成占位符）。
 pub struct Dump {
     pub tables: String,
     pub rows: String,
@@ -403,7 +392,7 @@ pub fn dump(c: &Connection, text: &dyn Fn(&str) -> String) -> Dump {
 }
 
 fn integer_key(c: &Connection, table: &str) -> bool {
-    // A rowid alias: exactly one primary-key column, declared INTEGER.
+    // rowid 别名：恰好一个主键列，声明为 INTEGER。
     let keys: Vec<String> = c
         .prepare(&format!("SELECT type FROM pragma_table_info('{}') WHERE pk>0", table.replace('\'', "''")))
         .unwrap()
@@ -424,7 +413,7 @@ fn literal(value: ValueRef, text: &dyn Fn(&str) -> String) -> String {
     }
 }
 
-/// A REAL that SQLite reads back to the same bits: Rust's shortest round-trip form, which SQLite parses exactly.
+/// SQLite 读回后各位不变的 REAL 字面量：用 Rust 最短的可往返形式，SQLite 能精确解析。
 fn real_literal(v: f64) -> String {
     if v.is_nan() {
         "NULL".into()
@@ -444,8 +433,8 @@ fn real_literal(v: f64) -> String {
     }
 }
 
-/// Every table and schema object exactly (typed cells, rowids), text through `text`: to check that `dump`
-/// rebuilds a database (as `dump` wrote its text).
+/// 原样列出每张表和每个表结构对象（带类型的单元格、rowid），文本经过 `text`：用来检查 `dump` 能重建数据库
+/// （文本按 `dump` 写出时的样子）。
 pub fn exact(c: &Connection, text: &dyn Fn(&str) -> String) -> BTreeMap<String, Vec<String>> {
     let mut out = BTreeMap::new();
     let mut s = c
@@ -476,7 +465,7 @@ pub fn exact(c: &Connection, text: &dyn Fn(&str) -> String) -> BTreeMap<String, 
         .map(Result::unwrap)
         .collect();
     for (name, sql) in tables {
-        // `sqlite_sequence` rows are restored in the order SQLite first needs them: their rowids carry nothing.
+        // `sqlite_sequence` 的行按 SQLite 第一次需要它们的顺序恢复：它们的 rowid 不带任何信息。
         let plain = sql.to_uppercase().contains("WITHOUT ROWID") || name == "sqlite_sequence";
         let select = if plain { "*" } else { "rowid,*" };
         let mut s = c.prepare(&format!("SELECT {select} FROM \"{name}\"")).unwrap();
@@ -507,26 +496,25 @@ pub fn exact(c: &Connection, text: &dyn Fn(&str) -> String) -> BTreeMap<String, 
     out
 }
 
-/// Rebuild a database from `dump` output (foreign keys off while the rows go in, as the recordings were restored).
+/// 用 `dump` 的输出重建数据库（写入行时关闭外键，与恢复录制时一样）。
 pub fn restore(c: &Connection, tables: &str, rows: &str, objects: &str) {
     c.execute_batch("PRAGMA foreign_keys=OFF").unwrap();
     c.execute_batch(&format!("BEGIN;\n{tables}{rows}{objects}COMMIT;")).unwrap();
 }
 
-/// Whether a file is an SQLite database (by its header).
+/// 按文件头判断文件是不是 SQLite 数据库。
 pub fn is_database(path: &std::path::Path) -> bool {
     let mut head = [0u8; 16];
     std::fs::File::open(path).and_then(|mut f| std::io::Read::read_exact(&mut f, &mut head)).is_ok()
         && &head == b"SQLite format 3\0"
 }
 
-/// The core version a database is at (0: no terms tables).
+/// 数据库所处的词条核心版本（0：没有词条表）。
 pub fn terms_version(c: &Connection) -> i64 {
     c.query_row("SELECT CAST(value AS INTEGER) FROM meta WHERE key='terms_schema'", [], |r| r.get(0)).unwrap_or(0)
 }
 
-/// A library some domain of which has not been switched to the core yet: calls on it build a scenario up rather than
-/// exercise the switched core, and become part of a checkpoint.
+/// 还有领域未切换到词条核心的图库：在它上面的调用是在搭建场景，而不是检验切换后的词条核心，这些调用归入检查点。
 pub fn before_cutover(c: &Connection) -> bool {
     let has_entities: bool = c
         .query_row("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='entities')", [], |r| {

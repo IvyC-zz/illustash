@@ -1,17 +1,17 @@
-//! CPU float32 products needed by the existing research matrix calculator.
-//! macOS uses system BLAS; Windows native research requires a fixed
-//! ILP64 OpenBLAS DLL. Other platforms keep an unaccepted portable loop (Linux is frozen).
+//! 现有研究矩阵计算器需要的 CPU float32 乘积。
+//! macOS 用系统 BLAS；Windows 原生研究需要固定的 ILP64 OpenBLAS DLL。
+//! 其他平台保留未经验收的可移植循环（Linux 已冻结）。
 #[cfg(target_os = "windows")]
 mod windows_openblas;
 
-/// Identity of the fixed Windows backend (never searches PATH).
+/// 固定的 Windows 后端的身份（从不搜索 PATH）。
 #[cfg(target_os = "windows")]
 pub fn windows_backend_identity() -> Result<String, String> {
     windows_openblas::identity()
 }
 
-/// Product of C-order row matrices A and B-transposed. Shape is preserved, including
-/// vector and symmetric cases: substituting independent dots can alter threshold decisions.
+/// C 顺序行矩阵 A 与 B 转置的乘积。保留原有的形状分派，包括向量和对称的情况：
+/// 换成逐个独立的点积可能改变阈值判定。
 pub fn cross(a: &[f32], m: usize, b: &[f32], p: usize, dim: usize) -> Result<Vec<f32>, String> {
     if m.checked_mul(dim) != Some(a.len())
         || p.checked_mul(dim) != Some(b.len())
@@ -27,8 +27,8 @@ pub fn cross(a: &[f32], m: usize, b: &[f32], p: usize, dim: usize) -> Result<Vec
         return Ok(out);
     }
     #[cfg(target_os = "macos")]
-    // SAFETY: lengths, nonempty dimensions and i32 bounds were checked above;
-    // BLAS receives only caller-owned read slices and the sized writable output.
+    // SAFETY: 上面已检查长度、各维非空和 i32 上限；
+    // BLAS 只拿到调用方持有的只读切片和大小已定的可写输出。
     unsafe {
         if m == 1 && p == 1 {
             out[0] = blas::cblas_sdot(dim as i32, a.as_ptr(), 1, b.as_ptr(), 1);
@@ -117,8 +117,8 @@ pub fn cross(a: &[f32], m: usize, b: &[f32], p: usize, dim: usize) -> Result<Vec
     }
     Ok(out)
 }
-/// Windows float64 C-order A @ B.T with the same shape dispatch as NumPy.
-/// Used by the fixed backend for weighted trait profiles.
+/// Windows 上的 float64 C 顺序 A @ B.T，形状分派与 NumPy 相同。
+/// 固定后端计算加权 trait 画像时使用。
 #[cfg(target_os = "windows")]
 pub fn cross64(a: &[f64], m: usize, b: &[f64], p: usize, dim: usize) -> Result<Vec<f64>, String> {
     if m.checked_mul(dim) != Some(a.len())
@@ -136,8 +136,7 @@ pub fn cross64(a: &[f64], m: usize, b: &[f64], p: usize, dim: usize) -> Result<V
     }
     Ok(out)
 }
-/// np.linalg.norm's one-dimensional float32 dot; rowwise feature normalisation
-/// instead uses the calculator's contiguous reduction and remains independent.
+/// np.linalg.norm 用的一维 float32 点积；按行的特征归一化改用计算器的连续归约，与这里无关。
 pub fn dot(a: &[f32], b: &[f32]) -> Result<f32, String> {
     if a.len() != b.len() || a.len() > i32::MAX as usize {
         return Err("invalid research dot shape".into());
@@ -146,7 +145,7 @@ pub fn dot(a: &[f32], b: &[f32]) -> Result<f32, String> {
         return Ok(0.0);
     }
     #[cfg(target_os = "macos")]
-    // SAFETY: equal checked slice lengths, unit strides, valid nonempty storage.
+    // SAFETY: 已检查两个切片等长，步长为 1，存储有效且非空。
     unsafe {
         Ok(blas::cblas_sdot(a.len() as i32, a.as_ptr(), 1, b.as_ptr(), 1))
     }
@@ -208,7 +207,7 @@ mod blas {
         );
     }
 }
-/// Index building uses the original NPY dtype/layout for A @ anchor; keep GEMV shape.
+/// 建索引时 A @ anchor 沿用原 NPY 的 dtype 和内存布局；保持 GEMV 的形状。
 pub fn index_product32(
     rows: &[f32],
     n: usize,

@@ -1,6 +1,6 @@
-//! Fixed Windows backend; installed resources and explicit development overrides share it.
-//! The two identities are the existing NumPy 2.3.3 / 2.5.3 reference wheels, not
-//! interchangeable numerical oracles. Packaging must select its own fixed identity.
+//! 固定的 Windows 后端；安装后的资源和开发时显式指定的覆盖共用它。
+//! 两个身份分别是现有的 NumPy 2.3.3 / 2.5.3 参考 wheel，不是可以互相替代的数值参照。
+//! 打包时必须选定自己的固定身份。
 use std::{
     ffi::{c_char, c_void, CStr, OsString},
     fs::{File, OpenOptions},
@@ -37,14 +37,14 @@ extern "system" {
 struct Library(usize);
 impl Drop for Library {
     fn drop(&mut self) {
-        // SAFETY: owns a successful LoadLibraryExW reference; no function escapes Backend.
+        // SAFETY: 持有一次成功的 LoadLibraryExW 引用；没有函数指针流出 Backend。
         unsafe {
             FreeLibrary(self.0 as *mut c_void);
         }
     }
 }
 struct Backend {
-    // Held together until process exit; failed initialization drops/unloads all state.
+    // 这些字段一起保留到进程退出；初始化失败时释放并卸载全部状态。
     _library: Library,
     _file: File,
     _module_file: File,
@@ -80,8 +80,8 @@ impl Backend {
             return Err("research OpenBLAS must be an existing absolute DLL path".into());
         }
         let path = path.canonicalize().map_err(|e| format!("research OpenBLAS path: {e}"))?;
-        // FILE_SHARE_READ only: do not permit writes/replacement between digest and loading,
-        // or for the lifetime of any function pointer. No global search path changes.
+        // 只给 FILE_SHARE_READ：从计算摘要到加载之间，以及任何函数指针存活期间，都不允许写入或替换文件。
+        // 不改全局搜索路径。
         let mut file = OpenOptions::new()
             .read(true)
             .share_mode(1)
@@ -97,21 +97,19 @@ impl Backend {
             .ok_or("research OpenBLAS DLL fingerprint is not a fixed reference identity")?;
         drop(bytes);
         let name: Vec<_> = path.as_os_str().encode_wide().chain(Some(0)).collect();
-        // SAFETY: NUL-terminated absolute canonical path. Dependencies search only the DLL
-        // directory and System32 (LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | SYSTEM32), not PATH/cwd.
+        // SAFETY: NUL 结尾的规范化绝对路径。依赖只在 DLL 所在目录和 System32 中搜索
+        // （LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | SYSTEM32），不搜索 PATH 和当前目录。
         let handle = unsafe { LoadLibraryExW(name.as_ptr(), std::ptr::null_mut(), 0x100 | 0x800) };
         if handle.is_null() {
             return Err(format!("research OpenBLAS load: {}", std::io::Error::last_os_error()));
         }
         let library = Library(handle as usize);
-        // The Windows loader can redirect an absolute request (.local/SxS). Verify
-        // the returned HMODULE BEFORE resolving/calling any OpenBLAS export; never
-        // report the requested digest as the identity of a different loaded file.
-        // LoadLibraryExW may already have run DllMain (including dependencies): this
-        // post-load check cannot prevent/reverse that initialization or its effects.
+        // Windows 加载器可能重定向绝对路径的请求（.local/SxS）。在解析或调用任何 OpenBLAS 导出函数**之前**
+        // 先核验返回的 HMODULE；绝不把请求文件的摘要报成另一个实际加载文件的身份。
+        // LoadLibraryExW 可能已经运行过 DllMain（包括依赖的）：加载后的这项检查无法阻止或撤回那次初始化及其影响。
         let module_file = verify_loaded_module(handle, &path, &file)?;
         let symbol = |name: &'static [u8]| -> Result<*mut c_void, String> {
-            // SAFETY: all call sites supply a static NUL-terminated export name; library alive.
+            // SAFETY: 所有调用处都传入静态的 NUL 结尾导出名；库仍处于加载状态。
             let p = unsafe { GetProcAddress(handle, name.as_ptr().cast()) };
             if p.is_null() {
                 Err(format!("research OpenBLAS missing symbol {}", String::from_utf8_lossy(&name[..name.len() - 1])))
@@ -119,9 +117,9 @@ impl Backend {
                 Ok(p)
             }
         };
-        // Resolve the COMPLETE contract before the first BLAS call. C enums stay i32;
-        // signed dimensions and strides are i64 (Windows c_long would be only 32 bits).
-        // SAFETY: pinned wheel digests and exact ILP64 exports establish these C signatures.
+        // 第一次调用 BLAS 之前先解析**完整的**契约。C 枚举仍是 i32；
+        // 有符号的维度和步长是 i64（Windows 的 c_long 只有 32 位）。
+        // SAFETY: 固定的 wheel 摘要和确切的 ILP64 导出名确定了这些 C 签名。
         let (dot, gemv, gemm, syrk, dot64, gemv64, gemm64, syrk64, config) = unsafe {
             (
                 std::mem::transmute::<*mut c_void, Dot>(symbol(b"scipy_cblas_sdot64_\0")?),
@@ -137,7 +135,7 @@ impl Backend {
                 )?),
             )
         };
-        // SAFETY: fixed export returns a library-owned static NUL-terminated configuration.
+        // SAFETY: 这个固定的导出函数返回库内持有的静态 NUL 结尾配置字符串。
         let config = unsafe { config() };
         if config.is_null() {
             return Err("research OpenBLAS empty configuration".into());
@@ -174,8 +172,8 @@ struct FileIdentity {
 }
 fn file_identity(file: &File) -> Result<FileIdentity, String> {
     let mut identity = FileIdentity::default();
-    // SAFETY: a live File HANDLE; FileIdInfo=18 receives the exact FILE_ID_INFO
-    // layout (u64 volume serial + FILE_ID_128). No path/name-only identity claim.
+    // SAFETY: 存活的 File 句柄；FileIdInfo=18 写入的正是 FILE_ID_INFO 的布局
+    // （u64 卷序列号 + FILE_ID_128）。不只凭路径或名称断言身份。
     let ok = unsafe {
         GetFileInformationByHandleEx(
             file.as_raw_handle(),
@@ -191,7 +189,7 @@ fn file_identity(file: &File) -> Result<FileIdentity, String> {
 }
 fn module_path(module: *mut c_void) -> Result<PathBuf, String> {
     let mut path = vec![0u16; 32768];
-    // SAFETY: live borrowed HMODULE and writable WCHAR buffer of the passed size.
+    // SAFETY: 借用的 HMODULE 仍然有效，WCHAR 缓冲区可写，大小与传入的一致。
     let len = unsafe { GetModuleFileNameW(module, path.as_mut_ptr(), path.len() as u32) } as usize;
     if len == 0 || len >= path.len() {
         return Err("research OpenBLAS module path missing or truncated".into());
@@ -211,8 +209,8 @@ fn verify_loaded_module(module: *mut c_void, requested: &std::path::Path, locked
     if actual_path != requested || !same_file {
         return Err("research OpenBLAS loaded module path/file identity mismatch".into());
     }
-    // Keep this second handle too: neither requested nor observed module file may
-    // change while the bound functions are retained. No export is called here.
+    // 这第二个句柄也保留：绑定的函数保留期间，请求的和实际观察到的模块文件都不能被改动。
+    // 这里不调用任何导出函数。
     Ok(actual)
 }
 pub(super) fn identity() -> Result<String, String> {
@@ -220,13 +218,13 @@ pub(super) fn identity() -> Result<String, String> {
 }
 pub(super) fn dot(a: &[f32], b: &[f32]) -> Result<f32, String> {
     let backend = backend()?;
-    // SAFETY: parent checks equal nonempty lengths and bounds; unit-stride immutable slices.
+    // SAFETY: 上层已检查长度相等、非空且不越界；切片不可变，步长为 1。
     Ok(unsafe { (backend.dot)(a.len() as i64, a.as_ptr(), 1, b.as_ptr(), 1) })
 }
 pub(super) fn cross(a: &[f32], m: usize, b: &[f32], p: usize, dim: usize, out: &mut [f32]) -> Result<(), String> {
     let backend = backend()?;
-    // SAFETY: parent validates every slice length, allocation and dimension before entry.
-    // Identical NumPy matrix-shape dispatch to the existing Mac backend: no dot substitution.
+    // SAFETY: 进入前上层已校验每个切片的长度、分配和维度。
+    // 与现有 Mac 后端相同的 NumPy 矩阵形状分派：不用点积替代。
     unsafe {
         if m == 1 && p == 1 {
             out[0] = (backend.dot)(dim as i64, a.as_ptr(), 1, b.as_ptr(), 1);
@@ -309,8 +307,8 @@ pub(super) fn cross(a: &[f32], m: usize, b: &[f32], p: usize, dim: usize, out: &
 
 pub(super) fn cross64(a: &[f64], m: usize, b: &[f64], p: usize, dim: usize, out: &mut [f64]) -> Result<(), String> {
     let backend = backend()?;
-    // SAFETY: parent validates every slice length, allocation and dimension before entry.
-    // Identical NumPy matrix-shape dispatch to the existing float32 backend: no dot substitution.
+    // SAFETY: 进入前上层已校验每个切片的长度、分配和维度。
+    // 与现有 float32 后端相同的 NumPy 矩阵形状分派：不用点积替代。
     unsafe {
         if m == 1 && p == 1 {
             out[0] = (backend.dot64)(dim as i64, a.as_ptr(), 1, b.as_ptr(), 1);
@@ -391,8 +389,8 @@ pub(super) fn cross64(a: &[f64], m: usize, b: &[f64], p: usize, dim: usize, out:
     Ok(())
 }
 
-// Index NPY arithmetic retains its original column/row layout. Converting F
-// storage to C and using another GEMV shape can change a threshold's last bit.
+// 索引 NPY 的运算保留原有的列主序或行主序布局。把 F 顺序存储转成 C 顺序、换用另一种 GEMV 形状，
+// 可能改变阈值的最后一位。
 pub(super) fn index_product32(
     rows: &[f32],
     n: usize,
@@ -401,7 +399,7 @@ pub(super) fn index_product32(
     out: &mut [f32],
 ) -> Result<(), String> {
     let backend = backend()?;
-    // SAFETY: parent validated nonempty lengths/bounds; these are F-order rows.
+    // SAFETY: 上层已校验长度非空且不越界；这些是 F 顺序的行。
     unsafe {
         if n == 1 {
             out[0] = (backend.dot)(dim as i64, rows.as_ptr(), 1, anchor.as_ptr(), 1);
@@ -433,7 +431,7 @@ pub(super) fn index_product64(
     out: &mut [f64],
 ) -> Result<(), String> {
     let backend = backend()?;
-    // SAFETY: parent validated nonempty lengths/bounds and the supplied NPY layout.
+    // SAFETY: 上层已校验长度非空且不越界，也校验了传入的 NPY 布局。
     unsafe {
         if n == 1 {
             out[0] = (backend.dot64)(dim as i64, rows.as_ptr(), 1, anchor.as_ptr(), 1);
@@ -467,7 +465,7 @@ mod tests {
     }
     fn known_module() -> *mut c_void {
         let name: Vec<_> = std::ffi::OsStr::new("kernel32.dll").encode_wide().chain(Some(0)).collect();
-        // SAFETY: retrieves an already loaded OS module, never loads a test DLL or runs DllMain.
+        // SAFETY: 只取已加载的系统模块，从不加载测试 DLL，也不运行 DllMain。
         let module = unsafe { GetModuleHandleW(name.as_ptr()) };
         assert!(!module.is_null());
         module
@@ -493,8 +491,8 @@ mod tests {
         std::fs::write(&path, b"identity fixture, never loaded").unwrap();
         let path = path.canonicalize().unwrap();
         let file = OpenOptions::new().read(true).share_mode(1).open(&path).unwrap();
-        // Wrong module/path and wrong file must fail. Then use the actual path but
-        // the wrong locked HANDLE: canonical spelling alone cannot pass the check.
+        // 模块或路径不对、文件不对都必须失败。再用实际路径配上锁定的错误句柄：
+        // 光是规范化后的路径写法一致不能通过检查。
         for expected_path in [&path, &actual_path] {
             let error = verify_loaded_module(module, expected_path, &file).expect_err("different file rejected");
             assert!(error.contains("path/file identity mismatch"), "{error}");

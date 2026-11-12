@@ -72,7 +72,7 @@ pub(super) fn scan(
     let limit = anchors::claim_thresholds(ids, &index, patched)?;
     let mut labels = vec![];
     let mut positions = HashMap::new();
-    // Keep the existing 4000-column scan shape: BLAS shape can alter boundary decisions.
+    // 保持既有的每块 4000 列的扫描形状：BLAS 的矩阵形状会改变边界上的判定。
     for start in (0..features.len()).step_by(4000) {
         let d = anchors::cross(vectors, &features[start..(start + 4000).min(features.len())])?;
         for j in 0..features[start..(start + 4000).min(features.len())].len() {

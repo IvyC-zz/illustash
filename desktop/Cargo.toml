@@ -24,7 +24,7 @@ illustash-terms = { path = "../native/terms" }
 [profile.release]
 strip = true
 
-# Same tiny_http as illustash-terms (#25): its HTTP host needs the vendored connection limits.
+# 与 illustash-terms 用同一份 tiny_http（#25）：它的 HTTP 宿主需要 vendored 版本里的连接数限制。
 [patch.crates-io]
 tiny_http = { path = "../native/terms/vendor/tiny_http" }
 

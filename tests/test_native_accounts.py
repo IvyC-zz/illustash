@@ -1,8 +1,8 @@
-"""#50 account actions using synthetic secrets, packages and loopback services only.
+"""#50 账号操作，只用合成的密钥、包和回环地址上的服务。
 
-Success bytes/metadata/DB rows compared with the reference (recorded through
-tests/fixed_expectations.py, #9; minute-precision check times compared as ``<clock>``); errors
-compare status. The native process cannot discover Python and cannot read the user's credential store.
+成功时的字节/元数据/数据库行与参考结果比较（经 tests/fixed_expectations.py 录制，#9；
+精确到分钟的检查时间按 ``<clock>`` 比较）；错误只比较状态码。原生进程找不到 Python，
+也读不到用户的凭据存储。
 """
 from contextlib import closing
 from concurrent.futures import ThreadPoolExecutor
@@ -82,11 +82,11 @@ class NativeAccountsTest(unittest.TestCase):
     def setUp(self):
         self.service=AccountService();self.addCleanup(self.service.close)
         life.NativeLifecycleTest.setUp(self)
-        # One synthetic provenance schema with frozen fixture defaults (recorded).
+        # 一份合成的溯源 schema，带冻结的夹具默认值（已录制）。
         self.rec.package('provenance', self.lib.path)
     def pair(self,action,body=None,expected=200):
         route='/api/accounts/'+action
-        # Preserve raw timestamps without output normalization across a minute boundary.
+        # 跨越分钟边界时保留原始时间戳，不对输出做规范化。
         left=life.NativeLifecycleTest.reference_response(self,route,body or {})
         right=self.request(route,body or {})
         self.assertEqual(left['status'],expected,left['body']);self.assertEqual(right['status'],expected,right['body'])
@@ -193,9 +193,9 @@ class NativeAccountsTest(unittest.TestCase):
         self.pair('saucenao',{'value':'a'*40});self.assertEqual(self.service.calls,[])
 
     def test_synthetic_file_secret_absent_from_responses(self):
-        # Native keychain compatibility is tested with an explicit isolated handle
-        # in platform_credentials_macos; this HTTP test keeps NO_KEYCHAIN=1.
-        # SauceNAO accepts only 40 hex digits; encode an explicit synthetic marker.
+        # 原生钥匙串的兼容性在 platform_credentials_macos 里用显式隔离的句柄测试；
+        # 这个 HTTP 测试保持 NO_KEYCHAIN=1。
+        # SauceNAO 只接受 40 位十六进制数；把一个显式的合成标记编码进去。
         value=b'SYNTHETIC-119-ONLY'.hex().ljust(40,'0')
         self.pair('saucenao',{'value':value})
         self.assertNotIn(value.encode(),self.request('/api/accounts')['body'])
@@ -216,7 +216,7 @@ class NativeAccountsTest(unittest.TestCase):
 
 class NativeDesktopAccountsTest(NativeAccountsTest):
     with_bridge=True
-    # Inherited native account contract cases also run with the loopback bridge.
+    # 继承来的原生账号契约用例也在回环桥接下运行。
     def test_invalid_branches_and_desktop_absent(self):
         for action,body in [('pixiv',{'value':'bad'}),('saucenao',{'value':'bad'}),('pixiv/check',{}),('unknown',{})]:self.pair(action,body,400)
     def test_window_connect_logout_and_cancelled_login(self):

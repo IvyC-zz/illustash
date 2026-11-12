@@ -1,4 +1,4 @@
-//! Read-only folder enumeration, hashing and image metadata; no source identity or database writes.
+//! 只读的文件夹遍历、哈希和图片元数据；不涉及来源身份，也不写数据库。
 use crate::{Error, Result};
 use md5::{Digest, Md5};
 use std::{
@@ -16,7 +16,7 @@ pub struct File {
     pub born: SystemTime,
     pub hash: String,
 }
-/// Paths relative to the root with `/` separators; the root itself is the empty string.
+/// 相对根目录的路径，用 `/` 分隔；根目录本身是空字符串。
 fn relative(root: &Path, path: &Path) -> String {
     path.strip_prefix(root)
         .expect("app_folder internal invariant")
@@ -24,9 +24,8 @@ fn relative(root: &Path, path: &Path) -> String {
         .replace(std::path::MAIN_SEPARATOR, "/")
 }
 
-/// Every image file under `folder`. What could not be read — a folder that cannot be listed or that had an
-/// unreadable entry, an entry whose metadata failed — goes to `unreadable` as a relative path, so a caller
-/// never takes "not read" for "gone".
+/// `folder` 下的所有图片文件。读不到的东西（无法列出或含有读不出的条目的文件夹、取元数据失败的条目）
+/// 以相对路径记进 `unreadable`，调用方就不会把「没读到」当成「已不在」。
 pub fn walk(
     root: &Path,
     folder: &Path,
@@ -125,7 +124,7 @@ pub fn describe(file: &File) -> (u32, u32, String) {
         }
     })()
     .unwrap_or((0, 0));
-    // Same Pillow decompression bomb error threshold (2 * MAX_IMAGE_PIXELS), header only.
+    // 与 Pillow 的解压炸弹报错阈值（2 * MAX_IMAGE_PIXELS）相同，只看文件头。
     let (w, h) = if u64::from(dimensions.0) * u64::from(dimensions.1) > 178_956_970 { (0, 0) } else { dimensions };
     let born: chrono::DateTime<chrono::Local> = file.born.into();
     (w, h, born.format("%Y-%m-%dT%H:%M:%S").to_string())

@@ -1,4 +1,4 @@
-//! A private Windows job: abnormal desktop exit cannot orphan its host.
+//! 私有的 Windows job：desktop 异常退出时不会留下孤儿宿主进程。
 use std::{ffi::c_void, io, os::windows::io::AsRawHandle, process::Child};
 #[repr(C)]
 #[derive(Default)]
@@ -97,7 +97,7 @@ mod tests {
         let child = fixture("child", &path).spawn().unwrap();
         let _job = Job::assign(&child).unwrap();
         std::fs::write(path, child.id().to_string()).unwrap();
-        // Exiting skips destructors: the kernel closes the desktop job handle.
+        // 直接退出会跳过析构：由内核关闭 desktop 的 job 句柄。
         std::process::exit(0);
     }
 

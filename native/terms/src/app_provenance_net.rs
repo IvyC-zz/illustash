@@ -1,4 +1,4 @@
-//! Rust owns network consent, host allowlist, pacing, refusal handling and the shared run budget.
+//! 联网同意、宿主白名单、节流、拒绝处理和共享的单次运行配额都由 Rust 负责。
 use crate::{app_tasks::TaskContext, Error, Result};
 use serde_json::Value;
 use std::{
@@ -13,7 +13,7 @@ pub(super) struct Net {
     agent: ureq::Agent,
     last: HashMap<String, Instant>,
     stopped: HashMap<String, String>,
-    /// Pixiv answered 401 to a logged-in request: the login has expired (#204: decided by this, not the words).
+    /// Pixiv 对已登录的请求返回 401：登录已过期（#204：按这一点判断，不看文字）。
     login_expired: bool,
     base: Option<String>,
     pub binding: Option<Value>,

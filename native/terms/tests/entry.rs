@@ -1,6 +1,6 @@
-//! The native host's entry: every request needs the session cookie that only the ready line's one-time address
-//! hands out, so another local process (which can set any Host and leave Origin out) reads and writes nothing; writes
-//! still need Origin and the page token, and a new model address drops the stored key. Synthetic package only.
+//! 原生宿主的入口：每个请求都需要会话 cookie，而它只由就绪行里的一次性地址发放，所以本机其他进程（可以随意设置
+//! Host、省略 Origin）什么都读不到、写不了；写入仍需要 Origin 和页面 token，换了新的模型地址会丢弃已存的密钥。
+//! 只用合成图库包。
 #![allow(clippy::unwrap_used, reason = "集成测试里 unwrap 就是断言")]
 use illustash_terms::{app_create::NewSource, app_service, store};
 use serde_json::{json, Value};
@@ -32,7 +32,7 @@ impl Drop for Host {
     }
 }
 
-/// Status, headers asked for and body of a request with exactly these headers (ureq adds Host itself).
+/// 只带这些请求头发出请求（Host 由 ureq 自己加），返回状态码、所需的响应头和响应体。
 fn call(method: &str, url: &str, headers: &[(&str, &str)], body: Option<&Value>) -> (u16, Vec<String>, String) {
     let mut request = ureq::request(method, url);
     for (name, value) in headers {
@@ -61,7 +61,7 @@ fn every_request_needs_the_cookie_from_the_one_time_address() {
     for dir in ["home", "support", "shared"] {
         fs::create_dir_all(root.join(dir)).unwrap();
     }
-    // This test binary has one test: nothing else reads the process environment meanwhile.
+    // 这个测试二进制只有一个测试：此期间没有别的代码读进程环境。
     std::env::set_var("ILLUSTASH_APP_SUPPORT", root.join("support"));
     std::env::set_var("ILLUSTASH_SHARED", root.join("shared"));
     std::env::set_var("ILLUSTASH_NO_KEYCHAIN", "1");
@@ -112,8 +112,8 @@ fn every_request_needs_the_cookie_from_the_one_time_address() {
     let code = address.strip_prefix(&format!("{origin}/?k=")).expect("the address carries a code");
     assert!(code.len() == 64 && code.bytes().all(|b| b.is_ascii_hexdigit()), "{address}");
 
-    // Before entering: whatever another local process sends — the right Host, no Origin or the right one, a guessed
-    // cookie, a wrong code — nothing is read, no page or picture either.
+    // 进入之前：本机其他进程不管发什么（正确的 Host，不带 Origin 或带正确的 Origin，猜的 cookie，错误的码），
+    // 都读不到任何东西，页面和图片也不行。
     let host = origin.trim_start_matches("http://");
     let forged = format!("illustash-{port}=0000");
     for url in ["/api/bootstrap", "/", "/app.js", "/index.html", "/image?id=synthetic&size=full", "/api/names", "/?k=0"]
@@ -133,8 +133,7 @@ fn every_request_needs_the_cookie_from_the_one_time_address() {
     );
     assert_eq!(status, 403);
 
-    // Entering as the desktop shell does (it adds `launched`): the cookie is set and the page goes on, without
-    // the code, by a refresh of its own.
+    // 像桌面外壳那样进入（它会加上 `launched`）：设置好 cookie，页面再自己刷新一次继续加载，地址里不再带码。
     let (status, cookies, body) = call("GET", &format!("{address}&launched=1"), &[], None);
     assert_eq!(status, 200, "{body}");
     let [set] = &cookies[..] else { panic!("{cookies:?}") };
@@ -143,13 +142,13 @@ fn every_request_needs_the_cookie_from_the_one_time_address() {
     assert_eq!(attributes, "HttpOnly; SameSite=Strict; Path=/");
     assert!(body.contains(r#"<meta http-equiv="refresh" content="0;url=/?launched=1">"#), "{body}");
     assert!(!body.contains(code));
-    // The code works once.
+    // 码只能用一次。
     for url in [address.clone(), format!("{address}&launched=1")] {
         let (status, cookies, _) = call("GET", &url, &[], None);
         assert_eq!((status, cookies.len()), (403, 0), "{url}");
     }
 
-    // With the cookie everything reads as before; writes still need Origin and the page token.
+    // 有了 cookie，读取都和以前一样；写入仍需要 Origin 和页面 token。
     let with = [("Cookie", pair)];
     let (status, _, body) = call("GET", &format!("{origin}/api/bootstrap"), &with, None);
     assert_eq!(status, 200, "{body}");
@@ -168,7 +167,7 @@ fn every_request_needs_the_cookie_from_the_one_time_address() {
             call("POST", &names, &headers, Some(&json!({"action": "model_api", "key": "sk-synthetic-0000"})));
         assert_eq!(status, 403, "{headers:?}");
     }
-    // The browser checks hold with the cookie as well: another site's page, or a name that resolves here.
+    // 带着 cookie 时浏览器相关的检查同样有效：别的网站的页面，或解析到本机的其他域名。
     assert_eq!(
         call("GET", &format!("{origin}/api/bootstrap"), &[("Cookie", pair), ("Origin", "http://evil.test")], None).0,
         403
@@ -178,7 +177,7 @@ fn every_request_needs_the_cookie_from_the_one_time_address() {
         403
     );
 
-    // The model key goes only to the address it was entered for.
+    // 模型密钥只发给填写它时对应的地址。
     let configured = |reply: &str| serde_json::from_str::<Value>(reply).unwrap()["model_api"]["configured"].clone();
     let (status, _, body) =
         model(json!({"action": "model_api", "key": "sk-synthetic-0000", "base": "https://one.invalid"}));

@@ -1,5 +1,5 @@
-//! Narrow numerical contracts used by the research calculator, not model inference.
-//! Keep float32 intermediates, the approved float64 linear percentile and scalar introsort.
+//! 研究计算程序用到的窄范围数值契约，不是模型推断。
+//! 保持 float32 中间值、经批准的 float64 线性百分位和标量 introsort。
 use std::collections::HashSet;
 
 pub const PAIR_BLOCK_BYTES: usize = 16 * 1024 * 1024;
@@ -7,7 +7,7 @@ pub fn pair_block_rows(columns: usize) -> usize {
     (PAIR_BLOCK_BYTES / columns.saturating_mul(4).max(1)).clamp(1, 512)
 }
 
-// NumPy's contiguous reduction uses eight lanes and a 128-element pairwise cutoff.
+// NumPy 的连续归约用八路并行，两两求和的分段阈值是 128 个元素。
 pub fn sum32(v: &[f32]) -> f32 {
     if v.len() < 8 {
         return v.iter().fold(-0.0, |s, x| s + x);
@@ -35,8 +35,8 @@ pub fn normalise_layout(v: &mut [f32], contiguous: bool) -> Result<(), String> {
     }
     let squares: Vec<_> = v.iter().map(|x| x * x).collect();
     let norm = if contiguous { sum32(&squares) } else { squares.iter().fold(-0.0, |s, x| s + x) }.sqrt();
-    // Finite inputs can still overflow the squared sum to Inf; dividing by it would
-    // silently yield a zero vector, so reject it like a zero norm (#45).
+    // 有限的输入仍可能让平方和溢出为 Inf；除以它会悄悄得到零向量，
+    // 所以像零范数一样拒绝（#45）。
     if norm <= 1e-12 || !norm.is_finite() {
         return Err("Invalid CCIP feature vector".into());
     }
@@ -45,7 +45,7 @@ pub fn normalise_layout(v: &mut [f32], contiguous: bool) -> Result<(), String> {
     }
     Ok(())
 }
-// Retain float64 norm/division for float64 NPY input, then cast the resulting row to float32.
+// float64 的 NPY 输入保留 float64 的求范数和除法，再把结果行转成 float32。
 pub(crate) fn sum64(v: &[f64]) -> f64 {
     if v.len() < 8 {
         return v.iter().fold(-0.0, |s, x| s + x);
@@ -92,7 +92,7 @@ pub fn distances(a: &[Vec<f32>], b: &[Vec<f32>]) -> Result<Vec<Vec<f32>>, String
 }
 pub fn centre(rows: &[Vec<f32>], members: &[usize]) -> Result<Vec<f32>, String> {
     let mut out = vec![0.0; rows[0].len()];
-    // Axis zero is strided in the C-order seed matrix: sequential float32 accumulation.
+    // 在 C 顺序的种子矩阵里沿轴 0 是跨步的：按顺序做 float32 累加。
     for &i in members {
         for (sum, x) in out.iter_mut().zip(&rows[i]) {
             *sum += x;
@@ -116,9 +116,9 @@ pub fn percentile90(v: &mut [f32]) -> f64 {
     let lo = at.floor() as usize;
     let hi = at.ceil() as usize;
     let t = at - lo as f64;
-    // User-approved 2026-10-04: NumPy 1.26 float32 endpoint subtraction,
-    // then float64 index/fraction/interpolation, including the >=0.5 lerp branch.
-    // Do not adopt NumPy 2.x scalar-promotion dtype or introduce tolerance.
+    // 用户 2026-10-04 批准：按 NumPy 1.26 用 float32 做端点相减，
+    // 再用 float64 计算索引、比例和插值，包括 >=0.5 时的 lerp 分支。
+    // 不采用 NumPy 2.x 标量提升后的 dtype，也不引入容差。
     let diff = (v[hi] - v[lo]) as f64;
     if t >= 0.5 {
         v[hi] as f64 - diff * (1.0 - t)
@@ -127,9 +127,9 @@ pub fn percentile90(v: &mut [f32]) -> f64 {
     }
 }
 
-/// NumPy scalar introsort, including its depth-limited heapsort fallback.
-/// SIMD implementations may reorder ties differently; no cross-backend tie promise is added.
-/// Reference: numpy/core/src/npysort/{quicksort.cpp,npysort_heapsort.h} at v1.26.4.
+/// NumPy 的标量 introsort，包括限制深度后回退到堆排序。
+/// SIMD 实现可能以不同的顺序排列并列项；这里不增加跨后端的并列顺序保证。
+/// 参考：numpy/core/src/npysort/{quicksort.cpp,npysort_heapsort.h}，v1.26.4。
 pub fn argsort<T: PartialOrd>(values: &[T]) -> Vec<usize> {
     let depth = if values.is_empty() { 0 } else { values.len().ilog2() as i32 * 2 };
     argsort_depth(values, depth)
@@ -170,8 +170,8 @@ fn argsort_depth<T: PartialOrd>(v: &[T], depth: i32) -> Vec<usize> {
     }
     let mut pending = vec![(0, ids.len() - 1, depth)];
     while let Some((mut first, mut last, mut depth)) = pending.pop() {
-        // Like the scalar reference, check at stack pop; the smaller partition
-        // is processed immediately, and the larger partition carries --depth.
+        // 与标量参考实现一样在出栈时检查；较小的分区立即处理，
+        // 较大的分区带着 --depth 入栈。
         if depth < 0 {
             heapsort(v, &mut ids[first..=last]);
             continue;
@@ -244,7 +244,7 @@ fn groups_blocked(
     let bytes = n.div_ceil(8);
     let mut packed = vec![vec![0u8; bytes]; n];
     let mut counts = vec![0i64; n];
-    // Only the bit adjacency survives each block; there is no dense N x N float allocation.
+    // 每个块之后只留下位邻接表；不分配稠密的 N x N 浮点矩阵。
     for start in (0..n).step_by(block) {
         let distance = distances(&rows[start..(start + block).min(n)], rows)?;
         for i in start..(start + block).min(n) {
@@ -277,7 +277,7 @@ fn groups_blocked(
     Ok(out)
 }
 
-// PCG64(0) is the sole existing sampling contract, not a general random API.
+// PCG64(0) 是现有唯一的抽样契约，不是通用的随机数接口。
 struct Pcg {
     state: u128,
     buffered: Option<u32>,
@@ -358,8 +358,8 @@ mod tests {
     use super::*;
     #[test]
     fn bitpacked_groups_match_dense_across_blocks_bytes_minimum_and_limit() {
-        // Fixed geometry contains crowded equal-count leaders as well as isolated rows.
-        // Dense decisions are independent of packing/blocks; both retain the accepted scalar sort.
+        // 固定的几何形状既有拥挤的同计数领头行，也有孤立的行。
+        // 稠密判断与打包方式和分块无关；两者都沿用已接受的标量排序。
         for n in [0, 1, 7, 9, 100, 517] {
             let rows: Vec<_> = (0..n)
                 .map(|i| {
@@ -401,10 +401,10 @@ mod tests {
     #[test]
     fn scalar_depth_fallback_matches_numpy_126_heap_and_adversarial_order() {
         use sha2::{Digest, Sha256};
-        // np.argsort(np.ones(40,dtype='i2'), kind='heapsort') at 1.26.4.
+        // 1.26.4 下的 np.argsort(np.ones(40,dtype='i2'), kind='heapsort')。
         let expected: Vec<_> = (1..40).chain([0]).collect();
         assert_eq!(argsort_depth(&[1i16; 40], -1), expected);
-        // Fixed scalar quicksort organ-pipe input, including ties and depth fallback.
+        // 固定的标量快速排序 organ-pipe 输入，包括并列项和深度回退。
         let values: Vec<i16> = (0..8192).chain((0..8192).rev()).collect();
         let ids = argsort(&values);
         let bytes: Vec<_> = ids.iter().flat_map(|&i| (i as u64).to_le_bytes()).collect();
@@ -417,7 +417,7 @@ mod tests {
     #[test]
     fn fixed_numpy_pcg64_zero_choice_contract() {
         use sha2::{Digest, Sha256};
-        // NumPy PCG64(0).choice(n,600,replace=False), independent fixed expected digests.
+        // NumPy PCG64(0).choice(n,600,replace=False)，预期摘要独立求得并固定。
         for (n, expected) in [
             (601, "e4e98363a99cacfef07dde14d38aabcfd21b8f7d419cb3960fb97cc6290447fb"),
             (3000, "3b54af48738f6669621371811bdc5e7c080fc5eda5c5677b9701f7655157a345"),
@@ -447,7 +447,7 @@ mod tests {
     }
     #[test]
     fn finite_norm_overflow_is_rejected_and_largest_finite_square_passes() {
-        // #45: finite elements whose squared sum overflows used to divide by Inf into zeros.
+        // #45：平方和溢出的有限元素以前会除以 Inf 得到全零。
         for contiguous in [true, false] {
             for row in [vec![1e30f32; 768], vec![2e19, 0.0], vec![f32::MAX, 1.0]] {
                 let mut v = row.clone();
@@ -457,7 +457,7 @@ mod tests {
             for row in [vec![1e200f64; 768], vec![f64::MAX, 1.0]] {
                 assert_eq!(normalise64(&row, contiguous), Err("Invalid CCIP feature vector".into()));
             }
-            // The largest finite squares still normalise; [3, 4] keeps exact bits.
+            // 最大的有限平方值仍能归一化；[3, 4] 保持精确的位。
             let mut v = vec![1e19f32, 0.0];
             normalise_layout(&mut v, contiguous).unwrap();
             assert_eq!(v, vec![1.0, 0.0]);

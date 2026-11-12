@@ -1,5 +1,4 @@
-//! Text-only name sources, and the one small preview picture of a Danbooru character (#293). Network never holds a
-//! database transaction.
+//! 只取文本的名称来源，以及 Danbooru 角色的那一张小预览图（#293）。联网时从不持有数据库事务。
 use crate::error::invalid;
 use crate::{Error, Result};
 use rusqlite::{Connection, OptionalExtension};
@@ -35,17 +34,16 @@ struct Host {
     next: Option<Instant>,
     failures: u32,
 }
-// Shared across synchronous pickers and background workers, including session rotations.
+// 在同步的选择器和后台 worker 之间共享，跨会话轮换也一样。
 static HOSTS: OnceLock<Mutex<HashMap<String, Arc<Mutex<Host>>>>> = OnceLock::new();
-/// The error of a name text query made without authorization; the front end keys on it.
+/// 未经授权发出名称文本查询时的错误；前端按它判断。
 pub(crate) const UNAUTHORIZED: &str = "显示名联网尚未授权";
 pub(crate) struct Source {
     pub path: PathBuf,
     pub cancel: Arc<AtomicBool>,
-    /// Authorized for this process (`--names-network`, or index network for the index task).
+    /// 本进程已获授权（`--names-network`，或索引任务的索引联网授权）。
     pub authorized: bool,
-    /// The library's lasting consent to name text queries, read at every request so that
-    /// revoking it stops the next request of a running task.
+    /// 图库对名称文本查询的长期同意，每次请求时都读取，这样撤销后，正在运行的任务的下一个请求就会停下。
     grant: Option<Arc<AtomicBool>>,
     pub force: bool,
     seen: HashSet<String>,
@@ -116,7 +114,7 @@ impl Source {
         self.seen.insert(key);
         Ok(value)
     }
-    /// Tests point both providers at one loopback service without touching the process environment.
+    /// 测试把两个提供方都指向同一个回环服务，不碰进程环境。
     #[cfg(test)]
     pub(crate) fn with_bases(mut self, db: &str, bg: &str) -> Self {
         self.db_base = db.trim_end_matches('/').into();
@@ -147,8 +145,8 @@ impl Source {
     pub fn fetch(&self, address: &str, body: Option<&Value>, key: Option<&str>) -> Result<Value> {
         self.fetch_serialized(address, body, key).map(|(value, _)| value)
     }
-    /// One small picture from Danbooru's CDN (a post's preview, #293), under the same consent as every name query.
-    /// At most `limit` bytes; no redirects, no other host (a synthetic service on this machine in tests).
+    /// 来自 Danbooru CDN 的一张小图（帖子的预览图，#293），与每次名称查询需要同样的同意。最多 `limit` 字节；
+    /// 不跟随重定向，不访问其他主机（测试里是本机上的合成服务）。
     pub fn picture(&self, address: &str, limit: u64) -> Result<Vec<u8>> {
         let u = url::Url::parse(address).map_err(|_| Error::Network("预览图地址不正确".into()))?;
         let local = matches!(u.host_str(), Some("localhost" | "127.0.0.1" | "[::1]"));
@@ -206,7 +204,7 @@ impl Source {
         };
         for attempt in 0..3 {
             self.check_request(local)?;
-            // One in-flight request per host is within the two-request maximum.
+            // 每个主机同时只有一个进行中的请求，在两个请求的上限之内。
             let mut h = loop {
                 if let Ok(h) = host.try_lock() {
                     break h;
@@ -430,14 +428,14 @@ impl Source {
         Ok(String::new())
     }
 }
-/// A preview is about 150 px; anything much bigger is not one.
+/// 预览图大约 150 px；大得多的就不是预览图。
 const PREVIEW_MAX: u64 = 512 * 1024;
-/// The preview of the best-scored all-ages (rating:g) post of a Danbooru character tag, kept as `danbooru-<sha256 of
-/// the tag>.jpg` among the library's thumbnails (cleared and counted with them). None when there is no such post.
-/// Looking it up and fetching it need the name-lookup consent, like the search that listed the tag.
+/// Danbooru 角色 tag 下评分最高的全年龄（rating:g）帖子的预览图，以 `danbooru-<sha256 of the tag>.jpg`
+/// 存放在图库的缩略图里（随缩略图一起清除和计数）。没有这样的帖子时为 None。查找和下载它需要名称查询的同意，
+/// 与列出这个 tag 的搜索一样。
 pub(crate) fn preview(source: &mut Source, thumbnails: &std::path::Path, tag: &str) -> Result<Option<Vec<u8>>> {
     use sha2::{Digest, Sha256};
-    // One plain tag: no operators, wildcards or a second tag of its own in the search.
+    // 只有一个普通 tag：搜索里不带运算符、通配符，也不夹带第二个 tag。
     if tag.is_empty()
         || tag.len() > 200
         || tag.starts_with(['-', '~'])
@@ -466,7 +464,7 @@ pub(crate) fn preview(source: &mut Source, thumbnails: &std::path::Path, tag: &s
         return Ok(None);
     }
     std::fs::create_dir_all(thumbnails)?;
-    // Whole or absent: a reader never sees half a picture.
+    // 要么完整，要么没有：读方从不会看到半张图。
     let tmp = path.with_extension(format!("{}.tmp", crate::store::new_key()?));
     std::fs::write(&tmp, &bytes)?;
     std::fs::rename(tmp, &path)?;
@@ -686,7 +684,7 @@ mod tests {
             HOSTS.get_or_init(Default::default).lock().unwrap().insert(format!("{host_name}:443"), host.clone());
             let held = queued.then(|| host.lock().unwrap());
             let grant = Arc::new(AtomicBool::new(true));
-            // No database is needed: a revoked request must stop before sending HTTP.
+            // 不需要数据库：被撤销的请求必须在发出 HTTP 之前停下。
             let source = Source::new(PathBuf::new(), Arc::new(AtomicBool::new(false)), false, false)
                 .unwrap()
                 .granted(grant.clone());
@@ -755,8 +753,8 @@ mod tests {
     }
 }
 
-/// Retry, pacing and cache rules of the native transport (#9: formerly tests/test_name_network.py,
-/// which exercised the old Python updater; native limits differ and are tested as they are).
+/// 原生传输的重试、限速和缓存规则（#9：原来是 tests/test_name_network.py，测试的是旧的 Python 更新器；
+/// 原生的限制不同，按现在的样子测试）。
 #[cfg(test)]
 mod network_tests {
     use super::*;
@@ -774,7 +772,7 @@ mod network_tests {
         Reply { status, retry_after: None, body, delay: Duration::ZERO }
     }
 
-    /// Loopback server answering from a script (then 200 `[]`), one thread per request.
+    /// 按脚本回答的回环服务器（脚本用完后回答 200 `[]`），每个请求一个线程。
     struct Scripted {
         base: String,
         host: String,
@@ -893,16 +891,15 @@ mod network_tests {
             lib.source(&server, quiet()).fetch(&format!("{}/search/characters", server.base), None, None).unwrap();
         assert_eq!(value, json!({"data":[]}));
         assert_eq!(server.calls(), 3);
-        // Retry-After 1 s, then the second exponential step (at least 1 s).
+        // Retry-After 1 s，然后是第二级指数退避（至少 1 s）。
         assert!(started.elapsed() >= Duration::from_millis(1950), "{:?}", started.elapsed());
         assert_eq!(server.host().lock().unwrap().failures, 0);
     }
 
     #[test]
     fn retry_after_http_date() {
-        // HTTP-date has whole-second precision, so the client waits until floor(now + 3 s), at least 2 s
-        // after the date is taken. Measure from that moment: setup time must not count against the wait,
-        // while ignoring the header would leave only the first backoff step (at most 0.625 s).
+        // HTTP-date 精确到整秒，所以客户端等到 floor(now + 3 s)，即取日期之后至少 2 s。从那一刻开始计时：
+        // 准备时间不能算进等待，而忽略这个头只会剩下第一级退避（最多 0.625 s）。
         let started = Instant::now();
         let date = httpdate::fmt_http_date(std::time::SystemTime::now() + Duration::from_secs(3));
         let server = Scripted::start(vec![Reply { retry_after: Some(date), ..reply(503, "busy") }]);
@@ -952,7 +949,7 @@ mod network_tests {
             std::thread::sleep(Duration::from_millis(5));
         }
         std::thread::sleep(Duration::from_millis(100));
-        cancel.store(true, Ordering::SeqCst); // the pause is long; stop the waiting request
+        cancel.store(true, Ordering::SeqCst); // 暂停很长；停下正在等待的请求
         assert!(worker.join().unwrap().is_err());
         let host = server.host();
         let host = host.lock().unwrap();
@@ -980,8 +977,8 @@ mod network_tests {
     }
 
     const JPEG: &[u8] = &[0xff, 0xd8, 0xff, 0xe0, 0, 16, b'J', b'F', b'I', b'F'];
-    /// A synthetic Danbooru for the 「设为…」 previews (#293): posts.json answers one post for `known` only, whose
-    /// preview is `picture` (on this service unless absolute); anything else is a JPEG.
+    /// 供「设为…」预览使用的合成 Danbooru（#293）：posts.json 只对 `known` 回答一个帖子，
+    /// 它的预览图是 `picture`（除非是绝对地址，否则在这个服务上）；其他请求都回答一张 JPEG。
     struct Previews {
         base: String,
         calls: Arc<AtomicUsize>,
@@ -1046,11 +1043,11 @@ mod network_tests {
             std::fs::read_dir(&thumbnails).unwrap().map(|e| e.unwrap().file_name().into_string().unwrap()).collect();
         assert_eq!(kept.len(), 1);
         assert!(kept[0].starts_with("danbooru-") && kept[0].ends_with(".jpg"), "{kept:?}");
-        // Kept: no request again, even without the consent.
+        // 已保存：即使没有同意也不再请求。
         let again = preview(&mut previewer(&lib, &server.base, false), &thumbnails, "rem_(re:zero)").unwrap();
         assert_eq!(again.as_deref(), Some(JPEG));
         assert_eq!(server.calls(), 2);
-        // No all-ages post: nothing, and the answer is remembered in the name cache.
+        // 没有全年龄帖子：什么都没有，这个答案记在名称缓存里。
         for _ in 0..2 {
             let none = preview(&mut previewer(&lib, &server.base, true), &thumbnails, "nobody_(nowhere)");
             assert!(none.unwrap().is_none());
@@ -1066,12 +1063,11 @@ mod network_tests {
             let got = preview(&mut previewer(&lib, &server.base, true), &thumbnails, bad);
             assert!(matches!(got, Err(Error::Invalid(_))), "{bad:?}");
         }
-        // Danbooru itself without the consent: refused before anything is sent (a synthetic service on this machine
-        // needs no consent, so this one is the real address).
+        // 没有同意时访问 Danbooru 本身：在发出任何东西之前就拒绝（本机上的合成服务不需要同意，所以这里用真实地址）。
         let refused = preview(&mut previewer(&lib, "https://danbooru.donmai.us", false), &thumbnails, "rem_(re:zero)");
         assert!(matches!(refused, Err(Error::Network(m)) if m == UNAUTHORIZED));
         assert_eq!(server.calls(), 0);
-        // A post whose preview is not on Danbooru's CDN is not followed.
+        // 预览图不在 Danbooru CDN 上的帖子不跟随。
         let elsewhere = preview(&mut previewer(&lib, &server.base, true), &thumbnails, "rem_(re:zero)");
         assert!(matches!(elsewhere, Err(Error::Network(_))));
         assert_eq!(server.calls(), 1);

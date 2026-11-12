@@ -1,5 +1,5 @@
-// The task panel (desktop layout, #199): every background job's progress, confirmations and manual runs in one place.
-// The jobs, their polling and their words are core/jobs.js.
+// 任务面板（桌面布局，#199）：所有后台任务的进度、确认和手动运行集中在一处。任务本身、它们的轮询和文字在
+// core/jobs.js。
 import {t, tb} from '../core/i18n.js';
 import {esc, number, stamp, localTime} from '../core/format.js';
 import {state} from '../core/state.js';
@@ -12,14 +12,14 @@ import {confirmAction} from './dialog.js';
 import {openIndexAdd} from './catalog.js';
 import {modelsLine, modelsBar, modelsActions} from './models.js';
 import {loadModels, onModels} from '../core/models.js';
-// 开始 first shows what leaves the machine; the authorization covers this one run only.
+// 「开始」先显示有哪些内容会离开本机；授权只覆盖这一次运行。
 let provenanceArmed = false;
-// Open the panel; with armProvenance, at the authorization for a 找回画师 run.
+// 打开面板；带 armProvenance 时停在一次找回画师运行的授权上。
 export function openTasks({armProvenance = false} = {}) {
   if (armProvenance) provenanceArmed = true;
   toggleTasks(true);
 }
-// Pictures whose files open but are not images the app can read: where they are, as on the library page.
+// 文件能打开、但不是 App 能读的图片的那些：它们在哪里，和图库页上一样。
 export function syncDamaged(d) {
   if (!d?.count) return '';
   const short = p => p.replace(/^\/Users\/[^/]+/, '~');
@@ -28,18 +28,18 @@ export function syncDamaged(d) {
   return fold('task-sync-damaged', t('{n} 张图片已损坏或格式不支持', {n: number(d.count)}),
     `<p class="muted-note">${t('这些文件读得到，但不是能打开的图片：已经加入图库，图上显示「无法打开」，不参与识别。修好或换成正常的图片后，下次同步会重新识别。')}</p>${rows}${more}`);
 }
-// Progress bars from the worker's numbers (docs/BACKEND_TASKS.md): this step's items, and traffic against the run's cap.
+// 由 worker 的数字画的进度条（docs/BACKEND_TASKS.md）：这一步的条目数，以及相对本次运行上限的流量。
 export function provenanceBars(s) {
   const p = s.progress; if (!p || !p.total) return '';
   const bar = (label, done, total, detail) => `<div class="prov-bar-row"><span class="prov-bar-label">${label}</span><span class="prov-bar" role="progressbar" aria-valuemin="0" aria-valuemax="${total}" aria-valuenow="${done}"><span style="width:${Math.min(100, done / total * 100).toFixed(1)}%"></span></span><span class="prov-bar-num">${detail}</span></div>`;
-  // Two levels when the step has them (本地比对: all artists, then the current artist's works), then traffic.
+  // 这一步有两层时显示两层（本地比对：全部画师，然后是当前画师的作品），然后是流量。
   const sub = p.sub_total ? bar(esc(tb(p.sub_label) || t('当前')), p.sub_done || 0, p.sub_total, `${number(p.sub_done || 0)} / ${number(p.sub_total)}`) : '';
   return `<div class="prov-bars">${bar(esc(tb(p.label) || t('进度')), p.done || 0, p.total, `${number(p.done || 0)} / ${number(p.total)}${p.found != null ? ' · ' + t('对上 {n}', {n: number(p.found)}) : ''}`)}${sub}${p.mb != null && s.budget_mb ? bar(t('流量'), p.mb, s.budget_mb, `${number(Math.round(p.mb))} / ${number(s.budget_mb)} MB`) : ''}</div>`;
 }
 
-// ---------- 任务面板 (#199): every background job's progress, confirmations and manual runs in one place ----------
-// Each job keeps its own endpoint and poller; this only gathers them. While any job runs, its poller re-arms
-// itself every 2 s; otherwise a slow tick (fast while the panel is open) catches jobs started elsewhere.
+// ---------- 任务面板（#199）：所有后台任务的进度、确认和手动运行集中在一处 ----------
+// 每个任务保留自己的接口和轮询；这里只是把它们汇到一起。有任务在运行时，它的轮询每 2 s 自己重新排上；否则由一个慢的
+// 定时调用（面板打开时变快）发现在别处启动的任务。
 export const taskPanel = {open: false, timer: 0, settingsAt: 0};
 export function taskList() {
   const s = state.sync, ix = state.index?.state || {}, nm = state.names?.state || {}, sim = state.settings?.tasks?.similar || {status: 'off'};
@@ -65,7 +65,7 @@ export function taskList() {
     body: PROV_ACTIVE.includes(ps.status) ? provenanceBars(ps) + (ps.side ? `<p class="task-side">${t('同时进行')} · ${esc(tb(ps.side.name || ps.side.step))}${ps.side.text ? ' · ' + esc(tb(ps.side.text)) : ''}</p>${provenanceBars({progress: ps.side.progress})}` : '') : '',
     action: PROV_ACTIVE.includes(ps.status) ? `<button class="quiet small" data-prov="stop" ${ps.status === 'stopping' ? 'disabled' : ''}>${t('停止')}</button>` : provenanceArmed ? '' : `<button class="quiet small" data-prov="arm">${t('开始…')}</button>`,
     log: pv.runs?.length ? [t('运行记录'), `<table class="settings-table"><tr><th>${t('开始')}</th><th>${t('方式')}</th><th>${t('新找到')}</th><th>${t('流量')}</th><th>${t('结果')}</th></tr>${pv.runs.slice(0, 8).map(r => `<tr><td>${esc(localTime(r.started_at))}</td><td>${r.kind === 'new' ? t('同步后') : r.kind === 'full' ? t('手动') : t('命令行')}</td><td>${number(r.found || 0)}</td><td>${(r.traffic_mb || 0).toFixed(1)} MB</td><td title="${esc(tb(r.reason || ''))}">${RUN_STATUS[r.status] || esc(r.status)}</td></tr>`).join('')}</table>`] : null});
-  // An install without its models (#168): until they are in place, and while a download or import runs.
+  // 没带模型的安装（#168）：在模型就位之前，以及下载或导入进行期间。
   const m = state.models;
   if (m?.on_demand && (m.status !== 'ready' || m.job?.status === 'running')) list.push({key: 'models', name: t('识别模型'), busy: m.job?.kind === 'import' ? t('导入识别模型中') : t('下载识别模型中'),
     active: m.job?.status === 'running', warn: m.job?.status === 'failed', line: modelsLine(m), body: modelsBar(m), action: modelsActions(m, true)});
@@ -73,7 +73,7 @@ export function taskList() {
     line: ex.status === 'running' ? t('正在导出…') : ex.status === 'done' ? t('已导出 {mb} MB', {mb: (ex.bytes / 1048576).toFixed(0)}) : t('导出失败：{error}', {error: tb(ex.error || '')}), body: '', action: ''});
   return list;
 }
-// Things that wait for the person: an authorization, characters to add, a sync that needs a hand.
+// 等用户处理的事：一次授权、要添加的角色、需要动手的同步。
 function taskAsks() {
   const asks = [], p = state.provenance, missing = state.index?.check?.missing || [], s = state.sync;
   if (provenanceArmed && p?.available) asks.push(`<div class="task-ask prov-confirm"><b>${t('找回画师这次要访问外网，确认后才会发出：')}</b>
@@ -104,18 +104,18 @@ export function renderTasks() {
       ${task.body ? `<div class="task-body">${task.body}</div>` : ''}${task.log ? fold('task-' + task.key, task.log[0], task.log[1]) : ''}</div>`).join('')}</div>
     <p class="task-foot">${t('各任务是否自动运行，在{link}里改。', {link: `<a class="link" href="#/settings">${t('设置')}</a>`})}</p>`;
   const pop = $('taskPanel');
-  // Polled while jobs run: redraw only on change, so a click is never lost to a replaced button.
+  // 任务运行期间会轮询：只在有变化时重画，这样点击绝不会因为按钮被替换而丢失。
   if (pop.dataset.html === html) return;
   pop.dataset.html = html; pop.innerHTML = html; wireFolds(pop);
 }
 export async function taskTick() {
   clearTimeout(taskPanel.timer);
   const jobs = [pollSync(), pollIndex(), pollNames(), loadProvenance()];
-  // The models' own poller runs while they download; this catches a download started in another window.
+  // 模型下载时有自己的轮询；这里发现在另一个窗口里启动的下载。
   if (taskPanel.open || !state.models) jobs.push(loadModels());
-  // The similar job's state comes with /api/settings, which also measures the caches: read it only when looked at.
+  // 相似任务的状态随 /api/settings 一起来，它还要测量缓存：只在有人看时才读。
   if (taskPanel.open && Date.now() - taskPanel.settingsAt > (SIMILAR_ACTIVE.includes(state.settings?.tasks?.similar?.status) ? 2500 : 15000)) { taskPanel.settingsAt = Date.now(); jobs.push(shared('/api/settings').then(s => { state.settings = s; }).catch(e => error(readError(e)))); }
-  // The library list (the sync task's name and the export's progress) is read once the panel is open.
+  // 面板打开后读一次图库列表（同步任务的名字和导出的进度）。
   if (taskPanel.open && !state.libraries) jobs.push(loadLibraries());
   await Promise.allSettled(jobs);
   renderTasks();
@@ -128,9 +128,9 @@ export function toggleTasks(open = !taskPanel.open) {
   if (open) { delete $('taskPanel').dataset.html; renderTasks(); taskTick(); }
   else provenanceArmed = false;
 }
-// The panel's handlers. Called once, when the page starts.
+// 面板的处理函数。页面启动时调用一次。
 export function wireTasks() {
-  // The models' download (#168) keeps its own poller: the button and panel follow each read.
+  // 模型下载（#168）有自己的轮询：按钮和面板跟着每次读取变。
   onModels(() => renderTasks());
   onJob(async (job, change) => {
     if (job === 'sync' && change.ended && state.sync.status === 'done' && state.sync.imported) toast(syncDoneText(state.sync));
@@ -139,7 +139,7 @@ export function wireTasks() {
   });
   $('taskPanel').addEventListener('click', async e => {
     const b = e.target.closest('[data-prov]'); if (!b) return;
-    // 开始 first shows what leaves the machine; the authorization covers this one run only.
+    // 「开始」先显示有哪些内容会离开本机；授权只覆盖这一次运行。
     if (b.dataset.prov === 'arm' || b.dataset.prov === 'cancel') { provenanceArmed = b.dataset.prov === 'arm'; renderTasks(); return; }
     b.disabled = true;
     const body = {action: b.dataset.prov};

@@ -1,5 +1,5 @@
-//! NumPy 2.5.3 NCC: forward double loops cast complex64 after each axis,
-//! complex64 product and float32 inverse loops; exact original shape/order.
+//! NumPy 2.5.3 的 NCC：正向 double 循环在每个轴之后转为 complex64，complex64 乘积，float32 逆变换循环；
+//! 原始的形状和顺序完全保持。
 use crate::{Error, Result};
 unsafe extern "C" {
     fn illustash_relation_rfft2(input: *const f32, ih: usize, iw: usize, h: usize, w: usize, output: *mut f32) -> i32;
@@ -38,7 +38,7 @@ pub(super) fn correlation(
     };
     let mut a = zeroed(n)?;
     let mut b = zeroed(n)?;
-    // Buffers are contiguous float32 pairs, exactly the wrapper's complex64 ABI.
+    // 缓冲区是连续的 float32 对，正是封装的 complex64 ABI。
     // SAFETY: 上面已核对 `big`、`template` 的长度分别是 bh×bw、th×tw，且都严格小于填充尺寸 h×w；`a`、`b` 各有
     // h×(w/2+1)×2 个 f32，正是封装写出的 complex64 数量；封装不保留指针。
     let status = unsafe {
@@ -65,9 +65,9 @@ fn multiply_conjugate(a: &mut [f32], b: &[f32]) {
     let fused = false;
     for (a, b) in a.chunks_exact_mut(2).zip(b.chunks_exact(2)) {
         let (ar, ai, br, bi) = (a[0], a[1], b[0], -b[1]);
-        // NumPy 2.5.3 simd_cmul_f32 rounds a_im*b_im/re before muladdsub.
-        // NEON and Windows AVX2/FMA dispatch fuse the a_re product; baseline
-        // x86 keeps separate operations. Do not fuse both products together.
+        // NumPy 2.5.3 的 simd_cmul_f32 在 muladdsub 之前先对 a_im*b_im/re 舍入。
+        // NEON 和 Windows AVX2/FMA 的分派会融合 a_re 的乘积；基线 x86 保持分开的运算。
+        // 不要把两个乘积一起融合。
         if fused {
             a[0] = ar.mul_add(br, -(ai * bi));
             a[1] = ar.mul_add(bi, ai * br);
@@ -111,9 +111,8 @@ mod tests {
         assert_eq!(unsafe { illustash_relation_irfft2(fa.as_ptr(), 6, 7, out.as_mut_ptr()) }, 0);
         exact_hash(&out, "7e01b5c8eb703ab80e76bd24143c30312e97836ec77cfdb5fa1fe7121d6d337a", "inverse");
     }
-    // Independent existing web.relate FFT expression, NumPy 2.5.3 / macOS arm64.
-    // These expected hashes were generated before running the candidate. All
-    // float32 bits (including signs of zero) are checked; no tolerance/golden update.
+    // 独立于候选、沿用现有 web.relate 的 FFT 表达式，NumPy 2.5.3 / macOS arm64。
+    // 这些预期哈希在运行候选之前生成。检查全部 float32 位（包括零的符号）；不加容差，不更新 golden。
     #[test]
     #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
     fn numpy_253_float32_prime_composite_and_small_outer_exact_bits() {
@@ -131,9 +130,8 @@ mod tests {
             exact_hash(&got, expected, &format!("{h}x{w}/{th}x{tw}"));
         }
     }
-    // Fixed independent Windows NumPy 2.5.3 references, captured before the
-    // candidate fix. Baseline references disabled X86_V3/X86_V4 as well as
-    // AVX2/FMA3/AVX512F; disabling the legacy feature names alone is insufficient.
+    // 固定的、独立的 Windows NumPy 2.5.3 参考，在修复候选之前采集。基线参考除了关闭 AVX2/FMA3/AVX512F，
+    // 还关闭了 X86_V3/X86_V4；只关闭旧的特性名不够。
     #[test]
     #[cfg(all(windows, target_arch = "x86_64"))]
     fn windows_numpy_253_forward_product_inverse_stages_exact_bits() {

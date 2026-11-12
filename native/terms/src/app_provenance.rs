@@ -1,4 +1,4 @@
-//! Native provenance coordination; optional computation workers never commit formal application state.
+//! 原生的溯源协调；可选的计算 worker 从不提交正式的应用状态。
 use crate::error::invalid;
 use crate::{
     app_library::Library,
@@ -95,7 +95,7 @@ impl Runner {
                 [],
                 |r| r.get::<_, bool>(0),
             )?;
-        // Reading an ordinary package or account archive must not extend its cache schema.
+        // 读普通图库包或账号归档时不得扩展它的缓存 schema。
         let c = if native || (enabled && !library.frozen() && worker.is_some()) {
             Some(cache::connect(&path)?)
         } else {
@@ -127,7 +127,7 @@ impl Runner {
             Json::Scalar(Value::Null)
         };
         if owned && initialized && !library.frozen() {
-            // Directories of runs that ended before their receive gate (#31).
+            // 在接收门之前就结束的运行留下的目录（#31）。
             if let Ok(c) = cache::connect(&path) {
                 let _ = cache::collect(library.instance_path(), &c, true);
             }
@@ -339,8 +339,7 @@ impl Runner {
             self.state.lock().expect("provenance state mutex poisoned").status(),
             Status::Running | Status::Stopping
         ) {
-            // A same-path replacement can be constructed while the old session owns
-            // the lease. Refresh its inherited state after that owner has closed.
+            // 旧会话持有租约时，可以构造一个同路径的替代实例。等那个持有者关闭后再刷新它继承的状态。
             if let Ok(latest) = cache::latest(&self.path()) {
                 let latest = State::parse(latest, &self.path()).unwrap_or_else(|e| {
                     State::from(Json::object([("status", "failed".into()), ("reason", e.to_string().into())]))
@@ -410,7 +409,7 @@ impl Runner {
             self.initialize()?;
             let identity = TaskIdentity::new(&self.library, self.generation, &self.session)?;
             let c = cache::connect(&self.path())?;
-            // Runs that ended before their receive gate are kept for inspection until the next run (#31).
+            // 在接收门之前就结束的运行保留到下一次运行，供检查（#31）。
             let _ = cache::collect(self.library.instance_path(), &c, true);
             cache::forget_changed_content(&c, &self.library)?;
             c.execute("INSERT INTO runs(kind,steps) VALUES (?,?)", [kind, *steps])?;
@@ -515,14 +514,14 @@ fn unlock(file: &std::fs::File) {
     let _ = crate::app_file_lock::release(file);
 }
 
-/// A run is in progress until its state ends. It reports that end before it removes its scratch files, and the
-/// page may ask for the next run at once (#132); starting one joins the finishing thread first.
+/// 运行在状态结束之前都算进行中。它先报告结束，再删临时文件，页面可能马上要求下一次运行（#132）；
+/// 开始新运行前先等收尾线程结束。
 fn active(task: Option<&Task>, status: Status) -> bool {
     task.is_some_and(Task::running) && !matches!(status, Status::Done | Status::Failed | Status::Stopped)
 }
 
-/// How long a research worker may go without progress, and whether this run's worker did (#204): the run's end
-/// tells a stall from a stop by this, not by the error's words.
+/// 研究 worker 最长可以多久没有进展，以及本次运行的 worker 是否出现过这种情况（#204）：运行结束时按这一点区分
+/// 卡住和停止，不看错误的文字。
 struct Stall {
     after: Duration,
     happened: Cell<bool>,
@@ -619,18 +618,17 @@ fn run(
         c.execute("ATTACH DATABASE ? AS stage",[crate::sqlite::path(&staged).to_string_lossy().as_ref()])?;
         c.execute_batch("PRAGMA defer_foreign_keys=ON")?;
         let tx=c.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-        // The machine tables become the staged ones, rowids included; only differing rows are written (#31).
+        // 机器表变成暂存的那份，rowid 也一样；只写入不同的行（#31）。
         for table in ["artists","artist_links","artist_names","image_sources","image_artists","seeds","lookups","marks","ref_sigs","ext_cache"] {
             crate::table_delta::mirror(&tx,table,"stage")?;
         }
-        // Account archive imports may add leads during a research run: preserve new leads.
+        // 研究运行期间，导入账号归档可能新增线索：保留新线索。
         tx.execute("INSERT INTO leads SELECT * FROM stage.leads WHERE 1 ON CONFLICT(source,system,key) DO UPDATE SET status=excluded.status,artist_id=excluded.artist_id,next_due_at=excluded.next_due_at",[])?;
         tx.execute("INSERT INTO native_delivery(task_id,package) VALUES (?,?)",params![ctx.identity().task_id,format!(".provenance/{}/evidence",ctx.identity().task_id)])?;
         tx.execute("UPDATE runs SET status=?,reason=?,results=?,found=?,traffic_mb=?,report=?,finished_at=datetime('now') WHERE id=?",params![status,reasons.join("；"),Value::Object(results).to_string(),found,(net.used as f64/1048576.0*100.0).round()/100.0,crate::character_json::dump(&report,false),id])?;
         tx.commit()?;
-        // The receipt is committed: detach the staged copy and remove the run's working files before the
-        // terminal state is published, so a caller that sees the end state finds only the sealed evidence (#143).
-        // Cleanup failure must not relabel accepted evidence as a failed run; recovery uses only that package.
+        // 回执已提交：先分离暂存副本、删掉本次运行的工作文件，再发布终态，这样看到结束状态的调用方只会找到
+        // 封好的证据（#143）。清理失败不得把已接收的证据改标成运行失败；恢复只用那个包。
         drop(c);
         pause_before_cleanup();
         remove_working_files(&dir);
@@ -641,7 +639,7 @@ fn run(
     let _ = pkg;
     Ok(())
 }
-/// Everything in a delivered run directory except its sealed `evidence` package; failures are ignored.
+/// 已交付的运行目录里除封好的 `evidence` 包以外的全部内容；失败忽略。
 fn remove_working_files(dir: &Path) {
     if let Ok(entries) = std::fs::read_dir(dir) {
         for entry in entries.flatten() {
@@ -656,7 +654,7 @@ fn remove_working_files(dir: &Path) {
         }
     }
 }
-/// Test-only widening of the moment between the receipt commit and the working-file cleanup (#143); unset in production.
+/// 仅供测试：拉长回执提交和清理工作文件之间的间隔（#143）；生产环境不设置。
 fn pause_before_cleanup() {
     if let Some(ms) = std::env::var("ILLUSTASH_TEST_PROVENANCE_CLEANUP_PAUSE_MS").ok().and_then(|v| v.parse().ok()) {
         std::thread::sleep(Duration::from_millis(ms));
@@ -699,7 +697,7 @@ fn compute(
     )?;
     let mut command = Command::new(worker);
     command.env(crate::app_tasks::WORKER_KIND_ENV, "provenance").args([&request, &response]);
-    // The network broker stays in Rust; computation has no credential or login interface.
+    // 网络代理留在 Rust 里；计算部分没有凭据或登录接口。
     std::thread::scope(|scope| -> Result<()> {
         let child = scope.spawn(|| ctx.process(&mut command));
         struct CancelOnError<'a>(&'a TaskContext, bool);
@@ -832,7 +830,7 @@ fn validate_cache(lib: &Library, staged: &Path, original: &Path) -> Result<()> {
 
 fn step_name(step: &str) -> &str {
     match step {
-        // Runs recorded before OCR computation was removed (#177) still display.
+        // 移除 OCR 计算（#177）之前记录的运行仍要能显示。
         "ocr" => "识别图上的签名",
         "groups" => "分组推荐",
         "local_match" => "本地重比新图",

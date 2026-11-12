@@ -1,4 +1,4 @@
-//! Synthetic client: no HTTP server, Tauri runtime, Python or research process.
+//! 合成的客户端：没有 HTTP 服务器、Tauri 运行时、Python 或研究进程。
 #![allow(clippy::unwrap_used, reason = "集成测试里 unwrap 就是断言")]
 use illustash_terms::{
     app_create::NewSource,
@@ -24,7 +24,7 @@ impl Fixture {
             store::new_key().unwrap()
         ));
         fs::create_dir_all(root.join("source")).unwrap();
-        // This test binary has one test; no environment mutation races with other tests.
+        // 这个测试二进制只有一个测试；修改环境变量不会与其他测试竞争。
         std::env::set_var("ILLUSTASH_APP_SUPPORT", root.join("support"));
         std::env::set_var("ILLUSTASH_SHARED", root.join("absent-reference"));
         std::env::set_var("ILLUSTASH_NO_KEYCHAIN", "1");
@@ -61,7 +61,7 @@ fn creation_open_same_id_switch_late_work_and_exit_without_transport() {
     let a = f.create("first");
     let b = f.create("second");
     let config = fs::read(a.join("library.json")).unwrap();
-    // Distinct packages deliberately share the same user-visible ID.
+    // 故意让两个不同的图库包使用同一个用户可见的 ID。
     let original: serde_json::Value = serde_json::from_slice(&config).unwrap();
     let mut second: serde_json::Value = serde_json::from_slice(&fs::read(b.join("library.json")).unwrap()).unwrap();
     second["id"] = original["id"].clone();
@@ -77,7 +77,7 @@ fn creation_open_same_id_switch_late_work_and_exit_without_transport() {
     let service = Arc::new(Application::open(&active, options(&f.root)).unwrap());
     #[cfg(unix)]
     {
-        // Rebind the display alias after acceptance to the distinct package with the same ID.
+        // 打开被接受之后，把显示用的别名改指向同 ID 的另一个图库包。
         fs::remove_file(&active).unwrap();
         std::os::unix::fs::symlink(&b, &active).unwrap();
     }
@@ -102,7 +102,7 @@ fn creation_open_same_id_switch_late_work_and_exit_without_transport() {
         done_tx.send(result.is_err()).unwrap();
         Ok(())
     });
-    // Existing Core writes and undo execute under the accepted instance's service guard.
+    // 现有的 Core 写入和撤销在已接受实例的服务守卫下执行。
     service
         .with_library(generation, |lib| {
             assert_eq!(lib.db(), lib.instance_path().join("library.sqlite"));
@@ -157,7 +157,7 @@ fn creation_open_same_id_switch_late_work_and_exit_without_transport() {
     assert!(service.switch(service.generation(), &a).is_err());
     drop(worker);
     drop(service);
-    // Failed creation cannot remove a pre-existing published package or its metadata.
+    // 创建失败时不能删掉已存在的已发布图库包或它的元数据。
     assert!(app_service::create(
         &f.root,
         &a,
@@ -166,7 +166,7 @@ fn creation_open_same_id_switch_late_work_and_exit_without_transport() {
     )
     .is_err());
     assert_eq!(config, fs::read(a.join("library.json")).unwrap());
-    // Relative destinations register the factory's actual absolute path and survive a cwd change.
+    // 相对路径的目标登记的是创建时实际的绝对路径，当前目录改变后仍然有效。
     struct Cwd(std::path::PathBuf);
     impl Drop for Cwd {
         fn drop(&mut self) {

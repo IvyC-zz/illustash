@@ -1,5 +1,5 @@
-// NumPy 2.5.3 complex64 output rfft2/float32 irfft2, restricted to NCC sizes.
-// Official header/complete BSD license provenance: docs/ARCHITECTURE_DIRECTION.md.
+// NumPy 2.5.3 输出 complex64 的 rfft2 和 float32 的 irfft2，只限 NCC 用到的尺寸。
+// 官方头文件和完整 BSD 许可的来源说明：docs/ARCHITECTURE_DIRECTION.md。
 #define POCKETFFT_NO_MULTITHREADING
 #include "pocketfft_hdronly.h"
 #include <algorithm>
@@ -12,8 +12,8 @@ using D = std::complex<double>;
 using PC = pocketfft::detail::cmplx<double>;
 static_assert(sizeof(D) == sizeof(PC), "pocketfft complex layout");
 
-// NCC always pads both axes. NumPy's nin < nout path deliberately uses scalar
-// plans even when other dimensions would allow vectorization.
+// NCC 总是在两个轴上都补零。NumPy 的 nin < nout 路径即使其他维度允许向量化，
+// 也有意使用标量 plan。
 extern "C" int illustash_relation_rfft2(const float *input, size_t ih, size_t iw,
                                        size_t h, size_t w, float *output) noexcept {
     const size_t pw = w / 2 + 1;
@@ -21,9 +21,9 @@ extern "C" int illustash_relation_rfft2(const float *input, size_t ih, size_t iw
         h > size_t(std::numeric_limits<ptrdiff_t>::max()) / sizeof(C) / pw)
         return 1;
     try {
-        // _raw_fft norm=None passes the Python integer 1. NumPy 2.5.3's
-        // gufunc resolves that to a double loop even with complex64 output.
-        // The output casts back after EACH axis, not after the whole transform.
+        // _raw_fft 在 norm=None 时传入 Python 整数 1。NumPy 2.5.3 的 gufunc
+        // 即使输出是 complex64，也把它解析为 double 循环。
+        // 输出在「每个」轴之后转换回去，而不是在整个变换之后。
         auto real = pocketfft::detail::get_plan<pocketfft::detail::pocketfft_r<double>>(w);
         auto complex = pocketfft::detail::get_plan<pocketfft::detail::pocketfft_c<double>>(h);
         std::vector<C> rows(ih * pw);
@@ -59,7 +59,7 @@ extern "C" int illustash_relation_irfft2(const float *input, size_t h, size_t w,
     try {
         const ptrdiff_t cs = sizeof(C), rs = sizeof(float);
         std::vector<C> columns(h * pw);
-        // NumPy irfft2: inverse complex axis 0, then inverse real axis 1.
+        // NumPy irfft2：先在轴 0 上做复数逆变换，再在轴 1 上做实数逆变换。
         pocketfft::c2c({pw, h}, {cs, cs * ptrdiff_t(pw)}, {cs, cs * ptrdiff_t(pw)},
                       {1}, pocketfft::BACKWARD, reinterpret_cast<const C *>(input),
                       columns.data(), 1.f / float(h));

@@ -71,7 +71,7 @@ fn query(agent: &ureq::Agent, hash: &str, user_agent: &str) -> Answer {
         if attempt > 0 {
             sleep(Duration::from_secs(2 * attempt));
         }
-        // `only` does not apply to IQDB results (they come back as empty objects): take the full answer.
+        // `only` 对 IQDB 结果不起作用（返回的是空对象）：取完整的响应。
         let call = agent.get(URL).set("User-Agent", user_agent).query("hash", hash).query("limit", "3").call();
         match call {
             Ok(response) => {
@@ -85,7 +85,7 @@ fn query(agent: &ureq::Agent, hash: &str, user_agent: &str) -> Answer {
                 let bytes = body.len() as u64;
                 return match serde_json::from_str::<Value>(&body) {
                     Ok(Value::Array(items)) => Answer::Matches(items, bytes),
-                    Ok(_) => Answer::Matches(vec![], bytes), // an error notice instead of matches: nothing found
+                    Ok(_) => Answer::Matches(vec![], bytes), // 返回的是错误提示而不是匹配：算没找到
                     Err(e) => Answer::Failed(format!("响应不是 JSON：{e}")),
                 };
             }
@@ -102,8 +102,8 @@ fn query(agent: &ureq::Agent, hash: &str, user_agent: &str) -> Answer {
     Answer::Failed(last)
 }
 
-/// Hands out request start times at most one per `pace` seconds, shared by the workers: two requests may be in flight,
-/// but they never start closer together than the pace (the server's latency no longer adds to it).
+/// 分发请求的开始时间，每 `pace` 秒最多一个，由各 worker 共用：可以有两个请求同时在途，
+/// 但相邻两次开始的间隔不会小于 pace（服务器的延迟不再叠加上去）。
 struct Slots {
     next: Mutex<Instant>,
     pace: Duration,
@@ -166,7 +166,7 @@ fn work(
                 let status = if score >= a.hit { "hit" } else { "miss" };
                 let post = best
                     .map(|b| {
-                        let p = &b["post"]; // keep what the caller records, not the post's 46 fields
+                        let p = &b["post"]; // 只留调用方要记录的，不要帖子的 46 个字段
                         json!({"id": p["id"], "tag_string_artist": p["tag_string_artist"], "source": p["source"]})
                     })
                     .unwrap_or(Value::Null);

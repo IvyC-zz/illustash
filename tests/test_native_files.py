@@ -1,8 +1,7 @@
-"""M3 files: old handler (recorded, tests/fixed_expectations.py) vs native host, generated temporary assets only.
+"""M3 文件：旧处理程序（已录制，tests/fixed_expectations.py）对比原生宿主，只用生成的临时资源。
 
-Cache hits and static bodies/headers are exact; errors compare status only. New JPEGs
-use explicit pixel bounds, independent caches, no snapshot re-recording. No workers
-or Python are permitted in the native process (the lifecycle harness installs sentinels).
+缓存命中和静态响应体/响应头逐字节一致；错误只比较状态码。新生成的 JPEG 用显式的像素误差界限、
+独立的缓存，不重新录制快照。原生进程里不允许出现 worker 或 Python（lifecycle harness 会装上哨兵）。
 """
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import closing
@@ -28,7 +27,7 @@ def key(path, ident, size):
 
 
 def asset(self, ident, im=None, *, format='PNG', exif=None):
-    path = self.root / (ident + '.data')  # Decode by signature, not extension.
+    path = self.root / (ident + '.data')  # 按文件签名解码，不看扩展名。
     if im is not None:
         im.save(path, format=format, **({'exif': exif} if exif is not None else {}))
     with closing(sqlite3.connect(self.lib.db)) as c:
@@ -44,7 +43,7 @@ def compare_generated(self, ident, path, size='thumb'):
     target.unlink(missing_ok=True)
     old = lifecycle.NativeLifecycleTest.reference_response(self, url)
     self.assertEqual(old['status'], 200)
-    target.unlink(missing_ok=True)   # written by the reference when recording
+    target.unlink(missing_ok=True)   # 录制时由参考实现写入
     new = self.request(url)
     self.assertEqual(new['status'], 200)
     self.assertEqual(new['route'], 'core')
@@ -55,8 +54,8 @@ def compare_generated(self, ident, path, size='thumb'):
     with Image.open(io.BytesIO(old['body'])) as a, Image.open(io.BytesIO(new['body'])) as b:
         self.assertEqual(a.size, b.size, (ident, size))
         self.assertEqual(b.format, 'JPEG')
-        # JPEG implementations/filter rounding differ. Bounds are fixed before results:
-        # channel-mean absolute error <= 4/255 and >=99% pixels <=24/255 per channel.
+        # 各 JPEG 实现和滤波的舍入不同。界限在看结果之前定好：
+        # 通道平均绝对误差 <= 4/255，且每个通道 >=99% 的像素误差 <=24/255。
         delta = ImageChops.difference(a.convert('RGB'), b.convert('RGB'))
         self.assertLessEqual(max(ImageStat.Stat(delta).mean), 4.0, (ident, size, ImageStat.Stat(delta).mean))
         for channel in delta.split():
@@ -66,7 +65,7 @@ def compare_generated(self, ident, path, size='thumb'):
 
 
 class NativeFilesTest(unittest.TestCase):
-    # Reuse only the isolated package/server fixture, without unrelated test cases.
+    # 只复用隔离的包/服务器夹具，不带无关的测试用例。
     setUpClass = classmethod(NativeLifecycleTest.setUpClass.__func__)
     setUp = NativeLifecycleTest.setUp
     package = NativeLifecycleTest.package
@@ -77,8 +76,8 @@ class NativeFilesTest(unittest.TestCase):
 
 
     def test_static_bytes_headers_and_security(self):
-        # User decision 2026-10-11 (#33): the recording froze the front end as it was then, so bodies are
-        # compared with the files being served; status and headers still match the recorded reference.
+        # 用户 2026-10-11 的决定（#33）：录制冻结的是当时的前端，所以响应体与正在提供的文件比较；
+        # 状态码和响应头仍与录制的参考结果一致。
         static = self.resources / 'web' / 'static'
         for url in ('/', '/app.js', '/app.css', '/theme.js', '/favicon.svg', '/splash.js'):
             reference = lifecycle.NativeLifecycleTest.reference_response(self, url + '?cache=1')
@@ -98,8 +97,8 @@ class NativeFilesTest(unittest.TestCase):
 
 
     def test_i18n_script_carries_the_app_wide_language(self):
-        # #173: the language lives in preferences.json beside libraries.json and is written ahead of i18n.js.
-        # #182: with it the languages on offer, and the table of the language set, or every table for system.
+        # #173：语言保存在 libraries.json 旁边的 preferences.json 里，写在 i18n.js 前面。
+        # #182：同时写入可选的语言，以及所设语言的表；设为 system 时写入全部表。
         static = self.resources / 'web' / 'static'
         script = (static / 'i18n.js').read_bytes()
         tables = {p.stem: json.loads(p.read_text(encoding='utf-8')) for p in (static / 'locales').glob('*.json')}
@@ -124,9 +123,9 @@ class NativeFilesTest(unittest.TestCase):
         self.assertFalse(preferences.exists())
         changed = self.request('/api/preferences', {'language': 'en'})
         self.assertEqual(changed['status'], 200)
-        # The reply is every app-wide preference as it now stands, not only the one changed.
+        # 响应是当前全部的应用级偏好设置，不只是改动的那一项。
         self.assertEqual(json.loads(changed['body']), {'preferences': {'language': 'en', 'acceleration': True}})
-        # /api/settings keeps its recorded reply; the language travels with /i18n.js.
+        # /api/settings 保持录制的响应；语言随 /i18n.js 下发。
         self.assertNotIn('preferences', json.loads(self.request('/api/settings')['body']))
         self.assertEqual(json.loads(preferences.read_text(encoding='utf-8')), {'language': 'en'})
         self.assertEqual(served(), 'en')
@@ -134,7 +133,7 @@ class NativeFilesTest(unittest.TestCase):
             self.assertEqual(self.request('/api/preferences', body)['status'], 400, body)
         self.assertEqual(self.request('/api/preferences', {'language': 'zh-CN'}, token='bad')['status'], 403)
         self.assertEqual(served(), 'en')
-        # 「使用 GPU 加速识别」 (#270) shares the file and the reply; the language is kept.
+        # 「使用 GPU 加速识别」（#270）共用这个文件和响应；语言保持不变。
         off = self.request('/api/preferences', {'acceleration': False})
         self.assertEqual((off['status'], json.loads(off['body'])), (200, {'preferences': {'language': 'en', 'acceleration': False}}))
         self.assertEqual(json.loads(preferences.read_text(encoding='utf-8')), {'language': 'en', 'acceleration': False})
@@ -142,14 +141,14 @@ class NativeFilesTest(unittest.TestCase):
             self.assertEqual(self.request('/api/preferences', body)['status'], 400, body)
         self.assertEqual(json.loads(preferences.read_text(encoding='utf-8')), {'language': 'en', 'acceleration': False})
         self.assertEqual(served(), 'en')
-        # A hand-broken file falls back to following the system instead of failing the page.
+        # 被手动改坏的文件回退为跟随系统，不让页面出错。
         preferences.write_text('{broken', encoding='utf-8')
         self.assertEqual(served(), 'system')
         self.assertFalse(self.sentinel.exists())
 
 
     def test_update_check_is_app_wide_asks_first_and_checks_each_launch(self):
-        # #191: GitHub's releases list, here a local stand-in (ILLUSTASH_UPDATE_BASE); nothing leaves the machine.
+        # #191：GitHub 的 releases 列表，这里用本机的替身（ILLUSTASH_UPDATE_BASE）；没有任何内容离开本机。
         from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
         import threading
         seen, replies = [], []
@@ -189,7 +188,7 @@ class NativeFilesTest(unittest.TestCase):
         self.assertEqual({k: state[k] for k in ('current', 'auto', 'checked_at', 'latest', 'newer', 'due')},
                          {'current': current, 'auto': None, 'checked_at': None, 'latest': None, 'newer': False, 'due': False})
         self.assertEqual(state['address'], 'https://api.github.com/repos/shio-vinyl/illustash/releases')
-        # Not allowed yet: an automatic check answers without the network.
+        # 还没允许：自动检查不联网就作答。
         self.assertFalse(updates({'action': 'check', 'auto': True})['due'])
         self.assertEqual(seen, [])
         self.assertTrue(updates({'action': 'auto', 'allow': True})['due'])
@@ -198,23 +197,23 @@ class NativeFilesTest(unittest.TestCase):
         self.assertEqual(seen[0], ('/repos/shio-vinyl/illustash/releases?per_page=30', 'Illustash-update-check', None))
         self.assertEqual((state['latest'], state['newer'], state['due'], state['error']), ('99.0.0', True, False, None))
         self.assertEqual(state['url'], 'https://github.com/shio-vinyl/illustash/releases/tag/v99.0.0')
-        # Once per launch however many pages ask; a manual check is always the person's click.
+        # 不论多少个页面请求，每次启动只查一次；手动检查总是来自用户的点击。
         updates({'action': 'check', 'auto': True})
         self.assertEqual(len(seen), 1)
         replies[0] = (500, b'{}')
         state = updates({'action': 'check'})
         self.assertEqual((len(seen), state['latest'], state['error']), (2, '99.0.0', 'GitHub 返回了错误（HTTP 500）'))
         self.assertTrue(updates({'action': 'dismiss'})['dismissed'])
-        # App-wide: the choice sits beside the language in preferences.json, the result in updates.json.
+        # 应用级：这个选择和语言一起放在 preferences.json 里，结果放在 updates.json 里。
         self.assertEqual(json.loads((self.support / 'preferences.json').read_text(encoding='utf-8')), {'update_check': 'auto'})
         self.assertEqual(json.loads((self.support / 'updates.json').read_text(encoding='utf-8'))['dismissed'], '99.0.0')
-        # The next launch checks again even within the day.
+        # 下次启动即使在同一天内也会再查一次。
         replies[0] = (200, releases)
         launch()
         self.assertTrue(updates()['due'])
         state = updates({'action': 'check', 'auto': True})
         self.assertEqual((len(seen), state['error'], state['dismissed']), (3, None, True))
-        # Turned off: the next launch does not check.
+        # 关掉之后：下次启动不检查。
         updates({'action': 'auto', 'allow': False})
         launch()
         self.assertFalse(updates({'action': 'check', 'auto': True})['due'])
@@ -223,7 +222,7 @@ class NativeFilesTest(unittest.TestCase):
             self.assertEqual(self.request('/api/updates', body)['status'], 400, body)
         self.assertEqual(self.request('/api/updates', {'action': 'check'}, token='bad')['status'], 403)
         self.assertEqual(len(seen), 3)
-        # Only a plain HTTP port on this machine may stand in for GitHub.
+        # 只有本机上的普通 HTTP 端口可以充当 GitHub 的替身。
         self.env['ILLUSTASH_UPDATE_BASE'] = 'https://example.com/'
         self.stop(self.process); self.process, self.log = self.start(self.lib.path)
         self.token = json.loads(self.request('/api/bootstrap')['body'])['token']
@@ -238,7 +237,7 @@ class NativeFilesTest(unittest.TestCase):
                 target = self.lib.thumbnails / key(path, 'cache-雪', size)
                 payload = b'cached original bytes\x00\xff' + size.encode()
                 target.write_bytes(payload)
-                # Non-decodable original still serves existing cached bytes.
+                # 原图无法解码时，仍提供已有的缓存字节。
                 response = self.pair('/image?id=cache-%E9%9B%AA&size=' + size)
                 self.assertEqual(response['body'], payload)
                 self.assertEqual(response['route'], 'core')

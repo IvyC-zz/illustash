@@ -1,4 +1,4 @@
-//! Host filesystem details. Callers retain creation, validation and error policy.
+//! 宿主文件系统的细节。创建、校验和错误处理的策略仍由调用方决定。
 use std::{fs, io, path::Path};
 
 pub fn private_file_options(options: &mut fs::OpenOptions) {
@@ -51,7 +51,7 @@ pub fn extension_matches(actual: &[u8], expected: &[u8]) -> bool {
     }
 }
 
-/// Bytes the current user can still write on the volume holding `path` (an existing directory).
+/// `path`（一个已存在的目录）所在卷上当前用户还能写入的字节数。
 pub fn available_space(path: &Path) -> io::Result<u64> {
     #[cfg(unix)]
     {
@@ -64,7 +64,7 @@ pub fn available_space(path: &Path) -> io::Result<u64> {
         }
         // SAFETY: 上面的 statvfs 返回 0，已完整写入 `stat`。
         let stat = unsafe { stat.assume_init() };
-        #[allow(clippy::unnecessary_cast)] // Field widths differ between Unix platforms.
+        #[allow(clippy::unnecessary_cast)] // 各 Unix 平台上这些字段的宽度不同。
         Ok((stat.f_bavail as u64).saturating_mul(stat.f_frsize as u64))
     }
     #[cfg(windows)]

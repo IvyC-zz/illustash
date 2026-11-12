@@ -1,8 +1,8 @@
-"""#151 calculator parity on explicit fixed/synthetic features, never a real model/library.
+"""#151 计算程序等价测试，用显式给定的固定/合成特征，从不用真实模型或图库。
 
 旧 Python/NumPy 结果已冻结；测试通过当前原生命令准备合成状态。
-This suite never builds/discovers a binary. Set ILLUSTASH_RESEARCH_COMPUTE_BIN and
-ILLUSTASH_TERMS_BIN to the candidate example/host for a development window.
+本套件从不构建或查找二进制。开发窗口期把 ILLUSTASH_RESEARCH_COMPUTE_BIN 和 ILLUSTASH_TERMS_BIN
+设为候选的 example 和宿主。
 """
 import json
 import os
@@ -33,7 +33,7 @@ class NativeResearchComputeTest(unittest.TestCase):
     def setUp(self):
         reference_learning.Learning.setUp(self)
         self.addCleanup(self.temp.cleanup)
-        # Pad the existing fixed eight-dimensional input to the production CCIP width.
+        # 把现有的固定八维输入补零到生产环境的 CCIP 宽度。
         self.raw = np.pad(self.features.X, ((0, 0), (0, 760)))
         self.features = Features(self.store.source, self.raw, self.features.uuids)
 
@@ -59,9 +59,9 @@ class NativeResearchComputeTest(unittest.TestCase):
             mutate(request)
         input_path, output = snapshot / 'request.json', snapshot / 'response.json'
         input_path.write_text(json.dumps(request), encoding='utf-8')
-        # Empty PATH proves this calculator itself never delegates learning to Python/a subprocess.
-        # The fixed answers come from the prototype-only algorithm; the discriminative claims (#156) stay off here
-        # and are covered by their Rust tests and tests/test_native_research.py.
+        # 空 PATH 证明这个计算程序自己从不把学习交给 Python 或子进程。
+        # 固定答案来自只用原型的算法；判别式认领（#156）在这里保持关闭，由它们的 Rust 测试和
+        # tests/test_native_research.py 覆盖。
         env = os.environ | dict(PATH='', ILLUSTASH_SHARED=str(anchors), ILLUSTASH_RESEARCH_PROGRESS=str(snapshot / 'progress.json'),
                                 ILLUSTASH_TEST_PROTOTYPES_ONLY='1')
         env.pop('ILLUSTASH_WORKER_PYTHON', None)
@@ -72,7 +72,7 @@ class NativeResearchComputeTest(unittest.TestCase):
     @staticmethod
     def rows(path):
         with sqlite3.connect(path) as c:
-            # `actions` as recorded: core v8 added two columns (#201), compared through the history replies.
+            # `actions` 按录制时的列取：core v8 新增了两列（#201），通过历史记录的回复比较。
             columns = {'actions': 'id,label,before_json,ts,undone'}
             return {table: c.execute(f"SELECT {columns.get(table, '*')} FROM {table} ORDER BY 1,2").fetchall()
                     for table in ('prototypes', 'learn_state', 'proto_claims', 'weak_claims', 'assertions', 'actions', 'memberships')}
@@ -98,7 +98,7 @@ class NativeResearchComputeTest(unittest.TestCase):
         self.assertEqual(response['tables']['clusters'], expected['tables']['clusters'])
         self.assertEqual([r[:4] + r[5:] for r in response['tables']['cluster_info']],
                          [r[:4] + r[5:] for r in expected['tables']['cluster_info']])
-        # Accept the checked native snapshot as the next command's input; fixed answers stay read-only.
+        # 把检查过的原生快照当作下一条命令的输入；固定答案保持只读。
         with sqlite3.connect(snapshot / 'library.sqlite') as source, sqlite3.connect(self.store.path) as dest:
             source.backup(dest)
         with self.store.connect() as c:
@@ -131,9 +131,8 @@ class NativeResearchComputeTest(unittest.TestCase):
             vector = np.zeros((1, 768), np.float32)
             vector[0, 7] = .9
             vector[0, 6] = np.sqrt(1 - float(vector[0, 7]) ** 2)
-            # The legacy bare-source layout resolves beside source.sqlite, while the
-            # native calculator receives an explicit snapshot resource path. Supply
-            # identical synthetic files to both actual resolvers; do not mock computation.
+            # 旧的裸 source 布局在 source.sqlite 旁边解析，而原生计算程序收到的是显式的快照资源路径。
+            # 给两边真实的解析器提供相同的合成文件；不 mock 计算。
             for root in (Path(request['anchors']), reference_root):
                 np.save(root / 'char-anchors.npy', vector)
                 (root / 'char-anchors.txt').write_text('alice\n', encoding='utf-8')
@@ -206,11 +205,9 @@ class NativeResearchComputeTest(unittest.TestCase):
         self.compare_learning()
 
     def test_trait_near_pairs_final_groups_match_original_float64_path(self):
-        # Two groups with distance strictly between .08 and .12 need the original
-        # float64 weighted-trait test, rather than the earlier appearance shortcut.
-        # A third, tag-free unmatched group gives nonzero rarity weights. The
-        # first two share 1, 2/3, 1/3: nontrivial norms and distinct description
-        # scores, independently of the unaccepted NumPy 2.x equal-score sort path.
+        # 距离严格介于 .08 和 .12 之间的两组，需要原来的 float64 加权特征检验，而不是先前的外观捷径。
+        # 第三组不带标签、未匹配，让稀有度权重不为零。前两组共有 1、2/3、1/3：范数不平凡，描述得分各不相同，
+        # 与未验收的 NumPy 2.x 同分排序路径无关。
         ids = self.features.uuids
         self.raw = np.zeros((len(ids), 768), np.float32)
         for i, ident in enumerate(ids):
@@ -219,13 +216,12 @@ class NativeResearchComputeTest(unittest.TestCase):
             elif ident in ('u0', 'u1', 'u2'):
                 self.raw[i, 1] = 1
             elif ident in ('far', 'ring', 'hintb'):
-                self.raw[i, 1:3] = (.8, .6)  # distance .1 from first unmatched group
+                self.raw[i, 1:3] = (.8, .6)  # 与第一个未匹配组的距离为 .1
             else:
                 self.raw[i, 3] = 1
         self.features = Features(self.store.source, self.raw, ids)
         tags = ('blue_eyes', 'ahoge', 'very_long_hair')
-        # Current general_hits is a Core-owned projection. Deliver these synthetic
-        # WD tags through the existing evidence importer, never write the view.
+        # 当前的 general_hits 是归 Core 管的投影。这些合成 WD 标签经现有的证据导入器送进去，绝不直接写视图。
         import sqlite3
         with sqlite3.connect(self.store.source) as c:
             c.execute("DELETE FROM labels WHERE dim='general'")

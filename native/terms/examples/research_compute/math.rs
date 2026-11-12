@@ -1,4 +1,4 @@
-//! Explicit synthetic numerical probe; no installed production routing changes.
+//! 显式调用的合成数值探针；不改变已安装生产环境的路由。
 use illustash_platform::platform_research_math;
 use std::{io::Read, path::PathBuf};
 pub(super) fn run(input: PathBuf) -> Result<(), Box<dyn std::error::Error>> {

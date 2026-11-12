@@ -1,4 +1,4 @@
-//! Machine cache and evidence delivery. Source/cache/application commits are separate and retryable.
+//! 机器缓存和证据交付。源库、缓存、应用三处的提交彼此分开，都可重试。
 use crate::{app_library::Library, http_json::Json, Error, Result};
 use rusqlite::{Connection, OptionalExtension};
 use serde_json::{json, Value};
@@ -32,14 +32,12 @@ fn has_column(c: &Connection, table: &str, column: &str) -> Result<bool> {
         .iter()
         .any(|s| s == column))
 }
-/// Pixel results describe the bytes they were computed from. Each picture's content hash is remembered, and
-/// when its bytes change under the same UUID its lookups, matched posts, attributions and OCR marks are
-/// dropped so the next run computes them again; the snapshot delivered after that run replaces the evidence
-/// computed from the old bytes. A picture seen for the first time is only remembered. All of these are
-/// machine results; verdicts live in the core.
+/// 像素结果描述的是计算时用的那份字节。每张图片的内容哈希都会记下；同一 UUID 下字节变了时，丢弃它的查询、
+/// 匹配到的帖子、归属和 OCR 标记，让下一次运行重新计算；那次运行之后交付的快照替换按旧字节算出的证据。
+/// 第一次见到的图片只记下哈希。这些都是机器结果；裁决在核心里。
 pub(super) fn forget_changed_content(c: &Connection, library: &Library) -> Result<()> {
     let src = crate::app_library::read_connection(&library.source())?;
-    // Opening does not require the column; such a source has no content version to compare.
+    // 打开时不要求有这一列；这样的源库没有可比较的内容版本。
     if src.prepare("SELECT stable_hash FROM assets LIMIT 0").is_err() {
         return Ok(());
     }
@@ -165,11 +163,9 @@ pub(super) fn package(library: &Library, cache: &Path, output: &Path) -> Result<
     std::fs::write(output.join("manifest.json"), format!("{text}\n"))?;
     Ok(pkg)
 }
-/// Import pending packages in order. A package the core refuses for its content, or one that is gone,
-/// will never import: it is marked stale with the reason instead of blocking every later delivery. Each
-/// package is a snapshot of the whole cache and importing one replaces the previous snapshot, so when the
-/// newest outcome is stale the cache as it stands now is sealed again; it names only assets still in the
-/// library. Other failures (a busy or unreadable database) leave the queue as it is for the next retry.
+/// 按顺序导入待处理的包。核心因内容拒绝的包，或已经不存在的包，永远导入不了：把它连同原因标为 stale，
+/// 而不是挡住之后的所有交付。每个包都是整个缓存的快照，导入一个就替换前一个快照，所以最新结果为 stale 时，
+/// 把缓存当前的样子重新封包；新包只列出仍在图库里的图片。其他失败（数据库忙或读不出）保持队列原样，等下次重试。
 pub(super) fn deliver(library: &Library, cache: &Path) -> Result<Json> {
     if library.frozen() {
         return Ok(Json::Scalar(Value::Null));
@@ -189,19 +185,17 @@ pub(super) fn deliver(library: &Library, cache: &Path) -> Result<Json> {
         let path = format!(".provenance/{task}/evidence");
         package(library, cache, &library.instance_path().join(&path))?;
         c.execute("INSERT INTO native_delivery(task_id,package) VALUES (?,?)", [&task, &path])?;
-        // A resealed package that is refused again stays stale; the next research run seals a new one.
+        // 重新封好的包再次被拒仍为 stale；下一次研究运行会封一个新包。
         (last, _) = settle(library, &c, &task, &path)?;
     }
-    // Directories are only reclaimed; a failure to remove one never changes the delivery outcome.
+    // 目录只做回收；删除失败从不改变交付结果。
     let _ = collect(library.instance_path(), &c, false);
     Ok(last)
 }
-/// Retention of the run directories `.provenance/<task>` (#31). A pending package is kept: delivery and
-/// recovery import it. Of the delivered packages only the newest is kept, the snapshot the core now holds
-/// (every package replaces the previous one), for inspection. Stale packages never import and their reason
-/// stays in `native_delivery.error`, so they go. With `orphans`, directories without a delivery row go too:
-/// runs that failed, were stopped or died before the receive gate, which recovery never imports. Callers hold
-/// the provenance lease, so no run of this package is writing a directory meanwhile. Returns how many went.
+/// 运行目录 `.provenance/<task>` 的保留规则（#31）。待处理的包保留：交付和恢复会导入它。已交付的包只保留最新的
+/// 一个，即核心现在持有的快照（每个包都替换前一个），供检查。stale 的包永远不会导入，原因留在
+/// `native_delivery.error`，所以删掉。带 `orphans` 时，没有交付记录的目录也删：这些是失败、被停止或在接收门
+/// 之前退出的运行，恢复从不导入它们。调用方持有溯源租约，所以这期间本包没有运行在写目录。返回删了多少个。
 pub(super) fn collect(instance: &Path, c: &Connection, orphans: bool) -> Result<usize> {
     let rows = c
         .prepare("SELECT package,status FROM native_delivery ORDER BY rowid")?
@@ -241,7 +235,7 @@ pub(super) fn collect(instance: &Path, c: &Connection, orphans: bool) -> Result<
     }
     Ok(removed)
 }
-/// `<task>` of a package saved as `.provenance/<task>/evidence` (relative, or absolute inside the package).
+/// 保存为 `.provenance/<task>/evidence`（相对路径，或包内的绝对路径）的包对应的 `<task>`。
 fn run_directory(instance: &Path, package: &str) -> Option<String> {
     use std::path::Component;
     let path = Path::new(package);
@@ -255,7 +249,7 @@ fn run_directory(instance: &Path, package: &str) -> Option<String> {
         _ => None,
     }
 }
-/// Deliver one pending package: done, stale with its reason, or an error that leaves it pending.
+/// 交付一个待处理的包：结果是完成、带原因的 stale，或者出错并保持待处理。
 fn settle(library: &Library, c: &Connection, task: &str, path: &str) -> Result<(Json, bool)> {
     match import(library, path) {
         Ok(report) => {
@@ -290,8 +284,8 @@ fn import(library: &Library, path: &str) -> Result<Json> {
         ("already", report.already.into()),
     ]))
 }
-/// The package itself can never import: its content is refused (an asset since removed, another library,
-/// a damaged file) or it no longer exists. Retrying the same bytes would fail the same way.
+/// 包本身永远导入不了：内容被拒（图片后来被移除、属于另一个图库、文件损坏），或者包已不存在。
+/// 用同样的字节重试也会同样失败。
 fn refused(e: &Error) -> bool {
     match e {
         Error::Invalid(_) | Error::Conflict(_) => true,
@@ -299,8 +293,8 @@ fn refused(e: &Error) -> bool {
         _ => false,
     }
 }
-/// Keep a read-only connection so SQLite data_version invalidates cached history after
-/// any native or external writer commits; polling does not reopen/parse unchanged rows.
+/// 保持一个只读连接，这样任何原生或外部写入方提交后，SQLite 的 data_version 会让缓存的历史失效；
+/// 轮询不会重新打开或解析没变的行。
 pub(super) struct History {
     connection: Connection,
     version: i64,
@@ -387,7 +381,7 @@ mod tests {
         let c = connect(&path).unwrap();
         let version: u32 = c.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
         assert_eq!(version, 5);
-        // Kept, and re-signed only when a comparison needs the colour check.
+        // 保留，只在比较需要颜色检查时才重新计算签名。
         let row: (String, Option<Vec<u8>>) =
             c.query_row("SELECT post_id, colour FROM ref_sigs", [], |r| Ok((r.get(0)?, r.get(1)?))).unwrap();
         assert_eq!(row, ("1".into(), None));
@@ -423,7 +417,7 @@ mod tests {
     }
     #[test]
     fn run_directories_keep_pending_and_the_newest_delivered_package() {
-        // #31: synthetic run directories and delivery rows only.
+        // #31：只用合成的运行目录和交付记录。
         let root =
             std::env::temp_dir().join(format!("illustash-provenance-retention-{}", crate::store::new_key().unwrap()));
         let runs = root.join(".provenance");
@@ -445,7 +439,7 @@ mod tests {
             )
             .unwrap();
         }
-        // A run that failed before its receive gate, and a package saved with an absolute path.
+        // 一次在接收门之前失败的运行，以及一个用绝对路径保存的包。
         std::fs::create_dir_all(runs.join("failed-run/groups")).unwrap();
         std::fs::write(runs.join("failed-run/provenance.sqlite"), "staged").unwrap();
         let absolute = root.join(".provenance/absolute/evidence");
@@ -461,13 +455,13 @@ mod tests {
             v.sort();
             v
         };
-        // Delivery reclaims settled packages only.
+        // 交付只回收已有定论的包。
         assert_eq!(collect(&root, &c, false).unwrap(), 2);
         assert_eq!(names(), ["absolute", "failed-run", "later-pending", "newest-done", "pending"]);
-        // Opening or starting a run also reclaims directories no delivery row names.
+        // 打开或开始运行时，也回收没有交付记录指向的目录。
         assert_eq!(collect(&root, &c, true).unwrap(), 1);
         assert_eq!(names(), ["absolute", "later-pending", "newest-done", "pending"]);
-        // Once delivered, a pending package becomes the newest delivered one and the previous goes.
+        // 交付后，待处理的包成为最新的已交付包，前一个被删掉。
         c.execute(
             "UPDATE native_delivery SET status='done' WHERE task_id IN ('pending','later-pending','absolute')",
             [],
@@ -479,9 +473,9 @@ mod tests {
         drop(c);
         std::fs::remove_dir_all(&root).unwrap();
     }
-    /// #31 measurement (synthetic, release): `cargo test --release provenance_delta_bench -- --ignored --nocapture`.
-    /// Accepting a staged machine cache (ten tables) and the size of one sealed package. Three runs, median.
-    /// ILLUSTASH_RESEARCH_BENCH_SIZES overrides the default 1000,10000,50000.
+    /// #31 测量（合成数据，release）：`cargo test --release provenance_delta_bench -- --ignored --nocapture`。
+    /// 接收一份暂存的机器缓存（十张表）的耗时，以及一个封好的包的大小。三次运行取中位数。
+    /// ILLUSTASH_RESEARCH_BENCH_SIZES 覆盖默认的 1000,10000,50000。
     #[test]
     #[ignore]
     fn provenance_delta_bench() {
@@ -508,7 +502,7 @@ mod tests {
         for n in sizes.split(',').map(|s| s.trim().parse::<usize>().unwrap()) {
             let dir = root.join(n.to_string());
             std::fs::create_dir_all(&dir).unwrap();
-            // A synthetic library with n pictures and a cache attributing each of them.
+            // 一个有 n 张图片的合成图库，以及把每张都归属好的缓存。
             let reference = dir.join("reference.sqlite");
             crate::open(&reference).unwrap().execute_batch(include_str!("app_source_empty.sql")).unwrap();
             let dest = dir.join("synthetic.pilib");
