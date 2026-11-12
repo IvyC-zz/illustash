@@ -6,7 +6,7 @@ use serde_json::{json, Value};
 use std::{
     fs::{self, File, OpenOptions},
     io::{self, Read, Write},
-    path::{Path, PathBuf},
+    path::PathBuf,
     sync::OnceLock,
     time::{SystemTime, UNIX_EPOCH},
 };
