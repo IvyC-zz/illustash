@@ -1899,7 +1899,6 @@
   "失败结果超出本次范围或重复": "The failure results are outside this run or repeated",
   "识别结果不完整": "The recognition results are incomplete",
   "识别批次的完成标记不合法": "A recognition batch's done marker is not valid",
-  "识别导入待恢复": "The recognition import needs recovering",
   "结果清单过大": "The result list is too large",
   "扫描已中断": "The scan was interrupted",
   "worker 文件名对应 {named}，但 {WORKER_KIND_ENV}={requested}": "The worker file name means {named}, but {WORKER_KIND_ENV}={requested}",
