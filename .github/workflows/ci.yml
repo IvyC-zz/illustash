@@ -43,6 +43,8 @@ jobs:
       - run: pip install -r tests/requirements.txt
       - name: Dependency boundary
         run: python tools/check_architecture.py
+      - name: Frontend structure
+        run: python tools/check_frontend.py
       - name: Core fmt/clippy/test/build
         run: |
           cargo fmt --manifest-path crates/core/Cargo.toml --check

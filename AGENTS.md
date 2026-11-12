@@ -92,6 +92,10 @@ Claude Code 通过 `CLAUDE.md` 引入本文件，Codex 等直接读本文件。�
 - **文档覆盖**（未检查）：同上。core 和 platform 新增或改动的 `pub` 项写文档注释，unsafe 的前提写进去；terms 和 desktop 是应用代码，不强制。不开 `missing_docs`，存量缺口太大会变成噪音；clippy 默认的 `missing_safety_doc` 照旧检查。
 - **存量不批量改**：多个会话并行改同一批文件，全仓改写纯风格分歧会造成大量冲突，也会动迁移清单指纹。改到哪个文件，顺手统一那个文件的写法；新写的代码照本节办理。
 
+### 前端结构约定
+
+2026-11-12（#320，总跟踪 #316）：`web/static` 的结构约定由 `tools/check_frontend.py` 机械检查，已接进 `tools/check_all.sh` 和 `ci.yml`，规则写在脚本开头：`core/` 不得导入 `ui/`；`ui/` 不得新增循环导入；`state` 上的字段必须在 `core/state.js` 声明；不得新增 `document`/`window` 级的 `keydown`/`click` 监听和运行时 `createElement('dialog')`；一行不超过 200 字符。存量冻结在 `tools/frontend_baseline.json`（按文件和内容特征登记，不按行号），**基线只能缩小**：违规要改代码，不能往基线里加；改好一处后运行 `python tools/check_frontend.py --shrink` 删掉对应项，评审和集成会话用 `--base-ref main` 确认基线没变大。报错会写明违反了哪条约定、怎么改；方案在 [WEB_V2.md](docs/WEB_V2.md#前端模块2026-10-18199)。
+
 ## 文档维护规范
 
 2026-09-30 做过一次精简（48 篇约 9,900 行 → 26 篇约 4,800 行），删掉的原文在开源前的私有历史中。以下规则是为了不再长回去。
