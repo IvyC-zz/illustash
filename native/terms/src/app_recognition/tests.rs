@@ -32,6 +32,9 @@ impl Fixture {
         src.execute_batch("INSERT INTO assets(uuid,filename,src_path,width,height,added_at,src_kind,in_scope,trashed) VALUES ('a','synthetic.png','synthetic.png',16,16,'2026-10-03','folder',1,0);
           INSERT INTO characters(char_id,anchor_p90,anchor_p75,post_count,gender_conf) VALUES ('old',0.05,0.02,10,1),('new',0.05,0.02,20,1);
           INSERT INTO labels(uuid,dim,value,conf,source) VALUES ('a','char_ext','old',0.9,'char_index');").unwrap();
+        let input = images.join("synthetic.png");
+        fs::write(&input, b"synthetic input bytes A").unwrap();
+        src.execute("UPDATE assets SET src_path=? WHERE uuid='a'", [input.to_str().unwrap()]).unwrap();
         let mut app = crate::sqlite::open(library.db()).unwrap();
         let tx = app.transaction_with_behavior(TransactionBehavior::Immediate).unwrap();
         crate::schema::begin_writing(&tx).unwrap();
@@ -62,6 +65,9 @@ impl Fixture {
         let identity = TaskIdentity::new(&library, 1, "synthetic-session").unwrap();
         Self { root, resources, library, identity }
     }
+    fn input(&self) -> PathBuf {
+        self.root.join("images/synthetic.png")
+    }
     fn source(&self) -> Connection {
         crate::sqlite::open(self.library.source()).unwrap()
     }
@@ -76,7 +82,7 @@ impl Fixture {
             &path,
             &json!(self.identity),
             &models,
-            &ids,
+            &[("a".into(), producer::input_hash(&self.input(), &|| Ok(())).unwrap())],
             &[producer::Label { asset: "a".into(), dim: "rating".into(), value: "general".into(), confidence: 0.9 }],
             &[vec![1.; 1024]],
             std::slice::from_ref(&feature),
@@ -483,4 +489,163 @@ fn redelivery_after_invalidation_uses_new_projection_with_or_without_anchors() {
         assert_eq!(f.import(&path, &sidecar).unwrap()["duplicate"], true);
         assert_eq!(human(&f.app()), before);
     }
+}
+
+#[test]
+fn old_input_package_is_rejected_even_without_a_scan_and_can_retry_after_bytes_are_restored() {
+    let f = Fixture::new(true);
+    let before = human(&f.app());
+    let original = fs::read(f.input()).unwrap();
+    let (path, sidecar) = f.batch("old", feature(1));
+    fs::write(f.input(), b"new bytes with unchanged asset id").unwrap();
+    assert!(f.import(&path, &sidecar).unwrap_err().to_string().contains("已过期"));
+    assert_no_wd(&f);
+    assert_eq!(human(&f.app()), before);
+    fs::write(f.input(), original).unwrap();
+    assert_eq!(f.import(&path, &sidecar).unwrap()["status"], "done");
+    assert_eq!(f.import(&path, &sidecar).unwrap()["duplicate"], true);
+    assert_eq!(human(&f.app()), before);
+}
+#[test]
+fn input_changes_at_publication_roll_back_all_machine_writes() {
+    struct Replace(PathBuf);
+    impl Observer for Replace {
+        fn publish(&self, apply: &mut dyn FnMut() -> Result<()>) -> Result<()> {
+            fs::write(&self.0, b"changed after validation")?;
+            apply()
+        }
+    }
+    let f = Fixture::new(false);
+    let before = human(&f.app());
+    let (path, _) = f.batch("result", feature(1));
+    let result = import_package_observed(
+        &f.library,
+        &path,
+        &f.resources,
+        &AtomicBool::new(false),
+        &|_, _| Ok(()),
+        &Replace(f.input()),
+    );
+    assert!(result.unwrap_err().to_string().contains("已过期"));
+    assert_no_wd(&f);
+    assert_eq!(human(&f.app()), before);
+}
+#[test]
+fn v1_and_malformed_v2_inputs_are_rejected_before_writes() {
+    let f = Fixture::new(false);
+    let (path, _) = f.batch("result", feature(0));
+    let manifest = path.join("manifest.json");
+    let original: Value = serde_json::from_slice(&fs::read(&manifest).unwrap()).unwrap();
+    for kind in ["v1", "missing", "extra", "invalid", "preprocessing"] {
+        let mut value = original.clone();
+        match kind {
+            "v1" => value["format"] = json!("illustash-recognition/1"),
+            "missing" => {
+                value.as_object_mut().unwrap().remove("inputs");
+            }
+            "extra" => value["inputs"]["other"] = json!("a".repeat(64)),
+            "invalid" => value["inputs"]["a"] = json!("A".repeat(64)),
+            _ => value["preprocessing"] = json!("unknown"),
+        }
+        fs::write(&manifest, value.to_string()).unwrap();
+        let err = import_package(&f.library, &path, &f.resources, &AtomicBool::new(false), &|_, _| Ok(())).unwrap_err();
+        if kind == "v1" {
+            assert!(err.to_string().contains("重新生成 v2"));
+        }
+        assert_no_wd(&f);
+    }
+}
+#[test]
+fn mixed_versions_reject_the_whole_batch_and_current_version_gets_a_distinct_fingerprint() {
+    let f = Fixture::new(false);
+    let second = f.root.join("images/b.png");
+    fs::write(&second, b"input B").unwrap();
+    f.source()
+        .execute(
+            "INSERT INTO assets(uuid,filename,src_path,in_scope,trashed) VALUES ('b','b.png',?,1,0)",
+            [second.to_str().unwrap()],
+        )
+        .unwrap();
+    let inputs = vec![
+        ("a".into(), producer::input_hash(&f.input(), &|| Ok(())).unwrap()),
+        ("b".into(), producer::input_hash(&second, &|| Ok(())).unwrap()),
+    ];
+    let path = f.root.join("mixed");
+    producer::write_batch(
+        &path,
+        &json!(f.identity),
+        &model_specs(&f.resources).unwrap(),
+        &inputs,
+        &inputs
+            .iter()
+            .map(|(id, _)| producer::Label {
+                asset: id.clone(),
+                dim: "rating".into(),
+                value: "general".into(),
+                confidence: 0.9,
+            })
+            .collect::<Vec<_>>(),
+        &[vec![1.; 1024], vec![1.; 1024]],
+        &[feature(0), feature(0)],
+    )
+    .unwrap();
+    fs::write(&second, b"changed B").unwrap();
+    assert!(import_package(&f.library, &path, &f.resources, &AtomicBool::new(false), &|_, _| Ok(())).is_err());
+    assert_no_wd(&f);
+    let (old, _) = f.batch("old-a", feature(0));
+    let first = import_package(&f.library, &old, &f.resources, &AtomicBool::new(false), &|_, _| Ok(())).unwrap();
+    let old_fingerprint: String =
+        f.source().query_row("SELECT digest FROM recognition_assets WHERE asset='a'", [], |r| r.get(0)).unwrap();
+    fs::write(f.input(), b"replacement A").unwrap();
+    // 模拟扫描已使旧资产结果失效；旧包收据仍然保留。
+    f.source().execute("DELETE FROM recognition_assets WHERE asset='a'", []).unwrap();
+    let (new, _) = f.batch("new-a", feature(0));
+    let second = import_package(&f.library, &new, &f.resources, &AtomicBool::new(false), &|_, _| Ok(())).unwrap();
+    let new_fingerprint: String =
+        f.source().query_row("SELECT digest FROM recognition_assets WHERE asset='a'", [], |r| r.get(0)).unwrap();
+    assert_ne!(first["digest"], second["digest"]);
+    assert_ne!(old_fingerprint, new_fingerprint);
+}
+
+#[test]
+fn legacy_unpublished_receipts_cannot_silently_gain_input_version_protection() {
+    let f = Fixture::new(false);
+    let before = human(&f.app());
+    let (path, _) = f.batch("result", feature(0));
+    let mut manifest: Value = serde_json::from_slice(&fs::read(path.join("manifest.json")).unwrap()).unwrap();
+    manifest["format"] = json!("illustash-recognition/1");
+    manifest.as_object_mut().unwrap().remove("inputs");
+    for legacy in [manifest.clone(), json!({"recognition":manifest,"character_claims":{}})] {
+        assert!(verify_current_inputs(&f.source(), &legacy, &["a".into()], &AtomicBool::new(false))
+            .unwrap_err()
+            .to_string()
+            .contains("不能发布"));
+    }
+    assert_no_wd(&f);
+    assert_eq!(human(&f.app()), before);
+}
+
+#[test]
+fn public_metadata_cannot_shadow_the_actual_manifest_input_binding() {
+    let f = Fixture::new(false);
+    let original = fs::read(f.input()).unwrap();
+    let (path, _) = f.batch("result", feature(0));
+    let file = path.join("manifest.json");
+    let mut manifest: Value = serde_json::from_slice(&fs::read(&file).unwrap()).unwrap();
+    let mut nested = manifest.clone();
+    fs::write(f.input(), b"replacement input").unwrap();
+    nested["inputs"]["a"] = json!(producer::input_hash(&f.input(), &|| Ok(())).unwrap());
+    manifest["recognition"] = nested;
+    fs::write(&file, manifest.to_string()).unwrap();
+    assert!(import_package(&f.library, &path, &f.resources, &AtomicBool::new(false), &|_, _| Ok(()))
+        .unwrap_err()
+        .to_string()
+        .contains("已过期"));
+    assert_no_wd(&f);
+    // 仍支持公开包原有的附加元数据，只有外层字段决定输入版本。
+    fs::write(f.input(), original).unwrap();
+    assert_eq!(
+        import_package(&f.library, &path, &f.resources, &AtomicBool::new(false), &|_, _| Ok(())).unwrap()["status"],
+        "done"
+    );
 }

@@ -1,4 +1,4 @@
-//! 离线识别 v1：验证后源事务提交；应用投影与 imported 事件可独立重试。
+//! 离线识别 v2：验证后源事务提交；应用投影与 imported 事件可独立重试。
 use crate::app_imports::{Observer, Silent};
 use crate::{app_library::Library, Error, Result};
 use rusqlite::{params, Connection, OpenFlags, OptionalExtension, TransactionBehavior};
@@ -168,6 +168,7 @@ struct Package {
     manifest: Value,
     digest: String,
     ids: Vec<String>,
+    inputs: HashMap<String, String>,
     labels: HashMap<String, Vec<Value>>,
     wd: Vec<u8>,
     ccip: Vec<u8>,
@@ -198,7 +199,10 @@ fn validate_against(
         std::str::from_utf8(&file(&path.join("manifest.json"), 4 * 1024 * 1024)?).map_err(|_| invalid())?,
     )
     .map_err(Error::Invalid)?;
-    if m["format"] != "illustash-recognition/1" || m["library_id"] != library.id() || &m["models"] != specs {
+    if m["format"] == "illustash-recognition/1" {
+        return Err(Error::invalid("v1 识别结果包没有输入内容版本，请重新生成 v2 结果包"));
+    }
+    if m["format"] != "illustash-recognition/2" || m["library_id"] != library.id() || &m["models"] != specs {
         return Err(invalid());
     }
     let ids: Vec<String> = serde_json::from_value(m["assets"].clone()).map_err(|_| invalid())?;
@@ -206,6 +210,15 @@ fn validate_against(
         || ids.len() > 100000
         || ids.iter().any(String::is_empty)
         || ids.iter().collect::<HashSet<_>>().len() != ids.len()
+    {
+        return Err(invalid());
+    }
+    let inputs: HashMap<String, String> = serde_json::from_value(m["inputs"].clone()).map_err(|_| invalid())?;
+    if m["preprocessing"] != crate::recognition_compute::producer::PREPROCESSING
+        || inputs.len() != ids.len()
+        || ids
+            .iter()
+            .any(|id| !inputs.get(id).is_some_and(|hash| crate::recognition_compute::producer::valid_input_hash(hash)))
     {
         return Err(invalid());
     }
@@ -276,7 +289,46 @@ fn validate_against(
         return Err(invalid());
     }
     let digest = sha(compact(&m).as_bytes());
-    Ok(Package { manifest: m, digest, ids, labels, wd, ccip })
+    Ok(Package { manifest: m, digest, ids, inputs, labels, wd, ccip })
+}
+/// 复核当前可发布的内容。恢复调用方先按账本筛选仍属于本包的资产。
+/// v1 不能证明输入版本：已有应用投影可以只确认通知，但不得据旧账本发布新的机器证据。
+pub(crate) fn verify_current_inputs(
+    c: &Connection,
+    manifest: &Value,
+    ids: &[String],
+    cancel: &AtomicBool,
+) -> Result<()> {
+    // 公开 manifest 允许附加元数据；同名字段不能把外层 v2 的输入版本遮盖掉。
+    let manifest =
+        if manifest.get("format").is_some() { manifest } else { manifest.get("recognition").ok_or_else(invalid)? };
+    if manifest["format"] == "illustash-recognition/1" {
+        return Err(Error::Conflict("v1 待恢复结果没有输入内容版本，不能发布，请重新识别生成 v2 结果".into()));
+    }
+    if manifest["format"] != "illustash-recognition/2" {
+        return Err(invalid());
+    }
+    for id in ids {
+        crate::app_sync::check(cancel)?;
+        let path: Option<String> = c
+            .query_row("SELECT src_path FROM assets WHERE uuid=? AND in_scope=1 AND coalesce(trashed,0)=0", [id], |r| {
+                r.get(0)
+            })
+            .optional()?;
+        let expected = manifest["inputs"][id]
+            .as_str()
+            .filter(|hash| crate::recognition_compute::producer::valid_input_hash(hash))
+            .ok_or_else(invalid)?;
+        let Some(path) = path else {
+            return Err(invalid());
+        };
+        let current =
+            crate::recognition_compute::producer::input_hash(Path::new(&path), &|| crate::app_sync::check(cancel))?;
+        if current != expected {
+            return Err(Error::Conflict("图片内容已改变，识别结果已过期，请重新识别".into()));
+        }
+    }
+    Ok(())
 }
 fn writer(path: &Path) -> Result<Connection> {
     let c = crate::sqlite::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_WRITE)?;
@@ -437,7 +489,7 @@ fn import_internal(
             Some(claims)
         } else {
             // 无锚点的 sidecar 对原生任务仍是必需的、要校验，
-            // 但保持公开的 v1 按图片和按包的指纹以及重复处理的行为。
+            // 但保持公开的 v2 按图片和按包的指纹以及重复处理的行为。
             None
         }
     } else {
@@ -446,16 +498,7 @@ fn import_internal(
     let models =
         if claims.is_some() { pkg.manifest["recognition"]["models"].clone() } else { pkg.manifest["models"].clone() };
     tx.execute_batch(SCHEMA)?;
-    for id in &pkg.ids {
-        let live: bool = tx.query_row(
-            "SELECT EXISTS(SELECT 1 FROM assets WHERE uuid=? AND in_scope=1 AND coalesce(trashed,0)=0)",
-            [id],
-            |r| r.get(0),
-        )?;
-        if !live {
-            return Err(invalid());
-        }
-    }
+    verify_current_inputs(&tx, &pkg.manifest, &pkg.ids, cancel)?;
     let seen: bool = tx.query_row(
         "SELECT EXISTS(SELECT 1 FROM recognition_imports WHERE digest=? OR digest GLOB ?)",
         params![pkg.digest, format!("{}:redelivery:*", pkg.digest)],
@@ -472,6 +515,7 @@ fn import_internal(
         let mut labels = pkg.labels[u].clone();
         labels.sort_by(|a, b| a[0].as_str().cmp(&b[0].as_str()).then(a[1].as_str().cmp(&b[1].as_str())));
         let mut bytes = crate::character_json::dump(&models, true).into_bytes();
+        bytes.extend(compact(&json!([pkg.inputs[u], crate::recognition_compute::producer::PREPROCESSING])).as_bytes());
         bytes.extend(compact(&json!(labels)).as_bytes());
         bytes.extend(wd);
         bytes.extend(ccip);
@@ -554,7 +598,11 @@ fn import_internal(
     // 发布点：只有这次提交执行了，内容才会进入图库；而且只在没有先到的取消时才执行。提交期间到达的取消会等待；
     // 之后下面的投影以待处理状态暂停。
     let mut tx = Some(tx);
-    observer.publish(&mut || Ok(tx.take().expect("the source transaction is published once").commit()?))?;
+    observer.publish(&mut || {
+        let tx = tx.take().expect("源事务只发布一次");
+        verify_current_inputs(&tx, &pkg.manifest, &pkg.ids, cancel)?;
+        Ok(tx.commit()?)
+    })?;
     drop(tx);
     drop(c);
     observer.stage("projecting");
