@@ -78,15 +78,9 @@
    "workTree": 3
   },
   "document-listener": {
-   "ui/catalog.js::keydown": 1,
-   "ui/grid.js::click": 1,
-   "ui/grid.js::keydown": 2,
-   "ui/guide.js::keydown": 1,
+   "ui/grid.js::keydown": 1,
    "ui/models.js::click": 1,
-   "ui/settings.js::click": 3,
-   "ui/shell.js::click": 1,
-   "ui/tasks.js::click": 1,
-   "ui/tasks.js::keydown": 1
+   "ui/settings.js::click": 3
   },
   "dialog-element": {
    "ui/dialog.js": 1
