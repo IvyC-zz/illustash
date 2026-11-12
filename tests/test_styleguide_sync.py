@@ -93,6 +93,22 @@ class StyleguideSyncTest(unittest.TestCase):
             tree.replace(GUIDE / 'index.html', 'class="sg-lead"', 'class="sg-leed"')
             self.assertOne(tree.errors(), '页面外壳类 .sg-leed', 'styleguide.css')
 
+    def test_frozen_override_does_not_whitelist_a_removed_class(self):
+        # `.sg-frozen .x` 是在改写应用组件，不能让 x 当成页面外壳的修饰类而躲过检查。
+        with Tree() as tree:
+            tree.write(GUIDE / 'styleguide.css', tree.read(GUIDE / 'styleguide.css') + '.sg-frozen .gone-widget { position: static; }\n')
+            tree.replace(GUIDE / 'index.html', 'class="sg-lead"', 'class="sg-lead gone-widget"')
+            errors = tree.errors()
+            self.assertOne(errors, 'index.html', '.gone-widget', 'app.css 里没有')
+            self.assertOne(errors, 'styleguide.css 的选择器', '.gone-widget')
+
+    def test_shell_modifiers_are_accepted(self):
+        with Tree() as tree:
+            tree.write(GUIDE / 'styleguide.css', tree.read(GUIDE / 'styleguide.css') + '.sg-stage.roomy { gap: 20px; }\n.sg-table td.wide { width: 50%; }\n')
+            tree.replace(GUIDE / 'index.html', 'class="sg-stage col"', 'class="sg-stage col roomy"')
+            tree.replace(GUIDE / 'index.html', '<td class="n">', '<td class="n wide">')
+            self.assertEqual(tree.errors(), [])
+
     def test_app_css_change_without_census_rerun_is_reported(self):
         with Tree() as tree:
             tree.write(APP_CSS, tree.read(APP_CSS) + '.sg-test-only{gap:var(--space-4)}\n')

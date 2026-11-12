@@ -57,15 +57,34 @@ def selector_classes(css_text):
     return found
 
 
-def shell_modifiers(css_text):
-    """styleguide.css 里和 .sg-* 写在同一条选择器里的非 sg- 类（如 `.sg-stage.col`、`.sg-table td.n`）。"""
-    found = set()
+def _compounds(part):
+    """把一条选择器按组合符（空白、>、+、~）切成复合选择器。"""
+    return [c for c in re.split(r'\s*[>+~]\s*|\s+', re.sub(r'\[[^\]]*\]|::?[\w-]+(\([^)]*\))?', '', part).strip()) if c]
+
+
+def shell_classes(css_text):
+    """styleguide.css 选择器里的类，分成三类：(sg- 类, 修饰类, 引用的应用类)。
+
+    修饰类是页面外壳自己的非 sg- 类：和 .sg-* 写在同一个复合选择器里（`.sg-stage.col`），
+    或者挂在 .sg-* 下面、带元素名的复合选择器里（`.sg-table td.n`）。
+    其余非 sg- 类（如 `.sg-frozen .toast` 的 toast）是在改写应用组件，必须仍在 app.css 里。
+    """
+    sg, modifiers, app = set(), set(), {}
     for selector, _, _ in CENSUS.parse_rules(CENSUS.strip_comments(css_text)):
         for part in selector.split(','):
-            names = _CLASS_IN_SELECTOR.findall(re.sub(r'\[[^\]]*\]', '', part))
-            if any(n.startswith('sg-') for n in names):
-                found.update(n for n in names if not n.startswith('sg-'))
-    return found
+            scoped = False
+            for compound in _compounds(part):
+                names = _CLASS_IN_SELECTOR.findall(compound)
+                own = {n for n in names if n.startswith('sg-')}
+                sg |= own
+                others = [n for n in names if not n.startswith('sg-')]
+                if own or (scoped and re.match(r'[a-z]', compound)):
+                    modifiers.update(others)
+                else:
+                    for n in others:
+                        app.setdefault(n, part.strip())
+                scoped = scoped or bool(own)
+    return sg, modifiers, app
 
 
 class _Page(HTMLParser):
@@ -129,9 +148,7 @@ def check_census(root):
 
 def check_classes(root):
     app = selector_classes((root / APP_CSS).read_text(encoding='utf-8'))
-    guide_css = (root / GUIDE / 'styleguide.css').read_text(encoding='utf-8')
-    shell = selector_classes(guide_css)
-    modifiers = shell_modifiers(guide_css)
+    shell, modifiers, overrides = shell_classes((root / GUIDE / 'styleguide.css').read_text(encoding='utf-8'))
     page = _Page()
     page.feed((root / GUIDE / 'index.html').read_text(encoding='utf-8'))
     page.close()
@@ -161,6 +178,10 @@ def check_classes(root):
     for name, lines in sorted(missing_listed.items()):
         errors.append(f'[样式清单 · listed] {GUIDE}/index.html 第 {_lines(lines)} 行：条目标题列出了 .{name}，web/static/app.css 里没有它的样式。'
                       '改法：照 app.css 现在的类名改标题里的 <code>，类已删就从标题里去掉。')
+    for name, selector in sorted(overrides.items()):
+        if name not in app and name not in modifiers:
+            errors.append(f'[样式清单 · class] {GUIDE}/styleguide.css 的选择器 `{selector}` 引用了 .{name}，web/static/app.css 里已经没有它。'
+                          '改法：按 app.css 现在的类名改这条覆盖；组件已删就删掉这条。')
     code = '\n'.join(p.read_text(encoding='utf-8') for pattern in ('*.html', '*.js', 'core/*.js', 'ui/*.js')
                      for p in sorted((root / STATIC).glob(pattern)))
     for name, where in sorted(HOOK_CLASSES.items()):
