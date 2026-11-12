@@ -13,6 +13,7 @@ import {remoteNames, remoteNote} from '../core/settings.js';
 import {state} from '../core/state.js';
 import {refreshLocalLinks} from './catalog.js';
 import {$, toast} from './dom.js';
+import {openDialog} from './dialog.js';
 import {mutate, reload} from './grid.js';
 import {namesAllowButton} from './settings.js';
 import {renderHeading} from './shell.js';
@@ -193,7 +194,7 @@ export function combo(input, menu, search, pick) {
     list = sections.flatMap(x => x.items); index = Math.min(index, Math.max(0, list.length - 1));
     let i = 0;
     menu.innerHTML = sections.filter(x => x.items.length || x.note).map(x => (x.label ? `<div class="palette-label">${esc(x.label)}</div>` : '') + (x.note ? `<p class="palette-note">${esc(x.note)}${x.allow ? ' ' + namesAllowButton : ''}</p>` : '') +
-      x.items.map(r => `<button type="button" class="picker-item watch-option${i === index ? ' on' : ''}" data-i="${i++}"><span class="watch-name">${esc(r.label)}</span><small>${esc(r.detail || '')}</small><em>${esc(r.extra || '')}</em></button>`).join('')).join('');
+      x.items.map(r => `<button type="button" class="menu-item watch-option${i === index ? ' on' : ''}" data-i="${i++}"><span class="watch-name">${esc(r.label)}</span><small>${esc(r.detail || '')}</small><em>${esc(r.extra || '')}</em></button>`).join('')).join('');
     menu.hidden = !menu.innerHTML;
   };
   const run = () => { const g = ++gen; clearTimeout(timer); timer = setTimeout(() => search(input.value.trim(), sections => { if (g === gen) render(sections); }), 160); };
@@ -227,22 +228,17 @@ export function twoStage(local, remote, extra = () => []) {
 export async function editProfile(c) {
   let p; try { p = await api('/api/character/profile?' + new URLSearchParams({entity: c.id})); } catch (e) { toast(e.message); return; }
   const draft = {aliases: [...p.aliases], work: p.work_id ? {id: p.work_id, label: p.work_name} : null, tag: p.tag};
-  const d = document.createElement('dialog'); d.className = 'palette profile-dialog';
   const autoName = p.tag && !p.user_name ? p.name : '';
-  d.innerHTML = `<form method="dialog">
-    <div class="dialog-top"><h2>${t('编辑资料')}</h2><button type="button" class="icon" data-close aria-label="${t('关闭')}">×</button></div>
-    ${p.label_only ? '' : `<label class="field"><span>${t('Danbooru 角色')}</span><div class="combo"><input id="pfTag" autocomplete="off" spellcheck="false" placeholder="${t('搜索角色名或 tag，如 karen blue、カレン')}"><div class="combo-menu" id="pfTagMenu" hidden></div></div>
+  const body = `${p.label_only ? '' : `<label class="field"><span>${t('Danbooru 角色')}</span><div class="combo"><input id="pfTag" autocomplete="off" spellcheck="false" placeholder="${t('搜索角色名或 tag，如 karen blue、カレン')}"><div class="combo-menu" id="pfTagMenu" hidden></div></div>
       <small id="pfTagNote"></small></label>`}
     <label class="field"><span>${t('显示名')}</span><input id="pfName" maxlength="120" value="${esc(p.user_name)}" placeholder="${esc(autoName ? t('留空：用自动名称「{name}」', {name: autoName}) : t('角色名称'))}">
       <small>${p.tag ? t('关联了 Danbooru 时可以留空，中文名会自动补全') : t('没有关联 Danbooru 时需要一个名称')}</small></label>
     <div class="field"><span>${t('别名')}</span><div class="alias-box" id="pfAliases"></div><input id="pfAlias" maxlength="120" placeholder="${t('输入别名后按回车，搜索时都能找到')}">
       <small>${p.other_aliases ? t('另有 {n} 个来自 Danbooru 等来源的别名，会自动更新', {n: number(p.other_aliases)}) : ''}</small></div>
-    <label class="field"><span>${t('所属作品')}</span>${p.oc ? `<small>${t('原创角色不属于任何作品')}</small>` : `<div class="combo"><input id="pfWork" autocomplete="off" placeholder="${t('搜索作品，找不到可以新建')}"><div class="combo-menu" id="pfWorkMenu" hidden></div></div><small id="pfWorkNote"></small>`}</label>
-    <div class="dialog-actions"><button type="button" class="quiet" data-close>${t('取消')}</button><button class="primary" id="pfSave">${t('保存')}</button></div></form>`;
-  document.body.append(d);
-  const close = () => { d.close(); d.remove(); };
-  for (const b of d.querySelectorAll('[data-close]')) b.onclick = close;
-  d.addEventListener('close', () => d.remove());
+    <label class="field"><span>${t('所属作品')}</span>${p.oc ? `<small>${t('原创角色不属于任何作品')}</small>` : `<div class="combo"><input id="pfWork" autocomplete="off" placeholder="${t('搜索作品，找不到可以新建')}"><div class="combo-menu" id="pfWorkMenu" hidden></div></div><small id="pfWorkNote"></small>`}</label>`;
+  const d = openDialog({title: t('编辑资料'), body, backdropClose: false, focus: !p.label_only && !p.tag ? '#pfTag' : '#pfName',
+    actions: `<button type="button" class="quiet" data-close>${t('取消')}</button><button class="primary" id="pfSave">${t('保存')}</button>`});
+  const close = () => d.close();
   const q = sel => d.querySelector(sel);
   const aliases = () => { q('#pfAliases').innerHTML = draft.aliases.map((a, i) => `<button type="button" class="staged-chip" data-a="${i}" title="${t('移除')}">${esc(a)} ×</button>`).join(''); };
   q('#pfAliases').onclick = e => { const b = e.target.closest('[data-a]'); if (b) { draft.aliases.splice(Number(b.dataset.a), 1); aliases(); } };
@@ -282,22 +278,18 @@ export async function editProfile(c) {
       state.localLinks = null; await refreshMeta(); renderHeading();
     } catch (err) { q('#pfSave').disabled = false; toast(err.message); }
   };
-  d.showModal(); (q('#pfTag') && !p.tag ? q('#pfTag') : q('#pfName')).focus();
 }
 export async function openLocalLinks() {
   const items = state.localLinks || [];
-  const d = document.createElement('dialog'); d.className = 'palette profile-dialog';
   const links = items.filter(x => x.kind === 'link'), merges = items.filter(x => x.kind === 'merge');
-  d.innerHTML = `<form method="dialog"><div class="dialog-top"><h2>${t('关联自建角色')}</h2><button type="button" class="icon" data-close aria-label="${t('关闭')}">×</button></div>
-    ${links.length ? `<p class="muted-note">${t('关联后自动补中文名、别名和所属作品，原来的名字留作别名，可以一步撤销。名字和 tag 完全一致的已勾选；标「可能是」的是按名字搜到的最像的一个，请确认后再勾。')}</p>
+  const body = `${links.length ? `<p class="muted-note">${t('关联后自动补中文名、别名和所属作品，原来的名字留作别名，可以一步撤销。名字和 tag 完全一致的已勾选；标「可能是」的是按名字搜到的最像的一个，请确认后再勾。')}</p>
       <div class="link-list">${links.map(x => `<label class="link-row"><input type="checkbox" data-link="${esc(x.id)}"${x.guess ? '' : ' checked'}><span><b>${esc(x.name)}${x.guess ? ` <i class="guess">${t('可能是')}</i>` : ''}</b><small>${esc(x.tag)}${x.work_name ? ' · ' + esc(x.work_name) : ''} · ${t('D 站 {n} 张', {n: number(x.posts)})}</small></span><em>${t('{n} 张', {n: number(x.count)})}</em></label>`).join('')}</div>` : ''}
     ${merges.length ? `<p class="muted-note">${t('下面的自建角色和图库里已有的角色像是同一个，合并后图和人工结论都会过去（可撤销）：')}</p>
       <div class="link-list">${merges.map(x => `<div class="link-row"><span><b>${esc(x.name)}${x.guess ? ` <i class="guess">${t('可能是')}</i>` : ''}</b><small>${t('{n} 张', {n: number(x.count)})} → ${esc(x.target.name)} · ${esc(x.tag)}</small></span><button type="button" class="quiet" data-merge="${esc(x.id)}">${t('合并到「{name}」', {name: esc(x.target.name)})}</button></div>`).join('')}</div>` : ''}
-    <div class="dialog-actions"><button type="button" class="quiet" data-close>${t('关闭')}</button>${links.length ? '<button class="primary" id="llApply"></button>' : ''}</div></form>`;
-  document.body.append(d);
-  const close = () => { d.close(); d.remove(); };
-  for (const b of d.querySelectorAll('[data-close]')) b.onclick = close;
-  d.addEventListener('close', () => d.remove());
+`;
+  const d = openDialog({title: t('关联自建角色'), body,
+    actions: `<button type="button" class="quiet" data-close>${t('关闭')}</button>${links.length ? '<button class="primary" id="llApply"></button>' : ''}`});
+  const close = () => d.close();
   const count = () => { const n = d.querySelectorAll('[data-link]:checked').length; if ($('llApply')) { $('llApply').textContent = t('关联选中的 {n} 个', {n: number(n)}); $('llApply').disabled = !n; } };
   d.addEventListener('change', count);
   count();
@@ -314,7 +306,6 @@ export async function openLocalLinks() {
     try { const r = await post('/api/local-links', {items: chosen}); close(); setLatest(r.undo); toast(tb(r.undo.label), true); await refreshMeta(); refreshLocalLinks(); }
     catch (err) { count(); toast(err.message); }
   };
-  d.showModal();
 }
 export async function toggleOc(c) {
   try {
