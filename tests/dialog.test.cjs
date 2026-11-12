@@ -1,6 +1,6 @@
-// openDialog (ui/dialog.js, #319): the one builder of the page's runtime modal dialogs. Closing paths (×/[data-close],
-// Esc, backdrop), the backdrop opt-in (default: a click on the backdrop does not close; read-only and confirmation dialogs
-// say so, #343), onClose before removal, and the focus hook. Esc and backdrop go through the overlay manager (ui/overlay.js).
+// openDialog（ui/dialog.js，#319）：页面所有运行时模态对话框的唯一生成函数。关闭途径（×／[data-close]、Esc、点背景），
+// 点背景默认不关（只读或确认类对话框显式声明，#343），关闭时先 onClose 再移除，以及焦点钩子。
+// Esc 和点背景经过浮层管理器（ui/overlay.js）。
 const {test, before, afterEach} = require('node:test');
 const assert = require('node:assert/strict');
 const web = require('./web.cjs');
@@ -37,25 +37,25 @@ test('builds a titled modal with the shared class, aria-label and shell', () => 
 test('without actions there is no action row', () => {
   page(); assert.doesNotMatch(dialog.openDialog({title: 'x'}).innerHTML, /dialog-actions/);
 });
-test('a click on the backdrop closes a dialog that says so; one inside the box, on a child, or on a form (the default) does not', () => {
+test('点背景只关声明过的对话框；点框内、点子元素、默认的表单都不关', () => {
   page();
   const click = e => document.dispatch('click', e);
   const d = dialog.openDialog({title: 'x', backdropClose: true});
-  click({target: {closest: () => null}, ...outside}); assert.equal(d.open, true, 'a click on a child is not a backdrop click');
-  click({target: d, ...inside}); assert.equal(d.open, true, 'inside the box');
+  click({target: {closest: () => null}, ...outside}); assert.equal(d.open, true, '点子元素不算点背景');
+  click({target: d, ...inside}); assert.equal(d.open, true, '点在框内');
   click({target: d, ...outside}); assert.equal(d.open, false); assert.equal(d.removed, true);
   const form = dialog.openDialog({title: 'x'});
-  click({target: form, ...outside}); assert.equal(form.open, true, 'the default keeps a form with typed input open');
+  click({target: form, ...outside}); assert.equal(form.open, true, '默认不关，带输入的表单不会被误点关掉');
   const explicit = dialog.openDialog({title: 'x', backdropClose: false});
   click({target: explicit, ...outside}); assert.equal(explicit.open, true);
 });
-test('Esc closes the top dialog only, with the same return value as a native cancel', () => {
+test('Esc 只关最上面的对话框，返回值与原生取消相同', () => {
   page();
   const esc = () => { const e = {key: 'Escape', target: {}, prevented: false, stopped: false, preventDefault() { this.prevented = true; }, stopImmediatePropagation() { this.stopped = true; }}; document.dispatch('keydown', e); return e; };
   const below = dialog.openDialog({title: 'a'}), top = dialog.openDialog({title: 'b'});
   const e = esc(); assert.equal(top.open, false); assert.equal(below.open, true); assert.equal(top.returnValue, ''); assert.equal(e.prevented && e.stopped, true);
   esc(); assert.equal(below.open, false);
-  assert.equal(esc().stopped, false, 'with nothing open the key is left to the page');
+  assert.equal(esc().stopped, false, '什么都没开时 Esc 留给页面');
 });
 test('any [data-close] inside closes it, also one drawn later', () => {
   page();
