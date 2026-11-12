@@ -95,9 +95,13 @@ pub(crate) fn valid_input_hash(hash: &str) -> bool {
 }
 /// 对实际输入字节取 SHA-256。来源的 stable_hash 可能是 MD5 或 Photos 标识，不能替代此值。
 pub(crate) fn input_hash(path: &Path, check: &dyn Fn() -> Result<()>) -> Result<String> {
+    // 先拒绝目录、管道等输入，避免打开命名管道时等待写入方；打开后再核对一次。
+    if !fs::metadata(path)?.is_file() {
+        return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "识别输入不是普通文件").into());
+    }
     let mut file = fs::File::open(path)?;
     if !file.metadata()?.is_file() {
-        return Err(Error::invalid("识别输入不是普通文件"));
+        return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "识别输入不是普通文件").into());
     }
     let mut hash = Sha256::new();
     let mut buffer = vec![0; 1 << 20];

@@ -210,3 +210,49 @@ class RecognitionRecoveryTest(unittest.TestCase):
         self.assertEqual(self.tables(self.lib.db, human), human)
         self.assertEqual(self.import_package()['status'], 'done')
         self.assertEqual(self.tables(self.lib.db, human), human)
+
+    def test_offline_pending_does_not_block_other_receipts_or_leak_through_refresh(self):
+        asset = self.ids['a.png']
+        self.assertEqual(self.request('/api/tag', {'ids': [asset], 'tag': '离线人工保留'})['status'], 200)
+        human = self.tables(self.lib.db, ('asset_tags', 'term_verdicts', 'actions'))
+        self.stop(self.process)
+        second = self.root / 'online'
+        image(second / 'c.png', 'green')
+        self.lib.config['sources'].append(dict(self.lib.config['sources'][0], id='online', path=str(second)))
+        (self.lib.path / 'library.json').write_text(json.dumps(self.lib.config))
+        self.scan()
+        online = self.rows(self.lib.source, "SELECT uuid FROM assets WHERE filename='c.png'")[0][0]
+        tags = self.resources / 'tags/tags_v3.csv'
+        tags.write_text(tags.read_text() + 'realistic,0\n')
+        self.specs['wd']['tags_sha256'] = hashlib.sha256(tags.read_bytes()).hexdigest()
+        offline_package = self.incoming((asset,), name='offline-result')
+        labels = offline_package / 'labels.jsonl'
+        labels.write_text(labels.read_text() + '\n' + json.dumps(dict(asset=asset, dim='general', value='realistic', confidence=.9)))
+        self.manifest(offline_package, (asset,))
+        online_package = self.incoming((online,), name='online-result')
+        # 源提交后、首个 WD 证据提交前中断；离线回执不能借另一张图的刷新发布任何机器证据。
+        with sqlite3.connect(self.lib.db) as c:
+            c.execute("CREATE TRIGGER fail BEFORE INSERT ON term_packages BEGIN SELECT RAISE(ABORT,'synthetic evidence failure'); END")
+        for package in (offline_package, online_package):
+            self.package = package
+            self.assertEqual(self.import_package(code=2)['status'], 'pending')
+        with sqlite3.connect(self.lib.db) as c:
+            c.execute('DROP TRIGGER fail')
+        disconnected = self.root / 'disconnected'
+        self.pics.rename(disconnected)
+        result = self.run_cli('recognition-import', '--library', str(self.lib.path), '--root', str(self.resources), '--resume', code=2)
+        self.assertEqual(result['unavailable_inputs'], [asset])
+        self.assertEqual(self.rows(self.lib.db, 'SELECT rating FROM asset_rating WHERE uuid=?', (online,)), [('general',)])
+        self.assertEqual(self.rows(self.lib.db, "SELECT * FROM auto_rules WHERE uuid=? AND reason='photo'", (asset,)), [])
+        image(second / 'd.png', 'yellow')
+        self.scan()
+        self.assertEqual(self.rows(self.lib.source, "SELECT status FROM recognition_imports ORDER BY rowid"), [('pending',), ('done',)])
+        self.assertEqual(self.rows(self.lib.db, 'SELECT rating FROM asset_rating WHERE uuid=?', (asset,)), [])
+        self.assertEqual(self.rows(self.lib.db, "SELECT * FROM auto_rules WHERE uuid=? AND reason='photo'", (asset,)), [])
+        self.assertEqual(self.rows(self.lib.db, "SELECT count(*) FROM term_evidence e JOIN term_assets a ON a.id=e.asset_id WHERE a.namespace='library' AND a.key=? AND e.source='wd'", (asset,)), [(0,)])
+        self.assertEqual(self.tables(self.lib.db, human), human)
+        disconnected.rename(self.pics)
+        self.assertEqual(self.resume()['status'], 'done')
+        self.assertEqual(self.rows(self.lib.db, 'SELECT rating FROM asset_rating WHERE uuid=?', (asset,)), [('general',)])
+        self.assertEqual(self.rows(self.lib.db, "SELECT reason FROM auto_rules WHERE uuid=? AND reason='photo'", (asset,)), [('photo',)])
+        self.assertEqual(self.tables(self.lib.db, human), human)

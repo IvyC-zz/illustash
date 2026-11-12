@@ -100,6 +100,8 @@ impl Syncer {
                     "stage",
                     "import_done",
                     "import_total",
+                    "input_done",
+                    "input_total",
                     "unreadable",
                     "damaged",
                     "problem",
@@ -297,6 +299,12 @@ fn run_with(
                 done_in_source.set(done);
                 update(json!({"scanned":scanned+done,"scan_total":scanned+total}))
             };
+            if source["kind"] == "folder"
+                && source["path"].as_str().is_some_and(|path| std::fs::metadata(path).is_err())
+            {
+                unreadable += 1;
+                continue;
+            }
             let (scan, order) = if source["kind"] == "folder" {
                 let scan = crate::app_folder::scan(source, &library.source(), &|| check(cancel), &progress)?;
                 let _ = scan.changed;
@@ -341,9 +349,8 @@ fn run_with(
         // 先扫描，避免已删除/换内容的图片被旧 pending 永久挡住；仍有效的结果再恢复。
         step.set("recognition resume, source.sqlite and library.sqlite");
         let recovery = crate::app_recognition::resume(library, cancel, &crate::app_research::dispatch)?;
-        if recovery["status"] != "done" {
-            return Err(Error::Invalid("识别导入恢复未完成".into()));
-        }
+        let deferred = crate::app_recognition::unavailable_inputs(&recovery)?;
+        unreadable += deferred.len() as u64;
         step.set("sync record, library.sqlite");
         let c = writer(&library.db())?;
         c.execute(
@@ -371,7 +378,7 @@ fn run_with(
         check(cancel)?;
         update(json!({"status":"importing"}));
         step.set("library refresh, library.sqlite");
-        let (out, refreshed) = refresh(library, run_id, cancel)?;
+        let (out, refreshed) = refresh(library, run_id, cancel, &deferred)?;
         counts["imported"] = out["added"].clone();
         counts["removed"] = out["removed"].clone();
         let pending = out["pending"].as_u64().expect("internal sync counter must be unsigned");
@@ -454,7 +461,12 @@ fn run_with(
     }
     result.map(|(_, _, out)| out)
 }
-fn refresh(library: &Library, run_id: i64, cancel: &AtomicBool) -> Result<(Value, HashSet<String>)> {
+fn refresh(
+    library: &Library,
+    run_id: i64,
+    cancel: &AtomicBool,
+    deferred: &HashSet<String>,
+) -> Result<(Value, HashSet<String>)> {
     let mut c = writer(&library.db())?;
     let mut src = crate::app_library::read_connection(&library.source())?;
     let src = src.transaction()?;
@@ -494,6 +506,10 @@ fn refresh(library: &Library, run_id: i64, cancel: &AtomicBool) -> Result<(Value
 
     for row in &live {
         let u = row[0].as_str().expect("SQLite uuid column must be text");
+        // 保留其应用状态和哈希基线；输入回来后仍须经过 resume 校验，不能由普通刷新发布。
+        if deferred.contains(u) {
+            continue;
+        }
         let hash = source_hashes.get(u).cloned().unwrap_or(None);
         let label_rows =
             crate::app_migrate_data::rows_with(&src, "SELECT * FROM labels WHERE uuid=? ORDER BY dim,value,conf", [u])?;
@@ -524,6 +540,7 @@ fn refresh(library: &Library, run_id: i64, cancel: &AtomicBool) -> Result<(Value
     let photos_pending=src.prepare("SELECT a.uuid FROM assets a WHERE EXISTS(SELECT 1 FROM asset_links l WHERE l.asset=a.uuid AND l.system='photos' AND l.source_id=a.source_id) AND NOT EXISTS(SELECT 1 FROM labels l WHERE l.uuid=a.uuid AND l.dim='rating')")?.query_map([],|r|r.get::<_,String>(0))?.collect::<rusqlite::Result<HashSet<_>>>()?;
     let added = live
         .iter()
+        .filter(|r| !deferred.contains(r[0].as_str().expect("SQLite uuid column must be text")))
         .filter(|r| !photos_pending.contains(r[0].as_str().expect("SQLite uuid column must be text")))
         .filter(|r| {
             !have.contains(r[0].as_str().expect("SQLite uuid column must be text"))
@@ -546,13 +563,7 @@ fn refresh(library: &Library, run_id: i64, cancel: &AtomicBool) -> Result<(Value
             list.replace('\'', "''")
         ),
     )?;
-    let realistic = crate::app_migrate_data::rows(
-        &src,
-        "SELECT uuid FROM labels WHERE dim='general' AND value='realistic' AND conf>=0.15",
-    )?
-    .iter()
-    .map(|r| r[0].clone())
-    .collect::<Vec<_>>();
+    let realistic = crate::app_recognition::realistic(&c, &src, &uuids)?;
     let album = library.source().parent().expect("source database path must have a parent").join("album-char-map.json");
     let album = if album.is_file() {
         serde_json::from_str::<Value>(&std::fs::read_to_string(album)?).map_err(|e| Error::Invalid(e.to_string()))?
@@ -565,6 +576,9 @@ fn refresh(library: &Library, run_id: i64, cancel: &AtomicBool) -> Result<(Value
     crate::schema::begin_writing(&tx)?;
     crate::app_migrate::invalidate_wd(&tx, &changed)?;
     for r in &live {
+        if deferred.contains(r[0].as_str().expect("SQLite uuid column must be text")) {
+            continue;
+        }
         tx.execute(
             "UPDATE assets SET filename=?,src_path=? WHERE uuid=?",
             params![r[1].as_str(), r[2].as_str(), r[0].as_str()],
@@ -602,7 +616,7 @@ fn refresh(library: &Library, run_id: i64, cancel: &AtomicBool) -> Result<(Value
 fn failure_message(failed: u64, damaged: u64) -> String {
     let mut parts = Vec::new();
     if failed > 0 {
-        parts.push(format!("{n} 张暂时读不到（可能还在 iCloud），下次同步重试", n = failed));
+        parts.push(format!("{n} 张暂时无法识别，下次同步重试", n = failed));
     }
     if damaged > 0 {
         parts.push(format!("{n} 张图片已损坏或格式不支持，留在图库里但不识别；文件改动后会重新识别", n = damaged));
@@ -687,6 +701,32 @@ struct RecognitionRun<'a> {
     already_counted: &'a HashSet<String>,
     run_id: i64,
 }
+/// 在打开首张输入前报告准备阶段，随后按完成文件推进；失败输入单独留待下次同步。
+fn prepare_inputs(
+    assets: Vec<Value>,
+    check: &dyn Fn() -> Result<()>,
+    update: &dyn Fn(Value),
+) -> Result<(Vec<protocol::SyncAsset>, HashSet<String>)> {
+    let total = assets.len();
+    let mut readable = Vec::new();
+    let mut failed = HashSet::new();
+    update(json!({"status":"recognising","stage":"hashing","total":total,"done":0,"failed":0,
+        "input_done":0,"input_total":total}));
+    for (index, row) in assets.into_iter().enumerate() {
+        check()?;
+        let id = row[0].as_str().expect("SQLite uuid column must be text").to_owned();
+        let path = row[1].as_str().ok_or_else(|| Error::invalid("source.sqlite: assets.src_path 必须为字符串"))?;
+        match crate::recognition_compute::producer::input_hash(std::path::Path::new(path), check) {
+            Ok(input_sha256) => readable.push(protocol::SyncAsset { id, path: path.to_owned(), input_sha256 }),
+            Err(Error::Io(_)) => {
+                failed.insert(id);
+            }
+            Err(e) => return Err(e),
+        }
+        update(json!({"input_done":index+1,"failed":failed.len()}));
+    }
+    Ok((readable, failed))
+}
 fn recognise(
     library: &Library,
     ctx: &crate::app_tasks::TaskContext,
@@ -731,20 +771,7 @@ fn recognise(
         assets.truncate(per_run);
     }
     let total = assets.len();
-    let mut readable = Vec::new();
-    let mut failed = HashSet::new();
-    for row in assets {
-        ctx.check()?;
-        let id = row[0].as_str().expect("SQLite uuid column must be text").to_owned();
-        let path = row[1].as_str().ok_or_else(|| Error::invalid("source.sqlite: assets.src_path 必须为字符串"))?;
-        match crate::recognition_compute::producer::input_hash(std::path::Path::new(path), &|| ctx.check()) {
-            Ok(input_sha256) => readable.push(protocol::SyncAsset { id, path: path.to_owned(), input_sha256 }),
-            Err(Error::Io(_)) => {
-                failed.insert(id);
-            }
-            Err(e) => return Err(e),
-        }
-    }
+    let (readable, mut failed) = prepare_inputs(assets, &|| ctx.check(), update)?;
     update(json!({"status":"recognising","stage":"preparing","total":total,"done":failed.len(),"failed":failed.len()}));
     counts["failed"] = json!(failed.len());
     if readable.is_empty() {
@@ -798,6 +825,7 @@ fn recognise(
         already_counted,
         run_id,
         import_done: 0,
+        deferred: HashSet::new(),
         scanned_at: None,
     };
     // worker 计算下一批的同时导入每个已完成的批次，这样中途被打断时已导入的批次都保留；
@@ -865,7 +893,8 @@ fn recognise(
         // 现在连查看都做不到的文件算作读不到，之后重试。
         match (u.reason, damaged::fingerprint(path, hash.as_deref())) {
             (protocol::FailureReason::InputChanged, _) => {
-                return Err(Error::Conflict("识别期间图片内容已改变，请重新同步".into()));
+                marked.remove(id);
+                failed.insert(id.to_owned());
             }
             (protocol::FailureReason::Undecodable, Some(now)) => {
                 marked.insert(id.to_owned(), now);
@@ -879,6 +908,7 @@ fn recognise(
     if batches.seen != batches.expected {
         return Err(Error::Invalid("识别结果不完整".into()));
     }
+    failed.extend(batches.deferred.iter().cloned());
     damaged::save(library, &kept, &marked)?;
     counts["damaged"] = json!(skipped + found);
     counts["failed"] = json!(failed.len());
@@ -915,6 +945,7 @@ struct Batches<'a> {
     already_counted: &'a HashSet<String>,
     run_id: i64,
     import_done: usize,
+    deferred: HashSet<String>,
     scanned_at: Option<std::time::Instant>,
 }
 impl Batches<'_> {
@@ -1031,8 +1062,11 @@ impl Batches<'_> {
                 &crate::app_research::dispatch,
             ),
         })?;
-        if imported["status"] != "done" {
-            return Err(Error::Invalid("识别导入待恢复".into()));
+        let deferred = crate::app_recognition::unavailable_inputs(&imported)?;
+        if ids.iter().any(|id| deferred.contains(id)) {
+            self.deferred.extend(ids.iter().cloned());
+            counts["failed"] = json!(counts["failed"].as_u64().unwrap_or(0) + ids.len() as u64);
+            return Ok(());
         }
         counts["imported"] = json!(
             counts["imported"].as_u64().expect("internal sync counter must be unsigned")
@@ -1169,13 +1203,34 @@ pub(crate) fn check(cancel: &AtomicBool) -> Result<()> {
 mod tests {
     use super::*;
     #[test]
+    fn input_preparation_reports_progress_and_keeps_unavailable_inputs_retryable() {
+        let root = std::env::temp_dir().join(format!("illustash-prepare-{}", crate::store::new_key().unwrap()));
+        std::fs::create_dir(&root).unwrap();
+        let file = root.join("input.png");
+        std::fs::write(&file, b"synthetic input").unwrap();
+        let events = std::cell::RefCell::new(Vec::new());
+        let rows = vec![json!(["good", file]), json!(["directory", root]), json!(["missing", root.join("missing")])];
+        let (readable, failed) = prepare_inputs(rows.clone(), &|| Ok(()), &|v| events.borrow_mut().push(v)).unwrap();
+        assert_eq!(readable.len(), 1);
+        assert_eq!(readable[0].id, "good");
+        assert_eq!(readable[0].input_sha256, crate::strict_json::sha256_hex(b"synthetic input"));
+        assert_eq!(failed, HashSet::from(["directory".into(), "missing".into()]));
+        let events = events.borrow();
+        assert_eq!(events[0]["stage"], "hashing");
+        assert_eq!(events[0]["done"], 0);
+        assert_eq!(events.iter().map(|v| v["input_done"].as_u64().unwrap()).collect::<Vec<_>>(), [0, 1, 2, 3]);
+        assert_eq!(events.last().unwrap()["failed"], 2);
+        assert!(prepare_inputs(rows, &|| Err(Error::Conflict("synthetic cancellation".into())), &|_| {}).is_err());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
     fn unreadable_and_damaged_pictures_are_reported_apart() {
         assert_eq!(failure_message(0, 0), "");
-        assert_eq!(failure_message(2, 0), "2 张暂时读不到（可能还在 iCloud），下次同步重试");
+        assert_eq!(failure_message(2, 0), "2 张暂时无法识别，下次同步重试");
         assert_eq!(failure_message(0, 1), "1 张图片已损坏或格式不支持，留在图库里但不识别；文件改动后会重新识别");
         assert_eq!(
             failure_message(2, 1),
-            "2 张暂时读不到（可能还在 iCloud），下次同步重试；1 张图片已损坏或格式不支持，留在图库里但不识别；文件改动后会重新识别"
+            "2 张暂时无法识别，下次同步重试；1 张图片已损坏或格式不支持，留在图库里但不识别；文件改动后会重新识别"
         );
     }
     #[test]

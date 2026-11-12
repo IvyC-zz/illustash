@@ -21,7 +21,8 @@ export const SYNC_ACTIVE = ['scanning', 'recognising', 'importing'];
 export const photosRefused = s => s.status === 'error' && s.problem === 'photos_permission';
 export const PHOTOS_PRIVACY = 'x-apple.systempreferences:com.apple.preference.security?Privacy_Photos';
 export const photosHelp = () => t('没有访问照片图库的权限。到「系统设置 › 隐私与安全性 › 照片」里打开 Illustash，退出并重新打开后再同步。');
-export const syncBar = (s, bar) => s.status === 'recognising' && s.stage !== 'preparing' ? bar(s.done, s.total)
+export const syncBar = (s, bar) => s.status === 'recognising' && s.stage === 'hashing' ? bar(s.input_done, s.input_total)
+  : s.status === 'recognising' && s.stage !== 'preparing' ? bar(s.done, s.total)
   : s.status === 'importing' && s.import_total ? bar(s.import_done, s.import_total) : '';
 // 识别和导入分开计数：done/total 是已识别或已放弃的图片，import_done/import_total 是已识别并写进图库的。
 export function syncLine(s) {
@@ -32,6 +33,7 @@ export function syncLine(s) {
       : t('正在导入识别结果 {done}/{total}', {done: number(s.import_done || 0), total: number(s.import_total)});
   }
   if (s.status === 'recognising') {
+    if (s.stage === 'hashing') return t('正在准备识别图片 {done}/{total}', {done: number(s.input_done || 0), total: number(s.input_total || 0)});
     if (s.stage === 'preparing') return t('正在加载识别模型（共 {n} 张）…', {n: number(s.total || 0)});
     const failed = s.failed ? ' · ' + t('{n} 张无法识别', {n: number(s.failed)}) : '';
     const left = s.ms_per_image && s.total > s.done ? ' · ' + t('约 {n} 分钟', {n: Math.max(1, Math.round((s.total - s.done) * s.ms_per_image / 60000))}) : '';
@@ -41,7 +43,7 @@ export function syncLine(s) {
   // 扫描读不到的路径保留它们的图片；下次同步再读。
   const kept = s.unreadable ? ' · ' + t('{n} 处暂时读不到，已有图片保留不动', {n: number(s.unreadable)}) : '';
   // 放弃的图片分开说（#112）：读不到的会再试，损坏的等它们的文件改变。
-  const gave = (s.failed ? ' · ' + t('{n} 张暂时读不到（可能还在 iCloud），下次同步重试', {n: number(s.failed)}) : '')
+  const gave = (s.failed ? ' · ' + t('{n} 张暂时无法识别，下次同步重试', {n: number(s.failed)}) : '')
     + (s.damaged ? ' · ' + t('{n} 张已损坏或格式不支持，未识别', {n: number(s.damaged)}) : '');
   if (s.status === 'done') return t('上次同步：{time}', {time: stamp(s.finished_at)}) + kept + gave;
   // 自己下载模型的安装（#168）在等模型；否则就是识别服务没有启动。

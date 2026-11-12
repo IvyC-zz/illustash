@@ -727,7 +727,10 @@ pub fn resume(
         .prepare("SELECT digest,assets,manifest FROM recognition_imports WHERE status NOT IN ('done','superseded') ORDER BY rowid")?
         .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?)))?
         .collect::<rusqlite::Result<Vec<_>>>()?;
+    let mut unavailable = Vec::new();
+    let mut unavailable_error = String::new();
     for (digest, raw, raw_manifest) in pending {
+        let mut deferred = Vec::new();
         let process: Result<()> = (|| {
             crate::app_sync::check(cancel)?;
             let ids: Vec<String> = serde_json::from_str(&raw).map_err(|_| invalid())?;
@@ -755,7 +758,12 @@ pub fn resume(
                     return Err(Error::Conflict("识别结果撤回尚未完成，请同步后重新识别".into()));
                 }
                 let manifest: Value = serde_json::from_str(&raw_manifest).map_err(|_| invalid())?;
-                verify_current_inputs(&tx, &manifest, &ids, cancel)?;
+                if let Err(error) = verify_current_inputs(&tx, &manifest, &ids, cancel) {
+                    if matches!(error, Error::Io(_)) {
+                        deferred = ids;
+                    }
+                    return Err(error);
+                }
                 crate::app_migrate::deliver_wd(&mut app, &library.source(), library.id(), Some(&ids), true)?;
                 let src = crate::app_library::read_connection(&library.source())?;
                 let app_tx = app.transaction_with_behavior(TransactionBehavior::Immediate)?;
@@ -795,13 +803,34 @@ pub fn resume(
                     "UPDATE recognition_imports SET status='pending',error=? WHERE digest=?",
                     params![message, digest],
                 )?;
+                if !deferred.is_empty() {
+                    unavailable.extend(deferred);
+                    unavailable_error = message;
+                    continue;
+                }
                 tx.commit()?;
                 return Ok(json!({"status":"pending","error":message}));
             }
         }
     }
     tx.commit()?;
-    Ok(json!({"status":"done"}))
+    if unavailable.is_empty() {
+        Ok(json!({"status":"done"}))
+    } else {
+        Ok(json!({"status":"pending","error":unavailable_error,"unavailable_inputs":unavailable}))
+    }
+}
+/// 同步只容忍输入暂不可读的回执；其他验证、发布或通知错误保持失败。
+pub(crate) fn unavailable_inputs(result: &Value) -> Result<std::collections::HashSet<String>> {
+    if result["status"] == "done" {
+        return Ok(Default::default());
+    }
+    if result["status"] == "pending" {
+        if let Some(ids) = result["unavailable_inputs"].as_array().filter(|ids| !ids.is_empty()) {
+            return ids.iter().map(|id| id.as_str().map(str::to_owned).ok_or_else(invalid)).collect();
+        }
+    }
+    Err(Error::invalid("识别导入恢复未完成"))
 }
 // 保持现有的每批 500 个 ID 的查询分批和行顺序。
 fn source_rows(src: &Connection, sql: &str, ids: &[String]) -> Result<Vec<Value>> {
@@ -815,6 +844,48 @@ fn source_rows(src: &Connection, sql: &str, ids: &[String]) -> Result<Vec<Value>
         )?);
     }
     Ok(out)
+}
+/// 全库规则也不能偷用另一份尚未验证、未发布回执的标签；保留这些图片上一次已发布的照片规则。
+pub(crate) fn realistic(app: &Connection, src: &Connection, publishing: &[String]) -> Result<Vec<Value>> {
+    let exists: bool =
+        src.query_row("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name='recognition_imports')", [], |r| r.get(0))?;
+    let mut blocked = std::collections::HashSet::new();
+    if exists {
+        let pending = src
+            .prepare("SELECT digest,assets FROM recognition_imports WHERE status NOT IN ('done','superseded')")?
+            .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        for (digest, raw) in pending {
+            let published: bool = app.query_row(
+                "SELECT EXISTS(SELECT 1 FROM meta WHERE key=?)",
+                [format!("recognition_projection:{digest}")],
+                |r| r.get(0),
+            )?;
+            if !published {
+                blocked.extend(delivery_ids(src, &digest, serde_json::from_str(&raw).map_err(|_| invalid())?)?);
+            }
+        }
+    }
+    for id in publishing {
+        blocked.remove(id);
+    }
+    let mut result = crate::app_migrate_data::rows(
+        src,
+        "SELECT uuid FROM labels WHERE dim='general' AND value='realistic' AND conf>=0.15",
+    )?
+    .into_iter()
+    .filter(|row| !row[0].as_str().is_some_and(|id| blocked.contains(id)))
+    .map(|row| row[0].clone())
+    .collect::<Vec<_>>();
+    if !blocked.is_empty() {
+        result.extend(
+            crate::app_migrate_data::rows(app, "SELECT uuid FROM auto_rules WHERE kind='exclude' AND reason='photo'")?
+                .into_iter()
+                .filter(|row| row[0].as_str().is_some_and(|id| blocked.contains(id)))
+                .map(|row| row[0].clone()),
+        );
+    }
+    Ok(result)
 }
 fn import_changes(app: &Connection, src: &Connection, library: &Library, ids: &[String]) -> Result<()> {
     let list = serde_json::to_string(ids).expect("internal JSON value is serializable").replace('\'', "''");
@@ -837,7 +908,7 @@ fn import_changes(app: &Connection, src: &Connection, library: &Library, ids: &[
         json!({})
     };
     let stamp: String = src.query_row("SELECT datetime('now','localtime')", [], |r| r.get(0))?;
-    let args = json!({"op":"import","rows":rows,"removed":[],"run_id":null,"new_ids":{},"wd_tags":crate::app_migrate_data::rows(src,"SELECT char_id,wd_tag FROM characters")?,"labels":source_rows(src,"SELECT uuid,value,conf,dim FROM labels WHERE ((dim='character' AND conf>=0.35) OR dim='char_ext') AND uuid IN ({})",&added)?,"decisions":source_rows(src,"SELECT uuid,value FROM decisions WHERE dim='character' AND uuid IN ({})",&added)?,"album_map":album,"duplicates":crate::app_migrate_data::duplicates(app,src,&shape)?,"realistic":crate::app_migrate_data::rows(src,"SELECT uuid FROM labels WHERE dim='general' AND value='realistic' AND conf>=0.15")?.iter().map(|r|r[0].clone()).collect::<Vec<_>>(),"indexed":stamp});
+    let args = json!({"op":"import","rows":rows,"removed":[],"run_id":null,"new_ids":{},"wd_tags":crate::app_migrate_data::rows(src,"SELECT char_id,wd_tag FROM characters")?,"labels":source_rows(src,"SELECT uuid,value,conf,dim FROM labels WHERE ((dim='character' AND conf>=0.35) OR dim='char_ext') AND uuid IN ({})",&added)?,"decisions":source_rows(src,"SELECT uuid,value FROM decisions WHERE dim='character' AND uuid IN ({})",&added)?,"album_map":album,"duplicates":crate::app_migrate_data::duplicates(app,src,&shape)?,"realistic":realistic(app,src,&added)?,"indexed":stamp});
     crate::character_commands::command(app, &args)?;
     Ok(())
 }

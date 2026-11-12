@@ -160,6 +160,12 @@ if mode=='progress':
     report('recognising',2);wait_for('release')
 (Path(sys.argv[0]).parent/'last-request').write_text(json.dumps([a['id'] for a in r['assets']]))
 failures=[]
+if mode=='input-changed':
+    # 请求之后改变一张图，模拟生产者发现实际字节与请求版本不符。
+    changed=r['assets'].pop(0)
+    Path(changed['path']).write_bytes(b'synthetic changed input')
+    (Path(sys.argv[0]).parent/'changed-asset').write_text(changed['id'])
+    failures.append(dict(uuid=changed['id'],reason='input_changed'))
 if mode in ('classify','classify-legacy'):
     # Stands in for the native producer (#112): a file it cannot read is unreadable; a PNG read in
     # full without its end chunk, or anything else, is undecodable. Older workers give no reason.
@@ -292,6 +298,31 @@ if failures: Path(sys.argv[2]).write_text(json.dumps(dict(identity=r['identity']
         self.assertEqual(value['status'],'done',value)
         self.assertEqual((value['done'],value['total'],value['imported'],value['import_done'],value['import_total']),
                          (total,total,total,total,total))
+
+    def test_native_library_new_changed_input_keeps_other_results_and_retries(self):
+        for uuid in ('E', 'F'):
+            self.photo(uuid, 'com.atebits.Tweetie2')
+            original = self.library / f'originals/{uuid}/{uuid}.png'
+            original.parent.mkdir(parents=True)
+            original.write_bytes(b'synthetic')
+        self.worker('input-changed')
+        state = self.sync()['state']
+        self.assertEqual(state['status'], 'done', state)
+        self.assertEqual(state['failed'], 1)
+        self.assertEqual(state['input_done'], state['input_total'])
+        self.assertEqual(state.get('damaged', 0), 0)
+        changed = (self.root / 'changed-asset').read_text()
+        with sqlite3.connect(self.lib.source) as c:
+            self.assertEqual(c.execute('SELECT count(*) FROM recognition_assets WHERE asset=?', (changed,)).fetchone()[0], 0)
+            self.assertEqual(c.execute('SELECT count(*) FROM recognition_assets').fetchone()[0], state['total'] - 1)
+        with sqlite3.connect(self.lib.db) as c:
+            self.assertEqual(c.execute('SELECT count(*) FROM asset_rating WHERE uuid=?', (changed,)).fetchone()[0], 0)
+            self.assertIsNone(c.execute("SELECT value FROM prefs WHERE key='sync_damaged'").fetchone())
+        self.worker('ok')
+        retried = self.sync()['state']
+        self.assertEqual((retried['status'], retried['failed']), ('done', 0), retried)
+        with sqlite3.connect(self.lib.source) as c:
+            self.assertEqual(c.execute('SELECT count(*) FROM recognition_assets WHERE asset=?', (changed,)).fetchone()[0], 1)
 
     def test_native_library_new_worker_deadline_follows_progress_and_reports_why(self):
         import time
@@ -574,7 +605,7 @@ if failures: Path(sys.argv[2]).write_text(json.dumps(dict(identity=r['identity']
         state = value['state']
         self.assertEqual(sent, {'not-scanned.png', 'good.png', 'bad.png'})
         self.assertEqual((state['failed'], state['damaged'], state['imported']), (1, 2, 1), state)
-        self.assertEqual(state['message'], '1 张暂时读不到（可能还在 iCloud），下次同步重试；'
+        self.assertEqual(state['message'], '1 张暂时无法识别，下次同步重试；'
                                            '2 张图片已损坏或格式不支持，留在图库里但不识别；文件改动后会重新识别')
         self.assertEqual(value['damaged']['count'], 2)
         self.assertEqual(sorted(Path(p).name for p in value['damaged']['paths']), ['bad.png', 'not-scanned.png'])
@@ -622,7 +653,7 @@ if failures: Path(sys.argv[2]).write_text(json.dumps(dict(identity=r['identity']
             with sqlite3.connect(self.lib.db) as c:
                 text = c.execute("SELECT uuid FROM assets WHERE filename='not-scanned.png'").fetchone()[0]
             self.assertIn(text, json.loads((self.root / 'last-request').read_text()))
-            self.assertEqual(value['state']['message'], '1 张暂时读不到（可能还在 iCloud），下次同步重试')
+            self.assertEqual(value['state']['message'], '1 张暂时无法识别，下次同步重试')
 
     def test_native_library_new_batch_commit_then_failure_recovers_once(self):
         self.photo('D','com.atebits.Tweetie2')
