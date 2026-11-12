@@ -1,6 +1,6 @@
 # 离线识别结果包 v1
 
-> 状态：现行参考；2026-10-04。离线识别 v1 由 Rust 校验、导入与恢复；机器证据经 [EVIDENCE_PACKAGES.md](EVIDENCE_PACKAGES.md) 的核心接口发布。运行边界见 [ARCHITECTURE_DIRECTION.md](ARCHITECTURE_DIRECTION.md)。
+> 状态：现行参考；2026-11-12。离线识别 v1 由 Rust 校验、导入与恢复；机器证据经 [EVIDENCE_PACKAGES.md](EVIDENCE_PACKAGES.md) 的核心接口发布。运行边界见 [ARCHITECTURE_DIRECTION.md](ARCHITECTURE_DIRECTION.md)。
 
 原生命令行和 HTTP 共用 `app_recognition::import_package` / `resume`；无新增界面。结果在 Windows 生成，导入在持有图库的主机执行。不从导入包加载代码、pickle 或模型。
 
@@ -49,9 +49,9 @@ labels.jsonl 每行：
 
 角色源标签、WD、向量和组合指纹共用已有源事务与 pending 账本。应用恢复经既有 `import_changes` 发布 `ccip_index / char_ext / ccip_score` 有效证据集，替换相同范围旧机器候选并保留人工裁决；不另建恢复调度器。组合指纹包含锚点快照与该资产认领，其他来源标签和人工记录保持现行规则。撤回 sidecar 生产路径后仍可用原生 `resume` 完成已提交 pending 记录；公开 v1 协议及原有无锚点去重指纹不变。
 
-2026-10-04 macOS arm64、CPU ONNX Runtime 1.30.0 合成对照：8 张生成图片的 10,861 维 WD 概率、1024 / 768 维原始向量与现行 Python 路径逐位一致，保留阈值与四位舍入一致；同一组生成图的模型输出构造 8 条合成锚点后，真实生产得到的 14 条认领与 Python 按声明类型解码逐位一致。稠密向量及相邻 float32 阈值对照确认没有用容差掩盖归约差异。首版 `fdb8e3e` 的另一次 26 项真实模型请求（25 项复用生成图片、1 项损坏输入）验证两批 24 / 1、文件指纹、原始向量、标签及无锚点 sidecar，源 sentinel 未改变。正式认领替换、空结果、人工裁决保护、预验后篡改/过期拒绝、外部合成模型根及源提交后恢复由合成数据库回归覆盖；这些结果不代表真实图片准确率、私人锚点质量、Windows、GPU 或整批全量验收。
+2026-10-04 macOS arm64、CPU ONNX Runtime 1.30.0 合成对照：8 张生成图片的 10,861 维 WD 概率、1024 / 768 维原始向量与当时的 Python 参考实现（#9 已删除）逐位一致，保留阈值与四位舍入一致；同一组生成图的模型输出构造 8 条合成锚点后，真实生产得到的 14 条认领与该参考按声明类型解码逐位一致。稠密向量及相邻 float32 阈值对照确认没有用容差掩盖归约差异。首版 `fdb8e3e` 的另一次 26 项真实模型请求（25 项复用生成图片、1 项损坏输入）验证两批 24 / 1、文件指纹、原始向量、标签及无锚点 sidecar，源 sentinel 未改变。正式认领替换、空结果、人工裁决保护、预验后篡改/过期拒绝、外部合成模型根及源提交后恢复由合成数据库回归覆盖；这些结果不代表真实图片准确率、私人锚点质量、Windows、GPU 或整批全量验收。
 
-macOS / Windows 安装 adapter 的识别请求走原生 CPU producer，宿主对该入口要求角色 sidecar；Linux 已冻结，不提供识别。Windows 复用固定 ILP64 OpenBLAS 资源及已登记 DLL 身份，默认仅解析 ROOT/openblas/openblas.dll，显式 ILLUSTASH_RESEARCH_OPENBLAS_DLL 优先；缺失或未知身份直接失败，无 portable/Python 回退。显式声明的 sidecar 在各平台仍严格校验。共享 CCIP 推理接口由索引计算直接复用，不需要加载 WD。
+macOS / Windows 安装 adapter 的识别请求走原生 CPU producer，宿主对该入口要求角色 sidecar；Linux 已冻结，不提供识别。Windows 复用固定 ILP64 OpenBLAS 资源及已登记 DLL 身份，默认仅解析 ROOT/openblas/openblas.dll，显式 ILLUSTASH_RESEARCH_OPENBLAS_DLL 优先；缺失或未知身份直接失败，不回退到 portable 实现。显式声明的 sidecar 在各平台仍严格校验。共享 CCIP 推理接口由索引计算直接复用，不需要加载 WD。
 
 真实模型的可重复合成验收入口为 `tests.platform_recognition_models`，与普通 discover 分离，缺少显式输入直接失败：
 
@@ -76,7 +76,7 @@ illustash-terms recognition-import --library /path/to/library.pilib --root /path
 illustash-terms recognition-import --library /path/to/library.pilib --root /path/to/resources --resume
 ```
 
-旧 `python -m web.results` CLI 已退出生产；Python 导入函数和历史 CLI 对照保留在 `tests/reference/web/results.py（#9 已删除）`，仅供测试参考。`--root` 是模型与标签资源目录，不是图库路径。
+`--root` 是模型与标签资源目录，不是图库路径。
 
 模型规格命令只计算本地模型及 tag 文件的指纹，不联网。生产者必须使用同一套模型、tag 顺序和预处理。模型名称字符串相同而文件不同也会被拒绝。
 
@@ -94,4 +94,4 @@ Windows 包内 `illustash-recognition` 生产者只写隔离结果目录，复�
 
 公开 Rust 接口 `import_package(&Library,&Path /*结果目录*/,&Path /*资源root*/,&AtomicBool,dispatch)` 与 `resume(&Library,&AtomicBool,dispatch)` 返回原状态对象；接口内部固定 canonical 包路径（`Library::pinned`），显示别名移除或改指向不会重定位结果；调用方仍须捕获会话身份并验证迟到结果，不能仅用 library_id 定位。取消在验证、源写入和各应用提交前检查；已提交的阶段留待恢复。HTTP 显式离线导入在会话锁内验证令牌后作为后台任务执行，应用同一时间只运行一个导入；取消、切库或退出在源事务提交前停止导入，旧令牌/请求不能写入新会话（#26、#88）。只读图库拒绝导入；研究计算不得修改人工裁决。
 
-回退到当前版本的兼容宿主可读取相同 v1 源账本；原生恢复标记和事件记录保留，避免把已提交但未确认的结果当作未导入。旧 Python 恢复不识别原生投影标记，pending 包应先用原生 resume 完成确认后再切换兼容宿主。更旧核心版本须恢复升级前备份。
+回退：v1 源账本格式不变；原生恢复标记和事件记录保留，避免把已提交但未确认的结果当作未导入，pending 包先用 `resume` 完成确认再换版本。更旧核心版本须恢复升级前备份。
