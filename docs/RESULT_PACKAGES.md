@@ -1,6 +1,6 @@
 # 离线识别结果包 v2
 
-> 状态：现行参考；2026-11-12。离线识别 v1 由 Rust 校验、导入与恢复；机器证据经 [EVIDENCE_PACKAGES.md](EVIDENCE_PACKAGES.md) 的核心接口发布。运行边界见 [ARCHITECTURE_DIRECTION.md](ARCHITECTURE_DIRECTION.md)。
+> 状态：现行参考；2026-11-12。离线识别 v2 由 Rust 校验、导入与恢复；机器证据经 [EVIDENCE_PACKAGES.md](EVIDENCE_PACKAGES.md) 的核心接口发布。运行边界见 [ARCHITECTURE_DIRECTION.md](ARCHITECTURE_DIRECTION.md)。
 
 原生命令行和 HTTP 共用 `app_recognition::import_package` / `resume`；无新增界面。结果由独立计算 worker 生成，导入在持有图库的主机执行。不从导入包加载代码、pickle 或模型。
 
@@ -49,7 +49,7 @@ labels.jsonl 每行：
 
 生产者与导入器共用 `ModelFiles` 路径及 SHA-256 规格：默认为资源 root 的 `models/`，`ILLUSTASH_MODELS` 的绝对路径直接使用，相对路径锚定资源 root。同步把自己的资源 root 传给计算进程，标签仍由同一资源 root 的 `tags/tags_v3.csv` 提供；自定义模型根不绕过字节指纹，模型或标签变化拒绝旧结果。流式指纹读取保留合作取消检查。
 
-内部请求升级为 `illustash-sync/2`，每项 `{id,path,input_sha256}` 由宿主对实际文件取指纹。worker 完整读入一次，对同一缓冲区校验 SHA-256 后解码和推理；指纹不同返回 `input_changed`，下次同步重试，不登记为损坏图片，也不输出该项机器结果。批次只包含成功项及其请求哈希，结果包导入仍复核当前字节，所以推理期间替换图片也不能发布旧结果。模型或输入错误不修改来源及人工记录。完成标记继续绑定 manifest 和 sidecar 的摘要，不新建调度或恢复机制。
+内部请求升级为 `illustash-sync/2`，每项 `{id,path,input_sha256}` 由宿主对实际文件取指纹。worker 完整读入一次，对同一缓冲区校验 SHA-256 后解码和推理；指纹不同返回 `input_changed`，宿主明确报告同步冲突，留待下次同步重试，不登记为损坏图片，也不输出该项机器结果。批次只包含成功项及其请求哈希，结果包导入仍复核当前字节，所以推理期间替换图片也不能发布旧结果。模型或输入错误不修改来源及人工记录。完成标记继续绑定 manifest 和 sidecar 的摘要，不新建调度或恢复机制。
 
 公开 v2 不接收 `char_ext`。原生识别任务另生成 `character-claims.json`，格式为 `illustash-recognition-claims/1`，绑定完整任务身份、资产顺序、模型规格，以及共享锚点向量、ID、源角色元数据和补丁来源指纹。它只供同步任务在 `TaskContext::receive` 内部接收；公开 CLI/HTTP 结果导入没有这个入口。一个任务只构建一份锚点关系快照；全部声明的 sidecar 计算预验在接收锁外完成，并检查取消。准备证明仅保存路径与摘要，不累计保存全部批次载荷。源写事务内重新校验权威模型、锚点文件、角色元数据和 sidecar 指纹，严格复读 v2 载荷，不重建锚点关系或计算认领；声明的 sidecar 缺失、损坏、迟到或版本不匹配时拒绝写入该批 WD 结果。同步先预验全部声明的 sidecar，再开始逐包导入；逐包源事务不代表整个多包任务跨库原子提交。
 

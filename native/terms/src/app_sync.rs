@@ -859,6 +859,9 @@ fn recognise(
         let (path, hash) = &located[id];
         // 现在连查看都做不到的文件算作读不到，之后重试。
         match (u.reason, damaged::fingerprint(path, hash.as_deref())) {
+            (protocol::FailureReason::InputChanged, _) => {
+                return Err(Error::Conflict("识别期间图片内容已改变，请重新同步".into()));
+            }
             (protocol::FailureReason::Undecodable, Some(now)) => {
                 marked.insert(id.to_owned(), now);
                 found += 1;
