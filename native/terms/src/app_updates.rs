@@ -2,7 +2,8 @@
 //! 比较，并让页面链接到 Release 页面；不下载也不替换任何东西。联网规则与其他地方相同：自动检查在用户允许之前一直关闭
 //! （新图库的首次引导问一次，可在「设置 › 网络与隐私」中更改）；允许后，App 每次启动时检查一次，一直开着时每过一天
 //! 再检查一次（用户 2026-10-18：Mac 上的 App 可能一开就是几周）。手动检查就是用户的点击。
-//! 请求是对公开 Release 列表的普通 HTTPS GET：不带账号，也不带图库信息。
+//! 请求是对公开 Release 列表的普通 HTTPS GET：不带账号，也不带图库信息，只发给 api.github.com，不跟随重定向。
+//! 列表按仓库的数字 ID 查（#358），所以仓库改名或转移后，已经发出去的版本仍查得到。
 //!
 //! 和界面语言一样是全应用范围的：选择存在 preferences.json 里（`update_check`：`"auto"` 或 `"manual"`，
 //! 问过之前没有这个键）；最近一次结果存在旁边的 updates.json。
@@ -22,6 +23,9 @@ use std::{
 };
 
 const REPOSITORY: &str = "shio-vinyl/illustash";
+/// GitHub 给这个仓库的数字 ID（`gh api repos/shio-vinyl/illustash --jq .id`）。Release 列表按它查（#358）：
+/// 请求不跟随重定向，而仓库改名或转移后 ID 不变，已经发出去的版本仍查得到。仓库删掉重建后 ID 会变。
+const REPOSITORY_ID: u64 = 1_407_079_068;
 const API: &str = "https://api.github.com/";
 /// 本次启动（这个宿主进程）是否已做过自动检查；每个打开的页面都会问，只有一个去检查。
 static LAUNCH_CHECKED: AtomicBool = AtomicBool::new(false);
@@ -224,7 +228,8 @@ impl Place<'_> {
             ("dismissed", (newer.is_some() && text("dismissed") == latest.as_ref().map(Version::to_string)).into()),
             ("error", text("error").into()),
             ("due", self.due().into()),
-            ("address", format!("{API}repos/{REPOSITORY}/releases").into()),
+            // 检查时请求的地址；它答复 404 时的回退见 `releases`。
+            ("address", by_id(API).into()),
         ])
     }
     fn record(&self, result: std::result::Result<Option<Version>, String>) -> Result<()> {
@@ -262,30 +267,83 @@ fn base() -> std::result::Result<String, String> {
     Ok(base)
 }
 
-/// 对 Release 列表的一次 GET。失败变成给页面的一句简短说明，绝不弹错误对话框。
-fn fetch(current: &Version) -> std::result::Result<Option<Version>, String> {
-    let address = format!("{}repos/{REPOSITORY}/releases?per_page=30", base()?);
-    let agent = ureq::AgentBuilder::new().redirects(0).timeout(Duration::from_secs(15)).build();
+/// Release 列表按仓库 ID 的地址（不带查询串）。仓库改名或转移后，GitHub 把按名字的旧地址 301 到的就是它；
+/// 但它没有写进 GitHub 的 REST 文档。
+fn by_id(base: &str) -> String {
+    format!("{base}repositories/{REPOSITORY_ID}/releases")
+}
+/// Release 列表按「账号/仓库名」的地址（不带查询串）：写在文档里的入口，仓库改名或转移后在这里查不到。
+fn by_name(base: &str) -> String {
+    format!("{base}repos/{REPOSITORY}/releases")
+}
+
+/// 一次 GET 没拿到 Release 列表。
+#[derive(Debug, Clone, PartialEq)]
+enum Failure {
+    /// GitHub 答复了这个状态码（4xx、5xx）。
+    Status(u16),
+    /// 没连上、没读完，或回复不是列表；已经是给页面的一句话。
+    Other(&'static str),
+}
+impl Failure {
+    /// 给页面的一句简短说明。
+    fn message(&self) -> String {
+        match self {
+            Self::Status(403 | 429) => "GitHub 暂时拒绝了请求，请稍后再试".into(),
+            Self::Status(code) => format!("GitHub 返回了错误（HTTP {code}）"),
+            Self::Other(message) => (*message).into(),
+        }
+    }
+}
+
+/// 对 Release 列表的一次 GET。`agent` 不跟随重定向，301 的回复原样回到这里：它不是列表，按失败处理。
+fn get(agent: &ureq::Agent, address: &str) -> std::result::Result<Value, Failure> {
+    const NOT_A_LIST: Failure = Failure::Other("GitHub 的回复不是版本列表");
     let reply = agent
-        .get(&address)
+        .get(address)
         .set("Accept", "application/vnd.github+json")
         .set("User-Agent", "Illustash-update-check")
         .call();
     let reply = match reply {
         Ok(reply) => reply,
-        Err(ureq::Error::Status(403 | 429, _)) => return Err("GitHub 暂时拒绝了请求，请稍后再试".into()),
-        Err(ureq::Error::Status(code, _)) => return Err(format!("GitHub 返回了错误（HTTP {code}）")),
-        Err(ureq::Error::Transport(_)) => return Err("连不上 GitHub，请检查网络后再试".into()),
+        Err(ureq::Error::Status(code, _)) => return Err(Failure::Status(code)),
+        Err(ureq::Error::Transport(_)) => return Err(Failure::Other("连不上 GitHub，请检查网络后再试")),
     };
     let mut bytes = Vec::new();
-    reply.into_reader().take(LIMIT + 1).read_to_end(&mut bytes).map_err(|_| "读取 GitHub 的回复失败".to_string())?;
+    reply
+        .into_reader()
+        .take(LIMIT + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|_| Failure::Other("读取 GitHub 的回复失败"))?;
     if bytes.len() as u64 > LIMIT {
-        return Err("GitHub 的回复不是版本列表".into());
+        return Err(NOT_A_LIST);
     }
-    let releases: Value = serde_json::from_slice(&bytes).map_err(|_| "GitHub 的回复不是版本列表".to_string())?;
+    let releases: Value = serde_json::from_slice(&bytes).map_err(|_| NOT_A_LIST)?;
     if !releases.is_array() {
-        return Err("GitHub 的回复不是版本列表".into());
+        return Err(NOT_A_LIST);
     }
+    Ok(releases)
+}
+
+/// Release 列表：先按仓库 ID 查；这个地址答复 404（那里没有东西）时，再按「账号/仓库名」查一次，以这一次为准。
+/// 按 ID 的地址没有文档承诺，这样两个地址里有一个可用就查得到。其他失败不换地址：连不上、被限流或 GitHub
+/// 自己出错时，换个地址结果也一样。两个地址都在 `base`（api.github.com）下面。
+fn releases(
+    base: &str,
+    get: impl Fn(&str) -> std::result::Result<Value, Failure>,
+) -> std::result::Result<Value, Failure> {
+    let ask = |address: String| get(&format!("{address}?per_page=30"));
+    match ask(by_id(base)) {
+        Err(Failure::Status(404)) => ask(by_name(base)),
+        reply => reply,
+    }
+}
+
+/// 向 GitHub 查一次 Release 列表（至多两次 GET，见 `releases`）。失败变成给页面的一句简短说明，绝不弹错误对话框。
+fn fetch(current: &Version) -> std::result::Result<Option<Version>, String> {
+    let base = base()?;
+    let agent = ureq::AgentBuilder::new().redirects(0).timeout(Duration::from_secs(15)).build();
+    let releases = releases(&base, |address| get(&agent, address)).map_err(|failure| failure.message())?;
     Ok(newest(&releases, current))
 }
 
@@ -351,7 +409,7 @@ fn post_at(
 mod tests {
     use super::*;
     use serde_json::json;
-    use std::cell::Cell;
+    use std::cell::{Cell, RefCell};
     use std::sync::atomic::{AtomicU64, Ordering as Atomic};
     static NEXT: AtomicU64 = AtomicU64::new(0);
 
@@ -438,6 +496,49 @@ mod tests {
     }
 
     #[test]
+    fn releases_are_asked_by_repository_id_and_by_name_only_if_that_address_is_missing() {
+        const BY_ID: &str = "https://api.github.com/repositories/1407079068/releases?per_page=30";
+        const BY_NAME: &str = "https://api.github.com/repos/shio-vinyl/illustash/releases?per_page=30";
+        // 按顺序答复每次请求，记下问过的地址；多问一次或少问一次都算错。
+        let ask = |replies: Vec<std::result::Result<Value, Failure>>| {
+            let (seen, replies) = (RefCell::new(Vec::new()), RefCell::new(replies.into_iter()));
+            let reply = releases(API, |address| {
+                seen.borrow_mut().push(address.to_owned());
+                replies.borrow_mut().next().expect("多发了一次请求")
+            });
+            assert_eq!(replies.borrow_mut().next(), None, "准备的答复没有用完");
+            (reply, seen.into_inner())
+        };
+        let list = json!([{"tag_name": "v0.2.0"}]);
+        let (only_id, both) = (vec![BY_ID.to_owned()], vec![BY_ID.to_owned(), BY_NAME.to_owned()]);
+        // 平时只有一次请求，按仓库 ID。
+        assert_eq!(ask(vec![Ok(list.clone())]), (Ok(list.clone()), only_id.clone()));
+        // 按 ID 的地址答复 404：再按「账号/仓库名」查一次，以这一次为准，不论成败；没有第三次。
+        let missing = Failure::Status(404);
+        assert_eq!(ask(vec![Err(missing.clone()), Ok(list.clone())]), (Ok(list), both.clone()));
+        for second in [missing.clone(), Failure::Status(403), Failure::Other("GitHub 的回复不是版本列表")] {
+            assert_eq!(ask(vec![Err(missing.clone()), Err(second.clone())]), (Err(second), both.clone()));
+        }
+        // 其他失败不换地址：限流、GitHub 出错、连不上、回复不是列表（不跟随的 301 也在这一类）。
+        for failure in [
+            Failure::Status(403),
+            Failure::Status(429),
+            Failure::Status(500),
+            Failure::Other("连不上 GitHub，请检查网络后再试"),
+            Failure::Other("GitHub 的回复不是版本列表"),
+        ] {
+            assert_eq!(ask(vec![Err(failure.clone())]), (Err(failure), only_id.clone()));
+        }
+        // 给页面的说明和按名字查的时候一样。
+        assert_eq!(missing.message(), "GitHub 返回了错误（HTTP 404）");
+        assert_eq!(Failure::Status(500).message(), "GitHub 返回了错误（HTTP 500）");
+        for limited in [403, 429] {
+            assert_eq!(Failure::Status(limited).message(), "GitHub 暂时拒绝了请求，请稍后再试");
+        }
+        assert_eq!(Failure::Other("读取 GitHub 的回复失败").message(), "读取 GitHub 的回复失败");
+    }
+
+    #[test]
     fn nothing_is_fetched_until_allowed_then_at_each_launch_and_daily_while_open() {
         let fixture = Fixture::new();
         let launch = AtomicBool::new(false);
@@ -451,6 +552,8 @@ mod tests {
         let info = morning.info(&v("0.1.0"));
         assert_eq!(field(&info, "auto"), Value::Null);
         assert_eq!(field(&info, "due"), json!(false));
+        // 页面拿到的是检查时请求的地址：按仓库 ID 的那个（#358）。
+        assert_eq!(field(&info, "address"), json!("https://api.github.com/repositories/1407079068/releases"));
         // 从没问过，然后被拒绝：自动检查不联网就回复，也不消耗任何东西。
         post_at(&morning, &auto(), &v("0.1.0"), fetch).unwrap();
         post_at(&morning, &body(json!({"action": "auto", "allow": false})), &v("0.1.0"), fetch).unwrap();
