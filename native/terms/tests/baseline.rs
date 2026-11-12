@@ -9,6 +9,10 @@
 //! 每个用例在自己的目录里运行，有自己的键计数器（`ILLUSTASH_TEST_KEY_COUNTER`），在检查点处恢复，所以词条核心生成的键
 //! 与录制时相同；学习戳记里哈希了时钟，所以从产生它的响应里取出再往下传（输入中的 `<stamp@N>` 是本用例的响应里
 //! 出现的第 N 个戳记）。
+//!
+//! 基准录在导入按 tag 后缀建作品（#296）之前：每次重放的调用都设上 `ILLUSTASH_TEST_NO_IMPORT_WORKS`（`NO_IMPORT_WORKS`），
+//! 导入照旧规则走，录下的期望不改（用户 2026-11-12 定）。新规则由它自己的测试覆盖（`character_import`、`app_create`、
+//! `app_recognition`）。
 #![allow(clippy::unwrap_used, reason = "集成测试里 unwrap 就是断言")]
 use flate2::read::GzDecoder;
 use regex::Regex;
@@ -27,6 +31,8 @@ mod baseline;
 static STAMPS: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"learning-v1:[0-9a-f]{64}").unwrap());
 static STAMP_REF: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"<stamp@(\d+)>").unwrap());
 const COMPANIONS: [&str; 4] = ["", "-wal", "-shm", "-journal"];
+/// 只供测试：#296 之前的导入规则（见模块说明）。
+const NO_IMPORT_WORKS: &str = "ILLUSTASH_TEST_NO_IMPORT_WORKS";
 
 /// 一个用例的临时根目录：`@ROOT@`、`@ROOT_1@`……以及它们代表的真实目录。
 struct Roots {
@@ -203,6 +209,7 @@ impl Replay<'_> {
             .args(["migrate", "--db"])
             .arg(path)
             .env("ILLUSTASH_TEST_KEY_COUNTER", &self.counter)
+            .env(NO_IMPORT_WORKS, "1")
             .output()
             .unwrap();
         if !done.status.success() {
@@ -278,6 +285,7 @@ impl Replay<'_> {
             let mut child = Command::new(self.bin)
                 .args(&args)
                 .env("ILLUSTASH_TEST_KEY_COUNTER", &self.counter)
+                .env(NO_IMPORT_WORKS, "1")
                 .env(VERIFY_INCREMENTAL, &self.verified)
                 .stdin(Stdio::piped())
                 .stdout(Stdio::piped())
@@ -309,6 +317,7 @@ impl Replay<'_> {
                 let mut child = Command::new(bin)
                     .arg("serve")
                     .env("ILLUSTASH_TEST_KEY_COUNTER", counter)
+                    .env(NO_IMPORT_WORKS, "1")
                     .env(VERIFY_INCREMENTAL, verified)
                     .stdin(Stdio::piped())
                     .stdout(Stdio::piped())

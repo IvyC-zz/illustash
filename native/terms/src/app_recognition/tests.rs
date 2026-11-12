@@ -401,3 +401,52 @@ fn an_import_reports_its_real_stages_and_a_cancel_at_any_stage_before_commit_wri
         assert_eq!(human(&f.app()), app);
     }
 }
+
+/// 新图库里 WD 认出的新角色按 tag 后缀归到作品（#296）：同一个后缀只建一个待核对的作品；不是作品的后缀不建，
+/// 角色未归类。数据全部合成。
+#[test]
+fn wd_characters_in_a_new_library_get_the_work_of_their_tag_suffix() {
+    let f = Fixture::new(false);
+    let src = f.source();
+    src.execute_batch(
+        "INSERT INTO assets(uuid,filename,src_path,width,height,added_at,src_kind,in_scope,trashed) VALUES
+           ('b','b.png','b.png',16,16,'2026-10-03','folder',1,0);
+         INSERT INTO labels(uuid,dim,value,conf,source) VALUES ('b','character','first_girl_(synthetic_work)',0.9,'wd_v3'),
+           ('b','character','second_girl_(synthetic_work)',0.8,'wd_v3'),('b','character','third_girl_(vtuber)',0.7,'wd_v3'),
+           ('b','character','fourth_girl',0.6,'wd_v3');",
+    )
+    .unwrap();
+    let mut app = f.app();
+    let tx = app.transaction_with_behavior(TransactionBehavior::Immediate).unwrap();
+    crate::schema::begin_writing(&tx).unwrap();
+    import_changes(&tx, &src, &f.library, &["b".into()]).unwrap();
+    crate::schema::commit_writing(tx).unwrap();
+    let app = f.app();
+    let works: Vec<String> = app
+        .prepare(
+            "SELECT l.key||'→'||coalesce(q.key,'-')||'→'||r.work_text FROM term_links l JOIN term_tree r ON r.term_id=l.term_id
+             LEFT JOIN terms w ON w.key=r.work_id LEFT JOIN term_links q ON q.term_id=w.id AND q.system='qualifier'
+             WHERE l.system='wd_character' ORDER BY l.key",
+        )
+        .unwrap()
+        .query_map([], |r| r.get(0))
+        .unwrap()
+        .collect::<rusqlite::Result<_>>()
+        .unwrap();
+    assert_eq!(
+        works,
+        [
+            "first_girl_(synthetic_work)→synthetic_work→synthetic_work",
+            "fourth_girl→-→",
+            "second_girl_(synthetic_work)→synthetic_work→synthetic_work",
+            "third_girl_(vtuber)→-→vtuber",
+        ]
+    );
+    assert_eq!(
+        count(
+            &app,
+            "SELECT count(*) FROM terms t JOIN term_tree r ON r.term_id=t.id WHERE t.kind='work' AND r.review_status='pending'"
+        ),
+        1
+    );
+}
