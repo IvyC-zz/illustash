@@ -85,8 +85,8 @@ test('单图／选择快捷键在各页做什么', () => {
   assert.deepEqual(act('t', C, 2), {bar: 'variant'});
   assert.equal(act('t', C, 0), null);
   assert.equal(act('s', C, 2), null);
-  // 浏览页（图库、重复、新加入）
-  for (const view of [P.library, P.duplicates, P.recent]) {
+  // 浏览页（图库、重复）
+  for (const view of [P.library, P.duplicates]) {
     assert.deepEqual(act('remove', view, 3), {bar: 'notlib'}, view.name);
     assert.deepEqual(act('c', view, 3), {bar: 'assign'}, view.name);
     assert.deepEqual(act('c', view, 0), {single: 'also'}, view.name);
@@ -110,8 +110,9 @@ test('单图／选择快捷键在各页做什么', () => {
   assert.deepEqual(act('x', P.pending, 1), {bar: 'exclude'});
   assert.deepEqual(act('g', P.unmatched, 4), {bar: 'tag'});
   assert.deepEqual(act('g', P.unmatched, 0), {single: 'tag'});
-  // 相似组页（已知问题 4）：⌫ 有选中时也没有动作，但它不是整理页，键盘处理不提示
-  assert.equal(act('remove', P.sgroup, 2), null);
+  // 相似组页（#353 起是整理页）：选择栏是默认的那种，⌫ 交给它的「不是…」，和浏览页一样
+  assert.deepEqual(act('remove', P.sgroup, 2), {bar: 'notlib'});
+  assert.deepEqual(act('c', P.sgroup, 2), {bar: 'assign'});
 });
 
 // ---------- 键盘处理与换页 ----------
@@ -202,4 +203,88 @@ test('换页时关闭大图（已知问题 6）', async () => {
   assert.equal(modes.topMode(), 'browse');
   assert.equal(state.cursor, -1);
   assert.equal(state.selecting, false);
+});
+
+// ---------- #353 ----------
+// 首页没有网格光标：详情栏或大图打开时，单图快捷键作用于那张图；两者都没开时方向键、Space 不响应（已知问题 3）。
+test('首页：详情栏和大图里的单图快捷键生效，详情栏外方向键不动光标', async () => {
+  await wired();
+  const calls = [];
+  // 详情接口回一份最小的详情；其余写入接口回空对象
+  const detail = path => ({uuid: new URLSearchParams(path.split('?')[1]).get('id'), memberships: [], alternatives: [], user_tags: []});
+  globalThis.fetch = (path, opts = {}) => {
+    calls.push([path, opts.body ? JSON.parse(opts.body) : null]);
+    return Promise.resolve({status: 200, ok: true, json: async () => path.startsWith('/api/detail') ? detail(path) : {}});
+  };
+  const settle = () => new Promise(r => setTimeout(r, 0));
+  globalThis.Image = class {};
+  page.el('grid').hidden = true;
+  // 什么都没开：方向键、Space、↵ 都不处理，也不阻止页面滚动
+  reset({route: {page: 'home'}});
+  for (const key of ['ArrowRight', 'ArrowDown', ' ', 'Enter']) assert.equal(keydown(key).prevented, false, key);
+  assert.equal(state.cursor, -1);
+  assert.equal(state.viewer, -1);
+  // 详情栏打开：→ 换到下一张，不按网格的行去滚首页
+  reset({route: {page: 'home'}, focused: 'a'});
+  page.el('viewport').scrollTop = 1234;
+  assert.equal(keydown('ArrowRight').prevented, true);
+  assert.equal(state.focused, 'b');
+  assert.equal(page.el('viewport').scrollTop, 1234);
+  // ↓ 照常滚动页面
+  assert.equal(keydown('ArrowDown').prevented, false);
+  assert.equal(state.focused, 'b');
+  // X、⌫ 作用于详情栏里那张
+  calls.length = 0; keydown('x'); await settle();
+  assert.deepEqual(calls.find(([p]) => p === '/api/curate')?.[1], {ids: ['b'], action: 'exclude'});
+  calls.length = 0; keydown('Backspace'); await settle();
+  assert.deepEqual(calls.find(([p]) => p === '/api/change')?.[1], {ids: ['b'], action: 'rejected', entity: 'c1'});
+  // Space 打开的是详情栏里那张（不是别处留下的光标），大图里 ← → 换图，再按 Space 关掉
+  reset({route: {page: 'home'}, focused: 'c', cursor: 0});
+  assert.equal(keydown(' ').prevented, true);
+  assert.equal(state.viewer, 2);
+  keydown('ArrowLeft'); await settle();
+  assert.equal(state.viewer, 1);
+  keydown(' ');
+  assert.equal(state.viewer, -1);
+  // 面板页（设置、身份整理、画师抽查）照旧不响应
+  for (const r of [{page: 'settings', section: 'general'}, {page: 'identity'}, {page: 'artist-audit'}]) {
+    reset({route: r, focused: 'a'});
+    assert.equal(keydown('ArrowRight').prevented, false, r.page);
+    assert.equal(state.focused, 'a', r.page);
+  }
+  globalThis.fetch = undefined;
+});
+
+test('相似组页是整理页：↵ 在有光标时切换选中（已知问题 4）', async () => {
+  await wired();
+  page.el('grid').hidden = false;
+  reset({route: {page: 'sgroup', id: '4'}, cursor: 0});
+  keydown('Enter');
+  assert.deepEqual([...state.sel.ids], ['a']);
+  keydown('Enter');
+  assert.deepEqual([...state.sel.ids], []);
+  assert.equal(state.focused, null);
+});
+
+test('⌘滚轮、捏合只在主区是网格的页面缩放网格，也不交给浏览器缩放整页', async () => {
+  await wired();
+  let frames = 0;
+  globalThis.requestAnimationFrame = () => { frames++; return 0; };
+  const viewport = page.el('viewport');
+  const wheel = route => { reset({route}); frames = 0; const e = {ctrlKey: false, metaKey: true, deltaY: -50, clientX: 10, clientY: 10, prevented: false, preventDefault() { this.prevented = true; }}; for (const fn of viewport.listeners.wheel) fn(e); return e; };
+  const pinch = route => { reset({route}); frames = 0; const e = {scale: 2, clientX: 10, clientY: 10, prevented: false, preventDefault() { this.prevented = true; }}; for (const fn of viewport.listeners.gesturestart) fn(e); for (const fn of viewport.listeners.gesturechange) fn(e); return e; };
+  for (const r of [{page: 'settings', section: 'general'}, {page: 'home'}, {page: 'characters'}, {page: 'identity'}]) {
+    assert.equal(wheel(r).prevented, true, r.page); assert.equal(frames, 0, r.page);
+    assert.equal(pinch(r).prevented, true, r.page); assert.equal(frames, 0, r.page);
+  }
+  for (const r of [{page: 'library'}, {page: 'unmatched'}]) {
+    wheel(r); assert.equal(frames, 1, r.page);
+    pinch(r); assert.equal(frames, 1, r.page);
+  }
+  // 不按 ⌘ 的滚轮是普通滚动
+  reset({route: {page: 'library'}}); frames = 0;
+  const plain = {ctrlKey: false, metaKey: false, deltaY: 50, prevented: false, preventDefault() { this.prevented = true; }};
+  for (const fn of viewport.listeners.wheel) fn(plain);
+  assert.deepEqual([plain.prevented, frames], [false, 0]);
+  globalThis.requestAnimationFrame = () => 0;
 });
