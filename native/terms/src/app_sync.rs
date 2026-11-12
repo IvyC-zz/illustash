@@ -1263,7 +1263,7 @@ mod tests {
         )
         .unwrap();
         let waiting = to_recognise(&c).unwrap();
-        let order = waiting.iter().map(|row| row[0].as_str().unwrap()).collect::<Vec<_>>();
+        let order: Vec<&str> = waiting.iter().map(|row| row[0].as_str().unwrap()).collect();
         // 最新的在前，同一时间按资产 ID；没有保存时间的排在最后（空字符串先于 NULL）。
         // 已识别的 F、已移除的 G 和范围外的 H 不在其中。
         assert_eq!(order, ["A", "B", "D", "C", "E"]);
