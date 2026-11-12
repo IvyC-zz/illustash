@@ -34,7 +34,10 @@ run() { printf '\n== %s ==\n' "$*"; "$@"; }
 # 纯工具合成测试及测试文件语法尽早验证；改动相关测试可额外前置。
 run "$python" -m compileall -q tests
 run "$python" tools/check_architecture.py
-run "$python" tools/check_frontend.py
+# 前端结构检查：基线只能缩小。--strict-stale 要求改好的违规同时收紧基线；--base-ref 取与 main 的共同祖先，
+# 基线比它大就失败（本地没有 main 或 origin/main 时跳过这一项）。CI 里只在 main 上跑，没有可比较的基准。
+frontend_base=$(git merge-base HEAD origin/main 2>/dev/null || git merge-base HEAD main 2>/dev/null || true)
+run "$python" tools/check_frontend.py --strict-stale ${frontend_base:+--base-ref "$frontend_base"}
 run "$python" -m unittest discover -s tests -p test_local_acceptance.py -v -b
 # 旧变量不能在 release 前调用任意测试，避免读取上一候选的二进制。
 if [ -n "${CHECK_ALL_PREFLIGHT_TESTS:-}" ]; then
