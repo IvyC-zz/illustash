@@ -131,7 +131,7 @@
 
  "crates/platform/src/sqlite.rs":"c77ae1e6babb5af9b0c922280a307a4704d831af3bc661f8f89e28e9e229dca2",
 
- "desktop/build.rs":"8cc66c324ca02d0d45e2f262443447f9d076339793263634b3cc0ca3aef2f73b",
+ "desktop/build.rs":"391b5dc7bbabe9c63951300693c29688495e35bc0f5fb21a020f6e0d7038b9eb",
 
  "desktop/src/bridge.rs":"aa9215d33c05f971b0221f9cf3c151713b2cc93d17472fc6034e350a546f8adb",
 
@@ -139,15 +139,15 @@
 
  "desktop/src/i18n.rs":"5738b5894f4ac8b7e1cf9fb4e6c82381644865982b6264aec77668c148a76dab",
 
- "desktop/src/main.rs":"1ccf6a5bc8ec6952d113a88afd689688cfe7927f465fef928e2a98569778a89d",
+ "desktop/src/main.rs":"80cadbcdfe6cc07059049fbba42b54af7b9680e0200989955631aa5b8ebfbf7c",
 
  "desktop/src/picker.rs":"376898a399b0752e10b33e10123b4fea63657a9bc71fe6cd009f1d6580c11f11",
 
  "desktop/src/pixiv.rs":"53ff9d2d3f3c85f49ff59c7d1763cf7706bedf622bf6c1582cd4161156ae2486",
 
- "desktop/src/server.rs":"8582199fd052249fbd6205238b35143295e513c30161dd914f88fcce4d3eeb2b",
+ "desktop/src/server.rs":"b3156d2b37a7cfafff201d8cde11f3bec16d27a93268fd702e2900a95df35057",
 
- "desktop/src/welcome.rs":"4feafc82f4fe9f8752b9224c422e7f286f52a220c22599c3434b13efee0ff7de",
+ "desktop/src/welcome.rs":"844d5381becb2c34419067b49577a884fba77c131159ab7a00f4b151a532bb38",
 
  "desktop/tauri.conf.json":"bb054aa3da9ab925a3215c27a479619e3aa69504f539e57ac6d4c2aefa8343db",
 
@@ -159,7 +159,7 @@
 
  "native/terms/src/app_accounts.rs":"dce690a139403137f1c829f9f1edf26fc83627bee455420a2b38a65520ce6cca",
 
- "native/terms/src/app_archives.rs":"e17326d0f439a356ea6e866847cf01c0b1b458414a864091779039e335b51bbe",
+ "native/terms/src/app_archives.rs":"2b65e891ca922de5635f752ab180d9aee802dd63f78ab5a02b69a12af1b505b5",
 
  "native/terms/src/app_characters.rs":"a285efa8f72b9124cfe8f6a9e14631e196512bf2b239d12912bef5501b1f4cfc",
 
@@ -181,13 +181,13 @@
 
  "native/terms/src/app_folder.rs":"cd148b0a312065b97da3cbea8dc782a596eb0d8e842a1dfcf2d45f259fea6216",
 
- "native/terms/src/app_http.rs":"849ca98e4dc5b50b9d05d4aba1909b269b66c3aab9369d815f280ad24455447c",
+ "native/terms/src/app_http.rs":"90aaa1892dcf1842da7bd4e730762c20833c4e17ed573ab59fdced527c841023",
 
  "native/terms/src/app_identity.rs":"0a1013c73b59db6ad290a8bdfae5b554cef1fa36d73b3f217e029c0812fccd20",
 
- "native/terms/src/app_imports.rs":"5d38a4aed511f3d68df6997ceb5b6ef9aeb3434ed6d917c3ca614329f2e77290",
+ "native/terms/src/app_imports.rs":"1efd8508ee3f82fa51ce479012b1c31569fee37509334611561f399c72abf69b",
 
- "native/terms/src/app_index.rs":"701b9f4f0c48dd836308f943e17a0676b1b489cb5837525ea41a6844df78c9b5",
+ "native/terms/src/app_index.rs":"4fc306034a5b362d30066a5f78dcb6c130e1badcf4867902c92f81c8fd113d7e",
 
  "native/terms/src/app_integrity.rs":"d7ff3af8c6b4b0a90293a98cf65951db98aad92fe310d5cd29a837c49a6e3d4a",
 
@@ -219,11 +219,11 @@
 
  "native/terms/src/app_migration_sql/provenance.sql":"a780f1f8837dd2c90a556539c114d56cdaa513b057fb667bf0c5c9d604f75934",
 
- "native/terms/src/app_models.rs":"2c09d1f5c58ddb3e8088238f8d6691bc63857209a67dcd03d6312181a58bd368",
+ "native/terms/src/app_models.rs":"df0c6d780f04204bdd457a2403bc9726173b055e8afe796577bd94c7ca1d9281",
 
  "native/terms/src/app_name_sources.rs":"effedaf83af896ecd880784490e4b1483fe05c28c3098a098c2ae80c68a2f458",
 
- "native/terms/src/app_names.rs":"6648a1f39a60285fc193b0a6689440e54e6f620b93d3a721685ec2bcdcb97d0a",
+ "native/terms/src/app_names.rs":"f1e9ee13d2fc826d1c0071b5de7e4a38700efe9445001d472d70b07c3d60795f",
 
  "native/terms/src/app_onboarding.rs":"829290530c622801e4d6d10ffbecf8e98f29257533bc64f7ee9dde4532293e34",
 
@@ -235,7 +235,7 @@
 
  "native/terms/src/app_profiles.rs":"9146ad3345db80e03c9a8f68e02f3e253fe4cc04a21610a03060061aa0cfea9b",
 
- "native/terms/src/app_provenance.rs":"33c7303e6787ea58fc7c8336811776308294bb6ca95f61fb8bdd40fe71861f23",
+ "native/terms/src/app_provenance.rs":"78e2e1660cb702fa9b9240da7c9a4b19b6203344b8bf9cab98380845d03705cd",
 
  "native/terms/src/app_provenance_cache.rs":"cb3ae9fbc002bbf79281b1a896dba6c76cf3cad2888264db8fc2c9a11d0f29bf",
 
@@ -247,7 +247,7 @@
 
  "native/terms/src/app_rescue.rs":"08915aa36490c06b4d43fb0ff6337d4a548b451bc15c090928b0d37e6af4456d",
 
- "native/terms/src/app_research.rs":"89b135b2b6beb1a50448e14051cb5c7520c4c51b0bdcc680fcecc3cbda615639",
+ "native/terms/src/app_research.rs":"3e793d257030bc5aa0dcecd16c887b4dee04463f67c1db9e3b46738fdcf44e5b",
 
  "native/terms/src/app_resources.rs":"3304fcac09af5a36a490589de3dd36fd6f79bad80cf515f44f6d2888ee1d80e3",
 
@@ -261,9 +261,9 @@
 
  "native/terms/src/app_sources.rs":"8ee039dc596b1253783ab4256fd7befa1ce4087eee3f93b69208e7ede676c819",
 
- "native/terms/src/app_sync.rs":"fb466805b458fc642d2ff8638b3978330c2960174a83d49263d24d6976d90a82",
+ "native/terms/src/app_sync.rs":"297bb3ef681393f706229e5eb85d9d3a9020071247614df10437bc26b3d4fc58",
 
- "native/terms/src/app_tasks.rs":"c4fd4579b2899d6f303ce6cb66eb4fc7f3c615ac68df2c88c63242ce86870247",
+ "native/terms/src/app_tasks.rs":"edeab46a8fa6cccbf00956205a4639bb98307fab32ad62fa746c98cfb9a11a94",
 
  "native/terms/src/app_updates.rs":"856c4e3dd1cdd91baacd3097dcd1cf62daef71399212a724219e69b8536d4437",
 
@@ -277,6 +277,8 @@
 
  "native/terms/src/desktop_shell.rs":"381733278909d3290199f212c138d02197f1a259c9fda2a58819609b986f27a2",
 
+ "native/terms/src/diagnostics.rs":"8eff6d4eb9fe74a1072ba8e4299cefeb4b36933c421000ff51d84a1e872e5b09",
+
  "native/terms/src/http.rs":"806d8b048bc9e2925765986a082d3bc542c8e669bb93fcc745be8508fcc9ec91",
 
  "native/terms/src/http_app.rs":"1cdb28245fb1d97ac446313b089c8fe4700ce22027dbb7272bf3a6c04750a984",
@@ -287,7 +289,7 @@
 
  "native/terms/src/http_characters.rs":"77486635e9790c369b6f57ba96a9e57118acc646223cd1396740f91a4f31eb6c",
 
- "native/terms/src/http_host_get.rs":"bf803ce14b99b126cf946727d0548fab0fc16f150b2005ce5f03415cd30631a6",
+ "native/terms/src/http_host_get.rs":"ccfc6662205665fe50084e5d1ed607bd1b0b764e9ecec2805987f2621e362d32",
 
  "native/terms/src/http_host_post.rs":"8db1013ee971ea4812d3da18f416097cb33e4e37789dcb890a8115f2f41fc9a3",
 
@@ -315,7 +317,7 @@
 
  "native/terms/src/index_generation.rs":"940c236d35bee6001cc2225701d64d0be2964a2575a653a897449650535ad2fa",
 
- "native/terms/src/lib.rs":"e1f48b88eb3d2adf71593fc0c25c91ff2b21604937cf3e3744ab15af4f66e629",
+ "native/terms/src/lib.rs":"9fac2646674d06b45fd0eb53fc16fe9b146307e16ffce265db5c23492e11c09e",
 
  "native/terms/src/platform_process.rs":"11d73a02dc4f9baa3779aaef132012ef36908e510747326c6704374681f606a3",
 
@@ -524,7 +526,7 @@
  "native/terms/src/cli.rs":{"cli-entry":["recognition-import","folder-scan","photos-scan","library-scan","library-create","http","serve","wd-pending","names-command","names-project","names-search","character-command","identity-command","learning-snapshot","publish-learning","reproject-characters","validate","migrate","import","judge","tag","reproject","undo"],"database-write":[[0,3],3,1]},
  "crates/core/src/character_sql/fold.sql":{"database-write":["UPDATE:duplicates"]},
  "crates/core/src/character_commands.rs":{"database-write":{"@0":10,"@184":5,"@198":1,"DELETE FROM:identity_scopes":2,"DELETE FROM:identity_suspended":2,"INSERT INTO:identity_scopes":1,"@14":1,"@15":1,"INSERT OR REPLACE INTO:assertions":1,"DELETE FROM:assertions":2,"INSERT INTO:assertions":1,"@18":1,"@35":4,"INSERT OR IGNORE INTO:deferred":1,"DELETE FROM:deferred":5,"INSERT OR REPLACE INTO:asked":2,"INSERT INTO:reviews":1,"INSERT OR REPLACE INTO:identity_uncertain":1,"@175":1,"INSERT INTO:deferred":1,"@190":1,"DELETE FROM:identity_anchor_decisions":1,"INSERT INTO:identity_anchor_decisions":1,"INSERT INTO:identity_anchor_history":1}},
- "native/terms/src/http_host_get.rs":{"http-branch":[17,97,42,39,"/api/similar|/api/clusters",[26,2],41,43,"/api/settings","/api/libraries",291,293,295,296,305,306]},
+ "native/terms/src/http_host_get.rs":{"http-branch":[17,97,42,39,"/api/similar|/api/clusters",[26,2],41,43,"/api/settings","/api/libraries",291,293,295,296,305,306,"/api/diagnostics"]},
  "native/terms/src/app_create.rs":{"database-write":{"ATTACH":1,"dynamic-or-wrapper":9,"INSERT INTO:main.":1,"CREATE INDEX:if":1,"COMMIT":3,"DETACH":1,"ALTER TABLE:assets":1,"INSERT OR IGNORE INTO:meta":1}},
  "native/terms/src/app_index.rs":{"database-write":[[0,7],34,[1,5],33,283,284,285,286,[208,2],12,[199,2],287,249,201,[3,2]],"entrypoint":[4]},
  "native/terms/src/http_browse.rs":{"http-branch":["/api/assets|/api/ids",[246,3],[77,2],[248,3],24,99,89,"/api/assets|/api/assets/count|/api/ids",[78,3]],"database-write":[[7,2],[0,2]]},

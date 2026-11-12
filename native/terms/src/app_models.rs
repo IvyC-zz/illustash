@@ -337,6 +337,15 @@ impl Models {
                 }
                 Err(Stop::Cancelled) => job["status"] = "cancelled".into(),
                 Err(Stop::Failed(message)) => {
+                    let d = crate::diagnostics::record(
+                        crate::diagnostics::Operation::Models,
+                        crate::diagnostics::Stage::Background,
+                        crate::diagnostics::Cause::Background,
+                        None,
+                        crate::diagnostics::Publication::MayBePartial,
+                        crate::diagnostics::Retry::CheckState,
+                    );
+                    job["diagnostic"] = d.value();
                     job["status"] = "failed".into();
                     job["message"] = message.into();
                 }

@@ -264,3 +264,9 @@ mod tests {
         assert!(requests.seen.lock().expect("lock poisoned by an earlier panic").len() <= 8);
     }
 }
+
+/// 在宿主停止或尚未打开图库时仍可查阅；内容由原生白名单生成。
+#[tauri::command(async)]
+pub fn startup_diagnostics() -> Value {
+    illustash_terms::diagnostics::report()
+}

@@ -103,6 +103,7 @@ impl Syncer {
                     "unreadable",
                     "damaged",
                     "problem",
+                    "diagnostic",
                 ]
                 .iter()
                 .filter_map(|k| state.get(k).map(|v| ((*k).to_string(), v.clone())))
@@ -159,6 +160,9 @@ impl Syncer {
                 Ok(_) => Ok(()),
                 Err(e) => {
                     let mut s = state.lock().expect("sync state mutex poisoned");
+                    let stage = crate::diagnostics::stage(
+                        s.get("stage").or_else(|| s.get("status")).map(crate::http_json::Json::text).unwrap_or(""),
+                    );
                     s.set(
                         "status",
                         (if cancel.load(Ordering::SeqCst) || crate::platform_process::stopping() {
@@ -168,6 +172,15 @@ impl Syncer {
                         })
                         .into(),
                     );
+                    if s.status() == Status::Error || ctx.timed_out() {
+                        let d = crate::diagnostics::failure(
+                            crate::diagnostics::Operation::Sync,
+                            stage,
+                            &e,
+                            crate::diagnostics::Publication::MayBePartial,
+                        );
+                        s.set("diagnostic", d.value().into());
+                    }
                     s.set("message", stop_message(cancel, Some(&ctx), &e).into());
                     s.set("finished_at", now().into());
                     Err(e)

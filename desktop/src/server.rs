@@ -241,12 +241,22 @@ pub fn open_outside(url: &Url) {
     }
 }
 
-pub(crate) fn show_error(main: &WebviewWindow, message: &str, log: &VecDeque<String>) {
-    let tail: Vec<&str> = log.iter().map(String::as_str).collect();
+pub(crate) fn show_error(main: &WebviewWindow, message: &str, _log: &VecDeque<String>) {
+    use illustash_terms::diagnostics::{Cause, Stage};
+    show_diagnostic(main, message, Stage::Startup, Cause::HostStartup, None);
+}
+fn show_diagnostic(main: &WebviewWindow, message: &str, stage: illustash_terms::diagnostics::Stage,
+    cause: illustash_terms::diagnostics::Cause, code: Option<i32>) {
+    use illustash_terms::diagnostics::{self, Publication, Operation, Retry};
+    let receipt = diagnostics::record(Operation::Host, stage, cause, code, Publication::Unknown, Retry::Restart);
+    let message = format!("{message}\n{}", tr_with("错误编号：{id}", &[("id", &receipt.id)]));
+    let mut report = diagnostics::report();
+    report["current"] = receipt.value();
+    let text = serde_json::to_string_pretty(&report).expect("diagnostic report is JSON");
     let js = format!(
         "window.showError && window.showError({}, {})",
-        serde_json::to_string(message).expect("strings always serialize"),
-        serde_json::to_string(&tail.join("\n")).expect("strings always serialize")
+        serde_json::to_string(&message).expect("strings always serialize"),
+        serde_json::to_string(&text).expect("strings always serialize")
     );
     *main.app_handle().state::<ErrorPage>().0.lock().expect("lock poisoned by an earlier panic") = Some(js.clone());
     on_start(main, &js);
@@ -539,11 +549,9 @@ fn run(app: &AppHandle, main: &WebviewWindow, library: Option<PathBuf>, start: S
             }
             if !ready.load(Ordering::SeqCst) && active.lock().expect("lock poisoned by an earlier panic").elapsed() > STALL {
                 app.state::<Child>().stop();
-                show_error(
-                    &main,
+                show_diagnostic(&main,
                     &tr("本地服务 30 秒没有任何进展，已停止；可以重试，或选择其他图库"),
-                    &log.lock().expect("lock poisoned by an earlier panic"),
-                );
+                    illustash_terms::diagnostics::Stage::Startup, illustash_terms::diagnostics::Cause::Timeout, None);
                 return;
             }
             thread::sleep(Duration::from_millis(50));
@@ -569,20 +577,41 @@ fn run(app: &AppHandle, main: &WebviewWindow, library: Option<PathBuf>, start: S
                 return;
             }
         }
+        let code = match &status { Ok(Some(s)) => exit_code(s), Err(e) => e.raw_os_error(), _ => None };
         let why = match status {
             Ok(Some(s)) => {
-                tr_with("本地服务已退出（{status}）；请查看下方日志，可以重试或选择其他图库", &[("status", &s)])
+                tr_with("本地服务已退出（{status}）；可复制诊断信息，重试或选择其他图库", &[("status", &s)])
             }
             Err(e) => tr_with("本地服务异常：{error}；请重新启动应用", &[("error", &e)]),
             _ => unreachable!(),
         };
-        show_error(&main, &why, &log.lock().expect("lock poisoned by an earlier panic"));
+        show_diagnostic(&main, &why, illustash_terms::diagnostics::Stage::Exit,
+            illustash_terms::diagnostics::Cause::HostExit, code);
     });
+}
+
+/// Unix 信号用负数保存，与普通退出码区分；不保存 stderr 或任意进程文字。
+fn exit_code(status: &std::process::ExitStatus) -> Option<i32> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::ExitStatusExt;
+        status.code().or_else(|| status.signal().map(|signal| -signal))
+    }
+    #[cfg(not(unix))]
+    { status.code() }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(unix)]
+    #[test]
+    fn diagnostics_distinguishes_host_exit_codes_and_signals() {
+        use std::os::unix::process::ExitStatusExt;
+        assert_eq!(exit_code(&std::process::ExitStatus::from_raw(0)), Some(0));
+        assert_eq!(exit_code(&std::process::ExitStatus::from_raw(2 << 8)), Some(2));
+        assert_eq!(exit_code(&std::process::ExitStatus::from_raw(9)), Some(-9));
+    }
     #[test]
     fn ready_requires_exact_native_origin() {
         assert_eq!(

@@ -96,7 +96,7 @@ fn classify(error: Error) -> (u16, String) {
         Error::Conflict(message) => (409, message),
         other => {
             eprintln!("导入失败：{other}");
-            (500, "保存失败，未提交的操作已回滚；请查看启动终端".into())
+            (500, "导入失败，请核对提交状态；可在设置的关于页复制诊断信息".into())
         }
     }
 }
@@ -182,6 +182,20 @@ impl Imports {
             let mut state = lock(&shared);
             match result {
                 Ok(value) => {
+                    // 发布成功、投影/登记尚未完成仍是需要反馈的故障；保留业务成功结果，不能诱导重复导入。
+                    if value.get("status").map(Json::text) == Some("pending")
+                        || value.get("listed").is_some_and(|v| v.dump() == "false")
+                    {
+                        use crate::diagnostics::{self, Operation, Publication};
+                        let reason = Error::Invalid(value.get("error").map(Json::text).unwrap_or("").to_owned());
+                        let d = diagnostics::failure(
+                            if kind == Kind::Recognition { Operation::Recognition } else { Operation::Archive },
+                            diagnostics::stage(state.get("stage").map(Json::text).unwrap_or("")),
+                            &reason,
+                            Publication::Committed,
+                        );
+                        state.set("diagnostic", d.value().into());
+                    }
                     for key in ["stage", "done", "total"] {
                         state.remove(key);
                     }
@@ -194,6 +208,18 @@ impl Imports {
                     state.set("reason", lock(&why).unwrap_or(QUITTING).into());
                 }
                 Err(error) => {
+                    use crate::diagnostics::{self, Operation, Publication};
+                    let d = diagnostics::failure(
+                        if kind == Kind::Recognition { Operation::Recognition } else { Operation::Archive },
+                        diagnostics::stage(state.get("stage").map(Json::text).unwrap_or("")),
+                        &error,
+                        if progress.published.load(Ordering::SeqCst) {
+                            Publication::Committed
+                        } else {
+                            Publication::NotCommitted
+                        },
+                    );
+                    state.set("diagnostic", d.value().into());
                     let (code, message) = classify(error);
                     state.set("status", "error".into());
                     state.set("error", message.into());
@@ -386,7 +412,30 @@ mod tests {
             cancelling.join().unwrap();
             let end = settle(&imports);
             assert_eq!(end.get("status").unwrap().text(), status, "{}", end.dump());
+            if status == "error" {
+                let d = end.get("diagnostic").unwrap();
+                assert_eq!(d.get("publication").unwrap().text(), "committed");
+                assert_eq!(d.get("retry").unwrap().text(), "check_state");
+            }
         }
+    }
+
+    #[test]
+    fn published_pending_result_keeps_success_and_reports_committed_diagnostic() {
+        let imports = Imports::default();
+        imports
+            .start(identity(1), Kind::Recognition, "synthetic", |p| {
+                p.publish(&mut || Ok(()))?;
+                p.stage("projecting");
+                Ok(Json::object([("status", "pending".into()), ("error", "synthetic projection failure".into())]))
+            })
+            .unwrap();
+        let end = settle(&imports);
+        assert_eq!(end.get("status").unwrap().text(), "done");
+        assert_eq!(end.get("result").unwrap().get("status").unwrap().text(), "pending");
+        let d = end.get("diagnostic").unwrap();
+        assert_eq!(d.get("publication").unwrap().text(), "committed");
+        assert_eq!(d.get("retry").unwrap().text(), "check_state");
     }
 
     #[test]
@@ -402,6 +451,9 @@ mod tests {
             let end = settle(&imports);
             assert_eq!(end.get("status").unwrap().text(), "error");
             assert_eq!(end.get("code").unwrap().dump(), code);
+            let d = end.get("diagnostic").unwrap();
+            assert_eq!(d.get("publication").unwrap().text(), "not_committed");
+            assert_eq!(d.get("stored").unwrap().dump(), "false", "unit tests never write user diagnostics");
         }
         let imports = Imports::default();
         imports.start(identity(1), Kind::Archive, "a.zip", |_| panic!("synthetic import crash")).unwrap();

@@ -494,11 +494,20 @@ impl Exports {
                     ("path", path.to_string_lossy().as_ref().into()),
                     ("bytes", serde_json::Value::from(fs::metadata(&path).map(|m| m.len()).unwrap_or(0)).into()),
                 ]),
-                Err(e) => Json::object([
-                    ("status", "error".into()),
-                    ("path", dest.to_string_lossy().as_ref().into()),
-                    ("error", e.reason().chars().take(200).collect::<String>().into()),
-                ]),
+                Err(e) => {
+                    let d = crate::diagnostics::failure(
+                        crate::diagnostics::Operation::Export,
+                        crate::diagnostics::Stage::Background,
+                        &e,
+                        crate::diagnostics::Publication::Unknown,
+                    );
+                    Json::object([
+                        ("status", "error".into()),
+                        ("path", dest.to_string_lossy().as_ref().into()),
+                        ("error", e.reason().chars().take(200).collect::<String>().into()),
+                        ("diagnostic", d.value().into()),
+                    ])
+                }
             };
         })?;
         *tasks = Some(Task {

@@ -70,6 +70,7 @@ pub(crate) use illustash_core::compat_text;
 
 pub(crate) use illustash_core::compat_unicode;
 pub mod desktop_shell;
+pub mod diagnostics;
 pub(crate) use illustash_core::error;
 pub mod http;
 mod http_app;

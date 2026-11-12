@@ -2,6 +2,7 @@
 // 导入。每个任务怎样轮询、状态怎样用文字说、启动或取消时发什么；不碰 DOM。它们的状态仍在 core/state.js（sync、
 // syncHistory、syncDamaged、index、names、provenance、importTask、settings.tasks.similar），由这里写入，在它们也搬过来
 // 之前，设置页也会写。任务运行期间轮询会自己重新排上；重叠的轮询绝不会让状态倒退（#34）。
+import {diagnosticLine} from './diagnostics.js';
 import {t, tb} from './i18n.js';
 import {number, stamp} from './format.js';
 import {session, api, post, shared} from './session.js';
@@ -199,13 +200,17 @@ export function importCount(job) {
   return ' ' + t('{done}/{total} 张', {done: number(job.done), total: number(job.total)});
 }
 export function importLine(job) {
+  const line = importSummary(job), note = diagnosticLine(job?.diagnostic);
+  return line + (note ? ' · ' + note : '');
+}
+function importSummary(job) {
   if (!job || job.status === 'idle') return '';
   const recognition = job.kind === 'recognition';
   const name = job.file ? t('「{file}」', {file: job.file}) : '';
   if (job.status === 'running') return (recognition ? t('导入识别结果{name}：{step}', {name, step: (IMPORT_STAGES[job.kind] || {})[job.stage] || t('正在准备')}) : t('导入归档{name}：{step}', {name, step: (IMPORT_STAGES[job.kind] || {})[job.stage] || t('正在准备')})) + importCount(job) + '…';
   if (job.status === 'stopping') return recognition ? t('正在取消导入识别结果{name}…', {name}) : t('正在取消导入归档{name}…', {name});
   if (job.status === 'cancelled') return t('{reason}；图库没有改动。', {reason: tb(job.reason) || t('导入已取消')});
-  if (job.status === 'error') return recognition ? t('导入识别结果{name}失败：{reason}', {name, reason: tb(job.error)}) : t('导入归档{name}失败：{reason}', {name, reason: tb(job.error)});
+  if (job.status === 'error') return (recognition ? t('导入识别结果{name}失败：{reason}', {name, reason: tb(job.error)}) : t('导入归档{name}失败：{reason}', {name, reason: tb(job.error)}));
   if (job.status !== 'done') return '';
   const r = job.result || {};
   // 已发布但没有登记（#111）：打开它就会登记；再导入会另建一个带编号的图库。
