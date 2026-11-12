@@ -427,6 +427,7 @@ class CandidateExampleWiringTest(unittest.TestCase):
         self.assertIn('\n  pull_request:\n    branches: [main]\n', ci)
         self.assertNotIn('pull_request_target', ci)
         self.assertIn('github.event.pull_request.head.repo.full_name == github.repository', ci)
+        self.assertIn('!github.event.repository.private', ci)
         self.assertIn('\npermissions:\n  contents: read\n', ci)
         self.assertNotIn('secrets.', ci)
 

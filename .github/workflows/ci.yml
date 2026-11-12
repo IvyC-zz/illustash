@@ -4,7 +4,7 @@
 name: CI
 
 # Linux 已冻结（README）：除不涉平台的前端 JS 外，全部在 macOS 上运行。
-# 草稿 PR 不跑（转 Ready 时跑），来自 fork 的 PR 不跑（暂不接受外部贡献）。
+# 草稿 PR 不跑（转 Ready 时跑），来自 fork 的 PR 不跑（暂不接受外部贡献），仓库私有时只跑手动触发的。
 # push 到 main 只为给 PR 留可复用的编译缓存：PR 写的缓存别的 PR 读不到。
 on:
   pull_request:
@@ -27,12 +27,15 @@ env:
   PYTHON_VERSION: '3.12'
 
 jobs:
-  # 判断要不要跑：fork、草稿不跑；只改文档（docs/ 和根目录的 Markdown）的 PR 跳过构建与测试，
-  # 与 AGENTS.md「只改文档的 PR 不跑全量」一致。docs/THIRD_PARTY.md 随安装包分发，按代码算。
+  # 判断要不要跑：仓库私有时只跑手动触发的（私有库 macOS 按 10 倍计分钟）；fork、草稿 PR 不跑；
+  # 只改文档（docs/ 和根目录的 Markdown）的 PR 跳过构建与测试，与 AGENTS.md「只改文档的 PR 不跑全量」一致。
+  # docs/THIRD_PARTY.md 随安装包分发，按代码算。
   changes:
     if: >-
-      github.event_name != 'pull_request' ||
-      (github.event.pull_request.head.repo.full_name == github.repository && !github.event.pull_request.draft)
+      github.event_name == 'workflow_dispatch' ||
+      (!github.event.repository.private &&
+      (github.event_name != 'pull_request' ||
+      (github.event.pull_request.head.repo.full_name == github.repository && !github.event.pull_request.draft)))
     name: 改动范围
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -257,9 +260,12 @@ jobs:
           tools/test_native_contracts.sh "$binary"
 
   # 分支保护只要求这一项：job 改名或增减时不用改保护规则。跳过的 job（只改文档）算通过；
-  # 来自 fork 的 PR 没有运行检查，这里判失败。草稿 PR 不跑，转 Ready 后重跑。
+  # 来自 fork 的 PR 没有运行检查，这里判失败。草稿 PR 不跑，转 Ready 后重跑；仓库私有时同「改动范围」。
   ok:
-    if: always() && !(github.event_name == 'pull_request' && github.event.pull_request.draft)
+    if: >-
+      always() &&
+      (github.event_name == 'workflow_dispatch' || !github.event.repository.private) &&
+      !(github.event_name == 'pull_request' && github.event.pull_request.draft)
     needs: [changes, core, python, js, desktop, contracts]
     name: 全部检查
     runs-on: ubuntu-latest
