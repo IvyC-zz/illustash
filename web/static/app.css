@@ -16,7 +16,7 @@
   --glass-head:rgba(255,255,255,.88);--bar-bg:rgba(24,24,30,.86);--toast-bg:rgba(24,24,30,.88);--menu-group:var(--sheet);
   --splash-bg:radial-gradient(120% 90% at 50% 42%,#fff 0%,#f6f5fd 55%,#ecebf9 100%);
   /* 控件状态：开关、分段控件、悬停、徽标、滚动条 */
-  --switch-off:#d4d4da;--seg-on:var(--sheet);--wash-hover:rgba(var(--sh),.03);--chip-hover:#e0e0e5;--palette-hover:#e2e2e7;
+  --switch-off:#d4d4da;--view-sw-off:rgba(var(--sh),.14);--seg-on:var(--sheet);--wash-hover:rgba(var(--sh),.03);--chip-hover:#e0e0e5;--palette-hover:#e2e2e7;
   --btn-hover-filter:brightness(.96);--badge-bg:var(--soft);--badge-ink:var(--ink2);--tag-on-ink:var(--accent);--scroll-thumb:#d7d7de;
   --select-arrow:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Cpath d='m6 8 4 4 4-4' fill='none' stroke='%238b8b94' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
   --r18-on:#fff;
@@ -39,7 +39,7 @@
   --glass-head:rgba(40,40,45,.88);--bar-bg:rgba(58,58,66,.9);--toast-bg:rgba(58,58,66,.94);--menu-group:#34343a;
   --splash-bg:radial-gradient(120% 90% at 50% 42%,#2b2b33 0%,#222227 55%,#1b1b1f 100%);
   /* 控件状态：开关、分段控件、悬停、徽标、滚动条 */
-  --switch-off:#46464e;--seg-on:#42424a;--wash-hover:rgba(255,255,255,.04);--chip-hover:var(--soft);--palette-hover:var(--soft);
+  --switch-off:#46464e;--view-sw-off:rgba(255,255,255,.16);--seg-on:#42424a;--wash-hover:rgba(255,255,255,.04);--chip-hover:var(--soft);--palette-hover:var(--soft);
   --btn-hover-filter:brightness(1.12);--badge-bg:var(--accent-soft);--badge-ink:var(--accent-ink);--tag-on-ink:var(--accent-ink);
   --scroll-thumb:#4a4a52;
   --select-arrow:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Cpath d='m6 8 4 4 4-4' fill='none' stroke='%238d8d96' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
@@ -117,7 +117,7 @@ main{flex:1;display:flex;flex-direction:column;min-width:0}
 h1{font-size:var(--fs-22);letter-spacing:-.6px;font-weight:600;margin:0 0 6px}
 h1.tag-title{font-size:var(--fs-20);font-weight:600;letter-spacing:-.2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;user-select:all}
 p{margin:0;color:var(--muted);font-size:var(--fs-12);line-height:1.6}
-.unchecked{color:#7a6a3e}
+.unchecked{color:var(--tone-sand-ink)}
 .heading-actions{display:flex;gap:var(--space-4);flex-shrink:0}
 .link{color:var(--ink2)}
 .toolbar{display:flex;gap:var(--space-8);padding-bottom:var(--space-14);align-items:center;flex-wrap:wrap}
@@ -497,7 +497,7 @@ dialog.relate{width:min(980px,calc(100vw - 32px));max-height:88vh;overflow:auto}
 .about-actions{display:flex;gap:var(--space-8);flex-wrap:wrap}
 .credits td small{display:block;color:var(--muted);font-size:var(--fs-11)}
 .more-menu{left:auto;right:0;width:190px}
-.unchecked-link{color:#7a6a3e;border-radius:var(--radius-4)}
+.unchecked-link{color:var(--tone-sand-ink);border-radius:var(--radius-4)}
 .unchecked-link:hover{text-decoration:underline}
 .unchecked-link.on{background:var(--tone-sand-bg);color:var(--tone-sand-ink);padding:var(--space-1) var(--space-6)}
 .tag-popover .palette-label{padding:var(--space-6) var(--space-8) var(--space-2)}
@@ -543,7 +543,7 @@ dialog.relate{width:min(980px,calc(100vw - 32px));max-height:88vh;overflow:auto}
 .palette-add{flex-shrink:0;width:22px;height:22px;display:inline-flex;align-items:center;justify-content:center;border-radius:var(--radius-6);color:var(--muted);opacity:0}
 .palette-item:hover .palette-add,.palette-item.on .palette-add,.palette-add.on{opacity:1}
 .palette-add:hover{background:var(--palette-hover);color:var(--ink)}
-.palette-add.on{color:#282b64}
+.palette-add.on{color:var(--hint-ink)}
 .palette-item.staged{background:var(--soft)}
 .palette-tip{float:right;margin-left:12px;color:var(--muted)}
 .oc-split-group{display:flex;align-items:center;gap:var(--space-14);padding:var(--space-10) 0;border-top:1px solid var(--line)}
@@ -796,9 +796,7 @@ input,textarea{color:inherit}
 .view-opt span,.view-row span{flex:1;display:grid;gap:var(--space-1)}
 .view-opt small{font-size:var(--fs-11);color:var(--muted)}
 .view-row input[type=range]{width:120px;accent-color:var(--accent-btn)}
-.view-sw{width:34px;height:20px;border-radius:var(--radius-pill);background:rgba(var(--sh),.14);position:relative;flex-shrink:0;transition:background .22s}
-/* 现状：这条的优先级高于 .view-sw.on，暗色下「开」的开关底色也是灰的；#317 第一段保持原样，是否改成强调色在第二段提出。 */
-:root[data-theme=dark] .view-sw{background:rgba(255,255,255,.16)}
+.view-sw{width:34px;height:20px;border-radius:var(--radius-pill);background:var(--view-sw-off);position:relative;flex-shrink:0;transition:background .22s}
 .view-sw::after{content:"";position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:var(--radius-round);background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.22);transition:transform .26s var(--ease)}
 .view-sw.on{background:var(--accent-btn)}
 .view-sw.on::after{transform:translateX(14px)}
@@ -1406,7 +1404,7 @@ button.sidebar-bottom:hover .nav-icon{background:rgba(var(--sh),.06)}
 
 /* 资料库 (#198): 角色 / 作品 switch, the work tree and its dialogs */
 .segmented a{display:inline-flex;align-items:center;padding:var(--space-4) var(--space-12);border-radius:var(--radius-pill);font-size:var(--fs-12);color:var(--ink2);text-decoration:none}
-.segmented a.on{background:var(--sheet);color:var(--ink);font-weight:500;box-shadow:0 1px 3px rgba(var(--sh),.12)}
+.segmented a.on{background:var(--seg-on);color:var(--ink);font-weight:500;box-shadow:0 1px 3px rgba(var(--sh),.12)}
 .lib-views{flex:none}
 .shelf{display:flex;flex-direction:column;gap:var(--space-14);max-width:1080px}
 .shelf-empty{padding:30px 4px}
