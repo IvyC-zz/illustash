@@ -161,7 +161,7 @@ impl Syncer {
                 Err(e) => {
                     let mut s = state.lock().expect("sync state mutex poisoned");
                     let stage = crate::diagnostics::stage(
-                        s.get("stage").or_else(|| s.get("status")).map(Json::text).unwrap_or(""),
+                        s.get("stage").or_else(|| s.get("status")).map(crate::http_json::Json::text).unwrap_or(""),
                     );
                     s.set(
                         "status",

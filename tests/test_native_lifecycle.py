@@ -928,7 +928,9 @@ class NativeLifecycleTest(unittest.TestCase):
         with sqlite3.connect(self.lib.db) as source, sqlite3.connect(backup) as dest:
             source.backup(dest)
         with sqlite3.connect(self.lib.db) as db:
-            db.execute('DROP TABLE asset_tags')
+            kind = db.execute("SELECT type FROM sqlite_schema WHERE name='asset_tags'").fetchone()[0]
+            self.assertIn(kind, ('table', 'view'))
+            db.execute(f'DROP {kind} asset_tags')
         response = self.request('/api/user-tags?q=synthetic-private-filename.png&token=synthetic-secret')
         self.assertEqual(response['status'], 500, response['body'])
         error = json.loads(response['body'])['error']
