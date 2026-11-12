@@ -654,6 +654,11 @@ fn public_metadata_cannot_shadow_the_actual_manifest_input_binding() {
 fn unprojected_legacy_is_refused_and_sync_retirement_is_restart_safe() {
     let f = Fixture::new(false);
     let before = human(&f.app());
+    let old_source =
+        crate::app_migrate_data::rows(&f.source(), "SELECT * FROM labels WHERE source='char_index' AND dim='char_ext'")
+            .unwrap();
+    let old_candidates =
+        crate::app_migrate_data::rows(&f.app(), "SELECT * FROM candidates WHERE source='CCIP'").unwrap();
     let (path, sidecar) = f.batch("legacy", feature(1));
     f.app()
         .execute_batch(
@@ -683,6 +688,25 @@ fn unprojected_legacy_is_refused_and_sync_retirement_is_restart_safe() {
     assert_eq!(count(&f.source(), "SELECT count(*) FROM recognition_imports WHERE status='superseded'"), 1);
     assert_eq!(count(&f.app(), "SELECT count(*) FROM backend_effects"), effects);
     assert_eq!(resume(&reopened, &cancel, &|_, _| Ok(())).unwrap()["status"], "done");
+    // 无锚点交付没有接管旧 CCIP 候选，撤回它也不能移除别的回执或历史来源的候选。
+    assert_eq!(
+        crate::app_migrate_data::rows(&f.source(), "SELECT * FROM labels WHERE source='char_index' AND dim='char_ext'")
+            .unwrap(),
+        old_source
+    );
+    assert_eq!(
+        crate::app_migrate_data::rows(&f.app(), "SELECT * FROM candidates WHERE source='CCIP'").unwrap(),
+        old_candidates
+    );
     assert_eq!(f.import(&path, &sidecar).unwrap()["status"], "done");
     assert_eq!(human(&f.app()), before);
+    assert_eq!(
+        crate::app_migrate_data::rows(&f.source(), "SELECT * FROM labels WHERE source='char_index' AND dim='char_ext'")
+            .unwrap(),
+        old_source
+    );
+    assert_eq!(
+        crate::app_migrate_data::rows(&f.app(), "SELECT * FROM candidates WHERE source='CCIP'").unwrap(),
+        old_candidates
+    );
 }

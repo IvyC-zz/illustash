@@ -667,8 +667,8 @@ pub(crate) fn retire_unverifiable(library: &Library, cancel: &AtomicBool) -> Res
         }
         for id in &ids {
             tx.execute(
-                "DELETE FROM labels WHERE uuid=? AND (source='wd_v3' OR (source='char_index' AND dim='char_ext'))",
-                [id],
+                "DELETE FROM labels WHERE uuid=? AND run_id=? AND (source='wd_v3' OR (source='char_index' AND dim='char_ext'))",
+                params![id, format!("import:{digest}")],
             )?;
             tx.execute("DELETE FROM embeddings WHERE uuid=? AND model IN ('wd','ccip')", [id])?;
             tx.execute("DELETE FROM recognition_assets WHERE asset=? AND package=?", params![id, digest])?;
