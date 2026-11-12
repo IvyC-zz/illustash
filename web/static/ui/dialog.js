@@ -19,7 +19,9 @@ export function isBackdropClick(d, e) {
 export function openDialog({title, body = '', actions = '', cls = '', backdropClose = true, focus = '', onClose} = {}) {
   const d = document.createElement('dialog'); d.className = ('modal ' + cls).trim();
   d.setAttribute('aria-label', title);
-  d.innerHTML = `<form method="dialog"><div class="dialog-top"><h2></h2><button type="button" class="icon" data-close aria-label="${t('关闭')}">×</button></div>${body}${actions ? `<div class="dialog-actions">${actions}</div>` : ''}</form>`;
+  d.innerHTML = `<form method="dialog">
+    <div class="dialog-top"><h2></h2><button type="button" class="icon" data-close aria-label="${t('关闭')}">×</button></div>
+    ${body}${actions ? `<div class="dialog-actions">${actions}</div>` : ''}</form>`;
   d.querySelector('h2').textContent = title;
   d.onclick = e => {
     if (e.target === d) { if (backdropClose && isBackdropClick(d, e)) d.close(); }
@@ -46,11 +48,12 @@ export function confirmAction(message, title = t('确认操作'), ok = t('确认
     d.querySelector('p').textContent = message;
   });
 }
+const workOption = (w, selected) => `<option value="${esc(w.id)}" ${w.id === selected ? 'selected' : ''}>${esc(w.name)}${w.qualifier ? ' · ' + esc(w.qualifier) : ''}</option>`;
 // Pick a local work (or the empty choice); resolves null when cancelled.
 export function chooseWork(title, works, selected = '', emptyLabel = t('未归类 / 无上级')) {
   return new Promise(resolve => {
     openDialog({title, cls: 'work-dialog',
-      body: `<select name="work" class="work-choice"><option value="">${esc(emptyLabel)}</option>${works.map(w => `<option value="${esc(w.id)}" ${w.id === selected ? 'selected' : ''}>${esc(w.name)}${w.qualifier ? ' · ' + esc(w.qualifier) : ''}</option>`).join('')}</select>`,
+      body: `<select name="work" class="work-choice"><option value="">${esc(emptyLabel)}</option>${works.map(w => workOption(w, selected)).join('')}</select>`,
       actions: `<button value="cancel" class="quiet">${t('取消')}</button><button value="ok" class="primary">${t('确认')}</button>`,
       onClose: d => resolve(d.returnValue === 'ok' ? d.querySelector('select').value : null)});
   });
