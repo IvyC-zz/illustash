@@ -187,6 +187,20 @@ class FrontendArchitectureTest(unittest.TestCase):
             tree.append('ui/dialog.js', '\nconst d = document.createElement("dialog");\n')
             self.assertViolation(tree, 'dialog-element', 'ui/dialog.js')
 
+    def test_new_page_name_comparison(self):
+        # 页面名判断只能写在 core/pages.js 的注册表里；新增比较要报错，改写成读注册表字段
+        with Tree() as tree:
+            tree.append('ui/palette.js', "\nif (state.route.page === 'library') go();\n")
+            message = self.assertViolation(tree, 'page-name', 'ui/palette.js')
+            self.assertIn('core/pages.js', message)
+        with Tree() as tree:
+            tree.append('ui/palette.js', "\nif (['a', 'b'].includes(state.route.page)) go();\n")
+            self.assertViolation(tree, 'page-name', 'ui/palette.js')
+        with Tree() as tree:  # 注册表自己不受限，读注册表字段不算
+            tree.append('core/pages.js', "\nconst x = r.page === 'home';\n")
+            tree.append('ui/palette.js', "\nif (viewOf(state.route).click === 'cleanup' && onPage(state.route, 'home')) go();\n")
+            self.assertEqual(tree.errors(), [])
+
     def test_long_line_boundary(self):
         with Tree() as tree:
             tree.append('ui/home.js', '\nconst ok = "' + 'x' * (200 - len('const ok = "";')) + '";\n')

@@ -9,6 +9,7 @@ tools/check_architecture.py 对 crate 依赖方向的检查。规则（说明见
   3 document-listener    不得新增 document/window/body 级的 keydown、keyup、click、mousedown、pointerdown 监听
   4 dialog-element       不得新增 `document.createElement('dialog')`，也不得在字符串里拼 `<dialog`
   5 long-line            不得新增超过 200 字符的行（app.js、core/、ui/）
+  6 page-name            不得在 core/pages.js（页面注册表，#342）以外的位置比较页面名（硬规则，没有基线）
 
 基线（tools/frontend_baseline.json）按「文件 + 内容特征」登记（导入边、字段名、每个文件的数量），不按行号，
 所以文件里别处的改动不会让它失效。基线只能缩小：`--shrink` 只调低、不新增；`--base-ref REF` 在基线比 REF
@@ -235,12 +236,20 @@ def new_rules():
         Rule('long-line', '5', f'新增了超过 {MAX_LINE} 字符的行',
              f'一行不超过 {MAX_LINE} 个字符（代理和评审都读不动一行 1000 字符）。现有的超长行已冻结为基线，不得新增。',
              '把这行拆成多行：长模板字符串按块换行，长条件/链式调用拆成中间变量；顺手拆开的话，用 `--shrink` 更新基线。'),
+        Rule('page-name', '6', '在页面注册表以外的位置新增了页面名判断',
+             '页面是哪一类（点击语义、主区、侧栏高亮、工具栏、pool 参数、重画方式……）统一声明在 core/pages.js（#342），页面名只在那里比较，没有基线。',
+             '把页面的性质写进 core/pages.js 的声明，用 `viewOf(route).<字段>` 或 `pageOf(route).<字段>` 读；'
+             '异步回应回来时判断「还在不在这一页」用 `onPage(route, \'名\')`；要登记渲染入口、标题、重画方式用 `implement()`。'
+             '见 docs/WEB_UI_MAP.md「新增一个页面要做什么」。',
+             baselined=False),
     ]}
 
 
 LISTENER_EVENTS = 'keydown|keyup|click|mousedown|pointerdown'
 LISTENER_RE = re.compile(r'''\b(?:document(?:\s*\.\s*(?:body|documentElement))?|window)\s*\.\s*(?:addEventListener\s*\(\s*(['"`])(%s)\1|on(%s)\s*=(?!=))''' % (LISTENER_EVENTS, LISTENER_EVENTS))
 DIALOG_RE = re.compile(r'''createElement\s*\(\s*(['"`])dialog\1\s*\)|<dialog\b''')
+# 页面名判断：`page === '…'`、`route.page !== '…'`，以及 `[…].includes(route.page)`。
+PAGE_NAME_RE = re.compile(r'''(?:\b(?:route|r)\.page|\bpage)\s*[!=]==\s*['"`]|\.includes\(\s*(?:state\.)?(?:route|r)\.page\s*\)''')
 STATE_RE = re.compile(r'(?<![\w$.])state\s*\.\s*([A-Za-z_$][\w$]*)')
 
 
@@ -294,6 +303,10 @@ def run_rules(sources):
         for m in DIALOG_RE.finditer(s.code):
             line = s.line_of(m.start())
             rules['dialog-element'].add(p, f'{STATIC}/{p}:{line}: {s.raw_line(line)[:110]}')
+        if p != 'core/pages.js':
+            for m in PAGE_NAME_RE.finditer(s.code):
+                line = s.line_of(m.start())
+                rules['page-name'].add(p, f'{STATIC}/{p}:{line}: {s.raw_line(line)[:110]}')
         for number, text in enumerate(s.raw.splitlines(), 1):
             if len(text) > MAX_LINE:
                 rules['long-line'].add(p, f'{STATIC}/{p}:{number}: ({len(text)} chars) {text.strip()[:70]}…')
