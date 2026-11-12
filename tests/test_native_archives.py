@@ -1,4 +1,4 @@
-"""#42 acceptance. All paths and packages are temporary synthetic fixtures; no real library input."""
+"""#42 验收。所有路径和包都是临时的合成夹具；没有真实图库输入。"""
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import closing
 import json
@@ -28,7 +28,7 @@ class NativeArchivesTest(unittest.TestCase):
     pair = lifecycle.NativeLifecycleTest.pair
 
     def reference_status(self, url, body=None, **kwargs):
-        """The former reference server's status for the same request (recorded)."""
+        """原参考服务器对同一请求给出的状态码（已录制）。"""
         return lifecycle.NativeLifecycleTest.reference_response(self, url, body, **kwargs)['status']
 
     def state(self):
@@ -64,11 +64,11 @@ class NativeArchivesTest(unittest.TestCase):
             c.commit()
             c.execute("DELETE FROM name_settings WHERE key='retired_key'")
             c.execute("INSERT OR REPLACE INTO prefs VALUES ('startup',?)", ('{"names":true,"sync":false}',))
-            # #116: the sender's first-run guide (answered questions, ticks) is personal too.
+            # #116：发送方的首次使用引导（回答过的问题、勾选项）也属于个人数据。
             c.execute("INSERT OR REPLACE INTO prefs VALUES ('onboarding',?)",
                       ('{"status":"skipped","step":"home","ticked":["undo"],"seen":["names"],"hidden":false}',))
             c.execute("INSERT INTO sync_runs(status) VALUES ('done')")
-            # Unindexed historical tables must retain sparse physical rowids through compaction.
+            # 没有索引的历史表在压缩整理后必须保留稀疏的物理 rowid。
             c.execute('CREATE TABLE archive_sparse(value TEXT)')
             c.execute("INSERT INTO archive_sparse(rowid,value) VALUES (37,'synthetic human record')")
             c.commit()
@@ -76,7 +76,7 @@ class NativeArchivesTest(unittest.TestCase):
         self.assertIn(markers[3].encode(), self.lib.db.read_bytes(), 'fixture must contain deleted secret bytes')
         before = snapshot(self.lib.db)
         source_before = snapshot(self.lib.source)
-        # snapshot() is per-table digests: build the expected state on a plain copy, rowids untouched.
+        # snapshot() 是逐表的摘要：在普通副本上构建期望状态，rowid 不动。
         expected_db = self.root / 'expected-sanitized.sqlite'
         with closing(sqlite3.connect(self.lib.db)) as c, closing(sqlite3.connect(expected_db)) as e:
             c.backup(e)
@@ -99,7 +99,7 @@ class NativeArchivesTest(unittest.TestCase):
                 for marker in markers:
                     self.assertNotIn(marker.encode(), data, name)
                 if name.endswith('.sqlite'):
-                    # snapshot traverses every table/view, typed cell, rowid and DDL.
+                    # snapshot 遍历每张表/视图、每个带类型的单元格、rowid 和 DDL。
                     state = snapshot(unpacked / name)
                     for marker in markers:
                         self.assertNotIn(marker, repr(state), name)
@@ -124,7 +124,7 @@ class NativeArchivesTest(unittest.TestCase):
             self.assertFalse(names['model_api']['configured'])
             self.assertEqual(names['network'], {'authorized': False, 'this_run': False, 'granted_at': None})
             guide = json.loads(self.request('/api/onboarding')['body'])['guide']
-            # Without the sender's record, a library that has finished a sync counts as off: no guide, no checklist.
+            # 没有发送方的记录时，完成过同步的图库算作 off：没有引导，也没有清单。
             self.assertEqual((guide['status'], guide['seen'], guide['ticked']), ('off', [], []))
         self.assertEqual(legacy.read_bytes(), legacy_bytes)
         self.assertEqual(snapshot(self.lib.db), before)
@@ -245,7 +245,7 @@ class NativeArchivesTest(unittest.TestCase):
         names = ('../escape', '/absolute', 'features/../library.json', 'features\\full-features.npy', 'unexpected', 'features/')
         for name in names:
             if os.name == 'nt' and '\\' in name:
-                variants.append(None)   # recorded on POSIX; skipped here (see above)
+                variants.append(None)   # 录制于 POSIX；这里跳过（见上文）
                 continue
             out = self.root / f'bad-{len(variants)}.zip'
             with zipfile.ZipFile(out, 'w') as z:
@@ -275,7 +275,7 @@ class NativeArchivesTest(unittest.TestCase):
         self.assertFalse(self.sentinel.exists())
 
     def test_import_refuses_a_package_that_cannot_be_opened(self):
-        # #42: the archive is structurally valid, but the package it holds would not open.
+        # #42：归档的结构合法，但里面的包打不开。
         good = library.export_library(self.lib, self.root / 'good.zip')
         with zipfile.ZipFile(good) as z:
             files = {name: z.read(name) for name in z.namelist()}
@@ -305,7 +305,7 @@ class NativeArchivesTest(unittest.TestCase):
         self.assertFalse(self.sentinel.exists())
 
     def test_import_limits_refuse_before_anything_is_created(self):
-        # #26: the configuration is capped and the declared sizes must fit on disk (entries are limited to the exported set).
+        # #26：配置有大小上限，声明的大小必须放得进磁盘（条目限于导出的那些）。
         good = library.export_library(self.lib, self.root / 'good.zip')
         with zipfile.ZipFile(good) as z:
             files = {name: z.read(name) for name in z.namelist()}
@@ -317,7 +317,7 @@ class NativeArchivesTest(unittest.TestCase):
             with zipfile.ZipFile(out, 'w', compression=compression) as z:
                 for name, data in content:
                     z.writestr(name, data)
-                for info in z.filelist:  # the central directory is written on close, with these sizes
+                for info in z.filelist:  # 中央目录在关闭时写入，带上这些大小
                     if declare and info.filename == declare[0]:
                         info.file_size = declare[1]
             return out
@@ -345,7 +345,7 @@ class NativeArchivesTest(unittest.TestCase):
     LARGE = 256 << 20
 
     def large_archive(self):
-        """A valid export whose features file is LARGE zero bytes, LZMA-compressed: unpacking it takes seconds."""
+        """一个合法的导出，其中特征文件是 LARGE 个零字节、经 LZMA 压缩：解包要花几秒。"""
         if shutil.disk_usage(self.root).free < 2 * self.LARGE + (512 << 20):
             self.skipTest('not enough free space for the synthetic archive')
         good = library.export_library(self.lib, self.root / 'good.zip')
@@ -365,7 +365,7 @@ class NativeArchivesTest(unittest.TestCase):
         return json.loads(self.request('/api/imports')['body'])
 
     def test_archive_import_polls_its_real_stages_and_unpacked_bytes(self):
-        # #88: the request answers at once; polling follows the stages in order with the real bytes unpacked.
+        # #88：请求立即应答；轮询按顺序跟随各阶段，带上真实的已解包字节数。
         archive, declared = self.large_archive()
         registry = self.support / 'libraries.json'
         seen = []
@@ -386,8 +386,8 @@ class NativeArchivesTest(unittest.TestCase):
         self.assertIn(str(path), [r['path'] for r in json.loads(registry.read_text())['recent']])
 
     def test_archive_import_cancel_switch_and_quit_remove_what_it_unpacked(self):
-        # #88 (#26): the cancel button, a switch and quitting each stop the unpacking within 5 s (quitting: the
-        # process ends within 8 s), remove the new directory and leave the registry alone.
+        # #88（#26）：取消按钮、切换图库和退出都会在 5 秒内停止解包（退出时进程在 8 秒内结束），
+        # 删除新目录，不动登记表。
         archive, _ = self.large_archive()
         other = self.root / 'other.pilib'
         shutil.copytree(self.lib.path, other)
@@ -400,7 +400,7 @@ class NativeArchivesTest(unittest.TestCase):
                 self.assertEqual(r['status'], 200, r)
                 task = json.loads(r['body'])['task']
                 wait_until(lambda: self.imports().get('done', 0) > 0, timeout=20)
-                # Reads are answered while it unpacks.
+                # 解包期间读取请求照常应答。
                 started = time.monotonic()
                 self.assertEqual(self.request('/api/bootstrap')['status'], 200)
                 self.assertLess(time.monotonic() - started, 2)
@@ -428,7 +428,7 @@ class NativeArchivesTest(unittest.TestCase):
                         self.assertEqual(self.request('/api/libraries/open', {'path': str(self.lib.path)})['status'], 200)
                         self.token = json.loads(self.request('/api/bootstrap')['body'])['token']
                 self.assertEqual(listing(), before)
-                if how != 'cancel':  # opening a library (switching, restarting) updates the registry; the import adds nothing
+                if how != 'cancel':  # 打开图库（切换、重启）会更新登记表；导入不添加任何条目
                     self.assertFalse([r for r in json.loads(registry.read_text())['recent'] if Path(r['path']).resolve().parent == library.HOME.resolve()])
                 else:
                     self.assertEqual(registry.read_bytes() if registry.exists() else None, recent)
@@ -454,7 +454,7 @@ class NativeArchivesTest(unittest.TestCase):
         self.assertEqual(registry.read_bytes() if registry.exists() else None, recent)
 
     def test_repeated_export_busy_switch_cancel_same_id_and_exit_cleanup(self):
-        # A held rollback-journal write lock deterministically keeps backup active without huge data.
+        # 持有 rollback journal 的写锁，不用大量数据就能确定地让备份一直处于进行中。
         other = self.package('other')
         other.config['id'] = self.lib.config['id']; other.save()
         lock = sqlite3.connect(self.lib.source); self.addCleanup(lock.close)
@@ -522,8 +522,8 @@ class NativeArchivesTest(unittest.TestCase):
         registry = self.support / 'libraries.json'
         recent = registry.read_bytes() if registry.exists() else None
         response = self.archive_import({'path':str(archive)})
-        # #111 (like creation, #97): the published package is reported with why it is not listed, instead of the
-        # recorded 400; importing again would only make a second, numbered package.
+        # #111（与新建相同，#97）：报告已发布的包并说明它为什么没有登记，而不是录制里的 400；
+        # 再导入一次只会生成第二个带编号的包。
         self.assertEqual(response['status'], 200, response)
         published = library.HOME / (self.lib.name + ' 3.pilib')
         made = json.loads(response['body'])

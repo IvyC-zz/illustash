@@ -1,4 +1,4 @@
-//! Internal worker sidecar, separate from the public WD recognition/1 package.
+//! worker 内部的 sidecar，与公开的 WD recognition/1 包分开。
 use super::{
     anchor_snapshot::{Fingerprint, Snapshot},
     anchors::Claim,
@@ -68,8 +68,8 @@ impl Claims {
                 .collect::<Vec<_>>();
             expected.extend(snapshot.claims_checked(id, &feature, check)?);
         }
-        // Scores retain CCIP's dimension (1-distance), including f32 cosine rounding.
-        // They are not WD probabilities and are never rounded/clamped to pretend to be one.
+        // 分数保持 CCIP 的量纲（1 - 距离），包括 f32 余弦的舍入。
+        // 它们不是 WD 概率，从不为了冒充概率而舍入或截断。
         if serde_json::to_value(&expected).map_err(|_| invalid())?
             != serde_json::to_value(&self.claims).map_err(|_| invalid())?
         {

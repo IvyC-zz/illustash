@@ -1,4 +1,4 @@
-//! Local candidate selection and cached research results; no worker or network calls.
+//! 本地候选挑选和缓存的研究结果；不调用 worker，也不联网。
 use crate::character_entities::ENTITIES;
 use crate::{
     http::LibraryContext,
@@ -10,7 +10,7 @@ use crate::{
 use rusqlite::{Connection, OpenFlags};
 use std::collections::HashMap;
 pub(crate) const ROUTES: &[&str] = &["/api/ask", "/api/similar", "/api/clusters"];
-/// Identities a person asked to come back to later, within the last week.
+/// 最近一周内用户要求以后再问的身份。
 const REST: &str = "SELECT DISTINCT entity FROM asked WHERE answer='later' AND asked_at>=datetime('now','-7 days')";
 fn get<'a>(q: &'a HashMap<String, String>, k: &str) -> &'a str {
     q.get(k).map(String::as_str).unwrap_or("")

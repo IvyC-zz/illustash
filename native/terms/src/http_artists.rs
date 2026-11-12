@@ -1,5 +1,4 @@
-//! tests/reference/web/artists.py（#9 已删除） read contract. Auxiliary provenance stays read-only and shares the
-//! request transaction.
+//! tests/reference/web/artists.py（#9 已删除）的读取契约。辅助的溯源库保持只读，并与请求共用同一个事务。
 use crate::{
     http_json::{Json, Refusal},
     http_read::{flag, rows, strings},
@@ -9,14 +8,14 @@ use rusqlite::{Connection, OptionalExtension};
 use sha1::{Digest, Sha1};
 use std::collections::{BTreeSet, HashMap, HashSet};
 
-/// An artist's pictures in the core: found by machine or confirmed, not removed. Parameter: the artist key.
+/// 核心里某位画师的图片：机器找到或已确认、且未移除的。参数：画师的 key。
 const CORE_ASSETS: &str = "
     SELECT a.key
     FROM term_projection p
     JOIN terms t ON t.id=p.term_id AND t.key=? AND t.kind='artist'
     JOIN term_assets a ON a.id=p.asset_id AND a.removed_at IS NULL
     WHERE p.state IN ('machine','confirmed')";
-/// The artists projected on one library picture (`p`, `a`, `t`). Parameter: the picture's key.
+/// 投影到某张图库图片上的画师（`p`、`a`、`t`）。参数：图片的 key。
 const ON_ASSET: &str = "
     FROM term_projection p
     JOIN term_assets a ON a.id=p.asset_id AND a.namespace='library' AND a.key=?
@@ -139,7 +138,7 @@ fn legacy_ids(c: &Connection, id: &str) -> Result<Vec<String>> {
     ids.extend(strings(c, "SELECT id FROM prov.artists WHERE merged_into=?", &[id])?);
     Ok(ids)
 }
-/// `?,?,…` for `n` parameters of an `IN (…)` list.
+/// 为 `IN (…)` 列表的 `n` 个参数生成 `?,?,…`。
 fn marks(n: usize) -> String {
     vec!["?"; n].join(",")
 }
@@ -243,13 +242,13 @@ fn reason(method: &str, data: &str) -> Result<Json> {
     }
     .into())
 }
-/// A candidate artist's card with why they are suggested.
+/// 候选画师的卡片，附上推荐的理由。
 fn suggested(mut info: Json, method: &str, data: &str) -> Result<Json> {
     info.set("reason", reason(method, data)?);
     Ok(info)
 }
-/// An artist's card with how many of `present` (all of `assets` when there is none) are theirs, the verdict on
-/// this picture, and the methods that found them on it.
+/// 画师的卡片，附上 `present`（没有时取全部 `assets`）中有几张是 TA 的、这张图上的裁决，
+/// 以及在这张图上找到 TA 的方法。
 fn credited(
     mut info: Json,
     assets: &HashSet<String>,
@@ -395,7 +394,7 @@ fn legacy_for_asset(
 fn no_artists() -> Json {
     Json::object([("artists", Json::Array(Vec::new())), ("posts", Json::Array(Vec::new()))])
 }
-// The same card/evidence/candidate/posts assembly is available to the later detail migration.
+// 同一套卡片、证据、候选和帖子的组装逻辑，留给之后的详情迁移使用。
 pub(crate) fn for_asset(
     c: &Connection,
     library: bool,

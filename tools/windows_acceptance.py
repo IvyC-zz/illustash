@@ -315,7 +315,7 @@ class Acceptance:
             exported = state.get('path') if state.get('status') == 'done' else None
         self.check('导出图库归档', exported and Path(exported).is_file(), r['body'][:200])
         if exported:
-            # #88: the import is a background task; its end is read from GET /api/imports.
+            # #88：导入是后台任务；从 GET /api/imports 读它是否结束。
             r = self.post(origin, '/api/libraries/import', {'path': exported}, token)
             task = lambda: json.loads(self.get(origin, '/api/imports')['body'])
             ended = r['status'] == 200 and self.wait(lambda: task().get('status') in ('done', 'error', 'cancelled'), 60)

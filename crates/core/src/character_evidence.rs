@@ -136,7 +136,7 @@ pub fn publish(
                 .execute([set, id])?;
         }
         match &scope {
-            Scope::All => {} // No reader needs the intermediate one-source effective set.
+            Scope::All => {} // 没有读取方需要中间的单来源生效集合。
             Scope::Assets(uuids) => {
                 let mut put = c.prepare_cached(
                     "INSERT OR REPLACE INTO term_active_evidence(asset_id,source,method,set_id) VALUES (?,?,?,?)",

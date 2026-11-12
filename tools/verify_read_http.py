@@ -1,12 +1,12 @@
-"""Strict same-library HTTP comparison for R0–R4. Only temporary synthetic databases are accepted.
+"""R0–R4 的同图库 HTTP 严格对照。只接受临时的合成数据库。
 
-Build once: --db /tmp/.../library.sqlite --write-requests /tmp/requests.json
-Reuse: --requests /tmp/requests.json --python http://127.0.0.1:INTERNAL
-       --rust http://127.0.0.1:PUBLIC --origin http://127.0.0.1:PUBLIC [--require-core R1]
-Both requests have the *same* Host/Origin and Accept-Encoding: identity. Status and bytes alone
-establish equality. JSON parsing is diagnostic only; the Rust route header separately proves routing.
-The URL corpus follows the former verify_terms_characters/names sample selection (removed in #186), never their normalization.
-Random /api/ask is excluded; validate it by candidate range and constraints instead.
+构建一次：--db /tmp/.../library.sqlite --write-requests /tmp/requests.json
+复用：--requests /tmp/requests.json --python http://127.0.0.1:INTERNAL
+      --rust http://127.0.0.1:PUBLIC --origin http://127.0.0.1:PUBLIC [--require-core R1]
+两边的请求带*相同的* Host/Origin 和 Accept-Encoding: identity。只凭状态码和字节判定相等。
+JSON 解析只用于诊断；Rust 的路由响应头另行证明走了哪条路由。
+URL 样本集沿用以前 verify_terms_characters/names 的取样方式（已在 #186 删除），但从不沿用它们的归一化。
+随机的 /api/ask 不在其中；改为按候选范围和约束去验证它。
 """
 import argparse
 import http.client
@@ -22,7 +22,7 @@ import tempfile
 import time
 from urllib.parse import urlencode, urlsplit
 
-# No Store constructor, schema upgrade, golden recording, remote lookup, or production DB access.
+# 不调用 Store 构造函数，不做 schema 升级、对照基准录制、远程查询，也不访问生产数据库。
 STAGES = {
     'R1': ('user-tags', 'general-tags', 'artists', 'artist', 'artist-audit'),
     'R2': ('entities', 'works'),
@@ -36,7 +36,7 @@ STAGES = {
 def temporary_path(path):
     roots = (Path(tempfile.gettempdir()).resolve(), Path('/tmp').resolve())
     path = Path(path).absolute()
-    # Refuse an outside path before even resolving its symlinks (including real-library paths).
+    # 在解析符号链接之前就拒绝临时目录以外的路径（包括真实图库的路径）。
     lexical_roots = (Path(tempfile.gettempdir()).absolute(), Path('/tmp'), Path('/private/tmp'), *roots)
     if not any(path.is_relative_to(root) for root in lexical_roots):
         raise ValueError('只接受系统临时目录内的合成夹具；真实图库和真实副本不在本次范围')
@@ -104,7 +104,7 @@ def corpus(db, sample=16, query_limit=80):
     for asset in assets[::sample]:
         add('R3', 'detail', id=asset)
     for path, count in pages.items():
-        # Read all pages including one final empty page; no speculative pair-count query dependency.
+        # 读完所有页，包括最后一个空页；不依赖揣测性的组合计数查询。
         for offset in range(0, count + 200, 200):
             add('R4', path, offset=offset, limit=200)
     for limit in (0, 201, 'bad'):
@@ -121,15 +121,14 @@ _ENTERED = set()
 
 
 def output(log):
-    """What the host wrote to `log` so far (a path, or the file it inherited as stdout), without moving the
-    position it writes at."""
+    """宿主到目前为止写进 `log` 的内容（`log` 是路径，或宿主继承为 stdout 的文件），不移动宿主写入的位置。"""
     if isinstance(log, (str, os.PathLike)):
         return Path(log).read_bytes() if Path(log).exists() else b''
     log.flush()
     if hasattr(os, 'pread'):
         return os.pread(log.fileno(), os.fstat(log.fileno()).st_size, 0)
-    # Windows: no pread, and a duplicated handle shares the position. Open the file again for reading only; a
-    # TemporaryFile is delete-on-close, so the second handle must share delete access, which os.open cannot ask for.
+    # Windows：没有 pread，复制出的句柄又共享位置。所以只读地重新打开文件；TemporaryFile 是关闭即删除的，
+    # 第二个句柄必须共享删除权限，而 os.open 没法请求这一点。
     import ctypes, msvcrt
     from ctypes import wintypes
     create = ctypes.WinDLL('kernel32', use_last_error=True).CreateFileW
@@ -145,7 +144,7 @@ def output(log):
 
 
 def ready(text, origin):
-    """The newest ready address of the host at `origin` in its output, if not entered with yet."""
+    """`origin` 上的宿主在输出里给出的最新就绪地址，前提是还没用它进入过。"""
     lines = text.decode('utf-8', 'replace').splitlines() if isinstance(text, bytes) else text.splitlines()
     for line in reversed(lines):
         if line.startswith(READY) and line[len(READY):].startswith(origin + '/'):
@@ -155,8 +154,7 @@ def ready(text, origin):
 
 
 def enter(origin, log, process=None, timeout=15):
-    """Wait for the host at `origin` to print its ready address to `log`, then trade its one-time code for the
-    session cookie as a browser would. Returns the address."""
+    """等 `origin` 上的宿主把就绪地址打印到 `log`，然后像浏览器那样用其中的一次性码换会话 cookie。返回该地址。"""
     deadline = time.monotonic() + timeout
     while (address := ready(output(log), origin)) is None:
         if process is not None and process.poll() is not None:
@@ -176,7 +174,7 @@ def enter(origin, log, process=None, timeout=15):
 
 
 def cookie(origin):
-    """The Cookie header for requests to `origin` that do not go through fetch()."""
+    """不经 fetch() 发往 `origin` 的请求要用的 Cookie 头。"""
     return COOKIES[origin]
 
 
@@ -195,7 +193,7 @@ def fetch(base, item, origin, timeout=30):
     if base in COOKIES:
         headers['Cookie'] = COOKIES[base]
     headers.update(item.get('headers', {}))
-    # Corpus callers cannot accidentally turn compression on for JSON comparisons.
+    # 样本集的调用方不会在 JSON 对照时意外打开压缩。
     headers['Accept-Encoding'] = 'identity'
     started = time.perf_counter()
     try:
@@ -213,7 +211,7 @@ def fetch(base, item, origin, timeout=30):
 
 
 def difference(left, right, radius=32):
-    """Success bytes are exact; errors compare only status (user decision 2026-10-01)."""
+    """成功响应逐字节比较；错误只比较状态码（用户 2026-10-01 决定）。"""
     status_diff = {'status': [left['status'], right['status']]} if left['status'] != right['status'] else {}
     if left['status'] >= 400 or right['status'] >= 400:
         return status_diff or None
@@ -224,7 +222,7 @@ def difference(left, right, radius=32):
     out = {**status_diff, 'offset': offset, 'lengths': [len(a), len(b)],
            'python_context': repr(a[max(0, offset - radius):offset + radius]),
            'rust_context': repr(b[max(0, offset - radius):offset + radius])}
-    # Parsing may explain a mismatch, but never decides equality or changes the compared bytes.
+    # 解析可以帮助解释不一致，但从不决定是否相等，也不改变比较的字节。
     try:
         out['diagnostic_only_json_equal'] = json.loads(a) == json.loads(b)
     except (ValueError, UnicodeError):

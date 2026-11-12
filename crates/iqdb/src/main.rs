@@ -8,10 +8,10 @@
 mod signature;
 
 use std::io::{self, BufRead, Write};
+use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Mutex;
 use std::thread;
-use std::path::Path;
 use std::thread::sleep;
 use std::time::{Duration, Instant};
 
@@ -29,7 +29,14 @@ struct Args {
 }
 
 fn args() -> Args {
-    let mut a = Args { hash_only: false, pace: 1.0, workers: 1, budget: u64::MAX, hit: 80.0, user_agent: "Illustash/0.1 (+local library; provenance lookups)".into() };
+    let mut a = Args {
+        hash_only: false,
+        pace: 1.0,
+        workers: 1,
+        budget: u64::MAX,
+        hit: 80.0,
+        user_agent: "Illustash/0.1 (+local library; provenance lookups)".into(),
+    };
     let argv: Vec<String> = std::env::args().skip(1).collect();
     for pair in argv.chunks(2) {
         let value = pair.get(1).cloned().unwrap_or_default();
@@ -64,7 +71,7 @@ fn query(agent: &ureq::Agent, hash: &str, user_agent: &str) -> Answer {
         if attempt > 0 {
             sleep(Duration::from_secs(2 * attempt));
         }
-        // `only` does not apply to IQDB results (they come back as empty objects): take the full answer.
+        // `only` 对 IQDB 结果不起作用（返回的是空对象）：取完整的响应。
         let call = agent.get(URL).set("User-Agent", user_agent).query("hash", hash).query("limit", "3").call();
         match call {
             Ok(response) => {
@@ -78,7 +85,7 @@ fn query(agent: &ureq::Agent, hash: &str, user_agent: &str) -> Answer {
                 let bytes = body.len() as u64;
                 return match serde_json::from_str::<Value>(&body) {
                     Ok(Value::Array(items)) => Answer::Matches(items, bytes),
-                    Ok(_) => Answer::Matches(vec![], bytes), // an error notice instead of matches: nothing found
+                    Ok(_) => Answer::Matches(vec![], bytes), // 返回的是错误提示而不是匹配：算没找到
                     Err(e) => Answer::Failed(format!("响应不是 JSON：{e}")),
                 };
             }
@@ -95,8 +102,8 @@ fn query(agent: &ureq::Agent, hash: &str, user_agent: &str) -> Answer {
     Answer::Failed(last)
 }
 
-/// Hands out request start times at most one per `pace` seconds, shared by the workers: two requests may be in flight,
-/// but they never start closer together than the pace (the server's latency no longer adds to it).
+/// 分发请求的开始时间，每 `pace` 秒最多一个，由各 worker 共用：可以有两个请求同时在途，
+/// 但相邻两次开始的间隔不会小于 pace（服务器的延迟不再叠加上去）。
 struct Slots {
     next: Mutex<Instant>,
     pace: Duration,
@@ -105,7 +112,7 @@ struct Slots {
 impl Slots {
     fn wait(&self) {
         let start = {
-            let mut next = self.next.lock().unwrap();
+            let mut next = self.next.lock().expect("rate slot mutex poisoned");
             let start = (*next).max(Instant::now());
             *next = start + self.pace;
             start
@@ -114,12 +121,19 @@ impl Slots {
     }
 }
 
-fn work(a: &Args, agent: &ureq::Agent, input: &Mutex<io::Lines<io::BufReader<io::Stdin>>>, slots: &Slots, used: &AtomicU64, done: &AtomicBool) {
+fn work(
+    a: &Args,
+    agent: &ureq::Agent,
+    input: &Mutex<io::Lines<io::BufReader<io::Stdin>>>,
+    slots: &Slots,
+    used: &AtomicU64,
+    done: &AtomicBool,
+) {
     loop {
         if done.load(Ordering::SeqCst) {
             return;
         }
-        let Some(Ok(line)) = input.lock().unwrap().next() else { return };
+        let Some(Ok(line)) = input.lock().expect("stdin mutex poisoned").next() else { return };
         let Ok(item) = serde_json::from_str::<Value>(&line) else { continue };
         let asset = item["asset"].clone();
         let img = match image::open(Path::new(item["path"].as_str().unwrap_or_default())) {
@@ -130,7 +144,10 @@ fn work(a: &Args, agent: &ureq::Agent, input: &Mutex<io::Lines<io::BufReader<io:
             }
         };
         let hash = signature::of_image(&img).to_hash();
-        if a.hash_only { emit(json!({"asset":asset,"hash":hash}));continue; }
+        if a.hash_only {
+            emit(json!({"asset":asset,"hash":hash}));
+            continue;
+        }
         slots.wait();
         if done.load(Ordering::SeqCst) {
             return;
@@ -139,14 +156,20 @@ fn work(a: &Args, agent: &ureq::Agent, input: &Mutex<io::Lines<io::BufReader<io:
             Answer::Matches(items, bytes) => {
                 let total = used.fetch_add(bytes, Ordering::SeqCst) + bytes;
                 let best = items.into_iter().max_by(|x, y| {
-                    x["score"].as_f64().unwrap_or(0.0).partial_cmp(&y["score"].as_f64().unwrap_or(0.0)).unwrap()
+                    x["score"]
+                        .as_f64()
+                        .unwrap_or(0.0)
+                        .partial_cmp(&y["score"].as_f64().unwrap_or(0.0))
+                        .expect("JSON numbers are never NaN")
                 });
                 let score = best.as_ref().and_then(|b| b["score"].as_f64()).unwrap_or(0.0);
                 let status = if score >= a.hit { "hit" } else { "miss" };
-                let post = best.map(|b| {
-                    let p = &b["post"]; // keep what the caller records, not the post's 46 fields
-                    json!({"id": p["id"], "tag_string_artist": p["tag_string_artist"], "source": p["source"]})
-                }).unwrap_or(Value::Null);
+                let post = best
+                    .map(|b| {
+                        let p = &b["post"]; // 只留调用方要记录的，不要帖子的 46 个字段
+                        json!({"id": p["id"], "tag_string_artist": p["tag_string_artist"], "source": p["source"]})
+                    })
+                    .unwrap_or(Value::Null);
                 emit(json!({"asset": asset, "status": status, "score": score, "post": post, "bytes": bytes}));
                 if total >= a.budget && !done.swap(true, Ordering::SeqCst) {
                     emit(json!({"budget": total}));

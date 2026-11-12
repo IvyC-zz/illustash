@@ -42,9 +42,9 @@ fn app_support_with(home: &Path, env: impl Fn(&str) -> Option<OsString>) -> Path
     }
 }
 
-/// Like Path.resolve(strict=False): cancel dot segments even through missing components,
-/// following existing symlinks before processing any subsequent parent component.
-/// User-home expansion and validation of the resulting directory belong to the caller.
+/// 与 Path.resolve(strict=False) 相同：即使经过不存在的组件也消去点号段，
+/// 处理后续的上级组件之前先跟随已存在的符号链接。
+/// 展开用户主目录和校验结果目录由调用方负责。
 pub fn resolve(path: &Path) -> Result<PathBuf> {
     let base = if path.is_absolute() { PathBuf::new() } else { std::env::current_dir()? };
     resolve_from(path, &base, &mut HashSet::new())
@@ -68,7 +68,7 @@ fn resolve_from(path: &Path, base: &Path, links: &mut HashSet<PathBuf>) -> Resul
                     out = resolve_from(&target, &out, links)?;
                     links.remove(&candidate);
                 } else {
-                    // A missing/non-directory component is retained until a later '..' may cancel it.
+                    // 不存在或不是目录的组件先保留，后面的 '..' 可能把它消去。
                     out = candidate;
                 }
             }
@@ -77,8 +77,8 @@ fn resolve_from(path: &Path, base: &Path, links: &mut HashSet<PathBuf>) -> Resul
     Ok(out)
 }
 
-/// Two canonical folders overlap when they are the same or one contains the other, compared component-wise.
-/// macOS and Windows default to case-insensitive file systems, so names are compared ignoring case there.
+/// 两个规范化后的文件夹相同或一个包含另一个时算作重叠，按组件逐个比较。
+/// macOS 和 Windows 的文件系统默认不区分大小写，所以在这两个平台上比较名称时忽略大小写。
 pub fn overlaps(a: &Path, b: &Path) -> bool {
     let key = |p: &Path| -> Vec<String> {
         p.components()

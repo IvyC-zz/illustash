@@ -1,4 +1,4 @@
-//! Isolated v1 result production. No source/application database writes.
+//! 隔离的 v1 结果生成。不写源库和应用数据库。
 use super::session::{validate_vector, ModelOutput, ModelSessions};
 use crate::{Error, Result};
 use image::{ImageReader, RgbImage};
@@ -10,9 +10,6 @@ use std::{
     path::{Path, PathBuf},
 };
 
-fn invalid(message: impl Into<String>) -> Error {
-    Error::Invalid(message.into())
-}
 #[derive(Deserialize)]
 pub struct Request {
     pub format: String,
@@ -37,23 +34,24 @@ pub struct Tags {
 }
 impl Tags {
     pub fn load(path: &Path) -> Result<Self> {
-        let mut reader = csv::Reader::from_path(path).map_err(|e| invalid(e.to_string()))?;
-        let headers = reader.headers().map_err(|e| invalid(e.to_string()))?;
-        let name = headers.iter().position(|v| v == "name").ok_or_else(|| invalid("标签缺少 name"))?;
-        let category = headers.iter().position(|v| v == "category").ok_or_else(|| invalid("标签缺少 category"))?;
+        let mut reader = csv::Reader::from_path(path).map_err(|e| Error::invalid(e.to_string()))?;
+        let headers = reader.headers().map_err(|e| Error::invalid(e.to_string()))?;
+        let name = headers.iter().position(|v| v == "name").ok_or_else(|| Error::invalid("标签缺少 name"))?;
+        let category =
+            headers.iter().position(|v| v == "category").ok_or_else(|| Error::invalid("标签缺少 category"))?;
         let mut rows = Vec::new();
         for row in reader.records() {
-            let row = row.map_err(|e| invalid(e.to_string()))?;
+            let row = row.map_err(|e| Error::invalid(e.to_string()))?;
             let dim = match row.get(category) {
                 Some("0") => Some("general"),
                 Some("4") => Some("character"),
                 Some("9") => Some("rating"),
                 _ => None,
             };
-            rows.push((row.get(name).ok_or_else(|| invalid("标签缺少名称"))?.to_owned(), dim));
+            rows.push((row.get(name).ok_or_else(|| Error::invalid("标签缺少名称"))?.to_owned(), dim));
         }
         if rows.is_empty() {
-            return Err(invalid("标签表为空"));
+            return Err(Error::invalid("标签表为空"));
         }
         Ok(Self { rows })
     }
@@ -65,7 +63,7 @@ impl Tags {
     }
     pub fn labels(&self, asset: &str, probs: &[f32]) -> Result<Vec<Label>> {
         if probs.len() != self.rows.len() || probs.iter().any(|v| !v.is_finite() || !(0.0..=1.0).contains(v)) {
-            return Err(invalid("WD 概率与标签维度不匹配或非有限概率"));
+            return Err(Error::invalid("WD 概率与标签维度不匹配或非有限概率"));
         }
         Ok(self
             .rows
@@ -73,7 +71,7 @@ impl Tags {
             .zip(probs)
             .filter_map(|((name, dim), prob)| {
                 let dim = (*dim)?;
-                // Python casts model probabilities to f64 before >= KEEP and round(x,4).
+                // Python 在做 >= KEEP 判断和 round(x,4) 之前先把模型概率转成 f64。
                 let value = f64::from(*prob);
                 (value >= 0.001).then(|| Label {
                     asset: asset.to_owned(),
@@ -88,29 +86,28 @@ impl Tags {
 pub fn model_specs(resources: &Path, models: &Path) -> Result<Value> {
     super::models::ModelFiles::at(resources, models)?.specs(&|| Ok(()))
 }
-/// First frame, unrotated RGB; drop alpha before interpolation, as Pillow convert('RGB').
+/// 取第一帧，不旋转的 RGB；插值前丢掉 alpha，与 Pillow 的 convert('RGB') 相同。
 pub fn decode(path: &Path) -> Result<RgbImage> {
     decode_bytes(&fs::read(path)?, path)
 }
-/// One picture of a sync request: read in full first, so a failure is classified by where it
-/// happened. Reading can fail for a while (permissions, iCloud placeholder, unplugged disk); the
-/// decoder then only sees bytes in memory, so its every error is about the content itself.
+/// 同步请求里的一张图片：先完整读入，这样失败可以按发生的位置归类。读取可能暂时失败（权限、iCloud 占位文件、
+/// 拔掉的磁盘）；之后解码器只看内存里的字节，所以它的每个错误都关于内容本身。
 pub(crate) fn load(path: &Path) -> std::result::Result<RgbImage, crate::worker_protocol::FailureReason> {
     use crate::worker_protocol::FailureReason;
     let bytes = fs::read(path).map_err(|_| FailureReason::Unreadable)?;
     decode_bytes(&bytes, path).map_err(|_| FailureReason::Undecodable)
 }
-/// `path` only names the format when the bytes do not; nothing is read from it.
+/// 只在字节本身认不出格式时才用 `path` 指定格式；不从它读取任何内容。
 pub fn decode_bytes(bytes: &[u8], path: &Path) -> Result<RgbImage> {
     let mut reader = ImageReader::new(std::io::Cursor::new(bytes)).with_guessed_format()?;
-    // TGA has no dependable magic; retain the filename fallback after sniffing.
+    // TGA 没有可靠的 magic；嗅探之后保留按文件名回退。
     if reader.format().is_none() {
         if let Ok(format) = image::ImageFormat::from_path(path) {
             reader.set_format(format);
         }
     }
     if reader.format() == Some(image::ImageFormat::Jpeg) {
-        // Preserve libjpeg conversion instead of image's separately implemented JPEG decoder.
+        // 保留 libjpeg 的转换，不用 image 另行实现的 JPEG 解码器。
         let image = std::panic::catch_unwind(|| -> std::io::Result<RgbImage> {
             let decoder = mozjpeg::Decompress::new_reader(reader.into_inner())?;
             let cmyk = matches!(decoder.color_space(), mozjpeg::ColorSpace::JCS_CMYK | mozjpeg::ColorSpace::JCS_YCCK);
@@ -129,12 +126,12 @@ pub fn decode_bytes(bytes: &[u8], path: &Path) -> Result<RgbImage> {
             decoder.finish()?;
             RgbImage::from_raw(width, height, pixels).ok_or_else(|| std::io::Error::other("JPEG 像素长度不匹配"))
         })
-        .map_err(|_| invalid("JPEG 解码失败"))??;
+        .map_err(|_| Error::invalid("JPEG 解码失败"))??;
         Ok(image)
     } else {
-        let image = reader.decode().map_err(|e| invalid(format!("图片解码失败: {e}")))?;
-        // Pillow I;16.convert('RGB') clamps integer grayscale to 255; image::to_rgb8
-        // instead scales the full 16-bit range. Preserve the former before resize.
+        let image = reader.decode().map_err(|e| Error::invalid(format!("图片解码失败: {e}")))?;
+        // Pillow 的 I;16.convert('RGB') 把整数灰度截断到 255；image::to_rgb8
+        // 则按完整的 16 位范围缩放。缩放之前保持前者的行为。
         Ok(match image {
             image::DynamicImage::ImageLuma16(gray) => RgbImage::from_fn(gray.width(), gray.height(), |x, y| {
                 image::Rgb([gray.get_pixel(x, y)[0].min(255) as u8; 3])
@@ -143,7 +140,7 @@ pub fn decode_bytes(bytes: &[u8], path: &Path) -> Result<RgbImage> {
         })
     }
 }
-/// NPY v1, C-order little-endian f32; raw values are preserved bit for bit.
+/// NPY v1，C 顺序小端 f32；原始值逐位保留。
 pub fn npy(rows: &[Vec<f32>], dimension: usize) -> Result<Vec<u8>> {
     for row in rows {
         validate_vector(row, dimension)?;
@@ -151,7 +148,7 @@ pub fn npy(rows: &[Vec<f32>], dimension: usize) -> Result<Vec<u8>> {
     let header = format!("{{'descr': '<f4', 'fortran_order': False, 'shape': ({}, {}), }}", rows.len(), dimension);
     let padding = (64 - (10 + header.len() + 1) % 64) % 64;
     let header = format!("{header}{}\n", " ".repeat(padding));
-    let length = u16::try_from(header.len()).map_err(|_| invalid("NPY header 过长"))?;
+    let length = u16::try_from(header.len()).map_err(|_| Error::invalid("NPY header 过长"))?;
     let mut output = b"\x93NUMPY\x01\x00".to_vec();
     output.extend(length.to_le_bytes());
     output.extend(header.as_bytes());
@@ -172,17 +169,17 @@ pub fn write_batch(
     ccip: &[Vec<f32>],
 ) -> Result<()> {
     if ids.is_empty() || ids.len() != wd.len() || ids.len() != ccip.len() {
-        return Err(invalid("识别批次行数不匹配"));
+        return Err(Error::invalid("识别批次行数不匹配"));
     }
     let library =
-        identity["library_id"].as_str().filter(|s| !s.is_empty()).ok_or_else(|| invalid("缺少 library_id"))?;
+        identity["library_id"].as_str().filter(|s| !s.is_empty()).ok_or_else(|| Error::invalid("缺少 library_id"))?;
     let wd = npy(wd, 1024)?;
     let ccip = npy(ccip, 768)?;
     let labels = labels
         .iter()
         .map(serde_json::to_string)
         .collect::<std::result::Result<Vec<_>, _>>()
-        .map_err(|e| invalid(e.to_string()))?
+        .map_err(|e| Error::invalid(e.to_string()))?
         .join("\n");
     fs::create_dir(path)?;
     let mut files = serde_json::Map::new();
@@ -191,14 +188,13 @@ pub fn write_batch(
         fs::write(path.join(name), bytes)?;
         files.insert(name.into(), json!({"bytes":bytes.len(),"sha256":format!("{:x}",Sha256::digest(bytes))}));
     }
-    // Manifest is written last; an interrupted batch is not importable.
-    fs::write(path.join("manifest.json"),serde_json::to_vec(&json!({"format":"illustash-recognition/1","library_id":library,"assets":ids,"models":models,"files":files})).map_err(|e|invalid(e.to_string()))?)?;
+    // manifest 最后写；中断的批次不能导入。
+    fs::write(path.join("manifest.json"),serde_json::to_vec(&json!({"format":"illustash-recognition/1","library_id":library,"assets":ids,"models":models,"files":files})).map_err(|e|Error::invalid(e.to_string()))?)?;
     Ok(())
 }
-/// Progress for the waiting host, at the path the host passes in ILLUSTASH_RECOGNITION_PROGRESS.
-/// Counts are finished attempts of this task only (`failed` included in `processed`); nothing here
-/// means imported. Advisory: a write failure never fails recognition, and the host validates every
-/// value. Replaced by rename, so the host never reads a partial file.
+/// 给等待中的宿主的进度，写在宿主通过 ILLUSTASH_RECOGNITION_PROGRESS 传入的路径。
+/// 计数只是本任务已完成的尝试（`processed` 包含 `failed`）；这里的数字都不表示已导入。
+/// 仅供参考：写入失败从不让识别失败，宿主会校验每个值。用改名替换，所以宿主从不读到写了一半的文件。
 pub struct Progress {
     path: Option<PathBuf>,
     task_id: String,
@@ -227,29 +223,29 @@ impl Progress {
         }
     }
 }
-/// The batch's last file: the host may import a batch only once this exists, so it never reads
-/// a half-written package or sidecar. Digests pin both to exactly what the worker finished.
+/// 批次的最后一个文件：这个文件存在后宿主才可以导入该批次，所以从不读到写了一半的包或 sidecar。
+/// 摘要把两者固定为 worker 完成时的确切内容。
 pub fn write_complete(batch: &Path, task_id: &str, ids: &[String], sidecar: &[u8]) -> Result<()> {
     let manifest = fs::read(batch.join("manifest.json"))?;
     let value = json!({"format":"illustash-recognition-batch/1","task_id":task_id,"assets":ids,
         "manifest_sha256":format!("{:x}", Sha256::digest(&manifest)),
         "sidecar_sha256":format!("{:x}", Sha256::digest(sidecar))});
     let temporary = batch.join("complete.tmp");
-    fs::write(&temporary, serde_json::to_vec(&value).map_err(|e| invalid(e.to_string()))?)?;
+    fs::write(&temporary, serde_json::to_vec(&value).map_err(|e| Error::invalid(e.to_string()))?)?;
     fs::rename(temporary, batch.join("complete.json"))?;
     Ok(())
 }
-/// Produce WD v1 batches and independently bound character-claim sidecars.
+/// 生成 WD v1 批次，以及独立绑定的角色认领 sidecar。
 pub fn run(request: Request, resources: &Path, models: &Path, runtime: &Path, shared: &Path) -> Result<Value> {
     if request.format != "illustash-sync/1" {
-        return Err(invalid("unsupported recognition request"));
+        return Err(Error::invalid("unsupported recognition request"));
     }
     let identity: crate::app_tasks::TaskIdentity =
-        serde_json::from_value(request.identity.clone()).map_err(|e| invalid(format!("识别 identity: {e}")))?;
+        serde_json::from_value(request.identity.clone()).map_err(|e| Error::invalid(format!("识别 identity: {e}")))?;
     let mut progress = Progress::from_env(&identity.task_id, request.assets.len());
     progress.write("preparing");
     #[cfg(target_os = "windows")]
-    illustash_platform::platform_research_math::windows_backend_identity().map_err(invalid)?;
+    illustash_platform::platform_research_math::windows_backend_identity().map_err(Error::invalid)?;
     let snapshot = super::anchor_snapshot::Snapshot::load(shared, &identity.package.join("source.sqlite"))?;
     let specs = model_specs(resources, models)?;
     let tags = Tags::load(&resources.join("tags/tags_v3.csv"))?;
@@ -297,7 +293,7 @@ pub fn run(request: Request, resources: &Path, models: &Path, runtime: &Path, sh
             snapshot.fingerprint.clone(),
             claims,
         );
-        let sidecar_bytes = serde_json::to_vec(&claim).map_err(|e| invalid(e.to_string()))?;
+        let sidecar_bytes = serde_json::to_vec(&claim).map_err(|e| Error::invalid(e.to_string()))?;
         fs::write(&sidecar, &sidecar_bytes)?;
         write_complete(&path, &identity.task_id, &ids, &sidecar_bytes)?;
         sidecars.push(sidecar);
@@ -306,8 +302,8 @@ pub fn run(request: Request, resources: &Path, models: &Path, runtime: &Path, sh
     Ok(json!({"identity":request.identity,"packages":packages,"failed":failed,"character_claims":sidecars}))
 }
 
-/// Adapter integration point. The shared worker binary calls this for recognition only;
-/// no Python interpreter is needed. Resource paths share the existing app_resources policy.
+/// 适配器的接入点。共用的 worker 程序只在识别时调用它；不需要 Python 解释器。
+/// 资源路径沿用现有的 app_resources 规则。
 pub fn worker(arguments: &[String]) -> Result<()> {
     let resources = crate::app_resources::default_root();
     let model_files = super::models::ModelFiles::resolve(&resources)?;
@@ -315,26 +311,26 @@ pub fn worker(arguments: &[String]) -> Result<()> {
     let runtime = crate::app_resources::ort_runtime(&resources);
     if arguments == ["--check"] {
         #[cfg(target_os = "windows")]
-        illustash_platform::platform_research_math::windows_backend_identity().map_err(invalid)?;
+        illustash_platform::platform_research_math::windows_backend_identity().map_err(Error::invalid)?;
         let tags = Tags::load(&resources.join("tags/tags_v3.csv"))?;
         let _ = model_specs(&resources, models)?;
-        // Builds the accelerated session too, so the first sync after setup finds CoreML's model compiled.
+        // 同时建出加速会话，这样安装后的第一次同步就能用上已编译好的 CoreML 模型。
         let shared = crate::app_resources::shared_path(&resources).ok();
         let _ = ModelSessions::load(models, &runtime, &super::backend::Acceleration::from_env(shared.as_deref()))?;
         if tags.is_empty() {
-            return Err(invalid("标签表为空"));
+            return Err(Error::invalid("标签表为空"));
         }
         return Ok(());
     }
     if arguments.len() != 2 {
-        return Err(invalid("需要 request.json response.json 或 --check"));
+        return Err(Error::invalid("需要 request.json response.json 或 --check"));
     }
     let request: Request = crate::worker_protocol::read(Path::new(&arguments[0]))?;
     let _: crate::app_tasks::TaskIdentity =
-        serde_json::from_value(request.identity.clone()).map_err(|e| invalid(format!("识别 identity: {e}")))?;
+        serde_json::from_value(request.identity.clone()).map_err(|e| Error::invalid(format!("识别 identity: {e}")))?;
     let shared = crate::app_resources::shared_path(&resources)?;
     let result = run(request, &resources, models, &runtime, &shared)?;
-    fs::write(&arguments[1], serde_json::to_vec(&result).map_err(|e| invalid(e.to_string()))?)?;
+    fs::write(&arguments[1], serde_json::to_vec(&result).map_err(|e| Error::invalid(e.to_string()))?)?;
     Ok(())
 }
 
@@ -381,7 +377,7 @@ mod tests {
             let locked = root.join("locked.png");
             fs::copy(&png, &locked).unwrap();
             fs::set_permissions(&locked, fs::Permissions::from_mode(0o000)).unwrap();
-            // Root reads through permission bits; there the file is simply readable.
+            // root 不受权限位限制；在 root 下这个文件照样可读。
             if fs::read(&locked).is_err() {
                 assert_eq!(load(&locked).err(), Some(Unreadable));
             }
@@ -437,7 +433,7 @@ mod tests {
             (Some("task"), Some(3), Some(2), Some(1))
         );
         assert!(!root.join("progress.tmp").exists());
-        // Without a host path, and with an unwritable one, progress is silently skipped.
+        // 没有宿主路径，或路径不可写时，进度直接跳过，不报错。
         Progress::new(None, "task", 1).write("preparing");
         Progress::new(Some(root.join("missing/progress.json")), "task", 1).write("preparing");
         fs::remove_dir_all(root).unwrap();

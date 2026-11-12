@@ -360,15 +360,14 @@ pub fn compact_pending(conn: &Connection) {
             .query_row("SELECT value FROM meta WHERE key='terms_compact_pending'", [], |r| r.get::<_, String>(0))
             .optional()?;
         if pending.is_some() {
-            // SQLite may renumber implicit rowids in tables without an index. User
-            // research/history extensions are preserved even when the core never reads them.
-            // Do not trade their physical identity for optional file-space reclamation.
+            // SQLite 可能给没有索引的表重新编号隐式 rowid。用户的研究/历史扩展即使核心从不读取也要保留。
+            // 不要为了可有可无的文件空间回收而牺牲它们的物理身份。
             if vacuum_preserves_rowids(conn)? {
                 conn.execute_batch("VACUUM")?;
             } else {
                 eprintln!("词条表升级已提交；存在无索引的隐式 rowid 表，保留物理行，未回收文件空间");
             }
-            // A safety refusal is terminal maintenance, not a retryable busy/disk error.
+            // 出于安全的拒绝算维护已结束，不是可重试的忙碌或磁盘错误。
             conn.execute("DELETE FROM meta WHERE key='terms_compact_pending'", [])?;
         }
         Ok(())
@@ -378,9 +377,8 @@ pub fn compact_pending(conn: &Connection) {
     }
 }
 
-/// VACUUM preserves rowids for indexed tables and INTEGER PRIMARY KEY aliases.
-/// For unindexed rowid tables, refuse maintenance regardless of today's density:
-/// physical identities must not depend on an incidental insertion layout.
+/// VACUUM 会保留有索引的表和 INTEGER PRIMARY KEY 别名的 rowid。
+/// 对没有索引的 rowid 表，不管当前密度如何都拒绝维护：物理身份不能取决于偶然的插入布局。
 fn vacuum_preserves_rowids(conn: &Connection) -> rusqlite::Result<bool> {
     let tables = conn
         .prepare("SELECT name FROM sqlite_schema WHERE type='table' AND name NOT LIKE 'sqlite_%'")?
@@ -389,11 +387,10 @@ fn vacuum_preserves_rowids(conn: &Connection) -> rusqlite::Result<bool> {
     for table in tables {
         let quoted = format!("\"{}\"", table.replace('"', "\"\""));
         if conn.prepare(&format!("SELECT rowid FROM {quoted} LIMIT 0")).is_err() {
-            continue; // WITHOUT ROWID has no implicit physical identity.
+            continue; // WITHOUT ROWID 没有隐式的物理身份。
         }
         let indexed = conn.prepare(&format!("PRAGMA index_list({quoted})"))?.exists([])?;
-        // An INTEGER PRIMARY KEY alias has no separate primary-key index. The
-        // historical `INTEGER PRIMARY KEY DESC` exception DOES have an index.
+        // INTEGER PRIMARY KEY 别名没有单独的主键索引。历史上的 `INTEGER PRIMARY KEY DESC` 例外则确实有索引。
         let integer_primary = conn
             .prepare(&format!("PRAGMA table_info({quoted})"))?
             .query_map([], |r| Ok((r.get::<_, String>(2)?, r.get::<_, i64>(5)?)))?
@@ -407,7 +404,7 @@ fn vacuum_preserves_rowids(conn: &Connection) -> rusqlite::Result<bool> {
     Ok(true)
 }
 
-/// The upgrade requires a backup capability; platform/default wiring stays in the API facade.
+/// 升级必须提供备份能力；平台相关和默认的接线留在 API 门面里。
 pub fn backup_before_upgrade(
     conn: &Connection,
     before: i64,
@@ -970,7 +967,7 @@ pub(crate) fn migrate_to(conn: &mut Connection, target: i64) -> Result<i64> {
     Ok(before)
 }
 
-/// Host fixture/partial migrations still require the same mandatory backup capability.
+/// 宿主的夹具迁移和部分迁移同样要求这项必需的备份能力。
 pub fn migrate_to_with_backup(
     conn: &mut Connection,
     target: i64,
@@ -985,8 +982,8 @@ pub fn migrate_to_with_backup(
     }
     migrate_to(conn, target)
 }
-/// Completed backup of the committed snapshot before the host's already-held writer transaction.
-/// Private fields prevent construction without executing Core's SQLite copy.
+/// 在宿主已持有的写事务之前，对已提交快照完成的备份。
+/// 字段私有，不执行核心的 SQLite 复制就无法构造。
 pub struct PreparedUpgrade {
     source: String,
     before: i64,
@@ -1018,8 +1015,8 @@ pub fn migrate_prepared_in(tx: &rusqlite::Transaction<'_>, target: i64, prepared
     migrate_in(tx, target)
 }
 
-/// Retire obsolete identity tables inside the host's existing transaction, after mandatory backup.
-/// The destructive version step itself is deliberately private.
+/// 在必需的备份之后，于宿主现有的事务里停用过时的身份表。
+/// 这个破坏性的版本步骤本身特意设为私有。
 /// ```compile_fail
 /// let c = rusqlite::Connection::open_in_memory().unwrap();
 /// illustash_core::schema::v7(&c).unwrap();
@@ -1031,8 +1028,8 @@ pub fn retire_identity_calibration_in(tx: &rusqlite::Transaction<'_>, prepared: 
     v7(tx)
 }
 
-/// Apply the unchanged migration steps inside the caller's already-held writer transaction.
-/// The caller owns backup, commit and post-commit maintenance; this never starts a nested transaction.
+/// 在调用方已持有的写事务里执行原样不变的迁移步骤。
+/// 备份、提交和提交后的维护由调用方负责；这里从不开启嵌套事务。
 pub(crate) fn migrate_in(tx: &rusqlite::Transaction<'_>, target: i64) -> Result<i64> {
     tx.execute_batch(SHARED)?;
     let before = version(tx)?;
@@ -1160,7 +1157,7 @@ mod tests {
             .optional()
             .unwrap()
             .is_none());
-        // The safety decision does not block ordinary commands or require a migration.
+        // 这个安全判断不阻止普通命令，也不要求迁移。
         assert_eq!(version(&c).unwrap(), SCHEMA_VERSION);
     }
 

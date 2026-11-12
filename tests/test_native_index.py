@@ -146,10 +146,10 @@ class NativeIndexTest(unittest.TestCase):
         for b in ({'action':'apply','tags':['bogus']},{'action':'drop','char':'alice','reason':'x'},{'action':'watch','works':[self.work],'min_posts':True}):self.assertEqual(self.request('/api/index',b)['status'],400)
         self.index({'action':'drop','char':'carol_example','reason':'  合成放弃  '});v=self.finish();self.assertEqual(v['state']['status'],'done',v)
         self.assertEqual(v['history'][0]['characters'][0]['status'],'dropped')
-        self.assertEqual(self.check()['check']['missing'],[]) # both rejected characters stay excluded
+        self.assertEqual(self.check()['check']['missing'],[]) # 两个被拒绝的角色都仍被排除
 
     def test_watch_list_belongs_to_each_library(self):
-        # #205: work IDs only exist in their own library, so each library keeps its own list and threshold.
+        # #205：作品 ID 只在各自的图库里存在，所以每个图库保留自己的列表和阈值。
         shared_file=self.shared/'char-patch/watch.json';legacy=shared_file.read_bytes()
         self.assertEqual(self.index()['watch'],{'version':2,'works':[self.work],'pending_tags':[],'min_posts':100})
         self.assertEqual(self.index({'action':'watch','works':[self.work],'min_posts':150})['watch']['min_posts'],150)
@@ -168,12 +168,12 @@ class NativeIndexTest(unittest.TestCase):
 
     @unittest.skipIf(os.name == 'nt', 'POSIX 权限位制造复制失败')
     def test_index_files_are_published_as_one_generation(self):
-        # #47: readers never see a mix of old and new shared index files.
+        # #47：读取方永远不会看到新旧共享索引文件混在一起。
         self.mode.write_text('anchors')
         names = ('char-anchors.npy', 'char-anchors.txt', 'char-index/carol_example.json')
         published = lambda: {n: (self.shared/n).read_bytes() if (self.shared/n).exists() else None for n in names}
         generation = lambda: (self.shared/'index-generation').read_text() if (self.shared/'index-generation').exists() else None
-        # A copy that fails while staging changes no published file and leaves no staged copy behind.
+        # 暂存阶段失败的复制不改动任何已发布文件，也不留下暂存副本。
         self.check()
         self.shared.chmod(0o555); self.addCleanup(self.shared.chmod, 0o755)
         self.index({'action':'apply','tags':['carol_example']}); v = self.finish()
@@ -184,7 +184,7 @@ class NativeIndexTest(unittest.TestCase):
         self.stop(self.process); self.restart(); v = self.finish(); self.assertEqual(v['state']['status'], 'done', v)
         first = published()
         self.assertEqual((first['char-anchors.txt'], generation()), (b'carol_example', '2'))
-        # A failure after files were replaced leaves the generation odd until the resume completes the set.
+        # 文件替换之后才失败，generation 保持奇数，直到恢复运行把整组文件补齐。
         index = self.shared/'char-index'
         index.chmod(0o555); self.addCleanup(index.chmod, 0o755)
         self.index({'action':'drop','char':'carol_example','reason':'合成放弃'}); v = self.finish()
@@ -195,8 +195,8 @@ class NativeIndexTest(unittest.TestCase):
         self.assertEqual(list(self.shared.rglob('*.tmp')), [])
 
     def test_done_is_reported_only_after_the_job_is_cleaned_up(self):
-        # #123: a finished job reported done before removing its journal and folder; a poll in between saw both.
-        # The test-only pause right after done makes that moment wide enough to observe every time.
+        # #123：完成的任务曾在删除日志和文件夹之前就报告 done；其间的一次轮询会同时看到两者。
+        # done 之后紧接着的测试专用暂停把这个时间窗拉宽，每次都能观察到。
         self.env['ILLUSTASH_TEST_INDEX_DONE_PAUSE_MS']='1500';self.stop(self.process);self.restart()
         self.check();v=self.apply();self.assertEqual(v['state']['status'],'done',v)
         self.assertFalse((self.lib.path/'index-job.json').exists())
@@ -260,14 +260,14 @@ class NativeIndexTest(unittest.TestCase):
         v=self.finish();self.assertEqual(v['state']['status'],'checked',v)
         self.assertEqual(v['check']['missing'],[])
         self.assertEqual(v['watch']['works'],[self.work]);self.assertEqual(v['watch']['pending_tags'],['unresolved'])
-        # #205: the shared file of earlier versions is read as a starting point, never rewritten.
+        # #205：早期版本的共享文件作为起点读取，从不改写。
         self.assertEqual(json.loads((self.shared/'char-patch/watch.json').read_text()),{'works':['example','unresolved'],'min_posts':100})
         self.assertFalse((self.shared/'char-patch/watch-v1.json').exists())
         count=len(self.calls);time.sleep(1.2);self.assertEqual(len(self.calls),count)
 
     def test_deterministic_get_and_progress_bytes_match_reference(self):
-        # The former Python updater's bytes are recorded (tests/fixed_expectations.py); it had its own
-        # shared state and the native timings were copied into it, so times compare as <clock>.
+        # 原 Python 更新程序的字节已录制（tests/fixed_expectations.py）；它有自己的共享状态，
+        # 原生的计时被复制进去，所以时间按 <clock> 比较。
         reference=None
         watch=self.index()['watch']
         info=lambda:json.dumps(reference.info(),ensure_ascii=False)
@@ -353,7 +353,7 @@ class NativeIndexTest(unittest.TestCase):
         self.stop(self.process);(self.lib.path/'index-job.json').unlink();self.env.pop('ILLUSTASH_INDEX_WORKER');self.env.pop('ILLUSTASH_INDEX_TIMEOUT_MS');self.restart()
         self.assertEqual(self.request('/api/index',{'action':'apply','tags':['carol_example']})['status'],400)
         self.assertEqual(lifecycle.import_task(self,'/api/recognition/import',{'resume':True})['status'],200)
-        # No external request is made: the network gate rejects before contacting a host.
+        # 不发出任何外部请求：联网关卡在连接主机之前就拒绝。
         self.stop(self.process);self.env.pop('ILLUSTASH_COPYRIGHT_BASE');self.restart()
         r=self.request('/api/index',{'action':'check'});self.assertEqual(r['status'],400,r['body'])
         self.assertIn('确认本次检查',r['body'].decode())
@@ -380,8 +380,8 @@ class NativeIndexTest(unittest.TestCase):
         self.fail('index add did not pause')
 
     def test_add_without_network_after_restart_pauses_keeps_pictures_and_continues(self):
-        # #287: a restart resumes an unfinished add without the person's consent to go online. It waits for them
-        # instead of failing every minute, keeps the pictures it has, and goes on once they allow it.
+        # #287：重启后恢复一次没做完的添加，但用户还没同意联网。它等用户同意，而不是每分钟失败一次；
+        # 保留已有的图片，用户允许后继续。
         self.env['ILLUSTASH_TEST_INDEX_CONSENT']='1';self.stop(self.process);self.restart()
         port=self.remote.server_port
         self.posts=[{'id':i,'tag_string_general':'solo','media_asset':{'variants':[{'type':'720x720','url':f'http://127.0.0.1:{port}/image/{i}'}]}} for i in range(3)]
@@ -395,16 +395,16 @@ class NativeIndexTest(unittest.TestCase):
         self.restart();v=self.paused()['state']
         self.assertEqual((v['kind'],v['done'],v['total'],v['message']),('add',1,2,'继续下载参考图需要你确认联网'),v)
         self.assertTrue(json.loads((self.lib.path/'index-job.json').read_text())['paused'])
-        # The automatic retry leaves it waiting, and a new check or another add waits for the person too.
+        # 自动重试让它继续等待，新的检查或另一次添加也同样等用户。
         calls=len(self.calls);self.stop(self.process);self.restart();self.assertEqual(self.paused()['state'],v)
         self.assertEqual(len(self.calls),calls)
         for body in ({'action':'check','allow_network':True},{'action':'apply','tags':['carol_example'],'allow_network':True}):
             self.assertEqual(self.request('/api/index',body)['status'],400)
-        # A sync while it waited changes the source; the add goes on from the library as it is now.
+        # 等待期间的一次同步改了 source；添加按图库现在的样子继续。
         with sqlite3.connect(self.lib.source) as c:c.execute("UPDATE labels SET conf=.5 WHERE dim='character' AND uuid='b'")
         self.index({'action':'resume','allow_network':True});v=self.finish()
         self.assertEqual((v['state']['status'],v['state']['added']),('done',1),v)
-        # Carol's pictures were kept, Dani's fetched once; nothing was downloaded twice.
+        # Carol 的图片保留了，Dani 的只取了一次；没有下载两次的。
         images=[p for p in self.calls if p.startswith('/image/')]
         self.assertEqual(len(images),6,images)
         self.assertFalse((self.lib.path/'index-job.json').exists())
@@ -440,12 +440,12 @@ class NativeIndexTest(unittest.TestCase):
 
 
 
-# The character links as the former `links` table had them (core v8 keeps them in term_links, #201).
+# 按原 `links` 表的样子给出角色链接（core v8 把它们放在 term_links 里，#201）。
 LINKS="SELECT CASE x.system WHEN 'wd_character' THEN 'wd' ELSE x.system END AS system,x.key AS key,t.key AS entity_id,x.current AS current FROM term_links x JOIN terms t ON t.id=x.term_id JOIN term_tree r ON r.term_id=x.term_id"
 
 
 def projection(path):
-    """Application rows the patch touches, entity ids replaced by their stable links; times as <clock>."""
+    """patch 涉及的应用数据行，entity id 换成它们的稳定链接；时间写作 <clock>。"""
     with sqlite3.connect(path) as c:
         ids=dict(c.execute("SELECT entity_id,system||':'||key FROM ("+LINKS+") WHERE system IN ('ccip','qualifier')"))
         def canon(rows):return sorted([tuple(unclocked(ids.get(v,v)) for v in r) for r in rows],key=repr)
@@ -459,7 +459,7 @@ def projection(path):
 
 
 def canonical(history,path):
-    """A history entry's entity ids replaced by their stable links in that library."""
+    """把一条历史记录里的 entity id 换成它们在该图库里的稳定链接。"""
     with sqlite3.connect(path) as c: ids=dict(c.execute("SELECT entity_id,system||':'||key FROM ("+LINKS+") WHERE system IN ('ccip','qualifier')"))
     for r in history['characters']:
         if r['entity']:

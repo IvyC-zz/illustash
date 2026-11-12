@@ -1,5 +1,5 @@
-//! Line-for-line semantics of web/identity.py _graph / _project, hybrid only.
-//! Baseline order is the preserved legacy rowid (seq); representatives are b-side.
+//! 逐行对应 web/identity.py _graph / _project 的语义，只支持 hybrid。
+//! 对照基准的顺序是保留下来的旧版 rowid（seq）；代表取 b 侧。
 use crate::character_entities::ENTITIES;
 use crate::character_relations::{DECISIONS, DECISION_EVIDENCE, EVIDENCE, RELATIONS};
 use crate::{character_json, character_projection, Error, Result};
@@ -22,9 +22,6 @@ pub struct Graph {
     hierarchy: Vec<Option<usize>>,
     families: Vec<usize>,
 }
-fn invalid(message: &str) -> Error {
-    Error::Invalid(message.into())
-}
 fn find(parent: &mut [usize], mut i: usize) -> usize {
     while parent[i] != i {
         parent[i] = parent[parent[i]];
@@ -34,7 +31,7 @@ fn find(parent: &mut [usize], mut i: usize) -> usize {
 }
 
 pub fn baseline(c: &Connection) -> Result<()> {
-    // seq is an INTEGER PRIMARY KEY: omitted values append in SELECT row order (the identities' own order).
+    // seq 是 INTEGER PRIMARY KEY：不给值时按 SELECT 的行序追加（即身份本身的顺序）。
     c.prepare_cached(&format!(
         "INSERT OR IGNORE INTO term_identity_baseline(id,parent_id,variant,kind,merged_into)
         SELECT id,parent_id,variant,kind,merged_into FROM {ENTITIES} WHERE kind<>'work' ORDER BY seq"
@@ -51,7 +48,7 @@ pub fn graph(c: &Connection) -> Result<Graph> {
         })?
         .collect::<rusqlite::Result<_>>()?;
     let positions: HashMap<&str, usize> = nodes.iter().enumerate().map(|(i, n)| (n.id.as_str(), i)).collect();
-    let index = |s: &str| positions.get(s).copied().ok_or_else(|| invalid("关系端点不存在"));
+    let index = |s: &str| positions.get(s).copied().ok_or_else(|| Error::invalid("关系端点不存在"));
     let accepted: Vec<(String, String, String)> = c
         .prepare_cached(&format!(
             "SELECT r.a, r.b, r.kind FROM {RELATIONS} r WHERE r.status = 'accepted' ORDER BY r.id"
@@ -78,10 +75,10 @@ pub fn graph(c: &Connection) -> Result<Graph> {
     let attach = |a: usize, b: usize, hierarchy: &mut Vec<Option<usize>>| -> Result<()> {
         let (child, person) = (mapping[a], mapping[b]);
         if child == person {
-            return Err(invalid("变体不能与其人物重复"));
+            return Err(Error::invalid("变体不能与其人物重复"));
         }
         if hierarchy[child].is_some_and(|p| p != person) {
-            return Err(invalid("变体已有另一个父人物，需先撤销旧关系"));
+            return Err(Error::invalid("变体已有另一个父人物，需先撤销旧关系"));
         }
         hierarchy[child] = Some(person);
         Ok(())
@@ -93,7 +90,7 @@ pub fn graph(c: &Connection) -> Result<Graph> {
     }
     for (a, b, kind) in &accepted {
         if kind == "different_from" && mapping[index(a)?] == mapping[index(b)?] {
-            return Err(invalid("确认不同与重复等价组冲突"));
+            return Err(Error::invalid("确认不同与重复等价组冲突"));
         }
         if kind == "form_of" {
             attach(index(a)?, index(b)?, &mut hierarchy)?;
@@ -105,7 +102,7 @@ pub fn graph(c: &Connection) -> Result<Graph> {
         let mut seen = HashSet::new();
         while let Some(p) = hierarchy[i] {
             if !seen.insert(i) {
-                return Err(invalid("人物—变体关系存在环"));
+                return Err(Error::invalid("人物—变体关系存在环"));
             }
             i = p;
         }
@@ -113,7 +110,7 @@ pub fn graph(c: &Connection) -> Result<Graph> {
     }
     for (a, b, kind) in &accepted {
         if kind == "different_from" && families[index(a)?] == families[index(b)?] {
-            return Err(invalid("确认不同与人物—变体关系冲突"));
+            return Err(Error::invalid("确认不同与人物—变体关系冲突"));
         }
     }
     Ok(Graph { nodes, mapping, hierarchy, families })
@@ -181,8 +178,8 @@ pub fn project(c: &Connection, g: &Graph) -> Result<Value> {
         g.nodes.iter().enumerate().map(|(i, n)| (n.id.as_str(), g.nodes[g.mapping[i]].id.as_str())).collect();
     let is_split = |v: &Value| -> Result<bool> {
         let mut roots = HashSet::new();
-        for id in v.as_array().ok_or_else(|| invalid("身份范围应为数组"))? {
-            let id = id.as_str().ok_or_else(|| invalid("身份范围应为字符串"))?;
+        for id in v.as_array().ok_or_else(|| Error::invalid("身份范围应为数组"))? {
+            let id = id.as_str().ok_or_else(|| Error::invalid("身份范围应为字符串"))?;
             roots.insert(mapping.get(id).copied().unwrap_or(id));
         }
         Ok(roots.len() > 1)
@@ -275,7 +272,7 @@ pub fn project(c: &Connection, g: &Graph) -> Result<Value> {
 
 pub fn rebuild(c: &Connection) -> Result<Value> {
     if !character_projection::policy(c)? {
-        return Err(invalid("请先完成两级身份迁移"));
+        return Err(Error::invalid("请先完成两级身份迁移"));
     }
     baseline(c)?;
     let g = graph(c)?;

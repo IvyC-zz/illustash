@@ -1,6 +1,5 @@
-// The recognition models an installer without them downloads on first use (#168): the words and buttons the guide's
-// bar, the task panel and 设置 › 数据 share. Nothing is downloaded until the person clicks 下载; the button says how
-// much. Refusing leaves 从文件导入 and the manual download page.
+// 不带识别模型的安装包在第一次使用时下载的模型（#168）：向导横条、任务面板和「设置 › 数据」共用的文字和按钮。用户点
+// 「下载」之前什么都不下载；按钮上写明有多大。拒绝的话还有「从文件导入」和手动下载页面。
 import {t, tb} from '../core/i18n.js';
 import {esc, bytes, number} from '../core/format.js';
 import {state} from '../core/state.js';
@@ -12,7 +11,7 @@ import {confirmAction} from './dialog.js';
 const running = m => m?.job?.status === 'running';
 const left = m => Math.max(0, (m?.total || 0) - (m?.have || 0));
 const fileSize = n => n < 10000 ? t('{n} 字节', {n: number(n)}) : bytes(n);
-// One line: what is happening or what is missing.
+// 一行：正在发生什么，或缺了什么。
 export function modelsLine(m = state.models) {
   if (!m) return '…';
   const j = m.job;
@@ -30,7 +29,7 @@ export function modelsBar(m = state.models) {
   const j = m?.job; if (!running(m) || !j.total) return '';
   return `<div class="progress" role="progressbar" aria-valuemin="0" aria-valuemax="${j.total}" aria-valuenow="${j.done}"><span style="width:${Math.min(100, j.done / j.total * 100).toFixed(1)}%"></span></div>`;
 }
-// The buttons for the current state; `compact` leaves out the less common ones (the task panel).
+// 当前状态下的按钮；`compact` 省掉不常用的那些（任务面板）。
 export function modelsActions(m = state.models, compact = false) {
   if (!m || m.status === 'ready') return '';
   if (running(m)) return `<button class="quiet small" data-models="cancel">${t('取消')}</button>`;
@@ -39,36 +38,36 @@ export function modelsActions(m = state.models, compact = false) {
   return `${download}<button class="quiet small" data-models="import">${t('从文件导入…')}</button>`
     + (m.partial && m.have ? `<button class="quiet small" data-models="discard">${t('删除未完成的部分')}</button>` : '');
 }
-// Why each source failed for the file that stopped the download.
+// 下载卡在某个文件上时，每个来源各自失败的原因。
 export function modelsFailures(m = state.models) {
   const list = m?.job?.status === 'failed' ? m.job.failures || [] : [];
   return list.length ? `<ul class="models-results">${list.map(f => `<li class="mismatch">${esc(t('{source}：{why}', {source: f.source, why: tb(f.why)}))}</li>`).join('')}</ul>` : '';
 }
-// In place in an install that downloads them (user 2026-10-19, #168): they can be deleted, not while in use.
+// 在会自己下载模型的安装里已经就位（用户 2026-10-19 定，#168）：可以删除，正在使用时不行。
 export function deleteButton(m = state.models) {
   if (!m?.on_demand || m.status !== 'ready') return '';
   const busy = running(m) || SYNC_ACTIVE.includes(state.sync?.status) || INDEX_ACTIVE.includes(state.index?.state?.status);
   return `<div class="models-acts"><button class="quiet small" data-models="delete" ${busy ? `disabled title="${t('正在识别或下载，等它结束再删除')}"` : ''}>${t('删除已下载的模型')}</button></div>`;
 }
 export const manualLink = (m = state.models) => m?.manual ? `<a class="link" href="${esc(m.manual)}" target="_blank" rel="noreferrer noopener">${t('手动下载说明')}</a>` : '';
-// What an import made of each chosen file.
+// 导入对每个选中的文件做了什么。
 const RESULT = {accepted: () => t('已接收'), mismatch: () => t('SHA-256 不符，已拒绝'), unknown: () => t('不是需要的模型文件'), already: () => t('已经有了')};
 export function importSummary(job) {
   if (job?.kind !== 'import' || !job.results?.length) return '';
   return `<ul class="models-results">${job.results.map(r => `<li class="${r.result}"><bdi>${esc(r.name)}</bdi> · ${RESULT[r.result]?.() || esc(r.result)}</li>`).join('')}</ul>`;
 }
 
-// The guide's bar while recognition waits for the models, in every library of this install.
+// 识别等待模型期间向导的横条，出现在这个安装的每个图库里。
 export function modelsNotice() {
   const m = state.models; if (!modelsWaiting(m)) return '';
-  // The line says how it stands once something happened: a download running, stopped, or a part already here.
+  // 有事发生之后，这一行才说明现状：下载在进行、已停止，或者已经有一部分在这里。
   const line = running(m) || m.job || m.have ? esc(modelsLine(m)) : '';
   return `<div class="models-notice"><span>${running(m) ? '' : t('识别要用的模型还没下载（约 {size}）。图片会先加入图库，可以浏览和手动整理；模型就位后会自动开始识别。', {size: bytes(m.total)}) + ' '}${line}</span>
     ${modelsBar(m)}${running(m) ? '' : modelsFailures(m)}<div class="models-acts">${modelsActions(m)}${running(m) ? '' : manualLink(m)}</div>${running(m) ? '' : importSummary(m.job)}</div>`;
 }
 
-// 「使用 GPU 加速识别」 (#270): only where this build has an accelerator. App-wide (preferences.json); workers read
-// it when they start. If the last worker could not use the accelerator, why, and that it went on with the CPU.
+// 「使用 GPU 加速识别」（#270）：只在这个构建带加速器的地方出现。全应用共用（preferences.json）；worker 启动时读取。
+// 上一个 worker 没能用上加速器时，说明原因，以及它改用 CPU 继续了。
 export function accelerationLine(m = state.models) {
   const a = m?.acceleration; if (!a?.available) return '';
   const hint = a.backend === 'coreml'
@@ -78,7 +77,7 @@ export function accelerationLine(m = state.models) {
   return `<label class="switch-line"><span><b>${t('使用 GPU 加速识别')}</b><small>${hint} ${t('关掉就全部用 CPU。')} · ${t('下次识别时生效')}</small>${fell ? `<em>${esc(t('上次没能用上加速，已改用 CPU：{reason}', {reason: fell.reason}))}</em>` : ''}</span><input type="checkbox" class="switch" data-acceleration ${a.on ? 'checked' : ''}></label>`;
 }
 
-// 设置 › 数据: status, where they are, the mirror, and the same buttons.
+// 设置 › 数据：状态、存放位置、镜像，以及同样的按钮。
 export function renderModelsCard() {
   const card = $('setModels'), m = state.models; if (!card) return;
   if (!m) { card.innerHTML = `<h2>${t('识别模型')}</h2><p class="muted-note">…</p>`; return; }
@@ -93,7 +92,7 @@ export function renderModelsCard() {
       ${m.mirror !== m.mirror_default ? `<button class="quiet" data-models="mirror-reset">${t('恢复默认')}</button>` : ''}<button class="primary" data-models="mirror">${t('保存')}</button></div>` : ''}
     <table class="settings-table models-files"><tr><td>${t('存放位置')}</td><td class="mono">${esc(m.location)}</td></tr>
       ${m.files.map(f => `<tr><td class="mono">${esc(f.path)}</td><td class="mono" title="SHA-256 ${esc(f.sha256)}">${fileSize(f.size)} · ${esc(f.sha256.slice(0, 12))}…</td></tr>`).join('')}</table>`;
-  // Polled while a job runs: redraw only on change, and never under a mirror being typed.
+  // 任务运行期间会轮询：只在有变化时重画，正在输入镜像时绝不重画。
   if (card.dataset.html === html || card.contains(document.activeElement) && document.activeElement.matches('input')) return;
   card.dataset.html = html; card.innerHTML = html;
 }
@@ -117,10 +116,10 @@ async function act(what) {
   } catch (e) { toast(e.message); }
   renderModels();
 }
-// Redraws whatever shows the models; the guide's bar draws itself (ui/guide.js listens too).
+// 重画所有显示模型的地方；向导横条自己画自己（ui/guide.js 也在监听）。
 export function renderModels() { renderModelsCard(); }
 
-// The handlers. Called once, when the page starts.
+// 处理函数。页面启动时调用一次。
 export function wireModels() {
   document.addEventListener('click', e => {
     const button = e.target.closest('[data-models]'); if (!button || button.disabled) return;
@@ -137,7 +136,7 @@ export function wireModels() {
     renderModels();
     const job = modelsFinished(before); if (!job) return;
     if (job.status === 'done' && state.models.status === 'ready') {
-      // The pictures already in the library were waiting for exactly this: recognize them now.
+      // 图库里已有的图片等的就是这个：现在就识别它们。
       toast(t('识别模型已就位，开始识别'));
       if (!SYNC_ACTIVE.includes(state.sync?.status) && state.sync?.status !== 'off') startSync().then(pollSync).catch(e => toast(e.message));
     } else if (job.status === 'done' && job.kind === 'import') {

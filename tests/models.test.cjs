@@ -1,5 +1,5 @@
-// Run with: node --test tests/models.test.cjs
-// The recognition models an installer without them downloads on first use (#168): ui/models.js and core/models.js.
+// 运行：node --test tests/models.test.cjs
+// 不带识别模型的安装包在首次使用时下载模型（#168）：ui/models.js 和 core/models.js。
 const {test, before} = require('node:test');
 const assert = require('node:assert/strict');
 const web = require('./web.cjs');
@@ -28,13 +28,13 @@ test('the download button says how much; nothing starts without it', () => {
   assert.match(actions, /data-models="download">下载模型（约 618.0 MB）</);
   assert.match(actions, /data-models="import"/);
   assert.doesNotMatch(actions, /discard/);
-  // A part already here: continue, and the unfinished part can be deleted.
+  // 已经有一部分：可以继续，没下完的部分可以删除。
   const part = models({have: 100 * MB, partial: true, missing: ['wd_swinv2_v3_emb.onnx', 'ccip/model_feat.onnx']});
   assert.equal(context.modelsLine(part), '还缺 wd_swinv2_v3_emb.onnx、ccip/model_feat.onnx（已有 100.0 MB）');
   assert.match(context.modelsActions(part), /继续下载（还差 518.0 MB）/);
-  // Only a small file left: its size in bytes, not 0 KB.
+  // 只剩一个小文件：按字节显示大小，而不是 0 KB。
   assert.match(context.modelsActions(models({have: 618 * MB - 147, partial: true})), /继续下载（还差 147 字节）/);
-  // A failed first attempt leaves an empty folder: nothing to delete.
+  // 第一次尝试失败只留下空文件夹：没有可删的。
   assert.doesNotMatch(context.modelsActions(models({have: 0, partial: true})), /discard/);
   assert.match(context.modelsActions(part), /data-models="discard"/);
   assert.equal(context.modelsActions(part, true).includes('import'), false, 'the task panel shows the main button only');

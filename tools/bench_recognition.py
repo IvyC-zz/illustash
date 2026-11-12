@@ -419,7 +419,7 @@ def end_to_end(args, base, resources, images, shared, characters, trial, backend
 
 
 def used(shared):
-    """What the worker ran each model on (Shared/acceleration.json; absent when everything was on the CPU)."""
+    """worker 在什么上跑了每个模型（Shared/acceleration.json；全在 CPU 上跑时没有这个文件）。"""
     try:
         return json.loads((shared / 'acceleration.json').read_text(encoding='utf-8'))
     except (OSError, ValueError):
@@ -494,7 +494,7 @@ def main():
             results[backend] = summarise(args, generated, before, after, trials[backend], stages[backend])
             results[backend]['inputs'] = inputs
             results[backend]['backend'] = backend
-        # One backend: the same result as before #270; several: one result each, by name.
+        # 一个后端：结果与 #270 之前相同；多个后端：每个一份结果，按名称存放。
         result = results[backends[0]] if len(backends) == 1 else {'format': 'illustash-recognition-bench-compare/1',
                                                                    'order': backends, 'by_backend': results}
         out.write_text(json.dumps(result, ensure_ascii=False, indent=1), encoding='utf-8')

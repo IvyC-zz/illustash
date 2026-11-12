@@ -284,7 +284,7 @@ impl View {
         }
         let mut merged: HashMap<String, Vec<String>> = HashMap::new();
         for e in entities.values() {
-            // sorted by id (BTreeMap)
+            // 按 id 排序（BTreeMap）
             if let Some(m) = e.merged.as_ref().filter(|m| !m.is_empty()) {
                 if e.linked {
                     merged.entry(m.clone()).or_default().push(e.id.clone());
@@ -1228,7 +1228,7 @@ fn untagged(c: &Connection) -> Result<Vec<String>> {
 mod tests {
     use super::*;
 
-    /// Display names of identities by key, in this order (`seq` follows it, as `character_names::put_name` assigns it).
+    /// 按键给身份写显示名，按这里的顺序（`seq` 随之递增，与 `character_names::put_name` 的分配方式相同）。
     fn named(rows: &[(&str, &str, &str, &str, i64)]) -> String {
         rows.iter()
             .map(|(key, lang, value, source, preferred)| {
@@ -1241,7 +1241,7 @@ mod tests {
             .collect()
     }
 
-    /// Name inputs only, names already in the core so `legacy_names::track` records changes.
+    /// 只有名称的输入，名称已在核心里，`legacy_names::track` 才会记录变化。
     fn library() -> Connection {
         let c = Connection::open_in_memory().unwrap();
         c.execute_batch(
@@ -1286,7 +1286,7 @@ mod tests {
              INSERT INTO term_key_names VALUES ('skin','swimsuit_x','zh','index','皮肤名'),('work','series_w','zh','bangumi','作品名');",
         )
         .unwrap();
-        // Rows tied on (preferred,value) whose `seq` order differs from the primary key order.
+        // 在 (preferred,value) 上并列、`seq` 顺序与主键顺序不同的行。
         c.execute_batch(&named(&[
             ("e1", "zh", "同名", "index", 0),
             ("e1", "ja", "同名", "wiki", 0),
@@ -1314,8 +1314,8 @@ mod tests {
         all
     }
 
-    /// `library` plus a skin sharing a variant, a nameless character borrowing its member's name, a ccip_base tag
-    /// and two characters linked without a tag; the projection is fully built.
+    /// `library` 再加上：共用一个 variant 的皮肤、借用成员名称的无名角色、一个 ccip_base 标签，
+    /// 以及两个没有标签的已链接角色；投影已完整构建。
     fn projected() -> Connection {
         let c = library();
         c.execute_batch(TABLES).unwrap();
@@ -1347,30 +1347,30 @@ mod tests {
         let mut c = projected();
         let before = projection(&c);
         let cases: [(&str, Option<&[&str]>); 9] = [
-            // Own name of a character: its tag-mate (e2 via wd), its skin and the character key.
+            // 角色自己的名称：同标签的身份（经 wd 链到的 e2）、它的皮肤和角色键。
             (
                 "UPDATE term_names SET value='改名' WHERE term_id=(SELECT id FROM terms WHERE key='e1') AND lang='zh'",
                 Some(&["e1", "e2", "m1", "s1", "s2"]),
             ),
-            // A member's name: the nameless character it was merged into borrows it.
+            // 成员的名称：它并入的无名角色借用这个名称。
             (
                 "UPDATE term_names SET value='成员改名' WHERE term_id=(SELECT id FROM terms WHERE key='m2')",
                 Some(&["e3", "m2", "s3"]),
             ),
             ("DELETE FROM term_names WHERE term_id=(SELECT id FROM terms WHERE key='m2')", Some(&["e3", "m2", "s3"])),
-            // Shared skin variant: both skins and their parents.
+            // 共用的皮肤 variant：两个皮肤及其上级。
             (
                 "INSERT INTO term_key_names VALUES ('skin','swimsuit_x','ja','wiki','ミズギ')",
                 Some(&["e1", "e2", "m1", "s1", "s2"]),
             ),
-            // Work text: the work with that qualifier; the identity's `work` keeps the key in range.
+            // 作品文字：带这个限定词的作品；身份的 `work` 让这个键留在范围内。
             ("DELETE FROM term_key_names WHERE kind='work' AND key='series_w'", Some(&["w1"])),
             ("INSERT INTO term_key_names VALUES ('character','ccip_tag','zh','bangumi','新卡')", Some(&["e4"])),
             (
                 "INSERT INTO term_key_names VALUES ('character','member_tag','zh','bangumi','成员键')",
                 Some(&["e3", "m2", "s3"]),
             ),
-            // Linked without a tag: every tagless identity shares the ("character","") key → whole rebuild.
+            // 已链接但没有标签：所有无标签的身份共用 ("character","") 这个键 → 整体重建。
             ("UPDATE term_names SET value='无标签改' WHERE term_id=(SELECT id FROM terms WHERE key='b1')", None),
             ("INSERT INTO term_key_names VALUES ('skin','','zh','index','空')", None),
         ];
@@ -1396,22 +1396,22 @@ mod tests {
     fn structure_changes_are_projected_on_both_sides() {
         let mut c = projected();
         let cases: [&str; 10] = [
-            // Old variant key stays (s2), a new one appears.
+            // 旧的 variant 键还在（s2），又出现一个新的。
             "UPDATE identities SET variant='other_v' WHERE id='s1'",
-            // A deleted identity loses its rows, and its tag key leaves the choices.
+            // 删除的身份失去它的行，它的标签键从可选项里移除。
             "DELETE FROM term_links WHERE term_id=(SELECT id FROM terms WHERE key='s2'); DELETE FROM identities WHERE id='s2'",
-            // A link changes hands: e1 becomes unlinked, e3 takes the older tag and 'lonely' leaves the choices.
+            // 链接易手：e1 变成未链接，e3 拿到较早的标签，'lonely' 从可选项里移除。
             "UPDATE term_links SET term_id=(SELECT id FROM terms WHERE key='e3') WHERE system='danbooru' AND key='synth_(series_w)'",
-            // Unmerged: the nameless e3 no longer borrows its member's name.
+            // 解除合并：无名的 e3 不再借用成员的名称。
             "UPDATE identities SET merged_into=NULL WHERE id='m2'",
-            // Merged into the nameless e3, which now borrows the first named member (e4 before m2).
+            // 并入无名的 e3，它现在借用第一个有名称的成员（e4 在 m2 之前）。
             "UPDATE identities SET merged_into='e3' WHERE id='e4'",
             "INSERT INTO identities VALUES ('n1','character',NULL,'',NULL,0,'');
              INSERT INTO term_links(system,key,term_id,current,added_at) VALUES ('danbooru','new_tag',(SELECT id FROM terms WHERE key='n1'),1,'2026-01-20');
              INSERT INTO term_names(term_id,lang,value,source,role,preferred,position,seq) VALUES
               ((SELECT id FROM terms WHERE key='n1'),'zh','新人','index','display',0,0,
                (SELECT coalesce(max(seq),0)+1 FROM term_names))",
-            // REPLACE takes m2's link without firing the DELETE trigger.
+            // REPLACE 拿走 m2 的链接，不触发 DELETE 触发器。
             "INSERT OR REPLACE INTO term_links(system,key,term_id,current,added_at) VALUES ('danbooru','member_tag',(SELECT id FROM terms WHERE key='e4'),1,'2026-01-14')",
             "UPDATE identities SET work='series_new' WHERE id='e2'",
             "UPDATE identities SET kind='work' WHERE id='e2'",
@@ -1428,7 +1428,7 @@ mod tests {
             assert_eq!(changed, projection(&tx), "{sql}");
             assert_ne!(changed, before, "{sql}");
         }
-        // Projected mid-transaction (history labels), then changed again: rows written for the middle state go too.
+        // 事务中途投影过（历史文案），之后又改了：为中间状态写下的行也要去掉。
         let tx = c.transaction().unwrap();
         crate::legacy_names::track(&tx).unwrap();
         tx.execute_batch(
@@ -1444,7 +1444,7 @@ mod tests {
         rebuild(&tx).unwrap();
         assert_eq!(changed, projection(&tx));
         assert_eq!(changed, before);
-        // A closure over an eighth of the library (a large import) falls back to the whole rebuild.
+        // 闭包覆盖图库的八分之一（大量导入）时退回整体重建。
         drop(tx);
         let tx = c.transaction().unwrap();
         crate::legacy_names::track(&tx).unwrap();
@@ -1458,7 +1458,7 @@ mod tests {
         let changed = projection(&tx);
         rebuild(&tx).unwrap();
         assert_eq!(changed, projection(&tx));
-        // Only columns the projection does not read: nothing is tracked as a structure change.
+        // 只改投影不读的列：不记为结构变化。
         drop(tx);
         let tx = c.transaction().unwrap();
         crate::legacy_names::track(&tx).unwrap();
@@ -1477,8 +1477,7 @@ mod tests {
     #[test]
     fn one_key_choice_matches_a_whole_load() {
         let mut c = projected();
-        // e5's first danbooru link has an empty key and hides the second one: e5 has no tag either. The skin s1's own
-        // name never joins its tag's character key.
+        // e5 的第一个 danbooru 链接键为空，遮住了第二个：e5 也没有标签。皮肤 s1 自己的名称从不并入它标签的角色键。
         c.execute_batch(
             "INSERT INTO identities VALUES ('e5','character',NULL,'',NULL,0,'');
              INSERT INTO term_links(system,key,term_id,current,added_at) VALUES ('danbooru','',(SELECT id FROM terms WHERE key='e5'),1,'2026-01-14'),('danbooru','shadowed',(SELECT id FROM terms WHERE key='e5'),1,'2026-01-15');
@@ -1522,7 +1521,7 @@ mod tests {
             }
         };
         same(&c);
-        // Pending writes of an open transaction (the model preview): read as written, before any projection refresh.
+        // 未结束事务里尚未提交的写入（模型预览）：在任何投影刷新之前，按写入的样子读出。
         let tx = c.transaction().unwrap();
         crate::legacy_names::track(&tx).unwrap();
         tx.execute_batch(&named(&[("e2", "zh", "另一个", "bangumi", 1), ("b1", "ja", "ムヒョウ", "index", 0)]))

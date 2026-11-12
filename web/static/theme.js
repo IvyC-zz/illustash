@@ -1,5 +1,5 @@
 'use strict';
-// Runs before the stylesheet paints so a dark page never flashes white. 'pi.theme' is '' (follow system), 'light' or 'dark'.
+// 在样式表绘制之前运行，深色页面就不会闪一下白。'pi.theme' 为 ''（跟随系统）、'light' 或 'dark'。
 (() => {
   const media = matchMedia('(prefers-color-scheme: dark)');
   const pref = () => { try { return JSON.parse(localStorage.getItem('pi.theme') || '""'); } catch { return ''; } };

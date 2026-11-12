@@ -1,4 +1,4 @@
-// Isolated test-only storage adapter. No HTTP, CLI or platform host dependency.
+// 隔离的测试专用存储适配器。不依赖 HTTP、命令行或平台宿主。
 use crate::{Error, Result};
 use rusqlite::Connection;
 use std::path::Path;

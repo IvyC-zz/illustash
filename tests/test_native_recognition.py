@@ -1,7 +1,6 @@
-"""Rust recognition imports: owned synthetic resources/packages, no models or accounts.
+"""Rust 识别结果导入：用测试自己的合成资源和包，不用模型和账号。
 
-The former Python importer's result on the same package was recorded through
-tests/fixed_expectations.py (#9).
+原 Python 导入器在同一个包上的结果已通过 tests/fixed_expectations.py 录制（#9）。
 """
 import concurrent.futures
 import hashlib
@@ -19,7 +18,7 @@ from tests import test_native_lifecycle as lifecycle
 from tests.fixed_expectations import unclocked
 from tests.test_native_human_labels import snapshot, freeze_seed_defaults
 
-# The recognition package files and the source tables they land in (input contract of the former importer).
+# 识别结果包的文件和它们写入的 source 表（原导入器的输入契约）。
 FILES = ('labels.jsonl', 'wd.npy', 'ccip.npy')
 SCHEMA = """CREATE TABLE IF NOT EXISTS recognition_imports(
  digest TEXT PRIMARY KEY, manifest TEXT NOT NULL, assets TEXT NOT NULL, status TEXT NOT NULL,
@@ -39,7 +38,7 @@ class NativeRecognitionTest(unittest.TestCase):
 
     def setUp(self):
         lifecycle.NativeLifecycleTest.setUp(self)
-        # Restart with synthetic fingerprints; never read the installed model files.
+        # 用合成指纹重启；绝不读安装好的模型文件。
         self.stop(self.process)
         self.resources = self.root / 'resources'
         (self.resources / 'models' / 'ccip').mkdir(parents=True)
@@ -86,7 +85,7 @@ class NativeRecognitionTest(unittest.TestCase):
 
     def test_valid_duplicate_fingerprint_source_reference_and_human_history(self):
         p=self.incoming()
-        # Seed a manual verdict and preserve it through native import and resume.
+        # 先写入一条人工裁决，经过原生导入和恢复后仍保留。
         self.assertEqual(self.request('/api/tag', {'ids':['a'], 'tag':'合成人工'})['status'],200)
         before=snapshot(self.lib.db)['actions']
         with sqlite3.connect(self.lib.source) as c: c.executescript(SCHEMA)
@@ -96,24 +95,24 @@ class NativeRecognitionTest(unittest.TestCase):
         actual=self.import_result(p)
         source_now=dict(snapshot(self.lib.source))
         if os.name == 'nt':
-            # The package digest differs on Windows from the macOS recording, and with it the rows
-            # keyed by it (run ids, import records); everything else must match.
+            # Windows 上包的摘要与 macOS 录制的不同，以它为键的行（运行 id、导入记录）也随之不同；
+            # 其余都必须一致。
             actual,expected['result']=dict(actual,digest=None),dict(expected['result'],digest=None)
             for table in ('labels','recognition_assets','recognition_imports'):
                 source_now.pop(table,None);expected['source'].pop(table,None)
         self.assertEqual(actual,expected['result'])
         self.assertEqual(source_now,expected['source'])
-        # Random identity IDs/timestamps are checked by existing core golden tests; these tags/results are deterministic.
+        # 随机的身份 ID 和时间戳由现有的 core 黄金测试检查；这些标签和结果是确定的。
         for table in ('assets','assertions','asset_tags','memberships','general_hits','asset_rating'):
             self.assertEqual(snapshot(self.lib.db)[table],expected['db'][table],table)
-        # `actions` by the #201 baseline: core v8 added two columns to it.
+        # `actions` 按 #201 的对照基准比较：core v8 给它加了两列。
         self.assertTrue(self.rec.baseline('old import', self.lib.path, only={'app': ['actions']}))
         self.assertEqual(snapshot(self.lib.db)['actions'],before)
         source=snapshot(self.lib.source); app=snapshot(self.lib.db)
         self.assertTrue(self.import_result(p)['duplicate'])
         self.assertEqual(snapshot(self.lib.source),source)
         self.assertEqual(snapshot(self.lib.db),app)
-        # Different manifest with exactly the same asset results also deduplicates.
+        # manifest 不同时不算重复导入（duplicate 为假）；但图片结果完全相同，recognition_assets 仍只有 2 行。
         m=json.loads((p/'manifest.json').read_text());m['producer_note']='合成';(p/'manifest.json').write_text(json.dumps(m),newline='\n')
         self.assertFalse(self.import_result(p)['duplicate'])
         with sqlite3.connect(self.lib.source) as c:
@@ -200,7 +199,7 @@ class NativeRecognitionTest(unittest.TestCase):
             self.assertEqual(c.execute("SELECT count(*) FROM backend_effects WHERE kind='imported'").fetchone()[0],1)
 
     def test_one_import_at_a_time_duplicate_and_old_session_same_id_package(self):
-        # #88: while an import runs (held in its first stage), every other start is refused, whatever its kind.
+        # #88：一个导入在运行时（卡在第一阶段），其他任何启动都被拒绝，不论类型。
         p=self.incoming()
         self.hold_models()
         task=self.start_held({'path':str(p)})
@@ -244,8 +243,8 @@ class NativeRecognitionTest(unittest.TestCase):
             self.assertEqual(self.recognition_import(body)['status'],409)
         self.assertEqual(snapshot(self.lib.source),before)
 
-    # #88: a 64 GiB sparse WD model keeps an import fingerprinting it (SHA-256 of zeros) far longer than any step
-    # below, on every platform, without a pipe or a test hook; nothing on disk is allocated for it.
+    # #88：一个 64 GiB 的稀疏 WD 模型，让导入给它算指纹（对全零算 SHA-256）的时间远长于下面的任何一步，在所有平台上
+    # 都如此，不需要管道或测试钩子；磁盘上也不为它分配空间。
     HELD = 64 << 30
 
     def hold_models(self):
@@ -266,7 +265,7 @@ class NativeRecognitionTest(unittest.TestCase):
         return json.loads(self.request('/api/imports')['body'])
 
     def ended(self, task, within=5):
-        """The task's final state, which must arrive within `within` seconds."""
+        """任务的最终状态，必须在 `within` 秒内到达。"""
         started = time.monotonic()
         lifecycle.wait_until(lambda: self.imports()['status'] in lifecycle.IMPORT_ENDED, timeout=within + 5)
         self.assertLess(time.monotonic() - started, within)
@@ -275,8 +274,8 @@ class NativeRecognitionTest(unittest.TestCase):
         return state
 
     def test_cancel_switch_and_quit_stop_an_import_before_it_commits(self):
-        # #88 (and the #26 Windows gap): the cancel button, a switch and quitting each stop a running recognition
-        # import within 5 s, before its source transaction; the library is byte-for-byte as before.
+        # #88（以及 #26 的 Windows 缺口）：取消按钮、切换图库和退出，都会在 5 秒内、在 source 事务之前停下正在运行的
+        # 识别结果导入；图库逐字节保持原样。
         p = self.incoming()
         other = self.root / 'other.pilib'
         shutil.copytree(self.lib.path, other)
@@ -289,7 +288,7 @@ class NativeRecognitionTest(unittest.TestCase):
                 self.assertEqual((running['status'], running['file']), ('running', p.name))
                 self.assertNotIn('done', running)
                 if how == 'cancel':
-                    # While it runs: reads answer, sync and index writes wait for it.
+                    # 导入运行期间：读取照常应答；同步和索引写入直接拒绝（400「识别结果正在导入…」），等导入结束再做。
                     refused = self.request('/api/sync', {})
                     self.assertEqual(refused['status'], 400, refused)
                     self.assertIn('识别结果正在导入', json.loads(refused['body'])['error'])
@@ -318,7 +317,7 @@ class NativeRecognitionTest(unittest.TestCase):
                     self.assertEqual(self.imports(), {'status': 'idle'})
                 self.assertEqual(snapshot(self.lib.source), source)
                 self.assertEqual(snapshot(self.lib.db), app)
-        # Nothing was committed by the stopped imports: the first complete one is not a duplicate.
+        # 停下的导入什么都没提交：第一次完整导入不算重复。
         self.release_models()
         self.assertFalse(self.import_result(p)['duplicate'])
 
@@ -332,7 +331,7 @@ class NativeRecognitionTest(unittest.TestCase):
         self.request('/api/imports/cancel', {})
         self.ended(task)
         self.release_models()
-        # A package whose checksum does not match fails in its reading stage, says why, and writes nothing.
+        # 校验和对不上的包在读取阶段失败，说明原因，什么都不写。
         (p / 'wd.npy').write_bytes(b'damaged')
         source = snapshot(self.lib.source)
         r = self.request('/api/recognition/import', {'path': str(p)})
@@ -343,7 +342,7 @@ class NativeRecognitionTest(unittest.TestCase):
 
     @unittest.skipUnless(hasattr(os, 'mkfifo'), 'a FIFO holds the import open; POSIX only')
     def test_import_runs_outside_the_session_lock_and_a_switch_cancels_it(self):
-        # #26: the WD model file is a FIFO, so the import stays in its model fingerprint step until it is fed.
+        # #26：WD 模型文件是 FIFO，所以导入一直停在算模型指纹这一步，直到有数据写进去。
         p = self.incoming()
         model = self.resources / 'models' / 'wd_swinv2_v3_emb.onnx'
         model.unlink()
@@ -355,7 +354,7 @@ class NativeRecognitionTest(unittest.TestCase):
         self.assertEqual(started['status'], 200, started)
         task = json.loads(started['body'])['task']
         deadline = time.monotonic() + 10
-        while True:  # opening the write end succeeds once the import has the FIFO open for reading
+        while True:  # 导入以读方式打开 FIFO 之后，打开写端才会成功
             try:
                 writer = os.open(model, os.O_WRONLY | os.O_NONBLOCK)
                 break
@@ -371,7 +370,7 @@ class NativeRecognitionTest(unittest.TestCase):
         opened = self.request('/api/libraries/open', {'path': str(other)})
         self.assertEqual(opened['status'], 200, opened)
         self.assertLess(time.monotonic() - started, 5)
-        # Blocked in a read, the import cannot have stopped yet: it is reported as stopping, not as running.
+        # 导入阻塞在读取上，还不可能已经停下：报告为正在停止，而不是正在运行。
         self.assertEqual(self.imports()['status'], 'stopping')
         os.set_blocking(writer, True)
         os.write(writer, b'synthetic WD')
@@ -383,8 +382,8 @@ class NativeRecognitionTest(unittest.TestCase):
 
 
 def sparse(path, size):
-    """A file of `size` zero bytes with nothing allocated (NTFS needs the sparse flag first; SetEndOfFile, unlike
-    the C runtime's resize, does not write the zeros)."""
+    """一个 `size` 字节全零、不分配任何空间的文件（NTFS 要先设稀疏标志；SetEndOfFile 与 C 运行库的 resize 不同，
+    不会写入这些零）。"""
     path.unlink(missing_ok=True)
     with open(path, 'wb') as f:
         if os.name != 'nt':
@@ -404,7 +403,7 @@ def sparse(path, size):
             raise ctypes.WinError(ctypes.get_last_error())
         if not kernel32.SetFilePointerEx(handle, size, None, 0) or not kernel32.SetEndOfFile(handle):
             raise ctypes.WinError(ctypes.get_last_error())
-    if os.name == 'nt':  # never fill the disk: the file must really be sparse
+    if os.name == 'nt':  # 绝不能把磁盘写满：文件必须真的是稀疏的
         kernel32.GetCompressedFileSizeW.argtypes = [wintypes.LPCWSTR, ctypes.POINTER(wintypes.DWORD)]
         kernel32.GetCompressedFileSizeW.restype = wintypes.DWORD
         high = wintypes.DWORD()

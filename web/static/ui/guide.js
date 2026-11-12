@@ -1,4 +1,4 @@
-// The new library's guide (desktop layout, #96, #199): the tour, the checklist and the questions asked when they matter.
+// 新图库的向导（桌面布局，#96、#199）：导览、清单，以及在需要时才问的问题。
 import {WORK_NAMES} from '../core/catalog.js';
 import {esc, number, shortcut} from '../core/format.js';
 import {said, t, tb} from '../core/i18n.js';
@@ -13,10 +13,9 @@ import {taskList} from './tasks.js';
 import {modelsNotice} from './models.js';
 import {modelsWaiting, modelsFinished, onModels} from '../core/models.js';
 
-// ---------- 新图库的首次引导 (#96, native/terms/src/app_onboarding.rs) ----------
-// Taught on the real interface: a few stops lit up one at a time, a checklist that ticks itself as things get done,
-// and questions asked when they matter (names once characters show, a work once the first sync is through). The
-// guide's place is kept per library; nothing here grants network access or starts a task without the person's click.
+// ---------- 新图库的首次引导（#96，native/terms/src/app_onboarding.rs） ----------
+// 在真实界面上教：几处地方一次点亮一处，一份事情做完就自己打勾的清单，以及在需要时才问的问题（角色出现后问名字，
+// 第一次同步完成后问作品）。向导进行到哪按图库保存；这里没有任何东西会在用户点击之前授予联网权限或启动任务。
 const TOUR = ['welcome', 'tasks', 'home', 'characters', 'unmatched', 'end'];
 const CHECKLIST = [['look', t('看看认出的角色'), '#/characters'], ['correct', t('纠正一张认错的图'), '', t('选中后按 C')], ['undo', t('撤销一次操作'), '', shortcut('Z')],
   ['group', t('确认一组没认出的图'), '#/groups'], ['follow', t('关注一部作品'), '#/characters/works']];
@@ -38,7 +37,7 @@ async function guideAction(body) {
     return true;
   } catch (e) { toast(e.message); return false; }
 }
-// On opening: a new library records that its guide started; the tour itself waits for the splash to finish.
+// 打开时：新图库记下它的向导已经开始；导览本身等启动画面结束。
 export async function guideOnOpen() {
   try { await loadGuide(); } catch (e) { return; }
   if (state.guide?.guide.status === 'new') await guideAction({action: 'step', step: 'welcome'});
@@ -53,7 +52,7 @@ export async function guideAfterBoot() {
   if (guideActive()) showTour(Math.max(0, TOUR.indexOf(state.guide.guide.step)));
   drawGuide();
 }
-// Something about the library changed (a sync step, a mutation): read the guide again, at most every few seconds.
+// 图库有了变化（一个同步步骤、一次改动）：重新读取向导，最多每几秒一次。
 export async function guideRefresh(force = false) {
   if (!guideOn() || (!force && Date.now() - guideLoadedAt < 4000)) return;
   try { await loadGuide(); } catch (e) { return; }
@@ -64,7 +63,7 @@ export function drawGuide() {
   if (tourAt >= 0) placeTour(false);
 }
 
-// ----- the problem bar: recognition missing or its self-check failed, or a sync that stopped (while it lasts, #97) -----
+// ----- 问题横条：缺识别或它的自检失败，或同步停下了（持续期间显示，#97） -----
 function syncTrouble() {
   const s = state.sync, message = s.message ? `（${esc(tb(s.message))}）` : '', missing = said(s.message, '文件夹不存在或无法访问：{path}');
   if (s.status === 'interrupted') return t('同步没有做完{said}：已经加入和识别的图都保留了，再同步一次会接着处理剩下的。', {said: message});
@@ -76,7 +75,7 @@ function syncTrouble() {
 }
 export function drawGuideNotice() {
   const el = $('guideNotice'), g = state.guide; if (!el) return;
-  // An install without its models (#168): shown in every library until they are in place, guide or not.
+  // 没带模型的安装（#168）：在模型就位之前，每个图库都显示，不管有没有向导。
   const models = modelsNotice();
   if (models || el.dataset.models) {
     el.dataset.models = models ? '1' : '';
@@ -94,7 +93,7 @@ export function drawGuideNotice() {
     : trouble ? `<span>${trouble}</span>${photosRefused(state.sync) ? `<button class="quiet small" data-guide-photos>${t('打开系统设置')}</button>`
       : `<button class="quiet small" data-guide-sync>${t('再同步一次')}</button>`}` : '';
 }
-// ----- the tour: one real element lit up at a time -----
+// ----- 导览：一次点亮一个真实元素 -----
 export function tourStop(id) {
   const g = state.guide, s = state.sync, r = g.results;
   const counting = SYNC_ACTIVE.includes(s.status) ? syncLine(s) : r.total ? t('已经有 {n} 张图，认出了 {chars} 个角色。', {n: number(r.total), chars: number(r.characters)}) : '';
@@ -124,7 +123,7 @@ async function placeTour(moved) {
   if (tourAt < 0 || !state.guide) return;
   const id = TOUR[tourAt], stop = tourStop(id), root = $('tour'), hole = root.querySelector('.tour-hole'), bubble = root.querySelector('.tour-bubble');
   if (moved && stop.route && state.route.page !== stop.route) { go({page: stop.route}); await new Promise(done => setTimeout(done, 450)); if (TOUR[tourAt] !== id) return; }
-  // While a stop stays, only its text follows the live counts; its buttons are never rebuilt under a press.
+  // 停留在同一处时，只有文字跟着实时计数变；按钮绝不会在按下时被重建。
   if (!moved && bubble.dataset.stop === id) {
     const text = bubble.querySelector('.tour-text'); if (text && text.innerHTML !== stop.text) text.innerHTML = stop.text;
   }
@@ -143,21 +142,21 @@ async function placeTour(moved) {
     Object.assign(bubble.style, {left: (W - bw) / 2 + 'px', top: (H - bh) / 2 + 'px'});
     return;
   }
-  // A large area (the home page) is lit only at its top, where the first pictures are.
+  // 大的区域（首页）只点亮顶部，也就是最先几张图片所在的地方。
   const box = {left: r.left - pad, top: r.top - pad, width: r.width + pad * 2, height: Math.min(r.height, H * .45) + pad * 2};
   Object.assign(hole.style, {left: box.left + 'px', top: box.top + 'px', width: box.width + 'px', height: box.height + 'px'}); hole.classList.remove('none');
   const right = box.left + box.width + 14, below = box.top + box.height + 14;
   const [x, y] = right + bw < W - 12 ? [right, box.top] : below + bh < H - 12 ? [box.left, below] : [box.left, box.top - bh - 14];
   Object.assign(bubble.style, {left: Math.max(12, Math.min(x, W - bw - 12)) + 'px', top: Math.max(12, Math.min(y, H - bh - 12)) + 'px'});
 }
-// ----- questions asked when they matter, once each -----
+// ----- 在需要时才问的问题，每个只问一次 -----
 function nextNudge() {
   if (tourAt >= 0) return null;
   const g = state.guide, idle = !SYNC_ACTIVE.includes(state.sync.status);
   if (guideOn()) {
     const seen = g.guide.seen || [], net = state.names?.network;
     if (!seen.includes('names') && net && !net.granted_at && !net.this_run && g.results.characters > 0) return {key: 'names'};
-    // App-wide and asked once: answering either way records the choice, so no other library asks again (#191).
+    // 全应用共用、只问一次：不管怎么回答都会记下选择，所以别的图库不会再问（#191）。
     if (state.updates && state.updates.auto === null) return {key: 'updates'};
     if (!seen.includes('works') && idle && g.results.with_character > 0) {
       if (!g.works && Date.now() - guideWorksAt > 30000) { guideWorksAt = Date.now(); loadGuide(true).then(drawNudge).catch(() => {}); }
@@ -165,7 +164,7 @@ function nextNudge() {
       if (w && !(state.index?.watch?.works || []).length) return {key: 'works', w};
     }
   }
-  // A newer release waits until no task is running.
+  // 有新版本时，等到没有任务在运行再提示。
   if (state.updates?.newer && !state.updates.dismissed && !taskList().some(task => task.active)) return {key: 'update'};
   return null;
 }
@@ -188,13 +187,13 @@ export function drawNudge() {
   if (!html) { el.classList.remove('on'); setTimeout(() => { if (!el.dataset.html) el.hidden = true; }, 260); return; }
   el.innerHTML = html; el.hidden = false; requestAnimationFrame(() => el.classList.add('on'));
 }
-// ----- the checklist: ticks itself as things get done -----
+// ----- 清单：事情做完就自己打勾 -----
 export function guideTick(item) {
   const g = state.guide; if (!guideOn() || g.guide.ticked.includes(item)) return;
   g.guide.ticked = [...g.guide.ticked, item]; drawChecklist(item);
   guideAction({action: 'tick', item}).then(() => drawChecklist());
 }
-// Called after every successful change: which checklist item it shows was learned.
+// 每次成功的改动之后调用：它表明学会了清单里的哪一项。
 export function guideAfterPost(path, body) {
   if (!guideOn()) return;
   if (path === '/api/undo') guideTick('undo');
@@ -216,9 +215,9 @@ export function drawChecklist(just = '') {
   if (just) { el.classList.add('pulse'); setTimeout(() => el.classList.remove('pulse'), 900); }
   if (all && just) setTimeout(() => guideAction({action: 'hide'}).then(() => drawChecklist()), 2500);
 }
-// A work the library has keeps its own name; a suggested Danbooru tag shows the built-in Chinese name when there is one.
+// 图库已有的作品保留自己的名字；建议的 Danbooru tag 有内置中文名时显示中文名。
 const guideWorkName = w => (!w.id && WORK_NAMES[w.tag]) || w.name;
-// Following a suggested work: the local work for its Danbooru tag (made when missing), added to the watch list.
+// 关注一个建议的作品：它的 Danbooru tag 对应的本地作品（没有就新建），加进关注列表。
 async function guideWatch(w) {
   try {
     const id = w.id || (await post('/api/works', {action: 'from_tag', tag: w.tag})).id;
@@ -235,9 +234,9 @@ export async function replayGuide() {
   showTour(0);
 }
 
-// The handlers this part of the page registers. Called once, when the page starts.
+// 页面这一部分注册的处理函数。页面启动时调用一次。
 export function wireGuide() {
-  // The models just arrived: check that recognition starts, as on opening a new library.
+  // 模型刚到：检查识别是否开始，和打开新图库时一样。
   onModels(async before => {
     if (modelsFinished(before) && state.models.status === 'ready' && guideOn()) { await guideAction({action: 'check'}); setTimeout(() => guideRefresh(true), 1500); }
     drawGuideNotice();
@@ -260,7 +259,7 @@ export function wireGuide() {
   $('nudge').addEventListener('click', async e => {
     const act = e.target.closest('[data-nudge]')?.dataset.nudge, key = $('nudge').dataset.key; if (!act || !key) return;
     for (const b of $('nudge').querySelectorAll('button')) b.disabled = true;
-    // Not guide prompts: the answer is the update choice or this release, kept app-wide by the backend.
+    // 不是向导提示：回答的是更新选择或这个版本，由后端全应用保存。
     if (key === 'update' || key === 'updates') {
       if (key === 'update' && act === 'open') openRelease();
       try { await updatesPost(key === 'update' ? {action: 'dismiss'} : {action: 'auto', allow: act === 'allow'}); } catch (err) { toast(err.message); }

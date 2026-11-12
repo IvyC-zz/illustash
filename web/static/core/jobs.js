@@ -1,31 +1,28 @@
-// Background jobs (#199): the Photos or folder sync, new characters for the external index (native/terms/src/app_index.rs),
-// display names, look-alike images, 找回画师 and imports. How each is polled, its status in words, and what starting
-// or cancelling one sends; no DOM. Their state is still in core/state.js (sync, syncHistory, syncDamaged, index,
-// names, provenance, importTask, settings.tasks.similar), written here and, until they move too, by the settings
-// pages. While a job runs its poller re-arms itself; overlapping polls never wind the state back (#34).
+// 后台任务（#199）：照片或文件夹同步、外部索引的新角色（native/terms/src/app_index.rs）、显示名、相似图片、找回画师和
+// 导入。每个任务怎样轮询、状态怎样用文字说、启动或取消时发什么；不碰 DOM。它们的状态仍在 core/state.js（sync、
+// syncHistory、syncDamaged、index、names、provenance、importTask、settings.tasks.similar），由这里写入，在它们也搬过来
+// 之前，设置页也会写。任务运行期间轮询会自己重新排上；重叠的轮询绝不会让状态倒退（#34）。
 import {t, tb} from './i18n.js';
 import {number, stamp} from './format.js';
 import {session, api, post, shared} from './session.js';
 import {state} from './state.js';
 import {listeners} from './events.js';
 const changed = listeners();
-// fn(job, change) after each answer that was applied; job is sync, index, names, provenance or import. change.was is
-// the status before it, change.ended says a run has just ended; for sync, change.arrived says pictures came in or a
-// run settled, so what the library shows may have changed.
+// 每个被采用的回应之后调用 fn(job, change)；job 是 sync、index、names、provenance 或 import。change.was 是之前的状态，
+// change.ended 表示一次运行刚结束；对 sync，change.arrived 表示进了图片或一次运行已落定，图库显示的内容可能变了。
 export const onJob = changed.on;
 
-// ---------- sync ----------
+// ---------- 同步 ----------
 export const SYNC_ACTIVE = ['scanning', 'recognising', 'importing'];
-// The system refused this app the Photos library (#202): the backend names it with a code, never in the error's words.
-// The way out is System Settings › Privacy & Security › Photos, then quitting and reopening; the desktop shell opens
-// this one address outside the window (desktop/src/server.rs PHOTOS_PRIVACY), a browser asks first.
+// 系统拒绝让本 App 访问照片图库（#202）：后端用一个代码表示，从不放在错误文字里。出路是「系统设置 ›
+// 隐私与安全性 › 照片」，然后退出并重新打开；桌面外壳会在窗口外打开这一个地址（desktop/src/server.rs PHOTOS_PRIVACY），
+// 浏览器会先询问。
 export const photosRefused = s => s.status === 'error' && s.problem === 'photos_permission';
 export const PHOTOS_PRIVACY = 'x-apple.systempreferences:com.apple.preference.security?Privacy_Photos';
 export const photosHelp = () => t('没有访问照片图库的权限。到「系统设置 › 隐私与安全性 › 照片」里打开 Illustash，退出并重新打开后再同步。');
 export const syncBar = (s, bar) => s.status === 'recognising' && s.stage !== 'preparing' ? bar(s.done, s.total)
   : s.status === 'importing' && s.import_total ? bar(s.import_done, s.import_total) : '';
-// Recognition and import are counted apart: done/total are images recognised or given up on,
-// import_done/import_total the recognised ones written into the library.
+// 识别和导入分开计数：done/total 是已识别或已放弃的图片，import_done/import_total 是已识别并写进图库的。
 export function syncLine(s) {
   if (s.status === 'scanning') return s.scan_total == null ? t('正在检查来源…') : t('正在检查文件 {done}/{total}', {done: number(s.scanned || 0), total: number(s.scan_total)});
   if (s.status === 'importing') {
@@ -40,13 +37,13 @@ export function syncLine(s) {
     const imported = s.import_done ? ' · ' + t('已导入 {n}', {n: number(s.import_done)}) : '';
     return t('正在识别新图片 {done}/{total}', {done: number(s.done || 0), total: number(s.total || 0)}) + failed + imported + left;
   }
-  // Paths the scan could not read keep their pictures; the next sync reads them again.
+  // 扫描读不到的路径保留它们的图片；下次同步再读。
   const kept = s.unreadable ? ' · ' + t('{n} 处暂时读不到，已有图片保留不动', {n: number(s.unreadable)}) : '';
-  // Pictures given up on, apart (#112): unreadable ones are tried again, damaged ones wait for their file to change.
+  // 放弃的图片分开说（#112）：读不到的会再试，损坏的等它们的文件改变。
   const gave = (s.failed ? ' · ' + t('{n} 张暂时读不到（可能还在 iCloud），下次同步重试', {n: number(s.failed)}) : '')
     + (s.damaged ? ' · ' + t('{n} 张已损坏或格式不支持，未识别', {n: number(s.damaged)}) : '');
   if (s.status === 'done') return t('上次同步：{time}', {time: stamp(s.finished_at)}) + kept + gave;
-  // An install that downloads its models (#168) waits for them; otherwise the recognition service is missing.
+  // 自己下载模型的安装（#168）在等模型；否则就是识别服务没有启动。
   if (s.status === 'needs_recognition') return (state.models?.on_demand && state.models.status !== 'ready'
     ? t('有 {n} 张图等待识别（识别模型还没下载）', {n: number(s.total || 0)}) : t('有 {n} 张图等待识别（识别服务未启动）', {n: number(s.total || 0)})) + kept;
   if (s.status === 'interrupted') return s.message ? t('同步已中断（{reason}），可重新扫描', {reason: tb(s.message)}) : t('同步已中断，可重新扫描');
@@ -56,14 +53,14 @@ export function syncLine(s) {
 let syncTimer = null, lastImported = 0, syncPoll = 0;
 export async function pollSync() {
   clearTimeout(syncTimer);
-  // Polls overlap (task panel, timer, after a start): an older answer arriving last must not wind the state back.
+  // 几次轮询会重叠（任务面板、定时器、启动之后）：更早的回应最后才到时，不能让状态倒退。
   const poll = ++syncPoll;
   try {
     const {state: s, history, damaged} = await api('/api/sync');
     if (poll !== syncPoll) return;
     const was = state.sync.status, ended = SYNC_ACTIVE.includes(was) && !SYNC_ACTIVE.includes(s.status);
     state.sync = s; state.syncHistory = history; state.syncDamaged = damaged;
-    // New pictures, or a run that settled: what the library shows may have changed.
+    // 有新图片，或一次运行已落定：图库显示的内容可能变了。
     const arrived = (s.imported || 0) > lastImported || ended;
     if (arrived) lastImported = s.imported || 0;
     await changed.emit('sync', {was, ended, arrived});
@@ -73,7 +70,7 @@ export async function pollSync() {
 export const syncDoneText = s => t('同步完成：新加入 {n} 张', {n: number(s.imported)});
 export async function startSync() { await post('/api/sync', {}); state.sync = {status: 'scanning'}; }
 
-// ---------- new characters for the external index ----------
+// ---------- 外部索引的新角色 ----------
 export const INDEX_ACTIVE = ['checking', 'fetching', 'cleaning', 'building', 'scanning', 'importing'];
 export function indexLine(s, check) {
   const n = s.total ? ` ${number(s.done || 0)}/${number(s.total)}` : '';
@@ -87,7 +84,7 @@ export async function pollIndex() {
   const was = state.index?.state.status;
   try {
     const progress = await api('/api/index?progress=1');
-    // The full read (works, check results) only when something may have changed; the idle tick stays light.
+    // 只在可能有变化时才完整读取（作品、检查结果）；空闲时的轮询保持轻量。
     state.index = !state.index?.works || (!INDEX_ACTIVE.includes(progress.state?.status) && progress.state?.status !== was)
       ? await shared('/api/index') : {...state.index, ...progress};
   } catch (e) { indexTimer = setTimeout(pollIndex, 10000); return; }
@@ -95,7 +92,7 @@ export async function pollIndex() {
   await changed.emit('index', {was, ended: INDEX_ACTIVE.includes(was) && !INDEX_ACTIVE.includes(s.status)});
   if (INDEX_ACTIVE.includes(s.status)) indexTimer = setTimeout(pollIndex, 2000);
 }
-// What to tell when a run has ended, by how it ended.
+// 一次运行结束时要说什么，按它怎样结束。
 export function indexEndText(s) {
   if (s.status === 'done') return s.kind === 'drop' ? t('已移除，{n} 张图片已重新识别', {n: number(s.changed)}) : t('已添加 {added} 个角色，{n} 张图片的识别结果已更新', {added: number(s.added), n: number(s.changed)});
   if (s.status === 'checked') return s.found ? t('发现 {n} 个可添加的角色，在任务面板里添加', {n: number(s.found)}) : t('未发现新角色');
@@ -104,10 +101,9 @@ export function indexEndText(s) {
   return '';
 }
 
-// Watch list, minimum posts, dropping a character: the answer is the index's new state.
+// 关注列表、最低帖子数、移除角色：回应是索引的新状态。
 export async function indexAction(body) { state.index = await post('/api/index', body); }
-// A check reaches Danbooru, so it is asked for each time (confirm(message, title) resolves to the answer); a library
-// switched meanwhile is not checked.
+// 一次检查会访问 Danbooru，所以每次都要询问（confirm(message, title) 解析为回答）；期间切换了图库就不检查。
 export async function checkIndex(confirm) {
   const token = session.token;
   if (!await confirm(t('本次检查会联网查询 Danbooru，只发送关注作品的 tag，不发送图库图片。允许本次检查联网吗？'), t('检查新角色')) || token !== session.token) return false;
@@ -116,8 +112,7 @@ export async function checkIndex(confirm) {
   state.index = result; return true;
 }
 
-// An add that paused (after a restart nobody allowed the network for the pictures it still lacks) goes on with a
-// new run once the person allows the network again; the pictures it has are kept (#287).
+// 暂停的添加（重启之后，还缺的图片没有人允许联网）在用户再次允许联网后用一次新的运行继续；已有的图片保留（#287）。
 export async function resumeIndex(confirm) {
   const token = session.token;
   if (!await confirm(t('继续下载参考图会联网访问 Danbooru，只下载还缺的公开参考图，已下载的不会重下。允许本次联网吗？'), t('继续添加角色')) || token !== session.token) return false;
@@ -125,7 +120,7 @@ export async function resumeIndex(confirm) {
   if (token !== session.token) return false;
   state.index = result; return true;
 }
-// Giving up a paused add removes the pictures it downloaded; nothing of it was written to the library.
+// 放弃一次暂停的添加会删掉它下载的图片；它没有往图库里写任何东西。
 export async function discardIndex(confirm) {
   const token = session.token;
   if (!await confirm(t('放弃这次添加？已下载的参考图会删掉，图库不受影响；以后可以重新选择要添加的角色。'), t('放弃添加'), t('放弃')) || token !== session.token) return false;
@@ -134,7 +129,7 @@ export async function discardIndex(confirm) {
   state.index = result; return true;
 }
 
-// ---------- display names: Bangumi first, an opt-in model API last ----------
+// ---------- 显示名：Bangumi 优先，用户选择开启的模型 API 最后 ----------
 export const NAMES_ACTIVE = ['fetching', 'matching', 'translating', 'running'];
 export const namesLine = s => s.status === 'off' ? t('当前未启用') : NAMES_ACTIVE.includes(s.status) ? t('正在获取 {progress}', {progress: s.total ? `${number(s.done || 0)} / ${number(s.total)}` : '…'}) : s.status === 'error' ? t('获取失败，将在下次启动时重试') : s.status === 'unauthorized' ? t('未允许联网查询 · 可在设置 › 网络与隐私里允许') : t('已是最新');
 let namesTimer = 0;
@@ -143,18 +138,18 @@ export async function pollNames() {
   const was = state.names?.state?.status, running = NAMES_ACTIVE.includes(was);
   try {
     const progress = await api('/api/names?progress=1');
-    // Keep the existing coverage/settings while running; refresh them once on completion.
+    // 运行期间保留现有的覆盖率和设置；完成时刷新一次。
     state.names = !state.names?.counts || (running && !NAMES_ACTIVE.includes(progress.state?.status)) ? await api('/api/names') : {...state.names, ...progress};
   } catch (e) { namesTimer = setTimeout(pollNames, 10000); return; }
   const now = NAMES_ACTIVE.includes(state.names.state?.status);
   await changed.emit('names', {was, ended: running && !now});
   if (now) namesTimer = setTimeout(pollNames, 2000);
 }
-// A run the settings card just showed is polled again in 2 s.
+// 设置卡片刚显示的一次运行，2 s 后再轮询。
 export function pollNamesSoon() { clearTimeout(namesTimer); namesTimer = setTimeout(pollNames, 2000); }
 export async function refreshNames() { state.names = {...state.names, ...await post('/api/names', {action: 'refresh'})}; }
 
-// ---------- look-alike images (its state comes with /api/settings) ----------
+// ---------- 相似图片（它的状态随 /api/settings 一起来） ----------
 export const SIMILAR_ACTIVE = ['reading', 'pairing', 'comparing', 'waiting'];
 export function similarLine(s) {
   if (s.status === 'reading') return t('正在读图算签名 {done}/{total}', {done: number(s.done || 0), total: number(s.total || 0)});
@@ -167,7 +162,7 @@ export function similarLine(s) {
 }
 export const taskSimilar = s => s.status === 'off' ? t('这次启动没有开相似检测') : similarLine(s) || t('已是最新');
 
-// ---------- 找回画师 (docs/PROVENANCE.md section 8) ----------
+// ---------- 找回画师（docs/PROVENANCE.md 第 8 节） ----------
 export const PROV_ACTIVE = ['running', 'stopping'];
 export const RUN_STATUS = {done: t('完成'), stopped: t('已停止'), failed: t('出错'), running: t('进行中')};
 let provenanceTimer = 0;
@@ -175,7 +170,7 @@ export async function loadProvenance() {
   clearTimeout(provenanceTimer);
   const was = state.provenance?.state?.status;
   try { state.provenance = await api('/api/provenance'); } catch {
-    // One failed read must not end the polling of a run that is going on: keep what was shown and try again.
+    // 一次读取失败不能结束对进行中运行的轮询：保留已显示的内容，再试一次。
     if (PROV_ACTIVE.includes(was)) provenanceTimer = setTimeout(loadProvenance, 4000);
     else { state.provenance = null; await changed.emit('provenance', {was, ended: false}); }
     return;
@@ -184,12 +179,12 @@ export async function loadProvenance() {
   await changed.emit('provenance', {was, ended: PROV_ACTIVE.includes(was) && !PROV_ACTIVE.includes(s)});
   if (PROV_ACTIVE.includes(s)) provenanceTimer = setTimeout(loadProvenance, 1500);
 }
-// Start ({action: 'start', allow_network}) or stop a run; polled again either way.
+// 启动（{action: 'start', allow_network}）或停止一次运行；两种情况都会再轮询。
 export async function provenanceAction(body) {
   try { state.provenance = await post('/api/provenance', body); } finally { loadProvenance(); }
 }
 
-// ---------- imports (#88): an archive or recognition results, one at a time ----------
+// ---------- 导入（#88）：归档或识别结果，一次一个 ----------
 export const IMPORT_ACTIVE = ['running', 'stopping'];
 export const importActive = () => IMPORT_ACTIVE.includes(state.importTask?.status);
 export const IMPORT_STAGES = {
@@ -213,14 +208,13 @@ export function importLine(job) {
   if (job.status === 'error') return recognition ? t('导入识别结果{name}失败：{reason}', {name, reason: tb(job.error)}) : t('导入归档{name}失败：{reason}', {name, reason: tb(job.error)});
   if (job.status !== 'done') return '';
   const r = job.result || {};
-  // Published but not listed (#111): opening it lists it; importing again would make a second, numbered library.
+  // 已发布但没有登记（#111）：打开它就会登记；再导入会另建一个带编号的图库。
   if (job.kind === 'archive' && r.listed === false) return t('已导入「{name}」，保存在 {path}，但没能加入最近图库列表：{reason}。打开它会再试一次加入列表；再导入会另建一个带编号的图库。模型接口与名称联网授权需重新设置。', {name: r.name, path: String(r.path).replace(/^\/Users\/[^/]+/, '~'), reason: tb(r.error)});
   if (job.kind === 'archive') return t('已导入「{name}」，模型接口与名称联网授权需重新设置。', {name: r.name});
   if (r.status === 'pending') return t('识别结果已导入，后续处理尚未完成（{reason}）。', {reason: tb(r.error) || t('可稍后恢复')});
   return r.duplicate ? t('这份识别结果之前已经导入过。') : t('识别结果已导入。');
 }
-// Polls overlap (the start answer, the timer, a cancel): an older answer arriving last must not wind the state back,
-// and an answer for a page that has since changed session is dropped (#34).
+// 几次轮询会重叠（启动的回应、定时器、取消）：更早的回应最后才到时不能让状态倒退，页面之后换了会话的回应丢掉（#34）。
 let importTimer = null, importPoll = 0;
 export async function pollImports() {
   clearTimeout(importTimer);
@@ -234,7 +228,7 @@ export async function pollImports() {
     if (IMPORT_ACTIVE.includes(job.status)) importTimer = setTimeout(pollImports, 700);
   } catch { if (poll === importPoll && token === session.token) importTimer = setTimeout(pollImports, 5000); }
 }
-// A started import (the answer of POST /api/libraries/import) shows at once and is polled until it ends.
+// 已启动的导入（POST /api/libraries/import 的回应）立即显示，并一直轮询到它结束。
 export function importStarted(task) { state.importTask = task; changed.emit('import', {was: undefined, ended: false}); pollImports(); }
 export async function cancelImport() {
   try { await api('/api/imports/cancel', {method: 'POST', body: '{}'}); } finally { pollImports(); }

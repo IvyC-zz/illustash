@@ -1,4 +1,4 @@
-//! Explicit fresh-only folder/Photos package factory. No registry, session switch, scanning or existing-library upgrade.
+//! 只建全新图库的文件夹/Photos 图库包工厂。不登记图库、不切换会话、不扫描，也不升级已有图库。
 use crate::{Error, Result};
 use rusqlite::{types::ValueRef, Connection, OpenFlags, TransactionBehavior};
 use serde_json::{json, Map, Value};
@@ -22,7 +22,7 @@ pub fn create_folder(
 ) -> Result<Value> {
     create(dest, folder, name, preset, reference, |_| Ok(()))
 }
-/// Describe the Photos source without opening, resolving or validating its platform-owned files.
+/// 描述 Photos 来源，不打开、不解析、不校验平台所属的文件。
 pub fn create_photos(dest: &Path, photos: &Path, name: Option<&str>, reference: Option<&Path>) -> Result<Value> {
     let dest = absolute(dest)?;
     let name = name
@@ -56,7 +56,7 @@ fn create<F: FnOnce(&Connection) -> Result<()>>(
         return Err(Error::Invalid(format!("不是文件夹：{path}", path = folder.display())));
     }
     let folder = crate::app_paths::canonical(&folder).map_err(|e| crate::error::io_at(e, &folder, None))?;
-    // The origin is what the user says; without one it is 「其他」, never guessed from the folder name.
+    // 出处按用户说的来；没给时是「其他」，从不按文件夹名猜。
     let explicit_preset = preset.is_some();
     let preset = match preset {
         Some(value) if crate::origin::find(value).is_some() => value.to_owned(),
@@ -73,8 +73,7 @@ fn create<F: FnOnce(&Connection) -> Result<()>>(
         "preset_origin":if explicit_preset {"user"} else {"auto"}}]);
     create_package(&dest, name, sources, reference, after_birth)
 }
-/// Only an absent optional reference selects the empty built-in schema. Broken links,
-/// directories and permission failures remain errors rather than silently losing the index.
+/// 只有可选的参考文件不存在时才选用空的内置 schema。链接失效、是目录、没有权限仍然报错，不会悄悄丢掉索引。
 pub(crate) fn optional_reference(reference: &Path) -> Result<Option<&Path>> {
     match fs::symlink_metadata(reference) {
         Ok(_) => Ok(Some(reference)),
@@ -82,13 +81,13 @@ pub(crate) fn optional_reference(reference: &Path) -> Result<Option<&Path>> {
         Err(error) => Err(crate::error::io_at(error, reference, None)),
     }
 }
-/// One source of a library being created: a folder with the origin the user gave it, or Photos.
+/// 新建图库的一个来源：带用户所给出处的文件夹，或 Photos。
 pub enum NewSource {
     Folder { path: PathBuf, preset: String },
     Photos { path: PathBuf },
 }
-/// A folder becomes a source only if it exists, has a known origin and neither contains nor sits inside
-/// another folder source (the same file must not belong to two sources).
+/// 文件夹要成为来源，必须存在、出处已知，并且既不包含另一个文件夹来源，
+/// 也不在另一个文件夹来源里面（同一个文件不能属于两个来源）。
 pub(crate) fn folder_source(id: &str, folder: &Path, preset: &str, others: &[PathBuf]) -> Result<(PathBuf, Value)> {
     let folder = absolute(folder)?;
     if !folder.is_dir() {
@@ -108,7 +107,7 @@ pub(crate) fn folder_source(id: &str, folder: &Path, preset: &str, others: &[Pat
     let entry = json!({"id":id,"kind":"folder","path":text(&folder)?,"preset":preset,"preset_origin":"user"});
     Ok((folder, entry))
 }
-/// A library with one or more sources, ids s1, s2, … in the given order. At most one Photos source.
+/// 有一个或多个来源的图库，id 按给定顺序为 s1、s2、…。最多一个 Photos 来源。
 pub fn create_sources(dest: &Path, name: &str, sources: Vec<NewSource>, reference: Option<&Path>) -> Result<Value> {
     let dest = absolute(dest)?;
     if sources.is_empty() {
@@ -149,9 +148,9 @@ fn create_package<F: FnOnce(&Connection) -> Result<()>>(
             return Err(Error::Invalid(format!("缺少参考库 {path}", path = reference.display())));
         }
     }
-    // Exclusive acquisition: existing directories, files, and even dangling symlinks never enter cleanup.
-    // Attempt the final operand first, matching pathlib.mkdir(parents=True)'s error path.
-    // Recursively creating it directly would accept an already existing directory.
+    // 独占获取：已有的目录、文件，甚至失效的符号链接都不会进入清理。
+    // 先尝试最后一级路径，与 pathlib.mkdir(parents=True) 的出错路径一致。
+    // 直接递归创建会接受已经存在的目录。
     match fs::create_dir(dest) {
         Ok(()) => {}
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
@@ -188,12 +187,12 @@ fn create_package<F: FnOnce(&Connection) -> Result<()>>(
         );
         let config = json!({"format":1,"id":crate::store::new_key()?.to_ascii_uppercase(),"name":name,"created_at":created,
             "sources":sources});
-        // library.json is the discoverability marker. Publish only after both databases are complete and closed.
+        // library.json 是让图库能被发现的标记。只在两个数据库都写完并关闭后才发布。
         let temp = dest.join("library.json.tmp");
         let sources = serde_json::to_string_pretty(&config["sources"])
             .map_err(|e| Error::Invalid(e.to_string()))?
             .replace('\n', "\n  ");
-        // Keep the existing config field order without changing serde_json's global map representation.
+        // 保持现有的配置字段顺序，不改变 serde_json 全局的 map 表示。
         let bytes = format!("{{\n  \"format\": 1,\n  \"id\": {},\n  \"name\": {},\n  \"created_at\": {},\n  \"sources\": {sources}\n}}\n", config["id"], config["name"], config["created_at"]);
         fs::write(&temp, bytes).map_err(|e| crate::error::io_at(e, &temp, None))?;
         let config_path = dest.join("library.json");
@@ -201,7 +200,7 @@ fn create_package<F: FnOnce(&Connection) -> Result<()>>(
         Ok(json!({"path":text(dest)?,"name":name}))
     })();
     if let Err(error) = result {
-        // Every SQLite connection above is scoped to the failed closure and is closed before removing files.
+        // 上面的每个 SQLite 连接都限定在失败的闭包里，删除文件之前已经关闭。
         if let Err(cleanup) = fs::remove_dir_all(dest) {
             return Err(Error::Invalid(format!("新图库创建失败：{error}；清理本次新目录失败：{cleanup}")));
         }
@@ -257,7 +256,7 @@ pub(crate) fn initialize_source(path: &Path, reference: Option<&Path>) -> Result
         tx.execute_batch(include_str!("app_source_empty.sql"))?;
     }
     complete_source(&tx)?;
-    // Fail before publication if the supplied reference cannot support current source reads/imports.
+    // 如果给的参考文件不能支持当前的来源读取和导入，就在发布前失败。
     for sql in [
         "SELECT uuid,filename,src_path,width,height,added_at,src_kind,in_scope,trashed,hidden,stable_hash,orig_size,source_id,preset FROM assets LIMIT 0",
         "SELECT uuid,dim,value,conf,source,model_ver,run_id FROM labels LIMIT 0",
@@ -278,7 +277,7 @@ pub(crate) fn initialize_source(path: &Path, reference: Option<&Path>) -> Result
     check(&c)?;
     Ok(())
 }
-/// The asset columns and folder bookkeeping every current source has; also after a rescue (#228).
+/// 每个当前来源都有的 asset 列和文件夹记账表；抢救之后也一样（#228）。
 pub(crate) fn complete_source(c: &Connection) -> Result<()> {
     let columns: Vec<String> =
         c.prepare("PRAGMA table_info(assets)")?.query_map([], |r| r.get(1))?.collect::<rusqlite::Result<_>>()?;
@@ -453,7 +452,7 @@ mod tests {
             assert_eq!(count(&source, &format!("SELECT count(*) FROM {table}")), 0);
         }
         assert!(!f.reference.exists());
-        // Factory stays scan-free; scanner accepts its schema without test-time alterations.
+        // 工厂不扫描；扫描器无需测试时改表就能接受它的 schema。
         fs::write(f.folder.join("synthetic.png"), b"synthetic invalid image").unwrap();
         let source_config = json!({"id":"s1","path":f.folder,"preset":"other"});
         let scan = crate::app_folder::scan(
@@ -469,7 +468,7 @@ mod tests {
     #[test]
     fn photos_source_is_configuration_only_and_preserves_explicit_path() {
         let f = Fixture::new();
-        // A dangling link proves this factory does not require/read/resolve a Photos source.
+        // 失效的链接证明这个工厂不需要、不读取、不解析 Photos 来源。
         let photos = f.root.join("Photos Library.photoslibrary");
         #[cfg(unix)]
         std::os::unix::fs::symlink(f.root.join("missing-photos"), &photos).unwrap();
@@ -566,9 +565,8 @@ mod tests {
         assert_eq!(count(&c, "SELECT count(*) FROM sqlite_master WHERE name='entities'"), 0);
         assert!(crate::legacy_characters::characters_in_core(&c).unwrap());
         assert!(crate::legacy_names::names_in_core(&c).unwrap());
-        // The four domains start in the core (`new_library`): the label tables are views over it, the compatibility
-        // and core-only tables are guarded, the derived tables compacted, and the three empty whole-library evidence
-        // sets the former switch left are there.
+        // 四个域从核心开始（`new_library`）：标签表是核心之上的视图，兼容表和仅核心表有守卫，派生表已压实，
+        // 以前的切换留下的三组空的全图库证据集都在。
         assert_eq!(
             count(&c, "SELECT count(*) FROM sqlite_master WHERE type='view' AND name IN ('asset_tags','general_hits','asset_rating')"),
             3
@@ -715,7 +713,7 @@ mod tests {
         let result = create(&f.dest, &f.folder, None, None, Some(&f.reference), |c| {
             assert!(!f.dest.join("library.json").exists());
             assert_eq!(count(c,"SELECT count(*) FROM meta WHERE key IN ('terms_artists','terms_labels','terms_characters','terms_names') AND value='core'"),4);
-            // A new library starts in the core: nothing to back up before a switch.
+            // 新图库从核心开始：切换前没有要备份的东西。
             assert!(!f.dest.join("library-backups").exists());
             c.execute_batch(
                 "CREATE TRIGGER injected BEFORE INSERT ON terms BEGIN SELECT RAISE(ABORT,'injected'); END;",

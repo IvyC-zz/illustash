@@ -1,11 +1,11 @@
 const {test, before} = require('node:test');
-const web = require('./web.cjs');   // readError() is core/session.js, readFailure() ui/dom.js (#199)
+const web = require('./web.cjs');   // readError() 在 core/session.js，readFailure() 在 ui/dom.js（#199）
 let readError, readFailure;
 before(async () => { await web.ready(); ({readError} = web.core()); ({readFailure} = await web.load('ui/dom.js')); });
 const assert = require('node:assert/strict');
 const tick = () => new Promise(r => setImmediate(r));
 test('a local search failure reports its cause and never queries remote or offers creation', async () => {
-  // twoStage() is ui/palette.js: the local search first, then Danbooru.
+  // twoStage() 在 ui/palette.js：先本地搜索，再查 Danbooru。
   const {twoStage} = await web.load('ui/palette.js');
   let remoteCalls = 0, extraCalls = 0; const frames = [];
   twoStage(async () => { throw new Error('database locked'); }, async () => { remoteCalls++; }, () => { extraCalls++; return [{items: [{create: 'new'}]}]; })('name', f => frames.push(f));
@@ -16,7 +16,7 @@ test('inline failures show the escaped reason instead of an empty state', () => 
   const node = {hidden: true}; readFailure(node, new Error('<unreadable>'));
   assert.equal(node.hidden, false); assert.match(node.innerHTML, /role="alert"/); assert.match(node.innerHTML, /读取失败：&lt;unreadable&gt;/);
 });
-// The 资料库 is ui/catalog.js (#199); its reads go through the page's fetch.
+// 资料库在 ui/catalog.js（#199）；它的读取经过页面的 fetch。
 for (const [name, method] of [['works', 'renderShelf'], ['characters', 'searchIndex']]) {
   test(`a late ${name} failure cannot expose its panel after navigation`, async () => {
     let reject; const nodes = {hint: {}, charSearch: {value: 'Alice'}, charIndex: {hidden: true}};

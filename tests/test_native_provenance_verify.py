@@ -1,4 +1,4 @@
-"""Gallery verification against unchanged legacy algorithms using a synthetic mailbox."""
+"""用合成信箱，对照未改动的旧算法测试作品集验证。"""
 import io
 import json
 import os
@@ -36,7 +36,7 @@ class Gallery:
         if parts.path.endswith('tags.json'):return [dict(name='synthetic',post_count=1000)]
         if parts.path.endswith('profile/all'):return dict(body=dict(illusts={str(i):None for i in range(self.works)},manga={}))
         if parts.path.endswith('profile/illusts'):
-            # parse_qs preserves repeated ids[]; the old kwargs is a tuple list.
+            # parse_qs 保留重复的 ids[]；旧的 kwargs 是元组列表。
             if params:ids=[v for k,v in params if k=='ids[]']
             else:ids=query.get('ids[]',[])
             return dict(body=dict(works={str(i):dict(id=str(i),url=f'https://i.pximg.net/img/2026/01/01/00/00/00/{i}_p0.jpg',pageCount=1) for i in ids}))
@@ -78,8 +78,8 @@ class NativeProvenanceVerifyTest(unittest.TestCase):
                     try:
                         call=json.loads(calls.read_text(encoding='utf-8'))
                     except PermissionError:
-                        # NTFS rename/delete sharing can outlive the existence check.
-                        # The outer deadline still fails a persistent denial.
+                        # NTFS 改名/删除的共享冲突可能在存在性检查之后仍未解除。
+                        # 一直被拒绝时，外层的期限仍会让测试失败。
                         time.sleep(.002)
                         continue
                     self.assertEqual(call['identity'],request['identity'])
@@ -146,8 +146,8 @@ class NativeProvenanceVerifyTest(unittest.TestCase):
     def test_pixiv_two_listings_ahead_and_weak_matching_widening(self):
         request,reference,factory=self.fixture_verify(mode='pixiv',works=100,weak=True)
         result,_=self.parity(request,reference,factory)
-        # Legacy slices advance by 48 even when a weak plan starts with 30;
-        # preserve its expansion/overshoot behavior rather than silently improving it.
+        # 旧版即使弱计划从 30 开始，切片也按 48 前进；
+        # 保留它的扩展/超出行为，不悄悄改进。
         self.assertEqual(result['matches'],36)
 
     def test_automatic_popularity_selection_and_done_skip(self):
@@ -165,5 +165,5 @@ class NativeProvenanceVerifyTest(unittest.TestCase):
         self.assertFalse(self.rows(Path(request['cache']))['lookups'])
 
 
-# Named helper prevents unittest discovery of another TestCase through an import.
+# 用具名辅助函数，免得 unittest 通过导入发现另一个 TestCase。
 def tempfile_file(path):return path.open('wb')

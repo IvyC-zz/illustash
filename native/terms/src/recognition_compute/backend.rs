@@ -1,7 +1,6 @@
-//! Execution backends for the recognition sessions (#270: CoreML on macOS; #271: DirectML on Windows).
-//! The CPU is the reference. An accelerated session that cannot be built, or fails while running, falls back to the
-//! CPU for the rest of the worker, and the reason is recorded in Shared/acceleration.json. Accelerated outputs differ
-//! from the CPU's in fp32 rounding only (docs/TERMS_PERFORMANCE.md 第 6 节).
+//! 识别会话的执行后端（#270：macOS 上用 CoreML；#271：Windows 上用 DirectML）。
+//! 以 CPU 为准。加速会话建不起来或运行中失败时，这个 worker 余下的部分都回退到 CPU，原因记在
+//! Shared/acceleration.json。加速输出与 CPU 输出只差 fp32 舍入（docs/TERMS_PERFORMANCE.md 第 6 节）。
 use crate::{Error, Result};
 use ort::{
     execution_providers::{
@@ -19,20 +18,20 @@ use std::{
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
-/// `ILLUSTASH_CPU_ONLY=1` keeps every session on the CPU whatever the setting says: the bit-for-bit acceptance runs
-/// and anyone ruling the accelerator out set it. Empty and `0` mean unset.
+/// `ILLUSTASH_CPU_ONLY=1` 让所有会话都留在 CPU，不管设置怎么写：逐位一致的验收运行和要排除加速器的人设置它。
+/// 空值和 `0` 视同未设置。
 pub const CPU_ONLY_ENV: &str = "ILLUSTASH_CPU_ONLY";
-/// Whether this build has an accelerated backend at all; the setting is offered only where it does.
+/// 这个构建有没有加速后端；只在有的地方提供这项设置。
 pub const AVAILABLE: bool =
     cfg!(any(all(target_os = "macos", target_arch = "aarch64"), all(windows, target_arch = "x86_64")));
-/// The compiled CoreML models, one folder per key (cache_key), under the shared folder.
+/// 编译好的 CoreML 模型，在共享文件夹下，每个键（cache_key）一个文件夹。
 const COREML_CACHE: &str = "coreml-cache";
-/// What the last worker used, and why it fell back, per model: read by GET /api/models.
+/// 上一个 worker 按模型分别用了什么、为什么回退：供 GET /api/models 读取。
 pub const STATUS_FILE: &str = "acceleration.json";
-/// Beside the ONNX Runtime library: which backend that runtime build is meant to run each model on, e.g.
-/// `{"format": 1, "wd": "directml", "ccip": "directml"}` (#271). The runtime and its backends are one unit of
-/// configuration: replacing the runtime folder (say, with Windows ML's) changes the backends without touching
-/// this code. Without the file the platform default in `Acceleration::backend` applies.
+/// 放在 ONNX Runtime 库旁边：这个运行库构建打算让每个模型跑在哪个后端上，例如
+/// `{"format": 1, "wd": "directml", "ccip": "directml"}`（#271）。运行库和它的后端是一个配置单元：
+/// 替换运行库文件夹（比如换成 Windows ML 的）就换了后端，不用动这里的代码。
+/// 没有这个文件时使用 `Acceleration::backend` 里的平台默认值。
 pub const RUNTIME_BACKENDS: &str = "backends.json";
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -47,7 +46,7 @@ impl Model {
             Self::Ccip => "ccip",
         }
     }
-    /// The dynamic batch dimension; pinned to 1 for accelerators that need static shapes.
+    /// 动态 batch 维；对需要静态形状的加速器固定为 1。
     fn batch(self) -> &'static str {
         match self {
             Self::Wd => "batch_size",
@@ -75,8 +74,8 @@ impl Backend {
     }
 }
 
-/// The runtime's RUNTIME_BACKENDS: `Ok(None)` without the file; an unreadable or unknown entry is an error, and then
-/// every model stays on the CPU rather than guessing.
+/// 运行库的 RUNTIME_BACKENDS：没有文件时为 `Ok(None)`；读不了或有未知条目时报错，
+/// 此时所有模型都留在 CPU，不去猜。
 fn declared(runtime: &Path) -> std::result::Result<Option<[Backend; 2]>, String> {
     let Some(file) = runtime.parent().map(|d| d.join(RUNTIME_BACKENDS)).filter(|f| f.exists()) else {
         return Ok(None);
@@ -95,8 +94,8 @@ fn declared(runtime: &Path) -> std::result::Result<Option<[Backend; 2]>, String>
     };
     Ok(Some([backend(Model::Wd)?, backend(Model::Ccip)?]))
 }
-/// RUNTIME_BACKENDS of the runtime this process bound (session::initialise), read once it is bound; before that
-/// (no runtime yet) the platform default applies and nothing is cached.
+/// 本进程绑定的运行库（session::initialise）的 RUNTIME_BACKENDS，绑定后读一次；
+/// 绑定之前（还没有运行库）使用平台默认值，不缓存。
 fn runtime_backends() -> std::result::Result<Option<[Backend; 2]>, String> {
     static DECLARED: std::sync::OnceLock<std::result::Result<Option<[Backend; 2]>, String>> =
         std::sync::OnceLock::new();
@@ -107,7 +106,7 @@ fn runtime_backends() -> std::result::Result<Option<[Backend; 2]>, String> {
     DECLARED.get_or_init(|| declared(&runtime)).clone()
 }
 
-/// One worker's choice: the switch (setting and CPU_ONLY_ENV) and where the shared folder is.
+/// 一个 worker 的选择：开关（设置和 CPU_ONLY_ENV）以及共享文件夹的位置。
 #[derive(Clone, Debug)]
 pub struct Acceleration {
     enabled: bool,
@@ -117,14 +116,13 @@ impl Acceleration {
     pub fn cpu() -> Self {
         Self { enabled: false, shared: None }
     }
-    /// For a worker: on unless CPU_ONLY_ENV is set or 「使用 GPU 加速识别」 is off in preferences.json.
+    /// 用于 worker：默认开启，除非设置了 CPU_ONLY_ENV，或 preferences.json 里关闭了「使用 GPU 加速识别」。
     pub fn from_env(shared: Option<&Path>) -> Self {
         let forced = std::env::var_os(CPU_ONLY_ENV).is_some_and(|v| !v.is_empty() && v != "0");
         Self { enabled: AVAILABLE && !forced && crate::app_preferences::acceleration(), shared: shared.map(Into::into) }
     }
-    /// What the bound runtime declares (RUNTIME_BACKENDS), else the platform default (#213): on macOS only CCIP goes
-    /// to CoreML (WD on CoreML is no faster, takes about ten minutes to compile and caches 2.1 GB); on Windows both go
-    /// to DirectML (#271).
+    /// 用绑定的运行库声明的后端（RUNTIME_BACKENDS），否则用平台默认值（#213）：macOS 上只有 CCIP 用 CoreML
+    /// （WD 用 CoreML 并不更快，编译约要十分钟，缓存占 2.1 GB）；Windows 上两个都用 DirectML（#271）。
     pub fn backend(&self, model: Model) -> Backend {
         if !self.enabled {
             return Backend::Cpu;
@@ -143,7 +141,7 @@ impl Acceleration {
                 }
             }
             Ok(None) => default,
-            // An unreadable declaration: the CPU rather than a guess, and said where the settings page shows it.
+            // 声明读不了：用 CPU 而不是猜，并在设置页显示的位置写明原因。
             Err(reason) => {
                 eprintln!("识别加速：{} 改用 CPU：{reason}", model.name());
                 self.record(model, default, Backend::Cpu, Some(&reason));
@@ -151,7 +149,7 @@ impl Acceleration {
             }
         }
     }
-    /// The accelerator's part of the session: providers, pinned shapes, cache. CPU sessions never come here.
+    /// 会话里属于加速器的部分：provider、固定的形状、缓存。CPU 会话从不走到这里。
     pub(super) fn configure(
         &self,
         builder: SessionBuilder,
@@ -163,7 +161,7 @@ impl Acceleration {
         let failed = |e: ort::Error| Error::Invalid(format!("{} {}: {e}", backend.name(), model.name()));
         match backend {
             Backend::CoreMl => {
-                // Without a static batch CoreML takes 27 of CCIP's 1486 nodes; with it the whole graph is one partition.
+                // 不固定 batch 时，CoreML 只接管 CCIP 1486 个节点中的 27 个；固定后整张图是一个分区。
                 let builder = builder.with_dimension_override(model.batch(), 1).map_err(failed)?;
                 let mut provider = CoreMLExecutionProvider::default()
                     .with_model_format(CoreMLModelFormat::MLProgram)
@@ -174,15 +172,15 @@ impl Acceleration {
                 }
                 builder.with_execution_providers([provider.build().error_on_failure()]).map_err(failed)
             }
-            // With the batch pinned DirectML can plan the whole graph when the session is built.
+            // batch 固定后，DirectML 能在建会话时规划整张图。
             Backend::DirectMl if cfg!(windows) => {
                 builder.with_dimension_override(model.batch(), 1).and_then(super::directml::configure).map_err(failed)
             }
             Backend::DirectMl | Backend::Cpu => Err(Error::Invalid(format!("{} 不在本平台", backend.name()))),
         }
     }
-    /// Shared/coreml-cache/<key>. A key that changes (a new model, runtime or macOS) leaves the old folders unused,
-    /// so they are removed; the first session then compiles again (about 4 s for CCIP, then about 0.65 s per start).
+    /// Shared/coreml-cache/<key>。键变了（换了模型、运行库或 macOS）旧文件夹就不再使用，所以删掉；
+    /// 之后第一个会话重新编译（CCIP 约 4 秒，之后每次启动约 0.65 秒）。
     fn coreml_cache(&self, path: &Path, runtime: &Path) -> Option<PathBuf> {
         let root = self.shared.as_ref()?.join(COREML_CACHE);
         let key = cache_key(path, runtime).inspect_err(|e| eprintln!("识别加速：缓存键 {e}")).ok()?;
@@ -195,7 +193,7 @@ impl Acceleration {
         }
         Some(root.join(key))
     }
-    /// The accelerator could not be built, or failed while running: drop its cache (it may be what broke) and say so.
+    /// 加速器建不起来或运行中失败：删掉它的缓存（坏的可能就是缓存），并记下原因。
     pub(super) fn fell_back(&self, model: Model, backend: Backend, path: &Path, runtime: &Path, reason: &str) {
         eprintln!("识别加速：{} 改用 CPU（{}）：{reason}", model.name(), backend.name());
         if backend == Backend::CoreMl {
@@ -205,7 +203,7 @@ impl Acceleration {
         }
         self.record(model, backend, Backend::Cpu, Some(reason));
     }
-    /// Undo coreml_cache and compile_lock when nothing could be loaded at all: no folder is left behind.
+    /// 什么都没能加载时撤回 coreml_cache 和 compile_lock 的操作：不留下任何文件夹。
     pub(super) fn abandon(&self, backend: Backend) {
         let Some(root) = self.shared.as_ref().map(|s| s.join(COREML_CACHE)).filter(|_| backend == Backend::CoreMl)
         else {
@@ -235,8 +233,8 @@ impl Acceleration {
             let _ = fs::remove_file(&temporary);
         }
     }
-    /// Serialise the first compile between workers (recognition and index may start together): one compiles into
-    /// the cache, the other then loads it. Waits at most a minute, then goes ahead without the lock.
+    /// 让 worker 之间的首次编译串行（识别和索引可能同时启动）：一个编译进缓存，另一个随后加载它。
+    /// 最多等一分钟，之后不拿锁直接继续。
     pub(super) fn compile_lock(&self, backend: Backend) -> Option<fs::File> {
         if backend != Backend::CoreMl {
             return None;
@@ -261,7 +259,7 @@ impl Acceleration {
     }
 }
 
-/// GET /api/models: the switch's state, the accelerator this build would use, and what the last worker used.
+/// GET /api/models：开关的状态、这个构建会用的加速器，以及上一个 worker 用了什么。
 pub fn info(shared: Option<&Path>) -> Value {
     let last = shared.map(|s| read_status(&s.join(STATUS_FILE))).unwrap_or_default();
     let backend = if !AVAILABLE {
@@ -282,7 +280,7 @@ fn read_status(file: &Path) -> Map<String, Value> {
         .unwrap_or_default()
 }
 
-/// SHA-256 of the model, the runtime and the system version: the compiled model is valid for exactly these.
+/// 模型、运行库和系统版本的 SHA-256：编译好的模型恰好只对这三者有效。
 fn cache_key(model: &Path, runtime: &Path) -> Result<String> {
     let mut digest = Sha256::new();
     digest.update(b"illustash-coreml/1 mlprogram all batch=1\n");

@@ -1,4 +1,4 @@
-//! Rescuing source.sqlite (#228) on synthetic packages: synthetic pictures, rows and deliberately overwritten pages.
+//! 在合成图库包上抢救 source.sqlite（#228）：合成的图片、数据行和故意覆写坏的页。
 use super::*;
 use std::collections::BTreeMap;
 
@@ -31,7 +31,7 @@ impl Fixture {
         let source = self.library().config()["sources"][0].clone();
         crate::app_folder::scan(&source, &self.source(), &|| Ok(()), &|_, _| {}).unwrap();
     }
-    /// What a sync's refresh records in library.sqlite: the pictures and their content.
+    /// 同步时的刷新记进 library.sqlite 的内容：图片及其内容。
     fn remember(&self) {
         let src = crate::sqlite::open(self.source()).unwrap();
         let rows = src
@@ -53,7 +53,7 @@ impl Fixture {
             .unwrap();
         }
     }
-    /// Relative path → ID, as `files` in `db` has it.
+    /// 相对路径 → ID，按 `db` 里 `files` 表的记录。
     fn ids(db: &Path) -> BTreeMap<String, String> {
         let c = crate::sqlite::open(db).unwrap();
         let ids = c
@@ -75,7 +75,7 @@ impl Drop for Fixture {
     }
 }
 
-/// Overwrites page `page` (1-based) of `db` with garbage.
+/// 用垃圾数据覆写 `db` 的第 `page` 页（从 1 开始）。
 fn corrupt(db: &Path, page: u64) {
     let size: u64 = crate::sqlite::open(db).unwrap().query_row("PRAGMA page_size", [], |r| r.get(0)).unwrap();
     let mut bytes = fs::read(db).unwrap();
@@ -113,7 +113,7 @@ fn pictures_get_their_ids_back_by_path_and_content_and_stale_results_go() {
          INSERT INTO recognition_assets SELECT uuid,'synthetic','synthetic' FROM assets;",
     )
     .unwrap();
-    // One package per picture, as if each had been recognized on its own.
+    // 每张图一个结果包，就像每张都是单独识别的。
     for uuid in before.values() {
         src.execute(
             "INSERT INTO recognition_imports(digest,manifest,assets,status) VALUES (?,'{}',?,'done')",
@@ -121,7 +121,7 @@ fn pictures_get_their_ids_back_by_path_and_content_and_stale_results_go() {
         )
         .unwrap();
     }
-    // What damage took: the folder bookkeeping, two picture rows, and d's results (its ledger entry stayed).
+    // 损坏带走的东西：文件夹的记账、两行图片记录，以及 d 的结果（它的账本条目还在）。
     let id = |rel: &str| before[rel].clone();
     src.execute_batch("DELETE FROM files; DELETE FROM asset_links;").unwrap();
     for rel in ["a.png", "sub/c.png"] {
@@ -129,7 +129,7 @@ fn pictures_get_their_ids_back_by_path_and_content_and_stale_results_go() {
     }
     src.execute("DELETE FROM labels WHERE uuid=?", [id("d.png")]).unwrap();
     drop(src);
-    // Meanwhile c moved and b got new content.
+    // 与此同时 c 被移走，b 的内容也换了。
     fs::create_dir_all(f.folder.join("moved")).unwrap();
     fs::rename(f.folder.join("sub/c.png"), f.folder.join("moved/c2.png")).unwrap();
     f.picture("b.png", 21);
@@ -145,7 +145,7 @@ fn pictures_get_their_ids_back_by_path_and_content_and_stale_results_go() {
             .collect::<BTreeMap<_, _>>();
     assert_eq!(after, expected);
     assert_eq!((rebuilt.report.kept, rebuilt.report.new), (5, 0), "{:?}", rebuilt.report);
-    // b's results described its old content and d's were lost: those two wait for recognition, without ledger entries.
+    // b 的结果描述的是旧内容，d 的结果已经丢失：这两张等待识别，不带账本条目。
     assert_eq!(rebuilt.report.pending, 2, "{:?}", rebuilt.report);
     for (rel, results) in [("a.png", 1), ("b.png", 0), ("moved/c2.png", 1), ("d.png", 0), ("e.png", 1)] {
         let uuid = &expected[rel];
@@ -157,7 +157,7 @@ fn pictures_get_their_ids_back_by_path_and_content_and_stale_results_go() {
         assert_eq!(Fixture::count(&building, &package), results, "{rel}");
     }
     assert_eq!(Fixture::count(&building, "SELECT count(*) FROM assets WHERE coalesce(trashed,0)=0"), 5);
-    // The damaged file stays as it was until the new one is put in place.
+    // 新文件就位之前，损坏的文件保持原样。
     assert_eq!(Fixture::count(&f.source(), "SELECT count(*) FROM files"), 0);
 
     let health = Health::load(&f.package);
@@ -168,7 +168,7 @@ fn pictures_get_their_ids_back_by_path_and_content_and_stale_results_go() {
     assert!(copy.starts_with(library.backups()) && copy.is_file(), "{copy:?}");
     assert_eq!(Fixture::count(&copy, "SELECT count(*) FROM files"), 0);
     assert!(health.checked().contains_key(&crate::app_integrity::Database::Source));
-    // The scan's notes for the next refresh of library.sqlite follow the new file.
+    // 扫描为下次刷新 library.sqlite 留下的记录跟着新文件走。
     assert!(!f.package.join(BUILDING_JOURNAL).exists());
 }
 
@@ -215,12 +215,12 @@ fn reading_resumes_past_a_damaged_page_and_indices_are_made_again() {
             assert!(rebuilt.report.damaged.is_empty(), "{:?}", rebuilt.report);
             assert_eq!(rows, 6000);
         } else if case == "root" {
-            // No seek gets past the table's root: its rows are lost, the rest of the file is not.
+            // 表的根页坏了，怎么定位都越不过去：这张表的行丢失，文件的其余部分不受影响。
             assert_eq!(rebuilt.report.damaged, vec!["synthetic_rows".to_owned()]);
             assert_eq!(rows, 0);
         } else {
             assert_eq!(rebuilt.report.damaged, vec!["synthetic_rows".to_owned()]);
-            // One leaf of some twenty rows is lost; reading goes on to the end.
+            // 丢了一个大约二十行的叶子页；读取会一直继续到末尾。
             assert!((5000..6000).contains(&rows), "{rows}");
             assert_eq!(Fixture::count(&building, "SELECT max(id) FROM synthetic_rows"), 6000);
         }

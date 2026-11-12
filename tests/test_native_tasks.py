@@ -1,4 +1,4 @@
-"""Shared task consumer acceptance using owned synthetic packages only."""
+"""共用任务消费者验收，只用测试自己的合成图库包。"""
 import json
 import sqlite3
 import time
