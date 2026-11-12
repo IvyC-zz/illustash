@@ -14,9 +14,7 @@
    "ui/grid.js -> ui/artists.js": 1,
    "ui/grid.js -> ui/catalog.js": 1,
    "ui/grid.js -> ui/detail.js": 1,
-   "ui/grid.js -> ui/home.js": 1,
    "ui/grid.js -> ui/palette.js": 1,
-   "ui/grid.js -> ui/review.js": 1,
    "ui/grid.js -> ui/shell.js": 1,
    "ui/guide.js -> ui/settings.js": 1,
    "ui/guide.js -> ui/tasks.js": 1,
@@ -107,15 +105,23 @@
    "ui/detail.js": 30,
    "ui/dialog.js": 1,
    "ui/dom.js": 1,
-   "ui/grid.js": 30,
+   "ui/grid.js": 27,
    "ui/guide.js": 4,
    "ui/home.js": 15,
    "ui/models.js": 3,
    "ui/palette.js": 26,
    "ui/review.js": 18,
    "ui/settings.js": 53,
-   "ui/shell.js": 25,
+   "ui/shell.js": 23,
    "ui/tasks.js": 18
+  },
+  "page-name": {
+   "ui/catalog.js": 10,
+   "ui/effects.js": 1,
+   "ui/guide.js": 1,
+   "ui/home.js": 12,
+   "ui/review.js": 10,
+   "ui/settings.js": 9
   }
  }
 }

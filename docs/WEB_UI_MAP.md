@@ -93,7 +93,7 @@
 | 导览站点 | `ui/guide.js` `tourStop` | 只有导览要带用户去的页面才需要 |
 | 总表 | 本篇 §2.1 | 加一行；`tests/pages.test.cjs` 的 `ROWS` 同步加一行 |
 
-异步回应里「还在不在这一页」的判断（`state.route.page !== 'home'` 一类）仍分散在 `home.js`、`review.js`、`catalog.js`、`settings.js` 里：它们比较的是自己所属的页面，不属于上面的「性质」。
+异步回应里「还在不在这一页」的判断（`state.route.page !== 'home'` 一类）仍分散在 `home.js`、`review.js`、`catalog.js`、`settings.js` 里：它们比较的是自己所属的页面，不属于上面的「性质」。`tools/check_frontend.py` 的规则 6 把这类比较按文件冻结为基线，只能缩小，不得在注册表以外的位置新增。
 
 ## 3. 浮层
 
