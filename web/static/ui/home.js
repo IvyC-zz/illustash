@@ -3,7 +3,7 @@ import {edits} from '../core/edits.js';
 import {dateText, esc, number} from '../core/format.js';
 import {I18N, t} from '../core/i18n.js';
 import {nameWithWork} from '../core/labels.js';
-import {implement} from '../core/pages.js';
+import {implement, onPage} from '../core/pages.js';
 import {charHash, hashFor} from '../core/route.js';
 import {api, post, readError} from '../core/session.js';
 import {state} from '../core/state.js';
@@ -26,20 +26,20 @@ export async function renderHome(keep = false) {
   if (!keep) { home.days = []; home.next = ''; $('viewport').scrollTop = 0; $('homePage').innerHTML = `<div class="loading-line">${t('读取中…')}</div>`; }
   try {
     const r = await api('/api/home?' + new URLSearchParams({nsfw: state.nsfw, days: Math.min(20, Math.max(5, home.days.length))}));
-    if (gen !== home.gen || state.route.page !== 'home') return;
+    if (gen !== home.gen || !onPage(state.route, 'home')) return;
     home.days = r.days; home.next = r.next;
-    if (!keep) { home.askSkip = []; home.askOff = new Set(); home.ask = await nextAsk(); if (gen !== home.gen || state.route.page !== 'home') return; }
+    if (!keep) { home.askSkip = []; home.askOff = new Set(); home.ask = await nextAsk(); if (gen !== home.gen || !onPage(state.route, 'home')) return; }
     drawHome();
     if (keep) $('viewport').scrollTop = scroll;
-  } catch (e) { if (gen === home.gen && state.route.page === 'home') $('homePage').innerHTML = `<p class="empty">${esc(readError(e))}</p>`; }
+  } catch (e) { if (gen === home.gen && onPage(state.route, 'home')) $('homePage').innerHTML = `<p class="empty">${esc(readError(e))}</p>`; }
 }
 export async function moreHome() {
-  if (home.loading || !home.next || state.route.page !== 'home') return;
+  if (home.loading || !home.next || !onPage(state.route, 'home')) return;
   home.loading = true; const gen = home.gen; let appended = false;
   $('homeSentinel').textContent = t('正在读取更早的图…');
   try {
     const r = await api('/api/home?' + new URLSearchParams({nsfw: state.nsfw, before: home.next}));
-    if (gen !== home.gen || state.route.page !== 'home') return;
+    if (gen !== home.gen || !onPage(state.route, 'home')) return;
     const known = new Set(home.days.map(g => g.day)), days = r.days.filter(g => !known.has(g.day) && known.add(g.day));
     home.days.push(...days); home.next = r.next;
     const sentinel = $('homeSentinel');
@@ -48,14 +48,14 @@ export async function moreHome() {
     state.items.push(...days.flatMap(g => g.items)); state.total = state.items.length;
     if (!home.next) { home.observer?.disconnect(); sentinel.textContent = t('已经到底了'); }
     appended = true;
-  } catch (e) { if (gen === home.gen && state.route.page === 'home') {
+  } catch (e) { if (gen === home.gen && onPage(state.route, 'home')) {
     $('homeSentinel').innerHTML = `<button class="home-retry" data-home-retry>${t('读取失败，重试')}</button>`; toast(e.message);
   } }
   finally {
     if (gen === home.gen) {
       home.loading = false;
       // 每次追加后重新观察，这样仍在边距内的哨兵会再次加载。
-      if (appended && home.next && state.route.page === 'home' && $('homeSentinel')) { home.observer?.unobserve($('homeSentinel')); home.observer?.observe($('homeSentinel')); }
+      if (appended && home.next && onPage(state.route, 'home') && $('homeSentinel')) { home.observer?.unobserve($('homeSentinel')); home.observer?.observe($('homeSentinel')); }
     }
   }
 }
@@ -131,7 +131,7 @@ export async function moreOfDay(day) {
   dayLoading.add(day); const gen = home.gen;
   try {
     const r = await api('/api/assets?' + new URLSearchParams({day, nsfw: state.nsfw, order: 'newest', offset: g.items.length, limit: 30, count: 0}));
-    if (gen !== home.gen || state.route.page !== 'home') return;
+    if (gen !== home.gen || !onPage(state.route, 'home')) return;
     const known = new Set(g.items.map(x => x.uuid)); g.items.push(...r.items.filter(x => !known.has(x.uuid)));
     if (!r.items.length) g.count = g.items.length;
     const el = $('homePage').querySelector(`.home-strip[data-day="${day}"]`), left = el?.scrollLeft || 0;
@@ -139,10 +139,10 @@ export async function moreOfDay(day) {
     const tmp = document.createElement('div'); tmp.innerHTML = homeDay(g, home.width); sec.replaceWith(tmp.firstElementChild);
     const fresh = $('homePage').querySelector(`.home-strip[data-day="${day}"]`); if (fresh) { fresh.scrollLeft = left; syncStrip(fresh); }
     state.items = home.days.flatMap(x => x.items); state.total = state.items.length;
-  } catch (e) { if (gen === home.gen && state.route.page === 'home') toast(e.message); } finally { if (gen === home.gen) dayLoading.delete(day); }
+  } catch (e) { if (gen === home.gen && onPage(state.route, 'home')) toast(e.message); } finally { if (gen === home.gen) dayLoading.delete(day); }
 }
 export function drawHome() {
-  if (state.route.page !== 'home') return;
+  if (!onPage(state.route, 'home')) return;
   const page = $('homePage'); home.width = page.clientWidth;
   if (!home.days.length) { page.innerHTML = `<p class="empty">${t('没有符合当前 R18 设置的图片。')}</p>`; state.items = []; state.total = 0; return; }
   page.innerHTML = home.days.map((g, i) => homeDay(g, home.width) + (i === 0 ? askCardHTML() : '')).join('') + `<div class="home-more-line" id="homeSentinel">${home.next ? t('正在读取更早的图…') : t('已经到底了')}</div>`;
@@ -151,7 +151,7 @@ export function drawHome() {
   home.observer?.disconnect();
   if (home.next) { home.observer = new IntersectionObserver(es => { if (es.some(e => e.isIntersecting)) moreHome(); }, {root: $('viewport'), rootMargin: '600px'}); home.observer.observe($('homeSentinel')); }
 }
-export function markHomeFocus() { if (state.route.page === 'home') for (const b of $('homePage').querySelectorAll('.home-j')) b.classList.toggle('on', b.dataset.id === state.focused); }
+export function markHomeFocus() { if (onPage(state.route, 'home')) for (const b of $('homePage').querySelectorAll('.home-j')) b.classList.toggle('on', b.dataset.id === state.focused); }
 // 首页「认一认」：一个角色，几张机器识别出的图；点掉错的，然后确认其余的。
 async function nextAsk() {
   if (!viewOpts.ask) return null;
@@ -198,7 +198,7 @@ export function wireHome() {
     day.classList.add('focus'); for (const b of day.querySelectorAll('.home-j')) b.classList.toggle('hit', b.dataset.chars.split(' ').includes(c.dataset.char));
   });
   $('homePage').addEventListener('mouseleave', () => { for (const d of $('homePage').querySelectorAll('.home-day.focus')) d.classList.remove('focus'); });
-  new ResizeObserver(() => { if (state.route.page !== 'home' || !home.days.length || Math.abs($('homePage').clientWidth - home.width) < 8) return; clearTimeout(home.resize); home.resize = setTimeout(drawHome, 120); }).observe($('homePage'));
+  new ResizeObserver(() => { if (!onPage(state.route, 'home') || !home.days.length || Math.abs($('homePage').clientWidth - home.width) < 8) return; clearTimeout(home.resize); home.resize = setTimeout(drawHome, 120); }).observe($('homePage'));
 }
 
 // 首页登记：渲染入口，以及数据变了之后怎么重画（撤销、同步到新图、改动之后保持滚动；切换 R18 重新读；视图选项只重排）。

@@ -114,14 +114,6 @@
    "ui/settings.js": 53,
    "ui/shell.js": 23,
    "ui/tasks.js": 18
-  },
-  "page-name": {
-   "ui/catalog.js": 10,
-   "ui/effects.js": 1,
-   "ui/guide.js": 1,
-   "ui/home.js": 12,
-   "ui/review.js": 10,
-   "ui/settings.js": 9
   }
  }
 }

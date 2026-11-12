@@ -3,7 +3,7 @@ import {WORK_NAMES} from '../core/catalog.js';
 import {esc, number, shortcut} from '../core/format.js';
 import {said, t, tb} from '../core/i18n.js';
 import {PHOTOS_PRIVACY, SYNC_ACTIVE, photosHelp, photosRefused, pollSync, startSync, syncLine} from '../core/jobs.js';
-import {pageOf} from '../core/pages.js';
+import {onPage, pageOf} from '../core/pages.js';
 import {go} from '../core/route.js';
 import {api, post, session} from '../core/session.js';
 import {allowNames, updatesPost, updatesTick} from '../core/settings.js';
@@ -230,7 +230,7 @@ async function guideWatch(w) {
 }
 export async function replayGuide() {
   if (!await guideAction({action: 'reopen'})) return;
-  if (state.route.page === 'settings') go({page: 'home'});
+  if (onPage(state.route, 'settings')) go({page: 'home'});
   await new Promise(done => setTimeout(done, 300));
   showTour(0);
 }

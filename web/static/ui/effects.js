@@ -2,7 +2,7 @@
 // app.js 把这些交给 onPost() 和 onJob()。
 import {SYNC_ACTIVE, importLine} from '../core/jobs.js';
 import {metaWritten, refreshMeta} from '../core/meta.js';
-import {pageOf} from '../core/pages.js';
+import {onPage, pageOf} from '../core/pages.js';
 import {loadLibraries} from '../core/settings.js';
 import {readError} from '../core/session.js';
 import {state} from '../core/state.js';
@@ -33,7 +33,7 @@ export async function afterJob(job, change) {
   } else if (job === 'index') {
     const s = state.index.state;
     if (change.ended && s.status === 'done') { state.countDirty = true; state.readEpoch++; await refreshMeta().catch(e => error(readError(e))); }
-    if (s.status !== change.was && state.route.page === 'settings') renderIndexCard(false);
+    if (s.status !== change.was && onPage(state.route, 'settings')) renderIndexCard(false);
     if (s.status !== change.was && state.route.section === 'works') drawShelf();
   } else if (job === 'names') {
     renderNamesCard(false);

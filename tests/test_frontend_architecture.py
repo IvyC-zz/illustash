@@ -169,7 +169,7 @@ class FrontendArchitectureTest(unittest.TestCase):
             self.assertViolation(tree, 'page-name', 'ui/palette.js')
         with Tree() as tree:  # 注册表自己不受限，读注册表字段不算
             tree.append('core/pages.js', "\nconst x = r.page === 'home';\n")
-            tree.append('ui/palette.js', "\nif (viewOf(state.route).click === 'cleanup') go();\n")
+            tree.append('ui/palette.js', "\nif (viewOf(state.route).click === 'cleanup' && onPage(state.route, 'home')) go();\n")
             self.assertEqual(tree.errors(), [])
 
     def test_long_line_boundary(self):

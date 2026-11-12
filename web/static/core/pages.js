@@ -92,6 +92,8 @@ export const pageOf = route => PAGES[route.page] || UNKNOWN;
 export const viewOf = (route, char = route.char) => char ? CHARACTER : pageOf(route);
 export const pageNames = () => list.map(p => p.name);
 // 本页的后端 pool 是不是这几个之一（条目离开本页的判断：设为角色之后离开未识别、排除之后离开已排除……）。
+// 异步回应回来时：用户是不是还在（启动它的）这一页。守卫用它，不要在别处直接比较页面名（tools/check_frontend.py 规则 6）。
+export const onPage = (route, ...names) => names.includes(route.page);
 export const poolIs = (route, ...pools) => pools.includes(pageOf(route).pool);
 
 // ui/ 登记页面的处理函数：{页面名: {render, refresh, heading, ...}}。

@@ -5,7 +5,7 @@ import {t, tb} from '../core/i18n.js';
 import {SIMILAR_ACTIVE, similarLine} from '../core/jobs.js';
 import {RELATION_KINDS, RELATION_NAMES} from '../core/labels.js';
 import {refreshMeta} from '../core/meta.js';
-import {implement} from '../core/pages.js';
+import {implement, onPage} from '../core/pages.js';
 import {prefs} from '../core/prefs.js';
 import {charHash, go, hashFor} from '../core/route.js';
 import {api, post, readError} from '../core/session.js';
@@ -24,13 +24,13 @@ export const nearText = g => g.near_kind === 'trait' ? t('外观相似：第 {n}
 // 点一张图，把它排除在这组的回答之外。回答过的组原地离开页面（不会因重新加载而跳动）。
 export const groups = {list: [], shown: 40, off: new Map(), revision: 0};
 export async function renderGroups(keep = false) {
-  if (state.route.page !== 'groups') return;
+  if (!onPage(state.route, 'groups')) return;
   $('grid').hidden = true; $('empty').hidden = true; $('charIndex').hidden = true; $('settingsPage').hidden = true; $('groupsPage').hidden = false;
   closeInspector(); $('selectionBar').hidden = true; $('resultCount').textContent = ''; $('hint').textContent = t('点一下图片：不算在这组里 · 组头的按钮对整组生效，都可以撤销');
   const scroll = $('viewport').scrollTop, revision = ++groups.revision, nsfw = state.nsfw;
-  let result; try { result = await api('/api/clusters?nsfw=' + state.nsfw); } catch (e) { if (state.route.page === 'groups' && revision === groups.revision && nsfw === state.nsfw) readFailure($('groupsPage'), e); return; }
+  let result; try { result = await api('/api/clusters?nsfw=' + state.nsfw); } catch (e) { if (onPage(state.route, 'groups') && revision === groups.revision && nsfw === state.nsfw) readFailure($('groupsPage'), e); return; }
   const {clusters, learner} = result;
-  if (state.route.page !== 'groups' || revision !== groups.revision || nsfw !== state.nsfw) return;
+  if (!onPage(state.route, 'groups') || revision !== groups.revision || nsfw !== state.nsfw) return;
   // 一键就能确认的组排在前面（大的在前），然后是还要起名字的组。
   groups.list = [...clusters].sort((a, b) => !!b.lead - !!a.lead || b.size - a.size || a.cid - b.cid); groups.learner = learner;
   if (!keep) { groups.shown = 40; groups.off = new Map(); }
@@ -60,14 +60,14 @@ function groupSection(g) {
 // ---------- 整个图库里的相似图片（native/terms/src/research_compute/similar.rs） ----------
 let similarTimer = 0;
 export async function renderSimilar() {
-  if (state.route.page !== 'similar') return;
+  if (!onPage(state.route, 'similar')) return;
   clearTimeout(similarTimer);
   $('grid').hidden = true; $('empty').hidden = true; $('charIndex').hidden = true; $('settingsPage').hidden = true; $('groupsPage').hidden = false;
   closeInspector(); $('selectionBar').hidden = true; $('resultCount').textContent = ''; $('hint').textContent = t('点一组进去看');
   const kind = state.route.kind || '';
-  let result; try { result = await api('/api/similar?' + new URLSearchParams({kind, nsfw: state.nsfw})); } catch (e) { if (state.route.page === 'similar' && kind === (state.route.kind || '')) readFailure($('groupsPage'), e); return; }
+  let result; try { result = await api('/api/similar?' + new URLSearchParams({kind, nsfw: state.nsfw})); } catch (e) { if (onPage(state.route, 'similar') && kind === (state.route.kind || '')) readFailure($('groupsPage'), e); return; }
   const {groups, state: s} = result;
-  if (state.route.page !== 'similar') return;
+  if (!onPage(state.route, 'similar')) return;
   const busy = SIMILAR_ACTIVE.includes(s.status);
   $('groupsPage').innerHTML = `<div class="similar-status"><span class="local-dot${busy ? ' busy' : ''}"></span><span class="muted-note">${t('{n} 组 · 共 {images} 张', {n: number(groups.length), images: number(groups.reduce((n, g) => n + g.size, 0))})}${similarLine(s) ? ' · ' + esc(similarLine(s)) : ''}</span></div>
     <div class="groups-bar"><div class="segmented">${RELATION_KINDS.map(([k, label]) => `<button class="${k === kind ? 'on' : ''}" data-kind="${k}">${label}</button>`).join('')}</div>
@@ -118,14 +118,14 @@ function identityCard(x, i) {
     </div></article>`;
 }
 export async function renderIdentity(more = false) {
-  if (state.route.page !== 'identity') return;
+  if (!onPage(state.route, 'identity')) return;
   $('grid').hidden = true; $('empty').hidden = true; $('charIndex').hidden = true; $('settingsPage').hidden = true; $('groupsPage').hidden = false;
   closeInspector(); $('selectionBar').hidden = true; $('hint').textContent = t('点角色名看全部图 · 高亮的是外部资料建议的做法');
   if (!more) { identity.items = []; identity.offset = 0; }
   let page;
   try { page = await api('/api/identity/queue?' + new URLSearchParams({limit: IDENTITY_PAGE, offset: identity.items.length, nsfw: state.nsfw})); }
   catch (e) { $('groupsPage').innerHTML = `<p class="empty">${esc(readError(e))}</p>`; return; }
-  if (state.route.page !== 'identity') return;
+  if (!onPage(state.route, 'identity')) return;
   identity.items.push(...page.items); identity.total = page.total; state.identityCount = page.total; navCount('countIdentity', page.total);
   $('resultCount').textContent = t('{n} 对待判断', {n: number(page.total)});
   renderHeading();
@@ -162,14 +162,14 @@ const AUDIT_METHODS = {pixel_hash: [t('像素哈希'), t('和 Danbooru 上的帖
   gallery_match: [t('本地比对'), t('和 TA 公开作品的小图逐张比对一致')], ocr: [t('签名识别'), t('图上的签名或水印')]};
 const auditMethod = a => a.methods?.includes('pixel_hash') ? 'pixel_hash' : a.methods?.[0] || '';
 export async function renderArtistAudit() {
-  if (state.route.page !== 'artist-audit') return;
+  if (!onPage(state.route, 'artist-audit')) return;
   $('grid').hidden = true; $('empty').hidden = true; $('charIndex').hidden = true; $('settingsPage').hidden = true; $('groupsPage').hidden = false;
   closeInspector(); $('selectionBar').hidden = true; $('resultCount').textContent = '';
   $('hint').textContent = t('点原帖或画师主页对照 · 看不出来就先留着 · 都可以撤销');
   const n = Number(prefs.get('artistAuditN', 50)) || 50, scroll = $('viewport').scrollTop;
   let d;
   try { d = await api('/api/artist-audit?n=' + n); } catch (e) { $('groupsPage').innerHTML = `<p class="muted-note">${esc(readError(e))}</p>`; return; }
-  if (state.route.page !== 'artist-audit') return;
+  if (!onPage(state.route, 'artist-audit')) return;
   const pairs = d.items.flatMap(it => it.artists.map(a => ({...a, method: auditMethod(a)})));
   const tally = list => { const yes = list.filter(a => a.confirmed).length, no = list.filter(a => a.rejected).length; return {yes, no, done: yes + no, all: list.length}; };
   const tl = tally(pairs), acc = tl.done ? tl.yes / tl.done : null;
