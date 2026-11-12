@@ -58,6 +58,7 @@ Claude Code 通过 `CLAUDE.md` 引入本文件，Codex 等直接读本文件。�
 - 2026-10-19 用户定（#240）：开发会话的编译和定向测试（`cargo build/test/clippy/check`、`python -m unittest`）默认经 `collab_run.py bg -- <命令>` 以后台优先级运行，把性能核留给全量和计时；全量、计时和单独的 release 构建本身不降级。全量在跑时这些命令会慢很多，甚至几乎停住，这是预期的。经 SSH 在 Windows 机上跑的不受此限。重型、计时和后台三类命令由钩子按本机配置拦截，没按规定运行时照提示改写即可。做法、拦截范围和运行历史见[本地验收](docs/LOCAL_CHECKS.md#本机资源排队计时与后台优先级)。
 - 读不到 GitHub 的代理（禁网沙箱）：由 Lead 把 Issue 正文贴给它，它的进度和结果由 Lead 代写进 PR。
 - 合并到 main、推送标签、关闭别人开的 Issue 由用户决定或明确授权。
+- 2026-11-12 用户定（#316、#318）：写或改 `web/static` 界面前先看样式清单 `tools/styleguide/index.html`（浏览器直接打开，或在仓库根运行 `python3 -m http.server` 后打开 `/tools/styleguide/`）：复用里面现成的变体和类名，不新造类名和新数值；没有合适的，先在 Issue 里问。这页只在开发时用，不进发布包；改了 `app.css` 后重跑 `python3 tools/styleguide/census.py` 更新令牌统计。
 - 每个会话都必须知道的约束写在本文件，不写在 Issue 里：Issue 不会自动进上下文。
 
 ### 公开库规则
@@ -90,6 +91,10 @@ Claude Code 通过 `CLAUDE.md` 引入本文件，Codex 等直接读本文件。�
 - **错误类型**（未检查）：同上。core 和 terms 的新代码用 `Error`，不新增 `Result<_, String>`。例外：desktop 的 Tauri 命令边界（要求错误可序列化）和 platform 内部的 OpenBLAS 加载器可以用 `String`，在进入 core、terms 的地方转成 `Error`。存量的 `String` 错误改到时顺手改。
 - **文档覆盖**（未检查）：同上。core 和 platform 新增或改动的 `pub` 项写文档注释，unsafe 的前提写进去；terms 和 desktop 是应用代码，不强制。不开 `missing_docs`，存量缺口太大会变成噪音；clippy 默认的 `missing_safety_doc` 照旧检查。
 - **存量不批量改**：多个会话并行改同一批文件，全仓改写纯风格分歧会造成大量冲突，也会动迁移清单指纹。改到哪个文件，顺手统一那个文件的写法；新写的代码照本节办理。
+
+### 前端结构约定
+
+2026-11-12（#320，总跟踪 #316）：`web/static` 的结构约定由 `tools/check_frontend.py` 机械检查，已接进 `tools/check_all.sh` 和 `ci.yml`，规则写在脚本开头：`core/` 不得导入 `ui/`；`ui/` 不得新增循环导入；`state` 上的字段必须在 `core/state.js` 声明；不得新增 `document`/`window` 级的 `keydown`/`click` 监听和运行时 `createElement('dialog')`；一行不超过 200 字符。存量冻结在 `tools/frontend_baseline.json`（按文件和内容特征登记，不按行号），**基线只能缩小**：违规要改代码，不能往基线里加；改好一处后运行 `python tools/check_frontend.py --shrink` 删掉对应项，评审和集成会话用 `--base-ref main` 确认基线没变大。报错会写明违反了哪条约定、怎么改；方案在 [WEB_V2.md](docs/WEB_V2.md#前端模块2026-10-18199)。
 
 ## 文档维护规范
 

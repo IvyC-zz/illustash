@@ -136,8 +136,8 @@ class NativeLocalReadsTest(unittest.TestCase):
         for url in ['/api/similar','/api/similar?kind=duplicate','/api/clusters','/api/sync','/api/index',
                     '/api/index?progress=1','/api/provenance','/api/names','/api/names?progress=1']:
             if url=='/api/provenance':
-                # #51 起即使没有计算 worker 也会提供协调器。
-                # 为了原有的字节契约，使用真实的空闲 Python 协调器。
+                # #51 起即使没有计算 worker 也会提供协调器，这里和其他路由一样直接对照；
+                # 原来为字节契约接入的真实空闲 Python 协调器随旧参考一起删除了（#9）。
                 pass
             result=self.get_pair(url)
             if url=='/api/similar':self.assertTrue(result['groups'])
