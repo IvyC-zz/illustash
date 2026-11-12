@@ -61,8 +61,9 @@ class RecognitionRecoveryTest(unittest.TestCase):
         self.process, self.log = self.start(path)
         self.token = json.loads(self.request('/api/bootstrap')['body'])['token']
 
-    def run_cli(self, command, *args, code=0):
-        result = subprocess.run([str(self.binary), command, *args], env=self.env, capture_output=True, timeout=30)
+    def run_cli(self, command, *args, code=0, stdin=None):
+        result = subprocess.run([str(self.binary), command, *args], env=self.env, capture_output=True, timeout=30,
+                                input=stdin.encode() if stdin is not None else None)
         self.assertEqual(result.returncode, code, result.stderr.decode(errors='replace'))
         return json.loads(result.stdout)
 
@@ -82,7 +83,7 @@ class RecognitionRecoveryTest(unittest.TestCase):
             return connection.execute(sql, args).fetchall()
 
     def tables(self, db, names):
-        return {table: self.rows(db, f'SELECT * FROM {table} ORDER BY rowid') for table in names}
+        return {table: sorted(self.rows(db, f'SELECT * FROM {table}'), key=repr) for table in names}
 
     def test_mtime_preserves_results_and_duplicate_is_a_noop(self):
         self.assertFalse(self.import_package()['duplicate'])
@@ -136,3 +137,23 @@ class RecognitionRecoveryTest(unittest.TestCase):
         self.assertEqual(self.tables(self.lib.db, app), app)
         self.assertEqual(len(self.rows(self.lib.db, "SELECT key FROM meta WHERE key LIKE 'recognition_projection:%'")), 2)
 
+
+    def test_pending_batch_skips_invalidated_asset_then_redelivers_it(self):
+        self.stop(self.process)
+        with sqlite3.connect(self.lib.db) as c:
+            c.execute("CREATE TRIGGER fail BEFORE INSERT ON assets BEGIN SELECT RAISE(ABORT,'synthetic app failure'); END")
+        self.assertEqual(self.import_package(code=2)['status'], 'pending')
+        image(self.pics / 'a.png', 'yellow', (51, 31))
+        # 源扫描已提交而应用尚未恢复：由正式 folder-scan 建立这个崩溃边界。
+        self.run_cli('folder-scan', '--db', str(self.lib.source), stdin=json.dumps(self.lib.config['sources'][0]))
+        with sqlite3.connect(self.lib.db) as c:
+            c.execute('DROP TRIGGER fail')
+        self.scan()
+        self.assertEqual(self.rows(self.lib.db, 'SELECT rating FROM asset_rating WHERE uuid=?', (self.ids['a.png'],)), [])
+        self.assertEqual(self.rows(self.lib.db, 'SELECT rating FROM asset_rating WHERE uuid=?', (self.ids['b.png'],)), [('general',)])
+        self.assertEqual(self.rows(self.lib.source, "SELECT status FROM recognition_imports"), [('done',)])
+        image(self.pics / 'a.png', 'red')
+        self.scan()
+        self.assertFalse(self.import_package()['duplicate'])
+        self.assertTrue(self.import_package()['duplicate'])
+        self.assertEqual(len(self.rows(self.lib.db, 'SELECT * FROM asset_rating')), 2)
