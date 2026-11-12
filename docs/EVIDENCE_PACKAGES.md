@@ -1,6 +1,6 @@
 # 证据包 v1（`illustash-evidence/1`）
 
-2026-09-28。worker（识别、溯源、分组、规则）把机器结果交给词条核心的唯一格式，见 [TERMS.md](TERMS.md) 第 4 节第 1 步。
+状态：现行参考，2026-11-12（初版 2026-09-28）。worker（识别、溯源、分组、规则）把机器结果交给词条核心的唯一格式，见 [TERMS.md](TERMS.md) 第 4 节第 1 步。
 它合并了两份已有契约：[RESULT_PACKAGES.md](RESULT_PACKAGES.md) 的离线识别结果包（目录、清单、文件摘要、导入去重）和未合并分支 `codex/research-boundary` 的研究 worker 契约（`docs/RESEARCH_BOUNDARY.md`：资产命名空间、任务终态、证据带来源和方法、分数带量纲）。
 
 解析与校验在 `crates/core/src/package.rs`，导入在 `crates/core/src/store.rs` 的 `import_package`；命令行校验：
@@ -90,7 +90,7 @@ illustash-terms import --db <library.sqlite> --library-id <id> --package <目录
 
 **产出者自己的链接系统**：链接的 `system` 与 `producer.name` 相同（例如溯源的 `provenance:<画师 id>`）时，它是产出者给这个词条的身份；按它新建词条时，词条 key 就用这个链接的 key（未被占用时），界面上的 ID 因此不变。
 
-**命名空间 `library`**：键是本图库 `assets.uuid`。核心还没登记、但同库 `assets` 里有的图，导入时当场登记。导入加 `--new-assets` 时，连 `assets` 里还没有的也先登记：同步导入新图时 WD 证据先于 Python 写 `assets` 交来（[TERMS_LABELS.md](TERMS_LABELS.md)）。
+**命名空间 `library`**：键是本图库 `assets.uuid`。核心还没登记、但同库 `assets` 里有的图，导入时当场登记。导入加 `--new-assets` 时，连 `assets` 里还没有的也先登记：同步和识别导入新图时，WD 证据在新图写进应用库 `assets` 之前交来（`app_migrate::deliver_wd`，见 [TERMS_LABELS.md](TERMS_LABELS.md)）。
 
 `kind` 取值见 [TERMS_SCHEMA.md](TERMS_SCHEMA.md) 第 2 节。
 
@@ -138,13 +138,13 @@ illustash-terms import --db <library.sqlite> --library-id <id> --package <目录
 | research-boundary：`decision`（confirm/reject/undo） | 不属于证据包。人工裁决只经核心的命令写 `term_verdicts`，撤销走 `actions` |
 | research-boundary：`request`（任务、输入路径、联网政策） | 不属于证据包。任务派发仍由核心的任务调度负责，本步不定 |
 
-合并后 `codex/research-boundary` 不再单独维护：Python 溯源进程在第 2 步改为产出本格式；`RESULT_PACKAGES` 的现有导入器在第 3 步改走本格式前保持不变。
+合并后 `codex/research-boundary` 不再单独维护。现在以本格式交给核心的有溯源快照（`native/terms/src/app_provenance_cache.rs`，见下节）和 WD 分级、题材（`app_migrate::deliver_wd`）；离线识别结果包仍按 RESULT_PACKAGES 的 v1 目录导入源库，其中的 WD 结果再以本格式交核心。
 
 ## 原生溯源计算交付（2026-10-01）
 
 Rust 用 `illustash-provenance/1` 调用显式配置的计算程序，参数为 request.json、response.json；请求含固定包实例、任务身份、owner_pid、暂存缓存、步骤、资产/画师范围及本次授权。回复须原样返回 format/identity/step，只交机器缓存或哈希。身份/范围不符、超限、符号链接或无效证据均拒绝；计算程序不得直接写正式库。适配器看门狗在父进程异常退出后结束进程组；这不是不可信代码沙箱。
 
-Rust 验证暂存结果，生成与 `tests/reference/provenance/export.py（#9 已删除）` 同格式的完整证据快照，经任务接收门验证/去重后，在机器缓存事务内写机器结果、运行终态和 `native_delivery` 的 sealed 包路径，再调用既有词条核心导入。应用库提交而缓存确认前崩溃，下次打开按内容去重重放；未经接收门的暂存目录不恢复导入。交付按账本顺序进行：数据库忙等暂时失败保留 pending，开库与每 60 秒重试；核心因内容拒绝的包（其中的图已移除、不属于本库、文件损坏）或包目录已不存在，记为 `stale` 并在 `native_delivery.error` 留下原因，不再重试，也不挡住之后的包。溯源包是整份缓存的快照、导入时替换上一份快照，所以本轮最后的结果是 `stale` 时，按当前缓存重新封一个 `resealed-*` 包立即交付，它只列仍在图库里的图；重新封的包若仍被拒绝也记为 `stale`，留待下次研究运行（2026-10-11，#28）。核心对外库和已移除图的拒绝不放宽。人工裁决/历史/投影由核心维护，重跑不覆盖「不是 TA」；并发账号归档新加的 leads 不被旧暂存快照删除。
+Rust 验证暂存结果，生成整份溯源缓存的完整证据快照（映射见 [TERMS_ARTISTS.md](TERMS_ARTISTS.md) 第 1 节），经任务接收门验证/去重后，在机器缓存事务内写机器结果、运行终态和 `native_delivery` 的 sealed 包路径，再调用既有词条核心导入。应用库提交而缓存确认前崩溃，下次打开按内容去重重放；未经接收门的暂存目录不恢复导入。交付按账本顺序进行：数据库忙等暂时失败保留 pending，开库与每 60 秒重试；核心因内容拒绝的包（其中的图已移除、不属于本库、文件损坏）或包目录已不存在，记为 `stale` 并在 `native_delivery.error` 留下原因，不再重试，也不挡住之后的包。溯源包是整份缓存的快照、导入时替换上一份快照，所以本轮最后的结果是 `stale` 时，按当前缓存重新封一个 `resealed-*` 包立即交付，它只列仍在图库里的图；重新封的包若仍被拒绝也记为 `stale`，留待下次研究运行（2026-10-11，#28）。核心对外库和已移除图的拒绝不放宽。人工裁决/历史/投影由核心维护，重跑不覆盖「不是 TA」；并发账号归档新加的 leads 不被旧暂存快照删除。
 
 缓存写入与目录回收（2026-10-12，#31）：接收时机器缓存的十张表与暂存缓存逐行比较（rowid 与带类型的取值），只删除、插入不同的行，各表的行与先后和整表替换相同，rowid 与暂存缓存一致；没有变化的表不写。`.provenance/<任务>` 目录：pending 的包保留到交付成功；已交付的只留最新一个（核心当前持有的快照，供查看），更早的已交付包与 stale 包在交付时删除，stale 原因留在 `native_delivery.error`；没有交付记录的目录（接收门之前失败、停止或进程退出的运行，按上文不恢复导入）保留到下一次开库或运行开始时删除。删掉的包不再需要：交付只读 pending 包，最新结果为 stale 时按当前缓存重新封包。运行成功时，接收事务提交后先删除运行目录中 `evidence` 以外的工作文件（暂存缓存、各步骤目录），再交付并发布终态，读到终态的调用方只会看到封存的包；清理失败不改判已接受的证据（2026-10-14，#143）。计算程序打开暂存缓存时设 `synchronous=NORMAL`（WAL）：提交的事务边界不变，只是不再每次提交都刷盘。暂存副本只在运行成功后导入，崩溃丢失也无需恢复；逐条匹配提交数千次时，Windows 磁盘繁忙会让单次计算超过 30 秒（#143）。合成 5 万张、三次中位数：接收写入由 441,000 行降到无变化 0 行、一行变化 4 行；一个包约 23 MB，以前每次成功运行各留一个，现在只留最新一个和未交付的。
 
