@@ -94,7 +94,7 @@ body { margin: 0; background: var(--canvas); color: var(--ink); }
 .sg-frozen .task-pop { position: static; animation: none; transform: none; left: auto; bottom: auto; }
 .sg-frozen .view-pop, .sg-frozen .cast-pop { position: static; animation: none; transform: none; width: 100%; max-width: 360px; }
 .sg-frozen .cast-pop { max-width: 720px; }
-.sg-frozen .tag-popover, .sg-frozen .combo-menu { position: static; width: 260px; }
+.sg-frozen .menu-drop, .sg-frozen .combo-menu { position: static; width: 260px; }
 .sg-frozen .nudge { position: static; transform: none; opacity: 1; transition: none; left: auto; bottom: auto; }
 .sg-frozen .checklist { position: static; }
 .sg-frozen .cl-panel { animation: none; }

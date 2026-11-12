@@ -41,10 +41,10 @@ export function confirmAction(message, title = t('确认操作'), ok = t('确认
   });
 }
 const workOption = (w, selected) => `<option value="${esc(w.id)}" ${w.id === selected ? 'selected' : ''}>${esc(w.name)}${w.qualifier ? ' · ' + esc(w.qualifier) : ''}</option>`;
-// 挑一个本地作品（或空选项）；取消时解析为 null。
+// 挑一个本地作品（或空选项）；取消时解析为 null。选择类表单，点背景不关。
 export function chooseWork(title, works, selected = '', emptyLabel = t('未归类 / 无上级')) {
   return new Promise(resolve => {
-    openDialog({title, cls: 'work-dialog', backdropClose: true,
+    openDialog({title, cls: 'work-dialog', backdropClose: false,
       body: `<select name="work" class="work-choice"><option value="">${esc(emptyLabel)}</option>${works.map(w => workOption(w, selected)).join('')}</select>`,
       actions: `<button value="cancel" class="quiet">${t('取消')}</button><button value="ok" class="primary">${t('确认')}</button>`,
       onClose: d => resolve(d.returnValue === 'ok' ? d.querySelector('select').value : null)});
