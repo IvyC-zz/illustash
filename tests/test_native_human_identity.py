@@ -1,4 +1,4 @@
-"""#36 native identity/merge: disposable synthetic HTTP and full three-DB comparisons."""
+"""#36 原生身份/合并：一次性的合成 HTTP 和三个数据库的完整比较。"""
 from contextlib import closing
 import http.client
 import json
@@ -23,8 +23,8 @@ class NativeHumanIdentityTest(unittest.TestCase):
     latest_action = labels.NativeHumanLabelsTest.latest_action
     reference_response = labels.NativeHumanLabelsTest.reference_response
     def wait_timestamp_pair(self, url):
-        # The existing core stamps newly proposed evidence with SELECT CURRENT_TIMESTAMP.
-        # Start both real calls early in the same second, without changing stored/output timestamps.
+        # 现有核心用 SELECT CURRENT_TIMESTAMP 给新提出的证据打时间戳。
+        # 让两次真实调用都在同一秒的前段开始，不改动存储和输出的时间戳。
         if url in ('/api/identity/decision','/api/merge'):
             phase = time.time() % 1
             if phase > .5:
@@ -94,13 +94,13 @@ class NativeHumanIdentityTest(unittest.TestCase):
         with closing(sqlite3.connect(self.right.db)) as c:
             self.assertEqual(c.execute('SELECT r.merged_into FROM term_tree r JOIN terms t ON t.id=r.term_id WHERE t.key=?', (self.bob,)).fetchone()[0], self.alice)
             self.assertEqual(c.execute('SELECT r.parent_id FROM term_tree r JOIN terms t ON t.id=r.term_id WHERE t.key=?', (self.variant,)).fetchone()[0], self.alice)
-        # A previously merged source resolves to its surviving role; undo the chain in order.
+        # 之前被合并过的 source 解析到它存续的角色；按顺序撤销这条链。
         self.pair('/api/merge', {'source':self.bob,'target':self.alice}, expected=400)
         self.pair('/api/merge', {'source':self.bob,'target':self.third})
         self.undo_latest()
         self.undo_latest()
         after = labels.snapshot(self.right.db)
-        # Physical restoration is compared to the real reference after undo, not assumed identical to pre-merge rowids.
+        # 撤销之后的物理还原与真实参考实现比较，不假定与合并前的 rowid 相同。
         for table in ('terms','term_tree','prefs'):
             self.assertEqual(before[table], after[table],table)
         self.pair('/api/merge', {'source':self.bob,'target':self.bob}, expected=400)
@@ -158,8 +158,8 @@ class NativeHumanIdentityTest(unittest.TestCase):
             before = [self.rec.state('before'), labels.states(self.right)]
             item={'url':url,'method':'POST','body':json.dumps(body).encode(),'headers':{'Content-Type':'application/json','X-CSRF-Token':self.token}}
             self.wait_timestamp_pair(url)
-            # The old reference answered 500 although the operation had committed; by user decision on
-            # 2026-10-11 (#40) it answers 200 and the event stays pending for recovery.
+            # 旧参考实现在操作已提交的情况下仍回答 500；按用户 2026-10-11 的决定（#40），
+            # 现在回答 200，事件保持 pending，留待恢复。
             responses=[self.reference_response('response', item), fetch(self.origin,item,self.origin)]
             self.assertEqual([r['status'] for r in responses],[500,200])
             after=[self.rec.state('after'), labels.states(self.right)]

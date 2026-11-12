@@ -1,5 +1,5 @@
-// The page's frame (desktop layout, #199): following the address to a page, the sidebar's counts, the heading and the
-// toolbar of each page. Where the page is, is core/route.js; the counts' data, core/meta.js.
+// 页面的框架（桌面布局，#199）：按地址切到对应页面、侧栏的计数、每个页面的标题和工具栏。页面在哪由 core/route.js
+// 负责；计数的数据由 core/meta.js 负责。
 import {workKey} from '../core/catalog.js';
 import {dateText, esc, number, shortcut} from '../core/format.js';
 import {t} from '../core/i18n.js';
@@ -20,13 +20,13 @@ import {dayLabel, renderHome} from './home.js';
 import {editProfile, markOc, mergeCharacter, openLocalLinks, openRelate, splitOc, toggleMascot, toggleOc} from './palette.js';
 import {nearText, renderArtistAudit, renderGroups, renderIdentity, renderSimilar} from './review.js';
 
-// The search boxes' and the tag menu's debounce.
+// 搜索框和标签菜单的防抖。
 let searchTimer = 0, pickerTimer = 0;
 export const navCount = (id, n, title = '') => { $(id).textContent = n ? number(n) : ''; $(id).title = title; };
-// What a metadata read changes on screen: the sidebar's counts, and the heading or page that shows them.
+// 一次元数据读取在屏幕上改动什么：侧栏的计数，以及显示它们的标题或页面。
 function metaShown({error: e, total, directory, queue}) {
   if (e) { error(readError(e)); return; }
-  // Library counts what you can see; the 整理 section counts what still needs you.
+  // 图库计的是你能看到的；「整理」一节计的是还需要你处理的。
   navCount('countLibrary', total); navCount('countCharacters', state.chars.length);
   navCount('countRecent', state.recentCount); navCount('countHome', state.recentCount, t('最近一次同步新加入的图'));
   navCount('countUnmatched', state.pools.unmatched, t('还没认出角色的图'));
@@ -42,7 +42,7 @@ function metaShown({error: e, total, directory, queue}) {
 export async function applyRoute() {
   const route = parseHash(); route.sort = route.sort || defaultSort(route);
   if (route.legacy) { delete route.legacy; history.replaceState(null, '', hashFor(route)); }
-  const samePage = state.route.page === route.page && state.route.id === route.id && state.route.char === route.char;   // a sub-view switch stays the same page
+  const samePage = state.route.page === route.page && state.route.id === route.id && state.route.char === route.char;   // 切换子视图仍是同一页
   state.route = route; state.selecting = false; clearSelection(); state.cursor = -1; state.totalReady = false;
   if (!samePage) closeInspector();
   $('sidebar').classList.remove('mobile-open');
@@ -52,7 +52,7 @@ export async function applyRoute() {
   state.groupNear = null;
   if (route.page === 'group') {
     let result; try { result = await api('/api/clusters?nsfw=' + state.nsfw); } catch (e) { if (state.route === route) error(readError(e)); return; }
-    if (state.route !== route) return;  // navigated on while the groups loaded: this answer belongs to no page
+    if (state.route !== route) return;  // 分组加载期间已经导航走了：这个回应不属于任何页面
     const g = result.clusters.find(x => String(x.cid) === route.id);
     state.groupNear = g?.near ? nearText(g) : null; state.groupNearId = g?.near || null; state.groupTraits = g?.traits || [];
   }
@@ -66,8 +66,8 @@ export async function applyRoute() {
   renderChrome();
   if (route.page === 'home') renderHome(); else if (route.page === 'characters') renderIndex(); else if (route.page === 'settings') renderSettings(true, !samePage); else if (route.page === 'groups') renderGroups(); else if (route.page === 'similar') renderSimilar(); else if (route.page === 'identity') renderIdentity(); else if (route.page === 'artist-audit') renderArtistAudit(); else await reload(true);
 }
-// ---------- chrome: heading, toolbar ----------
-// Sub-views of one sidebar entry show as tabs under its heading instead of links tucked in a corner.
+// ---------- 外框：标题、工具栏 ----------
+// 同一个侧栏入口的子视图在它的标题下显示成标签页，而不是塞在角落里的链接。
 function subTabs(r) {
   const tab = (href, label, n, on, title = '') => `<a class="chip-filter${on ? ' on' : ''}" href="${href}"${title ? ` title="${esc(title)}"` : ''}>${label}${n ? ` <span>${n}</span>` : ''}</a>`;
   const p = state.pools, row = tabs => `<div class="chips-row">${tabs.join('')}</div>`;
@@ -92,7 +92,7 @@ export function renderChrome() {
   if (r.page === 'groups' || r.page === 'similar') { bar.innerHTML = tabs; return; }
   if (r.page === 'identity' || r.page === 'home') { bar.innerHTML = ''; return; }
   if (r.page === 'characters') {
-    // 资料库: 角色 browses, 作品 manages; both search their own list.
+    // 资料库：「角色」用来浏览，「作品」用来管理；两者各自搜索自己的列表。
     const works = r.section === 'works';
     const views = `<div class="segmented lib-views" role="tablist" aria-label="${t('资料库')}">${[['', t('角色')], ['works', t('作品')]].map(([v, label]) => `<a role="tab" href="#/characters${v ? '/' + v : ''}" class="${(r.section || '') === v ? 'on' : ''}" aria-selected="${(r.section || '') === v}">${label}</a>`).join('')}</div>`;
     bar.innerHTML = views + `<div class="search-wrap wide">${searchIcon()}<input type="search" id="charSearch" value="${esc(works ? shelf.q : '')}" placeholder="${works ? t('搜索作品') : t('搜索角色或作品')}" aria-label="${works ? t('搜索作品') : t('搜索角色')}"></div><div class="spacer"></div>` +
@@ -146,7 +146,7 @@ const FIT_ICONS = {
   square: '<svg viewBox="0 0 20 20" aria-hidden="true"><rect x="3" y="3" width="6" height="6" rx="1.5"/><rect x="11" y="3" width="6" height="6" rx="1.5"/><rect x="3" y="11" width="6" height="6" rx="1.5"/><rect x="11" y="11" width="6" height="6" rx="1.5"/></svg>',
   fit: '<svg viewBox="0 0 20 20" aria-hidden="true"><rect x="2.5" y="3.5" width="9" height="5.5" rx="1.5"/><rect x="13" y="3.5" width="4.5" height="5.5" rx="1.5"/><rect x="2.5" y="11" width="4.5" height="5.5" rx="1.5"/><rect x="8.5" y="11" width="9" height="5.5" rx="1.5"/></svg>',
 };
-// One tag menu: your own tags first, then the machine's picture tags (WD general tags).
+// 一个标签菜单：先是你自己的标签，然后是机器给图片打的标签（WD general tags）。
 async function loadTagOptions() {
   const q = $('tagSearch').value.trim(), low = q.toLowerCase();
   const mine = state.userTags.filter(t => t.tag !== state.route.utag && (!q || t.tag.toLowerCase().includes(low))).slice(0, 12);
@@ -158,7 +158,7 @@ async function loadTagOptions() {
 export function renderHeading() {
   const r = state.route, h = $('heading'), c = state.char;
   if (r.char && c) {
-    const tagOnly = !!c.mascot;   // 只当标签: nothing to review, so no check/sweep/OC controls
+    const tagOnly = !!c.mascot;   // 只当标签：没有要复核的，所以没有检查、清扫、OC 这些控件
     const checked = !tagOnly && c.reviewed_at ? ' · ' + t('上次检查 {date}', {date: dateText(c.reviewed_at.slice(0, 4), c.reviewed_at.slice(5, 7), c.reviewed_at.slice(8, 10))}) : '';
     const unchecked = !tagOnly && (c.unchecked || r.check) ? ` · <a class="unchecked-link${r.check ? ' on' : ''}" href="${hashFor({...r, check: r.check ? '' : '1', maybe: ''})}" title="${r.check ? t('显示全部') : t('只看机器识别、还没检查过的图')}">${t('未检查 {n}', {n: number(c.unchecked)})}${r.check ? ' ×' : ''}</a>` : '';
     h.innerHTML = `<div class="heading-main"><h1 class="tag-title" title="${esc(nameTip(c))}">${esc(c.name)}${c.mascot ? '' : workSmall(c)}</h1><p>${c.mascot ? `<span class="oc-badge" title="${c.mascot_origin === 'default' ? t('默认设置：老师、博士、训练员这类没有固定形象的玩家化身和吉祥物，默认只当标签。') : ''}${t('不算角色：不出现在角色列表里，也不算多人图；图上仍挂着这个标签。在「⋯」里可以改回角色')}">${t('只当标签')}</span> ` : ''}${t('{n} 张', {n: number(c.count)})}${unchecked}${checked}${!c.tag && c.kind !== 'oc' && !c.label_only ? ` · <button class="link-button" id="profileNudge" title="${t('关联后自动补中文名、别名和所属作品')}">${t('关联 Danbooru…')}</button>` : ''}</p></div>
@@ -197,7 +197,7 @@ export function renderHeading() {
   $('groupOc')?.addEventListener('click', () => markOc({filter: filters(), exclude: [], confirm: state.total > 500}, false, true));
 }
 
-// The handlers this part of the page registers. Called once, when the page starts.
+// 页面这一部分注册的处理函数。页面启动时调用一次。
 export function wireShell() {
   onMeta(metaShown);
   window.addEventListener('hashchange', applyRoute);

@@ -1,4 +1,4 @@
-//! Shared cooperative task lifetime. Business persistence/retry remains with the consumer.
+//! 共用的协作式任务生命周期。业务上的持久化和重试仍由使用方负责。
 use crate::{app_library::Library, Error, Result};
 use std::{
     path::{Path, PathBuf},
@@ -71,8 +71,8 @@ struct Boundary {
     received: bool,
     closed: bool,
 }
-/// When a task runs out of time. `limit` is a fixed total from the start; `idle` is a window
-/// that restarts whenever the task reports progress, so steady work is never cut off.
+/// 任务什么时候超时。`limit` 是从开始算起的固定总时长；`idle` 是一个时间窗，
+/// 任务每报告一次进展就重新计时，所以稳定推进的工作永远不会被切断。
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Deadline {
     pub idle: Option<Duration>,
@@ -86,8 +86,8 @@ impl Deadline {
 const RUNNING: u8 = 0;
 const IDLE: u8 = 1;
 const LIMIT: u8 = 2;
-/// Where a deadline reads the time: the monotonic clock, or in unit tests one moved by hand, so the
-/// deadline rules are checked without depending on how fast a loaded machine runs (#219).
+/// 截止时间从哪里读时间：单调时钟，或者在单元测试里用手动拨动的时钟，这样检查截止规则时
+/// 不依赖负载高的机器跑得多快（#219）。
 #[derive(Clone, Default)]
 struct Time(Option<Arc<Mutex<Instant>>>);
 impl Time {
@@ -103,7 +103,7 @@ struct Clock {
     time: Time,
     started: Instant,
     progressed: Mutex<Instant>,
-    /// Why the task stopped by itself (IDLE/LIMIT), kept so cancellation and timeout stay apart.
+    /// 任务自己停下的原因（IDLE/LIMIT），记下来以区分取消和超时。
     expired: AtomicU8,
 }
 impl Clock {
@@ -120,7 +120,7 @@ impl Clock {
         } else {
             RUNNING
         };
-        // The first expiry wins; later checks keep reporting it.
+        // 第一次超时为准；之后的检查一直报告它。
         match self.expired.compare_exchange(RUNNING, reason, Ordering::SeqCst, Ordering::SeqCst) {
             Ok(_) => reason,
             Err(earlier) => earlier,
@@ -156,7 +156,7 @@ impl TaskContext {
     pub fn cancellation(&self) -> &AtomicBool {
         &self.cancel
     }
-    /// Why the task stopped by itself; a cancellation that came first is never relabelled a timeout.
+    /// 任务自己停下的原因；先到的取消绝不会被改标为超时。
     fn expiry(&self) -> u8 {
         if self.cancel.load(Ordering::SeqCst) {
             self.clock.expired.load(Ordering::SeqCst)
@@ -170,7 +170,7 @@ impl TaskContext {
             None => Ok(()),
         }
     }
-    /// Why the task stopped, in words for the user: cancelled, or which deadline ran out.
+    /// 任务停下的原因，用给用户看的文字：已取消，或哪一个截止时间到了。
     pub fn stop_reason(&self) -> Option<String> {
         let reason = self.expiry();
         if reason != RUNNING {
@@ -186,11 +186,11 @@ impl TaskContext {
             _ => "任务已取消".into(),
         })
     }
-    /// The task stopped because its time ran out, not because it was cancelled.
+    /// 任务停下是因为时间用完了，而不是被取消。
     pub fn timed_out(&self) -> bool {
         self.expiry() != RUNNING
     }
-    /// Real work happened: restart the idle window. No effect on the total limit.
+    /// 确实有工作完成：重新开始空闲时间窗。对总时长上限没有影响。
     pub fn progressed(&self) {
         *self.clock.progressed.lock().unwrap_or_else(|e| e.into_inner()) = self.clock.time.now();
     }
@@ -199,8 +199,8 @@ impl TaskContext {
         let mut boundary = self.boundary.lock().unwrap_or_else(|e| e.into_inner());
         boundary.closed = true;
     }
-    /// Validate the complete envelope and serialize receipt against cancellation. Importers must
-    /// additionally persist their idempotency key in the same transaction as the business result.
+    /// 校验完整的信封，并让接收与取消互斥、按顺序进行。导入方还必须把自己的幂等键和业务结果
+    /// 在同一个事务里持久化。
     pub fn receive<T>(&self, identity: &TaskIdentity, apply: impl FnOnce() -> Result<T>) -> Result<T> {
         self.check()?;
         let mut boundary = self.boundary.lock().unwrap_or_else(|e| e.into_inner());
@@ -216,9 +216,8 @@ impl TaskContext {
         boundary.received = true;
         Ok(value)
     }
-    /// One part of a result that arrives in parts while the worker still runs (recognition
-    /// batches). The same envelope, cancellation, closure and deadline checks as `receive`, but
-    /// repeatable; each part's importer must itself be idempotent and atomic.
+    /// 结果分批到达、worker 还在运行时（识别批次）的其中一批。与 `receive` 做同样的信封、取消、
+    /// 关闭和截止时间检查，但可以重复；每一批的导入方自己必须是幂等且原子的。
     pub fn receive_part<T>(&self, identity: &TaskIdentity, apply: impl FnOnce() -> Result<T>) -> Result<T> {
         self.check()?;
         let boundary = self.boundary.lock().unwrap_or_else(|e| e.into_inner());
@@ -232,13 +231,12 @@ impl TaskContext {
         }
         apply()
     }
-    /// Run an optional worker without pipe deadlocks. The caller supplies files for large output;
-    /// stdout/stderr are null by default. Always reap the leader and kill remaining descendants,
-    /// including when the leader exits before its children. Workers must not detach their group.
+    /// 运行一个可选的 worker，不会因管道死锁。大量输出由调用方提供文件；stdout/stderr 默认为 null。
+    /// 总是回收主进程并杀掉剩下的后代进程，包括主进程先于子进程退出的情况。worker 不得脱离自己的进程组。
     pub fn process(&self, command: &mut Command) -> Result<ExitStatus> {
         self.process_observed(command, || Ok(()))
     }
-    /// `observe` runs while waiting; its error stops and reaps the worker.
+    /// `observe` 在等待期间运行；它返回错误时停止并回收 worker。
     pub fn process_observed(&self, command: &mut Command, observe: impl FnMut() -> Result<()>) -> Result<ExitStatus> {
         crate::platform_process::worker(command, || self.check(), observe)
     }
@@ -309,7 +307,7 @@ impl Task {
     pub fn outcome(&self) -> TaskOutcome {
         self.outcome.lock().expect("app_tasks mutex poisoned").clone()
     }
-    /// Bounded observation; expiry does not detach the task. Use stop for cancellation and join.
+    /// 有时限的观察；超时不会让任务脱离。要取消并等线程结束，用 stop。
     pub fn wait(&mut self, timeout: Duration) -> bool {
         let until = Instant::now() + timeout;
         while self.running() {
@@ -323,8 +321,8 @@ impl Task {
         }
         true
     }
-    /// Cancel without waiting any longer: the thread ends by itself at its next checkpoint, which may never come
-    /// for work blocked on input (a pipe nobody writes). Only for quitting, after a bounded `wait`.
+    /// 取消，不再等待：线程会在下一个检查点自己结束，但阻塞在输入上的工作（没人写的管道）可能永远等不到那个检查点。
+    /// 只用于退出，并在有时限的 `wait` 之后调用。
     pub fn abandon(mut self) {
         self.context.cancel();
         drop(self.thread.take());
@@ -372,7 +370,7 @@ mod tests {
             *self.0.as_ref().expect("manual clock").lock().unwrap() += by;
         }
     }
-    /// A task that runs until it stops, its deadline read from a clock that moves only when told.
+    /// 一个一直运行到停下的任务，它的截止时间读自一个只在被告知时才走的时钟。
     fn waiting(deadline: Deadline) -> (Task, Time) {
         let time = Time::manual();
         let task = Task::start_timed(identity(), deadline, time.clone(), |ctx| loop {
@@ -385,13 +383,13 @@ mod tests {
     fn idle_deadline_follows_progress_and_limit_bounds_the_whole_task() {
         let (mut task, time) = waiting(Deadline { idle: Some(Duration::from_millis(80)), limit: None });
         let ctx = task.context();
-        // Steady progress keeps the task alive well past one idle window.
+        // 稳定的进展让任务活过远超一个空闲时间窗的时长。
         for _ in 0..10 {
             time.advance(Duration::from_millis(79));
             assert!(ctx.check().is_ok(), "progressing task stopped");
             ctx.progressed();
         }
-        // It expires one full idle window after the last progress, not before.
+        // 它在最后一次进展后整整一个空闲时间窗时超时，不会更早。
         time.advance(Duration::from_millis(79));
         assert!(ctx.check().is_ok());
         time.advance(Duration::from_millis(1));
@@ -399,7 +397,7 @@ mod tests {
         assert!(ctx.timed_out());
         assert!(task.wait(Duration::from_secs(10)));
         assert_eq!(task.outcome(), TaskOutcome::Cancelled);
-        // Progress restarts only the idle window; the total limit still counts from the start.
+        // 进展只重启空闲时间窗；总时长上限仍从开始算起。
         let (mut task, time) =
             waiting(Deadline { idle: Some(Duration::from_secs(60)), limit: Some(Duration::from_millis(150)) });
         let ctx = task.context();
@@ -417,7 +415,7 @@ mod tests {
     }
     #[test]
     fn idle_deadline_on_the_real_clock_stops_a_task_without_progress() {
-        // Waiting out a short window only gets longer on a busy machine, so this cannot fail early.
+        // 在忙的机器上，等一个短时间窗只会等得更久，所以这里不会过早失败。
         let mut task =
             Task::start_with(identity(), Deadline { idle: Some(Duration::from_millis(30)), limit: None }, |ctx| loop {
                 ctx.check()?;
@@ -496,8 +494,7 @@ mod tests {
         ] {
             let file = std::env::temp_dir().join(format!("illustash-group-{}", identity().task_id));
             let output = file.clone();
-            // The timeout runs on a clock moved only once the group is published: a slow shell start can
-            // no longer be killed before it writes the file.
+            // 超时用的时钟只在进程组公布后才拨动：shell 启动慢时，不会再在它写文件之前就被杀掉。
             let time = Time::manual();
             let mut task = Task::start_timed(identity(), Deadline::fixed(timeout), time.clone(), move |ctx| {
                 let mut cmd = Command::new("/bin/sh");
@@ -526,9 +523,11 @@ mod tests {
                 assert!(task.wait(Duration::from_secs(10)));
             }
             let until = Instant::now() + Duration::from_secs(10);
+            // SAFETY: kill 的信号 0 只检查进程组是否存在，不发送信号。
             while unsafe { libc::kill(-pgid, 0) } == 0 && Instant::now() < until {
                 thread::sleep(Duration::from_millis(10));
             }
+            // SAFETY: kill 的信号 0 只检查进程组是否存在，不发送信号。
             assert_ne!(unsafe { libc::kill(-pgid, 0) }, 0, "residual process group {pgid}");
             if cancel || timeout.is_some() {
                 assert_eq!(task.outcome(), TaskOutcome::Cancelled);

@@ -1,12 +1,10 @@
-"""Read-route byte contract on synthetic databases, against fixed expectations (#9 stage 3).
+"""在合成数据库上按固定期望检查读取路由的字节契约（#9 第 3 阶段）。
 
-The core read routes (`http_read::read` with the application's response encoding) are served by
-the test-only `read-http` example for whatever library context the test publishes to a state
-file. Their bytes are compared with the former Python reference server's responses to the same
-requests on the same databases, recorded once through ``tests/fixed_expectations.py``
-(#9; the reference is gone, so they cannot be recorded again). The databases themselves are recorded as
-packages of the temporary root after every reference-side change and restored before the next
-request, so no Python reference code runs in the default mode.
+核心读取路由（`http_read::read` 加上应用的响应编码）由仅供测试的 `read-http` example 提供，
+图库上下文是测试发布到状态文件里的那个。它们的字节与原 Python 参考服务器在同样数据库上对同样请求的响应比较，
+这些响应经 ``tests/fixed_expectations.py`` 录制过一次（#9；参考实现已删除，无法再次录制）。
+数据库本身在参考侧每次改动之后录制为临时根目录的包，并在下一个请求之前还原，
+所以默认模式下不运行任何 Python 参考代码。
 """
 import json
 import os
@@ -21,7 +19,7 @@ import unittest
 from contextlib import closing
 from urllib.parse import quote
 
-from tests.fixed_expectations import Expectations
+from tests.fixed_expectations import RECORDED_TODAY, Expectations
 from tests.test_read_http import SPAWN, free_port, stop_process, wait_until
 from tools import verify_read_http as verify
 
@@ -46,9 +44,8 @@ def binary():
 
 
 def publish(rec, server, state, **override):
-    """Atomically publish the request context (formerly the reference server's readiness file); `override` replaces
-    some of the recorded context's fields."""
-    # The session token is recorded as is: response lengths depend on it.
+    """原子地发布请求上下文（原先是参考服务器的就绪文件）；`override` 替换录制的上下文里的部分字段。"""
+    # 会话 token 按原样录制：响应长度取决于它。
     context = {**rec.value('context'), **override}
     temp = state.with_suffix('.new')
     temp.write_text(json.dumps({**context, 'generation': secrets.token_hex(16),
@@ -74,13 +71,13 @@ class HTTPHarness(unittest.TestCase):
         cls.context = publish(rec, cls.server, cls.state)
         cls.log = tempfile.TemporaryFile()
         cls.host = subprocess.Popen([str(cls.binary), '--port', cls.origin.rsplit(':', 1)[1], '--state', str(cls.state)],
-                                    stdout=cls.log, stderr=cls.log, **SPAWN)
+                                    env={**os.environ, **RECORDED_TODAY}, stdout=cls.log, stderr=cls.log, **SPAWN)
         wait_until(lambda: verify.fetch(cls.origin, {'url': '/api/fold'}, cls.origin)['status'] == 200)
 
     @classmethod
     def tearDownClass(cls):
         if os.name == 'nt' and cls.host.poll() is None:
-            cls.host.terminate()   # no console signal handling in the test host
+            cls.host.terminate()   # 测试宿主不处理控制台信号
             cls.host.wait(12)
         stop_process(cls.host)
         cls.log.close()
@@ -94,7 +91,7 @@ class HTTPHarness(unittest.TestCase):
         self.addCleanup(self.rec.finish, self)
         for actual, placeholder in type(self).rec.aliases:
             self.rec.alias(actual, placeholder)
-        # Each test starts from the recorded root and context, independent of earlier tests.
+        # 每个测试都从录制的根目录和上下文开始，不受前面测试的影响。
         self.sync('start')
         self.publish()
 
@@ -109,7 +106,7 @@ class HTTPHarness(unittest.TestCase):
         type(self).context = publish(self.rec, self.server, self.state, **override)
 
     def sync(self, label='changed'):
-        """After a reference-side change: record the temporary root, or restore it."""
+        """参考侧改动之后：录制临时根目录，或者还原它。"""
         self.rec.package(label, self.root, library=False)
 
     def reference(self, item):
@@ -124,17 +121,15 @@ class HTTPHarness(unittest.TestCase):
             self.assertEqual(a['headers'].get(h), b['headers'].get(h), (path, h))
         return a
 
-    # ---- Recorded replies of a library before it switched to the core (#201) ----
+    # ---- 图库切换到核心之前录制的响应（#201）----
     #
-    # Some recordings read a library before it switched to the core (Python-era, no `meta`). Core v8 refuses such
-    # libraries (only switched ones are kept), so these replies are not read live any more. They are compared instead
-    # with the same requests on the library after the switch, at this core version; the positions where the switch
-    # itself changed the reply are listed by each test with the reason.
+    # 有些录制读取的是切换到核心之前的图库（Python 时代，没有 `meta`）。core v8 拒绝这样的图库（只保留已切换的），
+    # 所以这些响应不再实时读取，而是与切换之后的图库在当前核心版本上对同样请求的响应比较；
+    # 切换本身改变了响应的位置，由各个测试列出并写明原因。
 
     def after_switch(self, before, differ):
-        """From now on each `pair` (recorded after the switch, compared with the live v8 reply) also compares the
-        reply recorded before the switch at the same position, except the positions in `differ`. Returns the list of
-        compared paths, for the caller to check that every recorded reply was reached."""
+        """从现在起，每次 `pair`（录制于切换之后，与实时的 v8 响应比较）还会比较切换之前在同一位置录制的响应，
+        `differ` 里的位置除外。返回比较过的路径列表，供调用方检查每条录制的响应都走到了。"""
         compared = []
         recorded = self.pair
 
@@ -151,7 +146,7 @@ class HTTPHarness(unittest.TestCase):
         return compared
 
     def live(self, before, path, headers=None):
-        """A reply recorded before the switch, compared with the live v8 reply of the library after the switch."""
+        """把切换之前录制的响应与切换之后图库的实时 v8 响应比较。"""
         item = {'url': quote(path, safe='/?&=;%+#'), 'headers': headers or {}}
         reply = verify.fetch(self.origin, item, self.origin)
         self.assertIsNone(verify.difference(before, reply), (path, verify.difference(before, reply)))
@@ -164,7 +159,7 @@ class HTTPHarness(unittest.TestCase):
         return self.rec.value('corpus')
 
     def compare(self, requests, require_core=()):
-        """The verify_read_http report shape, with the reference side recorded."""
+        """verify_read_http 报告的格式，参考侧用录制值。"""
         expected = self.rec.value('responses')
         report = {'compared': 0, 'differ': 0, 'core_equal': 0, 'stages': set(), 'differences': []}
         for item, left in zip(requests, expected, strict=True):

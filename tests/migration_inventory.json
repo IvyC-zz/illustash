@@ -3,35 +3,35 @@
 "sources":{
  ".claude/launch.json":"c5cc28f9eccb643553732c7e105fa186b785b1810bf524f4041dee7ca58c7463",
 
- "crates/core/src/backup.rs":"c47266c42468b701668128636674e794ee519f367098e0da043d38572c8f11af",
+ "crates/core/src/backup.rs":"7d5f5abe63adb1620f2847609451fda7b588a927f742a676e16fc4acd2abeeb5",
 
- "crates/core/src/character_commands.rs":"fd5347bc35eb6a21a7ac1294e4cdd6129d31870aaad7b2195ea6fd1fe943e501",
+ "crates/core/src/character_commands.rs":"bce1c3f31c1055104025ee86fb507315e9a6c26481900c8708569ae000ed2bec",
 
  "crates/core/src/character_entities.rs":"36157140d08e8a851746438c8c578d15e3011d88f79689b335bc77fb241ed70f",
 
- "crates/core/src/character_evidence.rs":"e2f40d8ec39702fcc606beaa2ac9d21abbf6c31c6df8770b0f7e3f2a9bc2623e",
+ "crates/core/src/character_evidence.rs":"71df2b0c558856a80b168db97bfff7cfcff5cd7f0ec84cf028b87b2af2e68b32",
 
- "crates/core/src/character_graph.rs":"302edf5ee48f81c29cba5d70625882b3d9fd5e19d7d17f288fb388b28b8e5808",
+ "crates/core/src/character_graph.rs":"b2eeaffb53fdfe4b2a01d8fd2fd646f9f19e4fc1f792537203a0a3552f3fa9ed",
 
- "crates/core/src/character_identity.rs":"ee2a0b886abfacadf37fc7911baab014f1111a8c14a29dbc71c55aeaf1075020",
+ "crates/core/src/character_identity.rs":"dd494026266e6c788af1e0524f04ab010e56c26eb1d7b9973597f9fffe862fe6",
 
- "crates/core/src/character_import.rs":"4615e94644656f792c9750bbb528f31f3e46ca3002343093caf359870b5d2eb8",
+ "crates/core/src/character_import.rs":"ef522680739a01db6aecc56efc44c4dd6d87d14eb995323a37649f841676fac4",
 
- "crates/core/src/character_json.rs":"abc9016d18a2234e35c93398fedbd2ea2dc4b4d796e24139d3fe8e9436d0c1cd",
+ "crates/core/src/character_json.rs":"fbc17913baf024e4ea10902ca0520c2c2b9c5d2f8ef6fb8fc17550c3cb5fdf73",
 
  "crates/core/src/character_labels.rs":"221cff8d940eef876f584db62f46c147fe7583bf55eb3a8cc46944af70f0da6f",
 
- "crates/core/src/character_learning.rs":"8b7db39ddfb40ac01fa3e1de0942eebd1d9f96766e218ac567033e12cc1e62cf",
+ "crates/core/src/character_learning.rs":"0925e01fd435837dda2735b8a6318c82e10fc848ea87fbc8fcd7da76a5c71839",
 
  "crates/core/src/character_links.rs":"2e64aa135c932c55b84c4839a3427a7118c4d1a0f64a402531ef235ede5e9cc7",
 
- "crates/core/src/character_merge.rs":"284a633924321c0015831995178871025424029f27de54005fdbccd3cdf57515",
+ "crates/core/src/character_merge.rs":"d4b4e373f565acf52f0a11c4e4c4d3775100df06e97a40b63bd812a6f8406507",
 
  "crates/core/src/character_names.rs":"12409f166cd1f00dcbd60404f3bde7a46db845bd394c0a0734a5c577a27bd673",
 
- "crates/core/src/character_profile.rs":"875078d732098734823bafe991dd67c8d8b3e64b38a6c2692cb1ff54e81cfa75",
+ "crates/core/src/character_profile.rs":"e10227e35a44cf29a502944caa1b170af992e272a5d4150d6b3e51f2c4925e3e",
 
- "crates/core/src/character_projection.rs":"a3586760f3322d0c833f2c93677feb1a9d6a25b2ca389acc163c142e85266bf6",
+ "crates/core/src/character_projection.rs":"b25850b8d972b9f588c759487ecd53ffe916e579910fbdc026f7bcf22e8c6712",
 
  "crates/core/src/character_relations.rs":"a3b3a1139aca9bd85b6d14d83338341caaf4c26e7619c1c11511793d249e6e21",
 
@@ -51,11 +51,11 @@
 
  "crates/core/src/character_sql/tag_memberships.sql":"df7751a7282884fc933f25f60599ac994a7d4dfdfaa62a4348eb0f1910af3034",
 
- "crates/core/src/character_structure.rs":"c8b0f5024bd46e9ac1c3336d7d942c8c68a6ae33becff5aca70f04e92fd0829e",
+ "crates/core/src/character_structure.rs":"e877cf427d78fd0c1ac4edbedd6b766e306a0e15f8f79347c86a43d065fb9bc6",
 
- "crates/core/src/compat_text.rs":"ac1d740967f077c7c0f456a42c74b13df4c39535feef9d13a54b04e0f74eee2d",
+ "crates/core/src/compat_text.rs":"547b1eefcfc13275563161ecd0371aa202fa37b31f1bdfd36068aa8aecb8a59f",
 
- "crates/core/src/error.rs":"272c1d6d8f7fdd40bda672cd5edbda9084714d84e82e285ac3f91527d79b5606",
+ "crates/core/src/error.rs":"9cd4206fc28f3fdebc6ca1fa20ce1c2496e552580cfec72af808213f2e22d25d",
 
  "crates/core/src/legacy_characters.rs":"4533c2eb5ea6489ccd277074c874db05b78b1b4a2633c4b8bd3de58eedf6d548",
 
@@ -65,11 +65,11 @@
 
  "crates/core/src/lib.rs":"23a5778fb07dae5696c4d7791620640eb60efddd37cf3be6f2aae63a4d00eeeb",
 
- "crates/core/src/names_commands.rs":"96ce0a6d5c997574f6a8bfdbfe303239202408df96a449269b3a29a394a5fd61",
+ "crates/core/src/names_commands.rs":"55136b61cf16cb10d814ad96df0513368dcb6644efd672253c2877e7f1c868c9",
 
  "crates/core/src/names_search.rs":"624ef5beaa837758f412e0337e3599e2468eb33986ed09377ef35f5309fc883d",
 
- "crates/core/src/names_view.rs":"de5d3c6b3843ddf1855cd69c3405a959107c718ae378772e60da6af6eca3ee7b",
+ "crates/core/src/names_view.rs":"421d7daedd45545bca9fc86851a95a86e5301482bdb82d68bdefa03c2c8c2733",
 
  "crates/core/src/new_library.rs":"66d11a3e942e573585a204300ede8c0bf0225f00d44ce38e9dc30081e9d7a820",
 
@@ -77,129 +77,129 @@
 
  "crates/core/src/package.rs":"2c951060a10859148705790dd270f5bb15112970f0888dc31de126bc74471220",
 
- "crates/core/src/schema.rs":"46cf98320398e7137c8c0eb8ee8ba40ba374d531dce6743c747521a1cac0e983",
+ "crates/core/src/schema.rs":"5c5c363ab5a55c12f2502e833b22c2a1973fa4618256b3319364a115d8c499cd",
 
- "crates/core/src/store.rs":"1711e630b19eba554f49ccb700d4f2bfb45d70cf5dd23b0ff0c58440ae76e0dd",
+ "crates/core/src/store.rs":"506db20699d3624a2d30f21715e857ce1923b958c3db4d08f0b7bc072f7cc90e",
 
- "crates/core/src/strict_json.rs":"3c5bb30315590779a991508c485b508a3410a635905b96dd2cb976b952b391da",
+ "crates/core/src/strict_json.rs":"dc1bf3fd4e0ceb6316af6a95ab00915c52ffdd8fd759544326f371df39e67da6",
 
  "crates/core/src/undo_labels.rs":"95993da52d1fae92b21c7e01e541928455209d70b8fb8cfb6b58ac53e17dd7fc",
 
- "crates/iqdb/src/main.rs":"786432535d0db00c223b400299ef033238cb0e22b02c25cc896aadf099d33ba8",
+ "crates/iqdb/src/main.rs":"63714e7b0811716d3bdaef01c6e07020668956b7067b9dacae9003346999594d",
 
- "crates/iqdb/src/signature.rs":"ed91c0fbb91c437d5fb34a29d575c44562f86c72337f7025eedcab6bd5112763",
+ "crates/iqdb/src/signature.rs":"37ec86c25db8161d0cc3a43ef0087dbf93ef32093e64127840a3249afd0fb503",
 
- "crates/platform/src/app_dpapi.rs":"63dcdcaa80f7b6695f2d8e6aaef81e46ec0cf102dbb6343a7b6d1e414f760ed0",
+ "crates/platform/src/app_dpapi.rs":"63475ddec888d457c93f9cf835012c20187d116ea755e4b18a338094eccb844f",
 
- "crates/platform/src/app_file_lock.rs":"42d5369b0ab72c489b8217cfce742ee849296e25d92e548f670f1290ecdbc790",
+ "crates/platform/src/app_file_lock.rs":"de0cb41af0128813177c8b1ce7343e57cd65b63db428b7cf4b5fa9572833082d",
 
- "crates/platform/src/app_paths.rs":"91aeca9fc3ca078835ae786dd57dde29f90019712c1fd937abb0bcad4fee3551",
+ "crates/platform/src/app_paths.rs":"e2d17eee0d0d2da0c8bb348a84c4fc7c1b0d7703a76768ac099f51fa3aad8c3d",
 
- "crates/platform/src/capabilities.rs":"b54c654c352409b3e2e26b70471b602329d4ec5b69a9da92cf99950d1eb21cd1",
+ "crates/platform/src/capabilities.rs":"d060ba562d2f39f302201655f000b17dcf8e3d52b9cdcf047ebaa123b23a4618",
 
- "crates/platform/src/lib.rs":"7f23066d81a1e9f14889d2efe4e942f50b20feccfa547a4049c091a382cfae48",
+ "crates/platform/src/lib.rs":"c0ff6e9eb3100d8beed853e63018177b10b97d28e6605b044a1d39f2fafc75ce",
 
- "crates/platform/src/picker.rs":"c91563baec9e3ecb27e85b1a357bdefb74d2a7118619cd25824b4ac4f597d79c",
+ "crates/platform/src/picker.rs":"82ce64682501809ee5757dd671dcaad72ddcc618d350a8c373cc0d46c1a88ff3",
 
- "crates/platform/src/platform_backup.rs":"0c177917c1a8929d8b825b9df06412ffb5948d4931a3b40ce04b7503caa13967",
+ "crates/platform/src/platform_backup.rs":"04c32bc17584d76a81f5c27c615592a2897d0dd0845129e0061cfad1632c1c36",
 
- "crates/platform/src/platform_credentials.rs":"7bf476e853ecd42d5f024991b64b0aeb93184c4be7568ad66434b0868e7c509d",
+ "crates/platform/src/platform_credentials.rs":"43532523d744f99b0b50aca3be096d4e6464acdfa365e65604d3978f2209d3ff",
 
- "crates/platform/src/platform_credentials_macos.rs":"7fb02fc0199e119fa3f9b6e119eb6fb5c0ed33d2703d29cff7510b8cbb6d8362",
+ "crates/platform/src/platform_credentials_macos.rs":"abc70d800812dd4e7bfee5c58ffd312f63be39c29892350f6cee130aaed44760",
 
- "crates/platform/src/platform_filesystem.rs":"2d59ebfdbe53a5915c5fc1004d0a39b40884ccea012b3ee670dc6d72c74e7c4c",
+ "crates/platform/src/platform_filesystem.rs":"5494a9d6bde7fc2650ccef6a7f3c0407af4cd0e02602eca0288823ac242a50dd",
 
- "crates/platform/src/platform_folder.rs":"0f025cc15d23f51f93576c255535249781765506df65e1859f2a06d168755b8e",
+ "crates/platform/src/platform_folder.rs":"d52b375938b1d1d7bf5c06ba3be5ec935a696b7f96d58d33c215272abde0069e",
 
- "crates/platform/src/platform_photos.rs":"677cb48521f2fc0ec2730c6a6221c5406d4a80c299bcd025f2fbbb9ea186db55",
+ "crates/platform/src/platform_photos.rs":"4765dd1127cc8940567f719e3f8761e51e0711488179843d39a6383f657123d7",
 
- "crates/platform/src/platform_process.rs":"ce552759db9eb4386baa704aa4506f812bacb12b120285f1fa79c8a1f29826ad",
+ "crates/platform/src/platform_process.rs":"2b0c10db7bc6d1631dee5e686af02d747e365965da1e0d6087148541db8ece01",
 
- "crates/platform/src/platform_process/windows_desktop.rs":"3c919890c9d02dd651621b6532ac2292db1b201a6102a6b311a6c36a006b3ac1",
+ "crates/platform/src/platform_process/windows_desktop.rs":"fb60ef14077bad0456d6c9e7bcad2c85857197ed41db11a800bd17dd6ec089fe",
 
- "crates/platform/src/platform_process/windows_worker.rs":"40cd756f366e6cbd54a4e1d39efcb682c72bee5282975835f1f2bd7cdd538ff5",
+ "crates/platform/src/platform_process/windows_worker.rs":"a1d58a129a6e427649ac5da5d3ffbc06d35801c856b4154d775bdd5ad1a50176",
 
- "crates/platform/src/platform_research_math.rs":"c3f77055b7377d185441731f94e9d421d67c6dbc67fd9dd7b635d924894e58f7",
+ "crates/platform/src/platform_research_math.rs":"92e11e5289b03700a962ef8fcd9d7cc38311af3eb5678d7a155e10b14096f2ee",
 
- "crates/platform/src/platform_research_math/windows_openblas.rs":"e08a72b7e449e3179eee41f5f10e126d99bafedce27f36f05cbf72345f54639e",
+ "crates/platform/src/platform_research_math/windows_openblas.rs":"d3bef8b33ff480061cceaf85586eca9b212de28612b6ce00a15a44ca3a618740",
 
- "crates/platform/src/platform_system.rs":"1844a477f7769adf79ad7dc64d6100f72c6d1af25734ac7df381a0d48a102fc5",
+ "crates/platform/src/platform_system.rs":"7182ffa64a7e70a74beaf8a06a1c7fa9f3c58d9a7fd25dd5425a140119f5ca6d",
 
- "crates/platform/src/platform_time.rs":"9d7c80faed1d762d0f71df5bcf8f845e0422e925cf3a89c7e73115814b181faa",
+ "crates/platform/src/platform_time.rs":"52564c5a29681a1222e979b3f5d34555d5c0fedad4972d9f9227d5bcfed4e568",
 
- "crates/platform/src/source_rows.rs":"a76c40abb5e05c913563f0c78fda143253b606abb705eb42daffe0abba89279b",
+ "crates/platform/src/source_rows.rs":"bda7ca3f5e0e988a4563882b4f9095f4dd5b009ec570538fc3362b25c8b60d1d",
 
- "crates/platform/src/sqlite.rs":"54ec58346af5b5517cb5c3fed855261dfebd3072a1982abdb6c8cfeeb4f1dcd4",
+ "crates/platform/src/sqlite.rs":"c77ae1e6babb5af9b0c922280a307a4704d831af3bc661f8f89e28e9e229dca2",
 
- "desktop/build.rs":"84300b4173b3e1ffb2d00f442bd40ef7b08758ff333161c5a145b004ea16f7d9",
+ "desktop/build.rs":"8cc66c324ca02d0d45e2f262443447f9d076339793263634b3cc0ca3aef2f73b",
 
- "desktop/src/bridge.rs":"d5c8c0726f58d3f44d75aba21745092e70e8a369c2fe3c1c85ebcb5a50c23eb6",
+ "desktop/src/bridge.rs":"aa9215d33c05f971b0221f9cf3c151713b2cc93d17472fc6034e350a546f8adb",
 
- "desktop/src/bundled_workers.rs":"37200daa85f08b0f523648d5096868db2be232022b8a3a35de2f0fdea81d376e",
+ "desktop/src/bundled_workers.rs":"8a542293cd920bd01cb47c7eb61a7aabf28990db2c9bb92cd2c7d26232d9d749",
 
- "desktop/src/i18n.rs":"5834594a27004b9c0303e17c5c240ecd1cf17e7ef6826000a85b1c24dd9a46a0",
+ "desktop/src/i18n.rs":"5738b5894f4ac8b7e1cf9fb4e6c82381644865982b6264aec77668c148a76dab",
 
- "desktop/src/main.rs":"3ef1eb54b15c63eee032bc55b3d69c9b6379662e40dd66893b6705cc08b8449e",
+ "desktop/src/main.rs":"1ccf6a5bc8ec6952d113a88afd689688cfe7927f465fef928e2a98569778a89d",
 
- "desktop/src/picker.rs":"88e54eaaf2747f359f8753928a97e27ad9393780acb8824548b5454ca0fd8775",
+ "desktop/src/picker.rs":"376898a399b0752e10b33e10123b4fea63657a9bc71fe6cd009f1d6580c11f11",
 
- "desktop/src/pixiv.rs":"1944e10c840a4366268dbde5189279fb8ec961851760ced3637967c53107f8e8",
+ "desktop/src/pixiv.rs":"53ff9d2d3f3c85f49ff59c7d1763cf7706bedf622bf6c1582cd4161156ae2486",
 
- "desktop/src/server.rs":"4caeaeb7eef8487b26f435a87810492e2c29f1d218b638f73f6b7b6919bc42fa",
+ "desktop/src/server.rs":"8582199fd052249fbd6205238b35143295e513c30161dd914f88fcce4d3eeb2b",
 
- "desktop/src/welcome.rs":"8b7a8ce662d60de1287e1338baacc8f22fca8ce2ea021e695643212a5d21cb95",
+ "desktop/src/welcome.rs":"4feafc82f4fe9f8752b9224c422e7f286f52a220c22599c3434b13efee0ff7de",
 
  "desktop/tauri.conf.json":"bb054aa3da9ab925a3215c27a479619e3aa69504f539e57ac6d4c2aefa8343db",
 
- "native/terms/build.rs":"fced479cbf0f476fc33b8df84ce2af5f110034f735f811992e6bb6e0367fec7a",
+ "native/terms/build.rs":"84a608741b24e58c93175008e509ab27d3a745a846539debf70c1be87f97db18",
 
- "native/terms/examples/recognition_compute/bench.rs":"f2c22765ac29c0363eb6e64ee9beb235841361adbb6e3122e94e687b9ca052c7",
+ "native/terms/examples/recognition_compute/bench.rs":"3499a6c07ea8e94512a61740b07567e89e1ae154b1b8a52f4fb836305c605960",
 
- "native/terms/examples/research_compute/math.rs":"4844fc1099be8a2e284e9061593d2114fecf2f95bd19c99519776c82d4f59abd",
+ "native/terms/examples/research_compute/math.rs":"ceedf5880d735289e7686d8b5bd11e54278941f93eb7955421996ca29c774562",
 
- "native/terms/src/app_accounts.rs":"7d8e5561467d471a772d5be4421f23354a6326f24c84b58152fcfe3f47f55a25",
+ "native/terms/src/app_accounts.rs":"dce690a139403137f1c829f9f1edf26fc83627bee455420a2b38a65520ce6cca",
 
- "native/terms/src/app_archives.rs":"7e3cd8abd55798961e217f88a7681db9b0a187df580f97e3662bfd93bbb6311f",
+ "native/terms/src/app_archives.rs":"e17326d0f439a356ea6e866847cf01c0b1b458414a864091779039e335b51bbe",
 
- "native/terms/src/app_characters.rs":"0379cfaf9e6353208f3beedb97a0d7d0b45934c2986c136a0b0dd5d71e67220f",
+ "native/terms/src/app_characters.rs":"a285efa8f72b9124cfe8f6a9e14631e196512bf2b239d12912bef5501b1f4cfc",
 
- "native/terms/src/app_commands.rs":"e198ab866b1babe5ec1ee27a4eecf156aff1ed475f3decf549f05625204aaa5a",
+ "native/terms/src/app_commands.rs":"c9eadb3e255cd1a7d832d95eee6df98324d0308247291be92fd7079b5c688278",
 
- "native/terms/src/app_create.rs":"533af856370d74969b441f9f810e0e3563226c13c3922aa666b2ae04f07ba046",
+ "native/terms/src/app_create.rs":"d4b1381f34ad722550bee5c25d0d3dd0662f983a348cad33cc5fe9b7113e7bfe",
 
  "native/terms/src/app_create_names.sql":"29fb8b712603ad5bfd49a20b82162ead37a45e781f949d5e1c9678bd42fa8f7f",
 
  "native/terms/src/app_create_schema.sql":"f41f751e3f9c2deae935dcb9869cd385a0893a9d20dad2c4b64b7b14d7ef54ae",
 
- "native/terms/src/app_curation.rs":"9cd78aaefb7f924a30ac48044cc23f8a02082bd4229473e055aaf1a64eaca786",
+ "native/terms/src/app_curation.rs":"a474670bf2b2c1371dbff659a519fd5a6a1e40801b1d16e317448232fc8fc17e",
 
- "native/terms/src/app_desktop.rs":"3ee08a852ef9b8d3e266a12e9b6f0f7dc4726e90de1846879cfb2d3b18473145",
+ "native/terms/src/app_desktop.rs":"e2ecd6c1ea8e28fbd9e6e738fb7b2db73cc8033f1ab73962e2ee4b83f9233361",
 
- "native/terms/src/app_effects.rs":"f57f598bf78f05133d42b33c619c298028e5af318206bdf732d3620bb20f7879",
+ "native/terms/src/app_effects.rs":"507ff09441aab09cc8f2ca7460bbde3da5bffb8180629b3bb6f503598dbbe1b8",
 
- "native/terms/src/app_files.rs":"d7f4edb4b02d82b0ec00bd26805ff8d8a0bc4970e2ae25f1aafa90c9e8432010",
+ "native/terms/src/app_files.rs":"997aa11877351d60dee879f884a6240b3d1fcd8d38793b0cb3962eef59cb62b3",
 
- "native/terms/src/app_folder.rs":"68f076c9a9d0e258bd5eff71a1c66582a244747fab9ce67f4cc53239ccba63c9",
+ "native/terms/src/app_folder.rs":"fd566d4d1e94e2740b9ed9a046729da88e5bd86da53c9e1c2092612e133dd4d6",
 
- "native/terms/src/app_http.rs":"a082b5d82ea1e7832b006d07f2ef6b7921a827fab71ddaf79fd735b86874db71",
+ "native/terms/src/app_http.rs":"849ca98e4dc5b50b9d05d4aba1909b269b66c3aab9369d815f280ad24455447c",
 
- "native/terms/src/app_identity.rs":"f9ace5a1574b8775637e7b3654e603a5db3fc9e4434a7d0e24b45e3d3a14b112",
+ "native/terms/src/app_identity.rs":"0a1013c73b59db6ad290a8bdfae5b554cef1fa36d73b3f217e029c0812fccd20",
 
- "native/terms/src/app_imports.rs":"e79d6a95f2cd045ef6ad0c3d0286d94a9ff82a93b03eed186e1b0ea986a60382",
+ "native/terms/src/app_imports.rs":"5d38a4aed511f3d68df6997ceb5b6ef9aeb3434ed6d917c3ca614329f2e77290",
 
- "native/terms/src/app_index.rs":"775578d56cd1bdb6f85f5005ebe012f798b22391b8fd08203522c3a5a115adae",
+ "native/terms/src/app_index.rs":"701b9f4f0c48dd836308f943e17a0676b1b489cb5837525ea41a6844df78c9b5",
 
- "native/terms/src/app_integrity.rs":"143aa1bbd662b8ea08636a6d58b4a8acc32095ba41526b579c32af9873adc6cc",
+ "native/terms/src/app_integrity.rs":"d7ff3af8c6b4b0a90293a98cf65951db98aad92fe310d5cd29a837c49a6e3d4a",
 
- "native/terms/src/app_libraries.rs":"e230fac5c3d21945de40f60dac40d7429a10baba9f223c8f608c8e52b41344ab",
+ "native/terms/src/app_libraries.rs":"0693c114f35fd953880a4f4d3503b8c37329c32971e0599cade08635e6035013",
 
- "native/terms/src/app_library.rs":"5a151b7b65edb7063b1a2f5a9d5b4e257d0203fc8d04a119721704e7e397d00b",
+ "native/terms/src/app_library.rs":"42c131ef177eb6374430a1315ee654a485923094bc814a80161021b5201e4c6c",
 
- "native/terms/src/app_local.rs":"cda9e666f21a3be6eb966eca0c0fd40076dc70226141851cd267a74a445d693b",
+ "native/terms/src/app_local.rs":"f8fb6ea23574a2ec339f9b966e05951db2c1e8cd3b735464f51edf36ecc4bd49",
 
- "native/terms/src/app_migrate.rs":"265b8367ae67814e6b7acffdbcbd6df051f33f8e92401785124c25cdc911d386",
+ "native/terms/src/app_migrate.rs":"8a3029dfe7fcd28ee8c504c110d071211dad1a2675fd0bb7f6abd7fc56c0703d",
 
- "native/terms/src/app_migrate_data.rs":"383c6344eb375b758b76694aa631317779dae9b0a82abc5accf5289424d942ea",
+ "native/terms/src/app_migrate_data.rs":"53fc754cf6ad0e6f397907ca42543512e6ff550dbce8ee2218c76211258a0aa5",
 
  "native/terms/src/app_migration_sql/ambiguous.sql":"04993300291b3a4d67b31b2d448781d1e35bf65a9b765929ca9b7e8a5047c174",
 
@@ -219,161 +219,161 @@
 
  "native/terms/src/app_migration_sql/provenance.sql":"a780f1f8837dd2c90a556539c114d56cdaa513b057fb667bf0c5c9d604f75934",
 
- "native/terms/src/app_models.rs":"e94bc747ebd7d390109cce8ac368b8d9517f4799300013551eba2f164b226491",
+ "native/terms/src/app_models.rs":"2c09d1f5c58ddb3e8088238f8d6691bc63857209a67dcd03d6312181a58bd368",
 
- "native/terms/src/app_name_sources.rs":"b4ccc815e76018ffb21737b7d89a5338d2d8b5b6e6f9271b27aa74a6cc3bb1c8",
+ "native/terms/src/app_name_sources.rs":"effedaf83af896ecd880784490e4b1483fe05c28c3098a098c2ae80c68a2f458",
 
- "native/terms/src/app_names.rs":"2f9f195abd7fe8b2e307c35a2195b572acbd201fc3628de44a6077a4e6671118",
+ "native/terms/src/app_names.rs":"6648a1f39a60285fc193b0a6689440e54e6f620b93d3a721685ec2bcdcb97d0a",
 
- "native/terms/src/app_onboarding.rs":"caec1f3634a1d6919f0b7b34d494767d19905c1c4bc054753afc1c3d37c41608",
+ "native/terms/src/app_onboarding.rs":"829290530c622801e4d6d10ffbecf8e98f29257533bc64f7ee9dde4532293e34",
 
- "native/terms/src/app_photos.rs":"e962a4f34708387a18d62af5276f9eee3f59e6cc43de783ef90d749e0bc55aeb",
+ "native/terms/src/app_photos.rs":"df3a434e0b64f63e395ca93703be19d90b83faefe6901537fdd628d51ddc0326",
 
- "native/terms/src/app_platform.rs":"5d20f65322df394264aedea61ab134aece0404aaa3e91dad3bb7c0cebf79316c",
+ "native/terms/src/app_platform.rs":"baa8c48885fc7b78bf8a312b66b0ce3a66ba269d1bbe1bdd95037bdf5ed650d3",
 
- "native/terms/src/app_preferences.rs":"56996e2d71f3bfc2317ebc72286985f5b9aa906b4d64c7621d1de4df08fca91c",
+ "native/terms/src/app_preferences.rs":"1718355189e4572f61797110da007b9baa6ad565ca8684929bec452875f12c61",
 
- "native/terms/src/app_profiles.rs":"eeab06879aa6d635442462b2f74bb728debeb70445c3802b88b7d0f9ba692f99",
+ "native/terms/src/app_profiles.rs":"9146ad3345db80e03c9a8f68e02f3e253fe4cc04a21610a03060061aa0cfea9b",
 
- "native/terms/src/app_provenance.rs":"2a9b841cd426d144b06e0867d10c1295062c0dfe0957db2b1156a709daa5794c",
+ "native/terms/src/app_provenance.rs":"33c7303e6787ea58fc7c8336811776308294bb6ca95f61fb8bdd40fe71861f23",
 
- "native/terms/src/app_provenance_cache.rs":"292be2794da44de858a1dd276f8dc17e86a22d050f51e5bb3bfbd7b07f1e7004",
+ "native/terms/src/app_provenance_cache.rs":"cb3ae9fbc002bbf79281b1a896dba6c76cf3cad2888264db8fc2c9a11d0f29bf",
 
- "native/terms/src/app_provenance_net.rs":"77118fad8e4ee718bf670f5ebc9435962f611d3b6bfe86e6c1ac15116192be34",
+ "native/terms/src/app_provenance_net.rs":"6bfa48c3c82e0100f1347eb2140099e70a219baeda0c942398b10a8f2aed8c46",
 
- "native/terms/src/app_provenance_sources.rs":"f8341efb9e83f2fdf20effea6b492dba3192264d664d3a39fe4a90d0bce20c6d",
+ "native/terms/src/app_provenance_sources.rs":"b5b95d67aa5753245bcbac3a32d36da0094d27650df1760db62d150d5168f868",
 
- "native/terms/src/app_recognition.rs":"9dfbca13fd8fe59e71d6e994feb012f60efaaebeee5188f12ebe50dcd4f79d50",
+ "native/terms/src/app_recognition.rs":"8d3ba9f6943387a3eea841f90d4c21f9cb3bdab74410955f215c38a39bb7f735",
 
- "native/terms/src/app_rescue.rs":"16274da1a0b1683ea0f652c79200cbc2b95ea62732c137c3ae08e7943601a9f0",
+ "native/terms/src/app_rescue.rs":"08915aa36490c06b4d43fb0ff6337d4a548b451bc15c090928b0d37e6af4456d",
 
- "native/terms/src/app_research.rs":"fdf91e441fc3bd223f2c56c5d40a34b5e29c1e93d3e77858d01c4046404a2820",
+ "native/terms/src/app_research.rs":"89b135b2b6beb1a50448e14051cb5c7520c4c51b0bdcc680fcecc3cbda615639",
 
- "native/terms/src/app_resources.rs":"08b7335b22a08947938bf80fe707302cfa82c0fa19b3b3122c28cfe78499811d",
+ "native/terms/src/app_resources.rs":"3304fcac09af5a36a490589de3dd36fd6f79bad80cf515f44f6d2888ee1d80e3",
 
- "native/terms/src/app_service.rs":"0b8880a74567c3730ed45ff59022dbea9b8c487835ceee4ddde5f4b58c9405bb",
+ "native/terms/src/app_service.rs":"4baee20d3876c3ed4611bfed7b31023ba1a0332e7f8370f4eb1ed1b0c4fe1a8b",
 
- "native/terms/src/app_settings.rs":"c49121e8b8c97f04336e2039e75a95c06294d10ff97557be40e5ab8873a52a86",
+ "native/terms/src/app_settings.rs":"7b8547030978fd5294e2927f5b1d80bdb229075aca29ead738f4490bd88d23d5",
 
  "native/terms/src/app_source_empty.sql":"601047d24a614c055ea7ce648777dbd4f27b45ce32ac90d2099cfa5ffb58f9ea",
 
  "native/terms/src/app_source_schema.sql":"51b8c0ecc6fcb856854ddbb21a9883b51c6546990c1673a57951fe02b16b207c",
 
- "native/terms/src/app_sources.rs":"69b2de0b8ab8a7bc9c7b1a5853aa0277c9baeb7666e8d1d270b57c80156f7687",
+ "native/terms/src/app_sources.rs":"8ee039dc596b1253783ab4256fd7befa1ce4087eee3f93b69208e7ede676c819",
 
- "native/terms/src/app_sync.rs":"f1c41b6bdb0563e90ad93db6cad42714fe7b2d51357947c366116f0c253d5a0a",
+ "native/terms/src/app_sync.rs":"5996a5f3011e1f8e05ecb02a724b97fe3e74e593c0eede32a81d4f84369e843d",
 
- "native/terms/src/app_tasks.rs":"3c01ae07dd99d6a8882c659f1f1cb0203a4eb1ddcc2fdccac6c06d36a19d5083",
+ "native/terms/src/app_tasks.rs":"c4fd4579b2899d6f303ce6cb66eb4fc7f3c615ac68df2c88c63242ce86870247",
 
- "native/terms/src/app_updates.rs":"c7d3c6a736bfa4662a2e4f7a99607e0905ef7437975c440bb66ebc002521ced2",
+ "native/terms/src/app_updates.rs":"856c4e3dd1cdd91baacd3097dcd1cf62daef71399212a724219e69b8536d4437",
 
- "native/terms/src/app_upgrade.rs":"2dc8f25a86f33bb59251ef3b8030cd7383068bb7806ca2e8ce8500a4db09d1ba",
+ "native/terms/src/app_upgrade.rs":"a2b5941e631f385638793ebdc873984f08784941b90ddb9fe9141b509e0d63f4",
 
  "native/terms/src/bin/illustash-terms.rs":"04ee80bb280034a16f8ddd9fe97e8de0700713259c44f76858f70b8713d4c594",
 
- "native/terms/src/bin/illustash-worker.rs":"7cc95e2056199db056027bdb57a73bde2b125ffdb4133ce7fcc5fcea68c9b43a",
+ "native/terms/src/bin/illustash-worker.rs":"282354dfa7c6d3ab227c352bb04627fed317bcb37550de2eb938a61393cab7f7",
 
- "native/terms/src/cli.rs":"673cd08bd09aedca7596ff6dabe921ac564f68d4ff6a9e08db12203991ff8f2f",
+ "native/terms/src/cli.rs":"9ce04f9ee8f5b693a6a8fd56bed77cac4066e51a476974eccad250d3e3fe1a25",
 
- "native/terms/src/desktop_shell.rs":"da29ec13b1627ef6209d295d40e4b4a896385053da04ba54ec89c32d711edffb",
+ "native/terms/src/desktop_shell.rs":"381733278909d3290199f212c138d02197f1a259c9fda2a58819609b986f27a2",
 
- "native/terms/src/http.rs":"24a4bb039d5b09e45025eb97583f135b2f511e6d73c8f8fe1bdfdd0467e69b30",
+ "native/terms/src/http.rs":"806d8b048bc9e2925765986a082d3bc542c8e669bb93fcc745be8508fcc9ec91",
 
- "native/terms/src/http_app.rs":"628b4421ca8433ff7ef3857876be34126033884cf7cffd9b97918c179cda150d",
+ "native/terms/src/http_app.rs":"1cdb28245fb1d97ac446313b089c8fe4700ce22027dbb7272bf3a6c04750a984",
 
- "native/terms/src/http_artists.rs":"f15a054a4ccf76e05066d3e50bba89f7f72a8b507a174e4045061e3f1466c8d8",
+ "native/terms/src/http_artists.rs":"f309368f900619f5a82c9174efe204b72e147d49ee1619fb990d74842c566e2b",
 
- "native/terms/src/http_browse.rs":"3927473efa1d18f618b1b318b1216ed7fca946cd595c168bdd3b971968b3cb53",
+ "native/terms/src/http_browse.rs":"f8772269132e045275095cf91fa1ddd73530c396071d518cc319c966b1b88305",
 
- "native/terms/src/http_characters.rs":"c49d546d8ae641b161fb02cc48275c246bf653e4d8d66d1023916f6313392c5e",
+ "native/terms/src/http_characters.rs":"77486635e9790c369b6f57ba96a9e57118acc646223cd1396740f91a4f31eb6c",
 
- "native/terms/src/http_host_get.rs":"3ecdb97a27150dbd87ceda841c7358fc09a4f910ce154746064987899f542c71",
+ "native/terms/src/http_host_get.rs":"bf803ce14b99b126cf946727d0548fab0fc16f150b2005ce5f03415cd30631a6",
 
- "native/terms/src/http_host_post.rs":"78cab3956c02d7b10fd3514ef336e3f97133fd22b6a9b56b1ce8c209c8d4128c",
+ "native/terms/src/http_host_post.rs":"8db1013ee971ea4812d3da18f416097cb33e4e37789dcb890a8115f2f41fc9a3",
 
- "native/terms/src/http_json.rs":"08ca9bcb17db4f8d9a38c25794d7958fa11e1ac35d176990b7a2aca92539b482",
+ "native/terms/src/http_json.rs":"ed199ea4c469fed512dfa9338140b8cf4dad1cb93a25e97bc2430e1675bf286b",
 
- "native/terms/src/http_local.rs":"24f94e13b95f2452fd0d6839adbbc6b0917dae3aa30e45b3147b760aa4c1bb49",
+ "native/terms/src/http_local.rs":"d7a5757ae32b7c609f0749facd77996e8879dd8fb531bb0a40352364807e8370",
 
- "native/terms/src/http_read.rs":"60a1c953750aed7dab7cc877e368bbf4db288771a9c09372c58297310e26449e",
+ "native/terms/src/http_read.rs":"e5b7e7f78faffd8865dbded82351d75ad8aa64d077b739015578396d3b638dbf",
 
- "native/terms/src/image_samples/mod.rs":"7100452279fd5c42b3b082ce828f9f31f993166b71d81df64514e289e2a375c5",
+ "native/terms/src/image_samples/mod.rs":"3322652e6cd2806e1c739a67ecca850060eb2d4d2c9fd49d74d1ade3bafbefd6",
 
- "native/terms/src/image_samples/pnm.rs":"d06bd15c05727badacdb5f4b5fbf2702eab55a18efd3943538e6c408fcf540cb",
+ "native/terms/src/image_samples/pnm.rs":"22c72dcad3e18581fe7df7b66dec9d40a0e1d25bfe084641d70e9b8761d3cef0",
 
- "native/terms/src/image_samples/tiff_scalar.rs":"67055d79b31208cebb702f40c7e9c571a88ef020906de992c3b447322d466e3d",
+ "native/terms/src/image_samples/tiff_scalar.rs":"5671722eeb1e33acf26f64ae5bdd9ce5757bb5241bb94351f6ee02d7d9ea2c2b",
 
- "native/terms/src/index_compute/build.rs":"9b334bce4bdde150f89513d51950b4a193c7c1ebfca2c3a93c290a1a65424ad4",
+ "native/terms/src/index_compute/build.rs":"21d39bfbd6c6a0af66e9c0132902595881dd4a9a41360e202450df41b1ab5d5e",
 
- "native/terms/src/index_compute/clean.rs":"f48ae0b2efc54aa542922196364b8a2e696f5d52b58981df067858de2b1ca24c",
+ "native/terms/src/index_compute/clean.rs":"738331ec667eb1ea77b3138cc8198a05888737899f45c628780e57d5d6641bc3",
 
- "native/terms/src/index_compute/mod.rs":"e70df5ba3d558b185c86ac608942f3bf7168cd9bd28b0f1f912506400a6a58a1",
+ "native/terms/src/index_compute/mod.rs":"bcf82cdbf48d8a5803f2dc45d51a2120c77ac257054945cb34d4fdb6df67db91",
 
- "native/terms/src/index_compute/numeric.rs":"4acbfb729869ad9192bc23d91605b78ce8f864e63e2d8c076138a78ae17228d3",
+ "native/terms/src/index_compute/numeric.rs":"ea9d101efc128f914e23126799a8b9048bcda8e03dfbfa45c93f2c755bb16a8c",
 
- "native/terms/src/index_compute/scan.rs":"0c5464cb3a092695928deae3cbd475e884ee7c251f9ef3f423791254eaa32ee8",
+ "native/terms/src/index_compute/scan.rs":"48b56d91b455e7f9f5e90f62187840cab2fac22e1fd8606a7e3ca49a529a6f9d",
 
- "native/terms/src/index_generation.rs":"556ad63a4bb7b8d30e3191d466b91744b29f23fd4fc53fa40ffb9f13b54946e6",
+ "native/terms/src/index_generation.rs":"940c236d35bee6001cc2225701d64d0be2964a2575a653a897449650535ad2fa",
 
- "native/terms/src/lib.rs":"c890139823d735dc00fa984d44f010c7743675b62214bfbebbb3fdc1cc8475bf",
+ "native/terms/src/lib.rs":"e1f48b88eb3d2adf71593fc0c25c91ff2b21604937cf3e3744ab15af4f66e629",
 
- "native/terms/src/platform_process.rs":"66a45606b4a65b14b2725679bbae0e7e5445e63fddede8e804c2e8d4cca893b0",
+ "native/terms/src/platform_process.rs":"11d73a02dc4f9baa3779aaef132012ef36908e510747326c6704374681f606a3",
 
- "native/terms/src/read_harness.rs":"858e975d3a99b4228250120f9120281a0ea4e0413deae915f27068df1a00ce84",
+ "native/terms/src/read_harness.rs":"720ce39b82f47a7f7a874e74dff61c2e9a741153acf7b908b4188c57fe67f48f",
 
- "native/terms/src/recognition_compute/anchor_snapshot.rs":"ac96b3a6beff4b71c663ab1a7698d05d37317f1af16a6af7becf4e04616103ce",
+ "native/terms/src/recognition_compute/anchor_snapshot.rs":"8ab8b7bb1fb022fbc3eb02a7c7f6ae6dfe3aaffb3bbade5f73c12e52abb1ff0a",
 
- "native/terms/src/recognition_compute/anchors.rs":"950b56c3552265a5882ffae28d19fb41fa0a9fe0fa400bcf9edd2ad8dbb973aa",
+ "native/terms/src/recognition_compute/anchors.rs":"aec9a4c123a723ece8dfdda208e60c7cdf5c8ae3997719299e02ddae275f749a",
 
- "native/terms/src/recognition_compute/backend.rs":"71024c80aecf2326681843478e5d4e1e1a7c6e79a3c3fac80bcd0d0811c164ff",
+ "native/terms/src/recognition_compute/backend.rs":"7d7ca3e79471d018470b6942802e07dc25e066a701f09136e8cb75ae227197c6",
 
- "native/terms/src/recognition_compute/claims.rs":"aca484ad8661e7aa1d5265a6b55609be564f59eec3f64a4994a5fb136c2e5c26",
+ "native/terms/src/recognition_compute/claims.rs":"e2ada99076e10bfc3a646a78583ec7c19e99271c0c2eb3e4814cbc53168d486f",
 
- "native/terms/src/recognition_compute/directml.rs":"e20f6ae0c655b8037818e5c0e4d4d8b09595070da22f984cf7fbc93075034dec",
+ "native/terms/src/recognition_compute/directml.rs":"ecfbfea697971a53b57de9a6ec230d30556f66408b1e096da03fe6fe825d0781",
 
- "native/terms/src/recognition_compute/mod.rs":"f6f16f4e248cc27104219b968a765636d077cfbbcdefd578887520dbbbe22e42",
+ "native/terms/src/recognition_compute/mod.rs":"30a6f87f8c9818b8735d47f3cbccb23c6218e9c36fb0f3bc383d6ea9357bebd1",
 
- "native/terms/src/recognition_compute/models.rs":"19ce57aba3158b38bc4c0f56c8567936009b3740c6009d15f880cbddd5c707ff",
+ "native/terms/src/recognition_compute/models.rs":"4c4218efcc168e429e3a87259135c205a3c3f3b3764683e3a17d837f01f8bf30",
 
- "native/terms/src/recognition_compute/preprocess.rs":"261b08d786e401a253e4bec9d83e5969a0e409b1209c107698d9fcf9a08149a3",
+ "native/terms/src/recognition_compute/preprocess.rs":"73cbb0b8f2a2668de96d84a2e0ed03402eaaaaa8897906251cc500137b6b833a",
 
- "native/terms/src/recognition_compute/producer.rs":"a9c2f93ac566196aaee555681c28844dc49590d290c40406a2981d82cc316a47",
+ "native/terms/src/recognition_compute/producer.rs":"1d3176240687d019b5b265cbd02fed719863f1086895d45d462b2b6d22bca4c0",
 
- "native/terms/src/recognition_compute/session.rs":"160dd10a3e0bc98b65d7f7ce71d3f53f995a18fcf58037c09ac0e1f5c054a7ba",
+ "native/terms/src/recognition_compute/session.rs":"7c8b46305a9cf0c0c2ccbf5bfb8ca571769023da044e0960af1650970f61d7f6",
 
- "native/terms/src/research_compute/discriminate.rs":"9fbacee2fef95dba8bb6f0c634a4e6b710fb8d484265b21a051ac2b92684fb5a",
+ "native/terms/src/research_compute/discriminate.rs":"4b8edfd7ac09adb9441d695914c9ae0adec011a27eb01ec920722c5e15dea2ad",
 
- "native/terms/src/research_compute/features.rs":"4ccd33c9986099f7a7b4df2c4b8822998f59726275c661ab807d48032737ec32",
+ "native/terms/src/research_compute/features.rs":"b050aa97333d6c38d0e532b4774f44ebfbed69f7a0dc8aa0074960195a08d87b",
 
- "native/terms/src/research_compute/groups.rs":"aefd22a675bd8ba0ea534e3a6bfd35d7718c305c03c862cc86bcab7a1a62abd8",
+ "native/terms/src/research_compute/groups.rs":"33e7cde9ca859134d56a2ad52bfbb5b8275a64a46598869daaae38dcc9295f39",
 
- "native/terms/src/research_compute/mod.rs":"4189cddb20fba4fc73f58ab34cd42acaf1e5b2eed5daf37796bf4146e28d0dd0",
+ "native/terms/src/research_compute/mod.rs":"96f453ce141d318bc3e6da554a932be8fdb7fc3b4145da56b3fa350c2fca5489",
 
- "native/terms/src/research_compute/numeric.rs":"f9ce48331cf55805cfa9887ec4514beb98a0c1814a508c7b5dd7d2a428ed739c",
+ "native/terms/src/research_compute/numeric.rs":"1c12b3f6180efa3b45bf3270acaeaa3699e3af9b7a9ad03891dfa908d61c73f5",
 
- "native/terms/src/research_compute/relation_fft.rs":"ca01e545b5a07fcf7e119ea0ee65d53c6475d318153ee0261e90d517b4ad7897",
+ "native/terms/src/research_compute/relation_fft.rs":"1f823782ece25dc9087bdb66d25dc55b2fb4ae717803626af0c33064f443aec3",
 
- "native/terms/src/research_compute/relation_image.rs":"039a9173171c107b9e9494431aa1fc3c7022a7bb2f1b955971d5f4a16b8f7c4e",
+ "native/terms/src/research_compute/relation_image.rs":"546022c70faf20496792dfbd1a4eef750962b9b4948432ee6b55b6ceeffed7b1",
 
- "native/terms/src/research_compute/relations.rs":"df85a13b08cd7996b9f5ff1dde41fe9a038228c94673e37b001039e1e8c0b325",
+ "native/terms/src/research_compute/relations.rs":"8c81bac9aeba57cc0235f024d5fcdcf4fa56344a9c0877ae1e37914e6f224297",
 
- "native/terms/src/research_compute/similar.rs":"a23fd791a7a91cb79086c0cdd99703cecaa48f5b5734eef3e2f76a4801813286",
+ "native/terms/src/research_compute/similar.rs":"f557acc722a99c07bb247b7a1be57cf1edb64244984698fee22a9b4c657b6fbb",
 
- "native/terms/src/research_compute/snapshot.rs":"39818e2353f73ef4864ceb29efec4abfdee9f3c9a845c45a9cdadd8516a954ea",
+ "native/terms/src/research_compute/snapshot.rs":"d2988f0e90aa5ee8f5db4eea1323331a29fe33e47fe07de3947f57829b420801",
 
  "native/terms/src/service.rs":"6752b797a7c721c3addf5ef7aa1aa72a537e8f71c26ce18517900595dd624064",
 
- "native/terms/src/sql_fragments.rs":"b9c36b6ecc3f88217781bbd97e26d94d04de65f7771b48803b8ef23346464a6a",
+ "native/terms/src/sql_fragments.rs":"4519b3df34e7ccc8e2a512c1803690841fa97daaf59f6ffcaff3f63bf2f86534",
 
  "native/terms/src/sqlite.rs":"a9d28dfd07ece00f2dd0dc9edb274636cce76f02f489b260cfb291abc9c813fc",
 
- "native/terms/src/table_delta.rs":"f5a08f3cb085ab3087636ada454a8bcc4e8de31f4b71d1f8e204d6a6d04b712a",
+ "native/terms/src/table_delta.rs":"875225221e30755766b276a098afab88d1663d3a2f0059181f3ee60b8c7f569d",
 
- "native/terms/src/task_state.rs":"f4b8017e875955cf805cfff7dde03dfb800bd4bdf29f8af1a65c48041bc75e14",
+ "native/terms/src/task_state.rs":"bc37b10d47109a65558d9a912aa75d7165b64b5c6088e236324e098e2351dcc6",
 
  "native/terms/src/wd_pending.rs":"0ee1bf7d1815e0d4ad7ce6b4aeabd173bfa91d8aa46eeae869adb9c880d466af",
 
- "native/terms/src/worker_protocol.rs":"3b4dd4d76e8ecb8e1f6ac0b6195dff66dbafc974b9e5986ffad3ed5fbbd31fae",
+ "native/terms/src/worker_protocol.rs":"ca9b8c77ea89ef5bd6aa1605faf7829a982319bbc0c84c8ea8c7b68623215152",
 
  "native/terms/vendor/tiny_http/src/client.rs":"5d0e5a6a3d1af1ede1796639110cf1678a9af021abb1cba46501e913ba4eedb0",
 
@@ -411,7 +411,7 @@
 
  "native/terms/vendor/tiny_http/src/util/task_pool.rs":"08e3cc8139d1512bb751f828e9838579d8848607e7172ae41b4033d8ecc46fdb",
 
- "start-web.command":"fb2d63d85652c54f0370fe7c096f4dcb9ee1bbfb5109beefe37bfb117f74d278"
+ "start-web.command":"3baa89ce43d2f91e1ed82cb461ecf3780951bc21d85107624a58f2cfa23a3dd2"
 },
 "format":2,
 "retained_references":[],

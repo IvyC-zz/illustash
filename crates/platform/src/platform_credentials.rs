@@ -1,4 +1,4 @@
-//! Credential storage platform boundary; account validation and authorization stay in app_accounts.
+//! 凭据存储的平台边界；账号校验和授权仍在 app_accounts 里。
 use crate::Result;
 #[cfg(windows)]
 #[path = "app_dpapi.rs"]
@@ -9,10 +9,6 @@ use std::{fs, path::PathBuf};
 #[cfg(target_os = "macos")]
 #[path = "platform_credentials_macos.rs"]
 mod macos;
-#[cfg(any(target_os = "macos", windows))]
-fn invalid(message: impl Into<String>) -> crate::Error {
-    crate::Error::Invalid(message.into())
-}
 pub fn support() -> Result<PathBuf> {
     // 显式配置时不要求能定位主目录，与原来的求值顺序一致。
     if let Some(configured) = std::env::var_os("ILLUSTASH_APP_SUPPORT") {
@@ -43,7 +39,7 @@ pub fn read(kind: &str) -> Result<Option<String>> {
 pub fn write(kind: &str, value: &str) -> Result<()> {
     if keychain() {
         #[cfg(target_os = "macos")]
-        macos::Store::default().write(kind, value.as_bytes()).map_err(|_| invalid("写入钥匙串失败"))?;
+        macos::Store::default().write(kind, value.as_bytes()).map_err(|_| crate::Error::invalid("写入钥匙串失败"))?;
         #[cfg(not(target_os = "macos"))]
         unreachable!("macOS only");
     } else if cfg!(windows) {
@@ -76,8 +72,8 @@ pub fn remove(kind: &str) -> Result<()> {
     }
     Ok(())
 }
-// Windows never reads or migrates the old plaintext file. Rebinding writes a
-// separate DPAPI blob; uninstall/revert cannot accidentally treat it as plaintext.
+// Windows 从不读取或迁移旧的明文文件。重新绑定时另写一个 DPAPI blob；
+// 卸载或回退时不会把它误当成明文。
 fn secret_path(kind: &str) -> Result<PathBuf> {
     Ok(support()?.join("accounts").join(if cfg!(windows) { format!("{kind}.dpapi") } else { kind.into() }))
 }
@@ -88,15 +84,15 @@ fn windows_secret(kind: &str) -> Result<String> {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(String::new()),
         Err(e) => return Err(e.into()),
     };
-    String::from_utf8(dpapi::unprotect(&bytes, kind)?).map_err(|_| invalid("Windows 凭据格式无效，请重新绑定"))
+    String::from_utf8(dpapi::unprotect(&bytes, kind)?)
+        .map_err(|_| crate::Error::invalid("Windows 凭据格式无效，请重新绑定"))
 }
 #[cfg(windows)]
 fn windows_put(kind: &str, value: &str) -> Result<()> {
     let bytes = dpapi::protect(value.as_bytes(), kind)?;
     let path = secret_path(kind)?;
     fs::create_dir_all(path.parent().expect("credential path parent"))?;
-    // Account operations are serialized. Only ciphertext is ever written, even
-    // to the temporary file; a failed protection never overwrites the old blob.
+    // 账号操作是串行的。任何时候只写密文，临时文件也一样；加密失败时不会覆盖旧的 blob。
     let tmp = path.with_extension("dpapi.tmp");
     fs::write(&tmp, bytes)?;
     fs::rename(tmp, path)?;
@@ -137,7 +133,7 @@ mod tests {
             fs::remove_dir_all(path).unwrap();
             return;
         }
-        // Isolate environment changes from every other test and from real stores.
+        // 环境变量的改动与其他所有测试和真实存储隔离开。
         let path = std::env::temp_dir().join(format!("illustash-117-credentials-{}", std::process::id()));
         assert!(!path.exists());
         let output = Command::new(std::env::current_exe().unwrap())

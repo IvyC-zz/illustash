@@ -1,4 +1,4 @@
-//! Existing index numerical contracts: no new floor or threshold tolerance.
+//! 既有的索引数值契约：不新增下限，也不放宽阈值容差。
 use crate::recognition_compute::anchors;
 use crate::{Error, Result};
 
@@ -16,8 +16,8 @@ pub fn core(rows: &[Vec<f32>]) -> Result<Option<Vec<usize>>> {
     }
     .core()
 }
-// NumPy v1.26.4 scalar argintroselect (selection.cpp); callers only request one kth.
-// User-approved 2026-10-04: preserve this tie order across OSes, including Windows SIMD differences.
+// NumPy v1.26.4 的标量 argintroselect（selection.cpp）；调用方只请求一个 kth。
+// 用户 2026-10-04 批准：各操作系统都保持这种并列顺序，包括 Windows 上 SIMD 带来的差异。
 fn partition(v: &[f32], ids: &mut [usize], kth: usize) {
     let (mut low, mut high) = (0, ids.len() - 1);
     if kth < 3 {
@@ -186,8 +186,8 @@ macro_rules! reference_math {
                 let lo = at.floor() as usize;
                 let hi = at.ceil() as usize;
                 let t = at - lo as f64;
-                // The recorded index algorithm uses scalar q: NumPy weak promotion retains input dtype.
-                // Learning owns its independently approved float64 percentile contract.
+                // 录制的索引算法使用标量 q：NumPy 的弱类型提升保留输入的 dtype。
+                // 学习另有一份单独批准的 float64 百分位契约。
                 let diff = d[hi] - d[lo];
                 if t >= 0.5 {
                     (d[hi] - diff * ((1.0 - t) as $ty)) as f64

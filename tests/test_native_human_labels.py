@@ -1,14 +1,11 @@
-"""M2 user-label/undo acceptance, on independent disposable package clones only.
+"""M2 用户标签/撤销验收，只用各自独立、用完即弃的包副本。
 
-Explicit ILLUSTASH_TERMS_BIN is required; missing release is not acceptance. The native host is
-compared with the former Python reference handler through fixed recordings (tests/fixed_expectations.py,
-#9): the seed packages, every reference response and the reference library state after each step
-were recorded while the reference existed). Neither side
-starts research workers. All app/source/provenance tables, raw DDL, typed cells and rowids are
-compared after each HTTP step (as digests), including history, undo and durable events. Responses
-are compared byte for byte; only session tokens, loopback origins and temporary roots are
-placeholders. The recorded seed fixed its timestamp DEFAULTs and preseeded user terms, so native
-results are deterministic. Snapshots are individually transactional, not cross-database atomic.
+必须显式给出 ILLUSTASH_TERMS_BIN；缺少 release 构建不算验收。原生宿主经固定录制与原 Python 参考处理程序
+比较（tests/fixed_expectations.py，#9：种子包、参考实现的每个响应和每一步之后参考图库的状态，
+都是在参考实现还在时录制的）。两边都不启动研究 worker。每个 HTTP 步骤之后比较 app/source/provenance 的
+全部表、原始 DDL、带类型的单元格和 rowid（以摘要形式），包括历史、撤销和持久化的事件。响应逐字节比较；
+只有会话 token、回环 origin 和临时根目录是占位符。录制的种子固定了时间戳的 DEFAULT 并预置了用户词条，
+所以原生结果是确定的。快照各自在一个事务里取，跨数据库不是原子的。
 """
 from contextlib import closing
 import datetime
@@ -42,13 +39,13 @@ def quote(name):
 
 
 def difference(left, right):
-    """Byte difference of two responses; clock-like text is compared as `<clock>`."""
+    """两个响应的字节差异；形似时钟的文本按 `<clock>` 比较。"""
     masked = [dict(r, body=unclocked(r['body'])) if 'body' in r else r for r in (left, right)]
     return verify_read_http.difference(*masked)
 
 
 def snapshot(path):
-    """Schema and every table (typed cells and physical rowids), as per-table digests."""
+    """schema 和每张表（带类型的单元格和物理 rowid），以逐表摘要的形式给出。"""
     from tests.fixed_expectations import table_digests
     return table_digests(temporary_path(path))
 
@@ -58,7 +55,7 @@ def states(lib):
 
 
 def freeze_seed_defaults(path):
-    """Only a freshly constructed temporary seed: alter DEFAULTs once, never compared output."""
+    """只用于新构造的临时种子：改一次 DEFAULT，从不用于比较的输出。"""
     path = temporary_path(path)
     with closing(sqlite3.connect(path)) as c:
         current, storage = c.execute('SELECT CURRENT_TIMESTAMP,typeof(CURRENT_TIMESTAMP)').fetchone()
@@ -99,13 +96,13 @@ class SnapshotTest(unittest.TestCase):
                 with closing(sqlite3.connect(b)) as c:
                     c.execute(sql); c.commit()
                 self.assertNotEqual(snapshot(a)[table], snapshot(b)[table], sql)
-            # The same snapshot function is used for named source/provenance DBs, not only app.
+            # 同一个快照函数也用于指名的 source/provenance 数据库，不只是 app。
             self.assertIsNotNone(difference({'status': 200, 'body': b'{"x": 1}'},
                                             {'status': 200, 'body': b'{"x":1}'}))
 
 
     def test_http_pair_rejects_same_failed_partial_commit_and_aux_mutation(self):
-        # Exercise the real pair gate without a native release or a live HTTP server.
+        # 不用原生 release 构建、也不用活的 HTTP 服务器，走一遍真实的 pair 把关。
         from types import SimpleNamespace
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -177,7 +174,7 @@ class NativeHumanLabelsTest(unittest.TestCase):
         self.env = {**os.environ, 'PATH': str(sentinel_bin), 'HOME': str(self.root / 'home'), 'USERPROFILE': str(self.root / 'home'),
                     'ILLUSTASH_APP_SUPPORT': str(support), 'ILLUSTASH_SHARED': str(shared),
                     'ILLUSTASH_PYTHON_SENTINEL': str(self.sentinel),
-                    # Reproducible native keys, so recorded expectations hold (store::new_key test hook).
+                    # 可复现的原生键，录制的期望才能成立（store::new_key 的测试钩子）。
                     'ILLUSTASH_TEST_KEY_COUNTER': str(self.root / 'key-counter')}
         for name in ('pristine', 'left', 'right'):
             lib = self.rec.package(name, self.root / f'{name}.pilib')
@@ -225,7 +222,7 @@ class NativeHumanLabelsTest(unittest.TestCase):
         return process
 
     def reference_response(self, label, item):
-        """The former reference's response to the same request (recorded)."""
+        """原参考实现对同一请求的响应（已录制）。"""
         return self.rec.response(item) if isinstance(self.rec, Live) else self.rec.value(label)
 
     def pair(self, url, body, *, expected=200, headers=None):
@@ -234,7 +231,7 @@ class NativeHumanLabelsTest(unittest.TestCase):
         before = [self.rec.state('before'), states(self.right)]
         responses = [self.reference_response('response', item), fetch(self.origin, item, self.origin)]
         after = [self.rec.state('after'), states(self.right)]
-        # Even two identically failed/partially committed commands must fail acceptance.
+        # 即使两边的命令以相同方式失败/部分提交，验收也必须判为失败。
         for old, new, response in zip(before, after, responses):
             if response['status'] >= 400:
                 self.assertEqual(old, new, ('failed POST partially committed', url, body))
@@ -249,7 +246,7 @@ class NativeHumanLabelsTest(unittest.TestCase):
         return json.loads(responses[1]['body'])
 
     def latest_action(self):
-        """Latest live action; both sides hold the same history (checked after every step)."""
+        """最新的未撤销操作；两边的历史相同（每一步之后都检查）。"""
         with closing(sqlite3.connect(self.right.db)) as c:
             action = c.execute('SELECT id FROM actions WHERE undone=0 ORDER BY id DESC LIMIT 1').fetchone()
         return action[0] if action else None
@@ -260,7 +257,7 @@ class NativeHumanLabelsTest(unittest.TestCase):
         return self.pair('/api/undo', {'id': action})
 
     def seed_both(self):
-        # Seed history through actual old commands once (recorded), then clone the complete committed input.
+        # 用真实的旧命令播种一次历史（已录制），再复制完整的已提交输入。
         self.stop(self.process)
         self.rec.package('seeded', self.left.path)
         for filename in ('library.sqlite', 'source.sqlite', 'provenance.sqlite'):
@@ -352,7 +349,7 @@ class NativeHumanLabelsTest(unittest.TestCase):
             with closing(sqlite3.connect(lib.db)) as c:
                 c.execute("CREATE TRIGGER fail_action BEFORE INSERT ON actions BEGIN SELECT RAISE(ABORT,'synthetic action failure'); END")
                 c.commit()
-        # The injected schema itself is part of the common input, not an output exception.
+        # 注入的 schema 本身是共同输入的一部分，不是输出上的例外。
         before = [self.rec.state('before'), states(self.right)]
         item = {'method': 'POST', 'url': '/api/tag', 'body': json.dumps({'ids': ['a'], 'tag': '全新故障标签'}),
                 'headers': {'Content-Type': 'application/json', 'X-CSRF-Token': self.token}}
@@ -361,8 +358,8 @@ class NativeHumanLabelsTest(unittest.TestCase):
         self.assertIsNone(difference(old, native), difference(old, native))
         self.assertEqual(native['status'], 500)
         self.assertEqual(states(self.right), before[1])
-        # The old CLI creates the concept outside its verdict transaction. Record the real
-        # legacy partial commit separately; this exception never weakens normal pair().
+        # 旧 CLI 在裁决事务之外创建 concept。把旧实现真实的部分提交单独录制；
+        # 这个例外从不放宽普通的 pair()。
         after_old = self.rec.state('after old')
         self.assertNotEqual(after_old, before[0], 'the legacy partial-create bug must be evidenced')
         self.assertEqual(after_old['source'], before[0]['source'])
@@ -372,8 +369,8 @@ class NativeHumanLabelsTest(unittest.TestCase):
         self.assertEqual(self.rec.value('old concepts'), 1)
         with closing(sqlite3.connect(self.right.db)) as c:
             self.assertEqual(c.execute("SELECT count(*) FROM terms t JOIN term_names n ON n.term_id=t.id WHERE t.kind='concept' AND n.value='全新故障标签'").fetchone()[0], 0)
-        # Successful birth is native-only: the two engines generate independent UUIDs.
-        # Do not map them or claim full two-side state equality for this separate phase.
+        # 成功的新建只看原生一侧：两个引擎各自生成独立的 UUID。
+        # 不映射它们，这个单独阶段也不声称两边状态完全相同。
         with closing(sqlite3.connect(self.right.db)) as c:
             c.execute('DROP TRIGGER fail_action'); c.commit()
         retry_before = states(self.right)
@@ -409,7 +406,7 @@ class NativeHumanLabelsTest(unittest.TestCase):
             self.assertEqual(c.execute('SELECT undone FROM actions WHERE id=?', (action['id'],)).fetchone()[0], 1)
             self.assertEqual(c.execute('SELECT max(id) FROM actions WHERE undone=0').fetchone()[0], None)
             self.assertEqual(c.execute('PRAGMA foreign_key_check').fetchall(), [])
-            # Undo removes the verdict, while the newly created identity and complete history persist.
+            # 撤销去掉裁决，新建的身份和完整的历史仍然保留。
             self.assertEqual(c.execute("SELECT count(*) FROM terms t JOIN term_names n ON n.term_id=t.id WHERE t.kind='concept' AND n.value='全新故障标签'").fetchone()[0], 1)
         retry_after = states(self.right)
         for name in ('source', 'provenance'):
@@ -449,7 +446,7 @@ class NativeHumanLabelsTest(unittest.TestCase):
                             'Content-Length': str(len(body))}.items():
             conn.putheader(name, value)
         conn.endheaders(); conn.send(body[:1])
-        # A second connection switches while the old request is still receiving its body.
+        # 旧请求还在接收请求体时，第二个连接切换了图库。
         response = fetch(self.origin, {'method': 'POST', 'url': '/api/libraries/open',
                                       'body': json.dumps({'path': str(newer.path)}),
                                       'headers': {'Content-Type': 'application/json', 'X-CSRF-Token': old_token}}, self.origin)
@@ -467,11 +464,10 @@ class NativeHumanLabelsTest(unittest.TestCase):
         self.assertFalse(self.sentinel.exists())
 
     def test_pending_verdict_startup_and_failed_ack_resume_without_http_trigger(self):
-        # A dispatcher acknowledgement failure happens AFTER the human transaction has
-        # committed. The old reference answered HTTP 500 "rolled back"; by user decision on
-        # 2026-10-11 (#40) the committed undo now answers 200 with the latest step to undo,
-        # and the event stays pending for recovery. Database states still match the recording.
-        # Keep this explicit committed phase separate from pair()'s precommit fault gate.
+        # 分发器的确认失败发生在人工事务已经提交之后。旧参考实现回答 HTTP 500 "rolled back"；
+        # 按用户 2026-10-11 的决定（#40），已提交的撤销现在回答 200 并带上最新可撤销的一步，
+        # 事件保持 pending，留待恢复。数据库状态仍与录制一致。
+        # 这个显式的已提交阶段与 pair() 的提交前故障把关分开。
         for owner in ('character', 'curation'):
             self.seed_both()
             for lib in (self.left, self.right):
@@ -485,7 +481,7 @@ class NativeHumanLabelsTest(unittest.TestCase):
             item = {'method': 'POST', 'url': '/api/undo', 'body': json.dumps({'id': action}).encode(),
                     'headers': {'Content-Type': 'application/json', 'X-CSRF-Token': self.token}}
             old, native = self.reference_response('response', item), fetch(self.origin, item, self.origin)
-            self.assertEqual(old['status'], 500)  # the recorded former answer, no longer the contract
+            self.assertEqual(old['status'], 500)  # 录制的旧响应，已不再是契约
             self.assertEqual(native['status'], 200, native['body'])
             self.assertIn('undo', json.loads(native['body']))
             after = [self.rec.state('after'), states(self.right)]
@@ -503,7 +499,7 @@ class NativeHumanLabelsTest(unittest.TestCase):
                 with closing(sqlite3.connect(lib.db)) as c:
                     c.execute('DROP TRIGGER fail_ack'); c.commit()
             drained = self.rec.state('drained')
-            # No HTTP request: the native loop must recover its committed pending event.
+            # 没有 HTTP 请求：原生循环必须自行恢复已提交的 pending 事件。
             wait_until(lambda: states(self.right) == drained, timeout=5)
             self.assertFalse(self.sentinel.exists())
         self.stop(self.process)
@@ -526,7 +522,7 @@ class NativeHumanLabelsTest(unittest.TestCase):
         with closing(sqlite3.connect(self.right.db)) as c:
             self.assertEqual(c.execute('SELECT kind,status,error FROM backend_effects ORDER BY id').fetchall(),
                              existing + [('verdict', 'done', ''), ('unknown-synthetic', 'pending', '')])
-        # A second already-published pending verdict must also be consumed on restart.
+        # 第二个已发布的 pending 裁决在重启时也必须被处理掉。
         self.stop(self.process)
         with closing(sqlite3.connect(self.right.db)) as c:
             c.execute("INSERT INTO backend_effects(kind) VALUES ('verdict')"); c.commit()

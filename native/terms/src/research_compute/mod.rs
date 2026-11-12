@@ -1,6 +1,5 @@
-//! One-shot research calculator shared by learning (#151) and image relations (#152).
-//! App Research keeps task identity, cancellation, fingerprint checks and formal publication.
-#![cfg_attr(not(test), deny(clippy::unwrap_used))]
+//! 学习（#151）和图片关系（#152）共用的一次性研究计算程序。
+//! 任务身份、取消、指纹检查和正式发布仍由 App Research 负责。
 mod discriminate;
 pub mod features;
 mod groups;
@@ -10,7 +9,7 @@ mod relation_fft;
 pub mod relation_image;
 pub mod relations;
 pub(crate) mod similar;
-// Existing NumPy f32 contiguous reduction shared with native anchor inference.
+// 沿用现有的 NumPy f32 连续归约，与原生锚点推断共用。
 pub(crate) use numeric::{sum32 as contiguous_sum32, sum64 as contiguous_sum64};
 pub mod snapshot;
 use crate::{Error, Result};
@@ -20,16 +19,16 @@ use std::{fs, path::Path};
 fn field<'a>(request: &'a Value, key: &str) -> Result<&'a str> {
     request[key].as_str().ok_or_else(|| Error::Invalid(format!("research request missing {key}")))
 }
-/// Installed readiness: on Windows the fixed OpenBLAS backend must load and match
-/// its registered identity; macOS uses the system Accelerate framework.
+/// 安装版就绪检查：Windows 上固定的 OpenBLAS 后端必须能加载，且与登记的身份一致；
+/// macOS 用系统的 Accelerate 框架。
 pub fn check() -> Result<()> {
     #[cfg(target_os = "windows")]
     illustash_platform::platform_research_math::windows_backend_identity().map_err(Error::Invalid)?;
     Ok(())
 }
 
-/// Installed macOS/Windows routing uses one calculator for learning and image
-/// relations, including a mixed startup batch. App still owns formal publication.
+/// 安装版 macOS/Windows 的路由让学习和图片关系用同一个计算程序，包括启动时的混合批次。
+/// 正式发布仍归 App。
 pub fn handles(request: &Value) -> bool {
     matches!(request["kind"].as_str(), Some("regroup" | "oc" | "similar" | "relate" | "events"))
 }
@@ -45,7 +44,7 @@ fn progress_value(value: Value) -> Result<()> {
     }
     Ok(())
 }
-/// The owner accepts similarity caches as change lists (#31); an owner that does not say so gets full tables.
+/// 所有者接受以变更列表形式返回的相似缓存（#31）；没有声明这一点的所有者拿到整表。
 fn delta_tables(request: &Value) -> bool {
     request["delta_tables"] == true
 }
@@ -53,12 +52,12 @@ pub fn run(request: &Value) -> Result<Value> {
     if request["format"] != "illustash-research/1" || !handles(request) {
         return Err(Error::Invalid("unsupported native research request".into()));
     }
-    // Require the fixed backend even for empty/no-op requests; missing installation
-    // resources must fail in the existing task status, never select portable arithmetic.
+    // 即使是空请求或无操作的请求也要求固定后端；缺少安装资源时必须以现有的任务状态失败，
+    // 绝不选用 portable 的算术实现。
     #[cfg(target_os = "windows")]
     illustash_platform::platform_research_math::windows_backend_identity().map_err(Error::Invalid)?;
     let snapshot = snapshot::Snapshot::open(Path::new(field(request, "snapshot")?))?;
-    // Pixel comparison never reads CCIP features; an unrelated bad vector must not block it (#30).
+    // 像素比对从不读 CCIP 特征；不相关的坏向量不能挡住它（#30）。
     if request["kind"] == "relate" {
         let c = snapshot.read()?;
         let ids = request["args"]["ids"].as_array().ok_or_else(|| Error::Invalid("missing relation ids".into()))?;
@@ -76,8 +75,8 @@ pub fn run(request: &Value) -> Result<Value> {
             let image = match path.flatten().filter(|p| !p.is_empty()) {
                 Some(path) => match relations::load(Path::new(&path)) {
                     Ok(image) => Some(image),
-                    // Pillow thumbnail's I;16 reducing_gap raises ValueError;
-                    // the old worker catches only decode/IO failures as missing.
+                    // Pillow thumbnail 对 I;16 的 reducing_gap 会抛出 ValueError；
+                    // 旧 worker 只把解码和 IO 失败当作缺失来捕获。
                     Err(error) if relation_image::is_mode_error(&error) => return Err(error),
                     Err(_) => None,
                 },
@@ -98,7 +97,7 @@ pub fn run(request: &Value) -> Result<Value> {
             json!({"format":"illustash-research/1","identity":request["identity"],"version":request["version"],"result":result}),
         );
     }
-    // Every remaining kind consumes CCIP features and still rejects any invalid vector.
+    // 其余各类都要用 CCIP 特征，仍然拒绝任何无效向量。
     let features = &features::load(&snapshot.source, Path::new(field(request, "features")?))?;
     let mut out = json!({"format":"illustash-research/1","identity":request["identity"],"version":request["version"]});
     if request["kind"] == "oc" {
@@ -140,7 +139,7 @@ pub fn run(request: &Value) -> Result<Value> {
     out["tables"] = tables;
     Ok(out)
 }
-/// The installed adapter only owns transport; it calls this dispatcher once for one kind.
+/// 安装版适配器只负责传输；它对一个种类调用一次这个 dispatcher。
 pub fn run_files(input: &Path, output: &Path) -> Result<()> {
     let text = fs::read_to_string(input)?;
     let request = crate::strict_json::parse(&text).map_err(|e| Error::Invalid(e.to_string()))?;
@@ -160,8 +159,8 @@ pub fn run_files(input: &Path, output: &Path) -> Result<()> {
 }
 fn response_bytes(kind: Option<&str>, response: Value) -> Result<Vec<u8>> {
     if kind == Some("oc") {
-        // App forwards this result to HTTP with insertion order preserved. Keep the
-        // legacy {total, groups} order and existing HTTP formatter; no stored hash changes.
+        // App 把这个结果原样按插入顺序转发给 HTTP。保持旧的 {total, groups} 顺序和现有的 HTTP 格式化方式；
+        // 已存的哈希都不变。
         let result = crate::http_json::Json::object([
             ("total", response["result"]["total"].clone().into()),
             ("groups", response["result"]["groups"].clone().into()),
@@ -185,7 +184,7 @@ mod tests {
     }
     #[test]
     fn relate_ignores_unrelated_bad_ccip_vector_but_feature_kinds_reject_it() {
-        // #30: synthetic images and features only; relate is a pixel comparison.
+        // #30：只用合成的图片和特征；relate 是像素比对。
         let root = std::env::temp_dir().join(format!("illustash-relate-test-{}", crate::store::new_key().unwrap()));
         let features = root.join("features");
         fs::create_dir_all(&features).unwrap();
@@ -210,9 +209,9 @@ mod tests {
         let before = run(&request("relate")).unwrap();
         assert_eq!(before["result"]["missing"], json!(["C"]));
         assert_eq!(before["result"]["sizes"]["A"], json!({"width":96,"height":64}));
-        // Feature kinds load CCIP first; this minimal snapshot has no full library schema.
+        // 特征类请求先加载 CCIP；这个最小快照没有完整的图库表结构。
         assert!(!run(&request("similar")).unwrap_err().to_string().contains("CCIP"));
-        // An unrelated stored CCIP vector is invalid (NaN), as is a finite one whose norm overflows.
+        // 一个不相关的已存 CCIP 向量无效（NaN），范数溢出的有限向量同样无效。
         for bad in [features::bytes(&[f32::NAN; 768]), features::bytes(&[1e30; 768])] {
             source.execute("INSERT OR REPLACE INTO embeddings VALUES ('UNRELATED','ccip',?)", [bad]).unwrap();
             assert_eq!(run(&request("relate")).unwrap(), before);

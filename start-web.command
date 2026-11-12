@@ -15,6 +15,6 @@ if [[ -z "$CORE" || ! -x "$CORE" ]]; then
   echo '缺少词条核心程序，请先构建 native/terms 或设置 ILLUSTASH_TERMS_BIN。' >&2
   exit 1
 fi
-# The host prints its address with a one-time code and, with --open, opens it in the default browser; the page
-# works only from that address. --no-open (after it) leaves the browser alone.
+# 宿主打印带一次性码的地址，加 --open 时用默认浏览器打开它；页面只能从这个地址使用。
+# 在它后面加 --no-open 则不打开浏览器。
 exec "$CORE" http --root "$PWD" --open "$@"

@@ -1,4 +1,4 @@
-//! Native application POST wrappers: target selection and history remain inside the command transaction.
+//! 原生应用的 POST 包装：目标选择和历史记录都留在命令事务里。
 use crate::{http::LibraryContext, http_json::Json, http_read, store, Error, Result};
 use rusqlite::{
     params, params_from_iter, types::Value as SqlValue, Connection, OpenFlags, OptionalExtension, TransactionBehavior,
@@ -52,8 +52,8 @@ pub(crate) fn request_prepared(
     Ok(result)
 }
 pub(crate) fn core_error(error: impl Into<Error>) -> Error {
-    // Only CLI refusal codes 2/3/4 become terms_core.Failed and Store.Invalid.
-    // SQL/IO failures and the separate NeedId protocol are not business refusals.
+    // 只有 CLI 拒绝码 2/3/4 才会变成 terms_core.Failed 和 Store.Invalid。
+    // SQL/IO 失败和另外的 NeedId 协议不是业务拒绝。
     match error.into() {
         Error::Invalid(message) | Error::Conflict(message) | Error::Schema(message) => Error::Invalid(message),
         other => other,
@@ -182,7 +182,7 @@ fn tag(c: &mut Connection, context: &LibraryContext, body: &Json) -> Result<Json
         ids.iter().map(|id| groups.get(id).cloned().unwrap_or_else(|| Some(id.clone()))).collect::<HashSet<_>>().len();
     let label =
         if add { format!("已给 {n} 张加上标签 {name}") } else { format!("已从 {n} 张去掉标签 {name}") };
-    // The existing CLI rejects the expanded batch before looking up/creating a concept.
+    // 现有 CLI 在查找或创建概念之前就拒绝展开后的批次。
     if ids.len() > 5000 {
         return Err(Error::Invalid("一次 1–5000 张图".into()));
     }
@@ -222,7 +222,7 @@ fn artist(c: &mut Connection, body: &Json) -> Result<Json> {
     }
     let name = string(body.get("name")).filter(|s| !http_read::trim(s).is_empty()).unwrap_or("该画师");
     let tx = c.transaction_with_behavior(TransactionBehavior::Immediate).map_err(core_error)?;
-    // This endpoint selects existing UUIDs directly, without the tag/curate copy expansion.
+    // 这个接口直接选现有的 UUID，不做 tag/curate 那样的副本展开。
     let placeholders = vec!["?"; ids.len()].join(",");
     let ids = tx
         .prepare(&format!("SELECT uuid FROM assets WHERE uuid IN ({placeholders})"))?
@@ -237,7 +237,7 @@ fn artist(c: &mut Connection, body: &Json) -> Result<Json> {
         store::Verdict::No => format!("已标记 {n} 张不是 {name} 画的"),
         store::Verdict::Clear => format!("已清除 {n} 张对 {name} 的判断"),
     };
-    // Existing CLI accepts any existing term key here; retain that public contract.
+    // 现有 CLI 在这里接受任何已有的词条键；保留这个公开契约。
     let (term, _) = store::term_by_key(&tx, artist)
         .map_err(core_error)?
         .ok_or_else(|| Error::Invalid(format!("词条不存在：{artist}")))?;
@@ -360,7 +360,7 @@ fn restore_application(c: &Connection, bound: &SqlValue, before: &Value) -> Resu
             return Err(Error::Io(std::io::Error::other("未知历史")));
         }
     }
-    // Bulk refresh preserves the original query's insertion/rowid order, including reversed targets.
+    // 批量刷新保持原查询的插入顺序和 rowid 顺序，包括反向的目标。
     crate::app_curation::refresh_excluded(c, &touched.into_iter().map(str::to_owned).collect::<Vec<_>>())?;
     c.execute("DELETE FROM reviews WHERE action_id=?", [id])?;
     c.execute("UPDATE actions SET undone=1 WHERE id=?", [id])?;

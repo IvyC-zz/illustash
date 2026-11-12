@@ -110,7 +110,7 @@ mod tests {
         let b = parse(r#"{ "a": {"c":"x","d":0.5}, "b": 1 }"#).unwrap();
         assert_eq!(canonical(&a), r#"{"a":{"c":"x","d":0.5},"b":1}"#);
         assert_eq!(canonical(&a), canonical(&b));
-        // The former Python canonical() gave these exact bytes (#9).
+        // 以前的 Python canonical() 正好给出这些字节（#9）。
         let c = parse("{\"b\":[1,true,null,\"é\\n\"],\"a\":{\"y\":2.5e-05}}").unwrap();
         assert_eq!(canonical(&c), "{\"a\":{\"y\":0.000025},\"b\":[1,true,null,\"é\\n\"]}");
     }

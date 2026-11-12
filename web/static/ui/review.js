@@ -1,5 +1,4 @@
-// The 整理 pages (desktop layout, #199): look-alike groups of unidentified pictures, look-alike pictures across the
-// library, pairs of look-alike characters, and the artist audit.
+// 「整理」各页（桌面布局，#199）：未识别图片的相似分组、整个图库里的相似图片、相似的角色对，以及画师抽查。
 import {edits, setLatest} from '../core/edits.js';
 import {esc, number, stamp} from '../core/format.js';
 import {t, tb} from '../core/i18n.js';
@@ -16,12 +15,12 @@ import {mutate} from './grid.js';
 import {markOc, openPicker} from './palette.js';
 import {navCount, renderHeading} from './shell.js';
 
-// ---------- look-alike groups of unmatched images ----------
-// 'look': close centres; 'trait': farther, but the same distinctive WD traits (weaker hint).
+// ---------- 未匹配图片的相似分组 ----------
+// 'look'：中心接近；'trait'：离得更远，但有相同的独特 WD 特征（较弱的线索）。
 export const nearText = g => g.near_kind === 'trait' ? t('外观相似：第 {n} 组', {n: g.near}) : t('可能和第 {n} 组是同一人', {n: g.near});
-// 未识别, group by group: CCIP puts images of one person together reliably (99%) even when it cannot name them (45%).
-// A group whose leads mostly agree is asked「是 TA 吗？」as a whole; the others get 设为… / 原创角色 / 跳过.
-// Tap a picture to leave it out of the group's answer. Answered groups leave the page in place (no reload jump).
+// 未识别，按组整理：CCIP 即使叫不出名字（45%），也能可靠地把同一个人的图放在一起（99%）。
+// 大多数代表图意见一致的组整组问「是 TA 吗？」；其余的组给出「设为…」/「原创角色」/「跳过」。
+// 点一张图，把它排除在这组的回答之外。回答过的组原地离开页面（不会因重新加载而跳动）。
 export const groups = {list: [], shown: 40, off: new Map(), revision: 0};
 export async function renderGroups(keep = false) {
   if (state.route.page !== 'groups') return;
@@ -31,7 +30,7 @@ export async function renderGroups(keep = false) {
   let result; try { result = await api('/api/clusters?nsfw=' + state.nsfw); } catch (e) { if (state.route.page === 'groups' && revision === groups.revision && nsfw === state.nsfw) readFailure($('groupsPage'), e); return; }
   const {clusters, learner} = result;
   if (state.route.page !== 'groups' || revision !== groups.revision || nsfw !== state.nsfw) return;
-  // Groups that can be confirmed in one click come first (biggest first), then the ones still to be named.
+  // 一键就能确认的组排在前面（大的在前），然后是还要起名字的组。
   groups.list = [...clusters].sort((a, b) => !!b.lead - !!a.lead || b.size - a.size || a.cid - b.cid); groups.learner = learner;
   if (!keep) { groups.shown = 40; groups.off = new Map(); }
   drawGroups();
@@ -57,7 +56,7 @@ function groupSection(g) {
   return `<section class="gsec" data-cid="${g.cid}"><div class="gsec-head"><b>${t('第 {id} 组', {id: g.cid})}</b><span class="muted-note">${t('{n} 张', {n: number(g.size)})}${g.traits?.length ? ' · ' + g.traits.slice(0, 2).map(esc).join(' · ') : ''}</span>${head}<a class="quiet link gsec-open" href="#/g/${g.cid}">${t('逐张看')} →</a></div>
     <div class="gsec-imgs">${thumbs}${g.members.length > max ? `<a class="gsec-rest" href="#/g/${g.cid}">+${number(g.members.length - max)}</a>` : ''}</div>${g.near ? `<div class="group-near">${nearText(g)}</div>` : ''}</section>`;
 }
-// ---------- look-alike images across the library (web/similar.py) ----------
+// ---------- 整个图库里的相似图片（native/terms/src/research_compute/similar.rs） ----------
 let similarTimer = 0;
 export async function renderSimilar() {
   if (state.route.page !== 'similar') return;
@@ -82,8 +81,8 @@ export async function renderSimilar() {
   if (busy) similarTimer = setTimeout(renderSimilar, 3000);
 }
 
-// ---------- identity review: pairs of look-alike characters (web/identity.py, Store.identity_queue) ----------
-// One click decides a pair; every decision is an undoable relation, raw records never move.
+// ---------- 身份复核：相似的角色对（/api/identity/queue，native/terms/src/http_characters.rs） ----------
+// 一次点击决定一对；每个决定都是一条可撤销的关系，原始记录从不移动。
 const IDENTITY_PAGE = 12;
 const identity = {items: [], total: 0, offset: 0, busy: new Set()};
 function identitySuggestion(x) {
@@ -138,7 +137,7 @@ async function decideIdentity(i, act) {
   const x = identity.items[i]; if (!x || identity.busy.has(i) || edits.busy) return;
   const card = $('groupsPage').querySelector(`.pair-card[data-i="${i}"]`);
   identity.busy.add(i); card?.classList.add('working');
-  // A duplicate is shown under the side with more images.
+  // 重复的角色显示在图多的那一边下面。
   const [small, big] = x.a.count <= x.b.count ? [x.a, x.b] : [x.b, x.a];
   const body = act === 'skip' ? null : {status: 'accepted', reason: '身份整理',
     ...{same: {a: small.id, b: big.id, kind: 'duplicate_of'}, b_of_a: {a: x.b.id, b: x.a.id, kind: 'form_of'},
@@ -155,9 +154,9 @@ async function decideIdentity(i, act) {
   finally { identity.busy.delete(i); }
 }
 
-// ---------- 画师抽查: acceptance of 找回画师 (docs/PROVENANCE.md section 8) ----------
-// A fixed random sample (the server orders by a hash of the id), answered with the same 是 TA / 不是 as the detail
-// panel, so every answer is in the undo history and fixes the library at the same time.
+// ---------- 画师抽查：找回画师的验收（docs/PROVENANCE.md 第 8 节） ----------
+// 一份固定的随机样本（服务端按 id 的哈希排序），用和详情面板一样的「是 TA」/「不是」回答，所以每个回答都进撤销历史，
+// 同时也修正图库。
 const AUDIT_METHODS = {pixel_hash: [t('像素哈希'), t('和 Danbooru 上的帖子是同一个文件，画师取自帖子的画师标签')],
   gallery_match: [t('本地比对'), t('和 TA 公开作品的小图逐张比对一致')], ocr: [t('签名识别'), t('图上的签名或水印')]};
 const auditMethod = a => a.methods?.includes('pixel_hash') ? 'pixel_hash' : a.methods?.[0] || '';
@@ -212,7 +211,7 @@ export async function renderArtistAudit() {
   $('aaMore')?.addEventListener('click', () => { prefs.set('artistAuditN', n + 10); renderArtistAudit(); });
 }
 
-// The handlers this part of the page registers. Called once, when the page starts.
+// 页面这一部分注册的处理函数。页面启动时调用一次。
 export function wireReview() {
   $('groupsPage').addEventListener('click', async e => {
     const sec = e.target.closest('.gsec'); if (!sec) return;

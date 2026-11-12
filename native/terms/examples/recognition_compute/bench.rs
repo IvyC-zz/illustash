@@ -1,7 +1,7 @@
-//! Recognition throughput benchmark modes (#213), driven by tools/bench_recognition.py.
-//! Synthetic inputs only; models/runtime are explicit paths, never discovered in user data.
-//! `bench-generate` writes seeded pictures and anchors; `bench-stages` repeats the worker's
-//! per-picture sequence (producer::run) with a timer around each step. The worker is unchanged.
+//! 识别吞吐基准的几种模式（#213），由 tools/bench_recognition.py 驱动。
+//! 只用合成输入；模型和运行库用显式路径给出，从不在用户数据里查找。
+//! `bench-generate` 按种子生成图片和锚点；`bench-stages` 重复 worker 对每张图的处理步骤（producer::run），
+//! 每一步单独计时。worker 本身不变。
 use illustash_terms::recognition_compute::{
     anchor_snapshot::Snapshot, backend, claims::Claims, preprocess, producer, session,
 };
@@ -14,7 +14,7 @@ use std::{
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
-/// Picture shapes cycled by index: common illustration sizes, JPEG quality or PNG.
+/// 按序号轮流使用的图片规格：常见插画尺寸，JPEG 质量或 PNG。
 const SPECS: [(u32, u32, Option<u8>); 8] = [
     (1200, 1700, Some(90)),
     (2048, 2048, None),
@@ -45,8 +45,8 @@ impl Rng {
     }
 }
 
-/// Flat-shaded shapes over a soft gradient with mild noise: compresses like an illustration,
-/// unlike pure noise, so file sizes and decode work stay in a realistic range.
+/// 柔和渐变上叠平涂形状，再加轻微噪声：压缩特性像插画而不像纯噪声，
+/// 文件大小和解码工作量都在接近真实的范围内。
 fn picture(width: u32, height: u32, seed: u64) -> image::RgbImage {
     let mut rng = Rng::new(seed);
     let a = [rng.byte(), rng.byte(), rng.byte()].map(f32::from);
@@ -110,9 +110,9 @@ pub fn generate(request: &Value) -> Result<Value> {
         encode(&path, &picture(width, height, seed ^ (i + 1)), quality)?;
         files.push(json!({"path":path,"width":width,"height":height,"bytes":fs::metadata(&path)?.len()}));
     }
-    // Random raw CCIP-shaped vectors: claims cost depends on the anchor count, not their meaning.
+    // 随机的 CCIP 形状原始向量：认领的开销取决于锚点数量，与向量含义无关。
     let shared = PathBuf::from(request["shared"].as_str().ok_or("shared missing")?);
-    // One anchor per character: the snapshot requires unique anchor ids.
+    // 每个角色一个锚点：快照要求锚点 id 唯一。
     let anchors = request["anchors"].as_u64().ok_or("anchors missing")? as usize;
     fs::create_dir_all(shared.join("char-index"))?;
     let mut rng = Rng::new(seed ^ 0xA5A5);
@@ -138,9 +138,8 @@ pub fn stages(request: &Value) -> Result<Value> {
 
     let started = Instant::now();
     session::initialise(&runtime)?;
-    // WD and CCIP on the backends the worker would pick (ILLUSTASH_CPU_ONLY and the setting), as in production.
-    // The first picture is checked bit for bit against ModelSessions::infer, so a drift in the production
-    // configuration fails the benchmark instead of timing something else.
+    // WD 和 CCIP 使用 worker 会选的后端（看 ILLUSTASH_CPU_ONLY 和设置），与生产环境相同。
+    // 第一张图与 ModelSessions::infer 逐位比较，生产配置一旦偏离，基准直接失败，而不是去计时别的东西。
     let acceleration = backend::Acceleration::from_env(Some(&shared));
     let mut wd = session::WdSession::load(&models.join("wd_swinv2_v3_emb.onnx"), &runtime, &acceleration)?;
     let mut ccip = session::CcipSession::load(&models.join("ccip/model_feat.onnx"), &runtime, &acceleration)?;

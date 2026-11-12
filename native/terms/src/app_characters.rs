@@ -1,11 +1,10 @@
-//! HTTP parameter/selection adapter for character verdicts; business rules and history use the shared core.
+//! 角色裁决的 HTTP 参数与选区适配层；业务规则和历史记录用共享的核心。
 use crate::{app_commands, character_commands, http::LibraryContext, http_json::Json, http_read, Error, Result};
 use rusqlite::{Connection, TransactionBehavior};
 use serde_json::{json, Value};
 
 pub(crate) fn request(c: &mut Connection, context: &LibraryContext, path: &str, body: &Json) -> Result<Json> {
-    // Only interpret consumed fields. Python accepts unused arbitrary-size integers and
-    // non-finite floats; serializing the entire body through serde_json would refuse them.
+    // 只解读会用到的字段。Python 接受用不到的任意大小整数和非有限浮点数；把整个请求体经 serde_json 序列化会拒绝它们。
     let mut input = json!({});
     for key in ["entity", "action", "entities", "switch", "yes", "no", "later", "old", "new", "id"] {
         input[key] = argument(body.get(key));
@@ -34,7 +33,7 @@ pub(crate) fn request(c: &mut Connection, context: &LibraryContext, path: &str, 
         args["new_entity"] = input["new"].clone();
     }
     let tx = c.transaction_with_behavior(TransactionBehavior::Immediate).map_err(app_commands::core_error)?;
-    // Match the CLI's guard boundary, including its fast verdict operations.
+    // 与 CLI 的守卫边界一致，包括它那些快速的裁决操作。
     if matches!(op, "change" | "sweep" | "answer") {
         tx.execute("INSERT OR REPLACE INTO meta(key,value) VALUES (?1,'1')", [crate::schema::WRITER_KEY])?;
     } else {
@@ -42,7 +41,7 @@ pub(crate) fn request(c: &mut Connection, context: &LibraryContext, path: &str, 
     }
     if matches!(op, "change" | "reassign") {
         let selection = body.clone();
-        // Defer business selection refusals to the core so its entity/argument check order is preserved.
+        // 业务上的选区拒绝留给核心处理，以保持它检查实体和参数的先后顺序。
         match app_commands::selected_scope(&tx, context, &selection, false) {
             Ok(ids) => args["asked"] = json!(ids),
             Err(Error::Invalid(message)) => args["asked_refused"] = json!(message),
@@ -53,15 +52,15 @@ pub(crate) fn request(c: &mut Connection, context: &LibraryContext, path: &str, 
     tx.execute("INSERT INTO backend_effects(kind) VALUES ('verdict')", [])?;
     crate::schema::commit_writing(tx).map_err(app_commands::core_error)?;
     http_read::register_names(c)?;
-    // A later-only answer has no action, even if an earlier undoable action exists.
+    // 只含 later 的回答没有操作，即使之前有可撤销的操作。
     let undo =
         if op == "answer" && out["action"].is_null() { Json::from(Value::Null) } else { app_commands::last_action(c)? };
     crate::app_effects::drain_after_commit(&context.db);
     Ok(Json::object([("undo", undo)]))
 }
 
-// Non-representable numbers are truthy, non-string arguments. The core refuses them
-// wherever a string/list is required, while HTTP's `value or []` retains Python truthiness.
+// 无法表示的数字当作为真的非字符串参数。核心在要求字符串或列表的地方都会拒绝它们，
+// 而 HTTP 的 `value or []` 保留 Python 的真值语义。
 fn argument(value: Option<&Json>) -> Value {
     match value {
         None => Value::Null,

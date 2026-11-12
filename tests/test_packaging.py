@@ -1,4 +1,4 @@
-"""#69: relocated, allowlisted artifacts on synthetic packages; never real Photos/accounts."""
+"""#69：在合成图库包上测试挪过位置、按允许清单打包的构建产物；从不碰真实的照片图库或账号。"""
 import hashlib
 import importlib.util
 import json
@@ -82,10 +82,10 @@ class PackagingTest(unittest.TestCase):
         build.stage(install, self.binary.parent, research=True, iqdb=Path(os.environ['ILLUSTASH_IQDB_BINARY']) if os.environ.get('ILLUSTASH_IQDB_BINARY') else None)
         suffix = '.exe' if os.name == 'nt' else ''
         adapter = install / 'bin' / ('illustash-worker' + suffix)
-        # No interpreter ships: readiness and requests stay native.
+        # 不附带解释器：就绪检查和请求都保持原生。
         self.assertFalse((install / 'workers').exists())
         self.assertFalse((install / 'runtime').exists())
-        # #37: one worker program; the kind is explicit per launch.
+        # #37：只有一个 worker 程序；每次启动显式指定类型。
         self.assertEqual(sorted(p.name for p in (install / 'bin').iterdir()),
                          sorted(f'illustash-{name}{suffix}' for name in ('terms', 'iqdb', 'worker')))
         env = {k: v for k, v in self.env.items() if k != 'ILLUSTASH_WORKER_KIND'}
@@ -96,7 +96,7 @@ class PackagingTest(unittest.TestCase):
             result = subprocess.run([str(adapter), '--check'], env={**env, **extra}, capture_output=True)
             self.assertNotEqual(result.returncode, 0)
             self.assertIn(message, result.stderr.decode(errors='replace'))
-        # Older layouts and explicit overrides naming illustash-<kind> still dispatch by name.
+        # 旧布局和显式指定 illustash-<kind> 的覆盖仍按名字分派。
         legacy = self.root / 'legacy layout' / ('illustash-provenance' + suffix)
         legacy.parent.mkdir()
         shutil.copy2(adapter, legacy)
@@ -113,13 +113,13 @@ class PackagingTest(unittest.TestCase):
 
 
 class InstalledResearchTest(unittest.TestCase):
-    """Use existing algorithm acceptance with only the installed optional adapter."""
+    """沿用现有的算法验收，只用安装好的可选适配器。"""
     def setUp(self):
         research.NativeResearchTest.setUp(self)
         self.stop(self.process)
         install = self.root / 'research artifact'
         build.stage(install, self.binary.parent, research=True, iqdb=Path(os.environ['ILLUSTASH_IQDB_BINARY']) if os.environ.get('ILLUSTASH_IQDB_BINARY') else None)
-        # The host names the kind; the installed worker carries no kind in its file name.
+        # 由宿主指定类型；安装好的 worker 文件名里不带类型。
         self.env['ILLUSTASH_RESEARCH_WORKER'] = str(install / 'bin' / ('illustash-worker.exe' if os.name == 'nt' else 'illustash-worker'))
         self.env.pop('ILLUSTASH_WORKER_KIND', None)
         self.restart()
@@ -134,10 +134,10 @@ for name, value in research.NativeResearchTest.__dict__.items():
 
 @unittest.skipUnless(sys.platform == 'darwin', 'macOS/Linux only; this startup fixture uses accepted macOS native learning')
 class InstalledLauncherResearchTest(unittest.TestCase):
-    """Prepared actual-host test: startup intent is existing behavior, not a lazy claim.
+    """准备好的真实宿主测试：启动意图是已有的行为，不是延迟兑现的声明。
 
-    Requires this round's explicitly built host/worker/IQDB. No model or system
-    OCR is used; similarity is off so #151's accepted learning path is exercised.
+    需要本轮显式构建的宿主/worker/IQDB。不用模型，也不用系统 OCR；关闭相似度，以便走 #151
+    已验收的学习路径。
     """
     setUpClass = production.InstalledResearchComputeTest.__dict__['setUpClass']
     setUp = production.NativeResearchPublicationTest.setUp
@@ -164,8 +164,8 @@ class InstalledLauncherResearchTest(unittest.TestCase):
             for key in list(self.env):
                 if key.endswith('_WORKER') or key in ('ILLUSTASH_ROOT', 'ILLUSTASH_MODELS', 'ILLUSTASH_WORKER_PYTHON'):
                     self.env.pop(key)
-            # Keep the fixture's explicit HOME/support/shared. The launcher must
-            # configure its installed adapters; no inherited worker can mask it.
+            # 保留夹具显式给出的 HOME/support/shared。启动器必须自己配置安装好的适配器；
+            # 不能有继承来的 worker 把问题掩盖掉。
         self.process, self.log = self.start(self.lib.path, extra=('--no-open',), command=[str(self.launcher)])
         self.port = int(self.process.args[self.process.args.index('--port') + 1])
         self.origin = f'http://127.0.0.1:{self.port}'
@@ -179,8 +179,7 @@ class InstalledLauncherResearchTest(unittest.TestCase):
         with closing(sqlite3.connect(self.lib.db)) as c:
             self.assertEqual(c.execute("SELECT status FROM research_runs WHERE id='startup'").fetchall(), [('done',)])
         self.stop(self.process)
-        # A persisted interrupted intent must be recovered by the same ordinary
-        # launcher without a user HTTP request creating a replacement task.
+        # 已持久化的中断意图必须由同一个普通启动器恢复，不能靠用户的 HTTP 请求新建一个替代任务。
         with closing(sqlite3.connect(self.lib.db)) as c:
             with c:
                 c.execute("UPDATE research_runs SET status='running' WHERE id='startup'")
@@ -227,12 +226,12 @@ class DesktopComputeStagingTest(unittest.TestCase):
             self.assertIn('resources/models/ccip/model_feat.onnx', manifest['files'])
             for name, digest in manifest['files'].items():
                 self.assertEqual(hashlib.sha256((dest / name).read_bytes()).hexdigest(), digest)
-            # #8: a full installer without the bundled models' license texts is never staged.
+            # #8：缺少附带模型许可文本的完整安装包，绝不暂存。
             (source / 'resources/licenses/models/ccip/BigScience-OpenRAIL-M.pdf').unlink()
             with patch.object(build.sys, 'platform', 'win32'), self.assertRaisesRegex(ValueError, 'OpenRAIL-M.pdf'):
                 build.desktop_compute(source, root / 'no model license')
             self.assertFalse((root / 'no model license').exists())
-            # #161: nor one without the Rust crates' license texts.
+            # #161：缺少 Rust crate 许可文本的也不暂存。
             rust = source / 'resources/licenses/rust-dependencies.txt'
             rust.rename(root / 'rust-dependencies.txt')
             with patch.object(build.sys, 'platform', 'win32'), self.assertRaisesRegex(ValueError, 'rust-dependencies.txt'):
@@ -247,7 +246,7 @@ class DesktopComputeStagingTest(unittest.TestCase):
                 build.desktop_compute(source, root / 'mac')
             (root / 'onnxruntime.dll').write_bytes(b'fixture')
             (root / 'onnxruntime.dll').rename(source / 'resources/onnxruntime/onnxruntime.dll')
-            # #271: nor one without DirectML.dll or its license.
+            # #271：缺少 DirectML.dll 或其许可的也不暂存。
             for name in (*build.DIRECTML_FILES, 'resources/onnxruntime/backends.json'):
                 (source / name).rename(root / 'directml-moved')
                 with patch.object(build.sys, 'platform', 'win32'), self.assertRaisesRegex(ValueError, name):
@@ -256,7 +255,7 @@ class DesktopComputeStagingTest(unittest.TestCase):
                 (root / 'directml-moved').rename(source / name)
             (source / 'resources/licenses/models/ccip/BigScience-OpenRAIL-M.pdf').write_bytes(
                 (build.MODEL_LICENSES / 'ccip/BigScience-OpenRAIL-M.pdf').read_bytes())
-            # #168: the release installer has no models; only some of them is refused.
+            # #168：正式发布的安装包不含模型；只含部分模型的会被拒绝。
             (source / 'resources/models/ccip/metrics.json').unlink()
             with patch.object(build.sys, 'platform', 'win32'), patch.object(build, 'check_windows_crt'), self.assertRaisesRegex(ValueError, 'all present or all absent; missing resources/models/ccip/metrics.json'):
                 build.desktop_compute(source, root / 'partial models')

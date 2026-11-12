@@ -3,8 +3,8 @@ use crate::{Error, Result};
 use rusqlite::Connection;
 use std::path::{Path, PathBuf};
 
-/// Host storage operations. There is deliberately no callback for "backup succeeded":
-/// every file-backed migration performs the SQLite copy and quick_check in Core.
+/// 宿主的存储操作。特意不提供「备份成功」的回调：每次基于文件的迁移都在核心里执行 SQLite 复制和
+/// quick_check。
 pub struct RequiredBackup {
     reserve: fn(&Path, &str) -> Result<PathBuf>,
     open: fn(&Path) -> Result<Connection>,
@@ -29,7 +29,7 @@ impl RequiredBackup {
     fn copy_backup(&self, conn: &Connection, path: &std::path::Path) -> Result<()> {
         (|| -> Result<()> {
             let mut target = (self.open)(path)?;
-            // A storage adapter returning an in-memory/source connection cannot acknowledge a file backup.
+            // 存储适配器返回内存连接或源连接时，不能当作文件备份已完成。
             if target.path().filter(|p| !p.is_empty()).is_none() || target.path() == conn.path() {
                 return Err(Error::Invalid("升级备份未完成".into()));
             }
@@ -45,7 +45,7 @@ impl RequiredBackup {
                 }
             }
             drop(copy);
-            // This invocation owns the quiescent backup. Make it standalone without WAL sidecars.
+            // 这个静止的备份归本次调用所有。把它改成不带 WAL 附属文件的独立文件。
             target.pragma_update(None, "journal_mode", "DELETE")?;
             let check: String = target.query_row("PRAGMA quick_check", [], |r| r.get(0))?;
             if check != "ok" {
@@ -55,7 +55,7 @@ impl RequiredBackup {
         })()
     }
 }
-/// Only SQLite's original empty main filename denotes an in-memory database.
+/// 只有 SQLite 原本的空主文件名表示内存数据库。
 pub(crate) fn required(conn: &Connection, purpose: &str, backup: &RequiredBackup) -> Result<Option<PathBuf>> {
     let Some(path) = conn.path().filter(|p| !p.is_empty()) else { return Ok(None) };
     backup.create(conn, Path::new(path), purpose).map(Some)

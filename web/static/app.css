@@ -72,7 +72,7 @@ button:active:not(:disabled){transform:translateY(.5px)}
 kbd{font-family:inherit;font-size:var(--fs-10);white-space:nowrap;color:var(--muted);font-weight:400;border:1px solid var(--line);border-radius:var(--radius-4);padding:0 var(--space-4);line-height:15px;display:inline-block}
 .app{display:flex;height:100dvh;overflow:hidden}
 
-/* sidebar */
+/* 侧栏 */
 .sidebar{width:248px;flex-shrink:0;background:var(--soft);border-right:1px solid var(--line);padding:22px 10px 12px;display:flex;flex-direction:column;min-height:0}
 .brand{display:flex;align-items:center;gap:var(--space-8);font-size:var(--fs-13);font-weight:600;padding:0 8px 22px;letter-spacing:-.25px}
 .nav{border:0;background:transparent;border-radius:var(--radius-6);height:var(--h-36);display:flex;align-items:center;gap:var(--space-10);padding:0 var(--space-10);margin-bottom:2px;color:var(--ink)}
@@ -91,7 +91,7 @@ kbd{font-family:inherit;font-size:var(--fs-10);white-space:nowrap;color:var(--mu
 .local-dot{width:5px;height:5px;border-radius:var(--radius-round);background:#70708a}
 .subtle{margin-left:auto;color:var(--muted)}
 
-/* top */
+/* 顶部 */
 main{flex:1;display:flex;flex-direction:column;min-width:0}
 .topbar{height:52px;flex-shrink:0;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:var(--space-8);padding:0 18px}
 .breadcrumb{font-size:var(--fs-12);color:var(--ink2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -142,12 +142,11 @@ select{height:var(--h-32);border:1px solid var(--line);background:var(--sheet);c
 .zoom-control{display:flex;align-items:center;gap:var(--space-6);color:var(--muted);font-size:var(--fs-11)}
 .zoom-control input{width:84px;accent-color:#585865}
 
-/* grid */
+/* 网格 */
 .viewport{position:relative;overflow:auto;flex:1;min-height:0;overscroll-behavior:contain;scrollbar-width:thin;scrollbar-color:var(--scroll-thumb) transparent}
 .viewport:focus-visible{outline:none}
-/* Home and the character pages bleed strips and sticky bars to the sheet edge and draw card shadows: the scroll area
-   spans the gutter there, so nothing overflows it (no stray horizontal scrollbar) or gets clipped. Their pages keep
-   their width; the image grid, which sizes itself from the viewport, is not affected. */
+/* 首页和角色页把条带和吸顶栏铺到页面边缘，还要画卡片阴影：那里的滚动区域横跨页边距，所以没有东西会溢出它（不会多出
+   横向滚动条）或被裁掉。这些页面的宽度不变；按视口决定自身尺寸的图片网格不受影响。 */
 .viewport:has(>.home-page:not([hidden])),.viewport:has(>.char-index:not([hidden])){margin:0 calc(-1 * var(--gutter));padding-left:var(--gutter);padding-right:var(--gutter)}
 .grid{position:relative;width:100%;min-height:1px;user-select:none;-webkit-user-select:none}
 .card{position:absolute;background:var(--soft);border-radius:var(--radius-8);overflow:hidden;display:flex;flex-direction:column;cursor:default;contain:layout style;transition:opacity .18s var(--ease),transform .18s var(--ease),box-shadow .12s ease}
@@ -183,7 +182,7 @@ select{height:var(--h-32);border:1px solid var(--line);background:var(--sheet);c
 #errorBanner,#damageBanner{border:1px solid #eadfd2;background:var(--tone-warn-bg);color:var(--tone-warn-ink);border-radius:var(--radius-6);padding:var(--space-10);margin-bottom:12px;font-size:var(--fs-12)}
 #damageBanner .damage-line{margin:8px 0 0}
 
-/* character index */
+/* 角色索引 */
 .char-index{padding-bottom:30px}
 .char-group{margin-bottom:26px}
 .char-group h2{font-size:var(--fs-13);font-weight:600;margin:4px 0 12px;display:flex;gap:var(--space-10);align-items:baseline;text-transform:capitalize}
@@ -211,7 +210,7 @@ select{height:var(--h-32);border:1px solid var(--line);background:var(--sheet);c
 .pin.on{color:#b08a2d}
 .more{margin-top:6px;color:var(--muted)}
 
-/* inspector */
+/* 检查面板 */
 .inspector{width:340px;flex-shrink:0;border-left:1px solid var(--line);overflow:auto;background:var(--sheet);scrollbar-width:thin}
 .inspector-head{position:sticky;top:0;background:var(--glass-head);backdrop-filter:blur(8px);z-index:var(--z-page-3);display:flex;align-items:center;padding:var(--space-10) var(--space-14);gap:var(--space-2);font-size:var(--fs-11);color:var(--muted)}
 .preview{display:flex;height:300px;width:calc(100% - 32px);background:var(--soft);align-items:center;justify-content:center;margin:0 16px 16px;border-radius:var(--radius-8);overflow:hidden;border:0;padding:0;cursor:zoom-in}
@@ -258,7 +257,7 @@ details[open].inspector-section summary::before{transform:rotate(90deg)}
 .metadata dd{margin:0;color:var(--ink2);word-break:break-all}
 .loading-line{color:var(--muted);padding:var(--space-20);text-align:center;font-size:var(--fs-12)}
 
-/* selection bar & toast */
+/* 选择栏与 toast */
 .selection-bar{position:fixed;bottom:26px;left:calc(50% + 124px);transform:translateX(-50%);border:1px solid #dbdbe2;background:var(--bar-bg);backdrop-filter:blur(15px);box-shadow:0 8px 34px #13142e1c;border-radius:var(--radius-14);padding:var(--space-8) var(--space-10);display:flex;align-items:center;gap:var(--space-6);z-index:var(--z-bar);white-space:nowrap;animation:rise .18s var(--ease)}
 @keyframes rise{from{opacity:0;transform:translate(-50%,8px)}}
 .sel-count{font-size:var(--fs-12);color:#474757;font-variant-numeric:tabular-nums;padding:0 var(--space-4)}
@@ -269,7 +268,7 @@ details[open].inspector-section summary::before{transform:rotate(90deg)}
 .toast-undo:hover{background:#ffffff33}
 .busy .selection-bar button:not(#clearSel),.busy [data-not],.busy [data-swap],.busy .alt{pointer-events:none;opacity:.5}
 
-/* viewer */
+/* 查看器 */
 .viewer{position:fixed;inset:0;z-index:var(--z-overlay);background:#121215;display:flex;flex-direction:column;color:#e4e4e9;animation:fade .15s ease}
 @keyframes fade{from{opacity:0}}
 .viewer-top{display:flex;align-items:center;gap:var(--space-10);padding:var(--space-10) var(--space-16);font-size:var(--fs-12);color:#a8a8b2}
@@ -293,7 +292,7 @@ details[open].inspector-section summary::before{transform:rotate(90deg)}
 .viewer-bar .alt{background:#ffffff0d;border-color:#ffffff24;color:#e2e2e8}
 .viewer-bar .alt kbd{color:#a2a2b0;border-color:#ffffff33}
 
-/* palette & dialogs */
+/* 命令面板与对话框 */
 dialog{width:440px;max-width:calc(100vw - 32px);border:1px solid var(--line);border-radius:var(--radius-14);box-shadow:0 15px 65px #1c1c2324;padding:22px;color:inherit}
 dialog::backdrop{background:#1d1d2330;backdrop-filter:blur(2px)}
 dialog.palette{width:520px;padding:0;margin-top:14vh;overflow:hidden}
@@ -335,7 +334,7 @@ dialog.palette{width:520px;padding:0;margin-top:14vh;overflow:hidden}
 .viewer-bar{gap:var(--space-10)}
 }
 @media(prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
-/* duplicates */
+/* 重复 */
 .dup-badge{position:absolute;top:7px;right:7px;padding:var(--space-1) var(--space-8);border-radius:var(--radius-10);font-size:var(--fs-11);font-weight:600;font-variant-numeric:tabular-nums;color:#fff;background:hsl(var(--dup-hue) 45% 42%);box-shadow:0 0 0 1.5px #fff}
 .dup-list{display:flex;flex-direction:column;gap:var(--space-6)}
 .dup-copy{display:flex;align-items:center;gap:var(--space-10);padding:var(--space-6);border:1px solid var(--line);border-radius:var(--radius-8);background:var(--sheet);text-align:left;font-size:var(--fs-12);line-height:1.45}
@@ -344,7 +343,7 @@ dialog.palette{width:520px;padding:0;margin-top:14vh;overflow:hidden}
 .dup-copy small{color:var(--muted)}
 .dup-badge.folded{background:#0000008a;box-shadow:none;font-weight:500}
 .subtle-action{color:var(--muted);font-size:var(--fs-12)}
-/* aspect-ratio grid: the picture's own box carries ring, check and badges */
+/* 按宽高比的网格：图片自己的方框带着圆环、勾选和角标 */
 .card.fit{background:transparent}
 .card.fit .image-stage{background:transparent}
 .fit-box{position:relative;border-radius:var(--radius-6);overflow:hidden;background:var(--soft);transition:box-shadow .12s ease}
@@ -358,7 +357,7 @@ dialog.palette{width:520px;padding:0;margin-top:14vh;overflow:hidden}
 .card.fit .fit-box{width:100%;height:100%}
 .card.fit .fit-box.whole img{object-fit:contain}
 .caption small{flex-shrink:0;color:var(--muted);font-size:var(--fs-10);font-weight:600}
-/* sync status & settings */
+/* 同步状态与设置 */
 a.sidebar-bottom{text-decoration:none;color:var(--ink2);border-radius:var(--radius-6);margin:0 -4px;padding-left:var(--space-14)}
 a.sidebar-bottom:hover{background:#0000000a}
 .local-dot.busy{background:#c28a2c;animation:pulse 1.2s ease-in-out infinite}
@@ -425,7 +424,7 @@ details.more>summary:hover{color:var(--ink)}
 .segmented button+button{border-left:1px solid var(--line)}
 .segmented button.on{background:var(--accent-soft);color:var(--accent);font-weight:500}
 a.sidebar-bottom .subtle{flex:none}
-/* look-alike groups */
+/* 相似分组 */
 .groups-page{padding:4px 2px 40px}
 .groups-bar{display:flex;align-items:center;gap:var(--space-8);margin-bottom:12px}
 .groups-bar .spacer{flex:1}
@@ -511,12 +510,12 @@ dialog.relate{width:min(980px,calc(100vw - 32px));max-height:88vh;overflow:auto}
 .watch-option small{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .watch-option em{font-style:normal;font-size:var(--fs-11);color:var(--muted);white-space:nowrap}
 .watch-note{padding:var(--space-6) var(--space-8) var(--space-2);margin:0}
-/* The work picker drops below the card; the index table keeps its own horizontal scroll. */
+/* 作品选择器在卡片下方展开；索引表格保留自己的横向滚动。 */
 #indexCard{overflow:visible}
 #indexCard .index-table{display:block;overflow-x:auto}
 
-/* Work identity editors reuse the native modal and the app's form tokens. */
-/* identity review: look-alike character pairs */
+/* 作品身份编辑器复用原生模态框和 App 的表单样式变量。 */
+/* 身份复核：相似的角色对 */
 .pair-list{display:flex;flex-direction:column;gap:var(--space-12);max-width:980px}
 .pair-card{border:1px solid var(--line);border-radius:var(--radius-10);padding:var(--space-12) var(--space-14);background:var(--sheet);transition:opacity .17s var(--ease),transform .17s var(--ease)}
 .pair-card.working{opacity:.55;pointer-events:none}
@@ -588,12 +587,12 @@ dialog.profile-dialog{width:min(560px,calc(100vw - 32px));margin-top:8vh;overflo
 @media (max-width:600px){dialog.profile-dialog{margin-top:4vh}.link-row{flex-wrap:wrap}}
 .link-row .guess{font-style:normal;font-weight:500;font-size:var(--fs-11);color:var(--tone-amber-ink);background:var(--tone-amber-bg);border-radius:var(--radius-4);padding:var(--space-1) var(--space-6);margin-left:4px}
 
-/* ===================== Illustash redesign layer ===================== */
+/* ===================== Illustash 改版层 ===================== */
 body{background:var(--canvas);color:var(--ink)}
 :focus-visible{outline:2px solid var(--accent)}
 kbd{font-family:var(--mono);font-size:var(--fs-10);color:var(--muted);background:var(--sheet);border:0;border-radius:var(--radius-6);padding:0 var(--space-6);line-height:17px;box-shadow:0 0 0 1px var(--hair),0 1px 0 var(--hair)}
 .app{background:var(--canvas)}
-/* rail */
+/* 侧边导航 */
 .sidebar{width:84px;background:transparent;border-right:0;padding:var(--space-16) 0 var(--space-14);align-items:center;gap:var(--space-2)}
 .brand{flex-direction:column;gap:var(--space-4);padding:0 0 var(--space-16);font-size:var(--fs-10);font-weight:650;color:var(--ink2);letter-spacing:.1px}
 .brand .logo-mark{width:32px;height:32px;display:block}
@@ -620,11 +619,11 @@ a.sidebar-bottom:hover{background:transparent;color:var(--ink)}
 .sync-text{display:none}
 a.sidebar-bottom.active{color:var(--accent-ink);font-weight:600}
 a.sidebar-bottom.active .nav-icon{background:var(--accent-soft);color:var(--accent)}
-/* sheets */
+/* 页面底板 */
 .workspace{padding:var(--space-10) var(--space-10) var(--space-10) 0;gap:var(--space-10)}
 .content{background:var(--sheet);border-radius:var(--radius-18);box-shadow:var(--sheet-shadow);padding:0 var(--gutter);overflow:hidden}
 .inspector{width:320px;border-left:0;border-radius:var(--radius-18);box-shadow:var(--sheet-shadow);background:var(--sheet);scrollbar-width:none}
-/* top bar */
+/* 顶栏 */
 .topbar{height:auto;min-height:70px;border-bottom:0;padding:var(--space-14) 0 var(--space-10);gap:var(--space-14);align-items:center}
 #sidebarToggle{display:none}
 .page-heading{flex:1;min-width:0;padding:0;align-items:center;gap:var(--space-12)}
@@ -642,7 +641,7 @@ p{color:var(--muted)}
 .icon{border-radius:var(--radius-8);color:var(--ink2)}
 .icon:hover,.quiet:hover{background:var(--soft)}
 button:active:not(:disabled){transform:scale(.97)}
-/* R18 three-state plate */
+/* R18 三态标牌 */
 .nsfw-toggle{height:var(--h-36);padding:0 var(--space-8);border:0;border-radius:var(--radius-pill);display:inline-flex;align-items:center;justify-content:center;background:var(--soft);color:var(--muted);transition:background .2s,color .2s}
 .nsfw-toggle:hover{background:rgba(var(--sh),.09);color:var(--ink2)}
 .r18{width:34px;height:20px;display:block;overflow:visible}
@@ -657,7 +656,7 @@ button:active:not(:disabled){transform:scale(.97)}
 .nsfw-toggle.s-only{color:var(--r18);background:var(--r18-soft)}
 .nsfw-toggle.s-only .plate{fill:var(--r18);stroke:var(--r18)}
 .nsfw-toggle.s-only text{fill:var(--r18-on)}
-/* toolbar controls */
+/* 工具栏控件 */
 .toolbar{padding-bottom:var(--space-14);gap:var(--space-8)}
 .search-wrap{border:0;background:var(--soft);border-radius:var(--radius-pill);height:var(--h-36);padding:0 var(--space-10) 0 var(--space-14);color:var(--muted)}
 .search-wrap:focus-within{box-shadow:0 0 0 2px var(--accent-soft),0 0 0 1px var(--accent)}
@@ -686,7 +685,7 @@ select:hover{background-color:rgba(var(--sh),.08)}
 .tag-popover input{border:0;background:var(--soft);border-radius:var(--radius-pill);padding:0 var(--space-12)}
 .picker-item{border-radius:var(--radius-8);background:transparent}
 .picker-item:hover{background:var(--soft)}
-/* grid */
+/* 网格 */
 .viewport{scrollbar-color:var(--scroll-thumb) transparent}
 .card{background:var(--soft);border-radius:var(--radius-10);transition:opacity .18s var(--ease),transform .2s var(--ease),box-shadow .2s var(--ease)}
 .image-stage{background:var(--soft)}
@@ -704,13 +703,13 @@ select:hover{background-color:rgba(var(--sh),.08)}
 .card.fit.cursor .fit-box{box-shadow:0 0 0 2px var(--sheet),0 0 0 4px var(--accent-soft)}
 .card.fit.focused .fit-box{box-shadow:0 0 0 2px var(--sheet),0 0 0 4px var(--accent)}
 .card.fit.selected .fit-box{box-shadow:0 0 0 2px var(--sheet),0 0 0 4.5px var(--accent)}
-/* Justified cards are exactly the picture: the picture's own corners are the card's, and its rings sit outside unclipped. */
+/* 两端对齐的卡片就是图片本身：图片自己的圆角就是卡片的圆角，它的圆环画在外面，不被裁切。 */
 .card.fit{overflow:visible;border-radius:var(--radius-8)}
 .marquee{border-color:var(--accent);background:rgba(124,128,216,.14);border-radius:var(--radius-6)}
 .footer{color:var(--muted)}
 #errorBanner,#damageBanner{border:0;background:var(--tone-warn-bg);color:var(--tone-warn-ink);border-radius:var(--radius-12)}
 .dup-badge{border-radius:var(--radius-pill);box-shadow:none}
-/* inspector */
+/* 检查面板 */
 .inspector-head{background:var(--glass-head);-webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px);color:var(--muted);padding:var(--space-12) var(--space-16)}
 .preview{background:var(--soft);border-radius:var(--radius-14);margin:0 18px 18px;width:calc(100% - 36px)}
 .inspector-section{padding:0 20px 18px}
@@ -729,7 +728,7 @@ select:hover{background-color:rgba(var(--sh),.08)}
 .tag:hover{background:rgba(var(--sh),.08)}
 .metadata dt{color:var(--muted)}
 .metadata dd{color:var(--ink2)}
-/* selection bar & toast */
+/* 选择栏与 toast */
 .selection-bar,.toast{left:calc(50% + 42px)}
 .selection-bar{border:0;background:var(--bar-bg);-webkit-backdrop-filter:blur(18px) saturate(1.6);backdrop-filter:blur(18px) saturate(1.6);color:#fff;border-radius:var(--radius-18);padding:var(--space-6) var(--space-6) var(--space-6) var(--space-8);box-shadow:inset 0 0 0 .5px rgba(255,255,255,.18),0 18px 40px -10px rgba(var(--sh),.5)}
 .selection-bar .quiet,.selection-bar .icon{color:#fff;border-radius:var(--radius-12)}
@@ -741,7 +740,7 @@ select:hover{background-color:rgba(var(--sh),.08)}
 .bar-note{color:#ffcf99}
 .toast{background:var(--toast-bg);-webkit-backdrop-filter:blur(18px);backdrop-filter:blur(18px);border-radius:var(--radius-14);box-shadow:0 14px 36px -10px rgba(0,0,0,.45)}
 .toast-undo{border-radius:var(--radius-10)}
-/* dialogs & palette */
+/* 对话框与命令面板 */
 dialog{border:0;border-radius:var(--radius-18);box-shadow:0 0 0 1px var(--hair),0 30px 70px -20px rgba(var(--sh),.4)}
 dialog::backdrop{background:rgba(20,20,30,.22);backdrop-filter:blur(3px)}
 .palette-item{border-radius:var(--radius-10)}
@@ -749,7 +748,7 @@ dialog::backdrop{background:rgba(20,20,30,.22);backdrop-filter:blur(3px)}
 .palette-name{font-family:inherit;font-size:var(--fs-13);letter-spacing:0}
 .palette-item img,.palette-glyph{border-radius:var(--radius-10)}
 .staged-chip{background:var(--accent-btn)}
-/* character index & groups */
+/* 角色索引与分组 */
 .char-card{border-radius:var(--radius-14)}
 .char-card:hover{background:var(--soft)}
 .char-cover{border-radius:var(--radius-12);background:var(--soft)}
@@ -758,7 +757,7 @@ dialog::backdrop{background:rgba(20,20,30,.22);backdrop-filter:blur(3px)}
 .group-card{border:0;border-radius:var(--radius-14);box-shadow:0 0 0 1px var(--hair);background:var(--sheet);transition:transform .2s var(--ease),box-shadow .2s}
 .group-card:hover{box-shadow:0 0 0 1px var(--hair),0 14px 26px -14px rgba(var(--sh),.4);transform:translateY(-2px)}
 .pair-card{border:0;box-shadow:0 0 0 1px var(--hair);border-radius:var(--radius-14)}
-/* settings */
+/* 设置 */
 .settings-card{border:0;box-shadow:0 0 0 1px var(--hair);border-radius:var(--radius-14)}
 .settings-nav button.on{background:var(--accent-soft);color:var(--accent-ink)}
 .segmented{border:0;background:var(--soft);border-radius:var(--radius-pill);padding:var(--space-2)}
@@ -781,7 +780,7 @@ input,textarea{color:inherit}
 .card.skeleton{background:linear-gradient(90deg,var(--soft),var(--line),var(--soft));background-size:200% 100%}
 
 
-/* view options popover */
+/* 视图选项弹出层 */
 .view-anchor{position:relative;display:inline-flex}
 .top-actions .icon.on{background:var(--accent-soft);color:var(--accent-ink)}
 .view-pop{position:absolute;top:calc(100% + 10px);right:-4px;z-index:var(--z-menu);width:300px;max-height:min(640px,80vh);overflow:auto;scrollbar-width:none;background:color-mix(in srgb,var(--sheet) 94%,transparent);-webkit-backdrop-filter:blur(30px) saturate(1.8);backdrop-filter:blur(30px) saturate(1.8);border-radius:var(--radius-18);box-shadow:0 0 0 1px var(--hair),0 24px 56px -16px rgba(var(--sh),.36),0 4px 12px -4px rgba(var(--sh),.1);padding:var(--space-14) var(--space-12) var(--space-12);transform-origin:calc(100% - 22px) -8px;animation:popin .22s var(--ease)}
@@ -802,7 +801,7 @@ input,textarea{color:inherit}
 .view-sw.on::after{transform:translateX(14px)}
 .view-foot{display:flex;justify-content:space-between;align-items:center;margin:12px 6px 0;font-size:var(--fs-11);color:var(--muted)}
 .view-foot .link-button.strong{color:var(--accent-ink)}
-/* switches the popover controls */
+/* 弹出层控制的开关 */
 .hide-marks .chips>span,.hide-marks .dup-badge.folded,.hide-marks .machine-dot{display:none}
 body:not(.show-rail-count) .nav-count:not(#countHome){display:none}
 .hide-footer .footer{display:none}
@@ -810,7 +809,7 @@ body:not(.show-rail-count) .nav-count:not(#countHome){display:none}
 @media(prefers-reduced-motion:reduce){.view-pop{animation:none}}
 
 
-/* detail panel: character card */
+/* 详情面板：角色卡片 */
 .inspector{display:flex;flex-direction:column}
 .inspector-head{display:flex;gap:var(--space-4);padding:var(--space-12) var(--space-14) var(--space-8)}
 .inspector-head .icon{width:var(--h-32);height:var(--h-32);border-radius:var(--radius-pill)}
@@ -887,9 +886,8 @@ a.cc-name:hover{color:var(--accent-ink)}
 .cl-ring circle{fill:none;stroke:var(--line);stroke-width:3}
 .cl-ring .cl-done{stroke:var(--accent);stroke-linecap:round;transition:stroke-dasharray .6s var(--ease)}
 .checklist.pulse .cl-pill{animation:cl-pulse .9s var(--ease)}
-/* The checklist pill and the nudge float over the page (#98 Windows check): leave room under the content so its last
-   rows scroll clear of them, keep the pill out of the image viewer and the task panel, and keep the home page's
-   nudges (follow a work, look names up online) off the settings forms they would cover. */
+/* 清单胶囊和提示浮在页面上方（#98 Windows 检查）：在内容下方留出空间，让最后几行能滚到它们上面露出来；胶囊不进图片
+   查看器和任务面板；首页的提示（关注作品、联网查名字）不盖住设置表单。 */
 body:has(#checklist:not([hidden])) .viewport{padding-bottom:64px}
 body:has(#nudge:not([hidden])) .viewport{padding-bottom:120px}
 body:has(#viewer:not([hidden])) .checklist,body:has(#taskPanel:not([hidden])) .checklist{display:none}
@@ -1006,7 +1004,7 @@ body:has(#settingsPage:not([hidden])) .nudge{display:none}
 
 /* 角色页：书架 / 列表 */
 .cast{padding-bottom:28px}
-/* The shelf's spacing between the sticky tabs, the pane and the footer; full width, unlike the 作品 page's .shelf (#274). */
+/* 书架在吸顶标签页、面板和页脚之间的间距；占满宽度，不同于「作品」页的 .shelf（#274）。 */
 .cast-shelf{display:flex;flex-direction:column;gap:var(--space-14)}
 .cast-av{display:block;border-radius:var(--radius-round);overflow:hidden;background:var(--soft);box-shadow:inset 0 0 0 1px var(--hair);flex:none}
 .cast-av img{width:100%;height:100%;object-fit:cover;display:block}
@@ -1020,7 +1018,7 @@ body:has(#settingsPage:not([hidden])) .nudge{display:none}
 .cast-tab.on{background:var(--ink);color:var(--sheet);font-weight:600}
 .cast-tab.on small{color:color-mix(in srgb,var(--sheet) 65%,transparent)}
 .cast-tab.on .cast-av{box-shadow:0 0 0 1.5px color-mix(in srgb,var(--sheet) 70%,transparent)}
-/* 原创角色 / 未归作品 are groups, not works: outlined, after the works */
+/* 原创角色 / 未归作品 是分组，不是作品：用描边样式，排在作品之后 */
 .cast-tab.pseudo{background:transparent;box-shadow:inset 0 0 0 1px var(--line);color:var(--muted)}
 .cast-tab.pseudo:hover{background:var(--soft)}
 .cast-tab.pseudo.on{background:var(--ink);box-shadow:none;color:var(--sheet)}
@@ -1120,8 +1118,8 @@ body:has(#settingsPage:not([hidden])) .nudge{display:none}
 .cast-plus{color:var(--accent-ink);font-weight:700;background:var(--accent-soft);border-radius:var(--radius-pill);padding:var(--space-1) var(--space-8);font-size:var(--fs-11)}
 .cast .dim{color:var(--faint)}
 .cast-more{display:block;margin:14px auto 0}
-/* A poster's viewer (#293): the random picture comes in softly over the cover; two picture layers swap with a fade, a
-   blurred copy sits behind a picture shown whole, ticks say which picture, a minimap how far down */
+/* 海报的查看器（#293）：随机抽到的图在封面上柔和地出现；两层图片以淡入淡出互换，整张显示的图后面垫着它的模糊副本，
+   刻度表示是第几张，小地图表示往下看了多少 */
 .cast-poster .img img.drawn{animation:poster-drawn .4s ease-out}
 @keyframes poster-drawn{from{opacity:.25}to{opacity:1}}
 .cast-poster.look:hover .img{transform:none}
@@ -1141,7 +1139,7 @@ body:has(#settingsPage:not([hidden])) .nudge{display:none}
 .cast-poster .mini i{position:absolute;left:0;right:0;border-radius:var(--radius-2);background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.35)}
 @media(prefers-reduced-motion:reduce){.cast-poster,.cast-poster .img,.cast-fan i,.cast-poster .look-img .pic,.cast-poster .look-img .bg{transition:none}.cast-poster .img img.drawn{animation:none}}
 
-/* 暗色遮罩仍直接写色值：::backdrop 在较旧的内核里不继承自定义属性，不能引用变量。 */
+/* ===================== 深色主题（html[data-theme=dark]，由 theme.js 设置） ===================== */
 :root[data-theme=dark] dialog::backdrop{background:rgba(0,0,0,.45)}
 
 /* ===================== 主动提问（详情/大图的提问条、首页「认一认」） ===================== */
@@ -1183,7 +1181,7 @@ body:has(#settingsPage:not([hidden])) .nudge{display:none}
 .cast-tagged{margin:18px 0 8px;font-size:var(--fs-12);color:var(--muted);display:flex;flex-wrap:wrap;gap:var(--space-4) var(--space-12);align-items:baseline}
 .cast-tagged a{color:var(--ink2);text-decoration:none}
 .cast-tagged a:hover{color:var(--accent-ink)}
-/* The work beside a character's name, wherever there is room for it (#293) */
+/* 角色名字旁边的作品，只要放得下就显示（#293） */
 .char-work{margin-left:.45em;font-size:max(var(--fs-11),.62em);font-weight:500;color:var(--muted);letter-spacing:0;white-space:nowrap}
 .char-work::before{content:"· "}
 .home-cap .char-work{color:rgba(255,255,255,.72)}
@@ -1196,7 +1194,7 @@ body:has(#settingsPage:not([hidden])) .nudge{display:none}
 .tagged-row small{color:var(--muted);font-size:var(--fs-11)}
 .tagged-list>.muted-note{padding:var(--space-10) var(--space-2)}
 
-/* 随机抽查: the image's character tags float at the bottom; hover a tag for ✓ / ✗ */
+/* 随机抽查：图的角色标签浮在底部；悬停在标签上显示 ✓ / ✗ */
 .chips .hint-add{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .chips.atags{right:6px;max-width:none;gap:var(--space-4)}
 .chips .atag{display:inline-flex;align-items:center;gap:var(--space-2);max-width:100%;padding:var(--space-1) var(--space-4) var(--space-1) var(--space-8)}
@@ -1213,7 +1211,7 @@ body:has(#settingsPage:not([hidden])) .nudge{display:none}
 .chips span.atag.checked.no b{text-decoration:line-through}
 .hide-marks .chips.atags>span{display:inline-flex}
 
-/* 未识别 · 按组整理: one section per look-alike group, answered from its header */
+/* 未识别 · 按组整理：每个相似分组一节，在它的标题栏里回答 */
 .gsecs{display:flex;flex-direction:column;gap:var(--space-14)}
 .gsec{border:1px solid var(--line);border-radius:var(--radius-12);padding:var(--space-10) var(--space-12) var(--space-12);background:var(--sheet)}
 .gsec-head{display:flex;align-items:center;gap:var(--space-6);flex-wrap:wrap;margin-bottom:8px}
@@ -1234,7 +1232,7 @@ body:has(#settingsPage:not([hidden])) .nudge{display:none}
 .gsec-rest{display:flex;align-items:center;justify-content:center;width:96px;height:96px;border-radius:var(--radius-8);background:var(--line);color:var(--ink2);text-decoration:none;font-size:var(--fs-13)}
 .gsec-more{display:flex;justify-content:center;margin:16px 0}
 
-/* launch screen (splash.js): the icon folds itself, the name comes up, then both fly to the brand mark */
+/* 启动画面（splash.js）：图标自己折起来，名字浮现，然后两者一起飞向品牌标志 */
 #splash{position:fixed;inset:0;z-index:var(--z-splash);display:grid;place-items:center;cursor:default}
 #splash .sp-bg{position:absolute;inset:0;background:var(--splash-bg)}
 #splash .sp-col{position:relative;display:grid;justify-items:center}
@@ -1247,7 +1245,7 @@ body:has(#settingsPage:not([hidden])) .nudge{display:none}
 #splash .sp-track{width:100%;height:3px;border-radius:var(--radius-2);background:var(--line);overflow:hidden}
 #splash .sp-fill{display:block;height:100%;width:0;border-radius:var(--radius-2);background:var(--accent)}
 
-/* library management (docs/LIBRARIES.md): the brand only names a test library */
+/* 图库管理（docs/LIBRARIES.md）：品牌标志处只标出测试图库 */
 .brand-lib{max-width:74px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:var(--fs-10);font-weight:500;color:var(--warn);margin-top:-2px}
 .brand-lib:empty{display:none}
 .lib-form{margin:4px 0 12px;padding:var(--space-10) var(--space-12);border-radius:var(--radius-12);background:var(--soft)}
@@ -1322,7 +1320,7 @@ body:has(#settingsPage:not([hidden])) .nudge{display:none}
 .prov-confirm-btns{display:flex;gap:var(--space-8);flex-wrap:wrap;margin-top:8px}
 .acct-expired{color:var(--warn);font-weight:600}
 
-/* 设置 (#200): one page per section, cards as grouped lists */
+/* 设置（#200）：每节一页，卡片做成分组列表 */
 .settings-page{grid-template-columns:150px minmax(0,720px);gap:28px;padding-top:var(--space-2)}
 .settings-nav{gap:var(--space-2);top:4px}
 .settings-nav a{display:block;padding:var(--space-8) var(--space-12);border-radius:var(--radius-10);font-size:var(--fs-13);color:var(--ink2);text-decoration:none}
@@ -1355,7 +1353,7 @@ a.set-link:hover>span:last-child{color:var(--accent-ink)}
   .settings-nav a{white-space:nowrap;flex:none}
 }
 
-/* 任务面板 (#199): the rail entry with the icon's box and cards, and its popover */
+/* 任务面板（#199）：侧边导航里带图标盒子和卡片的入口，以及它的弹出层 */
 button.sidebar-bottom{border:0;background:transparent;cursor:pointer;font:inherit;font-size:var(--fs-11)}
 button.sidebar-bottom:hover{color:var(--ink)}
 button.sidebar-bottom:hover .nav-icon{background:rgba(var(--sh),.06)}
@@ -1367,7 +1365,7 @@ button.sidebar-bottom:hover .nav-icon{background:rgba(var(--sh),.06)}
 .task-entry.on .task-glyph .tg-box,.task-entry:hover .task-glyph .tg-box{fill:color-mix(in srgb,var(--canvas) 70%,var(--accent-soft))}
 .task-glyph .tg-card{fill:var(--canvas);transform-box:fill-box;transform-origin:50% 100%}
 .task-glyph .c2{opacity:0}
-/* Busy: like the launch screen, the cards in the box flip forward one after the other. */
+/* 忙碌时：和启动画面一样，盒子里的卡片一张接一张向前翻。 */
 .task-entry.busy .tg-card{animation:tg-flip 1.6s var(--ease) infinite}
 .task-entry.busy .c2{animation-delay:.8s}
 @keyframes tg-flip{0%{transform:translateY(3px) rotate(0);opacity:0}18%{opacity:1}45%{transform:translateY(-1.5px) rotate(0);opacity:1}80%{transform:translateY(1px) rotate(-24deg);opacity:0}100%{opacity:0}}
@@ -1378,8 +1376,8 @@ button.sidebar-bottom:hover .nav-icon{background:rgba(var(--sh),.06)}
 .task-top{display:flex;align-items:center;justify-content:space-between;margin:0 4px 6px}
 .task-top h2{margin:0;font-size:var(--fs-15);font-weight:650}
 .task-pop h6{margin:12px 6px 6px;font-size:var(--fs-11);font-weight:600;color:var(--muted);letter-spacing:.2px}
-/* One shrinkable column: a long unbroken line inside (a damaged picture's path) must ellipsize, not widen the row past
-   the panel and push its button out of view. */
+/* 一个可收缩的列：里面一行很长、不能断开的文字（损坏图片的路径）必须显示省略号，而不是把这一行撑得比面板还宽，把它的
+   按钮挤出视野。 */
 .task-item{padding:var(--space-10) var(--space-12);display:grid;grid-template-columns:minmax(0,1fr);gap:var(--space-8)}
 .task-item.on{background:color-mix(in srgb,var(--accent-soft) 45%,transparent)}
 .task-main{display:flex;align-items:center;gap:var(--space-10);font-size:var(--fs-12)}
@@ -1402,7 +1400,7 @@ button.sidebar-bottom:hover .nav-icon{background:rgba(var(--sh),.06)}
 @media (max-width:760px){.task-pop{left:12px;right:12px;width:auto}}
 @media(prefers-reduced-motion:reduce){.task-entry.busy .tg-card{animation:none;opacity:1}.task-pop{animation:none}}
 
-/* 资料库 (#198): 角色 / 作品 switch, the work tree and its dialogs */
+/* 资料库（#198）：角色 / 作品 切换、作品树和它的对话框 */
 .segmented a{display:inline-flex;align-items:center;padding:var(--space-4) var(--space-12);border-radius:var(--radius-pill);font-size:var(--fs-12);color:var(--ink2);text-decoration:none}
 .segmented a.on{background:var(--seg-on);color:var(--ink);font-weight:500;box-shadow:0 1px 3px rgba(var(--sh),.12)}
 .lib-views{flex:none}
@@ -1461,9 +1459,8 @@ dialog.index-add{width:min(720px,calc(100vw - 32px))}
 }
 .img-broken{display:grid;place-items:center;width:100%;height:100%;min-height:24px;background:var(--soft);color:var(--muted);font-size:var(--fs-12)}
 
-/* 设置 (#293): one look for every card. Rows have a hairline above them; a row's title is 12.5px, its hint a block
-   of 11.5px grey below; sub-headings split a card into parts; buttons in a card are small outlined pills; tables use
-   the body size; the closing note gets its own hairline and room below. */
+/* 设置（#293）：所有卡片一个样式。每行上方有一条细线；行的标题 12.5px，提示是下面一块 11.5px 的灰字；小标题把卡片分成
+   几部分；卡片里的按钮是小的描边胶囊；表格用正文字号；结尾的说明有自己的细线，下方留出空间。 */
 .settings-card{padding:16px 18px 6px}
 .settings-card h2+.settings-note{margin:0 0 10px}
 .settings-card .setting-line,.settings-card .switch-line,.settings-card a.set-link{min-height:44px;padding:var(--space-8) 0;border-top:1px solid var(--line);border-bottom:0;font-size:var(--fs-12)}

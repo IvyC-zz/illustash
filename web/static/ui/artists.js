@@ -1,4 +1,4 @@
-// Artists in the detail panel (desktop layout, #199): shown only when found, and the lookup a click authorises.
+// 详情面板里的画师（桌面布局，#199）：只在找到时显示，以及点击即授权的查找。
 import {esc, number} from '../core/format.js';
 import {t, tb} from '../core/i18n.js';
 import {hashFor} from '../core/route.js';
@@ -8,9 +8,9 @@ import {confirmAction} from './dialog.js';
 import {error, toast} from './dom.js';
 import {renderHeading} from './shell.js';
 
-// ---------- artists (provenance/, read-only here): shown only when found, never as an empty field ----------
+// ---------- 画师（provenance/，这里只读）：只在找到时显示，从不显示成空栏 ----------
 const artistNames = {};
-// ---------- 按需查找画师 (docs/PROVENANCE.md section 9): the click authorises this one lookup ----------
+// ---------- 按需查找画师（docs/PROVENANCE.md 第 9 节）：点击即授权这一次查找 ----------
 const LOOKUP_NOTE = t('查找画师会把所选图片的像素哈希和 IQDB 签名（一串文本，不是图片）发给 Danbooru，按结果显示画师和原帖。\n「找 TA 的其他图」会下载这位画师公开作品的小缩略图，只在本机比对，比完不留图。\n\n以后点这两个按钮不再提示。继续吗？');
 let lookupTimer = null;
 async function lookupAllowed() {
@@ -56,7 +56,7 @@ export function artistSection(d, ident) {
       ${a.count > 1 ? `<a class="artist-more" href="${hashFor({page: 'library', artist: a.id})}">${t('库里还有 {n} 张', {n: number(a.count - 1)})}</a>` : ''}
       ${a.homes.length ? `<div class="artist-homes">${a.homes.map(h => link(h.url, h.label, t('在 {site} 打开 TA 的主页', {site: h.site}))).join(' · ')}</div>` : ''}
       <button class="quiet artist-find-more" data-artist-more="${esc(a.id)}" data-name="${esc(a.name)}" title="${t('下载 TA 公开作品的小缩略图，在本机比对出库里 TA 的其他图（一两分钟）')}">${t('找 TA 的其他图')}</button></div>`;
-  // 「也许是 TA」: a group recommendation or a signature read on the picture (native/terms/src/http_artists.rs); 是 TA settles it.
+  // 「也许是 TA」：分组推荐，或在图上读到的签名（native/terms/src/http_artists.rs）；「是 TA」就定下来。
   const maybe = a => `<div class="artist-row artist-maybe"><div class="artist-top"><span class="artist-maybe-name">${t('也许是 {name}', {name: `<a class="artist-name" href="${hashFor({page: 'library', artist: a.id})}" title="${t('在图库里只看 TA 的图')}">${esc(a.name)}</a>`})}</span>
       <span class="artist-judge"><button data-artist-verdict="yes" data-artist="${esc(a.id)}" data-name="${esc(a.name)}" title="${t('确认是 TA 画的')}">${t('是 TA')}</button><button data-artist-verdict="no" data-artist="${esc(a.id)}" data-name="${esc(a.name)}" title="${t('不是 TA 画的：不再推荐')}">${t('不是')}</button></span></div>
       <div class="artist-reason">${esc(tb(a.reason || ''))}</div>

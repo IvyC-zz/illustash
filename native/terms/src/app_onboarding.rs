@@ -2,7 +2,7 @@
 //! 首次同步得到了什么，以及按已认出的角色推荐可能想关注的作品。进度按图库存在 prefs（键 `onboarding`）；
 //! 记录进度不授权联网、不启动同步或索引任务。
 //! 唯一的计算是用户打开引导时一次识别组件自检（`--check`，实际加载模型），结果只留在本次会话。
-#![cfg_attr(not(test), deny(clippy::unwrap_used))]
+use crate::error::invalid;
 use crate::{
     app_library::Library,
     app_tasks::{Task, TaskIdentity},
@@ -27,10 +27,6 @@ const ITEMS: [&str; 5] = ["look", "correct", "undo", "group", "follow"];
 const PROMPTS: [&str; 2] = ["names", "works"];
 /// 推荐作品最多几部。
 const SUGGESTED: usize = 5;
-
-fn bad<T>(message: &str) -> Result<T> {
-    Err(Error::Invalid(message.into()))
-}
 
 /// 引导状态。存过的按存的来；没存过的：还没有一次同步走完的图库是新图库（`new`，界面打开时写入），
 /// 其余（升级上来的旧图库、导入的归档）不弹引导（`off`），可以从设置里重新打开。
@@ -57,7 +53,7 @@ fn guide(c: &Connection) -> Result<Value> {
         json!({"status": if synced { "off" } else { "new" }, "step": STEPS[0], "ticked": [], "seen": [], "hidden": false}),
     )
 }
-/// Change the stored guide under the writer lock, so a tick and a step taken together cannot lose one another.
+/// 在写入锁内修改保存的引导，同时打勾和换步时两者都不会丢。
 fn save(lib: &Library, change: impl FnOnce(&mut Value)) -> Result<()> {
     crate::app_settings::update_pref(lib, PREF, |c| {
         let mut v = guide(c)?;
@@ -105,8 +101,8 @@ fn results(c: &Connection) -> Result<Value> {
 /// 限定词同时是普通画面标签的（如 swimsuit）不当作品。按图片数取前几部，已关注的也列出并标明。
 fn suggestions(c: &Connection, general: &[String], watched: &[String]) -> Result<Value> {
     let general: BTreeSet<&str> = general.iter().map(String::as_str).collect();
-    let mut keys: HashMap<String, Option<String>> = HashMap::new(); // entity → work key
-    let mut pictures: BTreeMap<String, BTreeSet<String>> = BTreeMap::new(); // work key → assets
+    let mut keys: HashMap<String, Option<String>> = HashMap::new(); // 实体 → 作品键
+    let mut pictures: BTreeMap<String, BTreeSet<String>> = BTreeMap::new(); // 作品键 → 图片
     let mut rows = c.prepare(&format!(
         "SELECT m.uuid,e.id,e.work_id FROM memberships m JOIN {ENTITIES} e ON e.id=m.entity JOIN assets a ON a.uuid=m.uuid
          WHERE NOT EXISTS(SELECT 1 FROM duplicates h WHERE h.uuid=a.uuid AND h.hidden=1)
@@ -142,7 +138,7 @@ fn suggestions(c: &Connection, general: &[String], watched: &[String]) -> Result
             pictures.entry(key).or_default().insert(uuid);
         }
     }
-    // A qualifier that names a work this library already has counts with that work.
+    // 限定词指向图库里已有的作品时，计入那部作品。
     let mut merged: BTreeMap<String, (Option<String>, String, BTreeSet<String>)> = BTreeMap::new();
     for (key, assets) in pictures {
         let (id, tag) = if let Some(id) = key.strip_prefix("id:") {
@@ -196,7 +192,7 @@ pub(crate) struct Onboarding {
     task: Option<Task>,
     generation: u64,
     session: String,
-    /// The resource root: where the recognition models are looked for (#168).
+    /// 资源根目录：在这里找识别模型（#168）。
     resources: std::path::PathBuf,
 }
 impl Onboarding {
@@ -229,7 +225,7 @@ impl Onboarding {
         json!({
             "recognition": Self::worker("ILLUSTASH_RECOGNITION_WORKER").is_some(),
             "index": Self::worker("ILLUSTASH_INDEX_WORKER").is_some(),
-            // An installer without models (#168): recognition waits until they are downloaded or imported.
+            // 安装包不带模型（#168）：识别要等模型下载或导入后才能用。
             "models_waiting": crate::app_models::waiting(&self.resources),
             "anchors": anchors,
             "check": self.check.lock().expect("onboarding check mutex poisoned").clone(),
@@ -302,7 +298,7 @@ impl Onboarding {
         }
         Ok(out.into())
     }
-    /// The guide for the session's library; `works` adds the suggested works (reads the whole membership table).
+    /// 会话所在图库的引导；`works` 附上推荐作品（会读整张归属表）。
     pub(crate) fn read(
         session: &crate::app_service::Session,
         root: &Path,
@@ -318,7 +314,7 @@ impl Onboarding {
     pub fn post(&mut self, lib: &Library, body: &Json) -> Result<()> {
         let body: Value = serde_json::from_str(&body.dump()).map_err(|e| Error::Invalid(e.to_string()))?;
         if lib.frozen() {
-            return bad("测试图库没有引导");
+            return invalid("测试图库没有引导");
         }
         let named = |field: &str, known: &[&str], message: &str| -> Result<String> {
             body[field]
@@ -352,7 +348,7 @@ impl Onboarding {
             }
             Some("hide") => save(lib, |v| v["hidden"] = (body["hidden"] != false).into()),
             Some("check") => self.start_check(lib),
-            _ => bad("未知操作"),
+            _ => invalid("未知操作"),
         }
     }
 }
@@ -455,8 +451,7 @@ mod tests {
     fn suggestions_group_characters_by_work_and_skip_picture_tags() {
         let (_root, lib) = fixture();
         let c = crate::sqlite::open_with_flags(lib.db(), OpenFlags::SQLITE_OPEN_READ_WRITE).unwrap();
-        // Seeded as the core would have: identities (terms and their `term_tree` rows) are written only while holding
-        // its key; links are the core's own table.
+        // 按核心的做法写入：身份（词条及其 `term_tree` 行）只在持有它的键时写入；关联用的是核心自己的表。
         c.execute("INSERT INTO meta(key,value) VALUES (?1,'1')", [crate::schema::WRITER_KEY]).unwrap();
         c.execute_batch(
             "INSERT INTO assets(uuid) VALUES ('a1'),('a2'),('a3'),('a4');

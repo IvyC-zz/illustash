@@ -1,4 +1,4 @@
-//! Host-local information with research workers absent. Does not start tasks or grant network access.
+//! 没有研究 worker 时宿主本地的信息。不启动任务，也不授予联网权限。
 use crate::{
     http::LibraryContext,
     http_json::Json,
@@ -19,7 +19,7 @@ pub(crate) fn read(context: &LibraryContext, url: &str) -> Result<Json> {
         "/api/about" => return Ok(about(context)),
         "/api/index" => return Ok(Json::object([("state", off())])),
         "/api/provenance" => return Ok(Json::object([("available", false.into())])),
-        // OC sub-grouping is an on-demand research computation, never a stored cache.
+        // OC 细分是按需的研究计算，从不存成缓存。
         "/api/oc/groups" => return Err(Error::Invalid("图像特征未加载，暂时无法按相似细分".into())),
         "/api/accounts" => return accounts(context),
         _ => {}
@@ -56,14 +56,13 @@ fn about(context: &LibraryContext) -> Json {
         ("runtime", env!("ILLUSTASH_RUSTC").into()),
     ])
 }
-/// The recognition components the workers would use (#148): the recognition worker and the ONNX Runtime it loads,
-/// found by the same paths the workers use (the session's resource root, which sync hands workers as
-/// `ILLUSTASH_ROOT`). A missing one is null (shown as 「未安装」). Presence only: the host never loads ONNX Runtime,
-/// and no path is reported.
+/// worker 会用到的识别组件（#148）：识别 worker 和它加载的 ONNX Runtime，按 worker 使用的同样路径查找
+/// （会话的资源根目录，同步以 `ILLUSTASH_ROOT` 交给 worker）。缺少的为 null（显示为「未安装」）。只看有没有：
+/// 宿主从不加载 ONNX Runtime，也不报告任何路径。
 fn components(context: &LibraryContext) -> Json {
     let worker = std::env::var_os("ILLUSTASH_RECOGNITION_WORKER")
         .is_some_and(|p| !p.is_empty() && std::path::Path::new(&p).is_file());
-    // The session's tags file is `<root>/tags/tags_v3.csv`.
+    // 会话的 tags 文件是 `<root>/tags/tags_v3.csv`。
     let root = context
         .tags
         .parent()
@@ -124,16 +123,14 @@ pub(crate) fn names(c: &Connection, progress: bool) -> Result<Json> {
     );
     Ok(out)
 }
-/// Characters, works and skins `/api/names` counts: the active, linked, unmerged non-OC identities' character tags,
-/// work texts and skin variants.
+/// `/api/names` 统计的角色、作品和皮肤：有效、已链接、未合并的非 OC 身份的角色 tag、作品文本和皮肤变体。
 const KINDS: [(&str, &str); 3] = [("characters", "character"), ("works", "work"), ("skins", "skin")];
 fn count_json(total: i64, zh: i64, ja: i64, readable: i64) -> Json {
     Json::object([("total", total.into()), ("zh", zh.into()), ("ja", ja.into()), ("readable", readable.into())])
 }
-/// The counts from the display projection (#105): identities and keys in SQL, each key's choice read from
-/// `term_name_choice`; a key the projection does not hold (a character without a tag) is chosen from its own rows.
-/// Only the projection's per-kind sums and the unprojected keys reach Rust. `shown` is materialized once rather than
-/// inlined into each of the three key branches.
+/// 来自显示投影的计数（#105）：身份和键在 SQL 里，每个键选用的名称从 `term_name_choice` 读；
+/// 投影里没有的键（没有 tag 的角色）从它自己的行里选。只有投影按类别的合计和未投影的键会到 Rust 这边。
+/// `shown` 只物化一次，而不是内联进三个键分支的每一个。
 fn projected_counts(c: &Connection) -> Result<Json> {
     let mut sums: HashMap<String, (i64, i64, i64, i64, String)> = c
         .prepare(
@@ -171,8 +168,7 @@ fn projected_counts(c: &Connection) -> Result<Json> {
     }
     Ok(counts)
 }
-/// The counts from one library-wide load (#102): names not yet in the core, or a projection that is behind the name
-/// tables. Also the reference for the projected counts under the incremental check.
+/// 全图库一次加载得到的计数（#102）：名称还不在核心里，或投影落后于名称表。也是增量检查下投影计数的对照基准。
 fn loaded_counts(c: &Connection) -> Result<Json> {
     let sql = format!(
         "SELECT entity FROM memberships
@@ -263,7 +259,7 @@ mod tests {
     use super::*;
     use std::io::Read;
 
-    /// The name updater's synthetic base library plus every identity shape the counts filter on.
+    /// 名称更新器的合成基础图库，加上计数会筛选的每种身份形态。
     fn library() -> (std::path::PathBuf, Connection) {
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/names/base.json.gz");
         let mut text = String::new();
@@ -327,12 +323,11 @@ mod tests {
         let projected = projected_counts(&tx).unwrap();
         assert_eq!(crate::names_view::whole_loads(), start, "the projected counts load nothing library-wide");
         assert_eq!(projected.dump(), loaded_counts(&tx).unwrap().dump());
-        // alice, bob, hidden_tag and the unprojected ("character","") key of the tagless character; the OC, the merged,
-        // the unlinked and the inactive identities are left out. (An empty-key link that hid a tag cannot be stored
-        // since core v8: `term_links` keys are 1–256 characters.)
+        // alice、bob、hidden_tag，以及无 tag 角色未投影的 ("character","") 键；OC、已合并、未链接和无效的身份不计入。
+        // （从核心 v8 起，隐藏 tag 的空键链接已经存不进去：`term_links` 的键是 1–256 个字符。）
         let counts: serde_json::Value = serde_json::from_str(&projected.dump()).unwrap();
         assert_eq!(counts["characters"]["total"], 4, "{counts}");
-        // The Chinese name is `hidden`'s user name, now under its own tag.
+        // 中文名是 `hidden` 的用户命名，现在在它自己的 tag 下。
         assert_eq!(
             (&counts["characters"]["zh"], &counts["characters"]["readable"]),
             (&1.into(), &2.into()),
@@ -341,7 +336,7 @@ mod tests {
         assert_eq!(counts["skins"]["total"], 2, "{counts}");
         assert_eq!(names(&tx, false).unwrap().get("counts").unwrap().dump(), projected.dump());
         tx.commit().unwrap();
-        // A write that bypassed the core's commit leaves the projection behind: the counts are computed afresh.
+        // 绕过核心提交的写入让投影落后：计数重新计算。
         c.execute("UPDATE meta SET value=CAST(value AS INTEGER)+1 WHERE key='names_version'", []).unwrap();
         assert!(!crate::legacy_names::projection_current(&c).unwrap());
         let start = crate::names_view::whole_loads();
@@ -374,8 +369,8 @@ mod tests {
         let keys: std::collections::BTreeSet<String> =
             libraries(&context).as_object().unwrap().keys().cloned().collect();
         assert_eq!(keys, ["ONNX Runtime", "识别组件"].map(String::from).into(), "no Python-era Pillow/NumPy entries");
-        // ONNX Runtime is found where the workers look for it: under the session's resource root unless
-        // ILLUSTASH_ORT_DYLIB names one (as the Windows acceptance run does; then only that file counts).
+        // ONNX Runtime 在 worker 查找的地方找到：在会话的资源根目录下，除非 ILLUSTASH_ORT_DYLIB 指定了一个（Windows
+        // 验收运行就是这样；这时只算那个文件）。
         let runtime = crate::app_resources::ort_runtime(&root);
         if std::env::var_os("ILLUSTASH_ORT_DYLIB").is_none() {
             assert_eq!(libraries(&context)["ONNX Runtime"], serde_json::Value::Null);

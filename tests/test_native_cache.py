@@ -1,4 +1,4 @@
-"""Native cache clear, using only newly-created synthetic packages and assets."""
+"""原生的缓存清理，只用新建的合成包和资源。"""
 from concurrent.futures import ThreadPoolExecutor
 import http.client
 import json
@@ -42,7 +42,7 @@ class NativeCacheTest(unittest.TestCase):
         new = self.request('/api/cache', {'action': 'clear'})
         self.assertEqual(old['status'], 200)
         self.assertEqual(new['status'], 200)
-        # The reference was recorded on POSIX; Windows file names ignore case, so it also removes keep.JPG.
+        # 参考结果录自 POSIX；Windows 文件名不区分大小写，所以也会删掉 keep.JPG。
         recorded, payload = json.loads(old['body']), json.loads(new['body'])
         if os.name == 'nt':
             recorded['removed'] = payload['removed']
@@ -131,7 +131,7 @@ class NativeCacheTest(unittest.TestCase):
 
     def test_inflight_clear_switch_returns_old_package_settings(self):
         second = self.package('second')
-        # Package copies may have the same ID; storage ownership follows the path/session.
+        # 包的副本可能 ID 相同；存储的归属按路径/会话确定。
         config = json.loads((second.path / 'library.json').read_text())
         config['id'] = json.loads((self.lib.path / 'library.json').read_text())['id']
         (second.path / 'library.json').write_text(json.dumps(config))

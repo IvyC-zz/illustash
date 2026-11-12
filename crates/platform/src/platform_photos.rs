@@ -1,10 +1,10 @@
-//! Read only the explicitly supplied Photos source and probe its local files.
+//! 只读取显式给出的 Photos 来源，并探查它的本地文件。
 use crate::{Error, Result};
 use rusqlite::OpenFlags;
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 pub fn path(root: &Path, uuid: &str, directory: &str, filename: &str) -> Result<(String, PathBuf)> {
-    // Database paths are relative to Photos; reject traversal before considering originals.
+    // 数据库里的路径相对于 Photos；先拒绝越出目录的路径，再考虑原图。
     for value in [directory, filename] {
         if Path::new(value).components().any(|c| !matches!(c, std::path::Component::Normal(_))) {
             return Err(Error::Invalid("Photos 路径不合法".into()));
@@ -29,7 +29,7 @@ pub fn read(raw: &str) -> Result<(PathBuf, Vec<Value>)> {
         PathBuf::from(raw)
     };
     let db = root.join("database/Photos.sqlite");
-    // SQLite reports a refused open only as "unable to open database file"; the file itself says why (#202).
+    // 打开被拒时 SQLite 只报「unable to open database file」；直接打开文件才能知道原因（#202）。
     if let Err(error) = std::fs::File::open(&db) {
         if error.raw_os_error() == Some(libc::EPERM) {
             return Err(illustash_core::error::io_at(error, &db, None));
@@ -41,8 +41,8 @@ pub fn read(raw: &str) -> Result<(PathBuf, Vec<Value>)> {
     Ok((root, rows))
 }
 
-/// macOS privacy settings have not given this app the Photos library (#202): the system refuses the open with EPERM,
-/// where file permissions would give EACCES. Asking the person to allow it in System Settings is the only way on.
+/// macOS 隐私设置没有允许本应用访问 Photos 图库（#202）：系统以 EPERM 拒绝打开，文件权限不足时则是 EACCES。
+/// 唯一的出路是请用户在「系统设置」里允许。
 pub fn denied(error: &Error) -> bool {
     matches!(error, Error::IoAt { source, .. } if source.raw_os_error() == Some(libc::EPERM))
 }

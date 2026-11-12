@@ -1,7 +1,7 @@
-"""#153 fixed LCMS/scalar TIFF candidate parity; explicit binary, never auto-build.
+"""#153：固定的 LCMS/标量 TIFF 候选等价测试；显式指定二进制，从不自动构建。
 
-Old reference: unchanged provenance.sources.pixel_hash and Pillow/Cms2.19.
-Separate path/bytes TIFF expectations are mandatory. Inputs are synthetic only.
+旧参照：未改动的 provenance.sources.pixel_hash 和 Pillow/Cms2.19。
+必须分别给出按路径和按字节的 TIFF 预期。输入只用合成数据。
 """
 import hashlib
 import io
@@ -57,7 +57,7 @@ class IndependentICCAndScalarInputs(unittest.TestCase):
                             image.load()
                             self.assertEqual(bool(image.map), rows == 2)
                             self.assertEqual(image.size, ((3, 2) if rows == 2 or orientation < 5 else (2, 3)))
-                            # Image.__exit__ closes fp, not the surviving mmap/core.
+                            # Image.__exit__ 关闭 fp，但不关闭留下来的 mmap/core。
                             image.close()
                         self.assertEqual(pixel_hash(path) != pixel_hash(path.read_bytes()),
                                          rows == 2 and orientation >= 5)
@@ -84,7 +84,7 @@ class IndependentICCAndScalarInputs(unittest.TestCase):
             path.write_bytes(raw_u16_tiff(width=1, height=1, values=[128], fill_order=2, compression=8))
             with Image.open(path) as image:
                 image.load()
-                self.assertEqual(image.getpixel((0, 0)), 128)  # libtiff reverses compressed bytes.
+                self.assertEqual(image.getpixel((0, 0)), 128)  # libtiff 会把压缩字节反转。
 
     def test_build_override_isolation_keeps_parent_environment(self):
         from tools.build_provenance_probe import build_environment
@@ -167,7 +167,7 @@ class NativeICCAndScalarTest(unittest.TestCase):
                         kwargs['icc_profile'] = profile
                     rgb_image().save(path, **kwargs)
                     self.compare(path)
-        # No silently widened alpha, planar, or tiled domain.
+        # 不悄悄放宽到 alpha、planar 或 tiled 的取值范围。
         path = self.root / 'planar.tiff'
         rgb_image().save(path, tiffinfo={284: 2})
         self.probe(dict(op='hash', path=str(path)), success=False)

@@ -1,4 +1,4 @@
-"""Illustration-like synthetic pictures for image-relation tests (former tests/test_relate.py helpers)."""
+"""图片关系测试用的类插画合成图片（原 tests/test_relate.py 的辅助函数）。"""
 import io
 
 import numpy as np
@@ -6,7 +6,7 @@ from PIL import Image, ImageDraw
 
 
 def picture(seed, size=(900, 1200)):
-    """An illustration-like image: soft colour fields, shapes with edges, fine texture."""
+    """一张类似插画的图片：柔和的色块、带边缘的形状、细密的纹理。"""
     rng = np.random.default_rng(seed)
     base = Image.fromarray(rng.integers(0, 255, (size[1] // 60, size[0] // 60, 3), dtype=np.uint8)).resize(size, Image.BICUBIC)
     d = ImageDraw.Draw(base)

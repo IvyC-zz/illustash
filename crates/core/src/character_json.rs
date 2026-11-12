@@ -1,6 +1,5 @@
-//! Persisted Python json.dumps layout (identity fingerprints and snapshot JSON).
-//! Objects are key-sorted, as identity.propose requires; graph fingerprints contain
-//! only arrays/strings/null. Graph numbers never use the float branch.
+//! 已持久化的 Python json.dumps 格式（身份指纹和快照 JSON）。
+//! 对象按键排序，这是 identity.propose 的要求；图指纹里只有数组、字符串和 null。图里的数字从不走浮点分支。
 use serde_json::Value;
 
 pub fn dump(value: &Value, ascii: bool) -> String {

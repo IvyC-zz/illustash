@@ -1,4 +1,4 @@
-"""M4 sync acceptance: owned synthetic Photos databases, folders and packages only."""
+"""M4 同步验收：只用测试自己的合成照片数据库、文件夹和图库包。"""
 from tests.native_worker_fixture import command as worker_command, source as worker_source, exists as worker_exists
 
 import json
@@ -14,10 +14,10 @@ from tests import photos_fixture
 from tests.test_native_human_labels import snapshot
 from tests.test_read_http import wait_until
 
-# An idle window for the tests whose worker must not be taken for stalled: far longer than a worker start
-# on a busy machine (#219). The product default is 10 minutes and stays so.
+# 给那些 worker 不能被当成卡住的测试用的空闲窗口：远长于繁忙机器上 worker 的启动时间（#219）。
+# 产品默认值是 10 分钟，保持不变。
 WIDE_IDLE_MS=8000
-# How long the paced worker's next report waits after the host shows the last one.
+# 宿主显示上一条报告之后，限速的 worker 等多久再发下一条。
 PACE_S=.8
 
 class NativeSyncTest(unittest.TestCase):
@@ -62,7 +62,7 @@ class NativeSyncTest(unittest.TestCase):
         before=snapshot(self.library/'database/Photos.sqlite')
         state=self.sync()
         self.assertEqual(state['state']['status'],'needs_recognition',state)
-        self.assertEqual(state['state']['total'],2) # folder + E; D already recognised
+        self.assertEqual(state['state']['total'],2) # 文件夹 + E；D 已经识别过
         self.assertEqual(list(state['history'][0]['sources']),['s1','com.atebits.Tweetie2','net.pxv.iphone','com.apple.springboard'])
         with sqlite3.connect(self.lib.source) as c:
             self.assertEqual(c.execute("SELECT uuid,preset FROM assets WHERE source_id='photos' ORDER BY uuid").fetchall(), [('D','x'),('E','pixiv')])
@@ -225,7 +225,7 @@ if failures: Path(sys.argv[2]).write_text(json.dumps(dict(identity=r['identity']
 
     def finish(self):
         import time
-        # Longer than the widest idle window here: a stalled worker is stopped by the host, not by this wait.
+        # 比这里最宽的空闲窗口还长：卡住的 worker 由宿主停下，而不是靠这个等待。
         until=time.monotonic()+60
         while time.monotonic()<until:
             response=self.request('/api/sync')
@@ -245,7 +245,7 @@ if failures: Path(sys.argv[2]).write_text(json.dumps(dict(identity=r['identity']
         self.assertEqual(self.sync()['state']['status'],'done')
         with sqlite3.connect(self.lib.source) as c:
             self.assertEqual(c.execute('SELECT count(*) FROM recognition_assets').fetchone()[0],1)
-        # New source work, then fail the process. No partial formal recognition.
+        # 先给 source 加新的活，再让进程失败。不能留下部分完成的正式识别结果。
         self.photo('D','com.atebits.Tweetie2')
         original=self.library/'originals/D/D.png';original.parent.mkdir(parents=True);original.write_bytes(b'synthetic')
         script=self.root/'synthetic-worker'
@@ -275,7 +275,7 @@ if failures: Path(sys.argv[2]).write_text(json.dumps(dict(identity=r['identity']
             seen.append({k:s.get(k) for k in ('status','stage','done','total','failed')})
             if s['status'] not in ('scanning','importing','recognising'): self.fail(seen[-5:])
             return s['status']=='recognising' and s.get('stage')==stage and s.get('done')==done
-        # The worker moves on only once the test has seen each value, however slowly either side runs (#219).
+        # 测试看到每个值之后 worker 才往下走，不论哪一边跑得多慢（#219）。
         wait_until(lambda: shown('preparing',0),timeout=60);(self.root/'go-1').touch()
         wait_until(lambda: shown('recognising',1),timeout=60);(self.root/'go-2').touch()
         wait_until(lambda: shown('recognising',2),timeout=60)
@@ -283,7 +283,7 @@ if failures: Path(sys.argv[2]).write_text(json.dumps(dict(identity=r['identity']
         self.assertGreaterEqual(total,3)
         self.assertEqual(seen[-1]['failed'],0)
         recognising=[v for v in seen if v['status']=='recognising']
-        # Only this task's moving count reaches the panel; the stale full count never does.
+        # 面板上只出现这个任务不断变化的计数；过期的总数从不出现。
         self.assertIn('preparing',[v['stage'] for v in recognising])
         self.assertTrue(all(v['done'] in (0,1,2) for v in recognising),recognising)
         self.assertFalse((self.root/'release').exists())
@@ -299,10 +299,9 @@ if failures: Path(sys.argv[2]).write_text(json.dumps(dict(identity=r['identity']
         for uuid in photos:
             self.photo(uuid,'com.atebits.Tweetie2')
             original=self.library/f'originals/{uuid}/{uuid}.png';original.parent.mkdir(parents=True);original.write_bytes(b'synthetic')
-        # The worker reports once per image and the test lets each next report go a moment after the host
-        # shows the last one, so the run outlives the idle window on progress alone. The window is wide, so a
-        # slow worker start on a busy machine still reports in time (#219); the deadline rules themselves are
-        # unit-tested on a hand-moved clock (app_tasks).
+        # worker 每张图报告一次，宿主显示上一条之后，测试稍等片刻再放行下一条，所以这次运行只靠进度就能撑过
+        # 空闲窗口。窗口很宽，所以繁忙机器上 worker 启动慢也能及时报告（#219）；时限规则本身在手动拨动的时钟上
+        # 做单元测试（app_tasks）。
         self.env['ILLUSTASH_RECOGNITION_TIMEOUT_MS']=str(WIDE_IDLE_MS)
         self.worker('paced')
         self.assertEqual(self.request('/api/sync',{})['body'],b'{"started": true}')
@@ -321,7 +320,7 @@ if failures: Path(sys.argv[2]).write_text(json.dumps(dict(identity=r['identity']
         self.assertEqual(value['state']['status'],'done',value)
         self.assertEqual(value['state']['done'],value['state']['total'])
         self.assertGreater(time.monotonic()-first,WIDE_IDLE_MS/1000)
-        # The same worker, never let past its first report, is stopped by the total limit with that reason kept.
+        # 同一个 worker，不放它越过第一条报告，由总时限停下，并保留这个原因。
         for step in self.root.glob('step-*'): step.unlink()
         with sqlite3.connect(self.lib.source) as c: c.execute(f"DELETE FROM labels WHERE uuid IN ({','.join('?'*len(photos))})",tuple(photos))
         self.env.update(ILLUSTASH_RECOGNITION_TIMEOUT_MS='60000',ILLUSTASH_RECOGNITION_MAX_MS='1000')
@@ -336,8 +335,8 @@ if failures: Path(sys.argv[2]).write_text(json.dumps(dict(identity=r['identity']
         for uuid in ('E','F'):
             self.photo(uuid,'com.atebits.Tweetie2')
             original=self.library/f'originals/{uuid}/{uuid}.png';original.parent.mkdir(parents=True);original.write_bytes(b'synthetic')
-        # Two batches finish, then the worker stalls past the idle window. The window is wide, so loading
-        # NumPy before the first batch on a busy machine cannot be taken for the stall (#219).
+        # 两批完成后，worker 卡住超过空闲窗口。窗口很宽，
+        # 所以繁忙机器上第一批之前加载 NumPy 的时间不会被当成卡住（#219）。
         self.env['ILLUSTASH_RECOGNITION_TIMEOUT_MS']=str(WIDE_IDLE_MS)
         self.worker('stream-hang')
         value=self.sync()
@@ -345,14 +344,13 @@ if failures: Path(sys.argv[2]).write_text(json.dumps(dict(identity=r['identity']
         self.assertEqual(value['state']['message'],f'任务超时：{WIDE_IDLE_MS//1000} 秒没有进展')
         first=json.loads((self.root/'last-request').read_text())
         self.assertEqual(len(first),3)
-        # The folder asset is counted when the scan imports it; a streamed batch counts only the
-        # Photos assets it brings. Which assets the first two batches hold follows key order.
+        # 文件夹里的图片在扫描导入时计数；流式送来的一批只计它带来的照片图片。前两批包含哪些图片按键的顺序决定。
         self.assertEqual((value['history'][0]['status'],value['history'][0]['imported']),
                          ('interrupted',1+sum(u in ('E','F') for u in first[:2])))
         with sqlite3.connect(self.lib.source) as c:
             self.assertEqual(sorted(u for u, in c.execute('SELECT asset FROM recognition_assets')),sorted(first[:2]))
             self.assertEqual(c.execute("SELECT count(*) FROM recognition_imports WHERE status='done'").fetchone()[0],2)
-        # The next sync recognises only the asset left, and the run completes.
+        # 下一次同步只识别剩下的那张图片，运行完成。
         self.env.pop('ILLUSTASH_RECOGNITION_TIMEOUT_MS')
         self.worker('stream')
         value=self.sync()
@@ -420,7 +418,7 @@ if failures: Path(sys.argv[2]).write_text(json.dumps(dict(identity=r['identity']
         for i in range(101):self.photo('S'+str(i),'com.atebits.Tweetie2')
         self.process,self.log=self.start(self.lib.path)
         self.token=json.loads(self.request('/api/bootstrap')['body'])['token']
-        # The local recognition limit is gone (#100): any number of new pictures waits for this machine's worker.
+        # 本地识别数量上限已经去掉（#100）：不论多少新图片，都等本机的 worker 识别。
         self.assertEqual(self.request('/api/startup',{'local_limit':100})['status'],400)
         state=self.sync()
         self.assertEqual(state['state']['status'],'needs_recognition')
@@ -429,7 +427,7 @@ if failures: Path(sys.argv[2]).write_text(json.dumps(dict(identity=r['identity']
 
     @unittest.skipIf(os.name == 'nt', 'Apple 照片图库只在 macOS 上提供')
     def test_native_library_new_photos_exact_source_reference(self):
-        # The former Python Photos scanner's results on the same inputs are recorded (tests/fixed_expectations.py).
+        # 原 Python 照片扫描器在同样输入上的结果已录制（tests/fixed_expectations.py）。
         for u,app in (('D','com.atebits.Tweetie2'),('E','net.pxv.iphone'),('F','com.apple.springboard')): self.photo(u,app)
         for i,app in enumerate(('com.apple.camera','com.apple.mobileslideshow','com.apple.mobilesafari','tv.danmaku.bilianime','ai.x.GrokApp','com.tencent.xin','com.baidu.netdisk','app.nicegram','')):self.photo('N'+str(i),app)
         def pair():
@@ -449,7 +447,7 @@ if failures: Path(sys.argv[2]).write_text(json.dumps(dict(identity=r['identity']
 
     @unittest.skipUnless(shutil.which('sandbox-exec'), 'macOS/Linux only: the Photos permission is a macOS privacy setting, refused here through sandbox-exec')
     def test_native_library_new_photos_permission_refused_is_named(self):
-        # macOS privacy settings refuse the Photos database with EPERM, as a sandbox denial does (#202).
+        # macOS 隐私设置以 EPERM 拒绝访问照片数据库，与沙箱拒绝时一样（#202）。
         from tests.test_read_http import SPAWN
         from tools.verify_read_http import enter
         self.photo('D','com.atebits.Tweetie2')
@@ -468,7 +466,7 @@ if failures: Path(sys.argv[2]).write_text(json.dumps(dict(identity=r['identity']
         self.assertIn('Photos.sqlite',state['message'])
         with sqlite3.connect(self.lib.db) as c:
             self.assertEqual(c.execute('SELECT status FROM sync_runs ORDER BY id DESC').fetchone(),('error',))
-        # Any other failure keeps no problem code: the page then shows the error as it was.
+        # 其他任何失败都不带问题代码：页面按原样显示错误。
         self.stop(self.process)
         self.process,self.log=self.start(self.lib.path)
         self.token=json.loads(self.request('/api/bootstrap')['body'])['token']
@@ -490,8 +488,8 @@ if failures: Path(sys.argv[2]).write_text(json.dumps(dict(identity=r['identity']
         with sqlite3.connect(self.lib.source) as c:self.assertEqual(c.execute("SELECT count(*) FROM recognition_assets WHERE asset='E'").fetchone()[0],1)
 
     def hold_unreadable(self, path):
-        """Make an existing file unreadable while its metadata stays as it was: POSIX permission
-        bits, or on Windows an open handle that shares nothing. Returns the release function."""
+        """让一个已有文件读不了，同时元数据保持原样：用 POSIX 权限位，在 Windows 上则用一个不共享任何访问的
+        打开句柄。返回解除用的函数。"""
         if os.name != 'nt':
             path.chmod(0)
             release = lambda: path.chmod(0o644)
@@ -521,8 +519,8 @@ if failures: Path(sys.argv[2]).write_text(json.dumps(dict(identity=r['identity']
         return done
 
     def test_native_library_new_changed_picture_is_recognised_again_with_its_new_result(self):
-        # A picture replaced under the same name gives other vectors; so does the same picture on another
-        # execution backend (#270). The old recognition record goes with its labels, so the import takes the new one.
+        # 同名替换的图片会得到别的向量；同一张图片换一个执行后端也是如此（#270）。旧的识别记录随它的标签一起去掉，
+        # 所以导入取新的结果。
         from tests.folder_fixture import image, settle
         folder = self.new_folder
         image(folder / 'changing.png', 'red')
@@ -547,8 +545,7 @@ if failures: Path(sys.argv[2]).write_text(json.dumps(dict(identity=r['identity']
         self.assertEqual(run(), after, 'unchanged: nothing is recognised again')
 
     def test_native_library_new_damaged_pictures_wait_for_a_change_unreadable_ones_retry(self):
-        # #112: a picture that cannot be read is tried again on every sync; one read in full that
-        # is not a valid image is skipped until its file changes; both are counted apart.
+        # #112：读不了的图片每次同步都重试；完整读出来却不是有效图片的，在文件改动之前一直跳过；两者分开计数。
         from tests.folder_fixture import image, settle
         folder = self.new_folder
         image(folder / 'good.png', 'red'); image(folder / 'locked.png', 'blue'); image(folder / 'bad.png', 'green', (41, 30))
@@ -582,7 +579,7 @@ if failures: Path(sys.argv[2]).write_text(json.dumps(dict(identity=r['identity']
         self.assertEqual(value['damaged']['count'], 2)
         self.assertEqual(sorted(Path(p).name for p in value['damaged']['paths']), ['bad.png', 'not-scanned.png'])
         self.assertEqual(value['history'][0]['failed'], 1)
-        # Again: the damaged pictures are not sent, the unreadable one is tried again.
+        # 再来一次：损坏的图片不送出，读不了的那张再试一次。
         value, sent = run()
         self.assertEqual(sent, set())
         self.assertEqual((value['state']['failed'], value['state']['damaged']), (1, 2), value['state'])
@@ -591,7 +588,7 @@ if failures: Path(sys.argv[2]).write_text(json.dumps(dict(identity=r['identity']
         self.assertEqual(sent, {'locked.png'})
         self.assertEqual((value['state']['failed'], value['state']['damaged'], value['state']['imported']), (0, 2, 1), value['state'])
         self.assertEqual(value['state']['message'], '2 张图片已损坏或格式不支持，留在图库里但不识别；文件改动后会重新识别')
-        # The damaged file is replaced by a valid picture: the next sync recognises it, under the same UUID.
+        # 损坏的文件换成一张有效图片：下一次同步识别它，UUID 不变。
         image(folder / 'bad.png', 'yellow', (51, 31))
         settle(folder)
         value, sent = run()
@@ -613,7 +610,7 @@ if failures: Path(sys.argv[2]).write_text(json.dumps(dict(identity=r['identity']
         self.assertFalse(self.sentinel.exists())
 
     def test_native_library_new_worker_without_failure_reasons_keeps_retrying(self):
-        # A worker from before #112 gives no reason: every failure stays retryable, as it was.
+        # #112 之前的 worker 不给原因：所有失败都照旧可以重试。
         from tests.folder_fixture import image
         image(self.new_folder / 'good.png', 'red')
         self.worker('classify-legacy')

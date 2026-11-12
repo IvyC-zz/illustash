@@ -1,8 +1,7 @@
-//! Full installers opt in through compute/manifest.json. Configure only this process,
-//! before Tauri or worker threads start; the base installer has no compute directory,
-//! and a compute directory without a matching manifest is an error on every platform.
-//! The recognition models are either all in the package (the full package, for development and testing) or none
-//! (the release package, #168): then the model root is the shared data's `models/<pack>`, downloaded on first use.
+//! 完整安装包通过 compute/manifest.json 声明启用。只配置本进程，且在 Tauri 和 worker 线程启动之前；
+//! 基础安装没有 compute 目录，有 compute 目录却没有相符的 manifest 在所有平台上都是错误。
+//! 识别模型要么全在包里（完整包，用于开发和测试），要么一个都不在（发布用的包，#168）：
+//! 后一种情况下模型根目录是共享数据里的 `models/<pack>`，第一次使用时下载。
 use std::{ffi::OsString, path::Path};
 
 use crate::i18n::{tr, tr_with};
@@ -50,13 +49,13 @@ const MACOS_FILES: [&str; 10] = [
     "bin/illustash-worker",
 ];
 
-/// Where the recognition models come from.
+/// 识别模型从哪里来。
 #[cfg(any(windows, target_os = "macos", test))]
 #[derive(Debug, PartialEq)]
 enum Models {
-    /// All in `compute/resources/models` (the full package).
+    /// 全在 `compute/resources/models` 里（完整包）。
     Bundled,
-    /// None in the package: downloaded on first use into the shared data (#168).
+    /// 包里没有：第一次使用时下载到共享数据里（#168）。
     OnDemand,
 }
 
@@ -105,14 +104,14 @@ fn full_bundle(
     Ok(Some(Models::Bundled))
 }
 
-/// The model files a full package carries, as compute/ paths (native/terms/models.json).
+/// 完整包带的模型文件，写成 compute/ 下的路径（native/terms/models.json）。
 #[cfg(any(windows, target_os = "macos", test))]
 fn models() -> Vec<String> {
     illustash_terms::app_models::manifest().files.iter().map(|entry| format!("resources/models/{}", entry.path)).collect()
 }
 
-/// The model root and whether recognition waits for a download: the package's own models, or the shared data's
-/// `models/<pack>` (the same folder for every later version using this pack, so an update downloads nothing).
+/// 模型根目录，以及识别是否要等下载：用包里自带的模型，或共享数据里的 `models/<pack>`
+/// （之后用同一个 pack 的各版本都用这个文件夹，所以更新时什么都不用下载）。
 #[cfg(any(windows, target_os = "macos", test))]
 fn model_settings(compute: &Path, models: Models, shared: &Path) -> Vec<(&'static str, OsString)> {
     match models {
@@ -146,7 +145,7 @@ fn defaults(
         return Err(tr("无法定位 LOCALAPPDATA；请检查 Windows 用户环境后重启"));
     };
     let default_shared = Path::new(&local).join("Illustash/Shared").into_os_string();
-    // An explicit ILLUSTASH_SHARED stays (configure never overrides it); the models follow it.
+    // 明确设置的 ILLUSTASH_SHARED 保留（configure 从不覆盖它）；模型跟着它走。
     let models = model_settings(compute, models, Path::new(shared.as_ref().unwrap_or(&default_shared)));
     let mut values = vec![("ILLUSTASH_ROOT", compute.join("resources").into_os_string())];
     values.extend(models);
@@ -472,7 +471,7 @@ mod tests {
             let windows = defaults(&root, Some("user data".into()), None);
             let macos = macos_defaults(&root, None, Some("synthetic shared".into()));
             if windows_ok {
-                // No models in the package: the on-demand flag joins the usual settings.
+                // 包里没有模型：按需下载的标志加进常规设置。
                 assert_eq!(windows.unwrap().len(), 9);
                 assert!(macos.unwrap_err().contains("macOS 完整版"));
             } else {
@@ -501,7 +500,7 @@ mod tests {
             fs::create_dir_all(path.parent().unwrap()).unwrap();
             fs::write(path, b"fixture").unwrap();
         }
-        // The release package: no models inside, so they are downloaded into the shared data on first use.
+        // 发布用的包：里面没有模型，所以第一次使用时下载到共享数据里。
         let pack = &illustash_terms::app_models::manifest().pack;
         let settings = defaults(&root, Some("user data".into()), None).unwrap();
         let keys: Vec<_> = settings.iter().map(|(key, _)| *key).collect();
@@ -545,10 +544,10 @@ mod tests {
         assert!(settings
             .iter()
             .all(|(key, _)| !key.contains("NETWORK") && !key.contains("PYTHON")));
-        // An explicit shared folder is kept, and the downloaded models live under it.
+        // 明确指定的共享文件夹保留，下载的模型放在它下面。
         let explicit = defaults(&root, Some("user data".into()), Some("explicit shared".into())).unwrap();
         assert_eq!(explicit[1].1, Path::new("explicit shared").join("models").join(pack).into_os_string());
-        // The full package: every model listed and present, the package's own folder, no download.
+        // 完整包：每个模型都登记且存在，用包自己的文件夹，不下载。
         let mut manifest: serde_json::Value = serde_json::from_str(&windows_manifest("win32", "research", 1)).unwrap();
         for name in models() {
             manifest["files"][&name] = "synthetic-sha".into();
@@ -565,7 +564,7 @@ mod tests {
         assert_eq!(settings[1], ("ILLUSTASH_MODELS", root.join("resources/models").into_os_string()));
         assert!(settings.iter().all(|(key, _)| *key != "ILLUSTASH_MODELS_ON_DEMAND"));
         assert_eq!(settings.len(), 8);
-        // Only some models listed: neither package, so reinstall.
+        // 只登记了部分模型：两种包都不是，所以要重装。
         manifest["files"].as_object_mut().unwrap().remove("resources/models/ccip/metrics.json");
         fs::write(root.join("manifest.json"), manifest.to_string()).unwrap();
         let error = defaults(&root, Some("user data".into()), None).unwrap_err();

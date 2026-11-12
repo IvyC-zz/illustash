@@ -1,4 +1,4 @@
-//! Local application reads. Session metadata comes from the existing private startup state.
+//! 本地应用读取。会话元数据来自已有的私有启动状态。
 use crate::{
     http::LibraryContext,
     http_json::{parse_python, Json},
@@ -14,7 +14,7 @@ fn entity_name(c: &Connection, id: &str) -> Result<Option<String>> {
     let value = display(c, Json::object([("id", id.into())]))?;
     Ok(value.get("name").map(|v| v.text().to_owned()))
 }
-/// The latest step still to undo, with what `action_label` reads.
+/// 最近一步尚可撤销的操作，连同 `action_label` 要读的字段。
 pub(crate) const LAST_ACTION: &str = "
     SELECT id, label, ts, before_json, label_kind, label_count
     FROM actions
@@ -22,7 +22,7 @@ pub(crate) const LAST_ACTION: &str = "
     ORDER BY id DESC
     LIMIT 1";
 
-/// A counted step's kind and count (core v8, #201): stored with the step, earlier steps filled in by the upgrade.
+/// 带计数的操作的种类和数量（core v8，#201）：随操作一起保存，更早的操作由升级补上。
 fn counted(r: &Json) -> Option<(UndoLabel, String)> {
     let text = |key| match r.get(key) {
         Some(Json::Scalar(serde_json::Value::String(s))) => Some(s.as_str()),

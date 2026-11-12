@@ -1,6 +1,6 @@
-// Run with: node --test tests/name_poll.test.cjs
-// Polling the display-name job (core/jobs.js pollNames(); #199): a run polls only its progress and keeps the coverage
-// and settings it has; its end reads them once; a failed poll keeps what it has and backs off.
+// 运行：node --test tests/name_poll.test.cjs
+// 轮询显示名任务（core/jobs.js 的 pollNames()；#199）：运行中只轮询进度，保留已有的覆盖率和设置；
+// 结束时读一次这两项；轮询失败时保留已有内容并退避。
 const {test, before, afterEach} = require('node:test');
 const assert = require('node:assert/strict');
 const web = require('./web.cjs');
@@ -15,7 +15,7 @@ function harness(status = 'running', fail = false) {
   Object.assign(core.state, {route: {page: 'settings'}, names});
   web.fakePage();
   globalThis.fetch = async url => {
-    // The end of a run refreshes what names the page shows: a metadata read (core/meta.js), recorded as one call.
+    // 一次运行结束时刷新页面显示的名称：一次元数据读取（core/meta.js），记为一次调用。
     if (!url.startsWith('/api/names')) { if (url.startsWith('/api/bootstrap')) calls.push('refreshMeta'); return {status: 200, ok: true, json: async () => url.startsWith('/api/bootstrap') ? {token: '', total: 0} : []}; }
     calls.push(url);
     if (fail) throw new Error('offline');
@@ -24,7 +24,7 @@ function harness(status = 'running', fail = false) {
   };
   const setTimeout = globalThis.setTimeout;
   globalThis.setTimeout = (fn, delay) => { timers.push(delay); return 1; };
-  // ui/effects.js afterJob(), as app.js wires it: the card is redrawn, and the end refreshes what names the page shows.
+  // ui/effects.js 的 afterJob()，接法与 app.js 相同：重画卡片，结束时刷新页面显示的名称。
   const offs = [core.onJob(effects.afterJob)];
   restore = () => { globalThis.setTimeout = setTimeout; for (const off of offs) off(); };
   return {state: core.state, pollNames: core.pollNames, calls, timers, names};

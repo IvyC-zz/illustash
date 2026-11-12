@@ -1,4 +1,4 @@
-//! Candidate and shared-OC grouping. Existing appearance thresholds and filters are unchanged.
+//! 候选分组和共享 OC 分组。现有的外观阈值和过滤条件不变。
 use super::{
     features::Matrix,
     numeric,
@@ -222,7 +222,7 @@ pub fn cluster(snapshot: &Snapshot, f: &Matrix) -> Result<(usize, Value)> {
             .take(4)
             .map(|t| traits[t].replace('_', " "))
             .collect();
-        // This field has always been a JSON string inside the seven-column cache row.
+        // 这个字段一直是七列缓存行里的一个 JSON 字符串。
         let described = format!(
             "[{}]",
             described.iter().map(|s| serde_json::to_string(s).expect("trait string")).collect::<Vec<_>>().join(", ")
@@ -254,8 +254,8 @@ fn trait_profiles(share: &[Vec<f64>], width: usize) -> (Vec<f64>, Vec<Vec<f64>>)
     (weight, profile)
 }
 
-// NumPy computes the entire same-buffer profile product, selecting DSYRK.
-// Independent scalar pair dots change the accumulated bits at the trait threshold.
+// NumPy 对同一缓冲区计算整个 profile 乘积，选用的是 DSYRK。
+// 逐对独立做标量点积会在 trait 阈值处改变累加结果的位。
 #[cfg(target_os = "windows")]
 fn trait_alike(profile: &[Vec<f64>]) -> std::result::Result<Vec<Vec<f64>>, String> {
     if profile.is_empty() {
@@ -275,8 +275,7 @@ mod tests {
     #[test]
     #[ignore = "requires explicit independently generated NumPy trait reference"]
     fn fixed_windows_trait_profile_norm_and_alike_reference() {
-        // This explicit development check consumes only independently calculated
-        // NumPy reference bytes for fixed synthetic shares, never candidate output.
+        // 这项显式的开发检查只使用对固定合成 share 独立算出的 NumPy 参考字节，从不使用候选的输出。
         let path = std::env::var_os("ILLUSTASH_RESEARCH_TRAIT_REFERENCE")
             .expect("explicit independent NumPy trait reference required");
         let reference: Value = serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();

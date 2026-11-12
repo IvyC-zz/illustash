@@ -1,4 +1,5 @@
 //! 角色投影的增量重算（只算受影响的图）与全量重算逐行一致（#200）。数据全部合成。
+#![allow(clippy::unwrap_used, reason = "集成测试里 unwrap 就是断言")]
 use illustash_terms::character_projection::rebuild;
 use rusqlite::{params, types::ValueRef, Connection};
 

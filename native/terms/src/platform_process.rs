@@ -12,6 +12,7 @@ mod windows_worker {
         struct OwnedHandle(Handle);
         impl Drop for OwnedHandle {
             fn drop(&mut self) {
+                // SAFETY: `OwnedHandle` 只包装已检查有效的句柄，每个只在这里关闭一次。
                 unsafe {
                     CloseHandle(self.0);
                 }
@@ -49,6 +50,7 @@ mod windows_worker {
         }
         fn creation_time(process: Handle) -> u64 {
             let (mut creation, mut exit, mut kernel, mut user) = (0, 0, 0, 0);
+            // SAFETY: `process` 是调用方持有的有效进程句柄，四个出参都是本地变量。
             assert_ne!(unsafe { GetProcessTimes(process, &mut creation, &mut exit, &mut kernel, &mut user) }, 0);
             creation
         }
@@ -62,7 +64,7 @@ mod windows_worker {
             command
         }
         #[test]
-        #[allow(clippy::zombie_processes)] // Deliberately leave a live descendant for the owning job to reap.
+        #[allow(clippy::zombie_processes)] // 故意留下一个存活的后代进程，交给所属的 Job 回收。
         #[ignore = "subprocess fixture, invoked only by owned job tests"]
         fn worker_fixture() {
             let mode = std::env::var("ILLUSTASH_JOB_FIXTURE").unwrap();
@@ -72,14 +74,17 @@ mod windows_worker {
             }
             let path = std::env::var("ILLUSTASH_JOB_PID").unwrap();
             let child = fixture_command("child", Path::new(&path)).spawn().unwrap();
-            // Publish a handle to the original child in the observing test process before
-            // this leader can exit. The retained object prevents a later PID-reuse race.
+            // 在这个首进程退出之前，把原始子进程的句柄发布到负责观察的测试进程里。
+            // 保留的句柄对象可防止之后 PID 被复用造成的竞争。
             let observer = std::env::var("ILLUSTASH_JOB_OBSERVER").unwrap().parse().unwrap();
-            let target = unsafe { OpenProcess(0x0040, 0, observer) }; // PROCESS_DUP_HANDLE, test fixture only
+            // SAFETY: 无指针参数；下一行断言句柄非空。
+            let target = unsafe { OpenProcess(0x0040, 0, observer) }; // PROCESS_DUP_HANDLE，仅用于测试夹具
             assert!(!target.is_null());
             let target = OwnedHandle(target);
             let mut copy = std::ptr::null_mut();
             assert_ne!(
+                // SAFETY: 源进程用当前进程伪句柄，`child` 的原始句柄在 `child` 存活期间有效，`target`
+                // 是上面打开的观察进程，`copy` 是本地出参。
                 unsafe {
                     DuplicateHandle(
                         GetCurrentProcess(),
@@ -92,9 +97,9 @@ mod windows_worker {
                     )
                 },
                 0
-            ); // SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION, non-inheritable
+            ); // SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION，不可继承
             let creation = creation_time(child.as_raw_handle());
-            // `copy` belongs to the observer's handle table; only the observer closes it.
+            // `copy` 属于观察进程的句柄表；只有观察进程关闭它。
             let ready = Path::new(&path).with_extension("ready");
             std::fs::write(&ready, format!("{} {} {creation}", child.id(), copy as usize)).unwrap();
             std::fs::rename(ready, &path).unwrap();
@@ -136,6 +141,7 @@ mod windows_worker {
                     thread::sleep(Duration::from_millis(10));
                 };
                 let descendant = OwnedHandle(handle as Handle);
+                // SAFETY: `descendant` 包装观察进程收到的复制句柄，此时尚未关闭。
                 assert_eq!(unsafe { GetProcessId(descendant.0) }, pid);
                 assert_eq!(creation_time(descendant.0), creation);
                 if mode == "cancel" {
@@ -143,15 +149,17 @@ mod windows_worker {
                 } else {
                     assert!(task.wait(Duration::from_secs(5)));
                 }
-                // TerminateJobObject stops execution but process-object signaling is
-                // asynchronous. User approved one kernel wait within the existing 5s
-                // observation limit (#124); production cleanup/timeout semantics stay intact.
+                // TerminateJobObject 会停止执行，但进程对象变为有信号状态是异步的。用户批准在既有的
+                // 5 秒观察上限内做一次内核等待（#124）；生产环境的清理和超时语义保持不变。
                 let started = Instant::now();
+                // SAFETY: `descendant` 包装观察进程收到的复制句柄，此时尚未关闭。
                 let wait = unsafe { WaitForSingleObject(descendant.0, 5000) };
                 let mut exit = 0;
+                // SAFETY: `descendant` 的句柄尚未关闭，`exit` 是本地出参。
                 assert_ne!(unsafe { GetExitCodeProcess(descendant.0, &mut exit) }, 0);
                 eprintln!("worker cleanup mode={mode} pid={pid} creation={creation} wait={wait} exit={exit} wait_us={} outcome={:?}", started.elapsed().as_micros(), task.outcome());
                 assert_eq!(wait, 0, "residual worker descendant {pid}; mode={mode}; outcome={:?}", task.outcome());
+                // SAFETY: `descendant` 包装观察进程收到的复制句柄，此时尚未关闭。
                 assert_eq!(unsafe { GetProcessId(descendant.0) }, pid);
                 assert_eq!(creation_time(descendant.0), creation);
                 assert_eq!(exit, 1, "worker descendant did not exit through Job termination");
