@@ -3,6 +3,7 @@ import {esc, monthText, number} from '../core/format.js';
 import {t} from '../core/i18n.js';
 import {REASONS, nameWithWork} from '../core/labels.js';
 import {fetchChar} from '../core/meta.js';
+import {poolIs} from '../core/pages.js';
 import {charHash, cleanup, go} from '../core/route.js';
 import {api} from '../core/session.js';
 import {state} from '../core/state.js';
@@ -74,7 +75,7 @@ export async function inspect(ident, quiet = false) {
       ${d.duplicates?.length ? `<section class="inspector-section"><h3 class="section-title">${t('重复副本 · 共 {n} 份', {n: d.duplicates.length + 1})}</h3><div class="dup-list">${d.duplicates.map(x => `<button class="dup-copy" data-copy="${esc(x.uuid)}" title="${t('查看这份副本')}"><img src="/image?id=${encodeURIComponent(x.uuid)}&size=thumb" alt="" loading="lazy"><span><b>${x.pos}/${x.size}</b> ${esc((x.added_at || '').slice(0, 10))}<br><small>${x.names.length ? x.names.map(esc).join(' · ') : t('未识别')}</small></span></button>`).join('')}</div></section>` : ''}
       ${viewOpts.meta ? `<section class="inspector-section"><dl class="facts"><div><dt>${t('尺寸')}</dt><dd class="mono">${number(d.width)} × ${number(d.height)}</dd></div><div><dt>${t('加入')}</dt><dd class="mono">${esc((d.added_at || '').slice(0, 16).replace('T', ' '))}</dd></div><div><dt>${t('文件')}</dt><dd title="${esc(d.filename)}">${esc(d.filename)}</dd></div><div><dt>${t('文件形态')}</dt><dd>${d.src_kind === 'deriv' ? t('本地副本') : t('原图')}</dd></div></dl></section>
       <details class="inspector-section"><summary>${t('画面标签')}</summary><div class="tags">${d.tags.map(x => `<button class="tag" data-tag="${esc(x.value)}" title="${t('按此标签筛选图库 · WD {conf}', {conf: x.conf.toFixed(2)})}">${esc(x.value.replaceAll('_', ' '))}</button>`).join('') || `<p>${t('暂无')}</p>`}</div></details>` : ''}
-      <div class="inspector-actions">${d.memberships.length ? `<button class="btn pri" id="fixChar">${t('更正角色')} <kbd>C</kbd></button>` : `<button class="btn pri" data-also="1">${t('设为角色…')} <kbd>C</kbd></button>`}${state.route.page === 'unmatched' && !d.memberships.length ? `<button class="btn" id="skipOne">${t('跳过')} <kbd>S</kbd></button>` : ''}${d.unknown ? `<button class="btn" id="resumeOne">${t('恢复到未识别')}</button>` : ''}${curate}</div>`;
+      <div class="inspector-actions">${d.memberships.length ? `<button class="btn pri" id="fixChar">${t('更正角色')} <kbd>C</kbd></button>` : `<button class="btn pri" data-also="1">${t('设为角色…')} <kbd>C</kbd></button>`}${poolIs(state.route, 'unmatched') && !d.memberships.length ? `<button class="btn" id="skipOne">${t('跳过')} <kbd>S</kbd></button>` : ''}${d.unknown ? `<button class="btn" id="resumeOne">${t('恢复到未识别')}</button>` : ''}${curate}</div>`;
     if (pc) loadCharStats(pc.id, ident, gen);
     $('fixChar')?.addEventListener('click', () => swapOne(d, ident, primary.id));
     $('inspector').querySelector('.preview img').addEventListener('error', e => { e.target.parentElement.innerHTML = `<div class="missing">${t('图片暂不可读，请检查 Photos 下载状态与访问权限')}</div>`; }, {once: true});
@@ -83,7 +84,7 @@ export async function inspect(ident, quiet = false) {
     for (const b of $('inspector').querySelectorAll('[data-nav]')) b.onclick = () => step(Number(b.dataset.nav));
     for (const b of $('inspector').querySelectorAll('[data-tag]')) b.onclick = () => go({page: 'library', tag: b.dataset.tag});
     for (const b of $('inspector').querySelectorAll('[data-copy]')) b.onclick = () => inspect(b.dataset.copy);
-    for (const b of $('inspector').querySelectorAll('[data-curate]')) b.onclick = () => mutate('/api/curate', {ids: [ident], action: b.dataset.curate}, b.dataset.curate === 'exclude' || ['excluded', 'pending'].includes(state.route.page));
+    for (const b of $('inspector').querySelectorAll('[data-curate]')) b.onclick = () => mutate('/api/curate', {ids: [ident], action: b.dataset.curate}, b.dataset.curate === 'exclude' || poolIs(state.route, 'excluded', 'pending'));
     $('skipOne')?.addEventListener('click', () => singleAction('skip'));
     $('addTag').onclick = () => singleAction('tag');
     for (const b of $('inspector').querySelectorAll('[data-artist-verdict]')) b.onclick = () => {
@@ -93,7 +94,7 @@ export async function inspect(ident, quiet = false) {
     $('inspector').querySelector('[data-artist-find]')?.addEventListener('click', () => findArtists([ident], () => inspect(ident, true)));
     for (const b of $('inspector').querySelectorAll('[data-artist-more]')) b.onclick = () => findArtistWorks(b.dataset.artistMore, b.dataset.name, () => inspect(ident, true));
     for (const b of $('inspector').querySelectorAll('[data-untag]')) b.onclick = () => mutate('/api/tag', {ids: [ident], tag: b.dataset.untag, add: false}, state.route.utag === b.dataset.untag);
-    $('resumeOne')?.addEventListener('click', () => mutate('/api/change', {ids: [ident], action: 'resume'}, state.route.page === 'skipped'));
+    $('resumeOne')?.addEventListener('click', () => mutate('/api/change', {ids: [ident], action: 'resume'}, poolIs(state.route, 'skipped')));
     bindIdentity($('inspector'), d, ident); bindAsk($('inspector'), d, ident);
   } catch (e) { if (gen === detailGen) { $('inspector').innerHTML = `<div class="loading-line">${esc(e.message)}<br><button class="quiet" id="closeInspector">${t('关闭')}</button></div>`; $('closeInspector').onclick = closeInspector; } }
 }
@@ -110,7 +111,7 @@ function bindIdentity(root, d, ident) {
   };
   for (const b of root.querySelectorAll('[data-alt]')) b.onclick = e => pickAlternative(d, ident, Number(b.dataset.alt), e.altKey);
   for (const b of root.querySelectorAll('[data-also]')) b.onclick = () => openPicker({title: d.memberships.length ? t('这张也是…') : t('这张是…'), sentence: e => d.memberships.length ? t('给这张加上 {name}', {name: e.name}) : t('把这张设为 {name}', {name: e.name}), exclude: d.memberships.map(m => m.id), suggest: {ids: [ident]}, multi: true,
-    pick: list => mutate('/api/change', {ids: [ident], action: 'confirmed', ...targets(list)}, ['unmatched', 'skipped'].includes(state.route.page))});
+    pick: list => mutate('/api/change', {ids: [ident], action: 'confirmed', ...targets(list)}, poolIs(state.route, 'unmatched', 'skipped'))});
 }
 // ---------- 主动提问：偶尔问一句「是 TA 吗？」 ----------
 // 浏览时每隔几张图最多问一次，被略过三次后本次访问不再问；整理页（某个角色、未识别…）总是显示。回答发到
@@ -140,9 +141,9 @@ export function answerAsk(how) {
   const cur = state.question; if (!cur) return;
   const {q, ident} = cur; ask.pending = null; ask.ignored = 0;
   // 随机抽查：回答过的图离开列表，所以检查面板移到下一张。
-  if (state.route.page === 'audit' && state.viewer < 0 && state.focused === ident) { const i = indexOf(ident); state.focused = state.items[i + 1]?.uuid || state.items[i - 1]?.uuid || null; }
+  if (poolIs(state.route, 'audit') && state.viewer < 0 && state.focused === ident) { const i = indexOf(ident); state.focused = state.items[i + 1]?.uuid || state.items[i - 1]?.uuid || null; }
   const body = {ids: [ident], entity: q.entity, kind: q.kind, ...(how === 'yes' ? {yes: [ident]} : {no: [ident]}), ...(how === 'switch' ? {switch: q.rival} : {})};
-  mutate('/api/ask/answer', body, how !== 'yes' && state.route.char === q.entity, {advance: state.route.page === 'audit'});
+  mutate('/api/ask/answer', body, how !== 'yes' && state.route.char === q.entity, {advance: poolIs(state.route, 'audit')});
 }
 // 一个操作所替换的身份：当前角色页的那个身份（如果适用），否则是第一个。
 const primaryOf = d => d.memberships.find(m => m.id === state.route.char) || d.memberships[0];
@@ -155,7 +156,7 @@ export function pickAlternative(d, ident, i, also = false) {
   const alt = d.alternatives?.[i]; if (!alt) return;
   const from = primaryOf(d);
   if (from && !also) mutate('/api/reassign', {ids: [ident], old: from.id, new: alt.id}, state.route.char === from.id);
-  else mutate('/api/change', {ids: [ident], action: 'confirmed', entity: alt.id}, ['unmatched', 'skipped'].includes(state.route.page));
+  else mutate('/api/change', {ids: [ident], action: 'confirmed', entity: alt.id}, poolIs(state.route, 'unmatched', 'skipped'));
 }
 // 没有选中任何图时，单图快捷键作用于获得焦点或光标所在的图。
 function singleTarget() { return currentItem(); }
@@ -169,14 +170,14 @@ export async function singleAction(kind) {
   } else if (kind === 'tag') {
     const d = state.detail?.uuid === item.uuid ? state.detail : null;
     openTagPicker(() => ({ids: [item.uuid]}), 1, [{...item, user_tags: d?.user_tags || item.user_tags}], () => false);
-  } else if (kind === 'skip' && r.page === 'unmatched') mutate('/api/change', {ids: [item.uuid], action: 'unknown'}, true);
+  } else if (kind === 'skip' && poolIs(r, 'unmatched')) mutate('/api/change', {ids: [item.uuid], action: 'unknown'}, true);
   else if (kind === 'exclude' || kind === 'include') mutate('/api/curate', {ids: [item.uuid], action: kind}, true);
   else if (kind === 'swap' || kind === 'also') {
     const d = state.detail?.uuid === item.uuid ? state.detail : await api('/api/detail?id=' + encodeURIComponent(item.uuid));
     const from = primaryOf(d);
     if (kind === 'swap' && from) swapOne(d, item.uuid, from.id);
     else openPicker({title: from ? t('这张也是…') : t('这张是…'), sentence: e => from ? t('给这张加上 {name}', {name: e.name}) : t('把这张设为 {name}', {name: e.name}), exclude: d.memberships.map(m => m.id), suggest: {ids: [item.uuid]},
-      pick: e => mutate('/api/change', {ids: [item.uuid], action: 'confirmed', entity: e.id}, ['unmatched', 'skipped'].includes(r.page))});
+      pick: e => mutate('/api/change', {ids: [item.uuid], action: 'confirmed', entity: e.id}, poolIs(r, 'unmatched', 'skipped'))});
   }
 }
 export const indexOf = uuid => state.items.findIndex(x => x?.uuid === uuid);

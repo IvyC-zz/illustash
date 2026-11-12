@@ -6,6 +6,7 @@ import {esc, number} from '../core/format.js';
 import {t, tb} from '../core/i18n.js';
 import {workLabel} from '../core/labels.js';
 import {fetchChar, refreshMeta} from '../core/meta.js';
+import {poolIs} from '../core/pages.js';
 import {prefs} from '../core/prefs.js';
 import {charRoute, go} from '../core/route.js';
 import {api, post, readError} from '../core/session.js';
@@ -166,7 +167,7 @@ export function mergeCharacter(c) {
 export async function markOc(body, leaving, separate = false) {
   let entity; try { entity = await post(separate ? '/api/entities' : '/api/oc/shared', {kind: 'oc'}); } catch (err) { toast(err.message); return; }
   prefs.set('picks', [{id: entity.id, name: entity.name}, ...prefs.get('picks', []).filter(x => x.id !== entity.id)].slice(0, 8));
-  if (await mutate('/api/change', {...body, action: 'confirmed', entity: entity.id}, leaving) && state.route.page === 'group' && !state.total) go(charRoute(entity.id));
+  if (await mutate('/api/change', {...body, action: 'confirmed', entity: entity.id}, leaving) && poolIs(state.route, 'cluster') && !state.total) go(charRoute(entity.id));
 }
 // 拆分共用的 OC 标记：按需计算相似分组，每组一次点击归到它自己的 OC（可撤销）。
 export async function splitOc(c) {

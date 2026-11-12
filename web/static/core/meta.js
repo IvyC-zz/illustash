@@ -2,6 +2,7 @@
 // 不碰 DOM：onMeta(detail) 在每次被采用的读取之后通知（{total, directory, queue}），或通知一次读取失败（{error}）。
 import {api, adoptToken} from './session.js';
 import {setLatest} from './edits.js';
+import {pageOf} from './pages.js';
 import {state} from './state.js';
 import {listeners} from './events.js';
 const changed = listeners();
@@ -44,7 +45,7 @@ async function refreshMetaOnce(full, revision, bootSeed) {
   }
   const nsfw = new URLSearchParams({nsfw: state.nsfw});
   const charId = state.char?.id;
-  const directory = state.route.page === 'characters';
+  const directory = !!pageOf(state.route).directory;
   const [boot, pools, chars, tags, queue, detail] = await Promise.all([bootSeed || api('/api/bootstrap?' + nsfw), api('/api/review-pools?' + nsfw), api('/api/characters?min=1&' + nsfw + (directory ? '' : '&summary=1')), api('/api/user-tags'), api('/api/identity/count?' + nsfw).catch(e => { failed(e); return null; }), charId && !directory ? fetchChar(charId) : null]);
   const currentChar = charId && (detail || (directory && (chars.find(c => c.id === charId) || await fetchChar(charId))));
   if (revision !== metaRevision || nsfw.get('nsfw') !== state.nsfw || !adoptToken(boot.token)) return;
@@ -61,6 +62,6 @@ async function refreshMetaOnce(full, revision, bootSeed) {
   if (state.char) state.char = (state.char.id === charId && currentChar) || state.char;
   await changed.emit({total: boot.total, directory, queue: !!queue});
   // 读摘要行期间进入了目录：它需要完整的行。
-  if (state.route.page === 'characters' && !directory) refreshMeta().catch(failed);
+  if (pageOf(state.route).directory && !directory) refreshMeta().catch(failed);
 }
 

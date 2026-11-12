@@ -16,6 +16,7 @@ import {confirmAction} from './ui/dialog.js';
 import {wireSettings} from './ui/settings.js';
 import {wireCatalog} from './ui/catalog.js';
 import {refreshMeta} from './core/meta.js';
+import {pageOf} from './core/pages.js';
 import {parseHash} from './core/route.js';
 import {applyRoute, navCount, wireShell} from './ui/shell.js';
 import {renderGrid, undo, wireGrid} from './ui/grid.js';
@@ -59,7 +60,8 @@ for (const dialog of document.querySelectorAll('dialog')) dialog.addEventListene
     navCount('countLibrary', boot.total);
     window.splash?.status(t('正在整理 {n} 张图…', {n: number(boot.total)}));
     const meta = refreshMeta({boot: bootNsfw === state.nsfw ? boot : null});
-    if (parseHash().char || parseHash().page === 'characters') await meta;
+    const first = parseHash();
+    if (first.char || pageOf(first).directory) await meta;
     await guideOnOpen();
     await applyRoute();
     await meta;

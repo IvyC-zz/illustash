@@ -2,6 +2,7 @@
 // core/jobs.js）。
 import {t, tb, said, I18N} from '../core/i18n.js';
 import {esc, isMac, number, bytes, stamp, localStamp, pct, localTime} from '../core/format.js';
+import {implement} from '../core/pages.js';
 import {prefs} from '../core/prefs.js';
 import {session, shared, readError} from '../core/session.js';
 import {state} from '../core/state.js';
@@ -644,3 +645,6 @@ export function wireSettings() {
   loadLibraries();
   pollImports();
 }
+
+// 设置页登记：渲染入口（换了页面或子页时才整页重取）。
+implement({settings: {render: ({samePage}) => renderSettings(true, !samePage)}});

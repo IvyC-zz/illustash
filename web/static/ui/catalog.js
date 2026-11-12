@@ -2,13 +2,14 @@
 // 的内容在 core/catalog.js。
 import {t} from '../core/i18n.js';
 import {esc, number} from '../core/format.js';
+import {implement} from '../core/pages.js';
 import {prefs} from '../core/prefs.js';
 import {api, session, readError} from '../core/session.js';
 import {state} from '../core/state.js';
 import {nameTip} from '../core/labels.js';
 import {pollIndex, indexAction} from '../core/jobs.js';
 import {remoteNames, remoteNote} from '../core/settings.js';
-import {catalog, recentOf, loadActivity as readActivity, searchCharacters, loadTagged, loadWorkTree, loadLocalLinks, castWorks, PSEUDO_NOTES, BUCKETS, castRows,
+import {catalog, forgetActivity, recentOf, loadActivity as readActivity, searchCharacters, loadTagged, loadWorkTree, loadLocalLinks, castWorks, PSEUDO_NOTES, BUCKETS, castRows,
   WORK_NAMES, workName, loadIndex, searchWorks, shelfRows, saveWatch, watchTarget, saveWork} from '../core/catalog.js';
 import {$, toast, toastMore, error, readFailure, wireFolds, reconcileSections, searchIcon} from './dom.js';
 import {chooseWork} from './dialog.js';
@@ -557,3 +558,6 @@ export function wireCatalog() {
     saveWatchList(b.checked ? [...list, id] : list);
   });
 }
+
+// 资料库登记：渲染入口；切换 R18 之后只重新读收藏动态（目录由元数据读取重画）。
+implement({characters: {render: () => renderIndex(), refresh: why => { if (why === 'nsfw') { forgetActivity(); readActivity(); } }}});

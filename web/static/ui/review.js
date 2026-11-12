@@ -5,6 +5,7 @@ import {t, tb} from '../core/i18n.js';
 import {SIMILAR_ACTIVE, similarLine} from '../core/jobs.js';
 import {RELATION_KINDS, RELATION_NAMES} from '../core/labels.js';
 import {refreshMeta} from '../core/meta.js';
+import {implement} from '../core/pages.js';
 import {prefs} from '../core/prefs.js';
 import {charHash, go, hashFor} from '../core/route.js';
 import {api, post, readError} from '../core/session.js';
@@ -233,3 +234,11 @@ export function wireReview() {
       pick: async x => done(await mutate('/api/change', {ids, action: 'confirmed', entity: x.id}, false))});
   });
 }
+
+// 复核面板页登记：渲染入口，以及撤销、切换 R18 之后怎么重画。
+implement({
+  groups: {render: () => renderGroups(), refresh: why => { if (why === 'undo') renderGroups(true); else if (why === 'nsfw') renderGroups(); }},
+  similar: {render: () => renderSimilar(), refresh: why => { if (why === 'nsfw') renderSimilar(); }},
+  identity: {render: () => renderIdentity(), refresh: why => { if (why === 'undo' || why === 'nsfw') renderIdentity(); }},
+  'artist-audit': {render: () => renderArtistAudit(), refresh: why => { if (why === 'undo') renderArtistAudit(); }},
+});

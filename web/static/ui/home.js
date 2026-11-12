@@ -3,6 +3,7 @@ import {edits} from '../core/edits.js';
 import {dateText, esc, number} from '../core/format.js';
 import {I18N, t} from '../core/i18n.js';
 import {nameWithWork} from '../core/labels.js';
+import {implement} from '../core/pages.js';
 import {charHash, hashFor} from '../core/route.js';
 import {api, post, readError} from '../core/session.js';
 import {state} from '../core/state.js';
@@ -199,3 +200,6 @@ export function wireHome() {
   $('homePage').addEventListener('mouseleave', () => { for (const d of $('homePage').querySelectorAll('.home-day.focus')) d.classList.remove('focus'); });
   new ResizeObserver(() => { if (state.route.page !== 'home' || !home.days.length || Math.abs($('homePage').clientWidth - home.width) < 8) return; clearTimeout(home.resize); home.resize = setTimeout(drawHome, 120); }).observe($('homePage'));
 }
+
+// 首页登记：渲染入口，以及数据变了之后怎么重画（撤销、同步到新图、改动之后保持滚动；切换 R18 重新读；视图选项只重排）。
+implement({home: {render: () => renderHome(), refresh: why => { if (why === 'view') drawHome(); else renderHome(why !== 'nsfw' && why !== 'ask'); }}});
