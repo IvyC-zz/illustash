@@ -787,6 +787,7 @@ fn recognise(
         root,
         folder: crate::app_paths::canonical(&folder)?,
         expected: readable.iter().map(|r| r.id.clone()).collect(),
+        expected_inputs: readable.iter().map(|r| (r.id.clone(), r.input_sha256.clone())).collect(),
         seen: HashSet::new(),
         streamed: HashSet::new(),
         inputs: None,
@@ -901,6 +902,7 @@ struct Batches<'a> {
     root: &'a std::path::Path,
     folder: std::path::PathBuf,
     expected: HashSet<String>,
+    expected_inputs: HashMap<String, String>,
     seen: HashSet<String>,
     /// worker 还在运行时就已导入的批次。
     streamed: HashSet<std::path::PathBuf>,
@@ -983,6 +985,11 @@ impl Batches<'_> {
     ) -> Result<()> {
         let (library, ctx) = (self.library, self.ctx);
         ctx.check()?;
+        let manifest = read_recognition_manifest(package)?;
+        if manifest.assets != ids {
+            return Err(Error::Conflict("识别结果的资产列表已改变".into()));
+        }
+        manifest.check_inputs(&self.expected_inputs)?;
         let prepared = match claims {
             Some(claims) => {
                 if self.inputs.is_none() {
@@ -1039,6 +1046,9 @@ impl Batches<'_> {
 }
 /// 结果包 manifest 里的图片列表。
 fn manifest_assets(path: &std::path::Path) -> Result<Vec<String>> {
+    Ok(read_recognition_manifest(path)?.assets)
+}
+fn read_recognition_manifest(path: &std::path::Path) -> Result<protocol::RecognitionManifest> {
     let manifest = path.join("manifest.json");
     if std::fs::metadata(&manifest)?.len() > 4 * 1024 * 1024 {
         return Err(Error::Invalid("结果清单过大".into()));
@@ -1051,7 +1061,7 @@ fn manifest_assets(path: &std::path::Path) -> Result<Vec<String>> {
         serde_json::from_slice(&m).map_err(|e| Error::Invalid(format!("{}: {e}", manifest.display())))?,
         &manifest,
     )?;
-    Ok(m.assets)
+    Ok(m)
 }
 
 fn remember_labels(library: &Library, ids: &[String], cancel: &AtomicBool) -> Result<()> {

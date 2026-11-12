@@ -142,6 +142,18 @@ pub(crate) enum FailureReason {
 #[derive(Deserialize)]
 pub(crate) struct RecognitionManifest {
     pub assets: Vec<String>,
+    pub inputs: std::collections::HashMap<String, String>,
+}
+impl RecognitionManifest {
+    /// 同一资产的新内容也不能替换本次请求声明的输入版本。
+    pub(crate) fn check_inputs(&self, expected: &std::collections::HashMap<String, String>) -> Result<()> {
+        if self.inputs.len() != self.assets.len()
+            || self.assets.iter().any(|id| !expected.get(id).is_some_and(|hash| self.inputs.get(id) == Some(hash)))
+        {
+            return Err(Error::Conflict("识别结果的输入版本与本次请求不匹配".into()));
+        }
+        Ok(())
+    }
 }
 #[derive(Serialize)]
 pub(crate) struct ProvenanceRequest<'a> {
@@ -304,14 +316,15 @@ mod tests {
     }
     #[test]
     fn sync_failure_reason_defaults_to_retry_and_rejects_unknown_values() {
-        let v = json!({"identity":identity(),"packages":[],"failed":[{"uuid":"old"},{"uuid":"read","reason":"unreadable"},{"uuid":"bad","reason":"undecodable"}]});
+        let v = json!({"identity":identity(),"packages":[],"failed":[{"uuid":"old"},{"uuid":"read","reason":"unreadable"},{"uuid":"bad","reason":"undecodable"},{"uuid":"changed","reason":"input_changed"}]});
         let reply = parse::<SyncResponse>(v, Path::new("sync/response.json")).unwrap();
         assert_eq!(
             reply.failed.iter().map(|f| (f.uuid.as_str(), f.reason)).collect::<Vec<_>>(),
             [
                 ("old", FailureReason::Unreadable),
                 ("read", FailureReason::Unreadable),
-                ("bad", FailureReason::Undecodable)
+                ("bad", FailureReason::Undecodable),
+                ("changed", FailureReason::InputChanged)
             ]
         );
         let v = json!({"identity":identity(),"packages":[],"failed":[{"uuid":"x","reason":"broken"}]});
@@ -320,7 +333,11 @@ mod tests {
     }
     #[test]
     fn recognition_manifest_missing_and_wrong_fields_have_file_and_field() {
-        malformed::<RecognitionManifest>(json!({"assets":["synthetic"]}), &["assets"], "package/manifest.json");
+        malformed::<RecognitionManifest>(
+            json!({"assets":["synthetic"],"inputs":{"synthetic":"a".repeat(64)}}),
+            &["assets", "inputs"],
+            "package/manifest.json",
+        );
         let error = parse::<RecognitionManifest>(json!({"assets":[3]}), Path::new("package/manifest.json"))
             .err()
             .unwrap()
@@ -369,6 +386,22 @@ mod tests {
     #[test]
     fn hash_file_missing_and_wrong_fields_have_file_and_field() {
         malformed::<HashEntry>(json!({"asset":"synthetic","hash":"synthetic"}), &["asset", "hash"], "hashes.json");
+    }
+    #[test]
+    fn recognition_manifest_must_match_the_requested_content_even_if_the_file_has_changed_again() {
+        let expected = [("a".to_owned(), "a".repeat(64))].into_iter().collect();
+        let manifest = |hash: &str| RecognitionManifest {
+            assets: vec!["a".into()],
+            inputs: [("a".into(), hash.repeat(64))].into_iter().collect(),
+        };
+        assert!(manifest("a").check_inputs(&expected).is_ok());
+        assert!(manifest("b").check_inputs(&expected).is_err());
+        let mut missing = manifest("a");
+        missing.inputs.clear();
+        assert!(missing.check_inputs(&expected).is_err());
+        let mut extra = manifest("a");
+        extra.inputs.insert("b".into(), "b".repeat(64));
+        assert!(extra.check_inputs(&expected).is_err());
     }
     #[test]
     fn remaining_requests_keep_original_json_bytes() {
