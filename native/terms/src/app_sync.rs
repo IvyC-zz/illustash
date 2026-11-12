@@ -103,6 +103,7 @@ impl Syncer {
                     "unreadable",
                     "damaged",
                     "problem",
+                    "diagnostic",
                 ]
                 .iter()
                 .filter_map(|k| state.get(k).map(|v| ((*k).to_string(), v.clone())))
