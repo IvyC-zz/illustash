@@ -51,6 +51,10 @@
 
 **回退**：钩子环境里设 `COLLAB_RUN_GUARD=0` 关闭全部拦截；只想取消某一类，从 `run.json` 删掉对应规则。`bg` 不改变任何持久状态，不用就是回退。
 
+**编译缓存（sccache）**：2026-11-12 起，本机 illustash 的开发编译共用一份 sccache 缓存；全量、计时、`local_acceptance`、release 构建和 `cargo run` 不走缓存，编译行为不变。用户级的 `~/.cargo/config.toml` 用 `[build] rustc-wrapper` 指向包装脚本 `~/.local/bin/illustash-rustc-wrapper`。这个脚本只在四个条件同时满足时调 sccache：输出目录在 illustash 的检出或 worktree 里，调用的是 rustc 本身，不是 incremental 编译，进程是后台优先级。不满足时直接执行 rustc，所以本机其他 Rust 项目不受影响。这样分是因为 sccache 的编译由常驻服务进程执行，服务的优先级取自启动它的那个进程，`taskpolicy -b` 不会随每次请求传过去。服务如果由普通进程启动，`bg` 编译在未命中时会跑到性能核上；反过来，全量又会被降到能效核。官方文档规定同一份本地缓存只能由一个服务使用，所以只让后台编译用，服务也总在后台优先级下启动。仓库内的 `.cargo/config.toml` 不加 wrapper，因为 Windows 验收机和 CI 上没有 sccache。效果和测量口径见 [#240 的评论](https://github.com/shio-vinyl/illustash/issues/240#issuecomment-6806900035)。
+
+用法：`illustash-rustc-wrapper --stats` 查看命中率和缓存占用；单条命令前加 `ILLUSTASH_SCCACHE=0` 临时不用缓存；回退就删掉 `~/.cargo/config.toml` 里的 `rustc-wrapper` 一行。缓存放在 `~/Library/Caches/sccache-illustash`，上限 10 GB（`SCCACHE_CACHE_SIZE`）。加上或去掉 wrapper 都不会让已有的 target 重新编译。`local_acceptance.py` 会记录 `~/.cargo/config.toml` 的摘要，所以这个文件一改，已有的验收记录下次复用时就会以「环境改变」被拒一次，重跑一次 `local_acceptance.py run` 就能生成新记录。
+
 ## 修改测试的导航
 
 业务契约和固定期望的比较规则见 [架构参考](ARCHITECTURE_DIRECTION.md)；本节说明测试分工、依赖和修改方法，测试入口与合并门槛仍按上文及 AGENTS.md。
