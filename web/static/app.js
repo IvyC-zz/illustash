@@ -12,7 +12,7 @@ import {setLatest} from './core/edits.js';
 import {onJob} from './core/jobs.js';
 import {$, platformHints, toast, wireToast, error, wireDom} from './ui/dom.js';
 import {wireTasks, taskTick} from './ui/tasks.js';
-import {confirmAction} from './ui/dialog.js';
+import {confirmAction, isBackdropClick} from './ui/dialog.js';
 import {wireSettings} from './ui/settings.js';
 import {wireCatalog} from './ui/catalog.js';
 import {refreshMeta} from './core/meta.js';
@@ -48,7 +48,7 @@ wireIntegrity();
 wireModels();
 $('undoButton').onclick = undo; $('helpButton').onclick = () => $('help').showModal();
 $('sidebarToggle').onclick = () => { if (innerWidth <= 760) $('sidebar').classList.toggle('mobile-open'); else $('sidebar').hidden = !$('sidebar').hidden; requestAnimationFrame(() => renderGrid()); };
-for (const dialog of document.querySelectorAll('dialog')) dialog.addEventListener('click', e => { if (e.target === dialog) { const r = dialog.getBoundingClientRect(); if (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) dialog.close(); } });
+for (const dialog of document.querySelectorAll('dialog')) dialog.addEventListener('click', e => { if (isBackdropClick(dialog, e)) dialog.close(); });
 
 // 启动：本会话的 token 和撤销步骤、各项计数，然后是地址指向的页面。
 (async () => {

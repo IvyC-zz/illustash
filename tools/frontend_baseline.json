@@ -89,12 +89,9 @@
    "ui/tasks.js::keydown": 1
   },
   "dialog-element": {
-   "ui/catalog.js": 3,
-   "ui/dialog.js": 2,
-   "ui/palette.js": 2
+   "ui/dialog.js": 1
   },
   "long-line": {
-   "app.js": 1,
    "core/catalog.js": 3,
    "core/format.js": 1,
    "core/jobs.js": 4,
@@ -103,9 +100,8 @@
    "core/route.js": 4,
    "core/state.js": 1,
    "ui/artists.js": 6,
-   "ui/catalog.js": 44,
+   "ui/catalog.js": 42,
    "ui/detail.js": 30,
-   "ui/dialog.js": 1,
    "ui/dom.js": 1,
    "ui/grid.js": 30,
    "ui/guide.js": 4,

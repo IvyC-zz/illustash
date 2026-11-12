@@ -50,7 +50,7 @@ test('source removal waits with N images visible and submits only after explicit
 
 for (const dismiss of ['cancel','close','escape','backdrop']) test(`${dismiss} leaves source removal unsubmitted`, async () => {
   const h = harness(), pending = h.remove(); await tick(); const d = h.dialogs[0];
-  if (dismiss === 'close') d.querySelector('[data-close]').onclick();
+  if (dismiss === 'close') d.onclick({target: {closest: selector => selector === '[data-close]' ? {} : null}});
   else if (dismiss === 'backdrop') d.onclick({target:d,clientX:0,clientY:0});
   else d.close(dismiss === 'cancel' ? 'cancel' : '');
   await pending; assert.equal(h.calls.length,1); assert.equal(d.removed,true);
