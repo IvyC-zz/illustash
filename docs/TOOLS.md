@@ -18,5 +18,6 @@
 | `verify_read_http.py` | 原生测试用的 HTTP 逐字节对照辅助 |
 | `build_provenance_probe.py`、`windows_acceptance.py`、`windows_research_acceptance.py` | 溯源候选构建、Windows 基础版与研究包验收 |
 | `build_db.py` | 重建旧格式分析源库；`test_native_library_upgrade` 用它造旧库 |
+| `dev_preview.py` | 浏览器走查用的隔离宿主（临时目录、合成图库），`.claude/launch.json` 的 `web-isolated` 调用它，见 [开发说明](DEVELOPMENT.md#快速开始) |
 
 研究脚本已全部移出本仓库（2026-10-06、2026-10-07）。
