@@ -1,34 +1,27 @@
-// 页面自己的模态对话框（桌面布局，#199、#319）。openDialog 是唯一的生成处：标题行带 ×、正文、操作区，
-// 点 ×、[data-close]、Esc（原生）或背景都能关，关闭后从页面移除。confirmAction 和 chooseWork 是建在它上面的两个现成对话框；
-// ui/catalog.js 和 ui/palette.js 自己的对话框也走这里。
+// 页面自己的模态对话框（桌面布局，#199、#319）。openDialog 是唯一生成对话框的地方：标题行加 × 按钮、正文、操作区，
+// ×、[data-close]、Esc 和点背景都能关（Esc 与点背景由浮层管理器 ui/overlay.js 统一处理），关闭后从 DOM 移除。
+// confirmAction 和 chooseWork 是建在它上面的两个现成对话框；ui/catalog.js 和 ui/palette.js 自己的对话框也用它。
 import {t} from '../core/i18n.js';
 import {esc} from '../core/format.js';
 import {session} from '../core/session.js';
 import {state} from '../core/state.js';
-// 点在对话框自己的背景上（<dialog> 元素本身，盒子之外）。
-export function isBackdropClick(d, e) {
-  if (e.target !== d) return false;
-  const r = d.getBoundingClientRect();
-  return e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom;
-}
-// 生成并显示一个模态对话框，返回它。`title` 是纯文本；`body` 和 `actions` 是 HTML（调用方已转义、已翻译），
-// 分别是中间和底部一行（为空就不画）。`cls` 接在 `modal` 后面。点背景关闭的规则（#343）：只读和确认类对话框关，
-// 带输入的表单类（文字、选择、勾选）用 `backdropClose: false`，免得误点丢掉输入。
-// `focus` 是要获得焦点的控件的选择器（默认是浏览器的第一个可聚焦控件，或带 [autofocus] 的）。
-// `onClose(d)` 在关闭时运行（在里面读 d.returnValue 和表单）；运行完立刻把对话框从页面移除。
-export function openDialog({title, body = '', actions = '', cls = '', backdropClose = true, focus = '', onClose} = {}) {
+import {isBackdropClick, openModal} from './overlay.js';
+export {isBackdropClick};
+// 生成并显示一个模态对话框，返回它。`title` 是纯文本；`body` 和 `actions` 是 HTML（调用方已转义、翻译），分别是中间和底部一行
+// （为空则省略）。`cls` 加在 `modal` 之后。`backdropClose` 是点背景是否关闭，默认不关：只读或确认类的对话框传 true，
+// 带输入或选项的表单保持不关，免得误点丢掉填的东西；每个调用点都要写明属于哪一类。
+// `focus` 是拿焦点的控件的选择器（默认：浏览器的第一个可聚焦控件，或 [autofocus]）。
+// `onClose(d)` 在关闭时运行（在这里读 d.returnValue 和表单）；随后对话框被移除。
+export function openDialog({title, body = '', actions = '', cls = '', backdropClose = false, focus = '', onClose} = {}) {
   const d = document.createElement('dialog'); d.className = ('modal ' + cls).trim();
   d.setAttribute('aria-label', title);
   d.innerHTML = `<form method="dialog">
     <div class="dialog-top"><h2></h2><button type="button" class="icon" data-close aria-label="${t('关闭')}">×</button></div>
     ${body}${actions ? `<div class="dialog-actions">${actions}</div>` : ''}</form>`;
   d.querySelector('h2').textContent = title;
-  d.onclick = e => {
-    if (e.target === d) { if (backdropClose && isBackdropClick(d, e)) d.close(); }
-    else if (e.target.closest('[data-close]')) d.close();
-  };
+  d.onclick = e => { if (e.target !== d && e.target.closest('[data-close]')) d.close(); };
   d.onclose = () => { try { return onClose?.(d); } finally { d.remove(); } };
-  document.body.append(d); d.showModal();
+  document.body.append(d); openModal(d, {backdropClose, id: 'dialog'});
   if (focus) d.querySelector(focus)?.focus?.();
   return d;
 }
@@ -40,7 +33,7 @@ export function confirmAction(message, title = t('确认操作'), ok = t('确认
   confirmationOpen = true;
   const token = session.token, route = state.route;
   return new Promise(resolve => {
-    const d = openDialog({title, body: '<p class="muted-note dialog-message"></p>',
+    const d = openDialog({title, backdropClose: true, body: '<p class="muted-note dialog-message"></p>',
       actions: `${cancel ? `<button value="cancel" class="quiet" autofocus>${t('取消')}</button>` : ''}<button value="ok" class="primary"></button>`,
       onClose: d => { confirmationOpen = false; resolve(d.returnValue === 'ok' && token === session.token && route === state.route); }});
     d.querySelector('[value="ok"]').textContent = ok;
