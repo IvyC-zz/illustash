@@ -3,12 +3,13 @@ import {esc, monthText, number} from '../core/format.js';
 import {t} from '../core/i18n.js';
 import {REASONS, nameWithWork} from '../core/labels.js';
 import {fetchChar} from '../core/meta.js';
+import {shownUuid} from '../core/modes.js';
 import {poolIs} from '../core/pages.js';
 import {charHash, cleanup, go} from '../core/route.js';
 import {api} from '../core/session.js';
 import {state} from '../core/state.js';
 import {$, readFailure, workSmall} from './dom.js';
-import {PAGE, currentItem, kept, loadPage, mutate, openTagPicker, renderGrid, rowHeight, rowOf, rowTop, syncCards, viewOpts} from './grid.js';
+import {PAGE, currentItem, kept, loadPage, mutate, openTagPicker, renderGrid, rowHeight, rowOf, rowTop, setCursor, syncCards, viewOpts} from './grid.js';
 import {newIds, openPicker, stage, targets} from './palette.js';
 import {artistSection, findArtistWorks, findArtists} from './artists.js';
 import {markHomeFocus} from './home.js';
@@ -159,10 +160,9 @@ export function pickAlternative(d, ident, i, also = false) {
   if (from && !also) mutate('/api/reassign', {ids: [ident], old: from.id, new: alt.id}, state.route.char === from.id);
   else mutate('/api/change', {ids: [ident], action: 'confirmed', entity: alt.id}, poolIs(state.route, 'unmatched', 'skipped'));
 }
-// 没有选中任何图时，单图快捷键作用于获得焦点或光标所在的图。
-function singleTarget() { return currentItem(); }
+// 没有选中任何图（或大图盖住了选择栏）时，单图快捷键作用于当前图：大图 ＞ 详情栏 ＞ 光标（core/modes.js）。
 export async function singleAction(kind) {
-  const item = singleTarget(); if (!item) return;
+  const item = currentItem(); if (!item) return;
   const r = state.route;
   if (kind === 'remove') {
     if (r.char) mutate('/api/change', {ids: [item.uuid], action: 'rejected', entity: r.char}, true);
@@ -183,10 +183,10 @@ export async function singleAction(kind) {
 }
 export const indexOf = uuid => state.items.findIndex(x => x?.uuid === uuid);
 export async function step(delta) {
-  const cur = state.viewer >= 0 ? state.viewerItem?.uuid : state.focused;
+  const cur = shownUuid();
   if (kept.hold && kept.hold.uuid === cur && Math.abs(delta) === 1) {
     const target = indexOf(delta > 0 ? kept.hold.next : kept.hold.prev); kept.hold = null;
-    if (target >= 0) { state.cursor = target; ensureVisible(target); if (state.viewer >= 0) showViewer(target); else inspect(state.items[target].uuid); return; }
+    if (target >= 0) { setCursor(target); ensureVisible(target); if (state.viewer >= 0) showViewer(target); else inspect(state.items[target].uuid); return; }
   }
   kept.hold = null;
   const at = cur ? indexOf(cur) : -1;
@@ -194,7 +194,7 @@ export async function step(delta) {
   const n = Math.max(0, Math.min(state.total - 1, from + delta)); if (n === from || n < 0) return;
   if (!state.items[n]) await loadPage(Math.floor(n / PAGE) * PAGE);
   if (!state.items[n]) return;
-  state.cursor = n; ensureVisible(n);
+  setCursor(n); ensureVisible(n);
   if (state.viewer >= 0) showViewer(n); else inspect(state.items[n].uuid);
 }
 export function ensureVisible(i) {
@@ -208,13 +208,13 @@ const view = {scale: 1, x: 0, y: 0, fit: 1};
 // 大图是盖满页面的层：Esc 关它（焦点在层外的输入框里时让位给输入框失焦），关闭时焦点还给打开它的地方。
 const viewerLayer = createLayer({kind: 'overlay', id: 'viewer', el: () => $('viewer'), yieldToInput: true, onDismiss: reason => closeViewer(reason)});
 export function openViewer(i) { if (i < 0 || !state.items[i]) return; state.viewer = i; $('viewer').hidden = false; viewerLayer.open(); document.body.classList.add('viewing'); showViewer(i); }
-export function closeViewer(reason) { viewerLayer.close(reason); if (state.viewer < 0) return; kept.hold = null; state.viewerItem = null; state.cursor = state.viewer; $('viewer').hidden = true; document.body.classList.remove('viewing'); state.viewer = -1; ensureVisible(state.cursor); }
+export function closeViewer(reason) { viewerLayer.close(reason); if (state.viewer < 0) return; kept.hold = null; state.viewerItem = null; setCursor(state.viewer); $('viewer').hidden = true; document.body.classList.remove('viewing'); state.viewer = -1; ensureVisible(state.cursor); }
 export async function showViewer(i, held = null) {
   if (i < 0 && !held) { closeViewer(); return; }
   if (!held && !state.items[i]) await loadPage(Math.floor(i / PAGE) * PAGE);
   const item = held || state.items[i]; if (!item) { closeViewer(); return; }
   const same = state.viewerItem?.uuid === item.uuid && !$('viewer').hidden;
-  state.viewer = Math.max(0, i); state.cursor = state.viewer; state.viewerItem = item;
+  state.viewer = Math.max(0, i); setCursor(state.viewer); state.viewerItem = item;
   if (same) { $('viewerCount').textContent = indexOf(item.uuid) >= 0 ? `${number(indexOf(item.uuid) + 1)} / ${number(state.total)}` : t('已移出当前列表 · ← → 继续'); return refreshViewerBar(item, i); }
   const img = $('viewerImg'); img.style.transform = ''; img.hidden = false; $('viewerMissing').hidden = true; Object.assign(view, {scale: 1, x: 0, y: 0});
   img.onerror = () => { if (state.viewerItem?.uuid === item.uuid) { img.hidden = true; $('viewerMissing').hidden = false; } };

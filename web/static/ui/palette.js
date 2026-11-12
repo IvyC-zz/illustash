@@ -1,6 +1,6 @@
 // 对角色的操作（桌面布局，#199）：命令面板（换成 / 也是 / 设为角色 / 跳到角色）、原创角色、编辑角色资料、合并，以及
 // 选中图片之间的关系。
-import {workName} from '../core/catalog.js';
+import {forgetLocalLinks, workName} from '../core/catalog.js';
 import {setLatest} from '../core/edits.js';
 import {esc, number} from '../core/format.js';
 import {t, tb} from '../core/i18n.js';
@@ -279,7 +279,7 @@ export async function editProfile(c) {
     try {
       const r = await post('/api/character/profile', body);
       close(); setLatest(r.undo); toast(tb(r.undo.label), true);
-      state.localLinks = null; await refreshMeta(); renderHeading();
+      forgetLocalLinks(); await refreshMeta(); renderHeading();
     } catch (err) { q('#pfSave').disabled = false; toast(err.message); }
   };
 }

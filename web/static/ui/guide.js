@@ -2,7 +2,7 @@
 import {WORK_NAMES} from '../core/catalog.js';
 import {esc, number, shortcut} from '../core/format.js';
 import {said, t, tb} from '../core/i18n.js';
-import {PHOTOS_PRIVACY, SYNC_ACTIVE, photosHelp, photosRefused, pollSync, startSync, syncLine} from '../core/jobs.js';
+import {PHOTOS_PRIVACY, SYNC_ACTIVE, photosHelp, photosRefused, pollSync, setIndex, setNames, startSync, syncLine} from '../core/jobs.js';
 import {onPage, pageOf} from '../core/pages.js';
 import {go} from '../core/route.js';
 import {api, post, session} from '../core/session.js';
@@ -174,7 +174,7 @@ function nextNudge() {
 }
 export function drawNudge() {
   const el = $('nudge'), n = nextNudge();
-  if (guideOn() && !state.names && !el.dataset.names) { el.dataset.names = '1'; api('/api/names').then(v => { state.names = v; drawNudge(); }).catch(() => {}); }
+  if (guideOn() && !state.names && !el.dataset.names) { el.dataset.names = '1'; api('/api/names').then(v => { setNames(v); drawNudge(); }).catch(() => {}); }
   const html = !n ? '' : n.key === 'update'
     ? `<div><b>${t('有新版本 {version}', {version: esc(state.updates.latest)})}</b><small>${t('现在是 {current}。在浏览器里打开下载页，下载后覆盖安装即可。', {current: esc(state.updates.current)})}</small></div>
       <div class="nudge-acts"><button class="quiet small" data-nudge="later">${t('暂不')}</button><button class="primary small" data-nudge="open">${t('打开下载页')}</button></div>`
@@ -226,7 +226,7 @@ async function guideWatch(w) {
   try {
     const id = w.id || (await post('/api/works', {action: 'from_tag', tag: w.tag})).id;
     const x = await api('/api/index');
-    state.index = x.watch.works.includes(id) ? x : await post('/api/index', {action: 'watch', works: [...x.watch.works, id], min_posts: x.watch.min_posts});
+    setIndex(x.watch.works.includes(id) ? x : await post('/api/index', {action: 'watch', works: [...x.watch.works, id], min_posts: x.watch.min_posts}));
     toast(t('已关注「{work}」，可以在任务面板里检查它的新角色', {work: guideWorkName(w)}));
   } catch (e) { toast(e.message); }
   await loadGuide(true).catch(e => toast(e.message));

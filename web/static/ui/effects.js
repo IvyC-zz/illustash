@@ -8,14 +8,14 @@ import {readError} from '../core/session.js';
 import {state} from '../core/state.js';
 import {drawShelf} from './catalog.js';
 import {error, toast} from './dom.js';
-import {reload, selCount} from './grid.js';
+import {listChanged, reload, selCount} from './grid.js';
 import {guideAfterPost, guideRefresh} from './guide.js';
 import {renderIndexCard, renderLibrariesCard, renderNamesCard, renderProvenanceCard} from './settings.js';
 
 // 后端接受了一次写入：可能变了的计数和读取，以及向导的下一步。
 export function afterWrite(path, body) {
   guideAfterPost(path, body);
-  state.countDirty = true; state.readEpoch++;
+  listChanged();
   // 防止更早的元数据读取覆盖刚完成的改动。
   metaWritten(path === '/api/tag');
 }
@@ -23,7 +23,7 @@ export function afterWrite(path, body) {
 export async function afterJob(job, change) {
   if (job === 'sync') {
     if (change.arrived) {
-      state.countDirty = true; state.readEpoch++;
+      listChanged();
       await refreshMeta().catch(e => error(readError(e)));
       // 面板页自己重画（首页的按天分组和计数来自它自己的读取，同步落定后重画一次）。
       if (!pageOf(state.route).panel && !selCount()) reload();
@@ -32,7 +32,7 @@ export async function afterJob(job, change) {
     guideRefresh(change.ended);
   } else if (job === 'index') {
     const s = state.index.state;
-    if (change.ended && s.status === 'done') { state.countDirty = true; state.readEpoch++; await refreshMeta().catch(e => error(readError(e))); }
+    if (change.ended && s.status === 'done') { listChanged(); await refreshMeta().catch(e => error(readError(e))); }
     if (s.status !== change.was && onPage(state.route, 'settings')) renderIndexCard(false);
     if (s.status !== change.was && state.route.section === 'works') drawShelf();
   } else if (job === 'names') {

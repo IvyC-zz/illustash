@@ -6,6 +6,7 @@ import {t, tb} from '../core/i18n.js';
 import {REASONS, nameWithWork} from '../core/labels.js';
 import {metaSoon, refreshMeta} from '../core/meta.js';
 import {prefs} from '../core/prefs.js';
+import {currentSource, keyAction, keySelection, modes, selectionSize, shownUuid, viewerTarget} from '../core/modes.js';
 import {pageOf, viewOf} from '../core/pages.js';
 import {browsing, cleanup, defaultSort} from '../core/route.js';
 import {api, post, readError} from '../core/session.js';
@@ -63,6 +64,10 @@ export async function reload(reset = false) {
     if (state.route.char) refreshMaybe(gen);
   } catch (e) { if (e.name !== 'AbortError' && gen === state.generation && route === state.route) { error(e.message); $('resultCount').textContent = t('读取失败'); } }
 }
+// 首页借用网格的列表放它自己的图（详情栏翻页、大图都按这个列表走）。
+export function showList(items) { state.items = items; state.total = items.length; }
+// 后端接受了一次写入、或同步进了新图：已读到的计数和分页作废，下一次读取从头来（ui/effects.js 调用）。
+export function listChanged() { state.countDirty = true; state.readEpoch++; }
 export async function loadPage(offset) {
   if (state.pages.has(offset) || state.pending.has(offset) || offset >= state.total) return;
   if (state.countDirty) {
@@ -128,9 +133,11 @@ export function verticalStep(i, dir) {
   return best;
 }
 const captionH = () => viewOpts.captions && browsing() && state.cellW >= 150 ? 28 : 0;
+// 方格／原比例：设置页的选项和 R 键都经这里改，并记进偏好。
+export function setFit(on) { if (state.fit === on) return; state.fit = on; prefs.set('fit', on); }
 export function toggleFit() {
   const v = $('viewport'), anchor = rowStart(rowAt(v.scrollTop));
-  state.fit = !state.fit; prefs.set('fit', state.fit); layout();
+  setFit(!state.fit); layout();
   v.scrollTop = rowTop(rowOf(anchor)); renderGrid(true);
   for (const b of $('fitToggle')?.querySelectorAll('[data-fit]') || []) b.classList.toggle('on', Boolean(Number(b.dataset.fit)) === state.fit);
 }
@@ -333,7 +340,7 @@ function stepColumns(delta) {
 }
 let pinchFactor = 1, pinchPoint = null, gestureStart = 0;
 // ---------- 选择 ----------
-export const selCount = () => state.sel.all ? Math.max(0, state.total - state.sel.exclude.size) : state.sel.ids.size;
+export const selCount = () => selectionSize();
 const isSelected = id => state.sel.all ? !state.sel.exclude.has(id) : state.sel.ids.has(id);
 function setSelected(id, on) {
   if (state.sel.all) on ? state.sel.exclude.delete(id) : state.sel.exclude.add(id);
@@ -342,6 +349,12 @@ function setSelected(id, on) {
 export function clearSelection() { state.sel = {all: false, ids: new Set(), exclude: new Set()}; state.anchor = -1; state.armed = null; renderSelection(); }
 export function selectAll() { if (!state.total) return; state.sel = {all: true, ids: new Set(), exclude: new Set()}; state.selecting = true; renderSelection(); }
 export function toggleSelecting() { state.selecting = !state.selecting; if (!state.selecting) clearSelection(); renderSelection(); }
+// 取消选择并退出选择模式（Esc、选择栏的 ×、写入之后、切换 R18）。
+export function quitSelecting() { state.selecting = false; clearSelection(); }
+// 换页时复位网格这一侧的状态：退出选择模式、清空选择、光标归位、张数等新读取（ui/shell.js applyRoute 调用）。
+export function resetForRoute() { quitSelecting(); state.cursor = -1; state.totalReady = false; }
+// 键盘光标移到第 i 张（详情栏和大图翻页时跟着走）。
+export function setCursor(i) { state.cursor = i; }
 function selectionPayload() { return state.sel.all ? {filter: filters(), exclude: [...state.sel.exclude]} : {ids: [...state.sel.ids]}; }
 async function selectRange(a, b, on = true) {
   const lo = Math.min(a, b), hi = Math.max(a, b);
@@ -426,7 +439,7 @@ function renderSelection() {
   buttons += `<button class="quiet" data-act="findartist" title="${t('用像素哈希和 IQDB 查这些图的画师（只发哈希文本，不发图片；一次最多 500 张）')}">${t('查找画师')}</button>`;
   if (!state.sel.all && n >= 2 && n <= 12) buttons += `<button class="quiet" data-act="relate" title="${t('两两比较：同一张图、裁剪、差分、局部编辑，还是不同的图（只在本机计算）')}">${t('判断关系')}</button>`;
   bar.innerHTML = count + buttons + (big ? `<span class="bar-note">${t('超过 500 张需再点一次确认')}</span>` : '');
-  $('clearSel').onclick = () => { state.selecting = false; clearSelection(); };
+  $('clearSel').onclick = quitSelecting;
   for (const b of bar.querySelectorAll('[data-act]')) b.onclick = () => runBarAction(b.dataset.act);
 }
 export const short = name => name.length > 28 ? name.slice(0, 26) + '…' : name;
@@ -493,16 +506,18 @@ function openVariantMenu(payload) {
 // 列表在下面变化时保持在视野里的那张图：{uuid, item, prev, next}。
 export const kept = {hold: null};
 function holdCurrent() {
-  const uuid = state.viewer >= 0 ? state.viewerItem?.uuid : state.focused;
+  const uuid = shownUuid();
   if (!uuid) { kept.hold = null; return; }
   if (kept.hold?.uuid === uuid) return;
   const i = indexOf(uuid);
   kept.hold = {uuid, item: state.items[i] || state.viewerItem, prev: state.items[i - 1]?.uuid, next: state.items[i + 1]?.uuid};
 }
+// 当前图：单图快捷键和单图动作作用在它上面。来源的优先级（大图 ＞ 详情栏 ＞ 光标）在 core/modes.js 的 currentSource。
+// 那张图已经离开列表时，取保持在视野里的那份（kept.hold）或大图自己记着的那份。
 export function currentItem() {
-  const uuid = state.viewer >= 0 ? state.viewerItem?.uuid : state.focused;
-  if (!uuid) return state.cursor >= 0 ? state.items[state.cursor] : null;
-  const i = indexOf(uuid);
+  const src = currentSource(); if (!src) return null;
+  if (src.from === 'cursor') return state.items[src.index];
+  const uuid = src.uuid, i = indexOf(uuid);
   return i >= 0 ? state.items[i] : uuid === kept.hold?.uuid ? kept.hold.item : state.viewerItem?.uuid === uuid ? state.viewerItem : null;
 }
 export async function mutate(path, body, leaving, {advance = false} = {}) {
@@ -514,7 +529,7 @@ export async function mutate(path, body, leaving, {advance = false} = {}) {
   if (gone) for (const el of $('grid').children) if (gone.has(el.dataset.id)) el.classList.add('leaving');
   try {
     const r = await post(path, body); setLatest(r.undo);
-    state.selecting = false; clearSelection();
+    quitSelecting();
     toast(tb(r.undo.label), true);
     if (path === '/api/change' && body.action === 'confirmed') offerWatch(body.entities || [body.entity]).catch(() => {});
     if (gone) { await new Promise(done => setTimeout(done, Math.max(0, 170 - (performance.now() - started)))); collapse(gone); }
@@ -604,7 +619,7 @@ function renderNsfw() {
   b.className = 'nsfw-toggle s-' + (state.nsfw || 'all'); b.title = NSFW_TIP[state.nsfw]; b.setAttribute('aria-label', NSFW_TIP[state.nsfw]);
 }
 export function setNsfw(mode) {
-  state.nsfw = mode; prefs.set('nsfw', mode); renderNsfw(); state.selecting = false; clearSelection();
+  state.nsfw = mode; prefs.set('nsfw', mode); renderNsfw(); quitSelecting();
   toast({'': t('已显示全部内容'), hide: t('已隐藏 R18'), only: t('只看 R18')}[mode]);
   if (!pageOf(state.route).panel) reload(true);
   else pageOf(state.route).refresh?.('nsfw');
@@ -667,46 +682,58 @@ export function wireGrid() {
   $('grid').addEventListener('dblclick', e => { const card = e.target.closest('.card[data-id]'); if (card) openViewer(Number(card.dataset.index)); });
 
   // ---------- 键盘 ----------
+  // 按键先看最上面的模式（core/modes.js）：大图打开时它盖住选择栏，单图快捷键都作用于大图里那张。
   document.addEventListener('keydown', e => {
     if (document.querySelector('dialog[open]')) return;
-    const mod = e.metaKey || e.ctrlKey, key = e.key.toLowerCase();
+    const mod = e.metaKey || e.ctrlKey, key = e.key.toLowerCase(), m = modes();
     if (mod && key === 'k') { e.preventDefault(); jumpToCharacter(); return; }
-    if (mod && (key === '=' || key === '+')) { e.preventDefault(); if (state.viewer >= 0) zoomView(1.4, innerWidth / 2, innerHeight / 2); else stepColumns(-1); return; }
-    if (mod && key === '-') { e.preventDefault(); if (state.viewer >= 0) zoomView(1 / 1.4, innerWidth / 2, innerHeight / 2); else stepColumns(1); return; }
+    // ⌘＋／⌘－：大图打开时缩放大图；否则只在有网格的页面改网格列数，别的页面什么也不做（也不交给浏览器缩放）。
+    if (mod && (key === '=' || key === '+' || key === '-')) {
+      e.preventDefault(); const bigger = key !== '-';
+      if (m.viewer) zoomView(bigger ? 1.4 : 1 / 1.4, innerWidth / 2, innerHeight / 2);
+      else if (viewOf(state.route).area === 'grid') stepColumns(bigger ? -1 : 1);
+      return;
+    }
     if (e.target.closest('input,textarea,select,[contenteditable]')) { if (e.key === 'Escape') e.target.blur(); return; }
     if (mod && key === 'z') { e.preventDefault(); undo(); return; }
-    if (mod && key === 'a' && !$('grid').hidden) { e.preventDefault(); selectAll(); return; }
+    // ⌘A 是选择栏的快捷键：大图打开时选择栏被盖住，不响应。
+    if (mod && key === 'a' && !$('grid').hidden) { e.preventDefault(); if (!m.viewer) selectAll(); return; }
     // 浮层（含大图）的 Esc 已由浮层管理器处理；走到这里说明栈是空的，接着关详情栏、取消选择。
-    if (e.key === 'Escape') { if (state.focused) closeInspector(); else { state.selecting = false; clearSelection(); } return; }
+    if (e.key === 'Escape') { if (m.detail) closeInspector(); else quitSelecting(); return; }
     if (key === 'r' && !mod && !pageOf(state.route).panel) { e.preventDefault(); toggleFit(); return; }
     if (key === 'h' && !mod) { e.preventDefault(); setNsfw(state.nsfw === 'hide' ? '' : 'hide'); return; }
     if (e.key === '/' && $('search')) { e.preventDefault(); $('search').focus(); return; }
-    if ((key === 'y' || key === 'n') && !mod && !edits.busy && viewOf(state.route).bar === 'audit' && selCount() && state.viewer < 0) { e.preventDefault(); answerAudit(key === 'y'); return; }
-    if ((key === 'y' || key === 'n') && !mod && !edits.busy && state.question && [state.focused, state.viewer >= 0 && state.viewerItem?.uuid].includes(state.question.ident)) { e.preventDefault(); answerAsk(key === 'y' ? 'yes' : 'no'); return; }
+    const n = keySelection(), view = viewOf(state.route), character = !!state.route.char;
+    if ((key === 'y' || key === 'n') && !mod && !edits.busy && view.bar === 'audit' && n) { e.preventDefault(); answerAudit(key === 'y'); return; }
+    if ((key === 'y' || key === 'n') && !mod && !edits.busy && state.question && [state.focused, m.viewer && state.viewerItem?.uuid].includes(state.question.ident)) { e.preventDefault(); answerAsk(key === 'y' ? 'yes' : 'no'); return; }
     if (edits.busy || $('grid').hidden) return;
-    if (e.key === ' ') { e.preventDefault(); if (state.viewer >= 0) closeViewer(); else openViewer(state.cursor >= 0 ? state.cursor : state.focused ? indexOf(state.focused) : 0); return; }
+    if (e.key === ' ') { e.preventDefault(); if (m.viewer) closeViewer(); else openViewer(viewerTarget()); return; }
     if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key)) {
       e.preventDefault();
       const from = state.cursor < 0 ? 0 : state.cursor;
       const delta = e.key === 'ArrowLeft' ? -1 : e.key === 'ArrowRight' ? 1 : verticalStep(from, e.key === 'ArrowUp' ? -1 : 1) - from || (e.key === 'ArrowUp' ? -state.cols : state.cols);
-      if (state.viewer >= 0 || state.focused) { if (Math.abs(delta) === 1) step(delta); else if (state.viewer < 0) step(delta); return; }
-      state.cursor = Math.max(0, Math.min(state.total - 1, (state.cursor < 0 ? 0 : state.cursor + delta)));
+      // 大图里只有 ← → 翻页；详情栏里 ↑ ↓ 也翻到上一行、下一行的图。
+      if (m.viewer || m.detail) { if (Math.abs(delta) === 1 || !m.viewer) step(delta); return; }
+      setCursor(Math.max(0, Math.min(state.total - 1, (state.cursor < 0 ? 0 : state.cursor + delta))));
       if (e.shiftKey && state.items[state.cursor]) { setSelected(state.items[state.cursor].uuid, true); renderSelection(); }
       if (!state.items[state.cursor]) loadPage(Math.floor(state.cursor / PAGE) * PAGE);
       ensureVisible(state.cursor); return;
     }
-    if (e.key === 'Enter' && state.cursor >= 0 && state.viewer < 0) { e.preventDefault(); const item = state.items[state.cursor]; if (!item) return; if (cleanup() || state.selecting) { setSelected(item.uuid, !isSelected(item.uuid)); state.anchor = state.cursor; renderSelection(); } else inspect(item.uuid); return; }
-    const n = selCount(), view = viewOf(state.route), character = !!state.route.char;
+    if (e.key === 'Enter' && state.cursor >= 0 && !m.viewer) { e.preventDefault(); const item = state.items[state.cursor]; if (!item) return; if (cleanup() || state.selecting) { setSelected(item.uuid, !isSelected(item.uuid)); state.anchor = state.cursor; renderSelection(); } else inspect(item.uuid); return; }
     if (mod || e.altKey && !/^[1-9]$/.test(e.key)) return;
     if (['c', 'a', 't', 's', 'g'].includes(key) || /^[1-9]$/.test(e.key)) e.preventDefault(); // 别让这个字母进到命令面板的输入框里
-    if (e.key === 'Backspace' || e.key === 'Delete') { e.preventDefault(); if (n) runBarAction(character ? 'remove' : browsing() ? 'notlib' : ''); else singleAction('remove'); return; }
-    if (key === 'c') { if (n) runBarAction(character ? 'swap' : 'assign'); else singleAction(character ? 'swap' : 'also'); return; }
-    if (key === 'a' && !mod) { if (n) runBarAction(character ? 'also' : 'assign'); else singleAction('also'); return; }
-    if (key === 't' && character && n) { runBarAction('variant'); return; }
-    if (key === 'g') { if (n) runBarAction('tag'); else singleAction('tag'); return; }
-    if (key === 'x' && !mod) { const act = view.bar === 'excluded' ? 'include' : 'exclude'; if (n) runBarAction(act); else singleAction(act); return; }
-    if (key === 's' && view.bar === 'unmatched') { if (n) runBarAction('skip'); else singleAction('skip'); return; }
-    if (/^[1-9]$/.test(e.key) && !n && state.detail && (state.focused || state.viewer >= 0)) { pickAlternative(state.detail, state.detail.uuid, Number(e.key) - 1, e.altKey); return; }
+    const remove = e.key === 'Backspace' || e.key === 'Delete';
+    if (remove || ['c', 'a', 't', 'g', 'x', 's'].includes(key)) {
+      if (remove) e.preventDefault();
+      const item = n ? null : currentItem(); if (!n && !item) return;   // 没有选中也没有当前图：什么都不做
+      const act = keyAction(remove ? 'remove' : key, {view, char: character, n, item});
+      if (act?.bar) runBarAction(act.bar);
+      else if (act) singleAction(act.single);
+      // 整理页里这个键没有对应的动作：说一声，不再静默吞掉。
+      else if (view.click === 'cleanup') toast(t('这一页没有 {key} 对应的操作', {key: remove ? '⌫' : key.toUpperCase()}));
+      return;
+    }
+    if (/^[1-9]$/.test(e.key) && !n && state.detail && (m.detail || m.viewer)) { pickAlternative(state.detail, state.detail.uuid, Number(e.key) - 1, e.altKey); return; }
   });
 
   $('viewButton').onclick = e => { e.stopPropagation(); toggleViewPop(); };
