@@ -184,7 +184,7 @@ impl Reply {
 }
 pub(crate) fn request(c: &mut Connection, body: &Json, path: &str, prepared: Option<&Prepared>) -> Result<Json> {
     initialized(c)?;
-    // Python handler 只用这些字段；用不到的 NaN 和大整数无关紧要。
+    // 每个路由只读下面列出的字段，范围照旧 Python 处理函数（#9 已删除）；用不到的 NaN 和大整数无关紧要。
     let linked = body.get("tag").is_some_and(crate::app_service::truthy);
     let fields: &[&str] = match path {
         "/api/entities" if linked => &["tag", "typed"],
@@ -364,7 +364,7 @@ fn profile(c: &Connection, mut v: Value, prepared: Option<&Prepared>) -> Result<
 }
 fn local_links(c: &Connection, v: &Value, prepared: Option<&Prepared>) -> Result<Reply> {
     let mut plan = Vec::new();
-    // 在外部查询之前校验整个计划，与 _link_args 一致。
+    // 在外部查询之前校验整个计划，照旧 Python 的 `_link_args`（#9 已删除）。
     for item in link_items(v)? {
         plan.push((item["id"].clone(), tag(&item["tag"])?));
     }

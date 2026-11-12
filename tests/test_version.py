@@ -30,10 +30,11 @@ class VersionTests(unittest.TestCase):
             shutil.copyfile(ROOT / relative, self.root / relative)
 
     def edit(self, relative, old, new):
+        # 按字节读写，保持文件原有的 LF：write_text 在 Windows 上会把 \n 写成 \r\n（#322）。
         path = self.root / relative
-        text = path.read_text(encoding='utf-8')
+        text = path.read_bytes().decode('utf-8')
         self.assertIn(old, text)
-        path.write_text(text.replace(old, new, 1), encoding='utf-8')
+        path.write_bytes(text.replace(old, new, 1).encode('utf-8'))
 
     def test_repository_is_consistent(self):
         self.assertEqual(version.check(ROOT), [])

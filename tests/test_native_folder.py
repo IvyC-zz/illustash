@@ -359,9 +359,6 @@ class NativeFolderHTTPTest(unittest.TestCase):
                 src.backup(dest)
         image(self.new_folder / 'a.png', 'red')
         image(self.new_folder / 'b.webp', 'blue')
-        # 让两个各自写入的消费方在同一个真实时钟秒内运行（录制时）。
-        while False and time.time() % 1 > .1:
-            time.sleep(.005)
         state=self.sync()
         self.assertEqual(state['state']['status'],'needs_recognition',state)
         with sqlite3.connect(self.lib.source) as c:

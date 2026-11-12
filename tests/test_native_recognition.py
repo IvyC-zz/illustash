@@ -112,7 +112,7 @@ class NativeRecognitionTest(unittest.TestCase):
         self.assertTrue(self.import_result(p)['duplicate'])
         self.assertEqual(snapshot(self.lib.source),source)
         self.assertEqual(snapshot(self.lib.db),app)
-        # manifest 不同、但图片结果完全相同时，也会去重。
+        # manifest 不同时不算重复导入（duplicate 为假）；但图片结果完全相同，recognition_assets 仍只有 2 行。
         m=json.loads((p/'manifest.json').read_text());m['producer_note']='合成';(p/'manifest.json').write_text(json.dumps(m),newline='\n')
         self.assertFalse(self.import_result(p)['duplicate'])
         with sqlite3.connect(self.lib.source) as c:
@@ -288,7 +288,7 @@ class NativeRecognitionTest(unittest.TestCase):
                 self.assertEqual((running['status'], running['file']), ('running', p.name))
                 self.assertNotIn('done', running)
                 if how == 'cancel':
-                    # 导入运行期间：读取照常应答，同步和索引写入要等它。
+                    # 导入运行期间：读取照常应答；同步和索引写入直接拒绝（400「识别结果正在导入…」），等导入结束再做。
                     refused = self.request('/api/sync', {})
                     self.assertEqual(refused['status'], 400, refused)
                     self.assertIn('识别结果正在导入', json.loads(refused['body'])['error'])

@@ -1,5 +1,5 @@
 //! 精确的 PAM/MD5 契约，有意与显示和签名用的解码分开。
-//! 显式的 LCMS2.19 / 标量 TIFF 候选；安装版适配器仍受门槛限制。
+//! 固定 LCMS2.19，加上范围很窄的标量 TIFF；安装版适配器的 pixel_hash 步骤（`pixel_batch`）用它。
 use super::pixel_icc;
 use crate::image_samples::{
     pnm::{pnm_samples, PnmSamples},
@@ -24,8 +24,8 @@ pub fn rgba_hash(width: u32, height: u32, pixels: &[u8]) -> Result<String> {
     Ok(format!("{:x}", md5.finalize()))
 }
 
-/// 仅限候选：固定 LCMS2.19，加上范围很窄的标量 TIFF；生产环境仍受门槛限制。
-/// 解码器和 ICC 的完整覆盖是发布门槛；适配器不选用这个入口。
+/// 固定 LCMS2.19，加上范围很窄的标量 TIFF。安装版适配器的 pixel_hash 步骤经 `pixel_batch` 调用这里；
+/// 函数名沿用候选阶段的叫法。
 pub fn candidate_path(path: &Path) -> Result<String> {
     let bytes = fs::read(path)?;
     candidate_bytes_with_path(&bytes, Some(path))

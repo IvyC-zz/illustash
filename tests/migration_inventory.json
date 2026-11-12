@@ -15,7 +15,7 @@
 
  "crates/core/src/character_identity.rs":"dd494026266e6c788af1e0524f04ab010e56c26eb1d7b9973597f9fffe862fe6",
 
- "crates/core/src/character_import.rs":"ef522680739a01db6aecc56efc44c4dd6d87d14eb995323a37649f841676fac4",
+ "crates/core/src/character_import.rs":"c1584ab42579eff026120ef5293079cb948238fe6eefbf866a2027190c211426",
 
  "crates/core/src/character_json.rs":"fbc17913baf024e4ea10902ca0520c2c2b9c5d2f8ef6fb8fc17550c3cb5fdf73",
 
@@ -125,7 +125,7 @@
 
  "crates/platform/src/platform_system.rs":"7182ffa64a7e70a74beaf8a06a1c7fa9f3c58d9a7fd25dd5425a140119f5ca6d",
 
- "crates/platform/src/platform_time.rs":"19efd9bc693aabdc62f7f6b0f3525276dc626def9a3b503d7127bc6631bfd7db",
+ "crates/platform/src/platform_time.rs":"52564c5a29681a1222e979b3f5d34555d5c0fedad4972d9f9227d5bcfed4e568",
 
  "crates/platform/src/source_rows.rs":"bda7ca3f5e0e988a4563882b4f9095f4dd5b009ec570538fc3362b25c8b60d1d",
 
@@ -165,7 +165,7 @@
 
  "native/terms/src/app_commands.rs":"c9eadb3e255cd1a7d832d95eee6df98324d0308247291be92fd7079b5c688278",
 
- "native/terms/src/app_create.rs":"d4b1381f34ad722550bee5c25d0d3dd0662f983a348cad33cc5fe9b7113e7bfe",
+ "native/terms/src/app_create.rs":"732a3b2992f08151d69258021db000565208e24c47d2afbf10eee1d3341f6a7d",
 
  "native/terms/src/app_create_names.sql":"29fb8b712603ad5bfd49a20b82162ead37a45e781f949d5e1c9678bd42fa8f7f",
 
@@ -233,7 +233,7 @@
 
  "native/terms/src/app_preferences.rs":"1718355189e4572f61797110da007b9baa6ad565ca8684929bec452875f12c61",
 
- "native/terms/src/app_profiles.rs":"4fc5670ce092f65f223d97af4dcf1d0a7acb3fbfde26ed3ef15f83516519cc82",
+ "native/terms/src/app_profiles.rs":"9146ad3345db80e03c9a8f68e02f3e253fe4cc04a21610a03060061aa0cfea9b",
 
  "native/terms/src/app_provenance.rs":"33c7303e6787ea58fc7c8336811776308294bb6ca95f61fb8bdd40fe71861f23",
 
@@ -247,7 +247,7 @@
 
  "native/terms/src/app_rescue.rs":"08915aa36490c06b4d43fb0ff6337d4a548b451bc15c090928b0d37e6af4456d",
 
- "native/terms/src/app_research.rs":"a51203c50d0eb8e433e8314ae548d16736a7aacd3ed87d1de9c2cdf5636a65c8",
+ "native/terms/src/app_research.rs":"89b135b2b6beb1a50448e14051cb5c7520c4c51b0bdcc680fcecc3cbda615639",
 
  "native/terms/src/app_resources.rs":"3304fcac09af5a36a490589de3dd36fd6f79bad80cf515f44f6d2888ee1d80e3",
 
@@ -271,7 +271,7 @@
 
  "native/terms/src/bin/illustash-terms.rs":"04ee80bb280034a16f8ddd9fe97e8de0700713259c44f76858f70b8713d4c594",
 
- "native/terms/src/bin/illustash-worker.rs":"f8d151e03cbfb505d589edd2f4fff756d2660baf2f83887f5cff916c8f8b505b",
+ "native/terms/src/bin/illustash-worker.rs":"282354dfa7c6d3ab227c352bb04627fed317bcb37550de2eb938a61393cab7f7",
 
  "native/terms/src/cli.rs":"9ce04f9ee8f5b693a6a8fd56bed77cac4066e51a476974eccad250d3e3fe1a25",
 
@@ -289,15 +289,15 @@
 
  "native/terms/src/http_host_get.rs":"bf803ce14b99b126cf946727d0548fab0fc16f150b2005ce5f03415cd30631a6",
 
- "native/terms/src/http_host_post.rs":"37f37f16bc58dcb60357b37e5d26a66c44edab643be59b3b530e94fe4372609e",
+ "native/terms/src/http_host_post.rs":"8db1013ee971ea4812d3da18f416097cb33e4e37789dcb890a8115f2f41fc9a3",
 
  "native/terms/src/http_json.rs":"ed199ea4c469fed512dfa9338140b8cf4dad1cb93a25e97bc2430e1675bf286b",
 
  "native/terms/src/http_local.rs":"d7a5757ae32b7c609f0749facd77996e8879dd8fb531bb0a40352364807e8370",
 
- "native/terms/src/http_read.rs":"1c868c63fbc85154170eed7870257e17956b7af887dd9aa2b54471d41c74642a",
+ "native/terms/src/http_read.rs":"e5b7e7f78faffd8865dbded82351d75ad8aa64d077b739015578396d3b638dbf",
 
- "native/terms/src/image_samples/mod.rs":"67f56dca256c8a0ee344a24ae6c2d8d28c1ec87154c42046d850b4f168b00203",
+ "native/terms/src/image_samples/mod.rs":"3322652e6cd2806e1c739a67ecca850060eb2d4d2c9fd49d74d1ade3bafbefd6",
 
  "native/terms/src/image_samples/pnm.rs":"22c72dcad3e18581fe7df7b66dec9d40a0e1d25bfe084641d70e9b8761d3cef0",
 
@@ -323,7 +323,7 @@
 
  "native/terms/src/recognition_compute/anchor_snapshot.rs":"8ab8b7bb1fb022fbc3eb02a7c7f6ae6dfe3aaffb3bbade5f73c12e52abb1ff0a",
 
- "native/terms/src/recognition_compute/anchors.rs":"8095cbf978ecfb6bf4666e7f66f4b1268c446828f251d21b9ce57d96ec826c53",
+ "native/terms/src/recognition_compute/anchors.rs":"aec9a4c123a723ece8dfdda208e60c7cdf5c8ae3997719299e02ddae275f749a",
 
  "native/terms/src/recognition_compute/backend.rs":"7d7ca3e79471d018470b6942802e07dc25e066a701f09136e8cb75ae227197c6",
 
@@ -349,7 +349,7 @@
 
  "native/terms/src/research_compute/mod.rs":"96f453ce141d318bc3e6da554a932be8fdb7fc3b4145da56b3fa350c2fca5489",
 
- "native/terms/src/research_compute/numeric.rs":"84b8b35d61b176dd992c2f7c4e0e38773bde5c67b21d6b867c6c7fa83f24d4f5",
+ "native/terms/src/research_compute/numeric.rs":"1c12b3f6180efa3b45bf3270acaeaa3699e3af9b7a9ad03891dfa908d61c73f5",
 
  "native/terms/src/research_compute/relation_fft.rs":"1f823782ece25dc9087bdb66d25dc55b2fb4ae717803626af0c33064f443aec3",
 
@@ -369,7 +369,7 @@
 
  "native/terms/src/table_delta.rs":"875225221e30755766b276a098afab88d1663d3a2f0059181f3ee60b8c7f569d",
 
- "native/terms/src/task_state.rs":"5cc655c8b75fb0da578357af7743f5ece28f2a63b45ae8d510134e18ca7b6225",
+ "native/terms/src/task_state.rs":"bc37b10d47109a65558d9a912aa75d7165b64b5c6088e236324e098e2351dcc6",
 
  "native/terms/src/wd_pending.rs":"0ee1bf7d1815e0d4ad7ce6b4aeabd173bfa91d8aa46eeae869adb9c880d466af",
 
@@ -532,7 +532,7 @@
  "crates/core/src/character_sql/tag_memberships.sql":{"database-write":["INSERT INTO:tag_memberships"]},
  "crates/core/src/names_commands.rs":{"database-write":{"INSERT OR IGNORE INTO:term_key_names":1,"dynamic-or-wrapper":8,"DELETE FROM:term_names":4,"DELETE FROM:term_key_names":1,"DELETE FROM:term_key_aliases":1,"INSERT INTO:term_key_aliases":1}},
  "native/terms/src/app_profiles.rs":{"http-branch":[[23,8],[16,5],[17,7],[44,3],[83,3],[242,4],[98,3]],"database-write":[[3,3],0]},
- "crates/core/src/character_import.rs":{"database-write":{"INSERT OR IGNORE INTO:term_links":1,"dynamic-or-wrapper":14,"UPDATE:term_tree":3,"UPDATE:terms":1,"INSERT INTO:term_batches":1,"INSERT OR IGNORE INTO:assertions":1,"INSERT INTO:imported":1,"DELETE FROM:auto_rules":1,"INSERT OR IGNORE INTO:auto_rules":4,"INSERT INTO:excluded":1,"DELETE FROM:excluded":1,"DELETE FROM:touched":1,"INSERT OR IGNORE INTO:touched":1,"INSERT INTO:assets":1,"DELETE FROM:duplicates":1,"INSERT INTO:duplicates":1,"INSERT OR REPLACE INTO:meta":2,"DELETE FROM:assets":1,"DELETE FROM:candidates":1,"REINDEX":3,"INSERT OR REPLACE INTO:sync_added":1}},
+ "crates/core/src/character_import.rs":{"database-write":{"INSERT OR IGNORE INTO:term_links":1,"dynamic-or-wrapper":15,"UPDATE:term_tree":3,"UPDATE:terms":1,"INSERT INTO:term_batches":1,"INSERT OR IGNORE INTO:assertions":1,"INSERT INTO:imported":1,"DELETE FROM:auto_rules":1,"INSERT OR IGNORE INTO:auto_rules":4,"INSERT INTO:excluded":1,"DELETE FROM:excluded":1,"DELETE FROM:touched":1,"INSERT OR IGNORE INTO:touched":1,"INSERT INTO:assets":1,"DELETE FROM:duplicates":1,"INSERT INTO:duplicates":1,"INSERT OR REPLACE INTO:meta":2,"DELETE FROM:assets":1,"DELETE FROM:candidates":1,"REINDEX":3,"INSERT OR REPLACE INTO:sync_added":1}},
  "native/terms/src/http_host_post.rs":{"http-branch":[264,265,266,267,[41,2],268,247,231,74,88,24,23,16,17,44,83,242,98,80,79,76,269,100,37,95,40,42,[230,2],39,270,43,271,[26,2],272,273,276,277,278,281,292,293,295,[282,2],[275,2],[280,2],[279,2],[274,2],[294,2],296,[303,2],305]},
  "native/terms/src/app_provenance.rs":{"database-write":{"INSERT OR IGNORE INTO:pending_runs":3,"UPDATE:runs":3,"INSERT OR IGNORE INTO:native_meta":2,"dynamic-or-wrapper":4,"UPDATE:native_meta":1,"COMMIT":2,"INSERT INTO:runs":1,"DELETE FROM:pending_runs":1,"ATTACH":2,"PRAGMA:c.execute_batch(\"pragma defer_foreign_keys":1,"INSERT INTO:leads|UPDATE:set":1,"INSERT INTO:native_delivery":1},"entrypoint":{"process-start":1}},
  "crates/core/src/character_sql/evidence_default.sql":{"database-write":[196]},

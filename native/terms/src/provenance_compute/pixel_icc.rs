@@ -1,4 +1,4 @@
-//! 仅限候选：固定 LittleCMS 2.19，沿用旧 Pillow 的 RGB 变换。
+//! 像素哈希的色彩转换：固定 LittleCMS 2.19，沿用旧 Pillow 的 RGB 变换。
 use crate::{Error, Result};
 use image::RgbaImage;
 use lcms2::{Intent, PixelFormat, Profile, Transform};

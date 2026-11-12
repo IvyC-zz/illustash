@@ -140,7 +140,7 @@ impl Scope {
             ]),
             // research_compute::groups::oc.
             Self::Oc => Some(&["duplicates", "excluded", "general_hits", "memberships"]),
-            // 只有请求的图片的路径，由 `fingerprint_once` 计算哈希。
+            // 只有请求的图片的路径，由 `app_digest_once` 计算哈希。
             Self::Relate => Some(&[]),
         }
     }

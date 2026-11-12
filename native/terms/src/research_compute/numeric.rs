@@ -45,7 +45,6 @@ pub fn normalise_layout(v: &mut [f32], contiguous: bool) -> Result<(), String> {
     }
     Ok(())
 }
-// float64 的 NPY 输入保留 float64 的求范数和除法，再把结果行转成 float32。
 pub(crate) fn sum64(v: &[f64]) -> f64 {
     if v.len() < 8 {
         return v.iter().fold(-0.0, |s, x| s + x);
@@ -64,6 +63,7 @@ pub(crate) fn sum64(v: &[f64]) -> f64 {
     let sum = ((lane[0] + lane[1]) + (lane[2] + lane[3])) + ((lane[4] + lane[5]) + (lane[6] + lane[7]));
     v[end..].iter().fold(sum, |s, x| s + x)
 }
+// float64 的 NPY 输入保留 float64 的求范数和除法，再把结果行转成 float32。
 pub fn normalise64(v: &[f64], contiguous: bool) -> Result<Vec<f32>, String> {
     if v.iter().any(|x| !x.is_finite()) {
         return Err("Invalid CCIP feature vector".into());
