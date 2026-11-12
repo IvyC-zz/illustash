@@ -2505,5 +2505,6 @@
   "诊断记录暂不可读": "Diagnostic records are currently unavailable",
   "无法访问剪贴板，请导出诊断信息": "Clipboard unavailable. Export or view diagnostics instead.",
   "本地服务已退出（{status}）；可复制诊断信息，重试或选择其他图库": "The local service exited ({status}). You can copy diagnostics, retry, or choose another library.",
-  "任务线程崩溃（{id}）": "Task thread crashed ({id})"
+  "任务线程崩溃（{id}）": "Task thread crashed ({id})",
+  "无法访问剪贴板，请查看诊断信息并手动复制": "Clipboard unavailable. Open diagnostics and copy the text manually."
 }

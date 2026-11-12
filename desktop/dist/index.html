@@ -113,7 +113,7 @@ async function diagnosticText() {
 }
 document.getElementById('diagnosticCopy').onclick = async () => {
   try { await navigator.clipboard.writeText(await diagnosticText()); document.getElementById('diagnosticNotice').textContent = t('诊断信息已复制'); }
-  catch { document.getElementById('diagnosticNotice').textContent = t('无法访问剪贴板，请导出诊断信息'); }
+  catch { document.getElementById('diagnosticNotice').textContent = t('无法访问剪贴板，请查看诊断信息并手动复制'); }
 };
 document.getElementById('diagnosticExport').onclick = async () => {
   try {
