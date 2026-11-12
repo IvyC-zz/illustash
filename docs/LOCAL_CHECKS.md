@@ -12,6 +12,8 @@
 
 2026-10-03 用户批准的 PR #131 / #136 / #141 是限定合批例外：各项保留独立 review 和受影响平台专项，整合保留原提交，最终整合 head 一次完整入口通过后整批 merge；原 PR 的历史或定向证据单列，不冒称逐项新 head 全量。其余任务仍按 AGENTS.md 原合并门槛执行，不能因复用或合批省略实际 GUI / 安装验收。
 
+**前端结构检查**（#320）：`tools/check_all.sh` 在 `check_architecture.py` 之后运行 `tools/check_frontend.py --strict-stale --base-ref <与 origin/main 的共同祖先>`，`ci.yml` 里对应的步骤带 `--strict-stale`（CI 只在 main 上跑，没有可比较的基准）。`--strict-stale`：基线里已不再出现的项算失败，改好违规的 PR 要同时跑 `python tools/check_frontend.py --shrink`；`--base-ref`：基线比共同祖先上的大就失败，新增违规不能靠往 `tools/frontend_baseline.json` 里加通过。取不到 `origin/main` 和 `main` 时脚本会明说并跳过 `--base-ref` 这一项，先 `git fetch origin` 即可。规则本身见 [AGENTS.md](../AGENTS.md#前端结构约定)。集成会话组批时，先合入的 PR 若收紧了基线，后面改到同一批文件的 PR 合并后要再跑一次 `--shrink`。
+
 ## 并行运行与耗时口径
 
 `tests/run_fixed_suite.py` 默认以 CPU 核数为进程上限，按测试类分组动态领取，同一类在一个子进程内运行；`--jobs N` 指定正整数上限，`--jobs 1` 使用原串行 discover。并行模式仅接受 `-v`、`-b`，筛选等其他 unittest 参数需配合 `--jobs 1`。每组输出整段回放，父进程检查发现的测试 ID 是否漏跑或出现额外项，子进程崩溃、测试失败及退役导入尝试均使入口失败。子进程以 `-c` 启动，先把仓库根插到 `sys.path` 最前再运行 `tests.run_fixed_suite`，并沿用父进程的 `-I`、`-X utf8`、`-W` 等解释器选项，因此不依赖解释器把 cwd 放进 `sys.path`；带 `._pth` 的嵌入式 Python（Windows 验收机）与 `-I` 一样不加 cwd、忽略 `PYTHONPATH`，父进程须同样自行插入仓库根后用 `runpy` 运行，`tests/test_run_fixed_suite.py` 以 `-I` 覆盖这一情形。单独调用运行器前仍须准备对应候选二进制和环境；改变进程数不构成完整验收。
