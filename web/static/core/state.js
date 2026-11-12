@@ -1,12 +1,49 @@
-// 页面共享的状态（#199）：路由、图库的列表和选择、各项计数以及每个任务最近一次的回应，由需要它们的模块读写；不按领域
-// 拆分。放在别处、各自只有一个写入方的：会话（session.js），编辑和撤销（edits.js）。不碰 DOM。
+// 页面共享的状态（#199）：路由、图库的列表和选择、各项计数以及每个任务最近一次的回应。不碰 DOM。
+// 每个字段都在这里声明（tools/check_frontend.py 规则 2），按归属分组；每组只有一个写入者：组标题写的那个模块，
+// 其余模块只读，要改就调用组标题里列的那个模块的函数（#344）。字段的初值要与第一次写入之前读它的代码对得上，
+// 例如 doubtCount 是 null 而不是 0，「和上次一样就不重画」的比较才不会在第一次就跳过。
+// 放在别处、各自只有一个写入方的：会话（session.js），编辑和撤销（edits.js），列表变化时保持在视野里的那张图
+// （ui/grid.js 的 kept）。
+// 图片交互的几个模式（浏览、选择、详情、大图）怎么由这些字段组成、当前图取哪个来源，见 core/modes.js。
 import {prefs} from './prefs.js';
 export const state = {
+  // ---- 路由：core/route.js（setRoute 整体换掉、replaceRoute 就地改参数） ----
   route: {page: 'library'},
-  chars: [], charMap: new Map(), pins: [], char: null, pools: {unmatched: 0, skipped: 0}, dupInfo: {groups: 0, mixed: 0}, exclInfo: {count: 0, reasons: {}}, pendingCount: 0, sync: {status: 'off'}, syncHistory: [], settings: null, recentCount: 0, maybeCount: 0, userTags: [],
-  items: [], total: 0, readEpoch: 0, pages: new Set(), pending: new Set(), generation: 0, dataVersion: 0, gridKey: '',
+
+  // ---- 图库元数据：core/meta.js（refreshMeta 一起读；setChar、setIdentityCount） ----
+  chars: [], charMap: new Map(), workNames: null, char: null, userTags: [],
+  pools: {unmatched: 0, skipped: 0}, dupInfo: {groups: 0, mixed: 0}, exclInfo: {count: 0, reasons: {}}, pendingCount: 0, recentCount: 0,
+  identityCount: null,
+
+  // ---- 后台任务最近一次的回应：core/jobs.js（index、names 别处要换时用 setIndex、setNames、mergeNames） ----
+  sync: {status: 'off'}, syncHistory: [], syncDamaged: null, provenance: null, importTask: null, index: null, names: null,
+
+  // ---- 设置页读写的数据：core/settings.js（settings 别处要换时用 setSettings） ----
+  settings: null, about: null, accounts: null, fold: null, libraries: null, pixivWaiting: null, updates: null,
+
+  // ---- 资料库的数据：core/catalog.js（localLinks 别处要作废时用 forgetLocalLinks） ----
+  tagged: null, workTree: null, localLinks: null,
+
+  // ---- 其余各有一个写入者的回应：core/integrity.js、core/models.js、ui/guide.js ----
+  integrity: null, models: null, guide: null,
+
+  // ---- 网格的列表：ui/grid.js（首页借用它放自己的图，用 showList；写入后作废读取用 listChanged） ----
+  items: [], total: 0, totalReady: false, readEpoch: 0, countDirty: false, countReload: null,
+  pages: new Set(), pending: new Set(), generation: 0, dataVersion: 0, gridKey: '',
+  // 角色页「可能也是 TA」「可能认错」两个胶囊的张数。
+  maybeCount: 0, doubtCount: null,
+
+  // ---- 网格的布局与缩放：ui/grid.js（fit 用 setFit） ----
   // size 由知道缩放范围的 ui/grid.js 设置。
   cols: 1, cellW: 180, rowH: 250, gap: 12, size: 185, fit: prefs.get('fit', false),
-  selecting: false, sel: {all: false, ids: new Set(), exclude: new Set()}, anchor: -1, cursor: -1,
-  focused: null, detail: null, viewer: -1, armed: null, nsfw: ['', 'hide', 'only'].includes(prefs.get('nsfw', '')) ? prefs.get('nsfw', '') : '',
+  nsfw: ['', 'hide', 'only'].includes(prefs.get('nsfw', '')) ? prefs.get('nsfw', '') : '',
+
+  // ---- 选择与键盘光标：ui/grid.js（cursor 用 setCursor；换页复位用 resetForRoute） ----
+  selecting: false, sel: {all: false, ids: new Set(), exclude: new Set()}, anchor: -1, cursor: -1, armed: null,
+
+  // ---- 详情栏与大图：ui/detail.js ----
+  focused: null, detail: null, viewer: -1, viewerItem: null, question: null,
+
+  // ---- 「第 N 组」页标题用的近似组信息：ui/shell.js（进入该页前读取） ----
+  groupNear: null, groupNearId: null, groupTraits: null,
 };

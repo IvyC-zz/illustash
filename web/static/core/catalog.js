@@ -1,10 +1,11 @@
 // 资料库（#199）：按作品分组的角色和各自最近进了多少张、搜索、作品树，以及外部索引的关注列表。不碰 DOM；书架、列表和
-// 对话框在 ui/catalog.js。state.chars、state.tagged、state.workTree、state.workNames、state.localLinks 和 state.index
-// 仍在 core/state.js。
+// 对话框在 ui/catalog.js。tagged、workTree、localLinks 由这里写（字段声明在 core/state.js）；index 由 core/jobs.js 写，
+// 这里经 setIndex 换上新的回应。
 import {t} from './i18n.js';
 import {work} from './format.js';
 import {api, post} from './session.js';
 import {state} from './state.js';
+import {setIndex} from './jobs.js';
 // 每个角色的最近动态（{recent, last}），每种筛选、每个数据版本读一次。
 export const catalog = {activity: new Map(), activityKey: ''};
 export const recentOf = c => catalog.activity.get(c.id)?.recent || 0;
@@ -28,6 +29,8 @@ export async function loadLocalLinks() {
   state.localLinks = found;
   return true;
 }
+// 自建角色的 Danbooru 关联变了：忘掉上一次读到的清单，下次用到时重读。
+export function forgetLocalLinks() { state.localLinks = null; }
 
 // ---------- 按作品分的角色 ----------
 export const workKey = c => c.kind === 'oc' ? 'oc' : c.work_id || 'other';
@@ -59,7 +62,7 @@ export const WORK_NAMES = {blue_archive: t('蔚蓝档案'), 'arknights:_endfield
 export const workName = w => state.workNames?.get(w) || WORK_NAMES[w] || work(w);
 // 名字、别名或 tag 与 q 匹配的本地作品（q 为空时是全部）。
 export const searchWorks = q => api('/api/works?' + new URLSearchParams({q}));
-export async function loadIndex() { const x = await api('/api/index'); if (x) state.index = x; return x; }
+export async function loadIndex() { const x = await api('/api/index'); if (x) setIndex(x); return x; }
 // 显示用的作品树：在每个父作品下深度优先，大的作品在前；父作品已不在的子作品显示在顶层。filter 为 all、watched 或
 // pending；q 匹配名字或 tag。
 export function shelfRows(x, {q = '', filter = 'all'}) {
@@ -73,7 +76,7 @@ export function shelfRows(x, {q = '', filter = 'all'}) {
   return {rows: rows.filter(([w]) => tests[filter](w) && (!q || w.name.toLowerCase().includes(q) || (w.tag || '').toLowerCase().includes(q))),
     watched, pending: x.works.filter(tests.pending).length};
 }
-export async function saveWatch(works) { state.index = await post('/api/index', {action: 'watch', works, min_posts: state.index.watch.min_posts}); }
+export async function saveWatch(works) { setIndex(await post('/api/index', {action: 'watch', works, min_posts: state.index.watch.min_posts})); }
 // 为搜索到的 Danbooru 作品选定要关注的本地作品：带这个 tag 的那个，否则由用户挑（choose(title, works) 解析为 id，
 // 新作品为 ''，取消为 null），用这个 tag 关联或新建。解析为它的 id，取消时为 null。
 export async function watchTarget(r, choose) {
@@ -83,7 +86,7 @@ export async function watchTarget(r, choose) {
     const chosen = await choose(t('Danbooru 的 {tag} 对应哪个本地作品？', {tag: r.tag}), x.works);
     if (chosen === null) return null;
     id = (await post('/api/works', chosen ? {action: 'link', id: chosen, tag: r.tag} : {action: 'create', name: r.name || r.tag, tag: r.tag})).id;
-    state.index = await api('/api/index');
+    setIndex(await api('/api/index'));
   }
   return id;
 }
@@ -91,6 +94,6 @@ export async function watchTarget(r, choose) {
 export async function saveWork(id, {name, parent, tag}) {
   if (!id) id = (await post('/api/works', {action: 'create', name, ...(tag ? {tag} : {}), ...(parent ? {parent} : {})})).id;
   else await post('/api/works', {action: 'edit', id, name, parent, tag});
-  state.index = await api('/api/index');
+  setIndex(await api('/api/index'));
   return id;
 }

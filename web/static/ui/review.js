@@ -4,7 +4,7 @@ import {esc, number, stamp} from '../core/format.js';
 import {t, tb} from '../core/i18n.js';
 import {SIMILAR_ACTIVE, similarLine} from '../core/jobs.js';
 import {RELATION_KINDS, RELATION_NAMES} from '../core/labels.js';
-import {refreshMeta} from '../core/meta.js';
+import {refreshMeta, setIdentityCount} from '../core/meta.js';
 import {implement, onPage} from '../core/pages.js';
 import {prefs} from '../core/prefs.js';
 import {charHash, go, hashFor} from '../core/route.js';
@@ -126,7 +126,7 @@ export async function renderIdentity(more = false) {
   try { page = await api('/api/identity/queue?' + new URLSearchParams({limit: IDENTITY_PAGE, offset: identity.items.length, nsfw: state.nsfw})); }
   catch (e) { $('groupsPage').innerHTML = `<p class="empty">${esc(readError(e))}</p>`; return; }
   if (!onPage(state.route, 'identity')) return;
-  identity.items.push(...page.items); identity.total = page.total; state.identityCount = page.total; navCount('countIdentity', page.total);
+  identity.items.push(...page.items); identity.total = page.total; setIdentityCount(page.total); navCount('countIdentity', page.total);
   $('resultCount').textContent = t('{n} 对待判断', {n: number(page.total)});
   renderHeading();
   $('groupsPage').innerHTML = `<div class="pair-list">${identity.items.map(identityCard).join('') || `<p class="empty">${t('没有需要判断的角色了。')}</p>`}</div>

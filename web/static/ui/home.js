@@ -9,7 +9,7 @@ import {api, post, readError} from '../core/session.js';
 import {state} from '../core/state.js';
 import {INSP_ICONS, indexOf, inspect, openViewer} from './detail.js';
 import {$, toast, workSmall} from './dom.js';
-import {mutate, viewOpts} from './grid.js';
+import {mutate, showList, viewOpts} from './grid.js';
 
 // ---------- 首页：按加入日期分组的最新图片 ----------
 export const dayLabel = day => { const [y, m, d] = day.split('-').map(Number); const date = new Date(y, m - 1, d), now = new Date();
@@ -45,7 +45,7 @@ export async function moreHome() {
     const sentinel = $('homeSentinel');
     sentinel.insertAdjacentHTML('beforebegin', days.map(g => homeDay(g, home.width)).join(''));
     for (const day of days) for (const el of $('homePage').querySelectorAll(`.home-day[data-day="${day.day}"] .home-strip`)) syncStrip(el);
-    state.items.push(...days.flatMap(g => g.items)); state.total = state.items.length;
+    showList([...state.items, ...days.flatMap(g => g.items)]);
     if (!home.next) { home.observer?.disconnect(); sentinel.textContent = t('已经到底了'); }
     appended = true;
   } catch (e) { if (gen === home.gen && onPage(state.route, 'home')) {
@@ -138,15 +138,15 @@ export async function moreOfDay(day) {
     const sec = el?.closest('.home-day'); if (!sec) return;
     const tmp = document.createElement('div'); tmp.innerHTML = homeDay(g, home.width); sec.replaceWith(tmp.firstElementChild);
     const fresh = $('homePage').querySelector(`.home-strip[data-day="${day}"]`); if (fresh) { fresh.scrollLeft = left; syncStrip(fresh); }
-    state.items = home.days.flatMap(x => x.items); state.total = state.items.length;
+    showList(home.days.flatMap(x => x.items));
   } catch (e) { if (gen === home.gen && onPage(state.route, 'home')) toast(e.message); } finally { if (gen === home.gen) dayLoading.delete(day); }
 }
 export function drawHome() {
   if (!onPage(state.route, 'home')) return;
   const page = $('homePage'); home.width = page.clientWidth;
-  if (!home.days.length) { page.innerHTML = `<p class="empty">${t('没有符合当前 R18 设置的图片。')}</p>`; state.items = []; state.total = 0; return; }
+  if (!home.days.length) { page.innerHTML = `<p class="empty">${t('没有符合当前 R18 设置的图片。')}</p>`; showList([]); return; }
   page.innerHTML = home.days.map((g, i) => homeDay(g, home.width) + (i === 0 ? askCardHTML() : '')).join('') + `<div class="home-more-line" id="homeSentinel">${home.next ? t('正在读取更早的图…') : t('已经到底了')}</div>`;
-  state.items = home.days.flatMap(g => g.items); state.total = state.items.length;
+  showList(home.days.flatMap(g => g.items));
   for (const el of page.querySelectorAll('.home-strip')) syncStrip(el);
   home.observer?.disconnect();
   if (home.next) { home.observer = new IntersectionObserver(es => { if (es.some(e => e.isIntersecting)) moreHome(); }, {root: $('viewport'), rootMargin: '600px'}); home.observer.observe($('homeSentinel')); }

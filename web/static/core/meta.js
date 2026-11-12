@@ -9,6 +9,10 @@ const changed = listeners();
 export const onMeta = changed.on;
 const failed = error => changed.emit({error});
 export const fetchChar = async id => (await api('/api/characters?' + new URLSearchParams({id, nsfw: state.nsfw})))[0];
+// 当前角色页的角色（不在角色页时为 null）：换页时由 ui/shell.js 经这里换上，元数据重读后这里换成新读到的那份。
+export function setChar(c) { state.char = c; }
+// 身份整理还剩几对：元数据读取带回一次，身份整理页翻页时也会带回最新的总数。
+export function setIdentityCount(n) { state.identityCount = n; }
 let metaPending = null, metaRevision = 0, metaFull = false;
 // 后端接受了一次写入：仍在进行中的更早的读取不能覆盖它（标签只需要重读标签）。
 export function metaWritten(tagsOnly) { if (metaPending) { metaRevision++; metaFull ||= !tagsOnly; } }

@@ -30,6 +30,8 @@ export function go(route) { location.hash = hashFor(route); }
 // 角色是图库的一个筛选，不是单独的页面。
 export const charRoute = (id, variant = '') => ({page: 'library', char: id, variant});
 export const charHash = (id, variant = '') => hashFor(charRoute(id, variant));
+// 换到新解析出的路由（只有 ui/shell.js applyRoute 调用）；replaceRoute 只改当前路由的参数、不触发换页。
+export function setRoute(route) { state.route = route; }
 export function replaceRoute(patch) { Object.assign(state.route, patch); history.replaceState(null, '', hashFor(state.route)); }
 // 整理视图（按角色筛选，或复核池）：点击即选择。
 export const cleanup = () => viewOf(state.route).click === 'cleanup';

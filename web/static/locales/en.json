@@ -390,6 +390,7 @@
   "把 {n} 张设为…": "Assign {n} to…",
   "把 {n} 张设为 {name}": "Assign {n} to {name}",
   "所选图片还没有角色": "The selected pictures have no characters yet",
+  "这一页没有 {key} 对应的操作": "{key} does nothing on this page",
   "这些图不是…": "These pictures are not…",
   "把 {name} 从 {n} 张中移出": "Remove {name} from {n}",
   "输入标签，或搜索 WD 通用标签…": "Type a tag, or search WD general tags…",

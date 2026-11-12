@@ -8,7 +8,7 @@ import {session, shared, readError} from '../core/session.js';
 import {state} from '../core/state.js';
 import {REASONS, FOLD_OPTIONS} from '../core/labels.js';
 import {SYNC_ACTIVE, INDEX_ACTIVE, NAMES_ACTIVE, PROV_ACTIVE, syncLine, indexLine, namesLine, importLine, importActive, pollSync, pollIndex,
-  pollNamesSoon, loadProvenance, importStarted, pollImports, cancelImport, indexAction} from '../core/jobs.js';
+  pollNamesSoon, loadProvenance, importStarted, pollImports, cancelImport, indexAction, setIndex, setNames} from '../core/jobs.js';
 import {onSettings, allowNames, loadSettingsData, saveStartup, saveFold, backupNow, clearCache, saveLanguage, loadAbout, saveModelApi, testModelApi,
   loadLibraries, libraryRequest, pollExport, chooseFolders, openLibraryRequest, libraryOpened, loadAccounts, accountRequest,
   waitPixivLogin, stopPixivLogin, checkUpdates, updatesPost, updatesTick} from '../core/settings.js';
@@ -43,7 +43,7 @@ let indexArmed = null;
 export async function renderIndexCard(fresh = true) {
   const route = state.route, token = session.token;
   if (!$('indexCard') || !onPage(state.route, 'settings')) return;
-  if (fresh || !state.index) { try { const value = await shared('/api/index'); if (route !== state.route || token !== session.token) return; state.index = value; } catch (e) { if (route === state.route && token === session.token) readFailure($('indexCard'), e); return; } }
+  if (fresh || !state.index) { try { const value = await shared('/api/index'); if (route !== state.route || token !== session.token) return; setIndex(value); } catch (e) { if (route === state.route && token === session.token) readFailure($('indexCard'), e); return; } }
   const card = $('indexCard'), x = state.index; if (!x || !card) return;
   const s = x.state, active = INDEX_ACTIVE.includes(s.status), watched = x.watch.works.length;
   // 关注哪些作品在「资料库 · 作品」里逐个作品决定；这里只管检查怎么运行。
@@ -70,7 +70,7 @@ export async function renderIndexCard(fresh = true) {
 export async function renderNamesCard(fresh = true) {
   const route = state.route, token = session.token;
   if (!$('namesCard') || !onPage(state.route, 'settings')) return;
-  if (fresh || !state.names) { try { const value = await shared('/api/names'); if (route !== state.route || token !== session.token) return; state.names = value; } catch (e) { if (route === state.route && token === session.token) readFailure($('namesCard'), e); return; } }
+  if (fresh || !state.names) { try { const value = await shared('/api/names'); if (route !== state.route || token !== session.token) return; setNames(value); } catch (e) { if (route === state.route && token === session.token) readFailure($('namesCard'), e); return; } }
   // 等待期间页面可能已经重新渲染：总是对现在屏幕上的那张卡片操作。
   const card = $('namesCard'), x = state.names; if (!card) return; if (!x) { card.hidden = true; return; }
   card.hidden = false;
@@ -285,7 +285,7 @@ export async function renderSettings(fetchMissing = true, refresh = false) {
   for (const g of page.querySelectorAll('[data-setting]')) for (const b of g.querySelectorAll('button')) b.onclick = () => {
     const key = g.dataset.setting, v = b.dataset.value;
     if (key === 'language') { setLanguage(v); return; }
-    if (key === 'fit' && state.fit !== (v === '1')) { state.fit = !state.fit; prefs.set('fit', state.fit); }
+    if (key === 'fit') setFit(v === '1');
     if (key === 'nsfw') setNsfw(v);
     if (key === 'theme') { prefs.set('theme', v); window.applyTheme?.(); }
     if (key === 'sortLibrary' || key === 'sortCharacter') prefs.set(key, v);

@@ -6,6 +6,7 @@ import {t, said} from './i18n.js';
 import {session, api, post, shared, leaveSession} from './session.js';
 import {state} from './state.js';
 import {listeners} from './events.js';
+import {mergeNames} from './jobs.js';
 const changed = listeners();
 export const onSettings = changed.on;
 
@@ -27,6 +28,8 @@ export function loadSettingsData(refresh = false) {
   })).finally(() => { loading = null; });
   return loading;
 }
+// /api/settings 的最新回应；任务面板读到新的也经这里换上。
+export function setSettings(value) { state.settings = value; }
 // 启动时的开关；本次启动仍以 --no-* 参数为准。
 export async function saveStartup(body) { state.settings = await post('/api/startup', body); }
 export async function saveFold(kinds) { state.fold = (await post('/api/fold', {kinds})).kinds; }
@@ -41,13 +44,13 @@ export async function loadAbout() {
 
 // ---------- 名称：联网授权（和 Danbooru 搜索共用）以及可选的模型 API ----------
 export async function allowNames(allow) {
-  state.names = {...state.names, ...await api('/api/names', {method: 'POST', body: JSON.stringify({action: 'network', allow})})};
+  mergeNames(await api('/api/names', {method: 'POST', body: JSON.stringify({action: 'network', allow})}));
 }
 // 一次 Danbooru 名称查询（只有 tag 和作品名）：它的结果，或失败的原因。这个图库没有授权时，后端以「显示名联网尚未授权」
 // 拒绝；其他失败都是真正的网络或服务错误。
 export const remoteNames = path => api(path).then(found => ({found}), e => ({found: null, unauthorized: said(e.said, '显示名联网尚未授权'), reason: e.message}));
 export const remoteNote = r => r.unauthorized ? t('查 Danbooru 需要先允许这个图库联网查询名称（只发送文字）') : t('Danbooru 暂时连不上：{reason}', {reason: r.reason});
-export async function saveModelApi(body) { state.names = {...state.names, ...await post('/api/names', {action: 'model_api', ...body})}; }
+export async function saveModelApi(body) { mergeNames(await post('/api/names', {action: 'model_api', ...body})); }
 export const testModelApi = () => post('/api/names', {action: 'model_api_test'});
 
 // ---------- 图库（docs/LIBRARIES.md） ----------

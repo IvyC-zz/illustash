@@ -9,12 +9,12 @@ tools/check_architecture.py 对 crate 依赖方向的检查。规则（说明见
   3 document-listener    不得新增 document/window/body 级的 keydown、keyup、click、mousedown、pointerdown 监听
   4 dialog-element       不得新增 `document.createElement('dialog')`，也不得在字符串里拼 `<dialog`
   5 long-line            不得新增超过 200 字符的行（app.js、core/、ui/）
-  6 page-name            不得在 core/pages.js（页面注册表，#342）以外的位置比较页面名（硬规则，没有基线）
+  6 page-name            页面名只能在 core/pages.js（页面注册表，#342）里比较（硬规则，没有基线）
 
 基线（tools/frontend_baseline.json）按「文件 + 内容特征」登记（导入边、字段名、每个文件的数量），不按行号，
 所以文件里别处的改动不会让它失效。基线只能缩小：`--shrink` 只调低、不新增；`--base-ref REF` 在基线比 REF
 上的大时报错；`--strict-stale` 把「基线里已不再出现的项」也算作失败，逼着改好违规的人同时收紧基线。
-tools/check_all.sh 两个都带上。新规则（例如 #317 之后的规则 6：CSS 字面量）就是 new_rules() 里多一个 Rule。
+tools/check_all.sh 两个都带上。新规则（例如 #317 之后的规则 7：CSS 字面量）就是 new_rules() 里多一个 Rule。
 
 已知盲区（文本级检查做不到）：规则 2 认不出 `state[key]`、`Object.assign(state, …)` 和解构写法，名为 state
 的函数参数会被误报；正则字面量与除号靠前一个字符判断，`if (ok) /re/.test(s)` 这种写法会被当成除号。

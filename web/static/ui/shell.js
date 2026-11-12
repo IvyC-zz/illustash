@@ -4,18 +4,18 @@ import {workKey} from '../core/catalog.js';
 import {dateText, esc, number, shortcut} from '../core/format.js';
 import {t} from '../core/i18n.js';
 import {REASONS, nameTip} from '../core/labels.js';
-import {fetchChar, onMeta} from '../core/meta.js';
+import {fetchChar, onMeta, setChar} from '../core/meta.js';
 import {prefs} from '../core/prefs.js';
 import {implement, pageOf, viewOf} from '../core/pages.js';
-import {cleanup, defaultSort, go, hashFor, parseHash, replaceRoute} from '../core/route.js';
+import {cleanup, defaultSort, go, hashFor, parseHash, replaceRoute, setRoute} from '../core/route.js';
 import {api, readError} from '../core/session.js';
 import {state} from '../core/state.js';
 import {cast, createWork, drawCast, drawShelf, openTagged, renderIndexBody, searchIndex, shelf} from './catalog.js';
 import {$, error, searchIcon, workSmall} from './dom.js';
 import {renderSettings, settingsSection} from './settings.js';
 import {artistName} from './artists.js';
-import {closeInspector} from './detail.js';
-import {clearSelection, filters, reload, selectAll, short, sweep, toggleFit, toggleSelecting} from './grid.js';
+import {closeInspector, closeViewer} from './detail.js';
+import {filters, reload, resetForRoute, selectAll, short, sweep, toggleFit, toggleSelecting} from './grid.js';
 import {guideTick} from './guide.js';
 import {createLayer} from './overlay.js';
 import {dayLabel} from './home.js';
@@ -44,19 +44,22 @@ export async function applyRoute() {
   const route = parseHash(); route.sort = route.sort || defaultSort(route);
   if (route.legacy) { delete route.legacy; history.replaceState(null, '', hashFor(route)); }
   const samePage = state.route.page === route.page && state.route.id === route.id && state.route.char === route.char;   // 切换子视图仍是同一页
-  state.route = route; state.selecting = false; clearSelection(); state.cursor = -1; state.totalReady = false;
+  // 换页（含同一页换子视图、换参数）：大图关掉，因为它下面的列表要重读、序号不再对得上；选择和光标复位；
+  // 详情栏只在换了页面或角色时关。大图是被换页关掉的，不动焦点。
+  closeViewer('silent');
+  setRoute(route); resetForRoute();
   if (!samePage) closeInspector();
   $('sidebar').classList.remove('mobile-open');
   const page = pageOf(route);
   for (const a of document.querySelectorAll('.nav')) a.classList.toggle('active', a.dataset.page === page.nav);
   $('settingsLink').classList.toggle('active', page.nav === 'settings');
-  state.char = null;
+  setChar(null);
   state.groupNear = null;
   if (page.prepare && await page.prepare(route) === false) return;
   if (route.char) {
     let character; try { character = await fetchChar(route.char); } catch (e) { if (state.route === route) error(readError(e)); return; }
     if (state.route !== route) return;
-    state.char = character || {id: route.char, name: t('角色'), work: '', count: 0, unchecked: 0, variants: []};
+    setChar(character || {id: route.char, name: t('角色'), work: '', count: 0, unchecked: 0, variants: []});
   }
   $('homePage').hidden = page.area !== 'homePage';
   if (page.guideTick) guideTick(page.guideTick);
