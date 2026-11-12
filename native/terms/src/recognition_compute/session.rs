@@ -250,12 +250,14 @@ pub(crate) fn validate_vector(values: &[f32], dimension: usize) -> Result<()> {
     Ok(())
 }
 
-#[cfg(all(test, target_os = "macos", target_arch = "aarch64"))]
+#[cfg(test)]
 mod platform_tests {
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
     use super::*;
 
     /// 与实际模型验收同样需要显式资源和隔离的 HOME；不在普通测试中加载大型模型。
     #[test]
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
     #[ignore = "需要显式的 ILLUSTASH_RECOGNITION_MODELS 与 ILLUSTASH_ORT_DYLIB，单独验收"]
     fn wd_runtime_failure_rebuilds_the_original_cpu_model() {
         let models = PathBuf::from(std::env::var_os("ILLUSTASH_RECOGNITION_MODELS").expect("显式模型目录"));

@@ -633,7 +633,9 @@ fn download(models: &Models, place: &Place) -> std::result::Result<Value, Stop> 
     let mut originals_active = false;
     for entry in &place.manifest.files {
         if entry.optional && !originals_active {
-            activate(&place.root, &partial, place.manifest)?;
+            if !ready_at(&place.root, place.manifest) {
+                activate(&place.root, &partial, place.manifest)?;
+            }
             fs::create_dir_all(&partial)?;
             check_space(&partial, missing_bytes(true))?;
             originals_active = true;

@@ -166,6 +166,9 @@ fn optional_download_failure_keeps_originals_ready_and_retry_repairs_the_variant
     assert_eq!(info["status"], "ready");
     assert_eq!(info["optional_missing"], true);
     assert_eq!(info["have"].as_u64().unwrap(), fixture.files.iter().map(|(_, b)| b.len() as u64).sum::<u64>());
+    let partial = partial_dir(&place.root).join("coreml");
+    fs::create_dir_all(&partial).unwrap();
+    fs::write(partial.join("wd.onnx.part"), &data[..1_000]).unwrap();
     let server2 = serve(vec![("/variant.onnx", data.clone(), Mode::Normal)]);
     let repaired = with_variant(fixture.place(&server1), &server2, &data);
     for damage in [false, true] {
@@ -179,7 +182,9 @@ fn optional_download_failure_keeps_originals_ready_and_retry_repairs_the_variant
             assert_eq!(fs::read(repaired.root.join(path)).unwrap(), *expected, "原始文件不受补下载影响");
         }
     }
-    assert_eq!(server2.hits.lock().unwrap().len(), 2, "只下载缺失或损坏的变体");
+    let hits = server2.hits.lock().unwrap();
+    assert_eq!(hits.len(), 2, "只下载缺失或损坏的变体");
+    assert_eq!(hits[0].1.as_deref(), Some("bytes=1000-"), "原始模型已就位时保留变体的断点");
 }
 
 #[test]
