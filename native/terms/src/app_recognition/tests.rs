@@ -572,3 +572,21 @@ fn mixed_versions_reject_the_whole_batch_and_current_version_gets_a_distinct_fin
     assert_ne!(first["digest"], second["digest"]);
     assert_ne!(old_fingerprint, new_fingerprint);
 }
+
+#[test]
+fn legacy_unpublished_receipts_cannot_silently_gain_input_version_protection() {
+    let f = Fixture::new(false);
+    let before = human(&f.app());
+    let (path, _) = f.batch("result", feature(0));
+    let mut manifest: Value = serde_json::from_slice(&fs::read(path.join("manifest.json")).unwrap()).unwrap();
+    manifest["format"] = json!("illustash-recognition/1");
+    manifest.as_object_mut().unwrap().remove("inputs");
+    for legacy in [manifest.clone(), json!({"recognition":manifest,"character_claims":{}})] {
+        assert!(verify_current_inputs(&f.source(), &legacy, &["a".into()], &AtomicBool::new(false))
+            .unwrap_err()
+            .to_string()
+            .contains("不能发布"));
+    }
+    assert_no_wd(&f);
+    assert_eq!(human(&f.app()), before);
+}

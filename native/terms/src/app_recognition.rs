@@ -292,7 +292,7 @@ fn validate_against(
     Ok(Package { manifest: m, digest, ids, inputs, labels, wd, ccip })
 }
 /// 复核当前可发布的内容。恢复调用方先按账本筛选仍属于本包的资产。
-/// 已提交的 v1 账本保留旧恢复语义；这不赋予旧结果输入版本保证。
+/// v1 不能证明输入版本：已有应用投影可以只确认通知，但不得据旧账本发布新的机器证据。
 pub(crate) fn verify_current_inputs(
     c: &Connection,
     manifest: &Value,
@@ -301,7 +301,7 @@ pub(crate) fn verify_current_inputs(
 ) -> Result<()> {
     let manifest = manifest.get("recognition").unwrap_or(manifest);
     if manifest["format"] == "illustash-recognition/1" {
-        return Ok(());
+        return Err(Error::Conflict("v1 待恢复结果没有输入内容版本，不能发布，请重新识别生成 v2 结果".into()));
     }
     if manifest["format"] != "illustash-recognition/2" {
         return Err(invalid());
