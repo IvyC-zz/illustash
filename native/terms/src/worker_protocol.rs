@@ -29,7 +29,7 @@ pub(crate) fn value<T: Serialize>(v: &T) -> Result<Value> {
 pub(crate) enum Format {
     #[serde(rename = "illustash-index/1")]
     Index,
-    #[serde(rename = "illustash-sync/1")]
+    #[serde(rename = "illustash-sync/2")]
     Sync,
     #[serde(rename = "illustash-provenance/1")]
     Provenance,
@@ -110,6 +110,7 @@ pub(crate) struct SyncRequest<'a> {
 pub(crate) struct SyncAsset {
     pub id: String,
     pub path: String,
+    pub input_sha256: String,
 }
 #[derive(Deserialize)]
 pub(crate) struct SyncResponse {
@@ -135,6 +136,8 @@ pub(crate) enum FailureReason {
     #[default]
     Unreadable,
     Undecodable,
+    /// 请求之后输入改变；下次同步重试，不登记为损坏图片。
+    InputChanged,
 }
 #[derive(Deserialize)]
 pub(crate) struct RecognitionManifest {
@@ -371,9 +374,10 @@ mod tests {
     fn remaining_requests_keep_original_json_bytes() {
         let identity: TaskIdentity = parse(identity(), Path::new("internal")).unwrap();
         let path = Path::new("/synthetic");
-        let assets = [SyncAsset { id: "synthetic".into(), path: "/synthetic/image.png".into() }];
+        let assets =
+            [SyncAsset { id: "synthetic".into(), path: "/synthetic/image.png".into(), input_sha256: "a".repeat(64) }];
         let request = SyncRequest { format: Format::Sync, identity: &identity, assets: &assets, output: path };
-        assert_eq!(value(&request).unwrap().to_string(), json!({"format":"illustash-sync/1","identity":identity,"assets":[{"id":"synthetic","path":"/synthetic/image.png"}],"output":path}).to_string());
+        assert_eq!(value(&request).unwrap().to_string(), json!({"format":"illustash-sync/2","identity":identity,"assets":[{"id":"synthetic","path":"/synthetic/image.png","input_sha256":"a".repeat(64)}],"output":path}).to_string());
         let only = ["synthetic".into()];
         let request = ProvenanceRequest {
             format: Format::Provenance,

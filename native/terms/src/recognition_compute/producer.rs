@@ -1,4 +1,4 @@
-//! 隔离的 v1 结果生成。不写源库和应用数据库。
+//! 隔离的 v2 结果生成。不写源库和应用数据库。
 use super::session::{validate_vector, ModelOutput, ModelSessions};
 use crate::{Error, Result};
 use image::{ImageReader, RgbImage};
@@ -7,6 +7,7 @@ use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::{
     fs,
+    io::Read,
     path::{Path, PathBuf},
 };
 
@@ -21,6 +22,7 @@ pub struct Request {
 pub struct Asset {
     pub id: String,
     pub path: PathBuf,
+    pub input_sha256: String,
 }
 #[derive(Serialize)]
 pub struct Label {
@@ -86,12 +88,45 @@ impl Tags {
 pub fn model_specs(resources: &Path, models: &Path) -> Result<Value> {
     super::models::ModelFiles::at(resources, models)?.specs(&|| Ok(()))
 }
+/// 预处理语义不变时保持此版本；算法变更必须显式升级，不能只改模型名称。
+pub(crate) const PREPROCESSING: &str = "illustash-wd-ccip/1";
+pub(crate) fn valid_input_hash(hash: &str) -> bool {
+    hash.len() == 64 && hash.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+}
+/// 对实际输入字节取 SHA-256。来源的 stable_hash 可能是 MD5 或 Photos 标识，不能替代此值。
+pub(crate) fn input_hash(path: &Path, check: &dyn Fn() -> Result<()>) -> Result<String> {
+    let mut file = fs::File::open(path)?;
+    if !file.metadata()?.is_file() {
+        return Err(Error::invalid("识别输入不是普通文件"));
+    }
+    let mut hash = Sha256::new();
+    let mut buffer = vec![0; 1 << 20];
+    loop {
+        check()?;
+        let n = file.read(&mut buffer)?;
+        if n == 0 {
+            break;
+        }
+        hash.update(&buffer[..n]);
+    }
+    Ok(format!("{:x}", hash.finalize()))
+}
+/// 哈希和解码使用同一个不可变缓冲区，不能读完指纹后再打开路径解码。
+fn load_versioned(asset: &Asset) -> std::result::Result<RgbImage, crate::worker_protocol::FailureReason> {
+    use crate::worker_protocol::FailureReason;
+    let bytes = fs::read(&asset.path).map_err(|_| FailureReason::Unreadable)?;
+    if format!("{:x}", Sha256::digest(&bytes)) != asset.input_sha256 {
+        return Err(FailureReason::InputChanged);
+    }
+    decode_bytes(&bytes, &asset.path).map_err(|_| FailureReason::Undecodable)
+}
 /// 取第一帧，不旋转的 RGB；插值前丢掉 alpha，与 Pillow 的 convert('RGB') 相同。
 pub fn decode(path: &Path) -> Result<RgbImage> {
     decode_bytes(&fs::read(path)?, path)
 }
 /// 同步请求里的一张图片：先完整读入，这样失败可以按发生的位置归类。读取可能暂时失败（权限、iCloud 占位文件、
 /// 拔掉的磁盘）；之后解码器只看内存里的字节，所以它的每个错误都关于内容本身。
+#[cfg(test)]
 pub(crate) fn load(path: &Path) -> std::result::Result<RgbImage, crate::worker_protocol::FailureReason> {
     use crate::worker_protocol::FailureReason;
     let bytes = fs::read(path).map_err(|_| FailureReason::Unreadable)?;
@@ -163,12 +198,19 @@ pub fn write_batch(
     path: &Path,
     identity: &Value,
     models: &Value,
-    ids: &[String],
+    inputs: &[(String, String)],
     labels: &[Label],
     wd: &[Vec<f32>],
     ccip: &[Vec<f32>],
 ) -> Result<()> {
-    if ids.is_empty() || ids.len() != wd.len() || ids.len() != ccip.len() {
+    let ids: Vec<_> = inputs.iter().map(|(id, _)| id).collect();
+    let hashes: serde_json::Map<String, Value> = inputs.iter().map(|(id, hash)| (id.clone(), json!(hash))).collect();
+    if ids.is_empty()
+        || ids.len() != wd.len()
+        || ids.len() != ccip.len()
+        || hashes.len() != ids.len()
+        || inputs.iter().any(|(id, hash)| id.is_empty() || !valid_input_hash(hash))
+    {
         return Err(Error::invalid("识别批次行数不匹配"));
     }
     let library =
@@ -189,7 +231,7 @@ pub fn write_batch(
         files.insert(name.into(), json!({"bytes":bytes.len(),"sha256":format!("{:x}",Sha256::digest(bytes))}));
     }
     // manifest 最后写；中断的批次不能导入。
-    fs::write(path.join("manifest.json"),serde_json::to_vec(&json!({"format":"illustash-recognition/1","library_id":library,"assets":ids,"models":models,"files":files})).map_err(|e|Error::invalid(e.to_string()))?)?;
+    fs::write(path.join("manifest.json"),serde_json::to_vec(&json!({"format":"illustash-recognition/2","library_id":library,"assets":ids,"inputs":hashes,"preprocessing":PREPROCESSING,"models":models,"files":files})).map_err(|e|Error::invalid(e.to_string()))?)?;
     Ok(())
 }
 /// 给等待中的宿主的进度，写在宿主通过 ILLUSTASH_RECOGNITION_PROGRESS 传入的路径。
@@ -235,10 +277,16 @@ pub fn write_complete(batch: &Path, task_id: &str, ids: &[String], sidecar: &[u8
     fs::rename(temporary, batch.join("complete.json"))?;
     Ok(())
 }
-/// 生成 WD v1 批次，以及独立绑定的角色认领 sidecar。
+/// 生成 WD v2 批次，以及独立绑定的角色认领 sidecar。
 pub fn run(request: Request, resources: &Path, models: &Path, runtime: &Path, shared: &Path) -> Result<Value> {
-    if request.format != "illustash-sync/1" {
+    if request.format != "illustash-sync/2" {
         return Err(Error::invalid("unsupported recognition request"));
+    }
+    let ids: std::collections::HashSet<_> = request.assets.iter().map(|a| &a.id).collect();
+    if ids.len() != request.assets.len()
+        || request.assets.iter().any(|a| a.id.is_empty() || !valid_input_hash(&a.input_sha256))
+    {
+        return Err(Error::invalid("识别请求缺少有效输入版本或资产重复"));
     }
     let identity: crate::app_tasks::TaskIdentity =
         serde_json::from_value(request.identity.clone()).map_err(|e| Error::invalid(format!("识别 identity: {e}")))?;
@@ -258,11 +306,12 @@ pub fn run(request: Request, resources: &Path, models: &Path, runtime: &Path, sh
     for (batch, assets) in request.assets.chunks(25).enumerate() {
         let mut ids = Vec::new();
         let mut labels = Vec::new();
+        let mut inputs = Vec::new();
         let mut wd = Vec::new();
         let mut ccip = Vec::new();
         let mut claims = Vec::new();
         for asset in assets {
-            let image = match load(&asset.path) {
+            let image = match load_versioned(asset) {
                 Ok(image) => image,
                 Err(reason) => {
                     failed.push(json!({"uuid":asset.id,"reason":reason}));
@@ -275,6 +324,7 @@ pub fn run(request: Request, resources: &Path, models: &Path, runtime: &Path, sh
             labels.extend(tags.labels(&asset.id, &probabilities)?);
             claims.extend(snapshot.claims(&asset.id, &ccip_row)?);
             ids.push(asset.id.clone());
+            inputs.push((asset.id.clone(), asset.input_sha256.clone()));
             wd.push(wd_row);
             ccip.push(ccip_row);
             progress.finished(true);
@@ -284,7 +334,7 @@ pub fn run(request: Request, resources: &Path, models: &Path, runtime: &Path, sh
             continue;
         }
         let path = request.output.join(format!("batch-{}", batch * 25));
-        write_batch(&path, &request.identity, &specs, &ids, &labels, &wd, &ccip)?;
+        write_batch(&path, &request.identity, &specs, &inputs, &labels, &wd, &ccip)?;
         let sidecar = path.join("character-claims.json");
         let claim = super::claims::Claims::new(
             identity.clone(),
@@ -383,6 +433,26 @@ mod tests {
             }
             fs::set_permissions(&locked, fs::Permissions::from_mode(0o600)).unwrap();
         }
+        fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn versioned_input_hashes_the_exact_decode_buffer_and_changed_inputs_remain_retryable() {
+        let root = std::env::temp_dir().join(format!("illustash-version-{}", crate::store::new_key().unwrap()));
+        fs::create_dir(&root).unwrap();
+        let path = root.join("input.png");
+        let first = image::RgbImage::from_pixel(2, 2, image::Rgb([20, 40, 80]));
+        first.save(&path).unwrap();
+        let mut asset =
+            Asset { id: "synthetic".into(), path: path.clone(), input_sha256: input_hash(&path, &|| Ok(())).unwrap() };
+        let decoded = load_versioned(&asset).unwrap();
+        image::RgbImage::from_pixel(2, 2, image::Rgb([80, 40, 20])).save(&path).unwrap();
+        assert_eq!(decoded, first);
+        assert_eq!(load_versioned(&asset).err(), Some(crate::worker_protocol::FailureReason::InputChanged));
+        asset.input_sha256 = input_hash(&path, &|| Ok(())).unwrap();
+        assert_ne!(load_versioned(&asset).unwrap(), first);
+        fs::write(&path, b"bad image").unwrap();
+        asset.input_sha256 = input_hash(&path, &|| Ok(())).unwrap();
+        assert_eq!(load_versioned(&asset).err(), Some(crate::worker_protocol::FailureReason::Undecodable));
         fs::remove_dir_all(root).unwrap();
     }
     #[test]

@@ -183,7 +183,7 @@ if mode in ('stream','stream-hang'):
         dest=Path(r['output'])/f'batch-{i}';dest.mkdir()
         (dest/'labels.jsonl').write_text(json.dumps(dict(asset=a['id'],dim='rating',value='general',confidence=.9)))
         for model in ('wd','ccip'): np.save(dest/(model+'.npy'),np.ones((1,specs[model]['dimension']),dtype='<f4'))
-        m=dict(format='illustash-recognition/1',library_id=r['identity']['library_id'],assets=[a['id']],models=specs,files={f:dict(bytes=(dest/f).stat().st_size,sha256=hashlib.sha256((dest/f).read_bytes()).hexdigest()) for f in ('labels.jsonl','wd.npy','ccip.npy')})
+        m=dict(format='illustash-recognition/2',preprocessing='illustash-wd-ccip/1',library_id=r['identity']['library_id'],assets=[a['id']],inputs={a['id']:a['input_sha256']},models=specs,files={f:dict(bytes=(dest/f).stat().st_size,sha256=hashlib.sha256((dest/f).read_bytes()).hexdigest()) for f in ('labels.jsonl','wd.npy','ccip.npy')})
         (dest/'manifest.json').write_text(json.dumps(m))
         (dest/'complete.json').write_text(json.dumps(dict(format='illustash-recognition-batch/1',task_id=r['identity']['task_id'],assets=[a['id']],manifest_sha256=hashlib.sha256((dest/'manifest.json').read_bytes()).hexdigest(),sidecar_sha256=None)))
         time.sleep(.6)
@@ -203,7 +203,7 @@ if mode=='content':
     # Vectors from the file's bytes, as a real model: another picture under the same path gives others.
     fills=[[sum(Path(a['path']).read_bytes())%97+1] for a in r['assets']]
     for model in ('wd','ccip'): np.save(p/(model+'.npy'),np.repeat(np.asarray(fills,dtype='<f4'),specs[model]['dimension'],axis=1))
-m=dict(format='illustash-recognition/1',library_id=r['identity']['library_id'],assets=ids,models=specs,files={f:dict(bytes=(p/f).stat().st_size,sha256=hashlib.sha256((p/f).read_bytes()).hexdigest()) for f in ('labels.jsonl','wd.npy','ccip.npy')})
+m=dict(format='illustash-recognition/2',preprocessing='illustash-wd-ccip/1',library_id=r['identity']['library_id'],assets=ids,inputs={a['id']:a['input_sha256'] for a in r['assets']},models=specs,files={f:dict(bytes=(p/f).stat().st_size,sha256=hashlib.sha256((p/f).read_bytes()).hexdigest()) for f in ('labels.jsonl','wd.npy','ccip.npy')})
 (p/'manifest.json').write_text(json.dumps(m))
 if mode=='wrong':r['identity']['generation']+=1
 packages=[str(p)]
@@ -213,7 +213,7 @@ if mode=='splitbad' and len(ids)>1:
         dest=Path(r['output'])/('batch'+str(i));dest.mkdir()
         (dest/'labels.jsonl').write_text(json.dumps(dict(asset=u,dim='rating',value='general',confidence=.9)))
         for model in ('wd','ccip'):np.save(dest/(model+'.npy'),np.full((1,specs[model]['dimension']),0 if i==1 else 1,dtype='<f4'))
-        manifest=dict(m,assets=[u],files={f:dict(bytes=(dest/f).stat().st_size,sha256=hashlib.sha256((dest/f).read_bytes()).hexdigest()) for f in ('labels.jsonl','wd.npy','ccip.npy')})
+        manifest=dict(m,assets=[u],inputs={u:m['inputs'][u]},files={f:dict(bytes=(dest/f).stat().st_size,sha256=hashlib.sha256((dest/f).read_bytes()).hexdigest()) for f in ('labels.jsonl','wd.npy','ccip.npy')})
         (dest/'manifest.json').write_text(json.dumps(manifest));packages.append(str(dest))
 Path(sys.argv[2]).write_text(json.dumps(dict(identity=r['identity'],packages=packages,failed=[])))
 if failures: Path(sys.argv[2]).write_text(json.dumps(dict(identity=r['identity'],packages=packages,failed=failures)))

@@ -732,16 +732,13 @@ fn recognise(
     for row in assets {
         ctx.check()?;
         let id = row[0].as_str().expect("SQLite uuid column must be text").to_owned();
-        if std::fs::File::open(row[1].as_str().unwrap_or("")).is_err() {
-            failed.insert(id);
-        } else {
-            readable.push(protocol::SyncAsset {
-                id,
-                path: row[1]
-                    .as_str()
-                    .ok_or_else(|| Error::Invalid("source.sqlite: assets.src_path 必须为字符串".into()))?
-                    .to_owned(),
-            });
+        let path = row[1].as_str().ok_or_else(|| Error::invalid("source.sqlite: assets.src_path 必须为字符串"))?;
+        match crate::recognition_compute::producer::input_hash(std::path::Path::new(path), &|| ctx.check()) {
+            Ok(input_sha256) => readable.push(protocol::SyncAsset { id, path: path.to_owned(), input_sha256 }),
+            Err(Error::Io(_)) => {
+                failed.insert(id);
+            }
+            Err(e) => return Err(e),
         }
     }
     update(json!({"status":"recognising","stage":"preparing","total":total,"done":failed.len(),"failed":failed.len()}));
