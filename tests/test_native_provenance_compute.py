@@ -1,7 +1,7 @@
-"""#153 synthetic parity against unchanged Python algorithms and handwritten invariants.
+"""#153：在合成数据上与未改动的 Python 算法及手写不变量比对等价。
 
-No build/model/network/real library discovery. Candidate execution requires
-ILLUSTASH_PROVENANCE_COMPUTE_BIN pointing at an explicitly built example binary.
+不构建、不加载模型、不联网、不查找真实图库。运行候选需要 ILLUSTASH_PROVENANCE_COMPUTE_BIN
+指向一个显式构建的 example 二进制。
 """
 import hashlib
 import json
@@ -110,7 +110,7 @@ class NativeProvenanceComputeTest(unittest.TestCase):
     def test_review_gif_palette_canvas_and_pnm_rounding(self):
         raw = bytes.fromhex('47494638396102000100800000ff000000ff002c01000000010001000002024c01003b')
         cases = [('partial.gif', raw)]
-        # Explicit transparent red/green palette entries retain their hidden RGB.
+        # 显式透明的红/绿调色板条目保留其隐藏的 RGB。
         for index in (0, 1):
             cases.append((f'partial-alpha-{index}.gif', raw[:19] +
                           bytes.fromhex('21f904010000') + bytes([index, 0]) + raw[19:]))

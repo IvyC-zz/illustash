@@ -1,5 +1,4 @@
-//! ONNX sessions on the CPU or an accelerator (backend.rs). Models/runtime are explicit inputs, never fetched or
-//! discovered in user data.
+//! 跑在 CPU 或加速器（backend.rs）上的 ONNX 会话。模型和运行库都是显式输入，从不下载，也不在用户数据里查找。
 use super::backend::{Acceleration, Backend, Model};
 use crate::{Error, Result};
 use image::RgbImage;
@@ -18,13 +17,13 @@ fn failure(context: &str, error: impl std::fmt::Display) -> Error {
     Error::Invalid(format!("原生识别 {context}: {error}"))
 }
 static RUNTIME: OnceLock<std::result::Result<std::path::PathBuf, String>> = OnceLock::new();
-/// Call before constructing sessions; one subprocess binds one installed runtime.
+/// 在构建会话之前调用；一个子进程只绑定一个已安装的运行库。
 pub fn initialise(runtime: &Path) -> Result<()> {
     let requested =
         runtime.canonicalize().map_err(|e| failure(&format!("运行库 {path}", path = runtime.display()), e))?;
     let loaded = RUNTIME.get_or_init(|| {
-        // The binding's loader panics on invalid ABI/symbols. Contain it at the worker boundary
-        // and retain the explicit path in the diagnostic rather than falling back to PATH.
+        // 绑定库的加载器在 ABI 或符号无效时会 panic。在 worker 边界上兜住它，
+        // 诊断信息里保留显式给出的路径，不回退到 PATH。
         std::panic::catch_unwind(|| ort::init_from(requested.display()).commit())
             .map_err(|_| {
                 format!("无法加载 {path}（需要 ONNX Runtime >=1.22，含 OrtGetApiBase）", path = requested.display())
@@ -40,8 +39,8 @@ pub fn initialise(runtime: &Path) -> Result<()> {
         Err(error) => Err(failure("运行库", error)),
     }
 }
-/// One model's session on the backend `Acceleration` picks for it (backend.rs), rebuilt on the CPU once if the
-/// accelerator cannot be built or fails while running. CPU sessions are built exactly as before #270.
+/// 一个模型的会话，跑在 `Acceleration` 为它选的后端上（backend.rs）；加速器建不起来或运行中失败时在 CPU 上重建一次。
+/// CPU 会话的构建方式与 #270 之前完全相同。
 struct ModelSession {
     session: Session,
     backend: Backend,
@@ -67,7 +66,7 @@ fn build(builder: SessionBuilder, path: &Path, threads: Option<usize>) -> Result
     }
     builder.commit_from_file(path).map_err(|e| failure(&path.display().to_string(), e))
 }
-/// What the settings page shows: the runtime's own words, without the error kind, at most 300 characters.
+/// 设置页显示的内容：运行库自己的原话，去掉错误种类，最多 300 个字符。
 fn reason(error: &Error) -> String {
     let text = match error {
         Error::Invalid(text) => text.clone(),
@@ -75,7 +74,7 @@ fn reason(error: &Error) -> String {
     };
     text.trim().chars().take(300).collect()
 }
-/// The runtime this process bound in `initialise` (empty before).
+/// 本进程在 `initialise` 里绑定的运行库（之前为空）。
 pub(super) fn runtime() -> PathBuf {
     RUNTIME.get().and_then(|r| r.as_ref().ok()).cloned().unwrap_or_default()
 }
@@ -94,7 +93,7 @@ impl ModelSession {
                 acceleration.record(model, requested, requested, None);
                 (session, requested)
             }
-            // A model or runtime the CPU cannot load either is not the accelerator's fault: its error, as before.
+            // CPU 也加载不了的模型或运行库不怪加速器：照旧报它的错误。
             Some(Err(e)) => match cpu_session(path, threads) {
                 Ok(session) => {
                     acceleration.fell_back(model, requested, path, &runtime(), &reason(&e));
@@ -109,8 +108,8 @@ impl ModelSession {
         };
         Ok(Self { session, backend, model, path: path.to_owned(), threads, acceleration: acceleration.clone() })
     }
-    /// `run` reads everything it needs out of the outputs. If an accelerated session fails (an error, or outputs
-    /// that do not validate), the picture is run again on a CPU session that serves the rest of this worker.
+    /// `run` 从输出里读出它需要的全部内容。加速会话失败时（出错，或输出校验不通过），这张图片在一个 CPU 会话上
+    /// 重跑，这个 CPU 会话负责这个 worker 余下的工作。
     fn run<T>(&mut self, mut run: impl FnMut(&mut Session) -> Result<T>) -> Result<T> {
         match run(&mut self.session) {
             Err(e) if self.backend != Backend::Cpu => {
@@ -123,7 +122,7 @@ impl ModelSession {
         }
     }
 }
-/// Reusable CCIP session for #150; loading it does not require a WD model.
+/// #150 用的可复用 CCIP 会话；加载它不需要 WD 模型。
 pub struct CcipSession {
     session: ModelSession,
 }
@@ -136,11 +135,11 @@ impl CcipSession {
         }
         Ok(Self { session })
     }
-    /// The backend the session runs on now.
+    /// 会话当前运行的后端。
     pub fn backend(&self) -> Backend {
         self.session.backend
     }
-    /// Return 768 raw f32 values; the consumer owns any Features normalization/cache.
+    /// 返回 768 个原始 f32 值；Features 的归一化和缓存由使用方负责。
     pub fn features(&mut self, image: &RgbImage) -> Result<Vec<f32>> {
         self.session.run(|session| {
             let input = Tensor::from_array(([1, 3, 384, 384], super::preprocess::ccip_input(image, 384)))
@@ -155,12 +154,11 @@ impl CcipSession {
         })
     }
 }
-/// WD intra-op threads (#213): the ONNX Runtime default (one per physical core) on Windows,
-/// 4 elsewhere; on the M2 more threads reach the efficiency cores and WD gets slower.
-/// Thread count does not change the CPU outputs, bit for bit.
+/// WD 的 intra-op 线程数（#213）：Windows 上用 ONNX Runtime 的默认值（每个物理核一个），其他平台 4 个；
+/// 在 M2 上线程再多就会用到能效核，WD 反而变慢。线程数不改变 CPU 输出，逐位一致。
 pub const WD_THREADS: Option<usize> = if cfg!(windows) { None } else { Some(4) };
-/// WD on the backend `Acceleration` picks for it; `ModelSessions` and the benchmark's stage timing
-/// (examples/recognition_compute/bench.rs) both run it, so they time what production runs.
+/// 跑在 `Acceleration` 为它选的后端上的 WD；`ModelSessions` 和基准测试的分阶段计时
+/// （examples/recognition_compute/bench.rs）都用它，所以计时的就是生产实际运行的代码。
 pub struct WdSession {
     session: ModelSession,
 }
@@ -173,11 +171,11 @@ impl WdSession {
         }
         Ok(Self { session })
     }
-    /// The backend the session runs on now.
+    /// 会话当前运行的后端。
     pub fn backend(&self) -> Backend {
         self.session.backend
     }
-    /// Tag probabilities and the 1024 raw vector values for one preprocessed 448×448 input (preprocess::wd_input).
+    /// 对一个预处理好的 448×448 输入（preprocess::wd_input）给出标签概率和 1024 个原始向量值。
     pub fn run(&mut self, input: &[f32], tags: usize) -> Result<(Vec<f32>, Vec<f32>)> {
         self.session.run(|session| {
             let input = Tensor::from_array(([1, 448, 448, 3], input.to_vec())).map_err(|e| failure("WD 输入", e))?;
@@ -211,7 +209,7 @@ impl ModelSessions {
         let ccip = CcipSession::load(&models.join("ccip/model_feat.onnx"), runtime, acceleration)?;
         Ok(Self { wd, ccip })
     }
-    /// The backends WD and CCIP run on now.
+    /// WD 和 CCIP 当前运行的后端。
     pub fn backends(&self) -> (Backend, Backend) {
         (self.wd.backend(), self.ccip.backend())
     }

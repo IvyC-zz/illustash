@@ -1,4 +1,4 @@
-//! Feature loading owned by research. Recognition supplies raw little-endian float32 vectors.
+//! 研究部分负责的特征加载。识别提供原始的小端 float32 向量。
 use super::numeric;
 use crate::{Error, Result};
 use rusqlite::OpenFlags;
@@ -9,15 +9,12 @@ use std::{
     path::Path,
 };
 
-fn invalid(message: &str) -> Error {
-    Error::Invalid(message.into())
-}
 pub fn bytes(row: &[f32]) -> Vec<u8> {
     row.iter().flat_map(|v| v.to_le_bytes()).collect()
 }
 pub fn decode(blob: &[u8]) -> Result<Vec<f32>> {
     if blob.is_empty() || blob.len() % 4 != 0 {
-        return Err(invalid("Invalid CCIP feature vector"));
+        return Err(Error::invalid("Invalid CCIP feature vector"));
     }
     Ok(blob.chunks_exact(4).map(|b| f32::from_le_bytes(b.try_into().expect("four bytes"))).collect())
 }
@@ -37,10 +34,10 @@ impl Matrix {
             || uuids.iter().collect::<HashSet<_>>().len() != uuids.len()
             || rows.iter().any(|v| v.len() != dimension)
         {
-            return Err(invalid("Feature manifest/matrix mismatch or duplicate UUID"));
+            return Err(Error::invalid("Feature manifest/matrix mismatch or duplicate UUID"));
         }
         for v in &mut rows {
-            numeric::normalise(v).map_err(|m| invalid(&m))?;
+            numeric::normalise(v).map_err(|m| Error::invalid(&m))?;
         }
         Ok(Self::normalised(uuids, rows, dimension))
     }
@@ -62,9 +59,9 @@ impl Matrix {
     }
 }
 
-/// Load the on-disk base matrix plus the SQLite CCIP overlay once for this one-shot worker.
-/// Each research process loads at most once, so there is no cross-call cache (#32).
-/// Every read and validation finishes before a matrix is returned; any invalid row fails the load.
+/// 为这个一次性 worker 加载一次磁盘上的基础矩阵和 SQLite 里的 CCIP 覆盖层。
+/// 每个研究进程最多加载一次，所以没有跨调用的缓存（#32）。
+/// 所有读取和校验都在返回矩阵之前完成；任何一行无效都会让加载失败。
 pub fn load(source: &Path, base: &Path) -> Result<Matrix> {
     let paths = [base.join("full-manifest.csv"), base.join("full-features.npy")];
     let present = paths
@@ -89,28 +86,28 @@ pub fn load(source: &Path, base: &Path) -> Result<Matrix> {
     };
     let mut matrix = match present[..] {
         [true, true] => {
-            let mut csv = csv::Reader::from_path(&paths[0]).map_err(|e| invalid(&e.to_string()))?;
+            let mut csv = csv::Reader::from_path(&paths[0]).map_err(|e| Error::invalid(e.to_string()))?;
             let col = csv
                 .headers()
-                .map_err(|e| invalid(&e.to_string()))?
+                .map_err(|e| Error::invalid(e.to_string()))?
                 .iter()
                 .position(|h| h == "uuid")
-                .ok_or_else(|| invalid("Feature manifest missing uuid"))?;
+                .ok_or_else(|| Error::invalid("Feature manifest missing uuid"))?;
             let uuids = csv
                 .records()
                 .map(|r| r.map(|r| r.get(col).unwrap_or("").trim().to_uppercase()))
                 .collect::<std::result::Result<Vec<_>, _>>()
-                .map_err(|e| invalid(&e.to_string()))?;
+                .map_err(|e| Error::invalid(e.to_string()))?;
             read_npy(&paths[1])?.into_matrix(uuids)?
         }
         [false, false] => Matrix { dimension: 768, ..Matrix::default() },
-        _ => return Err(invalid("Both feature matrix and manifest are required")),
+        _ => return Err(Error::invalid("Both feature matrix and manifest are required")),
     };
     for (u, raw) in overlay {
         let mut v = decode(&raw)?;
-        numeric::normalise(&mut v).map_err(|m| invalid(&m))?;
+        numeric::normalise(&mut v).map_err(|m| Error::invalid(&m))?;
         if v.len() != matrix.dimension {
-            return Err(invalid("CCIP feature dimension mismatch"));
+            return Err(Error::invalid("CCIP feature dimension mismatch"));
         }
         let index = if let Some(&i) = matrix.row.get(&u) {
             i
@@ -127,8 +124,8 @@ pub fn load(source: &Path, base: &Path) -> Result<Matrix> {
     Ok(matrix)
 }
 
-// Preserve dtype and layout until after the reference rowwise norm/division.
-// In F-order with multiple rows the axis-one reduction is strided, not pairwise.
+// 在参考实现按行求范数并相除之前，保持原来的 dtype 和布局。
+// F 顺序且有多行时，沿轴 1 的归约是跨步的，不是两两求和。
 pub struct NpyMatrix {
     pub(crate) dimension: usize,
     pub(crate) fortran_order: bool,
@@ -149,42 +146,42 @@ impl NpyMatrix {
         self.len() == 0
     }
     pub(super) fn into_anchor_matrices(mut self, ids: Vec<String>) -> Result<(Matrix, Matrix)> {
-        // The recorded alias-distance algorithm converts the raw alias input to contiguous f32 first;
-        // patch_anchors instead selects rows, normalizes in the original dtype, then casts.
+        // 录制的别名距离算法先把原始别名输入转成连续的 f32；
+        // patch_anchors 则先选行，按原 dtype 归一化，再转换类型。
         let alias_rows = match &self.values {
             NpyValues::Float32(rows) => rows.clone(),
             NpyValues::Float64(rows) => rows.iter().map(|r| r.iter().map(|&x| x as f32).collect()).collect(),
         };
         let aliases = Matrix::new(ids.clone(), alias_rows, self.dimension)?;
-        self.fortran_order = false; // NumPy advanced row indexing A[keep] gives C-order rows.
+        self.fortran_order = false; // NumPy 的高级行索引 A[keep] 得到 C 顺序的行。
         Ok((aliases, self.into_matrix(ids)?))
     }
     pub fn into_matrix(self, uuids: Vec<String>) -> Result<Matrix> {
         if uuids.len() != self.len() || uuids.iter().collect::<HashSet<_>>().len() != uuids.len() {
-            return Err(invalid("Feature manifest/matrix mismatch or duplicate UUID"));
+            return Err(Error::invalid("Feature manifest/matrix mismatch or duplicate UUID"));
         }
         let contiguous = !self.fortran_order || self.len() <= 1 || self.dimension <= 1;
         let rows = match self.values {
             NpyValues::Float32(mut rows) => {
                 for row in &mut rows {
-                    numeric::normalise_layout(row, contiguous).map_err(|m| invalid(&m))?;
+                    numeric::normalise_layout(row, contiguous).map_err(|m| Error::invalid(&m))?;
                 }
                 rows
             }
             NpyValues::Float64(rows) => rows
                 .into_iter()
-                .map(|row| numeric::normalise64(&row, contiguous).map_err(|m| invalid(&m)))
+                .map(|row| numeric::normalise64(&row, contiguous).map_err(|m| Error::invalid(&m)))
                 .collect::<Result<_>>()?,
         };
         Ok(Matrix::normalised(uuids, rows, self.dimension))
     }
 }
 
-/// Bounded parser for real float32/float64 NPY matrices, including endian and C/F layout.
-/// Other dtypes are explicitly rejected; no pickle or expression evaluation.
+/// 有界的 NPY 解析器，用于实数 float32/float64 矩阵，包括字节序和 C/F 布局。
+/// 其他 dtype 显式拒绝；不做 pickle，也不求值表达式。
 pub fn read_npy(path: &Path) -> Result<NpyMatrix> {
     let raw = fs::read(path)?;
-    let bad = || invalid("Invalid CCIP NPY matrix");
+    let bad = || Error::invalid("Invalid CCIP NPY matrix");
     if raw.get(..6) != Some(b"\x93NUMPY") {
         return Err(bad());
     }
@@ -290,7 +287,7 @@ pub fn read_npy(path: &Path) -> Result<NpyMatrix> {
         "<f8" => (false, 8),
         "=f8" => (cfg!(target_endian = "big"), 8),
         ">f8" => (true, 8),
-        _ => return Err(invalid("CCIP NPY dtype must be real float32 or float64")),
+        _ => return Err(Error::invalid("CCIP NPY dtype must be real float32 or float64")),
     };
     if dim == 0 || count.checked_mul(dim).and_then(|n| n.checked_mul(width)) != Some(raw.len() - end) {
         return Err(bad());
@@ -326,8 +323,8 @@ mod tests {
     use super::*;
     #[test]
     fn npy_precision_layout_endian_and_versions_match_fixed_numpy_reference() {
-        // Actual NumPy 1.26.4 and 2.5.3 reference: two rows [1, 7*2^-12, 760*0].
-        // F-order float32 norm is 1; C-order norm is 1.0000001. Hashes are normalized bytes.
+        // 实际的 NumPy 1.26.4 和 2.5.3 参考：两行 [1, 7*2^-12, 760*0]。
+        // F 顺序的 float32 范数是 1；C 顺序的范数是 1.0000001。哈希针对归一化后的字节。
         let root = std::env::temp_dir().join(format!("illustash-npy-test-{}", crate::store::new_key().unwrap()));
         fs::create_dir(&root).unwrap();
         let path = root.join("features.npy");
@@ -393,7 +390,7 @@ mod tests {
                 }
             }
         }
-        // A finite f64 vector exceeding f32's range must be normalized before casting.
+        // 超出 f32 范围的有限 f64 向量必须先归一化再转换类型。
         let raw = NpyMatrix { dimension: 2, fortran_order: false, values: NpyValues::Float64(vec![vec![1e40, 0.0]]) };
         assert_eq!(raw.into_matrix(vec!["A".into()]).unwrap().rows, vec![vec![1.0, 0.0]]);
         fs::remove_dir_all(root).unwrap();
@@ -415,7 +412,7 @@ mod tests {
         fs::create_dir(&root).unwrap();
         let source = root.join("source.sqlite");
         let c = crate::sqlite::open(&source).unwrap();
-        // No base files and no overlay: an empty production-width matrix.
+        // 没有基础文件也没有覆盖层：一个生产宽度的空矩阵。
         let empty = load(&source, &root).unwrap();
         assert_eq!((empty.dimension, empty.rows.len()), (768, 0));
         c.execute_batch("CREATE TABLE embeddings(uuid,model,vec,PRIMARY KEY(uuid,model));").unwrap();
@@ -438,12 +435,12 @@ mod tests {
         let replaced = load(&source, &root).unwrap();
         assert_eq!(replaced.rows, vec![vec![1.0, 0.0]]);
         assert_ne!(version, replaced.versions["A"]);
-        // Invalid overlays fail the whole load, including finite rows whose norm overflows (#45).
+        // 无效的覆盖层让整个加载失败，包括范数溢出的有限行（#45）。
         for bad in [bytes(&[f32::NAN, 1.0]), bytes(&[1e30, 1e30]), vec![0, 0, 0], bytes(&[1.0, 0.0, 0.0])] {
             c.execute("INSERT OR REPLACE INTO embeddings VALUES ('B','ccip',?)", [bad]).unwrap();
             assert!(load(&source, &root).is_err());
         }
-        // Overlays replace base rows by UUID, append new UUIDs, and disappear when deleted.
+        // 覆盖层按 UUID 替换基础行，追加新的 UUID，删除后就消失。
         c.execute("UPDATE embeddings SET uuid='A', vec=?", [bytes(&[0.0, 3.0])]).unwrap();
         c.execute("INSERT INTO embeddings VALUES ('B','ccip',?)", [bytes(&[4.0, 0.0])]).unwrap();
         c.execute("INSERT INTO embeddings VALUES ('C','other',?)", [bytes(&[f32::NAN])]).unwrap();

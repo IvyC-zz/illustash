@@ -5,14 +5,14 @@ use std::fmt;
 pub enum Error {
     Sql(rusqlite::Error),
     Io(std::io::Error),
-    /// Filesystem operation with its actual operand(s), retained for the application HTTP contract.
+    /// 带实际操作对象的文件系统操作错误，为应用 HTTP 契约保留。
     IoAt {
         source: std::io::Error,
         path: std::path::PathBuf,
         destination: Option<std::path::PathBuf>,
     },
     Invalid(String),
-    /// Safe, local label for an upstream text-source failure; never provider bodies or credentials.
+    /// 上游文本来源失败时的安全本地标签；从不带提供方的响应正文或凭据。
     Network(String),
     Conflict(String),
     Schema(String),
@@ -42,8 +42,12 @@ impl fmt::Display for Error {
 impl std::error::Error for Error {}
 
 impl Error {
-    /// What went wrong, for a task's state the person reads: the message alone, without the kind
-    /// ("不合法：", "冲突：") that tells the code how to answer it.
+    /// `Error::Invalid` 的简写；返回 `Result` 的写法见 [`invalid`]。
+    pub fn invalid(message: impl Into<String>) -> Self {
+        Error::Invalid(message.into())
+    }
+    /// 出了什么错，用于给人看的任务状态：只有消息本身，不带告诉代码如何应对的种类前缀
+    /// （"不合法："、"冲突："）。
     pub fn reason(&self) -> String {
         match self {
             Error::Invalid(m) | Error::Network(m) | Error::Conflict(m) => m.clone(),
@@ -64,11 +68,12 @@ impl From<std::io::Error> for Error {
     }
 }
 
-pub(crate) fn invalid<T>(message: impl Into<String>) -> Result<T> {
-    Err(Error::Invalid(message.into()))
+/// 以 `Error::Invalid` 失败，供 `return invalid("…")` 一类写法使用。
+pub fn invalid<T>(message: impl Into<String>) -> Result<T> {
+    Err(Error::invalid(message))
 }
 
-/// Preserve legacy OSError text at the two explicit creation/registry boundaries.
+/// 在两处明确的创建/注册边界上保留旧版的 OSError 文本。
 pub fn filesystem_message(
     error: &std::io::Error,
     path: &std::path::Path,

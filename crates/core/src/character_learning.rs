@@ -1,6 +1,5 @@
-//! S3 / D6: optimistic learning publication. The stamp is taken before the Python
-//! training snapshot; BEGIN IMMEDIATE checks it before any write. A change between
-//! stamp and snapshot conservatively rejects, never publishes stale training.
+//! S3 / D6：乐观的学习结果发布。戳记在 Python 训练快照之前取；BEGIN IMMEDIATE 在任何写入之前核对它。
+//! 戳记和快照之间有变化时保守地拒绝，从不发布过时的训练结果。
 use crate::character_entities::ENTITIES;
 use crate::character_links::LINKS;
 use crate::{character_projection, schema, Error, Result};
@@ -46,17 +45,16 @@ fn feed(h: &mut Sha256, bytes: &[u8]) {
     h.update(bytes);
 }
 
-/// A versioned, typed, length-delimited stream. Blobs are hashed as bytes, without
-/// JSON/base64 expansion; row/column boundaries and missing tables are explicit.
+/// 带版本、带类型、按长度分隔的流。Blob 按字节哈希，不展开成 JSON/base64；行和列的边界、
+/// 缺失的表都明确写出。
 fn stamp(c: &Connection) -> Result<String> {
     character_projection::policy(c)?;
     let mut h = Sha256::new();
     feed(&mut h, b"character-learning-v1");
     for &table in INPUTS {
         feed(&mut h, table.as_bytes());
-        // The identities, the character links, the identity baseline and the identity relations live in core tables
-        // since core v8 (#201); they are read in the former tables' shape (the identities without the three columns
-        // the core never carried), so the same rows give the same stamp.
+        // 身份、角色链接、身份对照基准和身份关系从核心 v8（#201）起存在核心表里；按原来那些表的形状读出
+        // （身份不含核心从未带过的那三列），所以同样的行得到同样的戳记。
         let relations = crate::character_relations::TABLES.iter().find(|(name, _, _)| *name == table);
         let (stored, from) = match table {
             "entities" => (
@@ -226,8 +224,7 @@ impl Batch {
     }
 }
 
-/// Publication owns all four tables, the derived ownership and folding, in one
-/// transaction. No effects event: the original learner does not emit one either.
+/// 发布在一个事务里负责全部四张表、派生的归属和折叠。没有 effects 事件：原来的学习程序也不发出。
 pub fn publish(c: &mut Connection, input: &Value) -> Result<Value> {
     schema::require_current(c)?;
     let tx = c.transaction_with_behavior(TransactionBehavior::Immediate)?;

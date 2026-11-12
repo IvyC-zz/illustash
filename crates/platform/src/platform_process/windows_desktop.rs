@@ -1,4 +1,4 @@
-//! A private Windows job: abnormal desktop exit cannot orphan its host.
+//! 私有的 Windows job：desktop 异常退出时不会留下孤儿宿主进程。
 use std::{ffi::c_void, io, os::windows::io::AsRawHandle, process::Child};
 #[repr(C)]
 #[derive(Default)]
@@ -31,9 +31,11 @@ extern "system" {
     fn CloseHandle(handle: *mut c_void) -> i32;
 }
 pub struct Job(*mut c_void);
+// SAFETY: 作业句柄是内核对象，可以在任意线程使用和关闭；`Job` 独占它，不共享可变状态。
 unsafe impl Send for Job {}
 impl Job {
     pub fn assign(child: &Child) -> io::Result<Self> {
+        // SAFETY: 两个可选参数都传空指针：默认安全属性、匿名作业。
         let handle = unsafe { CreateJobObjectW(std::ptr::null(), std::ptr::null()) };
         if handle.is_null() {
             return Err(io::Error::last_os_error());
@@ -41,6 +43,9 @@ impl Job {
         let job = Self(handle);
         let mut limits = ExtendedLimit::default();
         limits.basic.flags = 0x2000; // JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+                                     // SAFETY: `handle` 是刚创建的作业；信息类 9 是 JobObjectExtendedLimitInformation，
+                                     // `limits` 是对应布局的 repr(C) 结构，长度按实际大小传入；`child`
+                                     // 的原始句柄在借用期间有效。
         unsafe {
             if SetInformationJobObject(
                 handle,
@@ -58,6 +63,7 @@ impl Job {
 }
 impl Drop for Job {
     fn drop(&mut self) {
+        // SAFETY: `Job` 只包装 CreateJobObjectW 返回的非空句柄，只在这里关闭一次。
         unsafe {
             CloseHandle(self.0);
         }
@@ -91,7 +97,7 @@ mod tests {
         let child = fixture("child", &path).spawn().unwrap();
         let _job = Job::assign(&child).unwrap();
         std::fs::write(path, child.id().to_string()).unwrap();
-        // Exiting skips destructors: the kernel closes the desktop job handle.
+        // 直接退出会跳过析构：由内核关闭 desktop 的 job 句柄。
         std::process::exit(0);
     }
 
@@ -100,6 +106,7 @@ mod tests {
         extern "system" {
             fn WaitForSingleObject(handle: *mut c_void, milliseconds: u32) -> u32;
         }
+        // SAFETY: `child` 的原始句柄在借用期间有效；超时 0 只查询状态。
         unsafe { WaitForSingleObject(child.as_raw_handle(), 0) == 258 }
     }
 
@@ -129,9 +136,12 @@ mod tests {
         let mut desktop = fixture("desktop", &path).spawn().unwrap();
         assert!(desktop.wait().unwrap().success());
         let pid: u32 = std::fs::read_to_string(&path).unwrap().parse().unwrap();
+        // SAFETY: 无指针参数；返回空指针时下面跳过。
         let handle = unsafe { OpenProcess(0x100000, 0, pid) };
         if !handle.is_null() {
+            // SAFETY: `handle` 是上面检查过非空的进程句柄。
             assert_eq!(unsafe { WaitForSingleObject(handle, 5000) }, 0, "orphaned host");
+            // SAFETY: `handle` 是上面打开的进程句柄，只在这里关闭一次。
             unsafe {
                 CloseHandle(handle);
             }

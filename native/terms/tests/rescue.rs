@@ -1,7 +1,7 @@
-//! Rescuing a damaged source.sqlite (#228), end to end through the native host: a library synced and organized, its
-//! picture and folder rows destroyed by overwritten pages, then rescued from the library page, from the desktop
-//! shell's `--rescue-source` and from the library switcher. Every picture keeps its ID, so its organizing stays with
-//! it. Synthetic pictures and packages only.
+//! 经原生宿主端到端地抢救损坏的 source.sqlite（#228）：图库同步并整理过，图片行和文件夹行所在的页被覆写破坏，
+//! 然后分别从图库页面、桌面外壳的 `--rescue-source` 和图库切换处抢救。每张图片都保留原来的 ID，
+//! 整理结果也就跟着它。只用合成图片和合成图库包。
+#![allow(clippy::unwrap_used, reason = "集成测试里 unwrap 就是断言")]
 use illustash_terms::{app_create::NewSource, app_service, store};
 use rusqlite::Connection;
 use serde_json::{json, Value};
@@ -29,7 +29,7 @@ impl Drop for Sandbox {
     }
 }
 
-/// The host as the desktop shell runs it: a startup gate on stdin, whose end is a normal exit.
+/// 按桌面外壳的方式运行的宿主：stdin 上有一道启动闸门，stdin 结束即正常退出。
 struct Host {
     child: Child,
     stdin: Option<ChildStdin>,
@@ -133,7 +133,7 @@ impl Host {
         };
         (response.status(), response.into_json().unwrap())
     }
-    /// Until `done` says yes about `GET /api/integrity`.
+    /// 一直轮询 `GET /api/integrity`，直到 `done` 判定满足。
     fn integrity_until(&self, what: &str, done: impl Fn(&Value) -> bool) -> Value {
         let start = Instant::now();
         loop {
@@ -162,7 +162,7 @@ fn picture(path: &Path, shade: u8) {
     fs::create_dir_all(path.parent().unwrap()).unwrap();
     image::RgbImage::from_pixel(5, 4, image::Rgb([shade, 40, 90])).save(path).unwrap();
 }
-/// Relative path → ID in a package's source.sqlite.
+/// 图库包 source.sqlite 里的相对路径 → ID。
 fn ids(package: &Path) -> BTreeMap<String, String> {
     let c = Connection::open(package.join("source.sqlite")).unwrap();
     let ids = c
@@ -177,7 +177,7 @@ fn ids(package: &Path) -> BTreeMap<String, String> {
 fn count(db: &Path, sql: &str) -> i64 {
     Connection::open(db).unwrap().query_row(sql, [], |r| r.get(0)).unwrap()
 }
-/// Overwrites the pages that hold the picture and folder rows of a small source.sqlite.
+/// 覆写一个小 source.sqlite 中存放图片行和文件夹行的页。
 fn destroy_rows(source: &Path) {
     let (size, pages): (u64, Vec<u64>) = {
         let c = Connection::open(source).unwrap();
@@ -201,7 +201,7 @@ fn destroy_rows(source: &Path) {
     fs::write(source, bytes).unwrap();
 }
 
-/// A synced, organized library on its own folder: the IDs its pictures have and the picture that carries a tag.
+/// 建在自己文件夹上、已同步并整理过的图库：记下各图片的 ID 和带标签的那张图片。
 struct Organized {
     package: PathBuf,
     folder: PathBuf,
@@ -220,7 +220,7 @@ fn organized(root: &Path, name: &str) -> Organized {
         vec![NewSource::Folder { path: folder.clone(), preset: "other".into() }],
     )
     .unwrap();
-    // Opening syncs: the pictures get their IDs and library.sqlite records them.
+    // 打开时会同步：图片得到 ID，library.sqlite 记下它们。
     let host = Host::launch(root, &package, &[]).unwrap();
     let start = Instant::now();
     while count(&package.join("library.sqlite"), "SELECT count(*) FROM assets") < 4 {
@@ -232,14 +232,14 @@ fn organized(root: &Path, name: &str) -> Organized {
     let (code, reply) = host.post("/api/tag", json!({"ids": [tagged], "tag": "合成标签"}));
     assert_eq!(code, 200, "{reply}");
     host.quit();
-    // The damage: no picture or folder row of source.sqlite can be read. Meanwhile c moved to another folder.
+    // 造成损坏：source.sqlite 的图片行和文件夹行都读不出来。与此同时 c 移到了另一个文件夹。
     destroy_rows(&package.join("source.sqlite"));
     fs::create_dir_all(folder.join("moved")).unwrap();
     fs::rename(folder.join("sub/c.png"), folder.join("moved/c.png")).unwrap();
     Organized { package, folder, ids, tagged }
 }
-/// After the rescue: every picture has the ID it had (c found by its content at its new path), the tag still points at
-/// a picture of the library, the damaged file is kept and the record is clear.
+/// 抢救之后：每张图片都是原来的 ID（c 按内容在新路径上找到），标签仍指向图库里的图片，
+/// 损坏的文件保留了下来，检查记录已清空。
 fn rescued(o: &Organized) {
     let mut expected = o.ids.clone();
     let c = expected.remove("sub/c.png").unwrap();
@@ -271,13 +271,12 @@ fn a_damaged_source_is_rescued_and_every_picture_keeps_its_id() {
     for dir in ["home", "support", "shared"] {
         fs::create_dir_all(root.join(dir)).unwrap();
     }
-    // This test binary has one test: nothing else reads the process environment meanwhile.
+    // 这个测试二进制只有一个测试：此期间没有别的代码读进程环境。
     std::env::set_var("ILLUSTASH_APP_SUPPORT", root.join("support"));
     std::env::set_var("ILLUSTASH_SHARED", root.join("shared"));
     std::env::set_var("ILLUSTASH_NO_KEYCHAIN", "1");
 
-    // From the library page: the background check finds the damage, 「抢救重建」 builds the new file while the session
-    // stays stopped, and opening the library again puts it in place.
+    // 从图库页面：后台检查发现损坏，「抢救重建」在会话保持停止的状态下建出新文件，再次打开图库时让它就位。
     let page = organized(&root, "page");
     let host = Host::launch(&root, &page.package, &["--no-sync"]).unwrap();
     let status = host.integrity_until("background check", |s| !s["damaged"].is_null());
@@ -287,7 +286,7 @@ fn a_damaged_source_is_rescued_and_every_picture_keeps_its_id() {
     assert_eq!(code, 200, "{started}");
     host.integrity_until("rescue", |s| s["rescue"]["ready"] == true || !s["rescue"]["error"].is_null());
     assert!(host.get("/api/integrity")["rescue"]["error"].is_null());
-    // Still stopped until it is put in place.
+    // 新文件就位之前仍是停止状态。
     let (code, _) = host.post("/api/startup", json!({"sync": false}));
     assert_eq!(code, 409);
     let (code, reopened) = host.post("/api/libraries/open", json!({"path": page.package}));
@@ -300,8 +299,7 @@ fn a_damaged_source_is_rescued_and_every_picture_keeps_its_id() {
     host.quit();
     rescued(&page);
 
-    // From the desktop shell: once a check has found the damage, the service is started again with --rescue-source,
-    // which reports its stages like the checks and then opens the library.
+    // 从桌面外壳：检查发现损坏后，用 --rescue-source 重新启动服务，它像检查一样报告各个阶段，然后打开图库。
     let shell = organized(&root, "shell");
     let host = Host::launch(&root, &shell.package, &["--no-sync"]).unwrap();
     host.integrity_until("background check", |s| !s["damaged"].is_null());
@@ -315,7 +313,7 @@ fn a_damaged_source_is_rescued_and_every_picture_keeps_its_id() {
     rescued(&shell);
     assert!(!illustash_terms::desktop_shell::damage_rescuable(&shell.package));
 
-    // From the library switcher: opening another damaged library says so; agreeing rescues it first.
+    // 从图库切换处：打开另一个损坏的图库时会提示损坏；同意后先抢救再打开。
     let switched = organized(&root, "switched");
     let host = Host::launch(&root, &switched.package, &["--no-sync"]).unwrap();
     host.integrity_until("background check", |s| !s["damaged"].is_null());

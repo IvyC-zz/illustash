@@ -49,7 +49,7 @@ def call(label,lib,*args,**kwargs):
         kind,message = entry['error']
         raise {'AttributeError':AttributeError,'ValueError':ValueError,'IntegrityError':sqlite3.IntegrityError}[kind](message)
     path = Path(lib['cache']) if isinstance(lib,dict) else lib.path
-    # Restore only the historical machine cache. The core/source databases remain untouched.
+    # 只还原历史的机器缓存；core/source 数据库不动。
     with closing(sqlite3.connect(path/'provenance.sqlite')) as c, c:
         for name,table in entry.get('tables',{}).items():
             c.execute('DELETE FROM "'+name+'"')

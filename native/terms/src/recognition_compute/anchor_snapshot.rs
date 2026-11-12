@@ -1,4 +1,4 @@
-//! One authorised task snapshot. No feature cache or quadratic work in write/receive locks.
+//! 一份经授权的任务快照。写入锁和接收锁内不做特征缓存，也不做平方级的计算。
 use super::{
     anchors::{self, AnchorIndex, Claim, Metadata},
     models::hash,
@@ -12,9 +12,6 @@ use std::{
     io::Read,
     path::Path,
 };
-fn invalid(message: impl Into<String>) -> Error {
-    Error::Invalid(message.into())
-}
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Fingerprint {
@@ -36,7 +33,7 @@ fn anchored(shared: &Path) -> Result<bool> {
     let a = shared.join("char-anchors.npy").try_exists()?;
     let b = shared.join("char-anchors.txt").try_exists()?;
     if a != b {
-        return Err(invalid("角色锚点必须同时有向量和ID文件"));
+        return Err(Error::invalid("角色锚点必须同时有向量和ID文件"));
     }
     Ok(a)
 }
@@ -58,7 +55,7 @@ impl Snapshot {
     pub fn load(shared: &Path, source: &Path) -> Result<Self> {
         Self::load_checked(shared, source, &|| Ok(()))
     }
-    /// Anchors, ids and per-character files from one complete index publication (index_generation).
+    /// 来自同一次完整索引发布（index_generation）的锚点、id 和逐角色文件。
     pub(crate) fn load_checked(shared: &Path, source: &Path, check: &dyn Fn() -> Result<()>) -> Result<Self> {
         crate::index_generation::stable(shared, || Self::load_once(shared, source, check))
     }
@@ -74,7 +71,7 @@ impl Snapshot {
         }
         let id_bytes = read(&shared.join("char-anchors.txt"), check)?;
         let ids = std::str::from_utf8(&id_bytes)
-            .map_err(|e| invalid(e.to_string()))?
+            .map_err(|e| Error::invalid(e.to_string()))?
             .lines()
             .map(str::trim)
             .filter(|s| !s.is_empty())
@@ -103,7 +100,7 @@ impl Snapshot {
         let limits = anchors::claim_thresholds(&ids, &index, &patched)?;
         Ok(Self { fingerprint, vectors: matrix, index, limits })
     }
-    /// Linear authoritative recheck under the source lease: no matrix/index construction.
+    /// 在源库租约下做线性的权威复查：不构建矩阵或索引。
     pub(crate) fn fingerprint(
         shared: &Path,
         source: &Connection,
@@ -152,7 +149,10 @@ fn patches(shared: &Path, check: &dyn Fn() -> Result<()>) -> Result<(HashSet<Str
         };
         if value["source"] == "danbooru-patch" {
             patched.insert(
-                path.file_stem().and_then(|s| s.to_str()).ok_or_else(|| invalid("角色索引文件名不是UTF8"))?.to_owned(),
+                path.file_stem()
+                    .and_then(|s| s.to_str())
+                    .ok_or_else(|| Error::invalid("角色索引文件名不是UTF8"))?
+                    .to_owned(),
             );
         }
         records.push(serde_json::json!([path.file_name().and_then(|s| s.to_str()), value["source"]]));
@@ -177,7 +177,7 @@ fn metadata(source: &Connection, check: &dyn Fn() -> Result<()>) -> Result<(Hash
         let p50: Option<f64> = row.get(8)?;
         let p75: Option<f64> = row.get(9)?;
         if [p90, gender, p50, p75].into_iter().flatten().any(|v| !v.is_finite()) {
-            return Err(invalid("角色锚点元数据不是有限值"));
+            return Err(Error::invalid("角色锚点元数据不是有限值"));
         }
         values.push(serde_json::json!([id, p90, copyright, wd, base, skin, posts, gender, p50, p75]));
         metadata.insert(

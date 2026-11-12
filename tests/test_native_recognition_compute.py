@@ -1,4 +1,4 @@
-"""Explicit native computation comparison, synthetic images/vectors only; no model discovery."""
+"""显式的原生计算对照，只用合成图片和向量；不查找模型。"""
 import json
 import os
 from pathlib import Path
@@ -68,8 +68,8 @@ class NativePreprocessTest(unittest.TestCase):
             self.assertFalse((root/'output.json').exists())
 
     def test_anchor_distance_and_nearest_order(self):
-        # Basis vectors make boundary distances exact; duplicated bases expose
-        # NumPy's equal-distance partition order (the producer takes only 9).
+        # 基向量让边界距离精确；重复的基向量暴露 NumPy 在距离相等时的 partition 顺序
+        # （生产方只取 9 个）。
         for count in (3, 9, 16, 17, 32, 257):
             with self.subTest(count=count), tempfile.TemporaryDirectory() as tmp:
                 root=Path(tmp)
@@ -84,12 +84,12 @@ class NativePreprocessTest(unittest.TestCase):
                 np.testing.assert_array_equal(native['distances'],distances)
                 for j,order in enumerate(native['orders']):
                     if os.name=='nt':
-                        # Approved scalar tie order (2026-10-04); Windows NumPy's SIMD argsort
-                        # orders equal distances differently, so use fixed macOS arm64 NumPy output.
+                        # 已批准的标量平局顺序（2026-10-04）；Windows 上 NumPy 的 SIMD argsort
+                        # 对相等距离的排序不同，所以用固定的 macOS arm64 NumPy 输出。
                         self.assertEqual(order,FIXED_ORDER['orders'][str(count)][j])
                     else:
                         self.assertEqual(order,np.argsort(distances[:,j]).tolist())
-                    if sys.platform=='darwin':  # keep the Windows fixture tied to its NumPy source
+                    if sys.platform=='darwin':  # 让 Windows 夹具和它的 NumPy 来源保持一致
                         self.assertEqual(FIXED_ORDER['orders'][str(count)][j],np.argsort(distances[:,j]).tolist())
 
     def test_dense_norm_dot_and_claim_boundaries(self):
@@ -104,7 +104,7 @@ class NativePreprocessTest(unittest.TestCase):
             subprocess.run([str(self.binary),str(root/'request.json'),str(root/'output.json')],check=True,capture_output=True)
             got=np.asarray(json.loads((root/'output.json').read_text())['distances'],np.float32)
             expected=cross(vectors,features,check=False)
-            # No epsilon in the claim decision, including the actual reviewed p90.
+            # 认领判定不留 epsilon，包括实际审核过的 p90。
             np.testing.assert_array_equal(got,expected)
             for threshold in (np.float32(1e-6),expected[0,0],np.nextafter(expected[0,0],np.float32(0))):
                 np.testing.assert_array_equal(got<=threshold,expected<=threshold)

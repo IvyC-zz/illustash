@@ -1,11 +1,11 @@
-"""The version number has one source: native/terms/application.json (#189).
+"""版本号只有一个来源：native/terms/application.json（#189）。
 
-Every other place that carries it (tauri.conf.json, the Cargo.toml of each shipped crate, and those crates'
-entries in every Cargo.lock) is rewritten from it; packaging/build.py refuses to package when they disagree.
+其他带版本号的地方（tauri.conf.json、每个发布 crate 的 Cargo.toml，以及这些 crate 在各个 Cargo.lock 里的条目）
+都从它改写；两边不一致时 packaging/build.py 拒绝打包。
 
-    python3 tools/version.py              # check only; exit 1 and list each mismatch
-    python3 tools/version.py --sync       # rewrite every other place from application.json
-    python3 tools/version.py --set 0.2.0  # change application.json, then sync
+    python3 tools/version.py              # 只检查；不一致时退出码为 1 并列出每一处
+    python3 tools/version.py --sync       # 按 application.json 改写其他所有地方
+    python3 tools/version.py --set 0.2.0  # 修改 application.json，然后同步
 """
 import argparse
 import json
@@ -17,13 +17,13 @@ ROOT = Path(__file__).resolve().parents[1]
 SOURCE = 'native/terms/application.json'
 TAURI = 'desktop/tauri.conf.json'
 CRATES = ('native/terms', 'desktop', 'crates/core', 'crates/platform', 'crates/iqdb')
-# SemVer 2.0.0 without build metadata: a prerelease suffix (0.2.0-beta.1) is allowed, `+build` is not.
+# 不带构建元数据的 SemVer 2.0.0：允许预发布后缀（0.2.0-beta.1），不允许 `+build`。
 SEMVER = re.compile(r'(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)'
                     r'(?:-((?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*))*))?')
-# The [package] table up to the next table header; its first `version = "…"` line is the crate's own.
+# [package] 表直到下一个表头为止；其中第一行 `version = "…"` 是 crate 自己的版本。
 PACKAGE_VERSION = re.compile(r'(^\[package\]\n(?:(?!\[).*\n)*?version = ")([^"]*)(")', re.M)
 TAURI_VERSION = re.compile(r'(^  "version": ")([^"]*)(")', re.M)
-# A lock entry for one of this project's crates: local path packages carry no `source = …` line.
+# 本项目某个 crate 的 lock 条目：本地路径包没有 `source = …` 这一行。
 LOCK_ENTRY = re.compile(r'(^\[\[package\]\]\nname = "(illustash-[^"]+)"\nversion = ")([^"]*)("\n(?!source = ))', re.M)
 
 
@@ -32,7 +32,7 @@ def valid(version):
 
 
 def read(root, relative):
-    # Byte-exact round trip: the files are LF (.gitattributes) and must stay so on Windows too.
+    # 逐字节原样读写：这些文件是 LF（.gitattributes），在 Windows 上也必须保持 LF。
     return (root / relative).read_bytes().decode('utf-8')
 
 
@@ -45,7 +45,7 @@ def source_version(root=ROOT):
 
 
 def places(root=ROOT):
-    """(relative path, label, version found) for every place that must equal application.json."""
+    """每处必须与 application.json 相同的地方，给出 (relative path, label, version found)。"""
     found = []
     tauri = TAURI_VERSION.findall(read(root, TAURI))
     found.append((TAURI, 'version', tauri[0][1] if len(tauri) == 1 else None))
@@ -62,7 +62,7 @@ def places(root=ROOT):
 
 
 def check(root=ROOT):
-    """Messages for every disagreement; empty when consistent."""
+    """每处不一致的消息；全部一致时为空。"""
     try:
         version = source_version(root)
     except (OSError, ValueError, KeyError, TypeError) as error:
@@ -79,7 +79,7 @@ def check(root=ROOT):
 
 
 def sync(root=ROOT, version=None):
-    """Rewrite every place from application.json (after setting it to `version` when given)."""
+    """按 application.json 改写每一处（给了 `version` 时先把 application.json 设为它）。"""
     if version is not None:
         if not valid(version):
             raise ValueError(f'版本号 {version!r} 不是 SemVer（例：0.2.0、0.2.0-beta.1）')

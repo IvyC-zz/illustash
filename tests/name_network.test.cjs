@@ -1,11 +1,11 @@
-// Run with: node --test tests/name_network.test.cjs
+// 运行：node --test tests/name_network.test.cjs
 const {test, before} = require('node:test');
-const web = require('./web.cjs');   // core/ and ui/settings.js (#199)
+const web = require('./web.cjs');   // core/ 和 ui/settings.js（#199）
 let settings;
 before(async () => { await web.ready(); settings = await web.load('ui/settings.js'); });
 const assert = require('node:assert/strict');
-// Lookups are core/settings.js (remoteNames, remoteNote); asking for consent is ui/settings.js setNamesNetwork(), with the
-// page's own dialog (ui/dialog.js) and toast (ui/dom.js), here on a fake page.
+// 查询在 core/settings.js（remoteNames、remoteNote）；征求同意是 ui/settings.js 的 setNamesNetwork()，
+// 用页面自己的对话框（ui/dialog.js）和提示条（ui/dom.js），这里放在假页面上。
 function harness({fail, confirm = true} = {}) {
   const calls = [], toasts = [], dialogs = [], core = web.core(), nodes = {};
   core.state.names = {counts: {}}; core.state.route = {page: 'library'};
@@ -17,7 +17,7 @@ function harness({fail, confirm = true} = {}) {
   const element = () => ({hidden: true, set textContent(v) { if (this === nodes.toastText) toasts.push(v); }});
   globalThis.document = {getElementById: id => nodes[id] ||= element(), body: {append(d) {
     dialogs.push(d.querySelector('h2').textContent);
-    setImmediate(() => d.close(confirm ? 'ok' : ''));   // the person answers
+    setImmediate(() => d.close(confirm ? 'ok' : ''));   // 用户作答
   }}, createElement() {
     const parts = {};
     return {returnValue: '', setAttribute() {}, querySelector: selector => parts[selector] ||= {}, showModal() {}, remove() {},
@@ -61,7 +61,7 @@ test('granting asks first and sends nothing when declined; revoking does not ask
 });
 
 test('saving or clearing model settings keeps the grant and revoke control available', async () => {
-  // The model card is ui/settings.js; saving goes through core/settings.js saveModelApi().
+  // 模型卡片在 ui/settings.js；保存经过 core/settings.js 的 saveModelApi()。
   const {renderModelCard} = await web.load('ui/settings.js');
   for (const authorized of [true, false]) {
     const network = {authorized, this_run: false, granted_at: authorized ? 'synthetic-time' : null}, {state} = web.core();
@@ -88,7 +88,7 @@ test('saving or clearing model settings keeps the grant and revoke control avail
 });
 
 test('saving a new model address that drops the key says the key must be entered again', async () => {
-  // The backend keeps a key only for the address it was entered for (app_names.rs configure).
+  // 后端只为填写 key 时的那个地址保留 key（app_names.rs 的 configure）。
   const {renderModelCard} = await web.load('ui/settings.js');
   for (const [kept, said] of [[true, '设置已保存'], [false, '接口地址已更改，原来的 API key 已清除，请重新填写']]) {
     const {state} = web.core();
@@ -106,7 +106,7 @@ test('saving a new model address that drops the key says the key must be entered
 });
 
 test('refreshing names from the task panel keeps the network status', async () => {
-  // The panel's button runs core/jobs.js refreshNames().
+  // 面板上的按钮运行 core/jobs.js 的 refreshNames()。
   const network = {authorized: true, this_run: false, granted_at: 'synthetic-time'}, {state, refreshNames} = web.core();
   state.names = {network, state: {status: 'idle'}};
   globalThis.fetch = async (path, options) => {

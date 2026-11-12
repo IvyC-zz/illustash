@@ -1,9 +1,7 @@
-// What the settings pages read and change (#199): startup switches, folding look-alike pictures, backups and the
-// thumbnail cache, the interface language, the names' network consent and model API, libraries and their sources,
-// linked accounts and update checks. No DOM. The data is still in core/state.js (settings, fold, about, names,
-// libraries, accounts, pixivWaiting, updates) until the page state is split; outside core/ nothing writes those
-// fields. onSettings(what, detail) tells after each read or change; what is data, libraries, accounts, pixiv or
-// updates.
+// 设置页读取和更改的内容（#199）：启动开关、相似图片的折叠、备份和缩略图缓存、界面语言、名称的联网授权和模型
+// API、图库及其来源、关联账号和更新检查。不碰 DOM。数据仍在 core/state.js（settings、fold、about、names、libraries、
+// accounts、pixivWaiting、updates），直到拆分页面状态；core/ 之外没有地方写这些字段。onSettings(what, detail) 在每次
+// 读取或更改后通知；what 为 data、libraries、accounts、pixiv 或 updates。
 import {t, said} from './i18n.js';
 import {session, api, post, shared, leaveSession} from './session.js';
 import {state} from './state.js';
@@ -11,11 +9,10 @@ import {listeners} from './events.js';
 const changed = listeners();
 export const onSettings = changed.on;
 
-// ---------- the settings page's data ----------
+// ---------- 设置页的数据 ----------
 let loading = null;
-// Reads what the page has not got yet (everything with refresh), all at once. Each part is announced as it arrives
-// (onSettings('data', {key, error})), so the useful ones show before the slow ones; a read for a library the page
-// has since left is dropped.
+// 一次读齐页面还没有的部分（refresh 时读全部）。每部分到达时就通知（onSettings('data', {key, error})），有用的先显示，
+// 不用等慢的；为页面已经离开的图库发出的读取丢掉。
 export function loadSettingsData(refresh = false) {
   if (loading) return loading;
   const token = session.token;
@@ -30,74 +27,72 @@ export function loadSettingsData(refresh = false) {
   })).finally(() => { loading = null; });
   return loading;
 }
-// Launch-time switches; --no-* flags still win for the current launch.
+// 启动时的开关；本次启动仍以 --no-* 参数为准。
 export async function saveStartup(body) { state.settings = await post('/api/startup', body); }
 export async function saveFold(kinds) { state.fold = (await post('/api/fold', {kinds})).kinds; }
 export async function backupNow() { const r = await post('/api/backup', {}); state.settings = null; return r; }
 export async function clearCache() { const r = await post('/api/cache', {action: 'clear'}); state.settings = r; return r; }
-// App-wide (preferences.json, #173): every window and library follows it; the page then reloads in the new language.
+// 全应用共用（preferences.json，#173）：每个窗口和图库都跟着它；之后页面用新语言重新载入。
 export const saveLanguage = language => api('/api/preferences', {method: 'POST', body: JSON.stringify({language})});
 export async function loadAbout() {
   const token = session.token, value = await shared('/api/about');
   if (token === session.token) state.about = value;
 }
 
-// ---------- names: network consent (shared with Danbooru search) and the optional model API ----------
+// ---------- 名称：联网授权（和 Danbooru 搜索共用）以及可选的模型 API ----------
 export async function allowNames(allow) {
   state.names = {...state.names, ...await api('/api/names', {method: 'POST', body: JSON.stringify({action: 'network', allow})})};
 }
-// A Danbooru name lookup (tag and work names only): its results, or why it failed. Without this library's consent
-// the backend refuses with 显示名联网尚未授权; any other failure is a real network or service error.
+// 一次 Danbooru 名称查询（只有 tag 和作品名）：它的结果，或失败的原因。这个图库没有授权时，后端以「显示名联网尚未授权」
+// 拒绝；其他失败都是真正的网络或服务错误。
 export const remoteNames = path => api(path).then(found => ({found}), e => ({found: null, unauthorized: said(e.said, '显示名联网尚未授权'), reason: e.message}));
 export const remoteNote = r => r.unauthorized ? t('查 Danbooru 需要先允许这个图库联网查询名称（只发送文字）') : t('Danbooru 暂时连不上：{reason}', {reason: r.reason});
 export async function saveModelApi(body) { state.names = {...state.names, ...await post('/api/names', {action: 'model_api', ...body})}; }
 export const testModelApi = () => post('/api/names', {action: 'model_api_test'});
 
-// ---------- libraries (docs/LIBRARIES.md) ----------
+// ---------- 图库（docs/LIBRARIES.md） ----------
 export async function loadLibraries() {
   try { state.libraries = await api('/api/libraries'); } catch { state.libraries = null; }
   await changed.emit('libraries');
 }
-// POST /api/libraries/<action>, with the token of the page that asked: a confirmation may outlast its session.
+// POST /api/libraries/<action>，带着发起请求的那个页面的 token：确认框可能比它的会话活得久。
 export const libraryRequest = (action, body = {}, token = session.token) =>
   api('/api/libraries/' + action, {method: 'POST', body: JSON.stringify(body), headers: {'X-CSRF-Token': token}});
-// Follows a running export, for up to an hour.
+// 跟踪进行中的导出，最多一小时。
 export async function pollExport() {
   for (let i = 0; i < 2400 && state.libraries?.export?.status === 'running'; i++) { await new Promise(r => setTimeout(r, 1500)); await loadLibraries(); }
 }
-// The native folder chooser, several at once; throws "Unsupported…" where there is none.
+// 系统的文件夹选择框，可一次选多个；没有选择框的地方抛出「Unsupported…」。
 export async function chooseFolders() {
   const r = await api('/api/libraries/choose', {method: 'POST', body: JSON.stringify({kind: 'folder', multiple: true})});
   return r?.paths || [];
 }
-// Opening another library restarts the server on it. `agreed` is what the person agreed to first: 'upgrade' an older
-// one (#193) or 'rescue' its damaged source.sqlite (#228). This page then belongs to the library it leaves: it stops
-// reading and writing at once. Throws what the backend refused.
+// 打开另一个图库会让服务在它上面重启。`agreed` 是用户事先同意的事：'upgrade' 升级旧图库（#193），或 'rescue' 抢救它
+// 损坏的 source.sqlite（#228）。之后这个页面属于它离开的那个图库：立即停止读写。后端拒绝时抛出拒绝的内容。
 export async function openLibraryRequest(path, agreed = null) {
   await api('/api/libraries/open', {method: 'POST', body: JSON.stringify(agreed ? {path, [agreed]: true} : {path})});
   leaveSession();
 }
-// Whether the server came back on that library, within about 80 s.
+// 服务是否在约 80 s 内回到了那个图库上。
 export async function libraryOpened(path) {
   for (let i = 0; i < 120; i++) {
     await new Promise(r => setTimeout(r, 700));
     try {
       const s = await fetch('/api/settings').then(r => r.json());
       if (s.package?.path === path) return true;
-    } catch { /* the server is restarting */ }
+    } catch { /* 服务正在重启 */ }
   }
   return false;
 }
 
-// ---------- linked accounts (docs/PROVENANCE.md section 8): shared by every library; secrets live in the Keychain ----------
+// ---------- 关联账号（docs/PROVENANCE.md 第 8 节）：所有图库共用；密钥存在钥匙串里 ----------
 export async function loadAccounts() {
   try { state.accounts = await api('/api/accounts'); } catch { state.accounts = null; }
   await changed.emit('accounts');
 }
 export const accountRequest = (action, body = {}) => api('/api/accounts/' + action, {method: 'POST', body: JSON.stringify(body)});
-// Logging in to Pixiv in the desktop app's window: polled every 2 s for up to 10 minutes, one request at a time; an
-// answer for a wait that was stopped or replaced changes nothing. The end is told as onSettings('pixiv', {bound}) with
-// the account, or {error}.
+// 在桌面 App 的窗口里登录 Pixiv：每 2 s 轮询一次，最多 10 分钟，同一时间只发一个请求；对已停止或被替换的等待的回应
+// 不改变任何东西。结束时以 onSettings('pixiv', {bound}) 带上账号通知，或通知 {error}。
 let pixivPoll = null;
 export function stopPixivLogin() {
   if (pixivPoll) {
@@ -130,18 +125,17 @@ export function waitPixivLogin() {
   poll.timer = setTimeout(tick, 2000);
 }
 
-// ---------- update checks (#191, native/terms/src/app_updates.rs) ----------
-// Off until the person allows it. Once allowed the backend checks at each launch and once a day while the app stays
-// open; the page only asks whether a check is due. Nothing is downloaded or installed here.
+// ---------- 更新检查（#191，native/terms/src/app_updates.rs） ----------
+// 用户允许之前关闭。允许之后，后端在每次启动时检查，App 一直开着时每天检查一次；页面只询问是否该检查了。这里不下载也不
+// 安装任何东西。
 let updatesAt = 0, updatesPending = null;
 export async function updatesPost(body) {
   state.updates = await api('/api/updates', {method: 'POST', body: JSON.stringify(body)});
   return state.updates;
 }
-// A manual check: always goes out.
+// 手动检查：总会发出。
 export async function checkUpdates() { const u = await updatesPost({action: 'check'}); updatesAt = Date.now(); return u; }
-// From the task panel's tick: refresh the cached state now and then and run a due automatic check; onSettings('updates')
-// tells when it is through, whatever came of it.
+// 由任务面板的定时调用：不时刷新缓存的状态，并运行到期的自动检查；完成时以 onSettings('updates') 通知，不管结果如何。
 export function updatesTick() {
   if (updatesPending) return updatesPending;
   updatesPending = (async () => {

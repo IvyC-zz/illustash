@@ -1,19 +1,18 @@
 'use strict';
-// Launch screen. A folded strip of paper opens round the base into the Illustash box, a card drops in,
-// the strip's end tucks over its start and the box eases into the icon; then the name comes up. While the
-// app is still loading, the cards in the box are flipped forward one by one; once it is ready the last flip
-// brings the cover card back and the icon and name fly to the sidebar's brand mark.
-// app.js reports progress through window.splash.status(text) and window.splash.ready().
-// The desktop shell's start page plays the same animation while the local service starts (progress, settled, halt),
-// then opens the library with ?launched: that load starts from the finished icon instead of folding again.
-// Both pages load i18n.js first (#173); the shell's start page gets its language from the shell (desktop/src/i18n.rs).
-// Taken here, outside the animation, whose own t is the time.
+// 启动画面。一条折好的纸带绕着底座展开，围成 Illustash 的盒子，一张卡片落进去，纸带的末端搭到起点上，盒子渐渐变成
+// 图标；然后名字浮现。App 还在加载时，盒子里的卡片一张接一张向前翻；准备好后，最后一次翻动把封面卡片翻回来，图标和
+// 名字飞到侧栏的品牌标志处。
+// app.js 通过 window.splash.status(text) 和 window.splash.ready() 报告进度。
+// 本地服务启动期间，桌面外壳的启动页播放同样的动画（progress、settled、halt），然后带着 ?launched 打开图库：这次加载
+// 从已经完成的图标开始，不再重新折一遍。
+// 两个页面都先加载 i18n.js（#173）；外壳启动页的语言由外壳提供（desktop/src/i18n.rs）。
+// 在这里、动画之外取，因为动画自己的 t 是时间。
 const SPLASH_READY = t('准备好了');
 (() => {
   const root = document.getElementById('splash');
   if (!root) return;
   const launched = new URLSearchParams(location.search).has('launched');
-  const MADE = 3.2;                                         // the icon and name are up and the status shows
+  const MADE = 3.2;                                         // 图标和名字已经出现，状态文字显示出来
   const NS = 'http://www.w3.org/2000/svg';
   const mk = (tag, attrs = {}, parent) => { const e = document.createElementNS(NS, tag); for (const k in attrs) e.setAttribute(k, attrs[k]); if (parent) parent.appendChild(e); return e; };
   const f = (n) => +n.toFixed(3);
@@ -23,7 +22,7 @@ const SPLASH_READY = t('准备好了');
   const outCubic = (x) => 1 - Math.pow(1 - x, 3);
   const bump = (t, a, b) => (t > a && t < b) ? Math.sin(seg(t, a, b) * Math.PI) : 0;
 
-  // ---------- the icon's artwork (docs/assets/icon-transparent.svg) ----------
+  // ---------- 图标的图稿（docs/assets/icon-transparent.svg） ----------
   const BOX = {
     back: 'M416 418L560 330C603 303 644 302 689 327L828 412C872 438 898 466 899 509C900 540 900 567 900 595V705C901 756 882 792 844 817L687 908C642 931 603 931 561 906L416 822C374 794 355 760 355 707V583C355 538 355 497 371 463C379 445 395 431 416 418Z',
     right: 'M899 509C900 540 900 567 900 595V705C901 756 882 792 844 817L782 855C801 802 784 759 760 731C738 704 710 677 672 656L694 666C739 687 774 677 806 649L849 603C880 570 900 542 899 509Z',
@@ -42,7 +41,7 @@ const SPLASH_READY = t('准备好了');
     <clipPath id="sp-hex"><path d="${BOX.back}"/><rect x="-2000" y="-3000" width="5000" height="3470"/></clipPath>
     <clipPath id="sp-bands"><path d="${BOX.front}"/><path d="${BOX.right}"/></clipPath>`;
 
-  // ---------- isometric world: the icon's hexagon is a box seen from above ----------
+  // ---------- 等轴测世界：图标的六边形是从上方看的一个盒子 ----------
   const O = [354, 465], C30 = .8660254, deg = Math.PI / 180;
   const proj = (p) => [O[0] + C30 * (p[0] + p[2]), O[1] + .5 * (p[2] - p[0]) - p[1]];
   const projV = (v) => [C30 * (v[0] + v[2]), .5 * (v[2] - v[0]) - v[1]];
@@ -51,7 +50,7 @@ const SPLASH_READY = t('准备好了');
   const cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
   const norm = (a) => mul(a, 1 / Math.hypot(...a));
 
-  // the card standing in the box, solved so it lands exactly on the icon's triangle; theta tips it forward
+  // 立在盒子里的卡片，解出来让它正好落在图标的三角形上；theta 让它向前倾
   const P0 = [-19.5, 0, 64.5], U0 = [310.6, 0, 108.6], V0 = [-44.3, -251.9, 126.8], KxV = cross(norm(U0), V0);
   const pose = (theta = 0, h = 0) => {
     const V = add(mul(V0, Math.cos(theta)), mul(KxV, Math.sin(theta)));
@@ -99,14 +98,14 @@ const SPLASH_READY = t('准备好了');
   nameEl.innerHTML = [...nameEl.textContent.trim()].map(ch => `<span>${ch}</span>`).join('');
   const letters = [...nameEl.children];
 
-  // ---------- the strip: soft paper that wraps a rounded box ----------
-  // Bends have the icon's corner radius (RAD) once the box is closed; they start as crisp creases (radius 0).
+  // ---------- 纸带：包着圆角盒子的软纸 ----------
+  // 盒子合上后，折弯的半径就是图标的圆角半径（RAD）；开始时是利落的折痕（半径 0）。
   const H = 315, RAD = 73, HALF = 178.75, CX = 157.5, CZ = 157.5;
   const XMIN = CX - HALF, XMAX = CX + HALF, ZMIN = CZ - HALF, ZMAX = CZ + HALF;
   const CORN = [[XMAX - RAD, ZMAX - RAD], [XMAX - RAD, ZMIN + RAD], [XMIN + RAD, ZMIN + RAD], [XMIN + RAD, ZMAX - RAD]];
   const nrm = (al) => [Math.sin(al), 0, Math.cos(al)];
   const rotY0 = (a) => [Math.cos(a), 0, -Math.sin(a)];
-  const FOLD = {top: 60, bottom: 180};                 // the strip's end is cut on a slant: the icon's fold
+  const FOLD = {top: 60, bottom: 180};                 // 纸带末端斜着裁：图标上的那道折
   const VIEW = [-1, 1, 1], LIGHT = norm([-.6, 1, .9]);
   const arcPts = (k, a0, a1, y, steps = 10) => Array.from({length: steps + 1}, (_, j) => {
     const n = nrm((a0 + (a1 - a0) * j / steps) * deg); return [CORN[k][0] + RAD * n[0], y, CORN[k][1] + RAD * n[2]];
@@ -127,7 +126,7 @@ const SPLASH_READY = t('准备好了');
       if ((ga >= 0) !== (gb >= 0)) { const u = ga / (ga - gb); out.push([A[0] + (B[0] - A[0]) * u, A[1] + (B[1] - A[1]) * u]); } });
     return out;
   };
-  // th[i]: the i-th crease, 180 = folded flat back on the previous side, 90 = round a corner of the box
+  // th[i]：第 i 道折痕，180 = 平平地折回到前一面上，90 = 绕过盒子的一个角
   const stripFacets = (th, rr) => {
     const x0 = XMIN + rr, SIDE = 2 * HALF - 2 * rr;
     const segs = []; let p = [x0, 0, ZMAX], hd = 0, s = 0;
@@ -154,7 +153,7 @@ const SPLASH_READY = t('准备好了');
     return out;
   };
 
-  // facets are flat-shaded with the icon's gradient colour at their centre, darkened as they turn from the light
+  // 每个面按平面着色，取图标渐变在它中心的颜色，背离光线时调暗
   const GR = {
     front: {a: [367, 502], b: [767, 920], st: [[0, '#e2e1fb'], [.32, '#c0bff5'], [.66, '#9597e9'], [1, '#5b68d2']]},
     right: {a: [702, 583], b: [907, 730], st: [[0, '#e5e3fb'], [.43, '#bbbbf1'], [1, '#858ae1']]},
@@ -184,7 +183,7 @@ const SPLASH_READY = t('准备好了');
       const outer = dot3(F.n, VIEW) > 0, lit = dot3(outer ? F.n : mul(F.n, -1), LIGHT);
       if (!pool.has(F.key)) pool.set(F.key, mk('path', {}));
       const el = pool.get(F.key); used.add(F.key);
-      // each facet reaches a few units past its neighbours (about a pixel at icon size), so seams never open
+      // 每个面都比相邻的面多伸出几个单位（图标尺寸下约一个像素），这样接缝永远不会裂开
       const c0 = mul(sc.reduce((a, b) => [a[0] + b[0], a[1] + b[1]]), 1 / sc.length);
       const ext = (p, q) => { const v = [p[0] - q[0], p[1] - q[1]], l = Math.hypot(...v) || 1; return [p[0] + v[0] / l * 4, p[1] + v[1] / l * 4]; };
       const grown = sc.length === 4 ? [ext(sc[0], sc[1]), ext(sc[1], sc[0]), ext(sc[2], sc[3]), ext(sc[3], sc[2])] : sc.map(p => ext(p, c0));
@@ -197,7 +196,7 @@ const SPLASH_READY = t('准备好了');
     pool.forEach((el, k) => { if (!used.has(k)) el.remove(); });
   };
 
-  // ---------- hand-over: the rounded box's outline eases into the icon's hand-drawn one ----------
+  // ---------- 交接：圆角盒子的轮廓渐渐变成图标手绘的轮廓 ----------
   const NP = 160;
   const samplePoly = (pts) => {
     const segs = pts.map((p, i) => [p, pts[(i + 1) % pts.length]]), lens = segs.map(([a, b]) => Math.hypot(b[0] - a[0], b[1] - a[1]));
@@ -252,8 +251,8 @@ const SPLASH_READY = t('准备好了');
     };
   })();
 
-  // ---------- timeline ----------
-  const P = .6, LS = 3.0;                                   // one card flip while loading; loading starts once the name is up
+  // ---------- 时间轴 ----------
+  const P = .6, LS = 3.0;                                   // 加载期间一次翻卡的时长；名字出现后加载才开始
   const CYCLE = ['rose', 'mint', 'sky', 'peach'];
   const cardAt = (k) => k === 0 ? 'lav' : CYCLE[(k - 1) % CYCLE.length];
   const flipAngle = (x) => {
@@ -261,11 +260,11 @@ const SPLASH_READY = t('准备好了');
     if (x < .2) return -4 * deg * Math.sin(x / .2 * Math.PI / 2);
     const y = (x - .2) / .8; return (-4 + 110 * y * y) * deg;
   };
-  let readyAt = null, plan = null;                          // plan: {kEnd, E, X} once the app is ready
-  let real = null, haltAt = null;                           // real progress (0–1) and the freeze time, from the shell
+  let readyAt = null, plan = null;                          // plan：App 准备好后为 {kEnd, E, X}
+  let real = null, haltAt = null;                           // 外壳给的真实进度（0–1）和定格时间
   const makePlan = (tr) => {
     if (tr < LS - .1) { const E = Math.max(tr, 2.9); return {kEnd: -1, E, X: E + .35}; }
-    const kEnd = Math.floor((tr - LS) / P) + 1, E = LS + (kEnd + 1) * P;   // finish this flip, then one more that brings the cover back
+    const kEnd = Math.floor((tr - LS) / P) + 1, E = LS + (kEnd + 1) * P;   // 做完这次翻动，再翻一次把封面翻回来
     return {kEnd, E, X: E + .5};
   };
   const brand = document.querySelector('.brand'), brandIcon = brand?.querySelector('.logo-mark'), brandName = brand?.querySelector('span');
@@ -275,7 +274,7 @@ const SPLASH_READY = t('准备好了');
 
   const render = (t) => {
     const K = (a, b) => inOut(seg(t, a, b));
-    // 出现: the base, then the folded strip fades in; it opens round the corners while its creases soften
+    // 出现：先是底座，然后折好的纸带淡入；它绕着各个角展开，折痕同时变软
     const fadeIn = K(.25, .7), rr = RAD * K(.85, 1.9);
     const th = [0, 178 - 88 * K(.4, .9), 182 - 92 * K(.68, 1.18), 178 - 88 * K(.96, 1.46), t < 1.5 ? 182 - 182 * K(1.0, 1.5) : 90 * outCubic(seg(t, 1.5, 1.96))];
     const M0 = 2.08, M1 = 2.32, folding = t < M0;
@@ -288,12 +287,12 @@ const SPLASH_READY = t('准备好了');
     floorG.setAttribute('opacity', f(K(0, .35) * leave));
     paperBehind.setAttribute('opacity', f(fadeIn * leave)); paperFront.setAttribute('opacity', f(fadeIn * leave));
     floorG.style.display = paperBehind.style.display = paperFront.style.display = folding ? '' : 'none';
-    // the smooth version fades in over the paper while the fold curls into the icon's curve
+    // 光滑的版本在纸面上淡入，同时那道折卷成图标的曲线
     morph(K(1.64, M1), t >= 1.64 && t < M1, K(1.64, 1.9));
     const art = t >= M1 ? 1 : 0;
     back.setAttribute('opacity', art); bands.setAttribute('opacity', art);
 
-    // the card drops in once three sides stand; while loading it is flipped forward, one card per cycle
+    // 三面立起后卡片落进去；加载期间它向前翻，每个周期一张
     let h = 0, op = 1, rock = 0;
     const cardFrom = 1.36;
     if (t < cardFrom + .28) { const x = seg(t, cardFrom, cardFrom + .28); h = 420 * (1 - x * x); op = seg(t, cardFrom, cardFrom + .07); rock = 6 * deg * Math.sin(x * Math.PI * 2) * (1 - x); }
@@ -313,7 +312,7 @@ const SPLASH_READY = t('准备好了');
     if (plan && t >= plan.E && plan.kEnd >= 0) { squash += .35 * bump(t, plan.E, plan.E + .2); if (t < plan.E + .5) rimP = seg(t, plan.E, plan.E + .5); }
     squashBands(squash); rim(rimP);
 
-    // the icon starts centred, then glides up to make room for the name
+    // 图标开始时居中，然后向上滑开，给名字让出位置
     const press = .75 * bump(t, 1.86, 2.34);
     const drop = (iconBox.parentElement.offsetHeight - iconBox.offsetHeight) / 2, glide = K(2.2, 2.8);
     svg.style.transform = `translateY(${f(drop * (1 - glide))}px) scale(${f(1 + .02 * press)}, ${f(1 - .035 * press)})`;
@@ -323,16 +322,16 @@ const SPLASH_READY = t('准备好了');
     });
     nameEl.style.letterSpacing = `${f(.12 - .14 * outCubic(seg(t, 2.3, 3.0)))}em`;
 
-    // status: real text from the app; the bar creeps while loading and fills when ready
+    // 状态：来自 App 的真实文字；加载时进度条缓缓前进，准备好后填满
     statusEl.style.opacity = f(seg(t, 2.8, 3.1) * (plan ? 1 - seg(t, plan.X - .05, plan.X + .2) : 1));
-    // a launched load carries on from where the shell's bar stopped (.9) instead of starting over
+    // 带 ?launched 的加载从外壳进度条停下的地方（.9）接着走，不从头开始
     const since = Math.max(0, t - (launched ? MADE : 2.8));
     const creep = real ?? (launched ? .9 + .07 * (1 - Math.exp(-since / 2.2)) : .9 * (1 - Math.exp(-since / 2.2)));
     const fillTo = plan ? creep + (1 - creep) * outCubic(seg(t, readyAt, Math.max(readyAt + .3, plan.E))) : creep;
     fillEl.style.width = `${f(100 * fillTo)}%`;
     if (plan && t >= plan.E - .2) textEl.textContent = SPLASH_READY;
 
-    // 进入: icon and name fly to the sidebar brand while the splash's backdrop fades away
+    // 进入：图标和名字飞向侧栏的品牌标志，启动画面的背景同时淡出
     const fx = plan ? inOut(seg(t, plan.X, plan.X + .8)) : 0;
     if (plan && t >= plan.X && !fly) {
       iconBox.style.transform = nameEl.style.transform = '';
@@ -355,9 +354,9 @@ const SPLASH_READY = t('准备好了');
     hideBrand(false); root.remove();
   };
 
-  // ---------- clock ----------
+  // ---------- 时钟 ----------
   const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
-  // the full folding plays on every load, except the library page the shell opens after playing it
+  // 每次加载都播放完整的折叠，外壳播放完之后打开的图库页面除外
   let t = reduce ? 2.99 : launched ? MADE : 0, last = 0;
   let waiting = [];
   const settle = () => { if (reduce || t >= MADE) { waiting.forEach(done => done()); waiting = []; } };
@@ -370,15 +369,15 @@ const SPLASH_READY = t('准备好了');
     settle();
     requestAnimationFrame(tick);
   };
-  // click to skip; not on the shell's start page, which has nothing behind it
+  // 点击跳过；外壳的启动页上不行，它后面什么都没有
   if (!root.hasAttribute('data-shell')) root.addEventListener('click', () => { root.style.transition = 'opacity .25s'; root.style.opacity = 0; setTimeout(finish, 260); });
   window.splash = {
     status(text) { textEl.textContent = text; },
     ready() { if (readyAt === null) { readyAt = t; plan = makePlan(t); } },
     progress(done) { real = clamp(done); },
-    // resolves once the icon is made, so the shell never cuts the fold short
+    // 图标做好后才解析，这样外壳绝不会把折叠截断
     settled() { return new Promise(done => { waiting.push(done); settle(); }); },
-    // stop flipping cards (the shell shows an error instead)
+    // 不再翻卡（外壳改为显示错误）
     halt() { if (haltAt === null) haltAt = t; }
   };
   render(t);

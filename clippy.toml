@@ -1,0 +1,4 @@
+# 各 Cargo 项目的 clippy 共用这份配置（clippy 从项目目录向上查找）。
+# `unwrap_used` 在各 Cargo.toml 的 [lints] 里打开；`#[test]` 函数和 `#[cfg(test)]` 模块里的 unwrap 就是断言，放行。
+# tests/ 目录下的集成测试 crate 另在各自开头写 allow。
+allow-unwrap-in-tests = true

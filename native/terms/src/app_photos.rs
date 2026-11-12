@@ -68,7 +68,7 @@ pub(crate) fn scan_ordered(
         entry["collected"] = json!(entry["collected"].as_u64().expect("validated internal numeric field") + 1);
         let (kind, p) =
             crate::platform_photos::path(&root, &uuid, r[6].as_str().unwrap_or(""), r[7].as_str().unwrap_or(""))?;
-        // Never replace another source's asset with a colliding external identifier.
+        // 外部标识符撞上时，绝不替换属于其他来源的图片。
         let owner: Option<String> =
             tx.query_row("SELECT coalesce(source_id,'') FROM assets WHERE uuid=?", [&uuid], |r| r.get(0)).optional()?;
         if owner.as_deref().is_some_and(|v| !v.is_empty() && v != sid) {

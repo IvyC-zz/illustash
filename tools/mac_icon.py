@@ -1,12 +1,12 @@
-"""The macOS app icon (#293): the glyph of docs/assets/icon-transparent.svg on a white tile.
+"""macOS App 图标（#293）：docs/assets/icon-transparent.svg 的图形放在白色底板上。
 
-macOS 26 puts an icon that is not a full tile on a grey plate, so the bundle gets its own icon: Apple's 1024 grid (an
-824 px continuous-corner tile at 100 px) in white, a soft shadow below it, the glyph centred on it. Windows keeps
-icon.ico and the welcome page keeps the transparent icon.png.
+macOS 26 会把不是满幅底板的图标放到灰色底板上，所以 App 包用自己的图标：Apple 的 1024 网格（位于 100 px 处、
+824 px 的连续圆角底板），白色，下面一层柔和的阴影，图形居中放在上面。Windows 继续用 icon.ico，欢迎页继续用透明的
+icon.png。
 
-    python3 tools/mac_icon.py    # macOS only: writes docs/assets/icon-macos.svg and desktop/icons/icon.icns
+    python3 tools/mac_icon.py    # 只能在 macOS 上运行：写出 docs/assets/icon-macos.svg 和 desktop/icons/icon.icns
 
-The SVG is rendered by macOS (sips); CoreSVG ignores SVG filters, so the shadow is added to the bitmap here.
+SVG 由 macOS（sips）渲染；CoreSVG 忽略 SVG 滤镜，所以阴影在这里加到位图上。
 """
 import math
 import subprocess
@@ -19,13 +19,13 @@ ROOT = Path(__file__).resolve().parent.parent
 GLYPH = ROOT / 'docs/assets/icon-transparent.svg'
 SVG = ROOT / 'docs/assets/icon-macos.svg'
 ICNS = ROOT / 'desktop/icons/icon.icns'
-# The glyph's drawn bounds in its 1254 viewBox, and its height on the 824 px tile (about 70 %).
+# 图形在它 1254 的 viewBox 里实际绘制的边界，以及它在 824 px 底板上的高度（约 70 %）。
 BOUNDS, SCALE = (355, 302, 901, 931), .92
 SHADOW = {'dy': 12, 'blur': 14, 'opacity': .22}
 
 
 def tile_path(n=5, a=412, c=512, steps=360):
-    """A superellipse |x|^n + |y|^n = 1, close to Apple's continuous corners."""
+    """超椭圆 |x|^n + |y|^n = 1，接近 Apple 的连续圆角。"""
     pts = []
     for i in range(steps):
         t = 2 * math.pi * i / steps

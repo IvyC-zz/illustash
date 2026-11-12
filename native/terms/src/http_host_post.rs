@@ -3,7 +3,7 @@ use super::http_host_get::{expired, reply, reply_if_current, waited};
 use super::*;
 use std::sync::RwLockWriteGuard;
 
-/// Requests a session answers while its package is damaged: none of them writes to the package's databases.
+/// 图库包损坏时会话仍会应答的请求：它们都不写包里的数据库。
 const DAMAGED_ALLOWS: [&str; 7] = [
     "/api/integrity/rescue",
     "/api/libraries/open",
@@ -16,12 +16,12 @@ const DAMAGED_ALLOWS: [&str; 7] = [
 type Translate<'a> = &'a dyn Fn(&str) -> String;
 
 pub(super) fn handle(request: Request, host: &Host, received: u64, text: &str, body: Json) {
-    // A native chooser's prompt in the page's language (#173).
+    // 原生选择窗口的提示文字用页面的语言（#173）。
     let language = header(&request, "X-Illustash-Language").map(str::to_owned);
     let translate = |text: &str| crate::app_preferences::tr(&host.root, language.as_deref(), text);
     match request.url() {
         "/api/libraries/choose" => return choose(request, host, received, &body, &translate),
-        // App-wide and possibly a network round trip (#191): never holds the session, so switching is not delayed.
+        // 全应用范围，且可能要联网往返一次（#191）：从不持有会话，所以不会拖慢切换。
         "/api/updates" => return reply(request, crate::app_updates::post(&body), true),
         "/api/models" => return models(request, host, body, &translate),
         _ => {}
@@ -39,7 +39,7 @@ pub(super) fn handle(request: Request, host: &Host, received: u64, text: &str, b
     if !host.accepts(&session, received) || header(&request, "X-CSRF-Token") != Some(session.token.as_str()) {
         return expired(request);
     }
-    // A damaged package takes no more writes (#212): only leaving it, backing up library.sqlite and app-wide choices.
+    // 损坏的图库包不再接受写入（#212）：只允许离开它、备份 library.sqlite 和全应用范围的选项。
     if let Some(damage) = session.damage() {
         if !DAMAGED_ALLOWS.contains(&request.url()) {
             drop(session);
@@ -57,9 +57,8 @@ pub(super) fn handle(request: Request, host: &Host, received: u64, text: &str, b
             return reply_if_current(request, host, received, result.and_then(|s| crate::app_names::test(&s)), true);
         }
         "/api/relate" => return relate(request, host, received, session, &body),
-        // Imports are background tasks (#26, #88): the request validates, starts the task and answers at once; the
-        // page polls GET /api/imports and may cancel. A recognition import stays bound to the library it started
-        // on. Cancelling, switching libraries or quitting stops either import before its publication point.
+        // 导入是后台任务（#26、#88）：请求做完校验、启动任务后立即应答；页面轮询 GET /api/imports，可以取消。
+        // 识别结果导入始终绑定在开始时的图库上。取消、切换图库或退出，都会让两种导入在发布点之前停下。
         "/api/recognition/import" => {
             let started = recognition_import(host, &session, &body);
             drop(session);
@@ -100,8 +99,8 @@ fn choose(request: Request, host: &Host, received: u64, body: &Json, translate: 
     .map_err(management_error);
     reply_if_current(request, host, received, result, true);
 }
-/// App-wide (#168): the model download runs on its own thread and outlives a library switch. Importing without
-/// paths asks the native chooser first, without holding the session.
+/// 全应用范围（#168）：模型下载在自己的线程上运行，切换图库后仍继续。不带路径的导入先打开原生选择窗口，
+/// 期间不持有会话。
 fn models(request: Request, host: &Host, mut body: Json, translate: Translate) {
     if body.get("action").map(Json::text) == Some("import") && body.get("paths").is_none() {
         match crate::app_platform::choose("models", true, &crate::platform_process::stopping, translate) {
@@ -112,7 +111,7 @@ fn models(request: Request, host: &Host, mut body: Json, translate: Translate) {
             Err(e) => return failure(request, management_error(e), true),
         }
     }
-    // Deleting the models waits while this session's recognition or character index uses them.
+    // 本会话的识别或角色索引正在使用模型时，删除模型会被拒绝（`app_models::post` 提示等识别结束再删）。
     let in_use = body.get("action").map(Json::text) == Some("delete") && {
         let session = host.session.read().expect("http_host_post session lock poisoned");
         session.syncer.running() || session.index.writing()
@@ -122,12 +121,11 @@ fn models(request: Request, host: &Host, mut body: Json, translate: Translate) {
 enum Picked {
     Path(Json),
     Cancelled,
-    /// The session switched while the chooser was open.
+    /// 选择窗口打开期间会话已切换。
     Switched,
     Failed(Error),
 }
-/// The archive the person picks for an X import. The native picker runs without holding the session;
-/// cancellation or a switch must never deliver the chosen file into a replacement package.
+/// 用户为 X 导入选的归档文件。原生选择窗口运行时不持有会话；取消或切换之后，选中的文件绝不能交给替换后的图库包。
 fn archive(host: &Host, received: u64, translate: Translate) -> Picked {
     let picked = match crate::app_platform::choose("archive", false, &crate::platform_process::stopping, translate) {
         Ok(picked) => picked,
@@ -146,13 +144,12 @@ fn cache(request: Request, host: &Host, session: RwLockWriteGuard<Session>, body
         drop(session);
         return failure(request, Error::Invalid("未知操作".into()), true);
     }
-    // Bind after framing and session validation; waiting for image work must
-    // not hold the session lock or retarget this operation after a switch.
+    // 在请求解析和会话校验之后才绑定图库；等待图片处理时不能持有会话锁，切换之后也不能让这个操作改指别的图库。
     let library = session.library.clone();
     drop(session);
     reply(request, host.images.clear(&library, &host.library_forced_off(&library)), true);
 }
-/// Character profile writes: their copyrights are looked up without the session lock, then written under it.
+/// 角色资料的写入：先在不持会话锁时查询它们的作品，再在锁内写入。
 fn profiles(request: Request, host: &Host, received: u64, session: RwLockWriteGuard<Session>, body: &Json) {
     let library = session.library.clone();
     let mut context = session.context(&host.tags);
@@ -229,7 +226,7 @@ fn recognition_import(host: &Host, session: &Session, body: &Json) -> Result<Jso
                 crate::app_recognition::resume(&library, cancel, &crate::app_research::dispatch)?
             }
         };
-        // Keep legacy response insertion order (digest, duplicate, status, error).
+        // 保持旧版响应的插入顺序（digest、duplicate、status、error）。
         Ok(Json::Object(
             ["digest", "duplicate", "status", "error"]
                 .iter()
@@ -244,8 +241,8 @@ fn library_import(host: &Host, session: &Session, body: &Json) -> Result<Json> {
     let file = archive.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default();
     host.imports.start(identity, crate::app_imports::Kind::Archive, &file, move |progress| {
         let (path, name) = crate::app_archives::import(&archive, &progress.cancellation_arc(), progress)?;
-        // Published: a registration failure keeps the complete package and is reported with it, like
-        // creation (#97, #111); importing again would only make a second, numbered package.
+        // 已发布：登记失败时保留完整的图库包，并随结果一起报告，与新建相同（#97、#111）；
+        // 再导入一次只会多出第二个带编号的包。
         let listed = crate::app_libraries::remember_created(&path, &name);
         let mut out = Json::object([("path", path.to_string_lossy().as_ref().into()), ("name", name.into())]);
         if let Err(error) = listed {
@@ -255,7 +252,7 @@ fn library_import(host: &Host, session: &Session, body: &Json) -> Result<Json> {
         Ok(out)
     })
 }
-/// The routes answered once the session lock is released; none for an unknown route.
+/// 释放会话锁之后才应答的路由；未知路由返回 None。
 fn route(
     url: &str,
     host: &Host,
@@ -314,12 +311,12 @@ fn route(
         }
         "/api/sync" => sync(host, received, session),
         "/api/similar" | "/api/regroup" => research(url, session, body),
-        // Read-only, so its names follow the page's language like other reads (app_http.rs).
+        // 只读，所以其中的名字和其他读取一样跟随页面语言（app_http.rs）。
         "/api/suggest" => crate::http_read::PageLanguage::set(language)
             .with(|| crate::http_local::suggest(&session.context(&host.tags), body)),
         "/api/startup" => crate::app_settings::set_startup_json(&session.library, text)
             .and_then(|_| host.library_settings(&session.library)),
-        // App-wide, so not part of /api/settings, whose reply stays as recorded; pages read it from /i18n.js.
+        // 全应用范围，所以不属于 /api/settings（其应答保持录制时的样子）；页面从 /i18n.js 读取。
         "/api/preferences" => {
             let locales = crate::app_preferences::locales(&crate::app_preferences::locales_folder(&host.root));
             crate::app_preferences::set_json(text, &locales)
@@ -357,7 +354,7 @@ fn sync(host: &Host, received: u64, session: &mut Session) -> Result<Json> {
     let token = session.token.clone();
     session.syncer.start(&library, received, &token).map(|started| Json::object([("started", started.into())]))
 }
-/// The similar scan (/api/similar) or regrouping (/api/regroup): started, or cancelled.
+/// 相似扫描（/api/similar）或重新分组（/api/regroup）：启动或取消。
 fn research(url: &str, session: &mut Session, body: &Json) -> Result<Json> {
     if url == "/api/similar" && !session.research.similar_enabled {
         return Err(Error::Invalid("相似扫描已关闭".into()));
@@ -371,7 +368,7 @@ fn research(url: &str, session: &mut Session, body: &Json) -> Result<Json> {
     session.research.start(&lib, kind, serde_json::json!({}), None).map(|_| Json::object([("started", true.into())]))
 }
 fn sources(url: &str, received: u64, session: &mut Session, body: &Json) -> Result<Json> {
-    // A running sync holds a pinned copy of the sources; change them only between syncs.
+    // 进行中的同步持有一份固定的来源副本；只在两次同步之间修改来源。
     if session.syncer.running() || session.index.writing() {
         return Err(Error::Invalid("正在同步或更新角色索引，请稍后再修改来源".into()));
     }
@@ -389,12 +386,12 @@ fn sources(url: &str, received: u64, session: &mut Session, body: &Json) -> Resu
         }
         result
     };
-    // Scan a new source now; a removed source's pictures leave the browsing database with this sync.
+    // 新来源立即扫描；移除的来源的图片随这次同步离开浏览数据库。
     let (library, token) = (session.library.clone(), session.token.clone());
     result.set("sync", session.syncer.start(&library, received, &token).unwrap_or(false).into());
     Ok(result)
 }
-/// Several folders picked at once share one origin and one sync: `paths`, or a single `path`.
+/// 一次选中的多个文件夹共用一个出处和一次同步：用 `paths`，或单个 `path`。
 fn add_sources(received: u64, session: &mut Session, body: &Json) -> Result<Json> {
     let raw: Vec<&str> = match body.get("paths") {
         Some(Json::Array(items)) => items.iter().map(Json::text).collect(),
@@ -409,7 +406,7 @@ fn add_sources(received: u64, session: &mut Session, body: &Json) -> Result<Json
         match crate::app_sources::add(&mut session.library, kind, path, preset) {
             Ok(source) => added.push(source),
             Err(error) => {
-                // Folders added before the refused one stay added and are scanned now.
+                // 被拒绝的文件夹之前已加上的保持加上，并立即扫描。
                 if !added.is_empty() {
                     let (library, token) = (session.library.clone(), session.token.clone());
                     let _ = session.syncer.start(&library, received, &token);
@@ -449,12 +446,12 @@ fn open(host: &Host, received: u64, session: &mut Session, body: &Json) -> Resul
     if !path.join("library.json").is_file() {
         return Err(Error::Invalid("不是图库包".into()));
     }
-    // The session's own package with its rescued source.sqlite ready (#228): put in place as it opens again.
+    // 会话自己的图库包，抢救出的 source.sqlite 已就绪（#228）：在重新打开时换上。
     let own = crate::app_paths::canonical(&path).is_ok_and(|p| p == session.library.instance_path());
     if own && session.rescue.ready() {
         return host.reopen_rescued(session, received);
     }
-    // Another package whose source.sqlite a check found damaged: rescued first when the person agreed to.
+    // 另一个经检查发现 source.sqlite 损坏的图库包：用户同意后先抢救。
     if !own && body.get("rescue").is_some_and(truthy) {
         let reference = crate::app_create::optional_reference(&host.reference)?;
         let report = crate::app_service::rescue_package(&path, None, reference, &|_, _| {})?.json();
@@ -463,8 +460,7 @@ fn open(host: &Host, received: u64, session: &mut Session, body: &Json) -> Resul
         out.set("rescued", report);
         return Ok(out);
     }
-    // A package in an older format opens only after the person agrees to upgrade it (#193); it is looked at
-    // only once opening failed, so libraries in the current format pay nothing for this.
+    // 旧格式的图库包要等用户同意升级后才打开（#193）；只在打开失败后才去检查它，当前格式的图库因此没有额外开销。
     match host.switch_locked(session, received, &path) {
         Err(Error::Schema(why)) => match crate::app_upgrade::needed(&path) {
             None => Err(crate::app_upgrade::pre_v8(&path).map_or(Error::Schema(why), Error::Invalid)),
@@ -472,7 +468,7 @@ fn open(host: &Host, received: u64, session: &mut Session, body: &Json) -> Resul
                 Err(Error::Conflict(crate::app_upgrade::NEEDED.into()))
             }
             Some(prepared) => {
-                // Said as it happened: not committed (the package is as it was) or committed, with the backup.
+                // 按实际发生的情况说明：未提交（图库包保持原样），或已提交并附上备份位置。
                 let report =
                     crate::app_upgrade::run(&prepared, None).map_err(|failure| Error::Invalid(failure.to_string()))?;
                 let backup = crate::app_upgrade::shown(&report.backup);

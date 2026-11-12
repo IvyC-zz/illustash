@@ -1,9 +1,9 @@
-"""Fixed text answers of the name providers (Danbooru wiki, Bangumi, model API); never the network."""
+"""名称提供方（Danbooru wiki、Bangumi、模型 API）的固定文本应答；从不联网。"""
 import copy
 import json
 import urllib.parse
 
-MODEL_BASE = 'https://api.deepseek.com'   # the model API's default base (former web.names.MODEL_BASE)
+MODEL_BASE = 'https://api.deepseek.com'   # 模型 API 的默认 base（原 web.names.MODEL_BASE）
 
 DS = MODEL_BASE + '/chat/completions'
 

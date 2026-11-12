@@ -1,4 +1,4 @@
-//! Local group recommendations. Core/source are read-only; receipt remains machine-only.
+//! 本地分组推荐。core/source 只读；回执仍只写机器缓存。
 use super::{check_owner, write, Request};
 use crate::{Error, Result};
 use chrono::{DateTime, Local, NaiveDateTime, TimeZone};
@@ -33,8 +33,8 @@ pub(super) fn library_groups(request: &Request) -> Result<[Groups; 5]> {
     let mut groups: [Groups; 5] = std::array::from_fn(|_| Vec::new());
     if request.library.join("library.sqlite").is_file() {
         let c = crate::app_library::read_connection(&request.library.join("library.sqlite"))?;
-        // Python catches the first OperationalError around this whole ordered block.
-        // Earlier tables remain loaded; later tables are not queried after a missing table.
+        // Python 在这一整段按顺序的查询外面只捕获第一个 OperationalError。
+        // 已读的表保留结果；遇到缺失的表后，后面的表不再查询。
         let originals = format!(
             "SELECT m.entity,m.uuid
              FROM memberships m
@@ -89,7 +89,7 @@ pub(super) fn save_runs(request: &Request, presets: &[&str]) -> Result<Groups> {
         let mut pictures = source.prepare("SELECT uuid,added_at FROM assets WHERE in_scope=1 AND coalesce(trashed,0)=0 AND preset=? AND added_at IS NOT NULL AND added_at!=''")?
             .query_map([preset], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?
             .collect::<rusqlite::Result<Vec<_>>>()?;
-        // Stable lexical sort is deliberate: Python sorts the encoded strings before timestamp conversion.
+        // 有意用稳定的字典序排序：Python 在转换时间戳之前就对编码后的字符串排序。
         pictures.sort_by(|a, b| a.1.cmp(&b.1));
         let mut last = None;
         let mut run = 0usize;

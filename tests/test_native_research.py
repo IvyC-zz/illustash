@@ -1,7 +1,7 @@
-"""#52: optional real calculator and controlled failures on generated packages only.
+"""#52：可选的真实计算程序和受控的失败，只用生成的图库包。
 
-The existing Python calculators' results on the same inputs (similar scan, clustering, relations,
-OC groups) and the prepared package were recorded through tests/fixed_expectations.py (#9).
+现有 Python 计算程序在同样输入上的结果（相似扫描、聚类、关系、OC 分组）和准备好的包，
+已通过 tests/fixed_expectations.py 录制（#9）。
 """
 from tests.native_worker_fixture import command as worker_command, source as worker_source, exists as worker_exists
 
@@ -101,17 +101,17 @@ Path(sys.argv[2]).write_text(json.dumps(v,allow_nan=False))
         with sqlite3.connect(self.lib.db) as c: return {u for (u,) in c.execute('SELECT uuid FROM clusters')}
     def release(self): self.gate.write_text('')
     def retry_visibly(self):
-        # A retry shows `waiting` for its backoff only; a wider backoff lets polling see it on a busy machine (#263).
+        # 重试只在退避期间显示 `waiting`；退避拉长一些，机器繁忙时轮询也能看到它（#263）。
         self.stop(self.process);self.env.update(ILLUSTASH_RESEARCH_RETRY_MS='3000',ILLUSTASH_RESEARCH_TIMEOUT_MS='60000')
         self.restart();self.finished()
     def poke_event(self):
         with sqlite3.connect(self.lib.db) as c:c.execute("INSERT INTO backend_effects(kind) VALUES ('imported')")
     def test_real_similar_relate_cluster_and_oc_routes(self):
-        # Existing actual algorithms against the same generated inputs, exact tables except wall-clock fields.
+        # 现有的真实算法跑同样的生成输入，除挂钟时间字段外，表内容完全一致。
         tables=['relations','image_sigs','similar_paired','similar_retry','similar_groups','duplicates']
         native=self.rows(tables)
         self.assertGreater(len(self.rows(['prototypes'])['prototypes']),0)
-        # Wall-clock columns (when a relation was computed) are compared as <clock>.
+        # 挂钟时间列（关系是何时算出的）按 <clock> 比较。
         masked=lambda rows:{t:[tuple(unclocked(v) for v in r) for r in rs] for t,rs in rows.items()}
         self.assertEqual(masked(native),masked(self.rec.value('scanned')))
         clusters=self.rows(['clusters','cluster_info'])
@@ -185,8 +185,7 @@ Path(sys.argv[2]).write_text(json.dumps(v,allow_nan=False))
         wait_until(lambda:not group_exists(pid),timeout=5)
 
     def test_inflight_input_change_retries_on_fresh_snapshot(self):
-        # #194: a human verdict lands while the worker computes; the stale result is rejected,
-        # never published, and the task finishes by itself on a newer snapshot.
+        # #194：worker 计算期间来了一条人工裁决；过期的结果被拒绝、绝不发布，任务在更新的快照上自行完成。
         self.retry_visibly()
         self.assertIn('unmatched6',self.clustered())
         before=self.rows(['clusters','cluster_info','relations','prototypes'])
@@ -205,14 +204,14 @@ Path(sys.argv[2]).write_text(json.dumps(v,allow_nan=False))
             seen.append(s['status'])
             return s['status'] in ('idle','error')
         wait_until(settled,timeout=20)
-        # Judge the state that ended the wait: the next recovery tick (every second) may already start the
-        # queued events run for the verdict, which regroup does not acknowledge.
+        # 按结束等待时的状态判断：下一次恢复轮询（每秒一次）可能已经为这条裁决启动排队中的 events 运行，
+        # 而 regroup 不确认这些事件。
         self.assertEqual(seen[-1],'idle',seen)
         self.assertIn('waiting',seen)
         versions=self.versions()[runs:]
         self.assertGreaterEqual(len(versions),2)
         self.assertNotEqual(versions[0],versions[-1])
-        # Published groups are the existing calculator's result on the post-verdict library.
+        # 发布的分组是现有计算程序在裁决后图库上的结果。
         native=self.rows(['clusters'])
         self.assertNotIn('unmatched6',self.clustered())
         self.assertEqual(native,self.rec.value('clustered'))
@@ -220,7 +219,7 @@ Path(sys.argv[2]).write_text(json.dumps(v,allow_nan=False))
             self.assertEqual(c.execute("SELECT count(*) FROM research_runs WHERE status='pending'").fetchone()[0],0)
 
     def inflight(self, start, write):
-        """Start a run with the held worker, commit `write` before releasing it; return what was seen."""
+        """用被卡住的 worker 开始一次运行，放行前提交 `write`；返回观察到的状态。"""
         runs=len(self.versions())
         self.mode.write_text('held')
         result=start()
@@ -235,9 +234,8 @@ Path(sys.argv[2]).write_text(json.dumps(v,allow_nan=False))
         return result,seen,len(self.versions())-runs
 
     def test_discriminative_claims_publish_within_core_score_range(self):
-        # #156: the package's external index candidates switch the discriminative claims on, and they claim
-        # Alice's confirmed seeds too. A seed is its own nearest confirmed image; f32 rounding can put that
-        # distance just below 0, and one score past 1 makes Core's publication check reject the whole batch.
+        # #156：包里的外部索引候选会打开判别式认领，它们也会认领 Alice 已确认的种子。种子离自己最近的已确认图片
+        # 就是它自己；f32 舍入可能让这个距离略小于 0，而只要有一个得分超过 1，Core 的发布检查就会拒绝整批。
         self.stop(self.process)
         rng=np.random.default_rng(156)
         with sqlite3.connect(self.lib.source) as c:
@@ -252,11 +250,11 @@ Path(sys.argv[2]).write_text(json.dumps(v,allow_nan=False))
         seeds={u:s for u,e,s in claims if e==self.alice and u.startswith('seed')}
         self.assertEqual(sorted(seeds),['seed'+str(i) for i in range(6)],claims)
         self.assertTrue(all(0<=s<=1 for _,_,s in claims),claims)
-        # Only the discriminative claim scores a seed by its distance to itself.
+        # 只有判别式认领会按种子到它自己的距离给它打分。
         self.assertIn(1.0,seeds.values(),claims)
 
     def test_unread_tables_written_inflight_do_not_invalidate_learning(self):
-        # #29: preferences, name caches/settings and sync history are no research input.
+        # #29：偏好设置、名称缓存/设置和同步历史都不是研究的输入。
         before=self.rows(['clusters'])
         self.assertTrue(before['clusters'])
         def write(c):
@@ -271,7 +269,7 @@ Path(sys.argv[2]).write_text(json.dumps(v,allow_nan=False))
         self.assertEqual(self.rows(['clusters']),before)
 
     def test_similar_ignores_human_verdict_and_retries_on_its_own_inputs(self):
-        # #29: a verdict changes learning inputs only; an exclusion changes what similar scans.
+        # #29：裁决只改变学习的输入；排除改变 similar 扫描的范围。
         def verdict(c):
             response=self.request('/api/change',{'ids':['unmatched6'],'action':'confirmed','entity':self.alice})
             self.assertEqual(response['status'],200,response)
@@ -279,8 +277,8 @@ Path(sys.argv[2]).write_text(json.dumps(v,allow_nan=False))
         _,seen,_=self.inflight(lambda:self.request('/api/similar',{}),verdict)
         self.assertEqual(self.state()['status'],'idle',self.state())
         self.assertNotIn('waiting',seen)
-        # The verdict queues learning (an `events` run) once similar ends; under load it can start before the
-        # count is read (#132). Only a second similar run would be a retry.
+        # similar 结束后，裁决会把学习排进队列（一次 `events` 运行）；负载高时它可能在读计数之前就开始（#132）。
+        # 只有第二次 similar 运行才算重试。
         self.assertEqual(self.run_kinds()[before:].count('similar'),1,(seen,self.run_kinds()[before:]))
         self.retry_visibly()
         _,seen,runs=self.inflight(lambda:self.request('/api/similar',{}),lambda c:c.execute("INSERT INTO excluded VALUES ('b','synthetic','test')"))
@@ -289,7 +287,7 @@ Path(sys.argv[2]).write_text(json.dumps(v,allow_nan=False))
         self.assertGreaterEqual(runs,2)
 
     def test_oc_query_answers_despite_unread_write(self):
-        # #29: OC reads memberships, tags, exclusions and vectors only; it never retries.
+        # #29：OC 只读归属、标签、排除和向量；它从不重试。
         expected=self.request('/api/oc/groups?entity='+self.alice)
         self.assertEqual(expected['status'],200,expected)
         with ThreadPoolExecutor(1) as pool:
@@ -301,13 +299,13 @@ Path(sys.argv[2]).write_text(json.dumps(v,allow_nan=False))
         self.assertEqual(runs,1)
 
     def test_continuous_input_change_retries_are_bounded_then_manual_retry(self):
-        # Six slow runs plus backoff outlast the default fixture task limit.
+        # 六次慢速运行加上退避，会超过夹具默认的任务时限。
         self.stop(self.process);self.env['ILLUSTASH_RESEARCH_TIMEOUT_MS']='60000';self.restart();self.finished()
         before=self.rows(['clusters','cluster_info','relations','prototypes'])
         runs=len(self.versions())
         self.mode.write_text('held')
         self.request('/api/regroup',{})
-        # Every attempt sees a write that lands while it is held: the first run and all five retries.
+        # 每次尝试被卡住时都会遇到一次写入：第一次运行和全部五次重试。
         for i in range(1,7):
             wait_until(lambda:len(self.versions())-runs>=i,timeout=30)
             self.assertEqual(self.request('/api/tag',{'ids':['a'],'tag':f'合成持续{i}'})['status'],200)
@@ -319,7 +317,7 @@ Path(sys.argv[2]).write_text(json.dumps(v,allow_nan=False))
         self.assertEqual(self.rows(list(before)),before)
         with sqlite3.connect(self.lib.db) as c:
             self.assertIn('持续变化',c.execute("SELECT error FROM research_runs WHERE status='pending'").fetchone()[0])
-        # Exhausted retries wait for an explicit start instead of looping on recovery.
+        # 重试次数用完后等待显式启动，不在恢复时循环。
         time.sleep(3)
         self.assertEqual(self.state(),state)
         self.assertEqual(len(self.versions())-runs,6)
@@ -337,11 +335,11 @@ Path(sys.argv[2]).write_text(json.dumps(v,allow_nan=False))
         with sqlite3.connect(self.lib.db) as c:
             c.execute("CREATE TRIGGER fail_ack BEFORE UPDATE ON backend_effects WHEN NEW.status='done' BEGIN SELECT RAISE(ABORT,'synthetic ack'); END")
         with sqlite3.connect(self.lib.db) as c:c.execute("INSERT INTO backend_effects(kind) VALUES ('index_changed')")
-        # Recovery may start the run before any request here (#263): judge the outcome, not whether it started.
+        # 恢复可能在这里发出任何请求之前就启动运行（#263）：判断结果，而不是判断它有没有启动。
         wait_until(lambda:self.state()['status']=='error',timeout=30)
         self.assertIn('synthetic ack',self.state()['message'])
         self.assertGreater(self.pending(),0)
-        # The rejected acknowledgement rolled the whole publication back.
+        # 被拒绝的确认让整个发布回滚了。
         self.assertEqual(before,self.rows(tables))
         with sqlite3.connect(self.lib.db) as c:c.execute('DROP TRIGGER fail_ack')
         self.stop(self.process);self.restart();self.finished()
@@ -372,7 +370,7 @@ Path(sys.argv[2]).write_text(json.dumps(v,allow_nan=False))
         wait_until(completed,timeout=20)
         self.assertEqual(history,self.rows(['assertions','actions']))
         with sqlite3.connect(self.lib.db) as c:count=c.execute('SELECT count(*) FROM research_runs').fetchone()[0]
-        # Confirmation failure re-dispatches the same stored event; intent key must remain stable.
+        # 确认失败时重新分派同一条已存的事件；意图键必须保持不变。
         with sqlite3.connect(self.lib.db) as c:
             c.execute("INSERT INTO backend_effects(kind) VALUES ('imported')")
             c.execute("CREATE TRIGGER fail_dispatch_ack BEFORE UPDATE ON backend_effects WHEN NEW.status='done' BEGIN SELECT RAISE(ABORT,'synthetic'); END")

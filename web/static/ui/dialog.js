@@ -1,21 +1,20 @@
-// The page's own modal dialogs (desktop layout, #199, #319). openDialog is the one place that builds one: title row with
-// a × button, body, action row, close on ×/[data-close]/Esc (native), a click on the backdrop and a removal when it closes.
-// confirmAction and chooseWork are two ready-made dialogs on top of it; ui/catalog.js and ui/palette.js build their own.
+// 页面自己的模态对话框（桌面布局，#199、#319）。openDialog 是唯一生成对话框的地方：标题行加 × 按钮、正文、操作区，
+// ×、[data-close]、Esc（原生）和点背景都能关，关闭后从 DOM 移除。confirmAction 和 chooseWork 是建在它上面的两个现成对话框；
+// ui/catalog.js 和 ui/palette.js 自己的对话框也用它。
 import {t} from '../core/i18n.js';
 import {esc} from '../core/format.js';
 import {session} from '../core/session.js';
 import {state} from '../core/state.js';
-// A click that landed on the dialog's own backdrop (the <dialog> element itself, outside its box).
+// 点在对话框自己的背景上（<dialog> 元素本身、在框外）。
 export function isBackdropClick(d, e) {
   if (e.target !== d) return false;
   const r = d.getBoundingClientRect();
   return e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom;
 }
-// Builds and shows a modal dialog and returns it. `title` is plain text; `body` and `actions` are HTML (already
-// escaped/translated by the caller) for the middle and the bottom row (omitted when empty). `cls` adds classes after
-// `modal`. `backdropClose: false` keeps a form that holds typed input from being dismissed by a stray click.
-// `focus` is a selector for the control that gets the focus (default: the browser's first focusable one, or [autofocus]).
-// `onClose(d)` runs when it closes (read d.returnValue and the form there); the dialog is removed right after.
+// 生成并显示一个模态对话框，返回它。`title` 是纯文本；`body` 和 `actions` 是 HTML（调用方已转义、翻译），分别是中间和底部一行
+// （为空则省略）。`cls` 加在 `modal` 之后。`backdropClose: false` 让带输入的表单不会被误点背景关掉。
+// `focus` 是拿焦点的控件的选择器（默认：浏览器的第一个可聚焦控件，或 [autofocus]）。
+// `onClose(d)` 在关闭时运行（在这里读 d.returnValue 和表单）；随后对话框被移除。
 export function openDialog({title, body = '', actions = '', cls = '', backdropClose = true, focus = '', onClose} = {}) {
   const d = document.createElement('dialog'); d.className = ('modal ' + cls).trim();
   d.setAttribute('aria-label', title);
@@ -32,10 +31,9 @@ export function openDialog({title, body = '', actions = '', cls = '', backdropCl
   if (focus) d.querySelector(focus)?.focus?.();
   return d;
 }
-// Gallery pages have no Tauri dialog permission. Keep confirmation inside the page;
-// window.confirm may be replaced with an async plugin function by the desktop shell.
+// 图库页面没有 Tauri 对话框权限。确认框留在页面内；window.confirm 可能被桌面外壳换成一个异步的插件函数。
 let confirmationOpen = false;
-// `ok` names the confirming button; without `cancel` the dialog only informs.
+// `ok` 是确认按钮的名字；没有 `cancel` 时对话框只作告知。
 export function confirmAction(message, title = t('确认操作'), ok = t('确认'), cancel = true) {
   if (confirmationOpen) return Promise.resolve(false);
   confirmationOpen = true;
@@ -49,7 +47,7 @@ export function confirmAction(message, title = t('确认操作'), ok = t('确认
   });
 }
 const workOption = (w, selected) => `<option value="${esc(w.id)}" ${w.id === selected ? 'selected' : ''}>${esc(w.name)}${w.qualifier ? ' · ' + esc(w.qualifier) : ''}</option>`;
-// Pick a local work (or the empty choice); resolves null when cancelled.
+// 挑一个本地作品（或空选项）；取消时解析为 null。
 export function chooseWork(title, works, selected = '', emptyLabel = t('未归类 / 无上级')) {
   return new Promise(resolve => {
     openDialog({title, cls: 'work-dialog',

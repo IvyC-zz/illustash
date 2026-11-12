@@ -1,5 +1,5 @@
-// Acting on characters (desktop layout, #199): the command palette (换成 / 也是 / 设为角色 / 跳到角色), original
-// characters, editing a character's profile, merging, and how selected pictures relate.
+// 对角色的操作（桌面布局，#199）：命令面板（换成 / 也是 / 设为角色 / 跳到角色）、原创角色、编辑角色资料、合并，以及
+// 选中图片之间的关系。
 import {workName} from '../core/catalog.js';
 import {setLatest} from '../core/edits.js';
 import {esc, number} from '../core/format.js';
@@ -18,13 +18,13 @@ import {mutate, reload} from './grid.js';
 import {namesAllowButton} from './settings.js';
 import {renderHeading} from './shell.js';
 
-// The palette search's debounce.
+// 命令面板搜索的防抖。
 let pickerTimer = 0;
 // ---------- command palette (换成 / 也是 / 设为角色 / 跳到角色) ----------
 let palette = null;
-// Multi pickers (设为角色 / 也是): ⇧+click, ⇧+↵ or a row's ＋ collects characters; ↵ applies all of them at once.
+// 多选面板（设为角色 / 也是）：⇧+点击、⇧+↵ 或行上的 ＋ 收集角色；↵ 一次全部应用。
 export const targets = list => list.length > 1 ? {entities: list.map(e => e.id)} : {entity: list[0].id};
-// 换成 accepts several characters; a single one is sent as before.
+// 「换成」接受多个角色；只有一个时照以前的方式发送。
 export const newIds = list => list.length > 1 ? list.map(e => e.id) : list[0].id;
 const stageKey = e => e.id || (e.remote ? 'tag:' + e.tag : 'new:' + (e.oc ? 'oc:' : '') + e.create);
 export async function openPicker(opts) {
@@ -59,7 +59,7 @@ async function paletteSearch() {
     const items = list.filter(e => !(p.exclude || []).includes(e.id)).map(e => ({...e, hint: e.matched ? t('别名：{name}', {name: e.matched}) : '', count: e.count}));
     sections = [{label: '', items}];
     if (!p.jump) {
-      // Not in the library yet: Danbooru characters (typed text only) come in a moment; local-only creation stays last.
+      // 还不在图库里：Danbooru 角色（只用输入的文字）稍后就到；只在本地新建的一项留在最后。
       const create = list.some(e => e.name.toLowerCase() === q.toLowerCase()) ? [] : [{create: q, name: q, hint: t('只在本地新建，不关联 Danbooru')}, {create: q, oc: true, name: q, hint: t('画师的原创角色，不属于任何作品')}];
       const remote = {label: t('Danbooru 角色 · 选中即新建并关联'), items: [], note: t('正在查 Danbooru…（只发送你输入的文字）')};
       sections.push(remote, {label: '', items: create});
@@ -70,7 +70,7 @@ async function paletteSearch() {
         remote.items = (result.found || []).map(r => ({...r, remote: true, typed: q, hint: t('D 站 {n} 张', {n: number(r.posts)}), counted: true}));
         remote.note = result.found ? '' : result.unauthorized ? t('{reason}，也可以先只在本地新建', {reason: remoteNote(result)}) : t('{reason}，可以稍后再试，或先只在本地新建', {reason: remoteNote(result)});
         remote.allow = result.unauthorized;
-        // Untouched: the best match wins the highlight (the first local hit, else the first Danbooru result).
+        // 没动过：最佳匹配获得高亮（第一个本地结果，否则是第一个 Danbooru 结果）。
         renderPalette(sections, q, p.touched && p.index > 0);
       }, 380);
     }
@@ -92,7 +92,7 @@ function renderPalette(sections, q, keep = false) {
   const p = palette, current = keep ? p.list[p.index] : null;
   p.list = sections.flatMap(s => s.items);
   p.index = current ? Math.max(0, p.list.indexOf(current)) : 0;
-  // Local-only creation is a fallback: never the default when anything else matched.
+  // 只在本地新建是兜底：只要有别的匹配，它绝不是默认项。
   if (!current && p.list[p.index]?.create) p.index = Math.max(0, p.list.findIndex(e => !e.create));
   let n = 0;
   $('pickerResults').innerHTML = sections.filter(s => s.items.length || s.note).map(s => (s.label ? `<div class="palette-label">${s.label}</div>` : '') + (s.note && !s.items.length ? `<p class="palette-note">${esc(s.note)}${s.allow ? ' ' + namesAllowButton : ''}</p>` : '') + s.items.map(e => {
@@ -113,8 +113,8 @@ function highlight() {
   const sentence = chosen.length ? (p.sentence ? p.sentence({...chosen[0], name: chosen.map(x => x.name).join(t('、'))}) : chosen.map(x => x.name).join(t('、'))) : '';
   $('pickerFoot').innerHTML = chosen.length ? `<kbd>↵</kbd> ${esc(sentence)}${p.multi ? `<span class="palette-tip"><kbd>⇧↵</kbd> ${p.staged.length ? t('继续加') : t('多选')}</span>` : ''}` : `<span>${esc(p.title || '')}</span>`;
 }
-// Staged characters plus the highlighted one (unless it is already staged).
-// Right after staging, ↵ applies the staged ones only; the highlight counts again once the user moves, types or clicks.
+// 暂存的角色加上高亮的那个（除非它已经暂存了）。
+// 刚暂存完时，↵ 只应用暂存的角色；用户移动、输入或点击之后，高亮的那个才重新算进去。
 function finalList(e, include) {
   const p = palette, list = [...p.staged];
   if (e && (include || !list.length) && !e.remove && !list.some(x => stageKey(x) === stageKey(e))) list.push(e);
@@ -161,15 +161,15 @@ export function mergeCharacter(c) {
       catch (err) { toast(err.message); }
     }});
 }
-// ---------- original characters ----------
-// An original character (kind='oc'): an artist's own character, belonging to no work. Unnamed ones are 原创角色 N.
-// Quick tagging uses the one shared「原创角色（未细分）」; a look-alike group (all one person) still gets its own OC.
+// ---------- 原创角色 ----------
+// 原创角色（kind='oc'）：画师自己的角色，不属于任何作品。没起名的叫「原创角色 N」。
+// 快速标注用共用的那一个「原创角色（未细分）」；一个相似分组（全是同一个人）仍然得到它自己的 OC。
 export async function markOc(body, leaving, separate = false) {
   let entity; try { entity = await post(separate ? '/api/entities' : '/api/oc/shared', {kind: 'oc'}); } catch (err) { toast(err.message); return; }
   prefs.set('picks', [{id: entity.id, name: entity.name}, ...prefs.get('picks', []).filter(x => x.id !== entity.id)].slice(0, 8));
   if (await mutate('/api/change', {...body, action: 'confirmed', entity: entity.id}, leaving) && state.route.page === 'group' && !state.total) go(charRoute(entity.id));
 }
-// Split the shared OC mark: look-alike groups computed on demand, each one click to its own OC (undoable).
+// 拆分共用的 OC 标记：按需计算相似分组，每组一次点击归到它自己的 OC（可撤销）。
 export async function splitOc(c) {
   const d = $('ocSplitDialog'), body = $('ocSplitBody');
   $('ocSplitTitle').textContent = t('按相似细分 · {name}', {name: c.name});
@@ -186,8 +186,8 @@ export async function splitOc(c) {
     else b.disabled = false;
   };
 }
-// ---------- character profile (编辑资料) ----------
-// A search box with a result menu: `search(q)` resolves to sections [{label, items, note}], `pick(item)` takes one.
+// ---------- 角色资料（编辑资料） ----------
+// 带结果菜单的搜索框：`search(q)` 解析为若干部分 [{label, items, note}]，`pick(item)` 取其中一项。
 export function combo(input, menu, search, pick) {
   let list = [], index = 0, gen = 0, timer = 0;
   const render = sections => {
@@ -210,14 +210,14 @@ export function combo(input, menu, search, pick) {
   });
   menu.addEventListener('mousedown', e => { const b = e.target.closest('[data-i]'); if (b) { e.preventDefault(); choose(Number(b.dataset.i)); } });
 }
-// Local results first (instant), then Danbooru for the typed text only.
+// 先是本地结果（即时），然后只用输入的文字查 Danbooru。
 export function twoStage(local, remote, extra = () => []) {
   return (q, show) => {
     local(q).then(mine => {
       if (!q) { show([{label: '', items: mine}, ...extra(q)]); return; }
       show([{label: '', items: mine}, {label: 'Danbooru', items: [], note: t('正在查 Danbooru…（只发送你输入的文字）')}, ...extra(q)]);
       remote(q).then(result => {
-        // A Danbooru entry the library already has shows once, as the local one.
+        // 图库里已有的 Danbooru 条目只显示一次，显示为本地的那条。
         const found = result.found, fresh = found && found.filter(r => !mine.some(m => m.detail && m.detail === r.detail));
         show([{label: '', items: mine}, {label: 'Danbooru', items: fresh || [], allow: result.unauthorized,
           note: found === null ? remoteNote(result) : fresh.length ? '' : found.length ? '' : t('没有找到，可以换英文或日文写法')}, ...extra(q)]);
@@ -261,12 +261,12 @@ export async function editProfile(c) {
     r => { draft.work = r; workNote(); });
   q('form').onsubmit = async e => {
     e.preventDefault();
-    if (q('#pfSave').disabled) return;  // one save at a time: no second work or profile from a double click
+    if (q('#pfSave').disabled) return;  // 同一时间只保存一次：双击不会多出第二个作品或资料
     const body = {entity: p.id};
     const name = q('#pfName').value.trim(); if (name !== p.user_name) body.name = name;
     if (JSON.stringify(draft.aliases) !== JSON.stringify(p.aliases)) body.aliases = draft.aliases;
     if (q('#pfTag') && draft.tag !== p.tag) body.tag = draft.tag;
-    // A new work is made in the same request (and transaction) as the profile it belongs to.
+    // 新作品和它所属的资料在同一个请求（和事务）里建好。
     if (q('#pfWork') && (draft.work?.id || null) !== (p.work_id || null)) {
       body.work = !draft.work ? '' : draft.work.create ? {create: draft.work.create} : draft.work.tag ? {tag: draft.work.tag} : draft.work.id;
     }
@@ -321,7 +321,7 @@ export async function toggleMascot(c) {
     const [fresh] = await Promise.all([fetchChar(c.id), refreshMeta(), reload()]); if (fresh) Object.assign(c, fresh); renderHeading();
   } catch (err) { toast(err.message); }
 }
-// ---------- how selected images relate (web/relate.py) ----------
+// ---------- 选中图片之间的关系（relate，native/terms/src/research_compute/relations.rs） ----------
 export async function openRelate(ids) {
   const d = $('relateDialog');
   $('relateTitle').textContent = t('{n} 张图的关系', {n: number(ids.length)});
@@ -342,7 +342,7 @@ export async function openRelate(ids) {
 }
 export function jumpToCharacter() { openPicker({title: t('跳到角色'), jump: true, sentence: e => t('打开 {name}', {name: e.name}), pick: e => go(charRoute(e.id))}); }
 
-// The handlers this part of the page registers. Called once, when the page starts.
+// 页面这一部分注册的处理函数。页面启动时调用一次。
 export function wirePalette() {
   $('pickerSearch').addEventListener('input', () => { if (palette) palette.touched = true; clearTimeout(pickerTimer); pickerTimer = setTimeout(paletteSearch, 140); });
   $('pickerSearch').addEventListener('keydown', e => {

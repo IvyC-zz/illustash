@@ -1,7 +1,7 @@
-"""Synthetic image inputs only; no candidate output or private files.
+"""只有合成的图片输入；没有候选的输出，也没有私人文件。
 
-ICC gamma profiles retain the old Pillow-generated sRGB matrix and replace only
-TRCs with a hand-written ICC curv tag (gamma1.5). TIFF cases are tiny scalar arrays.
+ICC gamma 配置文件保留原来由 Pillow 生成的 sRGB 矩阵，只把 TRC 换成手写的
+ICC curv 标签（gamma1.5）。TIFF 用例是很小的标量数组。
 """
 from pathlib import Path
 import io
@@ -26,7 +26,7 @@ def gamma_profile(padded=False):
         signature, offset, length = struct.unpack_from('>4sII', original, 132 + i * 12)
         payload = original[offset:offset + length]
         if signature in (b'rTRC', b'gTRC', b'bTRC'):
-            payload = b'curv' + b'\0' * 4 + struct.pack('>IH', 1, 384)  # gamma 1.5 in u8Fixed8
+            payload = b'curv' + b'\0' * 4 + struct.pack('>IH', 1, 384)  # u8Fixed8 格式的 gamma 1.5
         tags.append((signature, payload))
     offset = 132 + len(tags) * 12
     entries = bytearray()
@@ -37,9 +37,9 @@ def gamma_profile(padded=False):
         payloads.extend(b'\0' * (-len(payload) % 4))
     profile = bytearray(original[:128] + struct.pack('>I', len(tags)) + entries + payloads)
     if padded:
-        profile.extend(b'\0' * 70000)  # Forces multiple JPEG APP2 fragments, no external profile.
+        profile.extend(b'\0' * 70000)  # 强制拆成多个 JPEG APP2 片段，不用外部配置文件。
     struct.pack_into('>I', profile, 0, len(profile))
-    profile[84:100] = b'\0' * 16  # Unspecified profile ID after rebuilding the tag table.
+    profile[84:100] = b'\0' * 16  # 重建标签表之后的 profile ID 置为未指定。
     return bytes(profile)
 
 
@@ -53,7 +53,7 @@ def rgb_image(mode='RGB'):
 
 
 def jpeg_icc_variant(data, variant):
-    """Perturb only APP2 fragment order/count, using a synthetic JPEG input."""
+    """只扰动 APP2 片段的顺序/数量，输入是合成的 JPEG。"""
     with Image.open(io.BytesIO(data)) as image:
         parts = [payload for tag, payload in image.applist
                  if tag == 'APP2' and payload.startswith(b'ICC_PROFILE\0')]
@@ -104,10 +104,10 @@ def raw_u16_tiff(*, endian='<', width=3, height=2, rows=None,
 def scalar_tiff(*, mode='u16', endian='<', width=3, height=2, rows=None,
                 orientation=1, fill_order=1, values=None, compression=1,
                 icc=None, planar=1, predictor=1):
-    """Hand-written BlackIsZero TIFF strips, independent of either decoder.
+    """手写的 BlackIsZero TIFF 条带，不依赖任何一方的解码器。
 
-    Values describe stored words; FillOrder is deliberately not applied here.
-    Deflate8/32946 contain identical zlib streams; their tags remain distinct.
+    values 描述存储的字；这里有意不应用 FillOrder。
+    Deflate8/32946 含相同的 zlib 流；它们的标签仍然不同。
     """
     rows = height if rows is None else rows
     kind, bits, sample, defaults = {

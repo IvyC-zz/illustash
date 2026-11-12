@@ -3,7 +3,7 @@ use crate::recognition_compute::anchors;
 pub(super) fn reject(review: &Path, row: &Value, reason: &str) -> Result<()> {
     let cid = field(row, "short_tag")?;
     if !safe(cid) {
-        return Err(invalid("索引角色ID不正确"));
+        return Err(Error::invalid("索引角色ID不正确"));
     }
     let folder = review.join("char-patch/rejected");
     fs::create_dir_all(&folder)?;
@@ -16,7 +16,7 @@ pub(super) fn drop(review: &Path, selected: &HashSet<String>, reason: &str) -> R
         let path = review.join(format!("char-index/{cid}.json"));
         let meta = read(&path)?;
         if meta["source"] != "danbooru-patch" {
-            return Err(invalid(format!("{cid} 不是补充角色，不能在这里放弃")));
+            return Err(Error::invalid(format!("{cid} 不是补充角色，不能在这里放弃")));
         }
         reject(review, &meta, &format!("人工看图后放弃：{reason}"))?;
         fs::remove_file(path)?;
@@ -31,7 +31,7 @@ pub(super) fn existing(review: &Path, selected: &HashSet<String>) -> Result<(Vec
         let cid = meta["short_tag"]
             .as_str()
             .filter(|s| !s.is_empty())
-            .unwrap_or(path.file_stem().and_then(|s| s.to_str()).ok_or_else(|| invalid("索引文件名不是UTF8"))?);
+            .unwrap_or(path.file_stem().and_then(|s| s.to_str()).ok_or_else(|| Error::invalid("索引文件名不是UTF8"))?);
         let feat = path.with_extension("npy");
         if selected.contains(cid) || !feat.try_exists()? {
             continue;
@@ -51,7 +51,7 @@ pub(super) fn clean(review: &Path, selected: &HashSet<String>) -> Result<()> {
     let mut accepted_ids: Vec<String> = vec![];
     let mut accepted: Vec<Vec<f32>> = vec![];
     let plan = read(&review.join("char-patch/plan.json"))?;
-    let mut plan = plan.as_array().ok_or_else(|| invalid("索引plan不正确"))?.clone();
+    let mut plan = plan.as_array().ok_or_else(|| Error::invalid("索引plan不正确"))?.clone();
     plan.sort_by_key(|r| std::cmp::Reverse(r["post_count"].as_i64().unwrap_or(0)));
     for row in plan {
         let cid = field(&row, "short_tag")?;
@@ -77,10 +77,10 @@ pub(super) fn clean(review: &Path, selected: &HashSet<String>) -> Result<()> {
             .as_array()
             .filter(|p| !p.is_empty())
             .or_else(|| meta["posts"].as_array())
-            .ok_or_else(|| invalid("索引参考posts不正确"))?
+            .ok_or_else(|| Error::invalid("索引参考posts不正确"))?
             .clone();
         if posts.len() != rows.len() {
-            return Err(invalid("索引参考向量与posts长度不匹配"));
+            return Err(Error::invalid("索引参考向量与posts长度不匹配"));
         }
         meta["posts_all"] = json!(posts);
         let mut reason = None;
@@ -121,7 +121,7 @@ pub(super) fn clean(review: &Path, selected: &HashSet<String>) -> Result<()> {
             fs::remove_file(&path)?;
             continue;
         }
-        let keep = keep.ok_or_else(|| invalid("清洗核心缺失"))?;
+        let keep = keep.ok_or_else(|| Error::invalid("清洗核心缺失"))?;
         let selected = rows.selected(&keep);
         accepted.push(selected.merged()?);
         accepted_ids.push(cid.into());

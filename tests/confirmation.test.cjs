@@ -1,5 +1,5 @@
-// The page's own confirmation dialog (ui/dialog.js) guards source removal (ui/settings.js) and the first artist
-// lookup (ui/artists.js): nothing is sent until it is confirmed, in the same session and on the same page (#199).
+// 页面自己的确认对话框（ui/dialog.js）把守移除来源（ui/settings.js）和第一次查画师（ui/artists.js）：
+// 在同一会话、同一页面里确认之前，什么都不发送（#199）。
 const {test, before, afterEach} = require('node:test');
 const assert = require('node:assert/strict');
 const web = require('./web.cjs');
@@ -20,7 +20,7 @@ function harness() {
       showModal() {this.open = true;}, close(value = '') {this.returnValue = value; this.open = false; this.onclose();},
       remove() {this.removed = true;}, getBoundingClientRect: () => ({left:10,right:100,top:10,bottom:100})};
   }};
-  // Removing a source first asks how many pictures it holds, then removes with confirm: 1.
+  // 移除来源先问它有多少张图，再带 confirm: 1 移除。
   globalThis.fetch = async (path, options) => {
     const body = options?.body ? JSON.parse(options.body) : {};
     if (path === '/api/libraries/sources/remove') calls.push({action: 'sources/remove', body});
@@ -28,7 +28,7 @@ function harness() {
     const answer = path === '/api/libraries/sources/remove' ? (body.confirm ? {removed: 2} : {count: 2}) : {};
     return {status: 200, ok: true, json: async () => answer};
   };
-  // The artist lookup remembers consent in localStorage; its progress polling is not run here.
+  // 查画师把同意记在 localStorage 里；这里不运行它的进度轮询。
   const {localStorage, setTimeout} = globalThis;
   globalThis.localStorage = {getItem: k => consent.get(k), setItem: (k, v) => consent.set(k, v)};
   globalThis.setTimeout = () => 0;

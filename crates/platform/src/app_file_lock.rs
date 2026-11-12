@@ -36,6 +36,7 @@ mod platform {
     use std::os::fd::AsRawFd;
 
     pub(super) fn acquire(file: &File) -> io::Result<()> {
+        // SAFETY: `file` 在借用期间保持打开，文件描述符有效。
         if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } == 0 {
             Ok(())
         } else {
@@ -48,6 +49,7 @@ mod platform {
     }
 
     pub(super) fn release(file: &File) -> io::Result<()> {
+        // SAFETY: `file` 在借用期间保持打开，文件描述符有效。
         if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_UN) } == 0 {
             Ok(())
         } else {
@@ -70,7 +72,8 @@ mod platform {
         fn UnlockFile(file: *mut c_void, lo: u32, hi: u32, length_lo: u32, length_hi: u32) -> i32;
     }
     pub(super) fn acquire(file: &File) -> io::Result<()> {
-        // Same region used by the compatibility msvcrt provenance lease.
+        // 与兼容用的 msvcrt 溯源租约锁同一区间。
+        // SAFETY: `file` 在借用期间保持打开，原始句柄有效。
         if unsafe { LockFile(file.as_raw_handle(), 0, 0, 1, 0) } == 0 {
             Err(io::Error::last_os_error())
         } else {
@@ -78,7 +81,8 @@ mod platform {
         }
     }
     pub(super) fn acquire_unobstructed(file: &File) -> io::Result<()> {
-        // Offset 2^62: far past the end of the empty file, so no read of it overlaps the lock.
+        // 偏移 2^62：远在空文件末尾之后，任何读取都不会与锁区间重叠。
+        // SAFETY: `file` 在借用期间保持打开，原始句柄有效。
         if unsafe { LockFile(file.as_raw_handle(), 0, 0x4000_0000, 1, 0) } == 0 {
             Err(io::Error::last_os_error())
         } else {
@@ -86,6 +90,7 @@ mod platform {
         }
     }
     pub(super) fn release(file: &File) -> io::Result<()> {
+        // SAFETY: `file` 在借用期间保持打开，原始句柄有效。
         if unsafe { UnlockFile(file.as_raw_handle(), 0, 0, 1, 0) } == 0 {
             Err(io::Error::last_os_error())
         } else {
@@ -133,8 +138,8 @@ mod tests {
         #[cfg(windows)]
         assert_eq!(error.raw_os_error(), Some(33));
         drop(a);
-        // A child spawned concurrently by another test can inherit `a` until its exec closes it,
-        // holding the lease a moment longer; callers retry, so the test does too.
+        // 其他测试同时派生的子进程可能继承 `a`，直到它 exec 时才关闭，租约因此多持有片刻；
+        // 调用方会重试，测试也照样重试。
         let until = std::time::Instant::now() + std::time::Duration::from_secs(5);
         while let Err(error) = acquire(&b) {
             assert!(should_retry(&error) && std::time::Instant::now() < until, "lease not released: {error}");

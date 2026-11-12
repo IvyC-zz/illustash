@@ -1,21 +1,18 @@
-//! S3 relation commands: append-only core decisions read back in the legacy shape
-//! (`character_relations`), full graph validation, and undo audit. The caller owns the transaction.
+//! S3 关系命令：只追加的核心决定，按旧版形状（`character_relations`）读回；完整的图校验和撤销审计。
+//! 事务归调用方。
 use crate::character_entities::ENTITIES;
 use crate::character_relations::RELATIONS;
 use crate::{character_graph, character_json, legacy_characters, Error, Result};
 use rusqlite::{params, Connection, OptionalExtension};
 use serde_json::{json, Value};
 
-fn invalid(s: &str) -> Error {
-    Error::Invalid(s.into())
-}
 fn text<'a>(v: &'a Value, message: &str) -> Result<&'a str> {
-    v.as_str().ok_or_else(|| invalid(message))
+    v.as_str().ok_or_else(|| Error::invalid(message))
 }
 fn relation_core(c: &Connection, id: i64) -> Result<i64> {
     c.query_row("SELECT core_id FROM term_legacy_ids WHERE kind='relation' AND legacy_id=?", [id], |r| r.get(0))
         .optional()?
-        .ok_or_else(|| invalid("关系候选不存在"))
+        .ok_or_else(|| Error::invalid("关系候选不存在"))
 }
 /// 一条关系现在的状态（旧编号 `id`），没有这条关系为 None。
 fn relation_status(c: &Connection, id: i64) -> Result<Option<String>> {
@@ -53,7 +50,7 @@ fn semantic(v: &Value) -> Value {
 
 pub fn propose(c: &Connection, a: &str, b: &str, kind: &str, evidence: Option<&Value>, source: &str) -> Result<i64> {
     if a == b || !matches!(kind, "duplicate_of" | "form_of" | "different_from") {
-        return Err(invalid("无效身份关系"));
+        return Err(Error::invalid("无效身份关系"));
     }
     let count: i64 = c.query_row(
         &format!("SELECT count(*) FROM {ENTITIES} WHERE id IN (?,?) AND kind<>'work'"),
@@ -61,7 +58,7 @@ pub fn propose(c: &Connection, a: &str, b: &str, kind: &str, evidence: Option<&V
         |r| r.get(0),
     )?;
     if count != 2 {
-        return Err(invalid("关系端点不存在"));
+        return Err(Error::invalid("关系端点不存在"));
     }
     let (a, b) = if kind == "different_from" && a > b { (b, a) } else { (a, b) };
     let existing: Option<i64> = if kind == "duplicate_of" {
@@ -107,7 +104,7 @@ pub fn propose(c: &Connection, a: &str, b: &str, kind: &str, evidence: Option<&V
     Ok(id)
 }
 
-/// None action is a non-user batch, not a fabricated undo-stack entry.
+/// action 为 None 表示非用户发起的批次，不伪造撤销栈条目。
 pub fn decide(
     c: &Connection,
     id: i64,
@@ -117,7 +114,7 @@ pub fn decide(
     batch_kind: &str,
 ) -> Result<Value> {
     if !matches!(status, "accepted" | "rejected" | "proposed") {
-        return Err(invalid("请保存明确的关系决议及理由"));
+        return Err(Error::invalid("请保存明确的关系决议及理由"));
     }
     let core = relation_core(c, id)?;
     let previous = relation_status(c, id)?.ok_or(rusqlite::Error::QueryReturnedNoRows)?;
@@ -173,7 +170,7 @@ pub fn decide(
 
 pub fn command(c: &Connection, args: &Value) -> Result<Value> {
     if !crate::character_projection::policy(c)? {
-        return Err(invalid("请先完成两级身份迁移"));
+        return Err(Error::invalid("请先完成两级身份迁移"));
     }
     let op = text(&args["op"], "请选择身份命令")?;
     match op {
@@ -193,7 +190,7 @@ pub fn command(c: &Connection, args: &Value) -> Result<Value> {
             // 与 Store.decide_identity 的检查顺序一致（去掉预演后，同时有几处不对时报哪一条也要相同）：
             // 关系 id 的类型（Python 在调用前查）→ 策略（上面）→ 没给 id 时先提议（端点）→ 状态与理由 → 关系存在。
             let id = match args.get("relation_id").filter(|v| !v.is_null()) {
-                Some(v) => v.as_i64().filter(|i| *i > 0).ok_or_else(|| invalid("关系 ID 不正确"))?,
+                Some(v) => v.as_i64().filter(|i| *i > 0).ok_or_else(|| Error::invalid("关系 ID 不正确"))?,
                 None => {
                     let fallback = json!({"manual_review": args.get("reason").cloned().unwrap_or(Value::Null)});
                     propose(
@@ -210,11 +207,11 @@ pub fn command(c: &Connection, args: &Value) -> Result<Value> {
             let status = match args.get("status") {
                 None => "proposed",
                 Some(Value::String(s)) => s.as_str(),
-                Some(_) => return Err(invalid("请保存明确的关系决议及理由")),
+                Some(_) => return Err(Error::invalid("请保存明确的关系决议及理由")),
             };
             let reason = args.get("reason").and_then(Value::as_str).unwrap_or("");
             if !matches!(status, "accepted" | "rejected" | "proposed") || reason.trim().is_empty() {
-                return Err(invalid("请保存明确的关系决议及理由"));
+                return Err(Error::invalid("请保存明确的关系决议及理由"));
             }
             c.execute("INSERT INTO actions(label,before_json) VALUES (?,'[]')", ["已保存身份关系决议"])?;
             let action = c.last_insert_rowid();
@@ -226,12 +223,12 @@ pub fn command(c: &Connection, args: &Value) -> Result<Value> {
         }
         "accept-many" => {
             character_graph::baseline(c)?;
-            let ids = args["ids"].as_array().ok_or_else(|| invalid("关系 ID 应为数组"))?;
+            let ids = args["ids"].as_array().ok_or_else(|| Error::invalid("关系 ID 应为数组"))?;
             let reason = text(&args["reason"], "请保存明确的关系决议及理由")?;
             let mut accepted = Vec::new();
             let mut skipped = Vec::new();
             for id in ids {
-                let id = id.as_i64().ok_or_else(|| invalid("关系 ID 不正确"))?;
+                let id = id.as_i64().ok_or_else(|| Error::invalid("关系 ID 不正确"))?;
                 let previous = relation_status(c, id)?;
                 if previous.as_deref() != Some("proposed") {
                     continue;
@@ -256,7 +253,7 @@ pub fn command(c: &Connection, args: &Value) -> Result<Value> {
             Ok(json!({"accepted":accepted,"skipped":skipped}))
         }
         "undo" => crate::character_commands::undo(c, args),
-        _ => Err(invalid("未知身份命令")),
+        _ => Err(Error::invalid("未知身份命令")),
     }
 }
 
@@ -268,9 +265,9 @@ pub fn undo_relation(c: &Connection, r: &Value) -> Result<()> {
         || !matches!(r["status"].as_str(), Some("accepted" | "rejected" | "proposed"))
         || !matches!(r["previous_status"].as_str(), Some("accepted" | "rejected" | "proposed"))
     {
-        return Err(invalid("身份撤销快照不完整"));
+        return Err(Error::invalid("身份撤销快照不完整"));
     }
-    let relation = r["relation_id"].as_i64().ok_or_else(|| invalid("身份撤销快照不完整"))?;
+    let relation = r["relation_id"].as_i64().ok_or_else(|| Error::invalid("身份撤销快照不完整"))?;
     decide(c, relation, text(&r["previous_status"], "身份撤销快照不完整")?, "撤销人工关系决议", None, "undo_audit")?;
     character_graph::rebuild(c)?;
     Ok(())
@@ -298,10 +295,10 @@ pub fn undo_merge(c: &Connection, m: &Value) -> Result<()> {
         .any(|k| !m[k].is_array())
         || !(m["pins"].is_null() || m["pins"].is_string())
     {
-        return Err(invalid("合并快照不完整"));
+        return Err(Error::invalid("合并快照不完整"));
     }
     let (a, b) = (text(&m["source"], "合并快照不完整")?, text(&m["target"], "合并快照不完整")?);
-    let relation = duplicate(c, a, b)?.ok_or_else(|| invalid("旧合并缺少迁移记录，请先核验备份"))?;
+    let relation = duplicate(c, a, b)?.ok_or_else(|| Error::invalid("旧合并缺少迁移记录，请先核验备份"))?;
     decide(c, relation, "proposed", "撤销历史合并；原归属无法区分的认领待确认", None, "undo_audit")?;
     character_graph::rebuild(c)?;
     Ok(())

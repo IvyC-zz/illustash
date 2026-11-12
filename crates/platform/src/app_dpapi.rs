@@ -1,4 +1,4 @@
-//! Windows current-user DPAPI; no machine-wide key or plaintext fallback.
+//! Windows 当前用户 DPAPI；不用全机密钥，也不回退到明文。
 use crate::{Error, Result};
 use std::{ffi::c_void, ptr};
 
@@ -36,12 +36,12 @@ extern "system" {
 fn transform(bytes: &[u8], kind: &str, encrypt: bool) -> Result<Vec<u8>> {
     let len = u32::try_from(bytes.len()).map_err(|_| Error::Invalid("Windows 凭据过大".into()))?;
     let input = Blob { len, data: bytes.as_ptr() as *mut u8 };
-    // Bind each blob to its account kind. Entropy is a purpose label, not a key.
+    // 每个 blob 绑定到对应的账号种类。entropy 是用途标签，不是密钥。
     let purpose = format!("Illustash/accounts/v1/{kind}");
     let entropy = Blob { len: purpose.len() as u32, data: purpose.as_ptr() as *mut u8 };
     let mut output = Blob { len: 0, data: ptr::null_mut() };
-    // SAFETY: all blobs remain alive for the synchronous call; output is allocated
-    // by DPAPI and freed with LocalFree. UI_FORBIDDEN = 1; LOCAL_MACHINE is absent.
+    // SAFETY: 同步调用期间所有 blob 都存活；output 由 DPAPI 分配、用 LocalFree 释放。
+    // UI_FORBIDDEN = 1；不带 LOCAL_MACHINE。
     let ok = unsafe {
         if encrypt {
             CryptProtectData(&input, ptr::null(), &entropy, ptr::null_mut(), ptr::null_mut(), 1, &mut output)
@@ -59,10 +59,12 @@ fn transform(bytes: &[u8], kind: &str, encrypt: bool) -> Result<Vec<u8>> {
             .into(),
         ));
     }
-    // SAFETY: successful DPAPI returns a buffer of output.len bytes.
+    // SAFETY: DPAPI 成功时返回 output.len 字节的缓冲区。
     let result = unsafe { std::slice::from_raw_parts(output.data, output.len as usize).to_vec() };
+    // SAFETY: `output.data` 是成功调用后 DPAPI 分配的 `output.len` 字节缓冲区；先清零再用 LocalFree 释放一次，
+    // 之后不再使用。
     unsafe {
-        // Do not leave decrypted credentials in the Windows-allocated buffer.
+        // 不把解密后的凭据留在 Windows 分配的缓冲区里。
         if !encrypt {
             for i in 0..output.len as usize {
                 ptr::write_volatile(output.data.add(i), 0);

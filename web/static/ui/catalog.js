@@ -1,5 +1,5 @@
-// The 资料库 (desktop layout, #199): the characters' shelf and list, the works tree with its watch switches, and the
-// dialogs to edit a work and add new characters. What they read and change is core/catalog.js.
+// 资料库（桌面布局，#199）：角色的书架和列表、带关注开关的作品树，以及编辑作品和添加新角色的对话框。它们读取和更改
+// 的内容在 core/catalog.js。
 import {t} from '../core/i18n.js';
 import {esc, number} from '../core/format.js';
 import {prefs} from '../core/prefs.js';
@@ -19,8 +19,8 @@ import {fetchChar, refreshMeta} from '../core/meta.js';
 import {closeInspector} from './detail.js';
 import {renderHeading} from './shell.js';
 
-// ---------- characters: 书架 (work tabs, posters, tiers) and 列表 ----------
-// What the 角色 page shows: shelf or list, which work tab, a search's results, the list's sort and bucket.
+// ---------- 角色：书架（作品标签页、海报、分档）和列表 ----------
+// 「角色」页显示什么：书架还是列表、哪个作品标签页、搜索结果、列表的排序和档位。
 export const cast = {mode: prefs.get('castMode', 'shelf'), tab: 'all', list: null, sort: 'count', dir: -1, bucket: 'all', pop: false, popQ: ''};
 export async function renderIndex() {
   $('grid').hidden = true; $('empty').hidden = true; $('settingsPage').hidden = true; $('groupsPage').hidden = true; $('charIndex').hidden = false; closeInspector(); $('selectionBar').hidden = true;
@@ -38,7 +38,7 @@ export async function renderIndex() {
   await loadWorkTree().catch(e => error(readError(e)));
   loadActivity(); refreshLocalLinks();
 }
-// Own characters whose name is a Danbooru tag (asks Danbooru with those names only; none → no request).
+// 名字是 Danbooru tag 的自有角色（只拿这些名字去问 Danbooru；没有就不发请求）。
 export async function refreshLocalLinks() {
   if (await loadLocalLinks() && state.route.page === 'characters') renderHeading();
 }
@@ -53,18 +53,16 @@ export async function searchIndex() {
   let list; try { list = await searchCharacters(q); } catch (e) { if (route === state.route && token === session.token && q === $('charSearch').value.trim()) readFailure($('charIndex'), e); return; }
   if (route === state.route && token === session.token && q === $('charSearch').value.trim()) { cast.list = list; drawCast(); }
 }
-// Kept for callers that refresh the page after metadata changes.
+// 留给元数据变化后刷新页面的调用方。
 export function renderIndexBody() { if (state.route.page !== 'characters') return; if (state.route.section === 'works') drawShelf(); else { drawCast(); loadActivity(); } }
 const cover = (c, size = 'thumb') => c?.cover ? `<img src="/image?id=${encodeURIComponent(c.cover)}&size=${size}" alt="" loading="lazy" decoding="async">` : '';
 const avatar = (c, px) => `<i class="cast-av" style="width:${px}px;height:${px}px">${cover(c)}</i>`;
-// ---------- a poster's pictures: a random one at rest, the others under the pointer (#293) ----------
-// Each time the 资料库 opens, a poster shows a picture of the character drawn at random instead of always its cover
-// (pictures of it alone first, so the poster is not someone else's). Under the pointer the poster is a small viewer:
-// across picks a picture of the same draw (up to 12, the drawn one first), down looks over the picture. The picture
-// glides after the pointer, a band at each end reaches the top or bottom, a minimap on the right shows how tall the
-// picture is and which part shows, a picture wider than the poster shows whole over a blurred copy of itself, and the
-// name fades while you look at the lower half. ← → flip and ↑ ↓ look when the poster has focus. One small read per
-// poster, when it nears the screen; kept while the page redraws; the cover shows until then.
+// ---------- 海报的图片：静止时随机一张，指针下看其他的（#293） ----------
+// 每次打开资料库，海报都显示随机抽到的一张这个角色的图，而不总是它的封面（先抽只有它一个人的图，免得海报上是别人）。
+// 指针放在海报上时，海报就是一个小查看器：横向移动在同一次抽取的图里挑（最多 12 张，抽中的那张在最前），纵向移动
+// 上下看这张图。图片跟着指针滑动，两端各有一条带子，进入即到顶或到底；右边的小地图显示图有多高、正在显示哪一部分；
+// 比海报宽的图整张显示在它自己的模糊副本上；看下半部分时名字淡出。海报有焦点时，← → 翻图，↑ ↓ 上下看。每张海报在
+// 接近屏幕时读一次（很小）；页面重画时保留；在那之前显示封面。
 const drawn = new Map();
 const drawnKey = c => `${c.id}|${state.nsfw}|${state.readEpoch}`;
 function drawPictures(c) {
@@ -77,10 +75,10 @@ function drawPictures(c) {
       return [pick, ...items.map(x => x.uuid).filter(u => u !== pick)];
     }, () => [c.cover]);
 }
-const LOOK_EDGE = .14;   // the band at the top and at the bottom that reaches the end
+const LOOK_EDGE = .14;   // 顶部和底部那条进入即到头的带子
 const bigPoster = a => !!(a.closest('.cast-board') && !a.previousElementSibling);
 const lookSrc = (a, u) => `/image?id=${encodeURIComponent(u)}&size=${bigPoster(a) ? 'medium' : 'thumb'}`;
-// The poster becomes the viewer once its first picture is loaded, so the cover never flashes away to nothing.
+// 海报的第一张图加载好之后才变成查看器，这样封面绝不会闪一下变成空白。
 function lookFill(a, list) {
   const first = new Image();
   first.onload = first.onerror = () => {
@@ -94,7 +92,7 @@ function lookFill(a, list) {
   };
   first.src = lookSrc(a, list[0]);
 }
-// How the shown picture sits in the poster: tall (look down it), wide (show it whole) or fitting.
+// 显示的图在海报里怎么放：高的（往下看）、宽的（整张显示）或正好合适。
 function lookShape(a) {
   const pic = a.querySelector('.look-img .pic.on'), box = a.querySelector('.look-img');
   if (!pic?.naturalWidth) return {kind: 'fit', seen: 1};
@@ -116,7 +114,7 @@ function lookDraw(a) {
   L.raf = moving ? requestAnimationFrame(() => lookDraw(a)) : 0;
 }
 const lookKick = a => { if (!a.look.raf) a.look.raf = requestAnimationFrame(() => lookDraw(a)); };
-// The picture to show: the hidden layer loads it, then the two layers swap with a short fade.
+// 要显示的图：隐藏的那一层先加载它，然后两层以一个短的淡入淡出互换。
 function lookShow(a, i) {
   const L = a.look; if (i === L.i) return;
   L.i = i;
@@ -144,10 +142,9 @@ function lookKey(a, key) {
   else { L.target = Math.min(1, Math.max(0, L.target + (key === 'ArrowUp' ? -.25 : .25))); L.capTarget = L.target > .5 ? .15 : 1; }
   lookKick(a);
 }
-// A touch screen has no hovering (#300): dragging a poster sideways flips its pictures, one every LOOK_STEP px (to the
-// left for the next, as photos are swiped), and while the finger stays down, moving it up and down looks over the
-// picture. A drag that starts up or down scrolls the page (touch-action: pan-y); a tap still opens the character, and
-// the click that ends a drag does not. The picture flipped to stays when the finger lifts.
+// 触摸屏没有悬停（#300）：横向拖动海报翻它的图，每 LOOK_STEP px 一张（向左是下一张，和划照片一样）；手指一直按着时，
+// 上下移动就是上下看这张图。上下方向开始的拖动滚动页面（touch-action: pan-y）；轻点仍然打开角色，拖动结束时的那次
+// 点击则不会。手指抬起时停在翻到的那张图上。
 const LOOK_STEP = 36;
 let lookDrag = null;
 function lookDown(e) {
@@ -202,7 +199,7 @@ function tiers(list, showWork) {
     (mid.length ? `<section class="cast-sec"><h3>${t('常见')}<small>${t('5–19 张 · {n} 位', {n: number(mid.length)})}</small></h3><div class="cast-roster">${mid.map(c => `<a class="cast-rs" href="${charHash(c.id)}" title="${esc(nameTip(c))}">${avatar(c, 72)}<b>${esc(c.name)}</b><small>${showWork && c.work_name ? esc(c.work_name) + ' · ' : ''}${t('{n} 张', {n: c.count})}</small></a>`).join('')}</div></section>` : '') +
     (small.length ? `<section class="cast-sec"><h3>${t('偶尔')}<small>${t('不到 5 张 · {n} 位', {n: number(small.length)})}</small></h3><div class="cast-chips">${small.map(c => `<a class="cast-chip" href="${charHash(c.id)}" title="${esc(nameTip(c))}">${avatar(c, 22)}${esc(c.name)}<small>${c.count}</small></a>`).join('')}</div></section>` : '');
 }
-// 总览, the biggest works, then 原创角色 and 未归作品 at the end (#293: they are not works; 最近 30 天 lives in 总览).
+// 总览、最大的几个作品，然后是排在最后的原创角色和未归作品（#293：它们不是作品；「最近 30 天」在总览里）。
 function castTabs(works) {
   const real = works.filter(w => !w.pseudo), top = real.slice(0, 14);
   const current = !['all', 'recent'].includes(cast.tab) && !works.some(w => w.pseudo && w.key === cast.tab) && !top.some(w => w.key === cast.tab) ? works.find(w => w.key === cast.tab) : null;
@@ -247,7 +244,7 @@ function castList() {
 export function drawCast() {
   if (state.route.page !== 'characters' || state.route.section) return;
   const works = castWorks(), root = $('charIndex');
-  // Prefixed: a bare 'shelf' would pick up the 作品 page's .shelf (narrow flex column, #274).
+  // 带前缀：单独一个 'shelf' 会套上「作品」页的 .shelf（窄的 flex 列，#274）。
   root.className = 'char-index cast cast-' + cast.mode;
   reconcileSections(root, cast.mode === 'list' ? [['list', `<div class="cast-listview">${castList()}</div>`]]
     : [...(cast.list ? [] : [['tabs', castTabs(works)]]), ['pane', `<div class="cast-pane">${castPane(works)}</div>`]]);
@@ -259,8 +256,8 @@ export function drawCast() {
   watchPosters(root);
 }
 
-// 只当标签 (#293): mascots and player stand-ins (the default ones included) are tags, not characters. One place to see
-// them all, turn a character into one, and turn one back.
+// 只当标签（#293）：吉祥物和玩家替身（包括默认的那些）是标签，不是角色。在一处看到全部，把一个角色变成标签，或把它
+// 变回来。
 export async function openTagged() {
   const d = openDialog({title: t('只当标签的角色'), cls: 'tagged-dialog',
     body: `<p class="muted-note">${t('吉祥物、玩家化身（老师、博士、训练员这类）可以只当标签：不算角色，不出现在角色列表里，同框也不算多人图；图上仍挂着这个标签，可以按它筛选。')}</p>
@@ -285,8 +282,8 @@ export async function openTagged() {
   refresh();
 }
 
-// ---------- 资料库 · 作品: the work tree, its Danbooru links and the watch list (#198) ----------
-// Watching a work means the index check asks Danbooru (work name only) for characters the local index lacks.
+// ---------- 资料库 · 作品：作品树、它的 Danbooru 关联和关注列表（#198） ----------
+// 关注一个作品，意味着索引检查会去问 Danbooru（只发作品名）有哪些本地索引还没有的角色。
 export const shelf = {q: '', filter: 'all'};
 export async function renderShelf() {
   const route = state.route, token = session.token;
@@ -296,7 +293,7 @@ export async function renderShelf() {
   if (route !== state.route || token !== session.token) return;
   if (state.route.page === 'characters' && state.route.section === 'works') { renderHeading(); drawShelf(); }
 }
-// A watch toggle needs a Danbooru work tag the person has checked; the index check searches by that tag.
+// 关注开关需要一个用户核对过的 Danbooru 作品 tag；索引检查按这个 tag 搜索。
 function watchSwitch(w) {
   const on = state.index?.watch.works.includes(w.id);
   return `<label class="shelf-watch${w.watchable ? '' : ' off'}" title="${w.watchable ? t('定期检查 Danbooru 上这部作品还没收录的角色（只发送作品名）') : t('先在「编辑作品」里核对 Danbooru 作品 tag，才能关注')}"><input type="checkbox" class="switch" data-watch="${esc(w.id)}" ${on ? 'checked' : ''} ${w.watchable || on ? '' : 'disabled'}><span>${t('关注新角色')}</span></label>`;
@@ -341,7 +338,7 @@ async function saveWatchList(works) {
   catch (e) { toast(e.message); }
   renderIndexBody(); renderHeading();
 }
-// From the Danbooru search: an existing local work with that tag, or one the person picks or creates for it.
+// 来自 Danbooru 搜索：带这个 tag 的已有本地作品，或用户为它挑选或新建的一个。
 async function adoptWatch(r) {
   try {
     const id = await watchTarget(r, (title, works) => chooseWork(title, works, '', t('新建作品')));
@@ -350,8 +347,8 @@ async function adoptWatch(r) {
     if (!state.index.watch.works.includes(id)) await saveWatchList([...state.index.watch.works, id]); else renderIndexBody();
   } catch (e) { toast(e.message); }
 }
-// After pictures are set to characters (#293): when they belong to one work, the toast offers to watch it for new
-// characters, or says it is watched already. A work without a checked Danbooru tag opens its dialog to find one.
+// 图片设为角色之后（#293）：它们属于同一个作品时，toast 提议关注这个作品的新角色，或说明它已在关注。没有核对过的
+// Danbooru tag 的作品会打开它的对话框去找一个。
 export async function offerWatch(ids) {
   const chars = await Promise.all(ids.map(id => state.charMap.get(id) || fetchChar(id).catch(() => null)));
   const works = [...new Set(chars.map(c => c?.kind === 'oc' ? null : c?.work_id).filter(Boolean))];
@@ -369,8 +366,8 @@ export async function createWork() {
   const w = await workDialog(null);
   if (w) toast(w.watch ? t('已新建作品「{name}」并关注它的新角色', {name: w.name}) : t('已新建作品「{name}」', {name: w.name}));
 }
-// One dialog for a new work and for editing one: a Danbooru search that fills the tag (and the name, when empty), the
-// name, the tag the person has checked, an optional parent, and (with a tag) watching it for new characters (#293).
+// 新建作品和编辑作品共用一个对话框：一个填 tag（名字为空时也填名字）的 Danbooru 搜索、名字、用户核对过的 tag、可选的
+// 上级作品，以及（有 tag 时）关注它的新角色（#293）。
 function workDialog(w, {watch = false} = {}) {
   const works = state.index?.works || [], watched = new Set(state.index?.watch?.works || []);
   return new Promise(resolve => {
@@ -401,7 +398,7 @@ function workDialog(w, {watch = false} = {}) {
         } catch (err) { toast(err.message); resolve(null); }
       }});
     const q = sel => d.querySelector(sel), already = w && watched.has(w.id);
-    let filled = '';  // the name the search filled in, replaced by the next pick
+    let filled = '';  // 搜索填进来的名字，下一次挑选会替换它
     const tagNote = () => {
       const tag = q('#wdTag').value.trim(), owner = tag && works.find(x => x.tag === tag && x.id !== w?.id);
       q('#wdTagNote').innerHTML = owner ? `<span class="warn">${t('图库里的「{name}」已经用了这个 tag', {name: esc(owner.name)})}</span>`
@@ -428,7 +425,7 @@ function workDialog(w, {watch = false} = {}) {
     });
   });
 }
-// Characters the last index check found on Danbooru for watched works; adding one downloads ~20 public reference pictures.
+// 上次索引检查在 Danbooru 上为关注的作品找到的角色；添加一个会下载约 20 张公开参考图。
 export function openIndexAdd(tag = '') {
   const token = session.token, x = state.index, list = (x?.check?.missing || []).filter(r => !tag || r.copyright === tag);
   if (!list.length) return;
@@ -455,10 +452,10 @@ export function openIndexAdd(tag = '') {
   note();
 }
 
-// ---------- watching a work: the picker under the works tree ----------
+// ---------- 关注作品：作品树下面的选择器 ----------
 let indexSkip = new Set(), watchDraft = '';
-// Work picker: works your library already has (instant, local names and aliases), then Danbooru
-// copyright tags for the typed text (only the text goes out). Picking one yields an exact tag.
+// 作品选择器：先是你的图库已有的作品（即时，本地名字和别名），然后是按输入文字查到的 Danbooru copyright tag（只发出
+// 文字）。挑一个就得到一个确切的 tag。
 export function wireWatchAdd(x, add) {
   const token = session.token, input = $('watchAdd'), menu = $('watchMenu'), watched = new Set(x.watch.works);
   let list = [], index = 0, gen = 0, localTimer = 0, remoteTimer = 0;
@@ -505,14 +502,14 @@ export function wireWatchAdd(x, add) {
 
     }
   };
-  menu.onmousedown = e => e.preventDefault();  // keep focus in the input while clicking an option
+  menu.onmousedown = e => e.preventDefault();  // 点选项时焦点留在输入框里
   menu.onclick = e => { const b = e.target.closest('[data-i]'); if (b) pick(Number(b.dataset.i)); };
   if (document.activeElement === input || watchDraft) { input.focus(); input.setSelectionRange(input.value.length, input.value.length); }
 }
 
-// The 资料库 pages' handlers. Called once, when the page starts.
+// 资料库各页的处理函数。页面启动时调用一次。
 export function wireCatalog() {
-  // The posters' viewer (#293): the pointer across and down a poster, leaving it, and the arrow keys on a focused one.
+  // 海报的查看器（#293）：指针在海报上横向和纵向移动、离开海报，以及有焦点的海报上的方向键。
   $('charIndex').addEventListener('mousemove', lookMove);
   $('charIndex').addEventListener('mouseout', e => { const a = e.target.closest?.('.cast-poster.look'); if (a && !a.contains(e.relatedTarget)) lookMove({type: 'leave', target: a}); });
   $('charIndex').addEventListener('keydown', e => { const a = e.target.closest?.('.cast-poster.look'); if (a && ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key)) { e.preventDefault(); lookKey(a, e.key); } });
