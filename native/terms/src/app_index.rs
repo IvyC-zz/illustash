@@ -640,7 +640,16 @@ impl Updater {
             if let Err(ref e) = result {
                 // 只写原因：错误的类别（"不合法：…"）是给代码看的，不是给人看的（#287）。
                 let message = ctx.stop_reason().unwrap_or_else(|| e.reason()).chars().take(300).collect::<String>();
-                update(&state, json!({"status":"error","kind":kind,"message":message,"finished_at":now()}));
+                let d = crate::diagnostics::failure(
+                    crate::diagnostics::Operation::Index,
+                    crate::diagnostics::Stage::Background,
+                    e,
+                    crate::diagnostics::Publication::MayBePartial,
+                );
+                update(
+                    &state,
+                    json!({"status":"error","kind":kind,"message":message,"finished_at":now(), "diagnostic":d.value()}),
+                );
             }
             result
         }));

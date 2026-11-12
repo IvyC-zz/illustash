@@ -794,8 +794,18 @@ impl Research {
                             let _ = c.execute("UPDATE research_runs SET error=? WHERE status='pending'", [&message]);
                         }
                     }
-                    *state.lock().expect("research state mutex poisoned") =
-                        Json::object([("status", "error".into()), ("message", e.reason().into())]).into();
+                    let d = crate::diagnostics::failure(
+                        crate::diagnostics::Operation::Research,
+                        crate::diagnostics::Stage::Background,
+                        &e,
+                        crate::diagnostics::Publication::Unknown,
+                    );
+                    *state.lock().expect("research state mutex poisoned") = Json::object([
+                        ("status", "error".into()),
+                        ("message", e.reason().into()),
+                        ("diagnostic", d.value().into()),
+                    ])
+                    .into();
                     if let Some(tx) = reply {
                         let _ = tx.send(Err(Error::Invalid(e.to_string())));
                     }

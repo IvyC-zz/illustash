@@ -155,6 +155,14 @@ fn respond(request: Request, payload: Json, status: u16, route: &str) {
     }
 }
 fn failure(request: Request, err: Error, write: bool) {
+    use crate::diagnostics::{self, Publication, Stage};
+    // 传输层不知道每个操作的发布边界，不能把已发布后的登记失败说成「全部回滚」。
+    let diagnostic = diagnostics::failure(
+        diagnostics::operation(request.url()),
+        if write { Stage::Write } else { Stage::Read },
+        &err,
+        if write { Publication::Unknown } else { Publication::NotApplicable },
+    );
     let (payload, status) = match err {
         Error::Invalid(message) => (error(&message), 400),
         Error::Network(message) => (error(&message), 502),
@@ -163,15 +171,25 @@ fn failure(request: Request, err: Error, write: bool) {
             eprintln!("HTTP native: {err}");
             (
                 error(if write {
-                    "保存失败，未提交的操作已回滚；请查看启动终端"
+                    "保存失败，请先核对操作结果；可在设置的关于页复制诊断信息"
                 } else {
-                    "读取失败，请重试；详情请查看启动终端"
+                    "读取失败，请重试；可在设置的关于页复制诊断信息"
                 }),
                 500,
             )
         }
     };
-    respond(request, payload, status, "core");
+    match http::json_response(&request, &payload, status, "core") {
+        Ok(mut response) => {
+            let value = diagnostic.value().to_string();
+            response.add_header(
+                tiny_http::Header::from_bytes("X-Illustash-Diagnostic", value.as_bytes())
+                    .expect("diagnostic header is ASCII JSON"),
+            );
+            let _ = request.respond(response);
+        }
+        Err(e) => eprintln!("HTTP response: {e}"),
+    }
 }
 fn unavailable(request: Request) {
     respond(request, error("接口或可选研究任务不可用"), 502, "unavailable");
@@ -545,6 +563,7 @@ fn rescue_reporting(path: &Path, root: &Path) -> Result<crate::app_rescue::Repor
 }
 
 pub(crate) fn run(args: &[String]) -> Result<u8> {
+    crate::diagnostics::initialize();
     // 管道归属在初始化之前就记下，所以即使父进程很早崩溃，也会走正常的停止和 join 路径。
     // 除非明确要求，从不读 CLI 的 stdin。
     let desktop_closed = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));

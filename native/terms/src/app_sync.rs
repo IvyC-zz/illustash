@@ -168,6 +168,15 @@ impl Syncer {
                         })
                         .into(),
                     );
+                    if s.status() == Status::Error || ctx.timed_out() {
+                        let d = crate::diagnostics::failure(
+                            crate::diagnostics::Operation::Sync,
+                            crate::diagnostics::Stage::Background,
+                            &e,
+                            crate::diagnostics::Publication::MayBePartial,
+                        );
+                        s.set("diagnostic", d.value().into());
+                    }
                     s.set("message", stop_message(cancel, Some(&ctx), &e).into());
                     s.set("finished_at", now().into());
                     Err(e)

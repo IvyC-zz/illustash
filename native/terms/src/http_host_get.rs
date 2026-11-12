@@ -138,6 +138,7 @@ fn progress(request: &Request) -> bool {
 }
 fn read(request: &Request, host: &Host, session: &Session, path: &str) -> Result<Option<(Json, u16)>> {
     match path {
+        "/api/diagnostics" => Ok(Some((crate::diagnostics::report().into(), 200))),
         "/api/provenance" => session.provenance.info().map(|v| Some((v, 200))),
         "/api/index" => {
             if progress(request) {

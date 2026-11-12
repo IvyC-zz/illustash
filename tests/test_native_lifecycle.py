@@ -917,3 +917,66 @@ class NativeLifecycleTest(unittest.TestCase):
         process, _ = self.start(self.lib.path, command=[str(script)])
         self.assertIsNone(process.poll())
         self.assertFalse(self.sentinel.exists())
+
+    def test_diagnostics_http_failure_survives_restart_without_request_secrets(self):
+        backup = self.root / 'before-diagnostic.sqlite'
+        with sqlite3.connect(self.lib.db) as source, sqlite3.connect(backup) as dest:
+            source.backup(dest)
+        with sqlite3.connect(self.lib.db) as db:
+            db.execute('DROP TABLE asset_tags')
+        response = self.request('/api/user-tags?q=synthetic-private-filename.png&token=synthetic-secret')
+        self.assertEqual(response['status'], 500, response['body'])
+        error = json.loads(response['body'])['error']
+        self.assertNotIn('终端', error)
+        receipt = json.loads(response['headers']['X-Illustash-Diagnostic'])
+        self.assertTrue(receipt['stored'])
+        self.assertEqual(receipt['publication'], 'not_applicable')
+        report = json.loads(self.request('/api/diagnostics')['body'])
+        record = next(r for r in report['records'] if r['id'] == receipt['id'])
+        self.assertEqual(record['cause'], 'database')
+        self.assertEqual(record['stage'], 'read')
+        for secret in ('synthetic-private-filename', 'synthetic-secret', str(self.root), self.token):
+            self.assertNotIn(secret, json.dumps(report))
+        # 修回合成数据库，重启宿主后仍能读到原来同一个编号。
+        self.stop(self.process)
+        with sqlite3.connect(backup) as source, sqlite3.connect(self.lib.db) as dest:
+            source.backup(dest)
+        self.process, self.log = self.start(self.lib.path)
+        self.token = json.loads(self.request('/api/bootstrap')['body'])['token']
+        self.assertIn(receipt['id'], [r['id'] for r in json.loads(self.request('/api/diagnostics')['body'])['records']])
+
+    def test_diagnostics_storage_failure_keeps_original_http_error_and_business_state(self):
+        before = dump(self.lib.db)
+        directory = self.support / 'diagnostics'
+        shutil.rmtree(directory)
+        directory.write_text('synthetic non-directory')
+        response = self.request('/api/cache', {'action': 'synthetic-invalid-action'})
+        self.assertEqual(response['status'], 400)
+        self.assertEqual(json.loads(response['body']), {'error': '未知操作'})
+        receipt = json.loads(response['headers']['X-Illustash-Diagnostic'])
+        self.assertFalse(receipt['stored'])
+        self.assertEqual(receipt['publication'], 'unknown')
+        self.assertEqual(receipt['retry'], 'check_state')
+        self.assertEqual(dump(self.lib.db), before)
+        report = json.loads(self.request('/api/diagnostics')['body'])
+        self.assertFalse(report['available'])
+        self.assertEqual(report['records'], [])
+
+    def test_diagnostics_background_import_records_failure_before_polling(self):
+        invalid = self.root / 'synthetic-private-image.zip'
+        invalid.write_bytes(b'not a zip: synthetic-secret')
+        started = self.request('/api/libraries/import', {'path': str(invalid)})
+        self.assertEqual(started['status'], 200, started['body'])
+        # 先查持久记录而不是任务状态，保证不是 UI 轮询才触发记录。
+        reports = []
+        def recorded():
+            report = json.loads(self.request('/api/diagnostics')['body'])
+            reports[:] = [r for r in report['records'] if r['operation'] == 'archive']
+            return bool(reports)
+        wait_until(recorded, timeout=10)
+        job = json.loads(self.request('/api/imports')['body'])
+        self.assertEqual(job['status'], 'error', job)
+        self.assertEqual(job['diagnostic']['id'], reports[0]['id'])
+        self.assertEqual(reports[0]['publication'], 'not_committed')
+        for secret in (invalid.name, str(self.root), 'synthetic-secret'):
+            self.assertNotIn(secret, json.dumps(reports))
