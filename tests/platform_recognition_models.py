@@ -1,7 +1,7 @@
 """显式、需主动选择运行的模型验收；只用生成的图片/锚点。
 
 除 AcceleratedRecognitionTest 外，每个用例都以 ILLUSTASH_CPU_ONLY=1 运行，与 Python ONNX Runtime 的 CPU
-参考结果逐位比较。AcceleratedRecognitionTest 在本平台已有的加速器上运行（Apple 芯片上 CCIP 用 CoreML，#270；
+参考结果逐位比较。AcceleratedRecognitionTest 在本平台已有的加速器上运行（Apple 芯片上 WD 与 CCIP 用 CoreML，#270；
 Windows x64 上 WD 和 CCIP 用 DirectML，#271），在 #213 测得的界限内比较。
 不随 discover 运行，单独运行。必需的输入：ILLUSTASH_TERMS_BIN、
 ILLUSTASH_RECOGNITION_ADAPTER_BIN、ILLUSTASH_RECOGNITION_COMPUTE_BIN、
@@ -75,6 +75,9 @@ class RecognitionModelTest(unittest.TestCase):
                   (ROOT / 'tags/tags_v3.csv', cls.resources / 'tags/tags_v3.csv')]
         copies += [(models / name, cls.resources / 'models' / name)
                    for name in ('wd_swinv2_v3_emb.onnx', 'ccip/model_feat.onnx')]
+        variant = json.loads((ROOT / 'native/terms/models.json').read_text())['wd_coreml']['file']['path']
+        if sys.platform == 'darwin' and (models / variant).is_file():
+            copies.append((models / variant, cls.resources / 'models' / variant))
         # Windows 上的运行库从它自己的文件夹加载 DirectML.dll（#271），与安装后一致。
         copies += [(runtime.parent / name, cls.resources / 'onnxruntime' / name)
                    for name in ('DirectML.dll',) if sys.platform == 'win32' and (runtime.parent / name).is_file()]
@@ -435,7 +438,7 @@ def accelerator():
 
 
 # 加速器运行哪些模型；其余的留在 CPU 上，逐位一致。
-ACCELERATED = {'coreml': ('ccip',), 'directml': ('wd', 'ccip')}.get(accelerator(), ())
+ACCELERATED = {'coreml': ('wd', 'ccip'), 'directml': ('wd', 'ccip')}.get(accelerator(), ())
 
 
 @unittest.skipUnless(accelerator(), 'no accelerated recognition backend on this platform')
@@ -470,7 +473,7 @@ class AcceleratedRecognitionTest(RecognitionModelTest):
                 self.assertTrue(any(cache[0].rglob('*')), '编译模型已缓存')
         reference = np.asarray([r['ccip'] for r in self.reference], np.float64)
         for i, (expected, actual) in enumerate(zip(self.reference, got)):
-            # 在 CPU 上（CoreML 时）：逐位一致，标签也一样；DirectML 上在 WD_ATOL 以内。
+            # 两种加速后端都以原始 CPU 输出为参考，WD 概率在 WD_ATOL 以内。
             self.assert_wd(np.asarray(actual['probs'], np.float32), expected['probs'])
             self.assert_wd_vector(np.asarray(actual['wd'], np.float32), expected['wd'])
             self.assert_labels(actual['labels'], labels('synthetic', expected['probs'], self.tags))
@@ -482,7 +485,12 @@ class AcceleratedRecognitionTest(RecognitionModelTest):
             nearest = lambda v: max(others, key=lambda j: v @ reference[j] / np.linalg.norm(v) / np.linalg.norm(reference[j]))
             self.assertEqual(nearest(feature), nearest(reference[i]), i)
         # 再跑一次（CoreML 上用编译缓存）：输出相同，逐位一致。
+        cache_state = lambda: {str(p.relative_to(self.shared)): (p.stat().st_ino, p.stat().st_mtime_ns, p.stat().st_size)
+                               for p in (self.shared / 'coreml-cache').rglob('*') if p.is_file() and p.name != 'compile.lock'}
+        before = cache_state() if accelerator() == 'coreml' else None
         again = self.infer()
+        if before is not None:
+            self.assertEqual(cache_state(), before, 'WD 与 CCIP 均复用已有编译文件')
         self.assertEqual([r['ccip'] for r in again], [r['ccip'] for r in got])
         self.assertEqual([r['probs'] for r in again], [r['probs'] for r in got])
 
@@ -513,7 +521,7 @@ class AcceleratedRecognitionTest(RecognitionModelTest):
         self.assertGreaterEqual(cosine.min(), self.COSINE)
 
     def assert_labels(self, actual, expected):
-        """DirectML 上，距 0.001 截断线在 WD_ATOL 以内的标签可能出现或消失，存储的置信度第四位小数可能差 1；
+        """Core ML / DirectML 上，距 0.001 截断线在 WD_ATOL 以内的标签可能出现或消失，存储的置信度第四位小数可能差 1；
         其他都不变，处在判定阈值上的 tag 保持不变。"""
         if 'wd' not in ACCELERATED:
             return super().assert_labels(actual, expected)
@@ -526,7 +534,7 @@ class AcceleratedRecognitionTest(RecognitionModelTest):
         for cut in (.2, .35, .5, .85):
             self.assertEqual({k for k, v in got.items() if v >= cut}, {k for k, v in want.items() if v >= cut}, cut)
 
-    # test_candidate_batches_bad_image_and_synthetic_anchor_claims 按继承来的样子运行：WD 输出和标签逐位一致，
+    # 继承的批次测试以原始模型身份导入；WD 输出与保存标签按数值边界比较，
     # CCIP 向量、距离和置信度经 assert_ccip 比较，认领的角色完全一致。
 
     def test_installed_no_anchor_bad_image_and_explicit_dependency_failures(self):
@@ -555,3 +563,29 @@ class AcceleratedRecognitionTest(RecognitionModelTest):
             self.assertEqual(status['reason'], None)
         self.infer()
         self.assertEqual(self.status()['ccip']['used'], accelerator(), 'the next worker compiles again')
+
+
+    @unittest.skipUnless(accelerator() == 'coreml', 'WD Core ML execution variant')
+    def test_missing_or_corrupt_wd_variant_falls_back_to_original_cpu(self):
+        entry = json.loads((ROOT / 'native/terms/models.json').read_text())['wd_coreml']['file']
+        variant = self.resources / 'models' / entry['path']
+        saved = variant.with_suffix('.saved')
+        variant.rename(saved)
+        try:
+            for corrupt in (False, True):
+                if corrupt:
+                    shutil.copy2(saved, variant)
+                    with variant.open('r+b') as stream:
+                        first = stream.read(1)
+                        stream.seek(0)
+                        stream.write(bytes([first[0] ^ 1]))
+                got = self.infer()
+                self.assertEqual(self.status()['wd']['used'], 'cpu')
+                self.assertIn('加速文件', self.status()['wd']['reason'])
+                self.assertEqual(self.status()['ccip']['used'], 'coreml')
+                for expected, actual in zip(self.reference, got):
+                    np.testing.assert_array_equal(np.asarray(actual['probs'], np.float32), expected['probs'])
+                    np.testing.assert_array_equal(np.asarray(actual['wd'], np.float32), expected['wd'])
+        finally:
+            variant.unlink(missing_ok=True)
+            saved.rename(variant)

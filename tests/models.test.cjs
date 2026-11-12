@@ -112,7 +112,7 @@ test('the acceleration switch shows only where there is an accelerator, and says
   assert.equal(context.accelerationLine(models({acceleration: {available: false, backend: null, on: true, last: {}}})), '');
   const on = models({acceleration: {available: true, backend: 'coreml', on: true, last: {}}});
   assert.match(context.accelerationLine(on), /<b>使用 GPU 加速识别<\/b>/);
-  assert.match(context.accelerationLine(on), /神经引擎（Core ML）/);
+  assert.match(context.accelerationLine(on), /Core ML 加速标签与角色特征/);
   assert.match(context.accelerationLine(on), /data-acceleration checked/);
   assert.doesNotMatch(context.accelerationLine(on), /<em>/);
   const off = models({acceleration: {available: true, backend: 'directml', on: false, last: {}}});
@@ -123,4 +123,15 @@ test('the acceleration switch shows only where there is an accelerator, and says
     /<em>上次没能用上加速，已改用 CPU：coreml &lt;ccip&gt;: failed<\/em>/);
   assert.doesNotMatch(context.accelerationLine(models({acceleration: {available: true, backend: 'coreml', on: false, last: fell}})), /<em>/,
     'switched off: nothing to explain');
+});
+
+
+test('WD 加速文件可补下载，缺失不阻塞识别，下载中仍可取消', () => {
+  const m = models({status: 'ready', optional_missing: true, total: 1085 * MB, have: 618 * MB});
+  assert.equal(context.modelsWaiting(m), false);
+  assert.match(context.modelsLine(m), /WD 暂用 CPU/);
+  assert.match(context.modelsActions(m), /下载 WD 加速文件（约 467.0 MB）/);
+  assert.match(context.modelsActions(m), /data-models="import"/);
+  assert.match(context.modelsActions({...m, job: {kind: 'download', status: 'running'}}), /data-models="cancel"/);
+  assert.match(context.modelsActions({...m, optional_missing: false, acceleration: {backend: 'coreml', last: {wd: {reason: '损坏'}}}}), /修复 WD 加速文件/);
 });

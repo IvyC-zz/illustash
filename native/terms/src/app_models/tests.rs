@@ -133,6 +133,78 @@ fn bytes(size: usize, seed: u8) -> Vec<u8> {
 fn sha(data: &[u8]) -> String {
     format!("{:x}", Sha256::digest(data))
 }
+
+fn with_variant(mut place: Place, server: &Server, data: &[u8]) -> Place {
+    let mut manifest = place.manifest.clone();
+    manifest.files.push(Entry {
+        path: "coreml/wd.onnx".into(),
+        size: data.len() as u64,
+        sha256: sha(data),
+        source: Source::Project { url: format!("{}/variant.onnx", server.base) },
+        optional: true,
+    });
+    place.manifest = Box::leak(Box::new(manifest));
+    place
+}
+
+#[test]
+fn optional_download_failure_keeps_originals_ready_and_retry_repairs_the_variant() {
+    let fixture = Fixture::new();
+    let data = bytes(45_678, 37);
+    let server1 = server(fixture.routes(&[], Mode::Normal, true));
+    let place = with_variant(fixture.place(&server1), &server1, &data);
+    let models = models();
+    post(models, &place, json!({"action": "download"})).unwrap();
+    let job = finished(models);
+    assert_eq!(job["status"], "failed");
+    assert_eq!(job["failed_file"], "coreml/wd.onnx");
+    assert!(ready_at(&place.root, place.manifest), "可选文件 404 不阻止识别");
+    for (path, expected) in &fixture.files {
+        assert_eq!(fs::read(place.root.join(path)).unwrap(), *expected);
+    }
+    let info: Value = serde_json::from_str(&info_at(models, &place).dump()).unwrap();
+    assert_eq!(info["status"], "ready");
+    assert_eq!(info["optional_missing"], true);
+    assert_eq!(info["have"].as_u64().unwrap(), fixture.files.iter().map(|(_, b)| b.len() as u64).sum::<u64>());
+    let server2 = serve(vec![("/variant.onnx", data.clone(), Mode::Normal)]);
+    let repaired = with_variant(fixture.place(&server1), &server2, &data);
+    for damage in [false, true] {
+        if damage {
+            fs::write(repaired.root.join("coreml/wd.onnx"), bytes(data.len(), 38)).unwrap();
+        }
+        post(models, &repaired, json!({"action": "download"})).unwrap();
+        assert_eq!(finished(models)["status"], "done");
+        assert_eq!(fs::read(repaired.root.join("coreml/wd.onnx")).unwrap(), data);
+        for (path, expected) in &fixture.files {
+            assert_eq!(fs::read(repaired.root.join(path)).unwrap(), *expected, "原始文件不受补下载影响");
+        }
+    }
+    assert_eq!(server2.hits.lock().unwrap().len(), 2, "只下载缺失或损坏的变体");
+}
+
+#[test]
+fn optional_file_can_be_imported_after_originals_are_ready() {
+    let fixture = Fixture::new();
+    let server = server(fixture.routes(&[], Mode::Normal, true));
+    let original_place = fixture.place(&server);
+    let models = models();
+    post(models, &original_place, json!({"action": "download"})).unwrap();
+    assert_eq!(finished(models)["status"], "done");
+    let data = bytes(45_678, 37);
+    let place = with_variant(original_place, &server, &data);
+    let chosen = fixture.dir.join("renamed.onnx");
+    fs::write(&chosen, &data).unwrap();
+    for damage in [false, true] {
+        if damage {
+            fs::write(place.root.join("coreml/wd.onnx"), bytes(data.len(), 38)).unwrap();
+        }
+        post(models, &place, json!({"action": "import", "paths": [chosen]})).unwrap();
+        let job = finished(models);
+        assert_eq!(job["status"], "done");
+        assert_eq!(job["results"][0]["result"], "accepted");
+        assert_eq!(fs::read(place.root.join("coreml/wd.onnx")).unwrap(), data);
+    }
+}
 /// 三个大小不同的合成文件：根目录里一个大文件，子文件夹里一个，再加一个小 JSON。
 struct Fixture {
     dir: PathBuf,
@@ -166,8 +238,11 @@ impl Fixture {
                     path: path.clone(),
                     size: data.len() as u64,
                     sha256: sha(data),
-                    hf: origin("org/repo", "abc123"),
-                    modelscope: origin("org/repo", "master"),
+                    source: Source::Upstream {
+                        hf: origin("org/repo", "abc123"),
+                        modelscope: origin("org/repo", "master"),
+                    },
+                    optional: false,
                 }
             })
             .collect();
@@ -178,6 +253,7 @@ impl Fixture {
             mirror: "https://mirror.invalid".into(),
             modelscope: "https://modelscope.invalid".into(),
             files: entries,
+            wd_coreml: None,
         }));
         Self { dir, files, manifest }
     }
@@ -520,15 +596,25 @@ fn system_proxy_settings_are_read_for_https() {
 #[test]
 fn the_built_in_manifest_lists_the_packaged_models() {
     let m = manifest();
-    let paths: Vec<_> = m.files.iter().map(|e| e.path.as_str()).collect();
+    let paths: Vec<_> = m.files.iter().filter(|e| !e.optional).map(|e| e.path.as_str()).collect();
     assert_eq!(
         paths,
         ["wd_swinv2_v3_emb.onnx", "ccip/model_feat.onnx", "ccip/model_metrics.onnx", "ccip/metrics.json"]
     );
     for e in &m.files {
         assert_eq!(e.sha256.len(), 64);
-        assert!(e.hf.revision.len() == 40, "the Hugging Face address is pinned to a commit");
+        match &e.source {
+            Source::Upstream { hf, .. } => assert_eq!(hf.revision.len(), 40, "HF 固定提交"),
+            Source::Project { url } => {
+                assert!(e.optional);
+                assert!(url.starts_with("https://github.com/shio-vinyl/illustash/releases/download/wd-coreml-v1/"));
+            }
+        }
     }
+    let variant = m.wd_coreml.as_ref().unwrap();
+    assert_eq!(variant.source_sha256, m.files[0].sha256);
+    assert_eq!(variant.revision, 1);
+    assert_eq!(m.files.iter().any(|e| e.optional), cfg!(all(target_os = "macos", target_arch = "aarch64")));
     assert_eq!(base(&m.mirror).unwrap(), m.mirror);
     assert!(m.manual.starts_with("https://github.com/shio-vinyl/illustash/"));
     assert_eq!(configured_root(Path::new("/r"), None), Path::new("/r/models"));

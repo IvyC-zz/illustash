@@ -121,16 +121,17 @@ impl Acceleration {
         let forced = std::env::var_os(CPU_ONLY_ENV).is_some_and(|v| !v.is_empty() && v != "0");
         Self { enabled: AVAILABLE && !forced && crate::app_preferences::acceleration(), shared: shared.map(Into::into) }
     }
-    /// 用绑定的运行库声明的后端（RUNTIME_BACKENDS），否则用平台默认值（#213）：macOS 上只有 CCIP 用 CoreML
-    /// （WD 用 CoreML 并不更快，编译约要十分钟，缓存占 2.1 GB）；Windows 上两个都用 DirectML（#271）。
+    /// 运行库声明优先；macOS 上 WD 的已校验执行变体与 CCIP 都用 Core ML，Windows 都用 DirectML。
     pub fn backend(&self, model: Model) -> Backend {
         if !self.enabled {
             return Backend::Cpu;
         }
-        let default = match model {
-            Model::Ccip if cfg!(target_os = "macos") => Backend::CoreMl,
-            _ if cfg!(windows) => Backend::DirectMl,
-            _ => Backend::Cpu,
+        let default = if cfg!(target_os = "macos") {
+            Backend::CoreMl
+        } else if cfg!(windows) {
+            Backend::DirectMl
+        } else {
+            Backend::Cpu
         };
         match runtime_backends() {
             Ok(Some([wd, ccip])) => {
@@ -190,11 +191,11 @@ impl Acceleration {
         Some(owned.join(key))
     }
     /// 加速器建不起来或运行中失败：删掉它的缓存（坏的可能就是缓存），并记下原因。
-    pub(super) fn fell_back(&self, model: Model, backend: Backend, path: &Path, runtime: &Path, reason: &str) {
+    pub(super) fn fell_back(&self, model: Model, backend: Backend, path: Option<&Path>, runtime: &Path, reason: &str) {
         eprintln!("识别加速：{} 改用 CPU（{}）：{reason}", model.name(), backend.name());
         if backend == Backend::CoreMl {
             let _lock = self.compile_lock(backend);
-            if let Some(cache) = self.coreml_cache(model, path, runtime) {
+            if let Some(cache) = path.and_then(|path| self.coreml_cache(model, path, runtime)) {
                 let _ = fs::remove_dir_all(cache);
             }
         }
@@ -328,7 +329,7 @@ mod tests {
         assert_eq!((off.backend(Model::Wd), off.backend(Model::Ccip)), (Backend::Cpu, Backend::Cpu));
         let on = Acceleration { enabled: true, shared: None };
         let (wd, ccip) = if cfg!(target_os = "macos") {
-            (Backend::Cpu, Backend::CoreMl)
+            (Backend::CoreMl, Backend::CoreMl)
         } else if cfg!(windows) {
             (Backend::DirectMl, Backend::DirectMl)
         } else {
@@ -442,7 +443,7 @@ mod tests {
             cache
         });
         for i in 0..2 {
-            acceleration.fell_back(kinds[i], Backend::CoreMl, &models[i], &runtime, "损坏的编译缓存");
+            acceleration.fell_back(kinds[i], Backend::CoreMl, Some(&models[i]), &runtime, "损坏的编译缓存");
             assert!(!caches[i].exists());
             assert!(caches[1 - i].join("compiled").exists(), "回退不删除另一模型的缓存");
             let status = read_status(&root.join("shared").join(STATUS_FILE));

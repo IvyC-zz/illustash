@@ -135,7 +135,7 @@
 
  "desktop/src/bridge.rs":"21a05b8804b091edae92c99727a002470d995224f9ac0c212c2ea894cb18f56c",
 
- "desktop/src/bundled_workers.rs":"80a974d9ba7e347266d253ef08b372624a732360f1af422c6aa1987b059c9fe4",
+ "desktop/src/bundled_workers.rs":"7e8c129ac24612f967825dd16166c8339ce5d1b1287650e49d423edf41814897",
 
  "desktop/src/i18n.rs":"ab24cd127b728f156f456069c1c7e10de2ea10cbeea476ef4eb552daa2ae931b",
 
@@ -219,7 +219,7 @@
 
  "native/terms/src/app_migration_sql/provenance.sql":"a780f1f8837dd2c90a556539c114d56cdaa513b057fb667bf0c5c9d604f75934",
 
- "native/terms/src/app_models.rs":"2c09d1f5c58ddb3e8088238f8d6691bc63857209a67dcd03d6312181a58bd368",
+ "native/terms/src/app_models.rs":"d11378ef80f0834074b96d3b7a699ec00d24ddb8d0fa4a252d3faf9bafc47a47",
 
  "native/terms/src/app_name_sources.rs":"effedaf83af896ecd880784490e4b1483fe05c28c3098a098c2ae80c68a2f458",
 
@@ -325,13 +325,13 @@
 
  "native/terms/src/recognition_compute/anchors.rs":"aec9a4c123a723ece8dfdda208e60c7cdf5c8ae3997719299e02ddae275f749a",
 
- "native/terms/src/recognition_compute/backend.rs":"a83b801578fe18e20451829bbcf80ed553960a0b7d4752c2ea71ce96e791fe17",
+ "native/terms/src/recognition_compute/backend.rs":"f099abc2b66366c43eaccaf48eccc638b5ad6827bd524ab6a6f9efef29deec80",
 
  "native/terms/src/recognition_compute/claims.rs":"e2ada99076e10bfc3a646a78583ec7c19e99271c0c2eb3e4814cbc53168d486f",
 
  "native/terms/src/recognition_compute/directml.rs":"ecfbfea697971a53b57de9a6ec230d30556f66408b1e096da03fe6fe825d0781",
 
- "native/terms/src/recognition_compute/mod.rs":"30a6f87f8c9818b8735d47f3cbccb23c6218e9c36fb0f3bc383d6ea9357bebd1",
+ "native/terms/src/recognition_compute/mod.rs":"11bf1b1b2c67000007124bdb01c6d2f082f5df2d4769a608ae7d004350806eb2",
 
  "native/terms/src/recognition_compute/models.rs":"4c4218efcc168e429e3a87259135c205a3c3f3b3764683e3a17d837f01f8bf30",
 
@@ -339,7 +339,9 @@
 
  "native/terms/src/recognition_compute/producer.rs":"1d3176240687d019b5b265cbd02fed719863f1086895d45d462b2b6d22bca4c0",
 
- "native/terms/src/recognition_compute/session.rs":"737bfd2ab6076032c418d47e194d4497723a10fd0f6bdb5feb7bc8ca86a0b6e3",
+ "native/terms/src/recognition_compute/session.rs":"1165234b36fe156dd850989aef648660ea3e0dad28dff98ca4fa3bec322a28d1",
+
+ "native/terms/src/recognition_compute/wd_coreml.rs":"deaed63306945926e57c6b59427383bf0334776abb93de94df4e74332b42b96a",
 
  "native/terms/src/research_compute/discriminate.rs":"4b8edfd7ac09adb9441d695914c9ae0adec011a27eb01ec920722c5e15dea2ad",
 

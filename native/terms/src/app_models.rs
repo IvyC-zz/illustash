@@ -3,11 +3,12 @@
 //!
 //! 安全依靠应用内置的清单（native/terms/models.json），而不是字节从哪里来：清单列出每个文件的大小和 SHA-256，
 //! 对不上的文件不管来自哪个来源都拒绝。来源按文件依次尝试：经镜像访问的 Hugging Face 地址（默认 hf-mirror，
-//! 可在设置里更改，作为 `model_mirror` 全应用保存在 preferences.json），然后是 ModelScope 的副本。不做测速。
+//! 可在设置里更改，作为 `model_mirror` 全应用保存在 preferences.json），然后是 ModelScope 的副本。
+//! WD Core ML 派生文件来自项目固定版本的 GitHub Release。不做测速。
 //!
 //! 位置：worker 使用的模型根目录（`ILLUSTASH_MODELS`，否则 `<resources>/models`；见 app_resources）。
 //! 工作在它旁边的 `<root>.partial/` 里进行：每个文件写成 `<path>.part`，哈希对上后改名为它自己的名字，
-//! 全部到齐后把整个文件夹一步改名为根目录（根目录已经存在时逐个文件改名）。取消、失败或中断的下载从不碰根目录；
+//! 原始模型到齐后激活，再下载可选的 WD 加速文件；加速文件失败或中断不影响已就位的原始模型。
 //! 下次运行用 HTTP Range 请求从 `.part` 接着下，或者用户丢弃这个文件夹。
 //!
 //! 联网规则与其他地方一样：用户点击之前什么都不下载；请求是普通的 HTTPS GET，不带任何图库信息。
@@ -27,7 +28,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone)]
 pub struct Manifest {
     pub format: u32,
     /// 在共享数据里给模型文件夹命名，以后的模型包从不会和这一个混在一起。
@@ -37,6 +38,8 @@ pub struct Manifest {
     pub mirror: String,
     pub modelscope: String,
     pub files: Vec<Entry>,
+    /// macOS 的 WD 执行变体；原始文件仍决定模型身份和 CPU 回退。
+    pub wd_coreml: Option<WdCoreMl>,
 }
 #[derive(Deserialize, Clone)]
 pub struct Entry {
@@ -44,8 +47,23 @@ pub struct Entry {
     pub path: String,
     pub size: u64,
     pub sha256: String,
-    hf: Origin,
-    modelscope: Origin,
+    #[serde(flatten)]
+    source: Source,
+    /// 运行时加入本平台的变体；缺失不会阻塞原始模型识别。
+    #[serde(skip)]
+    pub optional: bool,
+}
+#[derive(Deserialize, Clone)]
+#[serde(untagged)]
+enum Source {
+    Upstream { hf: Origin, modelscope: Origin },
+    Project { url: String },
+}
+#[derive(Deserialize, Clone)]
+pub struct WdCoreMl {
+    pub revision: u32,
+    pub source_sha256: String,
+    pub file: Entry,
 }
 #[derive(Deserialize, Clone)]
 struct Origin {
@@ -58,8 +76,16 @@ struct Origin {
 pub fn manifest() -> &'static Manifest {
     static MANIFEST: OnceLock<Manifest> = OnceLock::new();
     MANIFEST.get_or_init(|| {
-        let manifest: Manifest = serde_json::from_str(include_str!("../models.json")).expect("models.json is valid");
+        let mut manifest: Manifest =
+            serde_json::from_str(include_str!("../models.json")).expect("models.json is valid");
         assert!(manifest.format == 1 && !manifest.files.is_empty(), "models.json format");
+        if cfg!(all(target_os = "macos", target_arch = "aarch64")) {
+            if let Some(variant) = &manifest.wd_coreml {
+                let mut file = variant.file.clone();
+                file.optional = true;
+                manifest.files.push(file);
+            }
+        }
         manifest
     })
 }
@@ -79,10 +105,21 @@ pub(crate) fn configured_root(resources: &Path, configured: Option<&Path>) -> Pa
 fn has(dir: &Path, entry: &Entry) -> bool {
     fs::symlink_metadata(dir.join(&entry.path)).is_ok_and(|m| m.is_file() && m.len() == entry.size)
 }
+/// 下载与导入时校验执行变体的已有副本，允许修复同长度损坏；轮询状态不读取大文件。
+fn usable(dir: &Path, entry: &Entry) -> bool {
+    has(dir, entry)
+        && (!entry.optional
+            || crate::recognition_compute::models::hash(&dir.join(&entry.path), &|| Ok(()))
+                .is_ok_and(|sha| sha == entry.sha256))
+}
 /// 每个模型文件都已就位。只有校验过的文件才会移进根目录（见 `activate`），所以这里看有没有就够了；
 /// 识别仍会对它加载的文件计算指纹（recognition_compute::models）。开销很小，每次读状态都可以做。
 fn ready_at(root: &Path, manifest: &Manifest) -> bool {
-    manifest.files.iter().all(|entry| fs::metadata(root.join(&entry.path)).is_ok_and(|m| m.is_file()))
+    manifest
+        .files
+        .iter()
+        .filter(|e| !e.optional)
+        .all(|entry| fs::metadata(root.join(&entry.path)).is_ok_and(|m| m.is_file()))
 }
 /// 桌面外壳为不带模型的安装包设置（#168）：识别、角色索引和自检会等到模型就位，并说明原因。
 /// 不设置时什么都不等（完整安装包、测试和开发运行各有自己的模型文件夹）。
@@ -173,17 +210,21 @@ impl Place {
             .and_then(|text| base(text).ok())
             .unwrap_or_else(|| self.manifest.mirror.clone())
     }
-    /// 一个文件的来源，按顺序：经镜像访问的 Hugging Face 地址，然后是 ModelScope。
-    fn sources(&self, entry: &Entry) -> [(String, String); 2] {
-        let mirror = self.mirror();
-        let (hf, ms) = (&entry.hf, &entry.modelscope);
-        [
-            (host(&mirror), format!("{mirror}/{}/resolve/{}/{}", hf.repo, hf.revision, hf.file)),
-            (
-                host(&self.modelscope),
-                format!("{}/models/{}/resolve/{}/{}", self.modelscope, ms.repo, ms.revision, ms.file),
-            ),
-        ]
+    /// 原始模型经 HF 镜像和 ModelScope；派生文件直接使用清单固定的项目 Release。
+    fn sources(&self, entry: &Entry) -> Vec<(String, String)> {
+        match &entry.source {
+            Source::Project { url } => vec![(host(url), url.clone())],
+            Source::Upstream { hf, modelscope: ms } => {
+                let mirror = self.mirror();
+                vec![
+                    (host(&mirror), format!("{mirror}/{}/resolve/{}/{}", hf.repo, hf.revision, hf.file)),
+                    (
+                        host(&self.modelscope),
+                        format!("{}/models/{}/resolve/{}/{}", self.modelscope, ms.repo, ms.revision, ms.file),
+                    ),
+                ]
+            }
+        }
     }
 }
 
@@ -555,12 +596,8 @@ fn present(root: &Path, partial: &Path, manifest: &Manifest) -> u64 {
         .sum()
 }
 
-fn download(models: &Models, place: &Place) -> std::result::Result<Value, Stop> {
-    let partial = partial_dir(&place.root);
-    fs::create_dir_all(&partial)?;
-    let needed =
-        place.manifest.files.iter().map(|e| e.size).sum::<u64>() - present(&place.root, &partial, place.manifest);
-    if let Ok(free) = crate::platform_filesystem::available_space(&partial) {
+fn check_space(partial: &Path, needed: u64) -> std::result::Result<(), Stop> {
+    if let Ok(free) = crate::platform_filesystem::available_space(partial) {
         if free < needed + (64 << 20) {
             return Err(Stop::Failed(format!(
                 "磁盘空间不足：还需要约 {needed} MB，可用约 {available} MB",
@@ -569,10 +606,39 @@ fn download(models: &Models, place: &Place) -> std::result::Result<Value, Stop> 
             )));
         }
     }
+    Ok(())
+}
+
+fn download(models: &Models, place: &Place) -> std::result::Result<Value, Stop> {
+    let partial = partial_dir(&place.root);
+    fs::create_dir_all(&partial)?;
+    let missing_bytes = |optional| {
+        place
+            .manifest
+            .files
+            .iter()
+            .filter(|e| e.optional == optional)
+            .map(|e| {
+                if has(&place.root, e) || has(&partial, e) {
+                    0
+                } else {
+                    e.size.saturating_sub(fs::metadata(part(&partial, e)).map(|m| m.len()).unwrap_or(0))
+                }
+            })
+            .sum()
+    };
+    check_space(&partial, missing_bytes(false))?;
     let (direct, proxied) = (agent(None), agent(place.proxy.as_deref()));
     let mut meter = Meter::new(models, 0);
+    let mut originals_active = false;
     for entry in &place.manifest.files {
-        if has(&place.root, entry) || has(&partial, entry) {
+        if entry.optional && !originals_active {
+            activate(&place.root, &partial, place.manifest)?;
+            fs::create_dir_all(&partial)?;
+            check_space(&partial, missing_bytes(true))?;
+            originals_active = true;
+        }
+        if usable(&place.root, entry) || usable(&partial, entry) {
             meter.finish(entry.size);
             continue;
         }
@@ -633,6 +699,7 @@ fn download(models: &Models, place: &Place) -> std::result::Result<Value, Stop> 
 /// 所有文件都在 `partial` 里（或已经在根目录里）：一步把它们变成根目录的文件。
 fn activate(root: &Path, partial: &Path, manifest: &Manifest) -> std::io::Result<()> {
     let record = json!({"pack": manifest.pack, "files": manifest.files.iter()
+        .filter(|e| has(root, e) || has(partial, e))
         .map(|e| json!({"path": e.path, "size": e.size, "sha256": e.sha256})).collect::<Vec<_>>()});
     fs::write(partial.join("pack.json"), serde_json::to_string_pretty(&record).expect("pack record") + "\n")?;
     match fs::symlink_metadata(root) {
@@ -709,7 +776,7 @@ fn import(models: &Models, place: &Place, paths: &[PathBuf]) -> std::result::Res
         |name: String, size: u64, reader: &mut dyn Read, meter: &mut Meter| -> std::result::Result<(), Stop> {
             let result = match wanted(size) {
                 None => "unknown",
-                Some(entry) if has(&place.root, entry) || has(&partial, entry) => "already",
+                Some(entry) if usable(&place.root, entry) || usable(&partial, entry) => "already",
                 Some(entry) => {
                     models.set(|job| job["file"] = entry.path.clone().into());
                     let ok = copy_checked(reader, &partial, entry, meter)?;
@@ -751,8 +818,8 @@ fn import(models: &Models, place: &Place, paths: &[PathBuf]) -> std::result::Res
             take(name, u64::MAX, &mut empty, &mut meter)?;
         }
     }
-    let complete = manifest.files.iter().all(|e| has(&place.root, e) || has(&partial, e));
-    if complete && !ready_at(&place.root, manifest) {
+    let complete = manifest.files.iter().filter(|e| !e.optional).all(|e| has(&place.root, e) || has(&partial, e));
+    if complete {
         activate(&place.root, &partial, manifest)?;
     }
     Ok(json!({"results": results}))
@@ -778,14 +845,15 @@ fn info_at(models: &Models, place: &Place) -> Json {
         "worker": std::env::var_os("ILLUSTASH_RECOGNITION_WORKER").is_some_and(|p| !p.is_empty()),
         "location": place.root.display().to_string(),
         "total": manifest.files.iter().map(|e| e.size).sum::<u64>(),
-        "have": if ready { manifest.files.iter().map(|e| e.size).sum::<u64>() } else { present(&place.root, &partial, manifest) },
+        "have": present(&place.root, &partial, manifest),
+        "optional_missing": manifest.files.iter().any(|e| e.optional && !has(&place.root, e)),
         "partial": partial.exists(),
         "missing": missing,
         "mirror": mirror,
         "mirror_default": manifest.mirror,
-        "sources": [host(&mirror), host(&place.modelscope)],
+        "sources": manifest.files.iter().flat_map(|e| place.sources(e).into_iter().map(|(name, _)| name)).collect::<std::collections::BTreeSet<_>>(),
         "manual": manifest.manual,
-        "files": manifest.files.iter().map(|e| json!({"path": e.path, "size": e.size, "sha256": e.sha256})).collect::<Vec<_>>(),
+        "files": manifest.files.iter().map(|e| json!({"path": e.path, "size": e.size, "sha256": e.sha256, "optional": e.optional})).collect::<Vec<_>>(),
         "job": models.snapshot(),
     }))
 }
@@ -833,7 +901,7 @@ fn post_at(models: &'static Models, place: Place, body: &Json) -> Result<Json> {
     }
     match action {
         "download" => {
-            if ready_at(&place.root, place.manifest) {
+            if ready_at(&place.root, place.manifest) && !place.manifest.files.iter().any(|e| e.optional) {
                 return Err(Error::Invalid("识别模型已经就位".into()));
             }
             let total = place.manifest.files.iter().map(|e| e.size).sum();
