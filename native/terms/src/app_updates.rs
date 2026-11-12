@@ -280,7 +280,7 @@ fn by_name(base: &str) -> String {
 /// 一次 GET 没拿到 Release 列表。
 #[derive(Debug, Clone, PartialEq)]
 enum Failure {
-    /// GitHub 答复了这个状态码（4xx、5xx）。
+    /// GitHub 答复了这个状态码（3xx、4xx、5xx）。
     Status(u16),
     /// 没连上、没读完，或回复不是列表；已经是给页面的一句话。
     Other(&'static str),
@@ -290,13 +290,16 @@ impl Failure {
     fn message(&self) -> String {
         match self {
             Self::Status(403 | 429) => "GitHub 暂时拒绝了请求，请稍后再试".into(),
+            // 不跟随的重定向：和改动前一样，算作回复不是版本列表。
+            Self::Status(300..=399) => "GitHub 的回复不是版本列表".into(),
             Self::Status(code) => format!("GitHub 返回了错误（HTTP {code}）"),
             Self::Other(message) => (*message).into(),
         }
     }
 }
 
-/// 对 Release 列表的一次 GET。`agent` 不跟随重定向，301 的回复原样回到这里：它不是列表，按失败处理。
+/// 对 Release 列表的一次 GET。`agent` 不跟随重定向，3xx 的回复原样回到这里，按状态码记为失败，不读回复里的
+/// 跳转地址。
 fn get(agent: &ureq::Agent, address: &str) -> std::result::Result<Value, Failure> {
     const NOT_A_LIST: Failure = Failure::Other("GitHub 的回复不是版本列表");
     let reply = agent
@@ -305,6 +308,7 @@ fn get(agent: &ureq::Agent, address: &str) -> std::result::Result<Value, Failure
         .set("User-Agent", "Illustash-update-check")
         .call();
     let reply = match reply {
+        Ok(reply) if (300..400).contains(&reply.status()) => return Err(Failure::Status(reply.status())),
         Ok(reply) => reply,
         Err(ureq::Error::Status(code, _)) => return Err(Failure::Status(code)),
         Err(ureq::Error::Transport(_)) => return Err(Failure::Other("连不上 GitHub，请检查网络后再试")),
@@ -325,16 +329,17 @@ fn get(agent: &ureq::Agent, address: &str) -> std::result::Result<Value, Failure
     Ok(releases)
 }
 
-/// Release 列表：先按仓库 ID 查；这个地址答复 404（那里没有东西）时，再按「账号/仓库名」查一次，以这一次为准。
-/// 按 ID 的地址没有文档承诺，这样两个地址里有一个可用就查得到。其他失败不换地址：连不上、被限流或 GitHub
-/// 自己出错时，换个地址结果也一样。两个地址都在 `base`（api.github.com）下面。
+/// Release 列表：先按仓库 ID 查；GitHub 明确答复这个地址查不到时（3xx 或 4xx，限流的 403、429 除外），再按
+/// 「账号/仓库名」查一次，以这一次为准。按 ID 的地址没有文档承诺，它哪天不再提供列表（404、410、跳到别处……），
+/// 只要仓库还叫原来的名字就仍查得到。换地址不是跟随重定向：回复里的跳转地址从不使用。其他失败不换地址：
+/// 连不上、被限流或 GitHub 自己出错（5xx）时，换个地址结果也一样。两个地址都在 `base`（api.github.com）下面。
 fn releases(
     base: &str,
     get: impl Fn(&str) -> std::result::Result<Value, Failure>,
 ) -> std::result::Result<Value, Failure> {
     let ask = |address: String| get(&format!("{address}?per_page=30"));
     match ask(by_id(base)) {
-        Err(Failure::Status(404)) => ask(by_name(base)),
+        Err(Failure::Status(code)) if (300..500).contains(&code) && !matches!(code, 403 | 429) => ask(by_name(base)),
         reply => reply,
     }
 }
@@ -496,7 +501,7 @@ mod tests {
     }
 
     #[test]
-    fn releases_are_asked_by_repository_id_and_by_name_only_if_that_address_is_missing() {
+    fn releases_are_asked_by_repository_id_and_by_name_only_if_that_address_is_refused() {
         const BY_ID: &str = "https://api.github.com/repositories/1407079068/releases?per_page=30";
         const BY_NAME: &str = "https://api.github.com/repos/shio-vinyl/illustash/releases?per_page=30";
         // 按顺序答复每次请求，记下问过的地址；多问一次或少问一次都算错。
@@ -513,17 +518,27 @@ mod tests {
         let (only_id, both) = (vec![BY_ID.to_owned()], vec![BY_ID.to_owned(), BY_NAME.to_owned()]);
         // 平时只有一次请求，按仓库 ID。
         assert_eq!(ask(vec![Ok(list.clone())]), (Ok(list.clone()), only_id.clone()));
-        // 按 ID 的地址答复 404：再按「账号/仓库名」查一次，以这一次为准，不论成败；没有第三次。
+        // 按 ID 的地址答复 3xx 或 4xx（限流除外）：再按「账号/仓库名」查一次，以这一次为准，不论成败；没有第三次。
         let missing = Failure::Status(404);
-        assert_eq!(ask(vec![Err(missing.clone()), Ok(list.clone())]), (Ok(list), both.clone()));
-        for second in [missing.clone(), Failure::Status(403), Failure::Other("GitHub 的回复不是版本列表")] {
+        for refused in [301, 302, 308, 400, 401, 404, 410, 451] {
+            let refused = Failure::Status(refused);
+            assert_eq!(
+                ask(vec![Err(refused.clone()), Ok(list.clone())]),
+                (Ok(list.clone()), both.clone()),
+                "{refused:?}"
+            );
+        }
+        for second in
+            [missing.clone(), Failure::Status(301), Failure::Status(403), Failure::Other("GitHub 的回复不是版本列表")]
+        {
             assert_eq!(ask(vec![Err(missing.clone()), Err(second.clone())]), (Err(second), both.clone()));
         }
-        // 其他失败不换地址：限流、GitHub 出错、连不上、回复不是列表（不跟随的 301 也在这一类）。
+        // 其他失败不换地址：限流、GitHub 出错、连不上、回复不是列表。
         for failure in [
             Failure::Status(403),
             Failure::Status(429),
             Failure::Status(500),
+            Failure::Status(503),
             Failure::Other("连不上 GitHub，请检查网络后再试"),
             Failure::Other("GitHub 的回复不是版本列表"),
         ] {
@@ -532,6 +547,7 @@ mod tests {
         // 给页面的说明和按名字查的时候一样。
         assert_eq!(missing.message(), "GitHub 返回了错误（HTTP 404）");
         assert_eq!(Failure::Status(500).message(), "GitHub 返回了错误（HTTP 500）");
+        assert_eq!(Failure::Status(301).message(), "GitHub 的回复不是版本列表");
         for limited in [403, 429] {
             assert_eq!(Failure::Status(limited).message(), "GitHub 暂时拒绝了请求，请稍后再试");
         }

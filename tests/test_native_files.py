@@ -149,7 +149,7 @@ class NativeFilesTest(unittest.TestCase):
 
     def test_update_check_is_app_wide_asks_first_and_checks_each_launch(self):
         # #191：GitHub 的 releases 列表，这里用本机的替身（ILLUSTASH_UPDATE_BASE）；没有任何内容离开本机。
-        # #358：列表按仓库的数字 ID 查；这个地址答复 404 时再按「账号/仓库名」查一次。从不跟随重定向。
+        # #358：列表按仓库的数字 ID 查；GitHub 明确答复这个地址查不到时，再按「账号/仓库名」查一次。从不跟随重定向。
         from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
         import threading
         by_id, by_name = '/repositories/1407079068/releases?per_page=30', '/repos/shio-vinyl/illustash/releases?per_page=30'
@@ -157,11 +157,13 @@ class NativeFilesTest(unittest.TestCase):
         seen, replies = [], {}
 
         class GitHub(BaseHTTPRequestHandler):
+            protocol_version = 'HTTP/1.1'   # 和 GitHub 一样保持连接，不是每次答复后就断开
+
             def do_GET(self):
                 seen.append((self.path, self.headers.get('User-Agent'), self.headers.get('Cookie')))
                 status, body = replies.get(self.path, missing)
                 self.send_response(status); self.send_header('Content-Type', 'application/json')
-                if status == 301:   # GitHub 对改过名的仓库这样答复；跟过去就会多出一条 /moved 的请求。
+                if status == 301:   # GitHub 对改名或转移过的仓库这样答复；跟过去就会多出一条 /moved 的请求。
                     self.send_header('Location', f'http://127.0.0.1:{self.server.server_port}/moved')
                 self.send_header('Content-Length', str(len(body))); self.end_headers(); self.wfile.write(body)
 
@@ -236,20 +238,24 @@ class NativeFilesTest(unittest.TestCase):
             self.assertEqual({(agent, cookie) for _, agent, cookie in seen}, {('Illustash-update-check', None)})
             return [path for path, _, _ in seen], state['latest'], state['error']
 
-        # #358：按 ID 的地址答复 404 时，再按「账号/仓库名」查一次，以这一次为准。
-        older = json.dumps([{'tag_name': 'v98.0.0', 'draft': False, 'prerelease': False}]).encode()
-        replies.update({by_id: missing, by_name: (200, older), '/moved': (200, releases)})
-        self.assertEqual(check(), ([by_id, by_name], '98.0.0', None))
-        # 两个地址都查不到：报错，没有第三次请求，上次查到的版本保留。重定向不跟随，在哪个地址上都一样。
+        # #358：GitHub 明确答复按 ID 的地址查不到时（3xx 或 4xx，限流的 403、429 除外），再按「账号/仓库名」查一次，
+        # 以这一次为准。回复里的 Location 从不使用：跟过去的话替身会多收到一条 /moved 的请求，查到的会是 v97。
+        older, moved = (json.dumps([{'tag_name': tag, 'draft': False, 'prerelease': False}]).encode() for tag in ('v98.0.0', 'v97.0.0'))
+        replies['/moved'] = (200, moved)
+        for status, found, latest in ((404, older, '98.0.0'), (301, releases, '99.0.0'), (410, older, '98.0.0'), (401, releases, '99.0.0')):
+            replies.update({by_id: (status, b'{}'), by_name: (200, found)})
+            self.assertEqual(check(), ([by_id, by_name], latest, None), status)
+        # 两个地址都查不到：报错，没有第三次请求，上次查到的版本保留。
+        replies[by_id] = missing
         for status, error in ((404, 'GitHub 返回了错误（HTTP 404）'), (301, 'GitHub 的回复不是版本列表')):
             replies[by_name] = (status, b'{}')
-            self.assertEqual(check(), ([by_id, by_name], '98.0.0', error), status)
-        # 其他失败不换地址：被限流、GitHub 出错、被重定向。
-        replies[by_name] = (200, releases)
+            self.assertEqual(check(), ([by_id, by_name], '99.0.0', error), status)
+        # 换个地址结果也一样的失败不换：被限流、GitHub 自己出错。
+        replies[by_name] = (200, older)
         for status, error in ((403, 'GitHub 暂时拒绝了请求，请稍后再试'), (429, 'GitHub 暂时拒绝了请求，请稍后再试'),
-                              (500, 'GitHub 返回了错误（HTTP 500）'), (301, 'GitHub 的回复不是版本列表')):
+                              (500, 'GitHub 返回了错误（HTTP 500）')):
             replies[by_id] = (status, b'{}')
-            self.assertEqual(check(), ([by_id], '98.0.0', error), status)
+            self.assertEqual(check(), ([by_id], '99.0.0', error), status)
         # 只有本机上的普通 HTTP 端口可以充当 GitHub 的替身。
         self.env['ILLUSTASH_UPDATE_BASE'] = 'https://example.com/'
         self.stop(self.process); self.process, self.log = self.start(self.lib.path)
