@@ -60,6 +60,7 @@ run cargo fmt --manifest-path native/terms/Cargo.toml --check
 run cargo clippy --locked --manifest-path native/terms/Cargo.toml --all-targets --all-features -- -D warnings
 # 前置较快检查和桌面构建，避免 Python 全量之后才发现构建失败。
 run node --test tests/*.test.cjs tests/test_pixiv_poll.js
+run cargo fmt --manifest-path desktop/Cargo.toml --check
 run cargo clippy --locked --manifest-path desktop/Cargo.toml --all-targets -- -D warnings
 run cargo test --locked --manifest-path desktop/Cargo.toml
 run cargo test --locked --manifest-path native/terms/Cargo.toml
