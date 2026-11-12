@@ -2,12 +2,13 @@
 // core/jobs.js）。
 import {t, tb, said, I18N} from '../core/i18n.js';
 import {esc, isMac, number, bytes, stamp, localStamp, pct, localTime} from '../core/format.js';
+import {implement, onPage} from '../core/pages.js';
 import {prefs} from '../core/prefs.js';
 import {session, shared, readError} from '../core/session.js';
 import {state} from '../core/state.js';
 import {REASONS, FOLD_OPTIONS} from '../core/labels.js';
 import {SYNC_ACTIVE, INDEX_ACTIVE, NAMES_ACTIVE, PROV_ACTIVE, syncLine, indexLine, namesLine, importLine, importActive, pollSync, pollIndex,
-  pollNamesSoon, loadProvenance, importStarted, pollImports, cancelImport, indexAction} from '../core/jobs.js';
+  pollNamesSoon, loadProvenance, importStarted, pollImports, cancelImport, indexAction, setIndex, setNames} from '../core/jobs.js';
 import {onSettings, allowNames, loadSettingsData, saveStartup, saveFold, backupNow, clearCache, saveLanguage, loadAbout, saveModelApi, testModelApi,
   loadLibraries, libraryRequest, pollExport, chooseFolders, openLibraryRequest, libraryOpened, loadAccounts, accountRequest,
   waitPixivLogin, stopPixivLogin, checkUpdates, updatesPost, updatesTick} from '../core/settings.js';
@@ -21,6 +22,7 @@ import {setNsfw} from './grid.js';
 import {drawGuide, drawNudge, replayGuide} from './guide.js';
 import {renderIntegrityLine} from './integrity.js';
 import {renderModelsCard} from './models.js';
+import {openModal} from './overlay.js';
 
 // ---------- 名称：这个图库联网查询名称的授权 ----------
 // 名称的文字查询（只有 tag 和作品名）需要这个图库授权：授权之前，后端以「显示名联网尚未授权」拒绝。其他失败都是真正的
@@ -40,8 +42,8 @@ export async function setNamesNetwork(allow) {
 let indexArmed = null;
 export async function renderIndexCard(fresh = true) {
   const route = state.route, token = session.token;
-  if (!$('indexCard') || state.route.page !== 'settings') return;
-  if (fresh || !state.index) { try { const value = await shared('/api/index'); if (route !== state.route || token !== session.token) return; state.index = value; } catch (e) { if (route === state.route && token === session.token) readFailure($('indexCard'), e); return; } }
+  if (!$('indexCard') || !onPage(state.route, 'settings')) return;
+  if (fresh || !state.index) { try { const value = await shared('/api/index'); if (route !== state.route || token !== session.token) return; setIndex(value); } catch (e) { if (route === state.route && token === session.token) readFailure($('indexCard'), e); return; } }
   const card = $('indexCard'), x = state.index; if (!x || !card) return;
   const s = x.state, active = INDEX_ACTIVE.includes(s.status), watched = x.watch.works.length;
   // 关注哪些作品在「资料库 · 作品」里逐个作品决定；这里只管检查怎么运行。
@@ -67,8 +69,8 @@ export async function renderIndexCard(fresh = true) {
 // 从 Bangumi 取的中文 / 日文名字（只有文字查询）；配置好的模型 API 是用户选择开启的最后手段。
 export async function renderNamesCard(fresh = true) {
   const route = state.route, token = session.token;
-  if (!$('namesCard') || state.route.page !== 'settings') return;
-  if (fresh || !state.names) { try { const value = await shared('/api/names'); if (route !== state.route || token !== session.token) return; state.names = value; } catch (e) { if (route === state.route && token === session.token) readFailure($('namesCard'), e); return; } }
+  if (!$('namesCard') || !onPage(state.route, 'settings')) return;
+  if (fresh || !state.names) { try { const value = await shared('/api/names'); if (route !== state.route || token !== session.token) return; setNames(value); } catch (e) { if (route === state.route && token === session.token) readFailure($('namesCard'), e); return; } }
   // 等待期间页面可能已经重新渲染：总是对现在屏幕上的那张卡片操作。
   const card = $('namesCard'), x = state.names; if (!card) return; if (!x) { card.hidden = true; return; }
   card.hidden = false;
@@ -184,7 +186,7 @@ async function renderAbout() {
     ${fold('credits', t('致谢与第三方组件'), `<table class="settings-table credits">${CREDITS.map(([n, by, use, url]) => `<tr><td><a class="link" href="${url}" target="_blank" rel="noreferrer noopener">${esc(n)}</a>${by ? `<small>${esc(by)}</small>` : ''}</td><td>${esc(use)}</td></tr>`).join('')}</table><p class="settings-note net-foot">${t('识别用的 CCIP 模型（随安装包附带，或第一次使用时下载）依据 {license} 许可提供给你，使用和再分发均受该许可第 5 条约束：不得用于其附件 A 列出的用途，再分发时须把这些限制写进分发协议并附上许可。许可原文和各模型的来源见应用资源目录里的 resources/licenses/models/。其余组件的许可条款以其项目主页为准。', {license: '<a class="link" href="https://bigscience.huggingface.co/blog/bigscience-openrail-m" target="_blank" rel="noreferrer noopener">BigScience Open RAIL-M</a>'})}</p>`)}
     ${fold('diagnostics', t('诊断信息'), `<table class="settings-table">${diag.map(([k, v]) => `<tr><td>${esc(k)}</td><td class="mono">${esc(v)}</td></tr>`).join('')}</table>`)}`;
   wireFolds(card);
-  $('aboutKeys').onclick = () => $('help').showModal();
+  $('aboutKeys').onclick = () => openModal($('help'), {backdropClose: true, id: 'help'});
   $('aboutGuide').onclick = () => replayGuide();
   $('aboutCopy').onclick = async () => {
     try { await navigator.clipboard.writeText(diag.map(([k, v]) => `${k}: ${v}`).join('\n')); toast(t('诊断信息已复制')); } catch (e) { toast(t('无法访问剪贴板')); }
@@ -214,7 +216,7 @@ function networkCard() {
     <p class="set-foot">${t('同步、图片识别、相似图片检测、学习与分组都只在本机进行。X 的关注通过导入官方数据归档获得，不联网。')}</p>`;
 }
 export async function renderSettings(fetchMissing = true, refresh = false) {
-  if (state.route.page !== 'settings') return;
+  if (!onPage(state.route, 'settings')) return;
   $('grid').hidden = true; $('empty').hidden = true; $('charIndex').hidden = true; $('groupsPage').hidden = true; $('settingsPage').hidden = false;
   closeInspector(); $('selectionBar').hidden = true; $('resultCount').textContent = ''; $('hint').textContent = '';
   if (fetchMissing) loadSettingsData(refresh);
@@ -283,7 +285,7 @@ export async function renderSettings(fetchMissing = true, refresh = false) {
   for (const g of page.querySelectorAll('[data-setting]')) for (const b of g.querySelectorAll('button')) b.onclick = () => {
     const key = g.dataset.setting, v = b.dataset.value;
     if (key === 'language') { setLanguage(v); return; }
-    if (key === 'fit' && state.fit !== (v === '1')) { state.fit = !state.fit; prefs.set('fit', state.fit); }
+    if (key === 'fit') setFit(v === '1');
     if (key === 'nsfw') setNsfw(v);
     if (key === 'theme') { prefs.set('theme', v); window.applyTheme?.(); }
     if (key === 'sortLibrary' || key === 'sortCharacter') prefs.set(key, v);
@@ -305,7 +307,7 @@ export const libForm = {open: false, name: '', folders: {}, photos: false, creat
 // 后端列出它知道的出处（#111）；后备值覆盖没有图库信息的旧布局。
 const origins = () => { const list = state.libraries?.info?.origins; return list?.length ? list.map(o => [o.id, tb(o.label)]) : ORIGINS; };
 export function renderLibrariesCard() {
-  const card = $('setLibraries'); if (!card || state.route.page !== 'settings') return;
+  const card = $('setLibraries'); if (!card || !onPage(state.route, 'settings')) return;
   const data = state.libraries;
   if (!data) { card.innerHTML = `<h2>${t('图库')}</h2><p class="muted-note">${t('正在读取…')}</p>`; return; }
   const home = p => p.replace(/^\/Users\/[^/]+/, '~'), cur = data.info, list = origins();
@@ -406,7 +408,7 @@ export async function openLibrary(path, name, agreed = null) {
 
 // ---------- 绑定的账号（docs/PROVENANCE.md 第 8 节）：所有图库共用；密钥存在钥匙串里 ----------
 export function renderAccountsCard() {
-  const card = $('setAccounts'); if (!card || state.route.page !== 'settings') return;
+  const card = $('setAccounts'); if (!card || !onPage(state.route, 'settings')) return;
   const a = state.accounts;
   if (!a) { card.innerHTML = `<h2>${t('账号')}</h2><p class="muted-note">${t('正在读取…')}</p>`; return; }
   const p = a.pixiv, x = a.x, s = a.saucenao;
@@ -449,7 +451,7 @@ async function accountAction(action, body = {}) {
 // ---------- 找回画师（docs/PROVENANCE.md 第 8 节）：设置卡片；运行的轮询在 core/jobs.js ----------
 const provenanceDrawn = new WeakMap();
 export function renderProvenanceCard() {
-  const card = $('setProvenance'); if (!card || state.route.page !== 'settings') return;
+  const card = $('setProvenance'); if (!card || !onPage(state.route, 'settings')) return;
   const p = state.provenance;
   if (!p) { card.innerHTML = `<h2>${t('找回画师')}</h2><p class="muted-note">${t('正在读取…')}</p>`; return; }
   if (!p.available) { card.innerHTML = `<h2>${t('找回画师')}</h2><p class="muted-note">${t('只有图库包能找回画师。')}</p>`; return; }
@@ -568,7 +570,7 @@ export function wireSettings() {
   onSettings((what, detail) => {
     if (what === 'data') {
       if (detail.error) error(readError(detail.error));
-      if (state.route.page === 'settings') renderSettings(false);
+      if (onPage(state.route, 'settings')) renderSettings(false);
     } else if (what === 'libraries') {
       const cur = state.libraries?.info;
       $('brandLib').textContent = cur?.test ? t('测试·') + (cur.name.split(' · ').pop()) : '';
@@ -580,7 +582,7 @@ export function wireSettings() {
       drawNudge();
       // 显示它的设置页只在有变化时重画，绝不在用户输入时重画。
       const now = JSON.stringify(state.updates ?? null);
-      if (now !== updatesDrawn) { updatesDrawn = now; if (state.route.page === 'settings' && ['network', 'about'].includes(settingsSection()[0])) renderSettings(false); }
+      if (now !== updatesDrawn) { updatesDrawn = now; if (onPage(state.route, 'settings') && ['network', 'about'].includes(settingsSection()[0])) renderSettings(false); }
     }
   });
   // 设置页上的状态行转到任务面板，运行在那里启动、停止和确认。
@@ -638,9 +640,12 @@ export function wireSettings() {
     const box = e.target.closest('[data-updates-auto]'); if (!box) return;
     try { await updatesPost({action: 'auto', allow: box.checked}); toast(box.checked ? t('已打开自动检查更新') : t('已关闭自动检查更新')); }
     catch (err) { toast(err.message); box.checked = !box.checked; }
-    if (state.route.page === 'settings') renderSettings(false);
+    if (onPage(state.route, 'settings')) renderSettings(false);
     updatesTick();
   });
   loadLibraries();
   pollImports();
 }
+
+// 设置页登记：渲染入口（换了页面或子页时才整页重取）。
+implement({settings: {render: ({samePage}) => renderSettings(true, !samePage)}});

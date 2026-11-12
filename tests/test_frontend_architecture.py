@@ -103,7 +103,7 @@ class FrontendArchitectureTest(unittest.TestCase):
 
     def test_declared_state_field_is_fine(self):
         with Tree() as tree:
-            tree.append('ui/tasks.js', '\nstate.total = 1;\n')
+            tree.append('ui/tasks.js', '\nif (state.total) go();\n')
             tree.append('core/state.js', '')
             self.assertEqual(tree.errors(), [])
 
@@ -112,7 +112,8 @@ class FrontendArchitectureTest(unittest.TestCase):
             tree.append('ui/tasks.js', '\nstate.brandNewField = 1;\n')
             self.assertTrue(tree.errors())
             path = tree.root / STATIC / 'core/state.js'
-            path.write_text(path.read_text(encoding='utf-8').replace('route: {page', 'brandNewField: 0, route: {page', 1),
+            # 声明在一个写明 ui/tasks.js 是写入者的组里，规则 7 也不报
+            path.write_text(path.read_text(encoding='utf-8').replace('  // ---- 路由', '  // ---- 任务面板：ui/tasks.js ----\n  brandNewField: 0,\n  // ---- 路由', 1),
                             encoding='utf-8')
             self.assertEqual(tree.errors(), [])
 
@@ -127,6 +128,18 @@ class FrontendArchitectureTest(unittest.TestCase):
             with self.subTest(event=event), Tree() as tree:
                 tree.append('ui/artists.js', f"\ndocument.addEventListener('{event}', e => {{}});\n")
                 self.assertViolation(tree, 'document-listener', f'ui/artists.js::{event}')
+
+    def test_the_overlay_manager_is_the_one_allowed_entry(self):
+        # 用户 2026-11-12 在 #343 批准：ui/overlay.js 是全局 keydown / click 监听的唯一入口，别的文件照旧报错。
+        with Tree() as tree:
+            overlay = (tree.root / STATIC / 'ui/overlay.js').read_text(encoding='utf-8')
+            self.assertIn("document.addEventListener('keydown'", overlay)
+            self.assertIn("document.addEventListener('click'", overlay)
+            tree.append('ui/overlay.js', "\ndocument.addEventListener('click', e => {});\nwindow.addEventListener('keydown', e => {});\n")
+            self.assertEqual([e for e in tree.errors() if 'document-listener' in e], [])
+        with Tree() as tree:
+            tree.append('ui/dialog.js', "\ndocument.addEventListener('keydown', e => {});\n")
+            self.assertViolation(tree, 'document-listener', 'ui/dialog.js::keydown')
 
     def test_extra_listener_in_a_file_that_already_has_some(self):
         with Tree() as tree:
@@ -171,9 +184,23 @@ class FrontendArchitectureTest(unittest.TestCase):
             tree.append('ui/home.js', "\nconst d = document.createElement('dialog');\n")
             message = self.assertViolation(tree, 'dialog-element', 'ui/home.js')
             self.assertIn('ui/dialog.js', message)
-        with Tree() as tree:  # 本来就有基线的文件（palette.js 登记了 2 处）
-            tree.append('ui/palette.js', '\nconst d = document.createElement("dialog");\n')
-            self.assertViolation(tree, 'dialog-element', 'ui/palette.js')
+        with Tree() as tree:  # 基线里已经登记了存量的文件（ui/dialog.js 登记 1 处，openDialog 内的那一处）
+            tree.append('ui/dialog.js', '\nconst d = document.createElement("dialog");\n')
+            self.assertViolation(tree, 'dialog-element', 'ui/dialog.js')
+
+    def test_new_page_name_comparison(self):
+        # 页面名判断只能写在 core/pages.js 的注册表里；新增比较要报错，改写成读注册表字段
+        with Tree() as tree:
+            tree.append('ui/palette.js', "\nif (state.route.page === 'library') go();\n")
+            message = self.assertViolation(tree, 'page-name', 'ui/palette.js')
+            self.assertIn('core/pages.js', message)
+        with Tree() as tree:
+            tree.append('ui/palette.js', "\nif (['a', 'b'].includes(state.route.page)) go();\n")
+            self.assertViolation(tree, 'page-name', 'ui/palette.js')
+        with Tree() as tree:  # 注册表自己不受限，读注册表字段不算
+            tree.append('core/pages.js', "\nconst x = r.page === 'home';\n")
+            tree.append('ui/palette.js', "\nif (viewOf(state.route).click === 'cleanup' && onPage(state.route, 'home')) go();\n")
+            self.assertEqual(tree.errors(), [])
 
     def test_long_line_boundary(self):
         with Tree() as tree:
@@ -197,27 +224,28 @@ class FrontendArchitectureTest(unittest.TestCase):
 
     def test_fixed_violation_is_reported_as_stale_not_failure(self):
         with Tree() as tree:
-            path = tree.root / STATIC / 'ui/palette.js'
+            # 改掉基线里仍登记着的违规（ui/dialog.js 的那一处），应报「过期」而不是失败
+            path = tree.root / STATIC / 'ui/dialog.js'
             path.write_text(path.read_text(encoding='utf-8').replace("document.createElement('dialog')", "document.createElement('div')"),
                             encoding='utf-8')
             errors, stale = check(tree.root)
             self.assertEqual(errors, [])
-            self.assertTrue(any('dialog-element' in line and 'ui/palette.js' in line for line in stale))
+            self.assertTrue(any('dialog-element' in line and 'ui/dialog.js' in line for line in stale))
             code, output = tree.run_main('--strict-stale')
             self.assertEqual(code, 1)
             self.assertIn('--shrink', output)
 
     def test_shrink_lowers_but_never_adds(self):
         with Tree() as tree:
-            palette = tree.root / STATIC / 'ui/palette.js'
-            palette.write_text(palette.read_text(encoding='utf-8').replace("document.createElement('dialog')", "document.createElement('div')"),
-                               encoding='utf-8')
+            fixed = tree.root / STATIC / 'ui/dialog.js'
+            fixed.write_text(fixed.read_text(encoding='utf-8').replace("document.createElement('dialog')", "document.createElement('div')"),
+                             encoding='utf-8')
             tree.append('ui/home.js', "\nconst d = document.createElement('dialog');\n")  # 一处新违规
             before = tree.baseline()
             code, _ = tree.run_main('--shrink')
             after = tree.baseline()
             self.assertEqual(code, 1, 'the new violation still fails after shrinking')
-            self.assertNotIn('ui/palette.js', after['dialog-element'])
+            self.assertNotIn('ui/dialog.js', after['dialog-element'])
             self.assertNotIn('ui/home.js', after['dialog-element'])
             self.assertEqual(baseline_growth(after, before), [])
 
@@ -278,6 +306,55 @@ class FrontendArchitectureTest(unittest.TestCase):
         self.assertIn('state.inTemplate', bare)
         with self.assertRaises(ValueError):
             strip_comments('const t = `unterminated')
+
+
+    # ---------- 规则 7：state 字段的写入者（#353） ----------
+    def test_state_written_outside_its_writer(self):
+        # cursor 的写入者是 ui/grid.js，focused 的是 ui/detail.js，route 的是 core/route.js
+        cases = [('ui/home.js', 'state.cursor = 3;', 'state.cursor', 'ui/grid.js'),
+                 ('ui/home.js', 'state.focused ??= null;', 'state.focused', 'ui/detail.js'),
+                 ('ui/palette.js', 'state.dataVersion++;', 'state.dataVersion', 'ui/grid.js'),
+                 ('ui/palette.js', '--state.generation;', 'state.generation', 'ui/grid.js'),
+                 ('ui/shell.js', 'state.route.sort = "x";', 'state.route', 'core/route.js'),
+                 ('ui/shell.js', 'state.sel.ids = new Set();', 'state.sel', 'ui/grid.js'),
+                 ('ui/catalog.js', 'state.items[0] = null;', 'state.items', 'ui/grid.js'),
+                 ('ui/catalog.js', 'Object.assign(state.route, {q: ""});', 'state.route', 'core/route.js'),
+                 ('app.js', 'delete state.char;', 'state.char', 'core/meta.js')]
+        for path, text, field, writer in cases:
+            with self.subTest(text=text), Tree() as tree:
+                tree.append(path, '\n' + text + '\n')
+                message = self.assertViolation(tree, 'state-writer', f'{path}: {field}（声明的写入者是 {writer}）')
+                self.assertIn(text, message)
+                self.assertIn('core/state.js', message)
+
+    def test_state_reads_and_the_writer_itself_are_fine(self):
+        with Tree() as tree:
+            tree.append('ui/home.js', '\nif (state.cursor === 3 || state.cursor >= 2 || state.cursor <= 1 || state.cursor !== 0) go(state.cursor == 1);\n'
+                                      'const f = state.items.filter(x => x).length; state.pending.add(1); const s = "state.cursor = 3";\n'
+                                      '// state.cursor = 3;\n')
+            tree.append('ui/grid.js', '\nstate.cursor = 3; state.items[0] = null; state.sel.ids = new Set();\n')
+            tree.append('core/route.js', '\nObject.assign(state.route, {q: ""});\n')
+            self.assertEqual(tree.errors(), [])
+
+    def test_state_groups_need_exactly_one_writer(self):
+        state = 'core/state.js'
+        with Tree() as tree:
+            path = tree.root / STATIC / state
+            text = path.read_text(encoding='utf-8')
+            path.write_text(text.replace('// ---- 详情栏与大图：ui/detail.js ----', '// ---- 详情栏与大图：ui/detail.js、ui/home.js ----'), encoding='utf-8')
+            self.assertViolation(tree, 'state-writer', '写了 2 个')
+        with Tree() as tree:
+            path = tree.root / STATIC / state
+            text = path.read_text(encoding='utf-8')
+            path.write_text(text.replace('// ---- 详情栏与大图：ui/detail.js ----', '// ---- 详情栏与大图 ----'), encoding='utf-8')
+            self.assertViolation(tree, 'state-writer', '写了 0 个')
+        with Tree() as tree:
+            # 换了写入者：原来的写入者再赋值就报错，新写入者不报
+            path = tree.root / STATIC / state
+            text = path.read_text(encoding='utf-8')
+            path.write_text(text.replace('// ---- 详情栏与大图：ui/detail.js ----', '// ---- 详情栏与大图：ui/home.js ----'), encoding='utf-8')
+            message = self.assertViolation(tree, 'state-writer', 'ui/detail.js: state.focused（声明的写入者是 ui/home.js）')
+            self.assertIn('setCursor', message)
 
 
 if __name__ == '__main__':

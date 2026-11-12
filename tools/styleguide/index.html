@@ -118,24 +118,24 @@
 <!-- ======================= 按钮 ======================= -->
 <section id="c-buttons">
   <h2>组件 · 按钮</h2>
-  <p class="sg-lead">按钮有三套并行的“灰底次要 + 强调色主要”写法（<code>.quiet</code>/<code>.primary</code>，<code>.btn</code>/<code>.btn.pri</code>，再加 <code>.ask-b</code>、<code>.aa-b</code> 两个只在局部用的），另有图标按钮、链接按钮和十几种只在一处出现的按钮外观。先看总表，再看每一种的样子。</p>
+  <p class="sg-lead">按钮收成一组有名字的变体：<code>.primary</code>（强调色主按钮）、<code>.secondary</code>（灰底次要）、<code>.quiet</code>（透明，悬停才有底）、<code>.icon</code>、<code>.link-button</code>；大小 默认 / <code>.small</code> / <code>.large</code>；状态 <code>.on</code> / <code>.armed</code>（#319 合并了原来并行的 <code>.btn</code> / <code>.btn.pri</code>）。另有 <code>.ask-b</code>、<code>.aa-b</code> 等只在局部用的外观和十几种只在一处出现的按钮外观。先看总表，再看每一种的样子。</p>
 
   <div class="sg-item"><header><h3>写法总表</h3><span class="sg-tag">按钮 class 的字面出现次数</span></header>
     <p class="sg-src">口径：<code>web/static/ui/*.js</code>、<code>app.js</code>、<code>index.html</code> 里字面的 <code>&lt;button class="…"&gt;</code>（2026-11-12 的 main）；类名里有 <code>${…}</code> 的动态拼接不数。另有 10 个完全没写 class 的按钮，靠父级选择器取样式（见表末）。</p>
     <div class="sg-stage col"><table class="sg-table">
       <tr><th>写法</th><th>次数</th><th>主要生成位置</th><th>本页位置</th></tr>
-      <tr><td><code>quiet</code></td><td class="n">62</td><td class="ex">ui/grid.js 选择栏、settings.js、shell.js 工具栏、review.js</td><td><a class="link" href="#b-quiet">次要按钮</a></td></tr>
-      <tr><td><code>quiet small</code></td><td class="n">45</td><td class="ex">ui/settings.js、guide.js（tour/nudge）、tasks.js 任务行</td><td><a class="link" href="#b-quiet">次要按钮</a></td></tr>
-      <tr><td><code>on quiet</code></td><td class="n">3</td><td class="ex">ui/shell.js（标签、按此筛选时）</td><td><a class="link" href="#b-quiet">次要按钮</a></td></tr>
-      <tr><td><code>artist-find-more quiet</code>、<code>cast-more quiet</code></td><td class="n">2 + 1</td><td class="ex">ui/artists.js、ui/catalog.js</td><td><a class="link" href="#b-quiet">次要按钮</a></td></tr>
-      <tr><td><code>primary</code></td><td class="n">23</td><td class="ex">ui/grid.js 选择栏、dialog.js、catalog.js、palette.js</td><td><a class="link" href="#b-primary">主按钮</a></td></tr>
+      <tr><td><code>quiet</code></td><td class="n">62</td><td class="ex">ui/grid.js 选择栏、settings.js、shell.js 工具栏、review.js</td><td><a class="link" href="#b-quiet">安静按钮</a></td></tr>
+      <tr><td><code>quiet small</code></td><td class="n">45</td><td class="ex">ui/settings.js、guide.js（tour/nudge）、tasks.js 任务行</td><td><a class="link" href="#b-quiet">安静按钮</a></td></tr>
+      <tr><td><code>on quiet</code></td><td class="n">3</td><td class="ex">ui/shell.js（标签、按此筛选时）</td><td><a class="link" href="#b-quiet">安静按钮</a></td></tr>
+      <tr><td><code>artist-find-more quiet</code>、<code>cast-more quiet</code></td><td class="n">2 + 1</td><td class="ex">ui/artists.js、ui/catalog.js</td><td><a class="link" href="#b-quiet">安静按钮</a></td></tr>
+      <tr><td><code>primary</code></td><td class="n">21</td><td class="ex">ui/grid.js 选择栏、dialog.js、catalog.js、palette.js</td><td><a class="link" href="#b-primary">主按钮</a></td></tr>
       <tr><td><code>primary small</code></td><td class="n">10</td><td class="ex">ui/guide.js、tasks.js、models.js、settings.js</td><td><a class="link" href="#b-primary">主按钮</a></td></tr>
-      <tr><td><code>btn</code></td><td class="n">8</td><td class="ex">ui/detail.js 详情栏底部、home.js、review.js</td><td><a class="link" href="#b-btn">.btn / .btn.pri</a></td></tr>
-      <tr><td><code>btn pri</code></td><td class="n">5</td><td class="ex">ui/detail.js、home.js、review.js</td><td><a class="link" href="#b-btn">.btn / .btn.pri</a></td></tr>
+      <tr><td><code>secondary</code>、<code>secondary large</code></td><td class="n">2 + 6</td><td class="ex">ui/detail.js 详情栏底部、home.js、review.js</td><td><a class="link" href="#b-secondary">次要按钮（灰底）</a></td></tr>
+      <tr><td><code>primary large</code></td><td class="n">2</td><td class="ex">ui/detail.js 详情栏底部</td><td><a class="link" href="#b-secondary">次要按钮（灰底）</a></td></tr>
       <tr><td><code>icon</code></td><td class="n">23</td><td class="ex">index.html 顶栏 10 个、detail.js、catalog.js、dialog.js、palette.js</td><td><a class="link" href="#b-icon">图标按钮</a></td></tr>
       <tr><td><code>icon small</code></td><td class="n">2</td><td class="ex">ui/detail.js 角色条上的 ⇄ ×</td><td><a class="link" href="#b-icon">图标按钮</a></td></tr>
       <tr><td><code>link-button</code>、<code>link-button strong</code></td><td class="n">6 + 2</td><td class="ex">ui/settings.js、palette.js、catalog.js、grid.js、guide.js、shell.js</td><td><a class="link" href="#b-link">链接按钮</a></td></tr>
-      <tr><td><code>picker-item</code>、<code>picker-item watch-option</code></td><td class="n">6 + 2</td><td class="ex">ui/shell.js 标签弹层与更多菜单；catalog.js、palette.js 联想</td><td><a class="link" href="#p-tag">浮层菜单</a></td></tr>
+      <tr><td><code>menu-item</code>、<code>menu-item watch-option</code></td><td class="n">6 + 2</td><td class="ex">ui/shell.js 标签弹层与更多菜单；catalog.js、palette.js 联想</td><td><a class="link" href="#p-tag">浮层菜单</a></td></tr>
       <tr><td><code>chip-filter</code></td><td class="n">4</td><td class="ex">ui/shell.js、catalog.js</td><td><a class="link" href="#e-filter">筛选芯片</a></td></tr>
       <tr><td><code>ask-b</code>、<code>ask-b yes</code></td><td class="n">2 + 1</td><td class="ex">ui/detail.js askHTML</td><td><a class="link" href="#n-ask">提问条</a></td></tr>
       <tr><td><code>aa-b</code>、<code>aa-b yes</code></td><td class="n">3 + 1</td><td class="ex">ui/review.js 画师抽查</td><td><a class="link" href="#b-misc">其它按钮外观</a></td></tr>
@@ -147,7 +147,7 @@
     </table></div>
   </div>
 
-  <div class="sg-item" id="b-quiet"><header><h3>次要按钮</h3><span class="sg-cls"><code>.quiet</code><code>.quiet.small</code><code>.quiet.on</code><code>.quiet.armed</code></span></header>
+  <div class="sg-item" id="b-quiet"><header><h3>安静按钮（透明）</h3><span class="sg-cls"><code>.quiet</code><code>.quiet.small</code><code>.quiet.on</code><code>.quiet.armed</code></span></header>
     <p class="sg-src">生成：<code>ui/grid.js</code> renderSelection（选择栏）· <code>ui/shell.js</code> renderChrome（工具栏的标签按钮、<code>quiet on</code>）· <code>ui/dialog.js</code> confirmAction（取消）· <code>ui/settings.js</code> 设置卡 · <code>ui/tasks.js</code> taskList（<code>quiet small</code>）· <code>ui/guide.js</code> placeTour / drawNudge（<code>quiet small</code>）。</p>
     <div class="sg-stage">
       <div class="sg-pair"><button class="quiet">取消</button><i>.quiet</i></div>
@@ -176,21 +176,21 @@
       <div class="sg-pair"><button class="primary" disabled>保存</button><i>:disabled</i></div>
       <div class="sg-pair"><button class="primary small">授权并开始</button><i>.primary.small</i></div>
     </div>
-    <p class="sg-note"><b>并行写法：</b>主要操作另有 <code>.btn.pri</code>（下一条）。<code>.primary</code> 本身只有一个名字，但在 CSS 里被定义了两次：app.css 上半是黑底方角版（<code>background:var(--ink)</code>），“redesign layer”一节整体改写成强调色圆角版；第一版里的 <code>.primary kbd</code>、<code>.primary.armed</code> 也各有两份。</p>
+    <p class="sg-note"><b>一种写法：</b>主要操作只有 <code>.primary</code>（原来并行的 <code>.btn.pri</code> 已并入，详情栏底部用 <code>.primary.large</code>）。它在 CSS 里仍被定义了两次：app.css 上半是黑底方角版（<code>background:var(--ink)</code>），“redesign layer”一节整体改写成强调色圆角版；第一版里的 <code>.primary kbd</code>、<code>.primary.armed</code> 也各有两份，是 #317 之后的清理项。</p>
   </div>
 
-  <div class="sg-item" id="b-btn"><header><h3>另一套：.btn / .btn.pri</h3><span class="sg-tag dup">与 .quiet / .primary 并行</span><span class="sg-cls"><code>.btn</code><code>.btn.pri</code></span></header>
-    <p class="sg-src">生成：<code>ui/detail.js</code> inspect（<code>.inspector-actions</code>，详情栏底部）· <code>ui/home.js</code>（首页“认一认”卡片的 <code>.ask-foot</code>）· <code>ui/review.js</code>（未识别按组整理的 <code>.gsec-head</code>）。</p>
+  <div class="sg-item" id="b-secondary"><header><h3>次要按钮（灰底）</h3><span class="sg-cls"><code>.secondary</code><code>.secondary.large</code><code>.primary.large</code></span></header>
+    <p class="sg-src">生成：<code>ui/detail.js</code> inspect（<code>.inspector-actions</code>，详情栏底部，<code>.large</code>）· <code>ui/home.js</code>（首页“认一认”卡片的 <code>.ask-foot</code>）· <code>ui/review.js</code>（未识别按组整理的 <code>.gsec-head</code>）。</p>
     <div class="sg-stage top">
-      <div class="sg-pair"><div class="inspector-actions" style="position:static;width:300px;padding:0"><button class="btn">跳过 <kbd>S</kbd></button><button class="btn pri">设为角色… <kbd>C</kbd></button></div><i>.inspector-actions &gt; .btn + .btn.pri（flex:1 / 1.5，高 36）</i></div>
-      <div class="sg-pair"><div class="ask-foot" style="margin:0;width:300px"><span>点掉不是 TA 的</span><button class="btn">以后再说</button><button class="btn pri">是 TA</button></div><i>.ask-foot .btn：flex:0 0 auto，高 32，padding 0 14</i></div>
-      <div class="sg-pair"><div class="gsec-head" style="margin:0"><button class="btn pri">都是 ✓</button><button class="btn">都不是 ✗</button></div><i>.gsec-head .btn：改成 padding 3/10、行高 1.5，和 .gsec-head .quiet 一模一样</i></div>
+      <div class="sg-pair"><div class="inspector-actions" style="position:static;width:300px;padding:0"><button class="secondary large">跳过 <kbd>S</kbd></button><button class="primary large">设为角色… <kbd>C</kbd></button></div><i>.inspector-actions &gt; .secondary.large + .primary.large（flex:1 / 1.5，高 36）</i></div>
+      <div class="sg-pair"><div class="ask-foot" style="margin:0;width:300px"><span>点掉不是 TA 的</span><button class="secondary">以后再说</button><button class="primary">是 TA</button></div><i>.ask-foot .secondary / .primary：flex:0 0 auto，高 32，padding 0 14</i></div>
+      <div class="sg-pair"><div class="gsec-head" style="margin:0"><button class="primary">都是 ✓</button><button class="secondary">都不是 ✗</button></div><i>.gsec-head .secondary / .primary：padding 3/10、行高 1.5，高仍是 36（旧 .btn 的遗留，同一行的 .quiet 是 24）</i></div>
     </div>
-    <div class="sg-stage"><p class="sg-cap">并排看：灰底次要 + 强调色主要，两套写法的实际区别——</p>
-      <div class="sg-pair"><div style="display:flex;gap:6px"><button class="quiet">次要</button><button class="primary">主要</button></div><i>.quiet + .primary：padding 7/13 与 8/14，高约 30，圆角 999 / 12，主按钮有字重 600 和内高光</i></div>
-      <div class="sg-pair"><div style="display:flex;gap:6px;width:240px"><button class="btn">次要</button><button class="btn pri">主要</button></div><i>.btn + .btn.pri：高 36，圆角 12，灰底也带圆角（不是胶囊），.pri 还多一道投影</i></div>
+    <div class="sg-stage"><p class="sg-cap">并排看：<code>.quiet</code> 透明、<code>.secondary</code> 常驻灰底——</p>
+      <div class="sg-pair"><div style="display:flex;gap:6px"><button class="quiet">次要</button><button class="primary">主要</button></div><i>.quiet + .primary：透明胶囊，悬停才有底</i></div>
+      <div class="sg-pair"><div style="display:flex;gap:6px"><button class="secondary" style="height:30px;padding:0 14px">次要</button><button class="primary">主要</button></div><i>.secondary + .primary：灰底圆角 12，悬停用 filter:brightness</i></div>
     </div>
-    <p class="sg-note"><b>差别：</b>形状（胶囊 vs 圆角矩形）、高度（自适应 vs 固定 36 / 32）、灰色按钮有没有底色（<code>.quiet</code> 透明、悬停才有底；<code>.btn</code> 常驻 <code>--soft</code> 底）、悬停反馈（背景变色 vs <code>filter:brightness</code>，暗色里方向相反）。同一概念两套名字，#319 要选一套。</p>
+    <p class="sg-note"><b>差别：</b><code>.quiet</code> 透明、悬停才有底，圆角胶囊；<code>.secondary</code> 常驻 <code>--soft</code> 底、圆角 12、字重 600，悬停是 <code>filter</code>。两者是不同变体，不是同一概念的两套名字；<code>.btn.pri</code> 与 <code>.primary</code> 才是同一概念，已合并。<code>.large</code> 是固定 36 高、居中的尺寸，只在详情栏底部用。</p>
   </div>
 
   <div class="sg-item" id="b-icon"><header><h3>图标按钮</h3><span class="sg-cls"><code>.icon</code><code>.icon.small</code></span></header>
@@ -213,7 +213,7 @@
       <div class="sg-pair"><a class="link" href="#c-buttons">设置</a><i>a.link（color:ink2，无下划线，悬停无变化）</i></div>
       <div class="sg-pair"><button class="add-identity">＋ 也是…</button><i>.add-identity（详情栏）</i></div>
     </div>
-    <p class="sg-note"><b>并行写法：</b>“看起来像文字链接的东西”至少有 <code>.link-button</code>、<code>a.link</code>、<code>.add-identity</code>、<code>.variant-add</code>、<code>.artist-more</code>、<code>.home-all</code>、<code>.subtle-action</code>（疑似已废弃）。</p>
+    <p class="sg-note"><b>并行写法：</b>“看起来像文字链接的东西”至少有 <code>.link-button</code>、<code>a.link</code>、<code>.add-identity</code>、<code>.variant-add</code>、<code>.artist-more</code>、<code>.home-all</code>。</p>
   </div>
 
   <div class="sg-item" id="b-misc"><header><h3>其它按钮外观</h3><span class="sg-tag dup">每个只在一处用</span></header>
@@ -232,7 +232,7 @@
     <div class="sg-stage">
       <div class="sg-pair"><div class="cl-pill" style="position:static;display:inline-flex"><svg class="cl-ring" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="8"/><circle cx="10" cy="10" r="8" class="cl-done" style="stroke-dasharray:21 50.3"/></svg><span>上手</span><b>3/7</b></div><i>.cl-pill · ui/guide.js drawChecklist（实际是 &lt;button&gt;）</i></div>
     </div>
-    <p class="sg-note">还有一批“按钮外观的容器”在各自小节里：<code>.picker-item</code> / <code>.watch-option</code> / <code>.palette-item</code>（<a class="link" href="#s-pops">浮层菜单</a>）、<code>.view-opt</code>（视图选项）、<code>.chip-filter</code> / <code>.cast-tab</code> / <code>.cast-allw</code> / <code>.cast-wrow</code> / <code>.cast-wt</code>（<a class="link" href="#c-chips">芯片</a>）、<code>.home-j</code> / <code>.ask-img</code> / <code>.gsec-img</code> / <code>.strip-nav</code>（图片按钮，<a class="link" href="#s-other">其它外壳</a>）、<code>.toast-undo</code>（<a class="link" href="#s-toast">toast</a>）。</p>
+    <p class="sg-note">还有一批“按钮外观的容器”在各自小节里：<code>.menu-item</code> / <code>.watch-option</code> / <code>.palette-item</code>（<a class="link" href="#s-pops">浮层菜单</a>）、<code>.view-opt</code>（视图选项）、<code>.chip-filter</code> / <code>.cast-tab</code> / <code>.cast-allw</code> / <code>.cast-wrow</code> / <code>.cast-wt</code>（<a class="link" href="#c-chips">芯片</a>）、<code>.home-j</code> / <code>.ask-img</code> / <code>.gsec-img</code> / <code>.strip-nav</code>（图片按钮，<a class="link" href="#s-other">其它外壳</a>）、<code>.toast-undo</code>（<a class="link" href="#s-toast">toast</a>）。</p>
   </div>
 </section>
 
@@ -253,14 +253,14 @@
     <p class="sg-src">它们是不同界面各自写的，没有一个共用的 input 类；全局的 <code>input,textarea{color:inherit}</code> 之外，基本都靠“父级 + input”选择器。</p>
     <div class="sg-stage top">
       <div class="sg-pair"><div class="search-wrap" style="min-width:220px"><input type="search" placeholder="搜索框里的 input"></div><i>.search-wrap input · 36 高胶囊，soft 底，聚焦出强调色环</i></div>
-      <div class="sg-pair"><div class="tag-popover" style="width:240px"><input type="search" placeholder="我的标签，或 white_hair"></div><i>.tag-popover input · 32 高胶囊，soft 底（弹层里）</i></div>
-      <div class="sg-pair"><div class="profile-dialog" style="width:240px"><div class="field"><input value="Karen" aria-label="显示名"></div></div><i>.profile-dialog .field input · 34 高，7px 圆角，1px 线框，聚焦 3px 外环</i></div>
+      <div class="sg-pair"><div class="menu menu-drop" style="width:240px"><input type="search" placeholder="我的标签，或 white_hair"></div><i>.menu-drop input · 32 高胶囊，soft 底（弹层里）</i></div>
+      <div class="sg-pair"><div class="modal" style="width:240px"><div class="field"><input value="Karen" aria-label="显示名"></div></div><i>.modal .field input · 34 高，7px 圆角，1px 线框，聚焦 3px 外环</i></div>
       <div class="sg-pair"><input class="lib-input" placeholder="图库名称"><i>.lib-input · 30 高胶囊，纸面底 + hair 环</i></div>
       <div class="sg-pair"><div class="shelf-bar"><span class="watch-add"><input placeholder="关注 Danbooru 上的作品…" style="width:200px"></span></div><i>.shelf-bar .watch-add input · 32 高胶囊，soft 底</i></div>
       <div class="sg-pair"><span class="num-field"><input type="number" value="500"> 张</span><i>.num-field input · 84×30，8px 圆角，线框，右对齐</i></div>
       <div class="sg-pair"><div class="form-grid" style="grid-template-columns:minmax(0,220px);margin:0"><input value="用户名" aria-label="用户名"></div><i>.form-grid input · 6px 圆角，padding 5/8，聚焦出灰紫轮廓</i></div>
       <div class="sg-pair"><code>#pickerSearch</code><i>38 高、15px、无边框 · 命令面板里，见<a class="link" href="#s-dialogs">对话框</a></i></div>
-      <div class="sg-pair"><input type="range" style="accent-color:var(--accent-btn)"><i>.view-row input[type=range] · accent-color:accent-btn（.zoom-control 里同类的一份已无人用）</i></div>
+      <div class="sg-pair"><input type="range" style="accent-color:var(--accent-btn)"><i>.view-row input[type=range] · accent-color:accent-btn</i></div>
     </div>
     <p class="sg-note"><b>共同点：</b>都是 <code>font:inherit</code>、12–13px；<b>差别：</b>高度 30 / 32 / 34 / 36 / 38 都有，圆角 6 / 7 / 8 / 胶囊都有，底色有透明、<code>--soft</code>、<code>--sheet</code> 三种。<code>#watchAdd</code>、<code>#watchMin</code> 的 id 选择器（旧版资料库写法）仍在 app.css 里，会盖过后来的类选择器（<code>#watchMin</code> 的宽度是 62px，不是 84px）。</p>
   </div>
@@ -269,9 +269,9 @@
     <p class="sg-src">生成：<code>ui/shell.js</code> renderChrome（<code>#sort</code> 排序）· <code>ui/catalog.js</code> workDialog（上级作品）· <code>ui/dialog.js</code> chooseWork（<code>.work-choice</code>）。无类，直接给 <code>select</code> 元素定样式：胶囊、soft 底、自带的箭头是 background 里的 SVG data URI（暗色另有一份）。</p>
     <div class="sg-stage">
       <select aria-label="排序"><option>最新加入</option><option>最早加入</option></select>
-      <div class="profile-dialog" style="width:240px"><label class="field"><select class="work-choice"><option>无</option></select></label></div>
+      <div class="modal" style="width:240px"><label class="field"><select class="work-choice"><option>无</option></select></label></div>
     </div>
-    <p class="sg-note">第二个是对话框里的 <code>.profile-dialog .field select</code>：34 高、7px 圆角、线框，和工具栏那个不是一种。</p>
+    <p class="sg-note">第二个是对话框里的 <code>.modal .field select</code>：34 高、7px 圆角、线框，和工具栏那个不是一种。</p>
   </div>
 
   <div class="sg-item"><header><h3>开关</h3><span class="sg-tag dup">两套并行</span><span class="sg-cls"><code>.switch</code><code>.view-sw</code></span></header>
@@ -296,10 +296,10 @@
   </div>
 
   <div class="sg-item"><header><h3>勾选行 / 联想框</h3><span class="sg-cls"><code>.check-row</code><code>.fold-option</code><code>.combo</code><code>.combo-menu</code></span></header>
-    <p class="sg-src">生成：<code>.check-row</code> — <code>ui/catalog.js</code> workDialog（关注新角色）；<code>.fold-option</code> — <code>ui/settings.js</code>；<code>.combo</code> / <code>.combo-menu</code> — <code>ui/palette.js</code> combo()（编辑资料 / 作品对话框里的联想），菜单行是 <code>.picker-item.watch-option</code>。</p>
+    <p class="sg-src">生成：<code>.check-row</code> — <code>ui/catalog.js</code> workDialog（关注新角色）；<code>.fold-option</code> — <code>ui/settings.js</code>；<code>.combo</code> / <code>.combo-menu</code> — <code>ui/palette.js</code> combo()（编辑资料 / 作品对话框里的联想），菜单行是 <code>.menu-item.watch-option</code>。</p>
     <div class="sg-stage top">
-      <div class="profile-dialog" style="width:320px"><label class="check-row"><input type="checkbox" checked><span><b>关注这部作品的新角色</b><small>定期检查 Danbooru 上还没收录的角色</small></span></label></div>
-      <div class="sg-frozen" style="width:320px"><div class="profile-dialog"><div class="field"><span>Danbooru 角色</span><div class="combo"><input value="karen" aria-label="搜索角色" style="width:100%"><div class="combo-menu"><div class="palette-label">Danbooru</div><button type="button" class="picker-item watch-option on"><span class="watch-name">Karen (Blue Archive)</span><small>karen_(blue_archive)</small><em>D 站 1234</em></button><button type="button" class="picker-item watch-option"><span class="watch-name">Karen Aijou</span><small>aijou_karen</small><em>D 站 8800</em></button></div></div></div></div></div>
+      <div class="modal" style="width:320px"><label class="check-row"><input type="checkbox" checked><span><b>关注这部作品的新角色</b><small>定期检查 Danbooru 上还没收录的角色</small></span></label></div>
+      <div class="sg-frozen" style="width:320px"><div class="modal"><div class="field"><span>Danbooru 角色</span><div class="combo"><input value="karen" aria-label="搜索角色" style="width:100%"><div class="combo-menu"><div class="palette-label">Danbooru</div><button type="button" class="menu-item watch-option on"><span class="watch-name">Karen (Blue Archive)</span><small>karen_(blue_archive)</small><em>D 站 1234</em></button><button type="button" class="menu-item watch-option"><span class="watch-name">Karen Aijou</span><small>aijou_karen</small><em>D 站 8800</em></button></div></div></div></div></div>
     </div>
   </div>
 </section>
@@ -312,7 +312,7 @@
   <div class="sg-item" id="e-filter"><header><h3>筛选芯片</h3><span class="sg-cls"><code>.chips-row</code><code>.chip-filter</code><code>.chip-filter.on</code></span></header>
     <p class="sg-src">生成：<code>ui/shell.js</code> subTabs / renderChrome（图库的页面分流、皮肤筛选、“可能也是 TA”）· <code>ui/catalog.js</code> drawShelf（作品页的 全部 / 已关注 / 还在核对的链接 三个筛选）。</p>
     <div class="sg-stage"><div class="chips-row"><a class="chip-filter on" href="#e-filter">全部 <span>1,204</span></a><a class="chip-filter" href="#e-filter">已识别 <span>1,100</span></a><button class="chip-filter">可能也是 TA <span>12</span></button></div></div>
-    <p class="sg-note"><b>并行写法：</b>同样是“一排可选项”，另有 <code>.cast-tab</code>（角色页的作品标签）、<code>.cast-buckets button</code>（列表视图的分组）、<code>.settings-nav a</code>（设置页左栏）、<code>.segmented</code>、<code>.picker-item</code>。选中态各自写：<code>.on</code>（accent-soft 底）或 <code>.on</code>（黑底白字）。</p>
+    <p class="sg-note"><b>并行写法：</b>同样是“一排可选项”，另有 <code>.cast-tab</code>（角色页的作品标签）、<code>.cast-buckets button</code>（列表视图的分组）、<code>.settings-nav a</code>（设置页左栏）、<code>.segmented</code>、<code>.menu-item</code>。选中态各自写：<code>.on</code>（accent-soft 底）或 <code>.on</code>（黑底白字）。</p>
   </div>
 
   <div class="sg-item"><header><h3>角色页的标签组</h3><span class="sg-cls"><code>.cast-tab</code><code>.cast-allw</code><code>.cast-chip</code><code>.cast-buckets button</code></span></header>
@@ -380,7 +380,7 @@
   <div class="sg-item"><header><h3>区块内提示</h3></header>
     <p class="sg-src">生成：<code>.dialog-lead</code> — <code>ui/catalog.js</code> workDialog · <code>.lib-created</code> — <code>ui/settings.js</code> · <code>.task-ask</code> — <code>ui/tasks.js</code> taskAsks · <code>.shelf-todo</code> / <code>.shelf-found</code> — <code>ui/catalog.js</code> drawShelf · <code>.prov-confirm</code> — <code>ui/tasks.js</code> taskAsks（授权）。</p>
     <div class="sg-stage col" style="align-items:stretch">
-      <div class="profile-dialog" style="max-width:520px"><p class="dialog-lead">关注要按 Danbooru 上的作品 tag 检查。先在下面找到这部作品，选中后保存就会关注。</p></div>
+      <div class="modal" style="max-width:520px"><p class="dialog-lead">关注要按 Danbooru 上的作品 tag 检查。先在下面找到这部作品，选中后保存就会关注。</p></div>
       <div class="lib-created" style="max-width:520px"><p><b>图库已经建好</b>，保存在 ~/Pictures/Illustash，但没能加入最近图库列表。</p></div>
       <div class="task-asks" style="max-width:520px"><div class="task-ask"><span>上次检查发现 <b>3</b> 个还没收录的角色</span><button class="primary small">查看并添加…</button></div><div class="task-ask prov-confirm"><b>找回画师这次要访问外网，确认后才会发出：</b><ul><li>发给 Danbooru：图片的像素哈希和感知哈希</li><li>本次最多 1,024 MB；遇到拒绝、限流或验证码就停</li></ul><div class="prov-confirm-btns"><button class="primary">授权并开始</button><button class="quiet">取消</button></div></div></div>
       <div class="shelf-found" style="max-width:520px"><span class="local-dot busy" style="position:static"></span><span>上次检查发现 <b>3</b> 个还没收录的角色</span><div class="spacer"></div><button class="quiet small">查看…</button></div>
@@ -411,23 +411,23 @@
 <!-- ======================= 对话框 ======================= -->
 <section id="s-dialogs" class="sg-frozen">
   <h2>带行为的壳 · 对话框</h2>
-  <p class="sg-lead">原生 <code>&lt;dialog&gt;</code>，应用里共 11 个：<code>index.html</code> 里写好的 4 个（命令面板 <code>#picker</code>、两个 <code>.relate</code>、快捷键帮助），和运行时 <code>document.createElement('dialog')</code> 拼出来的 7 个。后者全部是同一个壳：<code>class="palette profile-dialog …"</code> + <code>&lt;form method="dialog"&gt;</code> + <code>.dialog-top</code> + 内容 + <code>.dialog-actions</code>，沿用命令面板的 <code>.palette</code> 类名，再靠 <code>.profile-dialog</code> 把 <code>.palette</code> 的无内边距改回来。下面 7 个都排出来了；壳的 HTML 在每个文件里各复制了一份。</p>
+  <p class="sg-lead">原生 <code>&lt;dialog&gt;</code>，应用里共 11 个：<code>index.html</code> 里写好的 4 个（命令面板 <code>#picker</code>、两个 <code>.relate</code>、快捷键帮助），和运行时由 <code>ui/dialog.js</code> 的 <code>openDialog()</code> 生成的 7 个。后者全部是同一个壳：<code>class="modal …"</code> + <code>&lt;form method="dialog"&gt;</code> + <code>.dialog-top</code>（标题 + ×）+ 内容 + <code>.dialog-actions</code>，关闭 ×、点遮罩关闭、关闭后移除都在 <code>openDialog()</code> 里（#319）。下面 7 个都排出来了。</p>
 
-  <div class="sg-item"><header><h3>壳 A：确认框</h3><span class="sg-cls"><code>dialog.palette.profile-dialog</code><code>.dialog-top</code><code>.dialog-actions</code></span></header>
+  <div class="sg-item"><header><h3>壳 A：确认框</h3><span class="sg-cls"><code>dialog.modal</code><code>.dialog-top</code><code>.dialog-actions</code></span></header>
     <p class="sg-src">生成：<code>ui/dialog.js</code> confirmAction()（全应用的确认；<code>cancel=false</code> 时只有“确认”）。壳最简，是其它 6 个的模板。</p>
-    <div class="sg-stage canvas"><dialog open class="palette profile-dialog" aria-label="确认操作"><form method="dialog"><div class="dialog-top"><h2>确认操作</h2><button type="button" class="icon" data-close aria-label="关闭">×</button></div>
+    <div class="sg-stage canvas"><dialog open class="modal" aria-label="确认操作"><form method="dialog"><div class="dialog-top"><h2>确认操作</h2><button type="button" class="icon" data-close aria-label="关闭">×</button></div>
       <p class="muted-note" style="white-space:pre-line">把这 3 张图排除出图库？可以在“已排除”里恢复。</p>
       <div class="dialog-actions"><button value="cancel" class="quiet">取消</button><button value="ok" class="primary">确认</button></div></form></dialog></div></div>
 
   <div class="sg-item"><header><h3>壳 B：选一个作品</h3><span class="sg-cls"><code>.work-dialog</code></span></header>
     <p class="sg-src">生成：<code>ui/dialog.js</code> chooseWork()。同壳，中间是一个 <code>select.work-choice</code>。</p>
-    <div class="sg-stage canvas"><dialog open class="palette profile-dialog work-dialog" style="width:420px"><form method="dialog"><div class="dialog-top"><h2>选择所属作品</h2><button type="button" class="icon" data-close aria-label="关闭">×</button></div>
+    <div class="sg-stage canvas"><dialog open class="modal work-dialog" style="width:420px"><form method="dialog"><div class="dialog-top"><h2>选择所属作品</h2><button type="button" class="icon" data-close aria-label="关闭">×</button></div>
       <select name="work" class="work-choice"><option value="">未归类 / 无上级</option><option>Blue Archive</option></select>
       <div class="dialog-actions"><button value="cancel" class="quiet">取消</button><button value="ok" class="primary">确认</button></div></form></dialog></div></div>
 
   <div class="sg-item"><header><h3>壳 C：编辑资料（表单 + 联想）</h3><span class="sg-cls"><code>.field</code><code>.combo</code><code>.alias-box</code><code>.staged-chip</code></span></header>
     <p class="sg-src">生成：<code>ui/palette.js</code> editProfile()。表单字段 <code>.field</code>：标题行 + 输入 + <code>small</code> 提示；别名用 <code>.alias-box</code> 里的 <code>.staged-chip</code>。</p>
-    <div class="sg-stage canvas"><dialog open class="palette profile-dialog"><form method="dialog">
+    <div class="sg-stage canvas"><dialog open class="modal"><form method="dialog">
       <div class="dialog-top"><h2>编辑资料</h2><button type="button" class="icon" data-close aria-label="关闭">×</button></div>
       <label class="field"><span>Danbooru 角色</span><div class="combo"><input placeholder="搜索角色名或 tag，如 karen blue、カレン"><div class="combo-menu" hidden></div></div><small>已关联 <code>karen_(blue_archive)</code> · <button type="button" class="link-button">取消关联</button></small></label>
       <label class="field"><span>显示名</span><input maxlength="120" value="Karen" placeholder="角色名称"><small>关联了 Danbooru 时可以留空，中文名会自动补全</small></label>
@@ -437,7 +437,7 @@
 
   <div class="sg-item"><header><h3>壳 D：新建 / 编辑作品</h3><span class="sg-cls"><code>.dialog-lead</code><code>.check-row</code><code>.opt</code></span></header>
     <p class="sg-src">生成：<code>ui/catalog.js</code> workDialog()。比编辑资料多一条 <code>.dialog-lead</code> 提示和 <code>.check-row</code> 勾选行。</p>
-    <div class="sg-stage canvas"><dialog open class="palette profile-dialog work-dialog"><form method="dialog">
+    <div class="sg-stage canvas"><dialog open class="modal work-dialog"><form method="dialog">
       <div class="dialog-top"><h2>新建作品</h2><button type="button" class="icon" data-close aria-label="关闭">×</button></div>
       <p class="dialog-lead">关注要按 Danbooru 上的作品 tag 检查。先在下面找到这部作品，选中后保存就会关注。</p>
       <label class="field"><span>名称</span><input value="" maxlength="120" required><small>界面上显示的名字，用你习惯的叫法就行，以后随时能改。</small></label>
@@ -447,7 +447,7 @@
 
   <div class="sg-item"><header><h3>壳 E：列表 + 说明（只当标签）</h3><span class="sg-cls"><code>.tagged-dialog</code><code>.tagged-list</code><code>.tagged-row</code></span></header>
     <p class="sg-src">生成：<code>ui/catalog.js</code> openTagged()。操作行里有一个 <code>.spacer</code> 把“完成”推到右边。</p>
-    <div class="sg-stage canvas"><dialog open class="palette profile-dialog tagged-dialog"><form method="dialog">
+    <div class="sg-stage canvas"><dialog open class="modal tagged-dialog"><form method="dialog">
       <div class="dialog-top"><h2>只当标签的角色</h2><button type="button" class="icon" data-close aria-label="关闭">×</button></div>
       <p class="muted-note">吉祥物、玩家化身可以只当标签：不算角色，不出现在角色列表里。</p>
       <div class="tagged-list"><div class="tagged-row"><a href="#s-dialogs">佩洛洛</a><small>12 张</small><div class="spacer"></div><button type="button" class="quiet small">改回角色</button></div><div class="tagged-row"><a href="#s-dialogs">老师</a><small>40 张</small><div class="spacer"></div><button type="button" class="quiet small">改回角色</button></div></div>
@@ -455,7 +455,7 @@
 
   <div class="sg-item"><header><h3>壳 F：表格 + 勾选（添加新角色）</h3><span class="sg-cls"><code>.index-add</code><code>.settings-table</code></span></header>
     <p class="sg-src">生成：<code>ui/catalog.js</code> openIndexAdd()。宽 720。</p>
-    <div class="sg-stage canvas"><dialog open class="palette profile-dialog index-add" style="width:min(720px,100%)"><form method="dialog">
+    <div class="sg-stage canvas"><dialog open class="modal index-add" style="width:min(720px,100%)"><form method="dialog">
       <div class="dialog-top"><h2>添加新角色</h2><button type="button" class="icon" data-close aria-label="关闭">×</button></div>
       <p class="muted-note">这些角色在 Danbooru 上有、本地索引还没有。添加时每个角色下载约 20 张公开参考图。</p>
       <div class="index-add-list"><table class="settings-table index-table"><tr><th><input type="checkbox" checked aria-label="全选"></th><th>角色 tag</th><th>作品</th><th>D 站图数</th></tr><tr><td><input type="checkbox" checked></td><td><a class="link" href="#s-dialogs">karen_(blue_archive)</a></td><td>Blue Archive</td><td>12,345</td></tr><tr><td><input type="checkbox"></td><td><a class="link" href="#s-dialogs">rio_(blue_archive)</a></td><td>Blue Archive</td><td>9,876</td></tr></table></div>
@@ -463,7 +463,7 @@
 
   <div class="sg-item"><header><h3>壳 G：行列表（关联自建角色）</h3><span class="sg-cls"><code>.link-list</code><code>.link-row</code></span></header>
     <p class="sg-src">生成：<code>ui/palette.js</code> openLocalLinks()。</p>
-    <div class="sg-stage canvas"><dialog open class="palette profile-dialog"><form method="dialog">
+    <div class="sg-stage canvas"><dialog open class="modal"><form method="dialog">
       <div class="dialog-top"><h2>关联自建角色</h2><button type="button" class="icon" data-close aria-label="关闭">×</button></div>
       <p class="muted-note">关联后自动补中文名、别名和所属作品，可以一步撤销。标“可能是”的是按名字搜到的最像的一个。</p>
       <div class="link-list"><label class="link-row"><input type="checkbox" checked><span><b>Karen</b><small>karen_(blue_archive) · Blue Archive · D 站 12,345 张</small></span><em>12 张</em></label><label class="link-row"><input type="checkbox"><span><b>Rio <i class="guess">可能是</i></b><small>rio_(blue_archive) · D 站 9,876 张</small></span><em>3 张</em></label></div>
@@ -497,27 +497,27 @@
       <dl class="shortcuts"><dt>⌘K</dt><dd>跳转到角色</dd><dt>/</dt><dd>搜索图库</dd><dt>⌘Z</dt><dd>撤销</dd></dl>
       <p class="dialog-note">自动识别结果默认生效，仅需移除错误项。所有操作均可撤销。</p></dialog></div></div>
 
-  <p class="sg-note" style="padding-left:0"><b>共同点与差异：</b>圆角 18 / 阴影 / 遮罩在 <code>dialog</code> 与 <code>dialog::backdrop</code> 上统一；宽度 440（基础）/ 520（<code>.palette</code>）/ 560（<code>.profile-dialog</code>）/ 720（<code>.index-add</code>）/ 980（<code>.relate</code>）；顶部留白 <code>margin-top</code> 14vh（palette）/ 8vh（profile）；内边距 22 / 0 / <code>form</code> 上 18 20 16。7 个运行时对话框在每个文件里各复制一遍关闭 ×、点遮罩关闭、<code>d.onclose</code> 清理的代码。Esc 的处理见 #316。</p>
+  <p class="sg-note" style="padding-left:0"><b>共同点与差异：</b>圆角 18 / 阴影 / 遮罩在 <code>dialog</code> 与 <code>dialog::backdrop</code> 上统一；宽度 440（基础）/ 520（<code>.palette</code>）/ 560（<code>.modal</code>）/ 720（<code>.index-add</code>）/ 980（<code>.relate</code>）；顶部留白 <code>margin-top</code> 14vh（palette）/ 8vh（modal）；内边距 22 / 0 / <code>form</code> 上 18 20 16。点背景关闭：只读和确认类（确认框、只当标签、静态的 4 个）关，带输入的表单类（选作品、编辑资料、新建作品、添加新角色、关联自建角色）用 <code>backdropClose:false</code> 不关（#343）。Esc 的处理见 #316。</p>
 </section>
 
 <!-- ======================= 浮层菜单 ======================= -->
 <section id="s-pops" class="sg-frozen">
   <h2>带行为的壳 · 浮层菜单与弹出面板</h2>
-  <p class="sg-lead">弹出菜单没有统一的组件：<code>.tag-popover</code>（含 <code>.more-menu</code>、<code>.watch-menu</code> 变体）、<code>.view-pop</code>、<code>.cast-pop</code>、<code>.combo-menu</code>、<code>.task-pop</code> 各自定位、各自监听点击外部来关闭，圆角、阴影、毛玻璃各写一遍。</p>
+  <p class="sg-lead">弹出菜单共用外壳 <code>.menu</code>（底色、圆角 18、阴影、淡入；毛玻璃的再加 <code>.menu-glass</code>），位置和尺寸留在各自的类上：<code>.menu-drop</code>（挂在控件下面：标签、<code>.more-menu</code>、<code>.watch-menu</code>）、<code>.view-pop</code>、<code>.task-pop</code>、<code>.cast-pop</code>。<code>.combo-menu</code> 是搜索联想，还没并进来。各自监听点击外部来关闭的逻辑还没统一，见 #316。</p>
 
-  <div class="sg-item" id="p-tag"><header><h3>标签弹层 / 更多菜单 / 关注作品联想</h3><span class="sg-cls"><code>.tag-control</code><code>.tag-popover</code><code>.picker-item</code><code>.more-menu</code><code>.watch-menu</code></span></header>
-    <p class="sg-src">生成：标签弹层 — <code>ui/shell.js</code> renderChrome（<code>#tagButton</code> + <code>#tagPopover</code>）与 loadTagOptions()（选项）· 更多菜单 — <code>ui/shell.js</code> renderHeading（<code>#moreButton</code> + <code>#morePopover.more-menu</code>）· 关注联想 — <code>ui/catalog.js</code> drawShelf / wireWatchAdd（<code>.watch-add</code> 里的 <code>#watchMenu.watch-menu</code>，行是 <code>.picker-item.watch-option</code>）。都是 <code>position:absolute</code> 挂在 <code>.tag-control</code> / <code>.watch-add</code> 下面，z-index 20。</p>
+  <div class="sg-item" id="p-tag"><header><h3>标签弹层 / 更多菜单 / 关注作品联想</h3><span class="sg-cls"><code>.tag-control</code><code>.menu</code><code>.menu-drop</code><code>.menu-item</code><code>.more-menu</code><code>.watch-menu</code></span></header>
+    <p class="sg-src">生成：标签弹层 — <code>ui/shell.js</code> renderChrome（<code>#tagButton</code> + <code>#tagPopover</code>）与 loadTagOptions()（选项）· 更多菜单 — <code>ui/shell.js</code> renderHeading（<code>#moreButton</code> + <code>#morePopover.more-menu</code>）· 关注联想 — <code>ui/catalog.js</code> drawShelf / wireWatchAdd（<code>.watch-add</code> 里的 <code>#watchMenu.watch-menu</code>，行是 <code>.menu-item.watch-option</code>）。都是 <code>position:absolute</code> 挂在 <code>.tag-control</code> / <code>.watch-add</code> 下面，z-index 20。</p>
     <div class="sg-stage top">
-      <div class="sg-pair"><div class="tag-control"><button class="quiet on">标签 · white hair ×</button><div class="tag-popover"><input type="search" placeholder="我的标签，或 white_hair 这类画面标签" aria-label="搜索标签"><div id="tagOptions"><div class="palette-label">我的标签</div><button class="picker-item"># 夏日 <small>12</small></button><div class="palette-label">画面标签</div><button class="picker-item">white hair</button><button class="picker-item">long hair</button></div></div></div><i>#tagPopover.tag-popover</i></div>
-      <div class="sg-pair"><div class="tag-control more-control"><button class="quiet" aria-label="更多操作">⋯</button><div class="tag-popover more-menu" style="width:190px"><button class="picker-item">标为原创角色</button><button class="picker-item">不算角色，只当标签</button><button class="picker-item">编辑资料…</button><button class="picker-item">合并到另一个角色…</button></div></div><i>.tag-popover.more-menu（右对齐，宽 190）</i></div>
-      <div class="sg-pair"><span class="watch-add"><div class="tag-popover watch-menu" style="width:340px"><div class="palette-label">图库里已有</div><button class="picker-item watch-option on"><span class="watch-name">Blue Archive</span><small>blue_archive</small><em>你有 120 张</em></button><button class="picker-item watch-option" disabled><span class="watch-name">Fate/Grand Order</span><small>fate_grand_order</small><em>已关注</em></button><p class="muted-note watch-note">只发送你输入的文字</p></div></span><i>.tag-popover.watch-menu（宽 340）</i></div>
+      <div class="sg-pair"><div class="tag-control"><button class="quiet on">标签 · white hair ×</button><div class="menu menu-drop"><input type="search" placeholder="我的标签，或 white_hair 这类画面标签" aria-label="搜索标签"><div id="tagOptions"><div class="palette-label">我的标签</div><button class="menu-item"># 夏日 <small>12</small></button><div class="palette-label">画面标签</div><button class="menu-item">white hair</button><button class="menu-item">long hair</button></div></div></div><i>#tagPopover.menu-drop</i></div>
+      <div class="sg-pair"><div class="tag-control more-control"><button class="quiet" aria-label="更多操作">⋯</button><div class="menu menu-drop more-menu" style="width:190px"><button class="menu-item">标为原创角色</button><button class="menu-item">不算角色，只当标签</button><button class="menu-item">编辑资料…</button><button class="menu-item">合并到另一个角色…</button></div></div><i>.menu-drop.more-menu（右对齐，宽 190）</i></div>
+      <div class="sg-pair"><span class="watch-add"><div class="menu menu-drop watch-menu" style="width:340px"><div class="palette-label">图库里已有</div><button class="menu-item watch-option on"><span class="watch-name">Blue Archive</span><small>blue_archive</small><em>你有 120 张</em></button><button class="menu-item watch-option" disabled><span class="watch-name">Fate/Grand Order</span><small>fate_grand_order</small><em>已关注</em></button><p class="muted-note watch-note">只发送你输入的文字</p></div></span><i>.menu-drop.watch-menu（宽 340）</i></div>
     </div>
-    <p class="sg-note"><b>并行写法：</b>“一列可点选项”有 <code>.picker-item</code>（这里）、<code>.palette-item</code>（命令面板，带头像）、<code>.cast-wrow</code>（作品弹层）、<code>.view-opt</code>（视图选项）、<code>.watch-option</code>（在 picker-item 上叠加）。<code>.tag-popover</code> 的圆角 14、1px hair 环、<code>0 18px 40px -12px</code> 阴影；<code>.view-pop</code>、<code>.cast-pop</code>、<code>.task-pop</code> 的圆角 18、阴影略不同。</p>
+    <p class="sg-note"><b>并行写法：</b>“一列可点选项”有 <code>.menu-item</code>（这里）、<code>.palette-item</code>（命令面板，带头像）、<code>.cast-wrow</code>（作品弹层）、<code>.view-opt</code>（视图选项）、<code>.watch-option</code>（在 menu-item 上叠加）。</p>
   </div>
 
   <div class="sg-item" id="p-view"><header><h3>视图选项</h3><span class="sg-cls"><code>.view-pop</code><code>.view-group</code><code>.view-opt</code><code>.view-row</code><code>.view-foot</code></span></header>
     <p class="sg-src">生成：<code>ui/grid.js</code> renderViewPop()，行是 viewSwitch()。壳：<code>index.html</code> 顶栏的 <code>.view-anchor</code> 里的 <code>#viewPopover.view-pop</code>（<code>position:absolute</code>，右对齐，毛玻璃）。<code>.view-group</code> 同时被任务面板复用。</p>
-    <div class="sg-stage canvas"><div class="view-pop">
+    <div class="sg-stage canvas"><div class="menu menu-glass view-pop">
       <h6>首页</h6><div class="view-group"><div class="view-row"><span>缩略图</span><div class="segmented"><button>小</button><button class="on">中</button><button>大</button></div></div>
         <button class="view-opt" role="switch" aria-checked="true"><span>放大每组主图</span><i class="view-sw on"></i></button></div>
       <h6>图片网格</h6><div class="view-group"><label class="view-row"><span>缩略图大小</span><input type="range" min="0" max="100" value="40"></label>
@@ -527,7 +527,7 @@
 
   <div class="sg-item"><header><h3>作品弹层（角色页）</h3><span class="sg-cls"><code>.cast-pop</code><code>.cast-wcols</code><code>.cast-wrow</code></span></header>
     <p class="sg-src">生成：<code>ui/catalog.js</code> castPop(works)。<code>position:absolute</code> 在 <code>.cast-tabs</code> 下方，宽 min(720, 100%-52)，分三列。</p>
-    <div class="sg-stage canvas"><div class="cast-pop" style="max-width:640px"><div class="search-wrap"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="10" cy="10" r="6.5"/><path d="m15 15 5 5"/></svg><input type="search" placeholder="在 12 部作品里找"></div>
+    <div class="sg-stage canvas"><div class="menu cast-pop" style="max-width:640px"><div class="search-wrap"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="10" cy="10" r="6.5"/><path d="m15 15 5 5"/></svg><input type="search" placeholder="在 12 部作品里找"></div>
       <div class="cast-wcols"><button class="cast-wrow"><span class="cast-av" style="width:20px;height:20px"><img data-ph="0" alt=""></span><span>Blue Archive</span><small>120</small></button><button class="cast-wrow"><span class="cast-av" style="width:20px;height:20px"><img data-ph="1" alt=""></span><span>Fate/Grand Order</span><small>64</small></button><button class="cast-wrow pseudo"><span class="cast-av" style="width:20px;height:20px"><img data-ph="2" alt=""></span><span>原创角色</span><small>8</small></button></div></div></div></div>
 </section>
 
@@ -538,7 +538,7 @@
     <p class="sg-src">生成：入口 <code>index.html</code> 的 <code>button.sidebar-bottom.task-entry#taskButton</code>（<code>.busy</code> / <code>.on</code> 态由 <code>ui/tasks.js</code> renderTasks 切换）；面板壳 <code>index.html</code> 的 <code>#taskPanel.task-pop</code>（<code>position:fixed</code> 贴在侧栏右边），内容 <code>ui/tasks.js</code> renderTasks() 拼成；折叠段 <code>fold()</code> 在 <code>ui/dom.js</code>；进度条 <code>.progress</code> 在 taskList()。</p>
     <div class="sg-stage canvas top">
       <div class="sg-pair"><div class="sidebar" style="width:84px;padding:8px 0;border-radius:12px"><button class="sidebar-bottom task-entry busy"><span class="nav-icon"><svg class="task-glyph" viewBox="0 0 20 20" aria-hidden="true"><rect class="tg-card c1" x="6" y="3.6" width="8" height="9" rx="1.3"/><rect class="tg-card c2" x="6" y="3.6" width="8" height="9" rx="1.3"/><path class="tg-box" d="M3.4 9.6h13.2v5.6c0 1-.8 1.8-1.8 1.8H5.2c-1 0-1.8-.8-1.8-1.8Z"/></svg><span class="task-badge"></span></span><span class="nav-label">同步中</span></button></div><i>.task-entry.busy</i></div>
-      <div class="task-pop"><div class="task-top"><h2>任务</h2><button class="icon" aria-label="关闭">×</button></div>
+      <div class="menu menu-glass task-pop"><div class="task-top"><h2>任务</h2><button class="icon" aria-label="关闭">×</button></div>
         <h6>等你确认</h6><div class="task-asks"><div class="task-ask"><span>上次检查发现 <b>3</b> 个还没收录的角色</span><button class="primary small">查看并添加…</button></div></div>
         <h6>进行中与其他任务</h6><div class="view-group task-group">
           <div class="task-item on"><div class="task-main"><span class="local-dot busy" style="position:static"></span><span class="task-text"><b>文件夹同步</b><small>正在扫描 · 1,240 / 5,000</small></span><button class="quiet small" disabled>立即同步</button></div><div class="task-body"><div class="progress"><span style="width:25%"></span></div></div></div>
@@ -583,8 +583,8 @@
       <section class="inspector-section"><h3 class="section-title">我的标签</h3><div class="user-tags"><span class="variant-chip"><a href="#s-detail"># 夏日</a><button>×</button></span><button class="variant-add">＋ 标签 <kbd>G</kbd></button></div></section>
       <section class="inspector-section"><dl class="facts"><div><dt>尺寸</dt><dd class="mono">2000 × 2500</dd></div><div><dt>加入</dt><dd class="mono">2026-11-12 10:21</dd></div><div><dt>文件</dt><dd>IMG_0001.jpg</dd></div></dl></section>
       <details class="inspector-section"><summary>画面标签</summary><div class="tags"><button class="tag">white hair</button><button class="tag">long hair</button></div></details>
-      <div class="inspector-actions" style="position:static"><button class="btn pri">更正角色 <kbd>C</kbd></button><button class="btn">排除 <kbd>X</kbd></button></div></aside></div>
-    <p class="sg-note">详情栏里同时出现 <code>.icon</code>、<code>.icon.small</code>、<code>.btn</code>/<code>.btn.pri</code>、<code>.ask-b</code>、<code>.alt</code>、<code>.variant-chip</code>、<code>.variant-add</code>、<code>.add-identity</code>、<code>.tag</code> 九种按钮 / 标签外观；它们的字号 10.5 / 11 / 11.5 / 12 / 12.5 / 13 都有。</p>
+      <div class="inspector-actions" style="position:static"><button class="primary large">更正角色 <kbd>C</kbd></button><button class="secondary large">排除 <kbd>X</kbd></button></div></aside></div>
+    <p class="sg-note">详情栏里同时出现 <code>.icon</code>、<code>.icon.small</code>、<code>.secondary</code>/<code>.primary</code>（<code>.large</code>）、<code>.ask-b</code>、<code>.alt</code>、<code>.variant-chip</code>、<code>.variant-add</code>、<code>.add-identity</code>、<code>.tag</code> 九种按钮 / 标签外观；它们的字号 10.5 / 11 / 11.5 / 12 / 12.5 / 13 都有。</p>
   </div>
 </section>
 
@@ -663,16 +663,16 @@
   <p class="sg-lead">页面里已经把它们摆在一起了；这里汇总成一张表，方便 #319 收口时按行勾掉。这是现状清单，没有合并任何一条。</p>
   <div class="sg-item"><div class="sg-stage col"><table class="sg-table">
     <tr><th>概念</th><th>并行的写法</th><th>本页</th></tr>
-    <tr><td>次要 / 主要按钮</td><td class="ex"><code>.quiet</code> + <code>.primary</code> · <code>.btn</code> + <code>.btn.pri</code> · <code>.ask-b</code>(.yes) · <code>.aa-b</code>(.yes) · <code>button.small</code></td><td><a class="link" href="#b-btn">按钮</a></td></tr>
+    <tr><td>次要 / 主要按钮</td><td class="ex"><code>.quiet</code> + <code>.primary</code> · <code>.secondary</code>（#319 起 <code>.btn</code> 已并入 <code>.primary</code> / <code>.secondary</code>）· <code>.ask-b</code>(.yes) · <code>.aa-b</code>(.yes) · <code>button.small</code></td><td><a class="link" href="#c-buttons">按钮</a></td></tr>
     <tr><td>主按钮的两版</td><td class="ex"><code>.primary</code> 在 app.css 里定义两次（黑底方角 + redesign 层的强调色圆角），<code>.segmented</code>、<code>.quiet</code>、<code>.chip-filter</code>、<code>.card</code>、<code>.switch</code>、<code>dialog</code> 同样都是“先一版，后面再整体改一版”</td><td><a class="link" href="#b-primary">主按钮</a></td></tr>
     <tr><td>开关</td><td class="ex"><code>input.switch</code> · <code>.view-sw</code></td><td><a class="link" href="#c-forms">输入与开关</a></td></tr>
     <tr><td>分段 / 标签切换</td><td class="ex"><code>.segmented</code>(button / a) · <code>.icon-seg</code> · <code>.chip-filter</code> · <code>.cast-tab</code> · <code>.cast-buckets button</code> · <code>.settings-nav a</code></td><td><a class="link" href="#c-forms">输入与开关</a></td></tr>
-    <tr><td>文本输入</td><td class="ex"><code>.search-wrap input</code> · <code>.tag-popover input</code> · <code>.profile-dialog .field input</code> · <code>.lib-input</code> · <code>.watch-add input</code> · <code>.num-field input</code> · <code>.form-grid input</code> · <code>#pickerSearch</code> · <code>#watchAdd</code> · <code>#watchMin</code></td><td><a class="link" href="#c-forms">输入与开关</a></td></tr>
+    <tr><td>文本输入</td><td class="ex"><code>.search-wrap input</code> · <code>.menu-drop input</code> · <code>.modal .field input</code> · <code>.lib-input</code> · <code>.watch-add input</code> · <code>.num-field input</code> · <code>.form-grid input</code> · <code>#pickerSearch</code> · <code>#watchAdd</code> · <code>#watchMin</code></td><td><a class="link" href="#c-forms">输入与开关</a></td></tr>
     <tr><td>小标签</td><td class="ex"><code>.tag</code> · <code>.oc-badge</code> · <code>.pair-label</code> · <code>.group-traits span</code> · <code>.cast-tags span</code> · <code>.tag-on</code> · <code>.set-scope</code> · <code>.variant-chip</code></td><td><a class="link" href="#c-chips">芯片</a></td></tr>
     <tr><td>提示条</td><td class="ex"><code>#errorBanner</code> · <code>.guide-notice</code> · <code>.dialog-lead</code> · <code>.lib-created</code> · <code>.task-ask</code> · <code>.shelf-todo</code> · <code>.shelf-found</code> · <code>.ask-bar</code> · <code>.nudge</code> · <code>.prov-confirm</code></td><td><a class="link" href="#c-banners">提示条</a></td></tr>
-    <tr><td>对话框壳</td><td class="ex">无类 <code>dialog</code>（帮助）· <code>dialog.palette</code>（命令面板）· <code>dialog.relate</code>（两个）· <code>dialog.palette.profile-dialog</code>（运行时 7 个）</td><td><a class="link" href="#s-dialogs">对话框</a></td></tr>
-    <tr><td>弹出面板</td><td class="ex"><code>.tag-popover</code> · <code>.view-pop</code> · <code>.cast-pop</code> · <code>.combo-menu</code> · <code>.task-pop</code>，各自关闭逻辑</td><td><a class="link" href="#s-pops">浮层菜单</a></td></tr>
-    <tr><td>一列可点选项</td><td class="ex"><code>.picker-item</code> · <code>.watch-option</code> · <code>.palette-item</code> · <code>.cast-wrow</code> · <code>.view-opt</code> · <code>.link-row</code></td><td><a class="link" href="#s-pops">浮层菜单</a></td></tr>
+    <tr><td>对话框壳</td><td class="ex">无类 <code>dialog</code>（帮助）· <code>dialog.palette</code>（命令面板）· <code>dialog.relate</code>（两个）· <code>dialog.modal</code>（运行时 7 个，<code>openDialog()</code> 生成）</td><td><a class="link" href="#s-dialogs">对话框</a></td></tr>
+    <tr><td>弹出面板</td><td class="ex"><code>.menu</code> + <code>.menu-drop</code> / <code>.view-pop</code> / <code>.cast-pop</code> / <code>.task-pop</code> · <code>.combo-menu</code>（未并入），各自关闭逻辑</td><td><a class="link" href="#s-pops">浮层菜单</a></td></tr>
+    <tr><td>一列可点选项</td><td class="ex"><code>.menu-item</code> · <code>.watch-option</code> · <code>.palette-item</code> · <code>.cast-wrow</code> · <code>.view-opt</code> · <code>.link-row</code></td><td><a class="link" href="#s-pops">浮层菜单</a></td></tr>
     <tr><td>进度条</td><td class="ex"><code>.progress</code> · <code>.prov-bar</code> · <code>#splash .sp-track</code> · <code>.cast-bar i</code></td><td><a class="link" href="#s-tasks">任务面板</a></td></tr>
     <tr><td>卡片轮廓</td><td class="ex"><code>box-shadow:0 0 0 1px var(--hair)</code>（后期）与 <code>border:1px solid var(--line)</code>（早期）并存，如 <code>.settings-card</code>、<code>.pair-card</code>、<code>.group-card</code> 先写后覆盖</td><td>各节</td></tr>
     <tr><td>文字链接</td><td class="ex"><code>.link-button</code> · <code>a.link</code> · <code>.add-identity</code> · <code>.variant-add</code> · <code>.artist-more</code> · <code>.home-all</code></td><td><a class="link" href="#b-link">链接按钮</a></td></tr>
@@ -685,7 +685,7 @@
   <h2>附录 · 本页没有找到来源的类</h2>
   <p class="sg-lead">app.css 里有 534 个类名；其中下列 <b>32</b> 个在 <code>ui/*.js</code>、<code>core/*.js</code>、<code>app.js</code>、<code>index.html</code> 里<b>查不到字面出现</b>，也不是 <code>k-${kind}</code> / <code>s-${mode}</code> 那样动态拼出的（这两类是在用的：<code>.rel-kind.k-*</code>、<code>.nsfw-toggle.s-*</code>）。多半是已被后来的版本取代而没删：旧的角色索引页（<code>.char-*</code>、<code>.skin-*</code>、<code>.work-head</code>）、旧的设置行（<code>.task-row</code>、<code>.watch-chip</code>）、旧侧栏（<code>.entity-link</code>、<code>.side-hint</code>）等。因此本页没有给它们排样例。是否确实可以删，需要用户在 #319 决定。</p>
   <div class="sg-item"><div class="sg-stage col">
-    <p style="line-height:2.1"><span class="sg-tag dead">breadcrumb</span> <span class="sg-tag dead">cast-shelf</span> <span class="sg-tag dead">char-card</span> <span class="sg-tag dead">char-cover</span> <span class="sg-tag dead">char-grid</span> <span class="sg-tag dead">char-group</span> <span class="sg-tag dead">char-name</span> <span class="sg-tag dead">entity-link</span> <span class="sg-tag dead">lib-groups</span> <span class="sg-tag dead">nav-group</span> <span class="sg-tag dead">nsfw-dot</span> <span class="sg-tag dead">pin</span> <span class="sg-tag dead">prov-live</span> <span class="sg-tag dead">settings-sub</span> <span class="sg-tag dead">shut</span> <span class="sg-tag dead">side-hint</span> <span class="sg-tag dead">skin-chip</span> <span class="sg-tag dead">skin-more</span> <span class="sg-tag dead">skin-row</span> <span class="sg-tag dead">subtle-action</span> <span class="sg-tag dead">sync-text</span> <span class="sg-tag dead">tag-link</span> <span class="sg-tag dead">task-line</span> <span class="sg-tag dead">task-name</span> <span class="sg-tag dead">task-row</span> <span class="sg-tag dead">watch-chip</span> <span class="sg-tag dead">watch-row</span> <span class="sg-tag dead">work-caret</span> <span class="sg-tag dead">work-head</span> <span class="sg-tag dead">work-name</span> <span class="sg-tag dead">zoom-control</span> <span class="sg-tag dead">k-*（在用，动态）</span></p>
+    <p style="line-height:2.1"><span class="sg-tag dead">breadcrumb</span> <span class="sg-tag dead">cast-shelf</span> <span class="sg-tag dead">char-card</span> <span class="sg-tag dead">char-cover</span> <span class="sg-tag dead">char-grid</span> <span class="sg-tag dead">char-group</span> <span class="sg-tag dead">char-name</span> <span class="sg-tag dead">entity-link</span> <span class="sg-tag dead">lib-groups</span> <span class="sg-tag dead">nav-group</span> <span class="sg-tag dead">nsfw-dot</span> <span class="sg-tag dead">pin</span> <span class="sg-tag dead">prov-live</span> <span class="sg-tag dead">settings-sub</span> <span class="sg-tag dead">shut</span> <span class="sg-tag dead">side-hint</span> <span class="sg-tag dead">skin-chip</span> <span class="sg-tag dead">skin-more</span> <span class="sg-tag dead">skin-row</span> <span class="sg-tag dead">sync-text</span> <span class="sg-tag dead">tag-link</span> <span class="sg-tag dead">task-line</span> <span class="sg-tag dead">task-name</span> <span class="sg-tag dead">task-row</span> <span class="sg-tag dead">watch-chip</span> <span class="sg-tag dead">watch-row</span> <span class="sg-tag dead">work-caret</span> <span class="sg-tag dead">work-head</span> <span class="sg-tag dead">work-name</span> <span class="sg-tag dead">k-*（在用，动态）</span></p>
     <p class="sg-cap">另：同一个选择器在 app.css 里写两遍以上、后面整体覆盖前面的有 <code>.primary</code>、<code>.segmented</code>、<code>.quiet</code>、<code>.settings-card</code>、<code>.settings-sub</code>、<code>dialog</code> 等；<code>.aa-card</code> 引用了从未定义的 <code>--panel</code>。</p>
   </div></div>
   <p class="sg-note" style="padding-left:0">本页还<b>没有收录</b>：作品树行 <code>.shelf-row</code>、身份整理卡 <code>.pair-card</code>、画师抽查卡 <code>.aa-card</code>、按组整理 <code>.gsec</code>、首页日期头 <code>.home-dh</code>/条带 <code>.home-strip</code>、角色页榜单 <code>.cast-board</code>/<code>.cast-fan</code>/<code>.cast-rc</code>、角色列表 <code>.cast-table</code>、splash、tour 的镂空 <code>.tour-hole</code>——都是单页的版面，不是跨页复用的组件；第一轮先收可复用的，需要时再补。</p>

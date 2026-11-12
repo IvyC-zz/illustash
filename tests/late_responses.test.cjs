@@ -29,7 +29,7 @@ test('a group page answer that arrives after navigating home does not take over 
   answer({clusters: [{cid: 3, near: 1, traits: ['old']}]});
   await toGroup;
   assert.equal(el('homePage').hidden, false);
-  assert.equal(state.groupTraits, undefined);
+  assert.equal(state.groupTraits, null);   // 初值（core/state.js 声明为 null），迟到的回应没有写进来
   assert.match(el('heading').innerHTML, /首页/);
   assert.ok(requests.some(p => p.startsWith('/api/home')));
   assert.ok(!requests.some(p => p.startsWith('/api/assets')), 'the group page never reads its pictures');

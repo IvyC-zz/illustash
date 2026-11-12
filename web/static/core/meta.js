@@ -2,12 +2,17 @@
 // 不碰 DOM：onMeta(detail) 在每次被采用的读取之后通知（{total, directory, queue}），或通知一次读取失败（{error}）。
 import {api, adoptToken} from './session.js';
 import {setLatest} from './edits.js';
+import {pageOf} from './pages.js';
 import {state} from './state.js';
 import {listeners} from './events.js';
 const changed = listeners();
 export const onMeta = changed.on;
 const failed = error => changed.emit({error});
 export const fetchChar = async id => (await api('/api/characters?' + new URLSearchParams({id, nsfw: state.nsfw})))[0];
+// 当前角色页的角色（不在角色页时为 null）：换页时由 ui/shell.js 经这里换上，元数据重读后这里换成新读到的那份。
+export function setChar(c) { state.char = c; }
+// 身份整理还剩几对：元数据读取带回一次，身份整理页翻页时也会带回最新的总数。
+export function setIdentityCount(n) { state.identityCount = n; }
 let metaPending = null, metaRevision = 0, metaFull = false;
 // 后端接受了一次写入：仍在进行中的更早的读取不能覆盖它（标签只需要重读标签）。
 export function metaWritten(tagsOnly) { if (metaPending) { metaRevision++; metaFull ||= !tagsOnly; } }
@@ -44,7 +49,7 @@ async function refreshMetaOnce(full, revision, bootSeed) {
   }
   const nsfw = new URLSearchParams({nsfw: state.nsfw});
   const charId = state.char?.id;
-  const directory = state.route.page === 'characters';
+  const directory = !!pageOf(state.route).directory;
   const [boot, pools, chars, tags, queue, detail] = await Promise.all([bootSeed || api('/api/bootstrap?' + nsfw), api('/api/review-pools?' + nsfw), api('/api/characters?min=1&' + nsfw + (directory ? '' : '&summary=1')), api('/api/user-tags'), api('/api/identity/count?' + nsfw).catch(e => { failed(e); return null; }), charId && !directory ? fetchChar(charId) : null]);
   const currentChar = charId && (detail || (directory && (chars.find(c => c.id === charId) || await fetchChar(charId))));
   if (revision !== metaRevision || nsfw.get('nsfw') !== state.nsfw || !adoptToken(boot.token)) return;
@@ -61,6 +66,6 @@ async function refreshMetaOnce(full, revision, bootSeed) {
   if (state.char) state.char = (state.char.id === charId && currentChar) || state.char;
   await changed.emit({total: boot.total, directory, queue: !!queue});
   // 读摘要行期间进入了目录：它需要完整的行。
-  if (state.route.page === 'characters' && !directory) refreshMeta().catch(failed);
+  if (pageOf(state.route).directory && !directory) refreshMeta().catch(failed);
 }
 

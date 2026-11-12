@@ -83,7 +83,11 @@ fn resolve(preference: &str, wanted: &[String], codes: &[&str]) -> String {
             return (*code).into();
         }
     }
-    if codes.contains(&"en") { "en".into() } else { SOURCE.into() }
+    if codes.contains(&"en") {
+        "en".into()
+    } else {
+        SOURCE.into()
+    }
 }
 
 /// 外壳这次启动显示的语言：`zh-CN` 或某份译文表的代码。
@@ -195,7 +199,8 @@ fn system_languages() -> Vec<String> {
     let (mut count, mut size) = (0u32, 0u32);
     // SAFETY: 第一次调用只报告大小；第二次填充的缓冲区正好是那么多个 UTF-16 单元。
     unsafe {
-        if GetUserPreferredUILanguages(MUI_LANGUAGE_NAME, &mut count, std::ptr::null_mut(), &mut size) == 0 || size == 0 {
+        if GetUserPreferredUILanguages(MUI_LANGUAGE_NAME, &mut count, std::ptr::null_mut(), &mut size) == 0 || size == 0
+        {
             return Vec::new();
         }
         let mut buffer = vec![0u16; size as usize];
@@ -224,7 +229,10 @@ mod tests {
     use super::*;
 
     const FILES: &[(&str, &str)] = &[
-        ("en", r#"{"@name": "English", "设置": "Settings", "{n} 张": {"one": "{n} picture", "other": "{n} pictures"}, "空": ""}"#),
+        (
+            "en",
+            r#"{"@name": "English", "设置": "Settings", "{n} 张": {"one": "{n} picture", "other": "{n} pictures"}, "空": ""}"#,
+        ),
         ("fr", r#"{"@name": "Français"}"#),
         ("pt-BR", "{}"),
         ("bad", "not json"),
@@ -292,10 +300,16 @@ mod tests {
         assert_eq!(lookup(en, "{n} 张"), "{n} pictures");
         assert_eq!(lookup(None, "设置"), "设置");
         let error = "boom";
-        assert_eq!(fill("无法启动（{path}）：{error}；{error}", &[("path", &"/x"), ("error", &error)]), "无法启动（/x）：boom；boom");
+        assert_eq!(
+            fill("无法启动（{path}）：{error}；{error}", &[("path", &"/x"), ("error", &error)]),
+            "无法启动（/x）：boom；boom"
+        );
         // 单元测试看到的是原文。
         assert_eq!(tr("刷新页面"), "刷新页面");
-        assert_eq!(tr_with("无法启动本地服务（{path}）：{error}", &[("path", &"p"), ("error", &1)]), "无法启动本地服务（p）：1");
+        assert_eq!(
+            tr_with("无法启动本地服务（{path}）：{error}", &[("path", &"p"), ("error", &1)]),
+            "无法启动本地服务（p）：1"
+        );
     }
 
     /// 只读：平台调用返回语言标签（系统总会给出至少一个）。
@@ -317,7 +331,9 @@ mod tests {
         assert_eq!(lines[0], "if (location.protocol === 'tauri:' || location.hostname === 'tauri.localhost') {");
         assert_eq!(lines[1], "self.ILLUSTASH_LANGUAGE = \"en\";");
         assert_eq!(lines[2], r#"self.ILLUSTASH_LANGUAGES = {"en":"English","fr":"Français","pt-BR":"pt-BR"};"#);
-        let tables: Value = serde_json::from_str(lines[3].strip_prefix("self.ILLUSTASH_TABLES = ").unwrap().strip_suffix(';').unwrap()).unwrap();
+        let tables: Value =
+            serde_json::from_str(lines[3].strip_prefix("self.ILLUSTASH_TABLES = ").unwrap().strip_suffix(';').unwrap())
+                .unwrap();
         assert_eq!(tables.as_object().unwrap().keys().collect::<Vec<_>>(), ["en"]);
         assert_eq!(tables["en"]["设置"], "Settings");
         assert_eq!(lines[4], "}");

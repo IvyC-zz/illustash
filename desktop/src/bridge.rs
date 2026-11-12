@@ -9,7 +9,7 @@ use serde_json::{json, Value};
 use tauri::AppHandle;
 use tiny_http::{Header, Method, Request, Response, Server};
 
-use crate::{pixiv, picker};
+use crate::{picker, pixiv};
 
 pub const TOKEN_HEADER: &str = "X-Illustash-Token";
 
@@ -38,22 +38,25 @@ fn query(url: &str, key: &str) -> Option<String> {
 }
 
 fn handle(app: &AppHandle, token: &str, request: Request) {
-    let authorized = request
-        .headers()
-        .iter()
-        .any(|h| h.field.equiv(TOKEN_HEADER) && h.value.as_str() == token);
+    let authorized = request.headers().iter().any(|h| h.field.equiv(TOKEN_HEADER) && h.value.as_str() == token);
     let route = request.url().split('?').next().unwrap_or("").to_string();
     let (code, body): (u16, Value) = if !authorized {
         (403, json!({"error": "口令不对"}))
     } else {
         let result = match (request.method(), route.as_str()) {
-            (Method::Post, "/platform/choose") => picker::choose(app, query(request.url(), "kind").as_deref().unwrap_or(""), query(request.url(), "multiple").as_deref() == Some("1")),
+            (Method::Post, "/platform/choose") => picker::choose(
+                app,
+                query(request.url(), "kind").as_deref().unwrap_or(""),
+                query(request.url(), "multiple").as_deref() == Some("1"),
+            ),
             (Method::Get, "/pixiv/session") => Ok(pixiv::session(app)),
             (Method::Get, "/pixiv/fetch") => match query(request.url(), "path") {
                 Some(path) => pixiv::fetch(app, &path),
                 None => Err("缺少 path".to_string()),
             },
-            (Method::Post, "/pixiv/login") => pixiv::login(app, query(request.url(), "force").as_deref() == Some("1")).map(|_| json!({"ok": true})),
+            (Method::Post, "/pixiv/login") => {
+                pixiv::login(app, query(request.url(), "force").as_deref() == Some("1")).map(|_| json!({"ok": true}))
+            }
             (Method::Post, "/pixiv/logout") => pixiv::logout(app).map(|_| json!({"ok": true})),
             _ => Err("未知路径".to_string()),
         };

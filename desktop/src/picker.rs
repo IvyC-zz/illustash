@@ -27,10 +27,17 @@ pub fn choose(app: &AppHandle, kind: &str, multiple: bool) -> Result<Value, Stri
         "models" => dialog.add_filter(tr("模型文件"), &["onnx", "json", "zip"]).blocking_pick_files(),
         _ => dialog.add_filter("ZIP", &["zip"]).blocking_pick_file().map(|p| vec![p]),
     };
-    let paths: Vec<String> = selected.unwrap_or_default().into_iter().map(|p| {
-        p.into_path().map_err(|_| tr("选择结果不是本地路径"))?
-            .into_os_string().into_string().map_err(|_| tr("选择路径不是 UTF-8"))
-    }).collect::<Result<_, _>>()?;
+    let paths: Vec<String> = selected
+        .unwrap_or_default()
+        .into_iter()
+        .map(|p| {
+            p.into_path()
+                .map_err(|_| tr("选择结果不是本地路径"))?
+                .into_os_string()
+                .into_string()
+                .map_err(|_| tr("选择路径不是 UTF-8"))
+        })
+        .collect::<Result<_, _>>()?;
     // 不猜测、不读文件系统，也不记录选中的私人路径。
     Ok(json!({"paths": paths}))
 }

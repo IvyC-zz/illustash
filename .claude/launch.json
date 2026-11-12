@@ -2,9 +2,9 @@
   "version": "0.0.1",
   "configurations": [
     {
-      "name": "web",
-      "runtimeExecutable": "./start-web.command",
-      "runtimeArgs": ["--no-open", "--port", "8777"],
+      "name": "web-isolated",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": ["tools/dev_preview.py", "--port", "8777"],
       "port": 8777,
       "url": "http://127.0.0.1:8777"
     }
