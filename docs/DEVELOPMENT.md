@@ -28,7 +28,9 @@ cargo build --release --manifest-path native/terms/Cargo.toml
 ./start-web.command --library ~/Pictures/Illustash/我的图库.pilib
 ```
 
-宿主就绪时打印 `图库已启动：http://127.0.0.1:端口/?k=…`。这个地址只能用一次：第一次打开时换成会话 cookie，之后每个请求都要带它，没有就 403（见 [架构方向](ARCHITECTURE_DIRECTION.md) 中「原生宿主完成启动恢复」一段）。浏览器关掉重开丢了 cookie，就重启宿主拿新地址；用内置浏览器走查时也打开终端里打印的地址，`preview_start {url}` 写这个地址。
+宿主就绪时打印 `图库已启动：http://127.0.0.1:端口/?k=…`。这个地址只能用一次：第一次打开时换成会话 cookie，之后每个请求都要带它，没有就 403（见 [架构方向](ARCHITECTURE_DIRECTION.md) 中「原生宿主完成启动恢复」一段）。浏览器关掉重开丢了 cookie，就重启宿主拿新地址。
+
+浏览器走查不打开真实图库：`./start-web.command` 不带 `--library` 时打开的是最近登记的图库，也就是自己日常用的那个。走查用 `python3 tools/dev_preview.py`，代理会话用 `preview_start {name: "web-isolated"}`（`.claude/launch.json` 里只有这一项）。脚本把 `HOME`、`ILLUSTASH_APP_SUPPORT`、`ILLUSTASH_SHARED` 指向一个临时目录，设 `ILLUSTASH_NO_KEYCHAIN=1` 不碰钥匙串，在里面新建一个只含生成渐变图的图库，宿主跑在空闲端口上；`8777` 端口只做一次跳转，转到宿主打印的带码地址。退出时删除临时目录，`--work DIR` 改用指定目录并保留；宿主用 `native/terms/target` 里较新的构建，或 `ILLUSTASH_TERMS_BIN`。自己另起宿主走查时，同样要把这三个目录指向临时位置，再用 `preview_start {url}` 打开就绪行里的地址。
 
 `start-web.command` 在 `native/terms/target/{release,debug}` 里找 `illustash-terms`，也可以用 `ILLUSTASH_TERMS_BIN` 指定，找不到直接报错。服务和桌面入口都不隐式建库或升级；开库时按已保存的设置自动同步，`--no-auto-sync` 可关闭自动同步。多来源、Apple Photos 来源与出处分组见 [图库](LIBRARIES.md)。
 
