@@ -207,3 +207,20 @@ test('后端查询参数：pool、分组编号、筛选都从注册表来', () =
   assert.equal(pages.poolIs({page: 'skipped'}, 'unmatched', 'skipped'), true);
   assert.equal(pages.poolIs({page: 'group'}, 'unmatched', 'skipped'), false);
 });
+
+// 未识别一类三个整理页的行为靠注册表属性，不靠页面名（#385）：设角色之后图离开 = lead，能跳过当前这张 = skip。
+test('lead 页设角色后离开；全部未识别和组页能跳过，已跳过页不能', () => {
+  const P = pages.PAGES;
+  assert.deepEqual(Object.keys(P).filter(n => P[n].lead), ['unmatched', 'skipped', 'group']);
+  assert.deepEqual(Object.keys(P).filter(n => P[n].skip), ['unmatched', 'group']);
+  // 能跳过的页，选择栏也是「未识别」那一种（S 快捷键和选择栏的「跳过」按钮同源）
+  for (const n of Object.keys(P).filter(n => P[n].skip)) assert.equal(P[n].bar, 'unmatched', n);
+  assert.equal(pages.pageOf({page: 'group', id: '3'}).skip, true);
+  assert.equal(pages.CHARACTER.skip, undefined);
+});
+
+test('整理页都登记了底栏提示（已知问题 10）', () => {
+  for (const name of ['group', 'sgroup', 'unmatched', 'skipped', 'excluded', 'pending', 'audit']) assert.ok(pages.PAGES[name].hint?.(), name);
+  assert.match(pages.PAGES.group.hint(), /S 跳过/);
+  assert.doesNotMatch(pages.PAGES.sgroup.hint(), /S 跳过|C 设为角色/);
+});
