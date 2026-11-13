@@ -11,14 +11,23 @@ tools/check_architecture.py 对 crate 依赖方向的检查。规则（说明见
   5 long-line            不得新增超过 200 字符的行（app.js、core/、ui/）
   6 page-name            页面名只能在 core/pages.js（页面注册表，#342）里比较（硬规则，没有基线）
   7 state-writer         state 字段只能由 core/state.js 组标题写明的写入者文件赋值（#353；硬规则，没有基线）
+  8 css-literal          app.css 不得新增写死的字号、圆角、gap/padding、z-index 和颜色，改用顶部的令牌（#349）
 
 基线（tools/frontend_baseline.json）按「文件 + 内容特征」登记（导入边、字段名、每个文件的数量），不按行号，
 所以文件里别处的改动不会让它失效。基线只能缩小：`--shrink` 只调低、不新增；`--base-ref REF` 在基线比 REF
 上的大时报错；`--strict-stale` 把「基线里已不再出现的项」也算作失败，逼着改好违规的人同时收紧基线。
-tools/check_all.sh 两个都带上。新规则（例如 #317 之后的规则 8：CSS 字面量）就是 new_rules() 里多一个 Rule。
+tools/check_all.sh 两个都带上。新规则就是 new_rules() 里多一个 Rule；带基线的新规则用 `--init-rule <规则名>` 登记一次存量，
+和规则在同一个 PR 里提交（`--init` 在基线已存在时拒绝；手工往基线里加会被 `--base-ref` 当成基线变大）。`--base-ref` 把
+「基准上的基线和检查脚本里都没有」的规则认作首次登记，不算变大，但登记的数量不能多于现状。
+
+规则 8 按声明扫描（选择器 + 属性 + 值），基线键是「属性: 字面量」（如 `background: #e0e0e6`），不含选择器，改名、挪位置
+不受影响。令牌定义处（:root 与 :root[data-theme=dark] 里的 `--名:值`）不查；按 #339 的登记，margin 和不在档位上的
+18px 以上 padding、gap 不查；z-index 的 0、长度的 0 不算。颜色查十六进制、rgb()/hsl() 等颜色函数（通道里用了 var() 的
+不算，如 `rgba(var(--sh),.1)`），颜色名只在颜色类属性里查。别处声明的自定义属性（`.x{--gutter:26px}`）只查颜色。
 
 已知盲区（文本级检查做不到）：规则 2 认不出 `state[key]`、`Object.assign(state, …)` 和解构写法，名为 state
-的函数参数会被误报；正则字面量与除号靠前一个字符判断，`if (ok) /re/.test(s)` 这种写法会被当成除号。
+的函数参数会被误报；正则字面量与除号靠前一个字符判断，`if (ok) /re/.test(s)` 这种写法会被当成除号。规则 8 不查
+JS 里拼的内联样式、index.html 的 style 属性和 var() 的回退值；同一个字面量在别处删掉一处、新增一处，数量不变，查不出来。
 """
 from collections import Counter
 from dataclasses import dataclass, field
@@ -250,6 +259,12 @@ def new_rules():
              '没有合适的函数，就在写入者模块里加一个导出函数，由它来赋值。确实应当换写入者或拆组时，改 core/state.js 的组标题，'
              '并在 PR 里写明理由；不要为了通过检查在组标题里列两个文件。',
              baselined=False),
+        Rule('css-literal', '8', 'app.css 新增了写死的字号、圆角、间距、z-index 或颜色',
+             'web/static/app.css 顶部的 CSS 变量是外观令牌的唯一来源（docs/WEB_V2.md「样式令牌」，#317、#349）：font-size（含 font 简写）、'
+             'border-radius、gap 和 padding、z-index、颜色都写成 var(--…)；:root 与 :root[data-theme=dark] 里的变量声明就是令牌定义，不算。'
+             f'按 #339 的登记，margin 和不在档位上的 {LARGE_SPACING}px 以上 padding、gap 不检查。现有的字面量已冻结为基线，不得新增。',
+             '按每处箭头后的提示改用令牌；没有对应档位的，取最近的一档，确需新档位先在 Issue 里问（新档位加在 app.css 顶部的令牌块，'
+             '并改 docs/WEB_V2.md 那一节），不要往基线里添加。改好存量的一处后运行 `python tools/check_frontend.py --shrink`。'),
     ]}
 
 
@@ -329,8 +344,279 @@ def state_writers(sources):
     return writers, problems
 
 
-def run_rules(sources):
+# ------------------------------------------------------------------------------------------------- 规则 8：CSS 字面量
+CSS_FILE = 'app.css'  # 相对 web/static
+# 令牌定义处：这两个选择器里的变量声明（`--名:值`）就是令牌本身，不算违规。
+TOKEN_SELECTORS = frozenset({':root', ':root[data-theme=dark]'})
+# 按 #339 的登记（docs/WEB_V2.md「样式令牌」）不进令牌的：页面级的大间距（18px 以上、不在档位上的 padding、gap）和 margin。
+LARGE_SPACING = 18
+SPACING_PROPS = frozenset({'gap', 'row-gap', 'column-gap', 'grid-gap', 'grid-row-gap', 'grid-column-gap'})
+RADIUS_PROP_RE = re.compile(r'^border(?:-[a-z]+)*-radius$')
+# 会带颜色名（white、black…）的属性；十六进制和 rgb()/hsl() 这类颜色函数在任何属性里都算。
+COLOR_PROP_RE = re.compile(r'color|background|border|outline|shadow|fill|stroke|text-decoration|column-rule|filter')
+NAMED_COLORS = frozenset('''aliceblue antiquewhite aqua aquamarine azure beige bisque black blanchedalmond blue blueviolet brown
+    burlywood cadetblue chartreuse chocolate coral cornflowerblue cornsilk crimson cyan darkblue darkcyan darkgoldenrod darkgray
+    darkgreen darkgrey darkkhaki darkmagenta darkolivegreen darkorange darkorchid darkred darksalmon darkseagreen darkslateblue
+    darkslategray darkslategrey darkturquoise darkviolet deeppink deepskyblue dimgray dimgrey dodgerblue firebrick floralwhite
+    forestgreen fuchsia gainsboro ghostwhite gold goldenrod gray green greenyellow grey honeydew hotpink indianred indigo ivory khaki
+    lavender lavenderblush lawngreen lemonchiffon lightblue lightcoral lightcyan lightgoldenrodyellow lightgray lightgreen lightgrey
+    lightpink lightsalmon lightseagreen lightskyblue lightslategray lightslategrey lightsteelblue lightyellow lime limegreen linen
+    magenta maroon mediumaquamarine mediumblue mediumorchid mediumpurple mediumseagreen mediumslateblue mediumspringgreen
+    mediumturquoise mediumvioletred midnightblue mintcream mistyrose moccasin navajowhite navy oldlace olive olivedrab orange
+    orangered orchid palegoldenrod palegreen paleturquoise palevioletred papayawhip peachpuff peru pink plum powderblue purple
+    rebeccapurple red rosybrown royalblue saddlebrown salmon sandybrown seagreen seashell sienna silver skyblue slateblue slategray
+    slategrey snow springgreen steelblue tan teal thistle tomato turquoise violet wheat white whitesmoke yellow yellowgreen'''.split())
+NAMED_COLOR_RE = re.compile(r'(?<![\w-])(%s)(?![\w-])' % '|'.join(sorted(NAMED_COLORS, key=len, reverse=True)), re.I)
+HEX_RE = re.compile(r'(?<![\w&])#([0-9a-fA-F]{8}|[0-9a-fA-F]{6}|[0-9a-fA-F]{3,4})(?![\w])')
+COLOR_FN_RE = re.compile(r'(?<![\w-])(?:rgba?|hsla?|hwb|lab|lch|oklab|oklch)\(', re.I)
+LENGTH_RE = re.compile(r'(?<![\w#.\-])-?(?:\d+\.?\d*|\.\d+)(px|rem|em|pt|%)(?![\w%])')
+FONT_SIZE_IN_SHORTHAND_RE = re.compile(r'(?<![\w#.\-/])(?:\d+\.?\d*|\.\d+)(?:px|rem|em|pt|%)(?=\s*/|\s|$)')
+
+
+@dataclass
+class Declaration:
+    selector: str  # 最内层的选择器（或 @keyframes 里的 from / 50%）
+    context: tuple  # 外层到内层的全部前导（@media …、选择器）
+    prop: str
+    value: str
+    line: int
+
+
+def css_declarations(raw):
+    """按顺序列出 CSS 里的每条声明；注释抹空、字符串和括号里的 `;`、`{` 不当作分隔。行号是声明开头所在的行。"""
+    text = re.sub(r'/\*.*?\*/', lambda m: _BLANK.sub(' ', m.group(0)), raw, flags=re.S)
+    out, stack, start, depth, quote = [], [], 0, 0, ''
+
+    def emit(end):
+        piece = text[start:end]
+        body = piece.strip()
+        if not body or not stack or ':' not in body:
+            return
+        prop, _, value = body.partition(':')
+        offset = start + len(piece) - len(piece.lstrip())
+        out.append(Declaration(stack[-1], tuple(stack), prop.strip().lower(), value.strip(), text.count('\n', 0, offset) + 1))
+
+    for i, c in enumerate(text):
+        if quote:
+            if c == quote and text[i - 1] != '\\':
+                quote = ''
+        elif c in '\'"':
+            quote = c
+        elif c == '(':
+            depth += 1
+        elif c == ')':
+            depth = max(depth - 1, 0)
+        elif depth:
+            continue
+        elif c == '{':
+            stack.append(' '.join(text[start:i].split()))
+            start = i + 1
+        elif c == ';':
+            emit(i)
+            start = i + 1
+        elif c == '}':
+            emit(i)
+            if stack:
+                stack.pop()
+            start = i + 1
+    return out
+
+
+def _calls(text, opener):
+    """`text` 里以 `opener` 正则开头、括号配平的函数调用：[(起点, 终点)]。"""
+    spans, pos = [], 0
+    while (m := opener.search(text, pos)):
+        depth, j = 0, m.end() - 1
+        while j < len(text):
+            depth += {'(': 1, ')': -1}.get(text[j], 0)
+            j += 1
+            if depth == 0:
+                break
+        spans.append((m.start(), j))
+        pos = j
+    return spans
+
+
+_VAR_RE = re.compile(r'\bvar\(')
+
+
+def _clean_value(value):
+    """去掉字符串、url(…) 的内容和 `!important`，把 var(…) 整个换成 VAR（变量里的回退值不算字面量）。"""
+    value = re.sub(r'''(['"])(?:\\.|(?!\1).)*\1''', "''", value)
+    value = re.sub(r'\burl\([^)]*\)', 'url()', value, flags=re.I)
+    value = re.sub(r'!\s*important', '', value, flags=re.I)
+    for begin, end in reversed(_calls(value, _VAR_RE)):
+        value = value[:begin] + 'VAR' + value[end:]
+    return value.strip()
+
+
+def css_tokens(declarations):
+    """令牌定义处的变量：返回 ({亮色变量: 值}, {暗色变量: 值})。"""
+    light, dark = {}, {}
+    for d in declarations:
+        if d.prop.startswith('--') and d.selector in TOKEN_SELECTORS:
+            (dark if 'dark' in d.selector else light)[d.prop] = d.value
+    return light, dark
+
+
+def _px_tokens(light, prefix):
+    """形如 `--fs-12: 12px` 的数值令牌：{12.0: '--fs-12'}。"""
+    found = {}
+    for name, value in light.items():
+        m = re.fullmatch(r'(\d+(?:\.\d+)?)px', value)
+        if name.startswith(prefix) and m:
+            found.setdefault(float(m.group(1)), name)
+    return found
+
+
+# 第二段（#339）按用户答复定下的归并（docs/WEB_V2.md「样式令牌」），优先于下面「最近的一档」的推算。
+MERGED = {'--fs-': {9.5: 10, 10.5: 11, 11.5: 11, 12.5: 12, 13.5: 13},
+          '--radius-': {3: 4, 5: 6, 7: 6, 9: 10, 13: 14},
+          '--space-': {3: 4, 5: 6, 7: 8, 9: 8, 11: 10, 13: 12}}
+
+
+def _nearest(scale, value, uses, prefix):
+    """最近的一档；两档一样近时取用得更多的一档（docs/WEB_V2.md「样式令牌」）。"""
+    if MERGED[prefix].get(value) in scale:
+        return scale[MERGED[prefix][value]]
+    return scale[min(scale, key=lambda v: (abs(v - value), -uses[scale[v]], -v))]
+
+
+def _normal_color(text):
+    """颜色字面量的规范写法：十六进制小写并展开成 6 / 8 位，函数去掉空白、`0.5` 写成 `.5`。"""
+    if text.startswith('#'):
+        digits = text[1:].lower()
+        return '#' + (''.join(c * 2 for c in digits) if len(digits) in (3, 4) else digits)
+    return re.sub(r'(?<![\d.])0\.', '.', re.sub(r'\s+', '', text.lower()))
+
+
+class CssAdvisor:
+    """按 app.css 顶部的令牌，给每个字面量写出该用哪个令牌（没有对应档位时说明要先问）。"""
+
+    def __init__(self, declarations, raw):
+        self.uses = Counter(re.findall(r'var\((--[\w-]+)\)', raw))
+        light, self.dark = css_tokens(declarations)
+        self.display = _px_tokens(light, '--fs-display-')
+        self.font = {v: n for v, n in _px_tokens(light, '--fs-').items() if not n.startswith('--fs-display-')}
+        self.radius = _px_tokens(light, '--radius-')
+        self.space = _px_tokens(light, '--space-')
+        self.z = {int(v): n for n, v in light.items() if n.startswith('--z-') and re.fullmatch(r'-?\d+', v)}
+        self.colors = {}
+        for name, value in light.items():
+            if HEX_RE.fullmatch(value) or COLOR_FN_RE.match(value):
+                self.colors.setdefault(_normal_color(value), []).append(name)
+
+    @staticmethod
+    def _px(literal):
+        m = re.fullmatch(r'-?(\d+\.?\d*|\.\d+)px', literal)
+        return float(m.group(1)) if m and not literal.startswith('-') else None
+
+    @staticmethod
+    def _scale(scale):
+        return ' / '.join(f'{v:g}' for v in sorted(scale))
+
+    def _ask(self, what, scale, value, prefix):
+        near = f'最近的一档是 var({_nearest(scale, value, self.uses, prefix)})；' if scale else ''
+        return f'没有 {what} 这一档（现有档位 {self._scale(scale)}）：{near}确需这个值，先在 Issue 里问是否新增档位'
+
+    def font_size(self, literal):
+        px = self._px(literal)
+        if px in self.font:
+            return f'改用 var({self.font[px]})'
+        if px in self.display:
+            return f'改用 var({self.display[px]})（展示字号，只给大标题、空状态、启动页这类一次性的大字）'
+        if px is None:
+            return f'字号令牌都是 px 档位，没有 {literal} 这种写法的档；改用 var(--fs-N)，或先在 Issue 里问是否新增档位'
+        return self._ask(literal, self.font, px, '--fs-')
+
+    def radius_of(self, literal):
+        px = self._px(literal)
+        if literal == '50%':
+            return '改用 var(--radius-round)'
+        if px in self.radius:
+            return f'改用 var({self.radius[px]})'
+        if px is not None and px >= 999:
+            return '改用 var(--radius-pill)'
+        if px is None:
+            return f'圆角令牌是 px 档位、--radius-pill 和 --radius-round（50%），没有 {literal}；先在 Issue 里问是否新增档位'
+        return self._ask(literal, self.radius, px, '--radius-')
+
+    def spacing(self, literal):
+        px = self._px(literal)
+        if px in self.space:
+            return f'改用 var({self.space[px]})'
+        if px is None:
+            return f'间距令牌都是 px 档位，没有 {literal} 这种写法的档；改用 var(--space-N)，或先在 Issue 里问是否新增档位'
+        return self._ask(literal, self.space, px, '--space-')
+
+    def z_index(self, literal):
+        value = int(literal)
+        if value in self.z:
+            return f'改用 var({self.z[value]})'
+        order = ' < '.join(name for _, name in sorted(self.z.items()))
+        return f'没有 z-index {literal} 这一层（由低到高：{order}）：按它该在哪两层之间，先在 Issue 里问是否新增档位（只加档位，不改先后）'
+
+    def color(self, literal):
+        names = self.colors.get(_normal_color(literal), [])
+        if names:
+            pairs = '、'.join(f'var({n})（暗色下是 {self.dark.get(n, "同一个值")}）' for n in names[:3])
+            return (f'亮色下等于 {pairs}：确认这个语义在暗色下也合适就改用它；'
+                    '不合适就在 :root 和 :root[data-theme=dark] 两块里成对新增一个语义色（先在 Issue 里问）')
+        return ('没有这个颜色的令牌：改用 :root 顶部现有的语义色，或在 :root 和 :root[data-theme=dark] 两块里成对新增一个'
+                '（先在 Issue 里问；新增暗色取值按 docs/WEB_V2.md 的对比度要求核对）')
+
+
+def css_literals(raw):
+    """app.css 里写死的字号、圆角、间距、z-index 和颜色：[(基线键, 声明, 字面量, 怎么改)]。"""
+    declarations = css_declarations(raw)
+    advisor = CssAdvisor(declarations, raw)
+    found = []
+    for d in declarations:
+        custom = d.prop.startswith('--')
+        if custom and d.selector in TOKEN_SELECTORS:
+            continue  # 令牌定义处
+        value = _clean_value(d.value)
+        hits = []
+        if d.prop == 'font-size':
+            hits += [(m.group(0), advisor.font_size) for m in LENGTH_RE.finditer(value)]
+        elif d.prop == 'font':
+            hits += [(m.group(0), advisor.font_size) for m in FONT_SIZE_IN_SHORTHAND_RE.finditer(value)][:1]
+        elif RADIUS_PROP_RE.match(d.prop):
+            hits += [(m.group(0), advisor.radius_of) for m in LENGTH_RE.finditer(value)]
+        elif d.prop in SPACING_PROPS or d.prop.startswith('padding'):
+            for m in LENGTH_RE.finditer(value):
+                px = advisor._px(m.group(0))
+                if px is not None and px >= LARGE_SPACING and px not in advisor.space:
+                    continue  # 页面级的大间距，按 #339 的登记不进令牌
+                if m.group(1) in ('px', 'rem', 'em', 'pt'):
+                    hits.append((m.group(0), advisor.spacing))
+        elif d.prop == 'z-index' and re.fullmatch(r'-?\d+', value) and int(value) != 0:
+            hits.append((value, advisor.z_index))
+        hits = [(lit, how) for lit, how in hits if float(re.match(r'-?(\d+\.?\d*|\.\d+)', lit).group(1)) != 0]
+        hits += [(m.group(0), advisor.color) for m in HEX_RE.finditer(value)]
+        hits += [(value[b:e], advisor.color) for b, e in _calls(value, COLOR_FN_RE) if 'VAR' not in value[b:e]]
+        if not custom and COLOR_PROP_RE.search(d.prop):
+            hits += [(m.group(0), advisor.color) for m in NAMED_COLOR_RE.finditer(value)]
+        for literal, how in hits:
+            shown = _normal_color(literal) if how == advisor.color else literal
+            found.append((f'{d.prop}: {shown}', d, literal, how(literal)))
+    return found
+
+
+def load_css(root):
+    path = root / STATIC / CSS_FILE
+    if not path.exists():
+        raise SystemExit(f'check_frontend: 缺少 {STATIC}/{CSS_FILE}')
+    return path.read_text(encoding='utf-8')
+
+
+def run_rules(sources, css=None):
     rules = new_rules()
+    # 规则 8：app.css 的字面量
+    if css is not None:
+        for key, d, literal, how in css_literals(css):
+            selector = d.selector if len(d.selector) <= 60 else d.selector[:59] + '…'
+            rules['css-literal'].add(key, f'{STATIC}/{CSS_FILE}:{d.line}: {selector} {{ {d.prop}: {d.value[:70]} }}  → {how}')
     graph = {p: [t for t, _ in imports(s, sources)] for p, s in sources.items()}
     edges = {(p, t): s.raw_line(line) for p, s in sources.items() for t, line in imports(s, sources)}
     # 规则 1：core -> ui，硬规则
@@ -406,6 +692,8 @@ def compare(rules, baseline):
     errors, stale = [], []
     for rule in rules.values():
         base = baseline.get(rule.id, {}) if rule.baselined else {}
+        unregistered = (f'\n  基线里还没有规则 {rule.id}：新规则首次登记存量用 `python tools/check_frontend.py --init-rule {rule.id}`。'
+                        if rule.baselined and rule.id not in baseline else '')
         for key, count in sorted(rule.found.items()):
             allowed = base.get(key, 0)
             if count > allowed:
@@ -414,34 +702,47 @@ def compare(rules, baseline):
                 what = f'{key}（现有 {count} 处，基线允许 {allowed} 处）' if rule.baselined else key
                 errors.append(f'[规则 {rule.number} · {rule.id}] {rule.title}: {what}\n  '
                               + '\n  '.join(shown)
-                              + f'\n  约定：{rule.convention}\n  改法：{rule.fix}')
+                              + f'\n  约定：{rule.convention}\n  改法：{rule.fix}' + unregistered)
         for key, allowed in sorted(base.items()):
             if rule.found.get(key, 0) < allowed:
                 stale.append(f'[{rule.id}] {key}: 基线 {allowed}，现有 {rule.found.get(key, 0)}')
     return errors, stale
 
 
-def baseline_growth(current, reference):
-    """`current` 里比 `reference`（基准 ref 上的基线）多出来或数量更大的项。"""
+def baseline_growth(current, reference, introduced=frozenset()):
+    """`current` 里比 `reference`（基准 ref 上的基线）多出来或数量更大的项。
+    `introduced` 是在基准上还不存在的规则（见 introduced_rules）：它们的整份基线是首次登记，不算变大。"""
     grown = []
     for rule, entries in current.items():
+        if rule in introduced:
+            continue
         for key, count in entries.items():
             if count > reference.get(rule, {}).get(key, 0):
                 grown.append(f'[{rule}] {key}: {reference.get(rule, {}).get(key, 0)} -> {count}')
     return grown
 
 
+def introduced_rules(current, reference, reference_script, rules):
+    """`current` 里在基准上还不存在的规则：基准的基线里没有这一项，基准的检查脚本里也没有定义它。
+    只看基线不够：基准脚本里已有的规则不会缺席基线（--init 和 --shrink 都会留下这一项，哪怕是空的），
+    缺席说明有人删了它，这时照常按「基线变大」处理。"""
+    return frozenset(rid for rid in current if rid in rules and rules[rid].baselined and rid not in reference
+                     and f"Rule('{rid}'" not in reference_script)
+
+
+def file_at(root, ref, path):
+    result = subprocess.run(['git', '-C', str(root), 'show', f'{ref}:{path}'], capture_output=True, text=True)
+    return result.stdout if result.returncode == 0 else None
+
+
 def baseline_at(root, ref):
-    result = subprocess.run(['git', '-C', str(root), 'show', f'{ref}:{BASELINE.as_posix()}'],
-                            capture_output=True, text=True)
-    if result.returncode != 0:
-        return None
-    return json.loads(result.stdout).get('rules', {})
+    text = file_at(root, ref, BASELINE.as_posix())
+    return None if text is None else json.loads(text).get('rules', {})
 
 
 def check(root=ROOT, baseline=None):
     """返回 (errors, stale)。传入 `baseline` 时覆盖基线文件（测试用）。"""
-    rules = run_rules(load_sources(root))
+    rules = run_rules(load_sources(root), load_css(root))
     if baseline is None:
         baseline = load_baseline(root)
     if baseline is None:
@@ -449,16 +750,38 @@ def check(root=ROOT, baseline=None):
     return compare(rules, baseline)
 
 
+def init_rule(root, rules, baseline, rid):
+    """--init-rule：只给一条还没登记的规则按现状写基线，其他规则原样保留。"""
+    rule = rules.get(rid)
+    if rule is None:
+        print(f'没有规则 {rid}；带基线的规则有：' + '、'.join(r.id for r in rules.values() if r.baselined), file=sys.stderr)
+        return 1
+    if not rule.baselined:
+        print(f'规则 {rid} 是硬规则，没有基线；违规要改代码。', file=sys.stderr)
+        return 1
+    if rid in baseline:
+        print(f'规则 {rid} 已经登记过基线；之后只能用 --shrink 缩小，新增违规要改代码。', file=sys.stderr)
+        return 1
+    added = dict(sorted(rule.found.items()))
+    order = [r for r in rules if r in baseline or r == rid] + [r for r in baseline if r not in rules]
+    write_baseline(root, {r: added if r == rid else baseline[r] for r in order})
+    print(f'已在 {BASELINE} 里登记规则 {rid} 的存量：{len(added)} 项，共 {sum(added.values())} 处。和新规则在同一个 PR 里提交。')
+    return 0
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('--root', type=Path, default=ROOT)
     parser.add_argument('--init', action='store_true', help='按当前文件树建立基线（仅在基线不存在时）')
+    parser.add_argument('--init-rule', metavar='RULE',
+                        help='只给基线里还没有的一条新规则按现状登记存量（新加一条带基线的规则时用一次，和新规则在同一个 PR 里提交）；'
+                             '已登记的规则拒绝，其他规则的基线不动。--base-ref 认得出这是首次登记：基准上的基线和脚本里都没有这条规则')
     parser.add_argument('--shrink', action='store_true', help='调低或删除已不再出现的基线项；从不新增')
     parser.add_argument('--base-ref', metavar='REF', help='基线比这个 git ref 上的大时报错')
     parser.add_argument('--strict-stale', action='store_true', help='把基线里已不再出现的项算作失败')
     args = parser.parse_args(argv)
     root = args.root
-    rules = run_rules(load_sources(root))
+    rules = run_rules(load_sources(root), load_css(root))
     if args.init:
         if (root / BASELINE).exists():
             print('基线已存在；只能用 --shrink 缩小。', file=sys.stderr)
@@ -470,6 +793,8 @@ def main(argv=None):
     if baseline is None:
         print('缺少 tools/frontend_baseline.json；首次建立基线用 `python tools/check_frontend.py --init`。')
         return 1
+    if args.init_rule:
+        return init_rule(root, rules, baseline, args.init_rule)
     if args.shrink:
         shrunk = {rid: {k: min(v, rules[rid].found.get(k, 0)) for k, v in entries.items() if rules[rid].found.get(k, 0)}
                   for rid, entries in baseline.items() if rid in rules}
@@ -482,7 +807,15 @@ def main(argv=None):
         if reference is None:
             print(f'注意：{args.base_ref} 上没有基线文件，跳过“基线变大”检查。')
         else:
-            for line in baseline_growth(baseline, reference):
+            introduced = introduced_rules(baseline, reference, file_at(root, args.base_ref, 'tools/check_frontend.py') or '', rules)
+            for rid in sorted(introduced):
+                print(f'注意：规则 {rid} 在 {args.base_ref} 上还没有，这份基线（{sum(baseline[rid].values())} 处）是首次登记，不算基线变大。')
+                over = [f'{key}: 基线 {count}，现有 {rules[rid].found.get(key, 0)}' for key, count in sorted(baseline[rid].items())
+                        if count > rules[rid].found.get(key, 0)]
+                if over:
+                    errors.append(f'[首次登记多于现状] 规则 {rid}：' + '；'.join(over[:5])
+                                  + f'\n  首次登记只能照现状登记：删掉 {BASELINE} 里这一项，重新运行 `python tools/check_frontend.py --init-rule {rid}`。')
+            for line in baseline_growth(baseline, reference, introduced):
                 errors.append(f'[基线变大] {line}\n  基线只能缩小：新增违规要改代码，不能往 {BASELINE} 里添加。')
     for error in errors:
         print(error)
