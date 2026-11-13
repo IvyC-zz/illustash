@@ -28,6 +28,7 @@ fn main() {
         }
         std::process::exit(illustash_terms::cli::run(&args).into());
     }
+    illustash_terms::diagnostics::initialize();
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .manage(pixiv::Pixiv::default())
@@ -49,7 +50,8 @@ fn main() {
             welcome::startup_choose,
             welcome::startup_retry,
             welcome::startup_upgrade,
-            welcome::startup_rescue
+            welcome::startup_rescue,
+            welcome::startup_diagnostics
         ])
         .on_menu_event(|app, event| {
             if event.id() == "reload" {

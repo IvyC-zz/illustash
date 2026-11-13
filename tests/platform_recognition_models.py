@@ -191,12 +191,13 @@ class RecognitionModelTest(unittest.TestCase):
                         session=hashlib.sha256(b'synthetic').hexdigest(), task_id='synthetic')
         bad = self.root / 'bad.png'; bad.write_bytes(b'not an image')
         assets = [dict(id=f'asset-{i}', path=str(bad if i == 24 else self.images[i % 8])) for i in range(26)]
+        for a in assets: a['input_sha256'] = hashlib.sha256(Path(a['path']).read_bytes()).hexdigest()
         output = self.root / 'output'; output.mkdir()
         # 生产方还在运行时就能看到进度：一直采样到进程退出。
         progress = self.root / 'progress.json'
         request = dict(mode='produce', resources=str(self.resources), models=str(self.resources / 'models'),
                        runtime=str(self.runtime), shared=str(self.shared),
-                       request=dict(format='illustash-sync/1', identity=identity, assets=assets, output=str(output)))
+                       request=dict(format='illustash-sync/2', identity=identity, assets=assets, output=str(output)))
         (self.root / 'request.json').write_text(json.dumps(request), encoding='utf-8')
         (self.root / 'response.json').unlink(missing_ok=True)
         process = subprocess.Popen([str(self.compute), str(self.root / 'request.json'), str(self.root / 'response.json')],
@@ -278,8 +279,9 @@ class RecognitionModelTest(unittest.TestCase):
         output = self.root / 'output'; output.mkdir()
         identity = dict(package=str(package), library_id='synthetic', generation=1,
                         session=hashlib.sha256(b'synthetic').hexdigest(), task_id='synthetic')
-        request = dict(format='illustash-sync/1', identity=identity, output=str(output),
+        request = dict(format='illustash-sync/2', identity=identity, output=str(output),
                        assets=[dict(id='good', path=str(self.images[0])), dict(id='bad', path=str(bad))])
+        for a in request['assets']: a['input_sha256'] = hashlib.sha256(Path(a['path']).read_bytes()).hexdigest()
         response = self.invoke(self.adapter, request)
         self.assertEqual(response['failed'], [{'uuid': 'bad', 'reason': 'undecodable'}])
         self.assertEqual(len(response['packages']), 1)

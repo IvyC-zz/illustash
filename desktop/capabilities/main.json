@@ -15,6 +15,7 @@
     "allow-startup-choose",
     "allow-startup-retry",
     "allow-startup-upgrade",
-    "allow-startup-rescue"
+    "allow-startup-rescue",
+    "allow-startup-diagnostics"
   ]
 }

@@ -29,7 +29,7 @@ pub(crate) fn value<T: Serialize>(v: &T) -> Result<Value> {
 pub(crate) enum Format {
     #[serde(rename = "illustash-index/1")]
     Index,
-    #[serde(rename = "illustash-sync/1")]
+    #[serde(rename = "illustash-sync/2")]
     Sync,
     #[serde(rename = "illustash-provenance/1")]
     Provenance,
@@ -110,6 +110,7 @@ pub(crate) struct SyncRequest<'a> {
 pub(crate) struct SyncAsset {
     pub id: String,
     pub path: String,
+    pub input_sha256: String,
 }
 #[derive(Deserialize)]
 pub(crate) struct SyncResponse {
@@ -135,10 +136,24 @@ pub(crate) enum FailureReason {
     #[default]
     Unreadable,
     Undecodable,
+    /// 请求之后输入改变；下次同步重试，不登记为损坏图片。
+    InputChanged,
 }
 #[derive(Deserialize)]
 pub(crate) struct RecognitionManifest {
     pub assets: Vec<String>,
+    pub inputs: std::collections::HashMap<String, String>,
+}
+impl RecognitionManifest {
+    /// 同一资产的新内容也不能替换本次请求声明的输入版本。
+    pub(crate) fn check_inputs(&self, expected: &std::collections::HashMap<String, String>) -> Result<()> {
+        if self.inputs.len() != self.assets.len()
+            || self.assets.iter().any(|id| expected.get(id).is_none_or(|hash| self.inputs.get(id) != Some(hash)))
+        {
+            return Err(Error::Conflict("识别结果的输入版本与本次请求不匹配".into()));
+        }
+        Ok(())
+    }
 }
 #[derive(Serialize)]
 pub(crate) struct ProvenanceRequest<'a> {
@@ -301,14 +316,15 @@ mod tests {
     }
     #[test]
     fn sync_failure_reason_defaults_to_retry_and_rejects_unknown_values() {
-        let v = json!({"identity":identity(),"packages":[],"failed":[{"uuid":"old"},{"uuid":"read","reason":"unreadable"},{"uuid":"bad","reason":"undecodable"}]});
+        let v = json!({"identity":identity(),"packages":[],"failed":[{"uuid":"old"},{"uuid":"read","reason":"unreadable"},{"uuid":"bad","reason":"undecodable"},{"uuid":"changed","reason":"input_changed"}]});
         let reply = parse::<SyncResponse>(v, Path::new("sync/response.json")).unwrap();
         assert_eq!(
             reply.failed.iter().map(|f| (f.uuid.as_str(), f.reason)).collect::<Vec<_>>(),
             [
                 ("old", FailureReason::Unreadable),
                 ("read", FailureReason::Unreadable),
-                ("bad", FailureReason::Undecodable)
+                ("bad", FailureReason::Undecodable),
+                ("changed", FailureReason::InputChanged)
             ]
         );
         let v = json!({"identity":identity(),"packages":[],"failed":[{"uuid":"x","reason":"broken"}]});
@@ -317,7 +333,11 @@ mod tests {
     }
     #[test]
     fn recognition_manifest_missing_and_wrong_fields_have_file_and_field() {
-        malformed::<RecognitionManifest>(json!({"assets":["synthetic"]}), &["assets"], "package/manifest.json");
+        malformed::<RecognitionManifest>(
+            json!({"assets":["synthetic"],"inputs":{"synthetic":"a".repeat(64)}}),
+            &["assets", "inputs"],
+            "package/manifest.json",
+        );
         let error = parse::<RecognitionManifest>(json!({"assets":[3]}), Path::new("package/manifest.json"))
             .err()
             .unwrap()
@@ -368,12 +388,29 @@ mod tests {
         malformed::<HashEntry>(json!({"asset":"synthetic","hash":"synthetic"}), &["asset", "hash"], "hashes.json");
     }
     #[test]
+    fn recognition_manifest_must_match_the_requested_content_even_if_the_file_has_changed_again() {
+        let expected = [("a".to_owned(), "a".repeat(64))].into_iter().collect();
+        let manifest = |hash: &str| RecognitionManifest {
+            assets: vec!["a".into()],
+            inputs: [("a".into(), hash.repeat(64))].into_iter().collect(),
+        };
+        assert!(manifest("a").check_inputs(&expected).is_ok());
+        assert!(manifest("b").check_inputs(&expected).is_err());
+        let mut missing = manifest("a");
+        missing.inputs.clear();
+        assert!(missing.check_inputs(&expected).is_err());
+        let mut extra = manifest("a");
+        extra.inputs.insert("b".into(), "b".repeat(64));
+        assert!(extra.check_inputs(&expected).is_err());
+    }
+    #[test]
     fn remaining_requests_keep_original_json_bytes() {
         let identity: TaskIdentity = parse(identity(), Path::new("internal")).unwrap();
         let path = Path::new("/synthetic");
-        let assets = [SyncAsset { id: "synthetic".into(), path: "/synthetic/image.png".into() }];
+        let assets =
+            [SyncAsset { id: "synthetic".into(), path: "/synthetic/image.png".into(), input_sha256: "a".repeat(64) }];
         let request = SyncRequest { format: Format::Sync, identity: &identity, assets: &assets, output: path };
-        assert_eq!(value(&request).unwrap().to_string(), json!({"format":"illustash-sync/1","identity":identity,"assets":[{"id":"synthetic","path":"/synthetic/image.png"}],"output":path}).to_string());
+        assert_eq!(value(&request).unwrap().to_string(), json!({"format":"illustash-sync/2","identity":identity,"assets":[{"id":"synthetic","path":"/synthetic/image.png","input_sha256":"a".repeat(64)}],"output":path}).to_string());
         let only = ["synthetic".into()];
         let request = ProvenanceRequest {
             format: Format::Provenance,

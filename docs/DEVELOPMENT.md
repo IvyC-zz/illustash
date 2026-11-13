@@ -56,6 +56,12 @@ cargo build --release --manifest-path native/terms/Cargo.toml
 
 已退役、直接报错的参数：`--python`、`--upstream`、`--route`、`--refresh`、`--source`、`--db`、`--cache`、`--identity`、`--no-similar` 和裸 `--`。恢复旧版本要停服务、保留当前包与 WAL，再从相容版本的升级前备份恢复；不要复制正在使用的 SQLite 文件。`tools/build_db.py` 重建的是分析源库，不是应用的更新入口。
 
+### 本地运行诊断
+
+`native/terms/src/diagnostics.rs` 使用固定枚举、数值和随机错误编号记录故障，不收集错误原文或请求内容。记录位于应用支持目录的 `diagnostics/`，与图库数据库分离；用非阻塞跨进程文件锁串行写入、按条目数/大小/期限清理。macOS 新目录和文件分别为 0700/0600；Windows 继承用户应用数据目录权限。读取时重新按白名单解析，损坏或未知格式的记录不导出。接口以外的路径收到的输入错误（如 WebView2 每次加载页面都会请求的 `/favicon.ico`）照常应答 400，但不记录、不带诊断响应头；其余失败照常记录。删除该目录只清除诊断，不影响图库。
+
+HTTP 错误保留原有状态码与 `error` 正文，额外通过 `X-Illustash-Diagnostic` 返回 `id/stored/publication/retry`；后台失败在状态中附加 `diagnostic`。读取失败标记不涉及提交；传输层无法证明写入边界时标记未知，导入任务依据发布点区分未提交与已提交，其余分批任务保守标记可能部分提交。记录失败不改变业务 `Result`。认证后的 `/api/diagnostics` 和仅启动页有权调用的 `startup_diagnostics` 提供同一份脱敏报告；外壳记录宿主启动/退出及超时，但不导出 stderr。用户入口与保留上限见 [报告问题](INSTALL.md#报告问题)。
+
 ### 安装包与桌面
 
 版本号只在 `native/terms/application.json` 写一处（SemVer，可带 `-beta.1` 这类预发布后缀，不带 `+build`；关于页的版本与渠道也读这里）。`python3 tools/version.py --set X.Y.Z` 改它并同步 `desktop/tauri.conf.json`、各 crate 的 `Cargo.toml` 和 `Cargo.lock` 里的本项目包；`--sync` 只按它同步；不带参数只检查。本机全量与 CI 的 Python 测试会检查一致，`packaging/build.py` 不一致就拒绝打包。改版本号会改动 `desktop/tauri.conf.json`，按 AGENTS.md 同步 `tests/migration_inventory.json` 的指纹。

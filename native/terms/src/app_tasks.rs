@@ -295,7 +295,18 @@ impl Task {
                 match result {
                     Ok(Ok(())) => TaskOutcome::Done,
                     Ok(Err(e)) => TaskOutcome::Failed(e.to_string()),
-                    Err(_) => TaskOutcome::Failed("任务线程崩溃".into()),
+                    Err(_) => {
+                        use crate::diagnostics::{self, Cause, Operation, Publication, Retry, Stage};
+                        let d = diagnostics::record(
+                            Operation::Task,
+                            Stage::Background,
+                            Cause::Panic,
+                            None,
+                            Publication::Unknown,
+                            Retry::CheckState,
+                        );
+                        TaskOutcome::Failed(format!("任务线程崩溃（{id}）", id = d.id))
+                    }
                 }
             };
             lock_ignoring_poison(&ctx.boundary).closed = true;

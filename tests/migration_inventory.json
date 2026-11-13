@@ -131,7 +131,7 @@
 
  "crates/platform/src/sqlite.rs":"c77ae1e6babb5af9b0c922280a307a4704d831af3bc661f8f89e28e9e229dca2",
 
- "desktop/build.rs":"aad863f2093e8d1f400649920846d82e5bd48b78134d676143d2da4e23c9c532",
+ "desktop/build.rs":"ba1c3b9097208d998ecbebb7b5ab044ceef97999132afb8f1a55a1a61b077034",
 
  "desktop/src/bridge.rs":"21a05b8804b091edae92c99727a002470d995224f9ac0c212c2ea894cb18f56c",
 
@@ -139,27 +139,27 @@
 
  "desktop/src/i18n.rs":"ab24cd127b728f156f456069c1c7e10de2ea10cbeea476ef4eb552daa2ae931b",
 
- "desktop/src/main.rs":"ee4afc7080a2205a8fe8766cd1a77157722de752929937fa18c12301e3dd5484",
+ "desktop/src/main.rs":"d83f402cc7d267d3f7f93c2abe8ec6290f1a38adc851fedfffd4d71b32497c1d",
 
  "desktop/src/picker.rs":"71bd9e4e9e1746d60d4eea93b0a80f5091080cebcd2defb156ccbd63cd48c284",
 
  "desktop/src/pixiv.rs":"511b8003b2068c801f336d96a6c130a6796ed1866d1102e64678760d3a906c65",
 
- "desktop/src/server.rs":"66288ae322e0450d6529aeb177325beaae90fadd1dbae029416e951eb5bccc70",
+ "desktop/src/server.rs":"93312559f033bdb10199caee28809c5e73259a119e308e850aa5286bc07564a1",
 
- "desktop/src/welcome.rs":"fb50e5c81e1e36f88a49b3b170e858ea4ec4ee2b5758434a567dadb53f047764",
+ "desktop/src/welcome.rs":"2ddf57612f854e273fa6fbdf9f15d5b0f2b47e453c290045343b3f26feeed3bb",
 
  "desktop/tauri.conf.json":"bb054aa3da9ab925a3215c27a479619e3aa69504f539e57ac6d4c2aefa8343db",
 
  "native/terms/build.rs":"9cef40a98bd6a541d9a910c68d84add3571fb33cdde91fb2dacae2c9d52fd534",
 
- "native/terms/examples/recognition_compute/bench.rs":"3499a6c07ea8e94512a61740b07567e89e1ae154b1b8a52f4fb836305c605960",
+ "native/terms/examples/recognition_compute/bench.rs":"9055ce8465cabfb5717f4411914eff944a63cae1f021c1377e069a7a33049931",
 
  "native/terms/examples/research_compute/math.rs":"ceedf5880d735289e7686d8b5bd11e54278941f93eb7955421996ca29c774562",
 
  "native/terms/src/app_accounts.rs":"dce690a139403137f1c829f9f1edf26fc83627bee455420a2b38a65520ce6cca",
 
- "native/terms/src/app_archives.rs":"e17326d0f439a356ea6e866847cf01c0b1b458414a864091779039e335b51bbe",
+ "native/terms/src/app_archives.rs":"2b65e891ca922de5635f752ab180d9aee802dd63f78ab5a02b69a12af1b505b5",
 
  "native/terms/src/app_characters.rs":"a285efa8f72b9124cfe8f6a9e14631e196512bf2b239d12912bef5501b1f4cfc",
 
@@ -179,15 +179,15 @@
 
  "native/terms/src/app_files.rs":"997aa11877351d60dee879f884a6240b3d1fcd8d38793b0cb3962eef59cb62b3",
 
- "native/terms/src/app_folder.rs":"fd566d4d1e94e2740b9ed9a046729da88e5bd86da53c9e1c2092612e133dd4d6",
+ "native/terms/src/app_folder.rs":"cd148b0a312065b97da3cbea8dc782a596eb0d8e842a1dfcf2d45f259fea6216",
 
- "native/terms/src/app_http.rs":"849ca98e4dc5b50b9d05d4aba1909b269b66c3aab9369d815f280ad24455447c",
+ "native/terms/src/app_http.rs":"1fff6f06bb6b7aa0d60880d85dbbeedb5f41bfdfeb6b40689bbc4a8e9ac87e29",
 
  "native/terms/src/app_identity.rs":"0a1013c73b59db6ad290a8bdfae5b554cef1fa36d73b3f217e029c0812fccd20",
 
- "native/terms/src/app_imports.rs":"77b3cb01d9d5d433f919e2f86d8424c651bf0cc5c20fc9470b97199930ca6445",
+ "native/terms/src/app_imports.rs":"0432cfdda774fd06826ac4c4f36a2b8fca3b261fea19c66813241b5aad409b18",
 
- "native/terms/src/app_index.rs":"701b9f4f0c48dd836308f943e17a0676b1b489cb5837525ea41a6844df78c9b5",
+ "native/terms/src/app_index.rs":"bb368c81bdf3fdfd91eebdc3f9708916bf97d5f321bf6c826ed523b7a9fb0528",
 
  "native/terms/src/app_integrity.rs":"d7ff3af8c6b4b0a90293a98cf65951db98aad92fe310d5cd29a837c49a6e3d4a",
 
@@ -197,7 +197,7 @@
 
  "native/terms/src/app_local.rs":"f8fb6ea23574a2ec339f9b966e05951db2c1e8cd3b735464f51edf36ecc4bd49",
 
- "native/terms/src/app_migrate.rs":"8a3029dfe7fcd28ee8c504c110d071211dad1a2675fd0bb7f6abd7fc56c0703d",
+ "native/terms/src/app_migrate.rs":"dc7ac85b778a33def433892fe83fab3fdc283ff33c970595e8dddb6992a6cefb",
 
  "native/terms/src/app_migrate_data.rs":"53fc754cf6ad0e6f397907ca42543512e6ff550dbce8ee2218c76211258a0aa5",
 
@@ -219,11 +219,11 @@
 
  "native/terms/src/app_migration_sql/provenance.sql":"a780f1f8837dd2c90a556539c114d56cdaa513b057fb667bf0c5c9d604f75934",
 
- "native/terms/src/app_models.rs":"baeec471b24275b69c361a3cb6872bbcb75a84279a02ea9d5793d64adfac143b",
+ "native/terms/src/app_models.rs":"4cd349a7c2699a415e8fc069c028ed514ee209d3bb11f63c5822a2a0fcf3b810",
 
  "native/terms/src/app_name_sources.rs":"effedaf83af896ecd880784490e4b1483fe05c28c3098a098c2ae80c68a2f458",
 
- "native/terms/src/app_names.rs":"6648a1f39a60285fc193b0a6689440e54e6f620b93d3a721685ec2bcdcb97d0a",
+ "native/terms/src/app_names.rs":"f1e9ee13d2fc826d1c0071b5de7e4a38700efe9445001d472d70b07c3d60795f",
 
  "native/terms/src/app_onboarding.rs":"829290530c622801e4d6d10ffbecf8e98f29257533bc64f7ee9dde4532293e34",
 
@@ -235,7 +235,7 @@
 
  "native/terms/src/app_profiles.rs":"9146ad3345db80e03c9a8f68e02f3e253fe4cc04a21610a03060061aa0cfea9b",
 
- "native/terms/src/app_provenance.rs":"33c7303e6787ea58fc7c8336811776308294bb6ca95f61fb8bdd40fe71861f23",
+ "native/terms/src/app_provenance.rs":"78e2e1660cb702fa9b9240da7c9a4b19b6203344b8bf9cab98380845d03705cd",
 
  "native/terms/src/app_provenance_cache.rs":"cb3ae9fbc002bbf79281b1a896dba6c76cf3cad2888264db8fc2c9a11d0f29bf",
 
@@ -243,11 +243,11 @@
 
  "native/terms/src/app_provenance_sources.rs":"b5b95d67aa5753245bcbac3a32d36da0094d27650df1760db62d150d5168f868",
 
- "native/terms/src/app_recognition.rs":"8d3ba9f6943387a3eea841f90d4c21f9cb3bdab74410955f215c38a39bb7f735",
+ "native/terms/src/app_recognition.rs":"9683e86dd2467ed6f5e9ac9ff3142d9ba07405bf2b8075f28cd648c0ec104409",
 
  "native/terms/src/app_rescue.rs":"08915aa36490c06b4d43fb0ff6337d4a548b451bc15c090928b0d37e6af4456d",
 
- "native/terms/src/app_research.rs":"89b135b2b6beb1a50448e14051cb5c7520c4c51b0bdcc680fcecc3cbda615639",
+ "native/terms/src/app_research.rs":"3e793d257030bc5aa0dcecd16c887b4dee04463f67c1db9e3b46738fdcf44e5b",
 
  "native/terms/src/app_resources.rs":"3304fcac09af5a36a490589de3dd36fd6f79bad80cf515f44f6d2888ee1d80e3",
 
@@ -261,9 +261,9 @@
 
  "native/terms/src/app_sources.rs":"8ee039dc596b1253783ab4256fd7befa1ce4087eee3f93b69208e7ede676c819",
 
- "native/terms/src/app_sync.rs":"75daef1e3580a5ead4d3dc4b6ca0058a79cf3954893d8d3ce24f6896f605793f",
+ "native/terms/src/app_sync.rs":"a9b6362ced9158e3ff44940032b8ed18c8742ecbd7b96637a2ac3246c0ac415d",
 
- "native/terms/src/app_tasks.rs":"5179bb565aa28ea189feb7d87b5899fbe07fa552feaa393a29f3a36d394a3495",
+ "native/terms/src/app_tasks.rs":"77c6e161633fa9f8dd67a474de0d562182ac7cacbd92c941ea5f8f5909b91ab9",
 
  "native/terms/src/app_updates.rs":"8d5dedc499d93db689442c7e83487fccd806ffa77bcaa604534221f28020820a",
 
@@ -277,6 +277,8 @@
 
  "native/terms/src/desktop_shell.rs":"381733278909d3290199f212c138d02197f1a259c9fda2a58819609b986f27a2",
 
+ "native/terms/src/diagnostics.rs":"8eff6d4eb9fe74a1072ba8e4299cefeb4b36933c421000ff51d84a1e872e5b09",
+
  "native/terms/src/http.rs":"806d8b048bc9e2925765986a082d3bc542c8e669bb93fcc745be8508fcc9ec91",
 
  "native/terms/src/http_app.rs":"1cdb28245fb1d97ac446313b089c8fe4700ce22027dbb7272bf3a6c04750a984",
@@ -287,7 +289,7 @@
 
  "native/terms/src/http_characters.rs":"77486635e9790c369b6f57ba96a9e57118acc646223cd1396740f91a4f31eb6c",
 
- "native/terms/src/http_host_get.rs":"bf803ce14b99b126cf946727d0548fab0fc16f150b2005ce5f03415cd30631a6",
+ "native/terms/src/http_host_get.rs":"ccfc6662205665fe50084e5d1ed607bd1b0b764e9ecec2805987f2621e362d32",
 
  "native/terms/src/http_host_post.rs":"8db1013ee971ea4812d3da18f416097cb33e4e37789dcb890a8115f2f41fc9a3",
 
@@ -315,7 +317,7 @@
 
  "native/terms/src/index_generation.rs":"940c236d35bee6001cc2225701d64d0be2964a2575a653a897449650535ad2fa",
 
- "native/terms/src/lib.rs":"e1f48b88eb3d2adf71593fc0c25c91ff2b21604937cf3e3744ab15af4f66e629",
+ "native/terms/src/lib.rs":"9fac2646674d06b45fd0eb53fc16fe9b146307e16ffce265db5c23492e11c09e",
 
  "native/terms/src/platform_process.rs":"11d73a02dc4f9baa3779aaef132012ef36908e510747326c6704374681f606a3",
 
@@ -337,7 +339,7 @@
 
  "native/terms/src/recognition_compute/preprocess.rs":"73cbb0b8f2a2668de96d84a2e0ed03402eaaaaa8897906251cc500137b6b833a",
 
- "native/terms/src/recognition_compute/producer.rs":"1d3176240687d019b5b265cbd02fed719863f1086895d45d462b2b6d22bca4c0",
+ "native/terms/src/recognition_compute/producer.rs":"3e0e0fa40a7d57a602f6f1c4486fd3cd7bce8d09ba47cbbd6bcec9dade021eee",
 
  "native/terms/src/recognition_compute/session.rs":"816586af4d9ec00c75bd7f147fb5a0c03600d18a3f14ed400ec0a072df51d323",
 
@@ -377,7 +379,7 @@
 
  "native/terms/src/wd_pending.rs":"0ee1bf7d1815e0d4ad7ce6b4aeabd173bfa91d8aa46eeae869adb9c880d466af",
 
- "native/terms/src/worker_protocol.rs":"ca9b8c77ea89ef5bd6aa1605faf7829a982319bbc0c84c8ea8c7b68623215152",
+ "native/terms/src/worker_protocol.rs":"f6b95fd5c2eeb4303b07f0adbfbee1c75ff38b6a5795645bcb8100ddb0427fa0",
 
  "native/terms/vendor/tiny_http/src/client.rs":"5d0e5a6a3d1af1ede1796639110cf1678a9af021abb1cba46501e913ba4eedb0",
 
@@ -528,7 +530,7 @@
  "native/terms/src/cli.rs":{"cli-entry":["recognition-import","folder-scan","photos-scan","library-scan","library-create","http","serve","wd-pending","names-command","names-project","names-search","character-command","identity-command","learning-snapshot","publish-learning","reproject-characters","validate","migrate","import","judge","tag","reproject","undo"],"database-write":[[0,3],3,1]},
  "crates/core/src/character_sql/fold.sql":{"database-write":["UPDATE:duplicates"]},
  "crates/core/src/character_commands.rs":{"database-write":{"@0":10,"@184":5,"@198":1,"DELETE FROM:identity_scopes":2,"DELETE FROM:identity_suspended":2,"INSERT INTO:identity_scopes":1,"@14":1,"@15":1,"INSERT OR REPLACE INTO:assertions":1,"DELETE FROM:assertions":2,"INSERT INTO:assertions":1,"@18":1,"@35":4,"INSERT OR IGNORE INTO:deferred":1,"DELETE FROM:deferred":5,"INSERT OR REPLACE INTO:asked":2,"INSERT INTO:reviews":1,"INSERT OR REPLACE INTO:identity_uncertain":1,"@175":1,"INSERT INTO:deferred":1,"@190":1,"DELETE FROM:identity_anchor_decisions":1,"INSERT INTO:identity_anchor_decisions":1,"INSERT INTO:identity_anchor_history":1}},
- "native/terms/src/http_host_get.rs":{"http-branch":[17,97,42,39,"/api/similar|/api/clusters",[26,2],41,43,"/api/settings","/api/libraries",291,293,295,296,305,306]},
+ "native/terms/src/http_host_get.rs":{"http-branch":[17,97,42,39,"/api/similar|/api/clusters",[26,2],41,43,"/api/settings","/api/libraries",291,293,295,296,305,306,"/api/diagnostics"]},
  "native/terms/src/app_create.rs":{"database-write":{"ATTACH":1,"dynamic-or-wrapper":9,"INSERT INTO:main.":1,"CREATE INDEX:if":1,"COMMIT":3,"DETACH":1,"ALTER TABLE:assets":1,"INSERT OR IGNORE INTO:meta":1}},
  "native/terms/src/app_index.rs":{"database-write":[[0,7],34,[1,5],33,283,284,285,286,[208,2],12,[199,2],287,249,201,[3,2]],"entrypoint":[4]},
  "native/terms/src/http_browse.rs":{"http-branch":["/api/assets|/api/ids",[246,3],[77,2],[248,3],24,99,89,"/api/assets|/api/assets/count|/api/ids",[78,3]],"database-write":[[7,2],[0,2]]},
@@ -541,7 +543,7 @@
  "native/terms/src/app_provenance.rs":{"database-write":{"INSERT OR IGNORE INTO:pending_runs":3,"UPDATE:runs":3,"INSERT OR IGNORE INTO:native_meta":2,"dynamic-or-wrapper":4,"UPDATE:native_meta":1,"COMMIT":2,"INSERT INTO:runs":1,"DELETE FROM:pending_runs":1,"ATTACH":2,"PRAGMA:c.execute_batch(\"pragma defer_foreign_keys":1,"INSERT INTO:leads|UPDATE:set":1,"INSERT INTO:native_delivery":1},"entrypoint":{"process-start":1}},
  "crates/core/src/character_sql/evidence_default.sql":{"database-write":[196]},
  "native/terms/src/app_migration_sql/artists.sql":{"database-write":["CREATE TABLE IF NOT EXISTS:artist_verdicts","CREATE INDEX IF NOT EXISTS:artist_verdicts_artist"]},
- "native/terms/src/app_recognition.rs":{"database-write":["CREATE TABLE IF NOT EXISTS:recognition_imports","CREATE TABLE IF NOT EXISTS:recognition_assets",134,[0,9],[12,2],[199,2],217,"INSERT INTO:recognition_assets","INSERT INTO:recognition_imports",[1,3],3,201,[21,2],[234,2]]},
+ "native/terms/src/app_recognition.rs":{"database-write":{"CREATE TABLE IF NOT EXISTS:recognition_imports":1,"CREATE TABLE IF NOT EXISTS:recognition_assets":1,"CREATE TABLE IF NOT EXISTS:embeddings":1,"dynamic-or-wrapper":12,"DELETE FROM:labels":3,"INSERT INTO:labels":2,"INSERT OR REPLACE INTO:embeddings":1,"INSERT INTO:recognition_assets":1,"INSERT INTO:recognition_imports":1,"COMMIT":4,"DELETE FROM:embeddings":1,"DELETE FROM:recognition_assets":1,"UPDATE:files":1,"INSERT INTO:backend_effects":2,"INSERT INTO:meta":2,"UPDATE:recognition_imports":3,"UPDATE:backend_effects":2}},
  "native/terms/src/app_sources.rs":{"database-write":[0,5,1]},
  "crates/platform/src/platform_credentials.rs":{"entrypoint":[[4,3]]},
  "crates/core/src/backup.rs":{"database-write":[0]},

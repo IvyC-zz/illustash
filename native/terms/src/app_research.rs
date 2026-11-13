@@ -644,7 +644,7 @@ impl Research {
         let keys = if raw.get("status").map(Json::text) == Some("idle") {
             vec!["status", "compared", "found", "seconds", "at"]
         } else {
-            vec!["status", "done", "total", "found", "message"]
+            vec!["status", "done", "total", "found", "message", "diagnostic"]
         };
         Json::Object(keys.into_iter().filter_map(|k| raw.get(k).cloned().map(|v| (k.to_owned(), v))).collect())
     }
@@ -663,8 +663,12 @@ impl Research {
                     value.set(k, v.clone());
                 }
             }
-        } else if let Some(v) = raw.get("message") {
-            value.set("message", v.clone());
+        } else {
+            for key in ["message", "diagnostic"] {
+                if let Some(v) = raw.get(key) {
+                    value.set(key, v.clone());
+                }
+            }
         }
         value
     }
@@ -794,8 +798,18 @@ impl Research {
                             let _ = c.execute("UPDATE research_runs SET error=? WHERE status='pending'", [&message]);
                         }
                     }
-                    *state.lock().expect("research state mutex poisoned") =
-                        Json::object([("status", "error".into()), ("message", e.reason().into())]).into();
+                    let d = crate::diagnostics::failure(
+                        crate::diagnostics::Operation::Research,
+                        crate::diagnostics::Stage::Background,
+                        &e,
+                        crate::diagnostics::Publication::Unknown,
+                    );
+                    *state.lock().expect("research state mutex poisoned") = Json::object([
+                        ("status", "error".into()),
+                        ("message", e.reason().into()),
+                        ("diagnostic", d.value().into()),
+                    ])
+                    .into();
                     if let Some(tx) = reply {
                         let _ = tx.send(Err(Error::Invalid(e.to_string())));
                     }
@@ -1306,6 +1320,18 @@ mod tests {
     use super::*;
     use crate::app_tasks::{Task, TaskIdentity};
     use std::collections::BTreeSet;
+
+    #[test]
+    fn diagnostic_receipt_reaches_similar_and_learner_public_states() {
+        let research = Research::new(1, "synthetic-session", true);
+        *research.state.lock().unwrap() = json!({"status":"error", "message":"synthetic failure",
+            "diagnostic":{"id":"D-synthetic", "publication":"unknown", "retry":"check_state"}})
+        .into();
+        for state in [research.similar_state(), research.learner_state()] {
+            assert_eq!(state.get("diagnostic").unwrap().get("id").unwrap().text(), "D-synthetic");
+            assert_eq!(state.get("message").unwrap().text(), "synthetic failure");
+        }
+    }
 
     const ALL: [Scope; 4] = [Scope::Learning, Scope::Similar, Scope::Oc, Scope::Relate];
     struct Fixture {

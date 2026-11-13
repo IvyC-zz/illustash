@@ -52,6 +52,12 @@ class NativeRecognitionTest(unittest.TestCase):
         with sqlite3.connect(self.lib.source) as c:
             for col in ('source TEXT DEFAULT "legacy"', 'model_ver TEXT', 'run_id TEXT'):
                 c.execute('ALTER TABLE labels ADD COLUMN ' + col)
+        # 历史录制只保存数据库；v2 明确需要真实输入字节，补入隔离的合成文件，不改源表。
+        with sqlite3.connect(self.lib.source) as c:
+            for asset, path in c.execute("SELECT uuid,src_path FROM assets WHERE in_scope=1 AND coalesce(trashed,0)=0"):
+                path = Path(path)
+                self.assertTrue(path.is_relative_to(self.root))
+                path.write_bytes(('synthetic input ' + asset).encode())
         self.process, self.log = self.start(self.lib.path)
         self.token = json.loads(self.request('/api/bootstrap')['body'])['token']
 
@@ -67,7 +73,11 @@ class NativeRecognitionTest(unittest.TestCase):
         return p
 
     def manifest(self, p, ids=('a', 'b')):
-        m = dict(format='illustash-recognition/1', library_id=self.lib.config['id'], assets=list(ids), models=self.specs,
+        with sqlite3.connect(self.lib.source) as c:
+            paths = dict(c.execute('SELECT uuid,src_path FROM assets'))
+        hashes = {u: hashlib.sha256(Path(paths[u]).read_bytes()).hexdigest() if u in paths else '0'*64 for u in ids}
+        m = dict(format='illustash-recognition/2', library_id=self.lib.config['id'], assets=list(ids), models=self.specs,
+                 inputs=hashes, preprocessing='illustash-wd-ccip/1',
                  files={f:dict(bytes=(p/f).stat().st_size,sha256=hashlib.sha256((p/f).read_bytes()).hexdigest()) for f in FILES})
         (p / 'manifest.json').write_text(json.dumps(m), newline='\n')
         return m
@@ -94,14 +104,27 @@ class NativeRecognitionTest(unittest.TestCase):
         expected=self.rec.value('old import')
         actual=self.import_result(p)
         source_now=dict(snapshot(self.lib.source))
-        if os.name == 'nt':
-            # Windows 上包的摘要与 macOS 录制的不同，以它为键的行（运行 id、导入记录）也随之不同；
-            # 其余都必须一致。
-            actual,expected['result']=dict(actual,digest=None),dict(expected['result'],digest=None)
-            for table in ('labels','recognition_assets','recognition_imports'):
-                source_now.pop(table,None);expected['source'].pop(table,None)
-        self.assertEqual(actual,expected['result'])
-        self.assertEqual(source_now,expected['source'])
+        # v2 改变包和逐资产指纹；保留旧投影对照，单独核对新的输入绑定与账本。
+        manifest = json.loads((p/'manifest.json').read_text())
+        digest = hashlib.sha256(json.dumps(manifest, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
+        self.assertEqual(actual['digest'], digest)
+        old_digest = expected['result']['digest']
+        self.assertEqual(dict(actual, digest=old_digest), expected['result'])
+        with sqlite3.connect(self.lib.source) as c:
+            receipt = c.execute('SELECT digest,manifest,assets,status,error FROM recognition_imports').fetchone()
+            self.assertEqual((receipt[0], json.loads(receipt[1]), json.loads(receipt[2]), receipt[3:]),
+                             (digest, manifest, ['a', 'b'], ('done', '')))
+            ledger = c.execute('SELECT asset,digest,package FROM recognition_assets ORDER BY asset').fetchall()
+            self.assertEqual([r[0] for r in ledger], ['a', 'b'])
+            self.assertTrue(all(len(r[1]) == 64 and r[2] == digest for r in ledger))
+            normalized = self.root/'normalized-source.sqlite'
+            with sqlite3.connect(normalized) as dest:
+                c.backup(dest)
+                dest.execute('UPDATE labels SET run_id=? WHERE run_id=?', ('import:'+old_digest, 'import:'+digest))
+        source_now['labels'] = snapshot(normalized)['labels']
+        for table in ('recognition_assets','recognition_imports'):
+            source_now.pop(table); expected['source'].pop(table)
+        self.assertEqual(source_now, expected['source'])
         # 随机的身份 ID 和时间戳由现有的 core 黄金测试检查；这些标签和结果是确定的。
         for table in ('assets','assertions','asset_tags','memberships','general_hits','asset_rating'):
             self.assertEqual(snapshot(self.lib.db)[table],expected['db'][table],table)
@@ -125,7 +148,7 @@ class NativeRecognitionTest(unittest.TestCase):
                 p=self.incoming();m=json.loads((p/'manifest.json').read_text())
                 if bad=='checksum': (p/'wd.npy').write_bytes(b'bad')
                 elif bad=='library': m['library_id']='wrong'
-                elif bad=='version': m['format']='illustash-recognition/2'
+                elif bad=='version': m['format']='illustash-recognition/1'
                 elif bad=='models': m['models']['wd']['sha256']='a'*64
                 elif bad in ('shape','nan','inf','zero','fortran','dtype'):
                     x=np.ones((2,7 if bad=='shape' else 768),dtype='<f8' if bad=='dtype' else '<f4')
