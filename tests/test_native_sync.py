@@ -263,6 +263,35 @@ if failures: Path(sys.argv[2]).write_text(json.dumps(dict(identity=r['identity']
             self.assertEqual(c.execute("SELECT rating FROM asset_rating WHERE uuid='D'").fetchall(),[('general',)])
         self.assertFalse(self.sentinel.exists())
 
+    def test_native_library_new_recognition_takes_the_newest_saved_pictures_first(self):
+        # #360：待识别的图按保存时间从新到旧送去识别，同一时间按资产 ID，没有保存时间的排在最后；
+        # 每轮上限留下的是最新的那几张，其余的等下一轮。保存时间各差一天以上，换算成本地时间后先后不变。
+        day=86400
+        saved={'E':780000000+3*day,'F':780000000+day,'G':780000000+2*day,'I':780000000+2*day,'H':None}
+        for uuid in saved:
+            self.photo(uuid,'com.atebits.Tweetie2')
+            original=self.library/f'originals/{uuid}/{uuid}.png';original.parent.mkdir(parents=True);original.write_bytes(b'synthetic')
+        with sqlite3.connect(self.library/'database/Photos.sqlite') as c:
+            c.executemany('UPDATE ZASSET SET ZADDEDDATE=? WHERE ZUUID=?',[(when,uuid) for uuid,when in saved.items()])
+        self.worker(per_run=2)
+        sent=[]
+        for _ in range(3):
+            state=self.sync()
+            self.assertEqual(state['state']['status'],'done',state)
+            self.assertEqual((state['state']['total'],state['state']['done']),(2,2))
+            sent.append(json.loads((self.root/'last-request').read_text()))
+        with sqlite3.connect(self.lib.source) as c:
+            added=dict(c.execute('SELECT uuid,added_at FROM assets'))
+        self.assertEqual(added['H'],'')
+        # 文件夹里那张图的创建时间随平台而定（folder_fixture.settle），它排在哪里按它实际的保存时间算。
+        expected=sorted(sorted(added),key=added.get,reverse=True)
+        self.assertEqual(len(expected),6)
+        self.assertEqual([u for u in expected if u in saved],['E','G','I','F','H'])
+        self.assertEqual(sent,[expected[:2],expected[2:4],expected[4:]])
+        with sqlite3.connect(self.lib.source) as c:
+            self.assertEqual(c.execute('SELECT count(*) FROM recognition_assets').fetchone()[0],6)
+        self.assertFalse(self.sentinel.exists())
+
     def test_native_library_new_worker_progress_before_exit(self):
         for uuid in ('E','F'):
             self.photo(uuid,'com.atebits.Tweetie2')
@@ -344,7 +373,8 @@ if failures: Path(sys.argv[2]).write_text(json.dumps(dict(identity=r['identity']
         self.assertEqual(value['state']['message'],f'任务超时：{WIDE_IDLE_MS//1000} 秒没有进展')
         first=json.loads((self.root/'last-request').read_text())
         self.assertEqual(len(first),3)
-        # 文件夹里的图片在扫描导入时计数；流式送来的一批只计它带来的照片图片。前两批包含哪些图片按键的顺序决定。
+        # 文件夹里的图片在扫描导入时计数；流式送来的一批只计它带来的照片图片。前两批包含哪些图片按识别的顺序
+        # （保存时间从新到旧，#360）决定。
         self.assertEqual((value['history'][0]['status'],value['history'][0]['imported']),
                          ('interrupted',1+sum(u in ('E','F') for u in first[:2])))
         with sqlite3.connect(self.lib.source) as c:

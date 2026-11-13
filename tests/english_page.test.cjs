@@ -13,6 +13,13 @@ test('numbers and dates follow Intl', () => {
     '12,345|5/3/2025|5/3|May 2026');
 });
 
+test('the time recognition still needs is told in minutes or, when long, in hours (#360)', () => {
+  const {syncLine} = web.core();
+  const line = (total, ms) => syncLine({status: 'recognising', stage: 'recognising', total, done: 0, ms_per_image: ms});
+  assert.equal(line(30, 60000), 'Recognizing new pictures 0/30 · about 30 min');
+  assert.equal(line(50000, 940), 'Recognizing new pictures 0/50,000 · about 13 h');
+});
+
 test('requests name the language; a refusal is shown translated and kept as sent for said()', async () => {
   const {api, said} = web.core(), sent = [];
   globalThis.fetch = async (path, options) => { sent.push(options.headers); return {status: 400, ok: false, json: async () => ({error: '冲突：会话已过期，请刷新页面'})}; };

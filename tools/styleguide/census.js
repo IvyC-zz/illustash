@@ -1,7 +1,7 @@
 // 由 tools/styleguide/census.py 从 web/static/app.css 生成，不要手改。
 window.CENSUS = {
  "source": "web/static/app.css",
- "sha256": "1994cafab2b46e7392842deb08dc6d0de0a4c159d515e5e76ee7ec2fe5d30c29",
+ "sha256": "6d7049b044d9b86066f96cf78cd54fd721d03407c382a6b9de34e37f2201a442",
  "lines": 1498,
  "rules": 1345,
  "themeVars": {
@@ -150,6 +150,8 @@ window.CENSUS = {
    "--r18-on": "#2a0f17"
   },
   "uses": {
+   "--ink": 53,
+   "--canvas": 11,
    "--fs-13": 30,
    "--hair": 35,
    "--sh": 36,
@@ -164,24 +166,23 @@ window.CENSUS = {
    "--fs-10": 14,
    "--line": 72,
    "--radius-4": 20,
-   "--space-4": 87,
-   "--space-8": 131,
+   "--space-4": 92,
+   "--space-10": 97,
+   "--space-12": 73,
+   "--space-8": 134,
    "--radius-6": 34,
    "--h-36": 16,
-   "--space-10": 91,
-   "--ink": 52,
    "--fs-15": 10,
    "--fs-11": 109,
    "--fs-12": 135,
-   "--space-2": 47,
-   "--space-14": 42,
-   "--space-6": 111,
+   "--space-2": 49,
+   "--space-14": 45,
+   "--space-6": 115,
    "--radius-round": 16,
    "--h-32": 12,
    "--fs-16": 2,
-   "--space-12": 65,
    "--gutter": 13,
-   "--space-16": 20,
+   "--space-16": 27,
    "--fs-22": 3,
    "--fs-20": 4,
    "--tone-sand-ink": 3,
@@ -193,7 +194,7 @@ window.CENSUS = {
    "--ease": 46,
    "--z-page-2": 6,
    "--glass-chip": 2,
-   "--space-1": 25,
+   "--space-1": 26,
    "--z-page-4": 2,
    "--tone-warn-bg": 2,
    "--tone-warn-ink": 2,
@@ -202,7 +203,7 @@ window.CENSUS = {
    "--glass-head": 2,
    "--z-page-3": 2,
    "--chip-hover": 1,
-   "--space-20": 4,
+   "--space-20": 7,
    "--bar-bg": 2,
    "--radius-14": 18,
    "--z-bar": 1,
@@ -242,7 +243,6 @@ window.CENSUS = {
    "--tone-steel-bg": 1,
    "--tone-amber-ink": 1,
    "--tone-amber-bg": 1,
-   "--canvas": 9,
    "--mono": 4,
    "--ok": 3,
    "--bad": 4,
@@ -549,52 +549,52 @@ window.CENSUS = {
    {
     "name": "--space-1",
     "value": "1px",
-    "uses": 25
+    "uses": 26
    },
    {
     "name": "--space-2",
     "value": "2px",
-    "uses": 47
+    "uses": 49
    },
    {
     "name": "--space-4",
     "value": "4px",
-    "uses": 87
+    "uses": 92
    },
    {
     "name": "--space-6",
     "value": "6px",
-    "uses": 111
+    "uses": 115
    },
    {
     "name": "--space-8",
     "value": "8px",
-    "uses": 131
+    "uses": 134
    },
    {
     "name": "--space-10",
     "value": "10px",
-    "uses": 91
+    "uses": 97
    },
    {
     "name": "--space-12",
     "value": "12px",
-    "uses": 65
+    "uses": 73
    },
    {
     "name": "--space-14",
     "value": "14px",
-    "uses": 42
+    "uses": 45
    },
    {
     "name": "--space-16",
     "value": "16px",
-    "uses": 20
+    "uses": 27
    },
    {
     "name": "--space-20",
     "value": "20px",
-    "uses": 4
+    "uses": 7
    },
    {
     "name": "--space-24",
@@ -704,8 +704,8 @@ window.CENSUS = {
  },
  "darkOverrideRules": 1,
  "literalHexColors": {
-  "kinds": 74,
-  "uses": 133,
+  "kinds": 71,
+  "uses": 130,
   "table": [
    {
     "value": "#fff",
@@ -934,13 +934,6 @@ window.CENSUS = {
     ]
    },
    {
-    "value": "#1b1b1f",
-    "uses": 1,
-    "examples": [
-     ":root"
-    ]
-   },
-   {
     "value": "#1c1c221c",
     "uses": 1,
     "examples": [
@@ -952,13 +945,6 @@ window.CENSUS = {
     "uses": 1,
     "examples": [
      "dialog"
-    ]
-   },
-   {
-    "value": "#1d1d21",
-    "uses": 1,
-    "examples": [
-     ":root[data-theme=dark]"
     ]
    },
    {
@@ -1148,6 +1134,20 @@ window.CENSUS = {
     "uses": 1,
     "examples": [
      ".viewer-bar .icon"
+    ]
+   },
+   {
+    "value": "#c3c3ce",
+    "uses": 1,
+    "examples": [
+     ".primary kbd"
+    ]
+   },
+   {
+    "value": "#d0d0d9",
+    "uses": 1,
+    "examples": [
+     ".viewer-top .icon"
     ]
    }
   ]
@@ -1610,21 +1610,21 @@ window.CENSUS = {
     ]
    },
    {
-    "value": "18px 10px",
+    "value": "18px var(--space-10)",
     "uses": 1,
     "examples": [
      ".cast-roster"
     ]
    },
    {
-    "value": "18px 14px",
+    "value": "18px var(--space-14)",
     "uses": 1,
     "examples": [
      ".char-grid"
     ]
    },
    {
-    "value": "18px 16px",
+    "value": "18px var(--space-16)",
     "uses": 1,
     "examples": [
      ".group-grid"
@@ -1655,7 +1655,7 @@ window.CENSUS = {
   ]
  },
  "padding": {
-  "kinds": 128,
+  "kinds": 127,
   "uses": 256,
   "table": [
    {
@@ -1670,7 +1670,7 @@ window.CENSUS = {
    },
    {
     "value": "var(--space-1) var(--space-6)",
-    "uses": 11,
+    "uses": 12,
     "examples": [
      ".chips span",
      ".tag-on",
