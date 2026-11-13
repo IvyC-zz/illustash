@@ -261,6 +261,11 @@ class RecognitionRecoveryTest(unittest.TestCase):
         with sqlite3.connect(self.lib.source) as c:
             c.execute('DELETE FROM recognition_assets WHERE asset=?', (asset,))
         self.package = self.incoming((asset,), name='replacement-result')
+        # 证据包按内容去重：与已发布的 WD 证据相同时证据库直接返回 already，不会触发下面的失败点。改一个置信度，
+        # 让这次交付带来新的证据，同时仍不含 realistic（一旦提前发布就会撤掉照片规则）。
+        labels = self.package / 'labels.jsonl'
+        labels.write_text(labels.read_text().replace('"confidence": 0.7', '"confidence": 0.6'), newline='\n')
+        self.manifest(self.package, (asset,))
         with sqlite3.connect(self.lib.db) as c:
             c.execute("CREATE TRIGGER fail BEFORE INSERT ON term_packages BEGIN SELECT RAISE(ABORT,'synthetic evidence failure'); END")
         self.assertEqual(self.import_package(code=2)['status'], 'pending')

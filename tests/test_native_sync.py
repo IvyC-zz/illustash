@@ -542,7 +542,7 @@ if failures: Path(sys.argv[2]).write_text(json.dumps(dict(identity=r['identity']
         state=self.sync()
         self.assertEqual(state['state']['status'],'done',state)
         self.assertEqual((state['state']['total'],state['state']['done'],state['state']['failed'],state['state']['imported']),(2,2,1,1))
-        self.assertIn('iCloud',state['state']['message'])
+        self.assertIn('暂时无法识别',state['state']['message'])
         original=self.library/'originals/E/E.png';original.parent.mkdir(parents=True);original.write_bytes(b'synthetic')
         state=self.sync()
         self.assertEqual((state['state']['status'],state['state']['failed'],state['state']['imported']),('done',0,1))
