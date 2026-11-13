@@ -263,7 +263,7 @@
 
  "native/terms/src/app_sync.rs":"a9b6362ced9158e3ff44940032b8ed18c8742ecbd7b96637a2ac3246c0ac415d",
 
- "native/terms/src/app_tasks.rs":"13ecd353bc68e8f987c91bd6f265a2a89f7bad82f4b3449211d98e89c2a86819",
+ "native/terms/src/app_tasks.rs":"77c6e161633fa9f8dd67a474de0d562182ac7cacbd92c941ea5f8f5909b91ab9",
 
  "native/terms/src/app_updates.rs":"8d5dedc499d93db689442c7e83487fccd806ffa77bcaa604534221f28020820a",
 
@@ -271,7 +271,7 @@
 
  "native/terms/src/bin/illustash-terms.rs":"04ee80bb280034a16f8ddd9fe97e8de0700713259c44f76858f70b8713d4c594",
 
- "native/terms/src/bin/illustash-worker.rs":"282354dfa7c6d3ab227c352bb04627fed317bcb37550de2eb938a61393cab7f7",
+ "native/terms/src/bin/illustash-worker.rs":"e441577218d50c212a4291a750dd8b17289370dd1de70ba64ea016e6e76b9e05",
 
  "native/terms/src/cli.rs":"9ce04f9ee8f5b693a6a8fd56bed77cac4066e51a476974eccad250d3e3fe1a25",
 
@@ -333,7 +333,7 @@
 
  "native/terms/src/recognition_compute/directml.rs":"ecfbfea697971a53b57de9a6ec230d30556f66408b1e096da03fe6fe825d0781",
 
- "native/terms/src/recognition_compute/mod.rs":"11bf1b1b2c67000007124bdb01c6d2f082f5df2d4769a608ae7d004350806eb2",
+ "native/terms/src/recognition_compute/mod.rs":"c7923db715fe14a6af335b603c570e6593b9c200a77e21fd3e5e31f54b85a89b",
 
  "native/terms/src/recognition_compute/models.rs":"4c4218efcc168e429e3a87259135c205a3c3f3b3764683e3a17d837f01f8bf30",
 
@@ -341,7 +341,9 @@
 
  "native/terms/src/recognition_compute/producer.rs":"3e0e0fa40a7d57a602f6f1c4486fd3cd7bce8d09ba47cbbd6bcec9dade021eee",
 
- "native/terms/src/recognition_compute/session.rs":"cd1c6a4ae71712e950a8f03264e6bfa4e05121c02e149c9dad40ca0a479377b0",
+ "native/terms/src/recognition_compute/session.rs":"816586af4d9ec00c75bd7f147fb5a0c03600d18a3f14ed400ec0a072df51d323",
+
+ "native/terms/src/recognition_compute/telemetry.rs":"8356191f40d36869e5ff9fc27988ddffa424d63261db6c70110152a9a0543da2",
 
  "native/terms/src/recognition_compute/wd_coreml.rs":"deaed63306945926e57c6b59427383bf0334776abb93de94df4e74332b42b96a",
 

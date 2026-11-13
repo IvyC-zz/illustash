@@ -208,6 +208,21 @@ class PackagingResourcesTest(unittest.TestCase):
                        ort_licenses=notices, directml=directml)
         for name in ('directml-mac', 'directml-alone', 'directml-incomplete'):
             self.assertFalse((self.root / name).exists())
+        # #381：Windows 上不打包登记在微软遥测组里的运行库；全零组（自建的那份）照常通过。合成的 TraceLogging
+        # provider 元数据：总长、名字、组 trait（长度 0x13、类型 1、组 GUID）。
+        def provider(group):
+            name = b'Microsoft.ML.ONNXRuntime\0'
+            trait = b'\x13\x00\x01' + group
+            return len(name + trait).to_bytes(2, 'little') + name + trait
+        official = self.root / 'official-onnxruntime.dll'
+        official.write_bytes(b'MZ synthetic' + provider(pack.MICROSOFT_TELEMETRY_GROUP) + b'tail')
+        with patch.object(pack.sys, 'platform', 'win32'), self.assertRaisesRegex(ValueError, 'telemetry group'):
+            pack.stage(self.root / 'official-runtime', self.binaries, research=True, ort_dylib=official,
+                       ort_licenses=notices)
+        self.assertFalse((self.root / 'official-runtime').exists())
+        built = self.root / 'built-onnxruntime.dll'
+        built.write_bytes(b'MZ synthetic' + provider(bytes(16)) + b'tail')
+        pack.check_windows_ort_telemetry(built)
         (notices / 'ThirdPartyNotices.txt').unlink()
         with self.assertRaisesRegex(FileNotFoundError, 'ThirdPartyNotices'):
             pack.stage(self.root / 'incomplete-notices', self.binaries, research=True,

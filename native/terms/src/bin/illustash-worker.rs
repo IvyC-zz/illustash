@@ -13,6 +13,8 @@ fn main() -> ExitCode {
     }
 }
 fn run() -> Result<u8, Box<dyn std::error::Error>> {
+    // 宿主启动时已经设好；直接运行（诊断、验收脚本）也照样关掉 ONNX Runtime 的遥测（#381）。此处仍是单线程。
+    illustash_terms::recognition_compute::telemetry::at_startup();
     let exe = env::current_exe()?;
     let stem = exe.file_stem().and_then(|s| s.to_str()).unwrap_or("");
     let requested = env::var(WORKER_KIND_ENV).ok();

@@ -9,6 +9,7 @@ pub mod models;
 pub mod preprocess;
 pub mod producer;
 pub mod session;
+pub mod telemetry;
 mod wd_coreml;
 
 /// 共用的生产适配器门槛：宿主强制的 sidecar 契约必须与安装版 worker 的原生路线一致。

@@ -18,13 +18,16 @@ fn failure(context: &str, error: impl std::fmt::Display) -> Error {
 }
 static RUNTIME: OnceLock<std::result::Result<std::path::PathBuf, String>> = OnceLock::new();
 /// 在构建会话之前调用；一个子进程只绑定一个已安装的运行库。
+/// 本进程没设 `ORT_DISABLE_TELEMETRY=1` 时拒绝加载（#381，见 telemetry.rs）。
 pub fn initialise(runtime: &Path) -> Result<()> {
+    super::telemetry::require()?;
     let requested =
         runtime.canonicalize().map_err(|e| failure(&format!("运行库 {path}", path = runtime.display()), e))?;
     let loaded = RUNTIME.get_or_init(|| {
         // 绑定库的加载器在 ABI 或符号无效时会 panic。在 worker 边界上兜住它，
-        // 诊断信息里保留显式给出的路径，不回退到 PATH。
-        std::panic::catch_unwind(|| ort::init_from(requested.display()).commit())
+        // 诊断信息里保留显式给出的路径，不回退到 PATH。`with_telemetry(false)` 调 DisableTelemetryEvents：
+        // macOS 上环境变量已经让上传器不存在，这一句是第二道；Windows 的 ETW 只认这一句。
+        std::panic::catch_unwind(|| ort::init_from(requested.display()).with_telemetry(false).commit())
             .map_err(|_| {
                 format!("无法加载 {path}（需要 ONNX Runtime >=1.22，含 OrtGetApiBase）", path = requested.display())
             })
