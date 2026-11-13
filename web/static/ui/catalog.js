@@ -217,7 +217,8 @@ function setPop(on, reason, redraw = true) {
   if (redraw) drawCast();
   if (!on) popLayer.close(reason);
 }
-function castPop(works) {
+// 导出给样式清单页调用（tools/styleguide/live.js，#352）：改名或改参数时，tools/check_styleguide.py 会报出来。
+export function castPop(works) {
   const q = cast.popQ.trim().toLowerCase(), list = works.filter(w => !q || w.name.toLowerCase().includes(q));
   return `<div class="menu cast-pop" id="castPop"><div class="search-wrap">${searchIcon()}<input type="search" id="castPopQ" placeholder="${t('在 {n} 部作品里找', {n: number(works.filter(w => !w.pseudo).length)})}" value="${esc(cast.popQ)}" autocomplete="off"></div>
     <div class="cast-wcols">${list.map(w => `<button class="cast-wrow${w.pseudo ? ' pseudo' : ''}" data-tab="${esc(w.key)}"${w.pseudo ? ` title="${esc(PSEUDO_NOTES[w.key])}"` : ''}>${avatar(w.chars[0], 20)}<span>${esc(w.name)}</span><small>${number(w.images)}</small></button>`).join('') || `<p class="muted-note">${t('没有匹配的作品')}</p>`}</div></div>`;
@@ -378,7 +379,8 @@ export async function createWork() {
 }
 // 新建作品和编辑作品共用一个对话框：一个填 tag（名字为空时也填名字）的 Danbooru 搜索、名字、用户核对过的 tag、可选的
 // 上级作品，以及（有 tag 时）关注它的新角色（#293）。
-function workDialog(w, {watch = false} = {}) {
+// 导出给样式清单页调用（tools/styleguide/live.js，#352）：改名或改参数时，tools/check_styleguide.py 会报出来。
+export function workDialog(w, {watch = false} = {}) {
   const works = state.index?.works || [], watched = new Set(state.index?.watch?.works || []);
   return new Promise(resolve => {
     const parents = works.filter(x => !w || x.id !== w.id);

@@ -1,4 +1,5 @@
-"""tools/check_styleguide.py 的合成负例：在副本上故意弄错样例类名、改 app.css 不重跑 census 等，确认都会报错。"""
+"""tools/check_styleguide.py 的合成负例：在副本上故意弄错样例类名、改 app.css 不重跑 census、
+删掉清单页调用的导出、拆散舞台和样例的对应等，确认都会报错。"""
 from contextlib import redirect_stdout
 from pathlib import Path
 import importlib.util
@@ -7,7 +8,7 @@ import re
 import shutil
 import tempfile
 import unittest
-from tools.check_styleguide import APP_CSS, CENSUS, GUIDE, HOOK_CLASSES, ROOT, STATIC, check, main
+from tools.check_styleguide import APP_CSS, CENSUS, GUIDE, HOOK_CLASSES, ROOT, STATIC, check, js_exports, main
 
 
 class Tree(tempfile.TemporaryDirectory):
@@ -17,7 +18,7 @@ class Tree(tempfile.TemporaryDirectory):
         self.root = Path(super().__enter__())
         shutil.copytree(ROOT / STATIC, self.root / STATIC, ignore=shutil.ignore_patterns('vendor', 'locales', '*.png', '*.svg'))
         (self.root / GUIDE).mkdir(parents=True)
-        for name in ('index.html', 'styleguide.css', 'census.js'):
+        for name in ('index.html', 'styleguide.css', 'census.js', 'live.js'):
             shutil.copyfile(ROOT / GUIDE / name, self.root / GUIDE / name)
         return self
 
@@ -141,6 +142,65 @@ class StyleguideSyncTest(unittest.TestCase):
         with Tree() as tree:
             tree.replace(GUIDE / 'index.html', 'class="tour-text"', 'class="tour-title"')
             self.assertOne(tree.errors(), 'HOOK_CLASSES 里的 .tour-text', '已不在')
+
+    # ---- 规则 4：调用生成的样例 ----
+    def test_live_import_without_export_is_reported(self):
+        # 模拟产品代码把只为清单页导出的函数改回内部函数（或改了名）。
+        with Tree() as tree:
+            tree.replace(STATIC / 'ui/grid.js', 'export function renderViewPop() {', 'function renderViewPop() {')
+            error = self.assertOne(tree.errors(), '[样式清单 · live]', 'renderViewPop', 'web/static/ui/grid.js', '没有导出')
+            self.assertRegex(error, r'live\.js 第 \d+ 行')
+
+    def test_live_import_of_missing_module_is_reported(self):
+        with Tree() as tree:
+            tree.replace(GUIDE / 'live.js', "from '../../web/static/ui/tasks.js'", "from '../../web/static/ui/task.js'")
+            self.assertOne(tree.errors(), '[样式清单 · live]', 'web/static/ui/task.js', '不存在')
+
+    def test_live_import_outside_static_is_reported(self):
+        with Tree() as tree:
+            tree.replace(GUIDE / 'live.js', "import {state} from", "import {fake} from './fake.js';\nimport {state} from")
+            self.assertOne(tree.errors(), '[样式清单 · live]', './fake.js', '不在 web/static 下')
+
+    def test_js_exports_reads_declarations_and_lists(self):
+        src = ('export async function a() {}\nexport const b = 1, x = 2;\nexport function* g() {}\nexport class K {}\n'
+               'export {c, d as e};\nfunction hidden() {}\n  export const indented = 1;\n')
+        self.assertEqual(js_exports(src), {'a', 'b', 'g', 'K', 'c', 'e'})
+
+    def test_stage_without_sample_is_reported(self):
+        with Tree() as tree:
+            tree.replace(GUIDE / 'index.html', 'data-sg-live="toast"', 'data-sg-live="toastt"')
+            errors = tree.errors()
+            self.assertOne(errors, '[样式清单 · live]', 'data-sg-live="toastt"', "没有 sample('toastt'")
+            self.assertOne(errors, '[样式清单 · live]', "sample('toast'", '没有对应的舞台')
+
+    def test_duplicate_stage_is_reported(self):
+        with Tree() as tree:
+            tree.replace(GUIDE / 'index.html', 'data-sg-live="dialog-tagged"', 'data-sg-live="dialog-help"')
+            errors = tree.errors()
+            self.assertOne(errors, 'data-sg-live="dialog-help"', '不止一次')
+            self.assertOne(errors, "sample('dialog-tagged'", '没有对应的舞台')
+
+    def test_shell_id_gone_from_app_page_is_reported(self):
+        with Tree() as tree:
+            tree.replace(STATIC / 'index.html', 'id="toast"', 'id="toaster"')
+            self.assertOne(tree.errors(), '[样式清单 · live]', 'SHELLS', '#toast')
+
+    def test_item_without_source_tag_is_reported(self):
+        with Tree() as tree:
+            tree.replace(GUIDE / 'index.html', '<h3>写法总表</h3><span class="sg-tag hand">手写</span>', '<h3>写法总表</h3>')
+            self.assertOne(tree.errors(), '[样式清单 · live]', '写法总表', '没有标明样例的来源')
+
+    def test_live_item_marked_hand_is_reported(self):
+        with Tree() as tree:
+            tree.replace(GUIDE / 'index.html', '<h3>toast</h3><span class="sg-tag live">调用生成</span>', '<h3>toast</h3><span class="sg-tag hand">手写</span>')
+            errors = tree.errors()
+            self.assertOne(errors, '「toast」', '却标了“手写”')
+            self.assertOne(errors, '「toast」', '没有标“调用生成”')
+
+    def test_hand_item_marked_live_is_reported(self):
+        with Tree() as tree:
+            tree.replace(GUIDE / 'index.html', '<h3>写法总表</h3><span class="sg-tag hand">手写</span>', '<h3>写法总表</h3><span class="sg-tag live">调用生成</span>')
+            self.assertOne(tree.errors(), '「写法总表」', '没有 data-sg-live 舞台')
 
     def test_importing_census_writes_nothing(self):
         out = ROOT / GUIDE / 'census.js'

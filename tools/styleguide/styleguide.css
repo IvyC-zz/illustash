@@ -48,6 +48,9 @@ body { margin: 0; background: var(--canvas); color: var(--ink); }
 .sg-tag { display: inline-block; font-size: 10.5px; font-weight: 600; border-radius: 999px; padding: 1px 8px; background: var(--soft); color: var(--muted); }
 .sg-tag.dup { background: color-mix(in srgb, var(--warn) 18%, var(--sheet)); color: var(--ink); }
 .sg-tag.dead { background: color-mix(in srgb, var(--r18) 14%, var(--sheet)); color: var(--ink); }
+/* 条目的来源：live = 调用产品代码生成（live.js），hand = 照模板手写 */
+.sg-tag.live { background: var(--accent-soft); color: var(--accent-ink); }
+.sg-tag.hand { background: var(--soft); color: var(--muted); box-shadow: inset 0 0 0 1px var(--hair); }
 .sg-dark { background: #121215; color: #e4e4e9; border-radius: 12px; padding: 12px; }
 
 /* 令牌 */
@@ -106,6 +109,8 @@ body { margin: 0; background: var(--canvas); color: var(--ink); }
 .sg-frozen .viewer { position: static; inset: auto; animation: none; height: 260px; width: 100%; border-radius: 12px; }
 .sg-frozen .inspector { height: auto; overflow: visible; }
 .sg-frozen .home-hero, .sg-frozen .home-j { position: relative; }
+/* live.js 给任务入口包的一截侧栏 */
+.sg-sidebar { width: 84px; padding: 8px 0; border-radius: 12px; }
 
 /* 占位图 */
 .sg-img { display: block; background: linear-gradient(135deg, #b9bdf3, #f0d4e4); }

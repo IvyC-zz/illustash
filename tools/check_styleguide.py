@@ -1,16 +1,24 @@
 #!/usr/bin/env python3
 """样式清单页（tools/styleguide/）与实现的同步检查（#352，属 #316）。
 
-清单页的样例 HTML 是照着 web/static/ui/*.js 的模板手写的，AGENTS.md 要求写界面前先看它、照它复用类名，
-所以它一过期就会把代理带偏。本脚本只做便宜的机械检查，接在 tools/check_all.sh 和 ci.yml 里：
+清单页的样例分两种：调用产品代码生成的（tools/styleguide/live.js 调 web/static/ui 的函数，摆进
+index.html 里 `data-sg-live` 的舞台），和照模板手写的（index.html 里的纯 HTML，条目标“手写”）。
+AGENTS.md 要求写界面前先看这页、照它复用类名，所以它一过期就会把代理带偏。本脚本只做便宜的机械检查，
+接在 tools/check_all.sh 和 ci.yml 里：
 
   1 census     census.js 必须等于 census.py 对当前 app.css 的输出（app.css 改了没重跑、手改 census.js 都会报）
   2 class      index.html 里元素用到的类，必须在 web/static/app.css 里有样式；
                页面外壳的类（sg- 前缀，以及 styleguide.css 里挂在 .sg-* 选择器上的修饰类）必须在 styleguide.css 里有定义；
                只给 JS 当钩子、本来就没有样式的类登记在 HOOK_CLASSES，并且必须仍出现在 web/static 的代码里
   3 listed     条目标题里 <span class="sg-cls"> 列出的 `.类名`，同样必须在 app.css 里有样式
+  4 live       live.js 从 web/static 导入的每个名字，在那个文件里确实导出（产品代码改名、删导出会报）；
+               live.js 的 SHELLS 列的外壳 id 在 web/static/index.html 里存在；
+               index.html 的 data-sg-live 和 live.js 的 sample('名字', …) 一一对应；
+               组件和壳（c-*、s-* 两组）的每个条目都标明来源：有 data-sg-live 舞台的标“调用生成”（sg-tag live），
+               其余标“手写”（sg-tag hand），不能两个都标或都不标
 
-不依赖 Node，也不启动浏览器。用法：python3 tools/check_styleguide.py [--root 目录]
+调用生成的样例画出来什么样，要在浏览器里看（页面会把画不出来的样例连同原因写在舞台里）；这里不启动浏览器，
+也不依赖 Node。手写样例的 HTML 结构和模板是否一致，这里查不出来。用法：python3 tools/check_styleguide.py [--root 目录]
 """
 from html.parser import HTMLParser
 from pathlib import Path
@@ -27,14 +35,14 @@ CENSUS_FIX = '运行 `python3 tools/styleguide/census.py`，把改写后的 tool
 # 样例照抄了应用模板里的这些类：它们只给 JS 当选择器或钩子，app.css 里本来没有样式。
 # 每项写明出处；应用代码里不再用它时检查会报，届时从这里和样例里一起删掉。
 HOOK_CLASSES = {
-    'c1': 'web/static/index.html 任务入口的图标',
-    'diff': 'ui/palette.js 对比框（match / diff）',
     'more-control': 'ui/shell.js 更多菜单的点外关闭判断',
     'tagged-dialog': 'ui/catalog.js 打过标签的图对话框',
-    'task-group': 'ui/tasks.js 任务列表分组',
     'tour-text': 'ui/guide.js 引导气泡正文',
     'work-dialog': 'ui/dialog.js、ui/catalog.js 作品对话框',
 }
+LIVE_FIX = '照报错改 tools/styleguide/live.js（产品代码改了名字就跟着改；确实不再有生成函数的，把样例改回手写并标“手写”）'
+# 规则 4 只管这两组：组件（c-*）和带行为的壳（s-*）。令牌表和附录不是组件样例。
+_ITEM_SECTIONS = re.compile(r'[cs]-')
 _CLASS_IN_SELECTOR = re.compile(r'\.(-?[_a-zA-Z][\w-]*)')
 
 
@@ -88,25 +96,53 @@ def shell_classes(css_text):
 
 
 class _Page(HTMLParser):
-    """收集 index.html 里每个元素的类名（带行号），以及 sg-cls 标题里 <code> 列出的类。"""
+    """收集 index.html 里每个元素的类名（带行号）、sg-cls 标题里 <code> 列出的类，以及各条目的来源标注。"""
 
     def __init__(self):
         super().__init__(convert_charrefs=True)
         self.used = []      # [(类名, 行号)]
         self.listed = []    # [(类名, 行号)]
+        self.live = []      # [(data-sg-live 的名字, 行号)]
+        self.items = []     # [{'line', 'title', 'section', 'tags': set, 'live': [名字]}]，只收 c-*、s-* 两组
         self._depth = 0     # 位于 sg-cls 的 <span> 里时，未闭合的 <span> 层数；只数 span，不受省略结束标签影响
         self._code = None   # 正在读的 sg-cls <code> 的文字与行号
+        self._section = ''
+        self._item = None   # 正在读的条目，以及它里面未闭合的 <div> 层数
+        self._item_divs = 0
+        self._title = None
 
     def handle_starttag(self, tag, attrs):
-        classes = (dict(attrs).get('class') or '').split()
+        attrs = dict(attrs)
+        classes = (attrs.get('class') or '').split()
         line = self.getpos()[0]
         self.used.extend((c, line) for c in classes)
+        if tag == 'section' and attrs.get('id'):
+            self._section = attrs['id']
+        if attrs.get('data-sg-live') is not None:
+            self.live.append((attrs['data-sg-live'], line))
+            if self._item is not None:
+                self._item['live'].append(attrs['data-sg-live'])
+        if tag == 'div' and self._item is not None:
+            self._item_divs += 1
+        elif tag == 'div' and 'sg-item' in classes and _ITEM_SECTIONS.match(self._section):
+            self._item, self._item_divs = {'line': line, 'title': '', 'section': self._section, 'tags': set(), 'live': []}, 1
+            self.items.append(self._item)
+        if self._item is not None and tag == 'span' and 'sg-tag' in classes:
+            self._item['tags'].update(c for c in classes if c != 'sg-tag')
+        if self._item is not None and tag == 'h3' and not self._item['title']:
+            self._title = []
         if tag == 'span' and (self._depth or 'sg-cls' in classes):
             self._depth += 1
         elif tag == 'code' and self._depth:
             self._code = ['', line]
 
     def handle_endtag(self, tag):
+        if tag == 'div' and self._item is not None:
+            self._item_divs -= 1
+            if not self._item_divs:
+                self._item = None
+        if tag == 'h3' and self._title is not None:
+            self._item['title'], self._title = ''.join(self._title).strip(), None
         if tag == 'span' and self._depth:
             self._depth -= 1
         elif tag == 'code' and self._code is not None:
@@ -118,6 +154,8 @@ class _Page(HTMLParser):
     def handle_data(self, data):
         if self._code is not None:
             self._code[0] += data
+        if self._title is not None:
+            self._title.append(data)
 
 
 def _lines(lines):
@@ -194,8 +232,105 @@ def check_classes(root):
     return errors
 
 
+_EXPORT_DECL = re.compile(r'^export\s+(?:default\s+)?(?:async\s+)?(?:function\s*\*?|const|let|var|class)\s+([A-Za-z_$][\w$]*)', re.M)
+_EXPORT_LIST = re.compile(r'^export\s*\{([^}]*)\}', re.M)
+_IMPORT = re.compile(r'^import\s*\{([^}]*)\}\s*from\s*[\'"]([^\'"]+)[\'"]', re.M)
+_SAMPLE = re.compile(r'^sample\(\s*[\'"]([\w-]+)[\'"]', re.M)
+
+
+def js_exports(src):
+    """一个 ES 模块导出的名字：`export function/const/let/class 名字` 和 `export {a, b as c}`（取对外的名字）。"""
+    names = set(_EXPORT_DECL.findall(src))
+    for group in _EXPORT_LIST.findall(src):
+        for part in group.split(','):
+            part = part.strip()
+            if part:
+                names.add(re.split(r'\s+as\s+', part)[-1].strip())
+    return names
+
+
+def _line_of(src, index):
+    return src.count('\n', 0, index) + 1
+
+
+def check_live(root):
+    live_path = root / GUIDE / 'live.js'
+    page = _Page()
+    page.feed((root / GUIDE / 'index.html').read_text(encoding='utf-8'))
+    page.close()
+    errors = []
+    if not live_path.is_file():
+        if page.live:
+            errors.append(f'[样式清单 · live] {GUIDE}/index.html 有 data-sg-live 舞台，但缺少 {GUIDE}/live.js。改法：{LIVE_FIX}。')
+        src = ''
+    else:
+        src = live_path.read_text(encoding='utf-8')
+    static = (root / STATIC).resolve()
+    for m in _IMPORT.finditer(src):
+        names, spec, line = m.group(1), m.group(2), _line_of(src, m.start())
+        target = (root / GUIDE / spec).resolve()
+        try:
+            shown = target.relative_to(root.resolve()).as_posix()
+        except ValueError:
+            shown = spec
+        if not target.is_relative_to(static):
+            errors.append(f'[样式清单 · live] {GUIDE}/live.js 第 {line} 行从 {spec} 导入，它不在 web/static 下。'
+                          '约定：live.js 只调用产品代码，不另写一套生成函数。改法：改成从 web/static 里的模块导入。')
+            continue
+        if not target.is_file():
+            errors.append(f'[样式清单 · live] {GUIDE}/live.js 第 {line} 行导入的 {shown} 不存在：模块改名或删掉了。改法：{LIVE_FIX}。')
+            continue
+        exported = js_exports(target.read_text(encoding='utf-8'))
+        for part in names.split(','):
+            name = re.split(r'\s+as\s+', part.strip())[0].strip()
+            if name and name not in exported:
+                errors.append(f'[样式清单 · live] {GUIDE}/live.js 第 {line} 行从 {shown} 导入 {name}，但那个文件没有导出它：'
+                              f'函数改名、删掉，或去掉了 export。改法：{LIVE_FIX}；只为清单页导出的函数，导出处有注释说明，不要去掉。')
+    shells = re.search(r'^const SHELLS = \[([^\]]*)\]', src, re.M)
+    if shells:
+        app_page = (root / STATIC / 'index.html').read_text(encoding='utf-8')
+        for shell in re.findall(r"'([\w-]+)'", shells.group(1)):
+            if not re.search(rf'\bid="{re.escape(shell)}"', app_page):
+                errors.append(f'[样式清单 · live] {GUIDE}/live.js 的 SHELLS 要从 web/static/index.html 取 #{shell}，那里已经没有这个 id。'
+                              f'改法：{LIVE_FIX}。')
+    defined = {}
+    for m in _SAMPLE.finditer(src):
+        defined.setdefault(m.group(1), _line_of(src, m.start()))
+    used = {}
+    for name, line in page.live:
+        used.setdefault(name, []).append(line)
+    for name, lines in sorted(used.items()):
+        if name not in defined:
+            errors.append(f'[样式清单 · live] {GUIDE}/index.html 第 {_lines(lines)} 行的舞台要画 data-sg-live="{name}"，'
+                          f'{GUIDE}/live.js 里没有 sample(\'{name}\', …)。改法：在 live.js 里补上，或改正舞台上的名字。')
+        elif len(lines) > 1:
+            errors.append(f'[样式清单 · live] data-sg-live="{name}" 在 {GUIDE}/index.html 第 {_lines(lines)} 行出现了不止一次。'
+                          '改法：一个样例只放一个舞台，要多画几种就在 sample 里返回几个节点。')
+    for name, line in sorted(defined.items()):
+        if name not in used:
+            errors.append(f'[样式清单 · live] {GUIDE}/live.js 第 {line} 行定义了 sample(\'{name}\', …)，index.html 里没有对应的舞台。'
+                          f'改法：在条目里加 <div class="sg-stage" data-sg-live="{name}"></div>，或删掉这个 sample。')
+    for item in page.items:
+        where = f'{GUIDE}/index.html 第 {item["line"]} 行的条目「{item["title"]}」'
+        live, hand = 'live' in item['tags'], 'hand' in item['tags']
+        if item['live'] and not live:
+            errors.append(f'[样式清单 · live] {where} 有调用生成的舞台，标题里没有标“调用生成”。'
+                          '改法：在 <h3> 后面加 <span class="sg-tag live">调用生成</span>。')
+        if item['live'] and hand:
+            errors.append(f'[样式清单 · live] {where} 有调用生成的舞台，却标了“手写”。'
+                          '改法：一个条目只用一种来源：去掉“手写”，手写的部分挪到单独的条目里。')
+        if not item['live'] and live:
+            errors.append(f'[样式清单 · live] {where} 标了“调用生成”，但没有 data-sg-live 舞台。'
+                          '改法：改成手写就标 <span class="sg-tag hand">手写</span>，并在 sg-src 里写明来源文件。')
+        if not item['live'] and not hand and not live:
+            errors.append(f'[样式清单 · live] {where} 没有标明样例的来源。约定：组件和壳的条目要么调用产品代码生成'
+                          '（舞台写 data-sg-live，标“调用生成”），要么是手写（标 <span class="sg-tag hand">手写</span>，sg-src 写“来源：文件 函数”）。'
+                          '改法：能调用生成函数的改成调用；没有生成函数的标“手写”。')
+    return errors
+
+
 def check(root=ROOT):
-    return check_census(root) + check_classes(root)
+    return check_census(root) + check_classes(root) + check_live(root)
 
 
 def main(argv=None):
@@ -208,7 +343,7 @@ def main(argv=None):
     if errors:
         print(f'\n样式清单与实现不同步：{len(errors)} 项。清单页说明见 tools/styleguide/index.html 开头。')
         return 1
-    print('样式清单与 app.css 同步：census.js 是最新的，样例用到的类都有定义。')
+    print('样式清单与实现同步：census.js 是最新的，样例用到的类都有定义，调用生成的样例导入的函数都在。')
     return 0
 
 

@@ -1,6 +1,6 @@
 'use strict';
-// 样式清单页自己的脚本（#318）：主题切换、按 census.js 画令牌表、占位图。
-// 它从不生成应用组件：index.html 里的样例是纯 HTML，方便直接阅读和照抄。
+// 样式清单页自己的脚本（#318）：主题切换、按 census.js 画令牌表、占位图。经典脚本，file:// 下也能运行。
+// 它从不生成应用组件：手写的样例是 index.html 里的纯 HTML；调用产品代码生成的样例由 live.js（ES 模块）画。
 
 // ---- 主题：跟随系统 / 亮 / 暗。设置 html[data-theme]，和应用里 web/static/theme.js 设的是同一个属性 ----
 const THEME_KEY = 'sg.theme';
@@ -21,12 +21,21 @@ applyTheme();
 
 // ---- 占位图：应用里的封面和缩略图是 <img>，这里画成渐变色块 ----
 const PH = ['#b9bdf3|#f0d4e4', '#a9d8cf|#e9e2b8', '#d0b5ec|#a9c6f0', '#f0c9a8|#e6a9b8', '#a9c6f0|#c9f0d8'];
+// 第 n 张占位图的 data: 地址；live.js 也用它替换产品代码里的 /image?… 图片
+window.sgPlaceholder = n => {
+  const [a, b] = PH[Number(n) % PH.length].split('|');
+  return 'data:image/svg+xml,' + encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="120" height="150"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="${a}"/><stop offset="1" stop-color="${b}"/></linearGradient></defs><rect width="120" height="150" fill="url(#g)"/></svg>`);
+};
 function placeholders() {
-  for (const img of document.querySelectorAll('img[data-ph]')) {
-    const [a, b] = PH[Number(img.dataset.ph) % PH.length].split('|');
-    img.src = 'data:image/svg+xml,' + encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="120" height="150"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="${a}"/><stop offset="1" stop-color="${b}"/></linearGradient></defs><rect width="120" height="150" fill="url(#g)"/></svg>`);
-    img.alt = '';
-  }
+  for (const img of document.querySelectorAll('img[data-ph]')) { img.src = window.sgPlaceholder(img.dataset.ph); img.alt = ''; }
+}
+
+// ---- 调用生成的舞台：live.js 画好之前（以及 file:// 下浏览器不加载 ES 模块时）显示的说明 ----
+function liveNotes() {
+  const note = location.protocol === 'file:'
+    ? '这个样例由产品代码现场生成，要经 http 打开才看得到：在仓库根目录运行 python3 -m http.server 8000，再打开 /tools/styleguide/。'
+    : '正在调用产品代码生成…';
+  for (const el of document.querySelectorAll('[data-sg-live]')) if (!el.children.length) el.innerHTML = `<p class="sg-cap">${note}</p>`;
 }
 
 // ---- 令牌表，数据来自 census.js（python3 tools/styleguide/census.py 生成） ----
@@ -120,4 +129,5 @@ async function staleCheck() {
 }
 
 placeholders();
+liveNotes();
 if (C) { colorTokens(); scalarTokens(); staleCheck(); } else $('sg-stale').classList.add('on');
