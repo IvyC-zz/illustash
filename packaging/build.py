@@ -54,7 +54,8 @@ DIRECTML_FILES = {'resources/onnxruntime/DirectML.dll': 'bin/x64-win/DirectML.dl
 # RUNTIME_BACKENDS）：替换运行库文件夹（比如换成 Windows ML）就能改后端，不用改代码。
 WINDOWS_ORT_BACKENDS = ROOT / 'packaging/onnxruntime/windows-backends.json'
 # resources/models/ 下的识别模型（native/terms/models.json）：一个包要么全有，要么一个都没有。
-MODEL_FILES = tuple(entry['path'] for entry in json.loads((ROOT / 'native/terms/models.json').read_text())['files'])
+MODEL_MANIFEST = json.loads((ROOT / 'native/terms/models.json').read_text())
+MODEL_FILES = tuple(entry['path'] for entry in MODEL_MANIFEST['files'])
 # 一个 worker 程序承担全部四种；宿主每次启动时传入种类（#37）。
 WORKER_KINDS = ('research', 'index', 'provenance', 'recognition')
 
@@ -209,6 +210,8 @@ def stage(destination, binaries, research=False, desktop=None, iqdb=None, models
         if models:
             for name in MODEL_FILES:
                 copy(models / name, destination / 'resources/models' / name)
+            if sys.platform == 'darwin':
+                stage_wd_coreml(models, destination / 'resources/models')
         for installed, path in model_notices:
             copy(path, destination / installed)
         if ort_dylib:
@@ -255,6 +258,19 @@ def check_windows_crt(source):
             if dependencies:
                 raise ValueError(f'Windows computation component requires dynamic VC++ runtime: '
                                  f'{path.relative_to(source)}: {", ".join(dependencies)}')
+
+
+def stage_wd_coreml(models, destination):
+    """开发完整包可附执行变体；原始四文件的完整性约定不变。"""
+    entry = MODEL_MANIFEST['wd_coreml']['file']
+    source = models / entry['path']
+    if not source.exists():
+        return
+    with source.open('rb') as stream:
+        actual = hashlib.file_digest(stream, 'sha256').hexdigest()
+    if source.stat().st_size != entry['size'] or actual != entry['sha256']:
+        raise ValueError('WD Core ML execution variant does not match models.json')
+    copy(source, destination / entry['path'])
 
 
 def bundled_models(present):

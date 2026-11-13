@@ -14,7 +14,7 @@ use std::{
 };
 
 fn failure(context: &str, error: impl std::fmt::Display) -> Error {
-    Error::Invalid(format!("原生识别 {context}: {error}"))
+    Error::invalid(format!("原生识别 {context}: {error}"))
 }
 static RUNTIME: OnceLock<std::result::Result<std::path::PathBuf, String>> = OnceLock::new();
 /// 在构建会话之前调用；一个子进程只绑定一个已安装的运行库。
@@ -46,6 +46,7 @@ struct ModelSession {
     backend: Backend,
     model: Model,
     path: PathBuf,
+    execution: Option<PathBuf>,
     threads: Option<usize>,
     acceleration: Acceleration,
 }
@@ -81,12 +82,15 @@ pub(super) fn runtime() -> PathBuf {
 impl ModelSession {
     fn load(path: &Path, model: Model, threads: Option<usize>, acceleration: &Acceleration) -> Result<Self> {
         let requested = acceleration.backend(model);
+        let mut execution = None;
         let accelerated = (requested != Backend::Cpu).then(|| {
+            let path = super::wd_coreml::execution_path(path, model, requested)?;
+            execution = Some(path.clone());
             let _lock = acceleration.compile_lock(requested);
             Session::builder()
                 .map_err(|e| failure("会话", e))
-                .and_then(|b| acceleration.configure(b, requested, model, path, &runtime()))
-                .and_then(|b| build(b, path, threads))
+                .and_then(|b| acceleration.configure(b, requested, model, &path, &runtime()))
+                .and_then(|b| build(b, &path, threads))
         });
         let (session, backend) = match accelerated {
             Some(Ok(session)) => {
@@ -96,7 +100,7 @@ impl ModelSession {
             // CPU 也加载不了的模型或运行库不怪加速器：照旧报它的错误。
             Some(Err(e)) => match cpu_session(path, threads) {
                 Ok(session) => {
-                    acceleration.fell_back(model, requested, path, &runtime(), &reason(&e));
+                    acceleration.fell_back(model, requested, execution.as_deref(), &runtime(), &reason(&e));
                     (session, Backend::Cpu)
                 }
                 Err(cpu) => {
@@ -106,14 +110,28 @@ impl ModelSession {
             },
             None => (cpu_session(path, threads)?, Backend::Cpu),
         };
-        Ok(Self { session, backend, model, path: path.to_owned(), threads, acceleration: acceleration.clone() })
+        Ok(Self {
+            session,
+            backend,
+            model,
+            path: path.to_owned(),
+            execution,
+            threads,
+            acceleration: acceleration.clone(),
+        })
     }
     /// `run` 从输出里读出它需要的全部内容。加速会话失败时（出错，或输出校验不通过），这张图片在一个 CPU 会话上
     /// 重跑，这个 CPU 会话负责这个 worker 余下的工作。
     fn run<T>(&mut self, mut run: impl FnMut(&mut Session) -> Result<T>) -> Result<T> {
         match run(&mut self.session) {
             Err(e) if self.backend != Backend::Cpu => {
-                self.acceleration.fell_back(self.model, self.backend, &self.path, &runtime(), &reason(&e));
+                self.acceleration.fell_back(
+                    self.model,
+                    self.backend,
+                    self.execution.as_deref(),
+                    &runtime(),
+                    &reason(&e),
+                );
                 self.session = cpu_session(&self.path, self.threads)?;
                 self.backend = Backend::Cpu;
                 run(&mut self.session)
@@ -230,4 +248,56 @@ pub(crate) fn validate_vector(values: &[f32], dimension: usize) -> Result<()> {
         return Err(failure("向量", "维度、有限值或非零范数不合法"));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod platform_tests {
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    use super::*;
+
+    /// 与实际模型验收同样需要显式资源和隔离的 HOME；不在普通测试中加载大型模型。
+    #[test]
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    #[ignore = "需要显式的 ILLUSTASH_RECOGNITION_MODELS 与 ILLUSTASH_ORT_DYLIB，单独验收"]
+    fn wd_runtime_failure_rebuilds_the_original_cpu_model() {
+        let models = PathBuf::from(std::env::var_os("ILLUSTASH_RECOGNITION_MODELS").expect("显式模型目录"));
+        let library = PathBuf::from(std::env::var_os("ILLUSTASH_ORT_DYLIB").expect("显式运行库"));
+        initialise(&library).unwrap();
+        let original = models.join("wd_swinv2_v3_emb.onnx");
+        let shared = std::env::temp_dir().join(format!("illustash-wd-run-fallback-{}", std::process::id()));
+        std::fs::create_dir_all(&shared).unwrap();
+        let input: Vec<f32> = (0..448 * 448 * 3).map(|i| (i % 251) as f32).collect();
+        let infer = |session: &mut Session| -> Result<Vec<Vec<f32>>> {
+            let tensor = Tensor::from_array(([1, 448, 448, 3], input.clone())).map_err(|e| failure("输入", e))?;
+            let output = session.run(ort::inputs![tensor]).map_err(|e| failure("运行", e))?;
+            (0..2)
+                .map(|i| output[i].try_extract_tensor::<f32>().map(|(_, v)| v.to_vec()).map_err(|e| failure("输出", e)))
+                .collect()
+        };
+        let expected = infer(&mut cpu_session(&original, WD_THREADS).unwrap()).unwrap();
+        let acceleration = Acceleration::from_env(Some(&shared));
+        let mut loaded = ModelSession::load(&original, Model::Wd, WD_THREADS, &acceleration).unwrap();
+        assert_eq!(loaded.backend, Backend::CoreMl);
+        assert_ne!(loaded.execution.as_deref(), Some(original.as_path()));
+        let mut attempts = 0;
+        let actual = loaded
+            .run(|session| {
+                attempts += 1;
+                if attempts == 1 {
+                    return Err(failure("输出校验", "模拟运行中的设备/输出故障"));
+                }
+                infer(session)
+            })
+            .unwrap();
+        assert_eq!(attempts, 2, "同一图片只回退重跑一次");
+        assert_eq!(loaded.backend, Backend::Cpu);
+        assert_eq!(actual, expected, "必须回到原始模型，不能在 CPU 上运行派生图");
+        assert_eq!(loaded.run(infer).unwrap(), expected, "该 worker 后续继续使用原始 CPU 模型");
+        let status: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(shared.join("acceleration.json")).unwrap()).unwrap();
+        assert_eq!(status["wd"]["used"], "cpu");
+        assert!(status["wd"]["reason"].as_str().unwrap().contains("模拟运行"));
+        drop(loaded);
+        std::fs::remove_dir_all(shared).unwrap();
+    }
 }
