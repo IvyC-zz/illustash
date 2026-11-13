@@ -237,6 +237,11 @@ class RecognitionModelTest(unittest.TestCase):
             self.assertEqual(claim['identity'], identity)
             self.assertEqual(claim['assets'], manifest['assets'])
             self.assertEqual(claim['models'], manifest['models'])
+            # 执行变体不能进入证据包身份；旧 CPU 结果和加速结果必须属于同一原始模型。
+            configured = json.loads((ROOT / 'native/terms/models.json').read_text(encoding='utf-8'))
+            originals = {entry['path']: entry['sha256'] for entry in configured['files']}
+            self.assertEqual(manifest['models']['wd']['sha256'], originals['wd_swinv2_v3_emb.onnx'])
+            self.assertEqual(manifest['models']['ccip']['sha256'], originals['ccip/model_feat.onnx'])
             expected_labels = []
             reference_features = np.asarray([self.reference[int(asset.split('-')[1]) % 8]['ccip']
                                              for asset in manifest['assets']], np.float32)
