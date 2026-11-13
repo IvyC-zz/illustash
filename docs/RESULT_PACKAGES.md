@@ -76,7 +76,7 @@ python3.12 -m unittest tests.platform_recognition_models -v -b
 
 Windows 验收还须显式提供 `ILLUSTASH_RESEARCH_OPENBLAS_DLL`，与提供参考的 NumPy wheel 使用同一个已登记 DLL；两套 wheel 的矩阵 oracle 不可互换。
 
-此入口只使用生成图片和由其模型输出构造的合成锚点；默认设 `ILLUSTASH_CPU_ONLY=1`，逐位比较概率、原始向量、阈值和认领，并验证坏图、批次和 macOS / Windows 重定位识别布局内的首次 / 增量同步、角色正式证据发布及人工记录保留。`AcceleratedRecognitionTest` 按 [识别的执行后端](BACKEND_TASKS.md#识别的执行后端) 的平台边界和数值口径验收加速路径及 CPU 回退；不能把 CPU 的逐位相等结论套用于所有加速 provider。Python 仅承担对照与夹具制作，原生子进程使用空 PATH、独立 HOME 和共享根。布局夹具仅含识别所需的显式资源，不能据此宣称签名安装包、桌面 GUI 或完整计算包通过；完整包装与资源许可证由独立交付验收覆盖。
+此入口只使用生成图片和由其模型输出构造的合成锚点；默认设 `ILLUSTASH_CPU_ONLY=1`，逐位比较概率、原始向量、阈值和认领，并验证坏图、批次和 macOS / Windows 重定位识别布局内的首次 / 增量同步、角色正式证据发布及人工记录保留。`AcceleratedRecognitionTest` 在 macOS Core ML 或 Windows DirectML 上使用真实加速会话，按[执行后端约定的容差](BACKEND_TASKS.md#识别的执行后端)核对推理、结果包及认领，模型身份始终与原始文件一致；macOS 另验双模型缓存共存、热启动复用和加速文件缺失或损坏后的原始 CPU 回退。Python 仅承担对照与夹具制作，原生子进程使用空 PATH、独立 HOME 和共享根。布局夹具仅含识别所需的显式资源，不能据此宣称签名安装包、桌面 GUI 或完整计算包通过；完整包装与资源许可证由独立交付验收覆盖。
 
 ## 使用
 

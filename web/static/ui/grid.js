@@ -3,6 +3,7 @@
 import {edits, setLatest, undoLatest, undoneText} from '../core/edits.js';
 import {esc, number, platformText, shortcut} from '../core/format.js';
 import {t, tb} from '../core/i18n.js';
+import {composing} from '../core/keys.js';
 import {REASONS, nameWithWork} from '../core/labels.js';
 import {metaSoon, refreshMeta} from '../core/meta.js';
 import {prefs} from '../core/prefs.js';
@@ -701,7 +702,7 @@ export function wireGrid() {
   // 按键先看最上面的模式（core/modes.js）：大图打开时它盖住选择栏，单图快捷键都作用于大图里那张。哪些键、在哪生效
   // 写在 core/modes.js 的 SHORTCUTS（帮助对话框由它生成），这里加减按键要同步改那张表（tests/help_keys.test.cjs 核对）。
   document.addEventListener('keydown', e => {
-    if (document.querySelector('dialog[open]')) return;
+    if (composing(e) || document.querySelector('dialog[open]')) return;
     const mod = e.metaKey || e.ctrlKey, key = e.key.toLowerCase(), m = modes();
     const view = viewOf(state.route), scope = keyScope(view), grid = scope === 'grid';
     if (mod && key === 'k') { e.preventDefault(); jumpToCharacter(); return; }

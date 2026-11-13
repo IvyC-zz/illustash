@@ -98,11 +98,12 @@ test('单图／选择快捷键在各页做什么', () => {
   assert.equal(act('remove', P.library, 0, items[0]), null);
   // 整理页：⌫ 有选中时没有对应动作（已知问题 13 说的那一种）
   for (const view of [P.unmatched, P.skipped, P.excluded, P.pending, P.group, P.audit]) assert.equal(act('remove', view, 2), null, view.name);
-  // S 只在未识别一类；没有选中时只有「全部未识别」能跳过当前图
+  // S 只在未识别一类；没有选中时「全部未识别」和组页都跳过当前图（#385），已跳过页没有
   assert.deepEqual(act('s', P.unmatched, 2), {bar: 'skip'});
   assert.deepEqual(act('s', P.unmatched, 0), {single: 'skip'});
   assert.deepEqual(act('s', P.group, 2), {bar: 'skip'});
-  assert.equal(act('s', P.group, 0), null);
+  assert.deepEqual(act('s', P.group, 0), {single: 'skip'});
+  assert.equal(act('s', P.skipped, 0), null);
   for (const view of [P.skipped, P.excluded, P.pending, P.audit, P.library]) assert.equal(act('s', view, 1), null, view.name);
   // X：已排除页恢复收录，其余排除
   assert.deepEqual(act('x', P.excluded, 1), {bar: 'include'});
@@ -287,4 +288,55 @@ test('⌘滚轮、捏合只在主区是网格的页面缩放网格，也不交�
   for (const fn of viewport.listeners.wheel) fn(plain);
   assert.deepEqual([plain.prevented, frames], [false, 0]);
   globalThis.requestAnimationFrame = () => 0;
+});
+
+// 组页上不选图按 S：和「全部未识别」一样，当前图先飞走（卡片带 leaving），再发出「跳过」（#385）。
+test('不选图按 S 跳过当前这张：全部未识别和组页一样，已跳过页没有反应', async () => {
+  await wired();
+  const requests = [];
+  const grid = page.el('grid');
+  globalThis.fetch = async (path, init = {}) => {
+    const flying = grid.children.filter(c => c.classList.contains('leaving')).map(c => c.dataset.id);
+    requests.push({path, body: init.body ? JSON.parse(init.body) : null, flying});
+    return {status: 500, ok: false, text: async () => 'stop', json: async () => ({error: 'stop'})};
+  };
+  const card = id => { const el = page.document.createElement('div'); el.dataset.id = id; return el; };
+  const skipFrom = async (route, expectSent) => {
+    requests.length = 0; grid.children.length = 0;
+    for (const id of ['a', 'b', 'c']) grid.append(card(id));
+    reset({route, cursor: 0});
+    page.el('toast').hidden = true; page.el('toastText').textContent = '';
+    keydown('s');
+    await new Promise(done => setTimeout(done, 20));
+    const changes = requests.filter(r => r.path === '/api/change');
+    if (!expectSent) return assert.deepEqual(changes, [], route.page);
+    assert.equal(changes.length, 1, route.page);
+    assert.deepEqual(changes[0].body, {ids: ['a'], action: 'unknown'}, route.page);
+    assert.deepEqual(changes[0].flying, ['a'], `${route.page}：请求发出时这张已经在飞走`);
+  };
+  await skipFrom({page: 'unmatched'}, true);
+  await skipFrom({page: 'group', id: '3'}, true);
+  await skipFrom({page: 'skipped'}, false);
+});
+
+// 详情栏里「也可能是」设角色：lead 页（全部未识别、已跳过、组页）上图先飞走，别的页不飞（#385）。
+test('详情栏设角色后图飞走：未识别一类三页都飞，图库不飞', async () => {
+  await wired();
+  const detail = await web.load('ui/detail.js');
+  const grid = page.el('grid');
+  const seen = [];
+  globalThis.fetch = async (path, init = {}) => {
+    seen.push({path, flying: grid.children.filter(c => c.classList.contains('leaving')).map(c => c.dataset.id)});
+    return {status: 500, ok: false, text: async () => 'stop', json: async () => ({error: 'stop'})};
+  };
+  for (const [route, flies] of [[{page: 'unmatched'}, true], [{page: 'skipped'}, true], [{page: 'group', id: '3'}, true], [{page: 'library'}, false]]) {
+    seen.length = 0; grid.children.length = 0;
+    for (const id of ['a', 'b']) { const el = page.document.createElement('div'); el.dataset.id = id; grid.append(el); }
+    reset({route});
+    detail.pickAlternative({memberships: [], alternatives: [{id: 'c9'}]}, 'a', 0);
+    await new Promise(done => setTimeout(done, 20));
+    const sent = seen.filter(r => r.path === '/api/change');
+    assert.equal(sent.length, 1, route.page);
+    assert.deepEqual(sent[0].flying, flies ? ['a'] : [], route.page);
+  }
 });
