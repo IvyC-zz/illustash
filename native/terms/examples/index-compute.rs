@@ -6,6 +6,8 @@ use illustash_terms::{
 use serde_json::{json, Value};
 use std::{fs, path::Path};
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // 单线程时关掉 ONNX Runtime 的遥测（#381）；session::initialise 没看到它会拒绝加载。
+    illustash_terms::recognition_compute::telemetry::at_startup();
     let args: Vec<_> = std::env::args().collect();
     let input = Path::new(args.get(1).ok_or("request missing")?);
     let output = Path::new(args.get(2).ok_or("response missing")?);

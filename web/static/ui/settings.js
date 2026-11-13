@@ -213,7 +213,8 @@ function networkCard() {
     ${state.updates ? `<label class="switch-line"><span><b>${t('自动检查更新')}</b><small>${t('启动时和之后每天查一次 GitHub 上有没有新版本，有新版本时提示你，不会自己下载或安装')} · ${SCOPE.shared[0]}</small></span><input type="checkbox" class="switch" data-updates-auto ${state.updates.auto ? 'checked' : ''}></label>` : ''}
     ${net ? `<div class="setting-line"><span><b>${t('名称联网查询')}</b><small>${t('角色名称和 Danbooru 搜索共用这一项授权，只发送文字')} · ${names}</small></span>
       ${net.granted_at ? `<button class="quiet small" data-names-network="0">${t('撤销')}</button>` : `<button class="quiet small" data-names-network="1">${t('允许…')}</button>`}</div>` : ''}
-    <p class="set-foot">${t('同步、图片识别、相似图片检测、学习与分组都只在本机进行。X 的关注通过导入官方数据归档获得，不联网。')}</p>`;
+    <p class="set-foot">${t('同步、图片识别、相似图片检测、学习与分组都只在本机进行。X 的关注通过导入官方数据归档获得，不联网。')}</p>
+    <p class="set-foot">${t('识别用的 ONNX Runtime 已关掉微软的遥测，不联网。')}${isMac ? '' : ' ' + t('GPU 加速用的微软 DirectML 组件登记在 Windows 的遥测通道里，可能依照系统的「诊断数据」设置向微软发送使用信息；不想用可在「设置 › 数据 › 识别模型」里关掉「使用 GPU 加速识别」。')}</p>`;
 }
 export async function renderSettings(fetchMissing = true, refresh = false) {
   if (!onPage(state.route, 'settings')) return;

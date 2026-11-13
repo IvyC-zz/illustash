@@ -10,6 +10,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
+import uuid
 import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -53,6 +54,9 @@ DIRECTML_FILES = {'resources/onnxruntime/DirectML.dll': 'bin/x64-win/DirectML.dl
 # 这个运行库构建在哪个后端上跑每个模型，装在运行库旁边（native/terms recognition_compute/backend.rs
 # RUNTIME_BACKENDS）：替换运行库文件夹（比如换成 Windows ML）就能改后端，不用改代码。
 WINDOWS_ORT_BACKENDS = ROOT / 'packaging/onnxruntime/windows-backends.json'
+# Windows 的诊断数据管道只收集登记在这个 ETW 组里的 provider（#381）。微软官方发布的 onnxruntime.dll 登记在组里；
+# 从公开源码自建的（docs/BACKEND_TASKS.md）只登记全零组，不进遥测通道。按 TraceLogging 元数据里的字节序（bytes_le）。
+MICROSOFT_TELEMETRY_GROUP = uuid.UUID('4f50731a-89cf-4782-b3e0-dce8c90476ba').bytes_le
 # resources/models/ 下的识别模型（native/terms/models.json）：一个包要么全有，要么一个都没有。
 MODEL_FILES = tuple(entry['path'] for entry in json.loads((ROOT / 'native/terms/models.json').read_text())['files'])
 # 一个 worker 程序承担全部四种；宿主每次启动时传入种类（#37）。
@@ -159,6 +163,12 @@ def research_openblas(site):
         raise ValueError('expected exactly one fixed NumPy OpenBLAS DLL in the explicit site-packages')
     return candidates[0]
 
+def check_windows_ort_telemetry(dll):
+    """#381：不打包登记在微软遥测组里的 ONNX Runtime（比如换成了官方发布的那份）。"""
+    if MICROSOFT_TELEMETRY_GROUP in Path(dll).read_bytes():
+        raise ValueError(f'{dll}: this ONNX Runtime registers its ETW provider in the Microsoft telemetry group '
+                         '(an official Microsoft build); use the runtime built from source (docs/BACKEND_TASKS.md, #381)')
+
 def stage(destination, binaries, research=False, desktop=None, iqdb=None, models=None, openblas_site=None,
           ort_dylib=None, ort_licenses=None, directml=None):
     destination = destination.resolve()
@@ -180,6 +190,8 @@ def stage(destination, binaries, research=False, desktop=None, iqdb=None, models
         for source in DIRECTML_FILES.values():
             if not (directml / source).is_file():
                 raise FileNotFoundError(f'DirectML package file missing: {directml / source}')
+    if ort_dylib and sys.platform == 'win32':
+        check_windows_ort_telemetry(ort_dylib)
     openblas = None
     if openblas_site:
         if sys.platform != 'win32':
