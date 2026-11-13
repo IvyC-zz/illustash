@@ -94,7 +94,7 @@ Claude Code 通过 `CLAUDE.md` 引入本文件，Codex 等直接读本文件。�
 
 ### 前端结构约定
 
-2026-11-12（#320，总跟踪 #316）：`web/static` 的结构约定由 `tools/check_frontend.py` 机械检查，已接进 `tools/check_all.sh` 和 `ci.yml`，规则写在脚本开头：`core/` 不得导入 `ui/`；`ui/` 不得新增循环导入；`state` 上的字段必须在 `core/state.js` 声明，并且只能由声明里组标题写明的写入者文件赋值（#353）；不得新增 `document`/`window` 级的 `keydown`/`click` 监听（2026-11-12 用户在 #343 批准唯一例外：浮层管理器 `ui/overlay.js`，新浮层向它登记，不另挂监听）和运行时 `createElement('dialog')`；一行不超过 200 字符；`app.css` 里新写的字号、圆角、`gap`/`padding`、`z-index` 和颜色用顶部的令牌（`var(--…)`），没有合适的档位先在 Issue 里问（#349）。存量冻结在 `tools/frontend_baseline.json`（按文件和内容特征登记，不按行号），**基线只能缩小**：违规要改代码，不能往基线里加；改好一处后运行 `python tools/check_frontend.py --shrink` 删掉对应项（`check_all.sh` 带 `--strict-stale`，不收紧会失败；并带 `--base-ref`，基线比与 main 的共同祖先大也会失败，做法见[本地验收](docs/LOCAL_CHECKS.md)）。报错会写明违反了哪条约定、怎么改；方案在 [WEB_V2.md](docs/WEB_V2.md#前端模块2026-10-18199)。
+2026-11-12（#320，总跟踪 #316）：`web/static` 的结构约定由 `tools/check_frontend.py` 机械检查，已接进 `tools/check_all.sh` 和 `ci.yml`，规则写在脚本开头：`core/` 不得导入 `ui/`；`ui/` 不得新增循环导入；`state` 上的字段必须在 `core/state.js` 声明，并且只能由声明里组标题写明的写入者文件赋值（#353）；不得新增 `document`/`window` 级的 `keydown`/`click` 监听（2026-11-12 用户在 #343 批准唯一例外：浮层管理器 `ui/overlay.js`，新浮层向它登记，不另挂监听）和运行时 `createElement('dialog')`；每个键盘事件处理函数先用 `core/keys.js` 的 `composing(e)` 判断输入法是否在组字，别处不直接读 `isComposing`/`keyCode`（2026-11-13，#388）；一行不超过 200 字符；`app.css` 里新写的字号、圆角、`gap`/`padding`、`z-index` 和颜色用顶部的令牌（`var(--…)`），没有合适的档位先在 Issue 里问（#349）。存量冻结在 `tools/frontend_baseline.json`（按文件和内容特征登记，不按行号），**基线只能缩小**：违规要改代码，不能往基线里加；改好一处后运行 `python tools/check_frontend.py --shrink` 删掉对应项（`check_all.sh` 带 `--strict-stale`，不收紧会失败；并带 `--base-ref`，基线比与 main 的共同祖先大也会失败，做法见[本地验收](docs/LOCAL_CHECKS.md)）。报错会写明违反了哪条约定、怎么改；方案在 [WEB_V2.md](docs/WEB_V2.md#前端模块2026-10-18199)。
 
 ## 文档维护规范
 

@@ -10,6 +10,8 @@
 // 栈按打开的先后排；Esc 只关栈顶一个，栈是空的就放行（页面自己的 Esc 兜底链接着走：输入框失焦 → 详情栏 → 取消选择）。
 // 层级（z-index）仍由 app.css 的 --z-* 令牌决定，这里不写：原生 modal 在浏览器顶层，高于所有 z-index。
 
+import {composing} from '../core/keys.js';
+
 const stack = [];
 let wired = null;
 const get = x => (typeof x === 'function' ? x() : x);
@@ -40,7 +42,7 @@ function dismiss(layer, reason) {
 }
 
 function onKeydown(e) {
-  if (e.key !== 'Escape') return;
+  if (e.key !== 'Escape' || composing(e)) return;  // 组字时的 Esc 是取消组字，不关浮层
   prune();
   const top = stack[stack.length - 1];
   if (!top) return;

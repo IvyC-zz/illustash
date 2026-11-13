@@ -4,6 +4,7 @@ import {forgetLocalLinks, workName} from '../core/catalog.js';
 import {setLatest} from '../core/edits.js';
 import {esc, number} from '../core/format.js';
 import {t, tb} from '../core/i18n.js';
+import {composing} from '../core/keys.js';
 import {workLabel} from '../core/labels.js';
 import {fetchChar, refreshMeta} from '../core/meta.js';
 import {poolIs} from '../core/pages.js';
@@ -208,7 +209,7 @@ export function combo(input, menu, search, pick) {
   input.addEventListener('focus', run);
   input.addEventListener('blur', () => setTimeout(() => show(false, 'outside'), 150));
   input.addEventListener('keydown', e => {
-    if (menu.hidden || !list.length) return;
+    if (composing(e) || menu.hidden || !list.length) return;
     if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); index = (index + (e.key === 'ArrowDown' ? 1 : list.length - 1)) % list.length; for (const b of menu.querySelectorAll('[data-i]')) b.classList.toggle('on', Number(b.dataset.i) === index); }
     else if (e.key === 'Enter') { e.preventDefault(); choose(index); }
   });
@@ -246,7 +247,7 @@ export async function editProfile(c) {
   const q = sel => d.querySelector(sel);
   const aliases = () => { q('#pfAliases').innerHTML = draft.aliases.map((a, i) => `<button type="button" class="staged-chip" data-a="${i}" title="${t('移除')}">${esc(a)} ×</button>`).join(''); };
   q('#pfAliases').onclick = e => { const b = e.target.closest('[data-a]'); if (b) { draft.aliases.splice(Number(b.dataset.a), 1); aliases(); } };
-  q('#pfAlias').onkeydown = e => { const v = e.target.value.trim(); if (e.key === 'Enter') { e.preventDefault(); if (v && !draft.aliases.includes(v)) draft.aliases.push(v); e.target.value = ''; aliases(); } };
+  q('#pfAlias').onkeydown = e => { if (composing(e)) return; const v = e.target.value.trim(); if (e.key === 'Enter') { e.preventDefault(); if (v && !draft.aliases.includes(v)) draft.aliases.push(v); e.target.value = ''; aliases(); } };
   aliases();
   const tagNote = () => { if (!q('#pfTagNote')) return; q('#pfTag').value = draft.tag ? draft.tag.replaceAll('_', ' ') : ''; q('#pfTagNote').innerHTML = draft.tag ? `${t('已关联 {tag}', {tag: `<code>${esc(draft.tag)}</code>`})} · <button type="button" class="link-button" id="pfUnlink">${t('取消关联')}</button>` : t('关联后自动补中文名、别名和所属作品'); q('#pfUnlink')?.addEventListener('click', () => { draft.tag = ''; tagNote(); }); };
   const workNote = () => { if (!q('#pfWork')) return; q('#pfWork').value = draft.work?.label || ''; q('#pfWorkNote').innerHTML = draft.work ? `${draft.work.create ? t('保存时新建这个作品') + ' · ' : draft.work.tag ? t('保存时从 Danbooru 建立这个作品') + ' · ' : ''}<button type="button" class="link-button" id="pfNoWork">${t('不归属任何作品')}</button>` : (draft.tag && draft.tag !== p.tag && !p.work_id ? (draft.tagWork ? t('留空：按 Danbooru 自动设置（{work}）', {work: draft.tagWork}) : t('留空：按 Danbooru 自动设置')) : t('未归类')); q('#pfNoWork')?.addEventListener('click', () => { draft.work = null; workNote(); }); };
@@ -350,7 +351,7 @@ export function jumpToCharacter() { openPicker({title: t('跳到角色'), jump: 
 export function wirePalette() {
   $('pickerSearch').addEventListener('input', () => { if (palette) palette.touched = true; clearTimeout(pickerTimer); pickerTimer = setTimeout(paletteSearch, 140); });
   $('pickerSearch').addEventListener('keydown', e => {
-    const p = palette; if (!p) return;
+    const p = palette; if (!p || composing(e)) return;
     if (e.key === 'ArrowDown' || e.key === 'ArrowUp') p.touched = true;
     if (e.key === 'ArrowDown') { e.preventDefault(); p.index = Math.min(p.list.length - 1, p.index + 1); highlight(); }
     else if (e.key === 'ArrowUp') { e.preventDefault(); p.index = Math.max(0, p.index - 1); highlight(); }
