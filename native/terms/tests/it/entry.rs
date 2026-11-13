@@ -15,8 +15,7 @@ use std::{
     time::Duration,
 };
 
-#[path = "common/entry.rs"]
-mod entry;
+use crate::common::entry;
 
 struct Sandbox(PathBuf);
 impl Drop for Sandbox {
@@ -53,6 +52,7 @@ fn call(method: &str, url: &str, headers: &[(&str, &str)], body: Option<&Value>)
 
 #[test]
 fn every_request_needs_the_cookie_from_the_one_time_address() {
+    let _env = crate::exclusive();
     let root =
         std::env::temp_dir().join(format!("illustash-entry-{}-{}", std::process::id(), store::new_key().unwrap()));
     fs::create_dir_all(root.join("source")).unwrap();
@@ -61,7 +61,7 @@ fn every_request_needs_the_cookie_from_the_one_time_address() {
     for dir in ["home", "support", "shared"] {
         fs::create_dir_all(root.join(dir)).unwrap();
     }
-    // 这个测试二进制只有一个测试：此期间没有别的代码读进程环境。
+    // 持有 `crate::exclusive()`：此期间没有别的测试在跑，也就没有别的代码读进程环境。
     std::env::set_var("ILLUSTASH_APP_SUPPORT", root.join("support"));
     std::env::set_var("ILLUSTASH_SHARED", root.join("shared"));
     std::env::set_var("ILLUSTASH_NO_KEYCHAIN", "1");

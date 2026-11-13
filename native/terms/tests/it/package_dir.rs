@@ -37,6 +37,7 @@ fn scratch(name: &str) -> Scratch {
 
 #[test]
 fn the_fixture_package_validates_and_imports() {
+    let _env = crate::shared();
     let p = Package::open(&fixture()).unwrap();
     assert_eq!(p.rows.len(), 4);
     assert_eq!(p.manifest.assets[2].status, Status::Failed);
@@ -53,6 +54,7 @@ fn the_fixture_package_validates_and_imports() {
 
 #[test]
 fn file_checks() {
+    let _env = crate::shared();
     let dir = scratch("tamper");
     fs::write(dir.join("notes.txt"), b"changed").unwrap();
     assert!(Package::open(&dir).unwrap_err().to_string().contains("notes.txt"));
@@ -83,6 +85,7 @@ fn file_checks() {
 
 #[test]
 fn cli_validates_with_exit_codes() {
+    let _env = crate::shared();
     let bin = env!("CARGO_BIN_EXE_illustash-terms");
     let ok = Command::new(bin).args(["validate", fixture().to_str().unwrap()]).output().unwrap();
     assert!(ok.status.success());

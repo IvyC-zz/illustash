@@ -6,6 +6,9 @@
 //! 词条核心版本比本次构建旧的图库用 `--upgrade` 打开，与用户的图库相同（#193）：留一份升级前备份，保存图库原来的样子。
 //! 响应经 `common/baseline.rs` 的遮盖（以及随机会话 token 的遮盖）后按字节比较；图库包的每个数据库在启动后和
 //! 每次请求后都按那里的规则比较。
+//!
+//! 不并进 `tests/it/` 的合并测试二进制（#310）：`tools/check_all.sh`、`.github/workflows/ci.yml` 和
+//! `tools/bench_native_contracts.sh` 按 `--test contracts` 单独构建这个可执行文件，再拿它做空 PATH 重放和计时。
 #![allow(clippy::unwrap_used, reason = "集成测试里 unwrap 就是断言")]
 use rusqlite::Connection;
 use serde_json::{json, Map, Value};

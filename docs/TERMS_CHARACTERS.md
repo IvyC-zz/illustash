@@ -27,7 +27,7 @@
 | `candidates` | 证据：WD → `wd.wd_character`，CCIP → `ccip_index.char_ext`，按**证据批次**生效（每次 refresh / reindex / import 是一批，覆盖到的图上以这一批为准） | 核心维护的派生表：有效证据按 (图, 身份, 来源) 取最大分（第 8 版起不算兼容层，[TERMS_SCHEMA.md](TERMS_SCHEMA.md) 第 14 节） |
 | `proto_claims`、`weak_claims`、`prototypes`、`learn_state` | 判定器私有状态，由学习批次整批替换 | 原表，核心写 |
 | `identity_canonical`、`identity_scopes`、`identity_suspended`、`identity_uncertain`、`identity_claims`、`identity_anchor_*` | 判定器私有状态 | 原表，核心写 |
-| `memberships`、`tag_memberships`、`family_evidence`、`single_assets`、`lead_assets` | 投影：核心执行 `crates/core/src/character_sql/` 里逐字保存的旧 SQL；按图增量重算时把范围条件插在固定锚点上，锚点不是恰好出现一次就报错，不会悄悄退回整库（#200）。合成数据上增量与全量逐行一致由 `native/terms/tests/character_projection.rs` 钉住。人物、皮肤的归属另外镜像进 `term_projection`（目前没有读者） | 核心维护的派生表（第 8 版起不算兼容层） |
+| `memberships`、`tag_memberships`、`family_evidence`、`single_assets`、`lead_assets` | 投影：核心执行 `crates/core/src/character_sql/` 里逐字保存的旧 SQL；按图增量重算时把范围条件插在固定锚点上，锚点不是恰好出现一次就报错，不会悄悄退回整库（#200）。合成数据上增量与全量逐行一致由 `native/terms/tests/it/character_projection.rs` 钉住。人物、皮肤的归属另外镜像进 `term_projection`（目前没有读者） | 核心维护的派生表（第 8 版起不算兼容层） |
 | `membership_rules` 等规则视图 | — | 原样 |
 | `asked`、`reviews`、`deferred`、`duplicates`、`auto_rules`、`excluded`、`imported`、`backend_effects`、`prefs` | 外围，不收编 | 原表；属于某一步的由那一步的核心命令同事务写，收藏排除、跳过配对不走角色命令 |
 | `relations` | 图片相似关系，与本步无关 | 不变 |
