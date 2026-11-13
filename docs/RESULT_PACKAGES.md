@@ -47,7 +47,7 @@ labels.jsonl 每行：
 
 `recognition_compute` 使用显式路径加载 ONNX Runtime 动态库；后端选择、CPU 线程、加速开关、缓存与回退以 [识别的执行后端](BACKEND_TASKS.md#识别的执行后端) 为准。WD 先丢弃 alpha、白底补成正方形（奇数差向下取整居中），按 Pillow BICUBIC 语义缩到 448；白边是虚拟采样，不物化 max(宽,高)² 的正方形，横向一轮只遍历落在图像列上的系数，白边部分按整数权重和一次计入，耗时随输入像素线性增长（#74），输出与物化实现逐位一致（#46），输入为未除以 255 的 BGR NHWC float32；CCIP 按 Pillow BILINEAR 语义直接缩到 384，RGB/CLIP 归一化后输入 NCHW float32。不应用 EXIF 旋转或 ICC 转换。保存模型的原始 WD 1024 / CCIP 768 向量；特征的单位化属于研究计算消费者。
 
-生产者与导入器共用 `ModelFiles` 路径及 SHA-256 规格：默认为资源 root 的 `models/`，`ILLUSTASH_MODELS` 的绝对路径直接使用，相对路径锚定资源 root。同步把自己的资源 root 传给计算进程，标签仍由同一资源 root 的 `tags/tags_v3.csv` 提供；自定义模型根不绕过字节指纹，模型或标签变化拒绝旧结果。流式指纹读取保留合作取消检查。
+生产者与导入器共用 `ModelFiles` 路径及 SHA-256 规格：默认为资源 root 的 `models/`，`ILLUSTASH_MODELS` 的绝对路径直接使用，相对路径锚定资源 root。同步把自己的资源 root 传给计算进程，标签仍由同一资源 root 的 `tags/tags_v3.csv` 提供；自定义模型根不绕过字节指纹，模型或标签变化拒绝旧结果。执行时换用的加速文件（如 macOS WD 的 Core ML 执行变体）和退回 CPU 都不改变模型规格：manifest 与 sidecar 里的模型 SHA-256、版本仍取原始 ONNX，见[识别的执行后端](BACKEND_TASKS.md#识别的执行后端)。流式指纹读取保留合作取消检查。
 
 内部请求升级为 `illustash-sync/2`，每项 `{id,path,input_sha256}` 由宿主对实际文件取指纹。worker 完整读入一次，对同一缓冲区校验 SHA-256 后解码和推理；指纹不同返回 `input_changed`，宿主把该图计为本次失败、留待下次同步重试，不登记为损坏图片，也不输出该项机器结果；其他有效批次照常导入。准备输入时先报告 `hashing` 阶段，再逐文件推进 `input_done/input_total`，与模型加载及识别计数分开。非普通文件和暂时读不到的输入同样按单图失败处理，取消及格式错误仍中止任务。批次只包含成功项及其请求哈希，宿主核对回包哈希与本次请求相同，结果包导入仍复核当前字节，所以推理期间替换图片也不能发布旧结果。模型或输入错误不修改来源及人工记录。完成标记继续绑定 manifest 和 sidecar 的摘要，不新建调度或恢复机制。
 
