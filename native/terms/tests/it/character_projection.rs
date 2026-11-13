@@ -3,8 +3,8 @@
 use illustash_terms::character_projection::rebuild;
 use rusqlite::{params, types::ValueRef, Connection};
 
-const SCHEMA: &str = include_str!("../src/app_create_schema.sql");
-const HYBRID: &str = include_str!("../src/app_migration_sql/hybrid.sql");
+const SCHEMA: &str = include_str!("../../src/app_create_schema.sql");
+const HYBRID: &str = include_str!("../../src/app_migration_sql/hybrid.sql");
 const ENTITIES: [&str; 7] = ["alice", "alice_summer", "bob", "bob_winter", "carol", "mascot", "dave"];
 const GENERAL: [&str; 8] = ["solo", "1girl", "1boy", "multiple_girls", "2girls", "6+boys", "smile", "solo_focus"];
 const SCORES: [f64; 9] = [0.4, 0.6, 0.8, 0.85, 0.9, 0.92, 0.925, 0.95, 0.97];
@@ -157,6 +157,7 @@ fn compare(hybrid: bool, touched: &[usize]) {
 
 #[test]
 fn incremental_rebuild_matches_full_rebuild_row_by_row() {
+    let _env = crate::shared();
     for hybrid in [false, true] {
         // ≤10 张逐图刷新归属；更多的走 touched 临时表。
         compare(hybrid, &[1, 2, 5, 9, 14, 30]);

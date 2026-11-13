@@ -167,6 +167,7 @@ illustash/
 - 只改 Markdown 的 PR 不跑全量，只检查相对链接。
 - GitHub Actions 只有 `workflow_dispatch`，且 job 要求运行 ref 为 `refs/heads/main`；推送、开 PR、合并都不自动运行。
 - 常用入口：核心测试 `cargo test --locked --manifest-path native/terms/Cargo.toml`，Python 合成套件 `python -m tests.run_offline -v -b`（用装了依赖的 3.12 解释器）。
+- `native/terms` 的集成测试合成三个测试二进制（#310）：`tests/it/`（其余各文件是 `it/main.rs` 的子模块，只跑一个用 `--test it entry::`）、`tests/contracts.rs`（检查脚本和计时按 `--test contracts` 单独构建）、`tests/baseline.rs`（进程级的 SQLite 设置要最先生效）。新的集成测试放进 `tests/it/` 并在 `main.rs` 登记；每个测试第一行取 `crate::shared()`，要改进程环境变量或当前目录的取 `crate::exclusive()`，`it` 里有测试检查这一点。在 `tests/` 顶层另建文件也能跑，但会多编、多链接一次整个库。
 
 细节与复用口径见 [本地全量验收](LOCAL_CHECKS.md)。
 

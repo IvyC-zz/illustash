@@ -68,7 +68,7 @@
 | 事务、证据、人工历史、投影和业务规则 | `crates/core/src/` 的测试模块、`crates/core/tests/` | 直接调用核心，多数用内存 SQLite；适合规则的边界组合 |
 | 文件、凭据、进程、系统数学库等平台能力 | `crates/platform/src/` 的测试模块、`crates/platform/tests/` | 以真实平台边界为准；其他平台的证据单列 |
 | 宿主任务状态、取消、切库与提交顺序 | `native/terms/src/` 的测试模块；`tests/test_native_lifecycle.py`、`test_native_sync.py`、`test_native_research.py`、`test_native_provenance.py` 等 | 模块内测试可控制实际任务阶段；HTTP 测试验证调用方看到的状态和结果 |
-| 旧行为与旧图库兼容 | `native/terms/tests/baseline.rs`、`contracts.rs`、`v8_upgrade.rs`，比较规则在 `tests/common/baseline.rs`；`tests/fixed_expectations.py`、`test_native_library_upgrade.py` | 使用提交的录制或历史合成包；期望独立于当前候选输出；对照基准见下文 |
+| 旧行为与旧图库兼容 | `native/terms/tests/baseline.rs`、`contracts.rs`、`it/v8_upgrade.rs`，比较规则在 `tests/common/baseline.rs`；`tests/fixed_expectations.py`、`test_native_library_upgrade.py` | 使用提交的录制或历史合成包；期望独立于当前候选输出；对照基准见下文 |
 | 数值、图像及计算发布 | `tests/test_native_*_compute.py`、`test_native_*_production.py` | 显式指定候选 examples/worker；固定数值由 `*_expectations.py` 读取，Windows 差异另有覆盖文件 |
 | 界面、资源装配与检查工具 | `tests/*.test.cjs`、`test_pixiv_poll.js`、`test_packaging*.py`、`test_local_acceptance.py`、`test_architecture.py` | JS 与合成工具测试不等于 GUI 或完整安装验收 |
 

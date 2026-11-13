@@ -24,7 +24,7 @@ impl Fixture {
             store::new_key().unwrap()
         ));
         fs::create_dir_all(root.join("source")).unwrap();
-        // 这个测试二进制只有一个测试；修改环境变量不会与其他测试竞争。
+        // 测试持有 `crate::exclusive()`：修改环境变量不会与其他测试竞争。
         std::env::set_var("ILLUSTASH_APP_SUPPORT", root.join("support"));
         std::env::set_var("ILLUSTASH_SHARED", root.join("absent-reference"));
         std::env::set_var("ILLUSTASH_NO_KEYCHAIN", "1");
@@ -57,6 +57,7 @@ fn options(root: &Path) -> Options {
 
 #[test]
 fn creation_open_same_id_switch_late_work_and_exit_without_transport() {
+    let _env = crate::exclusive();
     let f = Fixture::new();
     let a = f.create("first");
     let b = f.create("second");
