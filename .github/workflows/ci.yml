@@ -93,6 +93,10 @@ jobs:
       - run: pip install -r tests/requirements.txt
       - name: Dependency boundary
         run: python tools/check_architecture.py
+      - name: Frontend structure
+        run: python tools/check_frontend.py --strict-stale
+      - name: Style guide sync
+        run: python tools/check_styleguide.py
       - name: Core fmt/clippy/test/build
         run: |
           cargo fmt --manifest-path crates/core/Cargo.toml --check
@@ -224,12 +228,13 @@ jobs:
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@stable
         with:
-          components: clippy
+          components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
           workspaces: desktop
-      # 桌面壳格式尚未统一（无 rustfmt.toml，存量代码按 120 列手写），暂不检查 fmt。
+      - name: fmt
+        run: cargo fmt --manifest-path desktop/Cargo.toml --check
       - name: clippy
         run: cargo clippy --locked --manifest-path desktop/Cargo.toml --all-targets -- -D warnings
       - name: test

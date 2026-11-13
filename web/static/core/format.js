@@ -5,6 +5,8 @@ export const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'
 export const macLike = platform => /Mac|iPhone|iPad|iPod/.test(platform || '');
 export const isMac = macLike(globalThis.navigator?.userAgentData?.platform || globalThis.navigator?.platform);
 export const shortcut = (key, mac = isMac) => mac ? `⌘${key}` : `Ctrl+${key}`;
+// 用 ⌘ 写的帮助文字：其他系统上换成 Ctrl（单独的 ⌘ 换成 Ctrl，⌘K 换成 Ctrl+K）。
+export const platformText = (text, mac = isMac) => mac ? text : text.replace(/⌘(?=\s|$)/g, 'Ctrl').replaceAll('⌘', 'Ctrl+');
 export const number = n => Number(n || 0).toLocaleString(I18N.locale);
 // 日期（#182）：中文保留自己的空格（「5 月 3 日」）；其他语言照 Intl。
 export const dateText = (y, m, d, withYear) => I18N.language === 'zh-CN' ? (withYear ? `${y} 年 ` : '') + `${m} 月 ${d} 日`

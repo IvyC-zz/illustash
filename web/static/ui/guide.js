@@ -2,7 +2,8 @@
 import {WORK_NAMES} from '../core/catalog.js';
 import {esc, number, shortcut} from '../core/format.js';
 import {said, t, tb} from '../core/i18n.js';
-import {PHOTOS_PRIVACY, SYNC_ACTIVE, photosHelp, photosRefused, pollSync, startSync, syncLine} from '../core/jobs.js';
+import {PHOTOS_PRIVACY, SYNC_ACTIVE, photosHelp, photosRefused, pollSync, setIndex, setNames, startSync, syncLine} from '../core/jobs.js';
+import {onPage, pageOf} from '../core/pages.js';
 import {go} from '../core/route.js';
 import {api, post, session} from '../core/session.js';
 import {allowNames, updatesPost, updatesTick} from '../core/settings.js';
@@ -10,6 +11,7 @@ import {state} from '../core/state.js';
 import {$, toast} from './dom.js';
 import {openRelease} from './settings.js';
 import {taskList} from './tasks.js';
+import {createLayer} from './overlay.js';
 import {modelsNotice} from './models.js';
 import {modelsWaiting, modelsFinished, onModels} from '../core/models.js';
 
@@ -109,13 +111,15 @@ export function tourStop(id) {
     end: {title: t('就这些'), text: t('右下角的「上手」清单会跟着你做过的事打勾，全做完就自己消失。以后想再看一遍，在「设置 › 关于」里。'), next: t('开始用吧')},
   }[id];
 }
+// 导览是盖满页面的层：Esc 等同"跳过"，由浮层管理器（ui/overlay.js）统一处理。
+const tourLayer = createLayer({kind: 'overlay', id: 'tour', el: () => $('tour'), onDismiss: () => { closeTour(); guideAction({action: 'skip'}); }});
 function showTour(at) {
   tourAt = at; drawNudge(); drawChecklist();
-  const root = $('tour'); root.hidden = false; requestAnimationFrame(() => root.classList.add('on'));
+  const root = $('tour'); root.hidden = false; tourLayer.open(); requestAnimationFrame(() => root.classList.add('on'));
   placeTour(true);
 }
 function closeTour() {
-  tourAt = -1; const root = $('tour'); root.classList.remove('on');
+  tourAt = -1; tourLayer.close(); const root = $('tour'); root.classList.remove('on');
   setTimeout(() => { if (tourAt < 0) root.hidden = true; }, 260);
   drawGuide();
 }
@@ -170,7 +174,7 @@ function nextNudge() {
 }
 export function drawNudge() {
   const el = $('nudge'), n = nextNudge();
-  if (guideOn() && !state.names && !el.dataset.names) { el.dataset.names = '1'; api('/api/names').then(v => { state.names = v; drawNudge(); }).catch(() => {}); }
+  if (guideOn() && !state.names && !el.dataset.names) { el.dataset.names = '1'; api('/api/names').then(v => { setNames(v); drawNudge(); }).catch(() => {}); }
   const html = !n ? '' : n.key === 'update'
     ? `<div><b>${t('有新版本 {version}', {version: esc(state.updates.latest)})}</b><small>${t('现在是 {current}。在浏览器里打开下载页，下载后覆盖安装即可。', {current: esc(state.updates.current)})}</small></div>
       <div class="nudge-acts"><button class="quiet small" data-nudge="later">${t('暂不')}</button><button class="primary small" data-nudge="open">${t('打开下载页')}</button></div>`
@@ -197,7 +201,7 @@ export function guideTick(item) {
 export function guideAfterPost(path, body) {
   if (!guideOn()) return;
   if (path === '/api/undo') guideTick('undo');
-  else if (path === '/api/change' && body?.action === 'confirmed' && ['groups', 'group'].includes(state.route.page)) guideTick('group');
+  else if (path === '/api/change' && body?.action === 'confirmed' && pageOf(state.route).tab === 'groups') guideTick('group');
   else if (path === '/api/change' || path === '/api/reassign') guideTick('correct');
   else if (path === '/api/index' && body?.action === 'watch' && body.works?.length) guideTick('follow');
   if (Date.now() - guideLoadedAt > 4000) guideRefresh();
@@ -222,14 +226,14 @@ async function guideWatch(w) {
   try {
     const id = w.id || (await post('/api/works', {action: 'from_tag', tag: w.tag})).id;
     const x = await api('/api/index');
-    state.index = x.watch.works.includes(id) ? x : await post('/api/index', {action: 'watch', works: [...x.watch.works, id], min_posts: x.watch.min_posts});
+    setIndex(x.watch.works.includes(id) ? x : await post('/api/index', {action: 'watch', works: [...x.watch.works, id], min_posts: x.watch.min_posts}));
     toast(t('已关注「{work}」，可以在任务面板里检查它的新角色', {work: guideWorkName(w)}));
   } catch (e) { toast(e.message); }
   await loadGuide(true).catch(e => toast(e.message));
 }
 export async function replayGuide() {
   if (!await guideAction({action: 'reopen'})) return;
-  if (state.route.page === 'settings') go({page: 'home'});
+  if (onPage(state.route, 'settings')) go({page: 'home'});
   await new Promise(done => setTimeout(done, 300));
   showTour(0);
 }
@@ -254,7 +258,6 @@ export function wireGuide() {
     placeTour(true); guideAction({action: 'step', step: TOUR[tourAt]});
   });
   addEventListener('resize', () => { if (tourAt >= 0) requestAnimationFrame(() => placeTour(false)); });
-  document.addEventListener('keydown', e => { if (tourAt >= 0 && e.key === 'Escape') { e.stopImmediatePropagation(); closeTour(); guideAction({action: 'skip'}); } }, true);
 
   $('nudge').addEventListener('click', async e => {
     const act = e.target.closest('[data-nudge]')?.dataset.nudge, key = $('nudge').dataset.key; if (!act || !key) return;

@@ -204,6 +204,15 @@ class MigrationInventoryTest(unittest.TestCase):
         self.assertEqual([], errors)
         self.assertEqual([], current['warnings'])
 
+    def test_styleguide_dev_tool_is_not_production_code(self):
+        # 样式清单页（#318）只在开发时用；它的脚本有正常的 __main__ 入口，也不算生产边界。
+        (self.root / 'tools/styleguide').mkdir(parents=True)
+        (self.root / 'tools/styleguide/census.py').write_text('def main():\n    pass\n\nif __name__ == "__main__":\n    main()\n')
+        self.assertNotIn('tools/styleguide/census.py', [p.relative_to(self.root).as_posix() for p in inventory.source_files(self.root)])
+        errors, current = inventory.check(self.root, self.spec)
+        self.assertEqual([], errors)
+        self.assertEqual([], current['warnings'])
+
     def test_production_tools_sql_and_dynamic_writer_boundaries_remain_visible(self):
         (self.root / 'tools').mkdir()
         (self.root / 'tools/char_scan.py').write_text('def load(c, sql):\n    c.execute(sql)\n')

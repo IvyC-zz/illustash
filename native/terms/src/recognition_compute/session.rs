@@ -100,7 +100,7 @@ impl ModelSession {
                     (session, Backend::Cpu)
                 }
                 Err(cpu) => {
-                    acceleration.abandon(requested);
+                    acceleration.abandon(model, requested);
                     return Err(cpu);
                 }
             },

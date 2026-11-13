@@ -1,6 +1,6 @@
 # 词条核心性能：现状
 
-状态：现行参考（2026-10-02；第 6 节 2026-10-19）。两轮优化都已合入 main；逐任务的过程记录和原始样本已删除，见开源前私有历史中的 `docs/TERMS_PERFORMANCE_TASKS.md`、`docs/TERMS_CHARACTERS_PERFORMANCE.md` 和 `docs/acceptance/terms-*`。没做完的方向在 issue #1。
+状态：现行参考（2026-10-02；第 6 节 2026-10-19；第 2 节 2026-11-12）。两轮优化都已合入 main；逐任务的过程记录和原始样本已删除，见开源前私有历史中的 `docs/TERMS_PERFORMANCE_TASKS.md`、`docs/TERMS_CHARACTERS_PERFORMANCE.md` 和 `docs/acceptance/terms-*`。没做完的方向在 issue #1。
 
 以后 PR 的性能验收统一使用第 5 节固定脚本；第 1 节保留此前同轮优化的历史口径。识别吞吐（扫描到识别、导入完成）用第 6 节的基准（2026-10-19，#213）。
 
@@ -36,16 +36,12 @@
 
 ## 2. 常驻核心进程
 
-角色命令默认走一个常驻的 Rust 子进程，省掉每次命令的进程启动（`tests/reference/web/terms_core.py（#9 已删除）` 的 `character_command`）。
+原生宿主在进程内直接调用核心，角色命令不再经子进程。`illustash-terms serve`（`native/terms/src/service.rs`）保留为父进程私有的逐行 JSON 通道，供测试（`native/terms/tests/baseline.rs`、`tests/test_terms_service.py`）和外部调用方使用：
 
-- Python 进程通过私有 stdin / stdout 管道持有子进程，不开端口。
-- 宿主锁把请求串行化，Store 原来的写锁仍然有效；跨 Python 进程由 SQLite `BEGIN IMMEDIATE` 仲裁。
-- 常驻入口与单次 CLI 共用同一套事务函数：一个命令一个事务，失败整事务回滚，名字同步、历史和后台事件仍在同一事务里。
+- 经私有 stdin / stdout 管道，不开端口；命令顺序执行。
+- 与单次 CLI 共用同一套事务函数（`app_service::character_request`）：一个命令一个事务，失败整事务回滚，名字、历史和后台事件仍在同一事务里；跨进程由 SQLite `BEGIN IMMEDIATE` 仲裁。
 - 每条命令独立打开并关闭 SQLite 连接，空闲时不占连接。
-- 业务拒绝不重启进程；执行中崩溃，下一次调用时重启。
-- 回退：环境变量 `ILLUSTASH_TERMS_DAEMON=0` 改回每次启动单次 CLI。
-
-测试在 `tests/test_terms_service.py`。
+- 业务拒绝不退出；stdin 关闭即退出，崩溃由调用方在下次请求时重启，不自动重放。
 
 ## 3. 其他保留下来的做法
 

@@ -417,7 +417,7 @@ mod tests {
              INSERT INTO labels(uuid,dim,value,conf) VALUES ('not-imported','general','blue_hair',0.9);
              INSERT INTO decisions VALUES ('not-imported','character','alice','album:synthetic pk=1');
              INSERT INTO reference_extra VALUES ('not-copied'); INSERT INTO runs VALUES ('reference-run','character');
-             INSERT INTO characters VALUES ('alice','alice_tag','alice_tag','Example','alice',NULL,'爱丽丝',NULL,'Alice'),('alice_swim','alice_swim_tag','alice_swim_tag','Example','alice','swimsuit',NULL,NULL,'Alice swim'),('doodle_sensei_(blue_archive)','doodle_sensei_(blue_archive)',NULL,'blue_archive',NULL,NULL,NULL,NULL,'Doodle Sensei');
+             INSERT INTO characters VALUES ('alice','alice_tag','alice_tag','Example','alice',NULL,'爱丽丝',NULL,'Alice'),('alice_swim','alice_swim_tag','alice_swim_tag','Example','alice','swimsuit',NULL,NULL,'Alice swim'),('doodle_sensei_(blue_archive)','doodle_sensei_(blue_archive)',NULL,'blue_archive',NULL,NULL,NULL,NULL,'Doodle Sensei'),('carol_(vtuber)','carol_(vtuber)',NULL,'vtuber','carol',NULL,NULL,NULL,'Carol');
              INSERT INTO character_aliases VALUES ('alice','alias alice','index');").unwrap();
             drop(c);
             let dest = root.join("synthetic.pilib");
@@ -559,7 +559,35 @@ mod tests {
             count(&c, "SELECT count(*) FROM sqlite_master WHERE type='trigger' AND name LIKE 'names_version_%'"),
             13
         );
-        assert_eq!(count(&c, "SELECT count(*) FROM term_links WHERE system='ccip'"), 3);
+        assert_eq!(count(&c, "SELECT count(*) FROM term_links WHERE system='ccip'"), 4);
+        // 新图库导入角色时按作品文字建作品（#296）：一个文字一个待核对的作品，挂 qualifier 链接，内置的中文名一并
+        // 写成作品的名字；皮肤跟随角色，自己不挂作品；不是作品的文字（vtuber）不建，角色未归类。
+        let works = |sql: &str| -> Vec<String> {
+            c.prepare(sql).unwrap().query_map([], |r| r.get(0)).unwrap().collect::<rusqlite::Result<_>>().unwrap()
+        };
+        assert_eq!(
+            works(
+                "SELECT x.key FROM term_links x JOIN term_tree r ON r.term_id=x.term_id JOIN terms t ON t.id=x.term_id
+                 WHERE x.system='qualifier' AND x.source='import' AND t.kind='work' AND r.review_status='pending'
+                 ORDER BY x.key"
+            ),
+            ["Example", "blue_archive"]
+        );
+        assert_eq!(
+            works(
+                "SELECT l.key||'→'||coalesce(q.key,'-') FROM term_links l JOIN term_tree r ON r.term_id=l.term_id
+                 LEFT JOIN terms w ON w.key=r.work_id LEFT JOIN term_links q ON q.term_id=w.id AND q.system='qualifier'
+                 WHERE l.system='ccip' ORDER BY l.key"
+            ),
+            ["alice→Example", "alice_swim→-", "carol_(vtuber)→-", "doodle_sensei_(blue_archive)→blue_archive"]
+        );
+        assert_eq!(
+            works(
+                "SELECT n.lang||':'||n.source||':'||n.value FROM term_names n JOIN term_links q ON q.term_id=n.term_id
+                 WHERE q.system='qualifier' AND q.key='blue_archive' AND n.role='display' ORDER BY n.lang"
+            ),
+            ["en:index:Blue Archive", "zh:builtin:蔚蓝档案"]
+        );
         assert_eq!(count(&c, "SELECT count(*) FROM term_tree WHERE parent_id IS NOT NULL AND variant='swimsuit'"), 1);
         assert_eq!(count(&c, "SELECT count(*) FROM term_tree WHERE mascot=1 AND mascot_origin='default'"), 1);
         assert_eq!(count(&c, "SELECT count(*) FROM sqlite_master WHERE name='entities'"), 0);
@@ -588,7 +616,7 @@ mod tests {
         for table in ["assets", "labels", "decisions", "reference_extra"] {
             assert_eq!(count(&src, &format!("SELECT count(*) FROM {table}")), 0);
         }
-        assert_eq!(count(&src, "SELECT count(*) FROM characters"), 3);
+        assert_eq!(count(&src, "SELECT count(*) FROM characters"), 4);
         assert_eq!(count(&src, "SELECT count(*) FROM runs"), 1);
         assert_eq!(count(&src,"SELECT count(*) FROM sqlite_master WHERE type='index' AND name IN ('reference_alias_idx','reference_extra_idx')"),2);
         src.prepare("SELECT source_id,preset FROM assets").unwrap();

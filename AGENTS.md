@@ -79,6 +79,23 @@ Claude Code 通过 `CLAUDE.md` 引入本文件，Codex 等直接读本文件。�
 - Rust 的 lint 约定写在各 Cargo 项目 `Cargo.toml` 的 `[lints]` 和仓库根目录的 `clippy.toml`，由 clippy 检查：每个 unsafe 块和 `unsafe impl` 都写 `// SAFETY:`；生产代码不用 `unwrap`，确实不会失败的地方用 `expect` 写明理由；`tests/` 下的集成测试 crate 在开头写 `allow`。新建 Cargo 项目时照抄这一段 `[lints]`。
 - 构造 `Error::Invalid` 用 `illustash_core::error` 里的 `invalid(…)`（返回 `Result`）或 `Error::invalid(…)`（返回 `Error`），不在各文件另写同样的辅助函数。带固定文案的辅助函数（如 `app_research.rs` 的 `bad()`）不在此列。
 
+### Rust 写法
+
+2026-11-12 用户定：多个代理分头写过，每个文件内部一致、文件之间不一致。以 [Google Rust Style Guide](https://google.github.io/styleguide/rustguide.html) 为参考，不逐条强制。
+
+- **工具优先**：能让工具检查的写成 lint、rustfmt 或测试，不只写成文字。本节每条约定要么有对应检查，要么注明「未检查」；lint 已覆盖的条目从本节删掉，不在两处各写一份。review 里同一种偏差出现第二次，先问能不能用 lint 抓，抓不了再补一行约定。
+- **格式**：各 Cargo 项目用同一份 `rustfmt.toml`（`max_width = 120`、`use_small_heuristics = "Max"`），新建项目照抄 `crates/core/rustfmt.toml`，并把 `cargo fmt --check` 加进 `tools/check_all.sh` 和 `ci.yml`。
+- **照手册办**（未检查，除 `ptr_arg` 外）：参数接受 `&str`、`&[T]`、`Option<&T>`，不接受 `&String`、`&Vec<T>`、`&Option<T>`（clippy 的 `ptr_arg` 默认检查）；能用模式匹配或 `let … else` 就不先判断再 `unwrap`；`collect` 优先写变量类型，少用 turbofish；公开 API 写文档，会 panic 的条件和 unsafe 的前提写进文档注释。
+- **不采用手册的条目**：`use` 里允许嵌套路径（`use a::{b, c::d}`）；行宽用 120，不是 100；Chromium、Fuchsia 专属的条目（不用 async、不起线程、平铺文件、专用测试框架）不适用；「少用 `Rc`/`Arc`」不强制，任务层的 `Arc<Mutex<_>>` 按需使用。
+- **中毒锁**（未检查）：2026-11-12 用户委托代理决定（#314）。默认遇到中毒就 panic，用 `expect` 写明是哪把锁。例外：取消、截止时间、信封边界这类收尾路径（`app_tasks.rs`、`app_imports.rs`）要在 worker panic 之后仍能执行，允许无视中毒；这类取锁统一走一个辅助函数，不在调用处各写 `unwrap_or_else(into_inner)`。
+- **错误类型**（未检查）：同上。core 和 terms 的新代码用 `Error`，不新增 `Result<_, String>`。例外：desktop 的 Tauri 命令边界（要求错误可序列化）和 platform 内部的 OpenBLAS 加载器可以用 `String`，在进入 core、terms 的地方转成 `Error`。存量的 `String` 错误改到时顺手改。
+- **文档覆盖**（未检查）：同上。core 和 platform 新增或改动的 `pub` 项写文档注释，unsafe 的前提写进去；terms 和 desktop 是应用代码，不强制。不开 `missing_docs`，存量缺口太大会变成噪音；clippy 默认的 `missing_safety_doc` 照旧检查。
+- **存量不批量改**：多个会话并行改同一批文件，全仓改写纯风格分歧会造成大量冲突，也会动迁移清单指纹。改到哪个文件，顺手统一那个文件的写法；新写的代码照本节办理。
+
+### 前端结构约定
+
+2026-11-12（#320，总跟踪 #316）：`web/static` 的结构约定由 `tools/check_frontend.py` 机械检查，已接进 `tools/check_all.sh` 和 `ci.yml`，规则写在脚本开头：`core/` 不得导入 `ui/`；`ui/` 不得新增循环导入；`state` 上的字段必须在 `core/state.js` 声明，并且只能由声明里组标题写明的写入者文件赋值（#353）；不得新增 `document`/`window` 级的 `keydown`/`click` 监听（2026-11-12 用户在 #343 批准唯一例外：浮层管理器 `ui/overlay.js`，新浮层向它登记，不另挂监听）和运行时 `createElement('dialog')`；一行不超过 200 字符；`app.css` 里新写的字号、圆角、`gap`/`padding`、`z-index` 和颜色用顶部的令牌（`var(--…)`），没有合适的档位先在 Issue 里问（#349）。存量冻结在 `tools/frontend_baseline.json`（按文件和内容特征登记，不按行号），**基线只能缩小**：违规要改代码，不能往基线里加；改好一处后运行 `python tools/check_frontend.py --shrink` 删掉对应项（`check_all.sh` 带 `--strict-stale`，不收紧会失败；并带 `--base-ref`，基线比与 main 的共同祖先大也会失败，做法见[本地验收](docs/LOCAL_CHECKS.md)）。报错会写明违反了哪条约定、怎么改；方案在 [WEB_V2.md](docs/WEB_V2.md#前端模块2026-10-18199)。
+
 ## 文档维护规范
 
 2026-09-30 做过一次精简（48 篇约 9,900 行 → 26 篇约 4,800 行），删掉的原文在开源前的私有历史中。以下规则是为了不再长回去。

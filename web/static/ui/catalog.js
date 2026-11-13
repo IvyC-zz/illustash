@@ -2,16 +2,18 @@
 // 的内容在 core/catalog.js。
 import {t} from '../core/i18n.js';
 import {esc, number} from '../core/format.js';
+import {implement, onPage} from '../core/pages.js';
 import {prefs} from '../core/prefs.js';
 import {api, session, readError} from '../core/session.js';
 import {state} from '../core/state.js';
 import {nameTip} from '../core/labels.js';
 import {pollIndex, indexAction} from '../core/jobs.js';
 import {remoteNames, remoteNote} from '../core/settings.js';
-import {catalog, recentOf, loadActivity as readActivity, searchCharacters, loadTagged, loadWorkTree, loadLocalLinks, castWorks, PSEUDO_NOTES, BUCKETS, castRows,
+import {catalog, forgetActivity, recentOf, loadActivity as readActivity, searchCharacters, loadTagged, loadWorkTree, loadLocalLinks, castWorks, PSEUDO_NOTES, BUCKETS, castRows,
   WORK_NAMES, workName, loadIndex, searchWorks, shelfRows, saveWatch, watchTarget, saveWork} from '../core/catalog.js';
 import {$, toast, toastMore, error, readFailure, wireFolds, reconcileSections, searchIcon} from './dom.js';
-import {chooseWork} from './dialog.js';
+import {chooseWork, openDialog} from './dialog.js';
+import {createLayer, openModal} from './overlay.js';
 import {combo, openPicker, toggleMascot} from './palette.js';
 import {namesAllowButton} from './settings.js';
 import {charHash, charRoute, go} from '../core/route.js';
@@ -28,10 +30,10 @@ export async function renderIndex() {
   if (state.route.section === 'works') { renderShelf(); return; }
   drawn.clear();
   $('hint').textContent = t('点角色，在图库里只看 TA');
-  cast.list = null; cast.pop = false;
+  cast.list = null; setPop(false, 'silent', false);
   if (state.chars.some(c => c.summary)) {
     try { await refreshMeta(); } catch (e) { error(e.message); return; }
-    if (state.route.page !== 'characters') return;
+    if (!onPage(state.route, 'characters')) return;
   }
   drawCast();
   loadTagged().then(() => drawCast()).catch(e => error(readError(e)));
@@ -40,11 +42,11 @@ export async function renderIndex() {
 }
 // 名字是 Danbooru tag 的自有角色（只拿这些名字去问 Danbooru；没有就不发请求）。
 export async function refreshLocalLinks() {
-  if (await loadLocalLinks() && state.route.page === 'characters') renderHeading();
+  if (await loadLocalLinks() && onPage(state.route, 'characters')) renderHeading();
 }
 export async function loadActivity() {
   let fresh; try { fresh = await readActivity(); } catch (e) { error(readError(e)); return; }
-  if (fresh && state.route.page === 'characters') drawCast();
+  if (fresh && onPage(state.route, 'characters')) drawCast();
 }
 export async function searchIndex() {
   const route = state.route, token = session.token;
@@ -54,7 +56,7 @@ export async function searchIndex() {
   if (route === state.route && token === session.token && q === $('charSearch').value.trim()) { cast.list = list; drawCast(); }
 }
 // 留给元数据变化后刷新页面的调用方。
-export function renderIndexBody() { if (state.route.page !== 'characters') return; if (state.route.section === 'works') drawShelf(); else { drawCast(); loadActivity(); } }
+export function renderIndexBody() { if (!onPage(state.route, 'characters')) return; if (state.route.section === 'works') drawShelf(); else { drawCast(); loadActivity(); } }
 const cover = (c, size = 'thumb') => c?.cover ? `<img src="/image?id=${encodeURIComponent(c.cover)}&size=${size}" alt="" loading="lazy" decoding="async">` : '';
 const avatar = (c, px) => `<i class="cast-av" style="width:${px}px;height:${px}px">${cover(c)}</i>`;
 // ---------- 海报的图片：静止时随机一张，指针下看其他的（#293） ----------
@@ -207,9 +209,18 @@ function castTabs(works) {
   return `<div class="cast-tabs"><div class="cast-tabrow">${tab('all', t('总览'))}${[...(current ? [current] : []), ...top].map(w => tab(w.key, w.name, number(w.images), avatar(w.chars[0], 24))).join('')}${works.filter(w => w.pseudo).map(w => tab(w.key, w.name, number(w.images), '', PSEUDO_NOTES[w.key])).join('')}</div>
     <button class="cast-allw${cast.pop ? ' on' : ''}" id="castAll" aria-expanded="${cast.pop}">${t('全部作品 {n}', {n: number(works.filter(w => !w.pseudo).length)})}<svg viewBox="0 0 20 20" aria-hidden="true"><path d="m6 8 4 4 4-4"/></svg></button>${cast.pop ? castPop(works) : ''}</div>`;
 }
-function castPop(works) {
+// "全部作品"是非模态浮层：Esc、点外关闭由浮层管理器（ui/overlay.js）统一处理。它的元素每次 drawCast 都重画，所以层按 id 找。
+const popLayer = createLayer({kind: 'popover', id: 'cast-works', el: () => $('castPop'), anchor: () => $('castAll'), onDismiss: reason => setPop(false, reason)});
+function setPop(on, reason, redraw = true) {
+  cast.pop = on;
+  if (on) popLayer.open();
+  if (redraw) drawCast();
+  if (!on) popLayer.close(reason);
+}
+// 导出给样式清单页调用（tools/styleguide/live.js，#352）：改名或改参数时，tools/check_styleguide.py 会报出来。
+export function castPop(works) {
   const q = cast.popQ.trim().toLowerCase(), list = works.filter(w => !q || w.name.toLowerCase().includes(q));
-  return `<div class="cast-pop" id="castPop"><div class="search-wrap">${searchIcon()}<input type="search" id="castPopQ" placeholder="${t('在 {n} 部作品里找', {n: number(works.filter(w => !w.pseudo).length)})}" value="${esc(cast.popQ)}" autocomplete="off"></div>
+  return `<div class="menu cast-pop" id="castPop"><div class="search-wrap">${searchIcon()}<input type="search" id="castPopQ" placeholder="${t('在 {n} 部作品里找', {n: number(works.filter(w => !w.pseudo).length)})}" value="${esc(cast.popQ)}" autocomplete="off"></div>
     <div class="cast-wcols">${list.map(w => `<button class="cast-wrow${w.pseudo ? ' pseudo' : ''}" data-tab="${esc(w.key)}"${w.pseudo ? ` title="${esc(PSEUDO_NOTES[w.key])}"` : ''}>${avatar(w.chars[0], 20)}<span>${esc(w.name)}</span><small>${number(w.images)}</small></button>`).join('') || `<p class="muted-note">${t('没有匹配的作品')}</p>`}</div></div>`;
 }
 function castPane(works) {
@@ -242,7 +253,7 @@ function castList() {
     </tbody></table>${rows.length > shown.length ? `<button class="quiet cast-more" id="castMore">${t('再显示 300 位（共 {n} 位）', {n: number(rows.length)})}</button>` : ''}`;
 }
 export function drawCast() {
-  if (state.route.page !== 'characters' || state.route.section) return;
+  if (!onPage(state.route, 'characters') || state.route.section) return;
   const works = castWorks(), root = $('charIndex');
   // 带前缀：单独一个 'shelf' 会套上「作品」页的 .shelf（窄的 flex 列，#274）。
   root.className = 'char-index cast cast-' + cast.mode;
@@ -259,11 +270,10 @@ export function drawCast() {
 // 只当标签（#293）：吉祥物和玩家替身（包括默认的那些）是标签，不是角色。在一处看到全部，把一个角色变成标签，或把它
 // 变回来。
 export async function openTagged() {
-  const d = document.createElement('dialog'); d.className = 'palette profile-dialog tagged-dialog';
-  d.innerHTML = `<form method="dialog"><div class="dialog-top"><h2>${t('只当标签的角色')}</h2><button type="button" class="icon" data-close aria-label="${t('关闭')}">×</button></div>
-    <p class="muted-note">${t('吉祥物、玩家化身（老师、博士、训练员这类）可以只当标签：不算角色，不出现在角色列表里，同框也不算多人图；图上仍挂着这个标签，可以按它筛选。')}</p>
-    <div class="tagged-list" id="taggedList"></div>
-    <div class="dialog-actions"><button type="button" class="quiet" id="taggedAdd">${t('把一个角色设为只当标签…')}</button><div class="spacer"></div><button value="ok" class="primary">${t('完成')}</button></div></form>`;
+  const d = openDialog({title: t('只当标签的角色'), cls: 'tagged-dialog', backdropClose: true,
+    body: `<p class="muted-note">${t('吉祥物、玩家化身（老师、博士、训练员这类）可以只当标签：不算角色，不出现在角色列表里，同框也不算多人图；图上仍挂着这个标签，可以按它筛选。')}</p>
+    <div class="tagged-list" id="taggedList"></div>`,
+    actions: `<button type="button" class="quiet" id="taggedAdd">${t('把一个角色设为只当标签…')}</button><div class="spacer"></div><button value="ok" class="primary">${t('完成')}</button>`});
   const list = () => {
     const rows = state.tagged || [];
     d.querySelector('#taggedList').innerHTML = rows.length ? rows.map(x => `<div class="tagged-row"><a href="${charHash(x.id)}" data-close>${esc(x.name)}</a><small>${t('{n} 张', {n: number(x.count)})}</small><div class="spacer"></div><button type="button" class="quiet small" data-untag="${esc(x.id)}">${t('改回角色')}</button></div>`).join('')
@@ -271,7 +281,6 @@ export async function openTagged() {
   };
   const refresh = async () => { await loadTagged().catch(e => error(readError(e))); if (d.open) list(); drawCast(); };
   d.addEventListener('click', async e => {
-    if (e.target.closest('[data-close]')) { d.close(); return; }
     const b = e.target.closest('[data-untag]'); if (!b) return;
     b.disabled = true;
     const x = state.tagged.find(r => r.id === b.dataset.untag);
@@ -279,9 +288,8 @@ export async function openTagged() {
   });
   d.querySelector('#taggedAdd').onclick = () => openPicker({title: t('把一个角色设为只当标签'), jump: true, exclude: (state.tagged || []).map(x => x.id),
     sentence: e => t('{name} 不再算角色，只当标签', {name: e.name}),
-    pick: async e => { await toggleMascot({id: e.id, name: e.name, mascot: false}); await refresh(); if (!d.open) d.showModal(); }});
-  d.addEventListener('close', () => d.remove());
-  document.body.append(d); list(); d.showModal();
+    pick: async e => { await toggleMascot({id: e.id, name: e.name, mascot: false}); await refresh(); if (!d.open) openModal(d, {backdropClose: true, id: 'tagged'}); }});
+  list();
   refresh();
 }
 
@@ -294,7 +302,7 @@ export async function renderShelf() {
   drawShelf();
   try { await loadIndex(); } catch (e) { if (route === state.route && token === session.token) readFailure($('charIndex'), e); return; }
   if (route !== state.route || token !== session.token) return;
-  if (state.route.page === 'characters' && state.route.section === 'works') { renderHeading(); drawShelf(); }
+  if (onPage(state.route, 'characters') && state.route.section === 'works') { renderHeading(); drawShelf(); }
 }
 // 关注开关需要一个用户核对过的 Danbooru 作品 tag；索引检查按这个 tag 搜索。
 function watchSwitch(w) {
@@ -307,7 +315,7 @@ function workLink(w) {
   return `<span class="shelf-link">${t('未关联 Danbooru')}</span>`;
 }
 export function drawShelf() {
-  if (state.route.page !== 'characters' || state.route.section !== 'works') return;
+  if (!onPage(state.route, 'characters') || state.route.section !== 'works') return;
   const root = $('charIndex'), x = state.index;
   root.className = 'char-index shelf';
   if (!x?.works) { root.innerHTML = `<p class="muted-note shelf-empty">${t('正在读取作品…')}</p>`; return; }
@@ -332,7 +340,7 @@ export function drawShelf() {
   };
   root.innerHTML = `${todo}${found}
     <div class="shelf-bar"><div class="chips-row">${chip('all', t('全部'), x.works.length)}${chip('watched', t('已关注'), watched.size)}${pendingN ? chip('pending', t('链接待确认'), pendingN) : ''}</div><div class="spacer"></div>
-      <span class="watch-add"><input id="watchAdd" value="${esc(watchDraft)}" placeholder="${t('关注 Danbooru 上的作品…')}" spellcheck="false" autocomplete="off" role="combobox" aria-expanded="false" aria-controls="watchMenu"><div id="watchMenu" class="tag-popover watch-menu" role="listbox" hidden></div></span></div>
+      <span class="watch-add"><input id="watchAdd" value="${esc(watchDraft)}" placeholder="${t('关注 Danbooru 上的作品…')}" spellcheck="false" autocomplete="off" role="combobox" aria-expanded="false" aria-controls="watchMenu"><div id="watchMenu" class="menu menu-drop watch-menu" role="listbox" hidden></div></span></div>
     <div class="shelf-list">${shown.map(row).join('') || `<p class="muted-note shelf-empty">${x.works.length ? t('没有符合条件的作品') : t('还没有作品。给角色填写所属作品，或点右上角「新建作品」。')}</p>`}</div>`;
   wireWatchAdd(x, adoptWatch); wireFolds(root);
 }
@@ -371,13 +379,12 @@ export async function createWork() {
 }
 // 新建作品和编辑作品共用一个对话框：一个填 tag（名字为空时也填名字）的 Danbooru 搜索、名字、用户核对过的 tag、可选的
 // 上级作品，以及（有 tag 时）关注它的新角色（#293）。
-function workDialog(w, {watch = false} = {}) {
+// 导出给样式清单页调用（tools/styleguide/live.js，#352）：改名或改参数时，tools/check_styleguide.py 会报出来。
+export function workDialog(w, {watch = false} = {}) {
   const works = state.index?.works || [], watched = new Set(state.index?.watch?.works || []);
   return new Promise(resolve => {
-    const d = document.createElement('dialog'); d.className = 'palette profile-dialog work-dialog';
     const parents = works.filter(x => !w || x.id !== w.id);
-    d.innerHTML = `<form method="dialog"><div class="dialog-top"><h2>${w ? t('编辑作品') : t('新建作品')}</h2><button type="button" class="icon" data-close aria-label="${t('关闭')}">×</button></div>
-      ${watch && !w?.tag ? `<p class="dialog-lead">${t('关注要按 Danbooru 上的作品 tag 检查。先在下面找到这部作品，选中后保存就会关注。')}</p>` : ''}
+    const body = `${watch && !w?.tag ? `<p class="dialog-lead">${t('关注要按 Danbooru 上的作品 tag 检查。先在下面找到这部作品，选中后保存就会关注。')}</p>` : ''}
       <label class="field"><span>${t('在 Danbooru 上找')}</span><div class="combo"><input id="wdFind" autocomplete="off" spellcheck="false" placeholder="${t('输入作品名，中文、日文、英文都行')}"><div class="combo-menu" id="wdFindMenu" hidden></div></div>
         <small>${t('选中后自动填好下面的 tag，名称空着时也一起填上。只发送你输入的文字。')}</small></label>
       <label class="field"><span>${t('名称')}</span><input id="wdName" name="title" value="${esc(w?.name || '')}" maxlength="120" required autocomplete="off">
@@ -386,8 +393,22 @@ function workDialog(w, {watch = false} = {}) {
         <small id="wdTagNote"></small></label>
       <label class="field"><span>${t('上级作品')}<em class="opt">${t('可不填')}</em></span><select id="wdParent" name="parent"><option value="">${t('无')}</option>${parents.map(x => `<option value="${esc(x.id)}" ${w?.parent_id === x.id ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}</select>
         <small>${t('只在这部作品属于某个系列时填，比如「Fate/Grand Order」的上级是「Fate 系列」。在图库里按上级作品筛选时，下级作品的图也算在内。')}</small></label>
-      <label class="check-row" id="wdWatchRow"><input type="checkbox" id="wdWatch"><span><b>${t('关注这部作品的新角色')}</b><small>${t('定期检查 Danbooru 上这部作品还没收录的角色（只发送作品名），检查前会确认联网')}</small></span></label>
-      <div class="dialog-actions"><button type="button" class="quiet" data-close>${t('取消')}</button><button value="ok" class="primary">${w ? t('保存') : t('新建')}</button></div></form>`;
+      <label class="check-row" id="wdWatchRow"><input type="checkbox" id="wdWatch"><span><b>${t('关注这部作品的新角色')}</b><small>${t('定期检查 Danbooru 上这部作品还没收录的角色（只发送作品名），检查前会确认联网')}</small></span></label>`;
+    const d = openDialog({title: w ? t('编辑作品') : t('新建作品'), cls: 'work-dialog', body, backdropClose: false, focus: w && !watch ? '#wdName' : '#wdFind',
+      actions: `<button type="button" class="quiet" data-close>${t('取消')}</button><button value="ok" class="primary">${w ? t('保存') : t('新建')}</button>`,
+      onClose: async d => {
+        const data = new FormData(d.querySelector('form')), ok = d.returnValue === 'ok', watch = d.querySelector('#wdWatch').checked;
+        if (!ok) { resolve(null); return; }
+        const name = String(data.get('title')).trim(), parent = data.get('parent'), tag = String(data.get('tag')).trim();
+        try {
+          const id = await saveWork(w?.id, {name, parent, tag});
+          if (watch && tag && !state.index.watch.works.includes(id)) await saveWatch([...state.index.watch.works, id]);
+          await loadWorkTree().catch(e => error(readError(e)));
+          await refreshMeta().catch(e => error(readError(e)));
+          renderIndexBody(); renderHeading();
+          resolve({id, name, watch});
+        } catch (err) { toast(err.message); resolve(null); }
+      }});
     const q = sel => d.querySelector(sel), already = w && watched.has(w.id);
     let filled = '';  // 搜索填进来的名字，下一次挑选会替换它
     const tagNote = () => {
@@ -414,33 +435,23 @@ function workDialog(w, {watch = false} = {}) {
       tagNote(); q('#wdFind').value = '';
       if (!already && (!w || watch)) q('#wdWatch').checked = true;
     });
-    for (const b of d.querySelectorAll('[data-close]')) b.onclick = () => d.close();
-    d.onclose = async () => {
-      const data = new FormData(q('form')), ok = d.returnValue === 'ok', watch = q('#wdWatch').checked; d.remove();
-      if (!ok) { resolve(null); return; }
-      const name = String(data.get('title')).trim(), parent = data.get('parent'), tag = String(data.get('tag')).trim();
-      try {
-        const id = await saveWork(w?.id, {name, parent, tag});
-        if (watch && tag && !state.index.watch.works.includes(id)) await saveWatch([...state.index.watch.works, id]);
-        await loadWorkTree().catch(e => error(readError(e)));
-        await refreshMeta().catch(e => error(readError(e)));
-        renderIndexBody(); renderHeading();
-        resolve({id, name, watch});
-      } catch (err) { toast(err.message); resolve(null); }
-    };
-    document.body.append(d); d.showModal(); (w && !watch ? q('#wdName') : q('#wdFind')).focus();
   });
 }
 // 上次索引检查在 Danbooru 上为关注的作品找到的角色；添加一个会下载约 20 张公开参考图。
 export function openIndexAdd(tag = '') {
   const token = session.token, x = state.index, list = (x?.check?.missing || []).filter(r => !tag || r.copyright === tag);
   if (!list.length) return;
-  const d = document.createElement('dialog'); d.className = 'palette profile-dialog index-add';
-  d.innerHTML = `<form method="dialog"><div class="dialog-top"><h2>${t('添加新角色')}</h2><button type="button" class="icon" data-close aria-label="${t('关闭')}">×</button></div>
-    <p class="muted-note">${t('这些角色在 Danbooru 上有、本地索引还没有。添加时每个角色下载约 20 张公开参考图（约 {mb} MB），在本机算好特征后重新扫描图库。点 tag 可以先去 Danbooru 看看。', {mb: x.mb_per_character})}</p>
+  const body = `<p class="muted-note">${t('这些角色在 Danbooru 上有、本地索引还没有。添加时每个角色下载约 20 张公开参考图（约 {mb} MB），在本机算好特征后重新扫描图库。点 tag 可以先去 Danbooru 看看。', {mb: x.mb_per_character})}</p>
     <div class="index-add-list"><table class="settings-table index-table"><tr><th><input type="checkbox" id="iaAll" aria-label="${t('全选')}" checked></th><th>${t('角色 tag')}</th><th>${t('作品')}</th><th>${t('D 站图数')}</th></tr>
-      ${list.map(r => `<tr><td><input type="checkbox" data-pick="${esc(r.short_tag)}" ${indexSkip.has(r.short_tag) ? '' : 'checked'}></td><td><a class="link" href="https://danbooru.donmai.us/posts?tags=${encodeURIComponent(r.tag)}" target="_blank" rel="noreferrer noopener">${esc(r.tag)}</a></td><td>${esc(x.works.find(w => w.tag === r.copyright)?.name || workName(r.copyright))}</td><td>${number(r.post_count)}</td></tr>`).join('')}</table></div>
-    <div class="dialog-actions"><span class="muted-note" id="iaNote"></span><div class="spacer"></div><button value="cancel" class="quiet">${t('取消')}</button><button value="ok" class="primary" id="iaApply"></button></div></form>`;
+      ${list.map(r => `<tr><td><input type="checkbox" data-pick="${esc(r.short_tag)}" ${indexSkip.has(r.short_tag) ? '' : 'checked'}></td><td><a class="link" href="https://danbooru.donmai.us/posts?tags=${encodeURIComponent(r.tag)}" target="_blank" rel="noreferrer noopener">${esc(r.tag)}</a></td><td>${esc(x.works.find(w => w.tag === r.copyright)?.name || workName(r.copyright))}</td><td>${number(r.post_count)}</td></tr>`).join('')}</table></div>`;
+  const d = openDialog({title: t('添加新角色'), cls: 'index-add', body, backdropClose: false,
+    actions: `<span class="muted-note" id="iaNote"></span><div class="spacer"></div><button value="cancel" class="quiet">${t('取消')}</button><button value="ok" class="primary" id="iaApply"></button>`,
+    onClose: async d => {
+      const tags = picks().filter(b => b.checked).map(b => b.dataset.pick), ok = d.returnValue === 'ok';
+      if (!ok || !tags.length || token !== session.token) return;
+      try { await indexAction({action: 'apply', tags, allow_network: true}); toast(t('开始添加 {n} 个角色，进度在任务面板里', {n: number(tags.length)})); pollIndex(); renderIndexBody(); }
+      catch (e) { toast(e.message); }
+    }});
   const q = s => d.querySelector(s), picks = () => [...d.querySelectorAll('[data-pick]')];
   const note = () => {
     const n = picks().filter(b => b.checked).length, mb = n * x.mb_per_character;
@@ -450,14 +461,7 @@ export function openIndexAdd(tag = '') {
   };
   for (const b of picks()) b.onchange = note;
   q('#iaAll').onchange = e => { for (const b of picks()) b.checked = e.target.checked; note(); };
-  q('[data-close]').onclick = () => d.close();
-  d.onclose = async () => {
-    const tags = picks().filter(b => b.checked).map(b => b.dataset.pick), ok = d.returnValue === 'ok'; d.remove();
-    if (!ok || !tags.length || token !== session.token) return;
-    try { await indexAction({action: 'apply', tags, allow_network: true}); toast(t('开始添加 {n} 个角色，进度在任务面板里', {n: number(tags.length)})); pollIndex(); renderIndexBody(); }
-    catch (e) { toast(e.message); }
-  };
-  document.body.append(d); note(); d.showModal();
+  note();
 }
 
 // ---------- 关注作品：作品树下面的选择器 ----------
@@ -467,14 +471,17 @@ let indexSkip = new Set(), watchDraft = '';
 export function wireWatchAdd(x, add) {
   const token = session.token, input = $('watchAdd'), menu = $('watchMenu'), watched = new Set(x.watch.works);
   let list = [], index = 0, gen = 0, localTimer = 0, remoteTimer = 0;
-  const row = (r, i) => `<button class="picker-item watch-option${i === index ? ' on' : ''}" data-i="${i}" role="option" ${watched.has(r.id) || (r.id && !r.watchable) ? 'disabled' : ''}>
+  // 联想菜单是非模态浮层：Esc 只关菜单（由浮层管理器 ui/overlay.js 处理）。
+  const layer = createLayer({kind: 'popover', id: 'watch-menu', el: menu, anchor: input, onDismiss: reason => { show(false, reason); input.setAttribute('aria-expanded', 'false'); }});
+  const show = (on, reason) => { menu.hidden = !on; if (on) layer.open(); else layer.close(reason); };
+  const row = (r, i) => `<button class="menu-item watch-option${i === index ? ' on' : ''}" data-i="${i}" role="option" ${watched.has(r.id) || (r.id && !r.watchable) ? 'disabled' : ''}>
     <span class="watch-name">${esc(r.name || workName(r.tag))}</span><small>${esc(r.tag || t('D 站上还没有这个作品'))}</small>
     <em>${watched.has(r.id) ? t('已关注') : [r.count ? t('你有 {n} 张', {n: number(r.count)}) : '', r.posts ? t('D 站 {n}', {n: number(r.posts)}) : ''].filter(Boolean).join(' · ')}</em></button>`;
   const render = (sections, note = '') => {
     list = sections.flatMap(sec => sec.items); index = Math.max(0, list.findIndex(r => !watched.has(r.id)));
     let i = 0;
     menu.innerHTML = sections.filter(sec => sec.items.length).map(sec => `<div class="palette-label">${sec.label}</div>` + sec.items.map(r => row(r, i++)).join('')).join('') + (note ? `<p class="muted-note watch-note">${note}</p>` : '');
-    menu.hidden = !menu.innerHTML; input.setAttribute('aria-expanded', String(!menu.hidden));
+    show(!!menu.innerHTML); input.setAttribute('aria-expanded', String(!menu.hidden));
   };
   const highlight = () => { for (const b of menu.querySelectorAll('[data-i]')) b.classList.toggle('on', Number(b.dataset.i) === index); menu.querySelector('.on')?.scrollIntoView({block: 'nearest'}); };
   const search = async () => {
@@ -496,14 +503,13 @@ export function wireWatchAdd(x, add) {
         remote === null ? (result.unauthorized ? esc(remoteNote(result)) + ' ' + namesAllowButton : esc(t('{reason}，可以稍后再试', {reason: remoteNote(result)}))) : !mine.length && !others.length ? t('没有找到这个作品。可以换个写法，比如英文或日文名') : '');
     }, 450);
   };
-  const pick = i => { const r = list[i]; if (!r || watched.has(r.id) || (r.id && !r.watchable)) return; menu.hidden = true; add(r); };
+  const pick = i => { const r = list[i]; if (!r || watched.has(r.id) || (r.id && !r.watchable)) return; show(false); add(r); };
   input.onfocus = () => { clearTimeout(localTimer); search(); };
   input.oninput = e => { watchDraft = e.target.value; clearTimeout(localTimer); localTimer = setTimeout(search, 150); };
-  input.onblur = () => setTimeout(() => { menu.hidden = true; input.setAttribute('aria-expanded', 'false'); }, 150);
+  input.onblur = () => setTimeout(() => { show(false, 'outside'); input.setAttribute('aria-expanded', 'false'); }, 150);
   input.onkeydown = e => {
     if (e.isComposing) return;
     if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); if (list.length) { index = (index + (e.key === 'ArrowDown' ? 1 : -1) + list.length) % list.length; highlight(); } }
-    else if (e.key === 'Escape') { menu.hidden = true; }
     else if (e.key === 'Enter') {
       e.preventDefault();
       if (!menu.hidden && list[index] && !watched.has(list[index].id)) pick(index);
@@ -526,13 +532,12 @@ export function wireCatalog() {
   for (const kind of ['pointerup', 'pointercancel']) $('charIndex').addEventListener(kind, lookLift);
   $('charIndex').addEventListener('click', e => { const a = e.target.closest?.('.cast-poster.look'); if (a?.dragged && performance.now() - a.dragged < 500) { e.preventDefault(); e.stopPropagation(); } }, true);
   $('charIndex').addEventListener('click', e => {
-    if (state.route.page !== 'characters') return;
+    if (!onPage(state.route, 'characters')) return;
     const hit = e.target;
     if (hit.closest('[data-tagged-manage]')) { openTagged(); return; }
     const tab = hit.closest('[data-tab]');
-    if (tab) { cast.tab = tab.dataset.tab; cast.pop = false; cast.popQ = ''; drawCast(); $('viewport').scrollTop = 0; $('charIndex').querySelector('.cast-tab.on')?.scrollIntoView({inline: 'center', block: 'nearest'}); return; }
-    if (hit.closest('#castAll')) { cast.pop = !cast.pop; drawCast(); return; }
-    if (cast.pop && !hit.closest('#castPop')) { cast.pop = false; drawCast(); return; }
+    if (tab) { cast.tab = tab.dataset.tab; cast.popQ = ''; setPop(false, 'silent', false); drawCast(); $('viewport').scrollTop = 0; $('charIndex').querySelector('.cast-tab.on')?.scrollIntoView({inline: 'center', block: 'nearest'}); return; }
+    if (hit.closest('#castAll')) { setPop(!cast.pop); return; }
     const lib = hit.closest('[data-work-lib]'); if (lib) { go({page: 'library', work: lib.dataset.workLib}); return; }
     const s = hit.closest('[data-sort]');
     if (s) { const k = s.dataset.sort; cast.dir = cast.sort === k ? -cast.dir : (k === 'name' || k === 'work' ? 1 : -1); cast.sort = k; drawCast(); return; }
@@ -541,9 +546,8 @@ export function wireCatalog() {
     const row = hit.closest('tr[data-char]'); if (row) go(charRoute(row.dataset.char));
   });
   $('charIndex').addEventListener('input', e => { if (e.target.id === 'castPopQ') { cast.popQ = e.target.value; const pos = e.target.selectionStart; drawCast(); const i = $('castPopQ'); i?.setSelectionRange(pos, pos); } });
-  document.addEventListener('keydown', e => { if (e.key === 'Escape' && cast.pop && state.route.page === 'characters') { cast.pop = false; drawCast(); } });
   $('charIndex').addEventListener('click', async e => {
-    if (state.route.page !== 'characters') return;
+    if (!onPage(state.route, 'characters')) return;
     const hit = e.target, works = state.index?.works || [];
     const f = hit.closest('[data-shelf-filter]'); if (f) { shelf.filter = f.dataset.shelfFilter; drawShelf(); return; }
     const open = hit.closest('[data-shelf-open]'); if (open) { cast.tab = open.dataset.shelfOpen; go({page: 'characters'}); return; }
@@ -557,3 +561,6 @@ export function wireCatalog() {
     saveWatchList(b.checked ? [...list, id] : list);
   });
 }
+
+// 资料库登记：渲染入口；切换 R18 之后只重新读收藏动态（目录由元数据读取重画）。
+implement({characters: {render: () => renderIndex(), refresh: why => { if (why === 'nsfw') { forgetActivity(); readActivity(); } }}});
