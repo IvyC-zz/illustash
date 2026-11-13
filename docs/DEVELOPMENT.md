@@ -46,7 +46,7 @@ cargo build --release --manifest-path native/terms/Cargo.toml
 | `--backup` | 用 SQLite backup API 备份后退出，允许服务仍在运行 |
 | `--upgrade` | 先备份，再在一个事务里迁移；与 `--backup` 互斥，普通启动不升级 |
 | `--no-sync` / `--no-auto-sync` | 禁用本次会话的同步 / 只关闭自动同步，手动同步仍可用 |
-| `--sync-limit N` | 每轮同步中待识别图片数上限，0 不限；不限制来源扫描 |
+| `--sync-limit N` | 每轮同步最多识别 N 张，取最近保存的 N 张（[识别顺序](ARCHITECTURE_DIRECTION.md#原生来源同步与应用刷新)），0 不限；不限制来源扫描 |
 | `--no-names` / `--names-network` | 关闭名字同步 / 本次进程允许名称文字查询联网（图库也可在界面上持久授权） |
 | `--no-provenance` / `--allow-provenance-network` | 不跑溯源任务 / 允许溯源联网 |
 | `--no-index-check` / `--index-check` | 关闭 / 打开开库时的角色索引检查（默认自动） |

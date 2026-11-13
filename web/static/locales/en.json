@@ -734,6 +734,7 @@
   "正在加载识别模型（共 {n} 张）…": "Loading recognition models ({n} pictures)…",
   "{n} 张无法识别": "{n} could not be recognized",
   "约 {n} 分钟": "about {n} min",
+  "约 {n} 小时": "about {n} h",
   "已导入 {n}": "{n} imported",
   "正在识别新图片 {done}/{total}": "Recognizing new pictures {done}/{total}",
   "{n} 处暂时读不到，已有图片保留不动": "{n} places unreadable for now; their pictures are kept",

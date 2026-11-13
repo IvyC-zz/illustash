@@ -27,6 +27,11 @@ export const PHOTOS_PRIVACY = 'x-apple.systempreferences:com.apple.preference.se
 export const photosHelp = () => t('没有访问照片图库的权限。到「系统设置 › 隐私与安全性 › 照片」里打开 Illustash，退出并重新打开后再同步。');
 export const syncBar = (s, bar) => s.status === 'recognising' && s.stage !== 'preparing' ? bar(s.done, s.total)
   : s.status === 'importing' && s.import_total ? bar(s.import_done, s.import_total) : '';
+// 预计剩余时间（#360）：新图库第一次识别要十几个小时，满两小时起按小时说；不到两小时按整小时说太粗，仍按分钟。
+function remaining(ms) {
+  const minutes = Math.max(1, Math.round(ms / 60000));
+  return minutes < 120 ? t('约 {n} 分钟', {n: minutes}) : t('约 {n} 小时', {n: Math.round(minutes / 60)});
+}
 // 识别和导入分开计数：done/total 是已识别或已放弃的图片，import_done/import_total 是已识别并写进图库的。
 export function syncLine(s) {
   if (s.status === 'scanning') return s.scan_total == null ? t('正在检查来源…') : t('正在检查文件 {done}/{total}', {done: number(s.scanned || 0), total: number(s.scan_total)});
@@ -38,7 +43,7 @@ export function syncLine(s) {
   if (s.status === 'recognising') {
     if (s.stage === 'preparing') return t('正在加载识别模型（共 {n} 张）…', {n: number(s.total || 0)});
     const failed = s.failed ? ' · ' + t('{n} 张无法识别', {n: number(s.failed)}) : '';
-    const left = s.ms_per_image && s.total > s.done ? ' · ' + t('约 {n} 分钟', {n: Math.max(1, Math.round((s.total - s.done) * s.ms_per_image / 60000))}) : '';
+    const left = s.ms_per_image && s.total > s.done ? ' · ' + remaining((s.total - s.done) * s.ms_per_image) : '';
     const imported = s.import_done ? ' · ' + t('已导入 {n}', {n: number(s.import_done)}) : '';
     return t('正在识别新图片 {done}/{total}', {done: number(s.done || 0), total: number(s.total || 0)}) + failed + imported + left;
   }
