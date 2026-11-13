@@ -3,8 +3,8 @@
 import {t, tb} from '../core/i18n.js';
 import {esc, bytes, number} from '../core/format.js';
 import {state} from '../core/state.js';
-import {SYNC_ACTIVE, INDEX_ACTIVE, startSync, pollSync} from '../core/jobs.js';
-import {loadModels, modelsPost, modelsWaiting, modelsFinished, modelsArrived, onModels, saveAcceleration} from '../core/models.js';
+import {SYNC_ACTIVE, INDEX_ACTIVE, startSync, pollSync, onJob} from '../core/jobs.js';
+import {loadModels, modelsPost, modelsWaiting, modelsFinished, modelsArrived, onModels, saveAcceleration, fallbacks} from '../core/models.js';
 import {$, toast} from './dom.js';
 import {confirmAction} from './dialog.js';
 
@@ -33,8 +33,7 @@ export function modelsBar(m = state.models) {
 // 自带模型的安装，模型在 App 包里，不往里写。
 const extra = m => {
   if (m?.status !== 'ready' || !m.on_demand) return '';
-  const a = m.acceleration;
-  return m.optional_missing ? 'download' : a?.on && a.backend === 'coreml' && a.last?.wd?.reason ? 'repair' : '';
+  return m.optional_missing ? 'download' : m.acceleration?.backend === 'coreml' && fallbacks(m).wd ? 'repair' : '';
 };
 // 当前状态下的按钮；`compact` 省掉不常用的那些（任务面板）。
 export function modelsActions(m = state.models, compact = false) {
@@ -86,10 +85,23 @@ export function accelerationLine(m = state.models) {
   const hint = a.backend === 'coreml'
     ? t('用 Core ML 加速标签与角色特征计算。首次需要准备编译缓存；加速不可用时自动用 CPU。')
     : t('用显卡计算，识别更快，角色判定和只用 CPU 时一致。');
-  const fell = Object.values(a.last || {}).find(r => a.on && r?.reason);
+  const fell = Object.values(fallbacks(m))[0];
   return `<label class="switch-line"><span><b>${t('使用 GPU 加速识别')}</b><small>${hint} ${t('关掉就全部用 CPU。')} · ${t('下次识别时生效')}</small>${fell ? `<em>${esc(t('上次没能用上加速，已改用 CPU：{reason}', {reason: fell.reason}))}</em>` : ''}</span><input type="checkbox" class="switch" data-acceleration ${a.on ? 'checked' : ''}></label>`;
 }
 
+// 下载或导入刚结束时提示的一句（#375），没什么要说时为空。模型刚到（`arrived`）时说开始识别；首次下载在同一个任务里
+// 接着下 WD 加速文件，它没下成时并进同一句（提示条只有一个，后一条会盖掉前一条）。没下成的是可选文件时写「WD 加速文件」。
+export function finishedNote(job, arrived, m = state.models) {
+  const optional = !!job.failed_file && !!m?.files?.find(f => f.path === job.failed_file)?.optional;
+  const failure = job.status !== 'failed' ? ''
+    : optional ? t('WD 加速文件没能下载，WD 暂用 CPU。')
+    : job.failed_file ? t('{path} 没能下载，每个来源都试过了', {path: job.failed_file})
+    : t('下载没有完成：{reason}', {reason: tb(job.message || '')});
+  if (arrived) return optional ? t('识别模型已就位，开始识别；WD 加速文件没能下载，WD 暂用 CPU。')
+    : failure ? t('识别模型已就位，开始识别。{problem}', {problem: failure}) : t('识别模型已就位，开始识别');
+  if (failure) return failure;
+  return job.status === 'done' && job.kind === 'import' && m?.status !== 'ready' ? t('还缺 {n} 个文件', {n: m.missing.length}) : '';
+}
 // 镜像说明：本平台清单里有可选的 WD 加速文件时（Apple 芯片的 macOS），说明它从哪里下载。
 const mirrorNote = m => {
   const hf = {hf: 'https://huggingface.co'};
@@ -155,14 +167,12 @@ export function wireModels() {
   onModels((before, start) => {
     renderModels();
     const job = modelsFinished(before); if (!job) return;
-    if (modelsArrived(before, start)) {
-      // 图库里已有的图片等的就是这个：现在就识别它们。
-      toast(t('识别模型已就位，开始识别'));
-      if (!SYNC_ACTIVE.includes(state.sync?.status) && state.sync?.status !== 'off') startSync().then(pollSync).catch(e => toast(e.message));
-    } else if (job.status === 'done' && job.kind === 'import' && state.models.status !== 'ready') {
-      toast(t('还缺 {n} 个文件', {n: state.models.missing.length}));
-    }
-    if (job.status === 'failed') toast(job.failed_file ? t('{path} 没能下载，每个来源都试过了', {path: job.failed_file}) : t('下载没有完成：{reason}', {reason: tb(job.message || '')}));
+    const arrived = modelsArrived(before, start), note = finishedNote(job, arrived);
+    if (note) toast(note);
+    // 图库里已有的图片等的就是这个：现在就识别它们。
+    if (arrived && !SYNC_ACTIVE.includes(state.sync?.status) && state.sync?.status !== 'off') startSync().then(pollSync).catch(e => toast(e.message));
   });
+  // 一次同步结束：重新读取模型状态，卡片上的加速回退原因跟着最近一次识别变，不用等打开任务面板。
+  onJob((job, change) => { if (job === 'sync' && change.ended) loadModels().catch(() => {}); });
   loadModels().catch(() => {});
 }

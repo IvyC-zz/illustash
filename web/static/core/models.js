@@ -7,11 +7,12 @@ import {listeners} from './events.js';
 const changed = listeners();
 export const onModels = changed.on;
 
-let timer = 0, reading = null, started = null;
+let timer = 0, reading = null, started = null, settled = null;
 const adopt = async value => {
   const before = state.models, start = started;
   state.models = value;
   started = readyWhenStarted(before, value, start);
+  settled = settledWd(before, value, settled);
   // 下载或导入进行期间，每秒读一次进度；它自己会结束。
   clearTimeout(timer);
   if (value?.job?.status === 'running') timer = setTimeout(() => loadModels().catch(() => {}), 1000);
@@ -44,3 +45,19 @@ export const readyWhenStarted = (before, after, known) =>
 // 加速文件，所以看的是任务开始时（`start`），不是结束前一刻；加速文件成功、失败还是取消都算。模型本来就在、只补或修
 // 加速文件或导入的，不算。
 export const modelsArrived = (before, start, after = state.models) => !!modelsFinished(before, after) && start !== true && after?.status === 'ready';
+// 装好 WD 加速文件之前留下的那条 WD 回退记录（#375）的 `at`：任务没失败、结束时不再缺可选文件，并且下载完成或导入接收了
+// 可选文件。否则沿用 `known`。之后读到的 `last.wd.at` 还是它，就是旧记录；下一次识别写入新的 `at` 后恢复正常判断。
+// 只记在这个页面里：装好之后、下一次识别之前重开页面或 App，旧记录会再显示一次。
+export function settledWd(before, after, known) {
+  const job = modelsFinished(before, after);
+  if (!job || job.status !== 'done' || after.optional_missing) return known;
+  const optional = new Set((after.files || []).filter(f => f.optional).map(f => f.path));
+  const placed = job.kind === 'download' || (job.results || []).some(r => r.result === 'accepted' && optional.has(r.path));
+  return placed ? after.acceleration?.last?.wd?.at ?? known : known;
+}
+// 上次识别里还算数的回退记录，按模型（#375）：开着加速、写了原因，WD 那条不是装好加速文件之前留下的（`stale`）。
+export function liveFallbacks(m, stale) {
+  const a = m?.acceleration; if (!a?.on) return {};
+  return Object.fromEntries(Object.entries(a.last || {}).filter(([k, r]) => r?.reason && !(k === 'wd' && stale != null && r.at === stale)));
+}
+export const fallbacks = (m = state.models) => liveFallbacks(m, settled);
