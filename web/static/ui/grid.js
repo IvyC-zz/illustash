@@ -1,13 +1,14 @@
 // 图片网格（桌面布局，#199）：分页加载图片、虚拟网格和它的缩放、选择、选择栏的操作、键盘快捷键、视图选项和 R18
 // 筛选。
-import {forgetActivity, loadActivity} from '../core/catalog.js';
 import {edits, setLatest, undoLatest, undoneText} from '../core/edits.js';
-import {esc, isMac, number, shortcut} from '../core/format.js';
+import {esc, number, platformText, shortcut} from '../core/format.js';
 import {t, tb} from '../core/i18n.js';
 import {REASONS, nameWithWork} from '../core/labels.js';
 import {metaSoon, refreshMeta} from '../core/meta.js';
 import {prefs} from '../core/prefs.js';
-import {LEAD_PAGES, browsing, cleanup, defaultSort, panelPage} from '../core/route.js';
+import {SHORTCUTS, currentSource, keyAction, keySelection, modes, selectionSize, shownUuid, viewerTarget} from '../core/modes.js';
+import {keyScope, pageOf, viewOf} from '../core/pages.js';
+import {browsing, cleanup, defaultSort} from '../core/route.js';
 import {api, post, readError} from '../core/session.js';
 import {state} from '../core/state.js';
 import {offerWatch} from './catalog.js';
@@ -15,9 +16,8 @@ import {$, error, toast} from './dom.js';
 import {renderChrome, renderHeading} from './shell.js';
 import {findArtists} from './artists.js';
 import {answerAsk, closeInspector, closeViewer, ensureVisible, indexOf, inspect, openViewer, pickAlternative, showViewer, singleAction, step, zoomView} from './detail.js';
-import {drawHome, renderHome} from './home.js';
 import {jumpToCharacter, markOc, newIds, openPicker, openRelate, targets} from './palette.js';
-import {renderArtistAudit, renderGroups, renderIdentity, renderSimilar} from './review.js';
+import {createLayer} from './overlay.js';
 
 // ---------- 加载图片 ----------
 // 缩放是一个连续的目标列宽；网格对齐到整列，并在两者之间做动画。
@@ -29,16 +29,10 @@ export const PAGE = 100;
 let abortList, pageTimer;
 export function filters() {
   const r = state.route, sort = r.sort || defaultSort(r), f = {order: sort === 'suspicious' && r.char && state.char?.mascot ? 'newest' : sort};   // 标签页没有「可疑优先」
-  if (r.page === 'library') { if (r.day) f.day = r.day; if (r.work) f.work = r.work; if (r.artist) f.artist = r.artist; if (r.q) f.q = r.q; if (r.tag) f.tag = r.tag; if (r.utag) f.utag = r.utag; }
+  const page = pageOf(r);   // 每页的 pool 和其余查询参数由页面登记（core/pages.js）；图库的筛选在 params 里
+  if (!page.pool) Object.assign(f, page.params?.(r));
   if (r.char) { f.entity = r.char; if (r.maybe) f.status = 'maybe'; else if (r.doubt) f.status = 'ambiguous'; else { if (r.variant) f.variant = r.variant; if (r.check) f.status = 'machine'; } }
-  if (r.page === 'unmatched' || r.page === 'skipped') f.pool = r.page;
-  if (r.page === 'duplicates') { f.pool = 'duplicates'; if (r.dup) f.dup = r.dup; }
-  if (r.page === 'excluded') { f.pool = 'excluded'; if (r.reason) f.reason = r.reason; }
-  if (r.page === 'pending') f.pool = 'pending';
-  if (r.page === 'recent') f.pool = 'recent';
-  if (r.page === 'audit') f.pool = 'audit';
-  if (r.page === 'group') { f.pool = 'cluster'; f.cluster = r.id; }
-  if (r.page === 'sgroup') { f.pool = 'similar'; f.cluster = r.id; }
+  if (page.pool) { f.pool = page.pool; Object.assign(f, page.params?.(r)); }
   if (state.nsfw) f.nsfw = state.nsfw;
   return f;
 }
@@ -50,7 +44,7 @@ function visibleOffsets() {
 }
 // 先取可见的几页，再一步换入数据：编辑之后不会闪出骨架。
 export async function reload(reset = false) {
-  if (panelPage(state.route.page)) return;
+  if (pageOf(state.route).panel) return;
   const epoch = state.readEpoch, route = state.route;
   const gen = ++state.generation; abortList?.abort(); abortList = new AbortController(); state.pending.clear();
   $('charIndex').hidden = true; $('settingsPage').hidden = true; $('groupsPage').hidden = true; $('grid').hidden = false; error('');
@@ -65,12 +59,15 @@ export async function reload(reset = false) {
     pages.forEach((p, i) => { p.items.forEach((item, j) => { if (offsets[i] + j < state.total) state.items[offsets[i] + j] = item; }); state.pages.add(offsets[i]); });
     state.dataVersion++; state.gridKey = ''; renderGrid(); updateCount(); renderSelection();
     $('empty').hidden = !!state.total;
-    const narrowed = state.route.q || state.route.tag || state.route.utag || state.route.check || state.route.doubt;
-    $('empty').innerHTML = state.route.char && !narrowed ? t('这个角色已经没有图片了。') : { unmatched: t('全部认出来了 🎉'), skipped: t('没有跳过的图片。'), duplicates: state.route.dup ? t('所有副本的角色都一致。') : t('没有重复的图片。'), excluded: t('没有被排除的图片。'), pending: t('没有待确认的图片。'), group: t('这一组都整理完了。'), recent: t('最近一次同步没有新图。'), audit: t('抽查做完了，谢谢！结果会用来衡量认人准不准。'), library: t('没有符合条件的图片。试试别的搜索或标签。')}[state.route.page] || '';
+    $('empty').innerHTML = viewOf(state.route).empty?.(state.route) || '';
     renderHeading();
     if (state.route.char) refreshMaybe(gen);
   } catch (e) { if (e.name !== 'AbortError' && gen === state.generation && route === state.route) { error(e.message); $('resultCount').textContent = t('读取失败'); } }
 }
+// 首页借用网格的列表放它自己的图（详情栏翻页、大图都按这个列表走）。
+export function showList(items) { state.items = items; state.total = items.length; }
+// 后端接受了一次写入、或同步进了新图：已读到的计数和分页作废，下一次读取从头来（ui/effects.js 调用）。
+export function listChanged() { state.countDirty = true; state.readEpoch++; }
 export async function loadPage(offset) {
   if (state.pages.has(offset) || state.pending.has(offset) || offset >= state.total) return;
   if (state.countDirty) {
@@ -88,8 +85,7 @@ export async function loadPage(offset) {
 function updateCount() {
   const loaded = state.items.filter(Boolean).length;
   $('resultCount').textContent = t('{n} 张', {n: number(state.total)}) + (loaded < state.total ? ' · ' + t('已加载 {n}', {n: number(loaded)}) : '');
-  $('hint').textContent = state.route.char ? t('点击或拖动选择 · Space 看大图 · ⌫ 不是 TA · C 换成') : {character: t('点击或拖动选择 · Space 看大图 · ⌫ 不是 TA · C 换成'), unmatched: t('点击或拖动选择 · Space 看大图 · C 设为角色 · S 跳过'),
-    skipped: t('点击或拖动选择 · Space 看大图'), excluded: t('点击或拖动选择 · Space 看大图 · X 恢复收录'), pending: t('点击或拖动选择 · Space 看大图 · X 排除'), audit: t('点一张或 Space 看大图 · Y 是 · N 不是 · 看不清可以跳过，换一张'), duplicates: t('同色角标为同一组 · 修改会同步到整组 · 角色不一致的组对齐后自动折叠'), library: t('点击查看 · 拖动或 {key} 点击多选 · Space 看大图', {key: isMac ? '⌘' : 'Ctrl'})}[state.route.page] || '';
+  $('hint').textContent = viewOf(state.route).hint?.() || '';
 }
 
 // ---------- 网格 ----------
@@ -137,9 +133,11 @@ export function verticalStep(i, dir) {
   return best;
 }
 const captionH = () => viewOpts.captions && browsing() && state.cellW >= 150 ? 28 : 0;
+// 方格／原比例：设置页的选项和 R 键都经这里改，并记进偏好。
+export function setFit(on) { if (state.fit === on) return; state.fit = on; prefs.set('fit', on); }
 export function toggleFit() {
   const v = $('viewport'), anchor = rowStart(rowAt(v.scrollTop));
-  state.fit = !state.fit; prefs.set('fit', state.fit); layout();
+  setFit(!state.fit); layout();
   v.scrollTop = rowTop(rowOf(anchor)); renderGrid(true);
   for (const b of $('fitToggle')?.querySelectorAll('[data-fit]') || []) b.classList.toggle('on', Boolean(Number(b.dataset.fit)) === state.fit);
 }
@@ -222,11 +220,12 @@ function cardHTML(item, i) {
     extra = (chips && state.cellW >= 120 ? `<span class="chips">${chips}</span>` : '') + (m?.status === 'machine' ? `<span class="machine-dot" title="${t('机器识别，未检查')}"></span>` : '');
   }
   if (r.char && r.maybe && state.cellW >= 120) extra += `<span class="chips"><span>${item.memberships.length ? t('现为 {name}', {name: esc(short(item.memberships[0].name))}) : t('未识别')}</span></span>`;
-  if (r.page === 'excluded' && !r.reason && item.excluded && state.cellW >= 120) extra += `<span class="chips"><span>${REASONS[item.excluded] || ''}</span></span>`;
+  const card = viewOf(r).card;
+  if (card?.reason && !r.reason && item.excluded && state.cellW >= 120) extra += `<span class="chips"><span>${REASONS[item.excluded] || ''}</span></span>`;
   // 随机抽查 / 未识别 是在小尺寸下快速浏览的：它们的单行角标一直保留到 70 px 的格子。
-  if (r.page === 'audit' && item.audit && state.cellW >= 70) extra += auditTags(item);
-  if (viewOpts.hints && !item.memberships.length && item.hint && state.cellW >= (r.page === 'unmatched' ? 70 : 120)) extra += `<span class="chips"><button class="hint-add" data-hint title="${t('机器觉得可能是 {name}，点一下设为 TA（可撤销）', {name: esc(item.hint.name)})}">+ ${esc(short(item.hint.name))}</button></span>`;
-  if (r.page === 'duplicates' && item.dup) extra += `<span class="dup-badge" style="--dup-hue:${dupHue(item.dup.grp)}" title="${t('同一组共 {n} 份副本', {n: item.dup.size})}">${item.dup.pos}/${item.dup.size}</span>`;
+  if (card?.audit && item.audit && state.cellW >= 70) extra += auditTags(item);
+  if (viewOpts.hints && !item.memberships.length && item.hint && state.cellW >= (card?.hintMin ?? 120)) extra += `<span class="chips"><button class="hint-add" data-hint title="${t('机器觉得可能是 {name}，点一下设为 TA（可撤销）', {name: esc(item.hint.name)})}">+ ${esc(short(item.hint.name))}</button></span>`;
+  if (card?.dup && item.dup) extra += `<span class="dup-badge" style="--dup-hue:${dupHue(item.dup.grp)}" title="${t('同一组共 {n} 份副本', {n: item.dup.size})}">${item.dup.pos}/${item.dup.size}</span>`;
   else if (item.dup && state.cellW >= 70) extra += `<span class="dup-badge folded" title="${t('共 {n} 份相同副本，操作会同步到全部', {n: item.dup.size})}">×${item.dup.size}</span>`;
   // 窄图显示第一个名字和数量，而不是把每个名字都截短；悬停显示全部。
   const names = item.memberships.map(m => m.name), narrow = state.fit && ratio * state.cellW * 4 / 3 < 170 && names.length > 1;
@@ -340,8 +339,10 @@ function stepColumns(delta) {
   setSize((width + state.gap) / cols - state.gap);
 }
 let pinchFactor = 1, pinchPoint = null, gestureStart = 0;
+// 主区是不是网格：缩放网格（⌘＋／⌘－、⌘滚轮、捏合）只在这样的页面生效。
+const onGrid = () => viewOf(state.route).area === 'grid';
 // ---------- 选择 ----------
-export const selCount = () => state.sel.all ? Math.max(0, state.total - state.sel.exclude.size) : state.sel.ids.size;
+export const selCount = () => selectionSize();
 const isSelected = id => state.sel.all ? !state.sel.exclude.has(id) : state.sel.ids.has(id);
 function setSelected(id, on) {
   if (state.sel.all) on ? state.sel.exclude.delete(id) : state.sel.exclude.add(id);
@@ -350,6 +351,12 @@ function setSelected(id, on) {
 export function clearSelection() { state.sel = {all: false, ids: new Set(), exclude: new Set()}; state.anchor = -1; state.armed = null; renderSelection(); }
 export function selectAll() { if (!state.total) return; state.sel = {all: true, ids: new Set(), exclude: new Set()}; state.selecting = true; renderSelection(); }
 export function toggleSelecting() { state.selecting = !state.selecting; if (!state.selecting) clearSelection(); renderSelection(); }
+// 取消选择并退出选择模式（Esc、选择栏的 ×、写入之后、切换 R18）。
+export function quitSelecting() { state.selecting = false; clearSelection(); }
+// 换页时复位网格这一侧的状态：退出选择模式、清空选择、光标归位、张数等新读取（ui/shell.js applyRoute 调用）。
+export function resetForRoute() { quitSelecting(); state.cursor = -1; state.totalReady = false; }
+// 键盘光标移到第 i 张（详情栏和大图翻页时跟着走）。
+export function setCursor(i) { state.cursor = i; }
 function selectionPayload() { return state.sel.all ? {filter: filters(), exclude: [...state.sel.exclude]} : {ids: [...state.sel.ids]}; }
 async function selectRange(a, b, on = true) {
   const lo = Math.min(a, b), hi = Math.max(a, b);
@@ -401,9 +408,10 @@ function autoScroll() {
   requestAnimationFrame(autoScroll);
 }
 // ---------- 选择栏与操作 ----------
-function renderSelection() {
+// 导出给样式清单页调用（tools/styleguide/live.js，#352）：改名或改参数时，tools/check_styleguide.py 会报出来。
+export function renderSelection() {
   syncCards();
-  const n = selCount(), bar = $('selectionBar'), r = state.route;
+  const n = selCount(), bar = $('selectionBar'), r = state.route, kind = viewOf(r).bar;   // 选择栏的种类由页面登记
   bar.hidden = !n; if (!n) { state.armed = null; return; }
   const big = n > 500, arm = key => state.armed === key ? ` armed` : '';
   const count = `<button class="icon" id="clearSel" title="${t('取消选择（Esc）')}">×</button><span class="sel-count">${state.sel.all ? t('已选全部 {n} 张', {n: number(n)}) : t('已选 {n} 张', {n: number(n)})}</span><div class="bar-divider"></div>`;
@@ -415,26 +423,26 @@ function renderSelection() {
   } else if (r.char) {
     const name = state.char?.name || t('该角色');
     buttons = `<button class="primary${arm('remove')}" data-act="remove">${state.armed === 'remove' ? t('再点一次：移出 {n} 张', {n: number(n)}) : t('不是 {name}', {name: esc(short(name))})} <kbd>⌫</kbd></button><button class="quiet" data-act="swap">${t('换成…')} <kbd>C</kbd></button><button class="quiet" data-act="also">${t('也是…')} <kbd>A</kbd></button>${state.char?.variants?.length ? `<button class="quiet" data-act="variant">${t('子标签')} <kbd>T</kbd></button>` : ''}`;
-  } else if (r.page === 'audit') {
+  } else if (kind === 'audit') {
     // 随机抽查：每张图问的是它自己的角色（深色角标）；可以一次回答整个选择。
     buttons = `<button class="primary" data-act="audit_yes" title="${t('选中的图都是角标上的角色')}">${t('都是')} <kbd>Y</kbd></button><button class="quiet" data-act="audit_no" title="${t('选中的图都不是角标上的角色')}">${t('都不是')} <kbd>N</kbd></button>`;
-  } else if (r.page === 'unmatched' || r.page === 'group') {
+  } else if (kind === 'unmatched') {
     buttons = `<button class="primary" data-act="assign">${t('设为角色…')} <kbd>C</kbd></button>${ocButton}<button class="quiet${arm('skip')}" data-act="skip">${state.armed === 'skip' ? t('再点一次：跳过 {n} 张', {n: number(n)}) : t('跳过')} <kbd>S</kbd></button>`;
-  } else if (r.page === 'excluded') {
+  } else if (kind === 'excluded') {
     buttons = `<button class="primary${arm('include')}" data-act="include">${state.armed === 'include' ? t('再点一次：恢复 {n} 张', {n: number(n)}) : t('恢复收录')} <kbd>X</kbd></button>`;
-  } else if (r.page === 'pending') {
+  } else if (kind === 'pending') {
     buttons = `<button class="primary${arm('exclude')}" data-act="exclude">${state.armed === 'exclude' ? t('再点一次：排除 {n} 张', {n: number(n)}) : t('排除')} <kbd>X</kbd></button><button class="quiet${arm('include')}" data-act="include">${state.armed === 'include' ? t('再点一次：保留 {n} 张', {n: number(n)}) : t('保留')}</button>`;
-  } else if (r.page === 'skipped') {
+  } else if (kind === 'skipped') {
     buttons = `<button class="primary${arm('resume')}" data-act="resume">${state.armed === 'resume' ? t('再点一次：恢复 {n} 张', {n: number(n)}) : t('恢复到未识别')}</button><button class="quiet" data-act="assign">${t('设为角色…')} <kbd>C</kbd></button>${ocButton}`;
   } else {
     buttons = `<button class="primary" data-act="assign">${t('加角色…')} <kbd>C</kbd></button><button class="quiet" data-act="notlib" ${state.sel.all ? `disabled title="${t('全选时请进入角色页移出')}"` : ''}>${t('不是…')} <kbd>⌫</kbd></button>`;
   }
-  if (!['excluded', 'pending'].includes(r.page)) buttons += `<button class="quiet${arm('exclude')}" data-act="exclude" title="${t('不是插画（截图、照片等）：从图库移到「已排除」')}">${state.armed === 'exclude' ? t('再点一次：排除 {n} 张', {n: number(n)}) : t('排除')} <kbd>X</kbd></button>`;
+  if (!['excluded', 'pending'].includes(kind)) buttons += `<button class="quiet${arm('exclude')}" data-act="exclude" title="${t('不是插画（截图、照片等）：从图库移到「已排除」')}">${state.armed === 'exclude' ? t('再点一次：排除 {n} 张', {n: number(n)}) : t('排除')} <kbd>X</kbd></button>`;
   buttons += `<button class="quiet" data-act="tag">${t('标签')} <kbd>G</kbd></button>`;
   buttons += `<button class="quiet" data-act="findartist" title="${t('用像素哈希和 IQDB 查这些图的画师（只发哈希文本，不发图片；一次最多 500 张）')}">${t('查找画师')}</button>`;
   if (!state.sel.all && n >= 2 && n <= 12) buttons += `<button class="quiet" data-act="relate" title="${t('两两比较：同一张图、裁剪、差分、局部编辑，还是不同的图（只在本机计算）')}">${t('判断关系')}</button>`;
   bar.innerHTML = count + buttons + (big ? `<span class="bar-note">${t('超过 500 张需再点一次确认')}</span>` : '');
-  $('clearSel').onclick = () => { state.selecting = false; clearSelection(); };
+  $('clearSel').onclick = quitSelecting;
   for (const b of bar.querySelectorAll('[data-act]')) b.onclick = () => runBarAction(b.dataset.act);
 }
 export const short = name => name.length > 28 ? name.slice(0, 26) + '…' : name;
@@ -501,16 +509,18 @@ function openVariantMenu(payload) {
 // 列表在下面变化时保持在视野里的那张图：{uuid, item, prev, next}。
 export const kept = {hold: null};
 function holdCurrent() {
-  const uuid = state.viewer >= 0 ? state.viewerItem?.uuid : state.focused;
+  const uuid = shownUuid();
   if (!uuid) { kept.hold = null; return; }
   if (kept.hold?.uuid === uuid) return;
   const i = indexOf(uuid);
   kept.hold = {uuid, item: state.items[i] || state.viewerItem, prev: state.items[i - 1]?.uuid, next: state.items[i + 1]?.uuid};
 }
+// 当前图：单图快捷键和单图动作作用在它上面。来源的优先级（大图 ＞ 详情栏 ＞ 光标）在 core/modes.js 的 currentSource。
+// 那张图已经离开列表时，取保持在视野里的那份（kept.hold）或大图自己记着的那份。
 export function currentItem() {
-  const uuid = state.viewer >= 0 ? state.viewerItem?.uuid : state.focused;
-  if (!uuid) return state.cursor >= 0 ? state.items[state.cursor] : null;
-  const i = indexOf(uuid);
+  const src = currentSource(); if (!src) return null;
+  if (src.from === 'cursor') return state.items[src.index];
+  const uuid = src.uuid, i = indexOf(uuid);
   return i >= 0 ? state.items[i] : uuid === kept.hold?.uuid ? kept.hold.item : state.viewerItem?.uuid === uuid ? state.viewerItem : null;
 }
 export async function mutate(path, body, leaving, {advance = false} = {}) {
@@ -522,11 +532,11 @@ export async function mutate(path, body, leaving, {advance = false} = {}) {
   if (gone) for (const el of $('grid').children) if (gone.has(el.dataset.id)) el.classList.add('leaving');
   try {
     const r = await post(path, body); setLatest(r.undo);
-    state.selecting = false; clearSelection();
+    quitSelecting();
     toast(tb(r.undo.label), true);
     if (path === '/api/change' && body.action === 'confirmed') offerWatch(body.entities || [body.entity]).catch(() => {});
     if (gone) { await new Promise(done => setTimeout(done, Math.max(0, 170 - (performance.now() - started)))); collapse(gone); }
-    await reload(); if (state.route.page === 'home') renderHome(true); metaSoon(path === '/api/tag');
+    await reload(); pageOf(state.route).refresh?.('edit'); metaSoon(path === '/api/tag');
     if (state.focused) inspect(state.focused, true);
     if (state.viewer >= 0) {
       if (advance && advanceFrom && indexOf(advanceFrom) >= 0) showViewer(Math.min(indexOf(advanceFrom) + 1, state.total - 1));
@@ -546,10 +556,7 @@ export async function undo() {
   if (!edits.latest || edits.busy) return; edits.busy = true;
   try {
     toast(undoneText(await undoLatest())); await reload(); refreshMeta().catch(e => error(readError(e)));
-    if (state.route.page === 'home') renderHome(true);
-    if (state.route.page === 'identity') renderIdentity();
-    if (state.route.page === 'groups') renderGroups(true);
-    if (state.route.page === 'artist-audit') renderArtistAudit();
+    pageOf(state.route).refresh?.('undo');
     if (state.focused) inspect(state.focused, true);
     if (state.viewer >= 0) { const i = indexOf(state.viewerItem?.uuid); showViewer(i >= 0 ? i : state.viewer, i >= 0 ? state.items[i] : state.viewerItem); }
   } catch (e) {
@@ -571,9 +578,10 @@ function applyViewClasses() {
   b.toggle('hide-marks', !viewOpts.marks); b.toggle('show-rail-count', viewOpts.railCount); b.toggle('hide-footer', !viewOpts.footer);
 }
 const viewSwitch = (key, label, hint = '') => `<button class="view-opt" data-view="${key}" role="switch" aria-checked="${viewOpts[key]}"><span>${label}${hint ? `<small>${hint}</small>` : ''}</span><i class="view-sw${viewOpts[key] ? ' on' : ''}"></i></button>`;
-function renderViewPop() {
-  const grid = !panelPage(state.route.page);
-  $('viewPopover').innerHTML = (state.route.page === 'home' ? `<h6>${t('首页')}</h6><div class="view-group">
+// 导出给样式清单页调用（tools/styleguide/live.js，#352）：改名或改参数时，tools/check_styleguide.py 会报出来。
+export function renderViewPop() {
+  const grid = !pageOf(state.route).panel;
+  $('viewPopover').innerHTML = (pageOf(state.route).area === 'homePage' ? `<h6>${t('首页')}</h6><div class="view-group">
       <div class="view-row"><span>${t('缩略图')}</span><div class="segmented" id="homeSizeSeg">${[[0, t('小')], [1, t('中')], [2, t('大')]].map(([v, label]) => `<button data-hsize="${v}" class="${viewOpts.homeSize === v ? 'on' : ''}">${label}</button>`).join('')}</div></div>
       ${viewSwitch('hero', t('放大每组主图'))}
       ${viewSwitch('people', t('分组显示角色数'))}
@@ -593,15 +601,17 @@ function renderViewPop() {
       ${viewSwitch('ask', t('偶尔问一句「是 TA 吗？」'), t('详情和首页；回答会用来学习认人'))}
     </div><div class="view-foot"><span>${t('设置会自动保存')}</span><button class="link-button strong" id="viewReset">${t('恢复默认')}</button></div>`;
   $('zoom')?.addEventListener('input', e => requestZoom(() => setSize(sliderToSize(Number(e.target.value)), undefined, undefined, true)));
-  $('viewReset').onclick = () => { Object.assign(viewOpts, VIEW_DEFAULTS); prefs.set('view', viewOpts); afterViewChange(true); renderViewPop(); if (state.route.page === 'home') drawHome(); };
+  $('viewReset').onclick = () => { Object.assign(viewOpts, VIEW_DEFAULTS); prefs.set('view', viewOpts); afterViewChange(true); renderViewPop(); pageOf(state.route).refresh?.('view'); };
 }
 function afterViewChange(relayout) {
   applyViewClasses();
-  if (relayout && !panelPage(state.route.page)) { layout(); renderGrid(true); }
+  if (relayout && !pageOf(state.route).panel) { layout(); renderGrid(true); }
 }
-function toggleViewPop(open = $('viewPopover').hidden) {
+// 视图选项是非模态浮层：Esc、点外关闭由浮层管理器（ui/overlay.js）统一处理。
+const viewLayer = createLayer({kind: 'popover', id: 'view-options', el: () => $('viewPopover'), anchor: () => $('viewButton'), onDismiss: reason => toggleViewPop(false, reason)});
+function toggleViewPop(open = $('viewPopover').hidden, reason) {
   $('viewPopover').hidden = !open; $('viewButton').classList.toggle('on', open); $('viewButton').setAttribute('aria-expanded', open);
-  if (open) renderViewPop();
+  if (open) { renderViewPop(); viewLayer.open(); } else viewLayer.close(reason);
 }
 // ---------- NSFW 筛选 ----------
 // 一次点击在 显示 → 隐藏 → 仅 NSFW 之间循环；H 切换隐藏。NSFW = WD 评级 questionable/explicit。
@@ -613,15 +623,18 @@ function renderNsfw() {
   b.className = 'nsfw-toggle s-' + (state.nsfw || 'all'); b.title = NSFW_TIP[state.nsfw]; b.setAttribute('aria-label', NSFW_TIP[state.nsfw]);
 }
 export function setNsfw(mode) {
-  state.nsfw = mode; prefs.set('nsfw', mode); renderNsfw(); state.selecting = false; clearSelection();
+  state.nsfw = mode; prefs.set('nsfw', mode); renderNsfw(); quitSelecting();
   toast({'': t('已显示全部内容'), hide: t('已隐藏 R18'), only: t('只看 R18')}[mode]);
-  if (!panelPage(state.route.page)) reload(true);
-  else if (state.route.page === 'identity') renderIdentity();
-  else if (state.route.page === 'home') renderHome();
-  else if (state.route.page === 'groups') renderGroups();
-  else if (state.route.page === 'similar') renderSimilar();
-  else if (state.route.page === 'characters') { forgetActivity(); loadActivity(); }
+  if (!pageOf(state.route).panel) reload(true);
+  else pageOf(state.route).refresh?.('nsfw');
   refreshMeta().catch(e => error(readError(e)));
+}
+
+// 帮助对话框的快捷键表从 core/modes.js 的 SHORTCUTS 生成，和键盘处理是同一张表。wireGrid 调用一次；
+// 也导出给样式清单页调用（tools/styleguide/live.js，#352）。
+export function renderHelpKeys() {
+  const text = x => typeof x === 'function' ? x() : x;
+  $('helpKeys').innerHTML = SHORTCUTS.map(s => `<dt>${esc(platformText(text(s.keys)))}</dt><dd>${esc(platformText(s.does()))}</dd>`).join('');
 }
 
 // 页面这一部分注册的处理函数。页面启动时调用一次。
@@ -630,13 +643,18 @@ export function wireGrid() {
   $('viewport').addEventListener('scroll', scheduleGrid, {passive: true});
   new ResizeObserver(scheduleGrid).observe($('viewport'));
 
+  // ⌘滚轮、捏合：只在主区是网格的页面缩放网格；别的页面什么也不做，也不交给浏览器缩放整页（与 ⌘＋／⌘－ 一致）。
   $('viewport').addEventListener('wheel', e => {
     if (!e.ctrlKey && !e.metaKey) return;
-    e.preventDefault(); pinchFactor *= Math.exp(-e.deltaY * .01); pinchPoint = [e.clientX, e.clientY];
+    e.preventDefault(); if (!onGrid()) return;
+    pinchFactor *= Math.exp(-e.deltaY * .01); pinchPoint = [e.clientX, e.clientY];
     requestZoom(() => { const f = pinchFactor; pinchFactor = 1; setSize(state.size * f, ...pinchPoint); });
   }, {passive: false});
   $('viewport').addEventListener('gesturestart', e => { e.preventDefault(); gestureStart = state.size; });
-  $('viewport').addEventListener('gesturechange', e => { e.preventDefault(); const x = e.clientX, y = e.clientY, s = gestureStart * e.scale; requestZoom(() => setSize(s, x, y)); });
+  $('viewport').addEventListener('gesturechange', e => {
+    e.preventDefault(); if (!onGrid()) return;
+    const x = e.clientX, y = e.clientY, s = gestureStart * e.scale; requestZoom(() => setSize(s, x, y));
+  });
 
   // 在卡片的「+ 角色」引导上点一次：把图设为那个角色，和在选择器里选它一样。
   $('grid').addEventListener('click', e => {
@@ -650,7 +668,7 @@ export function wireGrid() {
     }
     const b = e.target.closest('[data-hint]'); if (!b) return;
     const item = state.items[Number(b.closest('.card').dataset.index)];
-    if (item?.hint) mutate('/api/change', {ids: [item.uuid], action: 'confirmed', entity: item.hint.id}, LEAD_PAGES.includes(state.route.page));
+    if (item?.hint) mutate('/api/change', {ids: [item.uuid], action: 'confirmed', entity: item.hint.id}, pageOf(state.route).lead);
   });
   $('grid').addEventListener('pointerdown', e => {
     if (e.button !== 0 || e.pointerType === 'touch' || e.target.closest('[data-hint],[data-tagact]')) return;
@@ -680,61 +698,80 @@ export function wireGrid() {
   $('grid').addEventListener('dblclick', e => { const card = e.target.closest('.card[data-id]'); if (card) openViewer(Number(card.dataset.index)); });
 
   // ---------- 键盘 ----------
+  // 按键先看最上面的模式（core/modes.js）：大图打开时它盖住选择栏，单图快捷键都作用于大图里那张。哪些键、在哪生效
+  // 写在 core/modes.js 的 SHORTCUTS（帮助对话框由它生成），这里加减按键要同步改那张表（tests/help_keys.test.cjs 核对）。
   document.addEventListener('keydown', e => {
     if (document.querySelector('dialog[open]')) return;
-    const mod = e.metaKey || e.ctrlKey, key = e.key.toLowerCase();
+    const mod = e.metaKey || e.ctrlKey, key = e.key.toLowerCase(), m = modes();
+    const view = viewOf(state.route), scope = keyScope(view), grid = scope === 'grid';
     if (mod && key === 'k') { e.preventDefault(); jumpToCharacter(); return; }
-    if (mod && (key === '=' || key === '+')) { e.preventDefault(); if (state.viewer >= 0) zoomView(1.4, innerWidth / 2, innerHeight / 2); else stepColumns(-1); return; }
-    if (mod && key === '-') { e.preventDefault(); if (state.viewer >= 0) zoomView(1 / 1.4, innerWidth / 2, innerHeight / 2); else stepColumns(1); return; }
+    // ⌘＋／⌘－：大图打开时缩放大图；否则只在有网格的页面改网格列数，别的页面什么也不做（也不交给浏览器缩放）。
+    if (mod && (key === '=' || key === '+' || key === '-')) {
+      e.preventDefault(); const bigger = key !== '-';
+      if (m.viewer) zoomView(bigger ? 1.4 : 1 / 1.4, innerWidth / 2, innerHeight / 2);
+      else if (onGrid()) stepColumns(bigger ? -1 : 1);
+      return;
+    }
     if (e.target.closest('input,textarea,select,[contenteditable]')) { if (e.key === 'Escape') e.target.blur(); return; }
     if (mod && key === 'z') { e.preventDefault(); undo(); return; }
-    if (mod && key === 'a' && !$('grid').hidden) { e.preventDefault(); selectAll(); return; }
-    if (e.key === 'Escape') { if (state.viewer >= 0) closeViewer(); else if (state.focused) closeInspector(); else { state.selecting = false; clearSelection(); } return; }
-    if (key === 'r' && !mod && !panelPage(state.route.page)) { e.preventDefault(); toggleFit(); return; }
+    // ⌘A 是选择栏的快捷键：大图打开时选择栏被盖住，不响应。
+    if (mod && key === 'a' && grid) { e.preventDefault(); if (!m.viewer) selectAll(); return; }
+    // 浮层（含大图）的 Esc 已由浮层管理器处理；走到这里说明栈是空的，接着关详情栏、取消选择。
+    if (e.key === 'Escape') { if (m.detail) closeInspector(); else quitSelecting(); return; }
+    if (key === 'r' && !mod && !pageOf(state.route).panel) { e.preventDefault(); toggleFit(); return; }
     if (key === 'h' && !mod) { e.preventDefault(); setNsfw(state.nsfw === 'hide' ? '' : 'hide'); return; }
     if (e.key === '/' && $('search')) { e.preventDefault(); $('search').focus(); return; }
-    if ((key === 'y' || key === 'n') && !mod && !edits.busy && state.route.page === 'audit' && selCount() && state.viewer < 0) { e.preventDefault(); answerAudit(key === 'y'); return; }
-    if ((key === 'y' || key === 'n') && !mod && !edits.busy && state.question && [state.focused, state.viewer >= 0 && state.viewerItem?.uuid].includes(state.question.ident)) { e.preventDefault(); answerAsk(key === 'y' ? 'yes' : 'no'); return; }
-    if (edits.busy || $('grid').hidden) return;
-    if (e.key === ' ') { e.preventDefault(); if (state.viewer >= 0) closeViewer(); else openViewer(state.cursor >= 0 ? state.cursor : state.focused ? indexOf(state.focused) : 0); return; }
+    const n = keySelection(), character = !!state.route.char;
+    if ((key === 'y' || key === 'n') && !mod && !edits.busy && view.bar === 'audit' && n) { e.preventDefault(); answerAudit(key === 'y'); return; }
+    if ((key === 'y' || key === 'n') && !mod && !edits.busy && state.question && [state.focused, m.viewer && state.viewerItem?.uuid].includes(state.question.ident)) { e.preventDefault(); answerAsk(key === 'y' ? 'yes' : 'no'); return; }
+    if (edits.busy || !scope) return;
+    // 首页（scope 'shown'）没有网格光标：下面的键只作用于详情栏或大图里那张，两者都没开时不响应；方向键只有 ← → 翻页，
+    // ↑ ↓ 照常滚动页面。
+    if (!grid && !m.viewer && !m.detail) return;
+    if (e.key === ' ') { e.preventDefault(); if (m.viewer) closeViewer(); else openViewer(grid ? viewerTarget() : indexOf(state.focused)); return; }
     if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key)) {
+      if (!grid) { if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') { e.preventDefault(); step(e.key === 'ArrowLeft' ? -1 : 1); } return; }
       e.preventDefault();
       const from = state.cursor < 0 ? 0 : state.cursor;
       const delta = e.key === 'ArrowLeft' ? -1 : e.key === 'ArrowRight' ? 1 : verticalStep(from, e.key === 'ArrowUp' ? -1 : 1) - from || (e.key === 'ArrowUp' ? -state.cols : state.cols);
-      if (state.viewer >= 0 || state.focused) { if (Math.abs(delta) === 1) step(delta); else if (state.viewer < 0) step(delta); return; }
-      state.cursor = Math.max(0, Math.min(state.total - 1, (state.cursor < 0 ? 0 : state.cursor + delta)));
+      // 大图里只有 ← → 翻页；详情栏里 ↑ ↓ 也翻到上一行、下一行的图。
+      if (m.viewer || m.detail) { if (Math.abs(delta) === 1 || !m.viewer) step(delta); return; }
+      setCursor(Math.max(0, Math.min(state.total - 1, (state.cursor < 0 ? 0 : state.cursor + delta))));
       if (e.shiftKey && state.items[state.cursor]) { setSelected(state.items[state.cursor].uuid, true); renderSelection(); }
       if (!state.items[state.cursor]) loadPage(Math.floor(state.cursor / PAGE) * PAGE);
       ensureVisible(state.cursor); return;
     }
-    if (e.key === 'Enter' && state.cursor >= 0 && state.viewer < 0) { e.preventDefault(); const item = state.items[state.cursor]; if (!item) return; if (cleanup() || state.selecting) { setSelected(item.uuid, !isSelected(item.uuid)); state.anchor = state.cursor; renderSelection(); } else inspect(item.uuid); return; }
-    const n = selCount(), page = state.route.char ? 'character' : state.route.page;
+    if (e.key === 'Enter' && grid && state.cursor >= 0 && !m.viewer) { e.preventDefault(); const item = state.items[state.cursor]; if (!item) return; if (cleanup() || state.selecting) { setSelected(item.uuid, !isSelected(item.uuid)); state.anchor = state.cursor; renderSelection(); } else inspect(item.uuid); return; }
     if (mod || e.altKey && !/^[1-9]$/.test(e.key)) return;
     if (['c', 'a', 't', 's', 'g'].includes(key) || /^[1-9]$/.test(e.key)) e.preventDefault(); // 别让这个字母进到命令面板的输入框里
-    if (e.key === 'Backspace' || e.key === 'Delete') { e.preventDefault(); if (n) runBarAction(page === 'character' ? 'remove' : browsing() ? 'notlib' : ''); else singleAction('remove'); return; }
-    if (key === 'c') { if (n) runBarAction(page === 'character' ? 'swap' : 'assign'); else singleAction(page === 'character' ? 'swap' : 'also'); return; }
-    if (key === 'a' && !mod) { if (n) runBarAction(page === 'character' ? 'also' : 'assign'); else singleAction('also'); return; }
-    if (key === 't' && page === 'character' && n) { runBarAction('variant'); return; }
-    if (key === 'g') { if (n) runBarAction('tag'); else singleAction('tag'); return; }
-    if (key === 'x' && !mod) { const act = page === 'excluded' ? 'include' : 'exclude'; if (n) runBarAction(act); else singleAction(act); return; }
-    if (key === 's' && (page === 'unmatched' || page === 'group')) { if (n) runBarAction('skip'); else singleAction('skip'); return; }
-    if (/^[1-9]$/.test(e.key) && !n && state.detail && (state.focused || state.viewer >= 0)) { pickAlternative(state.detail, state.detail.uuid, Number(e.key) - 1, e.altKey); return; }
+    const remove = e.key === 'Backspace' || e.key === 'Delete';
+    if (remove || ['c', 'a', 't', 'g', 'x', 's'].includes(key)) {
+      if (remove) e.preventDefault();
+      const item = n ? null : currentItem(); if (!n && !item) return;   // 没有选中也没有当前图：什么都不做
+      const act = keyAction(remove ? 'remove' : key, {view, char: character, n, item});
+      if (act?.bar) runBarAction(act.bar);
+      else if (act) singleAction(act.single);
+      // 整理页里这个键没有对应的动作：说一声，不再静默吞掉。
+      else if (view.click === 'cleanup') toast(t('这一页没有 {key} 对应的操作', {key: remove ? '⌫' : key.toUpperCase()}));
+      return;
+    }
+    if (/^[1-9]$/.test(e.key) && !n && state.detail && (m.detail || m.viewer)) { pickAlternative(state.detail, state.detail.uuid, Number(e.key) - 1, e.altKey); return; }
   });
+
+  renderHelpKeys();
 
   $('viewButton').onclick = e => { e.stopPropagation(); toggleViewPop(); };
   $('viewPopover').addEventListener('click', e => {
     e.stopPropagation();
-    const hs = e.target.closest('[data-hsize]'); if (hs) { viewOpts.homeSize = Number(hs.dataset.hsize); prefs.set('view', viewOpts); for (const x of $('homeSizeSeg').children) x.classList.toggle('on', x === hs); drawHome(); return; }
+    const hs = e.target.closest('[data-hsize]'); if (hs) { viewOpts.homeSize = Number(hs.dataset.hsize); prefs.set('view', viewOpts); for (const x of $('homeSizeSeg').children) x.classList.toggle('on', x === hs); pageOf(state.route).refresh?.('view'); return; }
     const b = e.target.closest('[data-view]'); if (!b) return;
     const key = b.dataset.view; viewOpts[key] = !viewOpts[key]; prefs.set('view', viewOpts);
     b.setAttribute('aria-checked', viewOpts[key]); b.querySelector('.view-sw').classList.toggle('on', viewOpts[key]);
     afterViewChange(key === 'captions' || key === 'hints');
     if (['chart', 'same', 'meta'].includes(key) && state.focused && !$('inspector').hidden) inspect(state.focused, true);
-    if (['hero', 'people', 'marks'].includes(key) && state.route.page === 'home') drawHome();
-    if (key === 'ask') { if (state.focused && !$('inspector').hidden) inspect(state.focused, true); if (state.route.page === 'home') renderHome(); }
+    if (['hero', 'people', 'marks'].includes(key)) pageOf(state.route).refresh?.('view');
+    if (key === 'ask') { if (state.focused && !$('inspector').hidden) inspect(state.focused, true); pageOf(state.route).refresh?.('ask'); }
   });
-  document.addEventListener('click', () => { if (!$('viewPopover').hidden) toggleViewPop(false); });
-  document.addEventListener('keydown', e => { if (e.key === 'Escape' && !$('viewPopover').hidden) { toggleViewPop(false); e.stopImmediatePropagation(); } }, true);
   applyViewClasses();
 
   $('nsfwButton').onclick = () => setNsfw({'': 'hide', hide: 'only', only: ''}[state.nsfw]);

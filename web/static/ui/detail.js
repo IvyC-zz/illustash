@@ -3,14 +3,17 @@ import {esc, monthText, number} from '../core/format.js';
 import {t} from '../core/i18n.js';
 import {REASONS, nameWithWork} from '../core/labels.js';
 import {fetchChar} from '../core/meta.js';
+import {shownUuid} from '../core/modes.js';
+import {poolIs, viewOf} from '../core/pages.js';
 import {charHash, cleanup, go} from '../core/route.js';
 import {api} from '../core/session.js';
 import {state} from '../core/state.js';
 import {$, readFailure, workSmall} from './dom.js';
-import {PAGE, currentItem, kept, loadPage, mutate, openTagPicker, renderGrid, rowHeight, rowOf, rowTop, syncCards, viewOpts} from './grid.js';
+import {PAGE, currentItem, kept, loadPage, mutate, openTagPicker, renderGrid, rowHeight, rowOf, rowTop, setCursor, syncCards, viewOpts} from './grid.js';
 import {newIds, openPicker, stage, targets} from './palette.js';
 import {artistSection, findArtistWorks, findArtists} from './artists.js';
 import {markHomeFocus} from './home.js';
+import {createLayer} from './overlay.js';
 
 // 哪一次检查面板读取是当前的：更慢、更早的那次绝不会画到它上面。
 let detailGen = 0;
@@ -58,9 +61,9 @@ export async function inspect(ident, quiet = false) {
     const primary = primaryOf(d), pc = primary && (state.charMap.get(primary.id) || primary);
     const original = pc?.tag && pc.tag !== pc.name ? pc.tag.replaceAll('_', ' ') : '';
     const path = pc ? (primary.variants || []).map(v => v.name) : [];
-    const curate = d.excluded ? `<button class="btn" data-curate="include" title="${t('已排除 · {reason}', {reason: esc(REASONS[d.excluded.reason] || '')})}${d.excluded.origin === 'rule' ? t('（自动规则）') : ''}">${t('恢复收录')}</button>`
-      : d.pending ? `<button class="btn" data-curate="exclude">${t('排除')} <kbd>X</kbd></button><button class="btn" data-curate="include">${t('保留')}</button>`
-      : `<button class="btn" data-curate="exclude" title="${t('截图、照片等不是插画的图')}">${t('排除')} <kbd>X</kbd></button>`;
+    const curate = d.excluded ? `<button class="secondary large" data-curate="include" title="${t('已排除 · {reason}', {reason: esc(REASONS[d.excluded.reason] || '')})}${d.excluded.origin === 'rule' ? t('（自动规则）') : ''}">${t('恢复收录')}</button>`
+      : d.pending ? `<button class="secondary large" data-curate="exclude">${t('排除')} <kbd>X</kbd></button><button class="secondary large" data-curate="include">${t('保留')}</button>`
+      : `<button class="secondary large" data-curate="exclude" title="${t('截图、照片等不是插画的图')}">${t('排除')} <kbd>X</kbd></button>`;
     const pendingNote = d.excluded ? `<div class="cc-note">${t('已排除 · {reason}', {reason: esc(REASONS[d.excluded.reason] || '')})}</div>` : d.pending ? `<div class="cc-note">${t('待确认：像截图')}</div>` : '';
     $('inspector').innerHTML = `<div class="inspector-head"><button class="icon" data-nav="-1" aria-label="${t('上一张')}" title="${t('上一张（←）')}">${INSP_ICONS.prev}</button><button class="icon" data-nav="1" aria-label="${t('下一张')}" title="${t('下一张（→）')}">${INSP_ICONS.next}</button><div class="spacer"></div><button class="icon" id="expand" title="${t('大图（Space）')}" aria-label="${t('大图')}">${INSP_ICONS.expand}</button><button class="icon" id="closeInspector" aria-label="${t('关闭详情')}" title="${t('关闭（Esc）')}">${INSP_ICONS.close}</button></div>
       <button class="preview" id="previewButton" title="${t('大图查看')}"><img src="/image?id=${encodeURIComponent(ident)}&size=preview" alt="${t('插画预览')}"></button>
@@ -74,7 +77,7 @@ export async function inspect(ident, quiet = false) {
       ${d.duplicates?.length ? `<section class="inspector-section"><h3 class="section-title">${t('重复副本 · 共 {n} 份', {n: d.duplicates.length + 1})}</h3><div class="dup-list">${d.duplicates.map(x => `<button class="dup-copy" data-copy="${esc(x.uuid)}" title="${t('查看这份副本')}"><img src="/image?id=${encodeURIComponent(x.uuid)}&size=thumb" alt="" loading="lazy"><span><b>${x.pos}/${x.size}</b> ${esc((x.added_at || '').slice(0, 10))}<br><small>${x.names.length ? x.names.map(esc).join(' · ') : t('未识别')}</small></span></button>`).join('')}</div></section>` : ''}
       ${viewOpts.meta ? `<section class="inspector-section"><dl class="facts"><div><dt>${t('尺寸')}</dt><dd class="mono">${number(d.width)} × ${number(d.height)}</dd></div><div><dt>${t('加入')}</dt><dd class="mono">${esc((d.added_at || '').slice(0, 16).replace('T', ' '))}</dd></div><div><dt>${t('文件')}</dt><dd title="${esc(d.filename)}">${esc(d.filename)}</dd></div><div><dt>${t('文件形态')}</dt><dd>${d.src_kind === 'deriv' ? t('本地副本') : t('原图')}</dd></div></dl></section>
       <details class="inspector-section"><summary>${t('画面标签')}</summary><div class="tags">${d.tags.map(x => `<button class="tag" data-tag="${esc(x.value)}" title="${t('按此标签筛选图库 · WD {conf}', {conf: x.conf.toFixed(2)})}">${esc(x.value.replaceAll('_', ' '))}</button>`).join('') || `<p>${t('暂无')}</p>`}</div></details>` : ''}
-      <div class="inspector-actions">${d.memberships.length ? `<button class="btn pri" id="fixChar">${t('更正角色')} <kbd>C</kbd></button>` : `<button class="btn pri" data-also="1">${t('设为角色…')} <kbd>C</kbd></button>`}${state.route.page === 'unmatched' && !d.memberships.length ? `<button class="btn" id="skipOne">${t('跳过')} <kbd>S</kbd></button>` : ''}${d.unknown ? `<button class="btn" id="resumeOne">${t('恢复到未识别')}</button>` : ''}${curate}</div>`;
+      <div class="inspector-actions">${d.memberships.length ? `<button class="primary large" id="fixChar">${t('更正角色')} <kbd>C</kbd></button>` : `<button class="primary large" data-also="1">${t('设为角色…')} <kbd>C</kbd></button>`}${poolIs(state.route, 'unmatched') && !d.memberships.length ? `<button class="secondary large" id="skipOne">${t('跳过')} <kbd>S</kbd></button>` : ''}${d.unknown ? `<button class="secondary large" id="resumeOne">${t('恢复到未识别')}</button>` : ''}${curate}</div>`;
     if (pc) loadCharStats(pc.id, ident, gen);
     $('fixChar')?.addEventListener('click', () => swapOne(d, ident, primary.id));
     $('inspector').querySelector('.preview img').addEventListener('error', e => { e.target.parentElement.innerHTML = `<div class="missing">${t('图片暂不可读，请检查 Photos 下载状态与访问权限')}</div>`; }, {once: true});
@@ -83,7 +86,7 @@ export async function inspect(ident, quiet = false) {
     for (const b of $('inspector').querySelectorAll('[data-nav]')) b.onclick = () => step(Number(b.dataset.nav));
     for (const b of $('inspector').querySelectorAll('[data-tag]')) b.onclick = () => go({page: 'library', tag: b.dataset.tag});
     for (const b of $('inspector').querySelectorAll('[data-copy]')) b.onclick = () => inspect(b.dataset.copy);
-    for (const b of $('inspector').querySelectorAll('[data-curate]')) b.onclick = () => mutate('/api/curate', {ids: [ident], action: b.dataset.curate}, b.dataset.curate === 'exclude' || ['excluded', 'pending'].includes(state.route.page));
+    for (const b of $('inspector').querySelectorAll('[data-curate]')) b.onclick = () => mutate('/api/curate', {ids: [ident], action: b.dataset.curate}, b.dataset.curate === 'exclude' || poolIs(state.route, 'excluded', 'pending'));
     $('skipOne')?.addEventListener('click', () => singleAction('skip'));
     $('addTag').onclick = () => singleAction('tag');
     for (const b of $('inspector').querySelectorAll('[data-artist-verdict]')) b.onclick = () => {
@@ -93,7 +96,7 @@ export async function inspect(ident, quiet = false) {
     $('inspector').querySelector('[data-artist-find]')?.addEventListener('click', () => findArtists([ident], () => inspect(ident, true)));
     for (const b of $('inspector').querySelectorAll('[data-artist-more]')) b.onclick = () => findArtistWorks(b.dataset.artistMore, b.dataset.name, () => inspect(ident, true));
     for (const b of $('inspector').querySelectorAll('[data-untag]')) b.onclick = () => mutate('/api/tag', {ids: [ident], tag: b.dataset.untag, add: false}, state.route.utag === b.dataset.untag);
-    $('resumeOne')?.addEventListener('click', () => mutate('/api/change', {ids: [ident], action: 'resume'}, state.route.page === 'skipped'));
+    $('resumeOne')?.addEventListener('click', () => mutate('/api/change', {ids: [ident], action: 'resume'}, poolIs(state.route, 'skipped')));
     bindIdentity($('inspector'), d, ident); bindAsk($('inspector'), d, ident);
   } catch (e) { if (gen === detailGen) { $('inspector').innerHTML = `<div class="loading-line">${esc(e.message)}<br><button class="quiet" id="closeInspector">${t('关闭')}</button></div>`; $('closeInspector').onclick = closeInspector; } }
 }
@@ -110,7 +113,7 @@ function bindIdentity(root, d, ident) {
   };
   for (const b of root.querySelectorAll('[data-alt]')) b.onclick = e => pickAlternative(d, ident, Number(b.dataset.alt), e.altKey);
   for (const b of root.querySelectorAll('[data-also]')) b.onclick = () => openPicker({title: d.memberships.length ? t('这张也是…') : t('这张是…'), sentence: e => d.memberships.length ? t('给这张加上 {name}', {name: e.name}) : t('把这张设为 {name}', {name: e.name}), exclude: d.memberships.map(m => m.id), suggest: {ids: [ident]}, multi: true,
-    pick: list => mutate('/api/change', {ids: [ident], action: 'confirmed', ...targets(list)}, ['unmatched', 'skipped'].includes(state.route.page))});
+    pick: list => mutate('/api/change', {ids: [ident], action: 'confirmed', ...targets(list)}, poolIs(state.route, 'unmatched', 'skipped'))});
 }
 // ---------- 主动提问：偶尔问一句「是 TA 吗？」 ----------
 // 浏览时每隔几张图最多问一次，被略过三次后本次访问不再问；整理页（某个角色、未识别…）总是显示。回答发到
@@ -127,7 +130,8 @@ function shouldAsk(d, ident) {
   }
   ask.pending = ident; return true;
 }
-function askHTML(q, dark = false) {
+// 导出给样式清单页调用（tools/styleguide/live.js，#352）：改名或改参数时，tools/check_styleguide.py 会报出来。
+export function askHTML(q, dark = false) {
   const why = q.kind === 'audit' ? t('随机抽查') : q.kind === 'hint' ? t('和你确认过的 TA 很像') + (q.current_name ? ' · ' + t('现在算作 {name}', {name: esc(q.current_name)}) : '') : q.kind === 'ambiguous' ? t('和 {name} 分不太清', {name: esc(q.rival_name)}) : q.confirmed < 5 ? t('再确认 {n} 张就能学会认 TA', {n: 5 - q.confirmed}) : '';
   return `<div class="ask-bar${dark ? ' on-dark' : ''}"><div class="ask-q">${t('是 {name} 吗？', {name: `<b>${esc(q.name)}</b>${workSmall({id: q.entity, name: q.name})}`})}${why ? `<small>${why}</small>` : ''}</div>
     <div class="ask-btns"><button class="ask-b yes" data-ask="yes">${t('是')} <kbd>Y</kbd></button><button class="ask-b" data-ask="no">${t('不是')} <kbd>N</kbd></button>${q.rival ? `<button class="ask-b" data-ask="switch" title="${t('换成 {name}', {name: esc(q.rival_name)})}">${t('是 {name}', {name: esc(q.rival_name)})}</button>` : ''}</div></div>`;
@@ -140,9 +144,9 @@ export function answerAsk(how) {
   const cur = state.question; if (!cur) return;
   const {q, ident} = cur; ask.pending = null; ask.ignored = 0;
   // 随机抽查：回答过的图离开列表，所以检查面板移到下一张。
-  if (state.route.page === 'audit' && state.viewer < 0 && state.focused === ident) { const i = indexOf(ident); state.focused = state.items[i + 1]?.uuid || state.items[i - 1]?.uuid || null; }
+  if (poolIs(state.route, 'audit') && state.viewer < 0 && state.focused === ident) { const i = indexOf(ident); state.focused = state.items[i + 1]?.uuid || state.items[i - 1]?.uuid || null; }
   const body = {ids: [ident], entity: q.entity, kind: q.kind, ...(how === 'yes' ? {yes: [ident]} : {no: [ident]}), ...(how === 'switch' ? {switch: q.rival} : {})};
-  mutate('/api/ask/answer', body, how !== 'yes' && state.route.char === q.entity, {advance: state.route.page === 'audit'});
+  mutate('/api/ask/answer', body, how !== 'yes' && state.route.char === q.entity, {advance: poolIs(state.route, 'audit')});
 }
 // 一个操作所替换的身份：当前角色页的那个身份（如果适用），否则是第一个。
 const primaryOf = d => d.memberships.find(m => m.id === state.route.char) || d.memberships[0];
@@ -155,12 +159,11 @@ export function pickAlternative(d, ident, i, also = false) {
   const alt = d.alternatives?.[i]; if (!alt) return;
   const from = primaryOf(d);
   if (from && !also) mutate('/api/reassign', {ids: [ident], old: from.id, new: alt.id}, state.route.char === from.id);
-  else mutate('/api/change', {ids: [ident], action: 'confirmed', entity: alt.id}, ['unmatched', 'skipped'].includes(state.route.page));
+  else mutate('/api/change', {ids: [ident], action: 'confirmed', entity: alt.id}, poolIs(state.route, 'unmatched', 'skipped'));
 }
-// 没有选中任何图时，单图快捷键作用于获得焦点或光标所在的图。
-function singleTarget() { return currentItem(); }
+// 没有选中任何图（或大图盖住了选择栏）时，单图快捷键作用于当前图：大图 ＞ 详情栏 ＞ 光标（core/modes.js）。
 export async function singleAction(kind) {
-  const item = singleTarget(); if (!item) return;
+  const item = currentItem(); if (!item) return;
   const r = state.route;
   if (kind === 'remove') {
     if (r.char) mutate('/api/change', {ids: [item.uuid], action: 'rejected', entity: r.char}, true);
@@ -169,22 +172,22 @@ export async function singleAction(kind) {
   } else if (kind === 'tag') {
     const d = state.detail?.uuid === item.uuid ? state.detail : null;
     openTagPicker(() => ({ids: [item.uuid]}), 1, [{...item, user_tags: d?.user_tags || item.user_tags}], () => false);
-  } else if (kind === 'skip' && r.page === 'unmatched') mutate('/api/change', {ids: [item.uuid], action: 'unknown'}, true);
+  } else if (kind === 'skip' && poolIs(r, 'unmatched')) mutate('/api/change', {ids: [item.uuid], action: 'unknown'}, true);
   else if (kind === 'exclude' || kind === 'include') mutate('/api/curate', {ids: [item.uuid], action: kind}, true);
   else if (kind === 'swap' || kind === 'also') {
     const d = state.detail?.uuid === item.uuid ? state.detail : await api('/api/detail?id=' + encodeURIComponent(item.uuid));
     const from = primaryOf(d);
     if (kind === 'swap' && from) swapOne(d, item.uuid, from.id);
     else openPicker({title: from ? t('这张也是…') : t('这张是…'), sentence: e => from ? t('给这张加上 {name}', {name: e.name}) : t('把这张设为 {name}', {name: e.name}), exclude: d.memberships.map(m => m.id), suggest: {ids: [item.uuid]},
-      pick: e => mutate('/api/change', {ids: [item.uuid], action: 'confirmed', entity: e.id}, ['unmatched', 'skipped'].includes(r.page))});
+      pick: e => mutate('/api/change', {ids: [item.uuid], action: 'confirmed', entity: e.id}, poolIs(r, 'unmatched', 'skipped'))});
   }
 }
 export const indexOf = uuid => state.items.findIndex(x => x?.uuid === uuid);
 export async function step(delta) {
-  const cur = state.viewer >= 0 ? state.viewerItem?.uuid : state.focused;
+  const cur = shownUuid();
   if (kept.hold && kept.hold.uuid === cur && Math.abs(delta) === 1) {
     const target = indexOf(delta > 0 ? kept.hold.next : kept.hold.prev); kept.hold = null;
-    if (target >= 0) { state.cursor = target; ensureVisible(target); if (state.viewer >= 0) showViewer(target); else inspect(state.items[target].uuid); return; }
+    if (target >= 0) { setCursor(target); ensureVisible(target); if (state.viewer >= 0) showViewer(target); else inspect(state.items[target].uuid); return; }
   }
   kept.hold = null;
   const at = cur ? indexOf(cur) : -1;
@@ -192,10 +195,12 @@ export async function step(delta) {
   const n = Math.max(0, Math.min(state.total - 1, from + delta)); if (n === from || n < 0) return;
   if (!state.items[n]) await loadPage(Math.floor(n / PAGE) * PAGE);
   if (!state.items[n]) return;
-  state.cursor = n; ensureVisible(n);
+  setCursor(n); ensureVisible(n);
   if (state.viewer >= 0) showViewer(n); else inspect(state.items[n].uuid);
 }
+// 把网格滚到第 i 张可见。主区不是网格的页面（首页从详情栏、大图翻页）不按网格的行去滚。
 export function ensureVisible(i) {
+  if (viewOf(state.route).area !== 'grid') return;
   const v = $('viewport'), row = rowOf(i), top = rowTop(row), height = rowHeight(row);
   if (top < v.scrollTop) v.scrollTop = top; else if (top + height > v.scrollTop + v.clientHeight) v.scrollTop = top + height - v.clientHeight;
   syncCards();
@@ -203,14 +208,16 @@ export function ensureVisible(i) {
 
 // ---------- 全屏查看器 ----------
 const view = {scale: 1, x: 0, y: 0, fit: 1};
-export function openViewer(i) { if (i < 0 || !state.items[i]) return; state.viewer = i; $('viewer').hidden = false; document.body.classList.add('viewing'); showViewer(i); }
-export function closeViewer() { if (state.viewer < 0) return; kept.hold = null; state.viewerItem = null; state.cursor = state.viewer; $('viewer').hidden = true; document.body.classList.remove('viewing'); state.viewer = -1; ensureVisible(state.cursor); }
+// 大图是盖满页面的层：Esc 关它（焦点在层外的输入框里时让位给输入框失焦），关闭时焦点还给打开它的地方。
+const viewerLayer = createLayer({kind: 'overlay', id: 'viewer', el: () => $('viewer'), yieldToInput: true, onDismiss: reason => closeViewer(reason)});
+export function openViewer(i) { if (i < 0 || !state.items[i]) return; state.viewer = i; $('viewer').hidden = false; viewerLayer.open(); document.body.classList.add('viewing'); showViewer(i); }
+export function closeViewer(reason) { viewerLayer.close(reason); if (state.viewer < 0) return; kept.hold = null; state.viewerItem = null; setCursor(state.viewer); $('viewer').hidden = true; document.body.classList.remove('viewing'); state.viewer = -1; ensureVisible(state.cursor); }
 export async function showViewer(i, held = null) {
   if (i < 0 && !held) { closeViewer(); return; }
   if (!held && !state.items[i]) await loadPage(Math.floor(i / PAGE) * PAGE);
   const item = held || state.items[i]; if (!item) { closeViewer(); return; }
   const same = state.viewerItem?.uuid === item.uuid && !$('viewer').hidden;
-  state.viewer = Math.max(0, i); state.cursor = state.viewer; state.viewerItem = item;
+  state.viewer = Math.max(0, i); setCursor(state.viewer); state.viewerItem = item;
   if (same) { $('viewerCount').textContent = indexOf(item.uuid) >= 0 ? `${number(indexOf(item.uuid) + 1)} / ${number(state.total)}` : t('已移出当前列表 · ← → 继续'); return refreshViewerBar(item, i); }
   const img = $('viewerImg'); img.style.transform = ''; img.hidden = false; $('viewerMissing').hidden = true; Object.assign(view, {scale: 1, x: 0, y: 0});
   img.onerror = () => { if (state.viewerItem?.uuid === item.uuid) { img.hidden = true; $('viewerMissing').hidden = false; } };
@@ -255,5 +262,5 @@ export function wireDetail() {
   $('viewerStage').addEventListener('pointermove', e => { if (pan) { view.x = e.clientX - pan.x; view.y = e.clientY - pan.y; applyView(); } });
   $('viewerStage').addEventListener('pointerup', () => { pan = null; });
   $('viewerStage').addEventListener('click', e => { if (e.target === $('viewerStage') && view.scale <= 1) closeViewer(); });
-  $('viewerClose').onclick = closeViewer; $('viewerPrev').onclick = () => step(-1); $('viewerNext').onclick = () => step(1);
+  $('viewerClose').onclick = () => closeViewer(); $('viewerPrev').onclick = () => step(-1); $('viewerNext').onclick = () => step(1);
 }

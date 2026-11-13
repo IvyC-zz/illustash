@@ -34,7 +34,15 @@ run() { printf '\n== %s ==\n' "$*"; "$@"; }
 # 纯工具合成测试及测试文件语法尽早验证；改动相关测试可额外前置。
 run "$python" -m compileall -q tests
 run "$python" tools/check_architecture.py
-run "$python" tools/check_frontend.py
+# 前端结构检查：基线只能缩小。--strict-stale 要求改好的违规同时收紧基线（`--shrink`）；--base-ref 取与 main 的
+# 共同祖先，基线比它大就失败。找不到 origin/main 和 main 时明说并跳过“基线变大”这一项，其余检查照常。
+# CI 里只在 main 上跑，没有可比较的基准，所以只带 --strict-stale。
+frontend_base=$(git merge-base HEAD origin/main 2>/dev/null || git merge-base HEAD main 2>/dev/null || true)
+if [ -z "$frontend_base" ]; then
+  echo '注意：取不到 origin/main 或 main，跳过前端基线“变大”检查（--base-ref）；请先 git fetch origin。' >&2
+fi
+run "$python" tools/check_frontend.py --strict-stale ${frontend_base:+--base-ref "$frontend_base"}
+run "$python" tools/check_styleguide.py
 run "$python" -m unittest discover -s tests -p test_local_acceptance.py -v -b
 # 旧变量不能在 release 前调用任意测试，避免读取上一候选的二进制。
 if [ -n "${CHECK_ALL_PREFLIGHT_TESTS:-}" ]; then
@@ -53,6 +61,7 @@ run cargo fmt --manifest-path native/terms/Cargo.toml --check
 run cargo clippy --locked --manifest-path native/terms/Cargo.toml --all-targets --all-features -- -D warnings
 # 前置较快检查和桌面构建，避免 Python 全量之后才发现构建失败。
 run node --test tests/*.test.cjs tests/test_pixiv_poll.js
+run cargo fmt --manifest-path desktop/Cargo.toml --check
 run cargo clippy --locked --manifest-path desktop/Cargo.toml --all-targets -- -D warnings
 run cargo test --locked --manifest-path desktop/Cargo.toml
 run cargo test --locked --manifest-path native/terms/Cargo.toml

@@ -10,7 +10,8 @@
 |---|---|
 | `check_all.sh`、`local_acceptance.py` | 本地全量检查与固定路径验收，见 [LOCAL_CHECKS.md](LOCAL_CHECKS.md) |
 | `check_architecture.py` | crate 依赖方向检查 |
-| `check_frontend.py` | 前端结构检查：`web/static` 的依赖方向、state 声明、全局监听、对话框、超长行；基线 `frontend_baseline.json` 只能缩小（#320） |
+| `check_frontend.py` | 前端结构检查：`web/static` 的依赖方向、state 声明与写入者、全局监听、对话框、超长行、页面名判断、`app.css` 的写死字面量（#349）；基线 `frontend_baseline.json` 只能缩小（#320），新规则首次登记存量用 `--init-rule` |
+| `check_styleguide.py` | 样式清单页（`styleguide/`，只在开发时用、不进发布包，迁移清点不算生产代码）与实现的同步检查：`census.js` 要等于 `styleguide/census.py` 对当前 `app.css` 的输出，样例和条目标题用到的类要在 `app.css` 里有样式；`styleguide/live.js`（调用 `web/static/ui` 的生成函数画样例）导入的名字要在产品代码里导出、要取的外壳 id 要还在、舞台和样例一一对应，组件条目都标明“调用生成”或“手写”（#352） |
 | `migration_inventory.py` | 生产迁移边界清点，规格在 `tests/migration_inventory.json` |
 | `gen_casefold.py`、`gen_http_unicode.py` | 生成 `crates/core` 的 casefold 与 Unicode 表 |
 | `test_native_contracts.sh`、`bench_native_contracts.sh` | 空 PATH 重放固定契约；契约基准，见 [TERMS_PERFORMANCE.md](TERMS_PERFORMANCE.md) |
@@ -18,5 +19,6 @@
 | `verify_read_http.py` | 原生测试用的 HTTP 逐字节对照辅助 |
 | `build_provenance_probe.py`、`windows_acceptance.py`、`windows_research_acceptance.py` | 溯源候选构建、Windows 基础版与研究包验收 |
 | `build_db.py` | 重建旧格式分析源库；`test_native_library_upgrade` 用它造旧库 |
+| `dev_preview.py` | 浏览器走查用的隔离宿主（临时目录、合成图库），`.claude/launch.json` 的 `web-isolated` 调用它，见 [开发说明](DEVELOPMENT.md#快速开始) |
 
 研究脚本已全部移出本仓库（2026-10-06、2026-10-07）。

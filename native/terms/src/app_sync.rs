@@ -683,6 +683,16 @@ struct RecognitionRun<'a> {
     already_counted: &'a HashSet<String>,
     run_id: i64,
 }
+/// 等待识别的图片（uuid、路径、内容哈希），先认最近保存的（#360）：保存时间从新到旧，同一时间按资产 ID，
+/// 与图库默认的浏览顺序相同（http_browse.rs 的 `ordering`），所以识别到一半时最先看到的几屏已经认完。
+/// 没有保存时间的排在最后。
+fn to_recognise(source: &Connection) -> Result<Vec<Value>> {
+    crate::app_migrate_data::rows(
+        source,
+        "SELECT uuid,src_path,stable_hash FROM assets a WHERE in_scope=1 AND coalesce(trashed,0)=0 \
+         AND NOT EXISTS(SELECT 1 FROM labels l WHERE l.uuid=a.uuid AND l.dim='rating') ORDER BY added_at DESC,uuid",
+    )
+}
 fn recognise(
     library: &Library,
     ctx: &crate::app_tasks::TaskContext,
@@ -694,7 +704,7 @@ fn recognise(
     use std::{fs, process::Command};
     let RecognitionRun { root, per_run, already_counted, run_id } = options;
     let c = crate::app_library::read_connection(&library.source())?;
-    let mut assets=crate::app_migrate_data::rows(&c,"SELECT uuid,src_path,stable_hash FROM assets a WHERE in_scope=1 AND coalesce(trashed,0)=0 AND NOT EXISTS(SELECT 1 FROM labels l WHERE l.uuid=a.uuid AND l.dim='rating') ORDER BY uuid")?;
+    let mut assets = to_recognise(&c)?;
     drop(c);
     // 能读出但解码不了的图片保持不变地等着，直到文件改变（#112）；它们从不占用 per_run 的名额。
     let marks = damaged::load(library)?;
@@ -723,6 +733,7 @@ fn recognise(
     kept.extend(held);
     damaged::save(library, &marks, &kept)?;
     counts["damaged"] = json!(skipped);
+    // 每轮上限留下的是最近保存的那几张，其余的等下一轮。
     if per_run > 0 {
         assets.truncate(per_run);
     }
@@ -1233,6 +1244,30 @@ mod tests {
         watch.read_at = None;
         assert_eq!(watch.poll(&path, 2), None, "oversized file is ignored");
         std::fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn pictures_waiting_for_recognition_come_newest_saved_first() {
+        let c = Connection::open_in_memory().unwrap();
+        c.execute_batch(include_str!("app_source_empty.sql")).unwrap();
+        c.execute_batch(
+            "INSERT INTO assets(uuid,added_at,src_path,in_scope,trashed) VALUES
+               ('B','2026-11-10T08:00:00','b.png',1,0),
+               ('A','2026-11-12T09:30:00','a.png',1,NULL),
+               ('D','2026-11-10T08:00:00','d.png',1,0),
+               ('C','','c.png',1,0),
+               ('E',NULL,'e.png',1,0),
+               ('F','2026-11-13T00:00:00','f.png',1,0),
+               ('G','2026-11-13T00:00:00','g.png',1,1),
+               ('H','2026-11-13T00:00:00','h.png',0,0);
+             INSERT INTO labels(uuid,dim,value,conf,source) VALUES ('F','rating','general',1,'wd_v3');",
+        )
+        .unwrap();
+        let waiting = to_recognise(&c).unwrap();
+        let order: Vec<&str> = waiting.iter().map(|row| row[0].as_str().unwrap()).collect();
+        // 最新的在前，同一时间按资产 ID；没有保存时间的排在最后（空字符串先于 NULL）。
+        // 已识别的 F、已移除的 G 和范围外的 H 不在其中。
+        assert_eq!(order, ["A", "B", "D", "C", "E"]);
+        assert_eq!(waiting[0], json!(["A", "a.png", null]));
     }
 
     type Snapshot = BTreeMap<String, (Vec<String>, Vec<Vec<rusqlite::types::Value>>)>;

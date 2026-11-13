@@ -3,12 +3,13 @@ import {edits} from '../core/edits.js';
 import {dateText, esc, number} from '../core/format.js';
 import {I18N, t} from '../core/i18n.js';
 import {nameWithWork} from '../core/labels.js';
+import {implement, onPage} from '../core/pages.js';
 import {charHash, hashFor} from '../core/route.js';
 import {api, post, readError} from '../core/session.js';
 import {state} from '../core/state.js';
 import {INSP_ICONS, indexOf, inspect, openViewer} from './detail.js';
 import {$, toast, workSmall} from './dom.js';
-import {mutate, viewOpts} from './grid.js';
+import {mutate, showList, viewOpts} from './grid.js';
 
 // ---------- 首页：按加入日期分组的最新图片 ----------
 export const dayLabel = day => { const [y, m, d] = day.split('-').map(Number); const date = new Date(y, m - 1, d), now = new Date();
@@ -25,36 +26,36 @@ export async function renderHome(keep = false) {
   if (!keep) { home.days = []; home.next = ''; $('viewport').scrollTop = 0; $('homePage').innerHTML = `<div class="loading-line">${t('读取中…')}</div>`; }
   try {
     const r = await api('/api/home?' + new URLSearchParams({nsfw: state.nsfw, days: Math.min(20, Math.max(5, home.days.length))}));
-    if (gen !== home.gen || state.route.page !== 'home') return;
+    if (gen !== home.gen || !onPage(state.route, 'home')) return;
     home.days = r.days; home.next = r.next;
-    if (!keep) { home.askSkip = []; home.askOff = new Set(); home.ask = await nextAsk(); if (gen !== home.gen || state.route.page !== 'home') return; }
+    if (!keep) { home.askSkip = []; home.askOff = new Set(); home.ask = await nextAsk(); if (gen !== home.gen || !onPage(state.route, 'home')) return; }
     drawHome();
     if (keep) $('viewport').scrollTop = scroll;
-  } catch (e) { if (gen === home.gen && state.route.page === 'home') $('homePage').innerHTML = `<p class="empty">${esc(readError(e))}</p>`; }
+  } catch (e) { if (gen === home.gen && onPage(state.route, 'home')) $('homePage').innerHTML = `<p class="empty">${esc(readError(e))}</p>`; }
 }
 export async function moreHome() {
-  if (home.loading || !home.next || state.route.page !== 'home') return;
+  if (home.loading || !home.next || !onPage(state.route, 'home')) return;
   home.loading = true; const gen = home.gen; let appended = false;
   $('homeSentinel').textContent = t('正在读取更早的图…');
   try {
     const r = await api('/api/home?' + new URLSearchParams({nsfw: state.nsfw, before: home.next}));
-    if (gen !== home.gen || state.route.page !== 'home') return;
+    if (gen !== home.gen || !onPage(state.route, 'home')) return;
     const known = new Set(home.days.map(g => g.day)), days = r.days.filter(g => !known.has(g.day) && known.add(g.day));
     home.days.push(...days); home.next = r.next;
     const sentinel = $('homeSentinel');
     sentinel.insertAdjacentHTML('beforebegin', days.map(g => homeDay(g, home.width)).join(''));
     for (const day of days) for (const el of $('homePage').querySelectorAll(`.home-day[data-day="${day.day}"] .home-strip`)) syncStrip(el);
-    state.items.push(...days.flatMap(g => g.items)); state.total = state.items.length;
+    showList([...state.items, ...days.flatMap(g => g.items)]);
     if (!home.next) { home.observer?.disconnect(); sentinel.textContent = t('已经到底了'); }
     appended = true;
-  } catch (e) { if (gen === home.gen && state.route.page === 'home') {
+  } catch (e) { if (gen === home.gen && onPage(state.route, 'home')) {
     $('homeSentinel').innerHTML = `<button class="home-retry" data-home-retry>${t('读取失败，重试')}</button>`; toast(e.message);
   } }
   finally {
     if (gen === home.gen) {
       home.loading = false;
       // 每次追加后重新观察，这样仍在边距内的哨兵会再次加载。
-      if (appended && home.next && state.route.page === 'home' && $('homeSentinel')) { home.observer?.unobserve($('homeSentinel')); home.observer?.observe($('homeSentinel')); }
+      if (appended && home.next && onPage(state.route, 'home') && $('homeSentinel')) { home.observer?.unobserve($('homeSentinel')); home.observer?.observe($('homeSentinel')); }
     }
   }
 }
@@ -130,27 +131,27 @@ export async function moreOfDay(day) {
   dayLoading.add(day); const gen = home.gen;
   try {
     const r = await api('/api/assets?' + new URLSearchParams({day, nsfw: state.nsfw, order: 'newest', offset: g.items.length, limit: 30, count: 0}));
-    if (gen !== home.gen || state.route.page !== 'home') return;
+    if (gen !== home.gen || !onPage(state.route, 'home')) return;
     const known = new Set(g.items.map(x => x.uuid)); g.items.push(...r.items.filter(x => !known.has(x.uuid)));
     if (!r.items.length) g.count = g.items.length;
     const el = $('homePage').querySelector(`.home-strip[data-day="${day}"]`), left = el?.scrollLeft || 0;
     const sec = el?.closest('.home-day'); if (!sec) return;
     const tmp = document.createElement('div'); tmp.innerHTML = homeDay(g, home.width); sec.replaceWith(tmp.firstElementChild);
     const fresh = $('homePage').querySelector(`.home-strip[data-day="${day}"]`); if (fresh) { fresh.scrollLeft = left; syncStrip(fresh); }
-    state.items = home.days.flatMap(x => x.items); state.total = state.items.length;
-  } catch (e) { if (gen === home.gen && state.route.page === 'home') toast(e.message); } finally { if (gen === home.gen) dayLoading.delete(day); }
+    showList(home.days.flatMap(x => x.items));
+  } catch (e) { if (gen === home.gen && onPage(state.route, 'home')) toast(e.message); } finally { if (gen === home.gen) dayLoading.delete(day); }
 }
 export function drawHome() {
-  if (state.route.page !== 'home') return;
+  if (!onPage(state.route, 'home')) return;
   const page = $('homePage'); home.width = page.clientWidth;
-  if (!home.days.length) { page.innerHTML = `<p class="empty">${t('没有符合当前 R18 设置的图片。')}</p>`; state.items = []; state.total = 0; return; }
+  if (!home.days.length) { page.innerHTML = `<p class="empty">${t('没有符合当前 R18 设置的图片。')}</p>`; showList([]); return; }
   page.innerHTML = home.days.map((g, i) => homeDay(g, home.width) + (i === 0 ? askCardHTML() : '')).join('') + `<div class="home-more-line" id="homeSentinel">${home.next ? t('正在读取更早的图…') : t('已经到底了')}</div>`;
-  state.items = home.days.flatMap(g => g.items); state.total = state.items.length;
+  showList(home.days.flatMap(g => g.items));
   for (const el of page.querySelectorAll('.home-strip')) syncStrip(el);
   home.observer?.disconnect();
   if (home.next) { home.observer = new IntersectionObserver(es => { if (es.some(e => e.isIntersecting)) moreHome(); }, {root: $('viewport'), rootMargin: '600px'}); home.observer.observe($('homeSentinel')); }
 }
-export function markHomeFocus() { if (state.route.page === 'home') for (const b of $('homePage').querySelectorAll('.home-j')) b.classList.toggle('on', b.dataset.id === state.focused); }
+export function markHomeFocus() { if (onPage(state.route, 'home')) for (const b of $('homePage').querySelectorAll('.home-j')) b.classList.toggle('on', b.dataset.id === state.focused); }
 // 首页「认一认」：一个角色，几张机器识别出的图；点掉错的，然后确认其余的。
 async function nextAsk() {
   if (!viewOpts.ask) return null;
@@ -161,7 +162,7 @@ function askCardHTML() {
   const off = home.askOff.size, why = b.kind === 'hint' ? t('和你确认过的 TA 很像 · 点对了就能认出更多') : b.kind === 'seed' ? t('再确认 {n} 张就能学会认 TA', {n: Math.max(1, 5 - b.confirmed)}) : t('抽查一下认得准不准');
   return `<section class="ask-card" id="askCard"><div class="ask-head"><b>${t('认一认')}</b><span>${t('这些是 {name} 吗？', {name: `<a href="${charHash(b.entity)}">${esc(b.name)}</a>${workSmall({id: b.entity, name: b.name})}`})}</span><small>${why}</small></div>
     <div class="ask-row">${b.items.map(x => `<button class="ask-img${home.askOff.has(x.uuid) ? ' off' : ''}" data-askimg="${esc(x.uuid)}" title="${home.askOff.has(x.uuid) ? t('点一下：改回「是」') : t('点一下：不是 TA')}" style="aspect-ratio:${ratio(x)}"><img src="/image?id=${encodeURIComponent(x.uuid)}&size=thumb" alt="" loading="lazy"><i aria-hidden="true">✕</i></button>`).join('')}</div>
-    <div class="ask-foot"><span>${off ? t('{n} 张不是 TA', {n: off}) : t('点掉不是 TA 的')}</span><button class="btn" data-askcard="later">${t('以后再说')}</button><button class="btn pri" data-askcard="ok">${off === b.items.length ? t('都不是') : off ? t('其余 {n} 张是', {n: b.items.length - off}) : t('都对')}</button></div></section>`;
+    <div class="ask-foot"><span>${off ? t('{n} 张不是 TA', {n: off}) : t('点掉不是 TA 的')}</span><button class="secondary" data-askcard="later">${t('以后再说')}</button><button class="primary" data-askcard="ok">${off === b.items.length ? t('都不是') : off ? t('其余 {n} 张是', {n: b.items.length - off}) : t('都对')}</button></div></section>`;
 }
 function redrawAskCard() { const el = $('askCard'), html = askCardHTML(); if (!el) return drawHome(); if (!html) { el.remove(); return; } const t = document.createElement('div'); t.innerHTML = html; el.replaceWith(t.firstElementChild); }
 async function submitAskCard(how) {
@@ -197,5 +198,8 @@ export function wireHome() {
     day.classList.add('focus'); for (const b of day.querySelectorAll('.home-j')) b.classList.toggle('hit', b.dataset.chars.split(' ').includes(c.dataset.char));
   });
   $('homePage').addEventListener('mouseleave', () => { for (const d of $('homePage').querySelectorAll('.home-day.focus')) d.classList.remove('focus'); });
-  new ResizeObserver(() => { if (state.route.page !== 'home' || !home.days.length || Math.abs($('homePage').clientWidth - home.width) < 8) return; clearTimeout(home.resize); home.resize = setTimeout(drawHome, 120); }).observe($('homePage'));
+  new ResizeObserver(() => { if (!onPage(state.route, 'home') || !home.days.length || Math.abs($('homePage').clientWidth - home.width) < 8) return; clearTimeout(home.resize); home.resize = setTimeout(drawHome, 120); }).observe($('homePage'));
 }
+
+// 首页登记：渲染入口，以及数据变了之后怎么重画（撤销、同步到新图、改动之后保持滚动；切换 R18 重新读；视图选项只重排）。
+implement({home: {render: () => renderHome(), refresh: why => { if (why === 'view') drawHome(); else renderHome(why !== 'nsfw' && why !== 'ask'); }}});

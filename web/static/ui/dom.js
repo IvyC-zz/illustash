@@ -1,7 +1,7 @@
 // 桌面布局里覆盖整个页面的部件（#199）：按 id 找元素、带撤销按钮的 toast、错误横幅和工具栏里的撤销按钮。它们的状态在
 // core/session.js 和 core/edits.js。
 import {t, tb} from '../core/i18n.js';
-import {esc, isMac, shortcut} from '../core/format.js';
+import {esc, isMac, platformText, shortcut} from '../core/format.js';
 import {prefs} from '../core/prefs.js';
 import {session, STALE, onStale, readError} from '../core/session.js';
 import {onLatest} from '../core/edits.js';
@@ -11,8 +11,8 @@ export const $ = id => document.getElementById(id);
 export function platformHints(root, mac = isMac) {
   if (mac) return;
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
-  while (walker.nextNode()) walker.currentNode.nodeValue = walker.currentNode.nodeValue.replace(/⌘(?=\s|$)/g, 'Ctrl').replaceAll('⌘', 'Ctrl+');
-  for (const el of root.querySelectorAll('[title]')) el.title = el.title.replace(/⌘(?=\s|$)/g, 'Ctrl').replaceAll('⌘', 'Ctrl+');
+  while (walker.nextNode()) walker.currentNode.nodeValue = platformText(walker.currentNode.nodeValue, mac);
+  for (const el of root.querySelectorAll('[title]')) el.title = platformText(el.title, mac);
 }
 let toastTimer;
 export function toast(message, withUndo = false) {

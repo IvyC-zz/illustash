@@ -4,8 +4,8 @@ const {test, before, afterEach} = require('node:test');
 const assert = require('node:assert/strict');
 const web = require('./web.cjs');
 const tick = () => new Promise(resolve => setImmediate(resolve));
-let settings, artists;
-before(async () => { await web.ready(); settings = await web.load('ui/settings.js'); artists = await web.load('ui/artists.js'); });
+let settings, artists, overlay;
+before(async () => { await web.ready(); settings = await web.load('ui/settings.js'); artists = await web.load('ui/artists.js'); overlay = await web.load('ui/overlay.js'); });
 let restore = () => {};
 afterEach(() => { restore(); restore = () => {}; });
 
@@ -14,10 +14,13 @@ function harness() {
   core.session.token = 'synthetic-token'; core.state.route = {page: 'settings'};
   const element = () => ({hidden: true, textContent: '', classList: {toggle() {}}, contains: () => true});
   const nodes = {};
-  globalThis.document = {body: {append(d) { dialogs.push(d); }}, getElementById: id => nodes[id] ||= element(), createElement() {
+  const handlers = {};
+  globalThis.document = {body: {append(d) { dialogs.push(d); }}, getElementById: id => nodes[id] ||= element(),
+    addEventListener(type, fn) { (handlers[type] ||= []).push(fn); }, dispatch(type, e) { for (const fn of handlers[type] || []) fn(e); }, createElement() {
     const nodes = {};
     return {returnValue: '', setAttribute() {}, querySelector(selector) {return nodes[selector] ||= {};},
-      showModal() {this.open = true;}, close(value = '') {this.returnValue = value; this.open = false; this.onclose();},
+      showModal() {this.open = true;}, addEventListener(type, fn) {if (type === 'close') this.afterClose = fn;},
+      close(value = '') {this.returnValue = value; this.open = false; this.onclose(); this.afterClose?.();},
       remove() {this.removed = true;}, getBoundingClientRect: () => ({left:10,right:100,top:10,bottom:100})};
   }};
   // 移除来源先问它有多少张图，再带 confirm: 1 移除。
@@ -33,6 +36,7 @@ function harness() {
   globalThis.localStorage = {getItem: k => consent.get(k), setItem: (k, v) => consent.set(k, v)};
   globalThis.setTimeout = () => 0;
   restore = () => { globalThis.localStorage = localStorage; globalThis.setTimeout = setTimeout; };
+  overlay.resetLayers(); overlay.wireOverlays();
   const c = {session: core.session, state: core.state, findArtists: ids => artists.findArtists(ids), findArtistWorks: artist => artists.findArtistWorks(artist, 'synthetic')};
   const remove = () => settings.onLibrariesClick({target: {closest: () => ({dataset: {libRemove: 'synthetic-source'}})}});
   return {c, dialogs, calls, consent, remove};
@@ -50,9 +54,10 @@ test('source removal waits with N images visible and submits only after explicit
 
 for (const dismiss of ['cancel','close','escape','backdrop']) test(`${dismiss} leaves source removal unsubmitted`, async () => {
   const h = harness(), pending = h.remove(); await tick(); const d = h.dialogs[0];
-  if (dismiss === 'close') d.querySelector('[data-close]').onclick();
-  else if (dismiss === 'backdrop') d.onclick({target:d,clientX:0,clientY:0});
-  else d.close(dismiss === 'cancel' ? 'cancel' : '');
+  if (dismiss === 'close') d.onclick({target: {closest: selector => selector === '[data-close]' ? {} : null}});
+  else if (dismiss === 'backdrop') document.dispatch('click', {target:d,clientX:0,clientY:0});
+  else if (dismiss === 'escape') document.dispatch('keydown', {key: 'Escape', target: {}, preventDefault() {}, stopImmediatePropagation() {}});
+  else d.close('cancel');
   await pending; assert.equal(h.calls.length,1); assert.equal(d.removed,true);
 });
 
