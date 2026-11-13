@@ -25,7 +25,7 @@ use std::{
         atomic::{AtomicBool, Ordering},
         Mutex, OnceLock,
     },
-    time::{Duration, Instant},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 #[derive(Deserialize, Clone)]
@@ -870,15 +870,45 @@ fn info_at(models: &Models, place: &Place) -> Json {
 
 /// GET /api/models.
 pub(crate) fn info(resources: &Path) -> Result<Json> {
-    Ok(with_acceleration(resources, info_at(&APP, &Place::app(resources)?)))
+    let place = Place::app(resources)?;
+    Ok(with_acceleration(resources, &place, info_at(&APP, &place)))
 }
 
 /// 「使用 GPU 加速识别」（#270）在模型卡片上：这个构建有没有加速器、开关（POST /api/preferences），
 /// 以及上一个 worker 每个模型用的是什么（recognition_compute/backend.rs）。
-fn with_acceleration(resources: &Path, mut value: Json) -> Json {
+fn with_acceleration(resources: &Path, place: &Place, mut value: Json) -> Json {
     let shared = crate::app_resources::shared_path(resources).ok();
-    value.set("acceleration", Json::from(crate::recognition_compute::backend::info(shared.as_deref())));
+    value.set("acceleration", Json::from(acceleration_at(shared.as_deref(), place)));
     value
+}
+/// 加速状态，去掉 WD 加速文件装好之前留下的那条 WD 回退记录（#375）：它说的是装好之前的文件，下一次识别会写新的。
+/// 只读 acceleration.json，不改它（那是 worker 写的文件）。
+fn acceleration_at(shared: Option<&Path>, place: &Place) -> Value {
+    let mut value = crate::recognition_compute::backend::info(shared);
+    if let Some(last) = value.get_mut("last").and_then(Value::as_object_mut) {
+        drop_superseded_wd(last, variant_installed(&place.root, place.manifest));
+    }
+    value
+}
+/// 可选文件（只有 WD 加速文件）装好的时间：下载和导入都先在 `.partial` 里写出新文件，校验后改名进根目录（`activate`），
+/// 所以它的修改时间就是装好的时间，与所选文件原来的时间无关；同长度损坏的修复同样写出新文件。
+fn variant_installed(root: &Path, manifest: &Manifest) -> Option<SystemTime> {
+    manifest
+        .files
+        .iter()
+        .filter(|e| e.optional && has(root, e))
+        .filter_map(|e| fs::metadata(root.join(&e.path)).and_then(|m| m.modified()).ok())
+        .max()
+}
+/// WD 的回退记录（有原因的那种）写于 `installed` 之前时去掉。记录的 `at` 只精确到秒：与装好时间同一秒的算作装好之后写的，
+/// 照常报告。CCIP 的记录不看。
+fn drop_superseded_wd(last: &mut serde_json::Map<String, Value>, installed: Option<SystemTime>) {
+    let Some(installed) = installed.and_then(|t| t.duration_since(UNIX_EPOCH).ok()) else { return };
+    let Some(wd) = last.get("wd") else { return };
+    let fell_back = wd.get("reason").is_some_and(|r| !r.is_null());
+    if fell_back && wd.get("at").and_then(Value::as_u64).unwrap_or(0) < installed.as_secs() {
+        last.remove("wd");
+    }
 }
 
 /// POST /api/models：
@@ -893,7 +923,7 @@ pub(crate) fn post(resources: &Path, body: &Json, in_use: bool) -> Result<Json> 
     let mut place = Place::app(resources)?;
     place.proxy = proxy();
     place.in_use = in_use;
-    post_at(&APP, place, body).map(|value| with_acceleration(resources, value))
+    post_at(&APP, place.clone(), body).map(|value| with_acceleration(resources, &place, value))
 }
 
 fn post_at(models: &'static Models, place: Place, body: &Json) -> Result<Json> {

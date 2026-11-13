@@ -223,46 +223,16 @@ test('the note when a job ends says both things in one toast, and calls the opti
   assert.equal(context.finishedNote({kind: 'import', status: 'done', results: []}, false, missing), '还缺 1 个文件');
 });
 
-test('a WD fallback recorded before the acceleration file was put in place no longer asks for a repair (#375)', () => {
-  const files = [{path: 'wd/model.onnx', optional: false}, {path: 'coreml/wd-swinv2-v3-v1.onnx', optional: true}];
-  const accel = (at, reason = '加速文件损坏') => ({available: true, backend: 'coreml', on: true, last: {wd: {requested: 'coreml', used: 'cpu', reason, at}}});
-  const m = (job, fields = {}) => models({status: 'ready', files, optional_missing: false, acceleration: accel(5), job, ...fields});
-  const running = m({kind: 'import', status: 'running'});
-  const imported = result => m({kind: 'import', status: 'done', results: [{name: 'x.onnx', result, path: result === 'accepted' ? 'coreml/wd-swinv2-v3-v1.onnx' : null}]});
-  // 导入接收了加速文件、下载（补下或修复）完成：那时的记录过期。
-  assert.equal(context.settledWd(running, imported('accepted'), null), 5);
-  assert.equal(context.settledWd(m({kind: 'download', status: 'running'}), m({kind: 'download', status: 'done'}), null), 5);
-  // 导入的不是它、任务失败或取消、结束时仍缺加速文件、任务没结束：沿用原来的。
-  assert.equal(context.settledWd(running, imported('unknown'), null), null);
-  const accepted = {kind: 'import', status: 'done', results: [{result: 'accepted', path: 'wd/model.onnx'}]};
-  assert.equal(context.settledWd(running, m(accepted), null), null, 'only the original file was accepted');
-  assert.equal(context.settledWd(m({kind: 'download', status: 'running'}), m({kind: 'download', status: 'failed'}), 3), 3);
-  assert.equal(context.settledWd(m({kind: 'download', status: 'running'}), m({kind: 'download', status: 'cancelled'}), 3), 3);
-  assert.equal(context.settledWd(running, {...imported('accepted'), optional_missing: true}, null), null);
-  assert.equal(context.settledWd(running, running, 3), 3);
-  // 过期的 WD 记录不算；新的识别写入新的 at 后恢复；别的模型的记录不受影响；关掉加速就都不算。
-  const ccip = {...accel(5), last: {...accel(5).last, ccip: {reason: 'ccip 失败', at: 5}}};
-  assert.deepEqual(Object.keys(context.liveFallbacks(m(null), 5)), []);
-  assert.deepEqual(Object.keys(context.liveFallbacks(m(null), null)), ['wd']);
-  assert.deepEqual(Object.keys(context.liveFallbacks(m(null, {acceleration: accel(9)}), 5)), ['wd']);
-  assert.deepEqual(Object.keys(context.liveFallbacks(m(null, {acceleration: ccip}), 5)), ['ccip']);
-  assert.deepEqual(context.liveFallbacks(m(null, {acceleration: {...accel(5), on: false}}), null), {});
-  assert.deepEqual(Object.keys(context.liveFallbacks(m(null, {acceleration: accel(9, '')}), 5)), [], 'a record without a reason');
-});
-
-test('the settings card stops offering a repair once the import put the file in place, until recognition runs again (#375)', async () => {
-  const files = [{path: 'wd/model.onnx', size: 1, sha256: '0', optional: false}, {path: 'coreml/wd-swinv2-v3-v1.onnx', size: 1, sha256: '0', optional: true}];
-  const accel = at => ({available: true, backend: 'coreml', on: true, last: {wd: {requested: 'coreml', used: 'cpu', reason: '加速文件损坏', at}}});
-  const m = (job, at = 5) => models({status: 'ready', files, optional_missing: false, acceleration: accel(at), job});
-  const done = {kind: 'import', status: 'done', results: [{name: 'x.onnx', result: 'accepted', path: 'coreml/wd-swinv2-v3-v1.onnx'}]};
-  const replies = [m(null), m({kind: 'import', status: 'running'}), m(done), m(done, 9)];
-  globalThis.fetch = async () => ({ok: true, status: 200, json: async () => replies.shift()});
-  const read = async () => { await context.loadModels(); return [/修复 WD 加速文件/.test(context.modelsActions()), /<em>/.test(context.accelerationLine())]; };
-  assert.deepEqual(await read(), [true, true], 'the fallback from the last recognition');
-  await read();
-  assert.deepEqual(await read(), [false, false], 'the import was accepted: that record is out of date');
-  assert.deepEqual(await read(), [true, true], 'a later recognition fell back again');
-  delete globalThis.fetch;
+test('fallbacks count only while acceleration is on and a reason was written (#375)', () => {
+  const accel = (last, on = true) => models({status: 'ready', acceleration: {available: true, backend: 'coreml', on, last}});
+  const wd = {requested: 'coreml', used: 'cpu', reason: '加速文件损坏', at: 5}, ccip = {requested: 'coreml', used: 'coreml', reason: null, at: 5};
+  assert.deepEqual(Object.keys(context.fallbacks(accel({wd, ccip}))), ['wd']);
+  assert.deepEqual(context.fallbacks(accel({wd}, false)), {});
+  // 宿主不报装好加速文件之前的 WD 记录：没有记录就没有「修复」和红字。
+  const settled = accel({ccip});
+  assert.deepEqual(context.fallbacks(settled), {});
+  assert.equal(context.modelsActions(settled), '');
+  assert.doesNotMatch(context.accelerationLine(settled), /<em>/);
 });
 
 test('a sync that ends reads the models again, so the card follows the latest recognition (#375)', async () => {

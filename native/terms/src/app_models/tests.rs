@@ -210,6 +210,68 @@ fn optional_file_can_be_imported_after_originals_are_ready() {
         assert_eq!(fs::read(place.root.join("coreml/wd.onnx")).unwrap(), data);
     }
 }
+fn secs(t: SystemTime) -> u64 {
+    t.duration_since(UNIX_EPOCH).unwrap().as_secs()
+}
+fn status(shared: &Path, records: Value) {
+    fs::create_dir_all(shared).unwrap();
+    fs::write(shared.join(crate::recognition_compute::backend::STATUS_FILE), records.to_string()).unwrap();
+}
+
+#[test]
+fn a_wd_fallback_from_before_the_variant_was_installed_is_dropped() {
+    let installed = UNIX_EPOCH + Duration::from_millis(1_000_500);
+    let record = |at: u64, reason: Value| json!({"requested": "coreml", "used": "cpu", "reason": reason, "at": at});
+    let check = |wd: Value, installed: Option<SystemTime>| {
+        let mut last = serde_json::Map::new();
+        last.insert("wd".into(), wd);
+        last.insert("ccip".into(), record(1, "ccip 失败".into()));
+        drop_superseded_wd(&mut last, installed);
+        assert!(last.contains_key("ccip"), "CCIP 的记录不看");
+        last.contains_key("wd")
+    };
+    assert!(!check(record(999, "加速文件损坏".into()), Some(installed)), "装好之前的回退");
+    assert!(check(record(1_000, "加速文件损坏".into()), Some(installed)), "同一秒：算作装好之后");
+    assert!(check(record(1_001, "加速文件损坏".into()), Some(installed)), "装好之后的识别又回退了");
+    assert!(check(record(999, Value::Null), Some(installed)), "没有回退的记录保留");
+    assert!(check(record(999, "加速文件损坏".into()), None), "没有加速文件");
+}
+
+#[test]
+fn the_models_state_stops_reporting_the_old_wd_fallback_once_the_variant_is_imported() {
+    let fixture = Fixture::new();
+    let server = server(fixture.routes(&[], Mode::Normal, true));
+    let models = models();
+    post(models, &fixture.place(&server), json!({"action": "download"})).unwrap();
+    assert_eq!(finished(models)["status"], "done");
+    let data = bytes(45_678, 37);
+    let place = with_variant(fixture.place(&server), &server, &data);
+    let shared = fixture.dir.join("shared-status");
+    let reported = || acceleration_at(Some(&shared), &place)["last"].as_object().unwrap().clone();
+    // 上一次识别：WD 缺加速文件，用了 CPU；CCIP 也回退了。
+    let earlier = secs(SystemTime::now()) - 60;
+    let fell = |at| json!({"requested": "coreml", "used": "cpu", "reason": "加速文件不可用", "at": at});
+    status(&shared, json!({"wd": fell(earlier), "ccip": fell(earlier)}));
+    assert!(reported().contains_key("wd"), "加速文件还没装：照常报告");
+    // 所选文件的时间很早：装好的时间仍是现在。
+    let chosen = fixture.dir.join("renamed.onnx");
+    fs::write(&chosen, &data).unwrap();
+    fs::File::options().write(true).open(&chosen).unwrap().set_modified(UNIX_EPOCH + Duration::from_secs(1)).unwrap();
+    let start = SystemTime::now() - Duration::from_secs(1);
+    post(models, &place, json!({"action": "import", "paths": [chosen]})).unwrap();
+    assert_eq!(finished(models)["results"][0]["result"], "accepted");
+    assert!(variant_installed(&place.root, place.manifest).unwrap() >= start);
+    // 每次读取（页面重开、App 重启都只是再读一次）都一样：旧的 WD 记录不报，CCIP 照报。
+    for _ in 0..2 {
+        let last = reported();
+        assert!(!last.contains_key("wd"));
+        assert_eq!(last["ccip"]["reason"], "加速文件不可用");
+    }
+    // 下一次识别写了新记录：照常报告。
+    status(&shared, json!({"wd": fell(secs(SystemTime::now()) + 1), "ccip": fell(earlier)}));
+    assert_eq!(reported()["wd"]["reason"], "加速文件不可用");
+}
+
 /// 三个大小不同的合成文件：根目录里一个大文件，子文件夹里一个，再加一个小 JSON。
 struct Fixture {
     dir: PathBuf,
