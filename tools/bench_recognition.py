@@ -278,6 +278,9 @@ def layout(args, work):
               (ROOT / 'tags/tags_v3.csv', resources / 'tags/tags_v3.csv'),
               (args.models / 'wd_swinv2_v3_emb.onnx', resources / 'models/wd_swinv2_v3_emb.onnx'),
               (args.models / 'ccip/model_feat.onnx', resources / 'models/ccip/model_feat.onnx')]
+    variant = json.loads((ROOT / 'native/terms/models.json').read_text())['wd_coreml']['file']['path']
+    if sys.platform == 'darwin' and (args.models / variant).is_file():
+        copies.append((args.models / variant, resources / 'models' / variant))
     if WINDOWS:
         copies.append((args.openblas, resources / 'openblas/openblas.dll'))
     if args.directml:
@@ -489,6 +492,9 @@ def main():
         inputs = {name: sha256(path) for name, path in (
             ('wd', resources / 'models/wd_swinv2_v3_emb.onnx'), ('ccip', resources / 'models/ccip/model_feat.onnx'),
             ('runtime', resources / 'onnxruntime' / RUNTIME))}
+        variant = json.loads((ROOT / 'native/terms/models.json').read_text())['wd_coreml']['file']['path']
+        if (resources / 'models' / variant).is_file():
+            inputs['wd_coreml'] = sha256(resources / 'models' / variant)
         results = {}
         for backend in backends:
             results[backend] = summarise(args, generated, before, after, trials[backend], stages[backend])

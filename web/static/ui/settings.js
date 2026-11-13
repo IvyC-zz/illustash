@@ -1,6 +1,7 @@
 // 设置各页（桌面布局，#199）：每页的卡片、它们的表单和按钮。它们读取和更改的内容在 core/settings.js（任务自己的卡片在
 // core/jobs.js）。
 import {t, tb, said, I18N} from '../core/i18n.js';
+import {composing} from '../core/keys.js';
 import {esc, isMac, number, bytes, stamp, localStamp, pct, localTime} from '../core/format.js';
 import {implement, onPage} from '../core/pages.js';
 import {prefs} from '../core/prefs.js';
@@ -104,7 +105,7 @@ export function renderModelCard() {
     // 后端只为输入 key 时的那个地址保留 key：换了新地址而不带 key 会把它清掉。
     save(body, () => m.configured && !state.names?.model_api?.configured ? t('接口地址已更改，原来的 API key 已清除，请重新填写') : t('设置已保存'));
   };
-  for (const id of ['modelBase', 'modelName', 'modelKey']) $(id).onkeydown = e => { if (e.key === 'Enter' && !e.isComposing) $('modelSave').click(); };
+  for (const id of ['modelBase', 'modelName', 'modelKey']) $(id).onkeydown = e => { if (e.key === 'Enter' && !composing(e)) $('modelSave').click(); };
   if ($('modelClear')) $('modelClear').onclick = () => save({key: null}, t('API key 已清除'));
   if ($('modelTest')) $('modelTest').onclick = async () => {
     $('modelTest').disabled = true;

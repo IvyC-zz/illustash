@@ -1201,7 +1201,7 @@
   "角色页：换成别的角色；其余页：选中的图设为角色，没有选中时给当前这张加角色": "On a character page: change to another character; elsewhere: assign a character to the selected pictures, or add one to the current picture when nothing is selected",
   "给当前这张追加角色；不在角色页、有选中时同 C": "Add another character to the current picture; outside character pages, with a selection, the same as C",
   "子标签（角色页，选中图片时）": "Sub-tags (on a character page, with pictures selected)",
-  "跳过（「未识别」页和它的分组；没有选中时只在「全部未识别」）": "Skip (“Unidentified” and its groups; without a selection, only on “All unidentified”)",
+  "跳过（「全部未识别」和各组；没有选中时跳过当前这张）": "Skip (“All unidentified” and its groups; without a selection, skips the current picture)",
   "选详情栏或大图里「也可能是」的第几项；按住 ⌥（Alt）改为追加": "Pick that “Might also be” in the details or the large view; hold ⌥ (Alt) to add it instead",
   "回答「是 TA 吗？」：随机抽查页回答选中的图，详情栏或大图里回答问题条": "Answer “Is this them?”: for the selected pictures on Spot check, or the question in the details or the large view",
   "缩放图片网格；大图打开时缩放大图": "Zoom the picture grid; zoom the large view while it is open",
@@ -2430,7 +2430,6 @@
   "正在识别或下载，等它结束再删除": "Recognizing or downloading; delete once it has finished",
   "删除已下载的模型": "Delete the downloaded models",
   "使用 GPU 加速识别": "Use the GPU to speed up recognition",
-  "用 GPU 和神经引擎（Core ML）计算角色特征，识别更快，角色判定和只用 CPU 时一致。第一次会先花几秒准备。": "Computes character features on the GPU and Neural Engine (Core ML): recognition is faster, and characters are identified the same as on the CPU alone. The first time takes a few seconds to prepare.",
   "用显卡计算，识别更快，角色判定和只用 CPU 时一致。": "Computes on the graphics card: recognition is faster, and characters are identified the same as on the CPU alone.",
   "关掉就全部用 CPU。": "Turn it off to use only the CPU.",
   "下次识别时生效": "takes effect at the next recognition",
@@ -2496,5 +2495,13 @@
   "图库管理": "Libraries",
   "这台电脑上的其他图库": "Other libraries on this computer",
   "吉祥物、玩家化身这类不算角色、只当标签的，在这里看全部、设置和改回": "Mascots, player stand-ins and other tag-only characters: see them all, add one or change one back",
-  "{name}（{work}）": "{name} ({work})"
+  "{name}（{work}）": "{name} ({work})",
+  "识别模型已就位；WD 加速文件尚未就位，WD 暂用 CPU。": "Recognition models are ready. WD uses the CPU until its acceleration file is installed.",
+  "WD 加速文件没能下载，WD 暂用 CPU。": "The WD acceleration file could not be downloaded; WD uses the CPU for now.",
+  "识别模型已就位，开始识别；WD 加速文件没能下载，WD 暂用 CPU。": "The recognition models are in place; recognition is starting. The WD acceleration file could not be downloaded, so WD uses the CPU for now.",
+  "识别模型已就位，开始识别。{problem}": "The recognition models are in place; recognition is starting. {problem}",
+  "下载 WD 加速文件（约 {size}）": "Download WD acceleration file (about {size})",
+  "修复 WD 加速文件": "Repair WD acceleration file",
+  "用 Core ML 加速标签与角色特征计算。首次需要准备编译缓存；加速不可用时自动用 CPU。": "Use Core ML to accelerate tags and character features. The first run prepares a compiled cache; CPU is used automatically if acceleration is unavailable.",
+  "原始模型先从这个地址下载，不行再换 ModelScope。填 {hf} 就是直连 Hugging Face。WD 加速文件从项目的 GitHub Release 下载。": "Original models are downloaded here first, then from ModelScope if needed. Set {hf} to connect to Hugging Face directly. The WD acceleration file comes from the project’s GitHub Release."
 }

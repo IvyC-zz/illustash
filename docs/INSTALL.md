@@ -42,7 +42,7 @@
 
 ## 识别模型
 
-安装包里没有带识别模型。第一次使用时，应用会提示「识别要用的模型还没下载」，点「下载模型」后下载约 618 MB；下载前可以先建库、浏览和手动整理，模型就位后自动开始识别。模型放在用户目录里，所有图库共用，以后更新 Illustash 不用再下：
+安装包里没有带识别模型。第一次使用时，应用会提示「识别要用的模型还没下载」，原始模型约 618 MB，Apple 芯片的 macOS 另下载约 467 MB 的 WD 加速文件（合计约 1.1 GB）；下载前可以先建库、浏览和手动整理，模型就位后自动开始识别。模型放在用户目录里，所有图库共用，以后更新 Illustash 不用再下：
 
 - macOS：`~/Library/Application Support/Illustash/Shared/models/`
 - Windows：`%LOCALAPPDATA%\Illustash\Shared\models\`
@@ -51,7 +51,7 @@
 
 ### 下载很慢或下载失败
 
-应用先从 Hugging Face 的镜像（默认 hf-mirror.com）下载，不行再换 ModelScope。下载走系统设置里的 HTTP 代理；不支持自动代理配置（PAC）。
+原始模型先从 Hugging Face 的镜像（默认 hf-mirror.com）下载，不行再换 ModelScope；macOS 的 WD 加速文件从项目 GitHub Release 下载，不经过镜像。下载走系统设置里的 HTTP 代理；不支持自动代理配置（PAC）。
 
 - **换镜像**：在「设置 › 数据 › 识别模型」里把「Hugging Face 镜像」换成其他兼容 Hugging Face 的地址；填 `https://huggingface.co` 就是直连 Hugging Face。
 - **自己下载再导入**：用浏览器或下载工具把下表 4 个文件下载下来，在应用里点「从文件导入…」选中它们（可以一次多选，也可以选包含它们的 ZIP）。文件名和所在文件夹都不重要，应用按大小和 SHA-256 认出每个文件，放到正确的位置；对不上的文件会被拒绝。
@@ -67,9 +67,9 @@ Hugging Face 的地址固定在上游的某个提交上，上游以后改动也�
 
 ### 识别加速（macOS）
 
-在 Apple 芯片的 Mac 上，识别默认用 GPU 和神经引擎（Core ML）计算角色特征，比只用 CPU 快；角色判定和只用 CPU 时一致，向量只有浮点舍入级的差别。第一次识别前会先把模型编译一遍（几秒），编好的放在 `~/Library/Application Support/Illustash/Shared/coreml-cache/`（约 300 MB），之后每次启动识别只要不到一秒。模型、ONNX Runtime 或 macOS 版本变了，旧的会自动删掉重新编译；这个文件夹可以随时删除，下次识别时重新生成。
+在 Apple 芯片的 Mac 上，识别默认通过 Core ML 加速标签与角色特征计算。WD 加速文件由项目模型 Release 提供，首次下载模型时一并下载；已有安装可在「设置 › 数据 › 识别模型」补下载。手动下载 [WD 加速文件 v1](https://github.com/shio-vinyl/illustash/releases/download/wd-coreml-v1/wd-swinv2-v3-v1.onnx) 后也可从设置导入：文件为 467,387,780 字节，SHA-256 为 `57344d061ecaa0b8addb9cc33ae1a133a5bb18525590fdc61edb2aacdad2e444`。它需要与原始 WD 模型共同保留，不能用它替换原始文件。
 
-加速用不了（编译失败、缓存损坏、运行出错）时，这次识别自动改用 CPU，不影响结果；「设置 › 数据 › 识别模型」里会写出原因。想只用 CPU，把那里的「使用 GPU 加速识别」关掉，下次识别时生效。
+首次识别会准备编译缓存，WD 和 CCIP 分别保存在 `~/Library/Application Support/Illustash/Shared/coreml-cache/` 下。模型、运行库或 macOS 版本变化时，相应模型的缓存会重新生成。加速文件缺失、损坏，或编译、运行失败时，识别自动回到原始模型 CPU，设置页显示原因；已有图库和模型身份不受影响。想只用 CPU，关闭「使用 GPU 加速识别」，下次识别时生效。
 
 **隐私**（#381）：macOS 随包的 ONNX Runtime 是微软官方发布的版本，默认开启遥测，会把使用事件发给微软（`mobile.events.data.microsoft.com`），并在 `~/Library/Application Support/Microsoft/DeveloperTools/.onnxruntime/` 写一个设备标识。Illustash 启动每个识别、索引进程时都设 `ORT_DISABLE_TELEMETRY=1`，并在初始化时调用关闭遥测的接口，所以它不联网，也不写那个目录。如果你在 Illustash 之外用过别的 ONNX Runtime 程序，那个目录可能是它们留下的。
 

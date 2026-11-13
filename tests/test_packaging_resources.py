@@ -259,6 +259,23 @@ class PackagingResourcesTest(unittest.TestCase):
         self.assertEqual(pack.MODEL_FILES, ('wd_swinv2_v3_emb.onnx', 'ccip/model_feat.onnx',
                                             'ccip/model_metrics.onnx', 'ccip/metrics.json'))
 
+    def test_wd_variant_is_optional_and_checked_before_staging(self):
+        output = self.root / 'optional variant'
+        entry = pack.MODEL_MANIFEST['wd_coreml']['file']
+        pack.stage_wd_coreml(self.models, output)
+        self.assertFalse(output.exists())
+        variant = self.models / entry['path']
+        variant.parent.mkdir(parents=True)
+        variant.write_bytes(b'damaged')
+        with self.assertRaisesRegex(ValueError, 'does not match'):
+            pack.stage_wd_coreml(self.models, output)
+        # 用小合成文件覆盖同一条校验和复制路径；不把模型权重塞进测试。
+        synthetic = {'file': dict(entry, size=7, sha256=hashlib.sha256(b'valid!!').hexdigest())}
+        with patch.dict(pack.MODEL_MANIFEST, wd_coreml=synthetic):
+            variant.write_bytes(b'valid!!')
+            pack.stage_wd_coreml(self.models, output)
+            self.assertEqual((output / entry['path']).read_bytes(), b'valid!!')
+
     def test_packages_with_models_refuse_incomplete_model_licenses(self):
         def broken(name, change):
             source = self.root / name

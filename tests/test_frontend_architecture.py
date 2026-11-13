@@ -189,9 +189,60 @@ class FrontendArchitectureTest(unittest.TestCase):
         with Tree() as tree:
             tree.append('ui/artists.js', "\ndocument.addEventListener('change', e => {});\n"
                                          "document.addEventListener('pointermove', e => {});\n"
-                                         "button.addEventListener('keydown', e => {});\n"
+                                         "button.addEventListener('keydown', e => { if (composing(e)) return; });\n"
                                          "// document.addEventListener('keydown', e => {});\n")
             self.assertEqual(tree.errors(), [])
+
+    def test_key_handler_without_composing_guard(self):
+        # 规则 9（#388）：每个 keydown / keyup / keypress 处理函数都要调用 composing()，各种写法都算。
+        cases = ["input.addEventListener('keydown', e => { if (e.key === 'Enter') go(); });",
+                 "input.addEventListener(\"keyup\", function (e) { go(e); });",
+                 "input.addEventListener('keypress', e => go(e), true);",
+                 "input.onkeydown = e => { if (e.key === 'Enter') go(); };",
+                 "input.addEventListener('keydown', onKey);\nfunction onKey(e) { go(e); }",
+                 "input.addEventListener('keydown', onKey);\nconst onKey = e => { go(e); };",
+                 "input.addEventListener('keydown', missing);"]
+        for text in cases:
+            with self.subTest(text=text), Tree() as tree:
+                tree.append('ui/artists.js', '\n' + text + '\n')
+                message = self.assertViolation(tree, 'ime-composing', 'ui/artists.js: 键盘处理函数没有调用 composing()')
+                self.assertIn('core/keys.js', message)
+
+    def test_key_handler_with_composing_guard_is_fine(self):
+        cases = ["input.addEventListener('keydown', e => { if (composing(e)) return; go(e); });",
+                 "input.onkeydown = e => composing(e) || go(e);",
+                 "input.addEventListener('keydown', onKey, true);\nfunction onKey(e) { if (composing(e)) return; go(e); }",
+                 "input.addEventListener('keydown', onKey);\nconst onKey = e => { if (composing(e)) return; go(e); };",
+                 "const same = a === b; if (a.onkeydown == null) go();",
+                 "// input.onkeydown = e => go(e);"]
+        for text in cases:
+            with self.subTest(text=text), Tree() as tree:
+                tree.append('ui/artists.js', '\n' + text + '\n')
+                self.assertEqual([e for e in tree.errors() if 'ime-composing' in e], [])
+
+    def test_only_core_keys_reads_the_composition_flags(self):
+        for text in ("if (e.isComposing) return;", "if (e.keyCode === 229) return;", "const c = ev .isComposing;"):
+            with self.subTest(text=text), Tree() as tree:
+                tree.append('ui/artists.js', '\n' + text + '\n')
+                self.assertViolation(tree, 'ime-composing', 'ui/artists.js: 直接读')
+        with Tree() as tree:
+            keys = (tree.root / STATIC / 'core/keys.js').read_text(encoding='utf-8')
+            self.assertIn('isComposing', keys)
+            self.assertIn('229', keys)
+            self.assertEqual([e for e in tree.errors() if 'ime-composing' in e], [])
+        with Tree() as tree:  # 注释和字符串里提到不算
+            tree.append('ui/artists.js', "\n// e.isComposing 或 keyCode 229\nconst note = 'e.keyCode';\n")
+            self.assertEqual([e for e in tree.errors() if 'ime-composing' in e], [])
+
+    def test_removing_a_guard_from_the_repository_is_caught(self):
+        # 真实文件上的回归：把已有的防护拿掉，规则要报出来（覆盖具名函数、onkeydown 和 addEventListener 三种写法）。
+        for relative, old, new in (
+                ('ui/overlay.js', "if (e.key !== 'Escape' || composing(e)) return;", "if (e.key !== 'Escape') return;"),
+                ('ui/palette.js', "q('#pfAlias').onkeydown = e => { if (composing(e)) return; ", "q('#pfAlias').onkeydown = e => { "),
+                ('ui/palette.js', "const p = palette; if (!p || composing(e)) return;", "const p = palette; if (!p) return;")):
+            with self.subTest(relative=relative, old=old), Tree() as tree:
+                tree.replace(relative, old, new)
+                self.assertViolation(tree, 'ime-composing', f'{relative}: 键盘处理函数没有调用 composing()')
 
     def test_new_runtime_dialog(self):
         with Tree() as tree:

@@ -65,7 +65,7 @@ export function keyAction(key, {view, char = false, n = 0, item = null}) {
     case 'x': { const act = view.bar === 'excluded' ? 'include' : 'exclude'; return n ? {bar: act} : {single: act}; }
     case 's':
       if (view.bar !== 'unmatched') return null;
-      return n ? {bar: 'skip'} : view.pool === 'unmatched' ? {single: 'skip'} : null;
+      return n ? {bar: 'skip'} : view.skip ? {single: 'skip'} : null;
     default: return null;
   }
 }
@@ -89,7 +89,7 @@ export const SHORTCUTS = [
   {keys: 'C', codes: ['c'], does: () => t('角色页：换成别的角色；其余页：选中的图设为角色，没有选中时给当前这张加角色')},
   {keys: 'A', codes: ['a'], does: () => t('给当前这张追加角色；不在角色页、有选中时同 C')},
   {keys: 'T', codes: ['t'], does: () => t('子标签（角色页，选中图片时）')},
-  {keys: 'S', codes: ['s'], does: () => t('跳过（「未识别」页和它的分组；没有选中时只在「全部未识别」）')},
+  {keys: 'S', codes: ['s'], does: () => t('跳过（「全部未识别」和各组；没有选中时跳过当前这张）')},
   {keys: 'X', codes: ['x'], does: () => t('排除非插画内容（截图、照片等）；在「已排除」页为恢复')},
   {keys: 'G', codes: ['g'], does: () => t('添加或移除自定义标签（与自动标签分开保存）')},
   {keys: '1–9', codes: ['1-9'], does: () => t('选详情栏或大图里「也可能是」的第几项；按住 ⌥（Alt）改为追加')},

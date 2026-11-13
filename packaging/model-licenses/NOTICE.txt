@@ -3,8 +3,9 @@ Bundled model notices
 The Illustash code is licensed under GPL-3.0-or-later (resources/licenses/LICENSE). The
 machine-learning models under resources/models/ are not covered by that
 license. Each one is distributed under its own license, reproduced in this
-directory together with the upstream model cards. The model files are
-redistributed unmodified. sources.json records where each text came from and
+directory together with the upstream model cards. The original model files are
+redistributed unmodified. The optional WD Core ML execution variant is modified
+by Illustash as described below. sources.json records where each text came from and
 its SHA-256.
 
 wd_swinv2_v3_emb.onnx
@@ -19,6 +20,17 @@ wd_swinv2_v3_emb.onnx
   License:  Apache License, Version 2.0 (wd-swinv2-tagger-v3/LICENSE-2.0.txt),
             as declared on both model cards (wd-swinv2-tagger-v3/*-README.md).
             Neither repository ships a NOTICE file.
+
+coreml/wd-swinv2-v3-v1.onnx
+  Derived:  Illustash WD Core ML execution variant v1, 2026-11-12.
+  Source:   wd_swinv2_v3_emb.onnx above, with its original SHA-256 unchanged.
+  Changes:  Fixed batch 1; ONNX Runtime 1.30.0 BASIC graph export; 51 rank-6
+            reshape patterns lowered to rank 5; 48 redundant broadcasts removed;
+            48 ReduceL2 nodes decomposed; 96 constant Gemm matrices transposed.
+            Model weights retain their values; no quantization or retraining.
+  Build:    tools/build_wd_coreml.py; exact output recorded in native/terms/models.json.
+  SHA-256:  57344d061ecaa0b8addb9cc33ae1a133a5bb18525590fdc61edb2aacdad2e444
+  License:  Apache License, Version 2.0 (wd-swinv2-tagger-v3/LICENSE-2.0.txt).
 
 ccip/model_feat.onnx, ccip/model_metrics.onnx, ccip/metrics.json
   Model:    CCIP (Contrastive Anime Character Image Pre-Training) by DeepGHS,
