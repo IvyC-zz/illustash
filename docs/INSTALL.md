@@ -42,7 +42,7 @@
 
 ## 识别模型
 
-安装包里没有带识别模型。第一次使用时，应用会提示「识别要用的模型还没下载」，点「下载模型」后下载约 618 MB；下载前可以先建库、浏览和手动整理，模型就位后自动开始识别。模型放在用户目录里，所有图库共用，以后更新 Illustash 不用再下：
+安装包里没有带识别模型。第一次使用时，应用会提示「识别要用的模型还没下载」，原始模型约 618 MB，Apple 芯片的 macOS 另下载约 467 MB 的 WD 加速文件（合计约 1.1 GB）；下载前可以先建库、浏览和手动整理，模型就位后自动开始识别。模型放在用户目录里，所有图库共用，以后更新 Illustash 不用再下：
 
 - macOS：`~/Library/Application Support/Illustash/Shared/models/`
 - Windows：`%LOCALAPPDATA%\Illustash\Shared\models\`
@@ -51,7 +51,7 @@
 
 ### 下载很慢或下载失败
 
-应用先从 Hugging Face 的镜像（默认 hf-mirror.com）下载，不行再换 ModelScope。下载走系统设置里的 HTTP 代理；不支持自动代理配置（PAC）。
+原始模型先从 Hugging Face 的镜像（默认 hf-mirror.com）下载，不行再换 ModelScope；macOS 的 WD 加速文件从项目 GitHub Release 下载，不经过镜像。下载走系统设置里的 HTTP 代理；不支持自动代理配置（PAC）。
 
 - **换镜像**：在「设置 › 数据 › 识别模型」里把「Hugging Face 镜像」换成其他兼容 Hugging Face 的地址；填 `https://huggingface.co` 就是直连 Hugging Face。
 - **自己下载再导入**：用浏览器或下载工具把下表 4 个文件下载下来，在应用里点「从文件导入…」选中它们（可以一次多选，也可以选包含它们的 ZIP）。文件名和所在文件夹都不重要，应用按大小和 SHA-256 认出每个文件，放到正确的位置；对不上的文件会被拒绝。
