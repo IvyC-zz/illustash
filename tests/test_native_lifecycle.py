@@ -938,7 +938,12 @@ class NativeLifecycleTest(unittest.TestCase):
         receipt = json.loads(response['headers']['X-Illustash-Diagnostic'])
         self.assertTrue(receipt['stored'])
         self.assertEqual(receipt['publication'], 'not_applicable')
+        # WebView2 每次加载都会自己请求 /favicon.ico：照常 400，但不算用户操作的失败，不占诊断记录。
+        noise = self.request('/favicon.ico')
+        self.assertEqual(noise['status'], 400, noise['body'])
+        self.assertNotIn('X-Illustash-Diagnostic', noise['headers'])
         report = json.loads(self.request('/api/diagnostics')['body'])
+        self.assertEqual([r['id'] for r in report['records']], [receipt['id']])
         record = next(r for r in report['records'] if r['id'] == receipt['id'])
         self.assertEqual(record['cause'], 'database')
         self.assertEqual(record['stage'], 'read')

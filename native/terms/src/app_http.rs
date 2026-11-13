@@ -156,13 +156,18 @@ fn respond(request: Request, payload: Json, status: u16, route: &str) {
 }
 fn failure(request: Request, err: Error, write: bool) {
     use crate::diagnostics::{self, Publication, Stage};
+    // 接口以外的路径请求不合法（WebView2 每次加载页面都会自己请求 /favicon.ico）不是用户操作的失败：照常应答，
+    // 但不记诊断，免得每次启动都挤占记录名额。
+    let recorded = request.url().starts_with("/api/") || !matches!(err, Error::Invalid(_));
     // 传输层不知道每个操作的发布边界，不能把已发布后的登记失败说成「全部回滚」。
-    let diagnostic = diagnostics::failure(
-        diagnostics::operation(request.url()),
-        if write { Stage::Write } else { Stage::Read },
-        &err,
-        if write { Publication::Unknown } else { Publication::NotApplicable },
-    );
+    let diagnostic = recorded.then(|| {
+        diagnostics::failure(
+            diagnostics::operation(request.url()),
+            if write { Stage::Write } else { Stage::Read },
+            &err,
+            if write { Publication::Unknown } else { Publication::NotApplicable },
+        )
+    });
     let (payload, status) = match err {
         Error::Invalid(message) => (error(&message), 400),
         Error::Network(message) => (error(&message), 502),
@@ -181,11 +186,13 @@ fn failure(request: Request, err: Error, write: bool) {
     };
     match http::json_response(&request, &payload, status, "core") {
         Ok(mut response) => {
-            let value = diagnostic.value().to_string();
-            response.add_header(
-                tiny_http::Header::from_bytes("X-Illustash-Diagnostic", value.as_bytes())
-                    .expect("diagnostic header is ASCII JSON"),
-            );
+            if let Some(diagnostic) = diagnostic {
+                let value = diagnostic.value().to_string();
+                response.add_header(
+                    tiny_http::Header::from_bytes("X-Illustash-Diagnostic", value.as_bytes())
+                        .expect("diagnostic header is ASCII JSON"),
+                );
+            }
             let _ = request.respond(response);
         }
         Err(e) => eprintln!("HTTP response: {e}"),
