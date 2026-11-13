@@ -840,6 +840,14 @@ fn info_at(models: &Models, place: &Place) -> Json {
         .map(|e| e.path.clone().into())
         .collect();
     let mirror = place.mirror();
+    let mut sources = Vec::new();
+    for entry in &manifest.files {
+        for (name, _) in place.sources(entry) {
+            if !sources.contains(&name) {
+                sources.push(name);
+            }
+        }
+    }
     Json::from(json!({
         "pack": manifest.pack,
         "status": if ready { "ready" } else { "missing" },
@@ -853,7 +861,7 @@ fn info_at(models: &Models, place: &Place) -> Json {
         "missing": missing,
         "mirror": mirror,
         "mirror_default": manifest.mirror,
-        "sources": manifest.files.iter().flat_map(|e| place.sources(e).into_iter().map(|(name, _)| name)).collect::<std::collections::BTreeSet<_>>(),
+        "sources": sources,
         "manual": manifest.manual,
         "files": manifest.files.iter().map(|e| json!({"path": e.path, "size": e.size, "sha256": e.sha256, "optional": e.optional})).collect::<Vec<_>>(),
         "job": models.snapshot(),
