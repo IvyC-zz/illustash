@@ -464,9 +464,12 @@ class AcceleratedRecognitionTest(RecognitionModelTest):
             status = self.status()[model]
             self.assertEqual(status, dict(status, requested=accelerator(), used=accelerator(), reason=None), model)
         if accelerator() == 'coreml':
-            cache = [p for p in (self.shared / 'coreml-cache').iterdir() if p.is_dir()]
-            self.assertEqual(len(cache), 1, 'one compiled model, keyed by content')
-            self.assertTrue(any(cache[0].rglob('*')), 'the compiled model is cached')
+            root = self.shared / 'coreml-cache'
+            self.assertEqual({p.name for p in root.iterdir() if p.is_dir()}, set(ACCELERATED))
+            for model in ACCELERATED:
+                cache = [p for p in (root / model).iterdir() if p.is_dir()]
+                self.assertEqual(len(cache), 1, '每个模型独立保留当前内容的缓存')
+                self.assertTrue(any(cache[0].rglob('*')), '编译模型已缓存')
         reference = np.asarray([r['ccip'] for r in self.reference], np.float64)
         for i, (expected, actual) in enumerate(zip(self.reference, got)):
             # 在 CPU 上（CoreML 时）：逐位一致，标签也一样；DirectML 上在 WD_ATOL 以内。
@@ -537,7 +540,7 @@ class AcceleratedRecognitionTest(RecognitionModelTest):
     @unittest.skipUnless(accelerator() == 'coreml', 'only CoreML keeps a compiled cache')
     def test_damaged_cache_is_dropped_and_the_cpu_takes_over(self):
         self.infer()
-        cache = next(p for p in (self.shared / 'coreml-cache').iterdir() if p.is_dir())
+        cache = next(p for p in (self.shared / 'coreml-cache' / 'ccip').iterdir() if p.is_dir())
         for path in sorted(cache.rglob('*'), reverse=True):
             if path.is_file():
                 path.write_bytes(b'damaged')

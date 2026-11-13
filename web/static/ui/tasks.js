@@ -7,9 +7,10 @@ import {state} from '../core/state.js';
 import {api, post, shared, readError} from '../core/session.js';
 import {SYNC_ACTIVE, INDEX_ACTIVE, NAMES_ACTIVE, SIMILAR_ACTIVE, PROV_ACTIVE, RUN_STATUS, onJob, syncLine, syncBar, syncDoneText, indexLine, indexEndText, resumeIndex, discardIndex,
   namesLine, taskSimilar, pollSync, pollIndex, pollNames, loadProvenance, startSync, checkIndex, refreshNames, provenanceAction, PHOTOS_PRIVACY, photosHelp, photosRefused} from '../core/jobs.js';
-import {loadLibraries, updatesTick} from '../core/settings.js';
+import {loadLibraries, setSettings, updatesTick} from '../core/settings.js';
 import {$, toast, error, fold, wireFolds} from './dom.js';
 import {confirmAction} from './dialog.js';
+import {createLayer} from './overlay.js';
 import {openIndexAdd} from './catalog.js';
 import {modelsLine, modelsBar, modelsActions} from './models.js';
 import {loadModels, onModels} from '../core/models.js';
@@ -120,7 +121,7 @@ export async function taskTick() {
   // 模型下载时有自己的轮询；这里发现在另一个窗口里启动的下载。
   if (taskPanel.open || !state.models) jobs.push(loadModels());
   // 相似任务的状态随 /api/settings 一起来，它还要测量缓存：只在有人看时才读。
-  if (taskPanel.open && Date.now() - taskPanel.settingsAt > (SIMILAR_ACTIVE.includes(state.settings?.tasks?.similar?.status) ? 2500 : 15000)) { taskPanel.settingsAt = Date.now(); jobs.push(shared('/api/settings').then(s => { state.settings = s; }).catch(e => error(readError(e)))); }
+  if (taskPanel.open && Date.now() - taskPanel.settingsAt > (SIMILAR_ACTIVE.includes(state.settings?.tasks?.similar?.status) ? 2500 : 15000)) { taskPanel.settingsAt = Date.now(); jobs.push(shared('/api/settings').then(s => { setSettings(s); }).catch(e => error(readError(e)))); }
   // 面板打开后读一次图库列表（同步任务的名字和导出的进度）。
   if (taskPanel.open && !state.libraries) jobs.push(loadLibraries());
   await Promise.allSettled(jobs);
@@ -128,11 +129,13 @@ export async function taskTick() {
   updatesTick();
   taskPanel.timer = setTimeout(taskTick, taskPanel.open ? 3000 : 30000);
 }
-export function toggleTasks(open = !taskPanel.open) {
+// 任务面板是非模态浮层：Esc、点外关闭由浮层管理器（ui/overlay.js）统一处理；它上面再开对话框时，对话框先关。
+const taskLayer = createLayer({kind: 'popover', id: 'tasks', el: () => $('taskPanel'), anchor: () => $('taskButton'), onDismiss: reason => toggleTasks(false, reason)});
+export function toggleTasks(open = !taskPanel.open, reason) {
   taskPanel.open = open; $('taskPanel').hidden = !open;
   $('taskButton').setAttribute('aria-expanded', open); $('taskButton').classList.toggle('on', open);
-  if (open) { delete $('taskPanel').dataset.html; renderTasks(); taskTick(); }
-  else provenanceArmed = false;
+  if (open) { taskLayer.open(); delete $('taskPanel').dataset.html; renderTasks(); taskTick(); }
+  else { provenanceArmed = false; taskLayer.close(reason); }
 }
 // 面板的处理函数。页面启动时调用一次。
 export function wireTasks() {
@@ -167,10 +170,8 @@ export function wireTasks() {
       else if (act === 'index-resume') { if (!await resumeIndex(confirmAction)) return; pollIndex(); }
       else if (act === 'index-discard') { if (!await discardIndex(confirmAction)) return; }
       else if (act === 'names') { await refreshNames(); toast(t('已开始重新获取角色名称')); }
-      else if (act === 'similar') { await post('/api/similar', {}); state.settings = await api('/api/settings'); }
+      else if (act === 'similar') { await post('/api/similar', {}); setSettings(await api('/api/settings')); }
     } catch (err) { toast(err.message); } finally { b.disabled = false; }
     taskTick();
   });
-  document.addEventListener('click', e => { if (taskPanel.open && !e.target.closest('#taskPanel, dialog')) toggleTasks(false); });
-  document.addEventListener('keydown', e => { if (e.key === 'Escape' && taskPanel.open && !document.querySelector('dialog[open]')) { toggleTasks(false); e.stopImmediatePropagation(); } }, true);
 }

@@ -28,7 +28,9 @@ cargo build --release --manifest-path native/terms/Cargo.toml
 ./start-web.command --library ~/Pictures/Illustash/我的图库.pilib
 ```
 
-宿主就绪时打印 `图库已启动：http://127.0.0.1:端口/?k=…`。这个地址只能用一次：第一次打开时换成会话 cookie，之后每个请求都要带它，没有就 403（见 [架构方向](ARCHITECTURE_DIRECTION.md) 中「原生宿主完成启动恢复」一段）。浏览器关掉重开丢了 cookie，就重启宿主拿新地址；用内置浏览器走查时也打开终端里打印的地址，`preview_start {url}` 写这个地址。
+宿主就绪时打印 `图库已启动：http://127.0.0.1:端口/?k=…`。这个地址只能用一次：第一次打开时换成会话 cookie，之后每个请求都要带它，没有就 403（见 [架构方向](ARCHITECTURE_DIRECTION.md) 中「原生宿主完成启动恢复」一段）。浏览器关掉重开丢了 cookie，就重启宿主拿新地址。
+
+浏览器走查不打开真实图库：`./start-web.command` 不带 `--library` 时打开的是最近登记的图库，也就是自己日常用的那个。走查用 `python3 tools/dev_preview.py`，代理会话用 `preview_start {name: "web-isolated"}`（`.claude/launch.json` 里只有这一项）。脚本把 `HOME`、`ILLUSTASH_APP_SUPPORT`、`ILLUSTASH_SHARED` 指向一个临时目录，设 `ILLUSTASH_NO_KEYCHAIN=1` 不碰钥匙串，在里面新建一个只含生成渐变图的图库，宿主跑在空闲端口上；`8777` 端口只做一次跳转，转到宿主打印的带码地址。退出时删除临时目录，`--work DIR` 改用指定目录并保留；宿主用 `native/terms/target` 里较新的构建，或 `ILLUSTASH_TERMS_BIN`。自己另起宿主走查时，同样要把这三个目录指向临时位置，再用 `preview_start {url}` 打开就绪行里的地址。
 
 `start-web.command` 在 `native/terms/target/{release,debug}` 里找 `illustash-terms`，也可以用 `ILLUSTASH_TERMS_BIN` 指定，找不到直接报错。服务和桌面入口都不隐式建库或升级；开库时按已保存的设置自动同步，`--no-auto-sync` 可关闭自动同步。多来源、Apple Photos 来源与出处分组见 [图库](LIBRARIES.md)。
 
@@ -44,7 +46,7 @@ cargo build --release --manifest-path native/terms/Cargo.toml
 | `--backup` | 用 SQLite backup API 备份后退出，允许服务仍在运行 |
 | `--upgrade` | 先备份，再在一个事务里迁移；与 `--backup` 互斥，普通启动不升级 |
 | `--no-sync` / `--no-auto-sync` | 禁用本次会话的同步 / 只关闭自动同步，手动同步仍可用 |
-| `--sync-limit N` | 每轮同步中待识别图片数上限，0 不限；不限制来源扫描 |
+| `--sync-limit N` | 每轮同步最多识别 N 张，取最近保存的 N 张（[识别顺序](ARCHITECTURE_DIRECTION.md#原生来源同步与应用刷新)），0 不限；不限制来源扫描 |
 | `--no-names` / `--names-network` | 关闭名字同步 / 本次进程允许名称文字查询联网（图库也可在界面上持久授权） |
 | `--no-provenance` / `--allow-provenance-network` | 不跑溯源任务 / 允许溯源联网 |
 | `--no-index-check` / `--index-check` | 关闭 / 打开开库时的角色索引检查（默认自动） |
@@ -82,6 +84,7 @@ HTTP 错误保留原有状态码与 `error` 正文，额外通过 `X-Illustash-D
 2. **升版本号并同步**：从最新 main 开分支，`python3 tools/version.py --set X.Y.Z` 改 `native/terms/application.json`，并同步 `desktop/tauri.conf.json`、五个 crate（`native/terms`、`desktop`、`crates/core`、`crates/platform`、`crates/iqdb`）的 `Cargo.toml` 和各自 `Cargo.lock` 里本项目的包；再运行 `python -m tools.migration_inventory sync-sources` 同步迁移清单指纹。`python3 tools/version.py` 不带参数只检查：一致时打印「版本号一致：X.Y.Z」，不一致时逐处列出并退出 1。另外两道检查：全量里的 `tests/test_version.py`，以及 `packaging/build.py` 不一致就拒绝打包。这个 PR 按普通代码级别走合并队列，转 Ready 写「待集成」。版本号已经是要发的值时跳过这一步。
 3. **发布提交与本机全量**：集成会话把版本号 PR 编进一批，在候选 head 上经 `collab_run.py run -- bash tools/check_all.sh` 跑全量（占 heavy 槽，做法见 [合并队列](LOCAL_CHECKS.md#合并队列集成会话)），用户批准后合入。发布提交就是这一批合完后的 main 提交，它的 tree 与通过全量的候选 head 相同（`git rev-parse <发布提交>^{tree} <候选head>^{tree}` 两行一样）。main 在那之后又合入了不跑全量的 PR（界面级、只改文档），要带上它们就请集成会话在 main 当前提交上补跑一次全量，以它为发布提交。
    - **依赖漏洞**：在发布提交上对五个 `Cargo.lock`（`native/terms`、`desktop`、`crates/core`、`crates/platform`、`crates/iqdb`）各跑一次 `cargo audit -f <lock>`。有漏洞时逐条判断是否用到受影响的功能：用到的先升级再发布（升级 PR 按普通代码级别走合并队列，发布提交随之换成合入后的 main 提交），没用到的把编号和理由写进这次发布的 Issue。unmaintained、yanked 之类的警告只记录。需要 `cargo install cargo-audit --locked`（本机已装 0.22.2）；第一次运行会从 GitHub 拉 RustSec 漏洞库。
+   - **仓库 ID**（#358）：`gh api repos/shio-vinyl/illustash --jq .id` 的结果要等于发布提交里 `native/terms/src/app_updates.rs` 的 `REPOSITORY_ID`。ID 不对时应用靠按名字的回退照样查得到更新，验收看不出来，但仓库以后改名或转移就接不住了（见第 10 步）。仓库删掉重建过、或者换了仓库，都要先改这个常量和本文、[Web 界面](WEB_V2.md#界面语言2026-10-18173) 里的地址。
 4. **两个平台打包**：首个内测版起每个平台只发不含模型的小安装包，模型第一次使用时下载（#168）；打法与完整包相同，只是不传 `--models`，参数说明见 [安装与平台](BACKEND_TASKS.md#独立安装与可选计算包)。两边都从发布提交的干净检出构建（例如 `git worktree add --detach <目录> <发布提交>`）：关于页的构建号取自 `git rev-parse --short HEAD`，已跟踪文件有改动时带 `-dirty`，发出去的包不能带。release 构建按 [本机资源](LOCAL_CHECKS.md#本机资源排队计时与后台优先级) 的规定排队。安装包文件名用 Tauri 的默认格式：`Illustash_X.Y.Z_aarch64.zip`、`Illustash_X.Y.Z_x64-setup.exe`（2026-10-20 用户定）。
    - **macOS**：只发 Apple 芯片（arm64）版，有 Intel 用户反馈时再考虑通用二进制（2026-10-20 用户定）。`collab_run.py run -- python3 packaging/build.py --research --ort-dylib FILE --ort-licenses DIR --output NEW_PATH --macos-desktop-compute packaging/desktop-compute`，再在 `desktop/` 运行 `collab_run.py run -- cargo tauri build --bundles app --config ../packaging/tauri-full-macos.json`。产物 `Illustash.app` 是临时签名（`codesign -dv` 显示 `Signature=adhoc`），用 `ditto -c -k --keepParent Illustash.app Illustash_X.Y.Z_aarch64.zip` 压成 zip 发布，#7、#192 的虚拟机验收用的就是这种 zip。`--ort-dylib`、`--ort-licenses` 取自 PyPI 上 `onnxruntime` 1.30.0 的 macOS arm64 wheel，取法和哈希见 [安装与平台](BACKEND_TASKS.md#独立安装与可选计算包)「macOS 的 CPU ONNX Runtime」。
    - **Windows x64**：在 Windows 验收机上检出发布提交，从本机经 SSH 发起，外面包 `collab_run.py run --slot windows --`：`python packaging/build.py --research --openblas-site DIR --ort-dylib FILE --ort-licenses DIR --directml DIR --output NEW_PATH --desktop-compute packaging/desktop-compute`，再在 `desktop/` 运行 `cargo tauri build --bundles nsis --config ../packaging/tauri-full.json`。只发 NSIS 安装包 `Illustash_X.Y.Z_x64-setup.exe`（当前用户安装），不发 MSI。ONNX Runtime（带 DirectML）的构建办法和 `--directml` 取哪个目录见 [安装与平台](BACKEND_TASKS.md#独立安装与可选计算包)。
@@ -97,13 +100,17 @@ HTTP 错误保留原有状态码与 `error` 正文，额外通过 `X-Illustash-D
    - 内容来源是这期间合入 main 的 PR：`git log --first-parent --merges --format=%s <上一个tag>..<发布提交>` 列出每个「Merge pull request #N」，标题用 `gh pr list --state merged --base main --limit 500 --json number,title` 取（默认只列 30 个，要加 `--limit`）。按用户看得到的变化整理，不照抄标题；只涉及内部重构、测试、文档的不写。首个公开测试版没有上一个 tag，写这一版能做什么、已知限制和安装办法。
    - 每个 Release 都写：macOS 更新后的两步（2026-10-18 用户定，#192）：第一次打开新版本要在「系统设置 › 隐私与安全性」里重新放行一次，用 iCloud 照片作来源的第一次同步时要重新允许访问照片，原因是临时签名每个版本都不同，链接 [更新到新版本之后](INSTALL.md#更新到新版本之后)；安装包不带模型，第一次使用时下载，链接 [识别模型](INSTALL.md#识别模型)；用 `SHA256SUMS.txt` 核对下载的文件；macOS 版只支持 Apple 芯片的 Mac；请内测用户遇到装不上、打不开时按 [报告问题](INSTALL.md#报告问题) 反馈，Windows 的 SmartScreen 拦截尤其要反馈。
    - 升级图库格式的版本，开头标明「本版会升级图库格式」：打开旧图库时会先询问，升级前自动备份，升级后旧版本打不开；回退办法是装回旧版，再用升级前的备份恢复，备份位置在升级完成后应用会显示一次（规则见 [架构方向](ARCHITECTURE_DIRECTION.md#已有核心库的显式升级边界)）。
-10. **检查更新能看到它**（#191，A 档；机制见 [Web 界面](WEB_V2.md#界面语言2026-10-18173) 检查更新一段）：应用不带账号请求 `https://api.github.com/repos/shio-vinyl/illustash/releases?per_page=30`，只读每项的 `tag_name`、`draft`、`prerelease`，不看正文和资源文件，所以资源文件名不影响检查。一个 Release 要被提示，需要：
+10. **检查更新能看到它**（#191，A 档；机制见 [Web 界面](WEB_V2.md#界面语言2026-10-18173) 检查更新一段）：应用不带账号请求 `https://api.github.com/repositories/1407079068/releases?per_page=30`（`1407079068` 是本仓库在 GitHub 上的数字 ID，`gh api repos/shio-vinyl/illustash --jq .id`），只读每项的 `tag_name`、`draft`、`prerelease`，不看正文和资源文件，所以资源文件名不影响检查。一个 Release 要被提示，需要：
     - 已公开，不是草稿；
     - tag 是 `v` 加不带 `+build` 的 SemVer（`v0.2.0`、`v0.2.0-beta.1`），不带 `v`、少一段或带 `+` 的都被忽略；
     - 在接口返回的第一页（30 个）里；
     - 比本机的版本新；带后缀或标了 prerelease 的，只提示给本身是预发布版本的安装。
 
-    「打开下载页」打开的是程序按版本号拼出的 `https://github.com/shio-vinyl/illustash/releases/tag/vX.Y.Z`，不取回复里的链接。请求不跟随重定向，仓库改名或转移后，已经发出去的版本检查更新都会失败。公开后用 `gh api 'repos/shio-vinyl/illustash/releases?per_page=30' --jq '.[] | [.tag_name, .draft, .prerelease] | @tsv'` 核对（登录后的 gh 也能看到草稿，应用看不到）；从第二次发布起，再在虚拟机里用上一个版本在「设置 › 关于」点「检查更新」，确认提示新版本，「打开下载页」打开的是这个 Release。
+    「打开下载页」打开的是程序按版本号拼出的 `https://github.com/shio-vinyl/illustash/releases/tag/vX.Y.Z`，不取回复里的链接。公开后用 `gh api 'repositories/1407079068/releases?per_page=30' --jq '.[] | [.tag_name, .draft, .prerelease] | @tsv'` 核对（登录后的 gh 也能看到草稿，应用看不到）。不登录的 `curl -s -w '\nHTTP %{http_code}\n' 'https://api.github.com/repositories/1407079068/releases?per_page=30'` 看到的和应用一样，仓库公开后的第一次发布用它再核对一次，应是版本列表和 `HTTP 200`（#358；仓库还是私有时是 `HTTP 404`）。从第二次发布起，再在虚拟机里用上一个版本在「设置 › 关于」点「检查更新」，确认提示新版本，「打开下载页」打开的是这个 Release。
+
+    **仓库改名或转移**（2026-11-12 用户定，#358）：检查更新的请求不跟随重定向，所以按仓库的数字 ID 查，不按 `账号/仓库名`。改名或转移后 ID 不变，已经发出去的版本照样查得到；「打开下载页」是在浏览器里打开的网页，由 GitHub 的网页跳转接住。按 ID 的地址是 GitHub 把改名或转移过的仓库的旧地址跳转过去的地址（2026-11-12 实测），但没有写进它的 REST 文档。所以 GitHub 明确答复这个地址查不到时（3xx 或 4xx；403、429 是限流，不算），应用会再按 `repos/shio-vinyl/illustash/releases` 查一次：按 ID 的地址哪天不再提供这个列表，只要仓库还叫原来的名字就仍查得到。换地址不是跟随重定向，回复里的跳转地址从不使用；连不上、限流和 5xx 不换地址。已经发出去的版本改不了，由此有两条约束：
+    - 改名或转移后，旧的 `shio-vinyl/illustash` 这个位置不能再有仓库（新建和 fork 都算）。一有，GitHub 对旧地址的跳转就失效，已发出版本的「打开下载页」会打开那个新仓库，按名字的那次回退查到的也是它。仓库改名或转移到别的账号、组织时，`shio-vinyl` 账号要留着；账号本身改名的话，GitHub 会放出旧账号名，别人注册后就能在这个位置建同名仓库，这一条就守不住了。
+    - 仓库不能删掉重建。重建后 ID 会变，已发出的版本按 ID 查不到；用原名重建时还能靠按名字的回退查到，但以后改名或转移就接不住了。
 11. **发布之后**：第一次发布后，改掉 [README](../README.md)「现状」和 [装不上、打不开怎么办](INSTALL.md) 开头「还没有正式发布」的状态句。
 
 ## 图库包

@@ -101,11 +101,7 @@ fn root(app: &AppHandle, args: &[String]) -> Result<PathBuf, String> {
         }
     }
     let root = explicit.unwrap_or_else(|| {
-        let installed = app
-            .path()
-            .resource_dir()
-            .unwrap_or_default()
-            .join("resources");
+        let installed = app.path().resource_dir().unwrap_or_default().join("resources");
         if installed.is_dir() {
             return installed;
         }
@@ -120,11 +116,17 @@ fn root(app: &AppHandle, args: &[String]) -> Result<PathBuf, String> {
 
 fn validate_root(root: PathBuf) -> Result<PathBuf, String> {
     let root = root.canonicalize().map_err(|e| {
-        tr_with("找不到应用资源（{path}）：{error}；请重新安装或指定 --root", &[("path", &root.display()), ("error", &e)])
+        tr_with(
+            "找不到应用资源（{path}）：{error}；请重新安装或指定 --root",
+            &[("path", &root.display()), ("error", &e)],
+        )
     })?;
     for file in ["web/static/index.html", "tags/tags_v3.csv"] {
         if !root.join(file).is_file() {
-            return Err(tr_with("应用资源缺失：{path}；请重新安装或指定 --root", &[("path", &root.join(file).display())]));
+            return Err(tr_with(
+                "应用资源缺失：{path}；请重新安装或指定 --root",
+                &[("path", &root.join(file).display())],
+            ));
         }
     }
     Ok(root)
@@ -151,7 +153,10 @@ fn show_progress(main: &WebviewWindow, done: f64, stage: &str) {
 /// 所以这个地址只能用一次，新的服务会打印新的地址。
 fn launch(main: &WebviewWindow, mut url: Url, generation: u64) {
     url.query_pairs_mut().append_pair("launched", "1");
-    let js = format!("window.launch && window.launch({})", serde_json::to_string(url.as_str()).expect("strings always serialize"));
+    let js = format!(
+        "window.launch && window.launch({})",
+        serde_json::to_string(url.as_str()).expect("strings always serialize")
+    );
     // 启动页在它执行之前（重新）加载时再执行一遍；在图库页上什么都不做，图库页没有 launch()。
     *main.app_handle().state::<StartupPage>().0.lock().expect("lock poisoned by an earlier panic") = Some(js.clone());
     let _ = main.eval(&js);
@@ -211,14 +216,7 @@ fn free_port() -> u16 {
 pub fn keep_inside(url: &Url) -> bool {
     match url.scheme() {
         "tauri" | "about" | "data" | "blob" => true,
-        "http" | "https"
-            if matches!(
-                url.host_str(),
-                Some("127.0.0.1" | "localhost" | "tauri.localhost")
-            ) =>
-        {
-            true
-        }
+        "http" | "https" if matches!(url.host_str(), Some("127.0.0.1" | "localhost" | "tauri.localhost")) => true,
         _ => {
             open_outside(url);
             false
@@ -227,13 +225,10 @@ pub fn keep_inside(url: &Url) -> bool {
 }
 
 /// 系统设置 › 隐私与安全性 › 照片：同步被拒绝访问照片图库时，页面把用户引到这里（#202）。
-pub const PHOTOS_PRIVACY: &str =
-    "x-apple.systempreferences:com.apple.preference.security?Privacy_Photos";
+pub const PHOTOS_PRIVACY: &str = "x-apple.systempreferences:com.apple.preference.security?Privacy_Photos";
 
 pub fn open_outside(url: &Url) {
-    if matches!(url.scheme(), "http" | "https")
-        || (cfg!(target_os = "macos") && url.as_str() == PHOTOS_PRIVACY)
-    {
+    if matches!(url.scheme(), "http" | "https") || (cfg!(target_os = "macos") && url.as_str() == PHOTOS_PRIVACY) {
         #[cfg(target_os = "macos")]
         let _ = Command::new("open").arg(url.as_str()).spawn();
         #[cfg(target_os = "windows")]
@@ -276,21 +271,27 @@ fn show_upgrade(main: &WebviewWindow, name: &str) {
 /// 检查发现图库数据损坏（#212）：说明怎么办，带上常规的重试和选择，损坏在 source.sqlite 时则给出「抢救重建」
 /// （#228）；和失败页一样会再执行。
 fn show_damage(main: &WebviewWindow, note: &str, rescue: bool) {
-    let js = format!("window.showDamage && window.showDamage({}, {rescue})", serde_json::to_string(note).expect("strings always serialize"));
+    let js = format!(
+        "window.showDamage && window.showDamage({}, {rescue})",
+        serde_json::to_string(note).expect("strings always serialize")
+    );
     *main.app_handle().state::<ErrorPage>().0.lock().expect("lock poisoned by an earlier panic") = Some(js.clone());
     on_start(main, &js);
 }
 
 /// 服务配置好之前启动就停下了：记住原因，重试时直接再报一次，而不是等待。
 pub(crate) fn blocked(main: &WebviewWindow, message: &str) {
-    *main.app_handle().state::<Launch>().blocked.lock().expect("lock poisoned by an earlier panic") = Some(message.into());
+    *main.app_handle().state::<Launch>().blocked.lock().expect("lock poisoned by an earlier panic") =
+        Some(message.into());
     show_error(main, message, &VecDeque::new());
 }
 
 pub fn page_loaded(main: &WebviewWindow) {
     let app = main.app_handle();
     let error = app.state::<ErrorPage>().0.lock().expect("lock poisoned by an earlier panic").clone();
-    if let Some(js) = error.or_else(|| app.state::<StartupPage>().0.lock().expect("lock poisoned by an earlier panic").clone()) {
+    if let Some(js) =
+        error.or_else(|| app.state::<StartupPage>().0.lock().expect("lock poisoned by an earlier panic").clone())
+    {
         let _ = main.eval(&js);
     }
 }
@@ -315,7 +316,8 @@ pub fn boot(app: AppHandle, main: WebviewWindow, bridge_port: u16, token: String
         }
     };
     let explicit = args.iter().any(|a| a == "--library" || a.starts_with("--library="));
-    *app.state::<Launch>().config.lock().expect("lock poisoned by an earlier panic") = Some(Config { port, bridge_port, token, root, args });
+    *app.state::<Launch>().config.lock().expect("lock poisoned by an earlier panic") =
+        Some(Config { port, bridge_port, token, root, args });
     if explicit {
         run(&app, &main, None, Start::Open);
     } else if let Some(library) = illustash_terms::desktop_shell::startup_library() {
@@ -356,7 +358,8 @@ fn start_again(app: &AppHandle, library: Option<PathBuf>, start: Start) {
     app.state::<Child>().stop();
     app.state::<ErrorPage>().0.lock().expect("lock poisoned by an earlier panic").take();
     app.state::<StartupPage>().0.lock().expect("lock poisoned by an earlier panic").take();
-    let library = library.or_else(|| app.state::<Launch>().library.lock().expect("lock poisoned by an earlier panic").clone());
+    let library =
+        library.or_else(|| app.state::<Launch>().library.lock().expect("lock poisoned by an earlier panic").clone());
     let _ = main.navigate(start_page());
     run(app, &main, library, start);
 }
@@ -376,9 +379,16 @@ pub fn welcome(app: &AppHandle, main: &WebviewWindow, create: bool) {
 
 fn run(app: &AppHandle, main: &WebviewWindow, library: Option<PathBuf>, start: Start) {
     let generation = app.state::<Launch>().generation.fetch_add(1, Ordering::SeqCst) + 1;
-    let Some(Config { port, bridge_port, token, root, mut args }) = app.state::<Launch>().config.lock().expect("lock poisoned by an earlier panic").clone()
+    let Some(Config { port, bridge_port, token, root, mut args }) =
+        app.state::<Launch>().config.lock().expect("lock poisoned by an earlier panic").clone()
     else {
-        let why = app.state::<Launch>().blocked.lock().expect("lock poisoned by an earlier panic").clone().unwrap_or_else(|| tr("应用没有启动完成"));
+        let why = app
+            .state::<Launch>()
+            .blocked
+            .lock()
+            .expect("lock poisoned by an earlier panic")
+            .clone()
+            .unwrap_or_else(|| tr("应用没有启动完成"));
         show_error(main, &tr_with("{why}。处理后请退出并重新打开 Illustash", &[("why", &why)]), &VecDeque::new());
         return;
     };
@@ -414,11 +424,7 @@ fn run(app: &AppHandle, main: &WebviewWindow, library: Option<PathBuf>, start: S
     let script = match std::env::current_exe() {
         Ok(exe) => exe,
         Err(e) => {
-            show_error(
-                &main,
-                &tr_with("找不到核心 HTTP 程序：{error}", &[("error", &e)]),
-                &VecDeque::new(),
-            );
+            show_error(&main, &tr_with("找不到核心 HTTP 程序：{error}", &[("error", &e)]), &VecDeque::new());
             return;
         }
     };
@@ -433,10 +439,7 @@ fn run(app: &AppHandle, main: &WebviewWindow, library: Option<PathBuf>, start: S
         .arg("--root")
         .arg(&root)
         .current_dir(&root)
-        .env(
-            "ILLUSTASH_DESKTOP_BRIDGE",
-            format!("http://127.0.0.1:{bridge_port}"),
-        )
+        .env("ILLUSTASH_DESKTOP_BRIDGE", format!("http://127.0.0.1:{bridge_port}"))
         .env("ILLUSTASH_DESKTOP_TOKEN", token)
         .env("ILLUSTASH_DESKTOP_STDIN", "1")
         .stdin(Stdio::piped())
@@ -547,7 +550,9 @@ fn run(app: &AppHandle, main: &WebviewWindow, library: Option<PathBuf>, start: S
             if let Some(status) = outcome {
                 break status;
             }
-            if !ready.load(Ordering::SeqCst) && active.lock().expect("lock poisoned by an earlier panic").elapsed() > STALL {
+            if !ready.load(Ordering::SeqCst)
+                && active.lock().expect("lock poisoned by an earlier panic").elapsed() > STALL
+            {
                 app.state::<Child>().stop();
                 show_diagnostic(&main,
                     &tr("本地服务 30 秒没有任何进展，已停止；可以重试，或选择其他图库"),
@@ -614,12 +619,7 @@ mod tests {
     }
     #[test]
     fn ready_requires_exact_native_origin() {
-        assert_eq!(
-            ready_url("图库已启动：http://127.0.0.1:9123", 9123)
-                .unwrap()
-                .as_str(),
-            "http://127.0.0.1:9123/"
-        );
+        assert_eq!(ready_url("图库已启动：http://127.0.0.1:9123", 9123).unwrap().as_str(), "http://127.0.0.1:9123/");
         // 宿主打印带一次性码的地址，这个码用来换会话 cookie；launch() 再加上 `launched`，宿主在交换过程中保留它。
         let mut url = ready_url("图库已启动：http://127.0.0.1:9123/?k=0123abcd", 9123).unwrap();
         assert_eq!(url.query(), Some("k=0123abcd"));
@@ -659,20 +659,15 @@ mod tests {
     }
     #[test]
     fn missing_resources_give_reinstall_action() {
-        assert!(
-            validate_root(PathBuf::from("/nonexistent/illustash-synthetic-resources"))
-                .unwrap_err()
-                .contains("重新安装")
-        );
+        assert!(validate_root(PathBuf::from("/nonexistent/illustash-synthetic-resources"))
+            .unwrap_err()
+            .contains("重新安装"));
     }
     #[cfg(unix)]
     #[test]
     fn stop_waits_for_owned_child_and_is_idempotent() {
-        let process = Command::new("/bin/sh")
-            .args(["-c", "cat >/dev/null; exit 0"])
-            .stdin(Stdio::piped())
-            .spawn()
-            .unwrap();
+        let process =
+            Command::new("/bin/sh").args(["-c", "cat >/dev/null; exit 0"]).stdin(Stdio::piped()).spawn().unwrap();
         let pid = process.id();
         let child = Child::default();
         *child.process.lock().expect("lock poisoned by an earlier panic") = Some(process);
@@ -687,29 +682,19 @@ mod tests {
     fn forced_cleanup_includes_descendants_and_leaves_bystander_alive() {
         use std::os::unix::process::CommandExt;
         let mut command = Command::new("/bin/sh");
-        command
-            .args(["-c", "/bin/sleep 60 & echo $!; wait"])
-            .stdout(Stdio::piped())
-            .process_group(0);
+        command.args(["-c", "/bin/sleep 60 & echo $!; wait"]).stdout(Stdio::piped()).process_group(0);
         let mut host = command.spawn().unwrap();
         let mut line = String::new();
-        BufReader::new(host.stdout.take().unwrap())
-            .read_line(&mut line)
-            .unwrap();
+        BufReader::new(host.stdout.take().unwrap()).read_line(&mut line).unwrap();
         let descendant: i32 = line.trim().parse().unwrap();
         let mut bystander = Command::new("/bin/sleep").arg("60").spawn().unwrap();
         illustash_platform::platform_process::kill_owned_tree(host.id());
         host.wait().unwrap();
         // 被杀掉的后代进程不可能还在执行；可能有一个等待回收的短暂僵尸进程。
-        let state = Command::new("/bin/ps")
-            .args(["-o", "stat=", "-p", &descendant.to_string()])
-            .output()
-            .unwrap();
+        let state = Command::new("/bin/ps").args(["-o", "stat=", "-p", &descendant.to_string()]).output().unwrap();
         assert!(
             String::from_utf8_lossy(&state.stdout).trim().is_empty()
-                || String::from_utf8_lossy(&state.stdout)
-                    .trim()
-                    .starts_with('Z')
+                || String::from_utf8_lossy(&state.stdout).trim().starts_with('Z')
         );
         assert!(bystander.try_wait().unwrap().is_none());
         bystander.kill().unwrap();

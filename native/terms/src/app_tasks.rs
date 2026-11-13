@@ -5,11 +5,18 @@ use std::{
     process::{Command, ExitStatus},
     sync::{
         atomic::{AtomicBool, AtomicU8, Ordering},
-        Arc, Mutex,
+        Arc, Mutex, MutexGuard, PoisonError,
     },
     thread::{self, JoinHandle},
     time::{Duration, Instant},
 };
+
+/// 取取消、截止时间、信封边界和任务收尾这几条路径上的锁，即使持锁的线程 panic 把锁弄成了中毒也照常取到。
+/// 任务线程 panic 会被记成「任务线程崩溃」，之后 `boundary` 还要关闭、取消方和轮询方还要读状态；这里再 panic，
+/// 只会把一个任务的崩溃扩大成别的线程的崩溃。其余地方的锁不用它，按 AGENTS.md「Rust 写法」用 `expect` 写明是哪把锁。
+pub(crate) fn lock_ignoring_poison<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
+    mutex.lock().unwrap_or_else(PoisonError::into_inner)
+}
 
 /// 计算 worker 的四个种类。安装包只带一个 `illustash-worker`，四个
 /// `ILLUSTASH_<KIND>_WORKER` 都指向它（#37）。
@@ -94,7 +101,7 @@ impl Time {
     fn now(&self) -> Instant {
         match &self.0 {
             None => Instant::now(),
-            Some(manual) => *manual.lock().unwrap_or_else(|e| e.into_inner()),
+            Some(manual) => *lock_ignoring_poison(manual),
         }
     }
 }
@@ -111,11 +118,7 @@ impl Clock {
         let now = self.time.now();
         let reason = if self.deadline.limit.is_some_and(|d| now >= self.started + d) {
             LIMIT
-        } else if self
-            .deadline
-            .idle
-            .is_some_and(|d| now >= *self.progressed.lock().unwrap_or_else(|e| e.into_inner()) + d)
-        {
+        } else if self.deadline.idle.is_some_and(|d| now >= *lock_ignoring_poison(&self.progressed) + d) {
             IDLE
         } else {
             RUNNING
@@ -192,18 +195,18 @@ impl TaskContext {
     }
     /// 确实有工作完成：重新开始空闲时间窗。对总时长上限没有影响。
     pub fn progressed(&self) {
-        *self.clock.progressed.lock().unwrap_or_else(|e| e.into_inner()) = self.clock.time.now();
+        *lock_ignoring_poison(&self.clock.progressed) = self.clock.time.now();
     }
     pub fn cancel(&self) {
         self.cancel.store(true, Ordering::SeqCst);
-        let mut boundary = self.boundary.lock().unwrap_or_else(|e| e.into_inner());
+        let mut boundary = lock_ignoring_poison(&self.boundary);
         boundary.closed = true;
     }
     /// 校验完整的信封，并让接收与取消互斥、按顺序进行。导入方还必须把自己的幂等键和业务结果
     /// 在同一个事务里持久化。
     pub fn receive<T>(&self, identity: &TaskIdentity, apply: impl FnOnce() -> Result<T>) -> Result<T> {
         self.check()?;
-        let mut boundary = self.boundary.lock().unwrap_or_else(|e| e.into_inner());
+        let mut boundary = lock_ignoring_poison(&self.boundary);
         if boundary.closed
             || boundary.received
             || self.cancel.load(Ordering::SeqCst)
@@ -220,7 +223,7 @@ impl TaskContext {
     /// 关闭和截止时间检查，但可以重复；每一批的导入方自己必须是幂等且原子的。
     pub fn receive_part<T>(&self, identity: &TaskIdentity, apply: impl FnOnce() -> Result<T>) -> Result<T> {
         self.check()?;
-        let boundary = self.boundary.lock().unwrap_or_else(|e| e.into_inner());
+        let boundary = lock_ignoring_poison(&self.boundary);
         if boundary.closed
             || boundary.received
             || self.cancel.load(Ordering::SeqCst)
@@ -304,7 +307,7 @@ impl Task {
                     }
                 }
             };
-            ctx.boundary.lock().unwrap_or_else(|e| e.into_inner()).closed = true;
+            lock_ignoring_poison(&ctx.boundary).closed = true;
             *state.lock().expect("app_tasks mutex poisoned") = end;
         });
         Self { context, outcome, thread: Some(thread) }

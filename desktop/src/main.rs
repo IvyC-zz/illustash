@@ -6,8 +6,8 @@ mod bridge;
 #[cfg(any(windows, target_os = "macos", test))]
 mod bundled_workers;
 mod i18n;
-mod pixiv;
 mod picker;
+mod pixiv;
 mod server;
 mod welcome;
 
@@ -89,7 +89,9 @@ fn main() {
                 .inner_size(1280.0, 840.0)
                 .min_inner_size(720.0, 480.0)
                 .on_page_load(|window, payload| {
-                    if payload.event() == tauri::webview::PageLoadEvent::Finished { server::page_loaded(&window); }
+                    if payload.event() == tauri::webview::PageLoadEvent::Finished {
+                        server::page_loaded(&window);
+                    }
                 })
                 .on_navigation(server::keep_inside)
                 .on_new_window(|url, _| {
@@ -105,7 +107,10 @@ fn main() {
             let port = match bridge::start(handle.clone(), token.clone()) {
                 Ok(port) => port,
                 Err(error) => {
-                    server::blocked(&main, &i18n::tr_with("无法启动本机登录通道：{error}；请重新启动应用", &[("error", &error)]));
+                    server::blocked(
+                        &main,
+                        &i18n::tr_with("无法启动本机登录通道：{error}；请重新启动应用", &[("error", &error)]),
+                    );
                     return Ok(());
                 }
             };
@@ -116,11 +121,10 @@ fn main() {
         .expect("启动桌面外壳失败");
     app.run(|handle, event| {
         match event {
-            RunEvent::WindowEvent { label, event: WindowEvent::CloseRequested { api, .. }, .. }
-                if label == "main" => {
-                    api.prevent_close();
-                    handle.exit(0); // 隐藏的 Pixiv 窗口不能让服务一直活着。
-                }
+            RunEvent::WindowEvent { label, event: WindowEvent::CloseRequested { api, .. }, .. } if label == "main" => {
+                api.prevent_close();
+                handle.exit(0); // 隐藏的 Pixiv 窗口不能让服务一直活着。
+            }
             RunEvent::Exit => {
                 if let Some(child) = handle.try_state::<server::Child>() {
                     child.stop();

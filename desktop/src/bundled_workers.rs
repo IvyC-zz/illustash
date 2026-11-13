@@ -65,31 +65,33 @@ enum Models {
 /// 模型（app_models 清单里的文件）要么全部登记并存在（完整包），要么一个都不登记（发布用的小包）。
 /// 平台差异只有 platform 标识、组件文件名和给用户的重装提示。
 #[cfg(any(windows, target_os = "macos", test))]
-fn full_bundle(
-    compute: &Path,
-    platform: &str,
-    required: &[&str],
-    reinstall: &str,
-) -> Result<Option<Models>, String> {
+fn full_bundle(compute: &Path, platform: &str, required: &[&str], reinstall: &str) -> Result<Option<Models>, String> {
     match std::fs::symlink_metadata(compute) {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-        Err(error) => return Err(tr_with("完整安装包目录不可用：{error}；{reinstall}", &[("error", &error), ("reinstall", &reinstall)])),
+        Err(error) => {
+            return Err(tr_with(
+                "完整安装包目录不可用：{error}；{reinstall}",
+                &[("error", &error), ("reinstall", &reinstall)],
+            ))
+        }
         Ok(_) => {}
     }
-    let manifest = std::fs::read(compute.join("manifest.json"))
-        .map_err(|e| tr_with("完整安装包 manifest 不可用：{error}；{reinstall}", &[("error", &e), ("reinstall", &reinstall)]))?;
-    let manifest: serde_json::Value = serde_json::from_slice(&manifest)
-        .map_err(|e| tr_with("完整安装包 manifest 损坏：{error}；{reinstall}", &[("error", &e), ("reinstall", &reinstall)]))?;
-    if manifest["format"] != 1
-        || manifest["variant"] != "research"
-        || manifest["platform"] != platform
-    {
+    let manifest = std::fs::read(compute.join("manifest.json")).map_err(|e| {
+        tr_with("完整安装包 manifest 不可用：{error}；{reinstall}", &[("error", &e), ("reinstall", &reinstall)])
+    })?;
+    let manifest: serde_json::Value = serde_json::from_slice(&manifest).map_err(|e| {
+        tr_with("完整安装包 manifest 损坏：{error}；{reinstall}", &[("error", &e), ("reinstall", &reinstall)])
+    })?;
+    if manifest["format"] != 1 || manifest["variant"] != "research" || manifest["platform"] != platform {
         return Err(tr_with("完整安装包 manifest 类型不匹配；{reinstall}", &[("reinstall", &reinstall)]));
     }
     let listed = |relative: &str| compute.join(relative).is_file() && manifest["files"][relative].is_string();
     for relative in required {
         if !listed(relative) {
-            return Err(tr_with("完整安装包组件缺失：{path}；{reinstall}", &[("path", relative), ("reinstall", &reinstall)]));
+            return Err(tr_with(
+                "完整安装包组件缺失：{path}；{reinstall}",
+                &[("path", relative), ("reinstall", &reinstall)],
+            ));
         }
     }
     let models = models();
@@ -98,7 +100,10 @@ fn full_bundle(
     }
     for relative in &models {
         if !listed(relative) {
-            return Err(tr_with("完整安装包组件缺失：{path}；{reinstall}", &[("path", relative), ("reinstall", &reinstall)]));
+            return Err(tr_with(
+                "完整安装包组件缺失：{path}；{reinstall}",
+                &[("path", relative), ("reinstall", &reinstall)],
+            ));
         }
     }
     Ok(Some(Models::Bundled))
@@ -107,7 +112,11 @@ fn full_bundle(
 /// 完整包带的模型文件，写成 compute/ 下的路径（native/terms/models.json）。
 #[cfg(any(windows, target_os = "macos", test))]
 fn models() -> Vec<String> {
-    illustash_terms::app_models::manifest().files.iter().map(|entry| format!("resources/models/{}", entry.path)).collect()
+    illustash_terms::app_models::manifest()
+        .files
+        .iter()
+        .map(|entry| format!("resources/models/{}", entry.path))
+        .collect()
 }
 
 /// 模型根目录，以及识别是否要等下载：用包里自带的模型，或共享数据里的 `models/<pack>`
@@ -149,12 +158,7 @@ fn defaults(
     let models = model_settings(compute, models, Path::new(shared.as_ref().unwrap_or(&default_shared)));
     let mut values = vec![("ILLUSTASH_ROOT", compute.join("resources").into_os_string())];
     values.extend(models);
-    values.push((
-        "ILLUSTASH_RESEARCH_OPENBLAS_DLL",
-        compute
-            .join("resources/openblas/openblas.dll")
-            .into_os_string(),
-    ));
+    values.push(("ILLUSTASH_RESEARCH_OPENBLAS_DLL", compute.join("resources/openblas/openblas.dll").into_os_string()));
     let worker = compute.join("bin/illustash-worker.exe").into_os_string();
     for key in WORKER_KEYS {
         values.push((key, worker.clone()));
@@ -175,15 +179,8 @@ fn macos_defaults(
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        for relative in [
-            "bin/illustash-terms",
-            "bin/illustash-iqdb",
-            "bin/illustash-worker",
-        ] {
-            let mode = std::fs::metadata(compute.join(relative))
-                .map_err(|e| e.to_string())?
-                .permissions()
-                .mode();
+        for relative in ["bin/illustash-terms", "bin/illustash-iqdb", "bin/illustash-worker"] {
+            let mode = std::fs::metadata(compute.join(relative)).map_err(|e| e.to_string())?.permissions().mode();
             if mode & 0o111 == 0 {
                 return Err(tr_with("完整安装包组件不可执行：{path}；请重新安装 macOS 完整版", &[("path", &relative)]));
             }
@@ -197,8 +194,7 @@ fn macos_defaults(
                 .map(std::path::PathBuf::from)
                 .filter(|p| p.is_absolute())
                 .ok_or_else(|| tr("无法定位 HOME；请检查 macOS 用户环境后重启"))?;
-            home.join("Library/Application Support/Illustash/Shared")
-                .into_os_string()
+            home.join("Library/Application Support/Illustash/Shared").into_os_string()
         }
     };
     let mut values = vec![("ILLUSTASH_ROOT", compute.join("resources").into_os_string())];
@@ -214,16 +210,9 @@ fn macos_defaults(
 #[cfg(target_os = "macos")]
 pub fn configure() -> Result<(), String> {
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
-    let contents = exe
-        .parent()
-        .and_then(Path::parent)
-        .ok_or_else(|| tr("无法定位应用安装目录"))?;
+    let contents = exe.parent().and_then(Path::parent).ok_or_else(|| tr("无法定位应用安装目录"))?;
     let compute = contents.join("Resources/compute");
-    for (key, value) in macos_defaults(
-        &compute,
-        std::env::var_os("HOME"),
-        std::env::var_os("ILLUSTASH_SHARED"),
-    )? {
+    for (key, value) in macos_defaults(&compute, std::env::var_os("HOME"), std::env::var_os("ILLUSTASH_SHARED"))? {
         if std::env::var_os(key).is_none() {
             std::env::set_var(key, value);
         }
@@ -256,22 +245,15 @@ mod tests {
         let scratch = std::env::temp_dir().join(format!(
             "illustash-mac-compute-{}-{}",
             std::process::id(),
-            SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
+            SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos()
         ));
         fs::create_dir_all(&scratch).unwrap();
         let root = scratch.join("original.app/Contents/Resources/compute");
         assert!(macos_defaults(&root, None, None).unwrap().is_empty());
         fs::create_dir_all(&root).unwrap();
-        assert!(macos_defaults(&root, None, None)
-            .unwrap_err()
-            .contains("manifest"));
+        assert!(macos_defaults(&root, None, None).unwrap_err().contains("manifest"));
         fs::write(root.join("manifest.json"), "invalid").unwrap();
-        assert!(macos_defaults(&root, None, None)
-            .unwrap_err()
-            .contains("manifest"));
+        assert!(macos_defaults(&root, None, None).unwrap_err().contains("manifest"));
         let mut files = serde_json::Map::new();
         for name in [
             "resources/web/static/index.html",
@@ -299,8 +281,7 @@ mod tests {
             }
             files.insert(name.into(), "synthetic-sha".into());
         }
-        let manifest =
-            serde_json::json!({"format":1,"variant":"research","platform":"darwin","files":files});
+        let manifest = serde_json::json!({"format":1,"variant":"research","platform":"darwin","files":files});
         fs::write(root.join("manifest.json"), manifest.to_string()).unwrap();
         let moved = scratch.join("moved app with spaces");
         fs::rename(scratch.join("original.app"), &moved).unwrap();
@@ -309,55 +290,31 @@ mod tests {
         let settings = macos_defaults(&root, Some(home.clone().into_os_string()), None).unwrap();
         assert_eq!(settings.len(), 7);
         assert_eq!(settings[0].1, root.join("resources").into_os_string());
-        assert_eq!(
-            settings[1].1,
-            root.join("resources/models").into_os_string()
-        );
-        assert_eq!(
-            settings[2].1,
-            home.join("Library/Application Support/Illustash/Shared")
-                .into_os_string()
-        );
-        assert!(settings
-            .iter()
-            .all(|(key, _)| !key.contains("NETWORK") && !key.contains("PYTHON")));
+        assert_eq!(settings[1].1, root.join("resources/models").into_os_string());
+        assert_eq!(settings[2].1, home.join("Library/Application Support/Illustash/Shared").into_os_string());
+        assert!(settings.iter().all(|(key, _)| !key.contains("NETWORK") && !key.contains("PYTHON")));
         // 四个 worker 变量都指向同一个程序，kind 由宿主启动时传入。
         assert_eq!(
-            settings[3..]
-                .iter()
-                .map(|(key, value)| (*key, value.clone()))
-                .collect::<Vec<_>>(),
-            WORKER_KEYS
-                .map(|key| (key, root.join("bin/illustash-worker").into_os_string()))
-                .to_vec()
+            settings[3..].iter().map(|(key, value)| (*key, value.clone())).collect::<Vec<_>>(),
+            WORKER_KEYS.map(|key| (key, root.join("bin/illustash-worker").into_os_string())).to_vec()
         );
         assert!(!home.exists());
         assert_eq!(
             macos_defaults(&root, None, Some("/explicit shared".into())).unwrap()[2].1,
             OsString::from("/explicit shared")
         );
-        assert!(macos_defaults(&root, None, None)
-            .unwrap_err()
-            .contains("HOME"));
-        assert!(macos_defaults(&root, Some("relative".into()), None)
-            .unwrap_err()
-            .contains("HOME"));
+        assert!(macos_defaults(&root, None, None).unwrap_err().contains("HOME"));
+        assert!(macos_defaults(&root, Some("relative".into()), None).unwrap_err().contains("HOME"));
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
             let helper = root.join("bin/illustash-worker");
             fs::set_permissions(&helper, fs::Permissions::from_mode(0o644)).unwrap();
-            assert!(
-                macos_defaults(&root, Some(home.clone().into_os_string()), None)
-                    .unwrap_err()
-                    .contains("不可执行")
-            );
+            assert!(macos_defaults(&root, Some(home.clone().into_os_string()), None).unwrap_err().contains("不可执行"));
             fs::set_permissions(&helper, fs::Permissions::from_mode(0o755)).unwrap();
         }
         fs::remove_file(root.join("resources/onnxruntime/libonnxruntime.dylib")).unwrap();
-        assert!(macos_defaults(&root, Some(home.into_os_string()), None)
-            .unwrap_err()
-            .contains("libonnxruntime"));
+        assert!(macos_defaults(&root, Some(home.into_os_string()), None).unwrap_err().contains("libonnxruntime"));
         fs::remove_dir_all(scratch).unwrap();
     }
 
@@ -365,22 +322,16 @@ mod tests {
         let root = std::env::temp_dir().join(format!(
             "{prefix}-{}-{}",
             std::process::id(),
-            SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
+            SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos()
         ));
         fs::create_dir_all(&root).unwrap();
         root
     }
 
     fn windows_manifest(platform: &str, variant: &str, format: i64) -> String {
-        let files: serde_json::Map<_, _> = WINDOWS_FILES
-            .iter()
-            .map(|name| ((*name).into(), "synthetic-sha".into()))
-            .collect();
-        serde_json::json!({"format":format,"variant":variant,"platform":platform,"files":files})
-            .to_string()
+        let files: serde_json::Map<_, _> =
+            WINDOWS_FILES.iter().map(|name| ((*name).into(), "synthetic-sha".into())).collect();
+        serde_json::json!({"format":format,"variant":variant,"platform":platform,"files":files}).to_string()
     }
 
     #[test]
@@ -388,9 +339,7 @@ mod tests {
         let scratch = scratch("illustash-win-base");
         let compute = scratch.join("compute");
         assert!(defaults(&compute, None, None).unwrap().is_empty());
-        assert!(defaults(&compute, Some("user data".into()), None)
-            .unwrap()
-            .is_empty());
+        assert!(defaults(&compute, Some("user data".into()), None).unwrap().is_empty());
         fs::remove_dir_all(scratch).unwrap();
     }
 
@@ -410,14 +359,10 @@ mod tests {
             fs::write(path, b"fixture").unwrap();
         }
         // 组件齐全也不能掩盖 manifest 缺失或损坏。
-        assert!(defaults(&root, local(), None)
-            .unwrap_err()
-            .contains("manifest 不可用"));
+        assert!(defaults(&root, local(), None).unwrap_err().contains("manifest 不可用"));
         for broken in ["invalid", "", "{\"format\":1,"] {
             fs::write(root.join("manifest.json"), broken).unwrap();
-            assert!(defaults(&root, local(), None)
-                .unwrap_err()
-                .contains("manifest 损坏"));
+            assert!(defaults(&root, local(), None).unwrap_err().contains("manifest 损坏"));
         }
         for mismatched in [
             "{}".to_string(),
@@ -428,19 +373,12 @@ mod tests {
             windows_manifest("win32", "research", 2),
         ] {
             fs::write(root.join("manifest.json"), mismatched).unwrap();
-            assert!(defaults(&root, local(), None)
-                .unwrap_err()
-                .contains("manifest 类型不匹配"));
+            assert!(defaults(&root, local(), None).unwrap_err().contains("manifest 类型不匹配"));
         }
         // 声明正确但 files 未登记必需组件。
-        fs::write(
-            root.join("manifest.json"),
-            r#"{"format":1,"variant":"research","platform":"win32","files":{}}"#,
-        )
-        .unwrap();
-        assert!(defaults(&root, local(), None)
-            .unwrap_err()
-            .contains("resources/web/static/index.html"));
+        fs::write(root.join("manifest.json"), r#"{"format":1,"variant":"research","platform":"win32","files":{}}"#)
+            .unwrap();
+        assert!(defaults(&root, local(), None).unwrap_err().contains("resources/web/static/index.html"));
         fs::remove_dir_all(scratch).unwrap();
     }
 
@@ -487,11 +425,7 @@ mod tests {
         let scratch = scratch("illustash-bundle");
         let root = scratch.join("relocated with spaces/compute");
         fs::create_dir_all(&root).unwrap();
-        fs::write(
-            root.join("manifest.json"),
-            windows_manifest("win32", "research", 1),
-        )
-        .unwrap();
+        fs::write(root.join("manifest.json"), windows_manifest("win32", "research", 1)).unwrap();
         assert!(defaults(&root, Some("user data".into()), None)
             .unwrap_err()
             .contains("resources/web/static/index.html"));
@@ -524,26 +458,12 @@ mod tests {
             Path::new("user data").join("Illustash/Shared").join("models").join(pack).into_os_string()
         );
         assert_eq!(settings[2].1, OsString::from("1"));
-        assert_eq!(
-            settings[3].1,
-            root.join("resources/openblas/openblas.dll")
-                .into_os_string()
-        );
+        assert_eq!(settings[3].1, root.join("resources/openblas/openblas.dll").into_os_string());
         for (_, value) in &settings[4..8] {
-            assert_eq!(
-                *value,
-                root.join("bin/illustash-worker.exe").into_os_string()
-            );
+            assert_eq!(*value, root.join("bin/illustash-worker.exe").into_os_string());
         }
-        assert_eq!(
-            settings[8].1,
-            Path::new("user data")
-                .join("Illustash/Shared")
-                .into_os_string()
-        );
-        assert!(settings
-            .iter()
-            .all(|(key, _)| !key.contains("NETWORK") && !key.contains("PYTHON")));
+        assert_eq!(settings[8].1, Path::new("user data").join("Illustash/Shared").into_os_string());
+        assert!(settings.iter().all(|(key, _)| !key.contains("NETWORK") && !key.contains("PYTHON")));
         // 明确指定的共享文件夹保留，下载的模型放在它下面。
         let explicit = defaults(&root, Some("user data".into()), Some("explicit shared".into())).unwrap();
         assert_eq!(explicit[1].1, Path::new("explicit shared").join("models").join(pack).into_os_string());
@@ -573,9 +493,7 @@ mod tests {
         fs::write(root.join("manifest.json"), manifest.to_string()).unwrap();
         assert!(defaults(&root, None, None).unwrap_err().contains("LOCALAPPDATA"));
         fs::remove_file(root.join("bin/illustash-worker.exe")).unwrap();
-        assert!(defaults(&root, Some("user data".into()), None)
-            .unwrap_err()
-            .contains("illustash-worker.exe"));
+        assert!(defaults(&root, Some("user data".into()), None).unwrap_err().contains("illustash-worker.exe"));
         // #37 之前的布局（每类一份 illustash-<kind>.exe）不再满足契约：提示重装，不按旧文件名猜。
         for kind in ["research", "index", "provenance", "recognition"] {
             fs::write(root.join(format!("bin/illustash-{kind}.exe")), b"fixture").unwrap();

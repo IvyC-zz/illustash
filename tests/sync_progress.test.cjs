@@ -29,6 +29,19 @@ test('recognition shows the worker count, failures and the estimate while the wo
   assert.equal(context.syncBar(s, bar), '26/30');
 });
 
+test('a long estimate is told in hours from two hours on, in minutes below that (#360)', () => {
+  const line = (total, ms) => context.syncLine({status: 'recognising', stage: 'recognising', total, done: 0, ms_per_image: ms});
+  // 约 5 万张、每张 0.94 秒：约 13 小时，而不是「约 783 分钟」。
+  assert.equal(line(50000, 940), '正在识别新图片 0/50,000 · 约 13 小时');
+  assert.equal(line(119, 60000), '正在识别新图片 0/119 · 约 119 分钟');
+  // 四舍五入到 120 分钟就按小时说，不会出现「约 120 分钟」。
+  assert.equal(line(239, 30000), '正在识别新图片 0/239 · 约 2 小时');
+  assert.equal(line(120, 60000), '正在识别新图片 0/120 · 约 2 小时');
+  assert.equal(line(149, 60000), '正在识别新图片 0/149 · 约 2 小时');
+  assert.equal(line(150, 60000), '正在识别新图片 0/150 · 约 3 小时');
+  assert.equal(line(1, 100), '正在识别新图片 0/1 · 约 1 分钟');
+});
+
 test('a worker without progress keeps the old line', () => {
   assert.equal(context.syncLine({status: 'recognising', total: 3, done: 0}), '正在识别新图片 0/3');
 });

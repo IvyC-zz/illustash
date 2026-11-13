@@ -1,7 +1,7 @@
 // 后台任务（#199）：照片或文件夹同步、外部索引的新角色（native/terms/src/app_index.rs）、显示名、相似图片、找回画师和
 // 导入。每个任务怎样轮询、状态怎样用文字说、启动或取消时发什么；不碰 DOM。它们的状态仍在 core/state.js（sync、
-// syncHistory、syncDamaged、index、names、provenance、importTask、settings.tasks.similar），由这里写入，在它们也搬过来
-// 之前，设置页也会写。任务运行期间轮询会自己重新排上；重叠的轮询绝不会让状态倒退（#34）。
+// syncHistory、syncDamaged、index、names、provenance、importTask），由这里写入；别的模块要换掉 index、names 时调用
+// 这里的 setIndex、setNames（#344）。相似图片的状态随 settings 一起来，settings 由 core/settings.js 写。任务运行期间轮询会自己重新排上；重叠的轮询绝不会让状态倒退（#34）。
 import {diagnosticLine} from './diagnostics.js';
 import {t, tb} from './i18n.js';
 import {number, stamp} from './format.js';
@@ -9,6 +9,11 @@ import {session, api, post, shared} from './session.js';
 import {state} from './state.js';
 import {listeners} from './events.js';
 const changed = listeners();
+// /api/index 的最新回应（关注列表、作品、检查与添加的状态）。资料库、设置页、引导读到新的回应也经这里换上。
+export function setIndex(value) { state.index = value; }
+// /api/names 的最新回应（覆盖率、设置、运行状态）；mergeNames 只换掉回应里带的那几项。
+export function setNames(value) { state.names = value; }
+export function mergeNames(patch) { state.names = {...state.names, ...patch}; }
 // 每个被采用的回应之后调用 fn(job, change)；job 是 sync、index、names、provenance 或 import。change.was 是之前的状态，
 // change.ended 表示一次运行刚结束；对 sync，change.arrived 表示进了图片或一次运行已落定，图库显示的内容可能变了。
 export const onJob = changed.on;
@@ -24,6 +29,11 @@ export const photosHelp = () => t('没有访问照片图库的权限。到「系
 export const syncBar = (s, bar) => s.status === 'recognising' && s.stage === 'hashing' ? bar(s.input_done, s.input_total)
   : s.status === 'recognising' && s.stage !== 'preparing' ? bar(s.done, s.total)
   : s.status === 'importing' && s.import_total ? bar(s.import_done, s.import_total) : '';
+// 预计剩余时间（#360）：新图库第一次识别要十几个小时，满两小时起按小时说；不到两小时按整小时说太粗，仍按分钟。
+function remaining(ms) {
+  const minutes = Math.max(1, Math.round(ms / 60000));
+  return minutes < 120 ? t('约 {n} 分钟', {n: minutes}) : t('约 {n} 小时', {n: Math.round(minutes / 60)});
+}
 // 识别和导入分开计数：done/total 是已识别或已放弃的图片，import_done/import_total 是已识别并写进图库的。
 export function syncLine(s) {
   if (s.status === 'scanning') return s.scan_total == null ? t('正在检查来源…') : t('正在检查文件 {done}/{total}', {done: number(s.scanned || 0), total: number(s.scan_total)});
@@ -36,7 +46,7 @@ export function syncLine(s) {
     if (s.stage === 'hashing') return t('正在准备识别图片 {done}/{total}', {done: number(s.input_done || 0), total: number(s.input_total || 0)});
     if (s.stage === 'preparing') return t('正在加载识别模型（共 {n} 张）…', {n: number(s.total || 0)});
     const failed = s.failed ? ' · ' + t('{n} 张无法识别', {n: number(s.failed)}) : '';
-    const left = s.ms_per_image && s.total > s.done ? ' · ' + t('约 {n} 分钟', {n: Math.max(1, Math.round((s.total - s.done) * s.ms_per_image / 60000))}) : '';
+    const left = s.ms_per_image && s.total > s.done ? ' · ' + remaining((s.total - s.done) * s.ms_per_image) : '';
     const imported = s.import_done ? ' · ' + t('已导入 {n}', {n: number(s.import_done)}) : '';
     return t('正在识别新图片 {done}/{total}', {done: number(s.done || 0), total: number(s.total || 0)}) + failed + imported + left;
   }
@@ -88,8 +98,8 @@ export async function pollIndex() {
   try {
     const progress = await api('/api/index?progress=1');
     // 只在可能有变化时才完整读取（作品、检查结果）；空闲时的轮询保持轻量。
-    state.index = !state.index?.works || (!INDEX_ACTIVE.includes(progress.state?.status) && progress.state?.status !== was)
-      ? await shared('/api/index') : {...state.index, ...progress};
+    setIndex(!state.index?.works || (!INDEX_ACTIVE.includes(progress.state?.status) && progress.state?.status !== was)
+      ? await shared('/api/index') : {...state.index, ...progress});
   } catch (e) { indexTimer = setTimeout(pollIndex, 10000); return; }
   const s = state.index.state;
   await changed.emit('index', {was, ended: INDEX_ACTIVE.includes(was) && !INDEX_ACTIVE.includes(s.status)});
@@ -105,14 +115,14 @@ export function indexEndText(s) {
 }
 
 // 关注列表、最低帖子数、移除角色：回应是索引的新状态。
-export async function indexAction(body) { state.index = await post('/api/index', body); }
+export async function indexAction(body) { setIndex(await post('/api/index', body)); }
 // 一次检查会访问 Danbooru，所以每次都要询问（confirm(message, title) 解析为回答）；期间切换了图库就不检查。
 export async function checkIndex(confirm) {
   const token = session.token;
   if (!await confirm(t('本次检查会联网查询 Danbooru，只发送关注作品的 tag，不发送图库图片。允许本次检查联网吗？'), t('检查新角色')) || token !== session.token) return false;
   const result = await post('/api/index', {action: 'check', allow_network: true});
   if (token !== session.token) return false;
-  state.index = result; return true;
+  setIndex(result); return true;
 }
 
 // 暂停的添加（重启之后，还缺的图片没有人允许联网）在用户再次允许联网后用一次新的运行继续；已有的图片保留（#287）。
@@ -121,7 +131,7 @@ export async function resumeIndex(confirm) {
   if (!await confirm(t('继续下载参考图会联网访问 Danbooru，只下载还缺的公开参考图，已下载的不会重下。允许本次联网吗？'), t('继续添加角色')) || token !== session.token) return false;
   const result = await post('/api/index', {action: 'resume', allow_network: true});
   if (token !== session.token) return false;
-  state.index = result; return true;
+  setIndex(result); return true;
 }
 // 放弃一次暂停的添加会删掉它下载的图片；它没有往图库里写任何东西。
 export async function discardIndex(confirm) {
@@ -129,7 +139,7 @@ export async function discardIndex(confirm) {
   if (!await confirm(t('放弃这次添加？已下载的参考图会删掉，图库不受影响；以后可以重新选择要添加的角色。'), t('放弃添加'), t('放弃')) || token !== session.token) return false;
   const result = await post('/api/index', {action: 'discard'});
   if (token !== session.token) return false;
-  state.index = result; return true;
+  setIndex(result); return true;
 }
 
 // ---------- 显示名：Bangumi 优先，用户选择开启的模型 API 最后 ----------
@@ -142,7 +152,7 @@ export async function pollNames() {
   try {
     const progress = await api('/api/names?progress=1');
     // 运行期间保留现有的覆盖率和设置；完成时刷新一次。
-    state.names = !state.names?.counts || (running && !NAMES_ACTIVE.includes(progress.state?.status)) ? await api('/api/names') : {...state.names, ...progress};
+    setNames(!state.names?.counts || (running && !NAMES_ACTIVE.includes(progress.state?.status)) ? await api('/api/names') : {...state.names, ...progress});
   } catch (e) { namesTimer = setTimeout(pollNames, 10000); return; }
   const now = NAMES_ACTIVE.includes(state.names.state?.status);
   await changed.emit('names', {was, ended: running && !now});
@@ -150,7 +160,7 @@ export async function pollNames() {
 }
 // 设置卡片刚显示的一次运行，2 s 后再轮询。
 export function pollNamesSoon() { clearTimeout(namesTimer); namesTimer = setTimeout(pollNames, 2000); }
-export async function refreshNames() { state.names = {...state.names, ...await post('/api/names', {action: 'refresh'})}; }
+export async function refreshNames() { mergeNames(await post('/api/names', {action: 'refresh'})); }
 
 // ---------- 相似图片（它的状态随 /api/settings 一起来） ----------
 export const SIMILAR_ACTIVE = ['reading', 'pairing', 'comparing', 'waiting'];

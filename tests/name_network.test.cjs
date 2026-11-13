@@ -20,7 +20,7 @@ function harness({fail, confirm = true} = {}) {
     setImmediate(() => d.close(confirm ? 'ok' : ''));   // 用户作答
   }}, createElement() {
     const parts = {};
-    return {returnValue: '', setAttribute() {}, querySelector: selector => parts[selector] ||= {}, showModal() {}, remove() {},
+    return {returnValue: '', setAttribute() {}, querySelector: selector => parts[selector] ||= {}, showModal() {}, addEventListener() {}, remove() {},
       close(value = '') { this.returnValue = value; this.onclose(); }};
   }};
   const setTimeout = globalThis.setTimeout; globalThis.setTimeout = () => 0;

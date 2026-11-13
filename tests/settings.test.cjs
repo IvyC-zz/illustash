@@ -171,7 +171,7 @@ test('an older library is opened only after the person agrees to upgrade it (#19
   const sent = [], nodes = {}, dialogs = [];
   const element = () => ({hidden: true, textContent: '', innerHTML: '', contains: () => false});
   globalThis.document = {getElementById: id => nodes[id] ||= element(), activeElement: null, body: {append(d) { dialogs.push(d); setImmediate(() => d.close('')); }},
-    createElement() { const parts = {}; return {setAttribute() {}, querySelector: s => parts[s] ||= {}, showModal() {}, remove() {}, close(v = '') { this.returnValue = v; this.onclose(); }}; }};
+    createElement() { const parts = {}; return {setAttribute() {}, querySelector: s => parts[s] ||= {}, showModal() {}, addEventListener() {}, remove() {}, close(v = '') { this.returnValue = v; this.onclose(); }}; }};
   globalThis.fetch = async (path, options) => {
     sent.push(JSON.parse(options.body));
     return {status: 409, ok: false, json: async () => ({error: '这个图库需要升级到新格式才能打开。升级后旧版本的 Illustash 打不开它；升级前会自动备份，升级没有完成时图库保持原样。'})};

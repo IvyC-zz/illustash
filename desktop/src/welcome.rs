@@ -73,7 +73,9 @@ impl Requests {
             seen.push_back((id.to_owned(), None));
         }
         let answer = work();
-        if let Some(entry) = self.seen.lock().expect("lock poisoned by an earlier panic").iter_mut().find(|(s, _)| s == id) {
+        if let Some(entry) =
+            self.seen.lock().expect("lock poisoned by an earlier panic").iter_mut().find(|(s, _)| s == id)
+        {
             entry.1 = Some(answer.clone());
         }
         self.done.notify_all();
@@ -178,7 +180,11 @@ fn import_archive(app: &AppHandle, import: &Import, path: String) -> Result<(), 
 /// 正在进行的导入的阶段和字节数（没有导入在运行时为 `{}`）。
 #[tauri::command]
 pub fn welcome_import_status(import: State<'_, Import>) -> Value {
-    if import.cancel.lock().expect("lock poisoned by an earlier panic").is_some() { import.state.lock().expect("lock poisoned by an earlier panic").clone() } else { json!({}) }
+    if import.cancel.lock().expect("lock poisoned by an earlier panic").is_some() {
+        import.state.lock().expect("lock poisoned by an earlier panic").clone()
+    } else {
+        json!({})
+    }
 }
 
 /// 在图库发布之前停止正在进行的导入；已解压的内容会被删除。

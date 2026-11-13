@@ -1,7 +1,7 @@
 //! 识别结果导入与图库归档导入的后台任务（#88）。同一时间只运行一个导入；状态可轮询，可取消。
 //! 发布点经 `TaskContext::receive` 与取消互斥：取消先到就不发布；发布已经开始，取消等它完成，结果如实记为完成。
 use crate::{
-    app_tasks::{Deadline, Task, TaskContext, TaskIdentity},
+    app_tasks::{lock_ignoring_poison, Deadline, Task, TaskContext, TaskIdentity},
     http_json::Json,
     task_state::{State, Status},
     Error, Result,
@@ -9,7 +9,7 @@ use crate::{
 use std::{
     sync::{
         atomic::{AtomicBool, Ordering},
-        Arc, Mutex, MutexGuard,
+        Arc, Mutex,
     },
     time::Duration,
 };
@@ -43,10 +43,6 @@ impl Kind {
     }
 }
 
-fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
-    mutex.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
-}
-
 /// 交给正在运行的导入：它的取消标志，以及写进可轮询状态的报告。
 pub(crate) struct Progress {
     state: Arc<Mutex<State>>,
@@ -63,13 +59,13 @@ impl Progress {
 }
 impl Observer for Progress {
     fn stage(&self, stage: &'static str) {
-        let mut state = lock(&self.state);
+        let mut state = lock_ignoring_poison(&self.state);
         state.remove("done");
         state.remove("total");
         state.set("stage", stage.into());
     }
     fn count(&self, done: u64, total: u64) {
-        let mut state = lock(&self.state);
+        let mut state = lock_ignoring_poison(&self.state);
         state.set("done", serde_json::Value::from(done).into());
         state.set("total", serde_json::Value::from(total).into());
     }
@@ -110,7 +106,7 @@ struct Current {
 }
 impl Current {
     fn snapshot(&self) -> Json {
-        let state = lock(&self.state).clone();
+        let state = lock_ignoring_poison(&self.state).clone();
         // 没有最终状态就结束的线程是 panic 了；不要让它一直报告为运行中。
         if matches!(state.status(), Status::Running | Status::Stopping) && !self.task.running() {
             let mut state = state;
@@ -127,8 +123,8 @@ impl Current {
         if !self.task.running() {
             return None;
         }
-        lock(&self.reason).get_or_insert(reason);
-        let mut state = lock(&self.state);
+        lock_ignoring_poison(&self.reason).get_or_insert(reason);
+        let mut state = lock_ignoring_poison(&self.state);
         if state.status() == Status::Running {
             state.set("status", "stopping".into());
         }
@@ -145,7 +141,10 @@ pub(crate) struct Imports {
 }
 impl Imports {
     pub(crate) fn state(&self) -> Json {
-        lock(&self.current).as_ref().map(Current::snapshot).unwrap_or_else(|| Json::object([("status", "idle".into())]))
+        lock_ignoring_poison(&self.current)
+            .as_ref()
+            .map(Current::snapshot)
+            .unwrap_or_else(|| Json::object([("status", "idle".into())]))
     }
     /// 在后台启动 `work`，回答它的初始状态。`file` 是给页面看的输入名称。
     pub(crate) fn start(
@@ -155,7 +154,7 @@ impl Imports {
         file: &str,
         work: impl FnOnce(&Progress) -> Result<Json> + Send + 'static,
     ) -> Result<Json> {
-        let mut current = lock(&self.current);
+        let mut current = lock_ignoring_poison(&self.current);
         if self.closed.load(Ordering::SeqCst) {
             return Err(Error::Invalid("服务正在退出".into()));
         }
@@ -171,7 +170,7 @@ impl Imports {
         ]))));
         // 回答的是刚启动时的任务：立即失败的任务也必须以运行中的状态送到页面，否则页面（它在轮询看到导入结束时才报告）
         // 永远不会说出失败的原因。
-        let answer = lock(&state).snapshot();
+        let answer = lock_ignoring_poison(&state).snapshot();
         let reason: Arc<Mutex<Option<&'static str>>> = Arc::default();
         let (shared, why) = (state.clone(), reason.clone());
         let task = Task::start_with(identity, Deadline::default(), move |context| {
@@ -179,7 +178,7 @@ impl Imports {
                 Progress { state: shared.clone(), context: context.clone(), published: AtomicBool::new(false) };
             let result = work(&progress);
             let stopped = context.cancellation().load(Ordering::SeqCst) || crate::platform_process::stopping();
-            let mut state = lock(&shared);
+            let mut state = lock_ignoring_poison(&shared);
             match result {
                 Ok(value) => {
                     // 发布成功、投影/登记尚未完成仍是需要反馈的故障；保留业务成功结果，不能诱导重复导入。
@@ -205,7 +204,7 @@ impl Imports {
                 // 什么都没有发布：导入是因为被要求才停下的，无论它表现为什么错误。
                 Err(_) if stopped && !progress.published.load(Ordering::SeqCst) => {
                     state.set("status", "cancelled".into());
-                    state.set("reason", lock(&why).unwrap_or(QUITTING).into());
+                    state.set("reason", lock_ignoring_poison(&why).unwrap_or(QUITTING).into());
                 }
                 Err(error) => {
                     use crate::diagnostics::{self, Operation, Publication};
@@ -233,14 +232,14 @@ impl Imports {
     }
     /// 这个会话的识别导入已被接受或正在运行：同步和索引写入要等它。
     pub(crate) fn recognition_running(&self, generation: u64) -> bool {
-        lock(&self.current)
+        lock_ignoring_poison(&self.current)
             .as_ref()
             .is_some_and(|c| c.kind == Kind::Recognition && c.generation == generation && c.task.running())
     }
     /// 请正在运行的导入停下，回答那一刻的状态；页面轮询直到结束。
     pub(crate) fn cancel(&self, reason: &'static str) -> Json {
         let (stopping, answer) = {
-            let current = lock(&self.current);
+            let current = lock_ignoring_poison(&self.current);
             match current.as_ref() {
                 Some(c) => (c.stop(reason), c.snapshot()),
                 None => (None, Json::object([("status", "idle".into())])),
@@ -255,7 +254,7 @@ impl Imports {
     pub(crate) fn shutdown(&self, wait: Duration) {
         self.closed.store(true, Ordering::SeqCst);
         let taken = {
-            let mut current = lock(&self.current);
+            let mut current = lock_ignoring_poison(&self.current);
             current.take()
         };
         if let Some(mut c) = taken {
