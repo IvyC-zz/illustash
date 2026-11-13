@@ -408,7 +408,8 @@ function autoScroll() {
   requestAnimationFrame(autoScroll);
 }
 // ---------- 选择栏与操作 ----------
-function renderSelection() {
+// 导出给样式清单页调用（tools/styleguide/live.js，#352）：改名或改参数时，tools/check_styleguide.py 会报出来。
+export function renderSelection() {
   syncCards();
   const n = selCount(), bar = $('selectionBar'), r = state.route, kind = viewOf(r).bar;   // 选择栏的种类由页面登记
   bar.hidden = !n; if (!n) { state.armed = null; return; }
@@ -577,7 +578,8 @@ function applyViewClasses() {
   b.toggle('hide-marks', !viewOpts.marks); b.toggle('show-rail-count', viewOpts.railCount); b.toggle('hide-footer', !viewOpts.footer);
 }
 const viewSwitch = (key, label, hint = '') => `<button class="view-opt" data-view="${key}" role="switch" aria-checked="${viewOpts[key]}"><span>${label}${hint ? `<small>${hint}</small>` : ''}</span><i class="view-sw${viewOpts[key] ? ' on' : ''}"></i></button>`;
-function renderViewPop() {
+// 导出给样式清单页调用（tools/styleguide/live.js，#352）：改名或改参数时，tools/check_styleguide.py 会报出来。
+export function renderViewPop() {
   const grid = !pageOf(state.route).panel;
   $('viewPopover').innerHTML = (pageOf(state.route).area === 'homePage' ? `<h6>${t('首页')}</h6><div class="view-group">
       <div class="view-row"><span>${t('缩略图')}</span><div class="segmented" id="homeSizeSeg">${[[0, t('小')], [1, t('中')], [2, t('大')]].map(([v, label]) => `<button data-hsize="${v}" class="${viewOpts.homeSize === v ? 'on' : ''}">${label}</button>`).join('')}</div></div>
@@ -626,6 +628,13 @@ export function setNsfw(mode) {
   if (!pageOf(state.route).panel) reload(true);
   else pageOf(state.route).refresh?.('nsfw');
   refreshMeta().catch(e => error(readError(e)));
+}
+
+// 帮助对话框的快捷键表从 core/modes.js 的 SHORTCUTS 生成，和键盘处理是同一张表。wireGrid 调用一次；
+// 也导出给样式清单页调用（tools/styleguide/live.js，#352）。
+export function renderHelpKeys() {
+  const text = x => typeof x === 'function' ? x() : x;
+  $('helpKeys').innerHTML = SHORTCUTS.map(s => `<dt>${esc(platformText(text(s.keys)))}</dt><dd>${esc(platformText(s.does()))}</dd>`).join('');
 }
 
 // 页面这一部分注册的处理函数。页面启动时调用一次。
@@ -749,9 +758,7 @@ export function wireGrid() {
     if (/^[1-9]$/.test(e.key) && !n && state.detail && (m.detail || m.viewer)) { pickAlternative(state.detail, state.detail.uuid, Number(e.key) - 1, e.altKey); return; }
   });
 
-  // 帮助对话框的快捷键表从 core/modes.js 的 SHORTCUTS 生成，和键盘处理是同一张表。
-  const text = x => typeof x === 'function' ? x() : x;
-  $('helpKeys').innerHTML = SHORTCUTS.map(s => `<dt>${esc(platformText(text(s.keys)))}</dt><dd>${esc(platformText(s.does()))}</dd>`).join('');
+  renderHelpKeys();
 
   $('viewButton').onclick = e => { e.stopPropagation(); toggleViewPop(); };
   $('viewPopover').addEventListener('click', e => {
