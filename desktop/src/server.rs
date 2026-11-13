@@ -240,9 +240,14 @@ pub(crate) fn show_error(main: &WebviewWindow, message: &str, _log: &VecDeque<St
     use illustash_terms::diagnostics::{Cause, Stage};
     show_diagnostic(main, message, Stage::Startup, Cause::HostStartup, None);
 }
-fn show_diagnostic(main: &WebviewWindow, message: &str, stage: illustash_terms::diagnostics::Stage,
-    cause: illustash_terms::diagnostics::Cause, code: Option<i32>) {
-    use illustash_terms::diagnostics::{self, Publication, Operation, Retry};
+fn show_diagnostic(
+    main: &WebviewWindow,
+    message: &str,
+    stage: illustash_terms::diagnostics::Stage,
+    cause: illustash_terms::diagnostics::Cause,
+    code: Option<i32>,
+) {
+    use illustash_terms::diagnostics::{self, Operation, Publication, Retry};
     let receipt = diagnostics::record(Operation::Host, stage, cause, code, Publication::Unknown, Retry::Restart);
     let message = format!("{message}\n{}", tr_with("错误编号：{id}", &[("id", &receipt.id)]));
     let mut report = diagnostics::report();
@@ -554,9 +559,13 @@ fn run(app: &AppHandle, main: &WebviewWindow, library: Option<PathBuf>, start: S
                 && active.lock().expect("lock poisoned by an earlier panic").elapsed() > STALL
             {
                 app.state::<Child>().stop();
-                show_diagnostic(&main,
+                show_diagnostic(
+                    &main,
                     &tr("本地服务 30 秒没有任何进展，已停止；可以重试，或选择其他图库"),
-                    illustash_terms::diagnostics::Stage::Startup, illustash_terms::diagnostics::Cause::Timeout, None);
+                    illustash_terms::diagnostics::Stage::Startup,
+                    illustash_terms::diagnostics::Cause::Timeout,
+                    None,
+                );
                 return;
             }
             thread::sleep(Duration::from_millis(50));
@@ -582,16 +591,23 @@ fn run(app: &AppHandle, main: &WebviewWindow, library: Option<PathBuf>, start: S
                 return;
             }
         }
-        let code = match &status { Ok(Some(s)) => exit_code(s), Err(e) => e.raw_os_error(), _ => None };
+        let code = match &status {
+            Ok(Some(s)) => exit_code(s),
+            Err(e) => e.raw_os_error(),
+            _ => None,
+        };
         let why = match status {
-            Ok(Some(s)) => {
-                tr_with("本地服务已退出（{status}）；可复制诊断信息，重试或选择其他图库", &[("status", &s)])
-            }
+            Ok(Some(s)) => tr_with("本地服务已退出（{status}）；可复制诊断信息，重试或选择其他图库", &[("status", &s)]),
             Err(e) => tr_with("本地服务异常：{error}；请重新启动应用", &[("error", &e)]),
             _ => unreachable!(),
         };
-        show_diagnostic(&main, &why, illustash_terms::diagnostics::Stage::Exit,
-            illustash_terms::diagnostics::Cause::HostExit, code);
+        show_diagnostic(
+            &main,
+            &why,
+            illustash_terms::diagnostics::Stage::Exit,
+            illustash_terms::diagnostics::Cause::HostExit,
+            code,
+        );
     });
 }
 
@@ -603,7 +619,9 @@ fn exit_code(status: &std::process::ExitStatus) -> Option<i32> {
         status.code().or_else(|| status.signal().map(|signal| -signal))
     }
     #[cfg(not(unix))]
-    { status.code() }
+    {
+        status.code()
+    }
 }
 
 #[cfg(test)]
