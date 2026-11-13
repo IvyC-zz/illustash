@@ -2,6 +2,7 @@
 // 的内容在 core/catalog.js。
 import {t} from '../core/i18n.js';
 import {esc, number} from '../core/format.js';
+import {composing} from '../core/keys.js';
 import {implement, onPage} from '../core/pages.js';
 import {prefs} from '../core/prefs.js';
 import {api, session, readError} from '../core/session.js';
@@ -419,7 +420,7 @@ export function workDialog(w, {watch = false} = {}) {
       q('#wdWatchRow').hidden = !tag || already; if (!tag) q('#wdWatch').checked = false;
     };
     q('#wdTag').oninput = tagNote; tagNote();
-    q('#wdFind').addEventListener('keydown', e => { if (e.key === 'Enter') e.preventDefault(); });
+    q('#wdFind').addEventListener('keydown', e => { if (!composing(e) && e.key === 'Enter') e.preventDefault(); });
     combo(q('#wdFind'), q('#wdFindMenu'), (text, show) => {
       if (!text) { show([]); return; }
       show([{label: 'Danbooru', items: [], note: t('正在查 Danbooru…（只发送你输入的文字）')}]);
@@ -508,7 +509,7 @@ export function wireWatchAdd(x, add) {
   input.oninput = e => { watchDraft = e.target.value; clearTimeout(localTimer); localTimer = setTimeout(search, 150); };
   input.onblur = () => setTimeout(() => { show(false, 'outside'); input.setAttribute('aria-expanded', 'false'); }, 150);
   input.onkeydown = e => {
-    if (e.isComposing) return;
+    if (composing(e)) return;
     if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); if (list.length) { index = (index + (e.key === 'ArrowDown' ? 1 : -1) + list.length) % list.length; highlight(); } }
     else if (e.key === 'Enter') {
       e.preventDefault();
@@ -526,7 +527,7 @@ export function wireCatalog() {
   // 海报的查看器（#293）：指针在海报上横向和纵向移动、离开海报，以及有焦点的海报上的方向键。
   $('charIndex').addEventListener('mousemove', lookMove);
   $('charIndex').addEventListener('mouseout', e => { const a = e.target.closest?.('.cast-poster.look'); if (a && !a.contains(e.relatedTarget)) lookMove({type: 'leave', target: a}); });
-  $('charIndex').addEventListener('keydown', e => { const a = e.target.closest?.('.cast-poster.look'); if (a && ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key)) { e.preventDefault(); lookKey(a, e.key); } });
+  $('charIndex').addEventListener('keydown', e => { const a = e.target.closest?.('.cast-poster.look'); if (a && !composing(e) && ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key)) { e.preventDefault(); lookKey(a, e.key); } });
   $('charIndex').addEventListener('pointerdown', lookDown);
   $('charIndex').addEventListener('pointermove', lookPull);
   for (const kind of ['pointerup', 'pointercancel']) $('charIndex').addEventListener(kind, lookLift);
