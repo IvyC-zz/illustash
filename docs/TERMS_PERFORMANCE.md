@@ -1,6 +1,6 @@
 # 词条核心性能：现状
 
-状态：现行参考（2026-10-02；第 6 节 2026-10-19；第 2 节 2026-11-12）。两轮优化都已合入 main；逐任务的过程记录和原始样本已删除，见开源前私有历史中的 `docs/TERMS_PERFORMANCE_TASKS.md`、`docs/TERMS_CHARACTERS_PERFORMANCE.md` 和 `docs/acceptance/terms-*`。没做完的方向在 issue #1。
+状态：现行参考（2026-10-02；第 6 节 2026-11-13；第 2 节 2026-11-12）。两轮优化都已合入 main；逐任务的过程记录和原始样本已删除，见开源前私有历史中的 `docs/TERMS_PERFORMANCE_TASKS.md`、`docs/TERMS_CHARACTERS_PERFORMANCE.md` 和 `docs/acceptance/terms-*`。没做完的方向在 issue #1。
 
 以后 PR 的性能验收统一使用第 5 节固定脚本；第 1 节保留此前同轮优化的历史口径。识别吞吐（扫描到识别、导入完成）用第 6 节的基准（2026-10-19，#213）。
 
@@ -65,11 +65,11 @@
 
 ## 6. 整应用识别吞吐基准
 
-`tools/bench_recognition.py`（用法见文件开头）测一批新图从扫描到识别、导入完成的总时间、各阶段占比和峰值内存（#213 第 1 步）。之后改识别速度的 PR（包括 #213 第 2 步评估 CoreML / DirectML 执行后端）都用这份基准对比，按 [AGENTS.md](../AGENTS.md) 占 heavy 槽运行，写明负载和有没有虚拟机在跑。
+`tools/bench_recognition.py`（用法见文件开头）测一批新图从扫描到识别、导入完成的总时间、各阶段占比和峰值内存（#213 第 1 步）。后续识别性能改动使用这份基准对比，按 [AGENTS.md](../AGENTS.md) 经 `collab_run.py timing` 等待 heavy、vm 槽空闲且开跑前 30 秒 CPU 平均占用不超过 20%，再独占两个槽运行；记录负载与虚拟机状态。
 
 **样本**：同一种子生成的 200 张合成图（8 种常见插画尺寸循环，750×1334 到 2480×3508，JPEG 与 PNG 混合，共 538 MP、207 MiB）和 2,000 个合成角色各一条随机锚点。不是真实图库，也不说明识别准确率。
 
-**端到端**：重定位布局（与 `tests.platform_recognition_models` 相同）里启动 release 宿主，folder 来源新建图库后 `POST /api/sync`，每 50 ms 轮询到完成。宿主照常拉起 `illustash-recognition`，每 25 张一批，边识别边导入。不开名字、索引检查和研究任务，所以不含导入之后的相似计算等后台任务。线程数是产品默认值；下表和 Windows 的数字都是 CPU 执行后端，macOS 上 CCIP 走 Core ML 的对比见本节末尾：WD 在 Windows 上用 ONNX Runtime 默认值（每个物理核一个 intra-op 线程，2026-10-21 起，#213），macOS 用 4 个；CCIP 两边都用 ONNX Runtime 默认值。下表 2026-10-19 的数字是改之前测的，当时两边 WD 都是 4 个线程。图片文件已在系统缓存里。
+**端到端**：重定位布局（与 `tests.platform_recognition_models` 相同）里启动 release 宿主，folder 来源新建图库后 `POST /api/sync`，每 50 ms 轮询到完成。宿主照常拉起 `illustash-recognition`，每 25 张一批，边识别边导入。不开名字、索引检查和研究任务，所以不含导入之后的相似计算等后台任务。线程数是产品默认值；下表和 Windows 的数字都是 CPU 执行后端，平台加速后端的对比见本节后半：WD 在 Windows 上用 ONNX Runtime 默认值（每个物理核一个 intra-op 线程，2026-10-21 起，#213），macOS 用 4 个；CCIP 两边都用 ONNX Runtime 默认值。下表 2026-10-19 的数字是改之前测的，当时两边 WD 都是 4 个线程。图片文件已在系统缓存里。
 
 **阶段分解**：`recognition-compute` 示例的 `bench-stages` 在一个进程里按 worker 的顺序处理同一批图并逐步计时。计时用的 WD 会话第一张图与生产 `ModelSessions` 逐位比对，配置变了基准就报错，不会悄悄测成别的东西。
 
@@ -108,7 +108,7 @@ worker 本身是串行的；导入在宿主进程里和下一批的识别同时�
 
 **Windows 的 WD 线程数（2026-10-21，#213 第 2 步）**：同一台 Windows 机器、同样 200 张合成图，在同一时段与 WD 4 线程交替各测 3 次，WD 8 线程（等于这台 8 核机器上的 ONNX Runtime 默认值）每张 897 ms（三次 897 / 905 / 897），4 线程 1,116 ms，快约 20%；WD 阶段 818 → 623 ms，worker 的 CPU 时间多约 30%。12 线程 830 ms、16 线程 920 ms（另测，16 线程和宿主导入抢核），没有采用。产品改成不设线程数（用 ONNX Runtime 默认值）后，在同一台机器上用 100 张合成图把 main、新默认值和显式 8 线程交替各测 3 次：每张 1,139 / 923 / 926 ms，新默认值与显式 8 线程相同，比 main 快 19%。CPU 执行后端的输出与线程数无关，逐位相同，所以这个改动不影响识别结果、固定期望和 `tests.platform_recognition_models` 的逐位比对。执行后端（CoreML、DirectML）的评估结论见 [#213 的评论](https://github.com/shio-vinyl/illustash/issues/213)。
 
-**macOS 的 CCIP 走 Core ML（2026-10-21，#270）**：同一台 M2（macOS 26.7.1，接电源，没有虚拟机，开始时整机 CPU 占用约 15%，经 `collab_run.py timing` 独占 heavy 和 vm 槽），同样 200 张合成图，`--backends cpu,default` 让全部 CPU（`ILLUSTASH_CPU_ONLY=1`）和产品默认（CCIP 走 Core ML，WD 仍用 CPU）在同一时段交替各测 3 次，取中位数：
+**macOS 的 CCIP 走 Core ML（2026-10-21，#270）**：同一台 M2（macOS 26.7.1，接电源，没有虚拟机，开始时整机 CPU 占用约 15%，经 `collab_run.py timing` 独占 heavy 和 vm 槽），同样 200 张合成图，`--backends cpu,default` 让全部 CPU（`ILLUSTASH_CPU_ONLY=1`）和当时的产品默认（CCIP 走 Core ML，WD 用 CPU）在同一时段交替各测 3 次，取中位数：
 
 | | 全部 CPU | CCIP 走 Core ML |
 |---|---:|---:|
@@ -137,4 +137,4 @@ CCIP 从约三成降到约一成，剩下的几乎都是 WD。Core ML 的编译�
 
 两个模型推理从每张约 860 ms 降到约 180 ms，剩下的时间里解码、写库的占比升到约四分之一。worker 几乎不占 CPU，同步时整机不再被识别占满。显存没有测。数字只适用于这台带独显的机器，**只有核显的机器没有测过**：这台验收机处在独显直连模式，核显不可见。准确度见 [安装与平台](BACKEND_TASKS.md#识别的执行后端)和 [#213 的评论](https://github.com/shio-vinyl/illustash/issues/213)。
 
-Windows 三次总时间相差不到 3%，阶段耗时相差不到 1%，可以直接拿来对比。macOS 三次的阶段耗时相差约 ±10%，第一次总时间明显偏高（开始时前一个 heavy 作业的余下负载还没退），所以 macOS 上比较改动前后时，要在同一时段交替测，差距小于 10% 不能下结论。每次 `GET /api/sync` 约花宿主 3 ms（Windows）到 6 ms（macOS）CPU。这些数字只适用于这组合成样本和这两台机器。
+以上 2026-10 的 Windows 测量三次总时间相差不到 3%，阶段耗时相差不到 1%，可以直接拿来对比。macOS 三次的阶段耗时相差约 ±10%，第一次总时间明显偏高（开始时前一个 heavy 作业的余下负载还没退），所以 macOS 上比较改动前后时，要在同一时段交替测，差距小于 10% 不能下结论。每次 `GET /api/sync` 约花宿主 3 ms（Windows）到 6 ms（macOS）CPU。这些数字只适用于这组合成样本和这两台机器。
