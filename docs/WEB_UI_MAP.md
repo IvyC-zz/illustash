@@ -247,7 +247,7 @@
 |---|---|---|
 | `selecting` | 选择模式（浏览页点图不再打开详情） | `grid.js`（别处用 `quitSelecting`、`resetForRoute`） |
 | `sel`、`anchor`、`armed` | 选中集（`all` ＋ `ids` ＋ `exclude`）、连选起点、等待第二次点击的破坏性按钮 | `grid.js` |
-| `cursor` | 键盘光标（序号） | `grid.js`（详情栏、大图翻页用 `setCursor`） |
+| `cursor` | 键盘光标（序号）；写入让列表最后几张离开、光标落到列表之外时，收回到新的最后一张 | `grid.js`（详情栏、大图翻页用 `setCursor`） |
 | `focused`、`detail`、`question` | 详情栏里那张图（`null` ＝关）、详情接口最近一次返回、问题条 | `detail.js` |
 | `viewer`、`viewerItem` | 大图的序号（`-1` ＝关）和那张图 | `detail.js` |
 | `kept.hold`（不在 state） | 列表变化时保持在视野里的那张图 | `grid.js`、`detail.js` |
@@ -278,6 +278,12 @@
 | `detail` 有值、`focused` 空、`viewer<0` | 可达 | 只开过大图后：1–9 要求详情栏或大图在用，不会误触 |
 | 换页（`applyRoute`） | | 关大图（不动焦点）；复位 `selecting`、`sel`、`cursor`；详情栏只在换了页面或角色时关 |
 | 切换 R18 | | 清选择；不关详情栏、不关大图 |
+
+### 6.2 写入和撤销之后的重读
+
+写入（`grid.js` 的 `mutate`）之后重读当前列表，面板页按 `refresh('edit')` 自己重画，计数等编辑停下 0.7 秒再读（`metaSoon`）；撤销之后立即重读列表、计数和面板页（`refresh('undo')`）。
+
+确认角色（`/api/change` 的 `confirmed`）和撤销之后，服务端还会在后台学习，学完未识别计数和分组还会变（#400）。这两处在发出请求前先读一次学习状态（`/api/clusters` 的 `learner`），之后按 0.4 秒起、最长 2 秒一次的间隔再读（`core/meta.js` 的 `learningSettled`）：看到学习进行过又回到空闲，或学完的时间变了，就再重读一次列表、计数和面板页（`refresh('learned')`，按组整理页重画分组）。一直空闲 3 秒（这次写入没有触发学习）、没有学习 worker、学习出错时不再读；学习最多等 60 秒；新的写入或撤销让之前的等待作废，那时正有写入在进行就交给它自己的重读。
 
 ## 7. 已知问题
 

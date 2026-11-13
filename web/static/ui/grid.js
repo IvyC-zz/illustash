@@ -5,7 +5,7 @@ import {esc, number, platformText, shortcut} from '../core/format.js';
 import {t, tb} from '../core/i18n.js';
 import {composing} from '../core/keys.js';
 import {REASONS, nameWithWork} from '../core/labels.js';
-import {metaSoon, refreshMeta} from '../core/meta.js';
+import {learnerState, learningSettled, metaSoon, refreshMeta} from '../core/meta.js';
 import {prefs} from '../core/prefs.js';
 import {SHORTCUTS, currentSource, keyAction, keySelection, modes, selectionSize, shownUuid, viewerTarget} from '../core/modes.js';
 import {keyScope, pageOf, viewOf} from '../core/pages.js';
@@ -531,6 +531,8 @@ export async function mutate(path, body, leaving, {advance = false} = {}) {
   if (advance) kept.hold = null; else holdCurrent();
   const gone = leaving ? new Set(body.ids || state.items.filter(x => x && isSelected(x.uuid)).map(x => x.uuid)) : null;
   if (gone) for (const el of $('grid').children) if (gone.has(el.dataset.id)) el.classList.add('leaving');
+  // 确认角色之后后台会学习，学完未识别计数和分组还会变（#400）：写入前先记下学习的状态，好知道之后要不要再读。
+  const learner = path === '/api/change' && body.action === 'confirmed' ? learnerState().catch(() => null) : null;
   try {
     const r = await post(path, body); setLatest(r.undo);
     quitSelecting();
@@ -544,6 +546,7 @@ export async function mutate(path, body, leaving, {advance = false} = {}) {
       else if (advance || !kept.hold) showViewer(Math.min(state.viewer, state.total - 1));
       else { const i = indexOf(kept.hold.uuid); showViewer(i >= 0 ? i : state.viewer, i >= 0 ? state.items[i] : state.viewerItem); }
     }
+    if (learner) learner.then(afterLearning);
     return true;
   } catch (e) { toast(e.message); for (const el of $('grid').querySelectorAll('.leaving')) el.classList.remove('leaving'); }
   finally { edits.busy = false; document.body.classList.remove('busy'); setLatest(edits.latest); }
@@ -551,15 +554,29 @@ export async function mutate(path, body, leaving, {advance = false} = {}) {
 function collapse(gone) {
   const kept = []; let removed = 0;
   for (let i = 0; i < state.total; i++) { const x = state.items[i]; if (x && gone.has(x.uuid)) { removed++; continue; } kept[i - removed] = x; }
-  kept.length = state.total - removed; state.items = kept; state.total = kept.length; state.dataVersion++; renderGrid(true); updateCount();
+  kept.length = state.total - removed; state.items = kept; state.total = kept.length; state.dataVersion++;
+  // 光标停在离开的最后一张上时，收回到新的最后一张，接着按键还有对象（#386 的 2-6）。
+  if (state.cursor >= state.total) state.cursor = state.total - 1;
+  renderGrid(true); updateCount();
+}
+// 撤销之后重读列表、当前面板页、详情栏和大图；why 是交给面板页的原因（'undo'，或后台学习收尾后的 'learned'）。
+async function reread(why) {
+  await reload(); refreshMeta().catch(e => error(readError(e)));
+  pageOf(state.route).refresh?.(why);
+  if (state.focused) inspect(state.focused, true);
+  if (state.viewer >= 0) { const i = indexOf(state.viewerItem?.uuid); showViewer(i >= 0 ? i : state.viewer, i >= 0 ? state.items[i] : state.viewerItem); }
+}
+// 写入或撤销之后等后台学习收尾，学到的结果发布了就再读一次（#400，等法见 core/meta.js 的 learningSettled）。那时正有
+// 别的写入在进行，就交给它自己的重读。
+async function afterLearning(before) {
+  if (await learningSettled(before) && !edits.busy) await reread('learned');
 }
 export async function undo() {
   if (!edits.latest || edits.busy) return; edits.busy = true;
+  const learner = learnerState().catch(() => null);
   try {
-    toast(undoneText(await undoLatest())); await reload(); refreshMeta().catch(e => error(readError(e)));
-    pageOf(state.route).refresh?.('undo');
-    if (state.focused) inspect(state.focused, true);
-    if (state.viewer >= 0) { const i = indexOf(state.viewerItem?.uuid); showViewer(i >= 0 ? i : state.viewer, i >= 0 ? state.items[i] : state.viewerItem); }
+    toast(undoneText(await undoLatest())); await reread('undo');
+    learner.then(afterLearning);
   } catch (e) {
     // 历史可能已经往前走了（另一个窗口，或服务端提交之后才失败）：显示它最新的一步。
     toast(e.message); refreshMeta().catch(err => error(readError(err)));
