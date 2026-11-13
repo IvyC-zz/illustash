@@ -1,12 +1,12 @@
 # 后端任务交付边界
 
-状态：现行参考，2026-11-12；任务职责与 [架构方向](ARCHITECTURE_DIRECTION.md) 配套，安装交付以本篇为准。外部来源未做联网验证，所有测试使用假网络；本地 OCR 不上传图片或文字给模型服务。
+状态：现行参考，2026-11-12；任务职责与 [架构方向](ARCHITECTURE_DIRECTION.md) 配套，安装交付以本篇为准。识别执行后端统一见本篇「识别的执行后端」；溯源的联网与真实数据验收边界见「验收」。本地 OCR 计算已删除，历史结果不作为现行计算能力。
 
 ## 当前交付状态（2026-09-28）
 
 已实现：溯源任务互斥、取消、超时、异常恢复与增量补跑；Windows 识别结果包的事务导入、去重与恢复；显式初始化/查询入口及事务后业务事件；Pixiv 关注和昵称 worker。本地 OCR 计算已于 2026-10-05 按用户决定删除（#177），已有 OCR 结果与人工判断保留。结果包命令、HTTP 接口及事务边界见 [RESULT_PACKAGES.md](RESULT_PACKAGES.md)。
 
-2026-09-28 的验收覆盖 macOS 离线测试与真实图库副本；2026-10-01 的原生默认入口和安装包集成验收仅使用合成数据。Windows x64 的基础功能已在 2026-10-01 实机验收（见下文「Windows」），Windows 识别生产端、Pixiv 真实账号响应以及画师归属的人工准确率验收仍未完成，不标记整个阶段完成。
+2026-09-28 的验收覆盖 macOS 离线测试与真实图库副本；2026-10-01 的原生默认入口和安装包集成验收仅使用合成数据。Windows x64 的基础功能已在 2026-10-01 实机验收（见下文「Windows」），Windows 原生识别生产端已做真实模型与生成图片的合成验收（见 [结果包](RESULT_PACKAGES.md)）；这不等于真实图片质量、大图库或用户从安装到日常使用的完整链路验收。Pixiv 真实账号响应与后续画师归属的人工准确率验收仍未完成。
 
 ## 溯源生命周期
 
@@ -107,7 +107,7 @@ Windows 计算任务使用挂起创建 → 私有 kill-on-close Job → 恢复�
 
 ## 识别的执行后端
 
-2026-10-21 起（#270、#271）。识别和索引 worker 的 ONNX 会话按平台选执行后端（`native/terms/src/recognition_compute/backend.rs`），CPU 是参考：
+2026-10-21 起（#270、#271）。识别和索引 worker 的 ONNX 会话按平台选执行后端（`native/terms/src/recognition_compute/backend.rs`），CPU 是参考。CPU 会话中，WD 在 Windows 上用 ONNX Runtime 默认 intra-op 线程数，其他平台用 4 个；CCIP 使用 runtime 默认线程数（`recognition_compute/session.rs`）。后端选择、加速开关、缓存与回退规则只在本节维护：
 
 - **macOS（Apple 芯片）**：WD 与 CCIP 都走 Core ML（MLProgram 格式、全部计算单元，batch 固定为 1）。WD 使用单独校验的执行变体 `coreml/wd-swinv2-v3-v1.onnx`（#375）；原始图的分区与高维操作阻碍加速，变体通过固定形状与等价图改写适配 Core ML。原始 `wd_swinv2_v3_emb.onnx` 保留，识别包、角色锚点与数据库中的模型 SHA-256、版本和标签表身份仍取原始文件，Windows DirectML 与 CPU 继续用原始图。变体的 revision、来源模型 SHA-256、大小和输出 SHA-256 编入 `models.json`，任何不符都回退原始 CPU。打包不变：现在带的 PyPI `onnxruntime` 1.30.0 arm64 动态库自带 Core ML 执行后端，ort `load-dynamic` 下直接注册。
 - **Windows（x64）**：WD 和 CCIP 都走 DirectML（`recognition_compute/directml.rs`）。会话照 ORT 对 DirectML 的要求关闭 memory pattern、按顺序执行，动态 batch 维固定为 1；经 `OrtDmlApi` 的 `SessionOptionsAppendExecutionProvider_DML2` 按「高性能」选 GPU，有核显和独显时用独显（旧的 `device_id` 接口按适配器序号，0 是接显示器的那块，在混合模式的笔记本上通常是核显）。需要支持 DirectX 12 的显卡。用的是自建的 1.30.0（加 `--use_dml`，见「独立安装与可选计算包」），它从自己所在的目录加载随包的 `DirectML.dll`。`ILLUSTASH_DIRECTML_GPU=minimum_power` 改选省电的那块 GPU，只用于在双显卡机器上测核显。**只有核显的机器没有测过**（2026-10-21 的验收机处在独显直连模式，核显不可见）。

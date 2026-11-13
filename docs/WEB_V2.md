@@ -1,6 +1,6 @@
 # 本地图库 V2
 
-状态：现行参考，2026-10-02。本文记录图库数据模型、API 与浏览界面；原生入口及核心架构见 [ARCHITECTURE_DIRECTION.md](ARCHITECTURE_DIRECTION.md)。
+状态：现行参考，2026-11-12。本文记录图库数据模型、API 与浏览界面；原生入口及核心架构见 [ARCHITECTURE_DIRECTION.md](ARCHITECTURE_DIRECTION.md)。
 
 ## 浏览界面
 
@@ -408,7 +408,7 @@ change/reassign 的选择方式二选一：
 以前「新建角色」只存一串你输入的文字：不关联 Danbooru、没有作品和别名，也不会自动补中文名。现在：
 
 - **从 Danbooru 新建**：选择器输入名字时，本地结果之后会出现「Danbooru 角色」（`GET /api/entities?q=&remote=1`，只发送输入的文字；已在图库里的 tag 不重复列出）。选中即 `POST /api/entities {tag, typed}`：关联 tag；作品先按 tag 的后缀（`_(blue_archive)`）找本地作品，找不到再查 Danbooru 的 related_tag（取几乎覆盖该角色全部图的最小作品 tag），仍没有就自动建立作品（关联 Danbooru tag，名称自动补）；你输入的写法存为别名。随后自动拉取这个角色的显示名。只在本地新建的选项仍在列表末尾，默认不会被选中。
-- **编辑资料**（角色页「⋯ → 编辑资料…」；未关联的角色标题旁有「关联 Danbooru…」）：显示名、别名、所属作品（可搜索本地与 Danbooru 作品，或新建）、Danbooru 关联。`GET/POST /api/character/profile`，一次保存是一条撤销记录（快照包含用户名称、Danbooru 链接和作品）。关联了 Danbooru 时显示名可以留空，用自动名称；一个 tag 只能属于一个角色，重复时提示用「合并到另一个角色」。作品框里选 Danbooru 作品走 `POST /api/works {action:'from_tag'}`。
+- **编辑资料**（角色页「⋯ → 编辑资料…」；未关联的角色标题旁有「关联 Danbooru…」）：显示名（含原创角色改名）、别名、所属作品（可搜索本地与 Danbooru 作品，或新建）、Danbooru 关联。`GET/POST /api/character/profile`，一次保存是一条撤销记录（快照包含用户名称、Danbooru 链接和作品）。关联了 Danbooru 时显示名可以留空，用自动名称；一个 tag 只能属于一个角色，重复时提示用「合并到另一个角色」。作品框里选 Danbooru 作品走 `POST /api/works {action:'from_tag'}`。
 - **存量整理**：角色页出现「N 个自建角色能对上 Danbooru」（`GET /api/local-links`，只查这些角色的名字，结果缓存）。名字就是 Danbooru tag 的默认勾选；按名字搜到的最像的一个标「可能是」、默认不勾；已在图库里的给出「合并到……」。`POST /api/local-links` 一步关联所选（可撤销），原来的名字转为别名，好让自动补来的名称显示出来。
 - Danbooru 连不上时接口返回 502 和提示，已有功能不受影响。
 
