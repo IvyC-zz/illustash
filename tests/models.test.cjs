@@ -125,7 +125,6 @@ test('the acceleration switch shows only where there is an accelerator, and says
     'switched off: nothing to explain');
 });
 
-
 test('WD 加速文件可补下载，缺失不阻塞识别，下载中仍可取消', () => {
   const m = models({status: 'ready', optional_missing: true, total: 1085 * MB, have: 618 * MB});
   assert.equal(context.modelsWaiting(m), false);
@@ -133,5 +132,70 @@ test('WD 加速文件可补下载，缺失不阻塞识别，下载中仍可取�
   assert.match(context.modelsActions(m), /下载 WD 加速文件（约 467.0 MB）/);
   assert.match(context.modelsActions(m), /data-models="import"/);
   assert.match(context.modelsActions({...m, job: {kind: 'download', status: 'running'}}), /data-models="cancel"/);
-  assert.match(context.modelsActions({...m, optional_missing: false, acceleration: {backend: 'coreml', last: {wd: {reason: '损坏'}}}}), /修复 WD 加速文件/);
+  assert.match(context.modelsActions({...m, optional_missing: false, acceleration: {backend: 'coreml', on: true, last: {wd: {reason: '损坏'}}}}), /修复 WD 加速文件/);
+});
+
+// 依次读到这些状态（core/models.js 的 adopt 的做法），返回每次读取后「模型刚到」的判断（#375）。第一个 before 为空：
+// 页面刚打开。
+function arrivals(...seen) {
+  let before, started = null;
+  return seen.map(after => {
+    const start = started;
+    started = context.readyWhenStarted(before, after, start);
+    const arrived = context.modelsArrived(before, start, after);
+    before = after;
+    return arrived;
+  });
+}
+test('only a job that brought the models in starts recognition (#375)', () => {
+  const missing = models(), ready = models({status: 'ready'});
+  const run = (m, kind = 'download') => ({...m, job: {kind, status: 'running'}});
+  const end = (m, status, kind = 'download') => ({...m, job: {kind, status}});
+  // 首次下载：原始四文件在任务中途激活（status 先变 ready），之后下加速文件；成功、失败、取消都要开始识别。
+  for (const status of ['done', 'failed', 'cancelled'])
+    assert.deepEqual(arrivals(missing, run(missing), run(ready), end(ready, status)), [false, false, false, true], status);
+  // 原始模型没下完就失败：模型还没就位。
+  assert.deepEqual(arrivals(missing, run(missing), end(missing, 'failed')), [false, false, false]);
+  // 导入补齐了模型。
+  assert.deepEqual(arrivals(missing, run(missing, 'import'), end(ready, 'done', 'import')), [false, false, true]);
+  // 页面在任务中途打开（原始模型已激活）：无从判断，照旧开始识别。
+  assert.deepEqual(arrivals(run(ready), end(ready, 'done')), [false, true]);
+  assert.deepEqual(arrivals(run(missing), end(ready, 'cancelled')), [false, true]);
+  // 模型本来就在：补下或修复加速文件、导入，不管结局如何都不算。
+  for (const status of ['done', 'failed', 'cancelled'])
+    assert.deepEqual(arrivals(ready, run(ready), run(ready), end(ready, status)), [false, false, false, false], status);
+  assert.deepEqual(arrivals(ready, run(ready, 'import'), end(ready, 'done', 'import')), [false, false, false]);
+  // 只看到上一个任务的结局、没看到它在运行：没有「刚结束」的任务。
+  assert.deepEqual(arrivals(missing, end(ready, 'done')), [false, false]);
+});
+
+test('models that came with the install offer nothing that writes into the app (#375)', () => {
+  const bundled = models({on_demand: false, status: 'ready', optional_missing: true, total: 1085 * MB, have: 618 * MB});
+  assert.match(context.modelsLine(bundled), /WD 暂用 CPU/, 'the status line still says why WD uses the CPU');
+  assert.equal(context.modelsActions(bundled), '');
+  const fell = {available: true, backend: 'coreml', on: true, last: {wd: {reason: '损坏'}}};
+  assert.equal(context.modelsActions({...bundled, optional_missing: false, acceleration: fell}), '');
+  // 开发用的不完整文件夹：原有的下载和导入照旧。
+  const partial = context.modelsActions(models({on_demand: false}));
+  assert.match(partial, /data-models="download">下载模型/);
+  assert.match(partial, /data-models="import"/);
+});
+
+test('repairing the WD acceleration file is offered only while acceleration is on (#375)', () => {
+  const m = models({status: 'ready', optional_missing: false, acceleration: {available: true, backend: 'coreml', on: true, last: {wd: {reason: '损坏'}}}});
+  assert.match(context.modelsActions(m), /data-models="download">修复 WD 加速文件</);
+  assert.equal(context.modelsActions({...m, acceleration: {...m.acceleration, on: false}}), '');
+  assert.equal(context.modelsActions({...m, acceleration: {...m.acceleration, backend: 'directml'}}), '');
+});
+
+test('the mirror note mentions the WD acceleration file only where the platform has one (#375)', () => {
+  const {el} = web.fakePage();
+  const file = (path, optional) => ({path, size: 1, sha256: '0'.repeat(64), optional});
+  context.state.models = models({files: [file('wd/model.onnx', false)]});
+  context.renderModelsCard();
+  assert.match(el('setModels').innerHTML, /先从这个地址下载，不行再换 ModelScope。/);
+  assert.doesNotMatch(el('setModels').innerHTML, /WD 加速文件/);
+  context.state.models = models({files: [file('wd/model.onnx', false), file('wd/model-coreml.onnx', true)]});
+  context.renderModelsCard();
+  assert.match(el('setModels').innerHTML, /原始模型先从这个地址下载.*WD 加速文件从项目的 GitHub Release 下载。/);
 });

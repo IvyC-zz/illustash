@@ -11,7 +11,7 @@ import {$, toast} from './dom.js';
 import {openRelease} from './settings.js';
 import {taskList} from './tasks.js';
 import {modelsNotice} from './models.js';
-import {modelsWaiting, modelsFinished, onModels} from '../core/models.js';
+import {modelsWaiting, modelsArrived, onModels} from '../core/models.js';
 
 // ---------- 新图库的首次引导（#96，native/terms/src/app_onboarding.rs） ----------
 // 在真实界面上教：几处地方一次点亮一处，一份事情做完就自己打勾的清单，以及在需要时才问的问题（角色出现后问名字，
@@ -237,8 +237,8 @@ export async function replayGuide() {
 // 页面这一部分注册的处理函数。页面启动时调用一次。
 export function wireGuide() {
   // 模型刚到：检查识别是否开始，和打开新图库时一样。
-  onModels(async before => {
-    if (modelsFinished(before) && state.models.status === 'ready' && guideOn()) { await guideAction({action: 'check'}); setTimeout(() => guideRefresh(true), 1500); }
+  onModels(async (before, start) => {
+    if (modelsArrived(before, start) && guideOn()) { await guideAction({action: 'check'}); setTimeout(() => guideRefresh(true), 1500); }
     drawGuideNotice();
   });
   $('guideNotice').addEventListener('click', async e => {

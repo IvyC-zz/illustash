@@ -2360,6 +2360,7 @@
   "图片识别要用 WD 和 CCIP 两个模型，安装包里没有带，第一次使用时下载。每个文件都按应用里写好的大小和 SHA-256 核对，对不上就不用，从哪里下载都一样安全。": "Recognizing pictures uses two models, WD and CCIP. The installer doesn't include them; they are downloaded the first time they are needed. Every file is checked against the size and SHA-256 written into the app and is never used if they differ, so the download source doesn't affect safety.",
   "这个安装自带识别模型。": "This installation comes with the recognition models.",
   "Hugging Face 镜像": "Hugging Face mirror",
+  "先从这个地址下载，不行再换 ModelScope。填 {hf} 就是直连 Hugging Face。": "Downloads try this address first, then ModelScope. Enter {hf} to download from Hugging Face directly.",
   "存放位置": "Location",
   "删除已经下载但还没完成的部分？下次要从头下载。": "Delete what has been downloaded but not finished? The next download starts over.",
   "删除": "Delete",
