@@ -65,6 +65,10 @@ class IndexExpectationTest(unittest.TestCase):
             with self.subTest(changed_array=anchors is changed):
                 with self.assertRaises(KeyError):
                     reference.char_scan.anchor_index(anchors, ids, str(self.source))
+        missing = self.root / 'missing.db'
+        with self.assertRaises(KeyError):
+            reference.char_scan.anchor_index(self.anchors, self.ids, str(missing))
+        self.assertFalse(missing.exists())
 
 
 if __name__ == '__main__':

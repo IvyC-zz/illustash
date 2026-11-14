@@ -61,8 +61,8 @@ def anchor_index(*args,**kwargs):
     except KeyError:
         # 同一 REAL 在不同 SQLite 版本里会导出不同小数位。先核对整库，
         # 再用冻结 SQL 的原始哈希查找；数组、ID、参数和期望值仍按原来的精确键匹配。
-        if len(args)!=3 or kwargs:raise
-        with closing(sqlite3.connect(args[2])) as c:
+        if len(args)!=3 or kwargs or not Path(args[2]).is_file():raise
+        with closing(sqlite3.connect(Path(args[2]).resolve().as_uri()+'?mode=ro',uri=True)) as c:
             state=database_state(c)
         encoded=encode((args,kwargs))
         for entries in records()['legacy'].values():
