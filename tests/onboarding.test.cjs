@@ -159,3 +159,29 @@ test('after a stopped or failed sync the problem bar says nothing is lost and wh
   fine.drawGuideNotice();
   assert.equal(fine.nodes.guideNotice.hidden, true);
 });
+
+test('the open checklist is a popover: Esc folds it, the pill toggles it, a link folds it quietly (#398)', async () => {
+  const overlay = await web.load('ui/overlay.js');
+  const c = guide();
+  await c.loadGuide();
+  globalThis.addEventListener = () => {};
+  c.wireGuide();
+  delete globalThis.addEventListener;
+  overlay.resetLayers();
+  c.drawChecklist();
+  const click = cl => c.nodes.checklist.listeners.click[0]({target: {closest: s => s === '[data-cl]' && cl ? {dataset: {cl}} : s === 'a[href]' && !cl ? {} : null}});
+  await click('toggle');
+  assert.match(c.nodes.checklist.innerHTML, /cl-panel/);
+  assert.deepEqual(overlay.layerIds(), ['checklist']);
+  assert.equal(overlay.dismissTop('escape'), true);
+  assert.doesNotMatch(c.nodes.checklist.innerHTML, /cl-panel/);
+  assert.deepEqual(overlay.layerIds(), []);
+  await click('toggle');
+  await click('toggle');
+  assert.doesNotMatch(c.nodes.checklist.innerHTML, /cl-panel/);
+  assert.deepEqual(overlay.layerIds(), []);
+  await click('toggle');
+  await click(null);
+  assert.doesNotMatch(c.nodes.checklist.innerHTML, /cl-panel/);
+  assert.deepEqual(overlay.layerIds(), []);
+});
