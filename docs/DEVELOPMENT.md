@@ -20,6 +20,8 @@ Core、Platform、宿主、桌面和 `crates/relation-fft` 共用根目录的 Ca
 
 IQDB 保留独立的 `crates/iqdb/Cargo.lock`、`crates/iqdb/target/` 和原 profile（dev 自有代码带行号表、第三方不带调试信息，release 去符号）：其 image 0.25.10 / zune-jpeg 0.5.15 与宿主固定的 image 0.25.6 无法在同一 workspace 同时解析；合并会改变既有 JPEG 签名，用户于 2026-11-15 批准此例外（#311）。Windows 静态 CRT 对两个项目都仍由根 `.cargo/config.toml` 控制。
 
+URL 解析统一沿用桌面原有的 `idna_adapter` 1.2.2 / ICU 2.3。独立宿主及便携包的 `start.sh` / `start.cmd` 从 `idna_adapter` 1.2.0 / ICU 1.5 切换后，可接受的 Unicode 域名范围扩大；桌面窗口内的宿主原已采用新版本。用户于 2026-11-15 批准此行为变化（#311），不增加旧版拒绝规则的兼容层；应用层的 URL 校验、配置保存方式、域名白名单和联网授权规则不变。
+
 ```sh
 # 构建核心
 cargo build --release --manifest-path native/terms/Cargo.toml
