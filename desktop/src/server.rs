@@ -349,6 +349,22 @@ pub fn rescue(app: &AppHandle) {
     start_again(app, None, Start::Rescue);
 }
 
+/// 要安装更新了（#279，updater.rs）：窗口换成启动页、显示正在安装，然后停掉本地服务，等它把任务收尾。之后的退出
+/// 和失败都不再报告（换了 generation）；安装失败时 `restart` 重新启动服务。
+pub fn installing(app: &AppHandle, version: &str) {
+    app.state::<Launch>().generation.fetch_add(1, Ordering::SeqCst);
+    let js = format!(
+        "window.showUpdating && window.showUpdating({})",
+        serde_json::to_string(version).expect("strings always serialize")
+    );
+    app.state::<ErrorPage>().0.lock().expect("lock poisoned by an earlier panic").take();
+    *app.state::<StartupPage>().0.lock().expect("lock poisoned by an earlier panic") = Some(js.clone());
+    if let Some(main) = app.get_webview_window("main") {
+        on_start(&main, &js);
+    }
+    app.state::<Child>().stop();
+}
+
 /// 对图库启动服务的方式：照常启动，或在用户同意升级、抢救之后启动。
 #[derive(Clone, Copy, PartialEq)]
 enum Start {

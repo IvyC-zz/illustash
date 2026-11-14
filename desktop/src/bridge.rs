@@ -3,13 +3,15 @@
 //!   GET  /pixiv/fetch?path=/ajax/… 在登录窗口的 www.pixiv.net 页面里发一个 GET，返回 {status, body, cfMitigated}
 //!   POST /pixiv/login              打开登录窗口
 //!   POST /pixiv/logout             清掉登录窗口的数据（解绑）
+//!   GET  /platform/update/status   应用内更新的状态（#279，updater.rs）
+//!   POST /platform/update/download?version=X.Y.Z 下载并校验这个版本；cancel 取消；install 安装并重启
 use std::thread;
 
 use serde_json::{json, Value};
 use tauri::AppHandle;
 use tiny_http::{Header, Method, Request, Response, Server};
 
-use crate::{picker, pixiv};
+use crate::{picker, pixiv, updater};
 
 pub const TOKEN_HEADER: &str = "X-Illustash-Token";
 
@@ -58,6 +60,13 @@ fn handle(app: &AppHandle, token: &str, request: Request) {
                 pixiv::login(app, query(request.url(), "force").as_deref() == Some("1")).map(|_| json!({"ok": true}))
             }
             (Method::Post, "/pixiv/logout") => pixiv::logout(app).map(|_| json!({"ok": true})),
+            (Method::Get, "/platform/update/status") => Ok(updater::status(app)),
+            (Method::Post, "/platform/update/download") => match query(request.url(), "version") {
+                Some(version) => updater::download(app, &version),
+                None => Err("缺少 version".to_string()),
+            },
+            (Method::Post, "/platform/update/cancel") => Ok(updater::cancel(app)),
+            (Method::Post, "/platform/update/install") => updater::install(app),
             _ => Err("未知路径".to_string()),
         };
         // 给终端 / 控制台看的诊断信息：哪个调用，Pixiv 或窗口怎样回应（从不输出正文或 cookie）。
@@ -68,6 +77,8 @@ fn handle(app: &AppHandle, token: &str, request: Request) {
                 }
             }
             Ok(_) if route == "/platform/choose" => eprintln!("[bridge] 选择窗口完成"),
+            // 下载时页面每秒问一次状态。
+            Ok(_) if route == "/platform/update/status" => {}
             Ok(value) => eprintln!("[bridge] {route} → {value}"),
             Err(error) => eprintln!("[bridge] {route} 失败：{error}"),
         }

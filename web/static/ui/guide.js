@@ -10,7 +10,7 @@ import {api, post, session} from '../core/session.js';
 import {allowNames, updatesPost, updatesTick} from '../core/settings.js';
 import {state} from '../core/state.js';
 import {$, toast} from './dom.js';
-import {openRelease} from './settings.js';
+import {openRelease, selfUpdate, updateAct, updateActions, updateBar, updateStarted, updateStatus} from './settings.js';
 import {taskList} from './tasks.js';
 import {createLayer} from './overlay.js';
 import {modelsNotice} from './models.js';
@@ -172,16 +172,22 @@ function nextNudge() {
       if (w && !(state.index?.watch?.works || []).length) return {key: 'works', w};
     }
   }
-  // 有新版本时，等到没有任务在运行再提示。
-  if (state.updates?.newer && !state.updates.dismissed && !taskList().some(task => task.active)) return {key: 'update'};
+  // 有新版本时，等到没有任务在运行再提示。用户点了「下载并重启」之后，进度和结果照常显示（#279）；点过「暂不」就收起。
+  const u = state.updates, started = updateStarted(u);
+  const going = ['downloading', 'installing'].includes(selfUpdate(u)?.stage);
+  if (u?.newer && (going || !u.dismissed && (started || !taskList().some(task => task.active)))) return {key: 'update'};
   return null;
 }
 export function drawNudge() {
   const el = $('nudge'), n = nextNudge();
   if (guideOn() && !state.names && !el.dataset.names) { el.dataset.names = '1'; api('/api/names').then(v => { setNames(v); drawNudge(); }).catch(() => {}); }
+  const u = state.updates;
   const html = !n ? '' : n.key === 'update'
-    ? `<div><b>${t('有新版本 {version}', {version: esc(state.updates.latest)})}</b><small>${t('现在是 {current}。在浏览器里打开下载页，下载后覆盖安装即可。', {current: esc(state.updates.current)})}</small></div>
-      <div class="nudge-acts"><button class="quiet small" data-nudge="later">${t('暂不')}</button><button class="primary small" data-nudge="open">${t('打开下载页')}</button></div>`
+    ? `<div><b>${t('有新版本 {version}', {version: esc(u.latest)})}</b><small>${updateStatus(u) || (selfUpdate(u)
+        ? t('现在是 {current}。可以让 Illustash 下载这个版本，装好后自己重新打开；也可以在浏览器里打开下载页。', {current: esc(u.current)})
+        : t('现在是 {current}。在浏览器里打开下载页，下载后覆盖安装即可。', {current: esc(u.current)}))}</small>${updateBar(u)}</div>
+      <div class="nudge-acts">${['downloading', 'installing'].includes(selfUpdate(u)?.stage) ? '' : `<button class="quiet small" data-nudge="later">${t('暂不')}</button>`}
+        ${updateActions(u, 'data-nudge')}</div>`
     : n.key === 'updates'
     ? `<div><b>${t('要自动检查新版本吗？')}</b><small>${t('启动时和之后每天向 GitHub 查一次有没有新版本，有就提示你；只是一次普通的 HTTPS 请求，不发送图库里的任何信息。可以在「设置 › 网络与隐私」里随时改。')}</small></div>
       <div class="nudge-acts"><button class="quiet small" data-nudge="later">${t('不用')}</button><button class="primary small" data-nudge="allow">${t('自动检查')}</button></div>`
@@ -278,6 +284,12 @@ export function wireGuide() {
     const act = e.target.closest('[data-nudge]')?.dataset.nudge, key = $('nudge').dataset.key; if (!act || !key) return;
     for (const b of $('nudge').querySelectorAll('button')) b.disabled = true;
     // 不是向导提示：回答的是更新选择或这个版本，由后端全应用保存。
+    if (key === 'update' && act !== 'open' && act !== 'later') {
+      await updateAct(act);
+      for (const b of $('nudge').querySelectorAll('button')) b.disabled = false;
+      $('nudge').dataset.html = ''; drawNudge();
+      return;
+    }
     if (key === 'update' || key === 'updates') {
       if (key === 'update' && act === 'open') openRelease();
       try { await updatesPost(key === 'update' ? {action: 'dismiss'} : {action: 'auto', allow: act === 'allow'}); } catch (err) { toast(err.message); }

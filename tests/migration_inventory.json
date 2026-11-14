@@ -133,23 +133,25 @@
 
  "desktop/build.rs":"ba1c3b9097208d998ecbebb7b5ab044ceef97999132afb8f1a55a1a61b077034",
 
- "desktop/src/bridge.rs":"21a05b8804b091edae92c99727a002470d995224f9ac0c212c2ea894cb18f56c",
+ "desktop/src/bridge.rs":"3b641d0fc644bba3e845718fdc90cedcb4442e95ccd11901fb3311e16814785b",
 
  "desktop/src/bundled_workers.rs":"7e8c129ac24612f967825dd16166c8339ce5d1b1287650e49d423edf41814897",
 
  "desktop/src/i18n.rs":"ab24cd127b728f156f456069c1c7e10de2ea10cbeea476ef4eb552daa2ae931b",
 
- "desktop/src/main.rs":"71a8b86966191a40a9f8738f1f52302fe927fa434fbf72be5f3aabeeeffaa4eb",
+ "desktop/src/main.rs":"16f61f006a2eeeb3b0fd644ee064b8373479b12e6e13108e59abb7f37015cb5e",
 
  "desktop/src/picker.rs":"71bd9e4e9e1746d60d4eea93b0a80f5091080cebcd2defb156ccbd63cd48c284",
 
  "desktop/src/pixiv.rs":"511b8003b2068c801f336d96a6c130a6796ed1866d1102e64678760d3a906c65",
 
- "desktop/src/server.rs":"93312559f033bdb10199caee28809c5e73259a119e308e850aa5286bc07564a1",
+ "desktop/src/server.rs":"912a1cb53ccac080bd10cac03a08391949ff5517d2e0918ee83d212f983bb572",
+
+ "desktop/src/updater.rs":"3e8f63bc4f6b631dc75052d6fc26daa9fd0ef01b513ae5b110fee920fa57f5d7",
 
  "desktop/src/welcome.rs":"2ddf57612f854e273fa6fbdf9f15d5b0f2b47e453c290045343b3f26feeed3bb",
 
- "desktop/tauri.conf.json":"bb054aa3da9ab925a3215c27a479619e3aa69504f539e57ac6d4c2aefa8343db",
+ "desktop/tauri.conf.json":"ed7f556e213d25315df9d3f08e2cd5c763e88e7eeaa1faf858e83663742a1f0d",
 
  "native/terms/build.rs":"9cef40a98bd6a541d9a910c68d84add3571fb33cdde91fb2dacae2c9d52fd534",
 
@@ -173,7 +175,7 @@
 
  "native/terms/src/app_curation.rs":"a474670bf2b2c1371dbff659a519fd5a6a1e40801b1d16e317448232fc8fc17e",
 
- "native/terms/src/app_desktop.rs":"e2ecd6c1ea8e28fbd9e6e738fb7b2db73cc8033f1ab73962e2ee4b83f9233361",
+ "native/terms/src/app_desktop.rs":"481e12ba4f08868b199da130b683ffb46556a79c44b9e781723d4c887903f9a5",
 
  "native/terms/src/app_effects.rs":"507ff09441aab09cc8f2ca7460bbde3da5bffb8180629b3bb6f503598dbbe1b8",
 
@@ -265,7 +267,7 @@
 
  "native/terms/src/app_tasks.rs":"77c6e161633fa9f8dd67a474de0d562182ac7cacbd92c941ea5f8f5909b91ab9",
 
- "native/terms/src/app_updates.rs":"8d5dedc499d93db689442c7e83487fccd806ffa77bcaa604534221f28020820a",
+ "native/terms/src/app_updates.rs":"e7b51e4afd108af07dbf92e76d44251709635984f8387d3e702922190b9834ba",
 
  "native/terms/src/app_upgrade.rs":"a2b5941e631f385638793ebdc873984f08784941b90ddb9fe9141b509e0d63f4",
 
@@ -317,7 +319,7 @@
 
  "native/terms/src/index_generation.rs":"940c236d35bee6001cc2225701d64d0be2964a2575a653a897449650535ad2fa",
 
- "native/terms/src/lib.rs":"9fac2646674d06b45fd0eb53fc16fe9b146307e16ffce265db5c23492e11c09e",
+ "native/terms/src/lib.rs":"b2e766fd8806c9c11e36ad49a0809e98d6292c3634b2b65fab0907a8dae42b81",
 
  "native/terms/src/platform_process.rs":"11d73a02dc4f9baa3779aaef132012ef36908e510747326c6704374681f606a3",
 
