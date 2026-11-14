@@ -87,6 +87,20 @@ class CiWorkflowTest(unittest.TestCase):
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertEqual(self.output.read_text().strip(), 'code=true')
 
+    def test_moving_code_into_documents_still_checks_the_removed_code(self):
+        self.git('init', '-b', 'main')
+        self.git('config', 'user.name', 'Synthetic CI')
+        self.git('config', 'user.email', 'synthetic@users.noreply.github.com')
+        (self.root / 'source.rs').write_text('// 合成代码\n', encoding='utf-8')
+        self.git('add', 'source.rs')
+        self.git('commit', '-m', 'synthetic source')
+        (self.root / 'docs').mkdir()
+        self.git('mv', 'source.rs', 'docs/moved.md')
+        self.git('commit', '-m', 'synthetic move')
+        result = self.shell(job_script('changes'), GITHUB_EVENT_NAME='pull_request')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.output.read_text().strip(), 'code=true')
+
     def needs(self, code='true', result='success', changes='success'):
         jobs = dict.fromkeys(('core', 'python', 'js', 'desktop', 'contracts'), {'result': result})
         return {**jobs, 'changes': {'result': changes, 'outputs': {'code': code}}}

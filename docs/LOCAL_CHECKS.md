@@ -1,6 +1,6 @@
 # 本地全量验收
 
-现行参考，2026-11-12。本文补充 [AGENTS.md](../AGENTS.md) 的本地验收约定；CI 覆盖及允许跳过仍以 `.github/workflows/ci.yml`、`tools/check_all.sh` 为准。
+现行参考，2026-11-14。本文补充 [AGENTS.md](../AGENTS.md) 的本地验收约定；CI 覆盖及允许跳过仍以 `.github/workflows/ci.yml`、`tools/check_all.sh` 为准。
 
 ## 开发检查与完整入口
 

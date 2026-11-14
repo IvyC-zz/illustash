@@ -53,7 +53,8 @@ jobs:
             echo code=true >> "$GITHUB_OUTPUT"; exit 0
           fi
           # PR 检出的是它与 main 的合并提交：第一父提交就是当前 main。
-          git diff --name-only HEAD^1 HEAD > "$RUNNER_TEMP/changed.txt"
+          # 改名同时检查旧路径，避免把移入 docs/ 的代码删除误判成纯文档。
+          git diff --no-renames --name-only HEAD^1 HEAD > "$RUNNER_TEMP/changed.txt"
           echo "改动 $(wc -l < "$RUNNER_TEMP/changed.txt") 个文件"
           if grep -qEv '^([^/]+|docs/.+)\.md$' "$RUNNER_TEMP/changed.txt" ||
              grep -qEx 'docs/(THIRD_PARTY|BACKEND_TASKS)\.md' "$RUNNER_TEMP/changed.txt"; then
