@@ -275,16 +275,26 @@ Path(sys.argv[2]).write_text(json.dumps(v,allow_nan=False))
             self.assertEqual(response['status'],200,response)
         before=len(self.run_kinds())
         _,seen,_=self.inflight(lambda:self.request('/api/similar',{}),verdict)
-        self.assertEqual(self.state()['status'],'idle',self.state())
-        self.assertNotIn('waiting',seen)
-        # similar 结束后，裁决会把学习排进队列（一次 `events` 运行）；负载高时它可能在读计数之前就开始（#132）。
+        self.assertNotIn('waiting',seen,(seen,self.run_kinds()[before:]))
+        # similar 结束后，裁决会把学习排进队列（一次 `events` 运行，#132）。`inflight` 看到第一次 `idle` 就返回，
+        # 学习可能紧接着开始，所以先等它跑完：状态回到 `idle`，裁决事件也已确认（#418）。
+        drain=[]
+        def drained():
+            drain.append(self.state()['status'])
+            return drain[-1]=='idle' and self.pending()==0
+        try:wait_until(drained,timeout=20)
+        except AssertionError:self.fail(('裁决排出的学习没有跑完',seen,drain,self.pending(),self.run_kinds()[before:]))
+        kinds=self.run_kinds()[before:]
+        self.assertEqual(self.state()['status'],'idle',(self.state(),seen,drain,kinds))
         # 只有第二次 similar 运行才算重试。
-        self.assertEqual(self.run_kinds()[before:].count('similar'),1,(seen,self.run_kinds()[before:]))
+        self.assertEqual(kinds.count('similar'),1,(seen,drain,kinds))
         self.retry_visibly()
+        # 直接写 `excluded` 不产生裁决事件，similar 的重试在同一个任务里完成，结束后没有排队的学习。
+        before=len(self.run_kinds())
         _,seen,runs=self.inflight(lambda:self.request('/api/similar',{}),lambda c:c.execute("INSERT INTO excluded VALUES ('b','synthetic','test')"))
-        self.assertEqual(self.state()['status'],'idle',self.state())
-        self.assertIn('waiting',seen)
-        self.assertGreaterEqual(runs,2)
+        self.assertEqual(self.state()['status'],'idle',(self.state(),seen,self.run_kinds()[before:]))
+        self.assertIn('waiting',seen,(seen,self.run_kinds()[before:]))
+        self.assertGreaterEqual(runs,2,(seen,self.run_kinds()[before:]))
 
     def test_oc_query_answers_despite_unread_write(self):
         # #29：OC 只读归属、标签、排除和向量；它从不重试。
