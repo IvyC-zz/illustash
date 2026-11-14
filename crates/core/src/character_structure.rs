@@ -139,7 +139,7 @@ impl PinnedName {
     fn restore(self, c: &Connection, entity: &str) -> Result<()> {
         if let Some(was) = self.user_preferred {
             c.execute(&format!(
-                "UPDATE term_names SET preferred=?4 WHERE term_id={TERM_OF} AND role='display' AND lang=?2 AND source='user' AND value=?3"
+                "UPDATE term_names SET preferred=?4 WHERE {OF} AND role='display' AND lang=?2 AND source='user' AND value=?3"
             ), params![entity, self.lang, self.value, was])?;
         } else {
             c.execute(&format!(

@@ -51,7 +51,7 @@
 
  "crates/core/src/character_sql/tag_memberships.sql":"df7751a7282884fc933f25f60599ac994a7d4dfdfaa62a4348eb0f1910af3034",
 
- "crates/core/src/character_structure.rs":"54440a2657f86b85c5bade7cad2d7c8b6c93da86a57af3984d0353fc88535261",
+ "crates/core/src/character_structure.rs":"9201e2d2cba937da135d0c2c7362e0e2ffb70df2df66f8a0827d7b5e17dfca47",
 
  "crates/core/src/compat_text.rs":"547b1eefcfc13275563161ecd0371aa202fa37b31f1bdfd36068aa8aecb8a59f",
 

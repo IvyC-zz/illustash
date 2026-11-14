@@ -187,6 +187,13 @@ class NativeProfilesTest(unittest.TestCase):
         self.assertEqual(snapshot(), initial)
         self.assertEqual(views(), initial_views)
 
+        # 自建角色已有用户显示名时，撤销只恢复它的首选标记，保留原有名字行。
+        post('/api/character/profile', {'entity': entity, 'name': '合成角色'})
+        named = snapshot()
+        step = post('/api/kind', {'entity': entity, 'kind': 'oc'})['undo']
+        post('/api/undo', {'id': step['id']})
+        self.assertEqual(snapshot(), named)
+
     def test_profile_aliases_tags_links_and_mixed_undo(self):
         one=self.pair('/api/entities',{'name':'合成本地一'})['id']
         two=self.pair('/api/entities',{'name':'合成本地二'})['id']
