@@ -71,6 +71,7 @@
 - 撤销按 `character_commands::owns` 判断归属（`store.rs`、`native/terms/src/app_commands.rs` 都用它）：新信封，以及每一项都是角色形状（快照、`merge`、`identity_relation`、`identity_anchor`、`profile`）的旧步骤，都交角色撤销；角色形状和别的形状混在一步里，或形状不认识，拒绝，什么都不改。
 - `[]`、`curation`、`identity_skip` 不是角色步骤；画师、标签步骤归各自的撤销。
 - 旧历史可以按原样一步步撤到最早。
+- `POST /api/kind` 和 `POST /api/character/mascot` 各登记一步，返回本次的 `undo`。重复提交且持久状态相同时返回 `undo: null`。原创状态撤销还原画师、作品归属和固定显示名时改动的名字行。只当标签的撤销还原标记与来源，并按当前证据和结论重算相关图片的归属。
 
 **导入与重扫**：`refresh`、`reindex`、`import`、`rederive`（派生重算）、`work_evidence` 都是核心命令。调用方用只读连接准备输入（查询和顺序照旧），候选写成证据批次（方案第 7 节）。
 
@@ -212,6 +213,7 @@ schema v1 已随第 2、3 步用于切换，不能改；新增一次迁移 v2，
 | `merge`，hybrid（激活前留下的旧合并） | 在 `undo_audit` 批次追加对应 `duplicate_of` 的 clear（reason「撤销历史合并；原归属无法区分的认领待确认」，reviewed = 当时的全部证据），再重建图；找不到迁移记录时拒绝 |
 | `identity_relation` | 标记撤销，并在 `undo_audit` 批次追加 previous_status 对应的裁决（reason「撤销人工关系决议」，reviewed = 当时的全部证据），因此「未复核」的判定与旧版一致；再重建图 |
 | `identity_anchor` | 恢复原锚点结论、追加历史 `undo`、失效校准、清认领、重算归属；不恢复旧的机器认领 |
+| `character_kind`、`character_mascot` | 见第 3 节。两种快照都在 v2 信封内 |
 | `profile` | 恢复用户名字、Danbooru 链接、`work`/`work_id` 及其皮肤的 `work`；链接变了就重建图 |
 | `artist_verdict`、`{uuid, tag, had}`、`terms` | 与第 2、3 步相同 |
 
@@ -244,7 +246,8 @@ schema v1 已随第 2、3 步用于切换，不能改；新增一次迁移 v2，
 | `correct_identity_anchor` | 是 | `anchor` | 锚点表、learn_state、meta | 无 |
 | `set_profile`、`link_local` | 是 | `set_profile`、`link_local`（版权由调用方在核心事务外联网取得） | 名字、作品复核、图重建 | verdict |
 | `create_entity`、`create_linked`、`shared_oc` | 否 | 结构命令，不进历史 | 名字；hybrid 下重建图 | 无 |
-| `set_kind`、`set_mascot`、`set_work`、`edit_work`（create / edit / from_tag / move / link / rename） | 否 | 结构命令，不进历史 | 名字、作品复核、受影响图的归属 | 无 |
+| `edit_kind`、`edit_mascot` | 是 | 角色标记的 HTTP 写入口 | 名字、作品归属或受影响图的归属 | 无 |
+| `set_kind`、`set_mascot`、`set_work`、`edit_work`（create / edit / from_tag / move / link / rename） | 否 | 旧 CLI 结构命令 | 名字、作品复核、受影响图的归属 | 无 |
 | `import_changes`（同步） | 否 | `import`，一个事务（方案第 9 节） | assets、album 批次、imported、相册别名、duplicates、折叠、auto_rules、excluded、sync_added、meta.indexed | imported |
 | `refresh`、`reindex_characters` | 否 | `refresh` / `reindex`，附索引同步 | 同上 | 无 |
 | WD 重交后重算派生 | 否 | `rederive`：重算 single / lead / 归属 / 规则 / 排除 | 同上 | 无 |
@@ -254,7 +257,7 @@ schema v1 已随第 2、3 步用于切换，不能改；新增一次迁移 v2，
 | `undo` | — | `undo`，按方案第 6.3 节分派 | — | verdict |
 | `activate_identity` | 否 | 拒绝：改策略是迁移，不是日常写 | — | — |
 
-跳过配对、置顶、收藏排除不走角色命令。新增行为「作品和类型编辑可撤销」不在本步（方案第 11 节），这些接口的 HTTP 响应形状不变。
+跳过配对、置顶、收藏排除不走角色命令。作品编辑的撤销见方案第 11 节。
 
 **模块**：
 
@@ -263,7 +266,7 @@ schema v1 已随第 2、3 步用于切换，不能改；新增一次迁移 v2，
 | `character_commands.rs` | `change`、`answer`、`answer_audit`、`reassign`、`sweep`、`uncertain`、`anchor`、统一撤销 `undo`；身份关系的 `propose`、`decide`、`accept-many`、`rebuild` 转给 `character_identity.rs` |
 | `character_merge.rs` | `merge` 及策略未设置时的撤销 |
 | `character_profile.rs` | `set_profile`、`link_local` 及 `profile` 撤销 |
-| `character_structure.rs` | `create_entity`、`create_linked`、`shared_oc`、`set_kind`、`set_mascot`、`set_work`、`edit_work`、`work_evidence` |
+| `character_structure.rs` | `create_entity`、`create_linked`、`shared_oc`、`set_kind`、`set_mascot`、`edit_kind`、`edit_mascot`、`set_work`、`edit_work`、`work_evidence` |
 | `character_import.rs` | `refresh`、`reindex`、`import`、`rederive`、`default_tags` |
 | `character_evidence.rs` | 候选写成证据批次（方案第 7 节） |
 | `character_names.rs` | 按旧 `put_name` 语义写用户名字和别名：display 只接受有语言、来源在优先级表里的名字，来源为 danbooru 的 display 丢弃；设首选时先清掉同语言其他名字的首选；upsert 时首选取较大值 |
@@ -291,8 +294,8 @@ schema v1 已随第 2、3 步用于切换，不能改；新增一次迁移 v2，
 
 | 变化 | 原因或来源 | 决定 |
 |---|---|---|
-| 作品新建 / 改名 / 移动 / 链接、角色归作品、设为原创、当作标签变成可撤销的步骤 | TERMS.md「裁决带 action_id」 | 延后；要改撤销栈，并定下前端怎么显示 |
-| mascot 改成 `kind=label` | TERMS.md「只当标签只是改 kind」 | 延后；现在的 `set_kind` 会写一步 action，与「不进历史」矛盾 |
+| 作品新建 / 改名 / 移动 / 链接变成可撤销的步骤 | TERMS.md「裁决带 action_id」 | 延后 |
+| mascot 改成 `kind=label` | TERMS.md「只当标签只是改 kind」 | 延后 |
 | 作品树改成「由证据重算」、不依赖处理顺序 | 词条模型 | 延后；方案第 5.2 节的两个反例结果会变 |
 | `same_as` 只允许同层 | 原方案 | 撤回；列为之后的规则变更 |
 | 身份基线边可以被人工覆盖 | 词条模型「裁决先于证据」 | 延后 |

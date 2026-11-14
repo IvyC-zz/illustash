@@ -5,7 +5,7 @@
 
  "crates/core/src/backup.rs":"7d5f5abe63adb1620f2847609451fda7b588a927f742a676e16fc4acd2abeeb5",
 
- "crates/core/src/character_commands.rs":"934ee5fa5f91b9164c7388af9e4d88b80f19967c7709e0cc73f4dfedfd54d7bf",
+ "crates/core/src/character_commands.rs":"323d5dcfc2f655830caf394ed4f6ab31977918cfc5409fb859a4be8be9b81bf6",
 
  "crates/core/src/character_entities.rs":"36157140d08e8a851746438c8c578d15e3011d88f79689b335bc77fb241ed70f",
 
@@ -51,7 +51,7 @@
 
  "crates/core/src/character_sql/tag_memberships.sql":"df7751a7282884fc933f25f60599ac994a7d4dfdfaa62a4348eb0f1910af3034",
 
- "crates/core/src/character_structure.rs":"e877cf427d78fd0c1ac4edbedd6b766e306a0e15f8f79347c86a43d065fb9bc6",
+ "crates/core/src/character_structure.rs":"9201e2d2cba937da135d0c2c7362e0e2ffb70df2df66f8a0827d7b5e17dfca47",
 
  "crates/core/src/compat_text.rs":"547b1eefcfc13275563161ecd0371aa202fa37b31f1bdfd36068aa8aecb8a59f",
 
@@ -235,7 +235,7 @@
 
  "native/terms/src/app_preferences.rs":"1718355189e4572f61797110da007b9baa6ad565ca8684929bec452875f12c61",
 
- "native/terms/src/app_profiles.rs":"9146ad3345db80e03c9a8f68e02f3e253fe4cc04a21610a03060061aa0cfea9b",
+ "native/terms/src/app_profiles.rs":"7f15e81130636f3c6dc532c8258ca08d02d33e653f1c04e59f13f9d52eba863d",
 
  "native/terms/src/app_provenance.rs":"78e2e1660cb702fa9b9240da7c9a4b19b6203344b8bf9cab98380845d03705cd",
 
@@ -495,7 +495,7 @@
  "native/terms/src/app_migration_sql/provenance.sql":{"database-write":["CREATE TABLE IF NOT EXISTS:pending_runs","CREATE TABLE IF NOT EXISTS:artist_names","CREATE TABLE IF NOT EXISTS:artists","CREATE TABLE IF NOT EXISTS:artist_links","CREATE INDEX IF NOT EXISTS:artist_links_artist","CREATE TABLE IF NOT EXISTS:image_sources","CREATE TABLE IF NOT EXISTS:image_artists","CREATE TABLE IF NOT EXISTS:seeds","CREATE TABLE IF NOT EXISTS:leads","CREATE TABLE IF NOT EXISTS:lookups","CREATE TABLE IF NOT EXISTS:marks","CREATE TABLE IF NOT EXISTS:ref_sigs","CREATE TABLE IF NOT EXISTS:runs","CREATE TABLE IF NOT EXISTS:ext_cache"]},
  "native/terms/src/app_local.rs":{"http-branch":["/api/about|/api/sync|/api/names|/api/index|/api/provenance|/api/accounts|/api/oc/groups","/api/about",39,42,97,"/api/accounts",43,41],"database-write":[0,1]},
  "native/terms/src/app_migration_sql/base.sql":{"database-write":[53,135,124,104,127,105,139,120,101,131,153,123,103,122,49,152,164,155,113,160,115,50,47,51,132,157,158,159]},
- "crates/core/src/character_structure.rs":{"database-write":{"dynamic-or-wrapper":13,"INSERT INTO:term_links":3,"UPDATE:term_tree":10,"UPDATE:term_links":2,"UPDATE:set":1,"INSERT OR IGNORE INTO:term_links":1}},
+ "crates/core/src/character_structure.rs":{"database-write":{"dynamic-or-wrapper":15,"UPDATE:term_names":2,"DELETE FROM:term_names":1,"INSERT INTO:term_links":3,"UPDATE:term_tree":10,"UPDATE:term_links":2,"UPDATE:set":1,"INSERT OR IGNORE INTO:term_links":1}},
  "native/terms/src/http_json.rs":{"database-write":[[11,6]]},
  "native/terms/src/bin/illustash-terms.rs":{"entrypoint":[10]},
  "crates/core/src/schema.rs":{"database-write":{"dynamic-or-wrapper":21,"DROP TABLE IF EXISTS:identity_claims":1,"DROP TABLE IF EXISTS:identity_calibration":1,"DELETE FROM:meta":5,"ALTER TABLE:actions":1,"UPDATE:actions":1,"CREATE TABLE:terms_compact_new":1,"INSERT INTO:terms_compact_new":1,"ALTER TABLE:terms_compact_new":1,"INSERT OR REPLACE INTO:meta":3,"VACUUM":1,"CREATE TABLE IF NOT EXISTS:meta":1,"CREATE TABLE IF NOT EXISTS:actions":1,"CREATE TABLE:term_assets":1,"CREATE INDEX:term_assets_md5":1,"CREATE TABLE:terms":1,"CREATE INDEX:terms_kind":1,"CREATE TRIGGER:terms_kind_insert":1,"BEGIN":27,"CREATE TRIGGER:terms_kind_update|UPDATE:of":1,"CREATE TRIGGER:terms_key_permanent|UPDATE:of":1,"CREATE TABLE:term_names":1,"CREATE INDEX:term_names_value":1,"CREATE TABLE:term_links":1,"CREATE INDEX:term_links_term":1,"CREATE TABLE:term_relations":1,"CREATE INDEX:term_relations_b":1,"CREATE TABLE:term_packages":1,"CREATE TABLE:term_evidence":1,"CREATE INDEX:term_evidence_term":1,"CREATE TRIGGER:term_evidence_append_only_update|UPDATE:on":1,"CREATE TRIGGER:term_evidence_append_only_delete":1,"CREATE TABLE:term_verdicts":1,"CREATE INDEX:term_verdicts_image":2,"CREATE INDEX:term_verdicts_relation":2,"CREATE INDEX:term_verdicts_action":2,"CREATE TRIGGER:term_verdicts_append_only_update|UPDATE:on":2,"CREATE TRIGGER:term_verdicts_append_only_delete":2,"CREATE TABLE:term_projection":1,"CREATE INDEX:term_projection_term":1,"CREATE VIEW:term_effective_verdicts":2,"CREATE VIEW:term_relation_states":2,"DROP TABLE IF EXISTS:artist_verdicts":1,"DROP TABLE IF EXISTS:legacy_asset_tags":1,"DROP TABLE:if":1,"INSERT INTO:term_evidence_sets":1,"INSERT INTO:term_evidence_set_rows":1,"CREATE TABLE:term_evidence_sets_v3":1,"CREATE TABLE:term_evidence_set_assets_v3":1,"CREATE TABLE:term_evidence_set_rows_v3":1,"CREATE TABLE:term_active_evidence_v3":1,"INSERT INTO:term_evidence_sets_v3":1,"INSERT INTO:term_evidence_set_assets_v3":1,"INSERT INTO:term_evidence_set_rows_v3":1,"INSERT INTO:term_active_evidence_v3":1,"DROP VIEW:term_current_evidence":1,"DROP TABLE:term_active_evidence":1,"DROP TABLE:term_evidence_set_rows":1,"DROP TABLE:term_evidence_set_assets":1,"DROP TABLE:term_evidence_sets":1,"ALTER TABLE:term_evidence_sets_v3":1,"ALTER TABLE:term_evidence_set_assets_v3":1,"ALTER TABLE:term_evidence_set_rows_v3":1,"ALTER TABLE:term_active_evidence_v3":1,"CREATE INDEX:term_evidence_set_rows_evidence":2,"CREATE TRIGGER:term_evidence_set_rows_match":2,"CREATE TRIGGER:term_evidence_sets_append_only_update|UPDATE:on":2,"CREATE TRIGGER:term_evidence_sets_append_only_delete":2,"CREATE TRIGGER:term_evidence_set_assets_append_only_update|UPDATE:on":2,"CREATE TRIGGER:term_evidence_set_assets_append_only_delete":2,"CREATE TRIGGER:term_evidence_set_rows_append_only_update|UPDATE:on":2,"CREATE TRIGGER:term_evidence_set_rows_append_only_delete":2,"CREATE VIEW:term_current_evidence":2,"COMMIT":2,"CREATE TABLE:term_batches":1,"CREATE TRIGGER:term_batches_append_only_update|UPDATE:on":1,"CREATE TRIGGER:term_batches_append_only_delete":1,"CREATE TABLE:term_verdicts_v2":1,"INSERT INTO:term_verdicts_v2":1,"DROP VIEW:term_relation_states":1,"DROP VIEW:term_effective_verdicts":1,"DROP TABLE:term_verdicts":1,"ALTER TABLE:term_verdicts_v2":1,"CREATE INDEX:term_verdicts_batch":1,"CREATE TRIGGER:term_verdicts_batch_anchor":1,"CREATE VIEW:term_relation_latest":1,"CREATE TABLE:term_evidence_sets":1,"CREATE TABLE:term_evidence_set_assets":1,"CREATE TABLE:term_evidence_set_rows":1,"CREATE TABLE:term_active_evidence":1,"CREATE TABLE:term_identity_baseline":1,"CREATE TABLE:term_tree":1,"CREATE INDEX:term_tree_parent":1,"CREATE INDEX:term_tree_work":1,"CREATE TABLE:term_legacy_ids":1}},
