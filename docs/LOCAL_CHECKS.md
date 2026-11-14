@@ -185,6 +185,8 @@ PR 应明确区分“当前 head 上完整执行退出 0”和“当前候选仅
 
 **改检查项时**：`ci.yml` 和 `tools/check_all.sh` 一起改，`tests/test_packaging_resources.py` 核对两边的候选二进制接线和跳过白名单一致，并检查触发条件和权限。`native-upgrade.yml` 是升级测试的单独手动入口，要求整类零跳过；PR 自动检查的 Python job 已经包含这一类。
 
+**冻结输入**：索引参考的 SQLite 输入哈希若因 SQL 导出的小数位格式变化而不匹配，只有整库 schema、类型、值（浮点逐位）、rowid 和版本标记与冻结数据库完全一致时，才使用冻结 SQL 的原始哈希重查。数组、资产 ID、参数和结果仍精确匹配；不刷新录制，也不把真实数据差异当作格式差异。
+
 **缓存与权限**：Rust 编译缓存用 `Swatinem/rust-cache`，每个 job 一份，覆盖该 job 构建的 Cargo 项目；key 含各项目 Cargo.lock 的哈希，lock 变了时按前缀回退到最近一份，再增量编译。只在 main 上保存，PR 只读，免得 PR 的缓存挤掉 main 的（每个仓库合计 10 GB，超了按最久未用淘汰）。rustc 每 6 周升级一次 stable，升级后第一次是冷编译。workflow 只有 `contents: read`，checkout 不留凭据，不用 secret。每个 job 设了超时，卡住时不会耗满默认的 6 小时。
 
 **和合并队列的关系**：本机全量和集成会话的做法不变（见上一节）。集成会话组批时看一眼各 PR 的「全部检查」：失败的先退回原会话查明原因；只是 runner 故障或排队取消的，重跑一次再说。CI 跑的是 PR 与当时 main 的合并结果，不是候选，所以通过了也照样在候选上跑本机全量。

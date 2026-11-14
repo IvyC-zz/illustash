@@ -26,9 +26,54 @@ def encode(v):
     if isinstance(v,(str,Path)) and Path(v).is_file():
         data=Path(v).read_bytes()
         if data.startswith(b'SQLite format'):
-            with closing(sqlite3.connect(v)) as c, c:data='\n'.join(c.iterdump()).encode()
+            with closing(sqlite3.connect(v)) as c, c:data=database_dump(c).encode()
         return {'file':hashlib.sha256(data).hexdigest()}
     return str(v) if isinstance(v,Path) else v
+
+def database_dump(connection):
+    return '\n'.join(connection.iterdump())
+
+def database_state(connection):
+    """精确比较 schema、类型、值和 rowid，不依赖 SQLite 的浮点 SQL 文本写法。"""
+    schema=connection.execute('SELECT type,name,tbl_name,sql FROM sqlite_schema ORDER BY type,name').fetchall()
+    tables=[]
+    def cell(value):
+        return (type(value).__name__,value.hex() if isinstance(value,float) else value)
+    for kind,name,_,sql in schema:
+        if kind!='table':continue
+        columns='*' if 'WITHOUT ROWID' in (sql or '').upper() else 'rowid,*'
+        quoted='"'+name.replace('"','""')+'"'
+        rows=connection.execute(f'SELECT {columns} FROM {quoted}').fetchall()
+        tables.append((name,sorted((tuple(cell(v) for v in row) for row in rows),key=repr)))
+    return (schema,connection.execute('PRAGMA user_version').fetchone(),
+            connection.execute('PRAGMA application_id').fetchone(),tables)
+
+@lru_cache(None)
+def recorded_database_state(sql):
+    with closing(sqlite3.connect(':memory:')) as c, c:
+        c.executescript(sql)
+        return database_state(c)
+
+def anchor_index(*args,**kwargs):
+    """SQL 导出格式变化时，只接受与冻结数据库逐项完全一致的输入。"""
+    try:
+        return value('char_scan.anchor_index',*args,**kwargs)
+    except KeyError:
+        # 同一 REAL 在不同 SQLite 版本里会导出不同小数位。先核对整库，
+        # 再用冻结 SQL 的原始哈希查找；数组、ID、参数和期望值仍按原来的精确键匹配。
+        if len(args)!=3 or kwargs:raise
+        with closing(sqlite3.connect(args[2])) as c:
+            state=database_state(c)
+        encoded=encode((args,kwargs))
+        for entries in records()['legacy'].values():
+            for entry in entries:
+                sql=entry['files'].get('pi.db',{}).get('sql')
+                if sql is None or '@FOLDER@' in sql or recorded_database_state(sql)!=state:continue
+                encoded['tuple'][0]['tuple'][2]={'file':hashlib.sha256(sql.encode()).hexdigest()}
+                key=hashlib.sha256(json.dumps(encoded,sort_keys=True,ensure_ascii=False).encode()).hexdigest()
+                if key in records()['functions']['char_scan.anchor_index']:
+                    return decode(records()['functions']['char_scan.anchor_index'][key]['value'])
+        raise
 
 def decode(v):
     if isinstance(v,list):return [decode(x) for x in v]
@@ -96,5 +141,5 @@ def large(test,root):
 
 build=SimpleNamespace(merge=lambda *a,**kw:value('build.merge',*a,**kw))
 char_patch=SimpleNamespace(core_of=lambda *a,**kw:value('char_patch.core_of',*a,**kw))
-char_scan=SimpleNamespace(anchor_index=lambda *a,**kw:value('char_scan.anchor_index',*a,**kw),
+char_scan=SimpleNamespace(anchor_index=anchor_index,
                          claim_thresholds=lambda *a,**kw:value('char_scan.claim_thresholds',*a,**kw))
