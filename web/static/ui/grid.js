@@ -701,8 +701,9 @@ export function wireGrid() {
   // ---------- 键盘 ----------
   // 按键先看最上面的模式（core/modes.js）：大图打开时它盖住选择栏，单图快捷键都作用于大图里那张。哪些键、在哪生效
   // 写在 core/modes.js 的 SHORTCUTS（帮助对话框由它生成），这里加减按键要同步改那张表（tests/help_keys.test.cjs 核对）。
+  // 对话框或导览开着时整个让开：导览的按钮自己处理 Enter、Space、Tab，Esc 由浮层管理器处理（#398）。
   document.addEventListener('keydown', e => {
-    if (composing(e) || document.querySelector('dialog[open]')) return;
+    if (composing(e) || document.querySelector('dialog[open], #tour:not([hidden])')) return;
     const mod = e.metaKey || e.ctrlKey, key = e.key.toLowerCase(), m = modes();
     const view = viewOf(state.route), scope = keyScope(view), grid = scope === 'grid';
     if (mod && key === 'k') { e.preventDefault(); jumpToCharacter(); return; }
