@@ -12,12 +12,12 @@
 
 ## Rust 依赖
 
-完整依赖及版本由 `native/terms/Cargo.lock`、`desktop/Cargo.lock`、`crates/iqdb/Cargo.lock` 固定。2026-10-16 清点：三个 workspace 共 518 个第三方 crate（含 vendored 的 `tiny_http`），几乎全部为 MIT、Apache-2.0、BSD、ISC、Zlib、Unicode-3.0 等宽松许可或其多选一组合；`desktop` 另有 5 个 MPL-2.0 crate（Tauri 生态，按文件级开源义务使用）。标注含 LGPL 的 crate 均为与 MIT/Apache-2.0 多选一，按后者使用。上述许可均与 GPL-3.0 兼容。
+完整依赖及版本由根 `Cargo.lock` 固定。2026-11-15 清点：根 workspace 收录 518 个第三方 crate 的许可正文（含 vendored 的 `tiny_http`），几乎全部为 MIT、Apache-2.0、BSD、ISC、Zlib、Unicode-3.0 等宽松许可或其多选一组合；Tauri 生态另有 MPL-2.0 crate，按文件级开源义务使用。标注含 LGPL 的 crate 均为与 MIT/Apache-2.0 多选一，按后者使用。许可选择沿用 `about.toml` 的清单。
 
 **随包的许可正文**（2026-10-16，#161）：`packaging/rust-licenses/rust-dependencies.txt` 收录每个第三方 crate 的许可正文，随每个分发产物放进 `resources/licenses/rust-dependencies.txt`，并在 manifest 里登记。文件开头按 crate 列出名称、版本、声明的许可表达式和适用正文的编号，后面是去重后的正文；多选一的 crate 只收录选用的那一份，优先顺序见 `about.toml` 的 `accepted`。正文取自各 crate 发布包里的许可文件（含子目录里嵌入的上游代码许可，如 mozjpeg-sys 带的 libjpeg-turbo）；没带许可文件的 crate 用 SPDX 标准文本。
 
-- 生成：`tools/gen_rust_licenses.py` 调用固定版本的 [cargo-about](https://github.com/EmbarkStudios/cargo-about) 0.9.2（MIT OR Apache-2.0），离线读本机 cargo 注册表里的 crate 源码，按全部 feature、全部目标平台解析三个 workspace，构建期和测试用 crate 也收录。结果和 `crates.json` 一起提交；`crates.json` 登记覆盖的 crate、正文的 SHA-256，以及锁文件里列出但任何 feature 组合都不会编译的可选依赖（`not_built`，不附正文）。打包脚本和检查都不需要 cargo-about，也不下载任何东西。
-- 检查：打包前和 `tests/test_packaging_resources.py` 都比对 `crates.json` 与三份 `Cargo.lock`。附了正文的 crate 加上 `not_built` 必须恰好等于锁文件里的全部第三方包（按名称加版本），正文哈希必须与登记一致；不一致时测试失败、打包在产出任何文件之前拒绝执行。我们自己的 crate（`illustash-*`，GPL-3.0-or-later）不列入。
+- 生成：`tools/gen_rust_licenses.py` 调用固定版本的 [cargo-about](https://github.com/EmbarkStudios/cargo-about) 0.9.2（MIT OR Apache-2.0），离线读本机 cargo 注册表里的 crate 源码，按全部 feature、全部目标平台解析根 workspace，构建期和测试用 crate 也收录。结果和 `crates.json` 一起提交；`crates.json` 登记覆盖的 crate、正文的 SHA-256，以及锁文件里列出但任何 feature 组合都不会编译的可选依赖（`not_built`，不附正文）。打包脚本和检查都不需要 cargo-about，也不下载任何东西。
+- 检查：打包前和 `tests/test_packaging_resources.py` 都比对 `crates.json` 与根 `Cargo.lock`。附了正文的 crate 加上 `not_built` 必须恰好等于锁文件里的全部第三方包（按名称加版本），正文哈希必须与登记一致；不一致时测试失败、打包在产出任何文件之前拒绝执行。我们自己的 crate（`illustash-*`，GPL-3.0-or-later）不列入。
 - 更新：改了任何 `Cargo.lock` 或依赖的 feature 之后都要重新生成。只改 feature、没改锁文件却启用了某个 `not_built` 包时，上面的检查发现不了，必须手动重跑。新依赖用了 `accepted` 以外的许可时，生成会失败，先确认与 GPL-3.0 兼容再加进 `about.toml`。
 
 ```bash
@@ -28,7 +28,7 @@ cargo install --locked --features cli cargo-about@0.9.2
 python3 tools/gen_rust_licenses.py
 ```
 
-生成要求三个 workspace 的全部 crate 源码已在本机 cargo 注册表里（包括其他平台才用到的 crate）；缺的话先对每个 workspace 运行 `cargo fetch --locked --manifest-path <workspace>/Cargo.toml`。
+生成要求根 workspace 的全部 crate 源码已在本机 cargo 注册表里（包括其他平台才用到的 crate）；缺的话先在仓库根运行 `cargo fetch --locked`。
 
 ## 随源码分发
 

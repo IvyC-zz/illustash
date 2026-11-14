@@ -20,9 +20,9 @@ cpu 设 ILLUSTASH_CPU_ONLY=1 全部用 CPU；列了多个时每一次按列出�
   cargo build --release --locked --manifest-path native/terms/Cargo.toml \\
       --bin illustash-terms --bin illustash-worker --example recognition-compute
   collab_run.py run -- python3.12 tools/bench_recognition.py \\
-      --terms native/terms/target/release/illustash-terms \\
-      --worker native/terms/target/release/illustash-worker \\
-      --compute native/terms/target/release/examples/recognition-compute \\
+      --terms target/release/illustash-terms \\
+      --worker target/release/illustash-worker \\
+      --compute target/release/examples/recognition-compute \\
       --models <含 wd_swinv2_v3_emb.onnx 与 ccip/model_feat.onnx 的目录> \\
       --runtime <libonnxruntime.dylib 或 onnxruntime.dll> [--openblas <Windows 的 openblas.dll>] \\
       [--directml <Windows：与 onnxruntime.dll 一起构建的 DirectML.dll>] \\

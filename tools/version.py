@@ -1,6 +1,6 @@
 """版本号只有一个来源：native/terms/application.json（#189）。
 
-其他带版本号的地方（tauri.conf.json、每个发布 crate 的 Cargo.toml，以及这些 crate 在各个 Cargo.lock 里的条目）
+其他带版本号的地方（tauri.conf.json、每个自有 crate 的 Cargo.toml，以及这些 crate 在根 Cargo.lock 里的条目）
 都从它改写；两边不一致时 packaging/build.py 拒绝打包。
 
     python3 tools/version.py              # 只检查；不一致时退出码为 1 并列出每一处
@@ -16,7 +16,8 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE = 'native/terms/application.json'
 TAURI = 'desktop/tauri.conf.json'
-CRATES = ('native/terms', 'desktop', 'crates/core', 'crates/platform', 'crates/iqdb')
+CRATES = ('native/terms', 'desktop', 'crates/core', 'crates/platform', 'crates/iqdb', 'crates/relation-fft')
+LOCK = 'Cargo.lock'
 # 不带构建元数据的 SemVer 2.0.0：允许预发布后缀（0.2.0-beta.1），不允许 `+build`。
 SEMVER = re.compile(r'(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)'
                     r'(?:-((?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*))*))?')
@@ -53,11 +54,10 @@ def places(root=ROOT):
         manifest = f'{crate}/Cargo.toml'
         package = PACKAGE_VERSION.search(read(root, manifest))
         found.append((manifest, '[package] version', package.group(2) if package else None))
-        lock = f'{crate}/Cargo.lock'
-        entries = LOCK_ENTRY.findall(read(root, lock))
-        if not entries:
-            found.append((lock, 'illustash-*', None))
-        found.extend((lock, name, version) for _, name, version, _ in entries)
+    entries = LOCK_ENTRY.findall(read(root, LOCK))
+    if not entries:
+        found.append((LOCK, 'illustash-*', None))
+    found.extend((LOCK, name, version) for _, name, version, _ in entries)
     return found
 
 
@@ -93,7 +93,7 @@ def sync(root=ROOT, version=None):
     rewrites = [(TAURI, TAURI_VERSION, put)]
     for crate in CRATES:
         rewrites.append((f'{crate}/Cargo.toml', PACKAGE_VERSION, put))
-        rewrites.append((f'{crate}/Cargo.lock', LOCK_ENTRY, lambda m: m.group(1) + version + m.group(4)))
+    rewrites.append((LOCK, LOCK_ENTRY, lambda m: m.group(1) + version + m.group(4)))
     for relative, pattern, replace in rewrites:
         text = read(root, relative)
         updated, count = pattern.subn(replace, text, count=0 if relative.endswith('.lock') else 1)
@@ -116,7 +116,7 @@ def main(argv=None):
         except (OSError, ValueError, KeyError) as error:
             print(error, file=sys.stderr)
             return 1
-        print(f'版本号 {version} 已同步到 {TAURI}、{len(CRATES)} 个 Cargo.toml 和对应的 Cargo.lock')
+        print(f'版本号 {version} 已同步到 {TAURI}、{len(CRATES)} 个 Cargo.toml 和根 Cargo.lock')
     errors = check()
     for message in errors:
         print(message, file=sys.stderr)

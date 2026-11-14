@@ -57,6 +57,9 @@ run cargo fmt --manifest-path crates/platform/Cargo.toml --check
 run cargo clippy --locked --manifest-path crates/platform/Cargo.toml --all-targets -- -D warnings
 run cargo test --locked --manifest-path crates/platform/Cargo.toml
 run cargo build --locked --manifest-path crates/platform/Cargo.toml
+run cargo fmt --manifest-path crates/relation-fft/Cargo.toml --check
+run cargo clippy --locked --manifest-path crates/relation-fft/Cargo.toml --all-targets -- -D warnings
+run cargo test --locked --manifest-path crates/relation-fft/Cargo.toml
 run cargo fmt --manifest-path native/terms/Cargo.toml --check
 run cargo clippy --locked --manifest-path native/terms/Cargo.toml --all-targets --all-features -- -D warnings
 # 前置较快检查和桌面构建，避免 Python 全量之后才发现构建失败。
@@ -71,17 +74,17 @@ run cargo test --locked --manifest-path crates/iqdb/Cargo.toml
 run cargo build --release --locked --manifest-path native/terms/Cargo.toml
 run cargo build --release --locked --manifest-path native/terms/Cargo.toml --features test-read-host --example read-http --example recognition-compute --example index-compute --example research-compute --example relation-probe --example provenance-compute
 run cargo build --release --locked --manifest-path crates/iqdb/Cargo.toml
-export ILLUSTASH_TERMS_BIN="$root/native/terms/target/release/illustash-terms"
+export ILLUSTASH_TERMS_BIN="$root/target/release/illustash-terms"
 export ILLUSTASH_NATIVE_ROOT="$root"
-export ILLUSTASH_IQDB_BINARY="$root/crates/iqdb/target/release/illustash-iqdb"
-export ILLUSTASH_READ_HTTP_BIN="$root/native/terms/target/release/examples/read-http"
-export ILLUSTASH_RECOGNITION_COMPUTE_BIN="$root/native/terms/target/release/examples/recognition-compute"
-export ILLUSTASH_INDEX_COMPUTE_BIN="$root/native/terms/target/release/examples/index-compute"
-export ILLUSTASH_RELATION_PROBE_BIN="$root/native/terms/target/release/examples/relation-probe"
-export ILLUSTASH_PROVENANCE_COMPUTE_BIN="$root/native/terms/target/release/examples/provenance-compute"
-export ILLUSTASH_RESEARCH_COMPUTE_BIN="$root/native/terms/target/release/examples/research-compute"
-export ILLUSTASH_RESEARCH_ADAPTER_BIN="$root/native/terms/target/release/illustash-worker"
-export ILLUSTASH_INDEX_ADAPTER_BIN="$root/native/terms/target/release/illustash-worker"
+export ILLUSTASH_IQDB_BINARY="$root/target/release/illustash-iqdb"
+export ILLUSTASH_READ_HTTP_BIN="$root/target/release/examples/read-http"
+export ILLUSTASH_RECOGNITION_COMPUTE_BIN="$root/target/release/examples/recognition-compute"
+export ILLUSTASH_INDEX_COMPUTE_BIN="$root/target/release/examples/index-compute"
+export ILLUSTASH_RELATION_PROBE_BIN="$root/target/release/examples/relation-probe"
+export ILLUSTASH_PROVENANCE_COMPUTE_BIN="$root/target/release/examples/provenance-compute"
+export ILLUSTASH_RESEARCH_COMPUTE_BIN="$root/target/release/examples/research-compute"
+export ILLUSTASH_RESEARCH_ADAPTER_BIN="$root/target/release/illustash-worker"
+export ILLUSTASH_INDEX_ADAPTER_BIN="$root/target/release/illustash-worker"
 # 依赖核心/测试读宿主/IQDB/旧包的定向测试只在本次候选构建后运行。
 if [ -n "${CHECK_ALL_TARGETED_TESTS:-}" ]; then
   printf '构建后定向测试：候选 head=%s；二进制来自本轮固定路径构建。\n' "$head"

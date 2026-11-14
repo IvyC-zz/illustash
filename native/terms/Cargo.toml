@@ -8,6 +8,7 @@ license = "GPL-3.0-or-later"
 publish = false
 
 [dependencies]
+illustash-relation-fft = { path = "../../crates/relation-fft" }
 illustash-platform = { path = "../../crates/platform" }
 illustash-core = { path = "../../crates/core" }
 rusqlite = { version = "0.41", default-features = false, features = ["cache", "bundled", "functions", "backup", "hooks", "fallible_uint"] }
@@ -55,44 +56,11 @@ test-read-host = ["illustash-core/verify-incremental"]
 illustash-core = { path = "../../crates/core", features = ["verify-incremental"] }
 
 [build-dependencies]
-cc = "=1.5.1"
 serde_json = "1"
 
 [[example]]
 name = "read-http"
 required-features = ["test-read-host"]
-
-# dev 构建少带调试信息（#362）：自己的 crate 只带行号表，panic 和测试失败的回溯里仍有文件名和行号；
-# 第三方依赖不带调试信息。只动 dev profile，release 不变。做法和数字见 docs/LOCAL_CHECKS.md。
-[profile.dev]
-debug = "line-tables-only"
-
-# 对照基准重放（tests/baseline.rs）在每次录制的调用之后读取所有表；内置的 SQLite 不优化时，
-# 这会成为 `cargo test` 中最慢的部分。
-[profile.dev.package.libsqlite3-sys]
-opt-level = 3
-
-# tests/baseline.rs 在约 9,000 次录制调用的每一次之后比较所有表；不优化的依赖（哈希、正则遮盖、JSON、gzip、
-# SQLite 绑定）占去大部分时间（#130）。我们自己的 crate 保持 dev 级别，改动它们时重新构建的速度和以前一样快。
-[profile.dev.package."*"]
-opt-level = 3
-debug = false
-
-[profile.dev.package.illustash-core]
-opt-level = 0
-debug = "line-tables-only"
-
-[profile.dev.package.illustash-platform]
-opt-level = 0
-debug = "line-tables-only"
-
-[profile.dev.package.tiny_http]
-opt-level = 0
-
-# tiny_http 0.12 没有按连接的超时和连接数上限（#25）；vendored 副本加了 `Server::from_listener_with_limits`。
-# 每个链接本 crate 的构建根都要重复这条 patch。
-[patch.crates-io]
-tiny_http = { path = "vendor/tiny_http" }
 
 # 2026-10-29 用户定：每个 unsafe 块和 unsafe impl 都写 `// SAFETY:` 注释；生产代码不用 unwrap，
 # 确实不会失败的地方用 expect 写明理由。测试里的 unwrap 由仓库根目录的 clippy.toml 放行。

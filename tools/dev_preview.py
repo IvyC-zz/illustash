@@ -36,7 +36,7 @@ def binary() -> Path:
     """与 start-web.command 相同：ILLUSTASH_TERMS_BIN 优先，否则取 target 里较新的 release/debug 构建。"""
     if configured := os.environ.get('ILLUSTASH_TERMS_BIN'):
         return Path(configured)
-    found = [p for p in (ROOT / 'native/terms/target' / kind / 'illustash-terms' for kind in ('release', 'debug'))
+    found = [p for p in (ROOT / 'target' / kind / 'illustash-terms' for kind in ('release', 'debug'))
              if os.access(p, os.X_OK)]
     if not found:
         sys.exit('缺少词条核心程序，请先构建 native/terms 或设置 ILLUSTASH_TERMS_BIN。')

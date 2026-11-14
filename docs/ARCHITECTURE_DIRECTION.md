@@ -52,7 +52,7 @@ Platform picker 以 Selected/Cancelled/Unsupported 表达原生回退结果，�
 
 ## 应用服务与客户端入口
 
-实际依赖为 `desktop → illustash-terms / illustash-platform`，`illustash-terms → illustash-core / illustash-platform`，`illustash-platform → illustash-core`；Core 不引用 Platform、宿主、HTTP/CLI 或 Tauri。`tools/check_architecture.py` 检查四份显式 manifest 的普通、build、dev、target 条件依赖和重命名包，禁止反向依赖及 Core/Platform 传输或 UI 依赖；各 crate 保持独立 manifest 与 path dependency，没有根 workspace。
+实际依赖为 `desktop → illustash-terms / illustash-platform`，`illustash-terms → illustash-core / illustash-platform / illustash-relation-fft`，`illustash-platform → illustash-core`；Core 不引用 Platform、宿主、HTTP/CLI 或 Tauri。`tools/check_architecture.py` 检查五份显式 manifest 的普通、build、dev、target 条件依赖和重命名包，禁止反向依赖及 Core/Platform 传输或 UI 依赖；各 crate 保持独立 manifest 与显式 path dependency，根 workspace 共用锁文件和构建产物；`illustash-relation-fft` 不依赖业务 crate，只隔离 C++ 编译，宿主源码变化不再重编 PocketFFT，版本/dirty 信息仍由宿主 build.rs 生成。
 
 `native/terms` 继续是第三个后端 crate（应用宿主）。`app_service::Application` 私有持有 Session、实例、generation、任务和导出：显式 `open(path, Options)` 只校验/登记，`start` 初始化既有任务和恢复，`recover` 在该实例锁内恢复持久事件，`switch(received_generation, path)` 在写锁内复验后按原顺序打开、登记、停止旧任务、替换并发布新 generation，`shutdown` 停止并回收任务/导出；Drop 复用同一收尾。关闭后新的服务调用拒绝，重复关闭可安全调用。Options 保留本次网络与自动任务标志，偏好不会自行授予网络权限。进程内客户端须在接受工作时取 generation，再通过 `with_library` 的锁内复验执行 Core 操作，回调取得的 Library 经打开时固定的物理实例访问包内文件，显示别名重指不能改写另一包；任务结果还须沿用完整 TaskIdentity、持久幂等与原所有者的正式提交校验。库 ID 相同不能代替实例路径、generation 或会话身份。
 

@@ -1,6 +1,6 @@
 # 开发说明
 
-状态：现行参考，2026-11-14；「发布」一节已按 v0.1.0 的实际发布修订（#190）。从 README 移出的开发者内容：构建、运行形态、图库包结构、目录、文档地图与检查流程。面向使用者的介绍见 [README](../README.md)。
+状态：现行参考，2026-11-15；「发布」一节已按 v0.1.0 的实际发布修订（#190）。从 README 移出的开发者内容：构建、运行形态、图库包结构、目录、文档地图与检查流程。面向使用者的介绍见 [README](../README.md)。
 
 核心是 Rust：`crates/core` 管业务规则、证据、人工裁决、关系、历史与投影，`crates/platform` 管平台能力，`crates/iqdb` 在本地算 IQDB 签名；`native/terms` 是应用宿主（CLI、HTTP、任务编排），`desktop/` 是只做启动与登录窗口的 Tauri 外壳。数据在 SQLite，推理用 ONNX Runtime（Apple 芯片的 macOS 上走 Core ML、Windows 上走 DirectML，CPU 是参考与回退，见[识别的执行后端](BACKEND_TASKS.md#识别的执行后端)），模型不进仓库、打包时按白名单加入。
 
@@ -16,12 +16,14 @@
 
 ### 快速开始
 
+六个自有 crate 共用根目录的 Cargo workspace、`Cargo.lock` 和 `target/`；原有五个项目之外，`crates/relation-fft` 只负责 PocketFFT 的 C++ 编译与原始接口。仍可用 `--manifest-path` 单独构建成员。依赖、features 和架构方向保留在各自 manifest；根配置统一 profile 与 tiny_http patch。开发构建沿用 terms 的第三方依赖 opt-level 3，自有成员和 tiny_http 保持 opt-level 0；自有成员带行号表，第三方不带调试信息。release 仅 desktop 与 IQDB 去符号，Windows 静态 CRT 仍由根 `.cargo/config.toml` 控制。
+
 ```sh
 # 构建核心
 cargo build --release --manifest-path native/terms/Cargo.toml
 
 # 首次建库：只登记来源，不扫描图片
-./native/terms/target/release/illustash-terms library-create \
+./target/release/illustash-terms library-create \
     --dest ~/Pictures/Illustash/我的图库.pilib --folder /图片目录
 
 # 打开
@@ -30,9 +32,9 @@ cargo build --release --manifest-path native/terms/Cargo.toml
 
 宿主就绪时打印 `图库已启动：http://127.0.0.1:端口/?k=…`。这个地址只能用一次：第一次打开时换成会话 cookie，之后每个请求都要带它，没有就 403（见 [架构方向](ARCHITECTURE_DIRECTION.md) 中「原生宿主完成启动恢复」一段）。浏览器关掉重开丢了 cookie，就重启宿主拿新地址。
 
-浏览器走查不打开真实图库：`./start-web.command` 不带 `--library` 时打开的是最近登记的图库，也就是自己日常用的那个。走查用 `python3 tools/dev_preview.py`，代理会话用 `preview_start {name: "web-isolated"}`（`.claude/launch.json` 里只有这一项）。脚本把 `HOME`、`ILLUSTASH_APP_SUPPORT`、`ILLUSTASH_SHARED` 指向一个临时目录，设 `ILLUSTASH_NO_KEYCHAIN=1` 不碰钥匙串，在里面新建一个只含生成渐变图的图库，宿主跑在空闲端口上；`8777` 端口只做一次跳转，转到宿主打印的带码地址。退出时删除临时目录，`--work DIR` 改用指定目录并保留；宿主用 `native/terms/target` 里较新的构建，或 `ILLUSTASH_TERMS_BIN`。自己另起宿主走查时，同样要把这三个目录指向临时位置，再用 `preview_start {url}` 打开就绪行里的地址。
+浏览器走查不打开真实图库：`./start-web.command` 不带 `--library` 时打开的是最近登记的图库，也就是自己日常用的那个。走查用 `python3 tools/dev_preview.py`，代理会话用 `preview_start {name: "web-isolated"}`（`.claude/launch.json` 里只有这一项）。脚本把 `HOME`、`ILLUSTASH_APP_SUPPORT`、`ILLUSTASH_SHARED` 指向一个临时目录，设 `ILLUSTASH_NO_KEYCHAIN=1` 不碰钥匙串，在里面新建一个只含生成渐变图的图库，宿主跑在空闲端口上；`8777` 端口只做一次跳转，转到宿主打印的带码地址。退出时删除临时目录，`--work DIR` 改用指定目录并保留；宿主用 `target` 里较新的构建，或 `ILLUSTASH_TERMS_BIN`。自己另起宿主走查时，同样要把这三个目录指向临时位置，再用 `preview_start {url}` 打开就绪行里的地址。
 
-`start-web.command` 在 `native/terms/target/{release,debug}` 里找 `illustash-terms`，也可以用 `ILLUSTASH_TERMS_BIN` 指定，找不到直接报错。服务和桌面入口都不隐式建库或升级；开库时按已保存的设置自动同步，`--no-auto-sync` 可关闭自动同步。多来源、Apple Photos 来源与出处分组见 [图库](LIBRARIES.md)。
+`start-web.command` 在 `target/{release,debug}` 里找 `illustash-terms`，也可以用 `ILLUSTASH_TERMS_BIN` 指定，找不到直接报错。服务和桌面入口都不隐式建库或升级；开库时按已保存的设置自动同步，`--no-auto-sync` 可关闭自动同步。多来源、Apple Photos 来源与出处分组见 [图库](LIBRARIES.md)。
 
 ### 启动参数
 
@@ -64,7 +66,7 @@ HTTP 错误保留原有状态码与 `error` 正文，额外通过 `X-Illustash-D
 
 ### 安装包与桌面
 
-版本号只在 `native/terms/application.json` 写一处（SemVer，可带 `-beta.1` 这类预发布后缀，不带 `+build`；关于页的版本与渠道也读这里）。`python3 tools/version.py --set X.Y.Z` 改它并同步 `desktop/tauri.conf.json`、各 crate 的 `Cargo.toml` 和 `Cargo.lock` 里的本项目包；`--sync` 只按它同步；不带参数只检查。本机全量与 CI 的 Python 测试会检查一致，`packaging/build.py` 不一致就拒绝打包。改版本号会改动 `desktop/tauri.conf.json`，按 AGENTS.md 同步 `tests/migration_inventory.json` 的指纹。
+版本号只在 `native/terms/application.json` 写一处（SemVer，可带 `-beta.1` 这类预发布后缀，不带 `+build`；关于页的版本与渠道也读这里）。`python3 tools/version.py --set X.Y.Z` 改它并同步 `desktop/tauri.conf.json`、各自有 crate 的 `Cargo.toml` 和根 `Cargo.lock` 里的本项目包；`--sync` 只按它同步；不带参数只检查。本机全量与 CI 的 Python 测试会检查一致，`packaging/build.py` 不一致就拒绝打包。改版本号会改动 `desktop/tauri.conf.json`，按 AGENTS.md 同步 `tests/migration_inventory.json` 的指纹。
 
 `packaging/build.py` 按白名单复制资源，生成逐文件 SHA-256 的 `manifest.json` 与依赖清单；`--archive` 出 ZIP，`--binaries` 复用已构建的二进制，`--profile dev` 用调试构建。研究便携形态加 `--research --models PATH`；macOS 与 Windows 另需 `--ort-dylib FILE --ort-licenses DIR`，Windows 还需 `--openblas-site DIR`；桌面形态加 `--desktop PATH`，或加 `--desktop-resources` 后再在 `desktop/` 执行 `cargo tauri build --config ../packaging/tauri-bundle.json`。
 
@@ -81,13 +83,13 @@ HTTP 错误保留原有状态码与 `error` 正文，额外通过 `X-Illustash-D
    ```
 
    首个公开测试版没有上一个 tag，用现在的 `0.1.0`（#165）。关于页的渠道「预览版」是 `application.json` 的 `channel`，与检查更新无关；检查更新只看版本号带不带后缀（第 10 步），所以装了不带后缀版本的人收不到带后缀的版本。
-2. **升版本号并同步**：从最新 main 开分支，`python3 tools/version.py --set X.Y.Z` 改 `native/terms/application.json`，并同步 `desktop/tauri.conf.json`、五个 crate（`native/terms`、`desktop`、`crates/core`、`crates/platform`、`crates/iqdb`）的 `Cargo.toml` 和各自 `Cargo.lock` 里本项目的包；再运行 `python -m tools.migration_inventory sync-sources` 同步迁移清单指纹。`python3 tools/version.py` 不带参数只检查：一致时打印「版本号一致：X.Y.Z」，不一致时逐处列出并退出 1。另外两道检查：全量里的 `tests/test_version.py`，以及 `packaging/build.py` 不一致就拒绝打包。这个 PR 按普通代码级别走合并队列，转 Ready 写「待集成」。版本号已经是要发的值时跳过这一步。
+2. **升版本号并同步**：从最新 main 开分支，`python3 tools/version.py --set X.Y.Z` 改 `native/terms/application.json`，并同步 `desktop/tauri.conf.json`、六个自有 crate 的 `Cargo.toml` 和根 `Cargo.lock` 里本项目的包；再运行 `python -m tools.migration_inventory sync-sources` 同步迁移清单指纹。`python3 tools/version.py` 不带参数只检查：一致时打印「版本号一致：X.Y.Z」，不一致时逐处列出并退出 1。另外两道检查：全量里的 `tests/test_version.py`，以及 `packaging/build.py` 不一致就拒绝打包。这个 PR 按普通代码级别走合并队列，转 Ready 写「待集成」。版本号已经是要发的值时跳过这一步。
 3. **发布提交与本机全量**：集成会话把版本号 PR 编进一批，在候选 head 上经 `collab_run.py run -- bash tools/check_all.sh` 跑全量（占 heavy 槽，做法见 [合并队列](LOCAL_CHECKS.md#合并队列集成会话)），用户批准后合入。发布提交就是这一批合完后的 main 提交，它的 tree 与通过全量的候选 head 相同（`git rev-parse <发布提交>^{tree} <候选head>^{tree}` 两行一样）。main 在那之后又合入了不跑全量的 PR（界面级、只改文档），要带上它们就请集成会话在 main 当前提交上补跑一次全量，以它为发布提交。
-   - **依赖漏洞**：在发布提交上对五个 `Cargo.lock`（`native/terms`、`desktop`、`crates/core`、`crates/platform`、`crates/iqdb`）各跑一次 `cargo audit -f <lock>`。有漏洞时逐条判断是否用到受影响的功能：用到的先升级再发布（升级 PR 按普通代码级别走合并队列，发布提交随之换成合入后的 main 提交），没用到的把编号和理由写进这次发布的 Issue。unmaintained、yanked 之类的警告只记录。需要 `cargo install cargo-audit --locked`（本机已装 0.22.2）；第一次运行会从 GitHub 拉 RustSec 漏洞库。
+   - **依赖漏洞**：在发布提交上对根 `Cargo.lock` 跑一次 `cargo audit -f Cargo.lock`。有漏洞时逐条判断是否用到受影响的功能：用到的先升级再发布（升级 PR 按普通代码级别走合并队列，发布提交随之换成合入后的 main 提交），没用到的把编号和理由写进这次发布的 Issue。unmaintained、yanked 之类的警告只记录。需要 `cargo install cargo-audit --locked`（本机已装 0.22.2）；第一次运行会从 GitHub 拉 RustSec 漏洞库。
    - **更新公钥**（#279）：发布提交里 `desktop/tauri.conf.json` 的 `plugins.updater.pubkey` 不能是空的，并且和用户保管的私钥是一对（与 `~/.tauri/illustash-updater.key.pub` 的内容相同，见下面 [更新签名密钥](#更新签名密钥)）。公钥是空的构建照样能用，只是「下载并重启」不出现，只能打开下载页；公钥不对的构建以后收不到任何自动更新。
    - **仓库 ID**（#358）：`gh api repos/shio-vinyl/illustash --jq .id` 的结果要等于发布提交里 `native/terms/src/app_updates.rs` 的 `REPOSITORY_ID`。ID 不对时应用靠按名字的回退照样查得到更新，验收看不出来，但仓库以后改名或转移就接不住了（见第 10 步）。仓库删掉重建过、或者换了仓库，都要先改这个常量和本文、[Web 界面](WEB_V2.md#界面语言2026-10-18173) 里的地址。
 4. **两个平台打包**：首个内测版起每个平台只发不含模型的小安装包，模型第一次使用时下载（#168）；打法与完整包相同，只是不传 `--models`，参数说明见 [安装与平台](BACKEND_TASKS.md#独立安装与可选计算包)。两边都从发布提交的干净检出构建（例如 `git worktree add --detach <目录> <发布提交>`）：关于页的构建号取自 `git rev-parse --short HEAD`，已跟踪文件有改动时带 `-dirty`，发出去的包不能带。短哈希的长度由各自检出里的对象数决定，两个平台可能不同（0.1.0：macOS `1b72ffd4`，Windows `1b72ffd`），指的是同一个提交。release 构建按 [本机资源](LOCAL_CHECKS.md#本机资源排队计时与后台优先级) 的规定排队。安装包文件名用 Tauri 的默认格式：`Illustash_X.Y.Z_aarch64.zip`、`Illustash_X.Y.Z_x64-setup.exe`（2026-10-20 用户定）。
-   - **macOS**：只发 Apple 芯片（arm64）版，有 Intel 用户反馈时再考虑通用二进制（2026-10-20 用户定）。`collab_run.py run -- python3 packaging/build.py --research --ort-dylib FILE --ort-licenses DIR --output NEW_PATH --macos-desktop-compute packaging/desktop-compute`，再在 `desktop/` 运行 `collab_run.py run -- cargo tauri build --bundles app --config ../packaging/tauri-full-macos.json`。产物在 `desktop/target/release/bundle/macos/Illustash.app`，只有链接器给主程序加的临时签名，整个包没有封签：`codesign --verify --deep --strict` 报 “code has no resources but signature indicates they must be present”。以前虚拟机验收用的包都补签过，没有验证过不补签的包在 Gatekeeper 下的表现，所以先拷出来补签整个包：`codesign --force --deep -s - Illustash.app`，再用 `codesign --verify --deep --strict Illustash.app` 核对通过（`codesign -dv` 显示 `Signature=adhoc` 和 `Sealed Resources`）。之后用 `ditto -c -k --keepParent Illustash.app Illustash_X.Y.Z_aarch64.zip` 压成 zip 发布，#7、#192 和 0.1.0 的虚拟机验收用的都是这样补签过的 zip。应用内更新（#279）用的包另外打：`python3 tools/updater_release.py pack-mac Illustash.app Illustash_X.Y.Z_aarch64.app.tar.gz`（第一层是 `Illustash.app/`，不带扩展属性），和 zip 来自同一个补签过的 `Illustash.app`。`--ort-dylib`、`--ort-licenses` 取自 PyPI 上 `onnxruntime` 1.30.0 的 macOS arm64 wheel，取法和哈希见 [安装与平台](BACKEND_TASKS.md#独立安装与可选计算包)「macOS 的 CPU ONNX Runtime」。
+   - **macOS**：只发 Apple 芯片（arm64）版，有 Intel 用户反馈时再考虑通用二进制（2026-10-20 用户定）。`collab_run.py run -- python3 packaging/build.py --research --ort-dylib FILE --ort-licenses DIR --output NEW_PATH --macos-desktop-compute packaging/desktop-compute`，再在 `desktop/` 运行 `collab_run.py run -- cargo tauri build --bundles app --config ../packaging/tauri-full-macos.json`。产物在 `target/release/bundle/macos/Illustash.app`，只有链接器给主程序加的临时签名，整个包没有封签：`codesign --verify --deep --strict` 报 “code has no resources but signature indicates they must be present”。以前虚拟机验收用的包都补签过，没有验证过不补签的包在 Gatekeeper 下的表现，所以先拷出来补签整个包：`codesign --force --deep -s - Illustash.app`，再用 `codesign --verify --deep --strict Illustash.app` 核对通过（`codesign -dv` 显示 `Signature=adhoc` 和 `Sealed Resources`）。之后用 `ditto -c -k --keepParent Illustash.app Illustash_X.Y.Z_aarch64.zip` 压成 zip 发布，#7、#192 和 0.1.0 的虚拟机验收用的都是这样补签过的 zip。应用内更新（#279）用的包另外打：`python3 tools/updater_release.py pack-mac Illustash.app Illustash_X.Y.Z_aarch64.app.tar.gz`（第一层是 `Illustash.app/`，不带扩展属性），和 zip 来自同一个补签过的 `Illustash.app`。`--ort-dylib`、`--ort-licenses` 取自 PyPI 上 `onnxruntime` 1.30.0 的 macOS arm64 wheel，取法和哈希见 [安装与平台](BACKEND_TASKS.md#独立安装与可选计算包)「macOS 的 CPU ONNX Runtime」。
    - **Windows x64**：在 Windows 验收机上检出发布提交，从本机经 SSH 发起，外面包 `collab_run.py run --slot windows --`：`python packaging/build.py --research --openblas-site DIR --ort-dylib FILE --ort-licenses DIR --directml DIR --output NEW_PATH --desktop-compute packaging/desktop-compute`，再在 `desktop/` 运行 `cargo tauri build --bundles nsis --config ../packaging/tauri-full.json`。只发 NSIS 安装包 `Illustash_X.Y.Z_x64-setup.exe`（当前用户安装），不发 MSI；应用内更新下载的也是这个文件。ONNX Runtime（带 DirectML）的构建办法和 `--directml` 取哪个目录见 [安装与平台](BACKEND_TASKS.md#独立安装与可选计算包)。
 5. **两个平台验收**：用要发布的那个文件验收，只用合成数据。
    - **macOS** 在 Tart 虚拟机里做（做法见 [macOS 实机测试](LOCAL_CHECKS.md#macos-实机测试虚拟机)，经 `collab_run.py run --slot vm` 占 vm 槽）：新建标准用户，用虚拟机里的 Safari 下载 zip（带上隔离标记），装进「应用程序」，按 [装不上、打不开怎么办](INSTALL.md#macos) 放行；之后核对关于页的版本是 X.Y.Z、构建号是发布提交的短哈希且不带 `-dirty`，下载模型，建合成图库，同步并识别。标准用户往 `/Applications` 里放东西、在「隐私与安全性」里点「仍要打开」，系统都要输入密码；代理会话不往系统密码框里输密码，所以 0.1.0 是这样做的（去隔离标记这一步用户 2026-11-14 同意）：装进标准用户自己的 `~/Applications`，确认打开时提示「未打开」、「隐私与安全性」里出现「仍要打开」按钮，然后用 `xattr -dr com.apple.quarantine` 去掉隔离标记再打开，验收记录里写明放行这一步没有走。仓库公开前，模型 Release `wd-coreml-v1` 不登录访问返回 404，macOS 上 WD 加速文件的下载会显示「github.com: HTTP 404」，原始模型照常下载、识别照常进行；这一项在仓库公开后按 #190 的清单补验。

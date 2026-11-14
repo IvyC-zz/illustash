@@ -1,14 +1,14 @@
-"""检查声明的 crate 依赖方向，不解析 Rust，也不引入 workspace。"""
+"""检查 workspace 内显式声明的 crate 依赖方向，不解析 Rust。"""
 from pathlib import Path
 import argparse
 import tomllib
 
 ROOT = Path(__file__).resolve().parents[1]
 MANIFESTS = {'core': 'crates/core/Cargo.toml', 'platform': 'crates/platform/Cargo.toml',
-             'app': 'native/terms/Cargo.toml', 'desktop': 'desktop/Cargo.toml'}
+             'fft': 'crates/relation-fft/Cargo.toml', 'app': 'native/terms/Cargo.toml', 'desktop': 'desktop/Cargo.toml'}
 OWNERS = {'illustash-core': 'core', 'illustash-platform': 'platform',
-          'illustash-terms': 'app', 'illustash-desktop': 'desktop'}
-ALLOWED = {'core': set(), 'platform': {'core'}, 'app': {'core', 'platform'},
+          'illustash-relation-fft': 'fft', 'illustash-terms': 'app', 'illustash-desktop': 'desktop'}
+ALLOWED = {'core': set(), 'platform': {'core'}, 'fft': set(), 'app': {'core', 'platform', 'fft'},
            'desktop': {'app', 'platform'}}
 
 
@@ -51,7 +51,7 @@ def main():
     for error in errors:
         print(error)
     if not errors:
-        print('crate dependency direction valid: desktop -> app/platform -> core')
+        print('crate dependency direction valid: desktop -> app/platform -> core; app -> fft')
     return bool(errors)
 
 
