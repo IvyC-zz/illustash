@@ -10,7 +10,7 @@ publish = false
 [dependencies]
 illustash-platform = { path = "../../crates/platform" }
 illustash-core = { path = "../../crates/core" }
-rusqlite = { version = "0.32", features = ["bundled", "functions", "backup", "hooks"] }
+rusqlite = { version = "0.41", default-features = false, features = ["cache", "bundled", "functions", "backup", "hooks"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["float_roundtrip"] }
 sha2 = "0.10"

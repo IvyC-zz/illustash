@@ -124,7 +124,7 @@ pub(crate) fn typed_rows(c: &Connection, sql: &str, args: &[rusqlite::types::Val
 }
 fn query_rows(c: &Connection, sql: &str, args: impl rusqlite::Params) -> Result<Vec<Json>> {
     let mut s = c.prepare(sql)?;
-    let columns: Vec<String> = s.column_names().iter().map(|n| n.to_string()).collect();
+    let columns: Vec<String> = s.column_names().map(str::to_owned).collect();
     let result = s
         .query_map(args, |r| {
             let mut fields = Vec::new();

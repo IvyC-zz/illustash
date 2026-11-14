@@ -9,7 +9,7 @@ publish = false
 
 [dependencies]
 illustash-core = { path = "../core" }
-rusqlite = { version = "0.32", features = ["bundled", "functions", "backup", "hooks"] }
+rusqlite = { version = "0.41", default-features = false, features = ["cache", "bundled", "functions", "backup", "hooks"] }
 serde_json = { version = "1", features = ["float_roundtrip"] }
 libc = "0.2"
 md-5 = "0.10"
