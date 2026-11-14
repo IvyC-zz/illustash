@@ -10,7 +10,7 @@ import {api, post, session} from '../core/session.js';
 import {allowNames, updatesPost, updatesTick} from '../core/settings.js';
 import {state} from '../core/state.js';
 import {$, toast} from './dom.js';
-import {openRelease, selfUpdate, updateAct, updateActions, updateBar, updateStarted, updateStatus} from './settings.js';
+import {drawUpdateButton, openRelease, selfUpdate, updateAct, updateActions, updateBar, updateStarted, updateStatus} from './settings.js';
 import {taskList} from './tasks.js';
 import {createLayer} from './overlay.js';
 import {modelsNotice} from './models.js';
@@ -287,7 +287,7 @@ export function wireGuide() {
     if (key === 'update' && act !== 'open' && act !== 'later') {
       await updateAct(act);
       for (const b of $('nudge').querySelectorAll('button')) b.disabled = false;
-      $('nudge').dataset.html = ''; drawNudge();
+      $('nudge').dataset.html = ''; drawNudge(); drawUpdateButton();
       return;
     }
     if (key === 'update' || key === 'updates') {

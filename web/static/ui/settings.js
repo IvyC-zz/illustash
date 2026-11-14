@@ -542,6 +542,27 @@ export function updatesLine() {
   return `<span>${status || t('检查更新')}<small class="line-hint">${hints.join(' · ')}</small>${updateBar(u)}</span>
     <span class="update-acts">${u.newer ? updateActions(u) : ''}${check}</span>`;
 }
+// 侧栏的更新入口（用户 2026-11-14 要求）：有新版本就一直在，不受「暂不」和任务的影响；没有就不显示。点一下直接开始
+// 下载并重启，下载时显示进度（点了打开「设置 › 关于」），下好后点了重启安装（先确认）；不能自己更新的安装点了打开下载页。
+export function drawUpdateButton(u = state.updates) {
+  const button = $('updateButton'), i = selfUpdate(u), stage = i?.stage;
+  button.hidden = !(u?.newer || ['downloading', 'ready', 'installing'].includes(stage));
+  if (button.hidden) return;
+  const percent = stage === 'downloading' && i.total ? Math.floor(i.received / i.total * 100) : null;
+  const label = stage === 'downloading' ? (percent === null ? t('下载中') : t('下载 {percent}%', {percent}))
+    : stage === 'ready' ? t('重启更新') : stage === 'installing' ? t('安装中') : stage === 'failed' ? t('更新失败') : t('更新');
+  $('updateLabel').textContent = label;
+  button.classList.toggle('busy', stage === 'downloading' || stage === 'installing');
+  button.title = updateStatus(u).replace(/<[^>]*>/g, '') || (i ? t('有新版本 {version}，点一下下载并重启', {version: u.latest})
+    : t('有新版本 {version}，点一下打开下载页', {version: u.latest}));
+}
+async function updateButtonClick() {
+  const stage = selfUpdate()?.stage;
+  if (stage === 'downloading' || stage === 'installing') { location.hash = '#/settings/about'; return; }
+  await updateAct(stage === 'ready' ? 'restart' : selfUpdate() ? 'install' : 'open');
+  drawUpdateButton(); drawNudge();
+  if ($('aboutUpdates')) $('aboutUpdates').innerHTML = updatesLine();
+}
 export const openRelease = () => { if (state.updates?.url) window.open(state.updates.url, '_blank', 'noopener'); };
 // 「下载并重启」的几个按钮，提示和「设置 › 关于」共用。重启会关掉 Illustash，所以先确认，有任务在运行时不重启。
 export async function updateAct(act) {
@@ -653,7 +674,7 @@ export function wireSettings() {
     } else if (what === 'accounts') renderAccountsCard();
     else if (what === 'pixiv') toast(detail.error ? detail.error.message : t('已绑定 Pixiv：{name}', {name: detail.bound.name || detail.bound.user_id}));
     else if (what === 'updates') {
-      drawNudge();
+      drawNudge(); drawUpdateButton();
       if ($('aboutUpdates')) $('aboutUpdates').innerHTML = updatesLine();
       // 显示它的设置页只在有变化时重画，绝不在用户输入时重画；下载进度只改上面那一行。
       const {install: _, ...rest} = state.updates || {};
@@ -703,13 +724,14 @@ export function wireSettings() {
     catch (err) { toast(err.message); e.target.checked = !e.target.checked; }
     loadProvenance();
   });
+  $('updateButton').onclick = updateButtonClick;
   document.addEventListener('click', async e => {
     const act = e.target.closest('[data-updates]');
     if (act) {
       act.disabled = true;
       await updateAct(act.dataset.updates);
       if ($('aboutUpdates')) $('aboutUpdates').innerHTML = updatesLine();
-      drawNudge();
+      drawNudge(); drawUpdateButton();
       return;
     }
     const b = e.target.closest('[data-updates-check]'); if (!b) return;
@@ -717,7 +739,7 @@ export function wireSettings() {
     try { const u = await checkUpdates(); toast(u.error ? tb(u.error) : u.newer ? t('有新版本 {version}', {version: u.latest}) : t('已是最新版本')); }
     catch (err) { toast(err.message); }
     if ($('aboutUpdates')) $('aboutUpdates').innerHTML = updatesLine();
-    drawNudge();
+    drawNudge(); drawUpdateButton();
   });
   document.addEventListener('change', async e => {
     const box = e.target.closest('[data-updates-auto]'); if (!box) return;
