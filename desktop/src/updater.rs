@@ -283,15 +283,23 @@ pub fn install(app: &AppHandle) -> Result<Value, String> {
 }
 
 /// Windows 上插件把下载的安装包写进 `%TEMP%\<产品名>-<版本>-updater-<随机>\`，运行它之后就退出，不再删除（安装包
-/// 运行时也删不掉）。新版本启动时在后台清掉这些目录，每次更新大约几十 MB。
+/// 运行时也删不掉）。新版本启动时在后台清掉这些目录，每次更新大约几十 MB。安装包在最后一步打开新版本，那一刻它自己
+/// 还没退出、文件还占着，所以隔一会儿再删，删不掉的过一会儿再试；还剩下的留给下次启动。
 #[cfg(windows)]
 pub fn clean_leftovers(app: &AppHandle) {
     let product = app.package_info().name.clone();
     thread::spawn(move || {
-        let Ok(entries) = std::fs::read_dir(std::env::temp_dir()) else { return };
-        for entry in entries.flatten() {
-            if leftover(&entry.file_name().to_string_lossy(), &product) && entry.path().is_dir() {
-                let _ = std::fs::remove_dir_all(entry.path());
+        for wait in [10, 30, 120] {
+            thread::sleep(Duration::from_secs(wait));
+            let Ok(entries) = std::fs::read_dir(std::env::temp_dir()) else { return };
+            let mut left = false;
+            for entry in entries.flatten() {
+                if leftover(&entry.file_name().to_string_lossy(), &product) && entry.path().is_dir() {
+                    left |= std::fs::remove_dir_all(entry.path()).is_err();
+                }
+            }
+            if !left {
+                return;
             }
         }
     });
