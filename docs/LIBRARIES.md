@@ -117,6 +117,8 @@
 
 最近图库记录、设置和账号放在应用数据目录，由原生 `app_paths::user_home() -> Result<PathBuf>` 与 `app_paths::app_support(home: &Path) -> PathBuf` 统一取值；`app_libraries` 负责最近图库登记。
 
+最近图库、语言偏好和更新设置各自在同名 `.lock` 文件的独占锁下读取、修改并写回。锁被占用时最多等待 5 秒，无法取得锁就报错，原配置不写入。图库包已创建或导入时，登记失败只影响最近图库列表。
+
 非 Windows 主目录取非空 `HOME`，Windows 取非空 `USERPROFILE`，缺失或空值返回「无法定位用户主目录」。macOS 和 Linux 均保留 `~/Library/Application Support/Illustash/`；Linux 尚未迁移到 XDG，改变目录需另行处理已有数据。Windows 为 `%APPDATA%\Illustash\`，`APPDATA` 缺失或空值时回退到主目录下的 `AppData\Roaming\Illustash`。`ILLUSTASH_APP_SUPPORT` 只要存在就原样覆盖（包括空值和相对路径），不建目录、不规范化路径。此接口搬迁不移动已有数据，回退程序沿用相同目录规则。Windows 普通路径规范化也归 `app_paths`；SQLite 长路径及 `win32-longpath` VFS 仍由 `sqlite` 独立封装，详见 [Windows 运行时说明](BACKEND_TASKS.md#windows)。
 
 ### 目录职责与输出约定

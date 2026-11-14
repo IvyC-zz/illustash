@@ -113,11 +113,11 @@
 
  "crates/platform/src/platform_photos.rs":"4765dd1127cc8940567f719e3f8761e51e0711488179843d39a6383f657123d7",
 
- "crates/platform/src/platform_process.rs":"2b0c10db7bc6d1631dee5e686af02d747e365965da1e0d6087148541db8ece01",
+ "crates/platform/src/platform_process.rs":"3b043c7eb0569dca4fa7e3443530c6d7c462b4ed199e4dee0a7fe8e9bc500e5e",
 
  "crates/platform/src/platform_process/windows_desktop.rs":"fb60ef14077bad0456d6c9e7bcad2c85857197ed41db11a800bd17dd6ec089fe",
 
- "crates/platform/src/platform_process/windows_worker.rs":"a1d58a129a6e427649ac5da5d3ffbc06d35801c856b4154d775bdd5ad1a50176",
+ "crates/platform/src/platform_process/windows_worker.rs":"719e41559853468e77b642ea15fb3c4985a88c76ec65a8af90b14ae0ecc10ecc",
 
  "crates/platform/src/platform_research_math.rs":"92e11e5289b03700a962ef8fcd9d7cc38311af3eb5678d7a155e10b14096f2ee",
 
@@ -193,7 +193,7 @@
 
  "native/terms/src/app_integrity.rs":"d7ff3af8c6b4b0a90293a98cf65951db98aad92fe310d5cd29a837c49a6e3d4a",
 
- "native/terms/src/app_libraries.rs":"0693c114f35fd953880a4f4d3503b8c37329c32971e0599cade08635e6035013",
+ "native/terms/src/app_libraries.rs":"8c1d194e126e79d29266e6d6d71fbc4acf71ed91566372c0259d8b81c1ef3065",
 
  "native/terms/src/app_library.rs":"42c131ef177eb6374430a1315ee654a485923094bc814a80161021b5201e4c6c",
 
@@ -227,7 +227,7 @@
 
  "native/terms/src/app_names.rs":"f1e9ee13d2fc826d1c0071b5de7e4a38700efe9445001d472d70b07c3d60795f",
 
- "native/terms/src/app_onboarding.rs":"829290530c622801e4d6d10ffbecf8e98f29257533bc64f7ee9dde4532293e34",
+ "native/terms/src/app_onboarding.rs":"03d17364b76316926f094d793662181cca97fdd144379691389f65b09b9a3f9a",
 
  "native/terms/src/app_photos.rs":"df3a434e0b64f63e395ca93703be19d90b83faefe6901537fdd628d51ddc0326",
 
@@ -265,7 +265,7 @@
 
  "native/terms/src/app_sync.rs":"a9b6362ced9158e3ff44940032b8ed18c8742ecbd7b96637a2ac3246c0ac415d",
 
- "native/terms/src/app_tasks.rs":"77c6e161633fa9f8dd67a474de0d562182ac7cacbd92c941ea5f8f5909b91ab9",
+ "native/terms/src/app_tasks.rs":"55d0fc14c38fadec7ca902c88fd0053ff6403c41eb4ccdda9435d5258874ad19",
 
  "native/terms/src/app_updates.rs":"e7b51e4afd108af07dbf92e76d44251709635984f8387d3e702922190b9834ba",
 
