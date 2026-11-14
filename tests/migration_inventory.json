@@ -159,15 +159,15 @@
 
  "native/terms/examples/research_compute/math.rs":"ceedf5880d735289e7686d8b5bd11e54278941f93eb7955421996ca29c774562",
 
- "native/terms/src/app_accounts.rs":"dce690a139403137f1c829f9f1edf26fc83627bee455420a2b38a65520ce6cca",
+ "native/terms/src/app_accounts.rs":"22ef4d58e65652276a92a0eb89a475cd86ea2f22a7fe80be57b0ac502b22bdeb",
 
- "native/terms/src/app_archives.rs":"2b65e891ca922de5635f752ab180d9aee802dd63f78ab5a02b69a12af1b505b5",
+ "native/terms/src/app_archives.rs":"fc1afb7a8820464b006eb97370fe332003637a48f9c77e18c6df2d64736db7c9",
 
  "native/terms/src/app_characters.rs":"a285efa8f72b9124cfe8f6a9e14631e196512bf2b239d12912bef5501b1f4cfc",
 
  "native/terms/src/app_commands.rs":"c9eadb3e255cd1a7d832d95eee6df98324d0308247291be92fd7079b5c688278",
 
- "native/terms/src/app_create.rs":"732a3b2992f08151d69258021db000565208e24c47d2afbf10eee1d3341f6a7d",
+ "native/terms/src/app_create.rs":"f884b4587d13c479e6739fdb7439f2bee4342627b0b157f06560dabfede3cbdc",
 
  "native/terms/src/app_create_names.sql":"29fb8b712603ad5bfd49a20b82162ead37a45e781f949d5e1c9678bd42fa8f7f",
 
@@ -195,13 +195,13 @@
 
  "native/terms/src/app_libraries.rs":"0693c114f35fd953880a4f4d3503b8c37329c32971e0599cade08635e6035013",
 
- "native/terms/src/app_library.rs":"42c131ef177eb6374430a1315ee654a485923094bc814a80161021b5201e4c6c",
+ "native/terms/src/app_library.rs":"e8e61594c331065461c63adaa6c7b14c033c5e3d1351741d88c89e720c3406d4",
 
  "native/terms/src/app_local.rs":"f8fb6ea23574a2ec339f9b966e05951db2c1e8cd3b735464f51edf36ecc4bd49",
 
  "native/terms/src/app_migrate.rs":"dc7ac85b778a33def433892fe83fab3fdc283ff33c970595e8dddb6992a6cefb",
 
- "native/terms/src/app_migrate_data.rs":"53fc754cf6ad0e6f397907ca42543512e6ff550dbce8ee2218c76211258a0aa5",
+ "native/terms/src/app_migrate_data.rs":"f7b52ce57261f5f71cd800fddbb3b4423e21fb10cfb9ebd7233df36b52a6a3a1",
 
  "native/terms/src/app_migration_sql/ambiguous.sql":"04993300291b3a4d67b31b2d448781d1e35bf65a9b765929ca9b7e8a5047c174",
 
@@ -221,7 +221,7 @@
 
  "native/terms/src/app_migration_sql/provenance.sql":"a780f1f8837dd2c90a556539c114d56cdaa513b057fb667bf0c5c9d604f75934",
 
- "native/terms/src/app_models.rs":"4cd349a7c2699a415e8fc069c028ed514ee209d3bb11f63c5822a2a0fcf3b810",
+ "native/terms/src/app_models.rs":"9bd2a3eae8e0022dc234f13d87d198803fd1250f133e9c8ff9ed11ef7cb33648",
 
  "native/terms/src/app_name_sources.rs":"effedaf83af896ecd880784490e4b1483fe05c28c3098a098c2ae80c68a2f458",
 
@@ -239,7 +239,7 @@
 
  "native/terms/src/app_provenance.rs":"78e2e1660cb702fa9b9240da7c9a4b19b6203344b8bf9cab98380845d03705cd",
 
- "native/terms/src/app_provenance_cache.rs":"cb3ae9fbc002bbf79281b1a896dba6c76cf3cad2888264db8fc2c9a11d0f29bf",
+ "native/terms/src/app_provenance_cache.rs":"ca5c3ddc9fc4139af8a941f9b1dcffc67653414f03103b4f1491f4c8ef778d31",
 
  "native/terms/src/app_provenance_net.rs":"6bfa48c3c82e0100f1347eb2140099e70a219baeda0c942398b10a8f2aed8c46",
 
@@ -249,7 +249,7 @@
 
  "native/terms/src/app_rescue.rs":"08915aa36490c06b4d43fb0ff6337d4a548b451bc15c090928b0d37e6af4456d",
 
- "native/terms/src/app_research.rs":"3e793d257030bc5aa0dcecd16c887b4dee04463f67c1db9e3b46738fdcf44e5b",
+ "native/terms/src/app_research.rs":"d5cdea217d263b9b328c1dd72e759b2617a5f09c9f778d2b5e04f4ddcc8e4e41",
 
  "native/terms/src/app_resources.rs":"3304fcac09af5a36a490589de3dd36fd6f79bad80cf515f44f6d2888ee1d80e3",
 
@@ -263,7 +263,7 @@
 
  "native/terms/src/app_sources.rs":"8ee039dc596b1253783ab4256fd7befa1ce4087eee3f93b69208e7ede676c819",
 
- "native/terms/src/app_sync.rs":"a9b6362ced9158e3ff44940032b8ed18c8742ecbd7b96637a2ac3246c0ac415d",
+ "native/terms/src/app_sync.rs":"31d40a32be87e7e0ce1992567c9e146315e180d1a6a64445efb411ef0cbd8f00",
 
  "native/terms/src/app_tasks.rs":"77c6e161633fa9f8dd67a474de0d562182ac7cacbd92c941ea5f8f5909b91ab9",
 
@@ -299,7 +299,7 @@
 
  "native/terms/src/http_local.rs":"d7a5757ae32b7c609f0749facd77996e8879dd8fb531bb0a40352364807e8370",
 
- "native/terms/src/http_read.rs":"e5b7e7f78faffd8865dbded82351d75ad8aa64d077b739015578396d3b638dbf",
+ "native/terms/src/http_read.rs":"9e02710115976c113d54ccaf36dc715ad272bf99e0d5ed8a8017876ff8993aa9",
 
  "native/terms/src/image_samples/mod.rs":"3322652e6cd2806e1c739a67ecca850060eb2d4d2c9fd49d74d1ade3bafbefd6",
 
@@ -373,9 +373,9 @@
 
  "native/terms/src/sql_fragments.rs":"4519b3df34e7ccc8e2a512c1803690841fa97daaf59f6ffcaff3f63bf2f86534",
 
- "native/terms/src/sqlite.rs":"a9d28dfd07ece00f2dd0dc9edb274636cce76f02f489b260cfb291abc9c813fc",
+ "native/terms/src/sqlite.rs":"df977b94f216b4f3ead9212689d41ee22dac8d61532b909ae40004eb07997456",
 
- "native/terms/src/table_delta.rs":"875225221e30755766b276a098afab88d1663d3a2f0059181f3ee60b8c7f569d",
+ "native/terms/src/table_delta.rs":"191cf3668dfa577769de76752732ac4ad8a8712840adbd30ea2e27caceb81ab9",
 
  "native/terms/src/task_state.rs":"bc37b10d47109a65558d9a912aa75d7165b64b5c6088e236324e098e2351dcc6",
 

@@ -160,6 +160,20 @@ class NativeAccountsTest(unittest.TestCase):
         (directory/'data/following.js').write_text('window.YTD.following.part0 = [{"following":{"accountId":"4"}}]')
         self.assertEqual(self.pair('x/import',{'path':str(directory)})['new'],1)
         self.assertEqual(labels.snapshot(provenance_db(self.lib)),self.rec.value('reference provenance'))
+
+        before = labels.snapshot(provenance_db(self.lib))
+        oversized = self.root / 'oversized-following.zip'
+        with zipfile.ZipFile(oversized, 'w', compression=zipfile.ZIP_DEFLATED) as z:
+            with z.open('data/following.js', 'w') as entry:
+                entry.write(b'window.YTD.following.part0 = []')
+                chunk = b' ' * (1 << 20)
+                for _ in range(64):
+                    entry.write(chunk)
+        response = self.request('/api/accounts/x/import', {'path': str(oversized)})
+        self.assertEqual(response['status'], 400, response)
+        self.assertIn('关注列表超过限额', json.loads(response['body'])['error'])
+        self.assertEqual(labels.snapshot(provenance_db(self.lib)), before)
+
     def test_archive_corruption_and_rollback(self):
         before=labels.snapshot(provenance_db(self.lib))
         self.pair('x/import',{'path':str(self.archive([],broken=True))},400)
