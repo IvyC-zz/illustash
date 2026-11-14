@@ -111,13 +111,15 @@ impl Host {
         }
         Ok(Self { child, stdin: Some(stdin), origin: format!("http://127.0.0.1:{port}"), lines })
     }
+    /// 失败时 panic 信息里带上状态码和回答正文，或连接错误本身。
     fn get(&self, url: &str) -> Value {
-        ureq::get(&format!("{}{url}", self.origin))
-            .set("Cookie", &entry::cookie(&self.origin))
-            .call()
-            .unwrap()
-            .into_json()
-            .unwrap()
+        match ureq::get(&format!("{}{url}", self.origin)).set("Cookie", &entry::cookie(&self.origin)).call() {
+            Ok(response) => response.into_json().unwrap_or_else(|e| panic!("GET {url}: unreadable reply: {e}")),
+            Err(ureq::Error::Status(code, response)) => {
+                panic!("GET {url}: HTTP {code}: {}", response.into_string().unwrap_or_default())
+            }
+            Err(e) => panic!("GET {url}: {e}"),
+        }
     }
     fn post(&self, url: &str, body: Value) -> (u16, Value) {
         let token = self.get("/api/bootstrap")["token"].as_str().unwrap().to_owned();
