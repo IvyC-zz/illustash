@@ -2,7 +2,7 @@
 name: 报告问题
 about: 装不上、打不开、识别或整理时出错
 title: ''
-labels: bug
+labels: bug, 反馈, 待分拣
 ---
 
 <!--
