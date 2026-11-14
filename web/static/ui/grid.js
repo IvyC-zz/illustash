@@ -463,11 +463,12 @@ function selectedChars() {
   }
   return {all, common: [...common || []].map(id => all.get(id))};
 }
-// 把选中的图从 from 换成别的角色：角色页换掉本页的角色，默认选择栏换掉选中的图共同的角色。
-function swapSelected(from) {
+// 把选中的图从 from 换成别的角色：角色页换掉本页的角色，默认选择栏换掉选中的图共同的角色。exclude 是候选里不列的角色
+// （图上本来就有的）。
+function swapSelected(from, exclude = [from.id]) {
   const n = selCount(), payload = {...selectionPayload(), confirm: n > 500};
   openPicker({title: t('把 {n} 张换成…', {n: number(n)}), sentence: e => t('把 {n} 张从 {from} 换成 {name}', {n: number(n), from: from.name, name: e.name}),
-    exclude: [from.id], suggest: selectionPayload(), multi: true,
+    exclude, suggest: selectionPayload(), multi: true,
     pick: list => mutate('/api/reassign', {...payload, old: from.id, new: newIds(list)}, state.route.char === from.id)});
 }
 export const short = name => name.length > 28 ? name.slice(0, 26) + '…' : name;
@@ -501,8 +502,10 @@ function runBarAction(act) {
     if (!chars) toast(t('全选时请进入角色页换成'));
     else if (!chars.all.size) runBarAction('assign');
     else if (!chars.common.length) toast(t('所选图片没有共同的角色'));
-    else if (chars.common.length === 1) swapSelected(chars.common[0]);
-    else openPicker({title: t('换掉哪个角色？'), items: chars.common, sentence: e => t('把 {n} 张的 {name} 换掉', {n: number(n), name: e.name}), pick: e => swapSelected(e)});
+    else if (chars.common.length === 1) swapSelected(chars.common[0], chars.common.map(m => m.id));
+    // 第二个面板等这一个的 close 事件之后再开：在那之前浮层管理器还把它算作开着，同一个对话框不会再打开。
+    else openPicker({title: t('换掉哪个角色？'), items: chars.common, sentence: e => t('把 {n} 张的 {name} 换掉', {n: number(n), name: e.name}),
+      pick: e => $('picker').addEventListener('close', () => swapSelected(e, chars.common.map(m => m.id)), {once: true})});
   }
   else if (act === 'also') openPicker({title: t('这 {n} 张也是…', {n: number(n)}), sentence: e => t('给 {n} 张加上 {name}', {n: number(n), name: e.name}), exclude: [r.char], suggest: selectionPayload(), multi: true,
     pick: list => mutate('/api/change', {...payload(), action: 'confirmed', ...targets(list)}, false)});
