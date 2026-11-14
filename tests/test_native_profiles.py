@@ -29,6 +29,7 @@ class NativeProfilesTest(unittest.TestCase):
     def setUp(self):
         labels.NativeHumanLabelsTest.setUp(self)
         self.seed_both()
+        self.flag_actions = set()
 
     def name_request(self, entity=None, refresh=False):
         with self.store.connect() as c:
@@ -39,8 +40,15 @@ class NativeProfilesTest(unittest.TestCase):
         return fetch(base, {'url':url,'method':'POST','body':json.dumps(body,ensure_ascii=False).encode(),
                            'headers':{'Content-Type':'application/json','X-CSRF-Token':self.token}},self.origin)
 
-    def pair(self,url,body,expected=200):
-        before=[self.rec.state('before'),labels.states(self.right)]
+    def recorded_state(self):
+        state = labels.states(self.right)
+        # #428 只扩展了这两个写入的历史。逐条验证新增步骤后，其余表及历史仍与录制比较。
+        actions = state.baseline['app']['actions']
+        actions['rows'] = [row for row in actions['rows'] if json.loads(row)[0] not in self.flag_actions]
+        return state
+
+    def pair(self,url,body,expected=200,*,flag_changed=None):
+        before=[self.rec.state('before'),self.recorded_state()]
         with closing(sqlite3.connect(self.right.db)) as c:
             ids={r[0] for r in c.execute('SELECT t.key FROM term_tree r JOIN terms t ON t.id=r.term_id')}
         native=self.post(self.origin,url,body)
@@ -53,8 +61,19 @@ class NativeProfilesTest(unittest.TestCase):
         for r in (old,native):self.assertEqual(r['status'],expected,(url,body,r['body']))
         self.assertEqual(native['route'],'core')
         if expected<400:
-            self.assertIsNone(labels.difference(old,native),(url,body,old['body'],native['body']))
-        after=[self.rec.state('after'),labels.states(self.right)]
+            compared = native
+            if url in ('/api/kind', '/api/character/mascot'):
+                step = json.loads(native['body'])['undo']
+                if flag_changed:
+                    self.assertEqual(set(step), {'id', 'label', 'ts'})
+                    self.assertEqual(step['id'], self.latest_action())
+                    self.assertNotIn(step['id'], self.flag_actions)
+                    self.flag_actions.add(step['id'])
+                else:
+                    self.assertIsNone(step)
+                compared = {**native, 'body': native['body'].rsplit(b', "undo": ', 1)[0] + b'}'}
+            self.assertIsNone(labels.difference(old,compared),(url,body,old['body'],native['body']))
+        after=[self.rec.state('after'),self.recorded_state()]
         if expected>=400:
             self.assertEqual(before,after,'failed transaction committed')
         self.assertEqual(after[0],after[1],(url,body))
@@ -92,12 +111,80 @@ class NativeProfilesTest(unittest.TestCase):
         self.pair('/api/works',{'action':'bad','id':parent},400)
         self.pair('/api/character/profile',{'entity':self.alice,'work':child})
         self.pair('/api/character/profile',{'entity':self.alice,'work':None})
-        self.pair('/api/character/mascot',{'entity':self.alice,'mascot':True})
-        self.pair('/api/character/mascot',{'entity':self.alice,'mascot':False})
+        self.pair('/api/character/mascot',{'entity':self.alice,'mascot':True},flag_changed=True)
+        self.pair('/api/character/mascot',{'entity':self.alice,'mascot':False},flag_changed=True)
         self.pair('/api/character/mascot',{'entity':self.alice,'mascot':1},400)
-        self.pair('/api/kind',{'entity':self.alice,'kind':'oc','artist':'作者'})
+        self.pair('/api/kind',{'entity':self.alice,'kind':'oc','artist':'作者'},flag_changed=True)
         self.pair('/api/character/profile',{'entity':self.alice,'work':child},400)
-        self.pair('/api/kind',{'entity':self.alice})
+        self.pair('/api/kind',{'entity':self.alice},flag_changed=True)
+        self.check_flag_undo(child)
+
+    def check_flag_undo(self, work):
+        entity = self.alice
+
+        def post(path, body, status=200):
+            r = self.post(self.origin, path, body)
+            self.assertEqual(r['status'], status, (path, r['body']))
+            return json.loads(r['body'])
+
+        def snapshot():
+            state = labels.states(self.right).baseline['app']
+            return {table: state[table] for table in ('terms', 'term_tree', 'term_names', 'memberships',
+                                                      'tag_memberships', 'family_evidence', 'term_projection')}
+
+        def read(path):
+            r = fetch(self.origin, {'url': path}, self.origin)
+            self.assertEqual(r['status'], 200, (path, r['body']))
+            return json.loads(r['body'])
+
+        def views():
+            return (read(f'/api/characters?id={entity}'), read('/api/characters?min=1'), read('/api/tagged'),
+                    read(f'/api/assets?entity={entity}')['total'], read('/api/review-pools'))
+
+        # 让合成角色有作品、自动显示名的首选标记和图片归属。
+        post('/api/character/profile', {'entity': entity, 'work': work})
+        post('/api/change', {'ids': ['a'], 'entity': entity, 'action': 'confirmed'})
+        with closing(sqlite3.connect(self.right.db)) as c:
+            term = c.execute('SELECT id FROM terms WHERE key=?', (entity,)).fetchone()[0]
+            c.execute("INSERT INTO meta(key,value) VALUES ('terms_writer','1')")
+            c.execute("DELETE FROM term_names WHERE term_id=? AND source='user' AND role='display'", (term,))
+            c.execute("INSERT INTO term_names(term_id,lang,value,role,source,preferred,seq) "
+                      "VALUES (?,'en','Alice Synthetic','display','index',1,(SELECT max(seq)+1 FROM term_names))", (term,))
+            c.execute("UPDATE term_tree SET mascot_origin='default' WHERE term_id=?", (term,))
+            c.execute("DELETE FROM meta WHERE key='terms_writer'")
+            c.commit()
+        initial = snapshot()
+        initial_views = views()
+        previous = self.latest_action()
+
+        oc = post('/api/kind', {'entity': entity, 'kind': 'oc', 'artist': '合成画师'})['undo']
+        character = read(f'/api/characters?id={entity}')[0]
+        self.assertEqual((character['kind'], character['artist']), ('oc', '合成画师'))
+        profile = read(f'/api/character/profile?entity={entity}')
+        self.assertIsNone(profile['work_id'])
+        self.assertEqual(profile['user_name'], initial_views[0][0]['name'])
+        self.assertIsNone(post('/api/kind', {'entity': entity, 'kind': 'oc', 'artist': '合成画师'})['undo'])
+        self.assertEqual(self.latest_action(), oc['id'])
+        without_oc = post('/api/kind', {'entity': entity})['undo']
+        post('/api/undo', {'id': oc['id']}, 400)
+        self.assertEqual(post('/api/undo', {'id': without_oc['id']})['undo'], oc)
+        self.assertEqual(read(f'/api/characters?id={entity}')[0]['kind'], 'oc')
+        self.assertEqual(post('/api/undo', {'id': oc['id']})['undo']['id'], previous)
+        self.assertEqual(snapshot(), initial)
+        self.assertEqual(views(), initial_views)
+
+        mascot = post('/api/character/mascot', {'entity': entity, 'mascot': True})['undo']
+        char, directory, tagged, total, _ = views()
+        self.assertTrue(char[0]['mascot'])
+        self.assertNotIn(entity, {r['id'] for r in directory})
+        self.assertIn(entity, {r['id'] for r in tagged})
+        self.assertEqual(total, initial_views[3])
+        restored = post('/api/character/mascot', {'entity': entity, 'mascot': False})['undo']
+        self.assertEqual(post('/api/undo', {'id': restored['id']})['undo'], mascot)
+        self.assertTrue(read(f'/api/characters?id={entity}')[0]['mascot'])
+        self.assertEqual(post('/api/undo', {'id': mascot['id']})['undo']['id'], previous)
+        self.assertEqual(snapshot(), initial)
+        self.assertEqual(views(), initial_views)
 
     def test_profile_aliases_tags_links_and_mixed_undo(self):
         one=self.pair('/api/entities',{'name':'合成本地一'})['id']

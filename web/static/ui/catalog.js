@@ -564,4 +564,12 @@ export function wireCatalog() {
 }
 
 // 资料库登记：渲染入口；切换 R18 之后只重新读收藏动态（目录由元数据读取重画）。
-implement({characters: {render: () => renderIndex(), refresh: why => { if (why === 'nsfw') { forgetActivity(); readActivity(); } }}});
+implement({characters: {render: () => renderIndex(), refresh: async why => {
+  if (why === 'nsfw') { forgetActivity(); readActivity(); }
+  if (why === 'undo' && !state.route.section) {
+    const route = state.route;
+    await loadTagged().catch(e => error(readError(e)));
+    if (state.route !== route) return;
+    renderHeading(); await searchIndex();
+  }
+}}});

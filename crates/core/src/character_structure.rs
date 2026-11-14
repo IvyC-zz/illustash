@@ -1,15 +1,16 @@
-//! 身份与作品的结构命令（方案第 8 节「不进历史」的那些）：建身份、改类型、当作标签、归作品、作品编辑、
+//! 身份与作品的结构命令：建身份、改类型、当作标签、归作品、作品编辑、
 //! 作品证据（`works.apply_evidence`）。逐行照 tests/reference/web/store.py（#9 已删除）、tests/reference/web/works.py（#9 已删除）；作品的可读名由调用方给，
 //! 当前显示名由核心读（character_labels）。
-use crate::character_commands::{hybrid, require_entity, text};
+use crate::character_commands::{begin_action, finish_action, hybrid, require_entity, text};
 use crate::character_entities::{self, New, ENTITIES, OF};
 use crate::character_links::{check_free, LINKS};
 use crate::character_names::TERM_OF;
 use crate::character_profile::{new_id, require_work, set_work, tag_owner, work_for};
 use crate::character_review::{OF as REVIEW_OF, OPEN as REVIEW_OPEN};
 use crate::error::invalid;
-use crate::{character_graph, character_names, character_projection, Error, Result};
+use crate::{character_graph, character_labels, character_names, character_projection, Error, Result};
 use rusqlite::{params, Connection, OptionalExtension};
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -101,68 +102,205 @@ fn shared_oc(c: &Connection, args: &Value) -> Result<Value> {
     Ok(json!({"id": id}))
 }
 
-/// `set_kind`。
-fn set_kind(c: &Connection, args: &Value) -> Result<Value> {
+#[derive(Serialize, Deserialize)]
+struct OriginalBefore {
+    entity: String,
+    original: i64,
+    artist: String,
+    work: String,
+    work_id: Option<String>,
+    pinned: Option<PinnedName>,
+}
+
+/// 固定显示名时也会清掉同语言其他来源的首选标记。只记录这次会改到的行。
+#[derive(Serialize, Deserialize)]
+struct PinnedName {
+    lang: String,
+    value: String,
+    user_preferred: Option<i64>,
+    preferred: Vec<(String, String)>,
+}
+
+impl PinnedName {
+    fn snapshot(c: &Connection, entity: &str, shown: &str) -> Result<Self> {
+        let lang = character_labels::lang_of(shown).to_owned();
+        let value = character_names::strip(shown).to_owned();
+        let user_preferred = c.query_row(
+            &format!("SELECT preferred FROM term_names WHERE term_id={TERM_OF} AND role='display' AND lang=? AND source='user' AND value=?"),
+            params![entity, lang, value],
+            |r| r.get(0),
+        ).optional()?;
+        let preferred = c.prepare(&format!(
+            "SELECT source,value FROM term_names WHERE term_id={TERM_OF} AND role='display' AND lang=? AND preferred=1 ORDER BY source,value"
+        ))?.query_map(params![entity, lang], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<rusqlite::Result<_>>()?;
+        Ok(Self { lang, value, user_preferred, preferred })
+    }
+
+    fn restore(self, c: &Connection, entity: &str) -> Result<()> {
+        if let Some(was) = self.user_preferred {
+            c.execute(&format!(
+                "UPDATE term_names SET preferred=?4 WHERE term_id={TERM_OF} AND role='display' AND lang=?2 AND source='user' AND value=?3"
+            ), params![entity, self.lang, self.value, was])?;
+        } else {
+            c.execute(&format!(
+                "DELETE FROM term_names WHERE term_id={TERM_OF} AND role='display' AND lang=? AND source='user' AND value=?"
+            ), params![entity, self.lang, self.value])?;
+        }
+        let mut restore = c.prepare(&format!(
+            "UPDATE term_names SET preferred=1 WHERE term_id={TERM_OF} AND role='display' AND lang=? AND source=? AND value=? AND preferred=0"
+        ))?;
+        for (source, value) in self.preferred {
+            restore.execute(params![entity, self.lang, source, value])?;
+        }
+        Ok(())
+    }
+}
+
+fn set_kind(c: &Connection, args: &Value, history: bool) -> Result<Value> {
     let (kind, artist) = oc_fields(args)?;
     let (entity, parent) = require_entity(c, &args["entity"])?;
     if parent.is_some() {
         return invalid("只能标记角色本身，不能标记子标签");
     }
-    let (original, label_only): (i64, i64) =
-        c.query_row(&format!("SELECT original,label_only FROM {ENTITIES} WHERE id=?"), [&entity], |r| {
-            Ok((r.get(0)?, r.get(1)?))
-        })?;
+    let (mut before, label_only) = c.query_row(
+        &format!("SELECT original,artist,work,work_id,label_only FROM {ENTITIES} WHERE id=?"),
+        [&entity],
+        |r| {
+            Ok((
+                OriginalBefore {
+                    entity: entity.clone(),
+                    original: r.get(0)?,
+                    artist: r.get(1)?,
+                    work: r.get(2)?,
+                    work_id: r.get(3)?,
+                    pinned: None,
+                },
+                r.get::<_, i64>(4)?,
+            ))
+        },
+    )?;
     if kind != "oc" && label_only != 0 {
         return invalid("未细分的原创角色只能是原创角色");
     }
     let oc = kind == "oc";
-    if oc && original != 1 {
-        // 标成原创角色：把现在的显示名固定成用户名字（旧代码读 entity_name）。
-        let shown = crate::character_labels::Shown::new().name(c, &entity)?;
-        character_names::put_name(
-            c,
-            &entity,
-            crate::character_labels::lang_of(&shown),
-            "user",
-            &shown,
-            "display",
-            0,
-            1,
-        )?;
+    let mut out = json!({"id": entity, "kind": kind, "artist": artist});
+    if history
+        && before.original == oc as i64
+        && before.artist == artist
+        && (!oc || (before.work_id.is_none() && before.work.is_empty()))
+    {
+        return Ok(out);
     }
-    c.execute(
-        &format!(
-            "UPDATE term_tree SET original=?2,artist=?3,work_id=CASE WHEN ?4 THEN NULL ELSE work_id END,
-              work_text=CASE WHEN ?4 THEN '' ELSE work_text END
-             WHERE {OF}"
-        ),
-        params![entity, oc as i64, artist, oc],
-    )?;
-    Ok(json!({"id": entity, "kind": kind, "artist": artist}))
+    let shown = (history || (oc && before.original != 1))
+        .then(|| character_labels::Shown::new().name(c, &entity))
+        .transpose()?;
+    if oc && before.original != 1 {
+        // 标成原创角色：把现在的显示名固定成用户名字（旧代码读 entity_name）。
+        let shown = shown.as_deref().expect("标成原创时已读取名字");
+        if history && !character_names::strip(shown).is_empty() {
+            before.pinned = Some(PinnedName::snapshot(c, &entity, shown)?);
+        }
+        character_names::put_name(c, &entity, character_labels::lang_of(shown), "user", shown, "display", 0, 1)?;
+    }
+    let (work, work_id) = if oc { ("", None) } else { (before.work.as_str(), before.work_id.as_deref()) };
+    write_kind(c, &entity, oc as i64, &artist, work, work_id)?;
+    if history {
+        let name = shown.expect("写历史已读取名字");
+        let label =
+            if oc { format!("{name} 已标为原创角色") } else { format!("{name} 不再标为原创角色") };
+        let action = begin_action(c, &label)?;
+        finish_action(c, action, "character_kind", vec![json!({"character_kind": before})])?;
+        out["action"] = json!(action);
+    }
+    Ok(out)
 }
 
-fn set_mascot(c: &Connection, args: &Value) -> Result<Value> {
+fn write_kind(
+    c: &Connection,
+    entity: &str,
+    original: i64,
+    artist: &str,
+    work: &str,
+    work_id: Option<&str>,
+) -> Result<()> {
+    c.execute(
+        &format!("UPDATE term_tree SET original=?2,artist=?3,work_text=?4,work_id=?5 WHERE {OF}"),
+        params![entity, original, artist, work, work_id],
+    )?;
+    Ok(())
+}
+
+#[derive(Serialize, Deserialize)]
+struct MascotBefore {
+    entity: String,
+    mascot: i64,
+    origin: Option<String>,
+}
+
+fn set_mascot(c: &Connection, args: &Value, history: bool) -> Result<Value> {
     let Some(mascot) = args["mascot"].as_bool() else { return invalid("参数不正确") };
     let (entity, parent) = require_entity(c, &args["entity"])?;
     if parent.is_some() {
         return invalid("只能标记角色本身，不能标记子标签");
     }
-    c.execute(
-        &format!("UPDATE term_tree SET mascot=?2,mascot_origin='user' WHERE {OF}"),
-        params![entity, mascot as i64],
-    )?;
+    let mut out = json!({"id": entity, "mascot": mascot});
+    let before = if history {
+        let (value, origin): (i64, Option<String>) =
+            c.query_row(&format!("SELECT mascot,mascot_origin FROM term_tree WHERE {OF}"), [&entity], |r| {
+                Ok((r.get(0)?, r.get(1)?))
+            })?;
+        if value == mascot as i64 && origin.as_deref() == Some("user") {
+            return Ok(out);
+        }
+        Some(MascotBefore { entity: entity.clone(), mascot: value, origin })
+    } else {
+        None
+    };
+    write_mascot(c, &entity, mascot as i64, Some("user"))?;
+    if let Some(before) = before {
+        let name = character_labels::Shown::new().name(c, &entity)?;
+        let label = if mascot {
+            format!("{name} 不再算角色，只当标签")
+        } else {
+            format!("{name} 已恢复成角色")
+        };
+        let action = begin_action(c, &label)?;
+        finish_action(c, action, "character_mascot", vec![json!({"character_mascot": before})])?;
+        out["action"] = json!(action);
+    }
+    Ok(out)
+}
+
+fn write_mascot(c: &Connection, entity: &str, mascot: i64, origin: Option<&str>) -> Result<()> {
+    c.execute(&format!("UPDATE term_tree SET mascot=?2,mascot_origin=?3 WHERE {OF}"), params![entity, mascot, origin])?;
     let uuids: Vec<String> = c
         .prepare(&format!(
             "SELECT uuid FROM family_evidence WHERE entity=?1 UNION
              SELECT s.uuid FROM assertions s JOIN {ENTITIES} x ON x.id=s.entity WHERE coalesce(x.parent_id,x.id)=?1"
         ))?
-        .query_map([&entity], |r| r.get(0))?
+        .query_map([entity], |r| r.get(0))?
         .collect::<rusqlite::Result<_>>()?;
     if !uuids.is_empty() {
         character_projection::evidence(c, Some(&uuids))?;
         character_projection::memberships(c, Some(&uuids))?;
     }
-    Ok(json!({"id": entity, "mascot": mascot}))
+    Ok(())
+}
+
+pub(crate) fn undo_kind(c: &Connection, before: &Value) -> Result<()> {
+    let snap: OriginalBefore =
+        serde_json::from_value(before.clone()).map_err(|_| Error::invalid("原创角色快照不完整"))?;
+    write_kind(c, &snap.entity, snap.original, &snap.artist, &snap.work, snap.work_id.as_deref())?;
+    if let Some(pinned) = snap.pinned {
+        pinned.restore(c, &snap.entity)?;
+    }
+    Ok(())
+}
+
+pub(crate) fn undo_mascot(c: &Connection, before: &Value) -> Result<()> {
+    let snap: MascotBefore =
+        serde_json::from_value(before.clone()).map_err(|_| Error::invalid("只当标签快照不完整"))?;
+    write_mascot(c, &snap.entity, snap.mascot, snap.origin.as_deref())
 }
 
 fn set_character_work(c: &Connection, args: &Value) -> Result<Value> {
@@ -526,8 +664,9 @@ pub fn command(c: &Connection, op: &str, args: &Value) -> Result<Option<Value>> 
         "create_entity" => create_entity(c, args)?,
         "create_linked" => create_linked(c, args)?,
         "shared_oc" => shared_oc(c, args)?,
-        "set_kind" => set_kind(c, args)?,
-        "set_mascot" => set_mascot(c, args)?,
+        // 用户编辑走带历史的命令，原有结构命令继续供 CLI 调用。
+        "set_kind" | "edit_kind" => set_kind(c, args, op == "edit_kind")?,
+        "set_mascot" | "edit_mascot" => set_mascot(c, args, op == "edit_mascot")?,
         "set_work" => set_character_work(c, args)?,
         // 新建作品要调用方给 id 时（`"id": false`），指针是 /id。
         "edit_work" => edit_work(c, args).map_err(|e| match e {

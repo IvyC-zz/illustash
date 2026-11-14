@@ -1,12 +1,12 @@
 // 对角色的操作（桌面布局，#199）：命令面板（换成 / 也是 / 设为角色 / 跳到角色）、原创角色、编辑角色资料、合并，以及
 // 选中图片之间的关系。
 import {forgetLocalLinks, workName} from '../core/catalog.js';
-import {setLatest} from '../core/edits.js';
+import {edits, setLatest} from '../core/edits.js';
 import {esc, number} from '../core/format.js';
 import {t, tb} from '../core/i18n.js';
 import {composing} from '../core/keys.js';
 import {workLabel} from '../core/labels.js';
-import {fetchChar, refreshMeta} from '../core/meta.js';
+import {refreshMeta} from '../core/meta.js';
 import {poolIs} from '../core/pages.js';
 import {prefs} from '../core/prefs.js';
 import {charRoute, go} from '../core/route.js';
@@ -312,19 +312,21 @@ export async function openLocalLinks() {
     catch (err) { count(); toast(err.message); }
   };
 }
-export async function toggleOc(c) {
-  try {
-    const r = await post('/api/kind', {entity: c.id, kind: c.kind === 'oc' ? '' : 'oc'});
-    Object.assign(c, r); toast(r.kind === 'oc' ? t('{name} 已标为原创角色', {name: c.name}) : t('{name} 不再标为原创角色', {name: c.name}));
-    await refreshMeta(); renderHeading();
-  } catch (err) { toast(err.message); }
+export function toggleOc(c) {
+  return editCharacterFlag('/api/kind', {entity: c.id, kind: c.kind === 'oc' ? '' : 'oc'});
 }
-export async function toggleMascot(c) {
+export function toggleMascot(c) {
+  return editCharacterFlag('/api/character/mascot', {entity: c.id, mascot: !c.mascot});
+}
+async function editCharacterFlag(path, body) {
+  if (edits.busy) return;
+  edits.busy = true; setLatest(edits.latest);
   try {
-    const r = await post('/api/character/mascot', {entity: c.id, mascot: !c.mascot});
-    c.mascot = r.mascot; toast(r.mascot ? t('{name} 不再算角色，只当标签', {name: c.name}) : t('{name} 已恢复成角色', {name: c.name}));
-    const [fresh] = await Promise.all([fetchChar(c.id), refreshMeta(), reload()]); if (fresh) Object.assign(c, fresh); renderHeading();
+    const {undo} = await post(path, body);
+    if (undo) { setLatest(undo); toast(tb(undo.label), true); }
+    await refreshMeta(); await reload();
   } catch (err) { toast(err.message); }
+  finally { edits.busy = false; setLatest(edits.latest); }
 }
 // ---------- 选中图片之间的关系（relate，native/terms/src/research_compute/relations.rs） ----------
 export async function openRelate(ids) {
