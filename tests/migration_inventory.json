@@ -165,7 +165,7 @@
 
  "native/terms/src/app_characters.rs":"a285efa8f72b9124cfe8f6a9e14631e196512bf2b239d12912bef5501b1f4cfc",
 
- "native/terms/src/app_commands.rs":"087fccf513d09827267be7831567df0c5f641c0ec2fec689045cf5b70c756eec",
+ "native/terms/src/app_commands.rs":"1a2403ae8b01f8f552c26054055a7b09da663219022e3d23cd5b41ae2eecf127",
 
  "native/terms/src/app_create.rs":"732a3b2992f08151d69258021db000565208e24c47d2afbf10eee1d3341f6a7d",
 
@@ -173,7 +173,7 @@
 
  "native/terms/src/app_create_schema.sql":"f41f751e3f9c2deae935dcb9869cd385a0893a9d20dad2c4b64b7b14d7ef54ae",
 
- "native/terms/src/app_curation.rs":"a474670bf2b2c1371dbff659a519fd5a6a1e40801b1d16e317448232fc8fc17e",
+ "native/terms/src/app_curation.rs":"d3cee4484d16a5392ba682fefe98faf4f46e3fa092febbc67b561da5e1e37799",
 
  "native/terms/src/app_desktop.rs":"481e12ba4f08868b199da130b683ffb46556a79c44b9e781723d4c887903f9a5",
 
@@ -185,7 +185,7 @@
 
  "native/terms/src/app_http.rs":"c2c64de22d19a3b604429e2c8199dce2b86548cc16b3994fb156457bbb623865",
 
- "native/terms/src/app_identity.rs":"0a1013c73b59db6ad290a8bdfae5b554cef1fa36d73b3f217e029c0812fccd20",
+ "native/terms/src/app_identity.rs":"e77e07d27aae3fbd42d9fea16dfe2481d729187daee94812e9477830adc4f030",
 
  "native/terms/src/app_imports.rs":"0432cfdda774fd06826ac4c4f36a2b8fca3b261fea19c66813241b5aad409b18",
 
