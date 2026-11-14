@@ -139,7 +139,7 @@
 
  "desktop/src/i18n.rs":"ab24cd127b728f156f456069c1c7e10de2ea10cbeea476ef4eb552daa2ae931b",
 
- "desktop/src/main.rs":"16f61f006a2eeeb3b0fd644ee064b8373479b12e6e13108e59abb7f37015cb5e",
+ "desktop/src/main.rs":"f3f0a67da31eb6c76cb5c293cdf670033c2740bc24db48cf4f65f02a570c7cae",
 
  "desktop/src/picker.rs":"71bd9e4e9e1746d60d4eea93b0a80f5091080cebcd2defb156ccbd63cd48c284",
 
@@ -147,7 +147,7 @@
 
  "desktop/src/server.rs":"912a1cb53ccac080bd10cac03a08391949ff5517d2e0918ee83d212f983bb572",
 
- "desktop/src/updater.rs":"3e8f63bc4f6b631dc75052d6fc26daa9fd0ef01b513ae5b110fee920fa57f5d7",
+ "desktop/src/updater.rs":"8cb2ee164e1bdb87eccf554f2f120c9ec121028bc8b125ba1f1c24010099fd27",
 
  "desktop/src/welcome.rs":"2ddf57612f854e273fa6fbdf9f15d5b0f2b47e453c290045343b3f26feeed3bb",
 

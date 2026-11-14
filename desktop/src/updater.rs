@@ -282,6 +282,29 @@ pub fn install(app: &AppHandle) -> Result<Value, String> {
     Ok(status(app))
 }
 
+/// Windows 上插件把下载的安装包写进 `%TEMP%\<产品名>-<版本>-updater-<随机>\`，运行它之后就退出，不再删除（安装包
+/// 运行时也删不掉）。新版本启动时在后台清掉这些目录，每次更新大约几十 MB。
+#[cfg(windows)]
+pub fn clean_leftovers(app: &AppHandle) {
+    let product = app.package_info().name.clone();
+    thread::spawn(move || {
+        let Ok(entries) = std::fs::read_dir(std::env::temp_dir()) else { return };
+        for entry in entries.flatten() {
+            if leftover(&entry.file_name().to_string_lossy(), &product) && entry.path().is_dir() {
+                let _ = std::fs::remove_dir_all(entry.path());
+            }
+        }
+    });
+}
+/// `name` 是插件给这个产品建的更新临时目录（`<产品名>-<版本>-updater-<随机>`）。
+#[cfg(any(windows, test))]
+fn leftover(name: &str, product: &str) -> bool {
+    name.strip_prefix(product)
+        .and_then(|rest| rest.strip_prefix('-'))
+        .and_then(|rest| rest.split_once("-updater-"))
+        .is_some_and(|(version, _)| !version.is_empty() && !version.contains(['/', '\\']))
+}
+
 /// 插件的错误换成给用户看的一句话。
 fn describe(error: tauri_plugin_updater::Error) -> String {
     use tauri_plugin_updater::Error as E;
@@ -301,6 +324,26 @@ fn describe(error: tauri_plugin_updater::Error) -> String {
             tr_with("没有装上，旧版本也没能放回原处，留在了 {path}", &[("path", &path.display())])
         }
         other => tr_with("没有装上：{error}", &[("error", &other)]),
+    }
+}
+
+#[cfg(test)]
+mod leftover_tests {
+    use super::leftover;
+
+    #[test]
+    fn only_this_products_updater_directories_are_cleaned() {
+        assert!(leftover("Illustash-0.2.0-updater-AbC123", "Illustash"));
+        assert!(leftover("Illustash PR279-0.2.0-beta.1-updater-x", "Illustash PR279"));
+        for other in [
+            "Illustash",
+            "Illustash-0.2.0",
+            "Illustash--updater-x",
+            "Other-0.2.0-updater-x",
+            "IllustashX-0.2.0-updater-x",
+        ] {
+            assert!(!leftover(other, "Illustash"), "{other}");
+        }
     }
 }
 

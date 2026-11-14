@@ -77,6 +77,8 @@ fn main() {
         })
         .setup(move |app| {
             let handle = app.handle().clone();
+            #[cfg(windows)]
+            updater::clean_leftovers(&handle);
             #[cfg(not(windows))]
             {
                 // macOS 保留原生的编辑/退出菜单和刷新命令；后退／前进用 Safari 的 ⌘[、⌘]（#402）。
