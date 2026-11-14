@@ -13,7 +13,6 @@ import {sleep} from './cdp.mjs';
 const uuidOf = (w, name) => Object.entries(w.config.names).find(([, n]) => n === name)?.[0];
 const cardSel = (w, name) => `#grid .card[data-id="${uuidOf(w, name)}"]`;
 const cardAt = i => `#grid .card[data-index="${i}"]`;
-const nav = page => `#sidebar a.nav[data-page="${page}"]`;
 
 // 换页：点侧栏的链接（和人一样）；侧栏里没有的地址改 location.hash（等同点页面里的链接）。
 async function goto(page, hash) {

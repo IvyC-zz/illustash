@@ -76,14 +76,14 @@ export class Walker {
 
   // 做一步：action 是一个 async 函数；之后等页面静下来，记快照和这一步里冒出的控制台错误。
   async step(label, action, {shot = false, settle} = {}) {
-    const index = ++this.n;
+    const index = ++this.n, begun = Date.now();
     let error = null;
     try { if (action) await action(this.page); } catch (e) { error = String(e.message || e); }
     await this.page.settle(settle);
     let snap;
     try { snap = await this.snapshot(); } catch (e) { snap = {error: String(e.message || e)}; }
     const console = this.page.drainConsole();
-    const entry = {index, label, snap, console, ...(error ? {error} : {})};
+    const entry = {index, label, ms: Date.now() - begun, snap, console, ...(error ? {error} : {})};
     if (shot && this.shots) {
       const file = `${this.flow}-${String(index).padStart(2, '0')}.png`;
       try { writeFileSync(join(this.out, file), await this.page.screenshot()); entry.shot = file; } catch { /* 截不到就不截 */ }

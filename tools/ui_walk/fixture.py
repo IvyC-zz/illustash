@@ -326,11 +326,14 @@ def build(root: Path, core: Path) -> Fixture:
     images = root / 'images'
     images.mkdir()
     plan = items()
-    for it in plan:
+    for i, it in enumerate(plan):
         if it.copy_of:
             shutil.copyfile(images / f'{it.copy_of}.png', images / f'{it.name}.png')
         else:
             scene(images / f'{it.name}.png', it.width, it.height, it.seed, it.edit)
+        # 文件时间固定（2026-11-01 起每张隔一小时）：「最新」排序和按天的图条每次建出来都一样。
+        stamp = 1793462400 + i * 3600
+        os.utime(images / f'{it.name}.png', (stamp, stamp))
     fixture = Fixture(root)
     work = fixture.live
     work.mkdir()
