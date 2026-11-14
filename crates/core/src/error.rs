@@ -73,26 +73,59 @@ pub fn invalid<T>(message: impl Into<String>) -> Result<T> {
     Err(Error::invalid(message))
 }
 
-/// 在两处明确的创建/注册边界上保留旧版的 OSError 文本。
+/// 文件操作失败的显示文字，保留操作系统原因、错误号和两个操作路径。
 pub fn filesystem_message(
     error: &std::io::Error,
     path: &std::path::Path,
     destination: Option<&std::path::Path>,
 ) -> String {
-    let text = error.to_string();
-    let message = if let Some(code) = error.raw_os_error() {
-        let suffix = format!(" (os error {code})");
-        format!("[Errno {code}] {}", text.strip_suffix(&suffix).unwrap_or(&text))
-    } else {
-        text
-    };
-    let quoted = crate::compat_text::python_repr(&path.to_string_lossy());
-    if let Some(destination) = destination {
-        format!("{message}: {quoted} -> {}", crate::compat_text::python_repr(&destination.to_string_lossy()))
-    } else {
-        format!("{message}: {quoted}")
+    let source = error.to_string();
+    let path = crate::compat_text::python_repr(&path.to_string_lossy());
+    let destination = destination.map(|value| crate::compat_text::python_repr(&value.to_string_lossy()));
+    match (error.raw_os_error(), destination) {
+        (Some(code), destination) => {
+            let suffix = format!(" (os error {code})");
+            let source = source.strip_suffix(&suffix).unwrap_or(&source);
+            match destination {
+                Some(other) => format!("文件操作失败（错误号 {code}）：{source}（路径：{path} → {other}）"),
+                None => format!("文件操作失败（错误号 {code}）：{source}（路径：{path}）"),
+            }
+        }
+        (None, Some(other)) => format!("文件操作失败：{source}（路径：{path} → {other}）"),
+        (None, None) => format!("文件操作失败：{source}（路径：{path}）"),
     }
 }
 pub fn io_at(error: std::io::Error, path: &std::path::Path, destination: Option<&std::path::Path>) -> Error {
     Error::IoAt { source: error, path: path.to_owned(), destination: destination.map(ToOwned::to_owned) }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::Path;
+
+    #[test]
+    fn filesystem_messages_keep_os_details_and_both_quoted_paths() {
+        let path = Path::new("合成/it's\n雪");
+        let destination = Path::new("合成/目标");
+        let quoted = crate::compat_text::python_repr(&path.to_string_lossy());
+        let other = crate::compat_text::python_repr(&destination.to_string_lossy());
+        for error in [std::io::Error::from_raw_os_error(13), std::io::Error::other("合成原因")] {
+            let original = error.to_string();
+            let (prefix, source) = if let Some(code) = error.raw_os_error() {
+                let suffix = format!(" (os error {code})");
+                (format!("文件操作失败（错误号 {code}）："), original.strip_suffix(&suffix).unwrap_or(&original))
+            } else {
+                ("文件操作失败：".to_owned(), original.as_str())
+            };
+            assert_eq!(filesystem_message(&error, path, None), format!("{prefix}{source}（路径：{quoted}）"));
+            assert_eq!(
+                filesystem_message(&error, path, Some(destination)),
+                format!("{prefix}{source}（路径：{quoted} → {other}）")
+            );
+            let error = io_at(error, path, Some(destination));
+            assert!(matches!(error, Error::IoAt { .. }));
+            assert_eq!(error.reason(), error.to_string());
+        }
+    }
 }

@@ -26,7 +26,7 @@ class IndependentLocalProvenanceInputs(unittest.TestCase):
                     self.assertEqual(fixture.probe(request)['result'], expected)
                     with sqlite3.connect(Path(request['cache']) / 'provenance.sqlite') as c:
                         self.assertEqual(c.execute("SELECT evidence FROM image_artists WHERE asset='dup'").fetchone()[0],
-                                         '{"group": "duplicate", "count": 1, "from": ["known"]}')
+                                         '{"count":1,"from":["known"],"group":"duplicate"}')
                         self.assertEqual(c.execute("SELECT count(*) FROM image_artists WHERE asset IN ('untouched','weak','after','old')").fetchone()[0], 0)
                 finally:
                     fixture.doCleanups()

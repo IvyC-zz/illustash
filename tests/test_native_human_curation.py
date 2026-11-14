@@ -89,8 +89,9 @@ class NativeHumanCurationTest(unittest.TestCase):
         action = self.pair('/api/curate', {'ids': ids, 'action': 'exclude'})['undo']
         with closing(sqlite3.connect(self.right.db)) as c:
             encoded = c.execute('SELECT before_json FROM actions WHERE id=?', (action['id'],)).fetchone()[0]
-        self.assertEqual(encoded, json.dumps([{'uuid': u, 'curation': None} for u in ordered]))
-        self.assertIn('\\u56fe\\u7532', encoded)
+        self.assertEqual(encoded, json.dumps([{'uuid': u, 'curation': None} for u in ordered],
+                                            ensure_ascii=False, sort_keys=True, separators=(',', ':')))
+        self.assertIn('图甲', encoded)
         self.assertEqual(self.excluded(), [(1, 'a'), (2, 'b'), (3, 'c'), (4, '图甲')])
         self.pair('/api/curate', {'ids': ids, 'action': 'reset'})
         self.assertEqual(self.excluded(), before_rows)
