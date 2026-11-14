@@ -61,6 +61,11 @@ serde_json = "1"
 name = "read-http"
 required-features = ["test-read-host"]
 
+# dev 构建少带调试信息（#362）：自己的 crate 只带行号表，panic 和测试失败的回溯里仍有文件名和行号；
+# 第三方依赖不带调试信息。只动 dev profile，release 不变。做法和数字见 docs/LOCAL_CHECKS.md。
+[profile.dev]
+debug = "line-tables-only"
+
 # 对照基准重放（tests/baseline.rs）在每次录制的调用之后读取所有表；内置的 SQLite 不优化时，
 # 这会成为 `cargo test` 中最慢的部分。
 [profile.dev.package.libsqlite3-sys]
@@ -70,12 +75,15 @@ opt-level = 3
 # SQLite 绑定）占去大部分时间（#130）。我们自己的 crate 保持 dev 级别，改动它们时重新构建的速度和以前一样快。
 [profile.dev.package."*"]
 opt-level = 3
+debug = false
 
 [profile.dev.package.illustash-core]
 opt-level = 0
+debug = "line-tables-only"
 
 [profile.dev.package.illustash-platform]
 opt-level = 0
+debug = "line-tables-only"
 
 [profile.dev.package.tiny_http]
 opt-level = 0
