@@ -21,7 +21,7 @@ def job_script(job):
                    for line in blocks[-1].splitlines(keepends=True))
 
 
-@unittest.skipUnless(shutil.which('bash') and shutil.which('git') and shutil.which('jq'),
+@unittest.skipUnless(os.name == 'posix' and shutil.which('bash') and shutil.which('git') and shutil.which('jq'),
                      'POSIX CI shell with git and jq only')
 class CiWorkflowTest(unittest.TestCase):
     def setUp(self):
@@ -102,7 +102,7 @@ class CiWorkflowTest(unittest.TestCase):
         self.assertEqual(self.output.read_text().strip(), 'code=true')
 
     def needs(self, code='true', result='success', changes='success'):
-        jobs = dict.fromkeys(('core', 'python', 'js', 'desktop', 'contracts'), {'result': result})
+        jobs = dict.fromkeys(('core', 'python', 'js', 'desktop', 'contracts', 'windows'), {'result': result})
         return {**jobs, 'changes': {'result': changes, 'outputs': {'code': code}}}
 
     def check_result(self, needs, success):
@@ -112,6 +112,18 @@ class CiWorkflowTest(unittest.TestCase):
     def test_summary_accepts_complete_code_checks_and_document_skips(self):
         self.check_result(self.needs(), True)
         self.check_result(self.needs(code='false', result='skipped'), True)
+
+    def test_summary_reports_windows_without_making_it_required_for_code(self):
+        for status in ('failure', 'cancelled', 'skipped'):
+            with self.subTest(status=status):
+                needs = self.needs()
+                needs['windows'] = {'result': status}
+                result = self.shell(job_script('ok'), NEEDS=json.dumps(needs))
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertIn(f'windows: {status}', result.stdout)
+        needs = self.needs(code='false', result='skipped')
+        needs['windows'] = {'result': 'success'}
+        self.check_result(needs, False)
 
     def test_summary_rejects_failed_cancelled_and_unexpected_skipped_checks(self):
         for job in ('core', 'python', 'js', 'desktop', 'contracts'):

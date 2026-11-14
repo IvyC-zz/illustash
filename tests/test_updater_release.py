@@ -2,13 +2,16 @@
 
 签名夹具（tests/fixtures/updater/signatures.json）由一把一次性的密钥对生成，私钥生成后即删；它和发布用的密钥无关。
 """
+from contextlib import nullcontext
 import datetime
 import json
+import os
 from pathlib import Path
 import shutil
 import tarfile
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from tools import updater_release as release
 
@@ -79,18 +82,41 @@ class PackMacTests(unittest.TestCase):
         (app / 'Contents/Info.plist').write_text('<plist/>')
         exe = app / 'Contents/MacOS/illustash-desktop'
         exe.write_text('#!/bin/sh\n')
-        exe.chmod(0o755)
         (app / 'Contents/Frameworks').mkdir()
-        (app / 'Contents/Frameworks/current').symlink_to('../MacOS')
+        link = app / 'Contents/Frameworks/current'
+        metadata = nullcontext()
+        if os.name == 'nt':
+            # 模拟归档器从 macOS 文件系统读取的元数据。Windows 上也实际写、读归档并校验成员。
+            link.touch()
+            gettarinfo = tarfile.TarFile.gettarinfo
+
+            def mac_metadata(archive, name, arcname):
+                info = gettarinfo(archive, name, arcname)
+                if Path(name) == exe:
+                    info.mode = 0o755
+                if Path(name) == link:
+                    info.type = tarfile.SYMTYPE
+                    info.linkname = '../MacOS'
+                info.uid = info.gid = 501
+                return info
+
+            metadata = patch.object(tarfile.TarFile, 'gettarinfo', mac_metadata)
+        else:
+            exe.chmod(0o755)
+            link.symlink_to('../MacOS')
         out = self.root / MAC
-        release.pack_mac(app, out)
+        with metadata:
+            release.pack_mac(app, out)
         with tarfile.open(out) as archive:
             members = {m.name: m for m in archive.getmembers()}
         self.assertTrue(all(name == 'Illustash.app' or name.startswith('Illustash.app/') for name in members))
         self.assertFalse(any(Path(name).name.startswith('._') for name in members))
         self.assertEqual(members['Illustash.app/Contents/MacOS/illustash-desktop'].mode & 0o777, 0o755)
-        self.assertEqual(members['Illustash.app/Contents/Frameworks/current'].linkname, '../MacOS')
+        archived_link = members['Illustash.app/Contents/Frameworks/current']
+        self.assertTrue(archived_link.issym())
+        self.assertEqual(archived_link.linkname, '../MacOS')
         self.assertEqual({m.uid for m in members.values()}, {0})
+        self.assertEqual({m.gid for m in members.values()}, {0})
 
     def test_refuses_what_is_not_a_bundle(self):
         (self.root / 'x.app').mkdir()

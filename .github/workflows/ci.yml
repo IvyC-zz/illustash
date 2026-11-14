@@ -3,7 +3,7 @@
 # 只用仓库内合成数据；不接触真实图库、账号、Photos 或网络凭据，也不用任何 secret。
 name: CI
 
-# Linux 已冻结（README）：除不涉平台的前端 JS 外，全部在 macOS 上运行。
+# Linux 已冻结（README）：仅用 Ubuntu 分流、汇总和检查前端 JS。
 # 草稿 PR 不跑（转 Ready 时跑），来自 fork 的 PR 不跑（暂不接受外部贡献），仓库私有时只跑手动触发的。
 # push 到 main 只为给 PR 留可复用的编译缓存：PR 写的缓存别的 PR 读不到。
 on:
@@ -265,14 +265,144 @@ jobs:
           [ -n "$binary" ] && [ -x "$binary" ]
           tools/test_native_contracts.sh "$binary"
 
+  windows:
+    needs: [changes, js]
+    if: needs.changes.outputs.code == 'true' && !github.event.repository.private
+    name: Windows x64
+    runs-on: windows-latest
+    timeout-minutes: 60
+    env:
+      # 验收机的五份 target 冷构建约 14.5 GB；CI 依赖缓存不需要工作区的增量目录。
+      CARGO_INCREMENTAL: '0'
+      PYTHONUTF8: '1'
+      NUMPY_VERSION: '2.5.3'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: 缩短测试临时目录
+        run: |
+          $tempDir = Join-Path "${env:SystemDrive}\" 'it'
+          New-Item -ItemType Directory -Path $tempDir -Force | Out-Null
+          "TEMP=$tempDir", "TMP=$tempDir" >> $env:GITHUB_ENV
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable-x86_64-pc-windows-msvc
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+          workspaces: |
+            native/terms
+            crates/iqdb
+            crates/core
+            crates/platform
+            desktop
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          architecture: x64
+      - name: 还原 NumPy wheel
+        uses: actions/cache/restore@v4
+        id: numpy-wheel
+        with:
+          path: ${{ runner.temp }}/numpy-wheel
+          key: numpy-${{ env.NUMPY_VERSION }}-cp${{ env.PYTHON_VERSION }}-win_amd64
+      - name: 安装 Python 依赖并核验 OpenBLAS
+        run: |
+          [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
+          $wheelDir = Join-Path $env:RUNNER_TEMP 'numpy-wheel'
+          if ('${{ steps.numpy-wheel.outputs.cache-hit }}' -ne 'true') {
+            python -m pip download --index-url https://pypi.org/simple --no-deps --only-binary=:all: --dest $wheelDir "numpy==$env:NUMPY_VERSION"
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+          $wheel = @(Get-ChildItem -Path $wheelDir -Filter "numpy-$env:NUMPY_VERSION-*-win_amd64.whl" -File)
+          if ($wheel.Count -ne 1) { throw '需要且只能有一个固定版本的 Windows x64 NumPy wheel' }
+          # 直接安装同一个 wheel，保证 Python 对照和原生后端用同一份 DLL。
+          python -m pip install --force-reinstall -r tests/requirements.txt $wheel[0].FullName
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $dll = @'
+          import os
+          from pathlib import Path
+          import runpy
+          import sysconfig
+
+          pack = runpy.run_path('packaging/build.py')
+          dll, _, digest = pack['research_openblas'](Path(sysconfig.get_path('platlib')))
+          if pack['RESEARCH_OPENBLAS_IDENTITIES'][digest]['numpy'] != os.environ['NUMPY_VERSION']:
+              raise SystemExit(f'OpenBLAS SHA-256 {digest} 与固定 NumPy 版本不匹配')
+          print(dll)
+          '@ | python -
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          "ILLUSTASH_RESEARCH_OPENBLAS_DLL=$dll" >> $env:GITHUB_ENV
+      - name: 保存已核验的 NumPy wheel
+        if: github.ref == 'refs/heads/main' && steps.numpy-wheel.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}/numpy-wheel
+          key: ${{ steps.numpy-wheel.outputs.cache-primary-key }}
+      - name: Core clippy/test
+        run: |
+          cargo clippy --locked --manifest-path crates/core/Cargo.toml --all-targets -- -D warnings
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo test --locked --manifest-path crates/core/Cargo.toml
+      - name: Platform clippy/test
+        run: |
+          cargo clippy --locked --manifest-path crates/platform/Cargo.toml --all-targets -- -D warnings
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo test --locked --manifest-path crates/platform/Cargo.toml
+      - name: Desktop clippy/test
+        run: |
+          cargo clippy --locked --manifest-path desktop/Cargo.toml --all-targets -- -D warnings
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo test --locked --manifest-path desktop/Cargo.toml
+      - name: Terms clippy/test
+        run: |
+          cargo clippy --locked --manifest-path native/terms/Cargo.toml --all-targets --all-features -- -D warnings
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo test --locked --manifest-path native/terms/Cargo.toml
+      - name: IQDB test
+        run: cargo test --locked --manifest-path crates/iqdb/Cargo.toml
+      - name: 构建被测核心与 IQDB
+        run: |
+          cargo build --release --locked --manifest-path native/terms/Cargo.toml
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo build --release --locked --manifest-path native/terms/Cargo.toml --features test-read-host --example read-http --example recognition-compute --example index-compute --example research-compute --example relation-probe --example provenance-compute
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo build --release --locked --manifest-path crates/iqdb/Cargo.toml
+      - name: Python 全量与跳过清单
+        env:
+          ILLUSTASH_TERMS_BIN: ${{ github.workspace }}/native/terms/target/release/illustash-terms.exe
+          ILLUSTASH_NATIVE_ROOT: ${{ github.workspace }}
+          ILLUSTASH_IQDB_BINARY: ${{ github.workspace }}/crates/iqdb/target/release/illustash-iqdb.exe
+          ILLUSTASH_READ_HTTP_BIN: ${{ github.workspace }}/native/terms/target/release/examples/read-http.exe
+          ILLUSTASH_RECOGNITION_COMPUTE_BIN: ${{ github.workspace }}/native/terms/target/release/examples/recognition-compute.exe
+          ILLUSTASH_INDEX_COMPUTE_BIN: ${{ github.workspace }}/native/terms/target/release/examples/index-compute.exe
+          ILLUSTASH_RELATION_PROBE_BIN: ${{ github.workspace }}/native/terms/target/release/examples/relation-probe.exe
+          ILLUSTASH_PROVENANCE_COMPUTE_BIN: ${{ github.workspace }}/native/terms/target/release/examples/provenance-compute.exe
+          ILLUSTASH_RESEARCH_COMPUTE_BIN: ${{ github.workspace }}/native/terms/target/release/examples/research-compute.exe
+          ILLUSTASH_RESEARCH_ADAPTER_BIN: ${{ github.workspace }}/native/terms/target/release/illustash-worker.exe
+          ILLUSTASH_INDEX_ADAPTER_BIN: ${{ github.workspace }}/native/terms/target/release/illustash-worker.exe
+        run: python -m tests.windows_fixed_suite --log "${{ runner.temp }}/windows-unittest.log"
+      - name: 上传 Windows 测试日志
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-unittest-log
+          path: ${{ runner.temp }}/windows-unittest.log
+          if-no-files-found: ignore
+          retention-days: 7
+
   # 分支保护只要求这一项：job 改名或增减时不用改保护规则。只有确认只改文档才容许跳过构建；
   # 来自 fork 的 PR 没有运行检查，这里判失败。草稿 PR 不跑，转 Ready 后重跑；仓库私有时同「改动范围」。
+  # Windows 试运行期间展示实际结论，暂不计入代码 PR 的通过判定。
   ok:
     if: >-
       always() &&
       (github.event_name == 'workflow_dispatch' || !github.event.repository.private) &&
       !(github.event_name == 'pull_request' && github.event.pull_request.draft)
-    needs: [changes, core, python, js, desktop, contracts]
+    needs: [changes, core, python, js, desktop, contracts, windows]
     name: 全部检查
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -285,7 +415,7 @@ jobs:
             .changes.result == "success" and
             (.changes.outputs.code as $code |
               if $code == "true" then
-                all(to_entries[]; .key == "changes" or .value.result == "success")
+                all(to_entries[]; .key == "changes" or .key == "windows" or .value.result == "success")
               elif $code == "false" then
                 all(to_entries[]; .key == "changes" or .value.result == "skipped")
               else false end)

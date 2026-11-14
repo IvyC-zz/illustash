@@ -26,7 +26,8 @@ class Tree(tempfile.TemporaryDirectory):
         return (self.root / relative).read_text(encoding='utf-8')
 
     def write(self, relative, text):
-        (self.root / relative).write_text(text, encoding='utf-8')
+        # 与仓库和 census CLI 一样写 LF，保留按文件字节校验的契约。
+        (self.root / relative).write_text(text, encoding='utf-8', newline='\n')
 
     def replace(self, relative, old, new, count=1):
         text = self.read(relative)
