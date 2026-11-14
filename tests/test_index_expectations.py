@@ -1,5 +1,7 @@
 """冻结索引输入的查找不受 SQL 浮点文本格式影响，仍拒绝任何真实输入变化。"""
 from contextlib import closing
+import hashlib
+import json
 from pathlib import Path
 import sqlite3
 import tempfile
@@ -21,7 +23,11 @@ class IndexExpectationTest(unittest.TestCase):
         self.anchors = np.load(self.root / 'char-anchors.npy')
         self.ids = (self.root / 'char-anchors.txt').read_text().splitlines()
         self.source = self.root / 'pi.db'
-        self.expected = reference.value('char_scan.anchor_index', self.anchors, self.ids, str(self.source))
+        # 期望直接来自冻结 SQL 与数组对应的原始记录，不依赖本机的 SQL 导出器。
+        encoded = reference.encode(((self.anchors, self.ids, str(self.source)), {}))
+        encoded['tuple'][0]['tuple'][2] = {'file': hashlib.sha256(self.files['pi.db']['sql'].encode()).hexdigest()}
+        key = hashlib.sha256(json.dumps(encoded, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+        self.expected = reference.decode(reference.records()['functions']['char_scan.anchor_index'][key]['value'])
         dump = reference.database_dump
         # SQL 注释只改变序列化文本，作用等同于 SQLite 版本间的小数位写法差异。
         alternate = patch.object(reference, 'database_dump', side_effect=lambda c: dump(c) + '\n-- same database')
