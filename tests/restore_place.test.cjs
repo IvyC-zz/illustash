@@ -15,6 +15,7 @@ async function wired() {
   globalThis.history = {replaceState() {}};
   globalThis.requestAnimationFrame = () => 0;
   globalThis.matchMedia = () => ({matches: true});
+  globalThis.IntersectionObserver = class { observe() {} unobserve() {} disconnect() {} };   // 资料库的海报懒加载
   const store = new Map();
   globalThis.localStorage = {getItem: k => store.has(k) ? store.get(k) : null, setItem: (k, v) => store.set(k, v), removeItem: k => store.delete(k)};
   ({state} = web.core());
@@ -119,4 +120,16 @@ test('详情栏里那张已经滚出读到的几页，回来照样打开它', as
   assert.ok(!state.items[10], '第 10 张不在这次读的页里');
   assert.equal(state.focused, 'library-10');
   assert.equal(page.el('inspector').hidden, false);
+});
+
+test('换到自己渲染的页面（资料库、设置）从顶部开始，不沿用图库的滚动位置', async () => {
+  await wired();
+  const v = page.el('viewport');
+  for (const hash of ['#/characters', '#/settings']) {
+    await visit('#/library');
+    v.scrollTop = grid.rowTop(grid.rowOf(2000));
+    assert.ok(v.scrollTop > 0);
+    await visit(hash);
+    assert.equal(v.scrollTop, 0, hash);
+  }
 });
