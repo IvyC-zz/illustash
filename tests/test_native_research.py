@@ -230,7 +230,9 @@ Path(sys.argv[2]).write_text(json.dumps(v,allow_nan=False))
         def settled():
             seen.append(self.state()['status'])
             return seen[-1] in ('idle','error')
-        wait_until(settled,timeout=20)
+        # 放行后可能还要退避再重跑；繁忙机器上 20 秒不够（#418）。上限高于 `retry_visibly` 的任务时限，卡住的运行仍会报 `error`。
+        try:wait_until(settled,timeout=70)
+        except AssertionError:self.fail(('运行没有结束',seen[-20:],self.run_kinds()))
         return result,seen,len(self.versions())-runs
 
     def test_discriminative_claims_publish_within_core_score_range(self):
@@ -273,18 +275,32 @@ Path(sys.argv[2]).write_text(json.dumps(v,allow_nan=False))
         def verdict(c):
             response=self.request('/api/change',{'ids':['unmatched6'],'action':'confirmed','entity':self.alice})
             self.assertEqual(response['status'],200,response)
+        # 两段都用较长的时限和退避：裁决排出的学习在繁忙机器上可能超过夹具默认的 10 秒（#418），
+        # 退避拉长也让不该出现的重试更容易被看到。
+        self.retry_visibly()
         before=len(self.run_kinds())
         _,seen,_=self.inflight(lambda:self.request('/api/similar',{}),verdict)
-        self.assertEqual(self.state()['status'],'idle',self.state())
-        self.assertNotIn('waiting',seen)
-        # similar 结束后，裁决会把学习排进队列（一次 `events` 运行）；负载高时它可能在读计数之前就开始（#132）。
+        self.assertEqual(seen[-1],'idle',(self.state(),seen,self.run_kinds()[before:]))
+        self.assertNotIn('waiting',seen,(seen,self.run_kinds()[before:]))
+        # similar 结束后，裁决会把学习排进队列（一次 `events` 运行，#132）。`inflight` 看到第一次 `idle` 就返回，
+        # 学习可能紧接着开始，所以先等它跑完：状态回到 `idle`，裁决事件也已确认（#418）。
+        drain=[]
+        def drained():
+            drain.append(self.state()['status'])
+            return drain[-1]=='error' or drain[-1]=='idle' and self.pending()==0
+        try:wait_until(drained,timeout=90)
+        except AssertionError:self.fail(('裁决排出的学习没有跑完',seen,drain,self.pending(),self.run_kinds()[before:]))
+        kinds=self.run_kinds()[before:]
+        self.assertEqual(self.state()['status'],'idle',(self.state(),seen,drain,kinds))
+        self.assertEqual(self.pending(),0,(seen,drain,kinds))
         # 只有第二次 similar 运行才算重试。
-        self.assertEqual(self.run_kinds()[before:].count('similar'),1,(seen,self.run_kinds()[before:]))
-        self.retry_visibly()
+        self.assertEqual(kinds.count('similar'),1,(seen,drain,kinds))
+        # 直接写 `excluded` 不产生裁决事件，similar 的重试在同一个任务里完成，结束后没有排队的学习。
+        before=len(self.run_kinds())
         _,seen,runs=self.inflight(lambda:self.request('/api/similar',{}),lambda c:c.execute("INSERT INTO excluded VALUES ('b','synthetic','test')"))
-        self.assertEqual(self.state()['status'],'idle',self.state())
-        self.assertIn('waiting',seen)
-        self.assertGreaterEqual(runs,2)
+        self.assertEqual(self.state()['status'],'idle',(self.state(),seen,self.run_kinds()[before:]))
+        self.assertIn('waiting',seen,(seen,self.run_kinds()[before:]))
+        self.assertGreaterEqual(runs,2,(seen,self.run_kinds()[before:]))
 
     def test_oc_query_answers_despite_unread_write(self):
         # #29：OC 只读归属、标签、排除和向量；它从不重试。
