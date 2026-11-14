@@ -177,11 +177,11 @@ PR 应明确区分“当前 head 上完整执行退出 0”和“当前候选仅
 
 ## GitHub Actions（PR 自动检查）
 
-2026-11-12 用户定（#4），仓库公开那天启用。规则见 [AGENTS.md](../AGENTS.md) 2026-11-12 一条，这里写做法。
+2026-11-12 用户定（#4），仓库公开后启用。规则见 [AGENTS.md](../AGENTS.md) 2026-11-12 一条，这里写做法。
 
 **触发**：`ci.yml` 在目标为 main 的 PR 打开、推送新提交、重新打开、转 Ready 时运行；草稿 PR 和来自 fork 的 PR 不跑。push 到 main 时也跑一次，作用是写编译缓存：GitHub 的缓存按分支隔离，PR 写的缓存只有同一个 PR 读得到，main 上写的所有 PR 都能读。也可以在 Actions 页面对任意分支手动触发。仓库私有时（`github.event.repository.private`）自动触发的运行一律跳过，只有手动触发的会跑，所以这个 PR 在公开前合入也不会耗分钟数。同一 PR 有新提交时取消旧运行；集成会话连续合入几个 PR 时，main 上只有最后一次跑完。
 
-**job**：「改动范围」先判断改了什么：只改 `docs/` 和根目录的 Markdown（`docs/THIRD_PARTY.md` 除外，它随安装包分发）时跳过其余构建与测试。之后是与 `tools/check_all.sh` 对齐的五个 job：Rust 核心（core、platform、terms、iqdb 的 fmt/clippy/test）、Python 全量（release 构建后跑 `tests.run_fixed_suite`，跳过白名单与本机相同）、前端 JS（Ubuntu）、桌面壳 clippy/test、原生固定契约空 PATH 重放。除 JS 外都跑在 Apple 芯片的 `macos-latest` 上，因为固定期望在 Apple 芯片上录制。最后一个「全部检查」汇总前面的结果：有失败或取消就失败；fork PR 没跑检查也判失败。分支保护只要求「全部检查」这一项，job 改名或增减时不用改保护规则。
+**job**：「改动范围」先判断改了什么：只改 `docs/` 和根目录的 Markdown 时跳过其余构建与测试；`docs/THIRD_PARTY.md` 和 `docs/BACKEND_TASKS.md` 随安装包分发，仍须检查。之后是与 `tools/check_all.sh` 对齐的五个 job：Rust 核心（core、platform、terms、iqdb 的 fmt/clippy/test）、Python 全量（release 构建后跑 `tests.run_fixed_suite`，跳过白名单与本机相同）、前端 JS（Ubuntu）、桌面壳 clippy/test、原生固定契约空 PATH 重放。除 JS 外都跑在 Apple 芯片的 `macos-latest` 上，因为固定期望在 Apple 芯片上录制。最后一个「全部检查」汇总前面的结果：代码改动要求五个 job 全部成功，只有确认纯文档改动才允许跳过；分流失败、缺失输出、失败、取消或意外跳过都判失败，fork PR 没跑检查也判失败。分支保护只要求「全部检查」这一项，job 改名或增减时不用改保护规则。
 
 **改检查项时**：`ci.yml` 和 `tools/check_all.sh` 一起改，`tests/test_packaging_resources.py` 核对两边的候选二进制接线和跳过白名单一致，并检查触发条件和权限。`native-upgrade.yml` 是升级测试的单独手动入口，要求整类零跳过；PR 自动检查的 Python job 已经包含这一类。
 

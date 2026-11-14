@@ -29,7 +29,7 @@ env:
 jobs:
   # 判断要不要跑：仓库私有时只跑手动触发的（私有库 macOS 按 10 倍计分钟）；fork、草稿 PR 不跑；
   # 只改文档（docs/ 和根目录的 Markdown）的 PR 跳过构建与测试，与 AGENTS.md「只改文档的 PR 不跑全量」一致。
-  # docs/THIRD_PARTY.md 随安装包分发，按代码算。
+  # docs/THIRD_PARTY.md 和 docs/BACKEND_TASKS.md 随安装包分发，按代码算。
   changes:
     if: >-
       github.event_name == 'workflow_dispatch' ||
@@ -55,8 +55,8 @@ jobs:
           # PR 检出的是它与 main 的合并提交：第一父提交就是当前 main。
           git diff --name-only HEAD^1 HEAD > "$RUNNER_TEMP/changed.txt"
           echo "改动 $(wc -l < "$RUNNER_TEMP/changed.txt") 个文件"
-          if grep -Ev '^([^/]+|docs/.+)\.md$' "$RUNNER_TEMP/changed.txt" | grep -q . ||
-             grep -qx 'docs/THIRD_PARTY.md' "$RUNNER_TEMP/changed.txt"; then
+          if grep -qEv '^([^/]+|docs/.+)\.md$' "$RUNNER_TEMP/changed.txt" ||
+             grep -qEx 'docs/(THIRD_PARTY|BACKEND_TASKS)\.md' "$RUNNER_TEMP/changed.txt"; then
             echo code=true >> "$GITHUB_OUTPUT"
           else
             echo '只改文档，跳过构建与测试'
@@ -264,7 +264,7 @@ jobs:
           [ -n "$binary" ] && [ -x "$binary" ]
           tools/test_native_contracts.sh "$binary"
 
-  # 分支保护只要求这一项：job 改名或增减时不用改保护规则。跳过的 job（只改文档）算通过；
+  # 分支保护只要求这一项：job 改名或增减时不用改保护规则。只有确认只改文档才容许跳过构建；
   # 来自 fork 的 PR 没有运行检查，这里判失败。草稿 PR 不跑，转 Ready 后重跑；仓库私有时同「改动范围」。
   ok:
     if: >-
@@ -279,11 +279,16 @@ jobs:
       - env:
           NEEDS: ${{ toJSON(needs) }}
         run: |
-          if [ "$(jq -r .changes.result <<< "$NEEDS")" != success ]; then
-            echo '::error::没有运行检查：来自 fork 的 PR 不自动运行（暂不接受外部贡献）'
-            exit 1
-          fi
           jq -r 'to_entries[] | "\(.key): \(.value.result)"' <<< "$NEEDS"
-          if jq -e 'any(.[]; .result == "failure" or .result == "cancelled")' <<< "$NEEDS" > /dev/null; then
+          if ! jq -e '
+            .changes.result == "success" and
+            (.changes.outputs.code as $code |
+              if $code == "true" then
+                all(to_entries[]; .key == "changes" or .value.result == "success")
+              elif $code == "false" then
+                all(to_entries[]; .key == "changes" or .value.result == "skipped")
+              else false end)
+          ' <<< "$NEEDS" > /dev/null; then
+            echo '::error::检查未完成：代码改动必须全部成功，只有文档改动允许跳过；fork PR 不自动运行'
             exit 1
           fi
