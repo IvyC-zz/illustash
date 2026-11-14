@@ -223,8 +223,9 @@ export const FLOWS = [
       await w.step('（等撤销后的学习收尾）', null, {shot: true});
       w.check('撤销后那一组回到列表', now.sections === before.sections, {before, now});
       w.check('撤销后未识别张数回到原样', now.unmatched === before.unmatched, {before: before.unmatched, now: now.unmatched});
-      const nav = await page.eval(`(document.querySelector('${nav('unmatched')} .count, ${nav('unmatched')} [id^=count]')?.textContent || '').trim()`);
-      w.check('侧栏的未识别计数和页面一致', !nav || Number(nav.replace(/\D/g, '')) === now.unmatched, {nav, unmatched: now.unmatched});
+      // 侧栏计数默认藏着（视图选项「侧栏显示数量」），文字照样写着。
+      const side = await page.eval(`(document.getElementById('countUnmatched')?.textContent || '').trim()`);
+      w.check('侧栏的未识别计数和页面一致', Number(side.replace(/\D/g, '') || 0) === now.unmatched, {side, unmatched: now.unmatched});
     },
   },
 

@@ -19,7 +19,7 @@ const config = JSON.parse(readFileSync(args[args.indexOf('--config') + 1], 'utf8
 const flow = FLOWS.find(f => f.name === config.flow);
 if (!flow) { console.error('没有这条流程：' + config.flow); process.exit(2); }
 // 看门狗：别的会话在同一台机器上清理浏览器时 CDP 可能无声挂住，到时间就退出，由外层重试。
-let current = null, bootMs = null;
+let current = null, bootMs = null, bootReloads = 0;
 const watchdog = setTimeout(() => {
   console.error('走查超时：' + config.flow);
   // 写出已经走过的步骤，便于看出挂在哪一步；外层会整条重跑一次。
@@ -49,7 +49,7 @@ try {
   await boot(page, config.url);
   page.drainConsole();
   await flow.run(w, page);
-  result = w.result({title: flow.title, covers: flow.covers || [], ms: Date.now() - started, bootMs});
+  result = w.result({title: flow.title, covers: flow.covers || [], ms: Date.now() - started, bootMs, bootReloads});
 } catch (e) {
   result = {flow: flow.name, lang: config.lang, title: flow.title, covers: flow.covers || [], steps: [], checks: [],
     crashed: String(e.stack || e), console: page.drainConsole(), ms: Date.now() - started};
@@ -60,13 +60,18 @@ writeFileSync(join(out, flow.name + '.json'), JSON.stringify(result, null, 1));
 clearTimeout(watchdog);
 process.exit(0);
 
-// 打开宿主的一次性码地址（换会话 cookie），等启动画面消失、页面挂好。最多等 60 秒：宿主的连接线程池有竞态，
-// 启动时偶尔有请求要等 30 秒读超时（#477）；耗时记在结果的 bootMs 里，报告里单独列出，不算检查失败。
+// 打开宿主的一次性码地址（换会话 cookie），等启动画面消失、页面挂好。宿主的连接线程池有竞态（#477）：启动时偶尔有
+// 模块请求要等 30 秒读超时才有回应。8 秒还没起来就重新载入（取消卡住的请求，在别的连接上重发），最多两次，再等到
+// 60 秒为止；耗时和重新载入的次数记在结果里，报告里单独列出，不算检查失败。
 async function boot(page, url) {
-  const bootStart = performance.now();
+  const bootStart = performance.now(), booted = `document.getElementById('sidebar') && !document.getElementById('splash')`;
   await page.navigate(url);
-  const ready = await page.waitFor(`document.getElementById('sidebar') && !document.getElementById('splash')
-    `, 60000);
+  let ready = await page.waitFor(booted, 8000);
+  for (bootReloads = 0; !ready && bootReloads < 2;) {
+    bootReloads++;
+    await page.send('Page.reload');
+    ready = await page.waitFor(booted, bootReloads < 2 ? 8000 : 45000);
+  }
   bootMs = Math.round(performance.now() - bootStart);
   if (!ready) {
     const why = await page.eval(`JSON.stringify({href: location.href.replace(/k=[^&#]+/, 'k=…'), title: document.title,

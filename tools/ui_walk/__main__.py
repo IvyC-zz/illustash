@@ -16,6 +16,7 @@ web/static 目录；都不给时用当前检出。宿主程序总是当前检出
 from __future__ import annotations
 
 import argparse
+import fcntl
 import datetime
 import json
 import os
@@ -96,6 +97,14 @@ def run(args: argparse.Namespace) -> int:
     if out.exists() and any(out.iterdir()):
         sys.exit(f'{out} 已经有内容，换一个 --out。')
     out.mkdir(parents=True, exist_ok=True)
+    # 同一检出里的走查共用夹具的 live/ 目录，一次只能跑一个：后来的等前一个跑完。
+    (ROOT / '.walk').mkdir(exist_ok=True)
+    lock = open(ROOT / '.walk' / 'lock', 'w')
+    try:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        print('这个检出里另一次走查正在跑，等它结束…', flush=True)
+        fcntl.flock(lock, fcntl.LOCK_EX)
     scratch = Path(tempfile.mkdtemp(prefix='illustash-walk-'))
     core = dev_preview.binary()
     browser = None
@@ -190,8 +199,9 @@ def markdown(report: dict) -> str:
             lines += ['流程没有跑完：', '', '```', r['crashed'][:3000], '```', '']
         for c in r['checks']:
             lines.append(f"- {'✓' if c['ok'] else '✗'} 第 {c['step']} 步 {c['name']}" + (f"：{c['detail']}" if not c['ok'] and c['detail'] else ''))
-        if (r.get('bootMs') or 0) > SLOW_BOOT_MS:
-            lines.append(f"- ⚠ 页面启动用了 {r['bootMs'] / 1000:.1f} 秒（正常约 4 秒；宿主连接线程池的问题，见 #477），不算检查失败")
+        if (r.get('bootMs') or 0) > SLOW_BOOT_MS or r.get('bootReloads'):
+            again = f"，重新载入 {r['bootReloads']} 次才起来" if r.get('bootReloads') else ''
+            lines.append(f"- ⚠ 页面启动用了 {r['bootMs'] / 1000:.1f} 秒{again}（宿主连接线程池的问题，见 #477），不算检查失败")
         for index, e in errors:
             lines.append(f"- ✗ 第 {index} 步控制台 {e['kind']}：{e['text'][:300]}")
         shots = [s['shot'] for s in r['steps'] if s.get('shot')]
