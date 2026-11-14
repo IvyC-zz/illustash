@@ -42,6 +42,8 @@ Core 持有连接内规则、资产、证据、人工结论、历史/撤销和�
 
 带路径的文件操作错误由 `error::filesystem_message` 显示为「文件操作失败」，保留操作系统原始原因、错误号和源／目标路径；错误类型、HTTP 状态及校验顺序不变。SQLite 整数绑定越界显示「整数超出数据库支持的范围」。前端按完整模板翻译这些消息，系统原因、数字和路径作为数据保留。新产生的同步错误沿用此格式和原有 300 字符上限；`sync_runs.message` 的历史文本不迁移、不重写（2026-11-15，#252）。
 
+`app_curation` 和 `app_identity::skip` 的新动作载荷使用结构化紧凑 JSON；skip 保存的旧 `identity_skipped` 偏好仍是字符串，撤销按原文恢复。既有 `actions.before_json` 不重写，其他核心动作载荷不变。学习发布戳包含动作原文，因此新编码参与的戳会与旧编码不同（2026-11-15，#252）。机器溯源的分组和本地匹配仅对新写入的 `image_artists.evidence` 使用结构化紧凑 JSON，交付前仍先解析再规范化计算 v4 版本；字段值和数组顺序相同的两种编码交付同一份核心证据。候选画师理由只在证据 `count` 为正整数时显示张数，其余取「有线索指向 TA」；此规则同时适用于核心和旧证据读取，不修改证据或裁决。
+
 扫描取消由宿主 `app_sync::check` 提供，保留 atomic cancel 或宿主进程停止状态的原谓词；文件夹、Photos 及只读函数仅调用传入的检查。文件夹仍先开启源库即时事务再盘点/哈希、发布 pending journal 后提交；Photos 仍先只读枚举显式来源再开启源库事务，并在原逐行位置探测路径。原检查点、频率、来源碰撞拒绝和应用库后续刷新边界不变。原生选择由宿主传停止谓词，保留 100ms 轮询、600s 超时及 kill/wait 收尾。
 
 `crates/core` 的 `illustash-core` 通过 path dependency 被 `native/terms` 的 `illustash-terms` 使用。Core 承载连接内的词条 schema/迁移、证据包解析与验证、人工裁决、角色/身份关系、历史/统一撤销、名字搜索与投影，以及 Error、Origin、严格 JSON、Unicode 与生成字符表。SQL 资源跟随规则归 Core；宿主以窄转导出保持旧 Rust 模块路径，折叠 SQL 通过连接内函数共用，不复制算法或 SQL。Core 可独立 fmt/clippy/test/locked build，进程内客户端不需要 HTTP/CLI/Tauri、平台 crate 或参考宿主；应用协调与 HTTP/CLI 留宿主；已有来源读取、路径/VFS、文件权限、进程/凭据/系统集成由 `crates/platform` / `illustash-platform` 提供。包名、bin 名、构建入口和 JSON/SQLite 格式不变，无根 workspace。

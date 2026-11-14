@@ -352,6 +352,14 @@ test('approved library errors translate while OS details and paths remain data',
   }
 });
 
+test('artist clues without a count reuse the translated fallback', () => {
+  const {context} = page('en', [], {en: english});
+  const tb = text => vm.runInContext('tb', context)(text);
+  assert.equal(tb('有线索指向 TA'), 'Clues point to them');
+  assert.equal(tb('同一原创角色里有 1 张是 TA 画的'), '1 picture of the same original character is by them');
+  assert.equal(tb('同一原创角色里有 2 张是 TA 画的'), '2 pictures of the same original character are by them');
+});
+
 test('each placeholder of the backend templates is either a nested message or data', () => {
   const {context} = page('en');
   const nested = vm.runInContext('BACKEND_NESTED', context), data = vm.runInContext('BACKEND_DATA', context);
