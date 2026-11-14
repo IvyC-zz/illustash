@@ -202,7 +202,7 @@ Model files required for local recognition are not included in the code reposito
 cargo build --release --manifest-path native/terms/Cargo.toml
 
 # Create a library for the first time: registers sources only, without scanning pictures
-./native/terms/target/release/illustash-terms library-create \
+./target/release/illustash-terms library-create \
     --dest ~/Pictures/Illustash/MyLibrary.pilib --folder /path/to/pictures
 
 # Open (defaults to http://127.0.0.1:8765)

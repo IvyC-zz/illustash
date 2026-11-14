@@ -202,7 +202,7 @@ Illustash 0.1.0 已正式发布，安装包在 [GitHub Releases](https://github.
 cargo build --release --manifest-path native/terms/Cargo.toml
 
 # 首次建库：只登记来源，不扫描图片
-./native/terms/target/release/illustash-terms library-create \
+./target/release/illustash-terms library-create \
     --dest ~/Pictures/Illustash/我的图库.pilib --folder /图片目录
 
 # 打开（默认 http://127.0.0.1:8765）
