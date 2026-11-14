@@ -50,6 +50,34 @@ fn cancelled(cancel: &AtomicBool) -> Result<()> {
         Ok(())
     }
 }
+
+fn export_filename(name: &str, date: &str) -> String {
+    let suffix = format!("-{date}.pilib.zip");
+    // 给文件系统的单个分量留出后缀和可能的下划线。按 UTF-8 字节限制也能满足 NTFS 的 UTF-16 长度限制。
+    let max_stem_bytes = 255 - suffix.len() - 1;
+    let mut stem = String::new();
+    for c in name.chars().filter(|c| !c.is_control() && !"<>:\"/\\|?*".contains(*c)) {
+        if stem.len() + c.len_utf8() > max_stem_bytes {
+            break;
+        }
+        stem.push(c);
+    }
+    let stem = stem.trim_start_matches(' ');
+    let stem = if stem.trim_matches(['.', ' ']).is_empty() { "图库" } else { stem };
+    let mut filename = format!("{stem}{suffix}");
+    // Win32 也把带扩展名的保留名当作设备。检查加完后缀的文件名，例如 CON.txt-日期.pilib.zip。
+    let base = filename.split('.').next().unwrap_or_default().trim_end().to_ascii_uppercase();
+    if matches!(base.as_str(), "CON" | "PRN" | "AUX" | "NUL" | "CONIN$" | "CONOUT$")
+        || base
+            .strip_prefix("COM")
+            .or_else(|| base.strip_prefix("LPT"))
+            .is_some_and(|n| matches!(n, "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" | "¹" | "²" | "³"))
+    {
+        filename.insert(0, '_');
+    }
+    filename
+}
+
 fn import_cancelled(cancel: &AtomicBool) -> Result<()> {
     if cancel.load(Ordering::SeqCst) || crate::platform_process::stopping() {
         Err(Error::Conflict("程序正在退出，导入已取消".into()))
@@ -480,8 +508,7 @@ impl Exports {
         }
         let date: String =
             Connection::open_in_memory()?.query_row("SELECT strftime('%Y%m%d','now','localtime')", [], |r| r.get(0))?;
-        let dest =
-            crate::app_paths::user_home()?.join("Downloads").join(format!("{}-{date}.pilib.zip", library.name()));
+        let dest = crate::app_paths::user_home()?.join("Downloads").join(export_filename(library.name(), &date));
         let initial = Json::object([("status", "running".into()), ("path", dest.to_string_lossy().as_ref().into())]);
         let state = Arc::new(Mutex::new(initial.clone()));
         let cancel = Arc::new(AtomicBool::new(false));
@@ -543,6 +570,91 @@ impl Drop for Exports {
 mod tests {
     use super::*;
     use std::io::Write;
+
+    #[test]
+    fn export_names_are_single_portable_filename_components() {
+        use std::path::Component;
+
+        for (name, stem) in [
+            ("春日插画", "春日插画"),
+            (".", "图库"),
+            ("..", "图库"),
+            ("../escaped", "..escaped"),
+            ("category/subset", "categorysubset"),
+            (r"category\subset", "categorysubset"),
+            ("/absolute/path", "absolutepath"),
+            (r"C:\absolute\path", "Cabsolutepath"),
+            (r"C:relative", "Crelative"),
+            (r"\\server\share\path", "serversharepath"),
+            (r"\\?\UNC\server\share\path", "UNCserversharepath"),
+            (" /\\:\0*\n", "图库"),
+            ("NUL.notes", "_NUL.notes"),
+            ("com¹.txt", "_com¹.txt"),
+            ("CON", "CON"),
+        ] {
+            let filename = export_filename(name, "20261114");
+            assert_eq!(filename, format!("{stem}-20261114.pilib.zip"), "{name:?}");
+            let mut components = Path::new(&filename).components();
+            assert!(matches!(components.next(), Some(Component::Normal(part)) if part == filename.as_str()));
+            assert_eq!(components.next(), None);
+        }
+        let filename = export_filename(&"彩图".repeat(256), "20261114");
+        assert!(filename.len() <= 255);
+        assert!(filename.ends_with("-20261114.pilib.zip"));
+    }
+
+    #[test]
+    fn export_keeps_the_display_name_and_publishes_inside_downloads() {
+        let work = stage(&std::env::temp_dir()).unwrap();
+        fs::create_dir(work.0.join("folder")).unwrap();
+        let status = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--ignored", "--exact", "app_archives::tests::export_name_fixture"])
+            .env("ILLUSTASH_ARCHIVE_FIXTURE", &work.0)
+            .env("HOME", &work.0)
+            .env("USERPROFILE", &work.0)
+            .env("ILLUSTASH_APP_SUPPORT", work.0.join("support"))
+            .env("ILLUSTASH_SHARED", work.0.join("absent-reference"))
+            .env("ILLUSTASH_NO_KEYCHAIN", "1")
+            .status()
+            .unwrap();
+        assert!(status.success());
+    }
+
+    #[test]
+    #[ignore = "由隔离的导出路径回归测试运行"]
+    fn export_name_fixture() {
+        let root = PathBuf::from(std::env::var_os("ILLUSTASH_ARCHIVE_FIXTURE").expect("isolated fixture only"));
+        let package = root.join("synthetic.pilib");
+        let name = "../escaped";
+        crate::app_create::create_folder(&package, &root.join("folder"), Some(name), None, None).unwrap();
+        let library = Library::open(&package).unwrap();
+        let downloads = root.join("Downloads");
+        fs::create_dir(&downloads).unwrap();
+        let date: String = Connection::open_in_memory()
+            .unwrap()
+            .query_row("SELECT strftime('%Y%m%d','now','localtime')", [], |row| row.get(0))
+            .unwrap();
+        let outside = root.join(format!("escaped-{date}.pilib.zip"));
+        fs::write(&outside, b"outside sentinel").unwrap();
+        let exports = Exports::default();
+        let initial = exports.start(&library, 1).unwrap();
+        exports.0.lock().unwrap().as_mut().unwrap().handle.take().unwrap().join().unwrap();
+        let dest = PathBuf::from(initial.get("path").unwrap().text());
+        assert_eq!(dest.parent(), Some(downloads.as_path()));
+        assert_eq!(exports.state(&library, 1).get("status").unwrap().text(), "done");
+        let mut archive = ZipArchive::new(File::open(&dest).unwrap()).unwrap();
+        let config: serde_json::Value = serde_json::from_reader(archive.by_name("library.json").unwrap()).unwrap();
+        assert_eq!(config["name"], name);
+        assert_eq!(library.name(), name);
+        drop(archive);
+
+        let published = fs::read(&dest).unwrap();
+        let cancel = Arc::new(AtomicBool::new(true));
+        assert!(export(&library, &dest, &cancel).is_err());
+        assert_eq!(fs::read(&dest).unwrap(), published);
+        assert_eq!(fs::read(&outside).unwrap(), b"outside sentinel");
+        assert_eq!(fs::read_dir(downloads).unwrap().count(), 1);
+    }
 
     #[test]
     fn exported_databases_are_one_snapshot_while_both_keep_changing() {

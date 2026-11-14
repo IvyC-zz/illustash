@@ -2,7 +2,12 @@
 #[cfg(not(any(unix, windows)))]
 use crate::Error;
 use crate::Result;
-use std::process::{Command, ExitStatus};
+#[cfg(any(unix, windows))]
+use std::process::Stdio;
+use std::{
+    fs::File,
+    process::{Command, ExitStatus},
+};
 
 #[cfg(windows)]
 mod windows_desktop;
@@ -23,18 +28,22 @@ pub fn parent_pid() -> std::io::Result<u32> {
     }
 }
 
+/// 在独立进程组或 Job 中运行 worker，并在返回前停止并回收它的进程树。
+/// 标准输入和标准输出丢弃。标准错误默认丢弃，也可以写入调用方提供的文件。
 pub fn worker(
     command: &mut Command,
+    stderr: Option<File>,
     mut check: impl FnMut() -> Result<()>,
     mut observe: impl FnMut() -> Result<()>,
 ) -> Result<ExitStatus> {
     #[cfg(any(unix, windows))]
     {
         check()?;
+        command.stdin(Stdio::null()).stdout(Stdio::null()).stderr(stderr.map_or_else(Stdio::null, Stdio::from));
         #[cfg(unix)]
         let mut group = {
-            use std::{os::unix::process::CommandExt, process::Stdio};
-            command.process_group(0).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
+            use std::os::unix::process::CommandExt;
+            command.process_group(0);
             ProcessGroup(command.spawn()?)
         };
         #[cfg(windows)]
@@ -55,7 +64,7 @@ pub fn worker(
     }
     #[cfg(not(any(unix, windows)))]
     {
-        let _ = (command, check, observe);
+        let _ = (command, stderr, check, observe);
         Err(Error::Invalid("此平台尚未提供 worker 进程树收尾；拒绝启动".into()))
     }
 }
