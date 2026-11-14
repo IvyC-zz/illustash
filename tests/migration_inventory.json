@@ -1,7 +1,7 @@
 {
 "baseline_commit":"621726f",
 "sources":{
- ".claude/launch.json":"76d4c88e0bca59fd6c3f0c7171350cd1c9c925dbfbaa7694c90309fcce5e9321",
+ ".claude/launch.json":"b78300b428b2e0eabf5fe0ebae9771df33eacf2a1a155cccb1570fff8566f764",
 
  "crates/core/src/backup.rs":"7d5f5abe63adb1620f2847609451fda7b588a927f742a676e16fc4acd2abeeb5",
 
@@ -139,7 +139,7 @@
 
  "desktop/src/i18n.rs":"ab24cd127b728f156f456069c1c7e10de2ea10cbeea476ef4eb552daa2ae931b",
 
- "desktop/src/main.rs":"d83f402cc7d267d3f7f93c2abe8ec6290f1a38adc851fedfffd4d71b32497c1d",
+ "desktop/src/main.rs":"71a8b86966191a40a9f8738f1f52302fe927fa434fbf72be5f3aabeeeffaa4eb",
 
  "desktop/src/picker.rs":"71bd9e4e9e1746d60d4eea93b0a80f5091080cebcd2defb156ccbd63cd48c284",
 

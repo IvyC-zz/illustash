@@ -9,7 +9,7 @@ import {metaSoon, refreshMeta} from '../core/meta.js';
 import {prefs} from '../core/prefs.js';
 import {SHORTCUTS, currentSource, keyAction, keySelection, modes, selectionSize, shownUuid, viewerTarget} from '../core/modes.js';
 import {keyScope, pageOf, viewOf} from '../core/pages.js';
-import {browsing, cleanup, defaultSort} from '../core/route.js';
+import {browsing, cleanup, defaultSort, hashFor} from '../core/route.js';
 import {api, post, readError} from '../core/session.js';
 import {state} from '../core/state.js';
 import {offerWatch} from './catalog.js';
@@ -38,13 +38,42 @@ export function filters() {
   return f;
 }
 const pageUrl = (offset, count = true) => '/api/assets?' + new URLSearchParams({...filters(), offset, limit: PAGE, ...(count ? {} : {count: 0})});
-function visibleOffsets() {
-  const v = $('viewport'), first = rowStart(rowAt(v.scrollTop)), last = rowStart(rowAt(v.scrollTop + v.clientHeight) + 2);
+// 从第 first 张到第 last 张所在的几页（最多 4 页）。
+function pagesBetween(first, last) {
   const offsets = []; for (let o = Math.floor(first / PAGE) * PAGE; o < Math.max(last, 1); o += PAGE) offsets.push(o);
   return offsets.slice(0, 4);
 }
-// 先取可见的几页，再一步换入数据：编辑之后不会闪出骨架。
-export async function reload(reset = false) {
+const visibleEnd = v => rowStart(rowAt(v.scrollTop + v.clientHeight) + 2);
+function visibleOffsets() { const v = $('viewport'); return pagesBetween(rowStart(rowAt(v.scrollTop)), visibleEnd(v)); }
+// ---------- 回到原位置（#402） ----------
+// 离开网格页时按地址记下位置：第一张可见的图的序号、在它那一行里滚过的比例、这一屏到哪一张，以及详情栏里的图和键盘光标。
+// 回到同一地址（侧栏、后退、从角色页返回）时，reload 先读这几张所在的页，再一步定位到那里，不先读顶部再跳。
+// 记的是序号而不是像素：窗口宽度、缩放或方格／原比例变了，回来时第一行仍是同一张。只存在这个页面里，重新载入就没了；
+// R18 筛选不同算不同的列表。
+const places = new Map(), PLACES_MAX = 30;
+const placeKey = route => `${hashFor(route)}|${state.nsfw}`;
+// 换页之前调用（ui/shell.js applyRoute），此时 state.route 和滚动位置还是要离开的那一页的。
+export function rememberPlace() {
+  if (pageOf(state.route).panel || $('grid').hidden || !state.totalReady || !state.total) return;
+  const v = $('viewport'), row = rowAt(v.scrollTop), anchor = rowStart(row), key = placeKey(state.route);
+  places.delete(key);
+  places.set(key, {anchor, within: Math.max(0, (v.scrollTop - rowTop(row)) / rowHeight(row)), end: visibleEnd(v), focused: state.focused, cursor: state.cursor});
+  if (places.size > PLACES_MAX) places.delete(places.keys().next().value);
+}
+export const placeFor = route => places.get(placeKey(route)) || null;
+// 数据到了、画网格之前：先开详情栏（它占掉的宽度决定列数），再按新的布局滚到记下的那一张。详情栏里那张图不一定
+// 在这次读到的几页里（离开前可能已经滚开了），所以不按列表核对，照样打开；已经开着别的（同一页换参数）就不动。
+function restorePlace(place) {
+  if (place.focused && !state.focused) inspect(place.focused);
+  if (place.cursor >= 0 && place.cursor < state.total) setCursor(place.cursor);
+  if (!state.total) return;
+  layout();
+  const row = rowOf(Math.min(place.anchor, state.total - 1));
+  $('grid').style.height = `${rowTop(rowCount())}px`;
+  $('viewport').scrollTop = rowTop(row) + Math.min(place.within, 1) * rowHeight(row);
+}
+// 先取可见的几页，再一步换入数据：编辑之后不会闪出骨架。place 是 placeFor() 记下的位置：读那附近的几页并定位过去。
+export async function reload(reset = false, place = null) {
   if (pageOf(state.route).panel) return;
   const epoch = state.readEpoch, route = state.route;
   const gen = ++state.generation; abortList?.abort(); abortList = new AbortController(); state.pending.clear();
@@ -52,13 +81,15 @@ export async function reload(reset = false) {
   if (reset) { $('viewport').scrollTop = 0; $('resultCount').textContent = t('正在读取…'); state.totalReady = false; }
   layout();
   try {
-    const offsets = reset ? [0] : visibleOffsets();
+    const offsets = place ? pagesBetween(place.anchor, place.end) : reset ? [0] : visibleOffsets();
     const pages = await Promise.all(offsets.map((o, i) => api(pageUrl(o, i === 0), {signal: abortList.signal})));
     if (gen !== state.generation || route !== state.route) return;
-    if (epoch !== state.readEpoch) return reload(reset);
+    if (epoch !== state.readEpoch) return reload(reset, place);
     state.total = pages[0].total; state.totalReady = true; state.countDirty = false; state.items = new Array(state.total); state.pages = new Set();
     pages.forEach((p, i) => { p.items.forEach((item, j) => { if (offsets[i] + j < state.total) state.items[offsets[i] + j] = item; }); state.pages.add(offsets[i]); });
-    state.dataVersion++; state.gridKey = ''; renderGrid(); updateCount(); renderSelection();
+    state.dataVersion++; state.gridKey = '';
+    if (place) restorePlace(place);
+    renderGrid(); updateCount(); renderSelection();
     $('empty').hidden = !!state.total;
     $('empty').innerHTML = viewOf(state.route).empty?.(state.route) || '';
     renderHeading();

@@ -7,7 +7,7 @@ import {REASONS, nameTip} from '../core/labels.js';
 import {fetchChar, onMeta, setChar} from '../core/meta.js';
 import {prefs} from '../core/prefs.js';
 import {implement, pageOf, viewOf} from '../core/pages.js';
-import {cleanup, defaultSort, go, hashFor, parseHash, replaceRoute, setRoute} from '../core/route.js';
+import {cleanup, defaultSort, go, hashFor, noteHistory, parseHash, replaceRoute, setRoute} from '../core/route.js';
 import {api, readError} from '../core/session.js';
 import {state} from '../core/state.js';
 import {cast, createWork, drawCast, drawShelf, openTagged, renderIndexBody, searchIndex, shelf} from './catalog.js';
@@ -15,7 +15,7 @@ import {$, error, searchIcon, workSmall} from './dom.js';
 import {renderSettings, settingsSection} from './settings.js';
 import {artistName} from './artists.js';
 import {closeInspector, closeViewer} from './detail.js';
-import {filters, reload, resetForRoute, selectAll, short, sweep, toggleFit, toggleSelecting} from './grid.js';
+import {filters, placeFor, rememberPlace, reload, resetForRoute, selectAll, short, sweep, toggleFit, toggleSelecting} from './grid.js';
 import {guideTick} from './guide.js';
 import {createLayer} from './overlay.js';
 import {dayLabel} from './home.js';
@@ -42,8 +42,10 @@ function metaShown({error: e, total, directory, queue}) {
 }
 export async function applyRoute() {
   const route = parseHash(); route.sort = route.sort || defaultSort(route);
-  if (route.legacy) { delete route.legacy; history.replaceState(null, '', hashFor(route)); }
+  const legacy = route.legacy; delete route.legacy;
+  noteHistory(legacy ? hashFor(route) : undefined);   // 旧地址就地改成新的；这一条记下序号，后退不退出页面
   const samePage = state.route.page === route.page && state.route.id === route.id && state.route.char === route.char;   // 切换子视图仍是同一页
+  rememberPlace();   // 先记下要离开的网格页滚到了哪里，回到这个地址时恢复（#402）
   // 换页（含同一页换子视图、换参数）：大图关掉，因为它下面的列表要重读、序号不再对得上；选择和光标复位；
   // 详情栏只在换了页面或角色时关。大图是被换页关掉的，不动焦点。
   closeViewer('silent');
@@ -64,7 +66,7 @@ export async function applyRoute() {
   $('homePage').hidden = page.area !== 'homePage';
   if (page.guideTick) guideTick(page.guideTick);
   renderChrome();
-  if (page.render) page.render({samePage}); else await reload(true);   // 没有自己渲染入口的页面是网格页
+  if (page.render) page.render({samePage}); else await reload(true, placeFor(route));   // 没有自己渲染入口的页面是网格页
 }
 // ---------- 外框：标题、工具栏 ----------
 // 同一个侧栏入口的子视图在它的标题下显示成标签页，而不是塞在角落里的链接。

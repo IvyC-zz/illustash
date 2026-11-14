@@ -54,21 +54,33 @@ fn main() {
             welcome::startup_diagnostics
         ])
         .on_menu_event(|app, event| {
-            if event.id() == "reload" {
-                // 只刷新图库页：刷新 Pixiv 窗口会打断在途的请求。
-                if let Some(main) = app.get_webview_window("main") {
+            // 只对图库页：刷新 Pixiv 窗口会打断在途的请求。
+            let Some(main) = app.get_webview_window("main") else { return };
+            match event.id().as_ref() {
+                "reload" => {
                     let _ = main.reload();
                 }
+                // 后退／前进交给页面（core/route.js 的 stepHistory）：它只在图库页自己的地址之间走，不会退回启动页或
+                // 上一个图库；启动页、欢迎页上没有这个函数，什么都不做（#402）。
+                "back" => {
+                    let _ = main.eval("window.illustashHistory && window.illustashHistory(-1)");
+                }
+                "forward" => {
+                    let _ = main.eval("window.illustashHistory && window.illustashHistory(1)");
+                }
+                _ => {}
             }
         })
         .setup(move |app| {
             let handle = app.handle().clone();
             #[cfg(not(windows))]
             {
-                // macOS 保留原生的编辑/退出菜单和刷新命令。
+                // macOS 保留原生的编辑/退出菜单和刷新命令；后退／前进用 Safari 的 ⌘[、⌘]（#402）。
                 let menu = Menu::default(&handle)?;
                 let reload = MenuItem::with_id(app, "reload", i18n::tr("刷新页面"), true, Some("CmdOrCtrl+R"))?;
-                // 默认菜单已经有 View 菜单（全屏）：刷新加进这个菜单，不另建第二个。
+                let back = MenuItem::with_id(app, "back", i18n::tr("后退"), true, Some("CmdOrCtrl+["))?;
+                let forward = MenuItem::with_id(app, "forward", i18n::tr("前进"), true, Some("CmdOrCtrl+]"))?;
+                // 默认菜单已经有 View 菜单（全屏）：这几项加进这个菜单，不另建第二个。
                 let view = menu
                     .items()?
                     .into_iter()
@@ -77,9 +89,14 @@ fn main() {
                 match view {
                     Some(view) => {
                         view.append(&PredefinedMenuItem::separator(app)?)?;
-                        view.append(&reload)?;
+                        view.append_items(&[&back, &forward, &PredefinedMenuItem::separator(app)?, &reload])?;
                     }
-                    None => menu.append(&Submenu::with_items(app, i18n::tr("视图"), true, &[&reload])?)?,
+                    None => menu.append(&Submenu::with_items(
+                        app,
+                        i18n::tr("视图"),
+                        true,
+                        &[&back, &forward, &PredefinedMenuItem::separator(app)?, &reload],
+                    )?)?,
                 }
                 app.set_menu(menu)?;
             }
