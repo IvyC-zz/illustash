@@ -498,7 +498,8 @@ fn import_internal(
     let models =
         if claims.is_some() { pkg.manifest["recognition"]["models"].clone() } else { pkg.manifest["models"].clone() };
     tx.execute_batch(SCHEMA)?;
-    verify_current_inputs(&tx, &pkg.manifest, &pkg.ids, cancel)?;
+    // 源事务中的暂写都能回滚，完整输入哈希只在下面的发布点复核一次。
+    // 重复包也必须经过该发布点，不能按是否新增了结果跳过校验。
     let seen: bool = tx.query_row(
         "SELECT EXISTS(SELECT 1 FROM recognition_imports WHERE digest=? OR digest GLOB ?)",
         params![pkg.digest, format!("{}:redelivery:*", pkg.digest)],
