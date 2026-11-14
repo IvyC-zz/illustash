@@ -20,6 +20,16 @@ debug = false
 [profile.dev.package.tiny_http]
 opt-level = 0
 
+# 仅桌面使用的 Tauri 构建工具沿用原 dev 优化等级，避免冷编译被代码生成拖慢（#311）。
+[profile.dev.package.tauri-utils]
+opt-level = 0
+
+[profile.dev.package.tauri-codegen]
+opt-level = 0
+
+[profile.dev.package.tauri-build]
+opt-level = 0
+
 # 保留原来桌面二进制的 strip 行为，宿主和 worker 的 release 设置不变。
 [profile.release.package.illustash-desktop]
 strip = true

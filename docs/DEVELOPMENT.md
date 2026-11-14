@@ -16,7 +16,7 @@
 
 ### 快速开始
 
-Core、Platform、宿主、桌面和 `crates/relation-fft` 共用根目录的 Cargo workspace、`Cargo.lock` 和 `target/`；FFT crate 只负责 PocketFFT 的 C++ 编译与原始接口。仍可用 `--manifest-path` 单独构建成员。依赖、features 和架构方向保留在各自 manifest；根配置统一 profile 与 tiny_http patch。开发构建沿用 terms 的第三方依赖 opt-level 3，自有成员和 tiny_http 保持 opt-level 0；自有成员带行号表，第三方不带调试信息。release 仅 desktop 去符号。
+Core、Platform、宿主、桌面和 `crates/relation-fft` 共用根目录的 Cargo workspace、`Cargo.lock` 和 `target/`；FFT crate 只负责 PocketFFT 的 C++ 编译与原始接口。仍可用 `--manifest-path` 单独构建成员。依赖、features 和架构方向保留在各自 manifest；根配置统一 profile 与 tiny_http patch。开发构建沿用 terms 的第三方依赖 opt-level 3，自有成员和 tiny_http 保持 opt-level 0；自有成员带行号表，第三方不带调试信息。桌面独有的 `tauri-utils`、`tauri-codegen`、`tauri-build` 保留原 opt-level 0，避免构建工具自身的代码生成增加冷编译成本；其他桌面第三方依赖统一为 3，并未完整保留原 desktop 的 dev profile。release 仅 desktop 去符号。
 
 IQDB 保留独立的 `crates/iqdb/Cargo.lock`、`crates/iqdb/target/` 和原 profile（dev 自有代码带行号表、第三方不带调试信息，release 去符号）：其 image 0.25.10 / zune-jpeg 0.5.15 与宿主固定的 image 0.25.6 无法在同一 workspace 同时解析；合并会改变既有 JPEG 签名，用户于 2026-11-15 批准此例外（#311）。Windows 静态 CRT 对两个项目都仍由根 `.cargo/config.toml` 控制。
 
