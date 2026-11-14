@@ -560,8 +560,9 @@ function collapse(gone) {
   renderGrid(true); updateCount();
 }
 // 撤销之后重读列表、当前面板页、详情栏和大图；why 是交给面板页的原因（'undo'，或后台学习收尾后的 'learned'）。
+// 计数先读完再重画面板页：按组整理页的「没成组的 N 张」是拿未识别总数减去分组里的张数，计数晚到就会算错。
 async function reread(why) {
-  await reload(); refreshMeta().catch(e => error(readError(e)));
+  await reload(); await refreshMeta().catch(e => error(readError(e)));
   pageOf(state.route).refresh?.(why);
   if (state.focused) inspect(state.focused, true);
   if (state.viewer >= 0) { const i = indexOf(state.viewerItem?.uuid); showViewer(i >= 0 ? i : state.viewer, i >= 0 ? state.items[i] : state.viewerItem); }
