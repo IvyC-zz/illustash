@@ -1,9 +1,10 @@
 // 近看一张图（桌面布局，#199）：网格旁边的检查面板、偶尔出现的「是 TA 吗？」提问，以及全屏查看器。
 import {esc, monthText, number} from '../core/format.js';
+import {unreadableText} from '../core/jobs.js';
 import {t} from '../core/i18n.js';
 import {REASONS, nameWithWork} from '../core/labels.js';
 import {fetchChar} from '../core/meta.js';
-import {shownUuid} from '../core/modes.js';
+import {detailAfterViewer, shownUuid} from '../core/modes.js';
 import {pageOf, poolIs, viewOf} from '../core/pages.js';
 import {charHash, cleanup, go} from '../core/route.js';
 import {api} from '../core/session.js';
@@ -20,11 +21,12 @@ let detailGen = 0;
 // ---------- 检查面板 ----------
 export function closeInspector() { detailGen++; if (state.viewer < 0) kept.hold = null; state.focused = null; state.detail = null; if (state.viewer < 0) state.question = null; $('inspector').hidden = true; markHomeFocus(); syncCards(); requestAnimationFrame(() => renderGrid()); }
 function identityChips(d, compact = false) {
-  const r = state.route;
-  const chips = d.memberships.map(m => `<div class="identity"><span class="dot ${m.status}" title="${m.status === 'machine' ? t('机器识别') : m.origin === 'album' ? t('相簿') : t('人工确认')} · ${esc(evidence(m.evidence))}"></span><a class="identity-name" href="${charHash(m.id)}" title="${esc(nameWithWork(m))}">${esc(m.name)}</a><span class="identity-actions"><button class="icon small" data-swap="${esc(m.id)}" title="${t('换成…（C）')}">⇄</button><button class="icon small" data-not="${esc(m.id)}" title="${t('不是 TA（⌫）')}">×</button></span>
+  // C 换掉的是主角色（primaryOf），所以只有它的 ⇄ 写着 C；A 是追加（#399）。
+  const primary = primaryOf(d);
+  const chips = d.memberships.map(m => `<div class="identity"><span class="dot ${m.status}" title="${m.status === 'machine' ? t('机器识别') : m.origin === 'album' ? t('相簿') : t('人工确认')} · ${esc(evidence(m.evidence))}"></span><a class="identity-name" href="${charHash(m.id)}" title="${esc(nameWithWork(m))}">${esc(m.name)}</a><span class="identity-actions"><button class="icon small" data-swap="${esc(m.id)}" title="${m === primary ? t('换成…（C）') : t('换成…')}">⇄</button><button class="icon small" data-not="${esc(m.id)}" title="${t('不是 TA（⌫）')}">×</button></span>
     ${compact ? '' : `<div class="variant-row">${(m.variants || []).map(v => `<span class="variant-chip">${esc(v.name)}<button data-unvariant="${esc(v.id)}" title="${t('去掉子标签')}">×</button></span>`).join('')}${(state.charMap.get(m.id)?.variants || []).some(v => !(m.variants || []).some(x => x.id === v.id)) ? `<button class="variant-add" data-addvariant="${esc(m.id)}">＋ ${t('子标签')}</button>` : ''}</div>`}</div>`).join('');
   const alts = (d.alternatives || []).slice(0, 9).map((a, i) => `<button class="alt${a.weak ? ' weak' : ''}" data-alt="${i}" title="${esc(nameWithWork(a))} · ${a.weak ? t('弱线索（中档相似，不算归属）') + ' · ' : ''}${t('{evidence}。点击：换成这个；⌥ 点击：也是', {evidence: esc(evidence(a.evidence))})}"><kbd>${i + 1}</kbd>${esc(a.name)}</button>`).join('');
-  return `<div class="identities">${chips || `<p class="none-yet">${d.unknown ? t('已跳过，还没有角色') : t('还没有角色')}</p>`}<button class="add-identity" data-also="1">＋ ${d.memberships.length ? t('也是…') : t('设为角色…')}</button></div>` +
+  return `<div class="identities">${chips || `<p class="none-yet">${d.unknown ? t('已跳过，还没有角色') : t('还没有角色')}</p>`}<button class="add-identity" data-also="1" title="${d.memberships.length ? t('追加角色，原有的保留（A）') : t('设为角色（C）')}">＋ ${d.memberships.length ? t('也是…') : t('设为角色…')}</button></div>` +
     (alts ? `<div class="alts"><h3>${t('也可能是')}</h3><div class="alt-row">${alts}</div></div>` : '');
 }
 // PROTO = 从用户自己的裁决学到的原型（native/terms/src/research_compute/learn.rs）。
@@ -77,10 +79,10 @@ export async function inspect(ident, quiet = false) {
       ${d.duplicates?.length ? `<section class="inspector-section"><h3 class="section-title">${t('重复副本 · 共 {n} 份', {n: d.duplicates.length + 1})}</h3><div class="dup-list">${d.duplicates.map(x => `<button class="dup-copy" data-copy="${esc(x.uuid)}" title="${t('查看这份副本')}"><img src="/image?id=${encodeURIComponent(x.uuid)}&size=thumb" alt="" loading="lazy"><span><b>${x.pos}/${x.size}</b> ${esc((x.added_at || '').slice(0, 10))}<br><small>${x.names.length ? x.names.map(esc).join(' · ') : t('未识别')}</small></span></button>`).join('')}</div></section>` : ''}
       ${viewOpts.meta ? `<section class="inspector-section"><dl class="facts"><div><dt>${t('尺寸')}</dt><dd class="mono">${number(d.width)} × ${number(d.height)}</dd></div><div><dt>${t('加入')}</dt><dd class="mono">${esc((d.added_at || '').slice(0, 16).replace('T', ' '))}</dd></div><div><dt>${t('文件')}</dt><dd title="${esc(d.filename)}">${esc(d.filename)}</dd></div><div><dt>${t('文件形态')}</dt><dd>${d.src_kind === 'deriv' ? t('本地副本') : t('原图')}</dd></div></dl></section>
       <details class="inspector-section"><summary>${t('画面标签')}</summary><div class="tags">${d.tags.map(x => `<button class="tag" data-tag="${esc(x.value)}" title="${t('按此标签筛选图库 · WD {conf}', {conf: x.conf.toFixed(2)})}">${esc(x.value.replaceAll('_', ' '))}</button>`).join('') || `<p>${t('暂无')}</p>`}</div></details>` : ''}
-      <div class="inspector-actions">${d.memberships.length ? `<button class="primary large" id="fixChar">${t('更正角色')} <kbd>C</kbd></button>` : `<button class="primary large" data-also="1">${t('设为角色…')} <kbd>C</kbd></button>`}${pageOf(state.route).skip && !d.memberships.length ? `<button class="secondary large" id="skipOne">${t('跳过')} <kbd>S</kbd></button>` : ''}${d.unknown ? `<button class="secondary large" id="resumeOne">${t('恢复到未识别')}</button>` : ''}${curate}</div>`;
+      <div class="inspector-actions">${d.memberships.length ? `<button class="primary large" id="fixChar">${t('更正角色')} <kbd>C</kbd></button>` : `<button class="primary large" data-also="1">${t('设为角色…')} <kbd>C</kbd></button>`}${pageOf(state.route).skip && !d.memberships.length ? `<button class="secondary large" id="skipOne">${t('跳过')} <kbd>S</kbd></button>` : ''}${d.unknown ? `<button class="secondary large" id="resumeOne">${t('恢复到未识别')}${viewOf(state.route).bar === 'skipped' ? ' <kbd>S</kbd>' : ''}</button>` : ''}${curate}</div>`;
     if (pc) loadCharStats(pc.id, ident, gen);
     $('fixChar')?.addEventListener('click', () => swapOne(d, ident, primary.id));
-    $('inspector').querySelector('.preview img').addEventListener('error', e => { e.target.parentElement.innerHTML = `<div class="missing">${t('图片暂不可读，请检查 Photos 下载状态与访问权限')}</div>`; }, {once: true});
+    $('inspector').querySelector('.preview img').addEventListener('error', e => { e.target.parentElement.innerHTML = `<div class="missing">${esc(unreadableText())}</div>`; }, {once: true});
     $('closeInspector').onclick = closeInspector;
     $('expand').onclick = $('previewButton').onclick = () => openViewer(indexOf(ident));
     for (const b of $('inspector').querySelectorAll('[data-nav]')) b.onclick = () => step(Number(b.dataset.nav));
@@ -173,6 +175,7 @@ export async function singleAction(kind) {
     const d = state.detail?.uuid === item.uuid ? state.detail : null;
     openTagPicker(() => ({ids: [item.uuid]}), 1, [{...item, user_tags: d?.user_tags || item.user_tags}], () => false);
   } else if (kind === 'skip' && pageOf(r).skip) mutate('/api/change', {ids: [item.uuid], action: 'unknown'}, true);
+  else if (kind === 'resume') mutate('/api/change', {ids: [item.uuid], action: 'resume'}, poolIs(r, 'skipped'));
   else if (kind === 'exclude' || kind === 'include') mutate('/api/curate', {ids: [item.uuid], action: kind}, true);
   else if (kind === 'swap' || kind === 'also') {
     const d = state.detail?.uuid === item.uuid ? state.detail : await api('/api/detail?id=' + encodeURIComponent(item.uuid));
@@ -211,7 +214,14 @@ const view = {scale: 1, x: 0, y: 0, fit: 1};
 // 大图是盖满页面的层：Esc 关它（焦点在层外的输入框里时让位给输入框失焦），关闭时焦点还给打开它的地方。
 const viewerLayer = createLayer({kind: 'overlay', id: 'viewer', el: () => $('viewer'), yieldToInput: true, onDismiss: reason => closeViewer(reason)});
 export function openViewer(i) { if (i < 0 || !state.items[i]) return; state.viewer = i; $('viewer').hidden = false; viewerLayer.open(); document.body.classList.add('viewing'); showViewer(i); }
-export function closeViewer(reason) { viewerLayer.close(reason); if (state.viewer < 0) return; kept.hold = null; state.viewerItem = null; setCursor(state.viewer); $('viewer').hidden = true; document.body.classList.remove('viewing'); state.viewer = -1; ensureVisible(state.cursor); }
+// 详情栏开着时，关大图后它跟到大图里最后看的那张（core/modes.js 的 detailAfterViewer，#399）：光标已经在那张，
+// 不跟的话快捷键改的是详情栏里的旧图，Space、方向键却从光标那张走。
+export function closeViewer(reason) {
+  viewerLayer.close(reason); if (state.viewer < 0) return;
+  const follow = detailAfterViewer();
+  kept.hold = null; state.viewerItem = null; setCursor(state.viewer); $('viewer').hidden = true; document.body.classList.remove('viewing'); state.viewer = -1; ensureVisible(state.cursor);
+  if (follow) inspect(follow, true);
+}
 export async function showViewer(i, held = null) {
   if (i < 0 && !held) { closeViewer(); return; }
   if (!held && !state.items[i]) await loadPage(Math.floor(i / PAGE) * PAGE);
@@ -220,7 +230,7 @@ export async function showViewer(i, held = null) {
   state.viewer = Math.max(0, i); setCursor(state.viewer); state.viewerItem = item;
   if (same) { $('viewerCount').textContent = indexOf(item.uuid) >= 0 ? `${number(indexOf(item.uuid) + 1)} / ${number(state.total)}` : t('已移出当前列表 · ← → 继续'); return refreshViewerBar(item, i); }
   const img = $('viewerImg'); img.style.transform = ''; img.hidden = false; $('viewerMissing').hidden = true; Object.assign(view, {scale: 1, x: 0, y: 0});
-  img.onerror = () => { if (state.viewerItem?.uuid === item.uuid) { img.hidden = true; $('viewerMissing').hidden = false; } };
+  img.onerror = () => { if (state.viewerItem?.uuid === item.uuid) { img.hidden = true; $('viewerMissing').textContent = unreadableText(); $('viewerMissing').hidden = false; } };
   img.src = `/image?id=${encodeURIComponent(item.uuid)}&size=preview`;
   const full = new Image(); full.onload = () => { if (state.viewerItem?.uuid === item.uuid) { img.src = full.src; $('viewerSize').textContent = t('本地副本 {w} × {h}', {w: full.naturalWidth, h: full.naturalHeight}); } }; full.src = `/image?id=${encodeURIComponent(item.uuid)}&size=full`;
   $('viewerSize').textContent = '';

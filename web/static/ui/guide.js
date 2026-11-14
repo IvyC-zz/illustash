@@ -1,6 +1,7 @@
 // 新图库的向导（桌面布局，#96、#199）：导览、清单，以及在需要时才问的问题。
 import {WORK_NAMES} from '../core/catalog.js';
 import {esc, number, shortcut} from '../core/format.js';
+import {composing} from '../core/keys.js';
 import {said, t, tb} from '../core/i18n.js';
 import {PHOTOS_PRIVACY, SYNC_ACTIVE, photosHelp, photosRefused, pollSync, setIndex, setNames, startSync, syncLine} from '../core/jobs.js';
 import {onPage, pageOf} from '../core/pages.js';
@@ -19,7 +20,7 @@ import {modelsWaiting, modelsArrived, onModels} from '../core/models.js';
 // 在真实界面上教：几处地方一次点亮一处，一份事情做完就自己打勾的清单，以及在需要时才问的问题（角色出现后问名字，
 // 第一次同步完成后问作品）。向导进行到哪按图库保存；这里没有任何东西会在用户点击之前授予联网权限或启动任务。
 const TOUR = ['welcome', 'tasks', 'home', 'characters', 'unmatched', 'end'];
-const CHECKLIST = [['look', t('看看认出的角色'), '#/characters'], ['correct', t('纠正一张认错的图'), '', t('选中后按 C')], ['undo', t('撤销一次操作'), '', shortcut('Z')],
+const CHECKLIST = [['look', t('看看认出的角色'), '#/characters'], ['correct', t('纠正一张认错的图'), '', t('点开后按 C')], ['undo', t('撤销一次操作'), '', shortcut('Z')],
   ['group', t('确认一组没认出的图'), '#/groups'], ['follow', t('关注一部作品'), '#/characters/works']];
 let guideChecked = false, guideLoadedAt = 0, guideWorksAt = 0, tourAt = -1, checklistOpen = false;
 const guideOn = () => !!state.guide && state.guide.guide.status !== 'off';
@@ -105,13 +106,14 @@ export function tourStop(id) {
       : {title: t('认识一下界面'), text: t('花一分钟看看几个常用的地方？'), next: t('带我看看'), skip: t('不用了')},
     tasks: {target: () => $('taskButton'), title: t('进度在这里'), text: `${counting ? esc(counting) + '<br>' : ''}${t('同步和识别在后台进行，识别好的图会陆续出现在首页，不用等全部完成。')}`},
     home: {route: 'home', target: () => document.querySelector('#homePage .home-j') || $('homePage'), title: t('首页'),
-      text: document.querySelector('#homePage .home-j') ? t('新加入的图按日期排在这里，图上写着认出的角色。认错了就选中它按 C 换成正确的角色，{key} 随时撤销。', {key: shortcut('Z')}) : t('图片导入后会按日期排在这里，图上写着认出的角色。')},
+      text: document.querySelector('#homePage .home-j') ? t('新加入的图按日期排在这里，图上写着认出的角色。认错了就点开它按 C 换成正确的角色，{key} 随时撤销。', {key: shortcut('Z')}) : t('图片导入后会按日期排在这里，图上写着认出的角色。')},
     characters: {target: () => document.querySelector('.nav[data-page="characters"]'), title: t('资料库'), text: t('认出的角色按作品放在这里，点进去只看 TA 的图。')},
     unmatched: {target: () => document.querySelector('.nav[data-page="unmatched"]'), title: t('还没认出的图'), text: t('长得像的会分成一组，一次确认一整组。确认得越多，认得越准。')},
     end: {title: t('就这些'), text: t('右下角的「上手」清单会跟着你做过的事打勾，全做完就自己消失。以后想再看一遍，在「设置 › 关于」里。'), next: t('开始用吧')},
   }[id];
 }
-// 导览是盖满页面的层：Esc 等同"跳过"，由浮层管理器（ui/overlay.js）统一处理。
+// 导览是盖满页面的层：Esc 等同"跳过"，由浮层管理器（ui/overlay.js）统一处理。开着时页面的单键快捷键不响应
+// （ui/grid.js 的键盘处理看 #tour 是否显示），焦点留在导览的按钮上（#398）。
 const tourLayer = createLayer({kind: 'overlay', id: 'tour', el: () => $('tour'), onDismiss: () => { closeTour(); guideAction({action: 'skip'}); }});
 function showTour(at) {
   tourAt = at; drawNudge(); drawChecklist();
@@ -140,6 +142,8 @@ async function placeTour(moved) {
     if (moved && bubble.dataset.html) { bubble.classList.add('swap'); await new Promise(done => setTimeout(done, 120)); }
     bubble.innerHTML = html; bubble.dataset.html = html; bubble.dataset.stop = id; bubble.classList.remove('swap');
   }
+  // 换了一步（按钮重建过）或刚打开：焦点放到主按钮上，Enter 就是「下一步」，Tab 在导览的按钮之间转（#398）。
+  if (moved) bubble.querySelector('.primary')?.focus({preventScroll: true});
   const target = stop.target?.(), r = target?.getBoundingClientRect(), pad = 6, W = innerWidth, H = innerHeight, bw = bubble.offsetWidth, bh = bubble.offsetHeight;
   if (!r || !r.width) {
     Object.assign(hole.style, {left: W / 2 + 'px', top: H / 2 + 'px', width: '0px', height: '0px'}); hole.classList.add('none');
@@ -206,6 +210,9 @@ export function guideAfterPost(path, body) {
   else if (path === '/api/index' && body?.action === 'watch' && body.works?.length) guideTick('follow');
   if (Date.now() - guideLoadedAt > 4000) guideRefresh();
 }
+// 展开的清单是非模态浮层：Esc、点它和药丸之外的地方都收起（#398）。元素每次重画都换，所以传函数。
+const checklistLayer = createLayer({kind: 'popover', id: 'checklist', el: () => $('checklist').querySelector('.cl-panel'), anchor: () => $('checklist').querySelector('.cl-pill'),
+  onDismiss: reason => { checklistOpen = false; drawChecklist(); checklistLayer.close(reason); }});
 export function drawChecklist(just = '') {
   const el = $('checklist'), g = state.guide;
   const ticked = g?.guide.ticked || [], all = ticked.length === CHECKLIST.length;
@@ -257,6 +264,14 @@ export function wireGuide() {
     tourAt = Math.max(0, Math.min(TOUR.length - 1, tourAt + (act === 'next' ? 1 : -1)));
     placeTour(true); guideAction({action: 'step', step: TOUR[tourAt]});
   });
+  // Tab 只在导览的按钮之间转；点暗处不把焦点从按钮上拿走，免得 Tab 走到遮罩下面的侧栏（#398）。
+  $('tour').addEventListener('keydown', e => {
+    if (composing(e) || e.key !== 'Tab') return;
+    const buttons = [...$('tour').querySelectorAll('.tour-bubble button')]; if (!buttons.length) return;
+    const at = buttons.indexOf(document.activeElement), next = at < 0 ? 0 : (at + (e.shiftKey ? -1 : 1) + buttons.length) % buttons.length;
+    e.preventDefault(); buttons[next].focus();
+  });
+  $('tour').addEventListener('mousedown', e => { if (!e.target.closest('button')) e.preventDefault(); });
   addEventListener('resize', () => { if (tourAt >= 0) requestAnimationFrame(() => placeTour(false)); });
 
   $('nudge').addEventListener('click', async e => {
@@ -281,8 +296,8 @@ export function wireGuide() {
 
   $('checklist').addEventListener('click', async e => {
     const act = e.target.closest('[data-cl]')?.dataset.cl;
-    if (act === 'toggle') { checklistOpen = !checklistOpen; drawChecklist(); }
-    else if (act === 'hide') { await guideAction({action: 'hide'}); drawChecklist(); }
-    else if (e.target.closest('a[href]')) { checklistOpen = false; drawChecklist(); }
+    if (act === 'toggle') { checklistOpen = !checklistOpen; if (checklistOpen) checklistLayer.open(); drawChecklist(); if (!checklistOpen) checklistLayer.close(); }
+    else if (act === 'hide') { checklistOpen = false; checklistLayer.close('silent'); await guideAction({action: 'hide'}); drawChecklist(); }
+    else if (e.target.closest('a[href]')) { checklistOpen = false; checklistLayer.close('silent'); drawChecklist(); }
   });
 }

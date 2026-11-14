@@ -227,7 +227,7 @@ implement({
   'artist-audit': {heading: (r, {n, clear}) => [t('画师抽查'), t('验收「找回画师」：固定的一组随机图，逐张判断机器找到的画师对不对')]},
   identity: {heading: (r, {n, clear}) => [t('身份整理'), t('{n} 对长得像的角色 · 按涉及图片数排序 · 每一步都可撤销', {n: number(state.identityCount || 0)})]},
   sgroup: {heading: (r, {n, clear}) => [t('相似组 {id}', {id: esc(r.id)}), t('{n} 张 · 选中两张以上可以判断关系', {n}), state.total >= 2 && state.total <= 12 ? `<span class="heading-links"><button class="quiet" id="sgroupRelate">${t('判断关系')}</button></span>` : '']},
-  excluded: {heading: (r, {n, clear}) => [t('已排除'), t('{n} 张 · 只是标记，不动 Photos', {n})]},
+  excluded: {heading: (r, {n, clear}) => [t('已排除'), t('{n} 张 · 只是标记，不改动原图', {n})]},
   pending: {heading: (r, {n, clear}) => [t('已排除'), t('待确认 {n} 张 · 像截图但有人物，排除或保留', {n})]},
   settings: {heading: (r, {n, clear}) => [t('设置'), settingsSection()[2]]},
 });

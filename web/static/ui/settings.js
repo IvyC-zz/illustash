@@ -20,7 +20,7 @@ import {openTasks} from './tasks.js';
 import {charHash} from '../core/route.js';
 import {refreshMeta} from '../core/meta.js';
 import {closeInspector} from './detail.js';
-import {setNsfw} from './grid.js';
+import {setFit, setNsfw} from './grid.js';
 import {drawGuide, drawNudge, replayGuide} from './guide.js';
 import {renderIntegrityLine} from './integrity.js';
 import {renderModelsCard} from './models.js';
@@ -316,7 +316,6 @@ async function setLanguage(language) {
 // 新图库和当前图库的来源按出处分组（#107）：每个文件夹都写明它的图片从哪来；不从文件夹名猜测。文件夹包含它的子文件夹，
 // 不能互相嵌套。
 const ORIGINS = [['pixiv', 'Pixiv'], ['x', 'X'], ['other', t('其他')]];
-const IS_MAC = /Mac/.test(navigator.platform);
 // created：已发布但没有登记到最近图库里的图库（#97），提供它而不是再新建一个。
 export const libForm = {open: false, name: '', folders: {}, photos: false, created: null};
 // 后端列出它知道的出处（#111）；后备值覆盖没有图库信息的旧布局。
@@ -338,7 +337,7 @@ export function renderLibrariesCard() {
   const sources = !cur ? '' : `<h3 class="set-sub">${t('来源')}</h3>
     ${folders.map(folderRow).join('')}${photos ? `<div class="setting-line lib-folder"><span><b>${t('iCloud 照片')}</b><small>${t('本机「照片」图库，按存图的 App 区分 X 和 Pixiv')}</small></span><span class="lib-src">${remove(photos)}</span></div>` : ''}
     ${folders.length || photos ? '' : `<p class="muted-note set-empty">${t('还没有来源')}</p>`}
-    ${editable ? `<div class="set-actions"><span class="set-actions-label">${t('添加文件夹：')}</span>${list.map(([id, label]) => `<button class="quiet small" data-lib-add-source="${id}" title="${t('图片来自 {origin} 的文件夹，子文件夹会一起读取', {origin: esc(label)})}">${esc(label)}</button>`).join('')}${!photos && IS_MAC ? `<button class="quiet small" data-lib-add-photos>${t('添加 iCloud 照片')}</button>` : ''}</div>` : ''}`;
+    ${editable ? `<div class="set-actions"><span class="set-actions-label">${t('添加文件夹：')}</span>${list.map(([id, label]) => `<button class="quiet small" data-lib-add-source="${id}" title="${t('图片来自 {origin} 的文件夹，子文件夹会一起读取', {origin: esc(label)})}">${esc(label)}</button>`).join('')}${!photos && isMac ? `<button class="quiet small" data-lib-add-photos>${t('添加 iCloud 照片')}</button>` : ''}</div>` : ''}`;
   // 测试图库是由开发者工具（tools/test_libraries.py，#186 已删除）生成的，所以它的标记只在开发模式下显示。
   const dev = devMode && data.libraries.some(l => l.test);
   const others = data.libraries.filter(l => l.path !== data.current);
@@ -354,7 +353,7 @@ export function renderLibrariesCard() {
       <div class="lib-columns">${list.map(([id, label]) => `<div class="lib-col"><h3>${esc(label)}</h3>
         ${(f.folders[id] || []).map((p, i) => `<div class="lib-picked"><span class="lib-path" title="${esc(p)}"><bdi>${esc(home(p))}</bdi></span><button class="quiet" data-lib-drop="${id}" data-index="${i}" title="${t('不添加这个文件夹')}">×</button></div>`).join('')}
         <button class="quiet" data-lib-pick="${id}">${t('添加文件夹…')}</button></div>`).join('')}</div>
-      ${IS_MAC ? `<label class="lib-photos"><input type="checkbox" id="libPhotos" ${f.photos ? 'checked' : ''}> ${t('同时读取 iCloud 照片（本机「照片」图库，按存图的 App 区分 X 和 Pixiv）')}</label>` : ''}
+      ${isMac ? `<label class="lib-photos"><input type="checkbox" id="libPhotos" ${f.photos ? 'checked' : ''}> ${t('同时读取 iCloud 照片（本机「照片」图库，按存图的 App 区分 X 和 Pixiv）')}</label>` : ''}
       <div class="setting-line"><span>${t('名字')}<small class="line-hint">${t('保存在 {path}', {path: esc(home(data.home))})}</small></span><input class="lib-input" id="libName" placeholder="${t('新图库')}" value="${esc(f.name)}"></div>
       ${f.created ? `<div class="lib-created"><p>${t('{done}，保存在 {path}，但没能加入最近图库列表：{reason}', {done: `<b>${t('图库已经建好')}</b>`, path: `<bdi>${esc(home(f.created.path))}</bdi>`, reason: esc(tb(f.created.error))})}</p>
         <p class="muted-note">${t('打开它会再试一次加入列表；再点创建会另建一个带编号的图库。')}</p>

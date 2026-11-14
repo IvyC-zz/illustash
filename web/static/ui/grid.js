@@ -5,7 +5,7 @@ import {esc, number, platformText, shortcut} from '../core/format.js';
 import {t, tb} from '../core/i18n.js';
 import {composing} from '../core/keys.js';
 import {REASONS, nameWithWork} from '../core/labels.js';
-import {metaSoon, refreshMeta} from '../core/meta.js';
+import {learnerState, learningSettled, metaSoon, refreshMeta} from '../core/meta.js';
 import {prefs} from '../core/prefs.js';
 import {SHORTCUTS, currentSource, keyAction, keySelection, modes, selectionSize, shownUuid, viewerTarget} from '../core/modes.js';
 import {keyScope, pageOf, viewOf} from '../core/pages.js';
@@ -465,9 +465,14 @@ export function renderSelection() {
   } else if (kind === 'pending') {
     buttons = `<button class="primary${arm('exclude')}" data-act="exclude">${state.armed === 'exclude' ? t('再点一次：排除 {n} 张', {n: number(n)}) : t('排除')} <kbd>X</kbd></button><button class="quiet${arm('include')}" data-act="include">${state.armed === 'include' ? t('再点一次：保留 {n} 张', {n: number(n)}) : t('保留')}</button>`;
   } else if (kind === 'skipped') {
-    buttons = `<button class="primary${arm('resume')}" data-act="resume">${state.armed === 'resume' ? t('再点一次：恢复 {n} 张', {n: number(n)}) : t('恢复到未识别')}</button><button class="quiet" data-act="assign">${t('设为角色…')} <kbd>C</kbd></button>${ocButton}`;
+    buttons = `<button class="primary${arm('resume')}" data-act="resume">${state.armed === 'resume' ? t('再点一次：恢复 {n} 张', {n: number(n)}) : t('恢复到未识别')} <kbd>S</kbd></button><button class="quiet" data-act="assign">${t('设为角色…')} <kbd>C</kbd></button>${ocButton}`;
   } else {
-    buttons = `<button class="primary" data-act="assign">${t('加角色…')} <kbd>C</kbd></button><button class="quiet" data-act="notlib" ${state.sel.all ? `disabled title="${t('全选时请进入角色页移出')}"` : ''}>${t('不是…')} <kbd>⌫</kbd></button>`;
+    // C＝换成、A＝追加（#399）：选中的图都还没有角色时只有「设为角色」，C、A 都是它。
+    const chars = selectedChars(), why = !chars ? t('全选时请进入角色页换成') : !chars.common.length ? t('所选图片没有共同的角色') : '';
+    buttons = chars && !chars.all.size ? `<button class="primary" data-act="assign">${t('设为角色…')} <kbd>C</kbd></button>`
+      : `<button class="primary" data-act="replace" ${why ? `disabled title="${why}"` : ''}>${t('换成…')} <kbd>C</kbd></button>`
+        + `<button class="quiet" data-act="assign">${t('加角色…')} <kbd>A</kbd></button>`;
+    buttons += `<button class="quiet" data-act="notlib" ${state.sel.all ? `disabled title="${t('全选时请进入角色页移出')}"` : ''}>${t('不是…')} <kbd>⌫</kbd></button>`;
   }
   if (!['excluded', 'pending'].includes(kind)) buttons += `<button class="quiet${arm('exclude')}" data-act="exclude" title="${t('不是插画（截图、照片等）：从图库移到「已排除」')}">${state.armed === 'exclude' ? t('再点一次：排除 {n} 张', {n: number(n)}) : t('排除')} <kbd>X</kbd></button>`;
   buttons += `<button class="quiet" data-act="tag">${t('标签')} <kbd>G</kbd></button>`;
@@ -476,6 +481,26 @@ export function renderSelection() {
   bar.innerHTML = count + buttons + (big ? `<span class="bar-note">${t('超过 500 张需再点一次确认')}</span>` : '');
   $('clearSel').onclick = quitSelecting;
   for (const b of bar.querySelectorAll('[data-act]')) b.onclick = () => runBarAction(b.dataset.act);
+}
+// 选中的图上的角色（只看已读到的图；全选时为 null）：all 是出现过的，common 是每张都有的，C 换掉的就是它（#399）。
+function selectedChars() {
+  if (state.sel.all) return null;
+  const all = new Map(); let common = null;
+  for (const x of state.items) {
+    if (!x || !state.sel.ids.has(x.uuid)) continue;
+    const ids = new Set((x.memberships || []).map(m => m.id));
+    for (const m of x.memberships || []) all.set(m.id, m);
+    common = common ? new Set([...common].filter(id => ids.has(id))) : ids;
+  }
+  return {all, common: [...common || []].map(id => all.get(id))};
+}
+// 把选中的图从 from 换成别的角色：角色页换掉本页的角色，默认选择栏换掉选中的图共同的角色。exclude 是候选里不列的角色
+// （图上本来就有的）。
+function swapSelected(from, exclude = [from.id]) {
+  const n = selCount(), payload = {...selectionPayload(), confirm: n > 500};
+  openPicker({title: t('把 {n} 张换成…', {n: number(n)}), sentence: e => t('把 {n} 张从 {from} 换成 {name}', {n: number(n), from: from.name, name: e.name}),
+    exclude, suggest: selectionPayload(), multi: true,
+    pick: list => mutate('/api/reassign', {...payload, old: from.id, new: newIds(list)}, state.route.char === from.id)});
 }
 export const short = name => name.length > 28 ? name.slice(0, 26) + '…' : name;
 function needsArm(key) {
@@ -490,7 +515,6 @@ async function answerAudit(yes) {
 function runBarAction(act) {
   const n = selCount(), r = state.route; if (!n || edits.busy) return;
   const payload = () => ({...selectionPayload(), confirm: n > 500});
-  const fromName = state.char?.name;
   if (act === 'audit_yes' || act === 'audit_no') { answerAudit(act === 'audit_yes'); return; }
   if (act === 'findartist') {
     const sel = state.sel;
@@ -503,8 +527,17 @@ function runBarAction(act) {
   else if (act === 'isme') { if (!needsArm('isme')) mutate('/api/change', {...payload(), action: 'confirmed', entity: r.char}, true); }
   else if (act === 'exclude' || act === 'include') { if (!needsArm(act)) mutate('/api/curate', {...payload(), action: act}, true); }
   else if (act === 'resume') { if (!needsArm('resume')) mutate('/api/change', {...payload(), action: 'resume'}, true); }
-  else if (act === 'swap') openPicker({title: t('把 {n} 张换成…', {n: number(n)}), sentence: e => t('把 {n} 张从 {from} 换成 {name}', {n: number(n), from: fromName, name: e.name}), exclude: [r.char], suggest: selectionPayload(), multi: true,
-    pick: list => mutate('/api/reassign', {...payload(), old: r.char, new: newIds(list)}, true)});
+  else if (act === 'swap') swapSelected({id: r.char, name: state.char?.name});
+  else if (act === 'replace') {
+    const chars = selectedChars();
+    if (!chars) toast(t('全选时请进入角色页换成'));
+    else if (!chars.all.size) runBarAction('assign');
+    else if (!chars.common.length) toast(t('所选图片没有共同的角色'));
+    else if (chars.common.length === 1) swapSelected(chars.common[0], chars.common.map(m => m.id));
+    // 第二个面板等这一个的 close 事件之后再开：在那之前浮层管理器还把它算作开着，同一个对话框不会再打开。
+    else openPicker({title: t('换掉哪个角色？'), items: chars.common, sentence: e => t('把 {n} 张的 {name} 换掉', {n: number(n), name: e.name}),
+      pick: e => $('picker').addEventListener('close', () => swapSelected(e, chars.common.map(m => m.id)), {once: true})});
+  }
   else if (act === 'also') openPicker({title: t('这 {n} 张也是…', {n: number(n)}), sentence: e => t('给 {n} 张加上 {name}', {n: number(n), name: e.name}), exclude: [r.char], suggest: selectionPayload(), multi: true,
     pick: list => mutate('/api/change', {...payload(), action: 'confirmed', ...targets(list)}, false)});
   else if (act === 'assign') openPicker({title: browsing() ? t('给 {n} 张加角色', {n: number(n)}) : t('把 {n} 张设为…', {n: number(n)}), sentence: e => t('把 {n} 张设为 {name}', {n: number(n), name: e.name}), suggest: selectionPayload(), multi: true,
@@ -562,6 +595,8 @@ export async function mutate(path, body, leaving, {advance = false} = {}) {
   if (advance) kept.hold = null; else holdCurrent();
   const gone = leaving ? new Set(body.ids || state.items.filter(x => x && isSelected(x.uuid)).map(x => x.uuid)) : null;
   if (gone) for (const el of $('grid').children) if (gone.has(el.dataset.id)) el.classList.add('leaving');
+  // 确认角色之后后台会学习，学完未识别计数和分组还会变（#400）：写入前先记下学习的状态，好知道之后要不要再读。
+  const learner = path === '/api/change' && body.action === 'confirmed' ? learnerState().catch(() => null) : null;
   try {
     const r = await post(path, body); setLatest(r.undo);
     quitSelecting();
@@ -575,6 +610,7 @@ export async function mutate(path, body, leaving, {advance = false} = {}) {
       else if (advance || !kept.hold) showViewer(Math.min(state.viewer, state.total - 1));
       else { const i = indexOf(kept.hold.uuid); showViewer(i >= 0 ? i : state.viewer, i >= 0 ? state.items[i] : state.viewerItem); }
     }
+    if (learner) learner.then(afterLearning);
     return true;
   } catch (e) { toast(e.message); for (const el of $('grid').querySelectorAll('.leaving')) el.classList.remove('leaving'); }
   finally { edits.busy = false; document.body.classList.remove('busy'); setLatest(edits.latest); }
@@ -582,15 +618,30 @@ export async function mutate(path, body, leaving, {advance = false} = {}) {
 function collapse(gone) {
   const kept = []; let removed = 0;
   for (let i = 0; i < state.total; i++) { const x = state.items[i]; if (x && gone.has(x.uuid)) { removed++; continue; } kept[i - removed] = x; }
-  kept.length = state.total - removed; state.items = kept; state.total = kept.length; state.dataVersion++; renderGrid(true); updateCount();
+  kept.length = state.total - removed; state.items = kept; state.total = kept.length; state.dataVersion++;
+  // 光标停在离开的最后一张上时，收回到新的最后一张，接着按键还有对象（#386 的 2-6）。
+  if (state.cursor >= state.total) state.cursor = state.total - 1;
+  renderGrid(true); updateCount();
+}
+// 撤销之后重读列表、当前面板页、详情栏和大图；why 是交给面板页的原因（'undo'，或后台学习收尾后的 'learned'）。
+// 计数先读完再重画面板页：按组整理页的「没成组的 N 张」是拿未识别总数减去分组里的张数，计数晚到就会算错。
+async function reread(why) {
+  await reload(); await refreshMeta().catch(e => error(readError(e)));
+  pageOf(state.route).refresh?.(why);
+  if (state.focused) inspect(state.focused, true);
+  if (state.viewer >= 0) { const i = indexOf(state.viewerItem?.uuid); showViewer(i >= 0 ? i : state.viewer, i >= 0 ? state.items[i] : state.viewerItem); }
+}
+// 写入或撤销之后等后台学习收尾，学到的结果发布了就再读一次（#400，等法见 core/meta.js 的 learningSettled）。那时正有
+// 别的写入在进行，就交给它自己的重读。
+async function afterLearning(before) {
+  if (await learningSettled(before) && !edits.busy) await reread('learned');
 }
 export async function undo() {
   if (!edits.latest || edits.busy) return; edits.busy = true;
+  const learner = learnerState().catch(() => null);
   try {
-    toast(undoneText(await undoLatest())); await reload(); refreshMeta().catch(e => error(readError(e)));
-    pageOf(state.route).refresh?.('undo');
-    if (state.focused) inspect(state.focused, true);
-    if (state.viewer >= 0) { const i = indexOf(state.viewerItem?.uuid); showViewer(i >= 0 ? i : state.viewer, i >= 0 ? state.items[i] : state.viewerItem); }
+    toast(undoneText(await undoLatest())); await reread('undo');
+    learner.then(afterLearning);
   } catch (e) {
     // 历史可能已经往前走了（另一个窗口，或服务端提交之后才失败）：显示它最新的一步。
     toast(e.message); refreshMeta().catch(err => error(readError(err)));
@@ -732,8 +783,9 @@ export function wireGrid() {
   // ---------- 键盘 ----------
   // 按键先看最上面的模式（core/modes.js）：大图打开时它盖住选择栏，单图快捷键都作用于大图里那张。哪些键、在哪生效
   // 写在 core/modes.js 的 SHORTCUTS（帮助对话框由它生成），这里加减按键要同步改那张表（tests/help_keys.test.cjs 核对）。
+  // 对话框或导览开着时整个让开：导览的按钮自己处理 Enter、Space、Tab，Esc 由浮层管理器处理（#398）。
   document.addEventListener('keydown', e => {
-    if (composing(e) || document.querySelector('dialog[open]')) return;
+    if (composing(e) || document.querySelector('dialog[open], #tour:not([hidden])')) return;
     const mod = e.metaKey || e.ctrlKey, key = e.key.toLowerCase(), m = modes();
     const view = viewOf(state.route), scope = keyScope(view), grid = scope === 'grid';
     if (mod && key === 'k') { e.preventDefault(); jumpToCharacter(); return; }
@@ -744,7 +796,13 @@ export function wireGrid() {
       else if (onGrid()) stepColumns(bigger ? -1 : 1);
       return;
     }
-    if (e.target.closest('input,textarea,select,[contenteditable]')) { if (e.key === 'Escape') e.target.blur(); return; }
+    // 输入框里的 Esc：搜索框有字时清空并取消这次搜索（发一次 input，由框自己的处理函数重新筛选），空的时候才离开输入框（#401）。
+    if (e.target.closest('input,textarea,select,[contenteditable]')) {
+      if (e.key !== 'Escape') return;
+      if (e.target.type === 'search' && e.target.value) { e.preventDefault(); e.target.value = ''; e.target.dispatchEvent(new Event('input', {bubbles: true})); }
+      else e.target.blur();
+      return;
+    }
     if (mod && key === 'z') { e.preventDefault(); undo(); return; }
     // ⌘A 是选择栏的快捷键：大图打开时选择栏被盖住，不响应。
     if (mod && key === 'a' && grid) { e.preventDefault(); if (!m.viewer) selectAll(); return; }
