@@ -181,17 +181,25 @@ PR 应明确区分“当前 head 上完整执行退出 0”和“当前候选仅
 
 **触发**：`ci.yml` 在目标为 main 的 PR 打开、推送新提交、重新打开、转 Ready 时运行；草稿 PR 和来自 fork 的 PR 不跑。push 到 main 时也跑一次，作用是写编译缓存：GitHub 的缓存按分支隔离，PR 写的缓存只有同一个 PR 读得到，main 上写的所有 PR 都能读。也可以在 Actions 页面对任意分支手动触发。仓库私有时（`github.event.repository.private`）自动触发的运行一律跳过，只有手动触发的会跑，所以这个 PR 在公开前合入也不会耗分钟数。同一 PR 有新提交时取消旧运行；集成会话连续合入几个 PR 时，main 上只有最后一次跑完。
 
-**job**：「改动范围」先判断改了什么：只改 `docs/` 和根目录的 Markdown 时跳过其余构建与测试；`docs/THIRD_PARTY.md` 和 `docs/BACKEND_TASKS.md` 随安装包分发，仍须检查。之后是与 `tools/check_all.sh` 对齐的五个 job：Rust 核心（core、platform、terms、iqdb 的 fmt/clippy/test）、Python 全量（release 构建后跑 `tests.run_fixed_suite`，跳过白名单与本机相同）、前端 JS（Ubuntu）、桌面壳 clippy/test、原生固定契约空 PATH 重放。除 JS 外都跑在 Apple 芯片的 `macos-latest` 上，因为固定期望在 Apple 芯片上录制。最后一个「全部检查」汇总前面的结果：代码改动要求五个 job 全部成功，只有确认纯文档改动才允许跳过；分流失败、缺失输出、失败、取消或意外跳过都判失败，fork PR 没跑检查也判失败。分支保护只要求「全部检查」这一项，job 改名或增减时不用改保护规则。
+**job**：「改动范围」先判断改了什么。只改 `docs/` 和根目录的 Markdown 时跳过构建与测试；`docs/THIRD_PARTY.md` 和 `docs/BACKEND_TASKS.md` 随安装包分发，仍须检查。与 `tools/check_all.sh` 对齐的五个必需 job 包括 Rust 核心（core、platform、terms、iqdb 的 fmt/clippy/test）、Python 全量（release 构建后跑 `tests.run_fixed_suite`）、前端 JS（Ubuntu）、桌面壳 clippy/test、原生固定契约空 PATH 重放。除 JS 外，这五项都跑在 Apple 芯片的 `macos-latest` 上。公开库另有 Windows x64 试运行。分支保护要求「全部检查」汇总结果。代码改动要求五个必需 job 全部成功，Windows 结果列在日志中；文档改动要求所有构建与测试跳过。分流失败、缺失输出和 fork PR 没跑检查均判失败。
 
-**改检查项时**：`ci.yml` 和 `tools/check_all.sh` 一起改，`tests/test_packaging_resources.py` 核对两边的候选二进制接线和跳过白名单一致，并检查触发条件和权限。`native-upgrade.yml` 是升级测试的单独手动入口，要求整类零跳过；PR 自动检查的 Python job 已经包含这一类。
+**改检查项时**：同步检查 `ci.yml` 和 `tools/check_all.sh`。`tests/test_packaging_resources.py` 核对三处候选二进制接线、macOS 两处跳过白名单的一致性和 Windows 白名单的匹配规则，并检查触发条件和权限。`native-upgrade.yml` 是升级测试的单独手动入口，要求整类零跳过；两平台的 Python 全套已经包含这一类。
 
 **冻结输入**：索引参考的 SQLite 输入哈希若因 SQL 导出的小数位格式变化而不匹配，只有整库 schema、类型、值（浮点逐位）、rowid 和版本标记与冻结数据库完全一致时，才使用冻结 SQL 的原始哈希重查。数组、资产 ID、参数和结果仍精确匹配；不刷新录制，也不把真实数据差异当作格式差异。
 
 **缓存与权限**：Rust 编译缓存用 `Swatinem/rust-cache`，每个 job 一份，覆盖该 job 构建的 Cargo 项目；key 含各项目 Cargo.lock 的哈希，lock 变了时按前缀回退到最近一份，再增量编译。只在 main 上保存，PR 只读，免得 PR 的缓存挤掉 main 的（每个仓库合计 10 GB，超了按最久未用淘汰）。rustc 每 6 周升级一次 stable，升级后第一次是冷编译。workflow 只有 `contents: read`，checkout 不留凭据，不用 secret。每个 job 设了超时，卡住时不会耗满默认的 6 小时。
 
-**和合并队列的关系**：本机全量和集成会话的做法不变（见上一节）。集成会话组批时看一眼各 PR 的「全部检查」：失败的先退回原会话查明原因；只是 runner 故障或排队取消的，重跑一次再说。CI 跑的是 PR 与当时 main 的合并结果，不是候选，所以通过了也照样在候选上跑本机全量。
+**和合并队列的关系**：集成会话组批时查看各 PR 的「全部检查」及 Windows x64 结果。失败的先退回原会话查明原因，runner 故障或排队取消可重跑一次。PR CI 以该 PR 和触发时 main 的合并提交为输入，集成会话仍在合批候选上跑本机全量（见上一节）。
 
 **耗时**：启用后按实际运行记录补上各 job 的冷、热缓存耗时。仓库私有期间没有触发过；2026-10-01 开源前的旧版本在 `macos-latest` 上的一次运行里，Python 全量 job 约 25 分钟，其余各约 2 分钟，当时的代码量和 job 组成与现在不同，只能作量级参考。
+
+### Windows x64 CI
+
+公开库使用 `windows-latest` 和 MSVC x64。job 运行 core、platform、terms、desktop 的 clippy（参数与本机检查相同）、这四个项目及 iqdb 的 `cargo test`、terms 与 IQDB 的 release 构建和六个测试 example，再用这些 `.exe` 跑 Python 全套。14 步中的前端 JS 使用同一 workflow 的 Ubuntu 结果。Cargo 沿用仓库的静态 CRT 配置，关闭 CI 增量编译以控制磁盘占用。`TEMP` 和 `TMP` 指到系统盘的短目录，Python 日志统一使用 UTF-8。
+
+CI 使用标准 Python 3.12，与 macOS job 一致；常驻验收机使用嵌入式 3.13，`tests/test_run_fixed_suite.py` 的隔离入口测试覆盖其模块查找行为。CI 从 PyPI 下载并缓存固定的 x64 NumPy 2.5.3 wheel，安装它给 Python 对照用，再用打包脚本和 `crates/platform/src/research_openblas.json` 验证 DLL 的 SHA-256 并设置 `ILLUSTASH_RESEARCH_OPENBLAS_DLL`。3.12 与 3.13 对应的 wheel 含相同的已登记 DLL。Rust 和 wheel 的缓存只在 main 保存，PR 可还原。Windows job 的冷、热缓存耗时及压缩缓存大小待实际运行记录。
+
+`python -m tests.windows_fixed_suite --log windows-unittest.log` 是候选二进制和 OpenBLAS 接线后的全套入口。它列出全部 unittest 跳过，白名单逐条匹配平台限制，缺被测二进制、DLL 或升级输入均判失败。默认 discover 会排除显式点名的真实模型用例，打包资源测试使用合成文件，原生 ORT 通过运行时动态加载，故这个 job 只需要固定 OpenBLAS。自建 ONNX Runtime 的实际加载及真实模型、DirectML、CRT 依赖检查、安装／覆盖升级／卸载、GUI 和首次流程、真机性能以及 Windows ARM 仍在对应的验收机或虚拟机上做。试运行期间 Windows job 保留真实成败，分支保护的汇总暂不以它决定代码 PR 是否通过。
 
 ## macOS 实机测试（虚拟机）
 
