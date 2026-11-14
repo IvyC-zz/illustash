@@ -2,7 +2,8 @@
 import {I18N} from './i18n.js';
 export const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 // 让静态帮助和动态消息里显示的修饰键保持一致。
-export const macLike = platform => /Mac|iPhone|iPad|iPod/.test(platform || '');
+// 不分大小写：Chromium 的 userAgentData.platform 在 macOS 上是 "macOS"（#389）。
+export const macLike = platform => /mac|iphone|ipad|ipod/i.test(platform || '');
 export const isMac = macLike(globalThis.navigator?.userAgentData?.platform || globalThis.navigator?.platform);
 export const shortcut = (key, mac = isMac) => mac ? `⌘${key}` : `Ctrl+${key}`;
 // 用 ⌘ 写的帮助文字：其他系统上换成 Ctrl（单独的 ⌘ 换成 Ctrl，⌘K 换成 Ctrl+K）。

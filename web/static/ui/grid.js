@@ -765,7 +765,13 @@ export function wireGrid() {
       else if (onGrid()) stepColumns(bigger ? -1 : 1);
       return;
     }
-    if (e.target.closest('input,textarea,select,[contenteditable]')) { if (e.key === 'Escape') e.target.blur(); return; }
+    // 输入框里的 Esc：搜索框有字时清空并取消这次搜索（发一次 input，由框自己的处理函数重新筛选），空的时候才离开输入框（#401）。
+    if (e.target.closest('input,textarea,select,[contenteditable]')) {
+      if (e.key !== 'Escape') return;
+      if (e.target.type === 'search' && e.target.value) { e.preventDefault(); e.target.value = ''; e.target.dispatchEvent(new Event('input', {bubbles: true})); }
+      else e.target.blur();
+      return;
+    }
     if (mod && key === 'z') { e.preventDefault(); undo(); return; }
     // ⌘A 是选择栏的快捷键：大图打开时选择栏被盖住，不响应。
     if (mod && key === 'a' && grid) { e.preventDefault(); if (!m.viewer) selectAll(); return; }

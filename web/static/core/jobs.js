@@ -4,7 +4,7 @@
 // 这里的 setIndex、setNames（#344）。相似图片的状态随 settings 一起来，settings 由 core/settings.js 写。任务运行期间轮询会自己重新排上；重叠的轮询绝不会让状态倒退（#34）。
 import {diagnosticLine} from './diagnostics.js';
 import {t, tb} from './i18n.js';
-import {number, stamp} from './format.js';
+import {isMac, number, stamp} from './format.js';
 import {session, api, post, shared} from './session.js';
 import {state} from './state.js';
 import {listeners} from './events.js';
@@ -26,6 +26,13 @@ export const SYNC_ACTIVE = ['scanning', 'recognising', 'importing'];
 export const photosRefused = s => s.status === 'error' && s.problem === 'photos_permission';
 export const PHOTOS_PRIVACY = 'x-apple.systempreferences:com.apple.preference.security?Privacy_Photos';
 export const photosHelp = () => t('没有访问照片图库的权限。到「系统设置 › 隐私与安全性 › 照片」里打开 Illustash，退出并重新打开后再同步。');
+// 读不到一张图时说去哪儿查（#401）：只有图库可能来自 iCloud 照片时才提照片。来源在设置页读过就按来源；没读过时 Mac 上
+// 算可能有，Windows 没有照片来源。
+export function unreadableText() {
+  const sources = state.settings?.package?.sources || state.libraries?.info?.sources;
+  return (sources ? sources.some(x => x.kind === 'photos') : isMac) ? t('图片暂不可读，请检查来源文件夹，或 iCloud 照片的下载状态与访问权限')
+    : t('图片暂不可读，请检查来源文件夹是否还在、外接硬盘是否接上');
+}
 export const syncBar = (s, bar) => s.status === 'recognising' && s.stage === 'hashing' ? bar(s.input_done, s.input_total)
   : s.status === 'recognising' && s.stage !== 'preparing' ? bar(s.done, s.total)
   : s.status === 'importing' && s.import_total ? bar(s.import_done, s.import_total) : '';
