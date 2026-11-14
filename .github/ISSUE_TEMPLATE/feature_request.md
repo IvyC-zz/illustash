@@ -2,7 +2,7 @@
 name: 功能建议
 about: 想要的功能或改进
 title: ''
-labels: enhancement
+labels: enhancement, 反馈, 待分拣
 ---
 
 <!--
