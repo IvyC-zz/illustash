@@ -312,7 +312,8 @@ pub(crate) fn import(
     let mut declared = 0u64;
     for i in 0..zip.len() {
         let file = zip.by_index_raw(i).map_err(zip_failure)?;
-        let name = file.name();
+        let name = file.name().map_err(zip_failure)?;
+        let name = name.as_ref();
         // ZIP 只用 `/` 分隔；按原始字节拒绝反斜杠，不依赖各平台对 `features\x` 的解释。
         if file.name_raw().contains(&b'\\')
             || !EXPORTED.contains(&name)

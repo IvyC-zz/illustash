@@ -36,7 +36,8 @@ chrono = "0.4"
 ort = { version = "=2.0.0-rc.10", default-features = false, features = ["std", "load-dynamic"] }
 
 ureq = { version = "=2.12.1", features = ["json"] }
-zip = { version = "=2.4.2", default-features = false, features = ["deflate-zlib", "bzip2"] }
+# zip 9 的 bzip2-rs 特性沿用原来的 bzip2-sys 后端。
+zip = { version = "=9.5.1", default-features = false, features = ["deflate-flate2-zlib", "bzip2-rs"] }
 lzma-rs = "=0.3.0"
 crc32fast = "1"
 
