@@ -110,13 +110,15 @@ impl Host {
         }
         Ok(Self { child, stdin: Some(stdin), origin: format!("http://127.0.0.1:{port}"), lines })
     }
+    /// 失败时 panic 信息里带上状态码和回答正文，或连接错误本身。
     fn get(&self, url: &str) -> Value {
-        ureq::get(&format!("{}{url}", self.origin))
-            .set("Cookie", &entry::cookie(&self.origin))
-            .call()
-            .unwrap()
-            .into_json()
-            .unwrap()
+        match ureq::get(&format!("{}{url}", self.origin)).set("Cookie", &entry::cookie(&self.origin)).call() {
+            Ok(response) => response.into_json().unwrap_or_else(|e| panic!("GET {url}: unreadable reply: {e}")),
+            Err(ureq::Error::Status(code, response)) => {
+                panic!("GET {url}: HTTP {code}: {}", response.into_string().unwrap_or_default())
+            }
+            Err(e) => panic!("GET {url}: {e}"),
+        }
     }
     fn post(&self, url: &str, body: Value) -> (u16, Value) {
         let token = self.get("/api/bootstrap")["token"].as_str().unwrap().to_owned();
@@ -131,8 +133,8 @@ impl Host {
         };
         (response.status(), response.into_json().unwrap())
     }
-    /// 等后台检查结束（它在宿主就绪几秒后开始）。检查耗时随磁盘速度差别很大：GitHub 托管的 macOS 机器上，
-    /// 最后一段约 400 MB 的 source.sqlite 让路后重查一遍要一分多钟。所以只要进度还在变就继续等，
+    /// 等后台检查结束（它在宿主就绪几秒后开始）。检查耗时随磁盘速度和负载差别很大：最后一段的 source.sqlite
+    /// 以前有 2 GB 多，在 GitHub 托管的 macOS 机器上让路后重查一遍要一分多钟（#395）。所以只要进度还在变就继续等，
     /// 进度 60 秒不动才算卡住；总时长另设上限，防止反复让路时一直等下去。
     fn checked(&self) -> Value {
         let start = Instant::now();
@@ -321,12 +323,13 @@ fn checks_after_a_crash_in_the_background_and_on_request_and_stop_writing_on_dam
     assert!(errors.contains("library.sqlite"), "{errors}");
 
     // source.sqlite 用回滚日志：后台检查运行期间，使用应用里最短忙等超时（250 ms）的写入方仍能提交；
-    // 检查会让路，等写入方完成后重新开始。
+    // 检查会让路，等写入方完成后从头重新检查。文件只需大到写入方到来时检查还在跑（约 330 MB，本机后台优先级下
+    // 一遍几秒）：重新检查也要读完整个文件，以前的 40 万行有 2 GB 多，在负载下或 GitHub 托管机器上一遍就超过 60 秒（#395）。
     let busy = create("busy");
     {
         let c = Connection::open(busy.join("source.sqlite")).unwrap();
         c.execute_batch(
-            "WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<400000)
+            "WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<60000)
              INSERT INTO synthetic_bulk(body) SELECT printf('%0100d-%d', i, i) || hex(randomblob(450)) FROM n;",
         )
         .unwrap();
@@ -348,6 +351,10 @@ fn checks_after_a_crash_in_the_background_and_on_request_and_stop_writing_on_dam
         .execute_batch("BEGIN IMMEDIATE; INSERT INTO synthetic_bulk(body) VALUES ('written during the check'); COMMIT;")
         .unwrap();
     drop(writer);
+    // 检查还在：写入方是在检查进行中提交的（检查让了路，正等着重新开始）。检查不让路时，它的读锁要到检查结束才放开，
+    // 写入方只能在那之后提交，这里就会失败；单看提交成功不够，后台优先级下 250 ms 的忙等实际要等一秒多（#395）。
+    let status = host.get("/api/integrity");
+    assert_eq!(status["running"]["database"], "source.sqlite", "the writer committed after the check ended: {status}");
     let status = host.checked();
     assert!(status["damaged"].is_null(), "{status}");
     assert!(status["error"].is_null(), "{status}");
