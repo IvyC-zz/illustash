@@ -98,7 +98,7 @@ fn copy_cancelled(mut from: impl Read, mut to: impl Write, cancel: &AtomicBool) 
 fn sanitize_database(path: &Path, cancel: Option<Arc<AtomicBool>>) -> Result<()> {
     let mut c = crate::sqlite::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE)?;
     // 大图库导出时压实可能占大部分时间。切换图库、关闭应用时，除了流式复制和备份，也必须能中断这些 SQLite 操作。
-    c.progress_handler(1000, cancel.map(|cancel| move || cancel.load(Ordering::SeqCst)));
+    c.progress_handler(1000, cancel.map(|cancel| move || cancel.load(Ordering::SeqCst)))?;
     c.execute_batch("PRAGMA journal_mode=DELETE; PRAGMA secure_delete=ON;")?;
     let tx = c.transaction()?;
     for (table, sql) in [
@@ -312,7 +312,8 @@ pub(crate) fn import(
     let mut declared = 0u64;
     for i in 0..zip.len() {
         let file = zip.by_index_raw(i).map_err(zip_failure)?;
-        let name = file.name();
+        let name = file.name().map_err(zip_failure)?;
+        let name = name.as_ref();
         // ZIP 只用 `/` 分隔；按原始字节拒绝反斜杠，不依赖各平台对 `features\x` 的解释。
         if file.name_raw().contains(&b'\\')
             || !EXPORTED.contains(&name)

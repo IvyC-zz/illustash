@@ -295,7 +295,7 @@ pub(crate) fn names_triggers(c: &Connection) -> Result<()> {
 }
 fn source_index(c: &Connection) -> Result<Value> {
     let mut query = c.prepare("SELECT * FROM characters")?;
-    let columns: Vec<String> = query.column_names().iter().map(|v| (*v).to_owned()).collect();
+    let columns: Vec<String> = query.column_names().map(str::to_owned).collect();
     let rows = query
         .query_map([], |r| {
             let mut obj = Map::new();

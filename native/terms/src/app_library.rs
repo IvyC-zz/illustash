@@ -277,7 +277,7 @@ enum Checks {
 }
 
 #[cfg(test)]
-pub(crate) fn check_database(conn: &Connection) -> Result<()> {
+pub(crate) fn check_database(conn: &mut Connection) -> Result<()> {
     match check_database_reporting(conn, None, Watch::default())? {
         Verdict::Sound => Ok(()),
         Verdict::Damaged(result) => Err(Error::Schema(format!("图库数据库损坏：{result}"))),
@@ -314,7 +314,7 @@ pub(crate) fn inspect_file(path: &Path, progress: Option<Report>, watch: Watch) 
     if watch.writer.as_ref().is_some_and(|journal| journal.exists()) {
         return Ok(Verdict::Yielded);
     }
-    check_database_reporting(&read_connection(path)?, progress, watch)
+    check_database_reporting(&mut read_connection(path)?, progress, watch)
 }
 
 /// quick_check 读每一页，然后（对表）再读一遍每一行来检查约束；SQLite 3.43+ 在两遍中都调用进度处理函数。
@@ -322,11 +322,11 @@ pub(crate) fn inspect_file(path: &Path, progress: Option<Report>, watch: Watch) 
 /// 合计是页数的 1.4–1.6×（2026-10-02），所以 `READS` 是预期的比例。估低了进度条会停在接近结尾处，
 /// 估高了会在结尾短暂跳一下，后者问题较小。
 ///
-/// 只看未命中不够：内置的 SQLite（SQLITE_ENABLE_MEMORY_MANAGEMENT）把进程里的每个连接放进同一个页缓存组，
-/// 所以这个连接可能靠回收其他连接的空闲页把整个小文件留在缓存里，第二遍就一次都不会未命中（#84）。
+/// 页面命中也算访问；检查第二遍可能直接命中第一遍留下的页。SQLite 3.54 的内置构建不再启用
+/// SQLITE_ENABLE_MEMORY_MANAGEMENT，页面请求统计仍同时适用于有、无共享页缓存组的构建。
 ///
 /// SQLite 报告为损坏或根本不是数据库的文件也算损坏，不论是哪条语句发现的。
-fn check_database_reporting(conn: &Connection, progress: Option<Report>, watch: Watch) -> Result<Verdict> {
+fn check_database_reporting(conn: &mut Connection, progress: Option<Report>, watch: Watch) -> Result<Verdict> {
     const READS: f64 = 1.5;
     let Watch { stop, writer } = watch;
     let watched = progress.is_some() || stop.is_some() || writer.is_some();
@@ -360,11 +360,11 @@ fn check_database_reporting(conn: &Connection, progress: Option<Report>, watch: 
                 }
                 stop.as_ref().is_some_and(|stop| stop.load(Ordering::SeqCst))
             }),
-        );
+        )?;
     }
     let result: rusqlite::Result<String> = conn.query_row("PRAGMA quick_check(1)", [], |row| row.get(0));
     if watched {
-        conn.progress_handler(0, None::<fn() -> bool>);
+        conn.progress_handler(0, None::<fn() -> bool>)?;
     }
     if yielded.load(Ordering::SeqCst) {
         return Ok(Verdict::Yielded);
@@ -630,8 +630,7 @@ mod tests {
         )
         .unwrap();
         drop(src);
-        // 进程里别处的空闲连接，每个都持有另一份副本的完整默认缓存。内置的 SQLite 让各连接共用一个页缓存组，
-        // 所以检查可能靠回收它们的页把整个文件留在缓存里，第二遍就一次都不会未命中（#84）。
+        // 保持其他连接打开并读热其缓存，再确认被检查的连接仍报告单调进度。
         let other = f.root.join("other.sqlite");
         fs::copy(f.package.join("source.sqlite"), &other).unwrap();
         for idle in [0, 8] {

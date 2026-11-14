@@ -811,13 +811,13 @@ fn import(models: &Models, place: &Place, paths: &[PathBuf]) -> std::result::Res
             let file = fs::File::open(path).map_err(unreadable)?;
             let mut archive = zip::ZipArchive::new(file)
                 .map_err(|e| Stop::Failed(format!("{name} 不是有效的 ZIP：{error}", error = e)))?;
+            let unreadable_entry = |error| Stop::Failed(format!("{name} 读取失败：{error}"));
             for i in 0..archive.len() {
-                let mut item =
-                    archive.by_index(i).map_err(|e| Stop::Failed(format!("{name} 读取失败：{error}", error = e)))?;
+                let mut item = archive.by_index(i).map_err(unreadable_entry)?;
                 if !item.is_file() {
                     continue;
                 }
-                let inner = format!("{name}/{}", item.name());
+                let inner = format!("{name}/{}", item.name().map_err(unreadable_entry)?);
                 let size = item.size();
                 take(inner, size, &mut item, &mut meter)?;
             }

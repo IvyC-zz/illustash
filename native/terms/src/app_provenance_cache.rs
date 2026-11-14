@@ -72,7 +72,7 @@ pub(super) fn forget_changed_content(c: &Connection, library: &Library) -> Resul
 }
 pub(super) fn backup(from: &Path, to: &Path) -> Result<()> {
     let c = crate::app_library::read_connection(from)?;
-    c.backup(rusqlite::DatabaseName::Main, to, None)?;
+    c.backup(rusqlite::MAIN_DB, to, rusqlite::backup::NO_PROGRESS)?;
     Ok(())
 }
 fn own(id: &str) -> Value {
