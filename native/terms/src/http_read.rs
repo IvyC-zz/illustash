@@ -8,7 +8,7 @@ use crate::{
     Error, Result,
 };
 use rusqlite::{params, params_from_iter, types::ValueRef, Connection, OpenFlags, OptionalExtension};
-use std::{collections::HashMap, sync::Arc};
+use std::{cell::RefCell, collections::HashMap, sync::Arc};
 use unicode_normalization::UnicodeNormalization;
 
 #[cfg(test)]
@@ -263,11 +263,11 @@ fn register_snapshot_names(c: &Connection) -> Result<()> {
 // 活得久）。不做全图库快照，也不做跨请求缓存：写入和切换图库不会复用过期的名字，空页面也不会加载所有身份的
 // 旧名字。
 fn register_entity_name(c: &Connection) -> Result<()> {
-    let mut names: HashMap<(bool, String), String> = HashMap::new();
+    let names = RefCell::new(HashMap::<(bool, String), String>::new());
     c.create_scalar_function("entity_name", 1, NAME_FUNCTION, move |ctx| {
         let id = ctx.get::<Option<String>>(0)?.unwrap_or_default();
         let key = (roman(), id);
-        if let Some(name) = names.get(&key) {
+        if let Some(name) = names.borrow().get(&key) {
             return Ok(name.clone());
         }
         // SAFETY: HTTP 在一个线程上持有这个连接。不拥有连接的句柄只在这个回调内使用，读的是同一个请求事务。
@@ -283,18 +283,18 @@ fn register_entity_name(c: &Connection) -> Result<()> {
         }
         .optional()?
         .unwrap_or_default();
-        names.insert(key, name.clone());
+        names.borrow_mut().insert(key, name.clone());
         Ok(name)
     })?;
     Ok(())
 }
 fn register_entity_info(c: &Connection) -> Result<()> {
-    let mut shown: HashMap<(bool, String, i64), String> = HashMap::new();
+    let shown = RefCell::new(HashMap::<(bool, String, i64), String>::new());
     c.create_scalar_function("entity_info", 2, NAME_FUNCTION, move |ctx| {
         let id = ctx.get::<Option<String>>(0)?.unwrap_or_default();
         let skin = i64::from(ctx.get::<i64>(1)? != 0);
         let key = (roman(), id, skin);
-        if let Some(info) = shown.get(&key) {
+        if let Some(info) = shown.borrow().get(&key) {
             return Ok(info.clone());
         }
         // SAFETY: 同 register_entity_name；连接引用不会逃出回调。
@@ -322,16 +322,16 @@ fn register_entity_info(c: &Connection) -> Result<()> {
             )
             .optional()?
             .unwrap_or_else(|| "{}".into());
-        shown.insert(key, info.clone());
+        shown.borrow_mut().insert(key, info.clone());
         Ok(info)
     })?;
     Ok(())
 }
 fn register_work_name(c: &Connection) -> Result<()> {
-    let mut chosen: HashMap<(bool, String), String> = HashMap::new();
+    let chosen = RefCell::new(HashMap::<(bool, String), String>::new());
     c.create_scalar_function("work_name", 1, NAME_FUNCTION, move |ctx| {
         let key = (roman(), ctx.get::<String>(0)?);
-        if let Some(name) = chosen.get(&key) {
+        if let Some(name) = chosen.borrow().get(&key) {
             return Ok(name.clone());
         }
         // SAFETY: 同 register_entity_name；回退路径也读这个事务，从不打开新连接。
@@ -351,7 +351,7 @@ fn register_work_name(c: &Connection) -> Result<()> {
                 .map(|v| shown_name(v.name, &v.source, v.names[2].clone(), &key.1, false))
                 .map_err(|e| rusqlite::Error::UserFunctionError(Box::new(e)))?,
         };
-        chosen.insert(key, name.clone());
+        chosen.borrow_mut().insert(key, name.clone());
         Ok(name)
     })?;
     Ok(())
