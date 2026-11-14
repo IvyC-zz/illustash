@@ -2233,6 +2233,8 @@
   "{path} 已包含在 {folder} 里，不重复添加。": "{path} is already inside {folder}, so it isn't added again.",
   "刷新页面": "Reload Page",
   "视图": "View",
+  "后退": "Back",
+  "前进": "Forward",
   "选择结果不是本地路径": "The selection is not a local path",
   "选择路径不是 UTF-8": "The selected path is not UTF-8",
   "登录 Pixiv": "Sign in to Pixiv",
