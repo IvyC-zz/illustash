@@ -231,13 +231,19 @@ fn reason(method: &str, data: &str) -> Result<Json> {
     if !matches!(value, Json::Object(_)) {
         return Err(Error::Invalid("候选证据不是对象".into()));
     }
-    let n = value.get("count").cloned().unwrap_or(1i64.into());
-    let n = py_string(&n);
-    Ok(match method {
-        "group_oc" => format!("同一原创角色里有 {n} 张是 TA 画的"),
-        "group_cluster" => format!("相似的未识别图里有 {n} 张是 TA 画的"),
-        "group_run" => format!("同一段保存的图里有 {n} 张是 TA 画的"),
-        "ocr" => "图上读到了 TA 的账号".into(),
+    let n = value
+        .get("count")
+        .filter(|count| match count {
+            Json::Scalar(serde_json::Value::Number(n)) => n.as_u64().is_some_and(|n| n > 0),
+            Json::Integer(n) => !n.starts_with('-') && n.bytes().any(|digit| digit != b'0'),
+            _ => false,
+        })
+        .map(py_string);
+    Ok(match (method, n) {
+        ("group_oc", Some(n)) => format!("同一原创角色里有 {n} 张是 TA 画的"),
+        ("group_cluster", Some(n)) => format!("相似的未识别图里有 {n} 张是 TA 画的"),
+        ("group_run", Some(n)) => format!("同一段保存的图里有 {n} 张是 TA 画的"),
+        ("ocr", _) => "图上读到了 TA 的账号".into(),
         _ => "有线索指向 TA".into(),
     }
     .into())
@@ -447,4 +453,91 @@ pub fn audit(c: &Connection, library: bool, n: usize) -> Result<Json> {
         items.push(item);
     }
     Ok(Json::object([("items", Json::Array(items)), ("pool", (count as i64).into())]))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn count_reasons_on_core_and_legacy_paths_only_display_positive_integers() {
+        let c = Connection::open_in_memory().unwrap();
+        c.execute_batch("CREATE TABLE meta(key TEXT PRIMARY KEY,value TEXT);
+            CREATE TABLE terms(id INTEGER PRIMARY KEY,key TEXT,kind TEXT);
+            CREATE TABLE term_assets(id INTEGER PRIMARY KEY,key TEXT,namespace TEXT,removed_at TEXT);
+            CREATE TABLE term_projection(asset_id INTEGER,term_id INTEGER,state TEXT);
+            CREATE TABLE term_current_evidence(asset_id INTEGER,term_id INTEGER,method TEXT,data TEXT,score REAL);
+            CREATE TABLE term_names(term_id INTEGER,value TEXT,role TEXT,preferred INTEGER,position INTEGER);
+            CREATE TABLE term_links(term_id INTEGER,system TEXT,key TEXT,url TEXT);
+            CREATE TABLE artist_verdicts(artist TEXT,uuid TEXT,verdict TEXT);
+            INSERT INTO terms VALUES (1,'synthetic-artist','artist');
+            INSERT INTO term_assets VALUES (1,'synthetic-image','library',NULL);
+            INSERT INTO term_projection VALUES (1,1,'maybe');
+            INSERT INTO term_current_evidence VALUES (1,1,'group_oc','{}',0.9);
+            ATTACH DATABASE ':memory:' AS prov;
+            CREATE TABLE prov.artists(id TEXT PRIMARY KEY,merged_into TEXT);
+            CREATE TABLE prov.artist_links(artist_id TEXT,system TEXT,key TEXT,url TEXT);
+            CREATE TABLE prov.image_artists(asset TEXT,artist_id TEXT,status TEXT,method TEXT,evidence TEXT,score REAL);
+            CREATE TABLE prov.image_sources(asset TEXT,site TEXT,url TEXT,artist_id TEXT,method TEXT,post_id TEXT);
+            INSERT INTO prov.artists VALUES ('synthetic-artist',NULL);
+            INSERT INTO prov.image_artists VALUES ('synthetic-image','synthetic-artist','candidate','group_oc','{}',0.9);").unwrap();
+        for core in [false, true] {
+            c.execute("INSERT OR REPLACE INTO meta VALUES ('terms_artists',?)", [if core { "core" } else { "legacy" }])
+                .unwrap();
+            for method in ["group_oc", "group_cluster", "group_run"] {
+                for count in [
+                    None,
+                    Some("true"),
+                    Some("false"),
+                    Some("null"),
+                    Some("0"),
+                    Some("-1"),
+                    Some("1.0"),
+                    Some("0.5"),
+                    Some("[]"),
+                    Some("{}"),
+                    Some(r#""3""#),
+                    Some("NaN"),
+                    Some("Infinity"),
+                    Some("1e400"),
+                    Some("1"),
+                    Some("123456789012345678901234567890"),
+                ] {
+                    let raw = count.map_or_else(|| "{}".to_owned(), |count| format!("{{\"count\":{count}}}"));
+                    c.execute("UPDATE term_current_evidence SET method=?,data=?", [method, &raw]).unwrap();
+                    c.execute("UPDATE prov.image_artists SET method=?,evidence=?", [method, &raw]).unwrap();
+                    let before = c.total_changes();
+                    let result = for_asset(&c, true, "synthetic-image", None, false).unwrap();
+                    let Json::Array(maybe) = result.get("maybe").unwrap() else { panic!("候选必须是数组") };
+                    assert_eq!(maybe.len(), 1);
+                    let expected = match (method, count) {
+                        ("group_oc", Some(n @ ("1" | "123456789012345678901234567890"))) => {
+                            format!("同一原创角色里有 {n} 张是 TA 画的")
+                        }
+                        ("group_cluster", Some(n @ ("1" | "123456789012345678901234567890"))) => {
+                            format!("相似的未识别图里有 {n} 张是 TA 画的")
+                        }
+                        ("group_run", Some(n @ ("1" | "123456789012345678901234567890"))) => {
+                            format!("同一段保存的图里有 {n} 张是 TA 画的")
+                        }
+                        _ => "有线索指向 TA".into(),
+                    };
+                    assert_eq!(
+                        maybe[0].field("reason").text(),
+                        expected,
+                        "core={core},method={method},count={count:?}"
+                    );
+                    assert_eq!(c.total_changes(), before, "理由读取不能改证据或裁决");
+                    assert_eq!(
+                        c.query_row("SELECT data FROM term_current_evidence", [], |r| r.get::<_, String>(0)).unwrap(),
+                        raw
+                    );
+                    assert_eq!(
+                        c.query_row("SELECT evidence FROM prov.image_artists", [], |r| r.get::<_, String>(0)).unwrap(),
+                        raw
+                    );
+                }
+            }
+        }
+    }
 }
