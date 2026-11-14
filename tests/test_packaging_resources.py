@@ -314,6 +314,10 @@ class PackagingResourcesTest(unittest.TestCase):
             pack.stage(output, self.binaries, research=packaged == 'research', iqdb=self.iqdb)
             self.assertEqual(self.manifest(output)['files']['resources/licenses/rust-dependencies.txt'],
                              hashlib.sha256(text.read_bytes()).hexdigest())
+            self.assertEqual((output / 'dependencies/core-Cargo.lock').read_bytes(), (ROOT / 'Cargo.lock').read_bytes())
+            if packaged == 'research':
+                self.assertEqual((output / 'dependencies/iqdb-Cargo.lock').read_bytes(),
+                                 (ROOT / 'crates/iqdb/Cargo.lock').read_bytes())
         pack.resources(self.root / 'desktop-resources')
         self.assertEqual((self.root / 'desktop-resources/licenses/rust-dependencies.txt').read_bytes(), text.read_bytes())
 
@@ -330,6 +334,8 @@ class PackagingResourcesTest(unittest.TestCase):
         def lock_root(name, change):
             root = self.root / name
             root.mkdir()
+            (root / 'crates/iqdb').mkdir(parents=True)
+            shutil.copy2(ROOT / 'crates/iqdb/Cargo.lock', root / 'crates/iqdb/Cargo.lock')
             lock = root / 'Cargo.lock'
             shutil.copy2(ROOT / 'Cargo.lock', lock)
             lock.write_text(change(lock.read_text()))

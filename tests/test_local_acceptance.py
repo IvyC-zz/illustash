@@ -265,7 +265,7 @@ class LocalAcceptanceTests(unittest.TestCase):
         self.assertLess(start, targeted)
         self.assertLess(targeted, script.index('run "$python" -m tests.run_fixed_suite -v -b'))
         # 执行真实脚本的构建至定向片段；只将 cargo 变成合成写入。
-        for name in ('target/release/illustash-terms', 'target/release/illustash-iqdb',
+        for name in ('target/release/illustash-terms', 'crates/iqdb/target/release/illustash-iqdb',
                      'target/release/examples/read-http'):
             self.write(name, 'old target')
         self.write('tests/__init__.py', '')
@@ -281,7 +281,7 @@ rustc() { echo synthetic-rust; }
 run() {
   if [ "$1" = cargo ]; then
     printf candidate > target/release/illustash-terms
-    printf candidate > target/release/illustash-iqdb
+    printf candidate > crates/iqdb/target/release/illustash-iqdb
     printf candidate > target/release/examples/read-http
   else
     "$@"

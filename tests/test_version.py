@@ -22,7 +22,7 @@ class VersionTests(unittest.TestCase):
     def setUp(self):
         self.root = Path(tempfile.mkdtemp(prefix='illustash-version-'))
         self.addCleanup(shutil.rmtree, self.root)
-        files = [version.SOURCE, version.TAURI, version.LOCK]
+        files = [version.SOURCE, version.TAURI, *version.LOCKS]
         for crate in version.CRATES:
             files.append(f'{crate}/Cargo.toml')
         for relative in files:
@@ -45,11 +45,12 @@ class VersionTests(unittest.TestCase):
         self.assertIn(version.TAURI, paths)
         for crate in version.CRATES:
             self.assertIn(f'{crate}/Cargo.toml', paths)
-        self.assertIn('Cargo.lock', paths)
-        # 根 lock 列出全部本项目 crate，从不列 registry crate。
+        for lock in version.LOCKS:
+            self.assertIn(lock, paths)
+        # 根与 IQDB 的 lock 分别列出各自的本项目 crate，从不列 registry crate。
         names = {(path, name) for path, name, _ in version.places(ROOT) if path.endswith('.lock')}
         self.assertIn(('Cargo.lock', 'illustash-terms'), names)
-        self.assertIn(('Cargo.lock', 'illustash-iqdb'), names)
+        self.assertIn(('crates/iqdb/Cargo.lock', 'illustash-iqdb'), names)
         self.assertIn(('Cargo.lock', 'illustash-relation-fft'), names)
         self.assertTrue(all(name.startswith('illustash-') for _, name in names))
 
@@ -64,11 +65,12 @@ class VersionTests(unittest.TestCase):
         for crate in version.CRATES:
             manifest = tomllib.loads((self.root / crate / 'Cargo.toml').read_text())
             self.assertEqual(manifest['package']['version'], '0.2.0-beta.1')
-        lock = tomllib.loads((self.root / 'Cargo.lock').read_text())
-        for package in lock['package']:
-            if package['name'].startswith('illustash-'):
-                self.assertEqual(package['version'], '0.2.0-beta.1')
-                self.assertNotIn('source', package)
+        for relative in version.LOCKS:
+            lock = tomllib.loads((self.root / relative).read_text())
+            for package in lock['package']:
+                if package['name'].startswith('illustash-'):
+                    self.assertEqual(package['version'], '0.2.0-beta.1')
+                    self.assertNotIn('source', package)
         # 只改了本项目的版本字符串：每处一个，别的不动（恰好也是 0.1.0 的 registry crate 仍是 0.1.0）。
         counts = {}
         for path, _, _ in version.places(self.root):

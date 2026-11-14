@@ -38,10 +38,10 @@ NOTICES = {'licenses/LICENSE': 'LICENSE', 'licenses/THIRD_PARTY.md': 'docs/THIRD
            'licenses/pocketfft/LICENSE.md': 'native/terms/vendor/pocketfft/LICENSE.md',
            'licenses/LCMS.txt': 'native/terms/licenses/LCMS.txt',
            'licenses/rust-dependencies.txt': 'packaging/rust-licenses/rust-dependencies.txt'}
-# 根 Cargo.lock 里每个第三方 crate 的许可文本，由 tools/gen_rust_licenses.py 生成，和 crates.json 一起提交；
+# 根与 IQDB 的 Cargo.lock 里每个第三方 crate 的许可文本，由 tools/gen_rust_licenses.py 生成，和 crates.json 一起提交；
 # 打包暂存时只拿它们和 lock 文件核对，然后复制（#161）。
 RUST_LICENSES = ROOT / 'packaging/rust-licenses'
-RUST_WORKSPACES = ('.',)
+RUST_WORKSPACES = ('.', 'crates/iqdb')
 # 模型许可的原文，与其来源和 SHA-256 一起提交（#8）。每个计算包都带着它们，不管带不带模型
 # （不带时 App 在第一次使用时下载模型，#168）；没有别的来源。
 MODEL_LICENSES = ROOT / 'packaging/model-licenses'
@@ -204,7 +204,7 @@ def stage(destination, binaries, research=False, desktop=None, iqdb=None, models
     cmd_setup = launcher_environment(windows=True) if research else ''
     copy(binaries / ('illustash-terms' + suffix), destination / 'bin' / ('illustash-terms' + suffix))
     resources(destination / 'resources')
-    # 安装包中的清单文件名保持不变，三种程序现在都由同一份 workspace lock 构建。
+    # 安装包中的清单文件名保持不变；宿主与桌面共享根 lock，IQDB 保留独立 lock。
     copy(ROOT / 'Cargo.lock', destination / 'dependencies/core-Cargo.lock')
     if desktop:
         copy(desktop, destination / 'bin' / ('illustash-desktop' + suffix))
@@ -216,9 +216,9 @@ def stage(destination, binaries, research=False, desktop=None, iqdb=None, models
     (destination / 'start.sh').chmod(0o755)
     (destination / 'start.cmd').write_text('@echo off\r\nsetlocal\r\n' + cmd_setup + '"%~dp0bin\\illustash-terms.exe" http --native --root "%ILLUSTASH_ROOT%" %*\r\n' if research else '@echo off\r\n"%~dp0bin\\illustash-terms.exe" http --native --root "%~dp0resources" %*\r\n', newline='')
     if research:
-        iqdb = iqdb or target() / 'release' / ('illustash-iqdb' + suffix)
+        iqdb = iqdb or target(ROOT / 'crates/iqdb') / 'release' / ('illustash-iqdb' + suffix)
         copy(iqdb, destination / 'bin' / ('illustash-iqdb' + suffix))
-        copy(ROOT / 'Cargo.lock', destination / 'dependencies/iqdb-Cargo.lock')
+        copy(ROOT / 'crates/iqdb/Cargo.lock', destination / 'dependencies/iqdb-Cargo.lock')
         copy(binaries / ('illustash-worker' + suffix), destination / 'bin' / ('illustash-worker' + suffix))
         if models:
             for name in MODEL_FILES:
@@ -386,10 +386,10 @@ def archive(directory, output):
                 info.external_attr = (path.stat().st_mode & 0xffff) << 16
                 bundle.writestr(info, path.read_bytes())
 
-def target():
+def target(workspace=ROOT):
     """workspace 的产物目录；遵守 CARGO_TARGET_DIR。"""
     configured = os.environ.get('CARGO_TARGET_DIR')
-    return Path(configured).resolve() if configured else ROOT / 'target'
+    return Path(configured).resolve() if configured else workspace / 'target'
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)

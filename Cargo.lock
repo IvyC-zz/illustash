@@ -1720,16 +1720,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "illustash-iqdb"
-version = "0.1.0"
-dependencies = [
- "image",
- "serde",
- "serde_json",
- "ureq",
-]
-
-[[package]]
 name = "illustash-platform"
 version = "0.1.0"
 dependencies = [
@@ -1805,8 +1795,6 @@ dependencies = [
  "num-traits",
  "png 0.17.16",
  "tiff 0.9.1",
- "zune-core",
- "zune-jpeg",
 ]
 
 [[package]]

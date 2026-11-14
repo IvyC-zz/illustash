@@ -76,7 +76,7 @@ run cargo build --release --locked --manifest-path native/terms/Cargo.toml --fea
 run cargo build --release --locked --manifest-path crates/iqdb/Cargo.toml
 export ILLUSTASH_TERMS_BIN="$root/target/release/illustash-terms"
 export ILLUSTASH_NATIVE_ROOT="$root"
-export ILLUSTASH_IQDB_BINARY="$root/target/release/illustash-iqdb"
+export ILLUSTASH_IQDB_BINARY="$root/crates/iqdb/target/release/illustash-iqdb"
 export ILLUSTASH_READ_HTTP_BIN="$root/target/release/examples/read-http"
 export ILLUSTASH_RECOGNITION_COMPUTE_BIN="$root/target/release/examples/recognition-compute"
 export ILLUSTASH_INDEX_COMPUTE_BIN="$root/target/release/examples/index-compute"

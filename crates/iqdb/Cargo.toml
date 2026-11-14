@@ -12,8 +12,19 @@ ureq = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
+[profile.release]
+strip = true
+
 # 2026-10-29 用户定：每个 unsafe 块和 unsafe impl 都写 `// SAFETY:` 注释；生产代码不用 unwrap，
 # 确实不会失败的地方用 expect 写明理由。测试里的 unwrap 由仓库根目录的 clippy.toml 放行。
 [lints.clippy]
 undocumented_unsafe_blocks = "warn"
 unwrap_used = "warn"
+
+# dev 构建少带调试信息（#362）：自己的 crate 只带行号表，panic 和测试失败的回溯里仍有文件名和行号；
+# 第三方依赖不带调试信息。只动 dev profile，release 不变。做法和数字见 docs/LOCAL_CHECKS.md。
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = false

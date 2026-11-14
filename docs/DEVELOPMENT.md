@@ -16,7 +16,9 @@
 
 ### 快速开始
 
-六个自有 crate 共用根目录的 Cargo workspace、`Cargo.lock` 和 `target/`；原有五个项目之外，`crates/relation-fft` 只负责 PocketFFT 的 C++ 编译与原始接口。仍可用 `--manifest-path` 单独构建成员。依赖、features 和架构方向保留在各自 manifest；根配置统一 profile 与 tiny_http patch。开发构建沿用 terms 的第三方依赖 opt-level 3，自有成员和 tiny_http 保持 opt-level 0；自有成员带行号表，第三方不带调试信息。release 仅 desktop 与 IQDB 去符号，Windows 静态 CRT 仍由根 `.cargo/config.toml` 控制。
+Core、Platform、宿主、桌面和 `crates/relation-fft` 共用根目录的 Cargo workspace、`Cargo.lock` 和 `target/`；FFT crate 只负责 PocketFFT 的 C++ 编译与原始接口。仍可用 `--manifest-path` 单独构建成员。依赖、features 和架构方向保留在各自 manifest；根配置统一 profile 与 tiny_http patch。开发构建沿用 terms 的第三方依赖 opt-level 3，自有成员和 tiny_http 保持 opt-level 0；自有成员带行号表，第三方不带调试信息。release 仅 desktop 去符号。
+
+IQDB 保留独立的 `crates/iqdb/Cargo.lock`、`crates/iqdb/target/` 和原 profile（dev 自有代码带行号表、第三方不带调试信息，release 去符号）：其 image 0.25.10 / zune-jpeg 0.5.15 与宿主固定的 image 0.25.6 无法在同一 workspace 同时解析；合并会改变既有 JPEG 签名，用户于 2026-11-15 批准此例外（#311）。Windows 静态 CRT 对两个项目都仍由根 `.cargo/config.toml` 控制。
 
 ```sh
 # 构建核心
@@ -66,7 +68,7 @@ HTTP 错误保留原有状态码与 `error` 正文，额外通过 `X-Illustash-D
 
 ### 安装包与桌面
 
-版本号只在 `native/terms/application.json` 写一处（SemVer，可带 `-beta.1` 这类预发布后缀，不带 `+build`；关于页的版本与渠道也读这里）。`python3 tools/version.py --set X.Y.Z` 改它并同步 `desktop/tauri.conf.json`、各自有 crate 的 `Cargo.toml` 和根 `Cargo.lock` 里的本项目包；`--sync` 只按它同步；不带参数只检查。本机全量与 CI 的 Python 测试会检查一致，`packaging/build.py` 不一致就拒绝打包。改版本号会改动 `desktop/tauri.conf.json`，按 AGENTS.md 同步 `tests/migration_inventory.json` 的指纹。
+版本号只在 `native/terms/application.json` 写一处（SemVer，可带 `-beta.1` 这类预发布后缀，不带 `+build`；关于页的版本与渠道也读这里）。`python3 tools/version.py --set X.Y.Z` 改它并同步 `desktop/tauri.conf.json`、各自有 crate 的 `Cargo.toml` 和根及 IQDB 的 `Cargo.lock` 里的本项目包；`--sync` 只按它同步；不带参数只检查。本机全量与 CI 的 Python 测试会检查一致，`packaging/build.py` 不一致就拒绝打包。改版本号会改动 `desktop/tauri.conf.json`，按 AGENTS.md 同步 `tests/migration_inventory.json` 的指纹。
 
 `packaging/build.py` 按白名单复制资源，生成逐文件 SHA-256 的 `manifest.json` 与依赖清单；`--archive` 出 ZIP，`--binaries` 复用已构建的二进制，`--profile dev` 用调试构建。研究便携形态加 `--research --models PATH`；macOS 与 Windows 另需 `--ort-dylib FILE --ort-licenses DIR`，Windows 还需 `--openblas-site DIR`；桌面形态加 `--desktop PATH`，或加 `--desktop-resources` 后再在 `desktop/` 执行 `cargo tauri build --config ../packaging/tauri-bundle.json`。
 
@@ -83,9 +85,9 @@ HTTP 错误保留原有状态码与 `error` 正文，额外通过 `X-Illustash-D
    ```
 
    首个公开测试版没有上一个 tag，用现在的 `0.1.0`（#165）。关于页的渠道「预览版」是 `application.json` 的 `channel`，与检查更新无关；检查更新只看版本号带不带后缀（第 10 步），所以装了不带后缀版本的人收不到带后缀的版本。
-2. **升版本号并同步**：从最新 main 开分支，`python3 tools/version.py --set X.Y.Z` 改 `native/terms/application.json`，并同步 `desktop/tauri.conf.json`、六个自有 crate 的 `Cargo.toml` 和根 `Cargo.lock` 里本项目的包；再运行 `python -m tools.migration_inventory sync-sources` 同步迁移清单指纹。`python3 tools/version.py` 不带参数只检查：一致时打印「版本号一致：X.Y.Z」，不一致时逐处列出并退出 1。另外两道检查：全量里的 `tests/test_version.py`，以及 `packaging/build.py` 不一致就拒绝打包。这个 PR 按普通代码级别走合并队列，转 Ready 写「待集成」。版本号已经是要发的值时跳过这一步。
+2. **升版本号并同步**：从最新 main 开分支，`python3 tools/version.py --set X.Y.Z` 改 `native/terms/application.json`，并同步 `desktop/tauri.conf.json`、六个自有 crate 的 `Cargo.toml` 和根及 IQDB 的 `Cargo.lock` 里本项目的包；再运行 `python -m tools.migration_inventory sync-sources` 同步迁移清单指纹。`python3 tools/version.py` 不带参数只检查：一致时打印「版本号一致：X.Y.Z」，不一致时逐处列出并退出 1。另外两道检查：全量里的 `tests/test_version.py`，以及 `packaging/build.py` 不一致就拒绝打包。这个 PR 按普通代码级别走合并队列，转 Ready 写「待集成」。版本号已经是要发的值时跳过这一步。
 3. **发布提交与本机全量**：集成会话把版本号 PR 编进一批，在候选 head 上经 `collab_run.py run -- bash tools/check_all.sh` 跑全量（占 heavy 槽，做法见 [合并队列](LOCAL_CHECKS.md#合并队列集成会话)），用户批准后合入。发布提交就是这一批合完后的 main 提交，它的 tree 与通过全量的候选 head 相同（`git rev-parse <发布提交>^{tree} <候选head>^{tree}` 两行一样）。main 在那之后又合入了不跑全量的 PR（界面级、只改文档），要带上它们就请集成会话在 main 当前提交上补跑一次全量，以它为发布提交。
-   - **依赖漏洞**：在发布提交上对根 `Cargo.lock` 跑一次 `cargo audit -f Cargo.lock`。有漏洞时逐条判断是否用到受影响的功能：用到的先升级再发布（升级 PR 按普通代码级别走合并队列，发布提交随之换成合入后的 main 提交），没用到的把编号和理由写进这次发布的 Issue。unmaintained、yanked 之类的警告只记录。需要 `cargo install cargo-audit --locked`（本机已装 0.22.2）；第一次运行会从 GitHub 拉 RustSec 漏洞库。
+   - **依赖漏洞**：在发布提交上对根与 IQDB 两份锁文件分别运行 `cargo audit -f Cargo.lock`、`cargo audit -f crates/iqdb/Cargo.lock`。有漏洞时逐条判断是否用到受影响的功能：用到的先升级再发布（升级 PR 按普通代码级别走合并队列，发布提交随之换成合入后的 main 提交），没用到的把编号和理由写进这次发布的 Issue。unmaintained、yanked 之类的警告只记录。需要 `cargo install cargo-audit --locked`（本机已装 0.22.2）；第一次运行会从 GitHub 拉 RustSec 漏洞库。
    - **更新公钥**（#279）：发布提交里 `desktop/tauri.conf.json` 的 `plugins.updater.pubkey` 不能是空的，并且和用户保管的私钥是一对（与 `~/.tauri/illustash-updater.key.pub` 的内容相同，见下面 [更新签名密钥](#更新签名密钥)）。公钥是空的构建照样能用，只是「下载并重启」不出现，只能打开下载页；公钥不对的构建以后收不到任何自动更新。
    - **仓库 ID**（#358）：`gh api repos/shio-vinyl/illustash --jq .id` 的结果要等于发布提交里 `native/terms/src/app_updates.rs` 的 `REPOSITORY_ID`。ID 不对时应用靠按名字的回退照样查得到更新，验收看不出来，但仓库以后改名或转移就接不住了（见第 10 步）。仓库删掉重建过、或者换了仓库，都要先改这个常量和本文、[Web 界面](WEB_V2.md#界面语言2026-10-18173) 里的地址。
 4. **两个平台打包**：首个内测版起每个平台只发不含模型的小安装包，模型第一次使用时下载（#168）；打法与完整包相同，只是不传 `--models`，参数说明见 [安装与平台](BACKEND_TASKS.md#独立安装与可选计算包)。两边都从发布提交的干净检出构建（例如 `git worktree add --detach <目录> <发布提交>`）：关于页的构建号取自 `git rev-parse --short HEAD`，已跟踪文件有改动时带 `-dirty`，发出去的包不能带。短哈希的长度由各自检出里的对象数决定，两个平台可能不同（0.1.0：macOS `1b72ffd4`，Windows `1b72ffd`），指的是同一个提交。release 构建按 [本机资源](LOCAL_CHECKS.md#本机资源排队计时与后台优先级) 的规定排队。安装包文件名用 Tauri 的默认格式：`Illustash_X.Y.Z_aarch64.zip`、`Illustash_X.Y.Z_x64-setup.exe`（2026-10-20 用户定）。
@@ -147,7 +149,7 @@ HTTP 错误保留原有状态码与 `error` 正文，额外通过 `X-Illustash-D
 
 ```text
 illustash/
-├── crates/               词条核心、平台能力、IQDB 签名
+├── crates/               词条核心、平台能力、IQDB 签名、FFT 编译
 ├── native/terms/         应用宿主：Core 适配、CLI、HTTP、任务编排
 ├── desktop/              Tauri 桌面外壳：启动服务与 Pixiv 登录窗口
 ├── web/static/           静态界面
