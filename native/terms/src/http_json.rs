@@ -133,7 +133,7 @@ impl From<&str> for Json {
 }
 impl From<String> for Json {
     fn from(v: String) -> Self {
-        Self::from(v.as_str())
+        Self::Scalar(Value::String(v))
     }
 }
 impl From<i64> for Json {
