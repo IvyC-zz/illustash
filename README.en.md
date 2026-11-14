@@ -179,9 +179,11 @@ macOS (Apple silicon, macOS 14 or later) is the primary platform, and Windows x6
 
 The interface supports Simplified Chinese and English, defaults to “System”, and can be switched in “Settings › General › Language”.
 
-There is no official release yet, nor are notarized or code-signed installers provided; building from source is currently required. The core uses Rust stable; Python is not needed at runtime, while some build and check tools require Python 3.12 and Node 22.
+Illustash 0.1.0 has been officially released. Download it from [GitHub Releases](https://github.com/shio-vinyl/illustash/releases): a zip for Apple silicon Macs and an x64 installer for Windows. The installers are not notarized by Apple or code-signed for Windows, so the system blocks them the first time you open them; allow them once as described in [Troubleshooting installation and launch](docs/INSTALL.md) (in Chinese). When a new version comes out, you can check for updates and use “Download and restart” inside the app.
 
-Model files required for local recognition are not included in the code repository (in the full app they can be downloaded when prompted on first use, or imported offline from files; running from source requires preparing them separately). See [Installation and platforms](docs/BACKEND_TASKS.md#独立安装与可选计算包) for dependencies, build steps, and compute component setup, and [Troubleshooting installation and launch](docs/INSTALL.md) for common gatekeeping prompts, model downloads, and runtime troubleshooting.
+You can also build from source. The core uses Rust stable; Python is not needed at runtime, while some build and check tools require Python 3.12 and Node 22.
+
+Model files required for local recognition are not included in the code repository or the installers (the app downloads them when prompted on first use, or imports them offline from files; running from source requires preparing them separately). See [Installation and platforms](docs/BACKEND_TASKS.md#独立安装与可选计算包) for dependencies, build steps, and compute component setup, and [Troubleshooting installation and launch](docs/INSTALL.md) for common gatekeeping prompts, model downloads, and runtime troubleshooting.
 
 ### Running from source
 
