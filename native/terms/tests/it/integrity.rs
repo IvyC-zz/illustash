@@ -131,15 +131,22 @@ impl Host {
         };
         (response.status(), response.into_json().unwrap())
     }
-    /// 等后台检查结束（它在宿主就绪几秒后开始）。
+    /// 等后台检查结束（它在宿主就绪几秒后开始）。检查耗时随磁盘速度差别很大：GitHub 托管的 macOS 机器上，
+    /// 最后一段约 400 MB 的 source.sqlite 让路后重查一遍要一分多钟。所以只要进度还在变就继续等，
+    /// 进度 60 秒不动才算卡住；总时长另设上限，防止反复让路时一直等下去。
     fn checked(&self) -> Value {
         let start = Instant::now();
+        let (mut seen, mut moved) = (Value::Null, Instant::now());
         loop {
             let status = self.get("/api/integrity");
             if status["running"].is_null() {
                 return status;
             }
-            assert!(start.elapsed() < Duration::from_secs(60), "background check did not finish: {status}");
+            if status["running"] != seen {
+                (seen, moved) = (status["running"].clone(), Instant::now());
+            }
+            assert!(moved.elapsed() < Duration::from_secs(60), "background check stalled: {status}");
+            assert!(start.elapsed() < Duration::from_secs(600), "background check did not finish: {status}");
             thread::sleep(Duration::from_millis(100));
         }
     }
