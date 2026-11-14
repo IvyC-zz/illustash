@@ -1,5 +1,6 @@
 // 近看一张图（桌面布局，#199）：网格旁边的检查面板、偶尔出现的「是 TA 吗？」提问，以及全屏查看器。
 import {esc, monthText, number} from '../core/format.js';
+import {unreadableText} from '../core/jobs.js';
 import {t} from '../core/i18n.js';
 import {REASONS, nameWithWork} from '../core/labels.js';
 import {fetchChar} from '../core/meta.js';
@@ -80,7 +81,7 @@ export async function inspect(ident, quiet = false) {
       <div class="inspector-actions">${d.memberships.length ? `<button class="primary large" id="fixChar">${t('更正角色')} <kbd>C</kbd></button>` : `<button class="primary large" data-also="1">${t('设为角色…')} <kbd>C</kbd></button>`}${pageOf(state.route).skip && !d.memberships.length ? `<button class="secondary large" id="skipOne">${t('跳过')} <kbd>S</kbd></button>` : ''}${d.unknown ? `<button class="secondary large" id="resumeOne">${t('恢复到未识别')}</button>` : ''}${curate}</div>`;
     if (pc) loadCharStats(pc.id, ident, gen);
     $('fixChar')?.addEventListener('click', () => swapOne(d, ident, primary.id));
-    $('inspector').querySelector('.preview img').addEventListener('error', e => { e.target.parentElement.innerHTML = `<div class="missing">${t('图片暂不可读，请检查 Photos 下载状态与访问权限')}</div>`; }, {once: true});
+    $('inspector').querySelector('.preview img').addEventListener('error', e => { e.target.parentElement.innerHTML = `<div class="missing">${esc(unreadableText())}</div>`; }, {once: true});
     $('closeInspector').onclick = closeInspector;
     $('expand').onclick = $('previewButton').onclick = () => openViewer(indexOf(ident));
     for (const b of $('inspector').querySelectorAll('[data-nav]')) b.onclick = () => step(Number(b.dataset.nav));
@@ -220,7 +221,7 @@ export async function showViewer(i, held = null) {
   state.viewer = Math.max(0, i); setCursor(state.viewer); state.viewerItem = item;
   if (same) { $('viewerCount').textContent = indexOf(item.uuid) >= 0 ? `${number(indexOf(item.uuid) + 1)} / ${number(state.total)}` : t('已移出当前列表 · ← → 继续'); return refreshViewerBar(item, i); }
   const img = $('viewerImg'); img.style.transform = ''; img.hidden = false; $('viewerMissing').hidden = true; Object.assign(view, {scale: 1, x: 0, y: 0});
-  img.onerror = () => { if (state.viewerItem?.uuid === item.uuid) { img.hidden = true; $('viewerMissing').hidden = false; } };
+  img.onerror = () => { if (state.viewerItem?.uuid === item.uuid) { img.hidden = true; $('viewerMissing').textContent = unreadableText(); $('viewerMissing').hidden = false; } };
   img.src = `/image?id=${encodeURIComponent(item.uuid)}&size=preview`;
   const full = new Image(); full.onload = () => { if (state.viewerItem?.uuid === item.uuid) { img.src = full.src; $('viewerSize').textContent = t('本地副本 {w} × {h}', {w: full.naturalWidth, h: full.naturalHeight}); } }; full.src = `/image?id=${encodeURIComponent(item.uuid)}&size=full`;
   $('viewerSize').textContent = '';
