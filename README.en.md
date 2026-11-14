@@ -69,7 +69,7 @@ This section is for developers and curious users who want to know how Illustash 
 ### Architecture
 
 ```mermaid
-flowchart LR
+flowchart TB
     shell["Desktop shell desktop/<br>Tauri: windows, splash, Pixiv sign-in"]
     web["Web UI web/static<br>native ES modules, no build step"]
     host["App host native/terms<br>local HTTP, CLI, background tasks, all network requests"]

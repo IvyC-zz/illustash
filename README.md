@@ -69,7 +69,7 @@
 ### 整体结构
 
 ```mermaid
-flowchart LR
+flowchart TB
     shell["桌面外壳 desktop/<br>Tauri：窗口、启动页、Pixiv 登录窗口"]
     web["网页界面 web/static<br>原生 ES 模块，没有构建步骤"]
     host["应用宿主 native/terms<br>本机 HTTP、命令行、后台任务、全部联网请求"]
