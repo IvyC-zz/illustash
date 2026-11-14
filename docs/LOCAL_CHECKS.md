@@ -199,6 +199,8 @@ PR 应明确区分“当前 head 上完整执行退出 0”和“当前候选仅
 
 CI 使用标准 Python 3.12，与 macOS job 一致；常驻验收机使用嵌入式 3.13，`tests/test_run_fixed_suite.py` 的隔离入口测试覆盖其模块查找行为。CI 从 PyPI 下载并缓存固定的 x64 NumPy 2.5.3 wheel，安装它给 Python 对照用，再用打包脚本和 `crates/platform/src/research_openblas.json` 验证 DLL 的 SHA-256 并设置 `ILLUSTASH_RESEARCH_OPENBLAS_DLL`。3.12 与 3.13 对应的 wheel 含相同的已登记 DLL。Rust 和 wheel 的缓存只在 main 保存，PR 可还原。Windows job 的冷、热缓存耗时及压缩缓存大小待实际运行记录。
 
+固定 OpenBLAS DLL 仍会按 CPU 选择内核，浮点末位可能不同。灰度单元测试先按 DLL 摘要和实际内核选择独立 NumPy 固定参考，再严格比较五种宽度的全部输出位。NumPy 2.5.3 对应 DLL 的 SkylakeX 保留原期望，Haswell/Sandybridge 使用编译候选之前独立采集的参考，来源及摘要写在测试旁。未登记组合会明确报告缺少独立参考并使测试、Windows job 和 workflow 失败，不跳过、不按实际输出任选期望；这份参考清单不限制产品支持的 DLL 或 CPU。汇总「全部检查」仍遵守下述 Windows 试运行规则，不能据其绿色状态认定 Windows 已通过。
+
 `python -m tests.windows_fixed_suite --log windows-unittest.log` 是候选二进制和 OpenBLAS 接线后的全套入口。它列出全部 unittest 跳过，白名单逐条匹配平台限制，缺被测二进制、DLL 或升级输入均判失败。默认 discover 会排除显式点名的真实模型用例，打包资源测试使用合成文件，原生 ORT 通过运行时动态加载，故这个 job 只需要固定 OpenBLAS。自建 ONNX Runtime 的实际加载及真实模型、DirectML、CRT 依赖检查、安装／覆盖升级／卸载、GUI 和首次流程、真机性能以及 Windows ARM 仍在对应的验收机或虚拟机上做。试运行期间 Windows job 保留真实成败，分支保护的汇总暂不以它决定代码 PR 是否通过。
 
 ## macOS 实机测试（虚拟机）
