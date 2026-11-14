@@ -23,6 +23,36 @@ export function metaSoon(tagsOnly) {
   metaTagsOnly &&= tagsOnly; clearTimeout(metaTimer);
   metaTimer = setTimeout(() => { const t = metaTagsOnly; metaTagsOnly = true; refreshMeta({tagsOnly: t}).catch(failed); }, 700);
 }
+// 后台学习收尾（#400）：确认或撤销角色之后，服务端在下一次恢复检查（约每秒一次，native/terms/src/app_http.rs）时
+// 才开始学习（app_research.rs），学到的结果发布之后，未识别计数和分组才是最终的样子；写入请求返回时还没到这一步。
+// 能等的信号是 /api/clusters 带回的 learner 状态：idle（带上次学完的时间 at）、learning / importing / grouping /
+// waiting（进行中）、error、off（没有学习 worker，写入时已同步处理完，不用等）。
+export const learnerState = () => api('/api/clusters?nsfw=' + state.nsfw).then(r => r.learner || null);
+const LEARNER_BUSY = ['learning', 'importing', 'grouping', 'waiting'];
+// 一直空闲这么久就认为这次写入没有触发学习（撤销不涉及角色时就不会）；学习本身最多等 LEARN_LIMIT，之后由下一次
+// 写入、同步结束或换页再读。按累计的等待时间算，不读时钟。
+export const LEARN_QUIET = 3000, LEARN_LIMIT = 60000;
+let learnRun = 0;
+// before：写入发出前读到的 learner 状态（读不到为 null）。学到的结果已经发布时解析为 true；没有学习、学习失败、
+// 超时，或更新的一次写入接手了等待（每次调用都会让之前的等待作废）时解析为 false。
+export async function learningSettled(before) {
+  const run = ++learnRun;
+  let busySeen = LEARNER_BUSY.includes(before?.status), baseAt = before?.status === 'idle' ? before.at ?? null : undefined;
+  if (before?.status === 'off') return false;
+  for (let waited = 0, step = 400; waited < LEARN_LIMIT; step = Math.min(2000, Math.round(step * 1.5))) {
+    await new Promise(done => setTimeout(done, step)); waited += step;
+    if (run !== learnRun) return false;
+    let s; try { s = await learnerState(); } catch { return false; }
+    if (run !== learnRun || !s || s.status === 'off' || s.status === 'error') return false;
+    if (LEARNER_BUSY.includes(s.status)) { busySeen = true; continue; }
+    if (s.status !== 'idle') return false;
+    // 空闲：学过一轮（看到过进行中，或学完的时间变了）就是落定了；写入前的状态没读到时，第一次读到的空闲作为基准。
+    if (busySeen || (baseAt !== undefined && (s.at ?? null) !== baseAt)) return true;
+    if (baseAt === undefined) baseAt = s.at ?? null;
+    if (waited >= LEARN_QUIET) return false;
+  }
+  return false;
+}
 export function refreshMeta({tagsOnly = false, boot = null} = {}) {
   metaRevision++; metaFull ||= !tagsOnly;
   const bootEpoch = state.readEpoch, bootMode = state.nsfw;
