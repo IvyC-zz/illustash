@@ -140,7 +140,7 @@ fn character_rows(c: &Connection, q: &HashMap<String, String>, minimum: i64) -> 
     *bound.last_mut().expect("minimum argument") = minimum.into();
     crate::http_read::typed_rows(c, &sql, &bound)
 }
-/// Python int 没有上限；sqlite3 会拒绝超出其有符号 64 位绑定范围的最小值。
+/// 请求里的整数没有上限（沿用旧实现）；超出 SQLite 有符号 64 位绑定范围的最小值照旧按绑定错误拒绝。
 /// 在 SQL 绑定处检查，位于与 Store.characters 相同的作品、分级检查之后。
 fn bindable_minimum(min: &str) -> Result<()> {
     let exact_min: String = min

@@ -27,7 +27,7 @@ fn strings(v: &Value, message: &str) -> Result<Vec<String>> {
         .collect()
 }
 
-/// Python 的真值：None、False、0、空串、空列表、空字典为假。
+/// 沿用旧实现的真值规则：null、false、0、空串、空数组、空对象为假。
 pub fn truthy(v: &Value) -> bool {
     match v {
         Value::Null => false,
@@ -285,7 +285,7 @@ pub(crate) fn delete_assertion(c: &Connection, at: At, u: &str, e: &str, via: &s
     verdict(c, at, u, e, "clear", via)
 }
 
-/// 撤销后：`assertions` 的这一行 = 核心里的有效裁决（与 Python 按快照 DELETE + INSERT 的效果相同，含触发器语义）。
+/// 撤销后：`assertions` 的这一行 = 核心里的有效裁决（与旧实现按快照 DELETE + INSERT 的效果相同，含触发器语义）。
 pub(crate) fn refresh_assertion(c: &Connection, u: &str, e: &str) -> Result<()> {
     let effective: Option<(String, String)> = c.prepare_cached("SELECT v.verdict,v.via FROM term_effective_verdicts v JOIN term_assets a ON a.id=v.asset_id AND a.namespace='library'
               JOIN terms t ON t.id=v.term_id WHERE a.key=? AND t.key=?")?.query_row(

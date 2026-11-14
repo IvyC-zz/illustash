@@ -190,7 +190,7 @@ fn undo_hands_foreign_steps_back_without_skipping_them() {
     let t = create_term(&c, Kind::Artist, None, "user").unwrap();
     let a1 = asset(&c, "A-1");
     judge(&mut c, &[VerdictTarget::Image { asset: a1, term: t }], Verdict::Yes, "user", "", "确认").unwrap();
-    // Python 的标签操作排在后面：最近一步不是词条核心的。
+    // 宿主的标签操作排在后面：最近一步不是词条核心的。
     c.execute(
         "INSERT INTO actions(label,before_json) VALUES ('添加标签','[{\"uuid\":\"A-1\",\"tag\":\"x\",\"had\":null}]')",
         [],

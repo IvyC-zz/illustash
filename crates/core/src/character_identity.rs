@@ -188,7 +188,7 @@ pub fn command(c: &Connection, args: &Value) -> Result<Value> {
         }
         "decide" => {
             // 与 Store.decide_identity 的检查顺序一致（去掉预演后，同时有几处不对时报哪一条也要相同）：
-            // 关系 id 的类型（Python 在调用前查）→ 策略（上面）→ 没给 id 时先提议（端点）→ 状态与理由 → 关系存在。
+            // 关系 id 的类型（宿主在调用前查，见 app_identity）→ 策略（上面）→ 没给 id 时先提议（端点）→ 状态与理由 → 关系存在。
             let id = match args.get("relation_id").filter(|v| !v.is_null()) {
                 Some(v) => v.as_i64().filter(|i| *i > 0).ok_or_else(|| Error::invalid("关系 ID 不正确"))?,
                 None => {
@@ -203,7 +203,7 @@ pub fn command(c: &Connection, args: &Value) -> Result<Value> {
                     )?
                 }
             };
-            // Python 的默认值是 proposed；给了但不是字符串（含 null）照旧拒绝。
+            // 没给时默认是 proposed（沿用旧实现）；给了但不是字符串（含 null）照旧拒绝。
             let status = match args.get("status") {
                 None => "proposed",
                 Some(Value::String(s)) => s.as_str(),

@@ -329,7 +329,7 @@ mod tests {
         v.iter().map(|x| x / n).collect()
     }
 
-    /// 24 x 4 的合成问题，Python 参考实现（batch_lr.py）也解了同一个问题。
+    /// 24 x 4 的合成问题，旧的 Python 参考实现（batch_lr.py，#9 已删除）解过同一个问题。
     fn synthetic() -> (Rows, Labels) {
         let (n, d) = (24, 4);
         let x: Vec<f32> = (0..n)

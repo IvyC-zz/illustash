@@ -14,7 +14,7 @@ pub(crate) fn curate(c: &mut Connection, context: &LibraryContext, body: &Json) 
     };
     let tx = c.transaction_with_behavior(TransactionBehavior::Immediate)?;
     let ids = crate::app_commands::selected(&tx, context, body)?;
-    // 持久化的 JSON 用 Python 默认的 ASCII 转义和字段插入顺序。
+    // 持久化的 JSON 沿用已存数据的格式：非 ASCII 字符转义，字段按插入顺序。
     // HTTP Json 和规范 JSON 不得对这段历史重新排序或重新编码。
     let mut before = Vec::new();
     for id in &ids {
@@ -108,7 +108,7 @@ pub(crate) fn fold(c: &mut Connection, context: &LibraryContext, body: &Json) ->
     Ok(Json::object([("kinds", Json::Array(kinds.into_iter().map(Json::from).collect()))]))
 }
 
-// Python dict 的插入顺序会通过 duplicates 的 rowid 体现出来。并集运算先求右侧。
+// 分组的插入顺序会通过 duplicates 的 rowid 体现出来（沿用旧实现）。并集运算先求右侧。
 #[derive(Default)]
 struct Parents {
     index: HashMap<String, usize>,
@@ -190,7 +190,7 @@ pub(crate) fn refresh_duplicates(c: &Connection, src: &Connection, kinds: &[Stri
         });
         groups[slot].push(id);
     }
-    // 同键的组覆盖先前的值，但保留它在 dict 里的位置（旧 Python 推导式的行为）。
+    // 同键的组覆盖先前的值，但保留它在 dict 里的位置（沿用旧实现的行为）。
     let mut slots: HashMap<String, usize> = HashMap::new();
     let mut keyed: Vec<(String, Vec<String>)> = Vec::new();
     for group in groups {

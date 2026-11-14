@@ -55,7 +55,7 @@ fn unique_path_at(folder: &Path, name: &str) -> Result<PathBuf> {
     Ok(path)
 }
 fn path_exists(path: &Path) -> Result<bool> {
-    // Python 3.12 的 Path.exists 忽略这些错误，但会传出 NAME_MAX、权限之类的错误。
+    // 与旧实现（Python 3.12 的 Path.exists）一致：忽略这些错误，但传出 NAME_MAX、权限之类的错误。
     if path.as_os_str().to_string_lossy().contains('\0') {
         return Ok(false);
     }
@@ -447,7 +447,7 @@ mod tests {
         let ordinary_file = f.0.join("ordinary-file");
         fs::write(&ordinary_file, b"synthetic").unwrap();
         assert_eq!(unique_path_at(&ordinary_file, "child").unwrap(), ordinary_file.join("child.pilib"));
-        // Path.exists 对失效的符号链接遵循 Python 的行为；之后独占创建会拒绝它。
+        // 失效的符号链接按不存在处理（沿用旧实现的 Path.exists）；之后独占创建会拒绝它。
         #[cfg(unix)]
         {
             std::os::unix::fs::symlink(f.0.join("missing"), f.0.join("dangling.pilib")).unwrap();
@@ -487,7 +487,7 @@ mod tests {
     }
     #[test]
     fn unlisted_reason_names_the_registry_file_without_internal_prefixes() {
-        // #179：页面说明哪个文件写不进去以及原因，而不是「读取失败」或 Python 风格的 errno。
+        // #179：页面说明哪个文件写不进去以及原因，而不是「读取失败」或旧实现那种 errno 文字。
         let f = Fixture::new();
         let lib = f.library();
         f.write(json!({"recent":[]}));

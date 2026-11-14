@@ -21,7 +21,7 @@ const CORE_MARKERS: [&str; 4] = ["terms_artists", "terms_labels", "terms_charact
 pub type Progress = Arc<dyn Fn(&str, f64) + Send + Sync + std::panic::RefUnwindSafe>;
 
 /// 路径在校验后不再改变。会话身份还必须包含一个新的会话 generation，因为图库包的副本可能共用同一个配置 ID。
-/// 不查默认图库包，也不调用 Python 运行时。
+/// 不查默认图库包。
 ///
 /// 图库包拥有的每个文件都经打开时固定的规范路径访问：用户打开的别名之后改指别处，也不得把读写重定向到另一个图库包。
 /// 保留别名只是为了显示和记住用户选的是什么。
@@ -86,7 +86,7 @@ impl Library {
         if path.extension().and_then(|s| s.to_str()) != Some("pilib") {
             return Err(Error::Invalid("图库包的扩展名必须是 .pilib".into()));
         }
-        // 显示路径保留显式的别名，与 Python 的 Path.absolute 一致，而不是 resolve。
+        // 显示路径保留显式的别名，与旧实现的 Path.absolute 一致，而不是 resolve。
         let path = if path.is_absolute() { path.to_owned() } else { std::env::current_dir()?.join(path) };
         let instance_path = crate::app_paths::canonical(&path)?;
         if !path.is_dir() {

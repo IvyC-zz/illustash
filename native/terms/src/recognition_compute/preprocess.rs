@@ -1,5 +1,5 @@
 //! 识别用的 RGB 缩放契约。不做 EXIF 旋转、ICC 变换和 alpha 合成：
-//! Python 在缩放前调用 Image.convert('RGB')，这一点与缩略图流程不同。
+//! 与旧实现一样只在缩放前转成 RGB（Image.convert('RGB')），这一点与缩略图流程不同。
 use image::RgbImage;
 
 #[derive(Clone, Copy)]

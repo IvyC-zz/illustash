@@ -5,8 +5,8 @@
 //! 作品词表 `WORK_NAMES`；作品的名字或链接命中时，它整棵子树下的角色（`works.TREE`，`UNION` 防环）；皮肤词 `skin_zh`；
 //! 「父 · 皮肤」的组合查询（两半各搜一次，交集至少算开头）。
 //!
-//! 与旧代码相同地先用 SQLite 的 `LIKE`（只对 ASCII 不分大小写）筛，再按 Python 的 `str.casefold()` 比较
-//! （`casefold.rs`）；SQL 语句逐字照搬，行的顺序也就相同（作品命中那一段按行的顺序后者覆盖前者，旧代码如此）。
+//! 与旧代码相同地先用 SQLite 的 `LIKE`（只对 ASCII 不分大小写）筛，再做 Unicode 完全大小写折叠后比较
+//! （`casefold.rs`，与旧实现的 `str.casefold()` 相同）；SQL 语句逐字照搬，行的顺序也就相同（作品命中那一段按行的顺序后者覆盖前者，旧代码如此）。
 use crate::casefold::casefold;
 use crate::character_entities::ENTITIES;
 use crate::character_links::LINKS;

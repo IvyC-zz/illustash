@@ -90,7 +90,7 @@ pub(crate) fn day_bounds(day: &str) -> Result<(String, String)> {
     if y == 0 || d < 1 || d > size {
         return Err(bad());
     }
-    // 在 Python day_bounds 调用 mktime/localtime 的同一位置使用宿主系统的日历转换，包括它能表示的年份范围。
+    // 在旧实现 day_bounds 调用 mktime/localtime 的同一位置使用宿主系统的日历转换，包括它能表示的年份范围。
     // SAFETY: libc::tm 只含整数（Unix 上另有可为空的时区名指针），全零是合法值。
     let mut tm: libc::tm = unsafe { std::mem::zeroed() };
     tm.tm_year = y - 1900;
@@ -119,7 +119,7 @@ fn count(c: &Connection, sql: &str, args: &[&str]) -> Result<i64> {
 fn exists(c: &Connection, sql: &str, args: &[&str]) -> Result<bool> {
     Ok(count(c, &format!("SELECT EXISTS({sql})"), args)? != 0)
 }
-/// 参数转换在打开任何数据库之前进行，与 Python 分派器相同。
+/// 参数转换在打开任何数据库之前进行，与旧实现的分派器相同。
 fn preflight(path: &str, q: &HashMap<String, String>) -> Result<()> {
     let keys: Vec<(&str, &str)> = match path {
         "/api/assets" | "/api/ids" => vec![("offset", "0"), ("limit", "100")],
@@ -144,7 +144,7 @@ fn attach_provenance(c: &Connection, context: &LibraryContext) -> Result<()> {
     }
     Ok(())
 }
-// Python 的 isdigit 包括 Unicode 15 中的 Digit 字符（不只是 Decimal）。
+// 数字判定沿用旧实现的 isdigit：包括 Unicode 15 中的 Digit 字符（不只是 Decimal）。
 fn digit_extra(c: char) -> bool {
     const R: &[(u32, u32)] = &[
         (0xb2, 0xb3),
@@ -187,7 +187,7 @@ impl Filter {
         self.args.extend(args);
     }
 }
-/// 选区针对资产 `a` 的 SQL 条件、参数和排序。各项检查按 Python Store 原来的顺序拒绝。
+/// 选区针对资产 `a` 的 SQL 条件、参数和排序。各项检查按旧实现 Store 原来的顺序拒绝。
 pub(crate) fn selection(
     c: &Connection,
     context: &LibraryContext,
@@ -461,7 +461,7 @@ fn bound(args: Vec<String>, numeric_index: Option<usize>, cluster: &str) -> Resu
             .collect::<String>();
         let digits = digits.trim_start_matches('0');
         if digits.len() > 19 || (digits.len() == 19 && digits > "9223372036854775807") {
-            // 所有筛选校验都在 SQLite 绑定 Python 整数失败之前完成。
+            // 所有筛选校验都在「整数超出 SQLite INTEGER 范围」的绑定错误之前完成。
             return Err(Error::Io(std::io::Error::other("Python int too large to convert to SQLite INTEGER")));
         }
     }
@@ -707,7 +707,7 @@ fn page_members(
     }
     Ok(members)
 }
-/// 批量处理的一页，保持「取第一条最好线索」和 Python dict 覆盖的语义。
+/// 批量处理的一页，保持「取第一条最好线索」和同键后者覆盖前者的语义（沿用旧实现）。
 fn decorate(c: &Connection, page: &mut [Json]) -> Result<()> {
     if page.is_empty() {
         return Ok(());

@@ -73,7 +73,7 @@ impl Tags {
             .zip(probs)
             .filter_map(|((name, dim), prob)| {
                 let dim = (*dim)?;
-                // Python 在做 >= KEEP 判断和 round(x,4) 之前先把模型概率转成 f64。
+                // 沿用旧实现：做 >= KEEP 判断和 round(x,4) 之前先把模型概率转成 f64。
                 let value = f64::from(*prob);
                 (value >= 0.001).then(|| Label {
                     asset: asset.to_owned(),

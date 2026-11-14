@@ -4,7 +4,7 @@ use rusqlite::{Connection, TransactionBehavior};
 use serde_json::{json, Value};
 
 pub(crate) fn request(c: &mut Connection, context: &LibraryContext, path: &str, body: &Json) -> Result<Json> {
-    // 只解读会用到的字段。Python 接受用不到的任意大小整数和非有限浮点数；把整个请求体经 serde_json 序列化会拒绝它们。
+    // 只解读会用到的字段。旧实现接受用不到的任意大小整数和非有限浮点数，这里照旧；把整个请求体经 serde_json 序列化会拒绝它们。
     let mut input = json!({});
     for key in ["entity", "action", "entities", "switch", "yes", "no", "later", "old", "new", "id"] {
         input[key] = argument(body.get(key));
@@ -60,7 +60,7 @@ pub(crate) fn request(c: &mut Connection, context: &LibraryContext, path: &str, 
 }
 
 // 无法表示的数字当作为真的非字符串参数。核心在要求字符串或列表的地方都会拒绝它们，
-// 而 HTTP 的 `value or []` 保留 Python 的真值语义。
+// 而 HTTP 的 `value or []`（假值换成空列表）沿用旧实现的真值规则。
 fn argument(value: Option<&Json>) -> Value {
     match value {
         None => Value::Null,
