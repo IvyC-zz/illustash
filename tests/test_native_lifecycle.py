@@ -344,6 +344,21 @@ class NativeLifecycleTest(unittest.TestCase):
             with self.subTest(body=body):
                 registry_before = registry.read_bytes()
                 left = self.reference_response('/api/libraries/new', body)
+                if name is not None and not isinstance(name, str):
+                    # #252 C2：非字符串不再创建图库，当前会话、登记和来源均不变。
+                    before = files(self.home)
+                    directories = set((self.root / 'home').rglob('*'))
+                    right = self.request('/api/libraries/new', body)
+                    self.assertEqual(right['status'], 400)
+                    self.assertEqual(json.loads(right['body']), {'error': '图库名称必须是字符串'})
+                    self.assertIsNone(difference(left, right))
+                    self.assertEqual(files(self.home), before)
+                    self.assertEqual(set((self.root / 'home').rglob('*')), directories)
+                    self.assertEqual(registry.read_bytes(), registry_before)
+                    self.assertEqual(current, (dump(self.lib.source), dump(self.lib.db)))
+                    self.assertEqual(json.loads(self.request('/api/bootstrap')['body'])['token'], token)
+                    self.assertEqual(files(self.new_folder), folder_before)
+                    continue
                 self.assertEqual(left['status'], 200, left['body'])
                 dest = Path(json.loads(left['body'])['path'])
                 self.assertTrue(dest.is_relative_to(self.root))
@@ -398,6 +413,25 @@ class NativeLifecycleTest(unittest.TestCase):
     @REFERENCE_PARITY_ONLY
     def test_native_library_new_invalid_inputs_and_reference_errors_are_byte_exact(self):
         base = {'kind': 'folder', 'folder': str(self.new_folder), 'preset': 'other', 'name': 'bad-input'}
+        for name in (False, 0, [], {}):
+            for kind in ('folder', 'photos', 'sources', 'invalid'):
+                with self.subTest(name=name, kind=kind):
+                    before = files(self.home)
+                    directories = set((self.root / 'home').rglob('*'))
+                    databases = (dump(self.lib.source), dump(self.lib.db))
+                    registry = (self.support / 'libraries.json').read_bytes()
+                    # 名称类型先于来源、路径和 kind 校验，拒绝时不能建立目录或替换会话。
+                    body = {'kind': kind, 'name': name}
+                    if kind == 'sources':
+                        body['sources'] = []
+                    response = self.request('/api/libraries/new', body)
+                    self.assertEqual(response['status'], 400)
+                    self.assertEqual(json.loads(response['body']), {'error': '图库名称必须是字符串'})
+                    self.assertEqual(files(self.home), before)
+                    self.assertEqual(set((self.root / 'home').rglob('*')), directories)
+                    self.assertEqual((dump(self.lib.source), dump(self.lib.db)), databases)
+                    self.assertEqual((self.support / 'libraries.json').read_bytes(), registry)
+                    self.assertEqual(json.loads(self.request('/api/bootstrap')['body'])['token'], self.token)
         for change in ({'kind': 'invalid'}, {'kind': None}, {'folder': str(self.root / 'missing-folder')},
                        {'folder': 123}, {'folder': True}, {'folder': 1.5}, {'folder': ['x']}, {'folder': {'x': 1}},
                        {'folder': 'bad\0folder'}, {'preset': 'invalid'}, {'preset': 123}, {'name': 'bad\0name'},
@@ -408,6 +442,8 @@ class NativeLifecycleTest(unittest.TestCase):
                 before, registry = (dump(self.lib.source), dump(self.lib.db)), (self.support / 'libraries.json').read_bytes()
                 response = self.pair('/api/libraries/new', {**base, **change})
                 self.assertEqual(response['status'], 400)
+                if change == {'name': 'bad\0name'}:
+                    self.assertEqual(json.loads(response['body']), {'error': '无法创建图库：名称不能包含空字符（NUL）'})
                 self.assertEqual(before, (dump(self.lib.source), dump(self.lib.db)))
                 self.assertEqual(registry, (self.support / 'libraries.json').read_bytes())
                 self.assertEqual(json.loads(self.request('/api/bootstrap')['body'])['token'], self.token)
@@ -449,7 +485,10 @@ class NativeLifecycleTest(unittest.TestCase):
                 before = (dump(self.lib.source), dump(self.lib.db))
                 registry = (self.support / 'libraries.json').read_bytes()
                 try:
-                    self.assertEqual(self.pair('/api/libraries/new', body)['status'], 400)
+                    left = self.reference_response('/api/libraries/new', body)
+                    right = self.request('/api/libraries/new', body)
+                    self.assertEqual((left['status'], right['status']), (400, 400))
+                    self.assertEqual(left['body'], right['body'])
                     self.assertEqual(before, (dump(self.lib.source), dump(self.lib.db)))
                     self.assertEqual(registry, (self.support / 'libraries.json').read_bytes())
                     self.assertEqual(json.loads(self.request('/api/bootstrap')['body'])['token'], self.token)
@@ -499,6 +538,8 @@ class NativeLifecycleTest(unittest.TestCase):
                     right = self.request('/api/libraries/new', request, **kwargs)
                     self.assertEqual(left['status'], status)
                     self.assertEqual(right['status'], status)
+                    if kind in ('name', 'dangling'):
+                        self.assertEqual(left['body'], right['body'])
                     self.assertEqual(current, (dump(self.lib.source), dump(self.lib.db)))
                     self.assertEqual(registry_before, registry.read_bytes())
                     self.assertEqual(photos_before, files(photos))

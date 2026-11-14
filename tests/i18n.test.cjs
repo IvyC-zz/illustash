@@ -337,6 +337,21 @@ test('backend text: an exact entry, else the most specific template; a nested me
 
 // #198：后端的文本里也有用户的数据。只有装着后端自己的嵌套消息的占位符才再翻译一次；
 // 后端模板的每个占位符都要说明自己是哪一种。
+test('approved library errors translate while OS details and paths remain data', () => {
+  const {context} = page('en', [], {en: english});
+  const tb = text => vm.runInContext('tb', context)(text);
+  for (const text of ['图库名称必须是字符串', '整数超出数据库支持的范围', '无法创建图库：名称不能包含空字符（NUL）']) {
+    assert.equal(tb(text), english[text]);
+  }
+  for (const code of [true, false]) for (const destination of [true, false]) {
+    const template = `文件操作失败${code ? '（错误号 {code}）' : ''}：{source}（路径：{path}${destination ? ' → {other}' : ''}）`;
+    const values = {code: '13', source: '未识别', path: "'合成/未识别'", other: "'合成/目标'"};
+    const fill = text => text.replace(/\{(\w+)\}/g, (_, key) => values[key]);
+    assert.equal(tb(fill(template)), fill(english[template]));
+    assert.equal(tb('读取失败：' + fill(template)), 'Could not load: ' + fill(english[template]));
+  }
+});
+
 test('each placeholder of the backend templates is either a nested message or data', () => {
   const {context} = page('en');
   const nested = vm.runInContext('BACKEND_NESTED', context), data = vm.runInContext('BACKEND_DATA', context);

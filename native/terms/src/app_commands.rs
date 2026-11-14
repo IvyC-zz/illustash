@@ -264,10 +264,9 @@ fn sqlite_id(value: Option<&Json>) -> Result<SqlValue> {
             SqlValue::Real(v.as_f64().expect("validated internal numeric field"))
         }
         Some(Json::Float(v)) => SqlValue::Real(*v),
-        Some(Json::Integer(v)) => SqlValue::Integer(
-            v.parse()
-                .map_err(|_| Error::Io(std::io::Error::other("Python int too large to convert to SQLite INTEGER")))?,
-        ),
+        Some(Json::Integer(v)) => {
+            SqlValue::Integer(v.parse().map_err(|_| Error::Io(std::io::Error::other("整数超出数据库支持的范围")))?)
+        }
         _ => return Err(Error::Io(std::io::Error::other("unsupported SQLite parameter"))),
     })
 }
@@ -371,6 +370,18 @@ fn restore_application(c: &Connection, bound: &SqlValue, before: &Value) -> Resu
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn sqlite_id_overflow_keeps_io_error_and_i64_boundaries() {
+        for input in ["9223372036854775807", "-9223372036854775808"] {
+            let value = crate::http_json::parse_request(input).unwrap();
+            assert_eq!(sqlite_id(Some(&value)).unwrap(), SqlValue::Integer(input.parse().unwrap()));
+        }
+        for input in ["9223372036854775808", "-9223372036854775809"] {
+            let value = crate::http_json::parse_request(input).unwrap();
+            assert!(matches!(sqlite_id(Some(&value)), Err(Error::Io(e))
+                if e.to_string() == "整数超出数据库支持的范围"));
+        }
+    }
     use std::{
         fs,
         path::PathBuf,

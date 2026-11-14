@@ -1,6 +1,6 @@
 # 架构现状与已批准方向
 
-状态：现行参考，2026-11-12。记录稳定应用现在的架构（Rust 应用宿主、Core、Platform、可选原生 worker）和用户批准、仍然有效的方向；词条抽象见 [TERMS.md](TERMS.md)，安装交付见 [BACKEND_TASKS.md](BACKEND_TASKS.md)，检查与合并门槛见 [LOCAL_CHECKS.md](LOCAL_CHECKS.md)。各次实施、测量和验收过程在对应 PR，不在本文。2026-10-06 开源之前的 Issue / PR 编号指向开源前的私有历史（见 [AGENTS.md](../AGENTS.md#公开库规则)）。
+状态：现行参考，2026-11-15。记录稳定应用现在的架构（Rust 应用宿主、Core、Platform、可选原生 worker）和用户批准、仍然有效的方向；词条抽象见 [TERMS.md](TERMS.md)，安装交付见 [BACKEND_TASKS.md](BACKEND_TASKS.md)，检查与合并门槛见 [LOCAL_CHECKS.md](LOCAL_CHECKS.md)。各次实施、测量和验收过程在对应 PR，不在本文。2026-10-06 开源之前的 Issue / PR 编号指向开源前的私有历史（见 [AGENTS.md](../AGENTS.md#公开库规则)）。
 
 ## 目标与边界
 
@@ -40,6 +40,8 @@ Core 持有连接内规则、资产、证据、人工结论、历史/撤销和�
 
 兼容文本位于 `compat_text`：共用 Python 引号、转义、Unicode 可打印规则及扩展空白裁剪；错误和桌面建库不依赖 HTTP 工具。Unicode 15 表保留历史文件名 `http_unicode.rs`，以中性 `compat_unicode` 模块加载。HTTP 与欢迎页共用 `app_create::creation_error`，保留创建成功后登记、登记失败保留包和原错误转换。
 
+带路径的文件操作错误由 `error::filesystem_message` 显示为「文件操作失败」，保留操作系统原始原因、错误号和源／目标路径；错误类型、HTTP 状态及校验顺序不变。SQLite 整数绑定越界显示「整数超出数据库支持的范围」。前端按完整模板翻译这些消息，系统原因、数字和路径作为数据保留。新产生的同步错误沿用此格式和原有 300 字符上限；`sync_runs.message` 的历史文本不迁移、不重写（2026-11-15，#252）。
+
 扫描取消由宿主 `app_sync::check` 提供，保留 atomic cancel 或宿主进程停止状态的原谓词；文件夹、Photos 及只读函数仅调用传入的检查。文件夹仍先开启源库即时事务再盘点/哈希、发布 pending journal 后提交；Photos 仍先只读枚举显式来源再开启源库事务，并在原逐行位置探测路径。原检查点、频率、来源碰撞拒绝和应用库后续刷新边界不变。原生选择由宿主传停止谓词，保留 100ms 轮询、600s 超时及 kill/wait 收尾。
 
 `crates/core` 的 `illustash-core` 通过 path dependency 被 `native/terms` 的 `illustash-terms` 使用。Core 承载连接内的词条 schema/迁移、证据包解析与验证、人工裁决、角色/身份关系、历史/统一撤销、名字搜索与投影，以及 Error、Origin、严格 JSON、Unicode 与生成字符表。SQL 资源跟随规则归 Core；宿主以窄转导出保持旧 Rust 模块路径，折叠 SQL 通过连接内函数共用，不复制算法或 SQL。Core 可独立 fmt/clippy/test/locked build，进程内客户端不需要 HTTP/CLI/Tauri、平台 crate 或参考宿主；应用协调与 HTTP/CLI 留宿主；已有来源读取、路径/VFS、文件权限、进程/凭据/系统集成由 `crates/platform` / `illustash-platform` 提供。包名、bin 名、构建入口和 JSON/SQLite 格式不变，无根 workspace。
@@ -71,6 +73,8 @@ HTTP 前门仅装配服务与 socket，保留 Host/Origin/token 检查、请求�
 ## 应用生命周期
 
 普通打开只接受已初始化的 `.pilib` 包：Rust 持有图库实例、会话和切库状态。包格式、应用 schema、词条 schema 与 core 标记分别校验；需要建库或升级时拒绝启动，不通过读取入口隐式修改数据库。
+
+`POST /api/libraries/new` 的 `name` 缺省、为 null 或裁剪后为空时使用「新图库」；其他值必须是字符串，布尔、数字、数组和对象在创建目录前返回 400「图库名称必须是字符串」。名称仍按既有扩展空白规则裁剪，含 NUL 时返回「无法创建图库：名称不能包含空字符（NUL）」（2026-11-15，#252）。
 
 入口为 `./start-web.command --library /绝对路径/已有图库.pilib` 或 `illustash-terms http --library ...`，无需 `--native`。省略 `--library` 时重新打开最近登记的有效包；无记录则明确提示指定包，普通启动不创建图库或隐式升级。`--native` 保留为兼容别名。启动参数见 `http --help`；任务和网络授权参数沿用既有协议，`--no-open` 继续可用。旧宿主的 `--python`、`--upstream`、`--route`、`--refresh`、`--source`、`--db`、`--cache`、`--identity`、`--no-similar` 与参数分隔透传 `--` 明确报退役错误，不打开图库、不连接上游、不启动 Python。图库读、写、设置、备份和管理都在原生宿主中完成。
 
