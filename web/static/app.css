@@ -887,11 +887,12 @@ a.cc-name:hover{color:var(--accent-ink)}
 .cl-ring .cl-done{stroke:var(--accent);stroke-linecap:round;transition:stroke-dasharray .6s var(--ease)}
 .checklist.pulse .cl-pill{animation:cl-pulse .9s var(--ease)}
 /* 清单胶囊和提示浮在页面上方（#98 Windows 检查）：在内容下方留出空间，让最后几行能滚到它们上面露出来；胶囊不进图片
-   查看器和任务面板；首页的提示（关注作品、联网查名字）不盖住设置表单。 */
+   查看器和任务面板，详情栏打开时也收起，免得压住底部的「排除」等按钮；首页的提示（关注作品、联网查名字）不盖住设置表单，
+   有选中时让开选择栏，选择结束再出来（#398）。 */
 body:has(#checklist:not([hidden])) .viewport{padding-bottom:64px}
 body:has(#nudge:not([hidden])) .viewport{padding-bottom:120px}
-body:has(#viewer:not([hidden])) .checklist,body:has(#taskPanel:not([hidden])) .checklist{display:none}
-body:has(#settingsPage:not([hidden])) .nudge{display:none}
+body:has(#viewer:not([hidden])) .checklist,body:has(#taskPanel:not([hidden])) .checklist,body:has(#inspector:not([hidden])) .checklist{display:none}
+body:has(#settingsPage:not([hidden])) .nudge,body:has(#selectionBar:not([hidden])) .nudge{display:none}
 @keyframes cl-pulse{30%{transform:scale(1.08)}60%{transform:scale(.98)}}
 .cl-panel{order:1;width:260px;padding:var(--space-12) var(--space-14) var(--space-8);border-radius:var(--radius-14);background:var(--sheet);box-shadow:0 10px 32px rgba(var(--sh),.22),0 0 0 1px var(--hair);animation:tour-in .25s var(--ease)}
 .cl-head{margin:0 0 8px;font-size:var(--fs-11);color:var(--muted)}
