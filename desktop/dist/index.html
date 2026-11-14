@@ -96,6 +96,12 @@ window.showProgress = (done, stage) => {
   splash.status(`${tb(stage)} ${Math.floor(done * 100)}%`);
   splash.progress(done * .9);
 };
+// 外壳在安装更新（#279，desktop/src/updater.rs）：图库页已经关了，装好后应用自己重新打开。
+window.showUpdating = version => {
+  if (!window.splash) return;
+  document.body.classList.remove('failed');
+  splash.status(t('正在安装 {version}，装好后会重新打开 Illustash', {version}));
+};
 // 本地服务就绪：等折叠动画播完再打开图库页（地址里带 launched，图库页从成形的图标接着走）。
 window.launch = async url => {
   if (document.body.classList.contains('failed')) return;

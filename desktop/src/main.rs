@@ -9,6 +9,7 @@ mod i18n;
 mod picker;
 mod pixiv;
 mod server;
+mod updater;
 mod welcome;
 
 #[cfg(not(windows))]
@@ -31,6 +32,9 @@ fn main() {
     illustash_terms::diagnostics::initialize();
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        // 应用内更新（#279）：只用它的 Rust 接口（updater.rs），页面没有调用它的权限。
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .manage(updater::Updates::default())
         .manage(pixiv::Pixiv::default())
         .manage(server::Child::default())
         .manage(server::ErrorPage::default())
@@ -73,6 +77,8 @@ fn main() {
         })
         .setup(move |app| {
             let handle = app.handle().clone();
+            #[cfg(windows)]
+            updater::clean_leftovers(&handle);
             #[cfg(not(windows))]
             {
                 // macOS 保留原生的编辑/退出菜单和刷新命令；后退／前进用 Safari 的 ⌘[、⌘]（#402）。

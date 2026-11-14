@@ -31,7 +31,9 @@ pub fn request(method: &str, route: &str, timeout: u64) -> Result<Json> {
 fn send(port: u16, token: &str, method: &str, route: &str, timeout: u64) -> Result<Json> {
     if token.contains(['\r', '\n'])
         || !["GET", "POST"].contains(&method)
-        || !(route.starts_with("/pixiv/") || route.starts_with("/platform/choose?"))
+        || !(route.starts_with("/pixiv/")
+            || route.starts_with("/platform/choose?")
+            || route.starts_with("/platform/update/"))
     {
         return Err(Error::invalid("本机桥参数不正确"));
     }

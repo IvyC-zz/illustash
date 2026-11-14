@@ -16,7 +16,7 @@ import {onSettings, allowNames, loadSettingsData, saveStartup, saveFold, backupN
   waitPixivLogin, stopPixivLogin, checkUpdates, updatesPost, updatesTick} from '../core/settings.js';
 import {$, toast, error, readFailure, fold, wireFolds} from './dom.js';
 import {confirmAction} from './dialog.js';
-import {openTasks} from './tasks.js';
+import {openTasks, taskList} from './tasks.js';
 import {charHash} from '../core/route.js';
 import {refreshMeta} from '../core/meta.js';
 import {closeInspector} from './detail.js';
@@ -223,6 +223,8 @@ function networkCard() {
       ${row('artists', t('以图搜图'), 'SauceNAO', '—', acct?.saucenao?.bound ? t('已保存 key，还没有功能使用它') : t('未使用'))}
       ${state.models?.on_demand ? row('data', t('下载识别模型'), esc(state.models.sources.join(t('、'))), t('一次普通的 HTTPS 下载，取回模型文件；不发送图库里的任何信息'), t('只在你点「下载」时')) : ''}
       ${row('about', t('检查更新'), 'GitHub', t('一次普通的 HTTPS 请求，读取公开的版本列表；不发送图库里的任何信息'), state.updates?.auto ? t('启动时和之后每天自动') : t('只在你点「检查更新」时'))}
+      ${state.updates?.install
+        ? row('about', t('下载更新'), 'GitHub', t('下载新版本的安装包和签名，校验后安装；不发送图库里的任何信息'), t('只在你点「下载并重启」时')) : ''}
     </table>
     ${state.updates ? `<label class="switch-line"><span><b>${t('自动检查更新')}</b><small>${t('启动时和之后每天查一次 GitHub 上有没有新版本，有新版本时提示你，不会自己下载或安装')} · ${SCOPE.shared[0]}</small></span><input type="checkbox" class="switch" data-updates-auto ${state.updates.auto ? 'checked' : ''}></label>` : ''}
     ${net ? `<div class="setting-line"><span><b>${t('名称联网查询')}</b><small>${t('角色名称和 Danbooru 搜索共用这一项授权，只发送文字')} · ${names}</small></span>
@@ -486,18 +488,97 @@ export function renderProvenanceCard() {
 
 // ---------- 检查更新（#191，native/terms/src/app_updates.rs） ----------
 // 用户允许之前关闭：新图库的向导问一次，「设置 › 网络与隐私」里有开关。允许之后，后端在每次启动时检查，App 一直开着时
-// 每天检查一次；页面只询问是否该检查了。有新版本时在底部提示，有任务运行时绝不提示，点开是在浏览器里打开 Release 页面：
-// 这里不下载也不安装任何东西。「设置 › 关于」里总有手动检查。
+// 每天检查一次；页面只询问是否该检查了。有新版本时在底部提示，有任务运行时绝不提示；「设置 › 关于」里总有手动检查。
+// 桌面 App 里还能「下载并重启」（#279，desktop/src/updater.rs）：下载、校验签名和安装都由外壳做，这里只显示进度、在重启前
+// 确认；有任务在运行时不能重启。做不到时（不在桌面 App 里、这个安装不能自己更新、下载或安装失败）退回「打开下载页」，
+// 在浏览器里打开 Release 页面。
 // 设置各页上次画出的更新状态：只在它变了时重画，正在输入时绝不重画。
 let updatesDrawn = 'null';
+// 外壳的状态，只在这个安装能自己更新时；否则 null。
+export const selfUpdate = (u = state.updates) => u?.install?.available ? u.install : null;
+const tasksBusy = () => taskList().some(task => task.active);
+// 下载、下好、失败、安装中：用户点过「下载并重启」之后的这几步。
+export const updateStarted = (u = state.updates) => ['downloading', 'ready', 'failed', 'installing'].includes(selfUpdate(u)?.stage);
+// 下载进度条，放在说明文字下面。
+export const updateBar = (u = state.updates) => {
+  const i = selfUpdate(u);
+  if (i?.stage !== 'downloading' || !i.total) return '';
+  const width = Math.min(100, i.received / i.total * 100).toFixed(1);
+  return `<div class="progress" role="progressbar" aria-valuemin="0" aria-valuemax="${i.total}" aria-valuenow="${i.received}">`
+    + `<span style="width:${width}%"></span></div>`;
+};
+// 一行说明：下载到哪里了，或者为什么只能打开下载页。
+export function updateStatus(u = state.updates) {
+  const i = u?.install, version = esc(i?.version || '');
+  if (i?.stage === 'downloading') {
+    return i.total ? t('正在下载 {version}：{done} / {total}', {version, done: bytes(i.received), total: bytes(i.total)}) : t('正在下载 {version}…', {version});
+  }
+  if (i?.stage === 'ready') {
+    return tasksBusy() ? t('{version} 已下载好，等任务结束后就能重启安装', {version}) : t('{version} 已下载好，重启 Illustash 后就能用上', {version});
+  }
+  if (i?.stage === 'failed') return t('没能自动更新：{reason}。可以打开下载页手动更新。', {reason: esc(tb(i.error || ''))});
+  if (i?.stage === 'installing') return t('正在安装 {version}…', {version});
+  if (i && !i.available && i.reason === 'translocated') return t('把 Illustash 拖进「应用程序」文件夹，再从那里打开，才能在应用里直接更新。');
+  return '';
+}
+// 有新版本时的按钮，提示里的用 `data-nudge`；能自己更新时「打开下载页」是次要按钮，旁边是「下载并重启」。
+export function updateActions(u = state.updates, attr = 'data-updates') {
+  const i = selfUpdate(u);
+  const button = (kind, act, label, extra = '') => `<button class="${kind} small" ${attr}="${act}"${extra}>${label}</button>`;
+  const open = primary => button(primary ? 'primary' : 'quiet', 'open', t('打开下载页'));
+  if (i?.stage === 'downloading') return button('quiet', 'cancel', t('取消下载'));
+  if (i?.stage === 'installing') return '';
+  if (i?.stage === 'ready') return button('primary', 'restart', t('重启并安装'), tasksBusy() ? ` disabled title="${t('有任务在运行，等它结束再重启')}"` : '');
+  if (i?.stage === 'failed') return open(true) + button('quiet', 'install', t('重试'));
+  if (!u?.newer) return '';
+  return i ? open(false) + button('primary', 'install', t('下载并重启')) : open(true);
+}
 export function updatesLine() {
   const u = state.updates; if (!u) return `<span>${t('检查更新')}</span>`;
   const when = u.checked_at ? t('上次检查 {time}', {time: esc(localStamp(Date.parse(u.checked_at) / 1000))}) : t('还没有检查过');
   const status = u.newer ? t('有新版本 {version}', {version: esc(u.latest)}) : u.checked_at && !u.error ? t('已是最新版本') : '';
-  return `<span>${status || t('检查更新')}<small class="line-hint">${when}${u.error ? ' · ' + esc(tb(u.error)) : ''}${u.auto ? '' : ' · ' + t('自动检查已关闭，可在「设置 › 网络与隐私」里打开')}</small></span>
-    <span class="update-acts">${u.newer ? `<button class="primary small" data-updates-open>${t('打开下载页')}</button>` : ''}<button class="quiet small" data-updates-check>${t('检查更新')}</button></span>`;
+  const hints = [u.newer && updateStatus(u), when, u.error && esc(tb(u.error)), !u.auto && t('自动检查已关闭，可在「设置 › 网络与隐私」里打开')].filter(Boolean);
+  const check = updateStarted(u) ? '' : `<button class="quiet small" data-updates-check>${t('检查更新')}</button>`;
+  return `<span>${status || t('检查更新')}<small class="line-hint">${hints.join(' · ')}</small>${updateBar(u)}</span>
+    <span class="update-acts">${u.newer ? updateActions(u) : ''}${check}</span>`;
+}
+// 侧栏的更新入口（用户 2026-11-14 要求）：有新版本就一直在，不受「暂不」和任务的影响；没有就不显示。点一下直接开始
+// 下载并重启，下载时显示进度（点了打开「设置 › 关于」），下好后点了重启安装（先确认）；不能自己更新的安装点了打开下载页。
+export function drawUpdateButton(u = state.updates) {
+  const button = $('updateButton'), i = selfUpdate(u), stage = i?.stage;
+  button.hidden = !(u?.newer || ['downloading', 'ready', 'installing'].includes(stage));
+  if (button.hidden) return;
+  const percent = stage === 'downloading' && i.total ? Math.floor(i.received / i.total * 100) : null;
+  const label = stage === 'downloading' ? (percent === null ? t('下载中') : t('下载 {percent}%', {percent}))
+    : stage === 'ready' ? t('重启更新') : stage === 'installing' ? t('安装中') : stage === 'failed' ? t('更新失败') : t('更新');
+  $('updateLabel').textContent = label;
+  button.classList.toggle('busy', stage === 'downloading' || stage === 'installing');
+  button.title = updateStatus(u).replace(/<[^>]*>/g, '') || (i ? t('有新版本 {version}，点一下下载并重启', {version: u.latest})
+    : t('有新版本 {version}，点一下打开下载页', {version: u.latest}));
+}
+async function updateButtonClick() {
+  const stage = selfUpdate()?.stage;
+  if (stage === 'downloading' || stage === 'installing') { location.hash = '#/settings/about'; return; }
+  await updateAct(stage === 'ready' ? 'restart' : selfUpdate() ? 'install' : 'open');
+  drawUpdateButton(); drawNudge();
+  if ($('aboutUpdates')) $('aboutUpdates').innerHTML = updatesLine();
 }
 export const openRelease = () => { if (state.updates?.url) window.open(state.updates.url, '_blank', 'noopener'); };
+// 「下载并重启」的几个按钮，提示和「设置 › 关于」共用。重启会关掉 Illustash，所以先确认，有任务在运行时不重启。
+export async function updateAct(act) {
+  if (act === 'open') { openRelease(); return true; }
+  if (act === 'restart') {
+    if (tasksBusy()) { toast(t('有任务在运行，等它结束再重启')); return false; }
+    const version = selfUpdate()?.version || state.updates?.latest || '';
+    const note = t('Illustash 会关闭，装好 {version} 后自己重新打开。图库、设置和识别模型都不受影响。', {version});
+    const ok = await confirmAction(note, t('重启并安装更新'), t('重启并安装'));
+    if (!ok) return false;
+  }
+  const body = {install: {action: 'download'}, cancel: {action: 'cancel'}, restart: {action: 'install'}}[act];
+  if (!body) return false;
+  try { await updatesPost(body); } catch (err) { toast(err.message); }
+  return true;
+}
 
 
 // 新图库表单里输入的内容随输入保存，这样卡片在后台刷新时不会丢失任何东西。
@@ -593,9 +674,11 @@ export function wireSettings() {
     } else if (what === 'accounts') renderAccountsCard();
     else if (what === 'pixiv') toast(detail.error ? detail.error.message : t('已绑定 Pixiv：{name}', {name: detail.bound.name || detail.bound.user_id}));
     else if (what === 'updates') {
-      drawNudge();
-      // 显示它的设置页只在有变化时重画，绝不在用户输入时重画。
-      const now = JSON.stringify(state.updates ?? null);
+      drawNudge(); drawUpdateButton();
+      if ($('aboutUpdates')) $('aboutUpdates').innerHTML = updatesLine();
+      // 显示它的设置页只在有变化时重画，绝不在用户输入时重画；下载进度只改上面那一行。
+      const {install: _, ...rest} = state.updates || {};
+      const now = JSON.stringify(rest);
       if (now !== updatesDrawn) { updatesDrawn = now; if (onPage(state.route, 'settings') && ['network', 'about'].includes(settingsSection()[0])) renderSettings(false); }
     }
   });
@@ -641,14 +724,22 @@ export function wireSettings() {
     catch (err) { toast(err.message); e.target.checked = !e.target.checked; }
     loadProvenance();
   });
+  $('updateButton').onclick = updateButtonClick;
   document.addEventListener('click', async e => {
-    if (e.target.closest('[data-updates-open]')) { openRelease(); return; }
+    const act = e.target.closest('[data-updates]');
+    if (act) {
+      act.disabled = true;
+      await updateAct(act.dataset.updates);
+      if ($('aboutUpdates')) $('aboutUpdates').innerHTML = updatesLine();
+      drawNudge(); drawUpdateButton();
+      return;
+    }
     const b = e.target.closest('[data-updates-check]'); if (!b) return;
     b.disabled = true; b.textContent = t('正在检查…');
     try { const u = await checkUpdates(); toast(u.error ? tb(u.error) : u.newer ? t('有新版本 {version}', {version: u.latest}) : t('已是最新版本')); }
     catch (err) { toast(err.message); }
     if ($('aboutUpdates')) $('aboutUpdates').innerHTML = updatesLine();
-    drawNudge();
+    drawNudge(); drawUpdateButton();
   });
   document.addEventListener('change', async e => {
     const box = e.target.closest('[data-updates-auto]'); if (!box) return;
