@@ -66,6 +66,14 @@ Claude Code 通过 `CLAUDE.md` 引入本文件，Codex 等直接读本文件。�
 2026-10-06 用户定：本仓库公开，许可 GPL-3.0-or-later。2026-10-22 用户定（#271）：另附一项 GPLv3 第 7 条附加许可，允许与 DirectML 等 GPU 推理运行库组合分发和运行，正文在 [第三方组件与许可](docs/THIRD_PARTY.md#附加许可gplv3-第-7-条)。
 
 - Issue、PR、提交信息、代码和文档里都不写：真实图库的内容（图片、文件名）、内容构成（NSFW/R18 比例）、收藏的角色名及张数、保存时间段；真实账号信息；本机绝对路径、用户名、个人邮箱；验收机的主机名、IP、SSH 配置。真实图库的规模取整写（如「约 5 万张」）；方法层面的准确率、命中率可以写；样本一律用合成数据。
+- 例外：README 截图（2026-11-14 用户定，#361）。可以用作者本人收藏的全年龄插画，条件是：
+  1. 截的是专门挑的演示图库，不截日常用的图库，截图不反映真实收藏的构成和张数；
+  2. 插画只以完整界面里的缩略图、详情等形式出现，不单独裁切成宣传大图；
+  3. 截图里不出现文件名、画师名、本机路径和账号；
+  4. 优先选能查到画师和出处的图，演示图库的来源清单留在本机，不进仓库；
+  5. 截图提交在主仓库的 `docs/assets/readme/`（2026-11-14 用户改定，不另建资源仓库），README 用相对路径引用，安装包不带；演示图库、原图和来源清单留在本机，不上传。README 第一张截图旁写一句「截图里的插画版权归原作者，如需移除请开 Issue」。收到画师或权利人的移除请求时，先从当前版本删掉或换掉对应截图；要从 git 历史里彻底清除，需要改写主仓库历史，届时由用户决定。
+
+  截图以外的地方，上一条照旧。
 - 离不开上述内容的事项（真实图库验收、真实账号联测、验收机细节、需要用户私下决定的事）开在私有库 `shio-vinyl/illustash-private` 的 Issue 里；公开库只写不含细节的结论。
 - 提交作者使用 GitHub noreply 邮箱。
 - 暂不接受外部代码贡献；开始接受前先引入贡献者协议（CLA），保留双重授权的余地。
@@ -94,7 +102,7 @@ Claude Code 通过 `CLAUDE.md` 引入本文件，Codex 等直接读本文件。�
 
 ### 前端结构约定
 
-2026-11-12（#320，总跟踪 #316）：`web/static` 的结构约定由 `tools/check_frontend.py` 机械检查，已接进 `tools/check_all.sh` 和 `ci.yml`，规则写在脚本开头：`core/` 不得导入 `ui/`；`ui/` 不得新增循环导入；`state` 上的字段必须在 `core/state.js` 声明，并且只能由声明里组标题写明的写入者文件赋值（#353）；不得新增 `document`/`window` 级的 `keydown`/`click` 监听（2026-11-12 用户在 #343 批准唯一例外：浮层管理器 `ui/overlay.js`，新浮层向它登记，不另挂监听）和运行时 `createElement('dialog')`；一行不超过 200 字符；`app.css` 里新写的字号、圆角、`gap`/`padding`、`z-index` 和颜色用顶部的令牌（`var(--…)`），没有合适的档位先在 Issue 里问（#349）。存量冻结在 `tools/frontend_baseline.json`（按文件和内容特征登记，不按行号），**基线只能缩小**：违规要改代码，不能往基线里加；改好一处后运行 `python tools/check_frontend.py --shrink` 删掉对应项（`check_all.sh` 带 `--strict-stale`，不收紧会失败；并带 `--base-ref`，基线比与 main 的共同祖先大也会失败，做法见[本地验收](docs/LOCAL_CHECKS.md)）。报错会写明违反了哪条约定、怎么改；方案在 [WEB_V2.md](docs/WEB_V2.md#前端模块2026-10-18199)。
+2026-11-12（#320，总跟踪 #316）：`web/static` 的结构约定由 `tools/check_frontend.py` 机械检查，已接进 `tools/check_all.sh` 和 `ci.yml`，规则写在脚本开头：`core/` 不得导入 `ui/`；`ui/` 不得新增循环导入；`state` 上的字段必须在 `core/state.js` 声明，并且只能由声明里组标题写明的写入者文件赋值（#353）；不得新增 `document`/`window` 级的 `keydown`/`click` 监听（2026-11-12 用户在 #343 批准唯一例外：浮层管理器 `ui/overlay.js`，新浮层向它登记，不另挂监听）和运行时 `createElement('dialog')`；每个键盘事件处理函数先用 `core/keys.js` 的 `composing(e)` 判断输入法是否在组字，别处不直接读 `isComposing`/`keyCode`（2026-11-13，#388）；一行不超过 200 字符；`app.css` 里新写的字号、圆角、`gap`/`padding`、`z-index` 和颜色用顶部的令牌（`var(--…)`），没有合适的档位先在 Issue 里问（#349）。存量冻结在 `tools/frontend_baseline.json`（按文件和内容特征登记，不按行号），**基线只能缩小**：违规要改代码，不能往基线里加；改好一处后运行 `python tools/check_frontend.py --shrink` 删掉对应项（`check_all.sh` 带 `--strict-stale`，不收紧会失败；并带 `--base-ref`，基线比与 main 的共同祖先大也会失败，做法见[本地验收](docs/LOCAL_CHECKS.md)）。报错会写明违反了哪条约定、怎么改；方案在 [WEB_V2.md](docs/WEB_V2.md#前端模块2026-10-18199)。
 
 ## 文档维护规范
 
@@ -119,7 +127,7 @@ Claude Code 通过 `CLAUDE.md` 引入本文件，Codex 等直接读本文件。�
 
 - 新内容先找它属于哪篇现行参考，改那一篇。只有出现新的主题才新建。
 - 同一件事只在一处写全，别处用链接。不要在多篇文档里各写一份「现状」。
-- 新文档放 `docs/`，根目录只留 `README.md`、`AGENTS.md`、`CLAUDE.md`、`ERRATA.md` 和 `LICENSE`。
+- 新文档放 `docs/`，根目录只留 `README.md`、`AGENTS.md`、`CLAUDE.md` 和 `LICENSE`。
 - 新文档第一段写明：状态（现行参考 / 方案进行中）、日期、和哪篇文档是什么关系。
 
 ### 3. 一件事做完时的收尾
@@ -134,7 +142,7 @@ Claude Code 通过 `CLAUDE.md` 引入本文件，Codex 等直接读本文件。�
 ### 4. 删除和改名
 
 - 删之前搜一遍引用：`git grep -n '文件名'`，文档和代码注释都要改。
-- 代码注释会按节号引用文档（如「docs/TERMS_NAMES_PLAN.md N3」「docs/PROVENANCE.md 第 9 节」）。被引用的章节不要重新编号；要删就连注释一起改。
+- 代码注释会按节号引用文档（如「docs/TERMS_NAMES.md 方案 N3」「docs/PROVENANCE.md 第 9 节」）。被引用的章节不要重新编号；要删就连注释一起改。
 - 删掉的内容不用另外存档，git 历史就是存档。删除量大时先打一个标签并推送。
 - 不建 `archive/`、`old/` 这类目录。
 

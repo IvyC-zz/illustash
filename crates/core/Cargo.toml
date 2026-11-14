@@ -26,3 +26,11 @@ verify-incremental = []
 [lints.clippy]
 undocumented_unsafe_blocks = "warn"
 unwrap_used = "warn"
+
+# dev 构建少带调试信息（#362）：自己的 crate 只带行号表，panic 和测试失败的回溯里仍有文件名和行号；
+# 第三方依赖不带调试信息。只动 dev profile，release 不变。做法和数字见 docs/LOCAL_CHECKS.md。
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = false

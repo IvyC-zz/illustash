@@ -237,7 +237,7 @@ export function wireReview() {
 
 // 复核面板页登记：渲染入口，以及撤销、切换 R18 之后怎么重画。
 implement({
-  groups: {render: () => renderGroups(), refresh: why => { if (why === 'undo') renderGroups(true); else if (why === 'nsfw') renderGroups(); }},
+  groups: {render: () => renderGroups(), refresh: why => { if (why === 'undo' || why === 'learned') renderGroups(true); else if (why === 'nsfw') renderGroups(); }},
   similar: {render: () => renderSimilar(), refresh: why => { if (why === 'nsfw') renderSimilar(); }},
   identity: {render: () => renderIdentity(), refresh: why => { if (why === 'undo' || why === 'nsfw') renderIdentity(); }},
   'artist-audit': {render: () => renderArtistAudit(), refresh: why => { if (why === 'undo') renderArtistAudit(); }},

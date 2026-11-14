@@ -18,7 +18,7 @@ import {wireSettings} from './ui/settings.js';
 import {wireCatalog} from './ui/catalog.js';
 import {refreshMeta} from './core/meta.js';
 import {pageOf} from './core/pages.js';
-import {parseHash} from './core/route.js';
+import {parseHash, stepHistory} from './core/route.js';
 import {applyRoute, navCount, wireShell} from './ui/shell.js';
 import {renderGrid, undo, wireGrid} from './ui/grid.js';
 import {wirePalette} from './ui/palette.js';
@@ -38,6 +38,8 @@ wireToast(() => undo());
 // 浮层管理器的 Esc / 点外监听要排在最前（捕获阶段先于页面其余处理）；其余按页面原来注册它们的顺序。
 wireOverlays();
 wireShell();
+// 桌面 App 菜单的「后退／前进」（desktop/src/main.rs）调它。
+window.illustashHistory = stepHistory;
 wireGrid();
 wirePalette();
 wireDetail();

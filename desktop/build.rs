@@ -40,6 +40,7 @@ fn main() {
         "startup_retry",
         "startup_upgrade",
         "startup_rescue",
+        "startup_diagnostics",
     ];
     tauri_build::try_build(
         tauri_build::Attributes::new().app_manifest(tauri_build::AppManifest::new().commands(COMMANDS)),

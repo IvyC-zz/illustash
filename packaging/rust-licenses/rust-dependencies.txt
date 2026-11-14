@@ -56,77 +56,82 @@ cesu8 1.1.0 (Apache-2.0 OR MIT): [53]
 cfb 0.14.0 (MIT): [60]
 cfg-expr 0.15.8 (MIT OR Apache-2.0): [61]
 cfg-if 1.0.5 (MIT OR Apache-2.0): [59]
-chrono 0.4.45 (Apache-2.0 OR MIT): [62]
-chunked_transfer 1.5.0 (MIT OR Apache-2.0): [63]
-color_quant 1.1.0 (MIT): [64]
-combine 4.6.8 (MIT): [65]
-cookie 0.18.2 (MIT OR Apache-2.0): [66]
-core-foundation 0.10.1 (MIT OR Apache-2.0): [67]
-core-foundation-sys 0.8.7 (MIT OR Apache-2.0): [67]
-core-graphics 0.25.0 (MIT OR Apache-2.0): [67]
-core-graphics-types 0.2.0 (MIT OR Apache-2.0): [67]
-cpufeatures 0.2.17 (MIT OR Apache-2.0): [68]
-crc 3.3.0 (MIT OR Apache-2.0): [69]
-crc-catalog 2.5.0 (MIT OR Apache-2.0): [70]
-crc32fast 1.5.2 (MIT OR Apache-2.0): [71]
-crossbeam-channel 0.5.17 (MIT OR Apache-2.0): [72]
-crossbeam-utils 0.8.23 (MIT OR Apache-2.0): [72]
-crunchy 0.2.4 (MIT): [73]
-crypto-common 0.1.7 (MIT OR Apache-2.0): [74]
-cssparser 0.37.0 (MPL-2.0): [222]
-cssparser-macros 0.7.1 (MPL-2.0): [222]
+cfg_aliases 0.2.2 (MIT): [62], [63]
+chrono 0.4.45 (Apache-2.0 OR MIT): [64]
+chunked_transfer 1.5.0 (MIT OR Apache-2.0): [65]
+color_quant 1.1.0 (MIT): [66]
+combine 4.6.8 (MIT): [67]
+constant_time_eq 0.6.1 (CC0-1.0 OR MIT-0 OR Apache-2.0): [1]
+cookie 0.18.2 (MIT OR Apache-2.0): [68]
+core-foundation 0.9.4 (MIT OR Apache-2.0): [69]
+core-foundation 0.10.1 (MIT OR Apache-2.0): [69]
+core-foundation-sys 0.8.7 (MIT OR Apache-2.0): [69]
+core-graphics 0.25.0 (MIT OR Apache-2.0): [69]
+core-graphics-types 0.2.0 (MIT OR Apache-2.0): [69]
+cpufeatures 0.2.17 (MIT OR Apache-2.0): [70]
+crc 3.3.0 (MIT OR Apache-2.0): [71]
+crc-catalog 2.5.0 (MIT OR Apache-2.0): [72]
+crc32fast 1.5.2 (MIT OR Apache-2.0): [73]
+crossbeam-channel 0.5.17 (MIT OR Apache-2.0): [74]
+crossbeam-utils 0.8.23 (MIT OR Apache-2.0): [74]
+crunchy 0.2.4 (MIT): [75]
+crypto-common 0.1.7 (MIT OR Apache-2.0): [76]
+cssparser 0.37.0 (MPL-2.0): [236]
+cssparser-macros 0.7.1 (MPL-2.0): [236]
 csv 1.4.0 (Unlicense OR MIT): [40]
 csv-core 0.1.13 (Unlicense OR MIT): [40]
-ctor 1.0.13 (Apache-2.0 OR MIT): [75]
-darling 0.24.1 (MIT): [76]
-darling_core 0.24.1 (MIT): [76]
-darling_macro 0.24.1 (MIT): [76]
-dbus 0.9.12 (Apache-2.0 OR MIT): [77]
-deranged 0.5.8 (MIT OR Apache-2.0): [78]
+ctor 1.0.13 (Apache-2.0 OR MIT): [77]
+darling 0.24.1 (MIT): [78]
+darling_core 0.24.1 (MIT): [78]
+darling_macro 0.24.1 (MIT): [78]
+dbus 0.9.12 (Apache-2.0 OR MIT): [79]
+deranged 0.5.8 (MIT OR Apache-2.0): [80]
 derive_arbitrary 1.4.2 (MIT OR Apache-2.0): [42]
-derive_more 2.1.1 (MIT): [79]
-derive_more-impl 2.1.1 (MIT): [79]
-digest 0.10.7 (MIT OR Apache-2.0): [80]
-dirs 7.0.0 (MIT OR Apache-2.0): [81]
-dirs-sys 0.5.0 (MIT OR Apache-2.0): [81]
+derive_more 2.1.1 (MIT): [81]
+derive_more-impl 2.1.1 (MIT): [81]
+digest 0.10.7 (MIT OR Apache-2.0): [82]
+dirs 7.0.0 (MIT OR Apache-2.0): [83]
+dirs-sys 0.5.0 (MIT OR Apache-2.0): [83]
 dispatch2 0.3.1 (Zlib OR Apache-2.0 OR MIT): [53]
 displaydoc 0.2.7 (MIT OR Apache-2.0): [38]
 dlopen2 0.8.2 (MIT): [53]
 dlopen2_derive 0.4.3 (MIT): [53]
-document-features 0.2.12 (MIT OR Apache-2.0): [82]
-dom_query 0.28.0 (MIT): [83]
-dpi 0.1.2 (Apache-2.0 AND MIT): [1], [53]
+document-features 0.2.12 (MIT OR Apache-2.0): [84]
+dom_query 0.28.0 (MIT): [85]
+dpi 0.1.2 (Apache-2.0 AND MIT): [2], [53]
 dtoa 1.0.11 (MIT OR Apache-2.0): [38]
-dtoa-short 0.3.5 (MPL-2.0): [223]
-dunce 1.0.5 (CC0-1.0 OR MIT-0 OR Apache-2.0): [2]
+dtoa-short 0.3.5 (MPL-2.0): [237]
+dunce 1.0.5 (CC0-1.0 OR MIT-0 OR Apache-2.0): [1]
 dyn-clone 1.0.20 (MIT OR Apache-2.0): [38]
-embed-resource 3.0.11 (MIT): [84]
-embed_plist 1.2.2 (MIT OR Apache-2.0): [85]
-equivalent 1.0.2 (Apache-2.0 OR MIT): [86]
+embed-resource 3.0.11 (MIT): [86]
+embed_plist 1.2.2 (MIT OR Apache-2.0): [87]
+equivalent 1.0.2 (Apache-2.0 OR MIT): [88]
 erased-serde 0.4.10 (MIT OR Apache-2.0): [38]
-fallible-iterator 0.3.0 (MIT OR Apache-2.0): [87]
-fallible-streaming-iterator 0.1.9 (MIT OR Apache-2.0): [88]
-fast_image_resize 4.2.3 (MIT OR Apache-2.0): [89]
+errno 0.3.15 (MIT OR Apache-2.0): [89]
+fallible-iterator 0.3.0 (MIT OR Apache-2.0): [90]
+fallible-streaming-iterator 0.1.9 (MIT OR Apache-2.0): [91]
+fast_image_resize 4.2.3 (MIT OR Apache-2.0): [92]
 fastrand 2.5.0 (Apache-2.0 OR MIT): [38]
-fax 0.2.7 (MIT): [90]
-fdeflate 0.3.7 (MIT OR Apache-2.0): [91]
-field-offset 0.3.6 (MIT OR Apache-2.0): [92]
+fax 0.2.7 (MIT): [93]
+fdeflate 0.3.7 (MIT OR Apache-2.0): [94]
+field-offset 0.3.6 (MIT OR Apache-2.0): [95]
+filetime 0.2.29 (MIT OR Apache-2.0): [59]
 find-msvc-tools 0.1.14 (MIT OR Apache-2.0): [59]
-flate2 1.1.10 (MIT OR Apache-2.0): [93]
-fnv 1.0.7 (Apache-2.0  OR  MIT): [94]
-foldhash 0.2.0 (Zlib): [227]
-foreign-types 0.5.0 (MIT OR Apache-2.0): [95]
-foreign-types-macros 0.2.4 (MIT OR Apache-2.0): [95]
-foreign-types-shared 0.3.1 (MIT OR Apache-2.0): [95]
-form_urlencoded 1.2.2 (MIT OR Apache-2.0): [96]
-futures-channel 0.3.34 (MIT OR Apache-2.0): [97]
-futures-core 0.3.34 (MIT OR Apache-2.0): [97]
-futures-executor 0.3.34 (MIT OR Apache-2.0): [97]
-futures-io 0.3.34 (MIT OR Apache-2.0): [97]
-futures-macro 0.3.34 (MIT OR Apache-2.0): [97]
-futures-sink 0.3.34 (MIT OR Apache-2.0): [97]
-futures-task 0.3.34 (MIT OR Apache-2.0): [97]
-futures-util 0.3.34 (MIT OR Apache-2.0): [97]
+flate2 1.1.10 (MIT OR Apache-2.0): [96]
+fnv 1.0.7 (Apache-2.0  OR  MIT): [97]
+foldhash 0.2.0 (Zlib): [241]
+foreign-types 0.5.0 (MIT OR Apache-2.0): [98]
+foreign-types-macros 0.2.4 (MIT OR Apache-2.0): [98]
+foreign-types-shared 0.3.1 (MIT OR Apache-2.0): [98]
+form_urlencoded 1.2.2 (MIT OR Apache-2.0): [99]
+futures-channel 0.3.34 (MIT OR Apache-2.0): [100]
+futures-core 0.3.34 (MIT OR Apache-2.0): [100]
+futures-executor 0.3.34 (MIT OR Apache-2.0): [100]
+futures-io 0.3.34 (MIT OR Apache-2.0): [100]
+futures-macro 0.3.34 (MIT OR Apache-2.0): [100]
+futures-sink 0.3.34 (MIT OR Apache-2.0): [100]
+futures-task 0.3.34 (MIT OR Apache-2.0): [100]
+futures-util 0.3.34 (MIT OR Apache-2.0): [100]
 gdk 0.18.2 (MIT): [45]
 gdk-pixbuf 0.18.5 (MIT): [45]
 gdk-pixbuf-sys 0.18.0 (MIT): [45]
@@ -134,12 +139,12 @@ gdk-sys 0.18.2 (MIT): [45]
 gdkwayland-sys 0.18.2 (MIT): [45]
 gdkx11 0.18.2 (MIT): [45]
 gdkx11-sys 0.18.2 (MIT): [45]
-generic-array 0.14.7 (MIT): [98]
-getrandom 0.2.17 (MIT OR Apache-2.0): [99]
-getrandom 0.3.4 (MIT OR Apache-2.0): [100]
-getrandom 0.4.3 (MIT OR Apache-2.0): [101]
-gif 0.13.3 (MIT OR Apache-2.0): [102]
-gif 0.14.2 (MIT OR Apache-2.0): [102]
+generic-array 0.14.7 (MIT): [101]
+getrandom 0.2.17 (MIT OR Apache-2.0): [102]
+getrandom 0.3.4 (MIT OR Apache-2.0): [103]
+getrandom 0.4.3 (MIT OR Apache-2.0): [104]
+gif 0.13.3 (MIT OR Apache-2.0): [105]
+gif 0.14.2 (MIT OR Apache-2.0): [105]
 gio 0.18.4 (MIT): [45]
 gio-sys 0.18.1 (MIT): [45]
 glib 0.18.5 (MIT): [45]
@@ -150,103 +155,109 @@ gobject-sys 0.18.0 (MIT): [45]
 gtk 0.18.2 (MIT): [45]
 gtk-sys 0.18.2 (MIT): [45]
 gtk3-macros 0.18.2 (MIT): [45]
-half 2.7.1 (MIT OR Apache-2.0): [103]
-hashbrown 0.12.3 (MIT OR Apache-2.0): [104]
-hashbrown 0.14.5 (MIT OR Apache-2.0): [104]
-hashbrown 0.15.5 (MIT OR Apache-2.0): [104]
-hashbrown 0.17.1 (MIT OR Apache-2.0): [104]
-hashlink 0.9.1 (MIT OR Apache-2.0): [105]
-heck 0.4.1 (MIT OR Apache-2.0): [106]
-heck 0.5.0 (MIT OR Apache-2.0): [106]
-html5ever 0.39.0 (MIT OR Apache-2.0): [107]
-http 1.5.0 (MIT OR Apache-2.0): [108]
-http-body 1.1.0 (MIT): [109]
-http-body-util 0.1.5 (MIT): [109]
-httparse 1.10.1 (MIT OR Apache-2.0): [110]
-httpdate 1.0.3 (MIT OR Apache-2.0): [111]
-hyper 1.11.1 (MIT): [112]
-hyper-util 0.1.21 (MIT): [113]
-iana-time-zone 0.1.65 (MIT OR Apache-2.0): [114]
-iana-time-zone-haiku 0.1.2 (MIT OR Apache-2.0): [114]
-ico 0.5.0 (MIT): [115]
-icu_collections 1.5.0 (Unicode-3.0): [225]
-icu_collections 2.3.0 (Unicode-3.0): [225]
-icu_locale_core 2.3.0 (Unicode-3.0): [225]
-icu_locid 1.5.0 (Unicode-3.0): [225]
-icu_locid_transform 1.5.0 (Unicode-3.0): [225]
-icu_locid_transform_data 1.5.1 (Unicode-3.0): [225]
-icu_normalizer 1.5.0 (Unicode-3.0): [225]
-icu_normalizer 2.3.0 (Unicode-3.0): [225]
-icu_normalizer_data 1.5.1 (Unicode-3.0): [225]
-icu_normalizer_data 2.3.0 (Unicode-3.0): [225]
-icu_properties 1.5.1 (Unicode-3.0): [225]
-icu_properties 2.3.0 (Unicode-3.0): [225]
-icu_properties_data 1.5.1 (Unicode-3.0): [225]
-icu_properties_data 2.3.0 (Unicode-3.0): [225]
-icu_provider 1.5.0 (Unicode-3.0): [225]
-icu_provider 2.3.1 (Unicode-3.0): [225]
-icu_provider_macros 1.5.0 (Unicode-3.0): [225]
-ident_case 1.0.1 (MIT OR Apache-2.0): [103]
-idna 1.1.0 (MIT OR Apache-2.0): [116]
-idna_adapter 1.2.0 (Apache-2.0 OR MIT): [117]
-idna_adapter 1.2.2 (Apache-2.0 OR MIT): [117]
-image 0.25.6 (MIT OR Apache-2.0): [91]
-image 0.25.10 (MIT OR Apache-2.0): [91]
-image-webp 0.2.4 (MIT OR Apache-2.0): [91]
-indexmap 1.9.3 (Apache-2.0 OR MIT): [118]
-indexmap 2.7.1 (Apache-2.0 OR MIT): [118]
-indexmap 2.14.2 (Apache-2.0 OR MIT): [118]
-infer 0.22.0 (MIT): [119]
-ipnet 2.12.2 (MIT OR Apache-2.0): [120]
+half 2.7.1 (MIT OR Apache-2.0): [106]
+hashbrown 0.12.3 (MIT OR Apache-2.0): [107]
+hashbrown 0.14.5 (MIT OR Apache-2.0): [107]
+hashbrown 0.15.5 (MIT OR Apache-2.0): [107]
+hashbrown 0.17.1 (MIT OR Apache-2.0): [107]
+hashlink 0.9.1 (MIT OR Apache-2.0): [108]
+heck 0.4.1 (MIT OR Apache-2.0): [109]
+heck 0.5.0 (MIT OR Apache-2.0): [109]
+html5ever 0.39.0 (MIT OR Apache-2.0): [110]
+http 1.5.0 (MIT OR Apache-2.0): [111]
+http-body 1.1.0 (MIT): [112]
+http-body-util 0.1.5 (MIT): [112]
+httparse 1.10.1 (MIT OR Apache-2.0): [113]
+httpdate 1.0.3 (MIT OR Apache-2.0): [114]
+hyper 1.11.1 (MIT): [115]
+hyper-rustls 0.27.10 (Apache-2.0 OR ISC OR MIT): [116]
+hyper-util 0.1.21 (MIT): [117]
+iana-time-zone 0.1.65 (MIT OR Apache-2.0): [118]
+iana-time-zone-haiku 0.1.2 (MIT OR Apache-2.0): [118]
+ico 0.5.0 (MIT): [119]
+icu_collections 1.5.0 (Unicode-3.0): [239]
+icu_collections 2.3.0 (Unicode-3.0): [239]
+icu_locale_core 2.3.0 (Unicode-3.0): [239]
+icu_locid 1.5.0 (Unicode-3.0): [239]
+icu_locid_transform 1.5.0 (Unicode-3.0): [239]
+icu_locid_transform_data 1.5.1 (Unicode-3.0): [239]
+icu_normalizer 1.5.0 (Unicode-3.0): [239]
+icu_normalizer 2.3.0 (Unicode-3.0): [239]
+icu_normalizer_data 1.5.1 (Unicode-3.0): [239]
+icu_normalizer_data 2.3.0 (Unicode-3.0): [239]
+icu_properties 1.5.1 (Unicode-3.0): [239]
+icu_properties 2.3.0 (Unicode-3.0): [239]
+icu_properties_data 1.5.1 (Unicode-3.0): [239]
+icu_properties_data 2.3.0 (Unicode-3.0): [239]
+icu_provider 1.5.0 (Unicode-3.0): [239]
+icu_provider 2.3.1 (Unicode-3.0): [239]
+icu_provider_macros 1.5.0 (Unicode-3.0): [239]
+ident_case 1.0.1 (MIT OR Apache-2.0): [106]
+idna 1.1.0 (MIT OR Apache-2.0): [120]
+idna_adapter 1.2.0 (Apache-2.0 OR MIT): [121]
+idna_adapter 1.2.2 (Apache-2.0 OR MIT): [121]
+image 0.25.6 (MIT OR Apache-2.0): [94]
+image 0.25.10 (MIT OR Apache-2.0): [94]
+image-webp 0.2.4 (MIT OR Apache-2.0): [94]
+indexmap 1.9.3 (Apache-2.0 OR MIT): [122]
+indexmap 2.7.1 (Apache-2.0 OR MIT): [122]
+indexmap 2.14.2 (Apache-2.0 OR MIT): [122]
+infer 0.22.0 (MIT): [123]
+ipnet 2.12.2 (MIT OR Apache-2.0): [124]
 itoa 1.0.18 (MIT OR Apache-2.0): [38]
-javascriptcore-rs 1.1.2 (MIT): [121]
-javascriptcore-rs-sys 1.1.1 (MIT): [122]
-jni 0.21.1 (MIT OR Apache-2.0): [123]
-jni-sys 0.3.1 (MIT OR Apache-2.0): [124]
-jni-sys 0.4.1 (MIT OR Apache-2.0): [124]
+javascriptcore-rs 1.1.2 (MIT): [125]
+javascriptcore-rs-sys 1.1.1 (MIT): [126]
+jni 0.21.1 (MIT OR Apache-2.0): [127]
+jni 0.22.4 (MIT OR Apache-2.0): [53]
+jni-macros 0.22.4 (MIT OR Apache-2.0): [53]
+jni-sys 0.3.1 (MIT OR Apache-2.0): [128]
+jni-sys 0.4.1 (MIT OR Apache-2.0): [128]
 jni-sys-macros 0.4.1 (MIT OR Apache-2.0): [53]
 jobserver 0.1.34 (MIT OR Apache-2.0): [59]
-jpeg-decoder 0.3.2 (MIT OR Apache-2.0): [125]
+jpeg-decoder 0.3.2 (MIT OR Apache-2.0): [129]
 js-sys 0.3.106 (MIT OR Apache-2.0): [59]
-json-patch 4.2.0 (MIT OR Apache-2.0): [126]
-jsonptr 0.7.1 (MIT OR Apache-2.0): [127]
+json-patch 4.2.0 (MIT OR Apache-2.0): [130]
+jsonptr 0.7.1 (MIT OR Apache-2.0): [131]
 kamadak-exif 0.6.1 (BSD-2-Clause): [7], [8], [9], [10]
-keyboard-types 0.8.3 (MIT OR Apache-2.0): [128]
+keyboard-types 0.8.3 (MIT OR Apache-2.0): [132]
 lcms2 5.6.0 (MIT): [53]
-lcms2-sys 4.0.7 (MIT): [129]
-libc 0.2.189 (MIT OR Apache-2.0): [130]
-libdbus-sys 0.2.7 (Apache-2.0 OR MIT): [77], [131]
+lcms2-sys 4.0.7 (MIT): [133]
+libc 0.2.189 (MIT OR Apache-2.0): [134]
+libdbus-sys 0.2.7 (Apache-2.0 OR MIT): [79], [135]
 libloading 0.8.9 (ISC): [19]
-libredox 0.1.25 (MIT): [132]
-libsqlite3-sys 0.30.1 (MIT): [133]
-libz-sys 1.1.29 (MIT OR Apache-2.0): [134]
-litemap 0.7.5 (Unicode-3.0): [225]
-litemap 0.8.3 (Unicode-3.0): [225]
-litrs 1.0.0 (MIT OR Apache-2.0): [135]
-lock_api 0.4.14 (MIT OR Apache-2.0): [136]
+libredox 0.1.25 (MIT): [136]
+libsqlite3-sys 0.30.1 (MIT): [137]
+libz-sys 1.1.29 (MIT OR Apache-2.0): [138]
+linux-raw-sys 0.12.1 (Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT): [38]
+litemap 0.7.5 (Unicode-3.0): [239]
+litemap 0.8.3 (Unicode-3.0): [239]
+litrs 1.0.0 (MIT OR Apache-2.0): [139]
+lock_api 0.4.14 (MIT OR Apache-2.0): [140]
 log 0.4.34 (MIT OR Apache-2.0): [51]
-lzma-rs 0.3.0 (MIT): [137]
-markup5ever 0.39.0 (MIT OR Apache-2.0): [107]
-matrixmultiply 0.3.11 (MIT OR Apache-2.0): [138]
-md-5 0.10.6 (MIT OR Apache-2.0): [139]
+lzma-rs 0.3.0 (MIT): [141]
+markup5ever 0.39.0 (MIT OR Apache-2.0): [110]
+matrixmultiply 0.3.11 (MIT OR Apache-2.0): [142]
+md-5 0.10.6 (MIT OR Apache-2.0): [143]
 memchr 2.8.3 (Unlicense OR MIT): [40]
-memoffset 0.9.1 (MIT): [140]
-mime 0.3.17 (MIT OR Apache-2.0): [141]
-miniz_oxide 0.8.9 (MIT OR Zlib OR Apache-2.0): [142], [143]
-miniz_oxide 0.9.1 (MIT OR Zlib OR Apache-2.0): [142], [143]
-mio 1.2.3 (MIT): [144]
+memoffset 0.9.1 (MIT): [144]
+mime 0.3.17 (MIT OR Apache-2.0): [145]
+minisign-verify 0.3.0 (MIT): [53]
+miniz_oxide 0.8.9 (MIT OR Zlib OR Apache-2.0): [146], [147]
+miniz_oxide 0.9.1 (MIT OR Zlib OR Apache-2.0): [146], [147]
+mio 1.2.3 (MIT): [148]
 moxcms 0.8.1 (BSD-3-Clause OR Apache-2.0): [3]
 mozjpeg 0.10.13 (IJG): [18]
-mozjpeg-sys 2.2.3 (IJG AND Zlib AND BSD-3-Clause): [14], [15], [18], [228], [229]
-muda 0.20.0 (Apache-2.0 OR MIT): [145]
+mozjpeg-sys 2.2.3 (IJG AND Zlib AND BSD-3-Clause): [14], [15], [18], [242], [243]
+muda 0.20.0 (Apache-2.0 OR MIT): [149]
 mutate_once 0.1.2 (BSD-2-Clause): [11]
-ndarray 0.16.1 (MIT OR Apache-2.0): [146]
+ndarray 0.16.1 (MIT OR Apache-2.0): [150]
 ndk 0.9.0 (MIT OR Apache-2.0): [53]
 ndk-context 0.1.1 (MIT OR Apache-2.0): [53]
 ndk-sys 0.6.0+11769913 (MIT OR Apache-2.0): [53]
-new_debug_unreachable 1.0.6 (MIT): [147]
+new_debug_unreachable 1.0.6 (MIT): [151]
+nix 0.31.3 (MIT): [152]
 num-complex 0.4.6 (MIT OR Apache-2.0): [51]
-num-conv 0.2.2 (MIT OR Apache-2.0): [148]
+num-conv 0.2.2 (MIT OR Apache-2.0): [153]
 num-integer 0.1.47 (MIT OR Apache-2.0): [51]
 num-traits 0.2.19 (MIT OR Apache-2.0): [51]
 num_enum 0.7.6 (BSD-3-Clause OR MIT OR Apache-2.0): [38]
@@ -263,70 +274,80 @@ objc2-core-text 0.3.2 (Zlib OR Apache-2.0 OR MIT): [53]
 objc2-encode 4.1.0 (MIT): [53]
 objc2-exception-helper 0.1.1 (Zlib OR Apache-2.0 OR MIT): [53]
 objc2-foundation 0.3.2 (MIT): [53]
+objc2-osa-kit 0.3.2 (Zlib OR Apache-2.0 OR MIT): [53]
 objc2-quartz-core 0.3.2 (Zlib OR Apache-2.0 OR MIT): [53]
 objc2-ui-kit 0.3.2 (Zlib OR Apache-2.0 OR MIT): [53]
 objc2-user-notifications 0.3.2 (Zlib OR Apache-2.0 OR MIT): [53]
 objc2-web-kit 0.3.2 (Zlib OR Apache-2.0 OR MIT): [53]
 once_cell 1.21.4 (MIT OR Apache-2.0): [38]
-option-ext 0.2.0 (MPL-2.0): [224]
-ort 2.0.0-rc.10 (MIT OR Apache-2.0): [149]
-ort-sys 2.0.0-rc.10 (MIT OR Apache-2.0): [149]
+openssl-probe 0.2.2 (MIT OR Apache-2.0): [59]
+option-ext 0.2.0 (MPL-2.0): [238]
+ort 2.0.0-rc.10 (MIT OR Apache-2.0): [154]
+ort-sys 2.0.0-rc.10 (MIT OR Apache-2.0): [154]
+osakit 0.3.1 (MIT OR Apache-2.0): [155]
 pango 0.18.3 (MIT): [45]
 pango-sys 0.18.0 (MIT): [45]
-parking_lot 0.12.5 (MIT OR Apache-2.0): [136]
-parking_lot_core 0.9.12 (MIT OR Apache-2.0): [136]
-percent-encoding 2.3.2 (MIT OR Apache-2.0): [116]
-phf 0.13.1 (MIT): [150]
-phf_codegen 0.13.1 (MIT): [150]
-phf_generator 0.13.1 (MIT): [150]
-phf_macros 0.13.1 (MIT): [150]
-phf_shared 0.13.1 (MIT): [150]
+parking_lot 0.12.5 (MIT OR Apache-2.0): [140]
+parking_lot_core 0.9.12 (MIT OR Apache-2.0): [140]
+percent-encoding 2.3.2 (MIT OR Apache-2.0): [120]
+phf 0.13.1 (MIT): [156]
+phf_codegen 0.13.1 (MIT): [156]
+phf_generator 0.13.1 (MIT): [156]
+phf_macros 0.13.1 (MIT): [156]
+phf_shared 0.13.1 (MIT): [156]
 pin-project-lite 0.2.17 (Apache-2.0 OR MIT): [38]
 pkg-config 0.3.34 (MIT OR Apache-2.0): [59]
-plist 1.10.1 (MIT): [151]
-png 0.17.16 (MIT OR Apache-2.0): [152]
-png 0.18.1 (MIT OR Apache-2.0): [152]
+plist 1.10.1 (MIT): [157]
+png 0.17.16 (MIT OR Apache-2.0): [158]
+png 0.18.1 (MIT OR Apache-2.0): [158]
 portable-atomic 1.15.0 (Apache-2.0 OR MIT): [38]
 portable-atomic-util 0.2.8 (Apache-2.0 OR MIT): [38]
-potential_utf 0.1.6 (Unicode-3.0): [225]
-powerfmt 0.2.0 (MIT OR Apache-2.0): [153]
-precomputed-hash 0.1.1 (MIT): [154]
+potential_utf 0.1.6 (Unicode-3.0): [239]
+powerfmt 0.2.0 (MIT OR Apache-2.0): [159]
+precomputed-hash 0.1.1 (MIT): [160]
 proc-macro-crate 1.3.1 (MIT OR Apache-2.0): [38]
 proc-macro-crate 2.0.2 (MIT OR Apache-2.0): [38]
 proc-macro-crate 3.5.0 (MIT OR Apache-2.0): [38]
-proc-macro-error 1.0.4 (MIT OR Apache-2.0): [155]
-proc-macro-error-attr 1.0.4 (MIT OR Apache-2.0): [155]
+proc-macro-error 1.0.4 (MIT OR Apache-2.0): [161]
+proc-macro-error-attr 1.0.4 (MIT OR Apache-2.0): [161]
 proc-macro2 1.0.107 (MIT OR Apache-2.0): [38]
 pxfm 0.1.30 (BSD-3-Clause OR Apache-2.0): [3]
-quick-error 2.0.1 (MIT OR Apache-2.0): [156]
-quick-xml 0.42.0 (MIT): [157]
+quick-error 2.0.1 (MIT OR Apache-2.0): [162]
+quick-xml 0.42.0 (MIT): [163]
 quote 1.0.47 (MIT OR Apache-2.0): [38]
 r-efi 5.3.0 (MIT OR Apache-2.0 OR LGPL-2.1-or-later): [53]
 r-efi 6.0.0 (MIT OR Apache-2.0 OR LGPL-2.1-or-later): [53]
-raw-window-handle 0.6.2 (MIT OR Apache-2.0 OR Zlib): [158]
-rawpointer 0.2.1 (MIT OR Apache-2.0): [159]
-redox_syscall 0.5.18 (MIT): [160]
-redox_users 0.5.3 (MIT): [161]
+raw-window-handle 0.6.2 (MIT OR Apache-2.0 OR Zlib): [164]
+rawpointer 0.2.1 (MIT OR Apache-2.0): [165]
+redox_syscall 0.5.18 (MIT): [166]
+redox_users 0.5.3 (MIT): [167]
 regex 1.13.1 (MIT OR Apache-2.0): [51]
 regex-automata 0.4.18 (MIT OR Apache-2.0): [51]
 regex-syntax 0.8.11 (MIT OR Apache-2.0): [51]
-reqwest 0.13.5 (MIT OR Apache-2.0): [162]
-rfd 0.16.0 (MIT): [163]
-rgb 0.8.53 (MIT): [164]
+reqwest 0.13.5 (MIT OR Apache-2.0): [168]
+rfd 0.16.0 (MIT): [169]
+rgb 0.8.53 (MIT): [170]
 ring 0.17.14 (Apache-2.0 AND ISC): [4], [5], [20], [21], [22], [23], [24], [25], [26], [27], [28], [29], [30], [31], [32], [33], [34], [35]
-rusqlite 0.32.1 (MIT): [133]
-rustc-hash 2.1.3 (Apache-2.0 OR MIT): [165]
-rustc_version 0.4.1 (MIT OR Apache-2.0): [136]
-rustls 0.23.46 (Apache-2.0 OR ISC OR MIT): [166]
-rustls-pki-types 1.15.1 (MIT OR Apache-2.0): [167]
+rusqlite 0.32.1 (MIT): [137]
+rustc-hash 2.1.3 (Apache-2.0 OR MIT): [171]
+rustc_version 0.4.1 (MIT OR Apache-2.0): [140]
+rustix 1.1.6 (Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT): [38]
+rustls 0.23.46 (Apache-2.0 OR ISC OR MIT): [116]
+rustls-native-certs 0.8.5 (Apache-2.0 OR ISC OR MIT): [116]
+rustls-pki-types 1.15.1 (MIT OR Apache-2.0): [172]
+rustls-platform-verifier 0.7.1 (MIT OR Apache-2.0): [173]
+rustls-platform-verifier-android 0.2.0 (MIT OR Apache-2.0): [53]
 rustls-webpki 0.103.16 (ISC): [36]
 rustversion 1.0.23 (MIT OR Apache-2.0): [38]
-ryu 1.0.23 (Apache-2.0 OR BSL-1.0): [2]
-same-file 1.0.6 (Unlicense OR MIT): [168]
-schemars 0.8.22 (MIT): [169]
-schemars_derive 0.8.22 (MIT): [169], [170]
-scopeguard 1.2.0 (MIT OR Apache-2.0): [171]
-selectors 0.38.0 (MPL-2.0): [224]
+ryu 1.0.23 (Apache-2.0 OR BSL-1.0): [1]
+same-file 1.0.6 (Unlicense OR MIT): [174]
+schannel 0.1.30 (MIT): [175]
+schemars 0.8.22 (MIT): [176]
+schemars_derive 0.8.22 (MIT): [176], [177]
+scopeguard 1.2.0 (MIT OR Apache-2.0): [178]
+security-framework 3.7.0 (MIT OR Apache-2.0): [179]
+security-framework-sys 2.17.0 (MIT OR Apache-2.0): [179]
+selectors 0.38.0 (MPL-2.0): [238]
 semver 1.0.28 (MIT OR Apache-2.0): [38]
 serde 1.0.229 (MIT OR Apache-2.0): [38]
 serde-untagged 0.1.9 (MIT OR Apache-2.0): [38]
@@ -336,103 +357,112 @@ serde_derive_internals 0.29.1 (MIT OR Apache-2.0): [38]
 serde_json 1.0.151 (MIT OR Apache-2.0): [38]
 serde_path_to_error 0.1.20 (MIT OR Apache-2.0): [38]
 serde_repr 0.1.21 (MIT OR Apache-2.0): [38]
-serde_spanned 0.6.9 (MIT OR Apache-2.0): [172]
-serde_spanned 1.1.1 (MIT OR Apache-2.0): [172]
-serde_with 3.24.0 (MIT OR Apache-2.0): [159]
-serde_with_macros 3.24.0 (MIT OR Apache-2.0): [159]
-serialize-to-javascript 0.1.2 (MIT OR Apache-2.0): [173]
-serialize-to-javascript-impl 0.1.2 (MIT OR Apache-2.0): [173]
+serde_spanned 0.6.9 (MIT OR Apache-2.0): [180]
+serde_spanned 1.1.1 (MIT OR Apache-2.0): [180]
+serde_with 3.24.0 (MIT OR Apache-2.0): [165]
+serde_with_macros 3.24.0 (MIT OR Apache-2.0): [165]
+serialize-to-javascript 0.1.2 (MIT OR Apache-2.0): [181]
+serialize-to-javascript-impl 0.1.2 (MIT OR Apache-2.0): [181]
 servo_arc 0.4.3 (MIT OR Apache-2.0): [38]
-sha1 0.10.7 (MIT OR Apache-2.0): [139]
-sha2 0.10.9 (MIT OR Apache-2.0): [139]
-shlex 2.0.1 (MIT OR Apache-2.0): [174]
-simd-adler32 0.3.10 (MIT): [175]
-siphasher 1.0.4 (MIT OR Apache-2.0): [176]
-slab 0.4.12 (MIT): [177]
-smallvec 1.16.2 (MIT OR Apache-2.0): [178]
-smallvec 2.0.0-alpha.10 (MIT OR Apache-2.0): [178]
+sha1 0.10.7 (MIT OR Apache-2.0): [143]
+sha2 0.10.9 (MIT OR Apache-2.0): [143]
+shlex 2.0.1 (MIT OR Apache-2.0): [182]
+simd-adler32 0.3.10 (MIT): [183]
+simd_cesu8 1.2.0 (Apache-2.0 OR MIT): [38]
+simdutf8 0.1.5 (MIT OR Apache-2.0): [184]
+siphasher 1.0.4 (MIT OR Apache-2.0): [185]
+slab 0.4.12 (MIT): [186]
+smallvec 1.16.2 (MIT OR Apache-2.0): [187]
+smallvec 2.0.0-alpha.10 (MIT OR Apache-2.0): [187]
 socket2 0.6.5 (MIT OR Apache-2.0): [59]
-softbuffer 0.4.8 (MIT OR Apache-2.0): [179]
-soup3 0.5.0 (MIT): [122]
-soup3-sys 0.5.0 (MIT): [122]
-stable_deref_trait 1.2.1 (MIT OR Apache-2.0): [180]
-string_cache 0.9.0 (MIT OR Apache-2.0): [67]
-string_cache_codegen 0.6.1 (MIT OR Apache-2.0): [67]
-strsim 0.11.1 (MIT): [181]
+softbuffer 0.4.8 (MIT OR Apache-2.0): [188]
+soup3 0.5.0 (MIT): [126]
+soup3-sys 0.5.0 (MIT): [126]
+stable_deref_trait 1.2.1 (MIT OR Apache-2.0): [189]
+string_cache 0.9.0 (MIT OR Apache-2.0): [69]
+string_cache_codegen 0.6.1 (MIT OR Apache-2.0): [69]
+strsim 0.11.1 (MIT): [190]
 subtle 2.6.1 (BSD-3-Clause): [16]
-swift-rs 1.0.8 (MIT OR Apache-2.0): [182]
+swift-rs 1.0.9 (MIT OR Apache-2.0): [191]
 syn 1.0.109 (MIT OR Apache-2.0): [38]
 syn 2.0.119 (MIT OR Apache-2.0): [38]
 syn 3.0.6 (MIT OR Apache-2.0): [38]
-sync_wrapper 1.0.2 (Apache-2.0): [2]
-synstructure 0.13.2 (MIT): [183]
-synstructure 0.14.0 (MIT): [183]
+sync_wrapper 1.0.2 (Apache-2.0): [1]
+synstructure 0.13.2 (MIT): [192]
+synstructure 0.14.0 (MIT): [192]
+system-configuration 0.7.0 (MIT OR Apache-2.0): [193]
+system-configuration-sys 0.6.0 (MIT OR Apache-2.0): [193]
 system-deps 6.2.2 (MIT OR Apache-2.0): [38]
-tao 0.37.1 (Apache-2.0): [1]
-tao-macros 0.1.4 (MIT OR Apache-2.0): [184]
+tao 0.37.1 (Apache-2.0): [2]
+tao-macros 0.1.4 (MIT OR Apache-2.0): [194]
+tar 0.4.46 (MIT OR Apache-2.0): [195]
 target-lexicon 0.12.16 (Apache-2.0 WITH LLVM-exception): [6]
-tauri 2.12.0 (Apache-2.0 OR MIT): [185]
-tauri-build 2.7.0 (Apache-2.0 OR MIT): [185]
-tauri-codegen 2.7.0 (Apache-2.0 OR MIT): [185]
-tauri-macros 2.7.0 (Apache-2.0 OR MIT): [185]
-tauri-plugin 2.7.0 (Apache-2.0 OR MIT): [53]
+tauri 2.12.0 (Apache-2.0 OR MIT): [196]
+tauri-build 2.7.0 (Apache-2.0 OR MIT): [196]
+tauri-codegen 2.7.0 (Apache-2.0 OR MIT): [196]
+tauri-macros 2.7.0 (Apache-2.0 OR MIT): [196]
+tauri-plugin 2.7.2 (Apache-2.0 OR MIT): [53]
 tauri-plugin-dialog 2.8.0 (Apache-2.0 OR MIT): [53]
 tauri-plugin-fs 2.6.0 (Apache-2.0 OR MIT): [53]
-tauri-runtime 2.12.0 (Apache-2.0 OR MIT): [185]
-tauri-runtime-wry 2.12.0 (Apache-2.0 OR MIT): [185]
-tauri-utils 2.10.0 (Apache-2.0 OR MIT): [185]
-tauri-winres 0.3.6 (MIT): [186]
-tendril 0.5.1 (MIT OR Apache-2.0): [187]
+tauri-plugin-updater 2.14.1 (Apache-2.0 OR MIT): [53]
+tauri-runtime 2.12.0 (Apache-2.0 OR MIT): [196]
+tauri-runtime-wry 2.12.0 (Apache-2.0 OR MIT): [196]
+tauri-utils 2.10.2 (Apache-2.0 OR MIT): [196]
+tauri-winres 0.3.6 (MIT): [197]
+tempfile 3.27.0 (MIT OR Apache-2.0): [198]
+tendril 0.5.1 (MIT OR Apache-2.0): [199]
 thiserror 1.0.69 (MIT OR Apache-2.0): [38]
 thiserror 2.0.21 (MIT OR Apache-2.0): [38]
 thiserror-impl 1.0.69 (MIT OR Apache-2.0): [38]
 thiserror-impl 2.0.21 (MIT OR Apache-2.0): [38]
-tiff 0.9.1 (MIT): [188]
-tiff 0.10.3 (MIT): [188]
-time 0.3.55 (MIT OR Apache-2.0): [189]
-time-core 0.1.9 (MIT OR Apache-2.0): [189]
-time-macros 0.2.32 (MIT OR Apache-2.0): [189]
-tiny_http 0.12.0 (MIT OR Apache-2.0): [190]
-tinystr 0.7.6 (Unicode-3.0): [225]
-tinystr 0.8.4 (Unicode-3.0): [225]
-tinyvec 1.13.3 (Zlib OR Apache-2.0 OR MIT): [191]
-tokio 1.53.1 (MIT): [192]
-tokio-util 0.7.19 (MIT): [192]
-toml 0.8.2 (MIT OR Apache-2.0): [172]
-toml 1.1.6+spec-1.1.0 (MIT OR Apache-2.0): [172]
+tiff 0.9.1 (MIT): [200]
+tiff 0.10.3 (MIT): [200]
+time 0.3.55 (MIT OR Apache-2.0): [201]
+time-core 0.1.9 (MIT OR Apache-2.0): [201]
+time-macros 0.2.32 (MIT OR Apache-2.0): [201]
+tiny_http 0.12.0 (MIT OR Apache-2.0): [202]
+tinystr 0.7.6 (Unicode-3.0): [239]
+tinystr 0.8.4 (Unicode-3.0): [239]
+tinyvec 1.13.3 (Zlib OR Apache-2.0 OR MIT): [203]
+tokio 1.53.1 (MIT): [204]
+tokio-rustls 0.26.6 (MIT OR Apache-2.0): [205]
+tokio-util 0.7.19 (MIT): [204]
+toml 0.8.2 (MIT OR Apache-2.0): [180]
+toml 1.1.6+spec-1.1.0 (MIT OR Apache-2.0): [180]
 toml_datetime 0.6.3 (MIT OR Apache-2.0): [59]
-toml_datetime 1.1.1+spec-1.1.0 (MIT OR Apache-2.0): [172]
-toml_edit 0.19.15 (MIT OR Apache-2.0): [172]
-toml_edit 0.20.2 (MIT OR Apache-2.0): [172]
-toml_edit 0.25.15+spec-1.1.0 (MIT OR Apache-2.0): [172]
-toml_parser 1.1.3+spec-1.1.0 (MIT OR Apache-2.0): [172]
-toml_writer 1.1.2+spec-1.1.0 (MIT OR Apache-2.0): [172]
-tower 0.5.3 (MIT): [193]
-tower-http 0.6.11 (MIT): [194]
-tower-layer 0.3.3 (MIT): [193]
-tower-service 0.3.3 (MIT): [193]
-tracing 0.1.44 (MIT): [195]
-tracing-core 0.1.36 (MIT): [195], [196]
-try-lock 0.2.5 (MIT): [197]
+toml_datetime 1.1.1+spec-1.1.0 (MIT OR Apache-2.0): [180]
+toml_edit 0.19.15 (MIT OR Apache-2.0): [180]
+toml_edit 0.20.2 (MIT OR Apache-2.0): [180]
+toml_edit 0.25.15+spec-1.1.0 (MIT OR Apache-2.0): [180]
+toml_parser 1.1.3+spec-1.1.0 (MIT OR Apache-2.0): [180]
+toml_writer 1.1.2+spec-1.1.0 (MIT OR Apache-2.0): [180]
+tower 0.5.3 (MIT): [206]
+tower-http 0.6.11 (MIT): [207]
+tower-layer 0.3.3 (MIT): [206]
+tower-service 0.3.3 (MIT): [206]
+tracing 0.1.44 (MIT): [208]
+tracing-core 0.1.36 (MIT): [208], [209]
+try-lock 0.2.5 (MIT): [210]
+typed-path 0.13.0 (MIT OR Apache-2.0): [38]
 typeid 1.0.3 (MIT OR Apache-2.0): [38]
-typenum 1.20.1 (MIT OR Apache-2.0): [198]
-unicode-ident 1.0.26 ((MIT OR Apache-2.0) AND Unicode-3.0): [38], [226]
-unicode-normalization 0.1.22 (MIT OR Apache-2.0): [106]
-unicode-segmentation 1.13.3 (MIT OR Apache-2.0): [106]
+typenum 1.20.1 (MIT OR Apache-2.0): [211]
+unicode-ident 1.0.26 ((MIT OR Apache-2.0) AND Unicode-3.0): [38], [240]
+unicode-normalization 0.1.22 (MIT OR Apache-2.0): [109]
+unicode-segmentation 1.13.3 (MIT OR Apache-2.0): [109]
 untrusted 0.9.0 (ISC): [37]
-ureq 2.12.1 (MIT OR Apache-2.0): [63], [199]
-url 2.5.8 (MIT OR Apache-2.0): [116]
-urlpattern 0.6.0 (MIT): [200]
-utf16_iter 1.0.5 (Apache-2.0 OR MIT): [201]
-utf8_iter 1.0.4 (Apache-2.0 OR MIT): [201]
-uuid 1.26.1 (Apache-2.0 OR MIT): [202]
-vcpkg 0.2.15 (MIT OR Apache-2.0): [203]
-version-compare 0.2.1 (MIT): [204]
-version_check 0.9.5 (MIT OR Apache-2.0): [205]
-vswhom 0.1.0 (MIT): [206]
-vswhom-sys 0.1.3 (MIT): [206]
+ureq 2.12.1 (MIT OR Apache-2.0): [65], [212]
+url 2.5.8 (MIT OR Apache-2.0): [120]
+urlpattern 0.6.0 (MIT): [213]
+utf16_iter 1.0.5 (Apache-2.0 OR MIT): [214]
+utf8_iter 1.0.4 (Apache-2.0 OR MIT): [214]
+uuid 1.26.1 (Apache-2.0 OR MIT): [215]
+vcpkg 0.2.15 (MIT OR Apache-2.0): [216]
+version-compare 0.2.1 (MIT): [217]
+version_check 0.9.5 (MIT OR Apache-2.0): [218]
+vswhom 0.1.0 (MIT): [219]
+vswhom-sys 0.1.3 (MIT): [219]
 walkdir 2.5.0 (Unlicense OR MIT): [40]
-want 0.3.1 (MIT): [207]
+want 0.3.1 (MIT): [220]
 wasi 0.11.1+wasi-snapshot-preview1 (Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT): [38]
 wasip2 1.0.4+wasi-0.2.12 (Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT): [38]
 wasm-bindgen 0.2.129 (MIT OR Apache-2.0): [59]
@@ -442,21 +472,22 @@ wasm-bindgen-macro-support 0.2.129 (MIT OR Apache-2.0): [59]
 wasm-bindgen-shared 0.2.129 (MIT OR Apache-2.0): [59]
 wasm-streams 0.5.0 (MIT OR Apache-2.0): [38]
 web-sys 0.3.106 (MIT OR Apache-2.0): [59]
-web-time 1.1.0 (MIT OR Apache-2.0): [208]
-web_atoms 0.2.6 (MIT OR Apache-2.0): [107]
-webkit2gtk 2.0.2 (MIT): [209]
-webkit2gtk-sys 2.0.2 (MIT): [210]
+web-time 1.1.0 (MIT OR Apache-2.0): [221]
+web_atoms 0.2.6 (MIT OR Apache-2.0): [110]
+webkit2gtk 2.0.2 (MIT): [222]
+webkit2gtk-sys 2.0.2 (MIT): [223]
+webpki-root-certs 1.0.12 (CDLA-Permissive-2.0): [17]
 webpki-roots 0.26.11 (CDLA-Permissive-2.0): [17]
 webpki-roots 1.0.10 (CDLA-Permissive-2.0): [17]
 webview2-com 0.39.1 (MIT): [53]
 webview2-com-macros 0.8.1 (MIT): [53]
 webview2-com-sys 0.39.1 (MIT): [53]
-weezl 0.1.12 (MIT OR Apache-2.0): [211]
-winapi 0.3.9 (MIT OR Apache-2.0): [212]
+weezl 0.1.12 (MIT OR Apache-2.0): [224]
+winapi 0.3.9 (MIT OR Apache-2.0): [225]
 winapi-i686-pc-windows-gnu 0.4.0 (MIT OR Apache-2.0): [53]
-winapi-util 0.1.11 (Unlicense OR MIT): [168]
+winapi-util 0.1.11 (Unlicense OR MIT): [174]
 winapi-x86_64-pc-windows-gnu 0.4.0 (MIT OR Apache-2.0): [53]
-window-vibrancy 0.8.1 (Apache-2.0 OR MIT): [213]
+window-vibrancy 0.8.1 (Apache-2.0 OR MIT): [226]
 windows 0.62.2 (MIT OR Apache-2.0): [53]
 windows-collections 0.3.2 (MIT OR Apache-2.0): [53]
 windows-core 0.62.2 (MIT OR Apache-2.0): [53]
@@ -465,6 +496,7 @@ windows-implement 0.60.2 (MIT OR Apache-2.0): [53]
 windows-interface 0.59.3 (MIT OR Apache-2.0): [53]
 windows-link 0.2.1 (MIT OR Apache-2.0): [53]
 windows-numerics 0.3.1 (MIT OR Apache-2.0): [53]
+windows-registry 0.6.1 (MIT OR Apache-2.0): [53]
 windows-result 0.4.1 (MIT OR Apache-2.0): [53]
 windows-strings 0.5.1 (MIT OR Apache-2.0): [53]
 windows-sys 0.45.0 (MIT OR Apache-2.0): [53]
@@ -500,43 +532,125 @@ windows_x86_64_gnullvm 0.53.1 (MIT OR Apache-2.0): [53]
 windows_x86_64_msvc 0.42.2 (MIT OR Apache-2.0): [53]
 windows_x86_64_msvc 0.52.6 (MIT OR Apache-2.0): [53]
 windows_x86_64_msvc 0.53.1 (MIT OR Apache-2.0): [53]
-winnow 0.5.40 (MIT): [214]
-winnow 1.0.4 (MIT): [214]
-winreg 0.55.0 (MIT): [215]
+winnow 0.5.40 (MIT): [227]
+winnow 1.0.4 (MIT): [227]
+winreg 0.55.0 (MIT): [228]
 wit-bindgen 0.57.1 (Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT): [38]
-write16 1.0.0 (Apache-2.0 OR MIT): [201]
-writeable 0.5.5 (Unicode-3.0): [225]
-writeable 0.6.4 (Unicode-3.0): [225]
-wry 0.57.0 (Apache-2.0 OR MIT): [216]
+write16 1.0.0 (Apache-2.0 OR MIT): [214]
+writeable 0.5.5 (Unicode-3.0): [239]
+writeable 0.6.4 (Unicode-3.0): [239]
+wry 0.57.0 (Apache-2.0 OR MIT): [229]
 x11 2.21.0 (MIT): [38]
 x11-dl 2.21.0 (MIT): [38]
-yoke 0.7.5 (Unicode-3.0): [225]
-yoke 0.8.3 (Unicode-3.0): [225]
-yoke-derive 0.7.5 (Unicode-3.0): [225]
-yoke-derive 0.8.4 (Unicode-3.0): [225]
-zerocopy 0.8.59 (BSD-2-Clause OR Apache-2.0 OR MIT): [217]
-zerocopy-derive 0.8.59 (BSD-2-Clause OR Apache-2.0 OR MIT): [217]
-zerofrom 0.1.8 (Unicode-3.0): [225]
-zerofrom-derive 0.1.8 (Unicode-3.0): [225]
-zeroize 1.8.2 (Apache-2.0 OR MIT): [218]
-zeroize 1.9.0 (Apache-2.0 OR MIT): [219]
-zerotrie 0.2.5 (Unicode-3.0): [225]
-zerovec 0.10.4 (Unicode-3.0): [225]
-zerovec 0.11.8 (Unicode-3.0): [225]
-zerovec-derive 0.10.4 (Unicode-3.0): [225]
-zerovec-derive 0.11.6 (Unicode-3.0): [225]
-zip 2.4.2 (MIT): [220]
+xattr 1.7.0 (MIT OR Apache-2.0): [198]
+yoke 0.7.5 (Unicode-3.0): [239]
+yoke 0.8.3 (Unicode-3.0): [239]
+yoke-derive 0.7.5 (Unicode-3.0): [239]
+yoke-derive 0.8.4 (Unicode-3.0): [239]
+zerocopy 0.8.59 (BSD-2-Clause OR Apache-2.0 OR MIT): [230]
+zerocopy-derive 0.8.59 (BSD-2-Clause OR Apache-2.0 OR MIT): [230]
+zerofrom 0.1.8 (Unicode-3.0): [239]
+zerofrom-derive 0.1.8 (Unicode-3.0): [239]
+zeroize 1.8.2 (Apache-2.0 OR MIT): [231]
+zeroize 1.9.0 (Apache-2.0 OR MIT): [232]
+zeroize_derive 1.5.0 (Apache-2.0 OR MIT): [233]
+zerotrie 0.2.5 (Unicode-3.0): [239]
+zerovec 0.10.4 (Unicode-3.0): [239]
+zerovec 0.11.8 (Unicode-3.0): [239]
+zerovec-derive 0.10.4 (Unicode-3.0): [239]
+zerovec-derive 0.11.6 (Unicode-3.0): [239]
+zip 2.4.2 (MIT): [234]
+zip 9.5.1 (MIT): [209]
 zmij 1.0.23 (MIT): [38]
 zune-core 0.4.12 (MIT OR Apache-2.0 OR Zlib): [53]
-zune-core 0.5.3 (MIT OR Apache-2.0 OR Zlib): [221]
+zune-core 0.5.3 (MIT OR Apache-2.0 OR Zlib): [235]
 zune-jpeg 0.4.21 (MIT OR Apache-2.0 OR Zlib): [53]
-zune-jpeg 0.5.15 (MIT OR Apache-2.0 OR Zlib): [221]
+zune-jpeg 0.5.15 (MIT OR Apache-2.0 OR Zlib): [235]
 
 License texts
 -------------
 
 ------------------------------------------------------------------------------
 [1] Apache License 2.0 (Apache-2.0)
+Used by: constant_time_eq 0.6.1, dunce 1.0.5, ryu 1.0.23, sync_wrapper 1.0.2
+------------------------------------------------------------------------------
+
+Apache License
+Version 2.0, January 2004
+http://www.apache.org/licenses/
+
+TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION
+
+1. Definitions.
+
+"License" shall mean the terms and conditions for use, reproduction, and distribution as defined by Sections 1 through 9 of this document.
+
+"Licensor" shall mean the copyright owner or entity authorized by the copyright owner that is granting the License.
+
+"Legal Entity" shall mean the union of the acting entity and all other entities that control, are controlled by, or are under common control with that entity. For the purposes of this definition, "control" means (i) the power, direct or indirect, to cause the direction or management of such entity, whether by contract or otherwise, or (ii) ownership of fifty percent (50%) or more of the outstanding shares, or (iii) beneficial ownership of such entity.
+
+"You" (or "Your") shall mean an individual or Legal Entity exercising permissions granted by this License.
+
+"Source" form shall mean the preferred form for making modifications, including but not limited to software source code, documentation source, and configuration files.
+
+"Object" form shall mean any form resulting from mechanical transformation or translation of a Source form, including but not limited to compiled object code, generated documentation, and conversions to other media types.
+
+"Work" shall mean the work of authorship, whether in Source or Object form, made available under the License, as indicated by a copyright notice that is included in or attached to the work (an example is provided in the Appendix below).
+
+"Derivative Works" shall mean any work, whether in Source or Object form, that is based on (or derived from) the Work and for which the editorial revisions, annotations, elaborations, or other modifications represent, as a whole, an original work of authorship. For the purposes of this License, Derivative Works shall not include works that remain separable from, or merely link (or bind by name) to the interfaces of, the Work and Derivative Works thereof.
+
+"Contribution" shall mean any work of authorship, including the original version of the Work and any modifications or additions to that Work or Derivative Works thereof, that is intentionally submitted to Licensor for inclusion in the Work by the copyright owner or by an individual or Legal Entity authorized to submit on behalf of the copyright owner. For the purposes of this definition, "submitted" means any form of electronic, verbal, or written communication sent to the Licensor or its representatives, including but not limited to communication on electronic mailing lists, source code control systems, and issue tracking systems that are managed by, or on behalf of, the Licensor for the purpose of discussing and improving the Work, but excluding communication that is conspicuously marked or otherwise designated in writing by the copyright owner as "Not a Contribution."
+
+"Contributor" shall mean Licensor and any individual or Legal Entity on behalf of whom a Contribution has been received by Licensor and subsequently incorporated within the Work.
+
+2. Grant of Copyright License. Subject to the terms and conditions of this License, each Contributor hereby grants to You a perpetual, worldwide, non-exclusive, no-charge, royalty-free, irrevocable copyright license to reproduce, prepare Derivative Works of, publicly display, publicly perform, sublicense, and distribute the Work and such Derivative Works in Source or Object form.
+
+3. Grant of Patent License. Subject to the terms and conditions of this License, each Contributor hereby grants to You a perpetual, worldwide, non-exclusive, no-charge, royalty-free, irrevocable (except as stated in this section) patent license to make, have made, use, offer to sell, sell, import, and otherwise transfer the Work, where such license applies only to those patent claims licensable by such Contributor that are necessarily infringed by their Contribution(s) alone or by combination of their Contribution(s) with the Work to which such Contribution(s) was submitted. If You institute patent litigation against any entity (including a cross-claim or counterclaim in a lawsuit) alleging that the Work or a Contribution incorporated within the Work constitutes direct or contributory patent infringement, then any patent licenses granted to You under this License for that Work shall terminate as of the date such litigation is filed.
+
+4. Redistribution. You may reproduce and distribute copies of the Work or Derivative Works thereof in any medium, with or without modifications, and in Source or Object form, provided that You meet the following conditions:
+
+     (a) You must give any other recipients of the Work or Derivative Works a copy of this License; and
+
+     (b) You must cause any modified files to carry prominent notices stating that You changed the files; and
+
+     (c) You must retain, in the Source form of any Derivative Works that You distribute, all copyright, patent, trademark, and attribution notices from the Source form of the Work, excluding those notices that do not pertain to any part of the Derivative Works; and
+
+     (d) If the Work includes a "NOTICE" text file as part of its distribution, then any Derivative Works that You distribute must include a readable copy of the attribution notices contained within such NOTICE file, excluding those notices that do not pertain to any part of the Derivative Works, in at least one of the following places: within a NOTICE text file distributed as part of the Derivative Works; within the Source form or documentation, if provided along with the Derivative Works; or, within a display generated by the Derivative Works, if and wherever such third-party notices normally appear. The contents of the NOTICE file are for informational purposes only and do not modify the License. You may add Your own attribution notices within Derivative Works that You distribute, alongside or as an addendum to the NOTICE text from the Work, provided that such additional attribution notices cannot be construed as modifying the License.
+
+     You may add Your own copyright statement to Your modifications and may provide additional or different license terms and conditions for use, reproduction, or distribution of Your modifications, or for any such Derivative Works as a whole, provided Your use, reproduction, and distribution of the Work otherwise complies with the conditions stated in this License.
+
+5. Submission of Contributions. Unless You explicitly state otherwise, any Contribution intentionally submitted for inclusion in the Work by You to the Licensor shall be under the terms and conditions of this License, without any additional terms or conditions. Notwithstanding the above, nothing herein shall supersede or modify the terms of any separate license agreement you may have executed with Licensor regarding such Contributions.
+
+6. Trademarks. This License does not grant permission to use the trade names, trademarks, service marks, or product names of the Licensor, except as required for reasonable and customary use in describing the origin of the Work and reproducing the content of the NOTICE file.
+
+7. Disclaimer of Warranty. Unless required by applicable law or agreed to in writing, Licensor provides the Work (and each Contributor provides its Contributions) on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied, including, without limitation, any warranties or conditions of TITLE, NON-INFRINGEMENT, MERCHANTABILITY, or FITNESS FOR A PARTICULAR PURPOSE. You are solely responsible for determining the appropriateness of using or redistributing the Work and assume any risks associated with Your exercise of permissions under this License.
+
+8. Limitation of Liability. In no event and under no legal theory, whether in tort (including negligence), contract, or otherwise, unless required by applicable law (such as deliberate and grossly negligent acts) or agreed to in writing, shall any Contributor be liable to You for damages, including any direct, indirect, special, incidental, or consequential damages of any character arising as a result of this License or out of the use or inability to use the Work (including but not limited to damages for loss of goodwill, work stoppage, computer failure or malfunction, or any and all other commercial damages or losses), even if such Contributor has been advised of the possibility of such damages.
+
+9. Accepting Warranty or Additional Liability. While redistributing the Work or Derivative Works thereof, You may choose to offer, and charge a fee for, acceptance of support, warranty, indemnity, or other liability obligations and/or rights consistent with this License. However, in accepting such obligations, You may act only on Your own behalf and on Your sole responsibility, not on behalf of any other Contributor, and only if You agree to indemnify, defend, and hold each Contributor harmless for any liability incurred by, or claims asserted against, such Contributor by reason of your accepting any such warranty or additional liability.
+
+END OF TERMS AND CONDITIONS
+
+APPENDIX: How to apply the Apache License to your work.
+
+To apply the Apache License to your work, attach the following boilerplate notice, with the fields enclosed by brackets "[]" replaced with your own identifying information. (Don't include the brackets!)  The text should be enclosed in the appropriate comment syntax for the file format. We also recommend that a file or class name and description of purpose be included on the same "printed page" as the copyright notice for easier identification within third-party archives.
+
+Copyright [yyyy] [name of copyright owner]
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+
+------------------------------------------------------------------------------
+[2] Apache License 2.0 (Apache-2.0)
 Used by: dpi 0.1.2, tao 0.37.1
 ------------------------------------------------------------------------------
 
@@ -741,85 +855,6 @@ Apache License
    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
    See the License for the specific language governing permissions and
    limitations under the License.
-
-------------------------------------------------------------------------------
-[2] Apache License 2.0 (Apache-2.0)
-Used by: dunce 1.0.5, ryu 1.0.23, sync_wrapper 1.0.2
-------------------------------------------------------------------------------
-
-Apache License
-Version 2.0, January 2004
-http://www.apache.org/licenses/
-
-TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION
-
-1. Definitions.
-
-"License" shall mean the terms and conditions for use, reproduction, and distribution as defined by Sections 1 through 9 of this document.
-
-"Licensor" shall mean the copyright owner or entity authorized by the copyright owner that is granting the License.
-
-"Legal Entity" shall mean the union of the acting entity and all other entities that control, are controlled by, or are under common control with that entity. For the purposes of this definition, "control" means (i) the power, direct or indirect, to cause the direction or management of such entity, whether by contract or otherwise, or (ii) ownership of fifty percent (50%) or more of the outstanding shares, or (iii) beneficial ownership of such entity.
-
-"You" (or "Your") shall mean an individual or Legal Entity exercising permissions granted by this License.
-
-"Source" form shall mean the preferred form for making modifications, including but not limited to software source code, documentation source, and configuration files.
-
-"Object" form shall mean any form resulting from mechanical transformation or translation of a Source form, including but not limited to compiled object code, generated documentation, and conversions to other media types.
-
-"Work" shall mean the work of authorship, whether in Source or Object form, made available under the License, as indicated by a copyright notice that is included in or attached to the work (an example is provided in the Appendix below).
-
-"Derivative Works" shall mean any work, whether in Source or Object form, that is based on (or derived from) the Work and for which the editorial revisions, annotations, elaborations, or other modifications represent, as a whole, an original work of authorship. For the purposes of this License, Derivative Works shall not include works that remain separable from, or merely link (or bind by name) to the interfaces of, the Work and Derivative Works thereof.
-
-"Contribution" shall mean any work of authorship, including the original version of the Work and any modifications or additions to that Work or Derivative Works thereof, that is intentionally submitted to Licensor for inclusion in the Work by the copyright owner or by an individual or Legal Entity authorized to submit on behalf of the copyright owner. For the purposes of this definition, "submitted" means any form of electronic, verbal, or written communication sent to the Licensor or its representatives, including but not limited to communication on electronic mailing lists, source code control systems, and issue tracking systems that are managed by, or on behalf of, the Licensor for the purpose of discussing and improving the Work, but excluding communication that is conspicuously marked or otherwise designated in writing by the copyright owner as "Not a Contribution."
-
-"Contributor" shall mean Licensor and any individual or Legal Entity on behalf of whom a Contribution has been received by Licensor and subsequently incorporated within the Work.
-
-2. Grant of Copyright License. Subject to the terms and conditions of this License, each Contributor hereby grants to You a perpetual, worldwide, non-exclusive, no-charge, royalty-free, irrevocable copyright license to reproduce, prepare Derivative Works of, publicly display, publicly perform, sublicense, and distribute the Work and such Derivative Works in Source or Object form.
-
-3. Grant of Patent License. Subject to the terms and conditions of this License, each Contributor hereby grants to You a perpetual, worldwide, non-exclusive, no-charge, royalty-free, irrevocable (except as stated in this section) patent license to make, have made, use, offer to sell, sell, import, and otherwise transfer the Work, where such license applies only to those patent claims licensable by such Contributor that are necessarily infringed by their Contribution(s) alone or by combination of their Contribution(s) with the Work to which such Contribution(s) was submitted. If You institute patent litigation against any entity (including a cross-claim or counterclaim in a lawsuit) alleging that the Work or a Contribution incorporated within the Work constitutes direct or contributory patent infringement, then any patent licenses granted to You under this License for that Work shall terminate as of the date such litigation is filed.
-
-4. Redistribution. You may reproduce and distribute copies of the Work or Derivative Works thereof in any medium, with or without modifications, and in Source or Object form, provided that You meet the following conditions:
-
-     (a) You must give any other recipients of the Work or Derivative Works a copy of this License; and
-
-     (b) You must cause any modified files to carry prominent notices stating that You changed the files; and
-
-     (c) You must retain, in the Source form of any Derivative Works that You distribute, all copyright, patent, trademark, and attribution notices from the Source form of the Work, excluding those notices that do not pertain to any part of the Derivative Works; and
-
-     (d) If the Work includes a "NOTICE" text file as part of its distribution, then any Derivative Works that You distribute must include a readable copy of the attribution notices contained within such NOTICE file, excluding those notices that do not pertain to any part of the Derivative Works, in at least one of the following places: within a NOTICE text file distributed as part of the Derivative Works; within the Source form or documentation, if provided along with the Derivative Works; or, within a display generated by the Derivative Works, if and wherever such third-party notices normally appear. The contents of the NOTICE file are for informational purposes only and do not modify the License. You may add Your own attribution notices within Derivative Works that You distribute, alongside or as an addendum to the NOTICE text from the Work, provided that such additional attribution notices cannot be construed as modifying the License.
-
-     You may add Your own copyright statement to Your modifications and may provide additional or different license terms and conditions for use, reproduction, or distribution of Your modifications, or for any such Derivative Works as a whole, provided Your use, reproduction, and distribution of the Work otherwise complies with the conditions stated in this License.
-
-5. Submission of Contributions. Unless You explicitly state otherwise, any Contribution intentionally submitted for inclusion in the Work by You to the Licensor shall be under the terms and conditions of this License, without any additional terms or conditions. Notwithstanding the above, nothing herein shall supersede or modify the terms of any separate license agreement you may have executed with Licensor regarding such Contributions.
-
-6. Trademarks. This License does not grant permission to use the trade names, trademarks, service marks, or product names of the Licensor, except as required for reasonable and customary use in describing the origin of the Work and reproducing the content of the NOTICE file.
-
-7. Disclaimer of Warranty. Unless required by applicable law or agreed to in writing, Licensor provides the Work (and each Contributor provides its Contributions) on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied, including, without limitation, any warranties or conditions of TITLE, NON-INFRINGEMENT, MERCHANTABILITY, or FITNESS FOR A PARTICULAR PURPOSE. You are solely responsible for determining the appropriateness of using or redistributing the Work and assume any risks associated with Your exercise of permissions under this License.
-
-8. Limitation of Liability. In no event and under no legal theory, whether in tort (including negligence), contract, or otherwise, unless required by applicable law (such as deliberate and grossly negligent acts) or agreed to in writing, shall any Contributor be liable to You for damages, including any direct, indirect, special, incidental, or consequential damages of any character arising as a result of this License or out of the use or inability to use the Work (including but not limited to damages for loss of goodwill, work stoppage, computer failure or malfunction, or any and all other commercial damages or losses), even if such Contributor has been advised of the possibility of such damages.
-
-9. Accepting Warranty or Additional Liability. While redistributing the Work or Derivative Works thereof, You may choose to offer, and charge a fee for, acceptance of support, warranty, indemnity, or other liability obligations and/or rights consistent with this License. However, in accepting such obligations, You may act only on Your own behalf and on Your sole responsibility, not on behalf of any other Contributor, and only if You agree to indemnify, defend, and hold each Contributor harmless for any liability incurred by, or claims asserted against, such Contributor by reason of your accepting any such warranty or additional liability.
-
-END OF TERMS AND CONDITIONS
-
-APPENDIX: How to apply the Apache License to your work.
-
-To apply the Apache License to your work, attach the following boilerplate notice, with the fields enclosed by brackets "[]" replaced with your own identifying information. (Don't include the brackets!)  The text should be enclosed in the appropriate comment syntax for the file format. We also recommend that a file or class name and description of purpose be included on the same "printed page" as the copyright notice for easier identification within third-party archives.
-
-Copyright [yyyy] [name of copyright owner]
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
 
 ------------------------------------------------------------------------------
 [3] Apache License 2.0 (Apache-2.0)
@@ -2185,7 +2220,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ------------------------------------------------------------------------------
 [17] Community Data License Agreement Permissive 2.0 (CDLA-Permissive-2.0)
-Used by: webpki-roots 0.26.11, webpki-roots 1.0.10
+Used by: webpki-root-certs 1.0.12, webpki-roots 0.26.11, webpki-roots 1.0.10
 ------------------------------------------------------------------------------
 
 # Community Data License Agreement - Permissive - Version 2.0
@@ -2848,15 +2883,16 @@ Used by: untrusted 0.9.0
 [38] MIT License (MIT)
 Used by: adler2 2.0.1, anyhow 1.0.104, atomic-waker 1.1.2, camino 1.2.6, cargo-platform 0.1.9,
 cargo_metadata 0.19.2, displaydoc 0.2.7, dtoa 1.0.11, dyn-clone 1.0.20, erased-serde 0.4.10,
-fastrand 2.5.0, itoa 1.0.18, num_enum 0.7.6, num_enum_derive 0.7.6, once_cell 1.21.4,
-pin-project-lite 0.2.17, portable-atomic 1.15.0, portable-atomic-util 0.2.8, proc-macro-crate 1.3.1,
-proc-macro-crate 2.0.2, proc-macro-crate 3.5.0, proc-macro2 1.0.107, quote 1.0.47, rustversion
-1.0.23, semver 1.0.28, serde 1.0.229, serde-untagged 0.1.9, serde_core 1.0.229, serde_derive
-1.0.229, serde_derive_internals 0.29.1, serde_json 1.0.151, serde_path_to_error 0.1.20, serde_repr
-0.1.21, servo_arc 0.4.3, syn 1.0.109, syn 2.0.119, syn 3.0.6, system-deps 6.2.2, thiserror 1.0.69,
-thiserror 2.0.21, thiserror-impl 1.0.69, thiserror-impl 2.0.21, typeid 1.0.3, unicode-ident 1.0.26,
-wasi 0.11.1+wasi-snapshot-preview1, wasip2 1.0.4+wasi-0.2.12, wasm-streams 0.5.0, wit-bindgen
-0.57.1, x11 2.21.0, x11-dl 2.21.0, zmij 1.0.23
+fastrand 2.5.0, itoa 1.0.18, linux-raw-sys 0.12.1, num_enum 0.7.6, num_enum_derive 0.7.6, once_cell
+1.21.4, pin-project-lite 0.2.17, portable-atomic 1.15.0, portable-atomic-util 0.2.8,
+proc-macro-crate 1.3.1, proc-macro-crate 2.0.2, proc-macro-crate 3.5.0, proc-macro2 1.0.107, quote
+1.0.47, rustix 1.1.6, rustversion 1.0.23, semver 1.0.28, serde 1.0.229, serde-untagged 0.1.9,
+serde_core 1.0.229, serde_derive 1.0.229, serde_derive_internals 0.29.1, serde_json 1.0.151,
+serde_path_to_error 0.1.20, serde_repr 0.1.21, servo_arc 0.4.3, simd_cesu8 1.2.0, syn 1.0.109, syn
+2.0.119, syn 3.0.6, system-deps 6.2.2, thiserror 1.0.69, thiserror 2.0.21, thiserror-impl 1.0.69,
+thiserror-impl 2.0.21, typed-path 0.13.0, typeid 1.0.3, unicode-ident 1.0.26, wasi
+0.11.1+wasi-snapshot-preview1, wasip2 1.0.4+wasi-0.2.12, wasm-streams 0.5.0, wit-bindgen 0.57.1, x11
+2.21.0, x11-dl 2.21.0, zmij 1.0.23
 ------------------------------------------------------------------------------
 
 Permission is hereby granted, free of charge, to any
@@ -3319,26 +3355,28 @@ DEALINGS IN THE SOFTWARE.
 ------------------------------------------------------------------------------
 [53] MIT License (MIT)
 Used by: block2 0.6.2, brotli-decompressor 6.0.1, cargo_toml 1.0.1, cesu8 1.1.0, dispatch2 0.3.1,
-dlopen2 0.8.2, dlopen2_derive 0.4.3, dpi 0.1.2, jni-sys-macros 0.4.1, lcms2 5.6.0, ndk 0.9.0,
-ndk-context 0.1.1, ndk-sys 0.6.0+11769913, objc2 0.6.4, objc2-app-kit 0.3.2, objc2-cloud-kit 0.3.2,
-objc2-core-data 0.3.2, objc2-core-foundation 0.3.2, objc2-core-graphics 0.3.2, objc2-core-image
-0.3.2, objc2-core-location 0.3.2, objc2-core-text 0.3.2, objc2-encode 4.1.0, objc2-exception-helper
-0.1.1, objc2-foundation 0.3.2, objc2-quartz-core 0.3.2, objc2-ui-kit 0.3.2, objc2-user-notifications
-0.3.2, objc2-web-kit 0.3.2, r-efi 5.3.0, r-efi 6.0.0, tauri-plugin 2.7.0, tauri-plugin-dialog 2.8.0,
-tauri-plugin-fs 2.6.0, webview2-com 0.39.1, webview2-com-macros 0.8.1, webview2-com-sys 0.39.1,
-winapi-i686-pc-windows-gnu 0.4.0, winapi-x86_64-pc-windows-gnu 0.4.0, windows 0.62.2,
-windows-collections 0.3.2, windows-core 0.62.2, windows-future 0.3.2, windows-implement 0.60.2,
-windows-interface 0.59.3, windows-link 0.2.1, windows-numerics 0.3.1, windows-result 0.4.1,
-windows-strings 0.5.1, windows-sys 0.45.0, windows-sys 0.52.0, windows-sys 0.59.0, windows-sys
-0.60.2, windows-sys 0.61.2, windows-targets 0.42.2, windows-targets 0.52.6, windows-targets 0.53.5,
-windows-threading 0.2.1, windows-version 0.1.7, windows_aarch64_gnullvm 0.42.2,
-windows_aarch64_gnullvm 0.52.6, windows_aarch64_gnullvm 0.53.1, windows_aarch64_msvc 0.42.2,
-windows_aarch64_msvc 0.52.6, windows_aarch64_msvc 0.53.1, windows_i686_gnu 0.42.2, windows_i686_gnu
-0.52.6, windows_i686_gnu 0.53.1, windows_i686_gnullvm 0.52.6, windows_i686_gnullvm 0.53.1,
-windows_i686_msvc 0.42.2, windows_i686_msvc 0.52.6, windows_i686_msvc 0.53.1, windows_x86_64_gnu
-0.42.2, windows_x86_64_gnu 0.52.6, windows_x86_64_gnu 0.53.1, windows_x86_64_gnullvm 0.42.2,
-windows_x86_64_gnullvm 0.52.6, windows_x86_64_gnullvm 0.53.1, windows_x86_64_msvc 0.42.2,
-windows_x86_64_msvc 0.52.6, windows_x86_64_msvc 0.53.1, zune-core 0.4.12, zune-jpeg 0.4.21
+dlopen2 0.8.2, dlopen2_derive 0.4.3, dpi 0.1.2, jni 0.22.4, jni-macros 0.22.4, jni-sys-macros 0.4.1,
+lcms2 5.6.0, minisign-verify 0.3.0, ndk 0.9.0, ndk-context 0.1.1, ndk-sys 0.6.0+11769913, objc2
+0.6.4, objc2-app-kit 0.3.2, objc2-cloud-kit 0.3.2, objc2-core-data 0.3.2, objc2-core-foundation
+0.3.2, objc2-core-graphics 0.3.2, objc2-core-image 0.3.2, objc2-core-location 0.3.2, objc2-core-text
+0.3.2, objc2-encode 4.1.0, objc2-exception-helper 0.1.1, objc2-foundation 0.3.2, objc2-osa-kit
+0.3.2, objc2-quartz-core 0.3.2, objc2-ui-kit 0.3.2, objc2-user-notifications 0.3.2, objc2-web-kit
+0.3.2, r-efi 5.3.0, r-efi 6.0.0, rustls-platform-verifier-android 0.2.0, tauri-plugin 2.7.2,
+tauri-plugin-dialog 2.8.0, tauri-plugin-fs 2.6.0, tauri-plugin-updater 2.14.1, webview2-com 0.39.1,
+webview2-com-macros 0.8.1, webview2-com-sys 0.39.1, winapi-i686-pc-windows-gnu 0.4.0,
+winapi-x86_64-pc-windows-gnu 0.4.0, windows 0.62.2, windows-collections 0.3.2, windows-core 0.62.2,
+windows-future 0.3.2, windows-implement 0.60.2, windows-interface 0.59.3, windows-link 0.2.1,
+windows-numerics 0.3.1, windows-registry 0.6.1, windows-result 0.4.1, windows-strings 0.5.1,
+windows-sys 0.45.0, windows-sys 0.52.0, windows-sys 0.59.0, windows-sys 0.60.2, windows-sys 0.61.2,
+windows-targets 0.42.2, windows-targets 0.52.6, windows-targets 0.53.5, windows-threading 0.2.1,
+windows-version 0.1.7, windows_aarch64_gnullvm 0.42.2, windows_aarch64_gnullvm 0.52.6,
+windows_aarch64_gnullvm 0.53.1, windows_aarch64_msvc 0.42.2, windows_aarch64_msvc 0.52.6,
+windows_aarch64_msvc 0.53.1, windows_i686_gnu 0.42.2, windows_i686_gnu 0.52.6, windows_i686_gnu
+0.53.1, windows_i686_gnullvm 0.52.6, windows_i686_gnullvm 0.53.1, windows_i686_msvc 0.42.2,
+windows_i686_msvc 0.52.6, windows_i686_msvc 0.53.1, windows_x86_64_gnu 0.42.2, windows_x86_64_gnu
+0.52.6, windows_x86_64_gnu 0.53.1, windows_x86_64_gnullvm 0.42.2, windows_x86_64_gnullvm 0.52.6,
+windows_x86_64_gnullvm 0.53.1, windows_x86_64_msvc 0.42.2, windows_x86_64_msvc 0.52.6,
+windows_x86_64_msvc 0.53.1, zune-core 0.4.12, zune-jpeg 0.4.21
 ------------------------------------------------------------------------------
 
 MIT License
@@ -3495,10 +3533,10 @@ DEALINGS IN THE SOFTWARE.
 
 ------------------------------------------------------------------------------
 [59] MIT License (MIT)
-Used by: cc 1.5.1, cfg-if 1.0.5, find-msvc-tools 0.1.14, jobserver 0.1.34, js-sys 0.3.106,
-pkg-config 0.3.34, socket2 0.6.5, toml_datetime 0.6.3, wasm-bindgen 0.2.129, wasm-bindgen-futures
-0.4.79, wasm-bindgen-macro 0.2.129, wasm-bindgen-macro-support 0.2.129, wasm-bindgen-shared 0.2.129,
-web-sys 0.3.106
+Used by: cc 1.5.1, cfg-if 1.0.5, filetime 0.2.29, find-msvc-tools 0.1.14, jobserver 0.1.34, js-sys
+0.3.106, openssl-probe 0.2.2, pkg-config 0.3.34, socket2 0.6.5, toml_datetime 0.6.3, wasm-bindgen
+0.2.129, wasm-bindgen-futures 0.4.79, wasm-bindgen-macro 0.2.129, wasm-bindgen-macro-support
+0.2.129, wasm-bindgen-shared 0.2.129, web-sys 0.3.106
 ------------------------------------------------------------------------------
 
 Copyright (c) 2014 Alex Crichton
@@ -3587,6 +3625,53 @@ DEALINGS IN THE SOFTWARE.
 
 ------------------------------------------------------------------------------
 [62] MIT License (MIT)
+Used by: cfg_aliases 0.2.2
+------------------------------------------------------------------------------
+
+# 3rd Party Notices
+
+The `cfg_aliases!` macro uses a lot of the code from [`tectonic_cfg_support::target_cfg!`] macro which is under the following license:
+
+[`tectonic_cfg_support::target_cfg!`]: https://github.com/tectonic-typesetting/tectonic/blob/f2439b936470ad27bdf92882064bc4702ee01899/cfg_support/src/lib.rs#L166
+
+    tectonic_cfg_support is licensed under the MIT License.
+
+    Permission is hereby granted, free of charge, to any person obtaining a copy
+    of this software and associated documentation files (the “Software”), to deal
+    in the Software without restriction, including without limitation the rights
+    to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+    copies of the Software, and to permit persons to whom the Software is
+    furnished to do so, subject to the following conditions:
+
+    The above copyright notice and this permission notice shall be included in all
+    copies or substantial portions of the Software.
+
+    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+    IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+    AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+    LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+    OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+    SOFTWARE.
+---
+
+------------------------------------------------------------------------------
+[63] MIT License (MIT)
+Used by: cfg_aliases 0.2.2
+------------------------------------------------------------------------------
+
+MIT License
+
+Copyright (c) 2020 Katharos Technology
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+------------------------------------------------------------------------------
+[64] MIT License (MIT)
 Used by: chrono 0.4.45
 ------------------------------------------------------------------------------
 
@@ -3613,7 +3698,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 
 ------------------------------------------------------------------------------
-[63] MIT License (MIT)
+[65] MIT License (MIT)
 Used by: chunked_transfer 1.5.0, ureq 2.12.1
 ------------------------------------------------------------------------------
 
@@ -3641,7 +3726,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ------------------------------------------------------------------------------
-[64] MIT License (MIT)
+[66] MIT License (MIT)
 Used by: color_quant 1.1.0
 ------------------------------------------------------------------------------
 
@@ -3668,7 +3753,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ------------------------------------------------------------------------------
-[65] MIT License (MIT)
+[67] MIT License (MIT)
 Used by: combine 4.6.8
 ------------------------------------------------------------------------------
 
@@ -3695,7 +3780,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 
 ------------------------------------------------------------------------------
-[66] MIT License (MIT)
+[68] MIT License (MIT)
 Used by: cookie 0.18.2
 ------------------------------------------------------------------------------
 
@@ -3727,9 +3812,9 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 ------------------------------------------------------------------------------
-[67] MIT License (MIT)
-Used by: core-foundation 0.10.1, core-foundation-sys 0.8.7, core-graphics 0.25.0,
-core-graphics-types 0.2.0, string_cache 0.9.0, string_cache_codegen 0.6.1
+[69] MIT License (MIT)
+Used by: core-foundation 0.9.4, core-foundation 0.10.1, core-foundation-sys 0.8.7, core-graphics
+0.25.0, core-graphics-types 0.2.0, string_cache 0.9.0, string_cache_codegen 0.6.1
 ------------------------------------------------------------------------------
 
 Copyright (c) 2012-2013 Mozilla Foundation
@@ -3759,7 +3844,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 ------------------------------------------------------------------------------
-[68] MIT License (MIT)
+[70] MIT License (MIT)
 Used by: cpufeatures 0.2.17
 ------------------------------------------------------------------------------
 
@@ -3790,7 +3875,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 ------------------------------------------------------------------------------
-[69] MIT License (MIT)
+[71] MIT License (MIT)
 Used by: crc 3.3.0
 ------------------------------------------------------------------------------
 
@@ -3817,7 +3902,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ------------------------------------------------------------------------------
-[70] MIT License (MIT)
+[72] MIT License (MIT)
 Used by: crc-catalog 2.5.0
 ------------------------------------------------------------------------------
 
@@ -3844,7 +3929,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ------------------------------------------------------------------------------
-[71] MIT License (MIT)
+[73] MIT License (MIT)
 Used by: crc32fast 1.5.2
 ------------------------------------------------------------------------------
 
@@ -3871,7 +3956,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ------------------------------------------------------------------------------
-[72] MIT License (MIT)
+[74] MIT License (MIT)
 Used by: crossbeam-channel 0.5.17, crossbeam-utils 0.8.23
 ------------------------------------------------------------------------------
 
@@ -3904,7 +3989,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 ------------------------------------------------------------------------------
-[73] MIT License (MIT)
+[75] MIT License (MIT)
 Used by: crunchy 0.2.4
 ------------------------------------------------------------------------------
 
@@ -3931,7 +4016,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ------------------------------------------------------------------------------
-[74] MIT License (MIT)
+[76] MIT License (MIT)
 Used by: crypto-common 0.1.7
 ------------------------------------------------------------------------------
 
@@ -3962,7 +4047,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 ------------------------------------------------------------------------------
-[75] MIT License (MIT)
+[77] MIT License (MIT)
 Used by: ctor 1.0.13
 ------------------------------------------------------------------------------
 
@@ -3973,7 +4058,7 @@ The above copyright notice and this permission notice shall be included in all c
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 ------------------------------------------------------------------------------
-[76] MIT License (MIT)
+[78] MIT License (MIT)
 Used by: darling 0.24.1, darling_core 0.24.1, darling_macro 0.24.1
 ------------------------------------------------------------------------------
 
@@ -4000,7 +4085,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ------------------------------------------------------------------------------
-[77] MIT License (MIT)
+[79] MIT License (MIT)
 Used by: dbus 0.9.12, libdbus-sys 0.2.7
 ------------------------------------------------------------------------------
 
@@ -4025,7 +4110,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ------------------------------------------------------------------------------
-[78] MIT License (MIT)
+[80] MIT License (MIT)
 Used by: deranged 0.5.8
 ------------------------------------------------------------------------------
 
@@ -4050,7 +4135,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ------------------------------------------------------------------------------
-[79] MIT License (MIT)
+[81] MIT License (MIT)
 Used by: derive_more 2.1.1, derive_more-impl 2.1.1
 ------------------------------------------------------------------------------
 
@@ -4077,7 +4162,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ------------------------------------------------------------------------------
-[80] MIT License (MIT)
+[82] MIT License (MIT)
 Used by: digest 0.10.7
 ------------------------------------------------------------------------------
 
@@ -4108,7 +4193,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 ------------------------------------------------------------------------------
-[81] MIT License (MIT)
+[83] MIT License (MIT)
 Used by: dirs 7.0.0, dirs-sys 0.5.0
 ------------------------------------------------------------------------------
 
@@ -4133,7 +4218,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ------------------------------------------------------------------------------
-[82] MIT License (MIT)
+[84] MIT License (MIT)
 Used by: document-features 0.2.12
 ------------------------------------------------------------------------------
 
@@ -4158,7 +4243,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ------------------------------------------------------------------------------
-[83] MIT License (MIT)
+[85] MIT License (MIT)
 Used by: dom_query 0.28.0
 ------------------------------------------------------------------------------
 
@@ -4191,7 +4276,7 @@ derived from the "nipper" project (https://github.com/importcjj/nipper),
 developed by Chen Jiaju, licensed under the MIT License and the Apache License 2.0 (dual licensed).
 
 ------------------------------------------------------------------------------
-[84] MIT License (MIT)
+[86] MIT License (MIT)
 Used by: embed-resource 3.0.11
 ------------------------------------------------------------------------------
 
@@ -4218,7 +4303,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ------------------------------------------------------------------------------
-[85] MIT License (MIT)
+[87] MIT License (MIT)
 Used by: embed_plist 1.2.2
 ------------------------------------------------------------------------------
 
@@ -4245,7 +4330,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ------------------------------------------------------------------------------
-[86] MIT License (MIT)
+[88] MIT License (MIT)
 Used by: equivalent 1.0.2
 ------------------------------------------------------------------------------
 
@@ -4276,7 +4361,38 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 ------------------------------------------------------------------------------
-[87] MIT License (MIT)
+[89] MIT License (MIT)
+Used by: errno 0.3.15
+------------------------------------------------------------------------------
+
+Copyright (c) 2014 Chris Wong
+
+Permission is hereby granted, free of charge, to any
+person obtaining a copy of this software and associated
+documentation files (the "Software"), to deal in the
+Software without restriction, including without
+limitation the rights to use, copy, modify, merge,
+publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software
+is furnished to do so, subject to the following
+conditions:
+
+The above copyright notice and this permission notice
+shall be included in all copies or substantial portions
+of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
+ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
+TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
+SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
+IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.
+
+------------------------------------------------------------------------------
+[90] MIT License (MIT)
 Used by: fallible-iterator 0.3.0
 ------------------------------------------------------------------------------
 
@@ -4301,7 +4417,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ------------------------------------------------------------------------------
-[88] MIT License (MIT)
+[91] MIT License (MIT)
 Used by: fallible-streaming-iterator 0.1.9
 ------------------------------------------------------------------------------
 
@@ -4326,7 +4442,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ------------------------------------------------------------------------------
-[89] MIT License (MIT)
+[92] MIT License (MIT)
 Used by: fast_image_resize 4.2.3
 ------------------------------------------------------------------------------
 
@@ -4353,7 +4469,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ------------------------------------------------------------------------------
-[90] MIT License (MIT)
+[93] MIT License (MIT)
 Used by: fax 0.2.7
 ------------------------------------------------------------------------------
 
@@ -4366,7 +4482,7 @@ The above copyright notice and this permission notice shall be included in all c
 THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 ------------------------------------------------------------------------------
-[91] MIT License (MIT)
+[94] MIT License (MIT)
 Used by: fdeflate 0.3.7, image 0.25.6, image 0.25.10, image-webp 0.2.4
 ------------------------------------------------------------------------------
 
@@ -4397,7 +4513,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 ------------------------------------------------------------------------------
-[92] MIT License (MIT)
+[95] MIT License (MIT)
 Used by: field-offset 0.3.6
 ------------------------------------------------------------------------------
 
@@ -4424,7 +4540,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ------------------------------------------------------------------------------
-[93] MIT License (MIT)
+[96] MIT License (MIT)
 Used by: flate2 1.1.10
 ------------------------------------------------------------------------------
 
@@ -4455,7 +4571,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 ------------------------------------------------------------------------------
-[94] MIT License (MIT)
+[97] MIT License (MIT)
 Used by: fnv 1.0.7
 ------------------------------------------------------------------------------
 
@@ -4486,7 +4602,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 ------------------------------------------------------------------------------
-[95] MIT License (MIT)
+[98] MIT License (MIT)
 Used by: foreign-types 0.5.0, foreign-types-macros 0.2.4, foreign-types-shared 0.3.1
 ------------------------------------------------------------------------------
 
@@ -4511,7 +4627,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ------------------------------------------------------------------------------
-[96] MIT License (MIT)
+[99] MIT License (MIT)
 Used by: form_urlencoded 1.2.2
 ------------------------------------------------------------------------------
 
@@ -4542,7 +4658,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 ------------------------------------------------------------------------------
-[97] MIT License (MIT)
+[100] MIT License (MIT)
 Used by: futures-channel 0.3.34, futures-core 0.3.34, futures-executor 0.3.34, futures-io 0.3.34,
 futures-macro 0.3.34, futures-sink 0.3.34, futures-task 0.3.34, futures-util 0.3.34
 ------------------------------------------------------------------------------
@@ -4575,7 +4691,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 ------------------------------------------------------------------------------
-[98] MIT License (MIT)
+[101] MIT License (MIT)
 Used by: generic-array 0.14.7
 ------------------------------------------------------------------------------
 
@@ -4602,7 +4718,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ------------------------------------------------------------------------------
-[99] MIT License (MIT)
+[102] MIT License (MIT)
 Used by: getrandom 0.2.17
 ------------------------------------------------------------------------------
 
@@ -4634,7 +4750,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 ------------------------------------------------------------------------------
-[100] MIT License (MIT)
+[103] MIT License (MIT)
 Used by: getrandom 0.3.4
 ------------------------------------------------------------------------------
 
@@ -4666,7 +4782,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 ------------------------------------------------------------------------------
-[101] MIT License (MIT)
+[104] MIT License (MIT)
 Used by: getrandom 0.4.3
 ------------------------------------------------------------------------------
 
@@ -4698,7 +4814,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 ------------------------------------------------------------------------------
-[102] MIT License (MIT)
+[105] MIT License (MIT)
 Used by: gif 0.13.3, gif 0.14.2
 ------------------------------------------------------------------------------
 
@@ -4725,7 +4841,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ------------------------------------------------------------------------------
-[103] MIT License (MIT)
+[106] MIT License (MIT)
 Used by: half 2.7.1, ident_case 1.0.1
 ------------------------------------------------------------------------------
 
@@ -4750,7 +4866,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ------------------------------------------------------------------------------
-[104] MIT License (MIT)
+[107] MIT License (MIT)
 Used by: hashbrown 0.12.3, hashbrown 0.14.5, hashbrown 0.15.5, hashbrown 0.17.1
 ------------------------------------------------------------------------------
 
@@ -4781,7 +4897,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 ------------------------------------------------------------------------------
-[105] MIT License (MIT)
+[108] MIT License (MIT)
 Used by: hashlink 0.9.1
 ------------------------------------------------------------------------------
 
@@ -4813,7 +4929,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 ------------------------------------------------------------------------------
-[106] MIT License (MIT)
+[109] MIT License (MIT)
 Used by: heck 0.4.1, heck 0.5.0, unicode-normalization 0.1.22, unicode-segmentation 1.13.3
 ------------------------------------------------------------------------------
 
@@ -4844,7 +4960,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 ------------------------------------------------------------------------------
-[107] MIT License (MIT)
+[110] MIT License (MIT)
 Used by: html5ever 0.39.0, markup5ever 0.39.0, web_atoms 0.2.6
 ------------------------------------------------------------------------------
 
@@ -4875,7 +4991,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 ------------------------------------------------------------------------------
-[108] MIT License (MIT)
+[111] MIT License (MIT)
 Used by: http 1.5.0
 ------------------------------------------------------------------------------
 
@@ -4906,7 +5022,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 ------------------------------------------------------------------------------
-[109] MIT License (MIT)
+[112] MIT License (MIT)
 Used by: http-body 1.1.0, http-body-util 0.1.5
 ------------------------------------------------------------------------------
 
@@ -4937,7 +5053,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 ------------------------------------------------------------------------------
-[110] MIT License (MIT)
+[113] MIT License (MIT)
 Used by: httparse 1.10.1
 ------------------------------------------------------------------------------
 
@@ -4962,7 +5078,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 
 ------------------------------------------------------------------------------
-[111] MIT License (MIT)
+[114] MIT License (MIT)
 Used by: httpdate 1.0.3
 ------------------------------------------------------------------------------
 
@@ -4987,7 +5103,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 
 ------------------------------------------------------------------------------
-[112] MIT License (MIT)
+[115] MIT License (MIT)
 Used by: hyper 1.11.1
 ------------------------------------------------------------------------------
 
@@ -5012,7 +5128,38 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 
 ------------------------------------------------------------------------------
-[113] MIT License (MIT)
+[116] MIT License (MIT)
+Used by: hyper-rustls 0.27.10, rustls 0.23.46, rustls-native-certs 0.8.5
+------------------------------------------------------------------------------
+
+Copyright (c) 2016 Joseph Birr-Pixton <jpixton@gmail.com>
+
+Permission is hereby granted, free of charge, to any
+person obtaining a copy of this software and associated
+documentation files (the "Software"), to deal in the
+Software without restriction, including without
+limitation the rights to use, copy, modify, merge,
+publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software
+is furnished to do so, subject to the following
+conditions:
+
+The above copyright notice and this permission notice
+shall be included in all copies or substantial portions
+of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
+ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
+TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
+SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
+IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.
+
+------------------------------------------------------------------------------
+[117] MIT License (MIT)
 Used by: hyper-util 0.1.21
 ------------------------------------------------------------------------------
 
@@ -5037,7 +5184,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 
 ------------------------------------------------------------------------------
-[114] MIT License (MIT)
+[118] MIT License (MIT)
 Used by: iana-time-zone 0.1.65, iana-time-zone-haiku 0.1.2
 ------------------------------------------------------------------------------
 
@@ -5068,7 +5215,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 ------------------------------------------------------------------------------
-[115] MIT License (MIT)
+[119] MIT License (MIT)
 Used by: ico 0.5.0
 ------------------------------------------------------------------------------
 
@@ -5095,7 +5242,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ------------------------------------------------------------------------------
-[116] MIT License (MIT)
+[120] MIT License (MIT)
 Used by: idna 1.1.0, percent-encoding 2.3.2, url 2.5.8
 ------------------------------------------------------------------------------
 
@@ -5126,7 +5273,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 ------------------------------------------------------------------------------
-[117] MIT License (MIT)
+[121] MIT License (MIT)
 Used by: idna_adapter 1.2.0, idna_adapter 1.2.2
 ------------------------------------------------------------------------------
 
@@ -5157,7 +5304,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 ------------------------------------------------------------------------------
-[118] MIT License (MIT)
+[122] MIT License (MIT)
 Used by: indexmap 1.9.3, indexmap 2.7.1, indexmap 2.14.2
 ------------------------------------------------------------------------------
 
@@ -5188,7 +5335,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 ------------------------------------------------------------------------------
-[119] MIT License (MIT)
+[123] MIT License (MIT)
 Used by: infer 0.22.0
 ------------------------------------------------------------------------------
 
@@ -5215,7 +5362,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ------------------------------------------------------------------------------
-[120] MIT License (MIT)
+[124] MIT License (MIT)
 Used by: ipnet 2.12.2
 ------------------------------------------------------------------------------
 
@@ -5228,7 +5375,7 @@ The above copyright notice and this permission notice shall be included in all c
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 ------------------------------------------------------------------------------
-[121] MIT License (MIT)
+[125] MIT License (MIT)
 Used by: javascriptcore-rs 1.1.2
 ------------------------------------------------------------------------------
 
@@ -5256,7 +5403,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ------------------------------------------------------------------------------
-[122] MIT License (MIT)
+[126] MIT License (MIT)
 Used by: javascriptcore-rs-sys 1.1.1, soup3 0.5.0, soup3-sys 0.5.0
 ------------------------------------------------------------------------------
 
@@ -5283,7 +5430,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ------------------------------------------------------------------------------
-[123] MIT License (MIT)
+[127] MIT License (MIT)
 Used by: jni 0.21.1
 ------------------------------------------------------------------------------
 
@@ -5310,7 +5457,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ------------------------------------------------------------------------------
-[124] MIT License (MIT)
+[128] MIT License (MIT)
 Used by: jni-sys 0.3.1, jni-sys 0.4.1
 ------------------------------------------------------------------------------
 
@@ -5335,7 +5482,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ------------------------------------------------------------------------------
-[125] MIT License (MIT)
+[129] MIT License (MIT)
 Used by: jpeg-decoder 0.3.2
 ------------------------------------------------------------------------------
 
@@ -5362,7 +5509,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ------------------------------------------------------------------------------
-[126] MIT License (MIT)
+[130] MIT License (MIT)
 Used by: json-patch 4.2.0
 ------------------------------------------------------------------------------
 
@@ -5389,7 +5536,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ------------------------------------------------------------------------------
-[127] MIT License (MIT)
+[131] MIT License (MIT)
 Used by: jsonptr 0.7.1
 ------------------------------------------------------------------------------
 
@@ -5416,7 +5563,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ------------------------------------------------------------------------------
-[128] MIT License (MIT)
+[132] MIT License (MIT)
 Used by: keyboard-types 0.8.3
 ------------------------------------------------------------------------------
 
@@ -5441,7 +5588,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 
 ------------------------------------------------------------------------------
-[129] MIT License (MIT)
+[133] MIT License (MIT)
 Used by: lcms2-sys 4.0.7
 ------------------------------------------------------------------------------
 
@@ -5469,7 +5616,7 @@ TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
 SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 ------------------------------------------------------------------------------
-[130] MIT License (MIT)
+[134] MIT License (MIT)
 Used by: libc 0.2.189
 ------------------------------------------------------------------------------
 
@@ -5500,7 +5647,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 ------------------------------------------------------------------------------
-[131] MIT License (MIT)
+[135] MIT License (MIT)
 Used by: libdbus-sys 0.2.7
 ------------------------------------------------------------------------------
 
@@ -5542,7 +5689,7 @@ DBUS_END_DECLS
 #endif /* DBUS_SERVER_LAUNCHD_H */
 
 ------------------------------------------------------------------------------
-[132] MIT License (MIT)
+[136] MIT License (MIT)
 Used by: libredox 0.1.25
 ------------------------------------------------------------------------------
 
@@ -5569,7 +5716,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ------------------------------------------------------------------------------
-[133] MIT License (MIT)
+[137] MIT License (MIT)
 Used by: libsqlite3-sys 0.30.1, rusqlite 0.32.1
 ------------------------------------------------------------------------------
 
@@ -5594,7 +5741,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 
 ------------------------------------------------------------------------------
-[134] MIT License (MIT)
+[138] MIT License (MIT)
 Used by: libz-sys 1.1.29
 ------------------------------------------------------------------------------
 
@@ -5626,7 +5773,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 ------------------------------------------------------------------------------
-[135] MIT License (MIT)
+[139] MIT License (MIT)
 Used by: litrs 1.0.0
 ------------------------------------------------------------------------------
 
@@ -5657,7 +5804,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 ------------------------------------------------------------------------------
-[136] MIT License (MIT)
+[140] MIT License (MIT)
 Used by: lock_api 0.4.14, parking_lot 0.12.5, parking_lot_core 0.9.12, rustc_version 0.4.1
 ------------------------------------------------------------------------------
 
@@ -5688,7 +5835,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 ------------------------------------------------------------------------------
-[137] MIT License (MIT)
+[141] MIT License (MIT)
 Used by: lzma-rs 0.3.0
 ------------------------------------------------------------------------------
 
@@ -5715,7 +5862,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ------------------------------------------------------------------------------
-[138] MIT License (MIT)
+[142] MIT License (MIT)
 Used by: matrixmultiply 0.3.11
 ------------------------------------------------------------------------------
 
@@ -5748,7 +5895,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 ------------------------------------------------------------------------------
-[139] MIT License (MIT)
+[143] MIT License (MIT)
 Used by: md-5 0.10.6, sha1 0.10.7, sha2 0.10.9
 ------------------------------------------------------------------------------
 
@@ -5781,7 +5928,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 ------------------------------------------------------------------------------
-[140] MIT License (MIT)
+[144] MIT License (MIT)
 Used by: memoffset 0.9.1
 ------------------------------------------------------------------------------
 
@@ -5806,7 +5953,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ------------------------------------------------------------------------------
-[141] MIT License (MIT)
+[145] MIT License (MIT)
 Used by: mime 0.3.17
 ------------------------------------------------------------------------------
 
@@ -5831,7 +5978,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 
 ------------------------------------------------------------------------------
-[142] MIT License (MIT)
+[146] MIT License (MIT)
 Used by: miniz_oxide 0.8.9, miniz_oxide 0.9.1
 ------------------------------------------------------------------------------
 
@@ -5862,7 +6009,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ------------------------------------------------------------------------------
-[143] MIT License (MIT)
+[147] MIT License (MIT)
 Used by: miniz_oxide 0.8.9, miniz_oxide 0.9.1
 ------------------------------------------------------------------------------
 
@@ -5892,7 +6039,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ------------------------------------------------------------------------------
-[144] MIT License (MIT)
+[148] MIT License (MIT)
 Used by: mio 1.2.3
 ------------------------------------------------------------------------------
 
@@ -5917,7 +6064,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 
 ------------------------------------------------------------------------------
-[145] MIT License (MIT)
+[149] MIT License (MIT)
 Used by: muda 0.20.0
 ------------------------------------------------------------------------------
 
@@ -5944,7 +6091,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ------------------------------------------------------------------------------
-[146] MIT License (MIT)
+[150] MIT License (MIT)
 Used by: ndarray 0.16.1
 ------------------------------------------------------------------------------
 
@@ -5977,7 +6124,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 ------------------------------------------------------------------------------
-[147] MIT License (MIT)
+[151] MIT License (MIT)
 Used by: new_debug_unreachable 1.0.6
 ------------------------------------------------------------------------------
 
@@ -6008,7 +6155,34 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 ------------------------------------------------------------------------------
-[148] MIT License (MIT)
+[152] MIT License (MIT)
+Used by: nix 0.31.3
+------------------------------------------------------------------------------
+
+The MIT License (MIT)
+
+Copyright (c) 2015 Carl Lerche + nix-rust Authors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+
+------------------------------------------------------------------------------
+[153] MIT License (MIT)
 Used by: num-conv 0.2.2
 ------------------------------------------------------------------------------
 
@@ -6033,7 +6207,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ------------------------------------------------------------------------------
-[149] MIT License (MIT)
+[154] MIT License (MIT)
 Used by: ort 2.0.0-rc.10, ort-sys 2.0.0-rc.10
 ------------------------------------------------------------------------------
 
@@ -6061,7 +6235,38 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ------------------------------------------------------------------------------
-[150] MIT License (MIT)
+[155] MIT License (MIT)
+Used by: osakit 0.3.1
+------------------------------------------------------------------------------
+
+Copyright (c) 2024 Marat Dulin
+
+Permission is hereby granted, free of charge, to any
+person obtaining a copy of this software and associated
+documentation files (the "Software"), to deal in the
+Software without restriction, including without
+limitation the rights to use, copy, modify, merge,
+publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software
+is furnished to do so, subject to the following
+conditions:
+
+The above copyright notice and this permission notice
+shall be included in all copies or substantial portions
+of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
+ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
+TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
+SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
+IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.
+
+------------------------------------------------------------------------------
+[156] MIT License (MIT)
 Used by: phf 0.13.1, phf_codegen 0.13.1, phf_generator 0.13.1, phf_macros 0.13.1, phf_shared 0.13.1
 ------------------------------------------------------------------------------
 
@@ -6087,7 +6292,7 @@ IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 ------------------------------------------------------------------------------
-[151] MIT License (MIT)
+[157] MIT License (MIT)
 Used by: plist 1.10.1
 ------------------------------------------------------------------------------
 
@@ -6112,7 +6317,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ------------------------------------------------------------------------------
-[152] MIT License (MIT)
+[158] MIT License (MIT)
 Used by: png 0.17.16, png 0.18.1
 ------------------------------------------------------------------------------
 
@@ -6143,7 +6348,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 ------------------------------------------------------------------------------
-[153] MIT License (MIT)
+[159] MIT License (MIT)
 Used by: powerfmt 0.2.0
 ------------------------------------------------------------------------------
 
@@ -6168,7 +6373,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ------------------------------------------------------------------------------
-[154] MIT License (MIT)
+[160] MIT License (MIT)
 Used by: precomputed-hash 0.1.1
 ------------------------------------------------------------------------------
 
@@ -6195,7 +6400,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ------------------------------------------------------------------------------
-[155] MIT License (MIT)
+[161] MIT License (MIT)
 Used by: proc-macro-error 1.0.4, proc-macro-error-attr 1.0.4
 ------------------------------------------------------------------------------
 
@@ -6222,7 +6427,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ------------------------------------------------------------------------------
-[156] MIT License (MIT)
+[162] MIT License (MIT)
 Used by: quick-error 2.0.1
 ------------------------------------------------------------------------------
 
@@ -6247,7 +6452,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ------------------------------------------------------------------------------
-[157] MIT License (MIT)
+[163] MIT License (MIT)
 Used by: quick-xml 0.42.0
 ------------------------------------------------------------------------------
 
@@ -6276,7 +6481,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 
 ------------------------------------------------------------------------------
-[158] MIT License (MIT)
+[164] MIT License (MIT)
 Used by: raw-window-handle 0.6.2
 ------------------------------------------------------------------------------
 
@@ -6303,7 +6508,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ------------------------------------------------------------------------------
-[159] MIT License (MIT)
+[165] MIT License (MIT)
 Used by: rawpointer 0.2.1, serde_with 3.24.0, serde_with_macros 3.24.0
 ------------------------------------------------------------------------------
 
@@ -6334,7 +6539,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 ------------------------------------------------------------------------------
-[160] MIT License (MIT)
+[166] MIT License (MIT)
 Used by: redox_syscall 0.5.18
 ------------------------------------------------------------------------------
 
@@ -6362,7 +6567,7 @@ OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 ------------------------------------------------------------------------------
-[161] MIT License (MIT)
+[167] MIT License (MIT)
 Used by: redox_users 0.5.3
 ------------------------------------------------------------------------------
 
@@ -6389,7 +6594,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ------------------------------------------------------------------------------
-[162] MIT License (MIT)
+[168] MIT License (MIT)
 Used by: reqwest 0.13.5
 ------------------------------------------------------------------------------
 
@@ -6414,7 +6619,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 
 ------------------------------------------------------------------------------
-[163] MIT License (MIT)
+[169] MIT License (MIT)
 Used by: rfd 0.16.0
 ------------------------------------------------------------------------------
 
@@ -6441,7 +6646,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ------------------------------------------------------------------------------
-[164] MIT License (MIT)
+[170] MIT License (MIT)
 Used by: rgb 0.8.53
 ------------------------------------------------------------------------------
 
@@ -6468,7 +6673,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ------------------------------------------------------------------------------
-[165] MIT License (MIT)
+[171] MIT License (MIT)
 Used by: rustc-hash 2.1.3
 ------------------------------------------------------------------------------
 
@@ -6497,38 +6702,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 ------------------------------------------------------------------------------
-[166] MIT License (MIT)
-Used by: rustls 0.23.46
-------------------------------------------------------------------------------
-
-Copyright (c) 2016 Joseph Birr-Pixton <jpixton@gmail.com>
-
-Permission is hereby granted, free of charge, to any
-person obtaining a copy of this software and associated
-documentation files (the "Software"), to deal in the
-Software without restriction, including without
-limitation the rights to use, copy, modify, merge,
-publish, distribute, sublicense, and/or sell copies of
-the Software, and to permit persons to whom the Software
-is furnished to do so, subject to the following
-conditions:
-
-The above copyright notice and this permission notice
-shall be included in all copies or substantial portions
-of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
-ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
-TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
-PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
-SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
-CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
-OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
-IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-DEALINGS IN THE SOFTWARE.
-
-------------------------------------------------------------------------------
-[167] MIT License (MIT)
+[172] MIT License (MIT)
 Used by: rustls-pki-types 1.15.1
 ------------------------------------------------------------------------------
 
@@ -6559,7 +6733,34 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 ------------------------------------------------------------------------------
-[168] MIT License (MIT)
+[173] MIT License (MIT)
+Used by: rustls-platform-verifier 0.7.1
+------------------------------------------------------------------------------
+
+MIT License
+
+Copyright (c) 2022 1Password
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+------------------------------------------------------------------------------
+[174] MIT License (MIT)
 Used by: same-file 1.0.6, winapi-util 0.1.11
 ------------------------------------------------------------------------------
 
@@ -6586,7 +6787,20 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 
 ------------------------------------------------------------------------------
-[169] MIT License (MIT)
+[175] MIT License (MIT)
+Used by: schannel 0.1.30
+------------------------------------------------------------------------------
+
+Copyright (c) 2015 steffengy
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+------------------------------------------------------------------------------
+[176] MIT License (MIT)
 Used by: schemars 0.8.22, schemars_derive 0.8.22
 ------------------------------------------------------------------------------
 
@@ -6613,7 +6827,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ------------------------------------------------------------------------------
-[170] MIT License (MIT)
+[177] MIT License (MIT)
 Used by: schemars_derive 0.8.22
 ------------------------------------------------------------------------------
 
@@ -6672,7 +6886,7 @@ fn is_meta_character(c: char) -> bool {
 }
 
 ------------------------------------------------------------------------------
-[171] MIT License (MIT)
+[178] MIT License (MIT)
 Used by: scopeguard 1.2.0
 ------------------------------------------------------------------------------
 
@@ -6703,7 +6917,33 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 ------------------------------------------------------------------------------
-[172] MIT License (MIT)
+[179] MIT License (MIT)
+Used by: security-framework 3.7.0, security-framework-sys 2.17.0
+------------------------------------------------------------------------------
+
+The MIT License (MIT)
+
+Copyright (c) 2015 Steven Fackler
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of
+this software and associated documentation files (the "Software"), to deal in
+the Software without restriction, including without limitation the rights to
+use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software is furnished to do so,
+subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
+COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
+IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+------------------------------------------------------------------------------
+[180] MIT License (MIT)
 Used by: serde_spanned 0.6.9, serde_spanned 1.1.1, toml 0.8.2, toml 1.1.6+spec-1.1.0, toml_datetime
 1.1.1+spec-1.1.0, toml_edit 0.19.15, toml_edit 0.20.2, toml_edit 0.25.15+spec-1.1.0, toml_parser
 1.1.3+spec-1.1.0, toml_writer 1.1.2+spec-1.1.0
@@ -6730,7 +6970,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ------------------------------------------------------------------------------
-[173] MIT License (MIT)
+[181] MIT License (MIT)
 Used by: serialize-to-javascript 0.1.2, serialize-to-javascript-impl 0.1.2
 ------------------------------------------------------------------------------
 
@@ -6757,7 +6997,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ------------------------------------------------------------------------------
-[174] MIT License (MIT)
+[182] MIT License (MIT)
 Used by: shlex 2.0.1
 ------------------------------------------------------------------------------
 
@@ -6784,7 +7024,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 
 ------------------------------------------------------------------------------
-[175] MIT License (MIT)
+[183] MIT License (MIT)
 Used by: simd-adler32 0.3.10
 ------------------------------------------------------------------------------
 
@@ -6811,7 +7051,32 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ------------------------------------------------------------------------------
-[176] MIT License (MIT)
+[184] MIT License (MIT)
+Used by: simdutf8 0.1.5
+------------------------------------------------------------------------------
+
+MIT License
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+------------------------------------------------------------------------------
+[185] MIT License (MIT)
 Used by: siphasher 1.0.4
 ------------------------------------------------------------------------------
 
@@ -6834,7 +7099,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ------------------------------------------------------------------------------
-[177] MIT License (MIT)
+[186] MIT License (MIT)
 Used by: slab 0.4.12
 ------------------------------------------------------------------------------
 
@@ -6865,7 +7130,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 ------------------------------------------------------------------------------
-[178] MIT License (MIT)
+[187] MIT License (MIT)
 Used by: smallvec 1.16.2, smallvec 2.0.0-alpha.10
 ------------------------------------------------------------------------------
 
@@ -6896,7 +7161,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 ------------------------------------------------------------------------------
-[179] MIT License (MIT)
+[188] MIT License (MIT)
 Used by: softbuffer 0.4.8
 ------------------------------------------------------------------------------
 
@@ -6921,7 +7186,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ------------------------------------------------------------------------------
-[180] MIT License (MIT)
+[189] MIT License (MIT)
 Used by: stable_deref_trait 1.2.1
 ------------------------------------------------------------------------------
 
@@ -6952,7 +7217,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 ------------------------------------------------------------------------------
-[181] MIT License (MIT)
+[190] MIT License (MIT)
 Used by: strsim 0.11.1
 ------------------------------------------------------------------------------
 
@@ -6981,8 +7246,8 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ------------------------------------------------------------------------------
-[182] MIT License (MIT)
-Used by: swift-rs 1.0.8
+[191] MIT License (MIT)
+Used by: swift-rs 1.0.9
 ------------------------------------------------------------------------------
 
 Copyright (c) 2023 The swift-rs Developers
@@ -7006,7 +7271,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ------------------------------------------------------------------------------
-[183] MIT License (MIT)
+[192] MIT License (MIT)
 Used by: synstructure 0.13.2, synstructure 0.14.0
 ------------------------------------------------------------------------------
 
@@ -7019,7 +7284,38 @@ The above copyright notice and this permission notice shall be included in all c
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 ------------------------------------------------------------------------------
-[184] MIT License (MIT)
+[193] MIT License (MIT)
+Used by: system-configuration 0.7.0, system-configuration-sys 0.6.0
+------------------------------------------------------------------------------
+
+Copyright (c) 2024 Mullvad VPN AB
+
+Permission is hereby granted, free of charge, to any
+person obtaining a copy of this software and associated
+documentation files (the "Software"), to deal in the
+Software without restriction, including without
+limitation the rights to use, copy, modify, merge,
+publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software
+is furnished to do so, subject to the following
+conditions:
+
+The above copyright notice and this permission notice
+shall be included in all copies or substantial portions
+of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
+ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
+TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
+SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
+IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.
+
+------------------------------------------------------------------------------
+[194] MIT License (MIT)
 Used by: tao-macros 0.1.4
 ------------------------------------------------------------------------------
 
@@ -7046,9 +7342,40 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ------------------------------------------------------------------------------
-[185] MIT License (MIT)
+[195] MIT License (MIT)
+Used by: tar 0.4.46
+------------------------------------------------------------------------------
+
+Copyright (c) The tar-rs Project Contributors
+
+Permission is hereby granted, free of charge, to any
+person obtaining a copy of this software and associated
+documentation files (the "Software"), to deal in the
+Software without restriction, including without
+limitation the rights to use, copy, modify, merge,
+publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software
+is furnished to do so, subject to the following
+conditions:
+
+The above copyright notice and this permission notice
+shall be included in all copies or substantial portions
+of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
+ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
+TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
+SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
+IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.
+
+------------------------------------------------------------------------------
+[196] MIT License (MIT)
 Used by: tauri 2.12.0, tauri-build 2.7.0, tauri-codegen 2.7.0, tauri-macros 2.7.0, tauri-runtime
-2.12.0, tauri-runtime-wry 2.12.0, tauri-utils 2.10.0
+2.12.0, tauri-runtime-wry 2.12.0, tauri-utils 2.10.2
 ------------------------------------------------------------------------------
 
 MIT License
@@ -7074,7 +7401,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ------------------------------------------------------------------------------
-[186] MIT License (MIT)
+[197] MIT License (MIT)
 Used by: tauri-winres 0.3.6
 ------------------------------------------------------------------------------
 
@@ -7108,7 +7435,38 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 ------------------------------------------------------------------------------
-[187] MIT License (MIT)
+[198] MIT License (MIT)
+Used by: tempfile 3.27.0, xattr 1.7.0
+------------------------------------------------------------------------------
+
+Copyright (c) 2015 Steven Allen
+
+Permission is hereby granted, free of charge, to any
+person obtaining a copy of this software and associated
+documentation files (the "Software"), to deal in the
+Software without restriction, including without
+limitation the rights to use, copy, modify, merge,
+publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software
+is furnished to do so, subject to the following
+conditions:
+
+The above copyright notice and this permission notice
+shall be included in all copies or substantial portions
+of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
+ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
+TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
+SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
+IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.
+
+------------------------------------------------------------------------------
+[199] MIT License (MIT)
 Used by: tendril 0.5.1
 ------------------------------------------------------------------------------
 
@@ -7139,7 +7497,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 ------------------------------------------------------------------------------
-[188] MIT License (MIT)
+[200] MIT License (MIT)
 Used by: tiff 0.9.1, tiff 0.10.3
 ------------------------------------------------------------------------------
 
@@ -7166,7 +7524,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ------------------------------------------------------------------------------
-[189] MIT License (MIT)
+[201] MIT License (MIT)
 Used by: time 0.3.55, time-core 0.1.9, time-macros 0.2.32
 ------------------------------------------------------------------------------
 
@@ -7191,7 +7549,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ------------------------------------------------------------------------------
-[190] MIT License (MIT)
+[202] MIT License (MIT)
 Used by: tiny_http 0.12.0
 ------------------------------------------------------------------------------
 
@@ -7222,7 +7580,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 ------------------------------------------------------------------------------
-[191] MIT License (MIT)
+[203] MIT License (MIT)
 Used by: tinyvec 1.13.3
 ------------------------------------------------------------------------------
 
@@ -7233,7 +7591,7 @@ The above copyright notice and this permission notice shall be included in all c
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 ------------------------------------------------------------------------------
-[192] MIT License (MIT)
+[204] MIT License (MIT)
 Used by: tokio 1.53.1, tokio-util 0.7.19
 ------------------------------------------------------------------------------
 
@@ -7260,7 +7618,38 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ------------------------------------------------------------------------------
-[193] MIT License (MIT)
+[205] MIT License (MIT)
+Used by: tokio-rustls 0.26.6
+------------------------------------------------------------------------------
+
+Copyright (c) 2017 quininer kel
+
+Permission is hereby granted, free of charge, to any
+person obtaining a copy of this software and associated
+documentation files (the "Software"), to deal in the
+Software without restriction, including without
+limitation the rights to use, copy, modify, merge,
+publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software
+is furnished to do so, subject to the following
+conditions:
+
+The above copyright notice and this permission notice
+shall be included in all copies or substantial portions
+of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
+ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
+TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
+SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
+IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.
+
+------------------------------------------------------------------------------
+[206] MIT License (MIT)
 Used by: tower 0.5.3, tower-layer 0.3.3, tower-service 0.3.3
 ------------------------------------------------------------------------------
 
@@ -7291,7 +7680,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 ------------------------------------------------------------------------------
-[194] MIT License (MIT)
+[207] MIT License (MIT)
 Used by: tower-http 0.6.11
 ------------------------------------------------------------------------------
 
@@ -7322,7 +7711,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 ------------------------------------------------------------------------------
-[195] MIT License (MIT)
+[208] MIT License (MIT)
 Used by: tracing 0.1.44, tracing-core 0.1.36
 ------------------------------------------------------------------------------
 
@@ -7353,8 +7742,8 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 ------------------------------------------------------------------------------
-[196] MIT License (MIT)
-Used by: tracing-core 0.1.36
+[209] MIT License (MIT)
+Used by: tracing-core 0.1.36, zip 9.5.1
 ------------------------------------------------------------------------------
 
 The MIT License (MIT)
@@ -7380,7 +7769,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ------------------------------------------------------------------------------
-[197] MIT License (MIT)
+[210] MIT License (MIT)
 Used by: try-lock 0.2.5
 ------------------------------------------------------------------------------
 
@@ -7406,7 +7795,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 
 ------------------------------------------------------------------------------
-[198] MIT License (MIT)
+[211] MIT License (MIT)
 Used by: typenum 1.20.1
 ------------------------------------------------------------------------------
 
@@ -7433,7 +7822,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ------------------------------------------------------------------------------
-[199] MIT License (MIT)
+[212] MIT License (MIT)
 Used by: ureq 2.12.1
 ------------------------------------------------------------------------------
 
@@ -7460,7 +7849,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ------------------------------------------------------------------------------
-[200] MIT License (MIT)
+[213] MIT License (MIT)
 Used by: urlpattern 0.6.0
 ------------------------------------------------------------------------------
 
@@ -7487,7 +7876,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ------------------------------------------------------------------------------
-[201] MIT License (MIT)
+[214] MIT License (MIT)
 Used by: utf16_iter 1.0.5, utf8_iter 1.0.4, write16 1.0.0
 ------------------------------------------------------------------------------
 
@@ -7518,7 +7907,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 ------------------------------------------------------------------------------
-[202] MIT License (MIT)
+[215] MIT License (MIT)
 Used by: uuid 1.26.1
 ------------------------------------------------------------------------------
 
@@ -7550,7 +7939,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 ------------------------------------------------------------------------------
-[203] MIT License (MIT)
+[216] MIT License (MIT)
 Used by: vcpkg 0.2.15
 ------------------------------------------------------------------------------
 
@@ -7581,7 +7970,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 ------------------------------------------------------------------------------
-[204] MIT License (MIT)
+[217] MIT License (MIT)
 Used by: version-compare 0.2.1
 ------------------------------------------------------------------------------
 
@@ -7606,7 +7995,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ------------------------------------------------------------------------------
-[205] MIT License (MIT)
+[218] MIT License (MIT)
 Used by: version_check 0.9.5
 ------------------------------------------------------------------------------
 
@@ -7631,7 +8020,7 @@ IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 ------------------------------------------------------------------------------
-[206] MIT License (MIT)
+[219] MIT License (MIT)
 Used by: vswhom 0.1.0, vswhom-sys 0.1.3
 ------------------------------------------------------------------------------
 
@@ -7658,7 +8047,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ------------------------------------------------------------------------------
-[207] MIT License (MIT)
+[220] MIT License (MIT)
 Used by: want 0.3.1
 ------------------------------------------------------------------------------
 
@@ -7683,7 +8072,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 
 ------------------------------------------------------------------------------
-[208] MIT License (MIT)
+[221] MIT License (MIT)
 Used by: web-time 1.1.0
 ------------------------------------------------------------------------------
 
@@ -7710,7 +8099,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ------------------------------------------------------------------------------
-[209] MIT License (MIT)
+[222] MIT License (MIT)
 Used by: webkit2gtk 2.0.2
 ------------------------------------------------------------------------------
 
@@ -7736,7 +8125,7 @@ IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 ------------------------------------------------------------------------------
-[210] MIT License (MIT)
+[223] MIT License (MIT)
 Used by: webkit2gtk-sys 2.0.2
 ------------------------------------------------------------------------------
 
@@ -7760,7 +8149,7 @@ IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 ------------------------------------------------------------------------------
-[211] MIT License (MIT)
+[224] MIT License (MIT)
 Used by: weezl 0.1.12
 ------------------------------------------------------------------------------
 
@@ -7787,7 +8176,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ------------------------------------------------------------------------------
-[212] MIT License (MIT)
+[225] MIT License (MIT)
 Used by: winapi 0.3.9
 ------------------------------------------------------------------------------
 
@@ -7812,7 +8201,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ------------------------------------------------------------------------------
-[213] MIT License (MIT)
+[226] MIT License (MIT)
 Used by: window-vibrancy 0.8.1
 ------------------------------------------------------------------------------
 
@@ -7839,7 +8228,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ------------------------------------------------------------------------------
-[214] MIT License (MIT)
+[227] MIT License (MIT)
 Used by: winnow 0.5.40, winnow 1.0.4
 ------------------------------------------------------------------------------
 
@@ -7863,7 +8252,7 @@ OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 ------------------------------------------------------------------------------
-[215] MIT License (MIT)
+[228] MIT License (MIT)
 Used by: winreg 0.55.0
 ------------------------------------------------------------------------------
 
@@ -7888,7 +8277,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 
 ------------------------------------------------------------------------------
-[216] MIT License (MIT)
+[229] MIT License (MIT)
 Used by: wry 0.57.0
 ------------------------------------------------------------------------------
 
@@ -7915,7 +8304,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ------------------------------------------------------------------------------
-[217] MIT License (MIT)
+[230] MIT License (MIT)
 Used by: zerocopy 0.8.59, zerocopy-derive 0.8.59
 ------------------------------------------------------------------------------
 
@@ -7946,7 +8335,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 ------------------------------------------------------------------------------
-[218] MIT License (MIT)
+[231] MIT License (MIT)
 Used by: zeroize 1.8.2
 ------------------------------------------------------------------------------
 
@@ -7973,7 +8362,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ------------------------------------------------------------------------------
-[219] MIT License (MIT)
+[232] MIT License (MIT)
 Used by: zeroize 1.9.0
 ------------------------------------------------------------------------------
 
@@ -8004,7 +8393,38 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 ------------------------------------------------------------------------------
-[220] MIT License (MIT)
+[233] MIT License (MIT)
+Used by: zeroize_derive 1.5.0
+------------------------------------------------------------------------------
+
+Copyright (c) 2019-2026 The RustCrypto Project Developers
+
+Permission is hereby granted, free of charge, to any
+person obtaining a copy of this software and associated
+documentation files (the "Software"), to deal in the
+Software without restriction, including without
+limitation the rights to use, copy, modify, merge,
+publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software
+is furnished to do so, subject to the following
+conditions:
+
+The above copyright notice and this permission notice
+shall be included in all copies or substantial portions
+of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
+ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
+TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
+SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
+IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.
+
+------------------------------------------------------------------------------
+[234] MIT License (MIT)
 Used by: zip 2.4.2
 ------------------------------------------------------------------------------
 
@@ -8034,7 +8454,7 @@ Some files in the "tests/data" subdirectory of this repository are under other
 licences; see files named LICENSE.*.txt for details.
 
 ------------------------------------------------------------------------------
-[221] MIT License (MIT)
+[235] MIT License (MIT)
 Used by: zune-core 0.5.3, zune-jpeg 0.5.15
 ------------------------------------------------------------------------------
 
@@ -8061,7 +8481,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ------------------------------------------------------------------------------
-[222] Mozilla Public License 2.0 (MPL-2.0)
+[236] Mozilla Public License 2.0 (MPL-2.0)
 Used by: cssparser 0.37.0, cssparser-macros 0.7.1
 ------------------------------------------------------------------------------
 
@@ -8440,7 +8860,7 @@ Exhibit B - "Incompatible With Secondary Licenses" Notice
   defined by the Mozilla Public License, v. 2.0.
 
 ------------------------------------------------------------------------------
-[223] Mozilla Public License 2.0 (MPL-2.0)
+[237] Mozilla Public License 2.0 (MPL-2.0)
 Used by: dtoa-short 0.3.5
 ------------------------------------------------------------------------------
 
@@ -8819,7 +9239,7 @@ Exhibit B - "Incompatible With Secondary Licenses" Notice
   defined by the Mozilla Public License, v. 2.0.
 
 ------------------------------------------------------------------------------
-[224] Mozilla Public License 2.0 (MPL-2.0)
+[238] Mozilla Public License 2.0 (MPL-2.0)
 Used by: option-ext 0.2.0, selectors 0.38.0
 ------------------------------------------------------------------------------
 
@@ -9198,7 +9618,7 @@ Exhibit B - "Incompatible With Secondary Licenses" Notice
   defined by the Mozilla Public License, v. 2.0.
 
 ------------------------------------------------------------------------------
-[225] Unicode License v3 (Unicode-3.0)
+[239] Unicode License v3 (Unicode-3.0)
 Used by: icu_collections 1.5.0, icu_collections 2.3.0, icu_locale_core 2.3.0, icu_locid 1.5.0,
 icu_locid_transform 1.5.0, icu_locid_transform_data 1.5.1, icu_normalizer 1.5.0, icu_normalizer
 2.3.0, icu_normalizer_data 1.5.1, icu_normalizer_data 2.3.0, icu_properties 1.5.1, icu_properties
@@ -9257,7 +9677,7 @@ Portions of ICU4X may have been adapted from ICU4C and/or ICU4J.
 ICU 1.8.1 to ICU 57.1 © 1995-2016 International Business Machines Corporation and others.
 
 ------------------------------------------------------------------------------
-[226] Unicode License v3 (Unicode-3.0)
+[240] Unicode License v3 (Unicode-3.0)
 Used by: unicode-ident 1.0.26
 ------------------------------------------------------------------------------
 
@@ -9302,7 +9722,7 @@ dealings in these Data Files or Software without prior written
 authorization of the copyright holder.
 
 ------------------------------------------------------------------------------
-[227] zlib License (Zlib)
+[241] zlib License (Zlib)
 Used by: foldhash 0.2.0
 ------------------------------------------------------------------------------
 
@@ -9327,7 +9747,7 @@ the following restrictions:
 3. This notice may not be removed or altered from any source distribution.
 
 ------------------------------------------------------------------------------
-[228] zlib License (Zlib)
+[242] zlib License (Zlib)
 Used by: mozjpeg-sys 2.2.3
 ------------------------------------------------------------------------------
 
@@ -9361,7 +9781,7 @@ Used by: mozjpeg-sys 2.2.3
 #endif
 
 ------------------------------------------------------------------------------
-[229] zlib License (Zlib)
+[243] zlib License (Zlib)
 Used by: mozjpeg-sys 2.2.3
 ------------------------------------------------------------------------------
 

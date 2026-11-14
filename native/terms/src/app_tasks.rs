@@ -240,7 +240,9 @@ impl TaskContext {
         self.process_observed(command, || Ok(()))
     }
     /// `observe` 在等待期间运行；它返回错误时停止并回收 worker。
+    /// 每个 worker 都带着 `ORT_DISABLE_TELEMETRY=1` 启动，不管它会不会加载 ONNX Runtime（#381）。
     pub fn process_observed(&self, command: &mut Command, observe: impl FnMut() -> Result<()>) -> Result<ExitStatus> {
+        crate::recognition_compute::telemetry::child(command);
         crate::platform_process::worker(command, || self.check(), observe)
     }
 }
@@ -293,7 +295,18 @@ impl Task {
                 match result {
                     Ok(Ok(())) => TaskOutcome::Done,
                     Ok(Err(e)) => TaskOutcome::Failed(e.to_string()),
-                    Err(_) => TaskOutcome::Failed("任务线程崩溃".into()),
+                    Err(_) => {
+                        use crate::diagnostics::{self, Cause, Operation, Publication, Retry, Stage};
+                        let d = diagnostics::record(
+                            Operation::Task,
+                            Stage::Background,
+                            Cause::Panic,
+                            None,
+                            Publication::Unknown,
+                            Retry::CheckState,
+                        );
+                        TaskOutcome::Failed(format!("任务线程崩溃（{id}）", id = d.id))
+                    }
                 }
             };
             lock_ignoring_poison(&ctx.boundary).closed = true;
@@ -537,5 +550,32 @@ mod tests {
             }
             std::fs::remove_file(file).unwrap();
         }
+    }
+    /// #381：经任务启动的每个 worker 都看得到 `ORT_DISABLE_TELEMETRY=1`，父进程没设、调用方设成别的值都一样。
+    #[test]
+    fn every_worker_starts_with_ort_telemetry_off() {
+        use crate::recognition_compute::telemetry::ENV;
+        for parent in [None, Some("0"), Some("true")] {
+            let mut task = Task::start(identity(), Some(Duration::from_secs(60)), move |ctx| {
+                let mut cmd = Command::new(std::env::current_exe()?);
+                cmd.args(["--ignored", "--exact", "app_tasks::tests::ort_telemetry_fixture"]).env_remove(ENV);
+                if let Some(value) = parent {
+                    cmd.env(ENV, value);
+                }
+                if ctx.process(&mut cmd)?.success() {
+                    Ok(())
+                } else {
+                    Err(Error::Invalid("worker saw telemetry on".into()))
+                }
+            });
+            assert!(task.wait(Duration::from_secs(60)));
+            assert_eq!(task.outcome(), TaskOutcome::Done, "parent {parent:?}");
+        }
+    }
+    #[test]
+    #[ignore = "subprocess fixture, invoked only by every_worker_starts_with_ort_telemetry_off"]
+    fn ort_telemetry_fixture() {
+        use crate::recognition_compute::telemetry::{ENV, VALUE};
+        assert_eq!(std::env::var(ENV).as_deref(), Ok(VALUE));
     }
 }

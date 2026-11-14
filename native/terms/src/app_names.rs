@@ -735,7 +735,9 @@ impl Updater {
     fn state_json(&self) -> Json {
         let state = self.state.lock().expect("app_names mutex poisoned");
         Json::object(
-            ["status", "done", "total", "error"].iter().filter_map(|k| state.get(*k).map(|v| (*k, v.clone().into()))),
+            ["status", "done", "total", "error", "diagnostic"]
+                .iter()
+                .filter_map(|k| state.get(*k).map(|v| (*k, v.clone().into()))),
         )
     }
     pub fn progress(&self) -> Json {
@@ -891,6 +893,13 @@ impl Updater {
                             waiting = true;
                         }
                         Err(e) => {
+                            let d = crate::diagnostics::failure(
+                                crate::diagnostics::Operation::Names,
+                                crate::diagnostics::Stage::Background,
+                                &e,
+                                crate::diagnostics::Publication::MayBePartial,
+                            );
+                            s["diagnostic"] = d.value();
                             s["status"] = json!("error");
                             let message = match e {
                                 Error::Invalid(s) | Error::Network(s) => s,

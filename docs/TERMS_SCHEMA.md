@@ -72,7 +72,7 @@ cargo clippy --manifest-path crates/core/Cargo.toml --all-targets -- -D warnings
 - **投影 = 证据 + 裁决 + 类型策略。** 裁决、导入、改类型、移除图都在同一事务里重算受影响的图。「至多一个 / 恰好一个」的类型：有人工确认时，同类型的机器认定全部降为「也可能是」；否则只留分数最高的一个。
 - **包不能新建用户的东西**：概念、CP 只能由人或核心建；按 key 引用的词条必须已存在。
 
-同一个人被合并（`same_as` 已确认）后证据如何归到代表词条，由第 4、5 步按原 hybrid 规则的 canonical 投影实现（[TERMS_CHARACTERS_PLAN.md](TERMS_CHARACTERS_PLAN.md) 第 5.1 节）；本步只存关系。
+同一个人被合并（`same_as` 已确认）后证据如何归到代表词条，由第 4、5 步按原 hybrid 规则的 canonical 投影实现（[TERMS_CHARACTERS.md](TERMS_CHARACTERS.md) 方案第 5.1 节）；本步只存关系。
 
 ## 5. 与现有表的对应（按实际收编结果更正，2026-09-29）
 
@@ -117,7 +117,7 @@ cargo clippy --manifest-path crates/core/Cargo.toml --all-targets -- -D warnings
 
 ## 7. 第 2 版（2026-09-29，词条第 4、5 步 S1）
 
-为角色、皮肤、作品收编加的表，方案见 [TERMS_CHARACTERS_PLAN.md](TERMS_CHARACTERS_PLAN.md) 第 2 节。`migrate()` 从第 1 版升到第 2 版是一个事务；中途失败回到第 1 版原样（表、视图、数据都不变）。桌面 App 启动时照常自动迁移。
+为角色、皮肤、作品收编加的表，方案见 [TERMS_CHARACTERS.md](TERMS_CHARACTERS.md) 方案第 2 节。`migrate()` 从第 1 版升到第 2 版是一个事务；中途失败回到第 1 版原样（表、视图、数据都不变）。桌面 App 启动时照常自动迁移。
 
 | 变更 | 内容 |
 |---|---|
@@ -134,7 +134,7 @@ cargo clippy --manifest-path crates/core/Cargo.toml --all-targets -- -D warnings
 
 ## 8. 第 3 版（2026-09-29，main 的找回画师整合）
 
-溯源的证据整个来源按批次生效（`schema::REPLACEABLE_SOURCES`，批次的方法记为 `*`）：一个溯源证据包是 provenance.sqlite 的全量快照，包里标为「已完成」的图上，这个来源当前有效的证据就是包里的行，没有行就是查无结果（`store::publish_snapshot`）。`term_current_evidence` 相应放宽；画师判定器的强证据加上 `iqdb`、`same_picture`。迁移时已有的溯源证据收进一个全库覆盖的初始批次，迁移前后有效的证据不变。为放宽 `term_evidence_sets` 的 CHECK，父表和三张子表一起重建，失败回到第 2 版原样。读路径和人工裁决的规则见 [TERMS_CHARACTERS_PLAN.md](TERMS_CHARACTERS_PLAN.md) 第 16 节「画师证据的整合」。
+溯源的证据整个来源按批次生效（`schema::REPLACEABLE_SOURCES`，批次的方法记为 `*`）：一个溯源证据包是 provenance.sqlite 的全量快照，包里标为「已完成」的图上，这个来源当前有效的证据就是包里的行，没有行就是查无结果（`store::publish_snapshot`）。`term_current_evidence` 相应放宽；画师判定器的强证据加上 `iqdb`、`same_picture`。迁移时已有的溯源证据收进一个全库覆盖的初始批次，迁移前后有效的证据不变。为放宽 `term_evidence_sets` 的 CHECK，父表和三张子表一起重建，失败回到第 2 版原样。读路径和人工裁决的规则见 [TERMS_CHARACTERS.md](TERMS_CHARACTERS.md) 方案第 16 节「画师证据的整合」。
 
 
 ## 9. 第 4 版（2026-09-29，拆脚手架阶段 A）
@@ -145,7 +145,7 @@ cargo clippy --manifest-path crates/core/Cargo.toml --all-targets -- -D warnings
 
 ## 10. 第 5 版（2026-09-29，名字投影与收编）
 
-方案和用户决定见 [TERMS_NAMES_PLAN.md](TERMS_NAMES_PLAN.md)，结果说明见 [TERMS_NAMES.md](TERMS_NAMES.md)。第 4 版升到第 5 版只建四张表，不动数据；没切名字的库这四张表可以是空的（或是影子收编留下的内容，没有读者）。
+方案、用户决定和结果说明见 [TERMS_NAMES.md](TERMS_NAMES.md)。第 4 版升到第 5 版只建四张表，不动数据；没切名字的库这四张表可以是空的（或是影子收编留下的内容，没有读者）。
 
 | 表 | 内容 | 谁写 |
 |---|---|---|
@@ -265,5 +265,5 @@ cargo clippy --manifest-path crates/core/Cargo.toml --all-targets -- -D warnings
   - 为什么不改成从核心现算：实测（#201 评论，合成 5 万张图，负载下只看量级）判定 SQL 的增量重算从约 0.5 ms 变成约 230 ms，浏览里逐张查「被否定过」从约 0.2 ms 变成约 650 ms。有效裁决视图要对全部裁决开窗，候选要对全部证据聚合，按图的条件推不进去。
   - 原来第 8 版升级时由核心主数据生成 TEMP 影子、与兼容表逐表比对的机制（`verify_in`、`COMPAT`、影子表）随之删除：派生表随时可以由权威重算，各张旧表在退役时各自核对。
 - 升级沿用现有入口：桌面和网页的升级界面（#193）、`http --upgrade`、`illustash-terms migrate`；升级前备份 `library-backups/terms-v<旧版>-before-v8-*.sqlite`，失败整体回滚。应用层（`app_upgrade.rs`）对没切换完的旧图库（应用 schema 36 以前、切换标记缺失或未完成、更早的 source 布局或缺索引元数据）打开和升级都直接拒绝，提示先用 `pre-v8` 版本；原来为它们准备的分阶段成对发布路径已删除。
-- 对照：新对照基准（`native/terms/tests/baseline.rs`、`contracts.rs`，规则见 `native/terms/tests/common/baseline.rs`）的每个 v7 检查点都经这次升级再重放，接口回复逐字节不变；退役的旧表（含基准录制之后才退役的四张身份关系表，它们录下的变化一并略去）不比，内容在核心表里比；新加的列（`actions` 两列、`term_names.seq`、`term_tree.seq`）在比较器里登记排除，由历史提示和读者排序的回复比较覆盖；身份的属性在比较器里照原来的形状算进 `terms.attrs` 比较（`term_tree` 上的属性列不另比）。`native/terms/tests/v8_upgrade.rs` 覆盖拒绝（身份、身份关系、链接或作品复核的旧表与核心不一致、没切换完）不留痕、回填，以及各张旧表的内容原样进入核心、视图改读核心表、身份关系按片段读出原来的行。
+- 对照：新对照基准（`native/terms/tests/baseline.rs`、`contracts.rs`，规则见 `native/terms/tests/common/baseline.rs`）的每个 v7 检查点都经这次升级再重放，接口回复逐字节不变；退役的旧表（含基准录制之后才退役的四张身份关系表，它们录下的变化一并略去）不比，内容在核心表里比；新加的列（`actions` 两列、`term_names.seq`、`term_tree.seq`）在比较器里登记排除，由历史提示和读者排序的回复比较覆盖；身份的属性在比较器里照原来的形状算进 `terms.attrs` 比较（`term_tree` 上的属性列不另比）。`native/terms/tests/it/v8_upgrade.rs` 覆盖拒绝（身份、身份关系、链接或作品复核的旧表与核心不一致、没切换完）不留痕、回填，以及各张旧表的内容原样进入核心、视图改读核心表、身份关系按片段读出原来的行。
 

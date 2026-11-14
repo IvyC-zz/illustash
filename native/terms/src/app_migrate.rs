@@ -76,3 +76,23 @@ pub(crate) fn deliver_wd(
     }
     Ok(())
 }
+
+/// 撤回旧 WD 机器证据的有效投影，保留不可变证据、人工裁决和整理历史。
+pub(crate) fn invalidate_wd(app: &Connection, assets: &[String]) -> Result<()> {
+    let mut stale = Vec::new();
+    for asset in assets {
+        let ids = app.prepare("SELECT e.id,e.asset_id FROM term_evidence e JOIN term_assets a ON a.id=e.asset_id JOIN terms t ON t.id=e.term_id WHERE a.namespace='library' AND a.key=? AND e.source='wd' AND t.kind IN ('topic','rating')")?
+            .query_map([asset], |r| Ok((r.get::<_,i64>(0)?,r.get::<_,i64>(1)?)))?.collect::<rusqlite::Result<Vec<_>>>()?;
+        for (id, owner) in ids {
+            app.execute(
+                "INSERT OR REPLACE INTO meta VALUES (?,?)",
+                rusqlite::params![format!("folder_stale_wd:{id}"), owner.to_string()],
+            )?;
+            stale.push(owner);
+        }
+    }
+    stale.sort_unstable();
+    stale.dedup();
+    crate::store::project(app, &stale)?;
+    Ok(())
+}

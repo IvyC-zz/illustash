@@ -40,7 +40,7 @@ mod app_settings;
 mod app_sources;
 mod app_sync;
 pub mod app_tasks;
-mod app_updates;
+pub mod app_updates;
 mod app_upgrade;
 mod image_samples;
 pub mod index_compute;
@@ -70,6 +70,7 @@ pub(crate) use illustash_core::compat_text;
 
 pub(crate) use illustash_core::compat_unicode;
 pub mod desktop_shell;
+pub mod diagnostics;
 pub(crate) use illustash_core::error;
 pub mod http;
 mod http_app;

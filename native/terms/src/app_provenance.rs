@@ -470,6 +470,15 @@ impl Runner {
                     }
                     s.remove("text");
                     s.set("status", status.into());
+                    if status == "failed" {
+                        let d = crate::diagnostics::failure(
+                            crate::diagnostics::Operation::Provenance,
+                            crate::diagnostics::Stage::Background,
+                            e,
+                            crate::diagnostics::Publication::MayBePartial,
+                        );
+                        s.set("diagnostic", d.value().into());
+                    }
                     s.set("reason", reason.into());
                     s.set("finished_at", now().into());
                 }

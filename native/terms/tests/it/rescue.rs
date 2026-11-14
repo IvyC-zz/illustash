@@ -19,8 +19,7 @@ use std::{
 
 const RECORD: &str = ".illustash-checks.json";
 
-#[path = "common/entry.rs"]
-mod entry;
+use crate::common::entry;
 
 struct Sandbox(PathBuf);
 impl Drop for Sandbox {
@@ -263,6 +262,7 @@ fn rescued(o: &Organized) {
 
 #[test]
 fn a_damaged_source_is_rescued_and_every_picture_keeps_its_id() {
+    let _env = crate::exclusive();
     let root =
         std::env::temp_dir().join(format!("illustash-rescue-{}-{}", std::process::id(), store::new_key().unwrap()));
     fs::create_dir_all(&root).unwrap();
@@ -271,7 +271,7 @@ fn a_damaged_source_is_rescued_and_every_picture_keeps_its_id() {
     for dir in ["home", "support", "shared"] {
         fs::create_dir_all(root.join(dir)).unwrap();
     }
-    // 这个测试二进制只有一个测试：此期间没有别的代码读进程环境。
+    // 持有 `crate::exclusive()`：此期间没有别的测试在跑，也就没有别的代码读进程环境。
     std::env::set_var("ILLUSTASH_APP_SUPPORT", root.join("support"));
     std::env::set_var("ILLUSTASH_SHARED", root.join("shared"));
     std::env::set_var("ILLUSTASH_NO_KEYCHAIN", "1");

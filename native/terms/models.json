@@ -33,5 +33,15 @@
       "hf": {"repo": "deepghs/ccip_onnx", "revision": "eb2acdd29af1703388d3d0c04221add322bc9110", "file": "ccip-caformer-24-randaug-pruned/metrics.json"},
       "modelscope": {"repo": "deepghs/ccip_onnx", "revision": "master", "file": "ccip-caformer-24-randaug-pruned/metrics.json"}
     }
-  ]
+  ],
+  "wd_coreml": {
+    "revision": 1,
+    "source_sha256": "ae25f5f12b2d5891728fb7768fa63d65bf13a83d6d4823e3a1bf7b42875c74ff",
+    "file": {
+      "path": "coreml/wd-swinv2-v3-v1.onnx",
+      "size": 467387780,
+      "sha256": "57344d061ecaa0b8addb9cc33ae1a133a5bb18525590fdc61edb2aacdad2e444",
+      "url": "https://github.com/shio-vinyl/illustash/releases/download/wd-coreml-v1/wd-swinv2-v3-v1.onnx"
+    }
+  }
 }

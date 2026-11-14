@@ -83,6 +83,8 @@ button{font:inherit;color:inherit;cursor:pointer}
 <div class="sp-actions" id="upgradeActs" hidden><button class="btn primary" data-act="upgrade" data-t>升级并打开</button><button class="btn" data-act="choose" data-t>选择其他图库</button></div>
 <div class="sp-actions" id="rescueActs" hidden><button class="btn primary" data-act="rescue" data-t>抢救重建</button><button class="btn" data-act="choose" data-t>选择其他图库</button></div></div></div></div>
 <div id="welcome"><div class="w-col" id="wcol"></div></div>
+<div id="diagnosticActions" hidden style="position:fixed;bottom:12px;right:12px;z-index:10"><button class="btn" id="diagnosticCopy" data-t>复制诊断信息</button><button class="btn" id="diagnosticExport" data-t>查看诊断信息</button><span id="diagnosticNotice" role="status"></span></div>
+<dialog id="diagnosticDialog"><p data-t>运行错误仅保存在本机，最多 128 条、保留 14 天；不会自动上传，不含图片、文件名、路径或账号凭据。</p><textarea id="diagnosticText" readonly style="width:70vw;height:45vh"></textarea><form method="dialog"><button class="btn" data-t>关闭</button></form></dialog>
 <!-- i18n.js、splash.js 由 desktop/build.rs 从 web/static/ 复制过来，两边用同一份；语言和译文表由外壳在页面加载前注入（desktop/src/i18n.rs） -->
 <script src="i18n.js"></script>
 <script src="splash.js"></script>
@@ -94,6 +96,12 @@ window.showProgress = (done, stage) => {
   splash.status(`${tb(stage)} ${Math.floor(done * 100)}%`);
   splash.progress(done * .9);
 };
+// 外壳在安装更新（#279，desktop/src/updater.rs）：图库页已经关了，装好后应用自己重新打开。
+window.showUpdating = version => {
+  if (!window.splash) return;
+  document.body.classList.remove('failed');
+  splash.status(t('正在安装 {version}，装好后会重新打开 Illustash', {version}));
+};
 // 本地服务就绪：等折叠动画播完再打开图库页（地址里带 launched，图库页从成形的图标接着走）。
 window.launch = async url => {
   if (document.body.classList.contains('failed')) return;
@@ -103,6 +111,24 @@ window.launch = async url => {
 // 只有本地启动页能调用这些命令（capabilities/main.json）。
 const invoke = (cmd, args) => window.__TAURI_INTERNALS__.invoke(cmd, args);
 const busy = on => document.querySelectorAll('button').forEach(b => { b.disabled = on; });
+// 从原生白名单读取，永远不复制页面错误文字或原始 stderr。
+async function diagnosticText() {
+  const report = await invoke('startup_diagnostics');
+  if (window.currentDiagnostic) report.current = window.currentDiagnostic;
+  return JSON.stringify(report, null, 2);
+}
+document.getElementById('diagnosticCopy').onclick = async () => {
+  try { await navigator.clipboard.writeText(await diagnosticText()); document.getElementById('diagnosticNotice').textContent = t('诊断信息已复制'); }
+  catch { document.getElementById('diagnosticNotice').textContent = t('无法访问剪贴板，请查看诊断信息并手动复制'); }
+};
+document.getElementById('diagnosticExport').onclick = async () => {
+  try {
+    const text = await diagnosticText();
+    // 系统 WebView 未必支持下载；始终提供可选中的文本作为反馈入口。
+    const field = document.getElementById('diagnosticText'); field.value = text;
+    document.getElementById('diagnosticDialog').showModal(); field.focus(); field.select();
+  } catch { document.getElementById('diagnosticNotice').textContent = t('诊断记录暂不可读'); }
+};
 document.getElementById('switch').onclick = () => { busy(true); invoke('startup_choose', {create: false}); };
 for (const acts of document.querySelectorAll('.sp-actions')) acts.onclick = e => {
   const act = e.target.closest('[data-act]')?.dataset.act; if (!act) return;
@@ -125,6 +151,7 @@ window.showWelcome = state => {
   W = {...state, origins: (state.origins || []).map(o => ({...o, label: tb(o.label)})), photosOk: !!state.photos, photos: false, form: !!state.create || !(state.recent || []).length, seq: [], info: {}, notes: [], name: '', error: '', importing: null, created: null};
   document.body.classList.remove('failed');
   document.body.classList.add('welcoming');
+  document.getElementById('diagnosticActions').hidden = false;
   busy(false);
   window.splash?.halt();
   renderWelcome();
@@ -256,6 +283,8 @@ document.getElementById('welcome').onclick = async e => {
 const showActs = id => { for (const acts of ['failActs', 'upgradeActs', 'rescueActs']) document.getElementById(acts).hidden = acts !== id; };
 // 外壳在服务启动失败时调用，显示原因和最后几行输出。
 window.showError = (msg, log) => {
+  try { window.currentDiagnostic = JSON.parse(log || '{}').current || null; } catch { window.currentDiagnostic = null; }
+  document.getElementById('diagnosticActions').hidden = false;
   document.body.classList.add('failed');
   window.splash?.halt();
   busy(false);

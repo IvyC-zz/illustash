@@ -88,9 +88,12 @@ test('单图／选择快捷键在各页做什么', () => {
   // 浏览页（图库、重复）
   for (const view of [P.library, P.duplicates]) {
     assert.deepEqual(act('remove', view, 3), {bar: 'notlib'}, view.name);
-    assert.deepEqual(act('c', view, 3), {bar: 'assign'}, view.name);
-    assert.deepEqual(act('c', view, 0), {single: 'also'}, view.name);
-    assert.deepEqual(act('a', view, 0), {single: 'also'}, view.name);
+    // C＝换成、A＝追加（#399）：有选中时 C 换掉选中的图共同的角色，A 加角色；没有选中时 C 换掉当前图的角色
+    assert.deepEqual(act('c', view, 3), {bar: 'replace'}, view.name);
+    assert.deepEqual(act('a', view, 3), {bar: 'assign'}, view.name);
+    assert.deepEqual(act('c', view, 0, items[1]), {single: 'swap'}, view.name);
+    assert.deepEqual(act('c', view, 0, items[0]), {single: 'swap'}, view.name);   // 还没有角色：singleAction 退成设为
+    assert.deepEqual(act('a', view, 0, items[1]), {single: 'also'}, view.name);
     assert.deepEqual(act('x', view, 0), {single: 'exclude'}, view.name);
   }
   // 当前图有角色时 ⌫ 移出它，没有角色就没有可移出的
@@ -98,12 +101,16 @@ test('单图／选择快捷键在各页做什么', () => {
   assert.equal(act('remove', P.library, 0, items[0]), null);
   // 整理页：⌫ 有选中时没有对应动作（已知问题 13 说的那一种）
   for (const view of [P.unmatched, P.skipped, P.excluded, P.pending, P.group, P.audit]) assert.equal(act('remove', view, 2), null, view.name);
-  // S 只在未识别一类；没有选中时只有「全部未识别」能跳过当前图
+  // S：未识别一类跳过，没有选中时「全部未识别」和组页都跳过当前图（#385）；已跳过页恢复到未识别（#399）
   assert.deepEqual(act('s', P.unmatched, 2), {bar: 'skip'});
   assert.deepEqual(act('s', P.unmatched, 0), {single: 'skip'});
   assert.deepEqual(act('s', P.group, 2), {bar: 'skip'});
-  assert.equal(act('s', P.group, 0), null);
-  for (const view of [P.skipped, P.excluded, P.pending, P.audit, P.library]) assert.equal(act('s', view, 1), null, view.name);
+  assert.deepEqual(act('s', P.group, 0), {single: 'skip'});
+  assert.deepEqual(act('s', P.skipped, 2), {bar: 'resume'});
+  assert.deepEqual(act('s', P.skipped, 0), {single: 'resume'});
+  for (const view of [P.excluded, P.pending, P.audit, P.library]) assert.equal(act('s', view, 1), null, view.name);
+  // 未识别一类的图还没有角色：C 是设为
+  for (const view of [P.unmatched, P.skipped, P.group]) assert.deepEqual(act('c', view, 2), {bar: 'assign'}, view.name);
   // X：已排除页恢复收录，其余排除
   assert.deepEqual(act('x', P.excluded, 1), {bar: 'include'});
   assert.deepEqual(act('x', P.excluded, 0), {single: 'include'});
@@ -112,7 +119,20 @@ test('单图／选择快捷键在各页做什么', () => {
   assert.deepEqual(act('g', P.unmatched, 0), {single: 'tag'});
   // 相似组页（#353 起是整理页）：选择栏是默认的那种，⌫ 交给它的「不是…」，和浏览页一样
   assert.deepEqual(act('remove', P.sgroup, 2), {bar: 'notlib'});
-  assert.deepEqual(act('c', P.sgroup, 2), {bar: 'assign'});
+  assert.deepEqual(act('c', P.sgroup, 2), {bar: 'replace'});
+});
+
+// 关大图后详情栏跟到大图里最后看的那张（#399）：之后「当前图」、Space 打开的、光标三者是同一张。
+test('关大图时详情栏换到大图那张', () => {
+  reset({focused: 'a', viewer: 2, viewerItem: items[2], cursor: 2});
+  assert.equal(modes.detailAfterViewer(), 'c');
+  // 没翻页、没开详情栏、大图还没读到图：不用换
+  reset({focused: 'a', viewer: 0, viewerItem: items[0], cursor: 0});
+  assert.equal(modes.detailAfterViewer(), null);
+  reset({viewer: 2, viewerItem: items[2], cursor: 2});
+  assert.equal(modes.detailAfterViewer(), null);
+  reset({focused: 'a', viewer: 2, viewerItem: null, cursor: 2});
+  assert.equal(modes.detailAfterViewer(), null);
 });
 
 // ---------- 键盘处理与换页 ----------
@@ -287,4 +307,163 @@ test('⌘滚轮、捏合只在主区是网格的页面缩放网格，也不交�
   for (const fn of viewport.listeners.wheel) fn(plain);
   assert.deepEqual([plain.prevented, frames], [false, 0]);
   globalThis.requestAnimationFrame = () => 0;
+});
+
+// 组页上不选图按 S：和「全部未识别」一样，当前图先飞走（卡片带 leaving），再发出「跳过」（#385）。
+test('不选图按 S：全部未识别和组页跳过当前这张，已跳过页恢复它（#399）', async () => {
+  await wired();
+  const requests = [];
+  const grid = page.el('grid');
+  globalThis.fetch = async (path, init = {}) => {
+    const flying = grid.children.filter(c => c.classList.contains('leaving')).map(c => c.dataset.id);
+    requests.push({path, body: init.body ? JSON.parse(init.body) : null, flying});
+    return {status: 500, ok: false, text: async () => 'stop', json: async () => ({error: 'stop'})};
+  };
+  const card = id => { const el = page.document.createElement('div'); el.dataset.id = id; return el; };
+  const skipFrom = async (route, action) => {
+    requests.length = 0; grid.children.length = 0;
+    for (const id of ['a', 'b', 'c']) grid.append(card(id));
+    reset({route, cursor: 0});
+    page.el('toast').hidden = true; page.el('toastText').textContent = '';
+    keydown('s');
+    await new Promise(done => setTimeout(done, 20));
+    const changes = requests.filter(r => r.path === '/api/change');
+    assert.equal(changes.length, 1, route.page);
+    assert.deepEqual(changes[0].body, {ids: ['a'], action}, route.page);
+    assert.deepEqual(changes[0].flying, ['a'], `${route.page}：请求发出时这张已经在飞走`);
+  };
+  await skipFrom({page: 'unmatched'}, 'unknown');
+  await skipFrom({page: 'group', id: '3'}, 'unknown');
+  await skipFrom({page: 'skipped'}, 'resume');
+});
+
+// 详情栏里「也可能是」设角色：lead 页（全部未识别、已跳过、组页）上图先飞走，别的页不飞（#385）。
+test('详情栏设角色后图飞走：未识别一类三页都飞，图库不飞', async () => {
+  await wired();
+  const detail = await web.load('ui/detail.js');
+  const grid = page.el('grid');
+  const seen = [];
+  globalThis.fetch = async (path, init = {}) => {
+    seen.push({path, flying: grid.children.filter(c => c.classList.contains('leaving')).map(c => c.dataset.id)});
+    return {status: 500, ok: false, text: async () => 'stop', json: async () => ({error: 'stop'})};
+  };
+  for (const [route, flies] of [[{page: 'unmatched'}, true], [{page: 'skipped'}, true], [{page: 'group', id: '3'}, true], [{page: 'library'}, false]]) {
+    seen.length = 0; grid.children.length = 0;
+    for (const id of ['a', 'b']) { const el = page.document.createElement('div'); el.dataset.id = id; grid.append(el); }
+    reset({route});
+    detail.pickAlternative({memberships: [], alternatives: [{id: 'c9'}]}, 'a', 0);
+    await new Promise(done => setTimeout(done, 20));
+    const sent = seen.filter(r => r.path === '/api/change');
+    assert.equal(sent.length, 1, route.page);
+    assert.deepEqual(sent[0].flying, flies ? ['a'] : [], route.page);
+  }
+});
+
+// ---------- #399 ----------
+// 详情接口按 id 回 items 里那张的角色；/api/suggest 回空，命令面板只列 state.chars。
+function stubDetail(calls = []) {
+  globalThis.fetch = async (path, opts = {}) => {
+    calls.push([path, opts.body ? JSON.parse(opts.body) : null]);
+    const id = path.startsWith('/api/detail') ? new URLSearchParams(path.split('?')[1]).get('id') : null;
+    const memberships = (state.items.find(x => x?.uuid === id)?.memberships || []).map(m => ({name: m.id.toUpperCase(), ...m}));
+    const body = id ? {uuid: id, memberships, alternatives: [], user_tags: []} : path === '/api/suggest' ? [] : {};
+    return {status: 200, ok: true, json: async () => body};
+  };
+  globalThis.Image = class {};
+  return calls;
+}
+const settle = () => new Promise(r => setTimeout(r, 20));
+// 命令面板底部那句话：说明打开的是换成还是追加。
+const pickerSays = () => page.el('picker').open ? page.el('pickerFoot').innerHTML.replace(/<[^>]+>/g, '').trim() : '';
+// 关掉命令面板，并像浏览器那样发出 close 事件，好让浮层管理器把它出栈。
+const closePicker = () => { const el = page.el('picker'); el.close(); for (const fn of (el.listeners.close || []).splice(0)) fn(); };
+
+test('详情栏开着时进大图翻几张，关大图后详情栏和快捷键都在最后看的那张（#399）', async () => {
+  await wired();
+  const calls = stubDetail();
+  page.el('grid').hidden = false;
+  reset({route: {page: 'library'}, focused: 'a', cursor: 0});
+  keydown(' ');
+  assert.equal(state.viewer, 0);
+  keydown('ArrowRight'); await settle();
+  keydown('ArrowRight'); await settle();
+  assert.equal(state.viewer, 2);
+  keydown(' '); await settle();
+  assert.equal(state.viewer, -1);
+  assert.equal(state.focused, 'c');
+  assert.equal(state.cursor, 2);
+  assert.deepEqual(modes.currentSource(), {from: 'focused', uuid: 'c'});
+  assert.equal(modes.viewerTarget(), 2);
+  calls.length = 0; keydown('x'); await settle();
+  assert.deepEqual(calls.find(([p]) => p === '/api/curate')?.[1], {ids: ['c'], action: 'exclude'});
+  // 没开详情栏时关大图不开详情栏
+  reset({route: {page: 'library'}, cursor: 0});
+  keydown(' '); keydown('ArrowRight'); await settle(); keydown(' ');
+  assert.equal(state.focused, null);
+  globalThis.fetch = undefined;
+});
+
+test('C 换成、A 追加：单图（#399）', async () => {
+  await wired();
+  stubDetail();
+  state.chars = [{id: 'c2', name: 'C2'}];
+  page.el('grid').hidden = false;
+  // 图上已有角色：C 是换成，A 是追加
+  reset({route: {page: 'library'}, focused: 'b', cursor: 1});
+  keydown('c'); await settle();
+  assert.equal(pickerSays(), '↵ 把这张从 C1 换成 C2⇧↵ 多选');
+  closePicker();
+  keydown('a'); await settle();
+  assert.equal(pickerSays(), '↵ 给这张加上 C2');
+  closePicker();
+  // 还没有角色：C、A 都是设为
+  reset({route: {page: 'library'}, focused: 'a', cursor: 0});
+  keydown('c'); await settle();
+  assert.equal(pickerSays(), '↵ 把这张设为 C2');
+  closePicker();
+  globalThis.fetch = undefined; state.chars = [];
+});
+
+test('C 换成、A 追加：图库的选择栏（#399）', async () => {
+  await wired();
+  stubDetail();
+  state.chars = [{id: 'c2', name: 'C2'}];
+  page.el('grid').hidden = false;
+  const grid = await web.load('ui/grid.js');
+  const bar = () => page.el('selectionBar').innerHTML;
+  const toast = () => page.el('toast').hidden === false ? page.el('toastText').textContent : '';
+  const c1 = {id: 'c1', name: 'C1'}, c3 = {id: 'c3', name: 'C3'};
+  const many = [{uuid: 'a', memberships: []}, {uuid: 'b', memberships: [c1]}, {uuid: 'c', memberships: []}, {uuid: 'd', memberships: [c1, c3]}, {uuid: 'e', memberships: [c1, c3]}];
+  // 都有同一个角色：C 换掉它，A 加角色
+  reset({route: {page: 'library'}, items: many, total: many.length, sel: pick('b', 'd')});
+  grid.renderSelection();
+  assert.match(bar(), /data-act="replace" >换成… <kbd>C<\/kbd>/);
+  assert.match(bar(), /data-act="assign">加角色… <kbd>A<\/kbd>/);
+  keydown('c'); await settle();
+  assert.equal(pickerSays(), '↵ 把 2 张从 C1 换成 C2⇧↵ 多选');
+  closePicker();
+  keydown('a'); await settle();
+  assert.equal(pickerSays(), '↵ 把 2 张设为 C2⇧↵ 多选');
+  closePicker();
+  // 共同的角色不止一个：先问换掉哪个
+  reset({route: {page: 'library'}, items: many, total: many.length, sel: pick('d', 'e')});
+  keydown('c'); await settle();
+  assert.equal(pickerSays(), '↵ 把 2 张的 C1 换掉');
+  closePicker();
+  // 没有共同的角色：按钮不可用，按 C 说明原因
+  reset({route: {page: 'library'}, items: many, total: many.length, sel: pick('a', 'b')});
+  grid.renderSelection();
+  assert.match(bar(), /data-act="replace" disabled title="所选图片没有共同的角色"/);
+  page.el('toast').hidden = true; keydown('c'); await settle();
+  assert.equal(toast(), '所选图片没有共同的角色');
+  assert.equal(page.el('picker').open, false);
+  // 都还没有角色：只有「设为角色 C」，C 打开设为
+  reset({route: {page: 'library'}, items: many, total: many.length, sel: pick('a', 'c')});
+  grid.renderSelection();
+  assert.doesNotMatch(bar(), /data-act="replace"/);
+  assert.match(bar(), /data-act="assign">设为角色… <kbd>C<\/kbd>/);
+  keydown('c'); await settle();
+  assert.equal(pickerSays(), '↵ 把 2 张设为 C2⇧↵ 多选');
+  closePicker();
+  globalThis.fetch = undefined; state.chars = [];
 });

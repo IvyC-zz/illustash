@@ -115,6 +115,7 @@ fn models() -> Vec<String> {
     illustash_terms::app_models::manifest()
         .files
         .iter()
+        .filter(|entry| !entry.optional)
         .map(|entry| format!("resources/models/{}", entry.path))
         .collect()
 }

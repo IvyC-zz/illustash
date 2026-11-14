@@ -32,7 +32,27 @@ export const charRoute = (id, variant = '') => ({page: 'library', char: id, vari
 export const charHash = (id, variant = '') => hashFor(charRoute(id, variant));
 // 换到新解析出的路由（只有 ui/shell.js applyRoute 调用）；replaceRoute 只改当前路由的参数、不触发换页。
 export function setRoute(route) { state.route = route; }
-export function replaceRoute(patch) { Object.assign(state.route, patch); history.replaceState(null, '', hashFor(state.route)); }
+export function replaceRoute(patch) { Object.assign(state.route, patch); history.replaceState(history.state, '', hashFor(state.route)); }
+// ---------- 后退／前进（#402） ----------
+// 桌面 App 菜单里的「后退／前进」（⌘[、⌘]）经 window.illustashHistory 调 stepHistory。只在这个页面自己的地址之间走：
+// 页面打开之前的那一条是启动页或上一个图库（带一次性登录码的地址），退过去就离开了图库。所以每一条地址在
+// history.state 里记着它是这个页面打开后的第几条（0 是第一条），退到 0 就不再退；前进到头浏览器自己就不动。
+let entry = 0, noted = false;
+// 每次地址变了都调用一次（ui/shell.js applyRoute）：新建的那条还没有序号，记成上一条的下一个；后退、前进到的那条
+// 已经有。url 是要就地改写成的地址（旧地址换成新的），不给就是现在的地址。
+export function noteHistory(url) {
+  const seq = history.state?.illustash;
+  if (Number.isInteger(seq) && !url) { entry = seq; noted = true; return; }
+  if (!Number.isInteger(seq)) entry = noted ? entry + 1 : 0; else entry = seq;
+  noted = true;
+  history.replaceState({...history.state, illustash: entry}, '', url ?? location.hash);
+}
+// 后退时先把序号减掉：连按两下时第二下可能早于第一下的 hashchange，不能按还没更新的序号再退一次。前进不预先加：
+// 已经在最后一条时浏览器不动，预先加了就会让下一次后退越过第一条。
+export function stepHistory(dir) {
+  if (dir > 0) history.go(1);
+  else if (entry > 0) { entry--; history.go(-1); }
+}
 // 整理视图（按角色筛选，或复核池）：点击即选择。
 export const cleanup = () => viewOf(state.route).click === 'cleanup';
 // 浏览页：点击打开详情，选择要主动开启。

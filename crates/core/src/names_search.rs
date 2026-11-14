@@ -1,4 +1,4 @@
-//! 名字搜索（docs/TERMS_NAMES_PLAN.md N4）：逐条移植 tests/reference/web/names.py（#9 已删除） 的 `search_hits`。
+//! 名字搜索（docs/TERMS_NAMES.md 方案 N4）：逐条移植 tests/reference/web/names.py（#9 已删除） 的 `search_hits`。
 //!
 //! 给一个查询，返回 {身份: 排名}：完全相同 = 2、开头 = 1、包含 = 0，同一身份取最大。匹配面：身份的作品、画师、皮肤文字
 //! （原样与 `_` 换成空格）；当前与退役的链接 key（人物 tag 另比可读形式）；身份的名字；按文字键的名字与别名（作品、皮肤）；

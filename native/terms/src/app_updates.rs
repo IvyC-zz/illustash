@@ -7,6 +7,11 @@
 //!
 //! 和界面语言一样是全应用范围的：选择存在 preferences.json 里（`update_check`：`"auto"` 或 `"manual"`，
 //! 问过之前没有这个键）；最近一次结果存在旁边的 updates.json。
+//!
+//! B 档（#279）：在桌面 App 里，查到的新版本还可以「下载并重启」。下载、校验签名、安装和重启都由外壳做
+//! （desktop/src/updater.rs，Tauri 更新插件），这里只经本机桥（`app_desktop`）转达用户的点击、取回进度。下载哪个版本
+//! 沿用上面的检查结果，所以通道规则与检查更新完全相同；包的地址由 `package` 按版本号拼出，在这个版本自己的 Release 下面，
+//! 不依赖 GitHub 把哪个 Release 标成 Latest。
 use crate::{
     app_paths::{app_support, user_home},
     http_json::Json,
@@ -27,6 +32,8 @@ const REPOSITORY: &str = "shio-vinyl/illustash";
 /// 请求不跟随重定向，而仓库改名或转移后 ID 不变，已经发出去的版本仍查得到。仓库删掉重建后 ID 会变。
 const REPOSITORY_ID: u64 = 1_407_079_068;
 const API: &str = "https://api.github.com/";
+/// Release 的资源文件从这里下载（#279）；测试时和 API 一样换成 ILLUSTASH_UPDATE_BASE。
+const DOWNLOADS: &str = "https://github.com/";
 /// 本次启动（这个宿主进程）是否已做过自动检查；每个打开的页面都会问，只有一个去检查。
 static LAUNCH_CHECKED: AtomicBool = AtomicBool::new(false);
 /// App 一直开着时，自动检查每隔这么多秒重复一次。
@@ -176,6 +183,8 @@ struct Place<'a> {
     state: PathBuf,
     now: chrono::DateTime<chrono::FixedOffset>,
     launch: &'a AtomicBool,
+    /// 对外壳本机桥的一次请求（方法、路径）：App 里是 `app_desktop`，测试里是替身。
+    desktop: &'a dyn Fn(&str, &str) -> Result<Json>,
 }
 impl Place<'static> {
     fn app() -> Result<Self> {
@@ -185,8 +194,14 @@ impl Place<'static> {
             state: support.join("updates.json"),
             now: chrono::Local::now().fixed_offset(),
             launch: &LAUNCH_CHECKED,
+            desktop: &desktop,
         })
     }
+}
+
+/// 经本机桥问外壳（#279）。不在桌面 App 里（命令行的 `http`、浏览器宿主）时没有外壳可问。
+fn desktop(method: &str, route: &str) -> Result<Json> {
+    crate::app_desktop::request(method, route, 5)
 }
 impl Place<'_> {
     /// `Some(true)` 自动，`Some(false)` 只手动，`None` 从没问过。
@@ -230,7 +245,13 @@ impl Place<'_> {
             ("due", self.due().into()),
             // 检查时请求的地址；它答复 404 时的回退见 `releases`。
             ("address", by_id(API).into()),
+            ("install", self.install()),
         ])
+    }
+    /// 外壳的「下载并重启」状态（#279，desktop/src/updater.rs 的 `status`）；不在桌面 App 里，或外壳没有回答时为 null，
+    /// 页面只提供「打开下载页」。
+    fn install(&self) -> Json {
+        (self.desktop)("GET", "/platform/update/status").unwrap_or(Json::Scalar(Value::Null))
     }
     fn record(&self, result: std::result::Result<Option<Version>, String>) -> Result<()> {
         let at = self.now.to_rfc3339_opts(chrono::SecondsFormat::Secs, false);
@@ -252,7 +273,17 @@ impl Place<'_> {
 
 /// API 根地址：GitHub，或由 ILLUSTASH_UPDATE_BASE 指定的本地测试服务器（只限本机上的普通 HTTP）。
 fn base() -> std::result::Result<String, String> {
-    let Ok(base) = std::env::var("ILLUSTASH_UPDATE_BASE") else { return Ok(API.into()) };
+    test_base().unwrap_or_else(|| Ok(API.into()))
+}
+/// 资源文件的根地址（#279）：GitHub 的网页站，或同一个本地测试服务器。
+fn downloads() -> std::result::Result<String, String> {
+    test_base().unwrap_or_else(|| Ok(DOWNLOADS.into()))
+}
+fn test_base() -> Option<std::result::Result<String, String>> {
+    let base = std::env::var("ILLUSTASH_UPDATE_BASE").ok()?;
+    Some(local(base))
+}
+fn local(base: String) -> std::result::Result<String, String> {
     let u = url::Url::parse(&base).map_err(|_| "合成服务地址无效".to_string())?;
     if u.scheme() != "http"
         || !matches!(u.host_str(), Some("127.0.0.1" | "localhost" | "[::1]"))
@@ -352,6 +383,30 @@ fn fetch(current: &Version) -> std::result::Result<Option<Version>, String> {
     Ok(newest(&releases, current))
 }
 
+/// 外壳下载 `version` 的更新包时用的两个地址（#279）：`manifest` 是这个版本的 Release 里的 latest.json，
+/// latest.json 里给本平台的包必须在 `prefix` 下面，也就是同一个 Release 里。地址在这里按版本号拼出，不取自任何回复。
+#[derive(Debug, PartialEq, Eq)]
+pub struct Package {
+    pub manifest: String,
+    pub prefix: String,
+}
+
+/// 外壳收到的版本号要能安装才给地址：合法的 SemVer、比本构建新、通道规则与 `newest` 相同（预发布版只给预发布版本的
+/// 安装）。页面只能请求检查查到的那个版本（`post`），这里再核对一遍，不信任经过本机桥的参数。
+pub fn package(version: &str) -> std::result::Result<Package, String> {
+    let version = installable(version, &current())?;
+    Ok(package_at(&downloads()?, &version))
+}
+fn installable(version: &str, current: &Version) -> std::result::Result<Version, String> {
+    Version::parse(version)
+        .filter(|v| v > current && (!v.prerelease() || current.prerelease()))
+        .ok_or_else(|| "这个版本不能安装".to_owned())
+}
+fn package_at(base: &str, version: &Version) -> Package {
+    let prefix = format!("{base}{REPOSITORY}/releases/download/v{version}/");
+    Package { manifest: format!("{prefix}latest.json"), prefix }
+}
+
 /// GET /api/updates.
 pub(crate) fn info() -> Result<Json> {
     Ok(Place::app()?.info(&current()))
@@ -361,7 +416,9 @@ pub(crate) fn info() -> Result<Json> {
 /// - `{"action": "auto", "allow": true|false}` 记下选择（首次引导的提问或设置里的开关）；
 /// - `{"action": "check"}` 立即检查（用户的点击）；
 /// - `{"action": "check", "auto": true}` 只在已允许且本次启动还没检查过时检查，否则只回复；
-/// - `{"action": "dismiss"}` 不再提示已知的最新 Release（有更新的版本时会再次提示）。
+/// - `{"action": "dismiss"}` 不再提示已知的最新 Release（有更新的版本时会再次提示）；
+/// - `{"action": "download"}` 让外壳下载并校验检查查到的那个新版本（#279），`{"action": "cancel"}` 取消下载，
+///   `{"action": "install"}` 安装下好的版本并重启。外壳不在时这三个返回错误。
 pub(crate) fn post(body: &Json) -> Result<Json> {
     post_at(&Place::app()?, body, &current(), fetch)
 }
@@ -382,7 +439,7 @@ fn post_at(
     let allowed: &[&str] = match get("action").map(Json::text) {
         Some("auto") => &["action", "allow"],
         Some("check") => &["action", "auto"],
-        Some("dismiss") => &["action"],
+        Some("dismiss" | "download" | "cancel" | "install") => &["action"],
         _ => return Err(Error::Invalid("未知操作".into())),
     };
     if fields.iter().any(|(key, _)| !allowed.contains(&key.as_str())) {
@@ -399,6 +456,21 @@ fn post_at(
             if flag("auto")? != Some(true) || place.claim() {
                 place.record(fetch(current))?;
             }
+        }
+        Some("download") => {
+            // 只下载检查查到、比本构建新的那个版本；外壳收到后按 `package` 再核对一遍。
+            let state = read(&place.state);
+            let latest = state.get("latest").and_then(Value::as_str).and_then(Version::parse);
+            let Some(latest) = latest.filter(|latest| latest > current) else {
+                return Err(Error::invalid("没有可以下载的新版本"));
+            };
+            (place.desktop)("POST", &format!("/platform/update/download?version={latest}"))?;
+        }
+        Some("cancel") => {
+            (place.desktop)("POST", "/platform/update/cancel")?;
+        }
+        Some("install") => {
+            (place.desktop)("POST", "/platform/update/install")?;
         }
         _ => {
             let latest = read(&place.state).get("latest").cloned().unwrap_or(Value::Null);
@@ -434,11 +506,21 @@ mod tests {
         }
         /// `now` 时刻的 App，处在自动检查状态为 `launch` 的那次启动里。
         fn at<'a>(&self, now: &str, launch: &'a AtomicBool) -> Place<'a> {
+            self.with(now, launch, &no_desktop)
+        }
+        /// 同上，外壳由 `desktop` 回答。
+        fn with<'a>(
+            &self,
+            now: &str,
+            launch: &'a AtomicBool,
+            desktop: &'a dyn Fn(&str, &str) -> Result<Json>,
+        ) -> Place<'a> {
             Place {
                 preferences: self.0.join("preferences.json"),
                 state: self.0.join("updates.json"),
                 now: chrono::DateTime::parse_from_rfc3339(now).unwrap(),
                 launch,
+                desktop,
             }
         }
     }
@@ -446,6 +528,10 @@ mod tests {
         fn drop(&mut self) {
             let _ = fs::remove_dir_all(&self.0);
         }
+    }
+    /// 不在桌面 App 里：没有外壳可问。
+    fn no_desktop(_: &str, _: &str) -> Result<Json> {
+        Err(Error::invalid("桌面平台服务不可用"))
     }
     fn body(value: Value) -> Json {
         crate::http_json::parse_request(&value.to_string()).unwrap()
@@ -660,7 +746,9 @@ mod tests {
         let place = fixture.at("2026-10-18T09:00:00+08:00", &launch);
         for bad in [
             json!({}),
-            json!({"action": "install"}),
+            json!({"action": "upgrade"}),
+            json!({"action": "install", "version": "0.2.0"}),
+            json!({"action": "download", "url": "https://example.com/"}),
             json!({"action": "auto"}),
             json!({"action": "auto", "allow": "yes"}),
             json!({"action": "check", "auto": 1}),
@@ -673,5 +761,76 @@ mod tests {
             assert!(matches!(result, Err(Error::Invalid(_))), "{bad}");
         }
         assert!(!place.preferences.exists() && !place.state.exists());
+    }
+
+    #[test]
+    fn packages_are_looked_up_in_the_release_of_that_version() {
+        let package = package_at(DOWNLOADS, &v("0.2.0-beta.1"));
+        assert_eq!(
+            package,
+            Package {
+                manifest: "https://github.com/shio-vinyl/illustash/releases/download/v0.2.0-beta.1/latest.json".into(),
+                prefix: "https://github.com/shio-vinyl/illustash/releases/download/v0.2.0-beta.1/".into(),
+            }
+        );
+        assert_eq!(
+            package_at("http://127.0.0.1:8807/", &v("0.2.0")).manifest,
+            "http://127.0.0.1:8807/shio-vinyl/illustash/releases/download/v0.2.0/latest.json"
+        );
+        // 只装更新的版本；正式版不装预发布版，和检查更新的通道规则一样。
+        assert_eq!(installable("0.2.0", &v("0.1.0")), Ok(v("0.2.0")));
+        assert_eq!(installable("0.2.0-beta.1", &v("0.2.0-alpha")), Ok(v("0.2.0-beta.1")));
+        for (bad, current) in [
+            ("0.1.0", "0.1.0"),
+            ("0.0.9", "0.1.0"),
+            ("0.2.0-beta.1", "0.1.0"),
+            ("v0.2.0", "0.1.0"),
+            ("0.2.0/../../evil", "0.1.0"),
+            ("", "0.1.0"),
+        ] {
+            assert!(installable(bad, &v(current)).is_err(), "{bad} over {current}");
+        }
+        // 测试服务器只能是本机的普通 HTTP 端口。
+        assert!(local("http://127.0.0.1:8807/".into()).is_ok());
+        for bad in ["https://127.0.0.1:8807/", "http://example.com:80/", "http://127.0.0.1/", "http://127.0.0.1:1/x/"] {
+            assert!(local(bad.into()).is_err(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn download_install_and_cancel_go_to_the_shell_and_only_for_the_newer_release() {
+        let fixture = Fixture::new();
+        let launch = AtomicBool::new(false);
+        let asked = RefCell::new(Vec::<(String, String)>::new());
+        let desktop = |method: &str, route: &str| {
+            asked.borrow_mut().push((method.into(), route.into()));
+            Ok(crate::http_json::parse_request(r#"{"available": true, "stage": "idle"}"#).unwrap())
+        };
+        let place = fixture.with("2026-11-14T09:00:00+08:00", &launch, &desktop);
+        // 还没检查过：没有可下载的版本，也不去问外壳要不要下载。
+        let result = post_at(&place, &body(json!({"action": "download"})), &v("0.1.0"), |_| unreachable!());
+        assert!(matches!(result, Err(Error::Invalid(_))));
+        assert!(!asked.borrow().iter().any(|(method, _)| method == "POST"));
+        post_at(&place, &body(json!({"action": "check"})), &v("0.1.0"), |_| Ok(Some(v("0.2.0")))).unwrap();
+        let info = post_at(&place, &body(json!({"action": "download"})), &v("0.1.0"), |_| unreachable!()).unwrap();
+        // 状态里带着外壳的回答。
+        assert_eq!(field(&info, "install"), json!({"available": true, "stage": "idle"}));
+        post_at(&place, &body(json!({"action": "cancel"})), &v("0.1.0"), |_| unreachable!()).unwrap();
+        post_at(&place, &body(json!({"action": "install"})), &v("0.1.0"), |_| unreachable!()).unwrap();
+        let posts: Vec<_> = asked.borrow().iter().filter(|(m, _)| m == "POST").map(|(_, r)| r.clone()).collect();
+        assert_eq!(
+            posts,
+            ["/platform/update/download?version=0.2.0", "/platform/update/cancel", "/platform/update/install"]
+        );
+        // 已经装上了这个版本：不再下载。
+        let result = post_at(&place, &body(json!({"action": "download"})), &v("0.2.0"), |_| unreachable!());
+        assert!(matches!(result, Err(Error::Invalid(_))));
+        // 不在桌面 App 里：状态里没有 install，三个操作都报错。
+        let alone = fixture.at("2026-11-14T09:00:00+08:00", &launch);
+        assert_eq!(field(&alone.info(&v("0.1.0")), "install"), Value::Null);
+        for action in ["download", "cancel", "install"] {
+            let result = post_at(&alone, &body(json!({"action": action})), &v("0.1.0"), |_| unreachable!());
+            assert!(matches!(result, Err(Error::Invalid(_))), "{action}");
+        }
     }
 }

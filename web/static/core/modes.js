@@ -47,6 +47,10 @@ export function viewerTarget(s = state) {
   return s.focused ? s.items.findIndex(x => x?.uuid === s.focused) : 0;
 }
 
+// 关掉大图时详情栏换到哪一张（#399）：详情栏开着、大图里最后看的不是它时，换成大图那张，这样「刚才看的那张」和
+// 「快捷键作用的那张」（详情栏 ＞ 光标）、Space 再打开的那张（光标）是同一张；不用换时为 null。
+export const detailAfterViewer = (s = state) => s.focused && s.viewerItem?.uuid && s.viewerItem.uuid !== s.focused ? s.viewerItem.uuid : null;
+
 // 单图／选择快捷键在这一页做什么。key：'remove'（⌫、Delete）、'c'、'a'、't'、'g'、'x'、's'。
 // ctx：view 页面注册表里本页的条目（core/pages.js 的 viewOf），char 是否在角色页，n 作用于几张选中的图
 // （keySelection），item 当前图（没有选中时用，决定 ⌫ 有没有可移出的角色）。
@@ -58,14 +62,20 @@ export function keyAction(key, {view, char = false, n = 0, item = null}) {
     case 'remove':
       if (n) return char ? {bar: 'remove'} : view.bar === 'default' ? {bar: 'notlib'} : null;
       return char || item?.memberships?.length ? {single: 'remove'} : null;
-    case 'c': return n ? {bar: char ? 'swap' : 'assign'} : {single: char ? 'swap' : 'also'};
+    // C＝换成、A＝追加（用户 2026-11-14 定，#399）：图上已有角色时 C 换掉它，还没有角色时 C、A 都是设为角色。
+    // 单图的「换成」在 singleAction 里看这张图有没有角色，没有就退成设为。有选中时：角色页换掉本页的角色；
+    // 默认选择栏（图库、重复、相似组）换掉选中的图共同的角色（replace，没有角色时同样退成设为）；未识别一类的图
+    // 还没有角色，C 是设为。
+    case 'c': return n ? {bar: char ? 'swap' : view.bar === 'default' ? 'replace' : 'assign'} : {single: 'swap'};
     case 'a': return n ? {bar: char ? 'also' : 'assign'} : {single: 'also'};
     case 't': return char && n ? {bar: 'variant'} : null;
     case 'g': return n ? {bar: 'tag'} : {single: 'tag'};
     case 'x': { const act = view.bar === 'excluded' ? 'include' : 'exclude'; return n ? {bar: act} : {single: act}; }
+    // S：未识别一类是跳过；已跳过页是恢复到未识别，和已排除页的 X 恢复收录对称（#399）。
     case 's':
+      if (view.bar === 'skipped') return n ? {bar: 'resume'} : {single: 'resume'};
       if (view.bar !== 'unmatched') return null;
-      return n ? {bar: 'skip'} : view.pool === 'unmatched' ? {single: 'skip'} : null;
+      return n ? {bar: 'skip'} : view.skip ? {single: 'skip'} : null;
     default: return null;
   }
 }
@@ -86,10 +96,10 @@ export const SHORTCUTS = [
   {keys: '↵', codes: ['Enter'], does: () => t('整理页或选择模式下切换光标处那张的选中，浏览页打开它的详情')},
   {keys: 'Space', codes: [' '], does: () => t('打开或关闭大图')},
   {keys: '⌫', codes: ['Backspace', 'Delete'], does: () => t('不是这个角色：有选中时作用于选中的图（角色页移出，图库、重复等页选「不是…」），没有选中时移除当前这张的角色')},
-  {keys: 'C', codes: ['c'], does: () => t('角色页：换成别的角色；其余页：选中的图设为角色，没有选中时给当前这张加角色')},
-  {keys: 'A', codes: ['a'], does: () => t('给当前这张追加角色；不在角色页、有选中时同 C')},
+  {keys: 'C', codes: ['c'], does: () => t('换成别的角色：图上已有角色时换掉它（角色页换掉本页的角色），还没有角色时设为角色')},
+  {keys: 'A', codes: ['a'], does: () => t('追加角色，原有的角色保留')},
   {keys: 'T', codes: ['t'], does: () => t('子标签（角色页，选中图片时）')},
-  {keys: 'S', codes: ['s'], does: () => t('跳过（「未识别」页和它的分组；没有选中时只在「全部未识别」）')},
+  {keys: 'S', codes: ['s'], does: () => t('跳过（「全部未识别」和各组；没有选中时跳过当前这张）；在「已跳过」页为恢复到未识别')},
   {keys: 'X', codes: ['x'], does: () => t('排除非插画内容（截图、照片等）；在「已排除」页为恢复')},
   {keys: 'G', codes: ['g'], does: () => t('添加或移除自定义标签（与自动标签分开保存）')},
   {keys: '1–9', codes: ['1-9'], does: () => t('选详情栏或大图里「也可能是」的第几项；按住 ⌥（Alt）改为追加')},

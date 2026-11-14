@@ -5,6 +5,7 @@
 import {t, tb, said, I18N} from './i18n.js';
 import {listeners} from './events.js';
 export const session = {token: '', stale: false};
+export let lastDiagnostic = null;
 export const STALE = t('图库已在其他窗口切换或重新打开，请重新载入页面');
 const stopped = listeners(), written = listeners();
 // fn() 在页面停下时运行一次。每个都返回一个再把这个监听去掉的函数。
@@ -32,7 +33,13 @@ export async function api(path, options = {}) {
   if (response.status === 403 && said(result.error, '会话已过期，请刷新页面')) staleSession();
   if (session.stale) throw new Error(STALE);
   // 后端的消息，用页面的语言显示；e.said 保留发来时的原文，供 said 比对。
-  if (!response.ok) throw Object.assign(new Error(tb(result.error) || t('请求失败')), {said: result.error});
+  if (!response.ok) {
+    let d = null;
+    try { d = JSON.parse(response.headers?.get('X-Illustash-Diagnostic') || 'null'); } catch {}
+    if (d?.id) lastDiagnostic = d;
+    const note = d?.id ? ' · ' + t('错误编号：{id}', {id: d.id}) + (d.stored ? '' : ' · ' + t('诊断记录未保存')) : '';
+    throw Object.assign(new Error((tb(result.error) || t('请求失败')) + note), {said: result.error, diagnostic: d});
+  }
   return result;
 }
 export async function post(path, body) {

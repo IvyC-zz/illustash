@@ -12,6 +12,7 @@ tools/check_architecture.py 对 crate 依赖方向的检查。规则（说明见
   6 page-name            页面名只能在 core/pages.js（页面注册表，#342）里比较（硬规则，没有基线）
   7 state-writer         state 字段只能由 core/state.js 组标题写明的写入者文件赋值（#353；硬规则，没有基线）
   8 css-literal          app.css 不得新增写死的字号、圆角、gap/padding、z-index 和颜色，改用顶部的令牌（#349）
+  9 ime-composing        每个 keydown/keyup/keypress 处理函数先问 core/keys.js 的 composing(e)；别处不得直接读 isComposing / keyCode（#388）
 
 基线（tools/frontend_baseline.json）按「文件 + 内容特征」登记（导入边、字段名、每个文件的数量），不按行号，
 所以文件里别处的改动不会让它失效。基线只能缩小：`--shrink` 只调低、不新增；`--base-ref REF` 在基线比 REF
@@ -24,6 +25,9 @@ tools/check_all.sh 两个都带上。新规则就是 new_rules() 里多一个 Ru
 不受影响。令牌定义处（:root 与 :root[data-theme=dark] 里的 `--名:值`）不查；按 #339 的登记，margin 和不在档位上的
 18px 以上 padding、gap 不查；z-index 的 0、长度的 0 不算。颜色查十六进制、rgb()/hsl() 等颜色函数（通道里用了 var() 的
 不算，如 `rgba(var(--sh),.1)`），颜色名只在颜色类属性里查。别处声明的自定义属性（`.x{--gutter:26px}`）只查颜色。
+
+规则 9 只认「处理函数里出现了 composing(」，认不出它是不是真的放在最前面、是不是对着同一个事件；处理函数交给变量、
+再从别处传进来（`addEventListener('keydown', handlers[kind])`）时找不到函数体，按没有调用算。
 
 已知盲区（文本级检查做不到）：规则 2 认不出 `state[key]`、`Object.assign(state, …)` 和解构写法，名为 state
 的函数参数会被误报；正则字面量与除号靠前一个字符判断，`if (ok) /re/.test(s)` 这种写法会被当成除号。规则 8 不查
@@ -265,6 +269,13 @@ def new_rules():
              f'按 #339 的登记，margin 和不在档位上的 {LARGE_SPACING}px 以上 padding、gap 不检查。现有的字面量已冻结为基线，不得新增。',
              '按每处箭头后的提示改用令牌；没有对应档位的，取最近的一档，确需新档位先在 Issue 里问（新档位加在 app.css 顶部的令牌块，'
              '并改 docs/WEB_V2.md 那一节），不要往基线里添加。改好存量的一处后运行 `python tools/check_frontend.py --shrink`。'),
+        Rule('ime-composing', '9', '键盘处理函数没有先判断输入法是否在组字，或者绕开 core/keys.js 直接读 isComposing / keyCode',
+             '输入法组字时的回车、方向键、数字键、Esc 是在选词、挑候选、取消组字，不是页面的操作（#388）。WebKit 里结束组字的那次 keydown 的 '
+             'isComposing 已经是 false、keyCode 仍是 229，只判断 isComposing 不够。所以每个 keydown / keyup / keypress 处理函数都要先用 '
+             'core/keys.js 的 composing(e) 判断，判断只在那一处写。没有基线。',
+             "在处理函数开头加 `if (composing(e)) return;`（`import {composing} from '../core/keys.js'`），不要自己读 e.isComposing 或 e.keyCode；"
+             '处理函数交给变量再传进来时，改成直接写在 addEventListener 里，或让函数体里出现 composing(。见 docs/WEB_V2.md「输入框的键盘处理」。',
+             baselined=False),
     ]}
 
 
@@ -273,6 +284,62 @@ LISTENER_RE = re.compile(r'''\b(?:document(?:\s*\.\s*(?:body|documentElement))?|
 DIALOG_RE = re.compile(r'''createElement\s*\(\s*(['"`])dialog\1\s*\)|<dialog\b''')
 # 页面名判断：`page === '…'`、`route.page !== '…'`，以及 `[…].includes(route.page)`。
 PAGE_NAME_RE = re.compile(r'''(?:\b(?:route|r)\.page|\bpage)\s*[!=]==\s*['"`]|\.includes\(\s*(?:state\.)?(?:route|r)\.page\s*\)''')
+# 规则 9：键盘事件的处理函数。`el.addEventListener('keydown', fn` 和 `el.onkeydown = fn`，fn 写在原地，或是同一个文件里的具名函数。
+KEY_HANDLER_RE = re.compile(r'''\.\s*addEventListener\s*\(\s*(['"`])(?:keydown|keyup|keypress)\1\s*,\s*|\.\s*on(?:keydown|keyup|keypress)\s*=(?!=)\s*''')
+COMPOSING_CALL_RE = re.compile(r'(?<![\w$.])composing\s*\(')
+RAW_COMPOSING_RE = re.compile(r'\.\s*(?:isComposing|keyCode)\b')
+COMPOSING_HOME = 'core/keys.js'
+
+
+def _expression_end(bare, pos):
+    """从 pos 起的一个表达式（箭头函数、function 表达式或名字）结束的位置：括号配平，遇到更外层的 `)`、顶层的 `,` 或 `;` 为止。"""
+    depth, i = 0, pos
+    while i < len(bare):
+        c = bare[i]
+        if c in '([{':
+            depth += 1
+        elif c in ')]}':
+            if depth == 0:
+                break
+            depth -= 1
+        elif c in ',;' and depth == 0:
+            break
+        i += 1
+    return i
+
+
+def _function_end(bare, pos):
+    """`function 名(` 之后：返回函数体花括号配平后的位置。"""
+    i = bare.index('{', pos)
+    depth = 0
+    while i < len(bare):
+        depth += {'{': 1, '}': -1}.get(bare[i], 0)
+        i += 1
+        if depth == 0:
+            break
+    return i
+
+
+def key_handlers(source):
+    """这个文件里每个键盘处理函数：[(行号, 函数体文字)]。写成名字的，取同一文件里 `function 名(` 或 `const 名 =` 的定义；找不到时函数体是空串。"""
+    found = []
+    for m in KEY_HANDLER_RE.finditer(source.code):
+        end = _expression_end(source.bare, m.end())
+        body = source.code[m.end():end]
+        name = re.fullmatch(r'\s*([A-Za-z_$][\w$]*)\s*', body)
+        if name:
+            n = re.escape(name.group(1))
+            d = re.search(r'\bfunction\s+%s\s*\(|\b(?:const|let|var)\s+%s\s*=(?!=)' % (n, n), source.bare)
+            if not d:
+                body = ''
+            elif d.group(0).startswith('function'):
+                body = source.code[d.end():_function_end(source.bare, d.end())]
+            else:
+                body = source.code[d.end():_expression_end(source.bare, d.end())]
+        found.append((source.line_of(m.start()), body))
+    return found
+
+
 STATE_RE = re.compile(r'(?<![\w$.])state\s*\.\s*([A-Za-z_$][\w$]*)')
 
 
@@ -658,6 +725,14 @@ def run_rules(sources, css=None):
         for m in DIALOG_RE.finditer(s.code):
             line = s.line_of(m.start())
             rules['dialog-element'].add(p, f'{STATIC}/{p}:{line}: {s.raw_line(line)[:110]}')
+        # 规则 9
+        if p != COMPOSING_HOME:
+            for m in RAW_COMPOSING_RE.finditer(s.bare):
+                line = s.line_of(m.start())
+                rules['ime-composing'].add(f'{p}: 直接读 {m.group(0).lstrip(". ")}', f'{STATIC}/{p}:{line}: {s.raw_line(line)[:110]}')
+            for line, body in key_handlers(s):
+                if not COMPOSING_CALL_RE.search(body):
+                    rules['ime-composing'].add(f'{p}: 键盘处理函数没有调用 composing()', f'{STATIC}/{p}:{line}: {s.raw_line(line)[:110]}')
         if p != 'core/pages.js':
             for m in PAGE_NAME_RE.finditer(s.code):
                 line = s.line_of(m.start())

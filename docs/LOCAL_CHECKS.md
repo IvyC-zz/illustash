@@ -26,6 +26,34 @@
 
 全量耗时包含依赖准备、fmt/clippy、测试编译、Rust/JS/Python 执行、release 构建和空 PATH 重放；Python 汇总及 Rust 重放各只是其中一部分。比较时写明已测 head、平台、进程数、数据口径和缓存是否已存在，分别列出编译与执行时间。当前 Rust 重放缓存每个场景的路径替换规则并预筛无目标字符串的单元格；`native/terms/Cargo.toml` 的 dev profile 优化第三方依赖，自有 core/platform 和修改过的 tiny_http 保持未优化。依赖重编的单次总时长、测试执行时间与固定验收缓存复用是不同口径，不能合成一个提速数字。
 
+## dev 构建的调试信息（#362）
+
+2026-11-14 起，5 个 Cargo 项目（`crates/core`、`crates/platform`、`crates/iqdb`、`native/terms`、`desktop`）的 `Cargo.toml` 各自写了同一套 dev profile：自己的 crate 用 `debug = "line-tables-only"`（只带行号表），第三方依赖用 `debug = false`。`cargo test` 用的 test profile 继承 dev。release 的设置没动，安装包内容不变。
+
+- **范围**：自己的 crate 指项目本身和不在本项目 workspace 里的 path 依赖（`illustash-core`、`illustash-platform`，desktop 里还有 `illustash-terms`）。后者会落进 `[profile.dev.package."*"]`，所以在每个项目里单列一条，否则它们也拿不到行号表。vendored 的 `tiny_http` 当第三方处理。
+- **回溯**：panic 和测试失败的回溯里，自己的代码仍有 `文件:行:列`，标准库的栈帧也有；第三方依赖的栈帧没有文件名和行号，只有函数名。要用调试器或需要变量信息时，临时把对应 `Cargo.toml` 里的 `debug` 几行删掉（用完 `git checkout -- <Cargo.toml>`）。Cargo 输出的 `Finished `test` profile [unoptimized + debuginfo]` 是固定的 profile 名称，不反映 `debug` 的取值。
+- **将来合成 workspace（#311）**：profile 只能写在根 `Cargo.toml`，到时把这几段并到根上。
+- **三种设置**：现状（默认，完整调试信息）、甲（上面这套，采用）、乙（全部 `line-tables-only`）。选甲的理由：冷编译比乙更快、体积更小，增量编译在两个平台上都不比乙慢；乙多出来的只是第三方依赖栈帧里的文件名和行号，开发会话用不到。
+
+测量口径（构建的是 `cargo test --locked --no-run`，每个设置用一个新的临时 `CARGO_TARGET_DIR`，量完删除；基线 main `0b41d543`，三种设置在同一提交上只改 `Cargo.toml`；设置是否生效用 `cargo -v` 里每个 rustc 的 `-C debuginfo=` 核对过；没有用 sccache）：
+
+| | 现状 | 甲 | 乙 |
+|---|---|---|---|
+| **macOS** 冷编译 `native/terms` | 97.7 秒 | 81.1 秒（−17%） | 84.5 秒（−13%） |
+| macOS 冷编译 `desktop` | 69.5 秒 | 59.3 秒（−15%） | 64.9 秒（−7%） |
+| macOS 增量（改 terms 一个文件，含链接） | 7.7 秒 | 7.2 秒 | 7.3 秒 |
+| macOS `target` 大小 terms | 2.08 GiB | 1.49 GiB（−28%） | 1.66 GiB（−21%） |
+| macOS `target` 大小 desktop | 2.04 GiB | 1.43 GiB（−30%） | 1.68 GiB（−17%） |
+| **Windows** 冷编译 `native/terms` | 239.1 秒 | 194.3 秒（−19%） | 206.5 秒（−14%） |
+| Windows 冷编译 `desktop` | 124.7 秒 | 106.5 秒（−15%） | 110.0 秒（−12%） |
+| Windows 增量（改 terms 一个文件，含链接） | 20.1 秒 | 16.2 秒（−19%） | 16.8 秒（−16%） |
+| Windows `target` 大小 terms | 4.61 GiB（其中 PDB 1.91） | 2.20 GiB（PDB 0.57，−52%） | 2.49 GiB（PDB 0.78，−46%） |
+| Windows `target` 大小 desktop | 3.45 GiB（其中 PDB 0.64） | 2.17 GiB（PDB 0.33，−37%） | 2.32 GiB（PDB 0.38，−33%） |
+
+- macOS：Apple M2 8 核、16 GB，Rust 1.94.1，`CARGO_BUILD_JOBS` 取默认（8），经 `collab_run.py timing` 开跑，开跑时整机 CPU 最近 30 秒平均占用 7%～20%（门槛 20%）。冷编译各量 3 轮，每轮换一次三种设置的顺序，表里是中位数（范围：terms 现状 91.8～103.2、甲 79.3～91.6、乙 82.5～120.9 秒，乙的最大值是一次离群）。增量是在冷编译之后，往 `native/terms/src/app_names.rs` 末尾各追加一个函数、连续三次，三轮共 9 次的中位数，范围 6.8～8.6 秒，三种设置分不开。macOS 默认把调试信息留在 `.o` 里不合并（`split-debuginfo = unpacked`），链接本来就轻，所以增量没有差别，收益在 rustc 的生成时间和磁盘上。体积是冷编译后量的，增量三次之后再多约 0.36 GiB（各设置相近）。
+- Windows：验收机 Intel i7-11800H 8 核 16 线程、32 GB，MSVC，Rust 1.99.0，`CARGO_BUILD_JOBS=4`（与验收入口一致），经 `collab_run.py run --slot windows` 在常驻检出的同一份 git 对象上另开一次性检出构建，不用 sccache，每个设置只量 1 次。同一台机器在更早的 main（`c36dfbb`）上量过一次现状和甲，冷编译 terms 为 231.1 和 187.0 秒、增量 22.8 和 17.1 秒，冷编译与本次相差约 4%，趋势相同。MSVC 链接要生成 PDB，完整调试信息下 PDB 占 terms 的 `target` 约 40%，所以体积和增量的差别比 macOS 大。
+- 单次的冷编译数字受机器状态影响，别的会话在编译时会拉高；差别在 10% 以内的不要当结论。
+
 ## 本机资源：排队、计时与后台优先级
 
 规则见 [AGENTS.md](../AGENTS.md) 2026-10-12、2026-10-18、2026-10-19 的条目，这里写做法。工具是 agent-collab skill 的 `scripts/collab_run.py`（路径按所在 harness 的 skill 安装位置），槽位是本机文件锁，没有常驻进程。
@@ -68,7 +96,7 @@
 | 事务、证据、人工历史、投影和业务规则 | `crates/core/src/` 的测试模块、`crates/core/tests/` | 直接调用核心，多数用内存 SQLite；适合规则的边界组合 |
 | 文件、凭据、进程、系统数学库等平台能力 | `crates/platform/src/` 的测试模块、`crates/platform/tests/` | 以真实平台边界为准；其他平台的证据单列 |
 | 宿主任务状态、取消、切库与提交顺序 | `native/terms/src/` 的测试模块；`tests/test_native_lifecycle.py`、`test_native_sync.py`、`test_native_research.py`、`test_native_provenance.py` 等 | 模块内测试可控制实际任务阶段；HTTP 测试验证调用方看到的状态和结果 |
-| 旧行为与旧图库兼容 | `native/terms/tests/baseline.rs`、`contracts.rs`、`v8_upgrade.rs`，比较规则在 `tests/common/baseline.rs`；`tests/fixed_expectations.py`、`test_native_library_upgrade.py` | 使用提交的录制或历史合成包；期望独立于当前候选输出；对照基准见下文 |
+| 旧行为与旧图库兼容 | `native/terms/tests/baseline.rs`、`contracts.rs`、`it/v8_upgrade.rs`，比较规则在 `tests/common/baseline.rs`；`tests/fixed_expectations.py`、`test_native_library_upgrade.py` | 使用提交的录制或历史合成包；期望独立于当前候选输出；对照基准见下文 |
 | 数值、图像及计算发布 | `tests/test_native_*_compute.py`、`test_native_*_production.py` | 显式指定候选 examples/worker；固定数值由 `*_expectations.py` 读取，Windows 差异另有覆盖文件 |
 | 界面、资源装配与检查工具 | `tests/*.test.cjs`、`test_pixiv_poll.js`、`test_packaging*.py`、`test_local_acceptance.py`、`test_architecture.py` | JS 与合成工具测试不等于 GUI 或完整安装验收 |
 
@@ -187,7 +215,7 @@ PR 应明确区分“当前 head 上完整执行退出 0”和“当前候选仅
 
 2026-11-12 起（#240），Windows 验收机上的定向检查和完整 Windows 检查都在同一个常驻检出里增量编译，不再每次新建目录冷编译、跑完删掉。验收机经本机的 SSH 别名访问，主机名、IP 和 SSH 配置不写进仓库。
 
-**布局**：验收机上的 `D:\illustash-build\persistent\`。`src` 是 git 检出（本地分支 `win-acceptance`）；`sccache` 是编译缓存；`runs\<run-id>\` 放每次的步骤日志、`status.txt` 和 sccache 统计；`tools\` 放入口脚本（`run.cmd`、`run.ps1`、`pyrun.py`、`clean.ps1`）和 sccache。入口脚本和本机这一侧的驱动脚本 `win_run.sh` 都不进仓库，因为里面有 SSH 别名。
+**布局**：验收机上的 `D:\illustash-build\persistent`。`src` 是 git 检出（本地分支 `win-acceptance`）；`sccache` 是编译缓存；`runs\<run-id>` 放每次的步骤日志、`status.txt` 和 sccache 统计；`tools` 放入口脚本（`run.cmd`、`run.ps1`、`pyrun.py`、`clean.ps1`）和 sccache。入口脚本和本机这一侧的驱动脚本 `win_run.sh` 都不进仓库，因为里面有 SSH 别名。
 
 **一次运行**：
 - 仓库是私有的，验收机没有 GitHub 凭据。本机打一个以验收机当前 HEAD 为基的增量 git bundle，经 scp 送过去。验收机 `git fetch` 以后 checkout 到 `win-acceptance`，再 `git clean -ffdx`，只保留 5 个 Cargo 项目的 `target`。各项目用仓库内默认的 target，不设 `CARGO_TARGET_DIR`。不用 detached HEAD，原因见 #327。

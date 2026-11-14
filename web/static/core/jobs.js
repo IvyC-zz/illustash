@@ -2,8 +2,9 @@
 // 导入。每个任务怎样轮询、状态怎样用文字说、启动或取消时发什么；不碰 DOM。它们的状态仍在 core/state.js（sync、
 // syncHistory、syncDamaged、index、names、provenance、importTask），由这里写入；别的模块要换掉 index、names 时调用
 // 这里的 setIndex、setNames（#344）。相似图片的状态随 settings 一起来，settings 由 core/settings.js 写。任务运行期间轮询会自己重新排上；重叠的轮询绝不会让状态倒退（#34）。
+import {diagnosticLine} from './diagnostics.js';
 import {t, tb} from './i18n.js';
-import {number, stamp} from './format.js';
+import {isMac, number, stamp} from './format.js';
 import {session, api, post, shared} from './session.js';
 import {state} from './state.js';
 import {listeners} from './events.js';
@@ -25,7 +26,15 @@ export const SYNC_ACTIVE = ['scanning', 'recognising', 'importing'];
 export const photosRefused = s => s.status === 'error' && s.problem === 'photos_permission';
 export const PHOTOS_PRIVACY = 'x-apple.systempreferences:com.apple.preference.security?Privacy_Photos';
 export const photosHelp = () => t('没有访问照片图库的权限。到「系统设置 › 隐私与安全性 › 照片」里打开 Illustash，退出并重新打开后再同步。');
-export const syncBar = (s, bar) => s.status === 'recognising' && s.stage !== 'preparing' ? bar(s.done, s.total)
+// 读不到一张图时说去哪儿查（#401）：只有图库可能来自 iCloud 照片时才提照片。来源在设置页读过就按来源；没读过时 Mac 上
+// 算可能有，Windows 没有照片来源。
+export function unreadableText() {
+  const sources = state.settings?.package?.sources || state.libraries?.info?.sources;
+  return (sources ? sources.some(x => x.kind === 'photos') : isMac) ? t('图片暂不可读，请检查来源文件夹，或 iCloud 照片的下载状态与访问权限')
+    : t('图片暂不可读，请检查来源文件夹是否还在、外接硬盘是否接上');
+}
+export const syncBar = (s, bar) => s.status === 'recognising' && s.stage === 'hashing' ? bar(s.input_done, s.input_total)
+  : s.status === 'recognising' && s.stage !== 'preparing' ? bar(s.done, s.total)
   : s.status === 'importing' && s.import_total ? bar(s.import_done, s.import_total) : '';
 // 预计剩余时间（#360）：新图库第一次识别要十几个小时，满两小时起按小时说；不到两小时按整小时说太粗，仍按分钟。
 function remaining(ms) {
@@ -41,6 +50,7 @@ export function syncLine(s) {
       : t('正在导入识别结果 {done}/{total}', {done: number(s.import_done || 0), total: number(s.import_total)});
   }
   if (s.status === 'recognising') {
+    if (s.stage === 'hashing') return t('正在准备识别图片 {done}/{total}', {done: number(s.input_done || 0), total: number(s.input_total || 0)});
     if (s.stage === 'preparing') return t('正在加载识别模型（共 {n} 张）…', {n: number(s.total || 0)});
     const failed = s.failed ? ' · ' + t('{n} 张无法识别', {n: number(s.failed)}) : '';
     const left = s.ms_per_image && s.total > s.done ? ' · ' + remaining((s.total - s.done) * s.ms_per_image) : '';
@@ -50,7 +60,7 @@ export function syncLine(s) {
   // 扫描读不到的路径保留它们的图片；下次同步再读。
   const kept = s.unreadable ? ' · ' + t('{n} 处暂时读不到，已有图片保留不动', {n: number(s.unreadable)}) : '';
   // 放弃的图片分开说（#112）：读不到的会再试，损坏的等它们的文件改变。
-  const gave = (s.failed ? ' · ' + t('{n} 张暂时读不到（可能还在 iCloud），下次同步重试', {n: number(s.failed)}) : '')
+  const gave = (s.failed ? ' · ' + t('{n} 张暂时无法识别，下次同步重试', {n: number(s.failed)}) : '')
     + (s.damaged ? ' · ' + t('{n} 张已损坏或格式不支持，未识别', {n: number(s.damaged)}) : '');
   if (s.status === 'done') return t('上次同步：{time}', {time: stamp(s.finished_at)}) + kept + gave;
   // 自己下载模型的安装（#168）在等模型；否则就是识别服务没有启动。
@@ -209,13 +219,17 @@ export function importCount(job) {
   return ' ' + t('{done}/{total} 张', {done: number(job.done), total: number(job.total)});
 }
 export function importLine(job) {
+  const line = importSummary(job), note = diagnosticLine(job?.diagnostic);
+  return line + (note ? ' · ' + note : '');
+}
+function importSummary(job) {
   if (!job || job.status === 'idle') return '';
   const recognition = job.kind === 'recognition';
   const name = job.file ? t('「{file}」', {file: job.file}) : '';
   if (job.status === 'running') return (recognition ? t('导入识别结果{name}：{step}', {name, step: (IMPORT_STAGES[job.kind] || {})[job.stage] || t('正在准备')}) : t('导入归档{name}：{step}', {name, step: (IMPORT_STAGES[job.kind] || {})[job.stage] || t('正在准备')})) + importCount(job) + '…';
   if (job.status === 'stopping') return recognition ? t('正在取消导入识别结果{name}…', {name}) : t('正在取消导入归档{name}…', {name});
   if (job.status === 'cancelled') return t('{reason}；图库没有改动。', {reason: tb(job.reason) || t('导入已取消')});
-  if (job.status === 'error') return recognition ? t('导入识别结果{name}失败：{reason}', {name, reason: tb(job.error)}) : t('导入归档{name}失败：{reason}', {name, reason: tb(job.error)});
+  if (job.status === 'error') return (recognition ? t('导入识别结果{name}失败：{reason}', {name, reason: tb(job.error)}) : t('导入归档{name}失败：{reason}', {name, reason: tb(job.error)}));
   if (job.status !== 'done') return '';
   const r = job.result || {};
   // 已发布但没有登记（#111）：打开它就会登记；再导入会另建一个带编号的图库。

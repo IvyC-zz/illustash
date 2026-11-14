@@ -13,6 +13,9 @@
 //! 基准录在导入按 tag 后缀建作品（#296）之前：每次重放的调用都设上 `ILLUSTASH_TEST_NO_IMPORT_WORKS`（`NO_IMPORT_WORKS`），
 //! 导入照旧规则走，录下的期望不改（用户 2026-11-12 定）。新规则由它自己的测试覆盖（`character_import`、`app_create`、
 //! `app_recognition`）。
+//!
+//! 不并进 `tests/it/` 的合并测试二进制（#310）：下面的 `SQLITE_CONFIG_MEMSTATUS` 必须在本进程第一次用 SQLite 之前设置，
+//! 和别的测试同在一个进程里时，测试框架多线程运行、先后没有保证，谁先开了库这个设置就会失败。
 #![allow(clippy::unwrap_used, reason = "集成测试里 unwrap 就是断言")]
 use flate2::read::GzDecoder;
 use regex::Regex;

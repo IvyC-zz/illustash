@@ -35,3 +35,19 @@ test('the undo button names the step and the shortcut of this system', () => {
   assert.equal(button.title, '暂无可撤销操作');
   assert.equal(button.disabled, true);
 });
+
+test('Chromium on macOS reports "macOS": still a Mac (#389)', () => {
+  const core = web.core();
+  for (const platform of ['macOS', 'MACINTEL', 'ipados']) assert.equal(core.macLike(platform), true, platform);
+  assert.equal(core.macLike('Windows'), false);
+});
+
+test('an unreadable picture points at iCloud Photos only when the library may come from it (#401)', () => {
+  const {state, unreadableText} = web.core(), saved = {settings: state.settings, libraries: state.libraries};
+  state.settings = {package: {sources: [{kind: 'folder'}]}};
+  assert.match(unreadableText(), /来源文件夹是否还在/);
+  assert.doesNotMatch(unreadableText(), /照片|Photos/);
+  state.settings = {package: {sources: [{kind: 'folder'}, {kind: 'photos'}]}};
+  assert.match(unreadableText(), /iCloud 照片/);
+  Object.assign(state, saved);
+});

@@ -32,6 +32,9 @@ impl Fixture {
         src.execute_batch("INSERT INTO assets(uuid,filename,src_path,width,height,added_at,src_kind,in_scope,trashed) VALUES ('a','synthetic.png','synthetic.png',16,16,'2026-10-03','folder',1,0);
           INSERT INTO characters(char_id,anchor_p90,anchor_p75,post_count,gender_conf) VALUES ('old',0.05,0.02,10,1),('new',0.05,0.02,20,1);
           INSERT INTO labels(uuid,dim,value,conf,source) VALUES ('a','char_ext','old',0.9,'char_index');").unwrap();
+        let input = images.join("synthetic.png");
+        fs::write(&input, b"synthetic input bytes A").unwrap();
+        src.execute("UPDATE assets SET src_path=? WHERE uuid='a'", [input.to_str().unwrap()]).unwrap();
         let mut app = crate::sqlite::open(library.db()).unwrap();
         let tx = app.transaction_with_behavior(TransactionBehavior::Immediate).unwrap();
         crate::schema::begin_writing(&tx).unwrap();
@@ -62,6 +65,9 @@ impl Fixture {
         let identity = TaskIdentity::new(&library, 1, "synthetic-session").unwrap();
         Self { root, resources, library, identity }
     }
+    fn input(&self) -> PathBuf {
+        self.root.join("images/synthetic.png")
+    }
     fn source(&self) -> Connection {
         crate::sqlite::open(self.library.source()).unwrap()
     }
@@ -76,7 +82,7 @@ impl Fixture {
             &path,
             &json!(self.identity),
             &models,
-            &ids,
+            &[("a".into(), producer::input_hash(&self.input(), &|| Ok(())).unwrap())],
             &[producer::Label { asset: "a".into(), dim: "rating".into(), value: "general".into(), confidence: 0.9 }],
             &[vec![1.; 1024]],
             std::slice::from_ref(&feature),
@@ -448,5 +454,265 @@ fn wd_characters_in_a_new_library_get_the_work_of_their_tag_suffix() {
             "SELECT count(*) FROM terms t JOIN term_tree r ON r.term_id=t.id WHERE t.kind='work' AND r.review_status='pending'"
         ),
         1
+    );
+}
+
+#[test]
+fn redelivery_after_invalidation_uses_new_projection_with_or_without_anchors() {
+    for anchored in [false, true] {
+        let f = Fixture::new(anchored);
+        let before = human(&f.app());
+        let (path, sidecar) = f.batch("original", feature(1));
+        let first = f.import(&path, &sidecar).unwrap();
+        assert_eq!(first["duplicate"], false);
+        f.source().execute_batch("DELETE FROM labels WHERE uuid='a'; DELETE FROM embeddings WHERE uuid='a'; DELETE FROM recognition_assets WHERE asset='a';").unwrap();
+        // 应用已经有旧投影标记：修复前会直接报 duplicate，连新投影都不尝试。
+        f.app().execute_batch("CREATE TRIGGER fail BEFORE INSERT ON assets BEGIN SELECT RAISE(ABORT,'synthetic redelivery failure'); END;").unwrap();
+        let retried = f.import(&path, &sidecar).unwrap();
+        assert_eq!(retried["digest"], first["digest"]);
+        assert_eq!(retried["duplicate"], false);
+        assert_eq!(retried["status"], "pending");
+        assert_eq!(count(&f.source(), "SELECT count(*) FROM recognition_assets"), 1);
+        assert_eq!(count(&f.source(), "SELECT count(*) FROM recognition_imports WHERE status='pending'"), 1);
+        f.app().execute_batch("DROP TRIGGER fail").unwrap();
+        let reopened = Library::open(f.library.instance_path()).unwrap();
+        assert_eq!(resume(&reopened, &AtomicBool::new(false), &|_, _| Ok(())).unwrap()["status"], "done");
+        assert_eq!(count(&f.app(), "SELECT count(*) FROM meta WHERE key LIKE 'recognition_projection:%'"), 2);
+        let events = count(&f.app(), "SELECT count(*) FROM backend_effects");
+        assert_eq!(f.import(&path, &sidecar).unwrap()["duplicate"], true);
+        assert_eq!(count(&f.app(), "SELECT count(*) FROM backend_effects"), events);
+        assert_eq!(human(&f.app()), before);
+        // 历史抢救路径会删除源包账本，却保留应用标记；新交付也必须绕开它。
+        f.source().execute_batch("DELETE FROM labels; DELETE FROM embeddings; DELETE FROM recognition_assets; DELETE FROM recognition_imports;").unwrap();
+        assert_eq!(f.import(&path, &sidecar).unwrap()["duplicate"], false);
+        assert_eq!(count(&f.app(), "SELECT count(*) FROM meta WHERE key LIKE 'recognition_projection:%'"), 3);
+        assert_eq!(f.import(&path, &sidecar).unwrap()["duplicate"], true);
+        assert_eq!(human(&f.app()), before);
+    }
+}
+
+#[test]
+fn old_input_package_is_rejected_even_without_a_scan_and_can_retry_after_bytes_are_restored() {
+    let f = Fixture::new(true);
+    let before = human(&f.app());
+    let original = fs::read(f.input()).unwrap();
+    let (path, sidecar) = f.batch("old", feature(1));
+    fs::write(f.input(), b"new bytes with unchanged asset id").unwrap();
+    assert!(f.import(&path, &sidecar).unwrap_err().to_string().contains("已过期"));
+    assert_no_wd(&f);
+    assert_eq!(human(&f.app()), before);
+    fs::write(f.input(), original).unwrap();
+    assert_eq!(f.import(&path, &sidecar).unwrap()["status"], "done");
+    assert_eq!(f.import(&path, &sidecar).unwrap()["duplicate"], true);
+    assert_eq!(human(&f.app()), before);
+}
+#[test]
+fn input_changes_at_publication_roll_back_all_machine_writes() {
+    struct Replace(PathBuf);
+    impl Observer for Replace {
+        fn publish(&self, apply: &mut dyn FnMut() -> Result<()>) -> Result<()> {
+            fs::write(&self.0, b"changed after validation")?;
+            apply()
+        }
+    }
+    let f = Fixture::new(false);
+    let before = human(&f.app());
+    let (path, _) = f.batch("result", feature(1));
+    let result = import_package_observed(
+        &f.library,
+        &path,
+        &f.resources,
+        &AtomicBool::new(false),
+        &|_, _| Ok(()),
+        &Replace(f.input()),
+    );
+    assert!(result.unwrap_err().to_string().contains("已过期"));
+    assert_no_wd(&f);
+    assert_eq!(human(&f.app()), before);
+}
+#[test]
+fn v1_and_malformed_v2_inputs_are_rejected_before_writes() {
+    let f = Fixture::new(false);
+    let (path, _) = f.batch("result", feature(0));
+    let manifest = path.join("manifest.json");
+    let original: Value = serde_json::from_slice(&fs::read(&manifest).unwrap()).unwrap();
+    for kind in ["v1", "missing", "extra", "invalid", "preprocessing"] {
+        let mut value = original.clone();
+        match kind {
+            "v1" => value["format"] = json!("illustash-recognition/1"),
+            "missing" => {
+                value.as_object_mut().unwrap().remove("inputs");
+            }
+            "extra" => value["inputs"]["other"] = json!("a".repeat(64)),
+            "invalid" => value["inputs"]["a"] = json!("A".repeat(64)),
+            _ => value["preprocessing"] = json!("unknown"),
+        }
+        fs::write(&manifest, value.to_string()).unwrap();
+        let err = import_package(&f.library, &path, &f.resources, &AtomicBool::new(false), &|_, _| Ok(())).unwrap_err();
+        if kind == "v1" {
+            assert!(err.to_string().contains("重新生成 v2"));
+        }
+        assert_no_wd(&f);
+    }
+}
+#[test]
+fn mixed_versions_reject_the_whole_batch_and_current_version_gets_a_distinct_fingerprint() {
+    let f = Fixture::new(false);
+    let second = f.root.join("images/b.png");
+    fs::write(&second, b"input B").unwrap();
+    f.source()
+        .execute(
+            "INSERT INTO assets(uuid,filename,src_path,in_scope,trashed) VALUES ('b','b.png',?,1,0)",
+            [second.to_str().unwrap()],
+        )
+        .unwrap();
+    let inputs = vec![
+        ("a".into(), producer::input_hash(&f.input(), &|| Ok(())).unwrap()),
+        ("b".into(), producer::input_hash(&second, &|| Ok(())).unwrap()),
+    ];
+    let path = f.root.join("mixed");
+    producer::write_batch(
+        &path,
+        &json!(f.identity),
+        &model_specs(&f.resources).unwrap(),
+        &inputs,
+        &inputs
+            .iter()
+            .map(|(id, _)| producer::Label {
+                asset: id.clone(),
+                dim: "rating".into(),
+                value: "general".into(),
+                confidence: 0.9,
+            })
+            .collect::<Vec<_>>(),
+        &[vec![1.; 1024], vec![1.; 1024]],
+        &[feature(0), feature(0)],
+    )
+    .unwrap();
+    fs::write(&second, b"changed B").unwrap();
+    assert!(import_package(&f.library, &path, &f.resources, &AtomicBool::new(false), &|_, _| Ok(())).is_err());
+    assert_no_wd(&f);
+    let (old, _) = f.batch("old-a", feature(0));
+    let first = import_package(&f.library, &old, &f.resources, &AtomicBool::new(false), &|_, _| Ok(())).unwrap();
+    let old_fingerprint: String =
+        f.source().query_row("SELECT digest FROM recognition_assets WHERE asset='a'", [], |r| r.get(0)).unwrap();
+    fs::write(f.input(), b"replacement A").unwrap();
+    // 模拟扫描已使旧资产结果失效；旧包收据仍然保留。
+    f.source().execute("DELETE FROM recognition_assets WHERE asset='a'", []).unwrap();
+    let (new, _) = f.batch("new-a", feature(0));
+    let second = import_package(&f.library, &new, &f.resources, &AtomicBool::new(false), &|_, _| Ok(())).unwrap();
+    let new_fingerprint: String =
+        f.source().query_row("SELECT digest FROM recognition_assets WHERE asset='a'", [], |r| r.get(0)).unwrap();
+    assert_ne!(first["digest"], second["digest"]);
+    assert_ne!(old_fingerprint, new_fingerprint);
+}
+
+#[test]
+fn legacy_unpublished_receipts_cannot_silently_gain_input_version_protection() {
+    let f = Fixture::new(false);
+    let before = human(&f.app());
+    let (path, _) = f.batch("result", feature(0));
+    let mut manifest: Value = serde_json::from_slice(&fs::read(path.join("manifest.json")).unwrap()).unwrap();
+    manifest["format"] = json!("illustash-recognition/1");
+    manifest.as_object_mut().unwrap().remove("inputs");
+    for legacy in [manifest.clone(), json!({"recognition":manifest,"character_claims":{}})] {
+        assert!(verify_current_inputs(&f.source(), &legacy, &["a".into()], &AtomicBool::new(false))
+            .unwrap_err()
+            .to_string()
+            .contains("不能发布"));
+    }
+    assert_no_wd(&f);
+    assert_eq!(human(&f.app()), before);
+}
+
+#[test]
+fn public_metadata_cannot_shadow_the_actual_manifest_input_binding() {
+    let f = Fixture::new(false);
+    let original = fs::read(f.input()).unwrap();
+    let (path, _) = f.batch("result", feature(0));
+    let file = path.join("manifest.json");
+    let mut manifest: Value = serde_json::from_slice(&fs::read(&file).unwrap()).unwrap();
+    let mut nested = manifest.clone();
+    fs::write(f.input(), b"replacement input").unwrap();
+    nested["inputs"]["a"] = json!(producer::input_hash(&f.input(), &|| Ok(())).unwrap());
+    manifest["recognition"] = nested;
+    fs::write(&file, manifest.to_string()).unwrap();
+    assert!(import_package(&f.library, &path, &f.resources, &AtomicBool::new(false), &|_, _| Ok(()))
+        .unwrap_err()
+        .to_string()
+        .contains("已过期"));
+    assert_no_wd(&f);
+    // 仍支持公开包原有的附加元数据，只有外层字段决定输入版本。
+    fs::write(f.input(), original).unwrap();
+    assert_eq!(
+        import_package(&f.library, &path, &f.resources, &AtomicBool::new(false), &|_, _| Ok(())).unwrap()["status"],
+        "done"
+    );
+}
+
+#[test]
+fn unprojected_legacy_is_refused_and_sync_retirement_is_restart_safe() {
+    let f = Fixture::new(false);
+    let before = human(&f.app());
+    let old_source =
+        crate::app_migrate_data::rows(&f.source(), "SELECT * FROM labels WHERE source='char_index' AND dim='char_ext'")
+            .unwrap();
+    let old_candidates =
+        crate::app_migrate_data::rows(&f.app(), "SELECT * FROM candidates WHERE source='CCIP'").unwrap();
+    let (path, sidecar) = f.batch("legacy", feature(1));
+    f.app()
+        .execute_batch(
+            "CREATE TRIGGER fail BEFORE INSERT ON assets BEGIN SELECT RAISE(ABORT,'synthetic app failure'); END;",
+        )
+        .unwrap();
+    assert_eq!(f.import(&path, &sidecar).unwrap()["status"], "pending");
+    f.app().execute_batch("DROP TRIGGER fail").unwrap();
+    let mut manifest: Value = serde_json::from_slice(&fs::read(path.join("manifest.json")).unwrap()).unwrap();
+    manifest["format"] = json!("illustash-recognition/1");
+    manifest.as_object_mut().unwrap().remove("inputs");
+    f.source().execute("UPDATE recognition_imports SET manifest=?", [manifest.to_string()]).unwrap();
+    let cancel = AtomicBool::new(false);
+    assert_eq!(resume(&f.library, &cancel, &|_, _| Ok(())).unwrap()["status"], "pending");
+    assert_eq!(count(&f.app(), "SELECT count(*) FROM meta WHERE key LIKE 'recognition_projection:%'"), 0);
+    // 模拟应用撤回已提交、源确认失败。重试沿持久化撤回标记完成，不重复正式导入。
+    f.source().execute_batch("CREATE TRIGGER fail BEFORE UPDATE ON recognition_imports BEGIN SELECT RAISE(ABORT,'synthetic source confirmation failure'); END;").unwrap();
+    assert!(retire_unverifiable(&f.library, &cancel).is_err());
+    assert_eq!(count(&f.app(), "SELECT count(*) FROM meta WHERE key LIKE 'recognition_invalidated:%'"), 1);
+    assert_eq!(count(&f.app(), "SELECT count(*) FROM asset_rating"), 0);
+    assert_eq!(count(&f.source(), "SELECT count(*) FROM recognition_assets"), 1);
+    let effects = count(&f.app(), "SELECT count(*) FROM backend_effects");
+    f.source().execute_batch("DROP TRIGGER fail").unwrap();
+    let reopened = Library::open(f.library.instance_path()).unwrap();
+    retire_unverifiable(&reopened, &cancel).unwrap();
+    assert_eq!(count(&f.source(), "SELECT count(*) FROM recognition_assets"), 0);
+    assert_eq!(count(&f.source(), "SELECT count(*) FROM recognition_imports WHERE status='superseded'"), 1);
+    assert_eq!(count(&f.app(), "SELECT count(*) FROM backend_effects"), effects);
+    assert_eq!(resume(&reopened, &cancel, &|_, _| Ok(())).unwrap()["status"], "done");
+    // 无锚点交付没有接管旧 CCIP 候选，撤回它也不能移除别的回执或历史来源的候选。
+    assert_eq!(
+        crate::app_migrate_data::rows(&f.source(), "SELECT * FROM labels WHERE source='char_index' AND dim='char_ext'")
+            .unwrap(),
+        old_source
+    );
+    assert_eq!(
+        crate::app_migrate_data::rows(&f.app(), "SELECT * FROM candidates WHERE source='CCIP'").unwrap(),
+        old_candidates
+    );
+    // 抢救源库后即使两张账本都已丢失，应用内孤立的撤回标记仍占用旧回执键。
+    f.source().execute_batch("DELETE FROM recognition_assets; DELETE FROM recognition_imports;").unwrap();
+    assert_eq!(count(&f.app(), "SELECT count(*) FROM meta WHERE key LIKE 'recognition_projection:%'"), 0);
+    let restored = f.import(&path, &sidecar).unwrap();
+    assert_eq!(restored["status"], "done");
+    let receipt: String = f.source().query_row("SELECT digest FROM recognition_imports", [], |r| r.get(0)).unwrap();
+    assert!(receipt.starts_with(&format!("{}:redelivery:", restored["digest"].as_str().unwrap())));
+    assert_eq!(human(&f.app()), before);
+    assert_eq!(
+        crate::app_migrate_data::rows(&f.source(), "SELECT * FROM labels WHERE source='char_index' AND dim='char_ext'")
+            .unwrap(),
+        old_source
+    );
+    assert_eq!(
+        crate::app_migrate_data::rows(&f.app(), "SELECT * FROM candidates WHERE source='CCIP'").unwrap(),
+        old_candidates
     );
 }

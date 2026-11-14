@@ -16,7 +16,9 @@ import {t} from './i18n.js';
 //              那张图生效，没有网格光标（首页）；主区不是网格、也没写的页面不响应（keyScope）
 //   click      点卡片做什么：'browse' 打开详情（选择要主动进入）、'cleanup' 切换选中、'own' 页面自己处理
 //   nav        侧栏哪一项亮（.nav 的 data-page；设置是侧栏底部的链接）；'' 没有
-//   lead       未识别一类的「待认」页：排序偏好共用、默认可按「有线索优先」排
+//   lead       未识别一类的「待认」页（全部未识别、已跳过、组页）：排序偏好共用、默认可按「有线索优先」排；在这些页上设角色之后
+//              那张图会离开本页（详情栏、大图、卡片「+ 角色」建议都先飞走再消失）
+//   skip       能跳过当前这张的页面（全部未识别、组页）：详情栏对还没有角色的图显示「跳过 S」，不选图时 S 跳过当前这张
 //   tabs/tab   同一个侧栏入口下的子页签组，以及本页对应哪个页签
 //   toolbar    工具栏组成：'none' 空、'tabs' 只有子页签、'index' 资料库、'library' 图库（搜索和筛选）、'grid' 网格页
 //   sorts      排序下拉的选项
@@ -47,22 +49,24 @@ const list = [
   {name: 'characters', sections: true, area: 'charIndex', panel: true, click: 'own', nav: 'characters', toolbar: 'index', directory: true, guideTick: 'look'},
   {name: 'settings', sections: true, area: 'settingsPage', panel: true, click: 'own', nav: 'settings', toolbar: 'none'},
   {name: 'unmatched', area: 'grid', panel: false, click: 'cleanup', nav: 'unmatched', lead: true, tabs: 'unmatched', tab: 'all',
-    toolbar: 'grid', sorts: ['hinted', ...NEWEST], pool: 'unmatched', bar: 'unmatched',
+    toolbar: 'grid', sorts: ['hinted', ...NEWEST], pool: 'unmatched', bar: 'unmatched', skip: true,
     empty: () => t('全部认出来了 🎉'), hint: () => t('点击或拖动选择 · Space 看大图 · C 设为角色 · S 跳过'), card: {hintMin: 70}},
   {name: 'skipped', area: 'grid', panel: false, click: 'cleanup', nav: 'unmatched', lead: true, tabs: 'unmatched', tab: 'skipped',
     toolbar: 'grid', sorts: ['hinted', ...NEWEST], pool: 'skipped', bar: 'skipped',
     empty: () => t('没有跳过的图片。'), hint: () => t('点击或拖动选择 · Space 看大图')},
   {name: 'groups', area: 'groupsPage', panel: true, click: 'own', nav: 'unmatched', tabs: 'unmatched', tab: 'groups', toolbar: 'tabs'},
   {name: 'group', prefix: 'g', area: 'grid', panel: false, click: 'cleanup', nav: 'unmatched', lead: true, tabs: 'unmatched', tab: 'groups',
-    toolbar: 'grid', sorts: ['hinted', ...NEWEST], bar: 'unmatched',
-    pool: 'cluster', params: r => ({cluster: r.id}), empty: () => t('这一组都整理完了。')},
+    toolbar: 'grid', sorts: ['hinted', ...NEWEST], bar: 'unmatched', skip: true,
+    pool: 'cluster', params: r => ({cluster: r.id}), empty: () => t('这一组都整理完了。'),
+    hint: () => t('点击或拖动选择 · Space 看大图 · C 设为角色 · S 跳过')},
   {name: 'duplicates', area: 'grid', panel: false, click: 'browse', nav: 'duplicates', tabs: 'duplicates', tab: 'all',
     toolbar: 'grid', sorts: NEWEST, pool: 'duplicates', bar: 'default', card: {dup: true},
     params: r => r.dup ? {dup: r.dup} : {}, empty: r => r.dup ? t('所有副本的角色都一致。') : t('没有重复的图片。'),
     hint: () => t('同色角标为同一组 · 修改会同步到整组 · 角色不一致的组对齐后自动折叠')},
   {name: 'similar', area: 'groupsPage', panel: true, click: 'own', nav: 'duplicates', tabs: 'duplicates', tab: 'similar', toolbar: 'tabs'},
   {name: 'sgroup', prefix: 's', area: 'grid', panel: false, click: 'cleanup', nav: 'duplicates', tabs: 'duplicates', tab: 'similar',
-    toolbar: 'grid', sorts: NEWEST, pool: 'similar', params: r => ({cluster: r.id}), bar: 'default'},
+    toolbar: 'grid', sorts: NEWEST, pool: 'similar', params: r => ({cluster: r.id}), bar: 'default',
+    hint: () => t('点击或拖动选择 · Space 看大图')},
   {name: 'excluded', area: 'grid', panel: false, click: 'cleanup', nav: 'excluded', tabs: 'excluded', tab: 'all',
     toolbar: 'grid', sorts: NEWEST, pool: 'excluded', bar: 'excluded', card: {reason: true},
     params: r => r.reason ? {reason: r.reason} : {}, empty: () => t('没有被排除的图片。'), hint: () => t('点击或拖动选择 · Space 看大图 · X 恢复收录')},
@@ -103,8 +107,9 @@ export const poolIs = (route, ...pools) => pools.includes(pageOf(route).pool);
 //   prepare(route)       进入本页前要先读的数据；返回 false 表示已经导航走了
 //   heading(r, ctx)      [标题, 副标题, 右侧链接 HTML]；角色页另用 drawHeading
 //   onMeta(info)         计数等元数据到达后重画什么；没有的页面重画工具栏
-//   refresh(why)         数据变了之后重画面板页：'edit' 改动之后、'undo' 撤销之后、'sync' 同步到新图之后、
-//                        'nsfw' 切换 R18 之后、'view' 视图选项之后、'ask' 「偶尔问一句」开关之后
+//   refresh(why)         数据变了之后重画面板页：'edit' 改动之后、'undo' 撤销之后、'learned' 确认或撤销后后台学习
+//                        收尾之后（#400）、'sync' 同步到新图之后、'nsfw' 切换 R18 之后、'view' 视图选项之后、
+//                        'ask' 「偶尔问一句」开关之后
 export function implement(hooks) {
   for (const [name, h] of Object.entries(hooks)) {
     const page = name === 'character' ? character : PAGES[name];

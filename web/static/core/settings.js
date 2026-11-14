@@ -129,20 +129,28 @@ export function waitPixivLogin() {
 }
 
 // ---------- 更新检查（#191，native/terms/src/app_updates.rs） ----------
-// 用户允许之前关闭。允许之后，后端在每次启动时检查，App 一直开着时每天检查一次；页面只询问是否该检查了。这里不下载也不
-// 安装任何东西。
-let updatesAt = 0, updatesPending = null;
+// 用户允许之前关闭。允许之后，后端在每次启动时检查，App 一直开着时每天检查一次；页面只询问是否该检查了。
+// 「下载并重启」（#279）由桌面外壳做，状态在 state.updates.install（不在桌面 App 里时为 null）：这里转达 download、cancel、
+// install，下载期间每秒读一次进度，下完或失败就停。
+let updatesAt = 0, updatesPending = null, installTimer = 0;
+const adoptUpdates = value => {
+  state.updates = value; updatesAt = Date.now();
+  clearTimeout(installTimer);
+  if (value?.install?.stage === 'downloading') {
+    installTimer = setTimeout(() => api('/api/updates').then(adoptUpdates).catch(() => {}).finally(() => changed.emit('updates')), 1000);
+  }
+  return value;
+};
 export async function updatesPost(body) {
-  state.updates = await api('/api/updates', {method: 'POST', body: JSON.stringify(body)});
-  return state.updates;
+  return adoptUpdates(await api('/api/updates', {method: 'POST', body: JSON.stringify(body)}));
 }
 // 手动检查：总会发出。
-export async function checkUpdates() { const u = await updatesPost({action: 'check'}); updatesAt = Date.now(); return u; }
+export const checkUpdates = () => updatesPost({action: 'check'});
 // 由任务面板的定时调用：不时刷新缓存的状态，并运行到期的自动检查；完成时以 onSettings('updates') 通知，不管结果如何。
 export function updatesTick() {
   if (updatesPending) return updatesPending;
   updatesPending = (async () => {
-    if (!state.updates || Date.now() - updatesAt > 600000) { state.updates = await api('/api/updates'); updatesAt = Date.now(); }
+    if (!state.updates || Date.now() - updatesAt > 600000) adoptUpdates(await api('/api/updates'));
     if (state.updates.due) await updatesPost({action: 'check', auto: true});
   })().catch(() => {}).finally(() => { updatesPending = null; changed.emit('updates'); });
   return updatesPending;

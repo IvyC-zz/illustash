@@ -1,4 +1,4 @@
-//! 离线识别 v1：验证后源事务提交；应用投影与 imported 事件可独立重试。
+//! 离线识别 v2：验证后源事务提交；应用投影与 imported 事件可独立重试。
 use crate::app_imports::{Observer, Silent};
 use crate::{app_library::Library, Error, Result};
 use rusqlite::{params, Connection, OpenFlags, OptionalExtension, TransactionBehavior};
@@ -168,6 +168,7 @@ struct Package {
     manifest: Value,
     digest: String,
     ids: Vec<String>,
+    inputs: HashMap<String, String>,
     labels: HashMap<String, Vec<Value>>,
     wd: Vec<u8>,
     ccip: Vec<u8>,
@@ -198,7 +199,10 @@ fn validate_against(
         std::str::from_utf8(&file(&path.join("manifest.json"), 4 * 1024 * 1024)?).map_err(|_| invalid())?,
     )
     .map_err(Error::Invalid)?;
-    if m["format"] != "illustash-recognition/1" || m["library_id"] != library.id() || &m["models"] != specs {
+    if m["format"] == "illustash-recognition/1" {
+        return Err(Error::invalid("v1 识别结果包没有输入内容版本，请重新生成 v2 结果包"));
+    }
+    if m["format"] != "illustash-recognition/2" || m["library_id"] != library.id() || &m["models"] != specs {
         return Err(invalid());
     }
     let ids: Vec<String> = serde_json::from_value(m["assets"].clone()).map_err(|_| invalid())?;
@@ -206,6 +210,15 @@ fn validate_against(
         || ids.len() > 100000
         || ids.iter().any(String::is_empty)
         || ids.iter().collect::<HashSet<_>>().len() != ids.len()
+    {
+        return Err(invalid());
+    }
+    let inputs: HashMap<String, String> = serde_json::from_value(m["inputs"].clone()).map_err(|_| invalid())?;
+    if m["preprocessing"] != crate::recognition_compute::producer::PREPROCESSING
+        || inputs.len() != ids.len()
+        || ids
+            .iter()
+            .any(|id| !inputs.get(id).is_some_and(|hash| crate::recognition_compute::producer::valid_input_hash(hash)))
     {
         return Err(invalid());
     }
@@ -276,7 +289,46 @@ fn validate_against(
         return Err(invalid());
     }
     let digest = sha(compact(&m).as_bytes());
-    Ok(Package { manifest: m, digest, ids, labels, wd, ccip })
+    Ok(Package { manifest: m, digest, ids, inputs, labels, wd, ccip })
+}
+/// 复核当前可发布的内容。恢复调用方先按账本筛选仍属于本包的资产。
+/// v1 不能证明输入版本：已有应用投影可以只确认通知，但不得据旧账本发布新的机器证据。
+pub(crate) fn verify_current_inputs(
+    c: &Connection,
+    manifest: &Value,
+    ids: &[String],
+    cancel: &AtomicBool,
+) -> Result<()> {
+    // 公开 manifest 允许附加元数据；同名字段不能把外层 v2 的输入版本遮盖掉。
+    let manifest =
+        if manifest.get("format").is_some() { manifest } else { manifest.get("recognition").ok_or_else(invalid)? };
+    if manifest["format"] == "illustash-recognition/1" {
+        return Err(Error::Conflict("v1 待恢复结果没有输入内容版本，不能发布，请重新识别生成 v2 结果".into()));
+    }
+    if manifest["format"] != "illustash-recognition/2" {
+        return Err(invalid());
+    }
+    for id in ids {
+        crate::app_sync::check(cancel)?;
+        let path: Option<String> = c
+            .query_row("SELECT src_path FROM assets WHERE uuid=? AND in_scope=1 AND coalesce(trashed,0)=0", [id], |r| {
+                r.get(0)
+            })
+            .optional()?;
+        let expected = manifest["inputs"][id]
+            .as_str()
+            .filter(|hash| crate::recognition_compute::producer::valid_input_hash(hash))
+            .ok_or_else(invalid)?;
+        let Some(path) = path else {
+            return Err(invalid());
+        };
+        let current =
+            crate::recognition_compute::producer::input_hash(Path::new(&path), &|| crate::app_sync::check(cancel))?;
+        if current != expected {
+            return Err(Error::Conflict("图片内容已改变，识别结果已过期，请重新识别".into()));
+        }
+    }
+    Ok(())
 }
 fn writer(path: &Path) -> Result<Connection> {
     let c = crate::sqlite::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_WRITE)?;
@@ -437,7 +489,7 @@ fn import_internal(
             Some(claims)
         } else {
             // 无锚点的 sidecar 对原生任务仍是必需的、要校验，
-            // 但保持公开的 v1 按图片和按包的指纹以及重复处理的行为。
+            // 但保持公开的 v2 按图片和按包的指纹以及重复处理的行为。
             None
         }
     } else {
@@ -446,77 +498,99 @@ fn import_internal(
     let models =
         if claims.is_some() { pkg.manifest["recognition"]["models"].clone() } else { pkg.manifest["models"].clone() };
     tx.execute_batch(SCHEMA)?;
-    for id in &pkg.ids {
-        let live: bool = tx.query_row(
-            "SELECT EXISTS(SELECT 1 FROM assets WHERE uuid=? AND in_scope=1 AND coalesce(trashed,0)=0)",
-            [id],
-            |r| r.get(0),
+    verify_current_inputs(&tx, &pkg.manifest, &pkg.ids, cancel)?;
+    let seen: bool = tx.query_row(
+        "SELECT EXISTS(SELECT 1 FROM recognition_imports WHERE digest=? OR digest GLOB ?)",
+        params![pkg.digest, format!("{}:redelivery:*", pkg.digest)],
+        |r| r.get(0),
+    )?;
+    let mut added = Vec::new();
+    let mut delivery = None;
+    // 整包账本记录过去的交付，不证明每张图片的结果现在仍有效。每次重试都复核逐图指纹。
+    for (i, u) in pkg.ids.iter().enumerate() {
+        observer.count(i as u64, pkg.ids.len() as u64);
+        crate::app_sync::check(cancel)?;
+        let wd = &pkg.wd[i * 1024 * 4..(i + 1) * 1024 * 4];
+        let ccip = &pkg.ccip[i * 768 * 4..(i + 1) * 768 * 4];
+        let mut labels = pkg.labels[u].clone();
+        labels.sort_by(|a, b| a[0].as_str().cmp(&b[0].as_str()).then(a[1].as_str().cmp(&b[1].as_str())));
+        let mut bytes = crate::character_json::dump(&models, true).into_bytes();
+        bytes.extend(compact(&json!([pkg.inputs[u], crate::recognition_compute::producer::PREPROCESSING])).as_bytes());
+        bytes.extend(compact(&json!(labels)).as_bytes());
+        bytes.extend(wd);
+        bytes.extend(ccip);
+        if let Some(claims) = &claims {
+            let rows = claims.claims.iter().filter(|c| &c.asset == u).collect::<Vec<_>>();
+            bytes.extend(compact(&json!({"anchors":claims.anchors,"claims":rows})).as_bytes());
+        }
+        let fingerprint = sha(&bytes);
+        let old: Option<String> =
+            tx.query_row("SELECT digest FROM recognition_assets WHERE asset=?", [u], |r| r.get(0)).optional()?;
+        if let Some(old) = old {
+            if old != fingerprint {
+                return Err(invalid());
+            }
+            continue;
+        }
+        let delivery = match &delivery {
+            Some(value) => value,
+            None => {
+                // 兼容源账本丢失却保留应用标记的抢救图库；投影或撤回标记都不能复用于新交付。
+                let projected = if seen {
+                    false
+                } else {
+                    crate::app_library::read_connection(&library.db())?.query_row(
+                        "SELECT EXISTS(SELECT 1 FROM meta WHERE key IN (?,?))",
+                        params![
+                            format!("recognition_projection:{}", pkg.digest),
+                            format!("recognition_invalidated:{}", pkg.digest)
+                        ],
+                        |r| r.get::<_, bool>(0),
+                    )?
+                };
+                delivery.insert(if seen || projected {
+                    // 同包重新交付有自己的回执与投影标记；旧 done/投影记录保留为历史，不能挡住恢复。
+                    format!("{}:redelivery:{}", pkg.digest, crate::store::new_key()?)
+                } else {
+                    pkg.digest.clone()
+                })
+            }
+        };
+        tx.execute(
+            "DELETE FROM labels WHERE uuid=? AND source='wd_v3' AND dim IN ('general','character','rating')",
+            [u],
         )?;
-        if !live {
-            return Err(invalid());
-        }
-    }
-    let duplicate: bool =
-        tx.query_row("SELECT EXISTS(SELECT 1 FROM recognition_imports WHERE digest=?)", [&pkg.digest], |r| r.get(0))?;
-    if !duplicate {
-        let mut added = Vec::new();
-        for (i, u) in pkg.ids.iter().enumerate() {
-            observer.count(i as u64, pkg.ids.len() as u64);
-            crate::app_sync::check(cancel)?;
-            let wd = &pkg.wd[i * 1024 * 4..(i + 1) * 1024 * 4];
-            let ccip = &pkg.ccip[i * 768 * 4..(i + 1) * 768 * 4];
-            let mut labels = pkg.labels[u].clone();
-            labels.sort_by(|a, b| a[0].as_str().cmp(&b[0].as_str()).then(a[1].as_str().cmp(&b[1].as_str())));
-            let mut bytes = crate::character_json::dump(&models, true).into_bytes();
-            bytes.extend(compact(&json!(labels)).as_bytes());
-            bytes.extend(wd);
-            bytes.extend(ccip);
-            if let Some(claims) = &claims {
-                let rows = claims.claims.iter().filter(|c| &c.asset == u).collect::<Vec<_>>();
-                bytes.extend(compact(&json!({"anchors":claims.anchors,"claims":rows})).as_bytes());
-            }
-            let fingerprint = sha(&bytes);
-            let old: Option<String> =
-                tx.query_row("SELECT digest FROM recognition_assets WHERE asset=?", [u], |r| r.get(0)).optional()?;
-            if let Some(old) = old {
-                if old != fingerprint {
-                    return Err(invalid());
-                }
-                continue;
-            }
+        for label in &pkg.labels[u] {
             tx.execute(
-                "DELETE FROM labels WHERE uuid=? AND source='wd_v3' AND dim IN ('general','character','rating')",
-                [u],
+                "INSERT INTO labels(uuid,dim,value,conf,source,model_ver,run_id) VALUES (?,?,?,?,'wd_v3',?,?)",
+                params![
+                    u,
+                    label[0].as_str(),
+                    label[1].as_str(),
+                    label[2].as_f64(),
+                    models["wd"]["version"].as_str(),
+                    format!("import:{delivery}")
+                ],
             )?;
-            for label in &pkg.labels[u] {
-                tx.execute(
-                    "INSERT INTO labels(uuid,dim,value,conf,source,model_ver,run_id) VALUES (?,?,?,?,'wd_v3',?,?)",
-                    params![
-                        u,
-                        label[0].as_str(),
-                        label[1].as_str(),
-                        label[2].as_f64(),
-                        models["wd"]["version"].as_str(),
-                        format!("import:{}", pkg.digest)
-                    ],
-                )?;
-            }
-            if let Some(claims) = &claims {
-                tx.execute("DELETE FROM labels WHERE uuid=? AND source='char_index' AND dim='char_ext'", [u])?;
-                for claim in claims.claims.iter().filter(|c| &c.asset == u) {
-                    tx.execute("INSERT INTO labels(uuid,dim,value,conf,source,model_ver,run_id) VALUES (?,'char_ext',?,?,'char_index','character_index@2025-09-25',?)",params![u,claim.character,claim.confidence,format!("import:{}",pkg.digest)])?;
-                }
-            }
-            for (model, vec) in [("wd", wd), ("ccip", ccip)] {
-                tx.execute("INSERT OR REPLACE INTO embeddings VALUES (?,?,?)", params![u, model, vec])?;
-            }
-            tx.execute("INSERT INTO recognition_assets VALUES (?,?,?)", params![u, fingerprint, pkg.digest])?;
-            added.push(u.clone());
         }
+        if let Some(claims) = &claims {
+            tx.execute("DELETE FROM labels WHERE uuid=? AND source='char_index' AND dim='char_ext'", [u])?;
+            for claim in claims.claims.iter().filter(|c| &c.asset == u) {
+                tx.execute("INSERT INTO labels(uuid,dim,value,conf,source,model_ver,run_id) VALUES (?,'char_ext',?,?,'char_index','character_index@2025-09-25',?)",params![u,claim.character,claim.confidence,format!("import:{delivery}")])?;
+            }
+        }
+        for (model, vec) in [("wd", wd), ("ccip", ccip)] {
+            tx.execute("INSERT OR REPLACE INTO embeddings VALUES (?,?,?)", params![u, model, vec])?;
+        }
+        tx.execute("INSERT INTO recognition_assets VALUES (?,?,?)", params![u, fingerprint, delivery])?;
+        added.push(u.clone());
+    }
+    let duplicate = seen && added.is_empty();
+    if !duplicate {
         tx.execute(
             "INSERT INTO recognition_imports(digest,manifest,assets,status) VALUES (?,?,?,'pending')",
             params![
-                pkg.digest,
+                delivery.as_deref().unwrap_or(&pkg.digest),
                 crate::character_json::dump(&pkg.manifest, true),
                 crate::character_json::dump(&json!(added), true)
             ],
@@ -527,7 +601,11 @@ fn import_internal(
     // 发布点：只有这次提交执行了，内容才会进入图库；而且只在没有先到的取消时才执行。提交期间到达的取消会等待；
     // 之后下面的投影以待处理状态暂停。
     let mut tx = Some(tx);
-    observer.publish(&mut || Ok(tx.take().expect("the source transaction is published once").commit()?))?;
+    observer.publish(&mut || {
+        let tx = tx.take().expect("源事务只发布一次");
+        verify_current_inputs(&tx, &pkg.manifest, &pkg.ids, cancel)?;
+        Ok(tx.commit()?)
+    })?;
     drop(tx);
     drop(c);
     observer.stage("projecting");
@@ -535,6 +613,98 @@ fn import_internal(
     result["digest"] = json!(pkg.digest);
     result["duplicate"] = json!(duplicate);
     Ok(result)
+}
+/// 只取仍属于这次交付的有效资产；旧回执不能再发布被扫描撤销或被新交付接管的结果。
+fn delivery_ids(source: &Connection, digest: &str, ids: Vec<String>) -> Result<Vec<String>> {
+    ids.into_iter().filter_map(|id| {
+        match source.query_row(
+            "SELECT EXISTS(SELECT 1 FROM recognition_assets r JOIN assets a ON a.uuid=r.asset WHERE r.asset=? AND r.package=? AND a.in_scope=1 AND coalesce(a.trashed,0)=0)",
+            params![id, digest], |r| r.get::<_, bool>(0),
+        ) {
+            Ok(true) => Some(Ok(id)),
+            Ok(false) => None,
+            Err(e) => Some(Err(e)),
+        }
+    }).collect::<rusqlite::Result<Vec<_>>>().map_err(Into::into)
+}
+/// 同步可以撤回尚未投影、但输入已过期或缺少版本的机器结果，再扫描/识别。
+/// 应用先撤回并记录标记，源事务随后提交；中断后按同一回执幂等完成撤回，不把它重新发布。
+pub(crate) fn retire_unverifiable(library: &Library, cancel: &AtomicBool) -> Result<()> {
+    let mut source = writer(&library.source())?;
+    let exists: bool =
+        source.query_row("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name='recognition_imports')", [], |r| {
+            r.get(0)
+        })?;
+    if !exists {
+        return Ok(());
+    }
+    let tx = source.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    let pending = tx.prepare("SELECT digest,assets,manifest FROM recognition_imports WHERE status NOT IN ('done','superseded') ORDER BY rowid")?
+        .query_map([], |r| Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,String>(2)?)))?.collect::<rusqlite::Result<Vec<_>>>()?;
+    let files: bool =
+        tx.query_row("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name='files')", [], |r| r.get(0))?;
+    let mut app = writer(&library.db())?;
+    for (digest, raw_ids, raw_manifest) in pending {
+        crate::app_sync::check(cancel)?;
+        let published: bool = app.query_row(
+            "SELECT EXISTS(SELECT 1 FROM meta WHERE key=?)",
+            [format!("recognition_projection:{digest}")],
+            |r| r.get(0),
+        )?;
+        if published {
+            continue;
+        }
+        let ids = delivery_ids(&tx, &digest, serde_json::from_str(&raw_ids).map_err(|_| invalid())?)?;
+        if ids.is_empty() {
+            continue;
+        }
+        let manifest: Value = serde_json::from_str(&raw_manifest).map_err(|_| invalid())?;
+        let marker = format!("recognition_invalidated:{digest}");
+        let withdrawing: bool =
+            app.query_row("SELECT EXISTS(SELECT 1 FROM meta WHERE key=?)", [&marker], |r| r.get(0))?;
+        let stale = matches!(verify_current_inputs(&tx, &manifest, &ids, cancel), Err(Error::Conflict(_)));
+        crate::app_sync::check(cancel)?;
+        // IO/损坏记录不是输入已变化的证据：留待扫描和严格 resume 报告，不能猜测着丢弃。
+        if !withdrawing && !stale {
+            continue;
+        }
+        for id in &ids {
+            tx.execute(
+                "DELETE FROM labels WHERE uuid=? AND run_id=? AND (source='wd_v3' OR (source='char_index' AND dim='char_ext'))",
+                params![id, format!("import:{digest}")],
+            )?;
+            tx.execute("DELETE FROM embeddings WHERE uuid=? AND model IN ('wd','ccip')", [id])?;
+            tx.execute("DELETE FROM recognition_assets WHERE asset=? AND package=?", params![id, digest])?;
+            // 下一步扫描必须重新读字节；即使文件被替换后刻意保留了 size/mtime，也会更新内容元数据。
+            if files {
+                tx.execute("UPDATE files SET size=-1 WHERE asset=?", [id])?;
+            }
+        }
+        if !withdrawing {
+            let app_tx = app.transaction_with_behavior(TransactionBehavior::Immediate)?;
+            crate::schema::begin_writing(&app_tx)?;
+            crate::app_migrate::invalidate_wd(&app_tx, &ids)?;
+            let mut visible = Vec::new();
+            for id in &ids {
+                if app_tx
+                    .query_row("SELECT EXISTS(SELECT 1 FROM assets WHERE uuid=?)", [id], |r| r.get::<_, bool>(0))?
+                {
+                    visible.push(id.clone());
+                }
+            }
+            if !visible.is_empty() {
+                import_changes(&app_tx, &tx, library, &visible)?;
+            }
+            app_tx.execute("INSERT INTO backend_effects(kind) VALUES ('imported')", [])?;
+            app_tx.execute("INSERT INTO meta VALUES (?,?)", params![marker, app_tx.last_insert_rowid().to_string()])?;
+            crate::app_sync::check(cancel)?;
+            crate::schema::commit_writing(app_tx)?;
+        }
+        tx.execute("UPDATE recognition_imports SET status='superseded',error='输入版本无法确认，未完成发布的机器结果已撤回，等待重新识别' WHERE digest=?", [&digest])?;
+    }
+    crate::app_sync::check(cancel)?;
+    tx.commit()?;
+    Ok(())
 }
 /// 源库已提交的记录在应用或副作用失败后仍保留；投影标记和事件一起提交。
 pub fn resume(
@@ -554,10 +724,13 @@ pub fn resume(
     // 不用进程全局锁或按图库 ID 的锁，就让这个包的并发恢复串行执行。
     let tx = c.transaction_with_behavior(TransactionBehavior::Immediate)?;
     let pending = tx
-        .prepare("SELECT digest,assets FROM recognition_imports WHERE status<>'done' ORDER BY rowid")?
-        .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?
+        .prepare("SELECT digest,assets,manifest FROM recognition_imports WHERE status NOT IN ('done','superseded') ORDER BY rowid")?
+        .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?)))?
         .collect::<rusqlite::Result<Vec<_>>>()?;
-    for (digest, raw) in pending {
+    let mut unavailable = Vec::new();
+    let mut unavailable_error = String::new();
+    for (digest, raw, raw_manifest) in pending {
+        let mut deferred = Vec::new();
         let process: Result<()> = (|| {
             crate::app_sync::check(cancel)?;
             let ids: Vec<String> = serde_json::from_str(&raw).map_err(|_| invalid())?;
@@ -571,6 +744,26 @@ pub fn resume(
             let event = if let Some(event) = event {
                 event
             } else {
+                // 未投影的旧回执可能已有部分图片失效或由新交付接管，只交付仍属于它的逐图结果。
+                let ids = delivery_ids(&tx, &digest, ids)?;
+                if ids.is_empty() {
+                    return Ok(());
+                }
+                let withdrawing: bool = app.query_row(
+                    "SELECT EXISTS(SELECT 1 FROM meta WHERE key=?)",
+                    [format!("recognition_invalidated:{digest}")],
+                    |r| r.get(0),
+                )?;
+                if withdrawing {
+                    return Err(Error::Conflict("识别结果撤回尚未完成，请同步后重新识别".into()));
+                }
+                let manifest: Value = serde_json::from_str(&raw_manifest).map_err(|_| invalid())?;
+                if let Err(error) = verify_current_inputs(&tx, &manifest, &ids, cancel) {
+                    if matches!(error, Error::Io(_)) {
+                        deferred = ids;
+                    }
+                    return Err(error);
+                }
                 crate::app_migrate::deliver_wd(&mut app, &library.source(), library.id(), Some(&ids), true)?;
                 let src = crate::app_library::read_connection(&library.source())?;
                 let app_tx = app.transaction_with_behavior(TransactionBehavior::Immediate)?;
@@ -610,13 +803,34 @@ pub fn resume(
                     "UPDATE recognition_imports SET status='pending',error=? WHERE digest=?",
                     params![message, digest],
                 )?;
+                if !deferred.is_empty() {
+                    unavailable.extend(deferred);
+                    unavailable_error = message;
+                    continue;
+                }
                 tx.commit()?;
                 return Ok(json!({"status":"pending","error":message}));
             }
         }
     }
     tx.commit()?;
-    Ok(json!({"status":"done"}))
+    if unavailable.is_empty() {
+        Ok(json!({"status":"done"}))
+    } else {
+        Ok(json!({"status":"pending","error":unavailable_error,"unavailable_inputs":unavailable}))
+    }
+}
+/// 同步只容忍输入暂不可读的回执；其他验证、发布或通知错误保持失败。
+pub(crate) fn unavailable_inputs(result: &Value) -> Result<std::collections::HashSet<String>> {
+    if result["status"] == "done" {
+        return Ok(Default::default());
+    }
+    if result["status"] == "pending" {
+        if let Some(ids) = result["unavailable_inputs"].as_array().filter(|ids| !ids.is_empty()) {
+            return ids.iter().map(|id| id.as_str().map(str::to_owned).ok_or_else(invalid)).collect();
+        }
+    }
+    Err(Error::invalid("识别导入恢复未完成"))
 }
 // 保持现有的每批 500 个 ID 的查询分批和行顺序。
 fn source_rows(src: &Connection, sql: &str, ids: &[String]) -> Result<Vec<Value>> {
@@ -630,6 +844,60 @@ fn source_rows(src: &Connection, sql: &str, ids: &[String]) -> Result<Vec<Value>
         )?);
     }
     Ok(out)
+}
+/// 仍拥有有效资产、但尚无应用投影的识别回执。已投影待通知的回执不在此列。
+pub(crate) fn unpublished_assets(app: &Connection, src: &Connection) -> Result<std::collections::HashSet<String>> {
+    let exists: bool =
+        src.query_row("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name='recognition_imports')", [], |r| r.get(0))?;
+    let mut blocked = std::collections::HashSet::new();
+    if exists {
+        let pending = src
+            .prepare("SELECT digest,assets FROM recognition_imports WHERE status NOT IN ('done','superseded')")?
+            .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        for (digest, raw) in pending {
+            let published: bool = app.query_row(
+                "SELECT EXISTS(SELECT 1 FROM meta WHERE key=?)",
+                [format!("recognition_projection:{digest}")],
+                |r| r.get(0),
+            )?;
+            if !published {
+                blocked.extend(delivery_ids(src, &digest, serde_json::from_str(&raw).map_err(|_| invalid())?)?);
+            }
+        }
+    }
+    Ok(blocked)
+}
+/// 索引使用整库向量并替换角色认领，不能混入尚未发布的识别输入。
+pub(crate) fn require_published_inputs(app: &Connection, src: &Connection) -> Result<()> {
+    if !unpublished_assets(app, src)?.is_empty() {
+        return Err(Error::Conflict("识别结果尚未完成发布，请恢复输入并同步后再更新索引".into()));
+    }
+    Ok(())
+}
+/// 全库规则也不能偷用另一份尚未验证、未发布回执的标签；保留这些图片上一次已发布的照片规则。
+pub(crate) fn realistic(app: &Connection, src: &Connection, publishing: &[String]) -> Result<Vec<Value>> {
+    let mut blocked = unpublished_assets(app, src)?;
+    for id in publishing {
+        blocked.remove(id);
+    }
+    let mut result = crate::app_migrate_data::rows(
+        src,
+        "SELECT uuid FROM labels WHERE dim='general' AND value='realistic' AND conf>=0.15",
+    )?
+    .into_iter()
+    .filter(|row| !row[0].as_str().is_some_and(|id| blocked.contains(id)))
+    .map(|row| row[0].clone())
+    .collect::<Vec<_>>();
+    if !blocked.is_empty() {
+        result.extend(
+            crate::app_migrate_data::rows(app, "SELECT uuid FROM auto_rules WHERE kind='exclude' AND reason='photo'")?
+                .into_iter()
+                .filter(|row| row[0].as_str().is_some_and(|id| blocked.contains(id)))
+                .map(|row| row[0].clone()),
+        );
+    }
+    Ok(result)
 }
 fn import_changes(app: &Connection, src: &Connection, library: &Library, ids: &[String]) -> Result<()> {
     let list = serde_json::to_string(ids).expect("internal JSON value is serializable").replace('\'', "''");
@@ -652,7 +920,7 @@ fn import_changes(app: &Connection, src: &Connection, library: &Library, ids: &[
         json!({})
     };
     let stamp: String = src.query_row("SELECT datetime('now','localtime')", [], |r| r.get(0))?;
-    let args = json!({"op":"import","rows":rows,"removed":[],"run_id":null,"new_ids":{},"wd_tags":crate::app_migrate_data::rows(src,"SELECT char_id,wd_tag FROM characters")?,"labels":source_rows(src,"SELECT uuid,value,conf,dim FROM labels WHERE ((dim='character' AND conf>=0.35) OR dim='char_ext') AND uuid IN ({})",&added)?,"decisions":source_rows(src,"SELECT uuid,value FROM decisions WHERE dim='character' AND uuid IN ({})",&added)?,"album_map":album,"duplicates":crate::app_migrate_data::duplicates(app,src,&shape)?,"realistic":crate::app_migrate_data::rows(src,"SELECT uuid FROM labels WHERE dim='general' AND value='realistic' AND conf>=0.15")?.iter().map(|r|r[0].clone()).collect::<Vec<_>>(),"indexed":stamp});
+    let args = json!({"op":"import","rows":rows,"removed":[],"run_id":null,"new_ids":{},"wd_tags":crate::app_migrate_data::rows(src,"SELECT char_id,wd_tag FROM characters")?,"labels":source_rows(src,"SELECT uuid,value,conf,dim FROM labels WHERE ((dim='character' AND conf>=0.35) OR dim='char_ext') AND uuid IN ({})",&added)?,"decisions":source_rows(src,"SELECT uuid,value FROM decisions WHERE dim='character' AND uuid IN ({})",&added)?,"album_map":album,"duplicates":crate::app_migrate_data::duplicates(app,src,&shape)?,"realistic":realistic(app,src,&added)?,"indexed":stamp});
     crate::character_commands::command(app, &args)?;
     Ok(())
 }

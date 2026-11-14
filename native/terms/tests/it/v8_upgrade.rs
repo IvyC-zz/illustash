@@ -9,8 +9,7 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-#[path = "common/baseline.rs"]
-mod baseline;
+use crate::common::baseline;
 
 /// 已切换的第 7 版图库，含角色、链接、名称和历史步骤（golden 名称写入场景的第一个检查点）。
 const CASE: &str = "tests.test_terms_golden.GoldenNameWrites.test_core_name_writes_match_the_snapshot";
@@ -101,6 +100,7 @@ fn names_version(c: &Connection) -> i64 {
 
 #[test]
 fn a_consistent_library_upgrades_retires_the_key_tables_and_fills_in_counted_steps() {
+    let _env = crate::shared();
     let lib = library("consistent");
     {
         let c = Connection::open(&lib.db).unwrap();
@@ -291,6 +291,7 @@ fn a_consistent_library_upgrades_retires_the_key_tables_and_fills_in_counted_ste
 
 #[test]
 fn legacy_tables_that_disagree_with_the_core_refuse_the_upgrade_and_change_nothing() {
+    let _env = crate::shared();
     for (name, sql, refusal) in [
         (
             "disagree-entities",
@@ -324,6 +325,7 @@ fn legacy_tables_that_disagree_with_the_core_refuse_the_upgrade_and_change_nothi
 
 #[test]
 fn a_library_not_switched_in_every_domain_is_refused_and_unchanged() {
+    let _env = crate::shared();
     let lib = library("unswitched");
     Connection::open(&lib.db).unwrap().execute("DELETE FROM meta WHERE key='terms_names'", []).unwrap();
     let before = exact(&lib.db);
@@ -334,6 +336,7 @@ fn a_library_not_switched_in_every_domain_is_refused_and_unchanged() {
 
 #[test]
 fn an_outdated_names_mirror_is_brought_up_to_date_first_as_every_core_write_does() {
+    let _env = crate::shared();
     let lib = library("mirror");
     let entity: String = Connection::open(&lib.db)
         .unwrap()

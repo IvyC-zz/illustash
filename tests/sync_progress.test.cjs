@@ -11,6 +11,12 @@ before(async () => {
 });
 const bar = (done, total) => `${done}/${total}`;
 
+test('input preparation has its own progress before model loading', () => {
+  const s = {status: 'recognising', stage: 'hashing', input_done: 2, input_total: 30, done: 0, total: 30};
+  assert.equal(context.syncLine(s), '正在准备识别图片 2/30');
+  assert.equal(context.syncBar(s, bar), '2/30');
+});
+
 test('model loading shows the stage, not a count of recognised images', () => {
   const s = {status: 'recognising', stage: 'preparing', total: 30, done: 0};
   assert.equal(context.syncLine(s), '正在加载识别模型（共 30 张）…');
@@ -72,10 +78,10 @@ test('a finished run says which pictures it kept because their paths could not b
 test('a finished run tells unreadable pictures, retried next time, apart from damaged ones, skipped (#112)', () => {
   const done = {status: 'done', finished_at: '2026-10-13T09:00:00'};
   assert.equal(context.syncLine({...done, failed: 2}),
-    '上次同步：10-13 09:00 · 2 张暂时读不到（可能还在 iCloud），下次同步重试');
+    '上次同步：10-13 09:00 · 2 张暂时无法识别，下次同步重试');
   assert.equal(context.syncLine({...done, damaged: 1}), '上次同步：10-13 09:00 · 1 张已损坏或格式不支持，未识别');
   assert.equal(context.syncLine({...done, failed: 2, damaged: 1, unreadable: 1}),
-    '上次同步：10-13 09:00 · 1 处暂时读不到，已有图片保留不动 · 2 张暂时读不到（可能还在 iCloud），下次同步重试 · 1 张已损坏或格式不支持，未识别');
+    '上次同步：10-13 09:00 · 1 处暂时读不到，已有图片保留不动 · 2 张暂时无法识别，下次同步重试 · 1 张已损坏或格式不支持，未识别');
   assert.equal(context.syncLine({...done, failed: 0, damaged: 0}), '上次同步：10-13 09:00');
 });
 

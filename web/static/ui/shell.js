@@ -7,7 +7,7 @@ import {REASONS, nameTip} from '../core/labels.js';
 import {fetchChar, onMeta, setChar} from '../core/meta.js';
 import {prefs} from '../core/prefs.js';
 import {implement, pageOf, viewOf} from '../core/pages.js';
-import {cleanup, defaultSort, go, hashFor, parseHash, replaceRoute, setRoute} from '../core/route.js';
+import {cleanup, defaultSort, go, hashFor, noteHistory, parseHash, replaceRoute, setRoute} from '../core/route.js';
 import {api, readError} from '../core/session.js';
 import {state} from '../core/state.js';
 import {cast, createWork, drawCast, drawShelf, openTagged, renderIndexBody, searchIndex, shelf} from './catalog.js';
@@ -15,7 +15,7 @@ import {$, error, searchIcon, workSmall} from './dom.js';
 import {renderSettings, settingsSection} from './settings.js';
 import {artistName} from './artists.js';
 import {closeInspector, closeViewer} from './detail.js';
-import {filters, reload, resetForRoute, selectAll, short, sweep, toggleFit, toggleSelecting} from './grid.js';
+import {filters, placeFor, rememberPlace, reload, resetForRoute, selectAll, short, sweep, toggleFit, toggleSelecting} from './grid.js';
 import {guideTick} from './guide.js';
 import {createLayer} from './overlay.js';
 import {dayLabel} from './home.js';
@@ -42,11 +42,15 @@ function metaShown({error: e, total, directory, queue}) {
 }
 export async function applyRoute() {
   const route = parseHash(); route.sort = route.sort || defaultSort(route);
-  if (route.legacy) { delete route.legacy; history.replaceState(null, '', hashFor(route)); }
+  const legacy = route.legacy; delete route.legacy;
+  noteHistory(legacy ? hashFor(route) : undefined);   // 旧地址就地改成新的；这一条记下序号，后退不退出页面
   const samePage = state.route.page === route.page && state.route.id === route.id && state.route.char === route.char;   // 切换子视图仍是同一页
   // 换页（含同一页换子视图、换参数）：大图关掉，因为它下面的列表要重读、序号不再对得上；选择和光标复位；
   // 详情栏只在换了页面或角色时关。大图是被换页关掉的，不动焦点。
   closeViewer('silent');
+  // 再记下要离开的网格页停在哪里，回到这个地址时恢复（#402）。放在关大图之后：关大图让详情栏跟到大图里最后看的那张、
+  // 把光标那张滚进视野，记下的详情栏、光标和位置才是同一张。
+  rememberPlace();
   setRoute(route); resetForRoute();
   if (!samePage) closeInspector();
   $('sidebar').classList.remove('mobile-open');
@@ -64,7 +68,10 @@ export async function applyRoute() {
   $('homePage').hidden = page.area !== 'homePage';
   if (page.guideTick) guideTick(page.guideTick);
   renderChrome();
-  if (page.render) page.render({samePage}); else await reload(true);   // 没有自己渲染入口的页面是网格页
+  // 自己渲染的页面（首页、资料库、设置、按组整理……）不记位置：换到别的页面时从顶部开始，不沿用上一页的滚动位置。
+  // 同一页换子视图、刷新时由页面自己决定留在哪里。网格页由 reload 定位（回到记过的地址时恢复，否则回顶部）。
+  if (page.render && !samePage) $('viewport').scrollTop = 0;
+  if (page.render) page.render({samePage}); else await reload(true, placeFor(route));   // 没有自己渲染入口的页面是网格页
 }
 // ---------- 外框：标题、工具栏 ----------
 // 同一个侧栏入口的子视图在它的标题下显示成标签页，而不是塞在角落里的链接。
@@ -222,7 +229,7 @@ implement({
   'artist-audit': {heading: (r, {n, clear}) => [t('画师抽查'), t('验收「找回画师」：固定的一组随机图，逐张判断机器找到的画师对不对')]},
   identity: {heading: (r, {n, clear}) => [t('身份整理'), t('{n} 对长得像的角色 · 按涉及图片数排序 · 每一步都可撤销', {n: number(state.identityCount || 0)})]},
   sgroup: {heading: (r, {n, clear}) => [t('相似组 {id}', {id: esc(r.id)}), t('{n} 张 · 选中两张以上可以判断关系', {n}), state.total >= 2 && state.total <= 12 ? `<span class="heading-links"><button class="quiet" id="sgroupRelate">${t('判断关系')}</button></span>` : '']},
-  excluded: {heading: (r, {n, clear}) => [t('已排除'), t('{n} 张 · 只是标记，不动 Photos', {n})]},
+  excluded: {heading: (r, {n, clear}) => [t('已排除'), t('{n} 张 · 只是标记，不改动原图', {n})]},
   pending: {heading: (r, {n, clear}) => [t('已排除'), t('待确认 {n} 张 · 像截图但有人物，排除或保留', {n})]},
   settings: {heading: (r, {n, clear}) => [t('设置'), settingsSection()[2]]},
 });

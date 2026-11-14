@@ -1,5 +1,6 @@
 // 任务面板（桌面布局，#199）：所有后台任务的进度、确认和手动运行集中在一处。任务本身、它们的轮询和文字在
 // core/jobs.js。
+import {diagnosticLine} from '../core/diagnostics.js';
 import {t, tb} from '../core/i18n.js';
 import {esc, number, stamp, localTime} from '../core/format.js';
 import {state} from '../core/state.js';
@@ -72,6 +73,11 @@ export function taskList() {
     active: m.job?.status === 'running', warn: m.job?.status === 'failed', line: modelsLine(m), body: modelsBar(m), action: modelsActions(m, true)});
   if (['running', 'done', 'error'].includes(ex.status)) list.push({key: 'export', name: t('导出图库'), busy: t('导出图库中'), active: ex.status === 'running', warn: ex.status === 'error',
     line: ex.status === 'running' ? t('正在导出…') : ex.status === 'done' ? t('已导出 {mb} MB', {mb: (ex.bytes / 1048576).toFixed(0)}) : t('导出失败：{error}', {error: tb(ex.error || '')}), body: '', action: ''});
+  const diagnoses = {sync: s, index: ix, names: nm, similar: sim, provenance: ps, models: m?.job, export: ex};
+  for (const task of list) {
+    const note = diagnosticLine(diagnoses[task.key]?.diagnostic);
+    if (note && task.warn) task.line += ' · ' + note;
+  }
   return list;
 }
 // 等用户处理的事：一次授权、要添加的角色、需要动手的同步。

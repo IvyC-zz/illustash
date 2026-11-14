@@ -6,6 +6,7 @@ use illustash_terms::recognition_compute::{
     anchor_snapshot::Snapshot, backend, claims::Claims, preprocess, producer, session,
 };
 use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
 use std::{
     fs,
     path::{Path, PathBuf},
@@ -168,10 +169,13 @@ pub fn stages(request: &Value) -> Result<Value> {
     let mut packages = Vec::new();
     for (batch, chunk) in images.chunks(25).enumerate() {
         let (mut ids, mut labels, mut wd_rows, mut ccip_rows, mut claims) = (vec![], vec![], vec![], vec![], vec![]);
+        let mut inputs = Vec::new();
         for (offset, image_path) in chunk.iter().enumerate() {
             let asset = format!("asset-{:05}", batch * 25 + offset);
             let t = Instant::now();
-            let image = producer::decode(image_path)?;
+            let bytes = fs::read(image_path)?;
+            let input_sha256 = format!("{:x}", Sha256::digest(&bytes));
+            let image = producer::decode_bytes(&bytes, image_path)?;
             let decode_ms = ms(t);
             let t = Instant::now();
             let input = preprocess::wd_input(&image, 448);
@@ -189,13 +193,14 @@ pub fn stages(request: &Value) -> Result<Value> {
             let claims_ms = ms(t);
             rows.push(json!({"decode":decode_ms,"wd":wd_ms,"wd_preprocess":wd_pre_ms,"ccip":ccip_ms,
                 "labels":labels_ms,"claims":claims_ms,"pixels":image.width()*image.height()}));
+            inputs.push((asset.clone(), input_sha256));
             ids.push(asset);
             wd_rows.push(embedding);
             ccip_rows.push(feature);
         }
         let t = Instant::now();
         let path = output.join(format!("batch-{}", batch * 25));
-        producer::write_batch(&path, &identity, &specs, &ids, &labels, &wd_rows, &ccip_rows)?;
+        producer::write_batch(&path, &identity, &specs, &inputs, &labels, &wd_rows, &ccip_rows)?;
         let claim = Claims::new(task.clone(), ids.clone(), specs.clone(), snapshot.fingerprint.clone(), claims);
         let sidecar = serde_json::to_vec(&claim)?;
         fs::write(path.join("character-claims.json"), &sidecar)?;

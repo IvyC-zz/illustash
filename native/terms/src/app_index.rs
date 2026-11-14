@@ -640,7 +640,16 @@ impl Updater {
             if let Err(ref e) = result {
                 // 只写原因：错误的类别（"不合法：…"）是给代码看的，不是给人看的（#287）。
                 let message = ctx.stop_reason().unwrap_or_else(|| e.reason()).chars().take(300).collect::<String>();
-                update(&state, json!({"status":"error","kind":kind,"message":message,"finished_at":now()}));
+                let d = crate::diagnostics::failure(
+                    crate::diagnostics::Operation::Index,
+                    crate::diagnostics::Stage::Background,
+                    e,
+                    crate::diagnostics::Publication::MayBePartial,
+                );
+                update(
+                    &state,
+                    json!({"status":"error","kind":kind,"message":message,"finished_at":now(), "diagnostic":d.value()}),
+                );
             }
             result
         }));
@@ -881,7 +890,9 @@ fn snapshot_library(lib: &Library, folder: &Path, ctx: &TaskContext) -> Result<S
     } else {
         write(&folder.join("album-char-map.json"), &json!({"map":{}}))?;
     }
-    fingerprint(&crate::app_library::read_connection(&folder.join("pi.db"))?)
+    let snapshot = crate::app_library::read_connection(&folder.join("pi.db"))?;
+    crate::app_recognition::require_published_inputs(&crate::app_library::read_connection(&lib.db())?, &snapshot)?;
+    fingerprint(&snapshot)
 }
 /// 为每个新角色下载最多二十张 Danbooru 参考图，除非它的索引已经打过补丁。写下了图片列表的角色就算完成；
 /// 同一任务后来的运行会跳过它，并复用停下时那个角色的图片（#287）。还要下载的角色需要联网、
@@ -1119,6 +1130,16 @@ fn commit(
     } else {
         commit_source(lib, shared, dir, journal, job, ctx, &mut src)?;
     }
+    // 已提交源结果的重放仍可能遇到新的识别回执；在发布共享文件和应用候选之前再检查。
+    let app = crate::app_library::read_connection(&lib.db())?;
+    let projected: bool =
+        app.query_row("SELECT EXISTS(SELECT 1 FROM meta WHERE key=?)", [format!("index_job:{}", job.job_id)], |r| {
+            r.get(0)
+        })?;
+    if !projected {
+        crate::app_recognition::require_published_inputs(&app, &src)?;
+    }
+    drop(app);
     publish(shared, dir, &folder, job)?;
     update(state, json!({"status":"importing"}));
     let changed = import(lib, &src, job, ctx)?;
@@ -1191,6 +1212,7 @@ fn commit_source(
     if fingerprint(&tx)? != job.before {
         return changed_inputs("索引计算输入已改变");
     };
+    crate::app_recognition::require_published_inputs(&crate::app_library::read_connection(&lib.db())?, &tx)?;
     let result = job.result.as_ref().ok_or_else(|| Error::Invalid("ready job 缺少结果".into()))?;
     write_result(&tx, result, &job.job_id)?;
     let result = job.result.take();
@@ -1350,6 +1372,7 @@ fn stage_all(
 }
 /// 根据改变的标签重新索引图库，每个任务一次：返回有多少成员关系改变。
 fn import(lib: &Library, src: &Connection, job: &protocol::IndexJob, ctx: &TaskContext) -> Result<i64> {
+    let src = src.unchecked_transaction()?;
     let mut app = writer(&lib.db())?;
     crate::http_read::register_names(&app)?;
     let marker = format!("index_job:{}", job.job_id);
@@ -1360,22 +1383,17 @@ fn import(lib: &Library, src: &Connection, job: &protocol::IndexJob, ctx: &TaskC
     let changed = if let Some(n) = done {
         n.parse::<i64>().unwrap_or(0)
     } else {
+        crate::app_recognition::require_published_inputs(&tx, &src)?;
         let uuids = job.extra.get("changed").unwrap_or(&Value::Null);
         let labels = crate::app_migrate_data::rows_with(
-            src,
+            &src,
             "SELECT uuid,value,conf,dim
              FROM labels
              WHERE ((dim='character' AND conf>=0.35) OR dim='char_ext') AND uuid IN (SELECT value FROM json_each(?))",
             [uuids.to_string()],
         )?;
-        let realistic = crate::app_migrate_data::rows(
-            src,
-            "SELECT uuid FROM labels WHERE dim='general' AND value='realistic' AND conf>=0.15",
-        )?
-        .iter()
-        .map(|r| r[0].clone())
-        .collect::<Vec<_>>();
-        let index = crate::app_migrate_data::index(src)?;
+        let realistic = crate::app_recognition::realistic(&tx, &src, &[])?;
+        let index = crate::app_migrate_data::index(&src)?;
         let out = crate::character_commands::command(
             &tx,
             &json!({
@@ -1607,6 +1625,84 @@ fn state_and_history(state: &Mutex<State>, dir: &Path) -> (Value, Vec<Value>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn recognition_publication_gates_index_snapshot_source_commit_and_replay() {
+        let root = std::env::temp_dir().join(format!("illustash-index-pending-{}", crate::store::new_key().unwrap()));
+        let images = root.join("images");
+        std::fs::create_dir_all(&images).unwrap();
+        let package = root.join("synthetic.pilib");
+        crate::app_create::create_folder(&package, &images, None, None, None).unwrap();
+        let lib = Library::open(&package).unwrap();
+        let identity = crate::app_tasks::TaskIdentity::new(&lib, 1, "synthetic").unwrap();
+        let mut task = crate::app_tasks::Task::start(identity, None, move |ctx| {
+            let mut src = writer(&lib.source())?;
+            src.execute_batch(
+                "INSERT INTO assets(uuid,filename,src_path,in_scope,trashed) VALUES ('a','a.png','offline.png',1,0);
+                CREATE TABLE recognition_imports(digest TEXT PRIMARY KEY,assets TEXT,status TEXT);
+                CREATE TABLE recognition_assets(asset TEXT PRIMARY KEY,digest TEXT,package TEXT);
+                INSERT INTO recognition_imports VALUES ('receipt','[\"a\"]','pending');
+                INSERT INTO recognition_assets VALUES ('a','fingerprint','receipt');",
+            )?;
+            let app = writer(&lib.db())?;
+            let folder = lib.instance_path().join("index-jobs/test");
+            std::fs::create_dir_all(&folder)?;
+            assert!(snapshot_library(&lib, &folder, &ctx).unwrap_err().to_string().contains("尚未完成发布"));
+            // 已不拥有任何资产的旧回执不阻塞；已投影但通知 pending 也不阻塞。
+            src.execute("DELETE FROM recognition_assets", [])?;
+            snapshot_library(&lib, &folder, &ctx)?;
+            src.execute("INSERT INTO recognition_assets VALUES ('a','fingerprint','receipt')", [])?;
+            app.execute("INSERT INTO meta VALUES ('recognition_projection:receipt','1')", [])?;
+            snapshot_library(&lib, &folder, &ctx)?;
+            src.execute("DELETE FROM recognition_assets", [])?;
+            app.execute("DELETE FROM meta WHERE key='recognition_projection:receipt'", [])?;
+            let before = snapshot_library(&lib, &folder, &ctx)?;
+            let journal = lib.instance_path().join("index-job.json");
+            let shared = lib.instance_path().join("synthetic-shared");
+            let dir = shared.join("char-patch");
+            std::fs::create_dir_all(&dir)?;
+            let mut job: protocol::IndexJob = protocol::parse(
+                json!({
+                    "version":1,"package":lib.instance_path(),"job_id":"test","identity":ctx.identity(),
+                    "action":"apply","reason":null,"rows":[],"folder":folder,"before":before,"phase":"ready",
+                    "result":{"format":"illustash-index/1","identity":ctx.identity(),"before":before,
+                        "characters":[],"aliases":[],"labels":[]},"changed":[]
+                }),
+                &journal,
+            )?;
+            write(&journal, &protocol::value(&job)?)?;
+            // 快照之后才出现 pending，且索引指纹本身未变：源提交门禁仍必须拒绝。
+            src.execute("INSERT INTO recognition_assets VALUES ('a','fingerprint','receipt')", [])?;
+            assert_eq!(fingerprint(&src)?, before);
+            assert!(commit_source(&lib, &shared, &dir, &journal, &mut job, &ctx, &mut src)
+                .unwrap_err()
+                .to_string()
+                .contains("尚未完成发布"));
+            assert!(!src.query_row(
+                "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name='native_index_runs')",
+                [],
+                |r| r.get::<_, bool>(0)
+            )?);
+            // 旧索引已提交源结果，但应用尚未发布；重放也不能绕过新 pending 的门禁。
+            src.execute_batch("CREATE TABLE native_index_runs(id TEXT PRIMARY KEY,result TEXT NOT NULL)")?;
+            src.execute("INSERT INTO native_index_runs VALUES ('test',?)", [protocol::value(&job)?.to_string()])?;
+            let state = Mutex::new(State::from(json!({"status":"importing"})));
+            assert!(commit(&lib, &shared, &dir, &journal, &mut job, &ctx, &state)
+                .unwrap_err()
+                .to_string()
+                .contains("尚未完成发布"));
+            assert!(import(&lib, &src, &job, &ctx).unwrap_err().to_string().contains("尚未完成发布"));
+            assert!(!app.query_row("SELECT EXISTS(SELECT 1 FROM meta WHERE key='index_job:test')", [], |r| r
+                .get::<_, bool>(0))?);
+            app.execute("INSERT INTO meta VALUES ('recognition_projection:receipt','1')", [])?;
+            assert_eq!(import(&lib, &src, &job, &ctx)?, 0);
+            Ok(())
+        });
+        assert!(task.wait(Duration::from_secs(30)));
+        assert_eq!(task.outcome(), crate::app_tasks::TaskOutcome::Done);
+        drop(task);
+        std::fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn info_never_pairs_a_done_state_with_the_previous_history() {
