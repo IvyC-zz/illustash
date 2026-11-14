@@ -1,4 +1,4 @@
-//! S3 角色业务命令（docs/TERMS_CHARACTERS_PLAN.md 第 8 节）：一个命令一个核心事务，逐行照 tests/reference/web/store.py（#9 已删除） 的旧写法。
+//! S3 角色业务命令（docs/TERMS_CHARACTERS.md 方案第 8 节）：一个命令一个核心事务，逐行照 tests/reference/web/store.py（#9 已删除） 的旧写法。
 //!
 //! 写法：人工结论追加成 `term_verdicts`（挂在这一步上，它是权威），同时维护派生表 `assertions`（每个 (图, 身份) 的
 //! 有效结论）。身份、结构、

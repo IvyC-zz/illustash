@@ -1,4 +1,4 @@
-//! 名字的显示投影（docs/TERMS_NAMES_PLAN.md N1）：逐条移植 tests/reference/web/names.py（#9 已删除） 的 `View`（`entity_rows`、`load`、`choose`、
+//! 名字的显示投影（docs/TERMS_NAMES.md 方案 N1）：逐条移植 tests/reference/web/names.py（#9 已删除） 的 `View`（`entity_rows`、`load`、`choose`、
 //! `entity`、`base`、`own_name`）和词表（`PRIORITY`、`SKINS`、`WORK_NAMES`、`readable`、`skin_zh`）。
 //! 输入是身份（`character_entities::ENTITIES`）、当前链接、名字和按文字键的显示名 `term_key_names`，输出两张投影表：
 //! - `term_name_display(entity, skin_only, …)`：`View.entity(id, skin_only)`；

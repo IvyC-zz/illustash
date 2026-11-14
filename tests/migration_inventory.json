@@ -5,7 +5,7 @@
 
  "crates/core/src/backup.rs":"7d5f5abe63adb1620f2847609451fda7b588a927f742a676e16fc4acd2abeeb5",
 
- "crates/core/src/character_commands.rs":"bce1c3f31c1055104025ee86fb507315e9a6c26481900c8708569ae000ed2bec",
+ "crates/core/src/character_commands.rs":"934ee5fa5f91b9164c7388af9e4d88b80f19967c7709e0cc73f4dfedfd54d7bf",
 
  "crates/core/src/character_entities.rs":"36157140d08e8a851746438c8c578d15e3011d88f79689b335bc77fb241ed70f",
 
@@ -19,7 +19,7 @@
 
  "crates/core/src/character_json.rs":"fbc17913baf024e4ea10902ca0520c2c2b9c5d2f8ef6fb8fc17550c3cb5fdf73",
 
- "crates/core/src/character_labels.rs":"221cff8d940eef876f584db62f46c147fe7583bf55eb3a8cc46944af70f0da6f",
+ "crates/core/src/character_labels.rs":"b59f8161558389d955bb7c7a4568bd3bc698137ce0ba84601475c9b7f7e77014",
 
  "crates/core/src/character_learning.rs":"0925e01fd435837dda2735b8a6318c82e10fc848ea87fbc8fcd7da76a5c71839",
 
@@ -65,11 +65,11 @@
 
  "crates/core/src/lib.rs":"23a5778fb07dae5696c4d7791620640eb60efddd37cf3be6f2aae63a4d00eeeb",
 
- "crates/core/src/names_commands.rs":"55136b61cf16cb10d814ad96df0513368dcb6644efd672253c2877e7f1c868c9",
+ "crates/core/src/names_commands.rs":"2997fa9575331a557a118e9b97d22b3a13a51cb3fa6b50edcb28a1a60eb2f8a5",
 
- "crates/core/src/names_search.rs":"624ef5beaa837758f412e0337e3599e2468eb33986ed09377ef35f5309fc883d",
+ "crates/core/src/names_search.rs":"653e1357068c53b07a96dc662a865c5694c404223dbdaaa93f1ef6d0e02017d9",
 
- "crates/core/src/names_view.rs":"421d7daedd45545bca9fc86851a95a86e5301482bdb82d68bdefa03c2c8c2733",
+ "crates/core/src/names_view.rs":"87b202293db99589768a7187f8832e8c6ed525ff788e3a1607504e37e5be9949",
 
  "crates/core/src/new_library.rs":"66d11a3e942e573585a204300ede8c0bf0225f00d44ce38e9dc30081e9d7a820",
 
@@ -77,7 +77,7 @@
 
  "crates/core/src/package.rs":"2c951060a10859148705790dd270f5bb15112970f0888dc31de126bc74471220",
 
- "crates/core/src/schema.rs":"5c5c363ab5a55c12f2502e833b22c2a1973fa4618256b3319364a115d8c499cd",
+ "crates/core/src/schema.rs":"4fa0d297c606244a6efe89900366c2aab3feda4f8815b34d323670a954ac0148",
 
  "crates/core/src/store.rs":"506db20699d3624a2d30f21715e857ce1923b958c3db4d08f0b7bc072f7cc90e",
 

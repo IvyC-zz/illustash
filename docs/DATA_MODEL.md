@@ -1,6 +1,6 @@
 # 数据模型：作品、角色、名字与外部 tag
 
-定稿于 2026-09-24。分三步迁移（第 7 节）：**链接、名字、作品三步代码已实现**（schema 23 → 24 → 25）；外部作品对应关系与多上级歧义保留人工确认。验收记录已删除，见开源前私有历史中的 `docs/DATA_MODEL_ACCEPTANCE.md`。
+定稿于 2026-09-24。分三步迁移：**链接、名字、作品三步都已完成**（schema 23 → 24 → 25）；外部作品对应关系与多上级歧义保留人工确认（第 9 节）。原第 7 节「迁移对照」随迁移完成删除（2026-11-14），原文在 git 历史里，节号不重排。验收记录已删除，见开源前私有历史中的 `docs/DATA_MODEL_ACCEPTANCE.md`。
 
 本文的模型（身份、链接、名字三层）现行有效，但存储已换：2026-10-20 起（词条核心第 8 版，#201）身份在 `terms` / `term_tree`，链接在 `term_links`，名字在 `term_names`、`term_key_names`、`term_key_aliases`，第 4 节的 `entities`、`links`、`names` 和旧的 `display_names`、`name_aliases` 都已删除。表的对应见 [TERMS_SCHEMA.md](TERMS_SCHEMA.md) 第 5、14 节。
 
@@ -165,39 +165,6 @@ CREATE TABLE names(
 5. **同名角色**（好几个作品都有 Akane）。身份靠 ID 区分，显示时带上作品。
 6. **后缀有歧义**（fate）。`qualifier:fate` 挂在「Fate 系列」上。角色先归到系列，以后可以改到具体作品。新图库里第一次导入带 `fate` 后缀的角色时，自动建一个待核对的作品，你在作品管理里改名、挂上级或核对 D 站链接。
 7. **不是作品的后缀**（`vtuber`、`1st_costume`）。导入时不建作品，也不建 `qualifier` 链接（清单见第 5 节「导入」第 2 条），带这类后缀的角色就「未归类」，等你来归。第 25 版迁移当年没有排除它们，旧库里可能已有这类待核对作品，保留不动。
-
-## 7. 迁移对照（✅ 表示已完成）
-
-| 现在 | 迁移后 |
-|---|---|
-| `entities.id` | `entities.id`，原样保留，所有引用都不用改 |
-| `entities.kind='oc'` | `kind='character'`、`original=1` |
-| `parent_id` 不为空（皮肤） | `kind='skin'`，`parent_id` 不变 |
-| `entities.tag` | `links(danbooru, tag)` ✅ |
-| `external_key` 为 `index:…` | `links(ccip, …)` ✅ |
-| `external_key` 为 `wd:…` | `links(wd, …)` ✅ |
-| `external_key` 为 `album:…` | `links(photos_album, …)` ✅ |
-| `external_key` 为 `parent:[…]` | `links(ccip_base, …)` ✅（重新导入时要靠它找回补建的父角色） |
-| `entities.work`（字符串） | 同一个字符串归到同一个作品身份，字符串本身存为 `links(qualifier, …)`；D 站作品 tag 另外核对 |
-| `entities.name`，没有链接的身份（你手建的角色、原创角色） | `names`，`source='user'`，`preferred=1` |
-| `entities.name`，有链接的身份（索引的中文、日文、英文名或短名） | 显示时本来就不读它；索引名已在 `display_names`（`source='index'`），迁移时丢弃 |
-| `entities.variant` | 皮肤的可读名，由 `danbooru` 链接现算，或者迁成名字 |
-| `aliases` 表 | `names`，`role='alias'` |
-| `display_names` 表 | `names`，`role='display'`，来源照旧 |
-| `name_aliases` 表 | `names`，`role='alias'`，`source='danbooru'` |
-| 关注列表 `watch.json`（作品 tag） | 作品 ID 列表 |
-| `entities.artist` | 保留原样，留给溯源模块（BACKLOG 第 5 项），不在本模型范围内 |
-
-### 需要人来决定的
-
-- **作品的 D 站链接**：批量核对一次，只发 tag 文字。能直接对上的，自动挂链接；对不上的列成清单让你选，包括有歧义的、不是作品的。按 2026-09-24 对图片最多的 60 个作品的抽查，对不上的约 11 个：`fate`、`nikke`、`kancolle`、`honkai_impact`、`pgr`、`re:zero`、`marionette's_id`、`vtuber`、`oshiro_project`、`xenoblade`、`1st_costume`。
-- **你手建的 11 个角色**：可能和已有角色是同一个的，比如 `Janus_(azur_lane)`、`karen_(blue_archive)`，只提示，由你决定是否合并。其余的保留为只有名字、没有链接的角色。
-
-### 迁移方式
-
-- 迁移前先做一致性备份（`--backup`）。
-- 用 schema 版本号驱动迁移，和现在的 `SCHEMA_VERSION` 一样。
-- 迁移完核对计数：身份数、成员关系数、人工结论数，都必须和迁移前完全一致。
 
 ## 8. 不在本模型范围内
 

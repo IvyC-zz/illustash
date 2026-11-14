@@ -127,7 +127,7 @@ Claude Code 通过 `CLAUDE.md` 引入本文件，Codex 等直接读本文件。�
 
 - 新内容先找它属于哪篇现行参考，改那一篇。只有出现新的主题才新建。
 - 同一件事只在一处写全，别处用链接。不要在多篇文档里各写一份「现状」。
-- 新文档放 `docs/`，根目录只留 `README.md`、`AGENTS.md`、`CLAUDE.md`、`ERRATA.md` 和 `LICENSE`。
+- 新文档放 `docs/`，根目录只留 `README.md`、`AGENTS.md`、`CLAUDE.md` 和 `LICENSE`。
 - 新文档第一段写明：状态（现行参考 / 方案进行中）、日期、和哪篇文档是什么关系。
 
 ### 3. 一件事做完时的收尾
@@ -142,7 +142,7 @@ Claude Code 通过 `CLAUDE.md` 引入本文件，Codex 等直接读本文件。�
 ### 4. 删除和改名
 
 - 删之前搜一遍引用：`git grep -n '文件名'`，文档和代码注释都要改。
-- 代码注释会按节号引用文档（如「docs/TERMS_NAMES_PLAN.md N3」「docs/PROVENANCE.md 第 9 节」）。被引用的章节不要重新编号；要删就连注释一起改。
+- 代码注释会按节号引用文档（如「docs/TERMS_NAMES.md 方案 N3」「docs/PROVENANCE.md 第 9 节」）。被引用的章节不要重新编号；要删就连注释一起改。
 - 删掉的内容不用另外存档，git 历史就是存档。删除量大时先打一个标签并推送。
 - 不建 `archive/`、`old/` 这类目录。
 
