@@ -134,21 +134,21 @@ def paced_report(stage,processed):
     tmp.write_text(json.dumps(dict(format='illustash-recognition-progress/1',task_id=r['identity']['task_id'],stage=stage,total=len(r['assets']),processed=processed,failed=0)))
     tmp.replace(prog)
 def wait_for(name):
-    # Until the test lets the worker go on; a forgotten worker gives up instead of holding the run forever.
+    # 等待测试放行；无人放行时自行退出，避免一直占着任务。
     go=Path(sys.argv[0]).parent/name;until=time.monotonic()+120
     while not go.exists():
         if time.monotonic()>until: sys.exit(8)
         time.sleep(.01)
-# The first report goes out before NumPy loads: on a busy machine that import alone takes seconds.
+# 先报告进度再加载 NumPy：机器繁忙时，仅导入模块就可能耗费数秒。
 if mode=='paced': paced_report('preparing',0)
 import numpy as np
 if mode=='hang':
-    # Written whole, then renamed: a test that sees the file reads the full pid (#132).
+    # 完整写入后再重命名，保证测试看到文件时能读到完整 pid（#132）。
     (Path(r['output'])/'pid.tmp').write_text(str(os.getpid()));os.replace(Path(r['output'])/'pid.tmp',Path(r['output'])/'pid')
     time.sleep(60)
 if mode=='fail': sys.exit(7)
 if mode=='progress':
-    # A stale task's value first (ignored), then this task's, each next one once the test has seen the last.
+    # 先报告过期任务的值（应忽略），再报告本任务的值；测试看到上一条后才继续。
     prog=Path(os.environ['ILLUSTASH_RECOGNITION_PROGRESS'])
     def report(stage,processed,failed=0,task=r['identity']['task_id']):
         tmp=prog.with_suffix('.tmp')
@@ -167,8 +167,8 @@ if mode=='input-changed':
     (Path(sys.argv[0]).parent/'changed-asset').write_text(changed['id'])
     failures.append(dict(uuid=changed['id'],reason='input_changed'))
 if mode in ('classify','classify-legacy'):
-    # Stands in for the native producer (#112): a file it cannot read is unreadable; a PNG read in
-    # full without its end chunk, or anything else, is undecodable. Older workers give no reason.
+    # 模拟原生生产者（#112）：读不到的文件算 unreadable；完整读入后缺少结束块的 PNG
+    # 或其他内容算 undecodable。旧 worker 不提供原因。
     kept=[]
     for a in r['assets']:
         try: b=Path(a['path']).read_bytes()
@@ -181,7 +181,7 @@ if mode in ('classify','classify-legacy'):
         Path(sys.argv[2]).write_text(json.dumps(dict(identity=r['identity'],packages=[],failed=failures)))
         sys.exit(0)
 if mode in ('stream','stream-hang'):
-    # One complete batch per asset, each marked complete only after its files exist.
+    # 每张图单独成批，全部文件落盘后才标记完成。
     specs=SPECS
     for i,a in enumerate(r['assets']):
         if mode=='stream-hang' and i==2:
@@ -196,7 +196,7 @@ if mode in ('stream','stream-hang'):
     Path(sys.argv[2]).write_text(json.dumps(dict(identity=r['identity'],packages=[str(Path(r['output'])/f'batch-{i}') for i in range(len(r['assets']))],failed=[])))
     sys.exit(0)
 if mode=='paced':
-    # Each next report, and then the result, waits for the test to let it go: the test sets the pace (#219).
+    # 每条进度和最终结果都等待测试放行，由测试控制节奏（#219）。
     for step in range(1,len(r['assets'])+2):
         wait_for(f'step-{step}')
         if step<=len(r['assets']): paced_report('recognising',step)
@@ -206,11 +206,16 @@ ids=[a['id'] for a in r['assets']]
 specs=SPECS
 for model in ('wd','ccip'): np.save(p/(model+'.npy'),np.ones((len(ids),specs[model]['dimension']),dtype='<f4'))
 if mode=='content':
-    # Vectors from the file's bytes, as a real model: another picture under the same path gives others.
+    # 像真实模型一样按文件字节生成向量：同路径换图后得到不同向量。
     fills=[[sum(Path(a['path']).read_bytes())%97+1] for a in r['assets']]
     for model in ('wd','ccip'): np.save(p/(model+'.npy'),np.repeat(np.asarray(fills,dtype='<f4'),specs[model]['dimension'],axis=1))
 m=dict(format='illustash-recognition/2',preprocessing='illustash-wd-ccip/1',library_id=r['identity']['library_id'],assets=ids,inputs={a['id']:a['input_sha256'] for a in r['assets']},models=specs,files={f:dict(bytes=(p/f).stat().st_size,sha256=hashlib.sha256((p/f).read_bytes()).hexdigest()) for f in ('labels.jsonl','wd.npy','ccip.npy')})
 (p/'manifest.json').write_text(json.dumps(m))
+if mode=='stale-result':
+    # 模拟推理后文件被原地改写：大小、mtime 和资产 ID 不变，仍回传旧字节的识别结果。
+    path=Path(r['assets'][0]['path']);stat=path.stat();data=path.read_bytes()
+    path.write_bytes(bytes([data[0]^1])+data[1:])
+    os.utime(path,ns=(stat.st_atime_ns,stat.st_mtime_ns))
 if mode=='wrong':r['identity']['generation']+=1
 packages=[str(p)]
 if mode=='splitbad' and len(ids)>1:
@@ -352,6 +357,32 @@ if failures: Path(sys.argv[2]).write_text(json.dumps(dict(identity=r['identity']
         self.assertEqual((retried['status'], retried['failed']), ('done', 0), retried)
         with sqlite3.connect(self.lib.source) as c:
             self.assertEqual(c.execute('SELECT count(*) FROM recognition_assets WHERE asset=?', (changed,)).fetchone()[0], 1)
+
+    def test_native_library_new_stale_worker_result_rolls_back_the_entire_batch(self):
+        self.photo('E', 'com.atebits.Tweetie2')
+        original = self.library / 'originals/E/E.png'
+        original.parent.mkdir(parents=True)
+        original.write_bytes(b'synthetic')
+        self.sync()
+        # 未识别的照片还没进入应用库；给已扫描导入的文件夹资产建立人工标签。
+        with sqlite3.connect(self.lib.db) as c:
+            tagged = c.execute('SELECT uuid FROM assets ORDER BY uuid LIMIT 1').fetchone()[0]
+        self.assertEqual(self.request('/api/tag', {'ids': [tagged], 'tag': '合成保留'})['status'], 200)
+        with sqlite3.connect(self.lib.db) as c:
+            self.assertEqual(c.execute('SELECT tag FROM asset_tags WHERE uuid=?', (tagged,)).fetchall(), [('合成保留',)])
+        self.worker('stale-result')
+        state = self.sync()['state']
+        self.assertEqual(state['status'], 'error', state)
+        self.assertIn('已过期', state['message'])
+        with sqlite3.connect(self.lib.source) as c:
+            self.assertEqual(c.execute("SELECT count(*) FROM labels WHERE source='wd_v3'").fetchone()[0], 0)
+            self.assertEqual(c.execute('SELECT count(*) FROM embeddings').fetchone()[0], 0)
+            self.assertEqual(c.execute("SELECT count(*) FROM sqlite_master WHERE name='recognition_imports'").fetchone()[0], 0)
+        with sqlite3.connect(self.lib.db) as c:
+            self.assertEqual(c.execute('SELECT count(*) FROM asset_rating').fetchone()[0], 0)
+            self.assertEqual(c.execute('SELECT tag FROM asset_tags WHERE uuid=?', (tagged,)).fetchall(), [('合成保留',)])
+        self.worker('ok')
+        self.assertEqual(self.sync()['state']['status'], 'done')
 
     def test_native_library_new_worker_deadline_follows_progress_and_reports_why(self):
         import time
@@ -562,7 +593,7 @@ if failures: Path(sys.argv[2]).write_text(json.dumps(dict(identity=r['identity']
                                            wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE]
             kernel.CreateFileW.restype = wintypes.HANDLE
             kernel.CloseHandle.argtypes = [wintypes.HANDLE]
-            handle = kernel.CreateFileW(str(path), 0x80000000, 0, None, 3, 0, None)  # GENERIC_READ, no sharing, OPEN_EXISTING
+            handle = kernel.CreateFileW(str(path), 0x80000000, 0, None, 3, 0, None)  # GENERIC_READ，不允许共享，OPEN_EXISTING
             if handle in (None, wintypes.HANDLE(-1).value):
                 raise ctypes.WinError(ctypes.get_last_error())
             release = lambda: kernel.CloseHandle(handle)

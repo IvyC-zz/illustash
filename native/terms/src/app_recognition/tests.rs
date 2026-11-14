@@ -531,6 +531,42 @@ fn input_changes_at_publication_roll_back_all_machine_writes() {
     assert_eq!(human(&f.app()), before);
 }
 #[test]
+fn publication_checks_bytes_even_when_input_size_and_mtime_are_unchanged() {
+    struct Replace(PathBuf);
+    impl Observer for Replace {
+        fn publish(&self, apply: &mut dyn FnMut() -> Result<()>) -> Result<()> {
+            let metadata = fs::metadata(&self.0)?;
+            let mut bytes = fs::read(&self.0)?;
+            bytes[0] ^= 1;
+            fs::write(&self.0, bytes)?;
+            fs::OpenOptions::new().write(true).open(&self.0)?.set_modified(metadata.modified()?)?;
+            assert_eq!(fs::metadata(&self.0)?.len(), metadata.len());
+            assert_eq!(fs::metadata(&self.0)?.modified()?, metadata.modified()?);
+            apply()
+        }
+    }
+    for duplicate in [false, true] {
+        let f = Fixture::new(false);
+        let (path, _) = f.batch("result", feature(1));
+        let import = |observer: &dyn Observer| {
+            import_package_observed(&f.library, &path, &f.resources, &AtomicBool::new(false), &|_, _| Ok(()), observer)
+        };
+        if duplicate {
+            assert_eq!(import(&Silent).unwrap()["status"], "done");
+        }
+        let before = human(&f.app());
+        assert!(import(&Replace(f.input())).unwrap_err().to_string().contains("已过期"));
+        if duplicate {
+            // 重复包也须复核内容；拒绝它不撤销已经发布的历史交付。
+            assert_eq!(count(&f.source(), "SELECT count(*) FROM recognition_imports"), 1);
+            assert_eq!(count(&f.source(), "SELECT count(*) FROM recognition_assets"), 1);
+        } else {
+            assert_no_wd(&f);
+        }
+        assert_eq!(human(&f.app()), before);
+    }
+}
+#[test]
 fn v1_and_malformed_v2_inputs_are_rejected_before_writes() {
     let f = Fixture::new(false);
     let (path, _) = f.batch("result", feature(0));
