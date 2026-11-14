@@ -16,6 +16,10 @@ Once you connect your picture sources and finish local recognition, Illustash bu
 
 **Hierarchical series and character catalog:** Uses local models to identify characters in each picture and builds a “Catalog” structured as Series (with optional parent series) → Character → Outfit / Sub-tag (outfit, alternate version, another form); turning on “Online name lookups” can fill in Chinese names as well. Searching by Chinese, Japanese, or English names, aliases, or raw tags finds the matching character. Group pictures appear under every character in them, and different outfits or looks stay grouped under the same character.
 
+![Catalog: series and characters, organized](docs/assets/readme/en/library.jpg)
+
+<sub>Screenshots come from a demo library picked for this purpose. The illustrations belong to their original artists; to request removal, please <a href="https://github.com/shio-vinyl/illustash/issues">open an issue</a>.</sub>
+
 **Creating new series and characters:** Series, characters, or original characters not yet in the catalog can be created directly without waiting for a character index update. Once you confirm 5 pictures for a character, Illustash uses their visual features to link other pictures of that character; for characters whose names you do not know yet, look-alike pictures can be grouped under “Unidentified” first and renamed or merged into a character later.
 
 ### 2. Manual corrections and local learning
@@ -24,9 +28,13 @@ Machine recognition results apply by default, so you do not need to check every 
 
 **Your decisions take precedence:** Any assignment you confirm or reject always overrides machine judgment. Re-running recognition or updating the character index later will never overwrite assignments you edited or re-add a wrong character you removed.
 
+![Character page and details panel: confirm or correct a character](docs/assets/readme/en/character.jpg)
+
 **Identifying new looks from confirmed examples:** When a picture has a fan-made outfit, a different art style, or was missed initially, confirming 5 pictures for that character lets Illustash look for their other appearances based on existing examples: high-confidence matches are assigned automatically, while uncertain ones are marked “Might also be” for you to confirm.
 
 **Grouping obscure and original characters:** For characters whose names you do not know yet and original characters (OCs), Illustash groups look-alike pictures by appearance and traits such as hair color, eye color, and animal ears. Once you know who they are, you can assign the entire group at once without editing picture by picture.
+
+![Unidentified › By group: unknown characters grouped by look](docs/assets/readme/en/groups.jpg)
 
 “Home” occasionally shows a “Who's this?” card to add confirmed examples for uncertain characters or characters with few samples. For series you follow regularly, you can also turn on “Follow new characters” in the “Catalog” to fetch reference features for newly debuted characters on demand after confirming network access.
 
@@ -45,6 +53,8 @@ Clicking an artist from picture details lets you filter the library by that arti
 **Excluding non-illustrations:** Automatically distinguishes anime-style illustrations from real-life photos, chat logs, UI screenshots, and text images, placing non-illustrations under “Excluded” (rules can be toggled in Settings). A macOS Photos source only reads pictures saved from X and Pixiv, and everyday photos or clutter mixed into folders or saved files are moved to “Excluded” by the same rules.
 
 **Grouping duplicates and variants:** Re-saved originals, versions with added or removed text, crops, color-patch or mosaic censored pictures, and subtle variants that only change an expression or glasses are compared and grouped locally. Select several pictures and click “Compare” to outline differing regions or crop positions on the pictures.
+
+![Compare: boxes around what differs between two pictures](docs/assets/readme/en/compare.jpg)
 
 Identical and re-saved pictures fold automatically by default; subtle variants, local edits, crops, and other relations can also be set to fold in Settings. Editing character assignments on copies folded into the same duplicate group syncs automatically; if copies in a group disagree on their characters, they are held for alignment first and not folded yet.
 
