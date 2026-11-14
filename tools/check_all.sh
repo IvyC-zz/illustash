@@ -36,7 +36,7 @@ run "$python" -m compileall -q tests
 run "$python" tools/check_architecture.py
 # 前端结构检查：基线只能缩小。--strict-stale 要求改好的违规同时收紧基线（`--shrink`）；--base-ref 取与 main 的
 # 共同祖先，基线比它大就失败。找不到 origin/main 和 main 时明说并跳过“基线变大”这一项，其余检查照常。
-# CI 里只在 main 上跑，没有可比较的基准，所以只带 --strict-stale。
+# CI（push 到 main 和 PR）用浅克隆，没有可比较的基准，所以只带 --strict-stale；“基线变大”由本脚本把关。
 frontend_base=$(git merge-base HEAD origin/main 2>/dev/null || git merge-base HEAD main 2>/dev/null || true)
 if [ -z "$frontend_base" ]; then
   echo '注意：取不到 origin/main 或 main，跳过前端基线“变大”检查（--base-ref）；请先 git fetch origin。' >&2

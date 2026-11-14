@@ -1,3 +1,5 @@
+# 升级测试的单独手动入口，可在任意分支上触发。PR 自动检查的 Python job 已经包含这一类
+# （tests.run_fixed_suite 全量 discover），这里额外要求整类零跳过，供数据层改动单独复查。
 name: Historical library upgrade
 
 on:
@@ -12,15 +14,18 @@ concurrency:
 
 jobs:
   upgrade:
-    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
     name: Historical library upgrade (macOS)
     runs-on: macos-latest
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: native/terms
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'

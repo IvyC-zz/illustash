@@ -1,14 +1,23 @@
-# 手动检查入口；合并门槛为 PR 最终 head 上 tools/check_all.sh 全通过（#110）。
-# 只用仓库内合成数据；不接触真实图库、账号、Photos 或网络凭据。
+# PR 自动检查（#4）：目标为 main 的同库 PR 自动运行，作为额外保障；
+# 合入 main 的门槛仍是集成会话在候选上跑的 tools/check_all.sh（AGENTS.md）。
+# 只用仓库内合成数据；不接触真实图库、账号、Photos 或网络凭据，也不用任何 secret。
 name: CI
 
 # Linux 已冻结（README）：除不涉平台的前端 JS 外，全部在 macOS 上运行。
+# 草稿 PR 不跑（转 Ready 时跑），来自 fork 的 PR 不跑（暂不接受外部贡献），仓库私有时只跑手动触发的。
+# push 到 main 只为给 PR 留可复用的编译缓存：PR 写的缓存别的 PR 读不到。
 on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, ready_for_review]
+  push:
+    branches: [main]
   workflow_dispatch:
 
+# 同一 PR（或同一分支）有新提交时取消旧运行。
 concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: false
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -18,17 +27,59 @@ env:
   PYTHON_VERSION: '3.12'
 
 jobs:
-  core:
-    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
-    name: Rust 核心
-    runs-on: macos-latest
+  # 判断要不要跑：仓库私有时只跑手动触发的（私有库 macOS 按 10 倍计分钟）；fork、草稿 PR 不跑；
+  # 只改文档（docs/ 和根目录的 Markdown）的 PR 跳过构建与测试，与 AGENTS.md「只改文档的 PR 不跑全量」一致。
+  # docs/THIRD_PARTY.md 和 docs/BACKEND_TASKS.md 随安装包分发，按代码算。
+  changes:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (!github.event.repository.private &&
+      (github.event_name != 'pull_request' ||
+      (github.event.pull_request.head.repo.full_name == github.repository && !github.event.pull_request.draft)))
+    name: 改动范围
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      code: ${{ steps.scope.outputs.code }}
     steps:
       - uses: actions/checkout@v4
+        if: github.event_name == 'pull_request'
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+      - id: scope
+        run: |
+          if [ "$GITHUB_EVENT_NAME" != pull_request ]; then
+            echo code=true >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          # PR 检出的是它与 main 的合并提交：第一父提交就是当前 main。
+          # 改名同时检查旧路径，避免把移入 docs/ 的代码删除误判成纯文档。
+          git diff --no-renames --name-only HEAD^1 HEAD > "$RUNNER_TEMP/changed.txt"
+          echo "改动 $(wc -l < "$RUNNER_TEMP/changed.txt") 个文件"
+          if grep -qEv '^([^/]+|docs/.+)\.md$' "$RUNNER_TEMP/changed.txt" ||
+             grep -qEx 'docs/(THIRD_PARTY|BACKEND_TASKS)\.md' "$RUNNER_TEMP/changed.txt"; then
+            echo code=true >> "$GITHUB_OUTPUT"
+          else
+            echo '只改文档，跳过构建与测试'
+            echo code=false >> "$GITHUB_OUTPUT"
+          fi
+
+  core:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    name: Rust 核心
+    runs-on: macos-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
         with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
           workspaces: |
             native/terms
             crates/iqdb
@@ -75,16 +126,20 @@ jobs:
   # 跑在 macOS arm64：固定期望（tests/fixtures/ 下的录制值）在 Apple Silicon 上录制，
   # float32 结果在 x86 上差 1 ulp；另有错误文案、zsh 启动脚本等平台差异。Windows 另行处理。
   python:
-    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     name: Python 全量 (macOS)
     runs-on: macos-latest
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          persist-credentials: false
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
           workspaces: |
             native/terms
             crates/iqdb
@@ -148,27 +203,36 @@ jobs:
           fi
 
   js:
-    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     name: 前端 JS
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version: 22
       - run: node --test tests/*.test.cjs tests/test_pixiv_poll.js
 
   desktop:
-    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     name: 桌面壳 (macOS)
     runs-on: macos-latest
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
         with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
           workspaces: desktop
       - name: fmt
         run: cargo fmt --manifest-path desktop/Cargo.toml --check
@@ -177,16 +241,20 @@ jobs:
       - name: test
         run: cargo test --locked --manifest-path desktop/Cargo.toml
 
-  # #78: 仅 main 手动验收入口；不恢复任何自动触发。
   contracts:
-    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     name: 原生固定契约（无 Python）
     runs-on: macos-latest
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
           workspaces: native/terms
       - name: 构建独立重放可执行文件
         run: |
@@ -196,3 +264,32 @@ jobs:
           binary=$(jq -r 'select(.reason == "compiler-artifact" and .target.name == "contracts" and .executable != null) | .executable' "$RUNNER_TEMP/contracts-artifacts.jsonl")
           [ -n "$binary" ] && [ -x "$binary" ]
           tools/test_native_contracts.sh "$binary"
+
+  # 分支保护只要求这一项：job 改名或增减时不用改保护规则。只有确认只改文档才容许跳过构建；
+  # 来自 fork 的 PR 没有运行检查，这里判失败。草稿 PR 不跑，转 Ready 后重跑；仓库私有时同「改动范围」。
+  ok:
+    if: >-
+      always() &&
+      (github.event_name == 'workflow_dispatch' || !github.event.repository.private) &&
+      !(github.event_name == 'pull_request' && github.event.pull_request.draft)
+    needs: [changes, core, python, js, desktop, contracts]
+    name: 全部检查
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: |
+          jq -r 'to_entries[] | "\(.key): \(.value.result)"' <<< "$NEEDS"
+          if ! jq -e '
+            .changes.result == "success" and
+            (.changes.outputs.code as $code |
+              if $code == "true" then
+                all(to_entries[]; .key == "changes" or .value.result == "success")
+              elif $code == "false" then
+                all(to_entries[]; .key == "changes" or .value.result == "skipped")
+              else false end)
+          ' <<< "$NEEDS" > /dev/null; then
+            echo '::error::检查未完成：代码改动必须全部成功，只有文档改动允许跳过；fork PR 不自动运行'
+            exit 1
+          fi
