@@ -146,11 +146,7 @@ pub(super) fn record(
         format!("{:.1}", f64::from(score) * 100.).parse::<f64>().map_err(|e| Error::Invalid(e.to_string()))?;
     c.execute("INSERT OR IGNORE INTO image_sources(asset,site,post_id,url,artist_id,method,similarity) VALUES (?,?,?,?,?,'gallery_match',?)",
         params![asset,site,post_id,url,artist,similarity])?;
-    let proof = format!(
-        "{{{}: {}}}",
-        crate::character_json::dump(&json!(site), true),
-        crate::character_json::dump(&json!(post_id), true)
-    );
+    let proof = json!({site:post_id}).to_string();
     c.execute("INSERT INTO image_artists(asset,artist_id,method,score,evidence,status) VALUES (?,?,'gallery_match',?,?,'auto') ON CONFLICT(asset,artist_id) DO NOTHING",
         params![asset,artist,score,proof])?;
     Ok(())

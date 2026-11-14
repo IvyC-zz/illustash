@@ -95,6 +95,9 @@ class NativeSyncTest(unittest.TestCase):
         self.assertEqual(self.sync()['state']['status'],'needs_recognition')
 
     def test_native_library_new_original_download_refresh_and_existing_results_retry(self):
+        old_message = "[Errno 13] Permission denied: 'synthetic/old-input'"
+        with sqlite3.connect(self.lib.db) as c:
+            old_id = c.execute("INSERT INTO sync_runs(status,message) VALUES ('error',?)", (old_message,)).lastrowid
         self.photo('D','com.atebits.Tweetie2')
         self.sync()
         original=self.library/'originals/D/D.png';original.parent.mkdir(parents=True);original.write_bytes(b'synthetic')
@@ -104,7 +107,10 @@ class NativeSyncTest(unittest.TestCase):
         self.assertEqual(self.sync()['state']['status'],'error')
         with sqlite3.connect(self.lib.db) as c: c.execute('DROP TRIGGER fail_app')
         self.assertEqual(self.sync()['state']['status'],'needs_recognition')
+        history = json.loads(self.request('/api/sync')['body'])['history']
+        self.assertEqual(next(row['message'] for row in history if row['id'] == old_id), old_message)
         with sqlite3.connect(self.lib.db) as c:
+            self.assertEqual(c.execute('SELECT message FROM sync_runs WHERE id=?', (old_id,)).fetchone(), (old_message,))
             self.assertEqual(c.execute("SELECT rating FROM asset_rating WHERE uuid='D'").fetchall(), [('general',)])
             self.assertEqual(c.execute("SELECT src_path FROM assets WHERE uuid='D'").fetchone()[0],str(original))
 

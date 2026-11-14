@@ -55,7 +55,7 @@
 
  "crates/core/src/compat_text.rs":"547b1eefcfc13275563161ecd0371aa202fa37b31f1bdfd36068aa8aecb8a59f",
 
- "crates/core/src/error.rs":"9cd4206fc28f3fdebc6ca1fa20ce1c2496e552580cfec72af808213f2e22d25d",
+ "crates/core/src/error.rs":"fad3f2e435a56a1fd6273f61b50d2b997587e681adc408cc31fd6d3923b23ef8",
 
  "crates/core/src/legacy_characters.rs":"4533c2eb5ea6489ccd277074c874db05b78b1b4a2633c4b8bd3de58eedf6d548",
 
@@ -165,7 +165,7 @@
 
  "native/terms/src/app_characters.rs":"a285efa8f72b9124cfe8f6a9e14631e196512bf2b239d12912bef5501b1f4cfc",
 
- "native/terms/src/app_commands.rs":"c9eadb3e255cd1a7d832d95eee6df98324d0308247291be92fd7079b5c688278",
+ "native/terms/src/app_commands.rs":"1a2403ae8b01f8f552c26054055a7b09da663219022e3d23cd5b41ae2eecf127",
 
  "native/terms/src/app_create.rs":"f884b4587d13c479e6739fdb7439f2bee4342627b0b157f06560dabfede3cbdc",
 
@@ -173,7 +173,7 @@
 
  "native/terms/src/app_create_schema.sql":"f41f751e3f9c2deae935dcb9869cd385a0893a9d20dad2c4b64b7b14d7ef54ae",
 
- "native/terms/src/app_curation.rs":"a474670bf2b2c1371dbff659a519fd5a6a1e40801b1d16e317448232fc8fc17e",
+ "native/terms/src/app_curation.rs":"d3cee4484d16a5392ba682fefe98faf4f46e3fa092febbc67b561da5e1e37799",
 
  "native/terms/src/app_desktop.rs":"481e12ba4f08868b199da130b683ffb46556a79c44b9e781723d4c887903f9a5",
 
@@ -183,9 +183,9 @@
 
  "native/terms/src/app_folder.rs":"cd148b0a312065b97da3cbea8dc782a596eb0d8e842a1dfcf2d45f259fea6216",
 
- "native/terms/src/app_http.rs":"1fff6f06bb6b7aa0d60880d85dbbeedb5f41bfdfeb6b40689bbc4a8e9ac87e29",
+ "native/terms/src/app_http.rs":"c2c64de22d19a3b604429e2c8199dce2b86548cc16b3994fb156457bbb623865",
 
- "native/terms/src/app_identity.rs":"0a1013c73b59db6ad290a8bdfae5b554cef1fa36d73b3f217e029c0812fccd20",
+ "native/terms/src/app_identity.rs":"e77e07d27aae3fbd42d9fea16dfe2481d729187daee94812e9477830adc4f030",
 
  "native/terms/src/app_imports.rs":"0432cfdda774fd06826ac4c4f36a2b8fca3b261fea19c66813241b5aad409b18",
 
@@ -239,7 +239,7 @@
 
  "native/terms/src/app_provenance.rs":"78e2e1660cb702fa9b9240da7c9a4b19b6203344b8bf9cab98380845d03705cd",
 
- "native/terms/src/app_provenance_cache.rs":"ca5c3ddc9fc4139af8a941f9b1dcffc67653414f03103b4f1491f4c8ef778d31",
+ "native/terms/src/app_provenance_cache.rs":"440757a5a3d3fd37e79ac5a4400befe0503e3d792dd213b4cd2ff6f5af1655f4",
 
  "native/terms/src/app_provenance_net.rs":"6bfa48c3c82e0100f1347eb2140099e70a219baeda0c942398b10a8f2aed8c46",
 
@@ -263,7 +263,7 @@
 
  "native/terms/src/app_sources.rs":"8ee039dc596b1253783ab4256fd7befa1ce4087eee3f93b69208e7ede676c819",
 
- "native/terms/src/app_sync.rs":"31d40a32be87e7e0ce1992567c9e146315e180d1a6a64445efb411ef0cbd8f00",
+ "native/terms/src/app_sync.rs":"9f22ce00b66f257e5dd70fd889dc7039be2556810f9c855e2e8781832af128bd",
 
  "native/terms/src/app_tasks.rs":"55d0fc14c38fadec7ca902c88fd0053ff6403c41eb4ccdda9435d5258874ad19",
 
@@ -285,11 +285,11 @@
 
  "native/terms/src/http_app.rs":"1cdb28245fb1d97ac446313b089c8fe4700ce22027dbb7272bf3a6c04750a984",
 
- "native/terms/src/http_artists.rs":"f309368f900619f5a82c9174efe204b72e147d49ee1619fb990d74842c566e2b",
+ "native/terms/src/http_artists.rs":"4fa18a5bbbc5e5cab1954407308ffa9951bc2bf54a1b69a8ef01b2fa307d162b",
 
- "native/terms/src/http_browse.rs":"f8772269132e045275095cf91fa1ddd73530c396071d518cc319c966b1b88305",
+ "native/terms/src/http_browse.rs":"095086ad64f71de0ed6696ea8fa393597b3b626092d5429fc53eead4e8aa9b72",
 
- "native/terms/src/http_characters.rs":"77486635e9790c369b6f57ba96a9e57118acc646223cd1396740f91a4f31eb6c",
+ "native/terms/src/http_characters.rs":"acb705a0f8872cac7b3f978cfdb16afa58079a97d9c446581201e5c0eb1285ce",
 
  "native/terms/src/http_host_get.rs":"ccfc6662205665fe50084e5d1ed607bd1b0b764e9ecec2805987f2621e362d32",
 

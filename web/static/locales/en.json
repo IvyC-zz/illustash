@@ -2571,5 +2571,12 @@
   "下载 WD 加速文件（约 {size}）": "Download WD acceleration file (about {size})",
   "修复 WD 加速文件": "Repair WD acceleration file",
   "用 Core ML 加速标签与角色特征计算。首次需要准备编译缓存；加速不可用时自动用 CPU。": "Use Core ML to accelerate tags and character features. The first run prepares a compiled cache; CPU is used automatically if acceleration is unavailable.",
-  "原始模型先从这个地址下载，不行再换 ModelScope。填 {hf} 就是直连 Hugging Face。WD 加速文件从项目的 GitHub Release 下载。": "Original models are downloaded here first, then from ModelScope if needed. Set {hf} to connect to Hugging Face directly. The WD acceleration file comes from the project’s GitHub Release."
+  "原始模型先从这个地址下载，不行再换 ModelScope。填 {hf} 就是直连 Hugging Face。WD 加速文件从项目的 GitHub Release 下载。": "Original models are downloaded here first, then from ModelScope if needed. Set {hf} to connect to Hugging Face directly. The WD acceleration file comes from the project’s GitHub Release.",
+  "图库名称必须是字符串": "Library name must be a string",
+  "整数超出数据库支持的范围": "Integer is outside the range supported by the database",
+  "无法创建图库：名称不能包含空字符（NUL）": "Cannot create the library: its name cannot contain a null character (NUL)",
+  "文件操作失败（错误号 {code}）：{source}（路径：{path} → {other}）": "File operation failed (error {code}): {source} (path: {path} → {other})",
+  "文件操作失败（错误号 {code}）：{source}（路径：{path}）": "File operation failed (error {code}): {source} (path: {path})",
+  "文件操作失败：{source}（路径：{path} → {other}）": "File operation failed: {source} (path: {path} → {other})",
+  "文件操作失败：{source}（路径：{path}）": "File operation failed: {source} (path: {path})"
 }
