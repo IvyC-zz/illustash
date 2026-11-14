@@ -45,10 +45,12 @@ export async function applyRoute() {
   const legacy = route.legacy; delete route.legacy;
   noteHistory(legacy ? hashFor(route) : undefined);   // 旧地址就地改成新的；这一条记下序号，后退不退出页面
   const samePage = state.route.page === route.page && state.route.id === route.id && state.route.char === route.char;   // 切换子视图仍是同一页
-  rememberPlace();   // 先记下要离开的网格页滚到了哪里，回到这个地址时恢复（#402）
   // 换页（含同一页换子视图、换参数）：大图关掉，因为它下面的列表要重读、序号不再对得上；选择和光标复位；
   // 详情栏只在换了页面或角色时关。大图是被换页关掉的，不动焦点。
   closeViewer('silent');
+  // 再记下要离开的网格页停在哪里，回到这个地址时恢复（#402）。放在关大图之后：关大图让详情栏跟到大图里最后看的那张、
+  // 把光标那张滚进视野，记下的详情栏、光标和位置才是同一张。
+  rememberPlace();
   setRoute(route); resetForRoute();
   if (!samePage) closeInspector();
   $('sidebar').classList.remove('mobile-open');

@@ -133,3 +133,22 @@ test('换到自己渲染的页面（资料库、设置）从顶部开始，不�
     assert.equal(v.scrollTop, 0, hash);
   }
 });
+
+test('大图开着时换页再回来：详情栏和光标都是大图里最后看的那张', async () => {
+  await wired();
+  await visit('#/library');
+  const detail = await web.load('ui/detail.js');
+  globalThis.Image = class {};
+  // 开详情栏看第 6 张，Space 进大图，往后翻到第 9 张
+  await detail.inspect('library-5');
+  await detail.showViewer(8);
+  assert.equal(state.viewer, 8);
+  await visit('#/unmatched');
+  assert.equal(state.viewer, -1);
+  await visit('#/library');
+  assert.equal(state.focused, 'library-8');
+  assert.equal(state.cursor, 8);
+  assert.equal(page.el('inspector').hidden, false);
+  const v = page.el('viewport'), top = grid.rowTop(grid.rowOf(8));
+  assert.ok(top >= v.scrollTop && top < v.scrollTop + v.clientHeight, '光标那张在屏幕上');
+});
