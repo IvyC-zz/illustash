@@ -100,7 +100,7 @@ Python 合成测试在导入 `tests` 时为 `urllib.request.OpenerDirector.open`
 
 `native/terms/src/http.rs` 只保留原生入口、请求上下文、JSON/安全响应；停止信号委托进程平台模块，`app_http` 持有应用会话；不再有 Python state/readiness、旧路由转发或 Python 宿主启动。资源沿用 `--root` / `ILLUSTASH_ROOT` 下 `web/static` 和 `tags/tags_v3.csv`，参考库来自 `ILLUSTASH_SHARED/reference.sqlite`。stdout 的 `图库已启动：http://127.0.0.1:PORT` 与 `/api/bootstrap` 是桌面复用的启动信号；账号桌面登录桥与显式配置的可选研究 worker 保留。
 
-2026-10-08（#9 第 4 阶段）起，历史 Python 应用（HTTP、Store 编排、识别导入、Rust 命令桥、溯源 Runner 与联网来源，原在 `tests/reference/`）和根目录 `web/*.py`、`provenance/` 下的旧 Python 研究、索引、溯源计算脚本均已删除，原样副本归档在私有库；`web/` 只剩静态界面 `web/static`。测试不再导入旧 Python 代码，只读取录下的固定期望（见下两段）。读路由语料测试使用只服务核心读路由的测试读宿主（`native/terms/src/read_harness.rs`，`cargo build --manifest-path native/terms/Cargo.toml --features test-read-host --example read-http`），不转发、不启动 Python，不属于交付 CLI；普通构建不启用该 feature。`tools/` 下旧 Python 索引脚本及其自测已按用户决定删除（#53），现行脚本职责见 [TOOLS.md](TOOLS.md)。安装研究包的资源见 [安装交付](BACKEND_TASKS.md#独立安装与可选计算包)。
+2026-10-08（#9 第 4 阶段）起，历史 Python 应用（HTTP、Store 编排、识别导入、Rust 命令桥、溯源 Runner 与联网来源，原在 `tests/reference/`）和根目录 `web/*.py`、`provenance/` 下的旧 Python 研究、索引、溯源计算脚本均已删除，原样副本归档在私有库；`web/` 只剩静态界面 `web/static`。测试不再导入旧 Python 代码，只读取录下的固定期望（见下两段）。读路由语料测试使用只服务核心读路由的测试读宿主（`native/terms/src/read_harness.rs`，`cargo build --manifest-path native/terms/Cargo.toml --features test-read-host --example read-http`），不转发、不启动 Python，不属于交付 CLI；普通构建不启用该 feature。`tools/` 下旧 Python 索引脚本及其自测已按用户决定删除（#53），现行脚本职责见 [开发说明](DEVELOPMENT.md#tools-目录)。安装研究包的资源见 [安装交付](BACKEND_TASKS.md#独立安装与可选计算包)。
 
 固定契约：`native/terms/tests/contracts.rs` 重放 `native/terms/tests/fixtures/baseline/contracts/`（2026-10-19 起为 #201 的对照基准，由 main 在四个场景上录下），接口回复按字节、除退役旧表以外的全部表按行比较，规则见 `native/terms/tests/common/baseline.rs` 开头。测试只恢复输入、启动原生宿主、重放 HTTP，并核对两库全部表的列名、typed cells、rowid（包括历史、撤销载荷、事件与任务行），不录制期望值；输入 SQL 显式保留 rowid 间隙。四个场景覆盖基础 API 读取与拒绝、旧库升级/备份/旧历史撤销、标签写入和撤销、已有 running 同步记录转为 interrupted 后完成新运行并再次运行。成功 JSON 的全部键和值按列出的归一化规则比较，检查四个响应头；错误正文只比较状态码，同时检查数据库不变量。
 
@@ -231,7 +231,7 @@ terms 5（`5e7e7f7`）/6（`d9c49b4`）的历史源库定义均含可为 NULL �
 
 版权解析先查本地作品的 Danbooru/qualifier 链接；无匹配时按原 `related_tag.json` 查询及 `name_cache` 契约选择覆盖率至少 0.9 的最小作品，缺失则退至 0.5。Rust HTTPS 客户端保留 25 秒超时、2 MB 响应限制和 500 MB 流量预算，查询缓存与成功流量记账随命令提交；查询或后续写入失败回滚本次正式修改。`ILLUSTASH_COPYRIGHT_BASE` 仅允许本机带端口的 HTTP 合成查询替身。当前请求失败返回错误。
 
-关联创建（含复用）、资料编辑成功后同事务写入 `backend_effects.kind = names:{"entity":角色ID,"refresh":false}`；本地链接写入相同结构而 entity 为 null，表示全范围。这是可恢复的名称更新请求，绑定事件所在包实例，不是完成通知。原生名称消费者按范围执行、重查来源指纹并更新正式名称/投影，成功后确认；失败、确认故障或中断保留 pending，重启幂等补跑。名称运行、网络授权与回退的现行边界统一见 [WEB_NAMES.md](WEB_NAMES.md)「原生运行与恢复」。
+关联创建（含复用）、资料编辑成功后同事务写入 `backend_effects.kind = names:{"entity":角色ID,"refresh":false}`；本地链接写入相同结构而 entity 为 null，表示全范围。这是可恢复的名称更新请求，绑定事件所在包实例，不是完成通知。原生名称消费者按范围执行、重查来源指纹并更新正式名称/投影，成功后确认；失败、确认故障或中断保留 pending，重启幂等补跑。名称运行、网络授权与回退的现行边界统一见 [名字](TERMS_NAMES.md#9-显示名来源与后台更新)「原生运行与恢复」。
 
 原生角色裁决入口为 `POST /api/change`、`/api/audit/answer`、`/api/ask/answer`、`/api/reassign` 与 `/api/sweep`。HTTP 参数、筛选/exclude/confirm 和未展开副本的选择集在同一 Rust 写事务解析，角色核心继续负责副本范围、父角色/子标签裁决、原归属核验、历史及投影。全部 change 动作、多角色确认、问答 yes/no/later 与 switch、随机审核、单图和批量替换及扫除沿用现行语义；只解析接口消费的参数，未使用字段中的超大整数和非有限浮点不改变操作结果；写入仍要求当前 schema 和完整四项词条核心切换；later-only 返回 `undo:null`，不返回此前历史。裁决和 verdict 事件同事务提交，提交后无 learner 的事件处理及恢复由原生会话完成；角色与标签、画师、整理及身份命令共用最近一步撤销。生产回退使用相容产物及升级前备份。
 
@@ -263,7 +263,7 @@ terms 5（`5e7e7f7`）/6（`d9c49b4`）的历史源库定义均含可为 NULL �
 
 suggest 在只读事务内复用人工目标/filter/exclude 解析，明确不扩展复制品；按去重后的输入顺序截取前 2,000 图，保留机器归属及人工拒绝排除、频次/强弱/分数/名称排序与 9 个候选上限。名称显示、作品覆盖与筛选规则复用现有读取模块。只创建请求局部 TEMP 表，不写正式数据库、历史或事件。
 
-similar/clusters 从持久化表读取，worker 缺席时 state/learner 为 off；sync 的来源盘点、识别编排和本地历史见「原生来源同步与应用刷新」。names 的原生后台与远程选择器见 [WEB_NAMES.md](WEB_NAMES.md)，读取提供进度、名称覆盖、旧配置兼容与 API key 后四位；覆盖统计复用名称读取的 Danbooru、WD、Photos、CCIP、CCIP-base 链接回退。账号 GET 只读取既有绑定元数据、钥匙串/文件是否非空、X 导入统计及本机桌面登录桥，不联网、不改变凭据；写分支见「原生账号与桌面登录桥」。index 的原生检查、补丁与恢复见「原生角色索引维护」，provenance 已有原生 Runner，任务/授权和 worker 缺失行为见 [PROVENANCE.md](PROVENANCE.md) 第 8 节，已有来源结果仍由作品详情与画师读取呈现。oc/groups 从未持久化，是实时按需特征计算；worker 缺席返回原 400，local-links 与 entities/works 的非空 remote 查询已接入原生名称文本来源，联网授权独立于凭据保存。
+similar/clusters 从持久化表读取，worker 缺席时 state/learner 为 off；sync 的来源盘点、识别编排和本地历史见「原生来源同步与应用刷新」。names 的原生后台与远程选择器见 [名字](TERMS_NAMES.md#9-显示名来源与后台更新)，读取提供进度、名称覆盖、旧配置兼容与 API key 后四位；覆盖统计复用名称读取的 Danbooru、WD、Photos、CCIP、CCIP-base 链接回退。账号 GET 只读取既有绑定元数据、钥匙串/文件是否非空、X 导入统计及本机桌面登录桥，不联网、不改变凭据；写分支见「原生账号与桌面登录桥」。index 的原生检查、补丁与恢复见「原生角色索引维护」，provenance 已有原生 Runner，任务/授权和 worker 缺失行为见 [PROVENANCE.md](PROVENANCE.md) 第 8 节，已有来源结果仍由作品详情与画师读取呈现。oc/groups 从未持久化，是实时按需特征计算；worker 缺席返回原 400，local-links 与 entities/works 的非空 remote 查询已接入原生名称文本来源，联网授权独立于凭据保存。
 
 about 的应用名、版本和频道来自编译时现行应用元数据，schema 是应用 schema 36；build 是编译所用 Git 短提交，存在已跟踪改动时带 dirty；`git archive` 导出的源码没有 `.git`，改从 `native/terms/source-revision.txt`（export-subst 写入的导出提交）读取，不带 dirty（2026-10-12，#56）；其他非 checkout 构建可为空。runtime 为编译器版本；Unix platform 来自 uname，其他平台报 Rust 目标 OS/架构。python 为 null。libraries 只列识别要用的两项：「识别组件」（识别 worker 存在时为「可用」）和「ONNX Runtime」（worker 会加载的那个文件存在时为「已安装」：`ILLUSTASH_ORT_DYLIB`，否则会话资源根下的 `onnxruntime/`，与 worker 同一规则 `app_resources::ort_runtime`），缺失为 null、页面显示「未安装」；只判断文件在不在，宿主不加载 ONNX Runtime，也不报路径或版本（2026-10-15，#148）。页面使用 runtime 展示诊断。
 

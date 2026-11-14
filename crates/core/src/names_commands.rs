@@ -1,4 +1,4 @@
-//! 名字的写命令（docs/TERMS_NAMES_PLAN.md N3）：`illustash-terms names-command --db <库>`，标准输入给一个 JSON
+//! 名字的写命令（docs/TERMS_NAMES.md 方案 N3）：`illustash-terms names-command --db <库>`，标准输入给一个 JSON
 //! `{"op": …}`（或 `{"op": "batch", "ops": [...]}`），一个核心事务。NameUpdater（联网补名字）和相册标题的写入走这里，
 //! 逐行照 tests/reference/web/names.py（#9 已删除） 的 `put`、`tag_entities`、`NameUpdater.replace` / `aliases` / `seed` 与 tests/reference/web/store.py（#9 已删除） 的
 //! `Store.alias`。名字切到核心之后，旧表是兼容表（写保护），提交时由 `legacy_names::after_write` 补齐主数据、重建投影。

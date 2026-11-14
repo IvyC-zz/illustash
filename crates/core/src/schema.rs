@@ -579,7 +579,7 @@ CREATE VIEW term_relation_states AS
  FROM term_relations r LEFT JOIN term_effective_verdicts v ON v.relation_id=r.id;
 ";
 
-/// 第 4、5 步（角色、皮肤、作品）要的 schema，docs/TERMS_CHARACTERS_PLAN.md 第 2 节。
+/// 第 4、5 步（角色、皮肤、作品）要的 schema，docs/TERMS_CHARACTERS.md 方案第 2 节。
 fn v2(conn: &Connection) -> Result<()> {
     // term_verdicts 的 action_id 要变成可空：只能重建表。画师、标签切换时建的视图（asset_tags……）引用
     // term_effective_verdicts；重命名时用旧式 ALTER，不去检查、改写这些视图，它们按名字引用，重建后照常可用。
@@ -622,7 +622,7 @@ fn v4(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
-/// 第 5 版（名字投影，docs/TERMS_NAMES_PLAN.md）：名字的显示投影两张表（N1，影子阶段由 `names-project` 整表重建），
+/// 第 5 版（名字投影，docs/TERMS_NAMES.md「方案」）：名字的显示投影两张表（N1，影子阶段由 `names-project` 整表重建），
 /// 按文字键的名字与别名两张主数据表（N2，`sync-names` 收编）。
 fn v5(conn: &Connection) -> Result<()> {
     conn.execute_batch(crate::names_view::TABLES)?;
@@ -745,7 +745,7 @@ pub fn begin_writing(tx: &Connection) -> Result<()> {
 }
 
 pub fn commit_writing(tx: rusqlite::Transaction<'_>) -> Result<()> {
-    // 名字已在核心时，这个事务改到名字相关的数据就同事务补齐名字主数据、重建显示投影（docs/TERMS_NAMES_PLAN.md）。
+    // 名字已在核心时，这个事务改到名字相关的数据就同事务补齐名字主数据、重建显示投影（docs/TERMS_NAMES.md「方案」）。
     crate::legacy_names::after_write(&tx)?;
     tx.execute("DELETE FROM meta WHERE key=?1", [WRITER_KEY])?;
     tx.commit()?;

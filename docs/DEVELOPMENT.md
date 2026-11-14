@@ -2,7 +2,7 @@
 
 状态：现行参考，2026-10-20；「发布」一节还没按实际发布走过一次（#190）。从 README 移出的开发者内容：构建、运行形态、图库包结构、目录、文档地图与检查流程。面向使用者的介绍见 [README](../README.md)。
 
-核心是 Rust：`crates/core` 管业务规则、证据、人工裁决、关系、历史与投影，`crates/platform` 管平台能力，`crates/iqdb` 在本地算 IQDB 签名；`native/terms` 是应用宿主（CLI、HTTP、任务编排），`desktop/` 是只做启动与登录窗口的 Tauri 外壳。数据在 SQLite，推理固定 CPU ONNX Runtime，模型不进仓库、打包时按白名单加入。
+核心是 Rust：`crates/core` 管业务规则、证据、人工裁决、关系、历史与投影，`crates/platform` 管平台能力，`crates/iqdb` 在本地算 IQDB 签名；`native/terms` 是应用宿主（CLI、HTTP、任务编排），`desktop/` 是只做启动与登录窗口的 Tauri 外壳。数据在 SQLite，推理用 ONNX Runtime（Apple 芯片的 macOS 上走 Core ML、Windows 上走 DirectML，CPU 是参考与回退，见[识别的执行后端](BACKEND_TASKS.md#识别的执行后端)），模型不进仓库、打包时按白名单加入。
 
 文档、代码注释和提交信息里的 `#N` 编号、`PR #N` 与短提交哈希，凡早于 2026-10-06 开源的，都指向开源前的私有开发历史，在本仓库中查不到；本仓库的 Issue 和 PR 从 #1 重新编号。
 
@@ -135,6 +135,7 @@ HTTP 错误保留原有状态码与 `error` 正文，额外通过 `X-Illustash-D
 - `library.json`：包清单、来源与已移除来源记录。
 - `source.sqlite`：来源快照，只读，不接收人工写入。
 - `library.sqlite`：人工结论、机器证据与统一撤销历史，**不可当缓存删除**。
+- `provenance.sqlite`：找回画师的查询缓存与机器结果，不进导出包；`features/`：本图库的 CCIP 特征文件（`full-features.npy`、`full-manifest.csv`）。
 - `thumbnails/`：可重建；`backups/`：`--backup` 与升级前的备份。
 - `.illustash-owner.lock`：打开它的 Illustash 持有的系统文件锁；`.illustash-checks.json`：会话是否开着、两个库上次完整检查通过的时间、检查发现的损坏（#212，见[架构方向](ARCHITECTURE_DIRECTION.md#完整性检查)）。都由打开图库的会话维护，不要手改。
 
@@ -149,36 +150,57 @@ illustash/
 ├── desktop/              Tauri 桌面外壳：启动服务与 Pixiv 登录窗口
 ├── web/static/           静态界面
 ├── packaging/            安装包与便携产物构建、资源白名单
-├── tools/                构建、验收与研究入口（用途见 docs/TOOLS.md）
+├── tools/                构建、检查与验收脚本（用途见下文「tools/ 目录」）
 ├── tests/                合成测试、契约夹具与录下的旧参考固定期望
 ├── docs/                 现行参考、进行中的方案与待办
 ├── tags/                 标签表（tags_v3.csv）
 ├── start-web.command     本地 Web 入口（macOS）
 ├── AGENTS.md             协作流程与文档规范，CLAUDE.md 引入本篇
-├── ERRATA.md             模型与调研材料的勘误
 ├── LICENSE               GPL-3.0 全文
 └── README.md             对外介绍
 ```
 
 本机忽略、不进仓库：`models/`（ONNX 模型）、`review/`（共享索引与研究数据）、`reference/`（研究参考材料）、`_scratch/`（可重新生成的产物）、`.venv/`（本机依赖与固定验收缓存）；`.claude/worktrees/` 放开发 worktree。
 
+## tools/ 目录
+
+`tools/` 只放构建、检查与验收脚本，Python 源码不进安装包；安装包里实际带哪些文件以 `packaging/build.py` 的白名单为准（见 [安装交付](BACKEND_TASKS.md#独立安装与可选计算包)）。保留与删除的依据见 #186；旧 Python 索引工具已于 2026-10-08 删除（#53），正式索引计算由原生 `illustash-worker` 完成；研究脚本已全部移出本仓库（2026-10-06、2026-10-07）。
+
+| 脚本 | 用途 |
+|---|---|
+| `check_all.sh`、`local_acceptance.py` | 本地全量检查与固定路径验收，见 [LOCAL_CHECKS.md](LOCAL_CHECKS.md) |
+| `check_architecture.py` | crate 依赖方向检查 |
+| `check_frontend.py` | 前端结构检查：`web/static` 的依赖方向、state 声明与写入者、全局监听、对话框、超长行、页面名判断、`app.css` 的写死字面量（#349）；基线 `frontend_baseline.json` 只能缩小（#320），新规则首次登记存量用 `--init-rule` |
+| `check_styleguide.py` | 样式清单页（`styleguide/`，只在开发时用、不进发布包，迁移清点不算生产代码）与实现的同步检查：`census.js` 要等于 `styleguide/census.py` 对当前 `app.css` 的输出，样例和条目标题用到的类要在 `app.css` 里有样式；`styleguide/live.js`（调用 `web/static/ui` 的生成函数画样例）导入的名字要在产品代码里导出、要取的外壳 id 要还在、舞台和样例一一对应，组件条目都标明“调用生成”或“手写”（#352） |
+| `migration_inventory.py` | 生产迁移边界清点，规格在 `tests/migration_inventory.json` |
+| `gen_casefold.py`、`gen_http_unicode.py` | 生成 `crates/core` 的 casefold 与 Unicode 表 |
+| `test_native_contracts.sh`、`bench_native_contracts.sh` | 空 PATH 重放固定契约；契约基准，见 [TERMS_PERFORMANCE.md](TERMS_PERFORMANCE.md) |
+| `bench_recognition.py` | 整应用识别吞吐基准（合成图片，扫描到识别、导入完成），见 [TERMS_PERFORMANCE.md 第 6 节](TERMS_PERFORMANCE.md#6-整应用识别吞吐基准) |
+| `verify_read_http.py` | 原生测试用的 HTTP 逐字节对照辅助 |
+| `build_provenance_probe.py`、`windows_acceptance.py`、`windows_research_acceptance.py` | 溯源候选构建、Windows 基础版与研究包验收 |
+| `build_db.py` | 重建旧格式分析源库；`test_native_library_upgrade` 用它造旧库 |
+| `dev_preview.py` | 浏览器走查用的隔离宿主（临时目录、合成图库），`.claude/launch.json` 的 `web-isolated` 调用它，见上文「快速开始」 |
+| `version.py` | 版本号的唯一来源是 `native/terms/application.json`（#189）：检查或改写 `tauri.conf.json`、各发布 crate 的 `Cargo.toml` 与 `Cargo.lock` |
+| `updater_release.py` | 应用内更新的发布文件（#279）：打 macOS 更新包、生成 `latest.json`，步骤见上文「发布」 |
+| `gen_rust_licenses.py` | 生成 `packaging/rust-licenses/` 的第三方 Rust crate 许可（#161），依赖或 `Cargo.lock` 变了要重跑 |
+| `build_wd_coreml.py` | 生成 `models.json` 固定的 WD Core ML 执行变体（#375），只在维护者构建模型 Release 时用 |
+| `mac_icon.py` | 由 `docs/assets/icon-transparent.svg` 生成 macOS App 图标（#293），只能在 macOS 上运行 |
+
 ## 文档地图
 
-现行参考都在 `docs/`；根目录只留 `README.md`、`AGENTS.md`、`CLAUDE.md`、`ERRATA.md` 和 `LICENSE`。
+现行参考都在 `docs/`；根目录只留 `README.md`、`AGENTS.md`、`CLAUDE.md` 和 `LICENSE`。
 
 | 主题 | 文档 |
 |---|---|
 | 产品底线与待办 | [BACKLOG.md](BACKLOG.md) |
 | 架构与迁移方向 | [ARCHITECTURE_DIRECTION.md](ARCHITECTURE_DIRECTION.md) |
 | 词条核心 | [TERMS.md](TERMS.md)、[TERMS_SCHEMA.md](TERMS_SCHEMA.md)、[TERMS_ARTISTS.md](TERMS_ARTISTS.md)、[TERMS_LABELS.md](TERMS_LABELS.md)、[TERMS_CHARACTERS.md](TERMS_CHARACTERS.md)、[TERMS_NAMES.md](TERMS_NAMES.md) |
-| 图库与界面 | [LIBRARIES.md](LIBRARIES.md)、[WEB_V2.md](WEB_V2.md)、[WEB_UI_MAP.md](WEB_UI_MAP.md)、[WEB_NAMES.md](WEB_NAMES.md)、[DATA_MODEL.md](DATA_MODEL.md) |
+| 图库与界面 | [LIBRARIES.md](LIBRARIES.md)、[WEB_V2.md](WEB_V2.md)、[WEB_UI_MAP.md](WEB_UI_MAP.md)、[DATA_MODEL.md](DATA_MODEL.md) |
 | 识别与证据 | [RESULT_PACKAGES.md](RESULT_PACKAGES.md)、[EVIDENCE_PACKAGES.md](EVIDENCE_PACKAGES.md) |
 | 溯源 | [PROVENANCE.md](PROVENANCE.md) |
 | 安装与平台 | [BACKEND_TASKS.md](BACKEND_TASKS.md) |
 | 验收与性能 | [LOCAL_CHECKS.md](LOCAL_CHECKS.md)、[TERMS_PERFORMANCE.md](TERMS_PERFORMANCE.md) |
-| 角色与名字的方案（移植规则与用户决定，代码注释按节号引用） | [TERMS_CHARACTERS_PLAN.md](TERMS_CHARACTERS_PLAN.md)、[TERMS_NAMES_PLAN.md](TERMS_NAMES_PLAN.md) |
-| 工具与许可 | [TOOLS.md](TOOLS.md)、[THIRD_PARTY.md](THIRD_PARTY.md) |
-| 模型勘误 | [ERRATA.md](../ERRATA.md) |
+| 工具与许可 | [tools/ 目录](#tools-目录)、[THIRD_PARTY.md](THIRD_PARTY.md) |
 
 分类与维护规则见 [AGENTS.md](../AGENTS.md) 的「文档维护规范」：仓库只留现行参考、进行中的方案、待办与约束三种文档，任务与流水放 GitHub。
 
