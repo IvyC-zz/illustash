@@ -531,11 +531,12 @@ fn imported_files_and_zip_entries_are_matched_by_hash_whatever_their_names() {
     };
     let chosen = fixture.dir.join("downloads");
     fs::create_dir_all(&chosen).unwrap();
-    // 大文件放在带一个无关条目的 ZIP 里；特征模型文件改了名；再放一个与 JSON 大小相同但内容错误的文件。
+    // ZIP 带目录条目和 CP437 文件名；特征模型文件改了名；另有一个与 JSON 大小相同但内容错误的文件。
     let archive = chosen.join("models.zip");
     let mut zip = zip::ZipWriter::new(fs::File::create(&archive).unwrap());
     let options = zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
-    zip.start_file("folder/model.onnx", options).unwrap();
+    zip.add_directory("folder/", options).unwrap();
+    zip.start_file_with_options(options.name(b"folder/mod\x82l.onnx")).unwrap();
     zip.write_all(&fixture.files[0].1).unwrap();
     zip.start_file("readme.txt", options).unwrap();
     zip.write_all(b"synthetic").unwrap();
@@ -552,7 +553,7 @@ fn imported_files_and_zip_entries_are_matched_by_hash_whatever_their_names() {
     assert_eq!(
         job["results"],
         json!([
-            {"name": "models.zip/folder/model.onnx", "result": "accepted", "path": "big.onnx"},
+            {"name": "models.zip/folder/modél.onnx", "result": "accepted", "path": "big.onnx"},
             {"name": "models.zip/readme.txt", "result": "unknown", "path": null},
             {"name": "model (1).onnx", "result": "accepted", "path": "sub/feat.onnx"},
             {"name": "metrics.json", "result": "mismatch", "path": "sub/metrics.json"},

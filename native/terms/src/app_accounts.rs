@@ -571,7 +571,11 @@ pub fn import_archive(library: &Library, path: &Path) -> Result<i64> {
     } else {
         let mut zip = zip::ZipArchive::new(fs::File::open(path)?).map_err(|_| Error::invalid("归档格式不正确"))?;
         let index = (0..zip.len())
-            .find(|i| zip.by_index(*i).is_ok_and(|f| f.name().ends_with("data/following.js")))
+            .find(|i| {
+                zip.by_index(*i)
+                    .and_then(|file| file.name().map(|name| name.ends_with("data/following.js")))
+                    .unwrap_or(false)
+            })
             .ok_or_else(|| Error::invalid("归档里没有 data/following.js"))?;
         zip.by_index(index).map_err(|_| Error::invalid("归档读取失败"))?.take(LIMIT + 1).read_to_string(&mut text)?;
     }

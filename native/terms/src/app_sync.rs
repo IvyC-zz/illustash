@@ -46,7 +46,7 @@ impl Syncer {
         use crate::http_json::Json;
         let c = crate::app_library::read_connection(&library.db())?;
         let mut q = c.prepare("SELECT * FROM sync_runs ORDER BY id DESC LIMIT 8")?;
-        let names = q.column_names().iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        let names: Vec<String> = q.column_names().map(str::to_owned).collect();
         let history = q
             .query_map([], |r| {
                 let mut row = Vec::new();
@@ -1371,7 +1371,7 @@ mod tests {
             .into_iter()
             .map(|(name, sql)| {
                 let mut q = c.prepare(&sql).unwrap();
-                let columns = q.column_names().into_iter().map(str::to_owned).collect();
+                let columns = q.column_names().map(str::to_owned).collect();
                 let count = q.column_count();
                 let mut rows = q
                     .query_map([], |r| (0..count).map(|i| r.get(i)).collect::<rusqlite::Result<Vec<_>>>())

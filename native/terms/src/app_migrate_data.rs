@@ -7,7 +7,7 @@ use serde_json::{json, Map, Value};
 use std::collections::{HashMap, HashSet};
 pub(crate) fn index(c: &Connection) -> Result<Value> {
     let mut q = c.prepare("SELECT * FROM characters")?;
-    let cols = q.column_names().iter().map(|s| s.to_string()).collect::<Vec<_>>();
+    let cols: Vec<String> = q.column_names().map(str::to_owned).collect();
     let chars = q
         .query_map([], |r| {
             let mut o = Map::new();
