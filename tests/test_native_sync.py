@@ -364,7 +364,12 @@ if failures: Path(sys.argv[2]).write_text(json.dumps(dict(identity=r['identity']
         original.parent.mkdir(parents=True)
         original.write_bytes(b'synthetic')
         self.sync()
-        self.request('/api/tag', {'ids': ['E'], 'tag': '合成保留'})
+        # 未识别的照片还没进入应用库；给已扫描导入的文件夹资产建立人工标签。
+        with sqlite3.connect(self.lib.db) as c:
+            tagged = c.execute('SELECT uuid FROM assets ORDER BY uuid LIMIT 1').fetchone()[0]
+        self.assertEqual(self.request('/api/tag', {'ids': [tagged], 'tag': '合成保留'})['status'], 200)
+        with sqlite3.connect(self.lib.db) as c:
+            self.assertEqual(c.execute('SELECT tag FROM asset_tags WHERE uuid=?', (tagged,)).fetchall(), [('合成保留',)])
         self.worker('stale-result')
         state = self.sync()['state']
         self.assertEqual(state['status'], 'error', state)
@@ -375,7 +380,7 @@ if failures: Path(sys.argv[2]).write_text(json.dumps(dict(identity=r['identity']
             self.assertEqual(c.execute("SELECT count(*) FROM sqlite_master WHERE name='recognition_imports'").fetchone()[0], 0)
         with sqlite3.connect(self.lib.db) as c:
             self.assertEqual(c.execute('SELECT count(*) FROM asset_rating').fetchone()[0], 0)
-            self.assertEqual(c.execute("SELECT tag FROM asset_tags WHERE uuid='E'").fetchall(), [('合成保留',)])
+            self.assertEqual(c.execute('SELECT tag FROM asset_tags WHERE uuid=?', (tagged,)).fetchall(), [('合成保留',)])
         self.worker('ok')
         self.assertEqual(self.sync()['state']['status'], 'done')
 
