@@ -142,8 +142,6 @@ class NativeProfilesTest(unittest.TestCase):
                     read(f'/api/assets?entity={entity}')['total'], read('/api/review-pools'))
 
         # 让合成角色有作品、自动显示名的首选标记和图片归属。
-        post('/api/character/profile', {'entity': entity, 'work': work})
-        post('/api/change', {'ids': ['a'], 'entity': entity, 'action': 'confirmed'})
         with closing(sqlite3.connect(self.right.db)) as c:
             term = c.execute('SELECT id FROM terms WHERE key=?', (entity,)).fetchone()[0]
             c.execute("INSERT INTO meta(key,value) VALUES ('terms_writer','1')")
@@ -153,6 +151,9 @@ class NativeProfilesTest(unittest.TestCase):
             c.execute("UPDATE term_tree SET mascot_origin='default' WHERE term_id=?", (term,))
             c.execute("DELETE FROM meta WHERE key='terms_writer'")
             c.commit()
+        # 资料写入提交时刷新显示投影，再取初始状态。
+        post('/api/character/profile', {'entity': entity, 'work': work})
+        post('/api/change', {'ids': ['a'], 'entity': entity, 'action': 'confirmed'})
         initial = snapshot()
         initial_views = views()
         previous = self.latest_action()
