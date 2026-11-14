@@ -193,6 +193,34 @@ PR 应明确区分“当前 head 上完整执行退出 0”和“当前候选仅
 
 **耗时**：启用后按实际运行记录补上各 job 的冷、热缓存耗时。仓库私有期间没有触发过；2026-10-01 开源前的旧版本在 `macos-latest` 上的一次运行里，Python 全量 job 约 25 分钟，其余各约 2 分钟，当时的代码量和 job 组成与现在不同，只能作量级参考。
 
+## 界面走查（浏览器，#453）
+
+2026-11-15 起。`tools/ui_walk/` 在隔离宿主 + 合成图库上用无头 Chromium 走一组跨页面、跨浮层的使用流程，每一步记快照（焦点、打开的层、选中、光标、详情栏、大图、地址、滚动、提示条）、截图并检查控制台错误。现有的 Node 测试用假 DOM，拦不住「功能 A 对、功能 B 对，连起来不对」的问题（#386）；这套走查补的是这一层。它是 Chromium 上的初筛，不代替 WKWebView（虚拟机）和 WebView2（Windows）里的实测，输入法组字也不在里面（见 #388 的做法）。
+
+**跑一次**（在仓库根）：
+
+```sh
+python3 -m tools.ui_walk run                       # 当前检出的 web/static，中英文界面各跑一遍
+python3 -m tools.ui_walk run --ref d5bf1212        # 某个提交的 web/static（git archive），后端仍是当前构建的宿主
+python3 -m tools.ui_walk run --static 某处/web/static --flow viewer-detail --lang zh
+python3 -m tools.ui_walk compare .walk/<A> .walk/<B>   # 逐步比较两次运行
+python3 -m tools.ui_walk list                      # 流程和它们拦的 #386 条目
+```
+
+结果在 `.walk/<时间>/`（已被 git 忽略）：`report.md` 列出每条流程的检查、控制台错误和截图链接，`report.json` 是全部步骤的快照，截图在 `zh/`、`en/` 下。有检查没通过、控制台报错（含 5xx 回应）或流程没跑完时退出 1。`compare` 写 `compare.md` 和左右并排截图的 `compare.html`，有差异时退出 1；用法是新旧两份前端各跑一遍（#469 迁一页之前和之后），差异应只剩有意的改动。快照里的图一律写文件名，不写 uuid。
+
+**依赖**：Node 22（自带 WebSocket，驱动经 Chrome DevTools Protocol 发真实键鼠事件，没有 npm 依赖、不加构建步骤）、Python 3、当前检出构建的 `illustash-terms` 和 `illustash-worker`（`cargo build --bin illustash-terms --bin illustash-worker`，经 `collab_run.py bg`；没有 worker 时分组、相似页是空的，报告开头会写明），以及 chrome-headless-shell：默认取 Playwright 缓存里最新的一份（`npx playwright install chromium-headless-shell` 只下载浏览器，不往仓库加依赖），或用 `ILLUSTASH_WALK_CHROME` 指定。不用 Chrome 的 `--headless=new`：它在本机主进程会长期占满一个核，挡住别的会话的计时，页面里的定时器和 requestAnimationFrame 也会卡住。走查不经 `collab_run.py` 排队：它不编译，CPU 占用和定向测试相当。
+
+**隔离**：每条流程、每种语言开始前把合成图库恢复成刚建好的样子，各起一个宿主；宿主的 HOME、应用数据、共享资源都在 `.walk/fixture/` 下，和 `tools/dev_preview.py` 一样不碰真实图库、钥匙串和网络（关掉自动同步、来源查询和索引检查）。不点「打开其他图库」「导入」「添加文件夹」这类会在本机弹系统选择框的入口。宿主用一次性码地址开页，界面语言由浏览器的 `Accept-Language` 决定，时区固定为东八区，视口 1440×900。
+
+**合成图库**（`tools/ui_walk/fixture.py`）：约 110 张生成的图，内容只经产品自己的入口写入：`library-create`、`library-scan`，一个合成的识别结果包（WD 评级与画面标签、WD 认出的角色和「也可能是」、按方向造的 WD/CCIP 向量；模型文件和标签表是假的，宿主只核对 SHA-256），一个合成的画师证据包（机器认定和「也许是」），再起宿主让研究 worker 分组、找相似，经 HTTP 接口建角色、确认归属、跳过和排除。结果有人工确认的角色 3 个、WD 认出的 1 个、未识别分组、相似组、字节相同的副本、R18 图和画师；引导标成跳过、只问一次的提示卡记成问过。随机抽查和身份整理的题在新建图库里没有写入方，造不出来。夹具按「生成脚本 + 宿主和 worker 程序」的哈希缓存在 `.walk/fixture/<键>/`，第一次建约一两分钟，之后直接用；新旧两份前端比较时用的是同一份图库。`python3 tools/dev_preview.py --fixture walk`（`.claude/launch.json` 的 `web-isolated-walk`）用同一份图库起交互预览。
+
+**流程**（`tools/ui_walk/flows.mjs`）按使用流程组织，不按单页：主要页面逐个打开；详情栏 → 大图翻页 → 关大图后三者指向同一张；同一张图在详情栏、大图、角色页按 C 都是「换成」，和按钮一致；未识别里多选 → 大图里设角色 → 关大图 → 撤销；按组整理整组设为 → 撤销后等学习收尾；浮层叠浮层时 Esc 只关栈顶、点外面只关外面的；搜索后 Esc；筛选、滚动、开详情栏 → 去设置 → 后退；设置里切原比例；新图库的导览接管焦点、上手清单不盖详情栏按钮。检查项只写人看得见的对错（哪张图、哪一层、焦点在哪、张数），不写实现细节，所以换一种实现后同一套检查仍然成立。新增流程照文件开头的说明加一项。
+
+**已知的宿主问题**：宿主的连接线程池有竞态，页面启动偶尔有模块请求要等 30 秒读超时才回应（#477）。走查最多等 60 秒，启动超过 10 秒时报告里记一条 ⚠，不算检查失败。
+
+**旧版复现**（2026-11-15，本机 macOS arm64，chrome-headless-shell 148）：用 #386 那批修复之前的 `d5bf1212` 跑，走查拦下了已修的 1-2、1-3、1-4、1-5、1-6、1-8、1-9 等条目；当前 main 上全部通过。逐条结果见 #453 的 PR。
+
 ## macOS 实机测试（虚拟机）
 
 2026-10-15 起，在 Mac 上启动 App 的实机测试都在 [Tart](https://tart.run) 虚拟机里做（用户决定见 [AGENTS.md](../AGENTS.md)）。虚拟机有自己的用户目录、应用数据和钥匙串，碰不到本机正式版的数据；本机只被占用磁盘，以及运行时的 CPU 和内存。
