@@ -46,7 +46,7 @@ Core 持有连接内规则、资产、证据、人工结论、历史/撤销和�
 
 扫描取消由宿主 `app_sync::check` 提供，保留 atomic cancel 或宿主进程停止状态的原谓词；文件夹、Photos 及只读函数仅调用传入的检查。文件夹仍先开启源库即时事务再盘点/哈希、发布 pending journal 后提交；Photos 仍先只读枚举显式来源再开启源库事务，并在原逐行位置探测路径。原检查点、频率、来源碰撞拒绝和应用库后续刷新边界不变。原生选择由宿主传停止谓词，保留 100ms 轮询、600s 超时及 kill/wait 收尾。
 
-`crates/core` 的 `illustash-core` 通过 path dependency 被 `native/terms` 的 `illustash-terms` 使用。Core 承载连接内的词条 schema/迁移、证据包解析与验证、人工裁决、角色/身份关系、历史/统一撤销、名字搜索与投影，以及 Error、Origin、严格 JSON、Unicode 与生成字符表。SQL 资源跟随规则归 Core；宿主以窄转导出保持旧 Rust 模块路径，折叠 SQL 通过连接内函数共用，不复制算法或 SQL。Core 可独立 fmt/clippy/test/locked build，进程内客户端不需要 HTTP/CLI/Tauri、平台 crate 或参考宿主；应用协调与 HTTP/CLI 留宿主；已有来源读取、路径/VFS、文件权限、进程/凭据/系统集成由 `crates/platform` / `illustash-platform` 提供。包名、bin 名、构建入口和 JSON/SQLite 格式不变，无根 workspace。
+`crates/core` 的 `illustash-core` 通过 path dependency 被 `native/terms` 的 `illustash-terms` 使用。Core 承载连接内的词条 schema/迁移、证据包解析与验证、人工裁决、角色/身份关系、历史/统一撤销、名字搜索与投影，以及 Error、Origin、严格 JSON、Unicode 与生成字符表。SQL 资源跟随规则归 Core；宿主以窄转导出保持旧 Rust 模块路径，折叠 SQL 通过连接内函数共用，不复制算法或 SQL。Core 可独立 fmt/clippy/test/locked build，进程内客户端不需要 HTTP/CLI/Tauri、平台 crate 或参考宿主；应用协调与 HTTP/CLI 留宿主；已有来源读取、路径/VFS、文件权限、进程/凭据/系统集成由 `crates/platform` / `illustash-platform` 提供。包名、bin 名、构建入口和 JSON/SQLite 格式不变。
 
 `backup::RequiredBackup` 是 Core 的具体必需能力，字段私有：Platform 提供私有文件预留、VFS 打开和自身失败文件清理，Core 执行既有 SQLite Backup step100、DELETE journal 与 quick_check，保留已提交 WAL 和隐式 rowid。文件库不能以空适配或内存连接确认备份成功；只有 SQLite main filename 为空的内存库保留免备份语义。现有宿主公共 migrate/cutover 固定调用 `platform_backup::capability()`；Core 独立 API 必须显式提供该能力。宿主已持有 writer transaction 的升级以独立 reader 完成备份并获得字段私有的 `PreparedUpgrade`，规则核对原路径/版本后在原事务迁移；目标版本在任何写入前校验，没有公开的不带备份的 migrate_in。ATTACH URI 原编码规则仍在 Core，宿主给 ATTACH 提供 Windows 规范化操作路径，同时保留原请求路径作校验与错误文本；只读和事务顺序不变。测试生成旧版本也走带能力入口，合成夹具只清其自身 setup 备份后测实际升级。
 
