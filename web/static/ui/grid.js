@@ -434,9 +434,14 @@ export function renderSelection() {
   } else if (kind === 'pending') {
     buttons = `<button class="primary${arm('exclude')}" data-act="exclude">${state.armed === 'exclude' ? t('再点一次：排除 {n} 张', {n: number(n)}) : t('排除')} <kbd>X</kbd></button><button class="quiet${arm('include')}" data-act="include">${state.armed === 'include' ? t('再点一次：保留 {n} 张', {n: number(n)}) : t('保留')}</button>`;
   } else if (kind === 'skipped') {
-    buttons = `<button class="primary${arm('resume')}" data-act="resume">${state.armed === 'resume' ? t('再点一次：恢复 {n} 张', {n: number(n)}) : t('恢复到未识别')}</button><button class="quiet" data-act="assign">${t('设为角色…')} <kbd>C</kbd></button>${ocButton}`;
+    buttons = `<button class="primary${arm('resume')}" data-act="resume">${state.armed === 'resume' ? t('再点一次：恢复 {n} 张', {n: number(n)}) : t('恢复到未识别')} <kbd>S</kbd></button><button class="quiet" data-act="assign">${t('设为角色…')} <kbd>C</kbd></button>${ocButton}`;
   } else {
-    buttons = `<button class="primary" data-act="assign">${t('加角色…')} <kbd>C</kbd></button><button class="quiet" data-act="notlib" ${state.sel.all ? `disabled title="${t('全选时请进入角色页移出')}"` : ''}>${t('不是…')} <kbd>⌫</kbd></button>`;
+    // C＝换成、A＝追加（#399）：选中的图都还没有角色时只有「设为角色」，C、A 都是它。
+    const chars = selectedChars(), why = !chars ? t('全选时请进入角色页换成') : !chars.common.length ? t('所选图片没有共同的角色') : '';
+    buttons = chars && !chars.all.size ? `<button class="primary" data-act="assign">${t('设为角色…')} <kbd>C</kbd></button>`
+      : `<button class="primary" data-act="replace" ${why ? `disabled title="${why}"` : ''}>${t('换成…')} <kbd>C</kbd></button>`
+        + `<button class="quiet" data-act="assign">${t('加角色…')} <kbd>A</kbd></button>`;
+    buttons += `<button class="quiet" data-act="notlib" ${state.sel.all ? `disabled title="${t('全选时请进入角色页移出')}"` : ''}>${t('不是…')} <kbd>⌫</kbd></button>`;
   }
   if (!['excluded', 'pending'].includes(kind)) buttons += `<button class="quiet${arm('exclude')}" data-act="exclude" title="${t('不是插画（截图、照片等）：从图库移到「已排除」')}">${state.armed === 'exclude' ? t('再点一次：排除 {n} 张', {n: number(n)}) : t('排除')} <kbd>X</kbd></button>`;
   buttons += `<button class="quiet" data-act="tag">${t('标签')} <kbd>G</kbd></button>`;
@@ -445,6 +450,25 @@ export function renderSelection() {
   bar.innerHTML = count + buttons + (big ? `<span class="bar-note">${t('超过 500 张需再点一次确认')}</span>` : '');
   $('clearSel').onclick = quitSelecting;
   for (const b of bar.querySelectorAll('[data-act]')) b.onclick = () => runBarAction(b.dataset.act);
+}
+// 选中的图上的角色（只看已读到的图；全选时为 null）：all 是出现过的，common 是每张都有的，C 换掉的就是它（#399）。
+function selectedChars() {
+  if (state.sel.all) return null;
+  const all = new Map(); let common = null;
+  for (const x of state.items) {
+    if (!x || !state.sel.ids.has(x.uuid)) continue;
+    const ids = new Set((x.memberships || []).map(m => m.id));
+    for (const m of x.memberships || []) all.set(m.id, m);
+    common = common ? new Set([...common].filter(id => ids.has(id))) : ids;
+  }
+  return {all, common: [...common || []].map(id => all.get(id))};
+}
+// 把选中的图从 from 换成别的角色：角色页换掉本页的角色，默认选择栏换掉选中的图共同的角色。
+function swapSelected(from) {
+  const n = selCount(), payload = {...selectionPayload(), confirm: n > 500};
+  openPicker({title: t('把 {n} 张换成…', {n: number(n)}), sentence: e => t('把 {n} 张从 {from} 换成 {name}', {n: number(n), from: from.name, name: e.name}),
+    exclude: [from.id], suggest: selectionPayload(), multi: true,
+    pick: list => mutate('/api/reassign', {...payload, old: from.id, new: newIds(list)}, state.route.char === from.id)});
 }
 export const short = name => name.length > 28 ? name.slice(0, 26) + '…' : name;
 function needsArm(key) {
@@ -459,7 +483,6 @@ async function answerAudit(yes) {
 function runBarAction(act) {
   const n = selCount(), r = state.route; if (!n || edits.busy) return;
   const payload = () => ({...selectionPayload(), confirm: n > 500});
-  const fromName = state.char?.name;
   if (act === 'audit_yes' || act === 'audit_no') { answerAudit(act === 'audit_yes'); return; }
   if (act === 'findartist') {
     const sel = state.sel;
@@ -472,8 +495,15 @@ function runBarAction(act) {
   else if (act === 'isme') { if (!needsArm('isme')) mutate('/api/change', {...payload(), action: 'confirmed', entity: r.char}, true); }
   else if (act === 'exclude' || act === 'include') { if (!needsArm(act)) mutate('/api/curate', {...payload(), action: act}, true); }
   else if (act === 'resume') { if (!needsArm('resume')) mutate('/api/change', {...payload(), action: 'resume'}, true); }
-  else if (act === 'swap') openPicker({title: t('把 {n} 张换成…', {n: number(n)}), sentence: e => t('把 {n} 张从 {from} 换成 {name}', {n: number(n), from: fromName, name: e.name}), exclude: [r.char], suggest: selectionPayload(), multi: true,
-    pick: list => mutate('/api/reassign', {...payload(), old: r.char, new: newIds(list)}, true)});
+  else if (act === 'swap') swapSelected({id: r.char, name: state.char?.name});
+  else if (act === 'replace') {
+    const chars = selectedChars();
+    if (!chars) toast(t('全选时请进入角色页换成'));
+    else if (!chars.all.size) runBarAction('assign');
+    else if (!chars.common.length) toast(t('所选图片没有共同的角色'));
+    else if (chars.common.length === 1) swapSelected(chars.common[0]);
+    else openPicker({title: t('换掉哪个角色？'), items: chars.common, sentence: e => t('把 {n} 张的 {name} 换掉', {n: number(n), name: e.name}), pick: e => swapSelected(e)});
+  }
   else if (act === 'also') openPicker({title: t('这 {n} 张也是…', {n: number(n)}), sentence: e => t('给 {n} 张加上 {name}', {n: number(n), name: e.name}), exclude: [r.char], suggest: selectionPayload(), multi: true,
     pick: list => mutate('/api/change', {...payload(), action: 'confirmed', ...targets(list)}, false)});
   else if (act === 'assign') openPicker({title: browsing() ? t('给 {n} 张加角色', {n: number(n)}) : t('把 {n} 张设为…', {n: number(n)}), sentence: e => t('把 {n} 张设为 {name}', {n: number(n), name: e.name}), suggest: selectionPayload(), multi: true,
