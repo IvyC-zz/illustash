@@ -563,5 +563,13 @@ export function wireCatalog() {
   });
 }
 
-// 资料库登记：渲染入口；切换 R18 之后只重新读收藏动态（目录由元数据读取重画）。
-implement({characters: {render: () => renderIndex(), refresh: why => { if (why === 'nsfw') { forgetActivity(); readActivity(); } }}});
+// 元数据刷新角色目录，撤销后还要重读作品计数或「只当标签」清单。
+implement({characters: {render: () => renderIndex(), refresh: async why => {
+  if (why === 'nsfw') { forgetActivity(); readActivity(); }
+  if (why !== 'undo') return;
+  const route = state.route;
+  if (route.section === 'works') { await renderShelf(); return; }
+  await loadTagged().catch(e => error(readError(e)));
+  if (state.route !== route) return;
+  renderHeading(); await searchIndex();
+}}});

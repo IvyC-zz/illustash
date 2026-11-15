@@ -369,7 +369,7 @@ pub fn dump(c: &Connection, text: &dyn Fn(&str) -> String) -> Dump {
         let implicit = !sql.contains("WITHOUT ROWID") && !integer_key(c, name) && name != "sqlite_sequence";
         let select = if implicit { "SELECT rowid,* FROM" } else { "SELECT * FROM" };
         let mut s = c.prepare(&format!("{select} \"{name}\"")).unwrap();
-        let columns: Vec<String> = s.column_names().iter().map(|n| format!("\"{}\"", n.replace('"', "\"\""))).collect();
+        let columns: Vec<String> = s.column_names().map(|n| format!("\"{}\"", n.replace('"', "\"\""))).collect();
         let n = columns.len();
         let mut q = s.query([]).unwrap();
         while let Some(row) = q.next().unwrap() {

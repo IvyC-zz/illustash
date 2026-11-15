@@ -62,6 +62,10 @@ class Store:
         return self.command('undo', action=action, effect='verdict')
 
     def curate(self, ids, action):
+        return self.application_command('/api/curate', {'ids': ids, 'action': action})
+
+    def application_command(self, route, body):
+        """让合成状态经过真实应用写入口；后台宿主退出后取回数据库。"""
         import os, subprocess
         from tools.verify_read_http import enter, fetch
         from tests.test_read_http import SPAWN, free_port, wait_until, stop_process
@@ -85,8 +89,8 @@ class Store:
         try:
             enter(origin,log,process,timeout=10)
             token = json.loads(fetch(origin,{'url':'/api/bootstrap'},origin)['body'])['token']
-            result = fetch(origin,{'url':'/api/curate','method':'POST',
-                                   'body':json.dumps({'ids':ids,'action':action}).encode(),
+            result = fetch(origin,{'url':route,'method':'POST',
+                                   'body':json.dumps(body).encode(),
                                    'headers':{'Content-Type':'application/json','X-CSRF-Token':token}},origin)
             if result['status']!=200:
                 raise AssertionError(result)

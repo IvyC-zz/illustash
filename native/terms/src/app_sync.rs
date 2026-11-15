@@ -46,7 +46,7 @@ impl Syncer {
         use crate::http_json::Json;
         let c = crate::app_library::read_connection(&library.db())?;
         let mut q = c.prepare("SELECT * FROM sync_runs ORDER BY id DESC LIMIT 8")?;
-        let names = q.column_names().iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        let names: Vec<String> = q.column_names().map(str::to_owned).collect();
         let history = q
             .query_map([], |r| {
                 let mut row = Vec::new();
@@ -1214,6 +1214,15 @@ pub(crate) fn check(cancel: &AtomicBool) -> Result<()> {
 mod tests {
     use super::*;
     #[test]
+    fn filesystem_failure_uses_new_history_message_and_keeps_length_limit() {
+        let cancel = AtomicBool::new(false);
+        let path = std::path::Path::new("synthetic/input");
+        let error = crate::error::io_at(std::io::Error::other("合成失败"), path, None);
+        assert_eq!(stop_message(&cancel, None, &error), "文件操作失败：合成失败（路径：'synthetic/input'）");
+        let error = crate::error::io_at(std::io::Error::other("长".repeat(400)), path, None);
+        assert_eq!(stop_message(&cancel, None, &error), error.reason().chars().take(300).collect::<String>());
+    }
+    #[test]
     fn input_preparation_reports_progress_and_keeps_unavailable_inputs_retryable() {
         let root = std::env::temp_dir().join(format!("illustash-prepare-{}", crate::store::new_key().unwrap()));
         std::fs::create_dir(&root).unwrap();
@@ -1371,7 +1380,7 @@ mod tests {
             .into_iter()
             .map(|(name, sql)| {
                 let mut q = c.prepare(&sql).unwrap();
-                let columns = q.column_names().into_iter().map(str::to_owned).collect();
+                let columns = q.column_names().map(str::to_owned).collect();
                 let count = q.column_count();
                 let mut rows = q
                     .query_map([], |r| (0..count).map(|i| r.get(i)).collect::<rusqlite::Result<Vec<_>>>())

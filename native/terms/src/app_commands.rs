@@ -264,10 +264,9 @@ fn sqlite_id(value: Option<&Json>) -> Result<SqlValue> {
             SqlValue::Real(v.as_f64().expect("validated internal numeric field"))
         }
         Some(Json::Float(v)) => SqlValue::Real(*v),
-        Some(Json::Integer(v)) => SqlValue::Integer(
-            v.parse()
-                .map_err(|_| Error::Io(std::io::Error::other("Python int too large to convert to SQLite INTEGER")))?,
-        ),
+        Some(Json::Integer(v)) => {
+            SqlValue::Integer(v.parse().map_err(|_| Error::Io(std::io::Error::other("整数超出数据库支持的范围")))?)
+        }
         _ => return Err(Error::Io(std::io::Error::other("unsupported SQLite parameter"))),
     })
 }
@@ -371,6 +370,18 @@ fn restore_application(c: &Connection, bound: &SqlValue, before: &Value) -> Resu
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn sqlite_id_overflow_keeps_io_error_and_i64_boundaries() {
+        for input in ["9223372036854775807", "-9223372036854775808"] {
+            let value = crate::http_json::parse_request(input).unwrap();
+            assert_eq!(sqlite_id(Some(&value)).unwrap(), SqlValue::Integer(input.parse().unwrap()));
+        }
+        for input in ["9223372036854775808", "-9223372036854775809"] {
+            let value = crate::http_json::parse_request(input).unwrap();
+            assert!(matches!(sqlite_id(Some(&value)), Err(Error::Io(e))
+                if e.to_string() == "整数超出数据库支持的范围"));
+        }
+    }
     use std::{
         fs,
         path::PathBuf,
@@ -520,6 +531,51 @@ mod tests {
         assert_eq!(f.count("SELECT count(*) FROM backend_effects WHERE status='done'"), 2);
         f.call("/api/undo", r#"{"id":true}"#).unwrap();
         assert_eq!(f.count("SELECT count(*) FROM asset_tags"), 0);
+    }
+    #[test]
+    fn old_and_new_curation_and_skip_history_undo_in_one_stack() {
+        let f = Fixture::new();
+        let mut c = crate::sqlite::open(&f.context.db).unwrap();
+        let old_curation = r#"[{"uuid": "b", "curation": null}]"#;
+        let old_skip = r#"[{"identity_skip": null}]"#;
+        let old_prefs = r#"["a|\u96ea\ud83d\ude42"]"#;
+        c.execute("INSERT INTO actions(label,before_json) VALUES ('已排除 1 张',?)", [old_curation]).unwrap();
+        c.execute("INSERT INTO actions(label,before_json) VALUES ('已暂不判断一对角色',?)", [old_skip]).unwrap();
+        c.execute("INSERT INTO prefs VALUES ('identity_skipped',?)", [old_prefs]).unwrap();
+        c.execute_batch("INSERT INTO curation VALUES ('b','excluded','旧🙂','original'); INSERT INTO excluded VALUES ('b','manual','review');").unwrap();
+        f.call("/api/curate", r#"{"ids":["b"],"action":"include"}"#).unwrap();
+        f.call("/api/identity/skip", r#"{"a":"新🙂","b":"引号\"\\"}"#).unwrap();
+        let current: String = c.query_row("SELECT before_json FROM actions WHERE id=4", [], |r| r.get(0)).unwrap();
+        assert_eq!(serde_json::from_str::<Value>(&current).unwrap()[0]["identity_skip"], old_prefs);
+        let snapshot = crate::character_learning::snapshot(&mut c).unwrap();
+        let previous_encoding = crate::character_json::dump(&serde_json::from_str(&current).unwrap(), true);
+        c.execute("UPDATE actions SET before_json=? WHERE id=4", [&previous_encoding]).unwrap();
+        assert_ne!(crate::character_learning::snapshot(&mut c).unwrap(), snapshot);
+        c.execute("UPDATE actions SET before_json=? WHERE id=4", [&current]).unwrap();
+        assert!(matches!(f.call("/api/undo", r#"{"id":1}"#), Err(Error::Invalid(m)) if m == store::HISTORY_CHANGED));
+        f.call("/api/undo", r#"{"id":4}"#).unwrap();
+        assert_eq!(
+            c.query_row("SELECT value FROM prefs WHERE key='identity_skipped'", [], |r| r.get::<_, String>(0)).unwrap(),
+            old_prefs
+        );
+        f.call("/api/undo", r#"{"id":3}"#).unwrap();
+        let restored: (String, String, String) = c
+            .query_row("SELECT status,origin,created_at FROM curation WHERE uuid='b'", [], |r| {
+                Ok((r.get(0)?, r.get(1)?, r.get(2)?))
+            })
+            .unwrap();
+        assert_eq!(restored, ("excluded".into(), "旧🙂".into(), "original".into()));
+        f.call("/api/undo", r#"{"id":2}"#).unwrap();
+        f.call("/api/undo", r#"{"id":1}"#).unwrap();
+        assert_eq!(f.count("SELECT count(*) FROM prefs WHERE key='identity_skipped'"), 0);
+        assert_eq!(f.count("SELECT count(*) FROM curation"), 0);
+        assert_eq!(f.count("SELECT count(*) FROM actions WHERE undone=1"), 4);
+        for (id, original) in [(1, old_curation), (2, old_skip), (4, current.as_str())] {
+            assert_eq!(
+                c.query_row("SELECT before_json FROM actions WHERE id=?", [id], |r| r.get::<_, String>(0)).unwrap(),
+                original
+            );
+        }
     }
     #[test]
     fn unknown_history_rolls_back_and_does_not_skip_latest_step() {

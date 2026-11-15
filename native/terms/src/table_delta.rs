@@ -577,7 +577,7 @@ mod tests {
             c.execute_batch(SCHEMA).unwrap();
             insert(&c, "sigs", &rows);
             c.execute("DELETE FROM sigs WHERE rowid % 7 = 3", []).unwrap();
-            c.backup(rusqlite::DatabaseName::Main, &stage, None).unwrap();
+            c.backup(rusqlite::MAIN_DB, &stage, rusqlite::backup::NO_PROGRESS).unwrap();
             // worker 对它的暂存副本做的改动：原地更新、替换、删除、新增行。
             let s = Connection::open(&stage).unwrap();
             let steps = [0, 1, rng.next(20)][round % 3];

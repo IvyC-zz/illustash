@@ -1,7 +1,7 @@
 //! 人工收藏和折叠投影，与 Store.curate/set_fold_kinds 一致。
 use crate::{http::LibraryContext, http_json::Json, Error, Result};
 use rusqlite::{params, params_from_iter, Connection, OpenFlags, OptionalExtension, TransactionBehavior};
-use serde_json::Value;
+use serde_json::{json, Value};
 use std::{
     collections::{HashMap, HashSet},
     time::Duration,
@@ -14,8 +14,7 @@ pub(crate) fn curate(c: &mut Connection, context: &LibraryContext, body: &Json) 
     };
     let tx = c.transaction_with_behavior(TransactionBehavior::Immediate)?;
     let ids = crate::app_commands::selected(&tx, context, body)?;
-    // 持久化的 JSON 用 Python 默认的 ASCII 转义和字段插入顺序。
-    // HTTP Json 和规范 JSON 不得对这段历史重新排序或重新编码。
+    // 新历史使用结构化紧凑 JSON；已有历史保持原文，撤销按解析后的字段恢复。
     let mut before = Vec::new();
     for id in &ids {
         let had: Option<(String, String, String)> = tx
@@ -24,15 +23,10 @@ pub(crate) fn curate(c: &mut Connection, context: &LibraryContext, body: &Json) 
             })
             .optional()?;
         let previous = match had {
-            Some((status, origin, created)) => format!(
-                "{{\"status\": {}, \"origin\": {}, \"created_at\": {}}}",
-                ascii(&status),
-                ascii(&origin),
-                ascii(&created)
-            ),
-            None => "null".into(),
+            Some((status, origin, created)) => json!({"status":status,"origin":origin,"created_at":created}),
+            None => Value::Null,
         };
-        before.push(format!("{{\"uuid\": {}, \"curation\": {previous}}}", ascii(id)));
+        before.push(json!({"uuid":id,"curation":previous}));
         if action == "reset" {
             tx.execute("DELETE FROM curation WHERE uuid=?", [id])?;
         } else {
@@ -54,18 +48,11 @@ pub(crate) fn curate(c: &mut Connection, context: &LibraryContext, body: &Json) 
         "include" => format!("已收录 {n} 张", n = count),
         _ => format!("已将 {n} 张交回自动规则", n = count),
     };
-    tx.execute(
-        "INSERT INTO actions(label,before_json) VALUES (?,?)",
-        params![label, format!("[{}]", before.join(", "))],
-    )?;
+    tx.execute("INSERT INTO actions(label,before_json) VALUES (?,?)", params![label, json!(before).to_string()])?;
     let action = crate::app_commands::last_action(&tx)?;
     tx.commit()?;
     Ok(Json::object([("undo", action)]))
 }
-fn ascii(s: &str) -> String {
-    crate::character_json::dump(&Value::String(s.into()), true)
-}
-
 pub(crate) fn refresh_excluded(c: &Connection, ids: &[String]) -> Result<()> {
     c.execute_batch("CREATE TEMP TABLE IF NOT EXISTS touched(uuid TEXT PRIMARY KEY); DELETE FROM touched;")?;
     for id in ids {
@@ -284,7 +271,7 @@ mod tests {
         }
     }
     #[test]
-    fn curate_history_is_ascii_ordered_and_rules_have_human_precedence() {
+    fn curate_history_is_structured_and_rules_have_human_precedence() {
         let mut f = Fixture::new(false);
         f.c.execute_batch("INSERT INTO auto_rules VALUES ('a','exclude','photo'),('b','exclude','text'); INSERT INTO curation VALUES ('a','excluded','人🙂','old'); INSERT INTO duplicates VALUES ('b','pair',2,1,'2026-02',1,0),('c','pair',2,2,'2026-02',0,1);").unwrap();
         let out = curate(&mut f.c, &f.context, &Fixture::body(r#"{"ids":["b","a"],"action":"include"}"#)).unwrap();
@@ -292,7 +279,7 @@ mod tests {
         let before: String = f.c.query_row("SELECT before_json FROM actions", [], |r| r.get(0)).unwrap();
         assert_eq!(
             before,
-            r#"[{"uuid": "b", "curation": null}, {"uuid": "a", "curation": {"status": "excluded", "origin": "\u4eba\ud83d\ude42", "created_at": "old"}}, {"uuid": "c", "curation": null}]"#
+            r#"[{"curation":null,"uuid":"b"},{"curation":{"created_at":"old","origin":"人🙂","status":"excluded"},"uuid":"a"},{"curation":null,"uuid":"c"}]"#
         );
         assert_eq!(f.count("excluded"), 0);
         curate(&mut f.c, &f.context, &Fixture::body(r#"{"ids":["b","a"],"action":"reset"}"#)).unwrap();
