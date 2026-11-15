@@ -12,7 +12,7 @@ on:
     branches: [main]
     types: [opened, synchronize, reopened, ready_for_review]
   push:
-    branches: [main]
+    branches: [main, claude/501-windows-ci-bf7390]  # 临时：#501 验收 push 分流，转 Ready 前删除
   workflow_dispatch:
 
 # 同一 PR（或手动触发的同一分支）有新提交时取消旧运行。push 到 main 的每次运行各自成组、互不取消：
@@ -330,6 +330,7 @@ jobs:
       # main 上测试失败也保存依赖缓存：Windows 失败时不能让下一批 PR 回到冷编译。
       - uses: Swatinem/rust-cache@v2
         with:
+          prefix-key: v0-rust-501cold  # 临时：#501 测冷缓存耗时
           save-if: ${{ github.ref == 'refs/heads/main' }}
           cache-on-failure: true
           workspaces: |
