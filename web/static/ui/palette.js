@@ -271,8 +271,9 @@ export async function editProfile(c) {
     const name = q('#pfName').value.trim(); if (name !== p.user_name) body.name = name;
     if (JSON.stringify(draft.aliases) !== JSON.stringify(p.aliases)) body.aliases = draft.aliases;
     if (q('#pfTag') && draft.tag !== p.tag) body.tag = draft.tag;
-    // 新作品和它所属的资料在同一个请求（和事务）里建好。
-    if (q('#pfWork') && (draft.work?.id || null) !== (p.work_id || null)) {
+    // 新作品和它所属的资料在同一个请求（和事务）里建好。新建项和 Danbooru 项没有 id，一律算改动；只有选的是
+    // 已有作品、id 和原来相同才算没改（#464）。
+    if (q('#pfWork') && (draft.work ? !draft.work.id || draft.work.id !== p.work_id : !!p.work_id)) {
       body.work = !draft.work ? '' : draft.work.create ? {create: draft.work.create} : draft.work.tag ? {tag: draft.work.tag} : draft.work.id;
     }
     if (Object.keys(body).length === 1) { close(); return; }
