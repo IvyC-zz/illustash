@@ -74,6 +74,52 @@ impl Fixture {
         self.term("target-artist", "synthetic_artist");
         self.term("same-name-different-artist", "other_artist");
     }
+    fn structured(&self, hybrid: bool) {
+        self.source();
+        let mut c = crate::open(&self.db).unwrap();
+        let tx = c.transaction().unwrap();
+        crate::schema::begin_writing(&tx).unwrap();
+        if hybrid {
+            tx.execute("INSERT INTO meta VALUES ('identity_policy','hybrid')", []).unwrap();
+        }
+        illustash_core::character_entities::create(
+            &tx,
+            &illustash_core::character_entities::New { id: "source-work", kind: "work", ..Default::default() },
+            "user",
+        )
+        .unwrap();
+        crate::character_commands::command(&tx, &json!({"op":"create_entity","id":"source-parent","name":"合成原创角色","lang":"zh","kind":"oc","artist":"合成画师文字"})).unwrap();
+        illustash_core::character_entities::create(
+            &tx,
+            &illustash_core::character_entities::New {
+                id: "source-child",
+                kind: "skin",
+                parent_id: Some("source-parent"),
+                variant: "合成变体",
+                work_id: Some("source-work"),
+                ..Default::default()
+            },
+            "user",
+        )
+        .unwrap();
+        tx.execute(
+            "UPDATE term_tree SET work_id='source-work' WHERE term_id=(SELECT id FROM terms WHERE key='source-parent')",
+            [],
+        )
+        .unwrap();
+        tx.execute("UPDATE term_tree SET review_status='reviewed',review_note='合成复核',parent_locked=1 WHERE term_id=(SELECT id FROM terms WHERE key='source-work')",[]).unwrap();
+        if hybrid {
+            crate::character_graph::rebuild(&tx).unwrap();
+        }
+        tx.execute("INSERT INTO reviews(entity,reviewed_at,action_id) VALUES ('source-parent','2026-11-01',1),('source-child','2026-11-02',1)",[]).unwrap();
+        tx.execute("INSERT INTO term_verdicts(action_id,anchor,asset_id,term_id,verdict,origin,via)
+            SELECT 1,1,a.id,t.id,'yes','user','review' FROM term_assets a,terms t WHERE a.key='a' AND t.key='source-parent'",[]).unwrap();
+        tx.execute("INSERT INTO assertions VALUES ('a','source-parent','confirmed','review')", []).unwrap();
+        tx.execute("INSERT INTO identity_scopes VALUES ('a','source-parent','[\"source-parent\"]')", []).unwrap();
+        tx.execute("INSERT INTO identity_uncertain(uuid,options_json,reason) VALUES ('b','[\"source-parent\",\"source-child\"]','合成未定')",[]).unwrap();
+        crate::character_projection::rebuild(&tx, None).unwrap();
+        crate::schema::commit_writing(tx).unwrap();
+    }
     fn export(&self) -> PathBuf {
         let snapshot = capture(&self.db, &self.id, &|| Ok(())).unwrap();
         assert_eq!(snapshot.coverage().verified, 4);
@@ -240,6 +286,110 @@ fn standalone_user_definition_imports_and_undoes_without_assets() {
     target.undo(report.action_id.unwrap()).unwrap();
     assert_eq!(target.count("SELECT count(*) FROM terms"), 0);
     assert_eq!(target.count("SELECT count(*) FROM term_records"), 1);
+}
+
+fn structured_roundtrip(hybrid: bool) {
+    let source = Fixture::new("structured-source");
+    source.structured(hybrid);
+    let path = source.export();
+    let target = Fixture::new("structured-target");
+    target.target();
+    if hybrid {
+        crate::open(&target.db).unwrap().execute("INSERT INTO meta VALUES ('identity_policy','hybrid')", []).unwrap();
+    }
+    let imported = import_file(&target.db, &target.id, &path, &|| Ok(())).unwrap();
+    assert_eq!(imported.records, BTreeMap::from([("applied".into(), 13)]));
+    assert_eq!(imported.definitions["applied"], 3);
+    assert_eq!(target.count("SELECT count(*) FROM term_tree"), 3);
+    assert_eq!(target.count("SELECT count(*) FROM reviews WHERE action_id=1"), 2);
+    assert_eq!(target.count("SELECT count(*) FROM memberships WHERE uuid='new-a' AND status='confirmed'"), 1);
+    assert_eq!(target.count("SELECT count(*) FROM term_tree WHERE original=1 AND artist='合成画师文字'"), 1);
+    assert_eq!(target.count("SELECT count(*) FROM term_tree WHERE parent_locked=1 AND review_note='合成复核'"), 1);
+    assert_eq!(import_file(&target.db, &target.id, &path, &|| Ok(())).unwrap().action_id, None);
+    target.undo(imported.action_id.unwrap()).unwrap();
+    for table in [
+        "term_tree",
+        "term_identity_baseline",
+        "reviews",
+        "identity_scopes",
+        "identity_uncertain",
+        "memberships",
+        "identity_canonical",
+    ] {
+        assert_eq!(target.count(&format!("SELECT count(*) FROM {table}")), 0, "{table}");
+    }
+    assert_eq!(target.count("SELECT count(*) FROM terms"), 2);
+    assert_eq!(target.count("SELECT count(*) FROM pragma_foreign_key_check"), 0);
+    let repeated = import_file(&target.db, &target.id, &path, &|| Ok(())).unwrap();
+    assert_eq!(repeated.action_id, Some(2));
+    assert_eq!(repeated.records["applied"], 13);
+    assert_eq!(target.count("SELECT count(*) FROM term_effective_verdicts WHERE action_id=1"), 0);
+    let other = Fixture::new("different-policy");
+    other.target();
+    if !hybrid {
+        crate::open(&other.db).unwrap().execute("INSERT INTO meta VALUES ('identity_policy','hybrid')", []).unwrap();
+    }
+    let rejected = import_file(&other.db, &other.id, &path, &|| Ok(())).unwrap();
+    assert_eq!(rejected.records["blocked_dependency"], 5);
+    assert_eq!(rejected.records["applied"], 8);
+    assert_eq!(other.count("SELECT count(*) FROM term_tree"), 0);
+}
+
+#[test]
+fn structured_default_import_restores_names_tree_reviews_and_scope_then_undoes() {
+    structured_roundtrip(false);
+}
+
+#[test]
+fn structured_hybrid_import_preserves_original_baseline_and_policy_boundary() {
+    structured_roundtrip(true);
+}
+
+#[test]
+fn imported_multi_entity_reviews_survive_normal_merge_and_undo_without_moving_other_reviews() {
+    let source = Fixture::new("review-source");
+    let mut c = crate::open(&source.db).unwrap();
+    let tx = c.transaction().unwrap();
+    crate::schema::begin_writing(&tx).unwrap();
+    tx.execute("INSERT INTO actions(id,label,before_json) VALUES (1,'合成检查','[]')", []).unwrap();
+    for (key, at) in [("a", "2026-11-01"), ("b", "2026-11-02"), ("c", "2026-11-03")] {
+        crate::character_commands::command(
+            &tx,
+            &json!({"op":"create_entity","id":key,"name":format!("合成角色 {key}"),"lang":"zh"}),
+        )
+        .unwrap();
+        tx.execute("INSERT INTO reviews(entity,reviewed_at,action_id) VALUES (?1,?2,1)", params![key, at]).unwrap();
+    }
+    crate::schema::commit_writing(tx).unwrap();
+    let path = source.root.join("reviews.illustash-human.jsonl");
+    capture(&source.db, &source.id, &|| Ok(())).unwrap().write(&mut File::create(&path).unwrap()).unwrap();
+    let target = Fixture::new("review-target");
+    let imported = import_file(&target.db, &target.id, &path, &|| Ok(())).unwrap();
+    assert_eq!(imported.records["applied"], 3);
+    let mut c = crate::open(&target.db).unwrap();
+    let keys: BTreeMap<String, String> = c
+        .prepare("SELECT source_key,target_key FROM human_entity_origins")
+        .unwrap()
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+        .unwrap()
+        .collect::<rusqlite::Result<_>>()
+        .unwrap();
+    let tx = c.transaction().unwrap();
+    crate::schema::begin_writing(&tx).unwrap();
+    let merged =
+        crate::character_commands::command(&tx, &json!({"op":"merge","source":keys["a"],"target":keys["b"]})).unwrap();
+    crate::schema::commit_writing(tx).unwrap();
+    assert_eq!(target.count("SELECT count(*) FROM reviews"), 2);
+    target.undo(merged["action"].as_i64().unwrap()).unwrap();
+    for (key, at) in [("a", "2026-11-01"), ("b", "2026-11-02"), ("c", "2026-11-03")] {
+        let actual: String = c
+            .query_row("SELECT reviewed_at FROM reviews WHERE action_id=1 AND entity=?1", [&keys[key]], |r| r.get(0))
+            .unwrap();
+        assert_eq!(actual, at);
+    }
+    target.undo(imported.action_id.unwrap()).unwrap();
+    assert_eq!(target.count("SELECT count(*) FROM reviews"), 0);
+    assert_eq!(target.count("SELECT count(*) FROM terms"), 0);
 }
 
 #[test]

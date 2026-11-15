@@ -32,6 +32,16 @@ pub(crate) fn migrate(c: &Connection) -> Result<()> {
     c.execute_batch(TABLES)?;
     backfill(c)?;
     super::visibility::migrate(c)?;
+    // 一次导入可带多个人物的检查记录，原 action_id 单列主键不足以表达；旧三列逐行原样保留。
+    if c.query_row("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='reviews')", [], |r| {
+        r.get::<_, bool>(0)
+    })? {
+        c.execute_batch("CREATE TABLE human_reviews_upgrade(entity TEXT NOT NULL,reviewed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            action_id INTEGER NOT NULL,PRIMARY KEY(action_id,entity));
+            INSERT INTO human_reviews_upgrade SELECT entity,reviewed_at,action_id FROM reviews;
+            DROP TABLE reviews;
+            ALTER TABLE human_reviews_upgrade RENAME TO reviews;")?;
+    }
     for table in ["human_state_marks", "human_state_mark_undo"] {
         schema::guard(c, table)?;
     }

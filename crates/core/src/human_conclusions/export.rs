@@ -314,6 +314,8 @@ struct LegacyMerge {
     aliases: Vec<LegacyAlias>,
     pins: Option<String>,
     reviews: Vec<i64>,
+    #[serde(default)]
+    review_conflicts: Vec<(i64, String, String)>,
     uuids: Vec<String>,
 }
 impl LegacyMerge {
@@ -338,6 +340,10 @@ impl LegacyMerge {
                 matches!(lang, "" | "zh" | "ja" | "en") && !value.is_empty() && !source.is_empty()
             })
             && self.reviews.iter().all(|id| *id > 0)
+            && self
+                .review_conflicts
+                .iter()
+                .all(|(id, a, b)| self.reviews.contains(id) && !a.is_empty() && !b.is_empty())
             && self.pins.as_ref().is_none_or(|s| strings(s).is_ok())
     }
 }

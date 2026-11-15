@@ -73,6 +73,7 @@ struct History {
     // 当前阶段只补从未决定的逻辑键；before 均为无贡献，after 用于拒绝独立改动后的撤销。
     after: Vec<Record>,
     created: Vec<definitions::Created>,
+    graph: bool,
 }
 
 enum Resolution {
@@ -138,27 +139,13 @@ fn resolve_existing(
         }
     }
     let Some(target) = candidates.pop_first() else {
-        return Ok(if definition.tree.is_none() && definition.baseline.is_none() {
-            Resolution::New
-        } else {
-            Resolution::Blocked
-        });
+        return Ok(Resolution::New);
     };
     if !candidates.is_empty() {
         return Ok(Resolution::Blocked);
     }
     let kind: String = c.query_row("SELECT kind FROM terms WHERE key=?1", [&target], |r| r.get(0))?;
-    // 结构与关系的贡献撤销尚未接入时，不把它们降格为普通平面词条写入。
-    let structured: bool = c.query_row(
-        "SELECT EXISTS(SELECT 1 FROM term_tree r JOIN terms t ON t.id=r.term_id WHERE t.key=?1)",
-        [&target],
-        |r| r.get(0),
-    )?;
-    Ok(if kind == definition.kind && definition.tree.is_none() && definition.baseline.is_none() && !structured {
-        Resolution::Existing(target)
-    } else {
-        Resolution::Blocked
-    })
+    Ok(if kind == definition.kind { Resolution::Existing(target) } else { Resolution::Blocked })
 }
 
 fn match_reason(result: &Match) -> &'static str {
@@ -213,7 +200,6 @@ pub fn apply_in(
         if let Record::Entity { key, definition } = record {
             match resolve_existing(c, &snapshot.header.library_id, same_library, key, definition)? {
                 Resolution::Existing(target) => {
-                    *report.definitions.entry("matched_dependency".into()).or_default() += 1;
                     terms.insert(key.clone(), target);
                 }
                 Resolution::New => {
@@ -225,9 +211,7 @@ pub fn apply_in(
                         definition: definition.as_ref().clone(),
                     });
                 }
-                Resolution::Blocked => {
-                    *report.definitions.entry("blocked_dependency".into()).or_default() += 1;
-                }
+                Resolution::Blocked => (),
             }
         }
     }
@@ -238,8 +222,57 @@ pub fn apply_in(
     }
     terms.retain(|_, target| claims[target] == 1);
     let existing = current(c)?;
+    let existing_entities: BTreeMap<_, _> = existing
+        .records
+        .iter()
+        .filter_map(|r| match r {
+            Record::Entity { key, definition } => Some((key, definition.as_ref())),
+            _ => None,
+        })
+        .collect();
+    let fresh: BTreeSet<_> = new_definitions.iter().map(|new| new.source_key.as_str()).collect();
+    let mut blocked = BTreeSet::new();
+    for record in &snapshot.records {
+        if let Record::Entity { key, definition } = record {
+            let mapped = definitions::mapped(definition, &terms);
+            let compatible = terms.get(key).is_some_and(|target| {
+                mapped.as_ref().is_some_and(|mapped| {
+                    if fresh.contains(key.as_str()) {
+                        true
+                    } else if let Some(before) = existing_entities.get(target) {
+                        definitions::same_structure(before, mapped)
+                    } else {
+                        mapped.tree.is_none() && mapped.baseline.is_none()
+                    }
+                })
+            });
+            if !compatible || (snapshot.header.policy != existing.header.policy && definition.tree.is_some()) {
+                blocked.insert(key.clone());
+            }
+        }
+        // 尚未接入关系贡献时连同相关身份一起报告，不把关系投影误当作独立原始结构。
+        if matches!(record, Record::RelationVerdict { .. }) {
+            blocked.extend(record.terms().into_iter().map(str::to_owned));
+        }
+    }
+    let blocked = definitions::connected(snapshot, blocked);
+    terms.retain(|source, _| !blocked.contains(source));
+    for record in &snapshot.records {
+        if let Record::Entity { key, .. } = record {
+            if !terms.contains_key(key) {
+                *report.definitions.entry("blocked_dependency".into()).or_default() += 1;
+            } else if !fresh.contains(key.as_str()) {
+                *report.definitions.entry("matched_dependency".into()).or_default() += 1;
+            }
+        }
+    }
+    new_definitions.retain(|new| terms.contains_key(&new.source_key));
+    for new in &mut new_definitions {
+        new.definition = definitions::mapped(&new.definition, &terms).expect("依赖已核对并排除受阻组");
+    }
     let existing: BTreeMap<_, _> = existing.records.iter().map(|r| (key(r), r)).collect();
     let mut planned = Vec::new();
+    let mut mapped_records = Vec::new();
     for source in &snapshot.records {
         check()?;
         if matches!(source, Record::Asset { .. } | Record::Entity { .. }) {
@@ -277,12 +310,63 @@ pub fn apply_in(
                 *asset = asset_key(asset);
                 *options = options.iter().map(|t| terms[t].clone()).collect();
             }
+            Record::Review { term, .. } => *term = terms[term].clone(),
+            Record::IdentityContext { asset, term, scope, suspended, .. } => {
+                *asset = asset_key(asset);
+                *term = terms[term].clone();
+                if let Some(scope) = scope {
+                    *scope = scope.iter().map(|t| terms[t].clone()).collect();
+                }
+                if let Some(suspended) = suspended {
+                    suspended.options = suspended.options.iter().map(|t| terms[t].clone()).collect();
+                }
+            }
             _ => {
                 report.record(source, "unsupported_record");
                 continue;
             }
         }
-        if let Some(before) = existing.get(&key(&target)) {
+        mapped_records.push((source, target));
+    }
+    let pair = |record: &Record| match record {
+        Record::ImageVerdict { asset, term, .. } | Record::IdentityContext { asset, term, .. } => {
+            Some((asset.clone(), term.clone()))
+        }
+        _ => None,
+    };
+    let mut pair_conflicts = BTreeSet::new();
+    let mapped_keys: BTreeSet<_> = mapped_records.iter().map(|(_, record)| key(record)).collect();
+    for (_, target) in &mapped_records {
+        if let Some(pair) = pair(target) {
+            // 已有图片判断的附件缺省也属于目标语义；不能因裁决文字相同就给它追加源范围。
+            if matches!(target, Record::IdentityContext { .. })
+                && existing.contains_key(&vec!["image_verdict".into(), pair.0.clone(), pair.1.clone()])
+                && !existing.contains_key(&key(target))
+            {
+                pair_conflicts.insert(pair.clone());
+            }
+            if let Some(before) = existing.get(&key(target)) {
+                if !equivalent(before, target)? {
+                    pair_conflicts.insert(pair);
+                }
+            } else {
+                let other =
+                    if matches!(target, Record::ImageVerdict { .. }) { "identity_context" } else { "image_verdict" };
+                let other = vec![other.to_owned(), pair.0.clone(), pair.1.clone()];
+                if existing.contains_key(&other) && !mapped_keys.contains(&other) {
+                    pair_conflicts.insert(pair);
+                }
+            }
+        }
+    }
+    for (source, target) in mapped_records {
+        if pair(&target).is_some_and(|pair| pair_conflicts.contains(&pair)) {
+            let conflict = match existing.get(&key(&target)) {
+                Some(before) => !equivalent(before, &target)?,
+                None => false,
+            };
+            report.record(source, if conflict { "conflict" } else { "blocked_dependency" });
+        } else if let Some(before) = existing.get(&key(&target)) {
             report.record(source, if equivalent(before, &target)? { "already_present" } else { "conflict" });
         } else {
             report.record(source, "applied");
@@ -291,7 +375,8 @@ pub fn apply_in(
     }
     let needed: BTreeSet<_> = planned.iter().flat_map(|r| r.terms().into_iter().map(str::to_owned)).collect();
     new_definitions.retain(|new| {
-        let human = new.definition.provenance == "user"
+        let human = new.definition.tree.is_some()
+            || new.definition.provenance == "user"
             || new.definition.names.iter().any(|n| matches!(n.provenance.as_str(), "user" | "legacy_merge"));
         let keep = human || needed.contains(&new.target_key);
         *report.definitions.entry(if keep { "applied" } else { "unneeded_dependency" }.into()).or_default() += 1;
@@ -303,6 +388,11 @@ pub fn apply_in(
     c.execute("INSERT INTO actions(label,before_json) VALUES ('已导入人工结论','[]')", [])?;
     let action = c.last_insert_rowid();
     let created = definitions::create(c, action, &snapshot.header.library_id, &new_definitions)?;
+    let graph =
+        crate::character_projection::policy(c)? && new_definitions.iter().any(|new| new.definition.tree.is_some());
+    if graph {
+        crate::character_graph::rebuild(c)?;
+    }
     let mut touched = BTreeSet::new();
     for record in &planned {
         check()?;
@@ -316,12 +406,23 @@ pub fn apply_in(
     if after.len() != planned.len() + created.len() {
         return Err(Error::Conflict("导入后的有效记录与本次计划不一致".into()));
     }
+    let after_by_key: BTreeMap<_, _> = after.iter().map(|record| (key(record), record)).collect();
+    for expected in &planned {
+        let valid = match after_by_key.get(&key(expected)) {
+            Some(record) => equivalent(record, expected)?,
+            None => false,
+        };
+        if !valid {
+            return Err(Error::Conflict("导入后的判断语义与源记录不一致".into()));
+        }
+    }
     let history = History {
         v: 1,
         source_library: snapshot.header.library_id.clone(),
         snapshot_id: snapshot.header.snapshot_id.clone(),
         after,
         created,
+        graph,
     };
     c.execute(
         "UPDATE actions SET before_json=?1 WHERE id=?2",
@@ -350,6 +451,7 @@ fn write(c: &Connection, action: i64, snapshot: &str, record: &Record) -> Result
     };
     match record {
         Record::ImageVerdict { asset, term, decision, .. } => {
+            let (uuid, entity) = (asset, term);
             let asset = store::library_asset(c, asset)?.ok_or_else(|| Error::Conflict("目标图片已移除".into()))?;
             let (term, _) = store::term_by_key(c, term)?.ok_or_else(|| Error::Conflict("目标词条已移除".into()))?;
             c.execute(
@@ -366,6 +468,22 @@ fn write(c: &Connection, action: i64, snapshot: &str, record: &Record) -> Result
                     decision.created_at
                 ],
             )?;
+            if c.query_row("SELECT EXISTS(SELECT 1 FROM term_tree WHERE term_id=?1)", [term], |r| r.get::<_, bool>(0))?
+            {
+                // refresh_assertion 会重建范围；便携导入保留源附件，只同步这一行派生值。
+                c.execute("DELETE FROM assertions WHERE uuid=?1 AND entity=?2", params![uuid, entity])?;
+                if decision.verdict != "clear" {
+                    c.execute(
+                        "INSERT INTO assertions(uuid,entity,status,origin) VALUES (?1,?2,?3,?4)",
+                        params![
+                            uuid,
+                            entity,
+                            if decision.verdict == "yes" { "confirmed" } else { "rejected" },
+                            decision.via
+                        ],
+                    )?;
+                }
+            }
         }
         Record::Curation { asset, state: value, origin, created_at, .. } => {
             if value == "reset" {
@@ -394,6 +512,26 @@ fn write(c: &Connection, action: i64, snapshot: &str, record: &Record) -> Result
                 )?;
             }
         }
+        Record::Review { term, reviewed_at, .. } => {
+            c.execute(
+                "INSERT INTO reviews(entity,reviewed_at,action_id) VALUES (?1,?2,?3)",
+                params![term, reviewed_at, action],
+            )?;
+        }
+        Record::IdentityContext { asset, term, scope, suspended, .. } => {
+            if let Some(scope) = scope {
+                c.execute(
+                    "INSERT INTO identity_scopes(uuid,entity,members_json) VALUES (?1,?2,?3)",
+                    params![asset, term, json!(scope).to_string()],
+                )?;
+            }
+            if let Some(suspended) = suspended {
+                c.execute(
+                    "INSERT INTO identity_suspended(uuid,entity,reason,options_json) VALUES (?1,?2,?3,?4)",
+                    params![asset, term, suspended.reason, json!(suspended.options).to_string()],
+                )?;
+            }
+        }
         _ => return invalid("尚未接入此类人工记录的事务写入"),
     }
     Ok(())
@@ -406,7 +544,8 @@ fn project(c: &Connection, touched: &BTreeSet<String>) -> Result<()> {
             assets.push(asset);
         }
     }
-    store::project(c, &assets)
+    store::project(c, &assets)?;
+    crate::character_projection::rebuild(c, Some(&touched.iter().cloned().collect::<Vec<_>>()))
 }
 
 fn history(value: &Value) -> Result<Option<History>> {
@@ -452,8 +591,21 @@ pub fn undo_in(c: &Connection, action: i64) -> Result<Vec<String>> {
     }
     let mut touched = BTreeSet::new();
     for record in &history.after {
+        if let Record::ImageVerdict { asset, term, .. } = record {
+            c.execute("DELETE FROM assertions WHERE uuid=?1 AND entity=?2", params![asset, term])?;
+        }
+        if let Record::Review { term, .. } = record {
+            c.execute("DELETE FROM reviews WHERE action_id=?1 AND entity=?2", params![action, term])?;
+        }
+        if let Record::IdentityContext { asset, term, .. } = record {
+            c.execute("DELETE FROM identity_scopes WHERE uuid=?1 AND entity=?2", params![asset, term])?;
+            c.execute("DELETE FROM identity_suspended WHERE uuid=?1 AND entity=?2", params![asset, term])?;
+        }
         let table = match record {
-            Record::ImageVerdict { .. } | Record::Entity { .. } => None,
+            Record::ImageVerdict { .. }
+            | Record::Entity { .. }
+            | Record::Review { .. }
+            | Record::IdentityContext { .. } => None,
             Record::Curation { .. } => Some("curation"),
             Record::Deferred { .. } => Some("deferred"),
             Record::Uncertain { .. } => Some("identity_uncertain"),
@@ -470,6 +622,9 @@ pub fn undo_in(c: &Connection, action: i64) -> Result<Vec<String>> {
     definitions::check_undo(c, action, &history.created)?;
     definitions::remove(c, &history.created)?;
     c.execute("UPDATE actions SET undone=1 WHERE id=?1", [action])?;
+    if history.graph {
+        crate::character_graph::rebuild(c)?;
+    }
     state::undo(c, action)?;
     project(c, &touched)?;
     Ok(touched.into_iter().collect())
