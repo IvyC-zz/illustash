@@ -91,26 +91,28 @@ export function renderHumanBlock() {
 
 // ---------- 报告 ----------
 // 汇总：每一类计数各列一张表，不相加；冲突写明保留了目标图库的结论；没有改动时说没有新内容、不给撤销。
-// undoable：这次导入现在还是顶栏撤销的那一步（之后有别的改动、或已经撤销过，就不是了）。
-export function reportSummary(r, undoable = r.undo != null) {
+// undoable：这次导入现在还是顶栏撤销的那一步（之后有别的改动、或已经撤销过，就不是了）。extra 是接在后面的明细区。
+// 引导句在上面，其余放进一个可滚动的区域，明细展开后对话框也不会超出窗口。
+export function reportSummary(r, undoable = r.undo != null, extra = '') {
   const lines = [];
   const lead = r.undo == null ? t('没有新内容：图库没有改动，也没有可以撤销的步骤。下面是每一类的结果。')
     : undoable ? t('已经写进这个图库。可以整步撤销：点下面的「撤销这次导入」，或用顶栏的撤销按钮。') : t('已经写进这个图库。');
-  lines.push(`<p class="dialog-lead">${lead}</p>`);
-  if (r.committed && r.pending_effects) lines.push(`<p class="muted-note">${t('收录结果还在后台更新，稍后会自己刷新，不需要重新导入。')}</p>`);
-  if (conflictCount(r)) lines.push(`<p class="muted-note">${t('有 {n} 条和这个图库已有的结论冲突，都保留了这个图库的结论。', {n: number(conflictCount(r))})}</p>`);
+  const note = text => lines.push(`<p class="muted-note">${text}</p>`);
+  if (r.committed && r.pending_effects) note(t('收录结果还在后台更新，稍后会自己刷新，不需要重新导入。'));
+  if (conflictCount(r)) note(t('有 {n} 条和这个图库已有的结论冲突，都保留了这个图库的结论。', {n: number(conflictCount(r))}));
   const f = r.definition_fields || {};
   if (f.name_group_conflict || f.link_conflict) {
-    lines.push(`<p class="muted-note">${t('另有 {groups} 个名字组、{links} 个链接和已有的不同，同样保留了已有的。', {groups: number(f.name_group_conflict || 0), links: number(f.link_conflict || 0)})}</p>`);
+    note(t('另有 {groups} 个名字组、{links} 个链接和已有的不同，同样保留了已有的。', {groups: number(f.name_group_conflict || 0), links: number(f.link_conflict || 0)}));
   }
-  if (r.hash_coverage?.missing) lines.push(`<p class="muted-note">${t('文件里有 {n} 张图没有内容摘要，这些图上的结论认不回来。', {n: number(r.hash_coverage.missing)})}</p>`);
-  const tables = COUNT_GROUPS.map(([key, title]) => {
-    const rows = Object.entries(r[key] || {}).filter(([, n]) => n);
-    const body = rows.map(([k, n]) => `<tr><td>${esc(resultText(k, key))}</td><td>${number(n)}</td></tr>`).join('');
-    return rows.length ? `<h3 class="set-sub">${title}</h3><table class="settings-table">${body}</table>` : '';
+  if (r.hash_coverage?.missing) note(t('文件里有 {n} 张图没有内容摘要，这些图上的结论认不回来。', {n: number(r.hash_coverage.missing)}));
+  // 四类计数放在同一张表里，各有标题行，不出合计。
+  const rows = COUNT_GROUPS.map(([key, title]) => {
+    const found = Object.entries(r[key] || {}).filter(([, n]) => n);
+    const body = found.map(([k, n]) => `<tr><td>${esc(resultText(k, key))}</td><td>${number(n)}</td></tr>`).join('');
+    return found.length ? `<tr><th colspan="2">${title}</th></tr>${body}` : '';
   }).join('');
-  if (tables) lines.push(`<div>${tables}<p class="set-sub-note">${t('这几类分开计数，口径不同，不能相加。')}</p></div>`);
-  return lines.join('');
+  if (rows) lines.push(`<table class="settings-table">${rows}</table><p class="set-sub-note">${t('这几类分开计数，口径不同，不能相加。')}</p>`);
+  return `<p class="dialog-lead">${lead}</p><div class="index-add-list">${lines.join('')}${extra}</div>`;
 }
 const detailRow = d => `<tr><td>${esc(kindText(d.kind))}</td>
   <td>${esc([reasonText(d.reason), fieldText(d.field_counts)].filter(Boolean).join(' · '))}</td><td class="mono">${esc(d.record_key)}</td></tr>`;
@@ -123,7 +125,7 @@ export function reportDetails(page, total) {
     ${list.map(detailRow).join('')}`).join('');
   const from = details.length ? page.offset + 1 : 0, to = page.offset + details.length;
   return `<p class="muted-note">${t('第 {from}–{to} 条，共 {n} 条', {from: number(from), to: number(to), n: number(total)})}</p>
-    <div class="index-add-list"><table class="settings-table">${rows}</table></div>
+    <table class="settings-table">${rows}</table>
     <div class="set-actions"><button type="button" class="quiet small" data-page="${page.offset - REPORT_PAGE}" ${page.offset > 0 ? '' : 'disabled'}>${t('上一页')}</button>
       <button type="button" class="quiet small" data-page="${to}" ${to < total ? '' : 'disabled'}>${t('下一页')}</button></div>`;
 }
@@ -132,7 +134,8 @@ export function openReport(r, restore = false) {
   if (!r) return null;
   const undoable = r.committed && r.undo != null && edits.latest?.id === r.undo;
   const d = openDialog({title: restore ? t('从自动快照恢复：结果') : t('导入人工结论：结果'), backdropClose: true,
-    body: `${reportSummary(r, undoable)}${r.detail_count ? `<div data-details><button type="button" class="quiet small" data-page="0">${t('查看明细（{n} 条）', {n: number(r.detail_count)})}</button></div>` : ''}`,
+    body: reportSummary(r, undoable, r.detail_count
+      ? `<div data-details><button type="button" class="quiet small" data-page="0">${t('查看明细（{n} 条）', {n: number(r.detail_count)})}</button></div>` : ''),
     actions: `${undoable ? `<button type="button" class="quiet" data-human-undo>${t('撤销这次导入')}</button>` : ''}<button value="ok" class="primary" autofocus>${t('完成')}</button>`});
   d.addEventListener('click', async e => {
     const page = e.target.closest('[data-page]'), back = e.target.closest('[data-human-undo]');

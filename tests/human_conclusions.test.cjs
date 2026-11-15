@@ -153,7 +153,7 @@ test('the report counts each kind on its own, says conflicts kept this library, 
   const html = ui.reportSummary(summary());
   assert.match(html, /有 3 条和这个图库已有的结论冲突，都保留了这个图库的结论/);
   assert.match(html, /另有 0 个名字组、1 个链接和已有的不同/);
-  assert.match(html, /<h3 class="set-sub">人工结论<\/h3><table class="settings-table"><tr><td>补上了<\/td><td>2<\/td>/);
+  assert.match(html, /<tr><th colspan="2">人工结论<\/th><\/tr><tr><td>补上了<\/td><td>2<\/td>/);
   assert.match(html, /涉及的图片.*认回了<\/td><td>2.*这个图库里找不到对应的图<\/td><td>1/s);
   assert.match(html, /依赖的角色和作品.*对上了已有的/s);
   assert.match(html, /口径不同，不能相加/);
