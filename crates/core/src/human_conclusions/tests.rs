@@ -9,6 +9,7 @@ fn fixture(version: i64) -> Connection {
     c.execute_batch(
         "CREATE TABLE curation(uuid TEXT PRIMARY KEY,status TEXT NOT NULL,origin TEXT NOT NULL,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
          CREATE TABLE deferred(uuid TEXT PRIMARY KEY);
+         CREATE TABLE reviews(entity TEXT NOT NULL,reviewed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,action_id INTEGER PRIMARY KEY);
          CREATE TABLE identity_uncertain(uuid TEXT PRIMARY KEY,options_json TEXT NOT NULL,reason TEXT NOT NULL,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);"
     ).unwrap();
     crate::schema_rules::migrate_to(&mut c, version).unwrap();
@@ -172,9 +173,20 @@ fn v8_curation_backfill_supports_continuous_old_undo_without_forging_unknown_abs
 fn v8_only_provable_deferred_and_uncertain_clears_are_backfilled() {
     let mut c = fixture(8);
     let cleared = named_action(&c, "已将 2 张设为 合成身份", &json!([{"terms":{"v":2,"type":"snapshot","before":[
-        {"uuid":"known","entity":null,"assertion":null,"deferred":true,"identity":{"identity_scopes":null,"identity_suspended":null,"identity_uncertain":["[\"a\",\"b\"]","reason","old"]}},
-        {"uuid":"empty","entity":null,"assertion":null,"deferred":false,"identity":{"identity_scopes":null,"identity_suspended":null,"identity_uncertain":null}}
+        {"uuid":"known","entity":"synthetic","assertion":null,"deferred":true,"identity":{"identity_scopes":null,"identity_suspended":null,"identity_uncertain":["[\"a\",\"b\"]","reason","old"]}},
+        {"uuid":"empty","entity":"synthetic","assertion":null,"deferred":false,"identity":{"identity_scopes":null,"identity_suspended":null,"identity_uncertain":null}}
     ]}}]).to_string());
+    c.execute_batch(
+        "INSERT INTO terms(key,kind,origin) VALUES ('synthetic','character','user');
+        INSERT INTO term_assets(namespace,key) VALUES ('library','known'),('library','empty');",
+    )
+    .unwrap();
+    c.execute(
+        "INSERT INTO term_verdicts(action_id,anchor,asset_id,term_id,verdict,origin,via)
+        SELECT ?1,?1,a.id,t.id,'yes','user','review' FROM term_assets a CROSS JOIN terms t WHERE t.key='synthetic'",
+        [cleared],
+    )
+    .unwrap();
     crate::schema_rules::migrate_to(&mut c, schema::SCHEMA_VERSION).unwrap();
     for domain in [Domain::Deferred, Domain::Uncertain] {
         assert!(matches!(state::read(&c, domain, "known").unwrap(), State::Absent(m) if m.owner_action_id == cleared));
@@ -276,4 +288,85 @@ fn unknown_counted_metadata_and_ambiguous_legacy_text_do_not_guess_an_operation(
     crate::schema_rules::migrate_to(&mut c, schema::SCHEMA_VERSION).unwrap();
     assert_eq!(c.query_row("SELECT count(*) FROM human_state_marks", [], |r| r.get::<_, i64>(0)).unwrap(), 0);
     assert_eq!(c.query_row("SELECT count(*) FROM human_state_mark_undo", [], |r| r.get::<_, i64>(0)).unwrap(), 0);
+}
+
+#[test]
+fn unknown_operation_drops_current_inference_but_undo_retains_proven_history() {
+    let mut c = fixture(8);
+    let reset = named_action(&c, "已将 1 张交回自动规则", &json!([{"uuid":"a","curation":null}]).to_string());
+    let unknown = named_action(&c, "合成未知操作", &json!([{"uuid":"a","curation":null}]).to_string());
+    crate::schema_rules::migrate_to(&mut c, schema::SCHEMA_VERSION).unwrap();
+    assert_eq!(state::read(&c, Domain::Curation, "a").unwrap(), State::Undecided);
+    assert_eq!(c.query_row("SELECT count(*) FROM human_state_mark_undo", [], |r| r.get::<_, i64>(0)).unwrap(), 2);
+    let tx = c.transaction().unwrap();
+    schema::begin_writing(&tx).unwrap();
+    state::undo(&tx, unknown).unwrap();
+    tx.execute("UPDATE actions SET undone=1 WHERE id=?1", [unknown]).unwrap();
+    assert!(matches!(state::read(&tx, Domain::Curation, "a").unwrap(),State::Absent(m) if m.owner_action_id==reset));
+    state::undo(&tx, reset).unwrap();
+    tx.execute("UPDATE actions SET undone=1 WHERE id=?1", [reset]).unwrap();
+    schema::commit_writing(tx).unwrap();
+    assert_eq!(state::read(&c, Domain::Curation, "a").unwrap(), State::Undecided);
+}
+
+#[test]
+fn counted_history_requires_exact_verdict_and_review_witnesses() {
+    for broken in [
+        "missing",
+        "extra",
+        "wrong-asset",
+        "wrong-term",
+        "mixed-via",
+        "clear",
+        "review-with-sweep",
+        "sweep-without-review",
+        "sweep-no",
+    ] {
+        let mut c = fixture(8);
+        c.execute_batch(
+            "INSERT INTO terms(key,kind,origin) VALUES ('synthetic','character','user'),('other','character','user');
+            INSERT INTO term_assets(namespace,key) VALUES ('library','a'),('library','other');",
+        )
+        .unwrap();
+        let id = named_action(
+            &c,
+            "已将 1 张设为 合成 标为已检查（1 张）",
+            &json!([
+                {"uuid":"a","entity":"synthetic","assertion":null,"deferred":true}
+            ])
+            .to_string(),
+        );
+        c.execute("UPDATE actions SET label_kind='sweep',label_count='1' WHERE id=?1", [id]).unwrap();
+        if broken != "missing" {
+            let via = if broken.starts_with("sweep") { "sweep" } else { "review" };
+            let verdict = match broken {
+                "clear" => "clear",
+                "sweep-no" => "no",
+                _ => "yes",
+            };
+            let asset = if broken == "wrong-asset" { "other" } else { "a" };
+            let term = if broken == "wrong-term" { "other" } else { "synthetic" };
+            c.execute(
+                "INSERT INTO term_verdicts(action_id,anchor,asset_id,term_id,verdict,origin,via)
+                SELECT ?1,?1,a.id,t.id,?2,'user',?3 FROM term_assets a CROSS JOIN terms t WHERE a.key=?4 AND t.key=?5",
+                rusqlite::params![id, verdict, via, asset, term],
+            )
+            .unwrap();
+        }
+        if matches!(broken, "extra" | "mixed-via") {
+            c.execute("INSERT INTO term_verdicts(action_id,anchor,asset_id,term_id,verdict,origin,via)
+                SELECT ?1,?1,a.id,t.id,'yes','user',?2 FROM term_assets a CROSS JOIN terms t WHERE a.key='a' AND t.key='synthetic'",
+                rusqlite::params![id,if broken=="mixed-via" {"sweep"} else {"review"}]).unwrap();
+        }
+        if matches!(broken, "review-with-sweep" | "sweep-no") {
+            c.execute("INSERT INTO reviews(entity,action_id) VALUES ('synthetic',?1)", [id]).unwrap();
+        }
+        crate::schema_rules::migrate_to(&mut c, schema::SCHEMA_VERSION).unwrap();
+        assert_eq!(state::read(&c, Domain::Deferred, "a").unwrap(), State::Undecided, "{broken}");
+        assert_eq!(
+            c.query_row("SELECT count(*) FROM human_state_mark_undo", [], |r| r.get::<_, i64>(0)).unwrap(),
+            0,
+            "{broken}"
+        );
+    }
 }

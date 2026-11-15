@@ -409,6 +409,12 @@ mod tests {
             for (table, data) in input["tables"].as_object().unwrap() {
                 assert!([
                     "deferred",
+                    "identity_baseline",
+                    "identity_canonical",
+                    "identity_scopes",
+                    "identity_suspended",
+                    "identity_uncertain",
+                    "term_identity_baseline",
                     "display_names",
                     "entities",
                     "names",
@@ -421,6 +427,7 @@ mod tests {
                     "meta",
                     "term_assets",
                     "term_name_display",
+                    "term_name_choice",
                     "term_names",
                     "term_projection",
                     "term_tree",
@@ -643,6 +650,86 @@ mod tests {
                     3 => assert_eq!(read("synthetic-b"), State::Undecided),
                     2 => assert_eq!(read("synthetic-a"), State::Positive(json!(true))),
                     _ => assert_eq!(read("synthetic-a"), State::Undecided),
+                }
+            }
+        }
+    }
+    #[test]
+    fn genuine_v7_counted_matrix_preserves_both_states_through_each_upgrade_and_undo() {
+        use illustash_core::human_conclusions::state::{self, Domain, State};
+        use serde_json::{json, Value};
+        // 九个真实旧产出场景：六种计数操作、set/remove 被误认 sweep，以及 sweep 被误认 swap。
+        // 每种都先执行恢复、跳过、保留未定；计数操作后逐步撤销，必须找回最初的恢复标记。
+        let input: Value =
+            serde_json::from_str(include_str!("../../../tests/fixtures/library_upgrade/human_v7_counted_matrix.json"))
+                .unwrap();
+        assert_eq!(input["producer_commit"], "c472dfed");
+        assert_eq!(input["terms_schema"], 7);
+        assert_eq!(input["cases"].as_array().unwrap().len(), 9);
+        for via_v8 in [false, true] {
+            let f = Fixture::recorded(&input);
+            let mut c = f.connection();
+            if via_v8 {
+                crate::schema::migrate_to(&mut c, 8).unwrap();
+            }
+            drop(c);
+            let report = run(&needed(&f.0).unwrap(), None).unwrap();
+            assert_eq!(report.before, if via_v8 { 8 } else { 7 });
+            assert_eq!(f.backups(), if via_v8 { 2 } else { 1 });
+            let context = crate::http::LibraryContext {
+                db: f.0.join("library.sqlite"),
+                generation: "synthetic".into(),
+                library: Some(f.0.clone()),
+                tags: f.0.join("unused.csv"),
+                source: Some(f.0.join("source.sqlite")),
+                token: Some("synthetic".into()),
+                read_only: None,
+            };
+            for case in input["cases"].as_array().unwrap().iter().rev() {
+                let asset = case["asset"].as_str().unwrap();
+                let ids: Vec<i64> = case["actions"].as_array().unwrap().iter().map(|v| v.as_i64().unwrap()).collect();
+                assert_eq!(ids.len(), 4);
+                let c = f.connection();
+                let (kind, count): (String, String) = c
+                    .query_row("SELECT label_kind,label_count FROM actions WHERE id=?1", [ids[3]], |r| {
+                        Ok((r.get(0)?, r.get(1)?))
+                    })
+                    .unwrap();
+                assert_eq!(kind, case["recognized"].as_str().unwrap());
+                assert_eq!(count, "1");
+                let uncertain = json!({"options":[format!("synthetic-{}",asset.strip_prefix("asset-").unwrap()),format!("synthetic-other-{}",asset.strip_prefix("asset-").unwrap())],"reason":"合成未定原因",
+                    "created_at":c.query_row("SELECT ts FROM actions WHERE id=?1",[ids[2]],|r|r.get::<_,String>(0)).unwrap()});
+                drop(c);
+                let read = |domain| state::read(&f.connection(), domain, asset).unwrap();
+                if case["kind"] == "sweep" {
+                    assert_eq!(read(Domain::Deferred), State::Positive(json!(true)), "{case}");
+                    assert_eq!(read(Domain::Uncertain), State::Positive(uncertain.clone()), "{case}");
+                } else {
+                    for domain in [Domain::Deferred, Domain::Uncertain] {
+                        assert!(matches!(read(domain),State::Absent(m) if m.owner_action_id==ids[3]), "{case}");
+                    }
+                }
+                for index in (0..4).rev() {
+                    crate::app_commands::request(
+                        &context,
+                        "/api/undo",
+                        &crate::http_json::parse_request(&json!({"id":ids[index]}).to_string()).unwrap(),
+                    )
+                    .unwrap();
+                    if index == 3 {
+                        assert_eq!(read(Domain::Deferred), State::Positive(json!(true)), "{case}");
+                        assert_eq!(read(Domain::Uncertain), State::Positive(uncertain.clone()), "{case}");
+                    } else {
+                        assert_eq!(read(Domain::Uncertain), State::Undecided, "{case}");
+                        match index {
+                            2 => assert_eq!(read(Domain::Deferred), State::Positive(json!(true)), "{case}"),
+                            1 => assert!(
+                                matches!(read(Domain::Deferred),State::Absent(m) if m.owner_action_id==ids[0]),
+                                "{case}"
+                            ),
+                            _ => assert_eq!(read(Domain::Deferred), State::Undecided, "{case}"),
+                        }
+                    }
                 }
             }
         }

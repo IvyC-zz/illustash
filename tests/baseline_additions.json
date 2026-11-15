@@ -10,7 +10,9 @@
         "crates/core/src/human_conclusions/tests.rs::v8_only_provable_deferred_and_uncertain_clears_are_backfilled",
         "native/terms/src/app_commands.rs::reset_survives_reopen_and_ordinary_undo_restores_the_previous_mark",
         "native/terms/src/app_upgrade.rs::genuine_v8_counted_operation_survives_name_collision_upgrade_and_undo",
-        "native/terms/src/app_upgrade.rs::genuine_v7_collision_survives_direct_and_already_v8_upgrade_without_reclassifying_sweep"
+        "native/terms/src/app_upgrade.rs::genuine_v7_collision_survives_direct_and_already_v8_upgrade_without_reclassifying_sweep",
+        "native/terms/src/app_upgrade.rs::genuine_v7_counted_matrix_preserves_both_states_through_each_upgrade_and_undo",
+        "crates/core/src/human_conclusions/tests.rs::unknown_operation_drops_current_inference_but_undo_retains_proven_history"
       ]
     },
     {
@@ -21,7 +23,9 @@
         "crates/core/src/human_conclusions/tests.rs::changed_mark_rejects_undo_and_the_callers_transaction_restores_every_row",
         "crates/core/src/human_conclusions/tests.rs::v8_curation_backfill_supports_continuous_old_undo_without_forging_unknown_absence",
         "native/terms/src/app_upgrade.rs::genuine_v8_counted_operation_survives_name_collision_upgrade_and_undo",
-        "native/terms/src/app_upgrade.rs::genuine_v7_collision_survives_direct_and_already_v8_upgrade_without_reclassifying_sweep"
+        "native/terms/src/app_upgrade.rs::genuine_v7_collision_survives_direct_and_already_v8_upgrade_without_reclassifying_sweep",
+        "native/terms/src/app_upgrade.rs::genuine_v7_counted_matrix_preserves_both_states_through_each_upgrade_and_undo",
+        "crates/core/src/human_conclusions/tests.rs::unknown_operation_drops_current_inference_but_undo_retains_proven_history"
       ]
     }
   ],

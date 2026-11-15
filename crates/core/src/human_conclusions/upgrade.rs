@@ -117,27 +117,26 @@ fn character_snapshot(v: &Value) -> bool {
                 && assertion["origin"].is_string()))
 }
 
-// 句式只用来区分已验证快照的操作语义，不能单独凭「已恢复」或「交回自动规则」制造结论。
-fn character_effects(label: &str, kind: Option<&str>, count: Option<&str>) -> Option<(Effect, Effect, bool)> {
+// 句式只确定支持的操作族。v8 的 metadata 也可能由 v7 文案误认，不能作为清除或保留的证据。
+fn character_effects(
+    c: &Connection,
+    action: i64,
+    label: &str,
+    metadata: (Option<&str>, Option<&str>),
+    items: &[Value],
+    has_reviews: bool,
+) -> Result<Option<(Effect, Effect, bool)>> {
     use crate::undo_labels::UndoLabel;
-    let operation = match (kind, count) {
-        // v8 的真实命令持久化种类和张数。角色名可包含任何句式片段，不能再从显示文案反推操作。
-        (Some(kind), Some(count)) if counted(count, "", "") => Some(UndoLabel::parse(kind)?),
-        (None, None) => {
-            // 更早的载荷只有文案；有多种解释时保持未决定，不按句式的尝试顺序猜。
-            let mut kinds = UndoLabel::ALL.into_iter().filter(|kind| kind.count(label).is_some());
-            let first = kinds.next();
-            if kinds.next().is_some() {
-                return None;
-            }
-            first
-        }
-        _ => return None,
+    let counted_operation = match metadata {
+        (Some(kind), Some(count)) if UndoLabel::parse(kind).is_some() && counted(count, "", "") => true,
+        (None, None) => UndoLabel::ALL.into_iter().any(|kind| kind.count(label).is_some()),
+        _ => return Ok(None),
     };
-    if let Some(kind) = operation {
-        let effect = if kind == UndoLabel::Sweep { Effect::Preserve } else { Effect::Clear };
-        Some((effect, effect, false))
-    } else if counted(label, "已恢复 ", " 张") {
+    if counted_operation {
+        return counted_effect(c, action, items, has_reviews)
+            .map(|effect| effect.map(|effect| (effect, effect, false)));
+    }
+    Ok(if counted(label, "已恢复 ", " 张") {
         Some((Effect::Clear, Effect::Preserve, true))
     } else if counted(label, "已跳过 ", " 张") {
         Some((Effect::Present, Effect::Preserve, false))
@@ -154,39 +153,52 @@ fn character_effects(label: &str, kind: Option<&str>, count: Option<&str>) -> Op
         Some((Effect::Clear, Effect::Clear, false))
     } else {
         None
-    }
+    })
 }
 
-fn evidenced_effects(
-    c: &Connection,
-    action: i64,
-    label: &str,
-    kind: Option<&str>,
-    count: Option<&str>,
-    has_reviews: bool,
-) -> Result<Option<(Effect, Effect, bool)>> {
-    use crate::undo_labels::UndoLabel;
-    let effects = character_effects(label, kind, count);
-    // v8 对更早历史也从文案回填过 metadata，语法合法不等于来自原命令。
-    // 只有 sweep 与确认/移出句式碰撞时需要区分：真实 sweep 总写 reviews，裁决 via=sweep；
-    // 确认/移出写 via=review 且不写 reviews。保留持久裁决作为证据，不重写旧 action。
-    let suspect = has_reviews
-        && matches!((kind, count), (None, None) | (Some("sweep"), Some(_)))
-        && count.is_none_or(|n| counted(n, "", ""))
-        && UndoLabel::Sweep.count(label).is_some()
-        && UndoLabel::ALL.into_iter().any(|k| k != UndoLabel::Sweep && k.count(label).is_some());
-    if !suspect {
-        return Ok(effects);
+fn counted_effect(c: &Connection, action: i64, items: &[Value], has_reviews: bool) -> Result<Option<Effect>> {
+    if !has_reviews {
+        return Ok(None);
     }
-    let clear: bool = c.query_row(
-        "SELECT NOT EXISTS(SELECT 1 FROM reviews WHERE action_id=?1)
-         AND EXISTS(SELECT 1 FROM term_verdicts WHERE action_id=?1)
-         AND NOT EXISTS(SELECT 1 FROM term_verdicts WHERE action_id=?1
-            AND (asset_id IS NULL OR term_id IS NULL OR via<>'review' OR verdict NOT IN ('yes','no')))",
-        [action],
-        |r| r.get(0),
+    // 六类计数命令的有限矩阵：set/remove/add/drop/swap 都写 review 裁决并清除状态；
+    // sweep 写 sweep/yes 裁决和一条 reviews，并保留状态。两种文案误认方向用同一证据核验。
+    // 要求裁决与完整撤销快照逐对吻合，不能用同 action 下无关、缺失或额外的裁决作证。
+    let snapshots: Option<BTreeSet<(&str, &str)>> =
+        items.iter().map(|item| Some((item["uuid"].as_str()?, item["entity"].as_str()?))).collect();
+    let Some(snapshots) = snapshots.filter(|s| !s.is_empty() && s.len() == items.len()) else {
+        return Ok(None);
+    };
+    let reviews: i64 = c.query_row("SELECT count(*) FROM reviews WHERE action_id=?1", [action], |r| r.get(0))?;
+    let (via, effect) = match reviews {
+        0 => ("review", Effect::Clear),
+        1 => ("sweep", Effect::Preserve),
+        _ => return Ok(None),
+    };
+    let mut rows = c.prepare(
+        "SELECT a.key,t.key,v.via,v.verdict FROM term_verdicts v
+         LEFT JOIN term_assets a ON a.id=v.asset_id AND a.namespace='library'
+         LEFT JOIN terms t ON t.id=v.term_id WHERE v.action_id=?1",
     )?;
-    Ok(if clear { Some((Effect::Clear, Effect::Clear, false)) } else { effects })
+    let rows = rows.query_map([action], |r| {
+        Ok((
+            r.get::<_, Option<String>>(0)?,
+            r.get::<_, Option<String>>(1)?,
+            r.get::<_, String>(2)?,
+            r.get::<_, String>(3)?,
+        ))
+    })?;
+    let mut witnessed = BTreeSet::new();
+    for row in rows {
+        let (Some(asset), Some(term), actual_via, verdict) = row? else { return Ok(None) };
+        if actual_via != via
+            || !(verdict == "yes" || (reviews == 0 && verdict == "no"))
+            || !snapshots.contains(&(asset.as_str(), term.as_str()))
+            || !witnessed.insert((asset, term))
+        {
+            return Ok(None);
+        }
+    }
+    Ok((witnessed.len() == snapshots.len()).then_some(effect))
 }
 
 fn backfill(c: &Connection) -> Result<()> {
@@ -255,7 +267,14 @@ fn backfill(c: &Connection) -> Result<()> {
         let valid_envelope = envelope.is_none_or(|v| keys(v, &["v", "type", "before"]) && v["type"] == "snapshot");
         let valid = valid_envelope && !items.is_empty() && items.iter().all(character_snapshot);
         let effects = if valid {
-            evidenced_effects(c, action, &label, kind.as_deref(), count.as_deref(), tables.contains("reviews"))?
+            character_effects(
+                c,
+                action,
+                &label,
+                (kind.as_deref(), count.as_deref()),
+                &items,
+                tables.contains("reviews"),
+            )?
         } else {
             None
         };
@@ -279,45 +298,33 @@ fn backfill(c: &Connection) -> Result<()> {
         let mut undo = Vec::new();
         for (index, step) in steps.iter().enumerate() {
             let after_present = steps.get(index + 1).map_or(Some(current_present), |next| next.before_present);
-            let (Some(before_present), Some(after_present), Some(effect)) =
-                (step.before_present, after_present, step.effect)
-            else {
-                previous = None;
-                undo.clear();
-                continue;
-            };
-            let expected = match effect {
-                Effect::Present => true,
-                Effect::Clear => false,
-                Effect::Preserve => before_present,
-            };
-            // 快照、操作语义和后续状态必须一致；不把中途发生的未知改动归给这一步。
-            if expected != after_present {
-                previous = None;
-                undo.clear();
-                continue;
-            }
-            if before_present {
+            if step.before_present != Some(false) {
                 previous = None;
             }
-            let after = if after_present {
-                None
-            } else if step.explicit_absence || before_present {
-                Some(Mark {
-                    owner_action_id: step.action,
-                    origin: "legacy".into(),
-                    source_ref: None,
-                    created_at: step.at.clone(),
-                })
-            } else {
-                previous.clone()
+            let after = match (step.before_present, after_present, step.effect) {
+                (Some(before), Some(false), Some(effect))
+                    if matches!(effect, Effect::Clear) || (!before && matches!(effect, Effect::Preserve)) =>
+                {
+                    if step.explicit_absence || before {
+                        Some(Mark {
+                            owner_action_id: step.action,
+                            origin: "legacy".into(),
+                            source_ref: None,
+                            created_at: step.at.clone(),
+                        })
+                    } else {
+                        previous.clone()
+                    }
+                }
+                _ => None,
             };
+            // 未知或不一致的步骤不产生新结论。有效 before 仍证明它撤销后应恢复什么，
+            // 因此记录已知标记到未决定的边界，并保留此前已证明的账本供连续撤销使用。
             if previous != after {
                 undo.push((step.action, json!(previous).to_string(), json!(after).to_string()));
             }
             previous = after;
         }
-        // 只为最后一段可连续还原的历史记账；未知边界之前不能留下当前标记无法匹配的撤销账本。
         for (action, before, after) in undo {
             c.execute(
                 "INSERT INTO human_state_mark_undo(action_id,domain,asset_key,before_json,after_json) VALUES (?1,?2,?3,?4,?5)",
