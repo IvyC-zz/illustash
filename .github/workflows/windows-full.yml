@@ -239,6 +239,7 @@ jobs:
           "同步边界：$([int]$env:REPEAT - $failed)/$env:REPEAT 次通过"
           if ($failed) { exit 1 }
       # 研究 worker（#498）：失败报告附上 worker 启动次数、各次 kind、最后状态和合成 worker 的 stderr。
+      # 定向复跑用来复现，隔离名单里的失败也计入结果（--count-quarantined）。
       - name: 构建研究定向复跑的被测程序
         if: env.SCOPE == 'research-worker'
         run: |
@@ -263,7 +264,7 @@ jobs:
           $failed = 0
           for ($i = 1; $i -le [int]$env:REPEAT; $i++) {
             $log = "$logs/research-worker-$i.log"
-            python -m tests.windows_fixed_suite --scope "研究 worker 定向复跑 第 $i/$env:REPEAT 次" --select test_native_research.NativeResearchTest --log $log
+            python -m tests.windows_fixed_suite --scope "研究 worker 定向复跑 第 $i/$env:REPEAT 次" --select test_native_research.NativeResearchTest --count-quarantined --log $log
             $code = $LASTEXITCODE
             $cases = @(Select-String -Path $log -Pattern '^(FAIL|ERROR): (\S+)' | ForEach-Object { $_.Matches[0].Groups[2].Value }) -join '、'
             if ($code -ne 0) { $failed++ }

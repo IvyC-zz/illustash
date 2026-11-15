@@ -70,6 +70,7 @@ def main():
     parser.add_argument('--log', type=Path, required=True)
     parser.add_argument('--select', action='append', default=[], help='测试 ID 前缀，如 test_native_research.NativeResearchTest')
     parser.add_argument('--scope', default='', help='写进日志和摘要的范围名；带 --select 时必填')
+    parser.add_argument('--count-quarantined', action='store_true', help='隔离名单里的失败也计入结果（定向复现用）')
     args = parser.parse_args()
     if args.select and not args.scope:
         parser.error('带 --select 时须用 --scope 写明范围')
@@ -79,7 +80,7 @@ def main():
     references = []
     tail = []
     command = [sys.executable, '-X', 'utf8', '-m', 'tests.run_fixed_suite', '-v', '-b',
-               *(f'--select={prefix}' for prefix in args.select)]
+               *(f'--select={prefix}' for prefix in args.select), *(['--count-quarantined'] if args.count_quarantined else [])]
     heading = f'Windows Python 范围：{scope}' + (f'（只跑 {", ".join(args.select)}）' if args.select else '')
     print(heading, flush=True)
     args.log.write_text(heading + '\n', encoding='utf-8', newline='\n')

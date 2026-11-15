@@ -202,6 +202,8 @@ class FixedSuiteRunnerTest(unittest.TestCase):
                 self.assertIn('test_flaky.Flaky.test_sometimes（#1', run.stdout)
                 self.assertIn('2 处失败', run.stdout)
                 self.assertIn('synthetic flake', run.stderr)
+                # 定向复现时照样计入。
+                self.assertNotEqual(self.run_suite('--jobs', jobs, '--count-quarantined').returncode, 0)
 
     def test_quarantine_does_not_cover_other_platforms_or_other_tests(self):
         self.write('test_flaky.py', 'import unittest\nclass Flaky(unittest.TestCase):\n'

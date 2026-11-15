@@ -132,6 +132,16 @@ HTTP 测试共用 `tests/test_read_http.py` 的端口、等待和进程清理工
 
 调整 `tools/check_all.sh` 的结构时检查 `tests/test_local_acceptance.py` 与 `test_packaging_resources.py`：它们目前还按脚本文本定位构建、环境导出和 discover 顺序。维护时保留候选产物先准备再消费、漏跑失败及跳过白名单等行为；新增检查优先验证行为，避免继续绑定命令的排版与拼写。全量检查前置的 `test_local_acceptance.py` 也会被后续 discover 再执行；任何去重须同时保留快速失败入口及最终覆盖。
 
+### 不稳定测试的隔离名单（#501）
+
+2026-11-15 用户定。`tests/quarantine.json` 列出已知会偶发失败、正由 Issue 跟踪的测试。规则见 [AGENTS.md](../AGENTS.md#约定)「隔离名单」一条，这里写做法。
+
+- **条目**：`kind`（`python` 或 `rust`）、`id`、`platforms`（`macos`、`windows`）、`issue`、`added`、`expires`；Rust 条目另写 `crate`（Cargo 项目目录，如 `native/terms`）。Python 的 `id` 是 discover 下的测试 ID（`test_native_research.NativeResearchTest.test_x`），Rust 的 `id` 是 libtest 名称（`app_sync::tests::test_x`，集成测试不带二进制名）。到期日默认加入后两周。
+- **效果**：名单里的测试照常运行；在条目列出的平台上，它们的失败（含 subTest 和 setUp 的失败）不计入结果，在输出和 job 摘要里单列「隔离名单中的失败（不计入结果）」。别的平台照常计入。
+- **校验**：名单格式错误、条目到期（运行当天晚于 `expires`）、名单里的测试找不到时，检查失败。Python 条目由 `tests.run_fixed_suite` 在 discover 后核对，Rust 条目由 `cargo-test` 入口用 `cargo test -- --list` 核对。`python tools/quarantine.py check` 只查格式和到期，`tools/check_all.sh` 一开头就跑它。
+- **Rust 的做法**：`python tools/quarantine.py cargo-test --manifest-path <项目>/Cargo.toml` 代替 `cargo test`：先 `--exact --skip` 掉本平台的条目跑其余测试，由它决定退出码；再用 `--exact` 逐个单独运行这些条目，只汇报。本机全量、`macos-full.yml`、`windows-full.yml` 都经这个入口。
+- **用到它的入口**：本机全量、两份定时回归和 Windows 快检用同一份名单。定向复跑（`windows-full.yml` 的 `sync-boundary`、`research-worker`）直接跑选中的用例，不按名单放过失败，用来复现。
+
 ## 固定验收窗口
 
 固定路径为 Git 公共目录所在仓库的 `.venv/local-acceptance/worktree`，由 `tools/local_acceptance.py` 建立 detached worktree。它与主工作区及开发 worktree 的源码、target 分开；只在固定路径现场构建，不复制其他目录的 Tauri target。开发 worktree 的缓存可按原规则清理。固定验收 worktree 本身和外层记录、密钥不随普通任务收尾删除；它的 target 等构建缓存可以删除（2026-10-19 用户定，#240），下次 `run` 时在固定路径冷编译，不影响已有记录的校验。
@@ -185,17 +195,21 @@ PR 应明确区分“当前 head 上完整执行退出 0”和“当前候选仅
 
 2026-11-12 用户定（#4），仓库公开后启用。规则见 [AGENTS.md](../AGENTS.md#约定)「GitHub Actions」一条，这里写做法。
 
+**定位**（2026-11-15 用户定，#501）：PR 和 push 上只做快速冒烟：格式、clippy、编译、前端 JS、原生固定契约和 Windows 快检。各 Rust 项目的 `cargo test`、macOS 的 Python 全量和 Windows 完整回归每天定时跑，失败不挡任何合并，由 Lead 看到后开 Issue 或更新已有 Issue。完整测试靠集成会话的本机全量（合入门槛）和定时运行。挪走的依据：2026-11-14、15 两天 `ci.yml` 跑了 182 次、失败 23 次，一半以上是时限类偶发失败，集中在 macOS Python 全量和 Windows；macOS 的 Python 全量与本机全量完全重复。留下的几项这两天没出过偶发失败，单项都在几分钟内跑完。
+
 **触发**：`ci.yml` 在目标为 main 的 PR 打开、推送新提交、重新打开、转 Ready 时运行；草稿 PR 和来自 fork 的 PR 不跑。push 到 main 时也跑一次，作用是写编译缓存：GitHub 的缓存按分支隔离，PR 写的缓存只有同一个 PR 读得到，main 上写的所有 PR 都能读。也可以在 Actions 页面对任意分支手动触发。仓库私有时（`github.event.repository.private`）自动触发的运行一律跳过，只有手动触发的会跑，所以这个 PR 在公开前合入也不会耗分钟数；私有期间也不手动触发 macOS 运行（私有库按 10 倍计分钟）。同一 PR 有新提交时取消旧运行。push 到 main 的运行各自成组、互不取消；重型 job 另有只在 push 时共用的并发组，后一次代码 push 取消前一次还没跑完的同名 job，集成会话连续合入几个代码 PR 时，main 上仍只有最后一次跑完。纯文档 push 跳过这些 job，不进组，不会取消前一轮还在写缓存的代码运行（#501）。这些组按 ref 区分，别的分支的 push 运行不会取消 main 的 job。
 
-**job**：「改动范围」先判断改了什么：PR 比较它与 main 的合并提交和当前 main，push 比较推送前后的两棵树（多提交的 push 合起来算），都按 `--no-renames` 把改名拆成删除和新增，移进 `docs/` 的代码仍算代码。只改 `docs/` 和根目录的 Markdown 时跳过构建与测试；`docs/THIRD_PARTY.md` 和 `docs/BACKEND_TASKS.md` 随安装包分发，仍须检查。新建分支、取不到推送前的提交（如强推后）和手动触发一律按代码改动处理。与 `tools/check_all.sh` 对齐的五个必需 job 包括 Rust 核心（core、platform、relation-fft、terms、iqdb 的 fmt/clippy/test）、Python 全量（release 构建后跑 `tests.run_fixed_suite`）、前端 JS（Ubuntu）、桌面壳 clippy/test、原生固定契约空 PATH 重放。除 JS 外，这五项都跑在 Apple 芯片的 `macos-latest` 上。公开库另有 Windows x64 快检（见下节）。分支保护要求「全部检查」汇总结果。代码改动要求五个必需 job 全部成功，文档改动要求所有构建与测试跳过；分流失败、缺失输出和 fork PR 没跑检查均判失败。Windows 不在「全部检查」的 `needs` 里，汇总不等它，Windows 快检作为单独的检查显示实际成败。
+**job**：「改动范围」先判断改了什么：PR 比较它与 main 的合并提交和当前 main，push 比较推送前后的两棵树（多提交的 push 合起来算），都按 `--no-renames` 把改名拆成删除和新增，移进 `docs/` 的代码仍算代码。只改 `docs/` 和根目录的 Markdown 时跳过构建与测试；`docs/THIRD_PARTY.md` 和 `docs/BACKEND_TASKS.md` 随安装包分发，仍须检查。新建分支、取不到推送前的提交（如强推后）和手动触发一律按代码改动处理。四个必需 job：「Rust 格式、clippy 与编译」（依赖方向、前端结构、样式清单同步，core、platform、relation-fft、terms、iqdb 的 fmt 和 `clippy --all-targets`，core、platform 的 build）、前端 JS（Ubuntu）、桌面壳 fmt/clippy、原生固定契约空 PATH 重放。除 JS 外都跑在 Apple 芯片的 `macos-latest` 上。公开库另有 Windows x64 快检（见下节）。分支保护要求「全部检查」汇总结果。代码改动要求四个必需 job 全部成功，文档改动要求所有构建与测试跳过；分流失败、缺失输出和 fork PR 没跑检查均判失败。Windows 不在「全部检查」的 `needs` 里，汇总不等它，Windows 快检作为单独的检查显示实际成败。
 
-**改检查项时**：同步检查 `ci.yml`、`windows-full.yml` 和 `tools/check_all.sh`。`tests/test_packaging_resources.py` 核对候选二进制接线（本机全量、macOS Python job、Windows 完整回归和快检）、macOS 两处跳过白名单的一致性和 Windows 白名单的匹配规则，并检查触发条件和各 workflow 的权限；`tests/test_ci_workflows.py` 直接运行分流和汇总脚本，并检查并发组和快检选中的测试类。`native-upgrade.yml` 是升级测试的单独手动入口，要求整类零跳过；macOS 的 Python 全套和 Windows 完整回归已经包含这一类。
+**定时回归**：`macos-full.yml` 和 `windows-full.yml` 每天北京时间 02:17 在 main 上运行，也可以在 Actions 页面手动运行，`ref` 填标签、分支或提交哈希。`macos-full.yml` 有两个 job：「Rust 测试 (macOS)」经 `tools/quarantine.py cargo-test` 跑 core、platform、relation-fft、terms、iqdb、desktop 的 `cargo test`（一个项目失败不妨碍后面的项目继续跑）；「Python 全量 (macOS)」是原先 PR 上的 Python job：release 构建后跑 `tests.run_fixed_suite`，跳过白名单与本机全量相同。只有定期运行保存缓存。Windows 那份见下节。
+
+**改检查项时**：同步检查 `ci.yml`、`macos-full.yml`、`windows-full.yml` 和 `tools/check_all.sh`。`tests/test_packaging_resources.py` 核对候选二进制接线（本机全量、macOS 和 Windows 完整回归、Windows 快检）、PR 上不再跑 `cargo test` 和 Python 全量、macOS 两处跳过白名单的一致性和 Windows 白名单的匹配规则，并检查触发条件和各 workflow 的权限；`tests/test_ci_workflows.py` 直接运行分流和汇总脚本，并检查并发组和快检选中的测试类。`native-upgrade.yml` 是升级测试的单独手动入口，要求整类零跳过；macOS 的 Python 全套和 Windows 完整回归已经包含这一类。
 
 **冻结输入**：索引参考的 SQLite 输入哈希若因 SQL 导出的小数位格式变化而不匹配，只有整库 schema、类型、值（浮点逐位）、rowid 和版本标记与冻结数据库完全一致时，才使用冻结 SQL 的原始哈希重查。数组、资产 ID、参数和结果仍精确匹配；不刷新录制，也不把真实数据差异当作格式差异。
 
 **缓存与权限**：Rust 编译缓存用 `Swatinem/rust-cache`，每个 job 一份，覆盖该 job 构建的 Cargo 项目；key 含各项目 Cargo.lock 的哈希，lock 变了时按前缀回退到最近一份，再增量编译。只在 main 上保存，PR 只读，免得 PR 的缓存挤掉 main 的（每个仓库合计 10 GB，超了按最久未用淘汰）。rustc 每 6 周升级一次 stable，升级后第一次是冷编译。workflow 只有 `contents: read`，checkout 不留凭据，不用 secret。每个 job 设了超时，卡住时不会耗满默认的 6 小时。
 
-**和合并队列的关系**：集成会话组批时查看各 PR 的「全部检查」及 Windows x64 快检结果，并看最近一次 Windows 完整回归。失败的先退回原会话查明原因，runner 故障或排队取消可重跑一次。PR CI 以该 PR 和触发时 main 的合并提交为输入，集成会话仍在合批候选上跑本机全量（见上一节）。
+**和合并队列的关系**：集成会话组批时查看各 PR 的「全部检查」及 Windows x64 快检结果。失败的先退回原会话查明原因，runner 故障或排队取消可重跑一次；隔离名单里的测试失败不退回（见「不稳定测试的隔离名单」）。定时回归的结论不挡合入。PR CI 以该 PR 和触发时 main 的合并提交为输入，集成会话仍在合批候选上跑本机全量（见上一节）。
 
 **耗时**：各 job 的耗时以实际运行记录为准；Windows x64 的冷、热缓存实测见下节。仓库私有期间没有触发过；2026-10-01 开源前的旧版本在 `macos-latest` 上的一次运行里，Python 全量 job 约 25 分钟，其余各约 2 分钟，当时的代码量和 job 组成与现在不同，只能作量级参考。
 
@@ -205,7 +219,7 @@ PR 应明确区分“当前 head 上完整执行退出 0”和“当前候选仅
 
 **快检**（`ci.yml` 的「Windows x64 快检」，代码 PR 和代码 push 自动运行）：release 构建 terms（宿主和 worker）、带 `test-read-host` 的 `read-http` 测试读宿主，`cargo check` 桌面壳的全部目标，再用 `tests.windows_fixed_suite --select` 跑 job 里 `QUICK_TESTS` 列的三个测试类：原生启动和生命周期（`NativeLifecycleTest`）、新建图库（`NativeLibraryCreateTest`）、核心读路由的 HTTP 契约（`CoreReadHTTPTest`），都用合成图库。跳过白名单与全量相同。Rust 缓存覆盖 terms 和桌面壳两个 Cargo 项目，只在 main 上保存，测试失败也保存，PR 从 main 还原。快检不跑 clippy、Rust 测试、其余 example 和数值对照，结论单独显示，不进「全部检查」的等待链。
 
-**完整回归**（`windows-full.yml`，范围 `full`）：内容是原先 PR 上的完整 Windows job。运行 core、platform、relation-fft、terms、desktop 的 clippy（参数与本机检查相同）、这五个项目及 iqdb 的 `cargo test`、terms 与 IQDB 的 release 构建和六个测试 example，再用这些 `.exe` 跑 Python 全套，包括升级测试和 #347 的严格数值对照。每天北京时间 02:17 在 main 上定期运行；发布候选在 Actions 页面手动运行，`ref` 填标签、分支或提交哈希（留空为所选分支的最新提交）。只有定期运行保存缓存，手动运行只还原。集成会话组批时看各 PR 的快检；完整回归失败时由集成会话查清原因，和快检失败一样退回或开 Issue。
+**完整回归**（`windows-full.yml`，范围 `full`）：内容是原先 PR 上的完整 Windows job。运行 core、platform、relation-fft、terms、desktop 的 clippy（参数与本机检查相同）、这五个项目及 iqdb 的 `cargo test`、terms 与 IQDB 的 release 构建和六个测试 example，再用这些 `.exe` 跑 Python 全套，包括升级测试和 #347 的严格数值对照。每天北京时间 02:17 在 main 上定期运行；发布候选在 Actions 页面手动运行，`ref` 填标签、分支或提交哈希（留空为所选分支的最新提交）。只有定期运行保存缓存，手动运行只还原。结论不挡合并，失败时由 Lead 开 Issue 或更新已有 Issue。Rust 测试经隔离名单的 `cargo-test` 入口运行。
 
 **定向复跑**（`windows-full.yml`，范围 `sync-boundary` 或 `research-worker`）：对指定提交只跑一个用例组，`repeat` 可重复 1–10 次，每次的结果分别记进 job 摘要；运行名、job 名和摘要都写明范围与实际提交，定向结果不代替完整回归。`sync-boundary` 跑 `app_sync::tests::scan_cancellation_and_completed_lifecycle_have_explicit_boundaries`（#497），先用 `--list` 列出实际选中的测试，失败报告写明夹具最后进入的阶段，并附上隔离子进程的 stdout 和 stderr。`research-worker` 跑 `test_native_research.NativeResearchTest`（#498），数值环境与完整回归相同；失败报告附上 worker 已启动的次数和各次 kind、最后状态，以及 `worker.stderr.log`（每次尝试的编号、kind、模式、异常和计算程序 stderr）和 Windows 启动器追加写的 `research-worker.stderr`。断言和时限与全量相同。研究定向复跑需要包含 #501 的提交（`tests.run_fixed_suite --select`），更早的提交会在构建前明确报错；同步边界没有这个限制，但更早的提交没有阶段证据。失败时 `regression-logs/` 下每次的日志作为工件保留 7 天。
 

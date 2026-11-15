@@ -9,7 +9,8 @@
 某个前缀一项也没选中时判失败，不把空选择当成通过。定向结果不代替全量。
 
 隔离名单（`tests/quarantine.json`，#501）：名单里的测试照跑，在本平台的失败不计入结果，单列「隔离名单中的失败」；
-名单格式错误、条目到期或找不到对应测试时入口失败。规则见 tools/quarantine.py。
+名单格式错误、条目到期或找不到对应测试时入口失败。`--count-quarantined` 照样校验名单，但名单里的失败也计入结果，
+供定向复现使用。规则见 tools/quarantine.py。
 """
 import importlib.abc
 import importlib.machinery
@@ -96,8 +97,10 @@ def held_entries(tests):
                                          +'\n'.join('  '+quarantine.describe(entry) for entry in missing))
     return {entry['id']:entry for entry in entries if quarantine.platform() in entry['platforms']}
 
-def split_failures(ids,held):
+def split_failures(ids,held,counting=False):
     """把失败分成计入结果的和隔离名单里的；后者输出单独一节。"""
+    if counting:
+        return ids,0
     counted=[name for name in ids if name not in held]
     isolated={name:ids.count(name) for name in dict.fromkeys(ids) if name in held}
     quarantine.report([f'{quarantine.describe(held[name])}：{times} 处失败' for name,times in isolated.items()])
@@ -167,7 +170,7 @@ def select(tests,prefixes):
     sys.stderr.write(f'定向选择：{", ".join(prefixes)}；选中 {sum(type(t).__module__!="unittest.loader" for t in kept)} 项\n')
     return kept,empty
 
-def parallel(jobs,verbosity,buffer,passthrough,prefixes=()):
+def parallel(jobs,verbosity,buffer,passthrough,prefixes=(),counting=False):
     start=time.perf_counter()
     loader=unittest.defaultTestLoader
     discovered=list(flatten(loader.discover(str(ROOT/'tests'))))
@@ -233,7 +236,7 @@ def parallel(jobs,verbosity,buffer,passthrough,prefixes=()):
     for line in broken: sys.stderr.write(f'并行执行失败：{line}\n')
     if missing: sys.stderr.write(f'未运行的测试 {len(missing)} 项：{", ".join(sorted(missing)[:20])}\n')
     sys.stderr.write(f'{RULE}\nRan {total["run"]} tests in {elapsed:.3f}s（并行 {jobs} 进程）\n\n')
-    counted,isolated=split_failures(failing,held)
+    counted,isolated=split_failures(failing,held,counting)
     failed=counted or broken or missing or empty
     parts=[f'{label}={total[key]}' for key,label in (('failures','failures'),('errors','errors'),('skipped','skipped'),
            ('expected','expected failures'),('unexpected','unexpected successes')) if total[key]]
@@ -244,24 +247,25 @@ def parallel(jobs,verbosity,buffer,passthrough,prefixes=()):
     return not failed and not attempts and not extra
 
 def options(argv):
-    jobs=os.cpu_count() or 1;rest=[];prefixes=[]
+    jobs=os.cpu_count() or 1;rest=[];prefixes=[];counting=False
     args=iter(argv)
     for arg in args:
         if arg in ('-j','--jobs'): jobs=int(next(args))
         elif arg.startswith('--jobs='): jobs=int(arg.split('=',1)[1])
         elif arg=='--select': prefixes.append(next(args))
         elif arg.startswith('--select='): prefixes.append(arg.split('=',1)[1])
+        elif arg=='--count-quarantined': counting=True
         else: rest.append(arg)
     if jobs<1: raise SystemExit('--jobs 至少为 1')
     if any(not prefix for prefix in prefixes): raise SystemExit('--select 不能为空')
-    return jobs,rest,prefixes
+    return jobs,rest,prefixes,counting
 
 if __name__=='__main__':
     if sys.argv[1:2]==['--worker']:
         rest=sys.argv[3:]
         worker(sys.argv[2],2 if '-v' in rest else 1,'-b' in rest)
         sys.exit(0)
-    jobs,rest,prefixes=options(sys.argv[1:])
+    jobs,rest,prefixes,counting=options(sys.argv[1:])
     guard()
     if jobs==1 and prefixes: raise SystemExit('--select 只用于并行模式；--jobs 1 请直接传 unittest 参数')
     if jobs==1:
@@ -271,8 +275,8 @@ if __name__=='__main__':
             raise SystemExit(str(error))
         program=unittest.main(module=None,argv=[sys.argv[0],'discover','-s','tests',*rest],exit=False)
         print(f'退役参考导入尝试：{len(ATTEMPTS)}')
-        counted,_=split_failures(failed_ids(program.result),held)
+        counted,_=split_failures(failed_ids(program.result),held,counting)
         sys.exit(bool(counted) or bool(ATTEMPTS))
     unknown=[arg for arg in rest if arg not in ('-v','-b')]
     if unknown: raise SystemExit(f'并行模式只支持 -v/-b，其余参数请配合 --jobs 1：{" ".join(unknown)}')
-    sys.exit(not parallel(jobs,2 if '-v' in rest else 1,'-b' in rest,rest,prefixes))
+    sys.exit(not parallel(jobs,2 if '-v' in rest else 1,'-b' in rest,rest,prefixes,counting))
