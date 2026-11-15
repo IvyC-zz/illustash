@@ -8,10 +8,6 @@ run-name: >-
   macOS 回归 · ${{ github.event_name == 'schedule' && '定期' || '手动' }} · ${{ inputs.ref || github.ref_name }}
 
 on:
-  # 临时：#501 验收时注册 workflow，转 Ready 前删除。
-  push:
-    branches: [claude/501-windows-ci-bf7390]
-    paths: [.github/workflows/macos-full.yml]
   # 北京时间每天 02:17，与 windows-full.yml 相同；只在默认分支上触发。
   schedule:
     - cron: '17 18 * * *'

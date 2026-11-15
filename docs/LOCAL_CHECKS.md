@@ -211,13 +211,13 @@ PR 应明确区分“当前 head 上完整执行退出 0”和“当前候选仅
 
 **和合并队列的关系**：集成会话组批时查看各 PR 的「全部检查」及 Windows x64 快检结果。失败的先退回原会话查明原因，runner 故障或排队取消可重跑一次；隔离名单里的测试失败不退回（见「不稳定测试的隔离名单」）。定时回归的结论不挡合入。PR CI 以该 PR 和触发时 main 的合并提交为输入，集成会话仍在合批候选上跑本机全量（见上一节）。
 
-**耗时**：各 job 的耗时以实际运行记录为准；Windows x64 的冷、热缓存实测见下节。仓库私有期间没有触发过；2026-10-01 开源前的旧版本在 `macos-latest` 上的一次运行里，Python 全量 job 约 25 分钟，其余各约 2 分钟，当时的代码量和 job 组成与现在不同，只能作量级参考。
+**耗时**：各 job 的耗时以实际运行记录为准；Windows x64 的冷、热缓存实测见下节。2026-11-15 收缩后的一次手动运行（#501，[CI 43731628509](https://github.com/shio-vinyl/illustash/actions/runs/43731628509)）里，四个必需 job 最长约 2 分钟，「全部检查」在触发后 2 分 16 秒出结果；收缩前它要等 macOS Python 全量，约 13–15 分钟。仓库私有期间没有触发过；2026-10-01 开源前的旧版本在 `macos-latest` 上的一次运行里，Python 全量 job 约 25 分钟，其余各约 2 分钟，当时的代码量和 job 组成与现在不同，只能作量级参考。
 
 ### Windows x64 CI
 
 公开库使用 `windows-latest` 和 MSVC x64，分三种运行（#501）。Cargo 沿用仓库的静态 CRT 配置，关闭 CI 增量编译以控制磁盘占用；`TEMP` 和 `TMP` 指到系统盘的短目录，Python 日志统一使用 UTF-8。
 
-**快检**（`ci.yml` 的「Windows x64 快检」，代码 PR 和代码 push 自动运行）：release 构建 terms（宿主和 worker）、带 `test-read-host` 的 `read-http` 测试读宿主，`cargo check` 桌面壳的全部目标，再用 `tests.windows_fixed_suite --select` 跑 job 里 `QUICK_TESTS` 列的三个测试类：原生启动和生命周期（`NativeLifecycleTest`）、新建图库（`NativeLibraryCreateTest`）、核心读路由的 HTTP 契约（`CoreReadHTTPTest`），都用合成图库。跳过白名单与全量相同。Rust 缓存覆盖 terms 和桌面壳两个 Cargo 项目，只在 main 上保存，测试失败也保存，PR 从 main 还原。快检不跑 clippy、Rust 测试、其余 example 和数值对照，结论单独显示，不进「全部检查」的等待链。
+**快检**（`ci.yml` 的「Windows x64 快检」，代码 PR 和代码 push 自动运行）：release 构建 terms（宿主和 worker）、带 `test-read-host` 的 `read-http` 测试读宿主，`cargo check` 桌面壳的全部目标，再用 `tests.windows_fixed_suite --select` 跑 job 里 `QUICK_TESTS` 列的三个测试类：原生启动和生命周期（`NativeLifecycleTest`）、新建图库（`NativeLibraryCreateTest`）、核心读路由的 HTTP 契约（`CoreReadHTTPTest`），都用合成图库。跳过白名单与全量相同。Rust 缓存覆盖 terms 和桌面壳两个 Cargo 项目，只在 main 上保存，测试失败也保存，PR 从 main 还原。快检不跑 clippy、Rust 测试、其余 example 和数值对照，结论单独显示，不进「全部检查」的等待链。2026-11-15 试过把工作目录、临时目录和 Rust 工具链加进 Defender 排除项（#501）：runner 上的实时保护和按访问扫描本来就关着，构建耗时也在不加排除项的范围内，没有保留。
 
 **完整回归**（`windows-full.yml`，范围 `full`）：内容是原先 PR 上的完整 Windows job。运行 core、platform、relation-fft、terms、desktop 的 clippy（参数与本机检查相同）、这五个项目及 iqdb 的 `cargo test`、terms 与 IQDB 的 release 构建和六个测试 example，再用这些 `.exe` 跑 Python 全套，包括升级测试和 #347 的严格数值对照。每天北京时间 02:17 在 main 上定期运行；发布候选在 Actions 页面手动运行，`ref` 填标签、分支或提交哈希（留空为所选分支的最新提交）。只有定期运行保存缓存，手动运行只还原。结论不挡合并，失败时由 Lead 开 Issue 或更新已有 Issue。Rust 测试经隔离名单的 `cargo-test` 入口运行。
 
