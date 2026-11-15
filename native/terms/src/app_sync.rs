@@ -46,7 +46,7 @@ impl Syncer {
         use crate::http_json::Json;
         let c = crate::app_library::read_connection(&library.db())?;
         let mut q = c.prepare("SELECT * FROM sync_runs ORDER BY id DESC LIMIT 8")?;
-        let names = q.column_names().iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        let names: Vec<String> = q.column_names().map(str::to_owned).collect();
         let history = q
             .query_map([], |r| {
                 let mut row = Vec::new();
@@ -819,7 +819,7 @@ fn recognise(
     let mut watch = ProgressWatch::new(&ctx.identity().task_id, readable.len());
     let unreadable = failed.len();
     // 只有平台认可的、随安装包发布的原生路线才强制要求 sidecar。
-    // 安装版的 Python 过渡方案保持现有的响应契约。显式声明的 sidecar 在下面各平台上都完整校验。
+    // 其他 worker（没有原生路线的平台、测试替身）不强制，保持现有的响应契约。显式声明的 sidecar 在下面各平台上都完整校验。
     let native_adapter = crate::recognition_compute::production_adapter_enabled()
         && std::path::Path::new(worker).file_stem().is_some_and(|name| name == "illustash-recognition");
     let mut batches = Batches {
@@ -1214,6 +1214,15 @@ pub(crate) fn check(cancel: &AtomicBool) -> Result<()> {
 mod tests {
     use super::*;
     #[test]
+    fn filesystem_failure_uses_new_history_message_and_keeps_length_limit() {
+        let cancel = AtomicBool::new(false);
+        let path = std::path::Path::new("synthetic/input");
+        let error = crate::error::io_at(std::io::Error::other("合成失败"), path, None);
+        assert_eq!(stop_message(&cancel, None, &error), "文件操作失败：合成失败（路径：'synthetic/input'）");
+        let error = crate::error::io_at(std::io::Error::other("长".repeat(400)), path, None);
+        assert_eq!(stop_message(&cancel, None, &error), error.reason().chars().take(300).collect::<String>());
+    }
+    #[test]
     fn input_preparation_reports_progress_and_keeps_unavailable_inputs_retryable() {
         let root = std::env::temp_dir().join(format!("illustash-prepare-{}", crate::store::new_key().unwrap()));
         std::fs::create_dir(&root).unwrap();
@@ -1371,7 +1380,7 @@ mod tests {
             .into_iter()
             .map(|(name, sql)| {
                 let mut q = c.prepare(&sql).unwrap();
-                let columns = q.column_names().into_iter().map(str::to_owned).collect();
+                let columns = q.column_names().map(str::to_owned).collect();
                 let count = q.column_count();
                 let mut rows = q
                     .query_map([], |r| (0..count).map(|i| r.get(i)).collect::<rusqlite::Result<Vec<_>>>())

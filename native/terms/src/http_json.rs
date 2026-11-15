@@ -19,7 +19,7 @@ impl Json {
         }
         value
     }
-    // 与 Python dict.update 相同，被覆盖的字段保留原来的位置。
+    // 被覆盖的字段保留原来的位置（沿用旧实现的字典更新语义）。
     pub fn set(&mut self, key: impl Into<String>, value: Json) {
         let key = key.into();
         if let Self::Object(fields) = self {
@@ -66,7 +66,7 @@ impl Json {
             _ => 0,
         }
     }
-    /// Python json.dumps 的文本。调用方还会严格地重新解析它，含 NaN/Infinity 的请求就是这样被拒绝的；
+    /// 沿用旧实现 json.dumps 默认格式的文本。调用方还会严格地重新解析它，含 NaN/Infinity 的请求就是这样被拒绝的；
     /// 所以这里要保留这些常量，经 HTTP 发出的内容用 `dump_reply`。
     pub fn dump(&self) -> String {
         self.dumped(false)
@@ -81,7 +81,7 @@ impl Json {
         String::from_utf8(out).expect("JSON is UTF-8")
     }
     // 只用一个输出缓冲区；大页面不能为每个嵌套字段分配并拼接一个字符串。
-    // 保留既有的 Python 浮点格式化和分隔符。
+    // 保留既有的浮点格式化和分隔符，与已存数据和既有响应一致。
     fn write(&self, out: &mut Vec<u8>, reply: bool) {
         match self {
             Self::Scalar(Value::String(v)) => serde_json::to_writer(out, v).expect("JSON string"),
@@ -133,7 +133,7 @@ impl From<&str> for Json {
 }
 impl From<String> for Json {
     fn from(v: String) -> Self {
-        Self::from(v.as_str())
+        Self::Scalar(Value::String(v))
     }
 }
 impl From<i64> for Json {
@@ -200,12 +200,12 @@ impl<'de> Deserialize<'de> for Json {
         d.deserialize_any(Ordered)
     }
 }
-/// 证据按 Python json.loads 解析：非有限常量和任意大小的整数都合法。
+/// 证据按旧实现的宽松规则解析：非有限常量（NaN、Infinity）和任意大小的整数都合法。
 /// 只用于解码 HTTP 值；serde 全局的 map/number feature（以及持久化）保持不变。
 pub fn parse_python(input: &str) -> crate::Result<Json> {
     parse(input, false).map_err(|(_, e)| e)
 }
-/// 请求的错误与 CPython 的 JSONDecodeError 一致；证据的调用方保持原来的拒绝行为。
+/// 请求的错误文字沿用旧实现（CPython JSONDecodeError 的格式）；证据的调用方保持原来的拒绝行为。
 pub(crate) fn parse_request(input: &str) -> crate::Result<Json> {
     parse(input, true).map_err(|(_, e)| e)
 }
@@ -267,7 +267,7 @@ impl Parser<'_> {
         let column = before.rsplit('\n').next().unwrap_or("").chars().count() + 1;
         Err(crate::Error::Invalid(format!("{message}: line {line} column {column} (char {})", before.chars().count())))
     }
-    // CPython 的扫描器会吃掉合法的数字前缀，标点错误留给外层容器报告。
+    // 照旧实现的扫描方式，先吃掉合法的数字前缀，标点错误留给外层容器报告。
     fn request_number_end(&self) -> Option<usize> {
         let bytes = self.s.as_bytes();
         let mut at = self.at + usize::from(bytes.get(self.at) == Some(&b'-'));
@@ -399,7 +399,7 @@ impl Parser<'_> {
             }
         }
     }
-    /// 跳过一个常量或数字：请求按 CPython 的扫描器，证据则一直跳到分隔符。
+    /// 跳过一个常量或数字：请求按旧实现的扫描方式，证据则一直跳到分隔符。
     fn word(&mut self) -> crate::Result<()> {
         if !self.request_errors {
             while self.s.as_bytes().get(self.at).is_some_and(|b| !b" \t\r\n,]}".contains(b)) {
@@ -417,7 +417,7 @@ impl Parser<'_> {
         }
         Ok(())
     }
-    /// Python 的 JSON 数字语法，大整数不强制转成 f64。
+    /// 沿用旧实现的 JSON 数字语法，大整数不强制转成 f64。
     fn number(&self, word: &str) -> crate::Result<Json> {
         let bytes = word.as_bytes();
         let mut at = usize::from(bytes.first() == Some(&b'-'));
@@ -589,7 +589,7 @@ mod tests {
     #[test]
     fn float_and_string_bytes_match_python_not_just_semantic_json() {
         // json.dumps(ensure_ascii=False) 对 20,000 个随机有限 double、浮点边界值、ASCII 和分隔符的输出：
-        // 两种解析器都必须复现 Python 的字节。
+        // 两种解析器都必须复现录制下来的字节。
         let expected = String::from_utf8(recorded("float_bytes.json.gz")).unwrap();
         let reference: Json = serde_json::from_str(&expected).unwrap();
         assert_eq!(reference.dump(), expected);

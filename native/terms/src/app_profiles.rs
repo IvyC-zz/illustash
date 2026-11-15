@@ -184,7 +184,7 @@ impl Reply {
 }
 pub(crate) fn request(c: &mut Connection, body: &Json, path: &str, prepared: Option<&Prepared>) -> Result<Json> {
     initialized(c)?;
-    // 每个路由只读下面列出的字段，范围照旧 Python 处理函数（#9 已删除）；用不到的 NaN 和大整数无关紧要。
+    // 每个路由只读下面列出的字段，范围照旧实现的处理函数（#9 已删除）；用不到的 NaN 和大整数无关紧要。
     let linked = body.get("tag").is_some_and(crate::app_service::truthy);
     let fields: &[&str] = match path {
         "/api/entities" if linked => &["tag", "typed"],
@@ -364,7 +364,7 @@ fn profile(c: &Connection, mut v: Value, prepared: Option<&Prepared>) -> Result<
 }
 fn local_links(c: &Connection, v: &Value, prepared: Option<&Prepared>) -> Result<Reply> {
     let mut plan = Vec::new();
-    // 在外部查询之前校验整个计划，照旧 Python 的 `_link_args`（#9 已删除）。
+    // 在外部查询之前校验整个计划，照旧实现的 `_link_args`（#9 已删除）。
     for item in link_items(v)? {
         plan.push((item["id"].clone(), tag(&item["tag"])?));
     }
@@ -393,8 +393,8 @@ fn edit_work(c: &Connection, mut v: Value) -> Result<Reply> {
 /// /api/kind 和 /api/character/mascot。
 fn set_field(c: &Connection, mut v: Value, path: &str) -> Result<Reply> {
     v["op"] = json!(match path {
-        "/api/kind" => "set_kind",
-        "/api/character/mascot" => "set_mascot",
+        "/api/kind" => "edit_kind",
+        "/api/character/mascot" => "edit_mascot",
         _ => return invalid("接口不存在"),
     });
     if path == "/api/kind" {
@@ -402,5 +402,10 @@ fn set_field(c: &Connection, mut v: Value, path: &str) -> Result<Reply> {
         v["kind"] = json!(kind);
         v["artist"] = json!(artist);
     }
-    Ok(Reply::Answer(run(c, &v)?.into()))
+    let mut out = run(c, &v)?;
+    let action = out.as_object_mut().expect("角色标记命令返回对象").remove("action");
+    let mut response: Json = out.into();
+    // 在写事务里取刚登记的一步，避免其他写入抢在提交后的读取之前。
+    response.set("undo", if action.is_some() { last_action(c)? } else { Value::Null.into() });
+    Ok(Reply::Answer(response))
 }

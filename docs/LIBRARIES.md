@@ -49,6 +49,7 @@
 - **图库切换放在设置的「图库」页**（用户 2026-09-27 定：切换不频繁，不放侧栏），切换 = 宿主停掉旧图库的任务、换到另一个图库；侧栏只在当前是测试图库时在 Logo 下显示一行小字。
 - 文件夹扫描（`native/terms/src/app_folder.rs`，文件遍历在 `crates/platform/src/platform_folder.rs`）：只对大小或修改时间变了的文件算 MD5；按 MD5 跟上移动和改名，资产 ID 和人工结论不变；消失的文件标记已删除，同一路径的文件变了就重新识别：旧的标签、向量和识别记录（`recognition_assets`）一起清掉，新结果整份替换。识别记录不清的话，导入会拿新结果和旧记录的指纹比，换了内容或换了执行后端都对不上，整批被拒。`files` 表记录每个文件上次读到的样子；每次同步后新路径一并写进应用库。新建命令和参考库行为见上文「首次建库与参考库」；出处不按文件夹名猜（见上文「来源管理」）。
 - 设置「图库」页里可以新建图库（文件夹或 Apple Photos）、打开其他图库、导入导出（`~/Downloads/<名字>-<日期>.pilib.zip`，只含 `library.json`、两个数据库和特征，用 SQLite 备份接口导出，导入时拒绝不认识的文件，在后台进行、卡片上显示阶段并可取消，见[导入任务](ARCHITECTURE_DIRECTION.md#导入任务)；导出定位为可分享，不含出处缓存 `provenance.sqlite` 和导入过的 X 关注线索，设置页的导出说明与完成提示写明这一点，换电脑后要回查画师需重新导入 X 归档，2026-10-12 用户决定，#41）、改文件夹来源的预设（同时改写这个来源所有图的预设）、把图库移出列表（不删除）。桌面 App 没有可打开的图库时另有欢迎页（见上文「首次建库与参考库」）。
+- 导出的文件直接放在 `Downloads`。文件名取图库显示名中的合法字符，必要时改写设备保留名或截短。清理后没有可用字符时用「图库」。包内仍保存原显示名。
   原生选择由平台服务提供；桌面走 Tauri、本机 bridge，CLI macOS 保留 `osascript`，其他 CLI 平台手填。单选兼容与显式多选协议见 [三层边界](ARCHITECTURE_DIRECTION.md#core--platform-service--app-边界)。
 - 已知没做：名字缓存挪成所有图库共享（见第 8 节）。
 - **测试图库是冻结的快照**（`library.json` 有 `test` 字段）：打开时强制关闭同步和外部角色索引检查。
@@ -116,6 +117,8 @@
 和具体图库无关、所有图库共用一份的，放在共享资源目录（`ILLUSTASH_SHARED`；未设置时为资源根下的 `review/`）。
 
 最近图库记录、设置和账号放在应用数据目录，由原生 `app_paths::user_home() -> Result<PathBuf>` 与 `app_paths::app_support(home: &Path) -> PathBuf` 统一取值；`app_libraries` 负责最近图库登记。
+
+最近图库、语言偏好和更新设置各自在同名 `.lock` 文件的独占锁下读取、修改并写回。锁被占用时最多等待 5 秒，无法取得锁就报错，原配置不写入。图库包已创建或导入时，登记失败只影响最近图库列表。
 
 非 Windows 主目录取非空 `HOME`，Windows 取非空 `USERPROFILE`，缺失或空值返回「无法定位用户主目录」。macOS 和 Linux 均保留 `~/Library/Application Support/Illustash/`；Linux 尚未迁移到 XDG，改变目录需另行处理已有数据。Windows 为 `%APPDATA%\Illustash\`，`APPDATA` 缺失或空值时回退到主目录下的 `AppData\Roaming\Illustash`。`ILLUSTASH_APP_SUPPORT` 只要存在就原样覆盖（包括空值和相对路径），不建目录、不规范化路径。此接口搬迁不移动已有数据，回退程序沿用相同目录规则。Windows 普通路径规范化也归 `app_paths`；SQLite 长路径及 `win32-longpath` VFS 仍由 `sqlite` 独立封装，详见 [Windows 运行时说明](BACKEND_TASKS.md#windows)。
 

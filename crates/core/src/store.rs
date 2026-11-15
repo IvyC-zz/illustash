@@ -79,7 +79,7 @@ fn live_asset(conn: &Connection, asset: &AssetRef, new_assets: bool) -> Result<O
         .query_row([&asset.namespace, &asset.id], |r| r.get(0))
         .optional()?;
     match found {
-        // 同步导入新图时，WD 证据先于 Python 把图写进 assets 交过来（docs/TERMS_LABELS.md）：允许先登记。
+        // 同步导入新图时，WD 证据先于宿主把图写进 assets 交过来（docs/TERMS_LABELS.md）：允许先登记。
         None if asset.namespace == LIBRARY && new_assets => Ok(Some(register_asset(conn, LIBRARY, &asset.id, None)?)),
         None if asset.namespace == LIBRARY => library_asset(conn, &asset.id),
         found => Ok(found),
@@ -351,7 +351,7 @@ pub fn undo_last(conn: &mut Connection) -> Result<Undo> {
 }
 
 /// 撤销最近一步；给了 `expected` 时，最近一步必须正是它（调用方看到的那一步），否则按历史已变化拒绝。
-/// Python 的 `Store.undo` 发现最近一步是词条核心写的，就关掉自己的连接后经命令行调用这里。
+/// 命令行的撤销入口（`cli.rs`）调用这里；HTTP 宿主在自己的事务里用 `undo_in`。
 pub fn undo(conn: &mut Connection, expected: Option<ActionId>) -> Result<Undo> {
     let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
     let (result, character_owned) = undo_in(&tx, expected)?;

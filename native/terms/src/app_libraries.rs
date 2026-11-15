@@ -55,7 +55,7 @@ fn unique_path_at(folder: &Path, name: &str) -> Result<PathBuf> {
     Ok(path)
 }
 fn path_exists(path: &Path) -> Result<bool> {
-    // Python 3.12 的 Path.exists 忽略这些错误，但会传出 NAME_MAX、权限之类的错误。
+    // 与旧实现（Python 3.12 的 Path.exists）一致：忽略这些错误，但传出 NAME_MAX、权限之类的错误。
     if path.as_os_str().to_string_lossy().contains('\0') {
         return Ok(false);
     }
@@ -74,29 +74,41 @@ fn path_exists(path: &Path) -> Result<bool> {
     }
 }
 
-/// 不同图库的宿主共用登记表：每次读取、修改、写回都持有它的锁，所以一个宿主的更新从不会被另一个宿主的更新冲掉，
-/// 也不会同时经同一个临时文件写入。锁文件本身打不开时，更新照旧进行，并报告它自己的失败。
+/// 共享配置的读、改、写在同一把独占锁下完成。无法打开锁文件或在等待期限内拿不到锁时，不执行更新。
 pub(crate) fn registry_locked<T>(file: &Path, update: impl FnOnce() -> Result<T>) -> Result<T> {
-    let lock = file.parent().and_then(|parent| {
-        fs::create_dir_all(parent).ok()?;
-        fs::OpenOptions::new()
-            .create(true)
-            .truncate(false)
-            .read(true)
-            .write(true)
-            .open(file.with_extension("lock"))
-            .ok()
-    });
-    if let Some(lock) = &lock {
-        // 另一个宿主只为一次小的写入持有锁；等它，而不是覆盖它的结果。
-        for _ in 0..500 {
-            if crate::app_file_lock::acquire(lock).is_ok() {
-                break;
+    use std::{
+        io::ErrorKind,
+        thread,
+        time::{Duration, Instant},
+    };
+
+    let parent = file.parent().ok_or_else(|| Error::invalid("无效的共享配置路径"))?;
+    fs::create_dir_all(parent).map_err(|e| crate::error::io_at(e, parent, None))?;
+    let lock_path = file.with_extension("lock");
+    let lock = fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .read(true)
+        .write(true)
+        .open(&lock_path)
+        .map_err(|e| crate::error::io_at(e, &lock_path, None))?;
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        match crate::app_file_lock::acquire(&lock) {
+            Ok(()) => return update(),
+            // Unix 的索引锁兼容规则会重试所有错误。这里只有 Windows 用它识别锁冲突（33）。
+            Err(e)
+                if matches!(e.kind(), ErrorKind::WouldBlock | ErrorKind::Interrupted)
+                    || (cfg!(windows) && crate::app_file_lock::should_retry(&e)) =>
+            {
+                thread::sleep(Duration::from_millis(10));
+                if Instant::now() >= deadline {
+                    return Err(Error::Conflict("等待共享配置文件锁超时，请重试".into()));
+                }
             }
-            std::thread::sleep(std::time::Duration::from_millis(10));
+            Err(e) => return Err(crate::error::io_at(e, &lock_path, None)),
         }
     }
-    update()
 }
 
 pub(crate) fn forget(path: &Path) -> Result<()> {
@@ -211,6 +223,7 @@ fn remember_unlocked(path: &Path, name: &str, file: &Path, opened_at: &str, fron
 /// 而不是内部错误前缀或 errno。
 pub(crate) fn unlisted_reason(error: &Error) -> String {
     match error {
+        Error::Conflict(reason) => reason.clone(),
         Error::IoAt { source, path, destination } => {
             let file = destination.as_deref().unwrap_or(path);
             let why = if source.kind() == std::io::ErrorKind::PermissionDenied {
@@ -447,7 +460,7 @@ mod tests {
         let ordinary_file = f.0.join("ordinary-file");
         fs::write(&ordinary_file, b"synthetic").unwrap();
         assert_eq!(unique_path_at(&ordinary_file, "child").unwrap(), ordinary_file.join("child.pilib"));
-        // Path.exists 对失效的符号链接遵循 Python 的行为；之后独占创建会拒绝它。
+        // 失效的符号链接按不存在处理（沿用旧实现的 Path.exists）；之后独占创建会拒绝它。
         #[cfg(unix)]
         {
             std::os::unix::fs::symlink(f.0.join("missing"), f.0.join("dangling.pilib")).unwrap();
@@ -486,8 +499,40 @@ mod tests {
         assert!(remember_at(lib.display_path(), lib.name(), &blocker.join("libraries.json"), "now", true).is_err());
     }
     #[test]
+    fn registry_lock_timeout_skips_update_and_closing_the_holder_allows_retry() {
+        let f = Fixture::new();
+        f.write(json!({"recent":[]}));
+        let file = f.registry();
+        let before = fs::read(&file).unwrap();
+        let holder = fs::File::create(file.with_extension("lock")).unwrap();
+        crate::app_file_lock::acquire(&holder).unwrap();
+        let error = registry_locked::<()>(&file, || panic!("没有锁时不得更新")).unwrap_err();
+        assert!(matches!(error, Error::Conflict(reason) if reason.contains("超时")));
+        assert_eq!(fs::read(&file).unwrap(), before);
+        drop(holder);
+
+        registry_locked(&file, || {
+            fs::write(&file, b"updated")?;
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(fs::read(file).unwrap(), b"updated");
+    }
+    #[test]
+    fn registry_lock_open_failure_skips_update_and_keeps_the_config() {
+        let f = Fixture::new();
+        f.write(json!({"recent":[]}));
+        let file = f.registry();
+        let lock_path = file.with_extension("lock");
+        fs::create_dir(&lock_path).unwrap();
+        let before = fs::read(&file).unwrap();
+        let error = registry_locked::<()>(&file, || panic!("锁文件打不开时不得更新")).unwrap_err();
+        assert!(matches!(error, Error::IoAt { path, destination: None, .. } if path == lock_path));
+        assert_eq!(fs::read(file).unwrap(), before);
+    }
+    #[test]
     fn unlisted_reason_names_the_registry_file_without_internal_prefixes() {
-        // #179：页面说明哪个文件写不进去以及原因，而不是「读取失败」或 Python 风格的 errno。
+        // #179：页面说明哪个文件写不进去以及原因，而不是「读取失败」或旧实现那种 errno 文字。
         let f = Fixture::new();
         let lib = f.library();
         f.write(json!({"recent":[]}));

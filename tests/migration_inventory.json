@@ -5,7 +5,7 @@
 
  "crates/core/src/backup.rs":"7d5f5abe63adb1620f2847609451fda7b588a927f742a676e16fc4acd2abeeb5",
 
- "crates/core/src/character_commands.rs":"934ee5fa5f91b9164c7388af9e4d88b80f19967c7709e0cc73f4dfedfd54d7bf",
+ "crates/core/src/character_commands.rs":"4572ae73a99f3947036f5d1c012b96780791f682788411457113ff63b6253732",
 
  "crates/core/src/character_entities.rs":"36157140d08e8a851746438c8c578d15e3011d88f79689b335bc77fb241ed70f",
 
@@ -13,25 +13,25 @@
 
  "crates/core/src/character_graph.rs":"b2eeaffb53fdfe4b2a01d8fd2fd646f9f19e4fc1f792537203a0a3552f3fa9ed",
 
- "crates/core/src/character_identity.rs":"dd494026266e6c788af1e0524f04ab010e56c26eb1d7b9973597f9fffe862fe6",
+ "crates/core/src/character_identity.rs":"32ac20470f5847fbb4f6b6c09830867130c0aa2399e5439eee39b74973467f2f",
 
- "crates/core/src/character_import.rs":"c1584ab42579eff026120ef5293079cb948238fe6eefbf866a2027190c211426",
+ "crates/core/src/character_import.rs":"8ab5be4eaca34b063d77feb994ea7c965d6a326677954de754f771c17da9b261",
 
- "crates/core/src/character_json.rs":"fbc17913baf024e4ea10902ca0520c2c2b9c5d2f8ef6fb8fc17550c3cb5fdf73",
+ "crates/core/src/character_json.rs":"9a60f525976d786c9edfcd8420c100481ba117bbaa78e839f02e7002ff328046",
 
  "crates/core/src/character_labels.rs":"b59f8161558389d955bb7c7a4568bd3bc698137ce0ba84601475c9b7f7e77014",
 
- "crates/core/src/character_learning.rs":"0925e01fd435837dda2735b8a6318c82e10fc848ea87fbc8fcd7da76a5c71839",
+ "crates/core/src/character_learning.rs":"d7989e8ed501a03cdc2465cc021fdd98838af7578a97fa77911efcad1f8f4c67",
 
  "crates/core/src/character_links.rs":"2e64aa135c932c55b84c4839a3427a7118c4d1a0f64a402531ef235ede5e9cc7",
 
  "crates/core/src/character_merge.rs":"d4b4e373f565acf52f0a11c4e4c4d3775100df06e97a40b63bd812a6f8406507",
 
- "crates/core/src/character_names.rs":"12409f166cd1f00dcbd60404f3bde7a46db845bd394c0a0734a5c577a27bd673",
+ "crates/core/src/character_names.rs":"495f78f73036b1e04db56fabb1addedfe137db3ceca1f03b65b0381b10aafaf0",
 
- "crates/core/src/character_profile.rs":"e10227e35a44cf29a502944caa1b170af992e272a5d4150d6b3e51f2c4925e3e",
+ "crates/core/src/character_profile.rs":"eff1d7bfcc0ba8ef23f9e804e9ff1474d0be0b67632632fc3703730951d4bf8e",
 
- "crates/core/src/character_projection.rs":"b25850b8d972b9f588c759487ecd53ffe916e579910fbdc026f7bcf22e8c6712",
+ "crates/core/src/character_projection.rs":"55f3df7e093198cab9c9fa08b0d851ef080fb2ae2da6cc0b4572c9566c653fa9",
 
  "crates/core/src/character_relations.rs":"a3b3a1139aca9bd85b6d14d83338341caaf4c26e7619c1c11511793d249e6e21",
 
@@ -51,25 +51,25 @@
 
  "crates/core/src/character_sql/tag_memberships.sql":"df7751a7282884fc933f25f60599ac994a7d4dfdfaa62a4348eb0f1910af3034",
 
- "crates/core/src/character_structure.rs":"e877cf427d78fd0c1ac4edbedd6b766e306a0e15f8f79347c86a43d065fb9bc6",
+ "crates/core/src/character_structure.rs":"9201e2d2cba937da135d0c2c7362e0e2ffb70df2df66f8a0827d7b5e17dfca47",
 
- "crates/core/src/compat_text.rs":"547b1eefcfc13275563161ecd0371aa202fa37b31f1bdfd36068aa8aecb8a59f",
+ "crates/core/src/compat_text.rs":"d69f42e8d41b4d6e78572c0959d7ad1ea72a7dba6582d8f9a630603027a4801c",
 
- "crates/core/src/error.rs":"9cd4206fc28f3fdebc6ca1fa20ce1c2496e552580cfec72af808213f2e22d25d",
+ "crates/core/src/error.rs":"fad3f2e435a56a1fd6273f61b50d2b997587e681adc408cc31fd6d3923b23ef8",
 
- "crates/core/src/legacy_characters.rs":"4533c2eb5ea6489ccd277074c874db05b78b1b4a2633c4b8bd3de58eedf6d548",
+ "crates/core/src/legacy_characters.rs":"e74652ae0eb641f8414ac652e596178f50ff974b1983cb536cc5ede62dc94d67",
 
- "crates/core/src/legacy_labels.rs":"8ef55db0301b249eb077b91cac04094a7364ec849149f25b526a26b36e8dac9d",
+ "crates/core/src/legacy_labels.rs":"80b880279cc1af059178bbf8455a3cd364c99089a5358b3e5b7523dab59e75a5",
 
  "crates/core/src/legacy_names.rs":"28b1616f9ff6d317005faa2575ecf4903efaf5d681edadf0bc00da6cfeb23757",
 
- "crates/core/src/lib.rs":"23a5778fb07dae5696c4d7791620640eb60efddd37cf3be6f2aae63a4d00eeeb",
+ "crates/core/src/lib.rs":"1c99efe6dec54221df54947bc613563420ca1520675a64ac86522361e05a5ece",
 
- "crates/core/src/names_commands.rs":"2997fa9575331a557a118e9b97d22b3a13a51cb3fa6b50edcb28a1a60eb2f8a5",
+ "crates/core/src/names_commands.rs":"776af0e82fd79ef5ecfda1e2b6556882373d01f7b5add30b71fdbf390897e7aa",
 
- "crates/core/src/names_search.rs":"653e1357068c53b07a96dc662a865c5694c404223dbdaaa93f1ef6d0e02017d9",
+ "crates/core/src/names_search.rs":"ca951df0cd2afb41a9a5f29c73e1e8c377914f45c12fe2bf3891818ca7aa71ac",
 
- "crates/core/src/names_view.rs":"87b202293db99589768a7187f8832e8c6ed525ff788e3a1607504e37e5be9949",
+ "crates/core/src/names_view.rs":"402105f806711cab1c2955c9b48d3f1e9c5ea6e13e3330dac6d598c6d3b3cab6",
 
  "crates/core/src/new_library.rs":"66d11a3e942e573585a204300ede8c0bf0225f00d44ce38e9dc30081e9d7a820",
 
@@ -77,9 +77,9 @@
 
  "crates/core/src/package.rs":"2c951060a10859148705790dd270f5bb15112970f0888dc31de126bc74471220",
 
- "crates/core/src/schema.rs":"4fa0d297c606244a6efe89900366c2aab3feda4f8815b34d323670a954ac0148",
+ "crates/core/src/schema.rs":"96b753fed3e9eaa113674524610105c13d8276fafbc164709228a7bcbe19eb70",
 
- "crates/core/src/store.rs":"506db20699d3624a2d30f21715e857ce1923b958c3db4d08f0b7bc072f7cc90e",
+ "crates/core/src/store.rs":"b79c28a90b0742373a304c4f1bf634d3fbbb4115340eab4f0a426ffd0b94060f",
 
  "crates/core/src/strict_json.rs":"dc1bf3fd4e0ceb6316af6a95ab00915c52ffdd8fd759544326f371df39e67da6",
 
@@ -113,11 +113,11 @@
 
  "crates/platform/src/platform_photos.rs":"4765dd1127cc8940567f719e3f8761e51e0711488179843d39a6383f657123d7",
 
- "crates/platform/src/platform_process.rs":"2b0c10db7bc6d1631dee5e686af02d747e365965da1e0d6087148541db8ece01",
+ "crates/platform/src/platform_process.rs":"3b043c7eb0569dca4fa7e3443530c6d7c462b4ed199e4dee0a7fe8e9bc500e5e",
 
  "crates/platform/src/platform_process/windows_desktop.rs":"fb60ef14077bad0456d6c9e7bcad2c85857197ed41db11a800bd17dd6ec089fe",
 
- "crates/platform/src/platform_process/windows_worker.rs":"a1d58a129a6e427649ac5da5d3ffbc06d35801c856b4154d775bdd5ad1a50176",
+ "crates/platform/src/platform_process/windows_worker.rs":"719e41559853468e77b642ea15fb3c4985a88c76ec65a8af90b14ae0ecc10ecc",
 
  "crates/platform/src/platform_research_math.rs":"92e11e5289b03700a962ef8fcd9d7cc38311af3eb5678d7a155e10b14096f2ee",
 
@@ -125,7 +125,7 @@
 
  "crates/platform/src/platform_system.rs":"7182ffa64a7e70a74beaf8a06a1c7fa9f3c58d9a7fd25dd5425a140119f5ca6d",
 
- "crates/platform/src/platform_time.rs":"52564c5a29681a1222e979b3f5d34555d5c0fedad4972d9f9227d5bcfed4e568",
+ "crates/platform/src/platform_time.rs":"a07c7d73582819118f6afe678356ae49447480c1afc8625aa526d4651b49f7b2",
 
  "crates/platform/src/source_rows.rs":"bda7ca3f5e0e988a4563882b4f9095f4dd5b009ec570538fc3362b25c8b60d1d",
 
@@ -159,33 +159,33 @@
 
  "native/terms/examples/research_compute/math.rs":"ceedf5880d735289e7686d8b5bd11e54278941f93eb7955421996ca29c774562",
 
- "native/terms/src/app_accounts.rs":"dce690a139403137f1c829f9f1edf26fc83627bee455420a2b38a65520ce6cca",
+ "native/terms/src/app_accounts.rs":"22ef4d58e65652276a92a0eb89a475cd86ea2f22a7fe80be57b0ac502b22bdeb",
 
- "native/terms/src/app_archives.rs":"2b65e891ca922de5635f752ab180d9aee802dd63f78ab5a02b69a12af1b505b5",
+ "native/terms/src/app_archives.rs":"60052b7a6d95139f523d07c595ca4221762e82ebfc451f2ef58945be386e6165",
 
- "native/terms/src/app_characters.rs":"a285efa8f72b9124cfe8f6a9e14631e196512bf2b239d12912bef5501b1f4cfc",
+ "native/terms/src/app_characters.rs":"6c9e9e080970dce30092747ebcf6bdcaee7d99a8463500888e5dab278f4a0cbd",
 
- "native/terms/src/app_commands.rs":"c9eadb3e255cd1a7d832d95eee6df98324d0308247291be92fd7079b5c688278",
+ "native/terms/src/app_commands.rs":"1a2403ae8b01f8f552c26054055a7b09da663219022e3d23cd5b41ae2eecf127",
 
- "native/terms/src/app_create.rs":"732a3b2992f08151d69258021db000565208e24c47d2afbf10eee1d3341f6a7d",
+ "native/terms/src/app_create.rs":"f884b4587d13c479e6739fdb7439f2bee4342627b0b157f06560dabfede3cbdc",
 
  "native/terms/src/app_create_names.sql":"29fb8b712603ad5bfd49a20b82162ead37a45e781f949d5e1c9678bd42fa8f7f",
 
  "native/terms/src/app_create_schema.sql":"f41f751e3f9c2deae935dcb9869cd385a0893a9d20dad2c4b64b7b14d7ef54ae",
 
- "native/terms/src/app_curation.rs":"a474670bf2b2c1371dbff659a519fd5a6a1e40801b1d16e317448232fc8fc17e",
+ "native/terms/src/app_curation.rs":"17861f2a525eee26a32b981f819eca3929a051230bc81ac7f477ee8d1ae76122",
 
  "native/terms/src/app_desktop.rs":"481e12ba4f08868b199da130b683ffb46556a79c44b9e781723d4c887903f9a5",
 
  "native/terms/src/app_effects.rs":"507ff09441aab09cc8f2ca7460bbde3da5bffb8180629b3bb6f503598dbbe1b8",
 
- "native/terms/src/app_files.rs":"997aa11877351d60dee879f884a6240b3d1fcd8d38793b0cb3962eef59cb62b3",
+ "native/terms/src/app_files.rs":"335bea41714ba27ae9e1b5e8b5190f2e967f9c0aca8bfc670c05d06d954f8299",
 
  "native/terms/src/app_folder.rs":"cd148b0a312065b97da3cbea8dc782a596eb0d8e842a1dfcf2d45f259fea6216",
 
- "native/terms/src/app_http.rs":"1fff6f06bb6b7aa0d60880d85dbbeedb5f41bfdfeb6b40689bbc4a8e9ac87e29",
+ "native/terms/src/app_http.rs":"7fd4268b3287f1f4200e51333941c1e64b04b2ac0fa6e26643fe7a9a83c54192",
 
- "native/terms/src/app_identity.rs":"0a1013c73b59db6ad290a8bdfae5b554cef1fa36d73b3f217e029c0812fccd20",
+ "native/terms/src/app_identity.rs":"715d41ff00ae564d109fd8c6dde75f3e89e447360832bb2ab16c960bc473da38",
 
  "native/terms/src/app_imports.rs":"0432cfdda774fd06826ac4c4f36a2b8fca3b261fea19c66813241b5aad409b18",
 
@@ -193,15 +193,15 @@
 
  "native/terms/src/app_integrity.rs":"d7ff3af8c6b4b0a90293a98cf65951db98aad92fe310d5cd29a837c49a6e3d4a",
 
- "native/terms/src/app_libraries.rs":"0693c114f35fd953880a4f4d3503b8c37329c32971e0599cade08635e6035013",
+ "native/terms/src/app_libraries.rs":"99eba3d3fe7a7e1bfce74e275aeeb0458c3a89f7e86b170a546ee3d88a6ff8d6",
 
- "native/terms/src/app_library.rs":"42c131ef177eb6374430a1315ee654a485923094bc814a80161021b5201e4c6c",
+ "native/terms/src/app_library.rs":"776cfbe684a3d2341738010c41883cc599afe533604e1a2a788ff1d9cd0d4170",
 
  "native/terms/src/app_local.rs":"f8fb6ea23574a2ec339f9b966e05951db2c1e8cd3b735464f51edf36ecc4bd49",
 
  "native/terms/src/app_migrate.rs":"dc7ac85b778a33def433892fe83fab3fdc283ff33c970595e8dddb6992a6cefb",
 
- "native/terms/src/app_migrate_data.rs":"53fc754cf6ad0e6f397907ca42543512e6ff550dbce8ee2218c76211258a0aa5",
+ "native/terms/src/app_migrate_data.rs":"f7b52ce57261f5f71cd800fddbb3b4423e21fb10cfb9ebd7233df36b52a6a3a1",
 
  "native/terms/src/app_migration_sql/ambiguous.sql":"04993300291b3a4d67b31b2d448781d1e35bf65a9b765929ca9b7e8a5047c174",
 
@@ -221,13 +221,13 @@
 
  "native/terms/src/app_migration_sql/provenance.sql":"a780f1f8837dd2c90a556539c114d56cdaa513b057fb667bf0c5c9d604f75934",
 
- "native/terms/src/app_models.rs":"4cd349a7c2699a415e8fc069c028ed514ee209d3bb11f63c5822a2a0fcf3b810",
+ "native/terms/src/app_models.rs":"9bd2a3eae8e0022dc234f13d87d198803fd1250f133e9c8ff9ed11ef7cb33648",
 
  "native/terms/src/app_name_sources.rs":"effedaf83af896ecd880784490e4b1483fe05c28c3098a098c2ae80c68a2f458",
 
  "native/terms/src/app_names.rs":"f1e9ee13d2fc826d1c0071b5de7e4a38700efe9445001d472d70b07c3d60795f",
 
- "native/terms/src/app_onboarding.rs":"829290530c622801e4d6d10ffbecf8e98f29257533bc64f7ee9dde4532293e34",
+ "native/terms/src/app_onboarding.rs":"03d17364b76316926f094d793662181cca97fdd144379691389f65b09b9a3f9a",
 
  "native/terms/src/app_photos.rs":"df3a434e0b64f63e395ca93703be19d90b83faefe6901537fdd628d51ddc0326",
 
@@ -235,27 +235,27 @@
 
  "native/terms/src/app_preferences.rs":"1718355189e4572f61797110da007b9baa6ad565ca8684929bec452875f12c61",
 
- "native/terms/src/app_profiles.rs":"9146ad3345db80e03c9a8f68e02f3e253fe4cc04a21610a03060061aa0cfea9b",
+ "native/terms/src/app_profiles.rs":"34b2f5ab3486b4d88b01aebad9cf82f45a3fbfd286123b479733a3434f04abae",
 
  "native/terms/src/app_provenance.rs":"78e2e1660cb702fa9b9240da7c9a4b19b6203344b8bf9cab98380845d03705cd",
 
- "native/terms/src/app_provenance_cache.rs":"cb3ae9fbc002bbf79281b1a896dba6c76cf3cad2888264db8fc2c9a11d0f29bf",
+ "native/terms/src/app_provenance_cache.rs":"440757a5a3d3fd37e79ac5a4400befe0503e3d792dd213b4cd2ff6f5af1655f4",
 
  "native/terms/src/app_provenance_net.rs":"6bfa48c3c82e0100f1347eb2140099e70a219baeda0c942398b10a8f2aed8c46",
 
  "native/terms/src/app_provenance_sources.rs":"b5b95d67aa5753245bcbac3a32d36da0094d27650df1760db62d150d5168f868",
 
- "native/terms/src/app_recognition.rs":"9683e86dd2467ed6f5e9ac9ff3142d9ba07405bf2b8075f28cd648c0ec104409",
+ "native/terms/src/app_recognition.rs":"e6414e1d973870fd9ac2b46660b8b900686c9d7066b8bfa408ced2821d7c1d3f",
 
  "native/terms/src/app_rescue.rs":"08915aa36490c06b4d43fb0ff6337d4a548b451bc15c090928b0d37e6af4456d",
 
- "native/terms/src/app_research.rs":"3e793d257030bc5aa0dcecd16c887b4dee04463f67c1db9e3b46738fdcf44e5b",
+ "native/terms/src/app_research.rs":"d5cdea217d263b9b328c1dd72e759b2617a5f09c9f778d2b5e04f4ddcc8e4e41",
 
- "native/terms/src/app_resources.rs":"3304fcac09af5a36a490589de3dd36fd6f79bad80cf515f44f6d2888ee1d80e3",
+ "native/terms/src/app_resources.rs":"d691ec21499b906972a02d49a21790f2a301c34eb4dea0bd9c301675dd9e2c0a",
 
  "native/terms/src/app_service.rs":"4baee20d3876c3ed4611bfed7b31023ba1a0332e7f8370f4eb1ed1b0c4fe1a8b",
 
- "native/terms/src/app_settings.rs":"7b8547030978fd5294e2927f5b1d80bdb229075aca29ead738f4490bd88d23d5",
+ "native/terms/src/app_settings.rs":"20f5eb9c25a3a14920b85b48e75186564c5e01f6129cca02b06b2f63d60b2c41",
 
  "native/terms/src/app_source_empty.sql":"601047d24a614c055ea7ce648777dbd4f27b45ce32ac90d2099cfa5ffb58f9ea",
 
@@ -263,9 +263,9 @@
 
  "native/terms/src/app_sources.rs":"8ee039dc596b1253783ab4256fd7befa1ce4087eee3f93b69208e7ede676c819",
 
- "native/terms/src/app_sync.rs":"a9b6362ced9158e3ff44940032b8ed18c8742ecbd7b96637a2ac3246c0ac415d",
+ "native/terms/src/app_sync.rs":"0419ca74f296986a9ae8ebca670d68278e04891e12f9b73423d82df6d66db8f4",
 
- "native/terms/src/app_tasks.rs":"77c6e161633fa9f8dd67a474de0d562182ac7cacbd92c941ea5f8f5909b91ab9",
+ "native/terms/src/app_tasks.rs":"55d0fc14c38fadec7ca902c88fd0053ff6403c41eb4ccdda9435d5258874ad19",
 
  "native/terms/src/app_updates.rs":"e7b51e4afd108af07dbf92e76d44251709635984f8387d3e702922190b9834ba",
 
@@ -285,21 +285,21 @@
 
  "native/terms/src/http_app.rs":"1cdb28245fb1d97ac446313b089c8fe4700ce22027dbb7272bf3a6c04750a984",
 
- "native/terms/src/http_artists.rs":"f309368f900619f5a82c9174efe204b72e147d49ee1619fb990d74842c566e2b",
+ "native/terms/src/http_artists.rs":"4fa18a5bbbc5e5cab1954407308ffa9951bc2bf54a1b69a8ef01b2fa307d162b",
 
- "native/terms/src/http_browse.rs":"f8772269132e045275095cf91fa1ddd73530c396071d518cc319c966b1b88305",
+ "native/terms/src/http_browse.rs":"03ee5b650b7be1ffb3c7ed4a1eb47f29b6f943d768f48ed4f50bde12816a34dd",
 
- "native/terms/src/http_characters.rs":"77486635e9790c369b6f57ba96a9e57118acc646223cd1396740f91a4f31eb6c",
+ "native/terms/src/http_characters.rs":"03e4c82c04a2708b576a26a6c8dbbd49834f7bf4126240f06e17da4827478f9e",
 
  "native/terms/src/http_host_get.rs":"ccfc6662205665fe50084e5d1ed607bd1b0b764e9ecec2805987f2621e362d32",
 
  "native/terms/src/http_host_post.rs":"8db1013ee971ea4812d3da18f416097cb33e4e37789dcb890a8115f2f41fc9a3",
 
- "native/terms/src/http_json.rs":"ed199ea4c469fed512dfa9338140b8cf4dad1cb93a25e97bc2430e1675bf286b",
+ "native/terms/src/http_json.rs":"42ec65687fad69e430186543d3ef27b8141030e6694b07f683ee91f678478d6b",
 
  "native/terms/src/http_local.rs":"d7a5757ae32b7c609f0749facd77996e8879dd8fb531bb0a40352364807e8370",
 
- "native/terms/src/http_read.rs":"e5b7e7f78faffd8865dbded82351d75ad8aa64d077b739015578396d3b638dbf",
+ "native/terms/src/http_read.rs":"197171859bc8173f97ac78d919608b8978936f94861a9c1ec5e0c4c722c54bf9",
 
  "native/terms/src/image_samples/mod.rs":"3322652e6cd2806e1c739a67ecca850060eb2d4d2c9fd49d74d1ade3bafbefd6",
 
@@ -319,7 +319,7 @@
 
  "native/terms/src/index_generation.rs":"940c236d35bee6001cc2225701d64d0be2964a2575a653a897449650535ad2fa",
 
- "native/terms/src/lib.rs":"b2e766fd8806c9c11e36ad49a0809e98d6292c3634b2b65fab0907a8dae42b81",
+ "native/terms/src/lib.rs":"f642fdb4f5668536852c7b92ed485859bf4502702b162ab62296c25bd5bf7797",
 
  "native/terms/src/platform_process.rs":"11d73a02dc4f9baa3779aaef132012ef36908e510747326c6704374681f606a3",
 
@@ -327,7 +327,7 @@
 
  "native/terms/src/recognition_compute/anchor_snapshot.rs":"8ab8b7bb1fb022fbc3eb02a7c7f6ae6dfe3aaffb3bbade5f73c12e52abb1ff0a",
 
- "native/terms/src/recognition_compute/anchors.rs":"aec9a4c123a723ece8dfdda208e60c7cdf5c8ae3997719299e02ddae275f749a",
+ "native/terms/src/recognition_compute/anchors.rs":"afbb65ca409731a52e9933579764be6e0818f0f932198e75f1ac4ee4ba7bcde9",
 
  "native/terms/src/recognition_compute/backend.rs":"f099abc2b66366c43eaccaf48eccc638b5ad6827bd524ab6a6f9efef29deec80",
 
@@ -339,9 +339,9 @@
 
  "native/terms/src/recognition_compute/models.rs":"4c4218efcc168e429e3a87259135c205a3c3f3b3764683e3a17d837f01f8bf30",
 
- "native/terms/src/recognition_compute/preprocess.rs":"73cbb0b8f2a2668de96d84a2e0ed03402eaaaaa8897906251cc500137b6b833a",
+ "native/terms/src/recognition_compute/preprocess.rs":"0326571c4c375a6d09a290df4b1c0531e43c342b3410e94195e4fbf603839fc0",
 
- "native/terms/src/recognition_compute/producer.rs":"3e0e0fa40a7d57a602f6f1c4486fd3cd7bce8d09ba47cbbd6bcec9dade021eee",
+ "native/terms/src/recognition_compute/producer.rs":"2bb34621558d22a8c82d405839ec051dddd4490006fa852b4e96198b54def7c0",
 
  "native/terms/src/recognition_compute/session.rs":"816586af4d9ec00c75bd7f147fb5a0c03600d18a3f14ed400ec0a072df51d323",
 
@@ -349,7 +349,7 @@
 
  "native/terms/src/recognition_compute/wd_coreml.rs":"deaed63306945926e57c6b59427383bf0334776abb93de94df4e74332b42b96a",
 
- "native/terms/src/research_compute/discriminate.rs":"4b8edfd7ac09adb9441d695914c9ae0adec011a27eb01ec920722c5e15dea2ad",
+ "native/terms/src/research_compute/discriminate.rs":"6a7910c48a3675aea0cd47c18f8c2753049f550b24c3bf63ca98ad082e958b48",
 
  "native/terms/src/research_compute/features.rs":"b050aa97333d6c38d0e532b4774f44ebfbed69f7a0dc8aa0074960195a08d87b",
 
@@ -363,7 +363,7 @@
 
  "native/terms/src/research_compute/relation_image.rs":"546022c70faf20496792dfbd1a4eef750962b9b4948432ee6b55b6ceeffed7b1",
 
- "native/terms/src/research_compute/relations.rs":"8c81bac9aeba57cc0235f024d5fcdcf4fa56344a9c0877ae1e37914e6f224297",
+ "native/terms/src/research_compute/relations.rs":"c21b23f98fb44edb763709ec315375b5153d2ccf7fcf6c2220702f02859c9480",
 
  "native/terms/src/research_compute/similar.rs":"f557acc722a99c07bb247b7a1be57cf1edb64244984698fee22a9b4c657b6fbb",
 
@@ -373,9 +373,9 @@
 
  "native/terms/src/sql_fragments.rs":"4519b3df34e7ccc8e2a512c1803690841fa97daaf59f6ffcaff3f63bf2f86534",
 
- "native/terms/src/sqlite.rs":"a9d28dfd07ece00f2dd0dc9edb274636cce76f02f489b260cfb291abc9c813fc",
+ "native/terms/src/sqlite.rs":"df977b94f216b4f3ead9212689d41ee22dac8d61532b909ae40004eb07997456",
 
- "native/terms/src/table_delta.rs":"875225221e30755766b276a098afab88d1663d3a2f0059181f3ee60b8c7f569d",
+ "native/terms/src/table_delta.rs":"191cf3668dfa577769de76752732ac4ad8a8712840adbd30ea2e27caceb81ab9",
 
  "native/terms/src/task_state.rs":"bc37b10d47109a65558d9a912aa75d7165b64b5c6088e236324e098e2351dcc6",
 
@@ -417,7 +417,7 @@
 
  "native/terms/vendor/tiny_http/src/util/sequential.rs":"5ad84c87bd412edec8b289639d6d21486201e84f25a7edc1be4284be59c5570c",
 
- "native/terms/vendor/tiny_http/src/util/task_pool.rs":"08e3cc8139d1512bb751f828e9838579d8848607e7172ae41b4033d8ecc46fdb",
+ "native/terms/vendor/tiny_http/src/util/task_pool.rs":"4f4c6b713d5b6733897b8f645e0fd9f0bebdf8c9f635f324ae5eb0a870d23e56",
 
  "start-web.command":"3baa89ce43d2f91e1ed82cb461ecf3780951bc21d85107624a58f2cfa23a3dd2"
 },
@@ -495,7 +495,7 @@
  "native/terms/src/app_migration_sql/provenance.sql":{"database-write":["CREATE TABLE IF NOT EXISTS:pending_runs","CREATE TABLE IF NOT EXISTS:artist_names","CREATE TABLE IF NOT EXISTS:artists","CREATE TABLE IF NOT EXISTS:artist_links","CREATE INDEX IF NOT EXISTS:artist_links_artist","CREATE TABLE IF NOT EXISTS:image_sources","CREATE TABLE IF NOT EXISTS:image_artists","CREATE TABLE IF NOT EXISTS:seeds","CREATE TABLE IF NOT EXISTS:leads","CREATE TABLE IF NOT EXISTS:lookups","CREATE TABLE IF NOT EXISTS:marks","CREATE TABLE IF NOT EXISTS:ref_sigs","CREATE TABLE IF NOT EXISTS:runs","CREATE TABLE IF NOT EXISTS:ext_cache"]},
  "native/terms/src/app_local.rs":{"http-branch":["/api/about|/api/sync|/api/names|/api/index|/api/provenance|/api/accounts|/api/oc/groups","/api/about",39,42,97,"/api/accounts",43,41],"database-write":[0,1]},
  "native/terms/src/app_migration_sql/base.sql":{"database-write":[53,135,124,104,127,105,139,120,101,131,153,123,103,122,49,152,164,155,113,160,115,50,47,51,132,157,158,159]},
- "crates/core/src/character_structure.rs":{"database-write":{"dynamic-or-wrapper":13,"INSERT INTO:term_links":3,"UPDATE:term_tree":10,"UPDATE:term_links":2,"UPDATE:set":1,"INSERT OR IGNORE INTO:term_links":1}},
+ "crates/core/src/character_structure.rs":{"database-write":{"dynamic-or-wrapper":15,"UPDATE:term_names":2,"DELETE FROM:term_names":1,"INSERT INTO:term_links":3,"UPDATE:term_tree":10,"UPDATE:term_links":2,"UPDATE:set":1,"INSERT OR IGNORE INTO:term_links":1}},
  "native/terms/src/http_json.rs":{"database-write":[[11,6]]},
  "native/terms/src/bin/illustash-terms.rs":{"entrypoint":[10]},
  "crates/core/src/schema.rs":{"database-write":{"dynamic-or-wrapper":21,"DROP TABLE IF EXISTS:identity_claims":1,"DROP TABLE IF EXISTS:identity_calibration":1,"DELETE FROM:meta":5,"ALTER TABLE:actions":1,"UPDATE:actions":1,"CREATE TABLE:terms_compact_new":1,"INSERT INTO:terms_compact_new":1,"ALTER TABLE:terms_compact_new":1,"INSERT OR REPLACE INTO:meta":3,"VACUUM":1,"CREATE TABLE IF NOT EXISTS:meta":1,"CREATE TABLE IF NOT EXISTS:actions":1,"CREATE TABLE:term_assets":1,"CREATE INDEX:term_assets_md5":1,"CREATE TABLE:terms":1,"CREATE INDEX:terms_kind":1,"CREATE TRIGGER:terms_kind_insert":1,"BEGIN":27,"CREATE TRIGGER:terms_kind_update|UPDATE:of":1,"CREATE TRIGGER:terms_key_permanent|UPDATE:of":1,"CREATE TABLE:term_names":1,"CREATE INDEX:term_names_value":1,"CREATE TABLE:term_links":1,"CREATE INDEX:term_links_term":1,"CREATE TABLE:term_relations":1,"CREATE INDEX:term_relations_b":1,"CREATE TABLE:term_packages":1,"CREATE TABLE:term_evidence":1,"CREATE INDEX:term_evidence_term":1,"CREATE TRIGGER:term_evidence_append_only_update|UPDATE:on":1,"CREATE TRIGGER:term_evidence_append_only_delete":1,"CREATE TABLE:term_verdicts":1,"CREATE INDEX:term_verdicts_image":2,"CREATE INDEX:term_verdicts_relation":2,"CREATE INDEX:term_verdicts_action":2,"CREATE TRIGGER:term_verdicts_append_only_update|UPDATE:on":2,"CREATE TRIGGER:term_verdicts_append_only_delete":2,"CREATE TABLE:term_projection":1,"CREATE INDEX:term_projection_term":1,"CREATE VIEW:term_effective_verdicts":2,"CREATE VIEW:term_relation_states":2,"DROP TABLE IF EXISTS:artist_verdicts":1,"DROP TABLE IF EXISTS:legacy_asset_tags":1,"DROP TABLE:if":1,"INSERT INTO:term_evidence_sets":1,"INSERT INTO:term_evidence_set_rows":1,"CREATE TABLE:term_evidence_sets_v3":1,"CREATE TABLE:term_evidence_set_assets_v3":1,"CREATE TABLE:term_evidence_set_rows_v3":1,"CREATE TABLE:term_active_evidence_v3":1,"INSERT INTO:term_evidence_sets_v3":1,"INSERT INTO:term_evidence_set_assets_v3":1,"INSERT INTO:term_evidence_set_rows_v3":1,"INSERT INTO:term_active_evidence_v3":1,"DROP VIEW:term_current_evidence":1,"DROP TABLE:term_active_evidence":1,"DROP TABLE:term_evidence_set_rows":1,"DROP TABLE:term_evidence_set_assets":1,"DROP TABLE:term_evidence_sets":1,"ALTER TABLE:term_evidence_sets_v3":1,"ALTER TABLE:term_evidence_set_assets_v3":1,"ALTER TABLE:term_evidence_set_rows_v3":1,"ALTER TABLE:term_active_evidence_v3":1,"CREATE INDEX:term_evidence_set_rows_evidence":2,"CREATE TRIGGER:term_evidence_set_rows_match":2,"CREATE TRIGGER:term_evidence_sets_append_only_update|UPDATE:on":2,"CREATE TRIGGER:term_evidence_sets_append_only_delete":2,"CREATE TRIGGER:term_evidence_set_assets_append_only_update|UPDATE:on":2,"CREATE TRIGGER:term_evidence_set_assets_append_only_delete":2,"CREATE TRIGGER:term_evidence_set_rows_append_only_update|UPDATE:on":2,"CREATE TRIGGER:term_evidence_set_rows_append_only_delete":2,"CREATE VIEW:term_current_evidence":2,"COMMIT":2,"CREATE TABLE:term_batches":1,"CREATE TRIGGER:term_batches_append_only_update|UPDATE:on":1,"CREATE TRIGGER:term_batches_append_only_delete":1,"CREATE TABLE:term_verdicts_v2":1,"INSERT INTO:term_verdicts_v2":1,"DROP VIEW:term_relation_states":1,"DROP VIEW:term_effective_verdicts":1,"DROP TABLE:term_verdicts":1,"ALTER TABLE:term_verdicts_v2":1,"CREATE INDEX:term_verdicts_batch":1,"CREATE TRIGGER:term_verdicts_batch_anchor":1,"CREATE VIEW:term_relation_latest":1,"CREATE TABLE:term_evidence_sets":1,"CREATE TABLE:term_evidence_set_assets":1,"CREATE TABLE:term_evidence_set_rows":1,"CREATE TABLE:term_active_evidence":1,"CREATE TABLE:term_identity_baseline":1,"CREATE TABLE:term_tree":1,"CREATE INDEX:term_tree_parent":1,"CREATE INDEX:term_tree_work":1,"CREATE TABLE:term_legacy_ids":1}},

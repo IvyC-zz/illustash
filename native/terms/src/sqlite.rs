@@ -26,12 +26,12 @@ mod tests {
         assert!(backup.as_os_str().len() > 260);
         let restored = parent.join("restored.sqlite");
         fs::copy(&backup, &restored).unwrap();
-        let c = open_with_flags(&restored, OpenFlags::SQLITE_OPEN_READ_ONLY).unwrap();
+        let mut c = open_with_flags(&restored, OpenFlags::SQLITE_OPEN_READ_ONLY).unwrap();
         assert_eq!(
             c.query_row("SELECT value FROM long_path_probe", [], |r| r.get::<_, String>(0)).unwrap(),
             "committed-wal"
         );
-        crate::app_library::check_database(&c).unwrap();
+        crate::app_library::check_database(&mut c).unwrap();
         println!(
             "synthetic library path units: {}; backup path units: {}",
             dest.as_os_str().len(),

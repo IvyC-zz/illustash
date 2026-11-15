@@ -417,7 +417,7 @@ impl Writers {
         Ok(())
     }
     /// 运行 `read`，一旦出现写入方的日志文件就中断 `src`；此后出现的任何错误都当作让路。
-    fn read<T>(&self, src: &Connection, read: impl FnOnce() -> Result<T>) -> Result<T> {
+    fn read<T>(&self, src: &mut Connection, read: impl FnOnce(&mut Connection) -> Result<T>) -> Result<T> {
         self.check()?;
         let (journal, seen) = (self.journal.clone(), self.seen.clone());
         let mut polled = std::time::Instant::now();
@@ -432,9 +432,9 @@ impl Writers {
                 }
                 seen.load(Ordering::SeqCst)
             }),
-        );
-        let result = read();
-        src.progress_handler(0, None::<fn() -> bool>);
+        )?;
+        let result = read(src);
+        src.progress_handler(0, None::<fn() -> bool>)?;
         match result {
             Err(_) if self.seen.load(Ordering::SeqCst) => Err(Error::Conflict(YIELDED.into())),
             result => result,
@@ -464,7 +464,7 @@ fn data_version(c: &Connection) -> Result<i64> {
 /// `between` 在每次取锁前运行（测试钩子）。
 #[allow(clippy::too_many_arguments)]
 fn confirm<T>(
-    app: &Connection,
+    app: &mut Connection,
     src: &Connection,
     inputs: &Inputs<'_>,
     version: &str,
@@ -478,11 +478,12 @@ fn confirm<T>(
     let source = source_digest(src, inputs, &check)?;
     for _ in 0..OUTSIDE_ROUNDS {
         let files = inputs.stamp()?;
-        let read =
-            || read_snapshot(&[app], || Ok((combine(&app_digest(app, inputs, &check)?, &source), data_version(app)?)));
+        let read = |app: &mut Connection| {
+            read_snapshot(&[app], || Ok((combine(&app_digest(app, inputs, &check)?, &source), data_version(app)?)))
+        };
         let (fresh, seen) = match writers {
             Some(writers) => writers.read(app, read)?,
-            None => read()?,
+            None => read(app)?,
         };
         if fresh != version {
             return Err(Error::Conflict(INPUT_CHANGED.into()));
@@ -876,14 +877,14 @@ struct Snapshot {
 /// 等完整个复制（#275）。
 fn snapshot(
     c: &Connection,
-    src: &Connection,
+    src: &mut Connection,
     writers: &Writers,
     inputs: &Inputs<'_>,
     kind: &str,
     dir: &Path,
     ctx: &TaskContext,
 ) -> Result<Snapshot> {
-    writers.read(src, || {
+    writers.read(src, |src| {
         read_snapshot(&[c, src], || {
             let app = app_digest(c, inputs, &|| ctx.check())?;
             backup(c, &dir.join("library.sqlite"), ctx, None)?;
@@ -929,10 +930,11 @@ fn run(
     let scratch = Scratch(std::env::temp_dir().join(format!("illustash-research-{}", ctx.identity().task_id)));
     fs::create_dir(&scratch.0)?;
     let c = crate::app_library::read_connection(&library.db())?;
-    let src = crate::app_library::read_connection(&library.source())?;
+    let mut src = crate::app_library::read_connection(&library.source())?;
     let inputs = Inputs::new(library, anchors, kind, &args);
     let writers = Writers::of(&library.source());
-    let Snapshot { version, events, intents, regroup } = snapshot(&c, &src, &writers, &inputs, kind, &scratch.0, ctx)?;
+    let Snapshot { version, events, intents, regroup } =
+        snapshot(&c, &mut src, &writers, &inputs, kind, &scratch.0, ctx)?;
     // 在副本上、读事务之外进行：这里没有任何东西读图库。
     crate::sqlite::open(scratch.0.join("library.sqlite"))?
         .execute("DELETE FROM name_settings WHERE key IN ('model_key','deepseek_key')", [])?;
@@ -1015,8 +1017,8 @@ fn run(
     let publish = || {
         ctx.receive(&response.identity, || {
             let mut src = crate::app_library::read_connection(&library.source())?;
-            let src = src.transaction()?;
-            writers.read(&src, || {
+            writers.read(&mut src, |src| {
+                let src = src.transaction()?;
                 if !inputs.scope.publishes() {
                     // 查询什么都不发布：一个读事务同时检查它的输入和答案。
                     let c = crate::app_library::read_connection(&library.db())?;
@@ -1028,10 +1030,10 @@ fn run(
                         ordered.get("result").cloned().ok_or_else(bad)
                     });
                 }
-                let c = crate::sqlite::open(library.db())?;
+                let mut c = crate::sqlite::open(library.db())?;
                 crate::configure(&c)?;
                 confirm(
-                    &c,
+                    &mut c,
                     &src,
                     &inputs,
                     &version,
@@ -1416,12 +1418,12 @@ mod tests {
         }
         /// 对 `scope` 运行接受检查；返回是否发布了，以及运行了多少轮。
         fn confirm(&self, scope: Scope, version: &str, mut between: impl FnMut(u32)) -> (Result<()>, u32) {
-            let app = self.app();
+            let mut app = self.app();
             let mut src = self.source();
             let src = src.transaction().unwrap();
             let mut rounds = 0;
             let result = confirm(
-                &app,
+                &mut app,
                 &src,
                 &self.inputs(scope),
                 version,
@@ -1927,8 +1929,8 @@ mod tests {
         });
         let dir = f.root.join("snapshot");
         fs::create_dir_all(&dir).unwrap();
-        let (app, src) = (f.app(), f.source());
-        let taken = snapshot(&app, &src, &Writers::of(&path), &f.inputs(Scope::Learning), "events", &dir, &f.ctx);
+        let (app, mut src) = (f.app(), f.source());
+        let taken = snapshot(&app, &mut src, &Writers::of(&path), &f.inputs(Scope::Learning), "events", &dir, &f.ctx);
         BACKUP_HOOK.with(|hook| hook.borrow_mut().take());
         let outcomes = outcomes.borrow();
         assert!(!outcomes.is_empty());
@@ -2030,13 +2032,13 @@ mod tests {
         ROW_PAUSE.with(|p| p.set(Duration::from_millis(1)));
 
         let (started, handle) = writer("synthetic-a");
-        let (app, src) = (f.app(), f.source());
+        let (app, mut src) = (f.app(), f.source());
         let writers = Writers::of(&path);
         started.send(()).unwrap();
-        let read = writers.read(&src, || {
-            read_snapshot(&[&app, &src], || {
-                fingerprint(&app, &src, &f.inputs(Scope::Learning), &f.ctx)?;
-                backup(&src, &f.root.join("snapshot.sqlite"), &f.ctx, Some(&writers))
+        let read = writers.read(&mut src, |src| {
+            read_snapshot(&[&app, src], || {
+                fingerprint(&app, src, &f.inputs(Scope::Learning), &f.ctx)?;
+                backup(src, &f.root.join("snapshot.sqlite"), &f.ctx, Some(&writers))
             })
         });
         assert_eq!(handle.join().unwrap().map_err(|e| e.to_string()), Ok(()));
@@ -2046,25 +2048,23 @@ mod tests {
         let version = f.version(Scope::Learning);
         ROW_PAUSE.with(|p| p.set(Duration::from_millis(1)));
         let (started, handle) = writer("synthetic-b");
-        let (app, mut src) = (f.app(), f.source());
+        let (mut app, mut src) = (f.app(), f.source());
         let writers = Writers::of(&path);
         started.send(()).unwrap();
         // 和 `run` 里一样，源库事务随读取它的发布步骤一起结束。
-        let checked = (|| {
+        let checked = writers.read(&mut src, |src| {
             let src = src.transaction()?;
-            writers.read(&src, || {
-                confirm(
-                    &app,
-                    &src,
-                    &f.inputs(Scope::Learning),
-                    &version,
-                    &f.ctx,
-                    Some(&writers),
-                    || {},
-                    |tx| Ok(tx.commit()?),
-                )
-            })
-        })();
+            confirm(
+                &mut app,
+                &src,
+                &f.inputs(Scope::Learning),
+                &version,
+                &f.ctx,
+                Some(&writers),
+                || {},
+                |tx| Ok(tx.commit()?),
+            )
+        });
         assert_eq!(handle.join().unwrap().map_err(|e| e.to_string()), Ok(()));
         assert!(matches!(&checked, Err(e) if yielded(e)), "{checked:?}");
 
@@ -2072,10 +2072,10 @@ mod tests {
         ROW_PAUSE.with(|p| p.set(Duration::ZERO));
         let c = crate::sqlite::open(&path).unwrap();
         c.execute_batch("BEGIN IMMEDIATE; INSERT INTO characters VALUES ('synthetic-c',1);").unwrap();
-        let src = f.source();
-        assert!(matches!(Writers::of(&path).read(&src, || Ok(())), Err(e) if yielded(&e)));
+        let mut src = f.source();
+        assert!(matches!(Writers::of(&path).read(&mut src, |_| Ok(())), Err(e) if yielded(&e)));
         c.execute_batch("COMMIT").unwrap();
-        assert!(Writers::of(&path).read(&src, || Ok(())).is_ok());
+        assert!(Writers::of(&path).read(&mut src, |_| Ok(())).is_ok());
     }
 
     #[test]
@@ -2424,7 +2424,7 @@ mod tests {
                     let started = Instant::now();
                     let version = f.version(scope);
                     prepare.push(ms(started.elapsed()));
-                    let app = f.app();
+                    let mut app = f.app();
                     let mut src = f.source();
                     let src = src.transaction().unwrap();
                     let started = Instant::now();
@@ -2438,7 +2438,7 @@ mod tests {
                     }
                     let locked = std::cell::Cell::new(started);
                     confirm(
-                        &app,
+                        &mut app,
                         &src,
                         &f.inputs(scope),
                         &version,

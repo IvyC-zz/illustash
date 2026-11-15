@@ -27,7 +27,7 @@ fn strings(v: &Value, message: &str) -> Result<Vec<String>> {
         .collect()
 }
 
-/// Python 的真值：None、False、0、空串、空列表、空字典为假。
+/// 沿用旧实现的真值规则：null、false、0、空串、空数组、空对象为假。
 pub fn truthy(v: &Value) -> bool {
     match v {
         Value::Null => false,
@@ -285,7 +285,7 @@ pub(crate) fn delete_assertion(c: &Connection, at: At, u: &str, e: &str, via: &s
     verdict(c, at, u, e, "clear", via)
 }
 
-/// 撤销后：`assertions` 的这一行 = 核心里的有效裁决（与 Python 按快照 DELETE + INSERT 的效果相同，含触发器语义）。
+/// 撤销后：`assertions` 的这一行 = 核心里的有效裁决（与旧实现按快照 DELETE + INSERT 的效果相同，含触发器语义）。
 pub(crate) fn refresh_assertion(c: &Connection, u: &str, e: &str) -> Result<()> {
     let effective: Option<(String, String)> = c.prepare_cached("SELECT v.verdict,v.via FROM term_effective_verdicts v JOIN term_assets a ON a.id=v.asset_id AND a.namespace='library'
               JOIN terms t ON t.id=v.term_id WHERE a.key=? AND t.key=?")?.query_row(
@@ -808,6 +808,11 @@ fn shape(item: &Value) -> Option<&'static str> {
     None
 }
 
+/// 两种角色标记的快照始于 v2 信封，裸列表不认这两种形状。
+fn edit_shape(item: &Value) -> Option<&'static str> {
+    ["character_kind", "character_mascot"].into_iter().find(|key| has_keys(item, &[*key]))
+}
+
 pub fn undo(c: &Connection, args: &Value) -> Result<Value> {
     let id = args["action"].as_i64().ok_or_else(|| Error::Invalid("步骤 ID 不正确".into()))?;
     let last: Option<i64> =
@@ -820,7 +825,7 @@ pub fn undo(c: &Connection, args: &Value) -> Result<Value> {
     let before = crate::strict_json::parse(&before).map_err(Error::Invalid)?;
     let Some(items) = owns(&before)? else { return invalid("这一步不归角色核心撤销") };
     for item in &items {
-        if item.is_object() && shape(item).is_none() {
+        if item.is_object() && shape(item).is_none() && edit_shape(item).is_none() {
             return invalid("未知或混合撤销形状");
         }
     }
@@ -830,7 +835,7 @@ pub fn undo(c: &Connection, args: &Value) -> Result<Value> {
     let mut profile = false;
     let mut profile_links_changed = false;
     for item in &items {
-        match shape(item) {
+        match shape(item).or_else(|| edit_shape(item)) {
             Some("snapshot") => {
                 let u = text(&item["uuid"], "快照不完整")?;
                 let e = item["entity"].as_str();
@@ -853,6 +858,8 @@ pub fn undo(c: &Connection, args: &Value) -> Result<Value> {
                 profile_links_changed |= crate::character_profile::undo(c, &item["profile"])?;
                 profile = true;
             }
+            Some("character_kind") => crate::character_structure::undo_kind(c, &item["character_kind"])?,
+            Some("character_mascot") => crate::character_structure::undo_mascot(c, &item["character_mascot"])?,
             _ => return invalid("未知或混合撤销形状"),
         }
     }

@@ -13,7 +13,7 @@ pub(crate) fn request(c: &mut Connection, path: &str, body: &Json) -> Result<Jso
     let command = match path {
         "/api/identity/skip" => return skip(c, body),
         "/api/identity/decision" => {
-            // Store 先检查是不是 Python 的 int 类型，核心再检查策略和端点。
+            // 先检查关系 id 是不是正整数（旧实现 Store 的顺序），核心再检查策略和端点。
             let relation = argument(body, "relation_id")?;
             if !relation.is_null() && relation.as_i64().is_none_or(|id| id <= 0) {
                 return Err(Error::Invalid("关系 ID 不正确".into()));
@@ -58,7 +58,7 @@ fn skip(c: &mut Connection, body: &Json) -> Result<Json> {
     )?;
     tx.execute(
         "INSERT INTO actions(label,before_json) VALUES (?,?)",
-        params!["已暂不判断一对角色", character_json::dump(&json!([{"identity_skip":before}]), true)],
+        params!["已暂不判断一对角色", json!([{"identity_skip":before}]).to_string()],
     )?;
     tx.commit()?;
     Ok(Json::object([("undo", app_commands::last_action(c)?)]))

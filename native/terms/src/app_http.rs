@@ -324,7 +324,7 @@ fn handle(mut request: Request, host: &Host, received: u64) {
     http_host_get::handle(request, host, received);
 }
 
-// Python 的 library_action 把文件系统失败包装成 Invalid，而 SQLite 失败仍是 500。
+// 沿用旧实现 library_action 的分类：文件系统失败包装成 Invalid，SQLite 失败仍是 500。
 fn management_error(error: Error) -> Error {
     match error {
         Error::Io(e) => Error::Invalid(e.to_string()),
@@ -332,49 +332,24 @@ fn management_error(error: Error) -> Error {
     }
 }
 
-// library_action('new') 有意接受 str(value or '')。保留它现有的 repr 语义。
-fn python_text(value: &Json, nested: bool) -> String {
-    match value {
-        Json::Scalar(serde_json::Value::String(value)) if nested => crate::http_read::python_repr(value),
-        Json::Scalar(serde_json::Value::String(value)) => value.clone(),
-        Json::Scalar(serde_json::Value::Null) => "None".into(),
-        Json::Scalar(serde_json::Value::Bool(value)) => if *value { "True" } else { "False" }.into(),
-        Json::Integer(value) if value.trim_start_matches('-').chars().all(|c| c == '0') => "0".into(),
-        Json::Float(value) if value.is_nan() => "nan".into(),
-        Json::Float(value) if *value == f64::INFINITY => "inf".into(),
-        Json::Float(value) if *value == f64::NEG_INFINITY => "-inf".into(),
-        Json::Array(values) => {
-            format!("[{}]", values.iter().map(|v| python_text(v, true)).collect::<Vec<_>>().join(", "))
-        }
-        Json::Object(values) => format!(
-            "{{{}}}",
-            values
-                .iter()
-                .map(|(k, v)| format!("{}: {}", crate::http_read::python_repr(k), python_text(v, true)))
-                .collect::<Vec<_>>()
-                .join(", ")
-        ),
-        _ => value.dump(),
-    }
-}
-fn creation_name(body: &Json) -> String {
-    let name = body.get("name").filter(|v| truthy(v)).map(|v| python_text(v, false)).unwrap_or_default();
-    let name = crate::http_read::trim(&name);
-    if name.is_empty() {
-        "新图库".into()
-    } else {
-        name.into()
-    }
+/// 缺省、null 和空白名称沿用默认名；其他非字符串在创建任何目录之前拒绝。
+fn creation_name(body: &Json) -> Result<&str> {
+    let name = match body.get("name") {
+        None | Some(Json::Scalar(serde_json::Value::Null)) => "",
+        Some(Json::Scalar(serde_json::Value::String(name))) => name,
+        _ => return Err(Error::invalid("图库名称必须是字符串")),
+    };
+    let name = crate::http_read::trim(name);
+    Ok(if name.is_empty() { "新图库" } else { name })
 }
 fn create_library(host: &Host, body: &Json) -> Result<Json> {
-    let name = creation_name(body);
-    let name = name.as_str();
+    let name = creation_name(body)?;
     let dest = crate::app_libraries::unique_path(name)?;
     let result = match body.get("kind").map(Json::text) {
         _ if body.get("sources").is_some() => create_sources_library(host, body, &dest, name),
         Some("photos") => {
             if name.contains('\0') {
-                return Err(Error::Invalid("mkdir: embedded null character in path".into()));
+                return Err(Error::invalid("无法创建图库：名称不能包含空字符（NUL）"));
             }
             // 与 web.sync.PHOTOS 一致；这里只是配置，从不访问 Photos 图库包。
             let photos = crate::app_libraries::photos_library()?;
@@ -400,7 +375,7 @@ fn create_sources_library(host: &Host, body: &Json, dest: &Path, name: &str) -> 
         return Err(Error::Invalid("sources 必须是数组".into()));
     };
     if name.contains('\0') {
-        return Err(Error::Invalid("mkdir: embedded null character in path".into()));
+        return Err(Error::invalid("无法创建图库：名称不能包含空字符（NUL）"));
     }
     let mut sources = Vec::new();
     for item in items {
@@ -465,7 +440,7 @@ fn create_folder_library(host: &Host, body: &Json, dest: &Path, name: &str) -> R
         return Err(Error::Invalid("来源预设只能是 x、pixiv、other".into()));
     }
     if name.contains('\0') {
-        return Err(Error::Invalid("mkdir: embedded null character in path".into()));
+        return Err(Error::invalid("无法创建图库：名称不能包含空字符（NUL）"));
     }
     crate::app_create::create_folder(dest, &folder, Some(name), preset, creation_reference(host)?)
 }
@@ -852,29 +827,43 @@ mod tests {
         *LAST_PROGRESS.lock().unwrap() = None;
     }
     #[test]
-    fn creation_name_keeps_python_truthiness_repr_and_whitespace() {
+    fn creation_name_preserves_defaults_and_rejects_non_strings() {
+        use crate::http_json::Json;
+        let missing = Json::object(std::iter::empty::<(&str, Json)>());
+        assert_eq!(super::creation_name(&missing).unwrap(), "新图库");
         for (input, expected) in [
             ("null", "新图库"),
-            ("false", "新图库"),
-            ("0", "新图库"),
-            ("-0", "新图库"),
-            ("-0.0", "新图库"),
-            ("[]", "新图库"),
-            ("{}", "新图库"),
+            (r#""""#, "新图库"),
             (r#"" ""#, "新图库"),
-            ("true", "True"),
-            ("123", "123"),
-            ("1e400", "inf"),
-            ("NaN", "nan"),
-            ("Infinity", "inf"),
-            ("-Infinity", "-inf"),
             (r#""\u001c 名字 \u001f""#, "名字"),
-            ("[-0]", "[0]"),
-            (r#"["x", true, null]"#, "['x', True, None]"),
-            (r#"{"a":"b","c":[1,false]}"#, "{'a': 'b', 'c': [1, False]}"),
+            (r#""a/b:c""#, "a/b:c"),
+            (r#""bad\u0000name""#, "bad\0name"),
         ] {
             let body = crate::http_json::parse_request(&format!("{{\"name\":{input}}}")).unwrap();
-            assert_eq!(super::creation_name(&body), expected, "{input}");
+            assert_eq!(super::creation_name(&body).unwrap(), expected, "{input}");
+        }
+        for input in [
+            "false",
+            "true",
+            "0",
+            "-0",
+            "-0.0",
+            "123",
+            "1e400",
+            "NaN",
+            "Infinity",
+            "-Infinity",
+            "[]",
+            "{}",
+            r#"["x", true, null]"#,
+            r#"{"a":"b"}"#,
+        ] {
+            let body = crate::http_json::parse_request(&format!("{{\"name\":{input}}}")).unwrap();
+            assert!(
+                matches!(super::creation_name(&body), Err(crate::Error::Invalid(message))
+                if message == "图库名称必须是字符串"),
+                "{input}"
+            );
         }
     }
 }

@@ -82,6 +82,9 @@ HTTP 错误保留原有状态码与 `error` 正文，额外通过 `X-Illustash-D
 
    首个公开测试版没有上一个 tag，用现在的 `0.1.0`（#165）。关于页的渠道「预览版」是 `application.json` 的 `channel`，与检查更新无关；检查更新只看版本号带不带后缀（第 10 步），所以装了不带后缀版本的人收不到带后缀的版本。
 2. **升版本号并同步**：从最新 main 开分支，`python3 tools/version.py --set X.Y.Z` 改 `native/terms/application.json`，并同步 `desktop/tauri.conf.json`、五个 crate（`native/terms`、`desktop`、`crates/core`、`crates/platform`、`crates/iqdb`）的 `Cargo.toml` 和各自 `Cargo.lock` 里本项目的包；再运行 `python -m tools.migration_inventory sync-sources` 同步迁移清单指纹。`python3 tools/version.py` 不带参数只检查：一致时打印「版本号一致：X.Y.Z」，不一致时逐处列出并退出 1。另外两道检查：全量里的 `tests/test_version.py`，以及 `packaging/build.py` 不一致就拒绝打包。这个 PR 按普通代码级别走合并队列，转 Ready 写「待集成」。版本号已经是要发的值时跳过这一步。
+   - **例行复盘**（2026-11-15 用户定，#468）：从 0.2 起，每个次版本第一次升到 X.Y（含预发布版）时做，修订版不做。结论写进这个 PR 的描述；跳过这一步时写进这次发布的 Issue。两件事：
+     - **检查器复盘**：带基线的检查（现在只有 `tools/check_frontend.py`）逐条规则比上一个 tag 少了多少，项数和处数都写；对照 `git show <上一个tag>:tools/frontend_baseline.json | python3 -c "import json,sys; [print(k, len(v), sum(v.values())) for k, v in json.load(sys.stdin)['rules'].items()]"` 和当前基线跑出的同样输出。连续两个次版本没缩小的规则，按 [AGENTS.md](../AGENTS.md#前端结构约定)「前端结构约定」集中清理或删规则，写明选了哪个。脚本开头列的已知盲区太多、该改写或删掉的规则也写上。数字同步更新到 #470。
+     - **整体前端审查**：照 #386 的做法，跨页面看交互是否一致、结构是否冗余，找到的问题开 Issue，编号列进 PR 描述。
 3. **发布提交与本机全量**：集成会话把版本号 PR 编进一批，在候选 head 上经 `collab_run.py run -- bash tools/check_all.sh` 跑全量（占 heavy 槽，做法见 [合并队列](LOCAL_CHECKS.md#合并队列集成会话)），用户批准后合入。发布提交就是这一批合完后的 main 提交，它的 tree 与通过全量的候选 head 相同（`git rev-parse <发布提交>^{tree} <候选head>^{tree}` 两行一样）。main 在那之后又合入了不跑全量的 PR（界面级、只改文档），要带上它们就请集成会话在 main 当前提交上补跑一次全量，以它为发布提交。
    - **依赖漏洞**：在发布提交上对五个 `Cargo.lock`（`native/terms`、`desktop`、`crates/core`、`crates/platform`、`crates/iqdb`）各跑一次 `cargo audit -f <lock>`。有漏洞时逐条判断是否用到受影响的功能：用到的先升级再发布（升级 PR 按普通代码级别走合并队列，发布提交随之换成合入后的 main 提交），没用到的把编号和理由写进这次发布的 Issue。unmaintained、yanked 之类的警告只记录。需要 `cargo install cargo-audit --locked`（本机已装 0.22.2）；第一次运行会从 GitHub 拉 RustSec 漏洞库。
    - **更新公钥**（#279）：发布提交里 `desktop/tauri.conf.json` 的 `plugins.updater.pubkey` 不能是空的，并且和用户保管的私钥是一对（与 `~/.tauri/illustash-updater.key.pub` 的内容相同，见下面 [更新签名密钥](#更新签名密钥)）。公钥是空的构建照样能用，只是「下载并重启」不出现，只能打开下载页；公钥不对的构建以后收不到任何自动更新。
@@ -211,7 +214,7 @@ illustash/
 - 开发期和合入其他分支的 PR 按改动跑定向检查；目标为 main 的非纯 Markdown PR 先完成其他平台检查，再在已提交的干净候选上跑一次本机完整入口 `bash tools/check_all.sh`（对齐 `.github/workflows/ci.yml`）。固定验收区用 `python3.12 tools/local_acceptance.py run <候选SHA>` 串行执行并写签名记录，`result <候选SHA>` 取结果。
 - 允许的跳过只有 CI 同样允许的平台限制和真实图库数据缺失；不访问真实图库补齐数据。
 - 只改 Markdown 的 PR 不跑全量，只检查相对链接。
-- GitHub Actions 对目标为 main 的同库非草稿 PR 自动运行 `ci.yml`，作为额外保障，不代替本机全量；规则见 AGENTS.md 2026-11-12 一条，做法见 [本地验收](LOCAL_CHECKS.md#github-actionspr-自动检查)。
+- GitHub Actions 对目标为 main 的同库非草稿 PR 自动运行 `ci.yml`，作为额外保障，不代替本机全量；规则见 [AGENTS.md](../AGENTS.md#约定)「GitHub Actions」一条，做法见 [本地验收](LOCAL_CHECKS.md#github-actionspr-自动检查)。
 - 常用入口：核心测试 `cargo test --locked --manifest-path native/terms/Cargo.toml`，Python 合成套件 `python -m tests.run_offline -v -b`（用装了依赖的 3.12 解释器）。
 - `native/terms` 的集成测试合成三个测试二进制（#310）：`tests/it/`（其余各文件是 `it/main.rs` 的子模块，只跑一个用 `--test it entry::`）、`tests/contracts.rs`（检查脚本和计时按 `--test contracts` 单独构建）、`tests/baseline.rs`（进程级的 SQLite 设置要最先生效）。新的集成测试放进 `tests/it/` 并在 `main.rs` 登记；每个测试第一行取 `crate::shared()`，要改进程环境变量或当前目录的取 `crate::exclusive()`，`it` 里有测试检查这一点。在 `tests/` 顶层另建文件也能跑，但会多编、多链接一次整个库。
 - 开发时也可以用 `cargo nextest run` 跑这些测试（需自行安装）：它每个测试起一个进程、跨二进制并行，`it` 的环境锁和 `baseline` 的进程级设置都照常成立；它不减少编译，只缩短运行。`integrity`、`rescue` 在负载高时本来就不稳定（#395），并行更多时更容易碰到。全量和 CI 仍用 `cargo test`。

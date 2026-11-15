@@ -33,7 +33,7 @@ pub(super) fn library_groups(request: &Request) -> Result<[Groups; 5]> {
     let mut groups: [Groups; 5] = std::array::from_fn(|_| Vec::new());
     if request.library.join("library.sqlite").is_file() {
         let c = crate::app_library::read_connection(&request.library.join("library.sqlite"))?;
-        // Python 在这一整段按顺序的查询外面只捕获第一个 OperationalError。
+        // 沿用旧实现：这一整段按顺序查询，只在第一个 SQLite 操作错误处停下。
         // 已读的表保留结果；遇到缺失的表后，后面的表不再查询。
         let originals = format!(
             "SELECT m.entity,m.uuid
@@ -89,7 +89,7 @@ pub(super) fn save_runs(request: &Request, presets: &[&str]) -> Result<Groups> {
         let mut pictures = source.prepare("SELECT uuid,added_at FROM assets WHERE in_scope=1 AND coalesce(trashed,0)=0 AND preset=? AND added_at IS NOT NULL AND added_at!=''")?
             .query_map([preset], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?
             .collect::<rusqlite::Result<Vec<_>>>()?;
-        // 有意用稳定的字典序排序：Python 在转换时间戳之前就对编码后的字符串排序。
+        // 有意用稳定的字典序排序：旧实现在转换时间戳之前就对编码后的字符串排序。
         pictures.sort_by(|a, b| a.1.cmp(&b.1));
         let mut last = None;
         let mut run = 0usize;
@@ -142,12 +142,8 @@ pub(super) fn run(request: &Request, sequence: &mut u64) -> Result<Value> {
             if count < *least || count != solved.len() {
                 continue;
             }
-            let proof = format!(
-                "{{\"group\": {}, \"count\": {}, \"from\": {}}}",
-                crate::character_json::dump(&json!(RULES[index].0), true),
-                count,
-                crate::character_json::dump(&json!(solved.iter().take(5).collect::<Vec<_>>()), true)
-            );
+            let proof = json!({"group":RULES[index].0,"count":count,"from":solved.iter().take(5).collect::<Vec<_>>()})
+                .to_string();
             for asset in members {
                 if owners.contains_key(asset) {
                     continue;

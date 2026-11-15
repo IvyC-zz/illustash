@@ -72,7 +72,7 @@ pub(super) fn forget_changed_content(c: &Connection, library: &Library) -> Resul
 }
 pub(super) fn backup(from: &Path, to: &Path) -> Result<()> {
     let c = crate::app_library::read_connection(from)?;
-    c.backup(rusqlite::DatabaseName::Main, to, None)?;
+    c.backup(rusqlite::MAIN_DB, to, rusqlite::backup::NO_PROGRESS)?;
     Ok(())
 }
 fn own(id: &str) -> Value {
@@ -360,6 +360,101 @@ pub(super) fn latest(cache: &Path) -> Result<Json> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn compact_machine_evidence_keeps_v4_core_evidence_and_undo() {
+        let root = std::env::temp_dir()
+            .join(format!("illustash-evidence-encoding-{}.pilib", crate::store::new_key().unwrap()));
+        std::fs::create_dir(&root).unwrap();
+        std::fs::write(root.join("library.json"), r#"{"format":1,"id":"synthetic","name":"合成","sources":[]}"#)
+            .unwrap();
+        let library = Library::locate(&root).unwrap();
+        let mut app = crate::open(&library.db()).unwrap();
+        crate::migrate(&mut app).unwrap();
+        app.execute_batch(
+            "CREATE TABLE assets(uuid TEXT PRIMARY KEY); INSERT INTO assets VALUES ('group'),('gallery');",
+        )
+        .unwrap();
+        let cache = root.join("provenance.sqlite");
+        let c = connect(&cache).unwrap();
+        c.execute("INSERT INTO artists(id) VALUES ('synthetic-artist')", []).unwrap();
+        let proofs = [
+            (
+                "group",
+                "group_oc",
+                0.9,
+                r#"{"group": "oc", "count": 2, "from": ["\u96ea\ud83d\ude42", "a"]}"#,
+                json!({"group":"oc","count":2,"from":["雪🙂","a"]}).to_string(),
+            ),
+            (
+                "gallery",
+                "gallery_match",
+                0.95,
+                r#"{"pixiv": "\u96ea\ud83d\ude42\"\\"}"#,
+                json!({"pixiv":"雪🙂\"\\"}).to_string(),
+            ),
+        ];
+        for (asset, method, score, old, _) in &proofs {
+            c.execute("INSERT INTO image_artists(asset,artist_id,method,score,evidence,status,updated_at) VALUES (?,'synthetic-artist',?,?,?,'candidate','2026-01-01 00:00:00')", rusqlite::params![asset,method,score,old]).unwrap();
+        }
+        let old_package = package(&library, &cache, &root.join("old")).unwrap();
+        crate::store::import_package(&mut app, &old_package, library.id()).unwrap();
+        let evidence = |app: &Connection| -> Vec<Vec<rusqlite::types::Value>> {
+            let mut query = app.prepare("SELECT * FROM term_evidence ORDER BY id").unwrap();
+            let columns = query.column_count();
+            query
+                .query_map([], |r| (0..columns).map(|i| r.get(i)).collect())
+                .unwrap()
+                .collect::<rusqlite::Result<_>>()
+                .unwrap()
+        };
+        let before = evidence(&app);
+        assert_eq!(before.len(), 2);
+        assert!(before.iter().all(|row| matches!(&row[6], rusqlite::types::Value::Text(v) if v.starts_with("v4/"))));
+        let (asset, term) = app
+            .query_row("SELECT asset_id,term_id FROM term_evidence ORDER BY id LIMIT 1", [], |r| {
+                Ok((r.get(0)?, r.get(1)?))
+            })
+            .unwrap();
+        let action = crate::store::judge(
+            &mut app,
+            &[crate::store::VerdictTarget::Image { asset, term }],
+            crate::store::Verdict::No,
+            "user",
+            "",
+            "合成裁决",
+        )
+        .unwrap();
+        for (asset, _, _, old, new) in &proofs {
+            assert_eq!(serde_json::from_str::<Value>(old).unwrap(), serde_json::from_str::<Value>(new).unwrap());
+            c.execute("UPDATE image_artists SET evidence=? WHERE asset=?", [new.as_str(), asset]).unwrap();
+        }
+        let new_package = package(&library, &cache, &root.join("new")).unwrap();
+        assert_eq!(
+            std::fs::read(root.join("old/evidence.jsonl")).unwrap(),
+            std::fs::read(root.join("new/evidence.jsonl")).unwrap()
+        );
+        crate::store::import_package(&mut app, &new_package, library.id()).unwrap();
+        assert_eq!(evidence(&app), before);
+        assert_eq!(
+            app.query_row(
+                "SELECT verdict FROM term_effective_verdicts WHERE asset_id=? AND term_id=?",
+                [asset, term],
+                |r| r.get::<_, String>(0)
+            )
+            .unwrap(),
+            "no"
+        );
+        crate::store::undo(&mut app, Some(action)).unwrap();
+        assert_eq!(
+            app.query_row("SELECT count(*) FROM term_effective_verdicts", [], |r| r.get::<_, i64>(0)).unwrap(),
+            0
+        );
+        assert_eq!(evidence(&app), before);
+        drop(c);
+        drop(app);
+        std::fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn version_4_cache_keeps_its_signatures_and_gains_the_colour_column() {

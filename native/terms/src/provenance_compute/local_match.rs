@@ -117,7 +117,7 @@ impl Library {
         let scores = illustash_platform::platform_research_math::cross(&self.x, self.ids.len(), &x, 1, GRID)
             .map_err(Error::Invalid)?;
         let mut hits = vec![];
-        // 这里对应 Python 标量 np.log(ratio)，是 f64，不同于 local_run 的 f32 数组。
+        // 这里沿用旧实现的标量 np.log(ratio)，是 f64，不同于 local_run 的 f32 数组。
         let lr = sig.ratio.ln();
         for (i, score) in scores.into_iter().enumerate() {
             // NumPy 2.x 把标量结果提升为数组的 float32 dtype。
@@ -141,16 +141,12 @@ pub(super) fn record(
     url: &str,
     score: f32,
 ) -> Result<()> {
-    // Python 的 round(float(score)*100, 1) 按十进制四舍六入五成双，不是 f32 取整。
+    // 沿用旧实现的 round(float(score)*100, 1)：按十进制四舍六入五成双，不是 f32 取整。
     let similarity =
         format!("{:.1}", f64::from(score) * 100.).parse::<f64>().map_err(|e| Error::Invalid(e.to_string()))?;
     c.execute("INSERT OR IGNORE INTO image_sources(asset,site,post_id,url,artist_id,method,similarity) VALUES (?,?,?,?,?,'gallery_match',?)",
         params![asset,site,post_id,url,artist,similarity])?;
-    let proof = format!(
-        "{{{}: {}}}",
-        crate::character_json::dump(&json!(site), true),
-        crate::character_json::dump(&json!(post_id), true)
-    );
+    let proof = json!({site:post_id}).to_string();
     c.execute("INSERT INTO image_artists(asset,artist_id,method,score,evidence,status) VALUES (?,?,'gallery_match',?,?,'auto') ON CONFLICT(asset,artist_id) DO NOTHING",
         params![asset,artist,score,proof])?;
     Ok(())

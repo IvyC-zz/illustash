@@ -120,7 +120,7 @@ fn prioritize(pictures: Vec<Picture>, ratings: &BTreeMap<String, Option<String>>
 /// 按保存时间分段的图片，同一段内相邻两次保存间隔不超过 SAVE_GAP，最早的在前。
 fn save_runs(pictures: &[Picture]) -> Result<Vec<Vec<Picture>>> {
     let mut dated: Vec<_> = pictures.iter().filter(|p| p.added_at.as_deref().is_some_and(|a| !a.is_empty())).collect();
-    // Python 先对存储的字符串做稳定排序，再转换成时间戳。
+    // 沿用旧实现：先对存储的字符串做稳定排序，再转换成时间戳。
     dated.sort_by(|a, b| a.added_at.cmp(&b.added_at));
     let (mut runs, mut last): (Vec<Vec<Picture>>, Option<f64>) = (Vec::new(), None);
     for picture in dated {
@@ -213,7 +213,7 @@ pub(super) fn run(request: &Request, sequence: &mut u64) -> Result<Value> {
     let mut lines = String::new();
     for p in &todo {
         let original = pixel_batch::original(&config, &p.asset, &p.source_id, p.src_path.as_deref())?;
-        // Python 是 str(original or src_path)，所以缺失的路径是文本 "None"。
+        // 缺失的路径照旧是文本 "None"（旧实现是 str(original or src_path)）。
         let path = match original {
             Some(path) => path.to_string_lossy().into_owned(),
             None => p.src_path.clone().unwrap_or_else(|| "None".into()),

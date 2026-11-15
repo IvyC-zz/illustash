@@ -5,7 +5,7 @@ pub fn local_timestamp(tm: &mut libc::tm) -> libc::time_t {
         // SAFETY: `tm` 是独占的可变引用，mktime 只读写这个结构。
         unsafe { libc::mktime(tm) }
     }
-    // UCRT 的 mktime 是头文件里包在 _mktime64 外面的内联函数，Python 用的也是它。
+    // UCRT 的 mktime 是头文件里包在 _mktime64 外面的内联函数，旧实现用的也是它，结果与以前一致。
     #[cfg(windows)]
     {
         extern "C" {

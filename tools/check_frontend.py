@@ -7,7 +7,7 @@ tools/check_architecture.py 对 crate 依赖方向的检查。规则（说明见
   1 import-cycle         ui/ 循环导入里的导入边；现有的登记为基线，不得新增边或新的环
   2 undeclared-state     `state.<字段>` 必须在 core/state.js 声明
   3 document-listener    不得新增 document/window/body 级的 keydown、keyup、click、mousedown、pointerdown 监听
-  4 dialog-element       不得新增 `document.createElement('dialog')`，也不得在字符串里拼 `<dialog`
+  4 dialog-element       ui/dialog.js 以外不得 `document.createElement('dialog')`，也不得在字符串里拼 `<dialog`（硬规则，没有基线）
   5 long-line            不得新增超过 200 字符的行（app.js、core/、ui/）
   6 page-name            页面名只能在 core/pages.js（页面注册表，#342）里比较（硬规则，没有基线）
   7 state-writer         state 字段只能由 core/state.js 组标题写明的写入者文件赋值（#353；硬规则，没有基线）
@@ -49,6 +49,9 @@ BASELINE = Path('tools/frontend_baseline.json')
 # 规则 3 的放行项：浮层管理器是 document 级 keydown / click 监听的唯一入口（Esc 只关栈顶一个、点外关闭都靠它在一处判断）。
 # 用户 2026-11-12 在 #343 批准，只此一个文件；别的文件新增全局监听仍然报错，也不要往基线里加。
 GLOBAL_LISTENER_ALLOWED = frozenset({'ui/overlay.js'})
+# 规则 4 的放行项：ui/dialog.js 的 openDialog 是唯一生成 <dialog> 的地方，别处的对话框都建在它上面。
+# 用户 2026-11-15 批准（#470），只此一个文件；别的文件拼 <dialog> 仍然报错。
+DIALOG_ALLOWED = frozenset({'ui/dialog.js'})
 MAX_LINE = 200
 # 规则检查的模块文件。i18n.js、splash.js、theme.js 是经典脚本，locales/ 是数据，都不在范围内。
 MODULE_GLOBS = ('app.js', 'core/*.js', 'ui/*.js')
@@ -245,8 +248,9 @@ def new_rules():
              '把监听挂在具体元素或 <dialog> 上（dialog 用 cancel/close 事件，点外关闭在 dialog 自己的 click 里判断）；'
              '要新开浮层就向 ui/overlay.js 登记（createLayer / openModal），它是唯一放行的入口；确需别的全局监听时，在 Issue 里提出请用户决定，由用户改本检查的规则，不要往基线里添加。'),
         Rule('dialog-element', '4', '新增了运行时拼出的 <dialog>（createElement 或字符串里的 <dialog）',
-             '运行时拼出的 <dialog> 各自复制同一份外壳（#316）。现有的已冻结为基线，不得新增。',
-             '复用 ui/dialog.js 里的 confirmAction / chooseWork；不够用就在 ui/dialog.js 里扩展参数，不要再在别处拼一份 dialog 外壳。'),
+             '运行时拼出的 <dialog> 各自复制同一份外壳（#316）。ui/dialog.js 的 openDialog 是唯一放行的入口（#470），没有基线。',
+             '复用 ui/dialog.js 里的 openDialog / confirmAction / chooseWork；不够用就在 ui/dialog.js 里扩展参数，不要再在别处拼一份 dialog 外壳。',
+             baselined=False),
         Rule('long-line', '5', f'新增了超过 {MAX_LINE} 字符的行',
              f'一行不超过 {MAX_LINE} 个字符（代理和评审都读不动一行 1000 字符）。现有的超长行已冻结为基线，不得新增。',
              '把这行拆成多行：长模板字符串按块换行，长条件/链式调用拆成中间变量；顺手拆开的话，用 `--shrink` 更新基线。'),
@@ -723,6 +727,8 @@ def run_rules(sources, css=None):
             line = s.line_of(m.start())
             rules['document-listener'].add(f'{p}::{m.group(2) or m.group(3)}', f'{STATIC}/{p}:{line}: {s.raw_line(line)[:110]}')
         for m in DIALOG_RE.finditer(s.code):
+            if p in DIALOG_ALLOWED:
+                continue
             line = s.line_of(m.start())
             rules['dialog-element'].add(p, f'{STATIC}/{p}:{line}: {s.raw_line(line)[:110]}')
         # 规则 9

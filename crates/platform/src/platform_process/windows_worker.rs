@@ -4,7 +4,7 @@ use std::{
     ffi::c_void,
     io,
     os::windows::{io::AsRawHandle, process::CommandExt},
-    process::{Child, Command, Stdio},
+    process::{Child, Command},
 };
 type Handle = *mut c_void;
 #[repr(C)]
@@ -143,11 +143,7 @@ impl ProcessJob {
         {
             return Err(io::Error::last_os_error());
         }
-        command
-            .creation_flags(0x00000004 | 0x08000000) // CREATE_SUSPENDED | CREATE_NO_WINDOW
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null());
+        command.creation_flags(0x00000004 | 0x08000000); // CREATE_SUSPENDED | CREATE_NO_WINDOW
         let mut child = command.spawn()?;
         // SAFETY: `handle` 是存活的作业，`child` 的原始句柄在 `child` 存活期间有效。
         if unsafe { AssignProcessToJobObject(handle, child.as_raw_handle()) } == 0 {

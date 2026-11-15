@@ -210,10 +210,10 @@ fn differ(c: &Connection, old: &str, new: &str) -> Result<i64> {
     Ok(count(format!("{old} EXCEPT {new}"))? + count(format!("{new} EXCEPT {old}"))?)
 }
 
-/// 切换后由核心写、Python 只读的表（写保护，见 schema::guard）：人工结论与候选（`assertions`、`candidates`）和归属的派生表、角色判定器的私有状态、
-/// 学习产物，以及相册导入的 `imported`。`deferred`、`asked`、`reviews` 由核心命令一起写，但 Python 撤销自己的步骤
+/// 切换后只由核心写、宿主其余代码只读的表（写保护，见 schema::guard）：人工结论与候选（`assertions`、`candidates`）和归属的派生表、角色判定器的私有状态、
+/// 学习产物，以及相册导入的 `imported`。`deferred`、`asked`、`reviews` 由核心命令一起写，但宿主撤销自己的步骤
 /// （旧的零成员 sweep、curate、identity_skip）时照旧要删它们的行；`duplicates`、`excluded`、`auto_rules` 仍有
-/// Python 的写入口（curate、相似分组）。这些都不在里面。
+/// 宿主的写入口（curate、相似分组）。这些都不在里面。
 pub const GUARDED: [&str; 18] = [
     "assertions",
     "candidates",
