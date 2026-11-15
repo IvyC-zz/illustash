@@ -39,7 +39,7 @@ pub fn capture(c: &Connection, header: Header) -> Result<Snapshot> {
     for key in c
         .prepare(
             "SELECT key FROM terms WHERE origin='user' OR id IN (SELECT term_id FROM term_tree)
-        OR id IN (SELECT term_id FROM term_names WHERE source='user')
+        OR id IN (SELECT term_id FROM term_names WHERE source='user' AND (role='alias' OR preferred=1))
         OR id IN (SELECT term_id FROM term_links WHERE source='user')",
         )?
         .query_map([], |r| r.get::<_, String>(0))?
@@ -424,7 +424,11 @@ fn entity(
     for row in c.prepare("SELECT lang,value,role,preferred,position,source FROM term_names WHERE term_id=?1 ORDER BY seq,lang,role,source,value")?
         .query_map([id],|r|Ok(Name {lang:r.get(0)?,value:r.get(1)?,role:r.get(2)?,preferred:r.get(3)?,position:r.get(4)?,source:r.get(5)?,provenance:String::new()}))? {
         let mut name=row?;
-        if name.source=="user" {name.provenance="user".into();names.push(name);}
+        if name.source=="user" {
+            // 导入包也能声明 source=user；只有人工入口写出的别名或首选显示名能证明人工来源。
+            name.provenance=if name.role=="alias" || name.preferred {"user"} else {"legacy_unknown"}.into();
+            names.push(name);
+        }
         else if aliases.is_some_and(|a|a.contains(&(name.lang.clone(),name.value.clone(),name.source.clone()))) && name.role=="alias" {
             name.provenance="legacy_merge".into();names.push(name);
         } else if description.is_none() && name.role=="display" {
@@ -435,16 +439,9 @@ fn entity(
         names.extend(description);
     }
     let links = c
-        .prepare("SELECT system,key,url,current,added_at,source FROM term_links WHERE term_id=?1 ORDER BY system,key")?
+        .prepare("SELECT system,key,current,added_at,source FROM term_links WHERE term_id=?1 ORDER BY system,key")?
         .query_map([id], |r| {
-            Ok(Link {
-                system: r.get(0)?,
-                key: r.get(1)?,
-                url: r.get(2)?,
-                current: r.get(3)?,
-                added_at: r.get(4)?,
-                source: r.get(5)?,
-            })
+            Ok(Link { system: r.get(0)?, key: r.get(1)?, current: r.get(2)?, added_at: r.get(3)?, source: r.get(4)? })
         })?
         .collect::<rusqlite::Result<_>>()?;
     let provenance = if tree.is_some() {

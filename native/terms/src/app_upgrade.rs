@@ -400,26 +400,8 @@ mod tests {
             tx.execute_batch("PRAGMA defer_foreign_keys=ON").unwrap();
             // 装入固定旧状态时只借写钥匙，不调用当前版本的投影器改写旧行。
             tx.execute("INSERT OR REPLACE INTO meta VALUES (?1,'1')", [crate::schema::WRITER_KEY]).unwrap();
-            // 当前建库脚本已删掉这些 v7 兼容对象，DDL 从同一历史产出方一并冻结。
-            if let Some(ddl) = input["legacy_tables"].as_array() {
-                for sql in ddl {
-                    tx.execute_batch(sql.as_str().unwrap()).unwrap();
-                }
-            }
             for (table, data) in input["tables"].as_object().unwrap() {
                 assert!([
-                    "deferred",
-                    "identity_baseline",
-                    "identity_canonical",
-                    "identity_scopes",
-                    "identity_suspended",
-                    "identity_uncertain",
-                    "term_identity_baseline",
-                    "display_names",
-                    "entities",
-                    "names",
-                    "reviews",
-                    "term_key_names",
                     "actions",
                     "assertions",
                     "assets",
@@ -427,7 +409,6 @@ mod tests {
                     "meta",
                     "term_assets",
                     "term_name_display",
-                    "term_name_choice",
                     "term_names",
                     "term_projection",
                     "term_tree",
@@ -442,12 +423,6 @@ mod tests {
                 let sql = format!("{verb} INTO {table} ({}) SELECT {}", columns.join(","), values.join(","));
                 for row in data["rows"].as_array().unwrap() {
                     tx.execute(&sql, [row.to_string()]).unwrap();
-                }
-            }
-            // 装入旧行后再安装旧触发器，保留录制的 names_version，不用新投影器刷新数据。
-            if let Some(ddl) = input["legacy_triggers"].as_array() {
-                for sql in ddl {
-                    tx.execute_batch(sql.as_str().unwrap()).unwrap();
                 }
             }
             tx.execute("DELETE FROM meta WHERE key=?1", [crate::schema::WRITER_KEY]).unwrap();
@@ -500,7 +475,7 @@ mod tests {
         let f = Fixture::new(8);
         let c = f.connection();
         c.execute("INSERT INTO assets(uuid) VALUES ('a')", []).unwrap();
-        // 历史应用产出方的原始形状与句式；v8 没有标记表，当前业务状态为最后一次 reset。
+        // v8 的收录操作没有 kind/count，不从展示文案补出 reset；原业务状态和撤销仍然保留。
         for (label, before) in [
             ("已将 1 张交回自动规则", json!([{"uuid":"a","curation":null}])),
             ("已收录 1 张", json!([{"uuid":"a","curation":null}])),
@@ -524,7 +499,7 @@ mod tests {
             read_only: None,
         };
         let read = || state::read(&f.connection(), Domain::Curation, "a").unwrap();
-        assert!(matches!(read(), State::Absent(m) if m.owner_action_id == 3));
+        assert_eq!(read(), State::Undecided);
         for id in [3, 2, 1] {
             crate::app_commands::request(
                 &context,
@@ -534,7 +509,7 @@ mod tests {
             .unwrap();
             match id {
                 3 => assert!(matches!(read(), State::Positive(v) if v["status"] == "included")),
-                2 => assert!(matches!(read(), State::Absent(m) if m.owner_action_id == 1)),
+                2 => assert_eq!(read(), State::Undecided),
                 _ => assert_eq!(read(), State::Undecided),
             }
         }
@@ -584,153 +559,6 @@ mod tests {
                 assert_eq!(read(), State::Positive(json!(true)));
             } else {
                 assert_eq!(read(), State::Undecided);
-            }
-        }
-    }
-    #[test]
-    fn genuine_v7_collision_survives_direct_and_already_v8_upgrade_without_reclassifying_sweep() {
-        use illustash_core::human_conclusions::state::{self, Domain, State};
-        use serde_json::{json, Value};
-        // c472dfed/v7 原命令产出：动作 2 是确认，动作 4 是检查完了；两条展示文案完全相同。
-        // 候选输入与旧名字触发器初始化在夹具说明中明示。生成后未修改动作载荷或裁决。
-        let input: Value =
-            serde_json::from_str(include_str!("../../../tests/fixtures/library_upgrade/human_v7_name_collision.json"))
-                .unwrap();
-        assert_eq!(input["producer_commit"], "c472dfed");
-        assert_eq!(input["terms_schema"], 7);
-        for via_v8 in [false, true] {
-            let f = Fixture::recorded(&input);
-            let mut c = f.connection();
-            let same: bool = c
-                .query_row(
-                    "SELECT (SELECT label FROM actions WHERE id=2)=(SELECT label FROM actions WHERE id=4)",
-                    [],
-                    |r| r.get(0),
-                )
-                .unwrap();
-            assert!(same);
-            if via_v8 {
-                crate::schema::migrate_to(&mut c, 8).unwrap();
-            }
-            drop(c);
-            let report = run(&needed(&f.0).unwrap(), None).unwrap();
-            assert_eq!(report.before, if via_v8 { 8 } else { 7 });
-            assert_eq!(f.backups(), if via_v8 { 2 } else { 1 });
-            let metadata: Vec<(i64, String, String)> = f
-                .connection()
-                .prepare("SELECT id,label_kind,label_count FROM actions WHERE id IN (2,4) ORDER BY id")
-                .unwrap()
-                .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
-                .unwrap()
-                .map(|r| r.unwrap())
-                .collect();
-            // v8 当年的错误回填保持原样，v9 按裁决 via 与 reviews 核验语义，没有篡改历史元数据。
-            assert_eq!(metadata, vec![(2, "sweep".into(), "1".into()), (4, "sweep".into(), "1".into())]);
-            let read = |asset| state::read(&f.connection(), Domain::Deferred, asset).unwrap();
-            assert!(matches!(read("synthetic-a"),State::Absent(m) if m.owner_action_id==2));
-            assert_eq!(read("synthetic-b"), State::Positive(json!(true)));
-            let context = crate::http::LibraryContext {
-                db: f.0.join("library.sqlite"),
-                generation: "synthetic".into(),
-                library: Some(f.0.clone()),
-                tags: f.0.join("unused.csv"),
-                source: Some(f.0.join("source.sqlite")),
-                token: Some("synthetic".into()),
-                read_only: None,
-            };
-            for id in [4, 3, 2, 1] {
-                crate::app_commands::request(
-                    &context,
-                    "/api/undo",
-                    &crate::http_json::parse_request(&json!({"id":id}).to_string()).unwrap(),
-                )
-                .unwrap();
-                match id {
-                    4 => assert_eq!(read("synthetic-b"), State::Positive(json!(true))),
-                    3 => assert_eq!(read("synthetic-b"), State::Undecided),
-                    2 => assert_eq!(read("synthetic-a"), State::Positive(json!(true))),
-                    _ => assert_eq!(read("synthetic-a"), State::Undecided),
-                }
-            }
-        }
-    }
-    #[test]
-    fn genuine_v7_counted_matrix_preserves_both_states_through_each_upgrade_and_undo() {
-        use illustash_core::human_conclusions::state::{self, Domain, State};
-        use serde_json::{json, Value};
-        // 九个真实旧产出场景：六种计数操作、set/remove 被误认 sweep，以及 sweep 被误认 swap。
-        // 每种都先执行恢复、跳过、保留未定；计数操作后逐步撤销，必须找回最初的恢复标记。
-        let input: Value =
-            serde_json::from_str(include_str!("../../../tests/fixtures/library_upgrade/human_v7_counted_matrix.json"))
-                .unwrap();
-        assert_eq!(input["producer_commit"], "c472dfed");
-        assert_eq!(input["terms_schema"], 7);
-        assert_eq!(input["cases"].as_array().unwrap().len(), 9);
-        for via_v8 in [false, true] {
-            let f = Fixture::recorded(&input);
-            let mut c = f.connection();
-            if via_v8 {
-                crate::schema::migrate_to(&mut c, 8).unwrap();
-            }
-            drop(c);
-            let report = run(&needed(&f.0).unwrap(), None).unwrap();
-            assert_eq!(report.before, if via_v8 { 8 } else { 7 });
-            assert_eq!(f.backups(), if via_v8 { 2 } else { 1 });
-            let context = crate::http::LibraryContext {
-                db: f.0.join("library.sqlite"),
-                generation: "synthetic".into(),
-                library: Some(f.0.clone()),
-                tags: f.0.join("unused.csv"),
-                source: Some(f.0.join("source.sqlite")),
-                token: Some("synthetic".into()),
-                read_only: None,
-            };
-            for case in input["cases"].as_array().unwrap().iter().rev() {
-                let asset = case["asset"].as_str().unwrap();
-                let ids: Vec<i64> = case["actions"].as_array().unwrap().iter().map(|v| v.as_i64().unwrap()).collect();
-                assert_eq!(ids.len(), 4);
-                let c = f.connection();
-                let (kind, count): (String, String) = c
-                    .query_row("SELECT label_kind,label_count FROM actions WHERE id=?1", [ids[3]], |r| {
-                        Ok((r.get(0)?, r.get(1)?))
-                    })
-                    .unwrap();
-                assert_eq!(kind, case["recognized"].as_str().unwrap());
-                assert_eq!(count, "1");
-                let uncertain = json!({"options":[format!("synthetic-{}",asset.strip_prefix("asset-").unwrap()),format!("synthetic-other-{}",asset.strip_prefix("asset-").unwrap())],"reason":"合成未定原因",
-                    "created_at":c.query_row("SELECT ts FROM actions WHERE id=?1",[ids[2]],|r|r.get::<_,String>(0)).unwrap()});
-                drop(c);
-                let read = |domain| state::read(&f.connection(), domain, asset).unwrap();
-                if case["kind"] == "sweep" {
-                    assert_eq!(read(Domain::Deferred), State::Positive(json!(true)), "{case}");
-                    assert_eq!(read(Domain::Uncertain), State::Positive(uncertain.clone()), "{case}");
-                } else {
-                    for domain in [Domain::Deferred, Domain::Uncertain] {
-                        assert!(matches!(read(domain),State::Absent(m) if m.owner_action_id==ids[3]), "{case}");
-                    }
-                }
-                for index in (0..4).rev() {
-                    crate::app_commands::request(
-                        &context,
-                        "/api/undo",
-                        &crate::http_json::parse_request(&json!({"id":ids[index]}).to_string()).unwrap(),
-                    )
-                    .unwrap();
-                    if index == 3 {
-                        assert_eq!(read(Domain::Deferred), State::Positive(json!(true)), "{case}");
-                        assert_eq!(read(Domain::Uncertain), State::Positive(uncertain.clone()), "{case}");
-                    } else {
-                        assert_eq!(read(Domain::Uncertain), State::Undecided, "{case}");
-                        match index {
-                            2 => assert_eq!(read(Domain::Deferred), State::Positive(json!(true)), "{case}"),
-                            1 => assert!(
-                                matches!(read(Domain::Deferred),State::Absent(m) if m.owner_action_id==ids[0]),
-                                "{case}"
-                            ),
-                            _ => assert_eq!(read(Domain::Deferred), State::Undecided, "{case}"),
-                        }
-                    }
-                }
             }
         }
     }

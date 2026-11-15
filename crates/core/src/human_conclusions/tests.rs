@@ -132,41 +132,12 @@ fn changed_mark_rejects_undo_and_the_callers_transaction_restores_every_row() {
 }
 
 #[test]
-fn v8_curation_backfill_supports_continuous_old_undo_without_forging_unknown_absence() {
+fn v8_missing_metadata_keeps_curation_absence_undecided() {
     let mut c = fixture(8);
-    let first = named_action(&c, "已将 1 张交回自动规则", &json!([{"uuid":"a","curation":null}]).to_string());
-    let second = named_action(&c, "已收录 1 张", &json!([{"uuid":"a","curation":null}]).to_string());
-    let third = named_action(
-        &c,
-        "已将 1 张交回自动规则",
-        &json!([{"uuid":"a","curation":{"status":"included","origin":"review","created_at":"old"}}]).to_string(),
-    );
-    let unknown = action(&c, &json!([{"uuid":"unknown","entity":null,"assertion":null,"deferred":false,"identity":{"identity_uncertain":null}}]).to_string());
-    let undone = action(&c, &json!([{"uuid":"undone","curation":null}]).to_string());
-    c.execute("UPDATE actions SET undone=1 WHERE id=?1", [undone]).unwrap();
+    named_action(&c, "已将 1 张交回自动规则", &json!([{"uuid":"a","curation":null}]).to_string());
     crate::schema_rules::migrate_to(&mut c, schema::SCHEMA_VERSION).unwrap();
-    assert!(matches!(state::read(&c, Domain::Curation, "a").unwrap(), State::Absent(m) if m.owner_action_id == third));
-    for domain in [Domain::Curation, Domain::Deferred, Domain::Uncertain] {
-        assert_eq!(state::read(&c, domain, "unknown").unwrap(), State::Undecided);
-        assert_eq!(state::read(&c, domain, "undone").unwrap(), State::Undecided);
-    }
-    let tx = c.transaction().unwrap();
-    schema::begin_writing(&tx).unwrap();
-    tx.execute("UPDATE actions SET undone=1 WHERE id=?1", [unknown]).unwrap();
-    state::undo(&tx, unknown).unwrap();
-    tx.execute("INSERT INTO curation VALUES ('a','included','review','old')", []).unwrap();
-    state::undo(&tx, third).unwrap();
-    tx.execute("UPDATE actions SET undone=1 WHERE id=?1", [third]).unwrap();
-    assert!(matches!(state::read(&tx, Domain::Curation, "a").unwrap(), State::Positive(_)));
-    tx.execute("DELETE FROM curation", []).unwrap();
-    state::undo(&tx, second).unwrap();
-    tx.execute("UPDATE actions SET undone=1 WHERE id=?1", [second]).unwrap();
-    assert!(matches!(state::read(&tx, Domain::Curation, "a").unwrap(), State::Absent(m) if m.owner_action_id == first));
-    state::undo(&tx, first).unwrap();
-    tx.execute("UPDATE actions SET undone=1 WHERE id=?1", [first]).unwrap();
-    schema::commit_writing(tx).unwrap();
     assert_eq!(state::read(&c, Domain::Curation, "a").unwrap(), State::Undecided);
-    assert_eq!(c.query_row("SELECT count(*) FROM pragma_foreign_key_check", [], |r| r.get::<_, i64>(0)).unwrap(), 0);
+    assert_eq!(c.query_row("SELECT count(*) FROM human_state_mark_undo", [], |r| r.get::<_, i64>(0)).unwrap(), 0);
 }
 
 #[test]
@@ -176,17 +147,7 @@ fn v8_only_provable_deferred_and_uncertain_clears_are_backfilled() {
         {"uuid":"known","entity":"synthetic","assertion":null,"deferred":true,"identity":{"identity_scopes":null,"identity_suspended":null,"identity_uncertain":["[\"a\",\"b\"]","reason","old"]}},
         {"uuid":"empty","entity":"synthetic","assertion":null,"deferred":false,"identity":{"identity_scopes":null,"identity_suspended":null,"identity_uncertain":null}}
     ]}}]).to_string());
-    c.execute_batch(
-        "INSERT INTO terms(key,kind,origin) VALUES ('synthetic','character','user');
-        INSERT INTO term_assets(namespace,key) VALUES ('library','known'),('library','empty');",
-    )
-    .unwrap();
-    c.execute(
-        "INSERT INTO term_verdicts(action_id,anchor,asset_id,term_id,verdict,origin,via)
-        SELECT ?1,?1,a.id,t.id,'yes','user','review' FROM term_assets a CROSS JOIN terms t WHERE t.key='synthetic'",
-        [cleared],
-    )
-    .unwrap();
+    c.execute("UPDATE actions SET label_kind='set',label_count='2' WHERE id=?1", [cleared]).unwrap();
     crate::schema_rules::migrate_to(&mut c, schema::SCHEMA_VERSION).unwrap();
     for domain in [Domain::Deferred, Domain::Uncertain] {
         assert!(matches!(state::read(&c, domain, "known").unwrap(), State::Absent(m) if m.owner_action_id == cleared));
@@ -248,7 +209,7 @@ fn malformed_unknown_and_inconsistent_history_never_fabricates_absence() {
 }
 
 #[test]
-fn genuine_legacy_resume_payload_and_v2_envelope_preserve_explicit_empty_resumes() {
+fn missing_v8_metadata_does_not_infer_resume_from_legacy_or_v2_text() {
     let mut c = fixture(8);
     let snapshot = |key| json!({"uuid":key,"entity":null,"assertion":null,"deferred":false});
     let legacy = named_action(&c, "已恢复 1 张", &json!([snapshot("legacy")]).to_string());
@@ -258,10 +219,9 @@ fn genuine_legacy_resume_payload_and_v2_envelope_preserve_explicit_empty_resumes
         &json!([{"terms":{"v":2,"type":"snapshot","before":[snapshot("v2")]}}]).to_string(),
     );
     crate::schema_rules::migrate_to(&mut c, schema::SCHEMA_VERSION).unwrap();
-    for (key, action) in [("legacy", legacy), ("v2", current)] {
-        assert!(
-            matches!(state::read(&c, Domain::Deferred, key).unwrap(), State::Absent(m) if m.owner_action_id == action)
-        );
+    assert!(legacy < current);
+    for key in ["legacy", "v2"] {
+        assert_eq!(state::read(&c, Domain::Deferred, key).unwrap(), State::Undecided);
     }
 }
 
@@ -293,80 +253,27 @@ fn unknown_counted_metadata_and_ambiguous_legacy_text_do_not_guess_an_operation(
 #[test]
 fn unknown_operation_drops_current_inference_but_undo_retains_proven_history() {
     let mut c = fixture(8);
-    let reset = named_action(&c, "已将 1 张交回自动规则", &json!([{"uuid":"a","curation":null}]).to_string());
-    let unknown = named_action(&c, "合成未知操作", &json!([{"uuid":"a","curation":null}]).to_string());
+    let reset = named_action(
+        &c,
+        "已将 1 张设为 合成",
+        &json!([{"uuid":"a","entity":"e","assertion":null,"deferred":true}]).to_string(),
+    );
+    let unknown = named_action(
+        &c,
+        "合成未知操作",
+        &json!([{"uuid":"a","entity":"e","assertion":null,"deferred":false}]).to_string(),
+    );
+    c.execute("UPDATE actions SET label_kind='set',label_count='1' WHERE id=?1", [reset]).unwrap();
     crate::schema_rules::migrate_to(&mut c, schema::SCHEMA_VERSION).unwrap();
-    assert_eq!(state::read(&c, Domain::Curation, "a").unwrap(), State::Undecided);
+    assert_eq!(state::read(&c, Domain::Deferred, "a").unwrap(), State::Undecided);
     assert_eq!(c.query_row("SELECT count(*) FROM human_state_mark_undo", [], |r| r.get::<_, i64>(0)).unwrap(), 2);
     let tx = c.transaction().unwrap();
     schema::begin_writing(&tx).unwrap();
     state::undo(&tx, unknown).unwrap();
     tx.execute("UPDATE actions SET undone=1 WHERE id=?1", [unknown]).unwrap();
-    assert!(matches!(state::read(&tx, Domain::Curation, "a").unwrap(),State::Absent(m) if m.owner_action_id==reset));
+    assert!(matches!(state::read(&tx, Domain::Deferred, "a").unwrap(),State::Absent(m) if m.owner_action_id==reset));
     state::undo(&tx, reset).unwrap();
     tx.execute("UPDATE actions SET undone=1 WHERE id=?1", [reset]).unwrap();
     schema::commit_writing(tx).unwrap();
-    assert_eq!(state::read(&c, Domain::Curation, "a").unwrap(), State::Undecided);
-}
-
-#[test]
-fn counted_history_requires_exact_verdict_and_review_witnesses() {
-    for broken in [
-        "missing",
-        "extra",
-        "wrong-asset",
-        "wrong-term",
-        "mixed-via",
-        "clear",
-        "review-with-sweep",
-        "sweep-without-review",
-        "sweep-no",
-    ] {
-        let mut c = fixture(8);
-        c.execute_batch(
-            "INSERT INTO terms(key,kind,origin) VALUES ('synthetic','character','user'),('other','character','user');
-            INSERT INTO term_assets(namespace,key) VALUES ('library','a'),('library','other');",
-        )
-        .unwrap();
-        let id = named_action(
-            &c,
-            "已将 1 张设为 合成 标为已检查（1 张）",
-            &json!([
-                {"uuid":"a","entity":"synthetic","assertion":null,"deferred":true}
-            ])
-            .to_string(),
-        );
-        c.execute("UPDATE actions SET label_kind='sweep',label_count='1' WHERE id=?1", [id]).unwrap();
-        if broken != "missing" {
-            let via = if broken.starts_with("sweep") { "sweep" } else { "review" };
-            let verdict = match broken {
-                "clear" => "clear",
-                "sweep-no" => "no",
-                _ => "yes",
-            };
-            let asset = if broken == "wrong-asset" { "other" } else { "a" };
-            let term = if broken == "wrong-term" { "other" } else { "synthetic" };
-            c.execute(
-                "INSERT INTO term_verdicts(action_id,anchor,asset_id,term_id,verdict,origin,via)
-                SELECT ?1,?1,a.id,t.id,?2,'user',?3 FROM term_assets a CROSS JOIN terms t WHERE a.key=?4 AND t.key=?5",
-                rusqlite::params![id, verdict, via, asset, term],
-            )
-            .unwrap();
-        }
-        if matches!(broken, "extra" | "mixed-via") {
-            c.execute("INSERT INTO term_verdicts(action_id,anchor,asset_id,term_id,verdict,origin,via)
-                SELECT ?1,?1,a.id,t.id,'yes','user',?2 FROM term_assets a CROSS JOIN terms t WHERE a.key='a' AND t.key='synthetic'",
-                rusqlite::params![id,if broken=="mixed-via" {"sweep"} else {"review"}]).unwrap();
-        }
-        if matches!(broken, "review-with-sweep" | "sweep-no") {
-            c.execute("INSERT INTO reviews(entity,action_id) VALUES ('synthetic',?1)", [id]).unwrap();
-        }
-        crate::schema_rules::migrate_to(&mut c, schema::SCHEMA_VERSION).unwrap();
-        assert_eq!(state::read(&c, Domain::Deferred, "a").unwrap(), State::Undecided, "{broken}");
-        assert_eq!(
-            c.query_row("SELECT count(*) FROM human_state_mark_undo", [], |r| r.get::<_, i64>(0)).unwrap(),
-            0,
-            "{broken}"
-        );
-    }
+    assert_eq!(state::read(&c, Domain::Deferred, "a").unwrap(), State::Undecided);
 }

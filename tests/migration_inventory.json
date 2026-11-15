@@ -57,9 +57,9 @@
 
  "crates/core/src/error.rs":"fad3f2e435a56a1fd6273f61b50d2b997587e681adc408cc31fd6d3923b23ef8",
 
- "crates/core/src/human_conclusions/export.rs":"9fa2c09e42d1e38efd20a18baab6353d57258f09d0707cf15a639cc2a71ad7a2",
+ "crates/core/src/human_conclusions/export.rs":"a386ea74286dff7f488c09f516c20ed554486d3f3eda7adc9ed873114b93bf44",
 
- "crates/core/src/human_conclusions/format.rs":"f115520564ce8123d92e231b5051663c5132d65fc0b8f1f9e54245d87ecedb97",
+ "crates/core/src/human_conclusions/format.rs":"1471900e5c22fe440c1fa62c7d7ed28f4a3e5a55bcea2e6695587b542b168f2a",
 
  "crates/core/src/human_conclusions/format_graph.rs":"282d292d115972bfda8b50381bd3578bf3bf49ab84e996cbc8011399051e9104",
 
@@ -69,7 +69,7 @@
 
  "crates/core/src/human_conclusions/state.rs":"433c6a4b4b4cd476dfb8d030697c4664b5535e16bab3e176019a35a0be154f0b",
 
- "crates/core/src/human_conclusions/upgrade.rs":"d21e21b4e4c2548b377a4d259f8c089547a323d446939b1b9fccd01a6b5f596f",
+ "crates/core/src/human_conclusions/upgrade.rs":"82bff494141a77dcd3ba5d54336f3dcd7bac5120682a3ccfd4236671a9b19260",
 
  "crates/core/src/legacy_characters.rs":"e74652ae0eb641f8414ac652e596178f50ff974b1983cb536cc5ede62dc94d67",
 
@@ -287,7 +287,7 @@
 
  "native/terms/src/app_updates.rs":"e7b51e4afd108af07dbf92e76d44251709635984f8387d3e702922190b9834ba",
 
- "native/terms/src/app_upgrade.rs":"33b21a890a0d7acfcae24d2632e59530c7c69e31164b89d8e3ba3a5c22cc4bc2",
+ "native/terms/src/app_upgrade.rs":"257f8b7dfc90b4c25d190d2a9a31219695ce944a4ebe16d101a02411beab755e",
 
  "native/terms/src/bin/illustash-terms.rs":"04ee80bb280034a16f8ddd9fe97e8de0700713259c44f76858f70b8713d4c594",
 

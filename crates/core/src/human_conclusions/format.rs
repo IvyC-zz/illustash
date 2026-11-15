@@ -94,7 +94,6 @@ pub(crate) struct Name {
 pub(crate) struct Link {
     pub system: String,
     pub key: String,
-    pub url: String,
     pub current: bool,
     pub added_at: String,
     pub source: String,
@@ -314,6 +313,10 @@ impl Record {
             Self::ImageVerdict { asset, term, .. } | Self::IdentityContext { asset, term, .. } => {
                 vec![kind, asset, term]
             }
+            // same_as 的方向决定代表，记录本身保留原方向；去重时两个方向占用同一逻辑关系。
+            Self::RelationVerdict { a, b, kind: relation, .. } if relation == "same_as" && a > b => {
+                vec![kind, b, a, relation]
+            }
             Self::RelationVerdict { a, b, kind: relation, .. } => vec![kind, a, b, relation],
             Self::IdentitySkip { pair, .. } => vec![kind, pair],
             Self::Curation { asset, .. } | Self::Deferred { asset, .. } | Self::Uncertain { asset, .. } => {
@@ -363,9 +366,9 @@ impl Record {
                         || !matches!(n.role.as_str(), "display" | "alias")
                         || !names.insert((&n.lang, &n.role, &n.source, &n.value))
                         || (n.preferred && !preferred.insert((&n.lang, &n.role)))
-                        || !matches!(n.provenance.as_str(), "user" | "legacy_merge" | "description")
+                        || !matches!(n.provenance.as_str(), "user" | "legacy_merge" | "legacy_unknown" | "description")
                         || (n.provenance == "description" && n.preferred)
-                        || (n.provenance == "user" && n.source != "user")
+                        || (n.provenance == "user" && (n.source != "user" || (n.role == "display" && !n.preferred)))
                         || (n.provenance == "legacy_merge" && n.role != "alias")
                     {
                         return invalid("名字定义重复或不正确");
@@ -954,6 +957,23 @@ mod tests {
             relation(1, "a", "c", "different_from"),
         ]);
         snapshot.validate().unwrap();
+    }
+    #[test]
+    fn same_as_reverse_duplicates_and_conflicts_share_one_key_without_changing_direction() {
+        for verdict in ["yes", "no", "clear"] {
+            let mut snapshot = sample();
+            snapshot.header.policy = Policy::Hybrid;
+            snapshot.records.extend([entity("a", None), entity("b", None), relation(0, "b", "a", "same_as")]);
+            let encoded = bytes(&snapshot);
+            let restored = read(&mut Cursor::new(encoded)).unwrap();
+            assert!(matches!(restored.records.last(),Some(Record::RelationVerdict{a,b,..}) if a=="b" && b=="a"));
+            let mut reverse = relation(1, "a", "b", "same_as");
+            if let Record::RelationVerdict { decision, .. } = &mut reverse {
+                decision.verdict = verdict.into();
+            }
+            snapshot.records.push(reverse);
+            assert!(snapshot.validate().is_err(), "{verdict}");
+        }
     }
     #[test]
     fn hash_attachment_requires_snapshot_membership_and_round_trips_states() {
