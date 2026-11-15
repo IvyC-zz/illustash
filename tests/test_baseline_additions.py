@@ -75,7 +75,9 @@ class HistoricalAdditions(unittest.TestCase):
         root = Path(__file__).resolve().parents[1]
         additions = _baseline_additions()
         self.assertEqual({e['name'] for e in additions['tables']}, {
-            'human_state_marks', 'human_state_mark_undo', 'human_object_contributions', 'human_entity_origins'})
+            'human_state_marks', 'human_state_mark_undo', 'human_object_contributions', 'human_entity_origins',
+            'human_relation_review_context', 'human_asset_hashes', 'human_backup_state',
+            'human_import_reports', 'human_import_report_rows'})
         self.assertEqual({e['name'] for e in additions['meta_keys']}, {'human_revision'})
         self.assertEqual({(e['physical'], e['view']) for e in additions['physical_views']}, {
             ('term_records', 'terms'), ('term_relation_records', 'term_relations')})
