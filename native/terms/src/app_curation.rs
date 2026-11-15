@@ -13,6 +13,7 @@ pub(crate) fn curate(c: &mut Connection, context: &LibraryContext, body: &Json) 
         _ => return Err(Error::Invalid("未知操作".into())),
     };
     let tx = c.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    crate::schema::begin_writing(&tx)?;
     let ids = crate::app_commands::selected(&tx, context, body)?;
     // 新历史使用结构化紧凑 JSON；已有历史保持原文，撤销按解析后的字段恢复。
     let mut before = Vec::new();
@@ -49,9 +50,18 @@ pub(crate) fn curate(c: &mut Connection, context: &LibraryContext, body: &Json) 
         _ => format!("已将 {n} 张交回自动规则", n = count),
     };
     tx.execute("INSERT INTO actions(label,before_json) VALUES (?,?)", params![label, json!(before).to_string()])?;
-    let action = crate::app_commands::last_action(&tx)?;
-    tx.commit()?;
-    Ok(Json::object([("undo", action)]))
+    let step = tx.last_insert_rowid();
+    for id in &ids {
+        use illustash_core::human_conclusions::state::{self, Domain};
+        if action == "reset" {
+            state::absent(&tx, Domain::Curation, id, step)?;
+        } else {
+            state::present(&tx, Domain::Curation, id, step)?;
+        }
+    }
+    let undo = crate::app_commands::last_action(&tx)?;
+    crate::schema::commit_writing(tx)?;
+    Ok(Json::object([("undo", undo)]))
 }
 pub(crate) fn refresh_excluded(c: &Connection, ids: &[String]) -> Result<()> {
     c.execute_batch("CREATE TEMP TABLE IF NOT EXISTS touched(uuid TEXT PRIMARY KEY); DELETE FROM touched;")?;
@@ -236,8 +246,9 @@ mod tests {
             fs::create_dir(&root).unwrap();
             let db = root.join("library.sqlite");
             let source = root.join("source.sqlite");
-            let c = crate::sqlite::open(&db).unwrap();
+            let mut c = crate::sqlite::open(&db).unwrap();
             c.execute_batch("CREATE TABLE assets(uuid TEXT PRIMARY KEY,added_at TEXT,width INTEGER,height INTEGER); INSERT INTO assets VALUES ('a','2026-01',10,10),('b','2026-02',20,20),('c','2026-02',20,20),('d','2025-01',NULL,NULL); CREATE TABLE duplicates(uuid TEXT PRIMARY KEY,grp TEXT NOT NULL,size INTEGER NOT NULL,pos INTEGER NOT NULL,grp_added TEXT NOT NULL,rep INTEGER NOT NULL,hidden INTEGER NOT NULL DEFAULT 0); CREATE INDEX duplicates_grp ON duplicates(grp,pos); CREATE TABLE curation(uuid TEXT PRIMARY KEY,status TEXT NOT NULL,origin TEXT NOT NULL,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP); CREATE TABLE excluded(uuid TEXT PRIMARY KEY,reason TEXT,origin TEXT); CREATE TABLE auto_rules(uuid TEXT PRIMARY KEY,kind TEXT,reason TEXT); CREATE TABLE actions(id INTEGER PRIMARY KEY AUTOINCREMENT,label TEXT,before_json TEXT,ts TEXT DEFAULT CURRENT_TIMESTAMP,undone INTEGER DEFAULT 0,label_kind TEXT,label_count TEXT); CREATE TABLE prefs(key TEXT PRIMARY KEY,value TEXT NOT NULL); CREATE TABLE relations(a TEXT,b TEXT,kind TEXT); CREATE TABLE memberships(uuid TEXT,entity TEXT);").unwrap();
+            crate::migrate(&mut c).unwrap();
             let src = crate::sqlite::open(&source).unwrap();
             if hash {
                 src.execute_batch("CREATE TABLE assets(uuid TEXT PRIMARY KEY,stable_hash TEXT); INSERT INTO assets VALUES ('c','z'),('b','z'),('a','a'),('d',NULL),('not-in-library','z');").unwrap();

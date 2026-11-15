@@ -1,6 +1,6 @@
 # 词条核心 schema
 
-状态：现行参考，2026-10-20。当前词条 schema 为 **8**，应用 schema 为 **36**，包格式为 **1**；第 1 版见第 1–4 节，第 2–7 版的增量见第 7–12 节，第 8 版见第 14 节，宿主退役后的兼容职责与恢复边界见第 13 节。画师、标签、角色 / 皮肤 / 作品、名字都已收编，第 8 版起 `term_*` 是唯一权威，旧兼容表已删除（第 14 节）：[TERMS_ARTISTS.md](TERMS_ARTISTS.md)、[TERMS_LABELS.md](TERMS_LABELS.md)、[TERMS_CHARACTERS.md](TERMS_CHARACTERS.md)。下面第 1–6 节是第 1 版交付时写的，已按现状更正的地方都有注明（2026-09-29，词条第 4、5 步 S6）。
+状态：现行参考，2026-11-15。当前词条 schema 为 **9**，应用 schema 为 **36**，包格式为 **1**；第 1 版见第 1–4 节，第 2–7 版的增量见第 7–12 节，第 8 版见第 14 节，第 9 版见第 15 节，宿主退役后的兼容职责与恢复边界见第 13 节。画师、标签、角色 / 皮肤 / 作品、名字都已收编，第 8 版起 `term_*` 是唯一权威，旧兼容表已删除（第 14 节）：[TERMS_ARTISTS.md](TERMS_ARTISTS.md)、[TERMS_LABELS.md](TERMS_LABELS.md)、[TERMS_CHARACTERS.md](TERMS_CHARACTERS.md)。下面第 1–6 节是第 1 版交付时写的，已按现状更正的地方都有注明（2026-09-29，词条第 4、5 步 S6）。
 
 2026-09-28，[TERMS.md](TERMS.md) 第 4 节第 1 步的交付。代码在 `crates/core/`（Rust crate `illustash-core`，rusqlite 自持连接）；命令行和原生宿主在 `native/terms/`（`illustash-terms`）。证据包格式见 [EVIDENCE_PACKAGES.md](EVIDENCE_PACKAGES.md)。第 1 版只建了新表和规则，画师收编是第 2 步。
 
@@ -267,3 +267,11 @@ cargo clippy --manifest-path crates/core/Cargo.toml --all-targets -- -D warnings
 - 升级沿用现有入口：桌面和网页的升级界面（#193）、`http --upgrade`、`illustash-terms migrate`；升级前备份 `library-backups/terms-v<旧版>-before-v8-*.sqlite`，失败整体回滚。应用层（`app_upgrade.rs`）对没切换完的旧图库（应用 schema 36 以前、切换标记缺失或未完成、更早的 source 布局或缺索引元数据）打开和升级都直接拒绝，提示先用 `pre-v8` 版本；原来为它们准备的分阶段成对发布路径已删除。
 - 对照：新对照基准（`native/terms/tests/baseline.rs`、`contracts.rs`，规则见 `native/terms/tests/common/baseline.rs`）的每个 v7 检查点都经这次升级再重放，接口回复逐字节不变；退役的旧表（含基准录制之后才退役的四张身份关系表，它们录下的变化一并略去）不比，内容在核心表里比；新加的列（`actions` 两列、`term_names.seq`、`term_tree.seq`）在比较器里登记排除，由历史提示和读者排序的回复比较覆盖；身份的属性在比较器里照原来的形状算进 `terms.attrs` 比较（`term_tree` 上的属性列不另比）。`native/terms/tests/it/v8_upgrade.rs` 覆盖拒绝（身份、身份关系、链接或作品复核的旧表与核心不一致、没切换完）不留痕、回填，以及各张旧表的内容原样进入核心、视图改读核心表、身份关系按片段读出原来的行。
 
+
+## 15. 第 9 版：明确收回的人工状态
+
+`human_state_marks` 按 `(domain, asset_key)` 保存 `curation/reset`、`deferred/resumed`、`uncertain/cleared`，关联有效的本库 `owner_action_id`，保留来源及原操作时间。正值仍在原业务表；有正值、明确收回和从未决定是三个不同状态。普通收录／角色命令在同一写事务中维护它们，通用快照里的空值不会凭空生成收回标记。
+
+`human_state_mark_undo` 按 `(action_id, domain, asset_key)` 保存完整标记的 before/after；同一步多次写入保留最初 before 和最终 after。原所有者恢复业务行后恢复标记，有独立变更时整体回滚。两张表持有核心写保护；当前标记变动同事务更新 `meta.human_revision`，撤销账本本身不触发修订。
+
+升级只从可证明的有效历史和当前状态回填：收录历史能够证明 reset，角色历史只有明确恢复命令或正值到空值的状态转移能够证明 resumed/cleared。未知载荷、已撤销动作以及只有空快照字段的情况不作推断。为旧动作补齐对应的标记撤销账本，连续撤销不会遗留已撤销动作的标记。升级不读原图，仍经既有必需备份和单事务迁移；回退使用升级前 `library-backups/` 的完整 SQLite 副本，旧版程序不能直接打开第 9 版库。

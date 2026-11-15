@@ -195,7 +195,7 @@ pub const HUMAN_ORIGINS: [&str; 3] = ["user", "album", "legacy"];
 /// 证据来源不能冒充人。
 pub const RESERVED_SOURCES: [&str; 5] = ["user", "human", "album", "legacy", "verdict"];
 
-pub const SCHEMA_VERSION: i64 = 8;
+pub const SCHEMA_VERSION: i64 = 9;
 
 /// 可替换的机器证据（`source`, `method`）：按有效批次生效（`term_active_evidence`），成功的空结果让旧证据失效。
 /// 其余来源的证据全部有效。与 V2 里 `term_evidence_sets` 的 CHECK 一致，加一种要一次迁移。
@@ -424,7 +424,8 @@ CREATE TABLE IF NOT EXISTS actions(id INTEGER PRIMARY KEY AUTOINCREMENT,label TE
 ";
 
 /// 每个版本一段，按顺序执行；已发布的段不再修改。
-const MIGRATIONS: [fn(&Connection) -> Result<()>; 8] = [v1, v2, v3, v4, v5, v6, v7, v8];
+const MIGRATIONS: [fn(&Connection) -> Result<()>; 9] =
+    [v1, v2, v3, v4, v5, v6, v7, v8, crate::human_conclusions::migrate];
 
 fn v1(conn: &Connection) -> Result<()> {
     Ok(conn.execute_batch(V1)?)
