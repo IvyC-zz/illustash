@@ -349,8 +349,12 @@ class NativeIndexTest(unittest.TestCase):
         self.mode.write_text('sleep');self.env['ILLUSTASH_INDEX_TIMEOUT_MS']='100';self.restart()
         before=snapshot(self.lib.source)
         self.index({'action':'apply','tags':['carol_example']});v=self.finish();self.assertEqual(v['state']['status'],'error',v)
+        self.assertIn('任务超时',v['state']['message'],v)
         for k in ('characters','character_aliases','labels'):self.assertEqual(snapshot(self.lib.source)[k],before[k])
-        self.stop(self.process);(self.lib.path/'index-job.json').unlink();self.env.pop('ILLUSTASH_INDEX_WORKER');self.env.pop('ILLUSTASH_INDEX_TIMEOUT_MS');self.restart()
+        self.stop(self.process)
+        # 空闲时限也覆盖准备快照；在写任务日志前超时，不会留下该文件。
+        (self.lib.path/'index-job.json').unlink(missing_ok=True)
+        self.env.pop('ILLUSTASH_INDEX_WORKER');self.env.pop('ILLUSTASH_INDEX_TIMEOUT_MS');self.restart()
         self.assertEqual(self.request('/api/index',{'action':'apply','tags':['carol_example']})['status'],400)
         self.assertEqual(lifecycle.import_task(self,'/api/recognition/import',{'resume':True})['status'],200)
         # 不发出任何外部请求：联网关卡在连接主机之前就拒绝。
