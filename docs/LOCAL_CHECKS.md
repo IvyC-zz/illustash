@@ -8,6 +8,8 @@
 
 当前候选的 `read-http`、`recognition-compute`、`index-compute`、`research-compute`、`relation-probe`、`provenance-compute` examples 在本轮 release 构建中显式准备，再导出各自 `ILLUSTASH_*_BIN`；研究/索引安装适配器同样显式指向本轮 `illustash-worker`。本地与 CI 使用相同接线，缺产物不能靠测试默认跳过形成通过。模型的专项授权及平台证据仍单列。
 
+脚本依赖 Python 3.12（`CHECK_ALL_PYTHON` 可指定解释器）、Node 22、Rust stable（含 rustfmt/clippy），Python 依赖与历史构建缓存放在被忽略的 `.venv/check-all/`。
+
 直接执行 `tools/check_all.sh` 仍要求已提交的干净候选，运行期间 head/已跟踪文件保持不变。验收工具合成测试的前置与全量都使用 `unittest -b` 捕获模式，文本捕获器不提供二进制输出流时仍保留原始完整日志及其摘要。脚本独立执行不会生成可复用签名记录。缓存速度没有固定承诺。
 
 2026-10-03 用户批准的 PR #131 / #136 / #141 是限定合批例外：各项保留独立 review 和受影响平台专项，整合保留原提交，最终整合 head 一次完整入口通过后整批 merge；原 PR 的历史或定向证据单列，不冒称逐项新 head 全量。其余任务仍按 AGENTS.md 原合并门槛执行，不能因复用或合批省略实际 GUI / 安装验收。
@@ -56,7 +58,7 @@
 
 ## 本机资源：排队、计时与后台优先级
 
-规则见 [AGENTS.md](../AGENTS.md) 2026-10-12、2026-10-18、2026-10-19 的条目，这里写做法。工具是 agent-collab skill 的 `scripts/collab_run.py`（路径按所在 harness 的 skill 安装位置），槽位是本机文件锁，没有常驻进程。
+规则见 [AGENTS.md](../AGENTS.md#约定)「本机资源」一条，这里写做法。工具是 agent-collab skill 的 `scripts/collab_run.py`（路径按所在 harness 的 skill 安装位置），槽位是本机文件锁，没有常驻进程。
 
 | 用途 | 命令 | 行为 |
 |---|---|---|
@@ -157,7 +159,7 @@ PR 应明确区分“当前 head 上完整执行退出 0”和“当前候选仅
 
 ## 合并队列（集成会话）
 
-2026-10-18 起，合入 main 由一个集成会话统一做（用户决定见 [AGENTS.md](../AGENTS.md)）。起因：各开发会话分别在自己的 PR head 上跑全量，先合进一个，main 就变了，后面改到同一批文件的 PR 都要 rebase 再跑；并行的全量还互相抢机器。
+2026-10-18 起，合入 main 由一个集成会话统一做（用户决定见 [AGENTS.md](../AGENTS.md#约定)「合并队列」一条）。起因：各开发会话分别在自己的 PR head 上跑全量，先合进一个，main 就变了，后面改到同一批文件的 PR 都要 rebase 再跑；并行的全量还互相抢机器。
 
 **开发会话**：做完定向检查和平台相关验收（Windows 定向构建与测试、虚拟机走查、浏览器走查），在 PR 描述里写明结果和检查级别（界面 / 普通代码 / 数据层 / 只改文档），转为 Ready 并写「待集成」。不跑本机全量，不合并。
 
@@ -177,9 +179,9 @@ PR 应明确区分“当前 head 上完整执行退出 0”和“当前候选仅
 
 ## GitHub Actions（PR 自动检查）
 
-2026-11-12 用户定（#4），仓库公开后启用。规则见 [AGENTS.md](../AGENTS.md) 2026-11-12 一条，这里写做法。
+2026-11-12 用户定（#4），仓库公开后启用。规则见 [AGENTS.md](../AGENTS.md#约定)「GitHub Actions」一条，这里写做法。
 
-**触发**：`ci.yml` 在目标为 main 的 PR 打开、推送新提交、重新打开、转 Ready 时运行；草稿 PR 和来自 fork 的 PR 不跑。push 到 main 时也跑一次，作用是写编译缓存：GitHub 的缓存按分支隔离，PR 写的缓存只有同一个 PR 读得到，main 上写的所有 PR 都能读。也可以在 Actions 页面对任意分支手动触发。仓库私有时（`github.event.repository.private`）自动触发的运行一律跳过，只有手动触发的会跑，所以这个 PR 在公开前合入也不会耗分钟数。同一 PR 有新提交时取消旧运行；集成会话连续合入几个 PR 时，main 上只有最后一次跑完。
+**触发**：`ci.yml` 在目标为 main 的 PR 打开、推送新提交、重新打开、转 Ready 时运行；草稿 PR 和来自 fork 的 PR 不跑。push 到 main 时也跑一次，作用是写编译缓存：GitHub 的缓存按分支隔离，PR 写的缓存只有同一个 PR 读得到，main 上写的所有 PR 都能读。也可以在 Actions 页面对任意分支手动触发。仓库私有时（`github.event.repository.private`）自动触发的运行一律跳过，只有手动触发的会跑，所以这个 PR 在公开前合入也不会耗分钟数；私有期间也不手动触发 macOS 运行（私有库按 10 倍计分钟）。同一 PR 有新提交时取消旧运行；集成会话连续合入几个 PR 时，main 上只有最后一次跑完。
 
 **job**：「改动范围」先判断改了什么。只改 `docs/` 和根目录的 Markdown 时跳过构建与测试；`docs/THIRD_PARTY.md` 和 `docs/BACKEND_TASKS.md` 随安装包分发，仍须检查。与 `tools/check_all.sh` 对齐的五个必需 job 包括 Rust 核心（core、platform、terms、iqdb 的 fmt/clippy/test）、Python 全量（release 构建后跑 `tests.run_fixed_suite`）、前端 JS（Ubuntu）、桌面壳 clippy/test、原生固定契约空 PATH 重放。除 JS 外，这五项都跑在 Apple 芯片的 `macos-latest` 上。公开库另有 Windows x64 试运行。分支保护要求「全部检查」汇总结果。代码改动要求五个必需 job 全部成功，Windows 结果列在日志中；文档改动要求所有构建与测试跳过。分流失败、缺失输出和 fork PR 没跑检查均判失败。
 
@@ -211,13 +213,13 @@ CI 使用标准 Python 3.12，与 macOS job 一致；常驻验收机使用嵌入
 
 ## macOS 实机测试（虚拟机）
 
-2026-10-15 起，在 Mac 上启动 App 的实机测试都在 [Tart](https://tart.run) 虚拟机里做（用户决定见 [AGENTS.md](../AGENTS.md)）。虚拟机有自己的用户目录、应用数据和钥匙串，碰不到本机正式版的数据；本机只被占用磁盘，以及运行时的 CPU 和内存。
+2026-10-15 起，在 Mac 上启动 App 的实机测试都在 [Tart](https://tart.run) 虚拟机里做（用户决定见 [AGENTS.md](../AGENTS.md#约定)「Mac 实机测试」一条）。虚拟机有自己的用户目录、应用数据和钥匙串，碰不到本机正式版的数据；本机只被占用磁盘，以及运行时的 CPU 和内存。
 
 **母版与副本**：本机保留一台母版 `illustash-master`，来自 `ghcr.io/cirruslabs/macos-tahoe-base`（macOS 26），约 30 GB。镜像默认关闭 SIP，母版已在恢复模式里用 `csrutil enable` 打开 SIP；Gatekeeper 保持开启，母版里从没装过 Illustash。每次测试用 `tart clone illustash-master <名字>` 复制一份（APFS 写时复制，几乎不占额外空间），测完 `tart stop` 后 `tart delete` 删掉副本。母版只在用户明确同意时才修改或删除。镜像下载约 27 GB，大文件不经本机代理下载。
 
 **启动与操作**：
 - 启动用 `tart run --no-graphics --vnc-experimental [--dir=名字:路径:ro] <副本>`。不加 `--no-graphics` 时，tart 会在本机打开「屏幕共享」并占住 VNC 连接。VNC 只在测试期间开着，监听所有网卡，用的是随机口令。
-- 同一时间只开一台虚拟机（2026-10-18，见 [AGENTS.md](../AGENTS.md)）：把上面的命令包在 `collab_run.py run --slot vm -- tart run …` 里放后台运行，虚拟机运行期间占着 vm 槽，`tart stop` 后释放；别的会话要开虚拟机时会排队，`collab_run.py status` 能看到是谁开着。不能前台运行的虚拟机（例如 UTM 的 `utmctl start` 会立即返回），用 `collab_run.py run --slot vm --` 包住一个等它关机的命令。不测的时候就关掉，不要让虚拟机空跑。
+- 同一时间只开一台虚拟机（2026-10-18，见 [AGENTS.md](../AGENTS.md#约定)「本机资源」一条）：把上面的命令包在 `collab_run.py run --slot vm -- tart run …` 里放后台运行，虚拟机运行期间占着 vm 槽，`tart stop` 后释放；别的会话要开虚拟机时会排队，`collab_run.py status` 能看到是谁开着。不能前台运行的虚拟机（例如 UTM 的 `utmctl start` 会立即返回），用 `collab_run.py run --slot vm --` 包住一个等它关机的命令。不测的时候就关掉，不要让虚拟机空跑。
 - 截图、点击、输入走 VNC，不需要虚拟机里的系统授权。命令走 `tart exec`：它用的是虚拟化通道，不依赖网络，以当前登录的用户身份运行。`tart exec` 第一次访问「下载」或管理用户时，虚拟机里会弹出授权框，要用 VNC 点允许。
 - VNC 下滚轮和 Cmd 组合键不可靠：滚动靠拖滚动条，退出等操作走菜单栏；在原生文件选择器里直接输入 `/`，就能打开「前往文件夹」。
 

@@ -51,9 +51,6 @@
    "ui/models.js::click": 1,
    "ui/settings.js::click": 3
   },
-  "dialog-element": {
-   "ui/dialog.js": 1
-  },
   "long-line": {
    "core/catalog.js": 3,
    "core/format.js": 1,

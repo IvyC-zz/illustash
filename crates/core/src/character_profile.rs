@@ -180,7 +180,7 @@ fn snapshot(c: &Connection, entity: &str) -> Result<Value> {
 }
 
 /// 一个角色的资料修改（`_apply_profile`）；返回它的撤销快照。p：name / aliases / work / tag / copyright /
-/// work_id（新建作品用的 id）。缺省的字段不改（Python 的 None）。
+/// work_id（新建作品用的 id）。缺省的字段不改（旧实现里的 None）。
 fn apply(c: &Connection, p: &Value) -> Result<Value> {
     let (entity, parent) = require_entity(c, &p["entity"])?;
     if parent.is_some() {

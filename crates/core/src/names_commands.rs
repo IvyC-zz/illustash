@@ -14,7 +14,7 @@ fn text<'a>(v: &'a Value, message: &str) -> Result<&'a str> {
     v.as_str().ok_or_else(|| Error::Invalid(message.into()))
 }
 
-/// Python `value.strip()` 非空的字符串；其他（None、空白）一律当作没有。
+/// 去掉首尾空白（空白集同 `character_names::strip`）后非空的字符串；其他（null、全空白）一律当作没有。
 fn given(v: &Value) -> Option<&str> {
     v.as_str().filter(|s| !s.trim_matches(|c: char| c.is_whitespace() || ('\u{1c}'..='\u{1f}').contains(&c)).is_empty())
 }

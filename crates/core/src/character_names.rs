@@ -16,7 +16,7 @@ pub const TERM_OF: &str = "(SELECT id FROM terms WHERE key = ?)";
 /// 新一行名字的先后：当前最大值加一。
 pub const NEXT_SEQ: &str = "(SELECT coalesce(max(seq), 0) + 1 FROM term_names)";
 
-/// Python `str.strip()` 去掉的空白（比 Rust 的 White_Space 多 \x1c–\x1f）。
+/// 去掉首尾空白，空白集与已存数据一致：比 Rust 的 White_Space 多 \x1c–\x1f（沿用旧实现 `str.strip()` 的范围）。
 pub fn strip(value: &str) -> &str {
     value.trim_matches(|ch: char| ch.is_whitespace() || ('\u{1c}'..='\u{1f}').contains(&ch))
 }

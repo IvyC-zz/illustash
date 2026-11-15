@@ -2,6 +2,9 @@
 //!
 //! 连接内业务规则、证据、人工裁决、关系、历史和投影由 `illustash-core` 单一实现。
 //! 本宿主保留旧 Rust 模块路径的转导出与必需备份/SQLite 路径适配；见 docs/ARCHITECTURE_DIRECTION.md。
+//!
+//! 注释里的「旧实现」指 #9 删除的 Python 应用（HTTP、Store 编排、识别导入等，原在 `tests/reference/`）。
+//! 写着「沿用旧实现」的格式和规则是已存数据或既有响应依赖的兼容约束，改动前先确认没有数据或录制期望依赖它。
 
 #![cfg_attr(not(test), warn(clippy::unwrap_used))]
 

@@ -1,8 +1,8 @@
 //! 词条核心的表、类型策略和迁移。
 //!
-//! 表放在 library.sqlite 里，全部以 `term_` 开头，和 Python 现有的 `entities`、`names`、`links`、`assets`
+//! 表放在 library.sqlite 里，全部以 `term_` 开头，和图库原有的 `entities`、`names`、`links`、`assets`
 //! 等并存；只有撤销历史 `actions` 和版本表 `meta` 是共用的，定义与 tests/reference/web/store.py（#9 已删除） 逐字一致。
-//! 版本号记在 `meta` 的 `terms_schema`，与 Python 的 schema 版本各自独立。
+//! 版本号记在 `meta` 的 `terms_schema`，与图库原有表的 schema 版本各自独立。
 
 #[cfg(test)]
 use crate::schema::migrate;
@@ -414,7 +414,7 @@ pub fn backup_before_upgrade(
 }
 
 /// 核心写事务持有的「钥匙」：兼容表和私有表的写保护触发器在 `meta` 里看不到它时拒绝写入。
-/// 别的连接看不到未提交的行，所以 Python 在核心事务之外写这些表都会被拒绝。
+/// 别的连接看不到未提交的行，所以核心写事务之外对这些表的写入都会被拒绝。
 pub const WRITER_KEY: &str = "terms_writer";
 
 /// 与 tests/reference/web/store.py（#9 已删除） 的定义逐字一致；已存在时是空操作。

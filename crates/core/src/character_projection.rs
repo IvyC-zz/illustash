@@ -1,6 +1,5 @@
-//! S3：执行现有 Python 的归属 SQL，不翻译它的规则。
-//! 这些 SQL 文件是 Store._refresh_* 的原样截取；契约测试把它们和从运行中的 Python 函数截取的 SQL
-//! （含绑定参数）比对。
+//! S3：执行 `character_sql/` 里的归属 SQL，不在 Rust 里翻译它的规则。
+//! 这些 SQL 文件是旧实现 Store._refresh_* 的原样截取（#9 已删除）。
 use crate::{Error, Result};
 use rusqlite::{params_from_iter, Connection, OptionalExtension};
 

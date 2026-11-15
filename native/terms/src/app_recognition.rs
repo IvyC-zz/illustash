@@ -24,7 +24,7 @@ fn sha(data: &[u8]) -> String {
     crate::strict_json::sha256_hex(data)
 }
 fn compact(v: &Value) -> String {
-    // Python json.dumps(sort_keys=True,separators=(',',':'),ensure_ascii=True).
+    // 已存指纹的格式：键排序、分隔符不带空格、非 ASCII 转义（沿用旧实现 json.dumps(sort_keys=True,separators=(',',':'),ensure_ascii=True)）。
     match v {
         Value::Array(a) => format!("[{}]", a.iter().map(compact).collect::<Vec<_>>().join(",")),
         Value::Object(o) => format!(

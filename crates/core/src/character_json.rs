@@ -1,4 +1,4 @@
-//! 已持久化的 Python json.dumps 格式（身份指纹和快照 JSON）。
+//! 已持久化的 JSON 文本格式（身份指纹和快照 JSON），沿用旧实现 `json.dumps` 的输出。
 //! 对象按键排序，这是 identity.propose 的要求；图指纹里只有数组、字符串和 null。图里的数字从不走浮点分支。
 use serde_json::Value;
 
