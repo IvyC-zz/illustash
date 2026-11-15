@@ -1,6 +1,7 @@
 // 一次写入或一个后台任务的回应会改动页面别处的什么（桌面布局，#199）：图库的计数和图片、显示任务的设置卡片、向导。
 // app.js 把这些交给 onPost() 和 onJob()。
 import {SYNC_ACTIVE, importLine} from '../core/jobs.js';
+import {HUMAN_IMPORT} from '../core/human.js';
 import {metaWritten, refreshMeta} from '../core/meta.js';
 import {onPage, pageOf} from '../core/pages.js';
 import {loadLibraries} from '../core/settings.js';
@@ -10,6 +11,7 @@ import {drawShelf} from './catalog.js';
 import {error, toast} from './dom.js';
 import {listChanged, reload, selCount} from './grid.js';
 import {guideAfterPost, guideRefresh} from './guide.js';
+import {humanImportEnded, renderHumanBlock} from './human.js';
 import {renderIndexCard, renderLibrariesCard, renderNamesCard, renderProvenanceCard} from './settings.js';
 
 // 后端接受了一次写入：可能变了的计数和读取，以及向导的下一步。
@@ -41,7 +43,8 @@ export async function afterJob(job, change) {
   } else if (job === 'provenance') renderProvenanceCard();
   else if (job === 'import') {
     const task = state.importTask;
-    if (change.ended) { toast(importLine(task)); if (task.status === 'done' && task.kind === 'archive') loadLibraries(); }
-    renderLibrariesCard();
+    if (change.ended && task.kind === HUMAN_IMPORT) { if (task.status === 'done' && (task.committed ?? task.result?.committed)) listChanged(); humanImportEnded(task); }
+    else if (change.ended) { toast(importLine(task)); if (task.status === 'done' && task.kind === 'archive') loadLibraries(); }
+    renderLibrariesCard(); renderHumanBlock();
   }
 }

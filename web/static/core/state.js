@@ -25,6 +25,8 @@ export const state = {
   // ---- 资料库的数据：core/catalog.js（localLinks 别处要作废时用 forgetLocalLinks） ----
   tagged: null, workTree: null, localLinks: null,
 
+  // ---- 人工结论快照（自动快照的状态和最近一次导出，GET /api/human-conclusions）：core/human.js ----
+  human: null,
   // ---- 图库完整性检查的回应：core/integrity.js ----
   integrity: null,
   // ---- 识别模型的状态：core/models.js ----
