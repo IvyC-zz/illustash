@@ -330,7 +330,6 @@ jobs:
       # main 上测试失败也保存依赖缓存：Windows 失败时不能让下一批 PR 回到冷编译。
       - uses: Swatinem/rust-cache@v2
         with:
-          prefix-key: v0-rust-501cold  # 临时：#501 测冷缓存耗时
           save-if: ${{ github.ref == 'refs/heads/main' }}
           cache-on-failure: true
           workspaces: |

@@ -43,43 +43,40 @@ class NativeResearchTest(unittest.TestCase):
         self.worker.write_text('#!'+sys.executable+'\n'+f'''import sys,os,json,time,subprocess,traceback
 from pathlib import Path
 sys.path.insert(0,{str(self.repo)!r})
-# 失败证据（#501）：每次尝试的编号、kind、模式和异常追加进 worker.stderr.log，计算程序的 stderr 也抄一份；
-# 原本的 stderr 照旧交给宿主。
+# 失败证据（#501）：每次尝试的编号、kind、模式、未捕获的异常和计算程序的 stderr 追加进 worker.stderr.log；
+# 原本的 stderr 照旧交给宿主。主体保持顶层语句：别的测试会在这里按原文插入代码。
 log=open({str(self.worker_log)!r},'a',encoding='utf-8')
 def note(text): log.write(text if text.endswith('\\n') else text+'\\n');log.flush()
-try:
-  r=json.loads(Path(sys.argv[1]).read_text(encoding='utf-8'))
-  # Written whole, then renamed: a test that sees the file reads the full pid (#132).
-  Path({str(self.pid)!r}+'.tmp').write_text(str(os.getpid()));os.replace({str(self.pid)!r}+'.tmp',{str(self.pid)!r})
-  with open({str(self.runs)!r},'a') as f: f.write(r['version']+'\\n')
-  with open({str(self.kinds)!r},'a') as f: f.write(r['kind']+'\\n')
-  mode=Path({str(self.mode)!r}).read_text()
-  note('--- 第 '+str(len(Path({str(self.runs)!r}).read_text().split()))+' 次 worker kind='+r['kind']+' mode='+mode+' pid='+str(os.getpid()))
-  if mode=='hang':
+def logged(kind,value,trace): note(''.join(traceback.format_exception(kind,value,trace)));sys.__excepthook__(kind,value,trace)
+sys.excepthook=logged
+r=json.loads(Path(sys.argv[1]).read_text(encoding='utf-8'))
+# Written whole, then renamed: a test that sees the file reads the full pid (#132).
+Path({str(self.pid)!r}+'.tmp').write_text(str(os.getpid()));os.replace({str(self.pid)!r}+'.tmp',{str(self.pid)!r})
+with open({str(self.runs)!r},'a') as f: f.write(r['version']+'\\n')
+with open({str(self.kinds)!r},'a') as f: f.write(r['kind']+'\\n')
+mode=Path({str(self.mode)!r}).read_text()
+note('--- 第 '+str(len(Path({str(self.runs)!r}).read_text().split()))+' 次 worker kind='+r['kind']+' mode='+mode+' pid='+str(os.getpid()))
+if mode=='hang':
     subprocess.Popen([sys.executable,'-c','import time;time.sleep(60)'])
     time.sleep(60)
-  if mode=='crash': sys.exit(7)
-  if mode=='held':
+if mode=='crash': note('按模式退出，退出码 7');sys.exit(7)
+if mode=='held':
     # Waits for the test's release, taken once per run: what the test does meanwhile is in flight (#263).
     while True:
         try: os.remove({str(self.gate)!r}); break
         except FileNotFoundError: time.sleep(.02)
     note('已取走放行文件')
-  compute=subprocess.run([os.environ['ILLUSTASH_RESEARCH_COMPUTE_BIN'],sys.argv[1],sys.argv[2]],stderr=subprocess.PIPE)
-  if compute.stderr:
+compute=subprocess.run([os.environ['ILLUSTASH_RESEARCH_COMPUTE_BIN'],sys.argv[1],sys.argv[2]],stderr=subprocess.PIPE)
+if compute.stderr:
     sys.stderr.buffer.write(compute.stderr);sys.stderr.flush()
     note('计算程序 stderr：'+compute.stderr.decode('utf-8','replace'))
-  compute.check_returncode()
-  v=json.loads(Path(sys.argv[2]).read_text(encoding='utf-8'))
-  if mode=='wrong': v['identity']['generation']+=1
-  if mode=='bad': v['tables']['relations']=[['a','foreign','identical',0,'','2026-10-01']]
-  if mode=='invalid': v['tables']['cluster_info']=[['invalid']]
-  Path(sys.argv[2]).write_text(json.dumps(v,allow_nan=False))
-  note('正常结束')
-except SystemExit as error:
-  note('退出码 '+str(error.code));raise
-except BaseException:
-  note(traceback.format_exc());raise
+compute.check_returncode()
+v=json.loads(Path(sys.argv[2]).read_text(encoding='utf-8'))
+if mode=='wrong': v['identity']['generation']+=1
+if mode=='bad': v['tables']['relations']=[['a','foreign','identical',0,'','2026-10-01']]
+if mode=='invalid': v['tables']['cluster_info']=[['invalid']]
+Path(sys.argv[2]).write_text(json.dumps(v,allow_nan=False))
+note('正常结束')
 ''')
         self.worker.chmod(0o755)
         self.env.update(ILLUSTASH_RESEARCH_WORKER=worker_command(self.worker),ILLUSTASH_RESEARCH_TIMEOUT_MS='10000',ILLUSTASH_RESEARCH_RETRY_MS='300')
@@ -104,30 +101,12 @@ except BaseException:
         self.token=json.loads(self.request('/api/bootstrap')['body'])['token']
 
     def state(self): return json.loads(self.request('/api/similar')['body'])['state']
-    def evidence(self):
-        """失败证据（#501）：worker 启动过几次、各次的 kind、最后状态，以及合成 worker 的 stderr 结尾。"""
-        try: state=self.state()
-        except Exception as error: state=f'读取失败：{error!r}'
-        lines=[f'worker 已启动 {len(self.versions())} 次，依次为 {self.run_kinds()}',f'最后状态：{state}']
-        # 第二个是 Windows 启动器重定向的 stderr（tests/native_worker_fixture.py），收得到 Python 启动前的失败。
-        for path in (self.worker_log,self.worker.with_name(self.worker.name+'.stderr')):
-            if path.exists():
-                text=path.read_text(encoding='utf-8',errors='replace')
-                lines+=[f'--- {path.name}（末尾 {min(len(text),6000)} 字符）---',text[-6000:].rstrip()]
-        return '\n'.join(lines)
-    def why(self,*context):
-        """断言说明：给出的上下文加上失败证据；只在断言失败、生成报告时才去读状态和文件。"""
-        test=self
-        class Why:
-            def __str__(self): return '\n'.join([*(repr(item) for item in context),test.evidence()])
-        return Why()
-    def wait(self,predicate,timeout=15,what='等待超时'):
-        """同 wait_until，时限不变；超时报告里附上失败证据。"""
-        try: return wait_until(predicate,timeout=timeout)
-        except AssertionError: self.fail(f'{what}（{timeout} 秒）\n{self.evidence()}')
+    def wait(self,predicate,timeout=15,what='等待超时'): return wait_for(self,predicate,timeout,what)
+    def why(self,*context): return why(self,*context)
     def finished(self, status='idle'):
-        self.wait(lambda:self.state()['status'] in ('idle','error'),timeout=20,what='研究任务没有结束')
-        self.assertEqual(self.state()['status'],status,self.why())
+        # 直接调用模块级函数：别的测试类借用 setUp 和 finished 时不必再借这些辅助方法。
+        wait_for(self,lambda:self.state()['status'] in ('idle','error'),timeout=20,what='研究任务没有结束')
+        self.assertEqual(self.state()['status'],status,why(self))
     def rows(self, tables):
         with sqlite3.connect(self.lib.db) as c:
             return {t:c.execute('SELECT * FROM '+t+' ORDER BY 1').fetchall() for t in tables}
@@ -453,6 +432,38 @@ except BaseException:
         self.assertEqual(self.request('/api/regroup',{})['status'],400)
         self.assertEqual(self.request('/api/assets/count')['status'],200)
         self.assertEqual(before,self.rows(['assertions','actions','relations','prototypes']))
+
+
+def lines(path):
+    return path.read_text().split() if path.exists() else []
+
+
+def evidence(test):
+    """失败证据（#501）：worker 启动过几次、各次的 kind、最后状态，以及合成 worker 的 stderr 结尾。
+    只读 setUp 建好的文件和宿主状态，借用 setUp 的其他测试类同样可用。"""
+    try: state=test.state()
+    except Exception as error: state=f'读取失败：{error!r}'
+    kinds=lines(test.kinds)
+    parts=[f'worker 已启动 {len(kinds)} 次，依次为 {kinds}',f'最后状态：{state}']
+    # 第二个是 Windows 启动器追加写的 stderr（tests/native_worker_fixture.py），收得到 Python 启动前的失败。
+    for path in (test.worker_log,test.worker.with_name(test.worker.name+'.stderr')):
+        if path.exists():
+            text=path.read_text(encoding='utf-8',errors='replace')
+            parts+=[f'--- {path.name}（末尾 {min(len(text),6000)} 字符）---',text[-6000:].rstrip()]
+    return '\n'.join(parts)
+
+
+def why(test,*context):
+    """断言说明：给出的上下文加上失败证据；只在断言失败、生成报告时才去读状态和文件。"""
+    class Why:
+        def __str__(self): return '\n'.join([*(repr(item) for item in context),evidence(test)])
+    return Why()
+
+
+def wait_for(test,predicate,timeout=15,what='等待超时'):
+    """同 wait_until，时限不变；超时报告里附上失败证据。"""
+    try: return wait_until(predicate,timeout=timeout)
+    except AssertionError: test.fail(f'{what}（{timeout} 秒）\n{evidence(test)}')
 
 
 def group_exists(pid):
