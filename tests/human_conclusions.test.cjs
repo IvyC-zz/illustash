@@ -147,6 +147,11 @@ test('restore asks first, then sends only the snapshot id and reports as a resto
   assert.equal(p.state.importTask.id, 'i2');
   assert.ok(human.isRestore(task));
   assert.ok(!human.isRestore({id: 'other'}));
+  Object.assign(p.state, {human: {automatic: automatic(), export: {status: 'idle'}}, importTask: {...task, stage: 'matching', done: 2, total: 4}});
+  assert.match(ui.humanBlock(), /从自动快照恢复：正在核对图片 2\/4 张…/);
+  assert.match(ui.humanBlock(), /取消恢复/);
+  p.state.importTask = {...task, status: 'done', result: summary({undo: null})};
+  assert.match(ui.humanBlock(), /从自动快照恢复完成，没有新内容。/);
 });
 
 test('the report counts each kind on its own, says conflicts kept this library, and offers undo only when something changed', () => {

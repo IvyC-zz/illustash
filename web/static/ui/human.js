@@ -7,7 +7,7 @@ import {edits} from '../core/edits.js';
 import {onPage} from '../core/pages.js';
 import {refreshMeta} from '../core/meta.js';
 import {readError} from '../core/session.js';
-import {importActive, importLine, cancelImport} from '../core/jobs.js';
+import {IMPORT_STAGES, importActive, importCount, importLine, cancelImport} from '../core/jobs.js';
 import {HUMAN_IMPORT, exportActive, home, rfcSeconds, loadHuman, onHuman, startExport, cancelExport, startHumanImport, restoreSnapshot, isRestore,
   readReport, REPORT_PAGE, adoptUndo, humanError, COUNT_GROUPS, resultText, kindText, reasonText, fieldText, conflictCount} from '../core/human.js';
 import {$, toast, error, fold, wireFolds} from './dom.js';
@@ -62,7 +62,17 @@ function importBlock(job) {
   if (job.status === 'error') return `<p class="muted-note import-line">${esc(humanError(job.code, restore ? 'restore' : 'import', job.committed, job.error))}</p>`;
   const button = job.status === 'running' ? ` <button class="quiet small" data-human="cancel-import">${restore ? t('取消恢复') : t('取消导入')}</button>`
     : job.status === 'done' ? ` <button class="quiet small" data-human="report">${t('查看报告')}</button>` : '';
-  return `<p class="muted-note import-line">${esc(importLine(job))}${button}</p>`;
+  return `<p class="muted-note import-line">${esc(restore ? restoreLine(job) : importLine(job))}${button}</p>`;
+}
+// 恢复和导入共用导入槽；状态行写明是恢复。
+function restoreLine(job) {
+  if (job.status === 'running') {
+    const count = job.stage === 'matching' ? importCount(job) : '';
+    return t('从自动快照恢复：{step}', {step: IMPORT_STAGES.human_conclusions[job.stage] || t('正在准备')}) + count + '…';
+  }
+  if (job.status === 'stopping') return t('正在取消恢复…');
+  if (job.status === 'done') return job.result?.undo != null ? t('已从自动快照恢复。') : t('从自动快照恢复完成，没有新内容。');
+  return importLine(job);
 }
 let readFailed = null;
 // #humanBlock 的内容；h 是 GET /api/human-conclusions 的回应，job 是导入槽的任务。

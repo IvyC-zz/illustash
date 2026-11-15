@@ -2727,5 +2727,9 @@
   "同一张图，但这次没能读到它的内容来核验": "The same picture, but its content couldn't be read to verify it this time",
   "已经写进这个图库。": "Written to this library.",
   "没有新内容：图库没有改动，也没有可以撤销的步骤。": "Nothing new: the library wasn't changed, and there is nothing to undo.",
-  "文件或快照里没有人工结论。": "The file or snapshot holds no human conclusions."
+  "文件或快照里没有人工结论。": "The file or snapshot holds no human conclusions.",
+  "从自动快照恢复：{step}": "Restoring from automatic snapshot: {step}",
+  "正在取消恢复…": "Cancelling the restore…",
+  "已从自动快照恢复。": "Restored from automatic snapshot.",
+  "从自动快照恢复完成，没有新内容。": "Restore from automatic snapshot finished; nothing new."
 }
