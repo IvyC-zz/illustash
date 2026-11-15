@@ -68,6 +68,13 @@ async function pickerFind(page, name) {
   await page.settle({quiet: 200});
 }
 
+// 更改和撤销会延后刷新角色统计。等可见反馈完成，再记录稳定状态，避免下一场景跨过提示消失的时刻。
+async function feedbackEnd(page) {
+  if (!await page.waitFor(`!document.getElementById('toast').hidden`, 6000)) throw new Error('操作没有显示反馈');
+  if (!await page.waitFor(`document.getElementById('toast').hidden`, 12000)) throw new Error('操作反馈没有结束');
+  await page.settle({quiet: 400});
+}
+
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 
 // ---------- 流程 ----------
@@ -143,11 +150,13 @@ export const FLOWS = [
         let snap = await w.step(`${where}：按 C`, p => p.key('c'));
         w.check(`${where}：C 打开了命令面板`, snap.dialogs.includes('picker'), snap.dialogs);
         snap = await w.step(`${where}：搜「${b.name}」`, p => pickerFind(p, b.name), {shot: true});
-        await w.step(`${where}：回车`, p => p.key('Enter'));
+        await w.step(`${where}：回车，等操作反馈结束`, async p => { await p.key('Enter'); await feedbackEnd(p); });
         await page.settle({quiet: 400});
         const roles = await rolesOf(w, page, target);
         w.check(`${where}：C 是换成（${a.name} 换成 ${b.name}）`, same(roles, [b.name]), {roles});
-        snap = await w.step(`${where}：⌘Z 撤销`, async p => { await p.key('Escape'); await p.key('Escape'); await p.key('z', {modifiers: ['Meta']}); });
+        snap = await w.step(`${where}：⌘Z 撤销，等操作反馈结束`, async p => {
+          await p.key('Escape'); await p.key('Escape'); await p.key('z', {modifiers: ['Meta']}); await feedbackEnd(p);
+        });
         await page.settle({quiet: 400});
         w.check(`${where}：撤销后回到 ${a.name}`, same(await rolesOf(w, page, target), [a.name]), await rolesOf(w, page, target));
       }
