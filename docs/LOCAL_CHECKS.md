@@ -118,6 +118,8 @@
 
 词条第 9 版的新增状态及物理表／有效视图适配，由 Rust/Python 共用 [精确清单](../tests/baseline_additions.json) 与 v7 历史参考分开验收（#441）：表、meta 键和映射以该清单为唯一明细，每项登记引入版本和具名的严格语义测试。适配只用于实时应用库对历史参考的投影；冻结侧存在清单要分离的新增表、meta 键或物理表时直接失败。物理表与有效视图的完整列及带类型的行（含重数）须一致，才应用映射；历史结构属性表达只在该投影中重建。不使用通配或期望交集，旧表旧列、类型、行重数、响应和名称增量校验保持。Python `baseline_state()`、Rust `state()`/`exact()`、当前库前后比较、原样备份和失败回滚仍保留物理表、原始属性及全部新状态。
 
+自动人工备份会在开库后写入保护状态、摘要缓存和 WAL。HTTP 共享夹具先等待真实首份快照与摘要补算结束，再采集操作前的完整状态；需要比较切库目标前后状态的夹具先打开并完成目标的首备份。settings/startup/cache 的 `package.library_bytes`、`library.bytes` 及 libraries 的当前包 `info.library_bytes` 按当前主库加 WAL 的独立文件大小精确核验，其余响应字节和头继续对照冻结记录。仅 v5/v6 迁移及撤销等价用例用可释放的 `ILLUSTASH_TEST_HUMAN_BACKUP_GATE` 文件闸门保留原完整状态比较，随后释放并验收真实首备份；等待不持数据库或发布锁，切库及退出照常取消，产品不设置该变量（#441）。
+
 新基准和 Python 固定期望都录在导入按 tag 后缀建作品（#296）之前。重放时设上只供测试的环境变量 `ILLUSTASH_TEST_NO_IMPORT_WORKS`（`baseline.rs` 在启动核心时设，`tests/fixed_expectations.py` 加载时设），导入照旧规则走，录下的期望不改（用户 2026-11-12 定）；产品从不设置它。所以对照测试不覆盖导入建作品，这一段由 `crates/core` 的 `character_import` 单元测试（「不是作品」清单）和 `native/terms` 的 `app_create`（新图库从索引导入角色时建作品）、`app_recognition`（WD 结果按 tag 后缀归作品）测试负责。
 
 HTTP 测试共用 `tests/test_read_http.py` 的端口、等待和进程清理工具；多种原生测试借用 `tests/test_native_lifecycle.py` 的建包与宿主方法，worker 启动与进程存在性工具在 `tests/native_worker_fixture.py`。测试对宿主的 HTTP 请求统一经 `tools/verify_read_http.py` 的 `fetch`：每个请求一条短连接，读完响应后以 RST 关闭，本机不留 TIME_WAIT。逐个正常关闭时，并行全套约 1.5 万个连接会在 Windows 上耗尽默认的 16,384 个临时端口（#140）。新增大量请求或轮询时沿用 `fetch`，不要另起逐次关闭的客户端；只有验证连接本身行为（半包、卡住、慢读）的测试才自建 socket。修改这些共享方法须检查实际使用它们的测试类，别只看定义文件。提取 helper 时避免把带 `test_*` 方法的 `TestCase` 作为模块级别名留给 discover；`__module__` 还可能参与固定录制的定位，移动前须核对。

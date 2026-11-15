@@ -107,6 +107,7 @@ class NativeNamesTest(unittest.TestCase):
         process = subprocess.Popen(args, env=self.env, stdout=log, stderr=log, **SPAWN)
         self.addCleanup(self.stop, process)
         enter(self.origin, log, process, timeout=5)
+        lifecycle.wait_human_backup(self, self.origin)
         return process, log
     def setUp(self):
         self.enabled = False

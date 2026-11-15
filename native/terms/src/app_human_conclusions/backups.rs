@@ -142,6 +142,13 @@ fn load(db: &Path) -> Result<State> {
         .map(Option::unwrap_or_default)
 }
 fn run(db: &Path, library: &str, context: &TaskContext, shared: &Arc<Mutex<State>>) -> Result<()> {
+    // 仅供旧库升级等价测试：闸门释放后仍执行真实首备份；等待期间不打开数据库或持有发布锁。
+    if let Some(gate) = std::env::var_os("ILLUSTASH_TEST_HUMAN_BACKUP_GATE") {
+        while Path::new(&gate).try_exists()? {
+            context.check()?;
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    }
     let mut state = State::default();
     let mut initialized = false;
     let mut fill = true;
