@@ -94,7 +94,8 @@ export const undoRefusal = (e, step) => (e?.status === 409 && importSteps.has(st
 // ---------- 文字 ----------
 // 400、413、409、500 各一句话；committed 表示错误发生在发布之后（结论已经写进图库）。reason 是后端的原话，附在后面。
 export function humanError(code, op = 'import', committed = false, reason = '') {
-  const tail = reason ? t('（{reason}）', {reason: tb(reason)}) : '';
+  // 500 时后端的原话是固定的一句（让人去复制诊断信息），和这里的说法重复，不再附上。
+  const tail = reason && code !== 500 ? t('（{reason}）', {reason: tb(reason)}) : '';
   if (committed) return t('人工结论已经导入，但之后的处理出错了，不要重复导入。可以在「设置 › 关于」复制诊断信息。') + tail;
   const text = op === 'export' ? {
     409: t('现在不能导出：可能已有导出或导入在进行，或者图库刚被切换。请稍后再试。'),

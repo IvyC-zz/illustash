@@ -91,7 +91,7 @@ test('an export shows its stage with a cancel button, then where the file is wit
   assert.match(html, /5 条人工结论 · 3 张图 · 2 个角色和作品/, 'three containers, never summed');
   assert.match(html, /1 张图当时读不到/);
   p.state.human.export = {id: 'e1', status: 'error', code: 500, error: '合成故障'};
-  assert.match(ui.humanBlock(), /写导出文件时出错，没有生成文件。.*（合成故障）/);
+  assert.match(ui.humanBlock(), /写导出文件时出错，没有生成文件。/);
 });
 
 test('export starts a task, polls until it ends, and announces the file once; cancel names that export', async () => {
@@ -192,7 +192,9 @@ test('400, 413, 409 and 500 each have their own sentence; an error after publish
   assert.match(human.humanError(413), /256 MiB/);
   assert.match(human.humanError(400, 'restore'), /快照已经不在了/);
   assert.match(human.humanError(409, 'export'), /不能导出/);
-  assert.match(human.humanError(500, 'import', true, '合成'), /已经导入.*不要重复导入.*（合成）/);
+  assert.match(human.humanError(500, 'import', true, '合成'), /已经导入.*不要重复导入/);
+  assert.match(human.humanError(400, 'import', false, '合成'), /（合成）$/);
+  assert.doesNotMatch(human.humanError(500, 'import', false, '合成'), /合成/, 'the fixed 500 text is not repeated');
 });
 
 test('a finished import opens the report, joins the undo control, and a refused undo explains why', async () => {
