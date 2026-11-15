@@ -14,8 +14,10 @@ import sys
 FROZEN_ENVIRONMENT = {
     'platform': 'win32', 'machine': 'AMD64', 'numpy': '2.5.3', 'pillow': '12.3.0',
     'dll_sha256': 'ed4f167a5330424524f45258e7ca2c8d7f03c0cba1f30ee4985553ac1f88ecf8',
-    'core': 'SkylakeX', 'threads': 4,
+    'core': 'SkylakeX', 'numpy_blas_threads': 4,
     'config': 'OpenBLAS 0.3.34.106.0  USE64BITINT DYNAMIC_ARCH NO_AFFINITY SkylakeX MAX_THREADS=24',
+    'numpy_dispatch': {'AVX2': True, 'FMA3': True, 'AVX512F': True, 'X86_V3': True, 'X86_V4': True},
+    'numpy_disable_cpu_features': '',
 }
 
 
@@ -28,7 +30,9 @@ def environment():
     import numpy as np
     import PIL
     result = dict(platform=sys.platform, machine=platform.machine(), python=platform.python_version(),
-                  numpy=np.__version__, pillow=PIL.__version__, cpu=platform.processor())
+                  numpy=np.__version__, pillow=PIL.__version__, cpu=platform.processor(),
+                  identity_process='numpy_reference', candidate_blas_threads='not_measured',
+                  numpy_disable_cpu_features=os.environ.get('NPY_DISABLE_CPU_FEATURES', '').strip())
     if sys.platform != 'win32':
         return result
     path = Path(os.environ['ILLUSTASH_RESEARCH_OPENBLAS_DLL']).resolve(strict=True)
@@ -59,8 +63,10 @@ def environment():
 
     from numpy._core import _multiarray_umath
     result.update(dll_sha256=digest, core=exported('get_corename', ctypes.c_char_p),
-                  config=exported('get_config', ctypes.c_char_p), threads=exported('get_num_threads', ctypes.c_int),
-                  cpu_features=_multiarray_umath.__cpu_features__)
+                  config=exported('get_config', ctypes.c_char_p), numpy_blas_threads=exported('get_num_threads', ctypes.c_int),
+                  cpu_features=_multiarray_umath.__cpu_features__,
+                  numpy_dispatch={key: _multiarray_umath.__cpu_features__.get(key)
+                                  for key in FROZEN_ENVIRONMENT['numpy_dispatch']})
     return result
 
 

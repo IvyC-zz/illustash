@@ -48,6 +48,10 @@ class NumericReferenceContractTest(unittest.TestCase):
             with patch.object(np, '__version__', 'unsupported'):
                 with self.assertRaisesRegex(RuntimeError, '不能回退'):
                     mode.enabled(fixture)
+            with (patch.object(np, '__version__', '2.5.3'), patch.object(PIL, '__version__', '12.3.0'),
+                  patch.dict(os.environ, {'NPY_DISABLE_CPU_FEATURES': 'AVX2,FMA3,AVX512F,X86_V3,X86_V4'})):
+                with self.assertRaisesRegex(RuntimeError, 'NPY_DISABLE_CPU_FEATURES'):
+                    mode.enabled(fixture)
         with patch.dict(os.environ, {mode.ENV: 'numpy'}), patch.object(mode.sys, 'platform', 'linux'):
             with self.assertRaisesRegex(RuntimeError, '不能跳过'):
                 mode.enabled(fixture)
@@ -61,6 +65,11 @@ class NumericReferenceContractTest(unittest.TestCase):
             for key in environment.FROZEN_ENVIRONMENT:
                 value = dict(environment.FROZEN_ENVIRONMENT, **{key: 'unregistered'})
                 with self.subTest(component=key), patch.object(environment, 'environment', return_value=value):
+                    self.assertEqual(mode.references(fixture), ('numpy',))
+            for feature in environment.FROZEN_ENVIRONMENT['numpy_dispatch']:
+                value = dict(environment.FROZEN_ENVIRONMENT,
+                             numpy_dispatch=environment.FROZEN_ENVIRONMENT['numpy_dispatch'] | {feature: False})
+                with self.subTest(feature=feature), patch.object(environment, 'environment', return_value=value):
                     self.assertEqual(mode.references(fixture), ('numpy',))
 
     def test_failed_frozen_comparison_propagates_and_summary_keeps_it(self):
@@ -92,15 +101,51 @@ class NumericReferenceContractTest(unittest.TestCase):
         self.assertEqual([test.id() for test, _ in result.skipped], [other.id(), inherited.id()])
         self.assertFalse(result.failures)
 
-    def test_npy_rejects_equal_float64_shape_changes_and_changed_values(self):
+    def test_reference_summary_reads_actual_verbose_buffered_output(self):
+        from tests.windows_fixed_suite import reference_record, reference_summary
+        name = 'test_merge_percentile_core_and_partition_ties'
+        for references in (('numpy',), ('numpy', 'frozen')):
+            def compare(test):
+                for reference in references:
+                    with mode.comparing(test, reference):
+                        pass
+            fixture = type('NativeIndexComputeTest', (unittest.TestCase,), {name: compare})(name)
+            output = io.StringIO()
+            with patch.object(mode.sys, '__stderr__', output):
+                result = unittest.TextTestRunner(stream=output, verbosity=2, buffer=True).run(unittest.TestSuite([fixture]))
+            self.assertTrue(result.wasSuccessful())
+            lines = output.getvalue().splitlines()
+            self.assertGreater(lines[0].index('NUMERIC_REFERENCE '), 0)
+            records = [record for line in lines if (record := reference_record(line)) is not None]
+            self.assertEqual([record['reference'] for record in records], list(references))
+            summary = '\n'.join(reference_summary(records))
+            for reference in references:
+                self.assertIn(f'| {reference} | 1 | 0 |', summary)
+
+    def test_npy_rejects_dtype_shape_order_and_data_bit_changes(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            values = np.array([[1, 2], [3, 4]], np.float32)
+            values = np.array([[0, 2], [3, 4]], np.float32)
             np.save(root / 'expected.npy', values)
-            for changed in (values.astype(np.float64), values.reshape(4), values + 1):
+            signed_zero = values.copy(); signed_zero[0, 0] = -0.0
+            for changed in (values.astype(np.float64), values.reshape(4), values + 1,
+                            np.asfortranarray(values), signed_zero):
                 np.save(root / 'actual.npy', changed)
                 with self.assertRaises(AssertionError):
                     checks.assert_npy(self, root / 'actual.npy', root / 'expected.npy')
+            np.save(root / 'fortran.npy', np.asfortranarray(values))
+            with self.assertRaises(AssertionError):
+                checks.assert_npy(self, root / 'fortran.npy', root / 'fortran.npy', c_order=True)
+            # 两个维度中有 1 时，数组 flags 不能分辨头部声明；消费端仍拒绝 Fortran。
+            with (root / 'fortran.npy').open('wb') as output:
+                np.lib.format.write_array_header_1_0(output, dict(descr='<f4', fortran_order=True, shape=(1, 4)))
+                output.write(values.tobytes())
+            with self.assertRaises(AssertionError):
+                checks.assert_npy(self, root / 'fortran.npy', root / 'fortran.npy', c_order=True)
+            with (root / 'actual.npy').open('wb') as output:
+                np.lib.format.write_array_header_2_0(output, dict(descr='<f4', fortran_order=False, shape=values.shape))
+                output.write(values.tobytes())
+            checks.assert_npy(self, root / 'actual.npy', root / 'expected.npy', c_order=True)
 
     def test_index_persistent_ids_metadata_rejection_and_csv_bytes_are_checked(self):
         with tempfile.TemporaryDirectory() as tmp:

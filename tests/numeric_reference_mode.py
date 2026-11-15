@@ -52,6 +52,8 @@ def require_dependencies():
     import PIL
     if (np.__version__, PIL.__version__) != ('2.5.3', '12.3.0'):
         raise RuntimeError('NumPy 参考要求 numpy 2.5.3、Pillow 12.3.0；不能回退冻结值')
+    if disabled := os.environ.get('NPY_DISABLE_CPU_FEATURES', '').strip():
+        raise RuntimeError(f'NumPy 参考不支持与原生 CPU 分派不同的 NPY_DISABLE_CPU_FEATURES 覆盖：{disabled!r}')
 
 
 def defer_missing(cls, error):

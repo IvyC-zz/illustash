@@ -30,6 +30,12 @@ SKIP_MARK = ' ... skipped '
 REFERENCE_MARK = 'NUMERIC_REFERENCE '
 
 
+def reference_record(line):
+    """verbosity=2 的方法进度未换行时，首条记录会接在其后。"""
+    _, marker, payload = line.partition(REFERENCE_MARK)
+    return json.loads(payload) if marker else None
+
+
 def reference_summary(records):
     """按真实进入的比较汇总；失败不会删掉，也不会用后来的参考结果覆盖。"""
     totals = {}
@@ -70,8 +76,8 @@ def main():
             print(line, end='', flush=True)
             if SKIP_MARK in line:
                 skips.append(line.rstrip('\n'))
-            if line.startswith(REFERENCE_MARK):
-                references.append(json.loads(line[len(REFERENCE_MARK):]))
+            if (record := reference_record(line)) is not None:
+                references.append(record)
             tail = [*tail[-2:], line.rstrip('\n')]
         status = suite.wait()
 

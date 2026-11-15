@@ -7,16 +7,25 @@ import sqlite3
 import numpy as np
 
 
-def assert_npy(test, actual, expected):
-    """下游读取的 dtype、形状和值全部一致，不接受等值的 float64 替代 float32。"""
-    a, b = np.load(actual), np.load(expected)
-    test.assertEqual(a.dtype, b.dtype)
-    test.assertEqual(a.shape, b.shape)
-    np.testing.assert_array_equal(a, b)
+def npy_content(path):
+    """读取消费端支持的 NPY 元数据与原始数据，不锁定头部空白或 padding。"""
+    with path.open('rb') as source:
+        version = np.lib.format.read_magic(source)
+        readers = {(1, 0): np.lib.format.read_array_header_1_0, (2, 0): np.lib.format.read_array_header_2_0}
+        return readers[version](source), source.read()
+
+
+def assert_npy(test, actual, expected, *, c_order=False):
+    """类型、形状、存储顺序与数据位完全一致，包括浮点正负零。"""
+    a, b = npy_content(actual), npy_content(expected)
+    test.assertEqual(a[0], b[0])
+    if c_order:
+        test.assertFalse(a[0][1], '识别快照要求 C 顺序的 char-anchors.npy')
+    test.assertEqual(a[1], b[1])
 
 
 def assert_index_files(test, actual, expected, cached=False):
-    assert_npy(test, actual / 'char-anchors.npy', expected / 'char-anchors.npy')
+    assert_npy(test, actual / 'char-anchors.npy', expected / 'char-anchors.npy', c_order=True)
     # 读取顺序就是锚点行与角色 ID 的绑定，不能排序后比较。
     test.assertEqual((actual / 'char-anchors.txt').read_text().splitlines(),
                      (expected / 'char-anchors.txt').read_text().splitlines())

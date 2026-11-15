@@ -270,16 +270,16 @@ class NativeIndexComputeTest(unittest.TestCase):
                     proc=subprocess.run([str(self.binary),str(root/'request.json'),str(root/'response.json')],env=os.environ|{'PATH':'','ILLUSTASH_INDEX_TAGS':str(tags)},capture_output=True)
                     self.assertEqual(proc.returncode,0,proc.stderr.decode())
                     got=json.loads((root/'response.json').read_text())['characters'][0]
-                    saved=np.load(root/'char-anchors.npy')
+                    saved_header,saved_data=checks.npy_content(root/'char-anchors.npy')
                     for kind in references:
                         with numeric_reference_mode.comparing(self,kind):
                             anchor=reference.merge(a) if kind=='numpy' else build.merge(a)
                             distances=(1-(a/np.linalg.norm(a,axis=1,keepdims=True))@(anchor/np.linalg.norm(anchor)))/2
                             for key,q in [('anchor_p50',50),('anchor_p75',75),('anchor_p90',90)]:
                                 expected=float(np.percentile(distances,q));self.assertEqual(got[key],expected)
-                            self.assertEqual(saved.dtype,np.dtype('f4'))
-                            self.assertEqual(saved.shape,(3,768))
-                            np.testing.assert_array_equal(saved[0],anchor.astype('f4'))
+                            self.assertEqual(saved_header,((3,768),False,np.dtype('<f4')))
+                            self.assertEqual(len(saved_data),3*768*4)
+                            self.assertEqual(saved_data[:768*4],anchor.astype('<f4').tobytes())
 
     def test_scan_exact_threshold_and_adjacent_float_inputs_match_old_csv(self):
         with tempfile.TemporaryDirectory() as tmp:
