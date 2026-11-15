@@ -127,11 +127,11 @@ impl Net {
                     reply.get("body").map(crate::http_json::Json::text).unwrap_or("").as_bytes().to_vec(),
                 )
             } else {
-                let mut request = self
-                    .agent
-                    .get(&target)
-                    .set("User-Agent", "Illustash/0.1 (+local library; provenance lookups)")
-                    .set("Referer", "https://www.pixiv.net/");
+                let mut request =
+                    self.agent.get(&target).set("User-Agent", "Illustash/0.1 (+local library; provenance lookups)");
+                if host == "i.pximg.net" {
+                    request = request.set("Referer", "https://www.pixiv.net/");
+                }
                 if host == "www.pixiv.net" {
                     if let Some(cookie) = &self.session {
                         request = request.set("Cookie", &format!("PHPSESSID={cookie}"));
