@@ -9,7 +9,9 @@ use std::{
     process::ExitCode,
 };
 fn main() -> ExitCode {
-    match run() {
+    let result = run();
+    logs::flush();
+    match result {
         Ok(code) => ExitCode::from(code),
         Err(error) => {
             eprintln!("{WORKER_ERROR_PREFIX}{error}");
@@ -24,6 +26,7 @@ fn run() -> Result<u8, Box<dyn std::error::Error>> {
     let stem = exe.file_stem().and_then(|s| s.to_str()).unwrap_or("");
     let requested = env::var(WORKER_KIND_ENV).ok();
     let kind = worker_kind(stem, requested.as_deref())?;
+    logs::initialize_worker(kind, env::args_os().skip(1).eq([std::ffi::OsStr::new("--check")]));
     let native_args: Vec<String> = env::args().skip(1).collect();
     // 启动器为固定的 Windows OpenBLAS 设置 ROOT（或 DLL 路径）；直接运行的适配器解析同一个已安装资源。
     // 此处仍是单线程。

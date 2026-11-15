@@ -1,7 +1,12 @@
-//! 计算进程只传预定义阶段和类型。自由文本及路径始终走原有 stderr，供自检界面使用。
-use std::io;
+//! 自有进程直接记录固定阶段与类型，原有 stderr 仍供自检界面使用。
+use super::{record, Kind, WORKER_SOURCE};
+use std::{io, panic::Location};
 
-const PREFIX: &str = "ILLUSTASH-DIAGNOSTIC/1 ";
+fn worker_detail(phase: &'static str, kind: &'static str, code: Option<i32>) {
+    if let Some(&source) = WORKER_SOURCE.get() {
+        record(source, phase, code, Kind::WorkerDetail(kind));
+    }
+}
 
 pub enum IoPhase {
     ReadRequest,
@@ -10,25 +15,28 @@ pub enum IoPhase {
 
 pub fn worker_io(phase: IoPhase, error: &io::Error) {
     let phase = match phase {
-        IoPhase::ReadRequest => "read-request",
-        IoPhase::ResolveRuntime => "resolve-runtime",
+        IoPhase::ReadRequest => "读取 worker 请求",
+        IoPhase::ResolveRuntime => "解析 ONNX Runtime 路径",
     };
     let kind = match error.kind() {
-        io::ErrorKind::NotFound => "not-found",
-        io::ErrorKind::PermissionDenied => "permission",
-        io::ErrorKind::InvalidData => "invalid-data",
-        _ => "io",
+        io::ErrorKind::NotFound => "找不到文件",
+        io::ErrorKind::PermissionDenied => "系统拒绝访问",
+        io::ErrorKind::InvalidData => "文件内容无效",
+        _ => "系统读写失败",
     };
-    let code = error.raw_os_error().filter(|code| (1..=65535).contains(code)).unwrap_or_default();
-    eprintln!("{PREFIX}{phase} {kind} {code}");
+    worker_detail(phase, kind, error.raw_os_error());
 }
 
 pub fn worker_invalid_request() {
-    eprintln!("{PREFIX}decode-request invalid-json 0");
+    worker_detail("解析 worker 请求", "JSON 格式无效", None);
+}
+
+pub(crate) fn worker_invalid_fields() {
+    worker_detail("校验 worker 请求字段", "请求字段或类型无效", None);
 }
 
 pub fn worker_runtime_abi() {
-    eprintln!("{PREFIX}init-runtime loader-panic 0");
+    worker_detail("初始化 ONNX Runtime", "加载器崩溃", None);
 }
 
 pub enum OrtPhase {
@@ -36,86 +44,37 @@ pub enum OrtPhase {
     LoadModel,
 }
 
-const ORT_CODES: &[(ort::ErrorCode, &str)] = &[
-    (ort::ErrorCode::InvalidArgument, "ORT_INVALID_ARGUMENT"),
-    (ort::ErrorCode::NoSuchFile, "ORT_NO_SUCHFILE"),
-    (ort::ErrorCode::NoModel, "ORT_NO_MODEL"),
-    (ort::ErrorCode::EngineError, "ORT_ENGINE_ERROR"),
-    (ort::ErrorCode::RuntimeException, "ORT_RUNTIME_EXCEPTION"),
-    (ort::ErrorCode::InvalidProtobuf, "ORT_INVALID_PROTOBUF"),
-    (ort::ErrorCode::ModelLoaded, "ORT_MODEL_LOADED"),
-    (ort::ErrorCode::NotImplemented, "ORT_NOT_IMPLEMENTED"),
-    (ort::ErrorCode::InvalidGraph, "ORT_INVALID_GRAPH"),
-    (ort::ErrorCode::ExecutionProviderFailure, "ORT_EP_FAIL"),
-    (ort::ErrorCode::GenericFailure, "ORT_FAIL"),
+const ORT_CODES: &[&str] = &[
+    "ORT_INVALID_ARGUMENT",
+    "ORT_NO_SUCHFILE",
+    "ORT_NO_MODEL",
+    "ORT_ENGINE_ERROR",
+    "ORT_RUNTIME_EXCEPTION",
+    "ORT_INVALID_PROTOBUF",
+    "ORT_MODEL_LOADED",
+    "ORT_NOT_IMPLEMENTED",
+    "ORT_INVALID_GRAPH",
+    "ORT_EP_FAIL",
+    "ORT_FAIL",
 ];
 
-pub fn worker_ort(phase: OrtPhase, code: ort::ErrorCode) {
+pub(crate) fn worker_ort(phase: OrtPhase, code: &'static str) {
     let phase = match phase {
-        OrtPhase::Initialize => "init-runtime",
-        OrtPhase::LoadModel => "load-model",
+        OrtPhase::Initialize => "初始化 ONNX Runtime",
+        OrtPhase::LoadModel => "加载 ONNX 模型",
     };
-    let kind = ORT_CODES.iter().find_map(|&(known, kind)| (code == known).then_some(kind)).unwrap_or("ORT_FAIL");
-    eprintln!("{PREFIX}{phase} {kind} 0");
-}
-
-pub(super) struct WorkerDetail {
-    pub phase: &'static str,
-    pub kind: &'static str,
-    pub code: Option<i32>,
-}
-
-pub(super) fn parse_worker_detail(line: &str) -> Option<WorkerDetail> {
-    let mut fields = line.strip_prefix(PREFIX)?.split(' ');
-    let phase = fields.next()?;
-    let kind = fields.next()?;
-    let code = fields.next()?.parse::<u16>().ok()?;
-    if fields.next().is_some() {
-        return None;
-    }
-    let (phase, kind) = match phase {
-        "read-request" | "resolve-runtime" => {
-            let phase = if phase == "read-request" { "读取 worker 请求" } else { "解析 ONNX Runtime 路径" };
-            let kind = match kind {
-                "not-found" => "找不到文件",
-                "permission" => "系统拒绝访问",
-                "invalid-data" => "文件内容无效",
-                "io" => "系统读写失败",
-                _ => return None,
-            };
-            (phase, kind)
-        }
-        "decode-request" if kind == "invalid-json" && code == 0 => ("解析 worker 请求", "JSON 格式无效"),
-        "init-runtime" if kind == "loader-panic" && code == 0 => ("初始化 ONNX Runtime", "加载器崩溃"),
-        "init-runtime" | "load-model" if code == 0 => {
-            let phase = if phase == "init-runtime" { "初始化 ONNX Runtime" } else { "加载 ONNX 模型" };
-            let kind = ORT_CODES.iter().find_map(|&(_, name)| (name == kind).then_some(name))?;
-            (phase, kind)
-        }
-        _ => return None,
-    };
-    Some(WorkerDetail { phase, kind, code: (code != 0).then_some(i32::from(code)) })
+    let kind = if ORT_CODES.contains(&code) { code } else { "ORT_FAIL" };
+    worker_detail(phase, kind, None);
 }
 
 pub(super) struct PanicSite {
     pub file: &'static str,
-    pub line: u16,
-    pub column: u16,
+    pub line: u32,
+    pub column: u32,
 }
 
-pub(super) fn panic_site(line: &str) -> Option<PanicSite> {
-    let (header, location) = line.split_once(" panicked at ")?;
-    if !header.starts_with("thread '") {
-        return None;
-    }
-    let location = location.strip_suffix(':')?;
-    let mut parts = location.rsplitn(3, ':');
-    let column = parts.next()?.parse().ok()?;
-    let line = parts.next()?.parse().ok()?;
-    if !(1..=512).contains(&column) || !(1..=10000).contains(&line) {
-        return None;
-    }
-    let path = parts.next()?.replace('\\', "/");
+pub(super) fn panic_site(location: &Location<'_>) -> Option<PanicSite> {
+    let path = location.file().replace('\\', "/");
     // 只匹配已核实的第一方 Rust 源文件名。Cargo 可报告从本包或仓库根开始的相对写法。
     // 第三方、绝对路径、任意未知 src/ 文件以及 panic 正文无法进入日志。
     let files = [
@@ -134,5 +93,5 @@ pub(super) fn panic_site(line: &str) -> Option<PanicSite> {
     ];
     let relative = path.strip_prefix("native/terms/").unwrap_or(&path);
     let file = files.into_iter().find(|&name| name == relative)?;
-    Some(PanicSite { file, line, column })
+    Some(PanicSite { file, line: location.line(), column: location.column() })
 }

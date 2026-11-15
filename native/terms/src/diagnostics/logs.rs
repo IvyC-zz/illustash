@@ -1,16 +1,18 @@
 //! 滚动日志只接受固定来源、原因、错误码和已核实的源码位置。原始 stderr 不进入写入器。
 use super::{create_private_directory, lock_directory, private_options, Cause};
 use details::PanicSite;
-pub use details::{worker_invalid_request, worker_io, worker_ort, worker_runtime_abi, IoPhase, OrtPhase};
+pub(crate) use details::{worker_invalid_fields, worker_ort, worker_runtime_abi, OrtPhase};
+pub use details::{worker_invalid_request, worker_io, IoPhase};
 use std::{
     fs,
     io::{self, BufRead, BufReader, Read, Write},
+    panic,
     path::{Path, PathBuf},
     process::{Command, ExitStatus},
     sync::{
         atomic::{AtomicU64, AtomicUsize, Ordering},
         mpsc::{self, SyncSender, TrySendError},
-        Arc, OnceLock,
+        Arc, Once, OnceLock,
     },
     thread,
     time::{Duration, Instant},
@@ -27,16 +29,52 @@ const LOCK_WAIT: Duration = Duration::from_millis(100);
 const DEDUP_WINDOW: Duration = Duration::from_secs(1);
 static DIAGNOSTICS: OnceLock<PathBuf> = OnceLock::new();
 static WRITER: OnceLock<Option<Writer>> = OnceLock::new();
+static WORKER_SOURCE: OnceLock<Source> = OnceLock::new();
+static PANICS: Once = Once::new();
 
 /// 桌面外壳启动宿主前传入的绝对诊断根。只影响滚动日志。
 pub const DESKTOP_ROOT_ENV: &str = "ILLUSTASH_DESKTOP_LOG_ROOT";
+const WORKER_ROOT_ENV: &str = "ILLUSTASH_WORKER_LOG_ROOT";
 
 pub(super) fn initialize(diagnostics: &Path, desktop_child: bool) {
     let inherited = if desktop_child { std::env::var_os(DESKTOP_ROOT_ENV).map(PathBuf::from) } else { None };
     let root = inherited.filter(|path| path.is_absolute()).or_else(|| std::path::absolute(diagnostics).ok());
     if let Some(root) = root {
         DIAGNOSTICS.get_or_init(|| root);
+        capture_panics(Source::Host);
     }
+}
+
+pub(crate) fn prepare_worker(command: &mut Command) {
+    if let Some(root) = root() {
+        command.env(WORKER_ROOT_ENV, root);
+    } else {
+        command.env_remove(WORKER_ROOT_ENV);
+    }
+}
+
+/// 由本应用启动的适配器直接写同一日志目录。不从 stderr 接收程序错误码或 panic 位置。
+pub fn initialize_worker(kind: &str, checking: bool) {
+    let Some(root) = std::env::var_os(WORKER_ROOT_ENV).map(PathBuf::from).filter(|path| path.is_absolute()) else {
+        return;
+    };
+    let source = Source::for_worker(kind, checking);
+    DIAGNOSTICS.get_or_init(|| root);
+    WORKER_SOURCE.get_or_init(|| source);
+    capture_panics(source);
+}
+
+fn capture_panics(source: Source) {
+    PANICS.call_once(|| {
+        let original = panic::take_hook();
+        panic::set_hook(Box::new(move |info| {
+            if let Some(site) = info.location().and_then(details::panic_site) {
+                record(source, "Rust 进程崩溃位置", None, Kind::Panic(site));
+                flush();
+            }
+            original(info);
+        }));
+    });
 }
 
 /// 桌面外壳把这个绝对路径传给宿主，避免相对应用数据目录受工作目录切换影响。
@@ -70,12 +108,15 @@ impl Source {
             .find(|(name, _)| *name == crate::app_tasks::WORKER_KIND_ENV)
             .and_then(|(_, value)| value)
             .and_then(|value| value.to_str());
+        Self::for_worker(kind.unwrap_or_default(), command.get_args().eq(["--check"]))
+    }
+    fn for_worker(kind: &str, checking: bool) -> Self {
         match kind {
-            Some("recognition") if command.get_args().eq(["--check"]) => Self::RecognitionCheck,
-            Some("recognition") => Self::Recognition,
-            Some("index") => Self::Index,
-            Some("research") => Self::Research,
-            Some("provenance") => Self::Provenance,
+            "recognition" if checking => Self::RecognitionCheck,
+            "recognition" => Self::Recognition,
+            "index" => Self::Index,
+            "research" => Self::Research,
+            "provenance" => Self::Provenance,
             _ => Self::Worker,
         }
     }
@@ -144,7 +185,7 @@ fn record(source: Source, reason: &'static str, code: Option<i32>, kind: Kind) {
         return;
     }
     let Some(writer) = WRITER.get_or_init(|| Writer::start().ok()) else { return };
-    let stderr = matches!(kind, Kind::Stderr | Kind::WorkerDetail(_) | Kind::Panic(_));
+    let stderr = matches!(kind, Kind::Stderr);
     // 给超时和退出等终态保留队列空间。任何一个 stderr 流刷屏都不能占满它。
     if stderr && writer.stderr.fetch_add(1, Ordering::Relaxed) >= STDERR_LIMIT {
         writer.stderr.fetch_sub(1, Ordering::Relaxed);
@@ -313,28 +354,21 @@ pub fn drain(source: Source, stderr: impl Read, mut on_line: impl FnMut(&[u8])) 
         line.extend_from_slice(&chunk[..text_length]);
         if end.is_some() || (consumed == 0 && !line.is_empty()) {
             let text = String::from_utf8_lossy(&line);
-            if let Some(detail) = details::parse_worker_detail(text.trim_end()) {
-                record(source, detail.phase, detail.code, Kind::WorkerDetail(detail.kind));
-            } else {
-                on_line(&line);
-                if let Some(site) = details::panic_site(text.trim_end()) {
-                    record(source, "Rust 进程崩溃位置", None, Kind::Panic(site));
-                }
-                match classify_stderr(&text) {
-                    Some(reason) => {
-                        if text.trim_start().starts_with(crate::app_tasks::WORKER_ERROR_PREFIX)
-                            || text.contains("panicked at")
-                        {
-                            failure = Some(reason);
-                        }
-                        let now = Instant::now();
-                        if previous.is_none_or(|(last, at)| last != reason || now.duration_since(at) >= DEDUP_WINDOW) {
-                            record(source, reason, None, Kind::Stderr);
-                            previous = Some((reason, now));
-                        }
+            on_line(&line);
+            match classify_stderr(&text) {
+                Some(reason) => {
+                    if text.trim_start().starts_with(crate::app_tasks::WORKER_ERROR_PREFIX)
+                        || text.contains("panicked at")
+                    {
+                        failure = Some(reason);
                     }
-                    None => previous = None,
+                    let now = Instant::now();
+                    if previous.is_none_or(|(last, at)| last != reason || now.duration_since(at) >= DEDUP_WINDOW) {
+                        record(source, reason, None, Kind::Stderr);
+                        previous = Some((reason, now));
+                    }
                 }
+                None => previous = None,
             }
             line.clear();
         }

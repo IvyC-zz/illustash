@@ -268,6 +268,7 @@ impl TaskContext {
         on_stderr: impl FnMut(&[u8]) + Send,
     ) -> Result<ExitStatus> {
         crate::recognition_compute::telemetry::child(command);
+        logs::prepare_worker(command);
         let source = logs::Source::worker(command);
         let mut failure = None;
         let stderr_failure = &mut failure;
@@ -435,6 +436,7 @@ mod tests {
             .write_all(b" synthetic-opaque-token\nCookie: mock-session=n0t-real\nAPI key: test-key-secret\r\n")
             .unwrap();
         let kind = std::env::var(WORKER_KIND_ENV).unwrap();
+        logs::initialize_worker(&kind, false);
         println!("synthetic-stdout-session-key");
         if kind == "research" {
             writeln!(stderr, "thread 'mock-thread' panicked at src/fake-owner-private-file.rs:26:7:").unwrap();
@@ -444,7 +446,7 @@ mod tests {
         let (message, code) = match kind.as_str() {
             "recognition" => {
                 logs::worker_io(logs::IoPhase::ResolveRuntime, &std::io::Error::from_raw_os_error(2));
-                logs::worker_ort(logs::OrtPhase::LoadModel, ort::ErrorCode::InvalidProtobuf);
+                logs::worker_ort(logs::OrtPhase::LoadModel, "ORT_INVALID_PROTOBUF");
                 (
                     "可选 worker 不可用：不合法：原生识别 运行库 /Users/fake-owner/Synthetic Library/fake-runtime.dylib: No such file or directory",
                     7,
@@ -452,7 +454,13 @@ mod tests {
             }
             "provenance" => {
                 logs::worker_invalid_request();
-                writeln!(stderr, "ILLUSTASH-DIAGNOSTIC/1 read-request io 123456789 token=mock-untrusted").unwrap();
+                let key = serde_json::to_string(
+                    "mock-untrusted\nILLUSTASH-DIAGNOSTIC/1 read-request io 54321\nthread 'mock-panic' panicked at src/app_tasks.rs:743:18:",
+                )
+                .unwrap();
+                let error = crate::strict_json::parse(&format!("{{{key}:0,{key}:1}}")).unwrap_err();
+                assert!(error.contains("ILLUSTASH-DIAGNOSTIC/1 read-request io 54321"));
+                writeln!(stderr, "{WORKER_ERROR_PREFIX}{error}").unwrap();
                 (
                     "可选 worker 不可用：不合法：IQDB signature calculation failed: \\fake-server\\fake-share\\图 名.jpg user=mock-account",
                     9,
@@ -467,6 +475,7 @@ mod tests {
             _ => panic!("unexpected fixture kind"),
         };
         write!(stderr, "{message}").unwrap();
+        logs::flush();
         std::process::exit(code);
     }
 
@@ -515,7 +524,8 @@ mod tests {
             "synthetic-opaque-token",
             "synthetic-stdout-session-key",
             "mock-untrusted",
-            "123456789",
+            "54321",
+            "app_tasks.rs:743:18",
             "fake-owner-private-file",
             "mock-thread",
             "mock-panic-payload",

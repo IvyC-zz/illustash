@@ -8,6 +8,7 @@ use ort::{
     logging::LogLevel,
     session::{builder::SessionBuilder, Session},
     value::Tensor,
+    ErrorCode,
 };
 use std::{
     path::{Path, PathBuf},
@@ -16,6 +17,22 @@ use std::{
 
 fn failure(context: &str, error: impl std::fmt::Display) -> Error {
     Error::invalid(format!("原生识别 {context}: {error}"))
+}
+
+fn ort_status(code: ErrorCode) -> &'static str {
+    match code {
+        ErrorCode::InvalidArgument => "ORT_INVALID_ARGUMENT",
+        ErrorCode::NoSuchFile => "ORT_NO_SUCHFILE",
+        ErrorCode::NoModel => "ORT_NO_MODEL",
+        ErrorCode::EngineError => "ORT_ENGINE_ERROR",
+        ErrorCode::RuntimeException => "ORT_RUNTIME_EXCEPTION",
+        ErrorCode::InvalidProtobuf => "ORT_INVALID_PROTOBUF",
+        ErrorCode::ModelLoaded => "ORT_MODEL_LOADED",
+        ErrorCode::NotImplemented => "ORT_NOT_IMPLEMENTED",
+        ErrorCode::InvalidGraph => "ORT_INVALID_GRAPH",
+        ErrorCode::ExecutionProviderFailure => "ORT_EP_FAIL",
+        _ => "ORT_FAIL",
+    }
 }
 static RUNTIME: OnceLock<std::result::Result<std::path::PathBuf, String>> = OnceLock::new();
 /// 在构建会话之前调用；一个子进程只绑定一个已安装的运行库。
@@ -37,7 +54,7 @@ pub fn initialise(runtime: &Path) -> Result<()> {
             })
             .and_then(|result| {
                 result
-                    .inspect_err(|error| logs::worker_ort(OrtPhase::Initialize, error.code()))
+                    .inspect_err(|error| logs::worker_ort(OrtPhase::Initialize, ort_status(error.code())))
                     .map(|_| requested.clone())
                     .map_err(|error| error.to_string())
             })
@@ -79,7 +96,7 @@ fn build(builder: SessionBuilder, path: &Path, threads: Option<usize>) -> Result
     }
     builder
         .commit_from_file(path)
-        .inspect_err(|error| logs::worker_ort(OrtPhase::LoadModel, error.code()))
+        .inspect_err(|error| logs::worker_ort(OrtPhase::LoadModel, ort_status(error.code())))
         .map_err(|e| failure(&path.display().to_string(), e))
 }
 /// 设置页显示的内容：运行库自己的原话，去掉错误种类，最多 300 个字符。
