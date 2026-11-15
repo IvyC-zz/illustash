@@ -57,7 +57,14 @@ class InstalledLocalProvenanceTest(Installed, local.NativeLocalProvenanceTest):
 
 @skip_linux
 class InstalledProvenanceMatchTest(Installed, match.NativeProvenanceMatchTest):
-    setUpClass = classmethod(Installed.setUpClass.__func__)
+    @classmethod
+    def setUpClass(cls):
+        cls._missing_numeric_candidate = None
+        try:
+            Installed.setUpClass.__func__(cls)
+        except unittest.SkipTest as error:
+            if not match.numeric_reference_mode.defer_missing(cls, error):
+                raise
 
 
 @skip_linux

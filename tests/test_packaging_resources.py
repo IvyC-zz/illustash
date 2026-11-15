@@ -13,6 +13,8 @@ import unittest
 from unittest.mock import patch
 import zipfile
 
+from tests.windows_fixed_suite import skip_allowed
+
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -442,19 +444,22 @@ class PackagingResourcesTest(unittest.TestCase):
 
 class CandidateExampleWiringTest(unittest.TestCase):
     def test_full_runners_build_and_export_each_current_candidate_before_discovery(self):
-        shell = (ROOT / 'tools/check_all.sh').read_text()
-        ci = (ROOT / '.github/workflows/ci.yml').read_text()
+        shell = (ROOT / 'tools/check_all.sh').read_text(encoding='utf-8')
+        ci = (ROOT / '.github/workflows/ci.yml').read_text(encoding='utf-8')
+        windows = ci.split('\n  windows:\n', 1)[1].split('\n  ok:\n', 1)[0]
         probes = {'READ_HTTP': 'read-http', 'RECOGNITION_COMPUTE': 'recognition-compute',
                   'INDEX_COMPUTE': 'index-compute', 'RESEARCH_COMPUTE': 'research-compute',
                   'RELATION_PROBE': 'relation-probe', 'PROVENANCE_COMPUTE': 'provenance-compute'}
         for key, example in probes.items():
-            for source in (shell, ci):
+            for source, suffix, runner in ((shell, '', 'tests.run_fixed_suite -v -b'),
+                                           (ci, '', 'tests.run_fixed_suite -v -b'),
+                                           (windows, '.exe', 'tests.windows_fixed_suite')):
                 build_at = source.index('--example ' + example)
                 export_at = source.index('ILLUSTASH_' + key + '_BIN')
-                discover_at = source.index('-m tests.run_fixed_suite -v -b')
+                discover_at = source.index('-m ' + runner)
                 self.assertLess(build_at, export_at)
                 self.assertLess(export_at, discover_at)
-                self.assertIn('native/terms/target/release/examples/' + example, source)
+                self.assertIn('native/terms/target/release/examples/' + example + suffix, source)
         # #4：只对目标为 main 的同库 PR 自动运行，不用带写权限和 secret 的 pull_request_target。
         self.assertIn('\n  pull_request:\n    branches: [main]\n', ci)
         self.assertNotIn('pull_request_target', ci)
@@ -468,7 +473,7 @@ class CandidateExampleWiringTest(unittest.TestCase):
         import re
         patterns = []
         for name in ('tools/check_all.sh', '.github/workflows/ci.yml'):
-            source = (ROOT / name).read_text()
+            source = (ROOT / name).read_text(encoding='utf-8')
             pattern = re.search(r"allowed=['\"]([^'\"]+)['\"]", source).group(1)
             patterns.append(pattern)
             for reason in ('Windows pinned OpenBLAS backend only',
@@ -482,6 +487,20 @@ class CandidateExampleWiringTest(unittest.TestCase):
                            'explicit authorised CCIP model/runtime required'):
                 self.assertNotRegex(reason, pattern)
         self.assertEqual(*patterns)
+
+    def test_windows_runner_checks_whole_skip_reason(self):
+        for reason in ('固定期望录自 POSIX，包名含 Windows 不允许的 ?',
+                       'Apple 照片图库只在 macOS 上提供',
+                       'Windows 上原生 worker 按设计拒绝启动（app_tasks），不适用'):
+            self.assertTrue(skip_allowed(f'synthetic.case ... skipped {reason!r}'), reason)
+            self.assertFalse(skip_allowed(f'synthetic.case ... skipped {reason!r} extra diagnostic'), reason)
+        for reason in ('explicit candidate math example and matching reference DLL required',
+                       'explicit authorised CCIP model/runtime required',
+                       'Windows DPAPI unavailable on POSIX',
+                       'POSIX: missing candidate',
+                       'not enough free space for the synthetic archive',
+                       'set ILLUSTASH_TERMS_BIN explicitly; absence is not upgrade acceptance'):
+            self.assertFalse(skip_allowed(f'synthetic.case ... skipped {reason!r}'), reason)
 
 
 class MacDesktopResourcesTest(unittest.TestCase):

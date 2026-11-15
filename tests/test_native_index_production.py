@@ -84,6 +84,18 @@ class IndexTransitionRoutingTest(CandidateIndexAdapter, unittest.TestCase):
 
 @unittest.skipUnless(sys.platform in ('darwin', 'win32'), 'Linux is frozen: no local computation')
 class InstalledIndexComputeTest(CandidateIndexAdapter, unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls._missing_numeric_candidate = None
+        try:
+            super().setUpClass()
+        except unittest.SkipTest as error:
+            if not compute.numeric_reference_mode.defer_missing(cls, error):
+                raise
+
+    def setUp(self):
+        compute.numeric_reference_mode.check_candidate(self)
+
     def test_fresh_empty_and_last_drop_clear_anchors_without_model_or_python(self):
         with tempfile.TemporaryDirectory(prefix='illustash-index-empty-') as tmp:
             root = Path(tmp); adapter, resources = self.install(root)
@@ -110,36 +122,39 @@ class InstalledIndexComputeTest(CandidateIndexAdapter, unittest.TestCase):
                 self.assertEqual((review/'char-anchors.txt').read_text(), '')
 
     def test_cached_clean_build_scan_exact_old_algorithm_without_python_or_models(self):
+        references = compute.numeric_reference_mode.references(self)
+        from tests import numpy_index_reference
         with tempfile.TemporaryDirectory(prefix='illustash-index-installed-') as tmp:
-            root = Path(tmp); adapter, resources = self.install(root)
-            old, new = root/'old', root/'new'; old.mkdir()
-            reference = compute.NativeIndexComputeTest()
-            tags, rows = reference.prepare(old); shutil.copytree(old, new)
-            results = []
-            for folder in (old, new):
-                identity = dict(package=str(folder), library_id='synthetic', generation=1,
-                                session='0'*64, task_id='1'*32)
-                request = dict(format='illustash-index/1', identity=identity, before='fixed',
-                               action='apply', rows=rows, review=str(folder), reason=None)
+            root=Path(tmp);adapter,resources=self.install(root)
+            old,new=root/'old',root/'new';old.mkdir()
+            reference=compute.NativeIndexComputeTest()
+            tags,rows=reference.prepare(old);shutil.copytree(old,new)
+            expected=[]
+            for kind in references:
+                folder=root/kind;shutil.copytree(old,folder)
+                identity=dict(package=str(folder),library_id='synthetic',generation=1,session='0'*64,task_id='1'*32)
+                request=dict(format='illustash-index/1',identity=identity,before='fixed',
+                             action='apply',rows=rows,review=str(folder),reason=None)
                 (folder/'request.json').write_text(json.dumps(request))
-                if folder == old:
-                    results.append(reference.legacy(old, tags, folder/'request.json'))
-                else:
-                    # 使用安装根目录里的夹具 tags，相对可执行文件找到。
-                    shutil.copy2(tags, resources/'tags/tags_v3.csv')
-                    result = subprocess.run([str(adapter), str(folder/'request.json'), str(folder/'response.json')],
-                                            env=self.isolated_env(resources), capture_output=True, timeout=10)
-                    self.assertEqual(result.returncode, 0, result.stderr.decode(errors='replace'))
-                    results.append(json.loads((folder/'response.json').read_text()))
-            self.assertEqual(sorted(results[0]['characters'], key=lambda c:c['char_id']),
-                             sorted(results[1]['characters'], key=lambda c:c['char_id']))
-            for key in ('aliases', 'labels'):
-                self.assertEqual(sorted(results[0][key]), sorted(results[1][key]), key)
-            for name in ('char-anchors.npy', 'char-index/new.npy', 'char-patch/raw/new.npy', 'char-patch/raw/twin.npy'):
-                np.testing.assert_array_equal(np.load(old/name), np.load(new/name))
-            self.assertEqual((old/'char-scan.csv').read_bytes(), (new/'char-scan.csv').read_bytes())
-            with contextlib.closing(sqlite3.connect(new/'pi.db')) as c, c:
-                self.assertEqual(c.execute("SELECT value,source FROM labels WHERE dim='general'").fetchall(), [('solo','human')])
+                result=(numpy_index_reference.cached_apply(folder,folder/'tags.csv',folder/'request.json') if kind=='numpy'
+                        else reference.legacy(folder,folder/'tags.csv',folder/'request.json'))
+                expected.append((kind,folder,result))
+            request.update(review=str(new),identity=dict(identity,package=str(new)))
+            (new/'request.json').write_text(json.dumps(request))
+            shutil.copy2(tags,resources/'tags/tags_v3.csv')
+            result=subprocess.run([str(adapter),str(new/'request.json'),str(new/'response.json')],
+                                  env=self.isolated_env(resources),capture_output=True,timeout=10)
+            self.assertEqual(result.returncode,0,result.stderr.decode(errors='replace'))
+            actual=json.loads((new/'response.json').read_text())
+            for kind,folder,value in expected:
+                with compute.numeric_reference_mode.comparing(self,kind):
+                    self.assertEqual(sorted(actual['characters'],key=lambda c:c['char_id']),
+                                     sorted(value['characters'],key=lambda c:c['char_id']))
+                    for key in ('aliases','labels'):
+                        self.assertEqual(sorted(actual[key]),sorted(value[key]),key)
+                    compute.checks.assert_index_files(self,new,folder,cached=True)
+                    with contextlib.closing(sqlite3.connect(new/'pi.db')) as db:
+                        self.assertEqual(db.execute("SELECT value,source FROM labels WHERE dim='general'").fetchall(),[('solo','human')])
 
     def test_check_and_invalid_requests_fail_before_python_and_without_response(self):
         with tempfile.TemporaryDirectory(prefix='illustash-index-invalid-') as tmp:

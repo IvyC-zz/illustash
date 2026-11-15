@@ -125,8 +125,8 @@ class NativeNamesTest(unittest.TestCase):
         def complete():
             value = json.loads(self.request('/api/names?progress=1')['body'])['state']
             return value if value['status']==status else False
-        wait_until(complete, timeout=8)
-        return json.loads(self.request('/api/names?progress=1')['body'])['state']
+        # 后续名称事件可以立即开始，断言轮询命中时的状态。
+        return wait_until(complete, timeout=8)
     def events(self):
         with closing(sqlite3.connect(self.lib.db)) as c:
             return c.execute("SELECT id,status,error FROM backend_effects WHERE kind LIKE 'names:%' ORDER BY id").fetchall()
@@ -278,7 +278,10 @@ class NativeNamesTest(unittest.TestCase):
     def test_query_source_changed_while_pending_rejects_old_name(self):
         self.enable();ident=self.alice
         self.service.block=True
-        self.request('/api/names',{'action':'refresh','entity':ident});self.assertTrue(self.service.entered.wait(3))
+        refresh=self.request('/api/names',{'action':'refresh','entity':ident})
+        self.assertEqual(refresh['status'],200,refresh['body'])
+        self.assertTrue(self.service.entered.wait(3))
+        event_id, _, _ = self.events()[-1]
         # 这期间保存了一个用户名称（以前经过旧 Store，现在走应用自己的路由）。
         edited=self.request('/api/character/profile',{'entity':ident,'name':'人工保留名'})
         self.assertEqual(edited['status'],200,edited['body'])
@@ -286,7 +289,7 @@ class NativeNamesTest(unittest.TestCase):
         self.assertIn('名称来源已改变',state['error'])
         profile=json.loads(self.request('/api/character/profile?entity='+urllib.parse.quote(ident))['body'])
         self.assertEqual(profile['user_name'],'人工保留名')
-        self.assertTrue(any(s=='pending' for _,s,_ in self.events()))
+        wait_until(lambda:(event_id,'pending',state['error']) in self.events(),timeout=8)
 
     def test_malformed_event_does_not_block_new_valid_request(self):
         self.enable()
