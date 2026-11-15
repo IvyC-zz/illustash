@@ -2725,5 +2725,6 @@
   "依赖的角色和作品": "Characters and series it depends on",
   "整库备份": "Full backup",
   "图库里有些图暂时读不到，不能排除是它们": "Some pictures in the library can't be read right now, so they can't be ruled out",
-  "同一张图，但这次没能读到它的内容来核验": "The same picture, but its content couldn't be read to verify it this time"
+  "同一张图，但这次没能读到它的内容来核验": "The same picture, but its content couldn't be read to verify it this time",
+  "已经写进这个图库。": "Written to this library."
 }

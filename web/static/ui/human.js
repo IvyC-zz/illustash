@@ -91,9 +91,11 @@ export function renderHumanBlock() {
 
 // ---------- 报告 ----------
 // 汇总：每一类计数各列一张表，不相加；冲突写明保留了目标图库的结论；没有改动时说没有新内容、不给撤销。
-export function reportSummary(r) {
+// undoable：这次导入现在还是顶栏撤销的那一步（之后有别的改动、或已经撤销过，就不是了）。
+export function reportSummary(r, undoable = r.undo != null) {
   const lines = [];
-  const lead = r.undo != null ? t('已经写进这个图库。可以整步撤销：点下面的「撤销这次导入」，或用顶栏的撤销按钮。') : t('没有新内容：图库没有改动，也没有可以撤销的步骤。下面是每一类的结果。');
+  const lead = r.undo == null ? t('没有新内容：图库没有改动，也没有可以撤销的步骤。下面是每一类的结果。')
+    : undoable ? t('已经写进这个图库。可以整步撤销：点下面的「撤销这次导入」，或用顶栏的撤销按钮。') : t('已经写进这个图库。');
   lines.push(`<p class="dialog-lead">${lead}</p>`);
   if (r.committed && r.pending_effects) lines.push(`<p class="muted-note">${t('收录结果还在后台更新，稍后会自己刷新，不需要重新导入。')}</p>`);
   if (conflictCount(r)) lines.push(`<p class="muted-note">${t('有 {n} 条和这个图库已有的结论冲突，都保留了这个图库的结论。', {n: number(conflictCount(r))})}</p>`);
@@ -128,9 +130,9 @@ export function reportDetails(page, total) {
 // 导入或恢复完成后的报告。只读，点背景可以关。
 export function openReport(r, restore = false) {
   if (!r) return null;
-  const undoable = r.committed && r.undo != null;
+  const undoable = r.committed && r.undo != null && edits.latest?.id === r.undo;
   const d = openDialog({title: restore ? t('从自动快照恢复：结果') : t('导入人工结论：结果'), backdropClose: true,
-    body: `${reportSummary(r)}${r.detail_count ? `<div data-details><button type="button" class="quiet small" data-page="0">${t('查看明细（{n} 条）', {n: number(r.detail_count)})}</button></div>` : ''}`,
+    body: `${reportSummary(r, undoable)}${r.detail_count ? `<div data-details><button type="button" class="quiet small" data-page="0">${t('查看明细（{n} 条）', {n: number(r.detail_count)})}</button></div>` : ''}`,
     actions: `${undoable ? `<button type="button" class="quiet" data-human-undo>${t('撤销这次导入')}</button>` : ''}<button value="ok" class="primary" autofocus>${t('完成')}</button>`});
   d.addEventListener('click', async e => {
     const page = e.target.closest('[data-page]'), back = e.target.closest('[data-human-undo]');
