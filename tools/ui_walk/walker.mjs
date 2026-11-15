@@ -82,6 +82,8 @@ export class Walker {
     await this.page.settle(settle);
     let snap;
     try { snap = await this.snapshot(); } catch (e) { snap = {error: String(e.message || e)}; }
+    if (error) this.check('动作执行成功', false, error);
+    if (snap.error) this.check('快照读取成功', false, snap.error);
     const console = this.page.drainConsole();
     const entry = {index, label, ms: Date.now() - begun, snap, console, ...(error ? {error} : {})};
     if (shot && this.shots) {
@@ -100,6 +102,8 @@ export class Walker {
   }
 
   result(extra = {}) {
+    const pending = this.page.drainConsole();
+    if (pending.length) this.steps.push({index: ++this.n, label: '流程收尾', snap: {}, console: pending});
     return {flow: this.flow, lang: this.lang, steps: this.steps, checks: this.checks, ...extra};
   }
 }

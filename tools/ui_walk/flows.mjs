@@ -135,7 +135,8 @@ export const FLOWS = [
       const scenes = [
         ['图库的详情栏', '#/library', async p => { await openCard(w, p, target); }],
         ['图库的大图', '#/library', async p => { await openCard(w, p, target); await p.key('Space'); }],
-        ['角色页的光标', `#/library?char=${encodeURIComponent(f.charIds[a.name])}`, async p => { await openCard(w, p, target); await p.key('Escape'); }],
+        // 固定时间排序，避免异步学习改变「可疑优先」顺序；本流程核对 C 的操作语义。
+        ['角色页的光标', `#/library?char=${encodeURIComponent(f.charIds[a.name])}&sort=newest`, async p => { await openCard(w, p, target); await p.key('Escape'); }],
       ];
       for (const [where, hash, open] of scenes) {
         await w.step(`${where}：打开`, async p => { await goto(p, hash); await open(p); });
@@ -295,7 +296,10 @@ export const FLOWS = [
     covers: ['#386 1-8'],
     async run(w, page) {
       let snap = await w.step('打开图库', () => goto(page, '#/library'));
-      await w.step('R18 只看全年龄（顶栏按钮）', p => p.key('h'));
+      await w.step('R18 只看全年龄（顶栏按钮，等提示消失）', async p => {
+        await p.key('h');
+        if (!await p.waitFor(`document.getElementById('toast').hidden`, 6000)) throw new Error('筛选提示没有消失');
+      });
       snap = await w.step('往下滚', async p => { for (let i = 0; i < 4; i++) { await p.scroll('#viewport', 600); await sleep(120); } await sleep(300); });
       const scrolled = snap.scroll;
       w.check('滚下去了', scrolled > 300, scrolled);

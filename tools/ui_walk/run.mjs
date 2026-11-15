@@ -18,11 +18,11 @@ if (args[0] === '--list') {
 const config = JSON.parse(readFileSync(args[args.indexOf('--config') + 1], 'utf8'));
 const flow = FLOWS.find(f => f.name === config.flow);
 if (!flow) { console.error('没有这条流程：' + config.flow); process.exit(2); }
-// 看门狗：别的会话在同一台机器上清理浏览器时 CDP 可能无声挂住，到时间就退出，由外层重试。
-let current = null, bootMs = null, bootReloads = 0;
+// 看门狗：CDP 或页面无响应时保留已完成步骤，直接报告失败。
+let current = null, bootMs = null;
 const watchdog = setTimeout(() => {
   console.error('走查超时：' + config.flow);
-  // 写出已经走过的步骤，便于看出挂在哪一步；外层会整条重跑一次。
+  // 写出已经走过的步骤，便于看出挂在哪一步。
   if (current) {
     const partial = current.result({title: flow.title, covers: flow.covers || [], crashed: `超时：最后完成的是第 ${current.n} 步`});
     try { writeFileSync(join(out, flow.name + '.partial.json'), JSON.stringify(partial, null, 1)); } catch { /* 写不了就算了 */ }
@@ -47,12 +47,11 @@ try {
   w.config = config;
   current = w;
   await boot(page, config.url);
-  page.drainConsole();
   await flow.run(w, page);
-  result = w.result({title: flow.title, covers: flow.covers || [], ms: Date.now() - started, bootMs, bootReloads});
+  result = w.result({title: flow.title, covers: flow.covers || [], ms: Date.now() - started, bootMs});
 } catch (e) {
-  result = {flow: flow.name, lang: config.lang, title: flow.title, covers: flow.covers || [], steps: [], checks: [],
-    crashed: String(e.stack || e), console: page.drainConsole(), ms: Date.now() - started};
+  const extra = {title: flow.title, covers: flow.covers || [], crashed: String(e.stack || e), ms: Date.now() - started};
+  result = current ? current.result(extra) : {flow: flow.name, lang: config.lang, steps: [], checks: [], ...extra};
 } finally {
   await page.close();
 }
@@ -60,18 +59,11 @@ writeFileSync(join(out, flow.name + '.json'), JSON.stringify(result, null, 1));
 clearTimeout(watchdog);
 process.exit(0);
 
-// 打开宿主的一次性码地址（换会话 cookie），等启动画面消失、页面挂好。宿主的连接线程池有竞态（#477）：启动时偶尔有
-// 模块请求要等 30 秒读超时才有回应。8 秒还没起来就重新载入（取消卡住的请求，在别的连接上重发），最多两次，再等到
-// 60 秒为止；耗时和重新载入的次数记在结果里，报告里单独列出，不算检查失败。
+// 打开宿主的一次性码地址（换会话 cookie），等启动画面消失、页面挂好；不刷新掩盖首次启动失败。
 async function boot(page, url) {
   const bootStart = performance.now(), booted = `document.getElementById('sidebar') && !document.getElementById('splash')`;
   await page.navigate(url);
-  let ready = await page.waitFor(booted, 8000);
-  for (bootReloads = 0; !ready && bootReloads < 2;) {
-    bootReloads++;
-    await page.send('Page.reload');
-    ready = await page.waitFor(booted, bootReloads < 2 ? 8000 : 45000);
-  }
+  const ready = await page.waitFor(booted, 15000);
   bootMs = Math.round(performance.now() - bootStart);
   if (!ready) {
     const why = await page.eval(`JSON.stringify({href: location.href.replace(/k=[^&#]+/, 'k=…'), title: document.title,

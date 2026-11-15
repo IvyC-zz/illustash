@@ -143,35 +143,38 @@ def run(args: argparse.Namespace) -> int:
 
 
 def run_flow(name, lang, pristine, root, core, browser, out, scratch, args) -> dict:
-    """一条流程：复制合成图库，起宿主，跑 node 驱动；驱动挂住（退出码 3）时整条重来一次。"""
-    for attempt in (1, 2):
-        library = pristine.reset()
-        work = scratch / 'flows' / f'{lang}-{name}-{attempt}'
-        work.mkdir(parents=True)
-        research = fixture.worker()
-        with Host(core, root, library, pristine.live,
-                  env={'ILLUSTASH_RESEARCH_WORKER': str(research)} if research else None) as host:
-            config = {'flow': name, 'lang': lang, 'url': host.url, 'port': browser.port, 'out': str(out),
-                      'names': pristine.names, 'fixture': pristine.contract(), 'shots': not args.no_shots, 'timeout': args.timeout}
-            path = work / 'config.json'
-            path.write_text(json.dumps(config, ensure_ascii=False), encoding='utf-8')
-            try:
-                code = subprocess.run([node(), str(HERE / 'run.mjs'), '--config', str(path)],
-                                      timeout=args.timeout + 30).returncode
-            except subprocess.TimeoutExpired:
-                code = 3
-            log = host.log_tail()
-        result_file = out / lang / f'{name}.json'
-        if code == 0 and result_file.exists():
-            result = json.loads(result_file.read_text(encoding='utf-8'))
-            if result.get('crashed'):
-                result['host_log'] = log
-            mark = '✗' if result.get('crashed') or any(not c['ok'] for c in result['checks']) else '✓'
-            print(f'  {mark} [{lang}] {name}', flush=True)
-            return result
-        print(f'  … [{lang}] {name} 第 {attempt} 次没有跑完（退出码 {code}）', flush=True)
-    return {'flow': name, 'lang': lang, 'steps': [], 'checks': [], 'crashed': f'驱动两次都没有跑完（退出码 {code}）',
-            'host_log': log}
+    """一条流程只运行一次；失败和超时连同已完成步骤交给报告。"""
+    library = pristine.reset()
+    work = scratch / 'flows' / f'{lang}-{name}'
+    work.mkdir(parents=True)
+    research = fixture.worker()
+    result_file = out / lang / f'{name}.json'
+    partial_file = out / lang / f'{name}.partial.json'
+    result_file.unlink(missing_ok=True)
+    partial_file.unlink(missing_ok=True)
+    with Host(core, root, library, pristine.live,
+              env={'ILLUSTASH_RESEARCH_WORKER': str(research)} if research else None) as host:
+        config = {'flow': name, 'lang': lang, 'url': host.url, 'port': browser.port, 'out': str(out),
+                  'names': pristine.names, 'fixture': pristine.contract(), 'shots': not args.no_shots, 'timeout': args.timeout}
+        path = work / 'config.json'
+        path.write_text(json.dumps(config, ensure_ascii=False), encoding='utf-8')
+        try:
+            code = subprocess.run([node(), str(HERE / 'run.mjs'), '--config', str(path)],
+                                  timeout=args.timeout + 30).returncode
+        except subprocess.TimeoutExpired:
+            code = 3
+        log = host.log_tail()
+    if code == 0 and result_file.exists():
+        result = json.loads(result_file.read_text(encoding='utf-8'))
+    else:
+        result = (json.loads(partial_file.read_text(encoding='utf-8')) if partial_file.exists()
+                  else {'flow': name, 'lang': lang, 'steps': [], 'checks': []})
+        result['crashed'] = result.get('crashed') or f'驱动没有跑完（退出码 {code}）'
+    if result.get('crashed'):
+        result['host_log'] = log
+    bad = result.get('crashed') or any(not c['ok'] for c in result['checks']) or any(s['console'] for s in result['steps'])
+    print(f"  {'✗' if bad else '✓'} [{lang}] {name}", flush=True)
+    return result
 
 
 def describe(source: dict) -> str:
@@ -199,9 +202,8 @@ def markdown(report: dict) -> str:
             lines += ['流程没有跑完：', '', '```', r['crashed'][:3000], '```', '']
         for c in r['checks']:
             lines.append(f"- {'✓' if c['ok'] else '✗'} 第 {c['step']} 步 {c['name']}" + (f"：{c['detail']}" if not c['ok'] and c['detail'] else ''))
-        if (r.get('bootMs') or 0) > SLOW_BOOT_MS or r.get('bootReloads'):
-            again = f"，重新载入 {r['bootReloads']} 次才起来" if r.get('bootReloads') else ''
-            lines.append(f"- ⚠ 页面启动用了 {r['bootMs'] / 1000:.1f} 秒{again}（宿主连接线程池的问题，见 #477），不算检查失败")
+        if (r.get('bootMs') or 0) > SLOW_BOOT_MS:
+            lines.append(f"- ⚠ 页面启动用了 {r['bootMs'] / 1000:.1f} 秒")
         for index, e in errors:
             lines.append(f"- ✗ 第 {index} 步控制台 {e['kind']}：{e['text'][:300]}")
         shots = [s['shot'] for s in r['steps'] if s.get('shot')]

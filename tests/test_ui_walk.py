@@ -94,6 +94,28 @@ class CompareTest(unittest.TestCase):
 
 @unittest.skipUnless(shutil.which('node'), '没有 node')
 class FlowListTest(unittest.TestCase):
+    def test_walker_keeps_errors_and_completed_steps(self):
+        script = '''
+            import {Walker} from './tools/ui_walk/walker.mjs';
+            let errors = [{kind: 'exception', text: '启动错误'}];
+            const page = {settle: async () => {}, eval: async () => ({}),
+                drainConsole: () => { const old = errors; errors = []; return old; }};
+            const w = new Walker(page, {flow: 'synthetic', lang: 'zh', shots: false});
+            await w.step('失败动作', async () => { throw new Error('点击失败'); });
+            page.eval = async () => { throw new Error('快照失败'); };
+            await w.step('失败快照', null);
+            errors.push({kind: 'exception', text: '收尾错误'});
+            process.stdout.write(JSON.stringify(w.result({crashed: '流程被打断'})));
+        '''
+        run = subprocess.run(['node', '--input-type=module'], input=script, cwd=ROOT,
+                             capture_output=True, text=True, check=True)
+        result = json.loads(run.stdout)
+        self.assertEqual(result['crashed'], '流程被打断')
+        self.assertEqual([c['detail'] for c in result['checks']], ['点击失败', '快照失败'])
+        self.assertTrue(all(not c['ok'] for c in result['checks']))
+        self.assertEqual([s['label'] for s in result['steps']], ['失败动作', '失败快照', '流程收尾'])
+        self.assertEqual([e['text'] for s in result['steps'] for e in s['console']], ['启动错误', '收尾错误'])
+
     def test_flows_are_listed_with_unique_names(self):
         out = subprocess.run(['node', str(ROOT / 'tools/ui_walk/run.mjs'), '--list'], capture_output=True, text=True,
                              check=True)
