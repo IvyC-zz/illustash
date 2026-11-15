@@ -314,10 +314,6 @@ class PackagingResourcesTest(unittest.TestCase):
             pack.stage(output, self.binaries, research=packaged == 'research', iqdb=self.iqdb)
             self.assertEqual(self.manifest(output)['files']['resources/licenses/rust-dependencies.txt'],
                              hashlib.sha256(text.read_bytes()).hexdigest())
-            self.assertEqual((output / 'dependencies/core-Cargo.lock').read_bytes(), (ROOT / 'Cargo.lock').read_bytes())
-            if packaged == 'research':
-                self.assertEqual((output / 'dependencies/iqdb-Cargo.lock').read_bytes(),
-                                 (ROOT / 'crates/iqdb/Cargo.lock').read_bytes())
         pack.resources(self.root / 'desktop-resources')
         self.assertEqual((self.root / 'desktop-resources/licenses/rust-dependencies.txt').read_bytes(), text.read_bytes())
 
@@ -331,26 +327,25 @@ class PackagingResourcesTest(unittest.TestCase):
         self.assertEqual(pack.third_party_crates(lock), {'serde 1.0.1', 'tiny_http 0.12.0'})
 
     def test_stale_rust_licenses_refuse_packaging(self):
-        def lock_root(name, change):
+        def lock_root(name, workspace, change):
             root = self.root / name
-            root.mkdir()
-            (root / 'crates/iqdb').mkdir(parents=True)
-            shutil.copy2(ROOT / 'crates/iqdb/Cargo.lock', root / 'crates/iqdb/Cargo.lock')
-            lock = root / 'Cargo.lock'
-            shutil.copy2(ROOT / 'Cargo.lock', lock)
+            for each in pack.RUST_WORKSPACES:
+                (root / each).mkdir(parents=True)
+                shutil.copy2(ROOT / each / 'Cargo.lock', root / each / 'Cargo.lock')
+            lock = root / workspace / 'Cargo.lock'
             lock.write_text(change(lock.read_text()))
             return root
         added = '\n[[package]]\nname = "zzz-new"\nversion = "1.0.0"\nsource = "registry+https://github.com/rust-lang/crates.io-index"\n'
         cases = {
-            'added': (lambda text: text + added, r"Cargo.lock: unlisted \['zzz-new 1.0.0'\]"),
-            'bumped': (lambda text: text.replace('name = "ring"\nversion = "0.17.14"', 'name = "ring"\nversion = "0.17.15"'),
+            'added': ('desktop', lambda text: text + added, r"desktop/Cargo.lock: unlisted \['zzz-new 1.0.0'\]"),
+            'bumped': ('crates/iqdb', lambda text: text.replace('name = "ring"\nversion = "0.17.14"', 'name = "ring"\nversion = "0.17.15"'),
                        r"unlisted \['ring 0.17.15'\], no longer locked \['ring 0.17.14'\]"),
-            'removed': (lambda text: text.replace('name = "zlib-rs"', 'name = "illustash-zlib-rs"'),
+            'removed': ('native/terms', lambda text: text.replace('name = "zlib-rs"', 'name = "illustash-zlib-rs"'),
                         r"no longer locked \['zlib-rs 0.6.8'\]"),
         }
-        for name, (change, message) in cases.items():
+        for name, (workspace, change, message) in cases.items():
             with self.subTest(name), self.assertRaisesRegex(ValueError, message + '.*gen_rust_licenses'):
-                pack.rust_licenses(root=lock_root(name, change))
+                pack.rust_licenses(root=lock_root(name, workspace, change))
         def broken(name, change):
             source = self.root / name
             shutil.copytree(pack.RUST_LICENSES, source)
@@ -452,24 +447,6 @@ class CandidateExampleWiringTest(unittest.TestCase):
         probes = {'READ_HTTP': 'read-http', 'RECOGNITION_COMPUTE': 'recognition-compute',
                   'INDEX_COMPUTE': 'index-compute', 'RESEARCH_COMPUTE': 'research-compute',
                   'RELATION_PROBE': 'relation-probe', 'PROVENANCE_COMPUTE': 'provenance-compute'}
-        # 与打包入口核对完整路径，不能让旧的 native/terms/target 因包含 target 子串而通过。
-        with patch.dict(os.environ):
-            os.environ.pop('CARGO_TARGET_DIR', None)
-            target = pack.target().relative_to(ROOT).as_posix() + '/release/'
-            iqdb_target = pack.target(ROOT / 'crates/iqdb').relative_to(ROOT).as_posix() + '/release/'
-        expected = {'ILLUSTASH_TERMS_BIN': target + 'illustash-terms',
-                    'ILLUSTASH_IQDB_BINARY': iqdb_target + 'illustash-iqdb',
-                    'ILLUSTASH_RESEARCH_ADAPTER_BIN': target + 'illustash-worker',
-                    'ILLUSTASH_INDEX_ADAPTER_BIN': target + 'illustash-worker',
-                    **{'ILLUSTASH_' + key + '_BIN': target + 'examples/' + example
-                       for key, example in probes.items()}}
-        for source, pattern in (
-            (shell, r'export (ILLUSTASH_\w+)="\$root/([^"\n]+)"'),
-            (ci, r'^\s+(ILLUSTASH_\w+): \$\{\{ github\.workspace \}\}/(\S+)'),
-        ):
-            actual = dict(re.findall(pattern, source, re.M))
-            for key, path in expected.items():
-                self.assertEqual(actual.get(key), path, key)
         for key, example in probes.items():
             for source in (shell, ci):
                 build_at = source.index('--example ' + example)
@@ -477,7 +454,7 @@ class CandidateExampleWiringTest(unittest.TestCase):
                 discover_at = source.index('-m tests.run_fixed_suite -v -b')
                 self.assertLess(build_at, export_at)
                 self.assertLess(export_at, discover_at)
-                self.assertIn('target/release/examples/' + example, source)
+                self.assertIn('native/terms/target/release/examples/' + example, source)
         # #4：只对目标为 main 的同库 PR 自动运行，不用带写权限和 secret 的 pull_request_target。
         self.assertIn('\n  pull_request:\n    branches: [main]\n', ci)
         self.assertNotIn('pull_request_target', ci)

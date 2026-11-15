@@ -20,7 +20,7 @@ pub const GROUPING: [&str; 6] = ["identical", "duplicate", "subtle", "crop", "va
 const KINDS: [&str; 8] = ["identical", "duplicate", "subtle", "crop", "variant", "edit", "similar", "unrelated"];
 const LABELS: [&str; 8] = ["完全相同", "重复", "细微差分", "局部重复", "差分", "局部编辑", "构图相似", "不同的图"];
 fn round(x: f64, places: i32) -> f64 {
-    // Python 的 round(float, digits) 对实际的二进制数按十进制舍入。
+    // 沿用旧实现的 round(float, digits)：对实际的二进制数按十进制舍入。
     // 先乘以 10^digits 会在恰好一半的情况下多引入一次舍入。
     format!("{x:.digits$}", digits = places as usize).parse().expect("finite decimal relation score")
 }
@@ -100,7 +100,7 @@ fn grey(x: &Plane) -> Result<Plane> {
 }
 fn cells(d: &Plane) -> (usize, usize, Vec<bool>) {
     let (rows, cols) = ((d.height / CELL).max(1), (d.width / CELL).max(1));
-    // 公共画布有一个轴短于 CELL 时，Python 的 reshape 会失败。
+    // 公共画布有一个轴短于 CELL 时，旧实现的 reshape 会失败。
     // 调用方把这种情况报告为不可读 / 待重试的一对，而不是编造格子。
     let mut out = vec![false; rows * cols];
     for y in 0..rows {
@@ -184,7 +184,7 @@ fn correlation(a: &Plane, b: &Plane) -> Result<f64> {
     let xx = dot(&a, &a).map_err(Error::Invalid)?;
     let yy = dot(&b, &b).map_err(Error::Invalid)?;
     let denominator = (xx * yy).sqrt();
-    // np 标量除以 Python 的 max(sqrt float32, 1e-6)：非平坦分支是 f32。
+    // 沿用旧实现：np 标量除以 max(sqrt float32, 1e-6)，非平坦分支是 f32。
     Ok(if denominator >= 1e-6 { f64::from(xy / denominator) } else { f64::from(xy) / 1e-6 })
 }
 fn covered(arr: &Plane, box_: (usize, usize, usize, usize), changed: &Plane) -> Option<&'static str> {
@@ -687,7 +687,7 @@ pub fn relate_all(images: &[(String, Loaded)]) -> Result<Value> {
 pub fn load(path: &Path) -> Result<Loaded> {
     relation_image::load(path)
 }
-/// 查询响应保持旧 Python 的插入顺序，包括请求里的尺寸顺序。这只是 HTTP 的序列化；
+/// 查询响应保持旧实现的插入顺序，包括请求里的尺寸顺序。这只是 HTTP 的序列化；
 /// 已存的表和指纹不变。
 pub(super) fn wire_result(result: &Value, ids: &Value) -> Result<crate::http_json::Json> {
     use crate::http_json::Json;

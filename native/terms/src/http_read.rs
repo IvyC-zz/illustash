@@ -514,7 +514,7 @@ pub(crate) fn sqlite_uri(path: &std::path::Path) -> String {
     format!("file:{encoded}?mode=ro")
 }
 
-// Python Store 每次启动只加载一次这个不会变的 CSV。只缓存这份词表，以私有的启动 generation 和 CSV 路径为键；
+// 这个 CSV 不会变（旧实现每次启动只加载一次）。只缓存这份词表，以私有的启动 generation 和 CSV 路径为键；
 // 从不保留图库连接。
 type TagVocabulary = (String, std::path::PathBuf, Arc<Vec<String>>);
 pub(crate) fn tag_vocabulary(context: &LibraryContext) -> Result<Arc<Vec<String>>> {

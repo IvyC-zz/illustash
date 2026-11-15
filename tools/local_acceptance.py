@@ -38,9 +38,7 @@ TAURI_METADATA = frozenset({
     'desktop/gen/schemas/desktop-schema.json',
     'desktop/gen/schemas/macOS-schema.json',
 })
-# 固定验收区在切换旧候选时仍可能留下原来各项目的 target；这些与根 target 一样只含可再生输出。
-OUTPUTS = ('.venv/', 'target/', 'native/terms/target/', 'crates/iqdb/target/',
-           'crates/core/target/', 'crates/platform/target/', 'desktop/target/')
+OUTPUTS = ('.venv/', 'native/terms/target/', 'crates/iqdb/target/', 'crates/core/target/', 'crates/platform/target/', 'crates/relation-fft/target/', 'desktop/target/')
 
 
 def digest(data):

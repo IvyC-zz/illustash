@@ -24,7 +24,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: .
+          workspaces: native/terms
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - uses: actions/setup-python@v5
         with:
@@ -33,7 +33,7 @@ jobs:
       - run: cargo build --release --locked --manifest-path native/terms/Cargo.toml
       - name: Entire upgrade class, no skipped acceptance
         env:
-          ILLUSTASH_TERMS_BIN: ${{ github.workspace }}/target/release/illustash-terms
+          ILLUSTASH_TERMS_BIN: ${{ github.workspace }}/native/terms/target/release/illustash-terms
           ILLUSTASH_NATIVE_ROOT: ${{ github.workspace }}
         run: |
           python - <<'PY'

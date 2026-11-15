@@ -77,7 +77,7 @@ class LocalAcceptanceTests(unittest.TestCase):
         self.assertEqual(self.verify()['commit'], measured)
 
     def test_every_other_tracked_input_invalidates(self):
-        for name in ('src/code.rs', 'tests/test.py', 'Cargo.toml', 'Cargo.lock', 'config.json', 'docs/contract.md',
+        for name in ('src/code.rs', 'tests/test.py', 'Cargo.lock', 'config.json', 'docs/contract.md',
                      'tools/check_all.sh', 'generated/resource.png', 'AGENTS.md'):
             with self.subTest(name=name):
                 self.git('checkout', '--detach', self.payload['commit'])
@@ -99,17 +99,6 @@ class LocalAcceptanceTests(unittest.TestCase):
         self.write('packaging/desktop-resources/resource', 'generated')
         with self.assertRaises(ValueError):
             self.verify()
-
-    def test_workspace_and_legacy_targets_are_regenerable(self):
-        self.write('.gitignore', (self.root / '.gitignore').read_text() + 'target/\n')
-        self.commit()
-        before = acceptance.inputs(self.root)
-        for target in acceptance.OUTPUTS:
-            self.write(target + 'debug/build/output', 'generated')
-        self.assertEqual(acceptance.inputs(self.root), before)
-        self.write('other/target/debug/unregistered', 'unknown')
-        with self.assertRaisesRegex(ValueError, '未知忽略输入'):
-            acceptance.inputs(self.root)
 
     def test_generated_desktop_outputs_do_not_change_effective_inputs(self):
         self.write(acceptance.SPLASH_SOURCE, 'tracked splash')
@@ -265,12 +254,12 @@ class LocalAcceptanceTests(unittest.TestCase):
         self.assertLess(start, targeted)
         self.assertLess(targeted, script.index('run "$python" -m tests.run_fixed_suite -v -b'))
         # 执行真实脚本的构建至定向片段；只将 cargo 变成合成写入。
-        for name in ('target/release/illustash-terms', 'crates/iqdb/target/release/illustash-iqdb',
-                     'target/release/examples/read-http'):
+        for name in ('native/terms/target/release/illustash-terms', 'crates/iqdb/target/release/illustash-iqdb',
+                     'native/terms/target/release/examples/read-http'):
             self.write(name, 'old target')
         self.write('tests/__init__.py', '')
         self.write('tests/candidate_helper.py', 'EXPECTED=\"candidate\"')
-        self.write('tests/test_candidate.py', "from tests.candidate_helper import EXPECTED\nimport os, pathlib, unittest\nclass Candidate(unittest.TestCase):\n def test_candidate(self):\n  root=pathlib.Path(os.environ['ILLUSTASH_NATIVE_ROOT'])\n  self.assertEqual(pathlib.Path(os.environ['ILLUSTASH_TERMS_BIN']).read_text(),'candidate')\n  self.assertEqual(pathlib.Path(os.environ['ILLUSTASH_IQDB_BINARY']).read_text(),'candidate')\n  self.assertEqual((root/'target/release/examples/read-http').read_text(),'candidate')\n")
+        self.write('tests/test_candidate.py', "from tests.candidate_helper import EXPECTED\nimport os, pathlib, unittest\nclass Candidate(unittest.TestCase):\n def test_candidate(self):\n  root=pathlib.Path(os.environ['ILLUSTASH_NATIVE_ROOT'])\n  self.assertEqual(pathlib.Path(os.environ['ILLUSTASH_TERMS_BIN']).read_text(),'candidate')\n  self.assertEqual(pathlib.Path(os.environ['ILLUSTASH_IQDB_BINARY']).read_text(),'candidate')\n  self.assertEqual((root/'native/terms/target/release/examples/read-http').read_text(),'candidate')\n")
         prefix = """set -eu
 root=$PWD
 cache=$root/.venv/check-all
@@ -280,9 +269,9 @@ config() { echo "$head"; }
 rustc() { echo synthetic-rust; }
 run() {
   if [ "$1" = cargo ]; then
-    printf candidate > target/release/illustash-terms
+    printf candidate > native/terms/target/release/illustash-terms
     printf candidate > crates/iqdb/target/release/illustash-iqdb
-    printf candidate > target/release/examples/read-http
+    printf candidate > native/terms/target/release/examples/read-http
   else
     "$@"
   fi

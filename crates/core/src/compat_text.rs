@@ -1,4 +1,4 @@
-//! 业务适配器和传输适配器共用的、与现有 Python 兼容的文本规则。
+//! 业务适配器和传输适配器共用的文本规则：空白集和 repr 式引号转义，与已存数据和既有响应一致（沿用旧实现）。
 pub fn whitespace(c: char) -> bool {
     c.is_whitespace() || ('\u{1c}'..='\u{1f}').contains(&c)
 }

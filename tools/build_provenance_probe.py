@@ -23,7 +23,7 @@ def main():
     parser.add_argument('--jobs', type=int, choices=(1, 2), default=2)
     args = parser.parse_args()
     root = Path(__file__).resolve().parents[1]
-    target = root / 'target'
+    target = root / 'native/terms/target'
     child = build_environment(os.environ)
     subprocess.run(['cargo', 'build', '--manifest-path', str(root / 'native/terms/Cargo.toml'),
                     '--locked', '--offline', f'-j{args.jobs}', '--target-dir', str(target),

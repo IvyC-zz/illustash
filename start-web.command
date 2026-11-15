@@ -5,7 +5,7 @@ if [[ -n "${ILLUSTASH_TERMS_BIN:-}" ]]; then
   CORE="$ILLUSTASH_TERMS_BIN"
 else
   CORE=""
-  for candidate in target/release/illustash-terms target/debug/illustash-terms; do
+  for candidate in native/terms/target/release/illustash-terms native/terms/target/debug/illustash-terms; do
     if [[ -x "$candidate" && ( -z "$CORE" || "$candidate" -nt "$CORE" ) ]]; then
       CORE="$PWD/$candidate"
     fi

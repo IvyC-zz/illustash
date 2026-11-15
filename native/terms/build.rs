@@ -3,7 +3,7 @@ fn main() {
     println!("cargo:rerun-if-changed=src/research_compute/relation_fft.cpp");
     println!("cargo:rerun-if-changed=vendor/pocketfft/pocketfft_hdronly.h");
     println!("cargo:rerun-if-changed=application.json");
-    println!("cargo:rerun-if-changed=../../Cargo.lock");
+    println!("cargo:rerun-if-changed=Cargo.lock");
     println!("cargo:rerun-if-changed=src");
     // 仓库根目录用绝对路径：git 返回的相对路径要拼到它上面再交给 cargo，
     // cargo 会把 rerun-if-changed 里的相对路径按包目录（native/terms）解析（#327）。

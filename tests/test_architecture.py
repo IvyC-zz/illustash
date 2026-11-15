@@ -15,9 +15,8 @@ class ArchitectureTest(unittest.TestCase):
                  ('platform', 'dev-dependencies', 'illustash-terms', '../../native/terms'),
                  ('core', 'target.\'cfg(windows)\'.build-dependencies', 'tiny_http', None),
                  ('platform', 'dependencies', 'tauri', None),
-                 ('desktop', 'dependencies', 'illustash-core', '../../crates/core'),
-                 ('fft', 'build-dependencies', 'illustash-core', '../core'),
-                 ('core', 'dev-dependencies', 'illustash-relation-fft', '../relation-fft')]
+                 ('fft', 'dependencies', 'illustash-terms', '../../native/terms'),
+                 ('desktop', 'dependencies', 'illustash-core', '../../crates/core')]
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
             for relative in MANIFESTS.values():
@@ -28,7 +27,7 @@ class ArchitectureTest(unittest.TestCase):
                 with self.subTest(owner=owner, table=table, package=package):
                     dest = root / MANIFESTS[owner]
                     original = dest.read_text()
-                    suffix = f'\n[{table}]\n' if f'[{table}]' not in original else None
+                    suffix = f'\n[{table}]\n' if table not in ('dependencies', 'dev-dependencies') or f'[{table}]' not in original else None
                     declaration = f'forbidden_alias = {{ package = "{package}", ' + (f'path = "{path}"' if path else 'version = "0.1"') + ' }\n'
                     if suffix:
                         mutated = original + suffix + declaration

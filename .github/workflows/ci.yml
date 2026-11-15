@@ -81,8 +81,11 @@ jobs:
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
           workspaces: |
-            .
+            native/terms
             crates/iqdb
+            crates/core
+            crates/platform
+            crates/relation-fft
       # http_browse 的对照测试调用 python3 运行参考实现。
       - uses: actions/setup-python@v5
         with:
@@ -108,7 +111,7 @@ jobs:
           cargo clippy --locked --manifest-path crates/platform/Cargo.toml --all-targets -- -D warnings
           cargo test --locked --manifest-path crates/platform/Cargo.toml
           cargo build --locked --manifest-path crates/platform/Cargo.toml
-      - name: Relation FFT fmt/clippy/test
+      - name: relation-fft fmt/clippy/test
         run: |
           cargo fmt --manifest-path crates/relation-fft/Cargo.toml --check
           cargo clippy --locked --manifest-path crates/relation-fft/Cargo.toml --all-targets -- -D warnings
@@ -144,8 +147,11 @@ jobs:
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
           workspaces: |
-            .
+            native/terms
             crates/iqdb
+            crates/core
+            crates/platform
+            crates/relation-fft
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
@@ -160,17 +166,17 @@ jobs:
           cargo build --release --locked --manifest-path crates/iqdb/Cargo.toml
       - name: unittest
         env:
-          ILLUSTASH_TERMS_BIN: ${{ github.workspace }}/target/release/illustash-terms
+          ILLUSTASH_TERMS_BIN: ${{ github.workspace }}/native/terms/target/release/illustash-terms
           ILLUSTASH_NATIVE_ROOT: ${{ github.workspace }}
           ILLUSTASH_IQDB_BINARY: ${{ github.workspace }}/crates/iqdb/target/release/illustash-iqdb
-          ILLUSTASH_READ_HTTP_BIN: ${{ github.workspace }}/target/release/examples/read-http
-          ILLUSTASH_RECOGNITION_COMPUTE_BIN: ${{ github.workspace }}/target/release/examples/recognition-compute
-          ILLUSTASH_INDEX_COMPUTE_BIN: ${{ github.workspace }}/target/release/examples/index-compute
-          ILLUSTASH_RELATION_PROBE_BIN: ${{ github.workspace }}/target/release/examples/relation-probe
-          ILLUSTASH_PROVENANCE_COMPUTE_BIN: ${{ github.workspace }}/target/release/examples/provenance-compute
-          ILLUSTASH_RESEARCH_COMPUTE_BIN: ${{ github.workspace }}/target/release/examples/research-compute
-          ILLUSTASH_RESEARCH_ADAPTER_BIN: ${{ github.workspace }}/target/release/illustash-worker
-          ILLUSTASH_INDEX_ADAPTER_BIN: ${{ github.workspace }}/target/release/illustash-worker
+          ILLUSTASH_READ_HTTP_BIN: ${{ github.workspace }}/native/terms/target/release/examples/read-http
+          ILLUSTASH_RECOGNITION_COMPUTE_BIN: ${{ github.workspace }}/native/terms/target/release/examples/recognition-compute
+          ILLUSTASH_INDEX_COMPUTE_BIN: ${{ github.workspace }}/native/terms/target/release/examples/index-compute
+          ILLUSTASH_RELATION_PROBE_BIN: ${{ github.workspace }}/native/terms/target/release/examples/relation-probe
+          ILLUSTASH_PROVENANCE_COMPUTE_BIN: ${{ github.workspace }}/native/terms/target/release/examples/provenance-compute
+          ILLUSTASH_RESEARCH_COMPUTE_BIN: ${{ github.workspace }}/native/terms/target/release/examples/research-compute
+          ILLUSTASH_RESEARCH_ADAPTER_BIN: ${{ github.workspace }}/native/terms/target/release/illustash-worker
+          ILLUSTASH_INDEX_ADAPTER_BIN: ${{ github.workspace }}/native/terms/target/release/illustash-worker
         run: |
           set -o pipefail
           # -b：失败测试的输出（如被测服务日志）附在末尾失败报告里，不散落在日志中段。
@@ -234,7 +240,12 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
-          workspaces: .
+          workspaces: desktop
+      - name: relation-fft fmt/clippy/test
+        run: |
+          cargo fmt --manifest-path crates/relation-fft/Cargo.toml --check
+          cargo clippy --locked --manifest-path crates/relation-fft/Cargo.toml --all-targets -- -D warnings
+          cargo test --locked --manifest-path crates/relation-fft/Cargo.toml
       - name: fmt
         run: cargo fmt --manifest-path desktop/Cargo.toml --check
       - name: clippy
@@ -256,7 +267,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
-          workspaces: .
+          workspaces: native/terms
       - name: 构建独立重放可执行文件
         run: |
           cargo test --release --locked --manifest-path native/terms/Cargo.toml --test contracts --no-run --message-format=json > "$RUNNER_TEMP/contracts-artifacts.jsonl"

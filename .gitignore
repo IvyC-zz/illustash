@@ -1,5 +1,4 @@
 .venv
-/target/
 review/
 models/
 reference/
@@ -14,3 +13,5 @@ __pycache__/
 /packaging/desktop-resources/
 
 packaging/desktop-compute/
+
+/crates/relation-fft/target/

@@ -324,7 +324,7 @@ fn handle(mut request: Request, host: &Host, received: u64) {
     http_host_get::handle(request, host, received);
 }
 
-// Python 的 library_action 把文件系统失败包装成 Invalid，而 SQLite 失败仍是 500。
+// 沿用旧实现 library_action 的分类：文件系统失败包装成 Invalid，SQLite 失败仍是 500。
 fn management_error(error: Error) -> Error {
     match error {
         Error::Io(e) => Error::Invalid(e.to_string()),

@@ -33,7 +33,7 @@ fn unit(row: &[f32]) -> Result<Vec<f32>> {
     let norm = squares.sqrt().max(1e-12);
     Ok(row.iter().map(|v| v / norm).collect())
 }
-/// f32 的矩形 (1-cos)/2，包括 Python 对零向量的下限处理。
+/// f32 的矩形 (1-cos)/2，包括旧实现对零向量的下限处理。
 pub fn cross(a: &[Vec<f32>], b: &[Vec<f32>]) -> Result<Vec<Vec<f32>>> {
     cross_checked(a, b, &|| Ok(()))
 }
@@ -263,7 +263,7 @@ pub(crate) fn claims_checked(
     for a in nearest_order(&distances).into_iter().take(9) {
         check()?;
         let character = &index.entities[a];
-        // Python 在检查第一个锚点的阈值之前就把别名标记为已见。
+        // 沿用旧实现：在检查第一个锚点的阈值之前就把别名标记为已见。
         if !seen.insert(character.clone()) {
             continue;
         }

@@ -22,9 +22,9 @@ class VersionTests(unittest.TestCase):
     def setUp(self):
         self.root = Path(tempfile.mkdtemp(prefix='illustash-version-'))
         self.addCleanup(shutil.rmtree, self.root)
-        files = [version.SOURCE, version.TAURI, *version.LOCKS]
+        files = [version.SOURCE, version.TAURI]
         for crate in version.CRATES:
-            files.append(f'{crate}/Cargo.toml')
+            files += [f'{crate}/Cargo.toml', f'{crate}/Cargo.lock']
         for relative in files:
             (self.root / relative).parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(ROOT / relative, self.root / relative)
@@ -45,13 +45,11 @@ class VersionTests(unittest.TestCase):
         self.assertIn(version.TAURI, paths)
         for crate in version.CRATES:
             self.assertIn(f'{crate}/Cargo.toml', paths)
-        for lock in version.LOCKS:
-            self.assertIn(lock, paths)
-        # 根与 IQDB 的 lock 分别列出各自的本项目 crate，从不列 registry crate。
+            self.assertIn(f'{crate}/Cargo.lock', paths)
+        # 每个 lock 文件列出它构建的本项目 crate，从不列 registry crate。
         names = {(path, name) for path, name, _ in version.places(ROOT) if path.endswith('.lock')}
-        self.assertIn(('Cargo.lock', 'illustash-terms'), names)
+        self.assertIn(('desktop/Cargo.lock', 'illustash-terms'), names)
         self.assertIn(('crates/iqdb/Cargo.lock', 'illustash-iqdb'), names)
-        self.assertIn(('Cargo.lock', 'illustash-relation-fft'), names)
         self.assertTrue(all(name.startswith('illustash-') for _, name in names))
 
     def test_set_rewrites_every_place_and_keeps_files_valid(self):
@@ -65,8 +63,7 @@ class VersionTests(unittest.TestCase):
         for crate in version.CRATES:
             manifest = tomllib.loads((self.root / crate / 'Cargo.toml').read_text())
             self.assertEqual(manifest['package']['version'], '0.2.0-beta.1')
-        for relative in version.LOCKS:
-            lock = tomllib.loads((self.root / relative).read_text())
+            lock = tomllib.loads((self.root / crate / 'Cargo.lock').read_text())
             for package in lock['package']:
                 if package['name'].startswith('illustash-'):
                     self.assertEqual(package['version'], '0.2.0-beta.1')
@@ -82,7 +79,7 @@ class VersionTests(unittest.TestCase):
 
     def test_sync_restores_a_hand_edited_place(self):
         self.edit('crates/core/Cargo.toml', 'version = "0.1.0"', 'version = "0.1.1"')
-        self.edit('Cargo.lock', 'name = "illustash-terms"\nversion = "0.1.0"', 'name = "illustash-terms"\nversion = "9.9.9"')
+        self.edit('desktop/Cargo.lock', 'name = "illustash-terms"\nversion = "0.1.0"', 'name = "illustash-terms"\nversion = "9.9.9"')
         self.assertEqual(version.sync(self.root), '0.1.0')
         self.assertEqual(version.check(self.root), [])
         for path, _, _ in version.places(self.root):
@@ -91,11 +88,11 @@ class VersionTests(unittest.TestCase):
     def test_check_names_each_mismatch(self):
         self.edit(version.TAURI, '"version": "0.1.0"', '"version": "0.1.1"')
         self.edit('crates/iqdb/Cargo.toml', 'version = "0.1.0"', 'version = "0.0.9"')
-        self.edit('Cargo.lock', 'name = "illustash-core"\nversion = "0.1.0"', 'name = "illustash-core"\nversion = "0.1.2"')
+        self.edit('native/terms/Cargo.lock', 'name = "illustash-core"\nversion = "0.1.0"', 'name = "illustash-core"\nversion = "0.1.2"')
         errors = version.check(self.root)
         self.assertEqual(len(errors), 3, errors)
         self.assertTrue(errors[0].startswith('desktop/tauri.conf.json: version 是 0.1.1'))
-        self.assertTrue(any(e.startswith('Cargo.lock: illustash-core 是 0.1.2') for e in errors))
+        self.assertTrue(any(e.startswith('native/terms/Cargo.lock: illustash-core 是 0.1.2') for e in errors))
         self.assertTrue(any(e.startswith('crates/iqdb/Cargo.toml: [package] version 是 0.0.9') for e in errors))
 
     def test_dependency_version_is_not_the_package_version(self):

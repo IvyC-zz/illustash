@@ -1,5 +1,5 @@
 //! 同步、刷新、重扫（方案第 7、9 节）：`refresh`、`reindex_characters`、`import_changes`、`_refresh_general_hits`
-//! 各是一个核心事务，逐行照 tests/reference/web/store.py（#9 已删除） 的旧顺序。Python 在锁内只读 source.sqlite，把要用的行交进来：
+//! 各是一个核心事务，逐行照 tests/reference/web/store.py（#9 已删除） 的旧顺序。宿主在锁内只读 source.sqlite，把要用的行交进来：
 //! 新图行、候选标签行、相册决定与映射、索引的角色 / 别名 / tag、重复组的全量分组、realistic 列表、时间戳文字。
 //! 候选写成证据批次（覆盖范围：refresh 全库、reindex 改动的图、import 新图与移除的图），兼容 `candidates`
 //! 由有效证据算出；相册结论是 album 批次上的裁决，照旧只在没有结论时写。
@@ -236,7 +236,7 @@ fn hierarchy(c: &Connection, rows: &[Value], ids: &Ids) -> Result<()> {
     };
     let by_id: HashMap<&str, &Value> = rows.iter().filter_map(|r| r["char_id"].as_str().map(|k| (k, r))).collect();
     let text = |v: &Value| v.as_str().unwrap_or("").to_owned();
-    // base_tag 为空时 Python 的键是 (None, copyright)；这里用 Option 保留「没有 base_tag」。
+    // base_tag 为空时键是（没有 base_tag, copyright），与旧实现一致；这里用 Option 保留「没有 base_tag」。
     let mut plain: HashMap<String, String> = HashMap::new();
     for r in rows {
         if let Some(base) = s(&r["base_tag"]) {
@@ -626,7 +626,7 @@ fn rederive(c: &Connection, args: &Value) -> Result<Value> {
     Ok(json!({"rederived": true}))
 }
 
-/// 启动时的 `_default_tags`（Python 的迁移跳过核心的表后，改由核心执行）。
+/// 启动时补默认标签（旧实现的 `_default_tags`，现由核心执行）。
 fn defaults(c: &Connection) -> Result<Value> {
     let n = default_tags(c)?;
     Ok(json!({"changed": n}))

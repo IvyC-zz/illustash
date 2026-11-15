@@ -111,7 +111,7 @@ pub fn prepare(library: &Library, root: &Path, url: &str) -> Result<Prepared, Fa
     let source = source.filter(|p| !p.is_empty()).ok_or(Failure::Status(404))?;
     let source = PathBuf::from(source);
     let stat = fs::metadata(&source).map_err(|_| Failure::Status(404))?;
-    // SystemTime 也允许纪元之前的时间戳；Python 的 st_mtime_ns 是有符号的。
+    // SystemTime 也允许纪元之前的时间戳；旧实现的 st_mtime_ns 也是有符号的。
     let modified = stat.modified().map_err(|_| Failure::Status(404))?;
     let nanos = match modified.duration_since(UNIX_EPOCH) {
         Ok(d) => d.as_nanos() as i128,
@@ -177,7 +177,7 @@ impl Images {
         let mut removed = 0;
         for entry in entries {
             let entry = entry?;
-            // Python glob('*.jpg')：直接子项，含隐藏名；Windows 用它默认的不区分大小写匹配，POSIX 区分大小写。
+            // 与旧实现的 glob('*.jpg') 相同：直接子项，含隐藏名；Windows 用它默认的不区分大小写匹配，POSIX 区分大小写。
             let name = entry.file_name();
             let name = name.as_encoded_bytes();
             let jpeg = name

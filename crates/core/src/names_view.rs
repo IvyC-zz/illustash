@@ -71,7 +71,7 @@ pub fn work_name(key: &str) -> Option<&'static str> {
     WORK_NAMES.iter().find(|(k, _)| *k == key).map(|(_, v)| *v)
 }
 
-/// Python 的 `str.title()`：前一个字符不是有大小写的字母时，本字符转成首字母大写，否则转小写。
+/// 词首大写（沿用旧实现 `str.title()` 的规则）：前一个字符不是有大小写的字母时，本字符转成首字母大写，否则转小写。
 fn title(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     let mut previous_cased = false;
