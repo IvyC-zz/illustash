@@ -517,6 +517,11 @@ impl Snapshot {
         &self.header
     }
 
+    /// 每条白名单记录的类别与源文件键；供宿主生成可分页的导出报告。
+    pub fn record_keys(&self) -> impl Iterator<Item = (&'static str, &str)> + '_ {
+        self.records.iter().map(Record::identity)
+    }
+
     /// 需要宿主核验完整内容的源资产键，包括已离开当前来源的资产。
     pub fn asset_keys(&self) -> impl Iterator<Item = &str> {
         self.records.iter().filter_map(|r| match r {
@@ -582,7 +587,7 @@ impl Snapshot {
     pub(crate) fn validate(&self) -> Result<()> {
         self.header.validate()?;
         if self.records.len() > MAX_RECORDS {
-            return invalid("人工结论记录过多");
+            return Err(Error::Limit("人工结论超过格式 v1 的记录数量上限".into()));
         }
         let mut ids = BTreeSet::new();
         let mut logical = BTreeSet::new();
@@ -681,6 +686,12 @@ impl Snapshot {
 
     /// 写出经过自校验的 JSONL；调用方负责私有临时文件、刷盘和原子发布。
     pub fn write(&self, output: &mut impl Write) -> Result<()> {
+        self.write_checked(output, &|| Ok(()))
+    }
+
+    /// 按行响应宿主取消，完整写入后仍由宿主决定是否发布文件。
+    pub fn write_checked(&self, output: &mut impl Write, check: &dyn Fn() -> Result<()>) -> Result<()> {
+        check()?;
         self.validate()?;
         let mut digest = Sha256::new();
         let mut bytes = 0;
@@ -688,6 +699,7 @@ impl Snapshot {
         write_line(output, &header, &mut bytes)?;
         digest.update(&header);
         for record in &self.records {
+            check()?;
             let line = encode(record)?;
             write_line(output, &line, &mut bytes)?;
             digest.update(line);
@@ -713,7 +725,7 @@ fn encode(value: &impl Serialize) -> Result<Vec<u8>> {
 fn write_line(out: &mut impl Write, line: &[u8], bytes: &mut u64) -> Result<()> {
     *bytes += line.len() as u64;
     if line.len() as u64 > MAX_LINE || *bytes > MAX_BYTES {
-        return invalid("人工结论文件超过大小上限");
+        return Err(Error::Limit("人工结论超过格式 v1 的文件或单行大小上限".into()));
     }
     out.write_all(line)?;
     Ok(())
@@ -724,12 +736,18 @@ fn decode<T: serde::de::DeserializeOwned>(value: serde_json::Value) -> Result<T>
 
 /// 严格读取一份完整快照；限制逐行读取长度，校验原始字节摘要、语义摘要及所有引用。
 pub fn read(input: &mut impl BufRead) -> Result<Snapshot> {
+    read_checked(input, &|| Ok(()))
+}
+
+/// 严格读取并在每行检查取消，解析成功前不打开目标写事务。
+pub fn read_checked(input: &mut impl BufRead, check: &dyn Fn() -> Result<()>) -> Result<Snapshot> {
     let mut digest = Sha256::new();
     let mut bytes = 0;
     let mut header = None;
     let mut records = Vec::new();
     let mut footer = None;
     loop {
+        check()?;
         let mut line = Vec::new();
         let n = (&mut *input).take(MAX_LINE + 1).read_until(b'\n', &mut line)?;
         if n == 0 {
@@ -737,7 +755,7 @@ pub fn read(input: &mut impl BufRead) -> Result<Snapshot> {
         }
         bytes += n as u64;
         if n as u64 > MAX_LINE || bytes > MAX_BYTES {
-            return invalid("人工结论文件超过大小上限");
+            return Err(Error::Limit("人工结论超过格式 v1 的文件或单行大小上限".into()));
         }
         if footer.is_some() {
             return invalid("人工结论文件尾部还有内容");
@@ -756,7 +774,7 @@ pub fn read(input: &mut impl BufRead) -> Result<Snapshot> {
             continue;
         } else {
             if records.len() == MAX_RECORDS {
-                return invalid("人工结论记录过多");
+                return Err(Error::Limit("人工结论超过格式 v1 的记录数量上限".into()));
             }
             records.push(decode::<Record>(value)?);
         }

@@ -437,7 +437,7 @@ fn imported_alias_on_existing_term_keeps_legacy_merge_provenance() {
     target.undo(result.action_id.unwrap()).unwrap();
     assert_eq!(target.count("SELECT count(*) FROM term_names WHERE role='alias'"), 0);
     assert_eq!(target.count("SELECT count(*) FROM terms"), 1);
-    import_file(&target.db, &target.id, &path, &|| Ok(())).unwrap();
+    let refreshed_import = import_file(&target.db, &target.id, &path, &|| Ok(())).unwrap();
     let tx = c.transaction().unwrap();
     crate::schema::begin_writing(&tx).unwrap();
     illustash_core::names_commands::one(&tx,&json!({"op":"danbooru_aliases","kind":"character","tag":"synthetic_alias-target-character","values":["可被更新器重建的别名"]})).unwrap();
@@ -455,6 +455,104 @@ fn imported_alias_on_existing_term_keeps_legacy_merge_provenance() {
         .unwrap()
         .iter()
         .any(|n| n["value"] == "可被更新器重建的别名" && n["provenance"] == "legacy_unknown"));
+    assert!(target.undo(refreshed_import.action_id.unwrap()).is_err());
+    assert_eq!(target.count("SELECT count(*) FROM term_names WHERE value='可被更新器重建的别名'"), 1);
+}
+
+#[test]
+fn current_profile_link_clear_protects_the_slot_while_other_public_links_can_fill() {
+    let source = Fixture::new("clear-source");
+    let target = Fixture::new("clear-target");
+    for (fixture, tag) in [(&source, "new-tag"), (&target, "")] {
+        let mut c = crate::open(&fixture.db).unwrap();
+        let tx = c.transaction().unwrap();
+        crate::schema::begin_writing(&tx).unwrap();
+        linked_character(&tx, "same-character", None);
+        crate::character_profile::set_profile(&tx, &json!({"entity":"same-character","tag":tag})).unwrap();
+        crate::schema::commit_writing(tx).unwrap();
+    }
+    let c = crate::open(&source.db).unwrap();
+    let term = crate::store::term_by_key(&c, "same-character").unwrap().unwrap().0;
+    crate::store::add_link(&c, term, "pixiv_user", "synthetic-public-link", "", "user").unwrap();
+    let path = source.root.join("clear.illustash-human.jsonl");
+    capture(&source.db, &source.id, &|| Ok(())).unwrap().write(&mut File::create(&path).unwrap()).unwrap();
+    let result = import_file(&target.db, &target.id, &path, &|| Ok(())).unwrap();
+    assert_eq!(result.definition_fields["link_conflict"], 1);
+    assert_eq!(result.definition_fields["link_applied"], 1);
+    let detail = result.details.iter().find(|d| d.kind == "entity" && d.record_key == "same-character").unwrap();
+    assert_eq!(detail.field_counts["link_conflict"], 1);
+    assert_eq!(detail.field_counts["link_applied"], 1);
+    assert_eq!(target.count("SELECT count(*) FROM term_links WHERE system='danbooru' AND current=1"), 0);
+    target.undo(result.action_id.unwrap()).unwrap();
+    assert_eq!(target.count("SELECT count(*) FROM term_links WHERE system='pixiv_user'"), 0);
+}
+
+#[test]
+fn hash_cache_reuses_verified_versions_keeps_offline_history_and_invalidates_changes() {
+    let fixture = Fixture::new("cache");
+    fixture.source();
+    let first = capture_mode(&fixture.db, &fixture.id, Mode::Cached, &|| Ok(())).unwrap();
+    assert_eq!(first.snapshot.coverage().missing, 4);
+    let filled = capture_mode(&fixture.db, &fixture.id, Mode::Fill, &|| Ok(())).unwrap();
+    assert_eq!(filled.snapshot.coverage().verified, 4);
+    let cached = capture_mode(&fixture.db, &fixture.id, Mode::Cached, &|| Ok(())).unwrap();
+    assert_eq!(cached.snapshot.coverage().verified, 4);
+    assert_eq!(cached.revision, filled.revision);
+    fs::remove_file(fixture.root.join("source-a.png")).unwrap();
+    let offline = capture(&fixture.db, &fixture.id, &|| Ok(())).unwrap();
+    assert_eq!(offline.coverage().last_known, 1);
+    let c = crate::open(&fixture.db).unwrap();
+    c.execute("INSERT INTO meta(key,value) VALUES ('folder_hash:a','observed-new-version')", []).unwrap();
+    assert_eq!(capture(&fixture.db, &fixture.id, &|| Ok(())).unwrap().coverage().missing, 1);
+    c.execute("DELETE FROM assets WHERE uuid='b'", []).unwrap();
+    assert_eq!(capture(&fixture.db, &fixture.id, &|| Ok(())).unwrap().coverage().last_known, 1);
+    c.execute("INSERT INTO meta(key,value) VALUES ('folder_hash:b','new-removed-version')", []).unwrap();
+    assert_eq!(capture(&fixture.db, &fixture.id, &|| Ok(())).unwrap().coverage().last_known, 0);
+    image::RgbImage::from_pixel(3, 3, image::Rgb([9u8, 8, 7])).save(fixture.root.join("source-c.png")).unwrap();
+    assert_eq!(
+        capture_mode(&fixture.db, &fixture.id, Mode::Cached, &|| Ok(())).unwrap().snapshot.coverage().missing,
+        3
+    );
+    fs::remove_file(fixture.root.join("source-c.png")).unwrap();
+    assert_eq!(capture(&fixture.db, &fixture.id, &|| Ok(())).unwrap().coverage().last_known, 0);
+}
+
+#[test]
+fn revisions_cover_unhistoried_structure_album_verdicts_and_undo_without_machine_noise() {
+    let fixture = Fixture::new("revisions");
+    fixture.source();
+    let mut c = crate::open(&fixture.db).unwrap();
+    let before = revision::read(&c).unwrap();
+    let tx = c.transaction().unwrap();
+    crate::schema::begin_writing(&tx).unwrap();
+    tx.execute("INSERT INTO term_evidence(asset_id,term_id,source,method,version,fingerprint)
+        SELECT a.id,t.id,'synthetic-machine','synthetic','1',zeroblob(16) FROM term_assets a,terms t WHERE a.key='a' AND t.key='source-artist'",[]).unwrap();
+    tx.execute("INSERT INTO term_names(term_id,lang,value,role,source) SELECT id,'zh','机器显示名','display','synthetic' FROM terms WHERE key='source-artist'",[]).unwrap();
+    crate::schema::commit_writing(tx).unwrap();
+    assert_eq!(revision::read(&c).unwrap(), before);
+    let tx = c.transaction().unwrap();
+    crate::schema::begin_writing(&tx).unwrap();
+    crate::character_commands::command(
+        &tx,
+        &json!({"op":"edit_work","action":"create","id":"new-work","name":"无历史作品","lang":"zh"}),
+    )
+    .unwrap();
+    assert!(revision::read(&tx).unwrap() > before);
+    tx.rollback().unwrap();
+    assert_eq!(revision::read(&c).unwrap(), before);
+    let tx = c.transaction().unwrap();
+    crate::schema::begin_writing(&tx).unwrap();
+    tx.execute("INSERT INTO term_batches(kind,anchor) VALUES ('album',1)", []).unwrap();
+    let batch = tx.last_insert_rowid();
+    tx.execute("INSERT INTO term_verdicts(batch_id,anchor,asset_id,term_id,verdict,origin,via)
+        SELECT ?1,1,a.id,t.id,'yes','album','album' FROM term_assets a,terms t WHERE a.key='a' AND t.key='source-artist'",[batch]).unwrap();
+    crate::schema::commit_writing(tx).unwrap();
+    let album = revision::read(&c).unwrap();
+    assert!(album > before);
+    let tx = c.transaction().unwrap();
+    crate::schema::begin_writing(&tx).unwrap();
+    tx.execute("UPDATE actions SET undone=1 WHERE id=1", []).unwrap();
+    assert!(revision::read(&tx).unwrap() > album);
 }
 
 #[test]
@@ -964,7 +1062,22 @@ fn same_library_replaced_or_offline_id_cannot_redirect_conclusions_to_a_copy() {
     let offline = import_file(&target.db, &target.id, &path, &|| Ok(())).unwrap();
     assert_eq!(offline.action_id, None);
     assert_eq!(offline.records["unverified_asset"], 8);
-    assert_eq!(offline.details.iter().filter(|d| d.reason.as_deref() == Some("same_id_unverified")).count(), 3);
+    assert_eq!(
+        offline
+            .details
+            .iter()
+            .filter(|d| d.kind != "asset" && d.reason.as_deref() == Some("same_id_unverified"))
+            .count(),
+        3
+    );
+    assert_eq!(
+        offline
+            .details
+            .iter()
+            .filter(|d| d.kind == "asset" && d.reason.as_deref() == Some("same_id_unverified"))
+            .count(),
+        1
+    );
     assert_eq!(target.count("SELECT count(*) FROM actions"), 0);
     assert_eq!(target.count("SELECT count(*) FROM term_verdicts"), 0);
     // 原 ID 真正离开候选集后，才允许按唯一内容认回。
@@ -1033,4 +1146,119 @@ fn incomplete_candidates_and_cancellation_do_not_create_partial_actions() {
     for table in ["actions", "curation", "deferred", "human_state_marks", "human_state_mark_undo"] {
         assert_eq!(target.count(&format!("SELECT count(*) FROM {table}")), 0);
     }
+}
+
+#[test]
+fn publication_preserves_existing_files_and_rotation_checks_only_owned_valid_snapshots() {
+    let fixture = Fixture::new("files");
+    let directory = files::directory(&fixture.db);
+    let snapshot = capture(&fixture.db, &fixture.id, &|| Ok(())).unwrap();
+    let destination = files::path(&directory, &snapshot.header().snapshot_id).unwrap();
+    files::Prepared::new(&snapshot, &destination, &|| Ok(())).unwrap().publish().unwrap();
+    let original = fs::read(&destination).unwrap();
+    assert!(files::Prepared::new(&snapshot, &destination, &|| Ok(())).unwrap().publish().is_err());
+    assert_eq!(fs::read(&destination).unwrap(), original);
+    assert!(files::Prepared::new(&snapshot, &directory.join("cancelled.jsonl"), &|| Err(Error::Conflict(
+        "cancelled".into()
+    )))
+    .is_err());
+    for _ in 0..30 {
+        let snapshot = capture(&fixture.db, &fixture.id, &|| Ok(())).unwrap();
+        let destination = files::path(&directory, &snapshot.header().snapshot_id).unwrap();
+        files::Prepared::new(&snapshot, &destination, &|| Ok(())).unwrap().publish().unwrap();
+    }
+    fs::write(directory.join("library-original.sqlite"), b"unrelated").unwrap();
+    fs::write(directory.join("human-ffff.illustash-human.jsonl"), b"incomplete").unwrap();
+    let mut catalog = files::list(&directory, &fixture.id, &|| Ok(())).unwrap();
+    assert_eq!(catalog.items.len(), 31);
+    assert_eq!(catalog.unreadable, 1);
+    assert!(files::prune(&directory, &mut catalog, 30, &|| Ok(())).is_none());
+    assert_eq!(catalog.items.len(), 30);
+    assert!(directory.join("library-original.sqlite").exists());
+    assert!(directory.join("human-ffff.illustash-human.jsonl").exists());
+    let old = files::path(&directory, &catalog.items.last().unwrap().backup_id).unwrap();
+    fs::write(&old, b"changed independently").unwrap();
+    assert!(files::prune(&directory, &mut catalog, 29, &|| Ok(())).is_some());
+    assert_eq!(fs::read(old).unwrap(), b"changed independently");
+    assert!(!fs::read_dir(directory).unwrap().any(|e| e.unwrap().file_name().to_string_lossy().ends_with(".tmp")));
+}
+
+#[test]
+fn denied_publication_rolls_back_conclusions_cache_and_reports_together() {
+    struct Cancel;
+    impl crate::app_imports::Observer for Cancel {
+        fn publish(&self, _apply: &mut dyn FnMut() -> Result<()>) -> Result<()> {
+            Err(Error::Conflict("cancelled before publication".into()))
+        }
+    }
+    let source = Fixture::new("cancel-source");
+    source.source();
+    let path = source.root.join("cancel.illustash-human.jsonl");
+    capture(&source.db, &source.id, &|| Ok(())).unwrap().write(&mut File::create(&path).unwrap()).unwrap();
+    let target = Fixture::new("cancel-target");
+    target.target();
+    assert!(import_run(&target.db, &target.id, &path, &|| Ok(()), &Cancel, "cancelled-report", None).is_err());
+    for table in ["actions", "term_verdicts", "human_asset_hashes", "human_import_reports", "human_import_report_rows"]
+    {
+        assert_eq!(target.count(&format!("SELECT count(*) FROM {table}")), 0, "{table}");
+    }
+}
+
+#[test]
+fn persisted_import_report_has_every_record_after_the_first_page() {
+    let source = Fixture::new("report-source");
+    let mut c = crate::open(&source.db).unwrap();
+    let tx = c.transaction().unwrap();
+    crate::schema::begin_writing(&tx).unwrap();
+    for n in 0..503 {
+        crate::store::create_term(&tx, crate::Kind::Concept, Some(&format!("synthetic-{n}")), "user").unwrap();
+    }
+    crate::schema::commit_writing(tx).unwrap();
+    let path = source.root.join("report.illustash-human.jsonl");
+    capture(&source.db, &source.id, &|| Ok(())).unwrap().write(&mut File::create(&path).unwrap()).unwrap();
+    let target = Fixture::new("report-target");
+    let (report, summary) =
+        import_run(&target.db, &target.id, &path, &|| Ok(()), &crate::app_imports::Silent, "full-report", None)
+            .unwrap();
+    assert!(report.action_id.is_some());
+    assert_eq!(report.details.len(), 503);
+    assert_eq!(summary["detail_count"], 503);
+    let page: serde_json::Value =
+        serde_json::from_str(&reports::page(&target.db, "full-report", 500, 500).unwrap().dump()).unwrap();
+    assert_eq!(page["details"].as_array().unwrap().len(), 3);
+    let (repeat, _) =
+        import_run(&target.db, &target.id, &path, &|| Ok(()), &crate::app_imports::Silent, "repeat-report", None)
+            .unwrap();
+    assert!(repeat.action_id.is_none());
+    assert_eq!(target.count("SELECT count(*) FROM human_import_reports"), 2);
+}
+
+#[test]
+fn snapshot_does_not_protect_a_human_edit_committed_during_its_read() {
+    let fixture = Fixture::new("concurrent-revision");
+    fixture.source();
+    let c = crate::open(&fixture.db).unwrap();
+    let before = revision::read(&c).unwrap();
+    let changed = std::cell::Cell::new(false);
+    let captured = capture_mode(&fixture.db, &fixture.id, Mode::Fill, &|| {
+        if !changed.replace(true) {
+            let mut writer = crate::open(&fixture.db)?;
+            let tx = writer.transaction()?;
+            crate::schema::begin_writing(&tx)?;
+            crate::character_commands::command(
+                &tx,
+                &json!({"op":"edit_work","action":"create","id":"concurrent-work","name":"并发新增作品","lang":"zh"}),
+            )?;
+            crate::schema::commit_writing(tx)?;
+        }
+        Ok(())
+    })
+    .unwrap();
+    assert!(changed.get());
+    assert_eq!(captured.revision, before);
+    assert!(revision::read(&c).unwrap() > captured.revision);
+    assert!(!captured.snapshot.record_keys().any(|(_, key)| key == "concurrent-work"));
+    let next = capture_mode(&fixture.db, &fixture.id, Mode::Cached, &|| Ok(())).unwrap();
+    assert_eq!(next.revision, revision::read(&c).unwrap());
+    assert!(next.snapshot.record_keys().any(|(_, key)| key == "concurrent-work"));
 }

@@ -153,6 +153,7 @@ fn every_request_needs_the_cookie_from_the_one_time_address() {
     let (status, _, body) = call("GET", &format!("{origin}/api/bootstrap"), &with, None);
     assert_eq!(status, 200, "{body}");
     let token = serde_json::from_str::<Value>(&body).unwrap()["token"].as_str().unwrap().to_owned();
+    human_conclusion_routes(&root, &origin, &[("Cookie", pair), ("Origin", &origin), ("X-CSRF-Token", &token)]);
     assert_eq!(call("GET", &format!("{origin}/app.js"), &with, None).0, 200);
     assert_eq!(call("GET", &format!("{origin}/?launched=1"), &with, None).0, 200);
     assert_eq!(call("GET", &format!("{origin}/image?id=synthetic&size=full"), &with, None).0, 404);
@@ -192,4 +193,85 @@ fn every_request_needs_the_cookie_from_the_one_time_address() {
         (state["model_api"]["configured"].clone(), state["model_api"]["base"].clone()),
         (json!(false), json!("https://attacker.invalid"))
     );
+}
+
+fn human_conclusion_routes(root: &std::path::Path, origin: &str, headers: &[(&str, &str)]) {
+    let get = |path: &str| {
+        let (status, _, body) = call("GET", &format!("{origin}{path}"), headers, None);
+        assert_eq!(status, 200, "{body}");
+        serde_json::from_str::<Value>(&body).unwrap()
+    };
+    let post = |path: &str, body: Value| {
+        let (status, _, text) = call("POST", &format!("{origin}{path}"), headers, Some(&body));
+        (status, serde_json::from_str::<Value>(&text).unwrap())
+    };
+    let poll = |path: &str, export: bool| {
+        let deadline = std::time::Instant::now() + Duration::from_secs(60);
+        loop {
+            let mut value = get(path);
+            if export {
+                value = value["export"].clone();
+            }
+            if !matches!(value["status"].as_str(), Some("running" | "stopping")) {
+                break value;
+            }
+            assert!(std::time::Instant::now() < deadline, "{value}");
+            thread::sleep(Duration::from_millis(20));
+        }
+    };
+    assert_eq!(post("/api/human-conclusions/export", json!({"unknown":1})).0, 400);
+    let (code, started) = post("/api/human-conclusions/export", json!({}));
+    assert_eq!(code, 200, "{started}");
+    assert_eq!(started["kind"], "human_export");
+    let exported = poll("/api/human-conclusions", true);
+    assert_eq!(exported["status"], "done", "{exported}");
+    assert_eq!(exported["committed"], true);
+    let summary = &exported["result"];
+    assert_eq!(
+        summary["detail_count"].as_u64().unwrap(),
+        summary["counts"]["exported"].as_u64().unwrap()
+            + summary["asset_counts"]["exported"].as_u64().unwrap()
+            + summary["definition_counts"]["exported"].as_u64().unwrap()
+    );
+    let path = PathBuf::from(exported["result"]["path"].as_str().unwrap());
+    assert_eq!(path.parent().unwrap(), root.join("home/Downloads"));
+    assert!(path.is_file());
+    let id = exported["result"]["report_id"].as_str().unwrap();
+    assert_eq!(get(&format!("/api/human-conclusions/report?id={id}"))["report"]["committed"], true);
+    assert_eq!(call("GET", &format!("{origin}/api/human-conclusions/report?id={id}&limit=501"), headers, None).0, 400);
+    assert_eq!(post("/api/human-conclusions/export/cancel", json!({"id":"wrong"})).0, 409);
+    let (code, started) = post("/api/human-conclusions/import", json!({"path":path}));
+    assert_eq!(code, 200, "{started}");
+    assert_eq!(started["kind"], "human_conclusions");
+    let imported = poll("/api/imports", false);
+    assert_eq!(imported["status"], "done", "{imported}");
+    assert_eq!(imported["result"]["committed"], true);
+    assert!(imported["result"]["undo"].is_null());
+    let id = imported["result"]["report_id"].as_str().unwrap();
+    assert_eq!(get(&format!("/api/human-conclusions/report?id={id}"))["report"]["report_id"], id);
+    let bad = root.join("bad-human.jsonl");
+    fs::write(&bad, vec![b' '; 4 * 1024 * 1024 + 1]).unwrap();
+    assert_eq!(post("/api/human-conclusions/import", json!({"path":bad})).0, 200);
+    let failed = poll("/api/imports", false);
+    assert_eq!(failed["code"], 413, "{failed}");
+    assert_eq!(failed["committed"], false);
+    fs::write(&bad, b"{}\n").unwrap();
+    assert_eq!(post("/api/human-conclusions/import", json!({"path":bad})).0, 200);
+    let failed = poll("/api/imports", false);
+    assert_eq!(failed["code"], 400, "{failed}");
+    assert_eq!(failed["committed"], false);
+    let deadline = std::time::Instant::now() + Duration::from_secs(60);
+    let automatic = loop {
+        let value = get("/api/human-conclusions")["automatic"].clone();
+        if value["snapshots"].as_array().is_some_and(|s| !s.is_empty()) {
+            break value;
+        }
+        assert!(std::time::Instant::now() < deadline, "{value}");
+        thread::sleep(Duration::from_millis(20));
+    };
+    let backup = automatic["snapshots"][0]["backup_id"].as_str().unwrap();
+    assert_eq!(post("/api/human-conclusions/restore", json!({"backup_id":backup})).0, 200);
+    let restored = poll("/api/imports", false);
+    assert_eq!(restored["status"], "done", "{restored}");
+    assert_eq!(post("/api/human-conclusions/restore", json!({"backup_id":"../outside"})).0, 400);
 }

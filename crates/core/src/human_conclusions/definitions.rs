@@ -193,7 +193,7 @@ fn signature(c: &Connection, id: i64) -> Result<String> {
     let mut value = Vec::new();
     for sql in [
         "SELECT * FROM term_records WHERE id=?1",
-        "SELECT term_id,lang,value,role,source,preferred,position FROM term_names
+        "SELECT term_id,lang,value,role,source,preferred,position,CASE WHEN source='user' THEN NULL ELSE seq END FROM term_names
             WHERE term_id=?1 ORDER BY role,lang,seq,source,value",
         "SELECT * FROM term_links WHERE term_id=?1 ORDER BY system,key",
         "SELECT * FROM term_tree WHERE term_id=?1",

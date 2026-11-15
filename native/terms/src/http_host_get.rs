@@ -179,6 +179,24 @@ fn read(request: &Request, host: &Host, session: &Session, path: &str) -> Result
         }
         // 导入槽位属于应用：切换图库后，页面仍能读到上一次导入为什么停下。
         "/api/imports" => Ok(Some((host.imports.state(), 200))),
+        "/api/human-conclusions" => Ok(Some((
+            Json::object([("automatic", session.human_backups.status()), ("export", session.human_exports.state())]),
+            200,
+        ))),
+        "/api/human-conclusions/report" => {
+            let q = crate::http_read::query(request.url());
+            let id = q.get("id").filter(|s| !s.is_empty()).ok_or_else(|| Error::invalid("需要报告编号"))?;
+            let parse = |key: &str, default: usize| -> Result<usize> {
+                q.get(key)
+                    .map(|v| v.parse::<usize>().map_err(|_| Error::invalid("分页参数不正确")))
+                    .unwrap_or(Ok(default))
+            };
+            let (offset, limit) = (parse("offset", 0)?, parse("limit", 100)?);
+            if limit == 0 || limit > 500 || offset > illustash_core::human_conclusions::format::MAX_RECORDS {
+                return Err(Error::invalid("每页须为 1–500 条，偏移不能超过格式记录上限"));
+            }
+            Ok(Some((session.human_exports.page(&session.library.db(), id, offset, limit)?, 200)))
+        }
         path if crate::app_local::ROUTES.contains(&path) => {
             crate::app_local::read(&session.context(&host.tags), request.url()).map(|p| Some((p, 200)))
         }

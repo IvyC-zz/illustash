@@ -32,7 +32,7 @@ impl Content {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "state", rename_all = "snake_case", deny_unknown_fields)]
 pub enum SourceHash {
-    /// 导出时在线读取完整字节且版本未变。
+    /// 导出时在线核验版本未变的完整摘要；允许复用相同来源版本、大小和 mtime 的缓存。
     Verified { content: Content, version: String },
     /// 已保存的完整历史摘要；当前离线，但尚未观察到对应版本失效。
     LastKnown { content: Content, version: String },

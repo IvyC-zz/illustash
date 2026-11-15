@@ -12,6 +12,39 @@ pub(crate) struct Added {
     link: Link,
 }
 
+// v8 普通资料快照能证明此角色曾有当前链接；现行唯一会清空该槽的入口是人工资料/作品编辑。
+// 只接受仍有效的已知资料载荷及仍属于本词条的那条链接；不把无链接或任意旧载荷推断为清空。
+fn cleared(c: &Connection, term: i64, key: &str) -> Result<bool> {
+    let work_clear:bool=c.query_row("SELECT EXISTS(SELECT 1 FROM term_tree WHERE term_id=?1 AND review_status='confirmed' AND review_note='外部链接已由用户清空')",[term],|r|r.get(0))?;
+    if work_clear {
+        return Ok(true);
+    }
+    for row in c
+        .prepare("SELECT before_json FROM actions WHERE undone=0 ORDER BY id DESC")?
+        .query_map([], |r| r.get::<_, String>(0))?
+    {
+        let Ok(value) = crate::strict_json::parse(&row?) else { continue };
+        let Ok(Some(items)) = crate::character_commands::owns(&value) else { continue };
+        for item in items {
+            let profile = &item["profile"];
+            if profile["entity"] != key {
+                continue;
+            }
+            for link in profile["links"].as_array().into_iter().flatten() {
+                if link[0] == "danbooru" && link[2] == 1 {
+                    if let Some(old) = link[1].as_str() {
+                        let inactive:bool=c.query_row("SELECT EXISTS(SELECT 1 FROM term_links WHERE term_id=?1 AND system='danbooru' AND key=?2 AND current=0)",params![term,old],|r|r.get(0))?;
+                        if inactive {
+                            return Ok(true);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    Ok(false)
+}
+
 pub(crate) fn plan(
     c: &Connection,
     key: &str,
@@ -38,11 +71,11 @@ pub(crate) fn plan(
             let occupied = source.tree.is_some()
                 && link.system == "danbooru"
                 && link.current
-                && c.query_row(
+                && (c.query_row(
                     "SELECT EXISTS(SELECT 1 FROM term_links WHERE term_id=?1 AND system='danbooru' AND current=1)",
                     [term],
                     |r| r.get::<_, bool>(0),
-                )?;
+                )? || cleared(c, term, key)?);
             if occupied {
                 "link_conflict"
             } else {

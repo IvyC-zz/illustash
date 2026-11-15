@@ -46,6 +46,35 @@
       "checks": [
         "native/terms/src/app_human_conclusions/tests.rs::identity_relation_context_roundtrips_and_respects_local_review_audit"
       ]
+    },
+    {
+      "name": "human_asset_hashes",
+      "introduced_in": 9,
+      "checks": [
+        "native/terms/src/app_human_conclusions/tests.rs::hash_cache_reuses_verified_versions_keeps_offline_history_and_invalidates_changes"
+      ]
+    },
+    {
+      "name": "human_backup_state",
+      "introduced_in": 9,
+      "checks": [
+        "native/terms/tests/it/entry.rs::every_request_needs_the_cookie_from_the_one_time_address"
+      ]
+    },
+    {
+      "name": "human_import_reports",
+      "introduced_in": 9,
+      "checks": [
+        "native/terms/src/app_human_conclusions/tests.rs::persisted_import_report_has_every_record_after_the_first_page"
+      ]
+    },
+    {
+      "name": "human_import_report_rows",
+      "introduced_in": 9,
+      "checks": [
+        "native/terms/src/app_human_conclusions/tests.rs::persisted_import_report_has_every_record_after_the_first_page",
+        "native/terms/src/app_human_conclusions/tests.rs::denied_publication_rolls_back_conclusions_cache_and_reports_together"
+      ]
     }
   ],
   "meta_keys": [

@@ -121,10 +121,14 @@ pub(crate) fn apply(c: &Connection, planned: Vec<Planned>) -> Result<Vec<Edit>> 
 pub(crate) fn undo(c: &Connection, edits: &[Edit]) -> Result<()> {
     for edit in edits {
         let current = rows(c, edit.term, &edit.lang, &edit.role)?;
-        // 普通资料撤销会重插用户名字并重新分配 seq；字段和组内顺序才是独立改动的判断单位。
+        // 普通资料撤销只重插 user 名字；提供方行的 seq 变化仍能证明它被独立重建过。
         if current.len() != edit.after.len()
             || current.iter().zip(&edit.after).any(|(a, b)| {
-                a.value != b.value || a.source != b.source || a.preferred != b.preferred || a.position != b.position
+                a.value != b.value
+                    || a.source != b.source
+                    || a.preferred != b.preferred
+                    || a.position != b.position
+                    || (a.source != "user" && a.seq != b.seq)
             })
         {
             return Err(Error::Conflict("导入后的名字组已有独立变化，无法安全撤销".into()));

@@ -660,7 +660,7 @@ fn truthy(v: &Value) -> bool {
 }
 
 pub fn command(c: &Connection, op: &str, args: &Value) -> Result<Option<Value>> {
-    Ok(Some(match op {
+    let result = match op {
         "create_entity" => create_entity(c, args)?,
         "create_linked" => create_linked(c, args)?,
         "shared_oc" => shared_oc(c, args)?,
@@ -677,5 +677,9 @@ pub fn command(c: &Connection, op: &str, args: &Value) -> Result<Option<Value>> 
         "set_profile" => crate::character_profile::set_profile(c, args)?,
         "link_local" => crate::character_profile::link_local(c, args)?,
         _ => return Ok(None),
-    }))
+    };
+    if op != "work_evidence" {
+        crate::human_conclusions::revision::changed(c)?;
+    }
+    Ok(Some(result))
 }

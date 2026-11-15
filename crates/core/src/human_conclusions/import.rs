@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet};
 
-/// 一条源逻辑记录的唯一处理结果；只返回最多 500 条明细。
+/// 一条源逻辑记录的处理结果；宿主持久化后按页提供全部明细。
 #[derive(Clone, Debug, Serialize)]
 pub struct Detail {
     /// 源记录类别。
@@ -24,6 +24,11 @@ pub struct Detail {
     pub result: String,
     /// 资产未核验等结果的具体原因；不与上层结果重复计数。
     pub reason: Option<String>,
+    /// 目标逻辑键各部分；未能认回时为空。
+    pub target_key: Option<Vec<String>>,
+    /// 已有依赖定义的独立名字组和链接结果；不与记录数相加。
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub field_counts: BTreeMap<String, usize>,
 }
 
 /// 单次导入结果；定义数和人工逻辑记录数分开计数。
@@ -39,10 +44,8 @@ pub struct Report {
     pub definition_fields: BTreeMap<String, usize>,
     /// 源资产按匹配结果分类的数量。
     pub assets: BTreeMap<String, usize>,
-    /// 有界明细；计数始终包含全部记录。
+    /// 全部源记录的结果；HTTP 单页限制由宿主应用，不能截断台账。
     pub details: Vec<Detail>,
-    /// 超出明细上限的条数。
-    pub details_omitted: usize,
     /// 需要宿主在同一事务刷新收录投影的目标资产。
     #[serde(skip)]
     pub touched: Vec<String>,
@@ -55,16 +58,14 @@ impl Report {
 
     fn record_reason(&mut self, record: &Record, result: &str, reason: Option<&str>) {
         *self.records.entry(result.into()).or_default() += 1;
-        if self.details.len() < 500 {
-            self.details.push(Detail {
-                kind: record.identity().0.into(),
-                record_key: record.identity().1.into(),
-                result: result.into(),
-                reason: reason.map(str::to_owned),
-            });
-        } else {
-            self.details_omitted += 1;
-        }
+        self.details.push(Detail {
+            kind: record.identity().0.into(),
+            record_key: record.identity().1.into(),
+            result: result.into(),
+            reason: reason.map(str::to_owned),
+            target_key: None,
+            field_counts: BTreeMap::new(),
+        });
     }
 }
 
@@ -389,8 +390,22 @@ pub fn apply_in(
     let matched = matching::match_assets(same_library, &source, candidates)?;
     let assets: BTreeMap<_, _> = source.iter().map(|a| a.key.as_str()).zip(&matched).collect();
     let mut report = Report::default();
-    for result in &matched {
+    for (source, result) in source.iter().zip(&matched) {
         *report.assets.entry(match_reason(result).into()).or_default() += 1;
+        report.details.push(Detail {
+            kind: "asset".into(),
+            record_key: source.key.clone(),
+            result: match_reason(result).into(),
+            reason: match result {
+                Match::Ambiguous { reason } | Match::Unverified { reason } => Some(reason.clone()),
+                _ => None,
+            },
+            target_key: match result {
+                Match::Matched { target, .. } => Some(vec![target.clone()]),
+                _ => None,
+            },
+            field_counts: BTreeMap::new(),
+        });
     }
     let mut terms = BTreeMap::new();
     let mut new_definitions = Vec::new();
@@ -479,24 +494,46 @@ pub fn apply_in(
     terms.retain(|source, _| !blocked.contains(source));
     let mut name_edits = Vec::new();
     let mut link_edits = Vec::new();
+    let mut field_counts = BTreeMap::new();
     for (source, target) in &terms {
         if !fresh.contains(source.as_str()) {
-            link_edits.extend(links::plan(c, target, source_entities[source.as_str()], &mut report.definition_fields)?);
+            let mut fields = BTreeMap::new();
+            link_edits.extend(links::plan(c, target, source_entities[source.as_str()], &mut fields)?);
             name_edits.extend(names::plan(
                 c,
                 target,
                 source_entities[source.as_str()],
                 existing_entities.get(target).copied(),
-                &mut report.definition_fields,
+                &mut fields,
             )?);
+            for (result, count) in &fields {
+                *report.definition_fields.entry(result.clone()).or_default() += count;
+            }
+            field_counts.insert(source, fields);
         }
     }
     for record in &snapshot.records {
         if let Record::Entity { key, .. } = record {
             if !terms.contains_key(key) {
                 *report.definitions.entry("blocked_dependency".into()).or_default() += 1;
+                report.details.push(Detail {
+                    kind: "entity".into(),
+                    record_key: key.clone(),
+                    result: "blocked_dependency".into(),
+                    reason: None,
+                    target_key: None,
+                    field_counts: BTreeMap::new(),
+                });
             } else if !fresh.contains(key.as_str()) {
                 *report.definitions.entry("matched_dependency".into()).or_default() += 1;
+                report.details.push(Detail {
+                    kind: "entity".into(),
+                    record_key: key.clone(),
+                    result: "matched_dependency".into(),
+                    reason: None,
+                    target_key: Some(vec![terms[key].clone()]),
+                    field_counts: field_counts.remove(key).unwrap_or_default(),
+                });
             }
         }
     }
@@ -621,6 +658,7 @@ pub fn apply_in(
         }
     }
     for (source, target) in mapped_records {
+        let target_key = key(&target);
         if pair(&target).is_some_and(|pair| pair_conflicts.contains(&pair)) {
             let conflict = match existing.get(&key(&target)) {
                 Some(before) => !equivalent(before, &target)?,
@@ -633,6 +671,7 @@ pub fn apply_in(
             report.record(source, "applied");
             planned.push(target);
         }
+        report.details.last_mut().expect("刚记录处理结果").target_key = Some(target_key);
     }
     let mut needed: BTreeSet<_> = planned.iter().flat_map(|r| r.terms().into_iter().map(str::to_owned)).collect();
     for record in &planned {
@@ -648,6 +687,14 @@ pub fn apply_in(
             || new.definition.names.iter().any(|n| matches!(n.provenance.as_str(), "user" | "legacy_merge"));
         let keep = human || needed.contains(&new.target_key);
         *report.definitions.entry(if keep { "applied" } else { "unneeded_dependency" }.into()).or_default() += 1;
+        report.details.push(Detail {
+            kind: "entity".into(),
+            record_key: new.source_key.clone(),
+            result: if keep { "applied" } else { "unneeded_dependency" }.into(),
+            reason: None,
+            target_key: keep.then(|| vec![new.target_key.clone()]),
+            field_counts: BTreeMap::new(),
+        });
         keep
     });
     if planned.is_empty() && new_definitions.is_empty() && name_edits.is_empty() && link_edits.is_empty() {

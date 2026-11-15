@@ -170,6 +170,7 @@ fn failure(request: Request, err: Error, write: bool) {
     });
     let (payload, status) = match err {
         Error::Invalid(message) => (error(&message), 400),
+        Error::Limit(message) => (error(&message), 413),
         Error::Network(message) => (error(&message), 502),
         Error::Conflict(message) => (error(&message), 409),
         err => {
