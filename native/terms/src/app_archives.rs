@@ -222,15 +222,23 @@ fn snapshot(library: &Library, work: &Path, cancel: &AtomicBool) -> Result<HashM
     };
     for _ in 0..SNAPSHOT_ATTEMPTS {
         cancelled(cancel)?;
-        let before = versions(&readers)?;
-        for (_, c, copy) in &readers {
-            if copy.try_exists()? {
-                fs::remove_file(copy)?;
+        let attempt = || -> Result<bool> {
+            let before = versions(&readers)?;
+            for (_, c, copy) in &readers {
+                if copy.try_exists()? {
+                    fs::remove_file(copy)?;
+                }
+                backup_into(c, copy, cancel)?;
             }
-            backup_into(c, copy, cancel)?;
-        }
-        if versions(&readers)? == before {
-            return Ok(readers.into_iter().map(|(rel, _, copy)| (rel, copy)).collect());
+            Ok(versions(&readers)? == before)
+        };
+        match attempt() {
+            Ok(true) => return Ok(readers.into_iter().map(|(rel, _, copy)| (rel, copy)).collect()),
+            Ok(false) => {}
+            // 写入者也会短暂挡住 data_version；与版本变化一样，重做整组快照。
+            Err(Error::Sql(rusqlite::Error::SqliteFailure(error, _)))
+                if error.code == rusqlite::ErrorCode::DatabaseBusy => {}
+            Err(error) => return Err(error),
         }
     }
     Err(invalid("导出期间图库一直在写入，请稍后再导出"))
@@ -688,6 +696,19 @@ mod tests {
                      WITH RECURSIVE n(i) AS (VALUES(1) UNION ALL SELECT i+1 FROM n WHERE i<1500) INSERT INTO bulk SELECT randomblob(4096) FROM n;",
                 )
                 .unwrap();
+        }
+        // 用真实排他锁稳定覆盖版本读取的 BUSY，不依赖机器负载碰中竞态。
+        // 两份数据库都检查：重试耗尽时不发布部分归档，解除锁后继续下面的一致性回归。
+        let locked_dest = root.join("locked-export.zip");
+        for db in [library.source(), library.db()] {
+            let lock = crate::sqlite::open(db).unwrap();
+            let mode: String = lock.query_row("PRAGMA journal_mode", [], |row| row.get(0)).unwrap();
+            lock.execute_batch("PRAGMA journal_mode=DELETE; BEGIN EXCLUSIVE;").unwrap();
+            let error = export(&library, &locked_dest, &Arc::new(AtomicBool::new(false))).unwrap_err();
+            assert!(matches!(error, Error::Invalid(ref m) if m.contains("一直在写入")), "{error}");
+            assert!(!locked_dest.exists());
+            lock.execute_batch("ROLLBACK").unwrap();
+            lock.pragma_update(None, "journal_mode", mode).unwrap();
         }
         let stop = Arc::new(AtomicBool::new(false));
         let writer = {
