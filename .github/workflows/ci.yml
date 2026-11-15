@@ -330,7 +330,7 @@ jobs:
       # main 上测试失败也保存依赖缓存：Windows 失败时不能让下一批 PR 回到冷编译。
       - uses: Swatinem/rust-cache@v2
         with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          save-if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/claude/501-windows-ci-bf7390' }}  # 临时：#501 测热缓存
           cache-on-failure: true
           workspaces: |
             native/terms
