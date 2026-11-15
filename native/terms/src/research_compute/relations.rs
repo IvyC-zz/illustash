@@ -730,19 +730,72 @@ pub(super) fn wire_result(result: &Value, ids: &Value) -> Result<crate::http_jso
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[test]
-    #[cfg(windows)]
-    fn windows_grey_keeps_numpy_rowwise_dot_gemv_and_tail_bits() {
-        use sha2::{Digest, Sha256};
-        // 独立的 NumPy 2.5.3 / 固定版本的 Windows wheel，在运行候选之前采集。
-        // 图片的每一行各自是一个 (width,3) 矩阵。
-        for (width, expected) in [
+    fn windows_grey_reference(identity: &str) -> Option<&'static [(usize, &'static str)]> {
+        // 固定 DLL 的 config 包含实际活动内核；参考选择不读取被测输出。
+        let fields: Vec<_> = identity.split_whitespace().collect();
+        let [digest, "OpenBLAS", "0.3.34.106.0", "USE64BITINT", "DYNAMIC_ARCH", "NO_AFFINITY", core, "MAX_THREADS=24"] =
+            fields.as_slice()
+        else {
+            return None;
+        };
+        if *digest != "ed4f167a5330424524f45258e7ca2c8d7f03c0cba1f30ee4985553ac1f88ecf8" {
+            return None;
+        }
+        // 原五个独立 NumPy 期望保持不变；已验证其适用于此 DLL 的 SkylakeX 内核。
+        const SKYLAKEX: &[(usize, &str)] = &[
             (1, "094256784222d3d11ef82a2d76fb6c4274e6f8c5a0ef8a581c4b4548bf49845b"),
             (3, "efa1fbf05614a3ce44e8824636d74ea27f6abcbfd87773e075c1f1b7d651f500"),
             (17, "360fd9fa9eae551b7d04ce31eda3c30f6a9030a0cd8b5df08c5b83a16511d29c"),
             (37, "3a72d39f9b43be83ce811afcab7ca457fe3acf07b2538f61f9a74a2be4db21de"),
             (600, "7724157b714a9e4c5fefcb835df66750abd745873d5d8969ce0dff64889413ee"),
+        ];
+        // NumPy 2.5.3 在候选编译前独立采集；Haswell 与 Sandybridge 各自验证后逐位相同。
+        // 来源：GitHub run 43630158222，artifact 14127612345（grey-numpy-before-build）。
+        // ZIP SHA-256：970d85420042e0a7b8dae1500b3fdf03dc4febb0ea20edbfdf0f00e2a41cece6。
+        const HASWELL_SANDYBRIDGE: &[(usize, &str)] = &[
+            (1, "094256784222d3d11ef82a2d76fb6c4274e6f8c5a0ef8a581c4b4548bf49845b"),
+            (3, "efa1fbf05614a3ce44e8824636d74ea27f6abcbfd87773e075c1f1b7d651f500"),
+            (17, "b7fc33e38c47e6440d5af60a30cc73cf0738622cc6b11430674d92e6b176bdbb"),
+            (37, "b45d600d8d790c30a3e24ee93ca4e41c8c532412b3bde04ead313024144d092b"),
+            (600, "27247e81f757460881826d4689bb15022b208cf182e4d6e25f4e84e0703863c7"),
+        ];
+        match *core {
+            "SkylakeX" => Some(SKYLAKEX),
+            "Haswell" | "Sandybridge" => Some(HASWELL_SANDYBRIDGE),
+            _ => None,
+        }
+    }
+    #[test]
+    fn windows_grey_reference_requires_verified_dll_and_core() {
+        let prefix = "ed4f167a5330424524f45258e7ca2c8d7f03c0cba1f30ee4985553ac1f88ecf8 \
+                      OpenBLAS 0.3.34.106.0  USE64BITINT DYNAMIC_ARCH NO_AFFINITY";
+        let identity = |core| format!("{prefix} {core} MAX_THREADS=24");
+        let skylakex = windows_grey_reference(&identity("SkylakeX")).unwrap();
+        let haswell = windows_grey_reference(&identity("Haswell")).unwrap();
+        let sandybridge = windows_grey_reference(&identity("Sandybridge")).unwrap();
+        assert_eq!(haswell, sandybridge);
+        assert_ne!(skylakex, haswell);
+        assert_eq!(haswell.iter().map(|&(width, _)| width).collect::<Vec<_>>(), [1, 3, 17, 37, 600]);
+        for unknown in [
+            identity("Cooperlake"),
+            identity("unknown"),
+            identity("Haswell").replacen(prefix.split_whitespace().next().unwrap(), "unregistered-digest", 1),
+            identity("SkylakeX").replace("USE64BITINT", "USE32BITINT"),
+            String::new(),
         ] {
+            assert!(windows_grey_reference(&unknown).is_none(), "不得为未验证身份选择参考：{unknown}");
+        }
+    }
+    #[test]
+    #[cfg(windows)]
+    fn windows_grey_keeps_numpy_rowwise_dot_gemv_and_tail_bits() {
+        use sha2::{Digest, Sha256};
+        let identity = illustash_platform::platform_research_math::windows_backend_identity().unwrap();
+        let reference = windows_grey_reference(&identity).unwrap_or_else(|| {
+            panic!("缺少该 DLL/内核的独立灰度参考；请先独立采集，禁止跳过或重录候选输出：{identity}")
+        });
+        // 图片的每一行各自是一个 (width,3) 矩阵；选择参考后仍逐位比较全部宽度。
+        for &(width, expected) in reference {
             let pixels = (0..3 * width * 3).map(|i| ((i * 71 + 19) % 256) as f32).collect();
             let grey = grey(&Plane::new(width, 3, 3, pixels).unwrap()).unwrap();
             let mut hash = Sha256::new();
