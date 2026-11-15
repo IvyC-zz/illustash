@@ -138,7 +138,7 @@ HTTP 测试共用 `tests/test_read_http.py` 的端口、等待和进程清理工
 
 - **条目**：`kind`（`python` 或 `rust`）、`id`、`platforms`（`macos`、`windows`）、`issue`、`added`、`expires`；Rust 条目另写 `crate`（Cargo 项目目录，如 `native/terms`）。Python 的 `id` 是 discover 下的测试 ID（`test_native_research.NativeResearchTest.test_x`），Rust 的 `id` 是 libtest 名称（`app_sync::tests::test_x`，集成测试不带二进制名）。到期日默认加入后两周。
 - **效果**：名单里的测试照常运行；在条目列出的平台上，它们的失败（含 subTest 和 setUp 的失败）不计入结果，在输出和 job 摘要里单列「隔离名单中的失败（不计入结果）」。别的平台照常计入。
-- **校验**：名单格式错误、条目到期（运行当天晚于 `expires`）、名单里的测试找不到时，检查失败。Python 条目由 `tests.run_fixed_suite` 在 discover 后核对，Rust 条目由 `cargo-test` 入口用 `cargo test -- --list` 核对。`python tools/quarantine.py check` 只查格式和到期，`tools/check_all.sh` 一开头就跑它。
+- **校验**：名单格式错误、条目到期（运行当天晚于 `expires`）、名单里的测试找不到时，检查失败。Python 条目由 `tests.run_fixed_suite` 在 discover 后核对，各平台都核对；Rust 条目由 `cargo-test` 入口用 `cargo test -- --list` 核对，只在条目列出的平台上核对，因为 Rust 测试常按平台条件编译（如桌面壳的进程树测试只在 Unix 上有）。`python tools/quarantine.py check` 只查格式和到期，`tools/check_all.sh` 一开头就跑它。
 - **Rust 的做法**：`python tools/quarantine.py cargo-test --manifest-path <项目>/Cargo.toml` 代替 `cargo test`：先 `--exact --skip` 掉本平台的条目跑其余测试，由它决定退出码；再用 `--exact` 逐个单独运行这些条目，只汇报。本机全量、`macos-full.yml`、`windows-full.yml` 都经这个入口。
 - **用到它的入口**：本机全量、两份定时回归和 Windows 快检用同一份名单。定向复跑（`windows-full.yml` 的 `sync-boundary`、`research-worker`）直接跑选中的用例，不按名单放过失败，用来复现。
 

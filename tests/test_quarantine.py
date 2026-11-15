@@ -80,12 +80,12 @@ class CargoQuarantineTest(unittest.TestCase):
         status, text = self.run_cargo()
         self.assertEqual(status, 1)
         self.assertIn('找不到', text)
-        # 别的平台的条目只核对存在，照常参与常规运行，不单独运行。
+        # 别的平台的条目在这里不核对、不跳过：测试可能只在那个平台上编译，这里照常参与常规运行。
         self.fake.with_suffix('.calls').unlink()
         other = 'windows' if quarantine.platform() == 'macos' else 'macos'
-        self.entries('app::tests::flaky', platforms=[other])
+        self.entries('app::tests::gone', platforms=[other])
         self.assertEqual(self.run_cargo()[0], 0)
-        self.assertEqual(self.calls(), [['--list'], ['--exact']])
+        self.assertEqual(self.calls(), [[]])
         self.list.write_text(self.list.read_text().replace('2026-11-29', '2026-11-19'))
         with self.assertRaises(quarantine.QuarantineError):
             quarantine.load()

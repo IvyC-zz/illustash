@@ -253,15 +253,6 @@ jobs:
           cache: pip
           cache-dependency-path: tests/requirements.txt
       - run: python -m pip install -r tests/requirements.txt
-      # 实验（#501）：工作目录、临时目录和 Rust 工具链加进 Defender 排除项，量编译和测试耗时。
-      # 命令失败（例如 runner 没开实时保护或不允许改）不影响 job。
-      - name: Defender 排除工作目录（实验）
-        continue-on-error: true
-        run: |
-          $status = Get-MpComputerStatus -ErrorAction SilentlyContinue
-          "实时保护：$($status.RealTimeProtectionEnabled)；按访问扫描：$($status.OnAccessProtectionEnabled)"
-          Add-MpPreference -ExclusionPath $env:GITHUB_WORKSPACE, $env:TEMP, $env:RUNNER_TEMP, "$env:USERPROFILE\.cargo", "$env:USERPROFILE\.rustup"
-          (Get-MpPreference).ExclusionPath
       - name: 构建被测核心与测试读宿主
         run: |
           cargo build --release --locked --manifest-path native/terms/Cargo.toml

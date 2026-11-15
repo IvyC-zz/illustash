@@ -2,6 +2,7 @@
 
 名单里的测试照常运行；只在条目列出的平台上，它们的失败不计入结果，单列在「隔离名单中的失败」一节。
 到期的条目（今天晚于 `expires`）、格式不对的条目、找不到对应测试的条目都让检查失败。
+Rust 条目只在它列出的平台上核对是否存在（测试常按平台条件编译），Python 条目在各平台都核对。
 Python 测试由 `tests.run_fixed_suite` 处理；Rust 测试用本脚本的 `cargo-test` 子命令代替 `cargo test`：
 
     python tools/quarantine.py check
@@ -113,7 +114,9 @@ def report(lines):
 def cargo_test(manifest, extra):
     """`cargo test` 的替代：名单里本平台的 Rust 测试单独运行、只汇报；其余测试照常决定退出码。"""
     crate = Path(manifest).resolve().parent.relative_to(ROOT).as_posix()
-    entries = [entry for entry in load() if entry['kind'] == 'rust' and entry['crate'] == crate]
+    # 只处理本平台的条目：Rust 测试常按平台条件编译，别的平台的条目在这里可能根本不存在。
+    entries = [entry for entry in load() if entry['kind'] == 'rust' and entry['crate'] == crate
+               and platform() in entry['platforms']]
     command = [*CARGO, 'test', '--locked', '--manifest-path', manifest, *extra]
     if not entries:
         return subprocess.call(command)
@@ -129,7 +132,7 @@ def cargo_test(manifest, extra):
         for entry in missing:
             print('  ' + describe(entry), file=sys.stderr)
         return 1
-    held = [entry for entry in entries if platform() in entry['platforms']]
+    held = entries
     skips = [arg for entry in held for arg in ('--skip', entry['id'])]
     # --exact 让 --skip 只跳过同名测试，不跳过名字里含有它的其他测试。
     status = subprocess.call([*command, '--', '--exact', *skips])
