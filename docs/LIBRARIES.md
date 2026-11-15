@@ -193,7 +193,7 @@ CREATE INDEX asset_links_asset ON asset_links(asset);
   - 文件夹来源：取该来源的 `preset`。
 - 同一张图跨设备、跨来源时靠 `md5` 对上；文件被移动或改名时，重扫先按路径找，找不到再按 `md5` 找，都找不到才算新图。
 - `source.sqlite` 损坏时，文件夹图片的 uuid 靠 `library.sqlite` 认回（#228）：它的 `assets.src_path` 记着每张在库图片的完整路径，`meta` 里的 `folder_hash:<uuid>` 记着内容 md5（图片移出图库后也保留）。`library.sqlite` 的每份备份因此都带着与其中整理记录一致的对照表；应用内抢救按它重扫，见 [ARCHITECTURE_DIRECTION.md](ARCHITECTURE_DIRECTION.md) 开库检查一节。
-- `library.sqlite` 损坏时只能换回整库备份（#492，损坏提示 `app_integrity::LIBRARY_DAMAGED`）：退出应用，把它连同 `-wal`/`-shm` 移走，复制一份备份改名为 `library.sqlite`。可用的是 `backups/library-*.sqlite`（设置里的手动备份，当前格式，直接打开）和 `library-backups/terms-*.sqlite`（升级前的必需备份，内容停在升级前，打开时再升级一次；需要 pre-v8 版本升级的不能用）；`backups/source-damaged-*.sqlite` 和 `backups/human-conclusions/` 里的快照不是应用库。选修改时间最近的一份，之后的整理丢失；之后的人工结论可以再导入最新的人工结论快照补回一部分（只补换回后仍未决定的项，见上文「人工结论快照」）。记过损坏的图库换回旧格式备份后，打开前的完整检查通过就清除损坏记录，改为提问升级。
+- `library.sqlite` 损坏时只能换回整库备份（#492，损坏提示 `app_integrity::LIBRARY_DAMAGED`）：退出应用，把它连同 `-wal`/`-shm` 移走，复制一份备份改名为 `library.sqlite`。可用的是 `backups/library-*.sqlite`（设置里的手动备份，当前格式，直接打开）和 `library-backups/terms-*.sqlite`（升级前的必需备份，内容停在升级前，打开时再升级一次；需要 pre-v8 版本升级的不能用）；`backups/source-damaged-*.sqlite` 和 `backups/human-conclusions/` 里的快照不是应用库。选修改时间最近的一份，之后的整理丢失；打开后可以在「设置 › 数据」的「人工结论快照」里对换回之前最近的一份自动快照点「恢复…」，补回备份之后的人工结论（只补仍未决定的项，冲突时保留已有的，见上文「人工结论快照」）；换回的图库打开后也会生成快照，内容是换回后的状态，补回时不要选它。记过损坏的图库换回旧格式备份后，打开前的完整检查通过就清除损坏记录，改为提问升级。
 
 ## 4. 来源
 
