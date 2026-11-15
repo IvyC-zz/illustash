@@ -25,15 +25,19 @@ from tests.relate_images import picture, jpeg
 class NativeRelationImagesTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
+        cls._missing_numeric_candidate = None
         configured = os.environ.get('ILLUSTASH_RELATION_PROBE_BIN')
         if not configured:
-            numeric_reference_mode.missing_candidate('explicit candidate relation probe required')
-            raise unittest.SkipTest('explicit candidate relation probe required')
+            error = unittest.SkipTest('explicit candidate relation probe required')
+            if numeric_reference_mode.defer_missing(cls, error):
+                return
+            raise error
         cls.binary = Path(configured).resolve()
         if not cls.binary.is_file():
             raise AssertionError('configured candidate relation probe missing')
 
     def setUp(self):
+        numeric_reference_mode.check_candidate(self)
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
@@ -821,20 +825,23 @@ class NativeRelationImagesTest(unittest.TestCase):
                 self.assertEqual(actual, expected)
 
     def test_locate_flat_is_rejected_and_synthetic_crop_reference_is_exact(self):
-        dynamic = numeric_reference_mode.enabled(self)
+        references = numeric_reference_mode.references(self)
         from tests import numpy_crop_reference
         base = picture(9, (600, 800))
         crop = base.crop((120, 200, 480, 600))
         a, b = self.save(base, 'base.png'), self.save(crop, 'crop.png')
-        oracle = numpy_crop_reference if dynamic else relate
-        expected = oracle.locate(oracle.load(a)[0], oracle.load(b)[0])
-        self.assertEqual(list(expected[1:]), [.20052083333333334, .25, .5989583333333334, .5])
         actual = self.probe('locate', a=a, b=b)
-        self.assertEqual(actual, list(expected))
         flat = self.save(Image.new('RGB', (120, 160), '#888888'), 'flat.png')
-        if dynamic:
-            self.assertIsNone(oracle.locate(oracle.load(a)[0], oracle.load(flat)[0]))
-        self.assertIsNone(self.probe('locate', a=a, b=flat))
+        flat_actual = self.probe('locate', a=a, b=flat)
+        for kind in references:
+            with numeric_reference_mode.comparing(self, kind):
+                oracle = numpy_crop_reference if kind == 'numpy' else relate
+                expected = oracle.locate(oracle.load(a)[0], oracle.load(b)[0])
+                self.assertEqual(list(expected[1:]), [.20052083333333334, .25, .5989583333333334, .5])
+                self.assertEqual(actual, list(expected))
+                if kind == 'numpy':
+                    self.assertIsNone(oracle.locate(oracle.load(a)[0], oracle.load(flat)[0]))
+                self.assertIsNone(flat_actual)
 
 
 # 每个相似度缓存的主键宽度：变更列表要删除的行用这些列指明。

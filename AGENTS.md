@@ -40,6 +40,7 @@ Claude Code 通过 `CLAUDE.md` 引入本文件，Codex 等直接读本文件。�
 ### 约定
 
 - 接手一件事时先读 Issue 和 PR 的全部评论，以最新一条为准。
+- 2026-11-15 用户定（#347）：诊断已经确定失败属于哪一类原因，而剩下没解释的差异不影响接下来要做的决定时，就停止诊断，按上面「一件事的流程」第 3 步在 Issue 里提出决定，不为解释每一处残差再开一轮诊断。「不降低断言、不刷新期望、不放宽容差」这类约束管的是不用改测试来掩盖问题，不妨碍提出「这份参考或这条测试契约本身是否成立」。查明一类原因后，修复时顺带找出同一原因还影响哪些测试，一起处理或一并提出，不只修报错的那一个；「最小范围」限制的是改动，不限制排查。
 - 2026-10-02 用户定：除下述验收叙述复用例外外，「全量通过」指 PR 最终 head 上 `tools/check_all.sh` 一次完整运行全部通过；失败修复后的定向复跑不计。PR 描述写明 head、机器、操作系统、架构、工具链、检查结果和跳过原因，本机未覆盖的平台或检查单列。开发阶段按改动做定向检查，合并前执行本地全量。脚本要求已提交的干净工作区，验收期间保持 head 和已跟踪文件不变。
 - 2026-10-18 用户批准按改动范围分级检查，判断依据是 diff 碰了哪些文件，取其中最严的一级：
   1. 界面：只改 `web/static`（样式、文案、纯前端逻辑），不改前端调用的接口、请求或响应格式、数据、迁移和撤销。合并前跑 `node --test tests/*.test.cjs` 和相关定向测试，并在浏览器或虚拟机里实际看过，PR 描述附截图或量到的数字；不跑本机全量。下一个本来就要跑全量的 PR，会在 main 上一并覆盖这些改动。
@@ -58,6 +59,7 @@ Claude Code 通过 `CLAUDE.md` 引入本文件，Codex 等直接读本文件。�
 - 2026-10-03 用户批准：验收叙述收尾可按有效输入复用完整全量事实，仅限 `docs/acceptance/local-summary.md`；默认其他所有文档均影响指纹。由 `tools/local_acceptance.py` 在固定 detached worktree 串行执行并签名记录，保留原已测 commit/tree 和环境，不冒称新候选已重建。机制合并验证前其他会话不得采用。固定验收区的 target 等构建缓存可以删除（2026-10-19 用户定，#240），下次使用时冷编译；`local_acceptance` 机制、外层记录和密钥保留。失效规则、候选提交、取结果和释放窗口见 [本地验收](docs/LOCAL_CHECKS.md)。
 - 2026-11-12 用户定（#4，取代 2026-10-02「GitHub Actions 只在 main 上手动触发」和 2026-10-17「正式开源时再做」）：仓库公开后，`.github/workflows/ci.yml` 对目标为 main 的同库 PR 自动运行（草稿 PR 转 Ready 时才跑，来自 fork 的 PR 不跑，只改文档的跳过构建与测试），push 到 main 时跑一次给 PR 留编译缓存，也可在任意分支上手动触发；`native-upgrade.yml` 只保留手动触发。CI 是额外保障：合入 main 的门槛仍是集成会话在候选上跑的本机全量，CI 通过不代替本机全量、Windows 验收和实机验收。仓库私有时 workflow 只响应手动触发，私有期间也不手动触发 macOS 运行（私有库按 10 倍计分钟）。改 workflow 时不用 `pull_request_target`，不给 job 写权限，不引用 secret。做法见[本地验收](docs/LOCAL_CHECKS.md#github-actionspr-自动检查)。
 - Windows x64 CI（#347）在公开库试运行，覆盖常规 clippy、Rust 测试和用合成数据的 Python 全套，结果在「全部检查」中展示。集成会话仍看 Windows 结果并查清失败原因，分支保护的通过判定暂不计入这一项。实际运行 ONNX Runtime 和模型、打包和安装、界面和首次流程、真实 GPU、性能及 Windows ARM 继续单独验收。做法见[本地验收](docs/LOCAL_CHECKS.md#windows-x64-ci)。
+- 2026-11-15 用户批准（#347）：异构 CI 的九个指定数值方法可用测试专用的同机 NumPy 完整算法严格对照；默认验收仍回放冻结参考。已实测适用的 DLL、实际内核、线程数和依赖身份同时严格比较现有冻结参考，任一比较失败都失败，不回退。固定值、非数值业务契约和持久化断言保留，不把参考扩到其他方法，不恢复退役应用或改产品算法。身份记录和时间戳等比较规则见[本地验收](docs/LOCAL_CHECKS.md#windows-x64-ci)。
 - 本地全量对齐 `.github/workflows/ci.yml`，默认包含原生固定契约空 PATH 重放。升级验收使用 `tests/fixtures/library_upgrade` 中由历史 v5/v6 产出者一次性生成的合成旧图库，不在检查时构建历史版本；升级测试不能跳过。脚本依赖 Python 3.12（`CHECK_ALL_PYTHON` 可指定解释器）、Node 22、Rust stable（含 rustfmt/clippy），Python 依赖与历史构建缓存放在被忽略的 `.venv/check-all/`；只支持 macOS（Linux 已冻结，见 README），Windows 单列验收。只允许 CI 同样允许的平台限制和真实图库数据缺失跳过，不访问真实图库补齐数据。
 - 2026-10-12 用户定：本机同一时间只跑一个重型检查。`tools/check_all.sh`、`tools/local_acceptance.py run` 和单独的 release 构建，通过 agent-collab skill 的 `scripts/collab_run.py run -- <命令>` 运行（路径按所在 harness 的 skill 安装位置；没装这个 skill 的环境照常直接运行）：槽位被占时排队，用 `collab_run.py status` 查看谁在跑；长命令放后台运行，免得排队时被工具超时打断。从本机经 SSH 发起的 Windows 构建与验收用 `--slot windows`，与本机检查互不阻塞。定向测试不用排队。
 - 2026-10-15 用户定：在 Mac 上启动 App 做实机测试（图形界面走查、安装、首次流程、Gatekeeper、断网），一律在 macOS 虚拟机里做，不在本机直接启动，以免影响用户日常用的正式版及其图库、设置和钥匙串。`tools/check_all.sh`、单元测试等不启动 App 的检查照旧在本机跑。虚拟机做不了的项目（iCloud 照片、性能数字）先在 Issue 里说明，用户同意后才在本机用隔离目录做。做法见 [本地验收](docs/LOCAL_CHECKS.md#macos-实机测试虚拟机)。

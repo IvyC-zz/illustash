@@ -3,8 +3,11 @@
 异构 CI 显式设置 ILLUSTASH_TEST_NUMERIC_REFERENCE=numpy。同机参考只接收合成输入，
 不读取候选输出，不更新冻结值，也不提供生产计算入口。历史录制 CPU 身份仍未知。
 """
+from contextlib import contextmanager
+import json
 import os
 import sys
+import unittest
 
 
 ENV = 'ILLUSTASH_TEST_NUMERIC_REFERENCE'
@@ -30,24 +33,64 @@ def mode():
     return value
 
 
+def identity(test):
+    return f'{type(test).__name__}.{test._testMethodName}'
+
+
 def enabled(test):
     """仅由白名单方法显式选择；错误调用不能扩大参考口径。"""
-    identity = f'{type(test).__name__}.{test._testMethodName}'
-    if identity not in METHODS:
-        raise AssertionError(f'未批准的 NumPy 参考调用：{identity}')
+    if identity(test) not in METHODS:
+        raise AssertionError(f'未批准的 NumPy 参考调用：{identity(test)}')
     if mode() == 'frozen':
         return False
+    require_dependencies()
+    return True
+
+
+def require_dependencies():
     import numpy as np
     import PIL
     if (np.__version__, PIL.__version__) != ('2.5.3', '12.3.0'):
         raise RuntimeError('NumPy 参考要求 numpy 2.5.3、Pillow 12.3.0；不能回退冻结值')
+
+
+def defer_missing(cls, error):
+    """显式窗口延迟到实例判断，避免把同类其他方法的 skip 改成 error。"""
+    if mode() != 'numpy':
+        return False
+    cls._missing_numeric_candidate = str(error)
     return True
 
 
-def missing_candidate(message):
-    """显式参考窗口不能因缺少候选而变成跳过。"""
-    if mode() == 'numpy':
-        raise RuntimeError(message)
+def check_candidate(test):
+    message = getattr(test, '_missing_numeric_candidate', None)
+    if message:
+        if mode() == 'numpy' and identity(test) in METHODS:
+            raise RuntimeError(message)
+        raise unittest.SkipTest(message)
+
+
+def references(test):
+    """同机参考始终执行；已实测适用的完整身份再追加冻结比较。"""
+    if not enabled(test):
+        return ('frozen',)
+    from tests.numpy_reference_environment import environment, supports_frozen
+    return ('numpy', 'frozen') if supports_frozen(environment()) else ('numpy',)
+
+
+@contextmanager
+def comparing(test, reference):
+    """记录实际进入的比较及其结果；不捕获失败后改用另一种参考。"""
+    if identity(test) not in METHODS or reference not in ('numpy', 'frozen'):
+        raise AssertionError('参考比较超出批准范围')
+    record = dict(test=test.id(), reference=reference)
+    try:
+        yield
+    except BaseException:
+        print('NUMERIC_REFERENCE ' + json.dumps(record | {'status': 'failed'}), file=sys.__stderr__, flush=True)
+        raise
+    else:
+        print('NUMERIC_REFERENCE ' + json.dumps(record | {'status': 'passed'}), file=sys.__stderr__, flush=True)
 
 
 # 发现测试时即拒绝拼写错误，不能把未知模式当作默认回放。

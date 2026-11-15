@@ -15,7 +15,7 @@ from unittest.mock import patch
 
 import numpy as np
 from tests.index_expectations import build, char_patch, char_scan
-from tests import index_expectations, numeric_reference_mode, vector_math as ccip
+from tests import index_expectations, numeric_reference_mode, numeric_reference_assertions as checks, vector_math as ccip
 char_scan.cross = ccip.cross
 
 
@@ -23,11 +23,17 @@ char_scan.cross = ccip.cross
 class NativeIndexComputeTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
+        cls._missing_numeric_candidate = None
         path = os.environ.get('ILLUSTASH_INDEX_COMPUTE_BIN')
         if not path:
-            numeric_reference_mode.missing_candidate('explicit candidate ILLUSTASH_INDEX_COMPUTE_BIN required')
-            raise unittest.SkipTest('explicit candidate ILLUSTASH_INDEX_COMPUTE_BIN required')
+            error = unittest.SkipTest('explicit candidate ILLUSTASH_INDEX_COMPUTE_BIN required')
+            if numeric_reference_mode.defer_missing(cls, error):
+                return
+            raise error
         cls.binary = Path(path).resolve(strict=True)
+
+    def setUp(self):
+        numeric_reference_mode.check_candidate(self)
 
     def numeric(self, rows, distances):
         with tempfile.TemporaryDirectory() as tmp:
@@ -38,7 +44,7 @@ class NativeIndexComputeTest(unittest.TestCase):
             return json.loads((root/'response.json').read_text())
 
     def test_merge_percentile_core_and_partition_ties(self):
-        dynamic = numeric_reference_mode.enabled(self)
+        references = numeric_reference_mode.references(self)
         from tests import numpy_index_reference as reference
         # 用户 2026-10-04 批准：所有操作系统上都用标量 NumPy 的选择/排序顺序。
         # 独立的判定基准：macOS arm64 上的 NumPy 2.5.3（标量 argintroselect/aquicksort）。
@@ -57,16 +63,18 @@ class NativeIndexComputeTest(unittest.TestCase):
                 rows[:,0] += 1
                 distances = np.resize(np.array([0., .01, .1],np.float32), count)
                 value = self.numeric(rows, distances)
-                anchor = reference.merge(rows) if dynamic else build.merge(rows)
-                np.testing.assert_array_equal(np.array(value['anchor'],np.float32), anchor)
-                dd = (1-(rows/np.linalg.norm(rows,axis=1,keepdims=True)) @ (anchor/np.linalg.norm(anchor)))/2
-                np.testing.assert_array_equal(value['percentiles'],[float(np.percentile(dd,q)) for q in (50,75,90)])
-                keep = reference.core_of(rows) if dynamic else char_patch.core_of(rows)
-                self.assertEqual(value['core'], None if keep is None else keep.tolist())
+                for kind in references:
+                    with numeric_reference_mode.comparing(self,kind):
+                        anchor = reference.merge(rows) if kind=='numpy' else build.merge(rows)
+                        np.testing.assert_array_equal(np.array(value['anchor'],np.float32), anchor)
+                        dd = (1-(rows/np.linalg.norm(rows,axis=1,keepdims=True)) @ (anchor/np.linalg.norm(anchor)))/2
+                        np.testing.assert_array_equal(value['percentiles'],[float(np.percentile(dd,q)) for q in (50,75,90)])
+                        keep = reference.core_of(rows) if kind=='numpy' else char_patch.core_of(rows)
+                        self.assertEqual(value['core'], None if keep is None else keep.tolist())
+                        self.assertEqual(value['nearest'], tied_nearest[count])
+                        if kind=='numpy':
+                            self.assertEqual(reference.scalar_order(distances, partition=True).tolist(), tied_nearest[count])
                 k = min(9,count)
-                self.assertEqual(value['nearest'], tied_nearest[count])
-                if dynamic:
-                    self.assertEqual(reference.scalar_order(distances, partition=True).tolist(), tied_nearest[count])
                 # 没有并列时的选择仍与本地的独立算法一致。
                 unique = rng.permutation(count).astype('f4')
                 selected = np.argpartition(unique,k-1)[:k]
@@ -110,68 +118,79 @@ class NativeIndexComputeTest(unittest.TestCase):
         return index_expectations.legacy(self, root)
 
     def test_cached_apply_clean_build_scan_matches_algorithm_reference(self):
-        dynamic = numeric_reference_mode.enabled(self)
+        references = numeric_reference_mode.references(self)
         from tests import numpy_index_reference as reference
         with tempfile.TemporaryDirectory() as tmp:
             root=Path(tmp);old=root/'old';new=root/'new';old.mkdir()
             tags,rows=self.prepare(old);shutil.copytree(old,new)
-            responses=[]
-            for folder in (old,new):
-                request=dict(format='illustash-index/1',identity={'task_id':'synthetic'},before='fixed-input',action='apply',rows=rows,review=str(folder),reason=None)
+            expected=[]
+            # 每种参考都从未计算的同一份输入开始，候选仅运行一次。
+            for kind in references:
+                folder=root/kind;shutil.copytree(old,folder)
+                request=dict(format='illustash-index/1',identity={'task_id':'synthetic'},before='fixed-input',
+                             action='apply',rows=rows,review=str(folder),reason=None)
                 (folder/'request.json').write_text(json.dumps(request))
-                if folder==old:
-                    responses.append(reference.cached_apply(old,tags,old/'request.json') if dynamic
-                                     else self.legacy(old,tags,old/'request.json'))
-                else:
-                    proc=subprocess.run([str(self.binary),str(new/'request.json'),str(new/'response.json')],env=os.environ|{'PATH':'','ILLUSTASH_INDEX_TAGS':str(new/'tags.csv')},capture_output=True)
-                    self.assertEqual(proc.returncode,0,proc.stderr.decode());responses.append(json.loads((new/'response.json').read_text()))
-            expected,actual=responses
-            self.assertEqual(actual['characters'],expected['characters'])
-            self.assertEqual(sorted(actual['aliases']),sorted(expected['aliases']))
-            self.assertEqual(sorted(actual['labels']),sorted(expected['labels']))
-            self.assertEqual(len(actual['characters']),2)
-            for name in ('char-anchors.npy','char-index/new.npy','char-patch/raw/new.npy','char-patch/raw/twin.npy'):
-                np.testing.assert_array_equal(np.load(new/name),np.load(old/name))
-            self.assertEqual(json.loads((new/'char-patch/rejected/twin.json').read_text()),json.loads((old/'char-patch/rejected/twin.json').read_text()))
-            self.assertEqual((new/'char-scan.csv').read_text(),(old/'char-scan.csv').read_text())
-            # 隔离的计算程序连快照里的人工标注都不改。
-            with contextlib.closing(sqlite3.connect(new/'pi.db')) as db, db:
-                self.assertEqual(db.execute("SELECT value,source FROM labels WHERE dim='general'").fetchall(),[('solo','human')])
+                result=(reference.cached_apply(folder,folder/'tags.csv',folder/'request.json') if kind=='numpy'
+                        else self.legacy(folder,folder/'tags.csv',folder/'request.json'))
+                expected.append((kind,folder,result))
+            request.update(review=str(new))
+            (new/'request.json').write_text(json.dumps(request))
+            proc=subprocess.run([str(self.binary),str(new/'request.json'),str(new/'response.json')],
+                                env=os.environ|{'PATH':'','ILLUSTASH_INDEX_TAGS':str(new/'tags.csv')},capture_output=True)
+            self.assertEqual(proc.returncode,0,proc.stderr.decode())
+            actual=json.loads((new/'response.json').read_text())
+            for kind,folder,result in expected:
+                with numeric_reference_mode.comparing(self,kind):
+                    self.assertEqual(actual['characters'],result['characters'])
+                    self.assertEqual(sorted(actual['aliases']),sorted(result['aliases']))
+                    self.assertEqual(sorted(actual['labels']),sorted(result['labels']))
+                    self.assertEqual(len(actual['characters']),2)
+                    checks.assert_index_files(self,new,folder,cached=True)
+                    with contextlib.closing(sqlite3.connect(new/'pi.db')) as db:
+                        self.assertEqual(db.execute("SELECT value,source FROM labels WHERE dim='general'").fetchall(),[('solo','human')])
 
     def prepare_large(self, old):
         return index_expectations.large(self,old)
 
     def test_large_alias_matrix_at_boundary_matches_old_scan(self):
-        dynamic = numeric_reference_mode.enabled(self)
+        references = numeric_reference_mode.references(self)
         from tests import numpy_index_reference as reference
         with tempfile.TemporaryDirectory() as tmp:
             root=Path(tmp);old=root/'old';new=root/'new';tags,centres,edges=self.prepare_large(old)
             shutil.copytree(old,new)
-            responses=[]
-            for folder in (old,new):
-                request=dict(format='illustash-index/1',identity={'task_id':'large'},before='fixed',action='apply',rows=[],review=str(folder),reason=None)
+            expected=[]
+            for kind in references:
+                folder=root/kind;shutil.copytree(old,folder)
+                request=dict(format='illustash-index/1',identity={'task_id':'large'},before='fixed',
+                             action='apply',rows=[],review=str(folder),reason=None)
                 (folder/'request.json').write_text(json.dumps(request))
-                if folder==old:
-                    responses.append(reference.cached_apply(old,tags,old/'request.json') if dynamic
-                                     else self.legacy(old,tags,old/'request.json'))
-                else:
-                    p=subprocess.run([str(self.binary),str(new/'request.json'),str(new/'response.json')],env=os.environ|{'PATH':'','ILLUSTASH_INDEX_TAGS':str(new/'tags.csv')},capture_output=True)
-                    self.assertEqual(p.returncode,0,p.stderr.decode());responses.append(json.loads((new/'response.json').read_text()))
-            if dynamic:
-                edges = reference.boundary_edges(old, edges)
-            # 参考算法必须给出阈值两侧彼此不同的最终业务结果。
-            expected={(u,c)for u,c,_ in responses[0]['labels']}
-            for i,parent,within in edges:self.assertIn((f'asset{i}',f'large{parent if within else i:03}'),expected)
-            self.assertEqual(responses[1]['characters'],responses[0]['characters'])
-            self.assertEqual(sorted(responses[1]['labels']),sorted(responses[0]['labels']))
-            self.assertEqual((new/'char-scan.csv').read_text(),(old/'char-scan.csv').read_text())
+                result=(reference.cached_apply(folder,folder/'tags.csv',folder/'request.json') if kind=='numpy'
+                        else self.legacy(folder,folder/'tags.csv',folder/'request.json'))
+                expected.append((kind,folder,result))
+            request.update(review=str(new))
+            (new/'request.json').write_text(json.dumps(request))
+            proc=subprocess.run([str(self.binary),str(new/'request.json'),str(new/'response.json')],
+                                env=os.environ|{'PATH':'','ILLUSTASH_INDEX_TAGS':str(new/'tags.csv')},capture_output=True)
+            self.assertEqual(proc.returncode,0,proc.stderr.decode())
+            actual=json.loads((new/'response.json').read_text())
+            for kind,folder,result in expected:
+                with numeric_reference_mode.comparing(self,kind):
+                    boundary=reference.boundary_edges(folder,edges) if kind=='numpy' else edges
+                    labels={(u,c)for u,c,_ in result['labels']}
+                    for i,parent,within in boundary:
+                        self.assertIn((f'asset{i}',f'large{parent if within else i:03}'),labels)
+                    self.assertEqual(actual['characters'],result['characters'])
+                    self.assertEqual(sorted(actual['aliases']),sorted(result['aliases']))
+                    self.assertEqual(sorted(actual['labels']),sorted(result['labels']))
+                    checks.assert_index_files(self,new,folder)
 
     def test_recognition_snapshot_alias_and_claims_on_large_boundary(self):
-        dynamic = numeric_reference_mode.enabled(self)
+        references = numeric_reference_mode.references(self)
         from tests import numpy_index_reference as reference
         path=os.environ.get('ILLUSTASH_RECOGNITION_COMPUTE_BIN')
         if not path:
-            numeric_reference_mode.missing_candidate('explicit recognition computation candidate required')
+            if numeric_reference_mode.mode() == 'numpy':
+                raise RuntimeError('explicit recognition computation candidate required')
             raise unittest.SkipTest('explicit recognition computation candidate required')
         binary=Path(path).resolve(strict=True)
         with tempfile.TemporaryDirectory() as tmp:
@@ -179,35 +198,48 @@ class NativeIndexComputeTest(unittest.TestCase):
             request=dict(format='illustash-index/1',identity={'task_id':'large'},before='fixed',action='apply',rows=[],review=str(old),reason=None)
             (old/'request.json').write_text(json.dumps(request));self.legacy(old,tags,old/'request.json')
             anchors=np.load(old/'char-anchors.npy');ids=(old/'char-anchors.txt').read_text().splitlines()
-            if dynamic:
-                _,limits,_,_,entities=reference.anchor_index(anchors,ids,old/'pi.db')
-                edges=reference.boundary_edges(old,edges)
-            else:
-                with patch.object(char_scan,'cross',side_effect=lambda a,b,check=True:ccip.cross(a,b,check=False)),contextlib.redirect_stdout(io.StringIO()):
-                    _,limits,_,_,entities=char_scan.anchor_index(anchors,ids,str(old/'pi.db'))
-            # 独立复写的原 Recogniser.labels 判定逻辑，用合成的 embedding；
-            # 不实例化模型/会话，也不代表推理链路的结论。
-            expected=[];assets=[];features=[]
-            for i,parent,within in edges:
-                asset=f'asset{i}';feature=centres[i];assets.append(asset);features.append(feature.tolist())
-                distances=ccip.cross(anchors,feature[None],check=False)[:,0];seen=set()
-                order = reference.scalar_order(distances) if dynamic else np.argsort(distances)
-                for a in order[:9]:
-                    entity=entities[a]
-                    if entity in seen:continue
-                    seen.add(entity)
-                    if limits[a]>0 and distances[a]<=limits[a]:
-                        expected.append(dict(asset=asset,character=entity,distance=float(distances[a]),threshold=float(limits[a]),confidence=1-float(distances[a])))
-            request=dict(mode='claims',shared=str(old),source=str(old/'pi.db'),assets=assets,features=features,identity=dict(package=str(root),library_id='synthetic',generation=1,session='0'*64,task_id='1'*32),tamper_asset='asset128',tamper_character='large003')
+            assets=[f'asset{i}' for i,_,_ in edges]
+            features=[centres[i].tolist() for i,_,_ in edges]
+            expected=[]
+            for kind in references:
+                if kind=='numpy':
+                    _,th,_,th75,entities=reference.anchor_index(anchors,ids,old/'pi.db')
+                    limits=reference.claim_thresholds(old,ids,th,th75)
+                    boundary=reference.boundary_edges(old,edges)
+                else:
+                    with patch.object(char_scan,'cross',side_effect=lambda a,b,check=True:ccip.cross(a,b,check=False)),contextlib.redirect_stdout(io.StringIO()):
+                        _,limits,_,_,entities=char_scan.anchor_index(anchors,ids,str(old/'pi.db'))
+                    boundary=edges
+                # 原 Recogniser.labels 的独立判定；模型推理不在本用例范围。
+                claims=[]
+                for i,_,_ in edges:
+                    asset=f'asset{i}';feature=centres[i]
+                    distances=ccip.cross(anchors,feature[None],check=False)[:,0];seen=set()
+                    # 两种参考都遵守获批的标量并列顺序，不让 SIMD 排序改变业务契约。
+                    for a in reference.scalar_order(distances)[:9]:
+                        entity=entities[a]
+                        if entity in seen:continue
+                        seen.add(entity)
+                        if limits[a]>0 and distances[a]<=limits[a]:
+                            claims.append(dict(asset=asset,character=entity,distance=float(distances[a]),
+                                               threshold=float(limits[a]),confidence=1-float(distances[a])))
+                expected.append((kind,entities,claims,boundary))
+            request=dict(mode='claims',shared=str(old),source=str(old/'pi.db'),assets=assets,features=features,
+                         identity=dict(package=str(root),library_id='synthetic',generation=1,session='0'*64,task_id='1'*32),
+                         tamper_asset='asset128',tamper_character='large003')
             (root/'claims-request.json').write_text(json.dumps(request))
             proc=subprocess.run([str(binary),str(root/'claims-request.json'),str(root/'claims-response.json')],env=os.environ|{'PATH':''},capture_output=True)
             self.assertEqual(proc.returncode,0,proc.stderr.decode());got=json.loads((root/'claims-response.json').read_text())
-            self.assertEqual(got['entities'],entities)
             for claim in got['claims']:
                 for key in ('distance','threshold'):claim[key]=float(np.float32(claim[key]))
-            self.assertEqual(got['claims'],expected)
-            self.assertTrue(got['tampered_rejected'])
-            for i,parent,within in edges:self.assertIn((f'asset{i}',f'large{parent if within else i:03}'),[(c['asset'],c['character'])for c in got['claims']])
+            for kind,entities,claims,boundary in expected:
+                with numeric_reference_mode.comparing(self,kind):
+                    self.assertEqual(got['entities'],entities)
+                    self.assertEqual(got['claims'],claims)
+                    self.assertTrue(got['tampered_rejected'])
+                    for i,parent,within in boundary:
+                        self.assertIn((f'asset{i}',f'large{parent if within else i:03}'),
+                                      [(c['asset'],c['character'])for c in got['claims']])
 
     def test_missing_runtime_with_good_image_fails_without_response_or_rejection(self):
         from PIL import Image
@@ -222,7 +254,7 @@ class NativeIndexComputeTest(unittest.TestCase):
             self.assertFalse((root/'char-patch/rejected/first.json').exists())
 
     def test_reference_dtype_layout_endian(self):
-        dynamic = numeric_reference_mode.enabled(self)
+        references = numeric_reference_mode.references(self)
         from tests import numpy_index_reference as reference
         for dtype in ('<f4','>f4','<f8','>f8'):
             for order in ('C','F'):
@@ -238,11 +270,16 @@ class NativeIndexComputeTest(unittest.TestCase):
                     proc=subprocess.run([str(self.binary),str(root/'request.json'),str(root/'response.json')],env=os.environ|{'PATH':'','ILLUSTASH_INDEX_TAGS':str(tags)},capture_output=True)
                     self.assertEqual(proc.returncode,0,proc.stderr.decode())
                     got=json.loads((root/'response.json').read_text())['characters'][0]
-                    anchor=reference.merge(a) if dynamic else build.merge(a)
-                    distances=(1-(a/np.linalg.norm(a,axis=1,keepdims=True))@(anchor/np.linalg.norm(anchor)))/2
-                    for key,q in [('anchor_p50',50),('anchor_p75',75),('anchor_p90',90)]:
-                        expected=float(np.percentile(distances,q));self.assertEqual(got[key],expected)
-                    np.testing.assert_array_equal(np.load(root/'char-anchors.npy')[0],anchor.astype('f4'))
+                    saved=np.load(root/'char-anchors.npy')
+                    for kind in references:
+                        with numeric_reference_mode.comparing(self,kind):
+                            anchor=reference.merge(a) if kind=='numpy' else build.merge(a)
+                            distances=(1-(a/np.linalg.norm(a,axis=1,keepdims=True))@(anchor/np.linalg.norm(anchor)))/2
+                            for key,q in [('anchor_p50',50),('anchor_p75',75),('anchor_p90',90)]:
+                                expected=float(np.percentile(distances,q));self.assertEqual(got[key],expected)
+                            self.assertEqual(saved.dtype,np.dtype('f4'))
+                            self.assertEqual(saved.shape,(3,768))
+                            np.testing.assert_array_equal(saved[0],anchor.astype('f4'))
 
     def test_scan_exact_threshold_and_adjacent_float_inputs_match_old_csv(self):
         with tempfile.TemporaryDirectory() as tmp:

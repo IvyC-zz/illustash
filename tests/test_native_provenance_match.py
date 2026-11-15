@@ -1,5 +1,7 @@
 """独立的旧版本地验证契约；所有图片和数据库都是合成的。"""
 import json
+import copy
+import shutil
 import sqlite3
 from pathlib import Path
 from PIL import Image
@@ -13,13 +15,17 @@ import unittest
 class NativeProvenanceMatchTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
+        cls._missing_numeric_candidate = None
         try:
             local_driver.NativeLocalProvenanceTest.setUpClass.__func__(cls)
         except unittest.SkipTest as error:
-            numeric_reference_mode.missing_candidate(str(error))
-            raise
+            if not numeric_reference_mode.defer_missing(cls, error):
+                raise
 
-    setUp = local_driver.NativeLocalProvenanceTest.setUp
+    def setUp(self):
+        numeric_reference_mode.check_candidate(self)
+        local_driver.NativeLocalProvenanceTest.setUp(self)
+
     probe = local_driver.NativeLocalProvenanceTest.probe
     fixture_local = local_driver.NativeLocalProvenanceTest.fixture_local
 
@@ -65,19 +71,53 @@ class NativeProvenanceMatchTest(unittest.TestCase):
                          image_artists='asset,artist_id,method,score,evidence,status',
                          lookups='target,backend,attempts,last_result').items()}
 
-    def parity(self, request, reference, numeric=False):
+    def parity(self, request, reference):
         core, source = reference.db.read_bytes(), reference.source.read_bytes()
-        if numeric:
-            from tests.numpy_provenance_reference import local_run
-            expected = local_run(reference)
-        else:
-            expected = verify.local_run(reference,log=lambda _:None)
+        expected = verify.local_run(reference,log=lambda _:None)
         actual = self.probe(request)
         self.assertEqual(actual['identity'],request['identity'])
         self.assertEqual(actual['result'],expected)
         self.assertEqual(self.rows(Path(request['cache'])),self.rows(reference.path))
         self.assertEqual(reference.db.read_bytes(),core)
         self.assertEqual(reference.source.read_bytes(),source)
+        return actual['result']
+
+    def complete_parity(self, request, reference, references):
+        from tests import numeric_reference_assertions as checks
+        from tests.numpy_provenance_reference import local_run
+        core, source = reference.db.read_bytes(), reference.source.read_bytes()
+        # 正式缓存自带交付/元数据表（app_provenance_cache::connect）。将它们作为
+        # 相同的输入，并保留哨兵行；本地匹配不能改写这些与本次任务无关的状态。
+        for folder in (reference.path, Path(request['cache'])):
+            with sqlite3.connect(folder/'provenance.sqlite') as cache:
+                cache.executescript("""
+                    CREATE TABLE native_delivery(task_id TEXT PRIMARY KEY,package TEXT NOT NULL,
+                        status TEXT NOT NULL DEFAULT 'pending',error TEXT NOT NULL DEFAULT '');
+                    CREATE TABLE native_meta(key TEXT PRIMARY KEY,value TEXT NOT NULL);
+                    INSERT INTO native_delivery VALUES ('synthetic-existing','unchanged','done','');
+                    INSERT INTO native_meta VALUES ('synthetic','unchanged');
+                """)
+        expected = []
+        for kind in references:
+            isolated = copy.copy(reference)
+            isolated.path = reference.path.with_name(reference.path.name + '-' + kind)
+            shutil.copytree(reference.path, isolated.path)
+            result = local_run(isolated) if kind == 'numpy' else verify.local_run(isolated, log=lambda _: None)
+            expected.append((kind, result, checks.comparable_cache(checks.cache_state(isolated.path))))
+        candidate = Path(request['cache'])
+        before = checks.cache_state(candidate)
+        started = checks.utc_second()
+        actual = self.probe(request)
+        finished = checks.utc_second()
+        after = checks.cache_state(candidate)
+        checks.assert_cache_preserved(self, before, after, started, finished)
+        for kind, result, state in expected:
+            with numeric_reference_mode.comparing(self, kind):
+                self.assertEqual(actual['identity'], request['identity'])
+                self.assertEqual(actual['result'], result)
+                self.assertEqual(checks.comparable_cache(after), state)
+                self.assertEqual(reference.db.read_bytes(), core)
+                self.assertEqual(reference.source.read_bytes(), source)
         return actual['result']
 
     def test_cached_signatures_thresholds_machine_only_and_repeat(self):
@@ -129,7 +169,7 @@ class NativeProvenanceMatchTest(unittest.TestCase):
         self.assertEqual(self.rows(Path(request['cache']))['lookups'],[])
 
     def test_stored_ratio_float32_boundary_and_flat_rejection_are_exact(self):
-        dynamic = numeric_reference_mode.enabled(self)
+        references = numeric_reference_mode.references(self)
         import numpy as np
         request,reference=self.fixture_match()
         library=Path(request['library']);path=library/'generated.png'
@@ -146,4 +186,4 @@ class NativeProvenanceMatchTest(unittest.TestCase):
                 asset=f'ratio-{i}'
                 c.execute('INSERT INTO assets VALUES (?,?)',(asset,str(path)))
                 c.execute('INSERT INTO image_sigs VALUES (?,?,?,1)',(asset,float(value),grid))
-        self.parity(request,reference,numeric=dynamic)
+        self.complete_parity(request,reference,references)

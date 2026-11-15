@@ -1,6 +1,8 @@
 """运行 Windows 的 Python 全量，记录输出并拦截白名单外的跳过。"""
 import argparse
 import ast
+from collections import Counter
+import json
 import os
 from pathlib import Path
 import subprocess
@@ -25,6 +27,21 @@ ALLOWED_SKIP_REASONS = frozenset({
     'Apple 照片图库只在 macOS 上提供',
 })
 SKIP_MARK = ' ... skipped '
+REFERENCE_MARK = 'NUMERIC_REFERENCE '
+
+
+def reference_summary(records):
+    """按真实进入的比较汇总；失败不会删掉，也不会用后来的参考结果覆盖。"""
+    totals = {}
+    for record in records:
+        key = (record['test'], record['reference'])
+        totals.setdefault(key, Counter())[record['status']] += 1
+    lines = ['### Windows 数值参考比较', '', '| 方法 | 参考 | 通过的比较 | 失败的比较 |', '|---|---|---:|---:|']
+    for (test, reference), count in sorted(totals.items()):
+        lines.append(f"| {test} | {reference} | {count['passed']} | {count['failed']} |")
+    if not totals:
+        lines.append('| 尚未执行到数值参考比较 | — | 0 | 0 |')
+    return lines
 
 
 def skip_allowed(line):
@@ -42,6 +59,7 @@ def main():
     args = parser.parse_args()
 
     skips = []
+    references = []
     tail = []
     command = [sys.executable, '-X', 'utf8', '-m', 'tests.run_fixed_suite', '-v', '-b']
     with args.log.open('w', encoding='utf-8', newline='\n') as log, subprocess.Popen(
@@ -52,10 +70,12 @@ def main():
             print(line, end='', flush=True)
             if SKIP_MARK in line:
                 skips.append(line.rstrip('\n'))
+            if line.startswith(REFERENCE_MARK):
+                references.append(json.loads(line[len(REFERENCE_MARK):]))
             tail = [*tail[-2:], line.rstrip('\n')]
         status = suite.wait()
 
-    summary = [f'### Windows Python 跳过：{len(skips)} 项', '```', *skips, *tail, '```']
+    summary = [*reference_summary(references), '', f'### Windows Python 跳过：{len(skips)} 项', '```', *skips, *tail, '```']
     print('\n'.join(summary))
     if path := os.environ.get('GITHUB_STEP_SUMMARY'):
         with open(path, 'a', encoding='utf-8') as output:

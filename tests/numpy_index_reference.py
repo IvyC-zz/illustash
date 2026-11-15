@@ -280,6 +280,11 @@ def anchor_index(anchors, ids, database):
     return meta, *thresholds, anchor_alias(anchors, ids, meta)
 
 
+def claim_thresholds(root, ids, th, th75):
+    patched = {cid for cid, row in metadata(root).items() if row.get('source') == SOURCE}
+    return np.array([th75[i] if cid in patched else th[i] for i, cid in enumerate(ids)], np.float32)
+
+
 def scan(root, task_id):
     anchors = np.load(root / 'char-anchors.npy')
     ids = (root / 'char-anchors.txt').read_text().splitlines()
@@ -294,8 +299,7 @@ def scan(root, task_id):
         features = np.concatenate([features, np.stack([np.frombuffer(v, np.float32) for _, v in extra])])
         assets.extend(asset for asset, _ in extra)
     _, th, th50, th75, entities = anchor_index(anchors, ids, root / 'pi.db')
-    patched = {cid for cid, row in metadata(root).items() if row.get('source') == SOURCE}
-    limit = np.array([th75[i] if cid in patched else th[i] for i, cid in enumerate(ids)], np.float32)
+    limit = claim_thresholds(root, ids, th, th75)
     with (root / 'char-scan.csv').open('w', newline='', encoding='utf-8') as handle:
         writer = csv.writer(handle)
         writer.writerow(['uuid', 'char_id', 'entity', 'dist', 'thresh', 'tier', 'rank', 'within'])

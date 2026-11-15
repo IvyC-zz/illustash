@@ -1,18 +1,27 @@
 """独立参考自身的边界：授权范围、失败行为和非浮点业务契约。"""
 import os
+import io
+import json
+from pathlib import Path
+import shutil
+import sqlite3
+import tempfile
 import unittest
 from unittest.mock import patch
 
 import numpy as np
+import PIL
 
 from tests import numeric_reference_mode as mode
 from tests import numpy_index_reference as index
+from tests import numeric_reference_assertions as checks
+from tests import numpy_reference_environment as environment
 
 
 class NumericReferenceContractTest(unittest.TestCase):
     def fixture(self, name):
         cls, method = name.split('.')
-        return type(cls, (), {'_testMethodName': method})()
+        return type(cls, (), {'_testMethodName': method, 'id': lambda _: 'tests.' + name})()
 
     def test_default_stays_frozen_and_only_nine_methods_are_allowed(self):
         self.assertEqual(len(mode.METHODS), 9)
@@ -29,14 +38,134 @@ class NumericReferenceContractTest(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, '必须为'):
                 mode.enabled(fixture)
         with patch.dict(os.environ, {mode.ENV: 'numpy'}), patch.object(mode.sys, 'platform', 'win32'):
+            fixture._missing_numeric_candidate = 'candidate missing'
             with self.assertRaisesRegex(RuntimeError, 'candidate missing'):
-                mode.missing_candidate('candidate missing')
+                mode.check_candidate(fixture)
+            sibling = self.fixture('NativeProvenanceVerifyTest.test_unapproved')
+            sibling._missing_numeric_candidate = 'candidate missing'
+            with self.assertRaises(unittest.SkipTest):
+                mode.check_candidate(sibling)
             with patch.object(np, '__version__', 'unsupported'):
                 with self.assertRaisesRegex(RuntimeError, '不能回退'):
                     mode.enabled(fixture)
         with patch.dict(os.environ, {mode.ENV: 'numpy'}), patch.object(mode.sys, 'platform', 'linux'):
             with self.assertRaisesRegex(RuntimeError, '不能跳过'):
                 mode.enabled(fixture)
+
+    def test_registered_identity_adds_frozen_and_every_component_matters(self):
+        fixture = self.fixture(next(iter(mode.METHODS)))
+        with (patch.dict(os.environ, {mode.ENV: 'numpy'}), patch.object(mode.sys, 'platform', 'win32'),
+              patch.object(np, '__version__', '2.5.3'), patch.object(PIL, '__version__', '12.3.0')):
+            with patch.object(environment, 'environment', return_value=dict(environment.FROZEN_ENVIRONMENT)):
+                self.assertEqual(mode.references(fixture), ('numpy', 'frozen'))
+            for key in environment.FROZEN_ENVIRONMENT:
+                value = dict(environment.FROZEN_ENVIRONMENT, **{key: 'unregistered'})
+                with self.subTest(component=key), patch.object(environment, 'environment', return_value=value):
+                    self.assertEqual(mode.references(fixture), ('numpy',))
+
+    def test_failed_frozen_comparison_propagates_and_summary_keeps_it(self):
+        from tests.windows_fixed_suite import reference_summary
+        fixture = self.fixture(next(iter(mode.METHODS)))
+        output = io.StringIO()
+        with patch.object(mode.sys, '__stderr__', output):
+            with mode.comparing(fixture, 'numpy'):
+                pass
+            with self.assertRaisesRegex(AssertionError, 'fixed mismatch'):
+                with mode.comparing(fixture, 'frozen'):
+                    raise AssertionError('fixed mismatch')
+        records = [json.loads(line.removeprefix('NUMERIC_REFERENCE ')) for line in output.getvalue().splitlines()]
+        self.assertEqual([r['status'] for r in records], ['passed', 'failed'])
+        summary = '\n'.join(reference_summary(records))
+        self.assertIn('| frozen | 0 | 1 |', summary)
+        self.assertIn('| numpy | 1 | 0 |', summary)
+
+    def test_missing_candidate_is_scoped_to_selected_methods_in_reused_setup(self):
+        from tests import test_native_provenance_match as matching, test_native_provenance_verify as gallery
+        selected = matching.NativeProvenanceMatchTest('test_stored_ratio_float32_boundary_and_flat_rejection_are_exact')
+        other = matching.NativeProvenanceMatchTest('test_cached_signatures_thresholds_machine_only_and_repeat')
+        inherited = gallery.NativeProvenanceVerifyTest(unittest.defaultTestLoader.getTestCaseNames(gallery.NativeProvenanceVerifyTest)[0])
+        with patch.dict(os.environ, {mode.ENV: 'numpy'}):
+            os.environ.pop('ILLUSTASH_PROVENANCE_COMPUTE_BIN', None)
+            result = unittest.TestResult()
+            unittest.TestSuite([selected, other, inherited]).run(result)
+        self.assertEqual([test.id() for test, _ in result.errors], [selected.id()])
+        self.assertEqual([test.id() for test, _ in result.skipped], [other.id(), inherited.id()])
+        self.assertFalse(result.failures)
+
+    def test_npy_rejects_equal_float64_shape_changes_and_changed_values(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            values = np.array([[1, 2], [3, 4]], np.float32)
+            np.save(root / 'expected.npy', values)
+            for changed in (values.astype(np.float64), values.reshape(4), values + 1):
+                np.save(root / 'actual.npy', changed)
+                with self.assertRaises(AssertionError):
+                    checks.assert_npy(self, root / 'actual.npy', root / 'expected.npy')
+
+    def test_index_persistent_ids_metadata_rejection_and_csv_bytes_are_checked(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp); expected = root / 'expected'; expected.mkdir()
+            for name in ('char-anchors.npy', 'char-index/new.npy', 'char-patch/raw/new.npy', 'char-patch/raw/twin.npy'):
+                path = expected / name; path.parent.mkdir(exist_ok=True, parents=True)
+                np.save(path, np.ones((2, 3), np.float32))
+            (expected / 'char-patch/rejected').mkdir()
+            for name in ('char-index/new.json', 'char-patch/rejected/twin.json'):
+                (expected / name).write_text('{"posts":[0,1],"refs_kept":2}')
+            (expected / 'char-anchors.txt').write_text('first\nsecond')
+            (expected / 'char-scan.csv').write_bytes(b'uuid,char_id\r\na,first\r\n')
+            for index, (name, content) in enumerate((
+                ('char-anchors.txt', b'second\nfirst'),
+                ('char-index/new.json', b'{"posts":[0,1],"refs_kept":3}'),
+                ('char-patch/rejected/twin.json', b'{"posts":[1,0],"refs_kept":2}'),
+                ('char-scan.csv', b'uuid,char_id\na,first\n'),
+            )):
+                actual = root / str(index); shutil.copytree(expected, actual)
+                (actual / name).write_bytes(content)
+                with self.subTest(name=name), self.assertRaises(AssertionError):
+                    checks.assert_index_files(self, actual, expected, cached=True)
+
+    def test_cache_includes_original_due_cursor_and_preserves_untouched_tables(self):
+        from tests import provenance_fixture
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            with provenance_fixture.connect(type('Library', (), {'path': root})()) as db:
+                db.execute("INSERT INTO artists(id) VALUES ('A')")
+                db.execute("INSERT INTO ref_sigs(site,post_id,ratio,grid) VALUES ('example','1',1,X'00')")
+            before = checks.cache_state(root)
+            started = checks.utc_second()
+            with sqlite3.connect(root / 'provenance.sqlite') as db:
+                db.execute("INSERT INTO image_sources(asset,site,post_id,url,method) VALUES ('a','example','1','','gallery_match')")
+                db.execute("INSERT INTO lookups(target,backend,last_at) VALUES ('a','ref_compare',datetime('now'))")
+            finished = checks.utc_second()
+            expected = checks.cache_state(root)
+            checks.assert_cache_preserved(self, before, expected, started, finished)
+            for statement in (
+                "UPDATE image_sources SET original='changed'",
+                "UPDATE lookups SET next_due_at='2099-01-01 00:00:00'",
+                "UPDATE lookups SET cursor='changed'",
+                "DELETE FROM ref_sigs",
+                "UPDATE artists SET merged_into='A'",
+            ):
+                with sqlite3.connect(root / 'provenance.sqlite') as db:
+                    db.execute('BEGIN')
+                    db.execute(statement)
+                    # 未提交的值在同一连接导出，再放进隔离副本，避免污染下一子例。
+                    sql = '\n'.join(db.iterdump())
+                    db.rollback()
+                changed = root / 'changed'; changed.mkdir(exist_ok=True)
+                (changed / 'provenance.sqlite').unlink(missing_ok=True)
+                with sqlite3.connect(changed / 'provenance.sqlite') as db:
+                    db.executescript(sql)
+                    db.execute('PRAGMA user_version=5')
+                state = checks.cache_state(changed)
+                self.assertNotEqual(checks.comparable_cache(state), checks.comparable_cache(expected), statement)
+                if 'ref_sigs' in statement or 'artists' in statement:
+                    with self.assertRaises(AssertionError):
+                        checks.assert_cache_preserved(self, before, state, started, finished)
+            with sqlite3.connect(root / 'provenance.sqlite') as db:
+                db.execute("UPDATE image_sources SET fetched_at='1999-01-01 00:00:00'")
+            with self.assertRaises(AssertionError):
+                checks.assert_cache_preserved(self, before, checks.cache_state(root), started, finished)
 
     def test_scalar_sort_keeps_fixed_partition_order_and_rejects_invalid_input(self):
         values = np.ones(10, np.float32)

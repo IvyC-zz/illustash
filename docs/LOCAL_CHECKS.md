@@ -1,6 +1,6 @@
 # 本地全量验收
 
-现行参考，2026-11-14。本文补充 [AGENTS.md](../AGENTS.md) 的本地验收约定；CI 覆盖及允许跳过仍以 `.github/workflows/ci.yml`、`tools/check_all.sh` 为准。
+现行参考，2026-11-15。本文补充 [AGENTS.md](../AGENTS.md) 的本地验收约定；CI 覆盖及允许跳过仍以 `.github/workflows/ci.yml`、`tools/check_all.sh` 为准。
 
 ## 开发检查与完整入口
 
@@ -197,9 +197,15 @@ PR 应明确区分“当前 head 上完整执行退出 0”和“当前候选仅
 
 公开库使用 `windows-latest` 和 MSVC x64。job 运行 core、platform、terms、desktop 的 clippy（参数与本机检查相同）、这四个项目及 iqdb 的 `cargo test`、terms 与 IQDB 的 release 构建和六个测试 example，再用这些 `.exe` 跑 Python 全套。14 步中的前端 JS 使用同一 workflow 的 Ubuntu 结果。Cargo 沿用仓库的静态 CRT 配置，关闭 CI 增量编译以控制磁盘占用。`TEMP` 和 `TMP` 指到系统盘的短目录，Python 日志统一使用 UTF-8。
 
-CI 使用标准 Python 3.12，与 macOS job 一致；常驻验收机使用嵌入式 3.13，`tests/test_run_fixed_suite.py` 的隔离入口测试覆盖其模块查找行为。CI 从 PyPI 下载并缓存固定的 x64 NumPy 2.5.3 wheel，安装它给 Python 对照用，再用打包脚本和 `crates/platform/src/research_openblas.json` 验证 DLL 的 SHA-256 并设置 `ILLUSTASH_RESEARCH_OPENBLAS_DLL`。3.12 与 3.13 对应的 wheel 含相同的已登记 DLL。Rust 和 wheel 的缓存只在 main 保存，PR 可还原。Windows job 的冷、热缓存耗时及压缩缓存大小待实际运行记录。
+CI 使用标准 Python 3.12，与 macOS job 一致；常驻验收机使用嵌入式 3.13，`tests/test_run_fixed_suite.py` 的隔离入口测试覆盖其模块查找行为。CI 从 PyPI 下载并缓存固定的 x64 NumPy 2.5.3 wheel，配合固定的 Pillow 12.3.0 给 Python 对照用，再用打包脚本和 `crates/platform/src/research_openblas.json` 验证 DLL 的 SHA-256 并设置 `ILLUSTASH_RESEARCH_OPENBLAS_DLL`。3.12 与 3.13 对应的 wheel 含相同的已登记 DLL。Rust 和 wheel 的缓存只在 main 保存，PR 可还原。Windows job 的冷、热缓存耗时及压缩缓存大小待实际运行记录。
 
 固定 OpenBLAS DLL 仍会按 CPU 选择内核，浮点末位可能不同。灰度单元测试先按 DLL 摘要和实际内核选择独立 NumPy 固定参考，再严格比较五种宽度的全部输出位。NumPy 2.5.3 对应 DLL 的 SkylakeX 保留原期望，Haswell/Sandybridge 使用编译候选之前独立采集的参考，来源及摘要写在测试旁。未登记组合会明确报告缺少独立参考并使测试、Windows job 和 workflow 失败，不跳过、不按实际输出任选期望；这份参考清单不限制产品支持的 DLL 或 CPU。汇总「全部检查」仍遵守下述 Windows 试运行规则，不能据其绿色状态认定 Windows 已通过。
+
+**九个数值方法的参考口径（#347，2026-11-15 批准）**：`tests/numeric_reference_mode.py` 列出的九个裁剪定位、溯源匹配和索引计算方法，默认继续严格冻结回放。Windows CI 显式设置 `ILLUSTASH_TEST_NUMERIC_REFERENCE=numpy` 后，每次从相同合成输入执行测试专用 NumPy/Pillow 完整算法，并与原生结果精确比较；未列出的方法仍使用原有参考。仅在 `tests/numpy_reference_environment.py` 登记的实际 DLL 摘要、完整 OpenBLAS 配置、内核、线程数、平台和依赖版本全部匹配时，再严格比较现有冻结参考。任一比较失败都会使测试失败，不尝试另一种参考来消除失败；未知模式、缺候选或缺依赖同样失败，缺候选硬失败仅作用于实际选中的九个方法。登记证明参考适用于已验证环境，历史录制 CPU/core 身份仍未知；单独的 SkylakeX 字符串不能触发冻结比较。
+
+独立参考只保留历史 Python 的纯计算及缓存路径，不导入退役应用、不加载模型、不读原生输出构造期望、不刷新固定值。并列选择仍用已批准的标量 NumPy argintroselect/aquicksort 顺序，八组手写 `tied_nearest` 不变。比较涵盖业务返回、完整缓存表的确定字段及保留行、索引 ID 顺序、清洗/拒绝 JSON、CSV 字节和 NPY 的 dtype/shape/value；源库字节、人工标注和篡改拒绝断言保留。溯源的旧行时间戳须原样保留，新行的生成时间须落在实际调用的 UTC 秒窗口内；跨历史记录比较时，仅归一化 `artists.created_at`、`image_sources.fetched_at`、`image_artists.updated_at`、`lookups.last_at` 四列。`next_due_at`、`cursor` 及其他确定字段不归一化。
+
+正式 Windows job 在编译前输出 CPU、NumPy/Pillow、DLL SHA-256、实际 OpenBLAS 配置/内核与线程数。每次实际进入的数值比较输出 `NUMERIC_REFERENCE` 记录，`windows_fixed_suite` 在 job 摘要中分别统计 NumPy 和冻结比较的通过/失败数；这份记录与 unittest 的总体成败一起阅读。其他平台的默认验收入口不设置该变量。
 
 `python -m tests.windows_fixed_suite --log windows-unittest.log` 是候选二进制和 OpenBLAS 接线后的全套入口。它列出全部 unittest 跳过，白名单逐条匹配平台限制，缺被测二进制、DLL 或升级输入均判失败。默认 discover 会排除显式点名的真实模型用例，打包资源测试使用合成文件，原生 ORT 通过运行时动态加载，故这个 job 只需要固定 OpenBLAS。自建 ONNX Runtime 的实际加载及真实模型、DirectML、CRT 依赖检查、安装／覆盖升级／卸载、GUI 和首次流程、真机性能以及 Windows ARM 仍在对应的验收机或虚拟机上做。试运行期间 Windows job 保留真实成败，分支保护的汇总暂不以它决定代码 PR 是否通过。
 

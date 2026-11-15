@@ -276,6 +276,8 @@ jobs:
       CARGO_INCREMENTAL: '0'
       PYTHONUTF8: '1'
       NUMPY_VERSION: '2.5.3'
+      PILLOW_VERSION: '12.3.0'
+      ILLUSTASH_TEST_NUMERIC_REFERENCE: numpy
     steps:
       - uses: actions/checkout@v4
         with:
@@ -320,7 +322,7 @@ jobs:
           $wheel = @(Get-ChildItem -Path $wheelDir -Filter "numpy-$env:NUMPY_VERSION-*-win_amd64.whl" -File)
           if ($wheel.Count -ne 1) { throw '需要且只能有一个固定版本的 Windows x64 NumPy wheel' }
           # 直接安装同一个 wheel，保证 Python 对照和原生后端用同一份 DLL。
-          python -m pip install --force-reinstall -r tests/requirements.txt $wheel[0].FullName
+          python -m pip install --force-reinstall -r tests/requirements.txt $wheel[0].FullName "Pillow==$env:PILLOW_VERSION"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $dll = @'
           import os
@@ -336,6 +338,16 @@ jobs:
           '@ | python -
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           "ILLUSTASH_RESEARCH_OPENBLAS_DLL=$dll" >> $env:GITHUB_ENV
+      - name: 记录 CPU 与实际数值后端身份
+        run: |
+          [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
+          $identityLog = Join-Path $env:RUNNER_TEMP 'windows-numeric-environment.log'
+          Get-CimInstance Win32_Processor | Select-Object Name, NumberOfCores, NumberOfLogicalProcessors, Architecture | ConvertTo-Json | Tee-Object -FilePath $identityLog
+          python -m tests.numpy_reference_environment | Tee-Object -FilePath $identityLog -Append
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          '### Windows 数值环境', '```json' >> $env:GITHUB_STEP_SUMMARY
+          Get-Content $identityLog >> $env:GITHUB_STEP_SUMMARY
+          '```' >> $env:GITHUB_STEP_SUMMARY
       - name: 保存已核验的 NumPy wheel
         if: github.ref == 'refs/heads/main' && steps.numpy-wheel.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
@@ -390,7 +402,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: windows-unittest-log
-          path: ${{ runner.temp }}/windows-unittest.log
+          path: |
+            ${{ runner.temp }}/windows-unittest.log
+            ${{ runner.temp }}/windows-numeric-environment.log
           if-no-files-found: ignore
           retention-days: 7
 
