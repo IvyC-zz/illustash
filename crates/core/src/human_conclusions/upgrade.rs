@@ -157,6 +157,38 @@ fn character_effects(label: &str, kind: Option<&str>, count: Option<&str>) -> Op
     }
 }
 
+fn evidenced_effects(
+    c: &Connection,
+    action: i64,
+    label: &str,
+    kind: Option<&str>,
+    count: Option<&str>,
+    has_reviews: bool,
+) -> Result<Option<(Effect, Effect, bool)>> {
+    use crate::undo_labels::UndoLabel;
+    let effects = character_effects(label, kind, count);
+    // v8 对更早历史也从文案回填过 metadata，语法合法不等于来自原命令。
+    // 只有 sweep 与确认/移出句式碰撞时需要区分：真实 sweep 总写 reviews，裁决 via=sweep；
+    // 确认/移出写 via=review 且不写 reviews。保留持久裁决作为证据，不重写旧 action。
+    let suspect = has_reviews
+        && matches!((kind, count), (None, None) | (Some("sweep"), Some(_)))
+        && count.is_none_or(|n| counted(n, "", ""))
+        && UndoLabel::Sweep.count(label).is_some()
+        && UndoLabel::ALL.into_iter().any(|k| k != UndoLabel::Sweep && k.count(label).is_some());
+    if !suspect {
+        return Ok(effects);
+    }
+    let clear: bool = c.query_row(
+        "SELECT NOT EXISTS(SELECT 1 FROM reviews WHERE action_id=?1)
+         AND EXISTS(SELECT 1 FROM term_verdicts WHERE action_id=?1)
+         AND NOT EXISTS(SELECT 1 FROM term_verdicts WHERE action_id=?1
+            AND (asset_id IS NULL OR term_id IS NULL OR via<>'review' OR verdict NOT IN ('yes','no')))",
+        [action],
+        |r| r.get(0),
+    )?;
+    Ok(if clear { Some((Effect::Clear, Effect::Clear, false)) } else { effects })
+}
+
 fn backfill(c: &Connection) -> Result<()> {
     let tables: BTreeSet<String> = c
         .prepare("SELECT name FROM sqlite_master WHERE type='table'")?
@@ -222,7 +254,11 @@ fn backfill(c: &Connection) -> Result<()> {
         let envelope = body[0].get("terms");
         let valid_envelope = envelope.is_none_or(|v| keys(v, &["v", "type", "before"]) && v["type"] == "snapshot");
         let valid = valid_envelope && !items.is_empty() && items.iter().all(character_snapshot);
-        let effects = character_effects(&label, kind.as_deref(), count.as_deref()).filter(|_| valid);
+        let effects = if valid {
+            evidenced_effects(c, action, &label, kind.as_deref(), count.as_deref(), tables.contains("reviews"))?
+        } else {
+            None
+        };
         for item in items {
             let Some(key) = asset_key(&item["uuid"]) else { continue };
             add(

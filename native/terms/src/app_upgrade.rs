@@ -392,6 +392,62 @@ mod tests {
             s.execute_batch(include_str!("app_source_schema.sql")).unwrap();
             Self(p)
         }
+        // 从历史核心生成的固定行建立测试库；DDL 仍由真正 migrate_to(version) 创建。
+        fn recorded(input: &serde_json::Value) -> Self {
+            let f = Fixture::new(input["terms_schema"].as_i64().unwrap());
+            let mut c = f.connection();
+            let tx = c.transaction().unwrap();
+            tx.execute_batch("PRAGMA defer_foreign_keys=ON").unwrap();
+            // 装入固定旧状态时只借写钥匙，不调用当前版本的投影器改写旧行。
+            tx.execute("INSERT OR REPLACE INTO meta VALUES (?1,'1')", [crate::schema::WRITER_KEY]).unwrap();
+            // 当前建库脚本已删掉这些 v7 兼容对象，DDL 从同一历史产出方一并冻结。
+            if let Some(ddl) = input["legacy_tables"].as_array() {
+                for sql in ddl {
+                    tx.execute_batch(sql.as_str().unwrap()).unwrap();
+                }
+            }
+            for (table, data) in input["tables"].as_object().unwrap() {
+                assert!([
+                    "deferred",
+                    "display_names",
+                    "entities",
+                    "names",
+                    "reviews",
+                    "term_key_names",
+                    "actions",
+                    "assertions",
+                    "assets",
+                    "memberships",
+                    "meta",
+                    "term_assets",
+                    "term_name_display",
+                    "term_names",
+                    "term_projection",
+                    "term_tree",
+                    "term_verdicts",
+                    "terms"
+                ]
+                .contains(&table.as_str()));
+                let columns: Vec<_> = data["columns"].as_array().unwrap().iter().map(|v| v.as_str().unwrap()).collect();
+                assert!(columns.iter().all(|v| v.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')));
+                let values: Vec<_> = (0..columns.len()).map(|i| format!("json_extract(?1,'$[{i}]')")).collect();
+                let verb = if table == "meta" { "INSERT OR REPLACE" } else { "INSERT" };
+                let sql = format!("{verb} INTO {table} ({}) SELECT {}", columns.join(","), values.join(","));
+                for row in data["rows"].as_array().unwrap() {
+                    tx.execute(&sql, [row.to_string()]).unwrap();
+                }
+            }
+            // 装入旧行后再安装旧触发器，保留录制的 names_version，不用新投影器刷新数据。
+            if let Some(ddl) = input["legacy_triggers"].as_array() {
+                for sql in ddl {
+                    tx.execute_batch(sql.as_str().unwrap()).unwrap();
+                }
+            }
+            tx.execute("DELETE FROM meta WHERE key=?1", [crate::schema::WRITER_KEY]).unwrap();
+            tx.commit().unwrap();
+            drop(c);
+            f
+        }
         fn connection(&self) -> Connection {
             crate::open(&self.0.join("library.sqlite")).unwrap()
         }
@@ -487,37 +543,8 @@ mod tests {
                 .unwrap();
         assert_eq!(input["producer_commit"], "02b6437d");
         assert_eq!(input["terms_schema"], 8);
-        let f = Fixture::new(8);
-        let mut c = f.connection();
-        let tx = c.transaction().unwrap();
-        tx.execute_batch("PRAGMA defer_foreign_keys=ON").unwrap();
-        crate::schema::begin_writing(&tx).unwrap();
-        for (table, data) in input["tables"].as_object().unwrap() {
-            assert!([
-                "actions",
-                "assertions",
-                "assets",
-                "memberships",
-                "meta",
-                "term_assets",
-                "term_name_display",
-                "term_names",
-                "term_projection",
-                "term_tree",
-                "term_verdicts",
-                "terms"
-            ]
-            .contains(&table.as_str()));
-            let columns: Vec<_> = data["columns"].as_array().unwrap().iter().map(|v| v.as_str().unwrap()).collect();
-            assert!(columns.iter().all(|v| v.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')));
-            let values: Vec<_> = (0..columns.len()).map(|i| format!("json_extract(?1,'$[{i}]')")).collect();
-            let verb = if table == "meta" { "INSERT OR REPLACE" } else { "INSERT" };
-            let sql = format!("{verb} INTO {table} ({}) SELECT {}", columns.join(","), values.join(","));
-            for row in data["rows"].as_array().unwrap() {
-                tx.execute(&sql, [row.to_string()]).unwrap();
-            }
-        }
-        crate::schema::commit_writing(tx).unwrap();
+        let f = Fixture::recorded(&input);
+        let c = f.connection();
         let (label, kind, count): (String, String, String) = c
             .query_row("SELECT label,label_kind,label_count FROM actions WHERE id=2", [], |r| {
                 Ok((r.get(0)?, r.get(1)?, r.get(2)?))
@@ -550,6 +577,73 @@ mod tests {
                 assert_eq!(read(), State::Positive(json!(true)));
             } else {
                 assert_eq!(read(), State::Undecided);
+            }
+        }
+    }
+    #[test]
+    fn genuine_v7_collision_survives_direct_and_already_v8_upgrade_without_reclassifying_sweep() {
+        use illustash_core::human_conclusions::state::{self, Domain, State};
+        use serde_json::{json, Value};
+        // c472dfed/v7 原命令产出：动作 2 是确认，动作 4 是检查完了；两条展示文案完全相同。
+        // 候选输入与旧名字触发器初始化在夹具说明中明示。生成后未修改动作载荷或裁决。
+        let input: Value =
+            serde_json::from_str(include_str!("../../../tests/fixtures/library_upgrade/human_v7_name_collision.json"))
+                .unwrap();
+        assert_eq!(input["producer_commit"], "c472dfed");
+        assert_eq!(input["terms_schema"], 7);
+        for via_v8 in [false, true] {
+            let f = Fixture::recorded(&input);
+            let mut c = f.connection();
+            let same: bool = c
+                .query_row(
+                    "SELECT (SELECT label FROM actions WHERE id=2)=(SELECT label FROM actions WHERE id=4)",
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            assert!(same);
+            if via_v8 {
+                crate::schema::migrate_to(&mut c, 8).unwrap();
+            }
+            drop(c);
+            let report = run(&needed(&f.0).unwrap(), None).unwrap();
+            assert_eq!(report.before, if via_v8 { 8 } else { 7 });
+            assert_eq!(f.backups(), if via_v8 { 2 } else { 1 });
+            let metadata: Vec<(i64, String, String)> = f
+                .connection()
+                .prepare("SELECT id,label_kind,label_count FROM actions WHERE id IN (2,4) ORDER BY id")
+                .unwrap()
+                .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+                .unwrap()
+                .map(|r| r.unwrap())
+                .collect();
+            // v8 当年的错误回填保持原样，v9 按裁决 via 与 reviews 核验语义，没有篡改历史元数据。
+            assert_eq!(metadata, vec![(2, "sweep".into(), "1".into()), (4, "sweep".into(), "1".into())]);
+            let read = |asset| state::read(&f.connection(), Domain::Deferred, asset).unwrap();
+            assert!(matches!(read("synthetic-a"),State::Absent(m) if m.owner_action_id==2));
+            assert_eq!(read("synthetic-b"), State::Positive(json!(true)));
+            let context = crate::http::LibraryContext {
+                db: f.0.join("library.sqlite"),
+                generation: "synthetic".into(),
+                library: Some(f.0.clone()),
+                tags: f.0.join("unused.csv"),
+                source: Some(f.0.join("source.sqlite")),
+                token: Some("synthetic".into()),
+                read_only: None,
+            };
+            for id in [4, 3, 2, 1] {
+                crate::app_commands::request(
+                    &context,
+                    "/api/undo",
+                    &crate::http_json::parse_request(&json!({"id":id}).to_string()).unwrap(),
+                )
+                .unwrap();
+                match id {
+                    4 => assert_eq!(read("synthetic-b"), State::Positive(json!(true))),
+                    3 => assert_eq!(read("synthetic-b"), State::Undecided),
+                    2 => assert_eq!(read("synthetic-a"), State::Positive(json!(true))),
+                    _ => assert_eq!(read("synthetic-a"), State::Undecided),
+                }
             }
         }
     }

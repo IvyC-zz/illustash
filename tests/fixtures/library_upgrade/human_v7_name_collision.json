@@ -1,0 +1,959 @@
+{
+  "producer_commit": "c472dfed",
+  "terms_schema": 7,
+  "commands": [
+    {
+      "op": "create_entity",
+      "id": "synthetic-character",
+      "name": "合成 标为已检查（1 张）",
+      "lang": "zh"
+    },
+    {
+      "op": "change",
+      "action": "unknown",
+      "asked": [
+        "synthetic-a"
+      ]
+    },
+    {
+      "op": "change",
+      "action": "confirmed",
+      "entity": "synthetic-character",
+      "asked": [
+        "synthetic-a"
+      ]
+    },
+    {
+      "op": "create_entity",
+      "id": "synthetic-sweep",
+      "name": "1 张设为 合成",
+      "lang": "zh"
+    },
+    {
+      "op": "change",
+      "action": "unknown",
+      "asked": [
+        "synthetic-b"
+      ]
+    },
+    {
+      "op": "sweep",
+      "entity": "synthetic-sweep"
+    }
+  ],
+  "sweep_input": "调用 sweep 前为 synthetic-b / synthetic-sweep 填入一条合成 machine memberships 投影；历史、裁决与 reviews 由真实 v7 sweep 生成。",
+  "tables": {
+    "actions": {
+      "columns": [
+        "id",
+        "label",
+        "before_json",
+        "ts",
+        "undone"
+      ],
+      "rows": [
+        [
+          1,
+          "已跳过 1 张",
+          "[{\"terms\":{\"before\":[{\"assertion\":null,\"deferred\":false,\"entity\":null,\"uuid\":\"synthetic-a\"}],\"type\":\"snapshot\",\"v\":2}}]",
+          "2026-11-15 08:17:30",
+          0
+        ],
+        [
+          2,
+          "已将 1 张设为 合成 标为已检查（1 张）",
+          "[{\"terms\":{\"before\":[{\"assertion\":null,\"deferred\":true,\"entity\":\"synthetic-character\",\"uuid\":\"synthetic-a\"}],\"type\":\"snapshot\",\"v\":2}}]",
+          "2026-11-15 08:17:30",
+          0
+        ],
+        [
+          3,
+          "已跳过 1 张",
+          "[{\"terms\":{\"before\":[{\"assertion\":null,\"deferred\":false,\"entity\":null,\"uuid\":\"synthetic-b\"}],\"type\":\"snapshot\",\"v\":2}}]",
+          "2026-11-15 08:17:30",
+          0
+        ],
+        [
+          4,
+          "已将 1 张设为 合成 标为已检查（1 张）",
+          "[{\"terms\":{\"before\":[{\"assertion\":null,\"deferred\":true,\"entity\":\"synthetic-sweep\",\"uuid\":\"synthetic-b\"}],\"type\":\"snapshot\",\"v\":2}}]",
+          "2026-11-15 08:17:30",
+          0
+        ]
+      ]
+    },
+    "assertions": {
+      "columns": [
+        "uuid",
+        "entity",
+        "status",
+        "origin"
+      ],
+      "rows": [
+        [
+          "synthetic-a",
+          "synthetic-character",
+          "confirmed",
+          "review"
+        ],
+        [
+          "synthetic-b",
+          "synthetic-sweep",
+          "confirmed",
+          "sweep"
+        ]
+      ]
+    },
+    "assets": {
+      "columns": [
+        "uuid",
+        "filename",
+        "src_path",
+        "width",
+        "height",
+        "added_at",
+        "src_kind"
+      ],
+      "rows": [
+        [
+          "synthetic-a",
+          null,
+          null,
+          null,
+          null,
+          null,
+          null
+        ],
+        [
+          "synthetic-b",
+          null,
+          null,
+          null,
+          null,
+          null,
+          null
+        ]
+      ]
+    },
+    "deferred": {
+      "columns": [
+        "uuid"
+      ],
+      "rows": [
+        [
+          "synthetic-b"
+        ]
+      ]
+    },
+    "display_names": {
+      "columns": [
+        "kind",
+        "key",
+        "lang",
+        "source",
+        "value"
+      ],
+      "rows": [
+        [
+          "work",
+          "touhou",
+          "zh",
+          "builtin",
+          "东方Project"
+        ],
+        [
+          "work",
+          "hololive",
+          "zh",
+          "builtin",
+          "hololive"
+        ],
+        [
+          "work",
+          "nijisanji",
+          "zh",
+          "builtin",
+          "彩虹社"
+        ],
+        [
+          "work",
+          "vocaloid",
+          "zh",
+          "builtin",
+          "VOCALOID"
+        ],
+        [
+          "work",
+          "fate",
+          "zh",
+          "builtin",
+          "Fate"
+        ],
+        [
+          "work",
+          "idolmaster",
+          "zh",
+          "builtin",
+          "偶像大师"
+        ],
+        [
+          "work",
+          "kancolle",
+          "zh",
+          "builtin",
+          "舰队Collection"
+        ],
+        [
+          "work",
+          "azur_lane",
+          "zh",
+          "builtin",
+          "碧蓝航线"
+        ],
+        [
+          "work",
+          "girls'_frontline",
+          "zh",
+          "builtin",
+          "少女前线"
+        ],
+        [
+          "work",
+          "pokemon",
+          "zh",
+          "builtin",
+          "宝可梦"
+        ],
+        [
+          "work",
+          "genshin_impact",
+          "zh",
+          "builtin",
+          "原神"
+        ],
+        [
+          "work",
+          "arknights",
+          "zh",
+          "builtin",
+          "明日方舟"
+        ],
+        [
+          "work",
+          "blue_archive",
+          "zh",
+          "builtin",
+          "蔚蓝档案"
+        ],
+        [
+          "work",
+          "honkai:_star_rail",
+          "zh",
+          "builtin",
+          "崩坏：星穹铁道"
+        ],
+        [
+          "work",
+          "zenless_zone_zero",
+          "zh",
+          "builtin",
+          "绝区零"
+        ],
+        [
+          "work",
+          "wuthering_waves",
+          "zh",
+          "builtin",
+          "鸣潮"
+        ],
+        [
+          "work",
+          "honkai_impact_3rd",
+          "zh",
+          "builtin",
+          "崩坏3"
+        ],
+        [
+          "work",
+          "umamusume",
+          "zh",
+          "builtin",
+          "赛马娘"
+        ],
+        [
+          "work",
+          "love_live!",
+          "zh",
+          "builtin",
+          "LoveLive!"
+        ],
+        [
+          "work",
+          "bang_dream!",
+          "zh",
+          "builtin",
+          "BanG Dream!"
+        ],
+        [
+          "work",
+          "project_sekai",
+          "zh",
+          "builtin",
+          "世界计划"
+        ],
+        [
+          "work",
+          "princess_connect!",
+          "zh",
+          "builtin",
+          "公主连结"
+        ]
+      ]
+    },
+    "entities": {
+      "columns": [
+        "id",
+        "name",
+        "work",
+        "external_key",
+        "variant",
+        "parent_id",
+        "tag",
+        "merged_into",
+        "kind",
+        "artist",
+        "label_only",
+        "mascot",
+        "mascot_origin",
+        "work_id",
+        "original"
+      ],
+      "rows": [
+        [
+          "synthetic-character",
+          "",
+          "",
+          null,
+          "",
+          null,
+          null,
+          null,
+          "character",
+          "",
+          0,
+          0,
+          null,
+          null,
+          0
+        ],
+        [
+          "synthetic-sweep",
+          "",
+          "",
+          null,
+          "",
+          null,
+          null,
+          null,
+          "character",
+          "",
+          0,
+          0,
+          null,
+          null,
+          0
+        ]
+      ]
+    },
+    "memberships": {
+      "columns": [
+        "uuid",
+        "entity",
+        "status",
+        "origin",
+        "sources",
+        "score",
+        "source_count",
+        "ccip_only",
+        "skey"
+      ],
+      "rows": [
+        [
+          "synthetic-a",
+          "synthetic-character",
+          "confirmed",
+          "review",
+          "",
+          null,
+          0,
+          0,
+          "1110000001.0000000000001"
+        ],
+        [
+          "synthetic-b",
+          "synthetic-sweep",
+          "confirmed",
+          "sweep",
+          "",
+          null,
+          0,
+          0,
+          "1110000001.0000000000001"
+        ]
+      ]
+    },
+    "meta": {
+      "columns": [
+        "key",
+        "value"
+      ],
+      "rows": [
+        [
+          "schema_version",
+          "36"
+        ],
+        [
+          "terms_artists",
+          "core"
+        ],
+        [
+          "terms_labels",
+          "core"
+        ],
+        [
+          "terms_characters",
+          "core"
+        ],
+        [
+          "terms_names",
+          "core"
+        ],
+        [
+          "indexed",
+          "synthetic"
+        ],
+        [
+          "general_indexed",
+          "synthetic"
+        ],
+        [
+          "rating_indexed",
+          "synthetic"
+        ],
+        [
+          "names_version",
+          "4"
+        ],
+        [
+          "terms_compact_pending",
+          "1"
+        ],
+        [
+          "terms_schema",
+          "7"
+        ],
+        [
+          "names_display_projected",
+          "4"
+        ],
+        [
+          "names_projected",
+          "4"
+        ]
+      ]
+    },
+    "names": {
+      "columns": [
+        "entity_id",
+        "lang",
+        "value",
+        "source",
+        "role",
+        "preferred",
+        "position"
+      ],
+      "rows": [
+        [
+          "synthetic-character",
+          "zh",
+          "合成 标为已检查（1 张）",
+          "user",
+          "display",
+          1,
+          0
+        ],
+        [
+          "synthetic-sweep",
+          "zh",
+          "1 张设为 合成",
+          "user",
+          "display",
+          1,
+          0
+        ]
+      ]
+    },
+    "reviews": {
+      "columns": [
+        "entity",
+        "reviewed_at",
+        "action_id"
+      ],
+      "rows": [
+        [
+          "synthetic-sweep",
+          "2026-11-15 08:17:30",
+          4
+        ]
+      ]
+    },
+    "term_assets": {
+      "columns": [
+        "id",
+        "namespace",
+        "key",
+        "md5",
+        "added_at",
+        "removed_at"
+      ],
+      "rows": [
+        [
+          1,
+          "library",
+          "synthetic-a",
+          null,
+          "2026-11-15 08:17:30",
+          null
+        ],
+        [
+          2,
+          "library",
+          "synthetic-b",
+          null,
+          "2026-11-15 08:17:30",
+          null
+        ]
+      ]
+    },
+    "term_key_names": {
+      "columns": [
+        "kind",
+        "key",
+        "lang",
+        "source",
+        "value"
+      ],
+      "rows": [
+        [
+          "work",
+          "arknights",
+          "zh",
+          "builtin",
+          "明日方舟"
+        ],
+        [
+          "work",
+          "azur_lane",
+          "zh",
+          "builtin",
+          "碧蓝航线"
+        ],
+        [
+          "work",
+          "bang_dream!",
+          "zh",
+          "builtin",
+          "BanG Dream!"
+        ],
+        [
+          "work",
+          "blue_archive",
+          "zh",
+          "builtin",
+          "蔚蓝档案"
+        ],
+        [
+          "work",
+          "fate",
+          "zh",
+          "builtin",
+          "Fate"
+        ],
+        [
+          "work",
+          "genshin_impact",
+          "zh",
+          "builtin",
+          "原神"
+        ],
+        [
+          "work",
+          "girls'_frontline",
+          "zh",
+          "builtin",
+          "少女前线"
+        ],
+        [
+          "work",
+          "hololive",
+          "zh",
+          "builtin",
+          "hololive"
+        ],
+        [
+          "work",
+          "honkai:_star_rail",
+          "zh",
+          "builtin",
+          "崩坏：星穹铁道"
+        ],
+        [
+          "work",
+          "honkai_impact_3rd",
+          "zh",
+          "builtin",
+          "崩坏3"
+        ],
+        [
+          "work",
+          "idolmaster",
+          "zh",
+          "builtin",
+          "偶像大师"
+        ],
+        [
+          "work",
+          "kancolle",
+          "zh",
+          "builtin",
+          "舰队Collection"
+        ],
+        [
+          "work",
+          "love_live!",
+          "zh",
+          "builtin",
+          "LoveLive!"
+        ],
+        [
+          "work",
+          "nijisanji",
+          "zh",
+          "builtin",
+          "彩虹社"
+        ],
+        [
+          "work",
+          "pokemon",
+          "zh",
+          "builtin",
+          "宝可梦"
+        ],
+        [
+          "work",
+          "princess_connect!",
+          "zh",
+          "builtin",
+          "公主连结"
+        ],
+        [
+          "work",
+          "project_sekai",
+          "zh",
+          "builtin",
+          "世界计划"
+        ],
+        [
+          "work",
+          "touhou",
+          "zh",
+          "builtin",
+          "东方Project"
+        ],
+        [
+          "work",
+          "umamusume",
+          "zh",
+          "builtin",
+          "赛马娘"
+        ],
+        [
+          "work",
+          "vocaloid",
+          "zh",
+          "builtin",
+          "VOCALOID"
+        ],
+        [
+          "work",
+          "wuthering_waves",
+          "zh",
+          "builtin",
+          "鸣潮"
+        ],
+        [
+          "work",
+          "zenless_zone_zero",
+          "zh",
+          "builtin",
+          "绝区零"
+        ]
+      ]
+    },
+    "term_name_display": {
+      "columns": [
+        "entity",
+        "skin_only",
+        "name",
+        "name_source",
+        "zh",
+        "ja",
+        "en",
+        "tag"
+      ],
+      "rows": [
+        [
+          "synthetic-character",
+          0,
+          "合成 标为已检查（1 张）",
+          "user",
+          null,
+          null,
+          null,
+          ""
+        ],
+        [
+          "synthetic-character",
+          1,
+          "合成 标为已检查（1 张）",
+          "user",
+          null,
+          null,
+          null,
+          ""
+        ],
+        [
+          "synthetic-sweep",
+          0,
+          "1 张设为 合成",
+          "user",
+          null,
+          null,
+          null,
+          ""
+        ],
+        [
+          "synthetic-sweep",
+          1,
+          "1 张设为 合成",
+          "user",
+          null,
+          null,
+          null,
+          ""
+        ]
+      ]
+    },
+    "term_names": {
+      "columns": [
+        "term_id",
+        "lang",
+        "value",
+        "role",
+        "source",
+        "preferred",
+        "position"
+      ],
+      "rows": [
+        [
+          1,
+          "zh",
+          "合成 标为已检查（1 张）",
+          "display",
+          "user",
+          1,
+          0
+        ],
+        [
+          2,
+          "zh",
+          "1 张设为 合成",
+          "display",
+          "user",
+          1,
+          0
+        ]
+      ]
+    },
+    "term_projection": {
+      "columns": [
+        "asset_id",
+        "term_id",
+        "state",
+        "score",
+        "sources"
+      ],
+      "rows": [
+        [
+          1,
+          1,
+          "confirmed",
+          null,
+          ""
+        ],
+        [
+          2,
+          2,
+          "confirmed",
+          null,
+          ""
+        ]
+      ]
+    },
+    "term_tree": {
+      "columns": [
+        "term_id",
+        "parent_id",
+        "merged_into",
+        "work_id",
+        "work_text",
+        "review_status",
+        "review_note",
+        "parent_locked"
+      ],
+      "rows": [
+        [
+          1,
+          null,
+          null,
+          null,
+          "",
+          null,
+          null,
+          null
+        ],
+        [
+          2,
+          null,
+          null,
+          null,
+          "",
+          null,
+          null,
+          null
+        ]
+      ]
+    },
+    "term_verdicts": {
+      "columns": [
+        "id",
+        "action_id",
+        "asset_id",
+        "term_id",
+        "relation_id",
+        "verdict",
+        "origin",
+        "reason",
+        "reviewed",
+        "created_at",
+        "batch_id",
+        "anchor",
+        "via"
+      ],
+      "rows": [
+        [
+          1,
+          2,
+          1,
+          1,
+          null,
+          "yes",
+          "user",
+          "",
+          "[]",
+          "2026-11-15 08:17:30",
+          null,
+          2,
+          "review"
+        ],
+        [
+          2,
+          4,
+          2,
+          2,
+          null,
+          "yes",
+          "user",
+          "",
+          "[]",
+          "2026-11-15 08:17:30",
+          null,
+          4,
+          "sweep"
+        ]
+      ]
+    },
+    "terms": {
+      "columns": [
+        "id",
+        "key",
+        "kind",
+        "origin",
+        "attrs",
+        "created_at"
+      ],
+      "rows": [
+        [
+          1,
+          "synthetic-character",
+          "character",
+          "user",
+          "{\"variant\":\"\",\"artist\":\"\",\"label_only\":0,\"mascot\":0,\"mascot_origin\":null,\"original\":0}",
+          "2026-11-15 08:17:30"
+        ],
+        [
+          2,
+          "synthetic-sweep",
+          "character",
+          "user",
+          "{\"variant\":\"\",\"artist\":\"\",\"label_only\":0,\"mascot\":0,\"mascot_origin\":null,\"original\":0}",
+          "2026-11-15 08:17:30"
+        ]
+      ]
+    }
+  },
+  "initialization": "按 c472dfed 的 app_create::names_triggers 安装旧名字版本触发器。",
+  "legacy_tables": [
+    "CREATE TABLE display_names(\n kind TEXT NOT NULL, key TEXT NOT NULL, lang TEXT NOT NULL, source TEXT NOT NULL, value TEXT NOT NULL,\n PRIMARY KEY(kind,key,lang,source,value))",
+    "CREATE TABLE identity_baseline(\n id TEXT PRIMARY KEY,parent_id TEXT,variant TEXT,kind TEXT,merged_into TEXT)",
+    "CREATE TABLE links(system TEXT NOT NULL,key TEXT NOT NULL,entity_id TEXT NOT NULL REFERENCES entities(id),\n current INTEGER NOT NULL DEFAULT 1,source TEXT NOT NULL,added_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,PRIMARY KEY(system,key))",
+    "CREATE TABLE name_aliases(kind TEXT NOT NULL,key TEXT NOT NULL,value TEXT NOT NULL,position INTEGER NOT NULL,PRIMARY KEY(kind,key,value))",
+    "CREATE TABLE names(entity_id TEXT NOT NULL REFERENCES entities(id),lang TEXT NOT NULL DEFAULT '' CHECK(lang IN ('','zh','ja','en')),\n value TEXT NOT NULL,source TEXT NOT NULL,role TEXT NOT NULL CHECK(role IN ('display','alias')),preferred INTEGER NOT NULL DEFAULT 0,\n position INTEGER NOT NULL DEFAULT 0,PRIMARY KEY(entity_id,role,lang,source,value))",
+    "CREATE TABLE work_review(entity_id TEXT PRIMARY KEY REFERENCES entities(id),\n        status TEXT NOT NULL DEFAULT 'pending',note TEXT NOT NULL DEFAULT '',parent_locked INTEGER NOT NULL DEFAULT 0)",
+    "CREATE INDEX links_entity ON links(entity_id,system)",
+    "CREATE INDEX names_value ON names(value COLLATE NOCASE)"
+  ],
+  "legacy_triggers": [
+    "CREATE TRIGGER identity_baseline_writer_delete BEFORE DELETE ON identity_baseline\n              WHEN NOT EXISTS(SELECT 1 FROM meta WHERE key='terms_writer')\n              BEGIN SELECT RAISE(ABORT,'identity_baseline is written by the terms core'); END",
+    "CREATE TRIGGER identity_baseline_writer_insert BEFORE INSERT ON identity_baseline\n              WHEN NOT EXISTS(SELECT 1 FROM meta WHERE key='terms_writer')\n              BEGIN SELECT RAISE(ABORT,'identity_baseline is written by the terms core'); END",
+    "CREATE TRIGGER identity_baseline_writer_update BEFORE UPDATE ON identity_baseline\n              WHEN NOT EXISTS(SELECT 1 FROM meta WHERE key='terms_writer')\n              BEGIN SELECT RAISE(ABORT,'identity_baseline is written by the terms core'); END",
+    "CREATE TRIGGER links_writer_delete BEFORE DELETE ON links\n              WHEN NOT EXISTS(SELECT 1 FROM meta WHERE key='terms_writer')\n              BEGIN SELECT RAISE(ABORT,'links is written by the terms core'); END",
+    "CREATE TRIGGER links_writer_insert BEFORE INSERT ON links\n              WHEN NOT EXISTS(SELECT 1 FROM meta WHERE key='terms_writer')\n              BEGIN SELECT RAISE(ABORT,'links is written by the terms core'); END",
+    "CREATE TRIGGER links_writer_update BEFORE UPDATE ON links\n              WHEN NOT EXISTS(SELECT 1 FROM meta WHERE key='terms_writer')\n              BEGIN SELECT RAISE(ABORT,'links is written by the terms core'); END",
+    "CREATE TRIGGER names_version_display_names_delete AFTER DELETE ON display_names BEGIN UPDATE meta SET value=CAST(value AS INTEGER)+1 WHERE key='names_version'; END",
+    "CREATE TRIGGER names_version_display_names_insert AFTER INSERT ON display_names BEGIN UPDATE meta SET value=CAST(value AS INTEGER)+1 WHERE key='names_version'; END",
+    "CREATE TRIGGER names_version_display_names_update AFTER UPDATE ON display_names BEGIN UPDATE meta SET value=CAST(value AS INTEGER)+1 WHERE key='names_version'; END",
+    "CREATE TRIGGER names_version_entities_delete AFTER DELETE ON entities BEGIN UPDATE meta SET value=CAST(value AS INTEGER)+1 WHERE key='names_version'; END",
+    "CREATE TRIGGER names_version_entities_insert AFTER INSERT ON entities BEGIN UPDATE meta SET value=CAST(value AS INTEGER)+1 WHERE key='names_version'; END",
+    "CREATE TRIGGER names_version_entities_update AFTER UPDATE ON entities BEGIN UPDATE meta SET value=CAST(value AS INTEGER)+1 WHERE key='names_version'; END",
+    "CREATE TRIGGER names_version_links_delete AFTER DELETE ON links BEGIN UPDATE meta SET value=CAST(value AS INTEGER)+1 WHERE key='names_version'; END",
+    "CREATE TRIGGER names_version_links_insert AFTER INSERT ON links BEGIN UPDATE meta SET value=CAST(value AS INTEGER)+1 WHERE key='names_version'; END",
+    "CREATE TRIGGER names_version_links_update AFTER UPDATE ON links BEGIN UPDATE meta SET value=CAST(value AS INTEGER)+1 WHERE key='names_version'; END",
+    "CREATE TRIGGER names_version_names_delete AFTER DELETE ON names BEGIN UPDATE meta SET value=CAST(value AS INTEGER)+1 WHERE key='names_version'; END",
+    "CREATE TRIGGER names_version_names_insert AFTER INSERT ON names BEGIN UPDATE meta SET value=CAST(value AS INTEGER)+1 WHERE key='names_version'; END",
+    "CREATE TRIGGER names_version_names_update AFTER UPDATE ON names BEGIN UPDATE meta SET value=CAST(value AS INTEGER)+1 WHERE key='names_version'; END",
+    "CREATE TRIGGER work_review_writer_delete BEFORE DELETE ON work_review\n              WHEN NOT EXISTS(SELECT 1 FROM meta WHERE key='terms_writer')\n              BEGIN SELECT RAISE(ABORT,'work_review is written by the terms core'); END",
+    "CREATE TRIGGER work_review_writer_insert BEFORE INSERT ON work_review\n              WHEN NOT EXISTS(SELECT 1 FROM meta WHERE key='terms_writer')\n              BEGIN SELECT RAISE(ABORT,'work_review is written by the terms core'); END",
+    "CREATE TRIGGER work_review_writer_update BEFORE UPDATE ON work_review\n              WHEN NOT EXISTS(SELECT 1 FROM meta WHERE key='terms_writer')\n              BEGIN SELECT RAISE(ABORT,'work_review is written by the terms core'); END"
+  ]
+}
