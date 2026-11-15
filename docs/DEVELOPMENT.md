@@ -1,6 +1,6 @@
 # 开发说明
 
-状态：现行参考，2026-11-14；「发布」一节已按 v0.1.0 的实际发布修订（#190）。从 README 移出的开发者内容：构建、运行形态、图库包结构、目录、文档地图与检查流程。面向使用者的介绍见 [README](../README.md)。
+状态：现行参考，2026-11-14；「发布」一节已按 v0.1.0 的实际发布修订（#190）。从 README 移出的开发者内容：构建、运行形态、图库包结构、目录、文档地图与检查流程。面向使用者的介绍见 README（[英文](../README.md)、[中文](../README.zh-CN.md)）。
 
 核心是 Rust：`crates/core` 管业务规则、证据、人工裁决、关系、历史与投影，`crates/platform` 管平台能力，`crates/iqdb` 在本地算 IQDB 签名；`native/terms` 是应用宿主（CLI、HTTP、任务编排），`desktop/` 是只做启动与登录窗口的 Tauri 外壳。数据在 SQLite，推理用 ONNX Runtime（Apple 芯片的 macOS 上走 Core ML、Windows 上走 DirectML，CPU 是参考与回退，见[识别的执行后端](BACKEND_TASKS.md#识别的执行后端)），模型不进仓库、打包时按白名单加入。
 
@@ -132,7 +132,7 @@ stderr 每行最多取前 4 KiB 在内存识别，未知非空行只记未分类
     **仓库改名或转移**（2026-11-12 用户定，#358）：检查更新的请求不跟随重定向，所以按仓库的数字 ID 查，不按 `账号/仓库名`。改名或转移后 ID 不变，已经发出去的版本照样查得到；「打开下载页」是在浏览器里打开的网页，由 GitHub 的网页跳转接住。按 ID 的地址是 GitHub 把改名或转移过的仓库的旧地址跳转过去的地址（2026-11-12 实测），但没有写进它的 REST 文档。所以 GitHub 明确答复这个地址查不到时（3xx 或 4xx；403、429 是限流，不算），应用会再按 `repos/shio-vinyl/illustash/releases` 查一次：按 ID 的地址哪天不再提供这个列表，只要仓库还叫原来的名字就仍查得到。换地址不是跟随重定向，回复里的跳转地址从不使用；连不上、限流和 5xx 不换地址。已经发出去的版本改不了，由此有两条约束：
     - 改名或转移后，旧的 `shio-vinyl/illustash` 这个位置不能再有仓库（新建和 fork 都算）。一有，GitHub 对旧地址的跳转就失效，已发出版本的「打开下载页」会打开那个新仓库，按名字的那次回退查到的也是它。仓库改名或转移到别的账号、组织时，`shio-vinyl` 账号要留着；账号本身改名的话，GitHub 会放出旧账号名，别人注册后就能在这个位置建同名仓库，这一条就守不住了。
     - 仓库不能删掉重建。重建后 ID 会变，已发出的版本按 ID 查不到；用原名重建时还能靠按名字的回退查到，但以后改名或转移就接不住了。
-11. **发布之后**：第一次发布后，改掉 [README](../README.md)「现状」和 [装不上、打不开怎么办](INSTALL.md) 开头「还没有正式发布」的状态句。
+11. **发布之后**：第一次发布后，改掉两版 README（[英文](../README.md)、[中文](../README.zh-CN.md)）「下载与现状」一节和 [装不上、打不开怎么办](INSTALL.md) 开头「还没有正式发布」的状态句。
 
 #### 更新签名密钥
 
@@ -172,7 +172,8 @@ illustash/
 ├── start-web.command     本地 Web 入口（macOS）
 ├── AGENTS.md             协作流程与文档规范，CLAUDE.md 引入本篇
 ├── LICENSE               GPL-3.0 全文
-└── README.md             对外介绍
+├── README.md             对外介绍（英文，仓库首页默认显示）
+└── README.zh-CN.md       对外介绍（中文）
 ```
 
 本机忽略、不进仓库：`models/`（ONNX 模型）、`review/`（共享索引与研究数据）、`reference/`（研究参考材料）、`_scratch/`（可重新生成的产物）、`.venv/`（本机依赖与固定验收缓存）；`.claude/worktrees/` 放开发 worktree。
@@ -204,7 +205,7 @@ illustash/
 
 ## 文档地图
 
-现行参考都在 `docs/`；根目录只留 `README.md`、`AGENTS.md`、`CLAUDE.md` 和 `LICENSE`。
+现行参考都在 `docs/`；根目录只留 `README.md`、`README.zh-CN.md`、`AGENTS.md`、`CLAUDE.md` 和 `LICENSE`。
 
 | 主题 | 文档 |
 |---|---|

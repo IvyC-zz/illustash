@@ -1,234 +1,291 @@
+<div align="center">
+
+<img src="docs/assets/icon-macos.svg" width="112" height="112" alt="Illustash icon">
+
 # Illustash
 
-简体中文 | [English](README.en.md)
+**A local library for your anime illustration collection.**
 
-面向二次元插画收藏的本地图库工具，用来把从 X、Pixiv 存下的成千上万张插画按作品和角色归类，并协助找回画师与原帖出处。不搬运原图，识别与索引都在本机运行，图片不出你的电脑。
+[![Latest release](https://img.shields.io/github/v/release/shio-vinyl/illustash?label=release&color=4c6ef5)](https://github.com/shio-vinyl/illustash/releases/latest)
+[![License: GPL-3.0-or-later](https://img.shields.io/badge/license-GPL--3.0--or--later-blue.svg)](LICENSE)
+[![Platform: macOS · Windows](https://img.shields.io/badge/platform-macOS%2014%2B%20(Apple%20silicon)%20%C2%B7%20Windows%20x64-lightgrey.svg)](#download-and-status)
+[![Built with Rust and Tauri](https://img.shields.io/badge/built%20with-Rust%20%C2%B7%20Tauri-dea584.svg?logo=rust&logoColor=white)](#how-it-works)
 
-从 X、Pixiv 存图久了，手头很容易攒下几万张插画。留在系统相册里，通用相册不认识二次元角色，插画会和日常照片、截图混在一起；手动建文件夹很难处理多角色同框和不同造型，而用 Eagle 这类素材库又得自己打标签、维护仓库。
+[**Download**](https://github.com/shio-vinyl/illustash/releases/latest) · [Features](#what-it-does) · [Privacy](#privacy-and-boundaries) · [How it works](#how-it-works) · [Build from source](#running-from-source)
 
-接入图片来源、跑完本地识别后，就有现成的作品与角色目录。不用先把几万张图整理完才能开始使用，界面上默认也不显示「待整理数字」（侧栏计数默认关闭）。平时像翻相册一样浏览，看到哪张认错了点一下改掉，图库会按你的判断更新后续归属。
+English · [简体中文](README.zh-CN.md)
 
-## 能做什么
+</div>
 
-### 1. 图片来源与角色目录
+![Catalog: series and characters, organized](docs/assets/readme/en/library.jpg)
 
-**读取系统相册与本地文件夹：** 支持接入 macOS「照片」（只读，导入从 X、Pixiv 存下的图）和本地文件夹，不用搬运或复制原图。图片来源可按保存出处（Pixiv、X、其他）分栏管理：macOS「照片」按存图应用自动区分，文件夹在添加时指定出处。
+<sub>Screenshots come from a demo library picked for this purpose. The illustrations belong to their original artists; to request removal, please <a href="https://github.com/shio-vinyl/illustash/issues">open an issue</a>.</sub>
 
-**作品与角色层级目录：** 用本地模型自动识别画面中的角色，按「作品（可按系列分层） → 角色 → 皮肤 / 子标签（服装、异格、另一形态）」建立资料库目录；开启名称联网查询后可补全中文名。搜索中文、日文、英文名、别名或原始 tag，都能找到对应角色。多人同框的插画会同时归入各自的角色目录，同一角色的不同服装与造型也归在一起。
+A local library tool for anime-style illustrations. It organizes thousands of pictures saved from X and Pixiv by series and character, and helps trace back their artists and original posts. Originals stay where they are; recognition and indexing run locally, and your pictures never leave your computer.
 
-![资料库：按作品和角色整理的目录](docs/assets/readme/zh/library.jpg)
+Save illustrations from X and Pixiv long enough and you easily end up with tens of thousands of pictures. Kept in a system photo app, they mix with everyday photos and screenshots because general-purpose albums do not recognize anime characters; sorting into folders by hand breaks down when multiple characters share a picture or appear in different outfits, while asset managers like Eagle require tagging and maintaining everything yourself.
 
-<sub>截图来自专门挑的演示图库，里面的插画版权归原作者，如需移除请<a href="https://github.com/shio-vinyl/illustash/issues">开 Issue</a>。</sub>
+Once you connect your picture sources and finish local recognition, Illustash builds a ready-to-browse catalog of series and characters. You do not need to sort tens of thousands of pictures before using it, and pending-work counts are not shown on screen by default (“Counts in the sidebar” is off by default). Browse your pictures like a photo album; when you see a misidentified character, fix it with a click and the library updates subsequent assignments around your decision.
 
-**新建作品与角色：** 资料库里还没有的作品、角色或原创角色可以直接新建，不必等待角色索引更新。给一个角色确认满 5 张图后，Illustash 会根据画面中的角色特征把后续出现的同角色插画关联起来；暂时叫不出名字的角色，也能先在「未识别」里按相似外观归成一组，之后再改名或合并到具体角色。
+### Highlights
 
-### 2. 人工纠错与本地学习
+- **[A ready-made catalog](#picture-sources-and-character-catalog)**: local models sort pictures into series → character → outfit, and group pictures appear under every character in them.
+- **[Your decisions take precedence](#manual-corrections-and-local-learning)**: fix a character with a click and undo at any time; re-running recognition never overwrites what you edited.
+- **[Artists and original posts, found again](#finding-artists-and-original-posts)**: pixel hashes, image signatures, and your following lists, without uploading your originals or thumbnails.
+- **[Duplicates and variants, folded](#excluding-non-illustrations-grouping-duplicates-and-r18-filtering)**: re-saves, crops, censored versions, and subtle variants are compared and grouped locally.
+- **[Local by default](#privacy-and-boundaries)**: recognition and indexing run on your computer, and every network feature is off by default.
 
-机器识别的结果默认生效，不需要先检查完所有标签才能开始浏览。翻图时看到认错的，点一下就能更换、移出或合并角色，所有操作随时可以撤销（⌘Z / Ctrl+Z）。
+## What it does
 
-**人工结论优先：** 你确认或否定过的归属始终优先于机器判断。后续重新识别、更新角色索引，都不会覆盖你改好的归属，也不会把已移出的错误角色重新加回。
+### Picture sources and character catalog
 
-![角色页与详情栏：确认或更正角色](docs/assets/readme/zh/character.jpg)
+**System Photos and local folders:** Connects to macOS Photos (read-only, importing pictures saved from X and Pixiv) and local folders without moving or copying your originals. Picture sources are organized into tabs by saved origin (“Pixiv”, “X”, “Other”): macOS Photos distinguishes them automatically by the app that saved each picture, while folders are assigned an origin when added.
 
-**根据确认样本识别新造型：** 遇到同人服装、画风变化，或一开始漏认的图片，只要给该角色确认满 5 张图，Illustash 就会根据已有样本寻找这个角色的其他造型：把握高的自动认领进来，拿不准的标成「也可能是」供你确认。
+**Hierarchical series and character catalog:** Uses local models to identify characters in each picture and builds a “Catalog” structured as Series (with optional parent series) → Character → Outfit / Sub-tag (outfit, alternate version, another form); turning on “Online name lookups” can fill in Chinese names as well. Searching by Chinese, Japanese, or English names, aliases, or raw tags finds the matching character. Group pictures appear under every character in them, and different outfits or looks stay grouped under the same character. The screenshot at the top of this page shows the Catalog.
 
-**冷门角色与原创角色成组整理：** 对于暂时叫不出名字的角色和原创角色（OC），Illustash 会根据外貌以及发色、瞳色、兽耳等特征，把相似图片聚成小组。确定是谁后可以整组认领，不需要逐张修改。
+**Creating new series and characters:** Series, characters, or original characters not yet in the catalog can be created directly without waiting for a character index update. Once you confirm 5 pictures for a character, Illustash uses their visual features to link other pictures of that character; for characters whose names you do not know yet, look-alike pictures can be grouped under “Unidentified” first and renamed or merged into a character later.
 
-![未识别 › 按组整理：叫不出名字的角色按长相成组](docs/assets/readme/zh/groups.jpg)
+### Manual corrections and local learning
 
-首页偶尔会出现一张「认一认」卡片，用来给机器拿不准或样本较少的角色补足确认样本。常看的作品也可以在资料库里开启「关注新角色」，经你确认联网后按需补充新登场角色的参考特征。
+Machine recognition results apply by default, so you do not need to check every tag before browsing. When you spot a mistake while paging through pictures, you can change, remove, or merge characters with a click, and every action can be undone at any time (⌘Z / Ctrl+Z).
 
-### 3. 找回画师与原帖出处
+**Your decisions take precedence:** Any assignment you confirm or reject always overrides machine judgment. Re-running recognition or updating the character index later will never overwrite assignments you edited or re-add a wrong character you removed.
 
-对于保存已久、改过文件名、找不到原帖的图片，Illustash 可以在不上传原图或缩略图的前提下，经你授权联网后批量找回一部分插画的出处。
+![Character page and details panel: confirm or correct a character](docs/assets/readme/en/character.jpg)
 
-**多线索匹配原帖：** 结合 Danbooru 像素哈希、本地计算的 IQDB 图像签名，以及你的 Pixiv 关注列表或导入的 X 数据归档关注列表，查找图片的原始出处，补回画师信息与原帖链接。
+**Identifying new looks from confirmed examples:** When a picture has a fan-made outfit, a different art style, or was missed initially, confirming 5 pictures for that character lets Illustash look for their other appearances based on existing examples: high-confidence matches are assigned automatically, while uncertain ones are marked “Might also be” for you to confirm.
 
-**按已知画师查找其他作品：** 认出某位画师后，可以在详情面板点「找 TA 的其他图」，拉取这位画师在 Danbooru、Pixiv 上的公开作品缩略图（Pixiv 的 R18 作品需在桌面 App 内登录你自己的账号），只在本机比对签名；缩略图比完就删，只留比对用的签名（16×16 灰度和 24×24 彩色），把图库里出自同一位画师的其他作品找出来。
+**Grouping obscure and original characters:** For characters whose names you do not know yet and original characters (OCs), Illustash groups look-alike pictures by appearance and traits such as hair color, eye color, and animal ears. Once you know who they are, you can assign the entire group at once without editing picture by picture.
 
-从图片详情点进画师，可以在图库里按这位画师筛选浏览，并打开其主页与原帖链接。
+![Unidentified › By group: unknown characters grouped by look](docs/assets/readme/en/groups.jpg)
 
-### 4. 杂图排除、重复归组与 R18 筛选
+“Home” occasionally shows a “Who's this?” card to add confirmed examples for uncertain characters or characters with few samples. For series you follow regularly, you can also turn on “Follow new characters” in the “Catalog” to fetch reference features for newly debuted characters on demand after confirming network access.
 
-**排除非插画内容：** 自动区分二次元插画与三次元真人照片、聊天记录、界面截图、纯文字图等内容，把非插画图片归入「已排除」（规则可在设置中开关）。macOS「照片」来源只读取从 X、Pixiv 存下的图，文件夹或存图里混进的日常照片与杂图，也会按同样的规则自动归入「已排除」。
+### Finding artists and original posts
 
-**重复与差分归组：** 重复保存的原图、加字或去字版、裁剪版、色块或马赛克打码图，以及只改了表情或眼镜的细微差分，都能在本地自动比对、归组。选中几张图点「判断关系」，可以在图片上框出差异区域或裁剪位置。
+For older pictures whose file names were changed and whose source posts were lost, Illustash can recover the origins of part of your illustrations in batch once you allow network access, without uploading your originals or thumbnails.
 
-![判断关系：框出两张图不一样的地方](docs/assets/readme/zh/compare.jpg)
+**Matching posts from multiple clues:** Combines Danbooru pixel hashes, locally computed IQDB signatures, and your Pixiv following list or an imported X data-archive following list to find original posts and restore artist names and post links.
 
-完全相同与重复保存的图片默认自动折叠；细微差分、局部编辑、裁剪等关系也可以在设置中按需勾选折叠。折叠进同一重复组的副本，修改角色归属时会自动同步；组内角色不一致时会先留作待对齐，暂不折叠。
+**Finding other works by a known artist:** Once an artist is identified, you can click “Find more of their pictures” in the details panel to fetch thumbnails of their public works on Danbooru and Pixiv (matching R18 works on Pixiv requires signing in with your own account inside the desktop app). The thumbnails are compared with your library by signature on your computer only and deleted afterward, keeping only the signatures used for matching (16×16 grayscale and 24×24 color); matches show you other works by the same artist in your library.
 
-**R18 分级与筛选：** 自动识别图片年龄分级，顶栏「R18」按钮可隐藏 R18 内容（快捷键 H），也可以切换为「只看 R18」。
+Clicking an artist from picture details lets you filter the library by that artist and open links to their profile pages and original posts.
 
-## 隐私与底线
+### Excluding non-illustrations, grouping duplicates, and R18 filtering
 
-**图片只留本地：** 图像识别、特征提取、相似度比对与图库索引都在本机完成。原图和从图片算出的特征不会上传云端，不会发给任何大模型或多模态 API，也不会用于训练或改进任何共享模型（包括本软件使用的识别模型）。根据你的标注在本机学出的打分规则（如角色原型、自建标签候选）只保存在当前图库里，删除图库即一并消失。
+**Excluding non-illustrations:** Automatically distinguishes anime-style illustrations from real-life photos, chat logs, UI screenshots, and text images, placing non-illustrations under “Excluded” (rules can be toggled in Settings). A macOS Photos source only reads pictures saved from X and Pixiv, and everyday photos or clutter mixed into folders or saved files are moved to “Excluded” by the same rules.
 
-**不动你的原图：** 建库时不复制图片文件，不删除或修改原始文件，也不会直接修改 Apple「照片」数据库。Illustash 只建立自己的索引，你原有的文件夹或相册可以照常使用。
+**Grouping duplicates and variants:** Re-saved originals, versions with added or removed text, crops, color-patch or mosaic censored pictures, and subtle variants that only change an expression or glasses are compared and grouped locally. Select several pictures and click “Compare” to outline differing regions or crop positions on the pictures.
 
-**联网需你授权：** 所有联网功能默认关闭。查询角色中文名与搜索 Danbooru 标签资料，只发送 tag 名、作品名等文字信息（给图片设角色时，Danbooru 候选会按 tag 拉取一张全年龄预览小图）；你可以对当前图库授权一次，并随时撤销。
+![Compare: boxes around what differs between two pictures](docs/assets/readme/en/compare.jpg)
 
-「找回画师」「检查新角色」每次运行前都需要单独确认；识别模型只在你点击下载时联网获取（也可离线导入文件）；检查更新需你主动开启后才会定期查询 GitHub 版本列表（不发送图库信息），关闭时可在「设置 › 关于」手动检查；有新版本时，只有你点「下载并重启」才会从 GitHub 下载新版本，校验签名后安装。设置中的「网络与隐私」会列出全部联网功能及其发送的数据；保存账号、修改启动偏好，都不意味着授权联网。识别用的微软 ONNX Runtime 在官方发布的版本里默认开启遥测，Illustash 在每个识别进程里都把它关掉，不联网。Windows 上用于 GPU 加速识别的微软 DirectML 组件登记在系统的遥测通道里，按其许可可能依照系统的「诊断数据」设置向微软发送使用信息；不想使用时可在「设置 › 数据 › 识别模型」中关闭「使用 GPU 加速识别」（改为仅用 CPU、不加载该组件），详见 [装不上、打不开怎么办](docs/INSTALL.md#windows)。
+Identical and re-saved pictures fold automatically by default; subtle variants, local edits, crops, and other relations can also be set to fold in Settings. Editing character assignments on copies folded into the same duplicate group syncs automatically; if copies in a group disagree on their characters, they are held for alignment first and not folded yet.
 
-**第三方站点访问：** Pixiv、X、Danbooru、IQDB 等外部服务均为可选功能。需要账号时使用你自己的账号，访问以只读、低频为原则；遇到人机验证或限流就停止，不尝试绕过。Illustash 不是 pixiv 开发或分发的应用，和 pixiv、X、Danbooru 等站点都没有关联。
+**R18 rating and filtering:** Automatically detects picture age ratings. The “R18” button in the top bar hides R18 content (shortcut H) or switches to “R18 only”.
 
-## 工作原理
+## Privacy and boundaries
 
-这一节写给想知道「怎么做到的」的开发者和用户：每个功能背后用了什么技术、做了哪些取舍。细节和依据在 `docs/` 的现行参考文档里，各小节末尾有链接。
+**Pictures stay local:** Picture recognition, feature extraction, similarity matching, and library indexing all run on your computer. Originals and features computed from them are never uploaded to the cloud, never sent to any LLM or multimodal API, and never used to train or improve any shared model (including the recognition models used by this app). Scoring rules learned locally from your labels (such as character prototypes and custom tag candidates) are saved only in the current library and disappear if the library is deleted.
 
-### 整体结构
+**Originals stay untouched:** Building a library does not copy picture files, delete or modify original files, or directly modify the Apple Photos database. Illustash only builds its own index, so your existing folders or albums can be used as usual.
+
+**Network access requires your permission:** Every network feature is off by default. Looking up Chinese character names and searching Danbooru tag data send only text such as tag names and series names (when assigning a character to a picture, Danbooru candidates fetch one small all-ages preview picture by tag); you can grant permission once for the current library and revoke it at any time.
+
+- “Find artists” and “New characters” each require separate confirmation before every run.
+- Recognition models are fetched online only when you click download (or can be imported offline from files).
+- Update checks periodically query the GitHub release list only after you actively turn them on (sending no library data), and can be run manually in “Settings › About” when off; a new version is downloaded from GitHub only when you click “Download and restart”, and is installed after its signature is verified.
+- “Network and privacy” in Settings lists every network feature and the data it sends; saving an account or changing startup preferences does not grant network access.
+- Microsoft's ONNX Runtime, which recognition uses, has telemetry on by default in its official releases; Illustash turns it off in every recognition process, so it does not go online.
+- On Windows, the Microsoft DirectML component used for GPU-accelerated recognition is registered with the system's telemetry channel and may, under its license, send usage data to Microsoft according to your system's “Diagnostic data” settings; if you prefer not to use it, turn off “Use the GPU to speed up recognition” in “Settings › Data › Recognition models” (switching to CPU only without loading the component), as detailed in [Troubleshooting installation and launch](docs/INSTALL.md#windows) (in Chinese).
+
+**Third-party site access:** External services such as Pixiv, X, Danbooru, and IQDB are all optional. When an account is needed, Illustash uses your own account with read-only, low-frequency access; if it encounters a CAPTCHA or rate limit, it stops and does not attempt to bypass it. Illustash was not created or distributed by pixiv and is not affiliated with pixiv, X, Danbooru, or any other site.
+
+## Download and status
+
+> [!NOTE]
+> Illustash is a personal project built primarily for the author's own needs and is still in early development.
+
+Illustash 0.1.0 has been officially released. Download it from [GitHub Releases](https://github.com/shio-vinyl/illustash/releases): a zip for Apple silicon Macs and an x64 installer for Windows. The installers are not notarized by Apple or code-signed for Windows, so the system blocks them the first time you open them; allow them once as described in [Troubleshooting installation and launch](docs/INSTALL.md) (in Chinese). When a new version comes out, you can check for updates and use “Download and restart” inside the app.
+
+| Platform | Status | Download |
+|---|---|---|
+| macOS 14 or later, Apple silicon | Primary platform | zip |
+| Windows x64 | Also usable | x64 installer |
+| Linux | Frozen (decided 2026-10-06) | Not provided |
+
+Linux is frozen: no installers or local computation (recognition, indexing, learning, origin lookup) are provided, no checks are run on Linux, and Rust code is not guaranteed to compile on Linux; if needed later, support will be built on top of the native macOS/Windows implementation.
+
+The interface supports Simplified Chinese and English, defaults to “System”, and can be switched in “Settings › General › Language”.
+
+You can also build from source. The core uses Rust stable; Python is not needed at runtime, while some build and check tools require Python 3.12 and Node 22.
+
+Model files required for local recognition are not included in the code repository or the installers (the app downloads them when prompted on first use, or imports them offline from files; running from source requires preparing them separately). See [Installation and platforms](docs/BACKEND_TASKS.md#独立安装与可选计算包) for dependencies, build steps, and compute component setup, and [Troubleshooting installation and launch](docs/INSTALL.md) for common gatekeeping prompts, model downloads, and runtime troubleshooting.
+
+### Running from source
+
+```sh
+# Build the core
+cargo build --release --manifest-path native/terms/Cargo.toml
+
+# Create a library for the first time: registers sources only, without scanning pictures
+./native/terms/target/release/illustash-terms library-create \
+    --dest ~/Pictures/Illustash/MyLibrary.pilib --folder /path/to/pictures
+
+# Open (defaults to http://127.0.0.1:8765)
+./start-web.command --library ~/Pictures/Illustash/MyLibrary.pilib
+```
+
+Creating a library for the first time only registers picture sources and does not immediately scan all pictures. For the desktop app (Tauri), installer builds, launch options, and library package layout, see [Development guide](docs/DEVELOPMENT.md).
+
+## How it works
+
+This section is for developers and curious users who want to know how Illustash does what it does: the techniques behind each feature and the trade-offs we made. The details and evidence live in the reference documents under `docs/` (in Chinese), linked at the end of each part.
+
+### Architecture
 
 ```mermaid
 flowchart TB
-    shell["桌面外壳 desktop/<br>Tauri：窗口、启动页、Pixiv 登录窗口"]
-    web["网页界面 web/static<br>原生 ES 模块，没有构建步骤"]
-    host["应用宿主 native/terms<br>本机 HTTP、命令行、后台任务、全部联网请求"]
-    core["核心 crates/core<br>证据、人工结论、撤销历史、投影"]
-    platform["平台能力 crates/platform<br>文件夹、Apple 照片、钥匙串、数值计算"]
-    worker["计算 worker<br>识别、角色索引、学习与相似、溯源计算"]
-    pkg[("图库包 .pilib<br>source.sqlite、library.sqlite")]
-    shell -- 启动 --> host
+    shell["Desktop shell desktop/<br>Tauri: windows, splash, Pixiv sign-in"]
+    web["Web UI web/static<br>native ES modules, no build step"]
+    host["App host native/terms<br>local HTTP, CLI, background tasks, all network requests"]
+    core["Core crates/core<br>evidence, your decisions, undo history, projections"]
+    platform["Platform crates/platform<br>folders, Apple Photos, keychain, numerics"]
+    worker["Compute worker<br>recognition, character index, learning and similarity, provenance"]
+    pkg[("Library package .pilib<br>source.sqlite, library.sqlite")]
+    shell -- starts --> host
     web -- 127.0.0.1 HTTP --> host
     host --> core --> pkg
     host --> platform
-    host -- 只读快照 --> worker
-    worker -- 结果包，由宿主校验后写入 --> host
+    host -- read-only snapshot --> worker
+    worker -- result package, checked by the host before writing --> host
 ```
 
-Illustash 是一个 Rust 写的模块化单体，数据都在 SQLite 里，运行时不需要 Python。
+Illustash is a modular monolith written in Rust. All data lives in SQLite, and no Python is needed at runtime.
 
-- **核心**（`crates/core`）持有业务规则：词条、机器证据、人工结论、撤销历史，以及由它们算出的「图上显示什么」。它不知道自己跑在哪个平台上。`crates/iqdb` 在本地算 IQDB 图像签名。
-- **平台能力**（`crates/platform`）把 macOS 和 Windows 的差异挡在核心之外：遍历文件夹、只读访问 Apple 照片、原生选择窗口、钥匙串或 DPAPI 里的账号凭据，以及 Accelerate / OpenBLAS 数值计算。
-- **应用宿主**（`native/terms`）负责建库、开库、升级和备份，提供只监听 127.0.0.1 的 HTTP 服务，调度后台任务。所有联网请求都从这里发出。
-- **计算 worker** 是同一个原生程序，负责识别、角色索引、学习、相似扫描和溯源计算。宿主给它只读快照或隔离目录，它算完交回结果，由宿主校验身份、输入指纹和范围后写入。worker 缺失或崩溃时，浏览、整理和撤销照常可用。
-- **网页界面**（`web/static`）直接用浏览器原生的 ES 模块，不经过打包工具。`core/` 下的模块不碰 DOM，可以直接在 Node 里测试。
-- **桌面外壳**（`desktop/`）用 Tauri，只负责启动宿主、管理窗口和 Pixiv 登录窗口，不含业务逻辑。
+- **Core** (`crates/core`) owns the business rules: terms, machine evidence, your decisions, undo history, and what each picture ends up showing as a result. It has no idea which platform it runs on. `crates/iqdb` computes IQDB image signatures locally.
+- **Platform** (`crates/platform`) keeps macOS and Windows differences out of the core: walking folders, read-only access to Apple Photos, native file pickers, account credentials in the Keychain or DPAPI, and Accelerate / OpenBLAS numerics.
+- **App host** (`native/terms`) creates, opens, upgrades, and backs up libraries, serves HTTP on 127.0.0.1 only, and schedules background tasks. Every network request leaves from here.
+- **Compute worker** is one native program that handles recognition, the character index, learning, similarity scans, and provenance computation. The host hands it a read-only snapshot or an isolated directory; the worker returns results, and the host checks their identity, input fingerprints, and scope before writing anything. If the worker is missing or crashes, browsing, organizing, and undo keep working.
+- **Web UI** (`web/static`) uses the browser's native ES modules with no bundler. Modules under `core/` never touch the DOM, so they can be tested directly in Node.
+- **Desktop shell** (`desktop/`) is a Tauri app that only launches the host, manages windows, and hosts the Pixiv sign-in window. It contains no business logic.
 
-见 [架构现状](docs/ARCHITECTURE_DIRECTION.md)、[开发说明](docs/DEVELOPMENT.md)、[前端模块](docs/WEB_V2.md#前端模块2026-10-18199)。
+See [Architecture](docs/ARCHITECTURE_DIRECTION.md), [Development guide](docs/DEVELOPMENT.md), and [Front-end modules](docs/WEB_V2.md#前端模块2026-10-18199).
 
-### 角色识别
+The parts below are collapsed; click a title to expand it.
 
-每张新图在本机跑两个模型。[WD SwinV2 Tagger v3](https://huggingface.co/SmilingWolf/wd-swinv2-tagger-v3) 给出通用标签、年龄分级和约 2,700 个常见角色的标签；[CCIP](https://huggingface.co/deepghs/ccip) 给出 768 维的角色特征，同一个角色不管谁画、穿什么，特征都比较接近。CCIP 特征再和角色索引里的参考特征（锚点）比最近邻，距离在阈值内就算一条证据。两种来源分开记录，按用人工结论校准过的强弱排序：两种都认的最强，其次是单个强证据，最后是弱证据。单人图算给谁由这个排序决定。安装包不带共享角色索引。资料库里的「关注新角色」和「检查新角色」从 Danbooru 按 tag 下载公开参考图，在本机算出锚点，不上传图库里的任何东西。
+<details>
+<summary><strong>Character recognition</strong>: two local models, then learning from the pictures you confirm</summary>
 
-确认满 5 张后，Illustash 用这些样本在本机学两样东西。一是**原型**：按密度把确认图分成最多 8 簇，分别对应常服、泳装等不同造型；每个原型的认领范围取成员距离的 90 分位，而且要比你移出过的任何一张图更近。二是**判别式认领**：每个角色训练一个逻辑回归，负例包括你移出的图和其他角色的确认图。只有概率够高、离某张确认图够近、又比所有被移出的图更近时，才自动认领。范围外圈的匹配只当线索，进「也可能是」，不参与归属。这些学习结果只存在当前图库里，你的确认、移出或撤销之后会批量重学。
+Every new picture goes through two models on your computer. [WD SwinV2 Tagger v3](https://huggingface.co/SmilingWolf/wd-swinv2-tagger-v3) produces general tags, an age rating, and tags for about 2,700 well-known characters. [CCIP](https://huggingface.co/deepghs/ccip) produces a 768-dimensional character feature: the same character lands close together whoever drew them and whatever they wear. The CCIP feature is matched against reference features (anchors) in the character index by nearest neighbor, and a match within the threshold counts as evidence. The two sources are recorded separately and ranked by strength, calibrated against your own decisions: agreement between both is strongest, then a single strong match, then weak ones. This ranking decides who a solo picture belongs to. Installers do not ship a shared character index. “Follow new characters” and “New characters” in the Catalog download public reference images from Danbooru by tag and build anchors locally; nothing from your library is uploaded.
 
-叫不出名字的角色，按 CCIP 特征的密度聚类。WD 的外观标签（发色按色系归并，另有瞳色、兽耳、光环、翅膀等）用来拆开混了两种发色的组，并提示两组「可能是同一人」。
+Once you confirm 5 pictures of a character, Illustash learns two things from them locally. The first is **prototypes**: confirmed pictures are clustered by density into up to 8 groups, one per look such as everyday clothes or a swimsuit. Each prototype claims pictures within the 90th percentile of its members' distances, and always closer than any picture you removed from that character. The second is a **discriminative claim**: each character gets a logistic regression trained against negatives that include the pictures you removed and the confirmed pictures of other characters. A picture is claimed automatically only when the probability is high, it sits close to one of the confirmed pictures, and it is closer to them than to anything you removed. Matches just outside these ranges are kept as hints for “Might also be” and never count as assignments. Everything learned stays in the current library and is relearned in batches after you confirm, remove, or undo.
 
-推理用 ONNX Runtime。Apple 芯片的 Mac 上 WD 和 CCIP 走 Core ML，WD 用的是一份固定形状、等价改写过的执行变体；Windows 上走 DirectML。CPU 是参考实现：加速会话建不起来或输出校验不过，就退回 CPU 重算这一张。在验收样本上，加速结果与 CPU 只差 fp32 舍入，判定不变。数据库里记的模型身份始终取原始模型文件。worker 读入每张图后先核对宿主给的 SHA-256 再解码，结果和实际识别的那份文件绑定。
+Characters nobody can name yet are clustered by CCIP feature density. WD's appearance tags (hair color merged into color families, plus eye color, animal ears, halos, wings, and so on) are used to split a group that mixes two hair colors and to suggest when two groups “might be the same character”.
 
-见 [角色与皮肤](docs/TERMS_CHARACTERS.md)、[识别结果包](docs/RESULT_PACKAGES.md)、[识别的执行后端](docs/BACKEND_TASKS.md#识别的执行后端)、[新角色流程](docs/WEB_V2.md#新角色流程相似分组与边标边学2026-09-24)。
+Inference runs on ONNX Runtime. On Apple silicon, WD and CCIP use Core ML, with WD running an equivalent rewritten variant of the model with fixed shapes; on Windows both use DirectML. The CPU is the reference: if an accelerated session cannot be created or its output fails validation, that picture is recomputed on the CPU. On the acceptance samples, accelerated results differ from the CPU only by fp32 rounding and no decision changes. The model identity recorded in the database always comes from the original model file. Before decoding, the worker checks each picture against the SHA-256 the host gave it, so every result is tied to the exact bytes that were recognized.
 
-### 人工结论优先
+See [Characters and outfits](docs/TERMS_CHARACTERS.md), [Recognition result packages](docs/RESULT_PACKAGES.md), [Recognition backends](docs/BACKEND_TASKS.md#识别的执行后端), and [New-character flow](docs/WEB_V2.md#新角色流程相似分组与边标边学2026-09-24).
 
-角色、作品、画师、分级、自建标签在核心里都是**词条**，往图上加词条叫「贴」，机器和人贴的走同一套规则。机器证据只增不删，一个来源不覆盖另一个来源。裁决只来自人，「不是」永久有效。图上显示人工确认、机器认定、也可能是还是已否定，每次都由证据、裁决和词条类型的策略重新算出来。
+</details>
 
-两类数据分开存。worker 只能以证据包或识别结果包的形式交出机器证据，包里出现人工来源就整包拒绝，所以计算代码在结构上写不了人工结论。重新识别、更新角色索引只替换同一范围内的旧机器证据，人工结论原样保留。你移出过的角色不会被下一批证据贴回来。
+<details>
+<summary><strong>Your decisions come first</strong>: machine evidence and your decisions are stored apart, with one undo for everything</summary>
 
-所有人工操作都在一个写数据库事务里完成：解析选集、校验、写入、记一步历史，失败就整步回滚，不会只写一半。撤销只有一套机制：按全库最近一步撤销，不管这一步改的是角色、标签、画师还是收录状态，重启后仍可以撤销。由核心维护的派生表加了写保护，不经过核心的写入会直接报错，不会悄悄成功。
+In the core, characters, series, artists, ratings, and custom tags are all **terms**, and putting a term on a picture follows the same rules whether a model or you did it. Machine evidence is only ever added, never deleted, and no source overwrites another. Decisions come only from people, and a “no” is permanent. Whether a picture shows a term as confirmed by you, assigned by the machine, “might also be”, or rejected is recomputed every time from the evidence, the decisions, and the policy for that kind of term.
 
-见 [词条](docs/TERMS.md#2-核心抽象词条)、[证据包](docs/EVIDENCE_PACKAGES.md)、[归属规则与 API](docs/WEB_V2.md#归属规则)。
+The two kinds of data are stored apart. A worker can hand over machine evidence only as an evidence or recognition result package, and a package containing any human source is rejected whole, so compute code is structurally unable to write your decisions. Re-running recognition or updating the character index replaces only older machine evidence in the same scope and leaves your decisions untouched. A character you removed is never put back by the next batch of evidence.
 
-### 找回出处
+Every manual action runs in one write transaction: resolving the selection, validating it, writing, and recording one history step. If anything fails, the whole step rolls back, so nothing is ever half written. There is a single undo mechanism: it reverts the latest step across the whole library, whether that step changed characters, tags, artists, or inclusion, and it still works after a restart. Derived tables maintained by the core are write-protected, so a write that bypasses the core fails loudly instead of slipping through.
 
-溯源采用「种子加验证」的结构：几条线索各自给出候选画师或直接命中的原帖，再统一交给本地验证。
+See [Terms](docs/TERMS.md#2-核心抽象词条), [Evidence packages](docs/EVIDENCE_PACKAGES.md), and [Assignment rules and API](docs/WEB_V2.md#归属规则).
 
-- **Danbooru 像素哈希**：把图解码成 sRGB 加 alpha 的原始像素再算 MD5，算法与 Danbooru 一致。存图 App 改写文件元数据不影响结果。发出去的只有这串哈希；命中就是同一份像素，不会认错。
-- **IQDB 签名**：`crates/iqdb` 在本地算出 IQDB 的感知签名，只发签名文本，能找到缩放或重新压缩过的同一张图。排队时按各来源和分级的历史命中率排序，先查最可能命中的图。
-- **关注列表**：Pixiv 用你在 App 里登录的账号只读关注列表；X 导入官方数据归档，只读 `following.js` 里的数字账号 ID，不联网。关注的人是候选画师。
-- **本地验证**：拉候选画师在 Danbooru 和 Pixiv 上最新公开作品的小图，在本机用 16×16 签名比对，再用 24×24 彩色小图复核。比对上才算找到，小图用完就删，只留这两种签名。
-- **分组继承**：重复组、相似组里已经找到画师的，整组共用；同一段时间连续保存的图只作为待确认的候选。
+</details>
 
-不上传原图是底线，也是取舍：只发哈希和签名，能找回的主要是被转载到 Danbooru 的作品。在作者自己的图库（约 5 万张）上，像素哈希一路在 X 图上找回约两成，Pixiv 图只有约 6%。认出画师以后，「找 TA 的其他图」靠本地验证往外扩。人工的「是 / 不是 TA」是核心里的裁决，和其他操作一样可以撤销。溯源只写自己的 `provenance.sqlite`，不碰人工结论。
+<details>
+<summary><strong>Finding origins</strong>: several clues propose candidates, and every candidate is verified locally</summary>
 
-见 [溯源](docs/PROVENANCE.md)，第 8 节是现行流程。
+Provenance follows a “seeds plus verification” design: several clues each propose candidate artists or match original posts outright, and every candidate then goes through the same local verification.
 
-### 重复与差分
+- **Danbooru pixel hash**: the picture is decoded to raw sRGB-plus-alpha pixels and hashed with MD5, the same algorithm Danbooru uses, so metadata rewritten by the app that saved the picture does not matter. Only the hash is sent; a hit means identical pixels, so it cannot be wrong.
+- **IQDB signature**: `crates/iqdb` computes IQDB's perceptual signature locally and only the signature text is sent, which finds the same picture after resizing or recompression. The queue is ordered by each source's and rating's past hit rate, so the most promising pictures go first.
+- **Following lists**: Pixiv reads your following list read-only with the account you signed in with inside the app; for X, you import the official data archive and only the numeric account IDs in `following.js` are read, offline. People you follow become candidate artists.
+- **Local verification**: small thumbnails of a candidate artist's latest public works on Danbooru and Pixiv are downloaded and compared on your computer with 16×16 signatures, then double-checked with 24×24 color thumbnails. Only a match counts; the thumbnails are deleted afterward and only these two signatures are kept.
+- **Group inheritance**: once one picture in a duplicate or similar group has an artist, the whole group shares it; pictures saved in one continuous stretch are offered only as candidates for you to confirm.
 
-字节完全相同的副本按文件哈希归组。更进一步的相似扫描在本机分三步：
+Never uploading originals is a hard line, and it has a cost: with only hashes and signatures, what can be recovered is mostly work that was reposted to Danbooru. On the author's own library (about 50,000 pictures), the pixel hash alone recovers about a fifth of X pictures but only about 6% of Pixiv pictures. Once an artist is known, “Find more of their pictures” extends the reach through local verification. Your “this is / isn't them” is a decision in the core and can be undone like anything else. Provenance writes only to its own `provenance.sqlite` and never touches your decisions.
 
-1. **签名**：每张图解码一次，存画布比例和 16×16 灰度缩略图。
-2. **候选图对**：画布比例相同、缩略图高度相关的，每张最多取 12 个最像的；另外用 CCIP 距离极近的图对覆盖裁剪版。比较过的图对不再比较。
-3. **关系判断**：逐对做像素比较，不用模型。先缩到同一尺寸，容忍 1 像素错位，再由粗到细对齐，然后按变化区域的大小、位置和统计特征分成重复、调色、边缘加字、色块或马赛克打码、差分、细微差分（改动面积小于 2%）、构图相似、不同的图。比例不同时，用多尺度 FFT 归一化互相关在一张图里找另一张，判断是不是裁剪版。
+See [Provenance](docs/PROVENANCE.md); section 8 describes the current pipeline.
 
-全部结论存表，包括「不同的图」。之后用并查集把字节相同的副本和设置里勾选要折叠的关系连成组，组内分辨率最高的那张作代表。组内角色不一致的先不折叠，等你对齐。对组里任意一张的修改，在同一个事务里扩展到整组。
+</details>
 
-见 [图片关系判断](docs/WEB_V2.md#图片关系判断2026-09-24) 与 [全库找相似](docs/WEB_V2.md#全库找相似2026-09-24)。
+<details>
+<summary><strong>Duplicates and variants</strong>: signatures, candidate pairs, then a pixel-level relation check</summary>
 
-### 图库包
+Byte-identical copies are grouped by file hash. The broader similarity scan runs locally in three steps:
 
-一个图库就是一个 `.pilib` 文件夹：
+1. **Signatures**: each picture is decoded once to store its canvas aspect ratio and a 16×16 grayscale thumbnail.
+2. **Candidate pairs**: pictures with the same aspect ratio and highly correlated thumbnails, up to the 12 closest per picture, plus pairs with nearly identical CCIP features to catch crops. Pairs already compared are skipped.
+3. **Relation check**: each pair is compared pixel by pixel, without any model. Both are scaled to the same size, compared with one pixel of misalignment tolerated, and aligned coarse to fine; the size, position, and statistics of the changed region then classify the pair as duplicate, color adjustment, text or border at the edges, color-patch or mosaic censoring, variant, subtle variant (under 2% of the area changed), similar composition, or unrelated. When aspect ratios differ, multi-scale FFT normalized cross-correlation looks for one picture inside the other to detect crops.
 
-| 内容 | 是什么 | 能不能删 |
+Every result is stored, including “unrelated”. A union-find then joins byte-identical copies and the relations you chose to fold in Settings into groups, and the highest-resolution picture represents each group. Groups whose pictures disagree on characters stay unfolded until you align them. Editing any picture in a group applies to the whole group in the same transaction.
+
+See [Relation check](docs/WEB_V2.md#图片关系判断2026-09-24) and [Library-wide similarity](docs/WEB_V2.md#全库找相似2026-09-24).
+
+</details>
+
+<details>
+<summary><strong>Library packages</strong>: what is inside a <code>.pilib</code> folder and what is safe to delete</summary>
+
+A library is a `.pilib` folder:
+
+| Item | What it holds | Safe to delete? |
 |---|---|---|
-| `library.json` | 名字、永久 ID、来源列表、包格式版本 | 不能 |
-| `library.sqlite` | 人工结论、机器证据、撤销历史与派生表 | **不能**，它不是缓存 |
-| `source.sqlite` | 来源快照与识别结果（标签、特征） | 不要删。识别能重做，但文件夹图片的 ID 在首次扫描时生成，人工结论靠它关联；损坏时用应用内的抢救，抢救会保住这些 ID |
-| `provenance.sqlite` | 溯源的查询缓存与机器结果 | 不在导出包里 |
-| `thumbnails/` | 缩略图缓存 | 随时可删，会重建 |
-| `backups/` | 升级前的自动备份与手动备份 | 由你决定 |
+| `library.json` | Name, permanent ID, sources, package format version | No |
+| `library.sqlite` | Your decisions, machine evidence, undo history, and derived tables | **No**, it is not a cache |
+| `source.sqlite` | Snapshot of your sources and recognition results (tags, features) | Don't. Recognition can be redone, but folder pictures get their IDs on the first scan and your decisions are linked to them; if it is damaged, the in-app rescue keeps those IDs |
+| `provenance.sqlite` | Provenance lookup cache and machine results | Not included in exports |
+| `thumbnails/` | Thumbnail cache | Any time; it is rebuilt |
+| `backups/` | Automatic pre-upgrade backups and manual backups | Up to you |
 
-`library.json` 里的 `format` 是包格式版本，两个数据库另有各自的 schema 版本。程序遇到比自己新的格式直接拒绝打开，不猜。打开旧图库不会悄悄升级：要你确认，升级前用 SQLite 备份接口把 `library.sqlite` 备份到 `backups/`，再在一个事务里迁移，没完成就保持原样。上次没有正常关闭的图库，下次打开前先对两个库做完整性检查。导出的 `.pilib.zip` 只含配置、两个数据库和特征，导出时会清空 API key 等密钥，适合分享。
+The `format` field in `library.json` is the package format version, separate from each database's own schema version. A format newer than the program is refused outright rather than guessed at. Opening an older library never upgrades it silently: you confirm first, `library.sqlite` is backed up into `backups/` with SQLite's backup API, and the migration runs in a single transaction, leaving the library as it was if it does not finish. A library that was not closed cleanly gets a full integrity check of both databases before it opens. An exported `.pilib.zip` holds only the configuration, the two databases, and the features, with secrets such as API keys cleared, so it is safe to share.
 
-见 [图库](docs/LIBRARIES.md#1-图库包里有什么) 与 [升级边界](docs/ARCHITECTURE_DIRECTION.md#已有核心库的显式升级边界)。
+See [Libraries](docs/LIBRARIES.md#1-图库包里有什么) and [Upgrade boundary](docs/ARCHITECTURE_DIRECTION.md#已有核心库的显式升级边界).
 
-### 隐私怎么落实
+</details>
 
-- **计算不联网**：识别、索引、学习、相似扫描都在宿主准备的快照或隔离目录里算。溯源要用的公开小图由宿主按站点白名单、授权、限速和流量上限代取，再交给 worker。
-- **授权按功能分开**：名称查询对一个图库授权一次，可以随时撤销；「找回画师」和「检查新角色」每次运行前确认；按需查找时，点按钮就是授权这一次。遇到 403、429、人机验证或维护页，这个站点立即停止，不尝试绕过。「设置 › 网络与隐私」把全部联网功能、对应的服务和发送的内容列在一张表里。
-- **大模型只碰文字**：图片和从图片算出的特征从不发给任何大模型。唯一和大模型有关的是可选的「名称翻译」：Bangumi 没有中文名时，用你自己配置的、兼容 OpenAI 接口的模型翻译，只发送 tag、日文名和作品名，不配置就不使用。
-- **关掉 ONNX Runtime 的遥测**：官方构建默认开启遥测。宿主启动每个 worker 时设置 `ORT_DISABLE_TELEMETRY=1`，worker 启动时再补设一次；加载运行库前看到这个值不对，就拒绝加载。Windows 另外在会话里关闭遥测事件，打包时还会检查 DLL 有没有接入微软的遥测通道。DirectML 的情况见上文「隐私与底线」。
-- **本机服务也设防**：127.0.0.1 对本机所有进程开放，所以每个请求都要带会话 cookie。cookie 只能用启动时生成的一次性码换取，写请求还要额外的 CSRF 令牌。账号凭据存在 macOS 钥匙串或 Windows DPAPI 里，不存明文。
+<details>
+<summary><strong>How privacy is enforced</strong>: offline computation, per-feature permission, and a guarded local server</summary>
 
-见 [产品底线](docs/BACKLOG.md#产品底线与已定的约束新会话先读)、[第三方组件](docs/THIRD_PARTY.md#打包时加入的运行库)、[启动信号与会话 cookie](docs/ARCHITECTURE_DIRECTION.md#启动信号与会话-cookie)。
+- **Computation stays offline**: recognition, indexing, learning, and similarity scans run on snapshots or isolated directories prepared by the host. The public thumbnails provenance needs are fetched by the host, subject to a site allowlist, authorization, rate limits, and a traffic cap, and then passed to the worker.
+- **Permission per feature**: name lookups are authorized once per library and can be revoked at any time; “Find artists” and “New characters” ask before every run; on-demand lookups are authorized for that one click. On a 403, a 429, a CAPTCHA, or a maintenance page, requests to that site stop immediately with no attempt to get around it. “Settings › Network and privacy” lists every network feature in one table, with the service it talks to and exactly what it sends.
+- **LLMs only ever see text**: pictures and features computed from them are never sent to any LLM. The only LLM-related feature is the optional name translation: when Bangumi has no Chinese name, a model you configure yourself through an OpenAI-compatible API translates it, receiving only the tag, the Japanese name, and the series name. Without a configured model, it is not used.
+- **ONNX Runtime telemetry is off**: official builds have telemetry on by default. The host sets `ORT_DISABLE_TELEMETRY=1` for every worker it starts, the worker sets it again at startup, and the runtime library refuses to load if the value is not right. On Windows, telemetry events are also disabled per session, and packaging checks that the DLL is not wired into Microsoft's telemetry channel. For DirectML, see “Privacy and boundaries” above.
+- **The local server is guarded too**: 127.0.0.1 is open to every process on the machine, so every request needs a session cookie, which can only be obtained with a one-time code generated at launch; write requests also need a CSRF token. Account credentials are stored in the macOS Keychain or with Windows DPAPI, never in plain text.
 
-## 现状与运行
+See [Product baseline](docs/BACKLOG.md#产品底线与已定的约束新会话先读), [Third-party components](docs/THIRD_PARTY.md#打包时加入的运行库), and [Launch signal and session cookie](docs/ARCHITECTURE_DIRECTION.md#启动信号与会话-cookie).
 
-Illustash 是一个主要满足作者自己需求的个人项目，目前仍处于早期开发阶段。
+</details>
 
-macOS（Apple 芯片，macOS 14 及以上）是主力平台，Windows x64 也可以使用。Linux 已冻结（2026-10-06 决定）：不提供安装包和本地计算（识别、索引、学习、溯源），不在 Linux 上做检查，Rust 代码能否在 Linux 编译也不作保证；以后有需求再基于 macOS/Windows 的原生实现补做。
+## Feedback and contributing
 
-界面支持简体中文和英文，默认跟随系统，可在「设置 › 通用 › 语言」中切换。
+Feature trade-offs prioritize the author's own usage needs.
 
-Illustash 0.1.0 已正式发布，安装包在 [GitHub Releases](https://github.com/shio-vinyl/illustash/releases) 下载：macOS 版是 Apple 芯片的 zip，Windows 版是 x64 安装程序。安装包没有经过 Apple 公证或 Windows 代码签名，第一次打开时系统会拦截，按 [装不上、打不开怎么办](docs/INSTALL.md) 放行一次即可。以后有新版本时，可以在应用里检查更新并「下载并重启」。
+- **Bug reports** are welcome via Issues using the [Bug report template](.github/ISSUE_TEMPLATE/bug_report.md), along with your OS, the output of “Settings › About › Copy diagnostics”, and steps to reproduce (please do not post real pictures, picture file names, local paths, or account details); if the app fails to install or open, check [Troubleshooting installation and launch](docs/INSTALL.md) first.
+- **Feature suggestions** can be submitted with the [Feature request template](.github/ISSUE_TEMPLATE/feature_request.md), though adoption or implementation is not guaranteed.
+- **Code contributions** (Pull Requests) are not accepted at this time.
 
-也可以从源码构建。核心使用 Rust stable；运行时无需 Python，部分构建与检查工具需要 Python 3.12 和 Node 22。
+## License
 
-本地识别所需的模型文件不包含在代码仓库和安装包中（应用首次使用时按提示下载，或从文件离线导入；源码运行需另外准备）。具体依赖、构建方法与计算组件配置见 [安装与平台](docs/BACKEND_TASKS.md#独立安装与可选计算包)，常见拦截、模型下载与运行排障见 [装不上、打不开怎么办](docs/INSTALL.md)。
+Illustash's source code is released under the [GPL-3.0-or-later](LICENSE) license, with an additional permission under GPLv3 section 7 allowing this program to be distributed and run together with GPU inference runtime libraries such as Microsoft DirectML; see [Additional permission](docs/THIRD_PARTY.md#附加许可gplv3-第-7-条) for the full text.
 
-### 从源码运行
+Third-party components, models, and data follow their respective licenses; see [Third-party components and licenses](docs/THIRD_PARTY.md) for details. Recognition models, character indexes, and other data—whether bundled or prepared separately—are not uniformly covered by this project's code license. The CCIP model used for recognition (not included in the repository or release installers; downloaded from upstream on first use or prepared separately) is provided under the BigScience Open RAIL-M license, and its use and redistribution are bound by the use restrictions in paragraph 5 and Attachment A.
 
-```sh
-# 构建核心
-cargo build --release --manifest-path native/terms/Cargo.toml
+The Illustash name and icon are not licensed along with the code. Modified versions based on this project must use a different name and icon.
 
-# 首次建库：只登记来源，不扫描图片
-./native/terms/target/release/illustash-terms library-create \
-    --dest ~/Pictures/Illustash/我的图库.pilib --folder /图片目录
+## Credits
 
-# 打开（默认 http://127.0.0.1:8765）
-./start-web.command --library ~/Pictures/Illustash/我的图库.pilib
-```
+Character and picture recognition use [SmilingWolf's WD Tagger](https://huggingface.co/SmilingWolf/wd-swinv2-tagger-v3), [DeepGHS's CCIP](https://huggingface.co/deepghs/ccip), and [Character Index](https://huggingface.co/datasets/deepghs/character_index); tag and character data come from [Danbooru](https://danbooru.donmai.us), and Chinese character names come from [Bangumi](https://bgm.tv).
 
-首次创建图库只会登记图片来源，不会立刻扫描全部图片。桌面 App（Tauri）、安装包构建、启动参数和图库包结构见 [开发说明](docs/DEVELOPMENT.md)。
+---
 
-## 反馈与贡献
-
-功能取舍优先考虑作者自己的使用需求。
-
-欢迎通过 Issue 报告 bug，请使用 [「报告问题」模板](.github/ISSUE_TEMPLATE/bug_report.md)，附上操作系统、「设置 › 关于 › 复制诊断信息」的内容与复现步骤（请勿贴出真实图片、图片文件名、本机路径或账号信息）；装不上或打不开请先查看 [装不上、打不开怎么办](docs/INSTALL.md)。
-
-功能建议可使用 [「功能建议」模板](.github/ISSUE_TEMPLATE/feature_request.md) 提出，但不保证全部采纳或实现。
-
-目前暂不接受代码贡献（Pull Request）。
-
-## 许可
-
-Illustash 的源代码以 [GPL-3.0-or-later](LICENSE) 许可证发布，另按 GPLv3 第 7 条附加一项许可，允许本程序与 Microsoft DirectML 这类 GPU 推理运行库一起分发和运行，正文见 [附加许可](docs/THIRD_PARTY.md#附加许可gplv3-第-7-条)。
-
-第三方组件、模型及数据遵循各自的许可协议，详情见 [第三方组件与许可](docs/THIRD_PARTY.md)。随附或需要另行准备的识别模型、角色索引与其他数据，不受本项目代码许可证的统一授权。识别用的 CCIP 模型（仓库与发布安装包不自带，首次使用时从上游下载或另行准备）依据 BigScience Open RAIL-M 许可提供，使用和再分发受其第 5 条及附件 A 的使用限制约束。
-
-Illustash 的名称与图标不随代码一同授权。基于本项目开发的修改版本，请使用其他名称和图标。
-
-## 致谢
-
-角色与画面识别使用 [SmilingWolf 的 WD Tagger](https://huggingface.co/SmilingWolf/wd-swinv2-tagger-v3)、[DeepGHS 的 CCIP](https://huggingface.co/deepghs/ccip) 与 [Character Index](https://huggingface.co/datasets/deepghs/character_index)；标签和角色资料来自 [Danbooru](https://danbooru.donmai.us)，角色中文名称来自 [Bangumi](https://bgm.tv)。
+<sub>Keywords: anime illustration manager · image library · photo organizer · character recognition · anime character tagging · reverse image search · Pixiv · X (Twitter) · Danbooru · IQDB · duplicate image finder · local-first · privacy · offline · Tauri · Rust · SQLite · ONNX Runtime · macOS · Windows · 二次元插画 · 插画收藏 · 本地图库 · 角色识别 · 以图搜源 · 找画师</sub>
