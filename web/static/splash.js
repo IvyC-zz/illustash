@@ -357,17 +357,35 @@ const SPLASH_READY = t('准备好了');
   // ---------- 时钟 ----------
   const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
   // 每次加载都播放完整的折叠，外壳播放完之后打开的图库页面除外
-  let t = reduce ? 2.99 : launched ? MADE : 0, last = 0;
+  let t = reduce ? 2.99 : launched ? MADE : 0, last = 0, lagging = 0;
   let waiting = [];
   const settle = () => { if (reduce || t >= MADE) { waiting.forEach(done => done()); waiting = []; } };
+  // 时钟按实际时间走（#480）。加载期间卡一下（如解析模块）时每次最多前进 50 毫秒，不跳帧；由此落后实际时间的部分
+  // 最多攒 LAG 秒，帧率一直低时动画照实际时间播，只是跳帧，不放慢，外壳等的 settled() 也就不会拖长。App 准备好以后
+  // 不再限制：退出动画按实际时间播完，帧再少也准时收尾。
+  const LAG = .5;
+  const step = (now) => {
+    const real = last ? Math.max(0, (now - last) / 1000) : 0; last = now;
+    if (reduce && !plan) return;
+    const dt = plan ? real : Math.min(.05, real);
+    lagging += real - dt;
+    t += dt + Math.max(0, lagging - LAG); lagging = Math.min(lagging, LAG);
+    if (reduce && plan && t < plan.X) t = plan.X;
+  };
   const tick = (now) => {
     if (finished) return;
-    const dt = last ? Math.min(.05, (now - last) / 1000) : 0; last = now;
-    if (!reduce || plan) t += dt;
-    if (reduce && plan && t < plan.X) t = plan.X;
+    step(now);
     render(t);
     settle();
     requestAnimationFrame(tick);
+  };
+  // 没有帧的时候（页面隐藏、浏览器停了帧回调）时钟照样走，不画：外壳的 settled() 和准备好后的退出不会一直等到页面
+  // 重新显示。
+  const watchdog = () => {
+    if (finished) return;
+    const now = performance.now();
+    if (now - last > 250) { step(now); settle(); if (plan && t >= plan.X + .8) finish(); }
+    setTimeout(watchdog, 250);
   };
   // 点击跳过；外壳的启动页上不行，它后面什么都没有
   if (!root.hasAttribute('data-shell')) root.addEventListener('click', () => { root.style.transition = 'opacity .25s'; root.style.opacity = 0; setTimeout(finish, 260); });
@@ -382,4 +400,5 @@ const SPLASH_READY = t('准备好了');
   };
   render(t);
   requestAnimationFrame(tick);
+  setTimeout(watchdog, 250);
 })();
