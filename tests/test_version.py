@@ -16,6 +16,8 @@ ROOT = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location('illustash_build', ROOT / 'packaging/build.py')
 build = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(build)
+# 仓库当前的版本号。下面的用例都从它出发，不写死某个版本，升版本号时不用改测试。
+CURRENT = version.source_version(ROOT)
 
 
 class VersionTests(unittest.TestCase):
@@ -68,27 +70,27 @@ class VersionTests(unittest.TestCase):
                 if package['name'].startswith('illustash-'):
                     self.assertEqual(package['version'], '0.2.0-beta.1')
                     self.assertNotIn('source', package)
-        # 只改了本项目的版本字符串：每处一个，别的不动（恰好也是 0.1.0 的 registry crate 仍是 0.1.0）。
+        # 只改了本项目的版本字符串：每处一个，别的不动（版本号恰好与当前相同的 registry crate 保持原样）。
         counts = {}
         for path, _, _ in version.places(self.root):
             counts[path] = counts.get(path, 0) + 1
         for path, old in before.items():
             new = (self.root / path).read_bytes()
             self.assertEqual(new.count(b'0.2.0-beta.1'), counts[path] + (path == version.SOURCE), path)
-            self.assertEqual(new.replace(b'0.2.0-beta.1', b'0.1.0'), old, path)
+            self.assertEqual(new.replace(b'0.2.0-beta.1', CURRENT.encode()), old, path)
 
     def test_sync_restores_a_hand_edited_place(self):
-        self.edit('crates/core/Cargo.toml', 'version = "0.1.0"', 'version = "0.1.1"')
-        self.edit('desktop/Cargo.lock', 'name = "illustash-terms"\nversion = "0.1.0"', 'name = "illustash-terms"\nversion = "9.9.9"')
-        self.assertEqual(version.sync(self.root), '0.1.0')
+        self.edit('crates/core/Cargo.toml', f'version = "{CURRENT}"', 'version = "0.1.1"')
+        self.edit('desktop/Cargo.lock', f'name = "illustash-terms"\nversion = "{CURRENT}"', 'name = "illustash-terms"\nversion = "9.9.9"')
+        self.assertEqual(version.sync(self.root), CURRENT)
         self.assertEqual(version.check(self.root), [])
         for path, _, _ in version.places(self.root):
             self.assertEqual((self.root / path).read_bytes(), (ROOT / path).read_bytes(), path)
 
     def test_check_names_each_mismatch(self):
-        self.edit(version.TAURI, '"version": "0.1.0"', '"version": "0.1.1"')
-        self.edit('crates/iqdb/Cargo.toml', 'version = "0.1.0"', 'version = "0.0.9"')
-        self.edit('native/terms/Cargo.lock', 'name = "illustash-core"\nversion = "0.1.0"', 'name = "illustash-core"\nversion = "0.1.2"')
+        self.edit(version.TAURI, f'"version": "{CURRENT}"', '"version": "0.1.1"')
+        self.edit('crates/iqdb/Cargo.toml', f'version = "{CURRENT}"', 'version = "0.0.9"')
+        self.edit('native/terms/Cargo.lock', f'name = "illustash-core"\nversion = "{CURRENT}"', 'name = "illustash-core"\nversion = "0.1.2"')
         errors = version.check(self.root)
         self.assertEqual(len(errors), 3, errors)
         self.assertTrue(errors[0].startswith('desktop/tauri.conf.json: version 是 0.1.1'))
@@ -97,7 +99,7 @@ class VersionTests(unittest.TestCase):
 
     def test_dependency_version_is_not_the_package_version(self):
         # 依赖表里的 `version = …` 不能顶替缺失的 [package] version。
-        self.edit('crates/core/Cargo.toml', 'version = "0.1.0"\n', '')
+        self.edit('crates/core/Cargo.toml', f'version = "{CURRENT}"\n', '')
         errors = version.check(self.root)
         self.assertIn('crates/core/Cargo.toml: 找不到 [package] version', errors)
         with self.assertRaisesRegex(ValueError, 'crates/core/Cargo.toml'):
@@ -111,12 +113,12 @@ class VersionTests(unittest.TestCase):
         for good in ('0.1.0', '1.10.0', '0.2.0-beta.1', '0.2.0-rc.0', '0.2.0-alpha-2'):
             self.assertTrue(version.valid(good), good)
         self.assertEqual(version.check(self.root), [])  # 被拒绝的版本设置没有改动任何东西
-        self.edit(version.SOURCE, '"version":"0.1.0"', '"version":"0.1"')
+        self.edit(version.SOURCE, f'"version":"{CURRENT}"', '"version":"0.1"')
         self.assertEqual(len(version.check(self.root)), 1)
         self.assertIn('不是 SemVer', version.check(self.root)[0])
 
     def test_packaging_refuses_mismatched_versions_before_building(self):
-        self.edit('desktop/Cargo.toml', 'version = "0.1.0"', 'version = "0.1.1"')
+        self.edit('desktop/Cargo.toml', f'version = "{CURRENT}"', 'version = "0.1.1"')
         self.assertEqual(build.version_errors(self.root), version.check(self.root))
         self.assertEqual(len(build.version_errors(self.root)), 1)
         stderr = io.StringIO()

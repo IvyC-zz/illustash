@@ -1691,7 +1691,7 @@ dependencies = [
 
 [[package]]
 name = "illustash-core"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "getrandom 0.3.4",
  "regex",
@@ -1704,7 +1704,7 @@ dependencies = [
 
 [[package]]
 name = "illustash-desktop"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "getrandom 0.3.4",
  "illustash-platform",
@@ -1721,7 +1721,7 @@ dependencies = [
 
 [[package]]
 name = "illustash-platform"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "chrono",
  "illustash-core",
@@ -1735,14 +1735,14 @@ dependencies = [
 
 [[package]]
 name = "illustash-relation-fft"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "cc",
 ]
 
 [[package]]
 name = "illustash-terms"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "chrono",
  "crc32fast",
