@@ -220,6 +220,13 @@ class NativeLifecycleTest(unittest.TestCase):
         wait_human_backup(self, origin)
         return process, log
 
+    def clone_closed_library(self, target):
+        """停止自有宿主后复制完整包，再重新打开；活库的 WAL/SHM 不能靠文件复制取得一致快照。"""
+        self.stop(self.process)
+        shutil.copytree(self.lib.path, target)
+        self.process, self.log = self.start(self.lib.path)
+        self.token = json.loads(self.request('/api/bootstrap')['body'])['token']
+
     def request(self, url, body=None, *, base=None, token=None, headers=None):
         item = {'url': url, 'headers': headers or {}}
         if body is not None:

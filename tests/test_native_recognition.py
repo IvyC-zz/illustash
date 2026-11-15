@@ -296,12 +296,7 @@ class NativeRecognitionTest(unittest.TestCase):
         self.assertEqual(state['id'], task['id'])
         return state
 
-    def clone_closed_library(self, target):
-        """停止自有宿主后复制完整包，再重新打开；活库的 WAL/SHM 不能靠文件复制取得一致快照。"""
-        self.stop(self.process)
-        shutil.copytree(self.lib.path, target)
-        self.process, self.log = self.start(self.lib.path)
-        self.token = json.loads(self.request('/api/bootstrap')['body'])['token']
+    clone_closed_library = lifecycle.NativeLifecycleTest.clone_closed_library
 
     def test_cancel_switch_and_quit_stop_an_import_before_it_commits(self):
         # #88（以及 #26 的 Windows 缺口）：取消按钮、切换图库和退出，都会在 5 秒内、在 source 事务之前停下正在运行的
