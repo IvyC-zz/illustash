@@ -1,4 +1,4 @@
-//! S3 / D6：乐观的学习结果发布。戳记在 Python 训练快照之前取；BEGIN IMMEDIATE 在任何写入之前核对它。
+//! S3 / D6：乐观的学习结果发布。戳记在取训练快照之前取；BEGIN IMMEDIATE 在任何写入之前核对它。
 //! 戳记和快照之间有变化时保守地拒绝，从不发布过时的训练结果。
 use crate::character_entities::ENTITIES;
 use crate::character_links::LINKS;

@@ -489,7 +489,7 @@ fn pixiv(
     }
     plan.add(plan.all.iter().take(if probe { 30 } else { 300 }).cloned().collect::<Vec<_>>(), progress);
     let found = std::thread::scope(|scope| -> Result<usize> {
-        // 与现有 Python worker 相同的流水线：一个线程，提前两页列表。
+        // 沿用旧 Python worker 的流水线：一个线程，提前两页列表。
         // Network::gate 让唯一的 mailbox 与缩略图下载串行。
         type Task = (Vec<String>, std::sync::mpsc::Sender<Result<Vec<Value>>>);
         let (jobs, incoming) = std::sync::mpsc::channel::<Task>();

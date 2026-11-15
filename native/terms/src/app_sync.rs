@@ -819,7 +819,7 @@ fn recognise(
     let mut watch = ProgressWatch::new(&ctx.identity().task_id, readable.len());
     let unreadable = failed.len();
     // 只有平台认可的、随安装包发布的原生路线才强制要求 sidecar。
-    // 安装版的 Python 过渡方案保持现有的响应契约。显式声明的 sidecar 在下面各平台上都完整校验。
+    // 其他 worker（没有原生路线的平台、测试替身）不强制，保持现有的响应契约。显式声明的 sidecar 在下面各平台上都完整校验。
     let native_adapter = crate::recognition_compute::production_adapter_enabled()
         && std::path::Path::new(worker).file_stem().is_some_and(|name| name == "illustash-recognition");
     let mut batches = Batches {

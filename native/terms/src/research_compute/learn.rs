@@ -56,7 +56,7 @@ pub fn prototypes(seeds: &[Vec<f32>], negatives: &[Vec<f32>]) -> Result<Vec<Prot
     Ok(out)
 }
 
-// Python json.dumps(..., ensure_ascii=True) 的分隔符是持久化学习签名的一部分。
+// 分隔符（`, `）和非 ASCII 转义是持久化学习签名的一部分，沿用旧实现 json.dumps(..., ensure_ascii=True) 的格式。
 fn python_json(value: &Value) -> String {
     match value {
         Value::Array(values) => format!("[{}]", values.iter().map(python_json).collect::<Vec<_>>().join(", ")),
@@ -407,7 +407,7 @@ pub fn patch_anchors(snapshot: &Snapshot, root: &Path) -> Result<Anchors> {
             for p in paths {
                 let p = p?.path();
                 if p.extension().is_some_and(|s| s == "json") {
-                    // Python 跳过解码和 JSON 的 ValueError，但 I/O 失败会往外抛。
+                    // 沿用旧实现：跳过解码失败和 JSON 格式错误的文件，但 I/O 失败会往外抛。
                     let contents = fs::read(&p)?;
                     let Ok(contents) = std::str::from_utf8(&contents) else { continue };
                     if serde_json::from_str::<Value>(contents).is_ok_and(|v| v["source"] == "danbooru-patch") {

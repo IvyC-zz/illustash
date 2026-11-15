@@ -1,4 +1,7 @@
 //! Illustash 连接内共享业务规则；不依赖应用宿主、HTTP、CLI 或平台实现。
+//!
+//! 注释里的「旧实现」指 #9 删除的 Python 应用（HTTP、Store 编排、识别导入等，原在 `tests/reference/`）。
+//! 写着「沿用旧实现」的格式和规则是已存数据或既有响应依赖的兼容约束，改动前先确认没有数据或录制期望依赖它。
 #![cfg_attr(not(test), warn(clippy::unwrap_used))]
 pub mod backup;
 pub mod casefold;

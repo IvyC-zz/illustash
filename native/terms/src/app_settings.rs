@@ -16,7 +16,7 @@ const KEYS: [&str; 5] = ["sync", "similar", "index_check", "names", "provenance"
 /// 已移除的偏好项（#100：本地识别上限）。已存的值会被忽略，并在下次保存时去掉。
 const REMOVED: [&str; 1] = ["local_limit"];
 
-// 持久化的设置保留 Python dict 的插入顺序。标量编码复用持久化的序列化器；HTTP 的有序表示只在构造回复时生成，
+// 持久化的设置保留已存的键顺序（插入顺序）。标量编码复用持久化的序列化器；HTTP 的有序表示只在构造回复时生成，
 // 从不用来序列化已存的偏好设置。
 #[derive(Clone, Debug)]
 pub(crate) enum SettingValue {
@@ -225,7 +225,7 @@ pub(crate) fn startup(lib: &Library) -> Result<Json> {
 }
 
 /// 只提交偏好设置。会话、任务和联网授权归调用它的应用会话管。
-/// 接收原始请求体，以保留 Python 按第一个无效键报错的先后顺序。
+/// 接收原始请求体，以保留按第一个无效键报错的先后顺序（沿用旧实现）。
 pub(crate) fn set_startup_json(lib: &Library, body: &str) -> Result<()> {
     let Json::Object(changes) = crate::http_json::parse_request(body)? else {
         return Err(Error::Invalid("未知设置".into()));

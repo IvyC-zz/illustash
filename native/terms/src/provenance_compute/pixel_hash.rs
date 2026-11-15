@@ -222,7 +222,7 @@ fn pnm(bytes: &[u8]) -> Result<RgbaImage> {
     let Some(PnmSamples { width, height, bands, maxval, samples }) = pnm_samples(bytes, None)? else {
         return Ok(image::load_from_memory(bytes).map_err(|e| Error::Invalid(e.to_string()))?.to_rgba8());
     };
-    // 与 Pillow 的 value/maxval*out_max 运算顺序和 Python round（平局取偶）一致。
+    // 与 Pillow 的 value/maxval*out_max 运算顺序和平局取偶的舍入一致（沿用旧实现）。
     // 高于 8 位的灰度变成 I 模式，随后截断到 255，不是 16→8 位移。
     let out_max = if bands == 1 && maxval > 255 { 65535. } else { 255. };
     let scaled: Vec<_> = samples

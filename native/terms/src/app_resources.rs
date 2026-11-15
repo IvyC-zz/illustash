@@ -39,7 +39,7 @@ fn shared_from(root: &Path, cwd: &Path, configured: Option<&Path>) -> Result<Pat
     }
     let desired = crate::app_paths::resolve(&root.join(configured))?;
     let legacy = crate::app_paths::resolve(&cwd.join(configured))?;
-    // 旧的索引和 Python 消费者按自己的 CWD 解释相对路径的覆盖值。拒绝这种有歧义的切换，不去检查私有数据，
+    // 以前的索引和旧实现的消费者（#9 已删除）按自己的 CWD 解释相对路径的覆盖值。拒绝这种有歧义的切换，不去检查私有数据，
     // 也不新建空索引。绝对路径的覆盖值是明确的。
     if desired != legacy {
         for name in

@@ -10,7 +10,7 @@ use crate::store::{create_term, TermId};
 use crate::Result;
 use rusqlite::{Connection, OptionalExtension};
 
-/// Python 读的三张表换成同名同形的视图（列名、含义不变）。只显示仍在 `assets` 里的图。
+/// 宿主按原表名读的三张表换成同名同形的视图（列名、含义不变）。只显示仍在 `assets` 里的图。
 pub const VIEWS: &str = "
 CREATE VIEW general_hits(uuid,value) AS
  SELECT s.uuid,l.key FROM term_projection p
