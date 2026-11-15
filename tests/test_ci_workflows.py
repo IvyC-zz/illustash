@@ -185,8 +185,7 @@ class CiWorkflowTest(unittest.TestCase):
                 body = job_body(job)
                 self.assertIn("if: needs.changes.outputs.code == 'true'", body)
                 group = re.search(r'^    concurrency:\n      group: (.*)\n      cancel-in-progress: true$', body, re.M).group(1)
-                self.assertEqual(group, f"${{{{ github.event_name == 'push' && 'ci-main-{job}' || "
-                                        f"format('ci-{{0}}-{job}', github.run_id) }}}}")
+                self.assertEqual(group, f"ci-{job}-${{{{ github.event_name == 'push' && github.ref || github.run_id }}}}")
 
     def test_windows_quick_tests_name_existing_classes(self):
         tests = re.search(r'^      QUICK_TESTS: (.*)$', job_body('windows'), re.M).group(1).split()

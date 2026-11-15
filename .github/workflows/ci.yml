@@ -84,7 +84,7 @@ jobs:
     if: needs.changes.outputs.code == 'true'
     name: Rust 核心
     concurrency:
-      group: ${{ github.event_name == 'push' && 'ci-main-core' || format('ci-{0}-core', github.run_id) }}
+      group: ci-core-${{ github.event_name == 'push' && github.ref || github.run_id }}
       cancel-in-progress: true
     runs-on: macos-latest
     timeout-minutes: 60
@@ -154,7 +154,7 @@ jobs:
     if: needs.changes.outputs.code == 'true'
     name: Python 全量 (macOS)
     concurrency:
-      group: ${{ github.event_name == 'push' && 'ci-main-python' || format('ci-{0}-python', github.run_id) }}
+      group: ci-python-${{ github.event_name == 'push' && github.ref || github.run_id }}
       cancel-in-progress: true
     runs-on: macos-latest
     timeout-minutes: 60
@@ -250,7 +250,7 @@ jobs:
     if: needs.changes.outputs.code == 'true'
     name: 桌面壳 (macOS)
     concurrency:
-      group: ${{ github.event_name == 'push' && 'ci-main-desktop' || format('ci-{0}-desktop', github.run_id) }}
+      group: ci-desktop-${{ github.event_name == 'push' && github.ref || github.run_id }}
       cancel-in-progress: true
     runs-on: macos-latest
     timeout-minutes: 60
@@ -277,7 +277,7 @@ jobs:
     if: needs.changes.outputs.code == 'true'
     name: 原生固定契约（无 Python）
     concurrency:
-      group: ${{ github.event_name == 'push' && 'ci-main-contracts' || format('ci-{0}-contracts', github.run_id) }}
+      group: ci-contracts-${{ github.event_name == 'push' && github.ref || github.run_id }}
       cancel-in-progress: true
     runs-on: macos-latest
     timeout-minutes: 45
@@ -309,7 +309,7 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 45
     concurrency:
-      group: ${{ github.event_name == 'push' && 'ci-main-windows' || format('ci-{0}-windows', github.run_id) }}
+      group: ci-windows-${{ github.event_name == 'push' && github.ref || github.run_id }}
       cancel-in-progress: true
     env:
       CARGO_INCREMENTAL: '0'
