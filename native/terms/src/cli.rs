@@ -71,7 +71,7 @@ pub fn is_command(first: &str) -> bool {
 /// 执行一条命令（不含程序名），返回退出码。
 pub fn run(args: &[String]) -> u8 {
     if args.first().is_some_and(|a| a == "http") {
-        return match crate::http::run(&args[1..]) {
+        let code = match crate::http::run(&args[1..]) {
             Ok(code) => code,
             Err(e) => {
                 let (code, message) = error_response(e);
@@ -79,6 +79,8 @@ pub fn run(args: &[String]) -> u8 {
                 code
             }
         };
+        crate::diagnostics::logs::flush();
+        return code;
     }
     let args: Vec<&str> = args.iter().map(String::as_str).collect();
     let result = match args.as_slice() {

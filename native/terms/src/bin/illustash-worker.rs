@@ -1,13 +1,20 @@
 //! 安装的可选 worker 适配器。基础应用从不启用它。
 //! 一个二进制承担全部四种 worker：宿主每次启动时显式指定种类（ILLUSTASH_WORKER_KIND）；
 //! 旧式的 `illustash-<kind>` 副本仍按文件名分派。
-use illustash_terms::app_tasks::{worker_kind, WORKER_KIND_ENV};
-use std::{env, path::PathBuf, process::ExitCode};
+use illustash_terms::app_tasks::{worker_kind, WORKER_ERROR_PREFIX, WORKER_KIND_ENV};
+use illustash_terms::diagnostics::logs::{self, IoPhase};
+use std::{
+    env,
+    path::{Path, PathBuf},
+    process::ExitCode,
+};
 fn main() -> ExitCode {
-    match run() {
+    let result = run();
+    logs::flush();
+    match result {
         Ok(code) => ExitCode::from(code),
         Err(error) => {
-            eprintln!("可选 worker 不可用：{error}");
+            eprintln!("{WORKER_ERROR_PREFIX}{error}");
             ExitCode::FAILURE
         }
     }
@@ -19,6 +26,7 @@ fn run() -> Result<u8, Box<dyn std::error::Error>> {
     let stem = exe.file_stem().and_then(|s| s.to_str()).unwrap_or("");
     let requested = env::var(WORKER_KIND_ENV).ok();
     let kind = worker_kind(stem, requested.as_deref())?;
+    logs::initialize_worker(kind, env::args_os().skip(1).eq([std::ffi::OsStr::new("--check")]));
     let native_args: Vec<String> = env::args().skip(1).collect();
     // 启动器为固定的 Windows OpenBLAS 设置 ROOT（或 DLL 路径）；直接运行的适配器解析同一个已安装资源。
     // 此处仍是单线程。
@@ -45,7 +53,7 @@ fn run() -> Result<u8, Box<dyn std::error::Error>> {
         && native_args[0] != "--check"
     {
         let input = PathBuf::from(&native_args[0]);
-        let request = illustash_terms::strict_json::parse(&std::fs::read_to_string(&input)?)?;
+        let request = read_request(&input)?;
         if illustash_terms::research_compute::handles(&request) {
             illustash_terms::research_compute::run_files(&input, &PathBuf::from(&native_args[1]))?;
             return Ok(0);
@@ -70,7 +78,7 @@ fn run() -> Result<u8, Box<dyn std::error::Error>> {
         && native_args[0] != "--check"
     {
         let input = PathBuf::from(&native_args[0]);
-        let request = illustash_terms::strict_json::parse(&std::fs::read_to_string(&input)?)?;
+        let request = read_request(&input)?;
         if request["step"].as_str().is_some_and(illustash_terms::provenance_compute::handles) {
             illustash_terms::provenance_compute::run_files(&input, &PathBuf::from(&native_args[1]))?;
             return Ok(0);
@@ -83,4 +91,9 @@ fn run() -> Result<u8, Box<dyn std::error::Error>> {
         "本平台不提供本地计算"
     }
     .into())
+}
+
+fn read_request(input: &Path) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
+    let contents = std::fs::read_to_string(input).inspect_err(|error| logs::worker_io(IoPhase::ReadRequest, error))?;
+    Ok(illustash_terms::strict_json::parse(&contents).inspect_err(|_| logs::worker_invalid_request())?)
 }

@@ -23,6 +23,9 @@ pub(super) fn handle(request: Request, host: &Host, received: u64, text: &str, b
         "/api/libraries/choose" => return choose(request, host, received, &body, &translate),
         // 全应用范围，且可能要联网往返一次（#191）：从不持有会话，所以不会拖慢切换。
         "/api/updates" => return reply(request, crate::app_updates::post(&body), true),
+        "/api/diagnostics/open-logs" => {
+            return reply(request, crate::app_desktop::request("POST", "/platform/diagnostics/open-logs", 5), false);
+        }
         "/api/models" => return models(request, host, body, &translate),
         _ => {}
     }

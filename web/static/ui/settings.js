@@ -5,7 +5,7 @@ import {composing} from '../core/keys.js';
 import {esc, isMac, number, bytes, stamp, localStamp, pct, localTime} from '../core/format.js';
 import {implement, onPage} from '../core/pages.js';
 import {prefs} from '../core/prefs.js';
-import {diagnosticReport, diagnosticText, diagnosticLine, downloadDiagnostic} from '../core/diagnostics.js';
+import {diagnosticReport, diagnosticText, diagnosticLine, downloadDiagnostic, openDiagnosticLogs} from '../core/diagnostics.js';
 import {session, shared, readError} from '../core/session.js';
 import {state} from '../core/state.js';
 import {REASONS, FOLD_OPTIONS} from '../core/labels.js';
@@ -187,7 +187,13 @@ async function renderAbout() {
   card.innerHTML = `<div class="about-head"><img src="/favicon.svg" alt="" width="44" height="44"><div><h2 class="about-name">${esc(a.name)}</h2><p class="muted-note">${t('版本 {v}', {v: esc(version)})}${a.build ? ' · ' + t('构建 {build}', {build: esc(a.build)}) : ''}</p></div></div>
     <p class="settings-note">${t('在本机识别、整理收藏的插画和里面的角色。图片和识别数据都只在这台电脑上。')}</p>
     <div class="setting-line" id="aboutUpdates">${updatesLine()}</div>
-    <div class="about-actions"><button class="quiet" id="aboutGuide">${t('新手引导')}</button><button class="quiet" id="aboutKeys">${t('键盘快捷键')}</button><button class="quiet" id="aboutCopy">${t('复制诊断信息')}</button><button class="quiet" id="aboutExport">${t('导出诊断信息')}</button></div>
+    <div class="about-actions">
+      <button class="quiet" id="aboutGuide">${t('新手引导')}</button>
+      <button class="quiet" id="aboutKeys">${t('键盘快捷键')}</button>
+      <button class="quiet" id="aboutCopy">${t('复制诊断信息')}</button>
+      ${a.can_open_logs ? `<button class="quiet" id="aboutOpenLogs">${t('打开日志所在文件夹')}</button>` : ''}
+      <button class="quiet" id="aboutExport">${t('导出诊断信息')}</button>
+    </div>
     ${fold('credits', t('致谢与第三方组件'), `<table class="settings-table credits">${CREDITS.map(([n, by, use, url]) => `<tr><td><a class="link" href="${url}" target="_blank" rel="noreferrer noopener">${esc(n)}</a>${by ? `<small>${esc(by)}</small>` : ''}</td><td>${esc(use)}</td></tr>`).join('')}</table><p class="settings-note net-foot">${t('识别用的 CCIP 模型（随安装包附带，或第一次使用时下载）依据 {license} 许可提供给你，使用和再分发均受该许可第 5 条约束：不得用于其附件 A 列出的用途，再分发时须把这些限制写进分发协议并附上许可。许可原文和各模型的来源见应用资源目录里的 resources/licenses/models/。其余组件的许可条款以其项目主页为准。', {license: '<a class="link" href="https://bigscience.huggingface.co/blog/bigscience-openrail-m" target="_blank" rel="noreferrer noopener">BigScience Open RAIL-M</a>'})}</p>`)}
     ${fold('diagnostics', t('诊断信息'), `<p class="settings-note">${t('运行错误仅保存在本机，最多 128 条、保留 14 天；不会自动上传，不含图片、文件名、路径或账号凭据。')}</p>
       <p class="settings-note">${report.available ? t('最近的错误记录') : t('诊断记录暂不可读')}</p>
@@ -202,6 +208,13 @@ async function renderAbout() {
   };
   $('aboutExport').onclick = async () => {
     try { downloadDiagnostic({...await diagnosticReport(), environment: Object.fromEntries(diag)}); } catch (e) { error(readError(e)); }
+  };
+  const openLogs = $('aboutOpenLogs');
+  if (openLogs) openLogs.onclick = async () => {
+    openLogs.disabled = true;
+    try { await openDiagnosticLogs(); }
+    catch { toast(t('无法打开日志所在文件夹')); }
+    finally { openLogs.disabled = false; }
   };
 }
 // 每个会联网的功能、它发送什么、是否开启：集中在一处查看（#200）。

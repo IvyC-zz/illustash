@@ -32,9 +32,15 @@ pub struct Request {
 }
 impl Request {
     pub fn read(path: &Path) -> Result<Self> {
-        let value = crate::strict_json::parse(&fs::read_to_string(path)?).map_err(Error::Invalid)?;
-        let request: Self = serde_json::from_value(value).map_err(|e| Error::Invalid(e.to_string()))?;
+        use crate::diagnostics::logs;
+        let text = fs::read_to_string(path).inspect_err(|e| logs::worker_io(logs::IoPhase::ReadRequest, e))?;
+        let value =
+            crate::strict_json::parse(&text).inspect_err(|_| logs::worker_invalid_request()).map_err(Error::Invalid)?;
+        let request: Self = serde_json::from_value(value)
+            .inspect_err(|_| logs::worker_invalid_fields())
+            .map_err(|e| Error::Invalid(e.to_string()))?;
         if request.format != "illustash-provenance/1" || !request.identity.is_object() {
+            logs::worker_invalid_fields();
             return Err(Error::Invalid("溯源 worker 请求格式无效".into()));
         }
         Ok(request)

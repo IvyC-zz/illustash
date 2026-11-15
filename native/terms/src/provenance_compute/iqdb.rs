@@ -229,7 +229,8 @@ pub(super) fn run(request: &Request, sequence: &mut u64) -> Result<Value> {
         .args(["--hash-only", "1"])
         .stdin(fs::File::open(&input)?)
         .stdout(Stdio::piped())
-        .stderr(Stdio::null())
+        // 告警经溯源 worker 的 stderr 交给宿主做脱敏诊断。
+        .stderr(Stdio::inherit())
         .spawn()
         .map_err(|e| Error::Invalid(format!("可选 IQDB 程序不可用：{e}")))?;
     let stdout = child.stdout.take().ok_or_else(|| Error::Invalid("IQDB 签名输出不可用".into()))?;

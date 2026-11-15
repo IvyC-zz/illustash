@@ -1,5 +1,6 @@
 //! 跑在 CPU 或加速器（backend.rs）上的 ONNX 会话。模型和运行库都是显式输入，从不下载，也不在用户数据里查找。
 use super::backend::{Acceleration, Backend, Model};
+use crate::diagnostics::logs::{self, IoPhase, OrtPhase};
 use crate::{Error, Result};
 use image::RgbImage;
 use ort::{
@@ -7,6 +8,7 @@ use ort::{
     logging::LogLevel,
     session::{builder::SessionBuilder, Session},
     value::Tensor,
+    ErrorCode,
 };
 use std::{
     path::{Path, PathBuf},
@@ -16,22 +18,46 @@ use std::{
 fn failure(context: &str, error: impl std::fmt::Display) -> Error {
     Error::invalid(format!("原生识别 {context}: {error}"))
 }
+
+fn ort_status(code: ErrorCode) -> &'static str {
+    match code {
+        ErrorCode::InvalidArgument => "ORT_INVALID_ARGUMENT",
+        ErrorCode::NoSuchFile => "ORT_NO_SUCHFILE",
+        ErrorCode::NoModel => "ORT_NO_MODEL",
+        ErrorCode::EngineError => "ORT_ENGINE_ERROR",
+        ErrorCode::RuntimeException => "ORT_RUNTIME_EXCEPTION",
+        ErrorCode::InvalidProtobuf => "ORT_INVALID_PROTOBUF",
+        ErrorCode::ModelLoaded => "ORT_MODEL_LOADED",
+        ErrorCode::NotImplemented => "ORT_NOT_IMPLEMENTED",
+        ErrorCode::InvalidGraph => "ORT_INVALID_GRAPH",
+        ErrorCode::ExecutionProviderFailure => "ORT_EP_FAIL",
+        _ => "ORT_FAIL",
+    }
+}
 static RUNTIME: OnceLock<std::result::Result<std::path::PathBuf, String>> = OnceLock::new();
 /// 在构建会话之前调用；一个子进程只绑定一个已安装的运行库。
 /// 本进程没设 `ORT_DISABLE_TELEMETRY=1` 时拒绝加载（#381，见 telemetry.rs）。
 pub fn initialise(runtime: &Path) -> Result<()> {
     super::telemetry::require()?;
-    let requested =
-        runtime.canonicalize().map_err(|e| failure(&format!("运行库 {path}", path = runtime.display()), e))?;
+    let requested = runtime
+        .canonicalize()
+        .inspect_err(|error| logs::worker_io(IoPhase::ResolveRuntime, error))
+        .map_err(|e| failure(&format!("运行库 {path}", path = runtime.display()), e))?;
     let loaded = RUNTIME.get_or_init(|| {
         // 绑定库的加载器在 ABI 或符号无效时会 panic。在 worker 边界上兜住它，
         // 诊断信息里保留显式给出的路径，不回退到 PATH。`with_telemetry(false)` 调 DisableTelemetryEvents：
         // macOS 上环境变量已经让上传器不存在，这一句是第二道；Windows 的 ETW 只认这一句。
         std::panic::catch_unwind(|| ort::init_from(requested.display()).with_telemetry(false).commit())
             .map_err(|_| {
+                logs::worker_runtime_abi();
                 format!("无法加载 {path}（需要 ONNX Runtime >=1.22，含 OrtGetApiBase）", path = requested.display())
             })
-            .and_then(|result| result.map(|_| requested.clone()).map_err(|e| e.to_string()))
+            .and_then(|result| {
+                result
+                    .inspect_err(|error| logs::worker_ort(OrtPhase::Initialize, ort_status(error.code())))
+                    .map(|_| requested.clone())
+                    .map_err(|error| error.to_string())
+            })
     });
     match loaded {
         Ok(loaded) if loaded == &requested => Ok(()),
@@ -68,7 +94,10 @@ fn build(builder: SessionBuilder, path: &Path, threads: Option<usize>) -> Result
     if let Some(threads) = threads {
         builder = builder.with_intra_threads(threads).map_err(|e| failure("线程", e))?;
     }
-    builder.commit_from_file(path).map_err(|e| failure(&path.display().to_string(), e))
+    builder
+        .commit_from_file(path)
+        .inspect_err(|error| logs::worker_ort(OrtPhase::LoadModel, ort_status(error.code())))
+        .map_err(|e| failure(&path.display().to_string(), e))
 }
 /// 设置页显示的内容：运行库自己的原话，去掉错误种类，最多 300 个字符。
 fn reason(error: &Error) -> String {

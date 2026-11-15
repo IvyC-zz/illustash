@@ -33,6 +33,7 @@ fn send(port: u16, token: &str, method: &str, route: &str, timeout: u64) -> Resu
         || !["GET", "POST"].contains(&method)
         || !(route.starts_with("/pixiv/")
             || route.starts_with("/platform/choose?")
+            || (method == "POST" && route == "/platform/diagnostics/open-logs")
             || route.starts_with("/platform/update/"))
     {
         return Err(Error::invalid("本机桥参数不正确"));
@@ -128,5 +129,16 @@ mod tests {
         assert_eq!(m, "桌面 app 没有响应或拒绝请求：等待超过 1 秒");
         drop(silent);
         assert!(unanswered(&m) && !unanswered("Pixiv 请求失败"));
+    }
+
+    #[test]
+    fn logs_folder_bridge_only_accepts_the_fixed_post_route() {
+        let route = "/platform/diagnostics/open-logs";
+        let port = bridge(200, r#"{"ok":true}"#);
+        let reply = send(port, "t", "POST", route, 1).unwrap();
+        assert!(matches!(reply.get("ok"), Some(Json::Scalar(serde_json::Value::Bool(true)))));
+        for (method, route) in [("GET", route), ("POST", "/platform/diagnostics/open-logs?path=synthetic")] {
+            assert_eq!(message(send(0, "t", method, route, 1)), "本机桥参数不正确");
+        }
     }
 }
