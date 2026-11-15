@@ -235,6 +235,14 @@ class NumericReferenceContractTest(unittest.TestCase):
         distances[1, 2] = distances[2, 1] = above
         with patch.object(index, 'cross', return_value=distances):
             self.assertEqual(index.anchor_alias(np.zeros((3, 768), np.float32), ids, quality), ['b', 'b', 'c'])
+        # 覆盖阈值本身与紧邻的较大值；不能要求同一固定浮点样本在所有内核上跨两侧。
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            np.save(root / 'char-anchors.npy', np.zeros((3, 768), np.float32))
+            for distance, within in ((edge, True), (above, False)):
+                with patch.object(index, 'cross', return_value=np.full((3, 3), distance, np.float32)):
+                    self.assertEqual(index.boundary_edges(root, [(1, 0, False), (2, 0, True)]),
+                                     [(1, 0, within), (2, 0, within)])
 
 
 if __name__ == '__main__':
