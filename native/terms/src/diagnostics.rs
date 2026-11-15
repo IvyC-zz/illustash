@@ -135,7 +135,8 @@ fn now() -> u64 {
 pub fn initialize() {
     if let Ok(home) = crate::app_paths::user_home() {
         let store = STORE.get_or_init(|| Store { directory: crate::app_paths::app_support(&home).join("diagnostics") });
-        logs::initialize(&store.directory);
+        let desktop_child = std::env::var_os("ILLUSTASH_DESKTOP_STDIN").as_deref() == Some(std::ffi::OsStr::new("1"));
+        logs::initialize(&store.directory, desktop_child);
         let _ = store.read(now());
     }
 }

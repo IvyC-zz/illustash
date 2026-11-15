@@ -269,14 +269,16 @@ impl TaskContext {
     ) -> Result<ExitStatus> {
         crate::recognition_compute::telemetry::child(command);
         let source = logs::Source::worker(command);
+        let mut failure = None;
+        let stderr_failure = &mut failure;
         let result = crate::platform_process::worker(
             command,
-            |pipe| logs::drain(source, pipe, on_stderr),
+            |pipe| *stderr_failure = logs::drain(source, pipe, on_stderr),
             || self.check(),
             observe,
         );
         match &result {
-            Ok(status) => source.worker_exit(*status),
+            Ok(status) => source.worker_exit(*status, failure),
             Err(_) if self.timed_out() => source.worker_timeout(),
             Err(error) if !self.cancel.load(Ordering::SeqCst) => source.worker_error(error),
             Err(_) => {}
@@ -405,7 +407,7 @@ mod tests {
     #[ignore = "由 worker_failure_logs_are_readable_and_private 通过隔离进程运行"]
     fn diagnostic_host_fixture() {
         crate::diagnostics::initialize();
-        logs::drain(logs::Source::Host, "HTTP image: /Users/fake-owner/host-only.jpg\n".as_bytes(), |_| {});
+        let _ = logs::drain(logs::Source::Host, "HTTP image: /Users/fake-owner/host-only.jpg\n".as_bytes(), |_| {});
         for (kind, code) in [("recognition", 7), ("provenance", 9), ("index", 0)] {
             let mut task = Task::start(identity(), Some(Duration::from_secs(30)), move |ctx| {
                 let mut command = Command::new(std::env::current_exe()?);
@@ -445,7 +447,7 @@ mod tests {
             ),
             "index" => {
                 let warning = "识别加速：CCIP 改用 CPU：mock-account";
-                write!(stderr, "{warning}\n{warning}\n").unwrap();
+                writeln!(stderr, "{warning}\n{warning}").unwrap();
                 thread::sleep(Duration::from_millis(1100));
                 (warning, 0)
             }

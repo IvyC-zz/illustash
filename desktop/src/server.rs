@@ -466,6 +466,9 @@ fn run(app: &AppHandle, main: &WebviewWindow, library: Option<PathBuf>, start: S
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+    if let Some(root) = logs::root() {
+        command.env(logs::DESKTOP_ROOT_ENV, root);
+    }
     illustash_platform::platform_process::prepare_desktop(&mut command);
     let mut child = match command.spawn() {
         Ok(child) => child,
@@ -522,7 +525,7 @@ fn run(app: &AppHandle, main: &WebviewWindow, library: Option<PathBuf>, start: S
     let stderr = child.stderr.take().expect("stderr is piped");
     let stderr_activity = active.clone();
     thread::spawn(move || {
-        logs::drain(logs::Source::Host, stderr, |_| {
+        let _ = logs::drain(logs::Source::Host, stderr, |_| {
             *stderr_activity.lock().expect("lock poisoned by an earlier panic") = Instant::now();
         });
     });

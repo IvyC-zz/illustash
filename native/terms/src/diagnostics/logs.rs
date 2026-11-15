@@ -6,7 +6,7 @@ use std::{
     path::{Path, PathBuf},
     process::{Command, ExitStatus},
     sync::{
-        atomic::{AtomicU64, Ordering},
+        atomic::{AtomicU64, AtomicUsize, Ordering},
         mpsc::{self, SyncSender, TrySendError},
         Arc, OnceLock,
     },
@@ -15,21 +15,34 @@ use std::{
 };
 
 const MAX_BYTES: u64 = 2 * 1024 * 1024;
-const FILES: usize = 3;
 const MAX_LINE: usize = 4096;
 const QUEUE_SIZE: usize = 256;
+const STDERR_LIMIT: usize = QUEUE_SIZE / 2;
+const WRITE_BATCH: usize = 32;
 const LOCK_WAIT: Duration = Duration::from_millis(100);
 const DEDUP_WINDOW: Duration = Duration::from_secs(1);
 static DIAGNOSTICS: OnceLock<PathBuf> = OnceLock::new();
 static WRITER: OnceLock<Option<Writer>> = OnceLock::new();
 
-pub(super) fn initialize(diagnostics: &Path) {
-    DIAGNOSTICS.get_or_init(|| diagnostics.to_owned());
+/// 桌面外壳启动宿主前传入的绝对诊断根。只影响滚动日志。
+pub const DESKTOP_ROOT_ENV: &str = "ILLUSTASH_DESKTOP_LOG_ROOT";
+
+pub(super) fn initialize(diagnostics: &Path, desktop_child: bool) {
+    let inherited = if desktop_child { std::env::var_os(DESKTOP_ROOT_ENV).map(PathBuf::from) } else { None };
+    let root = inherited.filter(|path| path.is_absolute()).or_else(|| std::path::absolute(diagnostics).ok());
+    if let Some(root) = root {
+        DIAGNOSTICS.get_or_init(|| root);
+    }
+}
+
+/// 桌面外壳把这个绝对路径传给宿主，避免相对应用数据目录受工作目录切换影响。
+pub fn root() -> Option<&'static Path> {
+    DIAGNOSTICS.get().map(PathBuf::as_path)
 }
 
 /// 建好并返回应用自己的共享日志目录；调用方不提供路径。
 pub fn directory() -> io::Result<PathBuf> {
-    let parent = DIAGNOSTICS.get().ok_or_else(|| io::Error::other("diagnostics not initialized"))?;
+    let parent = root().ok_or_else(|| io::Error::other("diagnostics not initialized"))?;
     create_private_directory(parent)?;
     let path = parent.join("logs");
     create_private_directory(&path)?;
@@ -73,26 +86,26 @@ impl Source {
             Self::Worker => "worker",
         }
     }
-    pub(crate) fn worker_exit(self, status: ExitStatus) {
+    pub(crate) fn worker_exit(self, status: ExitStatus, failure: Option<&'static str>) {
         if !status.success() {
             #[cfg(unix)]
             use std::os::unix::process::ExitStatusExt;
             let code = status.code();
             #[cfg(unix)]
             let code = code.or_else(|| status.signal().map(|signal| -signal));
-            record(self, "worker 异常退出", code);
+            record(self, "worker 异常退出", code, Kind::WorkerExit(failure));
         }
     }
     pub(crate) fn worker_error(self, error: &crate::Error) {
         let (cause, code) = super::classify(error);
-        record(self, cause_text(cause), code);
+        record(self, cause_text(cause), code, Kind::Status);
     }
     pub(crate) fn worker_timeout(self) {
-        record(self, "计算任务超时", None);
+        record(self, "计算任务超时", None, Kind::Status);
     }
 }
 pub(super) fn host_failure(cause: Cause, code: Option<i32>) {
-    record(Source::Host, cause_text(cause), code);
+    record(Source::Host, cause_text(cause), code, Kind::Status);
 }
 
 fn cause_text(cause: Cause) -> &'static str {
@@ -114,53 +127,104 @@ fn cause_text(cause: Cause) -> &'static str {
     }
 }
 
-fn record(source: Source, reason: &'static str, code: Option<i32>) {
-    if DIAGNOSTICS.get().is_none() {
+enum Kind {
+    Stderr,
+    Status,
+    WorkerExit(Option<&'static str>),
+}
+
+fn record(source: Source, reason: &'static str, code: Option<i32>, kind: Kind) {
+    if root().is_none() {
         return;
     }
     let Some(writer) = WRITER.get_or_init(|| Writer::start().ok()) else { return };
+    let stderr = matches!(kind, Kind::Stderr);
+    // 给超时和退出等终态保留队列空间。任何一个 stderr 流刷屏都不能占满它。
+    if stderr
+        && writer
+            .stderr
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |n| (n < STDERR_LIMIT).then_some(n + 1))
+            .is_err()
+    {
+        writer.dropped.fetch_add(1, Ordering::Relaxed);
+        return;
+    }
     let time = chrono::Utc::now();
     let stamp = time.format("%Y-%m-%dT%H:%M:%SZ");
     let code = code.map(|code| format!("（代码 {code}）")).unwrap_or_default();
-    let line = format!("{stamp} [{}] {reason}{code}\n", source.label());
-    if writer.queue.try_send(Message::Line { time, line }).is_err() {
+    let detail = match kind {
+        Kind::WorkerExit(Some(failure)) => format!("：{failure}"),
+        _ => String::new(),
+    };
+    let line = format!("{stamp} [{}] {reason}{code}{detail}\n", source.label());
+    if writer.queue.try_send(Message::Line { line, stderr }).is_err() {
+        if stderr {
+            writer.stderr.fetch_sub(1, Ordering::Relaxed);
+        }
         writer.dropped.fetch_add(1, Ordering::Relaxed);
     }
 }
 
 enum Message {
-    Line { time: chrono::DateTime<chrono::Utc>, line: String },
+    Line { line: String, stderr: bool },
     Flush(SyncSender<()>),
 }
 struct Writer {
     queue: SyncSender<Message>,
     dropped: Arc<AtomicU64>,
+    stderr: Arc<AtomicUsize>,
 }
 impl Writer {
     fn start() -> io::Result<Self> {
         let (queue, pending) = mpsc::sync_channel(QUEUE_SIZE);
         let dropped = Arc::new(AtomicU64::new(0));
+        let stderr = Arc::new(AtomicUsize::new(0));
         let lost = dropped.clone();
+        let queued_stderr = stderr.clone();
         thread::Builder::new().name("diagnostic-log".into()).spawn(move || {
-            for message in pending {
-                match message {
-                    Message::Line { time, mut line } => {
-                        let count = lost.swap(0, Ordering::Relaxed);
-                        if count > 0 {
-                            let stamp = time.format("%Y-%m-%dT%H:%M:%SZ");
-                            line.insert_str(0, &format!("{stamp} [log] 有 {count} 条日志未能写入\n"));
+            while let Ok(first) = pending.recv() {
+                let mut batch = String::new();
+                let mut entries = 0;
+                for message in std::iter::once(first).chain(pending.try_iter().take(WRITE_BATCH - 1)) {
+                    match message {
+                        Message::Line { line, stderr } => {
+                            if stderr {
+                                queued_stderr.fetch_sub(1, Ordering::Relaxed);
+                            }
+                            batch.push_str(&line);
+                            entries += 1;
                         }
-                        if directory().and_then(|dir| append(&dir, line.as_bytes(), MAX_BYTES)).is_err() {
-                            lost.fetch_add(count + 1, Ordering::Relaxed);
+                        Message::Flush(done) => {
+                            write_pending(&lost, &batch, entries);
+                            batch.clear();
+                            entries = 0;
+                            let _ = done.send(());
                         }
                     }
-                    Message::Flush(done) => {
-                        let _ = done.send(());
-                    }
+                }
+                if entries > 0 {
+                    write_pending(&lost, &batch, entries);
                 }
             }
         })?;
-        Ok(Self { queue, dropped })
+        Ok(Self { queue, dropped, stderr })
+    }
+}
+
+fn write_pending(lost: &AtomicU64, batch: &str, entries: u64) {
+    let count = lost.swap(0, Ordering::Relaxed);
+    if count == 0 && entries == 0 {
+        return;
+    }
+    let mut entry = String::new();
+    if count > 0 {
+        let time = chrono::Utc::now();
+        let stamp = time.format("%Y-%m-%dT%H:%M:%SZ");
+        entry = format!("{stamp} [log] 有 {count} 条日志未能写入\n");
+    }
+    entry.push_str(batch);
+    if directory().and_then(|dir| append(&dir, entry.as_bytes(), MAX_BYTES)).is_err() {
+        lost.fetch_add(count + entries, Ordering::Relaxed);
     }
 }
 
@@ -195,20 +259,28 @@ fn append(directory: &Path, bytes: &[u8], max_bytes: u64) -> io::Result<()> {
         }
     };
     let active = directory.join("runtime.log");
+    let pending = directory.join(".runtime.pending");
+    if pending.try_exists()? {
+        finish_rotation(directory, &pending)?;
+    }
     let mut options = private_options();
     options.append(true).create(true);
     let mut file = options.open(&active)?;
     if file.metadata()?.len().saturating_add(bytes.len() as u64) > max_bytes {
         drop(file);
-        let archived = |index| directory.join(format!("runtime.{index}.log"));
-        ignore_missing(fs::remove_file(archived(FILES - 1)))?;
-        for index in (1..FILES).rev() {
-            let from = if index == 1 { active.clone() } else { archived(index - 1) };
-            ignore_missing(fs::rename(from, archived(index)))?;
-        }
+        // Windows 读者可能打开 active 且拒绝重命名。先移走 active，成功后才动历史。
+        fs::rename(&active, &pending)?;
+        finish_rotation(directory, &pending)?;
         file = options.open(active)?;
     }
     file.write_all(bytes)
+}
+
+fn finish_rotation(directory: &Path, pending: &Path) -> io::Result<()> {
+    let previous = directory.join("runtime.1.log");
+    // 替换第二代是原子重命名。如果第一代已经移动（上次中断），第二代原样保留。
+    ignore_missing(fs::rename(&previous, directory.join("runtime.2.log")))?;
+    fs::rename(pending, previous)
 }
 
 fn conflict(error: &io::Error) -> bool {
@@ -224,23 +296,30 @@ fn ignore_missing(result: io::Result<()>) -> io::Result<()> {
 
 /// 逐行排空 stderr。每行最多保留 4 KiB 供判断；超长行的余部仍从管道读走。
 /// 回调只供启动计时和自检界面使用，收到的是内存中的原文，不能拿去落盘。
-pub fn drain(source: Source, stderr: impl Read, mut on_line: impl FnMut(&[u8])) {
+/// 返回 worker 适配器报告的固定失败原因，供异常退出记录合并保留。
+pub fn drain(source: Source, stderr: impl Read, mut on_line: impl FnMut(&[u8])) -> Option<&'static str> {
     let mut reader = BufReader::new(stderr);
     let mut line = Vec::new();
     let mut previous = None;
-    loop {
-        let Ok(chunk) = reader.fill_buf() else { break };
+    let mut failure = None;
+    while let Ok(chunk) = reader.fill_buf() {
         let end = chunk.iter().position(|&byte| byte == b'\n');
         let consumed = end.map_or(chunk.len(), |offset| offset + 1);
         let text_length = end.unwrap_or(consumed).min(MAX_LINE - line.len());
         line.extend_from_slice(&chunk[..text_length]);
         if end.is_some() || (consumed == 0 && !line.is_empty()) {
             on_line(&line);
-            match classify_stderr(&String::from_utf8_lossy(&line)) {
+            let text = String::from_utf8_lossy(&line);
+            match classify_stderr(&text) {
                 Some(reason) => {
+                    if text.trim_start().starts_with(crate::app_tasks::WORKER_ERROR_PREFIX)
+                        || text.contains("panicked at")
+                    {
+                        failure = Some(reason);
+                    }
                     let now = Instant::now();
                     if previous.is_none_or(|(last, at)| last != reason || now.duration_since(at) >= DEDUP_WINDOW) {
-                        record(source, reason, None);
+                        record(source, reason, None, Kind::Stderr);
                         previous = Some((reason, now));
                     }
                 }
@@ -253,6 +332,7 @@ pub fn drain(source: Source, stderr: impl Read, mut on_line: impl FnMut(&[u8])) 
             break;
         }
     }
+    failure
 }
 
 fn classify_stderr(line: &str) -> Option<&'static str> {
@@ -358,33 +438,42 @@ mod tests {
         }
     }
 
+    #[cfg(any(unix, windows))]
     #[test]
     #[ignore = "由 saturated_queue_recovers_after_a_bounded_flush 通过隔离进程运行"]
     fn saturation_fixture() {
+        #[cfg(unix)]
+        use std::os::unix::process::ExitStatusExt;
+        #[cfg(windows)]
+        use std::os::windows::process::ExitStatusExt;
+
         super::super::initialize();
         let directory = directory().unwrap();
         let lock = lock_directory(&directory).unwrap();
-        for _ in 0..QUEUE_SIZE * 4 {
-            host_failure(Cause::HostExit, Some(1));
-        }
-        assert!(WRITER.get().unwrap().as_ref().unwrap().dropped.load(Ordering::Relaxed) > 0);
+        let writer = WRITER.get_or_init(|| Writer::start().ok()).as_ref().unwrap();
+        let warning = "识别加速：CCIP 改用 CPU\n其他告警\n";
+        let mut spam = warning.repeat(QUEUE_SIZE);
+        spam.push_str("可选 worker 不可用：不合法：原生识别 运行库 synthetic-runtime");
+        let failure = drain(Source::Recognition, spam.as_bytes(), |_| {});
+        assert!(writer.dropped.load(Ordering::Relaxed) > 0);
         let since = Instant::now();
         flush();
         assert!(since.elapsed() < Duration::from_secs(5));
         assert!(!directory.join("runtime.log").exists());
+        Source::Recognition.worker_exit(ExitStatus::from_raw(if cfg!(unix) { 7 << 8 } else { 7 }), failure);
         drop(lock);
 
-        let until = Instant::now() + Duration::from_secs(5);
-        loop {
-            host_failure(Cause::HostExit, Some(999));
-            flush();
-            let text = fs::read_to_string(directory.join("runtime.log")).unwrap_or_default();
-            if text.contains("（代码 999）") {
-                assert!(text.contains("[log] 有 ") && text.contains(" 条日志未能写入"), "{text}");
-                break;
-            }
-            assert!(Instant::now() < until, "writer did not recover");
-        }
+        flush();
+        let text = fs::read_to_string(directory.join("runtime.log")).unwrap();
+        assert!(text.contains("[recognition] worker 异常退出（代码 7）：无法加载 ONNX Runtime"), "{text}");
+        assert!(text.contains("[log] 有 ") && text.contains(" 条日志未能写入"), "{text}");
+        assert!(!text.contains("synthetic-runtime"));
+
+        // 最后一条被丢弃后，再也没有业务消息时 flush 也会记录这一条。
+        writer.dropped.store(1, Ordering::Relaxed);
+        flush();
+        let text = fs::read_to_string(directory.join("runtime.log")).unwrap();
+        assert!(text.lines().last().unwrap().ends_with("[log] 有 1 条日志未能写入"));
     }
 
     #[cfg(any(unix, windows))]
@@ -422,5 +511,94 @@ mod tests {
             assert_eq!(fs::metadata(directory.join("runtime.log")).unwrap().permissions().mode() & 0o777, 0o600);
         }
         fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn rotation_resumes_after_first_archive_has_moved() {
+        let directory = std::env::temp_dir().join(format!("illustash-log-resume-{}", crate::store::new_key().unwrap()));
+        create_private_directory(&directory).unwrap();
+        fs::write(directory.join(".runtime.pending"), b"recover\n").unwrap();
+        fs::write(directory.join("runtime.2.log"), b"history\n").unwrap();
+        append(&directory, b"latest\n", 8).unwrap();
+        assert_eq!(fs::read(directory.join("runtime.log")).unwrap(), b"latest\n");
+        assert_eq!(fs::read(directory.join("runtime.1.log")).unwrap(), b"recover\n");
+        assert_eq!(fs::read(directory.join("runtime.2.log")).unwrap(), b"history\n");
+        assert!(!directory.join(".runtime.pending").exists());
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn rotation_preserves_both_archives_while_active_file_disallows_rename() {
+        use std::os::windows::fs::OpenOptionsExt;
+
+        let directory = std::env::temp_dir().join(format!("illustash-log-share-{}", crate::store::new_key().unwrap()));
+        create_private_directory(&directory).unwrap();
+        let filenames = ["runtime.log", "runtime.1.log", "runtime.2.log"];
+        let original = [b"current\n", b"first  \n", b"second \n"];
+        for (name, content) in filenames.into_iter().zip(original) {
+            fs::write(directory.join(name), content).unwrap();
+        }
+        let reader = fs::OpenOptions::new().read(true).share_mode(3).open(directory.join("runtime.log")).unwrap();
+        for _ in 0..3 {
+            assert_eq!(append(&directory, b"latest\n", 8).unwrap_err().raw_os_error(), Some(32));
+            for (name, content) in filenames.into_iter().zip(original) {
+                assert_eq!(&fs::read(directory.join(name)).unwrap(), content);
+            }
+        }
+        drop(reader);
+        append(&directory, b"latest\n", 8).unwrap();
+        for (name, content) in filenames.into_iter().zip([b"latest\n".as_slice(), original[0], original[1]]) {
+            assert_eq!(fs::read(directory.join(name)).unwrap(), content);
+        }
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    #[ignore = "由 desktop_and_host_share_logs_from_different_working_directories 隔离启动"]
+    fn desktop_root_fixture() {
+        super::super::initialize();
+        if std::env::var_os(DESKTOP_ROOT_ENV).is_some() {
+            host_failure(Cause::HostExit, Some(22));
+            flush();
+            return;
+        }
+        host_failure(Cause::HostStartup, Some(11));
+        flush();
+        let status = Command::new(std::env::current_exe().unwrap())
+            .args(["--ignored", "--exact", "diagnostics::logs::tests::desktop_root_fixture"])
+            .current_dir("resources")
+            .env("ILLUSTASH_DESKTOP_STDIN", "1")
+            .env(DESKTOP_ROOT_ENV, root().unwrap())
+            .status()
+            .unwrap();
+        assert!(status.success());
+    }
+
+    #[cfg(any(unix, windows))]
+    #[test]
+    fn desktop_and_host_share_logs_from_different_working_directories() {
+        let root = std::env::temp_dir().join(format!("illustash-logs-cwd-{}", crate::store::new_key().unwrap()));
+        for support in ["", "relative support"] {
+            let current = root.join(if support.is_empty() { "empty" } else { "relative" });
+            fs::create_dir_all(current.join("resources")).unwrap();
+            let result = Command::new(std::env::current_exe().unwrap())
+                .args(["--ignored", "--exact", "diagnostics::logs::tests::desktop_root_fixture"])
+                .current_dir(&current)
+                .env("HOME", &current)
+                .env("USERPROFILE", &current)
+                .env("ILLUSTASH_APP_SUPPORT", support)
+                .env_remove("ILLUSTASH_DESKTOP_STDIN")
+                .env_remove(DESKTOP_ROOT_ENV)
+                .output()
+                .unwrap();
+            assert!(result.status.success(), "{}", String::from_utf8_lossy(&result.stdout));
+            let log_path = Path::new(support).join("diagnostics/logs/runtime.log");
+            let text = fs::read_to_string(current.join(&log_path)).unwrap();
+            assert!(text.contains("本地服务启动失败（代码 11）"));
+            assert!(text.contains("本地服务异常退出（代码 22）"));
+            assert!(!current.join("resources").join(log_path).exists());
+        }
+        fs::remove_dir_all(root).unwrap();
     }
 }

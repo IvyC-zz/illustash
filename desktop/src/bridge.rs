@@ -109,6 +109,11 @@ fn open_logs() -> std::io::Result<()> {
     #[cfg(windows)]
     {
         use std::{ffi::c_void, os::windows::ffi::OsStrExt, ptr::null};
+        #[link(name = "ole32")]
+        extern "system" {
+            fn CoInitializeEx(reserved: *const c_void, flags: u32) -> i32;
+            fn CoUninitialize();
+        }
         #[link(name = "shell32")]
         extern "system" {
             fn ShellExecuteW(
@@ -121,8 +126,18 @@ fn open_logs() -> std::io::Result<()> {
             ) -> isize;
         }
         let path: Vec<_> = directory.as_os_str().encode_wide().chain(Some(0)).collect();
-        // SAFETY: path 在调用期间有效且以 NUL 结尾。用目录本身和默认动词，不拼接命令行或参数。
-        let status = unsafe { ShellExecuteW(null(), null(), path.as_ptr(), null(), null(), 1) };
+        let open: Vec<_> = "open".encode_utf16().chain(Some(0)).collect();
+        // SAFETY: 桥接在独立线程处理请求，首个参数按约定为空。外壳扩展可能需要 STA。
+        let init = unsafe { CoInitializeEx(null(), 0x2 | 0x4) }; // COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE
+        if init < 0 {
+            return Err(std::io::Error::other("CoInitializeEx failed"));
+        }
+        // SAFETY: path 和 open 在调用期间有效且以 NUL 结尾。CoUninitialize 与上面的成功调用配对。
+        let status = unsafe {
+            let status = ShellExecuteW(null(), open.as_ptr(), path.as_ptr(), null(), null(), 1);
+            CoUninitialize();
+            status
+        };
         if status > 32 {
             Ok(())
         } else {
