@@ -1087,7 +1087,7 @@
   "新加入的图只在本机做签名识别；要联网查，在任务面板里每次授权": "New pictures only get signature reading on this computer; to look them up online, allow it each time in the task panel",
   "测试图库不同步，这个开关不起作用": "test libraries don't sync, so this switch has no effect",
   "随机抽 50 张，逐张判断找到的画师对不对": "50 random pictures; judge one by one whether the artist found is right",
-  "登录 Pixiv 后才能比对 R18 作品、查 Pixiv 上的相关画师（见下方「账号」）。": "Sign in to Pixiv to compare R18 works and look up related artists on Pixiv (see “Accounts” below).",
+  "登录 Pixiv 后才能比对 R18 作品（见下方「账号」）。": "Sign in to Pixiv to compare R18 works (see “Accounts” below).",
   "同步后会自动查新图的画师": "Artists of new pictures will be looked up after sync",
   "同步后不再自动查画师": "Artists are no longer looked up after sync",
   "：{reason}": ": {reason}",
