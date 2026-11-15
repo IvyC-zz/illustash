@@ -67,7 +67,7 @@
 
  "crates/core/src/human_conclusions/hash_cache.rs":"94f4957fcaacc2d6afb5a1b6716c132ee36c2cb212df3569c556be3d590015fb",
 
- "crates/core/src/human_conclusions/import.rs":"b963d55b4a8c04afd2b65f579ebe747cd5976b36d9356fd0f65574942024151b",
+ "crates/core/src/human_conclusions/import.rs":"9c80f9ca4db57a9480b82952ebdc6981d3fdabaa13eb0e6962255bec0151f24c",
 
  "crates/core/src/human_conclusions/links.rs":"49ccf523a49e335808fb567f9a1fd5e0c042fa179d4a9569b6bbea5671d27d7d",
 
@@ -75,7 +75,7 @@
 
  "crates/core/src/human_conclusions/mod.rs":"44967674c06823a06c2fe1e7360da25746d9c1b8524142b5a97d1fd1235b64b1",
 
- "crates/core/src/human_conclusions/names.rs":"b4b8e7bc4e4efedfe654c2a4cd6296ea982abb9a55246fb3462849543f592880",
+ "crates/core/src/human_conclusions/names.rs":"ea5381062809d204146f7f20be20b9daeb13e5721a4c21735760ec8da5b36a4a",
 
  "crates/core/src/human_conclusions/relations.rs":"d22db21a70509c979645b24ec5381c242b0a4b8025fa848dec8826741a4eab7a",
 
@@ -85,7 +85,7 @@
 
  "crates/core/src/human_conclusions/state.rs":"433c6a4b4b4cd476dfb8d030697c4664b5535e16bab3e176019a35a0be154f0b",
 
- "crates/core/src/human_conclusions/upgrade.rs":"134101fb3310d4c80b30beac5d583f50024a1b2ce17c68857f66d9d6aca59b41",
+ "crates/core/src/human_conclusions/upgrade.rs":"356c0072926933019d6c07aefc4ce882c36ec58847e6aa76c93fa488a3159c9c",
 
  "crates/core/src/human_conclusions/visibility.rs":"e8576d39c5188e12dbb3319d90561dd6a3cecb56c89ebf545333b5f4c1440646",
 
@@ -221,7 +221,7 @@
 
  "native/terms/src/app_http.rs":"688a7f800f3bc748f52e8a60840ad650edb005b16d1917cbd37710345e33d391",
 
- "native/terms/src/app_human_conclusions.rs":"ea683b5465eb265d148ce57121ba647834198c032dac36c55e8b98e83519b737",
+ "native/terms/src/app_human_conclusions.rs":"8c110ea1cf47b89290de3db6ed636b944610a7bbf14b10d5c8ed607fad2d26a2",
 
  "native/terms/src/app_human_conclusions/backups.rs":"5013b4a34a472797d6da0aa2b2906b43733b05c1e04dbc85199d9513a2defbf5",
 
@@ -231,7 +231,7 @@
 
  "native/terms/src/app_human_conclusions/hashes.rs":"e611f83b2655d48e38099cc244e83ea13b0eca204f734e67c3cc2d32590edc81",
 
- "native/terms/src/app_human_conclusions/reports.rs":"e74fe99b57e71f7cd5fbd4607cb4f10fa2dd63d25cc7a115bd7f97c83a7994ee",
+ "native/terms/src/app_human_conclusions/reports.rs":"9f17de5e2b9ca594cb52d4be077e9c0d55d381b4eb18d6f7c071a92f06e2b924",
 
  "native/terms/src/app_identity.rs":"715d41ff00ae564d109fd8c6dde75f3e89e447360832bb2ab16c960bc473da38",
 
@@ -311,7 +311,7 @@
 
  "native/terms/src/app_sources.rs":"8ee039dc596b1253783ab4256fd7befa1ce4087eee3f93b69208e7ede676c819",
 
- "native/terms/src/app_sync.rs":"0419ca74f296986a9ae8ebca670d68278e04891e12f9b73423d82df6d66db8f4",
+ "native/terms/src/app_sync.rs":"1906eb16ccda249025444fe19261557450ac70528d4f992a5b9b092eef577352",
 
  "native/terms/src/app_tasks.rs":"17ee084a8d913ecc41d473dfde91dad11b6bd960b0d0b385927a0b3fa0f2937d",
 
@@ -510,8 +510,6 @@
  "crates/relation-fft/build.rs":{"policy":"application","current_runtime":"rust-build","storage_domain":"no-db"},
  "crates/core/src/human_conclusions/state.rs":{"policy":"application","current_runtime":"rust-core-human-state","storage_domain":"app"},
  "crates/core/src/human_conclusions/upgrade.rs":{"policy":"lifecycle","current_runtime":"rust-core-explicit-v9-upgrade","storage_domain":"app"},
- "crates/core/src/human_conclusions/mod.rs":{"policy":"application","current_runtime":"rust-core-human-conclusions","storage_domain":"no-db-write"},
- "crates/core/src/human_conclusions/matching.rs":{"policy":"application","current_runtime":"rust-core-human-conclusions","storage_domain":"no-db-write"},
  "crates/core/src/human_conclusions/format.rs":{"policy":"application","current_runtime":"rust-core-human-snapshot-format","storage_domain":"no-db-write"},
  "crates/core/src/human_conclusions/import.rs":{"policy":"application","current_runtime":"rust-core-human-import-undo","storage_domain":"app","boundary_notes":{"authorization":"#441 已批准的人工结论导入和专用撤销；只写 actions、人工业务表和提交后事件，单事务失败回滚。"}},
  "native/terms/src/app_human_conclusions.rs":{"policy":"application","current_runtime":"rust-human-file-verification-transaction","storage_domain":"app","boundary_notes":{"authorization":"#441 已批准的人工结论导入和专用撤销；只写 actions、人工业务表和提交后事件，单事务失败回滚。"}},
@@ -522,11 +520,6 @@
  "crates/core/src/human_conclusions/names.rs":{"policy":"application","current_runtime":"rust-core-human-import-name-group-owner","storage_domain":"app","boundary_notes":{"authorization":"#441 已批准的名字组目标优先、精确 before/after 和撤销；旧合并别名出处记录在有效导入历史。"}},
  "crates/core/src/human_conclusions/links.rs":{"policy":"application","current_runtime":"rust-core-human-import-links-owner","storage_domain":"app","boundary_notes":{"authorization":"#441 已批准的缺失链接及身份跳过记录补齐；保留目标已有状态，精确撤销本次新增键。"}},
  "crates/core/src/human_conclusions/skips.rs":{"policy":"application","current_runtime":"rust-core-human-import-skips-owner","storage_domain":"app","boundary_notes":{"authorization":"#441 已批准的缺失链接及身份跳过记录补齐；保留目标已有状态，精确撤销本次新增键。"}},
- "crates/core/src/human_conclusions/hash_cache.rs":{"policy":"lifecycle","current_runtime":"rust-human-v9-storage-revision","storage_domain":"app"},
- "crates/core/src/human_conclusions/revision.rs":{"policy":"lifecycle","current_runtime":"rust-human-v9-storage-revision","storage_domain":"app"},
- "native/terms/src/app_human_conclusions/backups.rs":{"policy":"lifecycle","current_runtime":"rust-human-snapshot-lifecycle","storage_domain":"app"},
- "native/terms/src/app_human_conclusions/exports.rs":{"policy":"lifecycle","current_runtime":"rust-human-snapshot-lifecycle","storage_domain":"app"},
- "native/terms/src/app_human_conclusions/files.rs":{"policy":"lifecycle","current_runtime":"rust-human-snapshot-lifecycle","storage_domain":"app"},
  "native/terms/src/app_human_conclusions/hashes.rs":{"policy":"assets","current_runtime":"rust-human-snapshot-lifecycle","storage_domain":"app"},
  "native/terms/src/app_human_conclusions/reports.rs":{"policy":"application","current_runtime":"rust-human-snapshot-lifecycle","storage_domain":"app"}
 },
@@ -573,7 +566,7 @@
  "native/terms/src/http_json.rs":{"database-write":[[11,6]]},
  "native/terms/src/bin/illustash-terms.rs":{"entrypoint":[10]},
  "crates/core/src/schema.rs":{"database-write":{"dynamic-or-wrapper":21,"DROP TABLE IF EXISTS:identity_claims":1,"DROP TABLE IF EXISTS:identity_calibration":1,"DELETE FROM:meta":5,"ALTER TABLE:actions":1,"UPDATE:actions":1,"CREATE TABLE:terms_compact_new":1,"INSERT INTO:terms_compact_new":1,"ALTER TABLE:terms_compact_new":1,"INSERT OR REPLACE INTO:meta":3,"VACUUM":1,"CREATE TABLE IF NOT EXISTS:meta":1,"CREATE TABLE IF NOT EXISTS:actions":1,"CREATE TABLE:term_assets":1,"CREATE INDEX:term_assets_md5":1,"CREATE TABLE:terms":1,"CREATE INDEX:terms_kind":1,"CREATE TRIGGER:terms_kind_insert":1,"BEGIN":27,"CREATE TRIGGER:terms_kind_update|UPDATE:of":1,"CREATE TRIGGER:terms_key_permanent|UPDATE:of":1,"CREATE TABLE:term_names":1,"CREATE INDEX:term_names_value":1,"CREATE TABLE:term_links":1,"CREATE INDEX:term_links_term":1,"CREATE TABLE:term_relations":1,"CREATE INDEX:term_relations_b":1,"CREATE TABLE:term_packages":1,"CREATE TABLE:term_evidence":1,"CREATE INDEX:term_evidence_term":1,"CREATE TRIGGER:term_evidence_append_only_update|UPDATE:on":1,"CREATE TRIGGER:term_evidence_append_only_delete":1,"CREATE TABLE:term_verdicts":1,"CREATE INDEX:term_verdicts_image":2,"CREATE INDEX:term_verdicts_relation":2,"CREATE INDEX:term_verdicts_action":2,"CREATE TRIGGER:term_verdicts_append_only_update|UPDATE:on":2,"CREATE TRIGGER:term_verdicts_append_only_delete":2,"CREATE TABLE:term_projection":1,"CREATE INDEX:term_projection_term":1,"CREATE VIEW:term_effective_verdicts":2,"CREATE VIEW:term_relation_states":2,"DROP TABLE IF EXISTS:artist_verdicts":1,"DROP TABLE IF EXISTS:legacy_asset_tags":1,"DROP TABLE:if":1,"INSERT INTO:term_evidence_sets":1,"INSERT INTO:term_evidence_set_rows":1,"CREATE TABLE:term_evidence_sets_v3":1,"CREATE TABLE:term_evidence_set_assets_v3":1,"CREATE TABLE:term_evidence_set_rows_v3":1,"CREATE TABLE:term_active_evidence_v3":1,"INSERT INTO:term_evidence_sets_v3":1,"INSERT INTO:term_evidence_set_assets_v3":1,"INSERT INTO:term_evidence_set_rows_v3":1,"INSERT INTO:term_active_evidence_v3":1,"DROP VIEW:term_current_evidence":1,"DROP TABLE:term_active_evidence":1,"DROP TABLE:term_evidence_set_rows":1,"DROP TABLE:term_evidence_set_assets":1,"DROP TABLE:term_evidence_sets":1,"ALTER TABLE:term_evidence_sets_v3":1,"ALTER TABLE:term_evidence_set_assets_v3":1,"ALTER TABLE:term_evidence_set_rows_v3":1,"ALTER TABLE:term_active_evidence_v3":1,"CREATE INDEX:term_evidence_set_rows_evidence":2,"CREATE TRIGGER:term_evidence_set_rows_match":2,"CREATE TRIGGER:term_evidence_sets_append_only_update|UPDATE:on":2,"CREATE TRIGGER:term_evidence_sets_append_only_delete":2,"CREATE TRIGGER:term_evidence_set_assets_append_only_update|UPDATE:on":2,"CREATE TRIGGER:term_evidence_set_assets_append_only_delete":2,"CREATE TRIGGER:term_evidence_set_rows_append_only_update|UPDATE:on":2,"CREATE TRIGGER:term_evidence_set_rows_append_only_delete":2,"CREATE VIEW:term_current_evidence":2,"COMMIT":2,"CREATE TABLE:term_batches":1,"CREATE TRIGGER:term_batches_append_only_update|UPDATE:on":1,"CREATE TRIGGER:term_batches_append_only_delete":1,"CREATE TABLE:term_verdicts_v2":1,"INSERT INTO:term_verdicts_v2":1,"DROP VIEW:term_relation_states":1,"DROP VIEW:term_effective_verdicts":1,"DROP TABLE:term_verdicts":1,"ALTER TABLE:term_verdicts_v2":1,"CREATE INDEX:term_verdicts_batch":1,"CREATE TRIGGER:term_verdicts_batch_anchor":1,"CREATE VIEW:term_relation_latest":1,"CREATE TABLE:term_evidence_sets":1,"CREATE TABLE:term_evidence_set_assets":1,"CREATE TABLE:term_evidence_set_rows":1,"CREATE TABLE:term_active_evidence":1,"CREATE TABLE:term_identity_baseline":1,"CREATE TABLE:term_tree":1,"CREATE INDEX:term_tree_parent":1,"CREATE INDEX:term_tree_work":1,"CREATE TABLE:term_legacy_ids":1}},
- "crates/core/src/character_merge.rs":{"database-write":{"UPDATE:term_tree":4,"UPDATE:prefs":2,"DELETE FROM:reviews":1,"dynamic-or-wrapper":6,"UPDATE:reviews":4,"DELETE FROM:term_names":1,"INSERT INTO:reviews":1}},
+ "crates/core/src/character_merge.rs":{"database-write":[[326,4],[311,2],190,[0,6],[327,4],59,315]},
  "crates/core/src/names_view.rs":{"database-write":{"CREATE TABLE IF NOT EXISTS:term_name_display":1,"CREATE TABLE IF NOT EXISTS:term_name_choice":1,"DELETE FROM:term_name_display|DELETE FROM:term_name_choice":1,"INSERT INTO:term_name_display":1,"dynamic-or-wrapper":8,"INSERT INTO:term_name_choice":1,"INSERT INTO:names_scope_ids":1,"INSERT INTO:names_scope_keys":1,"INSERT OR REPLACE INTO:term_name_display":1,"DELETE FROM:term_name_display":1,"INSERT OR REPLACE INTO:term_name_choice":1,"DELETE FROM:term_name_choice":1}},
  "desktop/src/server.rs":{"entrypoint":[[4,3]]},
  "crates/core/src/character_sql/lead_assets.sql":{"database-write":["INSERT INTO:lead_assets"]},
@@ -593,10 +586,10 @@
  "native/terms/src/app_accounts.rs":{"database-write":["PRAGMA:c.execute_batch(\"pragma journal_mode",[0,3],46,"PRAGMA:tx.execute_batch(\"pragma user_version","INSERT OR IGNORE INTO:leads",1]},
  "native/terms/src/app_identity.rs":{"http-branch":[95,37,40],"database-write":[[0,4],3,34,18,1]},
  "native/terms/src/app_migration_sql/asked.sql":{"database-write":[50,47,51]},
- "crates/core/src/store.rs":{"database-write":{"INSERT INTO:term_assets":1,"UPDATE:set":1,"dynamic-or-wrapper":23,"UPDATE:term_assets":1,"INSERT INTO:terms":1,"INSERT OR IGNORE INTO:term_names":1,"INSERT INTO:term_links":1,"INSERT INTO:term_relations":1,"COMMIT":6,"INSERT INTO:actions":2,"INSERT INTO:term_verdicts":2,"UPDATE:terms":2,"UPDATE:actions":1,"DELETE FROM:wanted_evidence":1,"INSERT INTO:wanted_evidence":1,"DELETE FROM:term_active_evidence":1,"INSERT INTO:term_active_evidence":1,"INSERT INTO:term_evidence_sets":1,"INSERT OR IGNORE INTO:term_evidence_set_assets":1,"INSERT OR REPLACE INTO:term_active_evidence":1,"INSERT OR IGNORE INTO:term_evidence_set_rows":1,"DELETE FROM:term_projection":2,"INSERT INTO:term_projection":1,"DELETE FROM:meta":2,"INSERT INTO:term_packages":1,"DELETE FROM:term_names":1,"UPDATE:term_packages":1,"INSERT INTO:term_evidence":1,"UPDATE:term_links":2}},
+ "crates/core/src/store.rs":{"database-write":[14,9,[0,23],226,67,214,66,"INSERT INTO:term_relations",[1,6],[18,2],[15,2],[72,2],35,"DELETE FROM:wanted_evidence","INSERT INTO:wanted_evidence","DELETE FROM:term_active_evidence","INSERT INTO:term_active_evidence",20,212,221,213,[191,2],206,[185,2],"INSERT INTO:term_packages",59,"UPDATE:term_packages",64,[227,2]]},
  "crates/core/src/character_projection.rs":{"database-write":{"DELETE FROM:touched":1,"INSERT OR IGNORE INTO:touched":1,"dynamic-or-wrapper":19,"DELETE FROM:candidate_scope":1,"INSERT OR IGNORE INTO:candidate_scope":1,"DELETE FROM:candidates":1,"INSERT INTO:candidates":1,"DELETE FROM:family_evidence":2,"DROP TABLE IF EXISTS:temp.projected_membership_rules":1,"DROP TABLE:temp.projected_membership_rules":1,"INSERT INTO:term_assets":1,"UPDATE:set":1,"DELETE FROM:term_projection":1,"INSERT INTO:term_projection":1}},
  "native/terms/src/app_characters.rs":{"http-branch":[80,79,76,269,100],"database-write":[0,2,3]},
- "crates/core/src/character_identity.rs":{"database-write":{"dynamic-or-wrapper":6,"INSERT INTO:term_legacy_ids":2,"INSERT INTO:term_evidence":1,"INSERT INTO:term_batches":1,"INSERT INTO:term_verdicts":1,"INSERT INTO:actions":1,"UPDATE:actions":1,"ROLLBACK":1}},
+ "crates/core/src/character_identity.rs":{"database-write":[[0,6],[205,2],64,63,15,18,35,71]},
  "native/terms/src/app_create_schema.sql":{"database-write":[53,135,124,104,127,105,139,120,101,131,153,123,103,122,49,152,164,155,113,160,115,[50,2],[47,2],[51,2],132,157,158,159,[45,11],109,171,108,165,161,137,110,167,52,133,107,130,169,168,118,166,117,129,106,128,163,170,119,162,116,154,125,136,172,56,156,114,54,48,174,55,148,146,145,144,142,143,112,149,150,151,140,141,147,173,126,2,[31,22]]},
  "native/terms/src/app_upgrade.rs":{"database-write":[[0,3],[1,3]]},
  "crates/core/src/legacy_names.rs":{"database-write":{"CREATE TABLE IF NOT EXISTS:term_key_names":1,"CREATE TABLE IF NOT EXISTS:term_key_aliases":1,"dynamic-or-wrapper":14,"DELETE FROM:term_key_aliases":1,"INSERT INTO:term_key_aliases":1,"UPDATE:set":2,"DELETE FROM:term_key_names":1,"INSERT OR IGNORE INTO:term_key_names":1,"ALTER TABLE:term_names":1,"CREATE INDEX:term_names_seq":1,"DELETE FROM:term_names":1,"INSERT INTO:term_names":1,"UPDATE:term_names":1,"DROP TABLE:names":1,"CREATE TRIGGER IF NOT EXISTS:names_version_|UPDATE:meta":1,"DELETE FROM:names_dirty_entities|DELETE FROM:names_dirty_keys":1,"DELETE FROM:names_dirty_full|DELETE FROM:names_old_entities|DELETE FROM:names_old_links_seen":1,"DELETE FROM:names_old_links|DELETE FROM:names_scope_ids|DELETE FROM:names_scope_keys":1,"INSERT INTO:names_dirty_full":1,"INSERT INTO:names_dirty_entities":3,"INSERT INTO:names_dirty_keys":1,"BEGIN":3,"INSERT INTO:names_old_entities":2,"INSERT INTO:names_old_links":1,"INSERT INTO:names_old_links_seen":1,"INSERT OR REPLACE INTO:meta":2,"ROLLBACK":1}},
@@ -605,8 +598,8 @@
  "start-web.command":{"entrypoint":["shell-script"]},
  "native/terms/src/cli.rs":{"cli-entry":["recognition-import","folder-scan","photos-scan","library-scan","library-create","http","serve","wd-pending","names-command","names-project","names-search","character-command","identity-command","learning-snapshot","publish-learning","reproject-characters","validate","migrate","import","judge","tag","reproject","undo"],"database-write":[[0,3],3,1]},
  "crates/core/src/character_sql/fold.sql":{"database-write":["UPDATE:duplicates"]},
- "crates/core/src/character_commands.rs":{"database-write":{"@0":10,"@184":2,"@198":1,"DELETE FROM:identity_scopes":2,"DELETE FROM:identity_suspended":2,"INSERT INTO:identity_scopes":1,"@14":1,"@15":1,"INSERT OR REPLACE INTO:assertions":1,"DELETE FROM:assertions":2,"INSERT INTO:assertions":1,"@18":1,"@35":4,"INSERT OR IGNORE INTO:deferred":1,"DELETE FROM:deferred":2,"INSERT OR REPLACE INTO:asked":2,"INSERT INTO:reviews":1,"INSERT OR REPLACE INTO:identity_uncertain":1,"@175":1,"INSERT INTO:deferred":1,"@190":1,"DELETE FROM:identity_anchor_decisions":1,"INSERT INTO:identity_anchor_decisions":1,"INSERT INTO:identity_anchor_history":1}},
- "native/terms/src/http_host_get.rs":{"http-branch":{"/api/local-links":1,"/api/entity-preview":1,"/api/oc/groups":1,"/api/diagnostics":1,"/api/provenance":1,"/api/index":1,"/api/similar|/api/clusters":1,"/api/similar":1,"/api/names":1,"/api/sync":1,"/api/integrity":1,"/api/updates":1,"/api/models":1,"/api/onboarding":1,"/api/imports":1,"/api/human-conclusions":1,"/api/human-conclusions/report":1,"/api/settings":1,"/api/libraries":1}},
+ "crates/core/src/character_commands.rs":{"database-write":[[0,10],[184,2],198,[317,2],[318,2],316,14,15,"INSERT OR REPLACE INTO:assertions",[312,2],313,18,[35,4],"INSERT OR IGNORE INTO:deferred",[321,2],[322,2],315,"INSERT OR REPLACE INTO:identity_uncertain",175,314,190,"DELETE FROM:identity_anchor_decisions","INSERT INTO:identity_anchor_decisions","INSERT INTO:identity_anchor_history"]},
+ "native/terms/src/http_host_get.rs":{"http-branch":[17,306,97,"/api/diagnostics",42,39,"/api/similar|/api/clusters",26,41,43,296,295,305,293,291,"/api/human-conclusions","/api/human-conclusions/report","/api/settings","/api/libraries"]},
  "native/terms/src/app_create.rs":{"database-write":{"ATTACH":1,"dynamic-or-wrapper":9,"INSERT INTO:main.":1,"CREATE INDEX:if":1,"COMMIT":3,"DETACH":1,"ALTER TABLE:assets":1,"INSERT OR IGNORE INTO:meta":1}},
  "native/terms/src/app_index.rs":{"database-write":[[0,7],34,[1,5],33,283,284,285,286,[208,2],12,[199,2],287,249,201,[3,2]],"entrypoint":[4]},
  "native/terms/src/http_browse.rs":{"http-branch":["/api/assets|/api/ids",[246,3],[77,2],[248,3],24,99,89,"/api/assets|/api/assets/count|/api/ids",[78,3]],"database-write":[[7,2],[0,2]]},
@@ -615,7 +608,7 @@
  "crates/core/src/names_commands.rs":{"database-write":{"INSERT OR IGNORE INTO:term_key_names":1,"dynamic-or-wrapper":8,"DELETE FROM:term_names":4,"DELETE FROM:term_key_names":1,"DELETE FROM:term_key_aliases":1,"INSERT INTO:term_key_aliases":1}},
  "native/terms/src/app_profiles.rs":{"http-branch":[[23,8],[16,5],[17,7],[44,3],[83,3],[242,4],[98,3]],"database-write":[[3,3],0]},
  "crates/core/src/character_import.rs":{"database-write":{"INSERT OR IGNORE INTO:term_links":1,"dynamic-or-wrapper":15,"UPDATE:term_tree":3,"UPDATE:terms":1,"INSERT INTO:term_batches":1,"INSERT OR IGNORE INTO:assertions":1,"INSERT INTO:imported":1,"DELETE FROM:auto_rules":1,"INSERT OR IGNORE INTO:auto_rules":4,"INSERT INTO:excluded":1,"DELETE FROM:excluded":1,"DELETE FROM:touched":1,"INSERT OR IGNORE INTO:touched":1,"INSERT INTO:assets":1,"DELETE FROM:duplicates":1,"INSERT INTO:duplicates":1,"INSERT OR REPLACE INTO:meta":2,"DELETE FROM:assets":1,"DELETE FROM:candidates":1,"REINDEX":3,"INSERT OR REPLACE INTO:sync_added":1}},
- "native/terms/src/http_host_post.rs":{"http-branch":{"/api/integrity/rescue":2,"/api/libraries/open":2,"/api/libraries/new":2,"/api/libraries/import":2,"/api/libraries/forget":2,"/api/backup":2,"/api/preferences":2,"/api/libraries/choose":1,"/api/updates":1,"/api/diagnostics/open-logs":1,"/api/models":1,"/api/human-conclusions/":1,"/api/human-conclusions/export":2,"/api/human-conclusions/export/cancel":2,"/api/human-conclusions/import":2,"/api/human-conclusions/restore":1,"/api/accounts/x/import":1,"/api/human-conclusions/import|/api/human-conclusions/restore":1,"/api/cache":1,"/api/entities|/api/character/profile|/api/local-links":1,"/api/names":2,"/api/relate":1,"/api/recognition/import":1,"/api/imports/cancel":1,"/api/tag":1,"/api/undo":1,"/api/artist/verdict":1,"/api/curate":1,"/api/fold":1,"/api/entities":1,"/api/character/profile":1,"/api/local-links":1,"/api/works":1,"/api/character/mascot":1,"/api/kind":1,"/api/oc/shared":1,"/api/change":1,"/api/audit/answer":1,"/api/ask/answer":1,"/api/reassign":1,"/api/sweep":1,"/api/identity/decision":1,"/api/identity/skip":1,"/api/merge":1,"/api/provenance":1,"/api/onboarding":1,"/api/accounts/":2,"/api/index":1,"/api/sync":1,"/api/similar|/api/regroup":1,"/api/suggest":1,"/api/startup":1,"/api/libraries/sources/add|/api/libraries/sources/remove":1,"/api/libraries/preset":1,"/api/libraries/export":1,"/api/integrity":1,"/api/similar":2,"/api/libraries/sources/add":1}},
+ "native/terms/src/http_host_post.rs":{"http-branch":[[303,2],[282,2],[275,2],[280,2],[279,2],[274,2],[294,2],264,295,"/api/diagnostics/open-logs",305,"/api/human-conclusions/",[307,2],[308,2],[309,2],"/api/human-conclusions/restore",265,"/api/human-conclusions/import|/api/human-conclusions/restore",266,267,[41,2],268,270,292,247,231,74,88,24,23,16,17,44,83,242,98,80,79,76,269,100,37,95,40,42,293,[230,2],39,43,271,272,273,276,278,281,296,[26,2],277]},
  "native/terms/src/app_provenance.rs":{"database-write":{"INSERT OR IGNORE INTO:pending_runs":3,"UPDATE:runs":3,"INSERT OR IGNORE INTO:native_meta":2,"dynamic-or-wrapper":4,"UPDATE:native_meta":1,"COMMIT":2,"INSERT INTO:runs":1,"DELETE FROM:pending_runs":1,"ATTACH":2,"PRAGMA:c.execute_batch(\"pragma defer_foreign_keys":1,"INSERT INTO:leads|UPDATE:set":1,"INSERT INTO:native_delivery":1},"entrypoint":{"process-start":1}},
  "crates/core/src/character_sql/evidence_default.sql":{"database-write":[196]},
  "native/terms/src/app_migration_sql/artists.sql":{"database-write":["CREATE TABLE IF NOT EXISTS:artist_verdicts","CREATE INDEX IF NOT EXISTS:artist_verdicts_artist"]},
@@ -624,8 +617,8 @@
  "crates/platform/src/platform_credentials.rs":{"entrypoint":[[4,3]]},
  "crates/core/src/backup.rs":{"database-write":[0]},
  "crates/core/src/lib.rs":{"database-write":[0]},
- "crates/platform/src/picker.rs":{"entrypoint":{"process-start":1}},
- "native/terms/src/app_service.rs":{"database-write":{"dynamic-or-wrapper":1,"INSERT OR REPLACE INTO:meta":1,"INSERT INTO:backend_effects":1}},
+ "crates/platform/src/picker.rs":{"entrypoint":[4]},
+ "native/terms/src/app_service.rs":{"database-write":[0,2,3]},
  "native/terms/src/recognition_compute/session.rs":{"database-write":[1]},
  "native/terms/examples/recognition-compute.rs":{"entrypoint":[10]},
  "native/terms/examples/research-compute.rs":{"entrypoint":[10]},
@@ -649,22 +642,22 @@
  "crates/core/src/new_library.rs":{"database-write":{"dynamic-or-wrapper":5,"INSERT INTO:term_evidence_sets":2,"DROP TABLE IF EXISTS:artist_verdicts":1,"DROP TABLE:asset_tags|DROP TABLE:general_hits|DROP TABLE:asset_rating":1,"INSERT OR REPLACE INTO:meta":1,"INSERT OR IGNORE INTO:meta":1}},
  "native/terms/src/app_http.rs":{"entrypoint":{"process-start":1}},
  "crates/relation-fft/build.rs":{"entrypoint":{"native-main":1}},
- "crates/core/src/human_conclusions/state.rs":{"database-write":{"dynamic-or-wrapper":2,"INSERT INTO:human_state_mark_undo":1,"UPDATE:set":1,"DELETE FROM:human_state_marks":1,"INSERT INTO:human_state_marks":1}},
- "crates/core/src/human_conclusions/upgrade.rs":{"database-write":{"CREATE TABLE:human_state_marks":1,"CREATE INDEX:human_state_marks_action":1,"CREATE TABLE:human_state_mark_undo":1,"INSERT INTO:meta":1,"CREATE TABLE:human_backup_state":1,"CREATE TABLE:human_import_reports":1,"CREATE TABLE:human_import_report_rows":1,"dynamic-or-wrapper":3,"CREATE TABLE:human_reviews_upgrade":1,"INSERT INTO:human_reviews_upgrade":1,"DROP TABLE:reviews":1,"ALTER TABLE:human_reviews_upgrade":1,"CREATE TRIGGER:human_marks_revision_":1,"UPDATE:meta":1,"INSERT INTO:human_state_mark_undo":1}},
- "crates/core/src/human_conclusions/import.rs":{"database-write":{"dynamic-or-wrapper":10,"INSERT INTO:actions":2,"ROLLBACK":1,"UPDATE:actions":2,"INSERT INTO:term_verdicts":1,"DELETE FROM:assertions":2,"INSERT INTO:assertions":1,"INSERT INTO:curation":1,"INSERT INTO:deferred":1,"INSERT INTO:identity_uncertain":1,"INSERT INTO:reviews":1,"INSERT INTO:identity_scopes":1,"INSERT INTO:identity_suspended":1,"DELETE FROM:reviews":1,"DELETE FROM:identity_scopes":1,"DELETE FROM:identity_suspended":1}},
- "native/terms/src/app_human_conclusions.rs":{"database-write":{"dynamic-or-wrapper":3,"COMMIT":1,"INSERT INTO:backend_effects":1}},
- "crates/core/src/human_conclusions/definitions.rs":{"database-write":{"INSERT INTO:human_object_contributions":1,"INSERT INTO:human_entity_origins":1,"dynamic-or-wrapper":4,"INSERT INTO:term_names":1,"INSERT INTO:term_links":1,"INSERT INTO:term_tree":1,"INSERT INTO:term_identity_baseline":1,"DELETE FROM:term_names":1,"DELETE FROM:term_links":1,"DELETE FROM:term_projection":1,"DELETE FROM:term_tree":1,"DELETE FROM:term_identity_baseline":1}},
- "crates/core/src/human_conclusions/visibility.rs":{"database-write":{"CREATE TABLE:human_object_contributions":1,"CREATE INDEX:human_object_contributions_owner":1,"CREATE TABLE:human_entity_origins":1,"CREATE INDEX:human_entity_origins_target":1,"CREATE VIEW:terms":1,"CREATE VIEW:term_relations":1,"CREATE TRIGGER:effective_terms_insert":1,"INSERT INTO:term_records":1,"CREATE TRIGGER:effective_terms_update|UPDATE:on":1,"UPDATE:term_records":1,"CREATE TRIGGER:effective_terms_delete":1,"DELETE FROM:term_records":1,"CREATE TRIGGER:effective_relations_insert":1,"INSERT INTO:term_relation_records":1,"CREATE TRIGGER:effective_relations_update|UPDATE:on":1,"UPDATE:term_relation_records":1,"CREATE TRIGGER:effective_relations_delete":1,"DELETE FROM:term_relation_records":1,"dynamic-or-wrapper":6,"ALTER TABLE:terms":1,"ALTER TABLE:term_relations":1,"CREATE TRIGGER:human_contribution_writer_":1,"BEGIN":2,"CREATE TRIGGER:human_contribution_delete":1,"DELETE FROM:human_object_contributions":1}},
+ "crates/core/src/human_conclusions/state.rs":{"database-write":[[0,2],310,9,"DELETE FROM:human_state_marks","INSERT INTO:human_state_marks"]},
+ "crates/core/src/human_conclusions/upgrade.rs":{"database-write":["CREATE TABLE:human_state_marks","CREATE INDEX:human_state_marks_action","CREATE TABLE:human_state_mark_undo",201,"CREATE TABLE:human_backup_state","CREATE TABLE:human_import_reports","CREATE TABLE:human_import_report_rows",[0,3],"CREATE TABLE:human_reviews_upgrade","INSERT INTO:human_reviews_upgrade","DROP TABLE:reviews","ALTER TABLE:human_reviews_upgrade","CREATE TRIGGER:human_marks_revision_",325,310]},
+ "crates/core/src/human_conclusions/import.rs":{"database-write":[[0,10],[18,2],71,[35,2],15,[312,2],313,263,314,198,315,316,"INSERT INTO:identity_suspended",190,317,318]},
+ "native/terms/src/app_human_conclusions.rs":{"database-write":[[0,3],1,3]},
+ "crates/core/src/human_conclusions/definitions.rs":{"database-write":[320,"INSERT INTO:human_entity_origins",[0,4],328,66,"INSERT INTO:term_tree","INSERT INTO:term_identity_baseline",59,324,191,"DELETE FROM:term_tree","DELETE FROM:term_identity_baseline"]},
+ "crates/core/src/human_conclusions/visibility.rs":{"database-write":["CREATE TABLE:human_object_contributions","CREATE INDEX:human_object_contributions_owner","CREATE TABLE:human_entity_origins","CREATE INDEX:human_entity_origins_target","CREATE VIEW:terms","CREATE VIEW:term_relations","CREATE TRIGGER:effective_terms_insert","INSERT INTO:term_records","CREATE TRIGGER:effective_terms_update|UPDATE:on","UPDATE:term_records","CREATE TRIGGER:effective_terms_delete","DELETE FROM:term_records","CREATE TRIGGER:effective_relations_insert","INSERT INTO:term_relation_records","CREATE TRIGGER:effective_relations_update|UPDATE:on","UPDATE:term_relation_records","CREATE TRIGGER:effective_relations_delete","DELETE FROM:term_relation_records",[0,6],"ALTER TABLE:terms","ALTER TABLE:term_relations","CREATE TRIGGER:human_contribution_writer_",[11,2],"CREATE TRIGGER:human_contribution_delete","DELETE FROM:human_object_contributions"]},
  "desktop/src/bridge.rs":{"entrypoint":["process-start"]},
- "crates/core/src/human_conclusions/relations.rs":{"database-write":{"dynamic-or-wrapper":7,"CREATE TABLE:human_relation_review_context":1,"INSERT INTO:human_relation_review_context":2,"INSERT INTO:term_legacy_ids":2,"INSERT INTO:human_object_contributions":1,"INSERT INTO:term_verdicts":1}},
- "crates/core/src/human_conclusions/names.rs":{"database-write":{"dynamic-or-wrapper":3,"UPDATE:term_names":1,"INSERT INTO:term_names":2,"DELETE FROM:term_names":1}},
- "crates/core/src/human_conclusions/links.rs":{"database-write":{"dynamic-or-wrapper":1,"INSERT INTO:term_links":1,"DELETE FROM:term_links":1}},
- "crates/core/src/human_conclusions/skips.rs":{"database-write":{"dynamic-or-wrapper":2,"INSERT OR REPLACE INTO:prefs":1,"UPDATE:prefs":2,"DELETE FROM:prefs":1}},
- "crates/core/src/human_conclusions/hash_cache.rs":{"database-write":{"dynamic-or-wrapper":4,"CREATE TABLE:human_asset_hashes":1,"CREATE TRIGGER:human_hash_writer_":1,"BEGIN":1,"CREATE TRIGGER:human_hash_revision_":1,"UPDATE:meta":1,"CREATE TRIGGER:human_hash_source_insert":1,"DELETE FROM:human_asset_hashes":5,"CREATE TRIGGER:human_hash_source_update|UPDATE:of":1,"CREATE TRIGGER:human_hash_version_insert":1,"CREATE TRIGGER:human_hash_version_update|UPDATE:of":1,"CREATE TRIGGER:human_hash_version_delete":1}},
- "crates/core/src/human_conclusions/revision.rs":{"database-write":{"UPDATE:meta":6,"CREATE TRIGGER:human_action_revision_insert":1,"CREATE TRIGGER:human_action_revision_undo|UPDATE:of":1,"CREATE TRIGGER:human_verdict_revision":1,"CREATE TRIGGER:human_":1,"CREATE TRIGGER:human_|UPDATE:on":1}},
- "native/terms/src/app_human_conclusions/backups.rs":{"database-write":{"INSERT INTO:human_backup_state|UPDATE:set":1}},
- "native/terms/src/app_human_conclusions/hashes.rs":{"database-write":{"INSERT INTO:human_asset_hashes":1,"UPDATE:set":1,"DELETE FROM:human_asset_hashes":1}},
- "native/terms/src/app_human_conclusions/reports.rs":{"database-write":{"dynamic-or-wrapper":2,"INSERT INTO:human_import_reports":1,"INSERT INTO:human_import_report_rows":1}}
+ "crates/core/src/human_conclusions/relations.rs":{"database-write":[[0,7],"CREATE TABLE:human_relation_review_context",[319,2],[205,2],320,15]},
+ "crates/core/src/human_conclusions/names.rs":{"database-write":[[0,3],"UPDATE:term_names",[328,2],59]},
+ "crates/core/src/human_conclusions/links.rs":{"database-write":[0,66,324]},
+ "crates/core/src/human_conclusions/skips.rs":{"database-write":[[0,2],34,[311,2],262]},
+ "crates/core/src/human_conclusions/hash_cache.rs":{"database-write":[[0,4],"CREATE TABLE:human_asset_hashes","CREATE TRIGGER:human_hash_writer_",11,"CREATE TRIGGER:human_hash_revision_",325,"CREATE TRIGGER:human_hash_source_insert",[323,5],"CREATE TRIGGER:human_hash_source_update|UPDATE:of","CREATE TRIGGER:human_hash_version_insert","CREATE TRIGGER:human_hash_version_update|UPDATE:of","CREATE TRIGGER:human_hash_version_delete"]},
+ "crates/core/src/human_conclusions/revision.rs":{"database-write":[[325,6],"CREATE TRIGGER:human_action_revision_insert","CREATE TRIGGER:human_action_revision_undo|UPDATE:of","CREATE TRIGGER:human_verdict_revision","CREATE TRIGGER:human_","CREATE TRIGGER:human_|UPDATE:on"]},
+ "native/terms/src/app_human_conclusions/backups.rs":{"database-write":["INSERT INTO:human_backup_state|UPDATE:set"]},
+ "native/terms/src/app_human_conclusions/hashes.rs":{"database-write":["INSERT INTO:human_asset_hashes",9,323]},
+ "native/terms/src/app_human_conclusions/reports.rs":{"database-write":[[0,2],"INSERT INTO:human_import_reports","INSERT INTO:human_import_report_rows"]}
 },
 "policies":{
  "application":{"final_owner":"rust","responsibility":"HTTP 参数/目标、人工命令、正式事务/投影；Python 包装待迁移","acceptance":"合成状态码/原始字节、返回/DB/历史/撤销/事件对照；竞争与注入失败原子回滚","deletion_condition":"Rust 调用链及无 Python 验收后删生产 Python；保留旧对照","stages":["M2","M3"]},
@@ -713,7 +706,10 @@
  {"patterns":["native/terms/src/provenance_compute/*"],"policy":"research","current_runtime":"rust-native-optional-candidate","storage_domain":"research"},
  {"patterns":["native/terms/examples/provenance-compute.rs"],"policy":"retained","current_runtime":"rust-test-example","storage_domain":"research"},
  {"patterns":["native/terms/src/app_onboarding.rs"],"policy":"coordination","current_runtime":"rust-native-onboarding-recognition-self-check","storage_domain":"app-prefs-via-settings"},
- {"patterns":["native/terms/src/app_models.rs"],"policy":"lifecycle","current_runtime":"rust-native-model-download","storage_domain":"shared-models+app-preferences"}
+ {"patterns":["native/terms/src/app_models.rs"],"policy":"lifecycle","current_runtime":"rust-native-model-download","storage_domain":"shared-models+app-preferences"},
+ {"patterns":["crates/core/src/human_conclusions/mod.rs","crates/core/src/human_conclusions/matching.rs"],"current_runtime":"rust-core-human-conclusions","policy":"application","storage_domain":"no-db-write"},
+ {"patterns":["crates/core/src/human_conclusions/hash_cache.rs","crates/core/src/human_conclusions/revision.rs"],"current_runtime":"rust-human-v9-storage-revision","policy":"lifecycle","storage_domain":"app"},
+ {"patterns":["native/terms/src/app_human_conclusions/backups.rs","native/terms/src/app_human_conclusions/exports.rs","native/terms/src/app_human_conclusions/files.rs"],"current_runtime":"rust-human-snapshot-lifecycle","policy":"lifecycle","storage_domain":"app"}
 ],
 "boundary_keys":[
  "dynamic-or-wrapper",
@@ -1022,6 +1018,28 @@
  "/api/integrity/rescue",
  "DELETE FROM:recognition_imports",
  "/api/models",
- "/api/entity-preview"
+ "/api/entity-preview",
+ "/api/human-conclusions/export",
+ "/api/human-conclusions/export/cancel",
+ "/api/human-conclusions/import",
+ "INSERT INTO:human_state_mark_undo",
+ "UPDATE:prefs",
+ "DELETE FROM:assertions",
+ "INSERT INTO:assertions",
+ "INSERT INTO:deferred",
+ "INSERT INTO:reviews",
+ "INSERT INTO:identity_scopes",
+ "DELETE FROM:identity_scopes",
+ "DELETE FROM:identity_suspended",
+ "INSERT INTO:human_relation_review_context",
+ "INSERT INTO:human_object_contributions",
+ "DELETE FROM:deferred",
+ "INSERT OR REPLACE INTO:asked",
+ "DELETE FROM:human_asset_hashes",
+ "DELETE FROM:term_links",
+ "UPDATE:meta",
+ "UPDATE:term_tree",
+ "UPDATE:reviews",
+ "INSERT INTO:term_names"
 ]
 }

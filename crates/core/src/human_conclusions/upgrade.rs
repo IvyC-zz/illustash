@@ -27,7 +27,7 @@ CREATE TABLE human_state_mark_undo(
  PRIMARY KEY(action_id,domain,asset_key));
 INSERT INTO meta(key,value) VALUES ('human_revision','0');
 CREATE TABLE human_backup_state(id INTEGER PRIMARY KEY CHECK(id=1),state_json TEXT NOT NULL CHECK(json_valid(state_json)));
-CREATE TABLE human_import_reports(id TEXT PRIMARY KEY,action_id INTEGER REFERENCES actions(id),summary_json TEXT NOT NULL CHECK(json_valid(summary_json)));
+CREATE TABLE human_import_reports(id TEXT PRIMARY KEY,action_id INTEGER REFERENCES actions(id),effect_id INTEGER,summary_json TEXT NOT NULL CHECK(json_valid(summary_json)));
 CREATE TABLE human_import_report_rows(report_id TEXT NOT NULL REFERENCES human_import_reports(id),seq INTEGER NOT NULL,detail_json TEXT NOT NULL CHECK(json_valid(detail_json)),PRIMARY KEY(report_id,seq));
 ";
 

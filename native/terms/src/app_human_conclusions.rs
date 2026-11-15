@@ -177,14 +177,17 @@ fn import_run(
     crate::schema::begin_writing(&tx)?;
     verify(&tx, &observations, true, check)?;
     let report = import::apply_in(&tx, &snapshot, library_id, &candidates, &mut || check())?;
-    if report.action_id.is_some() {
+    let effect = if report.action_id.is_some() {
         crate::app_curation::refresh_excluded(&tx, &report.touched)?;
         tx.execute("INSERT INTO backend_effects(kind) VALUES ('verdict')", [])?;
-    }
+        Some(tx.last_insert_rowid())
+    } else {
+        None
+    };
     verify(&tx, &observations, true, check)?;
     hashes::publish(&tx, &observations)?;
     let mut summary = reports::summary(report_id, &snapshot, &report);
-    reports::save(&tx, report_id, &summary, &report, check)?;
+    reports::save(&tx, report_id, effect, &summary, &report, check)?;
     check()?;
     observer.stage("committing");
     let mut tx = Some(tx);
@@ -195,7 +198,7 @@ fn import_run(
     })?;
     drop(tx);
     crate::app_effects::drain_after_commit(db);
-    summary["pending_effects"] = serde_json::json!(reports::pending(&c));
+    summary["pending_effects"] = serde_json::json!(reports::pending(&c, effect));
     Ok((report, summary))
 }
 

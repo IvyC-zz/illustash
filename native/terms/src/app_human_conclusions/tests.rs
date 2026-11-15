@@ -421,8 +421,10 @@ fn imported_alias_on_existing_term_keeps_legacy_merge_provenance() {
     linked_character(&tx, "alias-target-character", None);
     crate::schema::commit_writing(tx).unwrap();
     let result = import_file(&target.db, &target.id, &path, &|| Ok(())).unwrap();
-    // 普通合并同时留下中文名字和外链标签两个语言组。
-    assert_eq!(result.definition_fields["name_group_applied"], 2);
+    // 中文旧合并别名可恢复；混有后台可重建 Danbooru 别名的另一组明确不处理。
+    assert_eq!(result.definition_fields["name_group_applied"], 1);
+    assert_eq!(result.definition_fields["name_group_unsupported_dependency"], 1);
+    assert_eq!(target.count("SELECT count(*) FROM term_names WHERE source='danbooru'"), 0);
     assert_eq!(import_file(&target.db, &target.id, &path, &|| Ok(())).unwrap().action_id, None);
     let mut bytes = Vec::new();
     capture(&target.db, &target.id, &|| Ok(())).unwrap().write(&mut bytes).unwrap();
@@ -450,12 +452,9 @@ fn imported_alias_on_existing_term_keeps_legacy_merge_provenance() {
         .map(|b| serde_json::from_slice::<serde_json::Value>(b).unwrap())
         .find(|v| v["type"] == "entity" && v["record_key"] == "alias-target-character")
         .unwrap();
-    assert!(updated["definition"]["names"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|n| n["value"] == "可被更新器重建的别名" && n["provenance"] == "legacy_unknown"));
-    assert!(target.undo(refreshed_import.action_id.unwrap()).is_err());
+    // 这行来自目标后台，既没有导入贡献也没有人工合并证明，不再作为人工别名导出。
+    assert!(!updated["definition"]["names"].as_array().unwrap().iter().any(|n| n["value"] == "可被更新器重建的别名"));
+    target.undo(refreshed_import.action_id.unwrap()).unwrap();
     assert_eq!(target.count("SELECT count(*) FROM term_names WHERE value='可被更新器重建的别名'"), 1);
 }
 
@@ -1261,4 +1260,82 @@ fn snapshot_does_not_protect_a_human_edit_committed_during_its_read() {
     let next = capture_mode(&fixture.db, &fixture.id, Mode::Cached, &|| Ok(())).unwrap();
     assert_eq!(next.revision, revision::read(&c).unwrap());
     assert!(next.snapshot.record_keys().any(|(_, key)| key == "concurrent-work"));
+}
+
+#[test]
+fn provider_refresh_reusing_max_seq_is_never_owned_by_portable_undo() {
+    let source = Fixture::new("provider-source");
+    let mut c = crate::open(&source.db).unwrap();
+    let tx = c.transaction().unwrap();
+    crate::schema::begin_writing(&tx).unwrap();
+    linked_character(&tx, "provider-character", None);
+    crate::character_names::put_name(&tx, "provider-character", "zh", "bangumi", "提供方显示名", "display", 0, 0)
+        .unwrap();
+    crate::names_commands::one(
+        &tx,
+        &json!({"op":"danbooru_aliases","kind":"character","tag":"synthetic_provider-character","values":["后台别名"]}),
+    )
+    .unwrap();
+    crate::schema::commit_writing(tx).unwrap();
+    let path = source.root.join("provider.illustash-human.jsonl");
+    capture(&source.db, &source.id, &|| Ok(())).unwrap().write(&mut File::create(&path).unwrap()).unwrap();
+    for existed in [false, true] {
+        let target = Fixture::new(if existed { "provider-existing" } else { "provider-new" });
+        let mut c = crate::open(&target.db).unwrap();
+        if existed {
+            let tx = c.transaction().unwrap();
+            crate::schema::begin_writing(&tx).unwrap();
+            linked_character(&tx, "provider-character", None);
+            crate::schema::commit_writing(tx).unwrap();
+        }
+        let result = import_file(&target.db, &target.id, &path, &|| Ok(())).unwrap();
+        assert_eq!(target.count("SELECT count(*) FROM term_names WHERE source IN ('bangumi','danbooru')"), 0);
+        if !existed {
+            assert_eq!(result.definition_fields["name_rows_unsupported_dependency"], 1);
+        }
+        let refresh = |c: &mut Connection| {
+            let tx = c.transaction().unwrap();
+            crate::schema::begin_writing(&tx).unwrap();
+            crate::names_commands::one(&tx,&json!({"op":"danbooru_aliases","kind":"character","tag":"synthetic_provider-character","values":["后台别名"]})).unwrap();
+            crate::schema::commit_writing(tx).unwrap();
+        };
+        refresh(&mut c);
+        let before = target.count("SELECT seq FROM term_names WHERE source='danbooru'");
+        assert_eq!(before, target.count("SELECT max(seq) FROM term_names"));
+        refresh(&mut c);
+        assert_eq!(before, target.count("SELECT seq FROM term_names WHERE source='danbooru'"));
+        if let Some(action) = result.action_id {
+            assert!(target.undo(action).is_err());
+        }
+        assert_eq!(target.count("SELECT count(*) FROM term_names WHERE source='danbooru'"), 1);
+        assert_eq!(target.count("SELECT count(*) FROM terms"), 1);
+    }
+}
+
+#[test]
+fn import_reports_only_track_their_own_committed_effect() {
+    let source = Fixture::new("effect-source");
+    source.source();
+    let path = source.export();
+    let target = Fixture::new("effect-target");
+    target.target();
+    let c = crate::open(&target.db).unwrap();
+    c.execute_batch("CREATE TRIGGER synthetic_pending BEFORE UPDATE ON backend_effects BEGIN SELECT RAISE(ABORT,'synthetic delayed effect'); END;").unwrap();
+    let (_, first) =
+        import_run(&target.db, &target.id, &path, &|| Ok(()), &crate::app_imports::Silent, "effect-first", None)
+            .unwrap();
+    assert_eq!(first["committed"], true);
+    assert_eq!(first["pending_effects"], true);
+    let (repeat, second) =
+        import_run(&target.db, &target.id, &path, &|| Ok(()), &crate::app_imports::Silent, "effect-no-op", None)
+            .unwrap();
+    assert!(repeat.action_id.is_none());
+    assert_eq!(second["pending_effects"], false);
+    c.execute_batch("DROP TRIGGER synthetic_pending; UPDATE backend_effects SET status='done'; INSERT INTO backend_effects(kind) VALUES ('verdict');").unwrap();
+    for id in ["effect-first", "effect-no-op"] {
+        let page: serde_json::Value =
+            serde_json::from_str(&reports::page(&target.db, id, 0, 100).unwrap().dump()).unwrap();
+        assert_eq!(page["report"]["pending_effects"], false);
+    }
+    assert!(reports::pending(&c, Some(c.last_insert_rowid())));
 }

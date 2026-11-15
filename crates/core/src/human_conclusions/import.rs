@@ -687,16 +687,26 @@ pub fn apply_in(
             || new.definition.names.iter().any(|n| matches!(n.provenance.as_str(), "user" | "legacy_merge"));
         let keep = human || needed.contains(&new.target_key);
         *report.definitions.entry(if keep { "applied" } else { "unneeded_dependency" }.into()).or_default() += 1;
+        let unsupported =
+            if keep { new.definition.names.iter().filter(|name| !names::restorable(name)).count() } else { 0 };
+        let mut fields = BTreeMap::new();
+        if unsupported > 0 {
+            fields.insert("name_rows_unsupported_dependency".into(), unsupported);
+            *report.definition_fields.entry("name_rows_unsupported_dependency".into()).or_default() += unsupported;
+        }
         report.details.push(Detail {
             kind: "entity".into(),
             record_key: new.source_key.clone(),
             result: if keep { "applied" } else { "unneeded_dependency" }.into(),
             reason: None,
             target_key: keep.then(|| vec![new.target_key.clone()]),
-            field_counts: BTreeMap::new(),
+            field_counts: fields,
         });
         keep
     });
+    for new in &mut new_definitions {
+        new.definition.names.retain(names::restorable);
+    }
     if planned.is_empty() && new_definitions.is_empty() && name_edits.is_empty() && link_edits.is_empty() {
         return Ok(report);
     }

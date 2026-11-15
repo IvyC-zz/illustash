@@ -45,6 +45,12 @@ fn rows(c: &Connection, term: i64, lang: &str, role: &str) -> Result<Vec<Row>> {
     .collect::<rusqlite::Result<_>>()?)
 }
 
+// 显示名的 provider 行与 Danbooru 别名会由后台整批替换，MAX(seq)+1 可以复用旧 seq。
+// 便携描述不拥有这些行；仅恢复用户行及没有自动替换入口的旧合并别名。
+pub(crate) fn restorable(name: &Name) -> bool {
+    name.source == "user" || (name.role == "alias" && name.source != "danbooru")
+}
+
 pub(crate) fn plan(
     c: &Connection,
     key: &str,
@@ -61,6 +67,10 @@ pub(crate) fn plan(
     }
     let mut planned = Vec::new();
     for ((lang, role), names) in groups {
+        if names.iter().any(|name| !restorable(name)) {
+            *counts.entry("name_group_unsupported_dependency".into()).or_default() += 1;
+            continue;
+        }
         let before = rows(c, term, lang, role)?;
         let target: Vec<_> = current
             .into_iter()

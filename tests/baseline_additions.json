@@ -65,7 +65,8 @@
       "name": "human_import_reports",
       "introduced_in": 9,
       "checks": [
-        "native/terms/src/app_human_conclusions/tests.rs::persisted_import_report_has_every_record_after_the_first_page"
+        "native/terms/src/app_human_conclusions/tests.rs::persisted_import_report_has_every_record_after_the_first_page",
+        "native/terms/src/app_human_conclusions/tests.rs::import_reports_only_track_their_own_committed_effect"
       ]
     },
     {

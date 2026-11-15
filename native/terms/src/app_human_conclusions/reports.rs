@@ -13,13 +13,14 @@ pub(super) fn summary(id: &str, snapshot: &Snapshot, report: &Report) -> Value {
 pub(super) fn save(
     c: &Connection,
     id: &str,
+    effect: Option<i64>,
     summary: &Value,
     report: &Report,
     check: &dyn Fn() -> Result<()>,
 ) -> Result<()> {
     c.execute(
-        "INSERT INTO human_import_reports(id,action_id,summary_json) VALUES (?1,?2,?3)",
-        params![id, report.action_id, summary.to_string()],
+        "INSERT INTO human_import_reports(id,action_id,effect_id,summary_json) VALUES (?1,?2,?3,?4)",
+        params![id, report.action_id, effect, summary.to_string()],
     )?;
     let mut insert = c.prepare("INSERT INTO human_import_report_rows(report_id,seq,detail_json) VALUES (?1,?2,?3)")?;
     for (seq, detail) in report.details.iter().enumerate() {
@@ -30,11 +31,14 @@ pub(super) fn save(
 }
 pub(super) fn page(db: &Path, id: &str, offset: usize, limit: usize) -> Result<Json> {
     let c = crate::app_library::read_connection(db)?;
-    let summary: Option<String> =
-        c.query_row("SELECT summary_json FROM human_import_reports WHERE id=?1", [id], |r| r.get(0)).optional()?;
-    let Some(summary) = summary else { return Err(Error::invalid("报告不存在")) };
+    let stored: Option<(String, Option<i64>)> = c
+        .query_row("SELECT summary_json,effect_id FROM human_import_reports WHERE id=?1", [id], |r| {
+            Ok((r.get(0)?, r.get(1)?))
+        })
+        .optional()?;
+    let Some((summary, effect)) = stored else { return Err(Error::invalid("报告不存在")) };
     let mut summary: Value = serde_json::from_str(&summary).map_err(|_| Error::invalid("报告摘要不完整"))?;
-    summary["pending_effects"] = json!(pending(&c));
+    summary["pending_effects"] = json!(pending(&c, effect));
     let rows = c
         .prepare(
             "SELECT detail_json FROM human_import_report_rows WHERE report_id=?1 AND seq>=?2 ORDER BY seq LIMIT ?3",
@@ -47,10 +51,13 @@ pub(super) fn page(db: &Path, id: &str, offset: usize, limit: usize) -> Result<J
         .collect::<Result<Vec<_>>>()?;
     Ok(json!({"report":summary,"offset":offset,"limit":limit,"details":details}).into())
 }
-pub(super) fn pending(c: &Connection) -> bool {
-    c.query_row("SELECT EXISTS(SELECT 1 FROM backend_effects WHERE kind='verdict' AND status='pending')", [], |r| {
-        r.get(0)
-    })
+pub(super) fn pending(c: &Connection, effect: Option<i64>) -> bool {
+    let Some(effect) = effect else { return false };
+    c.query_row(
+        "SELECT EXISTS(SELECT 1 FROM backend_effects WHERE id=?1 AND kind='verdict' AND status='pending')",
+        [effect],
+        |r| r.get(0),
+    )
     .unwrap_or_else(|error| {
         // 导入已经提交；后续状态读取失败不能伪称效果已完成，也不能改报零提交。
         eprintln!("人工导入效果状态暂不可读：{error}");
