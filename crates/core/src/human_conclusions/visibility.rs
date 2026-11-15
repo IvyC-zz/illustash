@@ -73,7 +73,7 @@ pub(crate) fn migrate(c: &Connection) -> Result<()> {
     }
     c.execute_batch(
         "CREATE TRIGGER human_contribution_delete BEFORE DELETE ON human_object_contributions
-         WHEN EXISTS(SELECT 1 FROM actions WHERE id=OLD.owner_action_id AND undone=0)
+         WHEN OLD.kind<>'relation' OR EXISTS(SELECT 1 FROM actions WHERE id=OLD.owner_action_id AND undone=0)
          BEGIN SELECT RAISE(ABORT,'an active import contribution cannot be detached'); END;",
     )?;
     Ok(())
@@ -152,6 +152,7 @@ mod tests {
         )
         .unwrap();
         tx.execute("UPDATE actions SET undone=1 WHERE id=1", []).unwrap();
+        assert!(tx.execute("DELETE FROM human_object_contributions WHERE kind='term'", []).is_err());
         assert!(store::term_by_key(&tx, "imported").unwrap().is_none());
         assert!(store::term_by_key(&tx, "original").unwrap().is_some());
         assert_eq!(tx.query_row("SELECT count(*) FROM term_relations", [], |r| r.get::<_, i64>(0)).unwrap(), 0);

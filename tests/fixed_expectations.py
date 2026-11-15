@@ -478,7 +478,9 @@ def _cell(value, rename):
 
 
 def _select(c, name, columns):
-    moved = name in ('terms', 'term_records') and c.execute(
+    physical = c.execute("SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE type='table' "
+                         "AND name='term_records')").fetchone()[0]
+    moved = name == 'terms' and not physical and c.execute(
         "SELECT EXISTS(SELECT 1 FROM pragma_table_info('term_tree') WHERE name='variant')").fetchone()[0]
     if not moved:
         return 'SELECT * FROM ' + quote(name)
@@ -507,7 +509,8 @@ def _database_state(path, rename):
             if name in RETIRED:
                 continue
             columns = [r[1] for r in c.execute('PRAGMA table_info(' + quote(name) + ')')]
-            keep = [i for i, col in enumerate(columns) if (name, col) not in SKIP_COLUMNS]
+            keep = [i for i, col in enumerate(columns) if (name, col) not in SKIP_COLUMNS
+                    or ('term_records' in names and name == 'term_tree' and col in ATTRIBUTES)]
             rows = []
             for raw in c.execute(_select(c, name, columns)):
                 cells = [_cell(raw[i], rename) for i in keep]
@@ -569,6 +572,8 @@ def _historical_projection(state, frozen):
             assert raw in app and view in app and app[raw] == app[view], (
                 f'物理表 {raw} 与有效视图 {view} 的完整行不一致')
             del projected[raw]
+            if view == 'terms':
+                _historical_attributes(projected)
     for entry in additions['tables']:
         if version >= entry['introduced_in']:
             assert entry['name'] not in old, f"新增状态清单不能隐藏冻结侧已有表 {entry['name']}"
@@ -579,6 +584,32 @@ def _historical_projection(state, frozen):
     if 'meta' in projected:
         projected['meta'] = {**meta, 'rows': [row for row in meta['rows'] if json.loads(row)[0] not in keys]}
     return {**state, 'app': projected}
+
+
+def _historical_attributes(projected):
+    """当前原始属性保留；仅在旧参考投影里按第 8 版既定表达重建。"""
+    tree = projected.get('term_tree')
+    if not tree or 'variant' not in tree['columns']:
+        return
+    attributes = [tree['columns'].index(name) for name in ATTRIBUTES]
+    term_id = tree['columns'].index('term_id')
+    dump = lambda value: json.dumps(value, ensure_ascii=False, separators=(',', ':'))
+    objects = {}
+    for row in tree['rows']:
+        cells = json.loads(row)
+        objects[dump(cells[term_id])] = dump({name: cells[i] for name, i in zip(ATTRIBUTES, attributes)})
+    terms = projected['terms']
+    term_id, attrs = terms['columns'].index('id'), terms['columns'].index('attrs')
+    rows = []
+    for row in terms['rows']:
+        cells = json.loads(row)
+        if dump(cells[term_id]) in objects:
+            cells[attrs] = objects[dump(cells[term_id])]
+        rows.append(dump(cells))
+    projected['terms'] = {**terms, 'rows': sorted(rows)}
+    keep = [i for i in range(len(tree['columns'])) if i not in attributes]
+    projected['term_tree'] = {'columns': [tree['columns'][i] for i in keep],
+                              'rows': sorted(dump([json.loads(row)[i] for i in keep]) for row in tree['rows'])}
 
 
 @lru_cache(maxsize=None)

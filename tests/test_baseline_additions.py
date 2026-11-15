@@ -109,6 +109,29 @@ class HistoricalAdditions(unittest.TestCase):
             _historical_projection(live, old)
         self.assertIn('term_records', baseline_state(self.root)['app'])
 
+    def test_raw_attrs_change_remains_visible_before_historical_projection(self):
+        with sqlite3.connect(self.root / 'library.sqlite') as c:
+            c.executescript("""CREATE TABLE term_records(id INTEGER PRIMARY KEY,key TEXT,attrs TEXT);
+                INSERT INTO term_records VALUES(1,'synthetic','{"raw":"before"}');
+                CREATE VIEW terms AS SELECT * FROM term_records;
+                CREATE TABLE term_tree(term_id INTEGER,variant TEXT,artist TEXT,label_only INTEGER,
+                    mascot INTEGER,mascot_origin TEXT,original INTEGER);
+                INSERT INTO term_tree VALUES(1,'variant','artist',0,0,NULL,1);""")
+        before = baseline_state(self.root)
+        with sqlite3.connect(self.root / 'library.sqlite') as c:
+            c.execute("UPDATE term_records SET attrs=?", ('{"raw":"after"}',))
+        after = baseline_state(self.root)
+        self.assertNotEqual(before['app']['term_records'], after['app']['term_records'])
+        self.assertNotEqual(before['app']['terms'], after['app']['terms'])
+        projected = _historical_projection(after, self.frozen)
+        self.assertEqual(json.loads(projected['app']['terms']['rows'][0])[2],
+                         '{"variant":"variant","artist":"artist","label_only":0,"mascot":0,"mascot_origin":null,"original":1}')
+        self.assertEqual(after['app']['term_tree']['columns'], before['app']['term_tree']['columns'])
+        with sqlite3.connect(self.root / 'library.sqlite') as c:
+            c.executescript("DROP VIEW terms; CREATE VIEW terms AS SELECT id,key,'{}' AS attrs FROM term_records;")
+        with self.assertRaises(AssertionError):
+            _historical_projection(baseline_state(self.root), self.frozen)
+
 
 if __name__ == '__main__':
     unittest.main()

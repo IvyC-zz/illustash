@@ -60,7 +60,13 @@ pub const ATTRIBUTES: [&str; 6] = ["variant", "artist", "label_only", "mascot", 
 
 /// 读取一张表所用的查询（`terms` 表见 `ATTRIBUTES`）。
 fn select(c: &Connection, name: &str, columns: &[String]) -> String {
-    let moved: bool = matches!(name, "terms" | "term_records")
+    let physical: bool = c
+        .query_row("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='term_records')", [], |r| {
+            r.get(0)
+        })
+        .unwrap();
+    let moved: bool = name == "terms"
+        && !physical
         && c.query_row("SELECT EXISTS(SELECT 1 FROM pragma_table_info('term_tree') WHERE name='variant')", [], |r| {
             r.get(0)
         })
@@ -238,6 +244,9 @@ pub fn historical_projection(got: &State, frozen: &State, recorded: i64, current
             (None, None) => (),
             (Some(raw), Some(effective)) if raw == effective => {
                 out.remove(&entry.physical);
+                if entry.view == "terms" {
+                    historical_attributes(&mut out)?;
+                }
             }
             _ => return Err(format!("物理表 {} 与有效视图 {} 的完整行不一致", entry.physical, entry.view)),
         }
@@ -257,6 +266,54 @@ pub fn historical_projection(got: &State, frozen: &State, recorded: i64, current
         }
     }
     Ok(out)
+}
+
+// 第 9 版的当前读数保留原始 attrs 和结构属性。只在旧参考投影里沿用第 8 版的历史表达。
+fn historical_attributes(out: &mut State) -> Result<(), String> {
+    let Some(tree) = out.get("term_tree") else { return Ok(()) };
+    if !tree.columns.iter().any(|c| c == "variant") {
+        return Ok(());
+    }
+    let index =
+        |name: &str| tree.columns.iter().position(|c| c == name).ok_or_else(|| format!("历史属性缺少列 {name}"));
+    let id = index("term_id")?;
+    let attributes = ATTRIBUTES.iter().map(|name| index(name)).collect::<Result<Vec<_>, _>>()?;
+    let mut objects = BTreeMap::new();
+    for row in tree.rows.keys() {
+        let cells: Vec<Value> = serde_json::from_str(row).unwrap();
+        let object = format!(
+            "{{{}}}",
+            ATTRIBUTES
+                .iter()
+                .zip(&attributes)
+                .map(|(name, &i)| format!("{}:{}", json!(name), cells[i]))
+                .collect::<Vec<_>>()
+                .join(",")
+        );
+        objects.insert(cells[id].to_string(), object);
+    }
+    let terms = out.get_mut("terms").ok_or("历史属性缺少 terms")?;
+    let id = terms.columns.iter().position(|c| c == "id").ok_or("历史属性缺少词条 ID")?;
+    let attrs = terms.columns.iter().position(|c| c == "attrs").ok_or("历史属性缺少词条 attrs")?;
+    let mut rewritten = BTreeMap::new();
+    for (row, count) in &terms.rows {
+        let mut cells: Vec<Value> = serde_json::from_str(row).unwrap();
+        if let Some(object) = objects.get(&cells[id].to_string()) {
+            cells[attrs] = json!(object);
+        }
+        *rewritten.entry(json!(cells).to_string()).or_default() += count;
+    }
+    terms.rows = rewritten;
+    let tree = out.get_mut("term_tree").expect("上面已读取结构");
+    let keep: Vec<_> = (0..tree.columns.len()).filter(|i| !attributes.contains(i)).collect();
+    tree.columns = keep.iter().map(|&i| tree.columns[i].clone()).collect();
+    let mut rewritten = BTreeMap::new();
+    for (row, count) in &tree.rows {
+        let cells: Vec<Value> = serde_json::from_str(row).unwrap();
+        *rewritten.entry(json!(keep.iter().map(|&i| &cells[i]).collect::<Vec<_>>()).to_string()).or_default() += count;
+    }
+    tree.rows = rewritten;
+    Ok(())
 }
 
 fn hex(bytes: &[u8]) -> String {
@@ -291,6 +348,7 @@ pub fn state(c: &Connection, masks: &Masks) -> State {
         .ok();
     let mut out = State::new();
     let mut names = tables(c);
+    let raw = names.iter().any(|name| name == "term_records");
     for entry in &ADDITIONS.physical_views {
         if names.contains(&entry.physical)
             && c.query_row(
@@ -311,8 +369,12 @@ pub fn state(c: &Connection, masks: &Masks) -> State {
             let mut s = c.prepare(&format!("PRAGMA table_info(\"{name}\")")).unwrap();
             s.query_map([], |r| r.get::<_, String>(1)).unwrap().map(Result::unwrap).collect()
         };
-        let keep: Vec<usize> =
-            (0..all.len()).filter(|&i| !SKIP_COLUMNS.contains(&(name.as_str(), all[i].as_str()))).collect();
+        let keep: Vec<usize> = (0..all.len())
+            .filter(|&i| {
+                !SKIP_COLUMNS.contains(&(name.as_str(), all[i].as_str()))
+                    || (raw && name == "term_tree" && ATTRIBUTES.contains(&all[i].as_str()))
+            })
+            .collect();
         let mut table = Table { columns: keep.iter().map(|&i| all[i].clone()).collect(), rows: BTreeMap::new() };
         let mut s = c.prepare(&select(c, &name, &all)).unwrap();
         let mut q = s.query([]).unwrap();
@@ -719,5 +781,33 @@ mod historical_projection_tests {
         frozen.insert("term_records".into(), live["term_records"].clone());
         assert!(historical_projection(&live, &frozen, 7, 9).is_err());
         assert!(live.contains_key("term_records"));
+    }
+
+    #[test]
+    fn raw_attrs_are_visible_and_only_historical_projection_reconstructs_them() {
+        let c = Connection::open_in_memory().unwrap();
+        c.execute_batch(
+            "CREATE TABLE meta(key TEXT,value TEXT); INSERT INTO meta VALUES('terms_schema','9');
+            CREATE TABLE term_records(id INTEGER PRIMARY KEY,key TEXT,attrs TEXT);
+            INSERT INTO term_records VALUES(1,'synthetic','{\"raw\":\"before\"}');
+            CREATE VIEW terms AS SELECT * FROM term_records;
+            CREATE TABLE term_tree(term_id INTEGER,variant TEXT,artist TEXT,label_only INTEGER,
+                mascot INTEGER,mascot_origin TEXT,original INTEGER);
+            INSERT INTO term_tree VALUES(1,'variant','artist',0,0,NULL,1);",
+        )
+        .unwrap();
+        let masks = Masks { roots: &str::to_owned, version: 9 };
+        let before = state(&c, &masks);
+        c.execute("UPDATE term_records SET attrs=?1", ["{\"raw\":\"after\"}"]).unwrap();
+        let after = state(&c, &masks);
+        assert_ne!(before["term_records"], after["term_records"]);
+        assert_ne!(before["terms"], after["terms"]);
+        let projected = historical_projection(&after, &State::new(), 7, 9).unwrap();
+        let row: Vec<Value> = serde_json::from_str(projected["terms"].rows.keys().next().unwrap()).unwrap();
+        assert_eq!(row[2], json!("{\"variant\":\"variant\",\"artist\":\"artist\",\"label_only\":0,\"mascot\":0,\"mascot_origin\":null,\"original\":1}"));
+        assert_eq!(before["term_tree"], after["term_tree"]);
+        c.execute_batch("DROP VIEW terms; CREATE VIEW terms AS SELECT id,key,'{}' AS attrs FROM term_records;")
+            .unwrap();
+        assert!(historical_projection(&state(&c, &masks), &State::new(), 7, 9).is_err());
     }
 }
