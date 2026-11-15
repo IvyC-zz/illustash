@@ -1,4 +1,5 @@
 """独立的旧版本地验证契约；所有图片和数据库都是合成的。"""
+from contextlib import closing
 import json
 import copy
 import shutil
@@ -89,7 +90,7 @@ class NativeProvenanceMatchTest(unittest.TestCase):
         # 正式缓存自带交付/元数据表（app_provenance_cache::connect）。将它们作为
         # 相同的输入，并保留哨兵行；本地匹配不能改写这些与本次任务无关的状态。
         for folder in (reference.path, Path(request['cache'])):
-            with sqlite3.connect(folder/'provenance.sqlite') as cache:
+            with closing(sqlite3.connect(folder/'provenance.sqlite')) as cache, cache:
                 cache.executescript("""
                     CREATE TABLE native_delivery(task_id TEXT PRIMARY KEY,package TEXT NOT NULL,
                         status TEXT NOT NULL DEFAULT 'pending',error TEXT NOT NULL DEFAULT '');

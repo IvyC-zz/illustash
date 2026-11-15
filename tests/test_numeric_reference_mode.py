@@ -1,4 +1,5 @@
 """独立参考自身的边界：授权范围、失败行为和非浮点业务契约。"""
+from contextlib import closing
 import os
 import io
 import json
@@ -178,7 +179,7 @@ class NumericReferenceContractTest(unittest.TestCase):
                 db.execute("INSERT INTO ref_sigs(site,post_id,ratio,grid) VALUES ('example','1',1,X'00')")
             before = checks.cache_state(root)
             started = checks.utc_second()
-            with sqlite3.connect(root / 'provenance.sqlite') as db:
+            with closing(sqlite3.connect(root / 'provenance.sqlite')) as db, db:
                 db.execute("INSERT INTO image_sources(asset,site,post_id,url,method) VALUES ('a','example','1','','gallery_match')")
                 db.execute("INSERT INTO lookups(target,backend,last_at) VALUES ('a','ref_compare',datetime('now'))")
             finished = checks.utc_second()
@@ -191,7 +192,7 @@ class NumericReferenceContractTest(unittest.TestCase):
                 "DELETE FROM ref_sigs",
                 "UPDATE artists SET merged_into='A'",
             ):
-                with sqlite3.connect(root / 'provenance.sqlite') as db:
+                with closing(sqlite3.connect(root / 'provenance.sqlite')) as db, db:
                     db.execute('BEGIN')
                     db.execute(statement)
                     # 未提交的值在同一连接导出，再放进隔离副本，避免污染下一子例。
@@ -199,7 +200,7 @@ class NumericReferenceContractTest(unittest.TestCase):
                     db.rollback()
                 changed = root / 'changed'; changed.mkdir(exist_ok=True)
                 (changed / 'provenance.sqlite').unlink(missing_ok=True)
-                with sqlite3.connect(changed / 'provenance.sqlite') as db:
+                with closing(sqlite3.connect(changed / 'provenance.sqlite')) as db, db:
                     db.executescript(sql)
                     db.execute('PRAGMA user_version=5')
                 state = checks.cache_state(changed)
@@ -207,7 +208,7 @@ class NumericReferenceContractTest(unittest.TestCase):
                 if 'ref_sigs' in statement or 'artists' in statement:
                     with self.assertRaises(AssertionError):
                         checks.assert_cache_preserved(self, before, state, started, finished)
-            with sqlite3.connect(root / 'provenance.sqlite') as db:
+            with closing(sqlite3.connect(root / 'provenance.sqlite')) as db, db:
                 db.execute("UPDATE image_sources SET fetched_at='1999-01-01 00:00:00'")
             with self.assertRaises(AssertionError):
                 checks.assert_cache_preserved(self, before, checks.cache_state(root), started, finished)
