@@ -428,7 +428,7 @@ export function renderAccountsCard() {
   const a = state.accounts;
   if (!a) { card.innerHTML = `<h2>${t('账号')}</h2><p class="muted-note">${t('正在读取…')}</p>`; return; }
   const p = a.pixiv, x = a.x, s = a.saucenao;
-  card.innerHTML = `${cardHead(t('账号'), t('找回画师从你的关注出发：拉他们公开作品的小图，在本机逐张比对。只读，不点赞、不关注、不发任何内容。'))}
+  card.innerHTML = `${cardHead(t('账号'), t('找回画师会读你的关注列表，把关注的人记为候选画师；在详情面板点「找 TA 的其他图」时，才拉这位画师公开作品的小图，在本机逐张比对。只读，不点赞、不关注、不发任何内容。'))}
     <h3 class="acct-h">Pixiv${scope('shared')}</h3>
     ${pixivAccount(a)}
     <h3 class="acct-h">X${scope('library')}</h3>
@@ -448,7 +448,7 @@ function pixivAccount(a) {
   const pasteHint = devMode ? `<p class="muted-note">${t('网页版（开发用）：在浏览器里登录 pixiv.net，打开开发者工具（{keys}）→ Application（Safari 为「存储空间」）→ Cookie → pixiv.net，复制 {cookie} 的值粘贴到这里。', {keys: isMac ? '⌥⌘I' : 'Ctrl+Shift+I', cookie: '<code>PHPSESSID</code>'})}</p>` : `<p class="muted-note">${t('请从 Illustash 桌面 app 打开设置，在它的 Pixiv 窗口里登录。')}</p>`;
   const login = label => state.pixivWaiting ? `<span class="muted-note">${t('正在等你在 Pixiv 窗口里登录…')}</span>` : `<button class="quiet" data-acct-login>${label}</button>`;
   if (!p.bound) {
-    return desk ? `<p class="muted-note">${t('打开 Pixiv 官方登录页，由你亲手登录（出现人机验证请自己完成）；登录状态只留在 app 的 Pixiv 窗口里。登录后才能看到 R18 作品。Pixiv 没有给第三方开放接口，这里用的是网页自己的接口，低频只读。')}</p>
+    return desk ? `<p class="muted-note">${t('打开 Pixiv 官方登录页，由你亲手登录（出现人机验证请自己完成）；登录状态只留在 app 的 Pixiv 窗口里。登录后才能看到 R18 作品。Pixiv 没有给第三方开放接口，这里用的是网页自己的接口，低频只读。Illustash 不是 pixiv 开发或分发的应用。')}</p>
       <div class="setting-line"><span>${t('尚未登录')}</span><span>${login(t('登录 Pixiv…'))}</span></div>` : pasteHint + (devMode ? paste(t('绑定')) : '');
   }
   const line = `<div class="setting-line"><span>${p.expired ? `<span class="acct-expired">${t('登录已过期')}</span>` : t('已绑定')}<small class="line-hint">${esc(p.name || '')}${p.user_id ? ` · ID ${esc(p.user_id)}` : ''}${p.following != null && !p.expired ? ' · ' + t('关注 {n} 位', {n: number(p.following)}) : ''}${p.checked_at ? ' · ' + t('检查于 {time}', {time: esc(p.checked_at)}) : ''}</small></span><span>${desk && !p.expired ? login(inApp ? t('打开 Pixiv 窗口') : t('改用窗口登录…')) : ''}<button class="quiet" data-acct-check="pixiv">${t('重新检查')}</button><button class="quiet" data-acct-unbind="pixiv">${t('解绑')}</button></span></div>`;
@@ -479,7 +479,7 @@ export function renderProvenanceCard() {
     <div class="setting-line set-status"><span><span class="local-dot${busy ? ' busy' : s.status === 'failed' ? ' warn' : ''}"></span>${busy ? t('正在查找…') : s.status === 'failed' && s.reason ? t('上次出错：{reason}', {reason: esc(tb(s.reason))}) : p.runs?.[0] ? t('上次 {time} · 新找到 {n}', {time: esc(localTime(p.runs[0].started_at)), n: number(p.runs[0].found || 0)}) : t('还没有查过')}</span>${busy ? `<button class="quiet small" data-open-tasks>${t('在任务面板查看')}</button>` : `<button class="quiet small" data-open-tasks="provenance">${t('查找画师…')}</button>`}</div>
     <label class="switch-line"><span><b>${t('同步后自动查新图')}${scope('library')}</b><small>${p.auto_network ? t('新加入的图做签名识别、查像素哈希、比对新找到的画师；每次最多 {mb} MB', {mb: number(p.budgets?.new || 50)}) : t('新加入的图只在本机做签名识别；要联网查，在任务面板里每次授权')}${p.frozen ? ' · ' + t('测试图库不同步，这个开关不起作用') : ''}</small></span><input type="checkbox" class="switch" id="provAuto" ${p.auto ? 'checked' : ''}></label>
     ${cov ? `<a class="setting-line set-link" href="#/artist-audit"><span>${t('画师抽查')}<small class="line-hint">${t('随机抽 50 张，逐张判断找到的画师对不对')}</small></span><span>›</span></a>` : ''}
-    ${state.accounts && !state.accounts.pixiv?.bound ? `<p class="settings-note net-foot">${t('登录 Pixiv 后才能比对 R18 作品、查 Pixiv 上的相关画师（见下方「账号」）。')}</p>` : ''}`;
+    ${state.accounts && !state.accounts.pixiv?.bound ? `<p class="settings-note net-foot">${t('登录 Pixiv 后才能比对 R18 作品（见下方「账号」）。')}</p>` : ''}`;
   // 运行期间会轮询：只在有变化时重画，这样点击绝不会因为按钮被替换而丢失。
   if (provenanceDrawn.get(card) === html) return;
   provenanceDrawn.set(card, html); card.innerHTML = html;
