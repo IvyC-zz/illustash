@@ -57,11 +57,15 @@
 
  "crates/core/src/error.rs":"fad3f2e435a56a1fd6273f61b50d2b997587e681adc408cc31fd6d3923b23ef8",
 
- "crates/core/src/human_conclusions/format.rs":"b216d19568c1e7774c014c10f950d59140335e5e65c676a0db176ce7391665b8",
+ "crates/core/src/human_conclusions/export.rs":"9fa2c09e42d1e38efd20a18baab6353d57258f09d0707cf15a639cc2a71ad7a2",
+
+ "crates/core/src/human_conclusions/format.rs":"f115520564ce8123d92e231b5051663c5132d65fc0b8f1f9e54245d87ecedb97",
+
+ "crates/core/src/human_conclusions/format_graph.rs":"282d292d115972bfda8b50381bd3578bf3bf49ab84e996cbc8011399051e9104",
 
  "crates/core/src/human_conclusions/matching.rs":"9db7d3a36cb22b2ba3581362a2552f7c258c224e2d64421cd9c6492fa592de51",
 
- "crates/core/src/human_conclusions/mod.rs":"9ab238e9886a8a266b6eff47042e301be8fd06ac5d4ecbf1d85bfa9e6a64e8ed",
+ "crates/core/src/human_conclusions/mod.rs":"2a03aba826184ec917d69b902fe4dc0080907a5b6b4fc8d1a407725b87521e67",
 
  "crates/core/src/human_conclusions/state.rs":"433c6a4b4b4cd476dfb8d030697c4664b5535e16bab3e176019a35a0be154f0b",
 
