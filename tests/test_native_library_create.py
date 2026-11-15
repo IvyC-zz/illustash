@@ -22,6 +22,7 @@ from unittest.mock import patch
 
 from tests.fixed_expectations import Expectations
 from tests.synthetic_source import synthetic_reference
+from tools.wait_limit import WAIT
 
 # 原工厂的出处，即随产品提供的预设选项。
 PRESETS = ('x', 'pixiv', 'other')
@@ -76,7 +77,7 @@ class NativeLibraryCreateTest(unittest.TestCase):
             args += ['--name', name]
         if preset is not None:
             args += ['--preset', preset]
-        return subprocess.run(args, env=self.env, capture_output=True, timeout=20)
+        return subprocess.run(args, env=self.env, capture_output=True, timeout=WAIT)
 
     def timestamp(self, value, *, utc=False, iso=False):
         self.assertIsInstance(value, str)

@@ -12,6 +12,7 @@ from pathlib import Path
 
 from tests import native_commands as core
 from tests.fixed_expectations import upgrade_recorded
+from tools.wait_limit import WAIT
 
 
 class Channel:
@@ -29,7 +30,7 @@ class Channel:
         self.reader = threading.Thread(target=read, daemon=True)
         self.reader.start()
 
-    def request(self, command, timeout=10):
+    def request(self, command, timeout=WAIT):
         with self.lock:
             self.process.stdin.write(json.dumps({'db':self.db,'input':command},ensure_ascii=False)+'\n')
             self.process.stdin.flush()
@@ -48,8 +49,8 @@ class Channel:
     def close(self):
         if self.process.poll() is None:
             self.process.kill()
-        self.process.wait(5)
-        self.reader.join(5)
+        self.process.wait(WAIT)
+        self.reader.join(WAIT)
         for stream in (self.process.stdin,self.process.stdout):
             stream.close()
 
@@ -138,7 +139,7 @@ class Service(unittest.TestCase):
                 errors.append(e)
         thread = threading.Thread(target=write,daemon=True)
         thread.start()
-        deadline = time.monotonic()+5
+        deadline = time.monotonic()+WAIT
         locked = False
         with sqlite3.connect(self.db,timeout=.01) as probe:
             while time.monotonic()<deadline:
@@ -150,7 +151,7 @@ class Service(unittest.TestCase):
                 time.sleep(.01)
         self.assertTrue(locked)
         self.channel.process.kill()
-        thread.join(5)
+        thread.join(WAIT)
         self.assertFalse(thread.is_alive())
         self.assertEqual(len(errors),1)
         self.assertEqual(self.dump(),before)
@@ -177,7 +178,7 @@ class Service(unittest.TestCase):
         threads = [threading.Thread(target=write,args=(u,)) for u in 'abc']
         for thread in threads:thread.start()
         for thread in threads:
-            thread.join(10);self.assertFalse(thread.is_alive())
+            thread.join(WAIT);self.assertFalse(thread.is_alive())
         self.assertEqual(errors,[])
         with sqlite3.connect(self.db) as c:
             rows = c.execute('SELECT id FROM actions WHERE undone=0 ORDER BY id DESC').fetchall()
@@ -189,9 +190,9 @@ class Service(unittest.TestCase):
     def test_cli_and_service_refuse_duplicate_json_keys(self):
         before = self.dump()
         payload = '{"db":'+json.dumps(str(self.db))+',"input":{"op":"change","op":"sweep"}}\n'
-        result = subprocess.run([str(self.binary),'serve'],input=payload,capture_output=True,text=True,timeout=5)
+        result = subprocess.run([str(self.binary),'serve'],input=payload,capture_output=True,text=True,timeout=WAIT)
         self.assertEqual(json.loads(result.stdout.splitlines()[0])['code'],2)
         result = subprocess.run([str(self.binary),'character-command','--db',str(self.db)],
-                                input='{"op":"change","op":"sweep"}',capture_output=True,text=True,timeout=5)
+                                input='{"op":"change","op":"sweep"}',capture_output=True,text=True,timeout=WAIT)
         self.assertEqual(result.returncode,2)
         self.assertEqual(self.dump(),before)

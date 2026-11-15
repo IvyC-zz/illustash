@@ -123,13 +123,13 @@
 
  "crates/platform/src/app_dpapi.rs":"63475ddec888d457c93f9cf835012c20187d116ea755e4b18a338094eccb844f",
 
- "crates/platform/src/app_file_lock.rs":"de0cb41af0128813177c8b1ce7343e57cd65b63db428b7cf4b5fa9572833082d",
+ "crates/platform/src/app_file_lock.rs":"0ce009ea270fab7dd74080e2a465ed0350615543c517c2cd197a4a831fab0769",
 
  "crates/platform/src/app_paths.rs":"e2d17eee0d0d2da0c8bb348a84c4fc7c1b0d7703a76768ac099f51fa3aad8c3d",
 
  "crates/platform/src/capabilities.rs":"d060ba562d2f39f302201655f000b17dcf8e3d52b9cdcf047ebaa123b23a4618",
 
- "crates/platform/src/lib.rs":"c0ff6e9eb3100d8beed853e63018177b10b97d28e6605b044a1d39f2fafc75ce",
+ "crates/platform/src/lib.rs":"f92c2b771d423e7f5299b6eda01a92861b890fbe01eaa0aa11e31acf0bfce74a",
 
  "crates/platform/src/picker.rs":"651a79d7df02622875c9d51cc3f074c6dcb70b81d92b306b1b70fc1c86449b25",
 
@@ -145,7 +145,7 @@
 
  "crates/platform/src/platform_photos.rs":"4765dd1127cc8940567f719e3f8761e51e0711488179843d39a6383f657123d7",
 
- "crates/platform/src/platform_process.rs":"c0c28b2d85ce8696e93bde94d2cffc5721e66ce5ed6795f8c735fcaf3cef112d",
+ "crates/platform/src/platform_process.rs":"841419607ad021b11aff58be3bb279f1cfeba5d5709263f88b9654d4a355b340",
 
  "crates/platform/src/platform_process/windows_desktop.rs":"fb60ef14077bad0456d6c9e7bcad2c85857197ed41db11a800bd17dd6ec089fe",
 
@@ -162,6 +162,8 @@
  "crates/platform/src/source_rows.rs":"bda7ca3f5e0e988a4563882b4f9095f4dd5b009ec570538fc3362b25c8b60d1d",
 
  "crates/platform/src/sqlite.rs":"c77ae1e6babb5af9b0c922280a307a4704d831af3bc661f8f89e28e9e229dca2",
+
+ "crates/platform/src/test_wait.rs":"8167029670f6603fc5ea7e65110a335a681e8e2bc16b81a8a67138e615bfb6ed",
 
  "crates/relation-fft/build.rs":"c5423bb2b05b5a93e37f4291ebf2e518065b8199b384ef762c6f819cc87cd2d1",
 
@@ -215,11 +217,11 @@
 
  "native/terms/src/app_effects.rs":"507ff09441aab09cc8f2ca7460bbde3da5bffb8180629b3bb6f503598dbbe1b8",
 
- "native/terms/src/app_files.rs":"335bea41714ba27ae9e1b5e8b5190f2e967f9c0aca8bfc670c05d06d954f8299",
+ "native/terms/src/app_files.rs":"3ede70dfff285c721290075d0abb5dfa9cafbfa7d8af3ed01f897ea6b07c3d61",
 
  "native/terms/src/app_folder.rs":"cd148b0a312065b97da3cbea8dc782a596eb0d8e842a1dfcf2d45f259fea6216",
 
- "native/terms/src/app_http.rs":"688a7f800f3bc748f52e8a60840ad650edb005b16d1917cbd37710345e33d391",
+ "native/terms/src/app_http.rs":"1f3446f0fbaaee14a6f9bf178466746ccf1c6fa085f64c4f8511dc6825771e3f",
 
  "native/terms/src/app_human_conclusions.rs":"37bd5770a1bce2e3686a3a478b0925ddcfa11eaa81bf1f85023c57ed6cc8126b",
 
@@ -235,9 +237,9 @@
 
  "native/terms/src/app_identity.rs":"715d41ff00ae564d109fd8c6dde75f3e89e447360832bb2ab16c960bc473da38",
 
- "native/terms/src/app_imports.rs":"35afd48676024f8d00f2df017c576d4495b0442c3d73b720e3c2ed71e485bc04",
+ "native/terms/src/app_imports.rs":"994effa0bb18cd935887414031d60f7146ddb4836874a312677563070a730451",
 
- "native/terms/src/app_index.rs":"ea0f3ed87769a80eebc56329f40e5171c1c5ddd9b59c052de7f91bbc2496e62a",
+ "native/terms/src/app_index.rs":"8f612b29b90f8c3aae3700ed50eeb2bda58c27b998e9a6425ad4a373b50c3881",
 
  "native/terms/src/app_integrity.rs":"7281f9384bf6a9f390e88b25d6ff509ec3194fa1677c7d5bdddc996581152a19",
 
@@ -271,11 +273,11 @@
 
  "native/terms/src/app_models.rs":"9bd2a3eae8e0022dc234f13d87d198803fd1250f133e9c8ff9ed11ef7cb33648",
 
- "native/terms/src/app_name_sources.rs":"effedaf83af896ecd880784490e4b1483fe05c28c3098a098c2ae80c68a2f458",
+ "native/terms/src/app_name_sources.rs":"a9d895621405e92c2bdacd7f547f28feec7f294f307d628ea25d5e2bf27f9515",
 
  "native/terms/src/app_names.rs":"f1e9ee13d2fc826d1c0071b5de7e4a38700efe9445001d472d70b07c3d60795f",
 
- "native/terms/src/app_onboarding.rs":"5588053c4b2ad00654ec76c55ab6e9fd968c33a7979ae9f39f9ae03a09ba78a2",
+ "native/terms/src/app_onboarding.rs":"5e0d950d43ad03ffeb44e19a9090795c479a9e4a6199fcbafe93e107fe9a62a9",
 
  "native/terms/src/app_photos.rs":"df3a434e0b64f63e395ca93703be19d90b83faefe6901537fdd628d51ddc0326",
 
@@ -301,7 +303,7 @@
 
  "native/terms/src/app_resources.rs":"d691ec21499b906972a02d49a21790f2a301c34eb4dea0bd9c301675dd9e2c0a",
 
- "native/terms/src/app_service.rs":"26c9b8b0df97158fe0be95bb7ece5f9f0017e772897fb73a8094b6b4b33e1038",
+ "native/terms/src/app_service.rs":"9235a0d1605f49e5e8e3e2373af308fd6b8ec164fa2834cb82b208e6227aa3e4",
 
  "native/terms/src/app_settings.rs":"20f5eb9c25a3a14920b85b48e75186564c5e01f6129cca02b06b2f63d60b2c41",
 
@@ -311,9 +313,9 @@
 
  "native/terms/src/app_sources.rs":"8ee039dc596b1253783ab4256fd7befa1ce4087eee3f93b69208e7ede676c819",
 
- "native/terms/src/app_sync.rs":"cf71e04b368cb452a0e194289293bb3e5c097d22670f454f3e81156dbcd35537",
+ "native/terms/src/app_sync.rs":"6d9a92764b5884d26bcafabe2d504a520a5fca981e9128858c361d4e4beb79d0",
 
- "native/terms/src/app_tasks.rs":"17ee084a8d913ecc41d473dfde91dad11b6bd960b0d0b385927a0b3fa0f2937d",
+ "native/terms/src/app_tasks.rs":"3a2653f069763b5c2d5f50580679a064e21b1f048a530a886829d483871ba400",
 
  "native/terms/src/app_updates.rs":"e7b51e4afd108af07dbf92e76d44251709635984f8387d3e702922190b9834ba",
 
@@ -329,7 +331,7 @@
 
  "native/terms/src/diagnostics.rs":"0791b6496bfa790dbc11635b57fc79e1ce1cec8f6fd6ad4db9c119b8a05b8f34",
 
- "native/terms/src/diagnostics/logs.rs":"f34d598ed4a28d49c21a4e48aaeb10be3cf9424dd7ce741fd99f7fff430e160e",
+ "native/terms/src/diagnostics/logs.rs":"da41a06cc4dbc6135a9b6dece7769373250dbb9d585c2087dd166b1c4115e14e",
 
  "native/terms/src/diagnostics/logs/details.rs":"49daaeae10eaaf1275776734b97432d01d14b14855d0cfdcc2ed87a1b97b07d9",
 
@@ -371,9 +373,9 @@
 
  "native/terms/src/index_generation.rs":"940c236d35bee6001cc2225701d64d0be2964a2575a653a897449650535ad2fa",
 
- "native/terms/src/lib.rs":"dfe0c2a43ac0802dc650d9192915af85577e65d0bbffc22dc18228034d414d41",
+ "native/terms/src/lib.rs":"94efb421a9089c526b94c7e9716360b8a6c17ec50fcdb2c904fc523b6378a438",
 
- "native/terms/src/platform_process.rs":"11d73a02dc4f9baa3779aaef132012ef36908e510747326c6704374681f606a3",
+ "native/terms/src/platform_process.rs":"62046a3cf19fa77c1f3105770d4937a6cd780b24e9219a84106c4014aaf1f500",
 
  "native/terms/src/read_harness.rs":"720ce39b82f47a7f7a874e74dff61c2e9a741153acf7b908b4188c57fe67f48f",
 

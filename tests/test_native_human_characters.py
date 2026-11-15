@@ -11,6 +11,7 @@ from tests import test_native_human_identity as identity
 from tests.test_native_human_labels import states
 from tools.verify_read_http import cookie, fetch
 from tests.fixed_expectations import unclocked
+from tools.wait_limit import WAIT
 
 
 class NativeHumanCharactersTest(unittest.TestCase):
@@ -186,7 +187,7 @@ class NativeHumanCharactersTest(unittest.TestCase):
             token = self.token
             before_old, before_new = states(self.right), states(newer)
             encoded = json.dumps(body).encode()
-            conn = http.client.HTTPConnection('127.0.0.1', self.port, timeout=5)
+            conn = http.client.HTTPConnection('127.0.0.1', self.port, timeout=WAIT)
             conn.putrequest('POST', url, skip_host=True)
             for key, value in {'Host': self.origin.split('://')[1], 'Origin': self.origin, 'Cookie': cookie(self.origin),
                                'Content-Type': 'application/json', 'X-CSRF-Token': token,

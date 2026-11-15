@@ -8,6 +8,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from tools.wait_limit import WAIT
 
 from tools import quarantine
 
@@ -66,7 +67,7 @@ class FixedSuiteRunnerTest(unittest.TestCase):
                    '-c', LAUNCH, str(self.root), '-v', '-b', *args]
         environment = {key: value for key, value in os.environ.items() if key != 'GITHUB_STEP_SUMMARY'}
         environment['ILLUSTASH_QUARANTINE_TODAY'] = '2026-11-20'
-        return subprocess.run(command, cwd=self.root, capture_output=True, text=True, encoding='utf-8', timeout=120,
+        return subprocess.run(command, cwd=self.root, capture_output=True, text=True, encoding='utf-8', timeout=WAIT * 2,
                               env=environment)
 
     def test_parallel_summary_matches_serial_counts_and_keeps_skip_lines(self):

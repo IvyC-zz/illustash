@@ -14,6 +14,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from tests import test_native_lifecycle as lifecycle
 from tests.fixed_expectations import unclocked
 from tests.test_native_human_labels import snapshot
+from tools.wait_limit import WAIT
 
 WORKER = r'''#!/usr/bin/env PYTHON
 import json, sqlite3, sys, time
@@ -76,7 +77,7 @@ class NativeIndexTest(unittest.TestCase):
                     data=json.dumps({'related_tags':rows}).encode()
                 elif self.path.startswith('/posts'):
                     if 'dani_' in self.path and parent.hold_posts:
-                        parent.posts_entered.set();parent.release_posts.wait(10)
+                        parent.posts_entered.set();parent.release_posts.wait(WAIT)
                     data=json.dumps(parent.posts).encode()
                 else:
                     from PIL import Image
@@ -258,12 +259,13 @@ class NativeIndexTest(unittest.TestCase):
         self.assertEqual(self.request('/api/sync',{})['status'],400)
         other = self.package('other');other.config['id']=self.lib.config['id'];(other.path/'library.json').write_text(json.dumps(other.config))
         before=snapshot(other.source)
-        start=time.monotonic();r=self.request('/api/libraries/open',{'path':str(other.path)});self.assertEqual(r['status'],200,r['body']);self.assertLess(time.monotonic()-start,3)
+        # worker 睡 60 秒：切换和退出只要远短于它，就说明没有等 worker（#508：对照阻塞时长，不是性能预算）。
+        start=time.monotonic();r=self.request('/api/libraries/open',{'path':str(other.path)});self.assertEqual(r['status'],200,r['body']);self.assertLess(time.monotonic()-start,30)
         self.token=json.loads(self.request('/api/bootstrap')['body'])['token']
         self.assertEqual(self.index()['state']['status'],'idle')
         self.assertEqual(snapshot(other.source),before)
         self.assertEqual(self.request('/api/libraries/open',{'path':str(self.lib.path)})['status'],200)
-        time.sleep(.1);start=time.monotonic();self.stop(self.process);self.assertLess(time.monotonic()-start,3)
+        time.sleep(.1);start=time.monotonic();self.stop(self.process);self.assertLess(time.monotonic()-start,30)
 
     def test_no_changes_startup_due_and_v1_watch_resolution(self):
         self.remote_rows=[]
@@ -353,7 +355,7 @@ class NativeIndexTest(unittest.TestCase):
             with sqlite3.connect(self.lib.db) as c:
                 return c.execute("SELECT count(*) FROM backend_effects WHERE kind='index_changed' AND status='pending'").fetchone()[0]==0 and c.execute("SELECT count(*) FROM research_runs WHERE status='done'").fetchone()[0]>0
         from tests.test_read_http import wait_until
-        wait_until(complete,timeout=20)
+        wait_until(complete)
         request=json.loads(receipt.read_text());self.assertTrue(request['regroup'])
         self.assertIn('carol_example',(Path(request['anchors'])/'char-anchors.txt').read_text())
         after=snapshot(self.lib.db)
@@ -406,7 +408,7 @@ class NativeIndexTest(unittest.TestCase):
         self.posts=[{'id':i,'tag_string_general':'solo','media_asset':{'variants':[{'type':'720x720','url':f'http://127.0.0.1:{port}/image/{i}'}]}} for i in range(3)]
         self.check();self.hold_posts=True
         self.index({'action':'apply','tags':['carol_example','dani_example'],'allow_network':True})
-        self.assertTrue(self.posts_entered.wait(10))
+        self.assertTrue(self.posts_entered.wait(WAIT))
         job=json.loads((self.lib.path/'index-job.json').read_text());folder=Path(job['folder'])
         self.assertTrue((folder/'char-patch/carol_example-refs.json').is_file())
         self.process.kill();self.process.wait();self.release_posts.set();self.hold_posts=False

@@ -25,6 +25,7 @@ import time
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from tools.verify_read_http import enter, fetch  # noqa: E402
+from tools.wait_limit import WAIT  # noqa: E402
 
 PYTHON_NAMES = {'python.exe', 'python3.exe', 'pythonw.exe', 'py.exe', 'pyw.exe'}
 MONITOR = r'''
@@ -119,7 +120,7 @@ class Acceptance:
             except OSError:
                 return False
 
-    def wait(self, predicate, timeout=10):
+    def wait(self, predicate, timeout=WAIT):
         until = time.time() + timeout
         while time.time() < until:
             try:
@@ -142,7 +143,7 @@ class Acceptance:
         self.roots.append(p.pid)
         origin = f'http://127.0.0.1:{port}'
         try:
-            enter(origin, self.work / f'host-{port}.log', p, timeout=15)
+            enter(origin, self.work / f'host-{port}.log', p)
             up = True
         except AssertionError:
             up = False
@@ -164,9 +165,9 @@ class Acceptance:
         else:
             p.stdin.close()
         try:
-            return p.wait(15)
+            return p.wait(WAIT)
         except subprocess.TimeoutExpired:
-            p.kill(); p.wait(5); return 'killed'
+            p.kill(); p.wait(WAIT); return 'killed'
 
     # ---------- 合成数据 ----------
     def synthetic(self):
@@ -195,7 +196,7 @@ class Acceptance:
     def create(self, name, pics, reference):
         dest = self.work / f'{name}.pilib'
         r = subprocess.run([str(self.binary), 'library-create', '--dest', str(dest), '--folder', str(pics),
-                            '--reference', str(reference), '--name', name], env=self.env, capture_output=True, timeout=60)
+                            '--reference', str(reference), '--name', name], env=self.env, capture_output=True, timeout=WAIT)
         self.check(f'CLI 建库 {name}', r.returncode == 0 and (dest / 'library.json').is_file(),
                    r.stderr.decode(errors='replace')[-300:])
         return dest
@@ -334,19 +335,19 @@ class Acceptance:
         port = self.port()
         p, origin, up = self.start(library, port)
         r = subprocess.run([str(self.binary), 'http', '--native', '--library', str(library), '--port', str(port),
-                            '--no-open', '--no-auto-sync'], env=self.env, capture_output=True, timeout=20)
+                            '--no-open', '--no-auto-sync'], env=self.env, capture_output=True, timeout=WAIT)
         self.check('端口冲突时第二实例失败', r.returncode != 0)
         self.check('端口冲突不影响已运行实例', p.poll() is None and self.get(origin, '/api/bootstrap')['status'] == 200)
         self.stop(p)
         # 失败启动：图库不存在
         missing = self.work / 'missing.pilib'
         r = subprocess.run([str(self.binary), 'http', '--native', '--library', str(missing), '--port', str(self.port()),
-                            '--no-open'], env=self.env, capture_output=True, timeout=20)
+                            '--no-open'], env=self.env, capture_output=True, timeout=WAIT)
         self.check('不存在的图库启动失败且不建目录', r.returncode != 0 and not missing.exists())
         # 异常终止：强杀后图库仍能正常打开
         port = self.port()
         p, origin, up = self.start(library, port)
-        p.kill(); p.wait(5)
+        p.kill(); p.wait(WAIT)
         self.check('强杀后端口释放', self.wait(lambda: self.released(port), 10))
         p, origin, up = self.start(library, self.port())
         self.check('强杀后图库可重新打开', up)

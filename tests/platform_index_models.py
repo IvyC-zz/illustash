@@ -19,6 +19,7 @@ import numpy as np
 
 from tests import test_native_index_compute as compute
 from tests import test_native_index_production as installed
+from tools.wait_limit import WAIT
 
 
 class IndexModelAcceptance(installed.InstalledIndexAppTest):
@@ -104,7 +105,7 @@ class IndexModelAcceptance(installed.InstalledIndexAppTest):
         if os.name == 'nt':  # 开发用的 example 没有安装；指明安装好的 DLL。
             env['ILLUSTASH_RESEARCH_OPENBLAS_DLL'] = str(self.adapter_resources/'openblas/openblas.dll')
         result = subprocess.run([str(self.recognition), str(input_path), str(output)],
-                                env=env, capture_output=True, timeout=20)
+                                env=env, capture_output=True, timeout=WAIT)
         self.assertEqual(result.returncode, 0, result.stderr.decode(errors='replace'))
         actual = json.loads(output.read_text())
         self.assertTrue(actual['claims'])
@@ -134,7 +135,7 @@ class IndexModelAcceptance(installed.InstalledIndexAppTest):
 
     def test_real_index_then_recognition_cached_rebuild_and_drop(self):
         # 就绪检查加载安装好的 CPU 会话，在 Windows 上还加载固定的 OpenBLAS。
-        ready = subprocess.run([str(self.adapter), '--check'], env=self.env, capture_output=True, timeout=20)
+        ready = subprocess.run([str(self.adapter), '--check'], env=self.env, capture_output=True, timeout=WAIT)
         self.assertEqual(ready.returncode, 0, ready.stderr.decode(errors='replace'))
         self.assertNotIn('ILLUSTASH_RESEARCH_OPENBLAS_DLL', self.env)
         # 恰好八个新的模型特征，由测试自己持有的回环服务器提供。
@@ -173,7 +174,7 @@ class IndexModelAcceptance(installed.InstalledIndexAppTest):
         input_path, output = review/'request.json', review/'response.json'
         input_path.write_text(json.dumps(request))
         result = subprocess.run([str(self.adapter), str(input_path), str(output)],
-                                env=self.env, capture_output=True, timeout=20)
+                                env=self.env, capture_output=True, timeout=WAIT)
         self.assertEqual(result.returncode, 0, result.stderr.decode(errors='replace'))
         actual = json.loads(output.read_text())
         for key in ('characters', 'aliases', 'labels'):

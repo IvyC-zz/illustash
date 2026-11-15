@@ -410,7 +410,7 @@ mod tests {
         crate::diagnostics::initialize();
         let _ = logs::drain(logs::Source::Host, "HTTP image: /Users/fake-owner/host-only.jpg\n".as_bytes(), |_| {});
         for (kind, code) in [("recognition", 7), ("provenance", 9), ("index", 0), ("research", 101)] {
-            let mut task = Task::start(identity(), Some(Duration::from_secs(30)), move |ctx| {
+            let mut task = Task::start(identity(), Some(crate::test_wait::limit()), move |ctx| {
                 let mut command = Command::new(std::env::current_exe()?);
                 command
                     .args(["--ignored", "--exact", "app_tasks::tests::diagnostic_worker_fixture", "--nocapture"])
@@ -418,7 +418,7 @@ mod tests {
                 assert_eq!(ctx.process(&mut command)?.code(), Some(code));
                 Ok(())
             });
-            assert!(task.wait(Duration::from_secs(30)));
+            assert!(task.wait(crate::test_wait::limit()));
             assert_eq!(task.outcome(), TaskOutcome::Done);
         }
         logs::flush();
@@ -585,7 +585,7 @@ mod tests {
         time.advance(Duration::from_millis(1));
         assert_eq!(ctx.check().unwrap_err().to_string(), "不合法：任务超时：80 毫秒没有进展");
         assert!(ctx.timed_out());
-        assert!(task.wait(Duration::from_secs(10)));
+        assert!(task.wait(crate::test_wait::limit()));
         assert_eq!(task.outcome(), TaskOutcome::Cancelled);
         // 进展只重启空闲时间窗；总时长上限仍从开始算起。
         let (mut task, time) =
@@ -599,7 +599,7 @@ mod tests {
         time.advance(Duration::from_millis(10));
         assert_eq!(ctx.check().unwrap_err().to_string(), "不合法：任务超时：超过 150 毫秒上限");
         assert!(ctx.timed_out());
-        assert!(task.wait(Duration::from_secs(10)));
+        assert!(task.wait(crate::test_wait::limit()));
         assert_eq!(super::human(Duration::from_secs(600)), "10 分钟");
         assert_eq!(super::human(Duration::from_secs(86_400)), "24 小时");
     }
@@ -612,7 +612,7 @@ mod tests {
                 thread::sleep(Duration::from_millis(1));
             });
         let ctx = task.context();
-        assert!(task.wait(Duration::from_secs(30)));
+        assert!(task.wait(crate::test_wait::limit()));
         assert!(ctx.timed_out());
         assert_eq!(ctx.check().unwrap_err().to_string(), "不合法：任务超时：30 毫秒没有进展");
         assert_eq!(task.outcome(), TaskOutcome::Cancelled);
@@ -650,7 +650,7 @@ mod tests {
             Ok(())
         });
         let ctx = task.context();
-        assert!(task.wait(Duration::from_secs(2)));
+        assert!(task.wait(crate::test_wait::limit()));
         assert_eq!(task.outcome(), TaskOutcome::Done);
         assert!(ctx.receive(&ctx.identity, || Ok(())).is_err());
     }
@@ -666,10 +666,10 @@ mod tests {
         assert_eq!(task.outcome(), TaskOutcome::Cancelled);
         assert!(ctx.receive(&ctx.identity, || Ok(())).is_err());
         let mut task = Task::start(identity(), None, |_| panic!("synthetic worker crash"));
-        assert!(task.wait(Duration::from_secs(2)));
+        assert!(task.wait(crate::test_wait::limit()));
         assert!(matches!(task.outcome(), TaskOutcome::Failed(_)));
         let mut task = Task::start(identity(), None, |ctx| ctx.receive(&ctx.identity, || Ok(())));
-        assert!(task.wait(Duration::from_secs(2)));
+        assert!(task.wait(crate::test_wait::limit()));
         assert_eq!(task.outcome(), TaskOutcome::Done);
         assert_ne!(ctx.identity, task.context().identity);
     }
@@ -688,7 +688,9 @@ mod tests {
             let time = Time::manual();
             let mut task = Task::start_timed(identity(), Deadline::fixed(timeout), time.clone(), move |ctx| {
                 let mut cmd = Command::new("/bin/sh");
-                cmd.arg("-c").arg(format!("sleep 60 & echo $$ > '{}'; {script}", output.display()));
+                // 子进程睡得比等待上限长：进程组要是没被清掉，下面的检查会先到上限而失败，不会等到它自己退出（#508）。
+                let sleep = (crate::test_wait::limit() * 2).as_secs().max(1);
+                cmd.arg("-c").arg(format!("sleep {sleep} & echo $$ > '{}'; {script}", output.display()));
                 let status = ctx.process(&mut cmd)?;
                 if status.success() {
                     Ok(())
@@ -696,7 +698,7 @@ mod tests {
                     Err(Error::Invalid("worker failed".into()))
                 }
             });
-            let until = Instant::now() + Duration::from_secs(10);
+            let until = crate::test_wait::deadline();
             let pgid = loop {
                 if let Ok(text) = std::fs::read_to_string(&file) {
                     if let Ok(pgid) = text.trim().parse::<i32>() {
@@ -710,9 +712,9 @@ mod tests {
             if cancel {
                 task.stop();
             } else {
-                assert!(task.wait(Duration::from_secs(10)));
+                assert!(task.wait(crate::test_wait::limit()));
             }
-            let until = Instant::now() + Duration::from_secs(10);
+            let until = crate::test_wait::deadline();
             // SAFETY: kill 的信号 0 只检查进程组是否存在，不发送信号。
             while unsafe { libc::kill(-pgid, 0) } == 0 && Instant::now() < until {
                 thread::sleep(Duration::from_millis(10));
@@ -730,7 +732,7 @@ mod tests {
     fn every_worker_starts_with_ort_telemetry_off() {
         use crate::recognition_compute::telemetry::ENV;
         for parent in [None, Some("0"), Some("true")] {
-            let mut task = Task::start(identity(), Some(Duration::from_secs(60)), move |ctx| {
+            let mut task = Task::start(identity(), Some(crate::test_wait::limit()), move |ctx| {
                 let mut cmd = Command::new(std::env::current_exe()?);
                 cmd.args(["--ignored", "--exact", "app_tasks::tests::ort_telemetry_fixture"]).env_remove(ENV);
                 if let Some(value) = parent {
@@ -742,7 +744,7 @@ mod tests {
                     Err(Error::Invalid("worker saw telemetry on".into()))
                 }
             });
-            assert!(task.wait(Duration::from_secs(60)));
+            assert!(task.wait(crate::test_wait::limit()));
             assert_eq!(task.outcome(), TaskOutcome::Done, "parent {parent:?}");
         }
     }

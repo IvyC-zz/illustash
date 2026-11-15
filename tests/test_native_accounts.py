@@ -21,6 +21,7 @@ import zipfile
 
 from tests import test_native_lifecycle as life, test_native_human_labels as labels
 from tests.fixed_expectations import unclocked
+from tools.wait_limit import WAIT
 
 
 def difference(left, right):
@@ -43,7 +44,7 @@ class AccountService:
             def reply(self):
                 outer.calls.append((self.command, self.path, self.headers.get('Cookie'), self.headers.get('X-Illustash-Token')))
                 if outer.block and '/ajax/' in self.path:
-                    outer.entered.set(); outer.release.wait(5)
+                    outer.entered.set(); outer.release.wait(WAIT)
                 route = urllib.parse.urlsplit(self.path).path
                 code = outer.code
                 if outer.failures_left and route.startswith("/ajax/"):
@@ -260,7 +261,7 @@ class NativeDesktopAccountsTest(NativeAccountsTest):
         self.service.block=True;other=self.package('second')
         with ThreadPoolExecutor(2) as pool:
             action=pool.submit(self.request,'/api/accounts/pixiv',{'value':'123_AbC'})
-            self.assertTrue(self.service.entered.wait(3))
+            self.assertTrue(self.service.entered.wait(WAIT))
             switch=pool.submit(self.request,'/api/libraries/open',{'path':str(other.path)})
             time.sleep(.1);self.assertFalse(switch.done());self.service.release.set()
             self.assertEqual(action.result()['status'],200);self.assertEqual(switch.result()['status'],200)
@@ -271,9 +272,9 @@ class NativeDesktopAccountsTest(NativeAccountsTest):
         self.service.block=True
         with ThreadPoolExecutor(1) as pool:
             action=pool.submit(self.request,'/api/accounts/pixiv',{'value':'123_AbC'})
-            self.assertTrue(self.service.entered.wait(3));self.process.send_signal(INTERRUPT)
+            self.assertTrue(self.service.entered.wait(WAIT));self.process.send_signal(INTERRUPT)
             time.sleep(.1);self.assertIsNone(self.process.poll());self.service.release.set()
-            self.assertEqual(action.result()['status'],200);self.process.wait(5)
+            self.assertEqual(action.result()['status'],200);self.process.wait(WAIT)
         self.process,self.log=self.start(self.lib.path)
         self.assertTrue(json.loads(self.request('/api/accounts')['body'])['pixiv']['bound'])
 

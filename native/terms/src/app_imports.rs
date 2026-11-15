@@ -295,7 +295,7 @@ mod tests {
         imports.state().get("status").map(|v| v.text().to_owned()).unwrap_or_default()
     }
     fn settle(imports: &Imports) -> Json {
-        let until = Instant::now() + Duration::from_secs(5);
+        let until = crate::test_wait::deadline();
         while matches!(status_of(imports).as_str(), "running" | "stopping") {
             assert!(Instant::now() < until, "import did not end");
             std::thread::sleep(Duration::from_millis(1));
@@ -415,7 +415,7 @@ mod tests {
                 std::thread::spawn(move || imports.cancel(CANCELLED))
             };
             // 轮询不会被等待中的取消挡住：取消等待期间它读到 "stopping"。
-            let until = Instant::now() + Duration::from_secs(5);
+            let until = crate::test_wait::deadline();
             while status_of(&imports) != "stopping" {
                 assert!(Instant::now() < until, "the cancellation was never recorded");
                 std::thread::yield_now();
@@ -483,14 +483,15 @@ mod tests {
         imports
             .start(identity(1), Kind::Recognition, "result", move |_| {
                 ready.send(()).unwrap();
-                let _ = held.recv_timeout(Duration::from_secs(30));
+                // 卡得比等待上限还久：关停要是等它，下面的上界就会失败（#508：对照阻塞时长）。
+                let _ = held.recv_timeout(crate::test_wait::limit() * 2);
                 Ok(Json::Object(Vec::new()))
             })
             .unwrap();
         wait.recv().unwrap();
         let started = Instant::now();
         imports.shutdown(Duration::from_millis(100));
-        assert!(started.elapsed() < Duration::from_secs(5));
+        assert!(started.elapsed() < crate::test_wait::limit());
         assert_eq!(status_of(&imports), "idle");
         let refused = imports.start(identity(1), Kind::Archive, "a.zip", |_| Ok(Json::Object(Vec::new()))).unwrap_err();
         assert!(refused.to_string().contains("服务正在退出"), "{refused}");

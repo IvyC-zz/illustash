@@ -22,8 +22,10 @@ mod v8_upgrade;
 mod common_baseline;
 #[path = "../common/entry.rs"]
 mod common_entry;
+#[path = "../common/wait.rs"]
+mod common_wait;
 mod common {
-    pub(crate) use super::{common_baseline as baseline, common_entry as entry};
+    pub(crate) use super::{common_baseline as baseline, common_entry as entry, common_wait as wait};
 }
 
 use std::{

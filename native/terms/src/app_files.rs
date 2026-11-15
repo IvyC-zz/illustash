@@ -546,7 +546,7 @@ mod tests {
         std::thread::scope(|scope| {
             let generator = scope.spawn(|| images.cached(&source, &target, 400).unwrap());
             // 键被阻塞，证明 cached() 已进入它的目录读闸。
-            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+            let deadline = crate::test_wait::deadline();
             while gate.try_write().is_ok() {
                 assert!(std::time::Instant::now() < deadline);
                 std::thread::yield_now();
@@ -564,7 +564,7 @@ mod tests {
             assert!(images.cache_lock(&root.join("other")).unwrap().try_write().is_ok());
             drop(key_guard);
             assert!(!generator.join().unwrap().is_empty());
-            assert_eq!(receive.recv_timeout(std::time::Duration::from_secs(5)).unwrap(), 1);
+            assert_eq!(receive.recv_timeout(crate::test_wait::limit()).unwrap(), 1);
             cleaner.join().unwrap();
         });
         assert!(!target.exists());

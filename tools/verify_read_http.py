@@ -22,6 +22,11 @@ import tempfile
 import time
 from urllib.parse import urlencode, urlsplit
 
+try:
+    from tools.wait_limit import WAIT
+except ModuleNotFoundError:  # 直接以脚本运行时 tools/ 本身在 sys.path 上
+    from wait_limit import WAIT
+
 # 不调用 Store 构造函数，不做 schema 升级、对照基准录制、远程查询，也不访问生产数据库。
 STAGES = {
     'R1': ('user-tags', 'general-tags', 'artists', 'artist', 'artist-audit'),
@@ -153,7 +158,7 @@ def ready(text, origin):
     return None
 
 
-def enter(origin, log, process=None, timeout=15):
+def enter(origin, log, process=None, timeout=WAIT):
     """等 `origin` 上的宿主把就绪地址打印到 `log`，然后像浏览器那样用其中的一次性码换会话 cookie。返回该地址。"""
     deadline = time.monotonic() + timeout
     while (address := ready(output(log), origin)) is None:
@@ -182,7 +187,7 @@ def cookie(origin):
 ABORTIVE_CLOSE = struct.pack('HH' if os.name == 'nt' else 'ii', 1, 0)
 
 
-def fetch(base, item, origin, timeout=30):
+def fetch(base, item, origin, timeout=WAIT):
     url, public = urlsplit(base), urlsplit(origin)
     if url.scheme != 'http' or url.hostname != '127.0.0.1' or not url.port or url.path or url.query or url.fragment:
         raise ValueError('对照端点必须是 127.0.0.1 的明确 HTTP origin')

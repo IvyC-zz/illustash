@@ -148,8 +148,8 @@ fn creation_open_same_id_switch_late_work_and_exit_without_transport() {
         })
         .unwrap();
     go_tx.send(()).unwrap();
-    assert!(done_rx.recv_timeout(Duration::from_secs(2)).unwrap());
-    assert!(worker.wait(Duration::from_secs(2)));
+    assert!(done_rx.recv_timeout(crate::common::wait::limit()).unwrap());
+    assert!(worker.wait(crate::common::wait::limit()));
     service.recover();
     service.shutdown();
     service.shutdown();

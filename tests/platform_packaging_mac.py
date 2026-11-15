@@ -19,6 +19,7 @@ from tests import test_native_research_production as production
 from tests import test_packaging as packaging_tests
 from tests.test_read_http import SPAWN, free_port, wait_until
 from tools.verify_read_http import enter, fetch
+from tools.wait_limit import WAIT
 
 
 class MacAppBootstrapTest(unittest.TestCase):
@@ -56,7 +57,7 @@ class MacAppBootstrapTest(unittest.TestCase):
         self.addCleanup(self.stop, process)
         origin = f'http://127.0.0.1:{port}'
         try:
-            enter(origin, log, process, timeout=5)
+            enter(origin, log, process)
         except AssertionError:
             log.seek(0)
             self.fail(f'App bootstrap failed ({process.poll()}): {log.read().decode(errors="replace")}')
@@ -118,7 +119,7 @@ class MacAppBootstrapTest(unittest.TestCase):
                 manifest.write_text('invalid')
             result = subprocess.run([str(self.app_executable), 'http', '--native',
                 '--library', str(self.lib.path), '--no-open'], env=self.env,
-                capture_output=True, text=True, timeout=10)
+                capture_output=True, text=True, timeout=WAIT)
             self.assertEqual(result.returncode, 2, result.stderr)
             self.assertIn(expected, result.stderr)
             self.assertEqual(self.lib.db.read_bytes(), before)

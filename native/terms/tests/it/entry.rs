@@ -106,7 +106,7 @@ fn every_request_needs_the_cookie_from_the_one_time_address() {
             }
         }
     });
-    let line = rx.recv_timeout(Duration::from_secs(60)).expect("ready line");
+    let line = rx.recv_timeout(crate::common::wait::limit()).expect("ready line");
     let origin = format!("http://127.0.0.1:{port}");
     let address = entry::address(&line).unwrap().to_owned();
     let code = address.strip_prefix(&format!("{origin}/?k=")).expect("the address carries a code");
@@ -206,7 +206,7 @@ fn human_conclusion_routes(root: &std::path::Path, origin: &str, headers: &[(&st
         (status, serde_json::from_str::<Value>(&text).unwrap())
     };
     let poll = |path: &str, export: bool| {
-        let deadline = std::time::Instant::now() + Duration::from_secs(60);
+        let deadline = crate::common::wait::deadline();
         loop {
             let mut value = get(path);
             if export {
@@ -260,7 +260,7 @@ fn human_conclusion_routes(root: &std::path::Path, origin: &str, headers: &[(&st
     let failed = poll("/api/imports", false);
     assert_eq!(failed["code"], 400, "{failed}");
     assert_eq!(failed["committed"], false);
-    let deadline = std::time::Instant::now() + Duration::from_secs(60);
+    let deadline = crate::common::wait::deadline();
     let automatic = loop {
         let value = get("/api/human-conclusions")["automatic"].clone();
         if value["snapshots"].as_array().is_some_and(|s| !s.is_empty()) {

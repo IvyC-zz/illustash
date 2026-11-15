@@ -19,6 +19,7 @@ from PIL import Image, ImageChops, ImageStat, ImageDraw
 from tests import test_native_lifecycle as lifecycle
 from tests.test_native_lifecycle import NativeLifecycleTest, HEADERS
 from tools.verify_read_http import cookie
+from tools.wait_limit import WAIT
 
 
 def key(path, ident, size):
@@ -384,7 +385,7 @@ class NativeFilesTest(unittest.TestCase):
             c.execute("INSERT INTO assets(uuid,src_path,width,height) VALUES ('switch',?,12,8)", (str(new_source),))
             c.commit()
         sock = socket.socket(); self.addCleanup(sock.close)
-        sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 4096); sock.settimeout(10)
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 4096); sock.settimeout(WAIT)
         sock.connect(('127.0.0.1', self.port))
         sock.sendall((f'GET /image?id=switch HTTP/1.1\r\nHost: 127.0.0.1:{self.port}\r\nCookie: {cookie(self.origin)}\r\n'
                       'Connection: close\r\n\r\n').encode())
@@ -406,7 +407,7 @@ class NativeFilesTest(unittest.TestCase):
         self.stop(self.process)
         for route in ('GET:/image=forward', 'GET:/app.js=forward'):
             result = __import__('subprocess').run([str(self.binary), 'http', '--route', route],
-                                                 env=self.env, capture_output=True, timeout=5)
+                                                 env=self.env, capture_output=True, timeout=WAIT)
             self.assertNotEqual(result.returncode, 0)
             self.assertIn('已退役', result.stderr.decode())
         self.resources = self.root / 'empty-root'

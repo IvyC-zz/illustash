@@ -10,6 +10,7 @@ import tempfile
 import unittest
 
 from tests.synthetic_source import source_fixture, synthetic_reference
+from tools.wait_limit import WAIT
 
 
 class SyntheticSourceTest(unittest.TestCase):
@@ -36,7 +37,7 @@ with tempfile.TemporaryDirectory() as directory:
 assert not blocked.intersection(sys.modules)
 '''
         result = subprocess.run([sys.executable, '-c', code], cwd=Path(__file__).resolve().parents[1],
-                                capture_output=True, text=True, timeout=10)
+                                capture_output=True, text=True, timeout=WAIT)
         self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_reference_has_fixed_schema_and_only_reference_rows(self):

@@ -17,6 +17,7 @@ import numpy as np
 from tests import test_native_lifecycle as lifecycle
 from tests.fixed_expectations import unclocked
 from tests.test_native_human_labels import snapshot, freeze_seed_defaults
+from tools.wait_limit import WAIT
 
 # 识别结果包的文件和它们写入的 source 表（原导入器的输入契约）。
 FILES = ('labels.jsonl', 'wd.npy', 'ccip.npy')
@@ -83,7 +84,7 @@ class NativeRecognitionTest(unittest.TestCase):
         return m
 
     def cli(self, *args):
-        return subprocess.run([str(self.binary), 'recognition-import', '--library', str(self.lib.path), '--root', str(self.resources), *args], env=self.env, capture_output=True, timeout=20)
+        return subprocess.run([str(self.binary), 'recognition-import', '--library', str(self.lib.path), '--root', str(self.resources), *args], env=self.env, capture_output=True, timeout=WAIT)
 
     def recognition_import(self, body, **kwargs):
         return lifecycle.import_task(self, '/api/recognition/import', body, **kwargs)
@@ -281,17 +282,15 @@ class NativeRecognitionTest(unittest.TestCase):
         self.assertEqual(r['status'], 200, r)
         task = json.loads(r['body'])['task']
         self.assertEqual((task['status'], task['kind']), ('running', 'recognition'), task)
-        lifecycle.wait_until(lambda: self.imports().get('stage') == 'models', timeout=10)
+        lifecycle.wait_until(lambda: self.imports().get('stage') == 'models')
         return task
 
     def imports(self):
         return json.loads(self.request('/api/imports')['body'])
 
-    def ended(self, task, within=5):
-        """任务的最终状态，必须在 `within` 秒内到达。"""
-        started = time.monotonic()
-        lifecycle.wait_until(lambda: self.imports()['status'] in lifecycle.IMPORT_ENDED, timeout=within + 5)
-        self.assertLess(time.monotonic() - started, within)
+    def ended(self, task):
+        """任务的最终状态。调用方在模型仍被卡住时取消，所以到得了终态就说明没有等模型（#508：不另设耗时上界）。"""
+        lifecycle.wait_until(lambda: self.imports()['status'] in lifecycle.IMPORT_ENDED)
         state = self.imports()
         self.assertEqual(state['id'], task['id'])
         return state
@@ -323,19 +322,16 @@ class NativeRecognitionTest(unittest.TestCase):
                     end = self.ended(task)
                     self.assertEqual((end['status'], end['reason'], end['stage']), ('cancelled', '导入已取消', 'models'))
                 elif how == 'switch':
-                    started = time.monotonic()
                     opened = self.request('/api/libraries/open', {'path': str(other)})
                     self.assertEqual(opened['status'], 200, opened)
-                    self.assertLess(time.monotonic() - started, 5)
                     end = self.ended(task)
                     self.assertEqual((end['status'], end['reason']), ('cancelled', '图库已切换，导入已取消'))
                     self.token = json.loads(self.request('/api/bootstrap')['body'])['token']
                     self.assertEqual(self.request('/api/libraries/open', {'path': str(self.lib.path)})['status'], 200)
                     self.token = json.loads(self.request('/api/bootstrap')['body'])['token']
                 else:
-                    started = time.monotonic()
+                    # 模型一直卡着：退出若要等它，就会超过等待上限被强杀，返回码不是 0。
                     self.stop(self.process)
-                    self.assertLess(time.monotonic() - started, 8)
                     self.assertEqual(self.process.returncode, 0)
                     self.process, self.log = self.start(self.lib.path)
                     self.token = json.loads(self.request('/api/bootstrap')['body'])['token']
@@ -378,7 +374,7 @@ class NativeRecognitionTest(unittest.TestCase):
         started = self.request('/api/recognition/import', {'path': str(p)})
         self.assertEqual(started['status'], 200, started)
         task = json.loads(started['body'])['task']
-        deadline = time.monotonic() + 10
+        deadline = time.monotonic() + WAIT
         while True:  # 导入以读方式打开 FIFO 之后，打开写端才会成功
             try:
                 writer = os.open(model, os.O_WRONLY | os.O_NONBLOCK)
@@ -387,21 +383,20 @@ class NativeRecognitionTest(unittest.TestCase):
                 self.assertLess(time.monotonic() - deadline, 0, 'import never reached the model files')
                 time.sleep(0.01)
         self.addCleanup(lambda: os.close(writer) if writer is not None else None)
-        started = time.monotonic()
+        # FIFO 没有写端数据，导入一直卡着：下面的请求能应答，就说明它们不等导入。
         self.assertEqual(self.request('/api/bootstrap')['status'], 200)
         refused = self.request('/api/sync', {})
         self.assertEqual(refused['status'], 400, refused)
         self.assertIn('识别结果正在导入', json.loads(refused['body'])['error'])
         opened = self.request('/api/libraries/open', {'path': str(other)})
         self.assertEqual(opened['status'], 200, opened)
-        self.assertLess(time.monotonic() - started, 5)
         # 导入阻塞在读取上，还不可能已经停下：报告为正在停止，而不是正在运行。
         self.assertEqual(self.imports()['status'], 'stopping')
         os.set_blocking(writer, True)
         os.write(writer, b'synthetic WD')
         os.close(writer)
         writer = None
-        end = self.ended(task, within=20)
+        end = self.ended(task)
         self.assertEqual((end['status'], end['reason']), ('cancelled', '图库已切换，导入已取消'))
         self.assertEqual(snapshot(self.lib.source), before)
 

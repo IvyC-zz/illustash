@@ -107,7 +107,7 @@ impl Host {
                 }
                 Err(mpsc::RecvTimeoutError::Timeout) => {}
             }
-            assert!(start.elapsed() < Duration::from_secs(120), "host startup timeout: {lines:?}");
+            assert!(start.elapsed() < crate::common::wait::limit() * 2, "host startup timeout: {lines:?}");
         }
         Ok(Self { child, stdin: Some(stdin), origin: format!("http://127.0.0.1:{port}"), lines })
     }
@@ -142,7 +142,7 @@ impl Host {
             if done(&status) {
                 return status;
             }
-            assert!(start.elapsed() < Duration::from_secs(120), "{what}: {status}");
+            assert!(start.elapsed() < crate::common::wait::limit() * 2, "{what}: {status}");
             thread::sleep(Duration::from_millis(100));
         }
     }
@@ -150,7 +150,7 @@ impl Host {
         drop(self.stdin.take());
         let start = Instant::now();
         while self.child.try_wait().unwrap().is_none() {
-            assert!(start.elapsed() < Duration::from_secs(20), "host did not exit");
+            assert!(start.elapsed() < crate::common::wait::limit(), "host did not exit");
             thread::sleep(Duration::from_millis(20));
         }
     }
@@ -225,7 +225,7 @@ fn organized(root: &Path, name: &str) -> Organized {
     let host = Host::launch(root, &package, &[]).unwrap();
     let start = Instant::now();
     while count(&package.join("library.sqlite"), "SELECT count(*) FROM assets") < 4 {
-        assert!(start.elapsed() < Duration::from_secs(60), "the first sync did not finish");
+        assert!(start.elapsed() < crate::common::wait::limit(), "the first sync did not finish");
         thread::sleep(Duration::from_millis(100));
     }
     let ids = ids(&package);

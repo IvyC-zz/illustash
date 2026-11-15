@@ -4,6 +4,8 @@ import os
 from pathlib import Path
 import subprocess
 
+from tools.wait_limit import WAIT
+
 
 class Failed(RuntimeError):
     pass
@@ -14,7 +16,7 @@ def binary():
     return Path(configured).resolve() if configured and Path(configured).is_file() else None
 
 
-def run(*args, stdin=None, timeout=60):
+def run(*args, stdin=None, timeout=WAIT):
     executable = binary()
     if executable is None:
         raise Failed('测试需要显式设置 ILLUSTASH_TERMS_BIN')

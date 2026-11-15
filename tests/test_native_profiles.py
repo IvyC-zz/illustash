@@ -14,6 +14,7 @@ from unittest.mock import patch
 from tests import test_native_human_labels as labels
 from tests.fixed_expectations import unclocked
 from tools.verify_read_http import cookie, fetch
+from tools.wait_limit import WAIT
 
 
 class NativeProfilesTest(unittest.TestCase):
@@ -298,7 +299,7 @@ class NativeProfilesTest(unittest.TestCase):
         newer=self.clone(self.right,'new-session')
         before_old,before_new=labels.states(self.right),labels.states(newer)
         body=json.dumps({'entity':self.alice,'name':'禁止跨库'}).encode()
-        conn=http.client.HTTPConnection('127.0.0.1',self.port,timeout=5);self.addCleanup(conn.close)
+        conn=http.client.HTTPConnection('127.0.0.1',self.port,timeout=WAIT);self.addCleanup(conn.close)
         conn.putrequest('POST','/api/character/profile',skip_host=True)
         for name,value in {'Host':self.origin.split('://')[1],'Origin':self.origin,'Cookie':cookie(self.origin),'Content-Type':'application/json',
                            'X-CSRF-Token':self.token,'Content-Length':str(len(body))}.items():conn.putheader(name,value)

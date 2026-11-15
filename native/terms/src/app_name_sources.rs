@@ -680,7 +680,9 @@ mod tests {
     fn revocation_stops_requests_waiting_for_a_host_or_retry_deadline() {
         for queued in [true, false] {
             let host_name = if queued { "consent-queue.invalid" } else { "consent-backoff.invalid" };
-            let host = Arc::new(Mutex::new(Host { next: Some(Instant::now() + Duration::from_secs(10)), failures: 0 }));
+            // 退避期长过等待上限：撤销要是没打断等待，下面的循环会先到上限而失败，不靠计时断言（#508）。
+            let backoff = crate::test_wait::limit() * 2;
+            let host = Arc::new(Mutex::new(Host { next: Some(Instant::now() + backoff), failures: 0 }));
             HOSTS.get_or_init(Default::default).lock().unwrap().insert(format!("{host_name}:443"), host.clone());
             let held = queued.then(|| host.lock().unwrap());
             let grant = Arc::new(AtomicBool::new(true));
@@ -690,12 +692,13 @@ mod tests {
                 .granted(grant.clone());
             let worker =
                 std::thread::spawn(move || source.fetch(&format!("https://{host_name}/tags.json"), None, None));
-            let deadline = Instant::now() + Duration::from_secs(2);
+            let deadline = crate::test_wait::deadline();
             while Arc::strong_count(&host) < 3 || (!queued && host.try_lock().is_ok()) {
                 assert!(Instant::now() < deadline, "request did not reach the host wait");
                 std::thread::sleep(Duration::from_millis(1));
             }
             grant.store(false, Ordering::SeqCst);
+            let deadline = crate::test_wait::deadline();
             while !worker.is_finished() {
                 assert!(Instant::now() < deadline, "revocation did not interrupt the wait");
                 std::thread::sleep(Duration::from_millis(1));

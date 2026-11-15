@@ -29,6 +29,7 @@ from tests.synthetic_source import source_fixture as fixture, synthetic_referenc
 from tests.test_read_http import INTERRUPT, SPAWN, free_port, wait_until, wait_human_backup
 from tools import verify_read_http
 from tools.verify_read_http import cookie, enter, fetch
+from tools.wait_limit import WAIT
 
 CORE_READS = (
     '/api/assets', '/api/assets/count', '/api/ids', '/api/detail?id=a', '/api/home', '/api/fold',
@@ -60,7 +61,7 @@ def dump(db):
 IMPORT_ENDED = ('done', 'error', 'cancelled')
 
 
-def import_task(test, url, body, *, token=None, timeout=60, seen=None):
+def import_task(test, url, body, *, token=None, timeout=WAIT, seen=None):
     """#88：归档导入和识别结果导入是后台任务。启动一个，轮询 GET /api/imports 直到结束，然后按原来的同步请求
     那样应答：启动本身的拒绝、200 加结果、错误状态和消息，或者被取消时的 409。`seen` 收集轮询到的每个状态。"""
     started = test.request(url, body, token=token)
@@ -169,7 +170,7 @@ class NativeLifecycleTest(unittest.TestCase):
             first = self.root / 'first.pilib'
             result = subprocess.run([str(self.binary), 'library-create', '--dest', str(first),
                                      '--folder', str(self.new_folder), '--reference', str(self.new_reference),
-                                     '--name', 'first'], env=self.env, capture_output=True, timeout=20)
+                                     '--name', 'first'], env=self.env, capture_output=True, timeout=WAIT)
             self.assertEqual(result.returncode, 0, result.stderr.decode(errors='replace'))
             self.assertEqual(json.loads(result.stdout), {'path': str(first), 'name': 'first'})
             # 参照打开后的图库包（录制；原生新建的输出可以复现）。
@@ -199,9 +200,9 @@ class NativeLifecycleTest(unittest.TestCase):
         if process.poll() is None:
             process.send_signal(INTERRUPT)
             try:
-                process.wait(5)
+                process.wait(WAIT)
             except subprocess.TimeoutExpired:
-                process.kill(); process.wait(3)
+                process.kill(); process.wait(WAIT)
 
     def start(self, path, extra=(), command=None):
         port = self.port if not command else free_port()
@@ -213,7 +214,7 @@ class NativeLifecycleTest(unittest.TestCase):
         self.addCleanup(self.stop, process)
         origin = f'http://127.0.0.1:{port}'
         try:
-            enter(origin, log, process, timeout=5)
+            enter(origin, log, process)
         except AssertionError:
             log.seek(0)
             self.fail(f'native startup failed ({process.poll()}): {log.read().decode(errors="replace")}')
@@ -687,7 +688,7 @@ class NativeLifecycleTest(unittest.TestCase):
     def test_request_started_before_switch_cannot_write_new_library(self):
         target = self.package('second')
         body = b'{"similar": false}'
-        conn = http.client.HTTPConnection('127.0.0.1', self.port, timeout=5)
+        conn = http.client.HTTPConnection('127.0.0.1', self.port, timeout=WAIT)
         self.addCleanup(conn.close)
         conn.putrequest('POST', '/api/startup', skip_host=True)
         for key, value in {'Host': self.origin.split('://')[1], 'Origin': self.origin, 'Cookie': cookie(self.origin),
@@ -750,7 +751,7 @@ class NativeLifecycleTest(unittest.TestCase):
             with self.subTest(path=path.name):
                 result = subprocess.run([str(self.binary), 'http', '--no-auto-sync', '--library', str(path),
                                          '--port', str(free_port()), '--root', str(self.resources), '--no-names',
-                                         '--no-index-check'], env=self.env, capture_output=True, timeout=10)
+                                         '--no-index-check'], env=self.env, capture_output=True, timeout=WAIT)
                 self.assertNotEqual(result.returncode, 0)
                 self.assertIn('另一个 Illustash', result.stderr.decode(errors='replace'))
         self.assertEqual(before, dump(self.lib.db))
@@ -777,7 +778,7 @@ class NativeLifecycleTest(unittest.TestCase):
             head = (f'POST /api/startup HTTP/1.1\r\nHost: 127.0.0.1:{self.port}\r\nOrigin: {self.origin}\r\n'
                     f'Cookie: {cookie(self.origin)}\r\n'
                     f'Content-Type: application/json\r\nContent-Length: {length}\r\nX-CSRF-Token: {self.token}\r\n\r\n')
-            conn = socket.create_connection(('127.0.0.1', self.port), timeout=10)
+            conn = socket.create_connection(('127.0.0.1', self.port), timeout=WAIT)
             self.addCleanup(conn.close)
             conn.sendall(head.encode() + body[:5])
             return conn
@@ -801,7 +802,7 @@ class NativeLifecycleTest(unittest.TestCase):
         # 所以不会有槽提前空出来（#219）。
         host('600000')
         held = [stalled(len(body)) for _ in range(64)]
-        refused = socket.create_connection(('127.0.0.1', self.port), timeout=5)
+        refused = socket.create_connection(('127.0.0.1', self.port), timeout=WAIT)
         self.addCleanup(refused.close)
         refused.sendall(f'GET /api/bootstrap HTTP/1.1\r\nHost: 127.0.0.1:{self.port}\r\n\r\n'.encode())
         try:
@@ -812,7 +813,7 @@ class NativeLifecycleTest(unittest.TestCase):
         # 占着的连接断开后释放它们的槽；之后宿主正常服务，而且什么都没写入。
         for conn in held:
             conn.close()
-        wait_until(lambda: self.request('/api/bootstrap')['status'] == 200, timeout=10)
+        wait_until(lambda: self.request('/api/bootstrap')['status'] == 200)
         self.assertEqual(startup(self.lib.db)['similar'], True)
         self.assertFalse(self.sentinel.exists())
 
@@ -827,7 +828,7 @@ class NativeLifecycleTest(unittest.TestCase):
         sock = socket.socket()
         self.addCleanup(sock.close)
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 4096)
-        sock.settimeout(15)
+        sock.settimeout(WAIT)
         sock.connect(('127.0.0.1', self.port))
         sock.sendall((f'GET /api/assets?limit=200 HTTP/1.1\r\nHost: 127.0.0.1:{self.port}\r\n'
                       f'Origin: {self.origin}\r\nCookie: {cookie(self.origin)}\r\nAccept-Encoding: identity\r\n'
@@ -843,9 +844,10 @@ class NativeLifecycleTest(unittest.TestCase):
             'method': 'POST', 'url': '/api/libraries/open',
             'body': json.dumps({'path': str(target.path)}).encode(),
             'headers': {'Content-Type': 'application/json', 'X-CSRF-Token': self.token}},
-            self.origin, timeout=3)
+            self.origin)
         self.assertEqual(switched['status'], 200)
-        self.assertLess(time.monotonic() - started, 3)
+        # 第一个连接要到 30 秒的写超时才会被宿主放弃；切换远短于它，就说明没有等那个连接（#508：对照阻塞时长）。
+        self.assertLess(time.monotonic() - started, 15)
         self.assertEqual(before, dump(target.db))
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 1024 * 1024)
         value = json.loads(response.read())
@@ -863,7 +865,7 @@ class NativeLifecycleTest(unittest.TestCase):
         self.assertNotIn('library.sqlite-wal', before)
         self.assertNotIn('library.sqlite-shm', before)
         result = subprocess.run([str(self.binary), 'http', '--no-auto-sync', '--library', str(broken.path),
-                                 '--port', str(free_port())], env=self.env, capture_output=True, timeout=5)
+                                 '--port', str(free_port())], env=self.env, capture_output=True, timeout=WAIT)
         self.assertNotEqual(result.returncode, 0)
         after = files(broken.path)
         added = set(after) - set(before)
@@ -888,7 +890,7 @@ class NativeLifecycleTest(unittest.TestCase):
             before = files(broken.path)
             self.assertGreater(Path(str(broken.db) + '-wal').stat().st_size, 0)
             result = subprocess.run([str(self.binary), 'http', '--no-auto-sync', '--library', str(broken.path),
-                                     '--port', str(free_port())], env=self.env, capture_output=True, timeout=5)
+                                     '--port', str(free_port())], env=self.env, capture_output=True, timeout=WAIT)
             self.assertNotEqual(result.returncode, 0)
             after = files(broken.path)
             # 活动的 SQLite 读取方可能更新 SHM 的锁/读标记。应用数据库、WAL、source 和包里的所有其他文件逐字节不变；
@@ -910,7 +912,7 @@ class NativeLifecycleTest(unittest.TestCase):
                 c.close()  # 静止的 DELETE 模式夹具：包里每个文件都逐字节不变。
                 before = files(broken.path)
                 result = subprocess.run([str(self.binary), 'http', '--no-auto-sync', '--library', str(broken.path),
-                                         '--port', str(free_port())], env=self.env, capture_output=True, timeout=5)
+                                         '--port', str(free_port())], env=self.env, capture_output=True, timeout=WAIT)
                 self.assertNotEqual(result.returncode, 0)
                 self.assertEqual(before, files(broken.path))
                 with sqlite3.connect(broken.db) as c:
@@ -919,7 +921,7 @@ class NativeLifecycleTest(unittest.TestCase):
         broken.source.unlink()
         before = files(broken.path)
         result = subprocess.run([str(self.binary), 'http', '--no-auto-sync', '--library', str(broken.path),
-                                 '--port', str(free_port())], env=self.env, capture_output=True, timeout=5)
+                                 '--port', str(free_port())], env=self.env, capture_output=True, timeout=WAIT)
         self.assertNotEqual(result.returncode, 0)
         self.assertEqual(before, files(broken.path))
         # 这里检验参数在开库前被拒绝；先停自有宿主，避免后台只读轮询改写 SHM 的协调字节。
@@ -927,7 +929,7 @@ class NativeLifecycleTest(unittest.TestCase):
         for args in (['--python', str(self.bin / 'python')], ['--upstream', '41002']):
             before = files(self.lib.path)
             result = subprocess.run([str(self.binary), 'http', '--no-auto-sync', '--library', str(self.lib.path),
-                                     '--port', str(free_port()), *args], env=self.env, capture_output=True, timeout=5)
+                                     '--port', str(free_port()), *args], env=self.env, capture_output=True, timeout=WAIT)
             self.assertNotEqual(result.returncode, 0)
             self.assertEqual(before, files(self.lib.path))
         self.assertFalse(self.sentinel.exists())
@@ -936,7 +938,7 @@ class NativeLifecycleTest(unittest.TestCase):
         self.stop(self.process)
         result = subprocess.run([str(self.binary), 'http', '--library', str(self.lib.path),
                                  '--port', str(self.port), '--route', 'GET:/api/fold=forward'],
-                                env=self.env, capture_output=True, timeout=5)
+                                env=self.env, capture_output=True, timeout=WAIT)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn('已退役', result.stderr.decode())
         with socket.socket() as probe:
@@ -950,7 +952,7 @@ class NativeLifecycleTest(unittest.TestCase):
             '--port', str(self.port), '--no-sync', '--no-names', '--no-index-check'],
             env=self.env, stdout=log, stderr=log, **SPAWN)
         self.addCleanup(self.stop, self.process)
-        enter(self.origin, log, self.process, timeout=5)
+        enter(self.origin, log, self.process)
         self.assertEqual(json.loads(self.request('/api/libraries')['body'])['current'], str(self.lib.path))
         self.assertFalse(self.sentinel.exists())
         self.stop(self.process)
@@ -964,12 +966,12 @@ class NativeLifecycleTest(unittest.TestCase):
                     '--refresh', '--source=unused', '--db=unused', '--cache=unused',
                     '--identity=hybrid', '--no-similar', '--'):
             result = subprocess.run([str(self.binary), 'http', arg], env=self.env,
-                                    capture_output=True, timeout=5)
+                                    capture_output=True, timeout=WAIT)
             self.assertNotEqual(result.returncode, 0, arg)
             self.assertIn('已退役', result.stderr.decode(), arg)
         self.assertEqual(before, files(self.lib.path))
         help_result = subprocess.run([str(self.binary), 'http', '--help'], env=self.env,
-                                     capture_output=True, timeout=5)
+                                     capture_output=True, timeout=WAIT)
         self.assertEqual(help_result.returncode, 0)
         self.assertNotIn('--upstream', help_result.stdout.decode())
         self.assertFalse(self.sentinel.exists())
@@ -977,7 +979,7 @@ class NativeLifecycleTest(unittest.TestCase):
     def test_production_python_has_no_compatibility_host(self):
         result = subprocess.run([__import__('sys').executable, '-c',
             "from pathlib import Path; assert not list(Path('web').glob('*.py')); assert not list(Path('tests/reference').rglob('*.py')); assert not list(Path('provenance').rglob('*.py'))"],
-            cwd=self.resources, env=self.env, capture_output=True, timeout=10)
+            cwd=self.resources, env=self.env, capture_output=True, timeout=WAIT)
         self.assertEqual(result.returncode, 0, result.stderr.decode())
 
     @unittest.skipUnless(os.name == 'posix', 'macOS shell launcher acceptance')
@@ -1062,13 +1064,13 @@ class NativeLifecycleTest(unittest.TestCase):
                     persisted[:] = [record]
                     return True
             return False
-        deadline = time.monotonic() + 10
+        deadline = time.monotonic() + WAIT
         while time.monotonic() < deadline:
             if recorded():
                 break
             time.sleep(.03)
         else:
-            self.fail('后台导入未在 10 秒内写出完整归档诊断')
+            self.fail(f'后台导入未在 {WAIT:g} 秒内写出完整归档诊断')
         # 状态锁覆盖诊断写入和终态更新，读取返回后再查 HTTP 报告不会抢写入锁。
         job = json.loads(self.request('/api/imports')['body'])
         self.assertEqual(job['status'], 'error', job)

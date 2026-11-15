@@ -2,6 +2,7 @@
 import json
 from pathlib import Path
 import subprocess
+from tools.wait_limit import WAIT
 
 
 def claims(binary, root, shared, source, identity, assets, features, env):
@@ -14,7 +15,7 @@ def claims(binary, root, shared, source, identity, assets, features, env):
     input_path.write_text(json.dumps(request), encoding='utf-8')
     output_path.unlink(missing_ok=True)
     result = subprocess.run([str(binary), str(input_path), str(output_path)],
-                            env=env, capture_output=True, timeout=120)
+                            env=env, capture_output=True, timeout=WAIT * 2)
     if result.returncode:
         raise AssertionError(result.stderr.decode(errors='replace'))
     value = json.loads(output_path.read_text(encoding='utf-8'))

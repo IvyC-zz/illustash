@@ -13,6 +13,7 @@ from tests.folder_fixture import image
 from tests.synthetic_source import synthetic_reference
 from tests import test_native_lifecycle as lifecycle, test_native_recognition as recognition
 from tests.test_read_http import free_port, wait_until
+from tools.wait_limit import WAIT
 
 
 class RecognitionRecoveryTest(unittest.TestCase):
@@ -62,7 +63,7 @@ class RecognitionRecoveryTest(unittest.TestCase):
         self.token = json.loads(self.request('/api/bootstrap')['body'])['token']
 
     def run_cli(self, command, *args, code=0, stdin=None):
-        result = subprocess.run([str(self.binary), command, *args], env=self.env, capture_output=True, timeout=30,
+        result = subprocess.run([str(self.binary), command, *args], env=self.env, capture_output=True, timeout=WAIT,
                                 input=stdin.encode() if stdin is not None else None)
         self.assertEqual(result.returncode, code, result.stderr.decode(errors='replace'))
         return json.loads(result.stdout)
@@ -109,7 +110,7 @@ class RecognitionRecoveryTest(unittest.TestCase):
         image(self.pics / 'a.png', 'yellow', (51, 31))
         self.assertEqual(self.request('/api/sync', {})['status'], 200)
         wait_until(lambda: json.loads(self.request('/api/sync')['body'])['state']['status']
-                   not in ('scanning', 'importing'), timeout=30)
+                   not in ('scanning', 'importing'))
         self.assertEqual(self.rows(self.lib.source, 'SELECT * FROM recognition_assets WHERE asset=?', (asset,)), [])
         self.assertEqual(self.rows(self.lib.db, 'SELECT * FROM asset_rating WHERE uuid=?', (asset,)), [])
         self.stop(self.process)

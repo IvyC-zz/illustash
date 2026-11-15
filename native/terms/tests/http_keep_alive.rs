@@ -7,6 +7,9 @@ use std::{
 };
 use tiny_http::{Limits, Response, Server};
 
+#[path = "common/wait.rs"]
+mod wait;
+
 #[test]
 fn concurrent_connections_keep_serving_before_keep_alive_expires() {
     // 与 app_http 的默认限制一致，不用测试环境变量缩短服务端超时。
@@ -26,8 +29,8 @@ fn concurrent_connections_keep_serving_before_keep_alive_expires() {
     let mut connections: Vec<_> = (0..8)
         .map(|_| {
             let stream = TcpStream::connect(address).unwrap();
-            stream.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
-            stream.set_write_timeout(Some(Duration::from_secs(5))).unwrap();
+            stream.set_read_timeout(Some(wait::limit())).unwrap();
+            stream.set_write_timeout(Some(wait::limit())).unwrap();
             BufReader::new(stream)
         })
         .collect();
@@ -43,7 +46,7 @@ fn concurrent_connections_keep_serving_before_keep_alive_expires() {
         }
         for _ in 0..connections.len() {
             let request = server
-                .recv_timeout(Duration::from_secs(5))
+                .recv_timeout(wait::limit())
                 .unwrap()
                 .expect("其他连接仍保持 keep-alive 时，后续连接必须得到服务");
             let body = request.url().to_owned();

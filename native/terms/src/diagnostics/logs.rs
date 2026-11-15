@@ -506,7 +506,8 @@ mod tests {
         assert!(writer.dropped.load(Ordering::Relaxed) > 0);
         let since = Instant::now();
         flush();
-        assert!(since.elapsed() < Duration::from_secs(5));
+        // 目录锁一直不放，flush 只能靠自身 300 ms 的上限返回；这里只防挂死（#508）。
+        assert!(since.elapsed() < crate::test_wait::limit());
         assert!(!directory.join("runtime.log").exists());
         Source::Recognition.worker_exit(ExitStatus::from_raw(if cfg!(unix) { 7 << 8 } else { 7 }), failure);
         drop(lock);

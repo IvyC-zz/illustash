@@ -25,6 +25,7 @@ from tests import test_native_sync as sync_fixture
 from tests.native_worker_fixture import command as fixture_command, exists as process_exists
 from tests.fixed_expectations import unclocked
 from tests.test_read_http import wait_until
+from tools.wait_limit import WAIT
 
 # 这些测试里的研究时限。产品默认值是 30 分钟；这两个值都不改变它。
 WIDE_TIMEOUT_MS = '120000'
@@ -67,7 +68,7 @@ class InstalledResearchComputeTest(compute.NativeResearchComputeTest):
         env = os.environ | {'PATH': ''}
         env.pop('ILLUSTASH_WORKER_PYTHON', None)
         result = subprocess.run([str(self.binary), str(request), str(response)], env=env,
-                                capture_output=True, timeout=10)
+                                capture_output=True, timeout=WAIT)
         self.assertNotEqual(result.returncode, 0)
         self.assertNotIn('ILLUSTASH_WORKER_PYTHON', result.stderr.decode(errors='replace'))
         self.assertFalse(response.exists())
@@ -88,7 +89,7 @@ class RecognitionTransitionRoutingTest(unittest.TestCase):
             env = os.environ | dict(PATH='', ILLUSTASH_ROOT=str(root), ILLUSTASH_MODELS=str(root / 'absent-models'))
             env.pop('ILLUSTASH_WORKER_PYTHON', None)
             result = subprocess.run([str(worker), str(request), str(output)], env=env,
-                                    capture_output=True, timeout=10)
+                                    capture_output=True, timeout=WAIT)
             self.assertNotEqual(result.returncode, 0)
             self.assertNotIn('ILLUSTASH_WORKER_PYTHON', result.stderr.decode(errors='replace'))
             self.assertFalse(output.exists())
@@ -221,7 +222,7 @@ class NativeResearchPublicationTest(unittest.TestCase):
         return json.loads(self.request('/api/clusters')['body'])['learner']
 
     def finished(self, status='idle'):
-        wait_until(lambda: self.state()['status'] in ('idle', 'error'), timeout=15)
+        wait_until(lambda: self.state()['status'] in ('idle', 'error'))
         self.assertEqual(self.state()['status'], status, self.state())
 
     def rows(self, tables):
@@ -270,7 +271,7 @@ child.terminate();child.wait()
             path.unlink(missing_ok=True)
         self.assertEqual(self.request('/api/regroup', {})['body'], b'{"started": true}')
         # 就绪文件要等一次真实的研究计算完成，繁忙的机器可能让它远超 5 秒。
-        wait_until(self.ready.exists, timeout=30)
+        wait_until(self.ready.exists)
         self.assertTrue(self.saved.exists())
         return int(self.pid.read_text()), int(self.child.read_text())
 
@@ -284,7 +285,7 @@ child.terminate();child.wait()
             except ProcessLookupError:
                 return False
         for pid in pids:
-            wait_until(lambda: not pid_exists(pid), timeout=5)
+            wait_until(lambda: not pid_exists(pid))
         # 在 POSIX 上也保留 #146 的 worker 进程组检查。
         self.assertFalse(process_exists(pids[0]))
 
@@ -311,7 +312,7 @@ child.terminate();child.wait()
         self.human_input_change()
         human = self.rows(['actions', 'assertions'])
         self.release.write_text('release')
-        wait_until(lambda: self.state()['status'] == 'waiting', timeout=10)
+        wait_until(lambda: self.state()['status'] == 'waiting')
         self.assertIn('自动重试', self.state()['message'])
         self.assertEqual(self.rows(list(before)), before)
         self.no_processes(pids)
@@ -346,7 +347,7 @@ child.terminate();child.wait()
         for path in (self.ready, self.pid, self.child):
             path.unlink(missing_ok=True)
         self.restart()
-        wait_until(self.ready.exists, timeout=10)
+        wait_until(self.ready.exists)
         self.finished('error')
         self.no_processes((int(self.pid.read_text()), int(self.child.read_text())))
         self.assertEqual(self.rows(list(before)), before)
@@ -374,7 +375,7 @@ child.terminate();child.wait()
         self.token = json.loads(self.request('/api/bootstrap')['body'])['token']
         # 打开旧图库包可能会恢复它待处理的意图。等待并扣住这个自有任务。
         self.request('/api/regroup', {})
-        wait_until(self.ready.exists, timeout=30)
+        wait_until(self.ready.exists)
         pids = int(self.pid.read_text()), int(self.child.read_text())
         self.stop(self.process)
         self.no_processes(pids)
@@ -407,7 +408,7 @@ child.terminate();child.wait()
             c.execute("CREATE TRIGGER fail_native_ack BEFORE UPDATE ON backend_effects WHEN NEW.status='done' BEGIN SELECT RAISE(ABORT,'synthetic ack'); END")
             effect = c.execute("INSERT INTO backend_effects(kind) VALUES ('index_changed')").lastrowid
         self.restart()
-        wait_until(lambda: self.state()['status'] == 'error', timeout=15)
+        wait_until(lambda: self.state()['status'] == 'error')
         self.finished('error')
         self.assertEqual(self.rows(tables), before)
         with sqlite3.connect(self.lib.db) as c:

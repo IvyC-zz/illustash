@@ -130,7 +130,7 @@ mod windows_worker {
                         Err(crate::Error::Invalid("worker failed".into()))
                     }
                 });
-                let deadline = Instant::now() + Duration::from_secs(5);
+                let deadline = crate::test_wait::deadline();
                 let (pid, handle, creation) = loop {
                     if let Ok(text) = std::fs::read_to_string(&path) {
                         if let Some(identity) = published_identity(&text) {
@@ -147,7 +147,7 @@ mod windows_worker {
                 if mode == "cancel" {
                     task.stop();
                 } else {
-                    assert!(task.wait(Duration::from_secs(5)));
+                    assert!(task.wait(crate::test_wait::limit()));
                 }
                 // TerminateJobObject 会停止执行，但进程对象变为有信号状态是异步的。用户批准在既有的
                 // 5 秒观察上限内做一次内核等待（#124）；生产环境的清理和超时语义保持不变。

@@ -16,6 +16,7 @@ from unittest.mock import patch
 from tests import test_native_provenance_local as local
 from tests import test_native_provenance_match as match
 from tests import test_native_provenance_verify as verify
+from tools.wait_limit import WAIT
 
 
 def candidate_worker():
@@ -88,7 +89,7 @@ class InstalledProvenanceRoutingTest(Installed, _FixtureOnly):
                 incoming, output = self.root / f'{step}-request.json', self.root / f'{step}-output.json'
                 incoming.write_text(json.dumps(dict(request, step=step)), encoding='utf-8')
                 run = subprocess.run([str(self.binary), str(incoming), str(output)], env=os.environ | {'PATH': ''},
-                                     capture_output=True, timeout=30, start_new_session=os.name != 'nt')
+                                     capture_output=True, timeout=WAIT, start_new_session=os.name != 'nt')
                 self.assertNotEqual(run.returncode, 0)
                 self.assertIn('不支持的计算请求', run.stderr.decode(errors='replace'))
                 self.assertFalse(output.exists())

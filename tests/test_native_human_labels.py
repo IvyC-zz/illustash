@@ -30,6 +30,7 @@ from tests.test_read_http import INTERRUPT, SPAWN, free_port, wait_until, wait_h
 from tests.synthetic_source import source_fixture as fixture
 from tools import verify_read_http
 from tools.verify_read_http import cookie, enter, fetch, temporary_path
+from tools.wait_limit import WAIT
 
 HEADERS = ('Content-Type', 'Content-Length', 'Content-Encoding', 'Cache-Control', 'Vary',
            'X-Content-Type-Options', 'Referrer-Policy', 'Content-Security-Policy')
@@ -258,9 +259,9 @@ class NativeHumanLabelsTest(unittest.TestCase):
         if process.poll() is None:
             process.send_signal(INTERRUPT)
             try:
-                process.wait(5)
+                process.wait(WAIT)
             except subprocess.TimeoutExpired:
-                process.kill(); process.wait(3)
+                process.kill(); process.wait(WAIT)
 
     def start(self, lib):
         log = tempfile.TemporaryFile(); self.addCleanup(log.close)
@@ -269,7 +270,7 @@ class NativeHumanLabelsTest(unittest.TestCase):
                                    env=self.env, stdout=log, stderr=log, **SPAWN)
         self.addCleanup(self.stop, process)
         try:
-            enter(self.origin, log, process, timeout=5)
+            enter(self.origin, log, process)
         except AssertionError:
             log.seek(0); self.fail(f'native startup failed: {log.read().decode(errors="replace")}')
         wait_human_backup(self, self.origin)
@@ -491,7 +492,7 @@ class NativeHumanLabelsTest(unittest.TestCase):
         old_token = json.loads(fetch(self.origin, {'url': '/api/bootstrap'}, self.origin)['body'])['token']
         before_old, before_new = states(self.right), states(newer)
         body = json.dumps({'ids': ['a'], 'tag': '合成 标签'}).encode()
-        conn = http.client.HTTPConnection('127.0.0.1', self.port, timeout=5)
+        conn = http.client.HTTPConnection('127.0.0.1', self.port, timeout=WAIT)
         self.addCleanup(conn.close)
         conn.putrequest('POST', '/api/tag', skip_host=True)
         for name, value in {'Host': self.origin.split('://')[1], 'Origin': self.origin, 'Cookie': cookie(self.origin),
@@ -553,7 +554,7 @@ class NativeHumanLabelsTest(unittest.TestCase):
                     c.execute('DROP TRIGGER fail_ack'); c.commit()
             drained = self.rec.state('drained')
             # 没有 HTTP 请求：原生循环必须自行恢复已提交的 pending 事件。
-            wait_until(lambda: states(self.right) == drained, timeout=5)
+            wait_until(lambda: states(self.right) == drained)
             self.assertFalse(self.sentinel.exists())
         self.stop(self.process)
         with closing(sqlite3.connect(self.right.db)) as c:
@@ -571,7 +572,7 @@ class NativeHumanLabelsTest(unittest.TestCase):
         def consumed():
             with closing(sqlite3.connect(self.right.db)) as c:
                 return c.execute("SELECT count(*) FROM backend_effects WHERE kind='verdict' AND status='pending'").fetchone()[0] == 0
-        wait_until(consumed, timeout=5)
+        wait_until(consumed)
         with closing(sqlite3.connect(self.right.db)) as c:
             self.assertEqual(c.execute('SELECT kind,status,error FROM backend_effects ORDER BY id').fetchall(),
                              existing + [('verdict', 'done', ''), ('unknown-synthetic', 'pending', '')])

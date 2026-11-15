@@ -25,6 +25,7 @@ from tests.test_native_human_labels import snapshot
 from tests import test_native_lifecycle as lifecycle
 from tests.test_native_lifecycle import NativeLifecycleTest
 from tests.test_read_http import wait_until
+from tools.wait_limit import WAIT
 
 
 class NativeFolderScanTest(unittest.TestCase):
@@ -54,7 +55,7 @@ class NativeFolderScanTest(unittest.TestCase):
             src.backup(dest)
         before = set(u for u, in self.rows('SELECT uuid FROM assets'))
         result = subprocess.run([str(self.binary), 'folder-scan', '--db', str(self.lib.source)],
-                                input=json.dumps(self.source).encode(), capture_output=True, timeout=15, env=self.env)
+                                input=json.dumps(self.source).encode(), capture_output=True, timeout=WAIT, env=self.env)
         self.assertEqual(result.returncode, 0, result.stderr.decode())
         new = json.loads(result.stdout)
         ids = [u for u, in self.rows('SELECT uuid FROM assets ORDER BY rowid') if u not in before]
@@ -94,7 +95,7 @@ class NativeFolderScanTest(unittest.TestCase):
         # #364：mtime-only 不再使有效标签/向量失效；这是修复后的契约，不沿用旧录制中的错误行为。
         before = {table: snapshot(self.lib.source)[table] for table in ('labels', 'embeddings')}
         result = subprocess.run([str(self.binary), 'folder-scan', '--db', str(self.lib.source)],
-                                input=json.dumps(self.source).encode(), capture_output=True, timeout=15, env=self.env)
+                                input=json.dumps(self.source).encode(), capture_output=True, timeout=WAIT, env=self.env)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(json.loads(result.stdout)['changed'], 0)
         self.assertEqual({table: snapshot(self.lib.source)[table] for table in before}, before)
@@ -276,7 +277,7 @@ class NativeFolderHTTPTest(unittest.TestCase):
         worker.write_text('#!' + sys.executable + '\nimport os,subprocess,sys\n'
                           "subprocess.run([os.environ['ILLUSTASH_RESEARCH_COMPUTE_BIN'],sys.argv[1],sys.argv[2]],check=True)\n")
         worker.chmod(0o755)
-        self.env.update(ILLUSTASH_RESEARCH_WORKER=worker_command(worker), ILLUSTASH_RESEARCH_TIMEOUT_MS='20000',
+        self.env.update(ILLUSTASH_RESEARCH_WORKER=worker_command(worker), ILLUSTASH_RESEARCH_TIMEOUT_MS=str(int(WAIT * 1000)),
                         ILLUSTASH_RESEARCH_RETRY_MS='300')
         self.stop(self.process)
         self.process, self.log = self.start(self.lib.path)
@@ -290,7 +291,7 @@ class NativeFolderHTTPTest(unittest.TestCase):
         def compared():
             self.assertNotEqual(self.sync()['state']['status'], 'error')
             wait_until(lambda: json.loads(self.request('/api/similar')['body'])['state']['status'] == 'idle'
-                       and not self.pending(), timeout=30)
+                       and not self.pending())
             with sqlite3.connect(self.lib.db) as c:
                 a, b = (c.execute('SELECT uuid FROM assets WHERE filename=?', (n,)).fetchone()[0] for n in ('a.png', 'b.png'))
                 pair = tuple(sorted((a, b)))

@@ -106,7 +106,7 @@ impl Host {
                 }
                 Err(mpsc::RecvTimeoutError::Timeout) => {}
             }
-            assert!(start.elapsed() < Duration::from_secs(60), "host startup timeout: {lines:?}");
+            assert!(start.elapsed() < crate::common::wait::limit(), "host startup timeout: {lines:?}");
         }
         Ok(Self { child, stdin: Some(stdin), origin: format!("http://127.0.0.1:{port}"), lines })
     }
@@ -147,8 +147,8 @@ impl Host {
             if status["running"] != seen {
                 (seen, moved) = (status["running"].clone(), Instant::now());
             }
-            assert!(moved.elapsed() < Duration::from_secs(60), "background check stalled: {status}");
-            assert!(start.elapsed() < Duration::from_secs(600), "background check did not finish: {status}");
+            assert!(moved.elapsed() < crate::common::wait::limit(), "background check stalled: {status}");
+            assert!(start.elapsed() < crate::common::wait::limit() * 10, "background check did not finish: {status}");
             thread::sleep(Duration::from_millis(100));
         }
     }
@@ -157,7 +157,7 @@ impl Host {
         drop(self.stdin.take());
         let start = Instant::now();
         while self.child.try_wait().unwrap().is_none() {
-            assert!(start.elapsed() < Duration::from_secs(20), "host did not exit");
+            assert!(start.elapsed() < crate::common::wait::limit(), "host did not exit");
             thread::sleep(Duration::from_millis(20));
         }
     }
@@ -342,7 +342,7 @@ fn checks_after_a_crash_in_the_background_and_on_request_and_stop_writing_on_dam
             break;
         }
         assert!(status["running"].is_object(), "the check ended before a writer could meet it: {status}");
-        assert!(start.elapsed() < Duration::from_secs(60), "{status}");
+        assert!(start.elapsed() < crate::common::wait::limit(), "{status}");
         thread::sleep(Duration::from_millis(20));
     }
     let writer = Connection::open(busy.join("source.sqlite")).unwrap();

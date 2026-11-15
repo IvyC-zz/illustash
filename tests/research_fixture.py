@@ -87,7 +87,7 @@ class Store:
                                     '--no-open','--no-auto-sync','--no-names','--no-provenance','--no-index-check'],
                                    env=env,stdout=log,stderr=subprocess.DEVNULL,**SPAWN)
         try:
-            enter(origin,log,process,timeout=10)
+            enter(origin,log,process)
             token = json.loads(fetch(origin,{'url':'/api/bootstrap'},origin)['body'])['token']
             result = fetch(origin,{'url':route,'method':'POST',
                                    'body':json.dumps(body).encode(),

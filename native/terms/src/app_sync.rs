@@ -1433,7 +1433,7 @@ mod tests {
         // 再以完整数据库为基线，避免把合法后台初始化误算成旧同步任务越界写入。
         let mut backups = crate::app_human_conclusions::Backups::default();
         backups.start(&replacement, 1, "synthetic-backup-session").unwrap();
-        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        let deadline = crate::test_wait::deadline();
         loop {
             let status = backups.status();
             if matches!(status.get("snapshots"), Some(crate::http_json::Json::Array(rows)) if !rows.is_empty())
@@ -1504,13 +1504,13 @@ mod tests {
                                 // 现有的回调正好包住源库提交和应用库刷新。
                                 // 精确地停在这个边界，直到观察到取消。
                                 ready_tx.send(()).unwrap();
-                                let deadline = std::time::Instant::now() + Duration::from_secs(5);
+                                let deadline = crate::test_wait::deadline();
                                 while ctx.check().is_ok() {
                                     assert!(std::time::Instant::now() < deadline, "lifecycle did not cancel scan");
                                     std::thread::yield_now();
                                 }
                                 cancel_tx.send(()).unwrap();
-                                release_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+                                release_rx.recv_timeout(crate::test_wait::limit()).unwrap();
                             }
                         })
                         .map(|_| ())
@@ -1519,7 +1519,7 @@ mod tests {
                     session.syncer.state = Arc::new(Mutex::new(State::from(json!({"status":"scanning"}))));
                     session.syncer.install_fixture_task(task);
                     if !cancelled {
-                        assert!(session.syncer.task.as_mut().unwrap().wait(Duration::from_secs(5)));
+                        assert!(session.syncer.task.as_mut().unwrap().wait(crate::test_wait::limit()));
                         assert_eq!(
                             session.syncer.task.as_ref().unwrap().outcome(),
                             crate::app_tasks::TaskOutcome::Done
@@ -1527,7 +1527,7 @@ mod tests {
                     }
                 }
                 if cancelled {
-                    ready_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+                    ready_rx.recv_timeout(crate::test_wait::limit()).unwrap();
                     let mut session = service.session.write().unwrap();
                     let library = session.library.clone();
                     let token = session.token.clone();
@@ -1563,14 +1563,14 @@ mod tests {
                     done_tx.send(()).unwrap();
                 });
                 if cancelled {
-                    cancel_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+                    cancel_rx.recv_timeout(crate::test_wait::limit()).unwrap();
                     assert!(matches!(done_rx.try_recv(), Err(mpsc::TryRecvError::Empty)));
                     if finish == "switch" {
                         assert_eq!(observer.as_ref().unwrap().generation(), generation);
                     }
                     release_tx.send(()).unwrap();
                 }
-                done_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+                done_rx.recv_timeout(crate::test_wait::limit()).unwrap();
                 thread.join().unwrap();
                 if let Some(observer) = observer {
                     assert!(observer.with_library::<()>(generation, |_| panic!("old generation published")).is_err());

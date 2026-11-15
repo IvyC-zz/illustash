@@ -34,6 +34,7 @@ from tests.synthetic_source import synthetic_reference
 from tests.test_read_http import INTERRUPT, SPAWN, free_port, wait_until
 from tools.build_db import SCHEMA as SOURCE_SCHEMA
 from tools.verify_read_http import enter, fetch
+from tools.wait_limit import WAIT
 
 difference = lifecycle.difference
 
@@ -315,7 +316,7 @@ class NativeLibraryUpgradeTest(unittest.TestCase):
 
     def failed(self, lib, *, upgrade=True, port=None):
         result = subprocess.run(self.args(lib, upgrade=upgrade, port=port), env=self.env,
-                                capture_output=True, timeout=10)
+                                capture_output=True, timeout=WAIT)
         self.assertNotEqual(result.returncode, 0, result.stdout)
         self.assertFalse(self.sentinel.exists())
         return result
@@ -324,9 +325,9 @@ class NativeLibraryUpgradeTest(unittest.TestCase):
         if process.poll() is None:
             process.send_signal(INTERRUPT)
             try:
-                process.wait(5)
+                process.wait(WAIT)
             except subprocess.TimeoutExpired:
-                process.kill(); process.wait(3)
+                process.kill(); process.wait(WAIT)
 
     def start(self, lib, *, upgrade=True, sync=False, backup_gate=None):
         port = free_port(); origin = f'http://127.0.0.1:{port}'
@@ -335,7 +336,7 @@ class NativeLibraryUpgradeTest(unittest.TestCase):
         process = subprocess.Popen(self.args(lib, upgrade=upgrade, port=port, sync=sync), env=env, stdout=log, stderr=log, **SPAWN)
         self.addCleanup(self.stop, process)
         try:
-            enter(origin, log, process, timeout=10)
+            enter(origin, log, process)
         except AssertionError:
             log.seek(0)
             self.fail(f'upgrade startup failed ({process.poll()}): {log.read().decode(errors="replace")}')
@@ -353,7 +354,7 @@ class NativeLibraryUpgradeTest(unittest.TestCase):
             return bool(result['history']) and result['history'][0]['status'] != 'running' \
                 and result['state']['status'] not in ('idle', 'scanning', 'recognising', 'importing')
 
-        wait_until(terminal, timeout=10)
+        wait_until(terminal)
         return result
 
     def backups(self, lib, before):
@@ -395,7 +396,7 @@ class NativeLibraryUpgradeTest(unittest.TestCase):
                 existing = {p.relative_to(lib.path).as_posix() for p in lib.path.rglob('*.sqlite')}
                 baseline = self.root / f'baseline-v{version}.pilib'; shutil.copytree(lib.path, baseline)
                 expected = subprocess.run([str(self.binaries['current']), 'migrate', '--db', str(baseline / 'library.sqlite')],
-                                          env=self.env, capture_output=True, timeout=20)
+                                          env=self.env, capture_output=True, timeout=WAIT)
                 self.assertEqual(expected.returncode, 0, expected.stderr)
                 # 比较等价的启动消费者：单独的 migrate CLI 让裁决事件留在待处理，而原生 HTTP 宿主会执行不带学习器的
                 # 分派。原 Python 消费者的结果已录制（tests/fixed_expectations.py）。
@@ -418,7 +419,7 @@ class NativeLibraryUpgradeTest(unittest.TestCase):
                 results = []
                 for db in (lib.db, baseline / 'library.sqlite'):
                     out = subprocess.run([str(self.binaries['current']), 'undo', '--db', str(db), '--action', str(action)],
-                                         env=self.env, capture_output=True, timeout=20)
+                                         env=self.env, capture_output=True, timeout=WAIT)
                     self.assertEqual(out.returncode, 0, out.stderr)
                     results.append(out.stdout)
                 self.assertEqual(*results)
@@ -543,7 +544,7 @@ class NativeLibraryUpgradeTest(unittest.TestCase):
     def test_occupied_port_and_invalid_preflight_do_not_write_or_backup(self):
         lib, _ = self.package(5, 'preflight')
         before = tree(self.root)
-        result = subprocess.run(self.args(lib) + ['--backup'], env=self.env, capture_output=True, timeout=10)
+        result = subprocess.run(self.args(lib) + ['--backup'], env=self.env, capture_output=True, timeout=WAIT)
         self.assertNotEqual(result.returncode, 0)
         self.assertEqual(result.stderr.decode().strip(), '--upgrade 不可与 --backup 同用')
         assert_only_startup_diagnostics_written(self, self.root, before)
@@ -626,7 +627,7 @@ class NativeLibraryUpgradeTest(unittest.TestCase):
         self.assertGreaterEqual(stages.count('正在备份图库'), 2, stages)
         self.assertEqual(len(self.backups(lib, existing)), 1)
         process.stdin.close()
-        self.assertEqual(process.wait(20), 0)
+        self.assertEqual(process.wait(WAIT), 0)
 
     def test_switching_to_an_old_library_asks_first_and_a_failed_upgrade_changes_nothing(self):
         # #193：页面上的切换图库，而不只是启动时的 --upgrade。
@@ -673,12 +674,12 @@ class NativeLibraryUpgradeTest(unittest.TestCase):
         backup = Path(body['upgraded']['backup'])
         self.assertEqual(self.backups(old, existing), [backup])
         self.assertEqual(database(backup), before)
-        wait_until(lambda: opened() == str(old.path), timeout=10)
+        wait_until(lambda: opened() == str(old.path))
         listed = json.loads(fetch(origin, {'url': '/api/libraries'}, origin)['body'])
         self.assertEqual(listed['upgraded'], {'backup': str(backup)})
         # 现在已是当前格式：来回切换不再询问。
         self.assertEqual(post('/api/libraries/open', {'path': str(current.path)})[0], 200)
-        wait_until(lambda: opened() == str(current.path), timeout=10)
+        wait_until(lambda: opened() == str(current.path))
         self.assertNotIn('upgraded', json.loads(fetch(origin, {'url': '/api/libraries'}, origin)['body']))
         self.assertEqual(post('/api/libraries/open', {'path': str(old.path)})[0], 200)
         self.stop(process)
