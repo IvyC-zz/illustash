@@ -152,6 +152,7 @@ fn main() {
                 if let Some(child) = handle.try_state::<server::Child>() {
                     child.stop();
                 }
+                illustash_terms::diagnostics::logs::flush();
             }
             _ => {}
         }

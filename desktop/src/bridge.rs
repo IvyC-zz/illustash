@@ -5,6 +5,7 @@
 //!   POST /pixiv/logout             清掉登录窗口的数据（解绑）
 //!   GET  /platform/update/status   应用内更新的状态（#279，updater.rs）
 //!   POST /platform/update/download?version=X.Y.Z 下载并校验这个版本；cancel 取消；install 安装并重启
+//!   POST /platform/diagnostics/open-logs 打开应用自己的日志目录（无路径参数）
 use std::thread;
 
 use serde_json::{json, Value};
@@ -60,6 +61,9 @@ fn handle(app: &AppHandle, token: &str, request: Request) {
                 pixiv::login(app, query(request.url(), "force").as_deref() == Some("1")).map(|_| json!({"ok": true}))
             }
             (Method::Post, "/pixiv/logout") => pixiv::logout(app).map(|_| json!({"ok": true})),
+            (Method::Post, "/platform/diagnostics/open-logs") if request.url() == route => {
+                open_logs().map(|()| json!({"ok": true})).map_err(|_| "无法打开日志所在文件夹".into())
+            }
             (Method::Get, "/platform/update/status") => Ok(updater::status(app)),
             (Method::Post, "/platform/update/download") => match query(request.url(), "version") {
                 Some(version) => updater::download(app, &version),
@@ -89,4 +93,45 @@ fn handle(app: &AppHandle, token: &str, request: Request) {
     };
     let header = Header::from_bytes("Content-Type", "application/json; charset=utf-8").expect("constant header");
     let _ = request.respond(Response::from_string(body.to_string()).with_status_code(code).with_header(header));
+}
+
+fn open_logs() -> std::io::Result<()> {
+    let directory = std::path::absolute(illustash_terms::diagnostics::logs::directory()?)?;
+    #[cfg(target_os = "macos")]
+    {
+        let status = std::process::Command::new("/usr/bin/open").arg(directory).status()?;
+        if status.success() {
+            Ok(())
+        } else {
+            Err(std::io::Error::other("open failed"))
+        }
+    }
+    #[cfg(windows)]
+    {
+        use std::{ffi::c_void, os::windows::ffi::OsStrExt, ptr::null};
+        #[link(name = "shell32")]
+        extern "system" {
+            fn ShellExecuteW(
+                window: *const c_void,
+                verb: *const u16,
+                file: *const u16,
+                parameters: *const u16,
+                directory: *const u16,
+                show: i32,
+            ) -> isize;
+        }
+        let path: Vec<_> = directory.as_os_str().encode_wide().chain(Some(0)).collect();
+        // SAFETY: path 在调用期间有效且以 NUL 结尾。用目录本身和默认动词，不拼接命令行或参数。
+        let status = unsafe { ShellExecuteW(null(), null(), path.as_ptr(), null(), null(), 1) };
+        if status > 32 {
+            Ok(())
+        } else {
+            Err(std::io::Error::other("ShellExecuteW failed"))
+        }
+    }
+    #[cfg(not(any(windows, target_os = "macos")))]
+    {
+        let _ = directory;
+        Err(std::io::ErrorKind::Unsupported.into())
+    }
 }

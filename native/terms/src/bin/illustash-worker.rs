@@ -1,13 +1,13 @@
 //! 安装的可选 worker 适配器。基础应用从不启用它。
 //! 一个二进制承担全部四种 worker：宿主每次启动时显式指定种类（ILLUSTASH_WORKER_KIND）；
 //! 旧式的 `illustash-<kind>` 副本仍按文件名分派。
-use illustash_terms::app_tasks::{worker_kind, WORKER_KIND_ENV};
+use illustash_terms::app_tasks::{worker_kind, WORKER_ERROR_PREFIX, WORKER_KIND_ENV};
 use std::{env, path::PathBuf, process::ExitCode};
 fn main() -> ExitCode {
     match run() {
         Ok(code) => ExitCode::from(code),
         Err(error) => {
-            eprintln!("可选 worker 不可用：{error}");
+            eprintln!("{WORKER_ERROR_PREFIX}{error}");
             ExitCode::FAILURE
         }
     }

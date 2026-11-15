@@ -113,7 +113,7 @@
 
  "crates/platform/src/platform_photos.rs":"4765dd1127cc8940567f719e3f8761e51e0711488179843d39a6383f657123d7",
 
- "crates/platform/src/platform_process.rs":"3b043c7eb0569dca4fa7e3443530c6d7c462b4ed199e4dee0a7fe8e9bc500e5e",
+ "crates/platform/src/platform_process.rs":"c0c28b2d85ce8696e93bde94d2cffc5721e66ce5ed6795f8c735fcaf3cef112d",
 
  "crates/platform/src/platform_process/windows_desktop.rs":"fb60ef14077bad0456d6c9e7bcad2c85857197ed41db11a800bd17dd6ec089fe",
 
@@ -137,19 +137,19 @@
 
  "desktop/build.rs":"ba1c3b9097208d998ecbebb7b5ab044ceef97999132afb8f1a55a1a61b077034",
 
- "desktop/src/bridge.rs":"3b641d0fc644bba3e845718fdc90cedcb4442e95ccd11901fb3311e16814785b",
+ "desktop/src/bridge.rs":"f8d56a032ed1cde0c049c1f1af3ec9ef57c64b927291ee7bc49411a268183dcb",
 
  "desktop/src/bundled_workers.rs":"7e8c129ac24612f967825dd16166c8339ce5d1b1287650e49d423edf41814897",
 
  "desktop/src/i18n.rs":"ab24cd127b728f156f456069c1c7e10de2ea10cbeea476ef4eb552daa2ae931b",
 
- "desktop/src/main.rs":"f3f0a67da31eb6c76cb5c293cdf670033c2740bc24db48cf4f65f02a570c7cae",
+ "desktop/src/main.rs":"c9a8bad5ef34aa2e46dd39dd830f8524a32b8cd2d1fe26f6b4d77c6b28a22307",
 
  "desktop/src/picker.rs":"71bd9e4e9e1746d60d4eea93b0a80f5091080cebcd2defb156ccbd63cd48c284",
 
  "desktop/src/pixiv.rs":"511b8003b2068c801f336d96a6c130a6796ed1866d1102e64678760d3a906c65",
 
- "desktop/src/server.rs":"912a1cb53ccac080bd10cac03a08391949ff5517d2e0918ee83d212f983bb572",
+ "desktop/src/server.rs":"ecf0690af8e40abdb1560619c3389efaf8e91ba9285c0276209d65fa20b98645",
 
  "desktop/src/updater.rs":"628b8b135561841b3e507574981c7107d6989feff784397690d025a5195fd99f",
 
@@ -179,7 +179,7 @@
 
  "native/terms/src/app_curation.rs":"17861f2a525eee26a32b981f819eca3929a051230bc81ac7f477ee8d1ae76122",
 
- "native/terms/src/app_desktop.rs":"481e12ba4f08868b199da130b683ffb46556a79c44b9e781723d4c887903f9a5",
+ "native/terms/src/app_desktop.rs":"bb18a27579eb066f333079ab11ba545e73819a90b6114d1c52cd4da592bd60a8",
 
  "native/terms/src/app_effects.rs":"507ff09441aab09cc8f2ca7460bbde3da5bffb8180629b3bb6f503598dbbe1b8",
 
@@ -201,7 +201,7 @@
 
  "native/terms/src/app_library.rs":"776cfbe684a3d2341738010c41883cc599afe533604e1a2a788ff1d9cd0d4170",
 
- "native/terms/src/app_local.rs":"f8fb6ea23574a2ec339f9b966e05951db2c1e8cd3b735464f51edf36ecc4bd49",
+ "native/terms/src/app_local.rs":"297a2b6263f1b0007f8e9918ac3ce16527fb210541de383f683a2fc6cd37da26",
 
  "native/terms/src/app_migrate.rs":"dc7ac85b778a33def433892fe83fab3fdc283ff33c970595e8dddb6992a6cefb",
 
@@ -231,7 +231,7 @@
 
  "native/terms/src/app_names.rs":"f1e9ee13d2fc826d1c0071b5de7e4a38700efe9445001d472d70b07c3d60795f",
 
- "native/terms/src/app_onboarding.rs":"03d17364b76316926f094d793662181cca97fdd144379691389f65b09b9a3f9a",
+ "native/terms/src/app_onboarding.rs":"5588053c4b2ad00654ec76c55ab6e9fd968c33a7979ae9f39f9ae03a09ba78a2",
 
  "native/terms/src/app_photos.rs":"df3a434e0b64f63e395ca93703be19d90b83faefe6901537fdd628d51ddc0326",
 
@@ -269,7 +269,7 @@
 
  "native/terms/src/app_sync.rs":"0419ca74f296986a9ae8ebca670d68278e04891e12f9b73423d82df6d66db8f4",
 
- "native/terms/src/app_tasks.rs":"55d0fc14c38fadec7ca902c88fd0053ff6403c41eb4ccdda9435d5258874ad19",
+ "native/terms/src/app_tasks.rs":"61d62bf4c6547993200925c6da704b065c4db301f26d5848a81a362c7a913cf6",
 
  "native/terms/src/app_updates.rs":"e7b51e4afd108af07dbf92e76d44251709635984f8387d3e702922190b9834ba",
 
@@ -277,13 +277,15 @@
 
  "native/terms/src/bin/illustash-terms.rs":"04ee80bb280034a16f8ddd9fe97e8de0700713259c44f76858f70b8713d4c594",
 
- "native/terms/src/bin/illustash-worker.rs":"e441577218d50c212a4291a750dd8b17289370dd1de70ba64ea016e6e76b9e05",
+ "native/terms/src/bin/illustash-worker.rs":"9152b82ab495fedadf6c7736bb103c1290fd5ee79eff758e76b382aeb0093abd",
 
- "native/terms/src/cli.rs":"9ce04f9ee8f5b693a6a8fd56bed77cac4066e51a476974eccad250d3e3fe1a25",
+ "native/terms/src/cli.rs":"573757b9b315bbbc6af829e6840a80554eea12ddeb89fdbd7d2bb979c2c34a2c",
 
  "native/terms/src/desktop_shell.rs":"381733278909d3290199f212c138d02197f1a259c9fda2a58819609b986f27a2",
 
- "native/terms/src/diagnostics.rs":"8eff6d4eb9fe74a1072ba8e4299cefeb4b36933c421000ff51d84a1e872e5b09",
+ "native/terms/src/diagnostics.rs":"94e20ccdbb30bf4ff97b8b773295ecc18bf6503236b7816e437cc6b959ccb9ec",
+
+ "native/terms/src/diagnostics/logs.rs":"7364905e2de55a313824318d68cbf35bdd0d7d8ac935e813b20b166f50a1ccdc",
 
  "native/terms/src/http.rs":"806d8b048bc9e2925765986a082d3bc542c8e669bb93fcc745be8508fcc9ec91",
 
@@ -297,7 +299,7 @@
 
  "native/terms/src/http_host_get.rs":"ccfc6662205665fe50084e5d1ed607bd1b0b764e9ecec2805987f2621e362d32",
 
- "native/terms/src/http_host_post.rs":"8db1013ee971ea4812d3da18f416097cb33e4e37789dcb890a8115f2f41fc9a3",
+ "native/terms/src/http_host_post.rs":"b4cb8a874a4e48da5cc149523b2676265c73f026eeaf91144ea7f00fb0a2ba3e",
 
  "native/terms/src/http_json.rs":"42ec65687fad69e430186543d3ef27b8141030e6694b07f683ee91f678478d6b",
 
@@ -459,7 +461,8 @@
  "native/terms/examples/relation-probe.rs":{"policy":"retained","current_runtime":"explicit-synthetic-relation-comparison","storage_domain":"test-research"},
  "native/terms/src/table_delta.rs":{"policy":"coordination","current_runtime":"rust-native-cache-publication","storage_domain":"research+application"},
  "native/terms/src/app_rescue.rs":{"policy":"lifecycle","current_runtime":"rust","storage_domain":"source"},
- "crates/relation-fft/build.rs":{"policy":"application","current_runtime":"rust-build","storage_domain":"no-db"}
+ "crates/relation-fft/build.rs":{"policy":"application","current_runtime":"rust-build","storage_domain":"no-db"},
+ "desktop/src/bridge.rs":{"policy":"coordination","current_runtime":"rust-desktop-native-bridge","storage_domain":"no-db","scope_overrides":{"open_logs":{"storage_domain":"app-support-diagnostics-directory-only"}}}
 },
 "limitations":[
  "审计生产 HTTP/DB/事务/动态执行/启动/CLI；保留研究/测试/生成代码。",
@@ -546,7 +549,7 @@
  "crates/core/src/names_commands.rs":{"database-write":{"INSERT OR IGNORE INTO:term_key_names":1,"dynamic-or-wrapper":8,"DELETE FROM:term_names":4,"DELETE FROM:term_key_names":1,"DELETE FROM:term_key_aliases":1,"INSERT INTO:term_key_aliases":1}},
  "native/terms/src/app_profiles.rs":{"http-branch":[[23,8],[16,5],[17,7],[44,3],[83,3],[242,4],[98,3]],"database-write":[[3,3],0]},
  "crates/core/src/character_import.rs":{"database-write":{"INSERT OR IGNORE INTO:term_links":1,"dynamic-or-wrapper":15,"UPDATE:term_tree":3,"UPDATE:terms":1,"INSERT INTO:term_batches":1,"INSERT OR IGNORE INTO:assertions":1,"INSERT INTO:imported":1,"DELETE FROM:auto_rules":1,"INSERT OR IGNORE INTO:auto_rules":4,"INSERT INTO:excluded":1,"DELETE FROM:excluded":1,"DELETE FROM:touched":1,"INSERT OR IGNORE INTO:touched":1,"INSERT INTO:assets":1,"DELETE FROM:duplicates":1,"INSERT INTO:duplicates":1,"INSERT OR REPLACE INTO:meta":2,"DELETE FROM:assets":1,"DELETE FROM:candidates":1,"REINDEX":3,"INSERT OR REPLACE INTO:sync_added":1}},
- "native/terms/src/http_host_post.rs":{"http-branch":[264,265,266,267,[41,2],268,247,231,74,88,24,23,16,17,44,83,242,98,80,79,76,269,100,37,95,40,42,[230,2],39,270,43,271,[26,2],272,273,276,277,278,281,292,293,295,[282,2],[275,2],[280,2],[279,2],[274,2],[294,2],296,[303,2],305]},
+ "native/terms/src/http_host_post.rs":{"http-branch":[264,265,266,267,[41,2],268,247,231,74,88,24,23,16,17,44,83,242,98,80,79,76,269,100,37,95,40,42,[230,2],39,270,43,271,[26,2],272,273,276,277,278,281,292,293,295,[282,2],[275,2],[280,2],[279,2],[274,2],[294,2],296,[303,2],305,"/api/diagnostics/open-logs"]},
  "native/terms/src/app_provenance.rs":{"database-write":{"INSERT OR IGNORE INTO:pending_runs":3,"UPDATE:runs":3,"INSERT OR IGNORE INTO:native_meta":2,"dynamic-or-wrapper":4,"UPDATE:native_meta":1,"COMMIT":2,"INSERT INTO:runs":1,"DELETE FROM:pending_runs":1,"ATTACH":2,"PRAGMA:c.execute_batch(\"pragma defer_foreign_keys":1,"INSERT INTO:leads|UPDATE:set":1,"INSERT INTO:native_delivery":1},"entrypoint":{"process-start":1}},
  "crates/core/src/character_sql/evidence_default.sql":{"database-write":[196]},
  "native/terms/src/app_migration_sql/artists.sql":{"database-write":["CREATE TABLE IF NOT EXISTS:artist_verdicts","CREATE INDEX IF NOT EXISTS:artist_verdicts_artist"]},
@@ -579,7 +582,8 @@
  "crates/core/src/character_entities.rs":{"database-write":{"INSERT INTO:terms":1,"dynamic-or-wrapper":2,"INSERT INTO:term_tree":1}},
  "crates/core/src/new_library.rs":{"database-write":{"dynamic-or-wrapper":5,"INSERT INTO:term_evidence_sets":2,"DROP TABLE IF EXISTS:artist_verdicts":1,"DROP TABLE:asset_tags|DROP TABLE:general_hits|DROP TABLE:asset_rating":1,"INSERT OR REPLACE INTO:meta":1,"INSERT OR IGNORE INTO:meta":1}},
  "native/terms/src/app_http.rs":{"entrypoint":{"process-start":1}},
- "crates/relation-fft/build.rs":{"entrypoint":{"native-main":1}}
+ "crates/relation-fft/build.rs":{"entrypoint":{"native-main":1}},
+ "desktop/src/bridge.rs":{"entrypoint":["process-start"]}
 },
 "policies":{
  "application":{"final_owner":"rust","responsibility":"HTTP 参数/目标、人工命令、正式事务/投影；Python 包装待迁移","acceptance":"合成状态码/原始字节、返回/DB/历史/撤销/事件对照；竞争与注入失败原子回滚","deletion_condition":"Rust 调用链及无 Python 验收后删生产 Python；保留旧对照","stages":["M2","M3"]},

@@ -1,7 +1,6 @@
 //! 共用的协作式任务生命周期。业务上的持久化和重试仍由使用方负责。
-use crate::{app_library::Library, Error, Result};
+use crate::{app_library::Library, diagnostics::logs, Error, Result};
 use std::{
-    fs::File,
     path::{Path, PathBuf},
     process::{Command, ExitStatus},
     sync::{
@@ -25,6 +24,8 @@ pub const WORKER_KINDS: [&str; 4] = ["research", "index", "provenance", "recogni
 /// 宿主每次启动 worker 都用这个环境变量显式告诉它本次的种类；请求/响应两参数协议不变，
 /// 旧布局里按文件名分派的适配器和测试替身 worker 不读这个变量。
 pub const WORKER_KIND_ENV: &str = "ILLUSTASH_WORKER_KIND";
+/// worker 适配器失败时的 stderr 前缀，供宿主将失败归类为脱敏日志。
+pub const WORKER_ERROR_PREFIX: &str = "可选 worker 不可用：";
 
 /// worker 本次的种类。旧安装布局的 `illustash-<kind>` 文件名仍按文件名分派（兼容旧安装和
 /// 显式覆盖）；其他文件名（安装包里的 `illustash-worker`）必须由 [`WORKER_KIND_ENV`] 给出。
@@ -235,27 +236,52 @@ impl TaskContext {
         }
         apply()
     }
-    /// 运行 worker，丢弃标准输出和标准错误。返回前回收主进程并清理剩下的后代进程。
+    /// 运行 worker，丢弃标准输出，对 stderr 做本机脱敏诊断。返回前回收进程树。
     pub fn process(&self, command: &mut Command) -> Result<ExitStatus> {
         self.process_observed(command, || Ok(()))
     }
     /// `observe` 在等待期间运行；它返回错误时停止并回收 worker。
     /// 每个 worker 都带着 `ORT_DISABLE_TELEMETRY=1` 启动，不管它会不会加载 ONNX Runtime（#381）。
     pub fn process_observed(&self, command: &mut Command, observe: impl FnMut() -> Result<()>) -> Result<ExitStatus> {
-        self.run_worker(command, None, observe)
+        self.run_worker(command, observe, |_| {})
     }
-    /// 与 `process` 相同，但将标准错误写入文件，并在返回前关闭文件句柄。
-    pub(crate) fn process_with_stderr(&self, mut command: Command, stderr: File) -> Result<ExitStatus> {
-        self.run_worker(&mut command, Some(stderr), || Ok(()))
+    /// 自检失败仍然向界面提供最后一个非空 stderr 行，原文只在内存里保留。
+    pub(crate) fn check_worker(&self, mut command: Command) -> Result<(ExitStatus, String)> {
+        let mut last = String::new();
+        let status = self.run_worker(
+            &mut command,
+            || Ok(()),
+            |line| {
+                let text = String::from_utf8_lossy(line);
+                let text = text.trim();
+                if !text.is_empty() {
+                    last = text.chars().take(300).collect();
+                }
+            },
+        )?;
+        Ok((status, last))
     }
     fn run_worker(
         &self,
         command: &mut Command,
-        stderr: Option<File>,
         observe: impl FnMut() -> Result<()>,
+        on_stderr: impl FnMut(&[u8]) + Send,
     ) -> Result<ExitStatus> {
         crate::recognition_compute::telemetry::child(command);
-        crate::platform_process::worker(command, stderr, || self.check(), observe)
+        let source = logs::Source::worker(command);
+        let result = crate::platform_process::worker(
+            command,
+            |pipe| logs::drain(source, pipe, on_stderr),
+            || self.check(),
+            observe,
+        );
+        match &result {
+            Ok(status) => source.worker_exit(*status),
+            Err(_) if self.timed_out() => source.worker_timeout(),
+            Err(error) if !self.cancel.load(Ordering::SeqCst) => source.worker_error(error),
+            Err(_) => {}
+        }
+        result
     }
 }
 pub struct Task {
@@ -373,6 +399,106 @@ mod tests {
     use super::*;
     fn identity() -> TaskIdentity {
         TaskIdentity::at(&std::env::temp_dir(), "synthetic", 1, "session").unwrap()
+    }
+
+    #[test]
+    #[ignore = "由 worker_failure_logs_are_readable_and_private 通过隔离进程运行"]
+    fn diagnostic_host_fixture() {
+        crate::diagnostics::initialize();
+        logs::drain(logs::Source::Host, "HTTP image: /Users/fake-owner/host-only.jpg\n".as_bytes(), |_| {});
+        for (kind, code) in [("recognition", 7), ("provenance", 9), ("index", 0)] {
+            let mut task = Task::start(identity(), Some(Duration::from_secs(30)), move |ctx| {
+                let mut command = Command::new(std::env::current_exe()?);
+                command
+                    .args(["--ignored", "--exact", "app_tasks::tests::diagnostic_worker_fixture", "--nocapture"])
+                    .env(WORKER_KIND_ENV, kind);
+                assert_eq!(ctx.process(&mut command)?.code(), Some(code));
+                Ok(())
+            });
+            assert!(task.wait(Duration::from_secs(30)));
+            assert_eq!(task.outcome(), TaskOutcome::Done);
+        }
+        logs::flush();
+    }
+
+    #[test]
+    #[ignore = "由隔离宿主经真实的 worker 管道启动"]
+    fn diagnostic_worker_fixture() {
+        use std::io::Write;
+
+        let mut stderr = std::io::stderr().lock();
+        // 超过管道和限长缓冲容量，末尾另有一行，没有换行符。
+        stderr.write_all(&vec![b'x'; 256 * 1024]).unwrap();
+        stderr
+            .write_all(b" synthetic-opaque-token\nCookie: mock-session=n0t-real\nAPI key: test-key-secret\r\n")
+            .unwrap();
+        let kind = std::env::var(WORKER_KIND_ENV).unwrap();
+        println!("synthetic-stdout-session-key");
+        let (message, code) = match kind.as_str() {
+            "recognition" => (
+                "可选 worker 不可用：不合法：原生识别 运行库 /Users/fake-owner/Synthetic Library/fake-runtime.dylib: No such file or directory",
+                7,
+            ),
+            "provenance" => (
+                "可选 worker 不可用：不合法：IQDB signature calculation failed: \\fake-server\\fake-share\\图 名.jpg user=mock-account",
+                9,
+            ),
+            "index" => {
+                let warning = "识别加速：CCIP 改用 CPU：mock-account";
+                write!(stderr, "{warning}\n{warning}\n").unwrap();
+                thread::sleep(Duration::from_millis(1100));
+                (warning, 0)
+            }
+            _ => panic!("unexpected fixture kind"),
+        };
+        write!(stderr, "{message}").unwrap();
+        std::process::exit(code);
+    }
+
+    #[cfg(any(unix, windows))]
+    #[test]
+    fn worker_failure_logs_are_readable_and_private() {
+        let root = std::env::temp_dir().join(format!("illustash-worker-log-{}", crate::store::new_key().unwrap()));
+        std::fs::create_dir(&root).unwrap();
+        let result = Command::new(std::env::current_exe().unwrap())
+            .args(["--ignored", "--exact", "app_tasks::tests::diagnostic_host_fixture", "--nocapture"])
+            .env("HOME", &root)
+            .env("USERPROFILE", &root)
+            .env("ILLUSTASH_APP_SUPPORT", &root)
+            .output()
+            .unwrap();
+        assert!(result.status.success(), "{}", String::from_utf8_lossy(&result.stdout));
+        let log = std::fs::read_to_string(root.join("diagnostics/logs/runtime.log")).unwrap();
+        std::fs::remove_dir_all(root).unwrap();
+        for reason in [
+            "[host] 本地服务读取图片失败",
+            "[recognition] 无法加载 ONNX Runtime",
+            "[recognition] worker 异常退出（代码 7）",
+            "[provenance] IQDB 签名计算失败",
+            "[provenance] worker 异常退出（代码 9）",
+            "[index] 识别加速不可用，已回退到 CPU",
+        ] {
+            assert!(log.contains(reason), "{log}");
+        }
+        assert_eq!(log.matches("[index] 识别加速不可用，已回退到 CPU").count(), 2, "{log}");
+        for private in [
+            "fake-owner",
+            "Synthetic Library",
+            "fake-runtime.dylib",
+            "host-only.jpg",
+            "fake-server",
+            "fake-share",
+            "图 名.jpg",
+            "mock-account",
+            "mock-session",
+            "n0t-real",
+            "test-key-secret",
+            "synthetic-opaque-token",
+            "synthetic-stdout-session-key",
+            "xxxxxxxxxx",
+        ] {
+            assert!(!log.contains(private), "{log}");
+        }
     }
     #[test]
     fn single_worker_kind_is_explicit_and_legacy_names_still_dispatch() {

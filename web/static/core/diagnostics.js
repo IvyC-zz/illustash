@@ -12,6 +12,7 @@ export async function diagnosticReport() {
   return {...report, ...(lastDiagnostic ? {current: lastDiagnostic} : {})};
 }
 export const diagnosticText = report => JSON.stringify(report, null, 2);
+export const openDiagnosticLogs = () => api('/api/diagnostics/open-logs', {method: 'POST', body: '{}'});
 export function downloadDiagnostic(report) {
   const url = URL.createObjectURL(new Blob([diagnosticText(report)], {type: 'application/json'}));
   const a = document.createElement('a'); a.href = url; a.download = 'illustash-diagnostics.json'; a.click();

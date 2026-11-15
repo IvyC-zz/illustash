@@ -54,6 +54,7 @@ fn about(context: &LibraryContext) -> Json {
         ("platform", platform.into()),
         ("libraries", components(context)),
         ("runtime", env!("ILLUSTASH_RUSTC").into()),
+        ("can_open_logs", crate::app_desktop::available().into()),
     ])
 }
 /// worker 会用到的识别组件（#148）：识别 worker 和它加载的 ONNX Runtime，按 worker 使用的同样路径查找

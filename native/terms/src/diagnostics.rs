@@ -6,10 +6,12 @@ use serde_json::{json, Value};
 use std::{
     fs::{self, File, OpenOptions},
     io::{self, Read, Write},
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::OnceLock,
     time::{SystemTime, UNIX_EPOCH},
 };
+
+pub mod logs;
 
 const LIMIT: usize = 128;
 const DAYS: u64 = 14;
@@ -133,6 +135,7 @@ fn now() -> u64 {
 pub fn initialize() {
     if let Ok(home) = crate::app_paths::user_home() {
         let store = STORE.get_or_init(|| Store { directory: crate::app_paths::app_support(&home).join("diagnostics") });
+        logs::initialize(&store.directory);
         let _ = store.read(now());
     }
 }
@@ -146,22 +149,29 @@ fn private_options() -> OpenOptions {
     }
     options
 }
+fn create_private_directory(path: &Path) -> io::Result<()> {
+    let mut builder = fs::DirBuilder::new();
+    builder.recursive(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::DirBuilderExt;
+        builder.mode(0o700);
+    }
+    builder.create(path)?;
+    if fs::symlink_metadata(path)?.file_type().is_symlink() {
+        return Err(io::Error::other("diagnostics directory is a symlink"));
+    }
+    Ok(())
+}
+fn lock_directory(path: &Path) -> io::Result<File> {
+    let file = private_options().create(true).truncate(false).open(path.join(".lock"))?;
+    crate::app_file_lock::acquire(&file)?;
+    Ok(file)
+}
 impl Store {
     fn lock(&self) -> io::Result<File> {
-        let mut builder = fs::DirBuilder::new();
-        builder.recursive(true);
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::DirBuilderExt;
-            builder.mode(0o700);
-        }
-        builder.create(&self.directory)?;
-        if fs::symlink_metadata(&self.directory)?.file_type().is_symlink() {
-            return Err(io::Error::other("diagnostics directory is a symlink"));
-        }
-        let file = private_options().create(true).truncate(false).open(self.directory.join(".lock"))?;
-        crate::app_file_lock::acquire(&file)?;
-        Ok(file)
+        create_private_directory(&self.directory)?;
+        lock_directory(&self.directory)
     }
     /// 在独占锁内清理。每个文件也有大小限制；坏的/过期的记录从不复制出去。
     fn retained(&self, at: u64, limit: usize) -> io::Result<Vec<Record>> {
@@ -247,6 +257,9 @@ pub fn record(
     publication: Publication,
     retry: Retry,
 ) -> Receipt {
+    if matches!(operation, Operation::Host) {
+        logs::host_failure(cause, code);
+    }
     record_with(STORE.get(), operation, stage, cause, code, publication, retry)
 }
 pub fn failure(operation: Operation, stage: Stage, error: &Error, publication: Publication) -> Receipt {

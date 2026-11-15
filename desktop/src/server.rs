@@ -1,6 +1,5 @@
 //! 启动原生 HTTP 前门（与 CLI 共用），ready 后导航；退出等待宿主任务收尾。
-use std::collections::VecDeque;
-use std::io::{BufRead, BufReader, Read, Write};
+use std::io::{BufRead, BufReader, Write};
 use std::net::TcpListener;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
@@ -9,6 +8,7 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
+use illustash_terms::diagnostics::logs;
 use tauri::{AppHandle, Manager, Url, WebviewWindow};
 
 use crate::i18n::{tr, tr_with};
@@ -236,7 +236,7 @@ pub fn open_outside(url: &Url) {
     }
 }
 
-pub(crate) fn show_error(main: &WebviewWindow, message: &str, _log: &VecDeque<String>) {
+fn show_error(main: &WebviewWindow, message: &str) {
     use illustash_terms::diagnostics::{Cause, Stage};
     show_diagnostic(main, message, Stage::Startup, Cause::HostStartup, None);
 }
@@ -288,7 +288,7 @@ fn show_damage(main: &WebviewWindow, note: &str, rescue: bool) {
 pub(crate) fn blocked(main: &WebviewWindow, message: &str) {
     *main.app_handle().state::<Launch>().blocked.lock().expect("lock poisoned by an earlier panic") =
         Some(message.into());
-    show_error(main, message, &VecDeque::new());
+    show_error(main, message);
 }
 
 pub fn page_loaded(main: &WebviewWindow) {
@@ -410,7 +410,7 @@ fn run(app: &AppHandle, main: &WebviewWindow, library: Option<PathBuf>, start: S
             .expect("lock poisoned by an earlier panic")
             .clone()
             .unwrap_or_else(|| tr("应用没有启动完成"));
-        show_error(main, &tr_with("{why}。处理后请退出并重新打开 Illustash", &[("why", &why)]), &VecDeque::new());
+        show_error(main, &tr_with("{why}。处理后请退出并重新打开 Illustash", &[("why", &why)]));
         return;
     };
     if let Some(library) = &library {
@@ -445,7 +445,7 @@ fn run(app: &AppHandle, main: &WebviewWindow, library: Option<PathBuf>, start: S
     let script = match std::env::current_exe() {
         Ok(exe) => exe,
         Err(e) => {
-            show_error(&main, &tr_with("找不到核心 HTTP 程序：{error}", &[("error", &e)]), &VecDeque::new());
+            show_error(&main, &tr_with("找不到核心 HTTP 程序：{error}", &[("error", &e)]));
             return;
         }
     };
@@ -467,14 +467,12 @@ fn run(app: &AppHandle, main: &WebviewWindow, library: Option<PathBuf>, start: S
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     illustash_platform::platform_process::prepare_desktop(&mut command);
-    let log = Arc::new(Mutex::new(VecDeque::<String>::new()));
     let mut child = match command.spawn() {
         Ok(child) => child,
         Err(e) => {
             show_error(
                 &main,
                 &tr_with("无法启动本地服务（{path}）：{error}", &[("path", &script.display()), ("error", &e)]),
-                &VecDeque::new(),
             );
             return;
         }
@@ -485,11 +483,7 @@ fn run(app: &AppHandle, main: &WebviewWindow, library: Option<PathBuf>, start: S
             Err(error) => {
                 let _ = child.kill();
                 let _ = child.wait();
-                show_error(
-                    &main,
-                    &tr_with("无法管理本地服务进程：{error}；请重新启动应用", &[("error", &error)]),
-                    &VecDeque::new(),
-                );
+                show_error(&main, &tr_with("无法管理本地服务进程：{error}；请重新启动应用", &[("error", &error)]));
                 return;
             }
         }
@@ -497,57 +491,41 @@ fn run(app: &AppHandle, main: &WebviewWindow, library: Option<PathBuf>, start: S
     if let Err(error) = child.stdin.as_mut().expect("stdin is piped").write_all(&[1]) {
         let _ = child.kill();
         let _ = child.wait();
-        show_error(
-            &main,
-            &tr_with("无法连接本地服务：{error}；请重新启动应用", &[("error", &error)]),
-            &VecDeque::new(),
-        );
+        show_error(&main, &tr_with("无法连接本地服务：{error}；请重新启动应用", &[("error", &error)]));
         return;
     }
     let ready = Arc::new(AtomicBool::new(false));
     let active = Arc::new(Mutex::new(Instant::now()));
 
-    fn pump(
-        stream: impl Read + Send + 'static,
-        log: Arc<Mutex<VecDeque<String>>>,
-        active: Arc<Mutex<Instant>>,
-        on_line: impl Fn(&str) -> bool + Send + 'static,
-    ) {
-        thread::spawn(move || {
-            for line in BufReader::new(stream).lines().map_while(Result::ok) {
-                *active.lock().expect("lock poisoned by an earlier panic") = Instant::now();
-                // 进度行交给启动页；错误尾部只保留真正的输出。
-                if !on_line(&line) {
-                    continue;
+    // stdout 是启动协议，含一次性入口码，完全不进入日志。
+    let (win, flag, stdout_activity) = (main.clone(), ready.clone(), active.clone());
+    let stdout = child.stdout.take().expect("stdout is piped");
+    thread::spawn(move || {
+        for line in BufReader::new(stdout).lines().map_while(Result::ok) {
+            *stdout_activity.lock().expect("lock poisoned by an earlier panic") = Instant::now();
+            if !current(win.app_handle(), generation) {
+                continue;
+            }
+            if let Some((done, stage)) = progress(&line) {
+                if !flag.load(Ordering::SeqCst) {
+                    show_progress(&win, done, stage);
                 }
-                eprintln!("{line}");
-                let mut log = log.lock().expect("lock poisoned by an earlier panic");
-                log.push_back(line);
-                if log.len() > 30 {
-                    log.pop_front();
+                continue;
+            }
+            if let Some(url) = ready_url(&line, port) {
+                if !flag.swap(true, Ordering::SeqCst) {
+                    launch(&win, url, generation);
                 }
             }
-        });
-    }
-    let (win, flag) = (main.clone(), ready.clone());
-    pump(child.stdout.take().expect("stdout is piped"), log.clone(), active.clone(), move |line| {
-        if !current(win.app_handle(), generation) {
-            return false;
         }
-        if let Some((done, stage)) = progress(line) {
-            if !flag.load(Ordering::SeqCst) {
-                show_progress(&win, done, stage);
-            }
-            return false;
-        }
-        if let Some(url) = ready_url(line, port) {
-            if !flag.swap(true, Ordering::SeqCst) {
-                launch(&win, url, generation);
-            }
-        }
-        true
     });
-    pump(child.stderr.take().expect("stderr is piped"), log.clone(), active.clone(), |_| true);
+    let stderr = child.stderr.take().expect("stderr is piped");
+    let stderr_activity = active.clone();
+    thread::spawn(move || {
+        logs::drain(logs::Source::Host, stderr, |_| {
+            *stderr_activity.lock().expect("lock poisoned by an earlier panic") = Instant::now();
+        });
+    });
     *app.state::<Child>().process.lock().expect("lock poisoned by an earlier panic") = Some(child);
     thread::spawn(move || {
         let status = loop {
