@@ -4,7 +4,7 @@
 
 ## 开发检查与完整入口
 
-开发 worktree 先跑新改测试和相关定向检查。`tools/check_all.sh` 先验证测试文件语法及验收工具合成测试，再执行 crates/core 与 crates/platform 独立 fmt/clippy/test/locked build、宿主 fmt/clippy、JS、桌面 clippy/test，随后执行原有 Rust 与 crates/iqdb 的 fmt/clippy/test、release 构建、屏蔽退役参考目录导入的 Python discover 和空 PATH 契约重放。Python 全套由 `tests.run_fixed_suite` 执行，调度和参数见下文；覆盖、失败即退出、跳过白名单不变。导入源位于 `tests/reference/`、`web/` 或 #53 已退役的旧索引工具文件时立即拒绝，任何被捕获的导入尝试也使检查失败。构建前只运行固定的测试语法、验收工具合成测试等纯轻量项。任意指定的定向测试使用 `CHECK_ALL_TARGETED_TESTS='tests.test_native_http.TestCase'`（使用完整模块路径，在仓库根执行，以实际类名为准），在本轮候选 release 核心、测试读宿主及 IQDB 准备完成并设置二进制路径之后、Python discover 之前运行；输出候选 head，不提前读取旧 target。旧变量 `CHECK_ALL_PREFLIGHT_TESTS` 非空时明确退出 2，不静默改变其含义。额外定向结果不能代替全量，也不缩小 discover 的覆盖。
+开发 worktree 先跑新改测试和相关定向检查。`tools/check_all.sh` 先验证测试文件语法及验收工具合成测试，再执行 crates/core、crates/platform 与 crates/relation-fft 的独立 fmt/clippy/test（前两项另做 locked build）、宿主 fmt/clippy、JS、桌面 clippy/test，随后执行原有 Rust 与 crates/iqdb 的 fmt/clippy/test、release 构建、屏蔽退役参考目录导入的 Python discover 和空 PATH 契约重放。Python 全套由 `tests.run_fixed_suite` 执行，调度和参数见下文；覆盖、失败即退出、跳过白名单不变。导入源位于 `tests/reference/`、`web/` 或 #53 已退役的旧索引工具文件时立即拒绝，任何被捕获的导入尝试也使检查失败。构建前只运行固定的测试语法、验收工具合成测试等纯轻量项。任意指定的定向测试使用 `CHECK_ALL_TARGETED_TESTS='tests.test_native_http.TestCase'`（使用完整模块路径，在仓库根执行，以实际类名为准），在本轮候选 release 核心、测试读宿主及 IQDB 准备完成并设置二进制路径之后、Python discover 之前运行；输出候选 head，不提前读取旧 target。旧变量 `CHECK_ALL_PREFLIGHT_TESTS` 非空时明确退出 2，不静默改变其含义。额外定向结果不能代替全量，也不缩小 discover 的覆盖。
 
 当前候选的 `read-http`、`recognition-compute`、`index-compute`、`research-compute`、`relation-probe`、`provenance-compute` examples 在本轮 release 构建中显式准备，再导出各自 `ILLUSTASH_*_BIN`；研究/索引安装适配器同样显式指向本轮 `illustash-worker`。本地与 CI 使用相同接线，缺产物不能靠测试默认跳过形成通过。模型的专项授权及平台证据仍单列。
 
@@ -183,7 +183,7 @@ PR 应明确区分“当前 head 上完整执行退出 0”和“当前候选仅
 
 **触发**：`ci.yml` 在目标为 main 的 PR 打开、推送新提交、重新打开、转 Ready 时运行；草稿 PR 和来自 fork 的 PR 不跑。push 到 main 时也跑一次，作用是写编译缓存：GitHub 的缓存按分支隔离，PR 写的缓存只有同一个 PR 读得到，main 上写的所有 PR 都能读。也可以在 Actions 页面对任意分支手动触发。仓库私有时（`github.event.repository.private`）自动触发的运行一律跳过，只有手动触发的会跑，所以这个 PR 在公开前合入也不会耗分钟数；私有期间也不手动触发 macOS 运行（私有库按 10 倍计分钟）。同一 PR 有新提交时取消旧运行；集成会话连续合入几个 PR 时，main 上只有最后一次跑完。
 
-**job**：「改动范围」先判断改了什么。只改 `docs/` 和根目录的 Markdown 时跳过构建与测试；`docs/THIRD_PARTY.md` 和 `docs/BACKEND_TASKS.md` 随安装包分发，仍须检查。与 `tools/check_all.sh` 对齐的五个必需 job 包括 Rust 核心（core、platform、terms、iqdb 的 fmt/clippy/test）、Python 全量（release 构建后跑 `tests.run_fixed_suite`）、前端 JS（Ubuntu）、桌面壳 clippy/test、原生固定契约空 PATH 重放。除 JS 外，这五项都跑在 Apple 芯片的 `macos-latest` 上。公开库另有 Windows x64 试运行。分支保护要求「全部检查」汇总结果。代码改动要求五个必需 job 全部成功，Windows 结果列在日志中；文档改动要求所有构建与测试跳过。分流失败、缺失输出和 fork PR 没跑检查均判失败。
+**job**：「改动范围」先判断改了什么。只改 `docs/` 和根目录的 Markdown 时跳过构建与测试；`docs/THIRD_PARTY.md` 和 `docs/BACKEND_TASKS.md` 随安装包分发，仍须检查。与 `tools/check_all.sh` 对齐的五个必需 job 包括 Rust 核心（core、platform、relation-fft、terms、iqdb 的 fmt/clippy/test）、Python 全量（release 构建后跑 `tests.run_fixed_suite`）、前端 JS（Ubuntu）、桌面壳 clippy/test、原生固定契约空 PATH 重放。除 JS 外，这五项都跑在 Apple 芯片的 `macos-latest` 上。公开库另有 Windows x64 试运行。分支保护要求「全部检查」汇总结果。代码改动要求五个必需 job 全部成功，Windows 结果列在日志中；文档改动要求所有构建与测试跳过。分流失败、缺失输出和 fork PR 没跑检查均判失败。
 
 **改检查项时**：同步检查 `ci.yml` 和 `tools/check_all.sh`。`tests/test_packaging_resources.py` 核对三处候选二进制接线、macOS 两处跳过白名单的一致性和 Windows 白名单的匹配规则，并检查触发条件和权限。`native-upgrade.yml` 是升级测试的单独手动入口，要求整类零跳过；两平台的 Python 全套已经包含这一类。
 
@@ -193,13 +193,26 @@ PR 应明确区分“当前 head 上完整执行退出 0”和“当前候选仅
 
 **和合并队列的关系**：集成会话组批时查看各 PR 的「全部检查」及 Windows x64 结果。失败的先退回原会话查明原因，runner 故障或排队取消可重跑一次。PR CI 以该 PR 和触发时 main 的合并提交为输入，集成会话仍在合批候选上跑本机全量（见上一节）。
 
-**耗时**：启用后按实际运行记录补上各 job 的冷、热缓存耗时。仓库私有期间没有触发过；2026-10-01 开源前的旧版本在 `macos-latest` 上的一次运行里，Python 全量 job 约 25 分钟，其余各约 2 分钟，当时的代码量和 job 组成与现在不同，只能作量级参考。
+**耗时**：各 job 的耗时以实际运行记录为准；Windows x64 的冷、热缓存实测见下节。仓库私有期间没有触发过；2026-10-01 开源前的旧版本在 `macos-latest` 上的一次运行里，Python 全量 job 约 25 分钟，其余各约 2 分钟，当时的代码量和 job 组成与现在不同，只能作量级参考。
 
 ### Windows x64 CI
 
 公开库使用 `windows-latest` 和 MSVC x64。job 运行 core、platform、relation-fft、terms、desktop 的 clippy（参数与本机检查相同）、这五个项目及 iqdb 的 `cargo test`、terms 与 IQDB 的 release 构建和六个测试 example，再用这些 `.exe` 跑 Python 全套。前端 JS 使用同一 workflow 的 Ubuntu 结果。Cargo 沿用仓库的静态 CRT 配置，关闭 CI 增量编译以控制磁盘占用。`TEMP` 和 `TMP` 指到系统盘的短目录，Python 日志统一使用 UTF-8。
 
-CI 使用标准 Python 3.12，与 macOS job 一致；常驻验收机使用嵌入式 3.13，`tests/test_run_fixed_suite.py` 的隔离入口测试覆盖其模块查找行为。CI 从 PyPI 下载并缓存固定的 x64 NumPy 2.5.3 wheel，配合固定的 Pillow 12.3.0 给 Python 对照用，再用打包脚本和 `crates/platform/src/research_openblas.json` 验证 DLL 的 SHA-256 并设置 `ILLUSTASH_RESEARCH_OPENBLAS_DLL`。3.12 与 3.13 对应的 wheel 含相同的已登记 DLL。Rust 和 wheel 的缓存只在 main 保存，PR 可还原。Windows job 的冷、热缓存耗时及压缩缓存大小待实际运行记录。
+CI 使用标准 Python 3.12，与 macOS job 一致；常驻验收机使用嵌入式 3.13，`tests/test_run_fixed_suite.py` 的隔离入口测试覆盖其模块查找行为。CI 从 PyPI 下载并缓存固定的 x64 NumPy 2.5.3 wheel，配合固定的 Pillow 12.3.0 给 Python 对照用，再用打包脚本和 `crates/platform/src/research_openblas.json` 验证 DLL 的 SHA-256 并设置 `ILLUSTASH_RESEARCH_OPENBLAS_DLL`。3.12 与 3.13 对应的 wheel 含相同的已登记 DLL。Rust 和 wheel 的缓存只在 main 保存，PR 可还原。Windows 缓存体积与耗时见下表。
+
+**Windows 缓存实测**（2026-11-15，同一 main `925798c1`，各一次）：Windows Server 2025 x64、Rust 1.100.0、Python 3.12.10。冷轮未命中 Rust 和 wheel 缓存；热轮命中两者。冷轮 CPU 为 EPYC 7763，热轮为 EPYC 9V74，且热轮有一项测试失败，因此下列是作业耗时记录，不能当作稳定加速比。
+
+| 步骤 | 冷缓存 | 热缓存 |
+|---|---:|---:|
+| 各 Rust clippy/test 步骤合计（含构建） | 25 分 32 秒 | 17 分 10 秒 |
+| 被测核心、examples 与 IQDB release 构建 | 9 分 23 秒 | 3 分 45 秒 |
+| Python 全套步骤 | 12 分 05 秒 | 12 分 21 秒 |
+| 整个 Windows job（含初始化、缓存等） | 48 分 54 秒 | 34 分 55 秒 |
+
+[冷轮](https://github.com/shio-vinyl/illustash/actions/runs/43681348320/job/132712622628) 全部通过；Python 共 780 项，727 通过、53 项按既有白名单跳过。[热轮](https://github.com/shio-vinyl/illustash/actions/runs/43681348320/job/132723570413) 的 Rust 与 release 步骤通过，Python 全套执行完毕：726 通过、53 跳过、1 失败（研究测试的受控 worker 异常退出，数值比较未失败）。热轮保留失败结论，不因缓存命中或汇总检查通过而视为验收通过。
+
+冷轮保存的 Rust 缓存压缩后为 1,273,862,781 字节（约 1.19 GiB），NumPy wheel 为 12,456,384 字节（约 11.88 MiB）；当时仓库缓存共 16 份、5,739,708,417 字节（约 5.35 GiB），尚未达到 10 GiB 上限，暂不额外裁剪。这里只统计缓存 API 返回的压缩体积，不是本机 target 目录的大小。
 
 固定 OpenBLAS DLL 仍会按 CPU 选择内核，浮点末位可能不同。灰度单元测试先按 DLL 摘要和实际内核选择独立 NumPy 固定参考，再严格比较五种宽度的全部输出位。NumPy 2.5.3 对应 DLL 的 SkylakeX 保留原期望，Haswell/Sandybridge 使用编译候选之前独立采集的参考，来源及摘要写在测试旁。未登记组合会明确报告缺少独立参考并使测试、Windows job 和 workflow 失败，不跳过、不按实际输出任选期望；这份参考清单不限制产品支持的 DLL 或 CPU。汇总「全部检查」仍遵守下述 Windows 试运行规则，不能据其绿色状态认定 Windows 已通过。
 
