@@ -414,6 +414,7 @@ class NativeLibraryUpgradeTest(unittest.TestCase):
                     self.assertEqual(c.execute("SELECT value FROM meta WHERE key='terms_schema'").fetchone()[0], str(TERMS_VERSION))
                     self.assertEqual(c.execute("SELECT count(*) FROM sqlite_schema WHERE name IN ('identity_claims','identity_calibration')").fetchone()[0], 0)
                 self.stop(process)
+                self.assertEqual(process.returncode, 0, '首备份闸门等待必须允许宿主正常退出')
                 results = []
                 for db in (lib.db, baseline / 'library.sqlite'):
                     out = subprocess.run([str(self.binaries['current']), 'undo', '--db', str(db), '--action', str(action)],
@@ -427,6 +428,7 @@ class NativeLibraryUpgradeTest(unittest.TestCase):
                 process, origin = self.start(lib, upgrade=False, backup_gate=backup_gate)
                 self.reads(lib, origin)
                 self.stop(process)
+                self.assertEqual(process.returncode, 0, '撤销后的闸门等待必须允许宿主正常退出')
                 # 只在上面所有 HTTP/SQLite 连接都关闭之后，恢复一份新的、静止的、测试自有的克隆。
                 # 绝不对 current7 运行旧的产出者。
                 restored = self.root / f'restored-v{version}.pilib'
@@ -450,6 +452,7 @@ class NativeLibraryUpgradeTest(unittest.TestCase):
                 self.assertIsNotNone(automatic['protected_revision'], automatic)
                 self.assertEqual(len(automatic['snapshots']), 1, automatic)
                 self.stop(process)
+                self.assertEqual(process.returncode, 0)
 
 
     def test_plain_startup_rejects_true_old_schemas_without_changes(self):
