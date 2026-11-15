@@ -4,10 +4,7 @@ use crate::Error;
 use crate::Result;
 #[cfg(any(unix, windows))]
 use std::process::Stdio;
-use std::{
-    fs::File,
-    process::{Command, ExitStatus},
-};
+use std::process::{ChildStderr, Command, ExitStatus};
 
 #[cfg(windows)]
 mod windows_desktop;
@@ -29,38 +26,43 @@ pub fn parent_pid() -> std::io::Result<u32> {
 }
 
 /// 在独立进程组或 Job 中运行 worker，并在返回前停止并回收它的进程树。
-/// 标准输入和标准输出丢弃。标准错误默认丢弃，也可以写入调用方提供的文件。
+/// 标准输入和标准输出丢弃。调用方在独立线程持续排空标准错误，进程树收尾后才等待排空完成。
 pub fn worker(
     command: &mut Command,
-    stderr: Option<File>,
+    stderr: impl FnOnce(ChildStderr) + Send,
     mut check: impl FnMut() -> Result<()>,
     mut observe: impl FnMut() -> Result<()>,
 ) -> Result<ExitStatus> {
     #[cfg(any(unix, windows))]
     {
         check()?;
-        command.stdin(Stdio::null()).stdout(Stdio::null()).stderr(stderr.map_or_else(Stdio::null, Stdio::from));
-        #[cfg(unix)]
-        let mut group = {
-            use std::os::unix::process::CommandExt;
-            command.process_group(0);
-            ProcessGroup(command.spawn()?)
-        };
-        #[cfg(windows)]
-        let mut group = windows_worker::ProcessJob::spawn(command)?;
-        loop {
-            check()?;
-            // observe 出错时像取消一样停掉 worker：drop 进程组时会杀掉它。
-            observe()?;
+        command.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::piped());
+        std::thread::scope(|scope| {
+            // 进程组的所有退出路径均先关闭组，再由 scope 等待 stderr 线程；后代可能继承写端。
             #[cfg(unix)]
-            let status = group.0.try_wait()?;
+            let mut group = {
+                use std::os::unix::process::CommandExt;
+                command.process_group(0);
+                ProcessGroup(command.spawn()?)
+            };
             #[cfg(windows)]
-            let status = group.child.try_wait()?;
-            if let Some(status) = status {
-                return Ok(status);
+            let mut group = windows_worker::ProcessJob::spawn(command)?;
+            #[cfg(unix)]
+            let child = &mut group.0;
+            #[cfg(windows)]
+            let child = &mut group.child;
+            let pipe = child.stderr.take().expect("worker stderr is piped");
+            scope.spawn(move || stderr(pipe));
+            loop {
+                check()?;
+                // observe 出错时像取消一样停掉 worker。
+                observe()?;
+                if let Some(status) = child.try_wait()? {
+                    return Ok(status);
+                }
+                std::thread::sleep(std::time::Duration::from_millis(10));
             }
-            std::thread::sleep(std::time::Duration::from_millis(10));
-        }
+        })
     }
     #[cfg(not(any(unix, windows)))]
     {

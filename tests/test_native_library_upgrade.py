@@ -18,6 +18,7 @@ import shutil
 import signal
 import socket
 import sqlite3
+import stat
 import subprocess
 import tempfile
 import threading
@@ -53,6 +54,23 @@ HISTORICAL_SOURCE_SHA256 = '8b2c4aae7adb8e413bbe4ec309cfd523e8ae3f9bcacc6c4c6e91
 FIXTURES = Path(__file__).resolve().parent / 'fixtures' / 'library_upgrade'
 PRODUCERS = {5: '5e7e7f7e585f1cf8a17a8703e900a0f8fe99edef', 6: 'd9c49b42eed12c5cc810215be4acf70688617679'}
 FOLDER = '<test folder>'
+LOG_DIRECTORY = 'support/diagnostics/logs'
+ACTIVE_LOG = 'file:' + LOG_DIRECTORY + '/runtime.log'
+LOG_LOCK = 'file:' + LOG_DIRECTORY + '/.lock'
+LOG_LIMIT = 2 * 1024 * 1024
+EMPTY_SHA256 = hashlib.sha256(b'').hexdigest()
+STARTUP_REASONS = {
+    'invalid_input': '输入或请求无效',
+    'database': '数据库操作失败',
+    'schema': '数据库版本不兼容',
+    'permission_denied': '系统拒绝访问',
+    'not_found': '系统找不到文件或程序',
+    'storage_full': '磁盘空间不足',
+    'io': '系统读写或进程操作失败',
+    'conflict': '操作与当前状态冲突',
+    'network': '网络请求失败',
+    'timeout': '等待服务或计算超时',
+}
 
 
 def tree(root):
@@ -68,16 +86,41 @@ def tree(root):
     return state
 
 
-def assert_only_startup_diagnostic_added(test, root, before):
-    """失败仍不得改任何原文件；只容许一条严格白名单的启动诊断和它的必要目录/空锁。"""
+def assert_startup_log_appended(test, root, before, after, record):
+    directory = root / LOG_DIRECTORY
+    active = directory / 'runtime.log'
+    lock = directory / '.lock'
+    test.assertIn('dir:' + LOG_DIRECTORY, after)
+    test.assertEqual(after.get(LOG_LOCK), EMPTY_SHA256)
+    test.assertIn(ACTIVE_LOG, after)
+    if os.name == 'posix':
+        for path, mode in ((directory, 0o700), (active, 0o600), (lock, 0o600)):
+            test.assertEqual(stat.S_IMODE(path.stat().st_mode), mode, path.name)
+    test.assertLessEqual(active.stat().st_size, LOG_LIMIT)
+    contents = active.read_bytes()
+    test.assertTrue(contents.endswith(b'\n'))
+    prefix, newline, line = contents[:-1].rpartition(b'\n')
+    test.assertEqual(hashlib.sha256(prefix + newline).hexdigest(), before.get(ACTIVE_LOG, EMPTY_SHA256),
+                     'previous log bytes must stay unchanged')
+    stamp, separator, reason = line.partition(b' [host] ')
+    test.assertTrue(separator, 'startup log must identify the host')
+    test.assertRegex(stamp, rb'\A[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z\Z')
+    expected = STARTUP_REASONS[record['cause']]
+    if record['code'] is not None:
+        expected += f"（代码 {record['code']}）"
+    test.assertEqual(reason, expected.encode('utf-8'))
+
+
+def assert_only_startup_diagnostics_written(test, root, before):
+    """一次拒绝只写一条结构化诊断，并向远未达到滚动阈值的日志追加一行。"""
     after = tree(root)
     added = set(after) - set(before)
     records = []
-    for key in added:
+    for key in added - {'dir:' + LOG_DIRECTORY, LOG_LOCK, ACTIVE_LOG}:
         if key in ('dir:support', 'dir:support/diagnostics'):
             test.assertIsNone(after[key])
         elif key == 'file:support/diagnostics/.lock':
-            test.assertEqual(after[key], hashlib.sha256(b'').hexdigest())
+            test.assertEqual(after[key], EMPTY_SHA256)
         else:
             match = re.fullmatch(r'file:support/diagnostics/(D-[0-9a-f]{32})\.json', key)
             test.assertIsNotNone(match, ('unexpected startup output', key))
@@ -94,8 +137,8 @@ def assert_only_startup_diagnostic_added(test, root, before):
             test.assertLessEqual(int(time.time()) - record['at'], 14 * 86400)
             test.assertEqual(record['operation'], 'host')
             test.assertEqual(record['stage'], 'startup')
-            test.assertIn(record['cause'], ('invalid_input', 'database', 'schema', 'permission_denied',
-                                           'not_found', 'storage_full', 'io', 'conflict', 'network', 'timeout'))
+            test.assertIs(type(record['cause']), str)
+            test.assertIn(record['cause'], STARTUP_REASONS)
             if record['code'] is not None:
                 test.assertIs(type(record['code']), int)
                 test.assertGreaterEqual(record['code'], -(2 ** 31))
@@ -104,7 +147,9 @@ def assert_only_startup_diagnostic_added(test, root, before):
             test.assertEqual(record['retry'], 'check_state')
             records.append(record)
     test.assertEqual(len(records), 1, 'each rejected startup must persist exactly one diagnostic')
-    test.assertEqual({key: value for key, value in after.items() if key not in added}, before)
+    test.assertEqual({key: value for key, value in after.items() if key not in added and key != ACTIVE_LOG},
+                     {key: value for key, value in before.items() if key != ACTIVE_LOG})
+    assert_startup_log_appended(test, root, before, after, records[0])
 
 
 class StartupDiagnosticGuardTest(unittest.TestCase):
@@ -125,29 +170,61 @@ class StartupDiagnosticGuardTest(unittest.TestCase):
             output = directory / (record['id'] + '.json')
             output.write_text(json.dumps(record))
             (directory / '.lock').touch()
-            assert_only_startup_diagnostic_added(self, root, before)
+            logs = root / LOG_DIRECTORY
+            logs.mkdir(mode=0o700)
+            lock, active = logs / '.lock', logs / 'runtime.log'
+            lock.touch(mode=0o600)
+            line = '2026-01-01T00:00:00Z [host] 数据库版本不兼容\n'.encode('utf-8')
+            active.write_bytes(line)
+            active.chmod(0o600)
+            assert_only_startup_diagnostics_written(self, root, before)
             for name in paths:
                 path = root / name
                 path.write_bytes(b'changed')
                 with self.subTest(changed=name), self.assertRaises(AssertionError):
-                    assert_only_startup_diagnostic_added(self, root, before)
+                    assert_only_startup_diagnostics_written(self, root, before)
                 path.write_bytes(b'unchanged')
-            for name in ('support/unexpected.txt', 'support/diagnostics/raw.log', 'library.pilib/new.sqlite'):
+            for name in ('support/unexpected.txt', 'support/diagnostics/raw.log', 'library.pilib/new.sqlite',
+                         LOG_DIRECTORY + '/raw.log', LOG_DIRECTORY + '/runtime.1.log'):
                 extra = root / name
                 extra.write_bytes(b'unexpected')
                 with self.subTest(added=name), self.assertRaises(AssertionError):
-                    assert_only_startup_diagnostic_added(self, root, before)
+                    assert_only_startup_diagnostics_written(self, root, before)
                 extra.unlink()
             for invalid in ({**record, 'path': '/synthetic/private/file.png'},
                             {**record, 'cause': '/synthetic/private/file.png'}, {**record, 'at': True},
                             {**record, 'id': 'D-' + 'c' * 32}, {**record, 'stage': 'write'}):
                 output.write_text(json.dumps(invalid))
                 with self.subTest(invalid=invalid), self.assertRaises(AssertionError):
-                    assert_only_startup_diagnostic_added(self, root, before)
+                    assert_only_startup_diagnostics_written(self, root, before)
             output.write_text(json.dumps(record))
+            for invalid in (line.rstrip(b'\n') + b' /synthetic/private/art.png Cookie: mock-secret\n',
+                            line.replace(b'[host]', b'[worker]'), line + line, line[:-1], b'x' * (LOG_LIMIT + 1)):
+                active.write_bytes(invalid)
+                with self.assertRaises(AssertionError):
+                    assert_only_startup_diagnostics_written(self, root, before)
+            active.write_bytes(line)
+            lock.write_bytes(b'secret')
+            with self.assertRaises(AssertionError):
+                assert_only_startup_diagnostics_written(self, root, before)
+            lock.write_bytes(b'')
+            if os.name == 'posix':
+                active.chmod(0o644)
+                with self.assertRaises(AssertionError):
+                    assert_only_startup_diagnostics_written(self, root, before)
+                active.chmod(0o600)
             (directory / '.lock').write_bytes(b'secret')
             with self.assertRaises(AssertionError):
-                assert_only_startup_diagnostic_added(self, root, before)
+                assert_only_startup_diagnostics_written(self, root, before)
+            (directory / '.lock').write_bytes(b'')
+            output.unlink()
+            before = tree(root)
+            output.write_text(json.dumps(record))
+            active.write_bytes(line + line)
+            assert_only_startup_diagnostics_written(self, root, before)
+            active.write_bytes(line.replace(b'2026-', b'2025-') + line)
+            with self.assertRaises(AssertionError):
+                assert_only_startup_diagnostics_written(self, root, before)
 
 
 def database(path):
@@ -373,7 +450,7 @@ class NativeLibraryUpgradeTest(unittest.TestCase):
                 lib, _ = self.package(version, f'plain-v{version}')
                 before = tree(self.root)
                 self.failed(lib, upgrade=False)
-                assert_only_startup_diagnostic_added(self, self.root, before)
+                assert_only_startup_diagnostics_written(self, self.root, before)
 
     def test_historical_source_default_auto_sync_records_each_start_and_imports_new_file(self):
         for version in (5, 6):
@@ -458,12 +535,12 @@ class NativeLibraryUpgradeTest(unittest.TestCase):
         result = subprocess.run(self.args(lib) + ['--backup'], env=self.env, capture_output=True, timeout=10)
         self.assertNotEqual(result.returncode, 0)
         self.assertEqual(result.stderr.decode().strip(), '--upgrade 不可与 --backup 同用')
-        assert_only_startup_diagnostic_added(self, self.root, before)
+        assert_only_startup_diagnostics_written(self, self.root, before)
         with socket.socket() as listener:
             listener.bind(('127.0.0.1', 0)); listener.listen()
             before = tree(self.root)
             self.failed(lib, port=listener.getsockname()[1])
-            assert_only_startup_diagnostic_added(self, self.root, before)
+            assert_only_startup_diagnostics_written(self, self.root, before)
         for key, value in (('schema_version', '35'), ('terms_names', 'pending')):
             with self.subTest(key=key):
                 with closing(sqlite3.connect(lib.db)) as c:
@@ -471,13 +548,13 @@ class NativeLibraryUpgradeTest(unittest.TestCase):
                     c.execute('UPDATE meta SET value=? WHERE key=?', (value, key)); c.commit()
                 before = tree(self.root)
                 self.failed(lib)
-                assert_only_startup_diagnostic_added(self, self.root, before)
+                assert_only_startup_diagnostics_written(self, self.root, before)
                 with closing(sqlite3.connect(lib.db)) as c:
                     c.execute('UPDATE meta SET value=? WHERE key=?', (old, key)); c.commit()
         lib.source.rename(lib.path / 'saved-source.sqlite')
         before = tree(self.root)
         self.failed(lib)
-        assert_only_startup_diagnostic_added(self, self.root, before)
+        assert_only_startup_diagnostics_written(self, self.root, before)
 
     def test_injected_migration_failure_rolls_back_and_retains_preupgrade_backup(self):
         lib, _ = self.package(5, 'rollback')

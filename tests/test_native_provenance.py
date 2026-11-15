@@ -82,10 +82,22 @@ if step=='groups':
  c.execute("INSERT OR REPLACE INTO image_artists(asset,artist_id,method,score,evidence,status) VALUES ('b','synthetic-candidate','group_run',.3,'{}','candidate')")
  c.commit();c.close();result={'auto':0,'candidates':1,'stopped':''}
 if step=='verify' and mode=='query':
- req={'identity':r['identity'],'url':'https://danbooru.donmai.us/posts.json?tags=synthetic'}
- (box/'net-request.json').write_text(json.dumps(req))
- while not (box/'net-response.json').exists():time.sleep(.01)
- result={'asked':1,'stopped':''}
+ urls=(
+  'https://danbooru.donmai.us/posts.json?tags=synthetic',
+  'https://cdn.donmai.us/synthetic-danbooru.jpg',
+  'https://www.pixiv.net/ajax/user/12/profile/all',
+  'https://i.pximg.net/synthetic-pixiv.jpg',
+ )
+ response=box/'net-response.json'
+ for url in urls:
+  req={'identity':r['identity'],'url':url}
+  pending=box/'net-request.tmp'
+  pending.write_text(json.dumps(req));pending.replace(box/'net-request.json')
+  while not response.exists():time.sleep(.01)
+  reply=json.loads(response.read_text())
+  if reply.get('status')!=200:raise RuntimeError(reply)
+  response.unlink()
+ result={'asked':len(urls),'stopped':''}
 if mode=='wrong':r['identity']['task_id']='old'
 if mode=='mutate-runs':
  c=sqlite3.connect(d/'provenance.sqlite');c.execute("DELETE FROM runs");c.commit()
@@ -106,12 +118,13 @@ class NativeProvenanceTest(unittest.TestCase):
     def setUp(self):
         lifecycle.NativeLifecycleTest.setUp(self)
         self.worker=self.root/'worker';self.worker.write_text('#!'+sys.executable+'\n'+WORKER);self.worker.chmod(0o755)
-        self.calls=[];self.code=200;self.bad=False;self.pixiv_users=False;self.pixiv_code=None
+        self.calls=[];self.referers=[];self.code=200;self.bad=False;self.pixiv_users=False;self.pixiv_code=None
         outer=self
         class Handler(http.server.BaseHTTPRequestHandler):
             def log_message(self,*args):pass
             def do_GET(self):
                 outer.calls.append(self.path)
+                outer.referers.append((self.path, self.headers.get_all('Referer')))
                 if 'media_assets.json' in self.path:value=[{'pixel_hash':'a'*32,'post':{'id':1,'tag_string_artist':'synthetic_artist','source':'https://x.com/synthetic/status/1'}}]
                 elif 'iqdb_queries.json' in self.path:value=[{'score':89.1,'post':{'id':2,'tag_string_artist':'synthetic_other','source':'https://www.pixiv.net/artworks/2'}}]
                 elif 'artists.json' in self.path:value=[{'id':7,'name':'synthetic_artist','is_banned':False}]
@@ -152,6 +165,18 @@ class NativeProvenanceTest(unittest.TestCase):
         r=self.request('/api/provenance',body);self.assertEqual(r['status'],code,r);return json.loads(r['body'])
     def sql(self,sql,args=(),cache=False):
         with closing(sqlite3.connect(self.lib.path/('provenance.sqlite' if cache else 'library.sqlite'))) as c:return c.execute(sql,args).fetchall()
+
+    def test_direct_query_referer_is_only_sent_to_pixiv_image_host(self):
+        self.env['SYNTHETIC_MODE']='query';self.restart()
+        self.post({'action':'artist','artist':'synthetic'})
+        wait_until(lambda: len(self.referers) >= 4)
+        self.assertEqual(self.referers, [
+            ('/posts.json?tags=synthetic', None),
+            ('/synthetic-danbooru.jpg', None),
+            ('/ajax/user/12/profile/all', None),
+            ('/synthetic-pixiv.jpg', ['https://www.pixiv.net/']),
+        ])
+
     def test_idle_success_bytes_and_all_action_errors(self):
         self.assertEqual(self.request('/api/provenance')['body'],json.dumps({'available':True,'state':{'status':'idle'},'runs':[],'coverage':None,'auto':True,'budgets':{'full':1024,'new':50,'pick':20,'artist':200},'frozen':False,'auto_network':False,'delivery':None},ensure_ascii=False).encode())
         for body in ({},{'action':'bad'},{'action':'lookup','ids':[]},{'action':'lookup','ids':[1]},{'action':'lookup','ids':['a']*501},{'action':'artist','artist':''},{'action':'artist','artist':True}):self.post(body,400)

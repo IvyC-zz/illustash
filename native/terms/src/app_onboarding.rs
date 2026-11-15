@@ -256,28 +256,13 @@ impl Onboarding {
         let identity = TaskIdentity::new(lib, self.generation, &self.session)?;
         *self.check.lock().expect("onboarding check mutex poisoned") = json!({"status": "checking"});
         let state = self.check.clone();
-        let log = std::env::temp_dir().join(format!("illustash-check-{}.log", identity.task_id));
         self.task.take();
         self.task = Some(Task::start(identity, Some(Duration::from_secs(180)), move |ctx| {
             let outcome = (|| -> Result<Value> {
-                let mut options = std::fs::OpenOptions::new();
-                options.write(true).create_new(true);
-                #[cfg(unix)]
-                std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
-                let stderr = options.open(&log)?;
-                let status = ctx.process_with_stderr(command, stderr);
-                let said = match &status {
-                    Ok(s) if !s.success() => std::fs::read(&log).unwrap_or_default(),
-                    _ => Vec::new(),
-                };
-                let _ = std::fs::remove_file(&log);
-                let status = status?;
+                let (status, last) = ctx.check_worker(command)?;
                 if status.success() {
                     return Ok(json!({"status": "ok"}));
                 }
-                let said = String::from_utf8_lossy(&said);
-                let last = said.lines().rev().find(|l| !l.trim().is_empty()).unwrap_or("").trim();
-                let last: String = last.chars().take(300).collect();
                 Ok(
                     json!({"status": "failed", "message": if last.is_empty() { format!("自检退出：{status}") } else { last }}),
                 )
@@ -533,7 +518,7 @@ mod tests {
 
     #[cfg(any(unix, windows))]
     #[test]
-    fn ordinary_worker_stderr_is_discarded() {
+    fn caller_cannot_redirect_raw_worker_stderr_to_a_file() {
         let (root, lib) = fixture();
         let log = root.0.join("ordinary.log");
         let stderr = std::fs::File::create(&log).unwrap();

@@ -12,12 +12,16 @@ pub(crate) mod similar;
 // 沿用现有的 NumPy f32 连续归约，与原生锚点推断共用。
 pub(crate) use numeric::{sum32 as contiguous_sum32, sum64 as contiguous_sum64};
 pub mod snapshot;
+use crate::diagnostics::logs;
 use crate::{Error, Result};
 use serde_json::{json, Value};
 use std::{fs, path::Path};
 
 fn field<'a>(request: &'a Value, key: &str) -> Result<&'a str> {
-    request[key].as_str().ok_or_else(|| Error::Invalid(format!("research request missing {key}")))
+    request[key].as_str().ok_or_else(|| {
+        logs::worker_invalid_fields();
+        Error::Invalid(format!("research request missing {key}"))
+    })
 }
 /// 安装版就绪检查：Windows 上固定的 OpenBLAS 后端必须能加载，且与登记的身份一致；
 /// macOS 用系统的 Accelerate 框架。
@@ -50,6 +54,7 @@ fn delta_tables(request: &Value) -> bool {
 }
 pub fn run(request: &Value) -> Result<Value> {
     if request["format"] != "illustash-research/1" || !handles(request) {
+        logs::worker_invalid_fields();
         return Err(Error::Invalid("unsupported native research request".into()));
     }
     // 即使是空请求或无操作的请求也要求固定后端；缺少安装资源时必须以现有的任务状态失败，
@@ -60,12 +65,18 @@ pub fn run(request: &Value) -> Result<Value> {
     // 像素比对从不读 CCIP 特征；不相关的坏向量不能挡住它（#30）。
     if request["kind"] == "relate" {
         let c = snapshot.read()?;
-        let ids = request["args"]["ids"].as_array().ok_or_else(|| Error::Invalid("missing relation ids".into()))?;
+        let ids = request["args"]["ids"].as_array().ok_or_else(|| {
+            logs::worker_invalid_fields();
+            Error::Invalid("missing relation ids".into())
+        })?;
         let mut seen = std::collections::HashSet::new();
         let mut images = vec![];
         let mut missing = vec![];
         for id in ids {
-            let id = id.as_str().ok_or_else(|| Error::Invalid("invalid relation id".into()))?;
+            let id = id.as_str().ok_or_else(|| {
+                logs::worker_invalid_fields();
+                Error::Invalid("invalid relation id".into())
+            })?;
             if !seen.insert(id) {
                 continue;
             }
@@ -141,8 +152,9 @@ pub fn run(request: &Value) -> Result<Value> {
 }
 /// 安装版适配器只负责传输；它对一个种类调用一次这个 dispatcher。
 pub fn run_files(input: &Path, output: &Path) -> Result<()> {
-    let text = fs::read_to_string(input)?;
-    let request = crate::strict_json::parse(&text).map_err(|e| Error::Invalid(e.to_string()))?;
+    let text = fs::read_to_string(input).inspect_err(|e| logs::worker_io(logs::IoPhase::ReadRequest, e))?;
+    let request =
+        crate::strict_json::parse(&text).inspect_err(|_| logs::worker_invalid_request()).map_err(Error::Invalid)?;
     let response = run(&request)?;
     let bytes = if request["kind"] == "relate" {
         let result = relations::wire_result(&response["result"], &request["args"]["ids"])?;
