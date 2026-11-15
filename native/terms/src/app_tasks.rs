@@ -1,6 +1,7 @@
 //! 共用的协作式任务生命周期。业务上的持久化和重试仍由使用方负责。
 use crate::{app_library::Library, Error, Result};
 use std::{
+    fs::File,
     path::{Path, PathBuf},
     process::{Command, ExitStatus},
     sync::{
@@ -234,16 +235,27 @@ impl TaskContext {
         }
         apply()
     }
-    /// 运行一个可选的 worker，不会因管道死锁。大量输出由调用方提供文件；stdout/stderr 默认为 null。
-    /// 总是回收主进程并杀掉剩下的后代进程，包括主进程先于子进程退出的情况。worker 不得脱离自己的进程组。
+    /// 运行 worker，丢弃标准输出和标准错误。返回前回收主进程并清理剩下的后代进程。
     pub fn process(&self, command: &mut Command) -> Result<ExitStatus> {
         self.process_observed(command, || Ok(()))
     }
     /// `observe` 在等待期间运行；它返回错误时停止并回收 worker。
     /// 每个 worker 都带着 `ORT_DISABLE_TELEMETRY=1` 启动，不管它会不会加载 ONNX Runtime（#381）。
     pub fn process_observed(&self, command: &mut Command, observe: impl FnMut() -> Result<()>) -> Result<ExitStatus> {
+        self.run_worker(command, None, observe)
+    }
+    /// 与 `process` 相同，但将标准错误写入文件，并在返回前关闭文件句柄。
+    pub(crate) fn process_with_stderr(&self, mut command: Command, stderr: File) -> Result<ExitStatus> {
+        self.run_worker(&mut command, Some(stderr), || Ok(()))
+    }
+    fn run_worker(
+        &self,
+        command: &mut Command,
+        stderr: Option<File>,
+        observe: impl FnMut() -> Result<()>,
+    ) -> Result<ExitStatus> {
         crate::recognition_compute::telemetry::child(command);
-        crate::platform_process::worker(command, || self.check(), observe)
+        crate::platform_process::worker(command, stderr, || self.check(), observe)
     }
 }
 pub struct Task {

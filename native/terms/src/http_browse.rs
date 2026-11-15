@@ -462,7 +462,7 @@ fn bound(args: Vec<String>, numeric_index: Option<usize>, cluster: &str) -> Resu
         let digits = digits.trim_start_matches('0');
         if digits.len() > 19 || (digits.len() == 19 && digits > "9223372036854775807") {
             // 所有筛选校验都在「整数超出 SQLite INTEGER 范围」的绑定错误之前完成。
-            return Err(Error::Io(std::io::Error::other("Python int too large to convert to SQLite INTEGER")));
+            return Err(Error::Io(std::io::Error::other("整数超出数据库支持的范围")));
         }
     }
     Ok(args
@@ -1397,6 +1397,17 @@ pub(crate) fn clusters(c: &Connection, nsfw: &str) -> Result<Json> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn cluster_overflow_keeps_io_error_and_i64_boundary() {
+        assert_eq!(
+            bound(vec![i64::MAX.to_string()], Some(0), "９２２３３７２０３６８５４７７５８０７").unwrap(),
+            vec![Value::Integer(i64::MAX)]
+        );
+        for cluster in ["9223372036854775808", "９２２３３７２０３６８５４７７５８０８"] {
+            assert!(matches!(bound(vec![cluster.into()], Some(0), cluster), Err(Error::Io(e))
+                if e.to_string() == "整数超出数据库支持的范围"));
+        }
+    }
     /// 核心的身份树，按这里的夹具所需的样子建。
     const TERM_TREE: &str = "CREATE TABLE term_tree(term_id INTEGER PRIMARY KEY,parent_id TEXT,merged_into TEXT,
         work_id TEXT,work_text TEXT NOT NULL DEFAULT '',variant TEXT NOT NULL DEFAULT '',

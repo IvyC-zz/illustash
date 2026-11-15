@@ -14,6 +14,7 @@ use serde_json::{json, Value};
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap},
     path::Path,
+    process::Command,
     sync::{Arc, Mutex},
     time::Duration,
 };
@@ -247,30 +248,40 @@ impl Onboarding {
                 json!({"status": "failed", "message": crate::app_models::MISSING});
             return Ok(());
         }
+        let mut command = Command::new(worker);
+        command.env(crate::app_tasks::WORKER_KIND_ENV, "recognition").arg("--check");
+        self.start_check_task(lib, command)
+    }
+    fn start_check_task(&mut self, lib: &Library, command: Command) -> Result<()> {
+        let identity = TaskIdentity::new(lib, self.generation, &self.session)?;
         *self.check.lock().expect("onboarding check mutex poisoned") = json!({"status": "checking"});
         let state = self.check.clone();
-        let identity = TaskIdentity::new(lib, self.generation, &self.session)?;
-        let log = std::env::temp_dir().join(format!("illustash-check-{}-{}.log", std::process::id(), self.generation));
+        let log = std::env::temp_dir().join(format!("illustash-check-{}.log", identity.task_id));
         self.task.take();
         self.task = Some(Task::start(identity, Some(Duration::from_secs(180)), move |ctx| {
             let outcome = (|| -> Result<Value> {
-                let mut command = std::process::Command::new(&worker);
-                command
-                    .env(crate::app_tasks::WORKER_KIND_ENV, "recognition")
-                    .arg("--check")
-                    .stderr(std::fs::File::create(&log)?);
-                let status = ctx.process(&mut command)?;
+                let mut options = std::fs::OpenOptions::new();
+                options.write(true).create_new(true);
+                #[cfg(unix)]
+                std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
+                let stderr = options.open(&log)?;
+                let status = ctx.process_with_stderr(command, stderr);
+                let said = match &status {
+                    Ok(s) if !s.success() => std::fs::read(&log).unwrap_or_default(),
+                    _ => Vec::new(),
+                };
+                let _ = std::fs::remove_file(&log);
+                let status = status?;
                 if status.success() {
                     return Ok(json!({"status": "ok"}));
                 }
-                let said = std::fs::read_to_string(&log).unwrap_or_default();
+                let said = String::from_utf8_lossy(&said);
                 let last = said.lines().rev().find(|l| !l.trim().is_empty()).unwrap_or("").trim();
                 let last: String = last.chars().take(300).collect();
                 Ok(
                     json!({"status": "failed", "message": if last.is_empty() { format!("自检退出：{status}") } else { last }}),
                 )
             })();
-            let _ = std::fs::remove_file(&log);
             let value = outcome.unwrap_or_else(
                 |e| json!({"status": "failed", "message": e.to_string().chars().take(300).collect::<String>()}),
             );
@@ -493,5 +504,51 @@ mod tests {
         assert_eq!(out["capability"]["recognition"], false);
         assert_eq!(out["capability"]["check"], json!({"status": "failed", "message": "没有识别组件"}));
         assert!(o.task.is_none());
+    }
+
+    #[test]
+    #[ignore = "由自检回归测试作为子进程运行"]
+    fn failing_check_worker_fixture() {
+        eprintln!("较早的诊断\n合成诊断：模型不匹配\n   ");
+        std::process::exit(7);
+    }
+
+    #[cfg(any(unix, windows))]
+    #[test]
+    fn failed_self_check_reports_the_last_worker_stderr_line() {
+        let (_root, lib) = fixture();
+        let mut o = Onboarding::new(1, "token");
+        let mut command = Command::new(std::env::current_exe().unwrap());
+        command.args(["--ignored", "--exact", "app_onboarding::tests::failing_check_worker_fixture", "--nocapture"]);
+        o.start_check_task(&lib, command).unwrap();
+        let task = o.task.as_mut().unwrap();
+        assert!(task.wait(Duration::from_secs(30)));
+        let log = std::env::temp_dir().join(format!("illustash-check-{}.log", task.context().identity().task_id));
+        assert!(!log.exists());
+        assert_eq!(
+            read(&o, &lib, None)["capability"]["check"],
+            json!({"status": "failed", "message": "合成诊断：模型不匹配"})
+        );
+    }
+
+    #[cfg(any(unix, windows))]
+    #[test]
+    fn ordinary_worker_stderr_is_discarded() {
+        let (root, lib) = fixture();
+        let log = root.0.join("ordinary.log");
+        let stderr = std::fs::File::create(&log).unwrap();
+        let mut command = Command::new(std::env::current_exe().unwrap());
+        command
+            .args(["--ignored", "--exact", "app_onboarding::tests::failing_check_worker_fixture", "--nocapture"])
+            .stderr(stderr);
+        let identity = TaskIdentity::new(&lib, 1, "token").unwrap();
+        let mut task = Task::start(identity, Some(Duration::from_secs(30)), move |ctx| {
+            let status = ctx.process(&mut command)?;
+            assert_eq!(status.code(), Some(7));
+            Ok(())
+        });
+        assert!(task.wait(Duration::from_secs(30)));
+        assert_eq!(task.outcome(), crate::app_tasks::TaskOutcome::Done);
+        assert_eq!(std::fs::metadata(log).unwrap().len(), 0);
     }
 }

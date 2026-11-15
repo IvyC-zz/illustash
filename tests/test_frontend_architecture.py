@@ -249,9 +249,13 @@ class FrontendArchitectureTest(unittest.TestCase):
             tree.append('ui/home.js', "\nconst d = document.createElement('dialog');\n")
             message = self.assertViolation(tree, 'dialog-element', 'ui/home.js')
             self.assertIn('ui/dialog.js', message)
-        with Tree() as tree:  # 基线里已经登记了存量的文件（ui/dialog.js 登记 1 处，openDialog 内的那一处）
+        with Tree() as tree:  # 用户 2026-11-15 批准（#470）：ui/dialog.js 是唯一放行的文件，别的文件照旧报错
+            dialog = (tree.root / STATIC / 'ui/dialog.js').read_text(encoding='utf-8')
+            self.assertIn("document.createElement('dialog')", dialog)
             tree.append('ui/dialog.js', '\nconst d = document.createElement("dialog");\n')
-            self.assertViolation(tree, 'dialog-element', 'ui/dialog.js')
+            self.assertEqual(tree.errors(), [])
+            tree.append('ui/catalog.js', "\nel.innerHTML = '<dialog></dialog>';\n")
+            self.assertViolation(tree, 'dialog-element', 'ui/catalog.js')
 
     def test_new_page_name_comparison(self):
         # 页面名判断只能写在 core/pages.js 的注册表里；新增比较要报错，改写成读注册表字段
@@ -289,29 +293,25 @@ class FrontendArchitectureTest(unittest.TestCase):
 
     def test_fixed_violation_is_reported_as_stale_not_failure(self):
         with Tree() as tree:
-            # 改掉基线里仍登记着的违规（ui/dialog.js 的那一处），应报「过期」而不是失败
-            path = tree.root / STATIC / 'ui/dialog.js'
-            path.write_text(path.read_text(encoding='utf-8').replace("document.createElement('dialog')", "document.createElement('div')"),
-                            encoding='utf-8')
+            # 改掉基线里仍登记着的违规（ui/models.js 的那一处全局 click 监听），应报「过期」而不是失败
+            tree.replace('ui/models.js', "document.addEventListener('click'", "$('models').addEventListener('click'")
             errors, stale = check(tree.root)
             self.assertEqual(errors, [])
-            self.assertTrue(any('dialog-element' in line and 'ui/dialog.js' in line for line in stale))
+            self.assertTrue(any('document-listener' in line and 'ui/models.js::click' in line for line in stale))
             code, output = tree.run_main('--strict-stale')
             self.assertEqual(code, 1)
             self.assertIn('--shrink', output)
 
     def test_shrink_lowers_but_never_adds(self):
         with Tree() as tree:
-            fixed = tree.root / STATIC / 'ui/dialog.js'
-            fixed.write_text(fixed.read_text(encoding='utf-8').replace("document.createElement('dialog')", "document.createElement('div')"),
-                             encoding='utf-8')
-            tree.append('ui/home.js', "\nconst d = document.createElement('dialog');\n")  # 一处新违规
+            tree.replace('ui/models.js', "document.addEventListener('click'", "$('models').addEventListener('click'")
+            tree.append('ui/home.js', "\ndocument.addEventListener('click', e => {});\n")  # 一处新违规
             before = tree.baseline()
             code, _ = tree.run_main('--shrink')
             after = tree.baseline()
             self.assertEqual(code, 1, 'the new violation still fails after shrinking')
-            self.assertNotIn('ui/dialog.js', after['dialog-element'])
-            self.assertNotIn('ui/home.js', after['dialog-element'])
+            self.assertNotIn('ui/models.js::click', after['document-listener'])
+            self.assertNotIn('ui/home.js::click', after['document-listener'])
             self.assertEqual(baseline_growth(after, before), [])
 
     def test_baseline_growth_is_detected(self):
@@ -333,9 +333,9 @@ class FrontendArchitectureTest(unittest.TestCase):
             code, _ = tree.run_main('--base-ref', 'HEAD')
             self.assertEqual(code, 0)
             # 把新违规写进基线来“让它通过”
-            tree.append('ui/home.js', "\nconst d = document.createElement('dialog');\n")
+            tree.append('ui/home.js', "\ndocument.addEventListener('click', e => {});\n")
             grown = tree.baseline()
-            grown['dialog-element']['ui/home.js'] = 1
+            grown['document-listener']['ui/home.js::click'] = 1
             (tree.root / BASELINE).write_text(json.dumps({'rules': grown}), encoding='utf-8')
             self.assertEqual(tree.errors(), [])
             code, output = tree.run_main('--base-ref', 'HEAD')

@@ -279,14 +279,51 @@ class NativeResearchComputeTest(unittest.TestCase):
         ids = [u for u in self.features.uuids if u != 'u3']
         self.raw = self.raw[[self.features.row[u] for u in ids]]
         self.features = Features(self.store.source, self.raw, ids)
-        self.store.curate(['far'], 'exclude')
+        with self.store.connect() as c:
+            history = c.execute('SELECT * FROM actions ORDER BY id').fetchall()
+            curation = c.execute('SELECT * FROM curation ORDER BY uuid').fetchall()
+            excluded = c.execute('SELECT * FROM excluded ORDER BY uuid').fetchall()
+        action = self.store.curate(['far'], 'exclude')['undo']['id']
+        current_before = '[{"curation":null,"uuid":"far"}]'
+        legacy_before = '[{"uuid": "far", "curation": null}]'
+        self.assertEqual(json.loads(current_before), json.loads(legacy_before))
+        with self.store.connect() as c:
+            self.assertEqual(c.execute('SELECT before_json FROM actions WHERE id=?', (action,)).fetchone()[0],
+                             current_before)
+            self.assertEqual(c.execute('SELECT * FROM actions WHERE id<>? ORDER BY id', (action,)).fetchall(), history)
         result, output, _ = self.request('oc', regroup=False, args=dict(entity=oc))
         self.assertEqual(result.returncode, 0, result.stderr.decode())
         actual = json.loads(output.read_text())['result']
         self.assertEqual(actual, self.fixed_oc())
         self.assertEqual(actual['total'], 4)
         self.assertEqual([sorted(g) for g in actual['groups']], [['u0', 'u1', 'u2']])
-        self.compare_learning()
+        # 只在独立快照里替换这条新动作的编码，保持原图库和旧历史不动。
+        tokens = {}
+        def legacy_snapshot(request):
+            database = Path(request['snapshot']) / 'library.sqlite'
+            with sqlite3.connect(database) as c:
+                c.execute('UPDATE actions SET before_json=? WHERE id=?', (legacy_before, action))
+            tokens['current'] = request['learning_token']
+            tokens['legacy'] = terms_core.run('learning-snapshot', '--db', database)['token']
+            self.assertNotEqual(tokens['legacy'], tokens['current'])
+            request['learning_token'] = tokens['legacy']
+        result, output, _ = self.request(mutate=legacy_snapshot)
+        self.assertEqual(result.returncode, 0, result.stderr.decode())
+        legacy = json.loads(output.read_text())
+        current = self.compare_learning()
+        self.assertEqual(legacy['learning']['token'], tokens['legacy'])
+        self.assertEqual(current['learning']['token'], tokens['current'])
+        # 戳记差异已单独验证；其余完整响应只沿用固定契约已有的时钟遮罩，所有计算值逐字比较。
+        legacy['learning']['token'] = tokens['current']
+        from tests.fixed_expectations import unclocked
+        self.assertEqual(unclocked(json.dumps(current, sort_keys=True)), unclocked(json.dumps(legacy, sort_keys=True)))
+        self.store.application_command('/api/undo', {'id': action})
+        with self.store.connect() as c:
+            self.assertEqual(c.execute('SELECT * FROM curation ORDER BY uuid').fetchall(), curation)
+            self.assertEqual(c.execute('SELECT * FROM excluded ORDER BY uuid').fetchall(), excluded)
+            self.assertEqual(c.execute('SELECT * FROM actions WHERE id<>? ORDER BY id', (action,)).fetchall(), history)
+            self.assertEqual(tuple(c.execute('SELECT before_json,undone FROM actions WHERE id=?', (action,)).fetchone()),
+                             (current_before, 1))
 
     def test_rejected_skin_is_not_a_parent_negative(self):
         self.compare_learning()

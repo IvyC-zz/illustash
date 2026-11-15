@@ -152,11 +152,12 @@ fn bindable_minimum(min: &str) -> Result<()> {
     if !exact_min.is_empty() && exact_min.parse::<i64>().is_err() {
         return Err(Error::Sql(rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::new(
             std::io::ErrorKind::InvalidInput,
-            "Python int too large to convert to SQLite INTEGER",
+            "整数超出数据库支持的范围",
         )))));
     }
     Ok(())
 }
+
 /// 角色 `ids`（JSON 列表）的皮肤，按角色分组；除非只要摘要，否则附上各自的张数。
 fn skins(c: &Connection, ids: &str, nsfw: &str, summary: bool) -> Result<HashMap<String, Vec<Json>>> {
     let variant_count = if summary {
@@ -695,4 +696,18 @@ pub fn validate(path: &str, q: &HashMap<String, String>) -> Result<()> {
         _ => {}
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn minimum_overflow_keeps_sql_error_and_unicode_boundary() {
+        assert!(bindable_minimum("９_２２３_３７２_０３６_８５４_７７５_８０７").is_ok());
+        for minimum in ["9223372036854775808", "９_２２３_３７２_０３６_８５４_７７５_８０８"] {
+            assert!(matches!(bindable_minimum(minimum), Err(Error::Sql(rusqlite::Error::ToSqlConversionFailure(e)))
+                if e.to_string() == "整数超出数据库支持的范围"));
+        }
+    }
 }

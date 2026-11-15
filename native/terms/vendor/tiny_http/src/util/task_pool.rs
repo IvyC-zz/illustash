@@ -4,29 +4,26 @@ use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
 use std::time::Duration;
 
-/// Manages a collection of threads.
-///
-/// A new thread is created every time all the existing threads are full.
-/// Any idle thread will automatically die after a few seconds.
+/// 管理工作线程：现有线程全部被占用时新增线程，多余的空闲线程在等待数秒后退出。
 pub struct TaskPool {
     sharing: Arc<Sharing>,
 }
 
 struct Sharing {
-    // list of the tasks to be done by worker threads
+    // 等待工作线程领取的任务。
     todo: Mutex<VecDeque<Box<dyn FnMut() + Send>>>,
 
-    // condvar that will be notified whenever a task is added to `todo`
+    // 向 todo 加入任务时通知等待线程。
     condvar: Condvar,
 
-    // number of total worker threads running
+    // 当前工作线程总数。
     active_tasks: AtomicUsize,
 
-    // number of idle worker threads
+    // 等待中的工作线程数，包含已唤醒但还未重新拿到 todo 锁的线程。
     waiting_tasks: AtomicUsize,
 }
 
-/// Minimum number of active threads.
+/// 保留的最少工作线程数。
 static MIN_THREADS: usize = 4;
 
 struct Registration<'a> {
@@ -64,12 +61,17 @@ impl TaskPool {
         pool
     }
 
-    /// Executes a function in a thread.
-    /// If no thread is available, spawns a new one.
+    /// 在线程中执行函数；没有可用线程时新增线程。
     pub fn spawn(&self, code: Box<dyn FnMut() + Send>) {
-        let mut queue = self.sharing.todo.lock().unwrap();
+        let mut queue = self.sharing.todo.lock().expect("任务队列锁中毒");
 
-        if self.sharing.waiting_tasks.load(Ordering::Acquire) == 0 {
+        self.spawn_with_queue(code, &mut queue);
+    }
+
+    // 调用者持有 todo 锁；工作线程恢复后也必须先拿到同一把锁。
+    fn spawn_with_queue(&self, code: Box<dyn FnMut() + Send>, queue: &mut VecDeque<Box<dyn FnMut() + Send>>) {
+        // 每个排队任务已预订一个等待线程，不能把尚未恢复的线程重复分配给新任务。
+        if queue.len() >= self.sharing.waiting_tasks.load(Ordering::Acquire) {
             self.add_thread(Some(code));
         } else {
             queue.push_back(code);
@@ -90,7 +92,7 @@ impl TaskPool {
 
             loop {
                 let mut task: Box<dyn FnMut() + Send> = {
-                    let mut todo = sharing.todo.lock().unwrap();
+                    let mut todo = sharing.todo.lock().expect("任务队列锁中毒");
 
                     let task;
                     loop {
@@ -100,18 +102,17 @@ impl TaskPool {
                         }
                         let _waiting_guard = Registration::new(&sharing.waiting_tasks);
 
-                        let received =
-                            if sharing.active_tasks.load(Ordering::Acquire) <= MIN_THREADS {
-                                todo = sharing.condvar.wait(todo).unwrap();
-                                true
-                            } else {
-                                let (new_lock, waitres) = sharing
-                                    .condvar
-                                    .wait_timeout(todo, Duration::from_millis(5000))
-                                    .unwrap();
-                                todo = new_lock;
-                                !waitres.timed_out()
-                            };
+                        let received = if sharing.active_tasks.load(Ordering::Acquire) <= MIN_THREADS {
+                            todo = sharing.condvar.wait(todo).expect("任务队列锁中毒");
+                            true
+                        } else {
+                            let (new_lock, waitres) = sharing
+                                .condvar
+                                .wait_timeout(todo, Duration::from_millis(5000))
+                                .expect("任务队列锁中毒");
+                            todo = new_lock;
+                            !waitres.timed_out()
+                        };
 
                         if !received && todo.is_empty() {
                             return;
@@ -129,9 +130,7 @@ impl TaskPool {
 
 impl Drop for TaskPool {
     fn drop(&mut self) {
-        self.sharing
-            .active_tasks
-            .store(999_999_999, Ordering::Release);
+        self.sharing.active_tasks.store(999_999_999, Ordering::Release);
         self.sharing.condvar.notify_all();
     }
 }

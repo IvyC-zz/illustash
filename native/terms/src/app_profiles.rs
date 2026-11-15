@@ -393,8 +393,8 @@ fn edit_work(c: &Connection, mut v: Value) -> Result<Reply> {
 /// /api/kind 和 /api/character/mascot。
 fn set_field(c: &Connection, mut v: Value, path: &str) -> Result<Reply> {
     v["op"] = json!(match path {
-        "/api/kind" => "set_kind",
-        "/api/character/mascot" => "set_mascot",
+        "/api/kind" => "edit_kind",
+        "/api/character/mascot" => "edit_mascot",
         _ => return invalid("接口不存在"),
     });
     if path == "/api/kind" {
@@ -402,5 +402,10 @@ fn set_field(c: &Connection, mut v: Value, path: &str) -> Result<Reply> {
         v["kind"] = json!(kind);
         v["artist"] = json!(artist);
     }
-    Ok(Reply::Answer(run(c, &v)?.into()))
+    let mut out = run(c, &v)?;
+    let action = out.as_object_mut().expect("角色标记命令返回对象").remove("action");
+    let mut response: Json = out.into();
+    // 在写事务里取刚登记的一步，避免其他写入抢在提交后的读取之前。
+    response.set("undo", if action.is_some() { last_action(c)? } else { Value::Null.into() });
+    Ok(Reply::Answer(response))
 }

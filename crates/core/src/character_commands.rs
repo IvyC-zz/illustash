@@ -808,6 +808,11 @@ fn shape(item: &Value) -> Option<&'static str> {
     None
 }
 
+/// 两种角色标记的快照始于 v2 信封，裸列表不认这两种形状。
+fn edit_shape(item: &Value) -> Option<&'static str> {
+    ["character_kind", "character_mascot"].into_iter().find(|key| has_keys(item, &[*key]))
+}
+
 pub fn undo(c: &Connection, args: &Value) -> Result<Value> {
     let id = args["action"].as_i64().ok_or_else(|| Error::Invalid("步骤 ID 不正确".into()))?;
     let last: Option<i64> =
@@ -820,7 +825,7 @@ pub fn undo(c: &Connection, args: &Value) -> Result<Value> {
     let before = crate::strict_json::parse(&before).map_err(Error::Invalid)?;
     let Some(items) = owns(&before)? else { return invalid("这一步不归角色核心撤销") };
     for item in &items {
-        if item.is_object() && shape(item).is_none() {
+        if item.is_object() && shape(item).is_none() && edit_shape(item).is_none() {
             return invalid("未知或混合撤销形状");
         }
     }
@@ -830,7 +835,7 @@ pub fn undo(c: &Connection, args: &Value) -> Result<Value> {
     let mut profile = false;
     let mut profile_links_changed = false;
     for item in &items {
-        match shape(item) {
+        match shape(item).or_else(|| edit_shape(item)) {
             Some("snapshot") => {
                 let u = text(&item["uuid"], "快照不完整")?;
                 let e = item["entity"].as_str();
@@ -853,6 +858,8 @@ pub fn undo(c: &Connection, args: &Value) -> Result<Value> {
                 profile_links_changed |= crate::character_profile::undo(c, &item["profile"])?;
                 profile = true;
             }
+            Some("character_kind") => crate::character_structure::undo_kind(c, &item["character_kind"])?,
+            Some("character_mascot") => crate::character_structure::undo_mascot(c, &item["character_mascot"])?,
             _ => return invalid("未知或混合撤销形状"),
         }
     }

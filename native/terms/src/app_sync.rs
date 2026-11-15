@@ -1214,6 +1214,15 @@ pub(crate) fn check(cancel: &AtomicBool) -> Result<()> {
 mod tests {
     use super::*;
     #[test]
+    fn filesystem_failure_uses_new_history_message_and_keeps_length_limit() {
+        let cancel = AtomicBool::new(false);
+        let path = std::path::Path::new("synthetic/input");
+        let error = crate::error::io_at(std::io::Error::other("合成失败"), path, None);
+        assert_eq!(stop_message(&cancel, None, &error), "文件操作失败：合成失败（路径：'synthetic/input'）");
+        let error = crate::error::io_at(std::io::Error::other("长".repeat(400)), path, None);
+        assert_eq!(stop_message(&cancel, None, &error), error.reason().chars().take(300).collect::<String>());
+    }
+    #[test]
     fn input_preparation_reports_progress_and_keeps_unavailable_inputs_retryable() {
         let root = std::env::temp_dir().join(format!("illustash-prepare-{}", crate::store::new_key().unwrap()));
         std::fs::create_dir(&root).unwrap();

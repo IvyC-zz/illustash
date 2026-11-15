@@ -1,6 +1,6 @@
 # 架构现状与已批准方向
 
-状态：现行参考，2026-11-12。记录稳定应用现在的架构（Rust 应用宿主、Core、Platform、可选原生 worker）和用户批准、仍然有效的方向；词条抽象见 [TERMS.md](TERMS.md)，安装交付见 [BACKEND_TASKS.md](BACKEND_TASKS.md)，检查与合并门槛见 [LOCAL_CHECKS.md](LOCAL_CHECKS.md)。各次实施、测量和验收过程在对应 PR，不在本文。2026-10-06 开源之前的 Issue / PR 编号指向开源前的私有历史（见 [AGENTS.md](../AGENTS.md#公开库规则)）。
+状态：现行参考，2026-11-15。记录稳定应用现在的架构（Rust 应用宿主、Core、Platform、可选原生 worker）和用户批准、仍然有效的方向；词条抽象见 [TERMS.md](TERMS.md)，安装交付见 [BACKEND_TASKS.md](BACKEND_TASKS.md)，检查与合并门槛见 [LOCAL_CHECKS.md](LOCAL_CHECKS.md)。各次实施、测量和验收过程在对应 PR，不在本文。2026-10-06 开源之前的 Issue / PR 编号指向开源前的私有历史（见 [AGENTS.md](../AGENTS.md#公开库规则)）。
 
 ## 目标与边界
 
@@ -40,6 +40,10 @@ Core 持有连接内规则、资产、证据、人工结论、历史/撤销和�
 
 兼容文本位于 `compat_text`：共用 Python 引号、转义、Unicode 可打印规则及扩展空白裁剪；错误和桌面建库不依赖 HTTP 工具。Unicode 15 表保留历史文件名 `http_unicode.rs`，以中性 `compat_unicode` 模块加载。HTTP 与欢迎页共用 `app_create::creation_error`，保留创建成功后登记、登记失败保留包和原错误转换。
 
+带路径的文件操作错误由 `error::filesystem_message` 显示为「文件操作失败」，保留操作系统原始原因、错误号和源／目标路径；错误类型、HTTP 状态及校验顺序不变。SQLite 整数绑定越界显示「整数超出数据库支持的范围」。前端按完整模板翻译这些消息，系统原因、数字和路径作为数据保留。新产生的同步错误沿用此格式和原有 300 字符上限；`sync_runs.message` 的历史文本不迁移、不重写（2026-11-15，#252）。
+
+`app_curation` 和 `app_identity::skip` 的新动作载荷使用结构化紧凑 JSON；skip 保存的旧 `identity_skipped` 偏好仍是字符串，撤销按原文恢复。既有 `actions.before_json` 不重写，其他核心动作载荷不变。学习发布戳包含动作原文，因此新编码参与的戳会与旧编码不同（2026-11-15，#252）。机器溯源的分组和本地匹配仅对新写入的 `image_artists.evidence` 使用结构化紧凑 JSON，交付前仍先解析再规范化计算 v4 版本；字段值和数组顺序相同的两种编码交付同一份核心证据。候选画师理由只在证据 `count` 为正整数时显示张数，其余取「有线索指向 TA」；此规则同时适用于核心和旧证据读取，不修改证据或裁决。
+
 扫描取消由宿主 `app_sync::check` 提供，保留 atomic cancel 或宿主进程停止状态的原谓词；文件夹、Photos 及只读函数仅调用传入的检查。文件夹仍先开启源库即时事务再盘点/哈希、发布 pending journal 后提交；Photos 仍先只读枚举显式来源再开启源库事务，并在原逐行位置探测路径。原检查点、频率、来源碰撞拒绝和应用库后续刷新边界不变。原生选择由宿主传停止谓词，保留 100ms 轮询、600s 超时及 kill/wait 收尾。
 
 `crates/core` 的 `illustash-core` 通过 path dependency 被 `native/terms` 的 `illustash-terms` 使用。Core 承载连接内的词条 schema/迁移、证据包解析与验证、人工裁决、角色/身份关系、历史/统一撤销、名字搜索与投影，以及 Error、Origin、严格 JSON、Unicode 与生成字符表。SQL 资源跟随规则归 Core；宿主以窄转导出保持旧 Rust 模块路径，折叠 SQL 通过连接内函数共用，不复制算法或 SQL。Core 可独立 fmt/clippy/test/locked build，进程内客户端不需要 HTTP/CLI/Tauri、平台 crate 或参考宿主；应用协调与 HTTP/CLI 留宿主；已有来源读取、路径/VFS、文件权限、进程/凭据/系统集成由 `crates/platform` / `illustash-platform` 提供。包名、bin 名、构建入口和 JSON/SQLite 格式不变，无根 workspace。
@@ -71,6 +75,8 @@ HTTP 前门仅装配服务与 socket，保留 Host/Origin/token 检查、请求�
 ## 应用生命周期
 
 普通打开只接受已初始化的 `.pilib` 包：Rust 持有图库实例、会话和切库状态。包格式、应用 schema、词条 schema 与 core 标记分别校验；需要建库或升级时拒绝启动，不通过读取入口隐式修改数据库。
+
+`POST /api/libraries/new` 的 `name` 缺省、为 null 或裁剪后为空时使用「新图库」；其他值必须是字符串，布尔、数字、数组和对象在创建目录前返回 400「图库名称必须是字符串」。名称仍按既有扩展空白规则裁剪，含 NUL 时返回「无法创建图库：名称不能包含空字符（NUL）」（2026-11-15，#252）。
 
 入口为 `./start-web.command --library /绝对路径/已有图库.pilib` 或 `illustash-terms http --library ...`，无需 `--native`。省略 `--library` 时重新打开最近登记的有效包；无记录则明确提示指定包，普通启动不创建图库或隐式升级。`--native` 保留为兼容别名。启动参数见 `http --help`；任务和网络授权参数沿用既有协议，`--no-open` 继续可用。旧宿主的 `--python`、`--upstream`、`--route`、`--refresh`、`--source`、`--db`、`--cache`、`--identity`、`--no-similar` 与参数分隔透传 `--` 明确报退役错误，不打开图库、不连接上游、不启动 Python。图库读、写、设置、备份和管理都在原生宿主中完成。
 
@@ -227,7 +233,7 @@ terms 5（`5e7e7f7`）/6（`d9c49b4`）的历史源库定义均含可为 NULL �
 
 原生会话另接管 `POST /api/artist/verdict`、`/api/curate`、`/api/fold`，覆盖画师裁决、人工收录与排除、重复关系折叠。画师裁决仅选择已有资产，不扩展重复组；人工整理沿用标签目标选择并在同一应用事务写历史、curation 与 excluded。折叠配置按既有稳定哈希和关系规则重建 duplicates，并沿用成员差异可见性规则；源库只读快照与应用库提交之间保留独立边界，不宣称跨库原子事务。折叠沿用现存无历史语义；人工标签、画师裁决和整理统一参与最近一步撤销。持久化 JSON 的 ASCII、空格与字段顺序保持原契约，和 HTTP 序列化分开。整理及其撤销共用 bulk excluded 重建规则，保留乱序目标下的物理 rowid 顺序。
 
-原生会话接管 `POST /api/entities`、`/api/character/profile`、`/api/local-links`、`/api/works`、`/api/character/mascot`、`/api/kind`、`/api/oc/shared`。实体创建先按现行名称、别名及 Danbooru/WD 链接复用已有身份；无名 OC 按未占用的「原创角色 N」命名。作品保留 create/edit/from_tag/move/link/rename 六类操作、父子环与链接冲突检查。资料和本地链接与其他人工命令共用最近一步撤销；创建、作品编辑、类型及 mascot 沿用无历史语义；作品归属统一经资料接口修改并参与撤销。资料请求的 `work` 也可写成 `{"create": 名称}` 或 `{"tag": tag}`：新建或按 tag 取得作品与资料写入在同一事务，资料失败不留孤立作品；网页保存在第一次请求前即禁用按钮，新建作品时上级作品随 `create` 一并提交（2026-10-11，#35）。参数解析、核心写入、历史、名称与身份投影及事件入队共用 Immediate 事务；响应读取发生在提交及投影更新之后，不把提交后的响应或事件失败解释成回滚。
+原生会话接管 `POST /api/entities`、`/api/character/profile`、`/api/local-links`、`/api/works`、`/api/character/mascot`、`/api/kind`、`/api/oc/shared`。实体创建先按现行名称、别名及 Danbooru/WD 链接复用已有身份；无名 OC 按未占用的「原创角色 N」命名。作品保留 create/edit/from_tag/move/link/rename 六类操作、父子环与链接冲突检查。资料、本地链接及角色标记与其他人工命令共用最近一步撤销。角色标记的撤销快照见[角色写入契约](TERMS_CHARACTERS.md#3-切换之后)。身份创建、作品编辑沿用无历史语义。单独修改作品归属经资料接口并参与撤销。资料请求的 `work` 也可写成 `{"create": 名称}` 或 `{"tag": tag}`：新建或按 tag 取得作品与资料写入在同一事务，资料失败不留孤立作品；网页保存在第一次请求前即禁用按钮，新建作品时上级作品随 `create` 一并提交（2026-10-11，#35）。参数解析、核心写入、历史、名称与身份投影及事件入队共用 Immediate 事务。角色标记在写事务内取得本次撤销记录，成功提交后才送出响应。其他响应读取在提交及投影更新之后，不把提交后的响应或事件失败解释成回滚。
 
 版权解析先查本地作品的 Danbooru/qualifier 链接；无匹配时按原 `related_tag.json` 查询及 `name_cache` 契约选择覆盖率至少 0.9 的最小作品，缺失则退至 0.5。Rust HTTPS 客户端保留 25 秒超时、2 MB 响应限制和 500 MB 流量预算，查询缓存与成功流量记账随命令提交；查询或后续写入失败回滚本次正式修改。`ILLUSTASH_COPYRIGHT_BASE` 仅允许本机带端口的 HTTP 合成查询替身。当前请求失败返回错误。
 
@@ -338,6 +344,8 @@ Photos 适配只打开显式配置包内的 Photos.sqlite 只读连接，收录 
 2026-10-04，索引分位数保留现行 macOS NumPy 2.5.3 标量 `np.percentile(dd,q)` 口径：f32 输入按 f32 插值、f64 输入按 f64 插值；与学习单独批准的 float64 p90 不混用。NPY 原始大小端、C/F 布局及 f32/f64 归约先保留，输出锚点/清洗特征才转 f32；矩阵运算复用 Platform 的系统 Accelerate。索引与识别别名矩阵均保留旧算法 1024 行分块，64 行会使尾部单行 GEMV 翻转 `.01` 边界判断；取消仍在归一化、逐别名行和 BLAS 前后检查，单次不可中断 BLAS 最多 1024 行乘全体锚点。scan 保留最近 9 项 argpartition 后排序、先去实体重再判断阈值、补丁 p75/上游 p90 和 4000 列分块；正式标签置信度仍取四位小数 CSV 距离，scan CSV 保留旧 `csv.writer` 的 CRLF 行结束字节。等频 core tags 的旧哈希集合没有跨进程固定顺序，现行计算以标签字典序打破同计数平局。其他平台 portable 数值尚未取得此项实际验收，不能据 macOS 证据宣布跨平台原生替代完成。macOS 安装 dispatcher 的 index 入口直接进入原生计算，无需 `ILLUSTASH_WORKER_PYTHON` 或可发现的 Python；模型目录与 tags 沿用统一资源解析，CPU runtime 使用 `ILLUSTASH_ORT_DYLIB` 或资源根下 `onnxruntime/libonnxruntime.dylib`，`--check` 实际加载 CCIP 会话。2026-10-05 起 Windows 安装 dispatcher 的 index 入口同样走原生计算（CPU runtime 默认资源根下 `onnxruntime/onnxruntime.dll`）。完整安装包的资源装配与平台验收范围以 [安装参考](BACKEND_TASKS.md#独立安装与可选计算包) 为准。
 
 Windows 开发计算候选复用 #151 的固定 ILP64 OpenBLAS 加载器：显式绝对 `ILLUSTASH_RESEARCH_OPENBLAS_DLL`、登记分发指纹和模块文件身份检查保持；索引 f32/f64 的 DOT 与 C/F 原始布局 GEMV 均走该后端，不用顺序累加替代，不将 F 布局转成另一种矩阵形状。缺配置明确失败，不静默使用 portable。安装后的 worker 在启动器未提供 `ILLUSTASH_RESEARCH_OPENBLAS_DLL` 与 `ILLUSTASH_ROOT` 时，按安装位置解析 `resources/openblas/openblas.dll`，学习、索引、识别三类入口一致；`--check` 也会验证该后端身份。其他平台算法未改。2026-10-04 用户批准最近 9 项的并列距离统一使用既有 NumPy 1.26.4 标量 argintroselect/aquicksort 顺序；Windows NumPy 2.5.3 的 SIMD 并列项选择及顺序会改变，可能改变 scan 去实体重后的候选与声明。距离数值、阈值与非并列项顺序保持原合同。
+
+**跨 CPU 重算（#483）**。计算沿用各机器的 BLAS 后端。Windows 的固定 OpenBLAS DLL 运行时按 CPU 选择内核，同一输入的锚点和溯源缓存分数等保存值可能出现末位差异，跨 CPU 不保证逐位一致。打开或导入图库时沿用已保存的机器认领和人工裁决。新识别即使读取同一组已保存的锚点，也会在本机重算别名，`0.01` 边界附近的样本可能归入不同角色。主动执行索引 apply/drop 会重新扫描全库，以新结果替换 `char_ext` 机器认领并刷新变化资产，继续保留人工裁决。计算沿用既有阈值。识别结果导入按内容指纹去重，指纹不同时拒绝覆盖仍有效的结果。本机宿主复算认领并严格校验原生 worker 的角色 sidecar。见[识别结果包契约](RESULT_PACKAGES.md)。
 
 显式模型验收入口为 `python -m unittest tests.platform_index_models -v -b`，不进入普通 discover。开发计算候选的 `tests.test_native_index_compute.NativeIndexActualCcipTest` 与安装适配器的 `tests.test_native_index_production.InstalledIndexAppTest.test_actual_ccip_download_to_installed_adapter_without_python` 同样只按名字显式运行，普通 discover 不收集；显式运行时缺模型、runtime 或独立旧 raw 直接失败。必须提供当轮 `ILLUSTASH_TERMS_BIN`、`ILLUSTASH_INDEX_ADAPTER_BIN`、`ILLUSTASH_RECOGNITION_COMPUTE_BIN`、`ILLUSTASH_NATIVE_ROOT`，以及授权的 `ILLUSTASH_INDEX_INSTALLED_MODEL`、`ILLUSTASH_INDEX_INSTALLED_RUNTIME`、独立旧算法的 `ILLUSTASH_INDEX_REFERENCE_RAW`；缺输入直接失败。该入口只安装索引所需 CCIP 资源，用八张坐标生成 RGB 图片检查原生参考推理、正式发布、后续识别认领、缓存重算与 drop；子进程空 PATH，无 Python workers、WD 或外部模型/runtime 路径覆盖。补丁识别阈值按旧 `claim_thresholds` 取 p75。缓存重算保留角色元数据和 raw，仅删除派生的清洗矩阵；公共 apply 仍只接受最近检查里的缺失角色，不新增强制重算接口。该窄安装布局不代表签名 App 或全功能安装包，其他平台继续按各自门槛验收。
 

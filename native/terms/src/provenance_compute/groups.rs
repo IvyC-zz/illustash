@@ -142,12 +142,8 @@ pub(super) fn run(request: &Request, sequence: &mut u64) -> Result<Value> {
             if count < *least || count != solved.len() {
                 continue;
             }
-            let proof = format!(
-                "{{\"group\": {}, \"count\": {}, \"from\": {}}}",
-                crate::character_json::dump(&json!(RULES[index].0), true),
-                count,
-                crate::character_json::dump(&json!(solved.iter().take(5).collect::<Vec<_>>()), true)
-            );
+            let proof = json!({"group":RULES[index].0,"count":count,"from":solved.iter().take(5).collect::<Vec<_>>()})
+                .to_string();
             for asset in members {
                 if owners.contains_key(asset) {
                     continue;

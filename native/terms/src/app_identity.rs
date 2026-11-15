@@ -58,7 +58,7 @@ fn skip(c: &mut Connection, body: &Json) -> Result<Json> {
     )?;
     tx.execute(
         "INSERT INTO actions(label,before_json) VALUES (?,?)",
-        params!["已暂不判断一对角色", character_json::dump(&json!([{"identity_skip":before}]), true)],
+        params!["已暂不判断一对角色", json!([{"identity_skip":before}]).to_string()],
     )?;
     tx.commit()?;
     Ok(Json::object([("undo", app_commands::last_action(c)?)]))
