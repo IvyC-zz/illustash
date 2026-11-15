@@ -345,6 +345,8 @@ Photos 适配只打开显式配置包内的 Photos.sqlite 只读连接，收录 
 
 Windows 开发计算候选复用 #151 的固定 ILP64 OpenBLAS 加载器：显式绝对 `ILLUSTASH_RESEARCH_OPENBLAS_DLL`、登记分发指纹和模块文件身份检查保持；索引 f32/f64 的 DOT 与 C/F 原始布局 GEMV 均走该后端，不用顺序累加替代，不将 F 布局转成另一种矩阵形状。缺配置明确失败，不静默使用 portable。安装后的 worker 在启动器未提供 `ILLUSTASH_RESEARCH_OPENBLAS_DLL` 与 `ILLUSTASH_ROOT` 时，按安装位置解析 `resources/openblas/openblas.dll`，学习、索引、识别三类入口一致；`--check` 也会验证该后端身份。其他平台算法未改。2026-10-04 用户批准最近 9 项的并列距离统一使用既有 NumPy 1.26.4 标量 argintroselect/aquicksort 顺序；Windows NumPy 2.5.3 的 SIMD 并列项选择及顺序会改变，可能改变 scan 去实体重后的候选与声明。距离数值、阈值与非并列项顺序保持原合同。
 
+**跨 CPU 重算（#483）**。计算沿用各机器的 BLAS 后端。Windows 的固定 OpenBLAS DLL 运行时按 CPU 选择内核，同一输入的锚点和溯源缓存分数等保存值可能出现末位差异，跨 CPU 不保证逐位一致。打开或导入图库时沿用已保存的机器认领和人工裁决。新识别即使读取同一组已保存的锚点，也会在本机重算别名，`0.01` 边界附近的样本可能归入不同角色。主动执行索引 apply/drop 会重新扫描全库，以新结果替换 `char_ext` 机器认领并刷新变化资产，继续保留人工裁决。计算沿用既有阈值。识别结果导入按内容指纹去重，指纹不同时拒绝覆盖仍有效的结果。本机宿主复算认领并严格校验原生 worker 的角色 sidecar。见[识别结果包契约](RESULT_PACKAGES.md)。
+
 显式模型验收入口为 `python -m unittest tests.platform_index_models -v -b`，不进入普通 discover。开发计算候选的 `tests.test_native_index_compute.NativeIndexActualCcipTest` 与安装适配器的 `tests.test_native_index_production.InstalledIndexAppTest.test_actual_ccip_download_to_installed_adapter_without_python` 同样只按名字显式运行，普通 discover 不收集；显式运行时缺模型、runtime 或独立旧 raw 直接失败。必须提供当轮 `ILLUSTASH_TERMS_BIN`、`ILLUSTASH_INDEX_ADAPTER_BIN`、`ILLUSTASH_RECOGNITION_COMPUTE_BIN`、`ILLUSTASH_NATIVE_ROOT`，以及授权的 `ILLUSTASH_INDEX_INSTALLED_MODEL`、`ILLUSTASH_INDEX_INSTALLED_RUNTIME`、独立旧算法的 `ILLUSTASH_INDEX_REFERENCE_RAW`；缺输入直接失败。该入口只安装索引所需 CCIP 资源，用八张坐标生成 RGB 图片检查原生参考推理、正式发布、后续识别认领、缓存重算与 drop；子进程空 PATH，无 Python workers、WD 或外部模型/runtime 路径覆盖。补丁识别阈值按旧 `claim_thresholds` 取 p75。缓存重算保留角色元数据和 raw，仅删除派生的清洗矩阵；公共 apply 仍只接受最近检查里的缺失角色，不新增强制重算接口。该窄安装布局不代表签名 App 或全功能安装包，其他平台继续按各自门槛验收。
 
 ### 离线识别结果导入
