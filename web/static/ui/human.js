@@ -95,7 +95,7 @@ export function renderHumanBlock() {
 // 引导句在上面，其余放进一个可滚动的区域，明细展开后对话框也不会超出窗口。
 export function reportSummary(r, undoable = r.undo != null, extra = '') {
   const lines = [];
-  const lead = r.undo == null ? t('没有新内容：图库没有改动，也没有可以撤销的步骤。下面是每一类的结果。')
+  const lead = r.undo == null ? t('没有新内容：图库没有改动，也没有可以撤销的步骤。')
     : undoable ? t('已经写进这个图库。可以整步撤销：点下面的「撤销这次导入」，或用顶栏的撤销按钮。') : t('已经写进这个图库。');
   const note = text => lines.push(`<p class="muted-note">${text}</p>`);
   if (r.committed && r.pending_effects) note(t('收录结果还在后台更新，稍后会自己刷新，不需要重新导入。'));
@@ -111,6 +111,7 @@ export function reportSummary(r, undoable = r.undo != null, extra = '') {
     const body = found.map(([k, n]) => `<tr><td>${esc(resultText(k, key))}</td><td>${number(n)}</td></tr>`).join('');
     return found.length ? `<tr><th colspan="2">${title}</th></tr>${body}` : '';
   }).join('');
+  if (!rows) note(t('文件或快照里没有人工结论。'));
   if (rows) lines.push(`<table class="settings-table">${rows}</table><p class="set-sub-note">${t('这几类分开计数，口径不同，不能相加。')}</p>`);
   return `<p class="dialog-lead">${lead}</p><div class="index-add-list">${lines.join('')}${extra}</div>`;
 }

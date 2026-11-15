@@ -163,6 +163,9 @@ test('the report counts each kind on its own, says conflicts kept this library, 
   assert.match(none, /没有新内容/);
   assert.doesNotMatch(none, /可以整步撤销/);
   assert.match(ui.reportSummary(summary({pending_effects: true})), /不需要重新导入/);
+  const empty = ui.reportSummary(summary({undo: null, counts: {}, asset_counts: {}, definition_counts: {}, definition_fields: {}, detail_count: 0}));
+  assert.match(empty, /没有人工结论/);
+  assert.doesNotMatch(empty, /settings-table/);
   assert.match(ui.reportSummary(summary({definition_counts: {applied: 1}})), /新建了<\/td><td>1/);
 });
 
