@@ -104,6 +104,7 @@ class NumericReferenceContractTest(unittest.TestCase):
 
     def test_reference_summary_reads_actual_verbose_buffered_output(self):
         from tests.windows_fixed_suite import reference_record, reference_summary
+        self.assertIsNone(reference_record(f'ValueError: {mode.ENV} 必须为 frozen 或 numpy'))
         name = 'test_merge_percentile_core_and_partition_ties'
         for references in (('numpy',), ('numpy', 'frozen')):
             def compare(test):

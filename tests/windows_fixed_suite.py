@@ -32,8 +32,10 @@ REFERENCE_MARK = 'NUMERIC_REFERENCE '
 
 def reference_record(line):
     """verbosity=2 的方法进度未换行时，首条记录会接在其后。"""
-    _, marker, payload = line.partition(REFERENCE_MARK)
-    return json.loads(payload) if marker else None
+    prefix, marker, payload = line.partition(REFERENCE_MARK)
+    if not marker or (prefix and not prefix[-1].isspace()):
+        return None
+    return json.loads(payload)
 
 
 def reference_summary(records):
