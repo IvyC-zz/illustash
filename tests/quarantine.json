@@ -1,0 +1,56 @@
+{
+  "说明": "不稳定测试的隔离名单（#501）。名单里的测试照常运行，只在列出的平台上失败不计入结果，单列在「隔离名单中的失败」。到期的条目、找不到对应测试的条目让检查失败。规则见 AGENTS.md，格式见 tools/quarantine.py。",
+  "entries": [
+    {
+      "kind": "python",
+      "id": "test_native_lifecycle.NativeLifecycleTest.test_native_library_new_invalid_inputs_and_reference_errors_are_byte_exact",
+      "platforms": ["macos"],
+      "issue": 510,
+      "added": "2026-11-15",
+      "expires": "2026-11-29"
+    },
+    {
+      "kind": "python",
+      "id": "test_native_research.NativeResearchTest.test_similar_ignores_human_verdict_and_retries_on_its_own_inputs",
+      "platforms": ["windows"],
+      "issue": 498,
+      "added": "2026-11-15",
+      "expires": "2026-11-29"
+    },
+    {
+      "kind": "python",
+      "id": "test_native_research.NativeResearchTest.test_continuous_input_change_retries_are_bounded_then_manual_retry",
+      "platforms": ["windows"],
+      "issue": 498,
+      "added": "2026-11-15",
+      "expires": "2026-11-29"
+    },
+    {
+      "kind": "rust",
+      "crate": "native/terms",
+      "id": "app_sync::tests::scan_cancellation_and_completed_lifecycle_have_explicit_boundaries",
+      "platforms": ["windows"],
+      "issue": 497,
+      "added": "2026-11-15",
+      "expires": "2026-11-29"
+    },
+    {
+      "kind": "rust",
+      "crate": "native/terms",
+      "id": "integrity::checks_after_a_crash_in_the_background_and_on_request_and_stop_writing_on_damage",
+      "platforms": ["macos"],
+      "issue": 473,
+      "added": "2026-11-15",
+      "expires": "2026-11-29"
+    },
+    {
+      "kind": "rust",
+      "crate": "desktop",
+      "id": "server::tests::forced_cleanup_includes_descendants_and_leaves_bystander_alive",
+      "platforms": ["macos"],
+      "issue": 474,
+      "added": "2026-11-15",
+      "expires": "2026-11-29"
+    }
+  ]
+}

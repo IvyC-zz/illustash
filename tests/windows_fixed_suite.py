@@ -1,4 +1,8 @@
-"""运行 Windows 的 Python 全量，记录输出并拦截白名单外的跳过。"""
+"""运行 Windows 的 Python 全量或定向选择，记录输出并拦截白名单外的跳过。
+
+不带 `--select` 时是全量；带 `--select`（可重复，原样交给 `tests.run_fixed_suite`）时只跑选中的测试，
+用于 Windows 快检和定向复跑（#501）。`--scope` 是写进日志和 job 摘要的范围名，定向结果不能当作全量。
+"""
 import argparse
 import ast
 from collections import Counter
@@ -64,13 +68,23 @@ def skip_allowed(line):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--log', type=Path, required=True)
+    parser.add_argument('--select', action='append', default=[], help='测试 ID 前缀，如 test_native_research.NativeResearchTest')
+    parser.add_argument('--scope', default='', help='写进日志和摘要的范围名；带 --select 时必填')
+    parser.add_argument('--count-quarantined', action='store_true', help='隔离名单里的失败也计入结果（定向复现用）')
     args = parser.parse_args()
+    if args.select and not args.scope:
+        parser.error('带 --select 时须用 --scope 写明范围')
+    scope = args.scope or '全量'
 
     skips = []
     references = []
     tail = []
-    command = [sys.executable, '-X', 'utf8', '-m', 'tests.run_fixed_suite', '-v', '-b']
-    with args.log.open('w', encoding='utf-8', newline='\n') as log, subprocess.Popen(
+    command = [sys.executable, '-X', 'utf8', '-m', 'tests.run_fixed_suite', '-v', '-b',
+               *(f'--select={prefix}' for prefix in args.select), *(['--count-quarantined'] if args.count_quarantined else [])]
+    heading = f'Windows Python 范围：{scope}' + (f'（只跑 {", ".join(args.select)}）' if args.select else '')
+    print(heading, flush=True)
+    args.log.write_text(heading + '\n', encoding='utf-8', newline='\n')
+    with args.log.open('a', encoding='utf-8', newline='\n') as log, subprocess.Popen(
         command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, encoding='utf-8', errors='replace',
     ) as suite:
         for line in suite.stdout:
@@ -83,7 +97,8 @@ def main():
             tail = [*tail[-2:], line.rstrip('\n')]
         status = suite.wait()
 
-    summary = [*reference_summary(references), '', f'### Windows Python 跳过：{len(skips)} 项', '```', *skips, *tail, '```']
+    summary = [f'### {heading}', '', *reference_summary(references), '',
+               f'### Windows Python 跳过：{len(skips)} 项', '```', *skips, *tail, '```']
     print('\n'.join(summary))
     if path := os.environ.get('GITHUB_STEP_SUMMARY'):
         with open(path, 'a', encoding='utf-8') as output:

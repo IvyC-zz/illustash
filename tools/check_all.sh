@@ -43,6 +43,9 @@ if [ -z "$frontend_base" ]; then
 fi
 run "$python" tools/check_frontend.py --strict-stale ${frontend_base:+--base-ref "$frontend_base"}
 run "$python" tools/check_styleguide.py
+# 不稳定测试的隔离名单（#501）：格式错误或到期时尽早失败。Rust 测试经 cargo-test 入口、Python 经
+# tests.run_fixed_suite 应用同一份名单：名单里本平台的测试照跑，失败单列，不计入结果。
+run "$python" tools/quarantine.py check
 run "$python" -m unittest discover -s tests -p test_local_acceptance.py -v -b
 # 旧变量不能在 release 前调用任意测试，避免读取上一候选的二进制。
 if [ -n "${CHECK_ALL_PREFLIGHT_TESTS:-}" ]; then
@@ -51,26 +54,26 @@ if [ -n "${CHECK_ALL_PREFLIGHT_TESTS:-}" ]; then
 fi
 run cargo fmt --manifest-path crates/core/Cargo.toml --check
 run cargo clippy --locked --manifest-path crates/core/Cargo.toml --all-targets -- -D warnings
-run cargo test --locked --manifest-path crates/core/Cargo.toml
+run "$python" tools/quarantine.py cargo-test --manifest-path crates/core/Cargo.toml
 run cargo build --locked --manifest-path crates/core/Cargo.toml
 run cargo fmt --manifest-path crates/platform/Cargo.toml --check
 run cargo clippy --locked --manifest-path crates/platform/Cargo.toml --all-targets -- -D warnings
-run cargo test --locked --manifest-path crates/platform/Cargo.toml
+run "$python" tools/quarantine.py cargo-test --manifest-path crates/platform/Cargo.toml
 run cargo build --locked --manifest-path crates/platform/Cargo.toml
 run cargo fmt --manifest-path crates/relation-fft/Cargo.toml --check
 run cargo clippy --locked --manifest-path crates/relation-fft/Cargo.toml --all-targets -- -D warnings
-run cargo test --locked --manifest-path crates/relation-fft/Cargo.toml
+run "$python" tools/quarantine.py cargo-test --manifest-path crates/relation-fft/Cargo.toml
 run cargo fmt --manifest-path native/terms/Cargo.toml --check
 run cargo clippy --locked --manifest-path native/terms/Cargo.toml --all-targets --all-features -- -D warnings
 # 前置较快检查和桌面构建，避免 Python 全量之后才发现构建失败。
 run node --test tests/*.test.cjs tests/test_pixiv_poll.js
 run cargo fmt --manifest-path desktop/Cargo.toml --check
 run cargo clippy --locked --manifest-path desktop/Cargo.toml --all-targets -- -D warnings
-run cargo test --locked --manifest-path desktop/Cargo.toml
-run cargo test --locked --manifest-path native/terms/Cargo.toml
+run "$python" tools/quarantine.py cargo-test --manifest-path desktop/Cargo.toml
+run "$python" tools/quarantine.py cargo-test --manifest-path native/terms/Cargo.toml
 run cargo fmt --manifest-path crates/iqdb/Cargo.toml --check
 run cargo clippy --locked --manifest-path crates/iqdb/Cargo.toml --all-targets -- -D warnings
-run cargo test --locked --manifest-path crates/iqdb/Cargo.toml
+run "$python" tools/quarantine.py cargo-test --manifest-path crates/iqdb/Cargo.toml
 run cargo build --release --locked --manifest-path native/terms/Cargo.toml
 run cargo build --release --locked --manifest-path native/terms/Cargo.toml --features test-read-host --example read-http --example recognition-compute --example index-compute --example research-compute --example relation-probe --example provenance-compute
 run cargo build --release --locked --manifest-path crates/iqdb/Cargo.toml

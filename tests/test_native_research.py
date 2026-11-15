@@ -39,30 +39,44 @@ class NativeResearchTest(unittest.TestCase):
         self.kinds = self.root/'worker.kinds'
         self.gate = self.root/'worker.release'
         self.mode.write_text('ok')
-        self.worker.write_text('#!'+sys.executable+'\n'+f'''import sys,os,json,time,subprocess
+        self.worker_log=self.root/'worker.stderr.log'
+        self.worker.write_text('#!'+sys.executable+'\n'+f'''import sys,os,json,time,subprocess,traceback
 from pathlib import Path
 sys.path.insert(0,{str(self.repo)!r})
+# 失败证据（#501）：每次尝试的编号、kind、模式、未捕获的异常和计算程序的 stderr 追加进 worker.stderr.log；
+# 原本的 stderr 照旧交给宿主。主体保持顶层语句：别的测试会在这里按原文插入代码。
+log=open({str(self.worker_log)!r},'a',encoding='utf-8')
+def note(text): log.write(text if text.endswith('\\n') else text+'\\n');log.flush()
+def logged(kind,value,trace): note(''.join(traceback.format_exception(kind,value,trace)));sys.__excepthook__(kind,value,trace)
+sys.excepthook=logged
 r=json.loads(Path(sys.argv[1]).read_text(encoding='utf-8'))
 # Written whole, then renamed: a test that sees the file reads the full pid (#132).
 Path({str(self.pid)!r}+'.tmp').write_text(str(os.getpid()));os.replace({str(self.pid)!r}+'.tmp',{str(self.pid)!r})
 with open({str(self.runs)!r},'a') as f: f.write(r['version']+'\\n')
 with open({str(self.kinds)!r},'a') as f: f.write(r['kind']+'\\n')
 mode=Path({str(self.mode)!r}).read_text()
+note('--- 第 '+str(len(Path({str(self.runs)!r}).read_text().split()))+' 次 worker kind='+r['kind']+' mode='+mode+' pid='+str(os.getpid()))
 if mode=='hang':
     subprocess.Popen([sys.executable,'-c','import time;time.sleep(60)'])
     time.sleep(60)
-if mode=='crash': sys.exit(7)
+if mode=='crash': note('按模式退出，退出码 7');sys.exit(7)
 if mode=='held':
     # Waits for the test's release, taken once per run: what the test does meanwhile is in flight (#263).
     while True:
         try: os.remove({str(self.gate)!r}); break
         except FileNotFoundError: time.sleep(.02)
-subprocess.run([os.environ['ILLUSTASH_RESEARCH_COMPUTE_BIN'],sys.argv[1],sys.argv[2]],check=True)
+    note('已取走放行文件')
+compute=subprocess.run([os.environ['ILLUSTASH_RESEARCH_COMPUTE_BIN'],sys.argv[1],sys.argv[2]],stderr=subprocess.PIPE)
+if compute.stderr:
+    sys.stderr.buffer.write(compute.stderr);sys.stderr.flush()
+    note('计算程序 stderr：'+compute.stderr.decode('utf-8','replace'))
+compute.check_returncode()
 v=json.loads(Path(sys.argv[2]).read_text(encoding='utf-8'))
 if mode=='wrong': v['identity']['generation']+=1
 if mode=='bad': v['tables']['relations']=[['a','foreign','identical',0,'','2026-10-01']]
 if mode=='invalid': v['tables']['cluster_info']=[['invalid']]
 Path(sys.argv[2]).write_text(json.dumps(v,allow_nan=False))
+note('正常结束')
 ''')
         self.worker.chmod(0o755)
         self.env.update(ILLUSTASH_RESEARCH_WORKER=worker_command(self.worker),ILLUSTASH_RESEARCH_TIMEOUT_MS='10000',ILLUSTASH_RESEARCH_RETRY_MS='300')
@@ -87,9 +101,12 @@ Path(sys.argv[2]).write_text(json.dumps(v,allow_nan=False))
         self.token=json.loads(self.request('/api/bootstrap')['body'])['token']
 
     def state(self): return json.loads(self.request('/api/similar')['body'])['state']
+    def wait(self,predicate,timeout=15,what='等待超时'): return wait_for(self,predicate,timeout,what)
+    def why(self,*context): return why(self,*context)
     def finished(self, status='idle'):
-        wait_until(lambda:self.state()['status'] in ('idle','error'),timeout=20)
-        self.assertEqual(self.state()['status'],status,self.state())
+        # 直接调用模块级函数：别的测试类借用 setUp 和 finished 时不必再借这些辅助方法。
+        wait_for(self,lambda:self.state()['status'] in ('idle','error'),timeout=20,what='研究任务没有结束')
+        self.assertEqual(self.state()['status'],status,why(self))
     def rows(self, tables):
         with sqlite3.connect(self.lib.db) as c:
             return {t:c.execute('SELECT * FROM '+t+' ORDER BY 1').fetchall() for t in tables}
@@ -153,36 +170,36 @@ Path(sys.argv[2]).write_text(json.dumps(v,allow_nan=False))
     def test_inflight_human_change_cancel_switch_exit_no_process_group(self):
         self.mode.write_text('held')
         self.request('/api/regroup',{})
-        wait_until(lambda:self.pid.exists() and self.state()['status']=='learning',timeout=30)
+        self.wait(lambda:self.pid.exists() and self.state()['status']=='learning',timeout=30)
         self.request('/api/tag',{'ids':['a'],'tag':'合成'})
         self.mode.write_text('ok');self.release()
         self.finished()
         self.mode.write_text('hang')
         self.pid.unlink(missing_ok=True)
         self.request('/api/similar',{})
-        wait_until(self.pid.exists,timeout=5)
+        self.wait(self.pid.exists,timeout=5)
         pid=int(self.pid.read_text())
         with sqlite3.connect(self.lib.db) as c: pending=c.execute('SELECT count(*) FROM research_runs').fetchone()[0]
         for _ in range(3):self.assertEqual(self.request('/api/similar',{})['body'],b'{"started": true}')
         with sqlite3.connect(self.lib.db) as c:self.assertEqual(c.execute('SELECT count(*) FROM research_runs').fetchone()[0],pending)
         self.assertEqual(self.request('/api/similar',{'action':'cancel'})['status'],200)
-        wait_until(lambda:not group_exists(pid),timeout=5)
+        self.wait(lambda:not group_exists(pid),timeout=5)
         self.assertEqual(self.state()['status'],'idle')
         self.request('/api/similar',{})
-        wait_until(lambda:self.pid.exists() and int(self.pid.read_text())!=pid,timeout=5)
+        self.wait(lambda:self.pid.exists() and int(self.pid.read_text())!=pid,timeout=5)
         pid=int(self.pid.read_text())
         replacement = self.package('same-id')
         config=replacement.config;config['id']=self.lib.config['id'];(replacement.path/'library.json').write_text(json.dumps(config))
         self.assertEqual(self.request('/api/libraries/open',{'path':str(replacement.path)})['status'],200)
-        wait_until(lambda:not group_exists(pid),timeout=5)
+        self.wait(lambda:not group_exists(pid),timeout=5)
         self.token=json.loads(self.request('/api/bootstrap')['body'])['token']
         with sqlite3.connect(replacement.db) as c:self.assertEqual(c.execute("SELECT count(*) FROM research_runs WHERE id='startup'").fetchone()[0],1)
         self.request('/api/similar',{'action':'cancel'})
         self.pid.unlink(missing_ok=True)
         self.request('/api/similar',{})
-        wait_until(self.pid.exists,timeout=5)
+        self.wait(self.pid.exists,timeout=5)
         pid=int(self.pid.read_text());self.stop(self.process)
-        wait_until(lambda:not group_exists(pid),timeout=5)
+        self.wait(lambda:not group_exists(pid),timeout=5)
 
     def test_inflight_input_change_retries_on_fresh_snapshot(self):
         # #194：worker 计算期间来了一条人工裁决；过期的结果被拒绝、绝不发布，任务在更新的快照上自行完成。
@@ -192,7 +209,7 @@ Path(sys.argv[2]).write_text(json.dumps(v,allow_nan=False))
         runs=len(self.versions())
         self.mode.write_text('held')
         self.request('/api/regroup',{})
-        wait_until(lambda:len(self.versions())>runs and self.state()['status']=='learning',timeout=30)
+        self.wait(lambda:len(self.versions())>runs and self.state()['status']=='learning',timeout=30)
         self.assertEqual(self.request('/api/change',{'ids':['unmatched6'],'action':'confirmed','entity':self.alice})['status'],200)
         self.mode.write_text('ok');self.release()
         seen=[]
@@ -203,11 +220,11 @@ Path(sys.argv[2]).write_text(json.dumps(v,allow_nan=False))
                 self.assertIn('自动重试',s['message'])
             seen.append(s['status'])
             return s['status'] in ('idle','error')
-        wait_until(settled,timeout=20)
+        self.wait(settled,timeout=20)
         # 按结束等待时的状态判断：下一次恢复轮询（每秒一次）可能已经为这条裁决启动排队中的 events 运行，
         # 而 regroup 不确认这些事件。
-        self.assertEqual(seen[-1],'idle',seen)
-        self.assertIn('waiting',seen)
+        self.assertEqual(seen[-1],'idle',self.why(seen))
+        self.assertIn('waiting',seen,self.why(seen))
         versions=self.versions()[runs:]
         self.assertGreaterEqual(len(versions),2)
         self.assertNotEqual(versions[0],versions[-1])
@@ -223,7 +240,7 @@ Path(sys.argv[2]).write_text(json.dumps(v,allow_nan=False))
         runs=len(self.versions())
         self.mode.write_text('held')
         result=start()
-        wait_until(lambda:len(self.versions())>runs,timeout=30)
+        self.wait(lambda:len(self.versions())>runs,timeout=30)
         with sqlite3.connect(self.lib.db) as c: write(c)
         self.mode.write_text('ok');self.release()
         seen=[]
@@ -232,7 +249,7 @@ Path(sys.argv[2]).write_text(json.dumps(v,allow_nan=False))
             return seen[-1] in ('idle','error')
         # 放行后可能还要退避再重跑；繁忙机器上 20 秒不够（#418）。上限高于 `retry_visibly` 的任务时限，卡住的运行仍会报 `error`。
         try:wait_until(settled,timeout=70)
-        except AssertionError:self.fail(('运行没有结束',seen[-20:],self.run_kinds()))
+        except AssertionError:self.fail(self.why('运行没有结束',seen[-20:]))
         return result,seen,len(self.versions())-runs
 
     def test_discriminative_claims_publish_within_core_score_range(self):
@@ -246,7 +263,7 @@ Path(sys.argv[2]).write_text(json.dumps(v,allow_nan=False))
                 c.execute("UPDATE embeddings SET vec=? WHERE uuid=? AND model='ccip'",(v.tobytes(),'seed'+str(i)))
         self.restart()
         self.poke_event()
-        wait_until(lambda:self.pending()==0,timeout=20)
+        self.wait(lambda:self.pending()==0,timeout=20)
         self.finished()
         claims=self.rows(['proto_claims'])['proto_claims']
         seeds={u:s for u,e,s in claims if e==self.alice and u.startswith('seed')}
@@ -265,9 +282,9 @@ Path(sys.argv[2]).write_text(json.dumps(v,allow_nan=False))
             c.execute("INSERT OR REPLACE INTO name_settings VALUES ('synthetic_setting','42')")
             c.execute("INSERT INTO sync_runs(status) VALUES ('done')")
         _,seen,runs=self.inflight(lambda:self.request('/api/regroup',{}),write)
-        self.assertEqual(self.state()['status'],'idle',self.state())
-        self.assertNotIn('waiting',seen)
-        self.assertEqual(runs,1)
+        self.assertEqual(self.state()['status'],'idle',self.why(seen))
+        self.assertNotIn('waiting',seen,self.why(seen))
+        self.assertEqual(runs,1,self.why(seen))
         self.assertEqual(self.rows(['clusters']),before)
 
     def test_similar_ignores_human_verdict_and_retries_on_its_own_inputs(self):
@@ -280,8 +297,8 @@ Path(sys.argv[2]).write_text(json.dumps(v,allow_nan=False))
         self.retry_visibly()
         before=len(self.run_kinds())
         _,seen,_=self.inflight(lambda:self.request('/api/similar',{}),verdict)
-        self.assertEqual(seen[-1],'idle',(self.state(),seen,self.run_kinds()[before:]))
-        self.assertNotIn('waiting',seen,(seen,self.run_kinds()[before:]))
+        self.assertEqual(seen[-1],'idle',self.why(seen))
+        self.assertNotIn('waiting',seen,self.why(seen))
         # similar 结束后，裁决会把学习排进队列（一次 `events` 运行，#132）。`inflight` 看到第一次 `idle` 就返回，
         # 学习可能紧接着开始，所以先等它跑完：状态回到 `idle`，裁决事件也已确认（#418）。
         drain=[]
@@ -289,18 +306,18 @@ Path(sys.argv[2]).write_text(json.dumps(v,allow_nan=False))
             drain.append(self.state()['status'])
             return drain[-1]=='error' or drain[-1]=='idle' and self.pending()==0
         try:wait_until(drained,timeout=90)
-        except AssertionError:self.fail(('裁决排出的学习没有跑完',seen,drain,self.pending(),self.run_kinds()[before:]))
+        except AssertionError:self.fail(self.why('裁决排出的学习没有跑完',seen,drain,self.pending()))
         kinds=self.run_kinds()[before:]
-        self.assertEqual(self.state()['status'],'idle',(self.state(),seen,drain,kinds))
-        self.assertEqual(self.pending(),0,(seen,drain,kinds))
+        self.assertEqual(self.state()['status'],'idle',self.why(seen,drain,kinds))
+        self.assertEqual(self.pending(),0,self.why(seen,drain,kinds))
         # 只有第二次 similar 运行才算重试。
-        self.assertEqual(kinds.count('similar'),1,(seen,drain,kinds))
+        self.assertEqual(kinds.count('similar'),1,self.why(seen,drain,kinds))
         # 直接写 `excluded` 不产生裁决事件，similar 的重试在同一个任务里完成，结束后没有排队的学习。
         before=len(self.run_kinds())
         _,seen,runs=self.inflight(lambda:self.request('/api/similar',{}),lambda c:c.execute("INSERT INTO excluded VALUES ('b','synthetic','test')"))
-        self.assertEqual(self.state()['status'],'idle',(self.state(),seen,self.run_kinds()[before:]))
-        self.assertIn('waiting',seen,(seen,self.run_kinds()[before:]))
-        self.assertGreaterEqual(runs,2,(seen,self.run_kinds()[before:]))
+        self.assertEqual(self.state()['status'],'idle',self.why(seen))
+        self.assertIn('waiting',seen,self.why(seen))
+        self.assertGreaterEqual(runs,2,self.why(seen))
 
     def test_oc_query_answers_despite_unread_write(self):
         # #29：OC 只读归属、标签、排除和向量；它从不重试。
@@ -323,13 +340,13 @@ Path(sys.argv[2]).write_text(json.dumps(v,allow_nan=False))
         self.request('/api/regroup',{})
         # 每次尝试被卡住时都会遇到一次写入：第一次运行和全部五次重试。
         for i in range(1,7):
-            wait_until(lambda:len(self.versions())-runs>=i,timeout=30)
+            self.wait(lambda:len(self.versions())-runs>=i,timeout=30)
             self.assertEqual(self.request('/api/tag',{'ids':['a'],'tag':f'合成持续{i}'})['status'],200)
             self.release()
-        wait_until(lambda:self.state()['status']=='error',timeout=30)
+        self.wait(lambda:self.state()['status']=='error',timeout=30)
         state=self.state()
-        self.assertIn('自动重试 5 次',state['message'])
-        self.assertEqual(len(self.versions())-runs,6)
+        self.assertIn('自动重试 5 次',state['message'],self.why())
+        self.assertEqual(len(self.versions())-runs,6,self.why())
         self.assertEqual(self.rows(list(before)),before)
         with sqlite3.connect(self.lib.db) as c:
             self.assertIn('持续变化',c.execute("SELECT error FROM research_runs WHERE status='pending'").fetchone()[0])
@@ -342,7 +359,7 @@ Path(sys.argv[2]).write_text(json.dumps(v,allow_nan=False))
         def drained():
             with sqlite3.connect(self.lib.db) as c:
                 return self.state()['status']=='idle' and c.execute("SELECT count(*) FROM research_runs WHERE status='pending'").fetchone()[0]==0
-        wait_until(drained,timeout=20)
+        self.wait(drained,timeout=20)
         self.assertEqual(self.pending(),0)
 
     def test_ack_failure_replay_is_atomic_and_restart_recovers(self):
@@ -352,7 +369,7 @@ Path(sys.argv[2]).write_text(json.dumps(v,allow_nan=False))
             c.execute("CREATE TRIGGER fail_ack BEFORE UPDATE ON backend_effects WHEN NEW.status='done' BEGIN SELECT RAISE(ABORT,'synthetic ack'); END")
         with sqlite3.connect(self.lib.db) as c:c.execute("INSERT INTO backend_effects(kind) VALUES ('index_changed')")
         # 恢复可能在这里发出任何请求之前就启动运行（#263）：判断结果，而不是判断它有没有启动。
-        wait_until(lambda:self.state()['status']=='error',timeout=30)
+        self.wait(lambda:self.state()['status']=='error',timeout=30)
         self.assertIn('synthetic ack',self.state()['message'])
         self.assertGreater(self.pending(),0)
         # 被拒绝的确认让整个发布回滚了。
@@ -383,7 +400,7 @@ Path(sys.argv[2]).write_text(json.dumps(v,allow_nan=False))
         self.assertEqual(lifecycle.import_task(self,'/api/recognition/import',{'path':str(package)})['status'],200)
         def completed():
             with sqlite3.connect(self.lib.db) as c:return c.execute("SELECT count(*) FROM research_runs WHERE status='done'").fetchone()[0]>before
-        wait_until(completed,timeout=20)
+        self.wait(completed,timeout=20)
         self.assertEqual(history,self.rows(['assertions','actions']))
         with sqlite3.connect(self.lib.db) as c:count=c.execute('SELECT count(*) FROM research_runs').fetchone()[0]
         # 确认失败时重新分派同一条已存的事件；意图键必须保持不变。
@@ -415,6 +432,38 @@ Path(sys.argv[2]).write_text(json.dumps(v,allow_nan=False))
         self.assertEqual(self.request('/api/regroup',{})['status'],400)
         self.assertEqual(self.request('/api/assets/count')['status'],200)
         self.assertEqual(before,self.rows(['assertions','actions','relations','prototypes']))
+
+
+def lines(path):
+    return path.read_text().split() if path.exists() else []
+
+
+def evidence(test):
+    """失败证据（#501）：worker 启动过几次、各次的 kind、最后状态，以及合成 worker 的 stderr 结尾。
+    只读 setUp 建好的文件和宿主状态，借用 setUp 的其他测试类同样可用。"""
+    try: state=test.state()
+    except Exception as error: state=f'读取失败：{error!r}'
+    kinds=lines(test.kinds)
+    parts=[f'worker 已启动 {len(kinds)} 次，依次为 {kinds}',f'最后状态：{state}']
+    # 第二个是 Windows 启动器追加写的 stderr（tests/native_worker_fixture.py），收得到 Python 启动前的失败。
+    for path in (test.worker_log,test.worker.with_name(test.worker.name+'.stderr')):
+        if path.exists():
+            text=path.read_text(encoding='utf-8',errors='replace')
+            parts+=[f'--- {path.name}（末尾 {min(len(text),6000)} 字符）---',text[-6000:].rstrip()]
+    return '\n'.join(parts)
+
+
+def why(test,*context):
+    """断言说明：给出的上下文加上失败证据；只在断言失败、生成报告时才去读状态和文件。"""
+    class Why:
+        def __str__(self): return '\n'.join([*(repr(item) for item in context),evidence(test)])
+    return Why()
+
+
+def wait_for(test,predicate,timeout=15,what='等待超时'):
+    """同 wait_until，时限不变；超时报告里附上失败证据。"""
+    try: return wait_until(predicate,timeout=timeout)
+    except AssertionError: test.fail(f'{what}（{timeout} 秒）\n{evidence(test)}')
 
 
 def group_exists(pid):

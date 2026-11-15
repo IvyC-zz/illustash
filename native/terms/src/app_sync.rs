@@ -1397,16 +1397,26 @@ mod tests {
     fn scan_cancellation_and_completed_lifecycle_have_explicit_boundaries() {
         let root = std::env::temp_dir().join(format!("illustash-sync-boundary-{}", crate::store::new_key().unwrap()));
         std::fs::create_dir(&root).unwrap();
-        let status = std::process::Command::new(std::env::current_exe().unwrap())
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
             .args(["--ignored", "--exact", "app_sync::tests::scan_boundary_fixture", "--nocapture"])
             .env("ILLUSTASH_SYNC_BOUNDARY_FIXTURE", &root)
             .env("ILLUSTASH_APP_SUPPORT", root.join("support"))
             .env("ILLUSTASH_SHARED", root.join("absent-reference"))
             .env("ILLUSTASH_NO_KEYCHAIN", "1")
-            .status()
+            .output()
             .unwrap();
-        std::fs::remove_dir_all(root).unwrap();
-        assert!(status.success());
+        // 失败证据（#501）：报告写明夹具最后进入的阶段，并附上子进程的全部输出。先判断夹具是否成功，
+        // 再判断清理，免得 Windows 上清理失败遮住夹具自己的失败原因。断言与时限不变。
+        let cleanup = std::fs::remove_dir_all(root);
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let stage = stdout.lines().rfind(|line| line.starts_with("SYNC_BOUNDARY ")).unwrap_or("（尚未进入任何阶段）");
+        assert!(
+            output.status.success(),
+            "同步边界夹具失败（{}），最后进入的阶段：{stage}\n--- 夹具 stdout ---\n{stdout}\n--- 夹具 stderr ---\n{stderr}",
+            output.status
+        );
+        cleanup.unwrap();
     }
 
     #[test]

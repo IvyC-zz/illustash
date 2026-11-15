@@ -1,0 +1,282 @@
+# Windows x64 完整回归与定向复跑（#501）。PR 和 push 只跑 ci.yml 里的 Windows 快检；这里保留原先的完整
+# clippy、Rust 测试、release 构建、Python 全套和 #347 的严格数值对照。2026-11-15 用户定：完整回归平时在
+# Windows 验收机上跑（发布前一次，见 docs/DEVELOPMENT.md「发布」）；这份只在 Actions 页面手动运行，
+# 供验收机不能用、或真机上数值参考对不上时备用，可指定提交（标签、分支或提交哈希）。
+# 定向复跑只跑一个用例组（同步边界或研究 worker），可重复几次，运行名、job 名和摘要都写明范围，不代替完整回归。
+# 只用仓库内合成数据；不接触真实图库、账号或网络凭据，也不用任何 secret。
+name: Windows 完整回归
+run-name: >-
+  Windows 回归 · ${{ inputs.scope || 'full' }}
+  ×${{ inputs.repeat || 1 }} · ${{ inputs.ref || github.ref_name }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 要测的提交（分支、标签或提交哈希）；留空为所选分支的最新提交
+        required: false
+        default: ''
+      scope:
+        description: 范围：full 为完整回归，其余为定向复跑
+        type: choice
+        options: [full, sync-boundary, research-worker]
+        default: full
+      repeat:
+        description: 定向复跑的重复次数（1–10）；完整回归只跑一次
+        type: number
+        default: 1
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  PYTHON_VERSION: '3.12'
+
+jobs:
+  regression:
+    if: github.event_name == 'workflow_dispatch'
+    name: Windows x64 · ${{ inputs.scope || 'full' }}
+    runs-on: windows-latest
+    timeout-minutes: 60
+    env:
+      # 验收机的五份 target 冷构建约 14.5 GB；CI 依赖缓存不需要工作区的增量目录。
+      CARGO_INCREMENTAL: '0'
+      PYTHONUTF8: '1'
+      NUMPY_VERSION: '2.5.3'
+      PILLOW_VERSION: '12.3.0'
+      ILLUSTASH_TEST_NUMERIC_REFERENCE: numpy
+      SCOPE: ${{ inputs.scope || 'full' }}
+      REPEAT: ${{ inputs.repeat || 1 }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: 记录范围与提交
+        env:
+          REQUESTED_REF: ${{ inputs.ref }}
+        run: |
+          [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
+          $labels = @{ 'full' = '完整回归'; 'sync-boundary' = '同步边界定向复跑'; 'research-worker' = '研究 worker 定向复跑' }
+          $label = $labels[$env:SCOPE]
+          if (-not $label) { throw "未知范围：$env:SCOPE" }
+          $repeat = 0
+          if (-not [int]::TryParse($env:REPEAT, [ref]$repeat) -or $repeat -lt 1 -or $repeat -gt 10) { throw "重复次数须为 1–10：$env:REPEAT" }
+          if ($env:SCOPE -eq 'full' -and $repeat -ne 1) { throw '完整回归只跑一次，重复只用于定向复跑' }
+          $requested = if ($env:REQUESTED_REF) { $env:REQUESTED_REF } else { "（$env:GITHUB_REF_NAME 的最新提交）" }
+          $commit = git rev-parse HEAD
+          "范围：$label；请求的提交：$requested；实际提交：$commit；重复 $repeat 次"
+          "### Windows x64 · $label", '', '| 项 | 值 |', '|---|---|', "| 触发方式 | $env:GITHUB_EVENT_NAME |",
+            "| 请求的提交 | $requested |", "| 实际提交 | ``$commit`` |", "| 重复次数 | $repeat |", '' >> $env:GITHUB_STEP_SUMMARY
+          if ($env:SCOPE -ne 'full') { '定向复跑只覆盖选中的用例组，不代替完整回归。', '' >> $env:GITHUB_STEP_SUMMARY }
+      - name: 缩短测试临时目录
+        run: |
+          $tempDir = Join-Path "${env:SystemDrive}\" 'it'
+          New-Item -ItemType Directory -Path $tempDir -Force | Out-Null
+          "TEMP=$tempDir", "TMP=$tempDir" >> $env:GITHUB_ENV
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable-x86_64-pc-windows-msvc
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          # 只有在 main 最新提交上手动运行时保存缓存，其余只还原。测试失败也保存依赖缓存。
+          save-if: ${{ github.ref == 'refs/heads/main' && inputs.ref == '' }}
+          cache-on-failure: true
+          workspaces: |
+            native/terms
+            crates/iqdb
+            crates/core
+            crates/platform
+            desktop
+            crates/relation-fft
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          architecture: x64
+      - name: 还原 NumPy wheel
+        if: env.SCOPE != 'sync-boundary'
+        uses: actions/cache/restore@v4
+        id: numpy-wheel
+        with:
+          path: ${{ runner.temp }}/numpy-wheel
+          key: numpy-${{ env.NUMPY_VERSION }}-cp${{ env.PYTHON_VERSION }}-win_amd64
+      - name: 安装 Python 依赖并核验 OpenBLAS
+        if: env.SCOPE != 'sync-boundary'
+        run: |
+          [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
+          $wheelDir = Join-Path $env:RUNNER_TEMP 'numpy-wheel'
+          if ('${{ steps.numpy-wheel.outputs.cache-hit }}' -ne 'true') {
+            python -m pip download --index-url https://pypi.org/simple --no-deps --only-binary=:all: --dest $wheelDir "numpy==$env:NUMPY_VERSION"
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+          $wheel = @(Get-ChildItem -Path $wheelDir -Filter "numpy-$env:NUMPY_VERSION-*-win_amd64.whl" -File)
+          if ($wheel.Count -ne 1) { throw '需要且只能有一个固定版本的 Windows x64 NumPy wheel' }
+          # 直接安装同一个 wheel，保证 Python 对照和原生后端用同一份 DLL。
+          python -m pip install --force-reinstall -r tests/requirements.txt $wheel[0].FullName "Pillow==$env:PILLOW_VERSION"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $dll = @'
+          import os
+          from pathlib import Path
+          import runpy
+          import sysconfig
+
+          pack = runpy.run_path('packaging/build.py')
+          dll, _, digest = pack['research_openblas'](Path(sysconfig.get_path('platlib')))
+          if pack['RESEARCH_OPENBLAS_IDENTITIES'][digest]['numpy'] != os.environ['NUMPY_VERSION']:
+              raise SystemExit(f'OpenBLAS SHA-256 {digest} 与固定 NumPy 版本不匹配')
+          print(dll)
+          '@ | python -
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          "ILLUSTASH_RESEARCH_OPENBLAS_DLL=$dll" >> $env:GITHUB_ENV
+      - name: 记录 CPU 与实际数值后端身份
+        if: env.SCOPE != 'sync-boundary'
+        run: |
+          [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
+          $identityLog = Join-Path $env:RUNNER_TEMP 'windows-numeric-environment.log'
+          Get-CimInstance Win32_Processor | Select-Object Name, NumberOfCores, NumberOfLogicalProcessors, Architecture | ConvertTo-Json | Tee-Object -FilePath $identityLog
+          python -m tests.numpy_reference_environment | Tee-Object -FilePath $identityLog -Append
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          '### Windows 数值环境', '```json' >> $env:GITHUB_STEP_SUMMARY
+          Get-Content $identityLog >> $env:GITHUB_STEP_SUMMARY
+          '```' >> $env:GITHUB_STEP_SUMMARY
+      - name: 保存已核验的 NumPy wheel
+        if: github.ref == 'refs/heads/main' && inputs.ref == '' && steps.numpy-wheel.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}/numpy-wheel
+          key: ${{ steps.numpy-wheel.outputs.cache-primary-key }}
+      # ---- 完整回归 ----
+      # Rust 测试经隔离名单的入口运行（#501）：名单里本平台的测试单独跑、只汇报，其余照常决定成败。
+      - name: 核对隔离名单
+        if: env.SCOPE == 'full'
+        run: python tools/quarantine.py check
+      - name: Core clippy/test
+        if: env.SCOPE == 'full'
+        run: |
+          cargo clippy --locked --manifest-path crates/core/Cargo.toml --all-targets -- -D warnings
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python tools/quarantine.py cargo-test --manifest-path crates/core/Cargo.toml
+      - name: Platform clippy/test
+        if: env.SCOPE == 'full'
+        run: |
+          cargo clippy --locked --manifest-path crates/platform/Cargo.toml --all-targets -- -D warnings
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python tools/quarantine.py cargo-test --manifest-path crates/platform/Cargo.toml
+      - name: relation-fft clippy/test
+        if: env.SCOPE == 'full'
+        run: |
+          cargo clippy --locked --manifest-path crates/relation-fft/Cargo.toml --all-targets -- -D warnings
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python tools/quarantine.py cargo-test --manifest-path crates/relation-fft/Cargo.toml
+      - name: Desktop clippy/test
+        if: env.SCOPE == 'full'
+        run: |
+          cargo clippy --locked --manifest-path desktop/Cargo.toml --all-targets -- -D warnings
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python tools/quarantine.py cargo-test --manifest-path desktop/Cargo.toml
+      - name: Terms clippy/test
+        if: env.SCOPE == 'full'
+        run: |
+          cargo clippy --locked --manifest-path native/terms/Cargo.toml --all-targets --all-features -- -D warnings
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python tools/quarantine.py cargo-test --manifest-path native/terms/Cargo.toml
+      - name: IQDB test
+        if: env.SCOPE == 'full'
+        run: python tools/quarantine.py cargo-test --manifest-path crates/iqdb/Cargo.toml
+      - name: 构建被测核心与 IQDB
+        if: env.SCOPE == 'full'
+        run: |
+          cargo build --release --locked --manifest-path native/terms/Cargo.toml
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo build --release --locked --manifest-path native/terms/Cargo.toml --features test-read-host --example read-http --example recognition-compute --example index-compute --example research-compute --example relation-probe --example provenance-compute
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo build --release --locked --manifest-path crates/iqdb/Cargo.toml
+      - name: Python 全量与跳过清单
+        if: env.SCOPE == 'full'
+        env:
+          ILLUSTASH_TERMS_BIN: ${{ github.workspace }}/native/terms/target/release/illustash-terms.exe
+          ILLUSTASH_NATIVE_ROOT: ${{ github.workspace }}
+          ILLUSTASH_IQDB_BINARY: ${{ github.workspace }}/crates/iqdb/target/release/illustash-iqdb.exe
+          ILLUSTASH_READ_HTTP_BIN: ${{ github.workspace }}/native/terms/target/release/examples/read-http.exe
+          ILLUSTASH_RECOGNITION_COMPUTE_BIN: ${{ github.workspace }}/native/terms/target/release/examples/recognition-compute.exe
+          ILLUSTASH_INDEX_COMPUTE_BIN: ${{ github.workspace }}/native/terms/target/release/examples/index-compute.exe
+          ILLUSTASH_RELATION_PROBE_BIN: ${{ github.workspace }}/native/terms/target/release/examples/relation-probe.exe
+          ILLUSTASH_PROVENANCE_COMPUTE_BIN: ${{ github.workspace }}/native/terms/target/release/examples/provenance-compute.exe
+          ILLUSTASH_RESEARCH_COMPUTE_BIN: ${{ github.workspace }}/native/terms/target/release/examples/research-compute.exe
+          ILLUSTASH_RESEARCH_ADAPTER_BIN: ${{ github.workspace }}/native/terms/target/release/illustash-worker.exe
+          ILLUSTASH_INDEX_ADAPTER_BIN: ${{ github.workspace }}/native/terms/target/release/illustash-worker.exe
+        run: python -m tests.windows_fixed_suite --log "${{ runner.temp }}/windows-unittest.log"
+      # ---- 定向复跑 ----
+      # 同步边界（#497）：父测试在隔离子进程里跑 scan_boundary_fixture，失败报告写明最后进入的阶段并附上子进程输出。
+      - name: 同步边界定向复跑
+        if: env.SCOPE == 'sync-boundary'
+        run: |
+          [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
+          $logs = Join-Path $env:RUNNER_TEMP 'regression-logs'
+          New-Item -ItemType Directory -Path $logs -Force | Out-Null
+          $test = 'app_sync::tests::scan_cancellation_and_completed_lifecycle_have_explicit_boundaries'
+          # 先列出实际选中的测试，核对选择；被父测试调用的夹具是 ignored，不会单独运行。
+          cargo test --locked --manifest-path native/terms/Cargo.toml --lib $test -- --exact --list | Tee-Object -FilePath "$logs/sync-boundary-list.txt"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          '#### 选中的测试', '```', (Get-Content "$logs/sync-boundary-list.txt"), '```', '', '| 次序 | 结果 | 最后进入的阶段 |', '|---|---|---|' >> $env:GITHUB_STEP_SUMMARY
+          $failed = 0
+          for ($i = 1; $i -le [int]$env:REPEAT; $i++) {
+            $log = "$logs/sync-boundary-$i.log"
+            "同步边界第 $i/$env:REPEAT 次"
+            cargo test --locked --manifest-path native/terms/Cargo.toml --lib $test -- --exact 2>&1 | Tee-Object -FilePath $log
+            $code = $LASTEXITCODE
+            $hit = Select-String -Path $log -Pattern '最后进入的阶段：(.*)$' | Select-Object -Last 1
+            $stage = if ($hit) { $hit.Matches[0].Groups[1].Value } else { '' }
+            if ($code -ne 0) { $failed++ }
+            "| $i | $(if ($code -eq 0) { '通过' } else { "失败（退出码 $code）" }) | $(if ($stage) { $stage } else { '—' }) |" >> $env:GITHUB_STEP_SUMMARY
+          }
+          "同步边界：$([int]$env:REPEAT - $failed)/$env:REPEAT 次通过"
+          if ($failed) { exit 1 }
+      # 研究 worker（#498）：失败报告附上 worker 启动次数、各次 kind、最后状态和合成 worker 的 stderr。
+      # 定向复跑用来复现，隔离名单里的失败也计入结果（--count-quarantined）。
+      - name: 构建研究定向复跑的被测程序
+        if: env.SCOPE == 'research-worker'
+        run: |
+          if (-not (Select-String -Path tests/run_fixed_suite.py -Pattern "'--select'" -SimpleMatch -Quiet)) {
+            throw '这个提交早于 #501，tests.run_fixed_suite 还没有定向选择；研究定向复跑需要包含 #501 的提交'
+          }
+          cargo build --release --locked --manifest-path native/terms/Cargo.toml
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo build --release --locked --manifest-path native/terms/Cargo.toml --features test-read-host --example research-compute
+      - name: 研究 worker 定向复跑
+        if: env.SCOPE == 'research-worker'
+        env:
+          ILLUSTASH_TERMS_BIN: ${{ github.workspace }}/native/terms/target/release/illustash-terms.exe
+          ILLUSTASH_NATIVE_ROOT: ${{ github.workspace }}
+          ILLUSTASH_RESEARCH_COMPUTE_BIN: ${{ github.workspace }}/native/terms/target/release/examples/research-compute.exe
+          ILLUSTASH_RESEARCH_ADAPTER_BIN: ${{ github.workspace }}/native/terms/target/release/illustash-worker.exe
+        run: |
+          [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
+          $logs = Join-Path $env:RUNNER_TEMP 'regression-logs'
+          New-Item -ItemType Directory -Path $logs -Force | Out-Null
+          '| 次序 | 结果 | 失败的用例 |', '|---|---|---|' >> $env:GITHUB_STEP_SUMMARY
+          $failed = 0
+          for ($i = 1; $i -le [int]$env:REPEAT; $i++) {
+            $log = "$logs/research-worker-$i.log"
+            python -m tests.windows_fixed_suite --scope "研究 worker 定向复跑 第 $i/$env:REPEAT 次" --select test_native_research.NativeResearchTest --count-quarantined --log $log
+            $code = $LASTEXITCODE
+            $cases = @(Select-String -Path $log -Pattern '^(FAIL|ERROR): (\S+)' | ForEach-Object { $_.Matches[0].Groups[2].Value }) -join '、'
+            if ($code -ne 0) { $failed++ }
+            "| $i | $(if ($code -eq 0) { '通过' } else { "失败（退出码 $code）" }) | $(if ($cases) { $cases } else { '—' }) |" >> $env:GITHUB_STEP_SUMMARY
+          }
+          "研究 worker：$([int]$env:REPEAT - $failed)/$env:REPEAT 次通过"
+          if ($failed) { exit 1 }
+      - name: 上传 Windows 测试日志
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-regression-logs
+          path: |
+            ${{ runner.temp }}/windows-unittest.log
+            ${{ runner.temp }}/windows-numeric-environment.log
+            ${{ runner.temp }}/regression-logs/
+          if-no-files-found: ignore
+          retention-days: 7

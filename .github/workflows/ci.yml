@@ -1,11 +1,14 @@
 # PR 自动检查（#4）：目标为 main 的同库 PR 自动运行，作为额外保障；
 # 合入 main 的门槛仍是集成会话在候选上跑的 tools/check_all.sh（AGENTS.md）。
+# PR 和 push 上只做快速冒烟（#501）：格式、clippy、编译、前端 JS、原生固定契约和 Windows 快检。
+# 各 Rust 项目的 cargo test 和 Python 全量由本机全量覆盖；macos-full.yml、windows-full.yml 只能手动运行。
 # 只用仓库内合成数据；不接触真实图库、账号、Photos 或网络凭据，也不用任何 secret。
 name: CI
 
 # Linux 已冻结（README）：仅用 Ubuntu 分流、汇总和检查前端 JS。
 # 草稿 PR 不跑（转 Ready 时跑），来自 fork 的 PR 不跑（暂不接受外部贡献），仓库私有时只跑手动触发的。
 # push 到 main 只为给 PR 留可复用的编译缓存：PR 写的缓存别的 PR 读不到。
+# Windows 在这里只跑快检；完整回归和定向复跑在 windows-full.yml（#501）。
 on:
   pull_request:
     branches: [main]
@@ -14,9 +17,11 @@ on:
     branches: [main]
   workflow_dispatch:
 
-# 同一 PR（或同一分支）有新提交时取消旧运行。
+# 同一 PR（或手动触发的同一分支）有新提交时取消旧运行。push 到 main 的每次运行各自成组、互不取消：
+# 纯文档 push 跳过重型 job，不能把上一轮还在写缓存的代码运行取消掉（#501）。代码 push 之间由各重型 job
+# 自己的并发组取消旧的那一个，main 上仍只有最后一次跑完。
 concurrency:
-  group: ci-${{ github.event.pull_request.number || github.ref }}
+  group: ci-${{ github.event_name == 'push' && format('push-{0}', github.run_id) || github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 permissions:
@@ -28,8 +33,8 @@ env:
 
 jobs:
   # 判断要不要跑：仓库私有时只跑手动触发的（私有库 macOS 按 10 倍计分钟）；fork、草稿 PR 不跑；
-  # 只改文档（docs/ 和根目录的 Markdown）的 PR 跳过构建与测试，与 AGENTS.md「只改文档的 PR 不跑全量」一致。
-  # docs/THIRD_PARTY.md 和 docs/BACKEND_TASKS.md 随安装包分发，按代码算。
+  # 只改文档（docs/ 和根目录的 Markdown）的 PR 和 push 跳过构建与测试，与 AGENTS.md「只改文档的 PR 不跑全量」一致。
+  # docs/THIRD_PARTY.md 和 docs/BACKEND_TASKS.md 随安装包分发，按代码算。手动触发一律按代码改动处理。
   changes:
     if: >-
       github.event_name == 'workflow_dispatch' ||
@@ -43,18 +48,30 @@ jobs:
       code: ${{ steps.scope.outputs.code }}
     steps:
       - uses: actions/checkout@v4
-        if: github.event_name == 'pull_request'
+        if: github.event_name != 'workflow_dispatch'
         with:
-          fetch-depth: 2
+          fetch-depth: ${{ github.event_name == 'pull_request' && 2 || 1 }}
           persist-credentials: false
       - id: scope
+        env:
+          PUSH_BEFORE: ${{ github.event.before }}
         run: |
-          if [ "$GITHUB_EVENT_NAME" != pull_request ]; then
-            echo code=true >> "$GITHUB_OUTPUT"; exit 0
-          fi
-          # PR 检出的是它与 main 的合并提交：第一父提交就是当前 main。
+          case "$GITHUB_EVENT_NAME" in
+            # PR 检出的是它与 main 的合并提交：第一父提交就是当前 main。
+            pull_request) base=HEAD^1 ;;
+            # push 比较推送前后的两棵树（#501）：多提交的 push 合起来算，中间提交里的代码不会漏掉。
+            # 新建分支（全零）、取不到推送前的提交（如强推后已不存在）时按代码改动处理。
+            push)
+              base=$PUSH_BEFORE
+              if ! [[ "$base" =~ ^[0-9a-f]{40}$ ]] || [[ "$base" =~ ^0+$ ]] ||
+                 ! { git cat-file -e "$base^{commit}" 2>/dev/null || git fetch --no-tags --depth=1 origin "$base"; }; then
+                echo "取不到推送前的提交（${base:-空}），按代码改动处理"
+                echo code=true >> "$GITHUB_OUTPUT"; exit 0
+              fi ;;
+            *) echo code=true >> "$GITHUB_OUTPUT"; exit 0 ;;
+          esac
           # 改名同时检查旧路径，避免把移入 docs/ 的代码删除误判成纯文档。
-          git diff --no-renames --name-only HEAD^1 HEAD > "$RUNNER_TEMP/changed.txt"
+          git diff --no-renames --name-only "$base" HEAD > "$RUNNER_TEMP/changed.txt"
           echo "改动 $(wc -l < "$RUNNER_TEMP/changed.txt") 个文件"
           if grep -qEv '^([^/]+|docs/.+)\.md$' "$RUNNER_TEMP/changed.txt" ||
              grep -qEx 'docs/(THIRD_PARTY|BACKEND_TASKS)\.md' "$RUNNER_TEMP/changed.txt"; then
@@ -67,7 +84,10 @@ jobs:
   core:
     needs: changes
     if: needs.changes.outputs.code == 'true'
-    name: Rust 核心
+    name: Rust 格式、clippy 与编译
+    concurrency:
+      group: ci-core-${{ github.event_name == 'push' && github.ref || github.run_id }}
+      cancel-in-progress: true
     runs-on: macos-latest
     timeout-minutes: 60
     steps:
@@ -86,7 +106,6 @@ jobs:
             crates/core
             crates/platform
             crates/relation-fft
-      # http_browse 的对照测试调用 python3 运行参考实现。
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
@@ -99,115 +118,30 @@ jobs:
         run: python tools/check_frontend.py --strict-stale
       - name: Style guide sync
         run: python tools/check_styleguide.py
-      - name: Core fmt/clippy/test/build
+      # cargo test 由本机全量覆盖，macos-full.yml 可手动运行（#501）；这里只查格式、clippy（含测试目标）和编译。
+      - name: Core fmt/clippy/build
         run: |
           cargo fmt --manifest-path crates/core/Cargo.toml --check
           cargo clippy --locked --manifest-path crates/core/Cargo.toml --all-targets -- -D warnings
-          cargo test --locked --manifest-path crates/core/Cargo.toml
           cargo build --locked --manifest-path crates/core/Cargo.toml
-      - name: Platform fmt/clippy/test/build
+      - name: Platform fmt/clippy/build
         run: |
           cargo fmt --manifest-path crates/platform/Cargo.toml --check
           cargo clippy --locked --manifest-path crates/platform/Cargo.toml --all-targets -- -D warnings
-          cargo test --locked --manifest-path crates/platform/Cargo.toml
           cargo build --locked --manifest-path crates/platform/Cargo.toml
-      - name: relation-fft fmt/clippy/test
+      - name: relation-fft fmt/clippy
         run: |
           cargo fmt --manifest-path crates/relation-fft/Cargo.toml --check
           cargo clippy --locked --manifest-path crates/relation-fft/Cargo.toml --all-targets -- -D warnings
-          cargo test --locked --manifest-path crates/relation-fft/Cargo.toml
       - name: fmt
         run: cargo fmt --manifest-path native/terms/Cargo.toml --check
       - name: clippy
         run: cargo clippy --locked --manifest-path native/terms/Cargo.toml --all-targets --all-features -- -D warnings
-      - name: test
-        run: cargo test --locked --manifest-path native/terms/Cargo.toml
       # 0.7071 常数须与 haar.cpp 逐位一致，在源码里用 #[expect(clippy::approx_constant)] 写明，不按 clippy 改。
-      - name: iqdb fmt/clippy/test
+      - name: iqdb fmt/clippy
         run: |
           cargo fmt --manifest-path crates/iqdb/Cargo.toml --check
           cargo clippy --locked --manifest-path crates/iqdb/Cargo.toml --all-targets -- -D warnings
-          cargo test --locked --manifest-path crates/iqdb/Cargo.toml
-
-  # 跑在 macOS arm64：固定期望（tests/fixtures/ 下的录制值）在 Apple Silicon 上录制，
-  # float32 结果在 x86 上差 1 ulp；另有错误文案、zsh 启动脚本等平台差异。Windows 另行处理。
-  python:
-    needs: changes
-    if: needs.changes.outputs.code == 'true'
-    name: Python 全量 (macOS)
-    runs-on: macos-latest
-    timeout-minutes: 60
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-        with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-          workspaces: |
-            native/terms
-            crates/iqdb
-            crates/core
-            crates/platform
-            crates/relation-fft
-      - uses: actions/setup-python@v5
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
-          cache: pip
-          cache-dependency-path: tests/requirements.txt
-      - run: pip install -r tests/requirements.txt
-      - name: 构建被测核心与 IQDB
-        run: |
-          cargo build --release --locked --manifest-path native/terms/Cargo.toml
-          # 读路由固定期望用的测试读宿主（tests/read_http_harness.py 按 release/examples 定位）。
-          cargo build --release --locked --manifest-path native/terms/Cargo.toml --features test-read-host --example read-http --example recognition-compute --example index-compute --example research-compute --example relation-probe --example provenance-compute
-          cargo build --release --locked --manifest-path crates/iqdb/Cargo.toml
-      - name: unittest
-        env:
-          ILLUSTASH_TERMS_BIN: ${{ github.workspace }}/native/terms/target/release/illustash-terms
-          ILLUSTASH_NATIVE_ROOT: ${{ github.workspace }}
-          ILLUSTASH_IQDB_BINARY: ${{ github.workspace }}/crates/iqdb/target/release/illustash-iqdb
-          ILLUSTASH_READ_HTTP_BIN: ${{ github.workspace }}/native/terms/target/release/examples/read-http
-          ILLUSTASH_RECOGNITION_COMPUTE_BIN: ${{ github.workspace }}/native/terms/target/release/examples/recognition-compute
-          ILLUSTASH_INDEX_COMPUTE_BIN: ${{ github.workspace }}/native/terms/target/release/examples/index-compute
-          ILLUSTASH_RELATION_PROBE_BIN: ${{ github.workspace }}/native/terms/target/release/examples/relation-probe
-          ILLUSTASH_PROVENANCE_COMPUTE_BIN: ${{ github.workspace }}/native/terms/target/release/examples/provenance-compute
-          ILLUSTASH_RESEARCH_COMPUTE_BIN: ${{ github.workspace }}/native/terms/target/release/examples/research-compute
-          ILLUSTASH_RESEARCH_ADAPTER_BIN: ${{ github.workspace }}/native/terms/target/release/illustash-worker
-          ILLUSTASH_INDEX_ADAPTER_BIN: ${{ github.workspace }}/native/terms/target/release/illustash-worker
-        run: |
-          set -o pipefail
-          # -b：失败测试的输出（如被测服务日志）附在末尾失败报告里，不散落在日志中段。
-          python -m tests.run_fixed_suite -v -b 2>&1 | tee "$RUNNER_TEMP/unittest.log"
-      - name: 上传测试日志
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: unittest-log
-          path: ${{ runner.temp }}/unittest.log
-          retention-days: 7
-      # 跳过必须可见：列出全部跳过及原因。只允许平台限制和依赖真实图库的数据缺失；
-      # 其余跳过（缺被测二进制等）在 CI 中视为未验收，判失败。
-      - name: 跳过清单
-        if: always()
-        run: |
-          log="$RUNNER_TEMP/unittest.log"
-          [ -f "$log" ] || exit 0
-          grep -E " \.\.\. skipped " "$log" > "$RUNNER_TEMP/skips.txt" || true
-          {
-            echo "### Python 跳过：$(wc -l < "$RUNNER_TEMP/skips.txt") 项"
-            echo '```'
-            cat "$RUNNER_TEMP/skips.txt"
-            echo '```'
-            tail -n 3 "$log"
-          } >> "$GITHUB_STEP_SUMMARY"
-          allowed="full-features\.npy not present|POSIX|posix|Unix|macOS/Linux only|Windows pinned OpenBLAS backend only|explicit Windows native development calculator only|explicit Windows development App publication only|Linux is frozen: no local computation"
-          if grep -Ev "$allowed" "$RUNNER_TEMP/skips.txt"; then
-            echo "::error::以上跳过不属于平台限制或真实图库数据缺失，CI 中视为未验收"
-            exit 1
-          fi
 
   js:
     needs: changes
@@ -227,7 +161,10 @@ jobs:
   desktop:
     needs: changes
     if: needs.changes.outputs.code == 'true'
-    name: 桌面壳 (macOS)
+    name: 桌面壳 fmt/clippy (macOS)
+    concurrency:
+      group: ci-desktop-${{ github.event_name == 'push' && github.ref || github.run_id }}
+      cancel-in-progress: true
     runs-on: macos-latest
     timeout-minutes: 60
     steps:
@@ -245,13 +182,14 @@ jobs:
         run: cargo fmt --manifest-path desktop/Cargo.toml --check
       - name: clippy
         run: cargo clippy --locked --manifest-path desktop/Cargo.toml --all-targets -- -D warnings
-      - name: test
-        run: cargo test --locked --manifest-path desktop/Cargo.toml
 
   contracts:
     needs: changes
     if: needs.changes.outputs.code == 'true'
     name: 原生固定契约（无 Python）
+    concurrency:
+      group: ci-contracts-${{ github.event_name == 'push' && github.ref || github.run_id }}
+      cancel-in-progress: true
     runs-on: macos-latest
     timeout-minutes: 45
     steps:
@@ -272,23 +210,25 @@ jobs:
           [ -n "$binary" ] && [ -x "$binary" ]
           tools/test_native_contracts.sh "$binary"
 
+  # Windows x64 快检（#501）：编译被测核心、测试读宿主和桌面壳，再用少量合成图库跑原生启动、SQLite 与 HTTP
+  # 契约（`QUICK_TESTS`）。完整 clippy、Rust 测试、全部 example、Python 全套和 #347 的严格数值对照在
+  # windows-full.yml，平时在 Windows 验收机上发布前跑一次，这份手动备用。结论单独显示，不进「全部检查」的等待链。
   windows:
-    needs: [changes, js]
+    needs: changes
     if: needs.changes.outputs.code == 'true' && !github.event.repository.private
-    name: Windows x64
+    name: Windows x64 快检
     runs-on: windows-latest
-    timeout-minutes: 60
+    timeout-minutes: 45
+    concurrency:
+      group: ci-windows-${{ github.event_name == 'push' && github.ref || github.run_id }}
+      cancel-in-progress: true
     env:
-      # 验收机的五份 target 冷构建约 14.5 GB；CI 依赖缓存不需要工作区的增量目录。
       CARGO_INCREMENTAL: '0'
       PYTHONUTF8: '1'
-      NUMPY_VERSION: '2.5.3'
-      PILLOW_VERSION: '12.3.0'
-      ILLUSTASH_TEST_NUMERIC_REFERENCE: numpy
+      QUICK_TESTS: test_native_lifecycle.NativeLifecycleTest test_native_library_create.NativeLibraryCreateTest test_read_http_core.CoreReadHTTPTest
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0
           persist-credentials: false
       - name: 缩短测试临时目录
         run: |
@@ -298,138 +238,54 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: stable-x86_64-pc-windows-msvc
-          components: clippy
+      # main 上测试失败也保存依赖缓存：Windows 失败时不能让下一批 PR 回到冷编译。
       - uses: Swatinem/rust-cache@v2
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
+          cache-on-failure: true
           workspaces: |
             native/terms
-            crates/iqdb
-            crates/core
-            crates/platform
             desktop
-            crates/relation-fft
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
           architecture: x64
-      - name: 还原 NumPy wheel
-        uses: actions/cache/restore@v4
-        id: numpy-wheel
-        with:
-          path: ${{ runner.temp }}/numpy-wheel
-          key: numpy-${{ env.NUMPY_VERSION }}-cp${{ env.PYTHON_VERSION }}-win_amd64
-      - name: 安装 Python 依赖并核验 OpenBLAS
-        run: |
-          [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
-          $wheelDir = Join-Path $env:RUNNER_TEMP 'numpy-wheel'
-          if ('${{ steps.numpy-wheel.outputs.cache-hit }}' -ne 'true') {
-            python -m pip download --index-url https://pypi.org/simple --no-deps --only-binary=:all: --dest $wheelDir "numpy==$env:NUMPY_VERSION"
-            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          }
-          $wheel = @(Get-ChildItem -Path $wheelDir -Filter "numpy-$env:NUMPY_VERSION-*-win_amd64.whl" -File)
-          if ($wheel.Count -ne 1) { throw '需要且只能有一个固定版本的 Windows x64 NumPy wheel' }
-          # 直接安装同一个 wheel，保证 Python 对照和原生后端用同一份 DLL。
-          python -m pip install --force-reinstall -r tests/requirements.txt $wheel[0].FullName "Pillow==$env:PILLOW_VERSION"
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          $dll = @'
-          import os
-          from pathlib import Path
-          import runpy
-          import sysconfig
-
-          pack = runpy.run_path('packaging/build.py')
-          dll, _, digest = pack['research_openblas'](Path(sysconfig.get_path('platlib')))
-          if pack['RESEARCH_OPENBLAS_IDENTITIES'][digest]['numpy'] != os.environ['NUMPY_VERSION']:
-              raise SystemExit(f'OpenBLAS SHA-256 {digest} 与固定 NumPy 版本不匹配')
-          print(dll)
-          '@ | python -
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          "ILLUSTASH_RESEARCH_OPENBLAS_DLL=$dll" >> $env:GITHUB_ENV
-      - name: 记录 CPU 与实际数值后端身份
-        run: |
-          [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
-          $identityLog = Join-Path $env:RUNNER_TEMP 'windows-numeric-environment.log'
-          Get-CimInstance Win32_Processor | Select-Object Name, NumberOfCores, NumberOfLogicalProcessors, Architecture | ConvertTo-Json | Tee-Object -FilePath $identityLog
-          python -m tests.numpy_reference_environment | Tee-Object -FilePath $identityLog -Append
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          '### Windows 数值环境', '```json' >> $env:GITHUB_STEP_SUMMARY
-          Get-Content $identityLog >> $env:GITHUB_STEP_SUMMARY
-          '```' >> $env:GITHUB_STEP_SUMMARY
-      - name: 保存已核验的 NumPy wheel
-        if: github.ref == 'refs/heads/main' && steps.numpy-wheel.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
-        with:
-          path: ${{ runner.temp }}/numpy-wheel
-          key: ${{ steps.numpy-wheel.outputs.cache-primary-key }}
-      - name: Core clippy/test
-        run: |
-          cargo clippy --locked --manifest-path crates/core/Cargo.toml --all-targets -- -D warnings
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          cargo test --locked --manifest-path crates/core/Cargo.toml
-      - name: Platform clippy/test
-        run: |
-          cargo clippy --locked --manifest-path crates/platform/Cargo.toml --all-targets -- -D warnings
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          cargo test --locked --manifest-path crates/platform/Cargo.toml
-      - name: relation-fft clippy/test
-        run: |
-          cargo clippy --locked --manifest-path crates/relation-fft/Cargo.toml --all-targets -- -D warnings
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          cargo test --locked --manifest-path crates/relation-fft/Cargo.toml
-      - name: Desktop clippy/test
-        run: |
-          cargo clippy --locked --manifest-path desktop/Cargo.toml --all-targets -- -D warnings
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          cargo test --locked --manifest-path desktop/Cargo.toml
-      - name: Terms clippy/test
-        run: |
-          cargo clippy --locked --manifest-path native/terms/Cargo.toml --all-targets --all-features -- -D warnings
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          cargo test --locked --manifest-path native/terms/Cargo.toml
-      - name: IQDB test
-        run: cargo test --locked --manifest-path crates/iqdb/Cargo.toml
-      - name: 构建被测核心与 IQDB
+          cache: pip
+          cache-dependency-path: tests/requirements.txt
+      - run: python -m pip install -r tests/requirements.txt
+      - name: 构建被测核心与测试读宿主
         run: |
           cargo build --release --locked --manifest-path native/terms/Cargo.toml
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          cargo build --release --locked --manifest-path native/terms/Cargo.toml --features test-read-host --example read-http --example recognition-compute --example index-compute --example research-compute --example relation-probe --example provenance-compute
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          cargo build --release --locked --manifest-path crates/iqdb/Cargo.toml
-      - name: Python 全量与跳过清单
+          cargo build --release --locked --manifest-path native/terms/Cargo.toml --features test-read-host --example read-http
+      - name: 桌面壳编译检查
+        run: cargo check --locked --manifest-path desktop/Cargo.toml --all-targets
+      - name: 原生启动、SQLite 与 HTTP 契约
         env:
           ILLUSTASH_TERMS_BIN: ${{ github.workspace }}/native/terms/target/release/illustash-terms.exe
           ILLUSTASH_NATIVE_ROOT: ${{ github.workspace }}
-          ILLUSTASH_IQDB_BINARY: ${{ github.workspace }}/crates/iqdb/target/release/illustash-iqdb.exe
           ILLUSTASH_READ_HTTP_BIN: ${{ github.workspace }}/native/terms/target/release/examples/read-http.exe
-          ILLUSTASH_RECOGNITION_COMPUTE_BIN: ${{ github.workspace }}/native/terms/target/release/examples/recognition-compute.exe
-          ILLUSTASH_INDEX_COMPUTE_BIN: ${{ github.workspace }}/native/terms/target/release/examples/index-compute.exe
-          ILLUSTASH_RELATION_PROBE_BIN: ${{ github.workspace }}/native/terms/target/release/examples/relation-probe.exe
-          ILLUSTASH_PROVENANCE_COMPUTE_BIN: ${{ github.workspace }}/native/terms/target/release/examples/provenance-compute.exe
-          ILLUSTASH_RESEARCH_COMPUTE_BIN: ${{ github.workspace }}/native/terms/target/release/examples/research-compute.exe
-          ILLUSTASH_RESEARCH_ADAPTER_BIN: ${{ github.workspace }}/native/terms/target/release/illustash-worker.exe
-          ILLUSTASH_INDEX_ADAPTER_BIN: ${{ github.workspace }}/native/terms/target/release/illustash-worker.exe
-        run: python -m tests.windows_fixed_suite --log "${{ runner.temp }}/windows-unittest.log"
-      - name: 上传 Windows 测试日志
+        run: |
+          $select = @($env:QUICK_TESTS -split ' ' | ForEach-Object { "--select=$_" })
+          python -m tests.windows_fixed_suite --scope 'Windows 快检' @select --log "${{ runner.temp }}/windows-quick.log"
+      - name: 上传 Windows 快检日志
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: windows-unittest-log
-          path: |
-            ${{ runner.temp }}/windows-unittest.log
-            ${{ runner.temp }}/windows-numeric-environment.log
+          name: windows-quick-log
+          path: ${{ runner.temp }}/windows-quick.log
           if-no-files-found: ignore
           retention-days: 7
 
   # 分支保护只要求这一项：job 改名或增减时不用改保护规则。只有确认只改文档才容许跳过构建；
   # 来自 fork 的 PR 没有运行检查，这里判失败。草稿 PR 不跑，转 Ready 后重跑；仓库私有时同「改动范围」。
-  # Windows 试运行期间展示实际结论，暂不计入代码 PR 的通过判定。
+  # Windows 试运行期间不计入代码 PR 的通过判定，也不在 needs 里：汇总不等 Windows，Windows 快检单独显示实际结论（#501）。
   ok:
     if: >-
       always() &&
       (github.event_name == 'workflow_dispatch' || !github.event.repository.private) &&
       !(github.event_name == 'pull_request' && github.event.pull_request.draft)
-    needs: [changes, core, python, js, desktop, contracts, windows]
+    needs: [changes, core, js, desktop, contracts]
     name: 全部检查
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -442,7 +298,7 @@ jobs:
             .changes.result == "success" and
             (.changes.outputs.code as $code |
               if $code == "true" then
-                all(to_entries[]; .key == "changes" or .key == "windows" or .value.result == "success")
+                all(to_entries[]; .key == "changes" or .value.result == "success")
               elif $code == "false" then
                 all(to_entries[]; .key == "changes" or .value.result == "skipped")
               else false end)

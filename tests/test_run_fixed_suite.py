@@ -1,4 +1,6 @@
 """完整测试入口的并行调度：用合成 tests 包验证汇总、跳过行、退役导入屏蔽与子进程失败。"""
+import json
+import os
 from pathlib import Path
 import re
 import shutil
@@ -7,7 +9,10 @@ import sys
 import tempfile
 import unittest
 
+from tools import quarantine
+
 RUNNER = Path(__file__).with_name('run_fixed_suite.py')
+QUARANTINE = Path(quarantine.__file__)
 LAUNCH = ("import runpy,sys;sys.path.insert(0,sys.argv.pop(1));"
           "runpy.run_module('tests.run_fixed_suite',run_name='__main__',alter_sys=True)")
 
@@ -29,6 +34,10 @@ class FixedSuiteRunnerTest(unittest.TestCase):
         (self.root / 'tests').mkdir()
         (self.root / 'tests/__init__.py').write_text('')
         shutil.copy(RUNNER, self.root / 'tests/run_fixed_suite.py')
+        (self.root / 'tools').mkdir()
+        (self.root / 'tools/__init__.py').write_text('')
+        shutil.copy(QUARANTINE, self.root / 'tools/quarantine.py')
+        self.isolate()
         self.write('test_alpha.py', PASSING)
 
     def tearDown(self):
@@ -39,6 +48,13 @@ class FixedSuiteRunnerTest(unittest.TestCase):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(text)
 
+    def isolate(self, *entries):
+        self.write('quarantine.json', json.dumps({'entries': list(entries)}))
+
+    def entry(self, test_id, platforms=None, expires='2026-11-29'):
+        return {'kind': 'python', 'id': test_id, 'platforms': platforms or [quarantine.platform()], 'issue': 1,
+                'added': '2026-11-15', 'expires': expires}
+
     def retired_package(self):
         (self.root / 'web').mkdir()
         (self.root / 'web/__init__.py').write_text('')
@@ -48,7 +64,10 @@ class FixedSuiteRunnerTest(unittest.TestCase):
         # 沿用本进程的解释器选项并固定 -X utf8，输出按 UTF-8 解码，与本进程的编码设置无关。
         command = [sys.executable, *subprocess._args_from_interpreter_flags(), '-X', 'utf8', *flags,
                    '-c', LAUNCH, str(self.root), '-v', '-b', *args]
-        return subprocess.run(command, cwd=self.root, capture_output=True, text=True, encoding='utf-8', timeout=120)
+        environment = {key: value for key, value in os.environ.items() if key != 'GITHUB_STEP_SUMMARY'}
+        environment['ILLUSTASH_QUARANTINE_TODAY'] = '2026-11-20'
+        return subprocess.run(command, cwd=self.root, capture_output=True, text=True, encoding='utf-8', timeout=120,
+                              env=environment)
 
     def test_parallel_summary_matches_serial_counts_and_keeps_skip_lines(self):
         for jobs in ('1', '3'):
@@ -144,6 +163,73 @@ class FixedSuiteRunnerTest(unittest.TestCase):
         run = self.run_suite('--jobs', '2', '-k', 'one')
         self.assertNotEqual(run.returncode, 0)
         self.assertIn('--jobs 1', run.stderr)
+
+    def test_select_runs_only_matching_classes_and_checks_them_for_omissions(self):
+        # #501：定向复跑只跑选中的类和方法；前缀按「.」边界匹配，Alpha 不会选中 AlphaBeta。
+        self.write('test_gamma.py', 'import unittest\nclass AlphaBeta(unittest.TestCase):\n    def test_four(self): pass\n')
+        run = self.run_suite('--jobs', '2', '--select', 'test_alpha.Alpha', '--select=test_alpha.Beta.test_three')
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertIn('定向选择：test_alpha.Alpha, test_alpha.Beta.test_three；选中 4 项', run.stderr)
+        self.assertIn('Ran 4 tests in ', run.stderr)
+        self.assertNotIn('test_four', run.stderr)
+
+    def test_select_that_matches_nothing_fails_and_import_errors_still_count(self):
+        run = self.run_suite('--jobs', '2', '--select', 'test_alpha.Alpha', '--select', 'test_alpha.Missing')
+        self.assertNotEqual(run.returncode, 0)
+        self.assertIn('定向选择没有匹配任何测试：test_alpha.Missing', run.stderr)
+        # 导入失败的测试文件不因不在选择范围内而被略过。
+        self.write('test_broken.py', 'raise ImportError("synthetic broken module")\n')
+        run = self.run_suite('--jobs', '2', '--select', 'test_alpha.Alpha')
+        self.assertNotEqual(run.returncode, 0)
+        self.assertIn('synthetic broken module', run.stderr)
+        for args in (('--jobs', '1', '--select', 'test_alpha.Alpha'), ('--jobs', '2', '--select=')):
+            with self.subTest(args=args):
+                self.assertNotEqual(self.run_suite(*args).returncode, 0)
+
+
+    def test_quarantined_failures_run_but_do_not_fail_and_are_listed(self):
+        # #501：名单里的测试照跑；本平台的失败（含 subTest）不计入结果，单列一节。
+        self.write('test_flaky.py', 'import unittest\nclass Flaky(unittest.TestCase):\n'
+                                    '    def test_sometimes(self):\n        for i in range(2):\n'
+                                    '            with self.subTest(i=i): self.fail("synthetic flake")\n'
+                                    '    def test_steady(self): pass\n')
+        self.isolate(self.entry('test_flaky.Flaky.test_sometimes'))
+        for jobs in ('1', '2'):
+            with self.subTest(jobs=jobs):
+                run = self.run_suite('--jobs', jobs)
+                self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
+                self.assertIn('隔离名单中的失败（不计入结果）', run.stdout)
+                self.assertIn('test_flaky.Flaky.test_sometimes（#1', run.stdout)
+                self.assertIn('2 处失败', run.stdout)
+                self.assertIn('synthetic flake', run.stderr)
+                # 定向复现时照样计入。
+                self.assertNotEqual(self.run_suite('--jobs', jobs, '--count-quarantined').returncode, 0)
+
+    def test_quarantine_does_not_cover_other_platforms_or_other_tests(self):
+        self.write('test_flaky.py', 'import unittest\nclass Flaky(unittest.TestCase):\n'
+                                    '    def test_sometimes(self): self.fail("synthetic flake")\n'
+                                    '    def test_other(self): self.fail("real failure")\n')
+        other = 'windows' if quarantine.platform() == 'macos' else 'macos'
+        self.isolate(self.entry('test_flaky.Flaky.test_sometimes', [other]))
+        self.assertNotEqual(self.run_suite('--jobs', '2').returncode, 0)
+        self.isolate(self.entry('test_flaky.Flaky.test_sometimes'))
+        run = self.run_suite('--jobs', '2')
+        self.assertNotEqual(run.returncode, 0)
+        self.assertIn('real failure', run.stderr)
+
+    def test_expired_missing_or_malformed_entries_fail_before_running(self):
+        cases = [(self.entry('test_alpha.Alpha.test_one', expires='2026-11-19'), '已于 2026-11-19 到期'),
+                 (self.entry('test_alpha.Alpha.test_gone'), '找不到'),
+                 ({**self.entry('test_alpha.Alpha.test_one'), 'issue': 0}, 'issue 须是正整数'),
+                 ({**self.entry('test_alpha.Alpha.test_one'), 'platforms': ['linux']}, 'platforms')]
+        for entry, message in cases:
+            for jobs in ('1', '2'):
+                with self.subTest(message=message, jobs=jobs):
+                    self.isolate(entry)
+                    run = self.run_suite('--jobs', jobs)
+                    self.assertNotEqual(run.returncode, 0)
+                    self.assertIn(message, run.stderr)
+                    self.assertNotIn('test_one (test_alpha.Alpha', run.stderr)
 
 
 if __name__ == '__main__':
