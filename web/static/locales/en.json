@@ -1025,7 +1025,7 @@
   "正在打开「{name}」…": "Opening “{name}”…",
   "切换图库超时：请检查启动终端，然后刷新页面。": "Switching libraries timed out: check the terminal it was started from, then refresh the page.",
   "账号": "Accounts",
-  "找回画师从你的关注出发：拉他们公开作品的小图，在本机逐张比对。只读，不点赞、不关注、不发任何内容。": "Finding artists starts from the people you follow: small pictures of their public works are fetched and compared one by one on this computer. Read only: nothing is liked, followed or posted.",
+  "找回画师会读你的关注列表，把关注的人记为候选画师；在详情面板点「找 TA 的其他图」时，才拉这位画师公开作品的小图，在本机逐张比对。只读，不点赞、不关注、不发任何内容。": "Finding artists reads your following list and records the people you follow as candidate artists; small pictures of an artist's public works are fetched and compared on this computer only when you click “Find more of their pictures” in the details panel. Read only: nothing is liked, followed or posted.",
   "用 X 的官方数据归档导入关注列表：X 设置 → 你的账号 → 下载你的数据，收到邮件后下载 zip 导入。只读取其中的关注（数字账号 ID），私信、推文都不会打开。": "Import your following list from X's official data archive: X settings → Your account → Download an archive of your data, then download the zip from the email and import it. Only the follows (numeric account IDs) are read; messages and posts are never opened.",
   "已导入 {n} 个关注": "{n} follows imported",
   "已对应到画师 {resolved} 位 · 待查 {pending} 个": "{resolved} matched to artists · {pending} to look up",

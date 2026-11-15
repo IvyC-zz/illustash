@@ -428,7 +428,7 @@ export function renderAccountsCard() {
   const a = state.accounts;
   if (!a) { card.innerHTML = `<h2>${t('账号')}</h2><p class="muted-note">${t('正在读取…')}</p>`; return; }
   const p = a.pixiv, x = a.x, s = a.saucenao;
-  card.innerHTML = `${cardHead(t('账号'), t('找回画师从你的关注出发：拉他们公开作品的小图，在本机逐张比对。只读，不点赞、不关注、不发任何内容。'))}
+  card.innerHTML = `${cardHead(t('账号'), t('找回画师会读你的关注列表，把关注的人记为候选画师；在详情面板点「找 TA 的其他图」时，才拉这位画师公开作品的小图，在本机逐张比对。只读，不点赞、不关注、不发任何内容。'))}
     <h3 class="acct-h">Pixiv${scope('shared')}</h3>
     ${pixivAccount(a)}
     <h3 class="acct-h">X${scope('library')}</h3>
