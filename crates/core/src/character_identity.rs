@@ -160,6 +160,7 @@ pub fn decide(
         ],
     )?;
     let decision_core = c.last_insert_rowid();
+    crate::human_conclusions::relations::acknowledge(c, decision_core)?;
     let decision = next_id(c, "decision")?;
     c.execute(
         "INSERT INTO term_legacy_ids(kind,legacy_id,core_id) VALUES ('decision',?,?)",

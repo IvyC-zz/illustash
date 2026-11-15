@@ -297,6 +297,7 @@ pub fn judge_in(
                     "INSERT INTO term_verdicts(action_id,anchor,relation_id,verdict,origin,reason,reviewed) VALUES (?1,?1,?2,?3,?4,?5,?6)",
                     params![action, rel, verdict.as_str(), origin, reason, reviewed],
                 )?;
+                crate::human_conclusions::relations::acknowledge(conn, conn.last_insert_rowid())?;
             }
         }
     }

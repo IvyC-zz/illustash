@@ -80,6 +80,13 @@ pub(crate) struct Created {
     pub signature: String,
 }
 
+pub(crate) fn refresh_signatures(c: &Connection, created: &mut [Created]) -> Result<()> {
+    for object in created {
+        object.signature = signature(c, object.id)?;
+    }
+    Ok(())
+}
+
 pub(crate) fn create(c: &Connection, action: i64, source_library: &str, definitions: &[New]) -> Result<Vec<Created>> {
     for new in definitions {
         let e = &new.definition;
@@ -195,7 +202,9 @@ pub(crate) fn check_undo(c: &Connection, action: i64, created: &[Created]) -> Re
             EXISTS(SELECT 1 FROM term_evidence WHERE term_id=?1)
             OR EXISTS(SELECT 1 FROM term_verdicts v LEFT JOIN actions a ON a.id=v.action_id
               WHERE v.term_id=?1 AND (v.batch_id IS NOT NULL OR (v.action_id<>?2 AND a.undone=0)))
-            OR EXISTS(SELECT 1 FROM term_relation_records WHERE a=?1 OR b=?1)
+            OR EXISTS(SELECT 1 FROM term_relation_records r WHERE (a=?1 OR b=?1)
+                AND NOT EXISTS(SELECT 1 FROM human_object_contributions o
+                    WHERE o.kind='relation' AND o.object_id=r.id AND o.owner_action_id=?2))
             OR EXISTS(SELECT 1 FROM term_tree WHERE (parent_id=?3 OR work_id=?3 OR merged_into=?3)
                 AND term_id NOT IN (SELECT value FROM json_each(?4)))
             OR EXISTS(SELECT 1 FROM term_identity_baseline WHERE (parent_id=?3 OR merged_into=?3)

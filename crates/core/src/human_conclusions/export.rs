@@ -109,7 +109,7 @@ fn image_verdicts(c: &Connection, out: &mut Vec<Record>) -> Result<()> {
 }
 fn relation_verdicts(c: &Connection, out: &mut Vec<Record>) -> Result<()> {
     let sql = format!(
-        "{LATEST} SELECT r.id,a.key,b.key,r.kind,v.verdict,v.origin,v.via,v.reason,v.created_at,v.reviewed,m.legacy_id
+        "{LATEST} SELECT r.id,a.key,b.key,r.kind,v.verdict,v.origin,v.via,v.reason,v.created_at,v.reviewed,m.legacy_id,v.id
         FROM latest v JOIN term_relations r ON r.id=v.relation_id JOIN terms a ON a.id=r.a JOIN terms b ON b.id=r.b
         LEFT JOIN term_legacy_ids m ON m.kind='relation' AND m.core_id=r.id
         WHERE v.rank=1 ORDER BY m.legacy_id IS NULL,m.legacy_id,r.id"
@@ -129,17 +129,18 @@ fn relation_verdicts(c: &Connection, out: &mut Vec<Record>) -> Result<()> {
                 decision(r, 4)?,
                 r.get::<_, String>(9)?,
                 r.get::<_, Option<i64>>(10)?,
+                r.get::<_, i64>(11)?,
             ))
         })?
         .enumerate()
     {
-        let (id, mut a, mut b, kind, decision, reviewed, legacy) = row?;
+        let (id, mut a, mut b, kind, decision, reviewed, legacy, verdict) = row?;
         if matches!(kind.as_str(), "different_from" | "excludes") && a > b {
             std::mem::swap(&mut a, &mut b);
         }
         let reviewed: BTreeSet<i64> =
             serde_json::from_str(&reviewed).map_err(|_| Error::invalid("关系审阅列表不正确"))?;
-        let (mut seen, mut acknowledged) = (BTreeSet::new(), BTreeSet::new());
+        let (mut seen, mut acknowledged) = super::relations::context(c, verdict)?;
         for row in evidence.query_map([id], |r| {
             Ok((
                 r.get::<_, i64>(0)?,

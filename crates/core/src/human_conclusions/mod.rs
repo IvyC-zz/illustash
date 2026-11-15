@@ -5,6 +5,7 @@ pub mod format;
 mod format_graph;
 pub mod import;
 pub mod matching;
+pub(crate) mod relations;
 pub mod state;
 mod upgrade;
 pub(crate) mod visibility;

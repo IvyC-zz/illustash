@@ -39,6 +39,13 @@
         "native/terms/src/app_human_conclusions/tests.rs::imported_definition_disappears_from_business_reads_and_reimport_owns_new_history",
         "native/terms/src/app_human_conclusions/tests.rs::independent_evidence_keeps_imported_definition_and_rolls_back_entire_undo"
       ]
+    },
+    {
+      "name": "human_relation_review_context",
+      "introduced_in": 9,
+      "checks": [
+        "native/terms/src/app_human_conclusions/tests.rs::identity_relation_context_roundtrips_and_respects_local_review_audit"
+      ]
     }
   ],
   "meta_keys": [

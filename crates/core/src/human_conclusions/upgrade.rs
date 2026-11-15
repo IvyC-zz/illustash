@@ -32,6 +32,7 @@ pub(crate) fn migrate(c: &Connection) -> Result<()> {
     c.execute_batch(TABLES)?;
     backfill(c)?;
     super::visibility::migrate(c)?;
+    super::relations::migrate(c)?;
     // 一次导入可带多个人物的检查记录，原 action_id 单列主键不足以表达；旧三列逐行原样保留。
     if c.query_row("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='reviews')", [], |r| {
         r.get::<_, bool>(0)

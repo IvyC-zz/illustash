@@ -6,6 +6,16 @@ use serde_json::json;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 static NEXT: AtomicU64 = AtomicU64::new(0);
+
+fn hybrid(c: &Connection) {
+    c.execute("INSERT OR REPLACE INTO meta VALUES ('identity_policy','hybrid')", []).unwrap();
+    // 当前 v8 身份布局保留原 hybrid 归属规则，entities 已由核心同形查询取代。
+    c.execute_batch(
+        &include_str!("../app_migration_sql/hybrid.sql")
+            .replace("entities", illustash_core::character_entities::ENTITIES),
+    )
+    .unwrap();
+}
 struct Fixture {
     root: PathBuf,
     db: PathBuf,
@@ -80,7 +90,7 @@ impl Fixture {
         let tx = c.transaction().unwrap();
         crate::schema::begin_writing(&tx).unwrap();
         if hybrid {
-            tx.execute("INSERT INTO meta VALUES ('identity_policy','hybrid')", []).unwrap();
+            self::hybrid(&tx);
         }
         illustash_core::character_entities::create(
             &tx,
@@ -295,7 +305,7 @@ fn structured_roundtrip(hybrid: bool) {
     let target = Fixture::new("structured-target");
     target.target();
     if hybrid {
-        crate::open(&target.db).unwrap().execute("INSERT INTO meta VALUES ('identity_policy','hybrid')", []).unwrap();
+        self::hybrid(&crate::open(&target.db).unwrap());
     }
     let imported = import_file(&target.db, &target.id, &path, &|| Ok(())).unwrap();
     assert_eq!(imported.records, BTreeMap::from([("applied".into(), 13)]));
@@ -327,7 +337,7 @@ fn structured_roundtrip(hybrid: bool) {
     let other = Fixture::new("different-policy");
     other.target();
     if !hybrid {
-        crate::open(&other.db).unwrap().execute("INSERT INTO meta VALUES ('identity_policy','hybrid')", []).unwrap();
+        self::hybrid(&crate::open(&other.db).unwrap());
     }
     let rejected = import_file(&other.db, &other.id, &path, &|| Ok(())).unwrap();
     assert_eq!(rejected.records["blocked_dependency"], 5);
@@ -343,6 +353,150 @@ fn structured_default_import_restores_names_tree_reviews_and_scope_then_undoes()
 #[test]
 fn structured_hybrid_import_preserves_original_baseline_and_policy_boundary() {
     structured_roundtrip(true);
+}
+
+fn family(f: &Fixture, parent_no: bool) {
+    f.asset("image", "family.png", 51);
+    let mut c = crate::open(&f.db).unwrap();
+    let tx = c.transaction().unwrap();
+    crate::schema::begin_writing(&tx).unwrap();
+    hybrid(&tx);
+    for (key, parent, kind) in [("parent", None, "character"), ("child", Some("parent"), "skin")] {
+        illustash_core::character_entities::create(
+            &tx,
+            &illustash_core::character_entities::New {
+                id: key,
+                kind,
+                parent_id: parent,
+                variant: if parent.is_some() { "family_variant" } else { "" },
+                ..Default::default()
+            },
+            "user",
+        )
+        .unwrap();
+        let id = crate::store::term_by_key(&tx, key).unwrap().unwrap().0;
+        crate::store::add_link(&tx, id, "danbooru", &format!("synthetic_{key}"), "", "synthetic").unwrap();
+    }
+    crate::character_graph::rebuild(&tx).unwrap();
+    crate::character_commands::command(
+        &tx,
+        &json!({"op":"change","action":if parent_no {"rejected"} else {"confirmed"},
+            "entity":if parent_no {"parent"}else{"child"},"asked":["image"]}),
+    )
+    .unwrap();
+    crate::schema::commit_writing(tx).unwrap();
+}
+
+#[test]
+fn imported_family_judgments_preserve_target_parent_rejection_and_child_confirmation() {
+    for parent_no in [true, false] {
+        let source = Fixture::new("family-source");
+        family(&source, parent_no);
+        let target = Fixture::new("family-target");
+        family(&target, !parent_no);
+        let before = capture(&target.db, &target.id, &|| Ok(())).unwrap();
+        let memberships = target.count("SELECT count(*) FROM memberships WHERE status='confirmed'");
+        assert_eq!(memberships, i64::from(parent_no));
+        let path = source.root.join("family.illustash-human.jsonl");
+        capture(&source.db, &source.id, &|| Ok(())).unwrap().write(&mut File::create(&path).unwrap()).unwrap();
+        let result = import_file(&target.db, &target.id, &path, &|| Ok(())).unwrap();
+        assert_eq!(result.action_id, None);
+        assert!(result.records["blocked_dependency"] > 0);
+        assert_eq!(target.count("SELECT count(*) FROM actions WHERE undone=0"), 1);
+        assert_eq!(target.count("SELECT count(*) FROM memberships WHERE status='confirmed'"), memberships);
+        let after = capture(&target.db, &target.id, &|| Ok(())).unwrap();
+        let mut a = Vec::new();
+        let mut b = Vec::new();
+        before.write(&mut a).unwrap();
+        after.write(&mut b).unwrap();
+        let footer = |bytes: &[u8]| {
+            serde_json::from_slice::<serde_json::Value>(bytes.split(|b| *b == b'\n').rfind(|s| !s.is_empty()).unwrap())
+                .unwrap()["state_sha256"]
+                .clone()
+        };
+        assert_eq!(footer(&a), footer(&b));
+    }
+}
+
+#[test]
+fn identity_relation_context_roundtrips_and_respects_local_review_audit() {
+    let source = Fixture::new("relation-source");
+    let mut c = crate::open(&source.db).unwrap();
+    let tx = c.transaction().unwrap();
+    crate::schema::begin_writing(&tx).unwrap();
+    hybrid(&tx);
+    for key in ["parent", "variant", "canonical"] {
+        illustash_core::character_entities::create(
+            &tx,
+            &illustash_core::character_entities::New {
+                id: key,
+                kind: "character",
+                variant: if key == "variant" { "synthetic_variant" } else { "" },
+                ..Default::default()
+            },
+            "user",
+        )
+        .unwrap();
+    }
+    let relation =
+        illustash_core::character_identity::propose(&tx, "variant", "parent", "form_of", None, "synthetic").unwrap();
+    tx.execute("INSERT INTO actions(id,label,before_json) VALUES (1,'合成关系','[]')", []).unwrap();
+    illustash_core::character_identity::decide(&tx, relation, "accepted", "合成决定", Some(1), "user").unwrap();
+    let duplicate =
+        illustash_core::character_identity::propose(&tx, "parent", "canonical", "duplicate_of", None, "synthetic")
+            .unwrap();
+    illustash_core::character_identity::decide(&tx, duplicate, "accepted", "合成代表选择", Some(1), "user").unwrap();
+    // 新出现的旧层级证据尚未复核；便携文件只保留其指纹和审阅状态。
+    illustash_core::character_identity::propose(
+        &tx,
+        "variant",
+        "parent",
+        "form_of",
+        Some(&json!({"synthetic":true})),
+        "legacy-hierarchy",
+    )
+    .unwrap();
+    crate::character_graph::rebuild(&tx).unwrap();
+    crate::schema::commit_writing(tx).unwrap();
+    let path = source.root.join("relations.illustash-human.jsonl");
+    capture(&source.db, &source.id, &|| Ok(())).unwrap().write(&mut File::create(&path).unwrap()).unwrap();
+    let target = Fixture::new("relation-target");
+    hybrid(&crate::open(&target.db).unwrap());
+    let report = import_file(&target.db, &target.id, &path, &|| Ok(())).unwrap();
+    assert_eq!(report.records, BTreeMap::from([("applied".into(), 2)]));
+    assert_eq!(target.count("SELECT count(*) FROM identity_canonical c JOIN human_entity_origins a ON a.target_key=c.entity
+        JOIN human_entity_origins b ON b.target_key=c.canonical WHERE a.source_key='parent' AND b.source_key='canonical'"),1);
+    assert_eq!(target.count("SELECT count(*) FROM term_evidence"), 0);
+    assert_eq!(target.count("SELECT count(*) FROM human_relation_review_context WHERE reviewed=0"), 1);
+    assert_eq!(import_file(&target.db, &target.id, &path, &|| Ok(())).unwrap().action_id, None);
+    let mut c = crate::open(&target.db).unwrap();
+    let version = crate::character_graph::version(&c).unwrap();
+    let tx = c.transaction().unwrap();
+    crate::schema::begin_writing(&tx).unwrap();
+    let reviewed = illustash_core::character_identity::command(
+        &tx,
+        &json!({"op":"decide","relation_id":1,"status":"accepted","reason":"合成复核"}),
+    )
+    .unwrap();
+    crate::schema::commit_writing(tx).unwrap();
+    assert_ne!(crate::character_graph::version(&c).unwrap(), version);
+    let conflict = import_file(&target.db, &target.id, &path, &|| Ok(())).unwrap();
+    assert_eq!(conflict.action_id, None);
+    assert_eq!(conflict.records["conflict"], 1);
+    let reviewed_version = crate::character_graph::version(&c).unwrap();
+    target.undo(reviewed["action"].as_i64().unwrap()).unwrap();
+    // 普通关系撤销沿用现行“追加已审计决议”的合同，审计批次成为独立贡献。
+    assert_eq!(crate::character_graph::version(&c).unwrap(), reviewed_version);
+    assert!(target.undo(report.action_id.unwrap()).is_err());
+    let target = Fixture::new("relation-undo-target");
+    hybrid(&crate::open(&target.db).unwrap());
+    let report = import_file(&target.db, &target.id, &path, &|| Ok(())).unwrap();
+    target.undo(report.action_id.unwrap()).unwrap();
+    assert_eq!(target.count("SELECT count(*) FROM terms"), 0);
+    assert_eq!(target.count("SELECT count(*) FROM term_relations"), 0);
+    assert_eq!(target.count("SELECT count(*) FROM pragma_foreign_key_check"), 0);
+    let repeated = import_file(&target.db, &target.id, &path, &|| Ok(())).unwrap();
+    assert!(repeated.action_id.unwrap() > report.action_id.unwrap());
 }
 
 #[test]

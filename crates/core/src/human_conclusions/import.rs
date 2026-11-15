@@ -3,6 +3,7 @@ use super::{
     definitions, export,
     format::{Entity, Header, Policy, Record, Snapshot},
     matching::{self, Match, SourceAsset, TargetAsset},
+    relations,
     state::{self, Domain, Mark},
 };
 use crate::{error::invalid, schema, store, Error, Result};
@@ -73,6 +74,7 @@ struct History {
     // 当前阶段只补从未决定的逻辑键；before 均为无贡献，after 用于拒绝独立改动后的撤销。
     after: Vec<Record>,
     created: Vec<definitions::Created>,
+    relations: Vec<relations::Created>,
     graph: bool,
 }
 
@@ -92,12 +94,23 @@ fn current(c: &Connection) -> Result<Snapshot> {
 }
 
 fn equivalent(a: &Record, b: &Record) -> Result<bool> {
+    if let (Record::RelationVerdict { seen: local, .. }, Record::RelationVerdict { seen: source, .. }) = (a, b) {
+        let local: BTreeSet<_> = local.iter().collect();
+        if !source.iter().all(|f| local.contains(f)) {
+            return Ok(false);
+        }
+    }
     let normalize = |record: &Record| -> Result<Value> {
         let mut value = serde_json::to_value(record).map_err(|e| Error::invalid(e.to_string()))?;
         let object = value.as_object_mut().expect("记录序列化为对象");
         object.remove("record_key");
         // 操作时间是审计信息，不让同一判断因创建时刻不同被重复导入。
         object.remove("created_at");
+        // 整数顺序在目标追加分配；代表语义由方向和组内相对顺序保留。
+        object.remove("order");
+        if matches!(record, Record::RelationVerdict { .. }) {
+            object.remove("seen");
+        }
         if let Some(decision) = object.get_mut("decision").and_then(Value::as_object_mut) {
             decision.remove("created_at");
         }
@@ -156,6 +169,129 @@ fn match_reason(result: &Match) -> &'static str {
         Match::Ambiguous { .. } => "ambiguous_asset",
         Match::Unverified { .. } => "unverified_asset",
     }
+}
+
+// 每个关系连通组在可回滚保存点中按真实图投影检查。旧人工归属或结构发生变化时整组跳过。
+fn graph_conflicts(
+    c: &Connection,
+    snapshot: &Snapshot,
+    existing: &Snapshot,
+    terms: &BTreeMap<String, String>,
+    new_definitions: &[definitions::New],
+    check: &mut impl FnMut() -> Result<()>,
+) -> Result<(BTreeSet<String>, BTreeSet<String>)> {
+    let mut visited = BTreeSet::new();
+    let mut blocked = BTreeSet::new();
+    let mut conflicts = BTreeSet::new();
+    let existing_records: BTreeMap<_, _> = existing.records.iter().map(|r| (key(r), r)).collect();
+    for record in &snapshot.records {
+        let Record::RelationVerdict { a, b, .. } = record else { continue };
+        if visited.contains(a) || !terms.contains_key(a) || !terms.contains_key(b) {
+            continue;
+        }
+        let group = definitions::connected(snapshot, BTreeSet::from([a.clone(), b.clone()]));
+        visited.extend(group.iter().cloned());
+        let mut relations: Vec<_> = snapshot
+            .records
+            .iter()
+            .filter_map(|r| match r {
+                Record::RelationVerdict { a, b, .. } if group.contains(a) => {
+                    let mut mapped = r.clone();
+                    if let Record::RelationVerdict { a: ma, b: mb, kind, .. } = &mut mapped {
+                        *ma = terms.get(a)?.clone();
+                        *mb = terms.get(b)?.clone();
+                        if matches!(kind.as_str(), "different_from" | "excludes") && ma > mb {
+                            std::mem::swap(ma, mb);
+                        }
+                    }
+                    Some(mapped)
+                }
+                _ => None,
+            })
+            .collect();
+        let all_present = relations.iter().try_fold(true, |present, r| -> Result<bool> {
+            Ok(present
+                && match existing_records.get(&key(r)) {
+                    Some(before) => equivalent(before, r)?,
+                    None => false,
+                })
+        })?;
+        if all_present {
+            continue;
+        }
+        let mut direct_conflict = false;
+        for record in &relations {
+            if let Some(before) = existing_records.get(&key(record)) {
+                if !equivalent(before, record)? {
+                    conflicts.insert(record.identity().1.to_owned());
+                    direct_conflict = true;
+                }
+            }
+        }
+        if direct_conflict {
+            blocked.extend(group);
+            continue;
+        }
+        relations.sort_by_key(|r| match r {
+            Record::RelationVerdict { order, .. } => *order,
+            _ => 0,
+        });
+        check()?;
+        c.execute_batch("SAVEPOINT human_graph_preflight")?;
+        let result = (|| -> Result<()> {
+            let definitions: Vec<_> = new_definitions
+                .iter()
+                .filter(|d| group.contains(&d.source_key))
+                .map(|d| {
+                    Ok(definitions::New {
+                        source_key: d.source_key.clone(),
+                        target_key: d.target_key.clone(),
+                        definition: definitions::mapped(&d.definition, terms)
+                            .ok_or_else(|| Error::Conflict("关系依赖不完整".into()))?,
+                    })
+                })
+                .collect::<Result<_>>()?;
+            c.execute("INSERT INTO actions(label,before_json) VALUES ('人工关系预检','[]')", [])?;
+            let action = c.last_insert_rowid();
+            definitions::create(c, action, &snapshot.header.library_id, &definitions)?;
+            for record in &relations {
+                if !existing_records.contains_key(&key(record)) {
+                    relations::write(c, action, record)?;
+                }
+            }
+            if existing.header.policy == Policy::Hybrid {
+                crate::character_graph::rebuild(c)?;
+            }
+            let after = current(c)?;
+            let after: BTreeMap<_, _> = after.records.iter().map(|r| (key(r), r)).collect();
+            // 图投影可能改变范围、暂停状态与现存身份；目标的这些语义都有优先权。
+            for before in &existing.records {
+                if matches!(before, Record::Entity { .. } | Record::IdentityContext { .. })
+                    && after.get(&key(before)).copied() != Some(before)
+                {
+                    return Err(Error::Conflict("源关系会改变目标已有身份语义".into()));
+                }
+            }
+            for definition in &definitions {
+                let Some(Record::Entity { definition: after, .. }) =
+                    after.get(&vec!["entity".into(), definition.target_key.clone()]).copied()
+                else {
+                    return Err(Error::Conflict("源关系投影丢失身份".into()));
+                };
+                if !definitions::same_structure(&definition.definition, after) {
+                    return Err(Error::Conflict("源关系与目标原有关系不能保留相同结构".into()));
+                }
+            }
+            Ok(())
+        })();
+        c.execute_batch("ROLLBACK TO human_graph_preflight; RELEASE human_graph_preflight")?;
+        match result {
+            Ok(()) => (),
+            Err(Error::Conflict(_) | Error::Invalid(_)) => blocked.extend(group),
+            Err(e) => return Err(e),
+        }
+    }
+    Ok((blocked, conflicts))
 }
 
 /// 在宿主持有的 BEGIN IMMEDIATE 和核心写钥匙中应用快照。
@@ -231,6 +367,14 @@ pub fn apply_in(
         })
         .collect();
     let fresh: BTreeSet<_> = new_definitions.iter().map(|new| new.source_key.as_str()).collect();
+    let source_entities: BTreeMap<_, _> = snapshot
+        .records
+        .iter()
+        .filter_map(|r| match r {
+            Record::Entity { key, definition } => Some((key.as_str(), definition.as_ref())),
+            _ => None,
+        })
+        .collect();
     let mut blocked = BTreeSet::new();
     for record in &snapshot.records {
         if let Record::Entity { key, definition } = record {
@@ -250,12 +394,49 @@ pub fn apply_in(
                 blocked.insert(key.clone());
             }
         }
-        // 尚未接入关系贡献时连同相关身份一起报告，不把关系投影误当作独立原始结构。
-        if matches!(record, Record::RelationVerdict { .. }) {
+        if matches!(record, Record::RelationVerdict { identity_relation: true, .. })
+            && snapshot.header.policy != existing.header.policy
+        {
             blocked.extend(record.terms().into_iter().map(str::to_owned));
+        }
+        if let Record::ImageVerdict { asset, term, decision, .. } = record {
+            if decision.verdict == "yes" {
+                if let (Some(Match::Matched { target, .. }), Some(parent)) = (
+                    assets.get(asset.as_str()).copied(),
+                    source_entities
+                        .get(term.as_str())
+                        .and_then(|e| definitions::mapped(e, &terms))
+                        .and_then(|e| e.tree?.parent),
+                ) {
+                    let rejected: bool = c.query_row(
+                        "SELECT EXISTS(SELECT 1 FROM assertions WHERE uuid=?1 AND entity=?2 AND status='rejected')",
+                        params![target, parent],
+                        |r| r.get(0),
+                    )?;
+                    if rejected {
+                        blocked.insert(term.clone());
+                    }
+                }
+            }
+            if decision.verdict == "no" {
+                if let (Some(Match::Matched { target, .. }), Some(term)) =
+                    (assets.get(asset.as_str()).copied(), terms.get(term))
+                {
+                    let masks_existing: bool = c.query_row("SELECT
+                        EXISTS(SELECT 1 FROM assertions a JOIN term_tree t ON t.term_id=(SELECT id FROM terms WHERE key=a.entity)
+                            WHERE a.uuid=?1 AND a.status='confirmed' AND t.parent_id=?2)
+                        AND NOT EXISTS(SELECT 1 FROM assertions WHERE uuid=?1 AND entity=?2 AND status='rejected')",
+                        params![target,term], |r|r.get(0))?;
+                    if masks_existing {
+                        blocked.extend(record.terms().into_iter().map(str::to_owned));
+                    }
+                }
+            }
         }
     }
     let blocked = definitions::connected(snapshot, blocked);
+    terms.retain(|source, _| !blocked.contains(source));
+    let (blocked, relation_conflicts) = graph_conflicts(c, snapshot, &existing, &terms, &new_definitions, check)?;
     terms.retain(|source, _| !blocked.contains(source));
     for record in &snapshot.records {
         if let Record::Entity { key, .. } = record {
@@ -292,7 +473,10 @@ pub fn apply_in(
             continue;
         }
         if source.terms().iter().any(|t| !terms.contains_key(*t)) {
-            report.record(source, "blocked_dependency");
+            report.record(
+                source,
+                if relation_conflicts.contains(source.identity().1) { "conflict" } else { "blocked_dependency" },
+            );
             continue;
         }
         let mut target = source.clone();
@@ -311,6 +495,13 @@ pub fn apply_in(
                 *options = options.iter().map(|t| terms[t].clone()).collect();
             }
             Record::Review { term, .. } => *term = terms[term].clone(),
+            Record::RelationVerdict { a, b, kind, .. } => {
+                *a = terms[a].clone();
+                *b = terms[b].clone();
+                if matches!(kind.as_str(), "different_from" | "excludes") && a > b {
+                    std::mem::swap(a, b);
+                }
+            }
             Record::IdentityContext { asset, term, scope, suspended, .. } => {
                 *asset = asset_key(asset);
                 *term = terms[term].clone();
@@ -387,16 +578,31 @@ pub fn apply_in(
     }
     c.execute("INSERT INTO actions(label,before_json) VALUES ('已导入人工结论','[]')", [])?;
     let action = c.last_insert_rowid();
-    let created = definitions::create(c, action, &snapshot.header.library_id, &new_definitions)?;
-    let graph =
-        crate::character_projection::policy(c)? && new_definitions.iter().any(|new| new.definition.tree.is_some());
+    let mut created = definitions::create(c, action, &snapshot.header.library_id, &new_definitions)?;
+    let graph = crate::character_projection::policy(c)?
+        && (new_definitions.iter().any(|new| new.definition.tree.is_some())
+            || planned.iter().any(|r| matches!(r, Record::RelationVerdict { identity_relation: true, .. })));
+    let mut relation_records: Vec<_> = planned.iter().filter(|r| matches!(r, Record::RelationVerdict { .. })).collect();
+    relation_records.sort_by_key(|r| match r {
+        Record::RelationVerdict { order, .. } => *order,
+        _ => 0,
+    });
+    let mut created_relations = Vec::new();
+    for record in relation_records {
+        if let Some(created) = relations::write(c, action, record)? {
+            created_relations.push(created);
+        }
+    }
     if graph {
         crate::character_graph::rebuild(c)?;
     }
+    definitions::refresh_signatures(c, &mut created)?;
     let mut touched = BTreeSet::new();
     for record in &planned {
         check()?;
-        write(c, action, &snapshot.header.snapshot_id, record)?;
+        if !matches!(record, Record::RelationVerdict { .. }) {
+            write(c, action, &snapshot.header.snapshot_id, record)?;
+        }
         touched.extend(record.assets().into_iter().map(str::to_owned));
     }
     project(c, &touched)?;
@@ -422,6 +628,7 @@ pub fn apply_in(
         snapshot_id: snapshot.header.snapshot_id.clone(),
         after,
         created,
+        relations: created_relations,
         graph,
     };
     c.execute(
@@ -605,6 +812,7 @@ pub fn undo_in(c: &Connection, action: i64) -> Result<Vec<String>> {
             Record::ImageVerdict { .. }
             | Record::Entity { .. }
             | Record::Review { .. }
+            | Record::RelationVerdict { .. }
             | Record::IdentityContext { .. } => None,
             Record::Curation { .. } => Some("curation"),
             Record::Deferred { .. } => Some("deferred"),
@@ -620,6 +828,7 @@ pub fn undo_in(c: &Connection, action: i64) -> Result<Vec<String>> {
     }
     // 先撤去已经精确核对的本次附属状态，再检查其它依赖；发生冲突时宿主回滚整个事务。
     definitions::check_undo(c, action, &history.created)?;
+    relations::check_undo(c, action, &history.relations)?;
     definitions::remove(c, &history.created)?;
     c.execute("UPDATE actions SET undone=1 WHERE id=?1", [action])?;
     if history.graph {
