@@ -1,6 +1,25 @@
+<div align="center">
+
+<img src="docs/assets/icon-macos.svg" width="112" height="112" alt="Illustash icon">
+
 # Illustash
 
-[简体中文](README.md) | English
+**A local library for your anime illustration collection.**
+
+[![Latest release](https://img.shields.io/github/v/release/shio-vinyl/illustash?label=release&color=4c6ef5)](https://github.com/shio-vinyl/illustash/releases/latest)
+[![CI](https://github.com/shio-vinyl/illustash/actions/workflows/ci.yml/badge.svg?branch=main&event=push)](https://github.com/shio-vinyl/illustash/actions/workflows/ci.yml)
+[![License: GPL-3.0-or-later](https://img.shields.io/badge/license-GPL--3.0--or--later-blue.svg)](LICENSE)
+[![Platform: macOS · Windows](https://img.shields.io/badge/platform-macOS%2014%2B%20(Apple%20silicon)%20%C2%B7%20Windows%20x64-lightgrey.svg)](#download-and-status)
+
+[**Download**](https://github.com/shio-vinyl/illustash/releases/latest) · [Features](#what-it-does) · [Privacy](#privacy-and-boundaries) · [How it works](#how-it-works) · [Build from source](#running-from-source)
+
+English · [简体中文](README.zh-CN.md)
+
+</div>
+
+![Catalog: series and characters, organized](docs/assets/readme/en/library.jpg)
+
+<sub>Screenshots come from a demo library picked for this purpose. The illustrations belong to their original artists; to request removal, please <a href="https://github.com/shio-vinyl/illustash/issues">open an issue</a>.</sub>
 
 A local library tool for anime-style illustrations. It organizes thousands of pictures saved from X and Pixiv by series and character, and helps trace back their artists and original posts. Originals stay where they are; recognition and indexing run locally, and your pictures never leave your computer.
 
@@ -8,21 +27,25 @@ Save illustrations from X and Pixiv long enough and you easily end up with tens 
 
 Once you connect your picture sources and finish local recognition, Illustash builds a ready-to-browse catalog of series and characters. You do not need to sort tens of thousands of pictures before using it, and pending-work counts are not shown on screen by default (“Counts in the sidebar” is off by default). Browse your pictures like a photo album; when you see a misidentified character, fix it with a click and the library updates subsequent assignments around your decision.
 
+### Highlights
+
+- **[A ready-made catalog](#picture-sources-and-character-catalog)**: local models sort pictures into series → character → outfit, and group pictures appear under every character in them.
+- **[Your decisions take precedence](#manual-corrections-and-local-learning)**: fix a character with a click and undo at any time; re-running recognition never overwrites what you edited.
+- **[Artists and original posts, found again](#finding-artists-and-original-posts)**: pixel hashes, image signatures, and your following lists, without uploading your originals or thumbnails.
+- **[Duplicates and variants, folded](#excluding-non-illustrations-grouping-duplicates-and-r18-filtering)**: re-saves, crops, censored versions, and subtle variants are compared and grouped locally.
+- **[Local by default](#privacy-and-boundaries)**: recognition and indexing run on your computer, and every network feature is off by default.
+
 ## What it does
 
-### 1. Picture sources and character catalog
+### Picture sources and character catalog
 
 **System Photos and local folders:** Connects to macOS Photos (read-only, importing pictures saved from X and Pixiv) and local folders without moving or copying your originals. Picture sources are organized into tabs by saved origin (“Pixiv”, “X”, “Other”): macOS Photos distinguishes them automatically by the app that saved each picture, while folders are assigned an origin when added.
 
-**Hierarchical series and character catalog:** Uses local models to identify characters in each picture and builds a “Catalog” structured as Series (with optional parent series) → Character → Outfit / Sub-tag (outfit, alternate version, another form); turning on “Online name lookups” can fill in Chinese names as well. Searching by Chinese, Japanese, or English names, aliases, or raw tags finds the matching character. Group pictures appear under every character in them, and different outfits or looks stay grouped under the same character.
-
-![Catalog: series and characters, organized](docs/assets/readme/en/library.jpg)
-
-<sub>Screenshots come from a demo library picked for this purpose. The illustrations belong to their original artists; to request removal, please <a href="https://github.com/shio-vinyl/illustash/issues">open an issue</a>.</sub>
+**Hierarchical series and character catalog:** Uses local models to identify characters in each picture and builds a “Catalog” structured as Series (with optional parent series) → Character → Outfit / Sub-tag (outfit, alternate version, another form); turning on “Online name lookups” can fill in Chinese names as well. Searching by Chinese, Japanese, or English names, aliases, or raw tags finds the matching character. Group pictures appear under every character in them, and different outfits or looks stay grouped under the same character. The screenshot at the top of this page shows the Catalog.
 
 **Creating new series and characters:** Series, characters, or original characters not yet in the catalog can be created directly without waiting for a character index update. Once you confirm 5 pictures for a character, Illustash uses their visual features to link other pictures of that character; for characters whose names you do not know yet, look-alike pictures can be grouped under “Unidentified” first and renamed or merged into a character later.
 
-### 2. Manual corrections and local learning
+### Manual corrections and local learning
 
 Machine recognition results apply by default, so you do not need to check every tag before browsing. When you spot a mistake while paging through pictures, you can change, remove, or merge characters with a click, and every action can be undone at any time (⌘Z / Ctrl+Z).
 
@@ -38,7 +61,7 @@ Machine recognition results apply by default, so you do not need to check every 
 
 “Home” occasionally shows a “Who's this?” card to add confirmed examples for uncertain characters or characters with few samples. For series you follow regularly, you can also turn on “Follow new characters” in the “Catalog” to fetch reference features for newly debuted characters on demand after confirming network access.
 
-### 3. Finding artists and original posts
+### Finding artists and original posts
 
 For older pictures whose file names were changed and whose source posts were lost, Illustash can recover the origins of part of your illustrations in batch once you allow network access, without uploading your originals or thumbnails.
 
@@ -48,7 +71,7 @@ For older pictures whose file names were changed and whose source posts were los
 
 Clicking an artist from picture details lets you filter the library by that artist and open links to their profile pages and original posts.
 
-### 4. Excluding non-illustrations, grouping duplicates, and R18 filtering
+### Excluding non-illustrations, grouping duplicates, and R18 filtering
 
 **Excluding non-illustrations:** Automatically distinguishes anime-style illustrations from real-life photos, chat logs, UI screenshots, and text images, placing non-illustrations under “Excluded” (rules can be toggled in Settings). A macOS Photos source only reads pictures saved from X and Pixiv, and everyday photos or clutter mixed into folders or saved files are moved to “Excluded” by the same rules.
 
@@ -68,9 +91,51 @@ Identical and re-saved pictures fold automatically by default; subtle variants, 
 
 **Network access requires your permission:** Every network feature is off by default. Looking up Chinese character names and searching Danbooru tag data send only text such as tag names and series names (when assigning a character to a picture, Danbooru candidates fetch one small all-ages preview picture by tag); you can grant permission once for the current library and revoke it at any time.
 
-“Find artists” and “New characters” each require separate confirmation before every run; recognition models are fetched online only when you click download (or can be imported offline from files); update checks periodically query the GitHub release list only after you actively turn them on (sending no library data), and can be run manually in “Settings › About” when off; a new version is downloaded from GitHub only when you click “Download and restart”, and is installed after its signature is verified. “Network and privacy” in Settings lists every network feature and the data it sends; saving an account or changing startup preferences does not grant network access. Microsoft's ONNX Runtime, which recognition uses, has telemetry on by default in its official releases; Illustash turns it off in every recognition process, so it does not go online. On Windows, the Microsoft DirectML component used for GPU-accelerated recognition is registered with the system's telemetry channel and may, under its license, send usage data to Microsoft according to your system's “Diagnostic data” settings; if you prefer not to use it, turn off “Use the GPU to speed up recognition” in “Settings › Data › Recognition models” (switching to CPU only without loading the component), as detailed in [Troubleshooting installation and launch](docs/INSTALL.md#windows) (in Chinese).
+- “Find artists” and “New characters” each require separate confirmation before every run.
+- Recognition models are fetched online only when you click download (or can be imported offline from files).
+- Update checks periodically query the GitHub release list only after you actively turn them on (sending no library data), and can be run manually in “Settings › About” when off; a new version is downloaded from GitHub only when you click “Download and restart”, and is installed after its signature is verified.
+- “Network and privacy” in Settings lists every network feature and the data it sends; saving an account or changing startup preferences does not grant network access.
+- Microsoft's ONNX Runtime, which recognition uses, has telemetry on by default in its official releases; Illustash turns it off in every recognition process, so it does not go online.
+- On Windows, the Microsoft DirectML component used for GPU-accelerated recognition is registered with the system's telemetry channel and may, under its license, send usage data to Microsoft according to your system's “Diagnostic data” settings; if you prefer not to use it, turn off “Use the GPU to speed up recognition” in “Settings › Data › Recognition models” (switching to CPU only without loading the component), as detailed in [Troubleshooting installation and launch](docs/INSTALL.md#windows) (in Chinese).
 
 **Third-party site access:** External services such as Pixiv, X, Danbooru, and IQDB are all optional. When an account is needed, Illustash uses your own account with read-only, low-frequency access; if it encounters a CAPTCHA or rate limit, it stops and does not attempt to bypass it. Illustash was not created or distributed by pixiv and is not affiliated with pixiv, X, Danbooru, or any other site.
+
+## Download and status
+
+> [!NOTE]
+> Illustash is a personal project built primarily for the author's own needs and is still in early development.
+
+Illustash 0.1.0 has been officially released. Download it from [GitHub Releases](https://github.com/shio-vinyl/illustash/releases): a zip for Apple silicon Macs and an x64 installer for Windows. The installers are not notarized by Apple or code-signed for Windows, so the system blocks them the first time you open them; allow them once as described in [Troubleshooting installation and launch](docs/INSTALL.md) (in Chinese). When a new version comes out, you can check for updates and use “Download and restart” inside the app.
+
+| Platform | Status | Download |
+|---|---|---|
+| macOS 14 or later, Apple silicon | Primary platform | zip |
+| Windows x64 | Also usable | x64 installer |
+| Linux | Frozen (decided 2026-10-06) | Not provided |
+
+Linux is frozen: no installers or local computation (recognition, indexing, learning, origin lookup) are provided, no checks are run on Linux, and Rust code is not guaranteed to compile on Linux; if needed later, support will be built on top of the native macOS/Windows implementation.
+
+The interface supports Simplified Chinese and English, defaults to “System”, and can be switched in “Settings › General › Language”.
+
+You can also build from source. The core uses Rust stable; Python is not needed at runtime, while some build and check tools require Python 3.12 and Node 22.
+
+Model files required for local recognition are not included in the code repository or the installers (the app downloads them when prompted on first use, or imports them offline from files; running from source requires preparing them separately). See [Installation and platforms](docs/BACKEND_TASKS.md#独立安装与可选计算包) for dependencies, build steps, and compute component setup, and [Troubleshooting installation and launch](docs/INSTALL.md) for common gatekeeping prompts, model downloads, and runtime troubleshooting.
+
+### Running from source
+
+```sh
+# Build the core
+cargo build --release --manifest-path native/terms/Cargo.toml
+
+# Create a library for the first time: registers sources only, without scanning pictures
+./native/terms/target/release/illustash-terms library-create \
+    --dest ~/Pictures/Illustash/MyLibrary.pilib --folder /path/to/pictures
+
+# Open (defaults to http://127.0.0.1:8765)
+./start-web.command --library ~/Pictures/Illustash/MyLibrary.pilib
+```
+
+Creating a library for the first time only registers picture sources and does not immediately scan all pictures. For the desktop app (Tauri), installer builds, launch options, and library package layout, see [Development guide](docs/DEVELOPMENT.md).
 
 ## How it works
 
@@ -106,7 +171,10 @@ Illustash is a modular monolith written in Rust. All data lives in SQLite, and n
 
 See [Architecture](docs/ARCHITECTURE_DIRECTION.md), [Development guide](docs/DEVELOPMENT.md), and [Front-end modules](docs/WEB_V2.md#前端模块2026-10-18199).
 
-### Character recognition
+The parts below are collapsed; click a title to expand it.
+
+<details>
+<summary><strong>Character recognition</strong>: two local models, then learning from the pictures you confirm</summary>
 
 Every new picture goes through two models on your computer. [WD SwinV2 Tagger v3](https://huggingface.co/SmilingWolf/wd-swinv2-tagger-v3) produces general tags, an age rating, and tags for about 2,700 well-known characters. [CCIP](https://huggingface.co/deepghs/ccip) produces a 768-dimensional character feature: the same character lands close together whoever drew them and whatever they wear. The CCIP feature is matched against reference features (anchors) in the character index by nearest neighbor, and a match within the threshold counts as evidence. The two sources are recorded separately and ranked by strength, calibrated against your own decisions: agreement between both is strongest, then a single strong match, then weak ones. This ranking decides who a solo picture belongs to. Installers do not ship a shared character index. “Follow new characters” and “New characters” in the Catalog download public reference images from Danbooru by tag and build anchors locally; nothing from your library is uploaded.
 
@@ -118,7 +186,10 @@ Inference runs on ONNX Runtime. On Apple silicon, WD and CCIP use Core ML, with 
 
 See [Characters and outfits](docs/TERMS_CHARACTERS.md), [Recognition result packages](docs/RESULT_PACKAGES.md), [Recognition backends](docs/BACKEND_TASKS.md#识别的执行后端), and [New-character flow](docs/WEB_V2.md#新角色流程相似分组与边标边学2026-09-24).
 
-### Your decisions come first
+</details>
+
+<details>
+<summary><strong>Your decisions come first</strong>: machine evidence and your decisions are stored apart, with one undo for everything</summary>
 
 In the core, characters, series, artists, ratings, and custom tags are all **terms**, and putting a term on a picture follows the same rules whether a model or you did it. Machine evidence is only ever added, never deleted, and no source overwrites another. Decisions come only from people, and a “no” is permanent. Whether a picture shows a term as confirmed by you, assigned by the machine, “might also be”, or rejected is recomputed every time from the evidence, the decisions, and the policy for that kind of term.
 
@@ -128,7 +199,10 @@ Every manual action runs in one write transaction: resolving the selection, vali
 
 See [Terms](docs/TERMS.md#2-核心抽象词条), [Evidence packages](docs/EVIDENCE_PACKAGES.md), and [Assignment rules and API](docs/WEB_V2.md#归属规则).
 
-### Finding origins
+</details>
+
+<details>
+<summary><strong>Finding origins</strong>: several clues propose candidates, and every candidate is verified locally</summary>
 
 Provenance follows a “seeds plus verification” design: several clues each propose candidate artists or match original posts outright, and every candidate then goes through the same local verification.
 
@@ -142,7 +216,10 @@ Never uploading originals is a hard line, and it has a cost: with only hashes an
 
 See [Provenance](docs/PROVENANCE.md); section 8 describes the current pipeline.
 
-### Duplicates and variants
+</details>
+
+<details>
+<summary><strong>Duplicates and variants</strong>: signatures, candidate pairs, then a pixel-level relation check</summary>
 
 Byte-identical copies are grouped by file hash. The broader similarity scan runs locally in three steps:
 
@@ -154,7 +231,10 @@ Every result is stored, including “unrelated”. A union-find then joins byte-
 
 See [Relation check](docs/WEB_V2.md#图片关系判断2026-09-24) and [Library-wide similarity](docs/WEB_V2.md#全库找相似2026-09-24).
 
-### Library packages
+</details>
+
+<details>
+<summary><strong>Library packages</strong>: what is inside a <code>.pilib</code> folder and what is safe to delete</summary>
 
 A library is a `.pilib` folder:
 
@@ -171,7 +251,10 @@ The `format` field in `library.json` is the package format version, separate fro
 
 See [Libraries](docs/LIBRARIES.md#1-图库包里有什么) and [Upgrade boundary](docs/ARCHITECTURE_DIRECTION.md#已有核心库的显式升级边界).
 
-### How privacy is enforced
+</details>
+
+<details>
+<summary><strong>How privacy is enforced</strong>: offline computation, per-feature permission, and a guarded local server</summary>
 
 - **Computation stays offline**: recognition, indexing, learning, and similarity scans run on snapshots or isolated directories prepared by the host. The public thumbnails provenance needs are fetched by the host, subject to a site allowlist, authorization, rate limits, and a traffic cap, and then passed to the worker.
 - **Permission per feature**: name lookups are authorized once per library and can be revoked at any time; “Find artists” and “New characters” ask before every run; on-demand lookups are authorized for that one click. On a 403, a 429, a CAPTCHA, or a maintenance page, requests to that site stop immediately with no attempt to get around it. “Settings › Network and privacy” lists every network feature in one table, with the service it talks to and exactly what it sends.
@@ -181,45 +264,15 @@ See [Libraries](docs/LIBRARIES.md#1-图库包里有什么) and [Upgrade boundary
 
 See [Product baseline](docs/BACKLOG.md#产品底线与已定的约束新会话先读), [Third-party components](docs/THIRD_PARTY.md#打包时加入的运行库), and [Launch signal and session cookie](docs/ARCHITECTURE_DIRECTION.md#启动信号与会话-cookie).
 
-## Status and running
-
-Illustash is a personal project built primarily for the author's own needs and is still in early development.
-
-macOS (Apple silicon, macOS 14 or later) is the primary platform, and Windows x64 is also usable. Linux is frozen (decided 2026-10-06): no installers or local computation (recognition, indexing, learning, origin lookup) are provided, no checks are run on Linux, and Rust code is not guaranteed to compile on Linux; if needed later, support will be built on top of the native macOS/Windows implementation.
-
-The interface supports Simplified Chinese and English, defaults to “System”, and can be switched in “Settings › General › Language”.
-
-Illustash 0.1.0 has been officially released. Download it from [GitHub Releases](https://github.com/shio-vinyl/illustash/releases): a zip for Apple silicon Macs and an x64 installer for Windows. The installers are not notarized by Apple or code-signed for Windows, so the system blocks them the first time you open them; allow them once as described in [Troubleshooting installation and launch](docs/INSTALL.md) (in Chinese). When a new version comes out, you can check for updates and use “Download and restart” inside the app.
-
-You can also build from source. The core uses Rust stable; Python is not needed at runtime, while some build and check tools require Python 3.12 and Node 22.
-
-Model files required for local recognition are not included in the code repository or the installers (the app downloads them when prompted on first use, or imports them offline from files; running from source requires preparing them separately). See [Installation and platforms](docs/BACKEND_TASKS.md#独立安装与可选计算包) for dependencies, build steps, and compute component setup, and [Troubleshooting installation and launch](docs/INSTALL.md) for common gatekeeping prompts, model downloads, and runtime troubleshooting.
-
-### Running from source
-
-```sh
-# Build the core
-cargo build --release --manifest-path native/terms/Cargo.toml
-
-# Create a library for the first time: registers sources only, without scanning pictures
-./native/terms/target/release/illustash-terms library-create \
-    --dest ~/Pictures/Illustash/MyLibrary.pilib --folder /path/to/pictures
-
-# Open (defaults to http://127.0.0.1:8765)
-./start-web.command --library ~/Pictures/Illustash/MyLibrary.pilib
-```
-
-Creating a library for the first time only registers picture sources and does not immediately scan all pictures. For the desktop app (Tauri), installer builds, launch options, and library package layout, see [Development guide](docs/DEVELOPMENT.md).
+</details>
 
 ## Feedback and contributing
 
 Feature trade-offs prioritize the author's own usage needs.
 
-Bug reports are welcome via Issues using the [Bug report template](.github/ISSUE_TEMPLATE/bug_report.md), along with your OS, the output of “Settings › About › Copy diagnostics”, and steps to reproduce (please do not post real pictures, picture file names, local paths, or account details); if the app fails to install or open, check [Troubleshooting installation and launch](docs/INSTALL.md) first.
-
-Feature suggestions can be submitted with the [Feature request template](.github/ISSUE_TEMPLATE/feature_request.md), though adoption or implementation is not guaranteed.
-
-Code contributions (Pull Requests) are not accepted at this time.
+- **Bug reports** are welcome via Issues using the [Bug report template](.github/ISSUE_TEMPLATE/bug_report.md), along with your OS, the output of “Settings › About › Copy diagnostics”, and steps to reproduce (please do not post real pictures, picture file names, local paths, or account details); if the app fails to install or open, check [Troubleshooting installation and launch](docs/INSTALL.md) first.
+- **Feature suggestions** can be submitted with the [Feature request template](.github/ISSUE_TEMPLATE/feature_request.md), though adoption or implementation is not guaranteed.
+- **Code contributions** (Pull Requests) are not accepted at this time.
 
 ## License
 
@@ -232,3 +285,7 @@ The Illustash name and icon are not licensed along with the code. Modified versi
 ## Credits
 
 Character and picture recognition use [SmilingWolf's WD Tagger](https://huggingface.co/SmilingWolf/wd-swinv2-tagger-v3), [DeepGHS's CCIP](https://huggingface.co/deepghs/ccip), and [Character Index](https://huggingface.co/datasets/deepghs/character_index); tag and character data come from [Danbooru](https://danbooru.donmai.us), and Chinese character names come from [Bangumi](https://bgm.tv).
+
+---
+
+<sub>Keywords: anime illustration manager · image library · photo organizer · character recognition · anime character tagging · reverse image search · Pixiv · X (Twitter) · Danbooru · IQDB · duplicate image finder · local-first · privacy · offline · Tauri · Rust · SQLite · ONNX Runtime · macOS · Windows · 二次元插画 · 插画收藏 · 本地图库 · 角色识别 · 以图搜源 · 找画师</sub>

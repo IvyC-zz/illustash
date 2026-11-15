@@ -1,6 +1,25 @@
+<div align="center">
+
+<img src="docs/assets/icon-macos.svg" width="112" height="112" alt="Illustash 图标">
+
 # Illustash
 
-简体中文 | [English](README.en.md)
+**面向二次元插画收藏的本地图库。**
+
+[![最新版本](https://img.shields.io/github/v/release/shio-vinyl/illustash?label=release&color=4c6ef5)](https://github.com/shio-vinyl/illustash/releases/latest)
+[![CI](https://github.com/shio-vinyl/illustash/actions/workflows/ci.yml/badge.svg?branch=main&event=push)](https://github.com/shio-vinyl/illustash/actions/workflows/ci.yml)
+[![许可：GPL-3.0-or-later](https://img.shields.io/badge/license-GPL--3.0--or--later-blue.svg)](LICENSE)
+[![平台：macOS · Windows](https://img.shields.io/badge/platform-macOS%2014%2B%20(Apple%20silicon)%20%C2%B7%20Windows%20x64-lightgrey.svg)](#下载与现状)
+
+[**下载**](https://github.com/shio-vinyl/illustash/releases/latest) · [能做什么](#能做什么) · [隐私](#隐私与底线) · [工作原理](#工作原理) · [从源码运行](#从源码运行)
+
+[English](README.md) · 简体中文
+
+</div>
+
+![资料库：按作品和角色整理的目录](docs/assets/readme/zh/library.jpg)
+
+<sub>截图来自专门挑的演示图库，里面的插画版权归原作者，如需移除请<a href="https://github.com/shio-vinyl/illustash/issues">开 Issue</a>。</sub>
 
 面向二次元插画收藏的本地图库工具，用来把从 X、Pixiv 存下的成千上万张插画按作品和角色归类，并协助找回画师与原帖出处。不搬运原图，识别与索引都在本机运行，图片不出你的电脑。
 
@@ -8,21 +27,25 @@
 
 接入图片来源、跑完本地识别后，就有现成的作品与角色目录。不用先把几万张图整理完才能开始使用，界面上默认也不显示「待整理数字」（侧栏计数默认关闭）。平时像翻相册一样浏览，看到哪张认错了点一下改掉，图库会按你的判断更新后续归属。
 
+### 亮点
+
+- **[现成的角色目录](#图片来源与角色目录)**：本地模型把插画归入「作品 → 角色 → 皮肤」，多人同框的图同时归入各自的角色。
+- **[人工结论优先](#人工纠错与本地学习)**：认错了点一下改掉，随时可以撤销；重新识别不会覆盖你改好的归属。
+- **[找回画师与原帖](#找回画师与原帖出处)**：靠像素哈希、图像签名和你的关注列表，不上传原图或缩略图。
+- **[重复与差分归组](#杂图排除重复归组与-r18-筛选)**：重复保存、裁剪、打码和细微差分都在本地比对、归组。
+- **[默认不联网](#隐私与底线)**：识别与索引都在本机运行，所有联网功能默认关闭。
+
 ## 能做什么
 
-### 1. 图片来源与角色目录
+### 图片来源与角色目录
 
 **读取系统相册与本地文件夹：** 支持接入 macOS「照片」（只读，导入从 X、Pixiv 存下的图）和本地文件夹，不用搬运或复制原图。图片来源可按保存出处（Pixiv、X、其他）分栏管理：macOS「照片」按存图应用自动区分，文件夹在添加时指定出处。
 
-**作品与角色层级目录：** 用本地模型自动识别画面中的角色，按「作品（可按系列分层） → 角色 → 皮肤 / 子标签（服装、异格、另一形态）」建立资料库目录；开启名称联网查询后可补全中文名。搜索中文、日文、英文名、别名或原始 tag，都能找到对应角色。多人同框的插画会同时归入各自的角色目录，同一角色的不同服装与造型也归在一起。
-
-![资料库：按作品和角色整理的目录](docs/assets/readme/zh/library.jpg)
-
-<sub>截图来自专门挑的演示图库，里面的插画版权归原作者，如需移除请<a href="https://github.com/shio-vinyl/illustash/issues">开 Issue</a>。</sub>
+**作品与角色层级目录：** 用本地模型自动识别画面中的角色，按「作品（可按系列分层） → 角色 → 皮肤 / 子标签（服装、异格、另一形态）」建立资料库目录；开启名称联网查询后可补全中文名。搜索中文、日文、英文名、别名或原始 tag，都能找到对应角色。多人同框的插画会同时归入各自的角色目录，同一角色的不同服装与造型也归在一起。本页开头的截图就是资料库。
 
 **新建作品与角色：** 资料库里还没有的作品、角色或原创角色可以直接新建，不必等待角色索引更新。给一个角色确认满 5 张图后，Illustash 会根据画面中的角色特征把后续出现的同角色插画关联起来；暂时叫不出名字的角色，也能先在「未识别」里按相似外观归成一组，之后再改名或合并到具体角色。
 
-### 2. 人工纠错与本地学习
+### 人工纠错与本地学习
 
 机器识别的结果默认生效，不需要先检查完所有标签才能开始浏览。翻图时看到认错的，点一下就能更换、移出或合并角色，所有操作随时可以撤销（⌘Z / Ctrl+Z）。
 
@@ -38,7 +61,7 @@
 
 首页偶尔会出现一张「认一认」卡片，用来给机器拿不准或样本较少的角色补足确认样本。常看的作品也可以在资料库里开启「关注新角色」，经你确认联网后按需补充新登场角色的参考特征。
 
-### 3. 找回画师与原帖出处
+### 找回画师与原帖出处
 
 对于保存已久、改过文件名、找不到原帖的图片，Illustash 可以在不上传原图或缩略图的前提下，经你授权联网后批量找回一部分插画的出处。
 
@@ -48,7 +71,7 @@
 
 从图片详情点进画师，可以在图库里按这位画师筛选浏览，并打开其主页与原帖链接。
 
-### 4. 杂图排除、重复归组与 R18 筛选
+### 杂图排除、重复归组与 R18 筛选
 
 **排除非插画内容：** 自动区分二次元插画与三次元真人照片、聊天记录、界面截图、纯文字图等内容，把非插画图片归入「已排除」（规则可在设置中开关）。macOS「照片」来源只读取从 X、Pixiv 存下的图，文件夹或存图里混进的日常照片与杂图，也会按同样的规则自动归入「已排除」。
 
@@ -68,9 +91,51 @@
 
 **联网需你授权：** 所有联网功能默认关闭。查询角色中文名与搜索 Danbooru 标签资料，只发送 tag 名、作品名等文字信息（给图片设角色时，Danbooru 候选会按 tag 拉取一张全年龄预览小图）；你可以对当前图库授权一次，并随时撤销。
 
-「找回画师」「检查新角色」每次运行前都需要单独确认；识别模型只在你点击下载时联网获取（也可离线导入文件）；检查更新需你主动开启后才会定期查询 GitHub 版本列表（不发送图库信息），关闭时可在「设置 › 关于」手动检查；有新版本时，只有你点「下载并重启」才会从 GitHub 下载新版本，校验签名后安装。设置中的「网络与隐私」会列出全部联网功能及其发送的数据；保存账号、修改启动偏好，都不意味着授权联网。识别用的微软 ONNX Runtime 在官方发布的版本里默认开启遥测，Illustash 在每个识别进程里都把它关掉，不联网。Windows 上用于 GPU 加速识别的微软 DirectML 组件登记在系统的遥测通道里，按其许可可能依照系统的「诊断数据」设置向微软发送使用信息；不想使用时可在「设置 › 数据 › 识别模型」中关闭「使用 GPU 加速识别」（改为仅用 CPU、不加载该组件），详见 [装不上、打不开怎么办](docs/INSTALL.md#windows)。
+- 「找回画师」「检查新角色」每次运行前都需要单独确认。
+- 识别模型只在你点击下载时联网获取（也可离线导入文件）。
+- 检查更新需你主动开启后才会定期查询 GitHub 版本列表（不发送图库信息），关闭时可在「设置 › 关于」手动检查；有新版本时，只有你点「下载并重启」才会从 GitHub 下载新版本，校验签名后安装。
+- 设置中的「网络与隐私」会列出全部联网功能及其发送的数据；保存账号、修改启动偏好，都不意味着授权联网。
+- 识别用的微软 ONNX Runtime 在官方发布的版本里默认开启遥测，Illustash 在每个识别进程里都把它关掉，不联网。
+- Windows 上用于 GPU 加速识别的微软 DirectML 组件登记在系统的遥测通道里，按其许可可能依照系统的「诊断数据」设置向微软发送使用信息；不想使用时可在「设置 › 数据 › 识别模型」中关闭「使用 GPU 加速识别」（改为仅用 CPU、不加载该组件），详见 [装不上、打不开怎么办](docs/INSTALL.md#windows)。
 
 **第三方站点访问：** Pixiv、X、Danbooru、IQDB 等外部服务均为可选功能。需要账号时使用你自己的账号，访问以只读、低频为原则；遇到人机验证或限流就停止，不尝试绕过。Illustash 不是 pixiv 开发或分发的应用，和 pixiv、X、Danbooru 等站点都没有关联。
+
+## 下载与现状
+
+> [!NOTE]
+> Illustash 是一个主要满足作者自己需求的个人项目，目前仍处于早期开发阶段。
+
+Illustash 0.1.0 已正式发布，安装包在 [GitHub Releases](https://github.com/shio-vinyl/illustash/releases) 下载：macOS 版是 Apple 芯片的 zip，Windows 版是 x64 安装程序。安装包没有经过 Apple 公证或 Windows 代码签名，第一次打开时系统会拦截，按 [装不上、打不开怎么办](docs/INSTALL.md) 放行一次即可。以后有新版本时，可以在应用里检查更新并「下载并重启」。
+
+| 平台 | 状态 | 安装包 |
+|---|---|---|
+| macOS 14 及以上，Apple 芯片 | 主力平台 | zip |
+| Windows x64 | 也可以使用 | x64 安装程序 |
+| Linux | 已冻结（2026-10-06 决定） | 不提供 |
+
+Linux 已冻结：不提供安装包和本地计算（识别、索引、学习、溯源），不在 Linux 上做检查，Rust 代码能否在 Linux 编译也不作保证；以后有需求再基于 macOS/Windows 的原生实现补做。
+
+界面支持简体中文和英文，默认跟随系统，可在「设置 › 通用 › 语言」中切换。
+
+也可以从源码构建。核心使用 Rust stable；运行时无需 Python，部分构建与检查工具需要 Python 3.12 和 Node 22。
+
+本地识别所需的模型文件不包含在代码仓库和安装包中（应用首次使用时按提示下载，或从文件离线导入；源码运行需另外准备）。具体依赖、构建方法与计算组件配置见 [安装与平台](docs/BACKEND_TASKS.md#独立安装与可选计算包)，常见拦截、模型下载与运行排障见 [装不上、打不开怎么办](docs/INSTALL.md)。
+
+### 从源码运行
+
+```sh
+# 构建核心
+cargo build --release --manifest-path native/terms/Cargo.toml
+
+# 首次建库：只登记来源，不扫描图片
+./native/terms/target/release/illustash-terms library-create \
+    --dest ~/Pictures/Illustash/我的图库.pilib --folder /图片目录
+
+# 打开（默认 http://127.0.0.1:8765）
+./start-web.command --library ~/Pictures/Illustash/我的图库.pilib
+```
+
+首次创建图库只会登记图片来源，不会立刻扫描全部图片。桌面 App（Tauri）、安装包构建、启动参数和图库包结构见 [开发说明](docs/DEVELOPMENT.md)。
 
 ## 工作原理
 
@@ -106,7 +171,10 @@ Illustash 是一个 Rust 写的模块化单体，数据都在 SQLite 里，运�
 
 见 [架构现状](docs/ARCHITECTURE_DIRECTION.md)、[开发说明](docs/DEVELOPMENT.md)、[前端模块](docs/WEB_V2.md#前端模块2026-10-18199)。
 
-### 角色识别
+下面几节默认收起，点标题展开。
+
+<details>
+<summary><strong>角色识别</strong>：本机跑两个模型，再从你确认的图里学</summary>
 
 每张新图在本机跑两个模型。[WD SwinV2 Tagger v3](https://huggingface.co/SmilingWolf/wd-swinv2-tagger-v3) 给出通用标签、年龄分级和约 2,700 个常见角色的标签；[CCIP](https://huggingface.co/deepghs/ccip) 给出 768 维的角色特征，同一个角色不管谁画、穿什么，特征都比较接近。CCIP 特征再和角色索引里的参考特征（锚点）比最近邻，距离在阈值内就算一条证据。两种来源分开记录，按用人工结论校准过的强弱排序：两种都认的最强，其次是单个强证据，最后是弱证据。单人图算给谁由这个排序决定。安装包不带共享角色索引。资料库里的「关注新角色」和「检查新角色」从 Danbooru 按 tag 下载公开参考图，在本机算出锚点，不上传图库里的任何东西。
 
@@ -118,7 +186,10 @@ Illustash 是一个 Rust 写的模块化单体，数据都在 SQLite 里，运�
 
 见 [角色与皮肤](docs/TERMS_CHARACTERS.md)、[识别结果包](docs/RESULT_PACKAGES.md)、[识别的执行后端](docs/BACKEND_TASKS.md#识别的执行后端)、[新角色流程](docs/WEB_V2.md#新角色流程相似分组与边标边学2026-09-24)。
 
-### 人工结论优先
+</details>
+
+<details>
+<summary><strong>人工结论优先</strong>：机器证据和人工结论分开存，所有操作共用一套撤销</summary>
 
 角色、作品、画师、分级、自建标签在核心里都是**词条**，往图上加词条叫「贴」，机器和人贴的走同一套规则。机器证据只增不删，一个来源不覆盖另一个来源。裁决只来自人，「不是」永久有效。图上显示人工确认、机器认定、也可能是还是已否定，每次都由证据、裁决和词条类型的策略重新算出来。
 
@@ -128,7 +199,10 @@ Illustash 是一个 Rust 写的模块化单体，数据都在 SQLite 里，运�
 
 见 [词条](docs/TERMS.md#2-核心抽象词条)、[证据包](docs/EVIDENCE_PACKAGES.md)、[归属规则与 API](docs/WEB_V2.md#归属规则)。
 
-### 找回出处
+</details>
+
+<details>
+<summary><strong>找回出处</strong>：几条线索给出候选，再统一在本地验证</summary>
 
 溯源采用「种子加验证」的结构：几条线索各自给出候选画师或直接命中的原帖，再统一交给本地验证。
 
@@ -142,7 +216,10 @@ Illustash 是一个 Rust 写的模块化单体，数据都在 SQLite 里，运�
 
 见 [溯源](docs/PROVENANCE.md)，第 8 节是现行流程。
 
-### 重复与差分
+</details>
+
+<details>
+<summary><strong>重复与差分</strong>：签名、候选图对，再逐对比较像素</summary>
 
 字节完全相同的副本按文件哈希归组。更进一步的相似扫描在本机分三步：
 
@@ -154,7 +231,10 @@ Illustash 是一个 Rust 写的模块化单体，数据都在 SQLite 里，运�
 
 见 [图片关系判断](docs/WEB_V2.md#图片关系判断2026-09-24) 与 [全库找相似](docs/WEB_V2.md#全库找相似2026-09-24)。
 
-### 图库包
+</details>
+
+<details>
+<summary><strong>图库包</strong>：<code>.pilib</code> 文件夹里有什么、哪些能删</summary>
 
 一个图库就是一个 `.pilib` 文件夹：
 
@@ -171,7 +251,10 @@ Illustash 是一个 Rust 写的模块化单体，数据都在 SQLite 里，运�
 
 见 [图库](docs/LIBRARIES.md#1-图库包里有什么) 与 [升级边界](docs/ARCHITECTURE_DIRECTION.md#已有核心库的显式升级边界)。
 
-### 隐私怎么落实
+</details>
+
+<details>
+<summary><strong>隐私怎么落实</strong>：计算不联网、授权按功能分开、本机服务也设防</summary>
 
 - **计算不联网**：识别、索引、学习、相似扫描都在宿主准备的快照或隔离目录里算。溯源要用的公开小图由宿主按站点白名单、授权、限速和流量上限代取，再交给 worker。
 - **授权按功能分开**：名称查询对一个图库授权一次，可以随时撤销；「找回画师」和「检查新角色」每次运行前确认；按需查找时，点按钮就是授权这一次。遇到 403、429、人机验证或维护页，这个站点立即停止，不尝试绕过。「设置 › 网络与隐私」把全部联网功能、对应的服务和发送的内容列在一张表里。
@@ -181,45 +264,15 @@ Illustash 是一个 Rust 写的模块化单体，数据都在 SQLite 里，运�
 
 见 [产品底线](docs/BACKLOG.md#产品底线与已定的约束新会话先读)、[第三方组件](docs/THIRD_PARTY.md#打包时加入的运行库)、[启动信号与会话 cookie](docs/ARCHITECTURE_DIRECTION.md#启动信号与会话-cookie)。
 
-## 现状与运行
-
-Illustash 是一个主要满足作者自己需求的个人项目，目前仍处于早期开发阶段。
-
-macOS（Apple 芯片，macOS 14 及以上）是主力平台，Windows x64 也可以使用。Linux 已冻结（2026-10-06 决定）：不提供安装包和本地计算（识别、索引、学习、溯源），不在 Linux 上做检查，Rust 代码能否在 Linux 编译也不作保证；以后有需求再基于 macOS/Windows 的原生实现补做。
-
-界面支持简体中文和英文，默认跟随系统，可在「设置 › 通用 › 语言」中切换。
-
-Illustash 0.1.0 已正式发布，安装包在 [GitHub Releases](https://github.com/shio-vinyl/illustash/releases) 下载：macOS 版是 Apple 芯片的 zip，Windows 版是 x64 安装程序。安装包没有经过 Apple 公证或 Windows 代码签名，第一次打开时系统会拦截，按 [装不上、打不开怎么办](docs/INSTALL.md) 放行一次即可。以后有新版本时，可以在应用里检查更新并「下载并重启」。
-
-也可以从源码构建。核心使用 Rust stable；运行时无需 Python，部分构建与检查工具需要 Python 3.12 和 Node 22。
-
-本地识别所需的模型文件不包含在代码仓库和安装包中（应用首次使用时按提示下载，或从文件离线导入；源码运行需另外准备）。具体依赖、构建方法与计算组件配置见 [安装与平台](docs/BACKEND_TASKS.md#独立安装与可选计算包)，常见拦截、模型下载与运行排障见 [装不上、打不开怎么办](docs/INSTALL.md)。
-
-### 从源码运行
-
-```sh
-# 构建核心
-cargo build --release --manifest-path native/terms/Cargo.toml
-
-# 首次建库：只登记来源，不扫描图片
-./native/terms/target/release/illustash-terms library-create \
-    --dest ~/Pictures/Illustash/我的图库.pilib --folder /图片目录
-
-# 打开（默认 http://127.0.0.1:8765）
-./start-web.command --library ~/Pictures/Illustash/我的图库.pilib
-```
-
-首次创建图库只会登记图片来源，不会立刻扫描全部图片。桌面 App（Tauri）、安装包构建、启动参数和图库包结构见 [开发说明](docs/DEVELOPMENT.md)。
+</details>
 
 ## 反馈与贡献
 
 功能取舍优先考虑作者自己的使用需求。
 
-欢迎通过 Issue 报告 bug，请使用 [「报告问题」模板](.github/ISSUE_TEMPLATE/bug_report.md)，附上操作系统、「设置 › 关于 › 复制诊断信息」的内容与复现步骤（请勿贴出真实图片、图片文件名、本机路径或账号信息）；装不上或打不开请先查看 [装不上、打不开怎么办](docs/INSTALL.md)。
-
-功能建议可使用 [「功能建议」模板](.github/ISSUE_TEMPLATE/feature_request.md) 提出，但不保证全部采纳或实现。
-
-目前暂不接受代码贡献（Pull Request）。
+- **报告 bug**：欢迎通过 Issue 报告 bug，请使用 [「报告问题」模板](.github/ISSUE_TEMPLATE/bug_report.md)，附上操作系统、「设置 › 关于 › 复制诊断信息」的内容与复现步骤（请勿贴出真实图片、图片文件名、本机路径或账号信息）；装不上或打不开请先查看 [装不上、打不开怎么办](docs/INSTALL.md)。
+- **功能建议**：可使用 [「功能建议」模板](.github/ISSUE_TEMPLATE/feature_request.md) 提出，但不保证全部采纳或实现。
+- **代码贡献**：目前暂不接受代码贡献（Pull Request）。
 
 ## 许可
 
@@ -232,3 +285,7 @@ Illustash 的名称与图标不随代码一同授权。基于本项目开发的�
 ## 致谢
 
 角色与画面识别使用 [SmilingWolf 的 WD Tagger](https://huggingface.co/SmilingWolf/wd-swinv2-tagger-v3)、[DeepGHS 的 CCIP](https://huggingface.co/deepghs/ccip) 与 [Character Index](https://huggingface.co/datasets/deepghs/character_index)；标签和角色资料来自 [Danbooru](https://danbooru.donmai.us)，角色中文名称来自 [Bangumi](https://bgm.tv)。
+
+---
+
+<sub>关键词：二次元插画 · 插画收藏 · 本地图库 · 图片管理 · 角色识别 · 以图搜源 · 找画师 · 重复图片 · Pixiv · X（Twitter） · Danbooru · IQDB · 离线 · 隐私 · Tauri · Rust · SQLite · ONNX Runtime · macOS · Windows · anime illustration manager · image library · character recognition</sub>
