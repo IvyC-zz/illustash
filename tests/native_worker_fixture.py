@@ -10,7 +10,8 @@ def command(script):
         script.chmod(0o755)
         return str(script)
     wrapper = script.with_name(script.name + '.cmd')
-    wrapper.write_text('@echo off\n"' + sys.executable + '" "' + str(script) + '" %* 2>"' + str(script) + '.stderr"\n', encoding='utf-8')
+    # stderr 追加写进 `<脚本>.stderr`，多次启动的记录都留着，失败时可以按次数对照（#501）。
+    wrapper.write_text('@echo off\n"' + sys.executable + '" "' + str(script) + '" %* 2>>"' + str(script) + '.stderr"\n', encoding='utf-8')
     return str(wrapper)
 
 

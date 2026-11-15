@@ -446,7 +446,9 @@ class CandidateExampleWiringTest(unittest.TestCase):
     def test_full_runners_build_and_export_each_current_candidate_before_discovery(self):
         shell = (ROOT / 'tools/check_all.sh').read_text(encoding='utf-8')
         ci = (ROOT / '.github/workflows/ci.yml').read_text(encoding='utf-8')
-        windows = ci.split('\n  windows:\n', 1)[1].split('\n  ok:\n', 1)[0]
+        # #501：Windows 的全部 example 接线在完整回归里；PR 的快检只用核心和测试读宿主。
+        full = (ROOT / '.github/workflows/windows-full.yml').read_text(encoding='utf-8')
+        windows = full.split('      # ---- 完整回归 ----\n', 1)[1].split('      # ---- 定向复跑 ----\n', 1)[0]
         probes = {'READ_HTTP': 'read-http', 'RECOGNITION_COMPUTE': 'recognition-compute',
                   'INDEX_COMPUTE': 'index-compute', 'RESEARCH_COMPUTE': 'research-compute',
                   'RELATION_PROBE': 'relation-probe', 'PROVENANCE_COMPUTE': 'provenance-compute'}
@@ -460,13 +462,24 @@ class CandidateExampleWiringTest(unittest.TestCase):
                 self.assertLess(build_at, export_at)
                 self.assertLess(export_at, discover_at)
                 self.assertIn('native/terms/target/release/examples/' + example + suffix, source)
+        quick = ci.split('\n  windows:\n', 1)[1].split('\n  ok:\n', 1)[0]
+        for key, path in (('TERMS', 'illustash-terms.exe'), ('READ_HTTP', 'examples/read-http.exe')):
+            self.assertLess(quick.index('cargo build --release'), quick.index('ILLUSTASH_' + key + '_BIN'))
+            self.assertLess(quick.index('ILLUSTASH_' + key + '_BIN'), quick.index('-m tests.windows_fixed_suite'))
+            self.assertIn('native/terms/target/release/' + path, quick)
+        self.assertIn('--example read-http', quick)
         # #4：只对目标为 main 的同库 PR 自动运行，不用带写权限和 secret 的 pull_request_target。
         self.assertIn('\n  pull_request:\n    branches: [main]\n', ci)
-        self.assertNotIn('pull_request_target', ci)
         self.assertIn('github.event.pull_request.head.repo.full_name == github.repository', ci)
+        for workflow in sorted((ROOT / '.github/workflows').glob('*.yml')):
+            with self.subTest(workflow=workflow.name):
+                text = workflow.read_text(encoding='utf-8')
+                self.assertNotIn('pull_request_target', text)
+                self.assertIn('\npermissions:\n  contents: read\n', text)
+                self.assertNotIn('secrets.', text)
+                self.assertNotRegex(text, r'(?m)^ +permissions:')
         self.assertIn('!github.event.repository.private', ci)
-        self.assertIn('\npermissions:\n  contents: read\n', ci)
-        self.assertNotIn('secrets.', ci)
+        self.assertIn('!github.event.repository.private', full)
 
 
     def test_full_runners_accept_research_platform_skips_but_not_missing_candidates_or_models(self):

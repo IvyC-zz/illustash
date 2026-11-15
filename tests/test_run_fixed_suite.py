@@ -145,6 +145,28 @@ class FixedSuiteRunnerTest(unittest.TestCase):
         self.assertNotEqual(run.returncode, 0)
         self.assertIn('--jobs 1', run.stderr)
 
+    def test_select_runs_only_matching_classes_and_checks_them_for_omissions(self):
+        # #501：定向复跑只跑选中的类和方法；前缀按「.」边界匹配，Alpha 不会选中 AlphaBeta。
+        self.write('test_gamma.py', 'import unittest\nclass AlphaBeta(unittest.TestCase):\n    def test_four(self): pass\n')
+        run = self.run_suite('--jobs', '2', '--select', 'test_alpha.Alpha', '--select=test_alpha.Beta.test_three')
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertIn('定向选择：test_alpha.Alpha, test_alpha.Beta.test_three；选中 4 项', run.stderr)
+        self.assertIn('Ran 4 tests in ', run.stderr)
+        self.assertNotIn('test_four', run.stderr)
+
+    def test_select_that_matches_nothing_fails_and_import_errors_still_count(self):
+        run = self.run_suite('--jobs', '2', '--select', 'test_alpha.Alpha', '--select', 'test_alpha.Missing')
+        self.assertNotEqual(run.returncode, 0)
+        self.assertIn('定向选择没有匹配任何测试：test_alpha.Missing', run.stderr)
+        # 导入失败的测试文件不因不在选择范围内而被略过。
+        self.write('test_broken.py', 'raise ImportError("synthetic broken module")\n')
+        run = self.run_suite('--jobs', '2', '--select', 'test_alpha.Alpha')
+        self.assertNotEqual(run.returncode, 0)
+        self.assertIn('synthetic broken module', run.stderr)
+        for args in (('--jobs', '1', '--select', 'test_alpha.Alpha'), ('--jobs', '2', '--select=')):
+            with self.subTest(args=args):
+                self.assertNotEqual(self.run_suite(*args).returncode, 0)
+
 
 if __name__ == '__main__':
     unittest.main()

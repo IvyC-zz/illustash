@@ -181,11 +181,11 @@ PR 应明确区分“当前 head 上完整执行退出 0”和“当前候选仅
 
 2026-11-12 用户定（#4），仓库公开后启用。规则见 [AGENTS.md](../AGENTS.md#约定)「GitHub Actions」一条，这里写做法。
 
-**触发**：`ci.yml` 在目标为 main 的 PR 打开、推送新提交、重新打开、转 Ready 时运行；草稿 PR 和来自 fork 的 PR 不跑。push 到 main 时也跑一次，作用是写编译缓存：GitHub 的缓存按分支隔离，PR 写的缓存只有同一个 PR 读得到，main 上写的所有 PR 都能读。也可以在 Actions 页面对任意分支手动触发。仓库私有时（`github.event.repository.private`）自动触发的运行一律跳过，只有手动触发的会跑，所以这个 PR 在公开前合入也不会耗分钟数；私有期间也不手动触发 macOS 运行（私有库按 10 倍计分钟）。同一 PR 有新提交时取消旧运行；集成会话连续合入几个 PR 时，main 上只有最后一次跑完。
+**触发**：`ci.yml` 在目标为 main 的 PR 打开、推送新提交、重新打开、转 Ready 时运行；草稿 PR 和来自 fork 的 PR 不跑。push 到 main 时也跑一次，作用是写编译缓存：GitHub 的缓存按分支隔离，PR 写的缓存只有同一个 PR 读得到，main 上写的所有 PR 都能读。也可以在 Actions 页面对任意分支手动触发。仓库私有时（`github.event.repository.private`）自动触发的运行一律跳过，只有手动触发的会跑，所以这个 PR 在公开前合入也不会耗分钟数；私有期间也不手动触发 macOS 运行（私有库按 10 倍计分钟）。同一 PR 有新提交时取消旧运行。push 到 main 的运行各自成组、互不取消；重型 job 另有只在 push 时共用的并发组，后一次代码 push 取消前一次还没跑完的同名 job，集成会话连续合入几个代码 PR 时，main 上仍只有最后一次跑完。纯文档 push 跳过这些 job，不进组，不会取消前一轮还在写缓存的代码运行（#501）。
 
-**job**：「改动范围」先判断改了什么。只改 `docs/` 和根目录的 Markdown 时跳过构建与测试；`docs/THIRD_PARTY.md` 和 `docs/BACKEND_TASKS.md` 随安装包分发，仍须检查。与 `tools/check_all.sh` 对齐的五个必需 job 包括 Rust 核心（core、platform、relation-fft、terms、iqdb 的 fmt/clippy/test）、Python 全量（release 构建后跑 `tests.run_fixed_suite`）、前端 JS（Ubuntu）、桌面壳 clippy/test、原生固定契约空 PATH 重放。除 JS 外，这五项都跑在 Apple 芯片的 `macos-latest` 上。公开库另有 Windows x64 试运行。分支保护要求「全部检查」汇总结果。代码改动要求五个必需 job 全部成功，Windows 结果列在日志中；文档改动要求所有构建与测试跳过。分流失败、缺失输出和 fork PR 没跑检查均判失败。
+**job**：「改动范围」先判断改了什么：PR 比较它与 main 的合并提交和当前 main，push 比较推送前后的两棵树（多提交的 push 合起来算），都按 `--no-renames` 把改名拆成删除和新增，移进 `docs/` 的代码仍算代码。只改 `docs/` 和根目录的 Markdown 时跳过构建与测试；`docs/THIRD_PARTY.md` 和 `docs/BACKEND_TASKS.md` 随安装包分发，仍须检查。新建分支、取不到推送前的提交（如强推后）和手动触发一律按代码改动处理。与 `tools/check_all.sh` 对齐的五个必需 job 包括 Rust 核心（core、platform、relation-fft、terms、iqdb 的 fmt/clippy/test）、Python 全量（release 构建后跑 `tests.run_fixed_suite`）、前端 JS（Ubuntu）、桌面壳 clippy/test、原生固定契约空 PATH 重放。除 JS 外，这五项都跑在 Apple 芯片的 `macos-latest` 上。公开库另有 Windows x64 快检（见下节）。分支保护要求「全部检查」汇总结果。代码改动要求五个必需 job 全部成功，文档改动要求所有构建与测试跳过；分流失败、缺失输出和 fork PR 没跑检查均判失败。Windows 不在「全部检查」的 `needs` 里，汇总不等它，Windows 快检作为单独的检查显示实际成败。
 
-**改检查项时**：同步检查 `ci.yml` 和 `tools/check_all.sh`。`tests/test_packaging_resources.py` 核对三处候选二进制接线、macOS 两处跳过白名单的一致性和 Windows 白名单的匹配规则，并检查触发条件和权限。`native-upgrade.yml` 是升级测试的单独手动入口，要求整类零跳过；两平台的 Python 全套已经包含这一类。
+**改检查项时**：同步检查 `ci.yml`、`windows-full.yml` 和 `tools/check_all.sh`。`tests/test_packaging_resources.py` 核对候选二进制接线（本机全量、macOS Python job、Windows 完整回归和快检）、macOS 两处跳过白名单的一致性和 Windows 白名单的匹配规则，并检查触发条件和各 workflow 的权限；`tests/test_ci_workflows.py` 直接运行分流和汇总脚本，并检查并发组和快检选中的测试类。`native-upgrade.yml` 是升级测试的单独手动入口，要求整类零跳过；macOS 的 Python 全套和 Windows 完整回归已经包含这一类。
 
 **冻结输入**：索引参考的 SQLite 输入哈希若因 SQL 导出的小数位格式变化而不匹配，只有整库 schema、类型、值（浮点逐位）、rowid 和版本标记与冻结数据库完全一致时，才使用冻结 SQL 的原始哈希重查。数组、资产 ID、参数和结果仍精确匹配；不刷新录制，也不把真实数据差异当作格式差异。
 
