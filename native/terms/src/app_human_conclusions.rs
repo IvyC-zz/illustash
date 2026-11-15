@@ -26,6 +26,13 @@ pub(crate) use backups::Backups;
 pub(crate) use exports::Exports;
 use hashes::{bindings, observe, verify, Mode};
 
+// 快照、临时文件和报告沿用任务编号的随机方式，不消耗词条专用的测试键序列。
+fn random_id() -> Result<String> {
+    let mut bytes = [0u8; 16];
+    getrandom::fill(&mut bytes).map_err(|e| Error::invalid(format!("无法生成人工结论编号：{e}")))?;
+    Ok(bytes.iter().map(|b| format!("{b:02x}")).collect())
+}
+
 /// 在同一个数据库读快照内导出人工状态并读取关联图片的完整 SHA-256。
 /// 缺失或不可读取的图片保留记录且报告 missing，不使用路径、文件名或资产 ID 猜测内容。
 pub fn capture(db: &Path, library_id: &str, check: &dyn Fn() -> Result<()>) -> Result<Snapshot> {
@@ -52,7 +59,7 @@ fn capture_guarded(
     let captured_revision = revision::read(&tx)?;
     let policy = if crate::character_projection::policy(&tx)? { Policy::Hybrid } else { Policy::Default };
     let header = Header::new(
-        crate::store::new_key()?,
+        random_id()?,
         library_id.into(),
         chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
         policy,
@@ -108,7 +115,7 @@ fn capture_guarded(
 /// 读取已存在的便携文件，在一次写事务内补齐可匹配的人工结论。
 /// check 由会话传入，负责取消和 generation 校验；技术失败在提交前全部回滚。
 pub fn import_file(db: &Path, library_id: &str, path: &Path, check: &dyn Fn() -> Result<()>) -> Result<Report> {
-    Ok(import_run(db, library_id, path, check, &crate::app_imports::Silent, &crate::store::new_key()?, None)?.0)
+    Ok(import_run(db, library_id, path, check, &crate::app_imports::Silent, &random_id()?, None)?.0)
 }
 
 pub(crate) fn import_observed(

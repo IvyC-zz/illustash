@@ -95,7 +95,7 @@ impl Prepared {
     pub(super) fn new(snapshot: &Snapshot, destination: &Path, check: &dyn Fn() -> Result<()>) -> Result<Self> {
         let parent = destination.parent().ok_or_else(|| Error::invalid("导出目录不存在"))?;
         fs::create_dir_all(parent)?;
-        let temporary = parent.join(format!(".human-{}.tmp", crate::store::new_key()?));
+        let temporary = parent.join(format!(".human-{}.tmp", random_id()?));
         let mut options = fs::OpenOptions::new();
         options.write(true).create_new(true);
         crate::platform_filesystem::private_file_options(&mut options);
