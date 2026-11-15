@@ -1020,15 +1020,36 @@ class NativeLifecycleTest(unittest.TestCase):
         invalid.write_bytes(b'not a zip: synthetic-secret')
         started = self.request('/api/libraries/import', {'path': str(invalid)})
         self.assertEqual(started['status'], 200, started['body'])
-        # 先查持久记录而不是任务状态，保证不是 UI 轮询才触发记录。
-        reports = []
+        # HTTP 诊断查询会拿独占锁，可能使后台写入返回 stored:false。
+        # 先只读持久文件，不查任务状态，保证记录由后台主动生成。
+        persisted = []
         def recorded():
-            report = json.loads(self.request('/api/diagnostics')['body'])
-            reports[:] = [r for r in report['records'] if r['operation'] == 'archive']
-            return bool(reports)
-        wait_until(recorded, timeout=10)
+            for path in (self.support / 'diagnostics').glob('D-*.json'):
+                try:
+                    record = json.loads(path.read_text(encoding='utf-8'))
+                except json.JSONDecodeError:
+                    continue  # 文件已创建，内容可能尚未写完；不写入、不删除、不加锁。
+                if record['operation'] == 'archive':
+                    persisted[:] = [record]
+                    return True
+            return False
+        deadline = time.monotonic() + 10
+        while time.monotonic() < deadline:
+            if recorded():
+                break
+            time.sleep(.03)
+        else:
+            self.fail('后台导入未在 10 秒内写出完整归档诊断')
+        # 状态锁覆盖诊断写入和终态更新，读取返回后再查 HTTP 报告不会抢写入锁。
         job = json.loads(self.request('/api/imports')['body'])
         self.assertEqual(job['status'], 'error', job)
+        self.assertTrue(job['diagnostic']['stored'], job)
+        response = self.request('/api/diagnostics')
+        self.assertEqual(response['status'], 200, response['body'])
+        report = json.loads(response['body'])
+        self.assertTrue(report['available'], report)
+        reports = [r for r in report['records'] if r['operation'] == 'archive']
+        self.assertEqual([r['id'] for r in reports], [persisted[0]['id']])
         self.assertEqual(job['diagnostic']['id'], reports[0]['id'])
         self.assertEqual(reports[0]['publication'], 'not_committed')
         for secret in (invalid.name, str(self.root), 'synthetic-secret'):
