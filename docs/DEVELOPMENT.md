@@ -213,7 +213,7 @@ illustash/
 - 开发期和合入其他分支的 PR 按改动跑定向检查；目标为 main 的非纯 Markdown PR 先完成其他平台检查，再在已提交的干净候选上跑一次本机完整入口 `bash tools/check_all.sh`（对齐 `.github/workflows/ci.yml`）。固定验收区用 `python3.12 tools/local_acceptance.py run <候选SHA>` 串行执行并写签名记录，`result <候选SHA>` 取结果。
 - 允许的跳过只有 CI 同样允许的平台限制和真实图库数据缺失；不访问真实图库补齐数据。
 - 只改 Markdown 的 PR 不跑全量，只检查相对链接。
-- GitHub Actions 对目标为 main 的同库非草稿 PR 自动运行 `ci.yml`，作为额外保障，不代替本机全量；规则见 AGENTS.md 2026-11-12 一条，做法见 [本地验收](LOCAL_CHECKS.md#github-actionspr-自动检查)。
+- GitHub Actions 对目标为 main 的同库非草稿 PR 自动运行 `ci.yml`，作为额外保障，不代替本机全量；规则见 [AGENTS.md](../AGENTS.md#约定)「GitHub Actions」一条，做法见 [本地验收](LOCAL_CHECKS.md#github-actionspr-自动检查)。
 - 常用入口：核心测试 `cargo test --locked --manifest-path native/terms/Cargo.toml`，Python 合成套件 `python -m tests.run_offline -v -b`（用装了依赖的 3.12 解释器）。
 - `native/terms` 的集成测试合成三个测试二进制（#310）：`tests/it/`（其余各文件是 `it/main.rs` 的子模块，只跑一个用 `--test it entry::`）、`tests/contracts.rs`（检查脚本和计时按 `--test contracts` 单独构建）、`tests/baseline.rs`（进程级的 SQLite 设置要最先生效）。新的集成测试放进 `tests/it/` 并在 `main.rs` 登记；每个测试第一行取 `crate::shared()`，要改进程环境变量或当前目录的取 `crate::exclusive()`，`it` 里有测试检查这一点。在 `tests/` 顶层另建文件也能跑，但会多编、多链接一次整个库。
 - 开发时也可以用 `cargo nextest run` 跑这些测试（需自行安装）：它每个测试起一个进程、跨二进制并行，`it` 的环境锁和 `baseline` 的进程级设置都照常成立；它不减少编译，只缩短运行。`integrity`、`rescue` 在负载高时本来就不稳定（#395），并行更多时更容易碰到。全量和 CI 仍用 `cargo test`。
