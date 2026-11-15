@@ -16,7 +16,7 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE = 'native/terms/application.json'
 TAURI = 'desktop/tauri.conf.json'
-CRATES = ('native/terms', 'desktop', 'crates/core', 'crates/platform', 'crates/iqdb')
+CRATES = ('native/terms', 'desktop', 'crates/core', 'crates/platform', 'crates/relation-fft', 'crates/iqdb')
 # 不带构建元数据的 SemVer 2.0.0：允许预发布后缀（0.2.0-beta.1），不允许 `+build`。
 SEMVER = re.compile(r'(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)'
                     r'(?:-((?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*))*))?')

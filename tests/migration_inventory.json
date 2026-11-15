@@ -131,6 +131,10 @@
 
  "crates/platform/src/sqlite.rs":"c77ae1e6babb5af9b0c922280a307a4704d831af3bc661f8f89e28e9e229dca2",
 
+ "crates/relation-fft/build.rs":"c5423bb2b05b5a93e37f4291ebf2e518065b8199b384ef762c6f819cc87cd2d1",
+
+ "crates/relation-fft/src/lib.rs":"537f190316608d41b555c0938846f6aea942f452b7341398e3455ff2d4361c13",
+
  "desktop/build.rs":"ba1c3b9097208d998ecbebb7b5ab044ceef97999132afb8f1a55a1a61b077034",
 
  "desktop/src/bridge.rs":"3b641d0fc644bba3e845718fdc90cedcb4442e95ccd11901fb3311e16814785b",
@@ -153,7 +157,7 @@
 
  "desktop/tauri.conf.json":"10693717d3604659328e819b08939c49e292bb1ab9ab4c4589620e565bf9f7b6",
 
- "native/terms/build.rs":"9cef40a98bd6a541d9a910c68d84add3571fb33cdde91fb2dacae2c9d52fd534",
+ "native/terms/build.rs":"87f5e7e03eef2b25ee5ffcc8e6b306e93e01210f5af113c88adc2f42408fa6b9",
 
  "native/terms/examples/recognition_compute/bench.rs":"9055ce8465cabfb5717f4411914eff944a63cae1f021c1377e069a7a33049931",
 
@@ -359,7 +363,7 @@
 
  "native/terms/src/research_compute/numeric.rs":"1c12b3f6180efa3b45bf3270acaeaa3699e3af9b7a9ad03891dfa908d61c73f5",
 
- "native/terms/src/research_compute/relation_fft.rs":"1f823782ece25dc9087bdb66d25dc55b2fb4ae717803626af0c33064f443aec3",
+ "native/terms/src/research_compute/relation_fft.rs":"3fd7b950265c64ac16ed0ac5674c16b50240786e5a64c776c0b4a7a4225140c5",
 
  "native/terms/src/research_compute/relation_image.rs":"546022c70faf20496792dfbd1a4eef750962b9b4948432ee6b55b6ceeffed7b1",
 
@@ -454,7 +458,8 @@
  "native/terms/examples/index-compute.rs":{"policy":"retained","current_runtime":"explicit-synthetic-index-comparison","storage_domain":"test-research"},
  "native/terms/examples/relation-probe.rs":{"policy":"retained","current_runtime":"explicit-synthetic-relation-comparison","storage_domain":"test-research"},
  "native/terms/src/table_delta.rs":{"policy":"coordination","current_runtime":"rust-native-cache-publication","storage_domain":"research+application"},
- "native/terms/src/app_rescue.rs":{"policy":"lifecycle","current_runtime":"rust","storage_domain":"source"}
+ "native/terms/src/app_rescue.rs":{"policy":"lifecycle","current_runtime":"rust","storage_domain":"source"},
+ "crates/relation-fft/build.rs":{"policy":"application","current_runtime":"rust-build","storage_domain":"no-db"}
 },
 "limitations":[
  "审计生产 HTTP/DB/事务/动态执行/启动/CLI；保留研究/测试/生成代码。",
@@ -573,7 +578,8 @@
  "crates/core/src/character_review.rs":{"database-write":{"UPDATE:term_tree":1}},
  "crates/core/src/character_entities.rs":{"database-write":{"INSERT INTO:terms":1,"dynamic-or-wrapper":2,"INSERT INTO:term_tree":1}},
  "crates/core/src/new_library.rs":{"database-write":{"dynamic-or-wrapper":5,"INSERT INTO:term_evidence_sets":2,"DROP TABLE IF EXISTS:artist_verdicts":1,"DROP TABLE:asset_tags|DROP TABLE:general_hits|DROP TABLE:asset_rating":1,"INSERT OR REPLACE INTO:meta":1,"INSERT OR IGNORE INTO:meta":1}},
- "native/terms/src/app_http.rs":{"entrypoint":{"process-start":1}}
+ "native/terms/src/app_http.rs":{"entrypoint":{"process-start":1}},
+ "crates/relation-fft/build.rs":{"entrypoint":{"native-main":1}}
 },
 "policies":{
  "application":{"final_owner":"rust","responsibility":"HTTP 参数/目标、人工命令、正式事务/投影；Python 包装待迁移","acceptance":"合成状态码/原始字节、返回/DB/历史/撤销/事件对照；竞争与注入失败原子回滚","deletion_condition":"Rust 调用链及无 Python 验收后删生产 Python；保留旧对照","stages":["M2","M3"]},

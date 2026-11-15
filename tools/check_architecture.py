@@ -4,11 +4,11 @@ import argparse
 import tomllib
 
 ROOT = Path(__file__).resolve().parents[1]
-MANIFESTS = {'core': 'crates/core/Cargo.toml', 'platform': 'crates/platform/Cargo.toml',
+MANIFESTS = {'core': 'crates/core/Cargo.toml', 'platform': 'crates/platform/Cargo.toml', 'fft': 'crates/relation-fft/Cargo.toml',
              'app': 'native/terms/Cargo.toml', 'desktop': 'desktop/Cargo.toml'}
-OWNERS = {'illustash-core': 'core', 'illustash-platform': 'platform',
+OWNERS = {'illustash-core': 'core', 'illustash-platform': 'platform', 'illustash-relation-fft': 'fft',
           'illustash-terms': 'app', 'illustash-desktop': 'desktop'}
-ALLOWED = {'core': set(), 'platform': {'core'}, 'app': {'core', 'platform'},
+ALLOWED = {'core': set(), 'platform': {'core'}, 'fft': set(), 'app': {'core', 'platform', 'fft'},
            'desktop': {'app', 'platform'}}
 
 
@@ -31,7 +31,7 @@ def check(root=ROOT):
             target = OWNERS.get(package)
             if target and target not in ALLOWED[owner]:
                 errors.append(f'{relative}: forbidden {owner} -> {target} ({alias})')
-            if owner in {'core', 'platform'} and (package == 'tiny_http' or package.startswith('tauri')):
+            if owner in {'core', 'platform', 'fft'} and (package == 'tiny_http' or package.startswith('tauri')):
                 errors.append(f'{relative}: transport/UI dependency {package}')
             if isinstance(spec, dict) and 'path' in spec:
                 dest = (manifest.parent / spec['path']).resolve()

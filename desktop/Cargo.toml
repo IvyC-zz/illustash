@@ -52,3 +52,6 @@ debug = "line-tables-only"
 
 [profile.dev.package.illustash-terms]
 debug = "line-tables-only"
+
+[profile.dev.package.illustash-relation-fft]
+debug = "line-tables-only"

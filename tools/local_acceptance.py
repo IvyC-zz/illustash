@@ -38,7 +38,7 @@ TAURI_METADATA = frozenset({
     'desktop/gen/schemas/desktop-schema.json',
     'desktop/gen/schemas/macOS-schema.json',
 })
-OUTPUTS = ('.venv/', 'native/terms/target/', 'crates/iqdb/target/', 'crates/core/target/', 'crates/platform/target/', 'desktop/target/')
+OUTPUTS = ('.venv/', 'native/terms/target/', 'crates/iqdb/target/', 'crates/core/target/', 'crates/platform/target/', 'crates/relation-fft/target/', 'desktop/target/')
 
 
 def digest(data):

@@ -1,0 +1,17 @@
+[package]
+name = "illustash-relation-fft"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.82"
+description = "关系 NCC 的 PocketFFT C++ 编译边界"
+license = "GPL-3.0-or-later"
+publish = false
+links = "illustash_relation_fft"
+
+[build-dependencies]
+cc = "=1.5.1"
+
+# 与其余自有 crate 相同：unsafe 前提必须说明，生产代码不用 unwrap。
+[lints.clippy]
+undocumented_unsafe_blocks = "warn"
+unwrap_used = "warn"

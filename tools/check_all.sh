@@ -57,6 +57,9 @@ run cargo fmt --manifest-path crates/platform/Cargo.toml --check
 run cargo clippy --locked --manifest-path crates/platform/Cargo.toml --all-targets -- -D warnings
 run cargo test --locked --manifest-path crates/platform/Cargo.toml
 run cargo build --locked --manifest-path crates/platform/Cargo.toml
+run cargo fmt --manifest-path crates/relation-fft/Cargo.toml --check
+run cargo clippy --locked --manifest-path crates/relation-fft/Cargo.toml --all-targets -- -D warnings
+run cargo test --locked --manifest-path crates/relation-fft/Cargo.toml
 run cargo fmt --manifest-path native/terms/Cargo.toml --check
 run cargo clippy --locked --manifest-path native/terms/Cargo.toml --all-targets --all-features -- -D warnings
 # 前置较快检查和桌面构建，避免 Python 全量之后才发现构建失败。

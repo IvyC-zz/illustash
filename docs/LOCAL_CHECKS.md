@@ -30,7 +30,7 @@
 
 ## dev 构建的调试信息（#362）
 
-2026-11-14 起，5 个 Cargo 项目（`crates/core`、`crates/platform`、`crates/iqdb`、`native/terms`、`desktop`）的 `Cargo.toml` 各自写了同一套 dev profile：自己的 crate 用 `debug = "line-tables-only"`（只带行号表），第三方依赖用 `debug = false`。`cargo test` 用的 test profile 继承 dev。release 的设置没动，安装包内容不变。
+2026-11-14 起，5 个 Cargo 项目（`crates/core`、`crates/platform`、`crates/relation-fft`、`crates/iqdb`、`native/terms`、`desktop`）的 `Cargo.toml` 各自写了同一套 dev profile：自己的 crate 用 `debug = "line-tables-only"`（只带行号表），第三方依赖用 `debug = false`。`cargo test` 用的 test profile 继承 dev。release 的设置没动，安装包内容不变。
 
 - **范围**：自己的 crate 指项目本身和不在本项目 workspace 里的 path 依赖（`illustash-core`、`illustash-platform`，desktop 里还有 `illustash-terms`）。后者会落进 `[profile.dev.package."*"]`，所以在每个项目里单列一条，否则它们也拿不到行号表。vendored 的 `tiny_http` 当第三方处理。
 - **回溯**：panic 和测试失败的回溯里，自己的代码仍有 `文件:行:列`，标准库的栈帧也有；第三方依赖的栈帧没有文件名和行号，只有函数名。要用调试器或需要变量信息时，临时把对应 `Cargo.toml` 里的 `debug` 几行删掉（用完 `git checkout -- <Cargo.toml>`）。Cargo 输出的 `Finished `test` profile [unoptimized + debuginfo]` 是固定的 profile 名称，不反映 `debug` 的取值。
@@ -163,7 +163,7 @@ PR 应明确区分“当前 head 上完整执行退出 0”和“当前候选仅
 
 **开发会话**：做完定向检查和平台相关验收（Windows 定向构建与测试、虚拟机走查、浏览器走查），在 PR 描述里写明结果和检查级别（界面 / 普通代码 / 数据层 / 只改文档），转为 Ready 并写「待集成」。不跑本机全量，不合并。
 
-改了 Rust 代码的 PR，转 Ready 之前先对改过的 Cargo 项目跑格式和 clippy（2026-10-19 用户定，#240；起因是第 11 批全量因为一个 PR 没过 `cargo fmt --check` 白跑一次）。参数与 `tools/check_all.sh` 相同：`crates/core`、`crates/platform`、`crates/iqdb`、`desktop`、`native/terms` 跑 `cargo fmt --manifest-path <项目>/Cargo.toml --check`；`crates/core`、`crates/platform`、`crates/iqdb`、`desktop` 跑 `cargo clippy --locked --manifest-path <项目>/Cargo.toml --all-targets -- -D warnings`，`native/terms` 在 `--all-targets` 后面再加 `--all-features`。clippy 经 `collab_run.py bg` 运行。之后合了最新 main 或又改了代码，要重跑。PR 描述写明在哪个 head 上跑的、结果如何。前后叠着的 PR（例如同一件事拆成几块）在描述里写明顺序。
+改了 Rust 代码的 PR，转 Ready 之前先对改过的 Cargo 项目跑格式和 clippy（2026-10-19 用户定，#240；起因是第 11 批全量因为一个 PR 没过 `cargo fmt --check` 白跑一次）。参数与 `tools/check_all.sh` 相同：`crates/core`、`crates/platform`、`crates/relation-fft`、`crates/iqdb`、`desktop`、`native/terms` 跑 `cargo fmt --manifest-path <项目>/Cargo.toml --check`；`crates/core`、`crates/platform`、`crates/relation-fft`、`crates/iqdb`、`desktop` 跑 `cargo clippy --locked --manifest-path <项目>/Cargo.toml --all-targets -- -D warnings`，`native/terms` 在 `--all-targets` 后面再加 `--all-features`。clippy 经 `collab_run.py bg` 运行。之后合了最新 main 或又改了代码，要重跑。PR 描述写明在哪个 head 上跑的、结果如何。前后叠着的 PR（例如同一件事拆成几块）在描述里写明顺序。
 
 **集成会话**，每一批：
 
@@ -197,7 +197,7 @@ PR 应明确区分“当前 head 上完整执行退出 0”和“当前候选仅
 
 ### Windows x64 CI
 
-公开库使用 `windows-latest` 和 MSVC x64。job 运行 core、platform、terms、desktop 的 clippy（参数与本机检查相同）、这四个项目及 iqdb 的 `cargo test`、terms 与 IQDB 的 release 构建和六个测试 example，再用这些 `.exe` 跑 Python 全套。14 步中的前端 JS 使用同一 workflow 的 Ubuntu 结果。Cargo 沿用仓库的静态 CRT 配置，关闭 CI 增量编译以控制磁盘占用。`TEMP` 和 `TMP` 指到系统盘的短目录，Python 日志统一使用 UTF-8。
+公开库使用 `windows-latest` 和 MSVC x64。job 运行 core、platform、relation-fft、terms、desktop 的 clippy（参数与本机检查相同）、这五个项目及 iqdb 的 `cargo test`、terms 与 IQDB 的 release 构建和六个测试 example，再用这些 `.exe` 跑 Python 全套。前端 JS 使用同一 workflow 的 Ubuntu 结果。Cargo 沿用仓库的静态 CRT 配置，关闭 CI 增量编译以控制磁盘占用。`TEMP` 和 `TMP` 指到系统盘的短目录，Python 日志统一使用 UTF-8。
 
 CI 使用标准 Python 3.12，与 macOS job 一致；常驻验收机使用嵌入式 3.13，`tests/test_run_fixed_suite.py` 的隔离入口测试覆盖其模块查找行为。CI 从 PyPI 下载并缓存固定的 x64 NumPy 2.5.3 wheel，配合固定的 Pillow 12.3.0 给 Python 对照用，再用打包脚本和 `crates/platform/src/research_openblas.json` 验证 DLL 的 SHA-256 并设置 `ILLUSTASH_RESEARCH_OPENBLAS_DLL`。3.12 与 3.13 对应的 wheel 含相同的已登记 DLL。Rust 和 wheel 的缓存只在 main 保存，PR 可还原。Windows job 的冷、热缓存耗时及压缩缓存大小待实际运行记录。
 

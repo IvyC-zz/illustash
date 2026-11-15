@@ -8,6 +8,7 @@ license = "GPL-3.0-or-later"
 publish = false
 
 [dependencies]
+illustash-relation-fft = { path = "../../crates/relation-fft" }
 illustash-platform = { path = "../../crates/platform" }
 illustash-core = { path = "../../crates/core" }
 rusqlite = { version = "0.41", default-features = false, features = ["cache", "bundled", "functions", "backup", "hooks", "fallible_uint"] }
@@ -55,7 +56,6 @@ test-read-host = ["illustash-core/verify-incremental"]
 illustash-core = { path = "../../crates/core", features = ["verify-incremental"] }
 
 [build-dependencies]
-cc = "=1.5.1"
 serde_json = "1"
 
 [[example]]
@@ -77,6 +77,10 @@ opt-level = 3
 [profile.dev.package."*"]
 opt-level = 3
 debug = false
+
+[profile.dev.package.illustash-relation-fft]
+opt-level = 0
+debug = "line-tables-only"
 
 [profile.dev.package.illustash-core]
 opt-level = 0

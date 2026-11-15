@@ -1,10 +1,7 @@
 //! NumPy 2.5.3 的 NCC：正向 double 循环在每个轴之后转为 complex64，complex64 乘积，float32 逆变换循环；
 //! 原始的形状和顺序完全保持。
 use crate::{Error, Result};
-unsafe extern "C" {
-    fn illustash_relation_rfft2(input: *const f32, ih: usize, iw: usize, h: usize, w: usize, output: *mut f32) -> i32;
-    fn illustash_relation_irfft2(input: *const f32, h: usize, w: usize, output: *mut f32) -> i32;
-}
+use illustash_relation_fft::{illustash_relation_irfft2, illustash_relation_rfft2};
 
 pub(super) fn correlation(
     big: &[f32],

@@ -15,6 +15,7 @@ class ArchitectureTest(unittest.TestCase):
                  ('platform', 'dev-dependencies', 'illustash-terms', '../../native/terms'),
                  ('core', 'target.\'cfg(windows)\'.build-dependencies', 'tiny_http', None),
                  ('platform', 'dependencies', 'tauri', None),
+                 ('fft', 'dependencies', 'illustash-terms', '../../native/terms'),
                  ('desktop', 'dependencies', 'illustash-core', '../../crates/core')]
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
