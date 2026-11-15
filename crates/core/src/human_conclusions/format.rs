@@ -263,7 +263,7 @@ impl Record {
         }
     }
 
-    fn assets(&self) -> Vec<&str> {
+    pub(crate) fn assets(&self) -> Vec<&str> {
         match self {
             Self::ImageVerdict { asset, .. }
             | Self::IdentityContext { asset, .. }
@@ -307,7 +307,7 @@ impl Record {
         }
     }
 
-    fn logical_key(&self) -> Vec<&str> {
+    pub(crate) fn logical_key(&self) -> Vec<&str> {
         let (kind, key) = self.identity();
         match self {
             Self::ImageVerdict { asset, term, .. } | Self::IdentityContext { asset, term, .. } => {

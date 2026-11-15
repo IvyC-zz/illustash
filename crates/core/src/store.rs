@@ -380,6 +380,11 @@ pub fn undo_in(conn: &Connection, expected: Option<ActionId>) -> Result<(Undo, b
     // 角色切到核心之后，角色的步骤（新步骤的信封，以及旧的快照、合并、关系、锚点、资料）交给角色撤销；
     // 角色形状与别的形状混在一步里、或形状不认识，拒绝（character_commands::owns）。
     let parsed = serde_json::from_str::<Value>(&before).unwrap_or(Value::Null);
+    if crate::human_conclusions::import::owns(&parsed)? {
+        crate::schema::begin_writing(conn)?;
+        crate::human_conclusions::import::undo_in(conn, action)?;
+        return Ok((Undo::Undone { action, label }, true));
+    }
     if crate::legacy_characters::characters_in_core(conn)? && crate::character_commands::owns(&parsed)?.is_some() {
         {
             crate::schema::begin_writing(conn)?;

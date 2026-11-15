@@ -1,0 +1,218 @@
+use super::*;
+use crate::{http::LibraryContext, http_json::Json};
+use illustash_core::human_conclusions::state::{self, Domain, State};
+use rusqlite::params;
+use serde_json::json;
+use std::sync::atomic::{AtomicU64, Ordering};
+
+static NEXT: AtomicU64 = AtomicU64::new(0);
+struct Fixture {
+    root: PathBuf,
+    db: PathBuf,
+    id: String,
+}
+impl Fixture {
+    fn new(id: &str) -> Self {
+        let root = std::env::temp_dir().join(format!(
+            "illustash-human-roundtrip-{}-{}",
+            std::process::id(),
+            NEXT.fetch_add(1, Ordering::Relaxed)
+        ));
+        fs::create_dir(&root).unwrap();
+        let db = root.join("library.sqlite");
+        let mut c = crate::open(&db).unwrap();
+        crate::migrate(&mut c).unwrap();
+        c.execute_batch(include_str!("../app_create_schema.sql")).unwrap();
+        c.execute_batch("INSERT INTO meta VALUES ('terms_artists','core'),('terms_labels','core'),('terms_characters','core'),('terms_names','core'),('names_version','0'),('names_projected','0')").unwrap();
+        Self { root, db, id: id.into() }
+    }
+    fn asset(&self, key: &str, filename: &str, color: u8) -> PathBuf {
+        let path = self.root.join(filename);
+        image::RgbImage::from_pixel(2, 2, image::Rgb([color, 10, 20])).save(&path).unwrap();
+        let c = crate::open(&self.db).unwrap();
+        c.execute(
+            "INSERT INTO assets(uuid,filename,src_path,src_kind,added_at) VALUES (?1,?2,?3,'orig','2026-11-15')",
+            params![key, filename, path.to_string_lossy()],
+        )
+        .unwrap();
+        path
+    }
+    fn term(&self, key: &str, link: &str) {
+        let c = crate::open(&self.db).unwrap();
+        let term = crate::store::create_term(&c, crate::Kind::Artist, Some(key), "package:synthetic").unwrap();
+        crate::store::add_link(&c, term, "danbooru", link, "", "synthetic").unwrap();
+        crate::store::add_name(&c, term, "zh", "同名合成画师", "display", "synthetic").unwrap();
+    }
+    fn source(&self) {
+        for (key, color) in [("a", 1), ("b", 2), ("c", 3), ("d", 4)] {
+            self.asset(key, &format!("source-{key}.png"), color);
+        }
+        self.term("source-artist", "synthetic_artist");
+        let mut c = crate::open(&self.db).unwrap();
+        let tx = c.transaction().unwrap();
+        crate::schema::begin_writing(&tx).unwrap();
+        tx.execute("INSERT INTO actions(id,label,before_json) VALUES (1,'合成人工操作','[]')", []).unwrap();
+        let term = crate::store::term_by_key(&tx, "source-artist").unwrap().unwrap().0;
+        for (key, verdict) in [("a", "yes"), ("b", "no"), ("c", "clear")] {
+            let asset = crate::store::library_asset(&tx, key).unwrap().unwrap();
+            tx.execute("INSERT INTO term_verdicts(action_id,anchor,asset_id,term_id,verdict,origin,via,reason,created_at) VALUES (1,1,?1,?2,?3,'user','review','合成理由','2026-11-01')",
+                params![asset,term,verdict]).unwrap();
+        }
+        tx.execute(
+            "INSERT INTO curation(uuid,status,origin,created_at) VALUES ('a','included','review','2026-11-01')",
+            [],
+        )
+        .unwrap();
+        state::absent(&tx, Domain::Curation, "b", 1).unwrap();
+        tx.execute("INSERT INTO deferred(uuid) VALUES ('c')", []).unwrap();
+        state::absent(&tx, Domain::Deferred, "d", 1).unwrap();
+        state::absent(&tx, Domain::Uncertain, "a", 1).unwrap();
+        crate::schema::commit_writing(tx).unwrap();
+    }
+    fn target(&self) {
+        for (key, color) in [("new-a", 1), ("new-b", 2), ("new-c", 3), ("new-d", 4)] {
+            self.asset(key, &format!("moved-and-renamed-{color}.png"), color);
+        }
+        self.term("target-artist", "synthetic_artist");
+        self.term("same-name-different-artist", "other_artist");
+    }
+    fn export(&self) -> PathBuf {
+        let snapshot = capture(&self.db, &self.id, &|| Ok(())).unwrap();
+        assert_eq!(snapshot.coverage().verified, 4);
+        let path = self.root.join("synthetic.illustash-human.jsonl");
+        snapshot.write(&mut File::create(&path).unwrap()).unwrap();
+        let data = fs::read_to_string(&path).unwrap();
+        assert!(!data.contains(self.root.to_string_lossy().as_ref()));
+        assert!(!data.contains("source-a.png"));
+        path
+    }
+    fn undo(&self, id: i64) -> Result<Json> {
+        let context = LibraryContext {
+            db: self.db.clone(),
+            generation: "synthetic".into(),
+            library: Some(self.root.clone()),
+            source: None,
+            tags: self.root.join("unused.csv"),
+            token: Some("synthetic".into()),
+            read_only: None,
+        };
+        crate::app_commands::request(
+            &context,
+            "/api/undo",
+            &crate::http_json::parse_request(&json!({"id":id}).to_string()).unwrap(),
+        )
+    }
+    fn count(&self, sql: &str) -> i64 {
+        crate::open(&self.db).unwrap().query_row(sql, [], |r| r.get(0)).unwrap()
+    }
+}
+impl Drop for Fixture {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.root);
+    }
+}
+
+#[test]
+fn real_files_export_rebuild_import_and_ordinary_undo() {
+    let source = Fixture::new("source-library");
+    source.source();
+    let path = source.export();
+    let target = Fixture::new("rebuilt-library");
+    target.target();
+    let report = import_file(&target.db, &target.id, &path, &|| Ok(())).unwrap();
+    assert_eq!(report.records, BTreeMap::from([("applied".into(), 8)]));
+    assert_eq!(report.assets["matched"], 4);
+    assert_eq!(report.action_id, Some(1));
+    let c = crate::open(&target.db).unwrap();
+    for (asset, verdict) in [("new-a", "yes"), ("new-b", "no"), ("new-c", "clear")] {
+        let row:(String,String,String,String)=c.query_row("SELECT t.key,v.verdict,v.reason,v.created_at FROM term_verdicts v JOIN terms t ON t.id=v.term_id JOIN term_assets a ON a.id=v.asset_id WHERE a.key=?1",[asset],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?))).unwrap();
+        assert_eq!(row, ("target-artist".into(), verdict.into(), "合成理由".into(), "2026-11-01".into()));
+    }
+    assert!(
+        matches!(state::read(&c, Domain::Curation, "new-a").unwrap(), State::Positive(v) if v["status"]=="included")
+    );
+    for (domain, asset) in [(Domain::Curation, "new-b"), (Domain::Deferred, "new-d"), (Domain::Uncertain, "new-a")] {
+        assert!(
+            matches!(state::read(&c,domain,asset).unwrap(),State::Absent(m) if m.owner_action_id==1 && m.source_ref.is_some())
+        );
+    }
+    assert!(matches!(state::read(&c, Domain::Deferred, "new-c").unwrap(), State::Positive(_)));
+    let repeated = import_file(&target.db, &target.id, &path, &|| Ok(())).unwrap();
+    assert_eq!(repeated.action_id, None);
+    assert_eq!(repeated.records, BTreeMap::from([("already_present".into(), 8)]));
+    assert_eq!(target.count("SELECT count(*) FROM actions"), 1);
+    target.undo(1).unwrap();
+    for (domain, asset) in [
+        (Domain::Curation, "new-a"),
+        (Domain::Curation, "new-b"),
+        (Domain::Deferred, "new-c"),
+        (Domain::Deferred, "new-d"),
+        (Domain::Uncertain, "new-a"),
+    ] {
+        assert_eq!(state::read(&c, domain, asset).unwrap(), State::Undecided);
+    }
+    assert_eq!(target.count("SELECT count(*) FROM term_effective_verdicts"), 0);
+    assert_eq!(target.count("SELECT count(*) FROM term_verdicts"), 3);
+    assert_eq!(target.count("SELECT count(*) FROM terms"), 2);
+    assert_eq!(target.count("SELECT count(*) FROM actions WHERE undone=0"), 0);
+    let reapplied = import_file(&target.db, &target.id, &path, &|| Ok(())).unwrap();
+    assert_eq!(reapplied.action_id, Some(2));
+    assert_eq!(reapplied.records["applied"], 8);
+    assert_eq!(target.count("SELECT count(*) FROM term_verdicts WHERE action_id=2"), 3);
+}
+
+#[test]
+fn target_human_state_wins_and_independent_change_refuses_undo_atomically() {
+    let source = Fixture::new("source-library");
+    source.source();
+    let path = source.export();
+    let target = Fixture::new("target-library");
+    target.target();
+    let c = crate::open(&target.db).unwrap();
+    c.execute("INSERT INTO curation VALUES ('new-a','excluded','review','2026-11-10')", []).unwrap();
+    let report = import_file(&target.db, &target.id, &path, &|| Ok(())).unwrap();
+    assert_eq!(report.records["conflict"], 1);
+    assert_eq!(report.records["applied"], 7);
+    assert!(matches!(state::read(&c,Domain::Curation,"new-a").unwrap(),State::Positive(v) if v["status"]=="excluded"));
+    c.execute("DELETE FROM deferred WHERE uuid='new-c'", []).unwrap();
+    let before = capture(&target.db, &target.id, &|| Ok(())).unwrap().semantic_sha256().unwrap();
+    assert!(matches!(target.undo(1), Err(Error::Conflict(_))));
+    assert_eq!(capture(&target.db, &target.id, &|| Ok(())).unwrap().semantic_sha256().unwrap(), before);
+    assert_eq!(target.count("SELECT count(*) FROM actions WHERE undone=0"), 1);
+    assert_eq!(target.count("SELECT count(*) FROM human_state_marks"), 3);
+}
+
+#[test]
+fn incomplete_candidates_and_cancellation_do_not_create_partial_actions() {
+    let source = Fixture::new("source-library");
+    source.source();
+    let path = source.export();
+    let target = Fixture::new("target-library");
+    target.target();
+    let missing = target.asset("offline", "offline.png", 1);
+    fs::remove_file(missing).unwrap();
+    let report = import_file(&target.db, &target.id, &path, &|| Ok(())).unwrap();
+    assert_eq!(report.records["unverified_asset"], 8);
+    assert_eq!(report.action_id, None);
+    assert_eq!(target.count("SELECT count(*) FROM actions"), 0);
+    let c = crate::open(&target.db).unwrap();
+    c.execute("DELETE FROM assets WHERE uuid='offline'", []).unwrap();
+    let cancelled = std::cell::Cell::new(false);
+    let check = || {
+        // 读文件阶段的取消不产生空历史。
+        if cancelled.replace(true) {
+            Err(Error::Conflict("合成取消".into()))
+        } else {
+            Ok(())
+        }
+    };
+    assert!(import_file(&target.db, &target.id, &path, &check).is_err());
+    assert_eq!(target.count("SELECT count(*) FROM actions"), 0);
+    assert_eq!(target.count("SELECT count(*) FROM term_verdicts"), 0);
+    c.execute_batch("CREATE TRIGGER synthetic_failure BEFORE INSERT ON term_verdicts BEGIN SELECT RAISE(ABORT,'synthetic failure'); END").unwrap();
+    assert!(import_file(&target.db, &target.id, &path, &|| Ok(())).is_err());
+    // 裁决写入之前已处理过收录与跳过，后续 SQL 失败必须连同历史、标记一起回滚。
+    for table in ["actions", "curation", "deferred", "human_state_marks", "human_state_mark_undo"] {
+        assert_eq!(target.count(&format!("SELECT count(*) FROM {table}")), 0);
+    }
+}

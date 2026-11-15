@@ -2,6 +2,7 @@
 pub mod export;
 pub mod format;
 mod format_graph;
+pub mod import;
 pub mod matching;
 pub mod state;
 mod upgrade;

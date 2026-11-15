@@ -294,7 +294,11 @@ fn undo(c: &mut Connection, body: &Json) -> Result<Json> {
         let owned = crate::character_commands::owns(&parsed).map_err(core_error)?.is_some();
         let terms =
             parsed.as_array().is_some_and(|items| store::owns(items, store::Handover { artists: true, labels: true }));
-        if owned {
+        if illustash_core::human_conclusions::import::owns(&parsed)? {
+            let touched = illustash_core::human_conclusions::import::undo_in(&tx, id)?;
+            crate::app_curation::refresh_excluded(&tx, &touched)?;
+            character = true;
+        } else if owned {
             let strict = input.and_then(integer_id).ok_or_else(|| Error::Invalid("步骤 ID 不正确".into()))?;
             let (_, owned) = store::undo_in(&tx, Some(strict)).map_err(core_error)?;
             character = owned;

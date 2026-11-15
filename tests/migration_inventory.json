@@ -59,13 +59,15 @@
 
  "crates/core/src/human_conclusions/export.rs":"a386ea74286dff7f488c09f516c20ed554486d3f3eda7adc9ed873114b93bf44",
 
- "crates/core/src/human_conclusions/format.rs":"1471900e5c22fe440c1fa62c7d7ed28f4a3e5a55bcea2e6695587b542b168f2a",
+ "crates/core/src/human_conclusions/format.rs":"d72c3cf93c3a987967db58f6ac42add92e99a29f1e6c09f2f6af4121d8c24851",
 
  "crates/core/src/human_conclusions/format_graph.rs":"282d292d115972bfda8b50381bd3578bf3bf49ab84e996cbc8011399051e9104",
 
+ "crates/core/src/human_conclusions/import.rs":"188540f71f65493abfc7a2217fe78973edf57e965b5bdced51fc967d0798175b",
+
  "crates/core/src/human_conclusions/matching.rs":"9db7d3a36cb22b2ba3581362a2552f7c258c224e2d64421cd9c6492fa592de51",
 
- "crates/core/src/human_conclusions/mod.rs":"2a03aba826184ec917d69b902fe4dc0080907a5b6b4fc8d1a407725b87521e67",
+ "crates/core/src/human_conclusions/mod.rs":"9246082bad77b9ab767519b609f1f74e48fad8757e5227dfa5193d13ebeb3f39",
 
  "crates/core/src/human_conclusions/state.rs":"433c6a4b4b4cd476dfb8d030697c4664b5535e16bab3e176019a35a0be154f0b",
 
@@ -93,7 +95,7 @@
 
  "crates/core/src/schema.rs":"7aff4c7c6ca085e214b386444ac458e19dfbdc77dbaa13d1d21b0382b645917b",
 
- "crates/core/src/store.rs":"b79c28a90b0742373a304c4f1bf634d3fbbb4115340eab4f0a426ffd0b94060f",
+ "crates/core/src/store.rs":"ff1d59248a64e8d5ff1e6b247ce29b7a4db5024f4c4b31ba78ef98adc35ae9c4",
 
  "crates/core/src/strict_json.rs":"dc1bf3fd4e0ceb6316af6a95ab00915c52ffdd8fd759544326f371df39e67da6",
 
@@ -183,7 +185,7 @@
 
  "native/terms/src/app_characters.rs":"6c9e9e080970dce30092747ebcf6bdcaee7d99a8463500888e5dab278f4a0cbd",
 
- "native/terms/src/app_commands.rs":"856acaced3c9079c785cccdf4367bcf9162f15e5e3925a97096396244ae20579",
+ "native/terms/src/app_commands.rs":"a2adb34bb5e13330ab72668f699b898d7648129109687977a7b3c2146ad0af5f",
 
  "native/terms/src/app_create.rs":"f884b4587d13c479e6739fdb7439f2bee4342627b0b157f06560dabfede3cbdc",
 
@@ -202,6 +204,8 @@
  "native/terms/src/app_folder.rs":"cd148b0a312065b97da3cbea8dc782a596eb0d8e842a1dfcf2d45f259fea6216",
 
  "native/terms/src/app_http.rs":"7fd4268b3287f1f4200e51333941c1e64b04b2ac0fa6e26643fe7a9a83c54192",
+
+ "native/terms/src/app_human_conclusions.rs":"2f256f2bb9edfdc38e5153848e7ef7a77eb4d30831fa7fcd5866bc69f5db305f",
 
  "native/terms/src/app_identity.rs":"715d41ff00ae564d109fd8c6dde75f3e89e447360832bb2ab16c960bc473da38",
 
@@ -337,7 +341,7 @@
 
  "native/terms/src/index_generation.rs":"940c236d35bee6001cc2225701d64d0be2964a2575a653a897449650535ad2fa",
 
- "native/terms/src/lib.rs":"f642fdb4f5668536852c7b92ed485859bf4502702b162ab62296c25bd5bf7797",
+ "native/terms/src/lib.rs":"dfe0c2a43ac0802dc650d9192915af85577e65d0bbffc22dc18228034d414d41",
 
  "native/terms/src/platform_process.rs":"11d73a02dc4f9baa3779aaef132012ef36908e510747326c6704374681f606a3",
 
@@ -478,7 +482,9 @@
  "crates/core/src/human_conclusions/upgrade.rs":{"policy":"lifecycle","current_runtime":"rust-core-explicit-v9-upgrade","storage_domain":"app"},
  "crates/core/src/human_conclusions/mod.rs":{"policy":"application","current_runtime":"rust-core-human-conclusions","storage_domain":"no-db-write"},
  "crates/core/src/human_conclusions/matching.rs":{"policy":"application","current_runtime":"rust-core-human-conclusions","storage_domain":"no-db-write"},
- "crates/core/src/human_conclusions/format.rs":{"policy":"application","current_runtime":"rust-core-human-snapshot-format","storage_domain":"no-db-write"}
+ "crates/core/src/human_conclusions/format.rs":{"policy":"application","current_runtime":"rust-core-human-snapshot-format","storage_domain":"no-db-write"},
+ "crates/core/src/human_conclusions/import.rs":{"policy":"application","current_runtime":"rust-core-human-import-undo","storage_domain":"app","boundary_notes":{"authorization":"#441 已批准的人工结论导入和专用撤销；只写 actions、人工业务表和提交后事件，单事务失败回滚。"}},
+ "native/terms/src/app_human_conclusions.rs":{"policy":"application","current_runtime":"rust-human-file-verification-transaction","storage_domain":"app","boundary_notes":{"authorization":"#441 已批准的人工结论导入和专用撤销；只写 actions、人工业务表和提交后事件，单事务失败回滚。"}}
 },
 "limitations":[
  "审计生产 HTTP/DB/事务/动态执行/启动/CLI；保留研究/测试/生成代码。",
@@ -600,7 +606,9 @@
  "native/terms/src/app_http.rs":{"entrypoint":{"process-start":1}},
  "crates/relation-fft/build.rs":{"entrypoint":{"native-main":1}},
  "crates/core/src/human_conclusions/state.rs":{"database-write":{"dynamic-or-wrapper":2,"INSERT INTO:human_state_mark_undo":1,"UPDATE:set":1,"DELETE FROM:human_state_marks":1,"INSERT INTO:human_state_marks":1}},
- "crates/core/src/human_conclusions/upgrade.rs":{"database-write":{"CREATE TABLE:human_state_marks":1,"CREATE INDEX:human_state_marks_action":1,"CREATE TABLE:human_state_mark_undo":1,"INSERT INTO:meta":1,"dynamic-or-wrapper":3,"CREATE TRIGGER:human_marks_revision_":1,"UPDATE:meta":1,"INSERT INTO:human_state_mark_undo":1}}
+ "crates/core/src/human_conclusions/upgrade.rs":{"database-write":{"CREATE TABLE:human_state_marks":1,"CREATE INDEX:human_state_marks_action":1,"CREATE TABLE:human_state_mark_undo":1,"INSERT INTO:meta":1,"dynamic-or-wrapper":3,"CREATE TRIGGER:human_marks_revision_":1,"UPDATE:meta":1,"INSERT INTO:human_state_mark_undo":1}},
+ "crates/core/src/human_conclusions/import.rs":{"database-write":{"INSERT INTO:actions":1,"dynamic-or-wrapper":5,"UPDATE:actions":2,"INSERT INTO:term_verdicts":1,"INSERT INTO:curation":1,"INSERT INTO:deferred":1,"INSERT INTO:identity_uncertain":1}},
+ "native/terms/src/app_human_conclusions.rs":{"database-write":{"dynamic-or-wrapper":2,"INSERT INTO:backend_effects":1}}
 },
 "policies":{
  "application":{"final_owner":"rust","responsibility":"HTTP 参数/目标、人工命令、正式事务/投影；Python 包装待迁移","acceptance":"合成状态码/原始字节、返回/DB/历史/撤销/事件对照；竞争与注入失败原子回滚","deletion_condition":"Rust 调用链及无 Python 验收后删生产 Python；保留旧对照","stages":["M2","M3"]},
